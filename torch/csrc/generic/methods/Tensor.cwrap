@@ -926,7 +926,8 @@ PyObject * THPTensor_(copy_)(PyObject *self, PyObject *args, PyObject *kwargs)
       arguments:
         - arg: THTensor* result
           output: True
-        - THTensor* self
+        - arg: THTensor* self
+          broadcast: other fallback
         - THTensor* other
 ]]
 
@@ -945,7 +946,8 @@ PyObject * THPTensor_(copy_)(PyObject *self, PyObject *args, PyObject *kwargs)
     - cname: cbitand
       arguments:
         - THTensor* self
-        - THTensor* self
+        - arg: THTensor* self
+          broadcast: other inplace fallback
         - THTensor* other
 ]]
 
@@ -966,7 +968,8 @@ PyObject * THPTensor_(copy_)(PyObject *self, PyObject *args, PyObject *kwargs)
       arguments:
         - arg: THTensor* result
           output: True
-        - THTensor* self
+        - arg: THTensor* self
+          broadcast: other fallback
         - THTensor* other
 ]]
 
@@ -985,7 +988,8 @@ PyObject * THPTensor_(copy_)(PyObject *self, PyObject *args, PyObject *kwargs)
     - cname: cbitor
       arguments:
         - THTensor* self
-        - THTensor* self
+        - arg: THTensor* self
+          broadcast: other inplace fallback
         - THTensor* other
 ]]
 
@@ -1006,7 +1010,8 @@ PyObject * THPTensor_(copy_)(PyObject *self, PyObject *args, PyObject *kwargs)
       arguments:
         - arg: THTensor* result
           output: True
-        - THTensor* self
+        - arg: THTensor* self
+          broadcast: other fallback
         - THTensor* other
 ]]
 
@@ -1025,7 +1030,8 @@ PyObject * THPTensor_(copy_)(PyObject *self, PyObject *args, PyObject *kwargs)
     - cname: cbitxor
       arguments:
         - THTensor* self
-        - THTensor* self
+        - arg: THTensor* self
+          broadcast: other inplace fallback
         - THTensor* other
 ]]
 
@@ -1046,7 +1052,8 @@ PyObject * THPTensor_(copy_)(PyObject *self, PyObject *args, PyObject *kwargs)
       arguments:
         - arg: THTensor* result
           output: True
-        - THTensor* self
+        - arg: THTensor* self
+          broadcast: other fallback
         - THTensor* other
 ]]
 
@@ -1065,7 +1072,8 @@ PyObject * THPTensor_(copy_)(PyObject *self, PyObject *args, PyObject *kwargs)
     - cname: clshift
       arguments:
         - THTensor* self
-        - THTensor* self
+        - arg: THTensor* self
+          broadcast: other inplace fallback
         - THTensor* other
 ]]
 
@@ -1086,7 +1094,8 @@ PyObject * THPTensor_(copy_)(PyObject *self, PyObject *args, PyObject *kwargs)
       arguments:
         - arg: THTensor* result
           output: True
-        - THTensor* self
+        - arg: THTensor* self
+          broadcast: other fallback
         - THTensor* other
 ]]
 
@@ -1105,6 +1114,7 @@ PyObject * THPTensor_(copy_)(PyObject *self, PyObject *args, PyObject *kwargs)
     - cname: crshift
       arguments:
         - THTensor* self
-        - THTensor* self
+        - arg: THTensor* self
+          broadcast: other inplace fallback
         - THTensor* other
 ]]
