@@ -5,10 +5,14 @@ node {
   input: "3"
   input: "4"
   output: "7"
+  output: "8"
+  output: "9"
+  output: "batch_norm_dead_output_10"
+  output: "batch_norm_dead_output_11"
   op_type: "SpatialBN"
   attribute {
     name: "is_test"
-    i: 1
+    i: 0
   }
   attribute {
     name: "epsilon"
@@ -50,13 +54,13 @@ initializer {
   dims: 2
   data_type: FLOAT
   name: "3"
-  raw_data: "\000\000\000\000\000\000\000\000"
+  raw_data: "\315\314\314=\315\314\314="
 }
 initializer {
   dims: 2
   data_type: FLOAT
   name: "4"
-  raw_data: "\000\000\200?\000\000\200?"
+  raw_data: "fff?fff?"
 }
 ir_version: 1
 producer_version: 20000

@@ -81,6 +81,10 @@ class TestONNX(TestCase):
         x = Variable(torch.randn(2, 2).fill_(1.0), requires_grad=True)
         self.assertONNXExpected(export_to_string(nn.BatchNorm2d(2), x))
 
+    def test_batchnorm_training(self):
+        x = Variable(torch.randn(2, 2).fill_(1.0), requires_grad=True)
+        self.assertONNXExpected(export_to_string(nn.BatchNorm2d(2), x, training=True))
+
     def test_conv(self):
         x = Variable(torch.randn(20, 16, 50, 40).fill_(1.0), requires_grad=True)
         self.assertONNXExpected(export_to_string(nn.Conv2d(16, 13, 3, bias=False), x))
