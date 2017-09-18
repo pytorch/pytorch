@@ -5,7 +5,6 @@ class ConstantPadNd(Function):
 
     @staticmethod
     def forward(ctx, input, pad, value=0):
-        assert len(pad) % 2 == 0, "padding tuple must be an even length"
         ctx.pad = pad
         ctx.value = value
         ctx.input_size = input.size()

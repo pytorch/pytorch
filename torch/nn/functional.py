@@ -1057,17 +1057,39 @@ def affine_grid(theta, size):
 def pad(input, pad, mode='constant', value=0):
     """Pads tensor.
 
-    1D, 2D and 3D padding supported.
-    1D: 3D input with padding in form (pad_l, pad_r)
-    2D: 4D input tensor pad should be in form
-    (pad_l, pad_r, pad_t, pad_b ).
-    3D: 5D pad should be (pleft, pright, ptop, pbottom, pfront, pback)
+    Nd constant padding:  The number of dimensions to pad is
+        len(padding) // 2 and the dimensions that gets padded begins with the
+        last dimension and moves forward.  See below for examples.
+
+    1D, 2D and 3D "reflect"/"replicate" padding:
+        1D: 3D input with padding in form (pad_l, pad_r)
+        2D: 4D input tensor pad should be in form
+        (pad_l, pad_r, pad_t, pad_b ).
+        3D: 5D pad (pleft, pright, ptop, pbottom, pfront, pback). No "reflect"
+        implementation
 
     Args:
-        input (Variable): 3D, 4D or 5D tensor
-        pad (tuple): m-elem tuple, where m // 2 > input dimension and m % 2 == 0
+        input (Variable): Nd tensor
+        pad (tuple): m-elem tuple, where m // 2 > input dimensions and m % 2 == 0
         mode: 'constant', 'reflect' or 'replicate'. Default: 'constant'
         value: fill value for 'constant' padding. Default: 0
+
+    Examples::
+
+        >>> t4d = torch.Tensor(3, 3, 4, 2)
+        >>> p1d = (1, 1) # pad last dim by 1 on each side
+        >>> out = F.pad(t4d, p1d, "constant", 0)
+        >>> print(out.data.size())
+        torch.Size([3, 3, 4, 4])
+        >>> p2d = (1, 1, 2, 2) # pad last dim by (1, 1) and 2nd to last by (2, 2)
+        >>> out = F.pad(t4d, p2d, "constant", 0)
+        >>> print(out.data.size())
+        torch.Size([3, 3, 8, 4])
+        >>> t4d = torch.Tensor(3, 3, 4, 2)
+        >>> p3d = (0, 1, 2, 1, 3, 3) # pad by (0, 1), (2, 1), and (3, 3)
+        >>> out = F.pad(t4d, p3d, "constant", 0)
+        >>> print(out.data.size())
+        torch.Size([3, 9, 7, 3])
     """
     assert len(pad) % 2 == 0, 'padding length must be divisible by 2'
     assert len(pad) // 2 <= len(input.size()), 'padding length too large'
