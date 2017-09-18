@@ -10,6 +10,7 @@
 #include <atomic>
 #include <algorithm>
 #include <unordered_set>
+#include <functional>
 #include <cstdint>
 
 #include <ATen/ATen.h>
