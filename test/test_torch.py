@@ -3119,6 +3119,63 @@ class TestTorch(TestCase):
     def test_advancedindex_big(self):
         self._test_advancedindex_big(self, lambda x: x)
 
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    def test_newaxis_numpy_comparison(self):
+        def run_test(tensor, *idx):
+            npt = tensor.numpy()
+            self.assertEqual(tensor[idx], npt[idx])
+
+        # 1D Tensor Tests
+        x = torch.arange(0, 10)
+        cases = [
+            [None],
+            [None, None],
+            [Ellipsis, None],
+            [None, Ellipsis],
+            [2, None],
+            [None, 2],
+            [Ellipsis, None, 2],
+            [Ellipsis, 2, None],
+            [2, Ellipsis, None],
+            [2, None, Ellipsis],
+            [None, 2, Ellipsis],
+            [None, Ellipsis, 2],
+        ]
+
+        for case in cases:
+            run_test(x, *case)
+
+        # 2D Tensor Tests
+        x = torch.arange(0, 12).view(3, 4)
+        cases = [
+            [None],
+            [None, None],
+            [None, None, None],
+            [Ellipsis, None],
+            [Ellipsis, None, None],
+            [None, Ellipsis],
+            [None, Ellipsis, None],
+            [None, None, Ellipsis],
+            [2, None],
+            [2, None, Ellipsis],
+            [2, Ellipsis, None],
+            [None, 2, Ellipsis],
+            [Ellipsis, 2, None],
+            [Ellipsis, None, 2],
+            [None, Ellipsis, 2],
+            [1, 2, None],
+            [1, 2, Ellipsis, None],
+            [1, Ellipsis, 2, None],
+            [Ellipsis, 1, None, 2],
+            [Ellipsis, 1, 2, None],
+            [1, None, 2, Ellipsis],
+            [None, 1, Ellipsis, 2],
+            [None, 1, 2, Ellipsis],
+        ]
+
+        for case in cases:
+            run_test(x, *case)
+
     def test_newindex(self):
         reference = self._consecutive((3, 3, 3))
         # This relies on __index__() being correct - but we have separate tests for that
