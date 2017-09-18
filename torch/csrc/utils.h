@@ -12,7 +12,11 @@
 
 #define THPUtils_typename(obj) (Py_TYPE(obj)->tp_name)
 
-
+#if defined(__GNUC__) || defined(__ICL) || defined(__clang__)
+#define EXPECT(x, y) (__builtin_expect((x),(y)))
+#else
+#define EXPECT(x, y) (x)
+#endif
 
 #if PY_MAJOR_VERSION == 2
 #define THPUtils_checkReal_FLOAT(object)                                       \
@@ -113,7 +117,7 @@
 if (!(cond)) { THPUtils_setError(__VA_ARGS__); return value; }
 #else
 #define THPUtils_assertRet(value, cond, ...)                                   \
-if (__builtin_expect(!(cond), 0)) { THPUtils_setError(__VA_ARGS__); return value; }
+if (EXPECT(!(cond), 0)) { THPUtils_setError(__VA_ARGS__); return value; }
 #endif
 THP_API void THPUtils_setError(const char *format, ...);
 THP_API void THPUtils_invalidArguments(
