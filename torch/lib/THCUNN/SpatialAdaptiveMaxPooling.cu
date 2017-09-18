@@ -5,6 +5,8 @@
 
 #define CUDA_MAX_THREADS 1024   // this is safe, in reality 256 is our limit
 
+// 4d tensor B x D x H x W
+
 /*
  * Description:
  *    this function adaptively maxpools an input 4D tensor along dimensions 2 and 3
@@ -14,11 +16,10 @@
 __global__ void adaptivemaxpool(T *input, T *output, THCIndex_t *indices,
                         int sizeD, int isizeH, int isizeW,
                         int osizeH, int osizeW,
-                        int istrideH, int istrideW,
-                        int istrideD)
+                        int istrideD, int istrideH, int istrideW)
 {
   // iterators
-  int ow, oh;
+  int oh, ow;
 
   // compute offsets based on thread/block ID
   int o_plane = blockIdx.x;
@@ -33,22 +34,22 @@ __global__ void adaptivemaxpool(T *input, T *output, THCIndex_t *indices,
   int oendH = osizeH;
   const int ostepH = blockDim.y*gridDim.y;
   // select input/output plane
-  output = output + o_plane*osizeW*osizeH;
+  output = output + o_plane*osizeH*osizeW;
   input = input + i_plane*istrideD;
-  indices = indices + o_plane*osizeW*osizeH;
+  indices = indices + o_plane*osizeH*osizeW;
 
   // For all output pixels...
-  for(oh = ostartH; oh < oendH; oh+=ostepH) {
+  for(oh = ostartH; oh < oendH; oh += ostepH) {
 
     int istartH = (int)floor(float(oh) / osizeH * isizeH);
-    int iendH   = (int)ceil(float(oh+1) / osizeH * isizeH);
-    int kH = iendH-istartH;
+    int iendH   = (int)ceil(float(oh + 1) / osizeH * isizeH);
+    int kH = iendH - istartH;
 
-    for(ow = ostartW; ow < oendW; ow+=ostepW) {
+    for(ow = ostartW; ow < oendW; ow += ostepW) {
       int istartW = (int)floor(float(ow) / osizeW * isizeW);
       int iendW   = (int)ceil(float(ow + 1) / osizeW * isizeW);
 
-      int kW = iendW-istartW;
+      int kW = iendW - istartW;
 
       // Compute the mean of the input image...
       T *ptr_input = input + istartH*istrideH + istartW*istrideW;
@@ -56,7 +57,7 @@ __global__ void adaptivemaxpool(T *input, T *output, THCIndex_t *indices,
       THCIndex_t *ptr_ind = indices + oh*osizeW + ow;
       int argmax = -1;
       T max = THCNumerics<T>::min();
-      int iw, ih;
+      int ih, iw;
       for(ih = 0; ih < kH; ih++) {
         for(iw = 0; iw < kW; iw++) {
           T val = ptr_input[iw*istrideW];
@@ -84,7 +85,7 @@ __global__ void adaptivemaxgradinput(T *gradInput, T *gradOutput, THCIndex_t *in
                              int osizeH, int osizeW)
 {
   // iterators
-  int ow, oh;
+  int oh, ow;
 
   // compute offsets based on thread/block ID
   int o_plane = blockIdx.x;
@@ -100,16 +101,16 @@ __global__ void adaptivemaxgradinput(T *gradInput, T *gradOutput, THCIndex_t *in
   int ostepH = blockDim.y*gridDim.y;
 
   // select input/output plane
-  gradOutput = gradOutput + o_plane*osizeW*osizeH;
-  gradInput = gradInput + i_plane*isizeW*isizeH;
-  indices = indices + o_plane*osizeW*osizeH;
+  gradOutput = gradOutput + o_plane*osizeH*osizeW;
+  gradInput = gradInput + i_plane*isizeH*isizeW;
+  indices = indices + o_plane*osizeH*osizeW;
 
   // compute gradInput
-  for(oh = ostartH; oh < oendH; oh+=ostepH) {
+  for(oh = ostartH; oh < oendH; oh += ostepH) {
 
     int istartH = (int)floor(float(oh) / osizeH * isizeH);
 
-    for(ow = ostartW; ow < oendW; ow+=ostepW) {
+    for(ow = ostartW; ow < oendW; ow += ostepW) {
 
       int istartW = (int)floor(float(ow) / osizeW * isizeW);
 
@@ -137,7 +138,7 @@ __global__ void atomicadaptivemaxgradinput(
 )
 {
   // iterators
-  int ow, oh;
+  int oh, ow;
 
   // compute offsets based on thread/block ID
   int o_plane = blockIdx.x;
@@ -152,16 +153,16 @@ __global__ void atomicadaptivemaxgradinput(
   int ostepH = blockDim.y*gridDim.y;
 
   // select input/output plane
-  gradOutput = gradOutput + o_plane*osizeW*osizeH;
-  gradInput = gradInput + i_plane*isizeW*isizeH;
-  indices = indices + o_plane*osizeW*osizeH;
+  gradOutput = gradOutput + o_plane*osizeH*osizeW;
+  gradInput = gradInput + i_plane*isizeH*isizeW;
+  indices = indices + o_plane*osizeH*osizeW;
 
   // compute gradInput
-  for(oh = ostartH; oh < oendH; oh+=ostepH) {
+  for(oh = ostartH; oh < oendH; oh += ostepH) {
 
     int istartH = (int)floor(float(oh) / osizeH * isizeH);
 
-    for(ow = ostartW; ow < oendW; ow+=ostepW) {
+    for(ow = ostartW; ow < oendW; ow += ostepW) {
 
       int istartW = (int)floor(float(ow) / osizeW * isizeW);
 
