@@ -1567,10 +1567,10 @@ class TestAutograd(TestCase):
 
     def test_norm_subgradient(self):
         def run_test(input_size, norm_deg):
-            input = Variable(torch.randn(*input_size).clamp(min=0), requires_grad=True)
+            input = Variable(torch.zeros(*input_size), requires_grad=True)
             out = input.norm(norm_deg)
             out.backward()
-            self.assertEqual(input.grad.data[input.data == 0].abs().sum(), 0)
+            self.assertEqual(input.grad.data.abs().sum(), 0)
 
         run_test((10,), 2)
         run_test((10, 10), 2)

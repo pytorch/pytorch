@@ -251,8 +251,7 @@ class Norm(Function):
             grad_input = input.mul(input_pow).mul(grad_output).div(output_pow)
 
         # Special case at 0 where we return a subgradient containing 0
-        zero_mask = (output == 0).type_as(grad_input)
-        grad_input.mul(1 - zero_mask)
+        grad_input.masked_fill_(output == 0, 0)
 
         return grad_input, None, None, None
 
