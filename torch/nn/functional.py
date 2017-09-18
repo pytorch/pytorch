@@ -9,7 +9,7 @@ from torch._C import _infer_size
 from . import _functions
 from .modules import utils
 from ._functions.linear import Bilinear
-from ._functions.padding import ConstantPad2d
+from ._functions.padding import ConstantPadNd
 from ._functions.vision import GridSampler, AffineGridGenerator
 from ..autograd import _functions as _autograd_functions
 from torch.autograd import Variable
@@ -1059,35 +1059,64 @@ def affine_grid(theta, size):
 def pad(input, pad, mode='constant', value=0):
     """Pads tensor.
 
-    Currently only 2D and 3D padding supported.
-    In case of 4D input tensor pad should be in form
-    (pad_l, pad_r, pad_t, pad_b ).
-    In case of 5D pad should be (pleft, pright, ptop, pbottom, pfront, pback)
+    Nd constant padding:  The number of dimensions to pad is
+        len(padding) // 2 and the dimensions that gets padded begins with the
+        last dimension and moves forward.  See below for examples.
+
+    1D, 2D and 3D "reflect"/"replicate" padding:
+        1D: 3D input with padding in form (pad_l, pad_r)
+        2D: 4D input tensor pad should be in form
+        (pad_l, pad_r, pad_t, pad_b ).
+        3D: 5D pad (pleft, pright, ptop, pbottom, pfront, pback). No "reflect"
+        implementation
 
     Args:
-        input (Variable): 4D or 5D tensor
-        pad (tuple): 4-elem or 6-elem tuple
+        input (Variable): Nd tensor
+        pad (tuple): m-elem tuple, where m // 2 > input dimensions and m % 2 == 0
         mode: 'constant', 'reflect' or 'replicate'. Default: 'constant'
         value: fill value for 'constant' padding. Default: 0
+
+    Examples::
+
+        >>> t4d = torch.Tensor(3, 3, 4, 2)
+        >>> p1d = (1, 1) # pad last dim by 1 on each side
+        >>> out = F.pad(t4d, p1d, "constant", 0)
+        >>> print(out.data.size())
+        torch.Size([3, 3, 4, 4])
+        >>> p2d = (1, 1, 2, 2) # pad last dim by (1, 1) and 2nd to last by (2, 2)
+        >>> out = F.pad(t4d, p2d, "constant", 0)
+        >>> print(out.data.size())
+        torch.Size([3, 3, 8, 4])
+        >>> t4d = torch.Tensor(3, 3, 4, 2)
+        >>> p3d = (0, 1, 2, 1, 3, 3) # pad by (0, 1), (2, 1), and (3, 3)
+        >>> out = F.pad(t4d, p3d, "constant", 0)
+        >>> print(out.data.size())
+        torch.Size([3, 9, 7, 3])
     """
-    if input.dim() == 4:
+    assert len(pad) % 2 == 0, 'padding length must be divisible by 2'
+    assert len(pad) // 2 <= len(input.size()), 'padding length too large'
+    if mode == 'constant':
+        return ConstantPadNd.apply(input, pad, value)
+    elif input.dim() == 3:
+        assert len(pad) == 2, '3D tensors expect 2 values for padding'
+        if mode == 'reflect':
+            return _functions.thnn.ReflectionPad1d.apply(input, *pad)
+        elif mode == 'replicate':
+            return _functions.thnn.ReplicationPad1d.apply(input, *pad)
+    elif input.dim() == 4:
         assert len(pad) == 4, '4D tensors expect 4 values for padding'
-        if mode == 'constant':
-            return ConstantPad2d.apply(input, pad, value)
-        elif mode == 'reflect':
+        if mode == 'reflect':
             return _functions.thnn.ReflectionPad2d.apply(input, *pad)
         elif mode == 'replicate':
             return _functions.thnn.ReplicationPad2d.apply(input, *pad)
     elif input.dim() == 5:
         assert len(pad) == 6, '5D tensors expect 6 values for padding'
-        if mode == 'constant':
-            raise NotImplementedError
-        elif mode == 'reflect':
+        if mode == 'reflect':
             raise NotImplementedError
         elif mode == 'replicate':
             return _functions.thnn.ReplicationPad3d.apply(input, *pad)
     else:
-        raise NotImplementedError("Only 4D and 5D padding is supported for now")
+        raise NotImplementedError("Only 3D, 4D, 5D padding with non-constant padding are supported for now")
 
 
 # distance

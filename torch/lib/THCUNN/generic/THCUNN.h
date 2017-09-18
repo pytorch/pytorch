@@ -1219,6 +1219,32 @@ TH_API void THNN_(TemporalRowConvolution_accGradParameters)(
                   bool featFirst,
                   accreal scale);
 
+TH_API void THNN_(TemporalReflectionPadding_updateOutput)(
+                  THCState *state,
+                  THCTensor *input,
+                  THCTensor *output,
+                  int padL, int padR);
+
+TH_API void THNN_(TemporalReflectionPadding_updateGradInput)(
+                  THCState *state,
+                  THCTensor *input,
+                  THCTensor *gradOutput,
+                  THCTensor *gradInput,
+                  int padL, int padR);
+
+TH_API void THNN_(TemporalReplicationPadding_updateOutput)(
+                  THCState *state,
+                  THCTensor *input,
+                  THCTensor *output,
+                  int padL, int padR);
+
+TH_API void THNN_(TemporalReplicationPadding_updateGradInput)(
+                  THCState *state,
+                  THCTensor *input,
+                  THCTensor *gradOutput,
+                  THCTensor *gradInput,
+                  int padL, int padR);
+
 TH_API void THNN_(Threshold_updateOutput)(
                   THCState *state,
                   THCTensor *input,
