@@ -4,6 +4,8 @@
 
 #include "../common.h"
 
+// 4d tensor B x D x H x W
+
 void THNN_(SpatialAdaptiveMaxPooling_updateOutput)(
            THCState *state,
            THCTensor *input,
@@ -22,9 +24,9 @@ void THNN_(SpatialAdaptiveMaxPooling_updateOutput)(
                   "3D or 4D (batch mode) tensor expected for input, but got: %s");
 
   if (input->nDimension == 3) {
-    int64_t isizeW = input->size[2];
+    int64_t sizeD  = input->size[0];
     int64_t isizeH = input->size[1];
-    int64_t sizeD = input->size[0];
+    int64_t isizeW = input->size[2];
 
     int64_t istrideD = input->stride[0];
     int64_t istrideH = input->stride[1];
@@ -41,22 +43,22 @@ void THNN_(SpatialAdaptiveMaxPooling_updateOutput)(
     // cuda blocks & threads:
     int blocksH = (int)(16L / sizeD);
     blocksH = blocksH < 1 ? 1 : blocksH;
-    dim3 blocks(sizeD,blocksH);
-    dim3 threads(32,8);
+    dim3 blocks(sizeD, blocksH);
+    dim3 threads(32, 8);
 
     // run maxpool kernel
     adaptivemaxpool <<<blocks, threads, 0, THCState_getCurrentStream(state)>>> (input_data, output_data,
                                    indices_data,
                                    sizeD, isizeH, isizeW, osizeH, osizeW,
-                                   istrideH, istrideW, istrideD);
+                                   istrideD, istrideH, istrideW);
     THCudaCheck(cudaGetLastError());
 
   } else {
     input = THCTensor_(newContiguous)(state, input);
-    int64_t isizeW = input->size[3];
+    int64_t sizeB  = input->size[0];
+    int64_t sizeD  = input->size[1];
     int64_t isizeH = input->size[2];
-    int64_t sizeD = input->size[1];
-    int64_t sizeB = input->size[0];
+    int64_t isizeW = input->size[3];
 
     int64_t istrideD = input->stride[1];
     int64_t istrideH = input->stride[2];
@@ -73,14 +75,14 @@ void THNN_(SpatialAdaptiveMaxPooling_updateOutput)(
     // cuda blocks & threads:
     int blocksH = (int)(16L / sizeD);
     blocksH = blocksH < 1 ? 1 : blocksH;
-    dim3 blocks(sizeD*sizeB,blocksH);
-    dim3 threads(32,8);
+    dim3 blocks(sizeB*sizeD, blocksH);
+    dim3 threads(32, 8);
 
     // run maxpool kernel
     adaptivemaxpool <<<blocks, threads, 0, THCState_getCurrentStream(state)>>> (input_data, output_data,
                                    indices_data,
                                    sizeD, isizeH, isizeW, osizeH, osizeW,
-                                   istrideH, istrideW, istrideD);
+                                   istrideD, istrideH, istrideW);
     THCudaCheck(cudaGetLastError());
     // clean
     THCTensor_(free)(state, input);
@@ -105,13 +107,14 @@ void THNN_(SpatialAdaptiveMaxPooling_updateGradInput)(
   gradOutput = THCTensor_(newContiguous)(state, gradOutput);
 
   if (input->nDimension == 3) {
-    int64_t isizeW = input->size[2];
+    int64_t sizeD  = input->size[0];
     int64_t isizeH = input->size[1];
-    int64_t sizeD = input->size[0];
-    int64_t osizeW = gradOutput->size[2];
-    int64_t osizeH = gradOutput->size[1];
+    int64_t isizeW = input->size[2];
 
-    //bool atomic = (isizeW%osizeW != 0) || (isizeH%osizeH != 0);
+    int64_t osizeH = gradOutput->size[1];
+    int64_t osizeW = gradOutput->size[2];
+
+    //bool atomic = (isizeH%osizeH != 0) || (isizeW%osizeW != 0);
 
     THCTensor_(resizeAs)(state, gradInput, input);
     THCTensor_(zero)(state, gradInput);
@@ -123,8 +126,8 @@ void THNN_(SpatialAdaptiveMaxPooling_updateGradInput)(
     // cuda blocks & threads:
     int blocksH = (int)(16L / sizeD);
     blocksH = blocksH < 1 ? 1 : blocksH;
-    dim3 blocks(sizeD,blocksH);
-    dim3 threads(32,8);
+    dim3 blocks(sizeD, blocksH);
+    dim3 threads(32, 8);
 
     if(atomic)
     {
@@ -142,14 +145,15 @@ void THNN_(SpatialAdaptiveMaxPooling_updateGradInput)(
     }
     THCudaCheck(cudaGetLastError());
   } else {
-    int64_t isizeW = input->size[3];
+    int64_t sizeB  = input->size[0];
+    int64_t sizeD  = input->size[1];
     int64_t isizeH = input->size[2];
-    int64_t sizeD = input->size[1];
-    int64_t sizeB = input->size[0];
-    int64_t osizeW = gradOutput->size[3];
-    int64_t osizeH = gradOutput->size[2];
+    int64_t isizeW = input->size[3];
 
-    //bool atomic = //(isizeW%osizeW != 0) || (isizeH%osizeH != 0);
+    int64_t osizeH = gradOutput->size[2];
+    int64_t osizeW = gradOutput->size[3];
+
+    //bool atomic = (isizeH%osizeH != 0) || (isizeW%osizeW != 0);
 
     THCTensor_(resizeAs)(state, gradInput, input);
     THCTensor_(zero)(state, gradInput);
@@ -161,8 +165,8 @@ void THNN_(SpatialAdaptiveMaxPooling_updateGradInput)(
     // cuda blocks & threads:
     int blocksH = (int)(16L / sizeD);
     blocksH = blocksH < 1 ? 1 : blocksH;
-    dim3 blocks(sizeD*sizeB,blocksH);
-    dim3 threads(32,8);
+    dim3 blocks(sizeB*sizeD, blocksH);
+    dim3 threads(32, 8);
 
     if(atomic)
     {
