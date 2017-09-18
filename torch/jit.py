@@ -7,6 +7,7 @@ import itertools
 import types
 import contextlib
 import os
+import torch.contrib._graph_vis as graph_vis
 # Example how to use:
 #
 # import torch.jit
@@ -97,7 +98,7 @@ def _dump_trace(trace_name, name, suffix, complete_trace):
     filename = "{}_{}_{}".format(trace_name, name, suffix)
     with open(filename + ".ir", "w") as f:
         f.write(str(complete_trace))
-    complete_trace.graph().write_vis(filename + ".html")
+    graph_vis.write(complete_trace.graph(), filename + ".html")
 
 
 # holds run() to run the function and self.inputs which
