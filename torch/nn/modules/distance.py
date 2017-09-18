@@ -67,8 +67,3 @@ class CosineSimilarity(Module):
 
     def forward(self, x1, x2):
         return F.cosine_similarity(x1, x2, self.dim, self.eps)
-
-
-# TODO: Cosine
-# TODO: Euclidean
-# TODO: WeightedEuclidean
