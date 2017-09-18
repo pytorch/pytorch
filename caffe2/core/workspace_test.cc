@@ -79,4 +79,27 @@ TEST(WorkspaceTest, Sharing) {
   }
 }
 
+TEST(WorkspaceTest, BlobMapping) {
+  Workspace parent;
+  EXPECT_FALSE(parent.HasBlob("a"));
+  EXPECT_TRUE(parent.CreateBlob("a"));
+  EXPECT_TRUE(parent.GetBlob("a"));
+  {
+    std::unordered_map<string, string> forwarded_blobs;
+    forwarded_blobs["inner_a"] = "a";
+    Workspace child(&parent, forwarded_blobs);
+    EXPECT_FALSE(child.HasBlob("a"));
+    EXPECT_TRUE(child.HasBlob("inner_a"));
+    EXPECT_TRUE(child.GetBlob("inner_a"));
+    Workspace ws;
+    EXPECT_TRUE(ws.CreateBlob("b"));
+    forwarded_blobs.clear();
+    forwarded_blobs["inner_b"] = "b";
+    child.AddBlobMapping(&ws, forwarded_blobs);
+    EXPECT_FALSE(child.HasBlob("b"));
+    EXPECT_TRUE(child.HasBlob("inner_b"));
+    EXPECT_TRUE(child.GetBlob("inner_b"));
+  }
+}
+
 }  // namespace caffe2

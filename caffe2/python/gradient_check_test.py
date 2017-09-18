@@ -17,6 +17,7 @@ from caffe2.python import (
     workspace,
 )
 from caffe2.python.gradient_checker import NetGradientChecker
+from caffe2.python.net_builder import ops, NetBuilder
 from caffe2.proto import caffe2_pb2
 
 import unittest
@@ -398,6 +399,112 @@ class TestNetGradientChecker(test_util.TestCase):
             inputs_with_grads=[a, b, c, d],
             input_values=input_values,
         )
+
+
+class TestIf(test_util.TestCase):
+    def testIf(self):
+        W_a_values = [2.0, 1.5]
+        B_a_values = [0.5]
+        W_b_values = [7.0, 3.5]
+        B_b_values = [1.5]
+
+        with NetBuilder(_use_control_ops=True) as init_nb:
+            W_a = ops.UniformFill([], "W_a", shape=[1, 2], min=-1., max=1.)
+            B_a = ops.ConstantFill([], "B_a", shape=[1], value=0.0)
+            W_b = ops.UniformFill([], "W_b", shape=[1, 2], min=-1., max=1.)
+            B_b = ops.ConstantFill([], "B_b", shape=[1], value=0.0)
+
+            W_gt_a = ops.GivenTensorFill(
+                [], "W_gt_a", shape=[1, 2], values=W_a_values)
+            B_gt_a = ops.GivenTensorFill([], "B_gt_a", shape=[1], values=B_a_values)
+            W_gt_b = ops.GivenTensorFill(
+                [], "W_gt_b", shape=[1, 2], values=W_b_values)
+            B_gt_b = ops.GivenTensorFill([], "B_gt_b", shape=[1], values=B_b_values)
+
+        params = [W_gt_a, B_gt_a, W_a, B_a, W_gt_b, B_gt_b, W_b, B_b]
+
+        with NetBuilder(_use_control_ops=True, initial_scope=params) as train_nb:
+            Y_pred = ops.ConstantFill([], "Y_pred", shape=[1], value=0.0)
+            Y_noise = ops.ConstantFill([], "Y_noise", shape=[1], value=0.0)
+
+            switch = ops.UniformFill(
+                [], "switch", shape=[1], min=-1., max=1., run_once=0)
+            zero = ops.ConstantFill([], "zero", shape=[1], value=0.0)
+            X = ops.GaussianFill(
+                [], "X", shape=[4096, 2], mean=0.0, std=1.0, run_once=0)
+            noise = ops.GaussianFill(
+                [], "noise", shape=[4096, 1], mean=0.0, std=1.0, run_once=0)
+
+            with ops.IfNet(ops.LT([switch, zero])):
+                Y_gt = ops.FC([X, W_gt_a, B_gt_a], "Y_gt")
+                ops.Add([Y_gt, noise], Y_noise)
+                ops.FC([X, W_a, B_a], Y_pred)
+            with ops.Else():
+                Y_gt = ops.FC([X, W_gt_b, B_gt_b], "Y_gt")
+                ops.Add([Y_gt, noise], Y_noise)
+                ops.FC([X, W_b, B_b], Y_pred)
+
+            dist = ops.SquaredL2Distance([Y_noise, Y_pred], "dist")
+            loss = dist.AveragedLoss([], ["loss"])
+
+        assert len(init_nb.get()) == 1, "Expected a single init net produced"
+        assert len(train_nb.get()) == 1, "Expected a single train net produced"
+
+        train_net = train_nb.get()[0]
+        gradient_map = train_net.AddGradientOperators([loss])
+
+        init_net = init_nb.get()[0]
+        ITER = init_net.ConstantFill(
+            [], "ITER", shape=[1], value=0, dtype=core.DataType.INT32)
+        train_net.Iter(ITER, ITER)
+        LR = train_net.LearningRate(ITER, "LR", base_lr=-0.1,
+                                        policy="step", stepsize=20, gamma=0.9)
+        ONE = init_net.ConstantFill([], "ONE", shape=[1], value=1.)
+        train_net.WeightedSum([W_a, ONE, gradient_map[W_a], LR], W_a)
+        train_net.WeightedSum([B_a, ONE, gradient_map[B_a], LR], B_a)
+        train_net.WeightedSum([W_b, ONE, gradient_map[W_b], LR], W_b)
+        train_net.WeightedSum([B_b, ONE, gradient_map[B_b], LR], B_b)
+
+        workspace.RunNetOnce(init_net)
+        workspace.CreateNet(train_net)
+        # print("Before training, W_a is: {}".format(workspace.FetchBlob("W_a")))
+        # print("Before training, B_a is: {}".format(workspace.FetchBlob("B_a")))
+        # print("Before training, W_b is: {}".format(workspace.FetchBlob("W_b")))
+        # print("Before training, B_b is: {}".format(workspace.FetchBlob("B_b")))
+
+        for _epoch in range(1000):
+            workspace.RunNet(train_net.Proto().name)
+
+        # print("After training, W_a is: {}".format(workspace.FetchBlob("W_a")))
+        # print("After training, B_a is: {}".format(workspace.FetchBlob("B_a")))
+        # print("After training, W_b is: {}".format(workspace.FetchBlob("W_b")))
+        # print("After training, B_b is: {}".format(workspace.FetchBlob("B_b")))
+        # print("Ground truth W_a is: {}".format(workspace.FetchBlob("W_gt_a")))
+        # print("Ground truth B_a is: {}".format(workspace.FetchBlob("B_gt_a")))
+        # print("Ground truth W_b is: {}".format(workspace.FetchBlob("W_gt_b")))
+        # print("Ground truth B_b is: {}".format(workspace.FetchBlob("B_gt_b")))
+
+        values_map = {
+            "W_a": W_a_values,
+            "B_a": B_a_values,
+            "W_b": W_b_values,
+            "B_b": B_b_values,
+        }
+
+        train_eps = 0.01
+
+        for blob_name, values in values_map.items():
+            trained_values = workspace.FetchBlob(blob_name)
+            if trained_values.ndim == 2:
+                self.assertEqual(trained_values.shape[0], 1)
+                trained_values = trained_values[0][:]
+            else:
+                self.assertEqual(trained_values.ndim, 1)
+
+            self.assertEqual(trained_values.size, len(values))
+            for idx in range(len(trained_values)):
+                self.assertTrue(abs(trained_values[idx] - values[idx]) < train_eps)
+
 
 if __name__ == '__main__':
     workspace.GlobalInit(["python"])

@@ -4,24 +4,15 @@ namespace caffe2 {
 
 template <>
 bool WhileOp<CPUContext>::RunOnDevice() {
-  CAFFE_ENFORCE_GT(
-      InputSize(), 0, "Condition must be specified in While operator");
   CAFFE_ENFORCE(
       InputIsType<Tensor<CPUContext>>(0),
       "Invalid condition in While operator: tensor expected");
 
   const auto& condition = Input(0);
-  CAFFE_ENFORCE(
-      condition.IsType<bool>(),
-      "Invalid condition tensor in While operator: boolean expected");
   CAFFE_ENFORCE_EQ(
       condition.size(),
       1,
       "Invalid condition tensor in While operator: single value expected");
-  CAFFE_ENFORCE_EQ(
-      condition.ndim(),
-      0,
-      "Invalid condition tensor in While operator: scalar expected");
 
   while (true) {
     if (cond_net_ && !cond_net_->Run()) {

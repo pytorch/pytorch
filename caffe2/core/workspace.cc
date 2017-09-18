@@ -87,16 +87,16 @@ vector<string> Workspace::Blobs() const {
   for (auto& entry : blob_map_) {
     names.push_back(entry.first);
   }
+  for (const auto& forwarded : forwarded_blobs_) {
+    const auto parent_ws = forwarded.second.first;
+    const auto& parent_name = forwarded.second.second;
+    if (parent_ws->HasBlob(parent_name)) {
+      names.push_back(forwarded.first);
+    }
+  }
   if (shared_) {
-    for (const auto& forwarded : forwarded_blobs_) {
-      if (shared_->HasBlob(forwarded.second)) {
-        names.push_back(forwarded.first);
-      }
-    }
-    if (blob_inheritance_) {
-      const auto& shared_blobs = shared_->Blobs();
-      names.insert(names.end(), shared_blobs.begin(), shared_blobs.end());
-    }
+    const auto& shared_blobs = shared_->Blobs();
+    names.insert(names.end(), shared_blobs.begin(), shared_blobs.end());
   }
   return names;
 }
@@ -107,7 +107,7 @@ Blob* Workspace::CreateBlob(const string& name) {
   } else if (forwarded_blobs_.count(name)) {
     // possible if parent workspace deletes forwarded blob
     VLOG(1) << "Blob " << name << " is already forwarded from parent workspace "
-            << "(blob " << forwarded_blobs_[name] << "). Skipping.";
+            << "(blob " << forwarded_blobs_[name].second << "). Skipping.";
   } else {
     VLOG(1) << "Creating blob " << name;
     blob_map_[name] = unique_ptr<Blob>(new Blob());
@@ -131,13 +131,12 @@ bool Workspace::RemoveBlob(const string& name) {
 const Blob* Workspace::GetBlob(const string& name) const {
   if (blob_map_.count(name)) {
     return blob_map_.at(name).get();
-  } else if (shared_) {
-    if (forwarded_blobs_.count(name)) {
-      return shared_->GetBlob(forwarded_blobs_.at(name));
-    }
-    if (blob_inheritance_ && shared_->HasBlob(name)) {
-      return shared_->GetBlob(name);
-    }
+  } else if (forwarded_blobs_.count(name)) {
+    const auto parent_ws = forwarded_blobs_.at(name).first;
+    const auto& parent_name = forwarded_blobs_.at(name).second;
+    return parent_ws->GetBlob(parent_name);
+  } else if (shared_ && shared_->HasBlob(name)) {
+    return shared_->GetBlob(name);
   }
   LOG(WARNING) << "Blob " << name << " not in the workspace.";
   // TODO(Yangqing): do we want to always print out the list of blobs here?
@@ -146,6 +145,33 @@ const Blob* Workspace::GetBlob(const string& name) const {
   //   LOG(WARNING) << entry.first;
   // }
   return nullptr;
+}
+
+void Workspace::AddBlobMapping(
+    const Workspace* parent,
+    const std::unordered_map<string, string>& forwarded_blobs) {
+  CAFFE_ENFORCE(parent, "Parent workspace must be specified");
+  for (const auto& forwarded : forwarded_blobs) {
+    CAFFE_ENFORCE(
+        parent->HasBlob(forwarded.second),
+        "Invalid parent workspace blob " + forwarded.second);
+    if (forwarded_blobs_.count(forwarded.first)) {
+      const auto& ws_blob = forwarded_blobs_[forwarded.first];
+      CAFFE_ENFORCE_EQ(
+          ws_blob.first, parent, "Redefinition of blob " + forwarded.first);
+      CAFFE_ENFORCE_EQ(
+          ws_blob.second,
+          forwarded.second,
+          "Redefinition of blob " + forwarded.first);
+    } else {
+      CAFFE_ENFORCE(
+          !HasBlob(forwarded.first), "Redefinition of blob " + forwarded.first);
+      // Lazy blob resolution - store the parent workspace and
+      // blob name, blob value might change in the parent workspace
+      forwarded_blobs_[forwarded.first] =
+          std::make_pair(parent, forwarded.second);
+    }
+  }
 }
 
 Blob* Workspace::GetBlob(const string& name) {
