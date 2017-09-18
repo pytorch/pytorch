@@ -3,9 +3,16 @@
 #include <memory>
 #include <limits>
 
+#include "ATen/ATenGeneral.h"
 #include "ATen/ArrayRef.h"
 #include "ATen/Half.h"
 #include "ATen/SparseTensorRef.h"
+
+#ifdef _MSC_VER
+#ifdef s_addr
+#undef s_addr
+#endif
+#endif
 
 namespace at {
 
@@ -96,7 +103,7 @@ enum class TypeID {
 typedef ArrayRef<int64_t> IntList;
 typedef ArrayRef<Tensor> TensorList;
 
-struct Type {
+struct ATen_CLASS Type {
   explicit Type(Context * context)
   : context(context) {}
   virtual ~Type() {}
