@@ -52,7 +52,7 @@ TH_API void THNN_(SpatialGridSamplerBilinear_updateOutput)(
   THCDeviceTensor<real, 4> devGrid = toDeviceTensor<real, 4>(state, grid);
   THCDeviceTensor<real, 4> devOutput = toDeviceTensor<real, 4>(state, output);
 
-  int64_t count = N*H*W*2;
+  int count = static_cast<int>(N*H*W);
   SpatialGridSamplerBilinear_updateOutput_kernel
     <<<GET_BLOCKS(count), CUDA_NUM_THREADS, 0, THCState_getCurrentStream(state)>>>(
       count, devInput, devGrid, devOutput);
