@@ -49,7 +49,7 @@ typename std::enable_if<std::numeric_limits<T>::is_integer, bool>::type
 }
 
 template<typename T>
-std::shared_ptr<thpp::THTensor<T>> buildTensor(std::vector<long> shape, T value) {
+std::shared_ptr<thpp::THTensor<T>> buildTensor(std::vector<int64_t> shape, T value) {
   auto tensor = std::make_shared<thpp::THTensor<T>>();
   tensor->resize(shape);
   tensor->fill(value);
@@ -61,14 +61,14 @@ inline bool contains(std::vector<T> v, T value) {
   return std::find(v.begin(), v.end(), value) != v.end();
 }
 
-inline long nowInMilliseconds() {
+inline int64_t nowInMilliseconds() {
   return std::chrono::duration_cast<std::chrono::milliseconds>
       (std::chrono::system_clock::now().time_since_epoch()).count();
 }
 
-inline long long factorial(int n) {
-  long long a = 1;
-  for (long long i = 1; i <= n; ++i) { a *= i; }
+inline int64_t factorial(int n) {
+  int64_t a = 1;
+  for (int64_t i = 1; i <= n; ++i) { a *= i; }
   return a;
 }
 

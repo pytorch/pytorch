@@ -67,7 +67,7 @@ struct Mul : public ForwardFunction<> {
 };
 
 struct MulBackward : public Function {
-  MulBackward(FunctionFlags&& flags, SavedVariable a, SavedVariable b)
+  MulBackward(FunctionFlags&& flags)
     : Function(std::move(flags)) {}
 
   virtual variable_list apply(const variable_list& gradOutputs) override;

@@ -1,6 +1,6 @@
-#include "torch/csrc/toffee.h"
+#include "torch/csrc/onnx.h"
 
-namespace torch { namespace toffee {
+namespace torch { namespace onnx {
 
 template <>
 bool micropb_encode<std::string, nullptr>(pb_ostream_t *stream, std::string* arg) {
@@ -40,4 +40,4 @@ GraphProto* AttributeProto::add_graphs() {
   return ptr;
 }
 
-}} // namespace toffee
+}} // namespace onnx

@@ -1,0 +1,5 @@
+# TODO: define derivatives e.g.
+# - name: addbmm(Scalar beta=1, Tensor self, Scalar alpha=1, Tensor mat1, Tensor mat2)
+#   self: grad * alpha
+#   mat1: grad.bmm(mat2.transpose(1, 2)) * beta
+#   mat2: mat1.transpose(1, 2).bmm(grad) * beta

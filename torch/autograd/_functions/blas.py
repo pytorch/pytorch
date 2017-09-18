@@ -16,12 +16,12 @@ def _get_output(ctx, arg, inplace=False):
 class Addmm(InplaceFunction):
 
     @staticmethod
-    def primspec(g, add_matrix, matrix1, matrix2, alpha=1, beta=1, inplace=False):
-        # TODO: manually insert the necessary scaling, since Toffee doesn't
+    def symbolic(g, add_matrix, matrix1, matrix2, alpha=1, beta=1, inplace=False):
+        # TODO: manually insert the necessary scaling, since ONNX doesn't
         # natively support it
         if alpha != 1 or beta != 1:
             return None
-        # TODO: Talk to Toffee about why their FC involves a transpose
+        # TODO: Talk to ONNX about why their FC involves a transpose
         matrix2_t = g.op("Transpose", matrix2)
         return g.op("FC", matrix1, matrix2_t, add_matrix)
 

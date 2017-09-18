@@ -9,7 +9,7 @@ from . import _all_functions
 class Embedding(Function):
 
     @staticmethod
-    def primspec(g, indices, weight, padding_idx, max_norm, norm_type, scale_grad_by_freq,
+    def symbolic(g, indices, weight, padding_idx, max_norm, norm_type, scale_grad_by_freq,
                  sparse=False):
         if max_norm is not None:
             raise ValueError('Right now, re-norm is not supported.')

@@ -14,7 +14,7 @@ void registerPyTypeObject(
     PyTypeObject *pytype, const std::string& name,
     bool is_cuda, bool is_sparse);
 
-PyObject* createPyObject(at::Tensor& tensor);
+PyObject* createPyObject(const at::Tensor& tensor);
 PyTypeObject* getPyTypeObject(const at::Tensor& tensor);
 //rename to createPyObject when THPP is removed
 // Creates a at::Tensor from a PyObject.  Does NOT steal the PyObject reference.

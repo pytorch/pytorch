@@ -14,5 +14,5 @@
 # when we aren't actually storing a graph/tensor; furthermore, circular
 # dependencies now work!
 
-toffee.AttributeProto.g type:FT_CALLBACK
-toffee.AttributeProto.t type:FT_CALLBACK
+onnx.AttributeProto.g type:FT_CALLBACK
+onnx.AttributeProto.t type:FT_CALLBACK

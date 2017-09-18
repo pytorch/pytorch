@@ -1,9 +1,9 @@
-#include "torch/csrc/toffee/export.h"
-#include "torch/csrc/autograd/primspec.h"
+#include "torch/csrc/onnx/export.h"
+#include "torch/csrc/autograd/symbolic.h"
 #include "torch/csrc/utils/python_numbers.h"
 #include "torch/csrc/utils/python_strings.h"
 #include "torch/csrc/Exceptions.h"
-#include "torch/csrc/toffee.h"
+#include "torch/csrc/onnx.h"
 
 #include "torch/csrc/autograd/functions/convolution.h"
 #include "torch/csrc/jit/dead_code_elimination.h"
@@ -22,14 +22,14 @@ std::string node_name(Node* n) {
   return n->uniqueName();
 }
 
-// transform PythonOps and Cpp Ops into Node's that match ToffeeIR
+// transform PythonOps and Cpp Ops into Node's that match ONNX
 // semantics.
 // Eventually this should just be part of init_pass but we should avoid
-// tight coupling of the JIT and Toffee IR exporter until ready.
-std::shared_ptr<Graph> ToToffeeIR(std::shared_ptr<Graph>& g,
+// tight coupling of the JIT and ONNX IR exporter until ready.
+std::shared_ptr<Graph> ToONNX(std::shared_ptr<Graph>& g,
                                   const std::unordered_map<void*, Node*>& old_buffer_map,
                                   bool verbose) {
-  torch::autograd::PrimSpecContext ctx;
+  torch::autograd::SymbolicContext ctx;
   std::unordered_map<Node*, Node*> env;
   std::shared_ptr<Graph> out_graph = std::make_shared<Graph>();
   ctx.graph = out_graph.get();
@@ -51,27 +51,27 @@ std::shared_ptr<Graph> ToToffeeIR(std::shared_ptr<Graph>& g,
   ctx.buffer_map = &buffer_map;
   // put the new outputs in our environment map, and
   // copy the type from the input graph if they were not set by the
-  // primspec
+  // symbolic
   auto setOutputs = [&](Node * node, const node_list & outputs) {
     auto old_outputs = node->outputs();
-    // The primspec can produce less outputs than the actual IR node,
+    // The symbolic can produce less outputs than the actual IR node,
     // because many IR nodes have an implicit extra trailing output
     // of type Handle, which is irrelevant for the purposes of export.
-    // It's bad design to ask the primspec() implementers to actually
+    // It's bad design to ask the symbolic() implementers to actually
     // handle this!
-    JIT_ASSERTM(outputs.size() <= old_outputs.size(), "primspec produced too many outputs");
+    JIT_ASSERTM(outputs.size() <= old_outputs.size(), "symbolic produced too many outputs");
     size_t i = 0;
     for(auto & old : old_outputs) {
       // NB: There is at most one handle, and if it exists, it is the last input
       if(i >= outputs.size()) {
-        // primspecs do not deal with Handles at the moment, so we just
+        // symbolics do not deal with Handles at the moment, so we just
         // assert the handle isn't actually used.
         auto typ = old->typeOption();
         JIT_ASSERTM(typ && typ->kind() == jit::TypeKind::HandleType,
-          "primspec produced too few outputs");
+          "symbolic produced too few outputs");
         env[old] = nullptr;
         if (!old->uses().empty()) {
-          throw std::runtime_error("In Toffee export, handles should be unused");
+          throw std::runtime_error("In ONNX export, handles should be unused");
         }
       } else {
         if (outputs[i]) {
@@ -85,7 +85,7 @@ std::shared_ptr<Graph> ToToffeeIR(std::shared_ptr<Graph>& g,
         } else {
           env[old] = nullptr;
           if (!old->uses().empty()) {
-            throw std::runtime_error("In Toffee export, non-exported PyTorch return not supported " + std::to_string(i));
+            throw std::runtime_error("In ONNX export, non-exported PyTorch return not supported " + std::to_string(i));
           }
         }
       }
@@ -97,25 +97,25 @@ std::shared_ptr<Graph> ToToffeeIR(std::shared_ptr<Graph>& g,
       // Selects are translated by multi-return nodes.
       JIT_ASSERT(env.count(value) > 0);
     IR_ELSEIFM(CppOp)
-      if (auto fn = std::dynamic_pointer_cast<autograd::HasPrimSpec>(value->fn)) {
-        auto outputs = fn->primspec(&ctx, fmap(node->inputs(), envFn));
+      if (auto fn = std::dynamic_pointer_cast<autograd::HasSymbolic>(value->fn)) {
+        auto outputs = fn->symbolic(&ctx, fmap(node->inputs(), envFn));
         setOutputs(node, outputs);
       } else {
-        throw std::runtime_error("CppOp doesn't define primspec " + value->name());
+        throw std::runtime_error("CppOp doesn't define symbolic " + value->name());
       }
     IR_ELSEIFM(PythonOp)
       auto pyobj = py::handle(value->pyobj.get());
-      if(!py::hasattr(pyobj, "primspec"))
-        throw std::runtime_error("PythonOp doesn't define primspec " + value->name());
+      if(!py::hasattr(pyobj, "symbolic"))
+        throw std::runtime_error("PythonOp doesn't define symbolic " + value->name());
 
-      py::object primspec_fn = pyobj.attr("primspec");
+      py::object symbolic_fn = pyobj.attr("symbolic");
 
-      py::tuple py_primspec_args(1+value->cconv.size());
+      py::tuple py_symbolic_args(1+value->cconv.size());
 
       auto node_it = node->inputs().begin();
       auto scalar_it = value->scalar_args.begin();
       Py_ssize_t input_nr = 0;
-      py_primspec_args[input_nr++] = py::cast(ctx.graph);
+      py_symbolic_args[input_nr++] = py::cast(ctx.graph);
 
       for (auto arg_type : value->cconv) {
         py::object obj;
@@ -132,13 +132,13 @@ std::shared_ptr<Graph> ToToffeeIR(std::shared_ptr<Graph>& g,
         } else {
           throw std::runtime_error("unexpected calling convention");
         }
-        py_primspec_args[input_nr++] = obj;
+        py_symbolic_args[input_nr++] = obj;
       }
-      py::object raw_output = py::reinterpret_steal<py::object>(PyObject_CallObject(primspec_fn.ptr(), py_primspec_args.ptr()));
+      py::object raw_output = py::reinterpret_steal<py::object>(PyObject_CallObject(symbolic_fn.ptr(), py_symbolic_args.ptr()));
       if(!raw_output)
         throw py::error_already_set();
       if(raw_output.ptr() == Py_None)
-        throw std::runtime_error("PythonOp's primspec returned None, indicating conversion not supported " + value->name());
+        throw std::runtime_error("PythonOp's symbolic returned None, indicating conversion not supported " + value->name());
       node_list outputs;
       if(py::isinstance<Node>(raw_output)) {
         outputs.push_back(py::cast<Node*>(raw_output));
@@ -148,7 +148,7 @@ std::shared_ptr<Graph> ToToffeeIR(std::shared_ptr<Graph>& g,
       setOutputs(node, outputs);
     IR_ELSE()
       auto n_ = ctx.graph->createClone(node, envFn);
-      ctx.graph->appendNode(n_); // will be ignored by ToffeeIR
+      ctx.graph->appendNode(n_); // will be ignored by ONNX
       if(node->hasMultipleOutputs()) {
         int i = 0;
         for(auto s : node->uses()) {
@@ -180,46 +180,46 @@ std::shared_ptr<Graph> ToToffeeIR(std::shared_ptr<Graph>& g,
   return out_graph; // RVO
 }
 
-static void encodeTensor(toffee::TensorProto * p, const at::Tensor & tensor) {
+static void encodeTensor(onnx::TensorProto * p, const at::Tensor & tensor) {
     for(auto d : tensor.sizes()) {
       p->add_dims(d);
     }
     at::ScalarType at_type;
-    toffee::DataType toffee_type;
+    onnx::DataType onnx_type;
     switch(tensor.type().scalarType()) {
       case at::kDouble:
       case at::kFloat:
       case at::kHalf:
-        toffee_type = toffee::kFLOAT;
+        onnx_type = onnx::kFLOAT;
         at_type = at::kFloat;
         break;
       case at::kByte:
       case at::kChar:
-        toffee_type = toffee::kINT8;
+        onnx_type = onnx::kINT8;
         at_type = at::kByte;
         break;
       case at::kShort:
-        toffee_type = toffee::kINT16;
+        onnx_type = onnx::kINT16;
         at_type = at::kShort;
         break;
       case at::kInt:
-        toffee_type = toffee::kINT32;
+        onnx_type = onnx::kINT32;
         at_type = at::kInt;
         break;
       case at::kLong:
-        toffee_type = toffee::kINT64;
+        onnx_type = onnx::kINT64;
         at_type = at::kLong;
         break;
       default:
         jit::barf("unexpected tensor scalar type");
         break;
     }
-    p->set_data_type(toffee_type);
+    p->set_data_type(onnx_type);
     at::Tensor cont = tensor.toType(at::CPU(at_type)).contiguous();
     p->set_raw_data(cont);
 }
-static void encodeGraph(toffee::GraphProto * p_g, std::shared_ptr<Graph> & g, const std::vector<at::Tensor> & initializers);
-static void addAttribute(toffee::NodeProto * n_p, jit::Node * n, jit::Symbol name) {
+static void encodeGraph(onnx::GraphProto * p_g, std::shared_ptr<Graph> & g, const std::vector<at::Tensor> & initializers);
+static void addAttribute(onnx::NodeProto * n_p, jit::Node * n, jit::Symbol name) {
   auto attr = n_p->add_attribute();
   attr->set_name(jit::symbolToString(name));
   switch(n->kindOf(name)) {
@@ -267,7 +267,7 @@ static void addAttribute(toffee::NodeProto * n_p, jit::Node * n, jit::Symbol nam
   }
 }
 
-static void encodeGraph(toffee::GraphProto * p_g, std::shared_ptr<Graph> & g, const std::vector<at::Tensor> & initializers) {
+static void encodeGraph(onnx::GraphProto * p_g, std::shared_ptr<Graph> & g, const std::vector<at::Tensor> & initializers) {
   for (auto input : g->inputs()) {
     p_g->add_input(node_name(input));
   }
@@ -276,13 +276,13 @@ static void encodeGraph(toffee::GraphProto * p_g, std::shared_ptr<Graph> & g, co
   }
   for (auto node : g->nodes()) {
     if (node->kind() == kSelect) {
-      // No select nodes in ToffeeIR: instead we make use
+      // No select nodes in ONNX: instead we make use
       // of the select invariant
       continue;
     }
     if (node->kind() == kUndefined && node->uses().empty()) {
-      // Undefined nodes never show up in ToffeeIR; they're just a tool
-      // to help primspecs do the right thing.
+      // Undefined nodes never show up in ONNX; they're just a tool
+      // to help symbolics do the right thing.
       continue;
     }
     auto p_n = p_g->add_node();
@@ -308,24 +308,24 @@ static void encodeGraph(toffee::GraphProto * p_g, std::shared_ptr<Graph> & g, co
   }
 }
 
-// Exports a graph to ToffeeIR
+// Exports a graph to ONNX
 std::string ExportGraph(std::shared_ptr<Graph>& g_,
                         const std::unordered_map<void*, Node*>& buffer_map,
                         const std::vector<at::Tensor> & initializers,
                         bool verbose) {
-  auto g = ToToffeeIR(g_, buffer_map, verbose);
+  auto g = ToONNX(g_, buffer_map, verbose);
   if(verbose) {
     std::cout << *g << "\n";
   }
   g->lint();
-  toffee::GraphProto p_g;
+  onnx::GraphProto p_g;
   p_g.set_name("torch-jit-export");
   encodeGraph(&p_g, g, initializers);
   size_t out_size;
-  pb_get_encoded_size(&out_size, toffee_GraphProto_fields, &p_g.proto);
+  pb_get_encoded_size(&out_size, onnx_GraphProto_fields, &p_g.proto);
   std::string out(out_size, '\0');
   pb_ostream_t ostream = pb_ostream_from_buffer(reinterpret_cast<pb_byte_t *>(&out[0]), out_size);
-  pb_encode(&ostream, toffee_GraphProto_fields, &p_g.proto);
+  pb_encode(&ostream, onnx_GraphProto_fields, &p_g.proto);
   return out; // RVO
 }
 

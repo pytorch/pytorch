@@ -19,8 +19,8 @@ void THNN_(unfolded_acc)(
           int outputHeight)
 {
   // This function assumes that
-  // outputHeight*dH does not overflow a long
-  // outputWidth*dW does not overflow a long
+  // outputHeight*dH does not overflow a int64_t
+  // outputWidth*dW does not overflow a int64_t
 
   int nip;
 
@@ -31,7 +31,7 @@ void THNN_(unfolded_acc)(
   for(nip = 0; nip < nInputPlane; nip++)
   {
     int kw, kh, y, x;
-    long ix, iy;
+    int64_t ix, iy;
     for(kh = 0; kh < kH; kh++)
     {
       for(kw = 0; kw < kW; kw++)
@@ -41,7 +41,7 @@ void THNN_(unfolded_acc)(
         if (padW > 0 || padH > 0) {
           int lpad,rpad;
           for(y = 0; y < outputHeight; y++) {
-            iy = (long)y*dH - padH + kh;
+            iy = (int64_t)y*dH - padH + kh;
             if (iy < 0 || iy >= inputHeight) {
             } else {
               if (dW==1){
@@ -53,7 +53,7 @@ void THNN_(unfolded_acc)(
               }
               else{
                 for (x=0; x<outputWidth; x++){
-                   ix = (long)x*dW - padW + kw;
+                   ix = (int64_t)x*dW - padW + kw;
                    if (ix < 0 || ix >= inputWidth){
                    }else{
                      real *dst_slice = dst+(size_t)iy*inputWidth+ix;
@@ -65,7 +65,7 @@ void THNN_(unfolded_acc)(
           }
         } else {
           for(y = 0; y < outputHeight; y++) {
-            iy = (long)y*dH + kh;
+            iy = (int64_t)y*dH + kh;
             ix = 0 + kw;
             if (dW == 1 ) {
                real *dst_slice = dst+(size_t)iy*inputWidth+ix;
@@ -100,28 +100,28 @@ void THNN_(unfolded_copy)(
 {
   // This function assumes that
   // kH*kW does not overflow an int
-  // nInputPlane*kH*kW does not overflow a long
-  // outputHeight*dH does not overflow a long
-  // outputWidth*dW does not overflow a long
+  // nInputPlane*kH*kW does not overflow a int64_t
+  // outputHeight*dH does not overflow a int64_t
+  // outputWidth*dW does not overflow a int64_t
 
-  long k;
+  int64_t k;
   real *input_data = THTensor_(data)(input);
   real *finput_data = THTensor_(data)(finput);
 
 #pragma omp parallel for private(k)
-  for(k = 0; k < (long)nInputPlane*kH*kW; k++) {
-    long nip = k / (kH*kW);
-    long rest = k % (kH*kW);
-    long kh = rest / kW;
-    long kw = rest % kW;
+  for(k = 0; k < (int64_t)nInputPlane*kH*kW; k++) {
+    int64_t nip = k / (kH*kW);
+    int64_t rest = k % (kH*kW);
+    int64_t kh = rest / kW;
+    int64_t kw = rest % kW;
     int x, y;
-    long ix, iy;
+    int64_t ix, iy;
     real *dst = finput_data + nip*((size_t)kH*kW*outputHeight*outputWidth) + kh*((size_t)kW*outputHeight*outputWidth) + kw*((size_t)outputHeight*outputWidth);
     real *src = input_data + nip*((size_t)inputHeight*inputWidth);
     if (padW > 0 || padH > 0) {
-      long lpad,rpad;
+      int64_t lpad,rpad;
       for(y = 0; y < outputHeight; y++) {
-        iy = (long)y*dH - padH + kh;
+        iy = (int64_t)y*dH - padH + kh;
         if (iy < 0 || iy >= inputHeight) {
           memset(dst+(size_t)y*outputWidth, 0, sizeof(real)*outputWidth);
         } else {
@@ -139,7 +139,7 @@ void THNN_(unfolded_copy)(
           }
           else{
             for (x=0; x<outputWidth; x++){
-               ix = (long)x*dW - padW + kw;
+               ix = (int64_t)x*dW - padW + kw;
                if (ix < 0 || ix >= inputWidth)
                  memset(dst+(size_t)y*outputWidth+x, 0, sizeof(real)*1);
                else
@@ -150,13 +150,13 @@ void THNN_(unfolded_copy)(
       }
     } else {
       for(y = 0; y < outputHeight; y++) {
-        iy = (long)y*dH + kh;
+        iy = (int64_t)y*dH + kh;
         ix = 0 + kw;
         if (dW == 1)
            memcpy(dst+(size_t)y*outputWidth, src+(size_t)iy*inputWidth+ix, sizeof(real)*outputWidth);
         else{
           for (x=0; x<outputWidth; x++)
-             memcpy(dst+(size_t)y*outputWidth+x, src+(size_t)iy*inputWidth+ix+(long)x*dW, sizeof(real)*(1));
+             memcpy(dst+(size_t)y*outputWidth+x, src+(size_t)iy*inputWidth+ix+(int64_t)x*dW, sizeof(real)*(1));
          }
       }
     }

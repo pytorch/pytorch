@@ -10,7 +10,7 @@ from .auto_double_backwards import softmax_double_backwards
 class PReLU(Function):
 
     @staticmethod
-    def primspec(g, input, weight):
+    def symbolic(g, input, weight):
         # TODO: Properly support numel in type()
         if all(s == 1 for s in weight.type().sizes()):
             raise RuntimeError("single weight shared among input channels not supported")

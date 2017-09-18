@@ -18,7 +18,7 @@ struct Storage {
   virtual Storage& retain() = 0;
   virtual Storage& free() = 0;
 
-  virtual Storage& resize(long new_size) = 0;
+  virtual Storage& resize(int64_t new_size) = 0;
 
   virtual Type & type() const = 0;
   virtual int getDevice() const = 0;

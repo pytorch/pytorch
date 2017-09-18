@@ -388,7 +388,8 @@ def adaptive_max_pool1d(input, output_size, return_indices=False):
         output_size: the target output size (single integer)
         return_indices: whether to return pooling indices. Default: False
     """
-    return _functions.thnn.AdaptiveMaxPool1d.apply(input, output_size, return_indices)
+    ret = _functions.thnn.AdaptiveMaxPool1d.apply(input, output_size)
+    return ret if return_indices else ret[0]
 
 
 def adaptive_max_pool2d(input, output_size, return_indices=False):
@@ -402,7 +403,8 @@ def adaptive_max_pool2d(input, output_size, return_indices=False):
             double-integer tuple)
         return_indices: whether to return pooling indices. Default: False
     """
-    return _functions.thnn.AdaptiveMaxPool2d.apply(input, output_size, return_indices)
+    ret = _functions.thnn.AdaptiveMaxPool2d.apply(input, output_size)
+    return ret if return_indices else ret[0]
 
 
 def adaptive_avg_pool1d(input, output_size):

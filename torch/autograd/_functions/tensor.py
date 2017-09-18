@@ -10,7 +10,7 @@ from .utils import maybe_unexpand
 class Index(Function):
 
     @staticmethod
-    def primspec(g, i, index):
+    def symbolic(g, i, index):
         # We should only expect index as an integer in this case.
         # We use "Slice" to get the index-th element in i,
         # Then we reduce the dimension using "Reshape".
@@ -95,8 +95,8 @@ class NoGrad(Function):
 class Transpose(Function):
 
     @staticmethod
-    def primspec(g, i, dim1, dim2):
-        # NB: Swap dim1 and dim2, which is different from Toffee's
+    def symbolic(g, i, dim1, dim2):
+        # NB: Swap dim1 and dim2, which is different from ONNX's
         # Transpose, which is actually a permute.
         if dim1 == dim2:
             return i
@@ -120,7 +120,7 @@ class Transpose(Function):
 class View(Function):
 
     @staticmethod
-    def primspec(g, i, sizes):
+    def symbolic(g, i, sizes):
         return g.op("Reshape", i, shape_i=sizes)
 
     @staticmethod
@@ -166,11 +166,16 @@ class Type(Function):
     @staticmethod
     def forward(ctx, i, dest_type):
         ctx.input_type = type(i)
+        ctx.input_device = -1 if not i.is_cuda else i.get_device()
         return i.type(dest_type)
 
     @staticmethod
     def backward(ctx, grad_output):
-        return grad_output.type(ctx.input_type), None
+        if ctx.input_device == -1:
+            return grad_output.type(ctx.input_type), None
+        else:
+            with torch.cuda.device(ctx.input_device):
+                return grad_output.type(ctx.input_type), None
 
 
 class CudaTransfer(Function):
@@ -197,7 +202,7 @@ class CudaTransfer(Function):
 class Permute(Function):
 
     @staticmethod
-    def primspec(g, input, dim_indices):
+    def symbolic(g, input, dim_indices):
         if dim_indices == list(range(0, len(dim_indices))):
             return input
         return g.op("Transpose", input, perm_i=dim_indices)
@@ -351,7 +356,7 @@ class IndexSelect(Function):
 class Concat(Function):
 
     @staticmethod
-    def primspec(g, dim, *inputs):
+    def symbolic(g, dim, *inputs):
         n, _ = g.op("Concat", *inputs, axis_i=dim, outputs=2)
         return n
 
@@ -409,7 +414,7 @@ class Clone(Function):
 class Squeeze(InplaceFunction):
 
     @staticmethod
-    def primspec(g, input, dim, inplace=False):
+    def symbolic(g, input, dim, inplace=False):
         # TODO: [Export inplace]
         if dim is None:
             dims = []
@@ -594,7 +599,7 @@ class Topk(_MultiSelectionFunction):
 class Chunk(Function):
 
     @staticmethod
-    def primspec(g, i, num_chunks, dim=0):
+    def symbolic(g, i, num_chunks, dim=0):
         dim_size = i.type().sizes()[dim]
         split_size = (dim_size + num_chunks - 1) // num_chunks
         lengths = []

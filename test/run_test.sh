@@ -23,8 +23,8 @@ pushd "$(dirname "$0")"
 echo "Running JIT tests"
 $PYCMD test_jit.py $@
 
-echo "Running Toffee tests"
-$PYCMD test_toffee.py $@
+echo "Running ONNX tests"
+$PYCMD test_onnx.py $@
 
 echo "Running torch tests"
 $PYCMD test_torch.py $@

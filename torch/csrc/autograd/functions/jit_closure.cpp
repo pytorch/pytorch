@@ -17,6 +17,7 @@
 namespace torch { namespace autograd {
 
 using namespace torch::jit;
+using namespace torch::jit::tracer;
 
 // Used when an output has multiple uses (there's only one entry
 // in next_functions per output).
@@ -120,7 +121,6 @@ struct PythonCall : public Function {
     }
   }
 
-  // TODO: we could probably call into some of our C functions in here to make it faster
   virtual variable_list apply(const variable_list& inputs) {
     AutoGIL gil;
 
@@ -209,10 +209,10 @@ struct WrapConstant : public Function {
   }
 
   virtual variable_list apply(const variable_list& inputs) {
-    if (inputs.size() != 1 || inputs[0])
+    if (inputs.size() != 1 || inputs[0].defined())
       throw std::logic_error("WrapConstant nodes should only receive a single NULL input");
-    AutoGPU guard(value.type().isCuda() ? value.get_device() : -1);
-    return {std::make_shared<Variable>(value.clone(), false, false)};
+    AutoGPU guard(value);
+    return {make_variable(value.clone())};
   }
 
   at::Tensor value;
@@ -226,7 +226,7 @@ struct ConstantFactory : public Function {
   }
 
   virtual variable_list apply(const variable_list& inputs) {
-    if (inputs.size() != 1 || inputs[0])
+    if (inputs.size() != 1 || inputs[0].defined())
       throw std::logic_error("ConstantFactory nodes should only receive a single NULL input");
     return variable_list(next_functions.size());
   }
@@ -241,7 +241,7 @@ struct FusionGroupFunction : public Function {
     // compiled for
     std::vector<at::Tensor> data;
     for(auto & input : inputs)
-      data.push_back(input->data);
+      data.push_back(input.data());
     AutoGPU guard(data.back());
     std::vector<at::Tensor> outputs;
     outputs.reserve(function->outputDescriptors().size());
@@ -375,8 +375,10 @@ struct CrossStageStateDesc {
 struct StageClosure {
   using node_fn_map_type = std::unordered_map<Node*, std::shared_ptr<Function>>;
 
-  StageClosure(Graph *graph, const CrossStageStateDesc& xstate, std::size_t stage)
-    : const_factory(std::make_shared<ConstantFactory>()) {
+  StageClosure(TracingState *state, const CrossStageStateDesc& xstate, std::size_t stage)
+    : var_flags(state->var_flags.at(stage))
+    , const_factory(std::make_shared<ConstantFactory>()) {
+    auto graph = state->graph.get();
     node_fn_map_type node_map;
     // This map caches PrevStageInputs for a given node, so that you don't
     // create multiple PrevStageInput for the same node.
@@ -448,6 +450,8 @@ struct StageClosure {
     }
 
     roots.emplace_back(const_factory, 0);
+
+    findCopiedNextFunctions(state, stage);
   }
 
   // Returns a function implementing functionality of a given node,
@@ -527,13 +531,10 @@ struct StageClosure {
       fn->next_functions.emplace_back(node_map.at(use.user), offset);
     };
     for (auto& output_uses_ref : output_uses_refs) {
-      auto output_uses = output_uses_ref.get(); // TODO: replace copy with filter
       // Filter out uses from future stages (except for output!)
-      output_uses.erase(std::remove_if(output_uses.begin(), output_uses.end(),
-                                       [stage, graph](Use& use) {
-                                          return use.user != graph->return_node() && use.user->stage() != stage;
-                                       }),
-                        output_uses.end());
+      auto output_uses = filter(output_uses_ref.get(), [stage, graph](const Use& use) {
+        return use.user->stage() == stage || use.user == graph->return_node();
+      });
       // Optimize out unnecessary Replicate nodes
       if (output_uses.size() == 1) {
         append_use(fn, output_uses[0]);
@@ -566,13 +567,36 @@ struct StageClosure {
     }
   }
 
+  // If this stage produces gradients of any of previous stage inputs,
+  // it needs to include them in its next_functions. However, we do not
+  // necessarily keep them as SavedVariables, so it's not straightforward
+  // to use wrap_outputs for this purpose. Here, we find all next_functions
+  // from the previous stage that will need to be copied as next_functions
+  // of this stage (the copy is done explicitly in lambda constructor given to
+  // wrap_outputs).
+  // NOTE: we depend on the Eval input ordering here (i.e. inherited/prev stage
+  // outputs come after this stage inputs and remain sorted).
+  void findCopiedNextFunctions(TracingState *state, std::size_t stage) {
+    if (stage == 0) return;
+    auto & current_outputs = state->output_edges[stage];
+    auto & prev_outputs = state->output_edges[stage - 1];
+    for (auto & output : current_outputs) {
+      auto prev_it = std::find(prev_outputs.begin(), prev_outputs.end(), output);
+      if (prev_it == prev_outputs.end()) continue;
+      copied_next_fns.push_back(std::distance(prev_outputs.begin(), prev_it));
+    }
+  }
+
   // Roots for a call to the engine. The list contains function in this order:
   // [ apply input roots | prev stage input roots | constant factory ]
   function_list roots;
+  std::vector<VariableFlags> var_flags;
 
   // Output node
   std::shared_ptr<Function> output;
   std::shared_ptr<ConstantFactory> const_factory;
+
+  std::vector<int> copied_next_fns;
 
   // These will be used by each instantiation of AutogradClosure to register hooks.
   std::vector<int> prev_stage_variables;                            // unique
@@ -585,11 +609,12 @@ struct StageClosure {
 
 // Computes and stores an array of StageClosures for each stage in the graph
 struct MultiStageClosure {
-  MultiStageClosure(Graph* graph) {
+  MultiStageClosure(TracingState* state) {
+    auto graph = state->graph.get();
     CrossStageStateDesc xstate {graph};
     auto num_stages = graph->stage() + 1;
     for (std::size_t i = 0; i < num_stages; ++i) {
-      stages.emplace_back(graph, xstate, i);
+      stages.emplace_back(state, xstate, i);
     }
   }
 
@@ -616,7 +641,7 @@ AutogradClosure::AutogradClosure(const std::shared_ptr<MultiStageClosure>& desc,
     auto saved_idx = std::get<2>(entry);
     post_callbacks.emplace(fn, [this, saved_idx, output_offset](Function* fn, variable_list& inputs, variable_list& outputs) {
       std::lock_guard<std::mutex> lock(this->capture_mutex);
-      this->captured_vars[saved_idx] = outputs[output_offset]->data;
+      this->captured_vars[saved_idx] = outputs[output_offset].data();
       return true;
     });
   }
@@ -650,7 +675,7 @@ AutogradClosure::AutogradClosure(const std::shared_ptr<MultiStageClosure>& desc,
     std::lock_guard<std::mutex> lock(this->capture_mutex);
     this->outputs.reserve(inputs.size());
     for (auto & input : inputs)
-      this->outputs.emplace_back(input->data);
+      this->outputs.emplace_back(input.data());
     return false; // Stop execution
   });
 
@@ -664,25 +689,36 @@ AutogradClosure::AutogradClosure(const std::shared_ptr<MultiStageClosure>& desc,
   }
 }
 
-// TODO: we could run all this with volatile variables, but we need to somehow capture handles
-// we should enable requires_grad only for the parts that need it
 variable_list AutogradClosure::apply(const variable_list& inputs) {
   auto& stage_closure = desc->stages[stage];
-  // TODO: allocate this vector only once, and replace spots for inputs
-  auto input_leaves = fmap(inputs, [](const std::shared_ptr<Variable>& v) {
-    return std::make_shared<Variable>(v->data, true, false);
+
+  // Validate inputs
+  auto num_inputs = inputs.size();
+  if (num_inputs != stage_closure.var_flags.size())
+    throw std::runtime_error("AutogradClosure received an incorrect number of inputs");
+  for (std::size_t i = 0; i < num_inputs; ++i) {
+    auto & input = inputs[i];
+    auto & flags = stage_closure.var_flags[i];
+    if (input.requires_grad() != flags.requires_grad || input.is_volatile() != flags.is_volatile)
+      throw std::runtime_error("AutogradClosure received inputs with different flags");
+  }
+
+  // TODO: we could run all this with volatile variables, but we need to somehow capture handles
+  // we should enable requires_grad only for the parts that need it
+  auto input_leaves = fmap(inputs, [](const Variable& v) {
+    return make_variable(v.data(), v.requires_grad(), v.is_volatile());
   });
   for (auto unique : desc->stages[stage].prev_stage_variables)
-    input_leaves.emplace_back(std::make_shared<Variable>(saved_vars.at(unique), true, false));
-  input_leaves.emplace_back(nullptr); // for ConstantFactory
+    input_leaves.emplace_back(make_variable(saved_vars.at(unique), true, false));
+  input_leaves.emplace_back(Variable()); // for ConstantFactory
 
   auto& engine = python::PythonEngine::getDefaultEngine();
   engine.execute(stage_closure.roots, input_leaves, true, pre_callbacks, post_callbacks);
 
   auto result = wrap_outputs(inputs, std::move(outputs), [this](FunctionFlags f) -> std::shared_ptr<Function> {
     if (this->stage == this->desc->stages.size() - 1) {
-      std::string msg = "JIT closure compiled only for";
-      msg += std::to_string(this->stage + 1);
+      std::string msg = "JIT closure compiled only for ";
+      msg += std::to_string(this->stage);
       msg += " backwards";
       return std::make_shared<Error>(std::move(msg), std::move(f));
     }
@@ -694,6 +730,15 @@ variable_list AutogradClosure::apply(const variable_list& inputs) {
     bw_fn->saved_handles = this->saved_handles;
     bw_fn->saved_handles.insert(std::make_move_iterator(this->captured_handles.begin()),
                                 std::make_move_iterator(this->captured_handles.end()));
+    // Patch next_functions to include prevous stage next_functions
+    for (auto copied_idx : this->desc->stages[this->stage + 1].copied_next_fns) {
+      bw_fn->next_functions.push_back(this->next_functions[copied_idx]);
+    }
+    // This is needed because of copied functions (even if all inputs of this stage
+    // didn't require grad, copied function can), and is always valid because we assert
+    // that flags are the same as when we compiled the closure (and the tracing Eval
+    // was run, so it must have been executable).
+    bw_fn->is_executable = true;
     return bw_fn;
   });
   captured_vars.clear();
@@ -702,8 +747,8 @@ variable_list AutogradClosure::apply(const variable_list& inputs) {
   return result;
 }
 
-AutogradClosureFactory::AutogradClosureFactory(Graph *graph)
-  : desc(std::make_shared<MultiStageClosure>(graph)) {}
+AutogradClosureFactory::AutogradClosureFactory(TracingState *state)
+  : desc(std::make_shared<MultiStageClosure>(state)) {}
 
 std::shared_ptr<Function> AutogradClosureFactory::construct() {
   return std::make_shared<AutogradClosure>(desc);

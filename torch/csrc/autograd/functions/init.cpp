@@ -247,9 +247,7 @@ static PyObject* accumulateGradVar(PyObject *_self, void* _unused)
 {
   THPCppFunction* self = (THPCppFunction*)_self;
   auto grad_acc = (AccumulateGrad*)self->cdata.get();
-  auto var = grad_acc->variable.lock();
-  if (!var) Py_RETURN_NONE;
-  return THPVariable_Wrap(var);
+  return THPVariable_Wrap(grad_acc->variable);
 }
 
 static struct PyGetSetDef accumulate_grad_properties[] = {
@@ -324,8 +322,7 @@ void initAutogradClosureBindings(PyObject* module) {
     ;
 
   m.def("_jit_createAutogradClosure", [](jit::tracer::TracingState* tracing_state) {
-    auto & graph = tracing_state->graph;
-    return std::make_shared<AutogradClosureFactory>(graph.get());
+    return std::make_shared<AutogradClosureFactory>(tracing_state);
   });
 }
 

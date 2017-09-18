@@ -1,6 +1,6 @@
 """
-The torch.toffee module contains functions to export models into the Toffee
-IR format.  These models can be loaded with the ToffeeIR library and then
+The torch.onnx module contains functions to export models into the ONNX
+IR format.  These models can be loaded with the ONNX library and then
 converted to models which run on other deep learning frameworks.
 """
 
@@ -15,11 +15,11 @@ from ._utils import _range
 
 def export(model, args, f, export_params=True, kwargs=None, verbose=False):
     """
-    Export a model into Toffee format.  This exporter runs your model
+    Export a model into ONNX format.  This exporter runs your model
     once in order to get a trace of its execution to be exported; at the
     moment, it does not support dynamic models (e.g., RNNs.)
 
-    See also: :ref:`toffee-export`
+    See also: :ref:`onnx-export`
 
     Arguments:
         model (torch.nn.Module): the model to be exported.
@@ -34,7 +34,10 @@ def export(model, args, f, export_params=True, kwargs=None, verbose=False):
             untrained model.
         kwargs (dict, optional): keyword inputs to the model.
     """
+    _export(model, args, f, export_params, kwargs, verbose)
 
+
+def _export(model, args, f, export_params=True, kwargs=None, verbose=False):
     # Special case for common case of passing a single Variable
     if isinstance(args, torch.autograd.Variable):
         args = (args, )
@@ -43,7 +46,9 @@ def export(model, args, f, export_params=True, kwargs=None, verbose=False):
     trace, torch_out = torch.jit.record_trace(model, *args, **kwargs)
     # TODO: Don't allocate a in-memory string for the protobuf
     if export_params:
-        proto = trace.export(model.state_dict().values(), verbose)
+        # NB: OrderedDict values is not actually a list, but trace.export is
+        # not duck-typed and expects an actual list.
+        proto = trace.export(list(model.state_dict().values()), verbose)
     else:
         proto = trace.export(verbose)
     torch.serialization._with_file_like(f, "wb", lambda f: f.write(proto))

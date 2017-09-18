@@ -1,21 +1,21 @@
-torch.toffee
+torch.onnx
 ============
-.. automodule:: torch.toffee
+.. automodule:: torch.onnx
 
 Example: End-to-end AlexNet from PyTorch to Caffe2
 --------------------------------------------------
 
 Here is a simple script which exports a pretrained AlexNet as defined in
-torchvision into Toffee IR.  It runs a single round of inference and then
+torchvision into ONNX.  It runs a single round of inference and then
 saves the resulting traced model to ``alexnet.proto``::
 
     from torch.autograd import Variable
-    import torch.toffee
+    import torch.onnx
     import torchvision
 
     dummy_input = Variable(torch.randn(10, 3, 224, 224)).cuda()
     model = torchvision.models.alexnet(pretrained=True).cuda()
-    torch.toffee.export(model, dummy_input, "alexnet.proto", verbose=True)
+    torch.onnx.export(model, dummy_input, "alexnet.proto", verbose=True)
 
 The resulting ``alexnet.proto`` is a binary protobuf file which contains both
 the network structure and parameters of the model you exported
@@ -50,29 +50,53 @@ exporter to print out a human-readable representation of the network::
       return (%58);
     }
 
-You can also verify and inspect the actual (substantially more verbose) protobuf
-using the `ToffeeIR <https://github.com/ProjectToffee/ToffeeIR/>`_ library::
+You can also verify the protobuf using the `onnx <https://github.com/onnx/onnx/>`_ library.
+You can install ``onnx`` with conda::
 
-    import toffee
+    conda install -c ezyang onnx
 
-    graph = toffee.load("alexnet.proto")
+Then, you can run::
+
+    import onnx
+
+    graph = onnx.load("alexnet.proto")
 
     # Check that the IR is well formed
-    toffee.checker.check_graph(graph)
+    onnx.checker.check_graph(graph)
 
-    # Print the IR
-    print(str(graph))
+    # Print a human readable representation of the graph
+    onnx.helper.printable_graph(graph)
 
-To run the exported script with Caffe2, you will need to install
-`caffe2 <https://caffe2.ai/>`_.  Once these are installed, you can use
-the backend for Caffe2::
+To run the exported script with `caffe2 <https://caffe2.ai/>`_, you will need three things:
+
+1. You'll need an install of Caffe2.  If you don't have one already,
+   you should make sure you have a Python 2 interpreter (Caffe2
+   doesn't officially support Python 3) and
+   `follow the install instructions <https://caffe2.ai/docs/getting-started.html>`_
+   (no Conda packaging for Caffe2 is available at the moment).
+
+2. You'll need `onnx-caffe2 <https://github.com/onnx/onnx-caffe2>`_, a
+   pure-Python library which provides a Caffe2 backend for ONNX.  You can install ``onnx-caffe2``
+   with conda or pip::
+
+      conda install -c ezyang onnx-caffe2
+      # OR
+      pip install onnx-caffe2
+
+Once these are installed, you can use the backend for Caffe2::
 
     # ...continuing from above
-    import toffee.backend.c2 as backend
+    import onnx_caffe2.backend as backend
     import numpy as np
 
-    (caffe2_proto, caffe2_workspace) = backend.prepare(graph, device="CUDA:0") # or "CPU"
-    outputs = backend.run((caffe2_proto, caffe2_workspace), np.rand(10, 3, 224, 224))
+    rep = backend.prepare(graph, device="CUDA:0") # or "CPU"
+    # For the Caffe2 backend:
+    #     rep.predict_net is the Caffe2 protobuf for the network
+    #     rep.workspace is the Caffe2 workspace for the network
+    #       (see the class onnx_caffe2.backend.Workspace)
+    outputs = rep.run(np.random.randn(10, 3, 224, 224).astype(np.float32))
+    # To run networks with more than one input, pass a tuple
+    # rather than a single numpy ndarray.
     print(outputs[0])
 
 In the future, there will be backends for other frameworks as well.
@@ -80,7 +104,7 @@ In the future, there will be backends for other frameworks as well.
 Limitations
 -----------
 
-* The Toffee exporter is a *trace-based* exporter, which means that it
+* The ONNX exporter is a *trace-based* exporter, which means that it
   operates by executing your model once, and exporting the operators which
   were actually run during this run.  This means that if your model is
   dynamic, e.g., changes behavior depending on input data, the export
@@ -103,6 +127,7 @@ Supported operators
 In this tech preview, only the following operators are supported:
 
 * Add (inplace is discarded)
+* Sub (inplace is discarded)
 * Mul (inplace is discarded)
 * Negate (inplace is discarded)
 * Addmm (inplace is discarded, alpha and beta must be 1)
@@ -115,8 +140,11 @@ In this tech preview, only the following operators are supported:
 * Squeeze (inplace is discarded)
 * BatchNorm
 * Convolution
+* Embedding (only optional argument that is supported is ``padding_idx``)
+* Slice (only integer indexing is supported)
 * Dropout (inplace is discarded)
 * Relu (inplace is discarded)
+* PReLU (inplace is discarded, sharing a single weight among all channels is not supported)
 * LeakyRelu (inplace is discarded)
 * MaxPool1d (ceil_mode must be False)
 * MaxPool2d (ceil_mode must be False
@@ -134,6 +162,7 @@ list.  The operator set above is sufficient to export the following models:
 * SqueezeNet
 * SuperResolution
 * VGG
+* `word_language_model <https://github.com/pytorch/examples/tree/master/word_language_model>`_
 
 The interface for specifying operator definitions is highly experimental
 and undocumented; adventurous users should note that the APIs will probably

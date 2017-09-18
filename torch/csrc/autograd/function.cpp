@@ -15,14 +15,14 @@ auto Function::flags(const variable_list& inputs) -> FunctionFlags {
   f.is_volatile = false;
   f.next_functions.resize(num_inputs);
   for (int i = 0; i != num_inputs; ++i) {
-    auto& var = inputs[i];
-    if (var) {
-      f.is_executable |= var->requires_grad;
-      f.is_volatile |= var->is_volatile;
-      if (var->grad_fn) {
-        f.next_functions[i] = std::make_pair<>(var->grad_fn, var->output_nr);
+    if (inputs[i].defined()) {
+      auto& var = inputs[i];
+      f.is_executable |= var.requires_grad();
+      f.is_volatile |= var.is_volatile();
+      if (var.grad_fn()) {
+        f.next_functions[i] = std::make_pair<>(var.grad_fn(), var.output_nr());
       } else {
-        f.next_functions[i] = std::make_pair<>(var->get_grad_accumulator(), 0);
+        f.next_functions[i] = std::make_pair<>(var.grad_accumulator(), 0);
       }
     }
   }
@@ -64,7 +64,7 @@ variable_list Function::tracedApply(variable_list inputs) {
   for (int i = 0; i < num_outputs; ++i) {
     auto& output = outputs[i];
     Node* sel = graph->appendNode(graph->createSelect(this_node, i));
-    sel->inferTypeFrom(output->data);
+    sel->inferTypeFrom(output.data());
     tracer::setValueTrace(state, output, sel);
   }
 

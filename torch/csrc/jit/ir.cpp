@@ -4,12 +4,16 @@
 #include "torch/csrc/utils/python_strings.h"
 #include "torch/csrc/autograd/function.h"
 
+#include "pybind11/pybind11.h"
+
 #include <iostream>
 #include <unordered_map>
 #include <unordered_set>
 #include <set>
 #include <stack>
 #include <sstream>
+
+namespace py = pybind11;
 
 namespace torch { namespace jit {
 
@@ -40,8 +44,42 @@ std::ostream& operator<<(std::ostream & out, const node_list & nodes) {
 }
 
 static std::ostream& operator<<(std::ostream & out, THPObjectPtr& obj) {
-   THPObjectPtr repr { PyObject_Repr(obj.get()) };
-   return out << THPUtils_unpackString(repr.get());
+  auto pyobj = py::handle(obj.get());
+  if (py::isinstance<py::tuple>(pyobj)) {
+    // This special-case for printing tuples handles a problem where
+    // str((2L, 3L)) outputs "(2L, 3L)" in Python 2 but "(2, 3)"
+    // in Python 3.  In order to suppress the L-suffix, we must
+    // manually print the string ourselves, calling str() on the
+    // sub-elements.
+    //
+    // This is a fairly fragile fix (What if you have nested tuples
+    // in tuples? What if you have dictionaries?) but it seems to hit
+    // the cases that are triggered in practice in onnx-pytorch.  Revisit
+    // this code if this is not the case.
+    //
+    // By the way, one non-solution for this problem is to monkeypatch
+    // tuple.__str__; this doesn't work because Python doesn't allow
+    // monkeypatching methods of built-in types.
+    auto pytuple = pyobj.cast<py::tuple>();
+    out << "(";
+    size_t i = 0;
+    for (auto& o : pytuple) {
+      if (i > 0) {
+        out << ", ";
+      }
+      THPObjectPtr str(py::str(o).release().ptr());
+      out << THPUtils_unpackString(str.get());
+      i++;
+    }
+    if (i == 1) {
+      out << ",";
+    }
+    out << ")";
+    return out;
+  } else {
+    THPObjectPtr str { PyObject_Str(obj.get()) };
+    return out << THPUtils_unpackString(str.get());
+  }
 }
 
 std::string PythonOp::name() {

@@ -852,8 +852,8 @@ void THNN_SpatialConvolutionLocal_updateOutput(
           int kW, int kH,
           int dW, int dH,
           int padW, int padH,
-          long inputWidth, long inputHeight,
-          long outputWidth, long outputHeight);
+          int64_t inputWidth, int64_t inputHeight,
+          int64_t outputWidth, int64_t outputHeight);
 ```
 ```C
 void THNN_SpatialConvolutionLocal_updateGradInput(
@@ -867,8 +867,8 @@ void THNN_SpatialConvolutionLocal_updateGradInput(
           int kW, int kH,
           int dW, int dH,
           int padW, int padH,
-          long inputWidth, long inputHeight,
-          long outputWidth, long outputHeight);
+          int64_t inputWidth, int64_t inputHeight,
+          int64_t outputWidth, int64_t outputHeight);
 ```
 ```C
 void THNN_SpatialConvolutionLocal_accGradParameters(
@@ -882,8 +882,8 @@ void THNN_SpatialConvolutionLocal_accGradParameters(
           int kW, int kH,
           int dW, int dH,
           int padW, int padH,
-          long inputWidth, long inputHeight,
-          long outputWidth, long outputHeight,
+          int64_t inputWidth, int64_t inputHeight,
+          int64_t outputWidth, int64_t outputHeight,
           real scale);
 ```
 ## SpatialConvolutionMM

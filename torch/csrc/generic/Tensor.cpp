@@ -166,13 +166,13 @@ THTensor* THPTensor_(fromNumpy)(PyObject *numpy_array) {
     auto ndim = PyArray_NDIM(array);
     size_t storage_size = 1;
     THLongStoragePtr sizes(THLongStorage_newWithSize(ndim));
-    long *sizes_data = sizes->data;
+    int64_t *sizes_data = sizes->data;
     for (int i = 0; i < ndim; ++i) {
       sizes_data[i] = PyArray_DIM(array, i);
     }
 
     THLongStoragePtr strides(THLongStorage_newWithSize(ndim));
-    long *strides_data = strides->data;
+    int64_t *strides_data = strides->data;
     long elsize = PyArray_ITEMSIZE(array);
     for (int i = 0; i < ndim; ++i) {
       // numpy uses bytes, torch uses elements
@@ -345,7 +345,7 @@ static PyObject * THPTensor_(pynew)(PyTypeObject *type, PyObject *args, PyObject
     PyErr_Clear();
 
     THLongStoragePtr sizes_storage(THLongStorage_newWithSize(sizes.size()));
-    long *sizes_data = sizes_storage->data;
+    int64_t *sizes_data = sizes_storage->data;
     for (auto size: sizes)
       *sizes_data++ = size;
     THTensorPtr tensor(THTensor_(newWithSize)(LIBRARY_STATE sizes_storage, NULL));
@@ -823,7 +823,7 @@ static bool THPTensor_(_convertToTensorIndexers)(
         if (!indexer) {
           PyErr_Format(PyExc_IndexError,
               "When performing advanced indexing the indexing objects must be LongTensors or "
-              "convertible to LongTensors. The indexing object at position %d is of type %s "
+              "convertible to LongTensors. The indexing object at position %zd is of type %s "
               "and cannot be converted", i, THPUtils_typename(obj));
 
           // Clean up Indexers
