@@ -72,7 +72,7 @@ struct Tensor {
   void reset(TensorImpl * rhs, bool retain) {
     Tensor(rhs, retain).swap(*this );
   }
-  TensorImpl * get() {
+  TensorImpl * get() const {
     return pImpl;
   }
   TensorImpl * detach() {
@@ -106,7 +106,7 @@ struct Tensor {
   Type & type() const {
     return pImpl->type();
   }
-  Tensor toType(Type & t) const {
+  Tensor toType(const Type & t) const {
     if(type().ID() ==t.ID())
       return *this;
     return t.copy(*this);
@@ -116,17 +116,17 @@ struct Tensor {
     type().copy(src,*this);
     return *this;
   }
-  Tensor toType(ScalarType t) {
+  Tensor toType(ScalarType t) const {
     return toType(type().toScalarType(t));
   }
-  Tensor toBackend(Backend b) {
+  Tensor toBackend(Backend b) const {
     return toType(type().toBackend(b));
   }
 
   template<typename T>
   T * data() const;
 
-  void * unsafeGetTH(bool retain) {
+  void * unsafeGetTH(bool retain) const {
     return pImpl->unsafeGetTH(retain);
   }
 
@@ -143,7 +143,7 @@ struct Tensor {
     return TensorAccessor<T,N>(data<T>(),sizes().data(),strides().data());
   }
 
-  Tensor operator-();
+  Tensor operator-() const;
   Tensor& operator+=(const Tensor & other);
   Tensor& operator+=(Scalar other);
   Tensor& operator-=(const Tensor & other);
@@ -152,7 +152,7 @@ struct Tensor {
   Tensor& operator*=(Scalar other);
   Tensor& operator/=(const Tensor & other);
   Tensor& operator/=(Scalar other);
-  Tensor operator[](int64_t idx);
+  Tensor operator[](int64_t idx) const;
 
   //example
   //Tensor * add(Tensor & b);

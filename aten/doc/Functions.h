@@ -591,6 +591,11 @@ static inline void SpatialDilatedConvolution_updateOutput(const Tensor & input, 
 static inline void SpatialDilatedConvolution_updateGradInput(const Tensor & input, const Tensor & gradOutput, const Tensor & gradInput, const Tensor & weight, const Tensor & gradColumns, int kW, int kH, int dW, int dH, int padW, int padH, int dilationW, int dilationH);
 static inline void SpatialDilatedConvolution_accGradParameters(const Tensor & input, const Tensor & gradOutput, const Tensor & gradWeight, const Tensor & gradBias, const Tensor & columns, const Tensor & ones, int kW, int kH, int dW, int dH, int padW, int padH, int dilationW, int dilationH, Scalar scale);
 static inline void SpatialDilatedConvolution_accGradParameters(const Tensor & input, const Tensor & gradOutput, const Tensor & gradWeight, const Tensor & columns, const Tensor & ones, int kW, int kH, int dW, int dH, int padW, int padH, int dilationW, int dilationH, Scalar scale);
+static inline void SpatialFullDilatedConvolution_updateOutput(const Tensor & input, const Tensor & output, const Tensor & weight, const Tensor & bias, const Tensor & columns, const Tensor & ones, int kW, int kH, int dW, int dH, int padW, int padH, int dilationW, int dilationH, int adjW, int adjH);
+static inline void SpatialFullDilatedConvolution_updateOutput(const Tensor & input, const Tensor & output, const Tensor & weight, const Tensor & columns, const Tensor & ones, int kW, int kH, int dW, int dH, int padW, int padH, int dilationW, int dilationH, int adjW, int adjH);
+static inline void SpatialFullDilatedConvolution_updateGradInput(const Tensor & input, const Tensor & gradOutput, const Tensor & gradInput, const Tensor & weight, const Tensor & gradColumns, int kW, int kH, int dW, int dH, int padW, int padH, int dilationW, int dilationH, int adjW, int adjH);
+static inline void SpatialFullDilatedConvolution_accGradParameters(const Tensor & input, const Tensor & gradOutput, const Tensor & gradWeight, const Tensor & gradBias, const Tensor & columns, const Tensor & ones, int kW, int kH, int dW, int dH, int padW, int padH, int dilationW, int dilationH, int adjW, int adjH, Scalar scale);
+static inline void SpatialFullDilatedConvolution_accGradParameters(const Tensor & input, const Tensor & gradOutput, const Tensor & gradWeight, const Tensor & columns, const Tensor & ones, int kW, int kH, int dW, int dH, int padW, int padH, int dilationW, int dilationH, int adjW, int adjH, Scalar scale);
 static inline void SpatialMaxPooling_updateOutput(const Tensor & input, const Tensor & output, const Tensor & indices, int kW, int kH, int dW, int dH, int padW, int padH, bool ceil_mode);
 static inline void SpatialMaxPooling_updateGradInput(const Tensor & input, const Tensor & gradOutput, const Tensor & gradInput, const Tensor & indices, int kW, int kH, int dW, int dH, int padW, int padH, bool ceil_mode);
 static inline void SpatialDilatedMaxPooling_updateOutput(const Tensor & input, const Tensor & output, const Tensor & indices, int kW, int kH, int dW, int dH, int padW, int padH, int dilationW, int dilationH, bool ceil_mode);
@@ -606,8 +611,8 @@ static inline void SpatialUpSamplingBilinear_updateOutput(const Tensor & input, 
 static inline void SpatialUpSamplingBilinear_updateGradInput(const Tensor & gradOutput, const Tensor & gradInput, int nbatch, int nchannels, int inputHeight, int inputWidth, int outputHeight, int outputWidth);
 static inline void SpatialGridSamplerBilinear_updateOutput(const Tensor & input, const Tensor & grid, const Tensor & output);
 static inline void SpatialGridSamplerBilinear_updateGradInput(const Tensor & input, const Tensor & gradInput, const Tensor & grid, const Tensor & gradGrid, const Tensor & gradOutput);
-static inline void VolumetricAveragePooling_updateOutput(const Tensor & input, const Tensor & output, int kT, int kW, int kH, int dT, int dW, int dH);
-static inline void VolumetricAveragePooling_updateGradInput(const Tensor & input, const Tensor & gradOutput, const Tensor & gradInput, int kT, int kW, int kH, int dT, int dW, int dH);
+static inline void VolumetricAveragePooling_updateOutput(const Tensor & input, const Tensor & output, int kT, int kW, int kH, int dT, int dW, int dH, int padT, int padW, int padH, bool ceil_mode, bool count_include_pad);
+static inline void VolumetricAveragePooling_updateGradInput(const Tensor & input, const Tensor & gradOutput, const Tensor & gradInput, int kT, int kW, int kH, int dT, int dW, int dH, int padT, int padW, int padH, bool ceil_mode, bool count_include_pad);
 static inline void VolumetricConvolution_updateOutput(const Tensor & input, const Tensor & output, const Tensor & weight, const Tensor & bias, const Tensor & finput, const Tensor & fgradInput, int dT, int dW, int dH, int pT, int pW, int pH);
 static inline void VolumetricConvolution_updateOutput(const Tensor & input, const Tensor & output, const Tensor & weight, const Tensor & finput, const Tensor & fgradInput, int dT, int dW, int dH, int pT, int pW, int pH);
 static inline void VolumetricConvolution_updateGradInput(const Tensor & input, const Tensor & gradOutput, const Tensor & gradInput, const Tensor & weight, const Tensor & finput, int dT, int dW, int dH, int pT, int pW, int pH);
@@ -630,6 +635,11 @@ static inline void VolumetricDilatedConvolution_updateOutput(const Tensor & inpu
 static inline void VolumetricDilatedConvolution_updateGradInput(const Tensor & input, const Tensor & gradOutput, const Tensor & gradInput, const Tensor & weight, const Tensor & gradColumns, int kT, int kW, int kH, int dT, int dW, int dH, int padT, int padW, int padH, int dilationT, int dilationW, int dilationH);
 static inline void VolumetricDilatedConvolution_accGradParameters(const Tensor & input, const Tensor & gradOutput, const Tensor & gradWeight, const Tensor & gradBias, const Tensor & columns, const Tensor & ones, int kT, int kW, int kH, int dT, int dW, int dH, int padT, int padW, int padH, int dilationT, int dilationW, int dilationH, Scalar scale);
 static inline void VolumetricDilatedConvolution_accGradParameters(const Tensor & input, const Tensor & gradOutput, const Tensor & gradWeight, const Tensor & columns, const Tensor & ones, int kT, int kW, int kH, int dT, int dW, int dH, int padT, int padW, int padH, int dilationT, int dilationW, int dilationH, Scalar scale);
+static inline void VolumetricFullDilatedConvolution_updateOutput(const Tensor & input, const Tensor & output, const Tensor & weight, const Tensor & bias, const Tensor & finput, const Tensor & fgradInput, int dT, int dW, int dH, int pT, int pW, int pH, int dilationT, int dilationW, int dilationH, int aT, int aW, int aH);
+static inline void VolumetricFullDilatedConvolution_updateOutput(const Tensor & input, const Tensor & output, const Tensor & weight, const Tensor & finput, const Tensor & fgradInput, int dT, int dW, int dH, int pT, int pW, int pH, int dilationT, int dilationW, int dilationH, int aT, int aW, int aH);
+static inline void VolumetricFullDilatedConvolution_updateGradInput(const Tensor & input, const Tensor & gradOutput, const Tensor & gradInput, const Tensor & weight, const Tensor & finput, const Tensor & fgradInput, int dT, int dW, int dH, int pT, int pW, int pH, int dilationT, int dilationW, int dilationH, int aT, int aW, int aH);
+static inline void VolumetricFullDilatedConvolution_accGradParameters(const Tensor & input, const Tensor & gradOutput, const Tensor & gradWeight, const Tensor & gradBias, const Tensor & finput, const Tensor & fgradInput, int dT, int dW, int dH, int pT, int pW, int pH, int dilationT, int dilationW, int dilationH, int aT, int aW, int aH, Scalar scale);
+static inline void VolumetricFullDilatedConvolution_accGradParameters(const Tensor & input, const Tensor & gradOutput, const Tensor & gradWeight, const Tensor & finput, const Tensor & fgradInput, int dT, int dW, int dH, int pT, int pW, int pH, int dilationT, int dilationW, int dilationH, int aT, int aW, int aH, Scalar scale);
 static inline void VolumetricMaxPooling_updateOutput(const Tensor & input, const Tensor & output, const Tensor & indices, int kT, int kW, int kH, int dT, int dW, int dH, int pT, int pW, int pH, bool ceilMode);
 static inline void VolumetricMaxPooling_updateGradInput(const Tensor & input, const Tensor & gradOutput, const Tensor & gradInput, const Tensor & indices, int kT, int kW, int kH, int dT, int dW, int dH, int pT, int pW, int pH, bool ceilMode);
 static inline void VolumetricDilatedMaxPooling_updateOutput(const Tensor & input, const Tensor & output, const Tensor & indices, int kT, int kW, int kH, int dT, int dW, int dH, int pT, int pW, int pH, int dilationT, int dilationW, int dilationH, bool ceilMode);
@@ -640,6 +650,8 @@ static inline void SpatialReflectionPadding_updateOutput(const Tensor & input, c
 static inline void SpatialReflectionPadding_updateGradInput(const Tensor & input, const Tensor & gradOutput, const Tensor & gradInput, int pad_l, int pad_r, int pad_t, int pad_b);
 static inline void SpatialReplicationPadding_updateOutput(const Tensor & input, const Tensor & output, int pad_l, int pad_r, int pad_t, int pad_b);
 static inline void SpatialReplicationPadding_updateGradInput(const Tensor & input, const Tensor & gradOutput, const Tensor & gradInput, int pad_l, int pad_r, int pad_t, int pad_b);
+static inline void FeatureLPPooling_updateOutput(const Tensor & input, const Tensor & output, Scalar power, int width, int stride, bool batchMode);
+static inline void FeatureLPPooling_updateGradInput(const Tensor & gradOutput, const Tensor & input, const Tensor & output, const Tensor & gradInput, Scalar power, int width, int stride, bool batchMode);
 static inline void VolumetricReplicationPadding_updateOutput(const Tensor & input, const Tensor & output, int pleft, int pright, int ptop, int pbottom, int pfront, int pback);
 static inline void VolumetricReplicationPadding_updateGradInput(const Tensor & input, const Tensor & gradOutput, const Tensor & gradInput, int pleft, int pright, int ptop, int pbottom, int pfront, int pback);
 static inline void VolumetricUpSamplingNearest_updateOutput(const Tensor & input, const Tensor & output, int scale_factor);
@@ -2384,6 +2396,21 @@ static inline void SpatialDilatedConvolution_accGradParameters(const Tensor & in
 static inline void SpatialDilatedConvolution_accGradParameters(const Tensor & input, const Tensor & gradOutput, const Tensor & gradWeight, const Tensor & columns, const Tensor & ones, int kW, int kH, int dW, int dH, int padW, int padH, int dilationW, int dilationH, Scalar scale) {
     return infer_type(input).SpatialDilatedConvolution_accGradParameters(input, gradOutput, gradWeight, columns, ones, kW, kH, dW, dH, padW, padH, dilationW, dilationH, scale);
 }
+static inline void SpatialFullDilatedConvolution_updateOutput(const Tensor & input, const Tensor & output, const Tensor & weight, const Tensor & bias, const Tensor & columns, const Tensor & ones, int kW, int kH, int dW, int dH, int padW, int padH, int dilationW, int dilationH, int adjW, int adjH) {
+    return infer_type(input).SpatialFullDilatedConvolution_updateOutput(input, output, weight, bias, columns, ones, kW, kH, dW, dH, padW, padH, dilationW, dilationH, adjW, adjH);
+}
+static inline void SpatialFullDilatedConvolution_updateOutput(const Tensor & input, const Tensor & output, const Tensor & weight, const Tensor & columns, const Tensor & ones, int kW, int kH, int dW, int dH, int padW, int padH, int dilationW, int dilationH, int adjW, int adjH) {
+    return infer_type(input).SpatialFullDilatedConvolution_updateOutput(input, output, weight, columns, ones, kW, kH, dW, dH, padW, padH, dilationW, dilationH, adjW, adjH);
+}
+static inline void SpatialFullDilatedConvolution_updateGradInput(const Tensor & input, const Tensor & gradOutput, const Tensor & gradInput, const Tensor & weight, const Tensor & gradColumns, int kW, int kH, int dW, int dH, int padW, int padH, int dilationW, int dilationH, int adjW, int adjH) {
+    return infer_type(input).SpatialFullDilatedConvolution_updateGradInput(input, gradOutput, gradInput, weight, gradColumns, kW, kH, dW, dH, padW, padH, dilationW, dilationH, adjW, adjH);
+}
+static inline void SpatialFullDilatedConvolution_accGradParameters(const Tensor & input, const Tensor & gradOutput, const Tensor & gradWeight, const Tensor & gradBias, const Tensor & columns, const Tensor & ones, int kW, int kH, int dW, int dH, int padW, int padH, int dilationW, int dilationH, int adjW, int adjH, Scalar scale) {
+    return infer_type(input).SpatialFullDilatedConvolution_accGradParameters(input, gradOutput, gradWeight, gradBias, columns, ones, kW, kH, dW, dH, padW, padH, dilationW, dilationH, adjW, adjH, scale);
+}
+static inline void SpatialFullDilatedConvolution_accGradParameters(const Tensor & input, const Tensor & gradOutput, const Tensor & gradWeight, const Tensor & columns, const Tensor & ones, int kW, int kH, int dW, int dH, int padW, int padH, int dilationW, int dilationH, int adjW, int adjH, Scalar scale) {
+    return infer_type(input).SpatialFullDilatedConvolution_accGradParameters(input, gradOutput, gradWeight, columns, ones, kW, kH, dW, dH, padW, padH, dilationW, dilationH, adjW, adjH, scale);
+}
 static inline void SpatialMaxPooling_updateOutput(const Tensor & input, const Tensor & output, const Tensor & indices, int kW, int kH, int dW, int dH, int padW, int padH, bool ceil_mode) {
     return infer_type(input).SpatialMaxPooling_updateOutput(input, output, indices, kW, kH, dW, dH, padW, padH, ceil_mode);
 }
@@ -2429,11 +2456,11 @@ static inline void SpatialGridSamplerBilinear_updateOutput(const Tensor & input,
 static inline void SpatialGridSamplerBilinear_updateGradInput(const Tensor & input, const Tensor & gradInput, const Tensor & grid, const Tensor & gradGrid, const Tensor & gradOutput) {
     return infer_type(input).SpatialGridSamplerBilinear_updateGradInput(input, gradInput, grid, gradGrid, gradOutput);
 }
-static inline void VolumetricAveragePooling_updateOutput(const Tensor & input, const Tensor & output, int kT, int kW, int kH, int dT, int dW, int dH) {
-    return infer_type(input).VolumetricAveragePooling_updateOutput(input, output, kT, kW, kH, dT, dW, dH);
+static inline void VolumetricAveragePooling_updateOutput(const Tensor & input, const Tensor & output, int kT, int kW, int kH, int dT, int dW, int dH, int padT, int padW, int padH, bool ceil_mode, bool count_include_pad) {
+    return infer_type(input).VolumetricAveragePooling_updateOutput(input, output, kT, kW, kH, dT, dW, dH, padT, padW, padH, ceil_mode, count_include_pad);
 }
-static inline void VolumetricAveragePooling_updateGradInput(const Tensor & input, const Tensor & gradOutput, const Tensor & gradInput, int kT, int kW, int kH, int dT, int dW, int dH) {
-    return infer_type(input).VolumetricAveragePooling_updateGradInput(input, gradOutput, gradInput, kT, kW, kH, dT, dW, dH);
+static inline void VolumetricAveragePooling_updateGradInput(const Tensor & input, const Tensor & gradOutput, const Tensor & gradInput, int kT, int kW, int kH, int dT, int dW, int dH, int padT, int padW, int padH, bool ceil_mode, bool count_include_pad) {
+    return infer_type(input).VolumetricAveragePooling_updateGradInput(input, gradOutput, gradInput, kT, kW, kH, dT, dW, dH, padT, padW, padH, ceil_mode, count_include_pad);
 }
 static inline void VolumetricConvolution_updateOutput(const Tensor & input, const Tensor & output, const Tensor & weight, const Tensor & bias, const Tensor & finput, const Tensor & fgradInput, int dT, int dW, int dH, int pT, int pW, int pH) {
     return infer_type(input).VolumetricConvolution_updateOutput(input, output, weight, bias, finput, fgradInput, dT, dW, dH, pT, pW, pH);
@@ -2501,6 +2528,21 @@ static inline void VolumetricDilatedConvolution_accGradParameters(const Tensor &
 static inline void VolumetricDilatedConvolution_accGradParameters(const Tensor & input, const Tensor & gradOutput, const Tensor & gradWeight, const Tensor & columns, const Tensor & ones, int kT, int kW, int kH, int dT, int dW, int dH, int padT, int padW, int padH, int dilationT, int dilationW, int dilationH, Scalar scale) {
     return infer_type(input).VolumetricDilatedConvolution_accGradParameters(input, gradOutput, gradWeight, columns, ones, kT, kW, kH, dT, dW, dH, padT, padW, padH, dilationT, dilationW, dilationH, scale);
 }
+static inline void VolumetricFullDilatedConvolution_updateOutput(const Tensor & input, const Tensor & output, const Tensor & weight, const Tensor & bias, const Tensor & finput, const Tensor & fgradInput, int dT, int dW, int dH, int pT, int pW, int pH, int dilationT, int dilationW, int dilationH, int aT, int aW, int aH) {
+    return infer_type(input).VolumetricFullDilatedConvolution_updateOutput(input, output, weight, bias, finput, fgradInput, dT, dW, dH, pT, pW, pH, dilationT, dilationW, dilationH, aT, aW, aH);
+}
+static inline void VolumetricFullDilatedConvolution_updateOutput(const Tensor & input, const Tensor & output, const Tensor & weight, const Tensor & finput, const Tensor & fgradInput, int dT, int dW, int dH, int pT, int pW, int pH, int dilationT, int dilationW, int dilationH, int aT, int aW, int aH) {
+    return infer_type(input).VolumetricFullDilatedConvolution_updateOutput(input, output, weight, finput, fgradInput, dT, dW, dH, pT, pW, pH, dilationT, dilationW, dilationH, aT, aW, aH);
+}
+static inline void VolumetricFullDilatedConvolution_updateGradInput(const Tensor & input, const Tensor & gradOutput, const Tensor & gradInput, const Tensor & weight, const Tensor & finput, const Tensor & fgradInput, int dT, int dW, int dH, int pT, int pW, int pH, int dilationT, int dilationW, int dilationH, int aT, int aW, int aH) {
+    return infer_type(input).VolumetricFullDilatedConvolution_updateGradInput(input, gradOutput, gradInput, weight, finput, fgradInput, dT, dW, dH, pT, pW, pH, dilationT, dilationW, dilationH, aT, aW, aH);
+}
+static inline void VolumetricFullDilatedConvolution_accGradParameters(const Tensor & input, const Tensor & gradOutput, const Tensor & gradWeight, const Tensor & gradBias, const Tensor & finput, const Tensor & fgradInput, int dT, int dW, int dH, int pT, int pW, int pH, int dilationT, int dilationW, int dilationH, int aT, int aW, int aH, Scalar scale) {
+    return infer_type(input).VolumetricFullDilatedConvolution_accGradParameters(input, gradOutput, gradWeight, gradBias, finput, fgradInput, dT, dW, dH, pT, pW, pH, dilationT, dilationW, dilationH, aT, aW, aH, scale);
+}
+static inline void VolumetricFullDilatedConvolution_accGradParameters(const Tensor & input, const Tensor & gradOutput, const Tensor & gradWeight, const Tensor & finput, const Tensor & fgradInput, int dT, int dW, int dH, int pT, int pW, int pH, int dilationT, int dilationW, int dilationH, int aT, int aW, int aH, Scalar scale) {
+    return infer_type(input).VolumetricFullDilatedConvolution_accGradParameters(input, gradOutput, gradWeight, finput, fgradInput, dT, dW, dH, pT, pW, pH, dilationT, dilationW, dilationH, aT, aW, aH, scale);
+}
 static inline void VolumetricMaxPooling_updateOutput(const Tensor & input, const Tensor & output, const Tensor & indices, int kT, int kW, int kH, int dT, int dW, int dH, int pT, int pW, int pH, bool ceilMode) {
     return infer_type(input).VolumetricMaxPooling_updateOutput(input, output, indices, kT, kW, kH, dT, dW, dH, pT, pW, pH, ceilMode);
 }
@@ -2530,6 +2572,12 @@ static inline void SpatialReplicationPadding_updateOutput(const Tensor & input, 
 }
 static inline void SpatialReplicationPadding_updateGradInput(const Tensor & input, const Tensor & gradOutput, const Tensor & gradInput, int pad_l, int pad_r, int pad_t, int pad_b) {
     return infer_type(input).SpatialReplicationPadding_updateGradInput(input, gradOutput, gradInput, pad_l, pad_r, pad_t, pad_b);
+}
+static inline void FeatureLPPooling_updateOutput(const Tensor & input, const Tensor & output, Scalar power, int width, int stride, bool batchMode) {
+    return infer_type(input).FeatureLPPooling_updateOutput(input, output, power, width, stride, batchMode);
+}
+static inline void FeatureLPPooling_updateGradInput(const Tensor & gradOutput, const Tensor & input, const Tensor & output, const Tensor & gradInput, Scalar power, int width, int stride, bool batchMode) {
+    return infer_type(gradOutput).FeatureLPPooling_updateGradInput(gradOutput, input, output, gradInput, power, width, stride, batchMode);
 }
 static inline void VolumetricReplicationPadding_updateOutput(const Tensor & input, const Tensor & output, int pleft, int pright, int ptop, int pbottom, int pfront, int pback) {
     return infer_type(input).VolumetricReplicationPadding_updateOutput(input, output, pleft, pright, ptop, pbottom, pfront, pback);
