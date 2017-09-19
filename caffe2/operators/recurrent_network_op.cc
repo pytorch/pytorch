@@ -9,7 +9,7 @@ CAFFE2_DEFINE_bool(
 namespace caffe2 {
 CAFFE_KNOWN_TYPE(detail::ScratchWorkspaces);
 
-REGISTER_CPU_OPERATOR(RecurrentNetwork, RecurrentNetworkOp<float, CPUContext>);
+REGISTER_CPU_OPERATOR(RecurrentNetwork, RecurrentNetworkOp<CPUContext>);
 OPERATOR_SCHEMA(RecurrentNetwork)
     .NumInputs(1, INT_MAX)
     .NumOutputs(2, INT_MAX)
@@ -36,12 +36,12 @@ See the usage examples for a flavor of how to use it.
 
 REGISTER_CPU_OPERATOR(
     RecurrentNetworkGradient,
-    RecurrentNetworkGradientOp<float, CPUContext>);
+    RecurrentNetworkGradientOp<CPUContext>);
 OPERATOR_SCHEMA(RecurrentNetworkGradient);
 
 REGISTER_CPU_OPERATOR(
     rnn_internal_accumulate_gradient_input,
-    AccumulateInputGradientOp<float, CPUContext>);
+    AccumulateInputGradientOp<CPUContext>);
 OPERATOR_SCHEMA(rnn_internal_accumulate_gradient_input)
     .NumInputs(3)
     .NumOutputs(1, INT_MAX)
@@ -51,7 +51,7 @@ OPERATOR_SCHEMA(rnn_internal_accumulate_gradient_input)
 
 REGISTER_CPU_OPERATOR(
     rnn_internal_apply_link,
-    RNNApplyLinkOp<float, CPUContext>);
+    RNNApplyLinkOp<CPUContext>);
 OPERATOR_SCHEMA(rnn_internal_apply_link)
     .NumInputs(2)
     .NumOutputs(2)
