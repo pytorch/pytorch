@@ -179,20 +179,10 @@ void THNN_(LookupTable_renorm)(
 
   pow_v<real, accreal> unary_pow(normType);
   thrust::plus<accreal> binary_plus;
-  // numel << stride, since idx usually contains sparse row indices
-  for (THCIndex_t i = 0; i < numel; i++)
-  {
-    THCIndex_t k = idx_ptr[i] - TH_INDEX_BASE;
-    thrust::device_ptr<real> row_ptr = weight_ptr + k * stride;
-    accreal norm = thrust::transform_reduce(row_ptr, row_ptr + stride,
-      unary_pow, (accreal)0, binary_plus);
-    norm = std::pow(norm, (accreal) (1.0 / normType));
-    if (norm > ScalarConvert<real, accreal>::to(maxNorm))
-    {
-      multiply_s<real> unary_mul(ScalarConvert<accreal, real>::to(maxNorm / (norm + 1e-7)));
-      thrust::transform(row_ptr, row_ptr + stride, row_ptr, unary_mul);
-    }
-  }
+
+  thrust::for_each(idx_ptr, end_ptr, 
+      renorm_functor<real, accreal>(weight_ptr, stride, maxNorm, normType, binary_plus, unary_pow));
+
 }
 
 #endif

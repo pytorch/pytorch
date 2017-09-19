@@ -1,10 +1,10 @@
 #include "THCUNN.h"
 #include "common.h"
-
 #include "THCThrustAllocator.cuh"
 #include <thrust/device_ptr.h>
 #include <thrust/execution_policy.h>
 #include <thrust/iterator/constant_iterator.h>
+#include <thrust/iterator/zip_iterator.h>
 #include <thrust/transform_reduce.h>
 #if CUDA_VERSION >= 7000
 #include <thrust/system/cuda/execution_policy.h>
@@ -193,5 +193,39 @@ struct multiply_s
   }
 };
 
+template <typename Dtype, typename Acctype>
+struct renorm_functor
+{
+  thrust::device_ptr<Dtype> weight_ptr;
+  int64_t stride;
+  Dtype maxNorm;
+  Dtype normType;
+  thrust::plus<Acctype> binary_plus;
+  pow_v<Dtype, Acctype> unary_pow;
+
+  renorm_functor(
+      thrust::device_ptr<Dtype> w, int64_t s, Dtype m, Dtype n, 
+      thrust::plus<Acctype> bp, pow_v<Dtype, Acctype> up
+  ) : weight_ptr(w), stride(s), maxNorm(m), normType(n), 
+      binary_plus(bp), unary_pow(up) {}
+
+  #pragma hd_warning_disable
+  __host__ __device__
+  void operator()(const THCIndex_t idx)
+  {
+    THCIndex_t k  = idx - TH_INDEX_BASE;
+    thrust::device_ptr<Dtype> row_ptr = weight_ptr + k * stride;
+    Acctype norm = thrust::transform_reduce(thrust::device, row_ptr, row_ptr + stride,
+      unary_pow, (Acctype) 0, binary_plus);
+    norm = std::pow(norm, (Acctype) (1.0 / normType));
+    if (norm > ScalarConvert<Dtype, Acctype>::to(maxNorm))
+    {
+      multiply_s<Dtype> unary_mul(ScalarConvert<Acctype, Dtype>::to(maxNorm / (norm + 1e-7)));
+      thrust::transform(thrust::device, row_ptr, row_ptr + stride, row_ptr, unary_mul);
+    }
+  }
+};
+
 #include "generic/LookupTable.cu"
 #include "THCGenerateFloatTypes.h"
+
