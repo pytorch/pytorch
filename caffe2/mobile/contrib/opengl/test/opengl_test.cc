@@ -8,6 +8,7 @@
 #include "../core/ImageAllocator.h"
 #include "../core/arm_neon_support.h"
 #include "../core/rewrite_net.h"
+#include "../operators/gl_tiling_utils.h"
 
 #include "caffe2/core/logging.h"
 #include "caffe2/core/operator.h"
@@ -798,8 +799,7 @@ void testOpenGLSub(int N, int C, int H, int W, float error = 0.1) {
   checkError(t2, t1, error);
 }
 
-void testOpenGLConcat(
-    int N, std::vector<int> Cs, int H, int W, int batch_size = 1, float error = 0.1) {
+void testOpenGLConcat(int N, std::vector<int> Cs, int H, int W, bool tiling = false, float error = 0.1) {
   LOG(INFO) << "OpenGL Concat Test "
             << "H: " << H << ", W: " << W;
   Workspace ws;
@@ -817,6 +817,21 @@ void testOpenGLConcat(
     op.set_type("CopyToOpenGL");
     op.add_input("X_cpu" + caffe2::to_string(i));
     op.add_output("X_gl" + caffe2::to_string(i));
+    if (tiling) {
+      int tile_x = 1, tile_y = 1;
+      computeOutputTiles(Cs[i], tile_x, tile_y);
+      printf("Cs[i] = %d, tile_x = %d, tile_y = %d\n", Cs[i], tile_x, tile_y);
+      {
+        auto& arg = *(op.add_arg());
+        arg.set_name("tile_x");
+        arg.set_i(tile_x);
+      }
+      {
+        auto& arg = *(op.add_arg());
+        arg.set_name("tile_y");
+        arg.set_i(tile_y);
+      }
+    }
   }
 
   {
@@ -824,11 +839,6 @@ void testOpenGLConcat(
     op.set_type("OpenGLConcat");
     for (int i = 0; i < Cs.size(); i++) {
       op.add_input("X_gl" + caffe2::to_string(i));
-    }
-    {
-      auto& arg = *(op.add_arg());
-      arg.set_name("batch_size");
-      arg.set_i(batch_size);
     }
     {
       auto& arg = *(op.add_arg());
@@ -2364,8 +2374,6 @@ void testGLTextureTypes() {
   gl_log(GL_LOG, "...done with %s\n", __PRETTY_FUNCTION__);
 }
 
-void squareFactors(int N, int& r1, int& r2);
-
 void testOpenGL() {
   {
     // Test a bunch of different tiled convolutions
@@ -2737,6 +2745,9 @@ void testOpenGL() {
     testOpenGLConcat(1, std::vector<int>{8, 4, 12}, 16, 16);
     testOpenGLConcat(1, std::vector<int>{12, 16, 8}, 16, 16);
     testOpenGLConcat(1, std::vector<int>{60, 24, 36}, 16, 16);
+
+    testOpenGLConcat(1, std::vector<int>{12, 16, 8}, 16, 16, true);
+    testOpenGLConcat(1, std::vector<int>{60, 24, 36}, 16, 16, true);
 
     LOG(INFO) << "Test OpenGL Softmax";
     testOpenGLSoftmax(1, 100, 0.1);
