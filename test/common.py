@@ -292,7 +292,7 @@ class TestCase(unittest.TestCase):
         If you call this multiple times in a single function, you must
         give a unique subname each time.
         """
-        if not isinstance(s, str):
+        if not (isinstance(s, str) or (sys.version_info[0] == 2 and isinstance(s, unicode))):
             raise TypeError("assertExpected is strings only")
 
         def remove_prefix(text, prefix):
