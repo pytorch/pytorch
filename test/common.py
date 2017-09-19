@@ -278,6 +278,7 @@ class TestCase(unittest.TestCase):
             callable(*args, **kwargs)
         except exc_type as e:
             self.assertExpected(str(e), subname)
+            return
         # Don't put this in the try block; the AssertionError will catch it
         self.fail(msg="Did not raise when expected to")
 
