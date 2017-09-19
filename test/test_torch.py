@@ -93,20 +93,8 @@ class TestTorch(TestCase):
     def test_sqrt(self):
         self._testMath(torch.sqrt, lambda x: math.sqrt(x) if x > 0 else float('nan'))
 
-    def test_exp(self):
-        self._testMathByName('exp')
-
     def test_erf(self):
         self._testMathByName('erf')
-
-    def test_floor(self):
-        self._testMathByName('floor')
-
-    def test_ceil(self):
-        self._testMathByName('ceil')
-
-    def test_rsqrt(self):
-        self._testMath(torch.rsqrt, lambda x: 1 / math.sqrt(x) if x > 0 else float('nan'))
 
     def test_erfinv(self):
         def checkType(tensor):
@@ -119,6 +107,18 @@ class TestTorch(TestCase):
 
         checkType(torch.FloatTensor)
         checkType(torch.DoubleTensor)
+
+    def test_exp(self):
+        self._testMathByName('exp')
+
+    def test_floor(self):
+        self._testMathByName('floor')
+
+    def test_ceil(self):
+        self._testMathByName('ceil')
+
+    def test_rsqrt(self):
+        self._testMath(torch.rsqrt, lambda x: 1 / math.sqrt(x) if x > 0 else float('nan'))
 
     def test_sigmoid(self):
         # TODO: why not simulate math.sigmoid like with rsqrt?
