@@ -464,7 +464,7 @@ void Graph::lint() const {
   }
 }
 
-void Graph::dump() const {
+void Graph::dump() {
   std::cout << *this << "\n";
 }
 

@@ -165,6 +165,11 @@ struct GraphFuser {
     topological_index[n] = topological_index[after];
   }
 
+  void insertAt(Node ** insertion_point, Node * n) {
+    insertAfter(n, *insertion_point);
+    *insertion_point = n;
+  }
+
   Node * fuse(Node * consumer, Node * producer) {
     auto group = consumer;
     if(group->kind() != kFusionGroup) {
@@ -238,7 +243,7 @@ struct GraphFuser {
 
     // Make sure we lay out the nodes in the correct topological order.
     // TODO: There should be some more enshrined way to do this
-    Node *last_node = chunk;
+    Node * insertion_point = chunk;
 
     // apply chunk to each of op's operands
     // chunked_inputs[input_nr][chunk_output_idx]
@@ -253,8 +258,7 @@ struct GraphFuser {
       input_chunk->setType(multiType());
       input_chunk->copyAttributes(*chunk);
       input_chunk->addInput(input);
-      insertAfter(input_chunk, last_node);
-      last_node = input_chunk;
+      insertAt(&insertion_point, input_chunk);
       // TODO: Make this go away when we make helper function for
       // setting up Selects.
       size_t i = 0;
@@ -265,18 +269,14 @@ struct GraphFuser {
           input_chunk_sel->setType(
             input_type->withSizesStrides(chunk_sel_type->sizes(),
                                          chunk_sel_type->strides()));
-          insertAfter(input_chunk_sel, last_node);
-          last_node = input_chunk_sel;
+          insertAt(&insertion_point, input_chunk_sel);
           chunked_inputs.back().push_back(input_chunk_sel);
       }
     }
 
     // apply the op to each chunk of the chunked operands,
     // and then rewrite the graph to use them!
-    // NB: as we replace/remove the selects the use list changes, so copy it first
-    auto chunk_outputs = chunk->outputs();
     for (auto chunk_sel : chunk->outputs()) {
-      auto chunk_sel_type = chunk_sel->type()->cast<TensorType>();
       Node * chunked_op = graph->create(producer_for_chunk->kind());
       chunked_op->copyAttributes(*producer_for_chunk);
       // Invariant: mappable operators always produce contiguous output
@@ -284,8 +284,7 @@ struct GraphFuser {
       for (auto by_chunk_output_idx : chunked_inputs) {
         chunked_op->addInput(by_chunk_output_idx.at(chunk_sel->offset()));
       }
-      insertAfter(chunked_op, last_node);
-      last_node = chunked_op;
+      insertAt(&insertion_point, chunked_op);
       chunk_sel->replaceAllUsesWith(chunked_op);
       // NB: Temporarily breaking the Select invariant as we clean up
       chunk_sel->destroy();
