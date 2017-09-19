@@ -87,6 +87,8 @@ Pointwise Ops
 .. autofunction:: cos
 .. autofunction:: cosh
 .. autofunction:: div
+.. autofunction:: erf
+.. autofunction:: erfinv
 .. autofunction:: exp
 .. autofunction:: floor
 .. autofunction:: fmod
@@ -109,8 +111,6 @@ Pointwise Ops
 .. autofunction:: tan
 .. autofunction:: tanh
 .. autofunction:: trunc
-.. autofunction:: erf
-.. autofunction:: erfinv
 
 
 Reduction Ops

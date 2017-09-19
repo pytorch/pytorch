@@ -1295,6 +1295,32 @@ Example::
     True
 """)
 
+# TODO: check the outputs in the example
+add_docstr(torch._C.erf,
+           """
+erf(tensor, out=None) -> Tensor
+
+Computes the error function of each element.
+
+Example::
+
+    >>> torch.erf(torch.Tensor([0, -1., 10.]))
+    torch.FloatTensor([0., -0.8427, 1.])
+""")
+
+# TODO: check the outputs in the example
+add_docstr(torch._C.erfinv,
+           """
+erfinv(tensor, out=None) -> Tensor
+
+Computes the inverse error function of each element.
+
+Example::
+
+    >>> torch.erfinv(torch.Tensor([0, 0.5., -1.]))
+    torch.FloatTensor([0., 0.4769, inf])
+""")
+
 add_docstr(torch._C.exp,
            """
 exp(tensor, out=None) -> Tensor
