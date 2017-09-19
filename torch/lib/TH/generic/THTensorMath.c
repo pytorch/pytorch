@@ -642,6 +642,16 @@ void THTensor_(sub)(THTensor *r_, THTensor *t, real value)
   THTensor_(add)(r_, t, -value);
 }
 
+void THTensor_(add_scaled)(THTensor *r_, THTensor *t, real value, real alpha)
+{
+  THTensor_(add)(r_, t, value * alpha);
+}
+
+void THTensor_(sub_scaled)(THTensor *r_, THTensor *t, real value, real alpha)
+{
+  THTensor_(add)(r_, t, -value * alpha);
+}
+
 void THTensor_(mul)(THTensor *r_, THTensor *t, real value)
 {
   THTensor_(resizeAs)(r_, t);
@@ -888,7 +898,7 @@ void THTensor_(cadd)(THTensor *r_, THTensor *t, real value, THTensor *src)
   }
 }
 
-void THTensor_(csub)(THTensor *r_, THTensor *t, real value,THTensor *src)
+void THTensor_(csub)(THTensor *r_, THTensor *t, real value, THTensor *src)
 {
   THTensor_(cadd)(r_, t, -value, src);
 }
