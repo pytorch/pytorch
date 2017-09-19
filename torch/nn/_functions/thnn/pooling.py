@@ -418,7 +418,7 @@ class AvgPool2d(Function):
                           .is_("kernel_shape", [kernel_size] * 2)
                           .is_("strides", [stride] * 2)
                           .is_("pads", [padding] * 4))
-        return (n, None)
+        return n
 
     @staticmethod
     def forward(ctx, input, kernel_size, stride=None, padding=0,
