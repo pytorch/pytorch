@@ -18,54 +18,54 @@
  */
  template <typename T>
 __global__ void adaptiveaveragepool(T *input, T *output,
-                        int input_n, int input_h, int input_w,
-                        int output_h, int output_w,
-                        int strideh, int stridew,
-                        int strided)
+                        int sizeD, int isizeH, int isizeW,
+                        int osizeH, int osizeW,
+                        int istrideH, int istrideW,
+                        int istrideD)
 {
   // iterators
-  int xx, yy;
+  int ow, oh;
 
   // compute offsets based on thread/block ID
-  int o = blockIdx.x;
-  int i = o;
-  //int k = blockIdx.x % input_n;
+  int o_plane = blockIdx.x;
+  int i_plane = o_plane;
+  //int k = blockIdx.x % sizeD;
 
-  int xx_start = threadIdx.x;
-  int xx_end = output_w;
-  const int xx_step = blockDim.x;
+  int ostartW = threadIdx.x;
+  int oendW = osizeW;
+  const int ostepW = blockDim.x;
 
-  int yy_start = blockDim.y*blockIdx.y + threadIdx.y;
-  int yy_end = output_h;
-  const int yy_step = blockDim.y*gridDim.y;
+  int ostartH = blockDim.y*blockIdx.y + threadIdx.y;
+  int oendH = osizeH;
+  const int ostepH = blockDim.y*gridDim.y;
   // select input/output plane
-  output = output + o*output_w*output_h;
-  input = input + i*strided;
+  output = output + o_plane*osizeW*osizeH;
+  input = input + i_plane*istrideD;
 
   // For all output pixels...
-  for(yy = yy_start; yy < yy_end; yy+=yy_step) {
+  for(oh = ostartH; oh < oendH; oh+=ostepH) {
 
-    int y_start = START_IND(yy, output_h, input_h);
-    int y_end   = END_IND(yy, output_h, input_h);
-    int kH = y_end-y_start;
+    int istartH = START_IND(oh, osizeH, isizeH);
+    int iendH   = END_IND(oh, osizeH, isizeH);
+    int kH = iendH-istartH;
 
-    for(xx = xx_start; xx < xx_end; xx+=xx_step) {
+    for(ow = ostartW; ow < oendW; ow+=ostepW) {
 
-      int x_start = START_IND(xx, output_w, input_w);
-      int x_end   = END_IND(xx, output_w, input_w);
-      int kW = x_end-x_start;
+      int istartW = START_IND(ow, osizeW, isizeW);
+      int iendW   = END_IND(ow, osizeW, isizeW);
+      int kW = iendW-istartW;
 
       // Compute the average pooling
-      T *ptr_input = input + y_start*strideh + x_start*stridew;
-      T *ptr_output = output + yy*output_w + xx;
+      T *ptr_input = input + istartH*istrideH + istartW*istrideW;
+      T *ptr_output = output + oh*osizeW + ow;
       T sum = ScalarConvert<int, T>::to(0);
-      int kx, ky;
-      for(ky = 0; ky < kH; ++ky) {
-        for(kx = 0; kx < kW; ++kx) {
-          T val = ptr_input[kx*stridew];
+      int iw, ih;
+      for(ih = 0; ih < kH; ++ih) {
+        for(iw = 0; iw < kW; ++iw) {
+          T val = ptr_input[iw*istrideW];
           sum += val;
         }
-        ptr_input += strideh; // next input line
+        ptr_input += istrideH; // next input line
       }
       // Update output
       *ptr_output = sum / kH / kW;
@@ -80,54 +80,54 @@ __global__ void adaptiveaveragepool(T *input, T *output,
  template <typename T>
 __global__ void adaptiveaveragegradinput(
   T *gradInput, T *gradOutput,
-  int input_n, int input_h, int input_w, int output_h, int output_w
+  int sizeD, int isizeH, int isizeW, int osizeH, int osizeW
 )
 {
   // iterators
-  int x, y;
+  int iw, ih;
 
   // compute offsets based on thread/block ID
-  int o = blockIdx.x;
-  int i = o;
+  int o_plane = blockIdx.x;
+  int i_plane = o_plane;
 
-  int x_start = threadIdx.x;
-  int x_end = input_w;
-  int x_step = blockDim.x;
+  int istartW = threadIdx.x;
+  int iendW = isizeW;
+  int istepW = blockDim.x;
 
-  int y_start = blockDim.y*blockIdx.y + threadIdx.y;
-  int y_end = input_h;
-  int y_step = blockDim.y*gridDim.y;
+  int istartH = blockDim.y*blockIdx.y + threadIdx.y;
+  int iendH = isizeH;
+  int istepH = blockDim.y*gridDim.y;
 
   // select input/output plane
-  gradOutput = gradOutput + o*output_w*output_h;
-  gradInput = gradInput + i*input_w*input_h;
+  gradOutput = gradOutput + o_plane*osizeW*osizeH;
+  gradInput = gradInput + i_plane*isizeW*isizeH;
 
   // compute gradInput
-  for(y = y_start; y < y_end; y+=y_step) {
+  for(ih = istartH; ih < iendH; ih+=istepH) {
 
-    int yy_start = START_IND(y, input_h, output_h);
-    int yy_end   = END_IND(y, input_h, output_h);
-    int kH = yy_end-yy_start;
+    int ostartH = START_IND(ih, isizeH, osizeH);
+    int oendH   = END_IND(ih, isizeH, osizeH);
+    int kH = oendH-ostartH;
 
-    for(x = x_start; x < x_end; x+=x_step) {
+    for(iw = istartW; iw < iendW; iw+=istepW) {
 
-      int xx_start = START_IND(x, input_w, output_w);
-      int xx_end   = END_IND(x, input_w, output_w);
-      int kW = xx_end-xx_start;
+      int ostartW = START_IND(iw, isizeW, osizeW);
+      int oendW   = END_IND(iw, isizeW, osizeW);
+      int kW = oendW-ostartW;
 
       // Compute the gradients
-      T *ptr_gradInput = gradInput + y*input_w + x;
-      T *ptr_gradOutput = gradOutput + yy_start*output_w + xx_start;
-      
-      int kx, ky;
-      for(ky = 0; ky < kH; ++ky) {
-        int yy = yy_start + ky;
-        int kkH = START_IND(yy, output_h, input_h) - END_IND(yy, output_h, input_h);
-        for(kx = 0; kx < kW; ++kx) {
-          int xx = xx_start + kx;
-          int kkW = START_IND(xx, output_w, input_w) - END_IND(xx, output_w, input_w);
-          T z = ptr_gradOutput[kx + ky*output_w] / kkW / kkH;
-          *ptr_gradInput += z;
+      T *ptr_gradInput = gradInput + ih*isizeW + iw;
+      T *ptr_gradOutput = gradOutput + ostartH*osizeW + ostartW;
+
+      int ow, oh;
+      for(oh = 0; oh < kH; ++oh) {
+        int orealH = ostartH + oh;
+        int kkH = START_IND(orealH, osizeH, isizeH) - END_IND(orealH, osizeH, isizeH);
+        for(ow = 0; ow < kW; ++ow) {
+          int orealW = ostartW + ow;
+          int kkW = START_IND(orealW, osizeW, isizeW) - END_IND(orealW, osizeW, isizeW);
+          T grad_delta = ptr_gradOutput[ow + oh*osizeW] / kkW / kkH;
+          *ptr_gradInput += grad_delta;
         }
       }
     }
@@ -142,50 +142,50 @@ __global__ void adaptiveaveragegradinput(
  template <typename T>
 __global__ void atomicadaptiveaveragegradinput(
   T *gradInput, T *gradOutput,
-  int input_n, int input_h, int input_w, int output_h, int output_w
+  int sizeD, int isizeH, int isizeW, int osizeH, int osizeW
 )
 {
   // iterators
-  int xx, yy;
+  int ow, oh;
 
   // compute offsets based on thread/block ID
-  int o = blockIdx.x;
-  int i = o;
+  int o_plane = blockIdx.x;
+  int i_plane = o_plane;
 
-  int xx_start = threadIdx.x;
-  int xx_end = output_w;
-  int xx_step = blockDim.x;
+  int ostartW = threadIdx.x;
+  int oendW = osizeW;
+  int ostepW = blockDim.x;
 
-  int yy_start = blockDim.y*blockIdx.y + threadIdx.y;
-  int yy_end = output_h;
-  int yy_step = blockDim.y*gridDim.y;
+  int ostartH = blockDim.y*blockIdx.y + threadIdx.y;
+  int oendH = osizeH;
+  int ostepH = blockDim.y*gridDim.y;
 
   // select input/output plane
-  gradOutput = gradOutput + o*output_w*output_h;
-  gradInput = gradInput + i*input_w*input_h;
+  gradOutput = gradOutput + o_plane*osizeW*osizeH;
+  gradInput = gradInput + i_plane*isizeW*isizeH;
 
   // compute gradInput
-  for(yy = yy_start; yy < yy_end; yy+=yy_step) {
+  for(oh = ostartH; oh < oendH; oh+=ostepH) {
 
-    int y_start = START_IND(yy, output_h, input_h);
-    int y_end   = END_IND(yy, output_h, input_h);
-    int kH = y_end-y_start;
+    int istartH = START_IND(oh, osizeH, isizeH);
+    int iendH   = END_IND(oh, osizeH, isizeH);
+    int kH = iendH-istartH;
 
-    for(xx = xx_start; xx < xx_end; xx+=xx_step) {
+    for(ow = ostartW; ow < oendW; ow+=ostepW) {
 
-      int x_start = START_IND(xx, output_w, input_w);
-      int x_end   = END_IND(xx, output_w, input_w);
-      int kW = x_end-x_start;
+      int istartW = START_IND(ow, osizeW, isizeW);
+      int iendW   = END_IND(ow, osizeW, isizeW);
+      int kW = iendW-istartW;
 
       // Compute the gradients
-      T *ptr_gradInput = gradInput + y_start*input_w + x_start;
-      T *ptr_gradOutput = gradOutput + yy*output_w + xx;
-      T z = *ptr_gradOutput / kW / kH;
-      int kx, ky;
-      for(ky = 0; ky < kH; ++ky) {
-        for(kx = 0; kx < kW; ++kx) {
+      T *ptr_gradInput = gradInput + istartH*isizeW + istartW;
+      T *ptr_gradOutput = gradOutput + oh*osizeW + ow;
+      T grad_delta = *ptr_gradOutput / kW / kH;
+      int iw, ih;
+      for(ih = 0; ih < kH; ++ih) {
+        for(iw = 0; iw < kW; ++iw) {
           // atomic add since different threads could update same variable
-          atomicAdd(&(ptr_gradInput[kx + ky*input_w]), z);
+          atomicAdd(&(ptr_gradInput[iw + ih*isizeW]), grad_delta);
         }
       }
     }
