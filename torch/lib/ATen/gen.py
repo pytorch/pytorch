@@ -1,5 +1,6 @@
 from optparse import OptionParser
 import yaml
+import platform
 
 import cwrap_parser
 import nn_parse
@@ -66,6 +67,12 @@ if not options.no_cuda:
     backends.append('CUDA')
 
 densities = ['Dense', 'Sparse']
+
+long_name = None
+if platform.system() != 'Windows':
+    long_name = 'long'
+else:
+    long_name = 'long long'
 
 scalar_types = [
     ('Byte', 'uint8_t', 'Long', 'uint8_t'),

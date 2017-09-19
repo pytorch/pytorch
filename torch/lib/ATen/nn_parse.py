@@ -3,7 +3,7 @@ import common_with_cwrap
 from collections import OrderedDict
 
 TYPE_TRANSLATIONS = {
-    'THIndex_t': 'long',
+    'THIndex_t': 'int64_t',
     'THCTensor*': 'THTensor*',
 }
 

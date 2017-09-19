@@ -38,7 +38,7 @@ class StandaloneExtension(CWrapPlugin):
         'float': Template('THPFloatUtils_unpackReal($arg)'),
         'double': Template('THPDoubleUtils_unpackReal($arg)'),
         'bool': Template('($arg == Py_True ? true : false)'),
-        'int': Template('THPUtils_unpackLong($arg)'),
+        'int': Template('(int) THPUtils_unpackLong($arg)'),
         'long': Template('THPUtils_unpackLong($arg)'),
         'int64_t': Template('THPUtils_unpackLong($arg)'),
         'void*': Template('(void*)THPUtils_unpackLong($arg)'),
@@ -69,7 +69,7 @@ class StandaloneExtension(CWrapPlugin):
 PyObject * $name(PyObject *_unused, PyObject *args)
 {
   HANDLE_TH_ERRORS
-  int __argcount = args ? PyTuple_Size(args) : 0;
+  int __argcount = args ? (int) PyTuple_Size(args) : 0;
     $options
   } else {
     THPUtils_invalidArguments(args, NULL, "$name", 1, $expected_args);

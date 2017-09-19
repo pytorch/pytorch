@@ -9,7 +9,7 @@ class CuDNNPlugin(CWrapPlugin):
 
     TYPE_UNPACK = {
         'THTensor*': Template('((THPVoidTensor*)$arg)->cdata'),
-        'int': Template('THPUtils_unpackLong($arg)'),
+        'int': Template('(int) THPUtils_unpackLong($arg)'),
         'std::vector<int>': Template('THPUtils_unpackIntTuple($arg)'),
         'cudnnDataType_t': Template('$arg'),
         'cudnnHandle_t': Template('$arg'),
