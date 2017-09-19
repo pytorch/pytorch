@@ -621,7 +621,7 @@ public:
   // Checks well-formedness and invariants of graph
   void lint() const;
   // for use in debugger
-  void dump() const;
+  void dump();
 
   ~Graph() {
     for (const Node * n : all_nodes)
