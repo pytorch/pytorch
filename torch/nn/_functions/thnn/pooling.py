@@ -415,9 +415,9 @@ class AvgPool2d(Function):
             raise RuntimeError("ceil_mode not supported in AvgPool2d")
         stride = stride or kernel_size
         n = g.appendNode(g.create("AveragePool", [input])
-                          .is_("kernel_shape", [kernel_size] * 2)
-                          .is_("strides", [stride] * 2)
-                          .is_("pads", [padding] * 4))
+                          .is_("kernel_shape", _pair(kernel_size))
+                          .is_("strides", _pair(stride))
+                          .is_("pads", _pair(padding)))
         return n
 
     @staticmethod
