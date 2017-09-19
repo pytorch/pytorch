@@ -78,6 +78,9 @@ std::unordered_map<std::string, std::unique_ptr<NCCLContext>>& gContexts() {
 
 std::string ncclKey(const NCCLExecution& ex) {
   std::string result;
+  int curr_device;
+  CUDA_CHECK(cudaGetDevice(&curr_device));
+  result += to_string(curr_device) + ":";
   for (const auto& el : ex.elements) {
     result += to_string(el.device) + ",";
   }
