@@ -3833,6 +3833,8 @@ class TestTorch(TestCase):
         for use_name in (False, True):
             with tempfile.NamedTemporaryFile() as f:
                 handle = f if not use_name else f.name
+                if sys.platform == 'win32' and use_name:
+                    handle = tempfile.mktemp()
                 torch.save(b, handle)
                 f.seek(0)
                 c = torch.load(handle)
@@ -3990,7 +3992,8 @@ class TestTorch(TestCase):
 
     def test_from_file(self):
         size = 10000
-        with tempfile.NamedTemporaryFile() as f:
+        delete = sys.platform != 'win32'
+        with tempfile.NamedTemporaryFile(delete=delete) as f:
             s1 = torch.FloatStorage.from_file(f.name, True, size)
             t1 = torch.FloatTensor(s1).copy_(torch.randn(size))
 
