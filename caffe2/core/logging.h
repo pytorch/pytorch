@@ -240,31 +240,34 @@ BINARY_COMP_HELPER(Less, <)
 BINARY_COMP_HELPER(LessEquals, <=)
 #undef BINARY_COMP_HELPER
 
-#define CAFFE_ENFORCE_THAT_IMPL(condition, expr, ...)                 \
-  do {                                                                \
-    using namespace ::caffe2::enforce_detail;                         \
-    const EnforceFailMessage& r = (condition);                        \
-    if (r.bad()) {                                                    \
-      throw ::caffe2::EnforceNotMet(                                  \
-          __FILE__,                                                   \
-          __LINE__,                                                   \
-          expr,                                                       \
-          r.get_message_and_free(::caffe2::MakeString(__VA_ARGS__))); \
-    }                                                                 \
+#define CAFFE_ENFORCE_THAT_IMPL(condition, expr, ...)                   \
+  do {                                                                  \
+    using namespace ::caffe2::enforce_detail;                           \
+    const EnforceFailMessage& CAFFE_ENFORCE_THAT_IMPL_r_ = (condition); \
+    if (CAFFE_ENFORCE_THAT_IMPL_r_.bad()) {                             \
+      throw ::caffe2::EnforceNotMet(                                    \
+          __FILE__,                                                     \
+          __LINE__,                                                     \
+          expr,                                                         \
+          CAFFE_ENFORCE_THAT_IMPL_r_.get_message_and_free(              \
+              ::caffe2::MakeString(__VA_ARGS__)));                      \
+    }                                                                   \
   } while (false)
 
-#define CAFFE_ENFORCE_THAT_IMPL_WITH_CALLER(condition, expr, ...)                 \
-  do {                                                                \
-    using namespace ::caffe2::enforce_detail;                         \
-    const EnforceFailMessage& r = (condition);                        \
-    if (r.bad()) {                                                    \
-      throw ::caffe2::EnforceNotMet(                                  \
-          __FILE__,                                                   \
-          __LINE__,                                                   \
-          expr,                                                       \
-          r.get_message_and_free(::caffe2::MakeString(__VA_ARGS__)),  \
-          this);                                                      \
-    }                                                                 \
+#define CAFFE_ENFORCE_THAT_IMPL_WITH_CALLER(condition, expr, ...)      \
+  do {                                                                 \
+    using namespace ::caffe2::enforce_detail;                          \
+    const EnforceFailMessage& CAFFE_ENFORCE_THAT_IMPL_WITH_CALLER_r_ = \
+        (condition);                                                   \
+    if (CAFFE_ENFORCE_THAT_IMPL_WITH_CALLER_r_.bad()) {                \
+      throw ::caffe2::EnforceNotMet(                                   \
+          __FILE__,                                                    \
+          __LINE__,                                                    \
+          expr,                                                        \
+          CAFFE_ENFORCE_THAT_IMPL_WITH_CALLER_r_.get_message_and_free( \
+              ::caffe2::MakeString(__VA_ARGS__)),                      \
+          this);                                                       \
+    }                                                                  \
   } while (false)
 }
 
