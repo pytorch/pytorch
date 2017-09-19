@@ -47,4 +47,24 @@ void TypedAxpy<float16, float>(
   BASE_DO(TypedAxpy_float16_float, N, a, x, y);
 }
 
+void TypedAxpy_uint8_float__base(
+    int N,
+    const float a,
+    const std::uint8_t* x,
+    float* y) {
+  for (int i = 0; i < N; ++i) {
+    y[i] += (float)(x[i]) * a;
+  }
+}
+
+template <>
+void TypedAxpy<std::uint8_t, float>(
+    int N,
+    const float a,
+    const std::uint8_t* x,
+    float* y) {
+  AVX2_FMA_DO(TypedAxpy_uint8_float, N, a, x, y);
+  BASE_DO(TypedAxpy_uint8_float, N, a, x, y);
+}
+
 } // namespace caffe2
