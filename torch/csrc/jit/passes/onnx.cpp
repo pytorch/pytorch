@@ -62,14 +62,14 @@ void ToONNX(std::shared_ptr<tracer::TracingState>& state) {
   // Put the new outputs in our environment map, and copy the type from the
   // input graph if they were not set by the symbolic. This is called only
   // with results of symbolic call (not for nodes that are just cloned).
-  auto setOutputs = [&](Node * node, const node_list & outputs) {
+  auto setOutputs = [&](const std::string& op_name, Node * node, const node_list & outputs) {
     auto old_outputs = node->outputs();
     // Count all outputs, excluding Handles
     bool has_handle = hasHandleOutput(node);
     auto num_old_outputs = old_outputs.size() - (has_handle ? 1 : 0);
     if (outputs.size() != num_old_outputs) {
       std::ostringstream ss;
-      ss << "symbolic produced an incorrect number of outputs (expected ";
+      ss << "symbolic for " << op_name << " produced an incorrect number of outputs (expected ";
       ss << num_old_outputs << ", but got " << outputs.size() << ")";
       throw std::runtime_error(ss.str());
     }
@@ -166,7 +166,7 @@ void ToONNX(std::shared_ptr<tracer::TracingState>& state) {
     IR_ELSEIFM(CppOp)
       if (auto fn = std::dynamic_pointer_cast<autograd::HasSymbolic>(value->fn)) {
         auto outputs = fn->symbolic(&ctx, fmap(node->inputs(), envFn));
-        setOutputs(node, outputs);
+        setOutputs(value->name(), node, outputs);
       } else {
         cloneNode(node);
       }
@@ -174,7 +174,7 @@ void ToONNX(std::shared_ptr<tracer::TracingState>& state) {
       auto pyobj = py::handle(value->pyobj.get());
       if (py::hasattr(pyobj, "symbolic")) {
         auto outputs = callPySymbollic(value);
-        setOutputs(node, outputs);
+        setOutputs(value->name(), node, outputs);
       } else {
         cloneNode(node);
       }
