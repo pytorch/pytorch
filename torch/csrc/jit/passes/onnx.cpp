@@ -26,6 +26,12 @@ bool hasUsedHandle(Node *node) {
 
 // Transform PythonOps and Cpp Ops into Node's that match ONNX semantics.
 void ToONNX(std::shared_ptr<tracer::TracingState>& state) {
+  // Check that the tracing state is live (it should be, because
+  // you were supposed to request zero derivatives.)
+  if (state->is_expired()) {
+    throw std::runtime_error("Tracing state is expired!  You should run the tracer with num_derivatives=0");
+  }
+
   auto new_graph = std::make_shared<Graph>();
   std::unordered_map<void*, Node*> new_buffer_map;
 

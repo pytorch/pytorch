@@ -94,7 +94,7 @@ def _export(model, args, f, export_params=True, verbose=False, training=False):
     # It's important to run the model in inference mode when exporting;
     # otherwise internal buffers may get updated, dropout gets applied, etc.
     with set_training(model, training):
-        trace, torch_out = torch.jit.record_trace(model, *args)
+        trace, torch_out = torch.jit.record_trace(model, *args, num_derivatives=0)
     torch._C._jit_pass_onnx(trace)
     if verbose:
         print(trace)
