@@ -2,6 +2,7 @@ import torch
 import torch.jit
 import torch.onnx
 import torch.nn as nn
+from torch.nn import Module
 import unittest
 from torch.autograd import Variable, Function
 from common import TestCase, run_tests
@@ -85,6 +86,25 @@ class TestONNX(TestCase):
         initializers = [x.data]
         torch._C._jit_pass_onnx(trace)
         self.assertONNXExpected(trace.export(initializers))
+
+    def test_symbolic_mismatch(self):
+        class MyFun(Function):
+            @staticmethod
+            def symbolic(g, x):
+                assert False  # dead code
+
+            @staticmethod
+            def forward(ctx, x, y):
+                return x + y
+
+        class MyModel(Module):
+            def forward(self, x, y):
+                return MyFun().apply(x, y)
+
+        x = Variable(torch.randn(2, 2).fill_(1.0))
+        y = Variable(torch.randn(2, 2).fill_(1.0))
+        with self.assertRaisesRegex(TypeError, "occurred when translating MyFun"):
+            export_to_string(MyModel(), (x, y))
 
     # TODO: Do an nn style test for these
     def test_batchnorm(self):

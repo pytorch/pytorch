@@ -110,6 +110,20 @@ def _export(model, args, f, export_params=True, verbose=False, training=False):
 attr_pattern = re.compile("^(.+)_([ifstg])$")
 
 
+def run_symbolic(op_name, symbolic_fn, args):
+    """
+    This trampoline function gets invoked for every symbolic call.
+    """
+    try:
+        return symbolic_fn(*args)
+    except TypeError as e:
+        # Handle the specific case where we didn't successfully dispatch
+        # to symbolic_fn.  Otherwise, the backtrace will have the clues
+        # you need.
+        e.args = ("{} (occurred when translating {})".format(e.args[0], op_name), )
+        raise
+
+
 def _add_attribute(node, key, value):
     """ initializes the right attribute based on type of value """
     m = attr_pattern.match(key)
