@@ -777,6 +777,13 @@ class LPPool2d(Module):
     def forward(self, input):
         return F.lp_pool2d(input, self.norm_type, self.kernel_size,
                            self.stride, self.ceil_mode)
+    
+    def __repr__(self):
+        return self.__class__.__name__ + ' (' \
+            + str(self.norm_type) + ', ' \
+            + str(self.kernel_size) + ', ' \
+            + 'stride=' + str(self.stride) + ', ' \
+            + 'ceil_mode=' + str(self.ceil_mode) + ')'
 
 class LPPool1d(Module):
     r"""Applies a 1D power-average pooling over an input signal composed of several input
@@ -814,6 +821,12 @@ class LPPool1d(Module):
     def forward(self, input):
         return F.lp_pool1d(input, self.norm_type, self.kernel_size,
                            self.stride, self.ceil_mode)
+    def __repr__(self):
+        return self.__class__.__name__ + ' (' \
+            + str(self.norm_type) + ', ' \
+            + str(self.kernel_size) + ', ' \
+            + 'stride=' + str(self.stride) + ', ' \
+            + 'ceil_mode=' + str(self.ceil_mode) + ')'
 
 class AdaptiveMaxPool1d(Module):
     """Applies a 1D adaptive max pooling over an input signal composed of several input planes.
