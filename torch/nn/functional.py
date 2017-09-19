@@ -377,6 +377,7 @@ def lp_pool2d(input, norm_type, kernel_size, stride=None, ceil_mode=False):
     out = avg_pool2d(input.pow(norm_type), kernel_size, stride, 0, ceil_mode)
     return out.mul(kw * kh).pow(1. / norm_type)
 
+
 def lp_pool1d(input, norm_type, kernel_size, stride=None, ceil_mode=False):
     out = avg_pool1d(input.pow(norm_type), kernel_size, stride, 0, ceil_mode)
     return out.mul(kernel_size).pow(1. / norm_type)
