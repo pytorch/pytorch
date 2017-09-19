@@ -87,8 +87,14 @@ void ToONNX(std::shared_ptr<tracer::TracingState>& state) {
         // Null output means that the ONNX op doesn't have outputs corresponding
         // to certain PyTorch outputs
         env[old] = nullptr;
-        if (!old->uses().empty())
-          throw std::runtime_error("ONNX conversion discarded a used output");
+        if (!old->uses().empty()) {
+          std::ostringstream ss;
+          ss << "symbolic for " << op_name << " returned None for the output " << i;
+          ss << " (indicating conversion for that particular output is not supported), ";
+          ss << "but the network uses this output later";
+          // TODO: Say what actually used it
+          throw std::runtime_error(ss.str());
+        }
       }
     }
     if (has_handle) {
@@ -111,7 +117,7 @@ void ToONNX(std::shared_ptr<tracer::TracingState>& state) {
     }
   };
 
-  auto callPySymbollic = [&](PythonOp* op) {
+  auto callPySymbolic = [&](PythonOp* op) {
     // Prepare args for Python. First one is the graph, and is followed
     // by regular args, with Variables replaced by corresponding nodes.
     auto pyobj = py::handle(op->pyobj.get());
@@ -134,9 +140,10 @@ void ToONNX(std::shared_ptr<tracer::TracingState>& state) {
       py_symbolic_args[input_nr++] = obj;
     }
     // Call the symbolic function
-    py::object raw_output = py::reinterpret_steal<py::object>(
-        PyObject_CallObject(pyobj.attr("symbolic").ptr(), py_symbolic_args.ptr()));
-    if (!raw_output) throw py::error_already_set();
+    py::object onnx = py::module::import("torch.onnx");
+    // Use a little trampoline function so we can give good error messages
+    // upon argument mismatch
+    py::object raw_output = onnx.attr("run_symbolic")(op->name(), pyobj.attr("symbolic"), py_symbolic_args);
     if (raw_output.ptr() == Py_None)
       throw std::runtime_error("PythonOp's symbolic returned None, indicating conversion not supported " + op->name());
 
@@ -173,7 +180,7 @@ void ToONNX(std::shared_ptr<tracer::TracingState>& state) {
     IR_ELSEIFM(PythonOp)
       auto pyobj = py::handle(value->pyobj.get());
       if (py::hasattr(pyobj, "symbolic")) {
-        auto outputs = callPySymbollic(value);
+        auto outputs = callPySymbolic(value);
         setOutputs(value->name(), node, outputs);
       } else {
         cloneNode(node);
