@@ -488,15 +488,11 @@ private:
   // having corner cases where the list is empty.
   Node * const output_;
 
-  // Indicate whether the results of nodes() are in topological order.
-  bool topological_;
-
 public:
   Graph()
   : next_unique_(0)
   , new_node_stage_(0)
-  , output_(initOutput(create(kReturn)))
-  , topological_(true) {}
+  , output_(initOutput(create(kReturn))) {}
 
   const param_list & inputs() {
     return inputs_;
@@ -532,12 +528,6 @@ public:
   }
   size_t stage() const {
     return new_node_stage_;
-  }
-  void setTopological(bool topological) {
-    topological_ = topological;
-  }
-  bool topological() const {
-    return topological_;
   }
   ResourceGuard setStageTemporary(size_t s) {
     auto prev_stage = new_node_stage_;

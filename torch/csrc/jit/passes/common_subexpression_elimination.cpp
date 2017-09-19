@@ -15,8 +15,10 @@ namespace torch { namespace jit {
 bool attributesEqualCSE(const Node* lhs, const Node* rhs) {
   JIT_ASSERT(lhs != nullptr);
   JIT_ASSERT(rhs != nullptr);
-  if (lhs->hasAttributes() && rhs->hasAttributes()) return true;
-  if (lhs->hasAttributes() || rhs->hasAttributes()) return false;
+  // One has attributes, the other does not.
+  if (lhs->hasAttributes() != rhs->hasAttributes()) return false;
+  // Neither has attributes.
+  if (!lhs->hasAttributes() && !rhs->hasAttributes()) return true;
 
   auto lnames = lhs->attributeNames();
   auto rnames = rhs->attributeNames();
@@ -25,6 +27,7 @@ bool attributesEqualCSE(const Node* lhs, const Node* rhs) {
   Node* l = const_cast<Node*>(lhs);
   Node* r = const_cast<Node*>(rhs);
   for (auto name : lnames) {
+    if (l->kindOf(name) != r->kindOf(name)) return false;
     switch(l->kindOf(name)) {
       case AttributeKind::f: 
         {
@@ -118,63 +121,56 @@ struct EqualNodeCSE {
   }
 };
 
-// If the nodes are visited in topological order, one pass is enough.
+// The function implements common subexpression elimination.
+// Since the nodes are visited in topological order, one pass is enough.
 void EliminateCommonSubexpression(std::shared_ptr<Graph>& graph) {
-  // Keep iterating until reach the fixed point.
-  bool topological = graph->topological();
-  bool reach_fixed = false;
-  while (!reach_fixed) {
-    reach_fixed = true;
-    auto nodes = graph->nodes();
-    std::unordered_set<Node*, HashNodeCSE, EqualNodeCSE> subexprs;
-    for (auto it = nodes.begin(); it != nodes.end(); ++ it) {
-      auto node = *it;
-      if (node->kind() != kAdd
-          && node->kind() != kMul
-          && node->kind() != kNeg
-          && node->kind() != kSigmoid
-          && node->kind() != kTanh
-          && node->kind() != kSplit
-          && node->kind() != kAddConstant
-         ) {
-        // TODO support more kinds of nodes.
-        // Only support CSE on these nodes.
-        continue;
-      }
-
-      // Check whether the same subexpression already exists.
-      auto subit = subexprs.find(node);
-      if (subit == subexprs.end()) {
-        // If not put current node into the map
-        subexprs.insert(node);
-      } else {
-        // Subexpression exists, replace the uses of node, and destroy it.
-        auto existing = *subit;
-        JIT_ASSERT(existing != node);
-        const use_list & uses = node->uses();
-        const use_list & reuses= existing->uses();
-        if (node->hasMultipleOutputs()) {
-          // For Multi-Output nodes, all its uses should be Select nodes.
-          JIT_ASSERT(uses.size() == reuses.size());
-          // Replace the uses of Select nodes.
-          for (size_t i = 0; i < uses.size(); ++ i) {
-            JIT_ASSERT(uses[i].user->kind() == kSelect);
-            JIT_ASSERT(reuses[i].user->kind() == kSelect);
-            uses[i].user->replaceAllUsesWith(reuses[i].user);
-          }
-          // Destroy Select nodes.
-          while (uses.size() > 0) {
-            uses[0].user->destroy();
-          }
-        } else {
-          node->replaceAllUsesWith(existing);
-        }
-        // Destroy the node.
-        it.destroyCurrent();
-        reach_fixed = false;
-      }
+  auto nodes = graph->nodes();
+  std::unordered_set<Node*, HashNodeCSE, EqualNodeCSE> subexprs;
+  for (auto it = nodes.begin(); it != nodes.end(); ++ it) {
+    auto node = *it;
+    if (node->kind() != kAdd
+        && node->kind() != kMul
+        && node->kind() != kNeg
+        && node->kind() != kSigmoid
+        && node->kind() != kTanh
+        && node->kind() != kSplit
+        && node->kind() != kAddConstant
+       ) {
+      // TODO support more kinds of nodes.
+      // Only support CSE on these nodes.
+      continue;
     }
-    if (topological) break;
+
+    // Check whether the same subexpression already exists.
+    auto subit = subexprs.find(node);
+    if (subit == subexprs.end()) {
+      // If not put current node into the map
+      subexprs.insert(node);
+    } else {
+      // Subexpression exists, replace the uses of node, and destroy it.
+      auto existing = *subit;
+      JIT_ASSERT(existing != node);
+      const use_list & uses = node->uses();
+      const use_list & reuses= existing->uses();
+      if (node->hasMultipleOutputs()) {
+        // For Multi-Output nodes, all its uses should be Select nodes.
+        JIT_ASSERT(uses.size() == reuses.size());
+        // Replace the uses of Select nodes.
+        for (size_t i = 0; i < uses.size(); ++ i) {
+          JIT_ASSERT(uses[i].user->kind() == kSelect);
+          JIT_ASSERT(reuses[i].user->kind() == kSelect);
+          uses[i].user->replaceAllUsesWith(reuses[i].user);
+        }
+        // Destroy Select nodes.
+        while (uses.size() > 0) {
+          uses[0].user->destroy();
+        }
+      } else {
+        node->replaceAllUsesWith(existing);
+      }
+      // Destroy the node.
+      it.destroyCurrent();
+    }
   }
 }
 
