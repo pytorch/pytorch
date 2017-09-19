@@ -73,7 +73,7 @@ void EliminateCommonSubexpression(std::shared_ptr<Graph>& graph) {
         // If not put it into the map
         subexprs.insert(node);
       } else {
-        // Subexpression exists, replace the uses of node, and destory it.
+        // Subexpression exists, replace the uses of node, and destroy it.
         auto existing = *subexprs.find(node);
         const use_list & uses = node->uses();
         const use_list & reuses= existing->uses();
