@@ -266,6 +266,21 @@ class TestCase(unittest.TestCase):
                 return
         raise AssertionError("object not found in iterable")
 
+    # TODO: Support context manager interface
+    # NB: The kwargs forwarding to callable robs the 'subname' parameter.
+    # If you need it, manually apply your callable in a lambda instead.
+    def assertExpectedRaises(self, exc_type, callable, *args, **kwargs):
+        subname = None
+        if 'subname' in kwargs:
+            subname = kwargs['subname']
+            del kwargs['subname']
+        try:
+            callable(*args, **kwargs)
+        except exc_type as e:
+            self.assertExpected(str(e), subname)
+        # Don't put this in the try block; the AssertionError will catch it
+        self.fail(msg="Did not raise when expected to")
+
     def assertExpected(self, s, subname=None):
         """
         Test that a string matches the recorded contents of a file
@@ -296,20 +311,31 @@ class TestCase(unittest.TestCase):
             expected_file += "-" + subname
         expected_file += ".expect"
         expected = None
-        if ACCEPT:
-            with open(expected_file, 'w') as f:
-                f.write(s)
-        else:
-            try:
-                with open(expected_file) as f:
-                    expected = f.read()
-            except IOError as e:
-                if e.errno == errno.ENOENT:
-                    raise RuntimeError(
-                        ("No expect file exists; to accept the current output, run:\n"
-                         "python {} {} --accept").format(__main__.__file__, munged_id))
+        try:
+            with open(expected_file) as f:
+                expected = f.read()
+        except IOError as e:
+            if e.errno == errno.ENOENT:
+                if ACCEPT:
+                    print("Accepting output for {}:\n\n{}".format(munged_id, s))
+                    with open(expected_file, 'w') as f:
+                        f.write(s)
+                    return  # don't keep going
                 else:
-                    raise
+                    raise RuntimeError(
+                        ("I got this output for {}:\n\n{}\n\n"
+                         "No expect file exists; to accept the current output, run:\n"
+                         "python {} {} --accept").format(munged_id, s, __main__.__file__, munged_id))
+            else:
+                raise
+        if ACCEPT:
+            if expected == s:
+                pass  # nothing to do
+            else:
+                print("Accepting updated output for {}:\n\n{}".format(munged_id, s))
+                with open(expected_file, 'w') as f:
+                    f.write(s)
+        else:
             if hasattr(self, "assertMultiLineEqual"):
                 # Python 2.7 only
                 # NB: Python considers lhs "old" and rhs "new".
