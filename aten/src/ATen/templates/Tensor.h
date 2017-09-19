@@ -106,7 +106,7 @@ struct Tensor {
   Type & type() const {
     return pImpl->type();
   }
-  Tensor toType(Type & t) const {
+  Tensor toType(const Type & t) const {
     if(type().ID() ==t.ID())
       return *this;
     return t.copy(*this);
