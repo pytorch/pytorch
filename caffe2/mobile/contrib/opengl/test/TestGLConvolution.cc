@@ -7,6 +7,7 @@
 #include "../core/GL.h"
 #include "../core/GLLogging.h"
 #include "../core/arm_neon_support.h"
+#include "../operators/gl_tiling_utils.h"
 #include "TestGLConvolution.h"
 #include "opengl_test.h"
 
@@ -109,10 +110,6 @@ double BenchOp(const std::string& typ,
          timer.MilliSeconds() / (float)runs);
   return double(total_t) / runs;
 }
-
-namespace caffe2 {
-  void squareFactors(int N, int& r1, int& r2);
-};
 
 template <typename T>
 static double BenchGLConvolution(int input_channels,

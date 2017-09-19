@@ -4,6 +4,7 @@
 #include "../core/GLFilter.h"
 #include "../core/GLImage.h"
 #include "../core/ImageAllocator.h"
+#include "../operators/gl_tiling_utils.h"
 
 #include "caffe2/core/common.h"
 #include "caffe2/core/context.h"
@@ -20,11 +21,6 @@ class GLConvolution : public GLFilter {
  public:
   static constexpr int MaxInputBatchSize = 8;
   static constexpr int MaxOutputBatchSize = 4;
-
-  struct point {
-    int x;
-    int y;
-  };
 
   struct descriptor {
     int input_channels;
@@ -767,24 +763,6 @@ static void computeOutputHW(OPBase* op, int H, int W, int* OH, int* OW) {
   CAFFE_ENFORCE_EQ(output.ndim(), 4);
   *OH = output.dim(2);
   *OW = output.dim(3);
-}
-
-void squareFactors(int N, int& r1, int& r2) {
-  int f = sqrt(N);
-
-  if (f * f == N) {
-    r1 = r2 = f;
-  } else {
-    while (N % f != 0) {
-      f--;
-    }
-    r1 = N / f;
-    r2 = f;
-  }
-}
-
-static void computeOutputTiles(int output_channels, int& output_tile_x, int& output_tile_y) {
-  squareFactors((output_channels + 3) / 4, output_tile_x, output_tile_y);
 }
 
 static int computeOutputTileChunkSize(int output_tile_x,

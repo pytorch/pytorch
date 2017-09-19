@@ -3,6 +3,7 @@
 #include "../core/GLFilter.h"
 #include "../core/GLImage.h"
 #include "../core/ImageAllocator.h"
+#include "gl_tiling_utils.h"
 
 #include "caffe2/core/operator.h"
 #include "caffe2/core/timer.h"
@@ -11,115 +12,110 @@
 
 class GLConcat : public GLFilter {
  public:
-  static constexpr int MaxBatchSize = 4;
-
-  binding* inputData[MaxBatchSize];
+  bool tiling_;
+  binding* inputData;
   binding* outputSize;
+  binding* inputTileRange;
+  binding* input_tile_x;
 
-  const int batch_size;
-
-  const std::vector<binding*> input_bindings(int batch_size) {
-    std::vector<binding*> bindings({BINDING(outputSize)});
-    for (int i = 0; i < batch_size; i++) {
-      bindings.push_back(inputData[i] = new binding{"inputData[" + caffe2::to_string(i) + "]"});
-    }
-    return bindings;
-  }
-
-  GLConcat(int _batch_size = 1)
+  GLConcat(tile_descriptor output_tile_geometries, bool tiling = false)
       : GLFilter("GLConcat",
                  vertex_shader,
                  fragment_shader,
-                 input_bindings(_batch_size),
+                 std::vector<binding*>(
+                     {BINDING(outputSize), BINDING(inputData), BINDING(inputTileRange), BINDING(input_tile_x)}),
                  {/* no uniform blocks */},
                  {/* no attributes */},
-                 {{"BATCH_SIZE", caffe2::to_string(_batch_size)}}),
-        batch_size(_batch_size) {}
+                 {{"TILING", caffe2::to_string(tiling)},
+                  {"OUTPUT_TILES", caffe2::to_string(output_tile_geometries.tiles)},
+                  {"OUTPUT_TILE_X", caffe2::to_string(output_tile_geometries.tile_dims.x)},
+                  {"OUTPUT_TILE_WIDTH", caffe2::to_string(output_tile_geometries.tile_size.x)},
+                  {"OUTPUT_TILE_HEIGHT", caffe2::to_string(output_tile_geometries.tile_size.y)}}),
+        tiling_(tiling) {}
 
   template <typename T>
-  void concat(const GLImageVector<T>** input_images,
-              int size,
-              const GLImageVector<T>& output_image);
+  void concat(const GLImageVector<T>** input_images, const GLImageVector<T>& output_image, int size);
   static const char* fragment_shader;
 };
 
 // MARK: GLSL
 
 const char* GLConcat::fragment_shader = R"GLSL(#version 300 es
+#define TILING                      $(TILING)
 
-#define BATCH_SIZE $(BATCH_SIZE)
+// tiling
+#define OUTPUT_TILES                $(OUTPUT_TILES)
+#define OUTPUT_TILE_X               $(OUTPUT_TILE_X)
+#define OUTPUT_TILE_WIDTH           $(OUTPUT_TILE_WIDTH)
+#define OUTPUT_TILE_HEIGHT          $(OUTPUT_TILE_HEIGHT)
 
 precision mediump float;
 precision mediump int;
 
 in highp vec2 v_texCoord;
+TEXTURE_INPUT(inputData);
+TEXTURE_OUTPUT(0, outputData);
 
 uniform ivec2 outputSize;
-//uniform ivec2 channelOffset;
-TEXTURE_INPUT(inputData[BATCH_SIZE]);
-//uniform sampler2D previousData[BATCH_SIZE];
+uniform ivec2 inputTileRange; // (]
+uniform int input_tile_x;
 
-
-TEXTURE_OUTPUT(0, outputData0);
-#if BATCH_SIZE > 1
-layout(location = 1) out mediump vec4 outputData1;
-#if BATCH_SIZE > 2
-layout(location = 2) out mediump vec4 outputData2;
-#if BATCH_SIZE > 3
-layout(location = 3) out mediump vec4 outputData3;
-#endif
-#endif
-#endif
+#if TILING
+const ivec2 outputTileSize = ivec2(OUTPUT_TILE_WIDTH, OUTPUT_TILE_HEIGHT);
 
 void main() {
   ivec2 texelCoord = ivec2(v_texCoord * vec2(outputSize));
-  vec4 value = TEXTURE_LOAD(inputData[0], texelCoord);
-  outputData0 = TEXTURE_STORE(value);
-#if BATCH_SIZE > 1
-  outputData1 = texelFetch(inputData[1], texelCoord, 0);
-#if BATCH_SIZE > 2
-  outputData2 = texelFetch(inputData[2], texelCoord, 0);
-#if BATCH_SIZE > 3
-  outputData3 = texelFetch(inputData[3], texelCoord, 0);
-#endif
-#endif
-#endif
+  ivec2 tile = texelCoord / outputTileSize; // 2D output tile idx
+  ivec2 tileCoord = texelCoord % outputTileSize; // in-tile coordinates
+  int tileNum = OUTPUT_TILE_X * tile.y + tile.x; // 1D output tile idx
+
+  if (tileNum >= inputTileRange.x && tileNum < inputTileRange.y) {
+    tileNum = tileNum - inputTileRange.x;
+    texelCoord = ivec2(tileNum % input_tile_x, tileNum / input_tile_x)  * ivec2(OUTPUT_TILE_WIDTH, OUTPUT_TILE_HEIGHT) + tileCoord;
+    vec4 value = TEXTURE_LOAD(inputData, texelCoord);
+    outputData = TEXTURE_STORE(value);
+  } else {
+    // early termination
+    discard;
+  }
 }
 
-    )GLSL";
+#else
+void main() {
+  ivec2 texelCoord = ivec2(v_texCoord * vec2(outputSize));
+  vec4 value = TEXTURE_LOAD(inputData, texelCoord);
+  outputData = TEXTURE_STORE(value);
+}
+#endif
+
+)GLSL";
 
 template <typename T>
-void GLConcat::concat(const GLImageVector<T>** input_images,
-                      int size,
-                      const GLImageVector<T>& output_images) {
+void GLConcat::concat(const GLImageVector<T>** input_images, const GLImageVector<T>& output_images, int input_size) {
   for (int k = 0; k < output_images.size(); k++) {
-    std::vector<int> input_slices;
-    std::vector<int> input_slices_acc;
-    input_slices_acc.push_back(0);
-    for (int i = 0; i < size; i++) {
-      int slices = (*input_images[i])[k]->slices;
-      input_slices.push_back(slices);
-      input_slices_acc.push_back(input_slices_acc[i] + slices);
-    }
     GLImage<T>* output_image = output_images[k];
-    int output_slices = output_image->slices;
-    for (int is = 0; is < input_slices_acc[size]; is += batch_size) {
-      std::vector<texture_attachment> input_attachments;
-      for (int i = 0; i < batch_size; i++) {
-        int image_index = 0;
-        while (is + i >= input_slices_acc[image_index + 1]) {
-          image_index += 1;
-        }
-        input_attachments.push_back(
-            {(*input_images[image_index])[k]->textures[is + i - input_slices_acc[image_index]],
-             inputData[i]});
-      }
 
-      run(input_attachments,
-          {output_image->textures.begin() + is, output_image->textures.begin() + is + batch_size},
-          [&]() { glUniform2i(outputSize->location, output_image->width, output_image->height); },
-          output_image->width,
-          output_image->height);
+    int is = 0, os = 0;
+    for (int i = 0; i < input_size; i++) {
+      for (int j = 0; j < input_images[i]->slices(); j++) {
+        GLImage<T>* input_image = (*input_images[i])[k];
+        std::vector<texture_attachment> input_attachments;
+        input_attachments.push_back({input_image->textures[j], inputData});
+
+        run(input_attachments,
+            {output_image->textures.begin() + os, output_image->textures.begin() + os + 1},
+            [&]() {
+              glUniform2i(outputSize->location, output_image->texture_width, output_image->texture_height);
+              glUniform2i(inputTileRange->location, is, is + input_image->tile_x * input_image->tile_y);
+              glUniform1i(input_tile_x->location, input_image->tile_x);
+            },
+            output_image->texture_width,
+            output_image->texture_height);
+        if (!tiling_) {
+          os++; // for tiling, you always write to the same texture
+        }
+        is += input_image->tile_x * input_image->tile_y;
+      }
     }
   }
 }
@@ -141,6 +137,9 @@ class OpenGLConcatOp final : public Operator<CPUContext>, ImageAllocator<T> {
     const GLImageVector<T>** input_images = new const GLImageVector<T>*[Inputs().size()];
     input_images[0] = &input0;
     int channelCount = input0.channels();
+
+    bool tiling = OperatorBase::GetSingleArgument<int>("tiling", 0);
+
     // Only supports input channels divisible by 4 for now
     CAFFE_ENFORCE_EQ(input0.channels() % 4, 0);
     for (auto i = 1; i < Inputs().size(); i++) {
@@ -151,6 +150,10 @@ class OpenGLConcatOp final : public Operator<CPUContext>, ImageAllocator<T> {
       CAFFE_ENFORCE_EQ(input0.width(), inputi.width());
       CAFFE_ENFORCE_EQ(input0.height(), inputi.height());
       input_images[i] = &inputi;
+
+      if (inputi.tile_x() > 1 || inputi.tile_y() > 1) {
+        tiling = true;
+      }
     }
 
     const int input_width = input0.width();
@@ -160,18 +163,23 @@ class OpenGLConcatOp final : public Operator<CPUContext>, ImageAllocator<T> {
     const int output_width = input_width;
     const int output_height = input_height;
 
+    int output_tile_x = 1;
+    int output_tile_y = 1;
+    if (tiling) {
+      computeOutputTiles(output_channels, output_tile_x, output_tile_y);
+    }
+
     int is_last = OperatorBase::GetSingleArgument<int>("is_last", 0);
 
     GLImageVector<T>* output = ImageAllocator<T>::newImage(
-        num_images, output_width, output_height, output_channels, is_last);
+        num_images, output_width, output_height, output_channels, output_tile_x, output_tile_y, is_last);
     if (!_concat) {
-      int batch_size = 1;
-
-      batch_size = OperatorBase::GetSingleArgument<int>("batch_size", batch_size);
-      _concat.reset(new GLConcat(batch_size));
+      tile_descriptor output_tile_geometries{
+          {output_tile_x, output_tile_y}, {output_width, output_height}, output_tile_x * output_tile_y};
+      _concat.reset(new GLConcat(output_tile_geometries, tiling));
     }
 
-    _concat->concat(input_images, Inputs().size(), *output);
+    _concat->concat(input_images, *output, Inputs().size());
     delete[] input_images;
     Outputs()[0]->Reset(output);
 
