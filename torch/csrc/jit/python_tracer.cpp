@@ -82,13 +82,14 @@ void initPythonTracerBindings(PyObject* module_) {
       ss << *s.graph;
       return ss.str();
     })
-    .def("export", [](TracingState& s, bool verbose) {
+    .def("export", [](TracingState& s,
+                      const std::vector<std::string> & input_names,
+                      const std::vector<std::string> & output_names,
+                      bool verbose,
+                      const std::vector<at::Tensor>& initializers) {
       ASSERT_UNEXPIRED("export");
-      return py::bytes(ExportGraph(s.graph, s.buffer_map, {}, verbose));
-    })
-    .def("export", [](TracingState& s, const std::vector<at::Tensor>& initializers, bool verbose) {
-      ASSERT_UNEXPIRED("export");
-      return py::bytes(ExportGraph(s.graph, s.buffer_map, initializers, verbose));
+      return py::bytes(ExportGraph(
+        s.graph, s.buffer_map,  input_names, output_names, verbose, initializers));
     })
     .def("graph", [](TracingState& s) {
       return s.graph;

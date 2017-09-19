@@ -7,8 +7,8 @@ node {
   output: "7"
   output: "8"
   output: "9"
-  output: "batch_norm_dead_output_10"
-  output: "batch_norm_dead_output_11"
+  output: "10_batch_norm_dead_output"
+  output: "11_batch_norm_dead_output"
   op_type: "SpatialBN"
   attribute {
     name: "is_test"

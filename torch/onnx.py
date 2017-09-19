@@ -13,7 +13,14 @@ import collections
 from ._utils import _range
 
 
-def export(model, args, f, export_params=True, kwargs=None, verbose=False):
+def _no_reserved(names):
+    for n in names:
+        if len(n) > 0 and n[0].isdigit():
+            raise ValueError("exported names cannot begin with a number but found '{}'".format(n))
+
+
+def export(model, args, f, export_params=True, kwargs=None, verbose=False,
+           input_names=(), output_names=()):
     """
     Export a model into ONNX format.  This exporter runs your model
     once in order to get a trace of its execution to be exported; at the
@@ -32,12 +39,25 @@ def export(model, args, f, export_params=True, kwargs=None, verbose=False):
         export_params (bool, default True): if specified, all parameters will
             be exported.  Set this to False if you are exporting an
             untrained model.
+        input_names (list, default ()): if specified, a list of strings which
+             will be used in ONNX as the names of the inputs of the model.
+             If args has nested tuples, this list is in the order resulting from flattening
+             the nesting into a single list.
+        output_names (list, default ()): if specified, a list of strings which
+             will be used in ONNX as the name of the outputs of the output.
         kwargs (dict, optional): keyword inputs to the model.
     """
-    _export(model, args, f, export_params, kwargs, verbose)
+    _export(model, args, f, export_params, kwargs, verbose, input_names, output_names)
 
 
-def _export(model, args, f, export_params=True, kwargs=None, verbose=False):
+def _export(model, args, f, export_params=True, kwargs=None, verbose=False,
+            input_names=(), output_names=()):
+
+    if (len(set(input_names) | set(output_names)) != len(input_names) + len(output_names)):
+        raise ValueError("duplicate definition of a name in input_names ({}) and output_names ({})".
+                         format(input_names, output_names))
+    _no_reserved(input_names)
+    _no_reserved(output_names)
     # Special case for common case of passing a single Variable
     if isinstance(args, torch.autograd.Variable):
         args = (args, )
@@ -48,9 +68,15 @@ def _export(model, args, f, export_params=True, kwargs=None, verbose=False):
     if export_params:
         # NB: OrderedDict values is not actually a list, but trace.export is
         # not duck-typed and expects an actual list.
-        proto = trace.export(list(model.state_dict().values()), verbose)
+        initializers = list(model.state_dict().values())
     else:
-        proto = trace.export(verbose)
+        initializers = list()
+
+    proto = trace.export(input_names,
+                         output_names,
+                         verbose,
+                         initializers)
+
     torch.serialization._with_file_like(f, "wb", lambda f: f.write(proto))
     return torch_out
 

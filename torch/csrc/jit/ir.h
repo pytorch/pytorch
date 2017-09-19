@@ -281,7 +281,7 @@ public:
   }
   std::string uniqueName() {
     if(debug_name_.size() > 0)
-      return debugName() + "_" + std::to_string(unique());
+      return std::to_string(unique()) + "_" + debugName();
     return std::to_string(unique());
   }
   void setStage(size_t s) {
