@@ -103,7 +103,7 @@ class TestJit(TestCase):
         y = Variable(torch.Tensor([0.7, 0.5]), requires_grad=True)
 
         trace = torch._C._tracer_enter((x, y), 0)
-        z = (x + y) * (x + y)
+        z = (x + y) * (x + y) * (x + y)
         torch._C._tracer_exit((z,))
         torch._C._jit_pass_lint(trace)
         torch._C._jit_pass_onnx(trace)
