@@ -50,21 +50,20 @@ def _ShouldInclude(net_state, layer):
 
 def _GetLegacyDims(net, net_params, dummy_input, legacy_pad_ops):
     dim_map = {}
-    current = workspace.CurrentWorkspace()
-    workspace.SwitchWorkspace('legacypad', True)
+    ws = workspace.C.Workspace()
     for param in net_params.protos:
-        workspace.FeedBlob(param.name, utils.Caffe2TensorToNumpyArray(param))
+        ws.create_blob(param.name) \
+            .feed_blob(utils.Caffe2TensorToNumpyArray(param))
     external_input = net.op[0].input[0]
-    workspace.FeedBlob(external_input, dummy_input)
+    ws.create_blob(external_input).feed_blob(dummy_input)
     # Get dimensions with legacy pad
     for i in range(len(net.op)):
         op_def = net.op[i]
-        workspace.RunOperatorOnce(op_def)
+        ws._run_operator(op_def.SerializeToString())
         if i in legacy_pad_ops:
             output = op_def.output[0]
-            blob_legacy = workspace.FetchBlob(output)
+            blob_legacy = ws.fetch_blob(output)
             dim_map[i] = blob_legacy.shape
-    workspace.SwitchWorkspace(current)
     return dim_map
 
 
@@ -126,13 +125,13 @@ def _RemoveLegacyPad(net, net_params, input_dims):
 
         # Running with the legacy pad argument removed
         # compare the dimensions and adjust pad argument when necessary
-        current = workspace.CurrentWorkspace()
-        workspace.SwitchWorkspace("legacypad-removed", True)
+        ws = workspace.C.Workspace()
 
         external_input = net.op[0].input[0]
-        workspace.FeedBlob(external_input, dummy_input)
+        ws.create_blob(external_input).feed_blob(dummy_input)
         for param in net_params.protos:
-            workspace.FeedBlob(param.name, utils.Caffe2TensorToNumpyArray(param))
+            ws.create_blob(param.name) \
+              .feed_blob(utils.Caffe2TensorToNumpyArray(param))
 
         for i in range(len(net.op)):
             op_def = net.op[i]
@@ -151,8 +150,8 @@ def _RemoveLegacyPad(net, net_params, input_dims):
                 # use a new name to avoid the interference with inplace
                 nonlegacy_output = output + '_nonlegacy'
                 op_def.output[0] = nonlegacy_output
-                workspace.RunOperatorOnce(op_def)
-                blob_nonlegacy = workspace.FetchBlob(nonlegacy_output)
+                ws._run_operator(op_def.SerializeToString())
+                blob_nonlegacy = ws.fetch_blob(nonlegacy_output)
                 # reset output name
                 op_def.output[0] = output
 
@@ -160,8 +159,7 @@ def _RemoveLegacyPad(net, net_params, input_dims):
                 dim2 = blob_nonlegacy.shape
                 _AdjustDims(op_def, arg_map, pads, dim1, dim2)
 
-            workspace.RunOperatorOnce(op_def)
-        workspace.SwitchWorkspace(current)
+            ws._run_operator(op_def.SerializeToString())
     return net
 
 
@@ -199,7 +197,8 @@ class TranslatorRegistry(object):
         pretrained_net,
         is_test=False,
         net_state=None,
-        remove_legacy_pad=False
+        remove_legacy_pad=False,
+        input_dims=None
     ):
         net_state = caffe_pb2.NetState() if net_state is None else net_state
         net = caffe2_pb2.NetDef()
@@ -242,15 +241,16 @@ class TranslatorRegistry(object):
             net.op.extend(operators)
             net_params.protos.extend(params)
         if remove_legacy_pad:
-            input_dims = []
-            if caffe_net.input_dim:
-                input_dims = caffe_net.input_dim
-            elif caffe_net.input_shape:
-                input_dims = caffe_net.input_shape[0].dim
-            else:
-                # getting input dimension from first layer
-                input_dims = caffe_net.layer[0].input_param.shape[0].dim
-            print("Input dims: ", input_dims)
+            if not input_dims:
+                if caffe_net.input_dim:
+                    input_dims = caffe_net.input_dim
+                elif caffe_net.input_shape:
+                    input_dims = caffe_net.input_shape[0].dim
+                elif caffe_net.layer[0].input_param.shape:
+                    # getting input dimension from first layer
+                    input_dims = caffe_net.layer[0].input_param.shape[0].dim
+            assert input_dims, \
+                   'Please specify input_dims to remove legacy_pad'
             net = _RemoveLegacyPad(net, net_params, input_dims)
         return net, net_params
 
@@ -826,8 +826,12 @@ if __name__ == '__main__':
                         default="init_net.pb")
     parser.add_argument("--predict_net", help="Caffe2 prediction net.",
                         default="predict_net.pb")
-    parser.add_argument("--keep_legacy_pad", help="Keep legacy pad",
-                        action="store_true", default=False)
+    parser.add_argument("--remove_legacy_pad", help="Remove legacy pad \
+                        (Only works for nets with one input blob)",
+                        action="store_true",
+                        default=False)
+    parser.add_argument("--input_dims", help="Dimension of input blob", nargs='+',
+                        type=int, default=[])
     args = parser.parse_args()
 
     caffenet = caffe_pb2.NetParameter()
@@ -845,7 +849,8 @@ if __name__ == '__main__':
     )
     net, pretrained_params = TranslateModel(
         caffenet, caffenet_pretrained, is_test=True,
-        remove_legacy_pad=not args.keep_legacy_pad
+        remove_legacy_pad=args.remove_legacy_pad,
+        input_dims=args.input_dims
     )
 
     # Assume there is one input and one output
