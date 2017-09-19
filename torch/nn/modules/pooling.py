@@ -822,6 +822,7 @@ class LPPool1d(Module):
     def forward(self, input):
         return F.lp_pool1d(input, self.norm_type, self.kernel_size,
                            self.stride, self.ceil_mode)
+
     def __repr__(self):
         return self.__class__.__name__ + ' (' \
             + str(self.norm_type) + ', ' \
