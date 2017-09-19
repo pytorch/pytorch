@@ -68,6 +68,7 @@ TH_API void THNN_(SpatialClassNLLCriterion_updateOutput)(
           THTensor *weights,           // [OPTIONAL] class weights
           THTensor *total_weight,      // [BUFFER]
           int64_t ignore_index);       // target index to ignore (loss = 0, gradInput = 0)
+
 TH_API void THNN_(SpatialClassNLLCriterion_updateGradInput)(
           THNNState *state,            // library's state
           THTensor *input,             // input tensor (4D)
@@ -77,7 +78,6 @@ TH_API void THNN_(SpatialClassNLLCriterion_updateGradInput)(
           THTensor *weights,           // [OPTIONAL] class weights
           THTensor *total_weight,      // [BUFFER]
           int64_t ignore_index);       // target index to ignore (loss = 0, gradInput = 0)
-
 
 TH_API void THNN_(ELU_updateOutput)(
           THNNState *state,            // library's state
@@ -1617,5 +1617,32 @@ TH_API void THNN_(VolumetricUpSamplingTrilinear_updateGradInput)(
           int outputDepth,
           int outputHeight,
           int outputWidth);
+
+TH_API void THNN_(TemporalReflectionPadding_updateOutput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *output,
+          int pad_l, int pad_r);
+
+TH_API void THNN_(TemporalReflectionPadding_updateGradInput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *gradOutput,
+          THTensor *gradInput,
+          int pad_l, int pad_r);
+
+TH_API void THNN_(TemporalReplicationPadding_updateOutput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *output,
+          int pad_l, int pad_r);
+
+TH_API void THNN_(TemporalReplicationPadding_updateGradInput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *gradOutput,
+          THTensor *gradInput,
+          int pad_l, int pad_r);
+
 
 #endif

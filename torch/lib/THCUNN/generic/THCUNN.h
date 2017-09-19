@@ -1012,6 +1012,18 @@ TH_API void THNN_(SpatialUpSamplingNearest_updateOutput)(
                   THCTensor *output,
                   int scale_factor);
 
+TH_API void THNN_(SpatialGridSamplerBilinear_updateOutput)(
+                  THCState *state,
+                  THCTensor *input,
+                  THCTensor *grid,
+                  THCTensor *output);
+
+TH_API void THNN_(SpatialGridSamplerBilinear_updateGradInput)(
+                  THCState *state,
+                  THCTensor *input, THCTensor *gradInput,
+                  THCTensor *grid, THCTensor *gradGrid,
+                  THCTensor *gradOutput);
+
 TH_API void THNN_(RReLU_updateOutput)(
                   THCState *state,
                   THCTensor *input,
@@ -1218,6 +1230,32 @@ TH_API void THNN_(TemporalRowConvolution_accGradParameters)(
                   int padW,
                   bool featFirst,
                   accreal scale);
+
+TH_API void THNN_(TemporalReflectionPadding_updateOutput)(
+                  THCState *state,
+                  THCTensor *input,
+                  THCTensor *output,
+                  int padL, int padR);
+
+TH_API void THNN_(TemporalReflectionPadding_updateGradInput)(
+                  THCState *state,
+                  THCTensor *input,
+                  THCTensor *gradOutput,
+                  THCTensor *gradInput,
+                  int padL, int padR);
+
+TH_API void THNN_(TemporalReplicationPadding_updateOutput)(
+                  THCState *state,
+                  THCTensor *input,
+                  THCTensor *output,
+                  int padL, int padR);
+
+TH_API void THNN_(TemporalReplicationPadding_updateGradInput)(
+                  THCState *state,
+                  THCTensor *input,
+                  THCTensor *gradOutput,
+                  THCTensor *gradInput,
+                  int padL, int padR);
 
 TH_API void THNN_(Threshold_updateOutput)(
                   THCState *state,

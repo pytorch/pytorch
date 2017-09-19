@@ -1565,6 +1565,17 @@ class TestAutograd(TestCase):
         # This will segfault if things have been erroneously released
         out.backward(torch.randn(out.size()))
 
+    def test_norm_subgradient(self):
+        def run_test(input_size, norm_deg):
+            input = Variable(torch.zeros(*input_size), requires_grad=True)
+            out = input.norm(norm_deg)
+            out.backward()
+            self.assertEqual(input.grad.data.abs().sum(), 0)
+
+        run_test((10,), 2)
+        run_test((10, 10), 2)
+        run_test((10,), 3)
+
 
 def index_variable(shape, max_indices):
     if not isinstance(shape, tuple):
