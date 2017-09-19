@@ -41,11 +41,13 @@ TH_API void THVector_(round)(real *y, const real *x, const ptrdiff_t n);
 TH_API void THVector_(abs)(real *y, const real *x, const ptrdiff_t n);
 TH_API void THVector_(trunc)(real *y, const real *x, const ptrdiff_t n);
 TH_API void THVector_(frac)(real *y, const real *x, const ptrdiff_t n);
-TH_API void THVector_(neg)(real *y, const real *x, const ptrdiff_t n);
 TH_API void THVector_(cinv)(real *y, const real *x, const ptrdiff_t n);
 
-#undef TH_MATH_NAME
 #endif /* floating point only part */
+
+#ifndef TH_REAL_IS_BYTE
+TH_API void THVector_(neg)(real *y, const real *x, const ptrdiff_t n);
+#endif
 
 /* Initialize the dispatch pointers */
 TH_API void THVector_(vectorDispatchInit)(void);
