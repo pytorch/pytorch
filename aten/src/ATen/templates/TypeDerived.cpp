@@ -15,32 +15,32 @@ namespace at {
 
 ${Type}::${Type}(Context* context)
 : Type(context) {}
-ScalarType ${Type}::scalarType() {
+ScalarType ${Type}::scalarType() const {
   return ScalarType::${ScalarName};
 }
-Backend ${Type}::backend() {
+Backend ${Type}::backend() const {
   return Backend::${Backend};
 }
-bool ${Type}::isCuda() { return backend() == kCUDA; }
-bool ${Type}::isSparse() { return backend() == kSparseCPU || backend() == kSparseCUDA; }
-bool ${Type}::isDistributed() { return false; }
+bool ${Type}::isCuda() const { return backend() == kCUDA; }
+bool ${Type}::isSparse() const { return backend() == kSparseCPU || backend() == kSparseCUDA; }
+bool ${Type}::isDistributed() const { return false; }
 
-std::unique_ptr<Storage> ${Type}::storage() {
+std::unique_ptr<Storage> ${Type}::storage() const {
   return std::unique_ptr<Storage>(new ${Storage}(context));
 }
-std::unique_ptr<Storage> ${Type}::storage(size_t size) {
+std::unique_ptr<Storage> ${Type}::storage(size_t size) const {
   return std::unique_ptr<Storage>(new ${Storage}(context,size));
 }
-std::unique_ptr<Storage> ${Type}::storageFromBlob(void * data, int64_t size) {
+std::unique_ptr<Storage> ${Type}::storageFromBlob(void * data, int64_t size) const {
     return std::unique_ptr<Storage>(
       new ${Storage}(context,data,size));
 }
-Tensor ${Type}::unsafeTensorFromTH(void * th_pointer, bool retain) {
+Tensor ${Type}::unsafeTensorFromTH(void * th_pointer, bool retain) const {
   if (retain)
     ${THTensor}_retain(${state,} (${THTensor}*) th_pointer);
   return Tensor(new ${Tensor}(context,(${THTensor}*)(th_pointer)), false);
 }
-std::unique_ptr<Generator> ${Type}::generator() {
+std::unique_ptr<Generator> ${Type}::generator() const {
   return std::unique_ptr<Generator>(new ${Generator}(context));
 }
 

@@ -15,20 +15,20 @@ void Type::registerAll(Context * context) {
   ${type_registrations}
 }
 
-Tensor Type::copy(const Tensor & src) {
+Tensor Type::copy(const Tensor & src) const {
   Tensor r = this->tensor();
   r.copy_(src);
   return r;
 }
 
-Type & Type::toBackend(Backend b) {
+Type & Type::toBackend(Backend b) const {
   return context->getType(b,scalarType());
 }
-Type & Type::toScalarType(ScalarType s) {
+Type & Type::toScalarType(ScalarType s) const {
   return context->getType(backend(),s);
 }
 
-Tensor Type::tensorFromBlob(void * data, IntList sizes) {
+Tensor Type::tensorFromBlob(void * data, IntList sizes) const {
   std::vector<int64_t> strides(sizes.size());
   int64_t stride = 1;
   for(size_t i = sizes.size(); i > 0; --i) {
@@ -37,7 +37,7 @@ Tensor Type::tensorFromBlob(void * data, IntList sizes) {
   }
   return tensorFromBlob(data, sizes, strides);
 }
-Tensor Type::tensorFromBlob(void * data, IntList sizes, IntList strides) {
+Tensor Type::tensorFromBlob(void * data, IntList sizes, IntList strides) const {
   // size of the underlying storage is 1 bigger than the offset
   // of the last element according to stride
   int64_t size = 1;
@@ -51,7 +51,7 @@ Tensor Type::tensorFromBlob(void * data, IntList sizes, IntList strides) {
   auto storage = storageFromBlob(data,size);
   return tensor(*storage, 0, sizes, strides);
 }
-Tensor Type::scalarTensor(Scalar s) {
+Tensor Type::scalarTensor(Scalar s) const {
   if(s.isBackedByTensor())
     return s.t.toType(*this);
   return tensor({}).fill_(s);
