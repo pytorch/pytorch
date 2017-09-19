@@ -18,7 +18,12 @@ nccl::NCCLExecution getNCCLElements(
   for (auto i = 0; i < op->InputSize(); ++i) {
     auto& el = ex.elements[i];
     el.src = &(op->Input<TensorCUDA>(i));
-    if (i < op->OutputSize()) {
+    if (op->OutputSize() == 1) {
+      // Reduce op
+      if (i == ex.root) {
+        el.dst = op->Output<TensorCUDA>(0);
+      }
+    } else if (i < op->OutputSize()) {
       el.dst = op->Output<TensorCUDA>(i);
     }
     // TODO - expensive (>1ms) - cache these.
@@ -95,8 +100,6 @@ class NCCLReduceOp final : public Operator<CUDAContext> {
     if (InputSize() == 1)
       return true;
     const auto& ex = getNCCLElements(this, context_);
-    CAFFE_ENFORCE_EQ(
-        ex.root, 0, "NCCLReduce has spurious deadlocks for non-zero root");
 
     if (AllInputsAre<float>(this)) {
       nccl::NCCL<float>::Reduce(ex);
@@ -193,7 +196,7 @@ OPERATOR_SCHEMA(NCCLReduce)
     .NumOutputs(1)
     .IdenticalTypeAndShapeOfInput(0)
     .InputsCanCrossDevices()
-    .AllowInplace({{0, 0}})
+    .AllowInplace([](int in, int out) -> bool { return (out == 0); })
     .DeviceInferenceFunction(ncclOpDevInfer);
 SHOULD_NOT_DO_GRADIENT(NCCLReduce);
 
