@@ -1170,7 +1170,7 @@ class TestNN(NNTestCase):
         self.assertTrue(gradcheck(lambda x: F.normalize(x, p=1, dim=-1), (inputs,)))
         self.assertTrue(gradcheck(lambda x: F.normalize(x, p=2, dim=-2), (inputs,)))
 
-    def _test_maxpool_indices(self, num_dim, type=torch.FloatTensor):
+    def _test_maxpool_indices(self, num_dim, adaptive=False, type=torch.FloatTensor):
         def expected_indices(dim):
             if dim == 1:
                 return torch.DoubleTensor([1, 3]).repeat(2, 2, 1)
@@ -1191,7 +1191,11 @@ class TestNN(NNTestCase):
                 col = torch.arange(6, 63, 8)
                 return torch.stack([col, col + 2], 1).view(2, 2, 2, 2)
 
-        module_cls = getattr(nn, 'MaxPool{}d'.format(num_dim))
+        if adaptive:
+            cls_name = 'AdaptiveMaxPool{}d'.format(num_dim)
+        else:
+            cls_name = 'MaxPool{}d'.format(num_dim)
+        module_cls = getattr(nn, cls_name)
         module = module_cls(2, return_indices=True).type(type)
         numel = 4 ** (num_dim + 1)
         input = torch.arange(1, numel + 1).view(2, 2, *repeat(4, num_dim)).type(type)
@@ -1237,35 +1241,35 @@ class TestNN(NNTestCase):
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     def test_MaxPool1d_indices_cuda(self):
-        self._test_maxpool_indices(1, torch.cuda.FloatTensor)
+        self._test_maxpool_indices(1, type=torch.cuda.FloatTensor)
 
     def test_MaxPool2d_indices(self):
         self._test_maxpool_indices(2)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     def test_MaxPool2d_indices_cuda(self):
-        self._test_maxpool_indices(2, torch.cuda.FloatTensor)
+        self._test_maxpool_indices(2, type=torch.cuda.FloatTensor)
 
     def test_MaxPool3d_indices(self):
         self._test_maxpool_indices(3)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     def test_MaxPool3d_indices_cuda(self):
-        self._test_maxpool_indices(3, torch.cuda.FloatTensor)
+        self._test_maxpool_indices(3, type=torch.cuda.FloatTensor)
 
     def test_AdaptiveMaxPool1d_indices(self):
-        self._test_maxpool_indices(1)
+        self._test_maxpool_indices(1, adaptive=True)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     def test_AdaptiveMaxPool1d_indices_cuda(self):
-        self._test_maxpool_indices(1, torch.cuda.FloatTensor)
+        self._test_maxpool_indices(1, adaptive=True, type=torch.cuda.FloatTensor)
 
     def test_AdaptiveMaxPool2d_indices(self):
-        self._test_maxpool_indices(2)
+        self._test_maxpool_indices(2, adaptive=True)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     def test_AdaptiveMaxPool2d_indices_cuda(self):
-        self._test_maxpool_indices(2, torch.cuda.FloatTensor)
+        self._test_maxpool_indices(2, adaptive=True, type=torch.cuda.FloatTensor)
 
     def _test_scatter(self, tensor):
         x = Variable(tensor, requires_grad=True)
