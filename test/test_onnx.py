@@ -54,6 +54,16 @@ class TestONNX(TestCase):
         torch._C._jit_pass_onnx(trace)
         self.assertONNXExpected(trace.export())
 
+    def test_concat(self):
+        class ConcatNet(nn.Module):
+            def forward(self, inputs):
+                return torch.cat(inputs, 1)
+
+        # volatile is of particular interest; there was a bug involving this
+        x = Variable(torch.randn(2, 3), volatile=True)
+        y = Variable(torch.randn(2, 3), volatile=True)
+        self.assertONNXExpected(export_to_string(ConcatNet(), ((x, y),)))
+
     def test_permute(self):
         x = Variable(torch.Tensor([[[[[[0]]]]]]), requires_grad=True)
         trace, _ = torch.jit.record_trace(lambda x: x.permute(0, 1, 4, 2, 5, 3), x)
