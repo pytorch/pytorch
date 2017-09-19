@@ -41,17 +41,14 @@ class Reader(object):
         self._schema = schema
 
     def setup_ex(self, init_net, finish_net):
-        """Nets to be executed once at startup and finish.
-           Experimental extension. Don't use yet"""
+        """Nets to be executed once at startup and finish."""
         pass
 
     def read_ex(self, local_init_net, local_finish_net):
-        """Experimental extension to the interface. Don't use yet"""
         read_net = core.Net('reader_body')
         return ([read_net], ) + self.read(read_net)
 
     def read_record_ex(self, local_init_net, local_finish_net):
-        """Experimental extension to the interface. Don't use yet"""
         nets, should_stop, fields = self.read_ex(
             local_init_net, local_finish_net)
         if self._schema:
