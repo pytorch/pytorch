@@ -24,10 +24,15 @@ def benchmark_sparse_lengths_sum(
     arr *= 17.01
 
     dtype_table = {
+        'uint8': np.uint8,
         'float': np.float32,
         'float16': np.float16
     }
     workspace.FeedBlob("X", arr.astype(dtype_table[dtype_str]))
+
+    scale_bias = np.random.rand(categorical_limit, 2).astype(np.float32)
+    workspace.FeedBlob("scale_bias", scale_bias.astype(np.float32))
+
 
     # In order to produce truly random lengths and indices, we will embed a
     # Python operator in the net to generate them.
@@ -42,8 +47,11 @@ def benchmark_sparse_lengths_sum(
         outputs[1].feed(lengths)
 
     net = core.Net("mynet")
-    net.Python(f)([], ["indices", "lengths"])
-    net.SparseLengthsSum(["X", "indices", "lengths"], "Y")
+    net.Python(f)([], ["indices", "lengths", ])
+    if dtype_str != "uint8":
+        net.SparseLengthsSum(["X", "indices", "lengths"], "Y")
+    else:
+        net.SparseLengthsSum8BitsRowwise(["X", "indices", "lengths", "scale_bias"], "Y")
     workspace.CreateNet(net)
 
     # Set random seed, so that repeated runs will keep the same sequence of

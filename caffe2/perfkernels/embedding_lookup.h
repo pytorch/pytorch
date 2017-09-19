@@ -40,6 +40,7 @@ void EmbeddingLookup(
     const IndexType* indices,
     const int* lengths,
     const float* weights, // optional, can be null for non-weighted sum
+    const float* scale_bias, // optional scale & bias params for uint8 input
     bool normalize_by_lengths,
     OutType* out);
 
