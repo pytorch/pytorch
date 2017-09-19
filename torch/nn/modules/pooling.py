@@ -807,8 +807,8 @@ class LPPool1d(Module):
 
     Examples::
         >>> # power-2 pool of window of length 3, with stride 2.
-        >>> m = nn.LPPool2d(2, 3, stride=2)
-        >>> input = autograd.Variable(torch.randn(20, 16, 50, 32))
+        >>> m = nn.LPPool1d(2, 3, stride=2)
+        >>> input = autograd.Variable(torch.randn(20, 16, 50))
         >>> output = m(input)
     """
 
