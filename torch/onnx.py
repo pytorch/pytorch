@@ -76,33 +76,36 @@ def _export(model, args, f, export_params=True, verbose=False, training=False):
     # Special case for common case of passing a single Variable
     if isinstance(args, torch.autograd.Variable):
         args = (args, )
-    # Look at the state_dict *prior* to running the model, as this
-    # accurately captures what inputs we actually passed to the model.
-    # If we run it afterwards, a buggy forward pass could have
-    # added/deleted parameters, changing the structure of the state_dict.
-    #
-    # Note that it's possible the actual /data/ may change by the time we
-    # actually export the model, because we're not cloning the parameters
-    # here.  This shouldn't happen, because we've turned off training
-    # mode and networks in inference mode should be purely functional.
-    # But it's user code; anything can happen!
-    params = None
+
+    # A basic sanity check: make sure the state_dict keys are the same
+    # before and after running the model.  Fail fast!
+    orig_state_dict_keys = model.state_dict().keys()
+
+    # By default, training=False, which is good because running a model in
+    # training mode could result in internal buffers getting updated, dropout
+    # getting applied, etc.  If you really know what you're doing, you
+    # can turn training=True (or None, to preserve whatever the original
+    # training mode was.)
+    with set_training(model, training):
+        trace, torch_out = torch.jit.record_trace(model, *args, num_derivatives=0)
+
+    if orig_state_dict_keys != model.state_dict().keys():
+        raise RuntimeError("state_dict changed after running the tracer; "
+                           "something weird is happening in your model!")
+
+    torch._C._jit_pass_onnx(trace)
+
+    if verbose:
+        print(trace)
+
+    # TODO: Don't allocate a in-memory string for the protobuf
     if export_params:
         # NB: OrderedDict values is not actually a list, but trace.export is
         # not duck-typed and expects an actual list.
-        params = list(model.state_dict().values())
-    # It's important to run the model in inference mode when exporting;
-    # otherwise internal buffers may get updated, dropout gets applied, etc.
-    with set_training(model, training):
-        trace, torch_out = torch.jit.record_trace(model, *args, num_derivatives=0)
-    torch._C._jit_pass_onnx(trace)
-    if verbose:
-        print(trace)
-    # TODO: Don't allocate a in-memory string for the protobuf
-    if export_params:
-        proto = trace.export(params)
+        proto = trace.export(list(model.state_dict().values()))
     else:
         proto = trace.export()
+
     torch.serialization._with_file_like(f, "wb", lambda f: f.write(proto))
     return torch_out
 
