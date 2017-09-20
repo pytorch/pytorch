@@ -32,6 +32,11 @@ CAFFE2_DEFINE_int(caffe2_cub_max_bin, 10,
 CAFFE2_DEFINE_int(caffe2_cub_max_managed_mb, 10 * 1024,
              "If using cub as the memory allocators, sets the maximum amount "
              "of memory managed in gigabytes");
+CAFFE2_DEFINE_bool(
+    caffe2_cub_print_allocation_events,
+    false,
+    "If true CachingDeviceAllocator will print allocation and deallocation "
+    "events to stdout.");
 
 CAFFE2_DEFINE_bool(
     caffe2_gpu_memory_tracking,
@@ -169,8 +174,7 @@ static void SetUpCub() {
         FLAGS_caffe2_cub_max_bin,
         size_t(FLAGS_caffe2_cub_max_managed_mb) * 1024L * 1024L,
         false,
-        false // debug
-    ));
+        FLAGS_caffe2_cub_print_allocation_events));
   } catch (...) {
     CAFFE_THROW("Some error happened at cub initialization.");
   }

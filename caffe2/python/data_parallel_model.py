@@ -46,6 +46,8 @@ def Parallelize(
     net_type='dag',
     broadcast_computed_params=True,
     optimize_gradient_memory=False,
+    dynamic_memory_management=False,
+    blobs_to_keep=None,
     use_nccl=False,
     max_concurrent_distributed_ops=16,
     cpu_device=False,
@@ -87,9 +89,15 @@ def Parallelize(
                         use <TBD>.
       net_type:         Network type
       optimize_gradient_memory: whether to apply 'memonger' to share blobs
-                        in gradient computation to reduce memory footprint
-      cpu_device        Use CPU instead of GPU
       shared_model      (only for CPU) use same parameters on each device
+                        in gradient computation to reduce memory footprint.
+      dynamic_memory_management: Whether to apply dynamic memory optimization
+                        by freeing unused blobs. The underlying (de)allocation
+                        uses cached allocator. For GPU training PLEASE MAKE SURE
+                        caffe2_cuda_memory_pool is set.
+      blobs_to_keep :   A list of blob names to keep and don't free during
+                        dynamic memory optimization (for example loss blob).
+      cpu_device        Use CPU instead of GPU.
     '''
     assert scope.CurrentDeviceScope() is None \
         or scope.CurrentDeviceScope().device_type == caffe2_pb2.CPU, \
@@ -311,8 +319,12 @@ def Parallelize(
                 ):
                     post_sync_builder_fun(model_helper_obj)
 
+    assert not (optimize_gradient_memory and dynamic_memory_management)
     if optimize_gradient_memory:
         _OptimizeGradientMemorySimple(model_helper_obj, losses_by_gpu, devices)
+
+    if dynamic_memory_management:
+        _AddDynamicMemoryOptimization(model_helper_obj, blobs_to_keep, devices)
 
     model_helper_obj._data_parallel_model_init_nets = [
         model_helper_obj.param_init_net,
@@ -1536,6 +1548,20 @@ def _OptimizeGradientMemorySimple(model, losses_by_gpu, devices):
             namescope,
             share_activations=False,
         )
+
+
+def _AddDynamicMemoryOptimization(model, blobs_to_keep, devices):
+    blobs_to_keep_all_devices = set()
+    if blobs_to_keep is not None:
+        for device in devices:
+            for blob_name in blobs_to_keep:
+                blobs_to_keep_all_devices.add(
+                    "{}_{}/{}".format(model._device_prefix, device, blob_name)
+                )
+    model.net._net = memonger.release_blobs_when_used(
+        model.net.Proto(),
+        blobs_to_keep_all_devices
+    )
 
 
 def OptimizeGradientMemory(model,
