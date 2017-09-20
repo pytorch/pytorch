@@ -10,10 +10,11 @@
 #ifdef _WIN32
 #undef PyLong_FromLong
 #undef PyLong_AsLong
+#undef PyLong_FromUnsignedLong
 
-#define PyLong_FromLong PyLong_FromLongLong
-#define PyLong_AsLong PyLong_AsLongLong
-
+#define PyLong_FromLong         PyLong_FromLongLong
+#define PyLong_AsLong           PyLong_AsLongLong
+#define PyLong_FromUnsignedLong PyLong_FromUnsignedLongLong
 #endif
 
 // Back-compatibility macros, Thanks to http://cx-oracle.sourceforge.net/
