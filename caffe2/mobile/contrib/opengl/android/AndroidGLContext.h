@@ -11,7 +11,6 @@ enum GL_Renderer { Adreno, Mali /*, PowerVR */ };
 class AndroidGLContext : public GLContext {
  private:
   EGLContext _eglcontext;
-  static std::unordered_map<std::string, GL_Renderer> _renderer_map;
 
   EGLContext create_opengl_thread_context();
   bool opengl_thread_context_exists();
