@@ -172,16 +172,27 @@ void THNN_(LookupTable_renorm)(
   int64_t stride = THCTensor_(stride)(state, weight, 0);
 
   // get the unique indices
-  thrust::device_ptr<real> weight_ptr(THCTensor_(data)(state, weight));
   thrust::device_ptr<THCIndex_t> idx_ptr(THCIndexTensor_(data)(state, idx));
   thrust::device_ptr<THCIndex_t> end_ptr(thrust::unique(idx_ptr, idx_ptr+numel));
   numel = end_ptr - idx_ptr;
 
-  pow_v<real, accreal> unary_pow(normType);
-  thrust::plus<accreal> binary_plus;
+  real * weight_ptr_raw = THCTensor_(data)(state, weight);
+  THCIndex_t * idx_ptr_raw = THCIndexTensor_(data)(state, idx);
 
-  thrust::for_each(idx_ptr, end_ptr, 
-      renorm_functor<real, accreal>(weight_ptr, stride, maxNorm, normType, binary_plus, unary_pow));
+  THCIndex_t num_blocks = numel;
+  // get the next highest power of 2 for algo correctness
+  int64_t threads_per_block = stride - 1;
+  threads_per_block |= threads_per_block >> 1;
+  threads_per_block |= threads_per_block >> 2;
+  threads_per_block |= threads_per_block >> 4;
+  threads_per_block |= threads_per_block >> 8;
+  threads_per_block |= threads_per_block >> 16;
+  threads_per_block |= threads_per_block >> 32;
+  threads_per_block++;
+
+  calculate_norms_and_renorm<real, accreal>
+    <<<num_blocks, threads_per_block, threads_per_block * sizeof(accreal)>>>
+    (weight_ptr_raw, idx_ptr_raw, normType, maxNorm, normType_, stride);
 
 }
 

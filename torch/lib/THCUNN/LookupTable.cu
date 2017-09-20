@@ -162,16 +162,9 @@ __global__ void cunn_LookupTable_accGradParametersKernel(
   }
 }
 
-/*
- * Keep the norm of weight smaller than maxNorm
- */
 template <typename Dtype, typename Acctype>
-struct pow_v
-{
-  Acctype normType;
-  pow_v(Dtype v) : normType(ScalarConvert<Dtype, Acctype>::to(v)) {}
-  __host__ __device__
-  Acctype operator()(const Dtype& x) const {
+__device__
+Acctype fast_pow(Dtype x, Acctype normType) {
     Acctype xA = ScalarConvert<Dtype, Acctype>::to(x);
     if (normType == 1)
       return std::abs(xA);
@@ -179,52 +172,61 @@ struct pow_v
       return xA * xA;
     else
       return std::pow(std::abs(xA), normType);
-  }
-};
+}
 
-template <typename T>
-struct multiply_s
+template <typename Dtype>
+__device__
+Dtype get_padded_value(Dtype *weight_ptr, THCIndex_t idx, int64_t dim) 
 {
-  T scale;
-  multiply_s(T s) : scale(s) {}
-  __host__ __device__
-  T operator()(const T& x) const {
-    return x * scale;
-  }
-};
+  if (idx < dim)
+    return weight_ptr[idx];
+  else
+    return 0;
+}
 
+/* Calculate norms of the rows of weight_ptr given by idx_ptr and capture them in norms */
 template <typename Dtype, typename Acctype>
-struct renorm_functor
+__global__
+void calculate_norms_and_renorm(Dtype *weight_ptr, THCIndex_t *idx_ptr, Dtype normType, 
+    Dtype maxNorm, Acctype normType_, int64_t dim)
 {
-  thrust::device_ptr<Dtype> weight_ptr;
-  int64_t stride;
-  Dtype maxNorm;
-  Dtype normType;
-  thrust::plus<Acctype> binary_plus;
-  pow_v<Dtype, Acctype> unary_pow;
+  // Some casting hacks since dynamic shared memory and templates don't work together:
+  extern __shared__ __align__(sizeof(Acctype)) unsigned char smem[];
+  Acctype *sdata = reinterpret_cast<Acctype *>(smem);
 
-  renorm_functor(
-      thrust::device_ptr<Dtype> w, int64_t s, Dtype m, Dtype n, 
-      thrust::plus<Acctype> bp, pow_v<Dtype, Acctype> up
-  ) : weight_ptr(w), stride(s), maxNorm(m), normType(n), 
-      binary_plus(bp), unary_pow(up) {}
+  int64_t tid = threadIdx.x;
+  int64_t idx = (idx_ptr[blockIdx.x] - TH_INDEX_BASE) * dim + tid;
 
-  #pragma hd_warning_disable
-  __host__ __device__
-  void operator()(const THCIndex_t idx)
-  {
-    THCIndex_t k  = idx - TH_INDEX_BASE;
-    thrust::device_ptr<Dtype> row_ptr = weight_ptr + k * stride;
-    Acctype norm = thrust::transform_reduce(thrust::device, row_ptr, row_ptr + stride,
-      unary_pow, (Acctype) 0, binary_plus);
-    norm = std::pow(norm, (Acctype) (1.0 / normType));
-    if (norm > ScalarConvert<Dtype, Acctype>::to(maxNorm))
-    {
-      multiply_s<Dtype> unary_mul(ScalarConvert<Acctype, Dtype>::to(maxNorm / (norm + 1e-7)));
-      thrust::transform(thrust::device, row_ptr, row_ptr + stride, row_ptr, unary_mul);
+  // Do the first addition and the initial exponents in the load
+  // Shenanigans here since we need to work with a power-of-2 block size
+  // effectively pad the matrix with zeroes if needed
+  if (tid > dim)
+    sdata[tid] = (Acctype) 0;
+  else 
+    sdata[tid] = fast_pow(weight_ptr[idx], normType_);
+
+  __syncthreads();
+
+  // iterative merging algorithm
+  for(int64_t i = blockDim.x / 2; i > 0; i >>= 1) {
+    if (tid < i) {
+      sdata[tid] += sdata[tid+i];
     }
+    __syncthreads();
   }
-};
+
+  if (tid == 0) {
+    sdata[0] = std::pow(sdata[0], (1.0/normType_)); 
+  }
+  __syncthreads();
+  // now we renormalize the blocks that need it
+  if (sdata[0] > ScalarConvert<Dtype, Acctype>::to(maxNorm)) {
+    Dtype factor = ScalarConvert<Acctype, Dtype>::to(maxNorm / (sdata[0] + 1e-7));
+    if (tid < dim)
+      weight_ptr[idx] *= factor;
+  }
+
+}
 
 #include "generic/LookupTable.cu"
 #include "THCGenerateFloatTypes.h"
