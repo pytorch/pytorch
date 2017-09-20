@@ -124,6 +124,9 @@
   self: norm_backward(grad, self - other, p)
   other: -norm_backward(grad, self - other, p)
 
+- name: div(Tensor self, Scalar value)
+  self: grad / value
+
 - name: div(Tensor self, Tensor other)
   self: grad / other
   other: -grad * self / (other * other)
@@ -222,7 +225,7 @@
 
 - name: ne
 
-- name: neg
+- name: neg(Tensor self)
   self: grad.neg()
 
 - name: nonzero
@@ -277,10 +280,14 @@
 - name: sin(Tensor self)
   self: grad * self.cos()
 
-- name: sinh
+- name: sinh(Tensor self)
+  self: grad * self.cosh()
+
 - name: size
 - name: sort
-- name: sqrt
+
+- name: sqrt(Tensor self)
+  self: grad * self.pow(-0.5) / 2
 
 - name: squeeze(Tensor self)
   self: unsqueeze_to(grad, self.sizes());
