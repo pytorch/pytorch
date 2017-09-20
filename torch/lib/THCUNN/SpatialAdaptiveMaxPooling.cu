@@ -12,60 +12,60 @@
  */
  template <typename T>
 __global__ void adaptivemaxpool(T *input, T *output, THCIndex_t *indices,
-                        int input_n, int input_h, int input_w,
-                        int output_h, int output_w,
-                        int strideh, int stridew,
-                        int strided)
+                        int sizeD, int isizeH, int isizeW,
+                        int osizeH, int osizeW,
+                        int istrideH, int istrideW,
+                        int istrideD)
 {
   // iterators
-  int xx, yy;
+  int ow, oh;
 
   // compute offsets based on thread/block ID
-  int o = blockIdx.x;
-  int i = o;
-  //int k = blockIdx.x % input_n;
+  int o_plane = blockIdx.x;
+  int i_plane = o_plane;
+  //int k = blockIdx.x % sizeD;
 
-  int xx_start = threadIdx.x;
-  int xx_end = output_w;
-  const int xx_step = blockDim.x;
+  int ostartW = threadIdx.x;
+  int oendW = osizeW;
+  const int ostepW = blockDim.x;
 
-  int yy_start = blockDim.y*blockIdx.y + threadIdx.y;
-  int yy_end = output_h;
-  const int yy_step = blockDim.y*gridDim.y;
+  int ostartH = blockDim.y*blockIdx.y + threadIdx.y;
+  int oendH = osizeH;
+  const int ostepH = blockDim.y*gridDim.y;
   // select input/output plane
-  output = output + o*output_w*output_h;
-  input = input + i*strided;
-  indices = indices + o*output_w*output_h;
+  output = output + o_plane*osizeW*osizeH;
+  input = input + i_plane*istrideD;
+  indices = indices + o_plane*osizeW*osizeH;
 
   // For all output pixels...
-  for(yy = yy_start; yy < yy_end; yy+=yy_step) {
+  for(oh = ostartH; oh < oendH; oh+=ostepH) {
 
-    int y_start = (int)floor(float(yy) / output_h * input_h);
-    int y_end   = (int)ceil(float(yy+1) / output_h * input_h);
-    int kH = y_end-y_start;
+    int istartH = (int)floor(float(oh) / osizeH * isizeH);
+    int iendH   = (int)ceil(float(oh+1) / osizeH * isizeH);
+    int kH = iendH-istartH;
 
-    for(xx = xx_start; xx < xx_end; xx+=xx_step) {
-      int x_start = (int)floor(float(xx) / output_w * input_w);
-      int x_end   = (int)ceil(float(xx + 1) / output_w * input_w);
+    for(ow = ostartW; ow < oendW; ow+=ostepW) {
+      int istartW = (int)floor(float(ow) / osizeW * isizeW);
+      int iendW   = (int)ceil(float(ow + 1) / osizeW * isizeW);
 
-      int kW = x_end-x_start;
+      int kW = iendW-istartW;
 
       // Compute the mean of the input image...
-      T *ptr_input = input + y_start*strideh + x_start*stridew;
-      T *ptr_output = output + yy*output_w + xx;
-      THCIndex_t *ptr_ind = indices + yy*output_w + xx;
+      T *ptr_input = input + istartH*istrideH + istartW*istrideW;
+      T *ptr_output = output + oh*osizeW + ow;
+      THCIndex_t *ptr_ind = indices + oh*osizeW + ow;
       int argmax = -1;
       T max = THCNumerics<T>::min();
-      int kx, ky;
-      for(ky = 0; ky < kH; ky++) {
-        for(kx = 0; kx < kW; kx++) {
-          T val = ptr_input[kx*stridew];
+      int iw, ih;
+      for(ih = 0; ih < kH; ih++) {
+        for(iw = 0; iw < kW; iw++) {
+          T val = ptr_input[iw*istrideW];
           if (val > max) {
             max = val;
-            argmax = (ky+y_start)*input_w + kx+x_start;
+            argmax = (ih+istartH)*isizeW + iw+istartW;
           }
         }
-        ptr_input += strideh; // next input line
+        ptr_input += istrideH; // next input line
       }
       // Update output and argmax
       *ptr_output = max;
@@ -80,45 +80,45 @@ __global__ void adaptivemaxpool(T *input, T *output, THCIndex_t *indices,
  */
  template <typename T>
 __global__ void adaptivemaxgradinput(T *gradInput, T *gradOutput, THCIndex_t *indices,
-                             int input_n, int input_h, int input_w,
-                             int output_h, int output_w)
+                             int sizeD, int isizeH, int isizeW,
+                             int osizeH, int osizeW)
 {
   // iterators
-  int xx, yy;
+  int ow, oh;
 
   // compute offsets based on thread/block ID
-  int o = blockIdx.x;
-  int i = o;
-  //int k = blockIdx.x % input_n;
+  int o_plane = blockIdx.x;
+  int i_plane = o_plane;
+  //int k = blockIdx.x % sizeD;
 
-  int xx_start = threadIdx.x;
-  int xx_end = output_w;
-  int xx_step = blockDim.x;
+  int ostartW = threadIdx.x;
+  int oendW = osizeW;
+  int ostepW = blockDim.x;
 
-  int yy_start = blockDim.y*blockIdx.y + threadIdx.y;
-  int yy_end = output_h;
-  int yy_step = blockDim.y*gridDim.y;
+  int ostartH = blockDim.y*blockIdx.y + threadIdx.y;
+  int oendH = osizeH;
+  int ostepH = blockDim.y*gridDim.y;
 
   // select input/output plane
-  gradOutput = gradOutput + o*output_w*output_h;
-  gradInput = gradInput + i*input_w*input_h;
-  indices = indices + o*output_w*output_h;
+  gradOutput = gradOutput + o_plane*osizeW*osizeH;
+  gradInput = gradInput + i_plane*isizeW*isizeH;
+  indices = indices + o_plane*osizeW*osizeH;
 
   // compute gradInput
-  for(yy = yy_start; yy < yy_end; yy+=yy_step) {
+  for(oh = ostartH; oh < oendH; oh+=ostepH) {
 
-    int y_start = (int)floor(float(yy) / output_h * input_h);
+    int istartH = (int)floor(float(oh) / osizeH * isizeH);
 
-    for(xx = xx_start; xx < xx_end; xx+=xx_step) {
+    for(ow = ostartW; ow < oendW; ow+=ostepW) {
 
-      int x_start = (int)floor(float(xx) / output_w * input_w);
+      int istartW = (int)floor(float(ow) / osizeW * isizeW);
 
-      T *ptr_gradInput = gradInput + y_start*input_w + x_start;
-      T *ptr_gradOutput = gradOutput + yy*output_w + xx;
-      THCIndex_t *ptr_ind = indices + yy*output_w + xx;
+      T *ptr_gradInput = gradInput + istartH*isizeW + istartW;
+      T *ptr_gradOutput = gradOutput + oh*osizeW + ow;
+      THCIndex_t *ptr_ind = indices + oh*osizeW + ow;
       T z = *ptr_gradOutput;
 
-      int argmax = (*ptr_ind) - TH_INDEX_BASE - x_start - y_start*input_w;
+      int argmax = (*ptr_ind) - TH_INDEX_BASE - istartW - istartH*isizeW;
 
       ptr_gradInput[argmax] += z;
     }
@@ -133,44 +133,44 @@ __global__ void adaptivemaxgradinput(T *gradInput, T *gradOutput, THCIndex_t *in
  template <typename T>
 __global__ void atomicadaptivemaxgradinput(
   T *gradInput, T *gradOutput, THCIndex_t *indices,
-  int input_n, int input_h, int input_w, int output_h, int output_w
+  int sizeD, int isizeH, int isizeW, int osizeH, int osizeW
 )
 {
   // iterators
-  int xx, yy;
+  int ow, oh;
 
   // compute offsets based on thread/block ID
-  int o = blockIdx.x;
-  int i = o;
+  int o_plane = blockIdx.x;
+  int i_plane = o_plane;
 
-  int xx_start = threadIdx.x;
-  int xx_end = output_w;
-  int xx_step = blockDim.x;
+  int ostartW = threadIdx.x;
+  int oendW = osizeW;
+  int ostepW = blockDim.x;
 
-  int yy_start = blockDim.y*blockIdx.y + threadIdx.y;
-  int yy_end = output_h;
-  int yy_step = blockDim.y*gridDim.y;
+  int ostartH = blockDim.y*blockIdx.y + threadIdx.y;
+  int oendH = osizeH;
+  int ostepH = blockDim.y*gridDim.y;
 
   // select input/output plane
-  gradOutput = gradOutput + o*output_w*output_h;
-  gradInput = gradInput + i*input_w*input_h;
-  indices = indices + o*output_w*output_h;
+  gradOutput = gradOutput + o_plane*osizeW*osizeH;
+  gradInput = gradInput + i_plane*isizeW*isizeH;
+  indices = indices + o_plane*osizeW*osizeH;
 
   // compute gradInput
-  for(yy = yy_start; yy < yy_end; yy+=yy_step) {
+  for(oh = ostartH; oh < oendH; oh+=ostepH) {
 
-    int y_start = (int)floor(float(yy) / output_h * input_h);
+    int istartH = (int)floor(float(oh) / osizeH * isizeH);
 
-    for(xx = xx_start; xx < xx_end; xx+=xx_step) {
+    for(ow = ostartW; ow < oendW; ow+=ostepW) {
 
-      int x_start = (int)floor(float(xx) / output_w * input_w);
+      int istartW = (int)floor(float(ow) / osizeW * isizeW);
 
-      T *ptr_gradInput = gradInput + y_start*input_w + x_start;
-      T *ptr_gradOutput = gradOutput + yy*output_w + xx;
-      THCIndex_t *ptr_ind = indices + yy*output_w + xx;
+      T *ptr_gradInput = gradInput + istartH*isizeW + istartW;
+      T *ptr_gradOutput = gradOutput + oh*osizeW + ow;
+      THCIndex_t *ptr_ind = indices + oh*osizeW + ow;
       T z = *ptr_gradOutput;
 
-      int argmax = (*ptr_ind) - TH_INDEX_BASE - x_start - y_start*input_w;
+      int argmax = (*ptr_ind) - TH_INDEX_BASE - istartW - istartH*isizeW;
 
       // atomic add since different threads could update same variable
       atomicAdd(&(ptr_gradInput[argmax]), z);
