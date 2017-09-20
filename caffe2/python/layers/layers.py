@@ -131,7 +131,7 @@ class LayerParameter(object):
 
     @initializer.setter
     def initializer(self, op):
-        assert core.IsOperator(getattr(op, 'type', None)), \
+        assert op is None or core.IsOperator(getattr(op, 'type', None)), \
             "initializer expects an operator, got type: {}".format(type(op))
         self._initializer = op
         if op is not None:
