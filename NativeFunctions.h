@@ -2,6 +2,7 @@
 
 #include "ATen/ATen.h"
 #include "ATen/WrapDimUtils.h"
+#include "ATen/ExpandUtils.h"
 #include <vector>
 
 namespace at {
@@ -62,7 +63,7 @@ type_method_definition_dispatch: at::native::is_same_size
 [/NativeFunction]
 */
 static inline bool is_same_size(const Tensor &self, const Tensor &other) {
-  return self.dim() == other.dim() && self.sizes().equals(other.sizes());
+  return self.sizes().equals(other.sizes());
 }
 
 /*
@@ -96,6 +97,30 @@ static inline Tensor permute(const Tensor & self, IntList dims) {
     newStrides[i] = oldStrides[dim];
   }
   return self.as_strided(newSizes, newStrides);
+}
+
+/*
+[NativeFunction]
+name: expand
+arg: Tensor self
+arg: IntList sizes
+return: Tensor
+variants: method, function
+type_method_definition_level: base
+type_method_definition_dispatch: at::native::expand
+[/NativeFunction]
+*/
+static inline Tensor expand(const Tensor &self, IntList sizes) {
+  if (sizes.size() < (size_t)self.dim()) {
+    throw std::runtime_error("the number of sizes provided must be greater or equal to the "
+                             "number of dimensions in the tensor");
+  }
+
+  std::vector<int64_t> expandedSizes;
+  std::vector<int64_t> expandedStrides;
+  std::tie(expandedSizes, expandedStrides) = inferExpandGeometry(self, sizes);
+
+  return self.as_strided(expandedSizes, expandedStrides);
 }
 
 }
