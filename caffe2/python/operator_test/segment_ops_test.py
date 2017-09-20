@@ -53,6 +53,7 @@ class TesterBase:
                 op = core.CreateOperator(
                     prefix + op_name, inputs, ['output'], **operator_args
                 )
+                print('Operator %s' % op.type)
 
                 def seg_reduce(data, *args):
                     indices, segments = (
@@ -228,9 +229,9 @@ def max_grad(grad_out, outputs, inputs):
         out = flat_outputs[i]
         for j in range(blocks):
             idx = j * block_size + i
+            # we can produce multiple outputs for max
             if out == flat_inputs[idx]:
                 flat_grad_in[idx] = out_grad
-                break
 
     return np.resize(flat_grad_in, inputs[0].shape)
 
@@ -311,7 +312,7 @@ class TestSegmentOps(hu.HypothesisTestCase):
                 allow_empty=True,
             ),
             REFERENCES_ALL,
-            gpu=True,
+            gpu=workspace.has_gpu_support,
             grad_check=False,
         )(self)
 
