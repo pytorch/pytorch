@@ -116,7 +116,6 @@ class LayerModelHelper(model_helper.ModelHelper):
         self.add_global_constant('ONE', 1.0)
         self.add_global_constant('ZERO', 0.0)
         self.add_global_constant('ZERO_RANGE', [0, 0], dtype='int32')
-        self.add_global_constant('OFFLINE_TRAINING', True, dtype='bool')
 
     def _add_global_constants(self, init_net):
         for initializer_op in self.global_constant_initializers:
