@@ -13,9 +13,12 @@ import platform
 import ctypes
 import os
 import torch
+import traceback
+from torch._six import raise_from
 from multiprocessing.util import register_after_fork as _register_after_fork
 
 _initialized = False
+_queued_calls = []  # don't invoke these until initialization occurs
 _in_bad_fork = False  # this global is also used in torch.manual_seed
 _original_pid = False
 _cudart = None
@@ -67,8 +70,20 @@ a PyTorch version that has been compiled with your version
 of the CUDA driver.""".format(str(torch._C._cuda_getDriverVersion())))
 
 
+def _lazy_call(callable):
+    if _initialized:
+        callable()
+    else:
+        # Don't store the actual traceback to avoid memory cycle
+        _queued_calls.append((callable, traceback.format_stack()))
+
+
+class DeferredCudaCallError(Exception):
+    pass
+
+
 def _lazy_init():
-    global _initialized, _cudart, _original_pid
+    global _initialized, _cudart, _original_pid, _queued_calls
     if _initialized:
         return
     if _in_bad_fork:
@@ -89,6 +104,13 @@ def _lazy_init():
     _cudart.cudaGetErrorString.restype = ctypes.c_char_p
     _original_pid = os.getpid()
     _initialized = True
+    for queued_call, orig_traceback in _queued_calls:
+        try:
+            queued_call()
+        except Exception as e:
+            msg = ("CUDA call failed lazily at initialization with error: {}\n\n"
+                   "CUDA call was originally invoked at:\n\n{}").format(str(e), orig_traceback)
+            raise_from(DeferredCudaCallError(msg), e)
 
 
 def _after_fork(arg):
