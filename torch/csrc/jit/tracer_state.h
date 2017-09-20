@@ -34,10 +34,12 @@ using function_list = std::vector<std::pair<std::shared_ptr<Function>, int>>;
 // actual trace itself.
 
 struct VariableFlags {
-  static VariableFlags create(const Variable& var);
+  static VariableFlags of(const Variable& var);
+  bool verify(const Variable& var);
 
   bool requires_grad;
   bool is_volatile;
+  bool was_null;
 };
 
 struct TracingState : public std::enable_shared_from_this<TracingState> {

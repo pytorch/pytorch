@@ -545,7 +545,7 @@ struct TensorLerpOp {
 
 template <typename T>
 struct TensorCrossOp {
-  TensorCrossOp(long sx, long sy, long so) : sx(sx), sy(sy), so(so) {}
+  TensorCrossOp(int64_t sx, int64_t sy, int64_t so) : sx(sx), sy(sy), so(so) {}
 
   __device__ __forceinline__ void operator()(T* out, T* x, T*y) {
     out[0 * so] = THCNumerics<T>::sub(
@@ -564,7 +564,7 @@ struct TensorCrossOp {
     );
   }
 
-  const long sx, sy, so;
+  const int64_t sx, sy, so;
 };
 
 template <typename T>

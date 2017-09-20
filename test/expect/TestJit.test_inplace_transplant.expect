@@ -1,6 +1,6 @@
 graph(%1 : Double(1)) {
   %3 : Double(1), %4 : Handle = ^Clone()(%1), uses = [[%5.i0], []];
-  %6 : Double(1), %7 : Handle = ^AddConstant(2, True)(%3), uses = [[%8.i0], []];
-  %9 : Double(1), %10 : Handle = ^AddConstant(3, True)(%6), uses = [[%0.i0], []];
-  return (%9);
+  %6 : Double(1) = ^AddConstant(2, True)(%3), uses = [[%7.i0]];
+  %8 : Double(1) = ^AddConstant(3, True)(%6), uses = [[%0.i0]];
+  return (%8);
 }

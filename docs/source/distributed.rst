@@ -86,7 +86,7 @@ Currently three initialization methods are supported:
 TCP initialization
 ^^^^^^^^^^^^^^^^^^
 
-There are two ways to intialize using TCP, both requiring a network address
+There are two ways to initialize using TCP, both requiring a network address
 reachable from all processes and a desired ``world_size``. The first way
 requires specifying an address that belongs to the rank 0 process. This first way of
 initialization requires that all processes have manually specified ranks.
@@ -173,6 +173,10 @@ as they should never be created manually, but they are guaranteed to support two
 * ``is_completed()`` - returns True if the operation has finished
 * ``wait()`` - will block the process until the operation is finished.
   ``is_completed()`` is guaranteed to return True once it returns.
+  
+When using the MPI backend, :func:`~torch.distributed.isend` and :func:`~torch.distributed.irecv`
+support non-overtaking, which has some guarantees on supporting message order. For more detail, see
+http://mpi-forum.org/docs/mpi-2.2/mpi22-report/node54.htm#Node54
 
 .. autofunction:: isend
 

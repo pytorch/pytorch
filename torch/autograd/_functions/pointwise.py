@@ -4,7 +4,7 @@ import math
 from itertools import repeat
 
 from ..._thnn import type2backend
-from ..function import Function, InplaceFunction
+from ..function import Function, InplaceFunction, traceable
 from ..variable import Variable
 from .utils import maybe_unexpand, maybe_unexpand_or_view
 
@@ -53,6 +53,7 @@ class Log1p(Function):
         return grad_output.div(i.add(1))
 
 
+@traceable
 class Tanh(InplaceFunction):
 
     @staticmethod
@@ -73,7 +74,7 @@ class Tanh(InplaceFunction):
     @staticmethod
     def backward(ctx, grad_output):
         result, = ctx.saved_variables
-        if grad_output.volatile:
+        if grad_output.volatile and not ctx._is_tracing:
             grad_input = Variable(grad_output.data.new(grad_output.size()), volatile=True)
             backend = type2backend[type(result.data)]
             backend.Tanh_updateGradInput(backend.library_state, None, grad_output.data,
@@ -83,6 +84,7 @@ class Tanh(InplaceFunction):
         return grad_input, None
 
 
+@traceable
 class Sigmoid(InplaceFunction):
 
     @staticmethod
@@ -102,7 +104,7 @@ class Sigmoid(InplaceFunction):
     @staticmethod
     def backward(ctx, grad_output):
         result, = ctx.saved_variables
-        if grad_output.volatile:
+        if grad_output.volatile and not ctx._is_tracing:
             grad_input = Variable(grad_output.data.new(grad_output.size()), volatile=True)
             backend = type2backend[type(result.data)]
             backend.Sigmoid_updateGradInput(backend.library_state, None, grad_output.data,

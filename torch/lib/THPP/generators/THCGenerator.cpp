@@ -29,11 +29,11 @@ THCGenerator& THCGenerator::free() {
   return *this;
 }
 
-unsigned long THCGenerator::seed() {
+uint64_t THCGenerator::seed() {
   return THCRandom_initialSeed(state);
 }
 
-THCGenerator& THCGenerator::manualSeed(unsigned long seed) {
+THCGenerator& THCGenerator::manualSeed(uint64_t seed) {
   THCRandom_manualSeed(state, seed);
   return *this;
 }

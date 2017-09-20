@@ -39,36 +39,42 @@ class TestONNX(TestCase):
         z = -torch.sigmoid(torch.tanh(x * (x + y)))
         torch._C._tracer_exit((z,))
         torch._C._jit_pass_lint(trace)
-        self.assertONNXExpected(trace.export(False))
+        torch._C._jit_pass_onnx(trace)
+        self.assertONNXExpected(trace.export())
 
     def test_view(self):
         x = Variable(torch.Tensor([0]), requires_grad=True)
         trace, _ = torch.jit.record_trace(lambda x: x.view(1, 1), x)
-        self.assertONNXExpected(trace.export(False))
+        torch._C._jit_pass_onnx(trace)
+        self.assertONNXExpected(trace.export())
 
     def test_transpose(self):
         x = Variable(torch.Tensor([[0, 1], [2, 3]]), requires_grad=True)
         trace, _ = torch.jit.record_trace(lambda x: x.transpose(0, 1).transpose(1, 0), x)
-        self.assertONNXExpected(trace.export(False))
+        torch._C._jit_pass_onnx(trace)
+        self.assertONNXExpected(trace.export())
 
     def test_permute(self):
         x = Variable(torch.Tensor([[[[[[0]]]]]]), requires_grad=True)
         trace, _ = torch.jit.record_trace(lambda x: x.permute(0, 1, 4, 2, 5, 3), x)
-        self.assertONNXExpected(trace.export(False))
+        torch._C._jit_pass_onnx(trace)
+        self.assertONNXExpected(trace.export())
 
     def test_params(self):
         x = Variable(torch.Tensor([[1, 2], [3, 4]]), requires_grad=True)
         y = Variable(torch.Tensor([[1, 2], [3, 4]]), requires_grad=True)
         trace, _ = torch.jit.record_trace(lambda x, y: -torch.sigmoid(torch.tanh(x * (x + y))), x, y)
         initializers = [x.data]
-        self.assertONNXExpected(trace.export(initializers, False))
+        torch._C._jit_pass_onnx(trace)
+        self.assertONNXExpected(trace.export(initializers))
 
     def test_non_float_params(self):
         x = Variable(torch.LongTensor([[1, 2], [3, 4]]), requires_grad=True)
         y = Variable(torch.LongTensor([[1, 2], [3, 4]]), requires_grad=True)
         trace, _ = torch.jit.record_trace(lambda x, y: x * y + x, x, y)
         initializers = [x.data]
-        self.assertONNXExpected(trace.export(initializers, False))
+        torch._C._jit_pass_onnx(trace)
+        self.assertONNXExpected(trace.export(initializers))
 
     # TODO: Do an nn style test for these
     def test_batchnorm(self):

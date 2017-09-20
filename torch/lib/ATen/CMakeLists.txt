@@ -10,7 +10,9 @@ else(${CMAKE_VERSION} VERSION_LESS "2.8.12")
   endif(${CMAKE_VERSION} VERSION_LESS "3.1")
 endif(${CMAKE_VERSION} VERSION_LESS "2.8.12")
 
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -pedantic -Wno-vla")
+IF(NOT MSVC)
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -pedantic -Wno-vla")
+ENDIF(NOT MSVC)
 
 ################################################################################
 # Helper functions
@@ -125,8 +127,16 @@ IF(NOT DEFINED cwrap_files)
   )
 ENDIF()
 
+
+IF(DEFINED ENV{PYTORCH_PYTHON})
+  message(STATUS "Using python found in $ENV{PYTORCH_PYTHON}")
+  SET(PYCMD "$ENV{PYTORCH_PYTHON}")
+ELSE()
+  SET(PYCMD "python")
+ENDIF()
+
 SET(GEN_COMMAND
-    python ${CMAKE_CURRENT_SOURCE_DIR}/gen.py ${CUDA_FLAG}
+    ${PYCMD} ${CMAKE_CURRENT_SOURCE_DIR}/gen.py ${CUDA_FLAG}
     -s ${CMAKE_CURRENT_SOURCE_DIR}
     ${cwrap_files}
 )

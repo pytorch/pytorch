@@ -31,17 +31,17 @@
   switch (type) {                                                             \
     case ::thpp::Type::FLOAT: func<float>(args); break;                       \
     case ::thpp::Type::DOUBLE: func<double>(args); break;                     \
-    /* case ::thpp::Type::CHAR: func<char>(args); break; */                   \
-    /* case ::thpp::Type::UCHAR: func<unsigned char>(args); break; */         \
+    /* case ::thpp::Type::CHAR: func<int8_t>(args); break; */                   \
+    /* case ::thpp::Type::UCHAR: func<uint8_t>(args); break; */         \
     /* case ::thpp::Type::HALF: func<float>(args); break; */                  \
-    /* case ::thpp::Type::SHORT: func<short>(args); break; */                 \
-    /* case ::thpp::Type::USHORT: func<unsigned short>(args); break; */       \
-    /* case ::thpp::Type::INT: func<int>(args); break; */                     \
-    /* case ::thpp::Type::UINT: func<unsigned int>(args); break; */           \
-    /* case ::thpp::Type::LONG: func<long>(args); break; */                   \
-    /* case ::thpp::Type::ULONG: func<unsigned long>(args); break; */         \
-    /* case ::thpp::Type::LONG_LONG: func<long long>(args); break; */         \
-    /* case ::thpp::Type::ULONG_LONG: func<unsigned long long>(args); break; */ \
+    /* case ::thpp::Type::SHORT: func<int16_t>(args); break; */                 \
+    /* case ::thpp::Type::USHORT: func<uint16_t>(args); break; */       \
+    /* case ::thpp::Type::INT: func<int32_t>(args); break; */                     \
+    /* case ::thpp::Type::UINT: func<uint32_t>(args); break; */           \
+    /* case ::thpp::Type::LONG: func<int64_t>(args); break; */                   \
+    /* case ::thpp::Type::ULONG: func<uint64_t>(args); break; */         \
+    /* case ::thpp::Type::LONG_LONG: func<int64_t>(args); break; */         \
+    /* case ::thpp::Type::ULONG_LONG: func<uint64_t>(args); break; */ \
     default:                                                                  \
       throw std::runtime_error("Invalid " + std::string(#func) + " function type"); \
   }

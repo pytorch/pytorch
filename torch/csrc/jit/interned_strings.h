@@ -17,15 +17,20 @@ _(Return) \
 _(Eval) \
 _(Add) \
 _(Mul) \
-_(Negate) \
+_(Neg) \
 _(Sigmoid) \
 _(Tanh) \
 _(Constant) \
+_(Concat) \
+_(Slice) \
+_(Squeeze) \
 _(Undefined) \
 _(FusionGroup) \
-_(Chunk) \
-_(NumChunks) \
-_(Dim) \
+_(Split) \
+_(AddConstant) \
+_(Transpose) \
+_(Reshape) \
+_(split) \
 _(Offset) \
 _(value) \
 _(Subgraph) \
@@ -49,6 +54,9 @@ _(dilations) \
 _(dilation) \
 _(broadcast) \
 _(axis) \
+_(perm) \
+_(shape) \
+_(axes) \
 _(group)
 
 enum BuiltinSymbol {

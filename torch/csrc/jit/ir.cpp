@@ -100,33 +100,6 @@ static void emitUses(std::ostream & out, Node * n) {
   }
 }
 
-std::ostream& operator<<(std::ostream & out, const Type & t) {
-  TYPE_IF(&t, MultiType)
-    out << "Multi";
-  TYPE_ELSEIF(HandleType)
-    out << "Handle";
-  TYPE_ELSEIF(TensorType)
-    out << at::toString(value->scalarType()) << "(";
-    auto& sizes = value->sizes();
-    auto& strides = value->strides();
-    JIT_ASSERT(sizes.size() == strides.size());
-    for (size_t i = 0; i < sizes.size(); i++) {
-      if (i > 0) {
-        out << ", ";
-      }
-      // TODO: figure out a good way to output strides, or
-      // add a "debug" printing mode which adds the extra stuff
-      out << sizes[i]; // << "%" << strides[i];
-      int64_t expected = i + 1 < sizes.size() ? sizes[i+1]*strides[i+1] : 1;
-      if (strides[i] != expected) {
-        out << "!"; //mark non-contiguous
-      }
-    }
-    out << ")";
-  TYPE_END()
-  return out;
-}
-
 struct node_list_with_types {
   const node_list& nodes;
   bool use_newlines;
@@ -296,7 +269,7 @@ std::ostream& operator<<(std::ostream & out, Graph & g) {
   return out;
 }
 
-using node_set = std::set<Node*>;
+using node_set = std::set<const Node*>;
 #define ALL_OF(container) container.begin(), container.end()
 
 // These functions purposely operate on the internal members directly, to force
@@ -306,7 +279,7 @@ using node_set = std::set<Node*>;
 // NB: This assert is written to assume you don't have any unattached
 // nodes.  Unattached nodes can occur while manipulations to the
 // graph are occurring.
-void Node::lint() {
+void Node::lint() const {
   // Node invariants
   // - if node should live in list, nodes_iter is consistent
   // - Inputs are all marked as a use by the nodes they refer to
@@ -322,7 +295,7 @@ void Node::lint() {
     size_t i = 0;
     for (auto input : inputs_) {
       // WARNING: O(n^2)
-      JIT_ASSERT(std::find(ALL_OF(input->uses_), Use(this, i)) != input->uses_.end());
+      JIT_ASSERT(std::find(ALL_OF(input->uses_), Use(const_cast<Node*>(this), i)) != input->uses_.end());
       JIT_ASSERT(stage_ >= input->stage_);
       JIT_ASSERT(graph_->all_nodes.count(this) == 1);
       // Handle invariant
@@ -369,7 +342,7 @@ void Node::lint() {
     JIT_ASSERT(inputs_.size() == 0);
   IR_ELSEIF(Select)
     JIT_ASSERT(inputs_.size() == 1);
-  IR_ELSEIFM(PythonOp)
+  IR_ELSEIFM_CONST(PythonOp)
     std::size_t n_scalars = 0, n_tensors = 0;
     for (auto c : value->cconv) {
       if (c == 's') {
@@ -379,11 +352,11 @@ void Node::lint() {
       } else {
         JIT_ASSERT(0);
       }
-      JIT_ASSERT(value->pyobj != nullptr);
+      JIT_ASSERT(static_cast<bool>(value->pyobj));
     }
     JIT_ASSERT(n_scalars == value->scalar_args.size());
     JIT_ASSERT(n_tensors == inputs_.size());
-  IR_ELSEIFM(CppOp)
+  IR_ELSEIFM_CONST(CppOp)
     // TODO: add invariants
   IR_ELSEIF(Eval)
     // TODO: add invariants
@@ -392,7 +365,7 @@ void Node::lint() {
     JIT_ASSERT(inputs_.size() == 2);
   IR_ELSEIF(Mul)
     JIT_ASSERT(inputs_.size() == 2);
-  IR_ELSEIF(Negate)
+  IR_ELSEIF(Neg)
     JIT_ASSERT(inputs_.size() == 1);
   IR_ELSEIF(Sigmoid)
     JIT_ASSERT(inputs_.size() == 1);
@@ -401,13 +374,13 @@ void Node::lint() {
   IR_ELSEIF(FusionGroup)
     // TODO: Typecheck the parameters
     value->g(kSubgraph)->lint();
-  IR_ELSEIF(Chunk)
+  IR_ELSEIF(Split)
     JIT_ASSERT(inputs_.size() == 1);
   IR_END()
 
 }
 
-void Graph::lint() {
+void Graph::lint() const {
   // Graph invariants
 
   // Uncomment the following to see the graph
@@ -420,9 +393,9 @@ void Graph::lint() {
   // - next_unique_ is greater than all uniques in graph
   // - uniques in all_nodes are unique
 
-  std::unordered_set<Node*> in_scope;
+  std::unordered_set<const Node*> in_scope;
   std::unordered_set<size_t> seen_uniques;
-  auto check_node = [&](Node* n) {
+  auto check_node = [&](const Node* n) {
     auto b = in_scope.insert(n);
     JIT_ASSERT(b.second);
     auto b2 = seen_uniques.insert(n->unique_);
@@ -483,6 +456,16 @@ void Graph::lint() {
   sum_set.insert(ALL_OF(output_set));
   JIT_ASSERT(std::includes(ALL_OF(sum_set), ALL_OF(all_nodes_set)));
 
+  // graph->stage() should be equal to max(node.stage for node in graph->nodes())
+  if (nodes().begin() == nodes().end()) {
+    JIT_ASSERT(stage() == 0);
+  } else {
+    JIT_ASSERT(stage() == nodes().rbegin()->stage());
+  }
+}
+
+void Graph::dump() {
+  std::cout << *this << "\n";
 }
 
 void LintGraph(std::shared_ptr<Graph>& graph) {

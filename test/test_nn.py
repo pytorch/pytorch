@@ -12,6 +12,7 @@ from functools import wraps, reduce
 from operator import mul
 
 import torch
+import torch.backends.cudnn as cudnn
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.nn.parallel as dp
@@ -2686,8 +2687,7 @@ class TestNN(NNTestCase):
         grid = Variable(torch.randn(N, H, W, 2), requires_grad=True)
         self.assertTrue(gradcheck(lambda inp, grid: F.grid_sample(inp, grid), (input, grid)))
 
-        # test CPU against CUDA
-        if TEST_CUDNN:
+        def test_cpu_against_cuda(N, C, H, W):
             def test_shape(N, C, IH, IW, H, W):
                 input_cpu = Variable(torch.randn(C, N, IH, IW).transpose(0, 1), requires_grad=True)
                 grid_cpu = Variable(torch.randn(H, N, W, 2).transpose(0, 1), requires_grad=True)
@@ -2736,6 +2736,20 @@ class TestNN(NNTestCase):
             H = random.randint(1, IH)
             W = random.randint(1, IW)
             test_shape(N, C, IH, IW, H, W)
+
+        # test CUDNN against CPU
+        if TEST_CUDNN:
+            test_cpu_against_cuda(N, C, H, W)
+
+        # test CUDA (without CUDNN) against CPU
+        if TEST_CUDA:
+
+            # GridSampler will automatically use CUDNN if it is available
+            # so we disable CUDNN temporarily
+            original_cudnn_enabled = cudnn.enabled
+            cudnn.enabled = False
+            test_cpu_against_cuda(N, C, H, W)
+            cudnn.enabled = original_cudnn_enabled
 
     def test_affine_grid(self):
         # test known input on CPU
@@ -3719,9 +3733,30 @@ new_module_tests = [
         desc='norm',
     ),
     dict(
+        module_name='LPPool1d',
+        constructor_args=(1.5, 2),
+        input=torch.rand(1, 3, 7),
+        desc='norm',
+    ),
+    dict(
+        module_name='LPPool1d',
+        constructor_args=(2, 2, 3),
+        input_size=(1, 3, 7),
+    ),
+    dict(
+        module_name='ReflectionPad1d',
+        constructor_args=((1, 2),),
+        input_size=(2, 3, 8),
+    ),
+    dict(
         module_name='ReflectionPad2d',
         constructor_args=((1, 2, 3, 4),),
         input_size=(2, 3, 8, 8),
+    ),
+    dict(
+        module_name='ReplicationPad1d',
+        constructor_args=((1, 2),),
+        input_size=(2, 3, 4),
     ),
     dict(
         module_name='ReplicationPad2d',
@@ -3740,9 +3775,19 @@ new_module_tests = [
         desc='negative_dims'
     ),
     dict(
+        module_name='ConstantPad1d',
+        constructor_args=((1, 2), 2),
+        input_size=(2, 3, 4)
+    ),
+    dict(
         module_name='ConstantPad2d',
         constructor_args=((1, 2, 3, 4), 2),
         input_size=(2, 3, 4, 4)
+    ),
+    dict(
+        module_name='ConstantPad3d',
+        constructor_args=((1, 2, 3, 4, 1, 0), 2),
+        input_size=(2, 3, 4, 4, 5)
     ),
     dict(
         module_name='Conv3d',
@@ -3990,21 +4035,18 @@ new_module_tests = [
         module_name='AdaptiveMaxPool1d',
         constructor_args=(3,),
         input=torch.rand(1, 3, 5),
-        check_gradgrad=False,
     ),
     dict(
         module_name='AdaptiveMaxPool2d',
         constructor_args=(3,),
         input=torch.rand(1, 3, 5, 6),
         desc='single',
-        check_gradgrad=False,
     ),
     dict(
         module_name='AdaptiveMaxPool2d',
         constructor_args=((3, 4),),
         input=torch.rand(1, 3, 5, 6),
         desc='tuple',
-        check_gradgrad=False,
     ),
     dict(
         module_name='AdaptiveAvgPool1d',

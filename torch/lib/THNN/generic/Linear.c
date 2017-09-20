@@ -7,8 +7,8 @@ void THNN_(Linear_updateAddBuffer)(
           THTensor *input,
           THTensor *addBuffer)
 {
-  long nframe = THTensor_(size)(input,0);
-  long nElement = THTensor_(nElement)(addBuffer);
+  int64_t nframe = THTensor_(size)(input,0);
+  int64_t nElement = THTensor_(nElement)(addBuffer);
   if (nElement != nframe) {
     THTensor_(resize1d)(addBuffer,nframe);
     THTensor_(fill)(addBuffer,1.0);
@@ -23,7 +23,7 @@ void THNN_(Linear_updateOutput)(
           THTensor *bias,
           THTensor *addBuffer)
 {
-  long dim = THTensor_(nDimension)(input);
+  int64_t dim = THTensor_(nDimension)(input);
   if (dim == 1) {
     THTensor_(resize1d)(output,THTensor_(size)(weight,0));
     if (bias) {
@@ -35,8 +35,8 @@ void THNN_(Linear_updateOutput)(
     THTensor_(addmv)(output,1,output,1,weight,input);
   }
   else if (dim == 2) {
-    long nframe = THTensor_(size)(input,0);
-    long nElement = THTensor_(nElement)(output);
+    int64_t nframe = THTensor_(size)(input,0);
+    int64_t nElement = THTensor_(nElement)(output);
     THTensor_(resize2d)(output,nframe,THTensor_(size)(weight,0));
     if (THTensor_(nElement)(output) != nElement) {
       THTensor_(zero)(output);
@@ -60,13 +60,13 @@ void THNN_(Linear_updateGradInput)(
           THTensor *weight)
 {
   if (gradInput) {
-    long nElement = THTensor_(nElement)(gradInput);
+    int64_t nElement = THTensor_(nElement)(gradInput);
     THTensor_(resizeAs)(gradInput,input);
     if (THTensor_(nElement)(gradInput) != nElement) {
       THTensor_(zero)(gradInput);
     }
 
-    long dim = THTensor_(nDimension)(input);
+    int64_t dim = THTensor_(nDimension)(input);
     if (dim == 1) {
       THTensor *tweight = THTensor_(new)();
       THTensor_(transpose)(tweight,weight,0,1);
@@ -92,7 +92,7 @@ void THNN_(Linear_accGradParameters)(
           accreal scale_)
 {
   real scale = TH_CONVERT_ACCREAL_TO_REAL(scale_);
-  long dim = THTensor_(nDimension)(input);
+  int64_t dim = THTensor_(nDimension)(input);
   if (dim == 1) {
     THTensor_(addr)(gradWeight,1,gradWeight,scale,gradOutput,input);
     if (bias) {

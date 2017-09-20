@@ -10,6 +10,9 @@ import torch.autograd
 import torch.serialization
 import re
 import collections
+import string
+import json
+import math
 from ._utils import _range
 
 
@@ -44,13 +47,16 @@ def _export(model, args, f, export_params=True, kwargs=None, verbose=False):
     if not kwargs:
         kwargs = {}
     trace, torch_out = torch.jit.record_trace(model, *args, **kwargs)
+    torch._C._jit_pass_onnx(trace)
+    if verbose:
+        print(trace)
     # TODO: Don't allocate a in-memory string for the protobuf
     if export_params:
         # NB: OrderedDict values is not actually a list, but trace.export is
         # not duck-typed and expects an actual list.
-        proto = trace.export(list(model.state_dict().values()), verbose)
+        proto = trace.export(list(model.state_dict().values()))
     else:
-        proto = trace.export(verbose)
+        proto = trace.export()
     torch.serialization._with_file_like(f, "wb", lambda f: f.write(proto))
     return torch_out
 
@@ -84,5 +90,6 @@ def _op(self, opname, *args, **kwargs):
     if outputs == 1:
         return n
     return tuple(self.appendNode(self.createSelect(n, i)) for i in _range(outputs))
+
 
 torch._C.Graph.op = _op

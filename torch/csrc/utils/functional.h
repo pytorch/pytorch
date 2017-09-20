@@ -5,7 +5,7 @@
 namespace torch {
 
 template<typename F, typename T, typename R = typename std::result_of<F(T)>::type>
-static std::vector<R> fmap(const std::vector<T> & inputs, const F& fn) {
+inline std::vector<R> fmap(const std::vector<T> & inputs, const F& fn) {
   std::vector<R> r;
   r.reserve(inputs.size());
   for(auto & input : inputs)
@@ -13,8 +13,18 @@ static std::vector<R> fmap(const std::vector<T> & inputs, const F& fn) {
   return r;
 }
 
+// C++ forbids taking an address of a constructor, so here's a workaround...
+template<typename R, typename T>
+inline std::vector<R> fmap(const std::vector<T> & inputs) {
+  std::vector<R> r;
+  r.reserve(inputs.size());
+  for(auto & input : inputs)
+    r.push_back(R(input));
+  return r;
+}
+
 template<typename F, typename T>
-static std::vector<T> filter(const std::vector<T> & inputs, const F& fn) {
+inline std::vector<T> filter(const std::vector<T> & inputs, const F& fn) {
   std::vector<T> r;
   r.reserve(inputs.size());
   for(auto & input : inputs) {

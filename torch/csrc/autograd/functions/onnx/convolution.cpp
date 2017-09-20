@@ -2,16 +2,6 @@
 
 namespace torch { namespace autograd {
 
-template<typename T>
-static T all_equal(at::ArrayRef<T> ts, const char * name) {
-  JIT_ASSERT(ts.size() > 0);
-  auto v = ts[0];
-  for(auto t : ts) {
-    JIT_ASSERTM(v == t, "all elements of %s must be the same for transposed", name);
-  }
-  return v;
-}
-
 // Note [Caffe2ConvTranspose]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~
 // ConvTranspose in Caffe2 is a bit silly: bias is mandatory.  But ONNX
@@ -66,7 +56,7 @@ jit::node_list ConvForward::symbolic(SymbolicContext* ctx, jit::node_list inputs
 
   // Not in ONNX?
   for (int p : output_padding) {
-    JIT_ASSERT(p == 0);
+    JIT_EXPECTM(p == 0, "output padding is not supported.");
   }
 
   // ignore benchmark/cudnn_enabled

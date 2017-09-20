@@ -27,8 +27,8 @@ struct THGenerator : public Generator {
   virtual THGenerator& copy(const Generator& from) override;
   virtual THGenerator& free() override;
 
-  virtual unsigned long seed() override;
-  virtual THGenerator& manualSeed(unsigned long seed) override;
+  virtual uint64_t seed() override;
+  virtual THGenerator& manualSeed(uint64_t seed) override;
 
 protected:
   generator_type *generator;

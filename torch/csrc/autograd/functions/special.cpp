@@ -4,6 +4,16 @@
 
 namespace torch { namespace autograd {
 
+// Note [Null-edge pruning]
+// Evals have a problem with null edges appearing in the graph, because there's
+// no way to tell the identity of the input (i.e. each nullptr might have been
+// a different input, all of them might have been a single input, etc.).
+// However, null edges are generally quite useless, so we can safely prune them,
+// by removing them from next_functions of Eval node and never allocating
+// placeholders for them. This is a bit annoying because backward subgraphs may
+// have many less outputs than forward graph had inputs, but I don't think there's
+// a way around it. It's a tiny perf optimization too :)
+
 // There's some subtlety involved in computing backwards of Eval functions,
 // because sometimes we need to inherit placeholders. There are two situations
 // in which it can happen:
@@ -27,8 +37,6 @@ auto Eval::getSubgraph(const variable_list& inputs, const variable_list& outputs
   edge_set input_edges;
   input_edges.reserve(inputs.size());
   for (auto & input : inputs) {
-    // TODO: Remove me when we get rid of null Variables
-    // See https://github.com/pytorch/pytorch/issues/2513
     if (!input.defined()) continue;
     input_edges.emplace(input.grad_fn() ? input.grad_fn() : input.grad_accumulator(), input.output_nr());
   }
@@ -42,7 +50,7 @@ auto Eval::getSubgraph(const variable_list& inputs, const variable_list& outputs
   }
 
   // Regular DFS data structures
-  std::unordered_set<Function*> seen { nullptr };
+  std::unordered_set<Function*> seen;
   std::vector<Function*> queue;
   for (auto & output : outputs) {
     auto ptr = output.grad_fn().get();
@@ -59,6 +67,7 @@ auto Eval::getSubgraph(const variable_list& inputs, const variable_list& outputs
     for (int i = 0; i < num_edges; ++i) {
       auto & edge = fn->next_functions[i];
       auto & next_fn = edge.first;
+      if (!next_fn) continue; // See Note [Null-edge pruning]
       // Edge belongs to subgraph boundary. Register that and don't search along it.
       if (input_edges.count(edge) > 0) {
         subgraph.boundary.begins.emplace(fn->getSharedPtr(), i);
@@ -89,6 +98,59 @@ auto Eval::getSubgraph(const variable_list& inputs, const variable_list& outputs
   return subgraph;
 }
 
+bool Eval::trySimpleEval(const variable_list& inputs, const variable_list& outputs,
+                         const placeholder_list& inherited_placeholders) {
+  using bitset_type = uint64_t;
+  constexpr std::size_t max_outputs = sizeof(bitset_type) * 8;
+
+  if (inherited_placeholders.size() != 0) return false;
+
+  auto& grad_fn = outputs[0].grad_fn();
+  if (static_cast<std::size_t>(grad_fn->num_inputs) >= max_outputs) return false;
+  if (static_cast<std::size_t>(grad_fn->num_inputs) != outputs.size()) return false;
+
+  // Check that all outputs have the same grad_fn and cover all its inputs
+  bitset_type output_nrs = 0;
+  bitset_type expected_bitset = ((1 << grad_fn->num_inputs) - 1);
+  for (auto & output : outputs) {
+    if (output.grad_fn() != grad_fn) return false;
+    output_nrs |= (1 << output.output_nr());
+  }
+  if (output_nrs != expected_bitset) return false;
+
+  // Check that grad_fn->next_functions matches the inputs exactly
+  auto num_inputs = inputs.size();
+  auto& grad_next_fns = grad_fn->next_functions;
+  if (num_inputs != grad_next_fns.size()) return false;
+  for (std::size_t i = 0; i < num_inputs; ++i) {
+    // Unfortunately, null edge pruning (see Note [Null-edge pruning]) applies to
+    // autograd functions which would otherwise be eligible for the SimpleEval
+    // optimization.  This makes everything more complicated, so for now we just don't
+    // attempt the optimization in this case.  To fix it properly,
+    // we'd need to filter grad_next_fns and outputs of apply in Eval::apply.
+    // The check below tests if null edge pruning occurred.
+    if (!inputs[i].defined() || !grad_next_fns[i].first) return false;
+    const auto& input_grad = inputs[i].grad_fn() ? inputs[i].grad_fn() : inputs[i].grad_accumulator();
+    if (grad_next_fns[i].first != input_grad || grad_next_fns[i].second != inputs[i].output_nr()) return false;
+  }
+
+  // Success! We still need to set up placeholders for next stages and to drop
+  // references to the graph.
+  std::swap(next_functions, grad_next_fns);
+  grad_next_fns.reserve(num_inputs);
+  placeholders.reserve(num_inputs);
+  for (std::size_t i = 0; i < num_inputs; ++i) {
+    auto placeholder = std::make_shared<EvalOutput>(next_functions[i]);
+    grad_next_fns.emplace_back(placeholder, 0);
+    placeholders.emplace_back(std::move(placeholder));
+  }
+  is_executable = grad_fn->is_executable;
+  simple_graph = grad_fn;
+  grad_fn->tracing_state->in_eval_subgraph = true;
+  return true;
+}
+
+
 // Here, a _relevant_ output is one that has a grad_fn (is not a leaf and is not
 // volatile) and is not one of the inputs (can happen because of passthrough).
 variable_list Eval::filterRelevantOutputs(const variable_list& inputs, const variable_list& outputs) {
@@ -97,14 +159,10 @@ variable_list Eval::filterRelevantOutputs(const variable_list& inputs, const var
   edge_set ignored_grad_fns;
   ignored_grad_fns.reserve(inputs.size());
   for (auto& input : inputs) {
-    // TODO: Remove me when we get rid of null Variables
-    // See https://github.com/pytorch/pytorch/issues/2513
     if (!input.defined()) continue;
     ignored_grad_fns.emplace(input.grad_fn(), input.output_nr());
   }
   for (auto& output : outputs) {
-    // TODO: Remove me when we get rid of null Variables
-    // See https://github.com/pytorch/pytorch/issues/2513
     if (!output.defined()) continue;
     if (!output.grad_fn()) continue;
     if (ignored_grad_fns.count(std::make_pair(output.grad_fn(), output.output_nr())) > 0) continue;
@@ -117,8 +175,6 @@ auto Eval::computeInputOrder(const variable_list& inputs, const placeholder_list
   edge_order input_order;
   int idx = 0;
   for (auto & input : inputs) {
-    // TODO: Remove me when we get rid of null Variables
-    // See https://github.com/pytorch/pytorch/issues/2513
     if (!input.defined()) continue;
     input_order.emplace(
       std::make_pair(input.grad_fn() ? input.grad_fn() : input.grad_accumulator(), input.output_nr()),
@@ -134,49 +190,54 @@ bool Eval::replaceSubgraph(const variable_list& inputs, const variable_list& _ou
                            const placeholder_list& inherited_placeholders) {
   // _outputs has a prefix deliberately, because it's unlikely that anything else
   // than relevant_outputs will be needed inside this function.
+  // TODO: it would be useful to unpack inputs to their grad_fn/grad_accumulators to avoid
+  // all these ternary operators in functions above
   variable_list relevant_outputs = filterRelevantOutputs(inputs, _outputs);
 
   if (relevant_outputs.size() == 0)
     return false;
 
-  for (auto & output : relevant_outputs)
-    roots.emplace_back(output.grad_fn(), output.output_nr());
+  if (!trySimpleEval(inputs, relevant_outputs, inherited_placeholders)) {
+    roots.reserve(relevant_outputs.size());
+    for (auto & output : relevant_outputs)
+      roots.emplace_back(output.grad_fn(), output.output_nr());
 
-  auto subgraph = getSubgraph(inputs, relevant_outputs, inherited_placeholders);
+    auto subgraph = getSubgraph(inputs, relevant_outputs, inherited_placeholders);
 
-  // Prepare output placeholder nodes for each end.
-  std::unordered_map<edge_type, std::shared_ptr<EvalOutput>, edge_hasher> ends_to_outputs;
-  for (auto & placeholder : placeholders) {
-    ends_to_outputs[placeholder->next_edge] = placeholder;
-  }
-  for (auto & end : subgraph.boundary.ends) {
-    if (ends_to_outputs.count(end) == 0) {
-      placeholders.emplace_back(std::make_shared<EvalOutput>(end));
-      ends_to_outputs[end] = placeholders.back();
+    // Prepare output placeholder nodes for each end.
+    std::unordered_map<edge_type, std::shared_ptr<EvalOutput>, edge_hasher> ends_to_outputs;
+    for (auto & placeholder : placeholders) {
+      ends_to_outputs[placeholder->next_edge] = placeholder;
     }
+    for (auto & end : subgraph.boundary.ends) {
+      if (ends_to_outputs.count(end) == 0) {
+        placeholders.emplace_back(std::make_shared<EvalOutput>(end));
+        ends_to_outputs[end] = placeholders.back();
+      }
+    }
+
+    // Replace begins with pointers to output nodes.
+    // This detaches the subgraph from the full backward graph.
+    for (auto & begin : subgraph.boundary.begins) {
+      auto & fn = begin.first;
+      auto offset = begin.second;
+      fn->next_functions[offset] = std::make_pair(ends_to_outputs.at(fn->next_functions[offset]), 0);
+    }
+
+    // Replace subgraph with this node.
+    next_functions.insert(next_functions.begin(), subgraph.boundary.ends.begin(), subgraph.boundary.ends.end());
+    is_executable = std::any_of(relevant_outputs.begin(), relevant_outputs.end(),
+                                [](const Variable& var) { return var.requires_grad(); });
+
+    // Ensure placeholders and inputs are sorted in the same way.
+    edge_order input_order = computeInputOrder(inputs, inherited_placeholders);
+    std::sort(next_functions.begin(), next_functions.end(), [&input_order](const edge_type &a, const edge_type &b) {
+      return input_order.at(a) < input_order.at(b);
+    });
+    std::sort(placeholders.begin(), placeholders.end(), [&input_order](const std::shared_ptr<EvalOutput> &a, const std::shared_ptr<EvalOutput> &b) {
+      return input_order.at(a->next_edge) < input_order.at(b->next_edge);
+    });
   }
-
-  // Replace begins with pointers to output nodes.
-  // This detaches the subgraph from the full backward graph.
-  for (auto & begin : subgraph.boundary.begins) {
-    auto & fn = begin.first;
-    auto offset = begin.second;
-    fn->next_functions[offset] = std::make_pair(ends_to_outputs.at(fn->next_functions[offset]), 0);
-  }
-
-  // Replace subgraph with this node.
-  next_functions.insert(next_functions.begin(), subgraph.boundary.ends.begin(), subgraph.boundary.ends.end());
-  is_executable = std::any_of(relevant_outputs.begin(), relevant_outputs.end(),
-                              [](const Variable& var) { return var.requires_grad(); });
-
-  // Ensure placeholders and inputs are sorted in the same way.
-  edge_order input_order = computeInputOrder(inputs, inherited_placeholders);
-  std::sort(next_functions.begin(), next_functions.end(), [&input_order](const edge_type &a, const edge_type &b) {
-    return input_order.at(a) < input_order.at(b);
-  });
-  std::sort(placeholders.begin(), placeholders.end(), [&input_order](const std::shared_ptr<EvalOutput> &a, const std::shared_ptr<EvalOutput> &b) {
-    return input_order.at(a->next_edge) < input_order.at(b->next_edge);
-  });
 
   // Rebase outputs.
   for (auto & output : relevant_outputs) {
@@ -188,10 +249,16 @@ bool Eval::replaceSubgraph(const variable_list& inputs, const variable_list& _ou
 }
 
 variable_list Eval::apply(const variable_list& inputs) {
-  std::mutex outputs_mutex;
-  variable_list outputs(placeholders.size());
-  auto& engine = python::PythonEngine::getDefaultEngine();
-  engine.execute(roots, inputs, true, getCallbacks(outputs, outputs_mutex));
+  variable_list outputs;
+  if (simple_graph) {
+    outputs = (*simple_graph)(inputs);
+  } else {
+    std::mutex outputs_mutex;
+    outputs.resize(placeholders.size());
+    auto& engine = python::PythonEngine::getDefaultEngine();
+    auto exec_data = filterRoots(inputs);
+    engine.execute(exec_data.first, exec_data.second, true, getCallbacks(outputs, outputs_mutex));
+  }
 
   auto bw_eval = newEval();
   bw_eval->replaceSubgraph(inputs, outputs, placeholders);
@@ -203,6 +270,39 @@ variable_list Eval::apply(const variable_list& inputs) {
   tracing_state->in_eval_subgraph = true;
 
   return outputs;
+}
+
+// TODO: once we clean up the stochastic function mess it should be possible to ignore
+// nullptr inputs in the Engine (it implies that the Variables is 0, so the jacobian vector
+// product will be all zero too).
+std::pair<function_list, variable_list> Eval::filterRoots(const variable_list& inputs) {
+  variable_list filtered_inputs;
+  function_list filtered_roots;
+  auto num_inputs = inputs.size();
+  if (roots.size() != num_inputs)
+    throw std::logic_error("inputs.size() != roots.size()");
+  filtered_inputs.reserve(num_inputs);
+  filtered_roots.reserve(num_inputs);
+  for (std::size_t i = 0; i < num_inputs; ++i) {
+    // This check is the sole reason why this function is needed. The problem
+    // with larger Evals is that they might trigger computation of nodes that
+    // would normally be ignored. For example, consider a subgraph with multiple
+    // outputs and a backprop from a Variable that's derived from only one of
+    // them. This line prevents us from unnecessarily executing, and thus recording,
+    // nodes in the trace which are unrelated to this Variable.
+    //
+    // If we didn't filter out roots that only get nullptr outputs, we would then
+    // pass nullptr inputs to roots that are executable. Then, the engine would
+    // discover them and would unnecessarily run a computation that doesn't contribute
+    // to the overall grad and would complicate the trace.
+    // If the node gets only nullptr inputs, it's guaranteed that
+    // the grad of its output w.r.t. anything is 0, so it is sound to just
+    // skip the computation entirely.
+    if (!inputs[i].defined()) continue;
+    filtered_inputs.emplace_back(inputs[i]);
+    filtered_roots.emplace_back(roots[i]);
+  }
+  return std::make_pair(std::move(filtered_roots), std::move(filtered_inputs));
 }
 
 Engine::pre_callback_map Eval::getCallbacks(variable_list& outputs, std::mutex& outputs_mutex) {

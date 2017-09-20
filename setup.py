@@ -88,9 +88,11 @@ def build_libs(libs):
     for lib in libs:
         assert lib in dep_libs, 'invalid lib: {}'.format(lib)
     build_libs_cmd = ['bash', 'torch/lib/build_libs.sh']
+    my_env = os.environ.copy()
+    my_env["PYTORCH_PYTHON"] = sys.executable
     if WITH_CUDA:
         build_libs_cmd += ['--with-cuda']
-    if subprocess.call(build_libs_cmd + libs) != 0:
+    if subprocess.call(build_libs_cmd + libs, env=my_env) != 0:
         sys.exit(1)
 
 
@@ -351,8 +353,6 @@ main_compile_args = ['-D_THP_CORE']
 main_libraries = ['shm']
 main_link_args = [TH_LIB, THS_LIB, THNN_LIB, ATEN_LIB, NANOPB_STATIC_LIB]
 main_sources = [
-    "torch/csrc/onnx.pb.cpp",
-    "torch/csrc/onnx.cpp",
     "torch/csrc/PtrWrapper.cpp",
     "torch/csrc/Module.cpp",
     "torch/csrc/Generator.cpp",
@@ -363,6 +363,7 @@ main_sources = [
     "torch/csrc/byte_order.cpp",
     "torch/csrc/utils.cpp",
     "torch/csrc/expand_utils.cpp",
+    "torch/csrc/utils/invalid_arguments.cpp",
     "torch/csrc/utils/object_ptr.cpp",
     "torch/csrc/utils/tuple_parser.cpp",
     "torch/csrc/allocators.cpp",
@@ -371,13 +372,15 @@ main_sources = [
     "torch/csrc/jit/init.cpp",
     "torch/csrc/jit/ir.cpp",
     "torch/csrc/jit/python_ir.cpp",
-    "torch/csrc/jit/graph_fuser.cpp",
-    "torch/csrc/jit/init_pass.cpp",
-    "torch/csrc/jit/dead_code_elimination.cpp",
     "torch/csrc/jit/test_jit.cpp",
     "torch/csrc/jit/tracer.cpp",
     "torch/csrc/jit/python_tracer.cpp",
     "torch/csrc/jit/interned_strings.cpp",
+    "torch/csrc/jit/type.cpp",
+    "torch/csrc/jit/export.cpp",
+    "torch/csrc/jit/passes/graph_fuser.cpp",
+    "torch/csrc/jit/passes/onnx.cpp",
+    "torch/csrc/jit/passes/dead_code_elimination.cpp",
     "torch/csrc/autograd/init.cpp",
     "torch/csrc/autograd/engine.cpp",
     "torch/csrc/autograd/function.cpp",
@@ -403,7 +406,9 @@ main_sources = [
     "torch/csrc/autograd/functions/init.cpp",
     "torch/csrc/autograd/functions/onnx/convolution.cpp",
     "torch/csrc/autograd/functions/onnx/batch_normalization.cpp",
-    "torch/csrc/onnx/export.cpp",
+    "torch/csrc/autograd/functions/onnx/basic_ops.cpp",
+    "torch/csrc/onnx/onnx.pb.cpp",
+    "torch/csrc/onnx/onnx.cpp",
 ]
 main_sources += split_types("torch/csrc/Tensor.cpp")
 

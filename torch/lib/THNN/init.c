@@ -281,6 +281,12 @@
 #include "generic/SpatialReplicationPadding.c"
 #include "THGenerateFloatTypes.h"
 
+#include "generic/TemporalReflectionPadding.c"
+#include "THGenerateFloatTypes.h"
+
+#include "generic/TemporalReplicationPadding.c"
+#include "THGenerateFloatTypes.h"
+
 #include "generic/VolumetricReplicationPadding.c"
 #include "THGenerateFloatTypes.h"
 

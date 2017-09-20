@@ -78,15 +78,27 @@ struct Eval : Function {
     return std::make_shared<Eval>();
   }
 
+  // Roots are empty if simple_graph is not NULL.
+  // simple_graph is an optimization of first backward stage - in this case
+  // all Eval subgraphs contain only a single gradient function, and the
+  // graph search on creation + call to the engine in apply can be elided
   function_list roots;
+  std::shared_ptr<Function> simple_graph;
+
   placeholder_list placeholders;
   jit::Node* forward_ctx_select = nullptr;
   bool traceable = false;
 
 private:
+  std::pair<function_list, variable_list> filterRoots(const variable_list& inputs);
   Engine::pre_callback_map getCallbacks(variable_list& outputs, std::mutex& outputs_mutex);
 
   Subgraph getSubgraph(
+      const variable_list& inputs,
+      const variable_list& outputs,
+      const placeholder_list& inherited_placeholders);
+
+  bool trySimpleEval(
       const variable_list& inputs,
       const variable_list& outputs,
       const placeholder_list& inherited_placeholders);

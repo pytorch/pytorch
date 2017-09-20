@@ -8,6 +8,7 @@
 #include "torch/csrc/jit/ir.h"
 #include "torch/csrc/jit/attributes.h"
 #include "torch/csrc/jit/interned_strings.h"
+#include <vector>
 
 namespace torch { namespace jit {
 
@@ -130,11 +131,19 @@ static void fusionTests() {
 
     std::vector<at::Tensor> inputs;
     std::vector<at::Tensor> outputs;
+    // We want to generate input/output tensors with dimension 128x128x32, but
+    // with different internal strides.  To do this, we generate a tensor
+    // with the "wrong" dimensions, and then use transpose to get an appropriately
+    // sized view.
     for(size_t i = 0; i < graph.inputs().size(); i++) {
-      inputs.push_back(at::CUDA(at::kFloat).rand({128,128,32}).transpose(ti, tj));
+      std::vector<int64_t> dims = {128, 128, 32};
+      std::swap(dims[ti],dims[tj]);
+      inputs.push_back(at::CUDA(at::kFloat).rand(dims).transpose(ti, tj));
     }
     for(size_t i = 0; i < graph.outputs().size(); i++) {
-      outputs.push_back(at::CUDA(at::kFloat).zeros({128,128,32}).transpose(toi,toj));
+      std::vector<int64_t> dims = {128, 128, 32};
+      std::swap(dims[toi],dims[toj]);
+      outputs.push_back(at::CUDA(at::kFloat).zeros(dims).transpose(toi,toj));
     }
 
     auto t22 = inputs[4].sigmoid();
@@ -150,11 +159,8 @@ static void fusionTests() {
 
     //auto out0 = inputs[0]*inputs[1];
     comp.debugLaunchGraph(graph, inputs, outputs);
-    // TODO: Also check that the shapes match.  They don't, and this has not
-    // been working for a while.
-    // https://github.com/ezyang/pytorch/issues/206
-    float max_diff = (outputs.front().contiguous().view(-1) - out0.contiguous().view(-1)).abs().max().toDouble();
-    //std::cout << "max diff: " << max_diff << "\n";
+    JIT_ASSERT(out0.is_same_size(outputs.front()));
+    float max_diff = (outputs.front() - out0).abs().max().toDouble();
     JIT_ASSERT(max_diff < 1e-6);
 
   };
@@ -167,7 +173,34 @@ static void fusionTests() {
   testOne(0,1,1,2);
   testOne(1,2,0,2);
 
+
+
+  auto testConcat = [&](int dim) {
+    Graph graph;
+    Node * i0 = graph.addInput();
+    Node * i1 = graph.addInput();
+    auto o0 = appendNewNode(kMul,graph,{i0, i1});
+    graph.registerOutput(o0);
+    graph.registerOutput(appendNewNode(kConcat, graph, {i0,o0})->i_(kaxis, dim));
+    auto a = at::CUDA(at::kFloat).rand({3,4,5});
+    auto b = at::CUDA(at::kFloat).rand({4,3,5}).transpose(0,1);
+    auto o = at::CUDA(at::kFloat).zeros({3,4,5});
+
+    auto o_r = a*b;
+    auto o2_r = at::cat({a, o_r}, dim);
+    auto o2 = at::CUDA(at::kFloat).zeros(o2_r.sizes());
+    comp.debugLaunchGraph(graph, {a,b}, {o, o2});
+
+    float max_diff = (o_r - o).abs().max().toDouble();
+    JIT_ASSERT(max_diff == 0);
+    float max_diff2 = (o2_r - o2).abs().max().toDouble();
+    JIT_ASSERT(max_diff2 == 0);
+  };
+  testConcat(0);
+  testConcat(1);
+  testConcat(2);
 }
+
 #else //WITH_CUDA
 void fusionTests() {}
 #endif

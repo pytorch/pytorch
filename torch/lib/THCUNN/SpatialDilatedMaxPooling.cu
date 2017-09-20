@@ -11,7 +11,7 @@ __global__ void MaxPoolForward(const int nthreads, const Dtype* bottom_data,
     const int kernel_h, const int kernel_w, const int stride_h,
     const int stride_w, const int pad_h, const int pad_w,
     const int dilation_h, const int dilation_w, Dtype* top_data,
-    long* top_mask) {
+    int64_t* top_mask) {
   CUDA_KERNEL_LOOP(index, nthreads) {
     int pw = index % pooled_width;
     int ph = (index / pooled_width) % pooled_height;
@@ -44,7 +44,7 @@ __global__ void MaxPoolForward(const int nthreads, const Dtype* bottom_data,
 
 template <typename Dtype, typename AccType>
 __global__ void MaxPoolBackward(const int nthreads, const Dtype* top_diff,
-    const long* top_mask, const int num, const int channels,
+    const int64_t* top_mask, const int num, const int channels,
     const int height, const int width, const int pooled_height,
     const int pooled_width, const int kernel_h, const int kernel_w,
     const int stride_h, const int stride_w, const int pad_h, const int pad_w,

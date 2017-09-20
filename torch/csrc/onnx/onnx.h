@@ -1,6 +1,6 @@
 #pragma once
 
-#include "torch/csrc/onnx.pb.h"
+#include "torch/csrc/onnx/onnx.pb.h"
 #include "torch/csrc/jit/assert.h"
 
 #include <pb_encode.h>

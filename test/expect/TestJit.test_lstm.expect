@@ -1,18 +1,20 @@
-graph(%1 : Double(80, 10)
-      %2 : Double(80, 20)
-      %3 : Double(80)
-      %4 : Double(80)
-      %5 : Double(3, 10)
-      %6 : Double(3, 20)
-      %7 : Double(3, 20)) {
-  %9 : Double(10!, 80!), %10 : Handle = ^Transpose(0, 1)(%1), uses = [[%11.i2], []];
-  %12 : Double(3, 80), %13 : Handle = ^Addmm(1, 1, False)(%3, %5, %9), uses = [[%70.i0], []];
-  %15 : Double(20!, 80!), %16 : Handle = ^Transpose(0, 1)(%2), uses = [[%17.i2], []];
-  %18 : Double(3, 80), %19 : Handle = ^Addmm(1, 1, False)(%4, %6, %15), uses = [[%71.i0], []];
-  %74 : Double(3!, 20), %77 : Double(3!, 20), %80 : Double(3!, 20), %83 : Double(3!, 20) = Chunk[NumChunks=4, Dim=1](%18), uses = [[%67.i8], [%67.i6], [%67.i4], [%67.i2]];
-  %73 : Double(3!, 20), %76 : Double(3!, 20), %79 : Double(3!, 20), %82 : Double(3!, 20) = Chunk[NumChunks=4, Dim=1](%12), uses = [[%67.i7], [%67.i5], [%67.i3], [%67.i1]];
-  %68 : Double(3, 20), %69 : Double(3, 20) = fusion_group_0(%7, %82, %83, %79, %80, %76, %77, %73, %74), uses = [[%0.i0], [%0.i1]];
-  return (%68, %69);
+graph(%1 : Double(3, 10)
+      %2 : Double(3, 20)
+      %3 : Double(3, 20)
+      %4 : Double(80, 10)
+      %5 : Double(80, 20)
+      %6 : Double(80)
+      %7 : Double(80)) {
+  %8 : Double(10!, 80!) = Transpose[perm=[1, 0]](%4), uses = [%9.i0];
+  %9 : UNKNOWN_TYPE = Transpose(%8), uses = [%10.i1];
+  %10 : Double(3, 80) = FC(%1, %9, %6), uses = [%32.i0];
+  %11 : Double(20!, 80!) = Transpose[perm=[1, 0]](%5), uses = [%12.i0];
+  %12 : UNKNOWN_TYPE = Transpose(%11), uses = [%13.i1];
+  %13 : Double(3, 80) = FC(%2, %12, %7), uses = [%33.i0];
+  %36 : Double(3!, 20), %39 : Double(3!, 20), %42 : Double(3!, 20), %45 : Double(3!, 20) = Split[split=[20, 20, 20, 20], axis=1](%13), uses = [[%29.i8], [%29.i6], [%29.i4], [%29.i2]];
+  %35 : Double(3!, 20), %38 : Double(3!, 20), %41 : Double(3!, 20), %44 : Double(3!, 20) = Split[split=[20, 20, 20, 20], axis=1](%10), uses = [[%29.i7], [%29.i5], [%29.i3], [%29.i1]];
+  %30 : Double(3, 20), %31 : Double(3, 20) = fusion_group_0(%3, %44, %45, %41, %42, %38, %39, %35, %36), uses = [[%0.i0], [%0.i1]];
+  return (%30, %31);
 }
 with fusion_group_0 = graph(%13 : Double(3, 20)
       %23 : Double(3!, 20)

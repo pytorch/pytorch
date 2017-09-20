@@ -5,15 +5,15 @@
 void THTensor_(random)(THTensor *self, THGenerator *_generator)
 {
 #if defined(TH_REAL_IS_BYTE)
-  TH_TENSOR_APPLY(real, self, *self_data = (unsigned char)(THRandom_random(_generator) % (UCHAR_MAX+1)););
+  TH_TENSOR_APPLY(real, self, *self_data = (uint8_t)(THRandom_random(_generator) % (UINT8_MAX+1)););
 #elif defined(TH_REAL_IS_CHAR)
-  TH_TENSOR_APPLY(real, self, *self_data = (char)(THRandom_random(_generator) % (CHAR_MAX+1)););
+  TH_TENSOR_APPLY(real, self, *self_data = (int8_t)(THRandom_random(_generator) % (INT8_MAX+1)););
 #elif defined(TH_REAL_IS_SHORT)
-  TH_TENSOR_APPLY(real, self, *self_data = (short)(THRandom_random(_generator) % (SHRT_MAX+1)););
+  TH_TENSOR_APPLY(real, self, *self_data = (int16_t)(THRandom_random(_generator) % (INT16_MAX+1)););
 #elif defined(TH_REAL_IS_INT)
-  TH_TENSOR_APPLY(real, self, *self_data = (int)(THRandom_random(_generator) % (INT_MAX+1UL)););
+  TH_TENSOR_APPLY(real, self, *self_data = (int32_t)(THRandom_random(_generator) % (INT32_MAX+1UL)););
 #elif defined(TH_REAL_IS_LONG)
-  TH_TENSOR_APPLY(real, self, *self_data = (long)(THRandom_random(_generator) % (LONG_MAX+1UL)););
+  TH_TENSOR_APPLY(real, self, *self_data = (int64_t)(THRandom_random(_generator) % (LONG_MAX+1UL)););
 #elif defined(TH_REAL_IS_FLOAT)
   TH_TENSOR_APPLY(real, self, *self_data = (float)(THRandom_random(_generator) % ((1UL << FLT_MANT_DIG)+1)););
 #elif defined(TH_REAL_IS_DOUBLE)
@@ -23,12 +23,12 @@ void THTensor_(random)(THTensor *self, THGenerator *_generator)
 #endif
 }
 
-void THTensor_(clampedRandom)(THTensor *self, THGenerator *_generator, long min, long max) {
+void THTensor_(clampedRandom)(THTensor *self, THGenerator *_generator, int64_t min, int64_t max) {
   THArgCheck(max > min, 2, "max must be greater than min");
   TH_TENSOR_APPLY(real, self, *self_data = (real)((THRandom_random(_generator) % (max - min)) + min);)
 }
 
-void THTensor_(cappedRandom)(THTensor *self, THGenerator *_generator, long max) {
+void THTensor_(cappedRandom)(THTensor *self, THGenerator *_generator, int64_t max) {
   THArgCheck(max > 0, 1, "max must be positive");
   THTensor_(clampedRandom)(self, _generator, 0, max);
 }
@@ -106,18 +106,18 @@ void THTensor_(logNormal)(THTensor *self, THGenerator *_generator, double mean, 
 
 void THTensor_(multinomialAliasSetup)(THTensor *probs, THLongTensor *J, THTensor *q)
 {
-  long inputsize = THTensor_(nElement)(probs);
-  long i = 0;
+  int64_t inputsize = THTensor_(nElement)(probs);
+  int64_t i = 0;
   THLongTensor *smaller = THLongTensor_newWithSize1d(inputsize);
   THLongTensor *larger = THLongTensor_newWithSize1d(inputsize);
-  long small_c = 0;
-  long large_c = 0;
+  int64_t small_c = 0;
+  int64_t large_c = 0;
   THLongTensor_resize1d(J, inputsize);
   THTensor_(resize1d)(q, inputsize);
   real *q_data = THTensor_(data)(q);
-  long *J_data = THLongTensor_data(J);
+  int64_t *J_data = THLongTensor_data(J);
       
-  for(i = 0; i < inputsize; i++)
+  for (i = 0; i < inputsize; i++)
     {
       THTensor_fastSet1d(J, i, 0L);
       real val = THTensor_fastGet1d(probs, i);
@@ -138,8 +138,8 @@ void THTensor_(multinomialAliasSetup)(THTensor *probs, THLongTensor *J, THTensor
   // Loop through and create little binary mixtures that
   // appropriately allocate the larger outcomes over the
   // overall uniform mixture.
-  long large, small;
-  while(small_c > 0 && large_c > 0)
+  int64_t large, small;
+  while (small_c > 0 && large_c > 0)
     {
       large = THTensor_fastGet1d(larger, large_c-1);
       small = THTensor_fastGet1d(smaller, small_c-1);
@@ -162,26 +162,26 @@ void THTensor_(multinomialAliasSetup)(THTensor *probs, THLongTensor *J, THTensor
   real q_min = THTensor_fastGet1d(q, inputsize-1);
   real q_max = q_min;
   real q_temp;
-  for(i=0; i < inputsize; i++)
+  for (i=0; i < inputsize; i++)
     {
       q_temp = THTensor_fastGet1d(q, i);
-      if(q_temp < q_min)
+      if (q_temp < q_min)
         q_min = q_temp;
-      else if(q_temp > q_max)
+      else if (q_temp > q_max)
         q_max = q_temp;
     }
   THArgCheckWithCleanup((q_min > 0),
                         THCleanup(THLongTensor_free(smaller); THLongTensor_free(larger);), 2,
                         "q_min is less than 0");
   
-  if(q_max > 1)
+  if (q_max > 1)
     {
-      for(i=0; i < inputsize; i++)
+      for (i=0; i < inputsize; i++)
         {
           q_data[i*q->stride[0]] /= q_max;
         }
     }
-  for(i=0; i<inputsize; i++)
+  for (i=0; i < inputsize; i++)
     {
       // sometimes an large index isn't added to J. 
       // fix it by making the probability 1 so that J isn't indexed.
@@ -193,15 +193,16 @@ void THTensor_(multinomialAliasSetup)(THTensor *probs, THLongTensor *J, THTensor
 }
 void THTensor_(multinomialAliasDraw)(THLongTensor *self, THGenerator *_generator, THLongTensor *J, THTensor *q)
 {
-  long K = THLongTensor_nElement(J);
-  long output_nelem = THLongTensor_nElement(self);
-  
-  int i = 0, _mask=0;
+  int64_t K = THLongTensor_nElement(J);
+  int64_t output_nelem = THLongTensor_nElement(self);
+  int64_t i = 0, _mask=0;
   real _q;
-  long rand_ind, sample_idx, J_sample, kk_sample;
-  for(i=0; i< output_nelem; i++)
+  int64_t rand_ind, sample_idx, J_sample, kk_sample;
+
+  for (i=0; i < output_nelem; i++)
     {
-      rand_ind = (long)THRandom_uniform(_generator, 0, K) ;
+      rand_ind = THRandom_uniform(_generator, 0, K);
+
       _q = THTensor_fastGet1d(q, rand_ind);
 
       _mask = THRandom_bernoulli(_generator, _q);
@@ -215,11 +216,11 @@ void THTensor_(multinomialAliasDraw)(THLongTensor *self, THGenerator *_generator
 }
 void THTensor_(multinomial)(THLongTensor *self, THGenerator *_generator, THTensor *prob_dist, int n_sample, int with_replacement)
 {
-  int start_dim = THTensor_(nDimension)(prob_dist);
-  long n_dist;
-  long n_categories;
+  int64_t start_dim = THTensor_(nDimension)(prob_dist);
+  int64_t n_dist;
+  int64_t n_categories;
   THDoubleTensor* cum_dist;
-  int i,j,k;
+  int64_t i,j,k;
 
   if (start_dim == 1)
   {

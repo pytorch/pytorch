@@ -15,8 +15,8 @@
 #define THIntegerTensor THIntTensor
 #define THIntegerTensor_(NAME) THIntTensor_ ## NAME
 
-typedef long THIndex_t;
-typedef int THInteger_t;
+typedef int64_t THIndex_t;
+typedef int32_t THInteger_t;
 typedef void THNNState;
 
 #define THNN_resizeAs_indices(I1, I2)                    \

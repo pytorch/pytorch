@@ -251,6 +251,11 @@ class TestAutograd(TestCase):
         self.assertFalse(hook_called[0])
         self.assertIsNone(x.grad)
 
+    def test_backward_badcalls(self):
+        x = Variable(torch.ones(1))
+        with self.assertRaisesRegex(RuntimeError, 'does not require grad'):
+            x.backward()
+
     def test_grad_badcalls(self):
         x = Variable(torch.ones(1))
         y = x ** 2
@@ -543,6 +548,34 @@ class TestAutograd(TestCase):
 
         xd = x.data
         self.assertEqual(x.grad.data, 2 * xd * go_y + 6 * xd.pow(5) * go_z)
+
+    def test_save_output_nr(self):
+        x = Variable(torch.randn(10), requires_grad=True)
+
+        class MultiOutputFn(Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x[:5], x[5:]
+
+            @staticmethod
+            def backward(ctx, *grad):
+                return torch.cat(grad)
+
+        a, b = MultiOutputFn.apply(x)
+        self.assertEqual(b.output_nr, 1)
+
+        class TestFn(Function):
+            @staticmethod
+            def forward(ctx, b):
+                ctx.save_for_backward(b)
+                return b * 2
+
+            @staticmethod
+            def backward(ctx, grad_b):
+                b, = ctx.saved_variables
+                self.assertEqual(b.output_nr, 1)
+
+        TestFn.apply(b).sum().backward()
 
     def test_volatile(self):
         x = Variable(torch.ones(5, 5), requires_grad=True)
@@ -1048,7 +1081,7 @@ class TestAutograd(TestCase):
             self.assertIs(type(x.float().cuda().data), torch.cuda.FloatTensor)
             self.assertIs(type(x.int().cuda().data), torch.cuda.IntTensor)
             self.assertIs(type(x.int().cuda().cpu().data), torch.IntTensor)
-            if torch.cuda.device_count() > 2:
+            if torch.cuda.device_count() >= 2:
                 x2 = x.float().cuda(1)
                 self.assertIs(type(x2.data), torch.cuda.FloatTensor)
                 self.assertIs(x2.get_device(), 1)
@@ -1058,6 +1091,10 @@ class TestAutograd(TestCase):
                 x2 = x2.cuda(1)
                 self.assertIs(type(x2.data), torch.cuda.FloatTensor)
                 self.assertIs(x2.get_device(), 1)
+                y = Variable(torch.randn(5).cuda(1), requires_grad=True)
+                y.cpu().sum().backward()
+                self.assertIs(y.grad.get_device(), 1)
+                self.assertIs(y.long().data.get_device(), 1)
 
         for t in [torch.DoubleTensor, torch.FloatTensor, torch.IntTensor, torch.ByteTensor]:
             for var in (True, False):
@@ -1513,6 +1550,36 @@ class TestAutograd(TestCase):
         run_functional_checks(self, "test_cat_negdim_2", "cat",
                               lambda a, b, c, dim: torch.cat((a, b, c), dim),
                               True, f_args_variable, f_args_tensor)
+
+    def test_variable_traverse(self):
+        def get_out_and_unrefed_cycle():
+            inp = Variable(torch.randn(10), requires_grad=True)
+            tmp = inp.view(10, 1)
+            out = tmp.view(10)
+
+            # Create a reference cycle that contains an
+            # intermediary Variable in the graph
+            my_list = []
+            my_list.append(tmp)
+            my_list.append(my_list)
+
+            return out
+
+        out = get_out_and_unrefed_cycle()
+        gc.collect()
+        # This will segfault if things have been erroneously released
+        out.backward(torch.randn(out.size()))
+
+    def test_norm_subgradient(self):
+        def run_test(input_size, norm_deg):
+            input = Variable(torch.zeros(*input_size), requires_grad=True)
+            out = input.norm(norm_deg)
+            out.backward()
+            self.assertEqual(input.grad.data.abs().sum(), 0)
+
+        run_test((10,), 2)
+        run_test((10, 10), 2)
+        run_test((10,), 3)
 
 
 def index_variable(shape, max_indices):

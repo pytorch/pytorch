@@ -166,13 +166,13 @@ THTensor* THPTensor_(fromNumpy)(PyObject *numpy_array) {
     auto ndim = PyArray_NDIM(array);
     size_t storage_size = 1;
     THLongStoragePtr sizes(THLongStorage_newWithSize(ndim));
-    long *sizes_data = sizes->data;
+    int64_t *sizes_data = sizes->data;
     for (int i = 0; i < ndim; ++i) {
       sizes_data[i] = PyArray_DIM(array, i);
     }
 
     THLongStoragePtr strides(THLongStorage_newWithSize(ndim));
-    long *strides_data = strides->data;
+    int64_t *strides_data = strides->data;
     long elsize = PyArray_ITEMSIZE(array);
     for (int i = 0; i < ndim; ++i) {
       // numpy uses bytes, torch uses elements
@@ -345,7 +345,7 @@ static PyObject * THPTensor_(pynew)(PyTypeObject *type, PyObject *args, PyObject
     PyErr_Clear();
 
     THLongStoragePtr sizes_storage(THLongStorage_newWithSize(sizes.size()));
-    long *sizes_data = sizes_storage->data;
+    int64_t *sizes_data = sizes_storage->data;
     for (auto size: sizes)
       *sizes_data++ = size;
     THTensorPtr tensor(THTensor_(newWithSize)(LIBRARY_STATE sizes_storage, NULL));
@@ -1387,45 +1387,47 @@ static bool THPTensor_(_index)(THPTensor *self, PyObject *index,
   int invalid_indexer_dim = 0;
 
   if(PyTuple_Check(index)) {
-    // num_index_dim is the number of indices in the tuple, num_effective_index
-    // is the number of non-None, non-ellipses indices
-    long num_index_dim = (long)PyTuple_Size(index);
-    long num_effective_index = num_index_dim;
+    // num_indexers is the number of indexing objects in the tuple, num_effective_indexers
+    // is the number of non-None, non-ellipses indexing objects
+    long num_indexers = (long)PyTuple_Size(index);
+    long num_effective_indexers = num_indexers;
     long num_tensor_dim = THTensor_(nDimension)(LIBRARY_STATE self->cdata);
-    long ellipsis_idx = -1;
-    for (int i = 0; i < num_index_dim; i++) {
-      PyObject *dimidx = PyTuple_GET_ITEM(index, i);
-      if (dimidx == Py_Ellipsis) {
-        if (ellipsis_idx != -1) throw std::runtime_error("ellipsis can be used at most once");
-        ellipsis_idx = i;
-        num_effective_index--;
+    long ellipsis_pos = -1;
+    for (int i = 0; i < num_indexers; i++) {
+      PyObject *indexer = PyTuple_GET_ITEM(index, i);
+      if (indexer == Py_Ellipsis) {
+        if (ellipsis_pos != -1) throw std::runtime_error("ellipsis can be used at most once");
+        ellipsis_pos = i;
+        num_effective_indexers--;
       }
-      if (dimidx == Py_None) {
-        num_effective_index--;
+      if (indexer == Py_None) {
+        num_effective_indexers--;
       }
     }
-    if (num_effective_index > num_tensor_dim) {
+    if (num_effective_indexers > num_tensor_dim) {
       PyErr_Format(PyExc_IndexError,
           "trying to index %ld dimensions of a %ld dimensional tensor",
-          num_effective_index, num_tensor_dim);
+          num_effective_indexers, num_tensor_dim);
       return false;
     }
 
     // Loop through the indices and perform the indiviudal indexing at each dim
     bool valid = true;
-    for (int dim = 0; dim < num_index_dim; dim++) {
-      if (dim == ellipsis_idx) {
+    for (int indexTuplePos = 0; indexTuplePos < num_indexers; indexTuplePos++) {
+      if (indexTuplePos == ellipsis_pos) {
         // tresult can be NULL if ellipsis is the last item
-        if (tresult) indexed_dim = tresult->nDimension - (num_index_dim - dim - 1);
+        // Note that the presence of the Ellipsis shifts the "indexed" dim by the number
+        // of dimensions minus the number of effective indexers
+        if (tresult) indexed_dim += (num_tensor_dim - num_effective_indexers);
         continue;
       }
-      PyObject *dimidx = PyTuple_GET_ITEM(index, dim);
-      valid = THPTensor_(_indexOnce)(dimidx, indexed_dim, tresult, sresult, storage_offset);
+      PyObject *indexer = PyTuple_GET_ITEM(index, indexTuplePos);
+      valid = THPTensor_(_indexOnce)(indexer, indexed_dim, tresult, sresult, storage_offset);
       if (!valid) {
         tresult = NULL;
         // overwrite this, so the message mentions the incorrect object
-        index = dimidx;
-        invalid_indexer_dim = dim;
+        index = indexer;
+        invalid_indexer_dim = indexTuplePos;
         break;
       }
     }

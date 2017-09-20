@@ -1,8 +1,9 @@
-#include "torch/csrc/utils/pybind.h"
 #include <iostream>
 #include <sstream>
 #include "torch/csrc/jit/ir.h"
+#include "torch/csrc/jit/pybind.h"
 #include "torch/csrc/jit/python_tracer.h"
+#include "torch/csrc/utils/pybind.h"
 
 namespace torch { namespace jit {
 
@@ -22,7 +23,7 @@ void initPythonIRBindings(PyObject * module_) {
     .def("nodes",[](Graph &g) {
       return py::make_iterator(g.nodes().begin(),g.nodes().end());
     })
-    .GS(addInput)
+    .def("addInput",[](Graph &g) { return g.addInput(); })
     .GS(advanceStage)
     .GS(stage)
     .GS(eraseInput)
@@ -34,7 +35,6 @@ void initPythonIRBindings(PyObject * module_) {
       return g.create(stringToSymbol(str),inputs);
     })
     .GS(createSelect)
-    .GS(createChunk)
     .GS(createConstant)
     .GS(createFusionGroup)
     .def("createClone",[](Graph & g, Node * n, py::object fn) {
@@ -56,9 +56,7 @@ void initPythonIRBindings(PyObject * module_) {
       ss << n;
       return ss.str();
     })
-    .def("kind",[](Node & n) {
-      return symbolToString(n.kind());
-    })
+    .NS(kind)
     .NS(stage)
     .NS(type)
     .NS(typeOption)
@@ -90,28 +88,20 @@ void initPythonIRBindings(PyObject * module_) {
     .NS(removeInput)
     .NS(removeAllInputs)
     .NS(destroy)
+    .def("typeAs", [](Node * node, Node * other) {
+      node->setType(other->typeOption());
+      return node;
+    })
+#define AS(name) def(#name,&Attributes<Node> :: name)
     // methods from Attributes
-    .def("copyAttributes",[](Node & n, Node & rhs) {
-      n.copyAttributes(rhs);
-    })
-    .def("hasAttribute",[](Node & n, const char * name) {
-      return n.hasAttribute(stringToSymbol(name));
-    })
-    .def("kindOf", [](Node & n, const char * name) {
-      return toString(n.kindOf(stringToSymbol(name)));
-    })
-    .def("removeAttribute",[](Node & n, const char * name) {
-      return n.removeAttribute(stringToSymbol(name));
-    })
-    .NS(hasAttributes)
-    .def("attributeNames",[](Node & n) {
-      auto names = n.attributeNames();
-      std::vector<std::string> names_s;
-      for(auto n : names)
-        names_s.push_back(symbolToString(n));
-      return names_s;
-    })
-    #define CREATE_ACCESSOR(Kind,method) \
+    .AS(copyAttributes)
+    .AS(hasAttribute)
+    .AS(kindOf)
+    .AS(removeAttribute)
+    .AS(hasAttributes)
+    .AS(attributeNames)
+#undef AS
+#define CREATE_ACCESSOR(Kind,method) \
     def(#method "_",[](Node & n, const char * name, Kind##Attr::ValueType v) { \
       return n . method ## _(stringToSymbol(name), std::move(v)); \
     }) \
@@ -128,6 +118,7 @@ void initPythonIRBindings(PyObject * module_) {
     .CREATE_ACCESSOR(Tensors,ts)
     .CREATE_ACCESSOR(Graph,g)
     .CREATE_ACCESSOR(Graphs,gs)
+#undef CREATE_ACCESSOR
     .def("pyobj",[](Node & n) {
       return py::handle(n.expect<PythonOp>()->pyobj.get()).cast<py::object>();
     })

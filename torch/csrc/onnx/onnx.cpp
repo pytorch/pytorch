@@ -1,4 +1,4 @@
-#include "torch/csrc/onnx.h"
+#include "torch/csrc/onnx/onnx.h"
 
 namespace torch { namespace onnx {
 

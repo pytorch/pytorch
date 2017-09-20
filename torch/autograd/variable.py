@@ -6,16 +6,7 @@ import torch.sparse as sparse
 import torch.utils.hooks as hooks
 import warnings
 import weakref
-import itertools
-
-
-# A portable way of referring to the generator version of map
-# in both Python 2 and Python 3.
-# TODO: Move this into an appropriate utility library.
-if hasattr(itertools, 'imap'):
-    imap = itertools.imap
-else:
-    imap = map
+from torch._six import imap
 
 
 class Variable(_C._VariableBase):

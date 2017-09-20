@@ -1,9 +1,11 @@
 import torch
 import torch.jit
 import torch.nn as nn
+import torch.nn.functional as F
 import unittest
 from itertools import product
 from torch.autograd import Variable, Function
+from torch.autograd.function import traceable
 from common import TestCase, run_tests
 import io
 
@@ -27,24 +29,54 @@ class TestJit(TestCase):
         z = torch.sigmoid(torch.tanh(x * (x + y)))
         torch._C._tracer_exit((z,))
         torch._C._jit_pass_lint(trace)
-        torch._C._jit_pass_init(trace)
-        torch._C._jit_pass_lint(trace)
-        torch._C._jit_pass_fuse(trace)
+        torch._C._jit_pass_onnx(trace)
         torch._C._jit_pass_lint(trace)
 
         self.assertExpected(str(trace))
 
-    def test_lstm(self):
-        # Careful: don't use fused backend (enabled with CUDA)
-        # Pasted from test_LSTM_cell
-        input = Variable(torch.randn(3, 10))
-        hx = Variable(torch.randn(3, 20))
-        cx = Variable(torch.randn(3, 20))
+    @unittest.skipIf(not torch.cuda.is_available(), "fuser requires CUDA")
+    def test_lstm_fusion(self):
+        input = Variable(torch.randn(3, 10).cuda())
+        hx = Variable(torch.randn(3, 20).cuda())
+        cx = Variable(torch.randn(3, 20).cuda())
+        module = nn.LSTMCell(10, 20).cuda()  # Just to allocate weights with correct sizes
+
+        def LSTMCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
+            hx, cx = hidden
+            gates = F.linear(input, w_ih, b_ih) + F.linear(hx, w_hh, b_hh)
+
+            ingate, forgetgate, cellgate, outgate = gates.chunk(4, 1)
+            ingate = F.sigmoid(ingate)
+            forgetgate = F.sigmoid(forgetgate)
+            cellgate = F.tanh(cellgate)
+            outgate = F.sigmoid(outgate)
+
+            cy = (forgetgate * cx) + (ingate * cellgate)
+            hy = outgate * F.tanh(cy)
+            return hy, cy
+
         trace, _ = torch.jit.record_trace(
-            nn.LSTMCell(10, 20), input, (hx, cx))
+            LSTMCell, input, (hx, cx), *module.parameters())
         torch._C._jit_pass_lint(trace)
-        torch._C._jit_pass_init(trace)
+        torch._C._jit_pass_onnx(trace)
         torch._C._jit_pass_lint(trace)
+        torch._C._jit_pass_fuse(trace)
+        torch._C._jit_pass_lint(trace)
+        self.assertExpected(str(trace))
+
+    @unittest.skipIf(not torch.cuda.is_available(), "fuser requires CUDA")
+    def test_fusion_distribute(self):
+        def f(x, y):
+            z1, z2 = (x + y).chunk(2, dim=1)
+            return z1 * z2
+        x = Variable(torch.randn(4, 4).cuda())
+        y = Variable(torch.randn(4, 4).cuda())
+        trace, _ = torch.jit.record_trace(f, x, y)
+        torch._C._jit_pass_lint(trace)
+        self.assertExpected(str(trace), 'raw')
+        torch._C._jit_pass_onnx(trace)
+        torch._C._jit_pass_lint(trace)
+        self.assertExpected(str(trace), 'onnx')
         torch._C._jit_pass_fuse(trace)
         torch._C._jit_pass_lint(trace)
         self.assertExpected(str(trace))
@@ -62,9 +94,7 @@ class TestJit(TestCase):
         trace, _ = torch.jit.record_trace(
             a_function, input, (hx, cx), parameters=lstm.parameters())
         torch._C._jit_pass_lint(trace)
-        torch._C._jit_pass_init(trace)
-        torch._C._jit_pass_lint(trace)
-        torch._C._jit_pass_fuse(trace)
+        torch._C._jit_pass_onnx(trace)
         torch._C._jit_pass_lint(trace)
         self.assertExpected(str(trace))
 
@@ -107,6 +137,27 @@ class TestJit(TestCase):
         z2 = traced(x, y)
         self.assertEqual(z, torch.sigmoid(torch.tanh(x * (x + y))))
         self.assertEqual(z, z2)
+
+    def test_assign_traces(self):
+        """Check that output Variables are assign traces before they are saved."""
+        @traceable
+        class MyFn(Function):
+            @staticmethod
+            def forward(ctx, a):
+                out = a * 2
+                ctx.save_for_backward(out)
+                return out
+
+            @staticmethod
+            def backward(ctx, grad_a):
+                a, = ctx.saved_variables
+                return a * grad_a
+
+        x = Variable(torch.randn(10, 10), requires_grad=True)
+        trace, out = torch.jit.record_trace(MyFn.apply, x)
+        out.sum().backward()
+        torch._C._jit_pass_dce(trace)
+        self.assertExpected(str(trace))
 
     def test_traced_module(self):
         input = Variable(torch.randn(3, 10))
@@ -222,6 +273,29 @@ class TestJit(TestCase):
         torch._C._jit_pass_dce(trace)
         self.assertExpected(str(trace))
 
+    def test_backward_closure(self):
+        """Check that autograd closures handle multiple stages correctly."""
+        x = Variable(torch.randn(1), requires_grad=True)
+
+        @torch.jit.trace(num_derivatives=2)
+        def fn(x):
+            return x * x
+
+        # Generate trace
+        grad_x, = torch.autograd.grad(fn(x), (x,), create_graph=True)
+        self.assertFalse(fn.has_trace_for(x))
+        grad_x.backward()
+        self.assertTrue(fn.has_trace_for(x))
+
+        x_grad = x.grad.data.clone()
+        x.grad.data.zero_()
+
+        # Run the trace
+        grad_x, = torch.autograd.grad(fn(x), (x,), create_graph=True)
+        grad_x.backward()
+
+        self.assertEqual(x.grad.data, x_grad)
+
     def test_trace_expire(self):
         x = Variable(torch.randn(2, 2), requires_grad=True)
         y = Variable(torch.randn(2, 2), requires_grad=True)
@@ -266,6 +340,42 @@ class TestJit(TestCase):
 
         out.sum().backward()
         self.assertTrue(cell.has_trace_for(x))
+
+    def test_output_unflatten(self):
+        """Check that outputs of traced functions retain the original structure and nesting"""
+        x = Variable(torch.randn(2, 2), requires_grad=True)
+
+        def fn(x):
+            return (x * 2, (x ** 2, x + 4, (x + 2,), ), x * 4)
+
+        expected_out = fn(x)
+        fn = torch.jit.traced(fn)
+
+        def recursive_sum(obj):
+            if isinstance(obj, Variable):
+                return obj.sum()
+            else:
+                return sum(recursive_sum(o) for o in obj)
+
+        recursive_sum(fn(x)).backward()
+        self.assertTrue(fn.has_trace_for(x))
+        self.assertEqual(fn(x), expected_out)
+
+    def test_input_flatten(self):
+        """Check that inputs to traced functions are flattened"""
+        def make_var():
+            return Variable(torch.randn(1), requires_grad=True)
+        x = (make_var(), (make_var(), make_var()))
+
+        def fn(x, t):
+            y, z = t
+            return x * y * z
+
+        expected_out = fn(*x)
+        fn = torch.jit.traced(fn)
+        fn(*x).backward()
+        self.assertTrue(fn.has_trace_for(*x))
+        self.assertEqual(fn(x), expected_out)
 
     def test_flags(self):
         x = Variable(torch.randn(2, 2))
@@ -323,14 +433,9 @@ class TestJit(TestCase):
 
         with self.assertRaisesRegex(RuntimeError, 'different flags'):
             fn(x).backward(Variable(torch.ones(1), requires_grad=True))
-        # TODO: enable once AutogradClosure registers prev stage inputs correctly
-        # The problem is that the tracer sometimes catches unnecessary operations.
-        # For example, some ops will still return a valid grad, even though their
-        # next_function doesn't need it, and if two ops do it, they will get summed
-        # together - the Add function will have two inputs that don't require grad,
-        # and this causees some problems in jit_closure.cpp
-        # grad_x, = torch.autograd.grad(fn(x), (x,), create_graph=True)
-        # grad_x.backward()
+        with self.assertRaisesRegex(RuntimeError, 'different flags'):
+            grad_x, = torch.autograd.grad(fn(x), (x,), create_graph=True)
+            grad_x.backward(Variable(torch.ones(1), requires_grad=True))
 
     def test_python_ir(self):
         x = Variable(torch.Tensor([0.4]), requires_grad=True)
@@ -387,6 +492,30 @@ class TestJit(TestCase):
         x = Variable(torch.randn(20, 16, 50, 40).fill_(1.0), requires_grad=True)
         trace, _ = torch.jit.record_trace(nn.Conv2d(16, 13, 3, bias=False), x)
         self.assertExpected(str(trace))
+
+    def test_mini_wlm(self):
+        """Exercise null-edge pruning in the tracer."""
+
+        class MyModel(nn.Module):
+            def __init__(self):
+                super(MyModel, self).__init__()
+                self.encoder = nn.Embedding(2, 2)
+
+            def forward(self, input, hidden):
+                emb = self.encoder(input)
+                hidden = hidden.clone()  # simulate some RNN operation
+                return emb, hidden
+
+        model = torch.jit.traced(MyModel(), verify=True)
+
+        x = Variable(torch.LongTensor([[0, 1], [1, 0]]))
+        y = Variable(torch.FloatTensor([0]))
+
+        z, _ = model(x, y)
+        z.sum().backward()
+
+        z, _ = model(x, y)
+        z.sum().backward()
 
     @skipIfNoTorchVision
     def test_alexnet(self):

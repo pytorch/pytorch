@@ -6,7 +6,6 @@
 #include "torch/csrc/utils/functional.h"
 #include "torch/csrc/autograd/function_hook.h"
 #include "torch/csrc/autograd/variable.h"
-#include "torch/csrc/jit/init_pass.h"
 
 #include <memory>
 #include <mutex>
@@ -52,7 +51,7 @@ inline bool isElemActive(const ValueTracingStateElem& vts) {
 }
 
 inline std::vector<VariableFlags> getVarFlags(const variable_list& vars) {
-  return fmap(vars, &VariableFlags::create);
+  return fmap(vars, &VariableFlags::of);
 }
 
 }
@@ -93,6 +92,7 @@ inline std::shared_ptr<TracingState> getTracingState(const variable_list& vars) 
 // 'setValueTrace' associates this node with an output variable, so that further operations
 // involving this variable know which node in the IR to reference.
 inline void setValueTrace(const std::shared_ptr<TracingState>& state, const Variable& var, Node *node) {
+  JIT_ASSERT(var.defined());
   auto vts = detail::getValueState(state, var);
   vts->trace = node;
 }
@@ -113,7 +113,8 @@ inline void setValueTrace(const std::shared_ptr<TracingState>& state, const Vari
 // if we treat it as a constant, everything will work out.
 inline Node* getValueTrace(const std::shared_ptr<TracingState>& state, const Variable& var, bool mustExist = false) {
   if (!var.defined()) {
-    return state->graph->appendNode(state->graph->createUndefined());
+    Node *n = state->graph->createUndefined();
+    return state->graph->appendNode(n);
   }
   if (mustExist) {
     auto vts = detail::getValueState(state, var, false);
@@ -212,5 +213,24 @@ inline void exit(const variable_list& outputs) {
 // Marks part of the backward graph as non-traceable (i.e. one that should be replaced
 // with an Eval in the trace).
 void nontraceableBackwardSubgraph(const variable_list& inputs, const variable_list& outputs);
+
+// These definitions require Variable struct to be defined, so they can't be
+// in tracer_state.h
+inline VariableFlags VariableFlags::of(const Variable& var) {
+  VariableFlags f;
+  if (var.defined()) {
+    f.was_null = false;
+    f.requires_grad = var.requires_grad();
+    f.is_volatile = var.is_volatile();
+  } else {
+    f.was_null = true;
+  }
+  return f;
+}
+
+inline bool VariableFlags::verify(const Variable& var) {
+  if (!var.defined()) return was_null;
+  return !was_null && requires_grad == var.requires_grad() && is_volatile == var.is_volatile();
+}
 
 }}} // namespace torch::jit::tracer

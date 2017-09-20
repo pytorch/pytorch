@@ -1,4 +1,6 @@
 #include "torch/csrc/autograd/functions/utils.h"
+#include "torch/csrc/utils/functional.h"
+#include "torch/csrc/jit/tracer.h"
 
 #include "torch/csrc/autograd/variable.h"
 
@@ -14,7 +16,7 @@ variable_list wrap_outputs(const variable_list& inputs, tensor_list&& outputs,
   if (flags.is_volatile) {
     for (auto& output : outputs) {
       if (output.defined()) {
-        result.emplace_back(Variable(new VariableImpl(output, false, true), false));
+        result.emplace_back(make_variable(output, false, true));
       } else {
         result.emplace_back();
       }
@@ -23,7 +25,7 @@ variable_list wrap_outputs(const variable_list& inputs, tensor_list&& outputs,
     auto grad_fn = ctr(std::move(flags));
     for (auto& output : outputs) {
       if (output.defined()) {
-        result.emplace_back(Variable(new VariableImpl(output, grad_fn), false));
+        result.emplace_back(make_variable(output, grad_fn));
       } else {
         ++grad_fn->num_inputs;
         result.emplace_back();
