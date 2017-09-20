@@ -30,9 +30,9 @@ class Multinomial(StochasticFunction):
         output_probs = probs.gather(1, samples)
         output_probs.add_(1e-6).reciprocal_()
         output_probs.neg_().mul_(reward)
-        # TODO: add batched index_add
-        for i in range(probs.size(0)):
-            grad_probs[i].index_add_(0, samples[i], output_probs[i])
+        # Fill in gradients 
+        idx = torch.arange(0, grad_probs.size(0)).long()
+        grad_probs[idx, samples.t()] = output_probs.t()
         return grad_probs
 
 
