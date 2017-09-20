@@ -312,30 +312,28 @@ class TestCase(unittest.TestCase):
             expected_file += "-" + subname
         expected_file += ".expect"
         expected = None
+
+        def accept_output(update_type):
+            print("Accepting {} for {}:\n\n{}".format(update_type, munged_id, s))
+            with open(expected_file, 'w') as f:
+                f.write(s)
+
         try:
             with open(expected_file) as f:
                 expected = f.read()
         except IOError as e:
-            if e.errno == errno.ENOENT:
-                if ACCEPT:
-                    print("Accepting output for {}:\n\n{}".format(munged_id, s))
-                    with open(expected_file, 'w') as f:
-                        f.write(s)
-                    return  # don't keep going
-                else:
-                    raise RuntimeError(
-                        ("I got this output for {}:\n\n{}\n\n"
-                         "No expect file exists; to accept the current output, run:\n"
-                         "python {} {} --accept").format(munged_id, s, __main__.__file__, munged_id))
-            else:
+            if e.errno != errno.ENOENT:
                 raise
-        if ACCEPT:
-            if expected == s:
-                pass  # nothing to do
+            elif ACCEPT:
+                return accept_output("output")
             else:
-                print("Accepting updated output for {}:\n\n{}".format(munged_id, s))
-                with open(expected_file, 'w') as f:
-                    f.write(s)
+                raise RuntimeError(
+                    ("I got this output for {}:\n\n{}\n\n"
+                     "No expect file exists; to accept the current output, run:\n"
+                     "python {} {} --accept").format(munged_id, s, __main__.__file__, munged_id))
+        if ACCEPT:
+            if expected != s:
+                return accept_output("updated output")
         else:
             if hasattr(self, "assertMultiLineEqual"):
                 # Python 2.7 only
