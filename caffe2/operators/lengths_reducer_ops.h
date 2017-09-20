@@ -80,7 +80,6 @@ class CPUSparseLengthsReductionOp : public Operator<CPUContext> {
         indices,
         lengths,
         in_weight,
-        NULL, // scale_bias field is only used in SparseLengths8BitsRowwiseOp
         USE_MEAN,
         out_data);
     return true;

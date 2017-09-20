@@ -19,13 +19,11 @@ static void EmbeddingLookupGenericSlow(
     const IndexType* indices,
     const int* lengths,
     const float* weights, // optional, can be null for sum reducer
-    const float* scale_bias, // optional scale & bias params for uint8 input
     bool normalize_by_lengths,
     OutType* out) {
   TIndex current = 0;
   for (int m = 0; m < output_size; ++m) {
     memset(out, 0, sizeof(OutType) * block_size);
-    EigenVectorArrayMap<OutType> out_vector(out, block_size);
     for (int i = 0; i < lengths[m]; ++i) {
       CAFFE_ENFORCE_LT(current, index_size);
       TIndex idx = indices[current];
@@ -43,23 +41,11 @@ static void EmbeddingLookupGenericSlow(
         __builtin_prefetch(input + block_size * indices[current + 1], 0, 1);
       }
 #endif // __GNUC__
-
-      float w = 1.f, b = 0.f;
-      if (weights) {
-        w = weights[current];
-      }
-      if (scale_bias) {
-        b = w * scale_bias[2 * indices[current] + 1];
-        w = w * scale_bias[2 * indices[current]];
-      }
-
       TypedAxpy<InType, OutType>(
-          block_size, w, input + block_size * indices[current], out);
-
-      if (scale_bias) {
-        out_vector = out_vector + b;
-      }
-
+          block_size,
+          weights ? weights[current] : 1.0,
+          input + block_size * indices[current],
+          out);
       ++current;
     }
     if (normalize_by_lengths && lengths[m]) {
@@ -87,7 +73,6 @@ static void EmbeddingLookupGenericSlow(
       const IndexType* indices,                                    \
       const int* lengths,                                          \
       const float* weights,                                        \
-      const float* scale_bias,                                     \
       bool normalize_by_lengths,                                   \
       OutType* out) {                                              \
     EmbeddingLookupGenericSlow<IndexType, InType, OutType>(        \
@@ -99,7 +84,6 @@ static void EmbeddingLookupGenericSlow(
         indices,                                                   \
         lengths,                                                   \
         weights,                                                   \
-        scale_bias,                                                \
         normalize_by_lengths,                                      \
         out);                                                      \
   }                                                                \
@@ -113,7 +97,6 @@ static void EmbeddingLookupGenericSlow(
       const IndexType* indices,                                    \
       const int* lengths,                                          \
       const float* weights,                                        \
-      const float* scale_bias,                                     \
       bool normalize_by_lengths,                                   \
       OutType* out) {                                              \
     AVX2_FMA_DO(                                                   \
@@ -126,7 +109,6 @@ static void EmbeddingLookupGenericSlow(
         indices,                                                   \
         lengths,                                                   \
         weights,                                                   \
-        scale_bias,                                                \
         normalize_by_lengths,                                      \
         out);                                                      \
     BASE_DO(                                                       \
@@ -139,7 +121,6 @@ static void EmbeddingLookupGenericSlow(
         indices,                                                   \
         lengths,                                                   \
         weights,                                                   \
-        scale_bias,                                                \
         normalize_by_lengths,                                      \
         out);                                                      \
   }
@@ -148,8 +129,6 @@ EMBEDDING_SPECIALIZATION(int32_t, float, float);
 EMBEDDING_SPECIALIZATION(int64_t, float, float);
 EMBEDDING_SPECIALIZATION(int32_t, float16, float);
 EMBEDDING_SPECIALIZATION(int64_t, float16, float);
-EMBEDDING_SPECIALIZATION(int32_t, uint8_t, float);
-EMBEDDING_SPECIALIZATION(int64_t, uint8_t, float);
 
 #undef EMBEDDING_SPECIALIZATION
 
