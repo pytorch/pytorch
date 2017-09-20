@@ -19,9 +19,9 @@
  */
  template <typename T>
 __global__ void adaptivemaxpool(T *input, T *output, THCIndex_t *indices,
-                        int sizeD, int isizeH, int isizeW,
+                        int isizeH, int isizeW,
                         int osizeH, int osizeW,
-                        int istrideD, int istrideH, int istrideW)
+                        int64_t istrideD, int64_t istrideH, int64_t istrideW)
 {
   // iterators
   int oh, ow;
@@ -85,7 +85,7 @@ __global__ void adaptivemaxpool(T *input, T *output, THCIndex_t *indices,
  */
  template <typename T>
 __global__ void adaptivemaxgradinput(T *gradInput, T *gradOutput, THCIndex_t *indices,
-                             int sizeD, int isizeH, int isizeW,
+                             int isizeH, int isizeW,
                              int osizeH, int osizeW)
 {
   // iterators
@@ -133,7 +133,7 @@ __global__ void adaptivemaxgradinput(T *gradInput, T *gradOutput, THCIndex_t *in
  template <typename T>
 __global__ void atomicadaptivemaxgradinput(
   T *gradInput, T *gradOutput, THCIndex_t *indices,
-  int sizeD, int isizeH, int isizeW, int osizeH, int osizeW
+  int isizeH, int isizeW, int osizeH, int osizeW
 )
 {
   // iterators
