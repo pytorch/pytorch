@@ -270,6 +270,7 @@ class Atan2(Function):
 
 
 class Erf(Function):
+
     @staticmethod
     def forward(ctx, i):
         ctx.save_for_backward(i)
@@ -282,6 +283,7 @@ class Erf(Function):
 
 
 class ErfInv(Function):
+
     @staticmethod
     def forward(ctx, i):
         ctx.save_for_backward(i)
