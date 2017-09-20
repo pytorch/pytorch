@@ -29,7 +29,7 @@ void ToONNX(std::shared_ptr<tracer::TracingState>& state) {
   // Check that the tracing state is live (it should be, because
   // you were supposed to request zero derivatives.)
   if (state->is_expired()) {
-    throw std::runtime_error("Tracing state is expired!  You should run the tracer with num_derivatives=0");
+    throw std::logic_error("ToONNX: tracing state is expired");
   }
 
   auto new_graph = std::make_shared<Graph>();
