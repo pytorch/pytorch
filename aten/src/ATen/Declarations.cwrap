@@ -157,15 +157,18 @@
   return: argument 0
   options:
     - cname: set
+      scalar_check: source
       arguments:
         - THTensor* self
         - THTensor* source
     - cname: setStorage
+      scalar_check: False
       arguments:
         - THTensor* self
         - CONSTANT NULL, 0, NULL, NULL
     - cname: setStorage
       before_call: THLongStoragePtr __storage_size(THLongStorage_newWithSize1(THStorage_(size)(LIBRARY_STATE arg_storage)));
+      scalar_check: False
       arguments:
         - THTensor* self
         - THStorage* storage
@@ -428,19 +431,11 @@
       long_args: True
 ]]
 [[
-  name: expand
-  cname: newExpand
-  return: THTensor*
-  arguments:
-    - THTensor* self
-    - arg: THSize* size
-      long_args: True
-]]
-[[
   name: resizeAs_
   python_name: resize_as_
   cname: resizeAs
   return: self
+  scalar_check: the_template
   arguments:
     - THTensor* self
     - THTensor* the_template
