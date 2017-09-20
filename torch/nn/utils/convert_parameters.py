@@ -1,12 +1,13 @@
 import torch
 from torch.autograd import Variable
 
+
 def parameters_to_vector(parameters):
     """Convert parameters to one vector
-    
+
     Arguments:
-        parameters (Iterable[Variable]): an iterator of Variables that are the 
-            parameters of a model. 
+        parameters (Iterable[Variable]): an iterator of Variables that are the
+            parameters of a model.
 
     Returns:
         The parameters represented by a single vector
@@ -16,13 +17,14 @@ def parameters_to_vector(parameters):
         vec.append(param.view(-1))
     return torch.cat(vec)
 
+
 def vector_to_parameters(vec, parameters):
     """Convert one vector to the parameters
-    
+
     Arguments:
         vec (Variable): a single vector represents the parameters of a model.
-        parameters (Iterable[Variable]): an iterator of Variables that are the 
-            parameters of a model. 
+        parameters (Iterable[Variable]): an iterator of Variables that are the
+            parameters of a model.
     """
     # Ensure vec of type Variable
     if not isinstance(vec, Variable):
