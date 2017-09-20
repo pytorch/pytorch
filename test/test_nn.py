@@ -3733,6 +3733,17 @@ new_module_tests = [
         desc='norm',
     ),
     dict(
+        module_name='LPPool1d',
+        constructor_args=(1.5, 2),
+        input=torch.rand(1, 3, 7),
+        desc='norm',
+    ),
+    dict(
+        module_name='LPPool1d',
+        constructor_args=(2, 2, 3),
+        input_size=(1, 3, 7),
+    ),
+    dict(
         module_name='ReflectionPad1d',
         constructor_args=((1, 2),),
         input_size=(2, 3, 8),

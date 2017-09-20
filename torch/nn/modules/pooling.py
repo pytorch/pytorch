@@ -778,6 +778,58 @@ class LPPool2d(Module):
         return F.lp_pool2d(input, self.norm_type, self.kernel_size,
                            self.stride, self.ceil_mode)
 
+    def __repr__(self):
+        return self.__class__.__name__ + ' (' \
+            + str(self.norm_type) + ', ' \
+            + str(self.kernel_size) + ', ' \
+            + 'stride=' + str(self.stride) + ', ' \
+            + 'ceil_mode=' + str(self.ceil_mode) + ')'
+
+
+class LPPool1d(Module):
+    r"""Applies a 1D power-average pooling over an input signal composed of several input
+    planes.
+
+    On each window, the function computed is: :math:`f(X) = pow(sum(pow(X, p)), 1/p)`
+
+        - At p = infinity, one gets Max Pooling
+        - At p = 1, one gets Average Pooling
+
+    Args:
+        kernel_size: a single int, the size of the window
+        stride: a single int, the stride of the window. Default value is :attr:`kernel_size`
+        ceil_mode: when True, will use `ceil` instead of `floor` to compute the output shape
+
+    Shape:
+        - Input: :math:`(N, C, L_{in})`
+        - Output: :math:`(N, C, L_{out})` where
+          :math:`L_{out} = floor((L_{in} + 2 * padding - kernel\_size) / stride + 1)`
+
+    Examples::
+        >>> # power-2 pool of window of length 3, with stride 2.
+        >>> m = nn.LPPool1d(2, 3, stride=2)
+        >>> input = autograd.Variable(torch.randn(20, 16, 50))
+        >>> output = m(input)
+    """
+
+    def __init__(self, norm_type, kernel_size, stride=None, ceil_mode=False):
+        super(LPPool1d, self).__init__()
+        self.norm_type = norm_type
+        self.kernel_size = kernel_size
+        self.stride = stride
+        self.ceil_mode = ceil_mode
+
+    def forward(self, input):
+        return F.lp_pool1d(input, self.norm_type, self.kernel_size,
+                           self.stride, self.ceil_mode)
+
+    def __repr__(self):
+        return self.__class__.__name__ + ' (' \
+            + str(self.norm_type) + ', ' \
+            + str(self.kernel_size) + ', ' \
+            + 'stride=' + str(self.stride) + ', ' \
+            + 'ceil_mode=' + str(self.ceil_mode) + ')'
+
 
 class AdaptiveMaxPool1d(Module):
     """Applies a 1D adaptive max pooling over an input signal composed of several input planes.

@@ -378,6 +378,11 @@ def lp_pool2d(input, norm_type, kernel_size, stride=None, ceil_mode=False):
     return out.mul(kw * kh).pow(1. / norm_type)
 
 
+def lp_pool1d(input, norm_type, kernel_size, stride=None, ceil_mode=False):
+    out = avg_pool1d(input.pow(norm_type), kernel_size, stride, 0, ceil_mode)
+    return out.mul(kernel_size).pow(1. / norm_type)
+
+
 def adaptive_max_pool1d(input, output_size, return_indices=False):
     r"""Applies a 1D adaptive max pooling over an input signal composed of
     several input planes.
