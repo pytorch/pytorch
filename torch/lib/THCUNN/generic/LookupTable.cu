@@ -145,6 +145,7 @@ void THNN_(LookupTable_accGradParameters)(
   THCudaCheck(cudaGetLastError());
 }
 
+#include <cuda_profiler_api.h>
 void THNN_(LookupTable_renorm)(
            THCState *state,
            THCIndexTensor *idx,
@@ -190,10 +191,12 @@ void THNN_(LookupTable_renorm)(
   threads_per_block |= threads_per_block >> 32;
   threads_per_block++;
 
+  cudaProfilerStart();
   calculate_norms_and_renorm<real, accreal>
-    <<<num_blocks, threads_per_block, threads_per_block * sizeof(accreal)>>>
+    <<<num_blocks, threads_per_block/2, threads_per_block * sizeof(accreal)>>>
     (weight_ptr_raw, idx_ptr_raw, normType, maxNorm, normType_, stride);
-
+  cudaDeviceSynchronize();
+  cudaProfilerStop();
 }
 
 #endif

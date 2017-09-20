@@ -197,17 +197,20 @@ void calculate_norms_and_renorm(Dtype *weight_ptr, THCIndex_t *idx_ptr, Dtype no
   int64_t tid = threadIdx.x;
   int64_t idx = (idx_ptr[blockIdx.x] - TH_INDEX_BASE) * dim + tid;
 
-  // Do the first addition and the initial exponents in the load
+  // Do the initial exponents in the load
   // Shenanigans here since we need to work with a power-of-2 block size
   // effectively pad the matrix with zeroes if needed
-  if (tid > dim)
-    sdata[tid] = (Acctype) 0;
+  Acctype second;
+  if (tid + blockDim.x > dim)
+    second = (Acctype) 0;
   else 
-    sdata[tid] = fast_pow(weight_ptr[idx], normType_);
+    second = fast_pow(weight_ptr[idx + blockDim.x], normType_);
+
+  sdata[tid] = fast_pow(weight_ptr[idx], normType_) + second;
 
   __syncthreads();
 
-  // iterative merging algorithm
+  // iterative merging algorithm. Possible optimization could involve 
   for(int64_t i = blockDim.x / 2; i > 0; i >>= 1) {
     if (tid < i) {
       sdata[tid] += sdata[tid+i];
@@ -222,8 +225,9 @@ void calculate_norms_and_renorm(Dtype *weight_ptr, THCIndex_t *idx_ptr, Dtype no
   // now we renormalize the blocks that need it
   if (sdata[0] > ScalarConvert<Dtype, Acctype>::to(maxNorm)) {
     Dtype factor = ScalarConvert<Acctype, Dtype>::to(maxNorm / (sdata[0] + 1e-7));
-    if (tid < dim)
-      weight_ptr[idx] *= factor;
+    weight_ptr[idx] *= factor;
+    if (tid + blockDim.x < dim)
+      weight_ptr[idx + blockDim.x] *= factor;
   }
 
 }
