@@ -59,7 +59,11 @@ static PyObject * THPStorage_(newTHView)(THStorage *base, ptrdiff_t offset, size
 // TODO: move this somewhere - we only need one version
 static std::string THPStorage_(__newHandle)() {
   std::string handle = "/torch_";
+#ifdef _MSC_VER
+  handle += std::to_string(GetCurrentProcessId());
+#else
   handle += std::to_string(getpid());
+#endif
   handle += "_";
   handle += std::to_string(THRandom_random(THPDefaultGenerator->cdata));
   return handle;
