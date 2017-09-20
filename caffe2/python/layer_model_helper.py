@@ -60,6 +60,10 @@ class LayerModelHelper(model_helper.ModelHelper):
 
         self._init_global_constants()
         self.param_init_net = self.create_init_net('param_init_net')
+        self._initialize_params = True
+
+    def set_initialize_params(self, initialize_params):
+        self._initialize_params = initialize_params
 
     def add_metric_field(self, name, value):
         assert name not in self._metrics_schema.fields, (
@@ -148,14 +152,18 @@ class LayerModelHelper(model_helper.ModelHelper):
         if shape is not None:
             init_op_args.update({'shape': shape})
 
-        param = layers.LayerParameter(
-            parameter=param_blob,
-            initializer=core.CreateOperator(
+        initializer_op = None
+        if self._initialize_params:
+            initializer_op = core.CreateOperator(
                 initializer[0],
                 [],
                 param_blob,
                 **init_op_args
-            ),
+            )
+
+        param = layers.LayerParameter(
+            parameter=param_blob,
+            initializer=initializer_op,
             optimizer=optimizer,
             ps_param=ps_param,
         )
