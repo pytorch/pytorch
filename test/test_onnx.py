@@ -24,6 +24,15 @@ def export_to_string(model, inputs, *args, **kwargs):
     return f.getvalue()
 
 
+class FuncModule(Module):
+    def __init__(self, f):
+        super(FuncModule, self).__init__()
+        self.f = f
+
+    def forward(self, *args):
+        return self.f(*args)
+
+
 @onnx_only
 class TestONNX(TestCase):
     maxDiff = None
@@ -56,14 +65,11 @@ class TestONNX(TestCase):
         self.assertONNXExpected(trace.export())
 
     def test_concat(self):
-        class ConcatNet(nn.Module):
-            def forward(self, inputs):
-                return torch.cat(inputs, 1)
-
-        # volatile is of particular interest; there was a bug involving this
+        # volatile is of particular interest; it caused a segfault
+        # with the exporter
         x = Variable(torch.randn(2, 3), volatile=True)
         y = Variable(torch.randn(2, 3), volatile=True)
-        self.assertONNXExpected(export_to_string(ConcatNet(), ((x, y),)))
+        self.assertONNXExpected(export_to_string(FuncModule(lambda inputs: torch.cat(inputs, 1)), ((x, y),)))
 
     def test_permute(self):
         x = Variable(torch.Tensor([[[[[[0]]]]]]), requires_grad=True)
@@ -91,20 +97,18 @@ class TestONNX(TestCase):
         class MyFun(Function):
             @staticmethod
             def symbolic(g, x):
-                assert False  # dead code
+                # The inside of this function should never be invoked, because
+                # we will fail due to an argument mismatch first.
+                assert False
 
             @staticmethod
             def forward(ctx, x, y):
                 return x + y
 
-        class MyModel(Module):
-            def forward(self, x, y):
-                return MyFun().apply(x, y)
-
         x = Variable(torch.randn(2, 2).fill_(1.0))
         y = Variable(torch.randn(2, 2).fill_(1.0))
         with self.assertRaisesRegex(TypeError, "occurred when translating MyFun"):
-            export_to_string(MyModel(), (x, y))
+            export_to_string(FuncModule(MyFun().apply), (x, y))
 
     # TODO: Do an nn style test for these
     def test_batchnorm(self):
