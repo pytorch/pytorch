@@ -7,15 +7,30 @@ from ..variable import Variable
 from .utils import maybe_unexpand
 
 
+def _preprocess_adv_index_seq(index):
+    result = []
+    for indexer in index:
+        if isinstance(indexer, Variable):
+            assert not indexer.requires_grad
+            result.append(indexer.data)
+        else:
+            result.append(indexer)
+    return result
+
+
 class Index(Function):
 
     @staticmethod
     def forward(ctx, i, index):
         ctx.input_size = i.size()
         ctx.index = index
-        result = i.index(ctx.index)
         ctx.advanced_indexing = i._check_advanced_indexing(index)
-        if not ctx.advanced_indexing:
+        if ctx.advanced_indexing:
+            # handle any Variable arguments in the index sequence
+            ctx.index = _preprocess_adv_index_seq(index)
+            result = i.index(ctx.index)
+        else:
+            result = i.index(ctx.index)
             ctx.mark_shared_storage((i, result))
         return result
 
@@ -40,6 +55,9 @@ class SetItem(InplaceFunction):
         ctx.tensor_value = torch.is_tensor(value)
         if ctx.tensor_value:
             ctx.value_size = value.size()
+        ctx.advanced_indexing = i._check_advanced_indexing(index)
+        if ctx.advanced_indexing:
+            ctx.index = _preprocess_adv_index_seq(index)
         i._set_index(ctx.index, value)
         return i
 
@@ -240,7 +258,10 @@ class AdvancedIndexAdd(InplaceFunction):
             ctx.adv_index = adv_index
         ctx.mark_dirty(tensor1)
         ctx.tensor2_size = tensor2.size()
-        return tensor1._advanced_index_add(adv_index, tensor2)
+        index = _preprocess_adv_index_seq(adv_index)
+        if ctx.needs_input_grad[2]:
+            ctx.adv_index = index
+        return tensor1._advanced_index_add(index, tensor2)
 
     @staticmethod
     @once_differentiable
