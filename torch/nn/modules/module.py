@@ -440,6 +440,28 @@ class Module(object):
             for name, p in module.named_parameters(memo, submodule_prefix):
                 yield name, p
 
+    def parameters_to_vector(self):
+        """Convert parameters to one vector"""
+        vec = []
+        for param in self.parameters():
+            vec.append(param.view(-1))
+        return torch.cat(vec)
+
+    def vector_to_parameters(self, vec):
+        """Convert one vector to the parameters"""
+        # Ensure vec of type Variable
+        if not isinstance(vec, Variable):
+            raise TypeError('expected torch.autograd.Variable, but got: {}'
+                            .format(torch.typename(vec)))
+        
+        pointer = 0
+        for param in self.parameters():
+            num_param = torch.prod(torch.LongTensor(list(param.size())))
+            param.data = vec[pointer:pointer + num_param].view(param.size()).data
+
+            # Increment the pointer
+            pointer += num_param
+                
     def _all_buffers(self, memo=None):
         if memo is None:
             memo = set()
