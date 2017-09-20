@@ -159,8 +159,8 @@ CHECKED_CAST = {
     'THGenerator*':
         CodeTemplate(
             'check_generator<${Backend}Generator>(${arg_name}, &context->defaultGenerator(backend()))'),
-    'THSize*': CodeTemplate('THLongStorageView::make(${arg_name}, true)'),
-    'THStride*': CodeTemplate('THLongStorageView::make(${arg_name}, false, true)'),
+    'THSize*': CodeTemplate('THLongStorageView::makeFromSize(${arg_name})'),
+    'THStride*': CodeTemplate('THLongStorageView::makeFromStride(${arg_name}, ${noelem_to_empty})'),
     'real': CodeTemplate('${arg_name}.to${ScalarName}()'),
     'accreal': CodeTemplate('${arg_name}.to${AccScalarName}()'),
     'TensorList': CodeTemplate('tensor_list_checked_cast<${Tensor}, Tensor, '
@@ -194,7 +194,7 @@ CONSTANT_REPLACEMENTS = [
     ('THPDefaultGenerator->cdata',
      'dynamic_cast<${Generator}&>().generator'),
     ('__storage_size.get\\(\\)',
-     'THLongStorageView::make(static_cast<int64_t>(storage.size()))'),
+     'THLongStorageView::makeFromLength(static_cast<int64_t>(storage.size()))'),
     ('__last_dim', 'self.ndimension()-1'),
 ]
 
@@ -773,11 +773,20 @@ def create_derived(backend_type_env, declarations):
         # if there is a THSize* argument, then its dimensions are used to determine scalar.
         # otherwise, it is true if all the input tensors are scalars,
         scalar_check_is_from_size = False
+        scalar_check_is_from_option = False
         scalar_check = None
+        scalar_check_opt = option.get('scalar_check')
+        if scalar_check_opt is not None:
+            if scalar_check_opt is not False:
+                scalar_check = '{}->isScalar()'.format(scalar_check_opt + '_')
+            else:
+                scalar_check = 'false'
+            scalar_check_is_from_option = True
+
         for arg in option['arguments']:
             if is_real_argument_to_wrapper(arg):
                 count += 1
-            if arg['type'] == 'THSize*':
+            if arg['type'] == 'THSize*' and not scalar_check_is_from_option:
                 scalar_check_is_from_size = True
                 scalar_check = '{}.size() == 0'.format(arg['name'])
             if arg['type'] == 'TensorList':
@@ -816,10 +825,12 @@ def create_derived(backend_type_env, declarations):
                     if 'default_init' in arg:
                         default_init.append(arg['default_init'])
 
+                    noelem_to_empty = 'is_noelem_tensor_size(size)' if 'size' in seen_names else 'false'
                     check_cast = CHECKED_CAST[arg['type']].substitute(
                         env, arg_name=arg['name'], arg_pos=count,
                         null_okay=null_okay, default_init=default_init,
-                        size=arg.get('size'))
+                        size=arg.get('size'),
+                        noelem_to_empty=noelem_to_empty)
                     body.append("auto {}_ = {};".format(
                         arg['name'], check_cast))
                 if drop_argument(arg, option) or replace_with_null(arg):
@@ -845,12 +856,15 @@ def create_derived(backend_type_env, declarations):
                 else:
                     body += initializers
 
-                # isScalar() for all input tensors is and'd to form
+                # for out-of-place: isScalar() for all input tensors is and'd to form
                 # the test for whether the output is also a scalar
+                # for in-place: isScalar() shouldn't change as a result of the operation
                 if (not arg.get('output') and 'Tensor' in arg['type'] and
                         'TensorList' not in arg['type'] and
                         'THS' not in arg['type'] and
-                        not scalar_check_is_from_size):
+                        not scalar_check_is_from_size and
+                        not scalar_check_is_from_option and
+                        not option['inplace']):
                     check = '{}->isScalar()'.format(arg['name'] + '_')
                     if nullable_argument(arg):
                         check = '(!{} || {})'.format(arg['name'] + '_', check)

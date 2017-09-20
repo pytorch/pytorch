@@ -98,7 +98,7 @@
     AT_ASSERT(ndim > 0, "unnarrow() cannot be applied to a 0-dim tensor.");
     std::vector<int64_t> self_sizes = self.sizes();
     self_sizes[dimension] = dimSize;
-    auto self_sizes_ = THLongStorageView::make(self_sizes, true);
+    auto self_sizes_ = THLongStorageView::makeFromSize(self_sizes);
     ${THTensor}_zeros(${state,}result_->tensor, self_sizes_);
     auto narrowed_result = result.narrow(dimension, offset, self.size(dimension));
     narrowed_result.copy_(self);
@@ -126,6 +126,7 @@
     - THStride* stride
   aten_custom_call: |
     ${THTensor}_setStorage(${state,}result_->tensor, self_->tensor->storage, self_->tensor->storageOffset, size_, stride_);
+    result_->maybeScalar(size.size() == 0);
 ]]
 
 [[

@@ -20,7 +20,12 @@ const char * ${Tensor}::toString() const {
 }
 
 IntList ${Tensor}::sizes() const {
-  return IntList(reinterpret_cast<int64_t*>(tensor->size),dim());
+  int64_t d = ${THTensor_nDimension};
+  if (d != 0) {
+    return IntList(reinterpret_cast<int64_t*>(tensor->size),dim());
+  } else {
+    return IntList(kEmptySizes);
+  }
 }
 
 int64_t ${Tensor}::dim() const {
@@ -30,7 +35,7 @@ int64_t ${Tensor}::dim() const {
   // See Note [Undefined-dim versus 0-dim]
   if (d != 0)
     return d;
-  return kUndefinedDimensions;
+  return kEmptySizes.size();
 }
 
 const char * ${Tensor}::typeString() {

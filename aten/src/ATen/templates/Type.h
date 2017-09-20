@@ -34,9 +34,11 @@ struct Generator;
 // zero elements.
 //
 // Because we are backed by Torch tensors, we need to be able to
-// represent this state (of numel==0).  kUndefinedDimensions represents this
-// situation.
-constexpr int64_t kUndefinedDimensions = std::numeric_limits<int64_t>::min();
+// represent this state (of numel==0).  These tensors are represented
+// by one-dimensional tensors with size[0] == 0 and stride[0] == 1
+// (the stride is arbitrary but matches the NumPy equivalent).
+constexpr std::array<int64_t, 1> kEmptySizes { {0} };
+constexpr std::array<int64_t, 1> kEmptyStrides { {1} };
 
 static inline void noop_deleter(void*) {}
 
