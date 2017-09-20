@@ -251,6 +251,11 @@ class TestAutograd(TestCase):
         self.assertFalse(hook_called[0])
         self.assertIsNone(x.grad)
 
+    def test_backward_badcalls(self):
+        x = Variable(torch.ones(1))
+        with self.assertRaisesRegex(RuntimeError, 'does not require grad'):
+            x.backward()
+
     def test_grad_badcalls(self):
         x = Variable(torch.ones(1))
         y = x ** 2

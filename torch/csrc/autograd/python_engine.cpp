@@ -166,9 +166,14 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
     // interpret the gradient function to be a grad accumulator,
     // which will accumulate its inputs into the grad property of the
     // variable. These nodes get suppressed in some situations,
-    // see "suppress grad accumulation" below.
+    // see "suppress grad accumulation" below. Note that only variables which
+    // have requires_grad=True can have grad accumulators.
     auto grad_fn = variable.grad_fn() ? variable.grad_fn() : variable.grad_accumulator();
     int output_nr = variable.grad_fn() ? variable.output_nr() : 0;
+    THPUtils_assert(!variable.is_volatile(),
+        "element %d of variables tuple is volatile", i);
+    THPUtils_assert(grad_fn,
+        "element %d of variables does not require grad and does not have a grad_fn", i);
     roots[i] = std::make_pair<>(std::move(grad_fn), output_nr);
 
     PyObject *grad = PyTuple_GET_ITEM(grad_variables, i);
