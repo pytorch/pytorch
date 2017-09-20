@@ -12,19 +12,19 @@ static inline void barf(const char *fmt, ...) {
 }
 
 #if defined(__GNUC__) || defined(__ICL) || defined(__clang__)
-#define EXPECT(x, y) (__builtin_expect((x),(y)))
+#define AT_EXPECT(x, y) (__builtin_expect((x),(y)))
 #else
-#define EXPECT(x, y) (x)
+#define AT_EXPECT(x, y) (x)
 #endif
 
 #define ASSERT(cond) \
-  if (EXPECT(!(cond), 0)) { \
+  if (AT_EXPECT(!(cond), 0)) { \
     barf("%s:%u: %s: Assertion `%s` failed.", __FILE__, __LINE__, __func__, #cond); \
   }
 
 //note: msg must be a string literal
 //node: In, ##__VA_ARGS '##' supresses the comma if __VA_ARGS__ is empty
 #define ASSERTM(cond, msg, ...) \
-  if (EXPECT(!(cond), 0)) { \
+  if (AT_EXPECT(!(cond), 0)) { \
     barf("%s:%u: %s: Assertion `%s` failed: " msg , __FILE__, __LINE__, __func__, #cond,##__VA_ARGS__); \
   }

@@ -8,6 +8,7 @@
 #include "ATen/Half.h"
 #include "ATen/SparseTensorRef.h"
 
+// To solve the conflict of s_addr in inaddr.h
 #ifdef _MSC_VER
 #ifdef s_addr
 #undef s_addr
