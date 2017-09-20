@@ -36,15 +36,59 @@ static inline float TH_lerpf(float a, float b, float weight) {
 }
 
 
+/* The next function is taken from  https://github.com/antelopeusersgroup/antelope_contrib/blob/master/lib/location/libgenloc/erfinv.c.
+Below is the copyright.
+Output was modified to be inf or -inf when input is 1 or -1. */
+
+
 /*
-From https://github.com/antelopeusersgroup/antelope_contrib/blob/master/lib/location/libgenloc/erfinv.c.
-Modified output to be inf or -inf when input is 1 or -1.
+    Copyright (c) 2014 Indiana University
+    All rights reserved.
+
+    Written by Prof. Gary L. Pavlis, Dept. of Geol. Sci.,
+            Indiana University, Bloomington, IN
+
+    This software is licensed under the New BSD license:
+
+    Redistribution and use in source and binary forms,
+    with or without modification, are permitted provided
+    that the following conditions are met:
+
+    Redistributions of source code must retain the above
+    copyright notice, this list of conditions and the
+    following disclaimer.
+
+    Redistributions in binary form must reproduce the
+    above copyright notice, this list of conditions and
+    the following disclaimer in the documentation and/or
+    other materials provided with the distribution.
+
+    Neither the name of Indiana University nor
+    the names of its contributors may be used to endorse
+    or promote products derived from this software without
+    specific prior written permission.
+
+    THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND
+    CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED
+    WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+    WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
+    PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL
+    THE COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY
+    DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+    CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+    PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF
+    USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+    HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER
+    IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
+    NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
+    USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+    POSSIBILITY OF SUCH DAMAGE.
 */
 
 #define CENTRAL_RANGE 0.7
 
 static inline double TH_erfinv(double y) {
-/*Function to calculate inverse error function.  Rational approximation
+/* Function to calculate inverse error function.  Rational approximation
 is used to generate an initial approximation, which is then improved to
 full accuracy by two steps of Newton's method.  Code is a direct
 translation of the erfinv m file in matlab version 2.0.
@@ -80,9 +124,5 @@ Date:  February 1996
     return(x);
 }
 #undef CENTRAL_RANGE
-
-static inline float TH_erfinvf(float y) {
-  return (float) TH_erfinv((double)y);
-}
 
 #endif // _THMATH_H
