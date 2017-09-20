@@ -13,6 +13,7 @@ class cwrap(object):
     RETURN_WRAPPERS = {
         'void': Template('Py_RETURN_NONE;'),
         'long': Template('return PyLong_FromLong($result);'),
+        'int64_t': Template('return PyLong_FromLong($result);'),
         'bool': Template('return PyBool_FromLong($result);'),
         'void*': Template('return PyLong_FromVoidPtr($result);'),
     }
