@@ -581,9 +581,9 @@ extensions.append(C)
 
 if not IS_WINDOWS:
     DL = Extension("torch._dl",
-                sources=["torch/csrc/dl.c"],
-                language='c',
-                )
+                   sources=["torch/csrc/dl.c"],
+                   language='c',
+                   )
     extensions.append(DL)
 
 THNN = Extension("torch._thnn._THNN",

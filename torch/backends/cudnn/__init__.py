@@ -11,6 +11,7 @@ __cudnn_version = None
 
 CUDNN_WIN_LIB = 'cudnn64_6'
 
+
 def _libcudnn():
     global lib, __cudnn_version
     if lib is None:

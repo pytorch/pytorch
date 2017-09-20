@@ -22,6 +22,7 @@ _cudart = None
 
 CUDA_WINDOWS_LIB = 'cudart64_80'
 
+
 def is_available():
     """Returns a bool indicating if CUDA is currently available."""
     if (not hasattr(torch._C, '_cuda_isDriverSufficient') or
