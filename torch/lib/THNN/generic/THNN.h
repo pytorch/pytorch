@@ -924,7 +924,7 @@ TH_API void THNN_(SpatialAdaptiveMaxPooling_updateOutput)(
           THTensor *input,
           THTensor *output,
           THIndexTensor *indices,
-          int owidth, int oheight);
+          int osizeW, int osizeH);
 TH_API void THNN_(SpatialAdaptiveMaxPooling_updateGradInput)(
           THNNState *state,
           THTensor *input,
