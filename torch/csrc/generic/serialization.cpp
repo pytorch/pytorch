@@ -2,7 +2,7 @@
 #define TH_GENERIC_FILE "generic/serialization.cpp"
 #else
 
-#define SYSCHECK(call) { ssize_t __result = call; if (__result < 0) throw std::system_error(__result, std::system_category()); }
+#define SYSCHECK(call) { ssize_t __result = call; if (__result < 0) throw std::system_error((int) __result, std::system_category()); }
 
 void THPTensor_(writeMetadataRaw)(THTensor *self, int fd)
 {

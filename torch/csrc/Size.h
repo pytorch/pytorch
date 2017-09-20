@@ -13,4 +13,8 @@ PyObject * THPSize_New(int dim, int64_t *sizes);
 bool THPSize_init(PyObject *module);
 #endif
 
+#ifndef int64_t
+#include "stdint.h"
+#endif
+
 #endif

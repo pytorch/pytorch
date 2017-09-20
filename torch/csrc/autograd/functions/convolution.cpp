@@ -517,11 +517,11 @@ auto ConvBackwardBackward::apply(const variable_list& grad_grad_inputs) -> varia
 
     // calculate output_padding
     auto weight_size = weight.sizes();
-    std::vector<long> kernel_size(weight_size.begin() + 2, weight_size.end());
+    std::vector<int64_t> kernel_size(weight_size.begin() + 2, weight_size.end());
     auto input_size = input.sizes();
-    std::vector<long> input_shape(input_size.begin() + 2, input_size.end());
+    std::vector<int64_t> input_shape(input_size.begin() + 2, input_size.end());
     auto grad_output_size = gO.sizes();
-    std::vector<long> grad_output_shape(grad_output_size.begin() + 2, grad_output_size.end());
+    std::vector<int64_t> grad_output_shape(grad_output_size.begin() + 2, grad_output_size.end());
 
     if (kernel_size.size() == 1) {
       auto expected_input_shape = (kernel_size[0] - 1) * gi_conv_params.stride[1]

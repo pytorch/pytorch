@@ -23,8 +23,14 @@ void barf(const char *fmt, ...);
 
 }} // namespace torch::jit
 
+#if defined(__GNUC__) || defined(__ICL) || defined(__clang__)
+#define JIT_EXPECT(x, y) (__builtin_expect((x), (y)))
+#else
+#define JIT_EXPECT(x, y) (x)
+#endif
+
 #define JIT_ASSERT(cond) \
-  if (__builtin_expect(!(cond), 0)) { \
+  if (JIT_EXPECT(!(cond), 0)) { \
     ::torch::jit::barf("%s:%u: %s: Assertion `%s` failed.", __FILE__, __LINE__, __func__, #cond); \
   }
 
@@ -35,7 +41,7 @@ void barf(const char *fmt, ...);
 
 // Note: msg must be a string literal
 #define _JIT_ASSERTM(cond, msg, ...) \
-  if (__builtin_expect(!(cond), 0)) { \
+  if (JIT_EXPECT(!(cond), 0)) { \
     ::torch::jit::barf("%s:%u: %s: Assertion `%s` failed: " msg, __FILE__, __LINE__, __func__, #cond, __VA_ARGS__); \
   }
 
@@ -43,6 +49,6 @@ void barf(const char *fmt, ...);
 
 // Note: msg must be a string literal
 #define _JIT_EXPECTM(cond, msg, ...) \
-  if (__builtin_expect(!(cond), 0)) { \
+  if (JIT_EXPECT(!(cond), 0)) { \
     ::torch::jit::barf("%s:%u: %s: " msg, __FILE__, __LINE__, __func__, __VA_ARGS__); \
   }

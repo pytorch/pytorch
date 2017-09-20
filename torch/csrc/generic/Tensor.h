@@ -41,18 +41,18 @@ THP_API PyObject * THPTensor_(NewEmpty)(void);
 THP_API PyObject * THSPTensor_(NewEmpty)(void);
 #endif
 
-extern PyObject *THPTensorClass;
+THP_API PyObject *THPTensorClass;
 #if GENERATE_SPARSE
-extern PyObject *THSPTensorClass;
+THP_API PyObject *THSPTensorClass;
 #endif
 
 #ifdef _THP_CORE
 #include "torch/csrc/Types.h"
 
 // TODO: init stateless in THPTensor_(init) and remove this
-extern PyTypeObject THPTensorStatelessType;
+THP_API PyTypeObject THPTensorStatelessType;
 #if GENERATE_SPARSE
-extern PyTypeObject THSPTensorStatelessType;
+THP_API PyTypeObject THSPTensorStatelessType;
 #endif
 
 bool THPTensor_(init)(PyObject *module);
@@ -62,7 +62,7 @@ bool THSPTensor_(init)(PyObject *module);
 bool THSPTensor_(postInit)(PyObject *module);
 #endif
 
-extern PyTypeObject THPTensorType;
+THP_API PyTypeObject THPTensorType;
 template <> struct THPTypeInfo<THTensor> {
   static PyTypeObject* pyType() { return &THPTensorType; }
   static THTensor* cdata(PyObject* p) { return ((THPTensor*)p)->cdata; }
