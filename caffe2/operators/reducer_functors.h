@@ -296,7 +296,6 @@ class MaxRangeReducerGradient {
         auto idx = i * block_size + j;
         if (out == data_in[idx]) {
           data_grad[idx] = out_grad;
-          break;
         }
       }
     }

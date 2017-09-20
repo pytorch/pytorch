@@ -419,9 +419,8 @@ class HypothesisTestCase(test_util.TestCase):
                     ref_vals,
                     atol=threshold,
                     rtol=threshold,
-                    err_msg='Gradient {0} is not matching the reference'.format(
-                        val_name,
-                    ),
+                    err_msg='Gradient {0} (x) is not matching the reference (y)'
+                    .format(val_name),
                 )
                 if ref_indices is not None:
                     indices = workspace.FetchBlob(str(grad_names.indices))
@@ -522,7 +521,6 @@ class HypothesisTestCase(test_util.TestCase):
                     b,
                     device_option=input_device_options.get(n, device_option)
                 )
-                print("Input", n, input_device_options.get(n, device_option))
             net = core.Net("opnet")
             net.Proto().op.extend([op])
             test_shape_inference = False
