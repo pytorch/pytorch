@@ -242,7 +242,7 @@ void __printTensor(std::ostream& stream, Tensor& self, int64_t linesize)
 std::ostream& print(std::ostream& stream, const Tensor & tensor_, int64_t linesize) {
   FormatGuard guard(stream);
   if(!tensor_.defined()) {
-    stream << "[ Tensor (empty) ]";
+    stream << "[ Tensor (undefined) ]";
   } else {
     Type& cpudouble = tensor_.type().toBackend(kCPU).toScalarType(kDouble);
     Tensor tensor = tensor_.toType(cpudouble).contiguous();
@@ -250,17 +250,22 @@ std::ostream& print(std::ostream& stream, const Tensor & tensor_, int64_t linesi
       stream << defaultfloat << tensor.data<double>()[0] << std::endl;
       stream << "[ " << tensor_.pImpl->toString() << "{} ]";
     } else if(tensor.ndimension() == 1) {
-      double scale;
-      int64_t sz;
-      std::tie(scale, sz) =  __printFormat(stream, tensor);
-      if(scale != 1) {
-        printScale(stream, scale);
+      if (tensor.numel() == 0) {
+        stream << "[ Tensor (empty) ]";
       }
-      double* tensor_p = tensor.data<double>();
-      for(int64_t i = 0; i < tensor.size(0); i++) {
-        stream << std::setw(sz) << tensor_p[i]/scale << std::endl;
+      else {
+        double scale;
+        int64_t sz;
+        std::tie(scale, sz) =  __printFormat(stream, tensor);
+        if(scale != 1) {
+          printScale(stream, scale);
+        }
+        double* tensor_p = tensor.data<double>();
+        for(int64_t i = 0; i < tensor.size(0); i++) {
+          stream << std::setw(sz) << tensor_p[i]/scale << std::endl;
+        }
+        stream << "[ " << tensor_.pImpl->toString() << "{" << tensor.size(0) << "} ]";
       }
-      stream << "[ " << tensor_.pImpl->toString() << "{" << tensor.size(0) << "} ]";
     } else if(tensor.ndimension() == 2) {
       __printMatrix(stream, tensor, linesize, 0);
       stream << "[ " << tensor_.pImpl->toString() << "{" << tensor.size(0) << "," <<  tensor.size(1) << "} ]";

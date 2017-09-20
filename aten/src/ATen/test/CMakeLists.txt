@@ -18,3 +18,6 @@ target_link_libraries(dlconvertor_test ATen)
 
 add_executable(native_test native_test.cpp)
 target_link_libraries(native_test ATen)
+
+add_executable(scalar_tensor_test scalar_tensor_test.cpp)
+target_link_libraries(scalar_tensor_test ATen)
