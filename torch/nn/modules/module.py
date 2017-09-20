@@ -453,7 +453,7 @@ class Module(object):
         if not isinstance(vec, Variable):
             raise TypeError('expected torch.autograd.Variable, but got: {}'
                             .format(torch.typename(vec)))
-        
+
         pointer = 0
         for param in self.parameters():
             num_param = torch.prod(torch.LongTensor(list(param.size())))
@@ -461,7 +461,7 @@ class Module(object):
 
             # Increment the pointer
             pointer += num_param
-                
+
     def _all_buffers(self, memo=None):
         if memo is None:
             memo = set()
