@@ -5,6 +5,11 @@
 
 #define CUDA_MAX_THREADS 1024   // this is safe, in reality 256 is our limit
 
+#define START_IND(a,b,c) (int)floor((float)(a * c) / b)
+#define END_IND(a,b,c) (int)ceil((float)((a + 1) * c) / b)
+// #define START_IND(a,b,c) a * c / b
+// #define END_IND(a,b,c)  (a + 1) * c / b + ((a + 1) * c % b > 0)?1:0
+
 // 4d tensor B x D x H x W
 
 /*
@@ -24,7 +29,6 @@ __global__ void adaptivemaxpool(T *input, T *output, THCIndex_t *indices,
   // compute offsets based on thread/block ID
   int o_plane = blockIdx.x;
   int i_plane = o_plane;
-  //int k = blockIdx.x % sizeD;
 
   int ostartW = threadIdx.x;
   int oendW = osizeW;
@@ -41,13 +45,13 @@ __global__ void adaptivemaxpool(T *input, T *output, THCIndex_t *indices,
   // For all output pixels...
   for(oh = ostartH; oh < oendH; oh += ostepH) {
 
-    int istartH = (int)floor(float(oh) / osizeH * isizeH);
-    int iendH   = (int)ceil(float(oh + 1) / osizeH * isizeH);
+    int istartH = START_IND(oh, osizeH, isizeH);
+    int iendH   = END_IND(oh, osizeH, isizeH);
     int kH = iendH - istartH;
 
     for(ow = ostartW; ow < oendW; ow += ostepW) {
-      int istartW = (int)floor(float(ow) / osizeW * isizeW);
-      int iendW   = (int)ceil(float(ow + 1) / osizeW * isizeW);
+      int istartW = START_IND(ow, osizeW, isizeW);
+      int iendW   = END_IND(ow, osizeW, isizeW);
 
       int kW = iendW - istartW;
 
@@ -108,20 +112,15 @@ __global__ void adaptivemaxgradinput(T *gradInput, T *gradOutput, THCIndex_t *in
   // compute gradInput
   for(oh = ostartH; oh < oendH; oh += ostepH) {
 
-    int istartH = (int)floor(float(oh) / osizeH * isizeH);
-
     for(ow = ostartW; ow < oendW; ow += ostepW) {
 
-      int istartW = (int)floor(float(ow) / osizeW * isizeW);
-
-      T *ptr_gradInput = gradInput + istartH*isizeW + istartW;
       T *ptr_gradOutput = gradOutput + oh*osizeW + ow;
       THCIndex_t *ptr_ind = indices + oh*osizeW + ow;
       T z = *ptr_gradOutput;
 
-      int argmax = (*ptr_ind) - TH_INDEX_BASE - istartW - istartH*isizeW;
+      int argmax = (*ptr_ind) - TH_INDEX_BASE;
 
-      ptr_gradInput[argmax] += z;
+      gradInput[argmax] += z;
     }
   }
 }
@@ -160,21 +159,16 @@ __global__ void atomicadaptivemaxgradinput(
   // compute gradInput
   for(oh = ostartH; oh < oendH; oh += ostepH) {
 
-    int istartH = (int)floor(float(oh) / osizeH * isizeH);
-
     for(ow = ostartW; ow < oendW; ow += ostepW) {
 
-      int istartW = (int)floor(float(ow) / osizeW * isizeW);
-
-      T *ptr_gradInput = gradInput + istartH*isizeW + istartW;
       T *ptr_gradOutput = gradOutput + oh*osizeW + ow;
       THCIndex_t *ptr_ind = indices + oh*osizeW + ow;
       T z = *ptr_gradOutput;
 
-      int argmax = (*ptr_ind) - TH_INDEX_BASE - istartW - istartH*isizeW;
+      int argmax = (*ptr_ind) - TH_INDEX_BASE;
 
       // atomic add since different threads could update same variable
-      atomicAdd(&(ptr_gradInput[argmax]), z);
+      atomicAdd(&(gradInput[argmax]), z);
     }
   }
 }

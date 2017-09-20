@@ -2,6 +2,11 @@
 #define TH_GENERIC_FILE "generic/SpatialAdaptiveMaxPooling.c"
 #else
 
+#define START_IND(a,b,c) (int)floor((float)(a * c) / b)
+#define END_IND(a,b,c) (int)ceil((float)((a + 1) * c) / b)
+// #define START_IND(a,b,c) a * c / b
+// #define END_IND(a,b,c)  (a + 1) * c / b + ((a + 1) * c % b > 0)?1:0
+
 // 4d tensor B x D x H x W
 
 static void THNN_(SpatialAdaptiveMaxPooling_updateOutput_frame)(
@@ -25,15 +30,14 @@ static void THNN_(SpatialAdaptiveMaxPooling_updateOutput_frame)(
     int64_t oh, ow;
     for(oh = 0; oh < osizeH; oh++)
     {
-      int istartH = (int)floor((float)oh / osizeH * isizeH);
-      int iendH   = (int)ceil((float)(oh + 1) / osizeH * isizeH);
+      int istartH = START_IND(oh, osizeH, isizeH);
+      int iendH   = END_IND(oh, osizeH, isizeH);
       int kH = iendH - istartH;
 
       for(ow = 0; ow < osizeW; ow++)
       {
-
-        int istartW = (int)floor((float)ow / osizeW * isizeW);
-        int iendW   = (int)ceil((float)(ow + 1) / osizeW * isizeW);
+        int istartW = START_IND(ow, osizeW, isizeW);
+        int iendW   = END_IND(ow, osizeW, isizeW);
         int kW = iendW - istartW;
 
         /* local pointers */
@@ -181,10 +185,8 @@ static void THNN_(SpatialAdaptiveMaxPooling_updateGradInput_frame)(
     int64_t oh, ow;
     for(oh = 0; oh < osizeH; oh++)
     {
-      int istartH = (int)floor((float) oh / osizeH * isizeH);
       for(ow = 0; ow < osizeW; ow++)
       {
-        int istartW = (int)floor((float) ow / osizeW * isizeW);
         /* retrieve position of max */
         int64_t maxp = ind_p_d[oh*osizeW + ow] - TH_INDEX_BASE;
 
