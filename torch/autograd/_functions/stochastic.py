@@ -33,7 +33,7 @@ class Multinomial(StochasticFunction):
         # Fill in gradients
         idx = grad_probs.new().resize_(grad_probs.size(0)).fill_(1)
         idx = idx.cumsum(0) - 1
-        grad_probs[idx, samples.t()] = output_probs.t()
+        grad_probs[idx.long(), samples.t()] = output_probs.t()
         return grad_probs
 
 
