@@ -2,6 +2,9 @@ graph(%1 : Double(2)
       %2 : Double(2)) {
   %3 : Double(2) = Add(%1, %2), uses = [%5.i0, %5.i1, %7.i1];
   %5 : Double(2) = Mul(%3, %3), uses = [%7.i0];
-  %7 : Double(2) = Mul(%5, %3), uses = [%0.i0];
-  return (%7);
+  %7 : Double(2) = Mul(%5, %3), uses = [%8.i0, %16.i0];
+  %8 : Double(2) = Tanh(%7), uses = [%10.i0, %10.i1];
+  %10 : Double(2) = Add(%8, %8), uses = [%16.i1];
+  %16 : Double(2) = Add(%7, %10), uses = [%0.i0];
+  return (%16);
 }
