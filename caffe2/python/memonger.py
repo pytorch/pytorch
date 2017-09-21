@@ -293,7 +293,7 @@ def _find_target_nodes(g):
     ''' Return nodes without successors '''
     ret = []
     for cn in g:
-        cur_succ = g.successors(cn)
+        cur_succ = list(g.successors(cn))
         if not cur_succ:
             ret.append(cn)
     return ret
@@ -381,7 +381,7 @@ def _compute_tree_height(g, root):
         Height of leaves are 0
     '''
     def _get_height(root):
-        children = g.successors(root)
+        children = list(g.successors(root))
         height = 0
         if children:
             child_heights = [_get_height(x) for x in children]
@@ -400,7 +400,7 @@ def _sort_tree_leaves(g, root):
         return g.node[root]["height"]
 
     def _get_sorted_leaves(root):
-        children = g.successors(root)
+        children = list(g.successors(root))
         if not children:
             return [root]
         child_heights = [_get_height(x) for x in children]
