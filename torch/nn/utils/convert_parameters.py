@@ -40,8 +40,14 @@ def vector_to_parameters(vec, parameters):
         if param_device is None:
             param_device = param.get_device() if param.is_cuda else -1
         else:
-            if param.get_device() != param_device:
-                raise TypeError('Found two parameters on different devices, this is currently not supported.')
+            warn = False
+            if param.is_cuda:
+                warn = (param.get_device() != param_device)
+            else:
+                warn = (param_device != -1)
+            if warn:
+                raise TypeError('Found two parameters on different devices, '
+                                'this is currently not supported.')
 
         # The length of the parameter
         num_param = torch.prod(torch.LongTensor(list(param.size())))
