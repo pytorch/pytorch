@@ -681,6 +681,7 @@ bool ImageInputOp<Context>::GetImageAndLabelAndInfoFromDBValue(
       inception_scale_jitter = RandomSizedCropping<Context>(img, crop_, randgen);
       // if a random crop is still not found, do simple random cropping later
     }
+  }
 
   if ((scale_jitter_type_ == NO_SCALE_JITTER) ||
     (scale_jitter_type_ == INCEPTION_STYLE && !inception_scale_jitter)) {
@@ -723,7 +724,6 @@ bool ImageInputOp<Context>::GetImageAndLabelAndInfoFromDBValue(
             cv::INTER_AREA);
         *img = scaled_img;
       }
-    }
   }
   // TODO(Yangqing): return false if any error happens.
   return true;
