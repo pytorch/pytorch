@@ -516,7 +516,7 @@ class MemongerTest(hu.HypothesisTestCase):
         m.Copy("b1", "b1")
         m.Copy("b1", "b1")
         g = memonger.compute_interference_graph(m.net.Proto().op)
-        self.assertEqual(g.edges(), [(0, 1), (0, 2), (1, 2)])
+        self.assertEqual(list(g.edges()), [(0, 1), (0, 2), (1, 2)])
 
     def test_topological_sort_longest_path(self):
         m = model_helper.ModelHelper()
@@ -538,7 +538,7 @@ class MemongerTest(hu.HypothesisTestCase):
         orders = memonger.topological_sort_traversal_longest_path(g)
         # longer path is in front of the shorter one
         orders_gt = [0, 1, 2, 3]
-        self.assertEqual(orders_gt, orders)
+        self.assertEqual(orders_gt, list(orders))
 
     def test_topological_sort_longest_path_multi_target(self):
         # two outputs: conv2 and data4
@@ -560,12 +560,12 @@ class MemongerTest(hu.HypothesisTestCase):
 
         orders_org = memonger.topological_sort_traversal(g)
         orders_gt_org = [4, 5, 2, 0, 1, 3]
-        self.assertEqual(orders_gt_org, orders_org)
+        self.assertEqual(orders_gt_org, list(orders_org))
 
         orders = memonger.topological_sort_traversal_longest_path(g)
         # longer path is in front of the shorter one
         orders_gt = [0, 1, 2, 3, 4, 5]
-        self.assertEqual(orders_gt, orders)
+        self.assertEqual(orders_gt, list(orders))
 
     def test_topological_sort_longest_path_single_node(self):
         # single node
@@ -577,12 +577,12 @@ class MemongerTest(hu.HypothesisTestCase):
 
         orders_org = memonger.topological_sort_traversal(g)
         orders_gt_org = [0]
-        self.assertEqual(orders_gt_org, orders_org)
+        self.assertEqual(orders_gt_org, list(orders_org))
 
         orders = memonger.topological_sort_traversal_longest_path(g)
         # longer path is in front of the shorter one
         orders_gt = [0]
-        self.assertEqual(orders_gt, orders)
+        self.assertEqual(orders_gt, list(orders))
 
     def test_compute_assignments_greedy(self):
         LiveRange = memonger.LiveRange
@@ -755,3 +755,7 @@ class MemongerTest(hu.HypothesisTestCase):
                     self.assertFalse(outp in found_frees)
 
         self.assertEqual(expect_frees, found_frees)
+
+
+if __name__ == '__main__':
+    unittest.main()
