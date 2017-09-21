@@ -376,24 +376,31 @@ class Module(object):
                 module.state_dict(destination, prefix + name + '.', keep_vars=keep_vars)
         return destination
 
-    def load_state_dict(self, state_dict):
+    def load_state_dict(self, state_dict, auto_match=False):
         """Copies parameters and buffers from :attr:`state_dict` into
-        this module and its descendants. The keys of :attr:`state_dict` must
-        exactly match the keys returned by this module's :func:`state_dict()`
-        function.
+        this module and its descendants. 
 
         Arguments:
             state_dict (dict): A dict containing parameters and
                 persistent buffers.
+            auto_match (bool): A bool, default False. if True, only load parameters with
+                exactly the same names and sizes, ignoring the others. if False, the keys and value sizes
+                of :attr:`state_dict` must exactly match the keys and value sizes returned by this
+                module's :func:`state_dict()` function, otherwise an exception will be raised.
         """
         own_state = self.state_dict()
         for name, param in state_dict.items():
             if name not in own_state:
-                raise KeyError('unexpected key "{}" in state_dict'
+                if auto_match:
+                    continue
+                else:
+                    raise KeyError('unexpected key "{}" in state_dict'
                                .format(name))
             if isinstance(param, Parameter):
                 # backwards compatibility for serialized parameters
                 param = param.data
+            if auto_match and own_state[name].size()!=param.size():
+                continue
             try:
                 own_state[name].copy_(param)
             except:
@@ -401,10 +408,11 @@ class Module(object):
                       ' {} and whose dimensions in the checkpoint are {}, ...'.format(
                           name, own_state[name].size(), param.size()))
                 raise
-
-        missing = set(own_state.keys()) - set(state_dict.keys())
-        if len(missing) > 0:
-            raise KeyError('missing keys in state_dict: "{}"'.format(missing))
+                
+        if not auto_match:
+            missing = set(own_state.keys()) - set(state_dict.keys())
+            if len(missing) > 0:
+                raise KeyError('missing keys in state_dict: "{}"'.format(missing))
 
     def parameters(self):
         """Returns an iterator over module parameters.
