@@ -646,6 +646,32 @@ kernel void bilinear_upsample(texture2d<half, access::sample> in[[texture(0)]],
   out.write(value, gid);
 }
 
+constant bool in0_is_tex = ushort_arg_0 <= 1 && ushort_arg_1 <= 4;
+constant bool in0_is_arr = !in0_is_tex;
+
+kernel void elementwise_mul(texture2d<half, access::read> in0[[texture(0), function_constant(in0_is_tex)]],
+                            texture2d_array<half, access::read> ina0[[texture(0), function_constant(in0_is_arr)]],
+                            texture2d<half, access::write> out[[texture(2), function_constant(in0_is_tex)]],
+                            texture2d_array<half, access::write> outa[[texture(2), function_constant(in0_is_arr)]],
+                            constant float* in1[[buffer(1)]],
+                            ushort3 gid[[thread_position_in_grid]]) {
+  if (in0_is_tex) {
+    if (gid.x >= out.get_width() || gid.y >= out.get_height()) {
+      return;
+    }
+  } else {
+    if (gid.x >= outa.get_width() || gid.y >= outa.get_height()) {
+      return;
+    }
+  }
+  ushort2 gid_ = ushort2(gid.x, gid.y);
+  if (in0_is_tex) {
+    out.write(in0.read(gid_) * in1[0], gid_);
+  } else {
+    outa.write(ina0.read(gid_, gid.z) * in1[0], gid_, gid.z);
+  }
+}
+
 kernel void elementwise_add_nonarray(texture2d<half, access::read> in0[[texture(0)]],
                                      texture2d<half, access::read> in1[[texture(1)]],
                                      texture2d<half, access::write> out[[texture(2)]],
