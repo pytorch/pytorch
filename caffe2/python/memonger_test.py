@@ -533,7 +533,7 @@ class MemongerTest(hu.HypothesisTestCase):
 
         orders_org = memonger.topological_sort_traversal(g)
         orders_gt_org = [2, 0, 1, 3]
-        self.assertEqual(orders_gt_org, orders_org)
+        self.assertEqual(orders_gt_org, list(orders_org))
 
         orders = memonger.topological_sort_traversal_longest_path(g)
         # longer path is in front of the shorter one
