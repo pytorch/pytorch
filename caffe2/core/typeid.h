@@ -3,9 +3,9 @@
 
 #include <cassert>
 #include <cstdlib>
-
 #include <iostream>
 #include <map>
+#include <mutex>
 #include <type_traits>
 #ifdef __GXX_RTTI
 #include <set>
@@ -31,9 +31,12 @@ string Demangle(const char* name);
 // type before its what() content.
 string GetExceptionString(const std::exception& e);
 
+std::mutex& gCaffe2TypeRegistrationMutex();
+
 template <typename T>
 struct TypeNameRegisterer {
   explicit TypeNameRegisterer(CaffeTypeId id) {
+    std::lock_guard<std::mutex> guard(gCaffe2TypeRegistrationMutex());
 #ifdef __GXX_RTTI
     string name = Demangle(typeid(T).name());
     gTypeNames()[id] = name;
