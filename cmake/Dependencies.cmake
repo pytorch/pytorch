@@ -208,7 +208,7 @@ endif()
 
 # ---[ Python + Numpy
 if(BUILD_PYTHON)
-  set(Python_ADDITIONAL_VERSIONS 2.8 2.7 2.6)
+  set(Python_ADDITIONAL_VERSIONS 3.6 3.5 3.4 3.3 3.2 3.1 3.0 2.8 2.7 2.6)
   find_package(PythonInterp 2.7)
   find_package(PythonLibs 2.7)
   find_package(NumPy REQUIRED)
