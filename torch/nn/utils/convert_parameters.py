@@ -30,9 +30,19 @@ def vector_to_parameters(vec, parameters):
     if not isinstance(vec, Variable):
         raise TypeError('expected torch.autograd.Variable, but got: {}'
                         .format(torch.typename(vec)))
+    # Flag for the device where the parameter is located
+    param_device = None
 
+    # Pointer for slicing the vector for each parameter
     pointer = 0
     for param in parameters:
+        # Ensure the parameters are located in the same device
+        if param_device is None:
+            param_device = param.get_device() if param.is_cuda else -1
+        else:
+            if param.get_device() != param_device:
+                raise TypeError('Found two parameters on different devices, this is currently not supported.')
+
         # The length of the parameter
         num_param = torch.prod(torch.LongTensor(list(param.size())))
         # Slice the vector, reshape it, and replace the old data of the parameter
