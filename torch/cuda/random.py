@@ -25,6 +25,8 @@ def set_rng_state(new_state):
 
 def manual_seed(seed):
     r"""Sets the seed for generating random numbers for the current GPU.
+    It's safe to call this function if CUDA is not available; in that
+    case, it is silently ignored.
 
     Args:
         seed (int or long): The desired seed.
@@ -38,6 +40,8 @@ def manual_seed(seed):
 
 def manual_seed_all(seed):
     r"""Sets the seed for generating random numbers on all GPUs.
+    It's safe to call this function if CUDA is not available; in that
+    case, it is silently ignored.
 
     Args:
         seed (int or long): The desired seed.
@@ -47,6 +51,8 @@ def manual_seed_all(seed):
 
 def seed():
     r"""Sets the seed for generating random numbers to a random number for the current GPU.
+    It's safe to call this function if CUDA is not available; in that
+    case, it is silently ignored.
 
     .. warning::
         If you are working with a multi-GPU model, this function will only initialize
@@ -56,7 +62,10 @@ def seed():
 
 
 def seed_all():
-    r"""Sets the seed for generating random numbers to a random number on all GPUs."""
+    r"""Sets the seed for generating random numbers to a random number on all GPUs.
+    It's safe to call this function if CUDA is not available; in that
+    case, it is silently ignored.
+    """
     _lazy_call(lambda: _C._cuda_seedAll())
 
 
