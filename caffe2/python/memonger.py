@@ -283,7 +283,7 @@ def _find_source_nodes(g):
     ''' Return nodes without predecessors '''
     ret = []
     for cn in g:
-        cur_pred = g.predecessors(cn)
+        cur_pred = list(g.predecessors(cn))
         if not cur_pred:
             ret.append(cn)
     return ret
@@ -332,9 +332,17 @@ def _get_path(pred_list, dist_list):
 
     ret = []
     cur = target
+
+
     while cur is not None:
         ret.append(cur)
-        cur = pred_list[cur]
+        # Hack to get networkx 2.0 happy: it uses list in pred.
+        # TODO(tulloch): are there cases with multiple predecessors?
+        try:
+            cur = pred_list[cur][0]
+        except TypeError:
+            cur = pred_list[cur]
+
     return list(reversed(ret))
 
 
@@ -436,13 +444,28 @@ def topological_sort_traversal_longest_path(g):
     sorted_sources = _sort_tree_leaves(tree, root)
     assert(sorted(sorted_sources) == sorted(source_nodes))
 
-    ret = nx.topological_sort(g, sorted_sources)
+    if nx.__version__ < '2.0':
+        ret = nx.topological_sort(g, sorted_sources)
+    else:
+        # Manually making a sorted descendent list
+        dependency_order = list(sorted_sources)
+        seen_nodes = set(sorted_sources)
+        for s in sorted_sources:
+            desc = nx.descendants(g, s)
+            for d in desc:
+                if d not in seen_nodes:
+                    seen_nodes.add(d)
+                    dependency_order.append(d)
+        sort_key = dict((v, len(dependency_order) - i) for i, v in enumerate(dependency_order))
+        ret = nx.algorithms.dag.lexicographical_topological_sort(
+            g, key=lambda x: sort_key[x])
+        ret = list(ret)
     assert(len(ret) == len(g.node))
     return ret
 
 
 def topological_sort_traversal(g):
-    return nx.topological_sort(g)
+    return list(nx.topological_sort(g))
 
 
 def compute_ranges(linearized_ops, blob_sizes=None):
