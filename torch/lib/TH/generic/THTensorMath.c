@@ -1707,6 +1707,9 @@ void THTensor_(min)(THTensor *values_, THLongTensor *indices_, THTensor *t, int 
                             *tempValues__data = *t_data;
                             *tempIndices__data = *tempIndices__dimOffset;
                           });
+
+    THTensor_(free)(tempValues_);
+    THLongTensor_free(tempIndices_);
   }
 
   if (!keepdim) {
