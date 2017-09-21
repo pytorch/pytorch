@@ -13,11 +13,11 @@ EXCLUDE_PATTERN = "bernoulli.*|normal.*|exponential.*|random.*|arange.*"
 # 1. if broadcasting or without the full list of arguments, add a non-virtual
 #    declaration under Type.h
 TYPE_METHOD_DECLARATION_NON_VIRTUAL = CodeTemplate("""\
-${return_type} ${method_prefix}${api_name}(${formals}) ;
+${return_type} ${method_prefix}${api_name}(${formals}) const;
 """)
 # 2. broadcasting functions are implemented in Type.cpp
 TYPE_METHOD_DEFINITION_BROADCAST = CodeTemplate("""\
-${return_type} Type::${method_prefix}${api_name}(${formals}) {
+${return_type} Type::${method_prefix}${api_name}(${formals}) const {
     Tensor ${broadcast_returns};
     std::tie(${broadcast_returns}) = ${broadcast_function}(${broadcast_actuals});
     return ${method_prefix_derived}${api_name}(${broadcast_modified_actuals});
@@ -25,26 +25,26 @@ ${return_type} Type::${method_prefix}${api_name}(${formals}) {
 """)
 # 3. functions without the full list of arguments are implemented in TypeMethods.h
 TYPE_METHOD_INLINE = CodeTemplate("""\
-inline ${return_type} Type::${method_prefix}${api_name}(${formals}) {
+inline ${return_type} Type::${method_prefix}${api_name}(${formals}) const {
     ${return_call}${method_prefix}${api_name}(${actuals_with_constants});
 }
 """)
 # 4. add virtual dispatch declaration to Type.h and default impl to Type.cpp
 TYPE_METHOD_DECLARATION = CodeTemplate("""\
-virtual ${return_type} ${method_prefix}${api_name}(${formals}) ;
+virtual ${return_type} ${method_prefix}${api_name}(${formals}) const;
 """)
 TYPE_METHOD_DEFINITION = CodeTemplate("""\
-${return_type} Type::${method_prefix}${api_name}(${formals}) {
+${return_type} Type::${method_prefix}${api_name}(${formals}) const {
     throw std::runtime_error(std::string("${api_name} is not implemented for type ") + toString());
 }
 """)
 # 5. add virtual override to TypeDerived.h
 TYPE_DERIVED_DECLARATION = CodeTemplate("""\
-virtual ${return_type} ${method_prefix_derived}${api_name}(${formals}) override;
+virtual ${return_type} ${method_prefix_derived}${api_name}(${formals}) const override;
 """)
 # 6. add override definition to TypeDerived.cpp
 TYPE_DERIVED_DEFINITION = CodeTemplate("""\
-${return_type} ${Type}::${method_prefix_derived}${api_name}(${formals}) {
+${return_type} ${Type}::${method_prefix_derived}${api_name}(${formals}) const {
     ${type_definition_body}
 }
 """)
@@ -74,12 +74,12 @@ static inline ${return_type} ${api_name}(${formals}) {
 # the same name (but different signature) already
 ZERO_DIM_CHECK = CodeTemplate("""\
 if(${check_name}.dim() == 0) {
-    return static_cast<Type*>(this)->${method_prefix}${api_name}(${zero_dim_actuals});
+    return static_cast<const Type*>(this)->${method_prefix}${api_name}(${zero_dim_actuals});
 }""")
 
 SPARSE_CHECK = CodeTemplate("""\
 if(${check_name}.type().isSparse()) {
-    return static_cast<Type*>(this)->${method_prefix}${api_name}(${sparse_actuals});
+    return static_cast<const Type*>(this)->${method_prefix}${api_name}(${sparse_actuals});
 }""")
 
 
