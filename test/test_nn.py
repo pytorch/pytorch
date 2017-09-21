@@ -20,6 +20,7 @@ import torch.nn.init as init
 import torch.nn.utils.rnn as rnn_utils
 import torch.legacy.nn as legacy
 from torch.nn.utils import clip_grad_norm
+from torch.nn.utils import parameters_to_vector, vector_to_parameters
 from torch.autograd import Variable, gradcheck
 from torch.autograd.gradcheck import gradgradcheck
 from torch.nn import Parameter
@@ -868,6 +869,25 @@ class TestNN(NNTestCase):
             self.assertLessEqual(norm_after, max_norm)
             scale = compare_scaling(grads)
             self.assertEqual(scale, 1)
+
+    def test_parameters_to_vector(self):
+        conv1 = nn.Conv2d(3, 10, 5)
+        fc1 = nn.Linear(10, 20)
+        model = nn.Sequential(conv1, fc1)
+
+        vec = parameters_to_vector(model.parameters())
+        self.assertEqual(vec.size(0), 980)
+
+    def test_vector_to_parameters(self):
+        conv1 = nn.Conv2d(3, 10, 5)
+        fc1 = nn.Linear(10, 20)
+        model = nn.Sequential(conv1, fc1)
+
+        vec = Variable(torch.arange(0, 980))
+        vector_to_parameters(vec, model.parameters())
+
+        sample = next(model.parameters())[0, 0, 0]
+        self.assertTrue(torch.equal(sample.data, vec.data[:5]))
 
     def test_weight_norm(self):
         input = Variable(torch.randn(3, 5))
