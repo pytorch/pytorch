@@ -273,6 +273,23 @@ class TestJit(TestCase):
         torch._C._jit_pass_dce(trace)
         self.assertExpected(str(trace))
 
+    def test_backward_opaque(self):
+        x = Variable(torch.randn(3, 3), requires_grad=True)
+        y = Variable(torch.randn(3, 3), requires_grad=True)
+
+        trace = torch._C._tracer_enter((x, y), 2)
+        z = x.cross(y)
+        torch._C._tracer_exit((z,))
+        torch._C._jit_pass_lint(trace)
+
+        # Run first backward
+        grad, = torch.autograd.grad(z, x, Variable(torch.ones(3, 3), requires_grad=True), create_graph=True)
+        torch._C._jit_pass_lint(trace)
+
+        # Run dead code elimination to remove unused trace nodes
+        torch._C._jit_pass_dce(trace)
+        self.assertExpected(str(trace))
+
     def test_backward_closure(self):
         """Check that autograd closures handle multiple stages correctly."""
         x = Variable(torch.randn(1), requires_grad=True)
