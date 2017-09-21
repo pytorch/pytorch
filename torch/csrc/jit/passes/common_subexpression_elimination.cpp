@@ -12,6 +12,8 @@ namespace torch { namespace jit {
 
 // Check whether two nodes have the same attributes in CSE.
 // This function may be too conservative for general use.
+// Do NOT support t/ts/g/gs attributes.
+// If t/ts are supported, CONSTANT node comparison may need to consider device.
 bool attributesEqualCSE(const Node* lhs, const Node* rhs) {
   JIT_ASSERT(lhs != nullptr);
   JIT_ASSERT(rhs != nullptr);
@@ -28,53 +30,25 @@ bool attributesEqualCSE(const Node* lhs, const Node* rhs) {
   Node* r = const_cast<Node*>(rhs);
   for (auto name : lnames) {
     if (l->kindOf(name) != r->kindOf(name)) return false;
+
+    #define COMPARE_ATTRIBUTEVALUE(type) \
+      case AttributeKind::type: \
+        { if (l->type(name) != r->type(name)) return false; } break;
+
     switch(l->kindOf(name)) {
-      case AttributeKind::f: 
-        {
-          auto lv = l->f(name);
-          auto rv = r->f(name);
-          if (lv != rv) return false;
-        }
-        break;
-      case AttributeKind::fs:
-        {
-          auto lv = l->fs(name);
-          auto rv = r->fs(name);
-          if (lv != rv) return false;
-        }
-        break;
-      case AttributeKind::i:
-        {
-          auto lv = l->i(name);
-          auto rv = r->i(name);
-          if (lv != rv) return false;
-        }
-        break;
-      case AttributeKind::is:
-        {
-          auto lv = l->is(name);
-          auto rv = r->is(name);
-          if (lv != rv) return false;
-        }
-        break;
-      case AttributeKind::s:
-        {
-          auto lv = l->s(name);
-          auto rv = r->s(name);
-          if (lv != rv) return false;
-        }
-        break;
-      case AttributeKind::ss:
-        {
-          auto lv = l->ss(name);
-          auto rv = r->ss(name);
-          if (lv != rv) return false;
-        }
-        break;
+      COMPARE_ATTRIBUTEVALUE(f)
+      COMPARE_ATTRIBUTEVALUE(fs)
+      COMPARE_ATTRIBUTEVALUE(i)
+      COMPARE_ATTRIBUTEVALUE(is)
+      COMPARE_ATTRIBUTEVALUE(s)
+      COMPARE_ATTRIBUTEVALUE(ss)
       default:
         return false;
     }
+
+    #undef COMPARE_ATTRIBUTEVALUE
   }
+
   return true;
 }
 
@@ -107,8 +81,6 @@ struct EqualNodeCSE {
     // Check the stage.
     if (lhs->stage() != rhs->stage()) return false;
 
-    // TODO check the device.
-
     // Check whether the inputs are the same.
     if (lhs->inputs().size() != rhs->inputs().size()) return false;
 
@@ -128,16 +100,12 @@ void EliminateCommonSubexpression(std::shared_ptr<Graph>& graph) {
   std::unordered_set<Node*, HashNodeCSE, EqualNodeCSE> subexprs;
   for (auto it = nodes.begin(); it != nodes.end(); ++ it) {
     auto node = *it;
-    if (node->kind() != kAdd
-        && node->kind() != kMul
-        && node->kind() != kNeg
-        && node->kind() != kSigmoid
-        && node->kind() != kTanh
-        && node->kind() != kSplit
-        && node->kind() != kAddConstant
+    if (node->kind() == kPythonOp
+        || node->kind() == kCppOp
+        || node->kind() == kEval
+        || node->kind() == kUndefined
        ) {
-      // TODO support more kinds of nodes.
-      // Only support CSE on these nodes.
+      // Do NOT have enough information to do CSE on these nodes.
       continue;
     }
 
