@@ -501,7 +501,7 @@ if WITH_CUDNN:
     extra_compile_args += ['-DWITH_CUDNN']
 
 if WITH_NNPACK:
-    main_libraries += ['nnpack']
+    main_libraries += ['nnpack', 'pthreadpool']
     include_dirs.extend(NNPACK_INCLUDE_DIRS)
     library_dirs.append(NNPACK_LIB_DIR)
     main_sources += [

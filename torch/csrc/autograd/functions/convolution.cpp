@@ -18,6 +18,10 @@ extern THCState* state;
 using namespace torch::cudnn;
 #endif
 
+#ifdef WITH_NNPACK
+#include "torch/csrc/nnpack/NNPACK.h"
+#endif
+
 using torch::cudnn::Convolution;
 using at::Tensor;
 using tensor_pair = std::pair<at::Tensor, at::Tensor>;
@@ -28,7 +32,7 @@ namespace torch { namespace autograd {
 
 static at::Tensor compute_output(
   at::Tensor& input, at::Tensor& weight, at::Tensor& bias, at::Tensor& columns, at::Tensor& ones,
-  const std::vector<int64_t>& kernel_size, const ConvParams& params);
+  const std::vector<int64_t>& kernel_size, const ConvForward& params);
 
 static at::Tensor compute_grad_input(
   at::Tensor& input, at::Tensor& grad_output, at::Tensor& weight, at::Tensor& columns, at::Tensor& ones,
@@ -37,6 +41,14 @@ static at::Tensor compute_grad_input(
 static tensor_pair compute_grad_params(
   at::Tensor& input, at::Tensor& grad_output, at::Tensor& weight, at::Tensor& bias, at::Tensor& columns, at::Tensor& ones,
   const std::vector<int64_t>& kernel_size, const ConvBackward& params);
+
+auto ConvParams::is_strided() const -> bool {
+  bool is_strided = false;
+  for (int s : stride) {
+    is_strided |= (s != 1);
+  }
+  return is_strided;
+}
 
 auto ConvParams::is_dilated() const -> bool {
   bool is_dilated = false;
@@ -95,9 +107,17 @@ auto ConvParams::use_cudnn(const at::Tensor& input) const -> bool {
   return false;
 }
 
+auto ConvParams::use_nnpack(const at::Tensor& input) const -> bool {
+#ifdef WITH_NNPACK
+  // NNPack Conv does not support strides, dilation yet
+  return input.type().ID() == at::TypeID::CPUFloat && !is_strided() && !is_dilated() && !transposed && input.ndimension() == 4;
+#endif
+  return false;
+}
+
 std::string ConvForward::name() { return "ConvForward"; }
 
-auto ConvForward::output_size(at::Tensor& input, at::Tensor& weight) -> std::vector<int64_t> {
+auto ConvForward::output_size(at::Tensor& input, at::Tensor& weight) const -> std::vector<int64_t> {
   auto in_size = input.sizes();
   auto weight_size = weight.sizes();
   auto dim = input.ndimension();
@@ -616,7 +636,7 @@ static at::Tensor compute_output(
     at::Tensor& input, at::Tensor& weight, at::Tensor& bias,
     at::Tensor& columns, at::Tensor& ones,
     const std::vector<int64_t>& kernel_size,
-    const ConvParams& params) {
+    const ConvForward& params) {
 
   auto output = input.type().tensor();
   auto dim = input.ndimension();
@@ -652,6 +672,16 @@ static at::Tensor compute_output(
           params.stride[1], params.stride[0],
           params.padding[1], params.padding[0],
           params.dilation[1], params.dilation[0]); goto done;
+      } else if (params.use_nnpack(input)) {
+#ifdef WITH_NNPACK
+        try {
+          output.resize_(params.output_size(input, weight));
+          nnpack::convolutionOutput(
+            input, weight, bias, params.padding, output); goto done;
+        } catch (...) {
+          throw std::runtime_error("dumb");
+        }
+#endif
       } else {
         /* CPU implementation has specialized MM kernels
            for non-dilated case here */
