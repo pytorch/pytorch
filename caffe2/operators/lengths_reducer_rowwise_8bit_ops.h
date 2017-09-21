@@ -8,6 +8,7 @@
 #include "caffe2/core/logging.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/operators/reducer_functors.h"
+#include "caffe2/perfkernels/embedding_lookup.h"
 #include "caffe2/utils/math.h"
 
 namespace caffe2 {
@@ -55,44 +56,34 @@ class SparseLengths8BitsRowwiseOp : public Operator<Context> {
     const IndexType* indices = indicesInput.template data<IndexType>();
     TIndex dataToReduceSize = indicesInput.dim(0);
 
-    const int32_t* lengths = lengthsInput.template data<int32_t>();
+    const int* lengths = lengthsInput.template data<int>();
     vector<TIndex> shape = dataInput.dims();
     shape[0] = outputSize;
     output->Resize(shape);
     const float* w = nullptr;
-    // TODO(dpod): switch to code generators from perfkernels
     if (USE_WEIGHTS) {
       w = Input(WEIGHTS).template data<float>();
     }
     TIndex in_block_size = dataInput.size_from_dim(1);
     OutDataT* out = output->template mutable_data<OutDataT>();
     const uint8_t* input_data = dataInput.template data<uint8_t>();
-    memset(out, 0, sizeof(OutDataT) * output->size());
-    TIndex dataIndex = 0;
-    for (TIndex rangeIndex = 0; rangeIndex < outputSize; ++rangeIndex) {
-      EigenVectorArrayMap<OutDataT> out_vector(
-          out + rangeIndex * in_block_size, in_block_size);
-      for (TIndex start = dataIndex; dataIndex < start + lengths[rangeIndex];
-           ++dataIndex) {
-        ConstEigenVectorArrayMap<uint8_t> in_vector(
-            input_data + indices[dataIndex] * in_block_size, in_block_size);
-        if (USE_WEIGHTS) {
-          out_vector = out_vector +
-              w[dataIndex] *
-                  (scale_bias[2 * indices[dataIndex]] *
-                       in_vector.template cast<OutDataT>() +
-                   scale_bias[2 * indices[dataIndex] + 1]);
-        } else {
-          out_vector = out_vector +
-              scale_bias[2 * indices[dataIndex]] *
-                  in_vector.template cast<OutDataT>() +
-              scale_bias[2 * indices[dataIndex] + 1];
-        }
-      }
-      if (USE_MEAN) {
-        out_vector = out_vector * 1.0f / std::max(lengths[rangeIndex], 1);
-      }
-    }
+
+    // delegate work to perfkernel that branches based on architecture
+    const TIndex indices_size = indicesInput.size();
+    const TIndex N = dataInput.dim(0);
+    EmbeddingLookup(
+        in_block_size,
+        outputSize,
+        indices_size,
+        N, // embeding table length
+        input_data,
+        indices,
+        lengths,
+        w,
+        scale_bias,
+        USE_MEAN,
+        out);
+
     return true;
   }
 
