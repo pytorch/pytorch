@@ -423,7 +423,7 @@ class ConvPoolOpBase : public Operator<Context> {
     if (helper.HasArgument("kernel")) {
       kernel.resize(2, helper.GetSingleArgument<int>("kernel", 1));
     } else if (
-        helper.HasArgument("kernel_h") && helper.HasArgument("helper_w")) {
+        helper.HasArgument("kernel_h") && helper.HasArgument("kernel_w")) {
       kernel.push_back(helper.GetSingleArgument<int>("kernel_h", 1));
       kernel.push_back(helper.GetSingleArgument<int>("kernel_w", 1));
     }
