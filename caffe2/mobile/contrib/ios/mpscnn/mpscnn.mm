@@ -600,8 +600,7 @@ class MPSCNNConvOp final : public ConvPoolOpBase<CPUContext> {
   MPSCNNConvOp(const OperatorDef& operator_def, Workspace* ws)
       : ConvPoolOpBase<CPUContext>(operator_def, ws) {
     OPERATOR_NEEDS_FEATURE(this->order_ == StorageOrder::NCHW, "Metal only supports NCHW order.");
-    OPERATOR_NEEDS_FEATURE(kernel_h() == kernel_w(),
-                           "Metal only supports equal kernel dimension.");
+    OPERATOR_NEEDS_FEATURE(kernel_h() == kernel_w(), "Metal only supports equal kernel dimension.");
   }
 
   bool RunOnDeviceWithOrderNCHW() override {
@@ -771,6 +770,57 @@ class MPSCNNPadImageOp final : public ConvPoolOpBase<CPUContext> {
 REGISTER_CPU_OPERATOR(MPSCNNPadImage, MPSCNNPadImageOp);
 OPERATOR_SCHEMA(MPSCNNPadImage).NumInputs(1).NumOutputs(1);
 
+class MPSCNNMulOp final : public Operator<CPUContext> {
+ public:
+  MPSCNNMulOp(const OperatorDef& operator_def, Workspace* ws)
+      : Operator<CPUContext>(operator_def, ws) {
+    OPERATOR_NEEDS_FEATURE(OperatorBase::GetSingleArgument<int>("broadcast", 0) == 1,
+                           "OpenGLMul only supports broadcast");
+
+    OPERATOR_NEEDS_FEATURE(OperatorBase::HasArgument("axis") == false,
+                           "OpenGLMul does not support axis");
+  }
+
+  bool RunOnDevice() override {
+    caffe2::Timer t;
+
+    auto wrapper0 = Inputs()[0]->Get<MPSImageWrapper>();
+    MPSImage* X0 = wrapper0.getImage();
+
+    const auto& X1 = Input(1);
+    CAFFE_ENFORCE_EQ(X1.size(), 1); // only scalar is supported
+
+    auto X1_ = [getMPSCNNContext().device newBufferWithBytes:X1.template data<float>()
+                                                      length:sizeof(float)
+                                                     options:MTLResourceOptionCPUCacheModeDefault];
+
+    auto outputWrapper = MPSImageWrapper(
+        this, &wrapper0, X0.numberOfImages, X0.height, X0.width, X0.featureChannels);
+    auto commandBuffer = outputWrapper.getCommandBuffer();
+    MPSImage* output = outputWrapper.getImage();
+
+    id<MTLComputeCommandEncoder> encoder = [commandBuffer computeCommandEncoder];
+    id<MTLComputePipelineState> state = getMPSCNNContext().getSpecializedPipelineState(
+        @"elementwise_mul", {{ushort(X0.numberOfImages), ushort(X0.featureChannels)}});
+
+    [encoder setComputePipelineState:state];
+    [encoder setTexture:[X0 texture] atIndex:0];
+    [encoder setBuffer:X1_ offset:0 atIndex:1];
+    [encoder setTexture:[output texture] atIndex:2];
+    const auto& launchParams = spatialPointwiseKernelLaunchParams(state, output);
+    [encoder dispatchThreadgroups:launchParams.threadgroupsPerGrid
+            threadsPerThreadgroup:launchParams.threadsPerThreadgroup];
+    [encoder endEncoding];
+    wrapper0.markRead();
+    outputWrapper.copyToOutputBlob(Outputs()[0]);
+    VLOG(2) << "ElementwiseMul took: " << t.MilliSeconds();
+    return true;
+  }
+};
+
+REGISTER_CPU_OPERATOR(MPSCNNMul, MPSCNNMulOp);
+OPERATOR_SCHEMA(MPSCNNMul).NumInputs(2).NumOutputs(1).AllowInplace({{0, 0}});
+
 class MPSCNNAddOp final : public Operator<CPUContext> {
  public:
   MPSCNNAddOp(const OperatorDef& operator_def, Workspace* ws)
@@ -822,8 +872,7 @@ class MPSCNNAveragePoolOp final : public ConvPoolOpBase<CPUContext> {
   MPSCNNAveragePoolOp(const OperatorDef& operator_def, Workspace* ws)
       : ConvPoolOpBase<CPUContext>(operator_def, ws) {
     OPERATOR_NEEDS_FEATURE(this->order_ == StorageOrder::NCHW, "Metal only supports NCHW order.");
-    OPERATOR_NEEDS_FEATURE(kernel_h() == kernel_w(),
-                           "Metal only supports equal kernel dimension.");
+    OPERATOR_NEEDS_FEATURE(kernel_h() == kernel_w(), "Metal only supports equal kernel dimension.");
   }
 
   bool RunOnDeviceWithOrderNCHW() override {
@@ -882,8 +931,7 @@ class MPSCNNMaxPoolOp final : public ConvPoolOpBase<CPUContext> {
   MPSCNNMaxPoolOp(const OperatorDef& operator_def, Workspace* ws)
       : ConvPoolOpBase<CPUContext>(operator_def, ws) {
     OPERATOR_NEEDS_FEATURE(this->order_ == StorageOrder::NCHW, "Metal only supports NCHW order.");
-    OPERATOR_NEEDS_FEATURE(kernel_h() == kernel_w(),
-                           "Metal only supports equal kernel dimension.");
+    OPERATOR_NEEDS_FEATURE(kernel_h() == kernel_w(), "Metal only supports equal kernel dimension.");
   }
 
   bool RunOnDeviceWithOrderNCHW() override {
@@ -1070,8 +1118,7 @@ class MPSCNNConvTransposeOp final : public ConvTransposeUnpoolBase<CPUContext> {
   MPSCNNConvTransposeOp(const OperatorDef& operator_def, Workspace* ws)
       : ConvTransposeUnpoolBase<CPUContext>(operator_def, ws) {
     OPERATOR_NEEDS_FEATURE(this->order_ == StorageOrder::NCHW, "Metal only supports NCHW order.");
-    CAFFE_ENFORCE_EQ(
-        kernel_w(), kernel_h(), "Metal only supports equal kernel dimensions");
+    CAFFE_ENFORCE_EQ(kernel_w(), kernel_h(), "Metal only supports equal kernel dimensions");
   }
 
   bool RunOnDeviceWithOrderNCHW() override {
@@ -1095,10 +1142,8 @@ class MPSCNNConvTransposeOp final : public ConvTransposeUnpoolBase<CPUContext> {
     const auto kH = kernel_h();
     const auto kW = kernel_w();
 
-    int output_height =
-        (X.height - 1) * stride_h() + kH - pad_b() - pad_t() + adj_h();
-    int output_width =
-        (X.width - 1) * stride_w() + kW - pad_l() - pad_r() + adj_w();
+    int output_height = (X.height - 1) * stride_h() + kH - pad_b() - pad_t() + adj_h();
+    int output_width = (X.width - 1) * stride_w() + kW - pad_l() - pad_r() + adj_w();
 
     VLOG(2) << "Output height: " << output_height;
     VLOG(2) << "Output width:" << output_width;
