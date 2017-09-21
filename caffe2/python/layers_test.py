@@ -412,6 +412,13 @@ class TestLayers(LayersTestCase):
             sampling_prob
         )
 
+    def testUniformSamplingWithIncorrectSampleSize(self):
+        input_record = self.new_record(schema.Scalar(np.int32))
+        num_samples = 200
+        num_elements = 100
+        with self.assertRaises(AssertionError):
+            self.model.UniformSampling(input_record, num_samples, num_elements)
+
     def testGatherRecord(self):
         indices = np.array([1, 3, 4], dtype=np.int32)
         dense = np.array(list(range(20)), dtype=np.float32).reshape(10, 2)

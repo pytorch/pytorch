@@ -31,7 +31,7 @@ class UniformSampling(ModelLayer):
             model, name, input_record, **kwargs
         )
 
-        assert num_elements > 0
+        assert num_elements > num_samples > 0
         assert isinstance(input_record, schema.Scalar)
 
         self.num_elements = num_elements
