@@ -16,6 +16,11 @@ std::set<string>& gRegisteredTypeNames() {
   return g_registered_type_names;
 }
 
+std::mutex& gCaffe2TypeRegistrationMutex() {
+  static std::mutex g_caffe2_type_registration_mutex;
+  return g_caffe2_type_registration_mutex;
+}
+
 #if defined(_MSC_VER)
 // Windows does not have cxxabi.h, so we will simply return the original.
 string Demangle(const char* name) {
