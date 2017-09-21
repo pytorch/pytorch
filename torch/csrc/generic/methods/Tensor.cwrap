@@ -806,7 +806,11 @@ static PyObject * THPTensor_stateless_(cat)(THPTensor *_unused, PyObject *args, 
 #endif
   static char* argnames[] = { "seq", "dim", "out", NULL };
   PyObject *_seq = NULL;
+#ifdef _WIN32
   int dim = 0;
+#else
+  int64_t dim = 0;
+#endif
   PyObject *___out = NULL;
 
   THPObjectPtr sequence;
