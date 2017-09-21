@@ -145,16 +145,19 @@ void THNN_(LookupTable_accGradParameters)(
   THCudaCheck(cudaGetLastError());
 }
 
-#include <cuda_profiler_api.h>
+#define THREADS 256
+#define RUN(NORM, IDXTYPE) \
+  calculate_norms_and_renorm<real, accreal, IDXTYPE, NORM> \
+    <<<numel, THREADS/2, THREADS * sizeof(accreal), THCState_getCurrentStream(state)>>> \
+    (weightsRaw, idxRaw, normType, maxNorm, THCTensor_(stride)(state, weight, 0))
+
 void THNN_(LookupTable_renorm)(
            THCState *state,
            THCIndexTensor *idx,
            THCTensor *weight,
-           accreal maxNorm_,
-           accreal normType_)
+           accreal maxNorm,
+           accreal normType)
 {
-  real maxNorm = ScalarConvert<accreal, real>::to(maxNorm_);
-  real normType = ScalarConvert<accreal, real>::to(normType_);
   THCUNN_assertSameGPU(state, 2, idx, weight);
   if (!(THCIndexTensor_(isContiguous)(state, idx) &&
         THCTensor_(isContiguous)(state, weight))) {
@@ -170,33 +173,34 @@ void THNN_(LookupTable_renorm)(
   }
 
   THCIndex_t numel = THCIndexTensor_(nElement)(state, idx);
-  int64_t stride = THCTensor_(stride)(state, weight, 0);
+
+  real * weightsRaw = THCTensor_(data)(state, weight);
+  THCIndex_t * idxRaw = THCIndexTensor_(data)(state, idx);
 
   // get the unique indices
-  thrust::device_ptr<THCIndex_t> idx_ptr(THCIndexTensor_(data)(state, idx));
-  thrust::device_ptr<THCIndex_t> end_ptr(thrust::unique(idx_ptr, idx_ptr+numel));
-  numel = end_ptr - idx_ptr;
+  thrust::device_ptr<THCIndex_t> idxThrust(idxRaw);
+  thrust::device_ptr<THCIndex_t> endIdxThrust(thrust::unique(idxThrust, idxThrust+numel));
+  numel = endIdxThrust - idxThrust;
 
-  real * weight_ptr_raw = THCTensor_(data)(state, weight);
-  THCIndex_t * idx_ptr_raw = THCIndexTensor_(data)(state, idx);
-
-  THCIndex_t num_blocks = numel;
-  // get the next highest power of 2 for algo correctness
-  int64_t threads_per_block = stride - 1;
-  threads_per_block |= threads_per_block >> 1;
-  threads_per_block |= threads_per_block >> 2;
-  threads_per_block |= threads_per_block >> 4;
-  threads_per_block |= threads_per_block >> 8;
-  threads_per_block |= threads_per_block >> 16;
-  threads_per_block |= threads_per_block >> 32;
-  threads_per_block++;
-
-  cudaProfilerStart();
-  calculate_norms_and_renorm<real, accreal>
-    <<<num_blocks, threads_per_block/2, threads_per_block * sizeof(accreal)>>>
-    (weight_ptr_raw, idx_ptr_raw, normType, maxNorm, normType_, stride);
-  cudaDeviceSynchronize();
-  cudaProfilerStop();
+  // At launch time figure out what the index type is and norm type
+  int Norm = ScalarConvert<accreal, int>::to(normType);
+  if (TensorUtils<THCudaLongTensor>::canUse32BitIndexMath(state, idx)) {
+    if (Norm == 1) {
+      RUN(1, unsigned int);
+    } else if (Norm == 2) {
+      RUN(2, unsigned int);
+    } else {
+      RUN(-1, unsigned int);
+    }
+  } else {
+    if (Norm == 1) {
+      RUN(1, unsigned long);
+    } else if (Norm == 2) {
+      RUN(2, unsigned long);
+    } else {
+      RUN(-1, unsigned long);
+    }
+  }
 }
 
 #endif

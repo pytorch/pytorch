@@ -1,18 +1,11 @@
 #include "THCUNN.h"
 #include "common.h"
 #include "THCThrustAllocator.cuh"
-#include <thrust/device_ptr.h>
-#include <thrust/execution_policy.h>
-#include <thrust/iterator/constant_iterator.h>
-#include <thrust/iterator/zip_iterator.h>
-#include <thrust/transform_reduce.h>
-#if CUDA_VERSION >= 7000
-#include <thrust/system/cuda/execution_policy.h>
-#endif
 #include <thrust/unique.h>
 #include "THCHalf.h"
 #include "THCHalfAutoNumerics.cuh"
 #include "THCTensorSort.cuh"
+#include "../THC/THCTensorMathReduce.cuh"
 
 const int WARP_SIZE = 32;
 
@@ -162,76 +155,76 @@ __global__ void cunn_LookupTable_accGradParametersKernel(
   }
 }
 
-template <typename Dtype, typename Acctype>
-__device__
-Acctype fast_pow(Dtype x, Acctype normType) {
-    Acctype xA = ScalarConvert<Dtype, Acctype>::to(x);
-    if (normType == 1)
-      return std::abs(xA);
-    else if (normType == 2)
-      return xA * xA;
-    else
-      return std::pow(std::abs(xA), normType);
-}
-
-template <typename Dtype>
-__device__
-Dtype get_padded_value(Dtype *weight_ptr, THCIndex_t idx, int64_t dim) 
+template <typename DType, typename AccType, int Norm>
+struct FastPow
 {
-  if (idx < dim)
-    return weight_ptr[idx];
-  else
-    return 0;
-}
+  __host__ __device__
+  static inline AccType pow(DType x, AccType norm) {
+    AccType xA = ScalarConvert<DType, AccType>::to(x);
+    return std::pow(std::abs(xA), norm);
+  }
+};
+
+template <typename DType, typename AccType>
+struct FastPow<DType, AccType, 1>
+{
+  __host__ __device__
+  static inline AccType pow(DType x, AccType _) {
+    AccType xA = ScalarConvert<DType, AccType>::to(x);
+    return std::abs(xA);
+  }
+};
+
+template <typename DType, typename AccType>
+struct FastPow<DType, AccType, 2>
+{
+  __host__ __device__
+  static inline AccType pow(DType x, AccType _) {
+    AccType xA = ScalarConvert<DType, AccType>::to(x);
+    return xA * xA;
+  }
+};
 
 /* Calculate norms of the rows of weight_ptr given by idx_ptr and capture them in norms */
-template <typename Dtype, typename Acctype>
+template <typename DType, typename AccType, typename IndexType, int Norm>
 __global__
-void calculate_norms_and_renorm(Dtype *weight_ptr, THCIndex_t *idx_ptr, Dtype normType, 
-    Dtype maxNorm, Acctype normType_, int64_t dim)
+void calculate_norms_and_renorm(DType *weights, 
+                                THCIndex_t *indices, 
+                                AccType normType,
+                                AccType maxNorm, 
+                                IndexType dim)
 {
   // Some casting hacks since dynamic shared memory and templates don't work together:
-  extern __shared__ __align__(sizeof(Acctype)) unsigned char smem[];
-  Acctype *sdata = reinterpret_cast<Acctype *>(smem);
+  extern __shared__ unsigned char smem[];
+  AccType *sdata = reinterpret_cast<AccType *>(smem);
 
-  int64_t tid = threadIdx.x;
-  int64_t idx = (idx_ptr[blockIdx.x] - TH_INDEX_BASE) * dim + tid;
+  IndexType tid = threadIdx.x;
+  IndexType baseIndex = (indices[blockIdx.x] - TH_INDEX_BASE) * dim;
 
-  // Do the initial exponents in the load
-  // Shenanigans here since we need to work with a power-of-2 block size
-  // effectively pad the matrix with zeroes if needed
-  Acctype second;
-  if (tid + blockDim.x > dim)
-    second = (Acctype) 0;
-  else 
-    second = fast_pow(weight_ptr[idx + blockDim.x], normType_);
-
-  sdata[tid] = fast_pow(weight_ptr[idx], normType_) + second;
-
-  __syncthreads();
-
-  // iterative merging algorithm. Possible optimization could involve 
-  for(int64_t i = blockDim.x / 2; i > 0; i >>= 1) {
-    if (tid < i) {
-      sdata[tid] += sdata[tid+i];
-    }
-    __syncthreads();
+  AccType accZero = ScalarConvert<int, AccType>::to(0);
+  AccType v = accZero;
+  for (IndexType i = tid; i < dim; i += blockDim.x) {
+    v += FastPow<DType, AccType, Norm>::pow(weights[baseIndex + i], normType);
   }
 
+  v = reduceBlock<AccType, ReduceAdd<AccType, AccType>>
+        (sdata, blockDim.x, v, ReduceAdd<AccType, AccType>(), accZero);
+
   if (tid == 0) {
-    sdata[0] = std::pow(sdata[0], (1.0/normType_)); 
+    sdata[0] = std::pow(v, 
+        THCNumerics<AccType>::div(ScalarConvert<int, AccType>::to(1), normType)
+    );
   }
   __syncthreads();
   // now we renormalize the blocks that need it
-  if (sdata[0] > ScalarConvert<Dtype, Acctype>::to(maxNorm)) {
-    Dtype factor = ScalarConvert<Acctype, Dtype>::to(maxNorm / (sdata[0] + 1e-7));
-    weight_ptr[idx] *= factor;
-    if (tid + blockDim.x < dim)
-      weight_ptr[idx + blockDim.x] *= factor;
+  if (sdata[0] > maxNorm) {
+    DType factor = ScalarConvert<AccType, DType>::to(maxNorm / (sdata[0] + 1e-7));
+    for (IndexType i = tid; i < dim; i += blockDim.x) {
+      weights[baseIndex + i] *= factor;
+    }
   }
 
 }
 
 #include "generic/LookupTable.cu"
 #include "THCGenerateFloatTypes.h"
-
