@@ -378,7 +378,7 @@ class Module(object):
 
     def load_state_dict(self, state_dict, auto_match=False):
         """Copies parameters and buffers from :attr:`state_dict` into
-        this module and its descendants. 
+        this module and its descendants.
 
         Arguments:
             state_dict (dict): A dict containing parameters and
@@ -395,11 +395,11 @@ class Module(object):
                     continue
                 else:
                     raise KeyError('unexpected key "{}" in state_dict'
-                               .format(name))
+                                   .format(name))
             if isinstance(param, Parameter):
                 # backwards compatibility for serialized parameters
                 param = param.data
-            if auto_match and own_state[name].size()!=param.size():
+            if auto_match and own_state[name].size() != param.size():
                 continue
             try:
                 own_state[name].copy_(param)
@@ -408,7 +408,7 @@ class Module(object):
                       ' {} and whose dimensions in the checkpoint are {}, ...'.format(
                           name, own_state[name].size(), param.size()))
                 raise
-                
+
         if not auto_match:
             missing = set(own_state.keys()) - set(state_dict.keys())
             if len(missing) > 0:
