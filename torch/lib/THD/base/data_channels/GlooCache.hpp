@@ -308,7 +308,12 @@ struct algorithm_spec<CollectiveType::ALL_REDUCE, T> {
         throw std::runtime_error("Gloo backend only supports sum op for CUDA all reduce");
       }
       auto stream = THCState_getCurrentStream(THDGetCudaState());
-      algo = std::make_shared<::gloo::CudaAllreduceHalvingDoublingPipelined<T>>(
+      algo = std::make_shared<::gloo::CudaAllreduceHalvingDoublingPipelined<T,
+#if defined(GLOO_USE_GPUDIRECT) && GLOO_USE_GPUDIRECT
+                              ::gloo::CudaDeviceWorkspace<T>>>(
+#else
+                              ::gloo::CudaHostWorkspace<T>>>(
+#endif
         context,
         std::initializer_list<T*>{reinterpret_cast<T*>(input_buffer.get())},
         count,
