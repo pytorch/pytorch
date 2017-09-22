@@ -22,7 +22,7 @@ AsyncSimpleNet::AsyncSimpleNet(
   // Initialize the operators
   for (int idx = 0; idx < net_def->op_size(); ++idx) {
     const auto& operator_def = net_def->op(idx);
-    VLOG(1) << "Creating operator " << operator_def.name() << ":"
+    VLOG(1) << "Creating operator " << operator_def.name() << ": "
             << operator_def.type();
     std::unique_ptr<OperatorBase> op{nullptr};
     if (!operator_def.has_device_option() && net_def_has_device_option) {
