@@ -23,6 +23,7 @@ def parameters_to_vector(parameters):
         vec.append(param.view(-1))
     return torch.cat(vec)
 
+
 def vector_to_parameters(vec, parameters):
     """Convert one vector to the parameters
 
@@ -52,10 +53,11 @@ def vector_to_parameters(vec, parameters):
         # Increment the pointer
         pointer += num_param
 
+
 def _check_param_device(param, old_param_device):
     """This helper function is to check if the parameters are located
     in the same device. Currently, the conversion between model parameters
-    and single vector form is not supported for multiple allocations, 
+    and single vector form is not supported for multiple allocations,
     e.g. parameters in different GPUs, or mixture of CPU/GPU.
 
     Arguments:
