@@ -26,16 +26,14 @@ bool attributesEqualCSE(const Node* lhs, const Node* rhs) {
   auto rnames = rhs->attributeNames();
   if (lnames != rnames) return false;
 
-  Node* l = const_cast<Node*>(lhs);
-  Node* r = const_cast<Node*>(rhs);
   for (auto name : lnames) {
-    if (l->kindOf(name) != r->kindOf(name)) return false;
+    if (lhs->kindOf(name) != rhs->kindOf(name)) return false;
 
     #define COMPARE_ATTRIBUTEVALUE(type) \
       case AttributeKind::type: \
-        { if (l->type(name) != r->type(name)) return false; } break;
+        { if (lhs->type(name) != rhs->type(name)) return false; } break;
 
-    switch(l->kindOf(name)) {
+    switch(lhs->kindOf(name)) {
       COMPARE_ATTRIBUTEVALUE(f)
       COMPARE_ATTRIBUTEVALUE(fs)
       COMPARE_ATTRIBUTEVALUE(i)
@@ -43,6 +41,7 @@ bool attributesEqualCSE(const Node* lhs, const Node* rhs) {
       COMPARE_ATTRIBUTEVALUE(s)
       COMPARE_ATTRIBUTEVALUE(ss)
       default:
+        // NB: Comparison of nodes with tensor(s) or graph(s) will return false.
         return false;
     }
 
@@ -103,7 +102,6 @@ void EliminateCommonSubexpression(std::shared_ptr<Graph>& graph) {
     if (node->kind() == kPythonOp
         || node->kind() == kCppOp
         || node->kind() == kEval
-        || node->kind() == kUndefined
        ) {
       // Do NOT have enough information to do CSE on these nodes.
       continue;
