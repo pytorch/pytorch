@@ -868,7 +868,7 @@ class TestLayers(LayersTestCase):
             """
             output = workspace.FetchBlob(rff_output)
             output_ref = scale * np.cos(np.dot(X, np.transpose(W)) + b)
-            npt.assert_allclose(output, output_ref, rtol=1e-4)
+            npt.assert_allclose(output, output_ref, rtol=1e-3)
 
         X = np.random.random((batch_size, input_dims)).astype(np.float32)
         scale = np.sqrt(2.0 / output_dims)
@@ -961,7 +961,7 @@ class TestLayers(LayersTestCase):
             output_ref = np.multiply(x_pow, h_rand_features)
 
             # Comparing net output and computed output
-            npt.assert_allclose(net_output, output_ref, rtol=1e-4)
+            npt.assert_allclose(net_output, output_ref, rtol=1e-3)
 
         X = np.random.normal(size=(batch_size, input_dims)).astype(np.float32)
         input_record = self.new_record(schema.Scalar((np.float32, (input_dims,))))
@@ -1087,7 +1087,7 @@ class TestLayers(LayersTestCase):
             output_ref = np.multiply(np.multiply(x_pow, h_rand_features), x_learn)
 
             # Comparing net output and computed output
-            npt.assert_allclose(net_output, output_ref, rtol=1e-4)
+            npt.assert_allclose(net_output, output_ref, rtol=1e-3)
 
         X_full = np.random.normal(size=(batch_size, input_dims)).astype(np.float32)
         if use_struct_input:

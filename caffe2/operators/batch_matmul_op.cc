@@ -34,7 +34,7 @@ size (C x K x N) where C is the batch size and i ranges from 0 to C-1.
         b_dim1 = in[1].dims(2);
       }
       return vector<TensorShape> {
-          CreateTensorShape(vector<int> {
+          CreateTensorShape(vector<TIndex> {
               in[0].dims(0), a_dim0, b_dim1},
               in[0].data_type())
       };

@@ -124,9 +124,6 @@ endif()
 # added to the list of include directories, prefixing
 # PROJECT_SOURCE_DIR means this source tree always takes precedence.
 include_directories(BEFORE ${PROJECT_SOURCE_DIR})
-if (Caffe2_IS_CUSTOM_PROTOBUF)
-  include_directories(BEFORE ${PROJECT_SOURCE_DIR}/build_host_protoc/include)
-endif()
 
 # Prefix path to generated Caffe2 headers.
 # These need to take precedence over their empty counterparts located

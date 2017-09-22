@@ -34,7 +34,7 @@ if NOT DEFINED CMAKE_GENERATOR (
     )
   ) else (
     :: In default we use win64 VS 2017.
-    set CMAKE_GENERATOR="Visual Studio 14 2015 Win64"
+    set CMAKE_GENERATOR="Visual Studio 15 2017 Win64"
   )
 )
 
@@ -46,8 +46,6 @@ echo CMAKE_BUILD_TYPE=%CMAKE_BUILD_TYPE%
 
 if not exist %CAFFE2_ROOT%\build mkdir %CAFFE2_ROOT%\build
 cd %CAFFE2_ROOT%\build
-
-SET Protobuf_DIR=%CAFFE2_ROOT%\build_host_protoc\cmake
 
 :: Set up cmake. We will skip building the test files right now.
 :: TODO: enable cuda support.
