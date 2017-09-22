@@ -277,7 +277,7 @@ DAGNetBase::DAGNetBase(
   // Initialize the operators
   for (int idx = 0; idx < net_def->op_size(); ++idx) {
     const OperatorDef& op_def = net_def->op(idx);
-    VLOG(1) << "Creating operator #" << idx << ": " << op_def.name() << ":"
+    VLOG(1) << "Creating operator #" << idx << ": " << op_def.name() << ": "
             << op_def.type();
     if (!op_def.has_device_option() && net_def_has_device_option) {
       OperatorDef temp_def(op_def);
