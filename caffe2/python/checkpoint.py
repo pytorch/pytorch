@@ -132,7 +132,13 @@ class CheckpointManager(object):
         self._blob_names = self._net.AddExternalInput('blob_names')
         self._names_output = None
 
-    def init(self, nodes=None, retrieve_from_epoch=None, path_prefix=None):
+    def init(
+        self,
+        nodes=None,
+        retrieve_from_epoch=None,
+        path_prefix=None,
+        path_type=None
+    ):
         """
         Build a Task that will be run once after the job's `init_group` is run.
         This task will determine which blobs need to be checkpointed.
@@ -149,12 +155,13 @@ class CheckpointManager(object):
                     include_shared=False)
             else:
                 full_db_name = self._db_name(retrieve_from_epoch, path_prefix)
+                db_type = path_type or self._db_type
                 logger.info("Initializing checkpoints from = %s"
                             % full_db_name)
                 ops.Load(
                     [], self._blob_names,
                     db=full_db_name,
-                    db_type=self._db_type,
+                    db_type=db_type,
                     absolute_path=True)
         self._names_output = task.outputs()[0]
         return task
@@ -171,20 +178,21 @@ class CheckpointManager(object):
             db_name = os.path.join(self._db_prefix, ckpt_filename)
         return db_name
 
-    def load(self, epoch, path_prefix=None):
+    def load(self, epoch, path_prefix=None, path_type=None):
         """
         Build a Task that will be run by JobRunner when the job is to be
         resumed from a given epoch. This task will run a Load op that will
         load and deserialize all relevant blobs from a persistent storage.
         """
         full_db_name = self._db_name(epoch, path_prefix)
+        db_type = path_type or self._db_type
         logger.info("Loading checkpoints from = %s" % full_db_name)
         with Task() as task:
             ops.Load(
                 [],
                 self.blob_list(),
                 db=full_db_name,
-                db_type=self._db_type,
+                db_type=db_type,
                 absolute_path=True)
         return task
 
@@ -260,7 +268,9 @@ class MultiNodeCheckpointManager(object):
                     func(manager, *args, **kw)
             return task_group
 
-    def init(self, nodes, retrieve_from_epoch=None, path_prefix=None):
+    def init(
+        self, nodes, retrieve_from_epoch=None, path_prefix=None, path_type=None
+    ):
         if self._node_managers is not None:
             assert [node for node, _ in self._node_managers] == nodes
             return
@@ -276,11 +286,15 @@ class MultiNodeCheckpointManager(object):
             CheckpointManager.init,
             nodes=[node],
             retrieve_from_epoch=retrieve_from_epoch,
-            path_prefix=path_prefix)
+            path_prefix=path_prefix,
+            path_type=path_type)
 
-    def load(self, epoch, path_prefix=None):
-        return self._task_group(CheckpointManager.load, epoch,
-                                path_prefix=path_prefix)
+    def load(self, epoch, path_prefix=None, path_type=None):
+        return self._task_group(
+            CheckpointManager.load,
+            epoch,
+            path_prefix=path_prefix,
+            path_type=path_type)
 
     def load_blobs_locally(self, nodes, blob_names, epoch, session):
         """Loads the necessary blobs from the checkpoints to the current node.
