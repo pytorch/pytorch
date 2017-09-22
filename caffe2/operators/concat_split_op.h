@@ -128,7 +128,6 @@ bool SplitOp<Context>::RunOnDevice() {
       input_channels,
       "Sum of split dimensions do not match: should be ",
       input_channels);
-  int input_offset = 0;
   vector<TIndex> output_dims(input.dims());
   int before = 1, after = 1;
   for (int i = 0; i < axis_; ++i) {
@@ -140,6 +139,7 @@ bool SplitOp<Context>::RunOnDevice() {
   if (add_axis_) {
     output_dims.erase(output_dims.begin() + axis_);
   }
+  size_t input_offset = 0;
   for (int i = 0; i < OutputSize(); ++i) {
     auto* output = Output(i);
     auto axis_dim = add_axis_ ? 1 : axis_data[i];
@@ -230,7 +230,7 @@ bool ConcatOp<Context>::RunOnDevice() {
     output_dims[axis_] = output_channels;
   }
   output->Resize(output_dims);
-  int output_offset = 0;
+  size_t output_offset = 0;
   for (int i = 0; i < InputSize(); ++i) {
     auto& input = Input(i);
     auto axis_dim = add_axis_ ? 1 : input.dim32(axis_);
