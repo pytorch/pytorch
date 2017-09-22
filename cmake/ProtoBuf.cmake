@@ -1,6 +1,7 @@
 # Finds Google Protocol Buffers library and compilers and extends
 # the standard cmake script with version and python generation support
 function(custom_protobuf_find)
+  message(STATUS "Use custom protobuf build.")
   # For a custom protobuf build, we will always use static protobuf.
   option(protobuf_BUILD_SHARED_LIBS "" OFF)
   option(protobuf_BUILD_TESTS "" OFF)
@@ -14,8 +15,8 @@ function(custom_protobuf_find)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-deprecated-declarations" PARENT_SCOPE)
   endif()
   add_subdirectory(${PROJECT_SOURCE_DIR}/third_party/protobuf/cmake)
-  caffe2_include_directories(${PROJECT_SOURCE_DIR}/third_party/protobuf/src)
-  list(APPEND Caffe2_DEPENDENCY_LIBS libprotobuf)
+  set(PROTOBUF_LIBRARIES libprotobuf PARENT_SCOPE)
+  set(PROTOBUF_INCLUDE_DIR ${PROJECT_SOURCE_DIR}/third_party/protobuf/src PARENT_SCOPE)
   set(Caffe2_DEPENDENCY_LIBS ${Caffe2_DEPENDENCY_LIBS} PARENT_SCOPE)
   if(NOT EXISTS ${PROTOBUF_PROTOC_EXECUTABLE})
     message(FATAL_ERROR
@@ -26,16 +27,12 @@ function(custom_protobuf_find)
     message(STATUS "Using protobuf compiler ${PROTOBUF_PROTOC_EXECUTABLE}.")
   endif()
   set(Protobuf_FOUND TRUE PARENT_SCOPE)
-  set(Caffe2_IS_CUSTOM_PROTOBUF TRUE PARENT_SCOPE)
 endfunction()
 
 if (WIN32)
   find_package( Protobuf NO_MODULE)
   if ( NOT (Protobuf_FOUND OR PROTOBUF_FOUND) )
     custom_protobuf_find()
-  else()
-    list(APPEND Caffe2_DEPENDENCY_LIBS protobuf::libprotobuf)
-    # include_directories(SYSTEM ${PROTOBUF_INCLUDE_DIR})
   endif()
 elseif (ANDROID OR IOS)
   custom_protobuf_find()
@@ -51,14 +48,16 @@ elseif (ANDROID OR IOS)
   endif()
 else()
   find_package( Protobuf )
-  if ( NOT (Protobuf_FOUND OR PROTOBUF_FOUND) )
-    custom_protobuf_find()
-  else()
-    # Adding PROTOBUF_LIBRARY for legacy support.
-    list(APPEND Caffe2_DEPENDENCY_LIBS ${PROTOBUF_LIBRARIES} ${PROTOBUF_LIBRARY})
-    caffe2_include_directories(${PROTOBUF_INCLUDE_DIR})
-  endif()
 endif()
+
+# If Protobuf is not found, do custom protobuf find.
+if ( NOT (Protobuf_FOUND OR PROTOBUF_FOUND) )
+  custom_protobuf_find()
+endif()
+
+caffe2_include_directories(${PROTOBUF_INCLUDE_DIR})
+# Adding PROTOBUF_LIBRARY for legacy support.
+list(APPEND Caffe2_DEPENDENCY_LIBS ${PROTOBUF_LIBRARIES} ${PROTOBUF_LIBRARY})
 
 if (NOT (Protobuf_FOUND OR PROTOBUF_FOUND) )
   message(FATAL_ERROR "Could not find Protobuf or compile local version.")

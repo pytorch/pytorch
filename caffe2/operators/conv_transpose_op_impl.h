@@ -47,16 +47,18 @@ bool ConvTransposeOp<T, Context>::RunOnDeviceWithOrderNCHW() {
         "bias dimension must be equal to output channel number");
     if (bias_multiplier_.size() != output_image_size) {
       bias_multiplier_.Resize(vector<TIndex>(1, output_image_size));
+      T* bm_data = bias_multiplier_.template mutable_data<T>();
       math::Set<T, Context>(
           output_image_size,
           static_cast<T>(1),
-          bias_multiplier_.template mutable_data<T>(),
+          bm_data,
           &context_);
     }
   }
 #endif // !__ARM_NEON__
 
   const T* Xdata = X.template data<T>();
+  const T* filter_data = filter.template data<T>();
   T* Ydata = Y->template mutable_data<T>();
 
   auto f = [&](Tensor<Context>* col_buffer) {
@@ -72,7 +74,7 @@ bool ConvTransposeOp<T, Context>::RunOnDeviceWithOrderNCHW() {
           input_image_size,
           M,
           1,
-          filter.template data<T>(),
+          filter_data,
           Xdata,
           0,
           col_buffer_data,
@@ -99,6 +101,8 @@ bool ConvTransposeOp<T, Context>::RunOnDeviceWithOrderNCHW() {
 
       // Bias term
       if (InputSize() == 3) {
+        const T* bias_data = Input(BIAS).template data<T>();
+        const T* bm_data = bias_multiplier_.template data<T>();
 #ifndef __ARM_NEON__
         math::Gemm<T, Context>(
             CblasNoTrans,
@@ -107,14 +111,14 @@ bool ConvTransposeOp<T, Context>::RunOnDeviceWithOrderNCHW() {
             output_image_size,
             1,
             1,
-            Input(BIAS).template data<T>(),
-            bias_multiplier_.template data<T>(),
+            bias_data,
+            bm_data,
             1,
             Ydata,
             &context_);
 #else
         math::BiasCHW<T, Context>(
-            Input(BIAS).template data<T>(),
+            bias_data,
             C,
             output_image_size,
             Ydata,
@@ -165,14 +169,16 @@ bool ConvTransposeOp<T, Context>::RunOnDeviceWithOrderNHWC() {
         "bias dimension must be equal to output channel number");
     if (bias_multiplier_.size() != output_image_size) {
       bias_multiplier_.Resize(vector<TIndex>(1, output_image_size));
+      T* bm_data = bias_multiplier_.template mutable_data<T>();
       math::Set<T, Context>(
           output_image_size,
           static_cast<T>(1),
-          bias_multiplier_.template mutable_data<T>(),
+          bm_data,
           &context_);
     }
   }
   const T* Xdata = X.template data<T>();
+  const T* filter_data = filter.template data<T>();
   T* Ydata = Y->template mutable_data<T>();
 
   auto f = [&](Tensor<Context>* /*col_buffer*/) {
@@ -189,7 +195,7 @@ bool ConvTransposeOp<T, Context>::RunOnDeviceWithOrderNHWC() {
           M,
           1,
           Xdata,
-          filter.template data<T>(),
+          filter_data,
           0,
           col_buffer_data,
           &context_);
@@ -213,6 +219,8 @@ bool ConvTransposeOp<T, Context>::RunOnDeviceWithOrderNHWC() {
           &context_);
       // Bias term
       if (InputSize() == 3) {
+        const T* bm_data = bias_multiplier_.template data<T>();
+        const T* bias_data = Input(BIAS).template data<T>();
         math::Gemm<T, Context>(
             CblasNoTrans,
             CblasNoTrans,
@@ -220,8 +228,8 @@ bool ConvTransposeOp<T, Context>::RunOnDeviceWithOrderNHWC() {
             C,
             1,
             1,
-            bias_multiplier_.template data<T>(),
-            Input(BIAS).template data<T>(),
+            bm_data,
+            bias_data,
             1,
             Ydata,
             &context_);
@@ -269,15 +277,17 @@ bool ConvTransposeGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
     dbias->Resize(C);
     if (bias_multiplier_.size() != output_image_size) {
       bias_multiplier_.Resize(1, output_image_size);
+      T* bm_data = bias_multiplier_.template mutable_data<T>();
       math::Set<T, Context>(
           output_image_size,
           static_cast<T>(1),
-          bias_multiplier_.template mutable_data<T>(),
+          bm_data,
           &context_);
     }
   }
   T* col_buffer_data = col_buffer_.template mutable_data<T>();
   const T* Xdata = X.template data<T>();
+  const T* filter_data = filter.template data<T>();
   const T* dYdata = dY.template data<T>();
   T* dfilter_data = dfilter->template mutable_data<T>();
   // Pre-setting the gradients to zero
@@ -322,6 +332,8 @@ bool ConvTransposeGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
         &context_);
     // gradient w.r.t. bias
     if (!no_bias_) {
+      const T* bm_data = bias_multiplier_.template data<T>();
+      T* input_grad_data = Output(BIAS_OR_INPUT_GRAD)->template mutable_data<T>();
       math::Gemm<T, Context>(
           CblasNoTrans,
           CblasNoTrans,
@@ -330,9 +342,9 @@ bool ConvTransposeGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
           output_image_size,
           1,
           dYdata,
-          bias_multiplier_.template data<T>(),
+          bm_data,
           1,
-          Output(BIAS_OR_INPUT_GRAD)->template mutable_data<T>(),
+          input_grad_data,
           &context_);
     }
     dYdata += dY.size() / dY.dim32(0);
@@ -340,6 +352,7 @@ bool ConvTransposeGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
   }
   if (OutputSize() == 3 || (no_bias_ && (OutputSize() == 2))) {
     // Compute gradients w.r.t. the input
+    // Since we have changed dYdata in the above loop, we will need to reset.
     dYdata = dY.template data<T>();
     auto* dX = Output(no_bias_ ? BIAS_OR_INPUT_GRAD : INPUT_GRAD);
     dX->ResizeLike(X);
@@ -373,7 +386,7 @@ bool ConvTransposeGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
           H * W,
           kernel_dim,
           1,
-          filter.template data<T>(),
+          filter_data,
           col_buffer_data,
           0,
           dXdata,
@@ -416,15 +429,17 @@ bool ConvTransposeGradientOp<T, Context>::RunOnDeviceWithOrderNHWC() {
     dbias->Resize(C);
     if (bias_multiplier_.size() != output_image_size) {
       bias_multiplier_.Resize(1, output_image_size);
+      T* bm_data = bias_multiplier_.template mutable_data<T>();
       math::Set<T, Context>(
           output_image_size,
           static_cast<T>(1),
-          bias_multiplier_.template mutable_data<T>(),
+          bm_data,
           &context_);
     }
   }
   T* col_buffer_data = col_buffer_.template mutable_data<T>();
   const T* Xdata = X.template data<T>();
+  const T* filter_data = filter.template data<T>();
   const T* dYdata = dY.template data<T>();
   T* dfilter_data = dfilter->template mutable_data<T>();
   // Pre-setting the gradients to zero
@@ -469,6 +484,8 @@ bool ConvTransposeGradientOp<T, Context>::RunOnDeviceWithOrderNHWC() {
         &context_);
     // gradients w.r.t. bias
     if (!no_bias_) {
+      const T* bm_data = bias_multiplier_.template data<T>();
+      T* input_grad_data = Output(BIAS_OR_INPUT_GRAD)->template mutable_data<T>();
       math::Gemm<T, Context>(
           CblasTrans,
           CblasNoTrans,
@@ -477,9 +494,9 @@ bool ConvTransposeGradientOp<T, Context>::RunOnDeviceWithOrderNHWC() {
           output_image_size,
           1,
           dYdata,
-          bias_multiplier_.template data<T>(),
+          bm_data,
           1,
-          Output(BIAS_OR_INPUT_GRAD)->template mutable_data<T>(),
+          input_grad_data,
           &context_);
     }
     dYdata += dY.size() / dY.dim32(0);
@@ -487,6 +504,7 @@ bool ConvTransposeGradientOp<T, Context>::RunOnDeviceWithOrderNHWC() {
   }
   if (OutputSize() == 3 || (no_bias_ && (OutputSize() == 2))) {
     // Compute gradients w.r.t. the input
+    // Since we have changed dYdata in the above loop, we will need to reset.
     dYdata = dY.template data<T>();
     auto* dX = Output(no_bias_ ? BIAS_OR_INPUT_GRAD : INPUT_GRAD);
     dX->ResizeLike(X);
@@ -521,7 +539,7 @@ bool ConvTransposeGradientOp<T, Context>::RunOnDeviceWithOrderNHWC() {
           kernel_dim,
           1,
           col_buffer_data,
-          filter.template data<T>(),
+          filter_data,
           0,
           dXdata,
           &context_);

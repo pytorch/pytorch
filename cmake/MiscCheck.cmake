@@ -84,6 +84,9 @@ if (${CMAKE_CXX_COMPILER_ID} STREQUAL "MSVC")
       /wd4800 # (3): Forcing non-boolean value to true or false.
       /wd4996 # (3): Use of a deprecated member
   )
+  # Exception handing for compiler warining C4530, see
+  # https://msdn.microsoft.com/en-us/library/2axwkyt4.aspx
+  add_definitions("/EHsc")
 endif()
 
 # ---[ If we are building on ios, or building with opengl support, we will

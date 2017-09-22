@@ -34,7 +34,7 @@ if NOT DEFINED CMAKE_GENERATOR (
     )
   ) else (
   	:: In default we use win64 VS 2017.
-  	set CMAKE_GENERATOR="Visual Studio 14 2015 Win64"
+  	set CMAKE_GENERATOR="Visual Studio 15 2017 Win64"
   )
 )
 

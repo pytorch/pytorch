@@ -4,6 +4,10 @@
 #include <thread>
 #include <condition_variable>
 
+#if defined(_MSC_VER)
+#include <intrin.h>
+#endif
+
 namespace caffe2 {
 
 // Uses code derived from gemmlowp,
@@ -26,11 +30,13 @@ struct AllocAligned {
   template <typename... Args>
   static T* alloc(Args&&... args) {
     void* p = nullptr;
-// FIXME: we should just be able to use std::align
-#if !defined(__ANDROID__)
-    posix_memalign((void**)&p, kGEMMLOWPCacheLineSize, sizeof(T));
-#else
+
+#if defined(__ANDROID__)
     p = memalign(kGEMMLOWPCacheLineSize, sizeof(T));
+#elif defined(_MSC_VER)
+    p = _aligned_malloc(sizeof(T), kGEMMLOWPCacheLineSize);
+#else
+    posix_memalign((void**)&p, kGEMMLOWPCacheLineSize, sizeof(T));
 #endif
 
     if (p) {
@@ -67,7 +73,11 @@ struct MakeAligned {
 
 const int kMaxBusyWaitNOPs = 32 * 1000 * 1000;
 
+#if defined(_MSC_VER)
+#define GEMMLOWP_NOP __nop();
+#else
 #define GEMMLOWP_NOP "nop\n"
+#endif
 
 #define GEMMLOWP_STRING_CONCAT_4(X) X X X X
 #define GEMMLOWP_NOP4 GEMMLOWP_STRING_CONCAT_4(GEMMLOWP_NOP)
@@ -75,7 +85,11 @@ const int kMaxBusyWaitNOPs = 32 * 1000 * 1000;
 #define GEMMLOWP_NOP64 GEMMLOWP_STRING_CONCAT_4(GEMMLOWP_NOP16)
 
 inline int Do256NOPs() {
+#if defined(_MSC_VER)
+  GEMMLOWP_NOP64;
+#else
   asm volatile(GEMMLOWP_NOP64);
+#endif
   return 64;
 }
 
