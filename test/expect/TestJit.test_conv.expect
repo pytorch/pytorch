@@ -1,6 +1,6 @@
-graph(%1 : Double(13, 16, 3, 3)
-      %2 : Double(20, 16, 50, 40)) {
+graph(%1 : Double(20, 16, 50, 40)
+      %2 : Double(13, 16, 3, 3)) {
   %4 : UNKNOWN_TYPE = Undefined(), uses = [%3.i2];
-  %5 : Double(20, 13, 48, 38), %6 : Handle = CppOp[ConvForward](%2, %1, %4), uses = [[%0.i0], []];
+  %5 : Double(20, 13, 48, 38), %6 : Handle = CppOp[ConvForward](%1, %2, %4), uses = [[%0.i0], []];
   return (%5);
 }
