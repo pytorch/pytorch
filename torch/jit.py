@@ -513,13 +513,13 @@ def _fork_rng(enabled=True):
     cpu_rng_state = torch.get_rng_state()
     gpu_rng_state = None
     if torch.cuda.is_available():
-        gpu_rng_state = torch.cuda.get_rng_state()
+        gpu_rng_state_all = torch.cuda.get_rng_state_all()
 
     yield
 
     torch.set_rng_state(cpu_rng_state)
     if gpu_rng_state is not None:
-        torch.cuda.set_rng_state(gpu_rng_state)
+        torch.cuda.set_rng_state_all(gpu_rng_state_all)
 
 
 # _flatten and _unflatten are inverses
