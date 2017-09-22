@@ -102,6 +102,7 @@ struct Attributes {
   bool hasAttributes() const {
     return values_.size() > 0;
   }
+  // The names are returned in order, since name actually is the index.
   std::vector<Symbol> attributeNames() const {
     std::vector<Symbol> names;
     for(auto & a : values_)
