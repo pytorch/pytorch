@@ -79,6 +79,8 @@ ENDIF()
 
 IF(GLOO_FOUND)
   ADD_DEFINITIONS(-DWITH_GLOO=1)
+  # This flag will be reserved until we officially enable Gloo IBVERBS support in pytorch
+  ADD_DEFINITIONS(-DGLOO_USE_GPUDIRECT=0)
 ENDIF()
 
 ADD_DEFINITIONS(-D_THD_CORE=1)
