@@ -75,7 +75,7 @@ int main(int argc, char** argv) {
         }
         caffe2::TensorCPU* tensor =
             workspace->GetBlob(input_names[i])->GetMutable<caffe2::TensorCPU>();
-        tensor->Reshape(input_dims);
+        tensor->Resize(input_dims);
         tensor->mutable_data<float>();
       }
     } else {
@@ -93,8 +93,7 @@ int main(int argc, char** argv) {
       caffe2::FLAGS_iter,
       caffe2::FLAGS_run_individual);
 
-  string output_prefix = 
-      caffe2::FLAGS_output_folder.size()
+  string output_prefix = caffe2::FLAGS_output_folder.size()
       ? caffe2::FLAGS_output_folder + "/"
       : "";
   if (caffe2::FLAGS_output.size()) {
