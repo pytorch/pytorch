@@ -1132,6 +1132,8 @@ random_(from=0, to=None, *, generator=None)
 Fills this tensor with numbers sampled from the discrete uniform distribution
 over [from, to - 1]. If not specified, the values are only bounded by this
 tensor's data type.
+
+This method is not available for CUDA tensors.  Use :meth:`~Tensor.uniform_` instead.
 """)
 
 add_docstr_all('reciprocal',
