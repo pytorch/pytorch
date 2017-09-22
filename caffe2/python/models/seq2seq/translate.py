@@ -388,6 +388,7 @@ class Seq2SeqModelCaffe2EnsembleDecoder(object):
             log_probs=output_log_probs_average,
             attentions=attention_weights_average,
             state_configs=state_configs,
+            data_dependencies=[],
             word_rewards=word_rewards,
         )
 
