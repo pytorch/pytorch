@@ -39,16 +39,36 @@ class LastNWindowCollector(ModelLayer):
             optimizer=model.NoOptim
         )
 
-        self.output_schema = schema.from_blob_list(
-            input_record, [self.get_next_blob_reference("output")])
+        self.mutex = self.create_param(
+            param_name='mutex',
+            shape=None,
+            initializer=('CreateMutex',),
+            optimizer=model.NoOptim,
+        )
+
+        self.num_visited_blob = self.create_param(
+            param_name='num_visited',
+            shape=[],
+            initializer=('ConstantFill', {
+                'value': 0,
+                'dtype': core.DataType.INT64,
+            }),
+            optimizer=model.NoOptim,
+        )
+
+        self.output_schema = schema.Struct(
+            (
+                'last_n',
+                schema.from_blob_list(input_record, [self.last_n])
+            ),
+            ('num_visited', schema.Scalar(blob=self.num_visited_blob)),
+            ('mutex', schema.Scalar(blob=self.mutex)),
+        )
 
     def add_ops(self, net):
         net.LastNWindowCollector(
-            [self.last_n, self.next_blob, self.input_record()],
-            [self.last_n, self.next_blob],
+            [self.last_n, self.next_blob, self.input_record(), self.mutex,
+             self.num_visited_blob],
+            [self.last_n, self.next_blob, self.num_visited_blob],
             num_to_collect=self.num_to_collect,
         )
-        # Copy to make sure DAG of record is not broken.
-        # Also, the output of this is likely going through a pipeline, which
-        # will move data and require us to copy anyway.
-        net.Copy(self.last_n, self.output_schema())
