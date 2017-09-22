@@ -19,6 +19,19 @@ class LastNWindowCollectorOp : public Operator<Context> {
   }
 
   bool RunOnDevice() override {
+    if (InputSize() > MUTEX) {
+      auto& mutex = OperatorBase::Input<std::unique_ptr<std::mutex>>(MUTEX);
+      std::lock_guard<std::mutex> guard(*mutex);
+      return collect();
+    } else {
+      return collect();
+    }
+  }
+
+ private:
+  const int32_t numToCollect_;
+
+  bool collect() {
     auto* output = Output(LAST_N);
     const auto& input = Input(DATA);
 
@@ -34,6 +47,14 @@ class LastNWindowCollectorOp : public Operator<Context> {
 
     auto dims = input.dims();
     auto num_entries = dims[0];
+
+    if (OutputSize() > NUM_VISITED) {
+      auto* num_visited_tensor = Output(NUM_VISITED);
+      CAFFE_ENFORCE_EQ(1, num_visited_tensor->size());
+      auto* num_visited = num_visited_tensor->template mutable_data<int64_t>();
+      CAFFE_ENFORCE_GE(*num_visited, 0);
+      *num_visited += num_entries;
+    }
 
     dims[0] = numToCollect_;
     output->Reserve(dims, &context_);
@@ -94,19 +115,16 @@ class LastNWindowCollectorOp : public Operator<Context> {
     return true;
   }
 
- private:
-  const int32_t numToCollect_;
-
-  INPUT_TAGS(LAST_N_IN, NEXT_IN, DATA);
-  OUTPUT_TAGS(LAST_N, NEXT);
+  INPUT_TAGS(LAST_N_IN, NEXT_IN, DATA, MUTEX, NUM_VISITED_IN);
+  OUTPUT_TAGS(LAST_N, NEXT, NUM_VISITED);
 };
 
 REGISTER_CPU_OPERATOR(LastNWindowCollector, LastNWindowCollectorOp<CPUContext>);
 
 OPERATOR_SCHEMA(LastNWindowCollector)
-    .NumInputs(3)
-    .NumOutputs(2)
-    .EnforceOneToOneInplace()
+    .NumInputs({3, 4, 5})
+    .NumOutputs(2, 3)
+    .EnforceInplace({{0, 0}, {1, 1}, {4, 2}})
     .SetDoc(R"DOC(
 Collect the last N rows from input data. The purpose is to keep track of data
 accross batches, so for example suppose the LastNWindowCollector is called
@@ -134,7 +152,7 @@ input rows and keeping the last N rows seen as input. So for instance:
 A possible output would be
 [[6,7],[7,8],[8,9],[9,10],[10,11],[11,12]]
 
-This is not thread safe.
+This is not thread safe unless a mutex is given.
 )DOC")
     .Arg(
         "num_to_collect",
@@ -149,8 +167,11 @@ This is not thread safe.
         "The cursor pointing to the next positiion that should be replaced. "
         "Should be initialized to 0.")
     .Input(2, "DATA", "tensor to collect from")
+    .Input(3, "MUTEX", "(optional) mutex to use to make this thread-safe")
+    .Input(4, "NUM_VISITED", "")
     .Output(0, "last-N buffer", "Data stored in sessions")
-    .Output(1, "next cursor", "Updated input cursor");
+    .Output(1, "next cursor", "Updated input cursor")
+    .Output(2, "NUM_VISITED", "number of records seen so far");
 SHOULD_NOT_DO_GRADIENT(LastNWindowCollector);
 }
 }

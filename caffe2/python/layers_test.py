@@ -387,9 +387,11 @@ class TestLayers(LayersTestCase):
         schema.FeedRecord(input_record, [X])
         last_n = self.model.LastNWindowCollector(input_record, num_to_collect)
         self.run_train_net_forward_only()
-        output_record = schema.FetchRecord(last_n)
+        output_record = schema.FetchRecord(last_n.last_n)
         start = max(0, 5 - num_to_collect)
         npt.assert_array_equal(X[start:], output_record())
+        num_visited = schema.FetchRecord(last_n.num_visited)
+        npt.assert_array_equal([5], num_visited())
 
     def testUniformSampling(self):
         input_record = self.new_record(schema.Scalar(np.int32))
