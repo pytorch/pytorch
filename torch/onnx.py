@@ -87,7 +87,7 @@ def _export(model, args, f, export_params=True, verbose=False, training=False):
     # can turn training=True (or None, to preserve whatever the original
     # training mode was.)
     with set_training(model, training):
-        trace, torch_out = torch.jit.record_trace(model, *args, num_derivatives=0)
+        trace, torch_out = torch.jit.trace(model)(*args)
 
     if orig_state_dict_keys != model.state_dict().keys():
         raise RuntimeError("state_dict changed after running the tracer; "

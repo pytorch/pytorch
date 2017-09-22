@@ -1,8 +1,8 @@
-graph(%1 : Double(2)
+graph(%1 : Double(2, 2)
       %2 : Double(2)
       %3 : Double(2)
       %4 : Double(2)
-      %5 : Double(2, 2)) {
-  %7 : Double(2, 2), %8 : Handle = CppOp[N5torch8autograd16BatchNormForwardE](%5, %1, %2), uses = [[%0.i0], []];
+      %5 : Double(2)) {
+  %7 : Double(2, 2), %8 : Handle = CppOp[N5torch8autograd16BatchNormForwardE](%1, %2, %3), uses = [[%0.i0], []];
   return (%7);
 }

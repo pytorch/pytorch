@@ -1,6 +1,6 @@
 node {
-  input: "2"
   input: "1"
+  input: "2"
   output: "4"
   op_type: "Conv"
   attribute {
