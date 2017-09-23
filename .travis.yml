@@ -45,3 +45,6 @@ install:
 
 script:
   - ./.travis/test.sh
+
+notifications:
+  webhooks: https://code.facebook.com/travis/webhook/
