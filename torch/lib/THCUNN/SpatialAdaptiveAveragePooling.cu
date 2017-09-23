@@ -21,9 +21,9 @@
  */
  template <typename T>
 __global__ void adaptiveaveragepool(T *input, T *output,
-                        int sizeD, int isizeH, int isizeW,
+                        int isizeH, int isizeW,
                         int osizeH, int osizeW,
-                        int istrideD, int istrideH, int istrideW)
+                        int64_t istrideD, int64_t istrideH, int64_t istrideW)
 {
   // iterators on output pixels
   int oh, ow;
@@ -81,7 +81,7 @@ __global__ void adaptiveaveragepool(T *input, T *output,
  template <typename T>
 __global__ void adaptiveaveragegradinput(
   T *gradInput, T *gradOutput,
-  int sizeD, int isizeH, int isizeW, int osizeH, int osizeW
+  int isizeH, int isizeW, int osizeH, int osizeW
 )
 {
   // iterators on input pixels
@@ -137,7 +137,7 @@ __global__ void adaptiveaveragegradinput(
  template <typename T>
 __global__ void atomicadaptiveaveragegradinput(
   T *gradInput, T *gradOutput,
-  int sizeD, int isizeH, int isizeW, int osizeH, int osizeW
+  int isizeH, int isizeW, int osizeH, int osizeW
 )
 {
   // iterators on output indices
