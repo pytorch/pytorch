@@ -43,7 +43,7 @@ void THNN_(SpatialAdaptiveAveragePooling_updateOutput)(
 
     // run averagepool kernel
     adaptiveaveragepool <<<blocks, threads, 0, THCState_getCurrentStream(state)>>> (input_data, output_data,
-                                   sizeD, isizeH, isizeW, osizeH, osizeW,
+                                   isizeH, isizeW, osizeH, osizeW,
                                    istrideD, istrideH, istrideW);
     THCudaCheck(cudaGetLastError());
 
@@ -71,7 +71,7 @@ void THNN_(SpatialAdaptiveAveragePooling_updateOutput)(
 
     // run averagepool kernel
     adaptiveaveragepool <<<blocks, threads, 0, THCState_getCurrentStream(state)>>> (input_data, output_data,
-                                   sizeD, isizeH, isizeW, osizeH, osizeW,
+                                   isizeH, isizeW, osizeH, osizeW,
                                    istrideD, istrideH, istrideW);
     THCudaCheck(cudaGetLastError());
     // clean
@@ -119,13 +119,13 @@ void THNN_(SpatialAdaptiveAveragePooling_updateGradInput)(
     {
       // run updateGradInput kernel, accumulate gradients atomically
       atomicadaptiveaveragegradinput <<<blocks, threads, 0, THCState_getCurrentStream(state)>>> (gradInput_data, gradOutput_data,
-                                          sizeD, isizeH, isizeW, osizeH, osizeW);
+                                          isizeH, isizeW, osizeH, osizeW);
     }
     else
     {
       // run updateGradInput kernel
       adaptiveaveragegradinput <<<blocks, threads, 0, THCState_getCurrentStream(state)>>> (gradInput_data, gradOutput_data,
-                                          sizeD, isizeH, isizeW, osizeH, osizeW);
+                                          isizeH, isizeW, osizeH, osizeW);
     }
     THCudaCheck(cudaGetLastError());
   } else {
@@ -154,13 +154,13 @@ void THNN_(SpatialAdaptiveAveragePooling_updateGradInput)(
     {
       // run updateGradInput kernel, accumulate gradients atomically
       atomicadaptiveaveragegradinput <<<blocks, threads, 0, THCState_getCurrentStream(state)>>> (gradInput_data, gradOutput_data,
-                                          sizeD, isizeH, isizeW, osizeH, osizeW);
+                                          isizeH, isizeW, osizeH, osizeW);
     }
     else
     {
       // run updateGradInput kernel, accumulate gradients atomically
       adaptiveaveragegradinput <<<blocks, threads, 0, THCState_getCurrentStream(state)>>> (gradInput_data, gradOutput_data,
-                                          sizeD, isizeH, isizeW, osizeH, osizeW);
+                                          isizeH, isizeW, osizeH, osizeW);
     }
     THCudaCheck(cudaGetLastError());
   }
