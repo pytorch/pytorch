@@ -722,6 +722,45 @@ class AdaptiveAvgPool2dBackward(Function):
         ggO = AdaptiveAvgPool2d.apply(ggI, ctx.output_size)
         return gI, ggO, None, None
 
+
+class AdaptiveAvgPool3d(Function):
+
+    @staticmethod
+    def forward(ctx, input, output_size):
+        ctx.output_size = _triple(output_size)
+        backend = type2backend[type(input)]
+        output = input.new()
+        ctx.save_for_backward(input)
+        backend.VolumetricAdaptiveAveragePooling_updateOutput(
+            backend.library_state,
+            input, output,
+            ctx.output_size[0], ctx.output_size[2], ctx.output_size[1])
+        return output
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        input, = ctx.saved_variables
+        return AdaptiveAvgPool3dBackward.apply(input, grad_output), None
+
+
+class AdaptiveAvgPool3dBackward(Function):
+
+    @staticmethod
+    def forward(ctx, input, grad_output):
+        backend = type2backend[type(grad_output)]
+        ctx.output_size = (grad_output.size(-3), grad_output.size(-2), grad_output.size(-1))
+        grad_input = grad_output.new()
+        backend.VolumetricAdaptiveAveragePooling_updateGradInput(
+            backend.library_state,
+            input, grad_output, grad_input)
+        return grad_input
+
+    @staticmethod
+    def backward(ctx, ggI):
+        gI = Variable(ggI.data.new(ggI.size()).zero_())
+        ggO = AdaptiveAvgPool3d.apply(ggI, ctx.output_size)
+        return gI, ggO
+
 _all_functions.append(AvgPool2d)
 _all_functions.append(AvgPool2dBackward)
 _all_functions.append(AvgPool3d)
@@ -744,3 +783,5 @@ _all_functions.append(AdaptiveAvgPool1d)
 _all_functions.append(AdaptiveAvgPool1dBackward)
 _all_functions.append(AdaptiveAvgPool2d)
 _all_functions.append(AdaptiveAvgPool2dBackward)
+_all_functions.append(AdaptiveAvgPool3d)
+_all_functions.append(AdaptiveAvgPool3dBackward)

@@ -437,6 +437,19 @@ def adaptive_avg_pool2d(input, output_size):
     return _functions.thnn.AdaptiveAvgPool2d.apply(input, output_size)
 
 
+def adaptive_avg_pool3d(input, output_size):
+    r"""Applies a 3D adaptive average pooling over an input signal composed of
+    several input planes.
+
+    See :class:`~torch.nn.AdaptiveAvgPool3d` for details and output shape.
+
+    Args:
+        output_size: the target output size (single integer or
+            triple-integer tuple)
+    """
+    return _functions.thnn.AdaptiveAvgPool3d.apply(input, output_size)
+
+
 # Activation functions
 
 def dropout(input, p=0.5, training=False, inplace=False):

@@ -4140,6 +4140,18 @@ new_module_tests = [
         desc='tuple',
     ),
     dict(
+        module_name='AdaptiveAvgPool3d',
+        constructor_args=(3,),
+        input=torch.rand(2, 3, 5, 2, 7),
+        desc='single',
+    ),
+    dict(
+        module_name='AdaptiveAvgPool3d',
+        constructor_args=((3, 4, 5),),
+        input=torch.rand(2, 3, 5, 3, 7),
+        desc='tuple',
+    ),
+    dict(
         module_name='SELU',
         input_size=(3, 2, 5),
         check_inplace=True

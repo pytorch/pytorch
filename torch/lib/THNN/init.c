@@ -269,6 +269,9 @@
 #include "generic/VolumetricDilatedConvolution.c"
 #include "THGenerateFloatTypes.h"
 
+#include "generic/VolumetricAdaptiveAveragePooling.c"
+#include "THGenerateFloatTypes.h"
+
 #include "generic/VolumetricMaxPooling.c"
 #include "THGenerateFloatTypes.h"
 
