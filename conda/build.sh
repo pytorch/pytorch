@@ -14,11 +14,12 @@ PYTHON_ARGS="$(python ./scripts/get_python_cmake_flags.py)"
 
 mkdir -p build
 cd build
-cmake -DCMAKE_INSTALL_PREFIX="$PREFIX" -DCMAKE_PREFIX_PATH="$PREFIX" $CUDA_ARGS $PYTHON_ARGS ..
+cmake -DCMAKE_INSTALL_PREFIX="$PREFIX" -DCMAKE_PREFIX_PATH="$PREFIX" $CONDA_CMAKE_ARGS $PYTHON_ARGS ..
 make -j20
 
 make install/fast
 
 # Python libraries got installed to wrong place, so move them
 # to the right place. See https://github.com/caffe2/caffe2/issues/1015
-mv $PREFIX/caffe2 $PREFIX/lib/python2.7/site-packages
+echo "Installing Python to $SP_DIR"
+mv $PREFIX/caffe2 $SP_DIR

@@ -10,6 +10,8 @@ source:
 build:
   number: 1
   skip: True  # [win]
+  script_env:
+    - CONDA_CMAKE_ARGS
 
 requirements:
   build:
@@ -18,17 +20,24 @@ requirements:
     - numpy
     - six
     - eigen
-    - python <3
-    - protobuf
+    - python
+    - protobuf ==3.4.0
     - cmake
+    - leveldb
+    - lmdb
+    - snappy
   run:
     - future
     - glog
     - numpy
     - six
     - eigen
-    - python <3
-    - protobuf
+    - python
+    - protobuf ==3.4.0
+    - leveldb
+    - lmdb
+    - snappy
+    - future
 
 about:
   home: https://caffe2.ai/

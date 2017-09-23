@@ -20,12 +20,6 @@ import os
 import sys
 import platform
 
-version = platform.python_version()
-if version[:3] != '2.7':
-    print('ERROR: Python {version} is not officially supported yet.'
-          .format(version=version), file=sys.stderr)
-    exit(1)
-
 # Flags to print to stdout
 flags = ''
 inc = sysconfig.get_python_inc()
