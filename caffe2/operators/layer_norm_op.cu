@@ -252,8 +252,8 @@ bool LayerNormGradientOp<CUDAContext>::DoRunWithType<float>() {
   auto* ginput = Output(0);
 
   const auto canonical_axis = norm_inputs.canonical_axis_index(axis_);
-  const int left = norm_inputs.size_to_dim(canonical_axis);
-  const int right = norm_inputs.size_from_dim(canonical_axis);
+  const unsigned long left = norm_inputs.size_to_dim(canonical_axis);
+  const unsigned long right = norm_inputs.size_from_dim(canonical_axis);
 
   ginput->ResizeLike(norm_inputs);
   std::vector<TIndex> stats_dims(
