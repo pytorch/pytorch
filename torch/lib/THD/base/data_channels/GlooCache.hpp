@@ -308,17 +308,28 @@ struct algorithm_spec<CollectiveType::ALL_REDUCE, T> {
         throw std::runtime_error("Gloo backend only supports sum op for CUDA all reduce");
       }
       auto stream = THCState_getCurrentStream(THDGetCudaState());
-      algo = std::make_shared<::gloo::CudaAllreduceHalvingDoublingPipelined<T,
-#if defined(GLOO_USE_GPUDIRECT) && GLOO_USE_GPUDIRECT
-                              ::gloo::CudaDeviceWorkspace<T>>>(
-#else
-                              ::gloo::CudaHostWorkspace<T>>>(
+
+#if defined(GLOO_USE_IBVERBS) && GLOO_USE_IBVERBS
+      // Only enable GPU direct if the device supports it
+      if (context->getDevice()->hasGPUDirect()) {
+        algo = std::make_shared<::gloo::CudaAllreduceHalvingDoublingPipelined<T,
+                                ::gloo::CudaDeviceWorkspace<T>>>(
+          context,
+          std::initializer_list<T*>{reinterpret_cast<T*>(input_buffer.get())},
+          count,
+          std::vector<cudaStream_t>{stream});
+      } else
 #endif
-        context,
-        std::initializer_list<T*>{reinterpret_cast<T*>(input_buffer.get())},
-        count,
-        std::vector<cudaStream_t>{stream});
+      {
+        algo = std::make_shared<::gloo::CudaAllreduceHalvingDoublingPipelined<T,
+                                ::gloo::CudaHostWorkspace<T>>>(
+          context,
+          std::initializer_list<T*>{reinterpret_cast<T*>(input_buffer.get())},
+          count,
+          std::vector<cudaStream_t>{stream});
+      }
 #endif
+
     } else {
       throw std::runtime_error("unsupported tensor device in Gloo allReduce");
     }
