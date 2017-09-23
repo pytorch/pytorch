@@ -128,7 +128,7 @@ void CaffeCudaSetDevice(const int id);
 int GetGPUIDForPointer(const void* ptr);
 
 /**
- * Gets the device property for the given device.
+ * Gets the device property for the given device. This function is thread safe.
  */
 const cudaDeviceProp& GetDeviceProperty(const int device);
 

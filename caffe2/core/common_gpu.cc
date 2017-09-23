@@ -152,8 +152,22 @@ int GetGPUIDForPointer(const void* ptr) {
   return attr.device;
 }
 
+struct CudaDevicePropWrapper {
+  CudaDevicePropWrapper() : props(NumCudaDevices()) {
+    for (int i = 0; i < NumCudaDevices(); ++i) {
+      CUDA_ENFORCE(cudaGetDeviceProperties(&props[i], i));
+    }
+  }
+
+  vector<cudaDeviceProp> props;
+};
+
 const cudaDeviceProp& GetDeviceProperty(const int deviceid) {
-  static vector<cudaDeviceProp> props;
+  // According to C++11 standard section 6.7, static local variable init is
+  // thread safe. See
+  //   https://stackoverflow.com/questions/8102125/is-local-static-variable-initialization-thread-safe-in-c11
+  // for details.
+  static CudaDevicePropWrapper props;
   CAFFE_ENFORCE_LT(
       deviceid,
       NumCudaDevices(),
@@ -162,13 +176,7 @@ const cudaDeviceProp& GetDeviceProperty(const int deviceid) {
       deviceid,
       " vs ",
       NumCudaDevices());
-  if (props.size() == 0) {
-    props.resize(NumCudaDevices());
-    for (int i = 0; i < NumCudaDevices(); ++i) {
-      CUDA_ENFORCE(cudaGetDeviceProperties(&props[i], i));
-    }
-  }
-  return props[deviceid];
+  return props.props[deviceid];
 }
 
 void DeviceQuery(const int device) {
