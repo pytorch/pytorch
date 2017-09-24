@@ -42,8 +42,6 @@ enum class Backend {
 };
 
 
-// The constexpr specifier declares that it is possible to evaluate the value
-// of the function or variable at compile time.
 constexpr Backend kCPU = Backend::CPU;
 constexpr Backend kCUDA = Backend::CUDA;
 constexpr Backend kSparseCPU = Backend::SparseCPU;
