@@ -7,5 +7,5 @@ BUILD_ROOT=$1
 # $BUILD_ROOT/src/ATen/test/scalar_test
 # $BUILD_ROOT/src/ATen/test/broadcast_test
 # $BUILD_ROOT/src/ATen/test/wrapdim_test
-$BUILD_ROOT/src/ATen/test/dlconvertor
-valgrind --suppressions=`dirname $0`/valgrind.sup --error-exitcode=1 $BUILD_ROOT/src/ATen/test/basic -n
+$BUILD_ROOT/src/ATen/test/dlconvertor_test
+# valgrind --suppressions=`dirname $0`/valgrind.sup --error-exitcode=1 $BUILD_ROOT/src/ATen/test/basic -n
