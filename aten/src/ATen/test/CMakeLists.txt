@@ -5,10 +5,13 @@ ADD_EXECUTABLE(basic basic.cpp)
 TARGET_LINK_LIBRARIES(basic ATen)
 
 add_executable(atest atest.cpp)
-target_link_libraries(atest ATen)
+TARGET_LINK_LIBRARIES(atest ATen)
 
 add_executable(broadcast_test broadcast_test.cpp)
-target_link_libraries(broadcast_test ATen)
+TARGET_LINK_LIBRARIES(broadcast_test ATen)
 
 add_executable(wrapdim_test wrapdim_test.cpp)
-target_link_libraries(wrapdim_test ATen)
+TARGET_LINK_LIBRARIES(wrapdim_test ATen)
+
+add_executable(dlconvertor dlconvertor.cpp)
+TARGET_LINK_LIBRARIES(dlconvertor ATen)
