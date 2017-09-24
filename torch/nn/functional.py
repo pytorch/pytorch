@@ -946,7 +946,7 @@ def upsample(input, size=None, scale_factor=None, mode='nearest'):
     The input dimensions are interpreted in the form:
     `mini-batch x channels x [depth] x [height] x width`
 
-    The modes available for upsampling are: `nearest`, `linear` (3D-only), 
+    The modes available for upsampling are: `nearest`, `linear` (3D-only),
     `bilinear` (4D-only), `trilinear` (5D-only)
 
     Args:

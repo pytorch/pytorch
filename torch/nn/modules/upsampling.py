@@ -12,7 +12,7 @@ class Upsample(Module):
     The input data is assumed to be of the form `minibatch x channels x [depth] x [height] x width`.
     Hence, for spatial inputs, we expect a 4D Tensor and for volumetric inputs, we expect a 5D Tensor.
 
-    The algorithms available for upsampling are nearest neighbor and linear, bilinear and trilinear 
+    The algorithms available for upsampling are nearest neighbor and linear, bilinear and trilinear
     for 3D, 4D and 5D input Tensor, respectively.
 
     One can either give a :attr:`scale_factor` or the target output :attr:`size` to
@@ -25,7 +25,8 @@ class Upsample(Module):
 
     Shape:
         - Input: :math:`(N, C, W_{in})`, :math:`(N, C, H_{in}, W_{in})` or :math:`(N, C, D_{in}, H_{in}, W_{in})`
-        - Output: :math:`(N, C, W_{out})`, :math:`(N, C, H_{out}, W_{out})` or :math:`(N, C, D_{out}, H_{out}, W_{out})` where
+        - Output: :math:`(N, C, W_{out})`, :math:`(N, C, H_{out}, W_{out})`
+          or :math:`(N, C, D_{out}, H_{out}, W_{out})` where
           :math:`D_{out} = floor(D_{in} * scale\_factor)` or `size[-3]`
           :math:`H_{out} = floor(H_{in} * scale\_factor)` or `size[-2]`
           :math:`W_{out} = floor(W_{in}  * scale\_factor)` or `size[-1]`
