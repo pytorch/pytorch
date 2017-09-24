@@ -544,7 +544,7 @@ OPERATOR_SCHEMA(RecurrentParamSet)
                   )DOC")
     .Arg("input_type", "'recurrent' or 'input'")
     .Arg("layer", "layer index (starting from 0)")
-    .Input(0, "input", R"DOC(Input blob. Needed for infering the shapes.
+    .Input(0, "input", R"DOC(Input blob. Needed for inferring the shapes.
                         A dummy tensor matching the input shape is ok.)DOC")
     .Input(1, "all_params", "Blob holding all the parameters")
     .Input(2, "param", "Values for the specified parameter")
@@ -566,7 +566,7 @@ OPERATOR_SCHEMA(RecurrentParamGet)
                   )DOC")
     .Arg("input_type", "'recurrent' or 'input'")
     .Arg("layer", "layer index (starting from 0)")
-    .Input(0, "input", R"DOC(Input blob. Needed for infering the shapes.
+    .Input(0, "input", R"DOC(Input blob. Needed for inferring the shapes.
                         A dummy tensor matching the input shape is ok.)DOC")
     .Input(1, "all_params", "Blob holding all the parameters")
     .Output(0, "param", "Blob holding the requested values");

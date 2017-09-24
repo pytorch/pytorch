@@ -61,7 +61,7 @@ OPERATOR_SCHEMA(BatchBoxCox)
     .AllowInplace({{0, 0}})
     .SetDoc(R"DOC(
 Input `data` is a N * D matrix. Apply box-cox transform for each column.
-`lambda1` and `lambda2` is of size D that defines the hyper-paramteres for
+`lambda1` and `lambda2` is of size D that defines the hyper-parameters for
 the transform of each column `x` of the input `data`:
 
     ln(x + lambda2), if lambda1 == 0

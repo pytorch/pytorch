@@ -19,7 +19,7 @@ OPERATOR_SCHEMA(PackSegments)
     .Output(
         0,
         "packed_tensor",
-        "N + 1 dim Tesor"
+        "N + 1 dim Tensor"
         "where dim(1) is the max length"
         ", dim(0) is the batch size.")
     .Arg(
@@ -34,7 +34,7 @@ OPERATOR_SCHEMA(UnpackSegments)
         "lengths",
         "1-d int/long tensor contains the length in each of the input.")
     .Input(1, "tensor", "N+1 dim Tensor.")
-    .Output(0, "packed_tensor", "N dim Tesor");
+    .Output(0, "packed_tensor", "N dim Tensor");
 
 class GetPackSegmentsGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;

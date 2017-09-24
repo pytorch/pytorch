@@ -178,7 +178,7 @@ OPERATOR_SCHEMA(LayerNorm)
     .SetDoc(R"DOC(
 Computes layer normalization as described in https://arxiv.org/pdf/1607.06450.pdf.
 Given an input vector x \in [a_0, a_1, ...,a_{k-1}, a_k, ..., a_{n-1}],
-this op treats dimensions a_k thorugh a_{n-1} as feature vectors. For each
+this op treats dimensions a_k through a_{n-1} as feature vectors. For each
 feature vector, the op contains the mean and standard deviation. Then,
 it returns the normalized values (with restdev_mapct to the feature vector).
 

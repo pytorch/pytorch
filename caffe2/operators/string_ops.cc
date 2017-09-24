@@ -169,7 +169,7 @@ OPERATOR_SCHEMA(StringJoin)
     .NumOutputs(1)
     .SetDoc(R"DOC(
 Takes a 1-D or a 2-D tensor as input and joins elements in each row with the
-provided delimieter. Output is a 1-D tensor of size equal to the first dimension
+provided delimiter. Output is a 1-D tensor of size equal to the first dimension
 of the input. Each element in the output tensor is a string of concatenated
 elements corresponding to each row in the input tensor. For 1-D input, each
 element is treated as a row.

@@ -44,7 +44,7 @@ OPERATOR_SCHEMA(UnpackRNNSequence)
     .SetDoc(R"DOC(
   This is the reverse operator for PackRNNSequence. It maps the packed values
   back to sequence values based on the length blob. Each number from length blob
-  represents the corresponding values that has been goruped. The dimension
+  represents the corresponding values that has been grouped. The dimension
   for each pack is the same as the maximum number from the length blob (padding
   with zero was implemented for smaller length value). The overall output
   dimension is: M * D, where M is the sum of lengths, and D is the dimension of

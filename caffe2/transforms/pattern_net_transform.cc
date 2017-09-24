@@ -51,7 +51,7 @@ bool compare_ops(
     bool arg_match) {
   // must specify a type for pattern operators
   CAFFE_ENFORCE(
-      p_op.has_type(), "Types must be specificed for all pattern operators.");
+      p_op.has_type(), "Types must be specified for all pattern operators.");
   if (!MatchStrings(p_op.type(), g_op.type())) {
     return false;
   }
