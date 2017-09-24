@@ -700,7 +700,7 @@ data into the output blob Y for further processing.
 const char* kMaxPoolDoc = R"DOC(
 consumes an input blob X and applies max pooling across the
 the blob according to kernel sizes, stride sizes, and pad lengths defined by the
-ConvPoolOpBase operator. Max pooling consisting of taking the maximumvalue of a
+ConvPoolOpBase operator. Max pooling consisting of taking the maximum value of a
 subset of the input tensor according to the kernel size and downsampling the
 data into the output blob Y for further processing.
 )DOC";

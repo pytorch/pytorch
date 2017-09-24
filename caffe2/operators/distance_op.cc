@@ -485,7 +485,7 @@ OPERATOR_SCHEMA(DotProductWithPadding)
     .Output(0, "Z", "1D output tensor")
     .IdenticalTypeAndShapeOfInputDim(0, 0)
     .Arg("pad_value", "the padding value for tensors with smaller dimension")
-    .Arg("replicate", "wehther to replicate the smaller tensor or not");
+    .Arg("replicate", "whether to replicate the smaller tensor or not");
 
 OPERATOR_SCHEMA(DotProductWithPaddingGradient).NumInputs(3).NumOutputs(2);
 

@@ -8,7 +8,7 @@ OPERATOR_SCHEMA(SquareRootDivide)
     .NumOutputs(1)
     .AllowInplace({{0, 0}})
     .SetDoc(R"DOC(
-Given DATA tensor with first dimention N and SCALE vector of the same size N
+Given DATA tensor with first dimension N and SCALE vector of the same size N
 produces an output tensor with same dimensions as DATA. Which consists of DATA
 slices. i-th slice is divided by sqrt(SCALE[i]) elementwise. If SCALE[i] == 0
 output slice is identical to the input one (no scaling)

@@ -197,7 +197,7 @@ OPERATOR_SCHEMA(StatRegistryCreate)
     .SetDoc(R"DOC(
 Create a StatRegistry object that will contain a map of performance counters
 keyed by name. A StatRegistry is used to gather and retrieve performance
-counts throuhgout the caffe2 codebase.
+counts throughout the caffe2 codebase.
 )DOC")
     .Output(0, "handle", "A Blob pointing to the newly created StatRegistry.");
 

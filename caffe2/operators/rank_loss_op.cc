@@ -180,7 +180,7 @@ Operator computes the pair wise loss between all pairs within a batch
         2,
         "lengths",
         "Optional input blob that contains the lengths"
-        "of multiple sessions. The sumamation of this blob must be equal"
+        "of multiple sessions. The summation of this blob must be equal"
         "to the size of blob X. If lengths blob is provided, the output"
         "blob has the same size as lengths blob, and the cross entropy"
         "is computed within each session.")

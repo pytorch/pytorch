@@ -1079,7 +1079,7 @@ The values of the fields will be:
   }
 
 In general, every field name in the format "{prefix}:lengths" defines a domain
-"{prefix}", and every subsequent field in the format "{prefx}:{field}" will
+"{prefix}", and every subsequent field in the format "{prefix}:{field}" will
 be in that domain, and the length of the domain is provided for each entry of
 the parent domain. In the example, "b:lengths" defines a domain of length 4, so
 every field under domain "b" will have 4 entries.
@@ -1197,7 +1197,7 @@ OPERATOR_SCHEMA(CheckDatasetConsistency)
     .NumInputs(1, INT_MAX)
     .NumOutputs(0)
     .SetDoc(R"DOC(
-Checks that the given data fields represents a consistent dataset unther
+Checks that the given data fields represents a consistent dataset under
 the schema specified by the `fields` argument. Operator fails if the fields
 are not consistent. If data is consistent, each field's data can be safely
 appended to an existing dataset, keeping it consistent.
@@ -1259,7 +1259,7 @@ OPERATOR_SCHEMA(CollectTensor)
     .SetDoc(R"DOC(
 Collect tensor into tensor vector by reservoir sampling,
 argument num_to_collect indicates the max number of tensors that will be
-collcted. The first half of the inputs are tensor vectors, which are also the
+collected. The first half of the inputs are tensor vectors, which are also the
 outputs. The second half of the inputs are the tensors to be collected into each
 vector (in the same order). The input tensors are collected in all-or-none
 manner. If they are collected, they will be placed at the same index in the
@@ -1311,7 +1311,7 @@ returned tensors is equal to the number of fields in the `fields` argument.
 
 The first input is the packed tensor to be unpacked. Optionally, you can provide
 prototype tensors to give the expected shapes of the output tensors. This is
-helpful when you expected to unpack empty tensor, e.g., output of a sapmling
+helpful when you expected to unpack empty tensor, e.g., output of a sampling
 process.
 )DOC")
     .Arg(

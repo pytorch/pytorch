@@ -9,7 +9,7 @@ OPERATOR_SCHEMA(LearningRate)
     .SetDoc(R"DOC(
 Learning rate is a decreasing function of time. With low learning rates the
 improvements will be linear. With high learning rates they will start to look
-more exponential. Learning rate is controled by the following arguments:
+more exponential. Learning rate is controlled by the following arguments:
 
 #### Required
 

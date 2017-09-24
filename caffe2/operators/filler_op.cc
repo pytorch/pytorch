@@ -248,7 +248,7 @@ OPERATOR_SCHEMA(LengthsRangeFill)
     .NumInputs(1)
     .NumOutputs(1)
     .SetDoc(R"DOC(
-Convert a length vector to a range sequene. For example, input=[4,3,1], the
+Convert a length vector to a range sequence. For example, input=[4,3,1], the
 output would be [0,1,2,3,0,1,2,0].
 )DOC")
     .Input(0, "lengths", "1D tensor of int32 or int64 segment lengths.")

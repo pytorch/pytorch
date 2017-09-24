@@ -11,8 +11,8 @@ OPERATOR_SCHEMA(IndexHash)
     .SetDoc(R"DOC(
 This operator translates a list of indices into a list of hashed indices.
 A seed can be fed as an argument to change the behavior of the hash function.
-If a modulo is speicified, all the hashed indices will be modulo the
-speicified number. All input and output indices are enforced to be positive.
+If a modulo is specified, all the hashed indices will be modulo the
+specified number. All input and output indices are enforced to be positive.
 )DOC")
     .Input(0, "Indices", "Input feature indices.")
     .Output(0, "HashedIndices", "Hashed feature indices.")

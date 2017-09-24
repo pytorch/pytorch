@@ -148,7 +148,7 @@ unchanged.
         "output",
         "A tensor of rank 2 with the contents of the input tensor, "
         "with first dimension equal first dimension of input, and remaining "
-        "input dimensions flatenned into the inner dimension of the output.");
+        "input dimensions flattened into the inner dimension of the output.");
 
 OPERATOR_SCHEMA(FlattenToVec)
     .NumInputs(1)
@@ -526,7 +526,7 @@ Example:
         "RANGES",
         "Tensor of int32/int64 ranges, of dims (N, M, 2). "
         "Where N is number of examples and M is a size of each example. "
-        "Last dimention represents a range in the format (start, lengths)")
+        "Last dimension represents a range in the format (start, lengths)")
     .Output(0, "OUTPUT", "1-D tensor of size sum of range lengths")
     .Output(
         1,

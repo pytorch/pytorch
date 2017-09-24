@@ -40,7 +40,7 @@ Computes the RMSProp update
 (http://www.cs.toronto.edu/~tijmen/csc321/slides/lecture_slides_lec6.pdf).
 Concretely, given inputs (grad, mean_squares, mom, lr), computes:
 
-    mean_squares_o = mean_squares + (1 - decay) * (squaare(grad) - mean_squares)
+    mean_squares_o = mean_squares + (1 - decay) * (square(grad) - mean_squares)
     mom_o = momentum * mom + lr * grad / sqrt(epsilon + mean_squares_o)
     grad_o = mom_o
 

@@ -160,11 +160,11 @@ This is not thread safe unless a mutex is given.
     .Input(
         0,
         "last-N buffer",
-        "The buffer for last-N record. Should be intialized to empty tensor")
+        "The buffer for last-N record. Should be initialized to empty tensor")
     .Input(
         1,
         "next cursor",
-        "The cursor pointing to the next positiion that should be replaced. "
+        "The cursor pointing to the next position that should be replaced. "
         "Should be initialized to 0.")
     .Input(2, "DATA", "tensor to collect from")
     .Input(3, "MUTEX", "(optional) mutex to use to make this thread-safe")
