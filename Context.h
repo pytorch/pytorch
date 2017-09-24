@@ -13,7 +13,6 @@ namespace at {
 
 class ATen_CLASS  Context {
 public:
-
   Context();
   Type & getType(Backend p, ScalarType s) {
     initCUDAIfNeeded(p);
@@ -22,7 +21,6 @@ public:
       runtime_error("%s%sType is not enabled.",toString(p),toString(s));
     return *type;
   }
-
   Generator & defaultGenerator(Backend p) {
     initCUDAIfNeeded(p);
     auto & generator = generator_registry[static_cast<int>(p)];
@@ -30,9 +28,7 @@ public:
       runtime_error("%s backend type not enabled.",toString(p));
     return *generator;
   }
-
   bool hasCUDA() const;
-
   // defined in header so that getType has ability to inline
   // call_once check. getType is called fairly frequently
   THCState* lazyInitCUDA() {
@@ -41,30 +37,21 @@ public:
     });
     return thc_state;
   }
-
   ~Context();
-
   std::unique_ptr<Generator>
     generator_registry[static_cast<int>(Backend::NumOptions)];
-
   std::unique_ptr<Type> type_registry
     [static_cast<int>(Backend::NumOptions)]
     [static_cast<int>(ScalarType::NumOptions)];
-
   THCState * thc_state;
-
 private:
-
   void initCUDAIfNeeded(Backend p) {
     if(p == Backend::CUDA)
       lazyInitCUDA();
   }
-
   void doInitCUDA();
-
   std::once_flag thc_init;
 };
-
 
 ATen_CLASS Context & globalContext();
 
