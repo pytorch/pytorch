@@ -231,7 +231,7 @@ class BeamSearchForwardOnly(object):
                 state_config.state_link.blob,
                 [
                     state_config.state_link.blob,
-                    'state_old_shape_before_choosing_per_hypo',
+                    state_config.state_link.blob + '_old_shape',
                 ],
                 shape=[self.beam_size, -1],
             )
