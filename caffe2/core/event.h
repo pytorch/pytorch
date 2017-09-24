@@ -63,13 +63,13 @@ class Event {
   static EventFinishFunction event_finisher_[MaxDeviceTypes];
 
   template <int d>
-  friend class EventCreateFunctionRegisterer;
+  friend struct EventCreateFunctionRegisterer;
   template <int d>
-  friend class EventRecordFunctionRegisterer;
+  friend struct EventRecordFunctionRegisterer;
   template <int w, int d>
-  friend class EventWaitFunctionRegisterer;
+  friend struct EventWaitFunctionRegisterer;
   template <int d>
-  friend class EventFinishFunctionRegisterer;
+  friend struct EventFinishFunctionRegisterer;
 };
 
 template <int d>
