@@ -1,5 +1,5 @@
 #include "ATen/ATen.h"
-#include "ATen/dlconvertor.h"
+#include "ATen/DLConvertor.h"
 
 #include <iostream>
 #include <string.h>
@@ -11,20 +11,21 @@ using namespace at;
 static void test() {
   {
     std::cout << "dlconvertor: convert ATen to DLTensor" << std::endl;
-    Tensor a = CPU(at::kFloat).zeros({3,4});
+    Tensor a = CPU(at::kFloat).rand({3,4});
     std::cout << a.numel() << std::endl;
-    ASSERT(a.numel() == 12);
-    dlpack::DLConvertor convertor(a);
-    convertor.convertToDLTensor(a);
+    DLTensor* dlTensor(new DLTensor);
+    toDLPack(a, dlTensor);
+    std::cout << "dlconvertor: convert DLTensor to ATen" << std::endl;
+    Tensor b = fromDLPack(dlTensor);
+    ASSERT(a.equal(b));
+    std::cout << "conversion was fine" << std::endl;
   }
 
 }
 
 int main(int argc, char ** argv)
 {
-  std::cout << "=========================== CPU ===========================" << std::endl;
-  // kFloat is the ScalarType defined in doc/Type.h line 75
-  // CPU is inline function defined in ATen/Context.h like 79
+  std::cout << "======================= CPU =====================" << std::endl;
   test();
   return 0;
 }
