@@ -167,7 +167,7 @@ struct ExecutionStepWrapper {
     CompiledGuard() {}
     std::unique_ptr<CompiledExecutionStep> compiled_;
     CompiledExecutionStep* compiledRef_;
-    friend class ExecutionStepWrapper;
+    friend struct ExecutionStepWrapper;
   };
 
   const ExecutionStep& step() {
