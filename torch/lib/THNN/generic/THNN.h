@@ -720,6 +720,32 @@ TH_API void THNN_(TemporalRowConvolution_accGradParameters)(
           bool featFirst,
           accreal scale);
 
+TH_API void THNN_(TemporalUpSamplingNearest_updateOutput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *output,
+          int scale_factor);
+TH_API void THNN_(TemporalUpSamplingNearest_updateGradInput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *gradOutput,
+          THTensor *gradInput,
+          int scale_factor);
+
+TH_API void THNN_(TemporalUpSamplingLinear_updateOutput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *output,
+          int outputWidth);
+TH_API void THNN_(TemporalUpSamplingLinear_updateGradInput)(
+          THNNState *state,
+          THTensor *gradOutput,
+          THTensor *gradInput,
+          int nbatch,
+          int nchannels,
+          int inputWidth,
+          int outputWidth);
+
 TH_API void THNN_(BatchNormalization_updateOutput)(
           THNNState *state,
           THTensor *input,
@@ -1203,7 +1229,7 @@ TH_API void THNN_(SpatialUpSamplingBilinear_updateOutput)(
           THNNState *state,
           THTensor *input,
           THTensor *output,
-	  int outputHeight,
+          int outputHeight,
           int outputWidth);
 TH_API void THNN_(SpatialUpSamplingBilinear_updateGradInput)(
           THNNState *state,

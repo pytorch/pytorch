@@ -940,38 +940,50 @@ def upsample(input, size=None, scale_factor=None, mode='nearest'):
 
     The algorithm used for upsampling is determined by :attr:`mode`.
 
-    Currently spatial and volumetric upsampling are supported, i.e.
-    expected inputs are 4-D or 5-D in shape.
+    Currently temporal, spatial and volumetric upsampling are supported, i.e.
+    expected inputs are 3-D, 4-D or 5-D in shape.
 
     The input dimensions are interpreted in the form:
-    `mini-batch x channels x [depth] x height x width`
+    `mini-batch x channels x [depth] x [height] x width`
 
-    The modes available for upsampling are: `nearest`, `bilinear` (4D-only),
-    `trilinear` (5D-only)
+    The modes available for upsampling are: `nearest`, `linear` (3D-only),
+    `bilinear` (4D-only), `trilinear` (5D-only)
 
     Args:
         input (Variable): input
-        size (int or Tuple[int, int] or Tuple[int, int, int]):
+        size (int or Tuple[int] or Tuple[int, int] or Tuple[int, int, int]):
             output spatial size.
         scale_factor (int): multiplier for spatial size. Has to be an integer.
         mode (string): algorithm used for upsampling:
-            'nearest' | 'bilinear' | 'trilinear'. Default: 'nearest'
+            'nearest' | 'linear' | 'bilinear' | 'trilinear'. Default: 'nearest'
     """
-    if input.dim() == 4 and mode == 'nearest':
+    if input.dim() == 3 and mode == 'nearest':
+        return _functions.thnn.UpsamplingNearest1d.apply(input, _single(size), scale_factor)
+    elif input.dim() == 4 and mode == 'nearest':
         return _functions.thnn.UpsamplingNearest2d.apply(input, _pair(size), scale_factor)
     elif input.dim() == 5 and mode == 'nearest':
         return _functions.thnn.UpsamplingNearest3d.apply(input, _triple(size), scale_factor)
+    elif input.dim() == 3 and mode == 'linear':
+        return _functions.thnn.UpsamplingLinear1d.apply(input, _single(size), scale_factor)
+    elif input.dim() == 3 and mode == 'bilinear':
+        raise NotImplementedError("Got 3D input, but bilinear mode needs 4D input")
+    elif input.dim() == 3 and mode == 'trilinear':
+        raise NotImplementedError("Got 3D input, but trilinear mode needs 5D input")
+    elif input.dim() == 4 and mode == 'linear':
+        raise NotImplementedError("Got 4D input, but linear mode needs 3D input")
     elif input.dim() == 4 and mode == 'bilinear':
         return _functions.thnn.UpsamplingBilinear2d.apply(input, _pair(size), scale_factor)
     elif input.dim() == 4 and mode == 'trilinear':
         raise NotImplementedError("Got 4D input, but trilinear mode needs 5D input")
+    elif input.dim() == 5 and mode == 'linear':
+        raise NotImplementedError("Got 5D input, but linear mode needs 3D input")
     elif input.dim() == 5 and mode == 'bilinear':
         raise NotImplementedError("Got 5D input, but bilinear mode needs 4D input")
     elif input.dim() == 5 and mode == 'trilinear':
         return _functions.thnn.UpsamplingTrilinear3d.apply(input, _triple(size), scale_factor)
     else:
-        raise NotImplementedError("Input Error: Only 4D and 5D input Tensors supported"
-                                  " (got {}D) for the modes: nearest | bilinear | trilinear"
+        raise NotImplementedError("Input Error: Only 3D, 4D and 5D input Tensors supported"
+                                  " (got {}D) for the modes: nearest | linear | bilinear | trilinear"
                                   " (got {})".format(input.dim(), mode))
 
 
