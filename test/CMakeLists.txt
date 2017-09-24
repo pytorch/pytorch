@@ -13,5 +13,5 @@ TARGET_LINK_LIBRARIES(broadcast_test ATen)
 add_executable(wrapdim_test wrapdim_test.cpp)
 TARGET_LINK_LIBRARIES(wrapdim_test ATen)
 
-add_executable(dlconvertor dlconvertor.cpp)
-TARGET_LINK_LIBRARIES(dlconvertor ATen)
+add_executable(dlconvertor_test dlconvertor_test.cpp)
+TARGET_LINK_LIBRARIES(dlconvertor_test ATen)
