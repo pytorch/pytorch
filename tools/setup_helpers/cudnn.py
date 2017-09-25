@@ -26,6 +26,8 @@ if WITH_CUDA and not check_env_flag('NO_CUDNN'):
         '/usr/lib/aarch64-linux-gnu/',
     ] + gather_paths([
         'LIBRARY_PATH',
+    ]) + gather_paths([
+        'LD_LIBRARY_PATH',
     ])))
     include_paths = list(filter(bool, [
         os.getenv('CUDNN_INCLUDE_DIR'),

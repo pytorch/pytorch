@@ -98,6 +98,22 @@ class TestJit(TestCase):
         torch._C._jit_pass_lint(trace)
         self.assertExpected(str(trace))
 
+    def test_cse(self):
+        x = Variable(torch.Tensor([0.4, 0.3]), requires_grad=True)
+        y = Variable(torch.Tensor([0.7, 0.5]), requires_grad=True)
+
+        trace = torch._C._tracer_enter((x, y), 0)
+        w = (x + y) * (x + y) * (x + y)
+        t = torch.tanh(w) + torch.tanh(w)
+        z = (x + y) * (x + y) * (x + y) + t
+        torch._C._tracer_exit((z,))
+        torch._C._jit_pass_lint(trace)
+        torch._C._jit_pass_onnx(trace)
+        torch._C._jit_pass_lint(trace)
+        torch._C._jit_pass_cse(trace)
+
+        self.assertExpected(str(trace))
+
     def test_verify(self):
         x = Variable(torch.Tensor([0.4]), requires_grad=True)
         y = Variable(torch.Tensor([0.7]), requires_grad=True)
@@ -228,7 +244,7 @@ class TestJit(TestCase):
 
     def test_legacy_fail(self):
 
-        class Legacy(Function):
+        class MyLegacyFn(Function):
             def forward(self, x):
                 return x
 
@@ -237,7 +253,7 @@ class TestJit(TestCase):
 
         x = Variable(torch.Tensor([0]), requires_grad=True)
         trace = torch._C._tracer_enter((x,), 0)
-        self.assertRaises(RuntimeError, lambda: Legacy()(x))
+        self.assertRaisesRegex(RuntimeError, "MyLegacyFn", lambda: MyLegacyFn()(x))
         torch._C._tracer_exit((x,))
 
     def test_inplace_transplant(self):
@@ -267,6 +283,23 @@ class TestJit(TestCase):
 
         # Run second backward
         grad.sum().backward(create_graph=True)
+        torch._C._jit_pass_lint(trace)
+
+        # Run dead code elimination to remove unused trace nodes
+        torch._C._jit_pass_dce(trace)
+        self.assertExpected(str(trace))
+
+    def test_backward_opaque(self):
+        x = Variable(torch.randn(3, 3), requires_grad=True)
+        y = Variable(torch.randn(3, 3), requires_grad=True)
+
+        trace = torch._C._tracer_enter((x, y), 2)
+        z = x.cross(y)
+        torch._C._tracer_exit((z,))
+        torch._C._jit_pass_lint(trace)
+
+        # Run first backward
+        grad, = torch.autograd.grad(z, x, Variable(torch.ones(3, 3), requires_grad=True), create_graph=True)
         torch._C._jit_pass_lint(trace)
 
         # Run dead code elimination to remove unused trace nodes

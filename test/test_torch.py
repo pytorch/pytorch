@@ -3500,6 +3500,9 @@ class TestTorch(TestCase):
         self.assertEqual(tensor.expand(4, -1, 5), tensor.expand(4, 8, 5))
         self.assertRaises(RuntimeError, lambda: tensor2.expand(-1, -1))
 
+        # test expanding empty to empty
+        self.assertEqual(torch.randn(()).expand(()), torch.randn(()))
+
     def test_repeat(self):
         result = torch.Tensor()
         tensor = torch.rand(8, 4)

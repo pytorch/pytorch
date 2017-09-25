@@ -28,7 +28,7 @@ bool isSimpleMap(Node *node) {
 struct GraphFuser {
   std::shared_ptr<Graph>& graph;
 
-  // Used to order nodes so we alway consider producer-consumer fusions
+  // Used to order nodes so we always consider producer-consumer fusions
   // in reverse topological order.
   // If topological_index[a] > topological_index[b] then a occurs after b.
   // Because nodes can be added to this graph during optimization, this mapping is not bijective.
@@ -211,7 +211,7 @@ struct GraphFuser {
   //
   // NB: Chunk motion only occurs with fusable consumers, which implies
   // that there is always some other operation, e.g., a+b, that happens
-  // after the chunk, and will be put into the fusion group.  This is
+  // after the chunk, and will be put into the fusion group. This is
   // important, because distributing the chunk changes the contiguity
   // of a and b, and so the results would be invalid, except that we know
   // that simple_mappable operations will restore contiguity before

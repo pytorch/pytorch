@@ -98,7 +98,8 @@ def backward(variables, grad_variables=None, retain_graph=None, create_graph=Non
         variables, grad_variables, retain_graph)
 
 
-def grad(outputs, inputs, grad_outputs=None, retain_graph=None, create_graph=None, only_inputs=True):
+def grad(outputs, inputs, grad_outputs=None, retain_graph=None, create_graph=None,
+         only_inputs=True, allow_unused=False):
     """Computes and returns the sum of gradients of outputs w.r.t. the inputs.
 
     ``grad_outputs`` should be a sequence of length matching ``output``
@@ -133,6 +134,9 @@ def grad(outputs, inputs, grad_outputs=None, retain_graph=None, create_graph=Non
         only_inputs (bool, optional): If True, gradient w.r.t. leaves that are
             part of the graph, but don't appear in ``inputs`` won't be computed
             and accumulated. Defaults to True.
+        allow_unused (bool, optional): If False, specifying inputs that were not
+            used when computing outputs (and therefore their grad is always zero)
+            is an error. Default: False.
     """
 
     outputs = (outputs,) if isinstance(outputs, Variable) else tuple(outputs)
@@ -150,7 +154,7 @@ def grad(outputs, inputs, grad_outputs=None, retain_graph=None, create_graph=Non
 
     return Variable._execution_engine.run_backward(
         outputs, grad_outputs, retain_graph,
-        inputs, only_inputs)
+        inputs, only_inputs, allow_unused)
 
 if not torch._C._autograd_init():
     raise RuntimeError("autograd initialization failed")

@@ -942,6 +942,7 @@ class AdaptiveAvgPool2d(Module):
         >>> # target output size of 5x7
         >>> m = nn.AdaptiveAvgPool2d((5,7))
         >>> input = autograd.Variable(torch.randn(1, 64, 8, 9))
+        >>> output = m(input)
         >>> # target output size of 7x7 (square)
         >>> m = nn.AdaptiveAvgPool2d(7)
         >>> input = autograd.Variable(torch.randn(1, 64, 10, 9))
@@ -955,6 +956,40 @@ class AdaptiveAvgPool2d(Module):
 
     def forward(self, input):
         return F.adaptive_avg_pool2d(input, self.output_size)
+
+    def __repr__(self):
+        return self.__class__.__name__ + ' (' \
+            + 'output_size=' + str(self.output_size) + ')'
+
+
+class AdaptiveAvgPool3d(Module):
+    """Applies a 3D adaptive average pooling over an input signal composed of several input planes.
+
+    The output is of size D x H x W, for any input size.
+    The number of output features is equal to the number of input planes.
+
+    Args:
+        output_size: the target output size of the form D x H x W.
+                     Can be a tuple (D, H, W) or a single number D for a cube D x D x D
+
+    Examples:
+        >>> # target output size of 5x7x9
+        >>> m = nn.AdaptiveAvgPool3d((5,7,9))
+        >>> input = autograd.Variable(torch.randn(1, 64, 8, 9, 10))
+        >>> output = m(input)
+        >>> # target output size of 7x7x7 (cube)
+        >>> m = nn.AdaptiveAvgPool3d(7)
+        >>> input = autograd.Variable(torch.randn(1, 64, 10, 9, 8))
+        >>> output = m(input)
+
+    """
+
+    def __init__(self, output_size):
+        super(AdaptiveAvgPool3d, self).__init__()
+        self.output_size = output_size
+
+    def forward(self, input):
+        return F.adaptive_avg_pool3d(input, self.output_size)
 
     def __repr__(self):
         return self.__class__.__name__ + ' (' \
