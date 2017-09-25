@@ -28,6 +28,8 @@ struct Variable : public at::Tensor {
   Variable(const Variable & rhs) : Tensor(rhs) {}
   Variable(Variable && rhs) noexcept : Tensor(std::move(rhs)) {}
 
+  // Implicitly casts a Tensor to a Variable. This should only be called on
+  // Tensors which you know are actually Variables.
   /*implicit*/ Variable(Tensor const & rhs) : Tensor(rhs) {}
   /*implicit*/ Variable(Tensor && rhs) noexcept : Tensor(std::move(rhs)) {}
 
