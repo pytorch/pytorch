@@ -247,7 +247,7 @@ class QTensor {
   // value = scale_ * (x + bias_)
   double scale_;
   double bias_;
-  bool signed_;
+  bool signed_ = false;
 
   // Capacity in bits.
   size_t capacity_ = 0;
