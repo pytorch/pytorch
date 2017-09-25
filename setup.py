@@ -91,12 +91,16 @@ def build_libs(libs):
     my_env["PYTORCH_PYTHON"] = sys.executable
     if WITH_SYSTEM_NCCL:
         my_env["NCCL_ROOT_DIR"] = NCCL_ROOT_DIR
-
     if WITH_CUDA:
         my_env["CUDA_BIN_PATH"] = CUDA_HOME
         build_libs_cmd += ['--with-cuda']
+
     if subprocess.call(build_libs_cmd + libs, env=my_env) != 0:
         sys.exit(1)
+
+    if 'THNN' in libs or 'THCUNN' in libs:
+        from tools.nnwrap import generate_wrappers as generate_nn_wrappers
+        generate_nn_wrappers()
 
 
 class build_deps(Command):
@@ -120,9 +124,6 @@ class build_deps(Command):
                 libs += ['gloo']
             libs += ['THD']
         build_libs(libs)
-
-        from tools.nnwrap import generate_wrappers as generate_nn_wrappers
-        generate_nn_wrappers()
 
 
 build_dep_cmds = {}
