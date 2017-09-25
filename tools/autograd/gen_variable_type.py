@@ -384,62 +384,59 @@ def create_variable_type(top_env, aten_declarations):
             stmts.append('grad_fn->{} = {};'.format(name, expr))
         return stmts
 
-    def unpack_args(option):
+    def unpack_args(env, option):
         body = []
         unpacked_args = []
         for i, arg in enumerate(option['arguments']):
             if arg['dynamic_type'] == 'Tensor':
-                env = {'arg_name': arg['name'], 'arg_pos': i}
-                body.append(UNWRAP_TENSOR.substitute(env))
+                body.append(UNWRAP_TENSOR.substitute(arg_name=arg['name'], arg_pos=i))
                 unpacked_args.append(arg['name'] + '_')
             else:
                 unpacked_args.append(arg['name'])
-        option['unpacked_args'] = unpacked_args
+        env['unpacked_args'] = unpacked_args
         return body
 
-    def emit_body(option):
+    def emit_body(env, option):
         if not is_implemented(option):
             return METHOD_DEFINITION_NYI.substitute(option)
 
         body = []
-        body += unpack_args(option)
+        body += unpack_args(env, option)
+
+        combined = nested_dict(env, option)
         if option['return_type'] in FALLTHROUGH_RETURN_TYPES:
-            body.extend(METHOD_DEFINITION_FALLTHROUGH.substitute(option).split('\n'))
+            body.extend(METHOD_DEFINITION_FALLTHROUGH.substitute(combined).split('\n'))
             return body
         elif option['derivative'] is None:
             assert option['name'] in FALLTHROUGH_FUNCTIONS
-            body.extend(METHOD_DEFINITION_FALLTHROUGH_VARIABLE.substitute(option).split('\n'))
+            body.extend(METHOD_DEFINITION_FALLTHROUGH_VARIABLE.substitute(combined).split('\n'))
             return body
 
         if option['inplace']:
-            body.extend(METHOD_DEFINITION_INPLACE.substitute(option).split('\n'))
+            body.extend(METHOD_DEFINITION_INPLACE.substitute(combined).split('\n'))
         else:
-            body.extend(METHOD_DEFINITION_DERIVATIVE.substitute(option).split('\n'))
+            body.extend(METHOD_DEFINITION_DERIVATIVE.substitute(combined).split('\n'))
         return body
 
     def process_function(option):
-        option['formals'] = [arg['type'] + ' ' + arg['name']
-                             for arg in option['arguments']]
-        option['args'] = [arg['name'] for arg in option['arguments']]
-        option['api_name'] = option['name']
-        return_type = format_return_type(option['returns'])
-        option['return_type'] = return_type
+        env = {}
         if option.get('derivative') is not None:
             derivative = option['derivative']
-            option['op'] = derivative['op']
-            option['save_variables'] = save_variables(option, derivative)
-            option['tensor_args'] = [arg['name'] for arg in option['arguments']
-                                     if arg['dynamic_type'] == 'Tensor']
-        if return_type == 'Scalar':
-            option['return_value'] = 'Scalar(output)'
+            env['op'] = derivative['op']
+            env['save_variables'] = save_variables(option, derivative)
+            env['tensor_args'] = [arg['name'] for arg in option['arguments']
+                                  if arg['dynamic_type'] == 'Tensor']
+        if option['return_type'] == 'Scalar':
+            env['return_value'] = 'Scalar(output)'
         else:
-            option['return_value'] = 'Tensor(std::move(output))'
+            env['return_value'] = 'Tensor(std::move(output))'
 
-        option['type_definition_body'] = emit_body(option)
+        env['type_definition_body'] = emit_body(env, option)
 
-        type_declarations.append(METHOD_DECLARATION.substitute(option))
+        combined = nested_dict(env, option)
+        type_declarations.append(METHOD_DECLARATION.substitute(combined))
         if option['name'] != 'resize_':
-            type_definitions.append(METHOD_DEFINITION.substitute(option))
+            type_definitions.append(METHOD_DEFINITION.substitute(combined))
 
     for function in aten_declarations:
         process_function(function)
@@ -565,6 +562,13 @@ def gen_variable_type(declarations, out):
         signature = '{}({})'.format(base_name, ', '.join(args))
         if signature not in options_by_signature:
             options_by_signature[signature] = []
+
+        option['formals'] = [arg['type'] + ' ' + arg['name']
+                             for arg in option['arguments']]
+        option['args'] = [arg['name'] for arg in option['arguments']]
+        option['api_name'] = option['name']
+        option['return_type'] = format_return_type(option['returns'])
+
         options_by_signature[signature].append(option)
         derivative = derivatives_by_signature.get(signature)
         option['derivative'] = derivative
