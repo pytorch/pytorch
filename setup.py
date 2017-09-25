@@ -395,7 +395,7 @@ main_sources = [
     "torch/csrc/autograd/functions/jit_closure.cpp",
     "torch/csrc/autograd/generated/VariableType.cpp",
     "torch/csrc/autograd/generated/Functions.cpp",
-    "torch/csrc/autograd/generated/py_variable_methods.cpp",
+    "torch/csrc/autograd/generated/python_variable_methods.cpp",
     "torch/csrc/autograd/generated/python_functions.cpp",
     "torch/csrc/autograd/functions/batch_normalization.cpp",
     "torch/csrc/autograd/functions/convolution.cpp",
