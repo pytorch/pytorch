@@ -258,7 +258,7 @@ void DataChannelGloo::receive(Scalar& data, rank_type src_rank) {
 }
 
 
-void DataChannelGloo::receive(thpp::Tensor& data) {
+rank_type DataChannelGloo::receive(thpp::Tensor& data) {
   throw std::runtime_error("DataChannelGloo does not support receive from any source");
 }
 
