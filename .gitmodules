@@ -46,3 +46,6 @@
 [submodule "third_party/NNPACK_deps/psimd"]
 	path = third_party/NNPACK_deps/psimd
 	url = https://github.com/Maratyszcza/psimd.git
+[submodule "third_party/aten"]
+	path = third_party/aten
+	url = https://github.com/zdevito/aten

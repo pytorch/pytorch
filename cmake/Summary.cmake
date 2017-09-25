@@ -35,6 +35,7 @@ function (Caffe2_print_configuration_summary)
   message(STATUS "  BUILD_SHARED_LIBS     : ${BUILD_SHARED_LIBS}")
   message(STATUS "  BUILD_TEST            : ${BUILD_TEST}")
 
+  message(STATUS "  USE_ATEN              : ${USE_ATEN}")
   message(STATUS "  USE_CUDA              : ${USE_CUDA}")
   if(${USE_CUDA})
     message(STATUS "    CUDA version        : ${CUDA_VERSION}")
