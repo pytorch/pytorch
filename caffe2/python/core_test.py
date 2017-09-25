@@ -556,9 +556,11 @@ class TestInferDevice(test_util.TestCase):
         device_option.cuda_gpu_id = 1
         weight = init_net.XavierFill([], 'fc_w', shape=[10, 100])
         bias = init_net.ConstantFill([], 'fc_b', shape=[10, ])
-
+        const = init_net.ConstantFill([], 'const', shape=[], value=1.)
         with core.DeviceScope(device_option):
-            net.FC(["data", weight, bias], "fc1")
+            const = init_net.Add([const, const], [const])
+            fc_out = net.FC(["data", weight, bias], "fc1")
+            net.Add([fc_out, const], [fc_out])
 
         data_remap = {'data': device_option}
         nets, _ = core.InjectDeviceCopiesAmongNets(
@@ -581,6 +583,13 @@ class TestInferDevice(test_util.TestCase):
         self.assertEqual(op.input[2], "fc_b_cuda_1")
         self.assertEqual(op.device_option.device_type, 1)
         self.assertEqual(op.device_option.cuda_gpu_id, 1)
+        op = nets[1]._net.op[3]
+        self.assertEqual(op.type, "Add")
+        self.assertEqual(op.input[0], "fc1")
+        self.assertEqual(op.input[1], "const_cuda_1")
+        # check that moved blob is in input to the new net
+        for c in ["data", "fc_w", "fc_b", "const_cuda_1"]:
+            self.assertTrue(c in nets[1]._net.external_input)
         """
 For reference, net.Proto() should be like:
 name: ""
@@ -616,9 +625,22 @@ op {
     cuda_gpu_id: 1
   }
 }
+op {
+  input: "fc1"
+  input: "const_cuda_1"
+  output: "fc1"
+  name: ""
+  type: "Add"
+  device_option {
+    device_type: 1
+    cuda_gpu_id: 1
+  }
+}
 external_input: "data"
 external_input: "fc_w"
 external_input: "fc_b"
+external_input: "const"
+external_input: "const_cuda_1"
 """
 
     def test_cross_nets_no_change(self):
