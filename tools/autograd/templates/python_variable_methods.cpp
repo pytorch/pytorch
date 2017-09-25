@@ -6,7 +6,7 @@
 #include "torch/csrc/Exceptions.h"
 #include "torch/csrc/utils/python_arg_parser.h"
 
-#include "py_variable_methods_dispatch.h"
+#include "python_variable_methods_dispatch.h"
 
 using at::Tensor;
 using at::Scalar;
