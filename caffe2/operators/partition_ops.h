@@ -6,6 +6,101 @@
 
 namespace caffe2 {
 
+template <typename Index>
+static inline int moduloPartition(Index key, int numPartitions) {
+  int shard = key % numPartitions;
+  // equivalent to `if (shard < 0) shard += partitions;`
+  shard += numPartitions & (shard >> (sizeof(int) * 8 - 1));
+  return shard;
+}
+
+class GatherByKeyOp : public Operator<CPUContext> {
+ public:
+  USE_DISPATCH_HELPER;
+  USE_OPERATOR_FUNCTIONS(CPUContext);
+  GatherByKeyOp(const OperatorDef& operator_def, Workspace* ws)
+      : Operator<CPUContext>(operator_def, ws) {}
+
+ private:
+  bool RunOnDevice() override {
+    return DispatchHelper<TensorTypes<int32_t, int64_t>>::call(this, Input(0));
+  }
+
+ private:
+  template <typename Index>
+  bool DoRunWithType() {
+    const auto numPartitions = InputSize() - 1;
+    CAFFE_ENFORCE_GE(numPartitions, 1);
+    const auto& keysTensor = Input(0);
+    const auto* keysData = keysTensor.template data<Index>();
+    const auto& keysShape = Input(0).dims();
+    CAFFE_ENFORCE_EQ(
+        keysShape.size(), 1, "Only 1D keys tensor supported currently.");
+
+    // 1. Shape and type consistency checks
+    const auto& in0Shape = Input(1).dims();
+    CAFFE_ENFORCE_GE(in0Shape.size(), 1);
+
+    vector<TIndex> outShape(keysShape);
+    outShape.insert(outShape.end(), in0Shape.begin() + 1, in0Shape.end());
+
+    CAFFE_ENFORCE_GE(outShape.size(), 1);
+    auto totalSize = in0Shape[0];
+    auto meta = Input(1).meta();
+    for (int i = 2; i < InputSize(); ++i) {
+      const auto& input = Input(i);
+      CAFFE_ENFORCE(meta == input.meta());
+      CAFFE_ENFORCE_GE(input.ndim(), 1);
+      CAFFE_ENFORCE(std::equal(
+          outShape.begin() + keysShape.size(),
+          outShape.end(),
+          input.dims().begin() + 1));
+      totalSize += input.dim(0);
+    }
+    CAFFE_ENFORCE_EQ(keysTensor.size(), totalSize);
+
+    auto* outTensor = Output(0);
+    outTensor->Resize(outShape);
+    auto* outData = static_cast<char*>(outTensor->raw_mutable_data(meta));
+    const auto blockSize = outTensor->size_from_dim(1);
+
+    inputDatas_.resize(numPartitions);
+    for (int i = 0; i < numPartitions; ++i) {
+      inputDatas_[i] = static_cast<const char*>(Input(i + 1).raw_data());
+    }
+    inStartOffsets_.assign(numPartitions, 0);
+    Index outStartOffset = 0;
+    int currentShard = -1;
+
+    // 2. copy from inputs into output based on shard for each input key
+    const auto numEntries = keysTensor.size();
+    for (int64_t i = 0; i <= numEntries; ++i) {
+      auto newShard =
+          i < numEntries ? moduloPartition(keysData[i], numPartitions) : -1;
+      if (newShard != currentShard) {
+        if (currentShard != -1) {
+          auto inStartOffset = inStartOffsets_[currentShard];
+          auto numItems = i - outStartOffset;
+          context_.template CopyItems<CPUContext, CPUContext>(
+              meta,
+              numItems * blockSize,
+              inputDatas_[currentShard] +
+                  inStartOffset * blockSize * meta.itemsize(),
+              outData + outStartOffset * blockSize * meta.itemsize());
+          inStartOffsets_[currentShard] += numItems;
+        }
+        currentShard = newShard;
+        outStartOffset = i;
+      }
+    }
+
+    return true;
+  }
+
+  std::vector<const char*> inputDatas_;
+  std::vector<int64_t> inStartOffsets_;
+};
+
 class PartitionOpBase : public Operator<CPUContext> {
  public:
   USE_OPERATOR_FUNCTIONS(CPUContext);
@@ -31,10 +126,7 @@ class PartitionOpBase : public Operator<CPUContext> {
     const Index* data = main_input.template data<Index>();
     counts_.assign(partitions, 0);
     for (TIndex p = 0; p < size; p++) {
-      // TODO: support other partition functions
-      int shard = data[p] % partitions;
-      // equivalent to `if (shard < 0) shard += partitions;`
-      shard += partitions & (shard >> (sizeof(int) * 8 - 1));
+      int shard = moduloPartition(data[p], partitions);
       ++counts_[shard];
     }
 
@@ -79,10 +171,7 @@ class PartitionOpBase : public Operator<CPUContext> {
 
     counts_.assign(partitions, 0);
     for (TIndex p = 0; p < size; p++) {
-      // TODO: support other partition functions
-      int shard = data[p] % partitions;
-      // equivalent to `if (shard < 0) shard += partitions;`
-      shard += partitions & (shard >> (sizeof(int) * 8 - 1));
+      int shard = moduloPartition(data[p], partitions);
       TIndex idx = counts_[shard]++;
 
       // special case first input
@@ -191,10 +280,7 @@ class LengthsPartitionOp : public PartitionOpBase {
         out_length_[j][i] = 0;
       }
       for (int j = 0; j < lengths_data[i]; ++j, ++index) {
-        // TODO: support other partition functions
-        int shard = data[index] % partitions;
-        // equivalent to `if (shard < 0) shard += partitions;`
-        shard += partitions & (shard >> (sizeof(int) * 8 - 1));
+        int shard = moduloPartition(data[index], partitions);
         ++out_length_[shard][i];
       }
     }
