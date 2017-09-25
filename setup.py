@@ -93,6 +93,7 @@ def build_libs(libs):
         my_env["NCCL_ROOT_DIR"] = NCCL_ROOT_DIR
 
     if WITH_CUDA:
+        my_env["CUDA_BIN_PATH"] = CUDA_HOME
         build_libs_cmd += ['--with-cuda']
     if subprocess.call(build_libs_cmd + libs, env=my_env) != 0:
         sys.exit(1)
