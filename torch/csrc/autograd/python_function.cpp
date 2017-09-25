@@ -630,8 +630,12 @@ static void _trace_create(PyObject* op_obj, THPFunction* bw_obj,
   if (!tracer::isTracing(input_vars))
     return;
 
-  if (!op_obj)
-    throw std::runtime_error("Tracing of legacy functions is not supported");
+  if (!op_obj) {
+    std::ostringstream oss;
+    oss << "Attempted to trace " << Py_TYPE(bw_obj)->tp_name;
+    oss << ", but tracing of legacy functions is not supported";
+    throw std::runtime_error(oss.str());
+  }
 
   auto tracing_state = tracer::getTracingState(input_vars);
   bw_obj->is_traced = true;
