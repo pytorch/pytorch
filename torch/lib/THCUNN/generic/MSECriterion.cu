@@ -7,7 +7,8 @@ void THNN_(MSECriterion_updateOutput)(
            THCTensor *input,
            THCTensor *target,
            THCTensor *output,
-           bool sizeAverage)
+           bool sizeAverage,
+           bool reduce)
 {
   THCUNN_check_nElement(state, input, target);
   THCUNN_check_dim_size(state, output, 1, 0, 1);
@@ -41,8 +42,10 @@ void THNN_(MSECriterion_updateGradInput)(
            THCState *state,
            THCTensor *input,
            THCTensor *target,
+           THCTensor *gradOutput,
            THCTensor *gradInput,
-           bool sizeAverage)
+           bool sizeAverage,
+           bool reduce)
 {
   THCUNN_check_nElement(state, input, target);
   THCUNN_assertSameGPU(state, 3, input, target, gradInput);

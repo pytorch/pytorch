@@ -80,7 +80,8 @@ class ClassSimplexCriterion(MSECriterion):
             input,
             self._target,
             self.output_tensor,
-            self.sizeAverage
+            self.sizeAverage,
+            True, # reduce
         )
         self.output = self.output_tensor[0]
         return self.output
@@ -91,8 +92,10 @@ class ClassSimplexCriterion(MSECriterion):
             self._backend.library_state,
             input,
             self._target,
+            None, # gradOutput
             self.gradInput,
-            self.sizeAverage
+            self.sizeAverage,
+            True, # reduce
         )
         return self.gradInput
 

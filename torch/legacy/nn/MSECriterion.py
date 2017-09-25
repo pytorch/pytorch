@@ -17,7 +17,8 @@ class MSECriterion(Criterion):
             input,
             target,
             self.output_tensor,
-            self.sizeAverage
+            self.sizeAverage,
+            True, # reduce
         )
         self.output = self.output_tensor[0]
         return self.output
@@ -27,7 +28,9 @@ class MSECriterion(Criterion):
             self._backend.library_state,
             input,
             target,
+            None, # gradOutput
             self.gradInput,
-            self.sizeAverage
+            self.sizeAverage,
+            True, # reduce
         )
         return self.gradInput
