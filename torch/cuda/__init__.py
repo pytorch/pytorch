@@ -129,6 +129,22 @@ def cudart():
     return _cudart
 
 
+class cudaStatus(object):
+    SUCCESS = 0
+    ERROR_NOT_READY = 34
+
+
+class CudaError(RuntimeError):
+    def __init__(self, code):
+        msg = cudart().cudaGetErrorString(code).decode('utf-8')
+        super(CudaError, self).__init__('{0} ({1})'.format(msg, code))
+
+
+def check_error(res):
+    if res != cudaStatus.SUCCESS:
+        raise CudaError(res)
+
+
 class device(object):
     """Context-manager that changes the selected device.
 
@@ -445,5 +461,6 @@ torch._tensor_classes.add(ByteTensor)
 torch._tensor_classes.add(HalfTensor)
 
 from . import sparse
+from . import profiler
 from . import nvtx
 from .streams import Stream, Event
