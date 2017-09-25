@@ -127,6 +127,12 @@ Tensor & VariableType::m_resize_(Tensor & self, IntList size) {
   auto& self_ = checked_unpack(self, "self", 0);
   auto& pImpl = static_cast<VariableImpl&>(*self.get());
   check_inplace(pImpl);
+  if (pImpl.grad_fn) {
+    at::runtime_error("cannot resize non-leaf variables");
+  }
+  if (pImpl.requires_grad) {
+    at::runtime_error("cannot resize variables which require grad");
+  }
   baseType->m_resize_(self_, size);
   return self;
 }
