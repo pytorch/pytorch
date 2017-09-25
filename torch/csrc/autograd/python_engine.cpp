@@ -71,7 +71,8 @@ struct CallbackContext {
 
 void compute_partial_exec_callbacks(const function_list& roots,
                                     const CallbackContext& ctx,
-                                    Engine::pre_callback_map& map) {
+                                    Engine::pre_callback_map& map,
+                                    bool allow_unreachable) {
   // This callback is used to suppress the computation of a node
   // if it is not necessary.
   static Engine::pre_callback_type abort_callback(
@@ -107,8 +108,9 @@ void compute_partial_exec_callbacks(const function_list& roots,
   queue.clear();
   for (auto input_info: ctx.output_map) {
     auto input = input_info.first.get();
-    auto& rev_edges = rev_graph[input];
-    if (rev_edges.size() == 0) throw std::runtime_error("differentiated input is unreachable");
+    auto rev_edges_it = rev_graph.find(input);
+    if (!allow_unreachable && rev_edges_it == rev_graph.end())
+      throw std::runtime_error("differentiated input is unreachable");
     queue.emplace_back(input);
     needed.insert(input);
   }
@@ -137,10 +139,11 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
   unsigned char keep_graph = 0;
   PyObject *inputs = NULL;
   unsigned char only_inputs = 0;
+  unsigned char allow_unreachable = 0;
   const char *accepted_kwargs[] = {"variables", "grad_variables",
-      "keep_graph", "inputs", "only_inputs", NULL};
-  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "OOb|Ob", (char**)accepted_kwargs,
-        &variables, &grad_variables, &keep_graph, &inputs, &only_inputs))
+      "keep_graph", "inputs", "only_inputs", "allow_unreachable", NULL};
+  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "OOb|Obb", (char**)accepted_kwargs,
+        &variables, &grad_variables, &keep_graph, &inputs, &only_inputs, &allow_unreachable))
     return NULL;
 
   THPUtils_assert(PyTuple_Check(variables), "variables argument is expected to "
@@ -208,6 +211,7 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
       }
       THPUtils_assert(input_var->cdata.requires_grad(),
           "One of the differentiated Variables does not require grad");
+      if (allow_unreachable && !grad_fn) continue;
       THPUtils_assert(grad_fn,
           "One of the differentiated Variables appears to not have been used in the graph");
       THPUtils_assert(grad_fn->is_executable,
@@ -236,7 +240,7 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
     }
     // Disable execution for all unneeded functions
     if (only_inputs) {
-      compute_partial_exec_callbacks(roots, ctx, callbacks);
+      compute_partial_exec_callbacks(roots, ctx, callbacks, allow_unreachable);
     }
   }
 
@@ -246,6 +250,13 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
   }
 
   if (ctx.outputs) {
+    for (int i = 0; i < PyTuple_GET_SIZE(inputs); i++) {
+      // XXX: initializing tuples with NULL pointers might be a CPython
+      // implementation detail
+      if (PyTuple_GET_ITEM(ctx.outputs.get(), i)) continue;
+      Py_INCREF(Py_None);
+      PyTuple_SET_ITEM(ctx.outputs.get(), i, Py_None);
+    }
     return ctx.outputs.release();
   } else {
     Py_RETURN_NONE;

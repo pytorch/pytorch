@@ -270,6 +270,26 @@ class TestAutograd(TestCase):
         with self.assertRaisesRegex(RuntimeError, 'unreachable'):
             torch.autograd.grad(x, y)
 
+    def test_grad_unreachable(self):
+        x = Variable(torch.ones(1), requires_grad=True)
+        y = Variable(torch.ones(1), requires_grad=True)
+        # Make sure x and y have grad accumulators allocated
+        z = x * 2
+        w = y * 2
+        with self.assertRaisesRegex(RuntimeError, 'unreachable'):
+            torch.autograd.grad(x * 2, [x, y])
+
+        grad_x, grad_y = torch.autograd.grad(x * 2, [x, y], allow_unused=True)
+        self.assertEqual(grad_x, x * 2)
+        self.assertIsNone(grad_y)
+
+        # This is slightly different than the case above, because z doesn't even
+        # have a grad accumulator allocated.
+        z = Variable(torch.ones(1), requires_grad=True)
+        grad_x, grad_z = torch.autograd.grad(x * 2, [x, z], allow_unused=True)
+        self.assertEqual(grad_x, x * 2)
+        self.assertIsNone(grad_z)
+
     def test_hooks(self):
         x = Variable(torch.ones(5, 5), requires_grad=True)
         y = Variable(torch.ones(5, 5) * 4, requires_grad=True)
