@@ -31,9 +31,10 @@ class Multinomial(StochasticFunction):
         output_probs.add_(1e-6).reciprocal_()
         output_probs.neg_().mul_(reward)
         # Fill in gradients
-        idx = grad_probs.new().resize_(grad_probs.size(0)).fill_(1)
-        idx = idx.cumsum(0) - 1
-        grad_probs[idx.long(), samples.t()] += output_probs.t()
+        mask = grad_probs.new().resize_as_(grad_probs).fill_(0).repeat(samples.size(1), 1)
+        mask[torch.arange(0, mask.size(0)).long(), samples.t().contiguous().view(-1)] = 1
+        mask = mask.view(-1, grad_probs.size(0), grad_probs.size(1)).sum(0)
+        grad_probs += mask*probs.add_(1e-6).reciprocal_().neg_().mul_(reward)
         return grad_probs
 
 
