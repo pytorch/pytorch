@@ -61,11 +61,9 @@
   vec1: grad.mv(vec2) * alpha
   vec2: grad.t().mv(vec1) * alpha
 
-- name: all
-  fallthrough: true
+- name: all  # fallthrough
 
-- name: any
-  fallthrough: true
+- name: any  # fallthrough
 
 - name: asin(Tensor self)
   self: grad * (-self * self + 1).sqrt().reciprocal()
@@ -114,8 +112,7 @@
 - name: cumsum(Tensor self, int64_t dim)
   self: cumsum_backward(grad, dim)
 
-- name: data_ptr
-  fallthrough: true
+- name: data_ptr  # fallthrough
 
 - name: diag(Tensor self, int64_t diagonal=0)
   self: grad.diag(diagonal)
@@ -160,8 +157,7 @@
 
 - name: gesv
 
-- name: get_device
-  fallthrough: true
+- name: get_device  # fallthrough
 
 - name: gt
 - name: histc
@@ -171,14 +167,11 @@
 - name: index_select
 - name: inverse
 
-- name: is_contiguous(Tensor self)
-  fallthrough: true
+- name: is_contiguous
 
-- name: is_same_size
-  fallthrough: true
+- name: is_same_size  # fallthrough
 
-- name: is_set_to
-  fallthrough: true
+- name: is_set_to  # fallthrough
 
 - name: kthvalue
 - name: le
@@ -297,11 +290,9 @@
 
 - name: std
 
-- name: storage_offset
-  fallthrough: true
+- name: storage_offset  # fallthrough
 
-- name: stride
-  fallthrough: true
+- name: stride  # fallthrough
 
 - name: sub(Tensor self, Scalar other, *, Scalar alpha)
   self: grad
@@ -326,8 +317,7 @@
 - name: tan
 - name: tanh
 
-- name: tensor
-  fallthrough: true
+- name: tensor  # fallthrough
 
 - name: topk
 - name: trace

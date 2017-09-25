@@ -101,6 +101,8 @@ void check_inplace(const VariableImpl& pImpl) {
 }
 
 void wrap_output(VariableImpl& pImpl, FunctionFlags flags, std::shared_ptr<Function> grad_fn) {
+  // Hooks up the grad_fn and sets the flags of the function output. This only
+  // supports a single differentiable output.
   pImpl.requires_grad = flags.is_executable;
   pImpl.is_volatile = flags.is_volatile;
   if (!flags.is_volatile) {

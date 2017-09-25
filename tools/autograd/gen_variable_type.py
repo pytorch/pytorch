@@ -2,11 +2,12 @@ import argparse
 import os
 import re
 import yaml
-from collections import OrderedDict
+from collections import OrderedDict, defaultdict
 from itertools import groupby
 from tools.shared.module_loader import import_module
 
 CodeTemplate = import_module('code_template', 'torch/lib/ATen/code_template.py').CodeTemplate
+
 
 # TODO: refactor nested_dict into common library with ATen
 class nested_dict(object):
@@ -77,7 +78,6 @@ addClass<${op}>(${op}Class, "${op}");
 
 DERIVATIVE = CodeTemplate("""\
 if (should_compute_output(${i})) {
-  ${unpack_save_variables}
   grad_inputs[${i}] = ${derivative};
 }
 """)
@@ -196,6 +196,8 @@ def load_derivatives(path):
     with open(path, 'r') as f:
         definitions = yaml.load(f, Loader=Loader)
 
+    # Matches "foo" in "foo, bar" but not "foobar". The name is substituted for
+    # the {} characters.
     name_regex = r'(^|\W){}($|\W)'
 
     def split_name_params(prototype):
@@ -210,13 +212,16 @@ def load_derivatives(path):
             arg_indices = {arg['name']: i for i, arg in enumerate(arguments)}
 
             def get_type(arg_name):
-                if arg_name in arg_indices:
-                    return arg_types[arg_indices[arg_name]]
-                return 'Scalar'
+                if arg_name not in arg_indices:
+                    # if the name is not an argument, assume it's a literal
+                    # number, with type 'Scalar'
+                    return 'Scalar'
+                return arg_types[arg_indices[arg_name]]
 
             arg_types = [get_type(arg_name) for arg_name in call_args]
         return '{}({})'.format(option['name'], ', '.join(arg_types))
 
+    # Parse each entry from derivatives.yaml
     options = []
     for defn in definitions:
         option = {}
@@ -277,6 +282,16 @@ def load_derivatives(path):
         option['saved'] = saved
 
         options.append(option)
+
+    options = sorted(options, key=lambda o: o['name'])
+    for name, overloads in groupby(options, lambda o: o['name']):
+        overloads = list(overloads)
+        for i, option in enumerate(overloads):
+            name = option['name']
+            option['op'] = name[0].upper() + name[1:] + 'Backward'
+            if len(overloads) > 1:
+                option['op'] += str(i)
+
     return options
 
 
@@ -288,28 +303,9 @@ def create_autograd_functions(top_env, declarations):
     """
     function_definitions = top_env['autograd_function_definitions']
     function_declarations = top_env['autograd_function_declarations']
-    py_function_initializers = top_env['py_autograd_function_initializers']
-
-    def group_by_name(options):
-        res = {}
-        for option in options:
-            name = option['name']
-            if name not in res:
-                res[name] = []
-            res[name].append(option)
-        return res
-
-    for name, options in group_by_name(declarations).items():
-        for i, option in enumerate(options):
-            name = option['name']
-            option['op'] = name[0].upper() + name[1:] + 'Backward'
-            if len(options) > 1:
-                option['op'] += str(i)
+    py_function_initializers = top_env['py_function_initializers']
 
     def process_function(op):
-        if op['fallthrough']:
-            return
-
         saved_variables = []
         for arg in op['saved']:
             name = arg['name']
@@ -324,7 +320,7 @@ def create_autograd_functions(top_env, declarations):
         body = []
         body.append('auto& grad = inputs[0];')
 
-        def unpack_args(derivative):
+        def unpack_args():
             unpack = []
             for arg in op['saved']:
                 if arg['type'] == 'Tensor':
@@ -332,13 +328,14 @@ def create_autograd_functions(top_env, declarations):
                     unpack.append('auto {} = {}_.unpack();'.format(name, name))
             return unpack
 
+        body.extend(unpack_args())
+
         i = 0
         for arg in op['python_arguments']:
             derivative = arg.get('derivative')
             if derivative is None:
                 continue
             body.append(DERIVATIVE.substitute({
-                'unpack_save_variables': unpack_args(derivative),
                 'i': i,
                 'derivative': derivative,
             }))
@@ -371,6 +368,7 @@ def create_variable_type(top_env, aten_declarations):
     type_definitions = top_env['type_derived_method_definitions']
 
     def save_variables(option, derivative):
+        # assign the saved variables to the generated grad_fn
         stmts = []
         for arg in derivative['saved']:
             name = arg['name']
@@ -405,7 +403,7 @@ def create_variable_type(top_env, aten_declarations):
 
         body = []
         body += unpack_args(option)
-        if option['return_type'] in FALLTHROUGH_RETURN_TYPES or option.get('fallthrough'):
+        if option['return_type'] in FALLTHROUGH_RETURN_TYPES:
             body.extend(METHOD_DEFINITION_FALLTHROUGH.substitute(option).split('\n'))
             return body
         elif option['derivative'] is None:
@@ -533,6 +531,7 @@ def gen_variable_type(declarations, out):
 
     def by_name(option):
         return option['name']
+
     def by_aten_name(option):
         return option.get('aten_name', option['name'])
 
@@ -589,7 +588,7 @@ def gen_variable_type(declarations, out):
         'py_methods': [],
         'py_method_defs': [],
         'py_method_dispatch': [],
-        'py_autograd_function_initializers': [],
+        'py_function_initializers': [],
     }
 
     create_autograd_functions(env, derivatives)
