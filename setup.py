@@ -15,13 +15,12 @@ import os
 from tools.setup_helpers.env import check_env_flag
 from tools.setup_helpers.cuda import WITH_CUDA, CUDA_HOME
 from tools.setup_helpers.cudnn import WITH_CUDNN, CUDNN_LIB_DIR, CUDNN_INCLUDE_DIR
+from tools.setup_helpers.nccl import WITH_NCCL, WITH_SYSTEM_NCCL, NCCL_LIB_DIR, NCCL_INCLUDE_DIR, NCCL_ROOT_DIR
 from tools.setup_helpers.split_types import split_types
 
 DEBUG = check_env_flag('DEBUG')
 WITH_DISTRIBUTED = not check_env_flag('NO_DISTRIBUTED')
 WITH_DISTRIBUTED_MW = WITH_DISTRIBUTED and check_env_flag('WITH_DISTRIBUTED_MW')
-WITH_NCCL = WITH_CUDA and platform.system() != 'Darwin'
-SYSTEM_NCCL = False
 
 
 ################################################################################
@@ -90,6 +89,9 @@ def build_libs(libs):
     build_libs_cmd = ['bash', 'torch/lib/build_libs.sh']
     my_env = os.environ.copy()
     my_env["PYTORCH_PYTHON"] = sys.executable
+    if WITH_SYSTEM_NCCL:
+        my_env["NCCL_ROOT_DIR"] = NCCL_ROOT_DIR
+
     if WITH_CUDA:
         build_libs_cmd += ['--with-cuda']
     if subprocess.call(build_libs_cmd + libs, env=my_env) != 0:
@@ -109,7 +111,7 @@ class build_deps(Command):
         libs = ['TH', 'THS', 'THNN']
         if WITH_CUDA:
             libs += ['THC', 'THCS', 'THCUNN']
-        if WITH_NCCL and not SYSTEM_NCCL:
+        if WITH_NCCL and not WITH_SYSTEM_NCCL:
             libs += ['nccl']
         libs += ['THPP', 'libshm', 'ATen', 'nanopb']
         if WITH_DISTRIBUTED:
@@ -208,8 +210,9 @@ class build_ext(setuptools.command.build_ext.build_ext):
             print('-- Detected CUDA at ' + CUDA_HOME)
         else:
             print('-- Not using CUDA')
-        if WITH_NCCL and SYSTEM_NCCL:
-            print('-- Using system provided NCCL library')
+        if WITH_NCCL and WITH_SYSTEM_NCCL:
+            print('-- Using system provided NCCL library at ' +
+                  NCCL_LIB_DIR + ', ' + NCCL_INCLUDE_DIR)
         elif WITH_NCCL:
             print('-- Building NCCL library')
         else:
@@ -349,10 +352,6 @@ if platform.system() == 'Darwin':
 # static library only
 NANOPB_STATIC_LIB = os.path.join(lib_path, 'libprotobuf-nanopb.a')
 
-if WITH_NCCL and (subprocess.call('ldconfig -p | grep libnccl >/dev/null', shell=True) == 0 or
-                  subprocess.call('/sbin/ldconfig -p | grep libnccl >/dev/null', shell=True) == 0):
-    SYSTEM_NCCL = True
-
 main_compile_args = ['-D_THP_CORE']
 main_libraries = ['shm']
 main_link_args = [TH_LIB, THS_LIB, THNN_LIB, ATEN_LIB, NANOPB_STATIC_LIB]
@@ -468,8 +467,10 @@ if WITH_CUDA:
     main_sources += split_types("torch/csrc/cuda/Tensor.cpp")
 
 if WITH_NCCL:
-    if SYSTEM_NCCL:
+    if WITH_SYSTEM_NCCL:
         main_libraries += ['nccl']
+        include_dirs.append(NCCL_INCLUDE_DIR)
+        library_dirs.append(NCCL_LIB_DIR)
     else:
         main_link_args += [NCCL_LIB]
     extra_compile_args += ['-DWITH_NCCL']
