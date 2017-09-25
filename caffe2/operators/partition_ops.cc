@@ -5,6 +5,28 @@ namespace {
 
 REGISTER_CPU_OPERATOR(Partition, PartitionOp);
 REGISTER_CPU_OPERATOR(LengthsPartition, LengthsPartitionOp);
+REGISTER_CPU_OPERATOR(GatherByKey, GatherByKeyOp);
+
+OPERATOR_SCHEMA(GatherByKey)
+    .NumInputs(2, INT_MAX)
+    .NumOutputs(1)
+    .SetDoc(R"DOC(
+Inverse operation of Partition.
+
+Takes the original, full 'keys' tensor followed by sharded value tensors,
+and returns the full value tensor, combined using the same hash used in
+Partition.
+)DOC")
+    .Input(
+        0,
+        "keys",
+        "The first input is the full keys tensor"
+        " (same as the first input of Partition).")
+    .Input(
+        1,
+        "sharded_values",
+        "Subsequented inputs are sharded values tensors.")
+    .Output(0, "values", "Reconstructed values tensor.");
 
 OPERATOR_SCHEMA(Partition)
     .NumInputsOutputs([](int in, int out) {
