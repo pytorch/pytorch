@@ -679,7 +679,10 @@ static at::Tensor compute_output(
           // but NNPACK expects the Tensors to be in the appropriate shape
           // already, so we resize here
           output.resize_(params.output_size(input, weight));
-          nnpack::convolutionOutput(input, weight, bias, params.padding, output); goto done;
+          nnpack::SpatialConvolution_updateOutput(
+              input, output, weight, bias,
+              kernel_size[1], kernel_size[0],
+              params.padding[1], params.padding[0]); goto done;
 #endif
         } else {
         /* CPU implementation has specialized MM kernels
@@ -758,7 +761,10 @@ static at::Tensor compute_grad_input(
       } else {
         if (params.use_nnpack(input)) {
 #ifdef WITH_NNPACK
-          nnpack::convolutionUpdateGradInput(input, weight, params.padding, grad_output, grad_input); goto done;
+          nnpack::SpatialConvolution_updateGradInput(
+              input, grad_output, grad_input, weight,
+              kernel_size[1], kernel_size[0],
+              params.padding[1], params.padding[0]); goto done;
 #endif
         } else {
           /* CPU implementation has specialized MM kernels
@@ -846,8 +852,12 @@ static tensor_pair compute_grad_params(
         if (params.use_nnpack(input)) {
 #ifdef WITH_NNPACK
           // NNPACK does not have a bias gradient calculation, so we split
-          // into two calls here
-          nnpack::convolutionUpdateGradWeight(input, grad_weight, params.padding, grad_output);
+          // into two calls here if necessary
+          nnpack::SpatialConvolution_accGradWeight(
+              input, grad_output, grad_weight,
+              kernel_size[1], kernel_size[0],
+              params.padding[1], params.padding[0]);
+
           if (bias.defined() && params.should_compute_output(2)) {
             // grad_output is in N, C, H, W, we re-shape and make contiguous
             at::Tensor ones = grad_output.type().ones(input.size(0) * grad_output.size(2) * grad_output.size(3));

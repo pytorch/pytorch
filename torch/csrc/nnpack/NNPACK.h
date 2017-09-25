@@ -7,25 +7,34 @@
 namespace torch {
 namespace nnpack {
 
-void convolutionOutput(
+void SpatialConvolution_updateOutput(
     at::Tensor& input,
+    at::Tensor& output,
     at::Tensor& weight,
     at::Tensor& bias,
-    const std::vector<int>& padding,
-    at::Tensor& output);
+    int kW,
+    int kH,
+    int padW,
+    int padH);
 
-void convolutionUpdateGradInput(
+void SpatialConvolution_updateGradInput(
     at::Tensor& input,
-    at::Tensor& weight,
-    const std::vector<int>& padding,
     at::Tensor& gradOutput,
-    at::Tensor& gradInput);
+    at::Tensor& gradInput,
+    at::Tensor& weight,
+    int kW,
+    int kH,
+    int padW,
+    int padH);
 
-void convolutionUpdateGradWeight(
+void SpatialConvolution_accGradWeight(
     at::Tensor& input,
+    at::Tensor& gradOutput,
     at::Tensor& gradWeight,
-    const std::vector<int>& padding,
-    at::Tensor& gradOutput);
+    int kW,
+    int kH,
+    int padW,
+    int padH);
 
 } // torch::nnpack
 } // torch
