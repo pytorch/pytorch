@@ -244,7 +244,7 @@ class TestJit(TestCase):
 
     def test_legacy_fail(self):
 
-        class Legacy(Function):
+        class MyLegacyFn(Function):
             def forward(self, x):
                 return x
 
@@ -253,7 +253,7 @@ class TestJit(TestCase):
 
         x = Variable(torch.Tensor([0]), requires_grad=True)
         trace = torch._C._tracer_enter((x,), 0)
-        self.assertRaises(RuntimeError, lambda: Legacy()(x))
+        self.assertRaisesRegex(RuntimeError, "MyLegacyFn", lambda: MyLegacyFn()(x))
         torch._C._tracer_exit((x,))
 
     def test_inplace_transplant(self):
