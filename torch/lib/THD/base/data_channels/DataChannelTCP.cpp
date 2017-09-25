@@ -547,8 +547,9 @@ void DataChannelTCP::receive(Scalar& data, rank_type src_rank) {
 }
 
 
-void DataChannelTCP::receive(thpp::Tensor& data) {
-  auto request = _receive_worker.push([this, &data]{
+rank_type DataChannelTCP::receive(thpp::Tensor& data) {
+  rank_type sender;
+  auto request = _receive_worker.push([this, &data, &sender]{
     if (!this->_poll_events) {
       // cache poll events array, it will be reused in another `receive` calls
       this->_poll_events.reset(new struct pollfd[this->_processes.size()]);
@@ -574,11 +575,13 @@ void DataChannelTCP::receive(thpp::Tensor& data) {
         throw std::system_error(ECONNABORTED, std::system_category());
 
       this->_receive(data, rank);
+      sender = rank;
       break;
     }
   });
 
   request.wait();
+  return sender;
 }
 
 
