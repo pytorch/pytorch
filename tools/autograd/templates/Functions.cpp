@@ -52,8 +52,7 @@ Tensor cumsum_backward(const Tensor & x, int64_t dim) {
 
 Tensor unnarrow(const Tensor & self, IntList sizes, int64_t dimension, int64_t offset) {
   auto result = self.type().zeros(sizes);
-  result.narrow(dimension, offset, self.size(dimension)).copy_(self);
-  // TODO: hook up grad_fn
+  // TODO: implement unnarrow
   return result;
 }
 
