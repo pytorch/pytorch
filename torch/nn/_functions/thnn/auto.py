@@ -77,8 +77,6 @@ def _make_function_class_criterion(class_name, update_output, update_grad_input,
         if reduce_arg_idx >= 0:
             getattr(ctx._backend, update_grad_input.name)(ctx._backend.library_state, input, target,
                                                           grad_output, grad_input, *ctx.additional_args)
-            grad_output_expanded = grad_output.view(*repeat(1, grad_input.dim()))
-            grad_input.mul_(grad_output_expanded.expand_as(grad_input))
             return grad_input
 
         getattr(ctx._backend, update_grad_input.name)(ctx._backend.library_state, input, target,

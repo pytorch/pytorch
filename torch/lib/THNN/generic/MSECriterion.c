@@ -36,8 +36,10 @@ void THNN_(MSECriterion_updateGradInput)(
           bool reduce)
 {
   THNN_CHECK_NELEMENT(input, target);
-  
+
+  THNN_CHECK_DIM_SIZE(gradOutput, 1, 0, 1);
   real norm = (sizeAverage ? 2./((real)THTensor_(nElement)(input)) : 2.);
+  norm *= THTensor_(get1d)(gradOutput, 0);
 
   THTensor_(resizeAs)(gradInput, input);
   TH_TENSOR_APPLY3(real, gradInput, real, input, real, target,

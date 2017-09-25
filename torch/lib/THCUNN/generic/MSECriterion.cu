@@ -50,8 +50,10 @@ void THNN_(MSECriterion_updateGradInput)(
   THCUNN_check_nElement(state, input, target);
   THCUNN_assertSameGPU(state, 3, input, target, gradInput);
 
+  THCUNN_check_dim_size(state, gradOutput, 1, 0, 1);
   ptrdiff_t size = THCTensor_(nElement)(state, input);
   accreal norm = sizeAverage ? (accreal)(2)/size : (accreal)(2);
+  norm *= ScalarConvert<real, accreal>::to(THCTensor_(get1d)(state, gradOutput, 0));
 
   input = THCTensor_(newContiguous)(state, input);
   target = THCTensor_(newContiguous)(state, target);
