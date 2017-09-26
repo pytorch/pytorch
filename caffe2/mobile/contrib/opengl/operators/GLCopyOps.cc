@@ -5,6 +5,7 @@
 #include "caffe2/core/timer.h"
 
 #include "../core/DataTransfer.h"
+#include "../core/GLContext.h"
 #include "../core/GLImage.h"
 #include "../core/GLPlainTexture.h"
 #include "../core/ImageAllocator.h"
@@ -26,6 +27,9 @@ class CopyToOpenGLOp final : public Operator<CPUContext>, ImageAllocator<T> {
     const int input_width = X.dim32(3);
     const int input_height = X.dim32(2);
     const int input_size = input_width * input_height;
+
+    // set up the OpenGL context
+    GLContext::getGLContext()->set_context();
 
     const float* input = X.template data<float>();
 

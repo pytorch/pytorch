@@ -2,11 +2,11 @@
 
 #include "IOSGLContext.h"
 
-GLContext* GLContext::_glcontext = nullptr;
+std::unique_ptr<GLContext> GLContext::_glcontext = nullptr;
 
 void GLContext::initGLContext() {
   if (_glcontext == nullptr) {
-    _glcontext = new IOSGLContext();
+    _glcontext.reset(new IOSGLContext());
   }
 }
 
@@ -14,12 +14,7 @@ GLContext* GLContext::getGLContext() {
   if (_glcontext == nullptr) {
     initGLContext();
   }
-  return _glcontext;
+  return _glcontext.get();
 }
 
-void GLContext::deleteGLContext() {
-  if (_glcontext != nullptr) {
-    delete _glcontext;
-  }
-  _glcontext = nullptr;
-}
+void GLContext::deleteGLContext() { _glcontext.reset(nullptr); }
