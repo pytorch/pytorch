@@ -1,4 +1,5 @@
 from ..stochastic_function import StochasticFunction
+import torch
 
 # Gradient formulas are based on Simple Statistical Gradient-Following
 # Algorithms for Connectionist Reinforcement Learning, available at
