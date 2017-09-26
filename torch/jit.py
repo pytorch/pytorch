@@ -24,7 +24,7 @@ VOLATILE = Placeholder("VOLATILE")
 
 
 # TODO: verify is not implemented yet
-def compile(arg=None, nderivs=1, params=tuple(), name=None, verify=False, optimize=True, enabled=True):
+def compile(arg=None, nderivs=1, params=tuple(), name=None, verify=False, optimize=True):
     """
     Mark a function or module as eligible for just-in-time compilation.  The
     next time the function/module is executed, it is traced, and the trace is
@@ -72,9 +72,6 @@ def compile(arg=None, nderivs=1, params=tuple(), name=None, verify=False, optimi
             Default: 1 (i.e., we will compile forwards and backwards, but not
             double-backwards).
         optimize (bool, optional): whether or not to apply optimizations.  Default: True.
-        enabled (bool, optional): whether or not to actually enable the JIT
-            compiler.  This is a convenient way to disable a compilation statement
-            without deleting the actual `compile` invocation.  Default: True.
 
     Example: Compile as function decorator.
 
@@ -118,10 +115,7 @@ def compile(arg=None, nderivs=1, params=tuple(), name=None, verify=False, optimi
     """
     # TODO: handle decorating a class (not an instance)
     def _compile(inner):
-        if enabled:
-            return CompiledModule(inner, params=params, nderivs=nderivs, optimize=optimize, name=name)
-        else:
-            return inner
+        return CompiledModule(inner, params=params, nderivs=nderivs, optimize=optimize, name=name)
     if callable(arg):
         return _compile(arg)
     else:
@@ -260,6 +254,9 @@ class CompiledModule(Module):
     # NB: In principle, there could also be a 'raw' version of this compiler,
     # but since the logic is so complicated, testing code wouldn't benefit much
     def forward(self, *args):
+        if _JIT_DISABLE:
+            with _time(self.name, "unoptimized"):
+                return self.inner(*args)
         in_vars, in_struct, is_volatile, in_key = self._process_args(args)
         ktrace = self.ktrace_cache.get(in_key)
         if ktrace is None:
@@ -271,11 +268,13 @@ class CompiledModule(Module):
         if closure is not None:
             # We already compiled it!  Run it directly, and
             # use the saved out_struct to unflatten.
-            out_vars = closure()(*in_vars)
-            out_struct = ktrace.out_struct
+            with _time(ktrace.name, "optimized"):
+                out_vars = closure()(*in_vars)
+                out_struct = ktrace.out_struct
         else:
             # No compiled trace available.  Run it by hand.
-            out_vars, out_struct = ktrace.add_trace(args, in_vars, in_struct)
+            with _time(ktrace.name, "tracing"):
+                out_vars, out_struct = ktrace.add_trace(args, in_vars, in_struct)
         if isinstance(out_vars, Variable):
             out_vars = (out_vars, )
         out, extras = _unflatten(out_vars, out_struct)
@@ -420,21 +419,6 @@ def _fork_rng(enabled=True):
         torch.cuda.set_rng_state(gpu_rng_state)
 
 
-@contextlib.contextmanager
-def _time(name, enabled=True):
-    if not enabled or not torch.cuda.is_available():
-        yield
-        return
-    stream = torch.cuda.current_stream()
-    start = torch.cuda.Event(enable_timing=True)
-    end = torch.cuda.Event(enable_timing=True)
-    stream.record_event(start)
-    yield
-    stream.record_event(end)
-    end.synchronize()
-    print("{} time: {} ms".format(name, start.elapsed_time(end)))
-
-
 # _flatten and _unflatten are inverses
 def _unflatten(input, proto):
     def unflatten_helper(input, proto):
@@ -456,11 +440,13 @@ def _flatten(obj, params=tuple()):
 
 
 # This is purely for developer debugging.  We are not going to advertise it.
-_DUMP_TRACES = os.environ.get('PYTORCH_JIT_DUMP', False)
+_JIT_DUMP = os.environ.get('PYTORCH_JIT_DUMP', False)
+_JIT_TIME = os.environ.get('PYTORCH_JIT_TIME', False)  # CUDA-only timing
+_JIT_DISABLE = os.environ.get('PYTORCH_JIT_DISABLE', False)
 
 
 def _dump_trace(trace_name, pass_name, input_key, trace):
-    if not _DUMP_TRACES:
+    if not _JIT_DUMP:
         return
 
     import torch.contrib._graph_vis as graph_vis
@@ -471,6 +457,21 @@ def _dump_trace(trace_name, pass_name, input_key, trace):
     with open(filename + ".ir", "w") as f:
         f.write("Input key: {}\n\n{}".format(input_key, str(trace)))
     graph_vis.write(trace.graph(), filename + ".html")
+
+
+@contextlib.contextmanager
+def _time(trace_name, name):
+    if not _JIT_TIME or not torch.cuda.is_available():
+        yield
+        return
+    stream = torch.cuda.current_stream()
+    start = torch.cuda.Event(enable_timing=True)
+    end = torch.cuda.Event(enable_timing=True)
+    stream.record_event(start)
+    yield
+    stream.record_event(end)
+    end.synchronize()
+    print("{} {} time: {} ms".format(trace_name, name, start.elapsed_time(end)))
 
 
 if not torch._C._jit_init():
