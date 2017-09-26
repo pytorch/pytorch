@@ -75,6 +75,8 @@ class TestShapeInference(test_util.TestCase):
         model.net.ReduceBackMean(["x"], ["x_back_mean"])
         model.net.ReduceFrontSum(["x"], ["x_front_sum"])
         model.net.ReduceFrontMean(["x"], ["x_front_mean"])
+        model.net.ReduceFrontMax(["x"], ["x_front_max"])
+
         workspace.FeedBlob("x", np.random.rand(10, 12, 18).astype(np.float32))
         self.InferTensorRunAndCompare(model)
 
