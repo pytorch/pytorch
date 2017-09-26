@@ -9,13 +9,13 @@ bool tryConvertToOpenGL(const NetDef& initNet,
                         const NetDef& predictNet,
                         NetDef* glPredictNet,
                         bool useTextureInput = false,
-                        bool useTiling = false,
-                        bool runFusion = true);
+                        bool useTiling       = false,
+                        bool runFusion       = true);
 
 // Exposed for testing
 NetDef rewritePredictNetForOpenGL(const NetDef& predictNet,
                                   bool useTextureInput = false,
-                                  bool useTiling = false,
-                                  bool runFusion = true);
+                                  bool useTiling       = false,
+                                  bool runFusion       = true);
 void dumpDefForOpenGL(const NetDef& net);
 } // namespace caffe2

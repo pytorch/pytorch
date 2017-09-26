@@ -139,8 +139,8 @@ class OpenGLPadImageOp final : public ConvPoolOpBase<CPUContext>, ImageAllocator
       padImage_.reset(new GLPadImage());
       LOG(INFO) << input_channels << ": " << input_height << " X " << input_width << " => "
                 << output_channels << ": " << output_height << " X " << output_width;
-      LOG(INFO) << "Padmode: " << mode_ << ", pad_l = " << pad_l() << ", pad_r = " << pad_r()
-                << ", pad_t = " << pad_t() << ", pad_b = " << pad_b();
+      LOG(INFO) << "Padmode: " << mode_ << ", pad_l = " << pad_l() << ", pad_r = " << pad_r() << ", pad_t = " << pad_t()
+                << ", pad_b = " << pad_b();
     }
 
     padImage_->pad(input, *output, pad_l(), pad_t());

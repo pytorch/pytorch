@@ -14,8 +14,7 @@
 #include <iostream>
 #include <vector>
 
-#define MaxOutputTileBatchSize 8
-#define MAXIMIZE_BUFFERS false
+#define MaxOutputTileBatchSize 2
 
 class GLConvolution : public GLFilter {
  public:
@@ -38,6 +37,7 @@ class GLConvolution : public GLFilter {
   const float* kernel;
   const float* bias;
   const float* prelu_scale; // for PRelu
+  float16_t** kernel_block_buffers = nullptr;
 
   binding* inputData[MaxInputBatchSize];
   binding* previousData[MaxOutputBatchSize];
@@ -72,8 +72,7 @@ class GLConvolution : public GLFilter {
     }
 
     for (int i = 0; i < output_batch_size; i++) {
-      bindings.push_back(previousData[i] =
-                             new binding{"previousData[" + caffe2::to_string(i) + "]"});
+      bindings.push_back(previousData[i] = new binding{"previousData[" + caffe2::to_string(i) + "]"});
     }
 
     return bindings;
@@ -89,8 +88,7 @@ class GLConvolution : public GLFilter {
     }
 
     for (int i = 0; i < std::max(input_batch_size, output_tile_batch_size); i++) {
-      bindings.push_back(kernel_block[i] =
-                             new binding{"Kernel_block[" + caffe2::to_string(i) + "]"});
+      bindings.push_back(kernel_block[i] = new binding{"Kernel_block[" + caffe2::to_string(i) + "]"});
     }
 
     return bindings;
@@ -99,25 +97,23 @@ class GLConvolution : public GLFilter {
   GLConvolution(const descriptor& _geometry,
                 const float* _kernel,
                 const float* _bias,
-                const float* _prelu_scale = nullptr,
-                int _prelu_scale_size = 0,
-                int _input_batch_size = 1,
-                int _output_batch_size = 1,
-                int _input_tiles = 1,
-                int _output_tiles = 1,
-                int _input_tile_chunk_size = 1,
+                const float* _prelu_scale   = nullptr,
+                int _prelu_scale_size       = 0,
+                int _input_batch_size       = 1,
+                int _output_batch_size      = 1,
+                int _input_tiles            = 1,
+                int _output_tiles           = 1,
+                int _input_tile_chunk_size  = 1,
                 int _output_tile_chunk_size = 1,
-                int _input_tile_batch_size = 1,
+                int _input_tile_batch_size  = 1,
                 int _output_tile_batch_size = 1,
-                bool _tiling = false)
+                bool _tiling                = false)
       : GLFilter("GLConvolution",
                  vertex_shader,
                  fragment_shader,
                  input_bindings(_input_batch_size, _output_batch_size),
-                 uniform_blocks_bindings(_input_batch_size,
-                                         _output_batch_size,
-                                         _output_tile_batch_size,
-                                         _prelu_scale != nullptr),
+                 uniform_blocks_bindings(
+                     _input_batch_size, _output_batch_size, _output_tile_batch_size, _prelu_scale != nullptr),
                  {/* no attributes */},
                  {{"KERNEL_SIZE_X", caffe2::to_string(_geometry.kernel_size.x)},
                   {"KERNEL_SIZE_Y", caffe2::to_string(_geometry.kernel_size.y)},
@@ -136,19 +132,16 @@ class GLConvolution : public GLFilter {
                   {"OUTPUT_TILE_BATCH_SIZE", caffe2::to_string(_output_tile_batch_size)},
                   {"TILED_CONVOLUTION", caffe2::to_string(_tiling)},
                   {"INPUT_PADDING_X",
-                   caffe2::to_string(_geometry.transposed
-                                         ? _geometry.kernel_size.x - 1 - _geometry.input_padding.x
-                                         : _geometry.input_padding.x)},
+                   caffe2::to_string(_geometry.transposed ? _geometry.kernel_size.x - 1 - _geometry.input_padding.x
+                                                          : _geometry.input_padding.x)},
                   {"INPUT_PADDING_Y",
-                   caffe2::to_string(_geometry.transposed
-                                         ? _geometry.kernel_size.y - 1 - _geometry.input_padding.y
-                                         : _geometry.input_padding.y)},
+                   caffe2::to_string(_geometry.transposed ? _geometry.kernel_size.y - 1 - _geometry.input_padding.y
+                                                          : _geometry.input_padding.y)},
                   {"INPUT_STRIDE_X", caffe2::to_string(_geometry.input_stride.x)},
                   {"INPUT_STRIDE_Y", caffe2::to_string(_geometry.input_stride.y)},
                   {"TRANSPOSED_CONVOLUTION", caffe2::to_string(_geometry.transposed)},
                   {"TEXTURE_BORDER_CLAMP",
-                   caffe2::to_string(
-                       GLContext::getGLContext()->GL_EXT_texture_border_clamp_defined())}}),
+                   caffe2::to_string(GLContext::getGLContext()->GL_EXT_texture_border_clamp_defined())}}),
         kernel(_kernel),
         bias(_bias),
         prelu_scale(_prelu_scale),
@@ -164,14 +157,31 @@ class GLConvolution : public GLFilter {
         output_tile_batch_size(_output_tile_batch_size),
         tiling(_tiling) {
     int binding_point = 0;
-    attach_uniform_buffer<float16_t>(bias_block, binding_point++, nullptr, 0);
+    attach_uniform_buffer<float16_t>(bias_block, binding_point++, nullptr);
 
     for (int ob = 0; ob < std::max(input_batch_size, output_tile_batch_size); ob++) {
-      attach_uniform_buffer<float16_t>(kernel_block[ob], binding_point++, nullptr, 0);
+      attach_uniform_buffer<float16_t>(kernel_block[ob], binding_point++, nullptr);
     }
 
     if (_prelu_scale != nullptr) {
-      attach_uniform_buffer<float16_t>(prelu_scale_block, binding_point++, nullptr, 0);
+      attach_uniform_buffer<float16_t>(prelu_scale_block, binding_point++, nullptr);
+    }
+
+    if (tiling) {
+      const int num_kernel_block = input_tile_batch_size * output_tile_batch_size;
+      kernel_block_buffers       = (float16_t**)malloc(num_kernel_block * sizeof(float16_t*));
+      for (int i = 0; i < num_kernel_block; i++) {
+        kernel_block_buffers[i] = nullptr;
+      }
+    }
+  }
+
+  ~GLConvolution() {
+    if (kernel_block_buffers) {
+      for (int i = 0; i < input_tile_batch_size * output_tile_batch_size; i++) {
+        free(kernel_block_buffers[i]);
+      }
+      free(kernel_block_buffers);
     }
   }
 
@@ -179,23 +189,16 @@ class GLConvolution : public GLFilter {
   void convolution(const GLImageVector<T>& input_images, const GLImageVector<T>& output_images);
 
   // for batching
-  void pack_kernel_data(float16_t* data,
-                        size_t size,
-                        int input_channels,
-                        int output_channels,
-                        int is,
-                        int os,
-                        int ib) {
-    size_t kernel_batch_size = 4 * 4 * output_batch_size * geometry.kernel_size.y *
-                               geometry.kernel_size.x * sizeof(float16_t);
+  void pack_kernel_data(float16_t* data, size_t size, int input_channels, int output_channels, int is, int os, int ib) {
+    size_t kernel_batch_size =
+        4 * 4 * output_batch_size * geometry.kernel_size.y * geometry.kernel_size.x * sizeof(float16_t);
 
     if (size != kernel_batch_size) {
       std::cerr << "size: " << size << ", kernel_batch_Size: " << kernel_batch_size << "\n";
       throw std::runtime_error("Kernel size mismatch");
     }
 
-    typedef float16_t(
-        packedKernel)[output_batch_size][geometry.kernel_size.y][geometry.kernel_size.x][4][4];
+    typedef float16_t(packedKernel)[output_batch_size][geometry.kernel_size.y][geometry.kernel_size.x][4][4];
     packedKernel& packed_kernel_data = *reinterpret_cast<packedKernel*>(data);
 
     const int batch_input_channels = std::min(4, input_channels - 4 * (is + ib));
@@ -231,16 +234,16 @@ class GLConvolution : public GLFilter {
                         int output_channels,
                         point input_tile_range,
                         point output_tile_range) {
-    size_t kernel_batch_size = (4 * input_tile_chunk_size) * (4 * output_tile_chunk_size) *
-                               geometry.kernel_size.y * geometry.kernel_size.x * sizeof(float16_t);
+    size_t kernel_batch_size = (4 * input_tile_chunk_size) * (4 * output_tile_chunk_size) * geometry.kernel_size.y *
+                               geometry.kernel_size.x * sizeof(float16_t);
 
     if (size != kernel_batch_size) {
       std::cerr << "size: " << size << ", kernel_batch_Size: " << kernel_batch_size << "\n";
       throw std::runtime_error("Kernel size mismatch");
     }
 
-    typedef float16_t(packedKernel)[input_tile_chunk_size][output_tile_chunk_size]
-                                   [geometry.kernel_size.y][geometry.kernel_size.x][4][4];
+    typedef float16_t(packedKernel)[input_tile_chunk_size][output_tile_chunk_size][geometry.kernel_size.y]
+                                   [geometry.kernel_size.x][4][4];
     packedKernel& packed_kernel_data = *reinterpret_cast<packedKernel*>(data);
 
     for (int it = input_tile_range.x; it < input_tile_range.y; it++) {
@@ -609,8 +612,8 @@ void main() {
 )GLSL";
 
 template <typename T>
-void GLConvolution::convolution(const GLImageVector<T>& input_images,
-                                const GLImageVector<T>& output_images) {
+void GLConvolution::convolution(const GLImageVector<T>& input_images, const GLImageVector<T>& output_images) {
+  int executions = 0;
 
   for (int i = 0; i < input_images.size(); i++) {
     GLImage<T>* input_image = input_images[i];
@@ -621,8 +624,6 @@ void GLConvolution::convolution(const GLImageVector<T>& input_images,
     int input_tile_y = input_image->tile_y;
     int input_tiles = input_image->tile_x * input_image->tile_y;
     int output_tiles = output_image->tile_x * output_image->tile_y;
-
-    int batch_number = 0;
 
     for (int is = 0; is < input_slices; is += input_batch_size) {
       for (int os = 0; os < output_slices; os += output_batch_size) {
@@ -638,80 +639,86 @@ void GLConvolution::convolution(const GLImageVector<T>& input_images,
           int binding_point = 0;
 
           // bias
-          attach_uniform_buffer<float16_t>(
-              bias_block,
-              binding_point++,
-              [&](float16_t* data, size_t size) {
-                const int bias_chunk_size =
-                    output_tiles * (4 * ((output_batch_size + 1) / 2 * 2) * sizeof(float16_t));
-                if (size != bias_chunk_size) {
-                  std::cerr << "size: " << size << ", bias_chunk_size: " << bias_chunk_size << "\n";
-                  throw std::runtime_error("Bias size mismatch");
-                }
+          attach_uniform_buffer<float16_t>(bias_block, binding_point++, [&](float16_t* data, size_t size) {
+            const int bias_chunk_size = output_tiles * (4 * ((output_batch_size + 1) / 2 * 2) * sizeof(float16_t));
+            if (size != bias_chunk_size) {
+              std::cerr << "size: " << size << ", bias_chunk_size: " << bias_chunk_size << "\n";
+              throw std::runtime_error("Bias size mismatch");
+            }
 
-                for (int ob = 0; ob < output_channels_per_batch; ob++) {
-                  data[ob] = bias[4 * os * output_tiles + ob];
-                }
-              },
-              batch_number);
+            for (int ob = 0; ob < output_channels_per_batch; ob++) {
+              data[ob] = bias[4 * os * output_tiles + ob];
+            }
+          });
 
           // kernel weights
           if (!tiling) {
             for (int ib = 0; ib < input_batch_size; ib++) {
-              attach_uniform_buffer<float16_t>(
-                  kernel_block[ib],
-                  binding_point++,
-                  [&](float16_t* data, size_t size) {
-                    pack_kernel_data(
-                        data, size, input_image->channels, output_image->channels, is, os, ib);
-                  },
-                  batch_number);
+              attach_uniform_buffer<float16_t>(kernel_block[ib], binding_point++, [&](float16_t* data, size_t size) {
+                pack_kernel_data(data, size, input_image->channels, output_image->channels, is, os, ib);
+              });
             }
           } else {
             for (int ob = 0, ot = 0; ot < output_tiles; ob++, ot += output_tile_chunk_size) {
-              attach_uniform_buffer<float16_t>(
-                  kernel_block[ob],
-                  binding_point++,
-                  [&](float16_t* data, size_t size) {
-                    pack_kernel_data(data,
-                                     size,
-                                     input_image->channels,
-                                     output_image->channels,
-                                     {it, std::min(it + input_tile_chunk_size, input_tiles)},
-                                     {ot, std::min(ot + output_tile_chunk_size, output_tiles)});
-                  },
-                  batch_number);
+              attach_uniform_buffer<float16_t>(kernel_block[ob], binding_point++, [&](float16_t* data, size_t size) {
+#if 0
+                    const int kernel_block_size = (4 * input_tile_chunk_size) *
+                                                  (4 * output_tile_chunk_size) *
+                                                  geometry.kernel_size.y * geometry.kernel_size.x;
+                    int kernel_block_idx = ib * output_tile_batch_size + ob;
+                    if (kernel_block_buffers[kernel_block_idx] == nullptr) {
+                      const int alignment = 32;
+#ifdef __ANDROID__
+                      kernel_block_buffers[kernel_block_idx] =
+                          (float16_t*)memalign(alignment, kernel_block_size * sizeof(float16_t));
+#else
+                                          posix_memalign((void**)&kernel_block_buffers[kernel_block_idx],
+                                          alignment, kernel_block_size * sizeof(float16_t));
+#endif
+                      CAFFE_ENFORCE(kernel_block_buffers[kernel_block_idx]);
+
+                      pack_kernel_data(kernel_block_buffers[kernel_block_idx],
+                                       size,
+                                       input_image->channels,
+                                       output_image->channels,
+                                       {it, std::min(it + input_tile_chunk_size, input_tiles)},
+                                       {ot, std::min(ot + output_tile_chunk_size, output_tiles)});
+                    }
+                    memcpy(data,
+                           kernel_block_buffers[kernel_block_idx],
+                           kernel_block_size * sizeof(float16_t));
+#else
+                    pack_kernel_data(
+                        data,
+                        size,
+                        input_image->channels,
+                        output_image->channels,
+                        {it, std::min(it + input_tile_chunk_size, input_tiles)},
+                        {ot,
+                         std::min(ot + output_tile_chunk_size, output_tiles)});
+#endif
+              });
             }
           }
 
           // PRelu scale
           if (!tiling) {
             if (prelu_scale != nullptr && is == input_slices - input_batch_size) {
-              attach_uniform_buffer<float16_t>(
-                  prelu_scale_block,
-                  binding_point++,
-                  [&](float16_t* data, size_t size) {
-                    for (int ob = 0; ob < output_channels_per_batch; ob++) {
-                      data[ob] = prelu_scale_size == geometry.output_channels
-                                     ? prelu_scale[4 * os * output_tiles + ob]
-                                     : prelu_scale[0];
-                    }
-                  },
-                  batch_number);
+              attach_uniform_buffer<float16_t>(prelu_scale_block, binding_point++, [&](float16_t* data, size_t size) {
+                for (int ob = 0; ob < output_channels_per_batch; ob++) {
+                  data[ob] = prelu_scale_size == geometry.output_channels ? prelu_scale[4 * os * output_tiles + ob]
+                                                                          : prelu_scale[0];
+                }
+              });
             }
           } else {
             if (prelu_scale != nullptr && ib == input_tile_batch_size - 1) {
-              attach_uniform_buffer<float16_t>(
-                  prelu_scale_block,
-                  binding_point++,
-                  [&](float16_t* data, size_t size) {
-                    for (int ob = 0; ob < geometry.output_channels; ob++) {
-                      data[ob] = prelu_scale_size == geometry.output_channels
-                                     ? prelu_scale[4 * os * output_tiles + ob]
-                                     : prelu_scale[0];
-                    }
-                  },
-                  batch_number);
+              attach_uniform_buffer<float16_t>(prelu_scale_block, binding_point++, [&](float16_t* data, size_t size) {
+                for (int ob = 0; ob < geometry.output_channels; ob++) {
+                  data[ob] = prelu_scale_size == geometry.output_channels ? prelu_scale[4 * os * output_tiles + ob]
+                                                                          : prelu_scale[0];
+                }
+              });
             }
           }
 
@@ -724,27 +731,21 @@ void GLConvolution::convolution(const GLImageVector<T>& input_images,
           }
 
           run(input_attachments,
-              {output_image->textures.begin() + os,
-               output_image->textures.begin() + os + output_batch_size},
+              {output_image->textures.begin() + os, output_image->textures.begin() + os + output_batch_size},
               [&]() {
-                glUniform2i(outputSize->location,
-                            output_image->texture_width,
-                            output_image->texture_height);
+                glUniform2i(outputSize->location, output_image->texture_width, output_image->texture_height);
                 // [inputTileFrom, inputTileTo)
-                glUniform2i(inputTileRange->location,
-                            it,
-                            std::min(it + input_tile_chunk_size, input_tiles));
+                glUniform2i(inputTileRange->location, it, std::min(it + input_tile_chunk_size, input_tiles));
 
                 glUniform1i(accumulate->location, is != 0 || it != 0);
                 glUniform1i(fusePRelu->location,
-                            prelu_scale != nullptr &&
-                                ((tiling && ib == input_tile_batch_size - 1) ||
-                                 (!tiling && (is == input_slices - input_batch_size))));
+                            prelu_scale != nullptr && ((tiling && ib == input_tile_batch_size - 1) ||
+                                                       (!tiling && (is == input_slices - input_batch_size))));
               },
               output_image->texture_width,
               output_image->texture_height);
 
-          batch_number++;
+          executions++;
         }
       }
     }
@@ -770,28 +771,21 @@ static int computeOutputTileChunkSize(int output_tile_x,
                                       int kernel_width,
                                       int kernel_height) {
   static const int maxUniformBlockBufferSize = 16 * 1024;
-  return std::min(
-      output_tile_x * output_tile_y,
-      maxUniformBlockBufferSize / 4 / (4 * kernel_width * kernel_height * (int)sizeof(float16_t)));
+  return std::min(output_tile_x * output_tile_y,
+                  maxUniformBlockBufferSize / 4 / (4 * kernel_width * kernel_height * (int)sizeof(float16_t)));
 }
 
-static int computeInputTileChunkSize(int input_tile_x,
-                                     int input_tile_y,
-                                     int output_tile_chunk_size,
-                                     int kernel_width,
-                                     int kernel_height) {
+static int computeInputTileChunkSize(
+    int input_tile_x, int input_tile_y, int output_tile_chunk_size, int kernel_width, int kernel_height) {
   static const int maxUniformBlockBufferSize = 16 * 1024;
-  return std::min(
-      input_tile_x * input_tile_y,
-      maxUniformBlockBufferSize / 4 /
-          (4 * output_tile_chunk_size * kernel_width * kernel_height * (int)sizeof(float16_t)));
+  return std::min(input_tile_x * input_tile_y,
+                  maxUniformBlockBufferSize / 4 /
+                      (4 * output_tile_chunk_size * kernel_width * kernel_height * (int)sizeof(float16_t)));
 }
 
 // Todo: optimize input/output batch size and use of uniforms/textures for
 // kernel data
-static void computeBatchSizes(GLConvolution::descriptor& geometry,
-                              int& input_batch_size,
-                              int& output_batch_size) {
+static void computeBatchSizes(GLConvolution::descriptor& geometry, int& input_batch_size, int& output_batch_size) {
   int kernel_size = std::max(geometry.kernel_size.x, geometry.kernel_size.y);
   int input_slices = (geometry.input_channels + 3) / 4;
   int output_slices = (geometry.output_channels + 3) / 4;
@@ -806,22 +800,20 @@ static void computeBatchSizes(GLConvolution::descriptor& geometry,
         /* input_slices % 8 == 0 ? 8 : */ input_slices % 4 == 0
             ? 4
             : input_slices % 3 == 0 ? 3 : input_slices % 2 == 0 ? 2 : 1;
-    output_batch_size =
-        output_slices % 4 == 0 ? 4 : output_slices % 3 == 0 ? 3 : output_slices % 2 == 0 ? 2 : 1;
+    output_batch_size = output_slices % 4 == 0 ? 4 : output_slices % 3 == 0 ? 3 : output_slices % 2 == 0 ? 2 : 1;
   }
 #endif
 }
 
 template <class T, bool fusePRelu, bool fuseRelu>
 class OpenGLConvOp final : public ConvPoolOpBase<CPUContext>, ImageAllocator<T> {
- public:
+public:
   USE_OPERATOR_BASE_FUNCTIONS;
   OpenGLConvOp(const OperatorDef& operator_def, Workspace* ws)
       : ConvPoolOpBase<CPUContext>(operator_def, ws) {
     OPERATOR_NEEDS_FEATURE(this->order_ == StorageOrder::NCHW, "OpenGL only supports NCHW order.");
     OPERATOR_NEEDS_FEATURE(group_ == 1, "OpenGL only supports group == 1");
-    OPERATOR_NEEDS_FEATURE(dilation_h() == 1 && dilation_w() == 1,
-                           "OpenGL only supports dialation == 1");
+    OPERATOR_NEEDS_FEATURE(dilation_h() == 1 && dilation_w() == 1, "OpenGL only supports dialation == 1");
   }
 
   bool RunOnDeviceWithOrderNCHW() override {
@@ -876,30 +868,17 @@ class OpenGLConvOp final : public ConvPoolOpBase<CPUContext>, ImageAllocator<T> 
       computeOutputTiles(output_channels, output_tile_x, output_tile_y);
       output_tiles = output_tile_x * output_tile_y;
 
-#if MAXIMIZE_BUFFERS
-      int maxTiles = MaxOutputTileBatchSize;
-#else
-      for (int maxTiles = 1; maxTiles <= MaxOutputTileBatchSize; maxTiles++)
-#endif
-      {
-        output_tile_chunk_size =
-            computeOutputTileChunkSize(output_tile_x, output_tile_y, kernel_width, kernel_height);
-        output_tile_batch_size = std::max(
-            maxTiles, (output_tiles + output_tile_chunk_size - 1) / output_tile_chunk_size);
-        output_tile_chunk_size =
-            (output_tiles + output_tile_batch_size - 1) / output_tile_batch_size;
-        output_tile_batch_size =
-            (output_tiles + output_tile_chunk_size - 1) / output_tile_chunk_size;
+      output_tile_chunk_size = computeOutputTileChunkSize(output_tile_x, output_tile_y, kernel_width, kernel_height);
+      output_tile_batch_size =
+          std::max(MaxOutputTileBatchSize, (output_tiles + output_tile_chunk_size - 1) / output_tile_chunk_size);
+      output_tile_chunk_size = (output_tiles + output_tile_batch_size - 1) / output_tile_batch_size;
+      output_tile_batch_size = (output_tiles + output_tile_chunk_size - 1) / output_tile_chunk_size;
 
-        input_tile_chunk_size = computeInputTileChunkSize(
-            input_tile_x, input_tile_y, output_tile_chunk_size, kernel_width, kernel_height);
-        input_tile_batch_size = (input_tiles + input_tile_chunk_size - 1) / input_tile_chunk_size;
-// input_tile_chunk_size = (input_tiles + input_tile_batch_size - 1) / input_tile_batch_size;
-#if !MAXIMIZE_BUFFERS
-        if (input_tile_batch_size == 1)
-          break;
-#endif
-      }
+      input_tile_chunk_size =
+          computeInputTileChunkSize(input_tile_x, input_tile_y, output_tile_chunk_size, kernel_width, kernel_height);
+      input_tile_batch_size = (input_tiles + input_tile_chunk_size - 1) / input_tile_chunk_size;
+      // input_tile_chunk_size = (input_tiles + input_tile_batch_size - 1) /
+      // input_tile_batch_size;
     }
     CAFFE_ENFORCE_GT(input_tile_chunk_size, 0);
     CAFFE_ENFORCE_GT(output_tile_chunk_size, 0);
@@ -907,13 +886,8 @@ class OpenGLConvOp final : public ConvPoolOpBase<CPUContext>, ImageAllocator<T> 
 
     int is_last = GetSingleArgument<int>("is_last", 0);
 
-    GLImageVector<T>* output = ImageAllocator<T>::newImage(num_images,
-                                                           output_width,
-                                                           output_height,
-                                                           output_channels,
-                                                           output_tile_x,
-                                                           output_tile_y,
-                                                           is_last);
+    GLImageVector<T>* output = ImageAllocator<T>::newImage(
+        num_images, output_width, output_height, output_channels, output_tile_x, output_tile_y, is_last);
 
     // TODO: figure out the dilation business
     GLConvolution::descriptor geometry{input_channels,
@@ -931,25 +905,19 @@ class OpenGLConvOp final : public ConvPoolOpBase<CPUContext>, ImageAllocator<T> 
       int input_batch_size = 1, output_batch_size = 1;
       if (!tiling) {
         computeBatchSizes(geometry, input_batch_size, output_batch_size);
-        input_batch_size = GetSingleArgument<int>("input_batch_size", input_batch_size);
+        input_batch_size  = GetSingleArgument<int>("input_batch_size", input_batch_size);
         output_batch_size = GetSingleArgument<int>("output_batch_size", output_batch_size);
       }
 
-      LOG(INFO) << input_channels << ": " << input_height << " X " << input_width << " => "
-                << output_channels << ": " << output_height << " X " << output_width
-                << " Kernel: " << kernel_width << "X" << kernel_height;
+      LOG(INFO) << input_channels << ": " << input_height << " X " << input_width << " => " << output_channels << ": "
+                << output_height << " X " << output_width << " Kernel: " << kernel_width << "X" << kernel_height;
       if (tiling) {
-        LOG(INFO) << "Tiling: " << input_tile_x << " X " << input_tile_y << " => " << output_tile_x
-                  << " X " << output_tile_y << ", Texture size: " << input_width * input_tile_x
-                  << " X " << input_height * input_tile_y << " => " << output_width * output_tile_x
-                  << " X " << output_height * output_tile_y
-                  << ", input_tile_batch_size: " << input_tile_batch_size
-                  << ", input_tile_chunk_size: " << input_tile_chunk_size
-                  << ", output_tile_batch_size: " << output_tile_batch_size
-                  << ", output_tile_chunk_size: " << output_tile_chunk_size;
+        LOG(INFO) << "Tiling: " << input_tile_x << " X " << input_tile_y << " => " << output_tile_x << " X "
+                  << output_tile_y << ", Texture size: " << input_width * input_tile_x << " X "
+                  << input_height * input_tile_y << " => " << output_width * output_tile_x << " X "
+                  << output_height * output_tile_y << ", Input tile batch size: " << input_tile_batch_size;
       } else {
-        LOG(INFO) << "input_batch_size = " << input_batch_size
-                  << ", output_batch_size = " << output_batch_size;
+        LOG(INFO) << "input_batch_size = " << input_batch_size << ", output_batch_size = " << output_batch_size;
       }
 
       conv.reset(new GLConvolution(geometry,
@@ -992,13 +960,12 @@ OPERATOR_SCHEMA(OpenGLConvRelu).NumInputs(3).NumOutputs(1);
 
 template <class T, bool fusePRelu, bool fuseRelu>
 class OpenGLConvTransposeOp final : public ConvTransposeUnpoolBase<CPUContext>, ImageAllocator<T> {
- public:
+public:
   USE_OPERATOR_BASE_FUNCTIONS;
   OpenGLConvTransposeOp(const OperatorDef& operator_def, Workspace* ws)
       : ConvTransposeUnpoolBase<CPUContext>(operator_def, ws) {
     OPERATOR_NEEDS_FEATURE(this->order_ == StorageOrder::NCHW, "OpenGL only supports NCHW order.");
-    OPERATOR_NEEDS_FEATURE(adj_h() == 0 && adj_w() == 0,
-                           "OpenGL only supports adj_h == 1 and adj_w == 1");
+    OPERATOR_NEEDS_FEATURE(adj_h() == 0 && adj_w() == 0, "OpenGL only supports adj_h == 1 and adj_w == 1");
   }
 
   bool RunOnDeviceWithOrderNCHW() override {
@@ -1043,8 +1010,7 @@ class OpenGLConvTransposeOp final : public ConvTransposeUnpoolBase<CPUContext>, 
     const int input_tile_x = input.tile_x(), input_tile_y = input.tile_y();
     int output_tile_x = 1, output_tile_y = 1;
     int input_tiles = input_tile_x * input_tile_y, output_tiles = 1;
-    int input_tile_chunk_size = 1, output_tile_chunk_size = 1, input_tile_batch_size = 1,
-        output_tile_batch_size = 1;
+    int input_tile_chunk_size = 1, output_tile_chunk_size = 1, input_tile_batch_size = 1, output_tile_batch_size = 1;
 
     const bool tiling = GetSingleArgument<int>("tiling", input_tile_x > 1 || input_tile_y > 1);
 
@@ -1054,30 +1020,17 @@ class OpenGLConvTransposeOp final : public ConvTransposeUnpoolBase<CPUContext>, 
       computeOutputTiles(output_channels, output_tile_x, output_tile_y);
       output_tiles = output_tile_x * output_tile_y;
 
-#if MAXIMIZE_BUFFERS
-      int maxTiles = MaxOutputTileBatchSize;
-#else
-      for (int maxTiles = 1; maxTiles <= MaxOutputTileBatchSize; maxTiles++)
-#endif
-      {
-        output_tile_chunk_size =
-            computeOutputTileChunkSize(output_tile_x, output_tile_y, kernel_width, kernel_height);
-        output_tile_batch_size = std::max(
-            maxTiles, (output_tiles + output_tile_chunk_size - 1) / output_tile_chunk_size);
-        output_tile_chunk_size =
-            (output_tiles + output_tile_batch_size - 1) / output_tile_batch_size;
-        output_tile_batch_size =
-            (output_tiles + output_tile_chunk_size - 1) / output_tile_chunk_size;
+      output_tile_chunk_size = computeOutputTileChunkSize(output_tile_x, output_tile_y, kernel_width, kernel_height);
+      output_tile_batch_size =
+          std::max(MaxOutputTileBatchSize, (output_tiles + output_tile_chunk_size - 1) / output_tile_chunk_size);
+      output_tile_chunk_size = (output_tiles + output_tile_batch_size - 1) / output_tile_batch_size;
+      output_tile_batch_size = (output_tiles + output_tile_chunk_size - 1) / output_tile_chunk_size;
 
-        input_tile_chunk_size = computeInputTileChunkSize(
-            input_tile_x, input_tile_y, output_tile_chunk_size, kernel_width, kernel_height);
-        input_tile_batch_size = (input_tiles + input_tile_chunk_size - 1) / input_tile_chunk_size;
-// input_tile_chunk_size = (input_tiles + input_tile_batch_size - 1) / input_tile_batch_size;
-#if !MAXIMIZE_BUFFERS
-        if (input_tile_batch_size == 1)
-          break;
-#endif
-      }
+      input_tile_chunk_size =
+          computeInputTileChunkSize(input_tile_x, input_tile_y, output_tile_chunk_size, kernel_width, kernel_height);
+      input_tile_batch_size = (input_tiles + input_tile_chunk_size - 1) / input_tile_chunk_size;
+      // input_tile_chunk_size = (input_tiles + input_tile_batch_size - 1) /
+      // input_tile_batch_size;
     }
     CAFFE_ENFORCE_GT(input_tile_chunk_size, 0);
     CAFFE_ENFORCE_GT(output_tile_chunk_size, 0);
@@ -1085,13 +1038,8 @@ class OpenGLConvTransposeOp final : public ConvTransposeUnpoolBase<CPUContext>, 
 
     int is_last = GetSingleArgument<int>("is_last", 0);
 
-    GLImageVector<T>* output = ImageAllocator<T>::newImage(num_images,
-                                                           output_width,
-                                                           output_height,
-                                                           output_channels,
-                                                           output_tile_x,
-                                                           output_tile_y,
-                                                           is_last);
+    GLImageVector<T>* output = ImageAllocator<T>::newImage(
+        num_images, output_width, output_height, output_channels, output_tile_x, output_tile_y, is_last);
 
     // TODO: figure out the adj business
     GLConvolution::descriptor geometry{input_channels,
@@ -1109,23 +1057,20 @@ class OpenGLConvTransposeOp final : public ConvTransposeUnpoolBase<CPUContext>, 
       int input_batch_size = 1, output_batch_size = 1;
       if (!tiling) {
         computeBatchSizes(geometry, input_batch_size, output_batch_size);
-        input_batch_size = GetSingleArgument<int>("input_batch_size", input_batch_size);
+        input_batch_size  = GetSingleArgument<int>("input_batch_size", input_batch_size);
         output_batch_size = GetSingleArgument<int>("output_batch_size", output_batch_size);
       }
 
-      LOG(INFO) << input_channels << ": " << input_height << " X " << input_width << " => "
-                << output_channels << ": " << output_height << " X " << output_width
-                << " Kernel: " << kernel_width << "X" << kernel_height;
+      LOG(INFO) << input_channels << ": " << input_height << " X " << input_width << " => " << output_channels << ": "
+                << output_height << " X " << output_width << " Kernel: " << kernel_width << "X" << kernel_height;
 
       if (tiling) {
-        LOG(INFO) << "Tiling: " << input_tile_x << " X " << input_tile_y << " => " << output_tile_x
-                  << " X " << output_tile_y << ", Texture size: " << input_width * input_tile_x
-                  << " X " << input_height * input_tile_y << " => " << output_width * output_tile_x
-                  << " X " << output_height * output_tile_y
-                  << ", Input tile batch size: " << input_tile_batch_size;
+        LOG(INFO) << "Tiling: " << input_tile_x << " X " << input_tile_y << " => " << output_tile_x << " X "
+                  << output_tile_y << ", Texture size: " << input_width * input_tile_x << " X "
+                  << input_height * input_tile_y << " => " << output_width * output_tile_x << " X "
+                  << output_height * output_tile_y << ", Input tile batch size: " << input_tile_batch_size;
       } else {
-        LOG(INFO) << "input_batch_size = " << input_batch_size
-                  << ", output_batch_size = " << output_batch_size;
+        LOG(INFO) << "input_batch_size = " << input_batch_size << ", output_batch_size = " << output_batch_size;
       }
 
       conv.reset(new GLConvolution(geometry,

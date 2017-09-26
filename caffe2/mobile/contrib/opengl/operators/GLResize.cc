@@ -19,8 +19,7 @@ class GLResizeNearest : public GLFilter {
       : GLFilter("GLResizeNearest",
                  vertex_shader,
                  fragment_shader,
-                 std::vector<binding*>(
-                     {BINDING(outputSize), BINDING(scale_reverse), BINDING(inputData)}),
+                 std::vector<binding*>({BINDING(outputSize), BINDING(scale_reverse), BINDING(inputData)}),
                  {/* no uniform blocks*/},
                  {/* no attributes */},
                  {/* replacements */}) {}
@@ -74,8 +73,7 @@ void GLResizeNearest::resize(const GLImageVector<T>& input_images,
       run(input_attachments,
           {output_image->textures.begin() + is, output_image->textures.begin() + is + 1},
           [&]() {
-            glUniform2i(
-                outputSize->location, output_image->texture_width, output_image->texture_height);
+            glUniform2i(outputSize->location, output_image->texture_width, output_image->texture_height);
             glUniform2f(scale_reverse->location, width_scale_rev, height_scale_rev);
           },
           output_image->texture_width,
@@ -114,13 +112,8 @@ class OpenGLResizeNearestOp final : public Operator<CPUContext>, ImageAllocator<
     const int output_tile_x = input_tile_x, output_tile_y = input_tile_y;
 
     int is_last = OperatorBase::GetSingleArgument<int>("is_last", 0);
-    GLImageVector<T>* output = ImageAllocator<T>::newImage(num_images,
-                                                           output_width,
-                                                           output_height,
-                                                           output_channels,
-                                                           output_tile_x,
-                                                           output_tile_y,
-                                                           is_last);
+    GLImageVector<T>* output = ImageAllocator<T>::newImage(
+        num_images, output_width, output_height, output_channels, output_tile_x, output_tile_y, is_last);
 
     if (!resizeNearest_) {
       resizeNearest_.reset(new GLResizeNearest());

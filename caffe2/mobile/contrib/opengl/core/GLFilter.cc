@@ -87,95 +87,52 @@ std::string GLFilter::process_replacements(std::string shader,
 template <typename T>
 void GLFilter::attach_uniform_buffer(const binding* block,
                                      GLuint bindingPoint,
-                                     std::function<void(T*, size_t)> loader,
-                                     int batch) {
-  // Force uniform buffer caching to turn off by default
-  bool no_batch = true;
-  batch         = 0;
-  if (batch < 0) {
-    batch = 0;
-    no_batch = true;
-  }
-
+                                     std::function<void(T*, size_t)> loader) {
   if (block->location >= 0) {
     if (bindingPoint < kMaxUniformBlocks) {
-      while (uniformBlock.size() < bindingPoint + 1) {
-        uniformBlock.push_back(std::vector<uniformBlockInfo>());
-      }
-      while (uniformBlock[bindingPoint].size() < batch + 1) {
-        uniformBlock[bindingPoint].push_back({0, 0, false});
-      }
-      if (uniformBlock[bindingPoint][batch].buffer == 0) {
+      if (uniformBlock[bindingPoint] == 0) {
         // Associate the uniform block index with a binding point
         glUniformBlockBinding(program, block->location, bindingPoint);
 
         // Get the size of block
-        glGetActiveUniformBlockiv(program,
-                                  block->location,
-                                  GL_UNIFORM_BLOCK_DATA_SIZE,
-                                  &uniformBlock[bindingPoint][batch].size);
+        glGetActiveUniformBlockiv(program, block->location, GL_UNIFORM_BLOCK_DATA_SIZE, &blockSize[bindingPoint]);
 
         // Create and fill a buffer object
-        glGenBuffers(1, &uniformBlock[bindingPoint][batch].buffer);
+        glGenBuffers(1, &uniformBlock[bindingPoint]);
 
-        gl_log(GL_VERBOSE,
-               "created uniform buffer block %d, batch %d, size %d\n",
-               uniformBlock[bindingPoint][batch].buffer,
-               batch,
-               uniformBlock[bindingPoint][batch].size);
+        gl_log(GL_VERBOSE, "created uniform buffer block %d\n", uniformBlock[bindingPoint]);
       }
 
-      // Bind the buffer object to the uniform block binding point
-      glBindBufferBase(GL_UNIFORM_BUFFER, bindingPoint, uniformBlock[bindingPoint][batch].buffer);
+      // Fill a buffer object
+      glBindBuffer(GL_UNIFORM_BUFFER, uniformBlock[bindingPoint]);
+      glBufferData(GL_UNIFORM_BUFFER, blockSize[bindingPoint], NULL, GL_DYNAMIC_DRAW);
 
       checkGLError([&](std::stringstream& errmsg) {
         errmsg << "Unable to bind uniform buffer " << block->name << ":" << block->location
                << " at binding point " << bindingPoint;
       });
 
-      if (no_batch || !uniformBlock[bindingPoint][batch].initialized) {
-        // Fill a buffer object
-        glBindBuffer(GL_UNIFORM_BUFFER, uniformBlock[bindingPoint][batch].buffer);
-        glBufferData(
-            GL_UNIFORM_BUFFER, uniformBlock[bindingPoint][batch].size, NULL, GL_STATIC_DRAW);
+      T* blockData = (T*)glMapBufferRange(
+          GL_UNIFORM_BUFFER, 0, blockSize[bindingPoint], GL_MAP_WRITE_BIT | GL_MAP_INVALIDATE_BUFFER_BIT);
+      if (blockData != NULL) {
+        // Copy the data into the mapped buffer
+        if (loader)
+          loader(blockData, blockSize[bindingPoint]);
 
-        checkGLError([&](std::stringstream& errmsg) {
-          errmsg << "Unable to bind uniform buffer data " << block->name << ":" << block->location
-                 << " at binding point " << bindingPoint;
-        });
-
-        T* blockData = (T*)glMapBufferRange(GL_UNIFORM_BUFFER,
-                                            0,
-                                            uniformBlock[bindingPoint][batch].size,
-                                            GL_MAP_WRITE_BIT | GL_MAP_INVALIDATE_BUFFER_BIT);
-        if (blockData != NULL) {
-          // Copy the data into the mapped buffer
-          if (loader) {
-            loader(blockData, uniformBlock[bindingPoint][batch].size);
-            uniformBlock[bindingPoint][batch].initialized = true;
-          }
-
-          gl_log(GL_VERBOSE,
-                 "loaded uniform buffer block %d, batch %d, size %d\n",
-                 uniformBlock[bindingPoint][batch].buffer,
-                 batch,
-                 uniformBlock[bindingPoint][batch].size);
-
-          // Unmap the buffer
-          if (glUnmapBuffer(GL_UNIFORM_BUFFER) != GL_TRUE) {
-            throwRuntimeError([&](std::stringstream& errmsg) {
-              errmsg << "Error unmapping element buffer object";
-            });
-          }
+        // Unmap the buffer
+        if (glUnmapBuffer(GL_UNIFORM_BUFFER) == GL_TRUE) {
+          // Bind the buffer object to the uniform block binding point
+          glBindBufferBase(GL_UNIFORM_BUFFER, bindingPoint, uniformBlock[bindingPoint]);
         } else {
-          throwRuntimeError([&](std::stringstream& errmsg) {
-            errmsg << "Error mapping element buffer object, blockSize: "
-                   << uniformBlock[bindingPoint][batch].size;
-          });
+          throwRuntimeError([&](std::stringstream& errmsg) { errmsg << "Error unmapping element buffer object"; });
         }
-
-        glBindBuffer(GL_UNIFORM_BUFFER, 0);
+      } else {
+        throwRuntimeError([&](std::stringstream& errmsg) {
+          errmsg << "Error mapping element buffer object, blockSize: " << blockSize;
+        });
       }
+
+      glBindBuffer(GL_UNIFORM_BUFFER, 0);
     } else {
       throwRuntimeError([&](std::stringstream& errmsg) {
         errmsg << "Uniform block binding point out of range: " << bindingPoint << ", should be < "
@@ -187,11 +144,9 @@ void GLFilter::attach_uniform_buffer(const binding* block,
   }
 }
 
-template void GLFilter::attach_uniform_buffer<float16_t>(
-    const binding* block,
-    GLuint bindingPoint,
-    std::function<void(float16_t*, size_t)> loader,
-    int batch);
+template void GLFilter::attach_uniform_buffer<float16_t>(const binding* block,
+                                                         GLuint bindingPoint,
+                                                         std::function<void(float16_t*, size_t)> loader);
 
 static const GLenum unused_capability[] = {GL_CULL_FACE,
                                            GL_BLEND,
@@ -413,15 +368,11 @@ void GLFilter::run(const std::vector<texture_attachment>& input,
 }
 
 void GLFilter::releaseBuffers() {
-  for (int i = 0; i < uniformBlock.size(); i++) {
-    for (int j = 0; j < uniformBlock[i].size(); j++) {
-      if (uniformBlock[i][j].buffer != 0) {
-        gl_log(GL_VERBOSE, "deleting uniformBlock[%d][%d] %d\n", i, j, uniformBlock[i][j].buffer);
-        glDeleteBuffers(1, &uniformBlock[i][j].buffer);
-        uniformBlock[i][j].buffer = 0;
-        uniformBlock[i][j].size = 0;
-        uniformBlock[i][j].initialized = false;
-      }
+  for (int i = 0; i < kMaxUniformBlocks; i++) {
+    if (uniformBlock[i]) {
+      gl_log(GL_VERBOSE, "deleting uniform buffer block %d\n", uniformBlock[i]);
+      glDeleteBuffers(1, &uniformBlock[i]);
+      uniformBlock[i] = 0;
     }
   }
   if (frameBuffer) {
