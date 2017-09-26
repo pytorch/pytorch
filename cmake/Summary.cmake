@@ -1,21 +1,9 @@
 # Prints accumulated Caffe2 configuration summary
-function (Caffe2_print_configuration_summary)
-
-  if(GIT_FOUND)
-    execute_process(COMMAND ${GIT_EXECUTABLE} describe --tags --always --dirty
-                    ERROR_QUIET OUTPUT_STRIP_TRAILING_WHITESPACE
-                    WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}"
-                    OUTPUT_VARIABLE Caffe2_GIT_VERSION
-                    RESULT_VARIABLE __git_result)
-    if(NOT ${__git_result} EQUAL 0)
-      set(Caffe2_GIT_VERSION "unknown")
-    endif()
-  endif()
-
+function (caffe2_print_configuration_summary)
   message(STATUS "")
   message(STATUS "******** Summary ********")
   message(STATUS "General:")
-  message(STATUS "  Git version           : ${Caffe2_GIT_VERSION}")
+  message(STATUS "  Git version           : ${CAFFE2_GIT_VERSION}")
   message(STATUS "  System                : ${CMAKE_SYSTEM_NAME}")
   message(STATUS "  C++ compiler          : ${CMAKE_CXX_COMPILER}")
   message(STATUS "  C++ compiler version  : ${CMAKE_CXX_COMPILER_VERSION}")
@@ -50,6 +38,7 @@ function (Caffe2_print_configuration_summary)
     message(STATUS "    LevelDB version     : ${LEVELDB_VERSION}")
     message(STATUS "    Snappy version      : ${Snappy_VERSION}")
   endif()
+  message(STATUS "  USE_LITE_PROTO        : ${USE_LITE_PROTO}")
   message(STATUS "  USE_LMDB              : ${USE_LMDB}")
   if(${USE_LMDB})
     message(STATUS "    LMDB version        : ${LMDB_VERSION}")

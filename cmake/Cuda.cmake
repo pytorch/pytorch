@@ -1,54 +1,13 @@
+# Caffe2 cmake utility to prepare for cuda build.
+# This cmake file is called from Dependencies.cmake. You do not need to
+# manually invoke it.
+
 # Known NVIDIA GPU achitectures Caffe2 can be compiled for.
-##set(Caffe2_known_gpu_archs9 "30 35 50 52 60 61 70 71") # for CUDA 9.x, not supported yet
+# Default is set to cuda 9. If we detect the cuda architectores to be less than
+# 9, we will lower it to the corresponding known archs.
+set(Caffe2_known_gpu_archs "30 35 50 52 60 61 70") # for CUDA 9.x
 set(Caffe2_known_gpu_archs8 "20 21(20) 30 35 50 52 60 61") # for CUDA 8.x
 set(Caffe2_known_gpu_archs7 "20 21(20) 30 35 50 52") # for CUDA 7.x
-# This list will be used for CUDA_ARCH_NAME = All option
-set(Caffe2_known_gpu_archs "20 21(20) 30 35 50 52 60 61 70")
-set(Caffe2_known_gpu_archs7 "20 21(20) 30 35 50 52")
-set(Caffe2_known_gpu_archs8 "20 21(20) 30 35 50 52 60 61")
-
-################################################################################################
-# A function for automatic detection of GPUs installed  (if autodetection is enabled)
-# Usage:
-#   caffe_detect_installed_gpus(out_variable)
-function(caffe2_detect_installed_gpus out_variable)
-  if(NOT CUDA_gpu_detect_output)
-    set(__cufile ${PROJECT_BINARY_DIR}/detect_cuda_archs.cu)
-
-    file(WRITE ${__cufile} ""
-      "#include <cstdio>\n"
-      "int main()\n"
-      "{\n"
-      "  int count = 0;\n"
-      "  if (cudaSuccess != cudaGetDeviceCount(&count)) return -1;\n"
-      "  if (count == 0) return -1;\n"
-      "  for (int device = 0; device < count; ++device)\n"
-      "  {\n"
-      "    cudaDeviceProp prop;\n"
-      "    if (cudaSuccess == cudaGetDeviceProperties(&prop, device))\n"
-      "      std::printf(\"%d.%d \", prop.major, prop.minor);\n"
-      "  }\n"
-      "  return 0;\n"
-      "}\n")
-
-    execute_process(COMMAND "${CUDA_NVCC_EXECUTABLE}" "-ccbin=${CUDA_HOST_COMPILER}" ${CUDA_NVCC_FLAGS} "--run" "${__cufile}"
-                    WORKING_DIRECTORY "${PROJECT_BINARY_DIR}/CMakeFiles/"
-                    RESULT_VARIABLE __nvcc_res OUTPUT_VARIABLE __nvcc_out
-                    ERROR_QUIET OUTPUT_STRIP_TRAILING_WHITESPACE)
-
-    if(__nvcc_res EQUAL 0)
-      string(REPLACE "2.1" "2.1(2.0)" __nvcc_out "${__nvcc_out}")
-      set(CUDA_gpu_detect_output ${__nvcc_out} CACHE INTERNAL "Returned GPU architetures from caffe_detect_gpus tool" FORCE)
-    endif()
-  endif()
-
-  if(NOT CUDA_gpu_detect_output)
-    message(STATUS "Automatic GPU detection failed. Building for all known architectures.")
-    set(${out_variable} ${Caffe2_known_gpu_archs} PARENT_SCOPE)
-  else()
-    set(${out_variable} ${CUDA_gpu_detect_output} PARENT_SCOPE)
-  endif()
-endfunction()
 
 
 ################################################################################################
@@ -57,31 +16,18 @@ endfunction()
 #   caffe_select_nvcc_arch_flags(out_variable)
 function(caffe2_select_nvcc_arch_flags out_variable)
   # List of arch names
-  set(__archs_names "Kepler" "Maxwell" "Pascal" "All" "Manual")
+  set(__archs_names "Kepler" "Maxwell" "Pascal" "Volta" "All")
   set(__archs_name_default "All")
-  if(NOT CMAKE_CROSSCOMPILING)
-    list(APPEND __archs_names "Auto")
-    set(__archs_name_default "Auto")
-  endif()
 
-  # set CUDA_ARCH_NAME strings (so it will be seen as dropbox in CMake-Gui)
-  set(CUDA_ARCH_NAME ${__archs_name_default} CACHE STRING "Select target NVIDIA GPU achitecture.")
-  set_property( CACHE CUDA_ARCH_NAME PROPERTY STRINGS "" ${__archs_names} )
+  # Set CUDA_ARCH_NAME strings (so it will be seen as dropbox in the CMake GUI)
+  set(CUDA_ARCH_NAME ${__archs_name_default} CACHE STRING "Select target NVIDIA GPU architecture")
+  set_property(CACHE CUDA_ARCH_NAME PROPERTY STRINGS "" ${__archs_names})
   mark_as_advanced(CUDA_ARCH_NAME)
 
-  # verify CUDA_ARCH_NAME value
+  # Verify CUDA_ARCH_NAME value
   if(NOT ";${__archs_names};" MATCHES ";${CUDA_ARCH_NAME};")
     string(REPLACE ";" ", " __archs_names "${__archs_names}")
-    message(FATAL_ERROR "Only ${__archs_names} architeture names are supported.")
-  endif()
-
-  if(${CUDA_ARCH_NAME} STREQUAL "Manual")
-    set(CUDA_ARCH_BIN ${Caffe2_known_gpu_archs} CACHE STRING "Specify 'real' GPU architectures to build binaries for, BIN(PTX) format is supported")
-    set(CUDA_ARCH_PTX "50"                     CACHE STRING "Specify 'virtual' PTX architectures to build PTX intermediate code for")
-    mark_as_advanced(CUDA_ARCH_BIN CUDA_ARCH_PTX)
-  else()
-    unset(CUDA_ARCH_BIN CACHE)
-    unset(CUDA_ARCH_PTX CACHE)
+    message(FATAL_ERROR "Invalid CUDA_ARCH_NAME, supported values: ${__archs_names}. Got ${CUDA_ARCH_NAME}")
   endif()
 
   if(${CUDA_ARCH_NAME} STREQUAL "Kepler")
@@ -94,18 +40,17 @@ function(caffe2_select_nvcc_arch_flags out_variable)
     set(__cuda_arch_bin "70")
   elseif(${CUDA_ARCH_NAME} STREQUAL "All")
     set(__cuda_arch_bin ${Caffe2_known_gpu_archs})
-  elseif(${CUDA_ARCH_NAME} STREQUAL "Auto")
-    caffe2_detect_installed_gpus(__cuda_arch_bin)
-  else()  # (${CUDA_ARCH_NAME} STREQUAL "Manual")
-    set(__cuda_arch_bin ${CUDA_ARCH_BIN})
+  else()
+    message(FATAL_ERROR "Invalid CUDA_ARCH_NAME")
   endif()
 
-  # remove dots and convert to lists
+  # Remove dots and convert to lists
   string(REGEX REPLACE "\\." "" __cuda_arch_bin "${__cuda_arch_bin}")
   string(REGEX REPLACE "\\." "" __cuda_arch_ptx "${CUDA_ARCH_PTX}")
   string(REGEX MATCHALL "[0-9()]+" __cuda_arch_bin "${__cuda_arch_bin}")
   string(REGEX MATCHALL "[0-9]+"   __cuda_arch_ptx "${__cuda_arch_ptx}")
-  caffe_list_unique(__cuda_arch_bin __cuda_arch_ptx)
+  list(REMOVE_DUPLICATES __cuda_arch_bin)
+  list(REMOVE_DUPLICATES __cuda_arch_ptx)
 
   set(__nvcc_flags "")
   set(__nvcc_archs_readable "")
@@ -133,6 +78,7 @@ function(caffe2_select_nvcc_arch_flags out_variable)
   set(${out_variable}          ${__nvcc_flags}          PARENT_SCOPE)
   set(${out_variable}_readable ${__nvcc_archs_readable} PARENT_SCOPE)
 endfunction()
+
 
 ################################################################################################
 # Short command for cuda compilation
@@ -200,7 +146,7 @@ elseif (${CUDA_VERSION} LESS 9.0) # CUDA 8.x
 endif()
 
 caffe2_include_directories(${CUDA_INCLUDE_DIRS})
-list(APPEND Caffe2_DEPENDENCY_LIBS ${CUDA_CUDART_LIBRARY}
+list(APPEND Caffe2_CUDA_DEPENDENCY_LIBS ${CUDA_CUDART_LIBRARY}
                               ${CUDA_curand_LIBRARY} ${CUDA_CUBLAS_LIBRARIES})
 
 # find libcuda.so and lbnvrtc.so
@@ -223,13 +169,13 @@ message(STATUS "Added CUDA NVCC flags for: ${NVCC_FLAGS_EXTRA_readable}")
 
 if(CUDA_CUDA_LIB)
     message(STATUS "Found libcuda: ${CUDA_CUDA_LIB}")
-    list(APPEND Caffe2_DEPENDENCY_LIBS ${CUDA_CUDA_LIB})
+    list(APPEND Caffe2_CUDA_DEPENDENCY_LIBS ${CUDA_CUDA_LIB})
 else()
     message(FATAL_ERROR "Cannot find libcuda.so. Please file an issue on https://github.com/caffe2/caffe2 with your build output.")
 endif()
 if(CUDA_NVRTC_LIB)
   message(STATUS "Found libnvrtc: ${CUDA_NVRTC_LIB}")
-  list(APPEND Caffe2_DEPENDENCY_LIBS ${CUDA_NVRTC_LIB})
+  list(APPEND Caffe2_CUDA_DEPENDENCY_LIBS ${CUDA_NVRTC_LIB})
 else()
     message(FATAL_ERROR "Cannot find libnvrtc.so. Please file an issue on https://github.com/caffe2/caffe2 with your build output.")
 endif()

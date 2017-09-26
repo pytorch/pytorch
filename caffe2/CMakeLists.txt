@@ -68,28 +68,7 @@ if (FALSE)
   endforeach()
 endif()
 
-# ---[ List of libraries to link with
-
-# In the static linking + clang mode, cmake will fail to identify the build
-# order because the lib becomes one single string -Wl,-force-load,libCaffe2_CPU.so
-# As a result, we will create a Caffe2_MAIN_LIBS_ORDER variable simply to
-# enforce the dependency.
-set(Caffe2_MAIN_LIBS_ORDER ${Caffe2_MAIN_LIBS})
-
-# Compile exposed libraries.
-add_library(Caffe2_CPU ${Caffe2_CPU_SRCS} $<TARGET_OBJECTS:Caffe_PROTO> $<TARGET_OBJECTS:Caffe2_PROTO>)
-target_link_libraries(Caffe2_CPU ${Caffe2_DEPENDENCY_LIBS})
-install(TARGETS Caffe2_CPU DESTINATION lib)
-list(APPEND Caffe2_MAIN_LIBS_ORDER Caffe2_CPU)
-if (BUILD_SHARED_LIBS)
-  list(APPEND Caffe2_MAIN_LIBS Caffe2_CPU)
-else()
-  caffe_add_whole_archive_flag(Caffe2_CPU tmp)
-  list(APPEND Caffe2_MAIN_LIBS ${tmp})
-endif()
-if (Caffe2_EXTERNAL_DEPENDENCIES)
-  add_dependencies(Caffe2_CPU ${Caffe2_EXTERNAL_DEPENDENCIES})
-endif()
+# ---[ Generate and install header files.
 
 # Write the macros file.
 configure_file(
@@ -103,24 +82,52 @@ install(DIRECTORY ${CMAKE_CURRENT_LIST_DIR}
 install(FILES ${PROJECT_BINARY_DIR}/caffe2/core/macros.h
         DESTINATION include/caffe2/core)
 
+
+# ---[ List of libraries to link with
+
+# In the static linking + clang mode, cmake will fail to identify the build
+# order because the lib becomes one single string -Wl,-force-load,libCaffe2_CPU.so
+# As a result, we will create a Caffe2_MAIN_LIBS_ORDER variable simply to
+# enforce the dependency.
+set(Caffe2_MAIN_LIBS_ORDER)
+set(Caffe2_MAIN_LIBS)
+
+# Compile exposed libraries.
+add_library(Caffe2_CPU ${Caffe2_CPU_SRCS} $<TARGET_OBJECTS:Caffe_PROTO> $<TARGET_OBJECTS:Caffe2_PROTO>)
+target_link_libraries(Caffe2_CPU ${Caffe2_DEPENDENCY_LIBS})
+install(TARGETS Caffe2_CPU DESTINATION lib)
+link_directories(${CMAKE_INSTALL_PREFIX}/lib)
+caffe_add_linker_flag(Caffe2_CPU Caffe2_CPU_LINK)
+list(APPEND Caffe2_MAIN_LIBS_ORDER Caffe2_CPU)
+list(APPEND Caffe2_MAIN_LIBS ${Caffe2_CPU_LINK})
+if (Caffe2_EXTERNAL_DEPENDENCIES)
+  add_dependencies(Caffe2_CPU ${Caffe2_EXTERNAL_DEPENDENCIES})
+endif()
+
 # ---[ CUDA library.
 if(USE_CUDA)
   CUDA_ADD_LIBRARY(Caffe2_GPU ${Caffe2_GPU_SRCS})
   list(APPEND Caffe2_MAIN_LIBS_ORDER Caffe2_GPU)
+  add_dependencies(Caffe2_GPU Caffe2_PROTO)
   if (BUILD_SHARED_LIBS)
-    target_link_libraries(Caffe2_GPU Caffe2_CPU ${Caffe2_DEPENDENCY_LIBS})
-    list(APPEND Caffe2_MAIN_LIBS Caffe2_GPU)
+    target_link_libraries(
+        Caffe2_GPU
+        Caffe2_CPU
+        ${Caffe2_DEPENDENCY_LIBS}
+        ${Caffe2_CUDA_DEPENDENCY_LIBS})
   else()
-    target_link_libraries(Caffe2_GPU ${Caffe2_DEPENDENCY_LIBS})
-    caffe_add_whole_archive_flag(Caffe2_GPU tmp)
-    list(APPEND Caffe2_MAIN_LIBS ${tmp})
+    target_link_libraries(
+        Caffe2_GPU
+        ${Caffe2_DEPENDENCY_LIBS}
+        ${Caffe2_CUDA_DEPENDENCY_LIBS})
   endif()
+  caffe_add_linker_flag(Caffe2_GPU Caffe2_GPU_LINK)
+  list(APPEND Caffe2_MAIN_LIBS_ORDER Caffe2_GPU)
+  list(APPEND Caffe2_MAIN_LIBS ${Caffe2_GPU_LINK})
   if (Caffe2_EXTERNAL_DEPENDENCIES)
     add_dependencies(Caffe2_GPU ${Caffe2_EXTERNAL_DEPENDENCIES})
   endif()
   install(TARGETS Caffe2_GPU DESTINATION lib)
-  link_directories(${CMAKE_INSTALL_PREFIX}/lib)
-  add_dependencies(Caffe2_GPU Caffe2_PROTO)
 endif()
 
 # ---[ Test binaries.
@@ -134,7 +141,15 @@ if (BUILD_TEST)
     get_filename_component(test_name ${test_src} NAME_WE)
     add_executable(${test_name} "${test_src}")
     add_dependencies(${test_name} ${Caffe2_MAIN_LIBS_ORDER})
-    target_link_libraries(${test_name} ${Caffe2_MAIN_LIBS} ${Caffe2_DEPENDENCY_LIBS} gtest_main)
+    if (USE_CUDA)
+      target_link_libraries(
+          ${test_name} ${Caffe2_MAIN_LIBS} ${Caffe2_DEPENDENCY_LIBS}
+          ${Caffe2_CUDA_DEPENDENCY_LIBS} gtest_main)
+    else()
+      target_link_libraries(
+          ${test_name} ${Caffe2_MAIN_LIBS} ${Caffe2_DEPENDENCY_LIBS}
+          gtest_main)
+    endif()
     if (${CMAKE_MAJOR_VERSION}.${CMAKE_MINOR_VERSION} GREATER 3.0)
       target_compile_features(${test_name} PRIVATE cxx_range_for)
     endif()
@@ -158,19 +173,8 @@ if (BUILD_PYTHON)
       caffe2_pybind11_state PROPERTIES LIBRARY_OUTPUT_DIRECTORY
       ${CMAKE_BINARY_DIR}/caffe2/python)
   target_link_libraries(
-      caffe2_pybind11_state ${Caffe2_MAIN_LIBS} ${Caffe2_DEPENDENCY_LIBS}
+      caffe2_pybind11_state ${Caffe2_CPU_LINK} ${Caffe2_DEPENDENCY_LIBS}
       ${Caffe2_PYTHON_DEPENDENCY_LIBS})
-  # Add rpath to the python target, so that we will be able to load it. This
-  # is in order to ease the problem of anaconda's ipython DYLD bug, detailed
-  # here:
-  #     https://github.com/BVLC/caffe/issues/2720
-  #     https://github.com/ipython/ipython/issues/8878
-  if (APPLE)
-    add_custom_command(
-        TARGET caffe2_pybind11_state POST_BUILD
-        COMMAND install_name_tool -add_rpath ${CMAKE_INSTALL_PREFIX}/lib
-                $<TARGET_FILE:caffe2_pybind11_state>)
-  endif()
   install(TARGETS caffe2_pybind11_state DESTINATION caffe2/python)
 
   if(USE_CUDA)
@@ -186,14 +190,8 @@ if (BUILD_PYTHON)
         caffe2_pybind11_state_gpu PROPERTIES LIBRARY_OUTPUT_DIRECTORY
         ${CMAKE_BINARY_DIR}/caffe2/python)
     target_link_libraries(
-        caffe2_pybind11_state_gpu ${Caffe2_MAIN_LIBS} ${Caffe2_DEPENDENCY_LIBS}
-        ${Caffe2_PYTHON_DEPENDENCY_LIBS})
-    if (APPLE)
-      add_custom_command(
-          TARGET caffe2_pybind11_state_gpu POST_BUILD
-          COMMAND install_name_tool -add_rpath ${CMAKE_INSTALL_PREFIX}/lib
-                  $<TARGET_FILE:caffe2_pybind11_state_gpu>)
-    endif()
+        caffe2_pybind11_state_gpu ${Caffe2_CPU_LINK} ${Caffe2_GPU_LINK} ${Caffe2_DEPENDENCY_LIBS}
+        ${Caffe2_CUDA_DEPENDENCY_LIBS} ${Caffe2_PYTHON_DEPENDENCY_LIBS})
     install(TARGETS caffe2_pybind11_state_gpu DESTINATION caffe2/python)
   endif()
 
