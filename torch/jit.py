@@ -8,15 +8,23 @@ import types
 import contextlib
 import os
 import functools
-import torch.contrib._graph_vis as graph_vis
 
 
-HOLE = object()
-VOLATILE = object()
+class Placeholder(object):
+    def __init__(self, s):
+        self.s = s
+    def __str__(self):
+        return self.s
+    def __repr__(self):
+        return self.s
+
+
+HOLE = Placeholder("HOLE")
+VOLATILE = Placeholder("VOLATILE")
 
 
 # TODO: verify is not implemented yet
-def compile(arg=None, nderivs=1, params=tuple(), verify=False, optimize=True, enabled=True):
+def compile(arg=None, nderivs=1, params=tuple(), name=None, verify=False, optimize=True, enabled=True):
     """
     Mark a function or module as eligible for just-in-time compilation.  The
     next time the function/module is executed, it is traced, and the trace is
@@ -111,7 +119,7 @@ def compile(arg=None, nderivs=1, params=tuple(), verify=False, optimize=True, en
     # TODO: handle decorating a class (not an instance)
     def _compile(inner):
         if enabled:
-            return CompiledModule(inner, params=params, nderivs=nderivs, optimize=optimize)
+            return CompiledModule(inner, params=params, nderivs=nderivs, optimize=optimize, name=name)
         else:
             return inner
     if callable(arg):
@@ -193,8 +201,6 @@ class TracedModule(Module):
         assert len(extra) == 0
         return trace, out
 
-    def __getattr__(self):
-
 
 # Functional version that assumes that all parameters are explicitly
 # specified
@@ -229,12 +235,21 @@ def _raw_trace(nderivs=0):
 # - When we encounter an input configuration whose trace is compiled,
 #   we just directly run the compiled trace.
 class CompiledModule(Module):
-    def __init__(self, inner, params=tuple(), **kwargs):
+    _next_id = 0
+
+    def __init__(self, inner, params=tuple(), name=None, **kwargs):
+        # TODO: Consider saving the backtrace of this constructor, so it's easier
+        # to correlate dump files with invocations in Python
         super(CompiledModule, self).__init__()
         self.inner = inner
         self.params = ParameterList(list(params))
         self.kwargs = kwargs
         self.ktrace_cache = {}
+        if name is None:
+            name = "jit_compile_{}".format(CompiledModule._next_id)
+            CompiledModule._next_id += 1
+        self.name = name
+        self._next_ktrace_id = 0
 
     def _process_args(self, args):
         in_vars, in_struct = _flatten(args, self.state_dict(keep_vars=True).values())
@@ -248,7 +263,9 @@ class CompiledModule(Module):
         in_vars, in_struct, is_volatile, in_key = self._process_args(args)
         ktrace = self.ktrace_cache.get(in_key)
         if ktrace is None:
-            ktrace = TraceForKey(self.inner, volatile=is_volatile, **self.kwargs)
+            ktrace_name = '{}_{}'.format(self.name, self._next_ktrace_id)
+            self._next_ktrace_id += 1
+            ktrace = TraceForKey(ktrace_name, in_key, self.inner, volatile=is_volatile, **self.kwargs)
             self.ktrace_cache[in_key] = ktrace
         closure = ktrace.maybe_closure()
         if closure is not None:
@@ -292,7 +309,9 @@ class TraceForKey(object):
     #   - Whenever we want to run this trace, we call 'maybe_closure'.  This
     #     returns None if we don't have a complete trace yet, or the
     #     autograd closure to actually run the trace if we do.
-    def __init__(self, f, nderivs=1, optimize=True, volatile=False):
+    def __init__(self, name, key, f, nderivs=1, optimize=True, volatile=False):
+        self.name = name
+        self.key = key
         self.f = f
         # TODO: Not convinced about this volatile special case...
         self.nderivs = nderivs if not volatile else 0
@@ -335,11 +354,12 @@ class TraceForKey(object):
             return None
 
         def _run_pass(p, trace):
-            # TODO: dump the trace with names
-            # (this is a little nontrivial because we have to compute a name
-            # based on the input names too)
+            pass_name = p.__name__.replace('_jit_pass_', '')
             p(trace)
+            _dump_trace(self.name, pass_name, self.key, trace)
             torch._C._jit_pass_lint(trace)
+
+        _dump_trace(self.name, "trace", self.key, complete_trace)
 
         # It's important to always run DCE, because backward can create a lot of unnecessary nodes
         _run_pass(torch._C._jit_pass_dce, complete_trace)
@@ -433,6 +453,24 @@ def _flatten(obj, params=tuple()):
     obj_vars = tuple(itertools.chain(function._iter_variables(obj), params))
     obj_struct = function._nested_map(lambda o: isinstance(o, Variable), lambda x: HOLE)(obj)
     return obj_vars, obj_struct
+
+
+# This is purely for developer debugging.  We are not going to advertise it.
+_DUMP_TRACES = os.environ.get('PYTORCH_JIT_DUMP', False)
+
+
+def _dump_trace(trace_name, pass_name, input_key, trace):
+    if not _DUMP_TRACES:
+        return
+
+    import torch.contrib._graph_vis as graph_vis
+
+    filename = "{}_{}".format(trace_name, pass_name)
+    # TODO: Also paste out the backtrace when the trace was compiled
+    # (and maybe also when it was run?)
+    with open(filename + ".ir", "w") as f:
+        f.write("Input key: {}\n\n{}".format(input_key, str(trace)))
+    graph_vis.write(trace.graph(), filename + ".html")
 
 
 if not torch._C._jit_init():
