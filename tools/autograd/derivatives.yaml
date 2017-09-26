@@ -45,9 +45,9 @@
 
 - name: addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1)
   aten: addmm(beta, self, alpha, mat1, mat2)
-  self: grad * beta
-  mat1: grad.mm(mat2.t()) * alpha
-  mat2: mat1.t().mm(grad) * alpha
+  self: addmm_self_backward(grad, beta)
+  mat1: addmm_mat1_backward(grad, mat1, mat2, alpha)
+  mat2: addmm_mat2_backward(grad, mat1, mat2, alpha)
 
 - name: addmv(Tensor self, Tensor mat, Tensor vec, *, Scalar beta=1, Scalar alpha=1)
   aten: addmv(beta, self, alpha, mat, vec)

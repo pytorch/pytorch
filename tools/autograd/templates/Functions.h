@@ -14,6 +14,9 @@ using at::Scalar;
 using at::Tensor;
 using at::IntList;
 
+// avoid mutiply if scalar is 1.
+inline Tensor maybe_multiply(const Tensor & t, const Scalar & s);
+
 ${autograd_function_declarations}
 
 }} // namespace torch::autograd
