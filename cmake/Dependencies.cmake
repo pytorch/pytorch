@@ -1,5 +1,6 @@
 # This list is required for static linking and exported to Caffe2Config.cmake
 set(Caffe2_DEPENDENCY_LIBS "")
+set(Caffe2_CUDA_DEPENDENCY_LIBS "")
 set(Caffe2_PYTHON_DEPENDENCY_LIBS "")
 set(Caffe2_EXTERNAL_DEPENDENCIES "")
 
@@ -16,6 +17,25 @@ endif()
 if(USE_LITE_PROTO)
   set(CAFFE2_USE_LITE_PROTO 1)
 endif()
+
+# ---[ git: used to generate git build string.
+find_package(Git)
+if(GIT_FOUND)
+  execute_process(COMMAND ${GIT_EXECUTABLE} describe --tags --always --dirty
+                  ERROR_QUIET OUTPUT_STRIP_TRAILING_WHITESPACE
+                  WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}"
+                  OUTPUT_VARIABLE CAFFE2_GIT_VERSION
+                  RESULT_VARIABLE __git_result)
+  if(NOT ${__git_result} EQUAL 0)
+    set(CAFFE2_GIT_VERSION "unknown")
+  endif()
+else()
+  message(
+      WARNING
+      "Cannot find git, so Caffe2 won't have any git build info available")
+endif()
+
+
 
 # ---[ BLAS
 set(BLAS "Eigen" CACHE STRING "Selected BLAS library")
@@ -299,7 +319,7 @@ if(USE_CUDA)
     find_package(CuDNN REQUIRED)
     if(CUDNN_FOUND)
       caffe2_include_directories(${CUDNN_INCLUDE_DIRS})
-      list(APPEND Caffe2_DEPENDENCY_LIBS ${CUDNN_LIBRARIES})
+      list(APPEND Caffe2_CUDA_DEPENDENCY_LIBS ${CUDNN_LIBRARIES})
     endif()
   else()
     message(WARNING "Not compiling with CUDA. Suppress this warning with -DUSE_CUDA=OFF")
@@ -319,7 +339,7 @@ if(USE_NCCL)
     include("cmake/External/nccl.cmake")
     caffe2_include_directories(${NCCL_INCLUDE_DIRS})
     message(STATUS "NCCL: ${NCCL_LIBRARIES}")
-    list(APPEND Caffe2_DEPENDENCY_LIBS ${NCCL_LIBRARIES})
+    list(APPEND Caffe2_CUDA_DEPENDENCY_LIBS ${NCCL_LIBRARIES})
   endif()
 endif()
 
@@ -372,10 +392,9 @@ if(USE_GLOO)
       endif()
     endif()
     # Pick the right dependency depending on USE_CUDA
-    if(NOT USE_CUDA)
-      list(APPEND Caffe2_DEPENDENCY_LIBS gloo)
-    else()
-      list(APPEND Caffe2_DEPENDENCY_LIBS gloo_cuda)
+    list(APPEND Caffe2_DEPENDENCY_LIBS gloo)
+    if(USE_CUDA)
+      list(APPEND Caffe2_CUDA_DEPENDENCY_LIBS gloo_cuda)
     endif()
   endif()
 endif()
