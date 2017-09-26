@@ -325,7 +325,8 @@ class WeightDecayBuilder(Optimizer):
 
 class AdagradOptimizer(Optimizer):
     def __init__(self, alpha=0.01, epsilon=1e-4, decay=1, policy="fixed",
-                 sparse_dedup_aggregator=None, engine='', **kwargs):
+                 sparse_dedup_aggregator=None, rowWise=False,
+                 engine='', **kwargs):
         super(AdagradOptimizer, self).__init__()
         self.alpha = alpha
         self.epsilon = epsilon
@@ -334,6 +335,7 @@ class AdagradOptimizer(Optimizer):
         self.sparse_dedup_aggregator = sparse_dedup_aggregator
         self.engine = engine
         self.init_kwargs = kwargs
+        self.rowWise = rowWise
 
     def _run(self, net, param_init_net, param_info):
         param = param_info.blob
@@ -349,20 +351,50 @@ class AdagradOptimizer(Optimizer):
             **(self.init_kwargs)
         )
 
-        param_squared_sum = param_init_net.ConstantFill(
-            [param],
-            str(param) + "_squared_sum",
-            value=0.0
-        )
+        if self.rowWise:
+            shape = param_init_net.Shape(param, str(param) + "_shape")
+            slice_starts = np.array([0]).astype(np.int32)
+            slice_ends = np.array([1]).astype(np.int32)
+            slice_starts = param_init_net.GivenTensorIntFill(
+                [], shape=[1], values=slice_starts
+            )
+            slice_ends = param_init_net.GivenTensorIntFill(
+                [], shape=[1], values=slice_ends
+            )
+            num_rows = param_init_net.Slice(
+                [shape, slice_starts, slice_ends],
+                str(shape) + "_numrows"
+            )
+            param_squared_sum = param_init_net.ConstantFill(
+                num_rows,
+                str(param) + "_avg_squared_sum",
+                input_as_shape=1,
+                value=0.0
+            )
+        else:
+            param_squared_sum = param_init_net.ConstantFill(
+                [param],
+                str(param) + "_squared_sum",
+                value=0.0
+            )
+
         self._aux_params.local.append(param_squared_sum)
 
+        if self.rowWise:
+            assert isinstance(grad, core.GradientSlice),\
+                'If SparseAdagrad with rowWise=True, gradient must be gradientslice'
         if isinstance(grad, core.GradientSlice):
+            assert self.decay == 1.,\
+                'Decay is not implemented for SparseAdagrad and must be set to 1'
             grad = self.dedup(net, self.sparse_dedup_aggregator, grad)
-            net.SparseAdagrad(
+            if self.rowWise:
+                op = 'RowWiseSparseAdagrad'
+            else:
+                op = 'SparseAdagrad'
+            net.__getattr__(op)(
                 [param, param_squared_sum, grad.indices, grad.values, lr],
                 [param, param_squared_sum],
                 epsilon=self.epsilon,
-                decay=float(self.decay),
                 engine=self.engine
             )
         else:
