@@ -356,8 +356,11 @@ if(USE_GLOO)
       set(BUILD_TEST OFF)
       set(BUILD_BENCHMARK OFF)
       add_subdirectory(${PROJECT_SOURCE_DIR}/third_party/gloo)
-      caffe2_include_directories(${PROJECT_SOURCE_DIR}/third_party/gloo)
-      caffe2_include_directories(${PROJECT_BINARY_DIR}/third_party/gloo)
+      # Here is a little bit hacky. We have to put PROJECT_BINARY_DIR in front
+      # of PROJECT_SOURCE_DIR with/without conda system. The reason is that
+      # gloo generates a new config.h in the binary diretory.
+      include_directories(BEFORE SYSTEM ${PROJECT_SOURCE_DIR}/third_party/gloo)
+      include_directories(BEFORE SYSTEM ${PROJECT_BINARY_DIR}/third_party/gloo)
       set(BUILD_TEST ${__BUILD_TEST})
       set(BUILD_BENCHMARK ${__BUILD_BENCHMARK})
 
