@@ -4,6 +4,7 @@
 #define THP_STATELESS_ATTRIBUTE_NAME "_torch"
 
 extern PyObject *THPDefaultTensorClass;
+extern bool THPDefaultTensorZero;
 extern THPGenerator *THPDefaultGenerator;
 
 #ifdef _THP_CORE

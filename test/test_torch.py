@@ -4334,6 +4334,22 @@ class TestTorch(TestCase):
         id_after = id(t)
         self.assertEqual(id_before, id_after)
 
+    def test_zero_init(self):
+        current = torch.get_default_tensor_zero()
+
+        torch.set_default_tensor_zero(True)
+        t = torch.Tensor(100, 100)
+        self.assertEqual(t.abs().sum(), 0)
+        t2 = t.new(100, 100)
+        self.assertEqual(t2.abs().sum(), 0)
+        t3 = torch.HalfTensor(100, 100)
+        self.assertEqual(t3.float().abs().sum(), 0)
+
+        # We cannot test False mode because the
+        # memory allocator might zero-out memory
+        torch.set_default_tensor_zero(current)
+
+
 # Functions to test negative dimension wrapping
 METHOD = 1
 INPLACE_METHOD = 2

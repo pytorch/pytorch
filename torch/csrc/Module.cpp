@@ -26,6 +26,7 @@ PyObject* module;
 PyObject* tensor_classes;
 
 PyObject *THPDefaultTensorClass = NULL;
+bool THPDefaultTensorZero = false;
 THPGenerator *THPDefaultGenerator   = NULL;
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -153,6 +154,28 @@ PyObject * THPModule_setDefaultTensorType(PyObject *_unused, PyObject *type)
 {
   THPDefaultTensorClass = type;
   Py_RETURN_NONE;
+}
+
+PyObject * THPModule_setDefaultTensorZero(PyObject *_unused, PyObject *flag)
+{
+  if (!PyBool_Check(flag)) {
+    THPUtils_setError("set_default_tensor_zero expect a boolean argument.");
+  }
+  if (PyObject_IsTrue(flag)) {
+    THPDefaultTensorZero = true;
+  } else {
+    THPDefaultTensorZero = false;
+  }
+  Py_RETURN_NONE;
+}
+
+PyObject * THPModule_getDefaultTensorZero(PyObject *_unused)
+{
+  if (THPDefaultTensorZero) {
+    Py_RETURN_TRUE;
+  } else {
+    Py_RETURN_FALSE;
+  }
 }
 
 PyObject * THPModule_fromNumpy(PyObject *_unused, PyObject *array)
@@ -595,6 +618,8 @@ static PyMethodDef TorchMethods[] = {
 #endif
   {"_safe_call",      (PyCFunction)THPModule_safeCall,          METH_VARARGS | METH_KEYWORDS, NULL},
   {"_set_default_tensor_type", (PyCFunction)THPModule_setDefaultTensorType, METH_O, NULL},
+  {"get_default_tensor_zero", (PyCFunction)THPModule_getDefaultTensorZero, METH_NOARGS, NULL},
+  {"set_default_tensor_zero", (PyCFunction)THPModule_setDefaultTensorZero, METH_O, NULL},
   {"_infer_size",     (PyCFunction)THPModule_inferSize,         METH_VARARGS, NULL},
   {"_set_backcompat_broadcast_warn", (PyCFunction)THPModule_setBackcompatBroadcastWarn, METH_O, NULL},
   {"_get_backcompat_broadcast_warn", (PyCFunction)THPModule_getBackcompatBroadcastWarn, METH_NOARGS, NULL},
