@@ -12,7 +12,17 @@ def leakyrelu_symbolic(g, input, negative_slope, inplace=False):
     return g.op("LeakyRelu", input, alpha_f=negative_slope)
 
 
+def glu_symbolic(g, input, dim):
+    assert input.type().sizes()[dim] % 2 == 0
+
+    split_op = g.op('Split', input, axis_i=dim)
+    first = g.createSelect(split_op, 0)
+    second = g.createSelect(split_op, 1)
+
+    return g.op('Mul', first, g.op('Sigmoid', second))
+
 symbolic_fns = {
     'Threshold': threshold_symbolic,
     'LeakyReLU': leakyrelu_symbolic,
+    'GatedLinear': glu_symbolic,
 }
