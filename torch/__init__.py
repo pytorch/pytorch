@@ -126,7 +126,7 @@ def set_default_tensor_zero(flag):
 def get_default_tensor_zero():
     r"""Get the current value of the tensor creation flag.
     """
-    _C._get_default_tensor_zero()
+    return _C._get_default_tensor_zero()
 
 
 def set_rng_state(new_state):
