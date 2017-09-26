@@ -8,10 +8,11 @@ from hypothesis import given
 from hypothesis import strategies as st
 import caffe2.python.hypothesis_test_util as hu
 
+import numpy as np
 import unittest
 
 
-class TestPowOp(hu.HypothesisTestCase):
+class TestMathOps(hu.HypothesisTestCase):
 
     @given(X=hu.tensor(),
            exponent=st.floats(min_value=2.0, max_value=3.0),
@@ -29,6 +30,19 @@ class TestPowOp(hu.HypothesisTestCase):
         self.assertReferenceChecks(gc, op, [X], powf,
                                    output_to_grad="Y",
                                    grad_reference=powf_grad),
+
+    @given(X=hu.tensor(),
+           exponent=st.floats(min_value=-3.0, max_value=3.0),
+           **hu.gcs)
+    def test_sign(self, X, exponent, gc, dc):
+        def signf(X):
+            return [np.sign(X)]
+
+        op = core.CreateOperator(
+            "Sign", ["X"], ["Y"])
+
+        self.assertReferenceChecks(gc, op, [X], signf),
+        self.assertDeviceChecks(dc, op, [X], [0])
 
 
 if __name__ == "__main__":
