@@ -549,7 +549,7 @@ TEST(IsTestArg, standard) {
   }
 
   {
-    op_def.add_arg()->CopyFrom(MakeArgument("is_test", 1));
+    op_def.add_arg()->CopyFrom(MakeArgument(OpSchema::Arg_IsTest, 1));
     const auto op = CreateOperator(op_def, &ws);
     EXPECT_NE(nullptr, op.get());
     EXPECT_EQ(
@@ -575,7 +575,7 @@ REGISTER_CPU_OPERATOR(
 OPERATOR_SCHEMA(JustTestWithNonStandardIsTestArg)
     .NumInputs(0, 1)
     .NumOutputs(0, 1)
-    .Arg("is_test", "this is_test arg is not required");
+    .Arg(OpSchema::Arg_IsTest, "this is_test arg is not required");
 
 TEST(IsTestArg, non_standard) {
   OperatorDef op_def;

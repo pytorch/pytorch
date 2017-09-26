@@ -100,6 +100,7 @@ def rnn_unidirectional_layer(
             dropout_ratio=dropout_ratio,
             name=(scope + '/' if scope else '') + 'dropout',
             forward_only=forward_only,
+            is_test=False,
         )
 
     outputs_with_grads = []
@@ -578,6 +579,7 @@ def build_embedding_decoder(
                 internal_cell=cell,
                 dropout_ratio=dropout_ratio,
                 forward_only=forward_only,
+                is_test=False,
                 name=get_layer_scope(scope, 'decoder_dropout', i),
             )
 

@@ -195,7 +195,7 @@ class DataParallelModelTest(TestCase):
             model.Conv("data_nchw", 'conv1', 3, 64,
                        weight_init=("MSRAFill", {}), kernel=7,
                        stride=2, pad=3, no_bias=0)
-            model.SpatialBN('conv1', 'conv1_spatbn_relu', 64, epsilon=1e-3)
+            model.SpatialBN('conv1', 'conv1_spatbn_relu', 64, epsilon=1e-3, is_test=False)
             model.Relu('conv1_spatbn_relu', 'conv1_spatbn_relu')
             model.MaxPool('conv1_spatbn_relu', 'pool1', kernel=3, stride=2)
             model.FC('pool1', 'fc', dim_in=(64 * 56 * 56), dim_out=100)
@@ -256,7 +256,7 @@ class DataParallelModelTest(TestCase):
             model.Conv("data_nchw", 'conv1', 3, 64,
                        weight_init=("MSRAFill", {}), kernel=7,
                        stride=2, pad=3, no_bias=0)
-            model.SpatialBN('conv1', 'conv1_spatbn_relu', 64, epsilon=1e-3)
+            model.SpatialBN('conv1', 'conv1_spatbn_relu', 64, epsilon=1e-3, is_test=False)
             model.Relu('conv1_spatbn_relu', 'conv1_spatbn_relu')
             model.MaxPool('conv1_spatbn_relu', 'pool1', kernel=3, stride=2)
             model.FC('pool1', 'fc', dim_in=(64 * 56 * 56), dim_out=10)

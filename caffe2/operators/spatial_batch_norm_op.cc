@@ -193,8 +193,7 @@ Output case #1: Y, mean, var, saved_mean, saved_var
                 (training mode)
 Output case #2: Y (test mode)
 )DOC")
-    .Arg(
-        "is_test",
+    .ArgIsTest(
         "If set to nonzero, run spatial batch normalization in test mode.")
     .Arg("epsilon", "The epsilon value to use to avoid division by zero.")
     .Arg("order", "A StorageOrder string.")

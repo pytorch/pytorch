@@ -703,6 +703,7 @@ def _prepare_attention(t, n, dim_in, encoder_dim,
                 dropout_ratio=0.0,
                 name='dropout',
                 forward_only=forward_only,
+                is_test=False,
             )
 
         attention_cell = (
