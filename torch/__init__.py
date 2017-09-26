@@ -113,6 +113,7 @@ def set_default_tensor_type(t):
     Storage = _import_dotted_name(t.replace('Tensor', 'Storage'))
     _C._set_default_tensor_type(Tensor)
 
+
 def set_default_tensor_zero(flag):
     r"""Changes the default behaviour during tensor creation for memory initialization.
     If set to True, the tensor will be filled with 0, otherwise it will contain
@@ -122,6 +123,7 @@ def set_default_tensor_zero(flag):
         flag (bool): Value to set for the default behavior
     """
     _C._set_default_tensor_zero(flag)
+
 
 def get_default_tensor_zero():
     r"""Get the current value of the tensor creation flag.
