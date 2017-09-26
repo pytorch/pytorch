@@ -28,8 +28,10 @@ struct Variable : public at::Tensor {
   Variable(const Variable & rhs) : Tensor(rhs) {}
   Variable(Variable && rhs) noexcept : Tensor(std::move(rhs)) {}
 
-  explicit Variable(Tensor const & rhs) : Tensor(rhs) {}
-  explicit Variable(Tensor && rhs) noexcept : Tensor(std::move(rhs)) {}
+  // Implicitly casts a Tensor to a Variable. This should only be called on
+  // Tensors which you know are actually Variables.
+  /*implicit*/ Variable(Tensor const & rhs) : Tensor(rhs) {}
+  /*implicit*/ Variable(Tensor && rhs) noexcept : Tensor(std::move(rhs)) {}
 
   inline VariableImpl* get() const;
 
@@ -63,6 +65,8 @@ struct Variable : public at::Tensor {
 
   inline Variable & operator=(Variable && rhs) &;
   inline Variable & operator=(const Variable & rhs) &;
+  inline Variable & operator=(Tensor && rhs) &;
+  inline Variable & operator=(const Tensor & rhs) &;
 };
 
 struct VariableImpl : public at::TensorImpl {
@@ -201,6 +205,14 @@ inline Variable & Variable::operator=(Variable && rhs) & {
   return *this;
 }
 inline Variable & Variable::operator=(const Variable & rhs) & {
+  Variable(rhs).swap(*this);
+  return *this;
+}
+inline Variable & Variable::operator=(Tensor && rhs) & {
+  rhs.swap(*this);
+  return *this;
+}
+inline Variable & Variable::operator=(const Tensor & rhs) & {
   Variable(rhs).swap(*this);
   return *this;
 }
