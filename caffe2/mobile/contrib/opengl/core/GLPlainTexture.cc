@@ -8,23 +8,16 @@
 
 #define half_float_supported (GLContext::getGLContext()->halfFloatTextureSupported())
 
-#define FIXED_TYPE(_t) \
-  (((_t).type != GL_HALF_FLOAT || half_float_supported) ? (_t) : GLTexture::FP16_COMPAT)
+#define FIXED_TYPE(_t) (((_t).type != GL_HALF_FLOAT || half_float_supported) ? (_t) : GLTexture::FP16_COMPAT)
 
-GLPlainTexture::GLPlainTexture(const Type& type,
-                               const void* input,
-                               GLsizei width,
-                               GLsizei height,
-                               bool use_padding,
-                               GLint filter,
-                               GLint wrap)
+GLPlainTexture::GLPlainTexture(
+    const Type& type, const void* input, GLsizei width, GLsizei height, bool use_padding, GLint filter, GLint wrap)
     : GLTexture(FIXED_TYPE(type), width, height, use_padding, filter, wrap) {
   //  caffe2::Timer timer;
   //  timer.Start();
   glGenTextures(1, &_textureId);
   glBindTexture(GL_TEXTURE_2D, _textureId);
-  glTexImage2D(
-      GL_TEXTURE_2D, 0, _type.internalFormat, _stride, _height, 0, _type.format, _type.type, input);
+  glTexImage2D(GL_TEXTURE_2D, 0, _type.internalFormat, _stride, _height, 0, _type.format, _type.type, input);
 
   gl_log(
       GL_VERBOSE,
@@ -51,13 +44,8 @@ GLPlainTexture::GLPlainTexture(const Type& type,
   //  LOG(INFO) << "glTexImage2D takes " << timer.MilliSeconds() << " ms";
 }
 
-GLPlainTexture::GLPlainTexture(const Type& type,
-                               const GLuint textureID,
-                               GLsizei width,
-                               GLsizei height,
-                               bool use_padding,
-                               GLint filter,
-                               GLint wrap)
+GLPlainTexture::GLPlainTexture(
+    const Type& type, const GLuint textureID, GLsizei width, GLsizei height, bool use_padding, GLint filter, GLint wrap)
     : GLTexture(FIXED_TYPE(type), width, height, use_padding, filter, wrap) {
   _textureId = textureID;
   isOwner = false;

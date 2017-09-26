@@ -223,6 +223,17 @@ void testOpenGLCopyOps(int N, int C, int H, int W, float error, int tile_x = 1, 
   checkError(t1, t2, error);
 }
 
+typedef enum {
+  AveragePool,
+  MaxPool,
+  Conv,
+  ConvTranspose,
+  ConvPRelu,
+  ConvTransposePRelu,
+  ConvRelu,
+  ConvTransposeRelu
+} PoolOp;
+
 const char* glPoolOperationName[] = {"OpenGLAveragePool",
                                      "OpenGLMaxPool",
                                      "OpenGLConv",
@@ -252,12 +263,12 @@ void testOpenGLConv(int N,
                     int stride,
                     PoolOp poolOp,
                     float error,
-                    bool random_input,
-                    int input_batch_size,
-                    int output_batch_size,
-                    int input_tile_x,
-                    int input_tile_y,
-                    bool tiling) {
+                    bool random_input     = true,
+                    int input_batch_size  = 1,
+                    int output_batch_size = 1,
+                    int input_tile_x      = 1,
+                    int input_tile_y      = 1,
+                    bool tiling           = false) {
   LOG(INFO) << "OpenGL Conv Test: "
             << "input C: " << C << ", output C: " << K << ", H: " << H << ", W: " << W
             << ", K: " << kernel_w << "x" << kernel_h << ", P: " << pad << ", S: " << stride
@@ -648,8 +659,7 @@ void testOpenGLRelu(int N, int C, int H, int W, int input_tile_x, int input_tile
   checkError(ws.GetBlob("Y_cpu")->Get<TensorCPU>(), ws.GetBlob("Y_ref")->Get<TensorCPU>(), error);
 }
 
-void testOpenGLAdd(
-    int N, int C, int H, int W, float error = 0.1, int input_tile_x = 1, int input_tile_y = 1) {
+void testOpenGLAdd(int N, int C, int H, int W, float error = 0.1, int input_tile_x = 1, int input_tile_y = 1) {
   LOG(INFO) << "OpenGL Add Test "
             << "C: " << C << ", H: " << H << ", W: " << W;
   Workspace ws;
@@ -2169,8 +2179,7 @@ int runModelBenchmarks(caffe2::NetDef& init_net,
   if (engine == "CPU") {
     net_def.CopyFrom(predict_net);
   } else if (engine == "OPENGL") {
-    if (!caffe2::tryConvertToOpenGL(
-            init_net, predict_net, &net_def, use_texture_input, use_tiling, run_fusion)) {
+    if (!caffe2::tryConvertToOpenGL(init_net, predict_net, &net_def, use_texture_input, use_tiling, run_fusion)) {
       CAFFE_THROW("Failed to convert to openGL. Benchmark failed to run");
       return -1;
     }

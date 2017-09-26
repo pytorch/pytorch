@@ -32,38 +32,8 @@ int runModelBenchmarks(caffe2::NetDef& init_net,
                        std::string input_type,
                        std::string input_order,
                        std::string engine,
-                       bool run_individual = false,
+                       bool run_individual    = false,
                        bool use_texture_input = false,
-                       bool use_tiling = false,
-                       bool run_fusion = true);
-
-typedef enum {
-  AveragePool,
-  MaxPool,
-  Conv,
-  ConvTranspose,
-  ConvPRelu,
-  ConvTransposePRelu,
-  ConvRelu,
-  ConvTransposeRelu
-} PoolOp;
-
-void testOpenGLConv(int N,
-                    int C,
-                    int H,
-                    int W,
-                    int K, // output_channels
-                    int kernel_h,
-                    int kernel_w,
-                    int pad,
-                    int stride,
-                    PoolOp poolOp,
-                    float error,
-                    bool random_input = true,
-                    int input_batch_size = 1,
-                    int output_batch_size = 1,
-                    int input_tile_x = 1,
-                    int input_tile_y = 1,
-                    bool tiling = false);
-
+                       bool use_tiling        = false,
+                       bool run_fusion        = true);
 } // namespace caffe2

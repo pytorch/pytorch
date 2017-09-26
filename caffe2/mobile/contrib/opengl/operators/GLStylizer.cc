@@ -23,12 +23,10 @@ class GLStylizer : public GLFilter {
       : GLFilter(_deprocess ? "GLDeStylizer" : "GLStylizer",
                  vertex_shader,
                  fragment_shader,
-                 std::vector<binding*>(
-                     {BINDING(inputData), BINDING(mean), BINDING(noise_std), BINDING(outputSize)}),
+                 std::vector<binding*>({BINDING(inputData), BINDING(mean), BINDING(noise_std), BINDING(outputSize)}),
                  {/* no uniform blocks */},
                  {/* no attributes */},
-                 {{"DEPROCESS", caffe2::to_string(_deprocess)},
-                  {"RGBAINPUT", caffe2::to_string(input_format)}}),
+                 {{"DEPROCESS", caffe2::to_string(_deprocess)}, {"RGBAINPUT", caffe2::to_string(input_format)}}),
         deprocess(_deprocess) {}
 
   template <typename T1, typename T2>

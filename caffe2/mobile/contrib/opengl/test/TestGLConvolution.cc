@@ -9,7 +9,6 @@
 #include "../core/arm_neon_support.h"
 #include "../operators/gl_tiling_utils.h"
 #include "TestGLConvolution.h"
-#include "opengl_test.h"
 
 #include <vector>
 
@@ -59,8 +58,7 @@ double BenchOp(const std::string& typ,
   def1.add_arg()->CopyFrom(caffe2::MakeArgument("pad_l", 0));
   def1.add_arg()->CopyFrom(caffe2::MakeArgument("pad_b", 0));
   def1.add_arg()->CopyFrom(caffe2::MakeArgument("pad_r", 0));
-  def1.add_arg()->CopyFrom(
-      caffe2::MakeArgument("convolution_transform_strategy", std::string("PRECOMPUTE")));
+  def1.add_arg()->CopyFrom(caffe2::MakeArgument("convolution_transform_strategy", std::string("PRECOMPUTE")));
 
   AddNoiseInput(std::vector<caffe2::TIndex>{1, inputC, inH, inW}, "X", ws);
   if (transposed) {
@@ -256,165 +254,68 @@ static double BenchGLConvolution(int input_channels,
   return gpuIterTime;
 }
 
-void TestSegmentationUseCase(caffe2::Workspace& ws) {
-  int stride = 1;
-  bool transposed = false;
-
-  std::vector<int> kernels({3});
-  std::vector<int> sizes({192, 96, 48, 24, 12, 6, 6, 12, 24, 48, 96, 192});
-  std::vector<std::pair<int, int>> channels({{3, 12},
-                                             {12, 24},
-                                             {24, 48},
-                                             {48, 96},
-                                             {96, 180},
-                                             {180, 220},
-                                             {220, 180},
-                                             {180, 96},
-                                             {96, 24},
-                                             {48, 24},
-                                             {24, 12},
-                                             {12, 1}});
-
-  for (int i = 0; i < sizes.capacity(); i++) {
-    int input_channels = channels[i].first;
-    int output_channels = channels[i].second;
-    int size = sizes[i];
-    for (const auto& kernel : kernels) {
-      int tile_x = 1, tile_y = 1;
-      caffe2::squareFactors((input_channels + 3) / 4, tile_x, tile_y);
-
-      caffe2::testOpenGLConv(1,
-                             input_channels,
-                             size,
-                             size,
-                             output_channels,
-                             3,
-                             3,
-                             0,
-                             1,
-                             caffe2::Conv,
-                             0.1 * input_channels / 8,
-                             true,
-                             1,
-                             1,
-                             tile_x,
-                             tile_y,
-                             true);
-
-      const double gpuIterTime = BenchGLConvolution<float16_t>(
-          input_channels, output_channels, kernel, kernel, size, size, 0, stride, transposed, &ws);
-      const double cpuIterTime = BenchOp(transposed ? "ConvTranspose" : "Conv",
-                                         input_channels,
-                                         output_channels,
-                                         kernel,
-                                         kernel,
-                                         stride,
-                                         size,
-                                         size,
-                                         transposed,
-                                         &ws);
-      const double flops = double(input_channels) * output_channels * kernel * kernel *
-                           (kernel == 1 ? size : size - 2) * (kernel == 1 ? size : size - 2) * 2;
-      printf(
-          "Conv: X: %ix%i  \tC: %i -> %i\tK: %ix%i\t16b GPU GFLOPS: %.2f\t32b CPU GFLOPS:"
-          "%.2f\tratio: "
-          "%.2f\n",
-          size,
-          size,
-          input_channels,
-          output_channels,
-          kernel,
-          kernel,
-          flops / gpuIterTime / 1E6,
-          flops / cpuIterTime / 1E6,
-          cpuIterTime / gpuIterTime);
-    }
-  }
-}
-
-void TestsConvolutionRange(caffe2::Workspace& ws) {
-  printf("running convolution benchmarks\n");
-
-  bool transposed = false;
-  int stride = 1;
-
-  std::vector<int> kernels({1, 3});
-  std::vector<int> sizes({1080, 720, 312, 104, 52, 26, 14});
-  std::vector<int> channels({4, 8, 16, 32, 64, 128, 256});
-
-  for (int i = 0; i < sizes.capacity(); i++) {
-    int input_channels = channels[i];
-    int output_channels = input_channels;
-    int size = sizes[i];
-    for (const auto& kernel : kernels) {
-      int tile_x = 1, tile_y = 1;
-      caffe2::squareFactors((input_channels + 3) / 4, tile_x, tile_y);
-
-      caffe2::testOpenGLConv(1,
-                             input_channels,
-                             size,
-                             size,
-                             output_channels,
-                             3,
-                             3,
-                             0,
-                             1,
-                             caffe2::Conv,
-                             0.1 * input_channels / 8,
-                             true,
-                             1,
-                             1,
-                             tile_x,
-                             tile_y,
-                             true);
-
-      const double gpuIterTime = BenchGLConvolution<float16_t>(input_channels,
-                                                               output_channels,
-                                                               kernel,
-                                                               kernel,
-                                                               size,
-                                                               size,
-                                                               0,
-                                                               stride,
-                                                               transposed,
-                                                               &ws);
-      const double cpuIterTime = BenchOp(transposed ? "ConvTranspose" : "Conv",
-                                         input_channels,
-                                         output_channels,
-                                         kernel,
-                                         kernel,
-                                         stride,
-                                         size,
-                                         size,
-                                         transposed,
-                                         &ws);
-      const double flops = double(input_channels) * output_channels * kernel * kernel *
-      (kernel == 1 ? size : size - 2) *
-      (kernel == 1 ? size : size - 2) * 2;
-      printf(
-             "Conv: X: %ix%i  \tC: %i -> %i\tK: %ix%i\t16b GPU GFLOPS: %.2f\t32b CPU GFLOPS:"
-             "%.2f\tratio: "
-             "%.2f\n",
-             size,
-             size,
-             input_channels,
-             output_channels,
-             kernel,
-             kernel,
-             flops / gpuIterTime / 1E6,
-             flops / cpuIterTime / 1E6,
-             cpuIterTime / gpuIterTime);
-    }
-  }
-}
-
 void TestGLConvolution() {
   caffe2::Workspace ws;
   ws.GetThreadPool()->setMinWorkSize(0);
 
-  TestSegmentationUseCase(ws);
+  // small input sizes
+  // std::vector<int> sizes({14, 26, 52, 104});
+  // std::vector<int> channels({128, 64}); // not working for 512 and 256 channels yet
+  // std::vector<int> channels({512, 256, 128, 64});
 
-  TestsConvolutionRange(ws);
+  // large input sizes
+  // std::vector<int> sizes({208, 312, 416, 720, 1080});
+  // std::vector<int> channels({16, 4});
+  //
+  std::vector<int> sizes({14, 26, 52, 104, 208});
+  // std::vector<int> channels({24, 16, 4});
+
+  //  std::vector<int> sizes({14});
+  std::vector<int> channels({32, 64, 128, 192, 256, 384, 512});
+
+  std::vector<int> kernels({3});
+
+  bool transposed = false;
+
+  int stride = 1;
+
+  for (const auto& space : sizes) {
+    for (const auto& input_channel : channels) {
+      int output_channel = input_channel;
+      /* for (const auto& output_channel : channels) */ {
+        for (const auto& kernel : kernels) {
+          const double gpuIterTime = BenchGLConvolution<float16_t>(
+              input_channel, output_channel, kernel, kernel, space, space, 0, stride, transposed, &ws);
+          const double cpuIterTime = BenchOp(transposed ? "ConvTranspose" : "Conv",
+                                             input_channel,
+                                             output_channel,
+                                             kernel,
+                                             kernel,
+                                             stride,
+                                             space,
+                                             space,
+                                             transposed,
+                                             &ws);
+          const double flops       = double(input_channel) * output_channel * kernel * kernel *
+                               (kernel == 1 ? space : space - 2) * (kernel == 1 ? space : space - 2) * 2;
+          // gl_log(GL_LOG,
+          printf(
+              "Conv: X: %ix%i  \tC: %i -> %i\tK: %ix%i\t16b GPU GFLOPS: %.2f\t32b CPU GFLOPS:"
+              "%.2f\tratio: "
+              "%.2f\n",
+              space,
+              space,
+              input_channel,
+              output_channel,
+              kernel,
+              kernel,
+              flops / gpuIterTime / 1E6,
+              flops / cpuIterTime / 1E6,
+              cpuIterTime / gpuIterTime);
+        }
+      }
+    }
+  }
 
   //  // ConvTranspose
   //  BenchGLConvolution<float16_t>(16, 16, 3, 3, 640, 360, 0, 2, true);
