@@ -438,10 +438,13 @@ def TranslateDeconv(layer, pretrained_blobs, is_test):
     caffe_op.input.extend([output + '_w', output + '_b'])
     AddArgument(caffe_op, "order", "NCHW")
     weight = utils.NumpyArrayToCaffe2Tensor(pretrained_blobs[0], output + '_w')
-    bias = utils.NumpyArrayToCaffe2Tensor(
-        pretrained_blobs[1].flatten(), output + '_b'
-    )
-    return caffe_op, [weight, bias]
+    if param.bias_term:
+        bias = utils.NumpyArrayToCaffe2Tensor(
+            pretrained_blobs[1].flatten(), output + '_b'
+        )
+        return caffe_op, [weight, bias]
+    else:
+        return caffe_op, [weight]
 
 
 @TranslatorRegistry.Register("ReLU")
