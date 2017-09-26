@@ -28,35 +28,45 @@ def compile(arg=None, nderivs=1, params=tuple(), verify=False, optimize=True, en
 
     .. note::
 
-        If your function/module takes non-Variable inputs, the JIT compiler
-        will compile a trace separately for each distinct input configuration.
+        A JIT compiled function/module may be compiled multiple times, as
+        different inputs can result in different traces.  Currently, the
+        JIT compiler conservatively assumes the trace may change if the
+        `size` or `requires_grad` of `Variable` inputs change, or if
+        any of the non-Variable inputs change.  For example, if you JIT
+        compile an RNN which takes the number of hidden units as a parameter,
+        we will compile a trace for every RNN length you use at runtime.
 
     .. warning::
 
         Just-in-time compilation currently only works for functions/modules
-        which do not have dynamic control flow; if you compile a function/module
-        which has dynamic control flow, you will silently get incorrect
-        results on subsequent invocations of the model.  Use `verify=True` to
-        check that the original Python code and optimized code are equivalent.
+        which are not data dependent (e.g., have conditionals on data in
+        tensors) and do not have any untracked external dependencies (e.g.,
+        perform input/output or access global variables). If you trace such
+        models, you will silently get incorrect results on subsequent
+        invocations of the model.  You can use `verify=True` to check that the
+        original Python code and optimized code are equivalent.
 
     Arguments:
-        arg (optional, torch.nn.Module or function): the function or module
+        arg (torch.nn.Module or function, optional): the function or module
             to be compiled.  If `None`, `compile` returns a decorator which can be
-            applied to the function or module you want to compile.
-        verify (bool, default False): if True, upon all invocations of the
+            applied to the function or module you want to compile.  See the
+            examples for how to use both modes.  Default: None.
+        verify (bool, optional): if True, upon all invocations of the
             function/module, execute both the compiled and interpreted versions
             of the model, and verify that their results match.  This is an easy
             (albeit slow) way to check if your function/module can be validly
-            JIT compiled.
-        nderivs (int, default 1): the number of derivatives which this function/module
+            JIT compiled.  Default: False.
+        nderivs (int, optional): the number of derivatives which this function/module
             will be used with.  You MUST accurately specify this number: set it too
             low and you will see an error when you attempt to run `backward`;
             set it too high, and the function/module will never be compiled
             (as we always wait to see all derivatives before compiling.)
-        optimize (bool, default False): whether or not to apply optimizations.
-        enabled (bool, default True): whether or not to actually enable the JIT
+            Default: 1 (i.e., we will compile forwards and backwards, but not
+            double-backwards).
+        optimize (bool, optional): whether or not to apply optimizations.  Default: True.
+        enabled (bool, optional): whether or not to actually enable the JIT
             compiler.  This is a convenient way to disable a compilation statement
-            without deleting the actual `compile` invocation.
+            without deleting the actual `compile` invocation.  Default: True.
 
     Example: Compile as function decorator.
 
@@ -65,7 +75,7 @@ def compile(arg=None, nderivs=1, params=tuple(), verify=False, optimize=True, en
         >>>     return x * 2
         >>> x = Variable(torch.randn(1))
         >>> out1 = f(x)  # interpreted run
-        >>> out1.sum().backward()  # required!
+        >>> out1.sum().backward()  # won't compile without this line
         >>> out2 = f(x)  # compiled run
         >>> out2.sum().backward()
 
@@ -89,6 +99,14 @@ def compile(arg=None, nderivs=1, params=tuple(), verify=False, optimize=True, en
         >>> compiled_model = jit.compile(nn.LSTMCell(), nderivs=0)
         >>> out1 = compiled_model(input, hidden)  # interpreted run
         >>> out2 = compiled_model(input, hidden)  # compiled run
+
+    Example: Compile a function with extra parameters. (If you compile
+    a Module, parameters are automatically computed via `state_dict`).
+
+        >>> lstm = nn.LSTMCell(10, 20)
+        >>> @jit.compile(params=lstm.parameters())
+        >>> def f(a, b):
+        >>>     return lstm(a, b)
     """
     # TODO: handle decorating a class (not an instance)
     def _compile(inner):
@@ -126,13 +144,6 @@ def trace(arg=None, nderivs=0, params=tuple()):
             question.  You generally do not need this for tracing modules, as
             the parameters of a module are automatically computed.
 
-    Example: Trace as function decorator.
-
-        >>> @jit.trace
-        >>> def f(x);
-        >>>     return x * 2
-        >>> trace, out = f(Variable(torch.randn(1)))
-
     Example: Trace as higher order function. (Notice that trace is a *curried*
     function; you first apply it with the function/model to trace, and then
     apply the result with the arguments.)
@@ -140,29 +151,12 @@ def trace(arg=None, nderivs=0, params=tuple()):
         >>> traced_model = jit.trace(nn.LSTMCell())
         >>> trace, out = traced_model(input, hidden)
 
-    Example: Trace the backwards pass as function decorator.
-
-        >>> @jit.trace(nderivs=1)
-        >>> def f(x);
-        >>>     return x * 2
-        >>> trace, out = f(Variable(torch.randn(1)))
-        >>> out.sum().backward()
-        >>> print(trace)
-
     Example: Trace the backwards pass as higher order function.
 
         >>> traced_model = jit.trace(nn.LSTMCell(), nderivs=1)
         >>> trace, out = traced_model(input, hidden)
         >>> out.sum().backward()
         >>> print(trace)
-
-    Example: Trace a function with extra parameters. (If you trace
-    a Module, parameters are automatically computed via `state_dict`).
-
-        >>> lstm = nn.LSTMCell(10, 20)
-        >>> @jit.trace(params=lstm.parameters())
-        >>> def f(a, b):
-        >>>     return lstm(a, b)
     """
     # TODO: handle decorating a class (not a callable)
     def _trace(inner):
@@ -189,10 +183,8 @@ class TracedModule(Module):
         # output so we don't unflatten it when we get out
         # NB: Not a method because trace_func_raw can't deal
         # with methods
-        @raw_trace(nderivs=self.nderivs)
+        @_raw_trace(nderivs=self.nderivs)
         def traced_inner(in_vars, in_struct):
-            # NB: Uncommenting this line should be equivalent
-            # args, _params = _unflatten(in_vars, in_struct)
             return _flatten(self.inner(*args))
 
         in_vars, in_struct = _flatten(args, self.state_dict(keep_vars=True).values())
@@ -201,11 +193,18 @@ class TracedModule(Module):
         assert len(extra) == 0
         return trace, out
 
+    def __getattr__(self):
+
 
 # Functional version that assumes that all parameters are explicitly
 # specified
-def raw_trace(nderivs=0):
-    def _raw_trace(f):
+def _raw_trace(nderivs=0):
+    def raw_trace(f):
+        # f takes two arguments, (in_vars, in_struct) (as determined
+        # by _flatten); furthermore, it must be the case that in_vars
+        # contains all Variable inputs (including parameters.)  It must
+        # produce two outputs, (out_vars, out_struct) (also as determined
+        # by _flatten).
         @functools.wraps(f)
         def wrapper(in_vars, in_struct=None):
             trace = torch._C._tracer_enter(in_vars, nderivs)
@@ -213,7 +212,7 @@ def raw_trace(nderivs=0):
             torch._C._tracer_exit(out_vars)
             return trace, (out_vars, out_struct)
         return wrapper
-    return _raw_trace
+    return raw_trace
 
 
 # Lifecycle of a CompiledModule:
@@ -239,7 +238,6 @@ class CompiledModule(Module):
 
     def _process_args(self, args):
         in_vars, in_struct = _flatten(args, self.state_dict(keep_vars=True).values())
-        # TODO: I'm not entirely sure about volatile implies nderivs=0 special case
         is_volatile, in_vars_key = vars_key(in_vars)
         in_key = (in_vars_key, in_struct)
         return in_vars, in_struct, is_volatile, in_key
@@ -252,9 +250,8 @@ class CompiledModule(Module):
         if ktrace is None:
             ktrace = TraceForKey(self.inner, volatile=is_volatile, **self.kwargs)
             self.ktrace_cache[in_key] = ktrace
-        # TODO: avoid virtual method call here
         closure = ktrace.maybe_closure()
-        if closure:
+        if closure is not None:
             # We already compiled it!  Run it directly, and
             # use the saved out_struct to unflatten.
             out_vars = closure()(*in_vars)
@@ -279,7 +276,9 @@ class CompiledModule(Module):
 
 
 # CompiledModule memoizes multiple traces and switches between them based on
-# inputs provided to a call; a TraceForKey represents one such trace. Things
+# inputs provided to a call; a TraceForKey logically represents one such trace
+# (in reality, a TraceForKey may contain multiple traces, but they all share
+# the same input configuration and should be equivalent). Things
 # that need to be considered include non-Variable argument (e.g. num_layers=3;
 # compared by equality) or Variable flags and sizes. TraceForKey is the object
 # that is used to hold a trace / compiled code for a single input configuration
@@ -305,9 +304,8 @@ class TraceForKey(object):
     # The signature here is a little goofy; it's a perf optimization
     def add_trace(self, args, in_vars, in_struct):
         # TODO: Deduplicate this code
-        @raw_trace(nderivs=self.nderivs)
+        @_raw_trace(nderivs=self.nderivs)
         def traced_f(in_vars, in_struct):
-            #args, _params = _unflatten(in_vars, in_struct)
             return _flatten(self.f(*args))
 
         trace, (out_vars, out_struct) = traced_f(in_vars, in_struct)
@@ -320,7 +318,7 @@ class TraceForKey(object):
         return out_vars, out_struct
 
     def maybe_closure(self):
-        if self.closure:
+        if self.closure is not None:
             return self.closure
 
         # GC expired traces
