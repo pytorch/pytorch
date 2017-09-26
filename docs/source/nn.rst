@@ -857,6 +857,11 @@ Non-linear activation functions
 
 .. autofunction:: rrelu
 
+:hidden:`glu`
+~~~~~~~~~~~~~~~
+
+.. autofunction:: glu
+
 :hidden:`logsigmoid`
 ~~~~~~~~~~~~~~~~~~~~
 

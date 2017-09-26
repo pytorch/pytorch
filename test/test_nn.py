@@ -3507,7 +3507,8 @@ def add_test(test):
     if hasattr(TestNN, cuda_test_name):
         raise RuntimeError('Found two tests with the same name: ' + cuda_test_name)
     setattr(TestNN, test_name, lambda self, test=test: test(self))
-    setattr(TestNN, cuda_test_name, lambda self, test=test: test.test_cuda(self))
+    if test_name != 'test_Hardshrink':  # no CUDA implementation
+        setattr(TestNN, cuda_test_name, lambda self, test=test: test.test_cuda(self))
 
 
 new_criterion_tests = [
