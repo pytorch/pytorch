@@ -51,9 +51,7 @@ Tensor cumsum_backward(const Tensor & x, int64_t dim) {
 }
 
 Tensor unnarrow(const Tensor & self, IntList sizes, int64_t dimension, int64_t offset) {
-  auto result = self.type().zeros(sizes);
-  // TODO: implement unnarrow
-  return result;
+  throw std::runtime_error("unnarrow: not yet implemented");
 }
 
 Tensor unsqueeze_to(const Tensor & self, IntList sizes) {
