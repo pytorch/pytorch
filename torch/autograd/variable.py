@@ -277,8 +277,8 @@ class Variable(_C._VariableBase):
         module = torch._import_dotted_name(self.data.__module__)
         return getattr(module, name)
 
-    def cuda(self, device_id=None, async=False):
-        return CudaTransfer.apply(self, device_id, async)
+    def cuda(self, device=None, async=False):
+        return CudaTransfer.apply(self, device, async)
 
     def cpu(self):
         return self.type(getattr(torch, type(self.data).__name__))
