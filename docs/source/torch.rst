@@ -7,6 +7,8 @@ Tensors
 .. autofunction:: is_tensor
 .. autofunction:: is_storage
 .. autofunction:: set_default_tensor_type
+.. autofunction:: set_default_tensor_zero
+.. autofunction:: get_default_tensor_zero
 .. autofunction:: numel
 .. autofunction:: set_printoptions
 

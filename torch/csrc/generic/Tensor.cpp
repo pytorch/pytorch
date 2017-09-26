@@ -113,6 +113,17 @@ static THTensor* THPTensor_(_newWithSize)(THLongStorage *size)
   if (!tensor->storage) {
     tensor->storage = THStorage_(new)(LIBRARY_STATE_NOARGS);
   }
+  if (THPDefaultTensorZero) {
+    #ifdef TH_REAL_IS_HALF
+      // Math Operations are not always implemented for half type
+      int size = THStorage_(size)(tensor->storage);
+      for (int i=0; i<size; ++i) {
+        THStorage_(set)(tensor->storage, i, TH_float2half(0));
+      }
+    #else
+      THTensor_(zero)(LIBRARY_STATE tensor);
+    #endif
+  }
   return tensor.release();
 }
 
