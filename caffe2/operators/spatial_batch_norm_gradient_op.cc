@@ -112,12 +112,9 @@ class GetSpatialBNGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;
   vector<OperatorDef> GetGradientDefs() override {
     // Check if we are in training or testing mode.
-    bool is_test = false;
-    if (ArgumentHelper::HasArgument(def_, OpSchema::Arg_IsTest)) {
-      const auto& arg = GetArgument(def_, OpSchema::Arg_IsTest);
-      CAFFE_ENFORCE(arg.has_i());
-      is_test = arg.i();
-    }
+    bool is_test =
+        ArgumentHelper::GetSingleArgument(def_, OpSchema::Arg_IsTest, 0);
+
     vector<string> grad_outputs{GI(0), GI(1), GI(2)};
     vector<string> grad_inputs;
     if (is_test) {

@@ -35,7 +35,7 @@ class BrewTest(unittest.TestCase):
         X = np.ones((100, 100)).astype(np.float32) - p
         workspace.FeedBlob("x", X)
         model = ModelHelper(name="test_model")
-        brew.dropout(model, "x", "out")
+        brew.dropout(model, "x", "out", is_test=False)
         workspace.RunNetOnce(model.param_init_net)
         workspace.RunNetOnce(model.net)
         out = workspace.FetchBlob("out")

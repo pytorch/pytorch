@@ -10,6 +10,7 @@
 #include "caffe2/core/logging.h"
 #include "caffe2/core/workspace.h"
 #include "caffe2/utils/proto_utils.h"
+#include "caffe2/core/operator_schema.h"
 
 namespace caffe2 {
 
@@ -427,7 +428,7 @@ void testMPSCNN() {
           op.add_input("var");
           {
             auto& arg = *(op.add_arg());
-            arg.set_name("is_test");
+            arg.set_name(OpSchema::Arg_IsTest);
             arg.set_i(1);
           }
 
@@ -451,7 +452,7 @@ void testMPSCNN() {
           op.add_input("var");
           {
             auto& arg = *(op.add_arg());
-            arg.set_name("is_test");
+            arg.set_name(OpSchema::Arg_IsTest);
             arg.set_i(1);
           }
 
@@ -1778,7 +1779,7 @@ void testMPSCNN() {
       op.add_input("X_mtl");
       {
         auto& arg = *(op.add_arg());
-        arg.set_name("is_test");
+        arg.set_name(OpSchema::Arg_IsTest);
         arg.set_i(1);
       }
       op.add_output("Y_mtl");
@@ -1798,7 +1799,7 @@ void testMPSCNN() {
       op.add_input("X_cpu");
       {
         auto& arg = *(op.add_arg());
-        arg.set_name("is_test");
+        arg.set_name(OpSchema::Arg_IsTest);
         arg.set_i(1);
       }
       op.add_output("Y_ref");

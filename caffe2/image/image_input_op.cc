@@ -82,7 +82,7 @@ The dimension of the output image will always be cropxcrop
     .Arg("bounding_xmin", "Bounding box coordinate. Defaults to -1 (none)")
     .Arg("bounding_height", "Bounding box coordinate. Defaults to -1 (none)")
     .Arg("bounding_width", "Bounding box coordinate. Defaults to -1 (none)")
-    .Arg("is_test", "Set to 1 to do deterministic cropping. Defaults to 0")
+    .ArgIsTest("Set to 1 to do deterministic cropping. Defaults to 0")
     .Arg("use_caffe_datum", "1 if the input is in Caffe format. Defaults to 0")
     .Arg("use_gpu_transform", "1 if GPU acceleration should be used."
          " Defaults to 0. Can only be 1 in a CUDAContext")

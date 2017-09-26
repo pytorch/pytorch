@@ -85,9 +85,8 @@ copy of the input. Note that our implementation of Dropout does scaling in
 the training phase, so during testing nothing needs to be done.
 )DOC")
     .Arg("ratio", "(float, default 0.5) the ratio of random dropout")
-    .Arg(
-        "is_test",
-        "(int, default 0) if nonzero, run dropout in test mode where "
+    .ArgIsTest(
+        "(int) if nonzero, run dropout in test mode where "
         "the output is simply Y = X.")
     .Input(0, "data", "The input data as Tensor.")
     .Output(0, "output", "The output.")
