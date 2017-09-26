@@ -24,12 +24,44 @@ struct LogitCPUFunctor {
   float eps_;
 };
 
+template <typename T, class Context>
+class LogitGradientOp final : public Operator<Context> {
+ public:
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
+  LogitGradientOp(const OperatorDef& operator_def, Workspace* ws)
+      : Operator<Context>(operator_def, ws),
+        eps_(OperatorBase::GetSingleArgument<float>("eps", 1e-6)) {}
+  ~LogitGradientOp() {}
+
+  bool RunOnDevice() override {
+    const auto& X = Input(0);
+    const auto& dY = Input(1);
+    auto* dX = Output(0);
+    dX->ResizeLike(X);
+    int channels = X.dim32(X.ndim() - 1);
+    ConstEigenArrayMap<float> Xmat(
+        X.template data<float>(), channels, X.size() / channels);
+    ConstEigenArrayMap<float> dYmat(
+        dY.template data<float>(), channels, X.size() / channels);
+    EigenArrayMap<float> dXmat(
+        dX->template mutable_data<float>(), channels, X.size() / channels);
+    dXmat = (Xmat < eps_ || Xmat > 1.0 - eps_)
+                .select(0, dYmat * ((1 - Xmat) * Xmat).inverse());
+    return true;
+  }
+
+ protected:
+  float eps_;
+};
+
 REGISTER_CPU_OPERATOR(
     Logit,
     UnaryElementwiseWithArgsOp<
         TensorTypes<float>,
         CPUContext,
         LogitCPUFunctor>);
+
+REGISTER_CPU_OPERATOR(LogitGradient, LogitGradientOp<float, CPUContext>);
 
 OPERATOR_SCHEMA(Logit)
     .NumInputs(1)
@@ -44,7 +76,25 @@ input data clampped in (eps, 1-eps).
     .Input(0, "X", "input float tensor")
     .Input(1, "Y", "output float tensor");
 
-GRADIENT_NOT_IMPLEMENTED_YET(Logit);
+OPERATOR_SCHEMA(LogitGradient)
+    .NumInputs(2)
+    .NumOutputs(1)
+    .Input(0, "X", "input float tensor")
+    .Input(1, "dY", "input float tensor")
+    .Output(0, "dX", "output float tensor")
+    .Arg("eps", "small positive epsilon value, the default is 1e-6.");
 
+class GetLogitGradient : public GradientMakerBase {
+  using GradientMakerBase::GradientMakerBase;
+  vector<OperatorDef> GetGradientDefs() override {
+    return vector<OperatorDef>{CreateOperatorDef(
+        "LogitGradient",
+        "",
+        std::vector<string>{I(0), GO(0)},
+        std::vector<string>{GI(0)})};
+  }
+};
+
+REGISTER_GRADIENT(Logit, GetLogitGradient);
 } // namespace
 } // namespace caffe2
