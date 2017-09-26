@@ -19,7 +19,8 @@ __all__ = [
     'DoubleStorage', 'FloatStorage', 'LongStorage', 'IntStorage',
     'ShortStorage', 'CharStorage', 'ByteStorage',
     'DoubleTensor', 'FloatTensor', 'LongTensor', 'IntTensor',
-    'ShortTensor', 'CharTensor', 'ByteTensor',
+    'ShortTensor', 'CharTensor', 'ByteTensor', 'set_default_tensor_zero',
+    'get_default_tensor_zero',
 ]
 
 ################################################################################
@@ -101,11 +102,31 @@ def is_storage(obj):
 
 
 def set_default_tensor_type(t):
+    r"""Changes the default tensor type.
+
+    Args:
+        t (string): Name of the class to use
+    """
     global Tensor
     global Storage
     Tensor = _import_dotted_name(t)
     Storage = _import_dotted_name(t.replace('Tensor', 'Storage'))
     _C._set_default_tensor_type(Tensor)
+
+def set_default_tensor_zero(flag):
+    r"""Changes the default behaviour during tensor creation for memory initialization.
+    If set to True, the tensor will be filled with 0, otherwise it will contain
+    uninitialised memory.
+
+    Args:
+        flag (bool): Value to set for the default behavior
+    """
+    _C._set_default_tensor_zero(flag)
+
+def get_default_tensor_zero():
+    r"""Get the current value of the tensor creation flag.
+    """
+    _C._get_default_tensor_zero()
 
 
 def set_rng_state(new_state):

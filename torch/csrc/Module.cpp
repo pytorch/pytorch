@@ -618,8 +618,8 @@ static PyMethodDef TorchMethods[] = {
 #endif
   {"_safe_call",      (PyCFunction)THPModule_safeCall,          METH_VARARGS | METH_KEYWORDS, NULL},
   {"_set_default_tensor_type", (PyCFunction)THPModule_setDefaultTensorType, METH_O, NULL},
-  {"get_default_tensor_zero", (PyCFunction)THPModule_getDefaultTensorZero, METH_NOARGS, NULL},
-  {"set_default_tensor_zero", (PyCFunction)THPModule_setDefaultTensorZero, METH_O, NULL},
+  {"_get_default_tensor_zero", (PyCFunction)THPModule_getDefaultTensorZero, METH_NOARGS, NULL},
+  {"_set_default_tensor_zero", (PyCFunction)THPModule_setDefaultTensorZero, METH_O, NULL},
   {"_infer_size",     (PyCFunction)THPModule_inferSize,         METH_VARARGS, NULL},
   {"_set_backcompat_broadcast_warn", (PyCFunction)THPModule_setBackcompatBroadcastWarn, METH_O, NULL},
   {"_get_backcompat_broadcast_warn", (PyCFunction)THPModule_getBackcompatBroadcastWarn, METH_NOARGS, NULL},
