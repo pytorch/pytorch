@@ -89,7 +89,9 @@ void GLFilter::attach_uniform_buffer(const binding* block,
                                      GLuint bindingPoint,
                                      std::function<void(T*, size_t)> loader,
                                      int batch) {
-  bool no_batch = false;
+  // Force uniform buffer caching to turn off by default
+  bool no_batch = true;
+  batch         = 0;
   if (batch < 0) {
     batch = 0;
     no_batch = true;
