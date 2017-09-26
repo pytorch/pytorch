@@ -210,6 +210,7 @@ void attributesTest() {
   auto one = kParam;
   auto two = kReturn;
   auto three = kConstant;
+  auto four = kSlice;
   Attr attr;
   attr.f_(one,3.4)->i_(two,5)->s_(three,"what");
   assert(attr.f(one) == 3.4);
@@ -224,7 +225,7 @@ void attributesTest() {
 
   Attr attr2;
   attr2.copyAttributes(attr);
-  assert(two.s(one) == "no");
+  assert(attr2.s(one) == "no");
   attr2.f_(one,5);
   assert(attr.s(one) == "no");
   assert(attr2.f(one) == 5);
