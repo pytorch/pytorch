@@ -1714,15 +1714,28 @@ class TestOperators(hu.HypothesisTestCase):
 
     @given(a=hu.tensor(),
            eps=st.floats(min_value=1e-4, max_value=1e-2),
+           a_grad=hu.tensor(elements=st.floats(min_value=0.01, max_value=0.99)),
+           eps_grad=st.floats(min_value=1e-4, max_value=1e-3),
            **hu.gcs_cpu_only)
-    def test_logit(self, a, eps, gc, dc):
+    def test_logit(self, a, eps, a_grad, eps_grad, gc, dc):
         def ref(data):
             data = np.clip(data, eps, 1.0 - eps)
             return (np.log(data / (1 - data)), )
-
+        # forward testing carried out in the full range of input
+        # to ensure original test coverage.
+        # gradient test carried out with reduced input range
+        # because the sharp increase of the logit curve at 0 and 1
+        # error increases dramtically when input is close to 0 or 1
+        # and it will fail the test.
+        # So we only run gradient test in the range of (0.01, 0.99)
+        # very occationally, test may fail due to random accumulated error
+        # reduce test range to (0.02, 0.98) will improve test stability
         op = core.CreateOperator('Logit', ["X"], ["Y"], eps=eps)
         self.assertDeviceChecks(dc, op, [a], [0])
         self.assertReferenceChecks(gc, op, [a], ref)
+        op_grad = core.CreateOperator('Logit', ["X"], ["Y"], eps=eps_grad)
+        self.assertGradientChecks(gc, op_grad, [a_grad], 0, [0],
+                                  threshold=0.04, stepsize=2e-3)
 
     @given(a=hu.tensor(elements=st.floats(allow_nan=True)),
            value=st.floats(min_value=-10, max_value=10),
