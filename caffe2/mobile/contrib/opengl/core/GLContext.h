@@ -7,7 +7,7 @@
 
 class GLContext {
  private:
-  static GLContext* _glcontext;
+  static std::unique_ptr<GLContext> _glcontext;
   std::function<const GLTexture*(const int width, const int height)> foreignTextureAllocator =
       nullptr;
 
