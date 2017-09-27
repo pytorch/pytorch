@@ -2,19 +2,23 @@ import torch.autograd.function as function
 import torch._C
 from torch.autograd import Variable
 from torch.nn import Module, ParameterList, Parameter
+from torch._six import raise_from
 from collections import defaultdict
 import itertools
 import types
 import contextlib
 import os
 import functools
+import inspect
 
 
 class Placeholder(object):
     def __init__(self, s):
         self.s = s
+
     def __str__(self):
         return self.s
+
     def __repr__(self):
         return self.s
 
@@ -24,16 +28,13 @@ VOLATILE = Placeholder("VOLATILE")
 
 
 # TODO: verify is not implemented yet
-def compile(arg=None, nderivs=1, params=tuple(), name=None, verify=False, optimize=True,
-            time=False, enabled=True):
+def compile(arg=None, verify=False, **kwargs):
     """
-    Mark a function or module as eligible for just-in-time compilation.  The
-    next time the function/module is executed, it is traced, and the trace is
-    compiled into an optimized representation which is run in lieu of the
-    original Python code upon subsequent invocations of the function/module.
-
-    The result of this function is stateful, so make sure you invoke it
-    only once per code you want to JIT compile.
+    Decorator which marks a function or module class as eligible for
+    just-in-time compilation.  The next time the function/module is executed, it
+    is traced, and the trace is compiled into an optimized representation which
+    is run in lieu of the original Python code upon subsequent invocations of
+    the function/module.
 
     .. note::
 
@@ -45,6 +46,9 @@ def compile(arg=None, nderivs=1, params=tuple(), name=None, verify=False, optimi
         compile an RNN which takes the number of hidden units as a parameter,
         we will compile a trace for every RNN length you use at runtime.
 
+        When a module class is JIT compiled, each instantiation of the module
+        gets a separate trace cache.
+
     .. warning::
 
         Just-in-time compilation currently only works for functions/modules
@@ -55,11 +59,7 @@ def compile(arg=None, nderivs=1, params=tuple(), name=None, verify=False, optimi
         invocations of the model.  You can use `verify=True` to check that the
         original Python code and optimized code are equivalent.
 
-    Arguments:
-        arg (torch.nn.Module or function, optional): the function or module
-            to be compiled.  If `None`, `compile` returns a decorator which can be
-            applied to the function or module you want to compile.  See the
-            examples for how to use both modes.  Default: None.
+    Keyword arguments:
         verify (bool, optional): if True, upon all invocations of the
             function/module, execute both the compiled and interpreted versions
             of the model, and verify that their results match.  This is an easy
@@ -95,54 +95,90 @@ def compile(arg=None, nderivs=1, params=tuple(), name=None, verify=False, optimi
             will get back your original model.  This is a convenient way to
             disable tracing without having to delete the annotation. Default: True.
 
-    Example: Compile as function decorator.
+    Example: Compile as class decorator.
+
+        >>> @jit.compile
+        >>> class MyModel(nn.Module):
+        >>>     ...
+        >>> model = MyModel()
+        >>> out1 = model(x)        # interpreted run
+        >>> out1.sum().backward()  # won't compile without this line
+        >>> out2 = model(x)        # compiled run
+        >>> out2.sum().backward()  # also compiled
+
+    Example: Compile forward pass only as class decorator.
+
+        >>> @jit.compile(nderivs=0)
+        >>> class MyModel(nn.Module):
+        >>>     ...
+        >>> model = MyModel()
+        >>> out1 = model(x)        # interpreted run
+        >>> out2 = model(x)        # compiled run
+
+    Example: Compile as function decorator.  The same modes of use for the class
+    decorator are also supported for functions; however, the decorated
+    function must declare *all* Variable inputs in its arguments.
 
         >>> @jit.compile
         >>> def f(x);
         >>>     return x * 2
-        >>> x = Variable(torch.randn(1))
-        >>> out1 = f(x)  # interpreted run
-        >>> out1.sum().backward()  # won't compile without this line
-        >>> out2 = f(x)  # compiled run
-        >>> out2.sum().backward()
-
-    Example: Compile as higher order function. (Notice that compile is a *curried*
-    function; you first apply it with the function/model to trace, and then
-    apply the result with the arguments.)
-
-        >>> compiled_model = jit.compile(nn.LSTMCell())
-        >>> out = compiled_model(input, hidden)
-
-    Example: Compile forwards only as function decorator
-
-        >>> @jit.compile(nderivs=0)
-        >>> def f(x);
-        >>>     return x * 2
-        >>> out1 = f(x)  # interpreted run
-        >>> out2 = f(x)  # compiled run
-
-    Example: Compile forwards only as higher order function
-
-        >>> compiled_model = jit.compile(nn.LSTMCell(), nderivs=0)
-        >>> out1 = compiled_model(input, hidden)  # interpreted run
-        >>> out2 = compiled_model(input, hidden)  # compiled run
-
-    Example: Compile a function with extra parameters. (If you compile
-    a Module, parameters are automatically computed via `state_dict`).
-
-        >>> lstm = nn.LSTMCell(10, 20)
-        >>> @jit.compile(params=lstm.parameters())
-        >>> def f(a, b):
-        >>>     return lstm(a, b)
     """
     # TODO: handle decorating a class (not an instance)
-    def _compile(inner):
-        return CompiledModule(inner, params=params, nderivs=nderivs, optimize=optimize,
-                              name=name, time=time, enabled=enabled)
-    if callable(arg):
-        return _compile(arg)
-    else:
+    def _compile(arg):
+        if inspect.isclass(arg):
+            if issubclass(arg, _CompiledMixin):
+                raise TypeError("Cannot compile a model class that already is compiled")
+
+            # NB: It might seem natural to create a subclass here, rather than
+            # make a copy of the class to insert the mixin.  Unfortunately, this
+            # will break many user classes.  Suppose you have:
+            #
+            #     @torch.jit.compile
+            #     class Foo(Module):
+            #         def __init__(self):
+            #             super(Foo, self).__init__() # Python 2 syntax!
+            #
+            # within the class definition, 'Foo' refers to the *decorated*
+            # class, not the undecorated class.  This is bad juju if the
+            # decorator returns a subclass, since super(Foo, self) is going to
+            # refer to the *undecorated* Foo (and thus you have an infinite
+            # loop.)  Python 3's argument-less super() does not have this
+            # problem, but in general we cannot ask users to rewrite their code.
+            #
+            # If we create a *copy* of the class (unrelated to the class the
+            # user passed in), this problem goes away, because the class
+            # __init__ is a part of is indeed Foo.
+
+            # Make a copy of the class, with the extra _CompiledMixin base
+            cls = type(arg.__name__, (_CompiledMixin,) + arg.__bases__, dict(arg.__dict__))
+
+            # Monkey-patch forward and __init__ with the compiler versions
+            cls.init_compiler(**kwargs)
+            return cls
+        elif isinstance(arg, Module):
+            # It requires work to compile module instances, because you would
+            # like the resulting compiled module to look just like the uncompiled
+            # version; actually achieving this requires a bit of fanciness.
+            # So for now, we just only support the class mechanism.
+            raise TypeError("Compiling model instances is not supported.  "
+                            "Use @torch.jit.compile on a class instead.")
+        elif callable(arg):
+            @compile(**kwargs)
+            class FuncModule(Module):
+                def __init__(self, f):
+                    super(FuncModule, self).__init__()
+                    self.f = f
+
+                def forward(self, *args):
+                    return self.f(*args)
+
+            return FuncModule(arg)
+        else:
+            raise TypeError("Cannot handle arg with type {}".format(type(arg)))
+    if arg is None:
         return _compile
+    else:
+        return _compile(arg)
 
 
 def trace(arg=None, nderivs=0, params=tuple()):
@@ -192,9 +228,8 @@ def trace(arg=None, nderivs=0, params=tuple()):
         return _trace
 
 
-# TODO: Formulating it this way means that state_dict of the traced thing
-# looks different, etc (because there's extra nesting).  Figure out a
-# way to avoid this
+# It's OK for TracedModule to look different from the inner module, since
+# the forward() return type changed anyway.
 class TracedModule(Module):
     def __init__(self, inner, params=tuple(), nderivs=0):
         super(TracedModule, self).__init__()
@@ -238,7 +273,8 @@ def _raw_trace(nderivs=0):
     return raw_trace
 
 
-# Lifecycle of a CompiledModule:
+# Lifecycle of a compiler:
+#
 # - It is given an underlying function, which knows how to actually
 #   execute the code that we want to compile.
 # - When we encounter an input configuration for which we don't
@@ -251,26 +287,64 @@ def _raw_trace(nderivs=0):
 #   as the compiled trace.
 # - When we encounter an input configuration whose trace is compiled,
 #   we just directly run the compiled trace.
-class CompiledModule(Module):
-    _next_id = 0
+#
+# You should never use this class directly; instead, use compile.  However,
+# the intended manual usage of this class looks like this:
+#
+#     class CompiledModel(_CompiledMixin, nn.Module):
+#         def forward(self, x):
+#             ...
+#     CompiledModule.init_compiler()
+#     model = CompiledModule()
+#
+class _CompiledMixin(object):
+    # Global over ALL compilations!  This helps us disambig if two Modules have
+    # the same __name__ but actually are different
+    __next_id = 0
 
-    def __init__(self, inner, params=tuple(), name=None, enabled=True, time=False, **kwargs):
+    @classmethod
+    def init_compiler(cls, params=tuple(), name=None, enabled=True, time=False, **kwargs):
+        # Ensure we are not shadowing this method on the class we mixed with
+        assert not hasattr(super(_CompiledMixin, cls), "init_compiler")
         # TODO: Consider saving the backtrace of this constructor, so it's easier
         # to correlate dump files with invocations in Python
-        super(CompiledModule, self).__init__()
-        self.inner = inner
-        self.params = ParameterList(list(params))
-        self.kwargs = kwargs
-        self.ktrace_cache = {}
-        self.enabled = enabled
-        self.time = time
-        if name is None:
-            name = "jit_compile_{}".format(CompiledModule._next_id)
-            CompiledModule._next_id += 1
-        self.name = name
-        self._next_ktrace_id = 0
+        #
+        # NB: Use private methods/variables here in order to prevent a class
+        # we mix with from accidentally scrambling us
+        #
+        # NB: Class variables are also accessible via self!
+        cls.__params = ParameterList(list(params))
+        cls.__ktrace_kwargs = kwargs
+        cls.__enabled = enabled
+        cls.__time = time
+        cls.__model_name = name
 
-    def _process_args(self, args):
+        # Monkey patch the constructor and forward functions *inplace*
+        cls.__old_forward = cls.forward
+        cls.forward = cls.__new_forward
+        cls.__old_init = cls.__init__
+        cls.__init__ = cls.__new_init
+
+    def __new_init(self, *args, **kwargs):
+        try:
+            # __old_init is assumed to handle super call
+            self.__old_init(*args, **kwargs)
+        except TypeError as e:
+            # If this fails here, the user probably didn't use this as a class
+            # decorator
+            if "super" in str(e):
+                raise_from(TypeError("torch.jit.compile must be used as a class decorator; "
+                                     "using it on an already defined class is not valid."
+                                     "\n\nOriginal error: {}".format(str(e))), e)
+            else:
+                raise
+        model_name = self.__model_name if self.__model_name else type(self).__name__
+        self.__name = "jit_{}_{}".format(model_name, _CompiledMixin.__next_id)
+        _CompiledMixin.__next_id += 1
+        self.__ktrace_cache = {}
+        self.__next_ktrace_id = 0
+
+    def __process_args(self, args):
         in_vars, in_struct = _flatten(args, self.state_dict(keep_vars=True).values())
         is_volatile, in_vars_key = vars_key(in_vars)
         in_key = (in_vars_key, in_struct)
@@ -278,28 +352,29 @@ class CompiledModule(Module):
 
     # NB: In principle, there could also be a 'raw' version of this compiler,
     # but since the logic is so complicated, testing code wouldn't benefit much
-    def forward(self, *args):
-        if _JIT_DISABLE or not self.enabled:
-            with _time(self.name, "unoptimized", self.time):
-                return self.inner(*args)
-        in_vars, in_struct, is_volatile, in_key = self._process_args(args)
-        ktrace = self.ktrace_cache.get(in_key)
+    def __new_forward(self, *args):
+        if _JIT_DISABLE or not self.__enabled:
+            with _time(self.__name, "unoptimized", self.__time):
+                # Call to the saved old forward function
+                return self.__old_forward(*args)
+        in_vars, in_struct, is_volatile, in_key = self.__process_args(args)
+        ktrace = self.__ktrace_cache.get(in_key)
         if ktrace is None:
-            ktrace_name = '{}_{}'.format(self.name, self._next_ktrace_id)
-            self._next_ktrace_id += 1
-            ktrace = TraceForKey(ktrace_name, in_key, self.inner, volatile=is_volatile, **self.kwargs)
-            self.ktrace_cache[in_key] = ktrace
+            ktrace_name = '{}_{}'.format(self.__name, self.__next_ktrace_id)
+            self.__next_ktrace_id += 1
+            ktrace = TraceForKey(ktrace_name, in_key, volatile=is_volatile, **self.__ktrace_kwargs)
+            self.__ktrace_cache[in_key] = ktrace
         closure = ktrace.maybe_closure()
         if closure is not None:
             # We already compiled it!  Run it directly, and
             # use the saved out_struct to unflatten.
-            with _time(ktrace.name, "optimized", self.time):
+            with _time(ktrace.name, "optimized", self.__time):
                 out_vars = closure()(*in_vars)
                 out_struct = ktrace.out_struct
         else:
             # No compiled trace available.  Run it by hand.
-            with _time(ktrace.name, "tracing", self.time):
-                out_vars, out_struct = ktrace.add_trace(args, in_vars, in_struct)
+            with _time(ktrace.name, "tracing", self.__time):
+                out_vars, out_struct = ktrace.add_trace(self.__old_forward, args, in_vars, in_struct)
         if isinstance(out_vars, Variable):
             out_vars = (out_vars, )
         out, extras = _unflatten(out_vars, out_struct)
@@ -307,8 +382,10 @@ class CompiledModule(Module):
         return out
 
     def has_trace_for(self, *args):
-        in_vars, in_struct, is_volatile, in_key = self._process_args(args)
-        ktrace = self.ktrace_cache.get(in_key)
+        # Ensure we are not shadowing this method on the class we mixed with
+        assert not hasattr(super(_CompiledMixin, self), "has_trace_for")
+        in_vars, in_struct, is_volatile, in_key = self.__process_args(args)
+        ktrace = self.__ktrace_cache.get(in_key)
         if ktrace is None:
             return False
         return ktrace.maybe_closure() is not None
@@ -333,23 +410,24 @@ class TraceForKey(object):
     #   - Whenever we want to run this trace, we call 'maybe_closure'.  This
     #     returns None if we don't have a complete trace yet, or the
     #     autograd closure to actually run the trace if we do.
-    def __init__(self, name, key, f, nderivs=1, optimize=True, volatile=False):
+    def __init__(self, name, key, nderivs=1, optimize=True, volatile=False):
         self.name = name
         self.key = key
-        self.f = f
         # TODO: Not convinced about this volatile special case...
         self.nderivs = nderivs if not volatile else 0
         self.optimize = optimize
         self.traces = []
         self.closure = None
-        self.out_struct = None # initialized when we call trace, checked thereafter
+        self.out_struct = None  # initialized when we call trace, checked thereafter
 
-    # The signature here is a little goofy; it's a perf optimization
-    def add_trace(self, args, in_vars, in_struct):
+    # The signature here is a little goofy; it's a perf optimization.
+    # Additionally, f is passed in as an argument (even though it is fixed as
+    # class initialization) to avoid a circular reference.
+    def add_trace(self, f, args, in_vars, in_struct):
         # TODO: Deduplicate this code
         @_raw_trace(nderivs=self.nderivs)
         def traced_f(in_vars, in_struct):
-            return _flatten(self.f(*args))
+            return _flatten(f(*args))
 
         trace, (out_vars, out_struct) = traced_f(in_vars, in_struct)
         if self.out_struct is None:
@@ -401,6 +479,7 @@ def vars_key(in_vars):
     affect the trace, e.g., size and requires_grad.
     """
     is_volatile = any(x.volatile if isinstance(x, Variable) else False for x in in_vars)
+
     def var_key(x):
         if isinstance(x, Variable):
             grad_key = x.requires_grad
@@ -411,6 +490,7 @@ def vars_key(in_vars):
         if is_volatile:
             grad_key = VOLATILE
         return ty, grad_key, x.size()
+
     return is_volatile, tuple(map(var_key, in_vars))
 
 

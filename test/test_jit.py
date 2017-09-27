@@ -185,8 +185,10 @@ class TestJit(TestCase):
         input = Variable(torch.randn(3, 10))
         hx = Variable(torch.randn(3, 20))
         cx = Variable(torch.randn(3, 20))
-        lstm = nn.LSTMCell(10, 20)
-        lstm = torch.jit.compile(verify=True)(lstm)
+        @torch.jit.compile(verify=True)
+        class MyLSTMCell(nn.LSTMCell):
+            pass
+        lstm = MyLSTMCell(10, 20)
 
         out = lstm(input, (hx, cx))
         out2 = lstm(input, (hx, cx))
@@ -522,11 +524,19 @@ class TestJit(TestCase):
         self.assertExpected(str(trace))
 
     def test_batchnorm_verify(self):
-        bn = torch.jit.compile(verify=True)(nn.BatchNorm2d(1))
+        @torch.jit.compile(verify=True)
+        class MyBatchNorm2d(nn.BatchNorm2d):
+            pass
+
+        bn = MyBatchNorm2d(1)
         x = Variable(torch.randn(5, 1))
         z = bn(x)
         z2 = bn(x)
         self.assertEqual(z, z2)
+
+    def test_non_decorator_use_fails(self):
+        MyLSTM = torch.jit.compile(nn.LSTM)
+        self.assertRaisesRegex(TypeError, "class decorator", lambda: MyLSTM(2,2))
 
     def test_conv(self):
         x = Variable(torch.randn(20, 16, 50, 40).fill_(1.0), requires_grad=True)
@@ -536,6 +546,7 @@ class TestJit(TestCase):
     def test_mini_wlm(self):
         """Exercise null-edge pruning in the tracer."""
 
+        @torch.jit.compile(verify=True)
         class MyModel(nn.Module):
             def __init__(self):
                 super(MyModel, self).__init__()
@@ -546,7 +557,7 @@ class TestJit(TestCase):
                 hidden = hidden.clone()  # simulate some RNN operation
                 return emb, hidden
 
-        model = torch.jit.compile(MyModel(), verify=True)
+        model = MyModel()
 
         x = Variable(torch.LongTensor([[0, 1], [1, 0]]))
         y = Variable(torch.FloatTensor([0]))
