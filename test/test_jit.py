@@ -85,24 +85,6 @@ class TestJit(TestCase):
         torch._C._jit_pass_lint(trace)
         self.assertExpected(str(trace))
 
-    def test_function_as_argument(self):
-        # Careful: don't use fused backend (enabled with CUDA)
-        # Pasted from test_LSTM_cell
-        input = Variable(torch.randn(3, 10))
-        hx = Variable(torch.randn(3, 20))
-        cx = Variable(torch.randn(3, 20))
-        lstm = nn.LSTMCell(10, 20)
-
-        @torch.jit.trace(nderivs=0, params=lstm.parameters())
-        def f(a, b):
-            return lstm(a, b)
-
-        trace, _ = f(input, (hx, cx))
-        torch._C._jit_pass_lint(trace)
-        torch._C._jit_pass_onnx(trace)
-        torch._C._jit_pass_lint(trace)
-        self.assertExpected(str(trace))
-
     def test_cse(self):
         x = Variable(torch.Tensor([0.4, 0.3]), requires_grad=True)
         y = Variable(torch.Tensor([0.7, 0.5]), requires_grad=True)
@@ -372,17 +354,17 @@ class TestJit(TestCase):
 
     def test_multiuse_fn(self):
         x = Variable(torch.randn(2, 2), requires_grad=True)
-        w = nn.Parameter(torch.randn(2, 2), requires_grad=True)
+        w = Variable(torch.randn(2, 2), requires_grad=True)
 
-        @torch.jit.compile(params=(w,))
-        def cell(x):
+        @torch.jit.compile
+        def cell(x, w):
             return x * w + 2
 
-        out = cell(cell(cell(x)))
-        self.assertFalse(cell.has_trace_for(x))
+        out = cell(cell(cell(x, w), w), w)
+        self.assertFalse(cell.has_trace_for(x, w))
 
         out.sum().backward()
-        self.assertTrue(cell.has_trace_for(x))
+        self.assertTrue(cell.has_trace_for(x, w))
 
     def test_output_unflatten(self):
         """Check that outputs of traced functions retain the original structure and nesting"""
