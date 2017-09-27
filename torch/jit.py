@@ -461,13 +461,15 @@ class TraceForKey(object):
             _dump_trace(self.name, pass_name, self.key, trace)
             torch._C._jit_pass_lint(trace)
 
-        _dump_trace(self.name, "trace", self.key, complete_trace)
+        _dump_trace(self.name, "init", self.key, complete_trace)
 
         # It's important to always run DCE, because backward can create a lot of unnecessary nodes
         _run_pass(torch._C._jit_pass_dce, complete_trace)
         if self.optimize:
             _run_pass(torch._C._jit_pass_onnx, complete_trace)
             _run_pass(torch._C._jit_pass_fuse, complete_trace)
+
+        _dump_trace(self.name, "final", self.key, complete_trace)
 
         self.closure = torch._C._jit_createAutogradClosure(complete_trace)
         return self.closure
