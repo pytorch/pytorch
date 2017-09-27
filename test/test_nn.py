@@ -3054,8 +3054,8 @@ class TestNN(NNTestCase):
 
 class TestNNInit(TestCase):
     def setUp(self):
+        super(TestNNInit, self).setUp()
         random.seed(123)
-        torch.manual_seed(123)
 
     def _is_normal(self, tensor, mean, std):
         if isinstance(tensor, Variable):
