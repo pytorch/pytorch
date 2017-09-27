@@ -7,11 +7,12 @@ cd torch/lib
 
 set INSTALL_DIR=%cd:\=/%/tmp_install
 set PATH=%INSTALL_DIR%/bin;%PATH%
-set BASIC_C_FLAGS= /DTH_INDEX_BASE=0 /I%INSTALL_DIR%/include /I%INSTALL_DIR%/include/TH /I%INSTALL_DIR%/include/THC
-set BASIC_CUDA_FLAGS= -DTH_INDEX_BASE=0 -I%INSTALL_DIR%/include -I%INSTALL_DIR%/include/TH -I%INSTALL_DIR%/include/THC
+set BASIC_C_FLAGS= /DTH_INDEX_BASE=0 /I%INSTALL_DIR%/include /I%INSTALL_DIR%/include/TH /I%INSTALL_DIR%/include/THC /I%INSTALL_DIR%/include/THS /I%INSTALLDIR%/include/THCS /I%INSTALLDIR%/include/THPP /I%INSTALLDIR%/include/THNN /I%INSTALLDIR%/include/THCUNN
+set BASIC_CUDA_FLAGS= -DTH_INDEX_BASE=0 -I%INSTALL_DIR%/include -I%INSTALL_DIR%/include/TH -I%INSTALL_DIR%/include/THC -I%INSTALL_DIR%/include/THS -I%INSTALLDIR%/include/THCS -I%INSTALLDIR%/include/THPP -I%INSTALLDIR%/include/THNN -I%INSTALLDIR%/include/THCUNN
 set LDFLAGS=/LIBPATH:%INSTALL_DIR%/lib
 :: set TORCH_CUDA_ARCH_LIST=6.1
 
+set CWRAP_FILES=%BASE_DIR%/torch/csrc/Declarations.cwrap; %BASE_DIR%/torch/lib/ATen/Local.cwrap; %BASE_DIR%/torch/lib/THNN/generic/THNN.h; %BASE_DIR%/torch/lib/THCUNN/generic/THCUNN.h
 set C_FLAGS=%BASIC_C_FLAGS% /D_WIN32 /Z7 /EHa /DNOMINMAX
 set LINK_FLAGS=/DEBUG:FULL
 
@@ -53,6 +54,7 @@ goto:eof
                   -DCMAKE_SHARED_LINKER_FLAGS="%LINK_FLAGS%" ^
                   -DCMAKE_CXX_FLAGS="%C_FLAGS% %CPP_FLAGS%" ^
                   -DCUDA_NVCC_FLAGS="%BASIC_CUDA_FLAGS%" ^
+                  -Dcwrap_files="%CWRAP_FILES%" ^
                   -DTH_INCLUDE_PATH="%INSTALL_DIR%/include" ^
                   -DTH_LIB_PATH="%INSTALL_DIR%/lib" ^
                   -DTH_LIBRARIES="%INSTALL_DIR%/lib/TH.lib" ^
