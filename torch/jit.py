@@ -181,7 +181,7 @@ def compile(arg=None, verify=False, **kwargs):
         return _compile(arg)
 
 
-def trace(arg=None, nderivs=0, params=tuple()):
+def trace(arg=None, nderivs=0):
     """
     Instrument a function or module for tracing, wrapping it in a
     :class:`TracedModule`, whose forward accepts the same arguments as the
@@ -200,10 +200,6 @@ def trace(arg=None, nderivs=0, params=tuple()):
             after executing the `forward` of the resulting module, but
             are not present until you run `backward()` (an appropriate
             number of times) on the resulting model.
-        params (tuple of torch.nn.Parameter): extra parameters for a traced
-            function, which do not occur as arguments to the function in
-            question.  You generally do not need this for tracing modules, as
-            the parameters of a module are automatically computed.
 
     Example: Trace as higher order function. (Notice that trace is a *curried*
     function; you first apply it with the function/model to trace, and then
@@ -221,7 +217,7 @@ def trace(arg=None, nderivs=0, params=tuple()):
     """
     # TODO: handle decorating a class (not a callable)
     def _trace(inner):
-        return TracedModule(inner, nderivs=nderivs, params=params)
+        return TracedModule(inner, nderivs=nderivs)
     if callable(arg):
         return _trace(arg)
     else:
@@ -231,11 +227,10 @@ def trace(arg=None, nderivs=0, params=tuple()):
 # It's OK for TracedModule to look different from the inner module, since
 # the forward() return type changed anyway.
 class TracedModule(Module):
-    def __init__(self, inner, params=tuple(), nderivs=0):
+    def __init__(self, inner, nderivs=0):
         super(TracedModule, self).__init__()
         # inner may be a Module, or it may be an arbitrary callable
         self.inner = inner
-        self.params = ParameterList(list(params))
         self.nderivs = nderivs
 
     def forward(self, *args):
@@ -303,7 +298,7 @@ class _CompiledMixin(object):
     __next_id = 0
 
     @classmethod
-    def init_compiler(cls, params=tuple(), name=None, enabled=True, time=False, **kwargs):
+    def init_compiler(cls, name=None, enabled=True, time=False, **kwargs):
         # Ensure we are not shadowing this method on the class we mixed with
         assert not hasattr(super(_CompiledMixin, cls), "init_compiler")
         # TODO: Consider saving the backtrace of this constructor, so it's easier
@@ -313,7 +308,6 @@ class _CompiledMixin(object):
         # we mix with from accidentally scrambling us
         #
         # NB: Class variables are also accessible via self!
-        cls.__params = ParameterList(list(params))
         kwargs["time"] = time  # also want to pass onto ktrace
         cls.__ktrace_kwargs = kwargs
         cls.__enabled = enabled
