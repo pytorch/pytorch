@@ -185,9 +185,11 @@ class TestJit(TestCase):
         input = Variable(torch.randn(3, 10))
         hx = Variable(torch.randn(3, 20))
         cx = Variable(torch.randn(3, 20))
+
         @torch.jit.compile(verify=True)
         class MyLSTMCell(nn.LSTMCell):
             pass
+
         lstm = MyLSTMCell(10, 20)
 
         out = lstm(input, (hx, cx))
@@ -536,7 +538,7 @@ class TestJit(TestCase):
 
     def test_non_decorator_use_fails(self):
         MyLSTM = torch.jit.compile(nn.LSTM)
-        self.assertRaisesRegex(TypeError, "class decorator", lambda: MyLSTM(2,2))
+        self.assertRaisesRegex(TypeError, "class decorator", lambda: MyLSTM(2, 2))
 
     def test_conv(self):
         x = Variable(torch.randn(20, 16, 50, 40).fill_(1.0), requires_grad=True)
