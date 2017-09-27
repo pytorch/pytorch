@@ -12,7 +12,7 @@ set BASIC_CUDA_FLAGS= -DTH_INDEX_BASE=0 -I%INSTALL_DIR%/include -I%INSTALL_DIR%/
 set LDFLAGS=/LIBPATH:%INSTALL_DIR%/lib
 :: set TORCH_CUDA_ARCH_LIST=6.1
 
-set CWRAP_FILES=%BASE_DIR%/torch/csrc/Declarations.cwrap; %BASE_DIR%/torch/lib/ATen/Local.cwrap; %BASE_DIR%/torch/lib/THNN/generic/THNN.h; %BASE_DIR%/torch/lib/THCUNN/generic/THCUNN.h
+set CWRAP_FILES=%BASE_DIR%/torch/csrc/Declarations.cwrap;%BASE_DIR%/torch/lib/ATen/Local.cwrap;%BASE_DIR%/torch/lib/THNN/generic/THNN.h;%BASE_DIR%/torch/lib/THCUNN/generic/THCUNN.h
 set C_FLAGS=%BASIC_C_FLAGS% /D_WIN32 /Z7 /EHa /DNOMINMAX
 set LINK_FLAGS=/DEBUG:FULL
 
