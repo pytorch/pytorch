@@ -48,7 +48,7 @@
     - arg: THTensor* result
       output: True
     - THTensor* self
-    - int dim
+    - int64_t dim
     - int64_t sliceIndex
   aten_custom_call: |
     int64_t ndim = self.dim();
@@ -80,5 +80,5 @@
     - arg: THTensor* self
       output: True
     - TensorList tensors
-    - int dim
+    - int64_t dim
 ]]
