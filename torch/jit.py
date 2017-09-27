@@ -24,7 +24,8 @@ VOLATILE = Placeholder("VOLATILE")
 
 
 # TODO: verify is not implemented yet
-def compile(arg=None, nderivs=1, params=tuple(), name=None, verify=False, optimize=True):
+def compile(arg=None, nderivs=1, params=tuple(), name=None, verify=False, optimize=True,
+            time=False, enabled=True):
     """
     Mark a function or module as eligible for just-in-time compilation.  The
     next time the function/module is executed, it is traced, and the trace is
@@ -73,6 +74,27 @@ def compile(arg=None, nderivs=1, params=tuple(), name=None, verify=False, optimi
             double-backwards).
         optimize (bool, optional): whether or not to apply optimizations.  Default: True.
 
+    Debug arguments:
+        time (bool, optional): if True, whenever we execute the model in question, we
+            will also print out some timing information for how long the model
+            took to execute.  At the moment, there are three types of timings we
+            emit:
+
+                - unoptimized: the time it took to execute the vanilla Python
+                  model.  This only occurs when tracing is disabled, e.g., via
+                  `enabled=False`
+
+                - tracing: the time it took to execute the vanilla Python model
+                  with tracing enabled.
+
+                - optimized: the time it took to execute the optimized model.
+
+            At the moment, all of these timings are for the forward pass only.
+            Default: False.
+        enabled (bool, optional): if False, compilation is disabled and you
+            will get back your original model.  This is a convenient way to
+            disable tracing without having to delete the annotation. Default: True.
+
     Example: Compile as function decorator.
 
         >>> @jit.compile
@@ -115,7 +137,8 @@ def compile(arg=None, nderivs=1, params=tuple(), name=None, verify=False, optimi
     """
     # TODO: handle decorating a class (not an instance)
     def _compile(inner):
-        return CompiledModule(inner, params=params, nderivs=nderivs, optimize=optimize, name=name)
+        return CompiledModule(inner, params=params, nderivs=nderivs, optimize=optimize,
+                              name=name, time=time, enabled=enabled)
     if callable(arg):
         return _compile(arg)
     else:
@@ -231,7 +254,7 @@ def _raw_trace(nderivs=0):
 class CompiledModule(Module):
     _next_id = 0
 
-    def __init__(self, inner, params=tuple(), name=None, **kwargs):
+    def __init__(self, inner, params=tuple(), name=None, enabled=True, time=False, **kwargs):
         # TODO: Consider saving the backtrace of this constructor, so it's easier
         # to correlate dump files with invocations in Python
         super(CompiledModule, self).__init__()
@@ -239,6 +262,8 @@ class CompiledModule(Module):
         self.params = ParameterList(list(params))
         self.kwargs = kwargs
         self.ktrace_cache = {}
+        self.enabled = enabled
+        self.time = time
         if name is None:
             name = "jit_compile_{}".format(CompiledModule._next_id)
             CompiledModule._next_id += 1
@@ -254,8 +279,8 @@ class CompiledModule(Module):
     # NB: In principle, there could also be a 'raw' version of this compiler,
     # but since the logic is so complicated, testing code wouldn't benefit much
     def forward(self, *args):
-        if _JIT_DISABLE:
-            with _time(self.name, "unoptimized"):
+        if _JIT_DISABLE or not self.enabled:
+            with _time(self.name, "unoptimized", self.time):
                 return self.inner(*args)
         in_vars, in_struct, is_volatile, in_key = self._process_args(args)
         ktrace = self.ktrace_cache.get(in_key)
@@ -268,12 +293,12 @@ class CompiledModule(Module):
         if closure is not None:
             # We already compiled it!  Run it directly, and
             # use the saved out_struct to unflatten.
-            with _time(ktrace.name, "optimized"):
+            with _time(ktrace.name, "optimized", self.time):
                 out_vars = closure()(*in_vars)
                 out_struct = ktrace.out_struct
         else:
             # No compiled trace available.  Run it by hand.
-            with _time(ktrace.name, "tracing"):
+            with _time(ktrace.name, "tracing", self.time):
                 out_vars, out_struct = ktrace.add_trace(args, in_vars, in_struct)
         if isinstance(out_vars, Variable):
             out_vars = (out_vars, )
@@ -460,8 +485,8 @@ def _dump_trace(trace_name, pass_name, input_key, trace):
 
 
 @contextlib.contextmanager
-def _time(trace_name, name):
-    if not _JIT_TIME or not torch.cuda.is_available():
+def _time(trace_name, name, time=True):
+    if (not _JIT_TIME and not time) or not torch.cuda.is_available():
         yield
         return
     stream = torch.cuda.current_stream()
