@@ -48,9 +48,13 @@ if WITH_CUDA and not check_env_flag('NO_SYSTEM_NCCL'):
         if path is None or not os.path.exists(path):
             continue
         if glob.glob(os.path.join(path, 'libnccl*')):
-            if os.path.exists((os.path.join(path, '../include/nccl.h'))):
+            # Find potential folder for nccl.h
+            base_path, tail = os.path.split(path)
+            while tail != "lib" and tail != "lib64":
+                base_path, tail = os.path.split(base_path)
+            if os.path.exists((os.path.join(base_path, 'include', 'nccl.h'))):
                 NCCL_LIB_DIR = path
-                NCCL_INCLUDE_DIR = os.path.join(path, '../include')
+                NCCL_INCLUDE_DIR = os.path.join(base_path, 'include')
                 break
     if NCCL_LIB_DIR is not None:
         WITH_SYSTEM_NCCL = True
