@@ -189,6 +189,8 @@ class LayerModelHelper(model_helper.ModelHelper):
             self.param_to_optim[str(param.parameter)] = \
                 param.optimizer or self.default_optimizer
 
+            self.params.append(param.parameter)
+
         # The primary value of adding everything to self.net - generation of the
         # operators right away, i.e. if error happens it'll be detected
         # immediately. Other than this - create_x_net should be called.
