@@ -249,11 +249,18 @@ class MSELoss(_Loss):
     The division by `n` can be avoided if one sets the internal variable
     `size_average` to `False`.
 
+    To get a batch of losses, a loss per batch element, set `reduce` to `True`.
+    These losses are not averaged and are not affected by `size_average`.
+
     Args:
         size_average (bool, optional): By default, the losses are averaged
            over observations for each minibatch. However, if the field
            size_average is set to False, the losses are instead summed for
-           each minibatch. Default: True
+           each minibatch. Only applies when reduce is True. Default: True
+        reduce (bool, optional): By default, the losses are averaged
+           over observations for each minibatch, or summed, depending on
+           size_average. When reduce is False, returns a loss per batch
+           element instead and ignores size_average. Default: True
 
     Shape:
         - Input: :math:`(N, *)` where `*` means, any number of additional
