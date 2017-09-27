@@ -29,7 +29,7 @@ class WeightedMSECriterion(Criterion):
             self.buffer,
             self.output_tensor,
             self.sizeAverage,
-            True, # reduce
+            True,  # reduce
         )
         self.output = self.output_tensor[0]
         return self.output
@@ -51,6 +51,6 @@ class WeightedMSECriterion(Criterion):
             implicit_gradOutput,
             self.gradInput,
             self.sizeAverage,
-            True, # reduce
+            True,  # reduce
         )
         return self.gradInput

@@ -27,8 +27,10 @@ PRECISION = 1e-5
 def get_size_average(m):
     return getattr(m, 'size_average', False) or getattr(m, 'sizeAverage', False)
 
+
 def get_reduce(m):
     return getattr(m, 'reduce', True)
+
 
 module_tests = [
     dict(
@@ -289,7 +291,7 @@ criterion_tests = [
         target=torch.randn(2, 3, 4, 5),
         reference_fn=lambda i, t, m:
             ((i - t).abs().pow(2).sum() / (i.numel() if get_size_average(m) else 1))
-            if get_reduce(m) else (i-t).abs().pow(2),
+            if get_reduce(m) else (i - t).abs().pow(2),
         check_no_size_average=True,
         check_no_reduce=True,
     ),
@@ -779,17 +781,19 @@ class CriterionTest(TestBase):
 
             reduce = get_reduce(cpu_module)
             cpu_output = test_case._forward_criterion(
-                    cpu_module, cpu_input, cpu_target, reduce=reduce)
+                cpu_module, cpu_input, cpu_target, reduce=reduce)
             gpu_output = test_case._forward_criterion(
-                    gpu_module, gpu_input, gpu_target, reduce=reduce)
+                gpu_module, gpu_input, gpu_target, reduce=reduce)
             test_case.assertEqual(cpu_output, gpu_output, 4e-4)
 
-            cpu_gradOutput = None if reduce else torch.randn(cpu_input.size()).double()
-            gpu_gradOutput = None if reduce else to_gpu(cpu_gradOutput, type_map=type_map)
+            cpu_gradOutput = \
+                None if reduce else torch.randn(cpu_input.size()).double()
+            gpu_gradOutput = \
+                None if reduce else to_gpu(cpu_gradOutput, type_map=type_map)
             cpu_gradInput = test_case._backward_criterion(
-                    cpu_module, cpu_input, cpu_target, cpu_gradOutput)
+                cpu_module, cpu_input, cpu_target, cpu_gradOutput)
             gpu_gradInput = test_case._backward_criterion(
-                    gpu_module, gpu_input, gpu_target, gpu_gradOutput)
+                gpu_module, gpu_input, gpu_target, gpu_gradOutput)
             test_case.assertEqual(cpu_gradInput, gpu_gradInput, 4e-4)
 
         except NotImplementedError:
