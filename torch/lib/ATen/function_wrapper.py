@@ -82,11 +82,6 @@ if(${check_name}.type().isSparse()) {
     return static_cast<Type*>(this)->${method_prefix}${api_name}(${sparse_actuals});
 }""")
 
-SPARSE_CHECK = CodeTemplate("""\
-if(${check_name}.type().isSparse()) {
-    return static_cast<Type*>(this)->${method_prefix}${api_name}(${sparse_actuals});
-}""")
-
 
 class NYIError(Exception):
     """Indicates we don't support this declaration yet"""

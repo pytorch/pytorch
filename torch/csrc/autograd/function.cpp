@@ -64,6 +64,8 @@ variable_list Function::tracedApply(variable_list inputs) {
   for (int i = 0; i < num_outputs; ++i) {
     auto& output = outputs[i];
     Node* sel = graph->appendNode(graph->createSelect(this_node, i));
+    // TODO: At the moment, C++ does not track shared storage.  It
+    // should.  Update this when that happens.
     if (output.defined()) {
       sel->inferTypeFrom(output.data());
       tracer::setValueTrace(state, output, sel);

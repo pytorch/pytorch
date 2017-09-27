@@ -96,7 +96,8 @@ class Optimizer(object):
         id_map = {old_id: p for old_id, p in
                   zip(chain(*(g['params'] for g in saved_groups)),
                       chain(*(g['params'] for g in groups)))}
-        state = {id_map.get(k, k): v for k, v in state_dict['state'].items()}
+        state = defaultdict(
+            dict, {id_map.get(k, k): v for k, v in state_dict['state'].items()})
 
         # Update parameter groups, setting their 'params' value
         def update_group(group, new_group):

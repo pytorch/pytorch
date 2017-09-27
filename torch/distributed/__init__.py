@@ -168,7 +168,11 @@ def recv(tensor, src=None):
 
     Arguments:
         tensor (Tensor): Tensor to fill with received data.
-        src (int): Source rank.
+        src (int, optional): Source rank. Will receive from any
+            process if unspecified.
+
+    Returns:
+        Sender rank.
     """
     assert torch.distributed._initialized == _INITIALIZED_PG, \
         "collective only supported in process-group mode"

@@ -36,9 +36,15 @@ else
 fi
 CPP_FLAGS=" -std=c++11 "
 GLOO_FLAGS=""
+NCCL_ROOT_DIR=${NCCL_ROOT_DIR:-$INSTALL_DIR}
 if [[ $WITH_CUDA -eq 1 ]]; then
-    GLOO_FLAGS="-DUSE_CUDA=1 -DNCCL_ROOT_DIR=$INSTALL_DIR"
+    GLOO_FLAGS="-DUSE_CUDA=1 -DNCCL_ROOT_DIR=$NCCL_ROOT_DIR"
 fi
+CWRAP_FILES="\
+$BASE_DIR/torch/csrc/Declarations.cwrap;\
+$BASE_DIR/torch/lib/ATen/Local.cwrap;\
+$BASE_DIR/torch/lib/THNN/generic/THNN.h;\
+$BASE_DIR/torch/lib/THCUNN/generic/THCUNN.h"
 
 # Used to build an individual library, e.g. build TH
 function build() {
@@ -61,7 +67,7 @@ function build() {
               -DCMAKE_SHARED_LINKER_FLAGS="$LDFLAGS" \
               -DCMAKE_INSTALL_LIBDIR="$INSTALL_DIR/lib" \
               -DCUDA_NVCC_FLAGS="$C_FLAGS" \
-              -DCWRAP_FILES_BASE="$BASE_DIR/torch" \
+              -Dcwrap_files="$CWRAP_FILES" \
               -DTH_INCLUDE_PATH="$INSTALL_DIR/include" \
               -DTH_LIB_PATH="$INSTALL_DIR/lib" \
               -DTH_LIBRARIES="$INSTALL_DIR/lib/libTH$LD_POSTFIX" \
@@ -82,7 +88,7 @@ function build() {
               -Dnanopb_BUILD_GENERATOR=0 \
               -DCMAKE_DEBUG_POSTFIX="" \
               -DCMAKE_BUILD_TYPE=$([ $DEBUG ] && echo Debug || echo Release) \
-              $2
+              ${@:2}
   make install -j$(getconf _NPROCESSORS_ONLN)
   cd ../..
 

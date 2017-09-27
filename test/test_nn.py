@@ -20,6 +20,7 @@ import torch.nn.init as init
 import torch.nn.utils.rnn as rnn_utils
 import torch.legacy.nn as legacy
 from torch.nn.utils import clip_grad_norm
+from torch.nn.utils import parameters_to_vector, vector_to_parameters
 from torch.autograd import Variable, gradcheck
 from torch.autograd.gradcheck import gradgradcheck
 from torch.nn import Parameter
@@ -868,6 +869,25 @@ class TestNN(NNTestCase):
             self.assertLessEqual(norm_after, max_norm)
             scale = compare_scaling(grads)
             self.assertEqual(scale, 1)
+
+    def test_parameters_to_vector(self):
+        conv1 = nn.Conv2d(3, 10, 5)
+        fc1 = nn.Linear(10, 20)
+        model = nn.Sequential(conv1, fc1)
+
+        vec = parameters_to_vector(model.parameters())
+        self.assertEqual(vec.size(0), 980)
+
+    def test_vector_to_parameters(self):
+        conv1 = nn.Conv2d(3, 10, 5)
+        fc1 = nn.Linear(10, 20)
+        model = nn.Sequential(conv1, fc1)
+
+        vec = Variable(torch.arange(0, 980))
+        vector_to_parameters(vec, model.parameters())
+
+        sample = next(model.parameters())[0, 0, 0]
+        self.assertTrue(torch.equal(sample.data, vec.data[:5]))
 
     def test_weight_norm(self):
         input = Variable(torch.randn(3, 5))
@@ -2780,6 +2800,24 @@ class TestNN(NNTestCase):
             self.assertEqual(out_cpu, out_cuda)
             self.assertEqual(input_cpu.grad, input_gpu.grad)
 
+    def test_upsamplingNearest1d(self):
+        m = nn.Upsample(size=4, mode='nearest')
+        in_t = torch.ones(1, 1, 2)
+        out_t = m(Variable(in_t))
+        self.assertEqual(torch.ones(1, 1, 4), out_t.data)
+
+        input = Variable(torch.randn(1, 1, 2), requires_grad=True)
+        self.assertTrue(gradcheck(lambda x: F.upsample(x, 4, mode='nearest'), (input,)))
+
+    def test_upsamplingLinear1d(self):
+        m = nn.Upsample(size=4, mode='linear')
+        in_t = torch.ones(1, 1, 2)
+        out_t = m(Variable(in_t))
+        self.assertEqual(torch.ones(1, 1, 4), out_t.data)
+
+        input = Variable(torch.randn(1, 1, 2), requires_grad=True)
+        self.assertTrue(gradcheck(lambda x: F.upsample(x, 4, mode='linear'), (input,)))
+
     def test_upsamplingNearest2d(self):
         m = nn.Upsample(size=4, mode='nearest')
         in_t = torch.ones(1, 1, 2, 2)
@@ -3733,6 +3771,17 @@ new_module_tests = [
         desc='norm',
     ),
     dict(
+        module_name='LPPool1d',
+        constructor_args=(1.5, 2),
+        input=torch.rand(1, 3, 7),
+        desc='norm',
+    ),
+    dict(
+        module_name='LPPool1d',
+        constructor_args=(2, 2, 3),
+        input_size=(1, 3, 7),
+    ),
+    dict(
         module_name='ReflectionPad1d',
         constructor_args=((1, 2),),
         input_size=(2, 3, 8),
@@ -3939,6 +3988,42 @@ new_module_tests = [
     dict(
         module_name='Upsample',
         constructor_args=(12, None, 'nearest'),
+        input_size=(1, 2, 4),
+        desc='nearest_1d',
+    ),
+    dict(
+        module_name='Upsample',
+        constructor_args=((12, ), None, 'nearest'),
+        input_size=(1, 2, 3),
+        desc='nearest_tuple_1d',
+    ),
+    dict(
+        module_name='Upsample',
+        constructor_args=(None, 4, 'nearest'),
+        input_size=(1, 2, 4),
+        desc='nearest_scale_1d',
+    ),
+    dict(
+        module_name='Upsample',
+        constructor_args=(12, None, 'linear'),
+        input_size=(1, 2, 4),
+        desc='linear_1d',
+    ),
+    dict(
+        module_name='Upsample',
+        constructor_args=((4, ), None, 'linear'),
+        input_size=(1, 2, 3),
+        desc='linear_tuple_1d',
+    ),
+    dict(
+        module_name='Upsample',
+        constructor_args=(None, 4, 'linear'),
+        input_size=(1, 2, 4),
+        desc='linear_scale_1d',
+    ),
+    dict(
+        module_name='Upsample',
+        constructor_args=(12, None, 'nearest'),
         input_size=(1, 2, 4, 4),
         desc='nearest_2d',
     ),
@@ -4052,6 +4137,18 @@ new_module_tests = [
         module_name='AdaptiveAvgPool2d',
         constructor_args=((3, 4),),
         input=torch.rand(1, 3, 5, 6),
+        desc='tuple',
+    ),
+    dict(
+        module_name='AdaptiveAvgPool3d',
+        constructor_args=(3,),
+        input=torch.rand(2, 3, 5, 2, 7),
+        desc='single',
+    ),
+    dict(
+        module_name='AdaptiveAvgPool3d',
+        constructor_args=((3, 4, 5),),
+        input=torch.rand(2, 3, 5, 3, 7),
         desc='tuple',
     ),
     dict(

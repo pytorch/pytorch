@@ -174,6 +174,12 @@ Pooling Layers
 .. autoclass:: AdaptiveAvgPool2d
     :members:
 
+:hidden:`AdaptiveAvgPool3d`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: AdaptiveAvgPool3d
+    :members:
+
 
 Padding Layers
 --------------
@@ -784,6 +790,11 @@ Pooling functions
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autofunction:: adaptive_avg_pool2d
+
+:hidden:`adaptive_avg_pool3d`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: adaptive_avg_pool3d
 
 
 Non-linear activation functions

@@ -13,9 +13,12 @@ import platform
 import ctypes
 import os
 import torch
+import traceback
+from torch._six import raise_from
 from multiprocessing.util import register_after_fork as _register_after_fork
 
 _initialized = False
+_queued_calls = []  # don't invoke these until initialization occurs
 _in_bad_fork = False  # this global is also used in torch.manual_seed
 _original_pid = False
 _cudart = None
@@ -72,8 +75,20 @@ a PyTorch version that has been compiled with your version
 of the CUDA driver.""".format(str(torch._C._cuda_getDriverVersion())))
 
 
+def _lazy_call(callable):
+    if _initialized:
+        callable()
+    else:
+        # Don't store the actual traceback to avoid memory cycle
+        _queued_calls.append((callable, traceback.format_stack()))
+
+
+class DeferredCudaCallError(Exception):
+    pass
+
+
 def _lazy_init():
-    global _initialized, _cudart, _original_pid
+    global _initialized, _cudart, _original_pid, _queued_calls
     if _initialized:
         return
     if _in_bad_fork:
@@ -94,6 +109,13 @@ def _lazy_init():
     _cudart.cudaGetErrorString.restype = ctypes.c_char_p
     _original_pid = os.getpid()
     _initialized = True
+    for queued_call, orig_traceback in _queued_calls:
+        try:
+            queued_call()
+        except Exception as e:
+            msg = ("CUDA call failed lazily at initialization with error: {}\n\n"
+                   "CUDA call was originally invoked at:\n\n{}").format(str(e), orig_traceback)
+            raise_from(DeferredCudaCallError(msg), e)
 
 
 def _after_fork(arg):
@@ -110,6 +132,22 @@ _register_after_fork(_after_fork, _after_fork)
 def cudart():
     _lazy_init()
     return _cudart
+
+
+class cudaStatus(object):
+    SUCCESS = 0
+    ERROR_NOT_READY = 34
+
+
+class CudaError(RuntimeError):
+    def __init__(self, code):
+        msg = cudart().cudaGetErrorString(code).decode('utf-8')
+        super(CudaError, self).__init__('{0} ({1})'.format(msg, code))
+
+
+def check_error(res):
+    if res != cudaStatus.SUCCESS:
+        raise CudaError(res)
 
 
 class device(object):
@@ -428,5 +466,6 @@ torch._tensor_classes.add(ByteTensor)
 torch._tensor_classes.add(HalfTensor)
 
 from . import sparse
+from . import profiler
 from . import nvtx
 from .streams import Stream, Event

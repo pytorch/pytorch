@@ -6,6 +6,7 @@
 #include "torch/csrc/jit/passes/graph_fuser.h"
 #include "torch/csrc/jit/passes/onnx.h"
 #include "torch/csrc/jit/passes/dead_code_elimination.h"
+#include "torch/csrc/jit/passes/common_subexpression_elimination.h"
 
 
 
@@ -39,6 +40,7 @@ void initJITBindings(PyObject *module) {
    .def("_jit_pass_onnx", ToONNX)
    .def("_jit_pass_fuse", graph_pass<FuseGraph>)
    .def("_jit_pass_dce", graph_pass<EliminateDeadCode>)
+   .def("_jit_pass_cse", graph_pass<EliminateCommonSubexpression>)
    .def("_jit_pass_lint", graph_pass<LintGraph>)
    .def("_jit_run_cpp_tests", runJITCPPTests);
 

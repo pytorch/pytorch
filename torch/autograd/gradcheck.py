@@ -1,6 +1,7 @@
 import torch
 from torch.autograd import Variable
 from collections import Iterable
+import sys
 
 
 def iter_variables(x):
@@ -130,7 +131,7 @@ def _as_tuple(x):
         return x,
 
 
-def gradcheck(func, inputs, eps=1e-6, atol=1e-5, rtol=1e-3):
+def gradcheck(func, inputs, eps=1e-6, atol=1e-5, rtol=1e-3, raise_exception=False):
     """Check gradients computed via small finite differences
        against analytical gradients
 
@@ -147,12 +148,19 @@ def gradcheck(func, inputs, eps=1e-6, atol=1e-5, rtol=1e-3):
         eps: perturbation for finite differences
         atol: absolute tolerance
         rtol: relative tolerance
-
+        raise_exception: bool indicating whether to raise an exception if
+            gradcheck fails. The exception gives more information about the
+            exact nature of the failure. This is helpful when debugging gradchecks.
     Returns:
         True if all differences satisfy allclose condition
     """
     output = func(*inputs)
     output = _as_tuple(output)
+
+    def fail_test(msg):
+        if raise_exception:
+            raise RuntimeError(msg)
+        return False
 
     for i, o in enumerate(output):
         if not o.requires_grad:
@@ -164,15 +172,15 @@ def gradcheck(func, inputs, eps=1e-6, atol=1e-5, rtol=1e-3):
         analytical, reentrant, correct_grad_sizes = get_analytical_jacobian(_as_tuple(inputs), o)
         numerical = get_numerical_jacobian(fn, inputs, inputs, eps)
 
-        for a, n in zip(analytical, numerical):
+        for j, (a, n) in enumerate(zip(analytical, numerical)):
             if not ((a - n).abs() <= (atol + rtol * n.abs())).all():
-                return False
+                return fail_test('for output no. %d,\n numerical:%s\nanalytical:%s\n' % (j, numerical, analytical))
 
         if not reentrant:
-            return False
+            return fail_test('not reentrant')
 
         if not correct_grad_sizes:
-            return False
+            return fail_test('not correct_grad_sizes')
 
     # check if the backward multiplies by grad_output
     zero_gradients(inputs)
@@ -186,7 +194,7 @@ def gradcheck(func, inputs, eps=1e-6, atol=1e-5, rtol=1e-3):
             if i.grad is None:
                 continue
             if not i.grad.data.eq(0).all():
-                return False
+                return fail_test('backward not multiplied by grad_output')
 
     return True
 

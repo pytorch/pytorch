@@ -15,6 +15,7 @@ import os
 from tools.setup_helpers.env import check_env_flag
 from tools.setup_helpers.cuda import WITH_CUDA, CUDA_HOME
 from tools.setup_helpers.cudnn import WITH_CUDNN, CUDNN_LIB_DIR, CUDNN_INCLUDE_DIR
+from tools.setup_helpers.nccl import WITH_NCCL, WITH_SYSTEM_NCCL, NCCL_LIB_DIR, NCCL_INCLUDE_DIR, NCCL_ROOT_DIR
 from tools.setup_helpers.nvtoolext import NVTOOLEXT_HOME
 from tools.setup_helpers.split_types import split_types
 
@@ -26,8 +27,6 @@ IS_LINUX = (platform.system() == 'Linux')
 
 WITH_DISTRIBUTED = not check_env_flag('NO_DISTRIBUTED') and not IS_WINDOWS
 WITH_DISTRIBUTED_MW = WITH_DISTRIBUTED and check_env_flag('WITH_DISTRIBUTED_MW')
-WITH_NCCL = WITH_CUDA and not (IS_DARWIN or IS_WINDOWS)
-SYSTEM_NCCL = False
 
 
 ################################################################################
@@ -99,10 +98,18 @@ def build_libs(libs):
         build_libs_cmd = ['bash', 'torch/lib/build_libs.sh']
     my_env = os.environ.copy()
     my_env["PYTORCH_PYTHON"] = sys.executable
+    if WITH_SYSTEM_NCCL:
+        my_env["NCCL_ROOT_DIR"] = NCCL_ROOT_DIR
     if WITH_CUDA:
+        my_env["CUDA_BIN_PATH"] = CUDA_HOME
         build_libs_cmd += ['--with-cuda']
+
     if subprocess.call(build_libs_cmd + libs, env=my_env) != 0:
         sys.exit(1)
+
+    if 'THNN' in libs or 'THCUNN' in libs:
+        from tools.nnwrap import generate_wrappers as generate_nn_wrappers
+        generate_nn_wrappers()
 
 
 class build_deps(Command):
@@ -118,7 +125,7 @@ class build_deps(Command):
         libs = ['TH', 'THS', 'THNN']
         if WITH_CUDA:
             libs += ['THC', 'THCS', 'THCUNN']
-        if WITH_NCCL and not SYSTEM_NCCL:
+        if WITH_NCCL and not WITH_SYSTEM_NCCL:
             libs += ['nccl']
         libs += ['THPP', 'ATen', 'nanopb']
         if IS_WINDOWS:
@@ -130,9 +137,6 @@ class build_deps(Command):
                 libs += ['gloo']
             libs += ['THD']
         build_libs(libs)
-
-        from tools.nnwrap import generate_wrappers as generate_nn_wrappers
-        generate_nn_wrappers()
 
 
 build_dep_cmds = {}
@@ -175,6 +179,10 @@ class build_py(setuptools.command.build_py.build_py):
         version_path = os.path.join(cwd, 'torch', 'version.py')
         with open(version_path, 'w') as f:
             f.write("__version__ = '{}'\n".format(version))
+            # NB: This is not 100% accurate, because you could have built the
+            # library code with DEBUG, but csrc without DEBUG (in which case
+            # this would claim to be a release build when it's not.)
+            f.write("debug = {}\n".format(repr(DEBUG)))
 
 
 class develop(setuptools.command.develop.develop):
@@ -217,8 +225,9 @@ class build_ext(setuptools.command.build_ext.build_ext):
             print('-- Detected CUDA at ' + CUDA_HOME)
         else:
             print('-- Not using CUDA')
-        if WITH_NCCL and SYSTEM_NCCL:
-            print('-- Using system provided NCCL library')
+        if WITH_NCCL and WITH_SYSTEM_NCCL:
+            print('-- Using system provided NCCL library at ' +
+                  NCCL_LIB_DIR + ', ' + NCCL_INCLUDE_DIR)
         elif WITH_NCCL:
             print('-- Building NCCL library')
         else:
@@ -382,10 +391,6 @@ if IS_WINDOWS:
             sys.version_info[0]) + str(sys.version_info[1]) + '-win_amd64.lib'
     NANOPB_STATIC_LIB = os.path.join(lib_path, 'protobuf-nanopb.lib')
 
-if not IS_WINDOWS and WITH_NCCL and (subprocess.call('ldconfig -p | grep libnccl >/dev/null', shell=True) == 0 or
-                                     subprocess.call('/sbin/ldconfig -p | grep libnccl >/dev/null', shell=True) == 0):
-        SYSTEM_NCCL = True
-
 main_compile_args = ['-D_THP_CORE']
 main_libraries = ['shm']
 main_link_args = [TH_LIB, THS_LIB, THNN_LIB, ATEN_LIB, NANOPB_STATIC_LIB]
@@ -402,6 +407,7 @@ main_sources = [
     "torch/csrc/expand_utils.cpp",
     "torch/csrc/utils/invalid_arguments.cpp",
     "torch/csrc/utils/object_ptr.cpp",
+    "torch/csrc/utils/python_arg_parser.cpp",
     "torch/csrc/utils/tuple_parser.cpp",
     "torch/csrc/allocators.cpp",
     "torch/csrc/serialization.cpp",
@@ -413,16 +419,19 @@ main_sources = [
     "torch/csrc/jit/tracer.cpp",
     "torch/csrc/jit/python_tracer.cpp",
     "torch/csrc/jit/interned_strings.cpp",
+    "torch/csrc/jit/type.cpp",
     "torch/csrc/jit/export.cpp",
     "torch/csrc/jit/passes/graph_fuser.cpp",
     "torch/csrc/jit/passes/onnx.cpp",
     "torch/csrc/jit/passes/dead_code_elimination.cpp",
+    "torch/csrc/jit/passes/common_subexpression_elimination.cpp",
     "torch/csrc/autograd/init.cpp",
     "torch/csrc/autograd/engine.cpp",
     "torch/csrc/autograd/function.cpp",
     "torch/csrc/autograd/variable.cpp",
     "torch/csrc/autograd/saved_variable.cpp",
     "torch/csrc/autograd/input_buffer.cpp",
+    "torch/csrc/autograd/profiler.cpp",
     "torch/csrc/autograd/python_function.cpp",
     "torch/csrc/autograd/python_cpp_function.cpp",
     "torch/csrc/autograd/python_variable.cpp",
@@ -432,6 +441,7 @@ main_sources = [
     "torch/csrc/autograd/generated/VariableType.cpp",
     "torch/csrc/autograd/generated/Functions.cpp",
     "torch/csrc/autograd/generated/python_variable_methods.cpp",
+    "torch/csrc/autograd/generated/python_functions.cpp",
     "torch/csrc/autograd/functions/batch_normalization.cpp",
     "torch/csrc/autograd/functions/convolution.cpp",
     "torch/csrc/autograd/functions/basic_ops.cpp",
@@ -514,8 +524,10 @@ if WITH_CUDA:
     main_sources += split_types("torch/csrc/cuda/Tensor.cpp")
 
 if WITH_NCCL:
-    if SYSTEM_NCCL:
+    if WITH_SYSTEM_NCCL:
         main_libraries += ['nccl']
+        include_dirs.append(NCCL_INCLUDE_DIR)
+        library_dirs.append(NCCL_LIB_DIR)
     else:
         main_link_args += [NCCL_LIB]
     extra_compile_args += ['-DWITH_NCCL']

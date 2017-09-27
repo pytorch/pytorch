@@ -328,6 +328,8 @@ simple_pointwise_float = [
     'atan',
     'cos',
     'cosh',
+    'erf',
+    'erfinv',
     'exp',
     'reciprocal',
     'floor',

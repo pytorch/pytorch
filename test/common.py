@@ -13,6 +13,7 @@ import errno
 import torch
 import torch.cuda
 from torch.autograd import Variable
+from torch._six import string_classes
 
 
 torch.set_default_tensor_type('torch.DoubleTensor')
@@ -212,7 +213,7 @@ class TestCase(unittest.TestCase):
                 assertTensorsEqual(x._values(), y._values())
             else:
                 assertTensorsEqual(x, y)
-        elif type(x) == str and type(y) == str:
+        elif isinstance(x, string_classes) and isinstance(y, string_classes):
             super(TestCase, self).assertEqual(x, y)
         elif type(x) == set and type(y) == set:
             super(TestCase, self).assertEqual(x, y)
@@ -266,6 +267,22 @@ class TestCase(unittest.TestCase):
                 return
         raise AssertionError("object not found in iterable")
 
+    # TODO: Support context manager interface
+    # NB: The kwargs forwarding to callable robs the 'subname' parameter.
+    # If you need it, manually apply your callable in a lambda instead.
+    def assertExpectedRaises(self, exc_type, callable, *args, **kwargs):
+        subname = None
+        if 'subname' in kwargs:
+            subname = kwargs['subname']
+            del kwargs['subname']
+        try:
+            callable(*args, **kwargs)
+        except exc_type as e:
+            self.assertExpected(str(e), subname)
+            return
+        # Don't put this in the try block; the AssertionError will catch it
+        self.fail(msg="Did not raise when expected to")
+
     def assertExpected(self, s, subname=None):
         """
         Test that a string matches the recorded contents of a file
@@ -277,7 +294,7 @@ class TestCase(unittest.TestCase):
         If you call this multiple times in a single function, you must
         give a unique subname each time.
         """
-        if not isinstance(s, str):
+        if not (isinstance(s, str) or (sys.version_info[0] == 2 and isinstance(s, unicode))):
             raise TypeError("assertExpected is strings only")
 
         def remove_prefix(text, prefix):
@@ -296,20 +313,29 @@ class TestCase(unittest.TestCase):
             expected_file += "-" + subname
         expected_file += ".expect"
         expected = None
-        if ACCEPT:
+
+        def accept_output(update_type):
+            print("Accepting {} for {}:\n\n{}".format(update_type, munged_id, s))
             with open(expected_file, 'w') as f:
                 f.write(s)
+
+        try:
+            with open(expected_file) as f:
+                expected = f.read()
+        except IOError as e:
+            if e.errno != errno.ENOENT:
+                raise
+            elif ACCEPT:
+                return accept_output("output")
+            else:
+                raise RuntimeError(
+                    ("I got this output for {}:\n\n{}\n\n"
+                     "No expect file exists; to accept the current output, run:\n"
+                     "python {} {} --accept").format(munged_id, s, __main__.__file__, munged_id))
+        if ACCEPT:
+            if expected != s:
+                return accept_output("updated output")
         else:
-            try:
-                with open(expected_file) as f:
-                    expected = f.read()
-            except IOError as e:
-                if e.errno == errno.ENOENT:
-                    raise RuntimeError(
-                        ("No expect file exists; to accept the current output, run:\n"
-                         "python {} {} --accept").format(__main__.__file__, munged_id))
-                else:
-                    raise
             if hasattr(self, "assertMultiLineEqual"):
                 # Python 2.7 only
                 # NB: Python considers lhs "old" and rhs "new".

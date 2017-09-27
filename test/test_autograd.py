@@ -15,6 +15,7 @@ import torch.nn.functional as F
 from torch.autograd import gradcheck
 from torch.autograd.gradcheck import gradgradcheck
 from torch.autograd.function import once_differentiable
+from torch.autograd.profiler import profile
 
 from common import TestCase, run_tests, skipIfNoLapack, parse_set_seed_once
 from torch.autograd._functions import *
@@ -251,6 +252,11 @@ class TestAutograd(TestCase):
         self.assertFalse(hook_called[0])
         self.assertIsNone(x.grad)
 
+    def test_backward_badcalls(self):
+        x = Variable(torch.ones(1))
+        with self.assertRaisesRegex(RuntimeError, 'does not require grad'):
+            x.backward()
+
     def test_grad_badcalls(self):
         x = Variable(torch.ones(1))
         y = x ** 2
@@ -264,6 +270,26 @@ class TestAutograd(TestCase):
         torch.autograd.grad(y, x)  # this should succeed now
         with self.assertRaisesRegex(RuntimeError, 'unreachable'):
             torch.autograd.grad(x, y)
+
+    def test_grad_unreachable(self):
+        x = Variable(torch.ones(1), requires_grad=True)
+        y = Variable(torch.ones(1), requires_grad=True)
+        # Make sure x and y have grad accumulators allocated
+        z = x * 2
+        w = y * 2
+        with self.assertRaisesRegex(RuntimeError, 'unreachable'):
+            torch.autograd.grad(x * 2, [x, y])
+
+        grad_x, grad_y = torch.autograd.grad(x * 2, [x, y], allow_unused=True)
+        self.assertEqual(grad_x, x * 2)
+        self.assertIsNone(grad_y)
+
+        # This is slightly different than the case above, because z doesn't even
+        # have a grad accumulator allocated.
+        z = Variable(torch.ones(1), requires_grad=True)
+        grad_x, grad_z = torch.autograd.grad(x * 2, [x, z], allow_unused=True)
+        self.assertEqual(grad_x, x * 2)
+        self.assertIsNone(grad_z)
 
     def test_hooks(self):
         x = Variable(torch.ones(5, 5), requires_grad=True)
@@ -593,12 +619,7 @@ class TestAutograd(TestCase):
         x = torch.arange(1, 17).view(4, 4)
         y = Variable(x, requires_grad=True)
 
-        def check_index(x, y, idx):
-            if y.grad is not None:
-                y.grad.data.zero_()
-            indexed_tensor = x[idx]
-            indexed_var = y[idx]
-
+        def compare(x, y, idx, indexed_tensor, indexed_var):
             indexed_var_t = indexed_var.data
             if not torch.is_tensor(indexed_tensor):
                 indexed_var_t = indexed_var_t[0]
@@ -608,6 +629,13 @@ class TestAutograd(TestCase):
             expected_grad = torch.Tensor(x.size()).fill_(0)
             expected_grad[idx] = 1
             self.assertEqual(y.grad.data, expected_grad)
+
+        def check_index(x, y, idx):
+            if y.grad is not None:
+                y.grad.data.zero_()
+            indexed_tensor = x[idx]
+            indexed_var = y[idx]
+            compare(x, y, idx, indexed_tensor, indexed_var)
 
         check_index(x, y, 1)
         check_index(x, y, (1, 1))
@@ -653,6 +681,18 @@ class TestAutograd(TestCase):
         check_index(x, y, ([1, 2], [0, 1]))
         check_index(x, y, ([1, 2], [0, 1], Ellipsis))
         check_index(x, y, (Ellipsis, [1, 2], [0, 1]))
+
+        # advanced indexing, with a tensor wrapped in a variable
+        z = torch.LongTensor([0, 1])
+        zv = Variable(z, requires_grad=False)
+        seq = [z, Ellipsis]
+        seqv = [zv, Ellipsis]
+
+        if y.grad is not None:
+            y.grad.data.zero_()
+        indexed_tensor = x[seq]
+        indexed_var = y[seqv]
+        compare(x, y, seq, indexed_tensor, indexed_var)
 
     def test_indexing_duplicates(self):
         x = torch.arange(1, 17).view(4, 4)
@@ -919,8 +959,20 @@ class TestAutograd(TestCase):
         self.assertNotEqual(y._version, y_version)
         y.backward(torch.ones(*size))
         expected_grad_input = torch.ones(*size)
+
+        # remove all variables when indexing a Tensor for comparison,
+        # whether a top-level Variable or in a sequence
         if isinstance(index, Variable):
             index = index.data
+        elif isinstance(index, list):
+            novars = []
+            for i in index:
+                if isinstance(i, Variable):
+                    novars.append(i.data)
+                else:
+                    novars.append(i)
+            index = novars
+
         expected_grad_input[index] = 0
         self.assertEqual(x.grad.data, expected_grad_input)
         self.assertEqual(value.grad.data, torch.ones(value.size()))
@@ -952,6 +1004,8 @@ class TestAutograd(TestCase):
         self._test_setitem_tensor((5, 5, 5), [[1, 3], slice(None), slice(None)])
         self._test_setitem_tensor((5, 5, 5), [slice(None), [2, 4], [1, 3]])
         self._test_setitem_tensor((5, 5, 5), [[1, 3], [2, 4], slice(None)])
+        self._test_setitem_tensor((5, 5, 5), [Variable(torch.LongTensor([1,
+                                              3]), requires_grad=False), [2, 4], slice(None)])
 
     def test_setitem_mask(self):
         mask = torch.ByteTensor(5, 5).bernoulli_()
@@ -1576,6 +1630,19 @@ class TestAutograd(TestCase):
         run_test((10, 10), 2)
         run_test((10,), 3)
 
+    def test_profiler(self):
+        x = Variable(torch.randn(10, 10))
+
+        with profile() as p:
+            y = x * 2 + 4
+
+        last_end = 0
+        names = ['MulConstant', 'AddConstant']
+        for info, expected_name in zip(p.function_events, names):
+            self.assertGreater(info.start, last_end)
+            self.assertEqual(info.name, expected_name)
+            last_end = info.end
+
 
 def index_variable(shape, max_indices):
     if not isinstance(shape, tuple):
@@ -1686,6 +1753,8 @@ method_tests = [
     ('expand', (1,), (S, S, S), 'scalar'),
     ('expand', (1, S), (1, 1, S), 'new_dim_front_old_front_1'),
     ('exp', (S, S, S), ()),
+    ('erf', torch.rand(S, S, S), ()),
+    ('erfinv', torch.rand(S, S, S), ()),
     ('log', torch.rand(S, S, S) + 1e-2, ()),
     ('log1p', torch.rand(S, S, S), ()),
     ('tanh', (S, S, S), ()),
@@ -1969,6 +2038,8 @@ method_tests = [
     ('__getitem__', torch.randn(S, S, S), (dont_convert([[0, 3], ]),), 'adv_index_sub'),
     ('__getitem__', torch.randn(S, S, S), (dont_convert([[0, 3], slice(None)]),), 'adv_index_sub_2'),
     ('__getitem__', torch.randn(S, S, S), (dont_convert([[0, 3], Ellipsis]),), 'adv_index_sub_3'),
+    ('__getitem__', torch.randn(S, S, S), (dont_convert([[0, 2, 3], [1, 3, 3],
+     Variable(torch.LongTensor([0, 0, 2]), requires_grad=False)]),), 'adv_index_var'),
 ]
 # TODO: clamp with min/max
 
