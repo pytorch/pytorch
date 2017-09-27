@@ -80,8 +80,8 @@ static THStorage* THPStorage_(newFilenameStorage)(ptrdiff_t size)
 static PyObject * THPStorage_(pyNewFilenameStorage)(PyObject *_unused, PyObject *args)
 {
   HANDLE_TH_ERRORS
-  int64_t size;
-  if (!PyArg_ParseTuple(args, "l", &size)) {
+  long long size;
+  if (!PyArg_ParseTuple(args, "L", &size)) {
     return NULL;
   }
   return THPStorage_(New)(THPStorage_(newFilenameStorage)(size));
@@ -162,8 +162,8 @@ static THStorage* THPStorage_(newFdStorage)(ptrdiff_t size)
 static PyObject * THPStorage_(pyNewFdStorage)(PyObject *_unused, PyObject *args)
 {
   HANDLE_TH_ERRORS
-  int64_t size;
-  if (!PyArg_ParseTuple(args, "l", &size)) {
+  long long size;
+  if (!PyArg_ParseTuple(args, "L", &size)) {
     return NULL;
   }
   return THPStorage_(New)(THPStorage_(newFdStorage)(size));
