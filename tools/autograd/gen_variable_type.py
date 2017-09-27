@@ -96,6 +96,7 @@ if (flags.is_executable) {
   ${save_variables}
 }
 auto output = as_variable(baseType->${method_prefix}${api_name}(${unpacked_args}));
+${save_output}
 wrap_output(*output.get(), std::move(flags), std::move(grad_fn));
 return ${return_value};
 """)
@@ -110,8 +111,15 @@ if (flags.is_executable) {
 }
 baseType->${method_prefix}${api_name}(${unpacked_args});
 (*pImpl.version_counter)++;
+${save_output}
 wrap_output(pImpl, std::move(flags), std::move(grad_fn));
-return self;
+return ${return_value};
+""")
+
+SAVE_OUTPUT = CodeTemplate("""\
+if (flags.is_executable) {
+  grad_fn->output_ = SavedVariable(${return_name}, grad_fn.get());
+}
 """)
 
 FUNCTION_PROTOTYPE = CodeTemplate("""\
@@ -284,6 +292,7 @@ def load_derivatives(path):
                         'type': 'IntList',
                     })
         option['saved'] = saved
+        option['save_output'] = any(re.search(name_regex.format('output'), f) for f in derivatives)
 
         options.append(option)
 
@@ -321,6 +330,8 @@ def create_autograd_functions(top_env, declarations):
                 saved_variables.append('std::vector<int64_t> {};'.format(name))
             else:
                 saved_variables.append('{} {};'.format(arg['type'], name))
+        if op['save_output']:
+            saved_variables.append('SavedVariable output_;')
         op['saved_variables'] = saved_variables
         op['release_variables'] = release_variables
 
@@ -333,6 +344,8 @@ def create_autograd_functions(top_env, declarations):
                 if arg['type'] == 'Tensor':
                     name = arg['name']
                     unpack.append('auto {} = {}_.unpack();'.format(name, name))
+            if op['save_output']:
+                unpack.append('auto output = output_.unpack(shared_from_this());')
             return unpack
 
         body.extend(unpack_args())
@@ -459,10 +472,22 @@ def create_variable_type(top_env, aten_declarations):
 
     def process_function(option):
         env = {}
+
+        if option['inplace']:
+            env['return_value'] = 'self'
+            return_name = 'self'
+        else:
+            if option['return_type'] == 'Scalar':
+                env['return_value'] = 'Scalar(output)'
+            else:
+                env['return_value'] = 'Tensor(std::move(output))'
+            return_name = 'output'
+
         if option.get('derivative') is not None:
             derivative = option['derivative']
             env['op'] = derivative['op']
             env['save_variables'] = save_variables(option, derivative)
+            env['save_output'] = SAVE_OUTPUT.substitute(return_name=return_name) if derivative['save_output'] else ''
             env['tensor_args'] = [arg['name'] for arg in option['arguments']
                                   if arg['dynamic_type'] == 'Tensor']
             env['tensorlist_args'] = [arg['name'] for arg in option['arguments']

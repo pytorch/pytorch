@@ -132,7 +132,9 @@
 - name: eig
 - name: eq
 - name: equal
-- name: exp
+
+- name: exp(Tensor self)
+  self: grad * output
 
 - name: expand(Tensor self, IntList size)
   self: reduce_to(grad, self.sizes())
