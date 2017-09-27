@@ -632,10 +632,12 @@ class TestNN(NNTestCase):
     def _backward(self, module, input, output, grad_output):
         return module.backward(input, grad_output)
 
-    def _forward_criterion(self, criterion, input, target):
+    def _forward_criterion(self, criterion, input, target, reduce=True):
+        assert(reduce is True)
         return criterion.forward(input, target)
 
-    def _backward_criterion(self, criterion, input, target):
+    def _backward_criterion(self, criterion, input, target, gradOutput=None):
+        assert(gradOutput is None)
         return criterion.backward(input, target)
 
     def _zero_grad_parameters(self, module):
