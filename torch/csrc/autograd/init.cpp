@@ -36,7 +36,11 @@ public:
       case torch::autograd::profiler::EventKind::Mark:
         return py::cast("mark").release();
     }
+#ifdef _MSC_VER
+    __assume(0);
+#else
     __builtin_unreachable();
+#endif
   }
 };
 
