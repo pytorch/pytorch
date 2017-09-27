@@ -10,6 +10,7 @@
 #include "torch/csrc/autograd/saved_variable.h"
 #include "torch/csrc/utils/auto_unique_ptr.h"
 #include "torch/csrc/autograd/function_hook.h"
+#include "torch/csrc/autograd/profiler.h"
 #include "torch/csrc/jit/tracer.h"
 
 #include <ATen/ATen.h>
@@ -81,6 +82,7 @@ struct Function : std::enable_shared_from_this<Function> {
   variable_list tracedApply(variable_list inputs);
 
   variable_list operator()(const variable_list& inputs) {
+    profiler::RecordFunction rec(this);
     if (jit::tracer::isTracing(inputs)) {
       return tracedApply(inputs);
     }

@@ -26,6 +26,12 @@ bool hasUsedHandle(Node *node) {
 
 // Transform PythonOps and Cpp Ops into Node's that match ONNX semantics.
 void ToONNX(std::shared_ptr<tracer::TracingState>& state) {
+  // Check that the tracing state is live (it should be, because
+  // you were supposed to request zero derivatives.)
+  if (state->is_expired()) {
+    throw std::logic_error("ToONNX: tracing state is expired");
+  }
+
   auto new_graph = std::make_shared<Graph>();
   std::unordered_map<void*, Node*> new_buffer_map;
 
@@ -44,11 +50,10 @@ void ToONNX(std::shared_ptr<tracer::TracingState>& state) {
 
   // Initialize context and environment
   for (auto input : state->graph->inputs()) {
-    env[input] = ctx.graph
-      ->addInput()
-      ->setType(input->typeOption())
-      ->setDebugName(input->debugName())
-      ->setStage(input->stage());
+    Node* n = ctx.graph->createClone(input, envFn);
+    n->setStage(input->stage());
+    ctx.graph->addInput(n);
+    env[input] = n;
   }
   for (auto kv : state->buffer_map) {
     new_buffer_map[kv.first] = envFn(kv.second);
@@ -57,20 +62,23 @@ void ToONNX(std::shared_ptr<tracer::TracingState>& state) {
   // Put the new outputs in our environment map, and copy the type from the
   // input graph if they were not set by the symbolic. This is called only
   // with results of symbolic call (not for nodes that are just cloned).
-  auto setOutputs = [&](Node * node, const node_list & outputs) {
+  auto setOutputs = [&](const std::string& op_name, Node * node, const node_list & outputs) {
     auto old_outputs = node->outputs();
     // Count all outputs, excluding Handles
     bool has_handle = hasHandleOutput(node);
     auto num_old_outputs = old_outputs.size() - (has_handle ? 1 : 0);
     if (outputs.size() != num_old_outputs) {
       std::ostringstream ss;
-      ss << "symbolic produced an incorrect number of outputs (expected ";
+      ss << "symbolic for " << op_name << " produced an incorrect number of outputs (expected ";
       ss << num_old_outputs << ", but got " << outputs.size() << ")";
       throw std::runtime_error(ss.str());
     }
     for (std::size_t i = 0; i < num_old_outputs; ++i) {
       auto old = old_outputs[i];
       if (outputs[i]) {
+        // Allow symbolic() to skip specifying the type of the return node.
+        // Unfortunately, they are on the hook for all internal nodes
+        // (though in practice, the types are not computed.)
         if (!outputs[i]->hasType()) {
           outputs[i]->setType(old->typeOption());
         }
@@ -79,8 +87,14 @@ void ToONNX(std::shared_ptr<tracer::TracingState>& state) {
         // Null output means that the ONNX op doesn't have outputs corresponding
         // to certain PyTorch outputs
         env[old] = nullptr;
-        if (!old->uses().empty())
-          throw std::runtime_error("ONNX conversion discarded a used output");
+        if (!old->uses().empty()) {
+          std::ostringstream ss;
+          ss << "symbolic for " << op_name << " returned None for the output " << i;
+          ss << " (indicating conversion for that particular output is not supported), ";
+          ss << "but the network uses this output later";
+          // TODO: Say what actually used it
+          throw std::runtime_error(ss.str());
+        }
       }
     }
     if (has_handle) {
@@ -92,21 +106,18 @@ void ToONNX(std::shared_ptr<tracer::TracingState>& state) {
   // Clone the node (possibly including its Selects) and add it to the new graph
   auto cloneNode = [&](Node * node) {
     auto n_ = ctx.graph->createClone(node, envFn);
+    env[node] = n_;
     ctx.graph->appendNode(n_);
     if (node->hasMultipleOutputs()) {
-      int i = 0;
-      for(auto s : node->uses()) {
-        auto new_node = ctx.graph->createSelect(n_,i++);
+      for (auto s : node->uses()) {
+        auto new_node = ctx.graph->createClone(s.user, envFn);
         ctx.graph->appendNode(new_node);
-        new_node->setType(s.user->typeOption());
         env[s.user] = new_node;
       }
-    } else {
-      env[node] = n_;
     }
   };
 
-  auto callPySymbollic = [&](PythonOp* op) {
+  auto callPySymbolic = [&](PythonOp* op) {
     // Prepare args for Python. First one is the graph, and is followed
     // by regular args, with Variables replaced by corresponding nodes.
     auto pyobj = py::handle(op->pyobj.get());
@@ -129,9 +140,10 @@ void ToONNX(std::shared_ptr<tracer::TracingState>& state) {
       py_symbolic_args[input_nr++] = obj;
     }
     // Call the symbolic function
-    py::object raw_output = py::reinterpret_steal<py::object>(
-        PyObject_CallObject(pyobj.attr("symbolic").ptr(), py_symbolic_args.ptr()));
-    if (!raw_output) throw py::error_already_set();
+    py::object onnx = py::module::import("torch.onnx");
+    // Use a little trampoline function so we can give good error messages
+    // upon argument mismatch
+    py::object raw_output = onnx.attr("run_symbolic")(op->name(), pyobj.attr("symbolic"), py_symbolic_args);
     if (raw_output.ptr() == Py_None)
       throw std::runtime_error("PythonOp's symbolic returned None, indicating conversion not supported " + op->name());
 
@@ -161,15 +173,15 @@ void ToONNX(std::shared_ptr<tracer::TracingState>& state) {
     IR_ELSEIFM(CppOp)
       if (auto fn = std::dynamic_pointer_cast<autograd::HasSymbolic>(value->fn)) {
         auto outputs = fn->symbolic(&ctx, fmap(node->inputs(), envFn));
-        setOutputs(node, outputs);
+        setOutputs(value->name(), node, outputs);
       } else {
         cloneNode(node);
       }
     IR_ELSEIFM(PythonOp)
       auto pyobj = py::handle(value->pyobj.get());
       if (py::hasattr(pyobj, "symbolic")) {
-        auto outputs = callPySymbollic(value);
-        setOutputs(node, outputs);
+        auto outputs = callPySymbolic(value);
+        setOutputs(value->name(), node, outputs);
       } else {
         cloneNode(node);
       }

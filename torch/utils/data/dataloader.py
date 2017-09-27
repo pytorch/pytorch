@@ -5,12 +5,13 @@ import collections
 import sys
 import traceback
 import threading
+from torch._six import string_classes
+
+
 if sys.version_info[0] == 2:
     import Queue as queue
-    string_classes = basestring
 else:
     import queue
-    string_classes = (str, bytes)
 
 
 _use_shared_memory = False

@@ -145,15 +145,19 @@ void THNN_(LookupTable_accGradParameters)(
   THCudaCheck(cudaGetLastError());
 }
 
+#define THREADS 256
+#define RUN(NORM, IDXTYPE) \
+  calculate_norms_and_renorm<real, accreal, IDXTYPE, NORM> \
+    <<<numel, THREADS/2, THREADS * sizeof(accreal), THCState_getCurrentStream(state)>>> \
+    (weightsRaw, idxRaw, normType, maxNorm, THCTensor_(stride)(state, weight, 0))
+
 void THNN_(LookupTable_renorm)(
            THCState *state,
            THCIndexTensor *idx,
            THCTensor *weight,
-           accreal maxNorm_,
-           accreal normType_)
+           accreal maxNorm,
+           accreal normType)
 {
-  real maxNorm = ScalarConvert<accreal, real>::to(maxNorm_);
-  real normType = ScalarConvert<accreal, real>::to(normType_);
   THCUNN_assertSameGPU(state, 2, idx, weight);
   if (!(THCIndexTensor_(isContiguous)(state, idx) &&
         THCTensor_(isContiguous)(state, weight))) {
@@ -169,28 +173,32 @@ void THNN_(LookupTable_renorm)(
   }
 
   THCIndex_t numel = THCIndexTensor_(nElement)(state, idx);
-  int64_t stride = THCTensor_(stride)(state, weight, 0);
+
+  real * weightsRaw = THCTensor_(data)(state, weight);
+  THCIndex_t * idxRaw = THCIndexTensor_(data)(state, idx);
 
   // get the unique indices
-  thrust::device_ptr<real> weight_ptr(THCTensor_(data)(state, weight));
-  thrust::device_ptr<THCIndex_t> idx_ptr(THCIndexTensor_(data)(state, idx));
-  thrust::device_ptr<THCIndex_t> end_ptr(thrust::unique(idx_ptr, idx_ptr+numel));
-  numel = end_ptr - idx_ptr;
+  thrust::device_ptr<THCIndex_t> idxThrust(idxRaw);
+  thrust::device_ptr<THCIndex_t> endIdxThrust(thrust::unique(idxThrust, idxThrust+numel));
+  numel = endIdxThrust - idxThrust;
 
-  pow_v<real, accreal> unary_pow(normType);
-  thrust::plus<accreal> binary_plus;
-  // numel << stride, since idx usually contains sparse row indices
-  for (THCIndex_t i = 0; i < numel; i++)
-  {
-    THCIndex_t k = idx_ptr[i] - TH_INDEX_BASE;
-    thrust::device_ptr<real> row_ptr = weight_ptr + k * stride;
-    accreal norm = thrust::transform_reduce(row_ptr, row_ptr + stride,
-      unary_pow, (accreal)0, binary_plus);
-    norm = std::pow(norm, (accreal) (1.0 / normType));
-    if (norm > ScalarConvert<real, accreal>::to(maxNorm))
-    {
-      multiply_s<real> unary_mul(ScalarConvert<accreal, real>::to(maxNorm / (norm + 1e-7)));
-      thrust::transform(row_ptr, row_ptr + stride, row_ptr, unary_mul);
+  // At launch time figure out what the index type is and norm type
+  int Norm = ScalarConvert<accreal, int>::to(normType);
+  if (TensorUtils<THCudaLongTensor>::canUse32BitIndexMath(state, idx)) {
+    if (Norm == 1) {
+      RUN(1, unsigned int);
+    } else if (Norm == 2) {
+      RUN(2, unsigned int);
+    } else {
+      RUN(-1, unsigned int);
+    }
+  } else {
+    if (Norm == 1) {
+      RUN(1, unsigned long);
+    } else if (Norm == 2) {
+      RUN(2, unsigned long);
+    } else {
+      RUN(-1, unsigned long);
     }
   }
 }

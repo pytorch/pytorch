@@ -35,12 +35,12 @@ auto Add::apply(const variable_list& inputs) -> variable_list {
     output = input1 + input2;
   }
   return wrap_outputs(inputs, as_tensor_list(std::move(output)), [&](FunctionFlags f) {
-    return std::make_shared<AddBackward>(std::move(f));
+    return std::make_shared<AddBackward_Deprecated>(std::move(f));
   });
 };
 
-auto AddBackward::apply(const variable_list& grad_outputs) -> variable_list {
-  check_input_variables("AddBackward", grad_outputs, 1);
+auto AddBackward_Deprecated::apply(const variable_list& grad_outputs) -> variable_list {
+  check_input_variables("AddBackward_Deprecated", grad_outputs, 1);
   return {grad_outputs[0], grad_outputs[0]};
 };
 

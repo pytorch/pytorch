@@ -642,6 +642,16 @@ void THTensor_(sub)(THTensor *r_, THTensor *t, real value)
   THTensor_(add)(r_, t, -value);
 }
 
+void THTensor_(add_scaled)(THTensor *r_, THTensor *t, real value, real alpha)
+{
+  THTensor_(add)(r_, t, value * alpha);
+}
+
+void THTensor_(sub_scaled)(THTensor *r_, THTensor *t, real value, real alpha)
+{
+  THTensor_(add)(r_, t, -value * alpha);
+}
+
 void THTensor_(mul)(THTensor *r_, THTensor *t, real value)
 {
   THTensor_(resizeAs)(r_, t);
@@ -888,7 +898,7 @@ void THTensor_(cadd)(THTensor *r_, THTensor *t, real value, THTensor *src)
   }
 }
 
-void THTensor_(csub)(THTensor *r_, THTensor *t, real value,THTensor *src)
+void THTensor_(csub)(THTensor *r_, THTensor *t, real value, THTensor *src)
 {
   THTensor_(cadd)(r_, t, -value, src);
 }
@@ -1697,6 +1707,9 @@ void THTensor_(min)(THTensor *values_, THLongTensor *indices_, THTensor *t, int 
                             *tempValues__data = *t_data;
                             *tempIndices__data = *tempIndices__dimOffset;
                           });
+
+    THTensor_(free)(tempValues_);
+    THLongTensor_free(tempIndices_);
   }
 
   if (!keepdim) {
@@ -2853,8 +2866,12 @@ TENSOR_IMPLEMENT_LOGICAL(ne,!=)
   void THTensor_(NAME)(THTensor *r_, THTensor *t)                \
   {                                                           \
     THTensor_(resizeAs)(r_, t);                               \
-    TH_TENSOR_APPLY2(real, t, real, r_, *r__data = CFUNC(*t_data);); \
-  }                                                           \
+    if (THTensor_(isContiguous)(r_) && THTensor_(isContiguous)(t)) { \
+      TH_TENSOR_APPLY2_CONTIG(real, r_, real, t, THVector_(NAME)(r__data, t_data, r__len););  \
+    } else {  \
+      TH_TENSOR_APPLY2(real, r_, real, t, *r__data = CFUNC(*t_data);); \
+    } \
+  }
 
 #if defined(TH_REAL_IS_LONG)
 LAB_IMPLEMENT_BASIC_FUNCTION(abs,labs)
@@ -2905,6 +2922,8 @@ LAB_IMPLEMENT_BASIC_FUNCTION(sinh,TH_MATH_NAME(sinh))
 LAB_IMPLEMENT_BASIC_FUNCTION(tan,TH_MATH_NAME(tan))
 LAB_IMPLEMENT_BASIC_FUNCTION(atan,TH_MATH_NAME(atan))
 LAB_IMPLEMENT_BASIC_FUNCTION(tanh,TH_MATH_NAME(tanh))
+LAB_IMPLEMENT_BASIC_FUNCTION(erf,TH_MATH_NAME(erf))
+LAB_IMPLEMENT_BASIC_FUNCTION(erfinv,TH_erfinv)
 LAB_IMPLEMENT_BASIC_FUNCTION(sqrt,TH_MATH_NAME(sqrt))
 LAB_IMPLEMENT_BASIC_FUNCTION(rsqrt,TH_MATH_NAME(TH_rsqrt))
 LAB_IMPLEMENT_BASIC_FUNCTION(ceil,TH_MATH_NAME(ceil))
@@ -2927,7 +2946,7 @@ void THTensor_(pow)(THTensor *r_, THTensor *t, real value)
     THTensor_(cmul)(r_, t, t);
   }
   else if(value == 3){
-    TH_TENSOR_APPLY2(real, t, real, r_, *r__data = *t_data * *t_data * *t_data;);
+    TH_TENSOR_APPLY2(real, r_, real, t, *r__data = *t_data * *t_data * *t_data;);
   }
   else if(value == 0.5){
     THTensor_(sqrt)(r_, t);
@@ -2939,10 +2958,10 @@ void THTensor_(pow)(THTensor *r_, THTensor *t, real value)
     THTensor_(cinv)(r_, t);
   }
   else if(value == -2){
-    TH_TENSOR_APPLY2(real, t, real, r_, *r__data = TH_MATH_NAME(1.0) / (*t_data * *t_data););
+    TH_TENSOR_APPLY2(real, r_, real, t, *r__data = TH_MATH_NAME(1.0) / (*t_data * *t_data););
   }
   else{
-    TH_TENSOR_APPLY2(real, t, real, r_, *r__data = TH_MATH_NAME(pow)(*t_data, value););
+    TH_TENSOR_APPLY2(real, r_, real, t, *r__data = TH_MATH_NAME(pow)(*t_data, value););
   }
 }
 

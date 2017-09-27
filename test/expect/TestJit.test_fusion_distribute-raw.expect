@@ -1,0 +1,7 @@
+graph(%1 : Double(4, 4)
+      %2 : Double(4, 4)) {
+  %4 : Double(4, 4) = ^Add(False)(%1, %2), uses = [[%5.i0]];
+  %6 : Double(4!, 2), %7 : Double(4!, 2) = ^Chunk(2, 1)(%4), uses = [[%8.i0], [%8.i1]];
+  %9 : Double(4, 2) = ^Mul()(%6, %7), uses = [[%0.i0]];
+  return (%9);
+}

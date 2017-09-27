@@ -113,7 +113,8 @@ inline void setValueTrace(const std::shared_ptr<TracingState>& state, const Vari
 // if we treat it as a constant, everything will work out.
 inline Node* getValueTrace(const std::shared_ptr<TracingState>& state, const Variable& var, bool mustExist = false) {
   if (!var.defined()) {
-    return state->graph->appendNode(state->graph->createUndefined());
+    Node *n = state->graph->createUndefined();
+    return state->graph->appendNode(n);
   }
   if (mustExist) {
     auto vts = detail::getValueState(state, var, false);

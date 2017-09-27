@@ -173,7 +173,34 @@ static void fusionTests() {
   testOne(0,1,1,2);
   testOne(1,2,0,2);
 
+
+
+  auto testConcat = [&](int dim) {
+    Graph graph;
+    Node * i0 = graph.addInput();
+    Node * i1 = graph.addInput();
+    auto o0 = appendNewNode(kMul,graph,{i0, i1});
+    graph.registerOutput(o0);
+    graph.registerOutput(appendNewNode(kConcat, graph, {i0,o0})->i_(kaxis, dim));
+    auto a = at::CUDA(at::kFloat).rand({3,4,5});
+    auto b = at::CUDA(at::kFloat).rand({4,3,5}).transpose(0,1);
+    auto o = at::CUDA(at::kFloat).zeros({3,4,5});
+
+    auto o_r = a*b;
+    auto o2_r = at::cat({a, o_r}, dim);
+    auto o2 = at::CUDA(at::kFloat).zeros(o2_r.sizes());
+    comp.debugLaunchGraph(graph, {a,b}, {o, o2});
+
+    float max_diff = (o_r - o).abs().max().toDouble();
+    JIT_ASSERT(max_diff == 0);
+    float max_diff2 = (o2_r - o2).abs().max().toDouble();
+    JIT_ASSERT(max_diff2 == 0);
+  };
+  testConcat(0);
+  testConcat(1);
+  testConcat(2);
 }
+
 #else //WITH_CUDA
 void fusionTests() {}
 #endif
@@ -183,6 +210,7 @@ void attributesTest() {
   auto one = kParam;
   auto two = kReturn;
   auto three = kConstant;
+  auto four = kSlice;
   Attr attr;
   attr.f_(one,3.4)->i_(two,5)->s_(three,"what");
   assert(attr.f(one) == 3.4);
@@ -197,7 +225,7 @@ void attributesTest() {
 
   Attr attr2;
   attr2.copyAttributes(attr);
-  assert(two.s(one) == "no");
+  assert(attr2.s(one) == "no");
   attr2.f_(one,5);
   assert(attr.s(one) == "no");
   assert(attr2.f(one) == 5);

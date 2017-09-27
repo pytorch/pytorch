@@ -454,6 +454,20 @@ equal(other) -> bool
 See :func:`torch.equal`
 """)
 
+add_docstr_all('erf',
+               """
+erf() -> Tensor
+
+See :func:`torch.erf`
+""")
+
+add_docstr_all('erfinv',
+               """
+erfinv() -> Tensor
+
+See :func:`torch.erfinv`
+""")
+
 add_docstr_all('exp',
                """
 exp() -> Tensor

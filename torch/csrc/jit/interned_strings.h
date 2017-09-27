@@ -31,7 +31,6 @@ _(AddConstant) \
 _(Transpose) \
 _(Reshape) \
 _(split) \
-_(Dim) \
 _(Offset) \
 _(value) \
 _(Subgraph) \

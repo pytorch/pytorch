@@ -427,6 +427,12 @@ class Variable(_C._VariableBase):
     def abs(self):
         return Abs.apply(self)
 
+    def erf(self):
+        return Erf.apply(self)
+
+    def erfinv(self):
+        return ErfInv.apply(self)
+
     def clamp(self, min=None, max=None):
         if min is None and max is None:
             raise ValueError("clamp requires specifying at least one of "

@@ -101,6 +101,8 @@ Pointwise Ops
 .. autofunction:: cos
 .. autofunction:: cosh
 .. autofunction:: div
+.. autofunction:: erf
+.. autofunction:: erfinv
 .. autofunction:: exp
 .. autofunction:: floor
 .. autofunction:: fmod

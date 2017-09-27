@@ -127,6 +127,30 @@ static auto view3d(const at::Tensor& tensor) -> at::Tensor {
   return tensor.squeeze(2);
 }
 
+static void check_input_shape_forward(const at::Tensor& input,
+				      const at::Tensor& weight,
+				      int64_t groups, bool transposed) {
+  if (!transposed) {
+    if (input.size(1) != (weight.size(1) * groups)) {
+      std::stringstream ss;
+      ss << "Given groups=" << groups << ", weight" << weight.sizes()
+	 << ", so expected input" << input.sizes() << "  to have "
+	 << (weight.size(1) * groups) << " channels, but got " << input.size(1)
+	 << " channels instead";
+      throw std::runtime_error(ss.str());
+    }
+  } else { // transposed
+    if (input.size(1) != weight.size(0)) {
+      std::stringstream ss;
+      ss << "Given transposed=" << transposed << ", weight" << weight.sizes()
+	 << ", so expected input" << input.sizes() << "  to have "
+	 << weight.size(0) << " channels, but got " << input.size(1)
+	 << " channels instead";
+      throw std::runtime_error(ss.str());
+    }
+  }
+}
+
 static at::Tensor subtensor(at::Tensor& tensor, int dim, int groups, int g) {
   if (!tensor.defined()) {
     return at::Tensor();
@@ -165,6 +189,8 @@ auto ConvForward::apply(const variable_list& inputs) -> variable_list {
   auto input = inputs[0].data().contiguous();
   auto weight = inputs[1].data();
   auto bias = inputs[2].opt_data();
+
+  check_input_shape_forward(input, weight, groups, transposed);
 
   int k = input.ndimension();
   if (k == 3) {

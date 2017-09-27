@@ -6,6 +6,7 @@
 
 namespace torch { namespace autograd {
 
+struct Variable;
 using at::Context;
 using at::Generator;
 using at::IntList;
@@ -38,6 +39,8 @@ struct VariableType : public at::Type {
 
 private:
   at::Tensor & checked_unpack(const Tensor & t, const char * name, int pos) const;
+  Variable as_variable(Tensor tensor) const;
+  Variable as_variable(const Scalar & scalar) const;
 
 private:
   at::Type* baseType;

@@ -536,8 +536,8 @@ TH_API void THNN_(SpatialAdaptiveAveragePooling_updateOutput)(
                   THCState *state,
                   THCTensor *input,
                   THCTensor *output,
-                  int nOutputCols,
-                  int nOutputRows);
+                  int osizeW,
+                  int osizeH);
 
 TH_API void THNN_(SpatialAdaptiveAveragePooling_updateGradInput)(
                   THCState *state,
@@ -1257,6 +1257,34 @@ TH_API void THNN_(TemporalReplicationPadding_updateGradInput)(
                   THCTensor *gradInput,
                   int padL, int padR);
 
+TH_API void THNN_(TemporalUpSamplingLinear_updateOutput)(
+                  THCState *state,
+                  THCTensor *input,
+                  THCTensor *output,
+                  int outputWidth);
+
+TH_API void THNN_(TemporalUpSamplingLinear_updateGradInput)(
+                  THCState *state,
+                  THCTensor *gradOutput,
+                  THCTensor *gradInput,
+                  int nbatch,
+                  int nchannels,
+                  int inputWidth,
+                  int outputWidth);
+
+TH_API void THNN_(TemporalUpSamplingNearest_updateGradInput)(
+                  THCState *state,
+                  THCTensor *input,
+                  THCTensor *gradOutput,
+                  THCTensor *gradInput,
+                  int scale_factor);
+
+TH_API void THNN_(TemporalUpSamplingNearest_updateOutput)(
+                  THCState *state,
+                  THCTensor *input,
+                  THCTensor *output,
+                  int scale_factor);
+
 TH_API void THNN_(Threshold_updateOutput)(
                   THCState *state,
                   THCTensor *input,
@@ -1524,6 +1552,20 @@ TH_API void THNN_(VolumetricMaxUnpooling_updateGradInput)(
                   int outputTime, int outputWidth, int outputHeight,
                   int dT, int dW, int dH,
                   int padT, int padW, int padH);
+
+TH_API void THNN_(VolumetricAdaptiveAveragePooling_updateOutput)(
+                  THCState *state,
+                  THCTensor *input,
+                  THCTensor *output,
+                  int osizeT,
+                  int osizeW,
+                  int osizeH);
+
+TH_API void THNN_(VolumetricAdaptiveAveragePooling_updateGradInput)(
+                  THCState *state,
+                  THCTensor *input,
+                  THCTensor *gradOutput,
+                  THCTensor *gradInput);
 
 TH_API void THNN_(VolumetricReplicationPadding_updateOutput)(
                   THCState *state,

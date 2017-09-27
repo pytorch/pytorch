@@ -179,6 +179,12 @@
 #include "generic/TemporalRowConvolution.c"
 #include "THGenerateFloatTypes.h"
 
+#include "generic/TemporalUpSamplingNearest.c"
+#include "THGenerateFloatTypes.h"
+
+#include "generic/TemporalUpSamplingLinear.c"
+#include "THGenerateFloatTypes.h"
+
 #include "generic/FeatureLPPooling.c"
 #include "THGenerateFloatTypes.h"
 
@@ -261,6 +267,9 @@
 #include "THGenerateFloatTypes.h"
 
 #include "generic/VolumetricDilatedConvolution.c"
+#include "THGenerateFloatTypes.h"
+
+#include "generic/VolumetricAdaptiveAveragePooling.c"
 #include "THGenerateFloatTypes.h"
 
 #include "generic/VolumetricMaxPooling.c"

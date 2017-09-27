@@ -1,4 +1,5 @@
 import torch
+import math
 
 from itertools import repeat
 
@@ -268,6 +269,32 @@ class Atan2(Function):
         y, x, = ctx.saved_variables
         denominator = y.mul(y).add(x.mul(x)).reciprocal()
         return grad_output * x.mul(denominator), grad_output * y.neg().mul(denominator)
+
+
+class Erf(Function):
+
+    @staticmethod
+    def forward(ctx, i):
+        ctx.save_for_backward(i)
+        return i.erf()
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        i, = ctx.saved_variables
+        return 2. / math.sqrt(math.pi) * torch.exp(-(i ** 2)) * grad_output
+
+
+class ErfInv(Function):
+
+    @staticmethod
+    def forward(ctx, i):
+        ctx.save_for_backward(i)
+        return i.erfinv()
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        i, = ctx.saved_variables
+        return 0.5 * math.sqrt(math.pi) * torch.exp(i.erfinv() ** 2) * grad_output
 
 
 # TODO: make inplace and update grad formulas

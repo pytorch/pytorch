@@ -91,7 +91,7 @@ struct DataChannel {
   virtual void send(Scalar& value, rank_type src_rank) = 0;
   virtual void send(thpp::Tensor& data, rank_type dst_rank) = 0;
   virtual void receive(Scalar& value, rank_type src_rank) = 0;
-  virtual void receive(thpp::Tensor& data) = 0; // receive from any source
+  virtual rank_type receive(thpp::Tensor& data) = 0; // receive from any source
   virtual void receive(thpp::Tensor& data, rank_type src_rank) = 0;
   virtual Request* isend(thpp::Tensor& data, rank_type dst_rank) = 0;
   virtual Request* ireceive(thpp::Tensor& data, rank_type src_rank) = 0;
