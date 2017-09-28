@@ -47,7 +47,7 @@ inline TIndex size_from_dim_(int k, vector<TIndex> dims) {
 
 // Product of all dims up to
 inline TIndex size_to_dim_(int k, vector<TIndex> dims) {
-  CAFFE_ENFORCE(k < dims.size());
+  CAFFE_ENFORCE(k <= dims.size());
   TIndex r = 1;
   for (int i = 0; i < k; ++i) {
     r *= dims[i];
