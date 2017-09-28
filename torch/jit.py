@@ -244,8 +244,8 @@ class TracedModule(Module):
 
         in_vars, in_struct = _flatten(args, self.state_dict(keep_vars=True).values())
         trace, (out_vars, out_struct) = traced_inner(in_vars, in_struct)
-        out, extra = _unflatten(out_vars, out_struct)
-        assert len(extra) == 0
+        out, unmatched = _unflatten(out_vars, out_struct)
+        assert len(unmatched) == 0
         return trace, out
 
 
@@ -372,8 +372,8 @@ class _CompiledMixin(object):
                 out_vars, out_struct = ktrace.add_trace(self.__old_forward, args, in_vars, in_struct)
         if isinstance(out_vars, Variable):
             out_vars = (out_vars, )
-        out, extras = _unflatten(out_vars, out_struct)
-        assert len(extras) == 0
+        out, unmatched = _unflatten(out_vars, out_struct)
+        assert len(unmatched) == 0
         return out
 
     def has_trace_for(self, *args):
