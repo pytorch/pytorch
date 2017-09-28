@@ -99,6 +99,11 @@ struct Function : std::enable_shared_from_this<Function> {
   // of input variables
   static FunctionFlags flags(const variable_list& inputs);
 
+  // same as above, but for tensor_list arguments; the use of initializer_list is
+  // to handle overloads correctly, i.e. so { tensor_list } will resolve to this, but
+  // { self, tensor } will resolve to the above.
+  static FunctionFlags flags(const std::initializer_list<tensor_list> &inputs);
+
   // Releases saved variables if the operation won't be reused
   virtual inline void releaseVariables() {}
 
@@ -108,6 +113,15 @@ struct Function : std::enable_shared_from_this<Function> {
   inline bool should_compute_output(int i) const {
     auto& fn = next_functions[i].first;
     return fn && fn->is_executable;
+  }
+
+  inline bool should_compute_any_outputs() const {
+    for (size_t i = 0; i < next_functions.size(); ++i) {
+      if (should_compute_output((int)i)) {
+        return true;
+      }
+    }
+    return false;
   }
 
   inline void set_flags(FunctionFlags&& flags) {

@@ -70,6 +70,7 @@ struct PythonArgs {
 
   inline at::Tensor tensor(int i);
   inline at::Scalar scalar(int i);
+  inline std::vector<at::Tensor> tensorlist(int i);
   inline std::vector<int64_t> intlist(int i);
   inline int64_t toInt64(int i);
   inline double toDouble(int i);
@@ -121,6 +122,19 @@ inline at::Scalar PythonArgs::scalar(int i) {
     return at::Scalar(THPUtils_unpackDouble(args[i]));
   }
   return at::Scalar(static_cast<int64_t>(THPUtils_unpackLong(args[i])));
+}
+
+inline std::vector<at::Tensor> PythonArgs::tensorlist(int i) {
+  if (!args[i]) return std::vector<at::Tensor>();
+  PyObject* arg = args[i];
+  auto tuple = PyTuple_Check(arg);
+  auto size = tuple ? PyTuple_GET_SIZE(arg) : PyList_GET_SIZE(arg);
+  std::vector<at::Tensor> res(size);
+  for (int idx = 0; idx < size; idx++) {
+    PyObject* obj = tuple ? PyTuple_GET_ITEM(arg, idx) : PyList_GET_ITEM(arg, idx);
+    res[idx] = reinterpret_cast<THPVariable*>(obj)->cdata;
+  }
+  return res;
 }
 
 inline std::vector<int64_t> PythonArgs::intlist(int i) {

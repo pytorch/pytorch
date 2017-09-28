@@ -30,6 +30,24 @@ auto Function::flags(const variable_list& inputs) -> FunctionFlags {
   return f;
 }
 
+auto Function::flags(const std::initializer_list<tensor_list> &inputs) -> FunctionFlags {
+  if (inputs.size() > 1) {
+    throw std::runtime_error("only one tensor_list is currently supported");
+  }
+
+  for (auto it = inputs.begin(); it != inputs.end(); ++it) {
+    auto& tensor_list = *it;
+    variable_list variables(tensor_list.size());
+    for (size_t i = 0; i < tensor_list.size(); ++i) {
+      variables[i] = tensor_list[i];
+    }
+    return Function::flags(variables);
+  }
+
+  throw std::runtime_error("unexpected");
+  return FunctionFlags();
+}
+
 auto Function::name() -> std::string {
   return std::string(typeid(*this).name());
 }

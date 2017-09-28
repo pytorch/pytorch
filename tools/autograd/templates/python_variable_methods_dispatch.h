@@ -11,7 +11,10 @@
 
 namespace torch { namespace autograd {
 
-using namespace at;
+using at::Tensor;
+using at::Scalar;
+using at::TensorList;
+using at::IntList;
 
 ${py_method_dispatch}
 

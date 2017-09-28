@@ -87,7 +87,10 @@
 
 - name: btrifact
 - name: btrisolve
-- name: cat
+
+- name: cat(TensorList tensors, int64_t dim=0)
+  tensors: cat_tensors_backward(grad, tensors.sizes(dim), dim)
+
 - name: cauchy
 - name: ceil
 
@@ -214,7 +217,10 @@
   vec: self.t().mv(grad)
 
 - name: narrow(Tensor self, int64_t dimension, int64_t start, int64_t length)
-  self: unnarrow(grad, self.sizes(), dimension, start)
+  self: grad._unnarrow(dimension, start, self.size(dimension))
+
+- name: _unnarrow(Tensor self, int64_t dimension, int64_t offset, int64_t dimSize)
+  self: grad.narrow(dimension, offset, self.size(dimension))
 
 - name: ne
 

@@ -2,7 +2,9 @@
 
 // ${generated_comment}
 
-using namespace at;
+using at::Tensor;
+using at::Scalar;
+using at::IntList;
 
 namespace torch { namespace autograd {
 
@@ -65,10 +67,6 @@ Tensor cumsum_backward(const Tensor & x, int64_t dim) {
   return ret;
 }
 
-Tensor unnarrow(const Tensor & self, IntList sizes, int64_t dimension, int64_t offset) {
-  throw std::runtime_error("unnarrow: not yet implemented");
-}
-
 Tensor unsqueeze_to(const Tensor & self, IntList sizes) {
   auto result = self;
   int64_t nDims = sizes.size();
@@ -103,6 +101,17 @@ Tensor addmm_mat2_backward(const Tensor & grad, const Tensor & mat1, const Tenso
   } else {
     return maybe_multiply(mat1.t().mm(grad), alpha);
   }
+}
+
+variable_list cat_tensors_backward(const Tensor & grad, const std::vector<int64_t> &sizes, int64_t dim) {
+  variable_list grad_inputs(sizes.size());
+  int64_t accumulate = 0;
+  for (size_t i = 0; i < sizes.size(); ++i) {
+    auto size = sizes[i];
+    accumulate += size;
+    grad_inputs[i] = grad.narrow(dim, accumulate - size, size);
+  }
+  return grad_inputs;
 }
 
 ${autograd_function_definitions}
