@@ -24,7 +24,7 @@ if WITH_CUDA and not check_env_flag('NO_SYSTEM_NCCL'):
     ENV_ROOT = os.getenv('NCCL_ROOT_DIR', None)
     LIB_DIR = os.getenv('NCCL_LIB_DIR', None)
     INCLUDE_DIR = os.getenv('NCCL_INCLUDE_DIR', None)
-    
+
     lib_paths = list(filter(bool, [
         LIB_DIR,
         ENV_ROOT,
