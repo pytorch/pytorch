@@ -100,20 +100,30 @@ def storage_to_tensor_type(storage):
     return getattr(module, storage_type.__name__.replace('Storage', 'Tensor'))
 
 
-def _with_file_like(f, mode, body):
-    """
-    Executes a body function with a file object for f, opening
+def _with_file_like(f, mode, body, atomic=False):
+    """Executes a body function with a file object for f, opening
     it in 'mode' if it is a string filename.
+
+    If 'atomic' is true, a temporary file will be used, which will be
+    (atomically) renamed to the target after the body function is executed.
     """
     new_fd = False
     if isinstance(f, str) or (sys.version_info[0] == 2 and isinstance(f, unicode)):
         new_fd = True
-        f = open(f, mode)
+        if atomic:
+            target_name = f
+            target_dir = os.path.dirname(f)
+            fd, tmp_name = tempfile.mkstemp(dir=target_dir)
+            f = os.fdopen(fd, mode)
+        else:
+            f = open(f, mode)
     try:
         return body(f)
     finally:
         if new_fd:
             f.close()
+            if atomic:
+                os.rename(tmp_name, target_name)
 
 
 def save(obj, f, pickle_module=pickle, pickle_protocol=DEFAULT_PROTOCOL):
@@ -128,7 +138,7 @@ def save(obj, f, pickle_module=pickle, pickle_protocol=DEFAULT_PROTOCOL):
         pickle_module: module used for pickling metadata and objects
         pickle_protocol: can be specified to override the default protocol
     """
-    return _with_file_like(f, "wb", lambda f: _save(obj, f, pickle_module, pickle_protocol))
+    return _with_file_like(f, "wb", lambda f: _save(obj, f, pickle_module, pickle_protocol), atomic=True)
 
 
 def _save(obj, f, pickle_module, pickle_protocol):
