@@ -37,14 +37,8 @@ output: "7"
 initializer {
   dims: 2
   data_type: FLOAT
-  name: "1"
-  raw_data: "\277Kh>\324\3350?"
-}
-initializer {
-  dims: 2
-  data_type: FLOAT
   name: "2"
-  raw_data: "\000\000\000\000\000\000\000\000"
+  raw_data: "\277Kh>\324\3350?"
 }
 initializer {
   dims: 2
@@ -56,6 +50,12 @@ initializer {
   dims: 2
   data_type: FLOAT
   name: "4"
+  raw_data: "\000\000\000\000\000\000\000\000"
+}
+initializer {
+  dims: 2
+  data_type: FLOAT
+  name: "5"
   raw_data: "\000\000\200?\000\000\200?"
 }
 ir_version: 1

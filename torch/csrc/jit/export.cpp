@@ -142,7 +142,8 @@ void encodeGraph(onnx::GraphProto * p_g, const std::shared_ptr<Graph> & g, const
       addAttribute(p_n, node, attr_name);
     }
   }
-  int inputs_count = 0;
+  auto num_initializers = initializers.size();
+  int inputs_count = g->inputs().size() - num_initializers;
   for (auto & tensor : initializers) {
     // TODO: stop using positions to determine which initializers
     // match to which inputs
