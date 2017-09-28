@@ -2723,7 +2723,7 @@ class TestNN(NNTestCase):
                 out_cpu.backward(gradients)
                 out_cuda.backward(gradients.cuda())
                 self.assertEqual(input_cpu.grad, input_cuda.grad)
-                self.assertEqual(grid_cpu.grad, grid_cuda.grad)
+                self.assertEqual(grid_cpu.grad, grid_cuda.grad, prec=5e-5)
 
                 # check that zero-dimensional input strides don't error out
                 base_input = torch.randn(C, IH, IW)
