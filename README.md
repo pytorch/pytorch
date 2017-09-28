@@ -1,7 +1,8 @@
 # Caffe2
 
-[![TravisCI Build Status](https://travis-ci.org/caffe2/caffe2.svg?branch=master)](https://travis-ci.org/caffe2/caffe2)
-[![Appveyor Build Status](https://ci.appveyor.com/api/projects/status/github/caffe2/caffe2?svg=true)](https://ci.appveyor.com/project/Yangqing/caffe2)
+[![License](https://img.shields.io/badge/License-Apache%202.0-brightgreen.svg)](https://opensource.org/licenses/Apache-2.0)
+[![TravisCI Build Status](https://img.shields.io/travis/caffe2/caffe2.svg)](https://travis-ci.org/caffe2/caffe2)
+[![Appveyor Build Status](https://img.shields.io/appveyor/ci/Yangqing/caffe2.svg)](https://ci.appveyor.com/project/Yangqing/caffe2)
 
 Caffe2 is a lightweight, modular, and scalable deep learning framework. Building on the original [Caffe](http://caffe.berkeleyvision.org), Caffe2 is designed with expression, speed, and modularity in mind.
 
@@ -16,9 +17,9 @@ Please use Github issues (https://github.com/caffe2/caffe2/issues) to ask questi
 Please participate in our survey (https://www.surveymonkey.com/r/caffe2). We will send you information about new releases and special developer events/webinars.
 
 
-## License and Citation
+## License
 
-Caffe2 is released under the [BSD 2-Clause license](https://github.com/Yangqing/caffe2/blob/master/LICENSE).
+Caffe2 is released under the [Apache 2.0 license](https://github.com/caffe2/caffe2/blob/master/LICENSE). See the [NOTICE](https://github.com/caffe2/caffe2/blob/master/NOTICE) file for details.
 
 ### Further Resources on [Caffe2.ai](http://caffe2.ai)
 
