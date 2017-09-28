@@ -253,7 +253,9 @@ class CRFWithLoss(object):
                                                   param_model=self.model)
             input_t, cell_t_prev, _ = (
                 step_model.net.AddExternalInputs(
-                    'input_t', 'cell_t_prev', transitions
+                    core.ScopedBlobReference('input_t'),
+                    core.ScopedBlobReference('cell_t_prev'),
+                    transitions
                 )
             )
             zero_segment_id = step_model.param_init_net.ConstantFill(
