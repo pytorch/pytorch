@@ -1,6 +1,7 @@
 #include "NNPACK.h"
 
 #include "TH/TH.h"
+#include <stdlib.h>
 
 namespace torch {
 namespace nnpack {
@@ -12,9 +13,28 @@ pthreadpool_t nnpack_threadpool() {
   if (nnpack_threadpool_ == nullptr) {
     enum nnp_status nnpack_status = nnp_initialize();
     if (nnpack_status != nnp_status_success) throw std::runtime_error("could not initialize NNPack");
-    nnpack_threadpool_ = pthreadpool_create(4);
+    nnpack_threadpool_ = pthreadpool_create(16);
   }
   return nnpack_threadpool_;
+}
+
+// Assuming for now this is Thread-safe, but that seems like a stretch
+static void *workspace = nullptr;
+static size_t workspace_size = 0;
+
+// NNPack has alignment requirements
+const size_t nnpack_memory_alignment_boundary = 64;
+
+static inline void deallocate_workspace() {
+  if (workspace)
+    std::free(workspace);
+  workspace = nullptr;
+}
+
+static inline void allocate_workspace() {
+  if (workspace)
+    deallocate_workspace();
+  posix_memalign(&workspace, nnpack_memory_alignment_boundary, workspace_size);
 }
 
 void SpatialConvolution_updateOutput(
@@ -75,27 +95,57 @@ void SpatialConvolution_updateOutput(
 
   // Note: we assume that the output is shaped correctly, probably should add an assert
 
-  auto status = nnp_convolution_output(
-      algorithm,
-      batch_size,
-      input_channels,
-      output_channels,
-      input_size,
-      input_padding,
-      kernel_size,
-      (float*)input.data_ptr(),
-      (float*)weight.data_ptr(),
-      (float*)bias_.data_ptr(),
-      (float*)output.data_ptr(),
-      nullptr, // workspace_buffer
-      nullptr, // workspace_size
-      nnp_activation_identity,
-      nullptr, // activation_parameters
-      nnpack_threadpool(),
-      nullptr  // profile
-  );
+  auto run = [&]() -> nnp_status {
+    return nnp_convolution_output(
+        algorithm,
+        batch_size,
+        input_channels,
+        output_channels,
+        input_size,
+        input_padding,
+        kernel_size,
+        (float*)input.data_ptr(),
+        (float*)weight.data_ptr(),
+        (float*)bias_.data_ptr(),
+        (float*)output.data_ptr(),
+        workspace, // workspace_buffer
+        &workspace_size, // workspace_size
+        nnp_activation_identity,
+        nullptr, // activation parameters
+        nnpack_threadpool(),
+        nullptr // profile
+    );
+  };
 
-  if (status != nnp_status_success) throw std::runtime_error("NNPACK SpatialConvolution_updateOutput failed");
+  auto size_and_allocate_ws = [&]() {
+    // Run a single pass to get the size of memory workspace buffer
+    auto status = run();
+    if (status != nnp_status_success) {
+      throw std::runtime_error("NNPACK SpatialConvolution_updateOutput failed");
+    }
+    allocate_workspace();
+  };
+
+  // If no workspace created yet, allocate it
+  if (workspace == nullptr) {
+    size_and_allocate_ws();
+  }
+
+  // Try to run with the newly created, or existing workspace
+  auto status = run();
+
+  if (status == nnp_status_insufficient_buffer) {
+    // Need to reallocate the workspace
+    deallocate_workspace();
+    size_and_allocate_ws();
+
+    // Try one more time
+    status = run();
+  }
+
+  if (status != nnp_status_success) {
+    throw std::runtime_error("NNPACK SpatialConvolution_updateOutput failed");
+  }
 }
 
 void SpatialConvolution_updateGradInput(
@@ -146,26 +196,56 @@ void SpatialConvolution_updateGradInput(
     .height = kH
   };
 
-  auto status = nnp_convolution_input_gradient(
-      algorithm,
-      batch_size,
-      input_channels,
-      output_channels,
-      input_size,
-      input_padding,
-      kernel_size,
-      (float*)gradOutput.data_ptr(),
-      (float*)weight.data_ptr(),
-      (float*)gradInput.data_ptr(),
-      nullptr, // workspace_buffer
-      nullptr, // workspace_size
-      nnp_activation_identity,
-      nullptr, // activation_parameters
-      nnpack_threadpool(),
-      nullptr  // profile
-  );
+  auto run = [&]() -> nnp_status {
+    return nnp_convolution_input_gradient(
+        algorithm,
+        batch_size,
+        input_channels,
+        output_channels,
+        input_size,
+        input_padding,
+        kernel_size,
+        (float*)gradOutput.data_ptr(),
+        (float*)weight.data_ptr(),
+        (float*)gradInput.data_ptr(),
+        workspace, // workspace_buffer
+        &workspace_size, // workspace_size
+        nnp_activation_identity,
+        nullptr, // activation_parameters
+        nnpack_threadpool(),
+        nullptr  // profile
+    );
+  };
 
-  if (status != nnp_status_success) throw std::runtime_error("NNPACK SpatialConvolution_updateGradInput failed");
+  auto size_and_allocate_ws = [&]() {
+    // Run a single pass to get the size of memory workspace buffer
+    auto status = run();
+    if (status != nnp_status_success) {
+      throw std::runtime_error("NNPACK SpatialConvolution_updateGradInput failed");
+    }
+    allocate_workspace();
+  };
+
+  // If no workspace created yet, allocate it
+  if (workspace == nullptr) {
+    size_and_allocate_ws();
+  }
+
+  // Try to run with the newly created, or existing workspace
+  auto status = run();
+
+  if (status == nnp_status_insufficient_buffer) {
+    // Need to reallocate the workspace
+    deallocate_workspace();
+    size_and_allocate_ws();
+
+    // Try one more time
+    status = run();
+  }
+
+  if (status != nnp_status_success) {
+    throw std::runtime_error("NNPACK SpatialConvolution_updateGradInput failed");
+  }
 }
 
 void SpatialConvolution_accGradWeight(
@@ -212,26 +292,56 @@ void SpatialConvolution_accGradWeight(
     .height = kH
   };
 
-  auto status = nnp_convolution_kernel_gradient(
-      algorithm,
-      batch_size,
-      input_channels,
-      output_channels,
-      input_size,
-      input_padding,
-      kernel_size,
-      (float*)input.data_ptr(),
-      (float*)gradOutput.data_ptr(),
-      (float*)gradWeight.data_ptr(),
-      nullptr, // workspace_buffer
-      nullptr, // workspace_size
-      nnp_activation_identity,
-      nullptr, // activation_parameters
-      nnpack_threadpool(),
-      nullptr  // profile
-  );
+  auto run= [&]() -> nnp_status {
+    return nnp_convolution_kernel_gradient(
+        algorithm,
+        batch_size,
+        input_channels,
+        output_channels,
+        input_size,
+        input_padding,
+        kernel_size,
+        (float*)input.data_ptr(),
+        (float*)gradOutput.data_ptr(),
+        (float*)gradWeight.data_ptr(),
+        workspace, // workspace_buffer
+        &workspace_size, // workspace_size
+        nnp_activation_identity,
+        nullptr, // activation_parameters
+        nnpack_threadpool(),
+        nullptr  // profile
+    );
+  };
 
-  if (status != nnp_status_success) throw std::runtime_error("NNPACK SpatialConvolution_accGradWeight failed");
+  auto size_and_allocate_ws = [&]() {
+    // Run a single pass to get the size of memory workspace buffer
+    auto status = run();
+    if (status != nnp_status_success) {
+      throw std::runtime_error("NNPACK SpatialConvolution_accGradWeight failed");
+    }
+    allocate_workspace();
+  };
+
+  // If no workspace created yet, allocate it
+  if (workspace == nullptr) {
+    size_and_allocate_ws();
+  }
+
+  // Try to run with the newly created, or existing workspace
+  auto status = run();
+
+  if (status == nnp_status_insufficient_buffer) {
+    // Need to reallocate the workspace
+    deallocate_workspace();
+    size_and_allocate_ws();
+
+    // Try one more time
+    status = run();
+  }
+
+  if (status != nnp_status_success) {
+    throw std::runtime_error("NNPACK SpatialConvolution_accGradWeight failed");
+  }
 }
 
 } // torch::nnpack

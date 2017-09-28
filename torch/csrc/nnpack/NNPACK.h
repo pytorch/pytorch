@@ -2,7 +2,7 @@
 
 #include "nnpack.h"
 
-#include "ATen/Tensor.h"
+#include "ATen/ATen.h"
 
 namespace torch {
 namespace nnpack {
