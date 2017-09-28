@@ -181,68 +181,67 @@ def compile(arg=None, verify=False, **kwargs):
         return _compile(arg)
 
 
-def trace(arg=None, nderivs=0):
+def trace(f, args=tuple(), kwargs=None, nderivs=0):
     """
-    Instrument a function or module for tracing, wrapping it in a
-    :class:`TracedModule`, whose forward accepts the same arguments as the
-    original function/module, but returns a tuple consisting of the
+    Trace a function or model, returning a tuple consisting of the both the
     *trace* of an execution, as well as the original return value.
 
     Tracing is guaranteed not to change the semantics of the function/module
     that is traced.
 
     Arguments:
-        arg (optional, torch.nn.Module or function): the function or module
-            to be traced.  If `None`, `trace` returns a decorator which can be
-            applied to the function or module you want to trace.
+        f (torch.nn.Module or function): the function or module
+            to be traced.
+        args (tuple or Variable): the positional arguments to pass to the
+            function/module to be traced.  A non-tuple is assumed to
+            be a single positional argument to be passed to the model.
+        kwargs (dict): the keyword arguments to pass to the function/module
+            to be traced.
         nderivs (int, default 0): the number of derivatives to trace.
             Traces of derivatives are recorded into the same trace returned
             after executing the `forward` of the resulting module, but
             are not present until you run `backward()` (an appropriate
             number of times) on the resulting model.
 
-    Example: Trace as higher order function. (Notice that trace is a *curried*
-    function; you first apply it with the function/model to trace, and then
-    apply the result with the arguments.)
+    Example: Trace the forwards pass only.
 
-        >>> traced_model = jit.trace(nn.LSTMCell())
-        >>> trace, out = traced_model(input, hidden)
+        >>> trace, out = jit.trace(nn.LSTMCell(), (input, hidden))
+        >>> print(trace)
 
-    Example: Trace the backwards pass as higher order function.
+    Example: Trace the backwards pass too.
 
-        >>> traced_model = jit.trace(nn.LSTMCell(), nderivs=1)
-        >>> trace, out = traced_model(input, hidden)
+        >>> trace, out = jit.trace(nn.LSTMCell(), (input, hidden), nderivs=1)
         >>> out.sum().backward()
         >>> print(trace)
     """
-    # TODO: handle decorating a class (not a callable)
-    def _trace(inner):
-        return TracedModule(inner, nderivs=nderivs)
-    if callable(arg):
-        return _trace(arg)
-    else:
-        return _trace
+    if kwargs is None:
+        kwargs = {}
+    if not isinstance(args, tuple):
+        args = (args,)
+    return TracedModule(f, nderivs=nderivs)(*args, **kwargs)
 
 
-# It's OK for TracedModule to look different from the inner module, since
-# the forward() return type changed anyway.
 class TracedModule(Module):
     def __init__(self, inner, nderivs=0):
         super(TracedModule, self).__init__()
         # inner may be a Module, or it may be an arbitrary callable
+        # If it's a Module, we get its parameters automatically, which lets
+        # us avoid a special casing functions versus modules.
         self.inner = inner
         self.nderivs = nderivs
 
-    def forward(self, *args):
+    def forward(self, *args, **kwargs):
         # TODO: Possible optimization: use the unflattened
         # output so we don't unflatten it when we get out
-        # NB: Not a method because trace_func_raw can't deal
+        # NB: Not a method because _raw_trace can't deal
         # with methods
         @_raw_trace(nderivs=self.nderivs)
         def traced_inner(in_vars, in_struct):
-            return _flatten(self.inner(*args))
+            return _flatten(self.inner(*args, **kwargs))
 
-        in_vars, in_struct = _flatten(args, self.state_dict(keep_vars=True).values())
+        kw_items = list(kwargs.items())
+        kw_items.sort()
+        in_vars, in_struct = _flatten((args, tuple(kw_items)), self.state_dict(keep_vars=True).values())
         trace, (out_vars, out_struct) = traced_inner(in_vars, in_struct)
         out, unmatched = _unflatten(out_vars, out_struct)
         assert len(unmatched) == 0

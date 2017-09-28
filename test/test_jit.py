@@ -25,11 +25,10 @@ class TestJit(TestCase):
         x = Variable(torch.Tensor([0.4]), requires_grad=True)
         y = Variable(torch.Tensor([0.7]), requires_grad=True)
 
-        @torch.jit.trace(nderivs=0)
         def f(x, y):
             return torch.sigmoid(torch.tanh(x * (x + y)))
 
-        trace, z = f(x, y)
+        trace, z = torch.jit.trace(f, (x, y), nderivs=0)
 
         torch._C._jit_pass_lint(trace)
         torch._C._jit_pass_onnx(trace)
@@ -44,7 +43,6 @@ class TestJit(TestCase):
         cx = Variable(torch.randn(3, 20).cuda())
         module = nn.LSTMCell(10, 20).cuda()  # Just to allocate weights with correct sizes
 
-        @torch.jit.trace(nderivs=0)
         def LSTMCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
             hx, cx = hidden
             gates = F.linear(input, w_ih, b_ih) + F.linear(hx, w_hh, b_hh)
@@ -59,7 +57,7 @@ class TestJit(TestCase):
             hy = outgate * F.tanh(cy)
             return hy, cy
 
-        trace, _ = LSTMCell(input, (hx, cx), *module.parameters())
+        trace, _ = torch.jit.trace(LSTMCell, (input, (hx, cx)) + tuple(module.parameters()))
         torch._C._jit_pass_lint(trace)
         torch._C._jit_pass_onnx(trace)
         torch._C._jit_pass_lint(trace)
@@ -69,13 +67,12 @@ class TestJit(TestCase):
 
     @unittest.skipIf(not torch.cuda.is_available(), "fuser requires CUDA")
     def test_fusion_distribute(self):
-        @torch.jit.trace(nderivs=0)
         def f(x, y):
             z1, z2 = (x + y).chunk(2, dim=1)
             return z1 * z2
         x = Variable(torch.randn(4, 4).cuda())
         y = Variable(torch.randn(4, 4).cuda())
-        trace, _ = f(x, y)
+        trace, _ = torch.jit.trace(f, (x, y), nderivs=0)
         torch._C._jit_pass_lint(trace)
         self.assertExpected(str(trace), 'raw')
         torch._C._jit_pass_onnx(trace)
@@ -106,11 +103,10 @@ class TestJit(TestCase):
         x = Variable(torch.Tensor([0.4]), requires_grad=True)
         y = Variable(torch.Tensor([0.7]), requires_grad=True)
 
+        @torch.jit.compile(verify=True, optimize=False)
         def doit(x, y):
             return torch.sigmoid(torch.tanh(x * (x + y)))
 
-        traced = torch.jit.traced(
-            doit, enabled=True, verify=True, time=True, optimize=False)
         z = traced(x, y)
         z2 = traced(x, y)
         self.assertEqual(z, torch.sigmoid(torch.tanh(x * (x + y))))
@@ -158,7 +154,7 @@ class TestJit(TestCase):
                 return a * grad_a
 
         x = Variable(torch.randn(10, 10), requires_grad=True)
-        trace, out = torch.jit.trace(MyFn.apply, nderivs=1)(x)
+        trace, out = torch.jit.trace(MyFn.apply, x, nderivs=1)
         out.sum().backward()
         torch._C._jit_pass_dce(trace)
         self.assertExpected(str(trace))
@@ -466,11 +462,10 @@ class TestJit(TestCase):
         x = Variable(torch.Tensor([0.4]), requires_grad=True)
         y = Variable(torch.Tensor([0.7]), requires_grad=True)
 
-        @torch.jit.trace
         def doit(x, y):
             return torch.sigmoid(torch.tanh(x * (x + y)))
 
-        traced, _ = doit(x, y)
+        traced, _ = torch.jit.trace(doit, (x, y))
         g = torch._C._jit_get_graph(traced)
         g2 = torch._C.Graph()
         g_to_g2 = {}
@@ -504,7 +499,7 @@ class TestJit(TestCase):
 
     def test_batchnorm(self):
         x = Variable(torch.randn(2, 2).fill_(1.0), requires_grad=True)
-        trace, _ = torch.jit.trace(nn.BatchNorm2d(2))(x)
+        trace, _ = torch.jit.trace(nn.BatchNorm2d(2), x)
         self.assertExpected(str(trace))
 
     def test_batchnorm_verify(self):
@@ -524,7 +519,7 @@ class TestJit(TestCase):
 
     def test_conv(self):
         x = Variable(torch.randn(20, 16, 50, 40).fill_(1.0), requires_grad=True)
-        trace, _ = torch.jit.trace(nn.Conv2d(16, 13, 3, bias=False))(x)
+        trace, _ = torch.jit.trace(nn.Conv2d(16, 13, 3, bias=False), x)
         self.assertExpected(str(trace))
 
     def test_mini_wlm(self):
@@ -555,7 +550,7 @@ class TestJit(TestCase):
     @skipIfNoTorchVision
     def test_alexnet(self):
         x = Variable(torch.randn(10, 3, 224, 224).fill_(1.0), requires_grad=True)
-        trace, _ = torch.jit.trace(torchvision.models.AlexNet())(x)
+        trace, _ = torch.jit.trace(torchvision.models.AlexNet(), x)
         self.assertExpected(str(trace))
         # NB: Purposely NOT testing protobuf export here
 

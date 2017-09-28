@@ -54,13 +54,13 @@ class TestONNX(TestCase):
 
     def test_view(self):
         x = Variable(torch.Tensor([0]), requires_grad=True)
-        trace, _ = torch.jit.trace(lambda x: x.view(1, 1))(x)
+        trace, _ = torch.jit.trace(lambda x: x.view(1, 1), x)
         torch._C._jit_pass_onnx(trace)
         self.assertONNXExpected(trace.export())
 
     def test_transpose(self):
         x = Variable(torch.Tensor([[0, 1], [2, 3]]), requires_grad=True)
-        trace, _ = torch.jit.trace(lambda x: x.transpose(0, 1).transpose(1, 0))(x)
+        trace, _ = torch.jit.trace(lambda x: x.transpose(0, 1).transpose(1, 0), x)
         torch._C._jit_pass_onnx(trace)
         self.assertONNXExpected(trace.export())
 
@@ -78,7 +78,7 @@ class TestONNX(TestCase):
     def test_params(self):
         x = Variable(torch.Tensor([[1, 2], [3, 4]]), requires_grad=True)
         y = Variable(torch.Tensor([[1, 2], [3, 4]]), requires_grad=True)
-        trace, _ = torch.jit.trace(lambda x, y: -torch.sigmoid(torch.tanh(x * (x + y))))(x, y)
+        trace, _ = torch.jit.trace(lambda x, y: -torch.sigmoid(torch.tanh(x * (x + y))), (x, y))
         initializers = [x.data]
         torch._C._jit_pass_onnx(trace)
         self.assertONNXExpected(trace.export(initializers))
@@ -86,7 +86,7 @@ class TestONNX(TestCase):
     def test_non_float_params(self):
         x = Variable(torch.LongTensor([[1, 2], [3, 4]]), requires_grad=True)
         y = Variable(torch.LongTensor([[1, 2], [3, 4]]), requires_grad=True)
-        trace, _ = torch.jit.trace(lambda x, y: x * y + x)(x, y)
+        trace, _ = torch.jit.trace(lambda x, y: x * y + x, (x, y))
         initializers = [x.data]
         torch._C._jit_pass_onnx(trace)
         self.assertONNXExpected(trace.export(initializers))
