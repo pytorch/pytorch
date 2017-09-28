@@ -26,6 +26,8 @@ requirements:
     - leveldb
     - lmdb
     - snappy
+    - mkl-include
+    - mkl
   run:
     - future
     - glog
@@ -38,6 +40,7 @@ requirements:
     - lmdb
     - snappy
     - future
+    - mkl
 
 about:
   home: https://caffe2.ai/
