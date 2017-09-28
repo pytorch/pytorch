@@ -16,6 +16,7 @@
   } while(0)
 
 template <typename Dtype>
+__launch_bounds__(1024)
 __global__ void SpatialGridSamplerBilinear_updateOutput_kernel(
     const int nthreads,
     THCDeviceTensor<Dtype, 4> input,
@@ -82,6 +83,7 @@ __global__ void SpatialGridSamplerBilinear_updateOutput_kernel(
 }
 
 template <typename Dtype>
+__launch_bounds__(1024)
 __global__ void SpatialGridSamplerBilinear_updateGradInput_kernel(
     const int nthreads,
     THCDeviceTensor<Dtype, 4> input, THCDeviceTensor<Dtype, 4> gradInput,
