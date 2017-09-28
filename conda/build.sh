@@ -14,7 +14,7 @@ PYTHON_ARGS="$(python ./scripts/get_python_cmake_flags.py)"
 
 mkdir -p build
 cd build
-cmake -DCMAKE_INSTALL_PREFIX="$PREFIX" -DCMAKE_PREFIX_PATH="$PREFIX" $CONDA_CMAKE_ARGS $PYTHON_ARGS ..
+cmake -DBLAS=MKL -DMKL_INCLUDE_DIR=$CONDA_PREFIX/include -DCMAKE_INSTALL_PREFIX="$PREFIX" -DCMAKE_PREFIX_PATH="$PREFIX" $CONDA_CMAKE_ARGS $PYTHON_ARGS ..
 make -j20
 
 make install/fast
