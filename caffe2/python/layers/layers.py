@@ -338,16 +338,17 @@ class ModelLayer(object):
                 self.add_ops(net)
 
     def add_ops(self, net):
+        # Predict layer implementation.
         raise NotImplementedError
 
     def add_eval_ops(self, net):
-        # Default train layer implementation is completely matching predict
-        # layer implementation.
+        # Default eval layer implementation is completely matching
+        # predict layer implementation.
         self.add_ops(net)
 
     def add_train_ops(self, net):
-        # Default eval layer implementation is completely matching eval
-        # layer implementation.
+        # Default train layer implementation is completely matching
+        # eval layer implementation.
         self.add_eval_ops(net)
 
     def add_ops_to_accumulate_pred(self, net):
