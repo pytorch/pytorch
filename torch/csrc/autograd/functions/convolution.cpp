@@ -97,6 +97,10 @@ auto ConvParams::use_cudnn(const at::Tensor& input) const -> bool {
   if (!input.type().isCuda() || !cudnn_enabled) {
     return false;
   }
+  if (deterministic && is_dilated()) {
+    // cudnn doesn't support deterministic dilated convolution fully yet
+    return false;
+  }
   if (is_dilated()) {
     cudaDeviceProp* prop = THCState_getCurrentDeviceProperties(state);
     // NOTE: extra parenthesis around numbers disable clang warnings about dead code
@@ -251,13 +255,13 @@ auto ConvForward::apply(const variable_list& inputs) -> variable_list {
           state, torch::cudnn::getCudnnHandle(), torch::cudnn::getCudnnDataType(input),
           (THVoidTensor*)input.unsafeGetTH(false), (THVoidTensor*)weight.unsafeGetTH(false),
           bias.defined() ? (THVoidTensor*)bias.unsafeGetTH(false) : nullptr, (THVoidTensor*)output.unsafeGetTH(false),
-          padding, stride, dilation, groups, benchmark));
+          padding, stride, dilation, groups, benchmark, deterministic));
     } else {
       convolution.reset(cudnn_convolution_full_forward(
           state, torch::cudnn::getCudnnHandle(), torch::cudnn::getCudnnDataType(input),
           (THVoidTensor*)input.unsafeGetTH(false), (THVoidTensor*)weight.unsafeGetTH(false),
           bias.defined() ? (THVoidTensor*)bias.unsafeGetTH(false) : nullptr, (THVoidTensor*)output.unsafeGetTH(false),
-          padding, stride, dilation, groups, benchmark));
+          padding, stride, dilation, groups, benchmark, deterministic));
     }
 #endif
   } else {
@@ -345,12 +349,12 @@ auto ConvBackward::apply(const variable_list& grad_outputs) -> variable_list {
         cudnn_convolution_forward(
             state, torch::cudnn::getCudnnHandle(), torch::cudnn::getCudnnDataType(input),
             (THVoidTensor*)grad_output.unsafeGetTH(false), (THVoidTensor*)weight.unsafeGetTH(false), (THVoidTensor*)grad_input.unsafeGetTH(false),
-            convolution.get(), benchmark);
+            convolution.get(), benchmark, deterministic);
       } else {
         cudnn_convolution_backward_data(
             state, torch::cudnn::getCudnnHandle(), torch::cudnn::getCudnnDataType(input),
             (THVoidTensor*)grad_output.unsafeGetTH(false), (THVoidTensor*)grad_input.unsafeGetTH(false), (THVoidTensor*)weight.unsafeGetTH(false),
-            convolution.get(), benchmark);
+            convolution.get(), benchmark, deterministic);
       }
 #endif
     } else if (groups == 1) {
@@ -379,7 +383,7 @@ auto ConvBackward::apply(const variable_list& grad_outputs) -> variable_list {
       cudnn_convolution_backward_filter(
           state, torch::cudnn::getCudnnHandle(), torch::cudnn::getCudnnDataType(input),
           (THVoidTensor*)grad_output.unsafeGetTH(false), (THVoidTensor*)input.unsafeGetTH(false), (THVoidTensor*)grad_weight.unsafeGetTH(false),
-          convolution.get(), benchmark);
+          convolution.get(), benchmark, deterministic);
 
       if (bias.defined() && should_compute_output(2)) {
         grad_bias = bias.type().tensor();

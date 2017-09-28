@@ -35,7 +35,7 @@ struct ConvCtor {
   ConvForward* operator()(PyObject* args) {
     ConvParams params;
 
-    TupleParser parser(args, 8);
+    TupleParser parser(args, 9);
     parser.parse(params.stride, "stride");
     parser.parse(params.padding, "padding");
     parser.parse(params.dilation, "dilation");
@@ -43,6 +43,7 @@ struct ConvCtor {
     parser.parse(params.output_padding, "output_padding");
     parser.parse(params.groups, "groups");
     parser.parse(params.benchmark, "benchmark");
+    parser.parse(params.deterministic, "deterministic");
     parser.parse(params.cudnn_enabled, "cudnn_enabled");
 
     return new ConvForward(std::move(params));

@@ -35,16 +35,6 @@ if TEST_SCIPY:
     from scipy import stats
 
 
-@contextlib.contextmanager
-def use_cudnn(should_use):
-    orig = torch.backends.cudnn.enabled
-    torch.backends.cudnn.enabled = should_use
-    try:
-        yield
-    finally:
-        torch.backends.cudnn.enabled = orig
-
-
 def default_tensor_type(type):
     type_str = torch.typename(type)
 
@@ -1786,6 +1776,25 @@ class TestNN(NNTestCase):
         # but it should work with the same type
         nn.functional.conv2d(inputs.float(), weights.float(), bias.float())
 
+    @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
+    @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
+    def test_Conv2d_deterministic_cudnn(self):
+        dtype = torch.cuda.FloatTensor
+        inputs = Variable(torch.randn(2, 3, 5, 5).type(dtype), requires_grad=True)
+        with cudnn.flags(enabled=True, benchmark=True, deterministic=True):
+            conv1 = torch.nn.Conv2d(3, 3, 3).type(dtype)
+            conv2 = torch.nn.Conv2d(3, 3, 3).type(dtype)
+            conv2.bias.data.copy_(conv1.bias.data)
+            conv2.weight.data.copy_(conv1.weight.data)
+            out1 = conv1(inputs)
+            out2 = conv2(inputs)
+            self.assertEqual(out1, out2, prec=0.0)
+            y = torch.randn(out1.size()).type(dtype)
+            out1.backward(y)
+            out2.backward(y)
+            self.assertEqual(conv1.bias.grad.data, conv2.bias.grad.data, prec=0.0)
+            self.assertEqual(conv1.weight.grad.data, conv2.weight.grad.data, prec=0.0)
+
     def test_Conv2d_missing_argument(self):
         c = nn.Conv2d(3, 3, 3)
         self.assertRaises(RuntimeError, lambda: c(None))
@@ -2973,7 +2982,7 @@ class TestNN(NNTestCase):
                     lx, lweight = inputs
                     lbias = None
             # We disable cudnn during forward to avoid finite difference imprecision issues
-            with use_cudnn(False):
+            with cudnn.flags(enabled=False):
                 out = F.conv2d(lx, lweight, lbias, stride, padding, dilation, groups)
             return out
 
@@ -2997,7 +3006,6 @@ class TestNN(NNTestCase):
             for stride, padding, chan_in, chan_out, dilation in \
                     product([1, 2], [0, 1, 2], [2], [3], dilations):
                 no_weight = False
-
                 result = self.run_conv_double_back_test(kern, stride,
                                                         padding, chan_in, chan_out,
                                                         batch_size, inp_size, dilation,

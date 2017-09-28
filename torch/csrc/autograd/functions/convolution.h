@@ -29,6 +29,7 @@ struct ConvParams {
   std::vector<int> output_padding;
   int groups;
   bool benchmark;
+  bool deterministic;
   bool cudnn_enabled;
 
   bool is_strided() const;
