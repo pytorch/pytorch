@@ -22,11 +22,15 @@ NCCL_INCLUDE_DIR = None
 NCCL_ROOT_DIR = None
 if WITH_CUDA and not check_env_flag('NO_SYSTEM_NCCL'):
     ENV_ROOT = os.getenv('NCCL_ROOT_DIR', None)
-    # NCCL_ROOT_DIR takes precedence over NCCL_LIB_DIR
+    LIB_DIR = os.getenv('NCCL_LIB_DIR', None)
+    INCLUDE_DIR = os.getenv('NCCL_INCLUDE_DIR', None)
+
     lib_paths = list(filter(bool, [
+        LIB_DIR,
+        ENV_ROOT,
         os.path.join(ENV_ROOT, 'lib') if ENV_ROOT is not None else None,
+        os.path.join(ENV_ROOT, 'lib', 'x86_64-linux-gnu') if ENV_ROOT is not None else None,
         os.path.join(ENV_ROOT, 'lib64') if ENV_ROOT is not None else None,
-        os.getenv('NCCL_LIB_DIR'),
         os.path.join(CUDA_HOME, 'lib'),
         os.path.join(CUDA_HOME, 'lib64'),
         '/usr/lib/x86_64-linux-gnu/',
@@ -37,21 +41,27 @@ if WITH_CUDA and not check_env_flag('NO_SYSTEM_NCCL'):
     ]) + gather_paths([
         'LD_LIBRARY_PATH',
     ])))
+    include_paths = list(filter(bool, [
+        INCLUDE_DIR,
+        ENV_ROOT,
+        os.path.join(ENV_ROOT, 'include') if ENV_ROOT is not None else None,
+        '/usr/include'
+    ]))
 
-    if os.getenv('NCCL_INCLUDE_DIR') is not None:
-        warnings.warn("Ignoring environment variable NCCL_INCLUDE_DIR because "
-                      "NCCL_INCLUDE_DIR is implicitly assumed as "
-                      "$NCCL_ROOT_DIR/include or $NCCL_LIB_DIR/../include")
     if is_conda:
         lib_paths.append(os.path.join(conda_dir, 'lib'))
     for path in lib_paths:
         if path is None or not os.path.exists(path):
             continue
         if glob.glob(os.path.join(path, 'libnccl*')):
-            if os.path.exists((os.path.join(path, '../include/nccl.h'))):
-                NCCL_LIB_DIR = path
-                NCCL_INCLUDE_DIR = os.path.join(path, '../include')
-                break
-    if NCCL_LIB_DIR is not None:
+            NCCL_LIB_DIR = path
+            break
+    for path in include_paths:
+        if path is None or not os.path.exists(path):
+            continue
+        if glob.glob(os.path.join(path, 'nccl.h')):
+            NCCL_INCLUDE_DIR = path
+            break
+    if NCCL_LIB_DIR is not None and NCCL_INCLUDE_DIR is not None:
         WITH_SYSTEM_NCCL = True
-        NCCL_ROOT_DIR = os.path.abspath(os.path.join(NCCL_LIB_DIR, "../"))
+        NCCL_ROOT_DIR = os.path.commonprefix((NCCL_LIB_DIR, NCCL_INCLUDE_DIR))
