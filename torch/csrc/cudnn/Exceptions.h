@@ -37,6 +37,20 @@ void assertSameGPU(cudnnDataType_t dataType, T* ... tensors) {
   }
 }
 
+inline int assertSameGPU(const at::Tensor& t) {
+  return t.get_device();
+}
+
+template<typename ...T>
+int assertSameGPU(const at::Tensor& t, T& ... tensors) {
+  static_assert(std::is_same<at::Tensor, typename std::common_type<T...>::type>::value,
+      "all arguments to assertSameGPU have to be at::Tensor&");
+  auto t_device = t.get_device();
+  if (t_device != assertSameGPU(tensors...))
+    throw std::runtime_error("tensors are on different GPUs");
+  return t_device;
+}
+
 class cudnn_exception : public std::runtime_error {
 public:
   cudnnStatus_t status;

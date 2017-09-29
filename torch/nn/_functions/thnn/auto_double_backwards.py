@@ -91,21 +91,6 @@ def logsigmoid_double_backwards(ctx, ggI):
     return gI, ggO, None, None, None, None
 
 
-def logsoftmax_double_backwards(ctx, ggI):
-    t = ctx.saved_variables
-    gO, output = t[1], t[2]
-
-    output_exp = output.exp()
-    gO_sum = gO.sum(dim=1, keepdim=True)
-    ggI_output_exp = ggI * output_exp
-    ggI_output_exp_sum = ggI_output_exp.sum(dim=1, keepdim=True)
-
-    gI = output_exp * gO_sum * ggI_output_exp_sum - ggI_output_exp * gO_sum
-    ggO = ggI - ggI_output_exp_sum
-
-    return gI, ggO, None, None, None, None
-
-
 def reflectionpad1d_double_backwards(ctx, ggI):
     gI = None
     ggO = torch.nn._functions.thnn.auto.ReflectionPad1d.apply(ggI, *ctx.additional_args)
@@ -137,29 +122,6 @@ def replicationpad2d_double_backwards(ctx, ggI):
 def replicationpad3d_double_backwards(ctx, ggI):
     gI = None
     ggO = torch.nn._functions.thnn.auto.ReplicationPad3d.apply(ggI, *ctx.additional_args)
-
-    return gI, ggO, None, None, None, None
-
-
-def softmax_double_backwards(ctx, ggI):
-    t = ctx.saved_variables
-    gO, output = t[1], t[2]
-
-    # terms for reuse
-    ggI_output = ggI * output
-    ggI_out_sum = ggI_output.sum(dim=1, keepdim=True)
-    ggI_out_sum_output = ggI_out_sum * output
-    gO_out_sum = (gO * output).sum(dim=1, keepdim=True)
-
-    # gI calculation
-    gI_t0 = ggI_output * (gO - gO_out_sum)
-    gI_t1 = output * ((ggI_output * gO).sum(dim=1, keepdim=True).sub_(gO_out_sum * ggI_out_sum))
-    gI_t2 = ggI_out_sum_output * gO
-    gI_t3 = ggI_out_sum_output * gO_out_sum
-    gI = gI_t0 - gI_t1 - gI_t2 + gI_t3
-
-    # gO calculation
-    ggO = output * (ggI - ggI_out_sum)
 
     return gI, ggO, None, None, None, None
 
@@ -313,13 +275,11 @@ double_backwards_fns = {
     'Hardtanh': hardtanh_double_backwards,
     'LeakyReLU': leakyrelu_double_backwards,
     'LogSigmoid': logsigmoid_double_backwards,
-    'LogSoftmax': logsoftmax_double_backwards,
     'ReflectionPad1d': reflectionpad1d_double_backwards,
     'ReflectionPad2d': reflectionpad2d_double_backwards,
     'ReplicationPad1d': replicationpad1d_double_backwards,
     'ReplicationPad2d': replicationpad2d_double_backwards,
     'ReplicationPad3d': replicationpad3d_double_backwards,
-    'Softmax': softmax_double_backwards,
     'Softplus': softplus_double_backwards,
     'Softshrink': softshrink_double_backwards,
     'Threshold': threshold_double_backwards,

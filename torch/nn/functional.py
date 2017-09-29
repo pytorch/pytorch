@@ -17,7 +17,9 @@ from torch.autograd import Variable
 from .modules.utils import _single, _pair, _triple
 
 # Convolutions
-ConvNd = torch._C._functions.ConvNd
+_ConvNd = torch._C._functions.ConvNd
+_Softmax = torch._C._functions.Softmax
+_LogSoftmax = torch._C._functions.LogSoftmax
 
 
 def conv1d(input, weight, bias=None, stride=1, padding=0, dilation=1,
@@ -49,9 +51,9 @@ def conv1d(input, weight, bias=None, stride=1, padding=0, dilation=1,
     if input is not None and input.dim() != 3:
         raise ValueError("Expected 3D tensor as input, got {}D tensor instead.".format(input.dim()))
 
-    f = ConvNd(_single(stride), _single(padding), _single(dilation), False,
-               _single(0), groups, torch.backends.cudnn.benchmark,
-               torch.backends.cudnn.deterministic, torch.backends.cudnn.enabled)
+    f = _ConvNd(_single(stride), _single(padding), _single(dilation), False,
+                _single(0), groups, torch.backends.cudnn.benchmark,
+                torch.backends.cudnn.deterministic, torch.backends.cudnn.enabled)
     return f(input, weight, bias)
 
 
@@ -85,9 +87,9 @@ def conv2d(input, weight, bias=None, stride=1, padding=0, dilation=1,
     if input is not None and input.dim() != 4:
         raise ValueError("Expected 4D tensor as input, got {}D tensor instead.".format(input.dim()))
 
-    f = ConvNd(_pair(stride), _pair(padding), _pair(dilation), False,
-               _pair(0), groups, torch.backends.cudnn.benchmark,
-               torch.backends.cudnn.deterministic, torch.backends.cudnn.enabled)
+    f = _ConvNd(_pair(stride), _pair(padding), _pair(dilation), False,
+                _pair(0), groups, torch.backends.cudnn.benchmark,
+                torch.backends.cudnn.deterministic, torch.backends.cudnn.enabled)
     return f(input, weight, bias)
 
 
@@ -121,9 +123,9 @@ def conv3d(input, weight, bias=None, stride=1, padding=0, dilation=1,
     if input is not None and input.dim() != 5:
         raise ValueError("Expected 5D tensor as input, got {}D tensor instead.".format(input.dim()))
 
-    f = ConvNd(_triple(stride), _triple(padding), _triple(dilation), False,
-               _triple(0), groups, torch.backends.cudnn.benchmark,
-               torch.backends.cudnn.deterministic, torch.backends.cudnn.enabled)
+    f = _ConvNd(_triple(stride), _triple(padding), _triple(dilation), False,
+                _triple(0), groups, torch.backends.cudnn.benchmark,
+                torch.backends.cudnn.deterministic, torch.backends.cudnn.enabled)
     return f(input, weight, bias)
 
 
@@ -153,10 +155,10 @@ def conv_transpose1d(input, weight, bias=None, stride=1, padding=0,
     if input is not None and input.dim() != 3:
         raise ValueError("Expected 3D tensor as input, got {}D tensor instead.".format(input.dim()))
 
-    f = ConvNd(_single(stride), _single(padding), _single(dilation), True,
-               _single(output_padding),
-               groups, torch.backends.cudnn.benchmark, torch.backends.cudnn.deterministic,
-               torch.backends.cudnn.enabled)
+    f = _ConvNd(_single(stride), _single(padding), _single(dilation), True,
+                _single(output_padding),
+                groups, torch.backends.cudnn.benchmark, torch.backends.cudnn.deterministic,
+                torch.backends.cudnn.enabled)
     return f(input, weight, bias)
 
 
@@ -187,9 +189,9 @@ def conv_transpose2d(input, weight, bias=None, stride=1, padding=0,
     if input is not None and input.dim() != 4:
         raise ValueError("Expected 4D tensor as input, got {}D tensor instead.".format(input.dim()))
 
-    f = ConvNd(_pair(stride), _pair(padding), _pair(dilation), True,
-               _pair(output_padding), groups, torch.backends.cudnn.benchmark,
-               torch.backends.cudnn.deterministic, torch.backends.cudnn.enabled)
+    f = _ConvNd(_pair(stride), _pair(padding), _pair(dilation), True,
+                _pair(output_padding), groups, torch.backends.cudnn.benchmark,
+                torch.backends.cudnn.deterministic, torch.backends.cudnn.enabled)
     return f(input, weight, bias)
 
 
@@ -219,9 +221,9 @@ def conv_transpose3d(input, weight, bias=None, stride=1, padding=0,
     if input is not None and input.dim() != 5:
         raise ValueError("Expected 5D tensor as input, got {}D tensor instead.".format(input.dim()))
 
-    f = ConvNd(_triple(stride), _triple(padding), _triple(dilation), True,
-               _triple(output_padding), groups, torch.backends.cudnn.benchmark,
-               torch.backends.cudnn.deterministic, torch.backends.cudnn.enabled)
+    f = _ConvNd(_triple(stride), _triple(padding), _triple(dilation), True,
+                _triple(output_padding), groups, torch.backends.cudnn.benchmark,
+                torch.backends.cudnn.deterministic, torch.backends.cudnn.enabled)
     return f(input, weight, bias)
 
 
@@ -599,20 +601,73 @@ def softplus(input, beta=1, threshold=20):
     return _functions.thnn.auto.Softplus.apply(input, beta, threshold)
 
 
-def softmin(input):
-    return softmax(-input)
+def _get_softmax_dim(name, ndim, stacklevel):
+    warnings.warn("Implicit dimension choice for " + name + " has been deprecated. "
+                  "Change the call to include dim=X as an argument.", stacklevel=stacklevel)
+    if ndim == 0 or ndim == 3:
+        return 0
+    else:
+        return 1
 
 
-def softmax(input):
-    return _functions.thnn.auto.Softmax.apply(input)
+def softmin(input, dim=None, _stacklevel=3):
+    """Applies a softmin function.
+
+    Note that softmin(x) = softmax(-x). See softmax definition for mathematical formula.
+
+    Arguments:
+        input (Variable): input
+        dim (int): A dimension along which softmin will be computed (so every slice
+            along dim will sum to 1).
+    """
+    if dim is None:
+        dim = _get_softmax_dim('softmin', input.dim(), _stacklevel)
+    return _Softmax(dim)(-input)
+
+
+def softmax(input, dim=None, _stacklevel=3):
+    """Applies a softmax function.
+
+    Softmax is defined as:
+
+    :math:`softmax(x) = \frac{exp(-x_i)}{\sum_j exp(-x_j)}`
+
+    It is applied to all slices along dim, and will rescale them so that the elements
+    lie in the range `(0, 1)` and sum to 1.
+
+    Arguments:
+        input (Variable): input
+        dim (int): A dimension along which softmax will be computed.
+
+    .. note::
+        This function doesn't work directly with NLLLoss,
+        which expects the Log to be computed between the Softmax and itself.
+        Use log_softmax instead (it's faster and has better numerical properties).
+
+    """
+    if dim is None:
+        dim = _get_softmax_dim('softmax', input.dim(), _stacklevel)
+    return _Softmax(dim)(input)
+
+
+def log_softmax(input, dim=None, _stacklevel=3):
+    """Applies a softmax followed by a logarithm.
+
+    While mathematically equivalent to log(softmax(x)), doing these two
+    operations separately is slower, and numerically unstable. This function
+    uses an alternative formulation to compute the output and gradient correctly.
+
+    Arguments:
+        input (Variable): input
+        dim (int): A dimension along which log_softmax will be computed.
+    """
+    if dim is None:
+        dim = _get_softmax_dim('log_softmax', input.dim(), _stacklevel)
+    return _LogSoftmax(dim)(input)
 
 
 def softshrink(input, lambd=0.5):
     return _functions.thnn.auto.Softshrink.apply(input, lambd)
-
-
-def log_softmax(input):
-    return _functions.thnn.LogSoftmax.apply(input)
 
 
 def tanh(input):
@@ -931,7 +986,7 @@ def cross_entropy(input, target, weight=None, size_average=True, ignore_index=-1
         >>> loss = F.cross_entropy(input, target)
         >>> loss.backward()
     """
-    return nll_loss(log_softmax(input), target, weight, size_average, ignore_index)
+    return nll_loss(log_softmax(input, 1), target, weight, size_average, ignore_index)
 
 
 def binary_cross_entropy(input, target, weight=None, size_average=True):

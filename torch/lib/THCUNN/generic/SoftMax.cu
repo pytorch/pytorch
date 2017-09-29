@@ -7,7 +7,8 @@
 void THNN_(SoftMax_updateOutput)(
            THCState *state,
            THCTensor *input,
-           THCTensor *output)
+           THCTensor *output,
+           int _dim)
 {
   THCUNN_assertSameGPU(state, 2, input, output);
 
@@ -21,12 +22,14 @@ void THNN_(SoftMax_updateOutput)(
     batchSize = 1;
     dim = input->size[0];
     stride0 = 1;
+    THArgCheck(_dim == 0, 4, "dim has to be 0 for 1D input");
   }
   else if (input->nDimension == 2)
   {
     batchSize = input->size[0];
     dim = input->size[1];
     stride0 = 1;
+    THArgCheck(_dim == 1, 4, "dim has to be 1 for 2D input");
   }
   else if (input->nDimension == 3)
   {
@@ -36,6 +39,7 @@ void THNN_(SoftMax_updateOutput)(
     blocksZ = input->size[2];
     stride0 = blocksY * blocksZ;
     stride1 = blocksZ;
+    THArgCheck(_dim == 0, 4, "dim has to be 0 for 3D input");
   }
   else if (input->nDimension == 4)
   {
@@ -45,6 +49,7 @@ void THNN_(SoftMax_updateOutput)(
     blocksZ = input->size[3];
     stride0 = blocksY * blocksZ;
     stride1 = blocksZ;
+    THArgCheck(_dim == 1, 4, "dim has to be 1 for 4D input");
   }
   else
   {
@@ -79,9 +84,10 @@ void THNN_(SoftMax_updateGradInput)(
            THCTensor *input,
            THCTensor *gradOutput,
            THCTensor *gradInput,
-           THCTensor *output)
+           THCTensor *output,
+           int _dim)
 {
-  THCUNN_check_nElement(state, input, gradOutput);
+  THCUNN_check_nElement(state, output, gradOutput);
   THCUNN_assertSameGPU(state, 3, output, gradOutput, gradInput);
 
   output = THCTensor_(newContiguous)(state, output);
@@ -96,12 +102,14 @@ void THNN_(SoftMax_updateGradInput)(
     batchSize = 1;
     dim = gradInput->size[0];
     stride0 = 1;
+    THArgCheck(_dim == 0, 6, "dim has to be 0 for 1D input");
   }
   else if (gradInput->nDimension == 2)
   {
     batchSize = gradInput->size[0];
     dim = gradInput->size[1];
     stride0 = 1;
+    THArgCheck(_dim == 1, 6, "dim has to be 0 for 2D input");
   }
   else if (gradInput->nDimension == 3)
   {
@@ -111,6 +119,7 @@ void THNN_(SoftMax_updateGradInput)(
     blocksZ = gradInput->size[2];
     stride0 = blocksY * blocksZ;
     stride1 = blocksZ;
+    THArgCheck(_dim == 0, 6, "dim has to be 0 for 3D input");
   }
   else if (gradInput->nDimension == 4)
   {
@@ -120,6 +129,7 @@ void THNN_(SoftMax_updateGradInput)(
     blocksZ = gradInput->size[3];
     stride0 = blocksY * blocksZ;
     stride1 = blocksZ;
+    THArgCheck(_dim == 1, 6, "dim has to be 0 for 4D input");
   }
   else
   {
@@ -131,7 +141,7 @@ void THNN_(SoftMax_updateGradInput)(
   {
     blocksY *= blocksZ;
     blocksZ = 1;
-    if (input->nDimension == 3 || input->nDimension == 4) {
+    if (output->nDimension == 3 || output->nDimension == 4) {
       stride0 = blocksY * blocksZ;
       stride1 = blocksZ;
     }

@@ -91,6 +91,7 @@ module_tests = [
     ),
     dict(
         module_name='Softmax',
+        constructor_args=(1,),
         input_size=(10, 20),
         reference_fn=lambda i, _: torch.exp(i).div(torch.exp(i).sum(1, True).expand(10, 20)),
     ),
@@ -101,11 +102,13 @@ module_tests = [
     ),
     dict(
         module_name='LogSoftmax',
+        constructor_args=(1,),
         input_size=(10, 20),
         reference_fn=lambda i, _: torch.exp(i).div_(torch.exp(i).sum(1, True).expand(10, 20)).log_(),
     ),
     dict(
         module_name='LogSoftmax',
+        constructor_args=(1,),
         input_size=(1, 3, 10, 20),
         reference_fn=lambda i, _: torch.exp(i).div_(torch.exp(i).sum(1, False)).log_(),
         desc='multiparam',
@@ -220,10 +223,12 @@ module_tests = [
     ),
     dict(
         module_name='Softmin',
+        constructor_args=(1,),
         input_size=(10, 20),
     ),
     dict(
         module_name='Softmin',
+        constructor_args=(1,),
         input_size=(2, 3, 5, 10),
         desc='multidim',
     ),
@@ -629,6 +634,7 @@ class ModuleTest(TestBase):
         super(ModuleTest, self).__init__(*args, **kwargs)
         self.jacobian_input = kwargs.get('jacobian_input', True)
         self.should_test_cuda = kwargs.get('test_cuda', True)
+        self.should_test_pickle = kwargs.get('pickle', True)
 
     def __call__(self, test_case):
         module = self.constructor(*self.constructor_args)
@@ -644,13 +650,14 @@ class ModuleTest(TestBase):
 
         self.test_noncontig(test_case, module, input)
 
-        # TODO: do this with in-memory files as soon as torch.save will support it
-        with TemporaryFile() as f:
-            test_case._forward(module, input)
-            torch.save(module, f)
-            f.seek(0)
-            module_copy = torch.load(f)
-            test_case.assertEqual(test_case._forward(module, input), test_case._forward(module_copy, input))
+        if self.should_test_pickle:
+            # TODO: do this with in-memory files as soon as torch.save will support it
+            with TemporaryFile() as f:
+                test_case._forward(module, input)
+                torch.save(module, f)
+                f.seek(0)
+                module_copy = torch.load(f)
+                test_case.assertEqual(test_case._forward(module, input), test_case._forward(module_copy, input))
 
         self._do_test(test_case, module, input)
 

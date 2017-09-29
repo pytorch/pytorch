@@ -601,8 +601,12 @@ class Softmin(Module):
     :math:`f(x) = exp(-x_i) / sum_j exp(-x_j)`
 
     Shape:
-        - Input: :math:`(N, L)`
-        - Output: :math:`(N, L)`
+        - Input: any shape
+        - Output: same as input
+
+    Arguments:
+        dim (int): A dimension along which Softmax will be computed (so every slice
+            along dim will sum to 1).
 
     Returns:
         a Tensor of the same dimension and shape as the input, with
@@ -615,9 +619,12 @@ class Softmin(Module):
         >>> print(input)
         >>> print(m(input))
     """
+    def __init__(self, dim=None):
+        super(Softmin, self).__init__()
+        self.dim = dim
 
     def forward(self, input):
-        return F.softmin(input)
+        return F.softmin(input, self.dim, _stacklevel=5)
 
     def __repr__(self):
         return self.__class__.__name__ + ' ()'
@@ -632,17 +639,21 @@ class Softmax(Module):
     :math:`f_i(x) = exp(x_i) / sum_j exp(x_j)`
 
     Shape:
-        - Input: :math:`(N, L)`
-        - Output: :math:`(N, L)`
+        - Input: any shape
+        - Output: same as input
 
     Returns:
         a Tensor of the same dimension and shape as the input with
         values in the range [0, 1]
 
+    Arguments:
+        dim (int): A dimension along which Softmax will be computed (so every slice
+            along dim will sum to 1).
+
     .. note::
         This module doesn't work directly with NLLLoss,
         which expects the Log to be computed between the Softmax and itself.
-        Use Logsoftmax instead (it's faster).
+        Use Logsoftmax instead (it's faster and has better numerical properties).
 
     Examples::
 
@@ -652,9 +663,17 @@ class Softmax(Module):
         >>> print(m(input))
     """
 
+    def __init__(self, dim=None):
+        super(Softmax, self).__init__()
+        self.dim = dim
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        if not hasattr(self, 'dim'):
+            self.dim = None
+
     def forward(self, input):
-        assert input.dim() == 2, 'Softmax requires a 2D tensor as input'
-        return F.softmax(input)
+        return F.softmax(input, self.dim, _stacklevel=5)
 
     def __repr__(self):
         return self.__class__.__name__ + ' ()'
@@ -686,7 +705,7 @@ class Softmax2d(Module):
 
     def forward(self, input):
         assert input.dim() == 4, 'Softmax2d requires a 4D tensor as input'
-        return F.softmax(input)
+        return F.softmax(input, 1, _stacklevel=5)
 
     def __repr__(self):
         return self.__class__.__name__ + ' ()'
@@ -699,8 +718,12 @@ class LogSoftmax(Module):
     :math:`f_i(x) = log(exp(x_i) / sum_j exp(x_j) )`
 
     Shape:
-        - Input: :math:`(N, L)`
-        - Output: :math:`(N, L)`
+        - Input: any shape
+        - Output: same as input
+
+    Arguments:
+        dim (int): A dimension along which Softmax will be computed (so every slice
+            along dim will sum to 1).
 
     Returns:
         a Tensor of the same dimension and shape as the input with
@@ -714,8 +737,17 @@ class LogSoftmax(Module):
         >>> print(m(input))
     """
 
+    def __init__(self, dim=None):
+        super(LogSoftmax, self).__init__()
+        self.dim = dim
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        if not hasattr(self, 'dim'):
+            self.dim = None
+
     def forward(self, input):
-        return F.log_softmax(input)
+        return F.log_softmax(input, self.dim, _stacklevel=5)
 
     def __repr__(self):
         return self.__class__.__name__ + ' ()'
