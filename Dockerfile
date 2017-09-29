@@ -9,7 +9,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
          curl \
          vim \
          ca-certificates \
-         libnccl-dev \
+         libnccl2=2.0.5-2+cuda8.0 \
+         libnccl-dev=2.0.5-2+cuda8.0 \
          libjpeg-dev \
          libpng-dev &&\
      rm -rf /var/lib/apt/lists/*
