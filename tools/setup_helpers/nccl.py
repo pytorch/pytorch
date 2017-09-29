@@ -31,6 +31,8 @@ if WITH_CUDA and not check_env_flag('NO_SYSTEM_NCCL'):
         os.path.join(ENV_ROOT, 'lib') if ENV_ROOT is not None else None,
         os.path.join(ENV_ROOT, 'lib', 'x86_64-linux-gnu') if ENV_ROOT is not None else None,
         os.path.join(ENV_ROOT, 'lib64') if ENV_ROOT is not None else None,
+        os.path.join(CUDA_HOME, 'lib'),
+        os.path.join(CUDA_HOME, 'lib64'),
         '/usr/lib/x86_64-linux-gnu/',
         '/usr/lib/powerpc64le-linux-gnu/',
         '/usr/lib/aarch64-linux-gnu/',
