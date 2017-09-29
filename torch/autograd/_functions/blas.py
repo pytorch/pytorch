@@ -16,23 +16,18 @@ def _get_output(ctx, arg, inplace=False):
 class Addmm(InplaceFunction):
 
     @staticmethod
-    def symbolic(g, add_matrix, matrix1, matrix2, alpha=1, beta=1, inplace=False):
-        if alpha != 1:
-            matrix1 = g.op("Scale", matrix1, scale_f=alpha)
-        if beta != 1:
-            add_matrix = g.op("Scale", add_matrix, scale_f=beta)
-        # TODO: Talk to ONNX about why their FC involves a transpose
-        matrix2_t = g.op("Transpose", matrix2)
-        return g.op("FC", matrix1, matrix2_t, add_matrix)
+    def symbolic(g, add_matrix, matrix1, matrix2, beta=1, alpha=1, inplace=False):
+        # TODO: test if broadcasting occurred
+        return g.op("Gemm", matrix1, matrix2, add_matrix, beta_f=beta, alpha_f=alpha, broadcast_i=True)
 
     @staticmethod
-    def forward(ctx, add_matrix, matrix1, matrix2, alpha=1, beta=1, inplace=False):
-        ctx.alpha = alpha
+    def forward(ctx, add_matrix, matrix1, matrix2, beta=1, alpha=1, inplace=False):
         ctx.beta = beta
+        ctx.alpha = alpha
         ctx.add_matrix_size = add_matrix.size()
         ctx.save_for_backward(matrix1, matrix2)
         output = _get_output(ctx, add_matrix, inplace=inplace)
-        return torch.addmm(alpha, add_matrix, beta,
+        return torch.addmm(beta, add_matrix, alpha,
                            matrix1, matrix2, out=output)
 
     @staticmethod
@@ -42,8 +37,8 @@ class Addmm(InplaceFunction):
 
         if ctx.needs_input_grad[0]:
             grad_add_matrix = maybe_unexpand(grad_output, ctx.add_matrix_size)
-            if ctx.alpha != 1:
-                grad_add_matrix = grad_add_matrix.mul(ctx.alpha)
+            if ctx.beta != 1:
+                grad_add_matrix = grad_add_matrix.mul(ctx.beta)
 
         if ctx.needs_input_grad[1]:
             if matrix1.stride() == (1, matrix1.size(0)):
@@ -51,8 +46,8 @@ class Addmm(InplaceFunction):
                 grad_matrix1 = torch.mm(matrix2, grad_output.t()).t()
             else:
                 grad_matrix1 = torch.mm(grad_output, matrix2.t())
-            if ctx.beta != 1:
-                grad_matrix1 *= ctx.beta
+            if ctx.alpha != 1:
+                grad_matrix1 *= ctx.alpha
 
         if ctx.needs_input_grad[2]:
             if matrix2.stride() == (1, matrix2.size(0)):
@@ -60,8 +55,8 @@ class Addmm(InplaceFunction):
                 grad_matrix2 = torch.mm(grad_output.t(), matrix1).t()
             else:
                 grad_matrix2 = torch.mm(matrix1.t(), grad_output)
-            if ctx.beta != 1:
-                grad_matrix2 *= ctx.beta
+            if ctx.alpha != 1:
+                grad_matrix2 *= ctx.alpha
 
         return grad_add_matrix, grad_matrix1, grad_matrix2, None, None, None
 

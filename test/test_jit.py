@@ -557,6 +557,27 @@ class TestJit(TestCase):
         trace, _ = torch.jit.trace(nn.Conv2d(16, 13, 3, bias=False), x)
         self.assertExpected(str(trace))
 
+    def test_reuse_function(self):
+        @torch.jit.compile(nderivs=0)
+        def clinear(*args):
+            return F.linear(*args)
+
+        def cast(x):
+            return x
+
+        input = Variable(cast(torch.randn(1, 1)))
+        weights = Variable(cast(torch.randn(1, 1)))
+        bias = Variable(cast(torch.randn(1, 1)))
+
+        # linear AKA addmm without bias is of particular interest
+        # because we allocate a zero-filled new variable when we execute,
+        # and then *fill* it with the result
+
+        r1 = clinear(clinear(input, weights), weights)
+        r2 = F.linear(F.linear(input, weights), weights)
+
+        self.assertEqual(r1, r2)
+
     def test_mini_wlm(self):
         """Exercise null-edge pruning in the tracer."""
 
