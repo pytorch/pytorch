@@ -10,14 +10,28 @@ from caffe2.python.executor_test_util import (
     run_resnet50_epoch,
     ExecutorTestBase)
 
-from hypothesis import given
+from hypothesis import given, settings
 import hypothesis.strategies as st
+
+from caffe2.python import hypothesis_test_util as hu
 
 import unittest
 
 
 EXECUTORS = ["dag", "async_dag"]
 ITERATIONS = 2
+SANDCASTLE_MAX_EXAMPLES = 2
+SANDCASTLE_TIMEOUT = 600
+
+
+def sandcastle_settings(func):
+    if hu.is_sandcastle():
+        return settings(
+            max_examples=SANDCASTLE_MAX_EXAMPLES,
+            timeout=SANDCASTLE_TIMEOUT
+        )(func)
+    else:
+        return func
 
 
 class ExecutorCPUConvNetTest(ExecutorTestBase):
@@ -25,6 +39,7 @@ class ExecutorCPUConvNetTest(ExecutorTestBase):
            model_name=st.sampled_from(conv_model_generators().keys()),
            batch_size=st.sampled_from([8]),
            num_workers=st.sampled_from([8]))
+    @sandcastle_settings
     def test_executor(self, executor, model_name, batch_size, num_workers):
         model = build_conv_model(model_name, batch_size)
         model.Proto().num_workers = num_workers
@@ -47,6 +62,7 @@ class ExecutorCPUConvNetTest(ExecutorTestBase):
 class ExecutorGPUResNetTest(ExecutorTestBase):
     @given(executor=st.sampled_from(EXECUTORS),
            num_workers=st.sampled_from([8]))
+    @sandcastle_settings
     def test_executor(self, executor, num_workers):
         model = build_resnet50_dataparallel_model(
             num_gpus=workspace.NumCudaDevices(), batch_size=32, epoch_size=32)
