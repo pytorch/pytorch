@@ -235,14 +235,6 @@ void THTensor_(multinomial)(THLongTensor *self, THGenerator *_generator, THTenso
     2,
     "cannot sample n_sample < 0 samples");
 
-  if (!with_replacement)
-  {
-    THArgCheckWithCleanup((!with_replacement) && (n_sample <= n_categories),
-      THCleanup(if (start_dim == 1) THTensor_(resize1d)(prob_dist, n_categories);),
-      2,
-      "cannot sample n_sample > prob_dist:size(1) samples without replacement");
-  }
-
   /* cumulative probability distribution vector */
   cum_dist = THDoubleTensor_newWithSize1d(n_categories);
 
@@ -265,51 +257,54 @@ void THTensor_(multinomial)(THLongTensor *self, THGenerator *_generator, THTenso
         sum \
       );
     }
-    THArgCheckWithCleanup((sum > 0),
-                          THCleanup(THDoubleTensor_free(cum_dist); if (start_dim == 1) THTensor_(resize1d)(prob_dist, n_categories);),
-                          2,
-                          "invalid multinomial distribution (sum of probabilities <= 0)");
-    /* normalize cumulative probability distribution so that last val is 1
+
+    /* normalize cumulative probability distribution so that it sums to 1
     i.e. doesn't assume original prob_dist row sums to one */
-    if ( (sum > 0) || ( ( sum < 1.00001) && (sum > 0.99999) ) )
+    if ( sum > 0 )
     {
       for (j=0; j<n_categories; j++)
       {
         THDoubleTensor_data(cum_dist)[j*cum_dist->stride[0]] /= sum;
       }
+      /* Setting sum to 1 after division of values */
+      sum = 1.0;
     }
 
     for (j=0; j<n_sample; j++)
     {
-      /* sample a probability mass from a uniform distribution */
-      double uniform_sample = THRandom_uniform(_generator, 0, 1);
-      /* Do a binary search for the slot in which the prob falls
-      ie cum_dist[row][slot-1] < uniform_prob < cum_distr[row][slot] */
-      int left_pointer = 0;
-      int right_pointer = n_categories;
-      int mid_pointer;
-      double cum_prob;
       int sample_idx;
-      /* Make sure the last cumulative distribution bucket sums to 1 */
-      THDoubleTensor_data(cum_dist)[(n_categories-1)*cum_dist->stride[0]] = 1;
 
-      while(right_pointer - left_pointer > 0)
+      if (sum > 0)
       {
-          mid_pointer = left_pointer + (right_pointer - left_pointer) / 2;
-          cum_prob = THDoubleStorage_get( \
-            cum_dist->storage, \
-            cum_dist->storageOffset+mid_pointer*cum_dist->stride[0] \
-          );
-          if (cum_prob < uniform_sample)
-          {
-            left_pointer = mid_pointer + 1;
-          }
-          else
-          {
-            right_pointer = mid_pointer;
-          }
+        /* sample a probability mass from a uniform distribution */
+        double uniform_sample = THRandom_uniform(_generator, 0, sum);
+        int left_pointer = 0;
+        int right_pointer = n_categories;
+        int mid_pointer;
+        double cum_prob;
+
+        /* Do a binary search for the slot in which the prob falls
+        ie cum_dist[row][slot-1] < uniform_prob < cum_distr[row][slot] */
+        while(right_pointer - left_pointer > 0)
+        {
+            mid_pointer = left_pointer + (right_pointer - left_pointer) / 2;
+            cum_prob = THDoubleStorage_get( \
+              cum_dist->storage, \
+              cum_dist->storageOffset+mid_pointer*cum_dist->stride[0] \
+            );
+            if (cum_prob < uniform_sample)
+            {
+              left_pointer = mid_pointer + 1;
+            }
+            else
+            {
+              right_pointer = mid_pointer;
+            }
+        }
+        sample_idx = left_pointer;
+      } else {
+        sample_idx = -1;
       }
-      sample_idx = left_pointer;
 
        /* store in result tensor (will be incremented for lua compat by wrapper) */
       THLongStorage_set( \
@@ -321,43 +316,41 @@ void THTensor_(multinomial)(THLongTensor *self, THGenerator *_generator, THTenso
       /* Once a sample is drawn, it cannot be drawn again. ie sample without replacement */
       if (!with_replacement)
       {
-        /* update cumulative distribution so that sample cannot be drawn again */
-        double diff;
-        double new_val = 0;
-        double sum;
-
-        if (sample_idx != 0)
+        if (sample_idx >= 0)
         {
-          new_val = THDoubleStorage_get( \
-            cum_dist->storage, \
-            cum_dist->storageOffset+(sample_idx-1)*cum_dist->stride[0] \
-          );
-        }
-        /* marginal cumulative mass (i.e. original probability) of sample */
-        diff = THDoubleStorage_get( \
-          cum_dist->storage, \
-          cum_dist->storageOffset+sample_idx*cum_dist->stride[0] \
-        ) - new_val;
-        /* new sum of marginals is not one anymore... */
-        sum = 1.0 - diff;
-        for (k=0; k<n_categories; k++)
-        {
-          new_val = THDoubleStorage_get( \
-            cum_dist->storage, \
-            cum_dist->storageOffset+k*cum_dist->stride[0] \
-          );
-          if (k >= sample_idx)
+          /* update cumulative distribution so that sample cannot be drawn again */
+          double diff;
+          double new_val = 0;
+          if (sample_idx != 0)
           {
-            /* remove sampled probability mass from later cumulative probabilities */
-            new_val -= diff;
+            new_val = THDoubleStorage_get( \
+              cum_dist->storage, \
+              cum_dist->storageOffset+(sample_idx-1)*cum_dist->stride[0] \
+            );
           }
-          /* make total marginals sum to one */
-          new_val /= sum;
-          THDoubleStorage_set( \
+          /* marginal cumulative mass (i.e. original probability) of sample */
+          diff = THDoubleStorage_get( \
             cum_dist->storage, \
-            cum_dist->storageOffset+k*cum_dist->stride[0], \
-            new_val \
-          );
+            cum_dist->storageOffset+sample_idx*cum_dist->stride[0] \
+          ) - new_val;
+
+          /* remove sampled probability mass from sum of probabilities */
+          sum -= diff;
+
+          /* remove sampled probability mass from later cumulative probabilities */
+          for (k=sample_idx; k<n_categories; k++)
+          {
+            new_val = THDoubleStorage_get( \
+              cum_dist->storage, \
+              cum_dist->storageOffset+k*cum_dist->stride[0] \
+            );
+            new_val -= diff;
+            THDoubleStorage_set( \
+              cum_dist->storage, \
+              cum_dist->storageOffset+k*cum_dist->stride[0], \
+              new_val \
+            );
+          }
         }
       }
     }
