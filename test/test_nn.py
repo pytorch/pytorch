@@ -162,7 +162,7 @@ class NewModuleTest(InputVariableMixin, ModuleTest):
                 test_case.assertEqual(type(p.data), torch.DoubleTensor)
 
             # TODO: Hardshrink is lacking a CUDA implementation
-            if TEST_CUDA and type(module) != nn.Hardshrink:
+            if TEST_CUDA and self.should_test_cuda and type(module) != nn.Hardshrink:
                 # to GPU0
                 input = input.float().cuda()
                 module.float().cuda()
@@ -3576,6 +3576,13 @@ def add_test(test):
     setattr(TestNN, cuda_test_name, lambda self, test=test: test.test_cuda(self))
 
 
+def wrap_functional(fn, **kwargs):
+    class FunctionalModule(nn.Module):
+        def forward(self, *args):
+            return fn(*args, **kwargs)
+    return FunctionalModule
+
+
 new_criterion_tests = [
     dict(
         module_name='BCEWithLogitsLoss',
@@ -4366,6 +4373,44 @@ new_module_tests = [
         constructor_args=(1,),
         input_size=(5, 6, 7),
         desc='dim'
+    ),
+    dict(
+        constructor=wrap_functional(F.softmax, dim=1),
+        input_size=(2, 3, 4, 5),
+        fullname='softmax',
+        pickle=False,
+    ),
+    dict(
+        constructor=wrap_functional(F.softmax, dim=0),
+        input_size=(2, 3, 4, 5),
+        fullname='softmax_dim0',
+        test_cuda=False,
+        pickle=False,
+    ),
+    dict(
+        constructor=wrap_functional(F.softmax, dim=3),
+        input_size=(2, 3, 4, 5),
+        fullname='softmax_dim3',
+        test_cuda=False,
+        pickle=False,
+    ),
+    dict(
+        constructor=wrap_functional(F.log_softmax, dim=1),
+        input_size=(2, 3, 4, 5),
+        fullname='log_softmax',
+        pickle=False,
+    ),
+    dict(
+        constructor=wrap_functional(F.log_softmax, dim=0),
+        input_size=(2, 3, 4, 5),
+        fullname='log_softmax_dim0',
+        pickle=False,
+    ),
+    dict(
+        constructor=wrap_functional(F.log_softmax, dim=3),
+        input_size=(2, 3, 4, 5),
+        fullname='log_softmax_dim3',
+        pickle=False,
     ),
 ]
 

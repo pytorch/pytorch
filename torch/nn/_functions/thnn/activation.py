@@ -4,7 +4,6 @@ from torch._thnn import type2backend
 from torch.autograd.variable import Variable
 
 from . import _all_functions
-from .auto_double_backwards import softmax_double_backwards
 
 
 class PReLU(Function):

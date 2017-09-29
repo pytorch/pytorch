@@ -1,86 +1,76 @@
 #include "THCUNN.h"
 #include "THCHalf.h"
+#include "THCTensorTypeUtils.cuh"
 #include "THCHalfAutoNumerics.cuh"
 #include "SharedMem.cuh"
 
 template <typename T, typename AccumT>
-__global__ void cunn_SpatialLogSoftMax_updateOutput_kernel(T *output, T *input, int classSize, int height, int width)
+__global__ void cunn_SpatialLogSoftMax_updateOutput_kernel(T *output, T *input, uint32_t outer_size, uint32_t dim_size, uint32_t inner_size)
 {
-  int batchIndex = blockIdx.x;
-  int index = threadIdx.x;
+  const uint32_t outer_stride = inner_size * dim_size;
+  const uint32_t dim_stride = inner_size;
 
-  while (index < height*width) {
-    int y = index / width;
-    int x = index % width;
-    if (y >= height)
-      break;
+  for (uint32_t outer_index = blockIdx.x; outer_index < outer_size; outer_index += gridDim.x) {
+    const uint32_t outer_offset = outer_index * outer_stride;
+    for (uint32_t inner_index = blockIdx.y * blockDim.x + threadIdx.x; inner_index < inner_size; inner_index += blockDim.x * gridDim.y) {
+      const uint32_t data_offset = outer_offset + inner_index;
 
-    // calculate input starting index in cuda layout (B x H x W x C)
-    int inputStartIndex =
-      (height*width*classSize)*batchIndex +
-      (width*classSize)*y +
-      (classSize)*x;
+      T max_input = input[data_offset];
+      for (uint32_t d = 1; d < dim_size; d++) {
+        const T value = input[data_offset + d * dim_stride];
+        max_input = THCNumerics<T>::ge(max_input, value) ? max_input : value;
+      }
 
-    T maxInput = input[inputStartIndex];
-    for (int i = 1; i < classSize; i++) {
-      T value = input[inputStartIndex + i];
-      maxInput = THCNumerics<T>::ge(maxInput, value) ? maxInput : value;
+      AccumT sum = 0;
+      for (uint32_t d = 0; d < dim_size; d++)
+        sum += THCNumerics<T>::exp(input[data_offset + d * dim_stride] - max_input);
+      const T logsum = max_input + ScalarConvert<AccumT, T>::to(THCNumerics<AccumT>::log(sum));
+
+      for (uint32_t d = 0; d < dim_size; d++)
+        output[data_offset + d * dim_stride] = input[data_offset + d * dim_stride] - logsum;
     }
-
-    AccumT sum = 0;
-    for (int i = 0; i < classSize; i++) {
-      sum += THCNumerics<T>::exp(input[inputStartIndex + i] - maxInput);
-    }
-    T logsum = maxInput + ScalarConvert<AccumT, T>::to(THCNumerics<AccumT>::log(sum));
-
-    for (int i = 0; i < classSize; i++) {
-      // calculate output index in torch layout (B x C x H x W)
-      int outputIndex =
-        (classSize*height*width)*batchIndex +
-        (height*width)*i +
-        (width)*y +
-        x;
-      output[outputIndex] = input[inputStartIndex + i] - logsum;
-    }
-    index += blockDim.x;
   }
 }
 
 template <typename T, typename AccumT>
-__global__ void cunn_SpatialLogSoftMax_updateGradInput_kernel(T *gradInput, T *output, T *gradOutput, int classSize, int height, int width)
+__global__ void cunn_SpatialLogSoftMax_updateGradInput_kernel(T *gradInput, T *output, T *gradOutput, uint32_t outer_size, uint32_t dim_size, uint32_t inner_size)
 {
-  int batchIndex = blockIdx.x;
-  int index = threadIdx.x;
+  const uint32_t outer_stride = inner_size * dim_size;
+  const uint32_t dim_stride = inner_size;
 
-  while (index < height*width) {
-    int y = index / width;
-    int x = index % width;
-    if (y >= height)
-      break;
+  for (uint32_t outer_index = blockIdx.x; outer_index < outer_size; outer_index += gridDim.x) {
+    const uint32_t outer_offset = outer_index * outer_stride;
+    for (uint32_t inner_index = blockIdx.y * blockDim.x + threadIdx.x; inner_index < inner_size; inner_index += blockDim.x * gridDim.y) {
+      const uint32_t data_offset = outer_offset + inner_index;
 
-    // calculate output starting index in cuda layout (B x H x W x C)
-    int outputStartIndex =
-      (height*width*classSize)*batchIndex +
-      (width*classSize)*y +
-      (classSize)*x;
+      AccumT sum = 0;
+      for (uint32_t d = 0; d < dim_size; d++) {
+        sum += gradOutput[data_offset + d * dim_stride];
+      }
+      const T real_sum = ScalarConvert<AccumT, T>::to(sum);
 
-    AccumT sum = 0;
-    for (int i = 0; i < classSize; i++) {
-      sum += gradOutput[outputStartIndex + i];
+      for (uint32_t d = 0; d < dim_size; d++) {
+        gradInput[data_offset + d * dim_stride] = gradOutput[data_offset + d * dim_stride] -
+          THCNumerics<T>::exp(output[data_offset + d * dim_stride]) * real_sum;
+      }
     }
-
-    for (int i = 0; i < classSize; i++) {
-      // calculate input index in torch layout (B x C x H x W)
-      int inputIndex =
-        (classSize*height*width)*batchIndex +
-        (height*width)*i +
-        (width)*y +
-        x;
-      gradInput[inputIndex] = ScalarConvert<AccumT, T>::to(
-        gradOutput[outputStartIndex + i] - THCNumerics<T>::exp(output[outputStartIndex + i]) * sum);
-    }
-    index += blockDim.x;
   }
+}
+
+static void LogSoftMax_getSpatialGridSize(
+    uint32_t block_size, uint32_t max_active_blocks,
+    uint64_t outer_size, uint64_t dim_size, uint64_t inner_size,
+    dim3& grid, dim3& block) {
+  // First, tile as many blocks as we can over the y axis
+  uint32_t y_size = (inner_size + block_size - 1) / block_size;
+  if (y_size > max_active_blocks)
+    y_size = max_active_blocks;
+  // Fill the x axis with as many blocks as we can fit
+  uint32_t x_size = (max_active_blocks + y_size - 1) / y_size;
+  if (x_size > outer_size)
+    x_size = outer_size;
+  grid = dim3(x_size, y_size);
+  block = dim3(block_size);
 }
 
 template <typename T, typename AccumT>

@@ -1,5 +1,6 @@
 #include "batch_normalization.h"
 #include "convolution.h"
+#include "softmax.h"
 #include "accumulate_grad.h"
 #include "basic_ops.h"
 #include "tensor.h"
@@ -47,6 +48,19 @@ struct ConvCtor {
     parser.parse(params.cudnn_enabled, "cudnn_enabled");
 
     return new ConvForward(std::move(params));
+  }
+};
+
+template<bool is_log>
+struct SoftmaxCtor {
+  using fn_type = typename std::conditional<is_log, LogSoftmax, Softmax>::type;
+  fn_type* operator()(PyObject* args) {
+    int dim;
+
+    TupleParser parser(args, 1);
+    parser.parse(dim, "dim");
+
+    return new fn_type(dim);
   }
 };
 
@@ -251,6 +265,16 @@ bool THPAutograd_initFunctions(PyObject* _unused)
   addClass<ConvForward, ConvCtor>(module, ConvClass, "ConvNd", conv_forward_properties);
   addClass<ConvBackward, NoCtor>(module, ConvBackwardClass, "ConvNdBackward", conv_backward_properties);
   addClass<ConvBackwardBackward, NoCtor>(module, ConvBackwardBackwardClass, "ConvNdBackwardBackward", conv_backward_backward_properties);
+
+  static PyTypeObject SoftmaxClass, SoftmaxBackwardClass, SoftmaxBackwardBackwardClass;
+  addClass<Softmax, SoftmaxCtor<false>>(module, SoftmaxClass, "Softmax");
+  addClass<SoftmaxBackward, NoCtor>(module, SoftmaxBackwardClass, "SoftmaxBackward");
+  addClass<SoftmaxBackwardBackward, NoCtor>(module, SoftmaxBackwardBackwardClass, "SoftmaxBackwardBackward");
+
+  static PyTypeObject LogSoftmaxClass, LogSoftmaxBackwardClass, LogSoftmaxBackwardBackwardClass;
+  addClass<LogSoftmax, SoftmaxCtor<true>>(module, LogSoftmaxClass, "LogSoftmax");
+  addClass<LogSoftmaxBackward, NoCtor>(module, LogSoftmaxBackwardClass, "LogSoftmaxBackward");
+  addClass<LogSoftmaxBackwardBackward, NoCtor>(module, LogSoftmaxBackwardBackwardClass, "LogSoftmaxBackwardBackward");
 
   static PyTypeObject AccumulateGradClass;
   addClass<AccumulateGrad, NoCtor>(module, AccumulateGradClass, "AccumulateGrad", accumulate_grad_properties);

@@ -492,10 +492,6 @@ def create_variable_type(top_env, aten_declarations):
                                   if arg['dynamic_type'] == 'Tensor']
             env['tensorlist_args'] = [arg['name'] for arg in option['arguments']
                                       if arg['dynamic_type'] == 'TensorList']
-        if option['return_type'] == 'Scalar':
-            env['return_value'] = 'Scalar(output)'
-        else:
-            env['return_value'] = 'Tensor(std::move(output))'
 
         env['type_definition_body'] = emit_body(env, option)
 
