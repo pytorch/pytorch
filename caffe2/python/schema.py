@@ -583,7 +583,7 @@ class Scalar(Field):
 
         Scalar(np.float64)
 
-            Scalar field of type float32. Caffe2 will expect readers and
+            Scalar field of type float64. Caffe2 will expect readers and
             datasets to expose it as a 1D tensor of doubles (vector), where
             the size of the vector is determined by this fields' domain.
 
