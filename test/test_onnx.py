@@ -125,5 +125,26 @@ class TestONNX(TestCase):
         x = Variable(torch.randn(20, 16, 50))
         self.assertONNXExpected(export_to_string(nn.MaxPool1d(3, stride=2), x))
 
+    def test_at_op(self):
+        x = Variable(torch.randn(3, 4))
+
+        class MyFun(Function):
+
+            @staticmethod
+            def symbolic(g, x):
+                return g.at("add", x, x)
+
+            @staticmethod
+            def forward(ctx, x):
+                return x + x
+
+        class MyModule(Module):
+
+            def forward(self, x):
+                return MyFun.apply(x)
+
+        self.assertONNXExpected(export_to_string(MyModule(), x))
+
+
 if __name__ == '__main__':
     run_tests()
