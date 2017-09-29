@@ -15,6 +15,7 @@ import json
 import math
 import contextlib
 from ._utils import _range
+from torch._six import string_classes
 
 
 @contextlib.contextmanager
@@ -135,7 +136,7 @@ def _add_attribute(node, key, value):
             "Invalid attribute specifier '{}' names " +
             " must be suffixed with type, e.g. 'dim_i' or 'dims_i'").format(key))
     name, kind = m.group(1), m.group(2)
-    if isinstance(value, collections.Iterable):
+    if not isinstance(value, string_classes) and isinstance(value, collections.Iterable):
         kind += "s"
     return getattr(node, kind + '_')(name, value)
 
@@ -155,4 +156,9 @@ def _op(self, opname, *args, **kwargs):
     return tuple(self.appendNode(self.createSelect(n, i)) for i in _range(outputs))
 
 
+def _at(self, opname, *args, **kwargs):
+    return self.op("ATen", *args, operator_s=opname, **kwargs)
+
+
 torch._C.Graph.op = _op
+torch._C.Graph.at = _at
