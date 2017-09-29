@@ -303,7 +303,14 @@ class CuDNNPoolGradientOp : public ConvPoolOpBase<CUDAContext> {
         operator_def.type() == "MaxPool1DGradient" ||
         operator_def.type() == "MaxPool2DGradient" ||
         operator_def.type() == "MaxPool3DGradient") {
+      bool deterministic =
+          OperatorBase::GetSingleArgument<bool>("deterministic", false);
+#if CUDNN_VERSION_MIN(6, 0, 0)
+      mode_ =
+          deterministic ? CUDNN_POOLING_MAX_DETERMINISTIC : CUDNN_POOLING_MAX;
+#else
       mode_ = CUDNN_POOLING_MAX;
+#endif
     } else if (
         operator_def.type() == "AveragePoolGradient" ||
         operator_def.type() == "AveragePool1DGradient" ||
@@ -375,7 +382,8 @@ class CuDNNPoolGradientOp : public ConvPoolOpBase<CUDAContext> {
                   dX->mutable_data<float>());
           return true;
         }
-        if (mode_ == CUDNN_POOLING_MAX) {
+        if (mode_ == CUDNN_POOLING_MAX ||
+            mode_ == CUDNN_POOLING_MAX_DETERMINISTIC) {
           global_maxpool_backward_NCHW<float>
               <<<CAFFE_GET_BLOCKS(dX->size()),
                  CAFFE_CUDA_NUM_THREADS,
