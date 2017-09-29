@@ -541,6 +541,12 @@ struct StageClosure {
       return std::make_shared<LambdaFunction>(1, [shape](const variable_list& vars) -> variable_list {
         return {make_variable(vars[0].data().view(shape), vars[0].requires_grad())};
       });
+    IR_ELSEIF(Gemm)
+      auto beta = value->f(kbeta);
+      auto alpha = value->f(kalpha);
+      return std::make_shared<LambdaFunction>(3, [beta, alpha](const variable_list& vars) -> variable_list {
+        return {vars[2].addmm(beta, alpha, vars[0], vars[1])};
+      });
     IR_ELSEIF(Split)
       auto dim = value->i(kaxis);
       auto splits = value->is(ksplit);
