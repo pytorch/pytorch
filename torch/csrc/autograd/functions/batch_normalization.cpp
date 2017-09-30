@@ -57,6 +57,7 @@ auto BatchNormForward::apply(const variable_list& inputs) -> variable_list {
   use_cudnn = (input.type().isCuda()
                && input.type().scalarType() != at::kHalf
                && weight.defined() && bias.defined()
+               && input.size(0) <= 131070
                && cudnn_enabled && CUDNN_VERSION >= 5110L);
 #endif
 
@@ -123,6 +124,7 @@ auto BatchNormBackward::apply(const variable_list& grad_outputs) -> variable_lis
   use_cudnn = (input.type().backend() == at::kCUDA
                && input.type().scalarType() != at::kHalf
                && weight.defined() && bias.defined() && training
+               && input.size(0) <= 131070
                && cudnn_enabled && CUDNN_VERSION >= 5110L);
 #endif
 
