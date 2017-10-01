@@ -277,8 +277,8 @@ class Variable(_C._VariableBase):
         module = torch._import_dotted_name(self.data.__module__)
         return getattr(module, name)
 
-    def cuda(self, device_id=None, async=False):
-        return CudaTransfer.apply(self, device_id, async)
+    def cuda(self, device=None, async=False):
+        return CudaTransfer.apply(self, device, async)
 
     def cpu(self):
         return self.type(getattr(torch, type(self.data).__name__))
@@ -959,7 +959,7 @@ class Variable(_C._VariableBase):
 
 for method in dir(Variable):
     # This will also wrap some methods that normally aren't part of the
-    # funcitonal interface, but we don't care, as they won't ever be used
+    # functional interface, but we don't care, as they won't ever be used
     if method.startswith('_') or method.endswith('_'):
         continue
     if hasattr(Variable._torch, method):

@@ -879,6 +879,7 @@ class AdaptiveMaxPool2d(Module):
         >>> # target output size of 5x7
         >>> m = nn.AdaptiveMaxPool2d((5,7))
         >>> input = autograd.Variable(torch.randn(1, 64, 8, 9))
+        >>> output = m(input)
         >>> # target output size of 7x7 (square)
         >>> m = nn.AdaptiveMaxPool2d(7)
         >>> input = autograd.Variable(torch.randn(1, 64, 10, 9))
@@ -893,6 +894,43 @@ class AdaptiveMaxPool2d(Module):
 
     def forward(self, input):
         return F.adaptive_max_pool2d(input, self.output_size, self.return_indices)
+
+    def __repr__(self):
+        return self.__class__.__name__ + ' (' \
+            + 'output_size=' + str(self.output_size) + ')'
+
+
+class AdaptiveMaxPool3d(Module):
+    """Applies a 3D adaptive max pooling over an input signal composed of several input planes.
+
+    The output is of size D x H x W, for any input size.
+    The number of output features is equal to the number of input planes.
+
+    Args:
+        output_size: the target output size of the image of the form D x H x W.
+                     Can be a tuple (D, H, W) or a single number D for a cube D x D x D
+        return_indices: if True, will return the indices along with the outputs.
+                        Useful to pass to nn.MaxUnpool3d. Default: False
+
+    Examples:
+        >>> # target output size of 5x7x9
+        >>> m = nn.AdaptiveMaxPool3d((5,7,9))
+        >>> input = autograd.Variable(torch.randn(1, 64, 8, 9, 10))
+        >>> output = m(input)
+        >>> # target output size of 7x7x7 (cube)
+        >>> m = nn.AdaptiveMaxPool3d(7)
+        >>> input = autograd.Variable(torch.randn(1, 64, 10, 9, 8))
+        >>> output = m(input)
+
+    """
+
+    def __init__(self, output_size, return_indices=False):
+        super(AdaptiveMaxPool3d, self).__init__()
+        self.output_size = output_size
+        self.return_indices = return_indices
+
+    def forward(self, input):
+        return F.adaptive_max_pool3d(input, self.output_size, self.return_indices)
 
     def __repr__(self):
         return self.__class__.__name__ + ' (' \

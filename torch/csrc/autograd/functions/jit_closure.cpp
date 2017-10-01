@@ -534,12 +534,12 @@ struct StageClosure {
       if (permutation != std::vector<int64_t>({1, 0}))
         throw std::runtime_error("Transpose isn't fully supported in closure compiler");
       return std::make_shared<LambdaFunction>(1, [](const variable_list& vars) -> variable_list {
-        return variable_list{Variable(new VariableImpl(vars[0].data().transpose(1, 0), vars[0].requires_grad(), false), false)};
+        return {make_variable(vars[0].data().transpose(1, 0), vars[0].requires_grad())};
       });
     IR_ELSEIF(Reshape)
       auto shape = value->is(kshape);
       return std::make_shared<LambdaFunction>(1, [shape](const variable_list& vars) -> variable_list {
-        return variable_list{Variable(new VariableImpl(vars[0].data().view(shape), vars[0].requires_grad(), false), false)};
+        return {make_variable(vars[0].data().view(shape), vars[0].requires_grad())};
       });
     IR_ELSEIF(Split)
       auto dim = value->i(kaxis);

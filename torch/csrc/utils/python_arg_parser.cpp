@@ -366,7 +366,6 @@ PythonArgs PythonArgParser::parse(PyObject* args, PyObject* kwargs, PyObject* pa
   print_error(args, kwargs, parsed_args);
 }
 
-[[noreturn]]
 void PythonArgParser::print_error(PyObject* args, PyObject* kwargs, PyObject* parsed_args[]) {
   auto num_args = PyTuple_GET_SIZE(args) + (kwargs ? PyDict_Size(kwargs) : 0);
   std::vector<int> plausible_idxs;

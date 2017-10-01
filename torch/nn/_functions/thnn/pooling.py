@@ -632,8 +632,54 @@ class AdaptiveMaxPool2dBackward(Function):
         gI = Variable(ggI.data.new(ggI.size()).zero_())
         # ggO is equivalent to the 1d case, but the indices are given wrt the last two dimensions combined
         indices_view = indices.view(indices.size()[:-2] + (-1,))
-        ggO = ggI.contiguous().view(ggI.size()[:-2] + (-1,)).gather(dim=2, index=indices_view).view_as(indices)
+        ggO = ggI.contiguous().view(ggI.size()[:-2] + (-1,)).gather(dim=-1, index=indices_view).view_as(indices)
         return gI, None, ggO, None, None, None, None, None, None
+
+
+class AdaptiveMaxPool3d(Function):
+
+    @staticmethod
+    def forward(ctx, input, output_size):
+        ctx.output_size = _triple(output_size)
+        backend = type2backend[type(input)]
+        indices, output = input.new().long(), input.new()
+        backend.VolumetricAdaptiveMaxPooling_updateOutput(
+            backend.library_state,
+            input, output, indices,
+            ctx.output_size[0], ctx.output_size[2], ctx.output_size[1])
+        ctx.save_for_backward(input, indices)
+        ctx.mark_non_differentiable(indices)
+        return output, indices
+
+    @staticmethod
+    def backward(ctx, grad_output, _indices_grad=None):
+        input, indices = ctx.saved_variables
+
+        grad_input = AdaptiveMaxPool3dBackward.apply(input, indices, grad_output)
+        return grad_input, None
+
+
+class AdaptiveMaxPool3dBackward(Function):
+
+    @staticmethod
+    def forward(ctx, input, indices, grad_output):
+        ctx.save_for_backward(indices)
+        grad_input = grad_output.new()
+        backend = type2backend[type(input)]
+        backend.VolumetricAdaptiveMaxPooling_updateGradInput(
+            backend.library_state,
+            input, grad_output, grad_input, indices)
+        return grad_input
+
+    @staticmethod
+    def backward(ctx, ggI):
+        indices, = ctx.saved_variables
+
+        gI = Variable(ggI.data.new(ggI.size()).zero_())
+        # ggO is equivalent to the 1d case, but the indices are given wrt the last two dimensions combined
+        indices_view = indices.view(indices.size()[:-3] + (-1,))
+        ggO = ggI.contiguous().view(ggI.size()[:-3] + (-1,)).gather(dim=-1, index=indices_view).view_as(indices)
+        return gI, None, ggO
 
 
 class AdaptiveAvgPool1d(Function):
@@ -779,6 +825,8 @@ _all_functions.append(AdaptiveMaxPool1d)
 _all_functions.append(AdaptiveMaxPool1dBackward)
 _all_functions.append(AdaptiveMaxPool2d)
 _all_functions.append(AdaptiveMaxPool2dBackward)
+_all_functions.append(AdaptiveMaxPool3d)
+_all_functions.append(AdaptiveMaxPool3dBackward)
 _all_functions.append(AdaptiveAvgPool1d)
 _all_functions.append(AdaptiveAvgPool1dBackward)
 _all_functions.append(AdaptiveAvgPool2d)

@@ -147,7 +147,7 @@ In this tech preview, only the following operators are supported:
 * PReLU (inplace is discarded, sharing a single weight among all channels is not supported)
 * LeakyRelu (inplace is discarded)
 * MaxPool1d (ceil_mode must be False)
-* MaxPool2d (ceil_mode must be False
+* MaxPool2d (ceil_mode must be False)
 * AvgPool2d (ceil_mode must be False)
 
 We plan on expanding support to more operators; RNNs are high on our priority

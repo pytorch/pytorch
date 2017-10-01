@@ -101,24 +101,17 @@ inline dim3 getApplyBlock() {
   return dim3(THC_APPLY_THREADS_PER_BLOCK);
 }
 
-inline bool getApplyGrid(THCState* state, ptrdiff_t totalElements, dim3& grid) {
+inline bool getApplyGrid(THCState* state, uint64_t totalElements, dim3& grid) {
   int curDevice = -1;
   cudaGetDevice(&curDevice);
+  if (curDevice == -1) return false;
 
-  if (curDevice == -1) {
-    return false;
-  }
-
-  if(THCState_getCurrentDeviceProperties(state)->major < 3){
-    grid = dim3(min((int64_t) THCCeilDiv(totalElements,
-               (ptrdiff_t) THC_APPLY_THREADS_PER_BLOCK), (int64_t) 64*1024-1));
-    return true;
-  }
-
-  grid = dim3((int64_t) THCCeilDiv(totalElements,
-              (ptrdiff_t) THC_APPLY_THREADS_PER_BLOCK) );
+  uint64_t numBlocks = THCCeilDiv(totalElements, static_cast<uint64_t>(THC_APPLY_THREADS_PER_BLOCK));
+  uint64_t maxGridX = THCState_getCurrentDeviceProperties(state)->maxGridSize[0];
+  if (numBlocks > maxGridX)
+      numBlocks = maxGridX;
+  grid = dim3(numBlocks);
   return true;
-
 }
 
 template <typename TensorTypeA,

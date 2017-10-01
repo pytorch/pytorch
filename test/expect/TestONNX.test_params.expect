@@ -37,7 +37,7 @@ initializer {
   dims: 2
   dims: 2
   data_type: FLOAT
-  name: "1"
+  name: "2"
   raw_data: "\000\000\200?\000\000\000@\000\000@@\000\000\200@"
 }
 ir_version: 1

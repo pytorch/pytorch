@@ -903,6 +903,17 @@ class TestCuda(TestCase):
             torch.arange(0, 10, out=b)
             self.assertEqual(a, b.cuda())
 
+    @unittest.skipIf(torch.cuda.device_count() < 2, "only one GPU detected")
+    def test_get_set_rng_state_all(self):
+        states = torch.cuda.get_rng_state_all()
+        before0 = torch.cuda.FloatTensor(100, device=0).normal_()
+        before1 = torch.cuda.FloatTensor(100, device=1).normal_()
+        torch.cuda.set_rng_state_all(states)
+        after0 = torch.cuda.FloatTensor(100, device=0).normal_()
+        after1 = torch.cuda.FloatTensor(100, device=1).normal_()
+        self.assertEqual(before0, after0, 0)
+        self.assertEqual(before1, after1, 0)
+
     def test_nvtx(self):
         # Just making sure we can see the symbols
         torch.cuda.nvtx.range_push("foo")

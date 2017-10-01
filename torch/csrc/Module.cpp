@@ -535,29 +535,6 @@ PyObject *THPModule_hasDistributed(PyObject *_unused)
 }
 
 #ifdef WITH_CUDA
-extern PyObject * THCPModule_initExtension(PyObject *self);
-extern PyObject * THCPModule_setDevice_wrap(PyObject *self, PyObject *arg);
-extern PyObject * THCPModule_getDevice_wrap(PyObject *self);
-extern PyObject * THCPModule_getDeviceCount_wrap(PyObject *self);
-extern PyObject * THCPModule_getDeviceName_wrap(PyObject *self, PyObject *arg);
-extern PyObject * THCPModule_getCurrentStream_wrap(PyObject *self);
-extern PyObject * THCPModule_getCurrentBlasHandle_wrap(PyObject *self);
-extern PyObject * THCPModule_setStream_wrap(PyObject *self, PyObject *stream);
-extern PyObject * THCPModule_getDriverVersion(PyObject *self);
-extern PyObject * THCPModule_isDriverSufficient(PyObject *self);
-extern PyObject * THCPModule_getRNGState(PyObject *_unused);
-extern PyObject * THCPModule_setRNGState(PyObject *_unused, PyObject *_new_rng_state);
-extern PyObject * THCPModule_manualSeed(PyObject *_unused, PyObject *seed);
-extern PyObject * THCPModule_manualSeedAll(PyObject *_unused, PyObject *seed);
-extern PyObject * THCPModule_seed(PyObject *_unused);
-extern PyObject * THCPModule_seedAll(PyObject *_unused);
-extern PyObject * THCPModule_initialSeed(PyObject *_unused);
-extern PyObject * THCPModule_cudaHostAllocator(PyObject *_unused);
-extern PyObject * THCPModule_cudaSynchronize(PyObject *_unused);
-extern PyObject * THCPModule_cudaSleep(PyObject *_unused, PyObject *cycles);
-extern PyObject * THCPModule_cudaLockMutex(PyObject *module);
-extern PyObject * THCPModule_cudaUnlockMutex(PyObject *module);
-
 extern PyObject * THCSPModule_initExtension(PyObject *self);
 #endif
 
@@ -569,29 +546,7 @@ static PyMethodDef TorchMethods[] = {
   {"_init_names",     (PyCFunction)THPModule_initNames,       METH_O,       NULL},
   {"_has_distributed",(PyCFunction)THPModule_hasDistributed,  METH_NOARGS,  NULL},
 #ifdef WITH_CUDA
-  {"_cuda_init",        (PyCFunction)THCPModule_initExtension,    METH_NOARGS,  NULL},
-  {"_cuda_setDevice",   (PyCFunction)THCPModule_setDevice_wrap,   METH_O,       NULL},
-  {"_cuda_getDevice",   (PyCFunction)THCPModule_getDevice_wrap,   METH_NOARGS,  NULL},
-  {"_cuda_getDeviceCount", (PyCFunction)THCPModule_getDeviceCount_wrap, METH_NOARGS, NULL},
-  {"_cuda_getDeviceName", (PyCFunction)THCPModule_getDeviceName_wrap, METH_O,   NULL},
-  {"_cuda_getCurrentStream", (PyCFunction)THCPModule_getCurrentStream_wrap, METH_NOARGS, NULL},
-  {"_cuda_getCurrentBlasHandle", (PyCFunction)THCPModule_getCurrentBlasHandle_wrap, METH_NOARGS, NULL},
-  {"_cuda_setStream",    (PyCFunction)THCPModule_setStream_wrap,  METH_O, NULL},
-  {"_cuda_isDriverSufficient", (PyCFunction)THCPModule_isDriverSufficient, METH_NOARGS, NULL},
-  {"_cuda_getDriverVersion", (PyCFunction)THCPModule_getDriverVersion, METH_NOARGS, NULL},
-  {"_cuda_getRNGState", (PyCFunction)THCPModule_getRNGState,      METH_NOARGS,  NULL},
-  {"_cuda_setRNGState", (PyCFunction)THCPModule_setRNGState,      METH_O,       NULL},
-  {"_cuda_manualSeed",  (PyCFunction)THCPModule_manualSeed,       METH_O,       NULL},
-  {"_cuda_manualSeedAll", (PyCFunction)THCPModule_manualSeedAll,  METH_O,       NULL},
-  {"_cuda_seed",        (PyCFunction)THCPModule_seed,             METH_NOARGS,  NULL},
-  {"_cuda_seedAll",     (PyCFunction)THCPModule_seedAll,          METH_NOARGS,  NULL},
-  {"_cuda_initialSeed", (PyCFunction)THCPModule_initialSeed,      METH_NOARGS,  NULL},
-  {"_cuda_cudaHostAllocator", (PyCFunction)THCPModule_cudaHostAllocator, METH_NOARGS, NULL},
-  {"_cuda_synchronize", (PyCFunction)THCPModule_cudaSynchronize, METH_NOARGS, NULL},
-  {"_cuda_sleep", (PyCFunction)THCPModule_cudaSleep, METH_O, NULL},
   {"_cuda_sparse_init",  (PyCFunction)THCSPModule_initExtension,    METH_NOARGS,  NULL},
-  {"_cuda_lock_mutex",   (PyCFunction)THCPModule_cudaLockMutex,   METH_NOARGS,  NULL},
-  {"_cuda_unlock_mutex", (PyCFunction)THCPModule_cudaUnlockMutex, METH_NOARGS,  NULL},
 #endif
   {"_safe_call",      (PyCFunction)THPModule_safeCall,          METH_VARARGS | METH_KEYWORDS, NULL},
   {"_set_default_tensor_type", (PyCFunction)THPModule_setDefaultTensorType, METH_O, NULL},
@@ -754,6 +709,10 @@ bool THCPByteTensor_init(PyObject *module);
 
 bool THCPStream_init(PyObject *module);
 
+#ifdef WITH_CUDA
+PyMethodDef* THCPModule_methods();
+#endif
+
 bool THCSPDoubleTensor_init(PyObject *module);
 bool THCSPFloatTensor_init(PyObject *module);
 bool THCSPHalfTensor_init(PyObject *module);
@@ -802,6 +761,9 @@ PyMODINIT_FUNC PyInit__C()
 #endif
 
   THPUtils_addPyMethodDefs(methods, TorchMethods);
+#ifdef WITH_CUDA
+  THPUtils_addPyMethodDefs(methods, THCPModule_methods());
+#endif
 #ifdef WITH_CUDNN
   THPUtils_addPyMethodDefs(methods, THCUDNN_methods());
 #endif
