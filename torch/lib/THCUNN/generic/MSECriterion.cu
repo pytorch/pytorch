@@ -2,6 +2,8 @@
 #define THC_GENERIC_FILE "generic/MSECriterion.cu"
 #else
 
+#include "THCApply.cuh"
+
 void THNN_(MSECriterion_updateOutput)(
            THCState *state,
            THCTensor *input,
@@ -42,24 +44,12 @@ void THNN_(MSECriterion_updateOutput)(
   }
 
   THCTensor_(resizeAs)(state, output, input);
-  ptrdiff_t size = THCTensor_(nElement)(state, input);
-
-  input = THCTensor_(newContiguous)(state, input);
-  target = THCTensor_(newContiguous)(state, target);
-
-  THCThrustAllocator thrustAlloc(state);
-  thrust::device_ptr<real> input_data(THCTensor_(data)(state, input));
-  thrust::device_ptr<real> target_data(THCTensor_(data)(state, target));
-  thrust::device_ptr<real> output_data(THCTensor_(data)(state, output));
-  thrust::transform(
-#if CUDA_VERSION >= 7000
-    thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
-#endif
-    input_data, input_data+size, target_data, output_data,
-    mse_functor_dtype<real, accreal>());
-
-  THCTensor_(free)(state, input);
-  THCTensor_(free)(state, target);
+  THC_pointwiseApply3(
+      state, 
+      input, 
+      target, 
+      output, 
+      mse_updateOutput_functor<real>()); 
 }
 
 void THNN_(MSECriterion_updateGradInput)(

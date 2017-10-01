@@ -25,15 +25,19 @@ struct mse_functor
   }
 };
 
-template <typename Dtype, typename Acctype>
-struct mse_functor_dtype
-{
-  mse_functor_dtype() {}
 
-  __host__ __device__ Dtype operator()(const Dtype &x, const Dtype &y) const
+template <typename Dtype>
+struct mse_updateOutput_functor
+{
+  mseUpdateOutput_functor() {}
+
+  __device__ void operator()(
+      const Dtype *input, 
+      const Dtype *target, 
+      Dtype *output)
   {
-    Acctype z = ScalarConvert<Dtype, Acctype>::to(x)-y;
-    return ScalarConvert<Acctype, Dtype>::to(z*z);
+    Dtype diff = THCNumerics<Dtype>::sub(*input, *target);
+    *output = THCNumerics<Dtype>::mul(diff, diff);
   }
 };
 
