@@ -959,7 +959,7 @@ class Variable(_C._VariableBase):
 
 for method in dir(Variable):
     # This will also wrap some methods that normally aren't part of the
-    # funcitonal interface, but we don't care, as they won't ever be used
+    # functional interface, but we don't care, as they won't ever be used
     if method.startswith('_') or method.endswith('_'):
         continue
     if hasattr(Variable._torch, method):

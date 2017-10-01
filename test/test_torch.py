@@ -2768,16 +2768,16 @@ class TestTorch(TestCase):
         self.assertEqual(reference[rows, columns],
                          torch.Tensor([[4, 6], [2, 3]]))
 
-        # Verify still works with Tranposed (i.e. non-contiguous) Tensors
+        # Verify still works with Transposed (i.e. non-contiguous) Tensors
 
         reference = conv_fn(torch.Tensor([[0, 1, 2, 3],
                                           [4, 5, 6, 7],
                                           [8, 9, 10, 11]])).t_()
 
-        # Tranposed: [[0, 4, 8],
-        #             [1, 5, 9],
-        #             [2, 6, 10],
-        #             [3, 7, 11]]
+        # Transposed: [[0, 4, 8],
+        #              [1, 5, 9],
+        #              [2, 6, 10],
+        #              [3, 7, 11]]
 
         self.assertEqual(reference[ri([0, 1, 2]), ri([0])], torch.Tensor([0, 1,
                          2]))
