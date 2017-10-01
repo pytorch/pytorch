@@ -18,8 +18,14 @@ def glu_symbolic(g, input, dim):
     first, second = g.op('Split', input, axis_i=dim, outputs=2)
     return g.op('Mul', first, g.op('Sigmoid', second))
 
+
+def softmax_symbolic(g, input):
+    return g.op('Softmax', input)
+
+
 symbolic_fns = {
     'Threshold': threshold_symbolic,
     'LeakyReLU': leakyrelu_symbolic,
     'GatedLinear': glu_symbolic,
+    'Softmax': softmax_symbolic,
 }
