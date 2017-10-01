@@ -121,6 +121,8 @@ class View(Function):
 
     @staticmethod
     def symbolic(g, i, sizes):
+        if len(sizes) == 1 and isinstance(sizes[0], torch.Size):
+            sizes = sizes[0]
         return g.op("Reshape", i, shape_i=sizes)
 
     @staticmethod
