@@ -17,4 +17,4 @@ class Zero(InplaceFunction):
     @staticmethod
     def backward(ctx, grad_output):
         result, = ctx.saved_variables
-        return result.new(1).expand_as_(result).zero_()
+        return result.new([0]).expand_as_(result)
