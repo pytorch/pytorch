@@ -519,7 +519,7 @@ class TestNN(NNTestCase):
         class Net(nn.Module):
             def __init__(self):
                 super(Net, self).__init__()
-                self.l1 = l
+                self.l1 = nn.Linear(10, 20)
                 self.register_backward_hook(self.hook)
                 self.check_backward_hook_flag = False
 
@@ -529,12 +529,10 @@ class TestNN(NNTestCase):
             def forward(self, inputs):
                 return {"output": self.l1(inputs).sum()}
 
-        l = nn.Linear(10, 20)
         net = Net()
-        data = Variable(torch.randn([5, 10]))
-        model_output = net(data)
+        model_output = net(Variable(torch.randn([5, 10]))
         model_output["output"].backward()
-        assert net.check_backward_hook_flag
+        self.assertTrue(net.check_backward_hook_flag)
 
     def test_children(self):
         l1 = nn.Linear(2, 2)
