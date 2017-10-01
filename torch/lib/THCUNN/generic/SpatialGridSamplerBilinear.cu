@@ -56,6 +56,7 @@ TH_API void THNN_(SpatialGridSamplerBilinear_updateOutput)(
   SpatialGridSamplerBilinear_updateOutput_kernel
     <<<GET_BLOCKS(count), CUDA_NUM_THREADS, 0, THCState_getCurrentStream(state)>>>(
       count, devInput, devGrid, devOutput);
+  THCudaCheck(cudaGetLastError());
 }
 
 TH_API void THNN_(SpatialGridSamplerBilinear_updateGradInput)(
@@ -88,6 +89,7 @@ TH_API void THNN_(SpatialGridSamplerBilinear_updateGradInput)(
   SpatialGridSamplerBilinear_updateGradInput_kernel
     <<<GET_BLOCKS(count), CUDA_NUM_THREADS, 0, THCState_getCurrentStream(state)>>>(
       count, devInput, devGradInput, devGrid, devGradGrid, devGradOutput);
+  THCudaCheck(cudaGetLastError());
 }
 
 #endif

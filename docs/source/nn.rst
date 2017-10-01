@@ -162,6 +162,12 @@ Pooling Layers
 .. autoclass:: AdaptiveMaxPool2d
     :members:
 
+:hidden:`AdaptiveMaxPool3d`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: AdaptiveMaxPool3d
+    :members:
+
 :hidden:`AdaptiveAvgPool1d`
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -780,6 +786,11 @@ Pooling functions
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autofunction:: adaptive_max_pool2d
+
+:hidden:`adaptive_max_pool3d`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: adaptive_max_pool3d
 
 :hidden:`adaptive_avg_pool1d`
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

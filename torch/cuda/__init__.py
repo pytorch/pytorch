@@ -104,6 +104,8 @@ def _lazy_init():
     _cudart.cudaGetErrorString.restype = ctypes.c_char_p
     _original_pid = os.getpid()
     _initialized = True
+    # Important to do this after _initialized, since some queued calls
+    # may themselves call _lazy_init()
     for queued_call, orig_traceback in _queued_calls:
         try:
             queued_call()

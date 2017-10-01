@@ -7,7 +7,7 @@
  * sspOP returns a sparse result
  * spOPs has all arguments sparse
  *
- * Everything is is up to discretion
+ * Everything is up to discretion
  */
 
 TH_API void THCSTensor_(zero)(THCState *state, THCSTensor *r_);

@@ -50,6 +50,7 @@ struct PythonArgParser {
   PythonArgs parse(PyObject* args, PyObject* kwargs, PyObject* dst[]);
 
 private:
+  [[noreturn]]
   void print_error(PyObject* args, PyObject* kwargs, PyObject* dst[]);
 
   std::vector<FunctionSignature> signatures_;
@@ -119,7 +120,7 @@ inline at::Scalar PythonArgs::scalar(int i) {
   if (PyFloat_Check(args[i])) {
     return at::Scalar(THPUtils_unpackDouble(args[i]));
   }
-  return at::Scalar(THPUtils_unpackLong(args[i]));
+  return at::Scalar(static_cast<int64_t>(THPUtils_unpackLong(args[i])));
 }
 
 inline std::vector<int64_t> PythonArgs::intlist(int i) {

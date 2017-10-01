@@ -230,12 +230,17 @@ void THTensor_(multinomial)(THLongTensor *self, THGenerator *_generator, THTenso
   n_dist = THTensor_(size)(prob_dist, 0);
   n_categories = THTensor_(size)(prob_dist, 1);
 
-  THArgCheck(n_sample > 0, 2, "cannot sample n_sample < 0 samples");
+  THArgCheckWithCleanup(n_sample > 0,
+    THCleanup(if (start_dim == 1) THTensor_(resize1d)(prob_dist, n_categories);),
+    2,
+    "cannot sample n_sample < 0 samples");
 
   if (!with_replacement)
   {
-    THArgCheck((!with_replacement) && (n_sample <= n_categories), 2, \
-    "cannot sample n_sample > prob_dist:size(1) samples without replacement");
+    THArgCheckWithCleanup((!with_replacement) && (n_sample <= n_categories),
+      THCleanup(if (start_dim == 1) THTensor_(resize1d)(prob_dist, n_categories);),
+      2,
+      "cannot sample n_sample > prob_dist:size(1) samples without replacement");
   }
 
   /* cumulative probability distribution vector */
@@ -260,7 +265,9 @@ void THTensor_(multinomial)(THLongTensor *self, THGenerator *_generator, THTenso
         sum \
       );
     }
-    THArgCheckWithCleanup((sum > 0), THCleanup(THDoubleTensor_free(cum_dist);), 2,
+    THArgCheckWithCleanup((sum > 0),
+                          THCleanup(THDoubleTensor_free(cum_dist); if (start_dim == 1) THTensor_(resize1d)(prob_dist, n_categories);),
+                          2,
                           "invalid multinomial distribution (sum of probabilities <= 0)");
     /* normalize cumulative probability distribution so that last val is 1
     i.e. doesn't assume original prob_dist row sums to one */

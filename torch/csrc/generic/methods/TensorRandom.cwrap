@@ -277,12 +277,14 @@
     - Double
   backends:
     - CPU
+    - CUDA
   return: argument 0
   variants:
     - method
     - function
   before_call:
-    THTensor_(resizeAs)(LIBRARY_STATE ((THPTensor*)$arg0)->cdata, ((THPTensor*)$arg2)->cdata);
+    CPU: THTensor_(resizeAs)(LIBRARY_STATE ((THPTensor*)$arg0)->cdata, ((THPTensor*)$arg2)->cdata);
+    CUDA: THTensor_(resizeAs)(LIBRARY_STATE ((THPTensor*)$arg0)->cdata, ((THPTensor*)$arg1)->cdata);
   cname: BERNOULLI_TENSOR
   arguments:
     - arg: THTensor* output
