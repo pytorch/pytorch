@@ -335,7 +335,7 @@ void* tensorPointer(cudnnDataType_t dataType, THVoidTensor* tensor, int groupIdx
   ptr += elementSize * tensor->storageOffset;
 #if CUDNN_VERSION < 7000
   if (groupIdx > 0) {
-    int64_t size = 1;
+    size_t size = 1;
     for (int i = dim; i < tensor->nDimension; ++i) {
       size *= tensor->size[i];
     }
