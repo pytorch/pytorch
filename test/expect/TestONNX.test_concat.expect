@@ -1,18 +1,21 @@
-node {
+ir_version: 1
+producer_name: "pytorch"
+producer_version: "0.2"
+domain: "com.facebook"
+graph {
+  node {
+    input: "1"
+    input: "2"
+    output: "4"
+    output: "5"
+    op_type: "Concat"
+    attribute {
+      name: "axis"
+      i: 1
+    }
+  }
+  name: "torch-jit-export"
   input: "1"
   input: "2"
   output: "4"
-  output: "5"
-  op_type: "Concat"
-  attribute {
-    name: "axis"
-    i: 1
-  }
 }
-name: "torch-jit-export"
-input: "1"
-input: "2"
-output: "4"
-ir_version: 1
-producer_version: 20000
-producer_tag: "pytorch"

@@ -168,6 +168,7 @@ class AttributeProto;
 class NodeProto;
 class GraphProto;
 class TensorProto;
+class ModelProto;
 
 class TensorProto : public MicroProto<onnx_TensorProto> {
 private:
@@ -249,20 +250,12 @@ public:
 class GraphProto : public MicroProto<onnx_GraphProto> {
 private:
   std::string name;
-  std::string producer_tag;
   unique_vector<std::string> inputs;
   unique_vector<std::string> outputs;
   unique_vector<NodeProto> nodes;
   unique_vector<TensorProto> initializers;
 public:
   GraphProto() : MicroProto(onnx_GraphProto_init_default) {
-    proto.has_ir_version = true;
-    proto.ir_version = onnx_Version_IR_VERSION;
-    // TODO: stop hard-coding this
-    // TODO: check if this is supposed to be octal
-    proto.has_producer_version = true;
-    proto.producer_version = 20000;
-    proto.producer_tag = string(&producer_tag, "pytorch");
     proto.input  = list<std::string>(&inputs);
     proto.output = list<std::string>(&outputs);
     proto.node   = list<NodeProto, onnx_NodeProto_fields>(&nodes);
@@ -282,6 +275,30 @@ public:
     initializers.emplace_back(ptr);
     return ptr;
   }
+};
+
+class ModelProto : public MicroProto<onnx_ModelProto> {
+private:
+  std::string producer_name;
+  std::string producer_version;
+  std::string domain;
+  std::string doc_string;
+  // graph is a static field in nanopb struct.
+  GraphProto graph;
+public:
+  ModelProto() : MicroProto(onnx_ModelProto_init_default) {
+    proto.has_ir_version = true;
+    proto.ir_version = onnx_Version_IR_VERSION;
+    proto.producer_name = string(&producer_name, "pytorch");
+    // TODO: stop hard-coding this
+    proto.producer_version = string(&producer_version, "0.2");
+    proto.domain = string(&domain, "com.facebook");
+  }
+  void set_model_version(int64_t i) { proto.has_model_version = true; proto.model_version = i; }
+  void set_doc_string(const std::string& s) { proto.doc_string = string(&doc_string, s); }
+  GraphProto* mutable_graph() { return &graph; }
+  // set_graph should be called after encoding graph.
+  void set_graph() { proto.has_graph = true; proto.graph = graph.proto; }
 };
 
 }} // namespace torch::onnx
