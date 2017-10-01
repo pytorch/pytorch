@@ -32,7 +32,7 @@ class _ContextMethodMixin(object):
 
         Every tensor that's been modified in-place in a call to :func:`forward`
         should be given to this function, to ensure correctness of our checks.
-        It doesn't matter wheter the function is called before or after
+        It doesn't matter whether the function is called before or after
         modification.
         """
         self.dirty_tensors = args
