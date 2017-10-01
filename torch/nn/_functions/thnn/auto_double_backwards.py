@@ -229,7 +229,7 @@ def mseloss_double_backwards(ctx, ggI):
     div_factor = input.nelement() if size_average and reduce else 1
 
     gI = ggI * (gO * 2. / div_factor).expand_as(input)
-    if (reduce):
+    if reduce:
         ggO = (ggI * (input - target)).sum() * (2. / div_factor)
     else:
         ggO = (ggI * (input - target)) * 2.

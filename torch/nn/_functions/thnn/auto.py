@@ -21,7 +21,6 @@ def _make_function_class_criterion(class_name, update_output, update_grad_input,
             break
 
     reduce_arg_idx = -1
-    reduce_arg_value = False
     for i, arg in enumerate(update_output.arguments):
         if arg.name == 'reduce':
             reduce_arg_idx = i

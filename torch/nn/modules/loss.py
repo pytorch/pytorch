@@ -13,10 +13,9 @@ def _assert_no_grad(variable):
 
 
 class _Loss(Module):
-    def __init__(self, size_average=True, reduce=True):
+    def __init__(self, size_average=True):
         super(_Loss, self).__init__()
         self.size_average = size_average
-        self.reduce = reduce
 
 
 class _WeightedLoss(_Loss):
@@ -275,6 +274,11 @@ class MSELoss(_Loss):
         >>> output = loss(input, target)
         >>> output.backward()
     """
+    def __init__(self, size_average=True, reduce=True):
+        super(MSELoss, self).__init__(size_average)
+        self.reduce = reduce
+
+
     def forward(self, input, target):
         _assert_no_grad(target)
         return F.mse_loss(input, target, size_average=self.size_average, reduce=self.reduce)

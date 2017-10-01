@@ -11,6 +11,7 @@ void THNN_(MSECriterion_updateOutput)(
            bool reduce)
 {
   THCUNN_check_nElement(state, input, target);
+  THCUNN_assertSameGPU(state, 3, input, target, output);
 
   if (reduce) {
     THCUNN_check_dim_size(state, output, 1, 0, 1);
@@ -40,7 +41,6 @@ void THNN_(MSECriterion_updateOutput)(
     return;
   }
 
-  THCUNN_assertSameGPU(state, 3, input, target, output);
   THCTensor_(resizeAs)(state, output, input);
   ptrdiff_t size = THCTensor_(nElement)(state, input);
 
@@ -72,10 +72,9 @@ void THNN_(MSECriterion_updateGradInput)(
            bool reduce)
 {
   THCUNN_check_nElement(state, input, target);
+  THCUNN_assertSameGPU(state, 4, input, target, gradInput, gradOutput);
 
   if (reduce) {
-    THCUNN_assertSameGPU(state, 3, input, target, gradInput);
-
     ptrdiff_t size = THCTensor_(nElement)(state, input);
 
     THCUNN_check_dim_size(state, gradOutput, 1, 0, 1);
@@ -105,8 +104,6 @@ void THNN_(MSECriterion_updateGradInput)(
   }
 
   THCUNN_check_shape(state, input, gradOutput);
-  THCUNN_assertSameGPU(state, 4, input, target, gradInput, gradOutput);
-
   ptrdiff_t size = THCTensor_(nElement)(state, input);
 
   input = THCTensor_(newContiguous)(state, input);
