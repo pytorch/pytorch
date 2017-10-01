@@ -248,27 +248,21 @@ class TestNN(NNTestCase):
             return None
         return input.grad.data
 
-    def _forward_criterion(self, criterion, input, target, reduce=True):
+    def _forward_criterion(self, criterion, input, target):
         if isinstance(input, tuple):
             args = input + (target,)
             output = criterion(*args)
         else:
             output = criterion(input, target)
-        if reduce:
-            return output.data[0]
-        else:
-            return output.data
+        return output.data[0]
 
-    def _backward_criterion(self, criterion, input, target, gradOutput=None):
+    def _backward_criterion(self, criterion, input, target):
         input_tuple = input if isinstance(input, tuple) else (input,)
         for i in input_tuple:
             if i.grad is not None:
                 i.grad.data.zero_()
         args = input_tuple + (target,)
-        if gradOutput is None:
-            criterion(*args).backward()
-        else:
-            criterion(*args).backward(gradOutput)
+        criterion(*args).backward()
         if isinstance(input, tuple):
             return tuple(map(lambda i: i.grad.data, input))
         else:
@@ -4263,13 +4257,11 @@ for test_params in module_tests + new_module_tests:
 
 for test_params in criterion_tests + new_criterion_tests:
     name = test_params.pop('module_name')
-    ctor = getattr(nn, name)
-    test_params['constructor'] = ctor
+    test_params['constructor'] = getattr(nn, name)
     test = NewCriterionTest(**test_params)
     add_test(test)
-
-    desc = test_params.get('desc', None)
     if 'check_no_size_average' in test_params:
+        desc = test_params.get('desc', None)
         test_params['desc'] = 'no_size_average' if desc is None else desc + '_no_size_average'
 
         def gen_no_size_average_constructor(constructor):
@@ -4279,21 +4271,7 @@ for test_params in criterion_tests + new_criterion_tests:
             no_size_average_constructor.__name__ = constructor.__name__
             return no_size_average_constructor
 
-        test_params['constructor'] = gen_no_size_average_constructor(ctor)
-        test = NewCriterionTest(**test_params)
-        add_test(test)
-
-    if 'check_no_reduce' in test_params:
-        test_params['desc'] = 'no_reduce' if desc is None else desc + '_no_reduce'
-
-        def gen_no_reduce_constructor(constructor):
-            def no_reduce_constructor(*args, **kwargs):
-                cons = constructor(*args, reduce=False, **kwargs)
-                return cons
-            no_reduce_constructor.__name__ = constructor.__name__
-            return no_reduce_constructor
-
-        test_params['constructor'] = gen_no_reduce_constructor(ctor)
+        test_params['constructor'] = gen_no_size_average_constructor(test_params['constructor'])
         test = NewCriterionTest(**test_params)
         add_test(test)
 
