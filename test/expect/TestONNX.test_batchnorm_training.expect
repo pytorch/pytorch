@@ -1,67 +1,70 @@
-node {
+ir_version: 1
+producer_name: "pytorch"
+producer_version: "0.2"
+domain: "com.facebook"
+graph {
+  node {
+    input: "1"
+    input: "2"
+    input: "3"
+    input: "4"
+    input: "5"
+    output: "7"
+    output: "8"
+    output: "9"
+    output: "batch_norm_dead_output_10"
+    output: "batch_norm_dead_output_11"
+    op_type: "SpatialBN"
+    attribute {
+      name: "is_test"
+      i: 0
+    }
+    attribute {
+      name: "epsilon"
+      f: 9.99999974737875e-06
+    }
+    attribute {
+      name: "momentum"
+      f: 0.899999976158142
+    }
+    attribute {
+      name: "consumed_inputs"
+      ints: 0
+      ints: 0
+      ints: 0
+      ints: 1
+      ints: 1
+    }
+  }
+  name: "torch-jit-export"
   input: "1"
   input: "2"
   input: "3"
   input: "4"
   input: "5"
   output: "7"
-  output: "8"
-  output: "9"
-  output: "batch_norm_dead_output_10"
-  output: "batch_norm_dead_output_11"
-  op_type: "SpatialBN"
-  attribute {
-    name: "is_test"
-    i: 0
+  initializer {
+    dims: 2
+    data_type: FLOAT
+    name: "2"
+    raw_data: "\277Kh>\324\3350?"
   }
-  attribute {
-    name: "epsilon"
-    f: 9.99999974737875e-06
+  initializer {
+    dims: 2
+    data_type: FLOAT
+    name: "3"
+    raw_data: "\000\000\000\000\000\000\000\000"
   }
-  attribute {
-    name: "momentum"
-    f: 0.899999976158142
+  initializer {
+    dims: 2
+    data_type: FLOAT
+    name: "4"
+    raw_data: "\315\314\314=\315\314\314="
   }
-  attribute {
-    name: "consumed_inputs"
-    ints: 0
-    ints: 0
-    ints: 0
-    ints: 1
-    ints: 1
+  initializer {
+    dims: 2
+    data_type: FLOAT
+    name: "5"
+    raw_data: "fff?fff?"
   }
 }
-name: "torch-jit-export"
-input: "1"
-input: "2"
-input: "3"
-input: "4"
-input: "5"
-output: "7"
-initializer {
-  dims: 2
-  data_type: FLOAT
-  name: "2"
-  raw_data: "\277Kh>\324\3350?"
-}
-initializer {
-  dims: 2
-  data_type: FLOAT
-  name: "3"
-  raw_data: "\000\000\000\000\000\000\000\000"
-}
-initializer {
-  dims: 2
-  data_type: FLOAT
-  name: "4"
-  raw_data: "\315\314\314=\315\314\314="
-}
-initializer {
-  dims: 2
-  data_type: FLOAT
-  name: "5"
-  raw_data: "fff?fff?"
-}
-ir_version: 1
-producer_version: 20000
-producer_tag: "pytorch"

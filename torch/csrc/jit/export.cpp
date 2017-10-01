@@ -113,6 +113,9 @@ void addAttribute(onnx::NodeProto * n_p, jit::Node * n, jit::Symbol name) {
 }
 
 void encodeGraph(onnx::GraphProto * p_g, const std::shared_ptr<Graph> & g, const std::vector<at::Tensor> & initializers) {
+  JIT_ASSERT(p_g != nullptr);
+  p_g->set_name("torch-jit-export");
+
   for (auto input : g->inputs()) {
     p_g->add_input(node_name(input));
   }
@@ -152,6 +155,14 @@ void encodeGraph(onnx::GraphProto * p_g, const std::shared_ptr<Graph> & g, const
     p->set_name(name);
     encodeTensor(p, tensor);
   }
+}
+
+void encodeModel(onnx::ModelProto* p_m, const std::shared_ptr<Graph>& g,
+                 const std::vector<at::Tensor>& initializers) {
+  onnx::GraphProto* p_g = p_m->mutable_graph();
+  encodeGraph(p_g, g, initializers);
+  // Since graph is a static field, we have to explicitly set it.
+  p_m->set_graph();
 }
 
 void standardizeGraph(const std::shared_ptr<Graph>& graph) {
@@ -219,21 +230,21 @@ void standardizeGraph(const std::shared_ptr<Graph>& graph) {
 
 std::string ExportGraph(const std::shared_ptr<Graph>& graph,
                         const std::vector<at::Tensor> & initializers) {
+
   standardizeGraph(graph);
 
-  onnx::GraphProto graph_proto;
-  graph_proto.set_name("torch-jit-export");
-
+  onnx::ModelProto model_proto;
   // Set up nanopb callbacks and compute the amount of space needed to store
   // the resulting protobuf
-  encodeGraph(&graph_proto, graph, initializers);
+  encodeModel(&model_proto, graph, initializers);
+
   size_t out_size;
-  pb_get_encoded_size(&out_size, onnx_GraphProto_fields, &graph_proto.proto);
+  pb_get_encoded_size(&out_size, onnx_ModelProto_fields, &model_proto.proto);
 
   // Allocate storage and export the graph
   std::string out(out_size, '\0');
   pb_ostream_t ostream = pb_ostream_from_buffer(reinterpret_cast<pb_byte_t *>(&out[0]), out_size);
-  pb_encode(&ostream, onnx_GraphProto_fields, &graph_proto.proto);
+  pb_encode(&ostream, onnx_ModelProto_fields, &model_proto.proto);
 
   return out;
 }
