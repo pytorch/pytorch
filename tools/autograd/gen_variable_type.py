@@ -32,11 +32,11 @@ except ImportError:
 
 
 METHOD_DECLARATION = CodeTemplate("""\
-virtual ${return_type} ${method_prefix}${api_name}(${formals}) override;
+virtual ${return_type} ${method_prefix}${api_name}(${formals}) const override;
 """)
 
 METHOD_DEFINITION = CodeTemplate("""\
-${return_type} VariableType::${method_prefix}${api_name}(${formals}) {
+${return_type} VariableType::${method_prefix}${api_name}(${formals}) const {
     ${type_definition_body}
 }
 """)
