@@ -9,7 +9,7 @@ class Zero(InplaceFunction):
             ctx.mark_dirty(i)
             result = i.zero_()
         else:
-            result = i.new(i.size()).zero_()
+            result = i.new(1).zero_().expand_as(i)
 
         ctx.save_for_backward(result)
         return result
@@ -17,4 +17,4 @@ class Zero(InplaceFunction):
     @staticmethod
     def backward(ctx, grad_output):
         result, = ctx.saved_variables
-        return result.new([0]).expand_as_(result)
+        return Variable(result.data.new(1).expand_as(result))

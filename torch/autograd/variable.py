@@ -766,6 +766,9 @@ class Variable(_C._VariableBase):
     def bernoulli(self):
         return Bernoulli()(self)
 
+    def zero(self):
+        return Zero.apply(self, False)
+
     def zero_(self):
         return Zero.apply(self, True)
 
