@@ -685,7 +685,7 @@ class FractionalMaxPool2d(Module):
         output_ratio: If one wants to have an output size as a ratio of the input size, this option can be given.
                       This has to be a number or tuple in the range (0, 1)
         return_indices: if True, will return the indices along with the outputs.
-                        Useful to pass to nn.MaxUnpool2d . Default: False
+                        Useful to pass to nn.MaxUnpool2d. Default: False
 
     Examples:
         >>> # pool of square window of size=3, and target output size 13x12
@@ -840,7 +840,7 @@ class AdaptiveMaxPool1d(Module):
     Args:
         output_size: the target output size H
         return_indices: if True, will return the indices along with the outputs.
-                        Useful to pass to nn.MaxUnpool2d . Default: False
+                        Useful to pass to nn.MaxUnpool1d. Default: False
 
     Examples:
         >>> # target output size of 5
@@ -873,7 +873,7 @@ class AdaptiveMaxPool2d(Module):
         output_size: the target output size of the image of the form H x W.
                      Can be a tuple (H, W) or a single number H for a square image H x H
         return_indices: if True, will return the indices along with the outputs.
-                        Useful to pass to nn.MaxUnpool2d . Default: False
+                        Useful to pass to nn.MaxUnpool2d. Default: False
 
     Examples:
         >>> # target output size of 5x7
