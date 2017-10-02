@@ -182,10 +182,10 @@ def build_resnet50_dataparallel_model(
 
 def run_resnet50_epoch(train_model, batch_size, epoch_size):
     epoch_iters = int(epoch_size / batch_size)
-    speed_per_iter = []
     prefix = "{}_{}".format(
         train_model._device_prefix,
         train_model._devices[0])
+    train_time = 0
     for i in range(epoch_iters):
         timeout = 600.0 if i == 0 else 60.0
         with timeout_guard.CompleteInTimeOrDie(timeout):
@@ -193,21 +193,20 @@ def run_resnet50_epoch(train_model, batch_size, epoch_size):
             workspace.RunNet(train_model.net.Proto().name)
             t2 = time.time()
             dt = t2 - t1
+            train_time += dt
 
         fmt = "Finished iteration {}/{} ({:.2f} images/sec)"
         print(fmt.format(i + 1, epoch_iters, batch_size / dt))
-        speed_per_iter.append(batch_size / dt)
-        accuracy = workspace.FetchBlob(prefix + '/accuracy')
-        loss = workspace.FetchBlob(prefix + '/loss')
-        train_fmt = "Training loss: {}, accuracy: {}"
-        print(train_fmt.format(loss, accuracy))
 
     accuracy = workspace.FetchBlob(prefix + '/accuracy')
     loss = workspace.FetchBlob(prefix + '/loss')
 
     assert loss < 40, "Exploded gradients"
 
-    return (np.average(speed_per_iter), accuracy, loss)
+    return (
+        epoch_iters * batch_size,  # number of examples
+        train_time,  # training time
+        accuracy, loss)
 
 
 class ExecutorTestBase(TestCase):
