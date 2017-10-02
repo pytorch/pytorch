@@ -91,8 +91,16 @@ if (should_compute_any_outputs()) {
 }
 """)
 
+METHOD_DEFINITION_FLAGS_TENSORS = CodeTemplate("""\
+   auto flags = Function::flags({ ${tensor_args} });
+""")
+
+METHOD_DEFINITION_FLAGS_TENSORLIST = CodeTemplate("""\
+   auto flags = Function::flags( ${tensorlist_args});
+""")
+
 METHOD_DEFINITION_DERIVATIVE = CodeTemplate("""\
-auto flags = Function::flags({ ${tensor_args} });
+${flags_def}
 auto grad_fn = std::make_shared<${op}>();
 if (flags.is_executable) {
   ${save_variables}
@@ -105,7 +113,7 @@ return ${return_value};
 METHOD_DEFINITION_INPLACE = CodeTemplate("""\
 auto& pImpl = static_cast<VariableImpl&>(*self.get());
 check_inplace(pImpl);
-auto flags = Function::flags({ ${tensor_args} });
+${flags_def}
 auto grad_fn = std::make_shared<${op}>();
 if (flags.is_executable) {
   ${save_variables}
@@ -266,10 +274,10 @@ def load_derivatives(path):
         if '(' not in defn['name']:
             continue
         name, params = split_name_params(defn['name'])
+        num_tensor_inputs = 0
         option['name'] = name
         option['aten'] = defn.get('aten')
         option['python_arguments'] = []
-        option['num_inputs'] = 0
         option['prototype'] = defn['name']  # with default
         option['fallthrough'] = defn.get('fallthrough', False)
         option['op'] = name[0].upper() + name[1:] + 'Backward'
@@ -317,11 +325,13 @@ def load_derivatives(path):
                 derivatives.append(formula)
                 arg['derivative'] = formula
                 if arg['type'] != "TensorList":
-                    option['num_inputs'] += 1
+                    num_tensor_inputs += 1
 
         if arg_sizes_found:
             option['num_inputs'] = ("+".join(arg_sizes_found) +
-                                    "" if option['num_inputs'] == 0 else " + " + str(option['num_inputs']))
+                                    "" if num_tensor_inputs == 0 else " + " + str(num_tensor_inputs))
+        else:
+            option['num_inputs'] = str(num_tensor_inputs)
 
         if option['aten'] is not None:
             option['call_args'] = split_name_params(option['aten'])[1]
@@ -411,9 +421,9 @@ def create_autograd_functions(top_env, declarations):
                 continue
 
             if arg['type'] == 'TensorList':
-                error_msg = "derivatives don't support specifying both a TensorList and non-TensorList derivative yet"
                 if added_derivative_tensor:
-                    raise RuntimeError(error_msg)
+                    raise RuntimeError("derivatives don't support specifying both a TensorList "
+                                       "and non-TensorList derivative yet")
                 added_derivative_tensorlist = True
                 body.append(DERIVATIVE_TENSORLIST.substitute({
                     'i': i,
@@ -421,7 +431,8 @@ def create_autograd_functions(top_env, declarations):
                 }))
             else:
                 if added_derivative_tensorlist:
-                    raise RuntimeError(error_msg)
+                    raise RuntimeError("derivatives don't support specifying both a TensorList "
+                                       "and non-TensorList derivative yet")
                 added_derivative_tensor = True
                 body.append(DERIVATIVE_TENSOR.substitute({
                     'i': i,
@@ -509,10 +520,16 @@ def create_variable_type(top_env, aten_declarations):
             body.extend(METHOD_DEFINITION_FALLTHROUGH_VARIABLE.substitute(combined).split('\n'))
             return body
 
-        if option['inplace']:
-            body.extend(METHOD_DEFINITION_INPLACE.substitute(combined).split('\n'))
+        if combined['tensorlist_args']:
+            flags_def = METHOD_DEFINITION_FLAGS_TENSORLIST.substitute(combined)
+            if combined['tensor_args']:
+                raise RuntimeError("both tensorlist_args and tensor_args not currently supported")
         else:
-            body.extend(METHOD_DEFINITION_DERIVATIVE.substitute(combined).split('\n'))
+            flags_def = METHOD_DEFINITION_FLAGS_TENSORS.substitute(combined)
+        if option['inplace']:
+            body.extend(METHOD_DEFINITION_INPLACE.substitute(combined, flags_def=flags_def).split('\n'))
+        else:
+            body.extend(METHOD_DEFINITION_DERIVATIVE.substitute(combined, flags_def=flags_def).split('\n'))
         return body
 
     def process_function(option):
@@ -522,7 +539,9 @@ def create_variable_type(top_env, aten_declarations):
             env['op'] = derivative['op']
             env['save_variables'] = save_variables(option, derivative)
             env['tensor_args'] = [arg['name'] for arg in option['arguments']
-                                  if arg['dynamic_type'] == 'Tensor' or arg['dynamic_type'] == 'TensorList']
+                                  if arg['dynamic_type'] == 'Tensor']
+            env['tensorlist_args'] = [arg['name'] for arg in option['arguments']
+                                      if arg['dynamic_type'] == 'TensorList']
         if option['return_type'] == 'Scalar':
             env['return_value'] = 'Scalar(output)'
         else:
@@ -561,7 +580,7 @@ def create_python_bindings(top_env, python_functions):
 
         args = []
         python_params = args_without_self(option['python_arguments'])
-        has_self = python_params != option['python_arguments']
+        has_self = any([True for arg in option['python_arguments'] if arg['name'] == 'self'])
         formal_args = ['Tensor & self'] if has_self else []
         for arg_idx, arg in enumerate(python_params):
             unpack = unpack_methods.get(arg['type'], arg['type'].lower())

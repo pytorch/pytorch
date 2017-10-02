@@ -80,14 +80,14 @@ std::vector<at::Tensor> VariableType::checked_unpack(const at::TensorList &tl, c
    const auto &t = tl[i];
    if(!t.defined()) {
      runtime_error("Expected a Tensor of type %s but found an undefined Tensor at position #%d "
-                   "for TensorList argument #%d '%s'",
+                   "for iterable argument #%d '%s'",
                    toString(), i, pos, name);
    }
    if (&t.type() == this) {
      ret[i] = static_cast<VariableImpl*>(t.pImpl)->data;
    } else {
    runtime_error("Expected object of type %s but found type %s at position #%d "
-                 "for TensorList argument #%d '%s'",
+                 "for iterable argument #%d '%s'",
                  toString(),t.type().toString(), i, pos, name);
    }
   }
