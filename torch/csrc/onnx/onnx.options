@@ -16,3 +16,4 @@
 
 onnx.AttributeProto.g type:FT_CALLBACK
 onnx.AttributeProto.t type:FT_CALLBACK
+onnx.ModelProto.graph type:FT_CALLBACK

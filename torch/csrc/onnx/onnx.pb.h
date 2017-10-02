@@ -86,8 +86,7 @@ typedef struct _onnx_ModelProto {
     bool has_model_version;
     int64_t model_version;
     pb_callback_t doc_string;
-    bool has_graph;
-    onnx_GraphProto graph;
+    pb_callback_t graph;
 /* @@protoc_insertion_point(struct:onnx_ModelProto) */
 } onnx_ModelProto;
 
@@ -128,14 +127,14 @@ typedef struct _onnx_SparseTensorProto {
 /* Initializer values for message structs */
 #define onnx_AttributeProto_init_default         {{{NULL}, NULL}, false, 0, false, 0, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}}
 #define onnx_NodeProto_init_default              {{{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}}
-#define onnx_ModelProto_init_default             {false, 0, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}, false, 0, {{NULL}, NULL}, false, onnx_GraphProto_init_default}
+#define onnx_ModelProto_init_default             {false, 0, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}, false, 0, {{NULL}, NULL}, {{NULL}, NULL}}
 #define onnx_GraphProto_init_default             {{{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}}
 #define onnx_TensorProto_init_default            {{{NULL}, NULL}, false, (onnx_TensorProto_DataType)0, false, onnx_TensorProto_Segment_init_default, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}}
 #define onnx_TensorProto_Segment_init_default    {false, 0, false, 0}
 #define onnx_SparseTensorProto_init_default      {{{NULL}, NULL}, false, onnx_TensorProto_init_default, false, onnx_TensorProto_init_default}
 #define onnx_AttributeProto_init_zero            {{{NULL}, NULL}, false, 0, false, 0, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}}
 #define onnx_NodeProto_init_zero                 {{{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}}
-#define onnx_ModelProto_init_zero                {false, 0, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}, false, 0, {{NULL}, NULL}, false, onnx_GraphProto_init_zero}
+#define onnx_ModelProto_init_zero                {false, 0, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}, false, 0, {{NULL}, NULL}, {{NULL}, NULL}}
 #define onnx_GraphProto_init_zero                {{{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}}
 #define onnx_TensorProto_init_zero               {{{NULL}, NULL}, false, (onnx_TensorProto_DataType)0, false, onnx_TensorProto_Segment_init_zero, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}, {{NULL}, NULL}}
 #define onnx_TensorProto_Segment_init_zero       {false, 0, false, 0}
