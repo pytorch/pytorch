@@ -21,29 +21,29 @@ VariableType::VariableType(Context* context, Type* baseType)
   , baseType(baseType) {
 }
 
-ScalarType VariableType::scalarType() {
+ScalarType VariableType::scalarType() const {
   return baseType->scalarType();
 }
-Backend VariableType::backend() {
+Backend VariableType::backend() const {
   return baseType->backend();
 }
-bool VariableType::isCuda() { return baseType->isCuda(); }
-bool VariableType::isSparse() { return baseType->isSparse(); }
-bool VariableType::isDistributed() { return baseType->isDistributed(); }
+bool VariableType::isCuda() const { return baseType->isCuda(); }
+bool VariableType::isSparse() const { return baseType->isSparse(); }
+bool VariableType::isDistributed() const { return baseType->isDistributed(); }
 
-std::unique_ptr<Storage> VariableType::storage() {
+std::unique_ptr<Storage> VariableType::storage() const {
   return baseType->storage();
 }
-std::unique_ptr<Storage> VariableType::storage(size_t size) {
+std::unique_ptr<Storage> VariableType::storage(size_t size) const {
   return baseType->storage(size);
 }
-std::unique_ptr<Storage> VariableType::storageFromBlob(void * data, int64_t size) {
+std::unique_ptr<Storage> VariableType::storageFromBlob(void * data, int64_t size) const {
   return baseType->storageFromBlob(data, size);
 }
-Tensor VariableType::unsafeTensorFromTH(void * th_pointer, bool retain) {
+Tensor VariableType::unsafeTensorFromTH(void * th_pointer, bool retain) const {
   return baseType->unsafeTensorFromTH(th_pointer, retain);
 }
-std::unique_ptr<Generator> VariableType::generator() {
+std::unique_ptr<Generator> VariableType::generator() const {
   return baseType->generator();
 }
 
@@ -112,7 +112,7 @@ void wrap_output(VariableImpl& pImpl, FunctionFlags flags, std::shared_ptr<Funct
   }
 }
 
-void VariableType::copy(const Tensor & src, Tensor & dst) {
+void VariableType::copy(const Tensor & src, Tensor & dst) const {
   auto& src_ = checked_unpack(src, "src", 0);
   auto& dst_ = checked_unpack(dst, "dst", 1);
   auto& pImpl = static_cast<VariableImpl&>(*dst.get());
@@ -123,7 +123,7 @@ void VariableType::copy(const Tensor & src, Tensor & dst) {
   wrap_output(pImpl, std::move(flags), std::make_shared<Identity>());
 }
 
-Tensor & VariableType::m_resize_(Tensor & self, IntList size) {
+Tensor & VariableType::m_resize_(Tensor & self, IntList size) const {
   auto& self_ = checked_unpack(self, "self", 0);
   auto& pImpl = static_cast<VariableImpl&>(*self.get());
   check_inplace(pImpl);
