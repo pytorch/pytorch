@@ -40,6 +40,8 @@ std::string DeviceTypeName(const int32_t& d) {
       return "CPU";
     case CUDA:
       return "CUDA";
+    case OPENGL:
+      return "OPENGL";
     case MKLDNN:
       return "MKLDNN";
     default:
