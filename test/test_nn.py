@@ -530,7 +530,7 @@ class TestNN(NNTestCase):
                 return {"output": self.l1(inputs).sum()}
 
         net = Net()
-        model_output = net(Variable(torch.randn([5, 10]))
+        model_output = net(Variable(torch.randn([5, 10])))
         model_output["output"].backward()
         self.assertTrue(net.check_backward_hook_flag)
 
