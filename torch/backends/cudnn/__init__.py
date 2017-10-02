@@ -9,11 +9,16 @@ lib = None
 __cudnn_version = None
 # TODO: dynamic version checks via cudnnGetVersion
 
+CUDNN_WIN_LIB = 'cudnn64_6'
+
 
 def _libcudnn():
     global lib, __cudnn_version
     if lib is None:
-        lib = ctypes.cdll.LoadLibrary(None)
+        if sys.platform == "win32":
+            lib = ctypes.cdll.LoadLibrary(CUDNN_WIN_LIB)
+        else:
+            lib = ctypes.cdll.LoadLibrary(None)
         if hasattr(lib, 'cudnnGetErrorString'):
             lib.cudnnGetErrorString.restype = ctypes.c_char_p
             __cudnn_version = lib.cudnnGetVersion()

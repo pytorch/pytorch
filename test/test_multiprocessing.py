@@ -22,6 +22,16 @@ TEST_CUDA_IPC = torch.cuda.is_available() and \
 TEST_MULTIGPU = TEST_CUDA_IPC and torch.cuda.device_count() > 1
 
 
+class SubProcess(mp.Process):
+    def __init__(self, tensor):
+        super(SubProcess, self).__init__()
+        self.tensor = tensor
+        self.daemon = True
+
+    def run(self):
+        self.tensor.add_(3)
+
+
 def simple_fill(queue, event):
     data = queue.get()
     data[0][:] = 4
@@ -269,15 +279,6 @@ class TestMultiprocessing(TestCase):
                 queue_put()
 
     def test_inherit_tensor(self):
-        class SubProcess(mp.Process):
-            def __init__(self, tensor):
-                super(SubProcess, self).__init__()
-                self.tensor = tensor
-                self.daemon = True
-
-            def run(self):
-                self.tensor.add_(3)
-
         t = torch.zeros(5, 5)
         p = SubProcess(t.share_memory_())
         p.start()

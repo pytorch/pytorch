@@ -311,7 +311,10 @@ class TestCase(unittest.TestCase):
                                      munged_id)
         if subname:
             expected_file += "-" + subname
-        expected_file += ".expect"
+        if sys.platform == 'win32' and os.path.exists(expected_file + '.expect.win'):
+            expected_file += ".expect.win"
+        else:
+            expected_file += ".expect"
         expected = None
 
         def accept_output(update_type):
