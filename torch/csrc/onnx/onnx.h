@@ -283,8 +283,7 @@ private:
   std::string producer_version;
   std::string domain;
   std::string doc_string;
-  // graph is a static field in nanopb struct.
-  GraphProto graph;
+  std::unique_ptr<GraphProto> graph;
 public:
   ModelProto() : MicroProto(onnx_ModelProto_init_default) {
     proto.has_ir_version = true;
@@ -296,9 +295,10 @@ public:
   }
   void set_model_version(int64_t i) { proto.has_model_version = true; proto.model_version = i; }
   void set_doc_string(const std::string& s) { proto.doc_string = string(&doc_string, s); }
-  GraphProto* mutable_graph() { return &graph; }
-  // set_graph should be called after encoding graph.
-  void set_graph() { proto.has_graph = true; proto.graph = graph.proto; }
+  GraphProto* mutable_graph() {
+    proto.graph = msg<GraphProto, onnx_GraphProto_fields>(&graph);
+    return graph.get();
+  }
 };
 
 }} // namespace torch::onnx

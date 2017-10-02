@@ -42,7 +42,7 @@ const pb_field_t onnx_ModelProto_fields[8] = {
     PB_FIELD(  4, STRING  , OPTIONAL, CALLBACK, OTHER, onnx_ModelProto, domain, producer_version, 0),
     PB_FIELD(  5, INT64   , OPTIONAL, STATIC  , OTHER, onnx_ModelProto, model_version, domain, 0),
     PB_FIELD(  6, STRING  , OPTIONAL, CALLBACK, OTHER, onnx_ModelProto, doc_string, model_version, 0),
-    PB_FIELD(  7, MESSAGE , OPTIONAL, STATIC  , OTHER, onnx_ModelProto, graph, doc_string, &onnx_GraphProto_fields),
+    PB_FIELD(  7, MESSAGE , OPTIONAL, CALLBACK, OTHER, onnx_ModelProto, graph, doc_string, &onnx_GraphProto_fields),
     PB_LAST_FIELD
 };
 
@@ -94,7 +94,7 @@ const pb_field_t onnx_SparseTensorProto_fields[4] = {
  * numbers or field sizes that are larger than what can fit in 8 or 16 bit
  * field descriptors.
  */
-PB_STATIC_ASSERT((pb_membersize(onnx_ModelProto, graph) < 65536 && pb_membersize(onnx_TensorProto, segment) < 65536 && pb_membersize(onnx_SparseTensorProto, indices) < 65536 && pb_membersize(onnx_SparseTensorProto, values) < 65536), YOU_MUST_DEFINE_PB_FIELD_32BIT_FOR_MESSAGES_onnx_AttributeProto_onnx_NodeProto_onnx_ModelProto_onnx_GraphProto_onnx_TensorProto_onnx_TensorProto_Segment_onnx_SparseTensorProto)
+PB_STATIC_ASSERT((pb_membersize(onnx_TensorProto, segment) < 65536 && pb_membersize(onnx_SparseTensorProto, indices) < 65536 && pb_membersize(onnx_SparseTensorProto, values) < 65536), YOU_MUST_DEFINE_PB_FIELD_32BIT_FOR_MESSAGES_onnx_AttributeProto_onnx_NodeProto_onnx_ModelProto_onnx_GraphProto_onnx_TensorProto_onnx_TensorProto_Segment_onnx_SparseTensorProto)
 #endif
 
 #if !defined(PB_FIELD_16BIT) && !defined(PB_FIELD_32BIT)
@@ -105,7 +105,7 @@ PB_STATIC_ASSERT((pb_membersize(onnx_ModelProto, graph) < 65536 && pb_membersize
  * numbers or field sizes that are larger than what can fit in the default
  * 8 bit descriptors.
  */
-PB_STATIC_ASSERT((pb_membersize(onnx_ModelProto, graph) < 256 && pb_membersize(onnx_TensorProto, segment) < 256 && pb_membersize(onnx_SparseTensorProto, indices) < 256 && pb_membersize(onnx_SparseTensorProto, values) < 256), YOU_MUST_DEFINE_PB_FIELD_16BIT_FOR_MESSAGES_onnx_AttributeProto_onnx_NodeProto_onnx_ModelProto_onnx_GraphProto_onnx_TensorProto_onnx_TensorProto_Segment_onnx_SparseTensorProto)
+PB_STATIC_ASSERT((pb_membersize(onnx_TensorProto, segment) < 256 && pb_membersize(onnx_SparseTensorProto, indices) < 256 && pb_membersize(onnx_SparseTensorProto, values) < 256), YOU_MUST_DEFINE_PB_FIELD_16BIT_FOR_MESSAGES_onnx_AttributeProto_onnx_NodeProto_onnx_ModelProto_onnx_GraphProto_onnx_TensorProto_onnx_TensorProto_Segment_onnx_SparseTensorProto)
 #endif
 
 

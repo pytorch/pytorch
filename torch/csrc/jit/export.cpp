@@ -161,8 +161,6 @@ void encodeModel(onnx::ModelProto* p_m, const std::shared_ptr<Graph>& g,
                  const std::vector<at::Tensor>& initializers) {
   onnx::GraphProto* p_g = p_m->mutable_graph();
   encodeGraph(p_g, g, initializers);
-  // Since graph is a static field, we have to explicitly set it.
-  p_m->set_graph();
 }
 
 void standardizeGraph(const std::shared_ptr<Graph>& graph) {
