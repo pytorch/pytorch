@@ -97,11 +97,13 @@ void THNN_(ClassNLLCriterion_updateGradInput)(
            THCState *state,
            THCTensor *input,
            THCIndexTensor *target,
+           THCTensor *gradOutput,
            THCTensor *gradInput,
            bool sizeAverage,
            THCTensor *weights,
            THCTensor *total_weight,
-           int64_t ignore_index) {
+           int64_t ignore_index,
+           bool reduce) {
   if (THCIndexTensor_(nDimension)(state, target) > 1) {
     THError("multi-target not supported");
   }

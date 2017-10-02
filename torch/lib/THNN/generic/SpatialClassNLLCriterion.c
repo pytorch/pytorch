@@ -35,7 +35,8 @@ void THNN_(SpatialClassNLLCriterion_updateOutput)(
           bool sizeAverage,
           THTensor *weights,
           THTensor *total_weight,
-          int64_t ignore_index)
+          int64_t ignore_index,
+          bool reduce)
 {
   INITIAL_CHECK;
   THTensor_(resize1d)(output, 1);
@@ -85,11 +86,13 @@ void THNN_(SpatialClassNLLCriterion_updateGradInput)(
           THNNState *state,
           THTensor *input,
           THIndexTensor *target,
+          THTensor *gradOutput,
           THTensor *gradInput,
           bool sizeAverage,
           THTensor *weights,
           THTensor *total_weight,
-          int64_t ignore_index)
+          int64_t ignore_index,
+          bool reduce)
 {
   INITIAL_CHECK;
   THTensor_(resizeAs)(gradInput, input);

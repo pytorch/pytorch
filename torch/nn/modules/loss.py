@@ -122,14 +122,15 @@ class NLLLoss(_WeightedLoss):
         >>> output.backward()
     """
 
-    def __init__(self, weight=None, size_average=True, ignore_index=-100):
+    def __init__(self, weight=None, size_average=True, ignore_index=-100, reduce=True):
         super(NLLLoss, self).__init__(weight, size_average)
         self.ignore_index = ignore_index
+        self.reduce = reduce
 
     def forward(self, input, target):
         _assert_no_grad(target)
         return F.nll_loss(input, target, self.weight, self.size_average,
-                          self.ignore_index)
+                          self.ignore_index, self.reduce)
 
 
 class NLLLoss2d(NLLLoss):
