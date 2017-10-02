@@ -379,7 +379,7 @@ class Module(object):
                 module.state_dict(destination, prefix + name + '.', keep_vars=keep_vars)
         return destination
 
-    def load_state_dict(self, state_dict):
+    def load_state_dict(self, state_dict, prefix='', state_tree=None):
         """Copies parameters and buffers from :attr:`state_dict` into
         this module and its descendants. The keys of :attr:`state_dict` must
         exactly match the keys returned by this module's :func:`state_dict()`
@@ -389,25 +389,46 @@ class Module(object):
             state_dict (dict): A dict containing parameters and
                 persistent buffers.
         """
-        own_state = self.state_dict()
-        for name, param in state_dict.items():
-            if name not in own_state:
-                raise KeyError('unexpected key "{}" in state_dict'
-                               .format(name))
-            if isinstance(param, Parameter):
+        
+        if state_tree is None:
+            def _fill_tree(tree, names, val):
+                if len(names) == 1: 
+                    tree[names[0]] = val
+                else:
+                    if names[0] not in tree: tree[names[0]] = {}
+                    _fill_tree(tree[names[0]], names[1:], val)
+            
+            state_tree = {}
+            for key in state_dict.keys():
+                _fill_tree(state_tree, key.split('.'), state_dict[key])
+        
+        def _assign(dest, name):
+            if name not in state_tree:
+                raise KeyError('missing key "{}" in state_dict'.format(prefix + name))
+            src = state_tree.pop(name)
+            if isinstance(src, Parameter):
                 # backwards compatibility for serialized parameters
-                param = param.data
+                src = src.data
             try:
-                own_state[name].copy_(param)
+                dest.copy_(src)
             except:
                 print('While copying the parameter named {}, whose dimensions in the model are'
                       ' {} and whose dimensions in the checkpoint are {}, ...'.format(
-                          name, own_state[name].size(), param.size()))
+                          prefix + name, dest.size(), src.size()))
                 raise
-
-        missing = set(own_state.keys()) - set(state_dict.keys())
-        if len(missing) > 0:
-            raise KeyError('missing keys in state_dict: "{}"'.format(missing))
+        
+        for name, param in self._parameters.items():
+            if param is not None:
+                _assign(param.data, name)
+        for name, buf in self._buffers.items():
+            if buf is not None:
+                _assign(buf, name)
+        for name, module in self._modules.items():
+            if module is not None:
+                module.load_state_dict(state_dict, prefix + name + '.', state_tree.pop(name,{}))
+        
+        if len(state_tree) > 0:
+            raise KeyError('unexpected keys in state_dict: "{}"'.format([prefix + n for n in state_tree]))
 
     def parameters(self):
         """Returns an iterator over module parameters.
