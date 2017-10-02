@@ -796,6 +796,9 @@ class Variable(_C._VariableBase):
     def bernoulli(self):
         return Bernoulli()(self)
 
+    def zero_(self):
+        return Zero.apply(self, True)
+
     def eq(self, other):
         assert not torch.is_tensor(other), "can't compare Variable and tensor"
         return Eq.apply(self, other)

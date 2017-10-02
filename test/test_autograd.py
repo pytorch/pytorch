@@ -1921,6 +1921,7 @@ method_tests = [
     ('addcdiv', (S, S), (0.5, (S, S), (S, S)), 'scale'),
     ('addcdiv', (S, S), (0.5, (S, 1), (1, S)), 'scale_broadcast_rhs'),
     ('addcdiv', (1,), (0.5, (S, S, 1), (1, S)), 'scale_broadcast_all'),
+    ('zero_', (S, S, S), ()),
     ('norm', (S, S, S), (2,)),
     ('norm', (S, S, S), (3,), '3'),
     ('norm', torch.rand(S, S, S) + 5e-2, (1.5,), '1_5'),
