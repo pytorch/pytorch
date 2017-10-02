@@ -4185,6 +4185,12 @@ class TestTorch(TestCase):
             y[0][1] = 3
             self.assertTrue(x[0][1] == 3)
 
+    def test_dlpack_conversion(self):
+        x = torch.randn(1, 2, 3, 4).type('torch.FloatTensor')
+        y = torch._C._to_dlpack(x)
+        z = torch._C._from_dlpack(y)
+        self.assertEqual(z, x)
+
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_from_numpy(self):
         dtypes = [
