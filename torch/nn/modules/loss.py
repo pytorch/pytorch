@@ -278,7 +278,6 @@ class MSELoss(_Loss):
         super(MSELoss, self).__init__(size_average)
         self.reduce = reduce
 
-
     def forward(self, input, target):
         _assert_no_grad(target)
         return F.mse_loss(input, target, size_average=self.size_average, reduce=self.reduce)

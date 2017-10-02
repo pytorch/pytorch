@@ -3521,13 +3521,12 @@ class TestMSELoss(torch.nn.modules.module.Module):
         self.mseloss = torch.nn.MSELoss(*args, **kwargs)
         self.target = target
 
-
     def forward(self, input):
         return self.mseloss.forward(input, self.target.type_as(input))
 
 
 def mseloss_no_reduce_module_test():
-    input_size = (2,3,4,5)
+    input_size = (2, 3, 4, 5)
     target = torch.randn(*input_size)
     return dict(
         fullname='MSELoss_no_reduce',

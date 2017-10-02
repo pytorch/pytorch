@@ -29,7 +29,7 @@ struct mse_functor
 template <typename Dtype>
 struct mse_updateOutput_functor
 {
-  mseUpdateOutput_functor() {}
+  mse_updateOutput_functor() {}
 
   __device__ void operator()(
       const Dtype *input, 
