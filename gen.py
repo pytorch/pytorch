@@ -32,7 +32,6 @@ STORAGE_DERIVED_H = CodeTemplate.from_file(TEMPLATE_PATH + "/StorageDerived.h")
 TYPE_DERIVED_CPP = CodeTemplate.from_file(TEMPLATE_PATH + "/TypeDerived.cpp")
 TYPE_DERIVED_H = CodeTemplate.from_file(TEMPLATE_PATH + "/TypeDerived.h")
 TYPE_H = CodeTemplate.from_file(TEMPLATE_PATH + "/Type.h")
-TYPE_METHODS_H = CodeTemplate.from_file(TEMPLATE_PATH + "/TypeMethods.h")
 TYPE_CPP = CodeTemplate.from_file(TEMPLATE_PATH + "/Type.cpp")
 
 TENSOR_DERIVED_CPP = CodeTemplate.from_file(
@@ -225,8 +224,6 @@ declarations = [d
                 for d in cwrap_parser.parse(file)]
 declarations += nn_parse.run(nn_files)
 declarations = preprocess_declarations.run(declarations)
-# print(yaml.dump(declarations))
-
 for fname, env in generators.items():
     write(fname, GENERATOR_DERIVED.substitute(env))
 
@@ -250,7 +247,6 @@ for backend in backends:
                 backend, density, scalar_type, declarations))
 
 write('Type.h', TYPE_H.substitute(top_env))
-write('TypeMethods.h', TYPE_METHODS_H.substitute(top_env))
 write('Type.cpp', TYPE_CPP.substitute(top_env))
 
 write('Tensor.h', TENSOR_H.substitute(top_env))

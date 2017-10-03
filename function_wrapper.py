@@ -8,12 +8,12 @@ else:
     string_type = basestring
 
 # temporary things we cannot handle
-EXCLUDE_PATTERN = "bernoulli.*|normal.*|exponential.*|random.*|arange.*"
+EXCLUDE_PATTERN = "bernoulli.*"
 # what has to be done to add a Operation ...
 # 1. if broadcasting or without the full list of arguments, add a non-virtual
 #    declaration under Type.h
 TYPE_METHOD_DECLARATION_NON_VIRTUAL = CodeTemplate("""\
-${return_type} ${method_prefix}${api_name}(${formals}) const;
+${return_type} ${method_prefix}${api_name}(${formals_with_defaults}) const;
 """)
 # 2. broadcasting functions are implemented in Type.cpp
 TYPE_METHOD_DEFINITION_BROADCAST = CodeTemplate("""\
@@ -23,46 +23,40 @@ ${return_type} Type::${method_prefix}${api_name}(${formals}) const {
     return ${method_prefix_derived}${api_name}(${broadcast_modified_actuals});
 }
 """)
-# 3. functions without the full list of arguments are implemented in TypeMethods.h
-TYPE_METHOD_INLINE = CodeTemplate("""\
-inline ${return_type} Type::${method_prefix}${api_name}(${formals}) const {
-    ${return_call}${method_prefix}${api_name}(${actuals_with_constants});
-}
-""")
-# 4. add virtual dispatch declaration to Type.h and default impl to Type.cpp
+# 3. add virtual dispatch declaration to Type.h and default impl to Type.cpp
 TYPE_METHOD_DECLARATION = CodeTemplate("""\
-virtual ${return_type} ${method_prefix}${api_name}(${formals}) const;
+virtual ${return_type} ${method_prefix}${api_name}(${formals_with_defaults}) const;
 """)
 TYPE_METHOD_DEFINITION = CodeTemplate("""\
 ${return_type} Type::${method_prefix}${api_name}(${formals}) const {
     throw std::runtime_error(std::string("${api_name} is not implemented for type ") + toString());
 }
 """)
-# 5. add virtual override to TypeDerived.h
+# 4. add virtual override to TypeDerived.h
 TYPE_DERIVED_DECLARATION = CodeTemplate("""\
 virtual ${return_type} ${method_prefix_derived}${api_name}(${formals}) const override;
 """)
-# 6. add override definition to TypeDerived.cpp
+# 5. add override definition to TypeDerived.cpp
 TYPE_DERIVED_DEFINITION = CodeTemplate("""\
 ${return_type} ${Type}::${method_prefix_derived}${api_name}(${formals}) const {
     ${type_definition_body}
 }
 """)
-# 7. add non-virtual declaration to Tensor.h
+# 6. add non-virtual declaration to Tensor.h
 TENSOR_METHOD_DECLARATION = CodeTemplate("""\
-${return_type} ${api_name}(${method_formals})${const_mark};
+${return_type} ${api_name}(${method_formals_with_defaults})${const_mark};
 """)
-# 8. add non-virtual declaration to Tensor.cpp
+# 7. add non-virtual declaration to Tensor.cpp
 TENSOR_METHOD_DEFINITION = CodeTemplate("""\
 inline ${return_type} Tensor::${api_name}(${method_formals})${const_mark} {
     return type().${method_prefix}${api_name}(${method_actuals});
 }
 """)
-# 9. add a method declaration in Functions.h
+# 8. add a method declaration in Functions.h
 FUNCTION_DECLARATION = CodeTemplate("""\
-static inline ${return_type} ${api_name}(${formals});
+static inline ${return_type} ${api_name}(${formals_with_defaults});
 """)
-# 10. add a method definition in Functions.cpp
+# 9. add method definition in Functions.h
 FUNCTION_DEFINITION = CodeTemplate("""\
 static inline ${return_type} ${api_name}(${formals}) {
     return ${inferred_type}.${api_name}(${actuals});
@@ -97,7 +91,7 @@ TYPE_FORMAL_GENERIC = {
     'THIndexTensor*': 'Tensor &',
     'THIntegerTensor*': 'Tensor &',
     'THStorage*': 'Storage &',
-    'THGenerator*': 'Generator &',
+    'THGenerator*': 'Generator *',
     'THSize*': 'IntList',
     'THStride*': 'IntList',
     'accreal': 'Scalar',
@@ -111,7 +105,7 @@ DYNAMIC_TYPE = {
     'THIndexTensor*': 'IndexTensor',
     'THIntegerTensor*': 'IntegerTensor',
     'THStorage*': 'Storage',
-    'THGenerator*': 'Generator',
+    'THGenerator*': 'Generator*',
     'THSize*': 'IntList',
     'THStride*': 'IntList',
     'accreal': 'accreal',
@@ -143,7 +137,7 @@ CHECKED_CAST = {
         CodeTemplate(
             'checked_cast<${Backend}IntTensor>(${arg_name}.pImpl,"${arg_name}",${arg_pos}, ${null_okay})'),
     'THStorage*': CodeTemplate('checked_cast<${Storage}>(&${arg_name},"${arg_name}",${arg_pos}, false)'),
-    'THGenerator*': CodeTemplate('check_generator<${Backend}Generator>(&${arg_name})'),
+    'THGenerator*': CodeTemplate('check_generator<${Backend}Generator>(${arg_name}, &context->defaultGenerator(backend()))'),
     'THSize*': CodeTemplate('THLongStorageView::make(${arg_name}, true)'),
     'THStride*': CodeTemplate('THLongStorageView::make(${arg_name}, false, true)'),
     'real': CodeTemplate('${arg_name}.to${ScalarName}()'),
@@ -176,17 +170,17 @@ ALLOC_WRAP = {
 CONSTANT_REPLACEMENTS = [
     ('AS_REAL', '${AS_REAL}'),
     ('THPDefaultGenerator->cdata',
-     'dynamic_cast<${Generator}&>(context->defaultGenerator(backend())).generator'),
+     'dynamic_cast<${Generator}&>().generator'),
     ('__storage_size.get\\(\\)',
      'THLongStorageView::make(static_cast<int64_t>(storage.size()))'),
     ('__last_dim', 'self.ndimension()-1'),
 ]
 
-# Replacements for constants when calling other ATen functions
-INLINE_CONSTANT_REPLACEMENTS = [
+# Replacements for constants in header file function definitions
+HEADER_CONSTANT_REPLACEMENTS = [
     (r'AS_REAL\((.*)\)', r'\1'),
-    ('THPDefaultGenerator->cdata', 'context->defaultGenerator(backend())'),
-    ('__last_dim', 'self.ndimension()-1'),
+    ('THPDefaultGenerator->cdata', 'nullptr'),
+    ('__last_dim', '-1'),
 ]
 
 
@@ -249,12 +243,19 @@ def create_generic(top_env, declarations):
 
     def get_formals(option, include_constants=False):
         seen = set()
-        result = []
+        pos_args = []
+        kwd_args = []
 
         def insert(argument):
             if argument['name'] not in seen:
                 seen.add(argument['name'])
-                result.append(argument)
+                if argument.get('kwarg_only', False):
+                    kwd_args.append(argument)
+                else:
+                    pos_args.append(argument)
+        for argument in option['arguments']:
+            if argument.get('output') and not argument.get('allocate', False):
+                insert(argument)
         for argument in option['arguments']:
             if argument['type'] == 'THSTensor*':
                 # only enable for a subset of Dense/Sparse ops
@@ -265,28 +266,9 @@ def create_generic(top_env, declarations):
                 insert(argument)
             elif is_real_argument_to_wrapper(argument):
                 insert(argument)
-        for argument in option['arguments']:
-            if argument.get('output') and not argument.get('allocate', False):
-                insert(argument)
 
+        result = pos_args + kwd_args
         return [translate_formal(argument, option) for argument in result]
-
-    def get_actuals_with_constants(option):
-        actuals = []
-        for arg in get_formals(option, include_constants=True):
-            if arg['type'] != 'CONSTANT':
-                actuals.append(arg['name'])
-                continue
-            v = str(arg.get('default', arg['name']))
-            for pattern, replacement in INLINE_CONSTANT_REPLACEMENTS:
-                v = re.sub(pattern, replacement, v)
-            if v in {'NULL', 'nullptr'}:
-                if arg['name'] == 'stride':
-                    v = 'IntList()'
-                else:
-                    v = 'Tensor()'
-            actuals.append(v)
-        return actuals
 
     def get_return_types(option):
         ret = option['return']
@@ -312,14 +294,28 @@ def create_generic(top_env, declarations):
         return "std::tuple<{}>".format(','.join(r['type'] for r in return_types))
         return return_types
 
-    def find_first_tensor(formals):
+    def find_dispatch_tensor(formals):
+        # dispatch to self if it's a parameter
         for formal in formals:
-            if 'Tensor' == formal['dynamic_type'] or 'TensorList' == formal['dynamic_type']:
+            if formal['name'] == 'self' and formal['dynamic_type'] == 'Tensor':
+                return formal['name']
+        # otherwise dispatch to the first Tensor or TensorList
+        for formal in formals:
+            if 'TensorList' == formal['dynamic_type'] or formal['dynamic_type'] == 'Tensor':
                 return formal['name']
         return None
 
     def format_formal(f):
         return '{} {}'.format(f['type'], f['name'])
+
+    def formal_with_default(f):
+        s = format_formal(f)
+        v = f.get('default')
+        if v is None:
+            return s
+        for pattern, replacement in HEADER_CONSTANT_REPLACEMENTS:
+            v = re.sub(pattern, replacement, str(v))
+        return '{}={}'.format(s, v)
 
     def get_broadcast_argument(option):
         for argument in option['arguments']:
@@ -359,6 +355,7 @@ def create_generic(top_env, declarations):
         formals = get_formals(option)
         option['formals_list'] = formals
         option['formals'] = [format_formal(f) for f in formals]
+        option['formals_with_defaults'] = [formal_with_default(f) for f in formals]
         option['returns'] = get_return_types(option)
         option['return_type'] = format_return_type(option['returns'])
         option['return_call'] = 'return ' if option['return_type'] != 'void' else ''
@@ -366,6 +363,8 @@ def create_generic(top_env, declarations):
 
         option['method_formals'] = [format_formal(f) for f in formals
                                     if f['name'] != 'self']
+        option['method_formals_with_defaults'] = (
+            [formal_with_default(f) for f in formals if f['name'] != 'self'])
         option['method_actuals'] = [
             f['name'] if f['name'] != 'self' else '*this' for f in formals]
 
@@ -373,8 +372,8 @@ def create_generic(top_env, declarations):
 
         is_method = 'method' in option['variants']
         is_function = 'function' in option['variants']
-        first_tensor = find_first_tensor(formals)
-        is_namespace_function = is_function and first_tensor is not None
+        dispatch_tensor = find_dispatch_tensor(formals)
+        is_namespace_function = is_function and dispatch_tensor is not None
 
         # method-only things are prefixed with m_ in Type so that
         # another function-only variant can exist without the name colliding
@@ -383,7 +382,7 @@ def create_generic(top_env, declarations):
         env = nested_dict(option, top_env)
 
         broadcast_arg = get_broadcast_argument(option)
-        if broadcast_arg is None and option['has_full_argument_list']:
+        if broadcast_arg is None:
             top_env['type_method_declarations'].append(
                 TYPE_METHOD_DECLARATION.substitute(env))
             top_env['type_method_definitions'].append(
@@ -392,13 +391,6 @@ def create_generic(top_env, declarations):
             top_env['type_method_declarations'].append(
                 TYPE_METHOD_DECLARATION_NON_VIRTUAL.substitute(env))
 
-        if not option['has_full_argument_list']:
-            # functions without the full list of arguments are implemented
-            # inline in TypeMethods.h
-            option['actuals_with_constants'] = get_actuals_with_constants(option)
-            top_env['type_method_inline_definitions'].append(
-                TYPE_METHOD_INLINE.substitute(env))
-        elif broadcast_arg is not None:
             # "s_" for "same size".
             option['method_prefix_derived'] = 's_' + option['method_prefix']
             same_size_option = option.copy()
@@ -434,7 +426,7 @@ def create_generic(top_env, declarations):
             method_of.append('Tensor')
 
         if is_namespace_function:
-            option['inferred_type'] = 'infer_type({})'.format(first_tensor)
+            option['inferred_type'] = 'infer_type({})'.format(dispatch_tensor)
             top_env['function_declarations'].append(
                 FUNCTION_DECLARATION.substitute(env))
             top_env['function_definitions'].append(
@@ -448,7 +440,6 @@ def create_generic(top_env, declarations):
             'method_of': method_of,
             'returns': option['returns'],
             'inplace': option['inplace'],
-            'has_full_argument_list': option['has_full_argument_list'],
         })
 
     output_declarations = []
@@ -476,8 +467,7 @@ def create_derived(backend_type_env, declarations):
         return argument['type'] in CHECKED_CAST
 
     def nullable_argument(argument):
-        return (argument['type'] in {'THIntegerTensor*', 'THTensor*'} and
-                argument.get('default', '') in {'NULL', 'nullptr'})
+        return argument.get('is_nullable', False)
 
     def bool_option_is_string(argument):
         return 'if_true' in argument and isinstance(argument['if_true'], string_type)
@@ -721,7 +711,7 @@ def create_derived(backend_type_env, declarations):
 
     for declaration in declarations:
         for option in declaration['options']:
-            if not option.get('skip', False) and option['has_full_argument_list']:
+            if not option.get('skip', False):
                 try:
                     process_option(option)
                 except NYIError:

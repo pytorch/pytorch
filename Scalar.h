@@ -1,24 +1,32 @@
 #pragma once
 
+#include <assert.h>
 #include <stdint.h>
 #include <stdexcept>
 #include <string>
-#include "ATen/Context.h"
+
+#include "ATen/ATenGeneral.h"
 #include "ATen/Half.h"
-#include "ATen/Type.h"
-#include "ATen/Utils.h"
-#include "ATen/Tensor.h"
+#include "ATen/ScalarType.h"
+#include "ATen/TensorImpl.h"
+
 
 namespace at {
+
+struct TensorImpl;
+struct Tensor;
 
 class Scalar {
 public:
   Scalar() : Scalar(int64_t(0)) {}
-
-  explicit Scalar(const Tensor & t)
-  : tag(Tag::HAS_t), t(t) {
-    AT_ASSERT(t.dim() == 0,"Attempting to create a Scalar from a %d dim tensor",t.dim());
+  ~Scalar() {
+    if (Tag::HAS_t == tag) {
+      v.t->release();
+    }
   }
+
+  explicit Scalar(const Tensor & t);
+
 #define DEFINE_IMPLICIT_CTOR(type,name,member) \
   Scalar(type vv) \
   : tag(Tag::HAS_##member) { \
@@ -46,7 +54,7 @@ public:
     if (Tag::HAS_t != tag) {
       return *this;
     }
-    return t.pImpl->localScalar();
+    return v.t->localScalar();
   }
 
 #define DEFINE_ACCESSOR(type,name,member) \
@@ -69,16 +77,7 @@ public:
     } \
   }
 
-  Tensor toTensor() const {
-    if (Tag::HAS_t == tag) {
-      return t;
-    } else if (Tag::HAS_d == tag) {
-      return CPU(kDouble).scalarTensor(*this);
-    } else {
-      assert(Tag::HAS_i == tag);
-      return CPU(kLong).scalarTensor(*this);
-    }
-  }
+  Tensor toTensor() const;
 
   AT_FORALL_SCALAR_TYPES(DEFINE_ACCESSOR)
 
@@ -103,10 +102,8 @@ private:
   union {
     double d;
     int64_t i;
+    TensorImpl* t;
   } v;
-  Tensor t; //Note: cannot be in union be cause of copy/destruct behavior
-            //ideally we try to pack this structure tighter if it becomes
-            //a performance problem.
   friend struct Type;
 };
 
