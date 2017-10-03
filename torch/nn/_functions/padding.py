@@ -4,6 +4,17 @@ from torch.autograd import Function, Variable
 class ConstantPadNd(Function):
 
     @staticmethod
+    def symbolic(g, input, pad, value=0):
+        dim = len(input.type().sizes())
+        paddings = []
+        for i, j in zip(pad[0::2], pad[1::2]):
+            paddings = [i, j] + paddings
+        while len(paddings) < 2 * dim:
+            paddings = [0, 0] + paddings
+        return g.appendNode(g.create("Pad", [input]).is_("paddings", paddings)
+                             .s_("mode", "constant").f_("value", value))
+
+    @staticmethod
     def forward(ctx, input, pad, value=0):
         ctx.pad = pad
         ctx.value = value
