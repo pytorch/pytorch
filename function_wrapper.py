@@ -137,7 +137,9 @@ CHECKED_CAST = {
         CodeTemplate(
             'checked_cast<${Backend}IntTensor>(${arg_name}.pImpl,"${arg_name}",${arg_pos}, ${null_okay})'),
     'THStorage*': CodeTemplate('checked_cast<${Storage}>(&${arg_name},"${arg_name}",${arg_pos}, false)'),
-    'THGenerator*': CodeTemplate('check_generator<${Backend}Generator>(${arg_name}, &context->defaultGenerator(backend()))'),
+    'THGenerator*':
+        CodeTemplate(
+            'check_generator<${Backend}Generator>(${arg_name}, &context->defaultGenerator(backend()))'),
     'THSize*': CodeTemplate('THLongStorageView::make(${arg_name}, true)'),
     'THStride*': CodeTemplate('THLongStorageView::make(${arg_name}, false, true)'),
     'real': CodeTemplate('${arg_name}.to${ScalarName}()'),
