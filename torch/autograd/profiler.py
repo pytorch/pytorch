@@ -244,6 +244,9 @@ class FunctionEventAvg(FormattedTimesMixin):
             self.cpu_time_str, self.cuda_time_str, self.key)
 
 
+################################################################################
+# Utilities
+
 def demangle(name):
     """Demangle a C++ identifier using c++filt"""
     try:
@@ -251,6 +254,12 @@ def demangle(name):
             return subprocess.check_output(['c++filt', '-n', name], stderr=devnull).rstrip().decode("ascii")
     except subprocess.CalledProcessError:
         return name
+
+
+class StringTable(defaultdict):
+    def __missing__(self, key):
+        self[key] = demangle(key)
+        return self[key]
 
 
 ################################################################################
@@ -264,6 +273,7 @@ def parse_cpu_trace(thread_records):
     start_time = None
     functions = []
     function_stack = []
+    string_table = StringTable()
     for r in itertools.chain(*thread_records):
         record = Record(*r)
         if record.name == '__start_profile':
@@ -272,7 +282,7 @@ def parse_cpu_trace(thread_records):
             continue
         elif record.kind == 'push':
             function_stack.append(FunctionEvent(
-                id=next_id, name=demangle(record.name), start=record.timestamp, end=record.timestamp))
+                id=next_id, name=string_table[record.name], start=record.timestamp, end=record.timestamp))
             next_id += 1
         elif record.kind == 'pop':
             function_stack[-1].end = record.timestamp
