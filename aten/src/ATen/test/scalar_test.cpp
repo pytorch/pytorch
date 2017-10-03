@@ -63,6 +63,14 @@ int main() {
   Tensor next_h = i2h.add(h2h);
   next_h = next_h.tanh();
 
+  bool threw = false;
+  try {
+    Scalar{Tensor{}};
+  } catch (std::runtime_error& e) {
+    threw = true;
+  }
+  ASSERT(threw);
+
   if(at::hasCUDA()) {
     auto r = CUDA(Float).copy(next_h);
 
