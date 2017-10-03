@@ -10,11 +10,8 @@ void THNN_(ClassNLLCriterion_updateOutput)(
            bool sizeAverage,
            THCTensor *weights,
            THCTensor *total_weight,
-           int64_t ignore_index) {
-  THCTensor_(resize1d)(state, output, 1);
-  THCTensor_(resize1d)(state, total_weight, 1);
-  ignore_index -= TH_INDEX_BASE;
-
+           int64_t ignore_index,
+           bool reduce) {
   if (THCIndexTensor_(nDimension)(state, target) > 1) {
     THError("multi-target not supported");
   }
@@ -45,6 +42,37 @@ void THNN_(ClassNLLCriterion_updateOutput)(
     THError("weight tensor should be defined either for all %d classes or no classes"
             " but got weight tensor of shape: %s", n_classes, s1.str);
   }
+
+  if (!reduce && n_dims == 2) {
+    THCTensor_(resize1d)(state, output, batch_size);
+    bool not_contiguous_weights = weights && !THCTensor_(isContiguous)(state, weights);
+    if (not_contiguous_weights) {
+      weights = THCTensor_(newContiguous)(state, weights);
+    }
+
+    ClassNLLCriterion_updateOutput_no_reduce_kernel<real>
+      <<<GET_BLOCKS(batch_size), CUDA_NUM_THREADS, 0, THCState_getCurrentStream(state)>>>(
+        batch_size,
+        toDeviceTensor<real, 2>(state, input),
+        toDeviceTensor<THCIndex_t, 1>(state, target),
+        toDeviceTensor<real, 1>(state, output),
+        weights ? THCTensor_(data)(state, weights) : NULL,
+        ignore_index);
+
+    if (not_contiguous_weights) {
+      THCTensor_(free)(state, weights);
+    }
+    return;
+  }
+
+  if (!reduce && n_dims <= 1) {
+    sizeAverage = false;
+  }
+
+  THCTensor_(resize1d)(state, output, 1);
+  THCTensor_(resize1d)(state, total_weight, 1);
+  ignore_index -= TH_INDEX_BASE;
+
 
   input = THCTensor_(newContiguous)(state, input);
   weights = weights ? THCTensor_(newContiguous)(state, weights) : NULL;
@@ -107,7 +135,6 @@ void THNN_(ClassNLLCriterion_updateGradInput)(
   if (THCIndexTensor_(nDimension)(state, target) > 1) {
     THError("multi-target not supported");
   }
-  ignore_index -= TH_INDEX_BASE;
 
   int n_dims = THCTensor_(nDimension)(state, input);
   int n_classes = THCTensor_(size)(state, input, n_dims - 1);
@@ -138,6 +165,34 @@ void THNN_(ClassNLLCriterion_updateGradInput)(
   if (weights && THCTensor_(nElement)(state, weights) != n_classes) {
     THError("weight tensor should be defined either for all or no classes");
   }
+
+  if (!reduce && n_dims == 2) {
+    THCUNN_check_dim_size(state, gradOutput, 1, 0, batch_size);
+    bool not_contiguous_weights = weights && !THCTensor_(isContiguous)(state, weights);
+    if (not_contiguous_weights) {
+      weights = THCTensor_(newContiguous)(state, weights);
+    }
+
+    ClassNLLCriterion_updateGradInput_no_reduce_kernel<real>
+      <<<GET_BLOCKS(batch_size), CUDA_NUM_THREADS, 0, THCState_getCurrentStream(state)>>>(
+        batch_size,
+        toDeviceTensor<THCIndex_t, 1>(state, target),
+        toDeviceTensor<real, 1>(state, gradOutput),
+        toDeviceTensor<real, 2>(state, gradInput),
+        weights ? THCTensor_(data)(state, weights) : NULL,
+        ignore_index);
+    
+    if (not_contiguous_weights) {
+      THCTensor_(free)(state, weights); 
+    }
+    return;
+  }
+
+  if (!reduce && n_dims <= 1) {
+    sizeAverage = false;
+  }
+
+  ignore_index -= TH_INDEX_BASE;
 
   weights = weights ? THCTensor_(newContiguous)(state, weights) : NULL;
   target = THCIndexTensor_(newContiguous)(state, target);

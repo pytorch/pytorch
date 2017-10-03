@@ -2,6 +2,9 @@
 #include "common.h"
 #include "THCHalf.h"
 #include "THCHalfAutoNumerics.cuh"
+#include "THCDeviceTensor.cuh"
+#include "THCDeviceTensorUtils.cuh"
+#include "THCDeviceUtils.cuh"
 
 #include <stdio.h>
 #include <assert.h>
@@ -31,6 +34,47 @@ __global__ void cunn_ClassNLLCriterion_updateOutput_kernel1(Dtype *output,
     if (size_average && *total_weight > 0) {
       *output /= *total_weight;
     }
+  }
+}
+
+template <typename Dtype>
+__global__ void ClassNLLCriterion_updateOutput_no_reduce_kernel(
+    int64_t batch_size,
+    THCDeviceTensor<Dtype, 2> input,
+    THCDeviceTensor<THCIndex_t, 1> target,
+    THCDeviceTensor<Dtype, 1> output, 
+    Dtype *weights,
+    int64_t ignore_index) {
+
+  CUDA_KERNEL_LOOP(index, batch_size) {
+    int64_t cur_target = target[index];
+    if (cur_target == ignore_index) {
+      output[index] = ScalarConvert<int, Dtype>::to(0);
+      continue;
+    }
+    Dtype weight =
+       weights ? weights[cur_target] : ScalarConvert<int, Dtype>::to(1);
+    output[index] = -weight * input[index][cur_target];
+  }
+}
+
+template <typename Dtype>
+__global__ void ClassNLLCriterion_updateGradInput_no_reduce_kernel(
+    int64_t batch_size,
+    THCDeviceTensor<THCIndex_t, 1> target,
+    THCDeviceTensor<Dtype, 1> gradOutput,
+    THCDeviceTensor<Dtype, 2> gradInput,
+    Dtype *weights,
+    int64_t ignore_index) {
+
+  CUDA_KERNEL_LOOP(index, batch_size) {
+    int64_t cur_target = target[index];
+    if (cur_target == ignore_index) {
+      continue;
+    }
+    Dtype weight =
+       weights ? weights[cur_target] : ScalarConvert<int, Dtype>::to(1);
+    gradInput[index][cur_target] = -weight * gradOutput[index];
   }
 }
 
