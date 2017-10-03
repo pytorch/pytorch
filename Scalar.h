@@ -20,7 +20,7 @@ class Scalar {
 public:
   Scalar() : Scalar(int64_t(0)) {}
   ~Scalar() {
-    if (Tag::HAS_t == tag) {
+    if (Tag::HAS_t == tag && v.t) {
       v.t->release();
     }
   }
