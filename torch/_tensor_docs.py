@@ -1453,18 +1453,18 @@ Example:
 
 add_docstr_all('stride',
                """
-stride(dim) -> tuple or int 
+stride(dim) -> tuple or int
 
 Returns the stride of the tensor.
 Stride is the jump necessary to go from one element to the next one in the specified dimension dim.
-Tuple is returned when no Argument is passed. So we get stride in all dimensions. 
+Tuple is returned when no Argument is passed. So we get stride in all dimensions.
 Integer value is returned when we desire stride in particular dimension.
 
 Args:
     dim (int): The desired dimension in which stride is required.
 
 Example:
-	>>> x = torch.Tensor([[1,2,3,4,5],[6,7,8,9,10]])
+	>>> x = torch.Tensor([[1, 2, 3, 4, 5], [6, 7, 8, 9, 10]])
 	>>> x.stride()
 	(5, 1)
 	>>>x.stride(0)
