@@ -1464,13 +1464,13 @@ Args:
     dim (int): The desired dimension in which stride is required.
 
 Example:
->>> x = torch.Tensor([[1, 2, 3, 4, 5], [6, 7, 8, 9, 10]])
->>> x.stride()
-(5, 1)
->>>x.stride(0)
-5
->>> x.stride(-1)
-1
+    >>> x = torch.Tensor([[1, 2, 3, 4, 5], [6, 7, 8, 9, 10]])
+    >>> x.stride()
+    (5, 1)
+    >>>x.stride(0)
+    5
+    >>> x.stride(-1)
+    1
 """)
 
 add_docstr_all('sub',
@@ -1649,9 +1649,9 @@ in the returned tensor will be `(sizedim - size) / step + 1`
 An additional dimension of size size is appended in the returned tensor.
 
 Args:
- dim (int): dimension in which unfolding happens
- size (int): size of each slice that is unfolded
- step (int): the step between each slice
+    dim (int): dimension in which unfolding happens
+    size (int): size of each slice that is unfolded
+    step (int): the step between each slice
 
 Example::
 
