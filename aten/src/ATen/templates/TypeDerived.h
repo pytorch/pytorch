@@ -4,6 +4,12 @@
 #include "ATen/TensorMethods.h"
 #include "ATen/CheckGenerator.h"
 
+#ifdef _MSC_VER
+#ifdef Type
+#undef Type
+#endif
+#endif
+
 namespace at {
 
 struct ${Type} final : public Type {
