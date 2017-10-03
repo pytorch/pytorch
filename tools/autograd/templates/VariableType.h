@@ -39,6 +39,7 @@ struct VariableType : public at::Type {
 
 private:
   at::Tensor & checked_unpack(const Tensor & t, const char * name, int pos) const;
+  std::vector<at::Tensor> checked_unpack(const at::TensorList &tl, const char *name, int pos) const;
   Variable as_variable(Tensor tensor) const;
   Variable as_variable(const Scalar & scalar) const;
 

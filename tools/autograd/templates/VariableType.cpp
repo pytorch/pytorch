@@ -65,14 +65,35 @@ Tensor & VariableType::checked_unpack(const Tensor & t, const char * name, int p
 {
  if(!t.defined()) {
    runtime_error("Expected a Tensor of type %s but found an undefined Tensor for argument #%d '%s'",
-     toString(),pos,name);
+     toString(), pos, name);
  }
  if (&t.type() == this) {
    return static_cast<VariableImpl*>(t.pImpl)->data;
  }
  runtime_error("Expected object of type %s but found type %s for argument #%d '%s'",
-   toString(),t.type().toString(),pos,name);
+   toString(),t.type().toString(), pos, name);
 }
+
+std::vector<at::Tensor> VariableType::checked_unpack(const at::TensorList &tl, const char *name, int pos) const {
+ std::vector<at::Tensor> ret(tl.size());
+ for (size_t i = 0; i < tl.size(); ++i) {
+   const auto &t = tl[i];
+   if(!t.defined()) {
+     runtime_error("Expected a Tensor of type %s but found an undefined Tensor at position #%d "
+                   "for iterable argument #%d '%s'",
+                   toString(), i, pos, name);
+   }
+   if (&t.type() == this) {
+     ret[i] = static_cast<VariableImpl*>(t.pImpl)->data;
+   } else {
+   runtime_error("Expected object of type %s but found type %s at position #%d "
+                 "for iterable argument #%d '%s'",
+                 toString(),t.type().toString(), i, pos, name);
+   }
+  }
+  return ret;
+}
+
 
 Variable VariableType::as_variable(Tensor tensor) const {
   return make_variable(std::move(tensor));
@@ -135,6 +156,14 @@ Tensor & VariableType::m_resize_(Tensor & self, IntList size) const {
   }
   baseType->m_resize_(self_, size);
   return self;
+}
+
+std::vector<int64_t> to_arg_sizes(TensorList tensors, int64_t dim) {
+  std::vector<int64_t> arg_sizes(tensors.size());
+  for (size_t i = 0; i < tensors.size(); ++i) {
+    arg_sizes[i] = tensors[i].size(dim);
+  }
+  return arg_sizes;
 }
 
 ${type_derived_method_definitions}

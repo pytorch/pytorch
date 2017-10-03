@@ -22,9 +22,11 @@
 
 #include <Python.h>
 #include <string>
+#include <sstream>
 #include <vector>
 #include <ATen/ATen.h>
 
+#include "torch/csrc/THP.h"
 #include "torch/csrc/utils/object_ptr.h"
 #include "torch/csrc/autograd/python_variable.h"
 #include "torch/csrc/utils/python_numbers.h"
@@ -43,6 +45,9 @@ struct PythonArgs;
 struct type_exception : public std::runtime_error {
   using std::runtime_error::runtime_error;
 };
+
+[[noreturn]]
+void type_error(const char *format, ...);
 
 struct PythonArgParser {
   explicit PythonArgParser(std::vector<std::string> fmts);
@@ -70,6 +75,7 @@ struct PythonArgs {
 
   inline at::Tensor tensor(int i);
   inline at::Scalar scalar(int i);
+  inline std::vector<at::Tensor> tensorlist(int i);
   inline std::vector<int64_t> intlist(int i);
   inline int64_t toInt64(int i);
   inline double toDouble(int i);
@@ -112,6 +118,9 @@ struct FunctionParameter {
 
 inline at::Tensor PythonArgs::tensor(int i) {
   if (!args[i]) return at::Tensor();
+  if (!THPVariable_Check(args[i])) {
+    type_error("expected Variable as argument %d, but got %s", i, THPUtils_typename(args[i]));
+  }
   return reinterpret_cast<THPVariable*>(args[i])->cdata;
 }
 
@@ -121,6 +130,23 @@ inline at::Scalar PythonArgs::scalar(int i) {
     return at::Scalar(THPUtils_unpackDouble(args[i]));
   }
   return at::Scalar(static_cast<int64_t>(THPUtils_unpackLong(args[i])));
+}
+
+inline std::vector<at::Tensor> PythonArgs::tensorlist(int i) {
+  if (!args[i]) return std::vector<at::Tensor>();
+  PyObject* arg = args[i];
+  auto tuple = PyTuple_Check(arg);
+  auto size = tuple ? PyTuple_GET_SIZE(arg) : PyList_GET_SIZE(arg);
+  std::vector<at::Tensor> res(size);
+  for (int idx = 0; idx < size; idx++) {
+    PyObject* obj = tuple ? PyTuple_GET_ITEM(arg, idx) : PyList_GET_ITEM(arg, idx);
+    if (!THPVariable_Check(obj)) {
+      type_error("expected Variable as element %d in argument %d, but got %s",
+                 idx, i, THPUtils_typename(args[i]));
+    }
+    res[idx] = reinterpret_cast<THPVariable*>(obj)->cdata;
+  }
+  return res;
 }
 
 inline std::vector<int64_t> PythonArgs::intlist(int i) {
