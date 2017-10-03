@@ -29,6 +29,7 @@ _(FusionGroup) \
 _(Split) \
 _(Gemm) \
 _(AddConstant) \
+_(SubConstant) \
 _(Transpose) \
 _(Reshape) \
 _(split) \
