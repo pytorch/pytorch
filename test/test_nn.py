@@ -3466,12 +3466,14 @@ class TestNNInit(TestCase):
                         self.assertEqual(torch.mm(flattened_tensor, flattened_tensor.t()),
                                          torch.eye(rows) * gain ** 2, prec=1e-6)
 
+
 # Generates rand tensor with non-equal values. This ensures that duplicate
 # values won't be causing test failure for modules like MaxPooling.
 # size should be small, otherwise randperm fails / long overflows.
 def _rand_tensor_non_equal(*size):
     total = reduce(mul, size, 1)
     return torch.randperm(total).view(*size).double()
+
 
 def add_test(test):
     test_name = test.get_name()
