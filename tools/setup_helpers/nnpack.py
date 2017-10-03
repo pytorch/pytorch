@@ -1,4 +1,5 @@
 import os
+import platform
 
 from .env import check_env_flag
 
@@ -6,7 +7,7 @@ WITH_NNPACK = False
 NNPACK_LIB_DIR = None
 NNPACK_INCLUDE_DIRS = None
 
-if not check_env_flag('NO_NNPACK'):
+if not check_env_flag('NO_NNPACK') and 'Windows' not in platform.system():
     # assume we have a flag set that determines the path
     nnpack_dir = os.getenv('NNPACK_DIR')
     if nnpack_dir is not None:

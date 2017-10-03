@@ -131,7 +131,7 @@ void SpatialConvolution_updateOutput(
 
   // Note: we assume that the output is shaped correctly, probably should add an assert
 
-  auto run = [&]() -> nnp_status {
+  auto batched = [&]() -> nnp_status {
     return nnp_convolution_output(
         algorithm,
         batch_size,
@@ -153,9 +153,36 @@ void SpatialConvolution_updateOutput(
     );
   };
 
+  auto single = [&]() -> nnp_status {
+    const nnp_size output_subsample = {
+        .width = 1,
+        .height = 1
+    };
+    return nnp_convolution_inference(
+        algorithm,
+        nnp_convolution_transform_strategy_compute,
+        input_channels,
+        output_channels,
+        input_size,
+        input_padding,
+        kernel_size,
+        output_subsample,
+        (float*)input.data_ptr(),
+        (float*)weight.data_ptr(),
+        (float*)bias_.data_ptr(),
+        (float*)output.data_ptr(),
+        workspace, // workspace_buffer
+        &workspace_size, // workspace_size
+        nnp_activation_identity,
+        nullptr, // activation parameters
+        nnpack_threadpool(),
+        nullptr // profile
+    );
+  };
+
   auto size_and_allocate_ws = [&]() {
     // Run a single pass to get the size of memory workspace buffer
-    auto status = run();
+    auto status = batch_size == 1 ? single() : batched();
     if (status != nnp_status_success) {
       throw std::runtime_error("NNPACK SpatialConvolution_updateOutput failed");
     }
@@ -168,7 +195,7 @@ void SpatialConvolution_updateOutput(
   }
 
   // Try to run with the newly created, or existing workspace
-  auto status = run();
+  auto status = batch_size == 1 ? single() : batched();
 
   if (status == nnp_status_insufficient_buffer) {
     // Need to reallocate the workspace
@@ -176,7 +203,7 @@ void SpatialConvolution_updateOutput(
     size_and_allocate_ws();
 
     // Try one more time
-    status = run();
+    status = batch_size == 1 ? single() : batched();
   }
 
   if (status != nnp_status_success) {

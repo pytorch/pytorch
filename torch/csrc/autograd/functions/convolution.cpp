@@ -109,8 +109,12 @@ auto ConvParams::use_cudnn(const at::Tensor& input) const -> bool {
 
 auto ConvParams::use_nnpack(const at::Tensor& input) const -> bool {
 #ifdef WITH_NNPACK
-  // NNPack Conv does not support strides, dilation yet
-  return input.type().ID() == at::TypeID::CPUFloat && !is_strided() && !is_dilated() && !transposed && input.ndimension() == 4;
+  return input.type().ID() == at::TypeID::CPUFloat && // only on CPU Float Tensors
+         !is_strided() && // doesn't support strides
+         !is_dilated() && // or dilation
+         !transposed &&   // or transposed tensors
+         input.ndimension() == 4 && // must be in NCHW format
+         input.size(0) >= 16; // ensure large enough batch size to ensure perf, tuneable
 #endif
   return false;
 }
