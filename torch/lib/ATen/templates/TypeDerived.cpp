@@ -7,6 +7,7 @@
 #include "ATen/${Backend}LongTensor.h"
 #include "ATen/${SparseTensor}.h"
 #include "ATen/Utils.h"
+#include "ATen/WrapDimUtils.h"
 #include "ATen/THLongStorageView.h"
 #include <iostream>
 #include <sstream>
