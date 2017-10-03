@@ -4,6 +4,6 @@ graph(%1 : UNKNOWN_TYPE
   %6 : Double(1) = Mul[note=from_pyop, some_value=0](%1, %4), uses = [[%7.i0]];
   %8 : Double(1) = Tanh[note=from_pyop, some_value=0](%6), uses = [[%9.i0]];
   %10 : Double(1) = Sigmoid[note=from_pyop, some_value=0](%8), uses = [[%0.i0]];
-  %11 : UNKNOWN_TYPE = TensorTest[a=<Tensor>](), uses = [];
+  %11 : UNKNOWN_TYPE = TensorTest[a= 1  1  1  1 [ CPUDoubleTensor{2,2} ]](), uses = [];
   return (%10);
 }
