@@ -4,7 +4,8 @@
   cpu_half: True
   arguments:
     - THTensor* self
-    - int64_t dim
+    - arg: int64_t dim
+      wrap_dim: self
 ]]
 
 [[
@@ -13,7 +14,8 @@
   cpu_half: True
   arguments:
     - THTensor* self
-    - int64_t dim
+    - arg: int64_t dim
+      wrap_dim: self
 ]]
 
 
@@ -48,7 +50,8 @@
     - arg: THTensor* result
       output: True
     - THTensor* self
-    - int64_t dim
+    - arg: int64_t dim
+      wrap_dim: self
     - int64_t sliceIndex
   aten_custom_call: |
     int64_t ndim = self.dim();
@@ -59,6 +62,29 @@
     } else {
       ${THTensor}_select(${state,}result_->tensor, self_->tensor, dim, sliceIndex);
     }
+]]
+
+[[
+  name: _unnarrow
+  variants: [method,function]
+  return: argument 0
+  arguments:
+    - arg: THTensor* result
+      output: True
+    - THTensor* self
+    - arg: int64_t dimension
+      wrap_dim: self
+    - int64_t offset
+    - int64_t dimSize
+  aten_custom_call: |
+    int64_t ndim = self.dim();
+    AT_ASSERT(ndim > 0, "unnarrow() cannot be applied to a 0-dim tensor.");
+    std::vector<int64_t> self_sizes = self.sizes();
+    self_sizes[dimension] = dimSize;
+    auto self_sizes_ = THLongStorageView::make(self_sizes, true);
+    ${THTensor}_zeros(${state,}result_->tensor, self_sizes_);
+    auto narrowed_result = result.narrow(dimension, offset, self.size(dimension));
+    narrowed_result.copy_(self);
 ]]
 
 [[
@@ -80,5 +106,6 @@
     - arg: THTensor* self
       output: True
     - TensorList tensors
-    - int64_t dim
+    - arg: int64_t dim
+      wrap_dim: tensors
 ]]
