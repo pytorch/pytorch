@@ -253,6 +253,41 @@ class TestJit(TestCase):
         torch._C._tracer_exit((y,))
         self.assertExpected(str(trace))
 
+    def test_inplace_flags(self):
+        x = Variable(torch.Tensor([0]), requires_grad=True)
+        trace = torch._C._tracer_enter((x,), 0)
+        y = x + 2
+        y.add_(2)
+        y.mul_(4)
+        y = y * 2
+        torch._C._tracer_exit((y,))
+        ops = [n for n in trace.graph().nodes() if n.kind() != 'Select']
+        for op in ops:
+            self.assertTrue(op.hasAttribute('__inplace'))
+        inplace_flags = [False, True, True, False]
+        for op, is_inplace in zip(ops, inplace_flags):
+            self.assertEqual(op.i('__inplace'), is_inplace)
+
+    def test_inplace_check(self):
+        class MyInplaceFn(Function):
+            @staticmethod
+            def forward(self, x):
+                x.add_(1)
+                self.mark_dirty(x)
+                return x
+
+            @staticmethod
+            def backward(self, grad):
+                return grad
+
+        @torch.jit.compile(nderivs=0)
+        def fn(x):
+            return MyInplaceFn.apply(x)
+        x = Variable(torch.randn(5, 5))
+        fn(x)  # trace
+        with self.assertRaisesRegex(RuntimeError, 'inplace MyInplaceFn'):
+            fn(x)  # create closure
+
     def test_backward(self):
         a = Variable(torch.randn(2, 2), requires_grad=True)
         b = Variable(torch.randn(2, 2), requires_grad=True)

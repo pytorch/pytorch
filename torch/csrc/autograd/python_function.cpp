@@ -631,7 +631,7 @@ std::pair<UnpackedInput, InputFlags> unpack_input(PyObject *args) {
 
 static void _trace_create(PyObject* op_obj, THPFunction* bw_obj,
         PyObject *input_objects, PyObject *output_objects,
-        const variable_list& input_vars) {
+        const variable_list& input_vars, bool is_inplace) {
   if (!tracer::isTracing(input_vars))
     return;
 
@@ -711,6 +711,7 @@ static void _trace_create(PyObject* op_obj, THPFunction* bw_obj,
     sel->inferTypeFrom(output.data());
     tracer::setValueTrace(tracing_state, output, sel);
   }
+  this_expr->i_(k__inplace, is_inplace);
 
   // See definition in function.cpp.
   THPObjectPtr passes_py_bool {PyObject_GetAttrString(op_obj, "is_traceable")};
@@ -743,6 +744,7 @@ PyObject* process_outputs(PyObject *op_obj, THPFunction* grad_fn, const Unpacked
   }
 
   std::unordered_set<PyObject *> dirty_inputs;
+  bool is_inplace = static_cast<bool>(grad_fn->dirty_tensors);
   _mark_dirty(grad_fn, t2var, dirty_inputs);
   _wrap_outputs(grad_fn, t2var, dirty_inputs, raw_output, outputs, is_volatile);
   // At this point, t2var contains output tensors as well
@@ -755,7 +757,7 @@ PyObject* process_outputs(PyObject *op_obj, THPFunction* grad_fn, const Unpacked
   // On the other hand, it needs to go after _mark_non_differentiable, because
   // it might be wraping backwards in Evals, and _mark_non_differentiable uses
   // grad_fn pointer equality for error checking.
-  _trace_create(op_obj, grad_fn, inputs, outputs, unpacked.input_vars);
+  _trace_create(op_obj, grad_fn, inputs, outputs, unpacked.input_vars, is_inplace);
   if (grad_fn->cdata.is_executable) {
     _save_variables(grad_fn, t2var);
   } else {
