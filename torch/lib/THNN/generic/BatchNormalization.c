@@ -77,6 +77,10 @@ void THNN_(BatchNormalization_backward)(
   int64_t f;
   ptrdiff_t n = THTensor_(nElement)(input) / nInput;
 
+  if (gradInput) {
+    THTensor_(resizeAs)(gradInput, input);
+  }
+
   #pragma omp parallel for
   for (f = 0; f < nInput; ++f) {
     THTensor *in = THTensor_(newSelect)(input, 1, f);
@@ -101,7 +105,6 @@ void THNN_(BatchNormalization_backward)(
       dotp += (*in_data - mean) * (*gradOut_data););
 
     if (gradInput) {
-      THTensor_(resizeAs)(gradInput, input);      
       THTensor *gradIn = THTensor_(newSelect)(gradInput, 1, f);
 
       if (train) {
