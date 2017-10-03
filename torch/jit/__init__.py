@@ -124,7 +124,6 @@ def compile(arg=None, verify=False, **kwargs):
         >>> def f(x);
         >>>     return x * 2
     """
-    # TODO: handle decorating a class (not an instance)
     def _compile(arg):
         if inspect.isclass(arg):
             if issubclass(arg, _CompiledMixin):
