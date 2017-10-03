@@ -223,6 +223,14 @@ class OperatorBase {
     return operator_def_->type();
   }
 
+  void annotate_engine(const std::string& engine) {
+    engine_ = engine;
+  }
+
+  const std::string& engine() const {
+    return engine_;
+  }
+
  public:
   static constexpr int kNoNetPositionSet = -1;
 
@@ -238,6 +246,7 @@ class OperatorBase {
   Workspace* operator_ws_;
   std::shared_ptr<const OperatorDef> operator_def_;
   DeviceOption device_option_;
+  std::string engine_;
   vector<const Blob*> inputs_;
   vector<Blob*> outputs_;
 

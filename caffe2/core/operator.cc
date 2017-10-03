@@ -28,6 +28,11 @@
 #include "caffe2/utils/proto_utils.h"
 #include "caffe2/utils/string_utils.h"
 
+CAFFE2_DEFINE_int(
+    caffe2_operator_max_engine_name_length,
+    10,
+    "Maximum engine name length to be stored");
+
 namespace caffe2 {
 
 OperatorBase::OperatorBase(const OperatorDef& operator_def, Workspace* ws)
@@ -147,6 +152,12 @@ unique_ptr<OperatorBase> _CreateOperator(
             << engine;
     auto op = TryCreateOperator(key, operator_def, ws);
     if (op) {
+      if (engine.size() <= FLAGS_caffe2_operator_max_engine_name_length) {
+        op->annotate_engine(engine);
+      } else {
+        op->annotate_engine(
+            engine.substr(0, FLAGS_caffe2_operator_max_engine_name_length));
+      }
       return op;
     } else {
       // If the above fails, we will just return the normal case with the
