@@ -12,6 +12,12 @@
 #include <iostream>
 #include <functional>
 
+#ifdef _MSC_VER
+#ifdef Type
+#undef Type
+#endif
+#endif
+
 using namespace at;
 
 namespace torch { namespace autograd {
