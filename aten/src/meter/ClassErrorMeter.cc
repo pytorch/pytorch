@@ -17,7 +17,7 @@ ClassErrorMeter::ClassErrorMeter(const int64_t topk) {
 }
 
 void ClassErrorMeter::reset() {
-  range_out(1,numel(topkval_),topkval_);
+  range_out(topkval_, 1, numel(topkval_));
   sumval_.fill_(0.);
   n_ = 0;
 }

@@ -33,7 +33,7 @@ int main() {
   bool threw = false;
   try {
     Tensor no;
-    add_out(foo,foo,no);
+    add_out(no,foo,foo);
   } catch (std::runtime_error&) {
     threw = true;
   }

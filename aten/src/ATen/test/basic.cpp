@@ -93,7 +93,7 @@ static void test(Type & type) {
     Tensor d = type.ones({3, 4});
     Tensor r = type.zeros({3,4});
     for(auto i = 0; i < 100000; i++) {
-      add_out(r, d, r);
+      add_out(r, r, d);
     }
     auto end = std::chrono::high_resolution_clock::now();
     std::cout << std::dec << "   " << std::chrono::duration_cast<std::chrono::milliseconds>(end-begin).count() << " ms" << std::endl;
@@ -132,7 +132,7 @@ static void test(Type & type) {
     std::cout << a << std::endl;
     std::cout << b << std::endl;
     std::cout << c << std::endl;
-    ASSERT(c.equal(addmv(0, type.zeros({3}), 1, a,b)));
+    ASSERT(c.equal(addmv(type.zeros({3}), a, b, 0, 1)));
   }
 
   {
