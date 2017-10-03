@@ -5,7 +5,7 @@
 
 #include <Python.h>
 #include "cudnn-wrapper.h"
-#include "Types.h"
+#include "PythonTypes.h"
 #include "Handles.h"
 #include "BatchNorm.h"
 #include "Conv.h"

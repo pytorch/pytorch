@@ -1,7 +1,7 @@
 #ifndef THP_CUDNN_TYPES_INC
 #define THP_CUDNN_TYPES_INC
 
-#include <Python.h>
+#include "torch/csrc/utils/python_stub.h"
 #include <cstddef>
 #include <string>
 #include "cudnn-wrapper.h"

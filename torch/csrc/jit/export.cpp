@@ -1,3 +1,5 @@
+#include <Python.h>
+
 #include "torch/csrc/jit/export.h"
 #include "torch/csrc/onnx/onnx.h"
 #include "torch/csrc/autograd/symbolic.h"

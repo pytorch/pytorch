@@ -1,3 +1,4 @@
+#include <Python.h>
 #include "Types.h"
 #include "torch/csrc/cuda/THCP.h"
 

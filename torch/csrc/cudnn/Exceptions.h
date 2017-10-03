@@ -1,13 +1,13 @@
 #ifndef THP_CUDNN_EXCEPTIONS_INC
 #define THP_CUDNN_EXCEPTIONS_INC
 
+#include "Types.h"
+
 #include <THC/THC.h>
 #include "cudnn-wrapper.h"
 #include <string>
 #include <stdexcept>
 #include <sstream>
-
-#include "Types.h"
 
 #define CHECK_ARG(cond) _CHECK_ARG(cond, #cond, __FILE__, __LINE__)
 

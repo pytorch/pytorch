@@ -1,6 +1,5 @@
 #pragma once
 
-#include <Python.h>
 #include <mutex>
 #include <memory>
 #include <functional>

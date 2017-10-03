@@ -1,3 +1,4 @@
+#include <Python.h>
 #include "ir.h"
 
 #include "torch/csrc/utils/auto_gil.h"
@@ -487,6 +488,20 @@ void Graph::dump() {
 
 void LintGraph(std::shared_ptr<Graph>& graph) {
   graph->lint();
+}
+
+
+void PythonOp::cloneFrom(Node * other_) {
+  Node::cloneFrom(other_);
+  auto other = other_->cast<PythonOp>();
+  this->cconv = other->cconv;
+  this->is_legacy = other->is_legacy;
+  Py_INCREF(other->pyobj.get());
+  this->pyobj = THPObjectPtr(other->pyobj.get());
+  for(auto & sa : other->scalar_args) {
+    Py_INCREF(sa.get());
+    this->scalar_args.emplace_back(sa.get());
+  }
 }
 
 }}
