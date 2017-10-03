@@ -268,13 +268,21 @@ bool FunctionSignature::parse(PyObject* args, PyObject* kwargs, PyObject* dst[],
   auto nargs = PyTuple_GET_SIZE(args);
   ssize_t remaining_kwargs = kwargs ? PyDict_Size(kwargs) : 0;
   ssize_t arg_pos = 0;
+  bool allow_varargs_intlist = false;
 
   if (nargs > max_pos_args) {
-    if (raise_exception) {
-      // foo() takes takes 2 positional arguments but 3 were given
-      extra_args(*this, nargs);
+    // if there is a single positional IntList argument, i.e. expand(..), view(...),
+    // allow a var-args style IntList, so expand(5,3) behaves as expand((5,3))
+    if (max_pos_args == 1 && params[0].type_ == ParameterType::INT_LIST) {
+      allow_varargs_intlist = true;
     }
-    return false;
+    else {
+      if (raise_exception) {
+        // foo() takes takes 2 positional arguments but 3 were given
+        extra_args(*this, nargs);
+      }
+      return false;
+    }
   }
 
   int i = 0;
@@ -287,6 +295,22 @@ bool FunctionSignature::parse(PyObject* args, PyObject* kwargs, PyObject* dst[],
         arg_pos++;
         continue;
       } else {
+        if (allow_varargs_intlist && arg_pos == 0) {
+          for (int j = arg_pos; j < nargs; ++j) {
+            PyObject *varobj = PyTuple_GET_ITEM(args, j);
+            if(!THPUtils_checkLong(varobj)) {
+              if (raise_exception) {
+                type_error("%s(): argument '%s' (position %d) must be %s, but found element of type %s at pos %d",
+                    name.c_str(), param.name.c_str(), arg_pos + 1,
+                    param.type_name().c_str(), Py_TYPE(varobj)->tp_name, j + 1);
+              }
+              return false;
+            }
+          }
+          dst[i++] = args;
+          arg_pos += nargs;
+          continue;
+        }
         if (raise_exception) {
           // foo(): argument 'other' (position 2) must be str, not int
           type_error("%s(): argument '%s' (position %d) must be %s, not %s",
