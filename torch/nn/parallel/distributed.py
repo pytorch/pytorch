@@ -94,8 +94,19 @@ class DistributedDataParallel(Module):
         self.output_device = output_device
 
         # Sync params and buffers
-        for p in self.module.state_dict().values():
-            dist.broadcast(p, 0)
+
+        # Experimental code for NCCL backend
+        if dist._backend == "nccl":
+            grp = dist.new_group()
+            for p in self.module.state_dict().values():
+                dist.broadcast(p, 0, grp)
+            dist.barrier(grp)
+            dist.destroy_group(grp)
+            self.bcast_grp = dist.new_group()
+            self.reduce_grp = set()
+        else:
+            for p in self.module.state_dict().values():
+                dist.broadcast(p, 0)
 
         if len(device_ids) > 1:
             # TODO: we don't need to replicate params in here. they're always going to
@@ -176,6 +187,20 @@ class DistributedDataParallel(Module):
         for module in self._module_copies[1:]:
             module.train(mode)
 
+    def recreate_groups(self):
+        """ Function that is only supposed to use with NCCL backend.
+        Currently experimental only
+        """
+        if dist._backend != "nccl":
+            raise RuntimeError("recreate_groups only supports and should only "
+                               "be used for nccl backend")
+        dist.destroy_group(self.bcast_grp)
+        for grp in self.reduce_grp:
+            dist.destroy_group(grp)
+        self.bcast_grp = dist.new_group()
+        for grp in self.reduce_grp:
+            new_grp = dist.new_group()
+
     def _sync_params(self):
         params = [p.data for p in self.module.parameters()]
         result = broadcast_coalesced(params, self.device_ids, self.broadcast_bucket_size)
@@ -187,7 +212,12 @@ class DistributedDataParallel(Module):
         if len(buffers) > 0:
             # cross-node buffer sync
             flat_buffers = _flatten_dense_tensors(buffers)
-            dist.broadcast(flat_buffers, 0)
+
+            if dist._backend == "nccl":
+                dist.broadcast(flat_buffers, 0, self.bcast_grp)
+            else:
+                dist.broadcast(flat_buffers, 0)
+
             for buf, synced in zip(buffers, _unflatten_dense_tensors(flat_buffers, buffers)):
                 buf.copy_(synced)
 
@@ -281,6 +311,9 @@ class DistributedDataParallel(Module):
             # We only use the first device for distributed reductions
             dist._register_stream(reduction_streams[0])
             group_id = dist.new_group()
+
+            if dist._backend == "nccl":
+                self.reduce_grp.add(group_id)
 
             self._reduction_threads.append(threading.Thread(
                 target=self._reduction_thread_fn,

@@ -74,21 +74,48 @@ struct DataChannel {
   virtual ~DataChannel() {};
 
   virtual bool init() = 0;
+  virtual void destroy() = 0;
 
   virtual rank_type getRank() = 0;
   virtual rank_type getNumProcesses() = 0;
 
-  virtual void allGather(std::vector<at::Tensor>& output, at::Tensor& input,
+  // All gather multiple GPUs on a number of nodes
+  virtual void allGather(std::vector<at::Tensor>& input,
+                         std::vector<at::Tensor>& output,
+                         THDGroup groupId = THDGroupWORLD) = 0;
+  virtual void allGather(std::vector<at::Tensor>& output,
+                         at::Tensor& input,
                          THDGroup group_id = THDGroupWORLD) = 0;
-  virtual void gather(std::vector<at::Tensor>& output, at::Tensor& input,
-                      rank_type dst_rank, THDGroup group_id = THDGroupWORLD) = 0;
-  virtual void scatter(std::vector<at::Tensor>& input, at::Tensor& output,
-                       rank_type src_rank, THDGroup group_id = THDGroupWORLD) = 0;
+  virtual void gather(std::vector<at::Tensor>& output,
+                      at::Tensor& input,
+                      rank_type dst_rank,
+                      THDGroup group_id = THDGroupWORLD) = 0;
+  virtual void scatter(std::vector<at::Tensor>& input,
+                       at::Tensor& output,
+                       rank_type src_rank,
+                       THDGroup group_id = THDGroupWORLD) = 0;
+  // All reduce multiple GPUs on a number of nodes
+  virtual void allReduce(std::vector<at::Tensor>& input,
+                         std::vector<at::Tensor>& output,
+                         THDReduceOp operation,
+                         THDGroup group_id = THDGroupWORLD) = 0;
   virtual void allReduce(at::Tensor& data, THDReduceOp operation,
                          THDGroup group_id = THDGroupWORLD) = 0;
-  virtual void reduce(at::Tensor& data, THDReduceOp operation,
-                      rank_type dst_rank, THDGroup group_id = THDGroupWORLD) = 0;
-  virtual void broadcast(at::Tensor& data, rank_type src_rank,
+  // Reduce multiple GPUs on a number of nodes
+  virtual void reduce(std::vector<at::Tensor>& data,
+                      THDReduceOp operation,
+                      rank_type dstRank,
+                      THDGroup groupId = THDGroupWORLD) = 0;
+  virtual void reduce(at::Tensor& data,
+                      THDReduceOp operation,
+                      rank_type dst_rank,
+                      THDGroup group_id = THDGroupWORLD) = 0;
+  // Reduce multiple GPUs on a number of nodes
+  virtual void broadcast(std::vector<at::Tensor>& data,
+                         rank_type srcRank,
+                         THDGroup groupId = THDGroupWORLD) = 0;
+  virtual void broadcast(at::Tensor& data,
+                         rank_type src_rank,
                          THDGroup group_id = THDGroupWORLD) = 0;
   virtual void send(Scalar& value, rank_type src_rank) = 0;
   virtual void send(at::Tensor& data, rank_type dst_rank) = 0;
@@ -101,9 +128,12 @@ struct DataChannel {
   virtual void barrier(THDGroup group_id = THDGroupWORLD) = 0;
 
   virtual THDGroup newGroup(const std::vector<rank_type>& ranks) = 0;
+  virtual void destroyGroup(THDGroup group_id = THDGroupWORLD) = 0;
 
-  static DataChannel* newChannel(THDChannelType type, std::string init_method,
-                                 int world_size, std::string group_name, int rank);
+  static DataChannel* newChannel(THDChannelType type,
+                                 std::string init_method,
+                                 int world_size,
+                                 std::string group_name, int rank);
 };
 
 } // namespace thd
