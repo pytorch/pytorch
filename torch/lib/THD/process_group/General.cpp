@@ -16,3 +16,20 @@ void THDProcessGroupInit(THDChannelType channel_type, std::string init_method = 
   dataChannel->init();
   END_HANDLE_EXCEPTIONS
 }
+
+void THDProcessGroupDestroy() {
+  HANDLE_EXCEPTIONS
+  if (dataChannel) {
+    dataChannel->destroy();
+    dataChannel.reset(nullptr);
+  }
+  END_HANDLE_EXCEPTIONS
+}
+
+void THDGroupDestroy(THDGroup group) {
+  HANDLE_EXCEPTIONS
+  if (dataChannel) {
+    dataChannel->destroyGroup(group);
+  }
+  END_HANDLE_EXCEPTIONS
+}

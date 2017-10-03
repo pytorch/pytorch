@@ -33,20 +33,35 @@ struct DataChannelMPI : DataChannel {
   virtual ~DataChannelMPI();
 
   bool init() override;
+  void destroy() override;
 
   rank_type getRank() override;
   rank_type getNumProcesses() override;
 
+  void allGather(std::vector<thpp::Tensor*>& input,
+                 std::vector<thpp::Tensor*>& output,
+                 THDGroup group_id = THDGroupWORLD) override;
   void allGather(std::vector<thpp::Tensor*>& output, thpp::Tensor& input,
                  THDGroup group_id = THDGroupWORLD) override;
   void gather(std::vector<thpp::Tensor*>& output, thpp::Tensor& input,
               rank_type dst_rank, THDGroup group_id = THDGroupWORLD) override;
   void scatter(std::vector<thpp::Tensor*>& input, thpp::Tensor& output,
                rank_type src_rank, THDGroup group_id = THDGroupWORLD) override;
+  void allReduce(std::vector<thpp::Tensor*>& input,
+                 std::vector<thpp::Tensor*>& output,
+                 THDReduceOp operation,
+                 THDGroup group_id = THDGroupWORLD) override;
   void allReduce(thpp::Tensor& data, THDReduceOp operation,
                  THDGroup group_id = THDGroupWORLD) override;
+  void reduce(std::vector<thpp::Tensor*>& data,
+              THDReduceOp operation,
+              rank_type dstRank,
+              THDGroup group_id = THDGroupWORLD) override;
   void reduce(thpp::Tensor& data, THDReduceOp operation, rank_type dst_rank,
               THDGroup group_id = THDGroupWORLD) override;
+  void broadcast(std::vector<thpp::Tensor*>& data,
+                 rank_type srcRank,
+                 THDGroup group_id = THDGroupWORLD) override;
   void broadcast(thpp::Tensor& data, rank_type src_rank,
                  THDGroup group_id = THDGroupWORLD) override;
   void send(Scalar& data, rank_type dst_rank) override;
@@ -59,6 +74,7 @@ struct DataChannelMPI : DataChannel {
 
   void barrier(THDGroup group_id = THDGroupWORLD) override;
   THDGroup newGroup(const std::vector<rank_type>& ranks) override;
+  void destroyGroup(THDGroup group_id = THDGroupWORLD) override;
 
 private:
   void _broadcastPack(thpp::Tensor& data, rank_type src_rank, MPI_Comm comm) const;
