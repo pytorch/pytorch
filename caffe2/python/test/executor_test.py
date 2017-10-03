@@ -3,7 +3,7 @@ from __future__ import division
 from __future__ import print_function
 
 from caffe2.python import workspace
-from caffe2.python.executor_test_util import (
+from caffe2.python.test.executor_test_util import (
     conv_model_generators,
     build_conv_model,
     build_resnet50_dataparallel_model,
