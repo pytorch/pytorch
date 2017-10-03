@@ -56,7 +56,7 @@ else()
 endif()
 
 set(cwrap_files
-  ${CMAKE_CURRENT_SOURCE_DIR}/tools/Declarations.cwrap
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/ATen/Declarations.cwrap
   ${CMAKE_CURRENT_SOURCE_DIR}/src/ATen/Local.cwrap
   ${CMAKE_CURRENT_SOURCE_DIR}/lib/THNN/generic/THNN.h
   ${CMAKE_CURRENT_SOURCE_DIR}/lib/THCUNN/generic/THCUNN.h
