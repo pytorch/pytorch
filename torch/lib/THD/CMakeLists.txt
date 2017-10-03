@@ -38,6 +38,8 @@ IF(NOT HAS_THREAD_LOCAL)
                         "XCode 8 or newer.")
 ENDIF(NOT HAS_THREAD_LOCAL)
 
+FIND_PACKAGE(NCCL)
+
 FIND_PACKAGE(MPI)
 
 FIND_PACKAGE(Gloo)
@@ -65,6 +67,11 @@ ENDIF()
 
 IF(GLOO_FOUND)
   ADD_DEFINITIONS(-DWITH_GLOO=1)
+ENDIF()
+
+IF(NCCL_FOUND)
+  MESSAGE(STATUS "NCCL_LIBRARIES: ${NCCL_LIBRARIES}")
+  ADD_DEFINITIONS(-DWITH_SYSTEM_NCCL=1)
 ENDIF()
 
 ADD_DEFINITIONS(-D_THD_CORE=1)
@@ -96,12 +103,22 @@ IF(NOT GLOO_FOUND)
   LIST(REMOVE_ITEM test_cpp "${CMAKE_CURRENT_SOURCE_DIR}/test/data_channel_gloo_cache.cpp")
 ENDIF()
 
+IF(NOT NCCL_FOUND)
+  LIST(REMOVE_ITEM base_cpp "${CMAKE_CURRENT_SOURCE_DIR}/base/data_channels/DataChannelNccl.cpp")
+ENDIF()
+
 EXCLUDE_DIR(master_worker_cpp ".*/dispatch/.*\\.cpp$")
 
 SET(all_cpp ${base_cpp} ${process_group_cpp} ${master_worker_cpp})
 SET(all_h THD.h ${base_h} ${process_group_h} ${master_worker_h})
 
 EXCLUDE_DIR(all_cpp ".*/generic/.*\\.cpp$")
+
+# Need to include external NCCL first
+IF(NCCL_FOUND)
+  INCLUDE_DIRECTORIES(${NCCL_INCLUDE_DIR})
+  FILE(APPEND "${CMAKE_INSTALL_PREFIX}/THD_deps.txt" "${NCCL_LIBRARIES};")
+ENDIF()
 
 INCLUDE_DIRECTORIES(${CMAKE_CURRENT_SOURCE_DIR})
 
