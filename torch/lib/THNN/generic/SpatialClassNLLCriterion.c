@@ -27,6 +27,25 @@
               input0, input1, input2, input3, target0, target1, target2);        \
   }
 
+#define GRADOUTPUT_SHAPE_CHECK                                                \
+  THArgCheck(THTensor_(nDimension)(gradOutput) == 3, 3,                       \
+    "gradOutput must have same dimension as target (3)"                       \
+	     " but got dimension: %d",			                                        \
+	     THTensor_(nDimension)(gradOutput));			                              \
+  {                                                                           \
+    int64_t gradOutput0 = THTensor_(size)(gradOutput, 0);                     \
+    int64_t gradOutput1 = THTensor_(size)(gradOutput, 1);                     \
+    int64_t gradOutput2 = THTensor_(size)(gradOutput, 2);                     \
+    int64_t target0 = THIndexTensor_(size)(target, 0);                        \
+    int64_t target1 = THIndexTensor_(size)(target, 1);                        \
+    int64_t target2 = THIndexTensor_(size)(target, 2);                        \
+    THAssertMsg(                                                              \
+        gradOutput0 == target0 && gradOutput1 == target1 && gradOutput2 == target2, \
+        "size mismatch (got gradOutput: %ldx%ldx%ld, target: %ldx%ldx%ld)",   \
+        gradOutput0, gradOutput1, gradOutput2, target0, target1, target2);    \
+  }
+
+
 void THNN_(SpatialClassNLLCriterion_updateOutput)(
           THNNState *state,
           THTensor *input,
@@ -41,6 +60,31 @@ void THNN_(SpatialClassNLLCriterion_updateOutput)(
   INITIAL_CHECK;
   THTensor_(resize1d)(output, 1);
   THTensor_(resize1d)(total_weight, 1);
+
+  if (!reduce) {
+    int64_t batch_size = THTensor_(size)(input, 0);
+    int64_t H = THTensor_(size)(input, 2);
+    int64_t W = THTensor_(size)(input, 3);
+    THTensor_(resize3d)(output, batch_size, H, W);
+
+    int64_t b, h, w;
+    #pragma omp parallel for private(b, h, w)
+    for (b = 0; b < batch_size; b++) {
+      for (h = 0; h < H; h++) {
+        for (w = 0; w < W; w++) {
+          int64_t cur_target = (int64_t)THIndexTensor_(get3d)(target, b, h, w);
+          if (cur_target == ignore_index) {
+            THTensor_(set3d)(output, b, h, w, 0.0f);
+            continue;
+          }
+          real value = THTensor_(get4d)(input, b, cur_target, h, w);
+          real weight = weights ? THTensor_(get1d)(weights, cur_target) : 1.0f;
+          THTensor_(set3d)(output, b, h, w, -value * weight);
+        }
+      }
+    }
+    return;
+  }
 
   input = THTensor_(newContiguous)(input);
   target = THIndexTensor_(newContiguous)(target);
@@ -99,6 +143,34 @@ void THNN_(SpatialClassNLLCriterion_updateGradInput)(
   THTensor_(zero)(gradInput);
   THArgCheck(THTensor_(isContiguous)(gradInput), 4,
               "gradInput must be contiguous");
+  THNN_CHECK_SHAPE(input, gradInput);
+
+  if (!reduce) {
+    GRADOUTPUT_SHAPE_CHECK;
+
+    int64_t batch_size = THTensor_(size)(input, 0);
+    int64_t H = THTensor_(size)(input, 2);
+    int64_t W = THTensor_(size)(input, 3);
+
+    int64_t b, h, w;
+    #pragma omp parallel for private(b, h, w)
+    for (b = 0; b < batch_size; b++) {
+      for (h = 0; h < H; h++) {
+        for (w = 0; w < W; w++) {
+          int64_t cur_target = (int64_t)THIndexTensor_(get3d)(target, b, h, w);
+          if (cur_target == ignore_index) {
+            continue;
+          }
+          real value = -(weights ? THTensor_(get1d)(weights, cur_target) : 1.0f);
+          real gradOutput_value = THTensor_(get3d)(gradOutput, b, h, w);
+          THTensor_(set4d)(gradInput, b, cur_target, h, w, value * gradOutput_value);
+        }
+      }
+    }
+    return;
+  }
+
+  THNN_CHECK_DIM_SIZE(gradOutput, 1, 0, 1);
 
   real *total_weight_data = THTensor_(data)(total_weight);
   if (*total_weight_data <= 0)
@@ -116,7 +188,7 @@ void THNN_(SpatialClassNLLCriterion_updateGradInput)(
   int64_t map_size = THTensor_(size)(input, 2) * THTensor_(size)(input, 3);
   int64_t sample_size = map_size * n_classes;
 
-  real normalize = sizeAverage ? *total_weight_data : 1.0f;
+  real normalize = (sizeAverage) ? *total_weight_data : 1.0f;
 
   int b;
   #pragma omp parallel for
@@ -127,8 +199,10 @@ void THNN_(SpatialClassNLLCriterion_updateGradInput)(
       if (cur_target == ignore_index) continue;
       THAssert(cur_target >= 0 && cur_target < n_classes);
 
-      gradInput_data[b * sample_size + cur_target * map_size + elem] =
+      int index = b * sample_size + cur_target * map_size + elem;
+      gradInput_data[index] =
         -(weights ? weights_data[cur_target] : 1.0f) / normalize;
+      gradInput_data[index] *= THTensor_(get1d)(gradOutput, 0);
     }
   }
 
