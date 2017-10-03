@@ -3466,6 +3466,12 @@ class TestNNInit(TestCase):
                         self.assertEqual(torch.mm(flattened_tensor, flattened_tensor.t()),
                                          torch.eye(rows) * gain ** 2, prec=1e-6)
 
+# Generates rand tensor with non-equal values. This ensures that duplicate
+# values won't be causing test failure for modules like MaxPooling.
+# size should be small, otherwise randperm fails / long overflows.
+def _rand_tensor_non_equal(*size):
+    total = reduce(mul, size, 1)
+    return torch.randperm(total).view(*size).double()
 
 def add_test(test):
     test_name = test.get_name()
@@ -4138,42 +4144,42 @@ new_module_tests = [
     dict(
         module_name='AdaptiveMaxPool1d',
         constructor_args=(3,),
-        input=torch.rand(1, 3, 5),
+        input=_rand_tensor_non_equal(1, 3, 5),
     ),
     dict(
         module_name='AdaptiveMaxPool2d',
         constructor_args=(3,),
-        input=torch.rand(1, 3, 5, 6),
+        input=_rand_tensor_non_equal(1, 3, 5, 6),
         desc='single',
     ),
     dict(
         module_name='AdaptiveMaxPool2d',
         constructor_args=((3, 4),),
-        input=torch.rand(1, 3, 5, 6),
+        input=_rand_tensor_non_equal(1, 3, 5, 6),
         desc='tuple',
     ),
     dict(
         module_name='AdaptiveMaxPool3d',
         constructor_args=(3,),
-        input=torch.rand(2, 3, 5, 6, 7),
+        input=_rand_tensor_non_equal(2, 3, 5, 6, 7),
         desc='single',
     ),
     dict(
         module_name='AdaptiveMaxPool3d',
         constructor_args=((3, 4, 5),),
-        input=torch.rand(2, 3, 5, 6, 7),
+        input=_rand_tensor_non_equal(2, 3, 5, 6, 7),
         desc='tuple',
     ),
     dict(
         module_name='AdaptiveMaxPool3d',
         constructor_args=(3,),
-        input=torch.rand(2, 3, 12, 9, 3),
+        input=_rand_tensor_non_equal(2, 3, 12, 9, 3),
         desc='single_nonatomic',
     ),
     dict(
         module_name='AdaptiveMaxPool3d',
         constructor_args=((3, 4, 5),),
-        input=torch.rand(2, 3, 6, 4, 10),
+        input=_rand_tensor_non_equal(2, 3, 6, 4, 10),
         desc='tuple_nonatomic',
     ),
     dict(
