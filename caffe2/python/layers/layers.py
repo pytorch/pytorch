@@ -23,6 +23,7 @@ from __future__ import unicode_literals
 import logging
 from caffe2.python import core, schema, scope, workspace
 from caffe2.python.layers.tags import TagContext
+from caffe2.proto import caffe2_pb2
 
 from collections import namedtuple
 import numpy as np
@@ -309,8 +310,15 @@ class ModelLayer(object):
             # internal.containers.RepeatedCompositeFieldContainer, but
             # the version of protobuf in fbcode does not support append
             # so extend is used
-            if param.initializer:
-                init_net._net.op.extend([param.initializer])
+            init_op = param.initializer
+            current_device_scope = scope.CurrentDeviceScope()
+            if init_op:
+                if not init_op.HasField('device_option') and\
+                        current_device_scope:
+                    init_op = caffe2_pb2.OperatorDef()
+                    init_op.CopyFrom(param.initializer)
+                    init_op.device_option.CopyFrom(current_device_scope)
+                init_net._net.op.extend([init_op])
 
     def create_param(self, param_name, shape, initializer, optimizer,
                        ps_param=None):
