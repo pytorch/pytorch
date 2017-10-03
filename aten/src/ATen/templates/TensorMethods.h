@@ -6,6 +6,27 @@
 
 namespace at {
 
+inline Tensor Tensor::toType(const Type & t) const {
+  if(type().ID() ==t.ID())
+    return *this;
+  return t.copy(*this);
+}
+
+inline Tensor & Tensor::copy_(const Tensor & src) {
+  resize_(src.sizes());
+  type().copy(src,*this);
+  return *this;
+}
+
+inline Tensor Tensor::toType(ScalarType t) const {
+  return toType(type().toScalarType(t));
+}
+
+inline Tensor Tensor::toBackend(Backend b) const {
+  return toType(type().toBackend(b));
+}
+
+
 // all static inline to allow for inlining of the non-dynamic part of dispatch
 ${tensor_method_definitions}
 

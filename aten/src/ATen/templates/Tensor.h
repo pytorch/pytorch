@@ -1,9 +1,13 @@
 #pragma once
 
-#include "ATen/Type.h"
-#include "ATen/TensorImpl.h"
-#include "ATen/Utils.h"
+#include "ATen/Generator.h"
+#include "ATen/Scalar.h"
+#include "ATen/ScalarType.h"
 #include "ATen/TensorAccessor.h"
+#include "ATen/TensorImpl.h"
+#include "ATen/Storage.h"
+#include "ATen/SparseTensorRef.h"
+#include "ATen/Utils.h"
 
 namespace at {
 struct Type;
@@ -106,22 +110,10 @@ struct Tensor {
   Type & type() const {
     return pImpl->type();
   }
-  Tensor toType(const Type & t) const {
-    if(type().ID() ==t.ID())
-      return *this;
-    return t.copy(*this);
-  }
-  Tensor & copy_(const Tensor & src) {
-    resize_(src.sizes());
-    type().copy(src,*this);
-    return *this;
-  }
-  Tensor toType(ScalarType t) const {
-    return toType(type().toScalarType(t));
-  }
-  Tensor toBackend(Backend b) const {
-    return toType(type().toBackend(b));
-  }
+  inline Tensor toType(const Type & t) const;
+  inline Tensor & copy_(const Tensor & src);
+  inline Tensor toType(ScalarType t) const;
+  inline Tensor toBackend(Backend b) const;
 
   template<typename T>
   T * data() const;
