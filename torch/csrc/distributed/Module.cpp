@@ -6,6 +6,7 @@
 
 #include "torch/csrc/utils/python_strings.h"
 #include "THDP.h"
+#include "torch/csrc/PythonTypes.h"
 
 #ifdef WITH_CUDA
 #include "torch/csrc/cuda/Stream.h"

@@ -3,7 +3,6 @@
 // A wrapper around at::Tensor to represent autograd Variables. Variables
 // can be implicitly converted to an at::Tensor.
 
-#include <Python.h>
 #include <mutex>
 #include <memory>
 #include <vector>

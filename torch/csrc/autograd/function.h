@@ -6,9 +6,9 @@
 // Subclasses may represent "forward" or "backward" operations (i.e functions
 // and their derivatives). Some functions may be used as both.
 
-#include <Python.h>
 #include "torch/csrc/autograd/saved_variable.h"
 #include "torch/csrc/utils/auto_unique_ptr.h"
+#include "torch/csrc/utils/python_stub.h"
 #include "torch/csrc/autograd/function_hook.h"
 #include "torch/csrc/autograd/profiler.h"
 #include "torch/csrc/jit/tracer.h"

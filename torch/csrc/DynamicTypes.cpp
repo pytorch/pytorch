@@ -1,6 +1,9 @@
-#include "DynamicTypes.h"
+#include <Python.h>
 
+#include "DynamicTypes.h"
+#include "PythonTypes.h"
 #include "THP.h"
+
 #include <vector>
 #include <unordered_map>
 

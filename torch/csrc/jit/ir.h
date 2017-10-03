@@ -1,9 +1,5 @@
 #pragma once
 
-// TODO: Remove Python dependency with layer of indirection
-
-#include <Python.h>
-
 #include <iostream>
 #include <memory>
 #include <vector>
@@ -18,6 +14,7 @@
 #include "torch/csrc/utils/object_ptr.h"
 #include "torch/csrc/utils/auto_gpu.h"
 #include "torch/csrc/utils/disallow_copy.h"
+#include "torch/csrc/utils/python_stub.h"
 
 #include "ATen/ArrayRef.h"
 #include "torch/csrc/jit/generic_if.h"
@@ -754,18 +751,7 @@ struct PythonOp : public Node {
   // the function in this order; see cconv for the correct order.
   std::vector<THPObjectPtr> scalar_args;
   std::string name();
-  virtual void cloneFrom(Node * other_) override {
-    Node::cloneFrom(other_);
-    auto other = other_->cast<PythonOp>();
-    this->cconv = other->cconv;
-    this->is_legacy = other->is_legacy;
-    Py_INCREF(other->pyobj.get());
-    this->pyobj = THPObjectPtr(other->pyobj.get());
-    for(auto & sa : other->scalar_args) {
-      Py_INCREF(sa.get());
-      this->scalar_args.emplace_back(sa.get());
-    }
-  }
+  virtual void cloneFrom(Node * other_) override;
 };
 inline Node * Graph::createPythonOp(THPObjectPtr&& pyobj, const std::string & cconv, bool is_legacy, pyobj_list&& scalar_args) {
   auto op = new PythonOp(this);
