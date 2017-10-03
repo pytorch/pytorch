@@ -57,7 +57,8 @@ _(axis) \
 _(perm) \
 _(shape) \
 _(axes) \
-_(group)
+_(group) \
+_(__inplace)
 
 enum BuiltinSymbol {
   #define DEFINE_SYMBOL(s) \
