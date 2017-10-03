@@ -13,6 +13,7 @@
 #include <unordered_map>
 #include <vector>
 #include <cstring>
+#include <stdexcept>
 
 namespace thpp {
 
