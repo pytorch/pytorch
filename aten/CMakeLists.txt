@@ -23,6 +23,8 @@ else()
   set(CMAKE_CXX_STANDARD 11)
 endif()
 
+set(CUDA_NVCC_FLAGS "--std=c++11")
+
 # TH stuff
 set(Torch_FOUND 1)
 add_definitions(-DTH_INDEX_BASE=0)
