@@ -111,16 +111,17 @@ void THCTensor_(scatter)(THCState* state, THCTensor *tensor, int dim, THCudaLong
              "Index tensor must have same dimensions as input tensor");
   THArgCheck(THCTensor_(nDimension)(state, src) == THCTensor_(nDimension)(state, tensor), 4,
              "Input tensor must have same dimensions as output tensor");
-  THLongStorage *indexDims = THCudaLongTensor_newSizeOf(state, index);
-  THArgCheck(THCTensor_(isSize)(state, src, indexDims), 3,
-             "Index tensor must have the same size as input tensor.");
-  THLongStorage_free(indexDims);
 
   for (int d = 0; d < THCTensor_(nDimension)(state, tensor); d++) {
+    int64_t indexSizeD = THCudaLongTensor_size(state, index, d);
     if (d != dim) {
-      THArgCheck(THCTensor_(size)(state, tensor, d) == THCTensor_(size)(state, src, d), 4,
-                 "Input tensor must have same size as output tensor apart from the specified dimension");
+      THArgCheck(indexSizeD <= THCTensor_(size)(state, tensor, d), 3,
+                 "Index tensor must not have larger size than output tensor apart from the specified dimension %d, but got index %s output %s",
+                 dim, THCudaLongTensor_sizeDesc(state, index).str, THCTensor_(sizeDesc)(state, tensor).str);
     }
+    THArgCheck(indexSizeD <= THCTensor_(size)(state, src, d), 3,
+               "Index tensor must not have larger size than input tensor, but got index %s input %s",
+               THCudaLongTensor_sizeDesc(state, index).str, THCTensor_(sizeDesc)(state, src).str);
   }
 
   THArgCheck(THCTensor_(nDimension)(state, tensor) <= MAX_CUTORCH_DIMS,

@@ -1,7 +1,37 @@
 #ifndef TH_TENSOR_DIM_APPLY_INC
 #define TH_TENSOR_DIM_APPLY_INC
 
-#define TH_TENSOR_DIM_APPLY3(TYPE1, TENSOR1, TYPE2, TENSOR2, TYPE3, TENSOR3, DIMENSION, CODE) \
+// This is an example of SIZE_CHECK argument passable to TH_TENSOR_DIM_APPLY3.
+// The TENSOR1, TENSOR2, TENSOR3, DIMENSION will be expanded the same way as
+// TH_TENSOR_DIM_APPLY3.
+// Specifically, this check ensures that TENSOR1, TENSOR2, TENSOR3 have same
+// size except for DIMENSION.
+#define TH_TENSOR_DIM_APPLY3_SIZE_EQ_EXCEPT_DIM(TENSOR1, TENSOR2, TENSOR3, DIMENSION) \
+{ \
+  int shape_check_flag = 0;                                             \
+  for(TH_TENSOR_DIM_APPLY_i = 0; TH_TENSOR_DIM_APPLY_i < TENSOR1->nDimension; TH_TENSOR_DIM_APPLY_i++) \
+  { \
+    if (TH_TENSOR_DIM_APPLY_i == DIMENSION) \
+      continue; \
+    if (TENSOR1->size[TH_TENSOR_DIM_APPLY_i] != TENSOR2->size[TH_TENSOR_DIM_APPLY_i]) { \
+      shape_check_flag = 1; \
+      break; \
+    } \
+    if(TENSOR1->size[TH_TENSOR_DIM_APPLY_i] != TENSOR3->size[TH_TENSOR_DIM_APPLY_i]) { \
+      shape_check_flag = 1; \
+      break; \
+    } \
+  } \
+  if (shape_check_flag == 1) { \
+    THDescBuff T1buff = _THSizeDesc(TENSOR1->size, TENSOR1->nDimension); \
+    THDescBuff T2buff = _THSizeDesc(TENSOR2->size, TENSOR2->nDimension); \
+    THDescBuff T3buff = _THSizeDesc(TENSOR3->size, TENSOR3->nDimension); \
+    THError("Expected %s %s, %s %s and %s %s to have the same size apart from dimension %d", \
+            #TENSOR1, T1buff.str, #TENSOR2, T2buff.str, #TENSOR3, T3buff.str, DIMENSION); \
+  } \
+}
+
+#define TH_TENSOR_DIM_APPLY3(TYPE1, TENSOR1, TYPE2, TENSOR2, TYPE3, TENSOR3, DIMENSION, SIZE_CHECK, CODE) \
 { \
   TYPE1 *TENSOR1##_data = NULL; \
   int64_t TENSOR1##_stride = 0, TENSOR1##_size = 0; \
@@ -29,24 +59,7 @@
     THError("inconsistent tensor size, expected %s %s, %s %s and %s %s to have the same " \
             "number of dimensions", #TENSOR1, T1buff.str, #TENSOR2, T2buff.str, #TENSOR3, T3buff.str); \
   }                                                                     \
-  int shape_check_flag = 0;                                             \
-  for(TH_TENSOR_DIM_APPLY_i = 0; TH_TENSOR_DIM_APPLY_i < TENSOR1->nDimension; TH_TENSOR_DIM_APPLY_i++) \
-  { \
-    if(TH_TENSOR_DIM_APPLY_i == DIMENSION) \
-      continue; \
-    if(TENSOR1->size[TH_TENSOR_DIM_APPLY_i] != TENSOR2->size[TH_TENSOR_DIM_APPLY_i]) \
-      shape_check_flag = 1;                                             \
-    if(TENSOR1->size[TH_TENSOR_DIM_APPLY_i] != TENSOR3->size[TH_TENSOR_DIM_APPLY_i]) \
-      shape_check_flag = 1;                                             \
-  } \
-    \
-  if (shape_check_flag == 1) { \
-    THDescBuff T1buff = _THSizeDesc(TENSOR1->size, TENSOR1->nDimension); \
-    THDescBuff T2buff = _THSizeDesc(TENSOR2->size, TENSOR2->nDimension); \
-    THDescBuff T3buff = _THSizeDesc(TENSOR3->size, TENSOR3->nDimension); \
-    THError("Expected %s %s, %s %s and %s %s to have the same size in dimension %d", \
-            #TENSOR1, T1buff.str, #TENSOR2, T2buff.str, #TENSOR3, T3buff.str, DIMENSION); \
-  } \
+  SIZE_CHECK(TENSOR1, TENSOR2, TENSOR3, DIMENSION)                      \
 \
   TH_TENSOR_DIM_APPLY_counter = (int64_t*)THAlloc(sizeof(int64_t)*(TENSOR1->nDimension)); \
   for(TH_TENSOR_DIM_APPLY_i = 0; TH_TENSOR_DIM_APPLY_i < TENSOR1->nDimension; TH_TENSOR_DIM_APPLY_i++) \

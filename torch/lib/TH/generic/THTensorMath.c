@@ -433,6 +433,7 @@ void THTensor_(gather)(THTensor *tensor, THTensor *src, int dim, THLongTensor *i
   elems_per_row = THLongTensor_size(index, dim);
 
   TH_TENSOR_DIM_APPLY3(real, tensor, real, src, int64_t, index, dim,
+                       TH_TENSOR_DIM_APPLY3_SIZE_EQ_EXCEPT_DIM,
                        for (i = 0; i < elems_per_row; ++i)
                        {
                          idx = *(index_data + i*index_stride);
@@ -457,7 +458,40 @@ void THTensor_(scatter)(THTensor *tensor, int dim, THLongTensor *index, THTensor
 
   elems_per_row = THLongTensor_size(index, dim);
 
+  // Assumes TENSOR1 is real
+  //         TENSOR2 is src
+  //         TENSOR3 is index
+  // Tests:
+  //   1. index->size[d] <= src->size[d] for all d
+  //   2. index->size[d] <= real->size[d] for all d != dim
+  #define TH_TENSOR_DIM_APPLY3_SIZE_SCATTER(TENSOR1, TENSOR2, TENSOR3, DIMENSION) \
+  { \
+    int shape_check_flag = 0; \
+    for(TH_TENSOR_DIM_APPLY_i = 0; TH_TENSOR_DIM_APPLY_i < TENSOR1->nDimension; TH_TENSOR_DIM_APPLY_i++) \
+    { \
+      int64_t TENSOR3##_dim_size = TENSOR3->size[TH_TENSOR_DIM_APPLY_i]; \
+      if (TH_TENSOR_DIM_APPLY_i != DIMENSION) { \
+        if (TENSOR3##_dim_size > TENSOR1->size[TH_TENSOR_DIM_APPLY_i]) { \
+          shape_check_flag = 1; \
+          break; \
+        } \
+      } \
+      if (TENSOR3##_dim_size > TENSOR2->size[TH_TENSOR_DIM_APPLY_i]) { \
+        shape_check_flag = 1; \
+        break; \
+      } \
+    } \
+    if (shape_check_flag == 1) { \
+      THDescBuff T1buff = _THSizeDesc(TENSOR1->size, TENSOR1->nDimension); \
+      THDescBuff T2buff = _THSizeDesc(TENSOR2->size, TENSOR2->nDimension); \
+      THDescBuff T3buff = _THSizeDesc(TENSOR3->size, TENSOR3->nDimension); \
+      THError("Expected %s %s to be smaller size than %s %s and to be smaller than %s %s apart from dimension %d", \
+              #TENSOR3, T3buff.str, #TENSOR2, T2buff.str, #TENSOR1, T1buff.str, DIMENSION); \
+    } \
+  }
+
   TH_TENSOR_DIM_APPLY3(real, tensor, real, src, int64_t, index, dim,
+                       TH_TENSOR_DIM_APPLY3_SIZE_SCATTER,
                        for (i = 0; i < elems_per_row; ++i)
                        {
                          idx = *(index_data + i*index_stride);
@@ -483,6 +517,7 @@ void THTensor_(scatterAdd)(THTensor *tensor, int dim, THLongTensor *index, THTen
   elems_per_row = THLongTensor_size(index, dim);
 
   TH_TENSOR_DIM_APPLY3(real, tensor, real, src, int64_t, index, dim,
+                       TH_TENSOR_DIM_APPLY3_SIZE_EQ_EXCEPT_DIM,
                        for (i = 0; i < elems_per_row; ++i)
                        {
                          idx = *(index_data + i*index_stride);
@@ -1578,6 +1613,7 @@ void THTensor_(max)(THTensor *values_, THLongTensor *indices_, THTensor *t, int 
     int64_t theIndex;
     int64_t i;
     TH_TENSOR_DIM_APPLY3(real, t, real, values_, int64_t, indices_, dimension,
+                         TH_TENSOR_DIM_APPLY3_SIZE_EQ_EXCEPT_DIM,
                          theMax = t_data[0];
                          theIndex = 0;
 
@@ -1658,6 +1694,7 @@ void THTensor_(min)(THTensor *values_, THLongTensor *indices_, THTensor *t, int 
     int64_t theIndex;
     int64_t i;
     TH_TENSOR_DIM_APPLY3(real, t, real, values_, int64_t, indices_, dimension,
+                         TH_TENSOR_DIM_APPLY3_SIZE_EQ_EXCEPT_DIM,
                          theMax = t_data[0];
                          theIndex = 0;
 
@@ -1905,6 +1942,7 @@ void THTensor_(cross)(THTensor *r_, THTensor *a, THTensor *b, int dimension)
   THTensor_(resizeAs)(r_, a);
 
   TH_TENSOR_DIM_APPLY3(real, a, real, b, real, r_, dimension,
+                       TH_TENSOR_DIM_APPLY3_SIZE_EQ_EXCEPT_DIM,
                        r__data[0*r__stride] = a_data[1*a_stride]*b_data[2*b_stride] - a_data[2*a_stride]*b_data[1*b_stride];
                        r__data[1*r__stride] = a_data[2*a_stride]*b_data[0*b_stride] - a_data[0*a_stride]*b_data[2*b_stride];
                        r__data[2*r__stride] = a_data[0*a_stride]*b_data[1*b_stride] - a_data[1*a_stride]*b_data[0*b_stride];);
@@ -2458,6 +2496,7 @@ void THTensor_(mode)(THTensor *values_, THLongTensor *indices_, THTensor *t, int
   tempi__data = THLongTensor_data(tempi_);
 
   TH_TENSOR_DIM_APPLY3(real, t, real, values_, int64_t, indices_, dimension,
+                       TH_TENSOR_DIM_APPLY3_SIZE_EQ_EXCEPT_DIM,
                        int64_t i;
                        real mode = 0;
                        int64_t modei = 0;
@@ -2523,6 +2562,7 @@ void THTensor_(kthvalue)(THTensor *values_, THLongTensor *indices_, THTensor *t,
   tempi__data = THLongTensor_data(tempi_);
 
   TH_TENSOR_DIM_APPLY3(real, t, real, values_, int64_t, indices_, dimension,
+                       TH_TENSOR_DIM_APPLY3_SIZE_EQ_EXCEPT_DIM,
                        int64_t i;
                        for(i = 0; i < t_size_dim; i++)
                           temp__data[i] = t_data[i*t_stride];
@@ -2578,6 +2618,7 @@ void THTensor_(topk)(THTensor *rt_, THLongTensor *ri_, THTensor *t, int64_t k, i
     /* k largest elements, descending order (optional: see sorted) */
     int64_t K = sliceSize - k;
     TH_TENSOR_DIM_APPLY3(real, t, real, rt_, int64_t, ri_, dim,
+                         TH_TENSOR_DIM_APPLY3_SIZE_EQ_EXCEPT_DIM,
                          int64_t i;
                          for(i = 0; i < sliceSize; i++)
                          {
@@ -2597,6 +2638,7 @@ void THTensor_(topk)(THTensor *rt_, THLongTensor *ri_, THTensor *t, int64_t k, i
   else {
     /* k smallest elements, ascending order (optional: see sorted) */
     TH_TENSOR_DIM_APPLY3(real, t, real, rt_, int64_t, ri_, dim,
+                         TH_TENSOR_DIM_APPLY3_SIZE_EQ_EXCEPT_DIM,
                          int64_t i;
                          for(i = 0; i < sliceSize; i++)
                          {
