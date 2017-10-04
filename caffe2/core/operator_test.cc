@@ -491,6 +491,24 @@ TEST(EnginePrefTest, SetOpEnginePref) {
   SetGlobalEnginePref({});
 }
 
+TEST(EnginePrefTest, SetDefaultEngine) {
+  OperatorDef op_def;
+  Workspace ws;
+  op_def.set_type("JustTest");
+
+  SetPerOpEnginePref({{DeviceType::CPU, {{"JustTest", {"DEFAULT"}}}}});
+  SetGlobalEnginePref({{DeviceType::CPU, {"BAR"}}});
+  {
+    const auto op = CreateOperator(op_def, &ws);
+    EXPECT_NE(nullptr, op.get());
+    // operator_def takes precedence
+    EXPECT_EQ(static_cast<JustTest*>(op.get())->type(), "base");
+  }
+  // clear
+  SetPerOpEnginePref({});
+  SetGlobalEnginePref({});
+}
+
 class JustTestWithRequiredArg : public JustTest {
  public:
   using JustTest::JustTest;

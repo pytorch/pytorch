@@ -86,11 +86,11 @@ def GetGlobalInitArgs():
 
 
 def IsOperator(op_type):
-    return (op_type in _REGISTERED_OPERATORS)
+    return IsOperatorWithEngine(op_type, engine='DEFAULT')
 
 
 def IsOperatorWithEngine(op_type, engine):
-    return (op_type + "_ENGINE_" + engine in _REGISTERED_OPERATORS)
+    return C.op_registry_key(op_type, engine) in _REGISTERED_OPERATORS
 
 
 def DeviceOption(device_type, cuda_gpu_id=0, random_seed=None, node_name=None):
