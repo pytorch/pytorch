@@ -31,12 +31,12 @@ void test_ctors() {
   auto s2 = Scalar(CPU(kFloat).scalarTensor(2));
   Scalar{s1};
   Scalar{std::move(s2)};
-  ASSERT(s2.isIntegral() && s2.toInt() == 0);
+  ASSERT(s2.isBackedByTensor() && !s2.toTensor().defined());
   s2 = s1;
   ASSERT(s2.isBackedByTensor() && s2.toFloat() == 1.0);
   Scalar s3;
   s3 = std::move(s2);
-  ASSERT(s2.isIntegral() && s2.toInt() == 0);
+  ASSERT(s2.isBackedByTensor() && !s2.toTensor().defined());
   ASSERT(s3.isBackedByTensor() && s3.toFloat() == 1.0);
 }
 
