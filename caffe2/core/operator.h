@@ -681,6 +681,10 @@ unique_ptr<OperatorBase> CreateOperator(
     Workspace* ws,
     int net_position = OperatorBase::kNoNetPositionSet);
 
+const std::string OpRegistryKey(
+    const std::string& op_type,
+    const std::string& engine = "");
+
 // User can set the preferred engines as a list of engine names, in
 // descending order of preference.
 using EnginePrefType = std::vector<std::string>;

@@ -478,6 +478,16 @@ class TestCreatePlan(test_util.TestCase):
             self.assertEqual(net_1.Name(), net_2.Name()[:trim_size])
 
 
+class TestOpRegistryKey(test_util.TestCase):
+    def test_is_operator(self):
+        self.assertTrue(core.IsOperator('Relu'))
+        self.assertFalse(core.IsOperator('NOEXIST'))
+
+    def test_is_operator_with_engine(self):
+        self.assertTrue(core.IsOperatorWithEngine('Relu', 'DEFAULT'))
+        self.assertFalse(core.IsOperatorWithEngine('Relu', 'NOEXIST'))
+
+
 @unittest.skipIf(not workspace.has_gpu_support, 'No GPU support')
 class TestInferDevice(test_util.TestCase):
 

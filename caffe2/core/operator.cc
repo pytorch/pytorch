@@ -147,7 +147,7 @@ unique_ptr<OperatorBase> _CreateOperator(
         engines.end(), preferred_engines.begin(), preferred_engines.end());
   }
   for (const auto& engine : engines) {
-    const std::string key = op_type + "_ENGINE_" + engine;
+    const std::string key = OpRegistryKey(op_type, engine);
     VLOG(1) << "Trying to create operator " << op_type << " with engine "
             << engine;
     auto op = TryCreateOperator(key, operator_def, ws);
@@ -184,6 +184,16 @@ unique_ptr<OperatorBase> _CreateOperator(
 }
 
 } // namespace
+
+const std::string OpRegistryKey(
+    const std::string& op_type,
+    const std::string& engine) {
+  if (engine == "" || engine == "DEFAULT") {
+    return op_type;
+  } else {
+    return op_type + "_ENGINE_" + engine;
+  }
+}
 
 void SetPerOpEnginePref(const PerOpEnginePrefType& per_op_engine_pref) {
   for (const auto& device_pref_pair : per_op_engine_pref) {
