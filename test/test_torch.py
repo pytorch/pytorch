@@ -4333,6 +4333,7 @@ class TestTorch(TestCase):
         types = [
             'torch.ByteTensor',
             'torch.IntTensor',
+            'torch.HalfTensor',
             'torch.FloatTensor',
             'torch.DoubleTensor',
             'torch.LongTensor',
@@ -4384,28 +4385,37 @@ class TestTorch(TestCase):
 
             # with storage offset
             xm = torch.randn(sz2 * 2, sz1).mul(255).type(tp)
-            x = xm.narrow(0, sz2 - 1, sz2).t()
-            y = x.numpy()
-            self.assertTrue(x.storage_offset() > 0)
-            check2d(x, y)
+            if tp == 'torch.HalfTensor':
+                # TODO: remove when `t()` is implemented. This assertion is
+                # intended to mark this as to be changed when the feature
+                # becomes available. Later tests are just skipped for half
+                # floats.
+                with self.assertRaises(AttributeError):
+                    x = xm.narrow(0, sz2 - 1, sz2).t()
+            else:
+                x = xm.narrow(0, sz2 - 1, sz2).t()
+                y = x.numpy()
+                self.assertTrue(x.storage_offset() > 0)
+                check2d(x, y)
 
-            # non-contiguous 2D with holes
-            xm = torch.randn(sz2 * 2, sz1 * 2).mul(255).type(tp)
-            x = xm.narrow(0, sz2 - 1, sz2).narrow(1, sz1 - 1, sz1).t()
-            y = x.numpy()
-            self.assertTrue(x.storage_offset() > 0)
-            check2d(x, y)
+            if tp != 'torch.HalfTensor':
+                # non-contiguous 2D with holes
+                xm = torch.randn(sz2 * 2, sz1 * 2).mul(255).type(tp)
+                x = xm.narrow(0, sz2 - 1, sz2).narrow(1, sz1 - 1, sz1).t()
+                y = x.numpy()
+                self.assertTrue(x.storage_offset() > 0)
+                check2d(x, y)
 
-            # check writeable
-            x = torch.randn(3, 4).mul(255).type(tp)
-            y = x.numpy()
-            self.assertTrue(y.flags.writeable)
-            y[0][1] = 3
-            self.assertTrue(x[0][1] == 3)
-            y = x.t().numpy()
-            self.assertTrue(y.flags.writeable)
-            y[0][1] = 3
-            self.assertTrue(x[0][1] == 3)
+                # check writeable
+                x = torch.randn(3, 4).mul(255).type(tp)
+                y = x.numpy()
+                self.assertTrue(y.flags.writeable)
+                y[0][1] = 3
+                self.assertTrue(x[0][1] == 3)
+                y = x.t().numpy()
+                self.assertTrue(y.flags.writeable)
+                y[0][1] = 3
+                self.assertTrue(x[0][1] == 3)
 
     def test_dlpack_conversion(self):
         x = torch.randn(1, 2, 3, 4).type('torch.FloatTensor')
@@ -4417,6 +4427,7 @@ class TestTorch(TestCase):
         dtypes = [
             np.double,
             np.float,
+            np.float16,
             np.int64,
             np.int32,
             np.int16,
@@ -4424,7 +4435,11 @@ class TestTorch(TestCase):
         ]
         for dtype in dtypes:
             array = np.array([1, 2, 3, 4], dtype=dtype)
-            self.assertEqual(torch.from_numpy(array), torch.Tensor([1, 2, 3, 4]))
+            tensor_from_array = torch.from_numpy(array)
+            # TODO: change to tensor equality check once HalfTensor
+            # implements `==`
+            for i in range(len(array)):
+                self.assertEqual(tensor_from_array[i], array[i])
 
         # check storage offset
         x = np.linspace(1, 125, 125)
@@ -4463,6 +4478,7 @@ class TestTorch(TestCase):
         types = [
             torch.DoubleTensor,
             torch.FloatTensor,
+            torch.HalfTensor,
             torch.LongTensor,
             torch.IntTensor,
             torch.ShortTensor,
@@ -4471,6 +4487,7 @@ class TestTorch(TestCase):
         dtypes = [
             np.float64,
             np.float32,
+            np.float16,
             np.int64,
             np.int32,
             np.int16,
