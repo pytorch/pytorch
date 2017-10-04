@@ -20,6 +20,10 @@ THC_API void THCTensor_(multinomialAliasDraw)(THCState *state, THCudaLongTensor 
 
 #endif
 
+#if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE)
+THC_API void THCTensor_(bernoulli_Tensor)(struct THCState *state, THCTensor *self, THCTensor *p);
+#endif
+
 THC_API void THCTensor_(bernoulli)(struct THCState *state, THCTensor *self, double p);
 THC_API void THCTensor_(bernoulli_FloatTensor)(struct THCState *state, THCTensor *self, THCudaTensor *p);
 THC_API void THCTensor_(bernoulli_DoubleTensor)(struct THCState *state, THCTensor *self, THCudaDoubleTensor *p);

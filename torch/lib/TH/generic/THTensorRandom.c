@@ -55,6 +55,11 @@ void THTensor_(bernoulli_DoubleTensor)(THTensor *self, THGenerator *_generator, 
 
 #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
 
+void THTensor_(bernoulli_Tensor)(THTensor *self, THGenerator *_generator, THTensor *p)
+{
+  TH_TENSOR_APPLY2(real, self, real , p, *self_data = (real)THRandom_bernoulli(_generator, (double)*p_data););
+}
+
 void THTensor_(uniform)(THTensor *self, THGenerator *_generator, double a, double b)
 {
   TH_TENSOR_APPLY(real, self, *self_data = (real)THRandom_uniform(_generator, a, b););
@@ -116,13 +121,13 @@ void THTensor_(multinomialAliasSetup)(THTensor *probs, THLongTensor *J, THTensor
   THTensor_(resize1d)(q, inputsize);
   real *q_data = THTensor_(data)(q);
   int64_t *J_data = THLongTensor_data(J);
-      
+
   for (i = 0; i < inputsize; i++)
     {
       THTensor_fastSet1d(J, i, 0L);
       real val = THTensor_fastGet1d(probs, i);
       THTensor_fastSet1d(q, i, inputsize*val);
-      
+
       if (inputsize * val < 1.0)
         {
           THTensor_fastSet1d(smaller, small_c, i);
@@ -143,7 +148,7 @@ void THTensor_(multinomialAliasSetup)(THTensor *probs, THLongTensor *J, THTensor
     {
       large = THTensor_fastGet1d(larger, large_c-1);
       small = THTensor_fastGet1d(smaller, small_c-1);
-      
+
       THTensor_fastSet1d(J, small, large);
       q_data[large * q->stride[0]] -= 1.0 - THTensor_fastGet1d(q, small);
 
@@ -173,7 +178,7 @@ void THTensor_(multinomialAliasSetup)(THTensor *probs, THLongTensor *J, THTensor
   THArgCheckWithCleanup((q_min > 0),
                         THCleanup(THLongTensor_free(smaller); THLongTensor_free(larger);), 2,
                         "q_min is less than 0");
-  
+
   if (q_max > 1)
     {
       for (i=0; i < inputsize; i++)
@@ -183,7 +188,7 @@ void THTensor_(multinomialAliasSetup)(THTensor *probs, THLongTensor *J, THTensor
     }
   for (i=0; i < inputsize; i++)
     {
-      // sometimes an large index isn't added to J. 
+      // sometimes an large index isn't added to J.
       // fix it by making the probability 1 so that J isn't indexed.
       if(J_data[i] <= 0)
         q_data[i] = 1.0;
@@ -206,7 +211,7 @@ void THTensor_(multinomialAliasDraw)(THLongTensor *self, THGenerator *_generator
       _q = THTensor_fastGet1d(q, rand_ind);
 
       _mask = THRandom_bernoulli(_generator, _q);
-      
+
       J_sample = THTensor_fastGet1d(J, rand_ind);
 
       sample_idx = J_sample*(1 -_mask) + (rand_ind+1L) * _mask;

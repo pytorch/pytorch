@@ -176,7 +176,7 @@ THC_API void THCTensor_(multinomial)(struct THCState *state,
   int maxShared = props->sharedMemPerBlock;
   int requiredShared = (numCategories < maxThreads ? numCategories : maxThreads)
                                 * (sizeof(real) * sizeof(accreal));
-                                
+
   if (n_sample == 1 && maxShared >= requiredShared) {
     // Optimized allocation-free implementation
     // To exploit greater parallelism for the sampling, generate the
@@ -303,10 +303,10 @@ THC_API void THCTensor_(multinomialAliasSetup)(THCState *state, THCTensor *_prob
   THCudaLongTensor *larger = THCudaLongTensor_newWithSize1d(state, inputsize);
   THCudaLongTensor *smaller_short = THCudaLongTensor_newWithSize1d(state, inputsize);
   THCudaLongTensor *larger_short = THCudaLongTensor_newWithSize1d(state, inputsize);
-  
+
   THCudaLongTensor_resize1d(state, _J, inputsize);
   THCTensor_(resize1d)(state, _q, inputsize);
-  
+
   real one = ScalarConvert<int64_t, real>::to(1);
   int inputBlockDim = THCCeilDiv((int)inputsize + BLOCK_SIZE - 1, BLOCK_SIZE);
   aliasMultinomialFilter
@@ -320,7 +320,7 @@ THC_API void THCTensor_(multinomialAliasSetup)(THCState *state, THCTensor *_prob
 								     THCudaLongTensor_data(state, larger_short),
 								     one, inputsize
 								     );
-  
+
   THCudaLongTensor_nonzero(state, smaller_short, smaller);
   THCudaLongTensor_nonzero(state, larger_short, larger);
   int h_large_c = THCudaLongTensor_nElement(state, larger_short);
@@ -342,7 +342,7 @@ THC_API void THCTensor_(multinomialAliasSetup)(THCState *state, THCTensor *_prob
 								      THCudaLongTensor_data(state, _J),
 								      inputsize, q_max
 								      );
-  
+
   THCudaLongTensor_free(state, smaller);
   THCudaLongTensor_free(state, larger);
   THCudaLongTensor_free(state, smaller_short);
@@ -435,6 +435,30 @@ THC_API void THCTensor_(NAME)(THCState* state,                                 \
 
 DEFINE_BERNOULLI_TENSOR(bernoulli_FloatTensor, THCudaTensor, float)
 DEFINE_BERNOULLI_TENSOR(bernoulli_DoubleTensor, THCudaDoubleTensor, double)
+
+#if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE)
+
+THC_API void THCTensor_(bernoulli_Tensor)(THCState* state, THCTensor *self_, THCTensor *probs_)
+{
+  THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self_, probs_));
+  Generator* gen = THCRandom_getGenerator(state);
+  THCTensor *self = THCTensor_(newContiguous)(state, self_);
+  THCTensor *probs = THCTensor_(newContiguous)(state, probs_);
+  ptrdiff_t size = THCTensor_(nElement)(state, self);
+  ptrdiff_t prob_size = THCTensor_(nElement)(state, probs);
+  real *result_data = THCTensor_(data)(state, self);
+  real *probs_data = THCTensor_(data)(state, probs);
+
+  THArgCheck(size == prob_size, 3, "inconsistent tensor size");
+
+  generate_bernoulli_tensor<<<NUM_BLOCKS, BLOCK_SIZE, 0, THCState_getCurrentStream(state)>>>(
+      gen->gen_states, size, result_data, probs_data);
+
+  THCTensor_(free)(state, probs);
+  THCTensor_(freeCopyTo)(state, self, self_);
+}
+
+#endif
 
 #if defined(THC_REAL_IS_DOUBLE)
 
