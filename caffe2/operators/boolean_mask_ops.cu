@@ -139,80 +139,151 @@ namespace {
 template <typename T>
 __global__ void sequenceMaskKernel(
     int N,
-    int D,
+    int M,
+    int B,
     const T* in,
     const int* seq_lengths,
     T fill_val,
     T* out) {
-  CUDA_1D_KERNEL_LOOP(index, N * D) {
-    int i = index / D;
-    int j = index % D;
+  if (B >= 0) {
+    CUDA_1D_KERNEL_LOOP(index, B * N * M) {
+      int k = index % M;
+      int j = (index - k) / M % N;
+      int i = (index - M * j - k) / (N * M);
 
-    out[index] = (j >= seq_lengths[i] ? fill_val : in[index]);
+      int ind = N * M * i + M * j + k;
+      out[ind] = (k >= seq_lengths[j] ? fill_val : in[ind]);
+    }
+  } else {
+    CUDA_1D_KERNEL_LOOP(index, N * M) {
+      int i = index / M;
+      int j = index % M;
+
+      out[index] = (j >= seq_lengths[i] ? fill_val : in[index]);
+    }
   }
 }
 
 template <typename T>
 __global__ void windowMaskKernel(
     int N,
-    int D,
+    int M,
+    int B,
     const T* in,
     const int* window_centers,
     const int radius,
     T fill_val,
     T* out) {
-  CUDA_1D_KERNEL_LOOP(index, N * D) {
-    int i = index / D;
-    int j = index % D;
+  if (B >= 0) {
+    CUDA_1D_KERNEL_LOOP(index, B * N * M) {
+      int k = index % M;
+      int j = (index - k) / M % N;
+      int i = (index - M * j - k) / (N * M);
 
-    out[index] =
-        (j < window_centers[i] - radius || j > window_centers[i] + radius
-             ? fill_val
-             : in[index]);
+      int ind = N * M * i + M * j + k;
+      out[ind] =
+          (k < window_centers[j] - radius || k > window_centers[j] + radius
+               ? fill_val
+               : in[ind]);
+    }
+  } else {
+    CUDA_1D_KERNEL_LOOP(index, N * M) {
+      int i = index / M;
+      int j = index % M;
+
+      out[index] =
+          (j < window_centers[i] - radius || j > window_centers[i] + radius
+               ? fill_val
+               : in[index]);
+    }
   }
 }
 
 template <typename T>
 __global__ void
-upperMaskKernel(int N, int D, const T* in, T fill_val, T* out) {
-  CUDA_1D_KERNEL_LOOP(index, N * D) {
-    int i = index / D;
-    int j = index % D;
+upperMaskKernel(int N, int M, int B, const T* in, T fill_val, T* out) {
+  if (B >= 0) {
+    CUDA_1D_KERNEL_LOOP(index, B * N * M) {
+      int k = index % M;
+      int j = (index - k) / M % N;
+      int i = (index - M * j - k) / (N * M);
 
-    out[index] = (j > i ? fill_val : in[index]);
+      int ind = N * M * i + M * j + k;
+      out[ind] = (k > j ? fill_val : in[ind]);
+    }
+  } else {
+    CUDA_1D_KERNEL_LOOP(index, N * M) {
+      int i = index / M;
+      int j = index % M;
+
+      out[index] = (j > i ? fill_val : in[index]);
+    }
   }
 }
 
 template <typename T>
 __global__ void
-lowerMaskKernel(int N, int D, const T* in, T fill_val, T* out) {
-  CUDA_1D_KERNEL_LOOP(index, N * D) {
-    int i = index / D;
-    int j = index % D;
+lowerMaskKernel(int N, int M, int B, const T* in, T fill_val, T* out) {
+  if (B >= 0) {
+    CUDA_1D_KERNEL_LOOP(index, B * N * M) {
+      int k = index % M;
+      int j = (index - k) / M % N;
+      int i = (index - M * j - k) / (N * M);
 
-    out[index] = (j < i ? fill_val : in[index]);
+      int ind = N * M * i + M * j + k;
+      out[ind] = (k < j ? fill_val : in[ind]);
+    }
+  } else {
+    CUDA_1D_KERNEL_LOOP(index, N * M) {
+      int i = index / M;
+      int j = index % M;
+
+      out[index] = (j < i ? fill_val : in[index]);
+    }
   }
 }
 
 template <typename T>
 __global__ void
-upperDiagMaskKernel(int N, int D, const T* in, T fill_val, T* out) {
-  CUDA_1D_KERNEL_LOOP(index, N * D) {
-    int i = index / D;
-    int j = index % D;
+upperDiagMaskKernel(int N, int M, int B, const T* in, T fill_val, T* out) {
+  if (B >= 0) {
+    CUDA_1D_KERNEL_LOOP(index, B * N * M) {
+      int k = index % M;
+      int j = (index - k) / M % N;
+      int i = (index - M * j - k) / (N * M);
 
-    out[index] = (j >= i ? fill_val : in[index]);
+      int ind = N * M * i + M * j + k;
+      out[ind] = (k >= j ? fill_val : in[ind]);
+    }
+  } else {
+    CUDA_1D_KERNEL_LOOP(index, N * M) {
+      int i = index / M;
+      int j = index % M;
+
+      out[index] = (j >= i ? fill_val : in[index]);
+    }
   }
 }
 
 template <typename T>
 __global__ void
-lowerDiagMaskKernel(int N, int D, const T* in, T fill_val, T* out) {
-  CUDA_1D_KERNEL_LOOP(index, N * D) {
-    int i = index / D;
-    int j = index % D;
+lowerDiagMaskKernel(int N, int M, int B, const T* in, T fill_val, T* out) {
+  if (B >= 0) {
+    CUDA_1D_KERNEL_LOOP(index, B * N * M) {
+      int k = index % M;
+      int j = (index - k) / M % N;
+      int i = (index - M * j - k) / (N * M);
 
-    out[index] = (j <= i ? fill_val : in[index]);
+      int ind = N * M * i + M * j + k;
+      out[ind] = (k <= j ? fill_val : in[ind]);
+    }
+  } else {
+    CUDA_1D_KERNEL_LOOP(index, N * M) {
+      int i = index / M;
+      int j = index % M;
+
+      out[index] = (j <= i ? fill_val : in[index]);
+    }
   }
 }
 
@@ -240,11 +311,33 @@ bool SequenceMaskOp<CUDAContext>::DoRunWithType() {
   output->ResizeLike(*input);
 
   const auto canonical_axis = input->canonical_axis_index(axis_);
-  const int left = input->size_to_dim(canonical_axis);
+
+  // canonical_batch is non-negative if batching, -1 otherwise
+  int canonical_batch = -1;
+  if ((HasArgument("batch"))) {
+    canonical_batch = input->canonical_axis_index(batch_);
+  }
+
+  // make sure batch < axis
+  if (canonical_batch >= 0) {
+    CAFFE_ENFORCE_LT(canonical_batch, canonical_axis);
+  }
+
+  // if no batch, then left is product of dims up to axis
+  // otherwise, left is product of dims between batch and axis
+  const int left =
+      (canonical_batch >= 0
+           ? input->size_between_dim(canonical_batch, canonical_axis)
+           : input->size_to_dim(canonical_axis));
   const int right = input->size_from_dim(canonical_axis);
 
-  T fill_val = convert::To<float, T>(grad_ ? 0.0f : fill_val_);
+  // product of dims from 1 to batch
+  const int batch_dim =
+      (canonical_batch >= 0
+           ? input->size_to_dim(canonical_batch) * input->dim(canonical_batch)
+           : -1);
 
+  T fill_val = convert::To<float, T>(grad_ ? 0.0f : fill_val_);
   if (mode_ == "sequence") {
     sequenceMaskKernel<<<
         CAFFE_GET_BLOCKS(left * right),
@@ -253,6 +346,7 @@ bool SequenceMaskOp<CUDAContext>::DoRunWithType() {
         context_.cuda_stream()>>>(
         left,
         right,
+        batch_dim,
         input->data<T>(),
         sequence_lengths->data<int>(),
         fill_val,
@@ -265,6 +359,7 @@ bool SequenceMaskOp<CUDAContext>::DoRunWithType() {
         context_.cuda_stream()>>>(
         left,
         right,
+        batch_dim,
         input->data<T>(),
         window_centers->data<int>(),
         radius_,
@@ -278,6 +373,7 @@ bool SequenceMaskOp<CUDAContext>::DoRunWithType() {
         context_.cuda_stream()>>>(
         left,
         right,
+        batch_dim,
         input->data<T>(),
         fill_val,
         output->mutable_data<T>());
@@ -289,6 +385,7 @@ bool SequenceMaskOp<CUDAContext>::DoRunWithType() {
         context_.cuda_stream()>>>(
         left,
         right,
+        batch_dim,
         input->data<T>(),
         fill_val,
         output->mutable_data<T>());
@@ -300,6 +397,7 @@ bool SequenceMaskOp<CUDAContext>::DoRunWithType() {
         context_.cuda_stream()>>>(
         left,
         right,
+        batch_dim,
         input->data<T>(),
         fill_val,
         output->mutable_data<T>());
@@ -311,6 +409,7 @@ bool SequenceMaskOp<CUDAContext>::DoRunWithType() {
         context_.cuda_stream()>>>(
         left,
         right,
+        batch_dim,
         input->data<T>(),
         fill_val,
         output->mutable_data<T>());

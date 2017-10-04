@@ -48,6 +48,10 @@ class SequenceMaskOp final : public Operator<Context> {
             -1.0f * std::numeric_limits<float>::infinity())) {
     // Mode argument is required
     mode_ = GetArgument(operator_def, "mode").s();
+    // batch argument is optional, but if not given, we don't want a default val
+    if (HasArgument("batch")) {
+      batch_ = GetArgument(operator_def, "batch").i();
+    }
   }
 
   bool RunOnDevice() override;
@@ -61,6 +65,7 @@ class SequenceMaskOp final : public Operator<Context> {
   std::string mode_;
   bool grad_;
   float fill_val_;
+  int batch_;
 };
 
 } // caffe2
