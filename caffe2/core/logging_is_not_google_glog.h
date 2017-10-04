@@ -114,6 +114,8 @@ static_assert(CAFFE2_LOG_THRESHOLD <= FATAL,
   ::caffe2::MessageLogger((char*)__FILE__, __LINE__, n).stream()
 #define VLOG_IF(n, condition) LOG_IF((-n), (condition))
 
+#define VLOG_IS_ON(verboselevel) (CAFFE2_LOG_THRESHOLD <= -(verboselevel))
+
 // Log only if condition is met.  Otherwise evaluates to void.
 #define FATAL_IF(condition) \
   condition ? (void) 0 : ::caffe2::LoggerVoidify() & \

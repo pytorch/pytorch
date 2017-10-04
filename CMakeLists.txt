@@ -50,6 +50,7 @@ option(USE_ZMQ "Use ZMQ" OFF)
 
 # ---[ CMake scripts + modules
 list(APPEND CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake/Modules)
+set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
 set(CMAKE_MACOSX_RPATH 1)
 
 enable_testing()

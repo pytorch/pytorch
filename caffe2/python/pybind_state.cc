@@ -713,6 +713,7 @@ void addObjectMethods(py::module& m) {
 
 void addGlobalMethods(py::module& m) {
   m.attr("is_asan") = py::bool_(CAFFE2_ASAN_ENABLED);
+  m.def("get_build_options", []() { return GetBuildOptions(); });
 
   m.attr("has_mkldnn") = py::bool_(
 #ifdef CAFFE2_HAS_MKL_DNN
