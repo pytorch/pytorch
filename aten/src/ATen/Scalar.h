@@ -9,43 +9,22 @@
 #include "ATen/ATenGeneral.h"
 #include "ATen/Half.h"
 #include "ATen/ScalarType.h"
-#include "ATen/TensorImpl.h"
+#include "ATen/TensorBase.h"
+#include "ATen/Utils.h"
 
 
 namespace at {
 
-struct TensorImpl;
 struct Tensor;
 
 class Scalar {
 public:
   Scalar() : Scalar(int64_t(0)) {}
-  ~Scalar() {
-    if (Tag::HAS_t == tag && v.t) {
-      v.t->release();
-    }
-  }
 
-  explicit Scalar(const Tensor & t);
-
-  Scalar(const Scalar & rhs)
-  : tag(rhs.tag), v(rhs.v) {
-    if (Tag::HAS_t == tag && v.t) {
-      v.t->retain();
-    }
-  }
-  Scalar(Scalar && rhs) noexcept
-  : tag(rhs.tag), v(rhs.v) {
-    rhs.tag = Tag::HAS_i;
-    rhs.v.i = 0;
-  }
-  Scalar & operator=(Scalar && rhs) {
-    std::swap(this->tag, rhs.tag);
-    std::swap(this->v, rhs.v);
-    return *this;
-  }
-  Scalar & operator=(const Scalar & rhs) {
-    return *this = Scalar{rhs};
+  explicit Scalar(const detail::TensorBase & t)
+  : tag(Tag::HAS_t), t(t) {
+    AT_ASSERT(t.pImpl, "Attempting to create a Scalar from an undefined tensor");
+    AT_ASSERT(t.dim() == 0, "Attempting to create a Scalar from a %d dim tensor", t.dim());
   }
 
 #define DEFINE_IMPLICIT_CTOR(type,name,member) \
@@ -75,7 +54,7 @@ public:
     if (Tag::HAS_t != tag) {
       return *this;
     }
-    return v.t->localScalar();
+    return t.pImpl->localScalar();
   }
 
 #define DEFINE_ACCESSOR(type,name,member) \
@@ -123,8 +102,8 @@ private:
   union {
     double d;
     int64_t i;
-    TensorImpl* t;
   } v;
+  detail::TensorBase t;
   friend struct Type;
 };
 
