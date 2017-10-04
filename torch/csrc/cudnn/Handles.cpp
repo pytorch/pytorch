@@ -36,4 +36,20 @@ cudnnHandle_t getCudnnHandle()
   return handles[device].handle;
 }
 
+
+void useCurrentStream(cudnnHandle_t handle, THCState *state)
+{
+  cudnnStatus_t status = cudnnSetStream(
+      handle,
+      THCState_getCurrentStream(state));
+  if (status == CUDNN_STATUS_BAD_PARAM) {
+    std::cerr << "WARNING: invalid handle\n";
+  } else if (status == CUDNN_STATUS_MAPPING_ERROR) {
+    std::cerr <<
+        "WARNING: Mismatch between user stream and the cuDNN handle context\n";
+  } else if (status != CUDNN_STATUS_SUCCESS) {
+    std::cerr << "WARNING: Could not set cuDNN to use current stream\n";
+  }
+}
+
 }} // namespace torch::cudnn
