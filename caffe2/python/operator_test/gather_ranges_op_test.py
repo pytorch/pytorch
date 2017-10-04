@@ -49,6 +49,31 @@ def batched_boarders_and_data(
     ))
 
 
+@st.composite
+def _tensor_splits(draw):
+    lengths = draw(st.lists(st.integers(1, 5), min_size=1, max_size=10))
+    batch_size = draw(st.integers(1, 5))
+    element_pairs = [
+        (batch, r) for batch in range(batch_size) for r in range(len(lengths))
+    ]
+    perm = draw(st.permutations(element_pairs))
+    perm = perm[:-1]  # skip one range
+    ranges = [[(0, 0)] * len(lengths) for _ in range(batch_size)]
+    offset = 0
+    for pair in perm:
+        ranges[pair[0]][pair[1]] = (offset, lengths[pair[1]])
+        offset += lengths[pair[1]]
+
+    data = draw(st.lists(
+        st.floats(min_value=-1.0, max_value=1.0),
+        min_size=offset,
+        max_size=offset
+    ))
+    return (
+        np.array(data).astype(np.float32), np.array(ranges), np.array(lengths)
+    )
+
+
 def gather_ranges(data, ranges):
     lengths = []
     output = []
@@ -60,6 +85,26 @@ def gather_ranges(data, ranges):
             length += range[1]
         lengths.append(length)
     return output, lengths
+
+
+def gather_ranges_to_dense(data, ranges, lengths):
+    outputs = []
+    assert len(ranges)
+    batch_size = len(ranges)
+    assert len(ranges[0])
+    num_ranges = len(ranges[0])
+    assert ranges.shape[2] == 2
+    for i in range(num_ranges):
+        out = []
+        for j in range(batch_size):
+            start, length = ranges[j][i]
+            if not length:
+                out.append([0] * lengths[i])
+            else:
+                assert length == lengths[i]
+                out.append(data[start:start + length])
+        outputs.append(np.array(out))
+    return outputs
 
 
 class TestGatherRanges(hu.HypothesisTestCase):
@@ -81,6 +126,22 @@ class TestGatherRanges(hu.HypothesisTestCase):
                                    ["output", "lengths"]),
             inputs=[data, ranges],
             reference=gather_ranges,
+        )
+
+    @given(tensor_splits=_tensor_splits(), **hu.gcs)
+    def test_gather_ranges_split(self, tensor_splits, gc, dc):
+        data, ranges, lengths = tensor_splits
+
+        self.assertReferenceChecks(
+            device_option=gc,
+            op=core.CreateOperator(
+                "GatherRangesToDense",
+                ['data', 'ranges'],
+                ['X_{}'.format(i) for i in range(len(lengths))],
+                lengths=lengths
+            ),
+            inputs=[data, ranges, lengths],
+            reference=gather_ranges_to_dense
         )
 
 if __name__ == "__main__":
