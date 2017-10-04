@@ -1,6 +1,11 @@
 #ifndef TH_TENSOR_DIM_APPLY_INC
 #define TH_TENSOR_DIM_APPLY_INC
 
+// This is an example of SIZE_CHECK argument passable to TH_TENSOR_DIM_APPLY3.
+// The TENSOR1, TENSOR2, TENSOR3, DIMENSION will be expanded the same way as
+// TH_TENSOR_DIM_APPLY3.
+// Specifically, this check ensures that TENSOR1, TENSOR2, TENSOR3 have same
+// size except for DIMENSION.
 #define TH_TENSOR_DIM_APPLY3_SIZE_EQ_EXCEPT_DIM(TENSOR1, TENSOR2, TENSOR3, DIMENSION) \
 { \
   int shape_check_flag = 0;                                             \
