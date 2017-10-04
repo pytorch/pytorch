@@ -207,8 +207,6 @@ def run(declarations):
     for declaration in declarations:
         common_with_cwrap.set_declaration_defaults(declaration)
         declaration['options'] = [deepcopy(o) for o in declaration['options']]
-        for option in declaration['options']:
-            option['has_full_argument_list'] = True
         declaration['options'] = common_with_cwrap.filter_unique_options(
             declaration['options'],
             allow_kwarg=False,
