@@ -241,8 +241,9 @@ class RowWiseSparseAdagradOp final : public Operator<Context> {
           hs += gj * gj;
         }
         float hi = nh[0] = h[0] + hs / block_size;
+        float step = lr[0] / (std::sqrt(hi) + epsilon_);
         for (auto j = 0; j < block_size; ++j) {
-          nw[j] = w[j] + lr[0] * g[j] / (std::sqrt(hi) + epsilon_);
+          nw[j] = w[j] + g[j] * step;
         }
       }
     }
