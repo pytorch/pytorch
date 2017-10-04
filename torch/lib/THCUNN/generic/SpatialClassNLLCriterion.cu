@@ -29,6 +29,24 @@ void THNN_(SpatialClassNLLCriterion_shapeCheck)(
   }
 }
 
+void THNN_(SpatialClassNLLCriterion_gradOutput_no_reduce_shapeCheck)(
+           THCState *state,
+           THCTensor *gradOutput,
+           THCIndexTensor *target)
+{
+  THArgCheck(THCTensor_(nDimension)(state, gradOutput) == 3, 2,
+             "Expected dimension 3 but got gradOutput of dimension: %d",
+             THCTensor_(nDimension)(state, gradOutput));
+  if (THCTensor_(size)(state, gradOutput, 0) != THCIndexTensor_(size)(state, target, 0) ||
+      THCTensor_(size)(state, gradOutput, 1) != THCIndexTensor_(size)(state, target, 1) ||
+      THCTensor_(size)(state, gradOutput, 2) != THCIndexTensor_(size)(state, target, 2)) {
+    THCDescBuff gradOutput_size = THCTensor_(sizeDesc)(state, gradOutput);
+    THCDescBuff target_size = THCIndexTensor_(sizeDesc)(state, target);
+    THError("gradOutput sizes don't match target sizes: target %s, gradOutput %s",
+            target_size.str, gradOutput_size.str);
+  }
+}
+
 void THNN_(SpatialClassNLLCriterion_updateOutput)(
            THCState *state,
            THCTensor *input,
@@ -48,6 +66,35 @@ void THNN_(SpatialClassNLLCriterion_updateOutput)(
     THCUNN_assertSameGPU(state, 5, input, target, weights, output, total_weight);
   else
     THCUNN_assertSameGPU(state, 4, input, target, output, total_weight);
+
+  if (!reduce) {
+    int64_t batch_size = THCTensor_(size)(state, input, 0);
+    int64_t H = THCTensor_(size)(state, input, 2);
+    int64_t W = THCTensor_(size)(state, input, 3);
+    
+    THCTensor_(resize3d)(state, output, batch_size, H, W);
+
+    bool not_contiguous_weights = 
+        weights && !THCTensor_(isContiguous)(state, weights);
+    if (not_contiguous_weights) {
+      weights = THCTensor_(newContiguous)(state, weights);
+    }
+
+    int64_t count = batch_size * H * W;
+    SpatialClassNLLCriterion_updateOutput_no_reduce_kernel<real>
+      <<<GET_BLOCKS(count), CUDA_NUM_THREADS, 0, THCState_getCurrentStream(state)>>>(
+        count, 
+        toDeviceTensor<real, 4>(state, input), 
+        toDeviceTensor<THCIndex_t, 3>(state, target), 
+        toDeviceTensor<real, 3>(state, output), 
+        weights ? THCTensor_(data)(state, weights) : NULL, 
+        ignore_index);
+
+    if (not_contiguous_weights) {
+      THCTensor_(free)(state, weights);
+    }
+    return;
+  }
 
   input = THCTensor_(newContiguous)(state, input);
   weights = weights ? THCTensor_(newContiguous)(state, weights) : NULL;
@@ -119,6 +166,38 @@ void THNN_(SpatialClassNLLCriterion_updateGradInput)(
   else
     THCUNN_assertSameGPU(state, 4, input, target, gradInput, total_weight);
 
+  if (!reduce) {
+    THNN_(SpatialClassNLLCriterion_gradOutput_no_reduce_shapeCheck)(
+        state, 
+        gradOutput, 
+        target);
+
+    int64_t batch_size = THCTensor_(size)(state, input, 0);
+    int64_t H = THCTensor_(size)(state, input, 2);
+    int64_t W = THCTensor_(size)(state, input, 3);
+
+    bool not_contiguous_weights = 
+        weights && !THCTensor_(isContiguous)(state, weights);
+    if (not_contiguous_weights) {
+      weights = THCTensor_(newContiguous)(state, weights);
+    }
+
+    int64_t count = batch_size * H * W;
+    SpatialClassNLLCriterion_updateGradInput_no_reduce_kernel<real>
+      <<<GET_BLOCKS(count), CUDA_NUM_THREADS, 0, THCState_getCurrentStream(state)>>>(
+        count, 
+        toDeviceTensor<THCIndex_t, 3>(state, target), 
+        toDeviceTensor<real, 3>(state, gradOutput), 
+        toDeviceTensor<real, 4>(state, gradInput), 
+        weights ? THCTensor_(data)(state, weights) : NULL, 
+        ignore_index);
+
+    if (not_contiguous_weights) {
+      THCTensor_(free)(state, weights);
+    }
+    return;
+  }  
+  
   input = THCTensor_(newContiguous)(state, input);
   weights = weights ? THCTensor_(newContiguous)(state, weights) : NULL;
   target = THCIndexTensor_(newContiguous)(state, target);
@@ -137,6 +216,7 @@ void THNN_(SpatialClassNLLCriterion_updateGradInput)(
   cunn_SpatialClassNLLCriterion_updateGradInput_kernel
     <<<total_blocks, CUDA_NUM_THREADS, 0, THCState_getCurrentStream(state)>>>(
       gradInput_data,
+      THCTensor_(get1d)(state, gradOutput, 0),
       target_data,
       weights_data,
       total_weight_data,
@@ -154,5 +234,7 @@ void THNN_(SpatialClassNLLCriterion_updateGradInput)(
   THCIndexTensor_(free)(state, target);
   THCTensor_(free)(state, input);
 }
+
+#undef TO_DEVICE
 
 #endif
