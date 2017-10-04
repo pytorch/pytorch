@@ -1482,6 +1482,22 @@ static PyObject * THPTensor_(getValue)(THPTensor *self, PyObject *index)
   }
   if (THPIndexTensor_Check(index)) {
     THIndexTensor *index_t = ((THPIndexTensor*)index)->cdata;
+
+    // TH will also throw an error, but its a Runtime Error that is less interpretable
+    // than doing it at this layer
+    if (THIndexTensor_(nDimension)(LIBRARY_STATE index_t) != 1) {
+      PyErr_Format(PyExc_IndexError, "Indexing a Tensor with a "
+#ifndef THC_GENERIC_FILE
+      "torch.LongTensor "
+#else
+      "torch.cuda.LongTensor "
+#endif
+      "triggers index_select semantics, and thus we expect a vector, but the indexing "
+      "Tensor passed has %lld dimensions",
+      (long long) THIndexTensor_(nDimension)(LIBRARY_STATE index_t));
+      throw python_error();
+    }
+
     THTensorPtr index_result(THTensor_(new)(LIBRARY_STATE_NOARGS));
     THTensor_(indexSelect)(LIBRARY_STATE index_result.get(), self->cdata, 0, index_t);
     return THPTensor_(New)(index_result.release());
@@ -1551,6 +1567,22 @@ static int THPTensor_(setValue)(THPTensor *self, PyObject *index, PyObject *valu
   }
   if (THPIndexTensor_Check(index)) {
     THIndexTensor *index_t = ((THPIndexTensor*)index)->cdata;
+
+    // TH will also throw an error, but its a Runtime Error that is less interpretable
+    // than doing it at this layer
+    if (THIndexTensor_(nDimension)(LIBRARY_STATE index_t) != 1) {
+      PyErr_Format(PyExc_IndexError, "Setting values by indexing a Tensor with a "
+#ifndef THC_GENERIC_FILE
+      "torch.LongTensor "
+#else
+      "torch.cuda.LongTensor "
+#endif
+      "triggers index_fill or index_copy semantics, and thus we expect a vector, but "
+      "the indexing Tensor passed has %lld dimensions",
+      (long long) THIndexTensor_(nDimension)(LIBRARY_STATE index_t));
+      throw python_error();
+    }
+
     if (THPUtils_(checkReal)(value)) {
       real v = THPUtils_(unpackReal)(value);
       THTensor_(indexFill)(LIBRARY_STATE self->cdata, 0, index_t, v);
