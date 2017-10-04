@@ -1746,6 +1746,8 @@ method_tests = [
     ('transpose', torch.rand(S, S, S), (2, 0), '3d'),
     ('t', (1, 2), ()),
     ('view', (S, S, S), (S * S, S),),
+    ('view', (S, S, S), (torch.Size([S * S, S]),), 'size'),
+    ('view', (S,), (S,), '1d'),
     ('view_as', (S, S, S), (Variable(torch.rand(S * S, S), requires_grad=False),)),
     ('expand', (S, 1, 1), (S, S, S)),
     ('expand', (torch.Size([S, 1, S]),), (S, S, S), 'size'),

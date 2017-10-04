@@ -157,7 +157,13 @@ inline std::vector<int64_t> PythonArgs::intlist(int i) {
   std::vector<int64_t> res(size);
   for (int idx = 0; idx < size; idx++) {
     PyObject* obj = tuple ? PyTuple_GET_ITEM(arg, idx) : PyList_GET_ITEM(arg, idx);
-    res[idx] = THPUtils_unpackLong(obj);
+    try {
+      res[idx] = THPUtils_unpackLong(obj);
+    } catch (std::runtime_error &e) {
+      type_error("%s(): argument '%s' must be %s, but found element of type %s at pos %d",
+          signature.name.c_str(), signature.params[i].name.c_str(),
+          signature.params[i].type_name().c_str(), Py_TYPE(obj)->tp_name, idx + 1);
+    }
   }
   return res;
 }
