@@ -238,6 +238,10 @@ inline bool HasCudaRuntime() {
   return g_caffe2_has_cuda_linked;
 }
 
+// Returns which setting Caffe2 was configured and built with (exported from
+// CMake)
+const std::map<string, string>& GetBuildOptions();
+
 }  // namespace caffe2
 
 #endif  // CAFFE2_CORE_COMMON_H_

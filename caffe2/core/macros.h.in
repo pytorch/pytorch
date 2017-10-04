@@ -41,3 +41,31 @@ static_assert(
 #cmakedefine CAFFE2_USE_LITE_PROTO
 #cmakedefine CAFFE2_USE_MKL
 #cmakedefine CAFFE2_USE_NVTX
+
+// Useful build settings that are recorded in the compiled binary
+#define CAFFE2_BUILD_STRINGS { \
+  {"GIT_VERSION", "${CAFFE2_GIT_VERSION}"}, \
+  {"CXX_FLAGS", "${CMAKE_CXX_FLAGS}"}, \
+  {"BUILD_TYPE", "${CMAKE_BUILD_TYPE}"}, \
+  {"BLAS", "${BLAS}"}, \
+  {"USE_ATEN", "${USE_ATEN}"}, \
+  {"USE_CUDA", "${USE_CUDA}"}, \
+  {"USE_NCCL", "${USE_NCCL}"}, \
+  {"USE_MPI", "${USE_MPI}"}, \
+  {"USE_GFLAGS", "${USE_GFLAGS}"}, \
+  {"USE_GLOG", "${USE_GLOG}"}, \
+  {"USE_GLOO", "${USE_GLOI}"}, \
+  {"USE_NNPACK", "${USE_NNPACK}"}, \
+  {"USE_OPENMP", "${USE_OPENMP}"}, \
+  {"FORCE_FALLBACK_CUDA_MPI", "${CAFFE2_FORCE_FALLBACK_CUDA_MPI}"}, \
+  {"HAS_MKL_DNN", "${CAFFE2_HAS_MKL_DNN}"}, \
+  {"HAS_MKL_SGEMM_PACK", "${CAFFE2_HAS_MKL_SGEMM_PACK}"}, \
+  {"PERF_WITH_AVX", "${CAFFE2_PERF_WITH_AVX}"}, \
+  {"PERF_WITH_AVX2", "${CAFFE2_PERF_WITH_AVX2}"}, \
+  {"UNIQUE_LONG_TYPEMETA", "${CAFFE2_UNIQUE_LONG_TYPEMETA}"}, \
+  {"USE_ACCELERATE", "${CAFFE2_USE_ACCELERATE}"}, \
+  {"USE_EIGEN_FOR_BLAS", "${CAFFE2_USE_EIGEN_FOR_BLAS}"}, \
+  {"USE_LITE_PROTO", "${CAFFE2_USE_LITE_PROTO}"}, \
+  {"USE_MKL", "${CAFFE2_USE_MKL}"}, \
+  {"USE_NVTX", "${CAFFE2_USE_NVTX}"}, \
+}
