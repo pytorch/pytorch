@@ -71,6 +71,22 @@ inline TIndex size_to_dim_(int k, vector<TIndex> dims) {
   return r;
 }
 
+// Product of all dims between k and l (not including dims[k] and dims[l])
+inline TIndex size_between_dim_(int k, int l, vector<TIndex> dims) {
+  CAFFE_ENFORCE(l < dims.size());
+  TIndex r = 1;
+  if (k < l) {
+    for (int i = k + 1; i < l; ++i) {
+      r *= dims[i];
+    }
+  } else {
+    for (int i = l + 1; i < k; ++i) {
+      r *= dims[i];
+    }
+  }
+  return r;
+}
+
 inline int canonical_axis_index_(int axis_index, int ndims) {
   CAFFE_ENFORCE_GE(axis_index, -ndims);
   CAFFE_ENFORCE_LT(axis_index, ndims);
@@ -612,6 +628,10 @@ class Tensor {
 
   inline TIndex size_to_dim(int k) const {
     return size_to_dim_(k, dims_);
+  }
+
+  inline TIndex size_between_dim(int k, int l) const {
+    return size_between_dim_(k, l, dims_);
   }
 
   /**
