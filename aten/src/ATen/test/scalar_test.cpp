@@ -25,6 +25,21 @@ struct Foo<Half> {
   static void CUDA(const Type & t, Tensor a, Tensor b) {}
 };
 
+void test_ctors() {
+  // create scalars backed by tensors
+  auto s1 = Scalar(CPU(kFloat).scalarTensor(1));
+  auto s2 = Scalar(CPU(kFloat).scalarTensor(2));
+  Scalar{s1};
+  Scalar{std::move(s2)};
+  ASSERT(s2.isIntegral() && s2.toInt() == 0);
+  s2 = s1;
+  ASSERT(s2.isBackedByTensor() && s2.toFloat() == 1.0);
+  Scalar s3;
+  s3 = std::move(s2);
+  ASSERT(s2.isIntegral() && s2.toInt() == 0);
+  ASSERT(s3.isBackedByTensor() && s3.toFloat() == 1.0);
+}
+
 int main() {
   Scalar what = 257;
   Scalar bar = 3.0;
@@ -70,6 +85,8 @@ int main() {
     threw = true;
   }
   ASSERT(threw);
+
+  test_ctors();
 
   if(at::hasCUDA()) {
     auto r = CUDA(Float).copy(next_h);

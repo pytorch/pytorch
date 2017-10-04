@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <stdexcept>
 #include <string>
+#include <utility>
 
 #include "ATen/ATenGeneral.h"
 #include "ATen/Half.h"
@@ -26,6 +27,26 @@ public:
   }
 
   explicit Scalar(const Tensor & t);
+
+  Scalar(const Scalar & rhs)
+  : tag(rhs.tag), v(rhs.v) {
+    if (Tag::HAS_t == tag && v.t) {
+      v.t->retain();
+    }
+  }
+  Scalar(Scalar && rhs) noexcept
+  : tag(rhs.tag), v(rhs.v) {
+    rhs.tag = Tag::HAS_i;
+    rhs.v.i = 0;
+  }
+  Scalar & operator=(Scalar && rhs) {
+    std::swap(this->tag, rhs.tag);
+    std::swap(this->v, rhs.v);
+    return *this;
+  }
+  Scalar & operator=(const Scalar & rhs) {
+    return *this = Scalar{rhs};
+  }
 
 #define DEFINE_IMPLICIT_CTOR(type,name,member) \
   Scalar(type vv) \
