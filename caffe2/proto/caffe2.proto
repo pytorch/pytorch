@@ -113,9 +113,9 @@ enum DeviceType {
   CPU = 0;                    // In default, we will use CPU.
   CUDA = 1;                   // CUDA.
   MKLDNN = 2;                 // Reserved for explicit MKLDNN
-  OPENGL = 4;                 // OpenGL
+  OPENGL = 3;                 // OpenGL
   // Change the following number if you add more devices in the code.
-  COMPILE_TIME_MAX_DEVICE_TYPES = 5;
+  COMPILE_TIME_MAX_DEVICE_TYPES = 4;
   ONLY_FOR_TEST = 20901701;   // This device type is only for test.
 }
 
