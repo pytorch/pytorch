@@ -1731,7 +1731,7 @@ class TestOperators(hu.HypothesisTestCase):
            eps=st.floats(min_value=1e-4, max_value=1e-2),
            a_grad=hu.tensor(elements=st.floats(min_value=0.01, max_value=0.99)),
            eps_grad=st.floats(min_value=1e-4, max_value=1e-3),
-           **hu.gcs_cpu_only)
+           **hu.gcs)
     def test_logit(self, a, eps, a_grad, eps_grad, gc, dc):
         def ref(data):
             data = np.clip(data, eps, 1.0 - eps)

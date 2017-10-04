@@ -13,11 +13,10 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
+#include "caffe2/operators/logit_op.h"
 #include "caffe2/operators/elementwise_op.h"
 
 namespace caffe2 {
-namespace {
 struct LogitCPUFunctor {
   explicit LogitCPUFunctor(OperatorBase& op)
       : eps_(op.GetSingleArgument<float>("eps", 1e-6)) {
@@ -40,35 +39,23 @@ struct LogitCPUFunctor {
   float eps_;
 };
 
-template <typename T, class Context>
-class LogitGradientOp final : public Operator<Context> {
- public:
-  USE_OPERATOR_CONTEXT_FUNCTIONS;
-  LogitGradientOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws),
-        eps_(OperatorBase::GetSingleArgument<float>("eps", 1e-6)) {}
-  ~LogitGradientOp() {}
-
-  bool RunOnDevice() override {
-    const auto& X = Input(0);
-    const auto& dY = Input(1);
-    auto* dX = Output(0);
-    dX->ResizeLike(X);
-    int channels = X.dim32(X.ndim() - 1);
-    ConstEigenArrayMap<float> Xmat(
-        X.template data<float>(), channels, X.size() / channels);
-    ConstEigenArrayMap<float> dYmat(
-        dY.template data<float>(), channels, X.size() / channels);
-    EigenArrayMap<float> dXmat(
-        dX->template mutable_data<float>(), channels, X.size() / channels);
-    dXmat = (Xmat < eps_ || Xmat > 1.0 - eps_)
-                .select(0, dYmat * ((1 - Xmat) * Xmat).inverse());
-    return true;
-  }
-
- protected:
-  float eps_;
-};
+template <>
+bool LogitGradientOp<float, CPUContext>::RunOnDevice() {
+  const auto& X = Input(0);
+  const auto& dY = Input(1);
+  auto* dX = Output(0);
+  dX->ResizeLike(X);
+  int channels = X.dim32(X.ndim() - 1);
+  ConstEigenArrayMap<float> Xmat(
+      X.template data<float>(), channels, X.size() / channels);
+  ConstEigenArrayMap<float> dYmat(
+      dY.template data<float>(), channels, X.size() / channels);
+  EigenArrayMap<float> dXmat(
+      dX->template mutable_data<float>(), channels, X.size() / channels);
+  dXmat = (Xmat < eps_ || Xmat > 1.0 - eps_)
+              .select(0, dYmat * ((1 - Xmat) * Xmat).inverse());
+  return true;
+}
 
 REGISTER_CPU_OPERATOR(
     Logit,
@@ -90,7 +77,7 @@ input data clampped in (eps, 1-eps).
 )DOC")
     .Arg("eps (optional)", "small positive epsilon value, the default is 1e-6.")
     .Input(0, "X", "input float tensor")
-    .Input(1, "Y", "output float tensor");
+    .Output(0, "Y", "output float tensor");
 
 OPERATOR_SCHEMA(LogitGradient)
     .NumInputs(2)
@@ -112,5 +99,4 @@ class GetLogitGradient : public GradientMakerBase {
 };
 
 REGISTER_GRADIENT(Logit, GetLogitGradient);
-} // namespace
 } // namespace caffe2
