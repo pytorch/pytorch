@@ -52,7 +52,7 @@ Tensor Type::tensorFromBlob(void * data, IntList sizes, IntList strides) const {
 }
 Tensor Type::scalarTensor(Scalar s) const {
   if(s.isBackedByTensor())
-    return Tensor(s.v.t, false).toType(*this);
+    return Tensor(s.t).toType(*this);
   return tensor({}).fill_(s);
 }
 

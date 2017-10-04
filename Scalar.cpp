@@ -7,17 +7,9 @@
 
 namespace at {
 
-Scalar::Scalar(const Tensor & t)
-: tag(Tag::HAS_t) {
-  v.t = t.get();
-  AT_ASSERT(t.defined(), "Attempting to create a Scalar from an undefined tensor");
-  v.t->retain();
-  AT_ASSERT(t.dim() == 0, "Attempting to create a Scalar from a %d dim tensor",t.dim());
-}
-
 Tensor Scalar::toTensor() const {
   if (Tag::HAS_t == tag) {
-    return Tensor(v.t, true);
+    return Tensor(t);
   } else if (Tag::HAS_d == tag) {
     return CPU(kDouble).scalarTensor(*this);
   } else {
