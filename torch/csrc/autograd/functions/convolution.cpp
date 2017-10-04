@@ -18,6 +18,10 @@ extern THCState* state;
 using namespace torch::cudnn;
 #endif
 
+#ifdef WITH_NNPACK
+#include "torch/csrc/nnpack/NNPACK.h"
+#endif
+
 using torch::cudnn::Convolution;
 using at::Tensor;
 using tensor_pair = std::pair<at::Tensor, at::Tensor>;
@@ -28,7 +32,7 @@ namespace torch { namespace autograd {
 
 static at::Tensor compute_output(
   at::Tensor& input, at::Tensor& weight, at::Tensor& bias, at::Tensor& columns, at::Tensor& ones,
-  const std::vector<int64_t>& kernel_size, const ConvParams& params);
+  const std::vector<int64_t>& kernel_size, const ConvForward& params);
 
 static at::Tensor compute_grad_input(
   at::Tensor& input, at::Tensor& grad_output, at::Tensor& weight, at::Tensor& columns, at::Tensor& ones,
@@ -37,6 +41,14 @@ static at::Tensor compute_grad_input(
 static tensor_pair compute_grad_params(
   at::Tensor& input, at::Tensor& grad_output, at::Tensor& weight, at::Tensor& bias, at::Tensor& columns, at::Tensor& ones,
   const std::vector<int64_t>& kernel_size, const ConvBackward& params);
+
+auto ConvParams::is_strided() const -> bool {
+  bool is_strided = false;
+  for (int s : stride) {
+    is_strided |= (s != 1);
+  }
+  return is_strided;
+}
 
 auto ConvParams::is_dilated() const -> bool {
   bool is_dilated = false;
@@ -95,9 +107,21 @@ auto ConvParams::use_cudnn(const at::Tensor& input) const -> bool {
   return false;
 }
 
+auto ConvParams::use_nnpack(const at::Tensor& input) const -> bool {
+#ifdef WITH_NNPACK
+  return input.type().ID() == at::TypeID::CPUFloat && // only on CPU Float Tensors
+         !is_strided() && // doesn't support strides
+         !is_dilated() && // or dilation
+         !transposed &&   // or transposed tensors
+         input.ndimension() == 4 && // must be in NCHW format
+         input.size(0) >= 16; // ensure large enough batch size to ensure perf, tuneable
+#endif
+  return false;
+}
+
 std::string ConvForward::name() { return "ConvForward"; }
 
-auto ConvForward::output_size(at::Tensor& input, at::Tensor& weight) -> std::vector<int64_t> {
+auto ConvForward::output_size(at::Tensor& input, at::Tensor& weight) const -> std::vector<int64_t> {
   auto in_size = input.sizes();
   auto weight_size = weight.sizes();
   auto dim = input.ndimension();
@@ -616,7 +640,7 @@ static at::Tensor compute_output(
     at::Tensor& input, at::Tensor& weight, at::Tensor& bias,
     at::Tensor& columns, at::Tensor& ones,
     const std::vector<int64_t>& kernel_size,
-    const ConvParams& params) {
+    const ConvForward& params) {
 
   auto output = input.type().tensor();
   auto dim = input.ndimension();
@@ -652,7 +676,19 @@ static at::Tensor compute_output(
           params.stride[1], params.stride[0],
           params.padding[1], params.padding[0],
           params.dilation[1], params.dilation[0]); goto done;
-      } else {
+      } else {  /* dim == 4, non-dilated */
+        if (params.use_nnpack(input)) {
+#ifdef WITH_NNPACK
+          // THNN functions handle resizing the output Tensor themselves,
+          // but NNPACK expects the Tensors to be in the appropriate shape
+          // already, so we resize here
+          output.resize_(params.output_size(input, weight));
+          nnpack::SpatialConvolution_updateOutput(
+              input, output, weight, bias,
+              kernel_size[1], kernel_size[0],
+              params.padding[1], params.padding[0]); goto done;
+#endif
+        } else {
         /* CPU implementation has specialized MM kernels
            for non-dilated case here */
         at::SpatialConvolutionMM_updateOutput(
@@ -660,6 +696,7 @@ static at::Tensor compute_output(
             kernel_size[1], kernel_size[0],
             params.stride[1], params.stride[0],
             params.padding[1], params.padding[0]); goto done;
+        }
       }
     } else if (dim == 5 && (input.type().isCuda() || dilated)) {
       at::VolumetricDilatedConvolution_updateOutput(
@@ -726,13 +763,22 @@ static at::Tensor compute_grad_input(
             params.padding[1], params.padding[0],
             params.dilation[1], params.dilation[0]); goto done;
       } else {
-        /* CPU implementation has specialized MM kernels
-           for non-dilated case here */
-        at::SpatialConvolutionMM_updateGradInput(
-            input, grad_output, grad_input, weight, columns, ones,
-            kernel_size[1], kernel_size[0],
-            params.stride[1], params.stride[0],
-            params.padding[1], params.padding[0]); goto done;
+        if (params.use_nnpack(input)) {
+#ifdef WITH_NNPACK
+          nnpack::SpatialConvolution_updateGradInput(
+              input, grad_output, grad_input, weight,
+              kernel_size[1], kernel_size[0],
+              params.padding[1], params.padding[0]); goto done;
+#endif
+        } else {
+          /* CPU implementation has specialized MM kernels
+             for non-dilated case here */
+          at::SpatialConvolutionMM_updateGradInput(
+              input, grad_output, grad_input, weight, columns, ones,
+              kernel_size[1], kernel_size[0],
+              params.stride[1], params.stride[0],
+              params.padding[1], params.padding[0]); goto done;
+        }
       }
     } else if (dim == 5 && (input.type().isCuda() || dilated)) {
         at::VolumetricDilatedConvolution_updateGradInput(
@@ -807,13 +853,32 @@ static tensor_pair compute_grad_params(
             params.padding[1], params.padding[0],
             params.dilation[1], params.dilation[0], 1.0); goto done;
       } else {
-        /* CPU implementation has specialized MM kernels
-           for non-dilated case here */
-        at::SpatialConvolutionMM_accGradParameters(
-            input, grad_output, grad_weight, grad_bias, columns, ones,
-            kernel_size[1], kernel_size[0],
-            params.stride[1], params.stride[0],
-            params.padding[1], params.padding[0], 1.0); goto done;
+        if (params.use_nnpack(input)) {
+#ifdef WITH_NNPACK
+          // NNPACK does not have a bias gradient calculation, so we split
+          // into two calls here if necessary
+          nnpack::SpatialConvolution_accGradWeight(
+              input, grad_output, grad_weight,
+              kernel_size[1], kernel_size[0],
+              params.padding[1], params.padding[0]);
+
+          if (bias.defined() && params.should_compute_output(2)) {
+            // grad_output is in N, C, H, W, we re-shape and make contiguous
+            at::Tensor ones = grad_output.type().ones(input.size(0) * grad_output.size(2) * grad_output.size(3));
+            at::Tensor reshaped = grad_output.transpose(1, 3).contiguous().view({-1, ones.numel()});
+            grad_bias.addmv_(1.0, 1.0, reshaped, ones);
+          }
+          goto done;
+#endif
+        } else {
+          /* CPU implementation has specialized MM kernels
+             for non-dilated case here */
+          at::SpatialConvolutionMM_accGradParameters(
+              input, grad_output, grad_weight, grad_bias, columns, ones,
+              kernel_size[1], kernel_size[0],
+              params.stride[1], params.stride[0],
+              params.padding[1], params.padding[0], 1.0); goto done;
+        }
       }
     } else if (dim == 5 && (input.type().isCuda() || dilated)) {
         at::VolumetricDilatedConvolution_accGradParameters(
