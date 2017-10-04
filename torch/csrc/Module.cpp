@@ -7,7 +7,10 @@
 #include <libshm.h>
 #include <TH/TH.h>
 #include <ATen/ATen.h>
+#include <ATen/dlpack.h>
+#include <ATen/DLConvertor.h>
 
+#include "torch/csrc/DynamicTypes.h"
 #include "torch/csrc/utils/python_strings.h"
 #include "torch/csrc/jit/python_tracer.h"
 #include "torch/csrc/jit/init.h"
@@ -534,6 +537,26 @@ PyObject *THPModule_hasDistributed(PyObject *_unused)
 #endif
 }
 
+void destroy_DLPack_PyCapsule(PyObject * obj) {
+  delete (DLTensor*)PyCapsule_GetPointer(obj, "tensor");
+}
+
+PyObject *THPModule_toDLPack(PyObject *_unused, PyObject *data)
+{
+  THPUtils_assert(THPModule_isTensor(data), "data must be a Tensor");
+  auto atTensor = torch::createTensor(data);
+  DLTensor * dlTensor(new DLTensor);
+  at::toDLPack(atTensor, dlTensor);
+  return PyCapsule_New(dlTensor, "tensor", destroy_DLPack_PyCapsule);
+}
+
+PyObject *THPModule_fromDLPack(PyObject *_unused, PyObject *data)
+{
+  DLTensor * dlTensor = (DLTensor *)PyCapsule_GetPointer(data, "tensor");
+  at::Tensor atensor = at::fromDLPack(dlTensor);
+  return torch::createPyObject(atensor);
+}
+
 #ifdef WITH_CUDA
 extern PyObject * THCSPModule_initExtension(PyObject *self);
 #endif
@@ -558,6 +581,8 @@ static PyMethodDef TorchMethods[] = {
   {"get_num_threads", (PyCFunction)THPModule_getNumThreads,     METH_NOARGS,  NULL},
   {"set_num_threads", (PyCFunction)THPModule_setNumThreads,     METH_O,       NULL},
   {"from_numpy",      (PyCFunction)THPModule_fromNumpy,         METH_O,       NULL},
+  {"_to_dlpack",      (PyCFunction)THPModule_toDLPack,          METH_O,       NULL},
+  {"_from_dlpack",    (PyCFunction)THPModule_fromDLPack,        METH_O,       NULL},
 
   {"sigmoid",         (PyCFunction)THPModule_sigmoid,           METH_VARARGS | METH_KEYWORDS, NULL},
   {"log",             (PyCFunction)THPModule_log,               METH_VARARGS | METH_KEYWORDS, NULL},
