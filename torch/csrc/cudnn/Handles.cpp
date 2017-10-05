@@ -36,10 +36,4 @@ cudnnHandle_t getCudnnHandle()
   return handles[device].handle;
 }
 
-
-void useCurrentStream(cudnnHandle_t handle, THCState *state)
-{
-  CHECK(cudnnSetStream(handle, THCState_getCurrentStream(state)));
-}
-
 }} // namespace torch::cudnn

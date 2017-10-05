@@ -50,7 +50,7 @@ void cudnn_affine_grid_generator_forward(
     THVoidTensor* theta, THVoidTensor* grid,
     int N, int C, int H, int W)
 {
-  useCurrentStream(handle, state);
+  CHECK(cudnnSetStream(handle, THCState_getCurrentStream(state)));
   assertSameGPU(dataType, theta, grid);
   checkIOSize(theta, grid, N, H, W);  
   SpatialTransformerDescriptor desc;
@@ -65,7 +65,7 @@ void cudnn_affine_grid_generator_backward(
     THVoidTensor* grad_theta, THVoidTensor* grad_grid,
     int N, int C, int H, int W)
 {
-  useCurrentStream(handle, state);
+  CHECK(cudnnSetStream(handle, THCState_getCurrentStream(state)));
   assertSameGPU(dataType, grad_theta, grad_grid);
   checkIOSize(grad_theta, grad_grid, N, H, W);
   SpatialTransformerDescriptor desc;
