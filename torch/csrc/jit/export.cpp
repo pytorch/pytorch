@@ -113,8 +113,7 @@ void addAttribute(onnx::NodeProto * n_p, jit::Node * n, jit::Symbol name) {
   }
 }
 
-void encodeType(onnx::TypeProto* t, Node* n) {
-  onnx::TypeProtoTensorTypeProto* tensor_type = t->mutable_tensor_type();
+void encodeTypeProtoTensorType(onnx::TypeProtoTensorTypeProto* tensor_type, Node* n) {
   onnx::TypeProtoTensorShapeProto* shape = tensor_type->mutable_shape();
   JIT_ASSERT(n->hasType());
   TensorType* node_type = n->type()->expect<TensorType>();
@@ -152,7 +151,8 @@ void encodeType(onnx::TypeProto* t, Node* n) {
 void encodeValueInfo(onnx::ValueInfoProto* v, Node* n) {
   v->set_name(node_name(n));
   onnx::TypeProto* t = v->mutable_type();
-  encodeType(t, n);
+  onnx::TypeProtoTensorTypeProto* tensor_type = t->mutable_tensor_type();
+  encodeTypeProtoTensorType(tensor_type, n);
 }
 
 void encodeGraph(onnx::GraphProto * p_g, const std::shared_ptr<Graph> & g, const std::vector<at::Tensor> & initializers) {
