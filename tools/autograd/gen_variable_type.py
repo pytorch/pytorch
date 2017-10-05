@@ -655,8 +655,7 @@ def create_python_bindings(top_env, python_functions):
 
 def gen_variable_type(declarations, out):
     with open(declarations, 'r') as f:
-        aten_decls = [option for option in yaml.load(f, Loader=Loader)
-                      if option['has_full_argument_list']]
+        aten_decls = [option for option in yaml.load(f, Loader=Loader)]
 
     derivatives = load_derivatives(derivatives_path)
     deprecated = load_derivatives(deprecated_path)

@@ -196,7 +196,7 @@ static at::Tensor cat(const tensor_list& tensors, int dim) {
   }
 
   auto output = tensors[0].type().tensor();
-  at::cat_out(tensors, dim, output);
+  at::cat_out(output, tensors, dim);
   return output;
 }
 

@@ -41,7 +41,7 @@ if [[ $WITH_CUDA -eq 1 ]]; then
     GLOO_FLAGS="-DUSE_CUDA=1 -DNCCL_ROOT_DIR=$NCCL_ROOT_DIR"
 fi
 CWRAP_FILES="\
-$BASE_DIR/torch/csrc/Declarations.cwrap;\
+$BASE_DIR/torch/lib/ATen/Declarations.cwrap;\
 $BASE_DIR/torch/lib/ATen/Local.cwrap;\
 $BASE_DIR/torch/lib/THNN/generic/THNN.h;\
 $BASE_DIR/torch/lib/THCUNN/generic/THCUNN.h"

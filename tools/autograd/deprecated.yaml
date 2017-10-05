@@ -2,43 +2,43 @@
 # in the error message suggestions.
 
 - name: add(Tensor self, Scalar alpha, Tensor other)
-  aten: add(self, alpha, other)
+  aten: add(self, other, alpha)
 
 - name: addbmm(Scalar beta, Tensor self, Scalar alpha, Tensor mat1, Tensor mat2)
-  aten: addbmm(beta, self, alpha, mat1, mat2)
+  aten: addbmm(self, mat1, mat2, beta, alpha)
 
 - name: addbmm(Scalar beta, Tensor self, Tensor mat1, Tensor mat2)
-  aten: addbmm(beta, self, 1, mat1, mat2)
+  aten: addbmm(self, mat1, mat2, beta, 1)
 
 - name: addcdiv(Tensor self, Scalar value, Tensor tensor1, Tensor tensor2)
-  aten: addcdiv(self, value, tensor1, tensor2)
+  aten: addcdiv(self, tensor1, tensor2, value)
 
 - name: addcmul(Tensor self, Scalar value, Tensor tensor1, Tensor tensor2)
-  aten: addcmul(self, value, tensor1, tensor2)
+  aten: addcmul(self, tensor1, tensor2, value)
 
 - name: addmm(Scalar beta, Tensor self, Scalar alpha, Tensor mat1, Tensor mat2)
-  aten: addmm(beta, self, alpha, mat1, mat2)
+  aten: addmm(self, mat1, mat2, beta, alpha)
 
 - name: addmm(Scalar beta, Tensor self, Tensor mat1, Tensor mat2)
-  aten: addmm(beta, self, 1, mat1, mat2)
+  aten: addmm(self, 1, mat1, mat2, beta)
 
 - name: addmv(Scalar beta, Tensor self, Scalar alpha, Tensor mat, Tensor vec)
-  aten: addmv(beta, self, alpha, mat, vec)
+  aten: addmv(self, mat, vec, beta, alpha)
 
 - name: addmv(Scalar beta, Tensor self, Tensor mat, Tensor vec)
-  aten: addmv(beta, self, 1, mat, vec)
+  aten: addmv(self, 1, mat, vec, beta)
 
 - name: addr(Scalar beta, Tensor self, Scalar alpha, Tensor vec1, Tensor vec2)
-  aten: addr(beta, self, alpha, vec1, vec2)
+  aten: addr(self, vec1, vec2, beta, alpha)
 
 - name: addr(Scalar beta, Tensor self, Tensor vec1, Tensor vec2)
-  aten: addr(beta, self, 1, vec1, vec2)
+  aten: addr(self, 1, vec1, vec2, beta)
 
 - name: baddbmm(Scalar beta, Tensor self, Scalar alpha, Tensor batch1, Tensor batch2)
-  aten: baddbmm(beta, self, alpha, batch1, batch2)
+  aten: baddbmm(self, batch1, batch2, beta, alpha)
 
 - name: baddbmm(Scalar beta, Tensor self, Tensor batch1, Tensor batch2)
-  aten: baddbmm(beta, self, 1, batch1, batch2)
+  aten: baddbmm(self, 1, batch1, batch2, beta)
 
 - name: sub(Tensor self, Scalar alpha, Tensor other)
-  aten: sub(self, alpha, other)
+  aten: sub(self, other, alpha)

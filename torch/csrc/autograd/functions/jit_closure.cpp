@@ -545,7 +545,7 @@ struct StageClosure {
       auto beta = value->f(kbeta);
       auto alpha = value->f(kalpha);
       return std::make_shared<LambdaFunction>(3, [beta, alpha](const variable_list& vars) -> variable_list {
-        return {vars[2].addmm(beta, alpha, vars[0], vars[1])};
+        return {vars[2].addmm(vars[0], vars[1], beta, alpha)};
       });
     IR_ELSEIF(Split)
       auto dim = value->i(kaxis);
