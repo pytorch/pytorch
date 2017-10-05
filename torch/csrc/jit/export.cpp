@@ -34,10 +34,16 @@ void encodeTensor(onnx::TensorProto * p, const at::Tensor & tensor) {
   onnx::DataType onnx_type;
   switch(tensor.type().scalarType()) {
     case at::kDouble:
+      onnx_type = onnx::kDOUBLE;
+      at_type = at::kDouble;
+      break;
     case at::kFloat:
-    case at::kHalf:
       onnx_type = onnx::kFLOAT;
       at_type = at::kFloat;
+      break;
+    case at::kHalf:
+      onnx_type = onnx::kFLOAT16;
+      at_type = at::kHalf;
       break;
     case at::kByte:
     case at::kChar:
@@ -124,9 +130,13 @@ void encodeTypeProtoTensorType(onnx::TypeProtoTensorTypeProto* tensor_type, Node
   onnx::DataType onnx_type;
   switch(node_type->scalarType()) {
     case at::kDouble:
+      onnx_type = onnx::kDOUBLE;
+      break;
     case at::kFloat:
-    case at::kHalf:
       onnx_type = onnx::kFLOAT;
+      break;
+    case at::kHalf:
+      onnx_type = onnx::kFLOAT16;
       break;
     case at::kByte:
     case at::kChar:

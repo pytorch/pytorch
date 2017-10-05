@@ -38,15 +38,15 @@ graph {
   initializer {
     dims: 2
     dims: 2
-    data_type: FLOAT
+    data_type: DOUBLE
     name: "2"
-    raw_data: "\000\000\200?\000\000\000@\000\000@@\000\000\200@"
+    raw_data: "\000\000\000\000\000\000\360?\000\000\000\000\000\000\000@\000\000\000\000\000\000\010@\000\000\000\000\000\000\020@"
   }
   input {
     name: "1"
     type {
       tensor_type {
-        elem_type: FLOAT
+        elem_type: DOUBLE
         shape {
           dim {
             dim_value: 2
@@ -62,7 +62,7 @@ graph {
     name: "2"
     type {
       tensor_type {
-        elem_type: FLOAT
+        elem_type: DOUBLE
         shape {
           dim {
             dim_value: 2
@@ -78,7 +78,7 @@ graph {
     name: "7"
     type {
       tensor_type {
-        elem_type: FLOAT
+        elem_type: DOUBLE
         shape {
           dim {
             dim_value: 2

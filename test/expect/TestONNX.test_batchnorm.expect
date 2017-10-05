@@ -35,33 +35,33 @@ graph {
   name: "torch-jit-export"
   initializer {
     dims: 2
-    data_type: FLOAT
+    data_type: DOUBLE
     name: "2"
-    raw_data: "\277Kh>\324\3350?"
+    raw_data: "\000\000\000\356w\t\315?\000\000@\214\272\033\346?"
   }
   initializer {
     dims: 2
-    data_type: FLOAT
+    data_type: DOUBLE
     name: "3"
-    raw_data: "\000\000\000\000\000\000\000\000"
+    raw_data: "\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000"
   }
   initializer {
     dims: 2
-    data_type: FLOAT
+    data_type: DOUBLE
     name: "4"
-    raw_data: "\000\000\000\000\000\000\000\000"
+    raw_data: "\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000"
   }
   initializer {
     dims: 2
-    data_type: FLOAT
+    data_type: DOUBLE
     name: "5"
-    raw_data: "\000\000\200?\000\000\200?"
+    raw_data: "\000\000\000\000\000\000\360?\000\000\000\000\000\000\360?"
   }
   input {
     name: "1"
     type {
       tensor_type {
-        elem_type: FLOAT
+        elem_type: DOUBLE
         shape {
           dim {
             dim_value: 2
@@ -77,7 +77,7 @@ graph {
     name: "2"
     type {
       tensor_type {
-        elem_type: FLOAT
+        elem_type: DOUBLE
         shape {
           dim {
             dim_value: 2
@@ -90,7 +90,7 @@ graph {
     name: "3"
     type {
       tensor_type {
-        elem_type: FLOAT
+        elem_type: DOUBLE
         shape {
           dim {
             dim_value: 2
@@ -103,7 +103,7 @@ graph {
     name: "4"
     type {
       tensor_type {
-        elem_type: FLOAT
+        elem_type: DOUBLE
         shape {
           dim {
             dim_value: 2
@@ -116,7 +116,7 @@ graph {
     name: "5"
     type {
       tensor_type {
-        elem_type: FLOAT
+        elem_type: DOUBLE
         shape {
           dim {
             dim_value: 2
@@ -129,7 +129,7 @@ graph {
     name: "7"
     type {
       tensor_type {
-        elem_type: FLOAT
+        elem_type: DOUBLE
         shape {
           dim {
             dim_value: 2
