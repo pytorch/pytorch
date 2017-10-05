@@ -146,9 +146,14 @@ class NNPACKConvOp final : public ConvPoolOpBase<CPUContext> {
     const int oH = Y->dim32(2), oW = Y->dim32(3);
 
     if (N > 1) {
-      // NNPack only supports stride = 1 when doing batch feedforward
-      CAFFE_ENFORCE(this->stride_h() == 1, "");
-      CAFFE_ENFORCE(this->stride_w() == 1, "");
+      CAFFE_ENFORCE_EQ(
+          this->stride_h(),
+          1,
+          "NNPack only supports stride = 1 when doing batch feedforward");
+      CAFFE_ENFORCE_EQ(
+          this->stride_w(),
+          1,
+          "NNPack only supports stride = 1 when doing batch feedforward");
     }
     std::vector<int> pads(
         {this->pad_t(), this->pad_b(), this->pad_l(), this->pad_r()});
