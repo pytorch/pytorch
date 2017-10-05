@@ -4466,6 +4466,49 @@ class TestTorch(TestCase):
         self.assertRaises(RuntimeError, lambda: torch.from_numpy(x))
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    def test_ctor_with_numpy_array(self):
+        dtypes = [
+            np.double,
+            np.float,
+            np.float16,
+            np.int64,
+            np.int32,
+            np.int16,
+            np.uint8
+        ]
+        for dtype in dtypes:
+            array = np.array([1, 2, 3, 4], dtype=dtype)
+
+            # Upcast
+            tensor = torch.DoubleTensor(array)
+            for i in range(len(array)):
+                self.assertEqual(tensor[i], array[i])
+
+            if torch.cuda.is_available():
+                tensor = torch.cuda.DoubleTensor(array)
+                for i in range(len(array)):
+                    self.assertEqual(tensor[i], array[i])
+
+            # Downcast (sometimes)
+            if np.issubsctype(dtype, np.floating):
+                tensor = torch.FloatTensor(array)
+                for i in range(len(array)):
+                    self.assertEqual(tensor[i], array[i])
+
+                tensor = torch.HalfTensor(array)
+                for i in range(len(array)):
+                    self.assertEqual(tensor[i], array[i])
+
+                if torch.cuda.is_available():
+                    tensor = torch.cuda.FloatTensor(array)
+                    for i in range(len(array)):
+                        self.assertEqual(tensor[i], array[i])
+
+                    tensor = torch.cuda.HalfTensor(array)
+                    for i in range(len(array)):
+                        self.assertEqual(tensor[i], array[i])
+
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_numpy_index(self):
         i = np.int32([0, 1, 2])
         x = torch.randn(5, 5)
