@@ -56,6 +56,15 @@ class Tags(object):
     PREFER_GPU = 'prefer_gpu'
     CPU_ONLY = 'cpu_only'
 
+    # The following two tags are hints to **distributed training framework**.
+    # The first tag is to determine a layer contains a sparse parameter and the
+    # parameter should be sharded and operators on those parameters should be
+    # done on distributed parameter servers. The second tag is to determine a
+    # layer contains a sparse parameters among others, and that the parameters
+    # should not be sharded (i.e. should be placed together on a node)
+    SPARSE_SHARDED = 'sparse_sharded'
+    SPARSE_DONT_SHARD = 'sparse_dont_shard'
+
     # In certain cases we want to have different schema for training and
     # prediction, as an example in prediction we might need to have only
     # subset of ids present in the orignal schema. This tag is one of the ways
