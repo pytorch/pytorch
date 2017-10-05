@@ -35,25 +35,33 @@ T vFetch(const volatile T* ptr) {
   return *ptr;
 }
 
-#ifdef CUDA_HAS_HALF
-template<> inline __device__
-half vFetch<half>(const volatile half* ptr) {
-  half r;
-  r.x = ptr->x;
-  return r;
-}
-#endif
-
 template<typename T> inline __device__
 void vStore(volatile T* ptr, const T val) {
   *ptr = val;
 }
 
 #ifdef CUDA_HAS_HALF
+#if CUDART_VERSION < 9000
+template<> inline __device__
+half vFetch<half>(const volatile half* ptr) {
+  half r;
+  r.x = ptr->x;
+  return r;
+}
 template<> inline __device__
 void vStore<half>(volatile half* ptr, const half val) {
   ptr->x = val.x;
 }
+#else
+template<> inline __device__
+half vFetch<half>(const volatile half* ptr) {
+  return *((half*)ptr);
+}
+template<> inline __device__
+void vStore<half>(volatile half* ptr, const half val) {
+  *((half*)ptr) = val;
+}
+#endif
 #endif
 
 __device__ unsigned int spinct;
@@ -125,24 +133,22 @@ struct MULTI<FUNC, int> {
 #ifdef CUDA_HAS_HALF
 template<class FUNC>
 struct MULTI<FUNC, half> {
-  static_assert(sizeof(PackType) == 2 * sizeof(float),
-      "PackType must be twice the size of float.");
-  union converter {
-    PackType storage;
-    struct {
-      half2 a, b;
-    };
+  static_assert(sizeof(PackType) == 4 * sizeof(half),
+      "PackType must be four times the size of half.");
+
+  struct PackHalf2 {
+    half2 a, b;
   };
 
   __device__ PackType operator()(const PackType x, const PackType y) const {
-    converter cx, cy, cr;
-    cx.storage = x;
-    cy.storage = y;
+    struct PackHalf2 cx, cy, cr;
+    cx = *(reinterpret_cast<const struct PackHalf2*>(&x));
+    cy = *(reinterpret_cast<const struct PackHalf2*>(&y));
 
     cr.a = FUNC()(cx.a, cy.a);
     cr.b = FUNC()(cx.b, cy.b);
 
-    return cr.storage;
+    return *(reinterpret_cast<PackType*>(&cr));
   }
 };
 #endif
