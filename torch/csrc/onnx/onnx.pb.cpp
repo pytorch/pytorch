@@ -25,6 +25,12 @@ const pb_field_t onnx_AttributeProto_fields[12] = {
     PB_LAST_FIELD
 };
 
+const pb_field_t onnx_ValueInfoProto_fields[3] = {
+    PB_FIELD(  1, STRING  , OPTIONAL, CALLBACK, FIRST, onnx_ValueInfoProto, name, name, 0),
+    PB_FIELD(  2, MESSAGE , OPTIONAL, CALLBACK, OTHER, onnx_ValueInfoProto, type, name, &onnx_TypeProto_fields),
+    PB_LAST_FIELD
+};
+
 const pb_field_t onnx_NodeProto_fields[7] = {
     PB_FIELD(  1, STRING  , REPEATED, CALLBACK, FIRST, onnx_NodeProto, input, input, 0),
     PB_FIELD(  2, STRING  , REPEATED, CALLBACK, OTHER, onnx_NodeProto, output, input, 0),
@@ -46,17 +52,18 @@ const pb_field_t onnx_ModelProto_fields[8] = {
     PB_LAST_FIELD
 };
 
-const pb_field_t onnx_GraphProto_fields[7] = {
+const pb_field_t onnx_GraphProto_fields[8] = {
     PB_FIELD(  1, MESSAGE , REPEATED, CALLBACK, FIRST, onnx_GraphProto, node, node, &onnx_NodeProto_fields),
     PB_FIELD(  2, STRING  , OPTIONAL, CALLBACK, OTHER, onnx_GraphProto, name, node, 0),
-    PB_FIELD(  3, STRING  , REPEATED, CALLBACK, OTHER, onnx_GraphProto, input, name, 0),
-    PB_FIELD(  4, STRING  , REPEATED, CALLBACK, OTHER, onnx_GraphProto, output, input, 0),
-    PB_FIELD(  5, MESSAGE , REPEATED, CALLBACK, OTHER, onnx_GraphProto, initializer, output, &onnx_TensorProto_fields),
+    PB_FIELD(  5, MESSAGE , REPEATED, CALLBACK, OTHER, onnx_GraphProto, initializer, name, &onnx_TensorProto_fields),
     PB_FIELD( 10, STRING  , OPTIONAL, CALLBACK, OTHER, onnx_GraphProto, doc_string, initializer, 0),
+    PB_FIELD( 11, MESSAGE , REPEATED, CALLBACK, OTHER, onnx_GraphProto, input, doc_string, &onnx_ValueInfoProto_fields),
+    PB_FIELD( 12, MESSAGE , REPEATED, CALLBACK, OTHER, onnx_GraphProto, output, input, &onnx_ValueInfoProto_fields),
+    PB_FIELD( 13, MESSAGE , REPEATED, CALLBACK, OTHER, onnx_GraphProto, value_info, output, &onnx_ValueInfoProto_fields),
     PB_LAST_FIELD
 };
 
-const pb_field_t onnx_TensorProto_fields[10] = {
+const pb_field_t onnx_TensorProto_fields[12] = {
     PB_FIELD(  1, INT64   , REPEATED, CALLBACK, FIRST, onnx_TensorProto, dims, dims, 0),
     PB_FIELD(  2, UENUM   , OPTIONAL, STATIC  , OTHER, onnx_TensorProto, data_type, dims, 0),
     PB_FIELD(  3, MESSAGE , OPTIONAL, STATIC  , OTHER, onnx_TensorProto, segment, data_type, &onnx_TensorProto_Segment_fields),
@@ -66,6 +73,8 @@ const pb_field_t onnx_TensorProto_fields[10] = {
     PB_FIELD(  7, INT64   , REPEATED, CALLBACK, OTHER, onnx_TensorProto, int64_data, string_data, 0),
     PB_FIELD(  8, STRING  , OPTIONAL, CALLBACK, OTHER, onnx_TensorProto, name, int64_data, 0),
     PB_FIELD(  9, BYTES   , OPTIONAL, CALLBACK, OTHER, onnx_TensorProto, raw_data, name, 0),
+    PB_FIELD( 10, DOUBLE  , REPEATED, CALLBACK, OTHER, onnx_TensorProto, double_data, raw_data, 0),
+    PB_FIELD( 11, UINT64  , REPEATED, CALLBACK, OTHER, onnx_TensorProto, uint64_data, double_data, 0),
     PB_LAST_FIELD
 };
 
@@ -82,6 +91,35 @@ const pb_field_t onnx_SparseTensorProto_fields[4] = {
     PB_LAST_FIELD
 };
 
+const pb_field_t onnx_TypeProto_fields[3] = {
+    PB_FIELD(  1, MESSAGE , OPTIONAL, CALLBACK, FIRST, onnx_TypeProto, tensor_type, tensor_type, &onnx_TypeProto_TensorTypeProto_fields),
+    PB_FIELD(  2, MESSAGE , OPTIONAL, STATIC  , OTHER, onnx_TypeProto, sparse_tensor_type, tensor_type, &onnx_TypeProto_SparseTensorTypeProto_fields),
+    PB_LAST_FIELD
+};
+
+const pb_field_t onnx_TypeProto_TensorShapeProto_fields[2] = {
+    PB_FIELD(  1, MESSAGE , REPEATED, CALLBACK, FIRST, onnx_TypeProto_TensorShapeProto, dim, dim, &onnx_TypeProto_TensorShapeProto_Dimension_fields),
+    PB_LAST_FIELD
+};
+
+const pb_field_t onnx_TypeProto_TensorShapeProto_Dimension_fields[3] = {
+    PB_FIELD(  1, INT64   , OPTIONAL, STATIC  , FIRST, onnx_TypeProto_TensorShapeProto_Dimension, dim_value, dim_value, 0),
+    PB_FIELD(  2, STRING  , OPTIONAL, CALLBACK, OTHER, onnx_TypeProto_TensorShapeProto_Dimension, dim_param, dim_value, 0),
+    PB_LAST_FIELD
+};
+
+const pb_field_t onnx_TypeProto_TensorTypeProto_fields[3] = {
+    PB_FIELD(  1, UENUM   , OPTIONAL, STATIC  , FIRST, onnx_TypeProto_TensorTypeProto, elem_type, elem_type, 0),
+    PB_FIELD(  2, MESSAGE , OPTIONAL, CALLBACK, OTHER, onnx_TypeProto_TensorTypeProto, shape, elem_type, &onnx_TypeProto_TensorShapeProto_fields),
+    PB_LAST_FIELD
+};
+
+const pb_field_t onnx_TypeProto_SparseTensorTypeProto_fields[3] = {
+    PB_FIELD(  1, UENUM   , OPTIONAL, STATIC  , FIRST, onnx_TypeProto_SparseTensorTypeProto, elem_type, elem_type, 0),
+    PB_FIELD(  2, MESSAGE , OPTIONAL, STATIC  , OTHER, onnx_TypeProto_SparseTensorTypeProto, shape, elem_type, &onnx_TypeProto_TensorShapeProto_fields),
+    PB_LAST_FIELD
+};
+
 
 
 
@@ -94,7 +132,7 @@ const pb_field_t onnx_SparseTensorProto_fields[4] = {
  * numbers or field sizes that are larger than what can fit in 8 or 16 bit
  * field descriptors.
  */
-PB_STATIC_ASSERT((pb_membersize(onnx_TensorProto, segment) < 65536 && pb_membersize(onnx_SparseTensorProto, indices) < 65536 && pb_membersize(onnx_SparseTensorProto, values) < 65536), YOU_MUST_DEFINE_PB_FIELD_32BIT_FOR_MESSAGES_onnx_AttributeProto_onnx_NodeProto_onnx_ModelProto_onnx_GraphProto_onnx_TensorProto_onnx_TensorProto_Segment_onnx_SparseTensorProto)
+PB_STATIC_ASSERT((pb_membersize(onnx_TensorProto, segment) < 65536 && pb_membersize(onnx_SparseTensorProto, indices) < 65536 && pb_membersize(onnx_SparseTensorProto, values) < 65536 && pb_membersize(onnx_TypeProto, sparse_tensor_type) < 65536 && pb_membersize(onnx_TypeProto_SparseTensorTypeProto, shape) < 65536), YOU_MUST_DEFINE_PB_FIELD_32BIT_FOR_MESSAGES_onnx_AttributeProto_onnx_ValueInfoProto_onnx_NodeProto_onnx_ModelProto_onnx_GraphProto_onnx_TensorProto_onnx_TensorProto_Segment_onnx_SparseTensorProto_onnx_TypeProto_onnx_TypeProto_TensorShapeProto_onnx_TypeProto_TensorShapeProto_Dimension_onnx_TypeProto_TensorTypeProto_onnx_TypeProto_SparseTensorTypeProto)
 #endif
 
 #if !defined(PB_FIELD_16BIT) && !defined(PB_FIELD_32BIT)
@@ -105,8 +143,14 @@ PB_STATIC_ASSERT((pb_membersize(onnx_TensorProto, segment) < 65536 && pb_members
  * numbers or field sizes that are larger than what can fit in the default
  * 8 bit descriptors.
  */
-PB_STATIC_ASSERT((pb_membersize(onnx_TensorProto, segment) < 256 && pb_membersize(onnx_SparseTensorProto, indices) < 256 && pb_membersize(onnx_SparseTensorProto, values) < 256), YOU_MUST_DEFINE_PB_FIELD_16BIT_FOR_MESSAGES_onnx_AttributeProto_onnx_NodeProto_onnx_ModelProto_onnx_GraphProto_onnx_TensorProto_onnx_TensorProto_Segment_onnx_SparseTensorProto)
+PB_STATIC_ASSERT((pb_membersize(onnx_TensorProto, segment) < 256 && pb_membersize(onnx_SparseTensorProto, indices) < 256 && pb_membersize(onnx_SparseTensorProto, values) < 256 && pb_membersize(onnx_TypeProto, sparse_tensor_type) < 256 && pb_membersize(onnx_TypeProto_SparseTensorTypeProto, shape) < 256), YOU_MUST_DEFINE_PB_FIELD_16BIT_FOR_MESSAGES_onnx_AttributeProto_onnx_ValueInfoProto_onnx_NodeProto_onnx_ModelProto_onnx_GraphProto_onnx_TensorProto_onnx_TensorProto_Segment_onnx_SparseTensorProto_onnx_TypeProto_onnx_TypeProto_TensorShapeProto_onnx_TypeProto_TensorShapeProto_Dimension_onnx_TypeProto_TensorTypeProto_onnx_TypeProto_SparseTensorTypeProto)
 #endif
 
+
+/* On some platforms (such as AVR), double is really float.
+ * These are not directly supported by nanopb, but see example_avr_double.
+ * To get rid of this error, remove any double fields from your .proto.
+ */
+PB_STATIC_ASSERT(sizeof(double) == 8, DOUBLE_MUST_BE_8_BYTES)
 
 /* @@protoc_insertion_point(eof) */

@@ -23,6 +23,7 @@ std::string node_name(Node* n) {
   return n->uniqueName();
 }
 
+
 void encodeGraph(onnx::GraphProto * p_g, const std::shared_ptr<Graph> & g, const std::vector<at::Tensor> & initializers);
 
 void encodeTensor(onnx::TensorProto * p, const at::Tensor & tensor) {
@@ -112,15 +113,59 @@ void addAttribute(onnx::NodeProto * n_p, jit::Node * n, jit::Symbol name) {
   }
 }
 
+void encodeType(onnx::TypeProto* t, Node* n) {
+  onnx::TypeProtoTensorTypeProto* tensor_type = t->mutable_tensor_type();
+  onnx::TypeProtoTensorShapeProto* shape = tensor_type->mutable_shape();
+  JIT_ASSERT(n->hasType());
+  TensorType* node_type = n->type()->expect<TensorType>();
+  const std::vector<std::int64_t>& sizes = node_type->sizes();
+  for (std::int64_t s : sizes) {
+    shape->add_dim(s);
+  }
+  onnx::DataType onnx_type;
+  switch(node_type->scalarType()) {
+    case at::kDouble:
+    case at::kFloat:
+    case at::kHalf:
+      onnx_type = onnx::kFLOAT;
+      break;
+    case at::kByte:
+    case at::kChar:
+      onnx_type = onnx::kINT8;
+      break;
+    case at::kShort:
+      onnx_type = onnx::kINT16;
+      break;
+    case at::kInt:
+      onnx_type = onnx::kINT32;
+      break;
+    case at::kLong:
+      onnx_type = onnx::kINT64;
+      break;
+    default:
+      jit::barf("unexpected tensor scalar type");
+      break;
+  }
+  tensor_type->set_data_type(onnx_type);
+}
+
+void encodeValueInfo(onnx::ValueInfoProto* v, Node* n) {
+  v->set_name(node_name(n));
+  onnx::TypeProto* t = v->mutable_type();
+  encodeType(t, n);
+}
+
 void encodeGraph(onnx::GraphProto * p_g, const std::shared_ptr<Graph> & g, const std::vector<at::Tensor> & initializers) {
   JIT_ASSERT(p_g != nullptr);
   p_g->set_name("torch-jit-export");
 
   for (auto input : g->inputs()) {
-    p_g->add_input(node_name(input));
+    onnx::ValueInfoProto* v = p_g->add_input();
+    encodeValueInfo(v, input);
   }
   for (auto output : g->outputs()) {
-    p_g->add_output(node_name(output));
+    onnx::ValueInfoProto* v = p_g->add_output();
+    encodeValueInfo(v, output);
   }
   for (auto node : g->nodes()) {
     if (node->kind() == kSelect) {
@@ -150,7 +195,7 @@ void encodeGraph(onnx::GraphProto * p_g, const std::shared_ptr<Graph> & g, const
   for (auto & tensor : initializers) {
     // TODO: stop using positions to determine which initializers
     // match to which inputs
-    std::string name = p_g->input(inputs_count++);
+    std::string name = p_g->get_input_name(inputs_count++);
     auto p = p_g->add_initializer();
     p->set_name(name);
     encodeTensor(p, tensor);

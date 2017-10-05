@@ -17,3 +17,8 @@
 onnx.AttributeProto.g type:FT_CALLBACK
 onnx.AttributeProto.t type:FT_CALLBACK
 onnx.ModelProto.graph type:FT_CALLBACK
+onnx.TypeProto.TensorTypeProto.shape type:FT_CALLBACK
+onnx.TypeProto.tensor_type type:FT_CALLBACK
+onnx.ValueInfoProto.type type:FT_CALLBACK
+onnx.TypeProto.TensorShapeProto.Dimension no_unions:true
+onnx.TypeProto no_unions:true

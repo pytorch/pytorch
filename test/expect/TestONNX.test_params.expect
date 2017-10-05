@@ -35,14 +35,59 @@ graph {
     }
   }
   name: "torch-jit-export"
-  input: "1"
-  input: "2"
-  output: "7"
   initializer {
     dims: 2
     dims: 2
     data_type: FLOAT
     name: "2"
     raw_data: "\000\000\200?\000\000\000@\000\000@@\000\000\200@"
+  }
+  input {
+    name: "1"
+    type {
+      tensor_type {
+        elem_type: FLOAT
+        shape {
+          dim {
+            dim_value: 2
+          }
+          dim {
+            dim_value: 2
+          }
+        }
+      }
+    }
+  }
+  input {
+    name: "2"
+    type {
+      tensor_type {
+        elem_type: FLOAT
+        shape {
+          dim {
+            dim_value: 2
+          }
+          dim {
+            dim_value: 2
+          }
+        }
+      }
+    }
+  }
+  output {
+    name: "7"
+    type {
+      tensor_type {
+        elem_type: FLOAT
+        shape {
+          dim {
+            dim_value: 2
+          }
+          dim {
+            dim_value: 2
+          }
+        }
+      }
+    }
   }
 }
