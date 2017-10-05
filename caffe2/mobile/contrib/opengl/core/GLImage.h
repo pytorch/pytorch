@@ -71,7 +71,8 @@ class GLImage {
         texture_height(_height * _tile_y),
         slices(channels_to_slices(_channels, _tile_x, _tile_y)),
         textures(allocate_textures(slices, texture_loader)) {
-    CAFFE_ENFORCE_EQ(slices * tile_x * tile_y, (channels + 3) / 4);
+    CAFFE_ENFORCE_EQ(
+        slices, ((channels + 3) / 4 + tile_x * tile_y - 1) / (tile_x * tile_y));
   }
 
   GLImage(int _width,
