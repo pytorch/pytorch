@@ -2,6 +2,7 @@
 
 #include "Descriptors.h"
 #include "Types.h"
+#include "Handles.h"
 
 
 namespace torch { namespace cudnn {
@@ -67,6 +68,7 @@ void cudnn_grid_sampler_forward(
     THCState* state, cudnnHandle_t handle, cudnnDataType_t dataType,
     THVoidTensor* input, THVoidTensor* grid, THVoidTensor* output)
 {
+  useCurrentStream(handle, state);
   assertSameGPU(dataType, input, output, grid);
   checkGridSize(grid, input);
   checkIOSize(input, output, grid);
@@ -94,6 +96,7 @@ void cudnn_grid_sampler_backward(
     THVoidTensor* grid, THVoidTensor* grad_grid,
     THVoidTensor* grad_output)
 {
+  useCurrentStream(handle, state);
   assertSameGPU(dataType, input, grad_output, grad_input, grid, grad_grid);
   checkGridSize(grid, input);
   checkGridSize(grad_grid, input);

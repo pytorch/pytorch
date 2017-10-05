@@ -2,6 +2,7 @@
 
 #include "Descriptors.h"
 #include "Types.h"
+#include "Handles.h"
 
 
 namespace torch { namespace cudnn {
@@ -62,6 +63,7 @@ void cudnn_batch_norm_forward(
     THVoidTensor* save_mean, THVoidTensor* save_var, bool training,
     double exponential_average_factor, double epsilon)
 {
+  useCurrentStream(handle, state);
   assertSameGPU(dataType, input, output, weight, bias, running_mean, running_var,
       save_mean, save_var);
   cudnnBatchNormMode_t mode;
@@ -128,6 +130,7 @@ void cudnn_batch_norm_backward(
     THVoidTensor* save_mean, THVoidTensor* save_var, bool training,
     double epsilon)
 {
+  useCurrentStream(handle, state);
   assertSameGPU(dataType, input, grad_output, grad_input, grad_weight, grad_bias, weight,
       running_mean, running_var, save_mean, save_var);
   cudnnBatchNormMode_t mode;
