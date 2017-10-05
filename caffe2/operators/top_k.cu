@@ -168,4 +168,64 @@ bool TopKOp<float, CUDAContext>::RunOnDevice() {
 
 REGISTER_CUDA_OPERATOR(TopK, TopKOp<float, CUDAContext>);
 
+__global__ void fillValuesWithIndicesKernel(
+    const float* values,
+    const TIndex* indices,
+    const TIndex k,
+    const TIndex orignal_last_dim,
+    const TIndex length,
+    float* output) {
+  CUDA_1D_KERNEL_LOOP(i, length) {
+    int first_dim = i / k;
+    int idx = orignal_last_dim * first_dim + indices[i];
+    output[idx] = values[i];
+  }
+}
+
+template <>
+bool TopKGradientOp<float, CUDAContext>::RunOnDevice() {
+  auto& values = Input(0);
+  auto& indices = Input(1);
+  auto& original_input = Input(2);
+
+  vector<TIndex> in_dims = values.dims();
+
+  // Linearize input tensor except for last dimension
+  // e.g. [3, 4, 5] -> [12, 5]
+  // [5] -> [5]
+  TIndex flatten_shape[] = {size_to_dim_(in_dims.size() - 1, in_dims),
+                            in_dims[in_dims.size() - 1]};
+
+  vector<TIndex> original_dims = original_input.dims();
+  auto* output = Output(0);
+  output->Resize(original_dims);
+
+  float* output_data = output->mutable_data<float>();
+  math::Set<float, CUDAContext>(
+      output->size(), float(0), output_data, &context_);
+
+  int length = flatten_shape[0] * flatten_shape[1];
+  if (length == 0) { // for empty batch
+    return true;
+  }
+
+  int num_threads = std::min(CAFFE_CUDA_NUM_THREADS, length);
+  int blocks = math::divUp(length, num_threads);
+
+  fillValuesWithIndicesKernel<<<
+      blocks,
+      num_threads,
+      0,
+      context_.cuda_stream()>>>(
+      values.data<float>(),
+      indices.data<TIndex>(),
+      flatten_shape[1],
+      original_dims.back(),
+      length,
+      output_data);
+
+  return true;
+}
+
+REGISTER_CUDA_OPERATOR(TopKGradient, TopKGradientOp<float, CUDAContext>);
 } // namespace caffe2
