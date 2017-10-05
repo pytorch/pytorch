@@ -16,14 +16,59 @@ graph {
     op_type: "Add"
   }
   name: "torch-jit-export"
-  input: "1"
-  input: "2"
-  output: "4"
   initializer {
     dims: 2
     dims: 2
     data_type: INT64
     name: "2"
     raw_data: "\001\000\000\000\000\000\000\000\002\000\000\000\000\000\000\000\003\000\000\000\000\000\000\000\004\000\000\000\000\000\000\000"
+  }
+  input {
+    name: "1"
+    type {
+      tensor_type {
+        elem_type: INT64
+        shape {
+          dim {
+            dim_value: 2
+          }
+          dim {
+            dim_value: 2
+          }
+        }
+      }
+    }
+  }
+  input {
+    name: "2"
+    type {
+      tensor_type {
+        elem_type: INT64
+        shape {
+          dim {
+            dim_value: 2
+          }
+          dim {
+            dim_value: 2
+          }
+        }
+      }
+    }
+  }
+  output {
+    name: "4"
+    type {
+      tensor_type {
+        elem_type: INT64
+        shape {
+          dim {
+            dim_value: 2
+          }
+          dim {
+            dim_value: 2
+          }
+        }
+      }
+    }
   }
 }

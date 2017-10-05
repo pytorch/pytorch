@@ -23,6 +23,12 @@ bool micropb_encode<double, nullptr>(pb_ostream_t *stream, double* arg) {
   return pb_encode_fixed64(stream, static_cast<void*>(arg));
 }
 
+template <>
+bool micropb_encode<Dimension, nullptr>(pb_ostream_t *stream, Dimension* arg) {
+  return pb_encode_submessage(stream, onnx_TypeProto_TensorShapeProto_Dimension_fields,
+                              static_cast<void*>(arg));
+}
+
 // TODO: I'm not entirely sure why this can't be in the header...
 bool micropb_callback_string_from_tensor(pb_ostream_t *stream, const pb_field_t *field, void * const *arg) {
   at::Tensor* t = static_cast<at::Tensor*>(*arg);
