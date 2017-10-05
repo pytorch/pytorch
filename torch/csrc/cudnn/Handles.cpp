@@ -39,21 +39,7 @@ cudnnHandle_t getCudnnHandle()
 
 void useCurrentStream(cudnnHandle_t handle, THCState *state)
 {
-  cudnnStatus_t status = cudnnSetStream(
-      handle,
-      THCState_getCurrentStream(state));
-  if (status == CUDNN_STATUS_BAD_PARAM) {
-    throw std::runtime_error(
-        "cudnnSetStream returned CUDNN_STATUS_BAD_PARAM: invalid handle");
-  } else if (status == CUDNN_STATUS_MAPPING_ERROR) {
-    throw std::runtime_error(
-        "cudnnSetStream returned CUDNN_STATUS_MAPPING_ERROR: "
-        "mismatch between user stream and the cuDNN handle context");
-  } else if (status != CUDNN_STATUS_SUCCESS) {
-    throw std::runtime_error(
-        "Could not set cuDNN to use current stream. "
-        "cudnnSetStream returned " + status);
-  }
+  CHECK(cudnnSetStream(handle, THCState_getCurrentStream(state)));
 }
 
 }} // namespace torch::cudnn
