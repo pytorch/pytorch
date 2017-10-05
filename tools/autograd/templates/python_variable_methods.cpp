@@ -35,6 +35,14 @@ inline PyObject* wrap(Scalar scalar) {
   return wrap(scalar.toTensor());
 }
 
+inline PyObject* wrap(TensorList tl) {
+  PyObject *tuple = PyTuple_New(tl.size());
+  for (size_t i = 0; i < tl.size(); ++i) {
+    PyTuple_SET_ITEM(tuple, i, wrap(tl[i]));
+  }
+  return tuple;
+}
+
 } // anonymous namespace
 
 ${py_methods}

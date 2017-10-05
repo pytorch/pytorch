@@ -211,6 +211,7 @@ PY_FUNCTIONS_CPP = CodeTemplate.from_file(template_path + '/python_functions.cpp
 
 derivatives_path = os.path.join(os.path.dirname(__file__), 'derivatives.yaml')
 deprecated_path = os.path.join(os.path.dirname(__file__), 'deprecated.yaml')
+aten_binding_path = os.path.join(os.path.dirname(__file__), 'binding.yaml')
 
 # Functions with these return types delegate completely to the underlying
 # base at::Type
@@ -220,14 +221,21 @@ FALLTHROUGH_FUNCTIONS = {
     'randn' 'randperm', 'range', 'tensor', 'zeros', 'zeros_like',
 }
 
+RETURN_TYPE_OVERRIDE_MAPPING = {
+  # TensorList maps to vector because TensorList is a reference type (i.e. it will go out of scope)
+  'TensorList': 'std::vector<Tensor>',
+}
 
 def format_return_type(returns):
+    def map_return_type(return_type):
+        return RETURN_TYPE_OVERRIDE_MAPPING.get(return_type, return_type)
+
     if len(returns) == 0:
         return 'void'
     elif len(returns) == 1:
-        return returns[0]['type']
+        return map_return_type(returns[0]['type'])
     else:
-        return_types = [r['type'] for r in returns]
+        return_types = [map_return_type(r['type']) for r in returns]
         return 'std::tuple<{}>'.format(','.join(return_types))
 
 
@@ -550,9 +558,10 @@ def create_variable_type(top_env, aten_declarations):
         env['type_definition_body'] = emit_body(env, option)
 
         combined = nested_dict(env, option)
-        type_declarations.append(METHOD_DECLARATION.substitute(combined))
-        if option['name'] != 'resize_':
-            type_definitions.append(METHOD_DEFINITION.substitute(combined))
+        if 'Type' in combined['method_of']:
+            type_declarations.append(METHOD_DECLARATION.substitute(combined))
+            if option['name'] != 'resize_':
+                type_definitions.append(METHOD_DEFINITION.substitute(combined))
 
     for function in aten_declarations:
         process_function(function)
@@ -659,6 +668,7 @@ def gen_variable_type(declarations, out):
 
     derivatives = load_derivatives(derivatives_path)
     deprecated = load_derivatives(deprecated_path)
+    aten_binding = load_derivatives(aten_binding_path)
 
     def by_name(option):
         return option['name']
@@ -710,10 +720,20 @@ def gen_variable_type(declarations, out):
             if name not in python_functions:
                 python_functions[name] = []
             python_functions[name].append(nested_dict(derivative, option))
+        else:
+            if name in (arg['name'] for arg in aten_binding):
+                python_functions[name] = []
 
     for declaration in deprecated:
         name = declaration['name']
         declaration['deprecated'] = True
+        options = options_by_signature.get(declaration['signature'])
+        if options is not None:
+            python_functions[name].append(nested_dict(declaration, options[0]))
+
+    for declaration in aten_binding:
+        name = declaration['name']
+        declaration['binding_only'] = True
         options = options_by_signature.get(declaration['signature'])
         if options is not None:
             python_functions[name].append(nested_dict(declaration, options[0]))
