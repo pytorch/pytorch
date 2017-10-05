@@ -233,8 +233,8 @@ class NewCriterionTest(InputVariableMixin, CriterionTest):
                 _assertGradAndGradgradChecks(test_case, lambda x, y, z, *args, **kw: module(x, y, z),
                                              input + (target,) + params)
 
-    def _get_target(self, target):
-        return Variable(target, requires_grad=False)
+    def _get_target(self):
+        return Variable(CriterionTest._get_target(self), requires_grad=False)
 
 
 class TestNN(NNTestCase):
