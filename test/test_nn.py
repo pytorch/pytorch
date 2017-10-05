@@ -28,7 +28,8 @@ from torch.nn.parallel._functions import Broadcast
 from common_nn import NNTestCase, ModuleTest, CriterionTest, TestBase, \
     module_tests, criterion_tests, TEST_CUDA, TEST_MULTIGPU, TEST_CUDNN, \
     TEST_CUDNN_VERSION
-from common import freeze_rng_state, run_tests, TestCase, skipIfNoLapack, TEST_SCIPY, download_file
+from common import freeze_rng_state, run_tests, TestCase, skipIfNoLapack, \
+    TEST_SCIPY, download_file
 
 if TEST_SCIPY:
     from scipy import stats
@@ -3489,27 +3490,27 @@ def add_test(test):
 new_criterion_tests = [
     dict(
         module_name='BCEWithLogitsLoss',
-        input=torch.rand(15, 10).clamp_(1e-2, 1 - 1e-2),
-        target=torch.randn(15, 10).gt(0).double()
+        input_fn=lambda: torch.rand(15, 10).clamp_(1e-2, 1 - 1e-2),
+        target_fn=lambda: torch.randn(15, 10).gt(0).double()
     ),
     dict(
         module_name='BCEWithLogitsLoss',
         constructor_args=(torch.rand(10),),
-        input=torch.rand(15, 10).clamp_(1e-2, 1 - 1e-2),
-        target=torch.randn(15, 10).gt(0).double(),
+        input_fn=lambda: torch.rand(15, 10).clamp_(1e-2, 1 - 1e-2),
+        target_fn=lambda: torch.randn(15, 10).gt(0).double(),
         desc='weights'
     ),
     dict(
         module_name='PoissonNLLLoss',
-        input=torch.randn(2, 3, 4, 5),
-        target=torch.randn(2, 3, 4, 5).floor_().abs_(),
+        input_size=(2, 3, 4, 5),
+        target_fn=lambda: torch.randn(2, 3, 4, 5).floor_().abs_(),
         desc='reduced_loss',
     ),
     dict(
         module_name='PoissonNLLLoss',
         constructor_args=(False, True, True),
-        input=torch.randn(2, 3, 4, 5).abs_().add_(0.001),
-        target=torch.randn(2, 3, 4, 5).floor_().abs_(),
+        input_fn=lambda: torch.randn(2, 3, 4, 5).abs_().add_(0.001),
+        target_fn=lambda: torch.randn(2, 3, 4, 5).floor_().abs_(),
         desc='full_loss',
     ),
 ]
@@ -3805,13 +3806,13 @@ new_module_tests = [
     dict(
         module_name='LPPool2d',
         constructor_args=(1.5, 2),
-        input=torch.rand(1, 3, 7, 7),
+        input_fn=lambda: torch.rand(1, 3, 7, 7),
         desc='norm',
     ),
     dict(
         module_name='LPPool1d',
         constructor_args=(1.5, 2),
-        input=torch.rand(1, 3, 7),
+        input_fn=lambda: torch.rand(1, 3, 7),
         desc='norm',
     ),
     dict(
@@ -3993,13 +3994,13 @@ new_module_tests = [
     dict(
         module_name='Embedding',
         constructor_args=(4, 3),
-        input=Variable(torch.randperm(2).repeat(1, 2)),
+        input_fn=lambda: Variable(torch.randperm(2).repeat(1, 2)),
         jacobian_input=False,
         check_gradgrad=False,
     ),
     dict(
         constructor=lambda: nn.Embedding(4, 3, sparse=True),
-        input=Variable(torch.randperm(2).repeat(1, 2)),
+        input_fn=lambda: Variable(torch.randperm(2).repeat(1, 2)),
         jacobian_input=False,
         fullname='Embedding_sparse',
         check_gradgrad=False,
@@ -4146,71 +4147,71 @@ new_module_tests = [
     dict(
         module_name='AdaptiveMaxPool1d',
         constructor_args=(3,),
-        input=_rand_tensor_non_equal(1, 3, 5),
+        input_fn=lambda: _rand_tensor_non_equal(1, 3, 5),
     ),
     dict(
         module_name='AdaptiveMaxPool2d',
         constructor_args=(3,),
-        input=_rand_tensor_non_equal(1, 3, 5, 6),
+        input_fn=lambda: _rand_tensor_non_equal(1, 3, 5, 6),
         desc='single',
     ),
     dict(
         module_name='AdaptiveMaxPool2d',
         constructor_args=((3, 4),),
-        input=_rand_tensor_non_equal(1, 3, 5, 6),
+        input_fn=lambda: _rand_tensor_non_equal(1, 3, 5, 6),
         desc='tuple',
     ),
     dict(
         module_name='AdaptiveMaxPool3d',
         constructor_args=(3,),
-        input=_rand_tensor_non_equal(2, 3, 5, 6, 7),
+        input_fn=lambda: _rand_tensor_non_equal(2, 3, 5, 6, 7),
         desc='single',
     ),
     dict(
         module_name='AdaptiveMaxPool3d',
         constructor_args=((3, 4, 5),),
-        input=_rand_tensor_non_equal(2, 3, 5, 6, 7),
+        input_fn=lambda: _rand_tensor_non_equal(2, 3, 5, 6, 7),
         desc='tuple',
     ),
     dict(
         module_name='AdaptiveMaxPool3d',
         constructor_args=(3,),
-        input=_rand_tensor_non_equal(2, 3, 12, 9, 3),
+        input_fn=lambda: _rand_tensor_non_equal(2, 3, 12, 9, 3),
         desc='single_nonatomic',
     ),
     dict(
         module_name='AdaptiveMaxPool3d',
         constructor_args=((3, 4, 5),),
-        input=_rand_tensor_non_equal(2, 3, 6, 4, 10),
+        input_fn=lambda: _rand_tensor_non_equal(2, 3, 6, 4, 10),
         desc='tuple_nonatomic',
     ),
     dict(
         module_name='AdaptiveAvgPool1d',
         constructor_args=(3,),
-        input=torch.rand(1, 3, 5),
+        input_fn=lambda: torch.rand(1, 3, 5),
     ),
     dict(
         module_name='AdaptiveAvgPool2d',
         constructor_args=(3,),
-        input=torch.rand(1, 3, 5, 6),
+        input_fn=lambda: torch.rand(1, 3, 5, 6),
         desc='single',
     ),
     dict(
         module_name='AdaptiveAvgPool2d',
         constructor_args=((3, 4),),
-        input=torch.rand(1, 3, 5, 6),
+        input_fn=lambda: torch.rand(1, 3, 5, 6),
         desc='tuple',
     ),
     dict(
         module_name='AdaptiveAvgPool3d',
         constructor_args=(3,),
-        input=torch.rand(2, 3, 5, 2, 7),
+        input_fn=lambda: torch.rand(2, 3, 5, 2, 7),
         desc='single',
     ),
     dict(
         module_name='AdaptiveAvgPool3d',
         constructor_args=((3, 4, 5),),
-        input=torch.rand(2, 3, 5, 3, 7),
+        input_fn=lambda: torch.rand(2, 3, 5, 3, 7),
         desc='tuple',
     ),
     dict(
