@@ -94,12 +94,22 @@ endif()
 # is going to be done with android-cmake by setting
 #     -DANDROID_ABI="armeabi-v7a with NEON FP16"
 # in the build command.
+# Also, we will turn off deprecated-declarations
+# due to protobuf.
+
 if (IOS)
   add_definitions("-mfpu=neon-fp16")
+  add_definitions("-Wno-deprecated-declarations")
 endif()
 
-# ---[ If we are buidling on ios, we should turn off deprecated-declarations
-# due to protobuf.
-if (IOS)
-  add_definitions("-Wno-deprecated-declarations")
+# ---[ If we use asan, turn on the flags.
+# TODO: This only works with new style gcc and clang (not the old -faddress-sanitizer).
+# Change if necessary on old platforms.
+if (USE_ASAN)
+  set(CAFFE2_ASAN_FLAG "-fsanitize=address -fPIE -pie")
+  set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${CAFFE2_ASAN_FLAG}")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${CAFFE2_ASAN_FLAG}")
+  set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${CAFFE2_ASAN_FLAG}")
+  set(CMAKE_MODULE_LINKER_FLAGS "${CMAKE_MODULE_LINKER_FLAGS} ${CAFFE2_ASAN_FLAG}")
+  set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} ${CAFFE2_ASAN_FLAG}")
 endif()
