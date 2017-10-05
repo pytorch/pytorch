@@ -442,11 +442,18 @@ class DropoutCell(RNNCell):
     recurrent connection for the corresponding state).
     '''
 
-    def __init__(self, internal_cell, dropout_ratio=None, **kwargs):
+    def __init__(
+        self,
+        internal_cell,
+        dropout_ratio=None,
+        use_cudnn=False,
+        **kwargs
+    ):
         self.internal_cell = internal_cell
         self.dropout_ratio = dropout_ratio
         assert 'is_test' in kwargs, "Argument 'is_test' is required"
         self.is_test = kwargs.pop('is_test')
+        self.use_cudnn = use_cudnn
         super(DropoutCell, self).__init__(**kwargs)
 
         self.prepare_input = internal_cell.prepare_input
@@ -501,6 +508,7 @@ class DropoutCell(RNNCell):
                     str(output) + '_with_dropout_mask{}'.format(self.mask),
                     ratio=float(self.dropout_ratio),
                     is_test=self.is_test,
+                    use_cudnn=self.use_cudnn,
                 )
                 self.mask += 1
         return output
