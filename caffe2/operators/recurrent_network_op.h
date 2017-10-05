@@ -421,10 +421,6 @@ class RecurrentNetworkGradientOp final : public Operator<Context> {
     const auto stepNet =
         OperatorBase::GetSingleArgument<string>("backward_step_net", "");
 
-    if (stepNetDef_.type() == "rnn") {
-      stepNetDef_.set_type("simple");
-    }
-
     CAFFE_ENFORCE(
         google::protobuf::TextFormat::ParseFromString(stepNet, &stepNetDef_));
 
