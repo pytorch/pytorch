@@ -75,6 +75,10 @@ def is_sandcastle():
     return False
 
 
+def is_travis():
+    return 'TRAVIS' in os.environ
+
+
 hypothesis.settings.register_profile(
     "sandcastle",
     hypothesis.settings(
