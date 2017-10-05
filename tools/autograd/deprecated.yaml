@@ -20,25 +20,25 @@
   aten: addmm(self, mat1, mat2, beta, alpha)
 
 - name: addmm(Scalar beta, Tensor self, Tensor mat1, Tensor mat2)
-  aten: addmm(self, 1, mat1, mat2, beta)
+  aten: addmm(self, mat1, mat2, beta, 1)
 
 - name: addmv(Scalar beta, Tensor self, Scalar alpha, Tensor mat, Tensor vec)
   aten: addmv(self, mat, vec, beta, alpha)
 
 - name: addmv(Scalar beta, Tensor self, Tensor mat, Tensor vec)
-  aten: addmv(self, 1, mat, vec, beta)
+  aten: addmv(self, mat, vec, beta, 1)
 
 - name: addr(Scalar beta, Tensor self, Scalar alpha, Tensor vec1, Tensor vec2)
   aten: addr(self, vec1, vec2, beta, alpha)
 
 - name: addr(Scalar beta, Tensor self, Tensor vec1, Tensor vec2)
-  aten: addr(self, 1, vec1, vec2, beta)
+  aten: addr(self, vec1, vec2, beta, 1)
 
 - name: baddbmm(Scalar beta, Tensor self, Scalar alpha, Tensor batch1, Tensor batch2)
   aten: baddbmm(self, batch1, batch2, beta, alpha)
 
 - name: baddbmm(Scalar beta, Tensor self, Tensor batch1, Tensor batch2)
-  aten: baddbmm(self, 1, batch1, batch2, beta)
+  aten: baddbmm(self, batch1, batch2, beta, 1)
 
 - name: sub(Tensor self, Scalar alpha, Tensor other)
   aten: sub(self, other, alpha)
