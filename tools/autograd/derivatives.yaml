@@ -346,6 +346,9 @@
   self: grad.squeeze(dim)
 
 - name: var
-- name: view
+
+- name: view(Tensor self, IntList size)
+  self: grad.contiguous().view(self.sizes())
+
 - name: zero
 - name: zeros
