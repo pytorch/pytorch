@@ -40,10 +40,5 @@ struct createDeviceAttr {
 std::shared_ptr<::gloo::transport::Device> createDevice(
     const createDeviceAttr attr);
 
-#if defined(GLOO_USE_MPI) && GLOO_USE_MPI
-void mpiInitialize();
-void mpiFinalize();
-#endif
-
 } // namespace gloo
 } // namespace caffe2
