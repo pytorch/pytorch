@@ -266,6 +266,7 @@ void standardizeGraph(const std::shared_ptr<Graph>& graph) {
                              ->insertBefore(py_node);
         auto first_select = py_node->uses()[0].user;
         first_select->replaceAllUsesWith(squeeze);
+        squeeze->setType(first_select->typeOption());
         for (auto use : py_node->uses())
           use.user->destroy();
         it.destroyCurrent();
