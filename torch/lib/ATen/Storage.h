@@ -1,9 +1,10 @@
 #pragma once
 
 #include "ATen/Scalar.h"
-#include "ATen/Type.h"
 
 namespace at {
+
+struct Type;
 
 struct Storage {
   Storage() {}

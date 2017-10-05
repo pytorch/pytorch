@@ -14,7 +14,7 @@ def argument_to_declaration(arg):
         'arg': typ + ' ' + arg.name,
     }
     if arg.is_optional:
-        result['default'] = 'nullptr'
+        result['is_nullable'] = True
     return result
 
 

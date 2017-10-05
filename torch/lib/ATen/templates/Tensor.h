@@ -1,9 +1,14 @@
 #pragma once
 
-#include "ATen/Type.h"
-#include "ATen/TensorImpl.h"
-#include "ATen/Utils.h"
+#include "ATen/Generator.h"
+#include "ATen/Scalar.h"
+#include "ATen/ScalarType.h"
 #include "ATen/TensorAccessor.h"
+#include "ATen/TensorImpl.h"
+#include "ATen/TensorBase.h"
+#include "ATen/Storage.h"
+#include "ATen/SparseTensorRef.h"
+#include "ATen/Utils.h"
 
 namespace at {
 struct Type;
@@ -25,28 +30,13 @@ struct Type;
 //
 // Note that Tensor can also be NULL, i.e. it is not associated with any underlying TensorImpl, and
 // special care must be taken to handle this.
-struct Tensor {
+struct Tensor : public detail::TensorBase {
+  Tensor() : TensorBase() {}
+  Tensor(TensorImpl * self, bool retain) : TensorBase(self, retain) {}
+  Tensor(const TensorBase & rhs) : TensorBase(rhs) {}
+  Tensor(const Tensor & rhs) = default;
+  Tensor(Tensor && rhs) noexcept = default;
 
-  Tensor()
-  : pImpl(nullptr){}
-  explicit Tensor(TensorImpl * self, bool retain)
-  : pImpl(self) {
-    if(pImpl != nullptr && retain)
-      pImpl->retain();
-  }
-  Tensor(Tensor const & rhs)
-  : pImpl(rhs.pImpl) {
-    if(pImpl != nullptr)
-      pImpl->retain();
-  }
-  Tensor(Tensor && rhs) noexcept
-  : pImpl(rhs.pImpl) {
-    rhs.pImpl = nullptr;
-  }
-  ~Tensor() {
-    if(pImpl != nullptr)
-      pImpl->release();
-  }
   Tensor & operator=(Tensor && rhs) & {
     rhs.swap(*this);
     return *this;
@@ -67,7 +57,7 @@ struct Tensor {
     Tensor().swap(*this);
   }
   void reset(TensorImpl * rhs) {
-    Tensor(rhs,true).swap(*this);
+    Tensor(rhs, true).swap(*this);
   }
   void reset(TensorImpl * rhs, bool retain) {
     Tensor(rhs, retain).swap(*this );
@@ -97,31 +87,16 @@ struct Tensor {
   IntList strides() const {
     return pImpl->strides();
   }
-  int64_t dim() const {
-    return pImpl->dim();
-  }
   int64_t ndimension() const {
     return dim();
   }
   Type & type() const {
     return pImpl->type();
   }
-  Tensor toType(const Type & t) const {
-    if(type().ID() ==t.ID())
-      return *this;
-    return t.copy(*this);
-  }
-  Tensor & copy_(const Tensor & src) {
-    resize_(src.sizes());
-    type().copy(src,*this);
-    return *this;
-  }
-  Tensor toType(ScalarType t) const {
-    return toType(type().toScalarType(t));
-  }
-  Tensor toBackend(Backend b) const {
-    return toType(type().toBackend(b));
-  }
+  inline Tensor toType(const Type & t) const;
+  inline Tensor & copy_(const Tensor & src);
+  inline Tensor toType(ScalarType t) const;
+  inline Tensor toBackend(Backend b) const;
 
   template<typename T>
   T * data() const;
@@ -157,12 +132,6 @@ struct Tensor {
   //example
   //Tensor * add(Tensor & b);
   ${tensor_method_declarations}
-
-  friend struct Type;
-
-//TODO(zach): sort out friend structes
-public:
-  TensorImpl * pImpl;
 };
 
 } //namespace at

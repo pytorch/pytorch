@@ -30,8 +30,11 @@
     - cname: newWithSize
       arguments:
         - THSize* size
+        - CONSTANT NULL
+    - cname: newWithSize
+      arguments:
+        - THSize* size
         - arg: THStride* stride
-          default: NULL
     - cname: newWithStorage
       arguments:
         - THStorage* storage

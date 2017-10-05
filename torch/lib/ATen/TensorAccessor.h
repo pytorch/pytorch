@@ -1,8 +1,9 @@
 #pragma once
+
 #include <cstddef>
 #include <stdint.h>
 
-#include "ATen/Type.h"
+#include "ATen/ScalarType.h"
 
 namespace at {
 

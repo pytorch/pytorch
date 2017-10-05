@@ -1,5 +1,4 @@
 #include "ATen/Type.h"
-#include "ATen/TypeMethods.h"
 #include "ATen/Tensor.h"
 #include "ATen/Storage.h"
 #include "ATen/Scalar.h"
@@ -53,7 +52,7 @@ Tensor Type::tensorFromBlob(void * data, IntList sizes, IntList strides) const {
 }
 Tensor Type::scalarTensor(Scalar s) const {
   if(s.isBackedByTensor())
-    return s.t.toType(*this);
+    return Tensor(s.t).toType(*this);
   return tensor({}).fill_(s);
 }
 
