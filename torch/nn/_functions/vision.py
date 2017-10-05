@@ -35,8 +35,9 @@ class GridSampler(Function):
             if 0 in input.stride():
                 input = input.contiguous()
             # Sometimes grad_output is a scalar (like 1) expanded as a tensor.
-            # cudnn requires a full tensor in memory so we give it one.
-            grad_output = grad_output.contiguous()
+            # cudnn requires a tensor that has non-zero strides.
+            if 0 in grad_output.stride():
+                grad_output = grad_output.contiguous()
             torch._C._cudnn_grid_sampler_backward(input, grad_input,
                                                   grid, grad_grid,
                                                   grad_output)
