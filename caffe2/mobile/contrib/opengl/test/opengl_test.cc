@@ -1070,16 +1070,17 @@ void testOpenGLMul(int N, int C, int H, int W, float error) {
   checkError(ws.GetBlob("Y_cpu")->Get<TensorCPU>(), ws.GetBlob("Y_ref")->Get<TensorCPU>(), error);
 }
 
-void testOpenGLSoftmax(int N, int D, float error) {
+void testOpenGLSoftmax(int N, int D, float error, bool tiled = false) {
   LOG(INFO) << "OpenGL Softmax Test "
-            << "N: " << N << " D: " << D;
+            << "N: " << N << " D: " << D << " Tiled:" << tiled;
   Workspace ws;
+  auto* t = ws.CreateBlob("X_cpu")->GetMutable<TensorCPU>();
   {
-    auto* t = ws.CreateBlob("X_cpu")->GetMutable<TensorCPU>();
     t->Resize(N, D);
     CPUContext ctx;
     // Too noisy.
-    math::RandGaussian<float, CPUContext>(t->size(), 0, 30, t->mutable_data<float>(), &ctx);
+    math::RandGaussian<float, CPUContext>(
+        t->size(), 0, 1, t->mutable_data<float>(), &ctx);
   }
 
   NetDef netdef;
@@ -1091,16 +1092,33 @@ void testOpenGLSoftmax(int N, int D, float error) {
     op.add_output("old_shape");
     auto& arg = *(op.add_arg());
     arg.set_name("shape");
-    arg.add_ints(N);
-    arg.add_ints(1);
-    arg.add_ints(D);
-    arg.add_ints(1);
+    if (tiled) {
+      arg.add_ints(N);
+      arg.add_ints(D);
+      arg.add_ints(1);
+      arg.add_ints(1);
+    } else {
+      arg.add_ints(N);
+      arg.add_ints(1);
+      arg.add_ints(D);
+      arg.add_ints(1);
+    }
   }
   {
     auto& op = *(netdef.add_op());
     op.set_type("CopyToOpenGL");
     op.add_input("X_reshaped");
     op.add_output("X_gl");
+    if (tiled) {
+      int tile_x = 1, tile_y = 1;
+      squareFactors((D + 3) / 4, tile_x, tile_y);
+      auto& argx = *(op.add_arg());
+      argx.set_name("tile_x");
+      argx.set_i(tile_x);
+      auto& argy = *(op.add_arg());
+      argy.set_name("tile_y");
+      argy.set_i(tile_y);
+    }
   }
 
   {
@@ -1137,9 +1155,8 @@ void testOpenGLSoftmax(int N, int D, float error) {
   }
 
   ws.RunNetOnce(netdef);
-  const auto& t2 = ws.GetBlob("Y_cpu")->Get<TensorCPU>(); // openGL
+  const auto& t2 = ws.GetBlob("Y_cpu")->Get<TensorCPU>(); // OpenGL
   const auto& t1 = ws.GetBlob("Y_ref")->Get<TensorCPU>(); // CPU
-
   checkError(ws.GetBlob("Y_cpu")->Get<TensorCPU>(), ws.GetBlob("Y_ref")->Get<TensorCPU>(), error);
 }
 
@@ -2906,6 +2923,11 @@ void testOpenGL() {
     testOpenGLSoftmax(27, 100, 0.1);
 
     testOpenGLNormPlanarYUV(4, 3, 192, 192, 0.01);
+
+    // Test Tiling
+    testOpenGLSoftmax(3, 1000, 0.1, true);
+    testOpenGLSoftmax(9, 523, 0.1, true);
+    testOpenGLSoftmax(27, 100, 0.1, true);
   }
 
   LOG(INFO) << "End of OpenGL tests";
