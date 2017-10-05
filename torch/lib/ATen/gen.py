@@ -2,6 +2,7 @@ from optparse import OptionParser
 import yaml
 
 import cwrap_parser
+import raw_outputdecl_parser
 import nn_parse
 import preprocess_declarations
 import function_wrapper
@@ -232,7 +233,14 @@ for fname, env in generators.items():
 # and modify the declarations to include any information that will all_backends
 # be used by function_wrapper.create_derived
 output_declarations = function_wrapper.create_generic(top_env, declarations)
-write("Declarations.yaml", format_yaml(output_declarations))
+
+# directly read any output_declarations specified in appropriate headers
+raw_output_declaration_search_path = [TEMPLATE_PATH + "/Tensor.h"]
+raw_output_decls = []
+for file in raw_output_declaration_search_path:
+    raw_output_decls += raw_outputdecl_parser.parse(file)
+
+write("Declarations.yaml", format_yaml(output_declarations) + '\n'.join(raw_output_decls))
 
 # populated by generate_storage_type_and_tensor
 all_types = []

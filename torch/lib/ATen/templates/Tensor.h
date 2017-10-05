@@ -9,6 +9,7 @@
 #include "ATen/Storage.h"
 #include "ATen/SparseTensorRef.h"
 #include "ATen/Utils.h"
+#include "ATen/WrapDim.h"
 
 namespace at {
 struct Type;
@@ -128,6 +129,71 @@ struct Tensor : public detail::TensorBase {
   Tensor& operator/=(const Tensor & other);
   Tensor& operator/=(Scalar other);
   Tensor operator[](int64_t idx) const;
+
+  /*
+    [Declarations.yaml]
+    - arguments:
+      - dynamic_type: Tensor
+        name: self
+        type: const Tensor &
+      - dynamic_type: int64_t
+        name: split_size
+        type: int64_t
+      - dynamic_type: int64_t
+        name: dim
+        type: int64_t
+      has_full_argument_list: true
+      inplace: false
+      method_of:
+      - Tensor
+      method_prefix: ''
+      name: split
+      returns:
+      - dynamic_type: TensorList
+        type: TensorList
+    [/Declarations.yaml]
+  */
+  std::vector<Tensor> split(int64_t split_size, int64_t dim) const {
+    dim = maybe_wrap_dim(dim, ndimension());
+    int64_t dim_size = size(dim);
+    int64_t num_splits = (dim_size + split_size - 1) / split_size;
+    std::vector<Tensor> splits(num_splits);
+    int64_t last_split_size = split_size - (split_size * num_splits - dim_size);
+
+    for (int64_t i = 0; i < num_splits; ++i) {
+      auto length = i < num_splits -1 ? split_size : last_split_size;
+      splits[i] = narrow(dim, i * split_size, length);
+    }
+      return splits;
+  }
+
+  /*
+    [Declarations.yaml]
+    - arguments:
+      - dynamic_type: Tensor
+        name: self
+        type: const Tensor &
+      - dynamic_type: int64_t
+        name: chunks
+        type: int64_t
+      - dynamic_type: int64_t
+        name: dim
+        type: int64_t
+      has_full_argument_list: true
+      inplace: false
+      method_of:
+      - Tensor
+      method_prefix: ''
+      name: chunk
+      returns:
+      - dynamic_type: TensorList
+        type: TensorList
+    [/Declarations.yaml]
+  */
+  std::vector<Tensor> chunk(int64_t chunks, int64_t dim) const {
+    int64_t split_size = (size(dim) + chunks - 1) / chunks;
+    return split(split_size, dim);
+  }
 
   //example
   //Tensor * add(Tensor & b);
