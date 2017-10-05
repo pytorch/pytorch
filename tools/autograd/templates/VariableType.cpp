@@ -165,6 +165,14 @@ VariableType::as_variable(std::tuple<Tensor, Tensor, Tensor> tensors) const {
       make_variable(std::move(std::get<2>(tensors))));
 }
 
+std::vector<Variable> VariableType::as_variable(TensorList tl) const {
+  std::vector<Variable> variables;
+  for (auto& t : tl) {
+    variables.emplace_back(make_variable(std::move(t)));
+  }
+  return variables;
+}
+
 Variable VariableType::as_variable(const Scalar & scalar) const {
   auto tensor = scalar.toTensor();
   if (&tensor.type() != baseType) {
@@ -254,6 +262,20 @@ static void set_flags(Variable& var, VariableFlags flags, std::shared_ptr<Functi
     var.output_nr() = grad_fn->num_inputs++;
     var.grad_fn() = std::move(grad_fn);
   }
+}
+
+static void set_flags(std::vector<Variable> &vl, VariableFlags flags, std::shared_ptr<Function> grad_fn) {
+  for (auto& v : vl) {
+    set_flags(v, flags, grad_fn);
+  }
+}
+
+std::vector<Tensor> as_tensor_list(std::vector<Variable> &vars) {
+  std::vector<Tensor> tensors;
+  for (auto& v : vars) {
+    tensors.emplace_back(std::move(v));
+  }
+  return tensors;
 }
 
 static void increment_version(const Tensor & t) {

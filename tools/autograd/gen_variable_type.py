@@ -51,7 +51,7 @@ auto${ref} ${arg_name}_ = unpack${suffix}(${arg_name}, "${arg_name}", ${arg_pos}
 FUNCTION_DECLARATION = CodeTemplate("""\
 struct ${op} : public Function {
   using Function::Function;
-  variable_list apply(const variable_list& inputs) override;
+  variable_list apply(const variable_list& grads) override;
   std::string name() override { return "${op}"; }
   void releaseVariables() override {
     ${release_variables}
@@ -61,7 +61,7 @@ struct ${op} : public Function {
 """)
 
 FUNCTION_DEFINITION = CodeTemplate("""\
-variable_list ${op}::apply(const variable_list& inputs) {
+variable_list ${op}::apply(const variable_list& grads) {
   variable_list grad_inputs{${num_inputs}};
   ${body}
   return grad_inputs;
@@ -454,7 +454,7 @@ def create_autograd_functions(top_env, autogen_functions):
         body = []
 
         if uses_grad(func):
-            body.append('auto& grad = inputs[0];')
+            body.append('auto& grad = grads[0];')
 
         def emit_derivative(derivative):
             formula = derivative['formula']
@@ -687,6 +687,10 @@ def create_variable_type(top_env, aten_declarations):
             env['return_value'] = 'self'
             env['result'] = 'static_cast<Variable&>(self)'
             env['trace_outputs'] = '{ self }'
+        elif declaration['return_type'] == 'std::vector<Tensor>':
+            env['return_value'] = 'as_tensor_list(ret)'
+            env['result'] = 'ret'
+            env['trace_outputs'] = 'ret'
         else:
             env['return_value'] = '{}(std::move(ret))'.format(declaration['return_type'])
             env['result'] = 'std::get<0>(ret)' if len(declaration['returns']) > 1 else 'ret'
@@ -751,13 +755,18 @@ def create_variable_type(top_env, aten_declarations):
         if skip_function(declaration['name']):
             return
 
+        if declaration.get('derivative') is None and declaration['mode'] == 'native':
+            # native functions without a derivative don't need Type implementations
+            return
+
         env = {}
         env['type_definition_body'] = emit_body(declaration)
 
         combined = nested_dict(env, declaration)
-        type_declarations.append(METHOD_DECLARATION.substitute(combined))
-        if declaration['name'] not in MANUAL_IMPLEMENTATIONS:
-            type_definitions.append(METHOD_DEFINITION.substitute(combined))
+        if 'Type' in combined['method_of']:
+            type_declarations.append(METHOD_DECLARATION.substitute(combined))
+            if declaration['name'] not in MANUAL_IMPLEMENTATIONS:
+                type_definitions.append(METHOD_DEFINITION.substitute(combined))
 
     for declaration in aten_declarations:
         process_function(declaration)
@@ -877,8 +886,11 @@ def gen_variable_type(declarations, out):
 
     def should_generate_python_binding(declaration):
         name = declaration['name']
-        # don't bind unimplemented functions to prevent errors in test_autograd
-        if not is_implemented(declaration):
+        # don't bind (non-native) unimplemented functions to prevent errors in test_autograd.
+        # Native functions, even if they don't have derivatives specified, should be bound
+        # so they can be called from python (their derivatives are defined based on the functions
+        # they call).
+        if not is_implemented(declaration) and declaration['mode'] != 'native':
             return False
 
         # don't bind size or stride since the python signatures are different

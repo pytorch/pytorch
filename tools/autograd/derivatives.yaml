@@ -447,6 +447,9 @@
 - name: sort(Tensor self, int64_t dim, bool descending)
   self: select_backward(grad, dim, indices, self.sizes(), true)
 
+- name: split(Tensor self, int64_t split_size, int64_t dim=0)
+  self: split_backward(grads, split_size, dim, self.sizes(), self.type())
+
 - name: sqrt(Tensor self)
   self: grad * self.pow(-0.5) / 2
 
