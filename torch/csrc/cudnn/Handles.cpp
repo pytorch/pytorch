@@ -43,12 +43,16 @@ void useCurrentStream(cudnnHandle_t handle, THCState *state)
       handle,
       THCState_getCurrentStream(state));
   if (status == CUDNN_STATUS_BAD_PARAM) {
-    std::cerr << "WARNING: invalid handle\n";
+    throw std::runtime_error(
+        "cudnnSetStream returned CUDNN_STATUS_BAD_PARAM: invalid handle");
   } else if (status == CUDNN_STATUS_MAPPING_ERROR) {
-    std::cerr <<
-        "WARNING: Mismatch between user stream and the cuDNN handle context\n";
+    throw std::runtime_error(
+        "cudnnSetStream returned CUDNN_STATUS_MAPPING_ERROR: "
+        "mismatch between user stream and the cuDNN handle context");
   } else if (status != CUDNN_STATUS_SUCCESS) {
-    std::cerr << "WARNING: Could not set cuDNN to use current stream\n";
+    throw std::runtime_error(
+        "Could not set cuDNN to use current stream. "
+        "cudnnSetStream returned " + status);
   }
 }
 
