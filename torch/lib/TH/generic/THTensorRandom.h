@@ -11,6 +11,7 @@ TH_API void THTensor_(bernoulli_FloatTensor)(THTensor *self, THGenerator *_gener
 TH_API void THTensor_(bernoulli_DoubleTensor)(THTensor *self, THGenerator *_generator, THDoubleTensor *p);
 
 #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
+TH_API void THTensor_(bernoulli_Tensor)(THTensor *self, THGenerator *_generator, THTensor *p);
 TH_API void THTensor_(uniform)(THTensor *self, THGenerator *_generator, double a, double b);
 TH_API void THTensor_(normal)(THTensor *self, THGenerator *_generator, double mean, double stdv);
 TH_API void THTensor_(normal_means)(THTensor *self, THGenerator *gen, THTensor *means, double stddev);

@@ -4332,7 +4332,7 @@
     - function
   before_call:
     THTensor_(resizeAs)(LIBRARY_STATE ((THPTensor*)$arg0)->cdata, ((THPTensor*)$arg2)->cdata);
-  cname: BERNOULLI_TENSOR
+  cname: bernoulli_Tensor
   arguments:
     - arg: THTensor* output
       output: True

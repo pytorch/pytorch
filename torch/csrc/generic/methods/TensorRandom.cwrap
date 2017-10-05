@@ -265,11 +265,6 @@
     - double p
 ]]
 
-#define THDoubleTensor_BERNOULLI_TENSOR THDoubleTensor_bernoulli_DoubleTensor
-#define THFloatTensor_BERNOULLI_TENSOR THFloatTensor_bernoulli_FloatTensor
-#define THCudaDoubleTensor_BERNOULLI_TENSOR THCudaDoubleTensor_bernoulli_DoubleTensor
-#define THCudaTensor_BERNOULLI_TENSOR THCudaTensor_bernoulli_FloatTensor
-
 [[
   name: bernoulli
   types:
@@ -285,7 +280,7 @@
   before_call:
     CPU: THTensor_(resizeAs)(LIBRARY_STATE ((THPTensor*)$arg0)->cdata, ((THPTensor*)$arg2)->cdata);
     CUDA: THTensor_(resizeAs)(LIBRARY_STATE ((THPTensor*)$arg0)->cdata, ((THPTensor*)$arg1)->cdata);
-  cname: BERNOULLI_TENSOR
+  cname: bernoulli_Tensor
   arguments:
     - arg: THTensor* output
       output: True
@@ -295,11 +290,6 @@
       kwarg_only: True
     - THTensor* self
 ]]
-
-#undef THDoubleTensor_BERNOULLI_TENSOR
-#undef THFloatTensor_BERNOULLI_TENSOR
-#undef THCudaDoubleTensor_BERNOULLI_TENSOR
-#undef THCudaTensor_BERNOULLI_TENSOR
 
 [[
   name: bernoulli_

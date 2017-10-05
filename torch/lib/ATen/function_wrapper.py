@@ -8,7 +8,7 @@ else:
     string_type = basestring
 
 # temporary things we cannot handle
-EXCLUDE_PATTERN = "bernoulli.*|normal.*|exponential.*|random.*|arange.*"
+EXCLUDE_PATTERN = "normal.*|exponential.*|random.*|arange.*"
 # what has to be done to add a Operation ...
 # 1. if broadcasting or without the full list of arguments, add a non-virtual
 #    declaration under Type.h
@@ -103,6 +103,8 @@ TYPE_FORMAL_GENERIC = {
     'accreal': 'Scalar',
     'real': 'Scalar',
     'long': 'int64_t',
+    'BackendFloatTensor*': 'Tensor &',
+    'BackendDoubleTensor*': 'Tensor &',
 }
 
 DYNAMIC_TYPE = {
@@ -117,6 +119,8 @@ DYNAMIC_TYPE = {
     'accreal': 'accreal',
     'real': 'real',
     'long': 'int64_t',
+    'BackendFloatTensor*': 'FloatTensor',
+    'BackendDoubleTensor*': 'DoubleTensor',
 }
 
 TYPE_RETURN = {
@@ -142,6 +146,12 @@ CHECKED_CAST = {
     'THIntegerTensor*':
         CodeTemplate(
             'checked_cast<${Backend}IntTensor>(${arg_name}.pImpl,"${arg_name}",${arg_pos}, ${null_okay})'),
+    'BackendFloatTensor*':
+        CodeTemplate(
+            'checked_cast<${Backend}FloatTensor>(${arg_name}.pImpl,"${arg_name}",${arg_pos}, ${null_okay})'),
+    'BackendDoubleTensor*':
+        CodeTemplate(
+            'checked_cast<${Backend}DoubleTensor>(${arg_name}.pImpl,"${arg_name}",${arg_pos}, ${null_okay})'),
     'THStorage*': CodeTemplate('checked_cast<${Storage}>(&${arg_name},"${arg_name}",${arg_pos}, false)'),
     'THGenerator*': CodeTemplate('check_generator<${Backend}Generator>(&${arg_name})'),
     'THSize*': CodeTemplate('THLongStorageView::make(${arg_name}, true)'),
@@ -158,6 +168,8 @@ CHECKED_USE = {
     'THIndexTensor*': '{}_->tensor',
     'THBoolTensor*': '{}_->tensor',
     'THIntegerTensor*': '{}_->tensor',
+    'BackendFloatTensor*': '{}_->tensor',
+    'BackendDoubleTensor*': '{}_->tensor',
     'THStorage*': '{}_->storage',
     'THGenerator*': '{}_->generator',
     'TensorList': "{0}_.data(), {0}_.size()",

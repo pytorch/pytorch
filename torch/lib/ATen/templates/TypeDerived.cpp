@@ -5,6 +5,8 @@
 #include "ATen/${Backend}ByteTensor.h"
 #include "ATen/${Backend}IntTensor.h"
 #include "ATen/${Backend}LongTensor.h"
+#include "ATen/${Backend}FloatTensor.h"
+#include "ATen/${Backend}DoubleTensor.h"
 #include "ATen/${SparseTensor}.h"
 #include "ATen/Utils.h"
 #include "ATen/WrapDimUtils.h"
