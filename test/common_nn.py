@@ -551,17 +551,21 @@ class NNTestCase(TestCase):
 
 class TestBase(object):
 
-    def __init__(self, constructor, constructor_args=tuple(), input_size=None,
-                 input=None, desc='', reference_fn=None, fullname=None, **kwargs):
-        if input_size is None and input is None:
-            raise RuntimeError("Specify either an input tensor, or it's size!")
-        self.constructor = constructor
-        self.constructor_args = constructor_args
-        self.input = input
-        self.input_size = input_size
+    _required_arg_names = {'constructor_args',  'input'}
+
+    def __init__(self, constructor, desc='', reference_fn=None, fullname=None, **kwargs):
         self.desc = desc
         self.fullname = fullname
+        self.constructor = constructor
         self.reference_fn = reference_fn
+        for name in self._required_arg_names:
+            if name not in kwargs and name + '_fn' not in kwargs and name + '_size' not in kwargs:
+                if name == 'constructor_args':
+                    kwargs['constructor_args'] = tuple()
+                else:
+                    raise ValueError("{}: Specify {} by a value, a function to generate it, or it's size!".format(self.get_name(), name))
+        self._extra_kwargs = kwargs
+        self._arg_cache = {}
 
     def get_name(self):
         if self.fullname is not None:
@@ -572,28 +576,45 @@ class TestBase(object):
             test_name += '_' + self.desc
         return test_name
 
-    def _unpack_input(self, input):
-        if isinstance(input, Variable):
-            return input.data
-        elif torch.is_tensor(input):
-            return input
+    def _unpack(self, value):
+        if isinstance(value, Variable):
+            return value.data
+        elif torch.is_tensor(value):
+            return value
         else:
-            return type(input)(self._unpack_input(i) for i in input)
+            return type(value)(self._unpack(v) for v in value)
+
+    @property
+    def constructor_args(self):
+        return self._get_arg('constructor_args')
+
+    def _get_arg(self, name):
+        assert name in self._required_arg_names
+
+        if name not in self._arg_cache:
+            fn_name = name + '_fn'
+            size_name = name + '_size'
+
+            if name in self._extra_kwargs:
+                self._arg_cache[name] = self._extra_kwargs[name]
+            elif fn_name in self._extra_kwargs:
+                self._arg_cache[name] = self._extra_kwargs[fn_name]()
+            else:
+                assert size_name in self._extra_kwargs
+
+                def map_tensor_sizes(sizes):
+                    if isinstance(sizes, list):
+                        return [map_tensor_sizes(s) for s in sizes]
+                    elif torch.is_tensor(sizes):
+                        return sizes.double()
+                    else:
+                        return torch.randn(*sizes)
+
+                self._arg_cache[name] = map_tensor_sizes(self._extra_kwargs[size_name])
+        return self._arg_cache[name]
 
     def _get_input(self):
-        if self.input is not None:
-            return self.input
-
-        def map_input_sizes(sizes):
-            if isinstance(sizes, list):
-                return [map_input_sizes(s) for s in sizes]
-            elif torch.is_tensor(sizes):
-                return sizes.double()
-            else:
-                return torch.randn(*sizes)
-
-        assert self.input_size is not None
-        return map_input_sizes(self.input_size)
+        return self._get_arg('input')
 
     def __call__(self, test_case):
         raise NotImplementedError
@@ -725,13 +746,14 @@ class ModuleTest(TestBase):
 
 class CriterionTest(TestBase):
 
+    _required_arg_names = TestBase._required_arg_names.union({'target'})
+
     def __init__(self, *args, **kwargs):
         super(CriterionTest, self).__init__(*args, **kwargs)
-        self.target = self._get_target(kwargs['target'])
         self.should_test_cuda = kwargs.get('test_cuda', True)
 
-    def _get_target(self, target):
-        return target
+    def _get_target(self):
+        return self._get_arg('target')
 
     def __call__(self, test_case):
         module = self.constructor(*self.constructor_args)
@@ -741,17 +763,16 @@ class CriterionTest(TestBase):
         module.__repr__()
         str(module)
 
+        target = self._get_target()
+
         if self.reference_fn is not None:
-            out = test_case._forward_criterion(module, input, self.target)
-            target = self.target
-            if isinstance(target, Variable):
-                target = target.data
-            expected_out = self.reference_fn(deepcopy(self._unpack_input(input)),
-                                             deepcopy(target), module)
+            out = test_case._forward_criterion(module, input, target)
+            expected_out = self.reference_fn(deepcopy(self._unpack(input)),
+                                             deepcopy(self._unpack(target)), module)
             test_case.assertEqual(out, expected_out)
 
-        test_case.check_criterion_jacobian(module, input, self.target)
-        self._do_extra_tests(test_case, module, input, self.target)
+        test_case.check_criterion_jacobian(module, input, target)
+        self._do_extra_tests(test_case, module, input, target)
 
     def test_cuda(self, test_case):
         if not TEST_CUDA or not self.should_test_cuda:
@@ -763,8 +784,8 @@ class CriterionTest(TestBase):
             }
             gpu_input = to_gpu(cpu_input, type_map=type_map)
 
-            cpu_target = self.target
-            gpu_target = to_gpu(self.target, type_map=type_map)
+            cpu_target = self._get_target()
+            gpu_target = to_gpu(cpu_target, type_map=type_map)
 
             cpu_module = self.constructor(*self.constructor_args)
             gpu_module = self.constructor(*self.constructor_args).float().cuda()
