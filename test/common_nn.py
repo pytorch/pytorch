@@ -553,7 +553,7 @@ class NNTestCase(TestCase):
 
 class TestBase(object):
 
-    _required_arg_names = {'constructor_args',  'input'}
+    _required_arg_names = {'constructor_args', 'input'}
 
     def __init__(self, constructor, desc='', reference_fn=None, fullname=None, **kwargs):
         self.desc = desc
@@ -565,7 +565,8 @@ class TestBase(object):
                 if name == 'constructor_args':
                     kwargs['constructor_args'] = tuple()
                 else:
-                    raise ValueError("{}: Specify {} by a value, a function to generate it, or it's size!".format(self.get_name(), name))
+                    raise ValueError("{}: Specify {} by a value, a function to generate it, or it's size!"
+                                     .format(self.get_name(), name))
         self._extra_kwargs = kwargs
         self._arg_cache = {}
 
