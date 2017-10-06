@@ -29,10 +29,21 @@ void THNN_(SpatialReflectionPadding_updateOutput)(THCState *state,
   int numPlanes = THCTensor_(size)(state, input, planeDim);
   int inputH = THCTensor_(size)(state, input, dimh);
   int inputW = THCTensor_(size)(state, input, dimw);
+
+  THArgCheck(padL <= inputW && padR <= inputW, 4,
+             "Padding size should not exceed corresponding input dimension, "
+             "but got: padding (%d, %d) at dimension %d of input %s",
+             padL, padR, dimw, THCTensor_(sizeDesc)(state, input).str);
+
+  THArgCheck(padT <= inputH && padB <= inputH, 6,
+             "Padding size should not exceed corresponding input dimension, "
+             "but got: padding (%d, %d) at dimension %d of input %s",
+             padT, padB, dimh, THCTensor_(sizeDesc)(state, input).str);
+
   int outputH = inputH + padT + padB;
   int outputW  = inputW + padL + padR;
 
-  THArgCheck(outputW >= 1 || outputH >= 1 , 2,
+  THArgCheck(outputW >= 1 || outputH >= 1, 2,
              "input (H: %d, W: %d)is too small."
              " Calculated output H: %d W: %d",
              inputH, inputW, outputH, outputW);

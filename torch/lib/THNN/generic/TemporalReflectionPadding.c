@@ -60,9 +60,16 @@ void THNN_(TemporalReflectionPadding_updateOutput)(THNNState *state,
     dimslices++;
   }
 
-  /* sizes */
+  /* input size */
   nslices = input->size[dimslices];
   iwidth = input->size[dimw];
+
+  THArgCheck(pad_l <= iwidth && pad_r <= iwidth, 4,
+             "Padding size should not exceed corresponding input dimension, "
+             "but got: padding (%d, %d) at dimension %d of input %s",
+             pad_l, pad_r, dimw, _THSizeDesc(input->size, input->nDimension).str);
+
+  /* output size */
   owidth  = iwidth + pad_l + pad_r;
 
   THArgCheck(owidth >= 1 , 2,

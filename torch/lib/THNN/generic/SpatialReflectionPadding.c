@@ -78,10 +78,22 @@ void THNN_(SpatialReflectionPadding_updateOutput)(THNNState *state,
     dimslices++;
   }
 
-  /* sizes */
+  /* input sizes */
   nslices = input->size[dimslices];
   iheight = input->size[dimh];
   iwidth = input->size[dimw];
+
+  THArgCheck(pad_l <= iwidth && pad_r <= iwidth, 4,
+             "Padding size should not exceed corresponding input dimension, "
+             "but got: padding (%d, %d) at dimension %d of input %s",
+             pad_l, pad_r, dimw, _THSizeDesc(input->size, input->nDimension).str);
+
+  THArgCheck(pad_t <= iheight && pad_b <= iheight, 6,
+             "Padding size should not exceed corresponding input dimension, "
+             "but got: padding (%d, %d) at dimension %d of input %s",
+             pad_t, pad_b, dimh, _THSizeDesc(input->size, input->nDimension).str);
+
+  /* output sizes */
   oheight = iheight + pad_t + pad_b;
   owidth  = iwidth + pad_l + pad_r;
 

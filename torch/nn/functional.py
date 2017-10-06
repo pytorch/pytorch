@@ -1133,7 +1133,7 @@ def pad(input, pad, mode='constant', value=0):
 
     Args:
         input (Variable): Nd tensor
-        pad (tuple): m-elem tuple, where m // 2 > input dimensions and m % 2 == 0
+        pad (tuple): m-elem tuple, where m // 2 <= input dimensions and m % 2 == 0
         mode: 'constant', 'reflect' or 'replicate'. Default: 'constant'
         value: fill value for 'constant' padding. Default: 0
 
@@ -1154,8 +1154,8 @@ def pad(input, pad, mode='constant', value=0):
         >>> print(out.data.size())
         torch.Size([3, 9, 7, 3])
     """
-    assert len(pad) % 2 == 0, 'padding length must be divisible by 2'
-    assert len(pad) // 2 <= len(input.size()), 'padding length too large'
+    assert len(pad) % 2 == 0, 'Padding length must be divisible by 2'
+    assert len(pad) // 2 <= input.dim(), 'Padding length too large'
     if mode == 'constant':
         return ConstantPadNd.apply(input, pad, value)
     elif input.dim() == 3:
