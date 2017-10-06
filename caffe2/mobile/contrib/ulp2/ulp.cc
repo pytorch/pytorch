@@ -293,7 +293,13 @@ std::unique_ptr<QConvState> create2b1bConvState(Workspace* ws,
   //   r->WQL1Norm.mutable_data<float>()[i] *= center_distance;
   // }
   state->parallelFor = [ws](size_t range, std::function<void(size_t)> f) {
-    return ws->GetThreadPool()->run([&](int, size_t v) { f(v); }, range);
+#if CAFFE2_MOBILE
+    ws->GetThreadPool()->run([&](int, size_t v) { f(v); }, range);
+#else
+    for (size_t v = 0; v < range; ++v) {
+      f(v);
+    }
+#endif
   };
   if (b) {
     state->bias = caffe2::make_unique<TensorCPU>(*b);
