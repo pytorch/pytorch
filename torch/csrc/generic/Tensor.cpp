@@ -5,11 +5,16 @@
 
 #ifdef WITH_NUMPY
 
+#include "THHalf.h"
+
 #ifdef TH_REAL_IS_DOUBLE
 #define NUMPY_TYPE_ENUM NPY_DOUBLE
 #endif
 #ifdef TH_REAL_IS_FLOAT
 #define NUMPY_TYPE_ENUM NPY_FLOAT
+#endif
+#ifdef TH_REAL_IS_HALF
+#define NUMPY_TYPE_ENUM NPY_HALF
 #endif
 #ifdef TH_REAL_IS_LONG
 #define NUMPY_TYPE_ENUM NPY_INT64
@@ -33,6 +38,31 @@
   }                                                       \
 }
 
+#define COPY_FROM_ARRAY_CPU_HALF(ELTYPE, ARRAY, STORAGE, SIZE)  \
+{ \
+  ELTYPE *arrdata = (ELTYPE*)PyArray_DATA(ARRAY);               \
+  THHalf *data = STORAGE->data;                                 \
+  for (size_t i=0; i<SIZE; i++) {                               \
+    float tmp = arrdata[i];                                     \
+    data[i] = TH_float2half(tmp);                               \
+  }                                                             \
+}
+
+#define COPY_FROM_HALF_ARRAY_CPU(ELTYPE, ARRAY, STORAGE, SIZE)  \
+{ \
+  ELTYPE *arrdata = (ELTYPE*)PyArray_DATA(ARRAY);               \
+  real *data = STORAGE->data;                                   \
+  for (size_t i=0; i<SIZE; i++) {                               \
+    data[i] = TH_half2float(arrdata[i]);                        \
+  }                                                             \
+}
+
+#define COPY_FROM_HALF_ARRAY_CPU_HALF(ELTYPE, ARRAY, STORAGE, SIZE) \
+{ \
+  char *arrdata = (char*)PyArray_DATA(ARRAY);                       \
+  memcpy(STORAGE->data, arrdata, SIZE * sizeof(float) / 2);         \
+}
+
 #define COPY_FROM_ARRAY_CUDA(ELTYPE, ARRAY, STORAGE, SIZE) \
 { \
   ELTYPE *arrdata = (ELTYPE*)PyArray_DATA(ARRAY);              \
@@ -48,32 +78,61 @@
   THHostStorage_(free)(cpu_storage);                           \
 }
 
-#define COPY_FROM_ARRAY_CUDA_HALF(ELTYPE, ARRAY, STORAGE, SIZE) \
+#define COPY_FROM_HALF_ARRAY_CUDA(ELTYPE, ARRAY, STORAGE, SIZE) \
 { \
-  ELTYPE *arrdata = (ELTYPE*)PyArray_DATA(ARRAY);                  \
-  std::unique_ptr<load_real> data_guard(new load_real[SIZE]);      \
-  load_real *data = data_guard.get();                              \
-  for (size_t i=0; i<SIZE; i++) {                                  \
-    data[i] = arrdata[i];                                          \
-  }                                                                \
-  THFloatStorage *cpu_storage =                                    \
-      THFloatStorage_newWithData(data_guard.get(), storage_size);  \
-  cpu_storage->flag &= ~TH_STORAGE_FREEMEM;                        \
-  THCudaHalfStorage_copyFloat(LIBRARY_STATE STORAGE, cpu_storage); \
-  THFloatStorage_free(cpu_storage);                                \
+  ELTYPE *arrdata = (ELTYPE*)PyArray_DATA(ARRAY);               \
+  std::unique_ptr<load_real> data_guard(new load_real[SIZE]);   \
+  load_real *data = data_guard.get();                           \
+  for (size_t i=0; i<SIZE; i++) {                               \
+    data[i] = TH_half2float(arrdata[i]);                        \
+  }                                                             \
+  THHostStorage *cpu_storage =                                  \
+      THHostStorage_(newWithData)(data_guard.get(), SIZE);      \
+  cpu_storage->flag &= ~TH_STORAGE_FREEMEM;                     \
+  THCStorage_(copyCPU)(LIBRARY_STATE STORAGE, cpu_storage);     \
+  THHostStorage_(free)(cpu_storage);                            \
+}
+
+#define COPY_FROM_ARRAY_CUDA_HALF(ELTYPE, ARRAY, STORAGE, SIZE)     \
+{ \
+  ELTYPE *arrdata = (ELTYPE*)PyArray_DATA(ARRAY);                   \
+  std::unique_ptr<load_real> data_guard(new load_real[SIZE]);       \
+  load_real *data = data_guard.get();                               \
+  for (size_t i=0; i<SIZE; i++) {                                   \
+    data[i] = arrdata[i];                                           \
+  }                                                                 \
+  THFloatStorage *cpu_storage =                                     \
+      THFloatStorage_newWithData(data_guard.get(), storage_size);   \
+  cpu_storage->flag &= ~TH_STORAGE_FREEMEM;                         \
+  THCudaHalfStorage_copyFloat(LIBRARY_STATE STORAGE, cpu_storage);  \
+  THFloatStorage_free(cpu_storage);                                 \
+}
+
+#define COPY_FROM_HALF_ARRAY_CUDA_HALF(ELTYPE, ARRAY, STORAGE, SIZE)                        \
+{ \
+  char *arrdata = (char*)PyArray_DATA(ARRAY);                                               \
+  cudaMemcpy(STORAGE->data, arrdata, SIZE * sizeof(float) / 2, cudaMemcpyHostToDevice);     \
 }
 
 #ifdef THC_GENERIC_FILE
 #ifdef THC_REAL_IS_HALF
 #define COPY_FROM_ARRAY COPY_FROM_ARRAY_CUDA_HALF
+#define COPY_FROM_HALF_ARRAY COPY_FROM_HALF_ARRAY_CUDA_HALF
 #else
 #define COPY_FROM_ARRAY COPY_FROM_ARRAY_CUDA
-#endif
+#define COPY_FROM_HALF_ARRAY COPY_FROM_HALF_ARRAY_CUDA
+#endif  // THC_REAL_IS_HALF
+#else
+#ifdef TH_REAL_IS_HALF
+#define COPY_FROM_ARRAY COPY_FROM_ARRAY_CPU_HALF
+#define COPY_FROM_HALF_ARRAY COPY_FROM_HALF_ARRAY_CPU_HALF
 #else
 #define COPY_FROM_ARRAY COPY_FROM_ARRAY_CPU
+#define COPY_FROM_HALF_ARRAY COPY_FROM_HALF_ARRAY_CPU
+#endif  // TH_REAL_IS_HALF
 #endif
 
-#endif
+#endif  // WITH_NUMPY
 
 PyObject *THPTensorClass = NULL;
 THPCopyList THTensor_(copy_functions);
@@ -207,12 +266,13 @@ THTensor* THPTensor_(fromNumpy)(PyObject *numpy_array) {
     {
       THStoragePtr storage(THStorage_(newWithSize)(LIBRARY_STATE storage_size));
       switch (PyArray_TYPE(array)) {
-        case NPY_DOUBLE: COPY_FROM_ARRAY(double,  array, storage, storage_size); break;
-        case NPY_FLOAT:  COPY_FROM_ARRAY(float,   array, storage, storage_size); break;
-        case NPY_INT64:  COPY_FROM_ARRAY(int64_t, array, storage, storage_size); break;
-        case NPY_INT32:  COPY_FROM_ARRAY(int32_t, array, storage, storage_size); break;
-        case NPY_INT16:  COPY_FROM_ARRAY(int16_t, array, storage, storage_size); break;
-        case NPY_UINT8:  COPY_FROM_ARRAY(uint8_t, array, storage, storage_size); break;
+        case NPY_DOUBLE:      COPY_FROM_ARRAY(double,  array, storage, storage_size); break;
+        case NPY_FLOAT:       COPY_FROM_ARRAY(float,   array, storage, storage_size); break;
+        case NPY_HALF:   COPY_FROM_HALF_ARRAY(THHalf,  array, storage, storage_size); break;
+        case NPY_INT64:       COPY_FROM_ARRAY(int64_t, array, storage, storage_size); break;
+        case NPY_INT32:       COPY_FROM_ARRAY(int32_t, array, storage, storage_size); break;
+        case NPY_INT16:       COPY_FROM_ARRAY(int16_t, array, storage, storage_size); break;
+        case NPY_UINT8:       COPY_FROM_ARRAY(uint8_t, array, storage, storage_size); break;
       }
       result = THTensor_(newWithStorage)(LIBRARY_STATE storage, 0, sizes, strides);
     }
