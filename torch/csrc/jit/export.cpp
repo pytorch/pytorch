@@ -225,11 +225,6 @@ void standardizeGraph(const std::shared_ptr<Graph>& graph) {
               "maybe it doesn't implement a symbolic definition?");
     IR_IF(*it, AddConstant)
       throw std::runtime_error("can't serialize PyTorch-only node AddConstant (not implemented yet)");
-    IR_ELSEIF(Concat)
-      JIT_ASSERT(!value->hasMultipleOutputs());
-      Node *real_output = value->makeMultireturn();
-      Node *fake_output = graph->createSelect(value, 1);
-      fake_output->insertAfter(real_output);
     IR_ELSEIF(CppOp)
       auto cpp_node = static_cast<torch::jit::CppOp*>(value);
       FAIL_EXPORT(cpp_node->name())
