@@ -40,34 +40,36 @@ class GLPRelu : public GLFilter {
   const int output_tile_width;
   const int output_tile_height;
 
-  GLPRelu(const float* _scale,
-          const int _scale_size,
-          const int _channels,
-          int _output_tile_x,
-          int _output_tile_y,
-          int _output_tile_width,
-          int _output_tile_height)
-      : GLFilter("GLPRelu",
-                 vertex_shader,
-                 fragment_shader,
-                 std::vector<binding*>({BINDING(inputData)}),
-                 std::vector<binding*>({BINDING(scale_block)}),
-                 {/* no attributes */},
-                 {{"USE_RELU", caffe2::to_string(PRelu)},
-                  {"OUTPUT_TILES", caffe2::to_string(_output_tile_x * _output_tile_y)},
-                  {"OUTPUT_TILE_X", caffe2::to_string(_output_tile_x)},
-                  {"OUTPUT_TILE_WIDTH", caffe2::to_string(_output_tile_width)},
-                  {"OUTPUT_TILE_HEIGHT", caffe2::to_string(_output_tile_height)},
-                  {"TILED_PRELU", caffe2::to_string(_output_tile_x > 1 || _output_tile_y > 1)}}),
+  GLPRelu(
+      const float* _scale,
+      const int _scale_size,
+      const int _channels,
+      int _output_tile_x,
+      int _output_tile_y,
+      int _output_tile_width,
+      int _output_tile_height)
+      : GLFilter(
+            "GLPRelu",
+            vertex_shader,
+            fragment_shader,
+            std::vector<binding*>({BINDING(inputData)}),
+            std::vector<binding*>({BINDING(scale_block)}),
+            {/* no attributes */},
+            {{"USE_RELU", caffe2::to_string(PRelu)},
+             {"OUTPUT_TILES",
+              caffe2::to_string(_output_tile_x * _output_tile_y)},
+             {"OUTPUT_TILE_X", caffe2::to_string(_output_tile_x)},
+             {"OUTPUT_TILE_WIDTH", caffe2::to_string(_output_tile_width)},
+             {"OUTPUT_TILE_HEIGHT", caffe2::to_string(_output_tile_height)},
+             {"TILED_PRELU",
+              caffe2::to_string(_output_tile_x > 1 || _output_tile_y > 1)}}),
         scale(_scale),
         scale_size(_scale_size),
         channels(_channels),
         output_tile_x(_output_tile_x),
         output_tile_y(_output_tile_y),
         output_tile_width(_output_tile_width),
-        output_tile_height(_output_tile_height) {
-    attach_uniform_buffer<float16_t>(scale_block, 0, nullptr);
-  }
+        output_tile_height(_output_tile_height) {}
 
   GLPRelu(const int _channels)
       : GLFilter("GLRelu",

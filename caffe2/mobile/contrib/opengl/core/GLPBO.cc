@@ -62,7 +62,6 @@ void GLPBO::mapTextureData(GLuint _textureId,
   }
 
   glBindFramebuffer(GL_FRAMEBUFFER, pboFrameBuffer);
-  glViewport(0, 0, _width, _height);
 
   glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, _textureId, 0);
 
