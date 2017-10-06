@@ -86,6 +86,20 @@ class BatchOneHotOp final : public Operator<Context> {
   OUTPUT_TAGS(ONE_HOT);
 };
 
+template <class Context>
+class BatchBucketOneHotOp final : public Operator<Context> {
+ public:
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
+  BatchBucketOneHotOp(const OperatorDef& operator_def, Workspace* ws)
+      : Operator<Context>(operator_def, ws) {}
+
+  bool RunOnDevice() override;
+
+ protected:
+  INPUT_TAGS(X, LENS, BOUNDARIES);
+  OUTPUT_TAGS(ONE_HOT);
+};
+
 } // namespace caffe2
 
 #endif // CAFFE_OPERATORS_ONE_HOT_OPS_H_
