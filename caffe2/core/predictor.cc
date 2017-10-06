@@ -74,4 +74,20 @@ bool Predictor::run(const TensorVector& inputs, TensorVector* outputs) {
   }
   return true;
 }
+
+bool Predictor::run_map(const TensorMap& inputs, TensorVector* outputs) {
+  for (auto input : inputs) {
+    shareInputTensor(&ws_, input.first, input.second);
+  }
+
+  if (!ws_.RunNet(run_net_.name())) {
+    return false;
+  }
+
+  outputs->resize(run_net_.external_output_size());
+  for (auto i = 0; i < outputs->size(); ++i) {
+    (*outputs)[i] = extractOutputTensor(&ws_, run_net_.external_output(i));
+  }
+  return true;
 }
+} // namespace caffe2
