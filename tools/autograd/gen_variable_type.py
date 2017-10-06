@@ -2,26 +2,12 @@ import argparse
 import os
 import re
 import yaml
-from collections import OrderedDict, defaultdict
+from collections import OrderedDict
 from itertools import groupby
 from tools.shared.module_loader import import_module
+from .nested_dict import nested_dict
 
 CodeTemplate = import_module('code_template', 'torch/lib/ATen/code_template.py').CodeTemplate
-
-
-# TODO: refactor nested_dict into common library with ATen
-class nested_dict(object):
-    def __init__(self, base, parent):
-        self.base, self.parent = base, parent
-
-    def __contains__(self, item):
-        return item in self.base or item in self.parent
-
-    def __getitem__(self, x):
-        r = self.base.get(x)
-        if r is not None:
-            return r
-        return self.parent[x]
 
 
 try:
@@ -95,11 +81,11 @@ if (should_compute_any_outputs()) {
 """)
 
 METHOD_DEFINITION_FLAGS_TENSORS = CodeTemplate("""\
-   auto flags = Function::flags({ ${tensor_args} });
+auto flags = Function::flags({ ${tensor_args} });
 """)
 
 METHOD_DEFINITION_FLAGS_TENSORLIST = CodeTemplate("""\
-   auto flags = Function::flags( ${tensorlist_args});
+auto flags = Function::flags( ${tensorlist_args});
 """)
 
 METHOD_DEFINITION_DERIVATIVE = CodeTemplate("""\
@@ -126,77 +112,6 @@ baseType->${method_prefix}${api_name}(${unpacked_args});
 wrap_output(pImpl, std::move(flags), std::move(grad_fn));
 return self;
 """)
-
-
-PY_VARIABLE_CASE = CodeTemplate("""\
-${cond} (r.idx == ${i}) {
-  return wrap(dispatch_${name}(${args_with_self}));
-""")
-
-PY_VARIABLE_CASE_STATIC = CodeTemplate("""\
-${cond} (r.idx == ${i}) {
-  return wrap(dispatch_${name}(${args_without_self}));
-""")
-
-PY_VARIABLE_DISPATCH_TO_METHOD = CodeTemplate("""\
-inline ${return_type} dispatch_${name}(${formal_args}) {
-  ${AutoNoGIL}
-  ${AutoGPU}
-  return self.${name}(${dispatch_args});
-}
-""")
-
-PY_VARIABLE_DISPATCH_TO_FUNCTION = CodeTemplate("""\
-inline ${return_type} dispatch_${name}(${formal_args}) {
-  ${AutoNoGIL}
-  ${AutoGPU}
-  return at::${name}(${dispatch_args});
-}
-""")
-
-PY_VARIABLE_METHOD_NOARGS = CodeTemplate("""\
-static PyObject * THPVariable_${name}(PyObject* self, PyObject* args)
-{
-  HANDLE_TH_ERRORS
-  auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
-  return wrap(dispatch_${name}(self_));
-  END_HANDLE_TH_ERRORS
-}
-""")
-
-PY_VARIABLE_METHOD_VARARGS = CodeTemplate("""\
-static PyObject * THPVariable_${name}(PyObject* self, PyObject* args, PyObject* kwargs)
-{
-  HANDLE_TH_ERRORS
-  static PythonArgParser parser({
-    ${prototypes}
-  });
-  auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
-  PyObject* parsed_args[${max_args}];
-  auto r = parser.parse(args, kwargs, parsed_args);
-  ${dispatch}
-  Py_RETURN_NONE;
-  END_HANDLE_TH_ERRORS
-}
-""")
-
-PY_VARIABLE_METHOD_STATIC = CodeTemplate("""\
-static PyObject * THPVariable_${name}(PyObject* self, PyObject* args, PyObject* kwargs)
-{
-  HANDLE_TH_ERRORS
-  static PythonArgParser parser({
-    ${prototypes}
-  });
-  PyObject* parsed_args[${max_args}];
-  auto r = parser.parse(args, kwargs, parsed_args);
-  ${dispatch}
-  Py_RETURN_NONE;
-  END_HANDLE_TH_ERRORS
-}
-""")
-
-PY_VARIABLE_METHOD_DEF = CodeTemplate("""\
-{"${name}", (PyCFunction)THPVariable_${name}, ${flags}, NULL},""")
 
 GENERATED_COMMENT = CodeTemplate("""\
 generated from tools/autograd/templates/${filename}""")
@@ -564,101 +479,6 @@ def create_variable_type(top_env, aten_declarations):
         process_function(function)
 
 
-def create_python_bindings(top_env, python_functions):
-    """python_variable_methods.cpp
-
-    Generates Python bindings to Variable methods
-    """
-    py_methods = top_env['py_methods']
-    py_method_defs = top_env['py_method_defs']
-    py_method_dispatch = top_env['py_method_dispatch']
-
-    unpack_methods = {
-        'int64_t': 'toInt64',
-        'bool': 'toBool'
-    }
-
-    def args_without_self(args):
-        return [arg for arg in args if arg['name'] != 'self']
-
-    def emit_dispatch(i, option):
-        env = {}
-
-        args = []
-        python_params = args_without_self(option['python_arguments'])
-        has_self = any([True for arg in option['python_arguments'] if arg['name'] == 'self'])
-        formal_args = ['Tensor & self'] if has_self else []
-        for arg_idx, arg in enumerate(python_params):
-            unpack = unpack_methods.get(arg['type'], arg['type'].lower())
-            args.append('r.{}({})'.format(unpack, arg_idx))
-            dispatch_type = arg['type']
-            dispatch_type = 'const Tensor &' if dispatch_type == 'Tensor' else dispatch_type
-            formal_args.append('{} {}'.format(dispatch_type, arg['name']))
-
-        env['i'] = i
-        env['dispatch_args'] = [arg for arg in option['call_args'] if arg != 'self']
-        env['args_without_self'] = args
-        env['args_with_self'] = ['self_'] + args
-        env['AutoNoGIL'] = 'AutoNoGIL no_gil;'
-        if has_self:
-            env['AutoGPU'] = 'AutoGPU auto_gpu(self);'
-        else:
-            if len(python_params) == 0:
-                raise RuntimeError("couldn't find argument for AutoGPU")
-            env['AutoGPU'] = 'AutoGPU auto_gpu({});'.format(python_params[0]['name'])
-        env['formal_args'] = formal_args
-        env['cond'] = 'if' if i == 0 else '} else if'
-        env = nested_dict(env, option)
-        if has_self:
-            py_method_dispatch.append(PY_VARIABLE_DISPATCH_TO_METHOD.substitute(env))
-            return PY_VARIABLE_CASE.substitute(env)
-        else:
-            py_method_dispatch.append(PY_VARIABLE_DISPATCH_TO_FUNCTION.substitute(env))
-            return PY_VARIABLE_CASE_STATIC.substitute(env)
-
-    def process_option(name, options):
-        env = {}
-        env['name'] = name
-        env['prototypes'] = []
-        env['max_args'] = max(len(o['python_arguments']) for o in options)
-        for o in options:
-            prototype = o['prototype']
-            if o['inplace']:
-                prototype = prototype.replace('(', '_(')
-            prototype = prototype.replace('Tensor self, ', '')
-            prototype = prototype.replace('Tensor self', '')
-            if 'deprecated' in o:
-                prototype += '|deprecated'
-            env['prototypes'].append('"{}",'.format(prototype))
-
-        dispatch = []
-        for i, option in enumerate(options):
-            dispatch.append(emit_dispatch(i, nested_dict(env, option)))
-        dispatch.append('}')
-        env['dispatch'] = dispatch
-
-        has_self = 'self' in options[0]['args']
-        if len(options) == 1 and len(options[0]['args']) == 1:
-            if has_self:
-                tmpl = PY_VARIABLE_METHOD_NOARGS
-                env['flags'] = 'METH_NOARGS'
-            else:
-                raise RuntimeError("static args method not yet implemented")
-        else:
-            if has_self:
-                tmpl = PY_VARIABLE_METHOD_VARARGS
-                env['flags'] = 'METH_VARARGS | METH_KEYWORDS'
-            else:
-                tmpl = PY_VARIABLE_METHOD_STATIC
-                env['flags'] = 'METH_STATIC | METH_VARARGS | METH_KEYWORDS'
-
-        py_methods.append(tmpl.substitute(env))
-        py_method_defs.append(PY_VARIABLE_METHOD_DEF.substitute(env))
-
-    for name, options in python_functions.items():
-        process_option(name, options)
-
-
 def gen_variable_type(declarations, out):
     with open(declarations, 'r') as f:
         aten_decls = [option for option in yaml.load(f, Loader=Loader)]
@@ -737,7 +557,14 @@ def gen_variable_type(declarations, out):
 
     create_autograd_functions(env, derivatives)
     create_variable_type(env, aten_decls)
-    create_python_bindings(env, python_functions)
+
+    from .gen_python_functions import create_python_bindings
+    create_python_bindings(
+        python_functions,
+        env['py_methods'],
+        env['py_method_defs'],
+        env['py_method_dispatch'],
+        is_static=False)
 
     write(out, 'VariableType.h', VARIABLE_TYPE_H, env)
     write(out, 'VariableType.cpp', VARIABLE_TYPE_CPP, env)
