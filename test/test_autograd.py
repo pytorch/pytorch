@@ -1754,7 +1754,7 @@ method_tests = [
     ('expand', (1, S), (1, 1, S), 'new_dim_front_old_front_1'),
     ('exp', (S, S, S), ()),
     ('erf', torch.rand(S, S, S), ()),
-    ('erfinv', torch.rand(S, S, S), ()),
+    ('erfinv', torch.rand(S, S, S).clamp(-0.9, 0.9), ()),
     ('log', torch.rand(S, S, S) + 1e-2, ()),
     ('log1p', torch.rand(S, S, S), ()),
     ('tanh', (S, S, S), ()),
