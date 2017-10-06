@@ -1,8 +1,9 @@
 import argparse
+import copy
 import os
 import re
 import yaml
-from collections import OrderedDict
+from collections import OrderedDict, defaultdict
 from itertools import groupby
 from tools.shared.module_loader import import_module
 from .nested_dict import nested_dict
@@ -112,6 +113,9 @@ baseType->${method_prefix}${api_name}(${unpacked_args});
 wrap_output(pImpl, std::move(flags), std::move(grad_fn));
 return self;
 """)
+
+FUNCTION_PROTOTYPE = CodeTemplate("""\
+${name}(${typed_args})""")
 
 GENERATED_COMMENT = CodeTemplate("""\
 generated from tools/autograd/templates/${filename}""")
@@ -479,12 +483,65 @@ def create_variable_type(top_env, aten_declarations):
         process_function(function)
 
 
-def gen_variable_type(declarations, out):
-    with open(declarations, 'r') as f:
-        aten_decls = [option for option in yaml.load(f, Loader=Loader)]
+def load_aten_declarations(path):
+    with open(path, 'r') as f:
+        declarations = yaml.load(f, Loader=Loader)
 
+    # enrich declarations with additional information
+    for declaration in declarations:
+        args = []
+        for arg in declaration['arguments']:
+            simple_type = arg['type']
+            simple_type = simple_type.replace(' &', '').replace('const ', '')
+            simple_type = simple_type.replace('Generator *', 'Generator')
+            args.append(simple_type)
+            arg['simple_type'] = simple_type
+        declaration['formals'] = [arg['type'] + ' ' + arg['name']
+                                  for arg in declaration['arguments']]
+        declaration['args'] = [arg['name'] for arg in declaration['arguments']]
+        declaration['api_name'] = declaration['name']
+        declaration['return_type'] = format_return_type(declaration['returns'])
+
+        # Compute the Python function prototype for argument parsing
+        typed_args = []
+        positional = True
+        for arg in declaration['arguments']:
+            if arg.get('kwarg_only', False) and positional:
+                typed_args.append('*')
+                positional = False
+            param = arg['simple_type'] + ' ' + arg['name']
+            if arg.get('default') is not None:
+                default = arg['default']
+                if default == 'nullptr':
+                    default = 'None'
+                param += '=' + str(default)
+            typed_args.append(param)
+
+        # Python function prototype
+        declaration['typed_args'] = typed_args
+        declaration['prototype'] = FUNCTION_PROTOTYPE.substitute(declaration)
+
+    return declarations
+
+
+def load_deprecated_signatures(declarations_by_signature):
+    declarations = []
+    for deprecated in load_derivatives(deprecated_path):
+        declaration = declarations_by_signature[deprecated['signature']][0]
+        declaration = copy.deepcopy(declaration)
+        declaration['deprecated'] = True
+        args_by_name = {arg['name']: arg for arg in declaration['arguments']}
+        declaration['arguments'] = [
+            args_by_name[arg['name']] for arg in deprecated['python_arguments']]
+        declaration['call_args'] = deprecated['call_args']
+        declaration['prototype'] = deprecated['prototype']
+        declarations.append(declaration)
+    return declarations
+
+
+def gen_variable_type(declarations, out):
+    aten_decls = load_aten_declarations(declarations)
     derivatives = load_derivatives(derivatives_path)
-    deprecated = load_derivatives(deprecated_path)
 
     def by_name(option):
         return option['name']
@@ -497,52 +554,45 @@ def gen_variable_type(declarations, out):
 
     derivatives_by_signature = {d['signature']: d for d in derivatives}
     options_by_name = OrderedDict([(k, list(g)) for k, g in groupby(aten_decls, by_name)])
-    options_by_signature = OrderedDict()
-    python_functions = OrderedDict()
+    options_by_signature = defaultdict(list)
 
-    def get_option(derivative):
-        name = derivative.get('aten', derivative['name'])
-        options = options_by_name.get(name, [])
-        if len(options) == 0:
-            raise RuntimeError('Declaration not found for: {}'.format(name))
-        elif len(options) == 1:
-            return options[0]
-        else:
-            raise RuntimeError('ambiguous decl for: {}'.format(name))
-            return None
-
-    for option in aten_decls:
-        args = []
-        for arg in option['arguments']:
-            simple_type = arg['type'].replace(' &', '').replace('const ', '')
-            args.append(simple_type)
-            arg['simple_type'] = simple_type
-        name = option['name']
-        base_name = name[:-1] if option['inplace'] else name
-        signature = '{}({})'.format(base_name, ', '.join(args))
-        if signature not in options_by_signature:
-            options_by_signature[signature] = []
-
-        option['formals'] = [arg['type'] + ' ' + arg['name']
-                             for arg in option['arguments']]
-        option['args'] = [arg['name'] for arg in option['arguments']]
-        option['api_name'] = option['name']
-        option['return_type'] = format_return_type(option['returns'])
-
-        options_by_signature[signature].append(option)
-        derivative = derivatives_by_signature.get(signature)
-        option['derivative'] = derivative
-        if derivative is not None:
-            if name not in python_functions:
-                python_functions[name] = []
-            python_functions[name].append(nested_dict(derivative, option))
-
-    for declaration in deprecated:
+    for declaration in aten_decls:
         name = declaration['name']
-        declaration['deprecated'] = True
-        options = options_by_signature.get(declaration['signature'])
-        if options is not None:
-            python_functions[name].append(nested_dict(declaration, options[0]))
+        base_name = name[:-1] if declaration['inplace'] else name
+        simple_types = [arg['simple_type'] for arg in declaration['arguments']]
+        signature = '{}({})'.format(base_name, ', '.join(simple_types))
+        options_by_signature[signature].append(declaration)
+
+        derivative = derivatives_by_signature.get(signature)
+        declaration['derivative'] = derivative
+
+    def should_generate_python_binding(declaration):
+        name = declaration['name']
+        # don't bind unimplemented functions to prevent errors in test_autograd
+        if not is_implemented(declaration):
+            return False
+
+        # don't bind size or stride since the python signatures are different
+        if name in ['size', 'stride']:
+            return False
+
+        # we don't currently support functions which are only defined on Type
+        # such as zeros(), randn(), etc.
+        method_of = declaration['method_of']
+        if 'Tensor' not in method_of and 'namespace' not in method_of:
+            return False
+
+        return True
+
+    python_functions = defaultdict(list)
+    for declaration in aten_decls:
+        name = declaration['name']
+        if not should_generate_python_binding(declaration):
+            continue
+        python_functions[name].append(declaration)
+
+    for declaration in load_deprecated_signatures(options_by_signature):
+        python_functions[declaration['name']].append(declaration)
 
     env = {
         'autograd_function_declarations': [],
@@ -563,8 +613,7 @@ def gen_variable_type(declarations, out):
         python_functions,
         env['py_methods'],
         env['py_method_defs'],
-        env['py_method_dispatch'],
-        is_static=False)
+        env['py_method_dispatch'])
 
     write(out, 'VariableType.h', VARIABLE_TYPE_H, env)
     write(out, 'VariableType.cpp', VARIABLE_TYPE_CPP, env)
