@@ -61,6 +61,9 @@ struct ${op} : public Function {
   using Function::Function;
   variable_list apply(const variable_list& inputs) override;
   std::string name() override { return "${op}"; }
+  void releaseVariables() override {
+    ${release_variables}
+  }
   ${saved_variables}
 };
 """)
@@ -389,15 +392,18 @@ def create_autograd_functions(top_env, declarations):
 
     def process_function(op):
         saved_variables = []
+        release_variables = []
         for arg in op['saved']:
             name = arg['name']
             if arg['type'] == 'Tensor':
                 saved_variables.append('SavedVariable {}_;'.format(name))
+                release_variables.append('{}_.data.reset();'.format(name))
             elif arg['type'] == 'IntList':
                 saved_variables.append('std::vector<int64_t> {};'.format(name))
             else:
                 saved_variables.append('{} {};'.format(arg['type'], name))
         op['saved_variables'] = saved_variables
+        op['release_variables'] = release_variables
 
         body = []
         body.append('auto& grad = inputs[0];')
