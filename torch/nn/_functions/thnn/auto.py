@@ -20,6 +20,12 @@ def _make_function_class_criterion(class_name, update_output, update_grad_input,
             weight_arg_idx = i
             break
 
+    reduce_arg_idx = -1
+    for i, arg in enumerate(update_output.arguments):
+        if arg.name == 'reduce':
+            reduce_arg_idx = i
+            break
+
     buffers_idx = []
     additional_arg_idx = 0
     for arg in update_output.arguments[4:]:
@@ -66,6 +72,12 @@ def _make_function_class_criterion(class_name, update_output, update_grad_input,
         ctx._backend = backend_ctx
         ctx.save_for_backward(input, target, grad_output)
         grad_input = grad_output.new().resize_as_(input).zero_()
+
+        if reduce_arg_idx >= 0:
+            getattr(ctx._backend, update_grad_input.name)(ctx._backend.library_state, input, target,
+                                                          grad_output, grad_input, *ctx.additional_args)
+            return grad_input
+
         getattr(ctx._backend, update_grad_input.name)(ctx._backend.library_state, input, target,
                                                       grad_input, *ctx.additional_args)
         grad_output_expanded = grad_output.view(*repeat(1, grad_input.dim()))

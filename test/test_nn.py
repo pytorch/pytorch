@@ -3515,7 +3515,31 @@ new_criterion_tests = [
     ),
 ]
 
+
+class TestMSELoss(torch.nn.modules.module.Module):
+    def __init__(self, target, *args, **kwargs):
+        super(TestMSELoss, self).__init__()
+        self.mseloss = torch.nn.MSELoss(*args, **kwargs)
+        self.target = target
+
+    def forward(self, input):
+        return self.mseloss.forward(input, self.target.type_as(input))
+
+
+def mseloss_no_reduce_module_test():
+    input_size = (2, 3, 4, 5)
+    target = torch.randn(*input_size)
+    return dict(
+        fullname='MSELoss_no_reduce',
+        module_name='TestMSELoss',
+        constructor=TestMSELoss,
+        constructor_args=(Variable(target, requires_grad=False), False, False),
+        input_size=input_size,
+        reference_fn=lambda i, m: (i - target).pow(2))
+
+
 new_module_tests = [
+    mseloss_no_reduce_module_test(),
     dict(
         module_name='BatchNorm1d',
         constructor_args=(10,),

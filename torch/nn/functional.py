@@ -908,8 +908,8 @@ def l1_loss(input, target, size_average=True):
     return _functions.thnn.L1Loss.apply(input, target, size_average)
 
 
-def mse_loss(input, target, size_average=True):
-    return _functions.thnn.MSELoss.apply(input, target, size_average)
+def mse_loss(input, target, size_average=True, reduce=True):
+    return _functions.thnn.MSELoss.apply(input, target, size_average, reduce)
 
 
 def margin_ranking_loss(input1, input2, target, margin=0, size_average=True):
