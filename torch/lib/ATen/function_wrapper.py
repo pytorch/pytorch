@@ -215,12 +215,31 @@ def to_return_type(arg, option):
         if not is_mutable_formal_argument(arg, option):
             rt = 'const ' + rt
     return {
+        'name': arg['name'],
         'type': rt,
         'dynamic_type': DYNAMIC_TYPE.get(arg['type'], arg['type']),
     }
 
 
 def create_generic(top_env, declarations):
+    # translates defaults from cwrap types to C++ values
+    def translate_default(argument, type_str, default):
+        if default is None:
+            # cause the default constructor for the object to run
+            return '{}'
+        if 'if_true' in argument:
+            return argument['default'] == argument['if_true']
+        for pattern, replacement in HEADER_CONSTANT_REPLACEMENTS:
+            default = re.sub(pattern, replacement, str(default))
+        if type_str in {'Scalar', 'int64_t'}:
+            return int(default)
+        elif type_str == 'double':
+            return float(default)
+        elif type_str == 'bool':
+            assert default.lower() in ['true', 'false']
+            return default.lower() == 'true'
+        else:
+            return default
 
     # change from THTensor* to Tensor & so we get how it will appear
     # in the aten argument list...
@@ -233,12 +252,11 @@ def create_generic(top_env, declarations):
             'type': type_str,
             'dynamic_type': DYNAMIC_TYPE.get(argument['type'], argument['type']),
         }
+        if 'kwarg_only' in argument:
+            translated['kwarg_only'] = argument['kwarg_only']
         if 'default' in argument:
-            if 'if_true' in argument:
-                val = argument['default'] == argument['if_true']
-                translated['default'] = str(val).lower()
-            else:
-                translated['default'] = argument['default']
+            default = argument['default']
+            translated['default'] = translate_default(argument, type_str, default)
         if argument.get('output'):
             translated['output'] = True
         return translated
@@ -315,8 +333,8 @@ def create_generic(top_env, declarations):
         v = f.get('default')
         if v is None:
             return s
-        for pattern, replacement in HEADER_CONSTANT_REPLACEMENTS:
-            v = re.sub(pattern, replacement, str(v))
+        if isinstance(v, bool):
+            v = str(v).lower()
         return '{}={}'.format(s, v)
 
     def get_broadcast_argument(option):
