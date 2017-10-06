@@ -79,7 +79,8 @@ def create_python_bindings(
 
         actuals = []
         formal_args = []
-        for arg_idx, arg in enumerate(function['python_arguments']):
+        arg_idx = 0
+        for arg in function['python_arguments']:
             if arg['name'] == 'self' and not is_static:
                 formal_args.append('Tensor & {}'.format(arg['name']))
                 actuals.append('self_')
@@ -96,6 +97,7 @@ def create_python_bindings(
             dispatch_type = typename
             dispatch_type = 'const Tensor &' if dispatch_type == 'Tensor' else dispatch_type
             formal_args.append('{} {}'.format(dispatch_type, arg['name']))
+            arg_idx += 1
 
         env['i'] = i
         env['actuals'] = actuals
