@@ -19,6 +19,23 @@ inline PyObject* wrap(Tensor tensor) {
   return THPVariable_Wrap(Variable(std::move(tensor)));
 }
 
+inline PyObject* wrap(std::tuple<Tensor, Tensor> tensors) {
+  auto tuple = THPObjectPtr{PyTuple_New(2)};
+  if (!tuple) return NULL;
+  PyTuple_SET_ITEM(tuple.get(), 0, wrap(std::move(std::get<0>(tensors))));
+  PyTuple_SET_ITEM(tuple.get(), 1, wrap(std::move(std::get<1>(tensors))));
+  return tuple.release();
+}
+
+inline PyObject* wrap(std::tuple<Tensor, Tensor, Tensor> tensors) {
+  auto tuple = THPObjectPtr{PyTuple_New(3)};
+  if (!tuple) return NULL;
+  PyTuple_SET_ITEM(tuple.get(), 0, wrap(std::move(std::get<0>(tensors))));
+  PyTuple_SET_ITEM(tuple.get(), 1, wrap(std::move(std::get<1>(tensors))));
+  PyTuple_SET_ITEM(tuple.get(), 2, wrap(std::move(std::get<2>(tensors))));
+  return tuple.release();
+}
+
 inline PyObject* wrap(bool value) {
   if (value) {
     Py_RETURN_TRUE;

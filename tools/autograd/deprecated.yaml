@@ -4,11 +4,11 @@
 - name: add(Tensor self, Scalar alpha, Tensor other)
   aten: add(self, other, alpha)
 
-- name: addbmm(Scalar beta, Tensor self, Scalar alpha, Tensor mat1, Tensor mat2)
-  aten: addbmm(self, mat1, mat2, beta, alpha)
+- name: addbmm(Scalar beta, Tensor self, Scalar alpha, Tensor batch1, Tensor batch2)
+  aten: addbmm(self, batch1, batch2, beta, alpha)
 
-- name: addbmm(Scalar beta, Tensor self, Tensor mat1, Tensor mat2)
-  aten: addbmm(self, mat1, mat2, beta, 1)
+- name: addbmm(Scalar beta, Tensor self, Tensor batch1, Tensor batch2)
+  aten: addbmm(self, batch1, batch2, beta, 1)
 
 - name: addcdiv(Tensor self, Scalar value, Tensor tensor1, Tensor tensor2)
   aten: addcdiv(self, tensor1, tensor2, value)

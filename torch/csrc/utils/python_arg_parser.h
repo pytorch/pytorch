@@ -77,6 +77,8 @@ struct PythonArgs {
   inline at::Scalar scalar(int i);
   inline std::vector<at::Tensor> tensorlist(int i);
   inline std::vector<int64_t> intlist(int i);
+  inline at::Generator* generator(int i);
+  inline at::Storage& storage(int i);
   inline int64_t toInt64(int i);
   inline double toDouble(int i);
   inline bool toBool(int i);
@@ -181,6 +183,14 @@ inline double PythonArgs::toDouble(int i) {
 inline bool PythonArgs::toBool(int i) {
   if (!args[i]) return signature.params[i].default_bool;
   return args[i] == Py_True;
+}
+
+inline at::Generator* PythonArgs::generator(int i) {
+  throw std::runtime_error("PythonArgs::generator not implemented");
+}
+
+inline at::Storage& PythonArgs::storage(int i) {
+  throw std::runtime_error("PythonArgs::storage not implemented");
 }
 
 } // namespace torch

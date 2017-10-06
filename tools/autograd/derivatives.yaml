@@ -84,7 +84,9 @@
   tensors: cat_tensors_backward(grad, tensors.sizes(dim), dim)
 
 - name: cauchy
-- name: ceil
+
+- name: ceil(Tensor self)
+  self: zeros_like(self)
 
 - name: clone(Tensor self)
   self: grad
