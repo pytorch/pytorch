@@ -178,18 +178,19 @@ class DistributedDataParallel(Module):
             for tensor, param in zip(tensors, module.parameters()):
                 param.data.set_(tensor)
 
-        # cross-node buffer sync
         buffers = list(self.module._all_buffers())
-        flat_buffers = _flatten_tensors(buffers)
-        dist.broadcast(flat_buffers, 0)
-        for buf, synced in zip(buffers, _unflatten_tensors(flat_buffers, buffers)):
-            buf.copy_(synced)
+        if len(buffers) > 0:
+            # cross-node buffer sync
+            flat_buffers = _flatten_tensors(buffers)
+            dist.broadcast(flat_buffers, 0)
+            for buf, synced in zip(buffers, _unflatten_tensors(flat_buffers, buffers)):
+                buf.copy_(synced)
 
-        # intra-node buffer sync
-        result = broadcast_coalesced(buffers, self.device_ids, self.broadcast_bucket_size)
-        for tensors, module in zip(result[1:], self._module_copies[1:]):
-            for tensor, buf in zip(tensors, module._all_buffers()):
-                buf.set_(tensor)
+            # intra-node buffer sync
+            result = broadcast_coalesced(buffers, self.device_ids, self.broadcast_bucket_size)
+            for tensors, module in zip(result[1:], self._module_copies[1:]):
+                for tensor, buf in zip(tensors, module._all_buffers()):
+                    buf.set_(tensor)
 
     def _register_grad_hooks(self):
         self._grad_accs = []  # need to keep them in scope
