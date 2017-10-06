@@ -1,5 +1,8 @@
+#include <fstream>
+#include <iterator>
 #include <string>
 
+#include "caffe2/core/blob_serialization.h"
 #include "caffe2/core/init.h"
 #include "caffe2/core/logging.h"
 #include "caffe2/core/operator.h"
@@ -52,11 +55,52 @@ CAFFE2_DEFINE_bool(
     run_individual,
     false,
     "Whether to benchmark individual operators.");
+CAFFE2_DEFINE_bool(
+    text_output,
+    false,
+    "Whether to write out output in text format for regression purpose.");
 CAFFE2_DEFINE_int(warmup, 0, "The number of iterations to warm up.");
 
 using std::string;
 using std::unique_ptr;
 using std::vector;
+
+static void writeTextOutput(
+    caffe2::TensorCPU* tensor,
+    const string& output_prefix,
+    const string& name) {
+  string output_name = output_prefix + "/" + name + ".txt";
+  caffe2::TensorSerializer<caffe2::CPUContext> ser;
+  caffe2::BlobProto blob_proto;
+  ser.Serialize(
+      *tensor, output_name, blob_proto.mutable_tensor(), 0, tensor->size());
+  blob_proto.set_name(output_name);
+  blob_proto.set_type("Tensor");
+  CAFFE_ENFORCE(blob_proto.has_tensor());
+  caffe2::TensorProto tensor_proto = blob_proto.tensor();
+  vector<float> data;
+  switch (tensor_proto.data_type()) {
+    case caffe2::TensorProto::FLOAT: {
+      std::copy(
+          tensor_proto.float_data().begin(),
+          tensor_proto.float_data().end(),
+          std::back_inserter(data));
+      break;
+    }
+    case caffe2::TensorProto::INT32: {
+      std::copy(
+          tensor_proto.int32_data().begin(),
+          tensor_proto.int32_data().end(),
+          std::back_inserter(data));
+      break;
+    }
+    default:
+      CAFFE_THROW("Unimplemented Blob type.");
+  }
+  std::ofstream output_file(output_name);
+  std::ostream_iterator<float> output_iterator(output_file, "\n");
+  std::copy(data.begin(), data.end(), output_iterator);
+}
 
 int main(int argc, char** argv) {
   caffe2::GlobalInit(&argc, &argv);
@@ -150,9 +194,14 @@ int main(int argc, char** argv) {
           workspace->HasBlob(name),
           "You requested a non-existing blob: ",
           name);
-      string serialized = workspace->GetBlob(name)->Serialize(name);
-      string output_filename = output_prefix + name;
-      caffe2::WriteStringToFile(serialized, output_filename.c_str());
+      if (caffe2::FLAGS_text_output) {
+        auto blob = workspace->GetBlob(name)->GetMutable<caffe2::TensorCPU>();
+        writeTextOutput(blob, output_prefix, name);
+      } else {
+        string serialized = workspace->GetBlob(name)->Serialize(name);
+        string output_filename = output_prefix + name;
+        caffe2::WriteStringToFile(serialized, output_filename.c_str());
+      }
     }
   }
 
