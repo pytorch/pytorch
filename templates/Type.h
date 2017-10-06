@@ -10,6 +10,7 @@
 #include "ATen/SparseTensorRef.h"
 #include "ATen/ScalarType.h"
 #include "ATen/Scalar.h"
+#include "ATen/Tensor.h"
 
 // To solve the conflict of s_addr in inaddr.h
 #ifdef _MSC_VER
