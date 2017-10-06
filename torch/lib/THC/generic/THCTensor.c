@@ -635,7 +635,7 @@ int THCTensor_(isContiguous)(THCState *state, const THCTensor *self)
   int d;
   for(d = self->nDimension-1; d >= 0; d--)
   {
-    if(self->size[d] != 1)
+    if(self->size[d] != 1 || d == 0)
     {
       if(self->stride[d] == z)
         z *= self->size[d];
