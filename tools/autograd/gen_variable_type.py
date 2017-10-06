@@ -222,9 +222,10 @@ FALLTHROUGH_FUNCTIONS = {
 }
 
 RETURN_TYPE_OVERRIDE_MAPPING = {
-  # TensorList maps to vector because TensorList is a reference type (i.e. it will go out of scope)
-  'TensorList': 'std::vector<Tensor>',
+    # TensorList maps to vector because TensorList is a reference type (i.e. it will go out of scope)
+    'TensorList': 'std::vector<Tensor>',
 }
+
 
 def format_return_type(returns):
     def map_return_type(return_type):
