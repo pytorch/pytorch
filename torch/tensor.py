@@ -28,6 +28,11 @@ class _TensorBase(object):
         Params:
             tensor (Tensor): the tensor which has the desired type
         """
+        from torch.autograd import Variable
+        if isinstance(tensor, Variable):
+            tensor = tensor.data
+        elif not torch.is_tensor(tensor):
+            raise ValueError('Expected a tensor in type_as, got type {}'.format(type(tensor)))
         return self.type(tensor.type())
 
     def cpu(self):
