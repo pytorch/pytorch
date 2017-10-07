@@ -1085,7 +1085,6 @@ class TestNN(NNTestCase):
 
         y.backward(grad)
 
-
     def test_EmbeddingBag(self):
         self._test_EmbeddingBag(False, 'sum')
         self._test_EmbeddingBag(False, 'mean')
