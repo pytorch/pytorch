@@ -22,7 +22,6 @@
 #include "caffe2/core/operator.h"
 #include "caffe2/core/tensor.h"
 #include "caffe2/operators/recurrent_network_executor.h"
-#include "google/protobuf/text_format.h"
 #include "caffe2/utils/conversions.h"
 
 CAFFE2_DECLARE_bool(caffe2_rnn_executor);
@@ -182,6 +181,8 @@ void extractLinks(
     const std::string& offsetArg,
     const std::string& windowArg,
     std::vector<detail::Link>* links);
+
+NetDef extractNetDef(const OperatorDef& op, const std::string& argName);
 } // namespace detail
 
 template <class Context>
@@ -198,11 +199,8 @@ class RecurrentNetworkOp final : public Operator<Context> {
             "timestep",
             "timestep")) {
     CAFFE_ENFORCE(ws);
-    const auto stepNet =
-        OperatorBase::GetSingleArgument<string>("step_net", "");
-    CAFFE_ENFORCE(
-        google::protobuf::TextFormat::ParseFromString(stepNet, &stepNetDef_),
-        "Invalid netdef");
+
+    stepNetDef_ = detail::extractNetDef(operator_def, "step_net");
 
     recurrentInputs_ = constructRecurrentInputs(operator_def, sharedWs_);
     links_ = constructLinks();
@@ -313,9 +311,11 @@ class RecurrentNetworkOp final : public Operator<Context> {
 
     // If we don't have a backward step net, this operator is forward_only
     // and we can avoid creating multiple workspaces.
-
     bool has_backward_pass =
-        OperatorBase::GetSingleArgument<string>("backward_step_net", "") != "";
+        OperatorBase::HasSingleArgumentOfType<NetDef>("backward_step_net") ||
+        (OperatorBase::HasSingleArgumentOfType<string>("backward_step_net") &&
+         OperatorBase::GetSingleArgument<string>("backward_step_net", "") !=
+             "");
 
     // With backward pass: we need to create workspace for each timestep
     detail::ScratchWorkspaces* scratch =
@@ -418,11 +418,8 @@ class RecurrentNetworkGradientOp final : public Operator<Context> {
         gradInputs_(OperatorBase::template GetRepeatedArgument<int32_t>(
             "outputs_with_grads")) {
     CAFFE_ENFORCE(ws);
-    const auto stepNet =
-        OperatorBase::GetSingleArgument<string>("backward_step_net", "");
 
-    CAFFE_ENFORCE(
-        google::protobuf::TextFormat::ParseFromString(stepNet, &stepNetDef_));
+    stepNetDef_ = detail::extractNetDef(operator_def, "backward_step_net");
 
     links_ = constructLinks();
     params_ = constructParams(operator_def);
