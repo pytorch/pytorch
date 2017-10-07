@@ -67,7 +67,7 @@ class Optimizer(object):
     def _run(self, net, param_init_net, param_info):
         raise Exception("Not Implemented")
 
-    def get_cpu_blob_name(self, base_str, node_name):
+    def get_cpu_blob_name(self, base_str, node_name=''):
         classname = self.__class__.__name__
         return '%s_%d_%s%s_cpu' % (classname, self._instance_num, base_str, node_name)
 
