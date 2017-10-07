@@ -4,13 +4,33 @@ from .utils import maybe_unexpand, maybe_unexpand_or_view
 import math
 
 
+# Note [Export inplace]
+# ~~~~~~~~~~~~~~~~~~~~~
+# In abstract, it would be better for us to export inplace annotations,
+# than to not export them, since it is useful information that can
+# help the target of an ONNX export export more efficiently.  Unfortunately,
+# there are a few barriers to actually making this happen:
+#
+#   - ONNX does not currently standardize any notion of inplace
+#   - PyTorch's parallel execution engine (which executes these operators)
+#     doesn't handle inplace operations correctly
+#   - If we did add inplace, we would also need a notion of *aliasing*,
+#     to determine when reordering past an inplace operation is sound
+#     or not.
+#
+# In short, while it may seem awkward and terrible for us to simply
+# unconditionally discard the inplace annotations on our autograd functions;
+# it is *sound* to do so (inplace ops still "return" the result
+# of the inplace operation), and is not easy to fix.
+
+
 @traceable
 class Add(InplaceFunction):
 
     @staticmethod
     def symbolic(g, a, b, inplace=False):
         # TODO: [Export inplace]
-        return g.appendNode(g.create("Add", [a, b]))
+        return g.op("Add", a, b)
 
     @staticmethod
     def forward(ctx, a, b, inplace=False):
