@@ -6,8 +6,7 @@ graph {
   node {
     input: "1"
     input: "2"
-    output: "4"
-    output: "5"
+    output: "3"
     op_type: "Concat"
     attribute {
       name: "axis"
@@ -48,7 +47,7 @@ graph {
     }
   }
   output {
-    name: "4"
+    name: "3"
     type {
       tensor_type {
         elem_type: DOUBLE
