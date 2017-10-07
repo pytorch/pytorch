@@ -48,7 +48,7 @@ sudo pip install pyyaml
 mkdir build
 cd build
 cmake .. -DCMAKE_INSTALL_PREFIX=/where/you/want # specify your dest directory
-# cmake .. -DNO_CUDA  # for CPU only machines
+# cmake .. -DNO_CUDA=true  # for CPU only machines
 make install
 ```
 
