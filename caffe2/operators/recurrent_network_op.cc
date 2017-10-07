@@ -16,6 +16,11 @@
 
 #include "recurrent_network_op.h"
 #include "caffe2/core/workspace.h"
+#include "caffe2/utils/proto_utils.h"
+
+#ifndef CAFFE2_RNN_NO_TEXT_FORMAT
+#include "google/protobuf/text_format.h"
+#endif
 
 CAFFE2_DEFINE_bool(
     caffe2_rnn_executor,
@@ -244,6 +249,26 @@ void extractLinks(
     l.offset = offset[i];
     l.window = window[i];
     links->push_back(l);
+  }
+}
+
+NetDef extractNetDef(const OperatorDef& op, const std::string& argName) {
+  if (ArgumentHelper::HasSingleArgumentOfType<OperatorDef, NetDef>(
+          op, argName)) {
+    return ArgumentHelper::GetSingleArgument<OperatorDef, NetDef>(
+        op, argName, NetDef());
+  } else {
+#ifndef CAFFE2_RNN_NO_TEXT_FORMAT
+    NetDef result;
+    const auto netString =
+        ArgumentHelper::GetSingleArgument<OperatorDef, string>(op, argName, "");
+    CAFFE_ENFORCE(
+        google::protobuf::TextFormat::ParseFromString(netString, &result),
+        "Invalid NetDef");
+    return result;
+#else
+    CAFFE_THROW("No valid NetDef for argument ", argName);
+#endif
   }
 }
 } // namespace detail
