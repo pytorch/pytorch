@@ -65,16 +65,16 @@ class Optimizer(object):
         self._run(net, param_init_net, param)
 
     def _run(self, net, param_init_net, param_info):
-        raise Exception("Not Impelemented")
+        raise Exception("Not Implemented")
 
-    def get_cpu_blob_name(self, base_str):
+    def get_cpu_blob_name(self, base_str, node_name):
         classname = self.__class__.__name__
-        return '%s_%d_%s_cpu' % (classname, self._instance_num, base_str)
+        return '%s_%d_%s%s_cpu' % (classname, self._instance_num, base_str, node_name)
 
-    def get_gpu_blob_name(self, base_str, gpu_id):
+    def get_gpu_blob_name(self, base_str, gpu_id, node_name):
         classname = self.__class__.__name__
-        return '%s_%d_%s_gpu%d' % (
-            classname, self._instance_num, base_str, gpu_id
+        return '%s_%d_%s%s_gpu%d' % (
+            classname, self._instance_num, base_str, node_name, gpu_id,
         )
 
     def make_unique_blob_name(self, base_str):
@@ -87,26 +87,32 @@ class Optimizer(object):
             return self.get_cpu_blob_name(base_str)
 
         if current_scope.device_type == caffe2_pb2.CUDA:
-            return self.get_gpu_blob_name(base_str, current_scope.cuda_gpu_id)
+            return self.get_gpu_blob_name(
+                base_str, current_scope.cuda_gpu_id, current_scope.node_name
+            )
         else:
-            return self.get_cpu_blob_name(base_str)
+            return self.get_cpu_blob_name(base_str, current_scope.node_name)
 
     def build_lr(self, net, param_init_net, base_learning_rate,
                  learning_rate_blob=None, policy="fixed",
                  iter_val=0, **kwargs):
         if learning_rate_blob is None:
             learning_rate_blob = self.make_unique_blob_name('lr')
-        if not param_init_net.BlobIsDefined(_OPTIMIZER_ITERATION_NAME):
+
+        # Each node needs its own iteration counter
+        optimization_iter_blob = _OPTIMIZER_ITERATION_NAME \
+            + scope.CurrentDeviceScope().node_name
+        if not param_init_net.BlobIsDefined(optimization_iter_blob):
             # Add training operators.
             with core.DeviceScope(core.DeviceOption(caffe2_pb2.CPU)):
                 iteration = param_init_net.ConstantFill(
-                    [], _OPTIMIZER_ITERATION_NAME, shape=[1],
+                    [], optimization_iter_blob, shape=[1],
                     value=iter_val,
                     dtype=core.DataType.INT64)
                 iter_mutex = param_init_net.CreateMutex([], ["iteration_mutex"])
                 net.AtomicIter([iter_mutex, iteration], [iteration])
         else:
-            iteration = param_init_net.GetBlobRef(_OPTIMIZER_ITERATION_NAME)
+            iteration = param_init_net.GetBlobRef(optimization_iter_blob)
 
         if not net.BlobIsDefined(learning_rate_blob):
             # There is one interesting thing here: since we are minimizing, we are
