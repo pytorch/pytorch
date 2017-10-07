@@ -1070,6 +1070,21 @@ class TestNN(NNTestCase):
         offset[-1] = 100
         self.assertRaises(ValueError, lambda: es(input.view(-1), offset))
 
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    def test_AvgPool3d_backward_after_cat_dim1_cuda(self):
+        # x has to have batch_size 1 to test contiguous checks
+        x = Variable(torch.randn(1, 3, 4, 4, 4).cuda(), requires_grad=True)
+        y = F.avg_pool3d(x, kernel_size=3, padding=1, stride=2)
+
+        grad = torch.randn(y.size()).cuda()
+        # increase the stride in dimension 0. the tensor is still contiguous because size[0] is 1
+        stride = list(grad.stride())
+        stride[0] = stride[0] * 2
+        grad.set_(grad.storage(), 0, grad.size(), stride)
+        assert grad.is_contiguous()
+
+        y.backward(grad)
+
     def test_EmbeddingBag(self):
         self._test_EmbeddingBag(False, 'sum')
         self._test_EmbeddingBag(False, 'mean')
