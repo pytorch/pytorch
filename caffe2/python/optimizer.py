@@ -100,8 +100,9 @@ class Optimizer(object):
             learning_rate_blob = self.make_unique_blob_name('lr')
 
         # Each node needs its own iteration counter
-        optimization_iter_blob = _OPTIMIZER_ITERATION_NAME \
-            + scope.CurrentDeviceScope().node_name
+        current_scope = scope.CurrentDeviceScope()
+        node_name = current_scope.node_name if current_scope else ''
+        optimization_iter_blob = _OPTIMIZER_ITERATION_NAME + node_name
         if not param_init_net.BlobIsDefined(optimization_iter_blob):
             # Add training operators.
             with core.DeviceScope(core.DeviceOption(caffe2_pb2.CPU)):
