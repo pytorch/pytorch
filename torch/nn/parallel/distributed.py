@@ -1,6 +1,7 @@
 import sys
 import math
 import threading
+import copy
 
 import torch
 from torch.autograd import Variable
@@ -143,6 +144,7 @@ class DistributedDataParallel(Module):
         attrs = copy.copy(self.__dict__)
         del attrs['_grad_accs'], attrs['_reduction_queues'], attrs['_reduction_streams'], \
             attrs['_reduction_threads'], attrs['_nccl_streams'], attrs['_default_streams']
+        return attrs
 
     def __setstate__(self, state):
         super(DistributedDataParallel, self).__setstate__(state)
