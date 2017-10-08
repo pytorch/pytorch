@@ -110,7 +110,9 @@ class Optimizer(object):
                     [], optimization_iter_blob, shape=[1],
                     value=iter_val,
                     dtype=core.DataType.INT64)
-                iter_mutex = param_init_net.CreateMutex([], ["iteration_mutex"])
+                iter_mutex = param_init_net.CreateMutex(
+                    [], ["iteration_mutex" + node_name]
+                )
                 net.AtomicIter([iter_mutex, iteration], [iteration])
         else:
             iteration = param_init_net.GetBlobRef(optimization_iter_blob)
@@ -223,7 +225,7 @@ class SgdOptimizer(Optimizer):
         # to include device information.
         ONE = param_init_net.ConstantFill(
             [],
-            "ONE_{}_{}".format(dev.device_type, dev.cuda_gpu_id),
+            "ONE_{}_{}{}".format(dev.device_type, dev.cuda_gpu_id, dev.node_name),
             shape=[1],
             value=1.0
         )
