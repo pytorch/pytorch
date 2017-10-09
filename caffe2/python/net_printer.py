@@ -273,7 +273,10 @@ def print_op(text, op):
         list(op.input) + [(a.name, _arg_val(a)) for a in op.arg],
         op.output,
         factor_prefixes=text.factor_prefixes))
-
+    for arg in op.arg:
+        if arg.HasField('n'):
+            with text.context('arg: %s' % arg.name):
+                text(arg.n)
 
 @Printer.register(NetDef)
 def print_net_def(text, net_def):
