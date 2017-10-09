@@ -485,7 +485,9 @@ if WITH_NCCL:
     else:
         main_link_args += [NCCL_LIB]
     extra_compile_args += ['-DWITH_NCCL']
-
+    main_sources += [
+        "torch/csrc/cuda/nccl.cpp",
+    ]
 if WITH_CUDNN:
     main_libraries += ['cudnn']
     # NOTE: this this at the front, in case there's another cuDNN in CUDA path

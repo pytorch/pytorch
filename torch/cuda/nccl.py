@@ -182,21 +182,8 @@ def reduce(inputs, outputs=None, root=0, op=SUM, streams=None):
         outputs = inputs
     if streams is None:
         streams = [None] * len(inputs)
-    _check_inputs(inputs, outputs)
-    comm = communicator(inputs)
-    count = inputs[0].numel()
-    data_type = nccl_types[inputs[0].type()]
-    with torch.cuda._free_mutex():
-        if nccl_2_0 is not None:
-            lib.ncclGroupStart()
-        for i in range(len(inputs)):
-            with torch.cuda.device(comm.devices[i]):
-                check_error(lib.ncclReduce(
-                    ctypes.c_void_p(inputs[i].data_ptr()),
-                    ctypes.c_void_p(outputs[i].data_ptr()), count,
-                    data_type, op, root, comm[i], streams[i]))
-        if nccl_2_0 is not None:
-            lib.ncclGroupEnd()
+
+    torch._C._nccl_reduce(inputs, outputs, streams, root, op)
 
 
 def broadcast(inputs, root=0):
