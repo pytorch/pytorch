@@ -2,6 +2,7 @@
 
 #include "ArrayRef.h"
 #include "ATenGeneral.h"
+#include <algorithm>
 #include <sstream>
 #include <typeinfo>
 
@@ -49,6 +50,24 @@ static inline std::vector<TH*> tensor_list_checked_cast(ArrayRef<TBase> tensors,
     }
   }
   return casted;
+}
+
+template <size_t N>
+std::array<int64_t, N> check_intlist(ArrayRef<int64_t> list, const char * name, int pos, ArrayRef<int64_t> def={}) {
+  if (list.empty()) {
+    list = def;
+  }
+  auto res = std::array<int64_t, N>();
+  if (list.size() == 1 && N > 1) {
+    res.fill(list[0]);
+    return res;
+  }
+  if (list.size() != N) {
+    runtime_error("Expected a list of %zd ints but got %zd for argument #%d '%s'",
+        N, list.size(), pos, name);
+  }
+  std::copy_n(list.begin(), N, res.begin());
+  return res;
 }
 
 } // at

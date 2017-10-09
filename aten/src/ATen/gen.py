@@ -217,7 +217,7 @@ def generate_storage_type_and_tensor(backend, density, scalar_type, declarations
 
 
 cwrap_files = [f for f in files if f.endswith('.cwrap')]
-nn_files = [f for f in files if f.endswith('.h')]
+nn_files = [f for f in files if f.endswith('.yaml') or f.endswith('.h')]
 
 declarations = [d
                 for file in cwrap_files
