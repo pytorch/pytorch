@@ -198,5 +198,8 @@ void initPythonIRBindings(PyObject * module_) {
   m.def("_jit_get_graph", [](tracer::TracingState* s) {
     return s->graph;
   });
+  m.def("_jit_is_tracing", [](const autograd::Variable& var) {
+    return tracer::isTracing(var);
+  });
 }
 }}
