@@ -55,7 +55,7 @@ static ncclComm_t* _get_communicator(std::vector<at::Tensor>& inputs) {
   }
 }
 
-static void _check_inputs(std::vector<at::Tensor> &inputs, std::vector<at::Tensor> &outputs, int size_multiplier) {
+static void _check_inputs(std::vector<at::Tensor> &inputs, std::vector<at::Tensor> &outputs, int input_multiplier, int output_multiplier) {
   // len(inputs) == len(outputs)
   size_t len = inputs.size();
 
@@ -108,8 +108,7 @@ static void _check_inputs(std::vector<at::Tensor> &inputs, std::vector<at::Tenso
       throw std::runtime_error("all inputs must have the same number of elements");
     }
   
-    // outputs have to be of size * size_multiplier
-    if (output.numel() != (numel * size_multiplier)) {
+    if (output.numel() * output_multiplier != numel * input_multiplier) {
       throw std::runtime_error("output must be of size input_size * size_multiplier");
     }
   }
@@ -148,7 +147,7 @@ PyObject * THCPModule_nccl_reduce(PyObject *self, PyObject *args) {
   
   // we can safely release GIL after this line, no python API used
   AutoNoGIL no_gil;
-  _check_inputs(inputs, outputs, 1);
+  _check_inputs(inputs, outputs, 1, 1);
   size_t len = inputs.size();
 
   ncclDataType_t data_type = _get_data_type(inputs[0].type().ID());
@@ -166,6 +165,177 @@ PyObject * THCPModule_nccl_reduce(PyObject *self, PyObject *args) {
     auto stream = (streams[i] == NULL) ? NULL : streams[i]->stream;
     CHECK(ncclReduce(inputs[i].data_ptr(), outputs[i].data_ptr(),
 		     count, data_type, (ncclRedOp_t) op, root, comm[i], stream));
+  }
+#if defined(NCCL_MAJOR) && (NCCL_MAJOR >= 2)
+  CHECK(ncclGroupEnd());
+#endif
+
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject * THCPModule_nccl_all_reduce(PyObject *self, PyObject *args) {
+  HANDLE_TH_ERRORS
+  PyObject *_inputs, *_outputs;
+  int op;
+
+  if (!PyArg_ParseTuple(args, "OOi", &_inputs, &_outputs, &op)) {
+    THPUtils_invalidArguments(args, NULL, "nccl_all_reduce", 1,
+			      "(sequence[Tensor] inputs, sequence[Tensor]"
+			      " outputs, int op");
+    return NULL;
+  }
+
+  std::vector<at::Tensor> inputs = THPUtils_PySequence_to_TensorList(_inputs);
+  std::vector<at::Tensor> outputs = THPUtils_PySequence_to_TensorList(_outputs);
+
+  // we can safely release GIL after this line, no python API used
+  AutoNoGIL no_gil;
+  _check_inputs(inputs, outputs, 1, 1);
+  size_t len = inputs.size();
+
+  ncclDataType_t data_type = _get_data_type(inputs[0].type().ID());
+
+  int64_t count = inputs[0].numel();
+  std::lock_guard<std::mutex> lock(*(THCCachingAllocator_getCudaFreeMutex()));
+  ncclComm_t *comm = _get_communicator(inputs);
+  AutoGPU gpu_guard;
+#if defined(NCCL_MAJOR) && (NCCL_MAJOR >= 2)
+  CHECK(ncclGroupStart());
+#endif
+  for (size_t i = 0; i < len; i++) {
+    int device = inputs[i].get_device();
+    gpu_guard.setDevice(device);
+    CHECK(ncclAllReduce(inputs[i].data_ptr(), outputs[i].data_ptr(),
+			count, data_type, (ncclRedOp_t) op, comm[i], NULL));
+  }
+#if defined(NCCL_MAJOR) && (NCCL_MAJOR >= 2)
+  CHECK(ncclGroupEnd());
+#endif
+
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject * THCPModule_nccl_broadcast(PyObject *self, PyObject *args) {
+  HANDLE_TH_ERRORS
+  PyObject *_inputs;
+  int root;
+
+  if (!PyArg_ParseTuple(args, "Oi", &_inputs, &root)) {
+    THPUtils_invalidArguments(args, NULL, "nccl_broadcast", 1,
+			      "(sequence[Tensor] inputs, int root");
+    return NULL;
+  }
+
+  std::vector<at::Tensor> inputs = THPUtils_PySequence_to_TensorList(_inputs);
+
+  // we can safely release GIL after this line, no python API used
+  AutoNoGIL no_gil;
+  _check_inputs(inputs, inputs, 1, 1);
+  size_t len = inputs.size();
+
+  ncclDataType_t data_type = _get_data_type(inputs[0].type().ID());
+
+  int64_t count = inputs[0].numel();
+  std::lock_guard<std::mutex> lock(*(THCCachingAllocator_getCudaFreeMutex()));
+  ncclComm_t *comm = _get_communicator(inputs);
+  AutoGPU gpu_guard;
+#if defined(NCCL_MAJOR) && (NCCL_MAJOR >= 2)
+  CHECK(ncclGroupStart());
+#endif
+  for (size_t i = 0; i < len; i++) {
+    int device = inputs[i].get_device();
+    gpu_guard.setDevice(device);
+    CHECK(ncclBcast(inputs[i].data_ptr(), count, data_type, root, comm[i], NULL));
+  }
+#if defined(NCCL_MAJOR) && (NCCL_MAJOR >= 2)
+  CHECK(ncclGroupEnd());
+#endif
+
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject * THCPModule_nccl_all_gather(PyObject *self, PyObject *args) {
+  HANDLE_TH_ERRORS
+  PyObject *_inputs, *_outputs;
+
+  if (!PyArg_ParseTuple(args, "OO", &_inputs, &_outputs)) {
+    THPUtils_invalidArguments(args, NULL, "nccl_all_gather", 1,
+			      "(sequence[Tensor] inputs, sequence[Tensor] outputs");
+    return NULL;
+  }
+
+  std::vector<at::Tensor> inputs = THPUtils_PySequence_to_TensorList(_inputs);
+  std::vector<at::Tensor> outputs = THPUtils_PySequence_to_TensorList(_outputs);
+
+  // we can safely release GIL after this line, no python API used
+  AutoNoGIL no_gil;
+  size_t len = inputs.size();
+  _check_inputs(inputs, outputs, len, 1);
+
+  ncclDataType_t data_type = _get_data_type(inputs[0].type().ID());
+
+  int64_t count = inputs[0].numel();
+  std::lock_guard<std::mutex> lock(*(THCCachingAllocator_getCudaFreeMutex()));
+  ncclComm_t *comm = _get_communicator(inputs);
+  AutoGPU gpu_guard;
+#if defined(NCCL_MAJOR) && (NCCL_MAJOR >= 2)
+  CHECK(ncclGroupStart());
+#endif
+  for (size_t i = 0; i < len; i++) {
+    int device = inputs[i].get_device();
+    gpu_guard.setDevice(device);
+#if defined(NCCL_MAJOR) && (NCCL_MAJOR >= 2)
+    CHECK(ncclAllGather(inputs[i].data_ptr(), outputs[i].data_ptr(),
+			count, data_type, comm[i], NULL));
+#else
+    CHECK(ncclAllGather(inputs[i].data_ptr(), count, data_type,
+			outputs[i].data_ptr(), comm[i], NULL));
+#endif
+  }
+#if defined(NCCL_MAJOR) && (NCCL_MAJOR >= 2)
+  CHECK(ncclGroupEnd());
+#endif
+
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject * THCPModule_nccl_reduce_scatter(PyObject *self, PyObject *args) {
+  HANDLE_TH_ERRORS
+  PyObject *_inputs, *_outputs;
+  int op;
+
+  if (!PyArg_ParseTuple(args, "OOi", &_inputs, &_outputs, &op)) {
+    THPUtils_invalidArguments(args, NULL, "nccl_reduce_scatter", 1,
+			      "(sequence[Tensor] inputs, sequence[Tensor] outputs, int op");
+    return NULL;
+  }
+
+  std::vector<at::Tensor> inputs = THPUtils_PySequence_to_TensorList(_inputs);
+  std::vector<at::Tensor> outputs = THPUtils_PySequence_to_TensorList(_outputs);
+
+  // we can safely release GIL after this line, no python API used
+  AutoNoGIL no_gil;
+  size_t len = inputs.size();
+  _check_inputs(inputs, outputs, 1, len);
+
+  ncclDataType_t data_type = _get_data_type(inputs[0].type().ID());
+
+  int64_t count = inputs[0].numel() / len;
+  std::lock_guard<std::mutex> lock(*(THCCachingAllocator_getCudaFreeMutex()));
+  ncclComm_t *comm = _get_communicator(inputs);
+  AutoGPU gpu_guard;
+#if defined(NCCL_MAJOR) && (NCCL_MAJOR >= 2)
+  CHECK(ncclGroupStart());
+#endif
+  for (size_t i = 0; i < len; i++) {
+    int device = inputs[i].get_device();
+    gpu_guard.setDevice(device);
+    CHECK(ncclReduceScatter(inputs[i].data_ptr(), outputs[i].data_ptr(),
+			    count, data_type, (ncclRedOp_t) op, comm[i], NULL));
   }
 #if defined(NCCL_MAJOR) && (NCCL_MAJOR >= 2)
   CHECK(ncclGroupEnd());
