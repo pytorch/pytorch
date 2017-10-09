@@ -149,6 +149,36 @@ def _newNode(self, opname, *args, **kwargs):
 
 
 def _op(self, opname, *args, **kwargs):
+    """
+    Create an ONNX operator 'opname', taking 'args' as inputs
+    and attributes 'kwargs' and add it to the current graph,
+    returning the node representing the single output of this
+    operator (see the `outputs` keyword argument for multi-return
+    nodes).
+
+    The set of operators and the inputs/attributes they take
+    is documented at https://github.com/onnx/onnx/blob/master/docs/Operators.md
+
+    This op is monkey-patched to be available on the 'Graph' object
+    passed in as the first argument.
+
+    Arguments:
+        opname (string): The ONNX operator name, e.g., `Abs` or `Add`.
+        args (Node...): The inputs to the operator; usually provided
+            as arguments to the `symbolic` definition.
+        kwargs: The attributes of the ONNX operator, with keys named
+            according to the following convention: `alpha_f` indicates
+            the `alpha` attribute with type `f`.  The valid type specifiers are
+            `f` (float), `i` (int), `s` (string) or `t` (Tensor).  An attribute
+            specified with type float accepts either a single float, or a
+            list of floats (e.g., you would say `dims_i` for a `dims` attribute
+            that takes a list of integers).
+        outputs (int, optional):  The number of outputs this operator returns;
+            by default an operator is assumed to return a single output.
+            If `outputs` is greater than one, this functions returns a tuple
+            of output `Node`, representing each output of the ONNX operator
+            in positional.
+    """
     outputs = kwargs.pop('outputs', 1)
     n = self.appendNode(_newNode(self, opname, *args, **kwargs))
     if outputs == 1:
