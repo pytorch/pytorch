@@ -81,6 +81,9 @@ class SparseToDenseMaskOp : public SparseToDenseMaskBase<Context> {
       : SparseToDenseMaskBase<Context>(operator_def, ws) {
     returnPresenceMask_ = OperatorBase::template GetSingleArgument<bool>(
         "return_presence_mask", false);
+    maxSkippedSparseIndices_ =
+        OperatorBase::template GetSingleArgument<int32_t>(
+            "max_skipped_indices", kMaxSkippedSparseIndices);
   }
 
   bool RunOnDevice() override {
@@ -157,20 +160,20 @@ class SparseToDenseMaskOp : public SparseToDenseMaskBase<Context> {
           rows * cols, false, presence_mask_data, &context_);
     }
 
-    CAFFE_ENFORCE(
-        (ConstEigenVectorArrayMap<TInd>(
-             sparse_indices_vec, sparse_indices_length) <
-         std::numeric_limits<int32_t>::max())
-                .all() &&
-            (ConstEigenVectorArrayMap<TInd>(
-                 sparse_indices_vec, sparse_indices_length) >= 0)
-                .all(),
-        "All indices must be representable as non-negative int32_t numbers");
-
     int32_t offset = 0;
     for (int r = 0; r < rows; r++) {
       for (int c = 0; c < lengths_vec[r]; c++) {
-        int idx = this->getFeatureIdx(sparse_indices_vec[offset + c]);
+        const auto sparse_index = sparse_indices_vec[offset + c];
+        if (sparse_index < 0 ||
+            sparse_index >= std::numeric_limits<int32_t>::max()) {
+          LOG(WARNING) << "Skipping invalid sparse index: " << sparse_index;
+          CAFFE_ENFORCE_LT(
+              ++skippedSparseIndices_,
+              maxSkippedSparseIndices_,
+              "Too many sparse indices skipped");
+          continue;
+        }
+        int idx = this->getFeatureIdx(sparse_index);
         if (idx != -1) {
           context_.template CopyItems<Context, Context>(
               sparse_values.meta(),
@@ -189,7 +192,11 @@ class SparseToDenseMaskOp : public SparseToDenseMaskBase<Context> {
   }
 
  private:
+  static const uint32_t kMaxSkippedSparseIndices = 5;
+
   bool returnPresenceMask_;
+  uint32_t maxSkippedSparseIndices_ = 0;
+  uint32_t skippedSparseIndices_ = 0;
 
   INPUT_TAGS(INDICES, VALUES, DEFAULT, LENGTHS);
   OUTPUT_TAGS(OUTPUTVALUE, PRESENCEMASK);
