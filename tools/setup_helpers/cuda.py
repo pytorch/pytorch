@@ -1,5 +1,6 @@
 import os
 import glob
+import re
 import platform
 import ctypes.util
 from subprocess import Popen, PIPE
@@ -17,8 +18,8 @@ def find_nvcc():
         return None
 
 
-def find_cuda_version(cuda_home=None):
-    if cuda_home is  None:
+def find_cuda_version(cuda_home):
+    if cuda_home is None:
         return None
     # get CUDA lib folder
     cuda_lib_dirs = ['lib64', 'lib']
@@ -28,14 +29,19 @@ def find_cuda_version(cuda_home=None):
             break
     # get a list of candidates for the version number
     # which are files containing cudart
-    candidates = list(glob.glob(os.path.join(cuda_lib_path, '*cudart*')))
-    candidates = [os.path.basename(c) for c in candidates]
+    candidate_names = list(glob.glob(os.path.join(cuda_lib_path, '*cudart*')))
+    candidate_names = [os.path.basename(c) for c in candidate_names]
     # suppose version is MAJOR.MINOR.PATCH, all numbers
     version_regex = re.compile('[0-9]+\.[0-9]+\.[0-9]+')
-    candidates = [c.group() for c in map(version_regex.search, candidates) if c]
-    assert len(candidates) == 1
-    version = candidates[0]
-    return version
+    candidates = [c.group() for c in map(version_regex.search, candidate_names) if c]
+    if len(candidates) > 0:
+        # normally only one will be retrieved, take the first result
+        return candidates[0]
+    # if no candidates were found, try MAJOR.MINOR
+    version_regex = re.compile('[0-9]+\.[0-9]+')
+    candidates = [c.group() for c in map(version_regex.search, candidate_names) if c]
+    if len(candidates) > 0:
+        return candidates[0]
 
 
 if check_env_flag('NO_CUDA'):
