@@ -53,17 +53,19 @@ class TestSparseToDenseMask(TestCase):
             mask=[999999999, 2])
         workspace.FeedBlob(
             'indices',
-            np.array([2000000000000, 999999999, 2], dtype=np.int32))
+            np.array([2000000000000, 999999999, 2, 3, 4, 5], dtype=np.int32))
         workspace.FeedBlob(
             'values',
-            np.array([1, 2, 3], dtype=np.float))
+            np.array([1, 2, 3, 4, 5, 6], dtype=np.float))
         workspace.FeedBlob('default', np.array(-1, dtype=np.float))
-        workspace.FeedBlob('lengths', np.array([3], dtype=np.int32))
-        with self.assertRaises(RuntimeError):
+        workspace.FeedBlob('lengths', np.array([6], dtype=np.int32))
+        try:
             workspace.RunOperatorOnce(op)
+        except RuntimeError:
+            self.fail("Exception raised with only one negative index")
         workspace.FeedBlob(
             'indices',
-            np.array([-1, 999999999, 2], dtype=np.int32))
+            np.array([2000000000000, 999999999, -2, -3, -4, -5], dtype=np.int32))
         with self.assertRaises(RuntimeError):
             workspace.RunOperatorOnce(op)
 
