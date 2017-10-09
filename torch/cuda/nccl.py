@@ -159,22 +159,7 @@ def cudaStream():
 def all_reduce(inputs, outputs=None, op=SUM):
     if outputs is None:
         outputs = inputs
-    _check_inputs(inputs, outputs)
-    comm = communicator(inputs, outputs)
-    count = inputs[0].numel()
-    data_type = nccl_types[inputs[0].type()]
-    with torch.cuda._free_mutex():
-        if nccl_2_0 is not None:
-            lib.ncclGroupStart()
-        for i in range(len(inputs)):
-            with torch.cuda.device(comm.devices[i]):
-                check_error(lib.ncclAllReduce(
-                    ctypes.c_void_p(inputs[i].data_ptr()),
-                    ctypes.c_void_p(outputs[i].data_ptr()),
-                    count, data_type, op, comm[i], cudaStream()))
-        if nccl_2_0 is not None:
-            lib.ncclGroupEnd()
-
+    torch._C._nccl_all_reduce(inputs, outputs, op)
 
 def reduce(inputs, outputs=None, root=0, op=SUM, streams=None):
     assert(root >= 0 and root < len(inputs))
@@ -188,64 +173,13 @@ def reduce(inputs, outputs=None, root=0, op=SUM, streams=None):
 
 def broadcast(inputs, root=0):
     assert(root >= 0 and root < len(inputs))
-    _check_inputs(inputs, inputs)
-    comm = communicator(inputs)
-    count = inputs[0].numel()
-    data_type = nccl_types[inputs[0].type()]
-    with torch.cuda._free_mutex():
-        if nccl_2_0 is not None:
-            lib.ncclGroupStart()
-        for i in range(len(inputs)):
-            with torch.cuda.device(comm.devices[i]):
-                check_error(lib.ncclBcast(
-                    ctypes.c_void_p(inputs[i].data_ptr()), count,
-                    data_type, root, comm[i], cudaStream()))
-        if nccl_2_0 is not None:
-            lib.ncclGroupEnd()
-
+    torch._C._nccl_broadcast(inputs, root)
 
 def all_gather(inputs, outputs):
-    _check_inputs(inputs, outputs, len(inputs))
-    comm = communicator(inputs, outputs)
-    count = inputs[0].numel()
-    data_type = nccl_types[inputs[0].type()]
-    with torch.cuda._free_mutex():
-        if nccl_2_0 is not None:
-            lib.ncclGroupStart()
-        for i in range(len(inputs)):
-            with torch.cuda.device(comm.devices[i]):
-                if nccl_2_0 is None:
-                    check_error(lib.ncclAllGather(
-                        ctypes.c_void_p(inputs[i].data_ptr()), count, data_type,
-                        ctypes.c_void_p(outputs[i].data_ptr()), comm[i],
-                        cudaStream()))
-                else:
-                    check_error(lib.ncclAllGather(
-                        ctypes.c_void_p(inputs[i].data_ptr()),
-                        ctypes.c_void_p(outputs[i].data_ptr()), count,
-                        data_type, comm[i], cudaStream()))
-
-        if nccl_2_0 is not None:
-            lib.ncclGroupEnd()
-
+    torch._C._nccl_all_gather(inputs, outputs)
 
 def reduce_scatter(inputs, outputs, op=SUM):
-    _check_inputs(inputs, outputs, 1.0 / len(inputs))
-    comm = communicator(inputs, outputs)
-    count = inputs[0].numel() // len(inputs)
-    data_type = nccl_types[inputs[0].type()]
-    with torch.cuda._free_mutex():
-        if nccl_2_0 is not None:
-            lib.ncclGroupStart()
-        for i in range(len(inputs)):
-            with torch.cuda.device(comm.devices[i]):
-                check_error(lib.ncclReduceScatter(
-                    ctypes.c_void_p(inputs[i].data_ptr()),
-                    ctypes.c_void_p(outputs[i].data_ptr()), count, data_type,
-                    op, comm[i], cudaStream()))
-        if nccl_2_0 is not None:
-            lib.ncclGroupEnd()
-
+    torch._C._nccl_reduce_scatter(inputs, outputs, op)
 
 def _check_inputs(inputs, outputs=None, size_multiplier=1):
     devices = set()
