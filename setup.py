@@ -15,7 +15,7 @@ import os
 from tools.setup_helpers.env import check_env_flag
 from tools.setup_helpers.cuda import WITH_CUDA, CUDA_HOME
 from tools.setup_helpers.cudnn import WITH_CUDNN, CUDNN_LIB_DIR, CUDNN_INCLUDE_DIR
-from tools.setup_helpers.nccl import WITH_NCCL, WITH_SYSTEM_NCCL, NCCL_LIB_DIR, NCCL_INCLUDE_DIR, NCCL_ROOT_DIR
+from tools.setup_helpers.nccl import WITH_NCCL, WITH_SYSTEM_NCCL, NCCL_LIB_DIR, NCCL_INCLUDE_DIR, NCCL_ROOT_DIR, NCCL_SYSTEM_LIB
 from tools.setup_helpers.nnpack import WITH_NNPACK, NNPACK_LIB_DIR, NNPACK_INCLUDE_DIRS
 from tools.setup_helpers.split_types import split_types
 
@@ -215,7 +215,7 @@ class build_ext(setuptools.command.build_ext.build_ext):
             print('-- Not using CUDA')
         if WITH_NCCL and WITH_SYSTEM_NCCL:
             print('-- Using system provided NCCL library at ' +
-                  NCCL_LIB_DIR + ', ' + NCCL_INCLUDE_DIR)
+                  NCCL_SYSTEM_LIB + ', ' + NCCL_INCLUDE_DIR)
         elif WITH_NCCL:
             print('-- Building NCCL library')
         else:
@@ -480,9 +480,8 @@ if WITH_CUDA:
 
 if WITH_NCCL:
     if WITH_SYSTEM_NCCL:
-        main_libraries += ['nccl']
+        main_link_args += [NCCL_SYSTEM_LIB]
         include_dirs.append(NCCL_INCLUDE_DIR)
-        library_dirs.append(NCCL_LIB_DIR)
     else:
         main_link_args += [NCCL_LIB]
     extra_compile_args += ['-DWITH_NCCL']

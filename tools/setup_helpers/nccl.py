@@ -18,6 +18,7 @@ conda_dir = os.path.join(os.path.dirname(sys.executable), '..')
 WITH_NCCL = WITH_CUDA and platform.system() != 'Darwin'
 WITH_SYSTEM_NCCL = False
 NCCL_LIB_DIR = None
+NCCL_SYSTEM_LIB = None
 NCCL_INCLUDE_DIR = None
 NCCL_ROOT_DIR = None
 if WITH_CUDA and not check_env_flag('NO_SYSTEM_NCCL'):
@@ -51,12 +52,20 @@ if WITH_CUDA and not check_env_flag('NO_SYSTEM_NCCL'):
     if is_conda:
         lib_paths.append(os.path.join(conda_dir, 'lib'))
     for path in lib_paths:
+        path = os.path.expanduser(path)
         if path is None or not os.path.exists(path):
             continue
         if glob.glob(os.path.join(path, 'libnccl*')):
             NCCL_LIB_DIR = path
+            # try to find an exact versioned .so/.dylib, rather than libnccl.so
+            preferred_path = glob.glob(os.path.join(path, 'libnccl*[0-9]*'))
+            if len(preferred_path) == 0:
+                NCCL_SYSTEM_LIB = glob.glob(os.path.join(path, 'libnccl*'))[0]
+            else:
+                NCCL_SYSTEM_LIB = os.path.realpath(preferred_path[0])
             break
     for path in include_paths:
+        path = os.path.expanduser(path)
         if path is None or not os.path.exists(path):
             continue
         if glob.glob(os.path.join(path, 'nccl.h')):
