@@ -232,15 +232,15 @@ void THNN_(VolumetricAveragePooling_updateOutput)(
         LAUNCH_UPDATE_OUTPUT_KERNEL_WIDTH(6);
         LAUNCH_UPDATE_OUTPUT_KERNEL_WIDTH(7);
       default:
-        cuda_VolumetricAveragePooling_updateOutput<real, accreal><<<grid, block>>>(
-                                                                    cudaInput,
-                                                                    cudaOutput,
-                                                                    kT, kH, kW,
-                                                                    dT, dH, dW,
-                                                                    padT, padH, padW,
-                                                                    count_include_pad,
-                                                                    offsetZ
-                                                                    );
+        cuda_VolumetricAveragePooling_updateOutput<real, accreal>
+          <<<grid, block, 0, THCState_getCurrentStream(state)>>>(
+            cudaInput,
+            cudaOutput,
+            kT, kH, kW,
+            dT, dH, dW,
+            padT, padH, padW,
+            count_include_pad,
+            offsetZ);
         break;
       }
     totalZ -= 65535;
@@ -336,8 +336,9 @@ void THNN_(VolumetricAveragePooling_updateGradInput)(
       dim3 grid(THCCeilDiv(inputWidth, static_cast<int>(block.x)),
                 THCCeilDiv(inputHeight, static_cast<int>(block.y)),
                 totalZ > 65535 ? 65535 : totalZ);
-      cuda_VolumetricAveragePooling_updateGradInput_Stride1<real, accreal><<<grid, block>>>(
-         cudaGradOutput, cudaGradInput, kT, kH, kW, 1.0f/(kT * kH * kW), offsetZ);
+      cuda_VolumetricAveragePooling_updateGradInput_Stride1<real, accreal>
+        <<<grid, block, 0, THCState_getCurrentStream(state)>>>(
+          cudaGradOutput, cudaGradInput, kT, kH, kW, 1.0f/(kT * kH * kW), offsetZ);
       THCudaCheck(cudaGetLastError());
       totalZ -= 65535;
       offsetZ += 65535;
@@ -353,15 +354,17 @@ void THNN_(VolumetricAveragePooling_updateGradInput)(
                 totalZ > 65535 ? 65535 : totalZ);
       if (kernelsOverlap)
       {
-        cuda_VolumetricAveragePooling_updateGradInput_atomicAdd<real, accreal><<<grid, block>>>(
-          cudaGradOutput, cudaGradInput, kT, kH, kW, dT, dH, dW,
-          padT, padH, padW, count_include_pad, offsetZ);
+        cuda_VolumetricAveragePooling_updateGradInput_atomicAdd<real, accreal>
+          <<<grid, block, 0, THCState_getCurrentStream(state)>>>(
+            cudaGradOutput, cudaGradInput, kT, kH, kW, dT, dH, dW,
+            padT, padH, padW, count_include_pad, offsetZ);
       }
       else
       {
-        cuda_VolumetricAveragePooling_updateGradInput<real, accreal><<<grid, block>>>(
-           cudaGradOutput, cudaGradInput, kT, kH, kW, dT, dH, dW,
-           padT, padH, padW, count_include_pad, offsetZ);
+        cuda_VolumetricAveragePooling_updateGradInput<real, accreal>
+          <<<grid, block, 0, THCState_getCurrentStream(state)>>>(
+            cudaGradOutput, cudaGradInput, kT, kH, kW, dT, dH, dW,
+            padT, padH, padW, count_include_pad, offsetZ);
       }
       THCudaCheck(cudaGetLastError());
       totalZ -= 65535;
