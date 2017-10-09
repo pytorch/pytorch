@@ -3648,8 +3648,134 @@ def mseloss_no_reduce_module_test():
         reference_fn=lambda i, m: (i - target).pow(2))
 
 
+class TestNLLLoss(torch.nn.modules.module.Module):
+    def __init__(self, target, *args, **kwargs):
+        super(TestNLLLoss, self).__init__()
+        kwargs['reduce'] = False
+        self.nllloss = torch.nn.NLLLoss(*args, **kwargs)
+        self.target = target
+
+    def forward(self, input):
+        return self.nllloss.forward(input, self.target.type_as(input).long())
+
+
+def nllloss_no_reduce_module_test():
+    target = Variable(
+        torch.Tensor(15).uniform_().mul(10).floor().long(),
+        requires_grad=False)
+    return dict(
+        fullname='NLLLoss_no_reduce',
+        module_name='TestNLLLoss',
+        constructor=TestNLLLoss,
+        constructor_args=(target, ),
+        input=torch.rand(15, 10).log())
+
+
+def nllloss_no_reduce_ignore_index_module_test():
+    target = Variable(
+        torch.Tensor(15).uniform_().mul(10).floor().long(),
+        requires_grad=False)
+    return dict(
+        fullname='NLLLoss_no_reduce_ignore_index',
+        module_name='TestNLLLoss',
+        constructor=TestNLLLoss,
+        constructor_args=(target, None, True, 2),
+        input=torch.rand(15, 10).log())
+
+
+def nllloss_no_reduce_weights_module_test():
+    target = Variable(
+        torch.Tensor(15).uniform_().mul(10).floor().long(),
+        requires_grad=False)
+    return dict(
+        fullname='NLLLoss_no_reduce_weights',
+        module_name='TestNLLLoss',
+        constructor=TestNLLLoss,
+        constructor_args=(target, torch.rand(10),),
+        input=torch.rand(15, 10).add(1e-2).log())
+
+
+def nllloss_no_reduce_weights_ignore_index_module_test():
+    target = Variable(
+        torch.Tensor(15).uniform_().mul(10).floor().long(),
+        requires_grad=False)
+    return dict(
+        fullname='NLLLoss_no_reduce_weights_ignore_index',
+        module_name='TestNLLLoss',
+        constructor=TestNLLLoss,
+        constructor_args=(target, torch.rand(10), True, 2),
+        input=torch.rand(15, 10).add(1e-2).log())
+
+
+def nllloss_no_reduce_weights_ignore_index_neg_module_test():
+    target = Variable(
+        torch.Tensor(15).uniform_().mul(10 + 1).floor().long() - 1,
+        requires_grad=False)
+    return dict(
+        fullname='NLLLoss_no_reduce_weights_ignore_index_neg',
+        module_name='TestNLLLoss',
+        constructor=TestNLLLoss,
+        constructor_args=(target, torch.rand(10), True, -1),
+        input=torch.rand(15, 10).add(1e-2).log())
+
+
+class TestNLLLoss2d(torch.nn.modules.module.Module):
+    def __init__(self, target, *args, **kwargs):
+        super(TestNLLLoss2d, self).__init__()
+        kwargs['reduce'] = False
+        self.nllloss = torch.nn.NLLLoss2d(*args, **kwargs)
+        self.target = target
+
+    def forward(self, input):
+        return self.nllloss.forward(input, self.target.type_as(input).long())
+
+
+def nllloss2d_no_reduce_module_test():
+    target = Variable(
+        torch.rand(2, 5, 5).mul(3).floor().long(),
+        requires_grad=False)
+    return dict(
+        fullname='NLLLoss2d_no_reduce',
+        module_name='TestNLLLoss2d',
+        constructor=TestNLLLoss2d,
+        constructor_args=(target,),
+        input_size=(2, 3, 5, 5))
+
+
+def nllloss2d_no_reduce_weights_module_test():
+    target = Variable(
+        torch.rand(2, 5, 5).mul(3).floor().long(),
+        requires_grad=False)
+    return dict(
+        fullname='NLLLoss2d_no_reduce_weights',
+        module_name='TestNLLLoss2d',
+        constructor=TestNLLLoss2d,
+        constructor_args=(target, torch.rand(3)),
+        input_size=(2, 3, 5, 5))
+
+
+def nllloss2d_no_reduce_ignore_index_module_test():
+    target = Variable(
+        torch.rand(2, 5, 5).mul(4).floor().long(),
+        requires_grad=False)
+    return dict(
+        fullname='NLLLoss2d_no_reduce_ignore_index',
+        module_name='TestNLLLoss2d',
+        constructor=TestNLLLoss2d,
+        constructor_args=(target, None, True, 3),
+        input_size=(2, 3, 5, 5))
+
+
 new_module_tests = [
     mseloss_no_reduce_module_test(),
+    nllloss_no_reduce_module_test(),
+    nllloss_no_reduce_ignore_index_module_test(),
+    nllloss_no_reduce_weights_module_test(),
+    nllloss_no_reduce_weights_ignore_index_module_test(),
+    nllloss_no_reduce_weights_ignore_index_neg_module_test(),
+    nllloss2d_no_reduce_module_test(),
+    nllloss2d_no_reduce_weights_module_test(),
+    nllloss2d_no_reduce_ignore_index_module_test(),
     dict(
         module_name='BatchNorm1d',
         constructor_args=(10,),
