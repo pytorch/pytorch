@@ -2,8 +2,11 @@
 #define TH_GENERIC_FILE "generic/THTensorRandom.c"
 #else
 
+#define RANDOM64(GENERATOR) ((THRandom_random(GENERATOR) << 32) | THRandom_random(GENERATOR))
+
 void THTensor_(random)(THTensor *self, THGenerator *_generator)
 {
+
 #if defined(TH_REAL_IS_BYTE)
   TH_TENSOR_APPLY(real, self, *self_data = (uint8_t)(THRandom_random(_generator) % (UINT8_MAX+1)););
 #elif defined(TH_REAL_IS_CHAR)
@@ -13,19 +16,27 @@ void THTensor_(random)(THTensor *self, THGenerator *_generator)
 #elif defined(TH_REAL_IS_INT)
   TH_TENSOR_APPLY(real, self, *self_data = (int32_t)(THRandom_random(_generator) % (INT32_MAX+1UL)););
 #elif defined(TH_REAL_IS_LONG)
-  TH_TENSOR_APPLY(real, self, *self_data = (int64_t)(THRandom_random(_generator) % (LONG_MAX+1UL)););
+  TH_TENSOR_APPLY(real, self, *self_data = (uint64_t)(RANDOM64(_generator) % (LONG_MAX + 1ULL)););
 #elif defined(TH_REAL_IS_FLOAT)
-  TH_TENSOR_APPLY(real, self, *self_data = (float)(THRandom_random(_generator) % ((1UL << FLT_MANT_DIG)+1)););
+  TH_TENSOR_APPLY(real, self, *self_data = (float)(THRandom_random(_generator) % ((1ULL << FLT_MANT_DIG) + 1)););
 #elif defined(TH_REAL_IS_DOUBLE)
-  TH_TENSOR_APPLY(real, self, *self_data = (double)(THRandom_random(_generator) % ((1ULL << DBL_MANT_DIG)+1)););
+  TH_TENSOR_APPLY(real, self, *self_data = (double)(RANDOM64(_generator) % ((1ULL << DBL_MANT_DIG) + 1)););
 #else
 #error "Unknown type"
 #endif
+
 }
 
 void THTensor_(clampedRandom)(THTensor *self, THGenerator *_generator, int64_t min, int64_t max) {
   THArgCheck(max > min, 2, "max must be greater than min");
-  TH_TENSOR_APPLY(real, self, *self_data = (real)((THRandom_random(_generator) % (max - min)) + min);)
+  uint64_t range = max - min;
+#if defined(TH_REAL_IS_LONG) || defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
+    if (range >= 1ULL << 32) {
+      TH_TENSOR_APPLY(real, self, *self_data = (real)((RANDOM64(_generator) % range) + min);)
+      return;
+    }
+#endif
+    TH_TENSOR_APPLY(real, self, *self_data = (real)((THRandom_random(_generator) % range) + min);)
 }
 
 void THTensor_(cappedRandom)(THTensor *self, THGenerator *_generator, int64_t max) {
