@@ -205,6 +205,7 @@ def nllloss_double_backwards(ctx, ggI):
     weights = Variable(ctx.additional_args[1])
     size_average = ctx.additional_args[0]
     ignore_index = ctx.additional_args[3]
+    reduce = ctx.additional_args[4]
 
     gI = None
 
@@ -225,12 +226,15 @@ def nllloss_double_backwards(ctx, ggI):
         weights_to_scatter = weights_maybe_resized.gather(0, safe_target)
 
     weights_to_scatter.masked_fill_(target_mask, 0)
-    divisor = weights_to_scatter.sum() if size_average else 1
+    divisor = weights_to_scatter.sum() if size_average and reduce else 1
     weights_to_scatter = -1 * weights_to_scatter / divisor
     zeros = Variable(ggI.data.new(ggI.size()).zero_())
     mask = zeros.scatter_(1, safe_target.unsqueeze(1), weights_to_scatter.unsqueeze(1))
 
-    ggO = (ggI * mask).sum()
+    if reduce:
+        ggO = (ggI * mask).sum()
+    else:
+        ggO = (ggI * mask).sum(dim=1)
 
     return gI, None, ggO, None, None, None
 
