@@ -1,0 +1,75 @@
+- name: l1_loss(Tensor input, Tensor target, bool size_average=true)
+  cname: AbsCriterion
+
+- name: binary_cross_entropy(Tensor input, Tensor target, Tensor weight={}, bool size_average=true)
+  cname: BCECriterion
+
+- name: nll_loss(Tensor input, LongTensor target, Tensor weight={}, bool size_average=true, int64_t ignore_index=-100)
+  cname: ClassNLLCriterion
+  buffers: [total_weight]
+
+- name: kl_div(Tensor input, Tensor target, bool size_average=true)
+  cname: DistKLDivCriterion
+
+- name: elu(Tensor input, Scalar alpha=1, bool inplace=false)
+  cname: ELU
+
+- name: glu(Tensor input, int64_t dim=-1)
+  cname: GatedLinear
+
+- name: threshold(Tensor input, Scalar threshold, Scalar value, bool inplace=false)
+  cname: Threshold
+
+- name: log_softmax(Tensor input)
+  cname: LogSoftMax
+
+- name: softmax(Tensor input)
+  cname: SoftMax
+
+- name: mse_loss(Tensor input, Tensor target, bool size_average=true, bool reduce=true)
+  cname: MSECriterion
+
+- name: adaptive_max_pool2d(Tensor input, IntList[2] output_size)
+  cname: SpatialAdaptiveMaxPooling
+
+- name: avg_pool2d(Tensor input, IntList[2] kernel_size, IntList[2] stride={}, IntList[2] padding=0, bool ceil_mode=false, bool count_include_pad=false)
+  cname: SpatialAveragePooling
+  default_init:
+    stride: kernel_size
+
+- name: max_pool2d(Tensor input, IntList[2] kernel_size, IntList[2] stride={}, IntList[2] padding=0, bool ceil_mode=false)
+  cname: SpatialMaxPooling
+  default_init:
+    stride: kernel_size
+
+# Batch normalization
+
+- name: batch_norm(Tensor input, Tensor weight, Tensor bias, Tensor running_mean, Tensor running_var, bool training, double momentum, double eps)
+  cname: BatchNormalization
+  buffers: [save_mean, save_std]
+
+# Convolutions
+
+- name: conv_transpose2d(Tensor input, Tensor weight, IntList[2] kernel_size, Tensor bias={}, IntList[2] stride=1, IntList[2] padding=0, IntList[2] output_padding=0, IntList[2] dilation=1)
+  cname: SpatialFullDilatedConvolution
+  buffers: [columns, ones]
+
+- name: conv_transpose3d(Tensor input, Tensor weight, Tensor bias={}, IntList[3] stride=1, IntList[3] padding=0, IntList[3] output_padding=0, IntList[3] dilation=1)
+  cname: VolumetricFullDilatedConvolution
+  buffers: [finput, fgrad_input]
+
+- name: conv2d(Tensor input, Tensor weight, IntList[2] kernel_size, Tensor bias={}, IntList[2] stride=1, IntList[2] padding=0)
+  cname: SpatialConvolutionMM
+  buffers: [finput, fgrad_input]
+
+- name: conv3d(Tensor input, Tensor weight, IntList[3] kernel_size, Tensor bias={}, IntList[3] stride=1, IntList[3] padding=0)
+  cname: VolumetricConvolutionMM
+  buffers: [finput, fgrad_input]
+
+- name: conv_dilated2d(Tensor input, Tensor weight, IntList[2] kernel_size, Tensor bias={}, IntList[2] stride=1, IntList[2] padding=0, IntList[2] dilation=1)
+  cname: SpatialDilatedConvolution
+  buffers: [columns, ones]
+
+- name: conv_dilated3d(Tensor input, Tensor weight, IntList[3] kernel_size, Tensor bias={}, IntList[3] stride=1, IntList[3] padding=0, IntList[3] dilation=1)
+  cname: VolumetricDilatedConvolution
+  buffers: [columns, ones]
