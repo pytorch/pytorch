@@ -266,7 +266,10 @@ class Module(object):
         if len(self._backward_hooks) > 0:
             var = result
             while not isinstance(var, Variable):
-                var = var[0]
+                if isinstance(var, dict):
+                    var = next((v for v in var.values() if isinstance(v, Variable)))
+                else:
+                    var = var[0]
             grad_fn = var.grad_fn
             if grad_fn is not None:
                 for hook in self._backward_hooks.values():

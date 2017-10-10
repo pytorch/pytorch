@@ -4,9 +4,13 @@
 #include <vector>
 #include <string>
 #include <type_traits>
-
+#include <ATen/ATen.h>
 #include "torch/csrc/utils/object_ptr.h"
 #include "torch/csrc/utils/python_numbers.h"
+
+#ifdef WITH_CUDA
+#include <THC/THC.h>
+#endif
 
 #define THPUtils_(NAME) TH_CONCAT_4(THP,Real,Utils_,NAME)
 
@@ -184,6 +188,12 @@ bool getBackCompatBroadcastWarn();
 void setBackCompatKeepdimWarn(bool warn);
 bool getBackCompatKeepdimWarn();
 bool maybeThrowBackCompatKeepdimWarn(char *func);
+
+std::vector<at::Tensor> THPUtils_PySequence_to_TensorList(PyObject *obj);
+
+#ifdef WITH_CUDA
+std::vector <THCStream*> THPUtils_PySequence_to_THCStreamList(PyObject *obj);
+#endif
 
 #endif /* _THP_CORE */
 

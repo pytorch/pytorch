@@ -651,6 +651,7 @@ THC_API void THCTensor_(qr)(THCState *state, THCTensor *rq_, THCTensor *rr_, THC
   if (info != 0)
     THError("MAGMA orgqr : Argument %d : illegal value.", -info);
 
+  THCTensor_(free)(state, a);
   THCTensor_(free)(state, work);
   magma_free_pinned(tau_data);
 

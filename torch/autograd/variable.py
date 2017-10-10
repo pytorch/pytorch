@@ -796,6 +796,9 @@ class Variable(_C._VariableBase):
     def bernoulli(self):
         return Bernoulli()(self)
 
+    def zero_(self):
+        return Zero.apply(self, True)
+
     def eq(self, other):
         assert not torch.is_tensor(other), "can't compare Variable and tensor"
         return Eq.apply(self, other)
@@ -959,7 +962,7 @@ class Variable(_C._VariableBase):
 
 for method in dir(Variable):
     # This will also wrap some methods that normally aren't part of the
-    # funcitonal interface, but we don't care, as they won't ever be used
+    # functional interface, but we don't care, as they won't ever be used
     if method.startswith('_') or method.endswith('_'):
         continue
     if hasattr(Variable._torch, method):

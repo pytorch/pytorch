@@ -38,8 +38,8 @@ class TestONNX(TestCase):
     maxDiff = None
 
     def assertONNXExpected(self, binary_pb, subname=None):
-        graph_def = onnx.GraphProto.FromString(binary_pb)
-        self.assertExpected(google.protobuf.text_format.MessageToString(graph_def, float_format='.15g'), subname)
+        model_def = onnx.ModelProto.FromString(binary_pb)
+        self.assertExpected(google.protobuf.text_format.MessageToString(model_def, float_format='.15g'), subname)
 
     def test_basic(self):
         x = Variable(torch.Tensor([0.4]), requires_grad=True)

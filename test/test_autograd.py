@@ -17,7 +17,7 @@ from torch.autograd.gradcheck import gradgradcheck
 from torch.autograd.function import once_differentiable
 from torch.autograd.profiler import profile
 
-from common import TestCase, run_tests, skipIfNoLapack, parse_set_seed_once
+from common import TestCase, run_tests, skipIfNoLapack
 from torch.autograd._functions import *
 from torch.autograd import Variable, Function
 
@@ -27,8 +27,6 @@ else:
     import pickle
 
 PRECISION = 1e-4
-
-parse_set_seed_once()
 
 
 @contextlib.contextmanager
@@ -1746,6 +1744,8 @@ method_tests = [
     ('transpose', torch.rand(S, S, S), (2, 0), '3d'),
     ('t', (1, 2), ()),
     ('view', (S, S, S), (S * S, S),),
+    ('view', (S, S, S), (torch.Size([S * S, S]),), 'size'),
+    ('view', (S,), (S,), '1d'),
     ('view_as', (S, S, S), (Variable(torch.rand(S * S, S), requires_grad=False),)),
     ('expand', (S, 1, 1), (S, S, S)),
     ('expand', (torch.Size([S, 1, S]),), (S, S, S), 'size'),
@@ -1754,7 +1754,7 @@ method_tests = [
     ('expand', (1, S), (1, 1, S), 'new_dim_front_old_front_1'),
     ('exp', (S, S, S), ()),
     ('erf', torch.rand(S, S, S), ()),
-    ('erfinv', torch.rand(S, S, S), ()),
+    ('erfinv', torch.rand(S, S, S).clamp(-0.9, 0.9), ()),
     ('log', torch.rand(S, S, S) + 1e-2, ()),
     ('log1p', torch.rand(S, S, S), ()),
     ('tanh', (S, S, S), ()),
@@ -1921,6 +1921,7 @@ method_tests = [
     ('addcdiv', (S, S), (0.5, (S, S), (S, S)), 'scale'),
     ('addcdiv', (S, S), (0.5, (S, 1), (1, S)), 'scale_broadcast_rhs'),
     ('addcdiv', (1,), (0.5, (S, S, 1), (1, S)), 'scale_broadcast_all'),
+    ('zero_', (S, S, S), ()),
     ('norm', (S, S, S), (2,)),
     ('norm', (S, S, S), (3,), '3'),
     ('norm', torch.rand(S, S, S) + 5e-2, (1.5,), '1_5'),
@@ -1994,6 +1995,7 @@ method_tests = [
     ('permute', (1, 2, 3, 4), (0, 2, 3, 1)),
     ('select', (S, S, S), (1, 2), 'dim', [0]),
     ('narrow', (S, S, S), (1, 2, 2), 'dim', [0]),
+    ('_unnarrow', (S, S, S), (0, 2, M), 'dim', [0]),
     ('squeeze', (S, 1, S, 1), ()),
     ('squeeze', (S, 1, S, 1), (1,), '1_dim', [0]),
     ('squeeze', (S, 1, S, 1), (2,), 'not_1_dim', [0]),
@@ -2131,6 +2133,8 @@ def exclude_tensor_method(name, test_name):
     exclude_all_tensor_method_by_test_name = {
         'test_clamp_min',
         'test_clamp_max',
+        'test__unnarrow_dim',
+        'test__unnarrow_dim_neg0',
     }
     # there are no out-of-place tensor equivalents for these
     exclude_outplace_tensor_method = {

@@ -541,6 +541,34 @@ struct StageClosure {
       return std::make_shared<LambdaFunction>(1, [shape](const variable_list& vars) -> variable_list {
         return {make_variable(vars[0].data().view(shape), vars[0].requires_grad())};
       });
+    IR_ELSEIF(Tanh)
+      return std::make_shared<LambdaFunction>(1, [](const variable_list& vars) -> variable_list {
+        return {make_variable(vars[0].data().tanh(), vars[0].requires_grad())};
+      });
+    IR_ELSEIF(Sigmoid)
+      return std::make_shared<LambdaFunction>(1, [](const variable_list& vars) -> variable_list {
+        return {make_variable(vars[0].data().sigmoid(), vars[0].requires_grad())};
+      });
+    IR_ELSEIF(AddConstant)
+      auto c = value->f(kvalue);
+      return std::make_shared<LambdaFunction>(1, [c](const variable_list& vars) -> variable_list {
+        return {vars[0].add(c)};
+      });
+    IR_ELSEIF(SubConstant)
+      auto c = value->f(kvalue);
+      return std::make_shared<LambdaFunction>(1, [c](const variable_list& vars) -> variable_list {
+        return {vars[0].sub(c)};
+      });
+    IR_ELSEIF(Neg)
+      return std::make_shared<LambdaFunction>(1, [](const variable_list& vars) -> variable_list {
+        return {vars[0].neg()};
+      });
+    IR_ELSEIF(Gemm)
+      auto beta = value->f(kbeta);
+      auto alpha = value->f(kalpha);
+      return std::make_shared<LambdaFunction>(3, [beta, alpha](const variable_list& vars) -> variable_list {
+        return {vars[2].addmm(vars[0], vars[1], beta, alpha)};
+      });
     IR_ELSEIF(Split)
       auto dim = value->i(kaxis);
       auto splits = value->is(ksplit);

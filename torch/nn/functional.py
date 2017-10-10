@@ -3,6 +3,8 @@
 from numbers import Integral
 import warnings
 import math
+from operator import mul
+from functools import reduce
 
 import torch
 from torch._C import _infer_size
@@ -700,6 +702,10 @@ def embedding(input, embedding_matrix,
 
 def batch_norm(input, running_mean, running_var, weight=None, bias=None,
                training=False, momentum=0.1, eps=1e-5):
+    if training:
+        size = list(input.size())
+        if reduce(mul, size[2:], size[0]) == 1:
+            raise ValueError('Expected more than 1 value per channel when training, got input size {}'.format(size))
     f = torch._C._functions.BatchNorm(running_mean, running_var, training, momentum, eps, torch.backends.cudnn.enabled)
     return f(input, weight, bias)
 
@@ -902,8 +908,8 @@ def l1_loss(input, target, size_average=True):
     return _functions.thnn.L1Loss.apply(input, target, size_average)
 
 
-def mse_loss(input, target, size_average=True):
-    return _functions.thnn.MSELoss.apply(input, target, size_average)
+def mse_loss(input, target, size_average=True, reduce=True):
+    return _functions.thnn.MSELoss.apply(input, target, size_average, reduce)
 
 
 def margin_ranking_loss(input1, input2, target, margin=0, size_average=True):
@@ -1127,7 +1133,7 @@ def pad(input, pad, mode='constant', value=0):
 
     Args:
         input (Variable): Nd tensor
-        pad (tuple): m-elem tuple, where m // 2 > input dimensions and m % 2 == 0
+        pad (tuple): m-elem tuple, where m // 2 <= input dimensions and m % 2 == 0
         mode: 'constant', 'reflect' or 'replicate'. Default: 'constant'
         value: fill value for 'constant' padding. Default: 0
 
@@ -1148,8 +1154,8 @@ def pad(input, pad, mode='constant', value=0):
         >>> print(out.data.size())
         torch.Size([3, 9, 7, 3])
     """
-    assert len(pad) % 2 == 0, 'padding length must be divisible by 2'
-    assert len(pad) // 2 <= len(input.size()), 'padding length too large'
+    assert len(pad) % 2 == 0, 'Padding length must be divisible by 2'
+    assert len(pad) // 2 <= input.dim(), 'Padding length too large'
     if mode == 'constant':
         return ConstantPadNd.apply(input, pad, value)
     elif input.dim() == 3:

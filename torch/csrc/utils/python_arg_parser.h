@@ -22,9 +22,11 @@
 
 #include <Python.h>
 #include <string>
+#include <sstream>
 #include <vector>
 #include <ATen/ATen.h>
 
+#include "torch/csrc/THP.h"
 #include "torch/csrc/utils/object_ptr.h"
 #include "torch/csrc/autograd/python_variable.h"
 #include "torch/csrc/utils/python_numbers.h"
@@ -43,6 +45,9 @@ struct PythonArgs;
 struct type_exception : public std::runtime_error {
   using std::runtime_error::runtime_error;
 };
+
+[[noreturn]]
+void type_error(const char *format, ...);
 
 struct PythonArgParser {
   explicit PythonArgParser(std::vector<std::string> fmts);
@@ -70,7 +75,10 @@ struct PythonArgs {
 
   inline at::Tensor tensor(int i);
   inline at::Scalar scalar(int i);
+  inline std::vector<at::Tensor> tensorlist(int i);
   inline std::vector<int64_t> intlist(int i);
+  inline at::Generator* generator(int i);
+  inline at::Storage& storage(int i);
   inline int64_t toInt64(int i);
   inline double toDouble(int i);
   inline bool toBool(int i);
@@ -112,6 +120,9 @@ struct FunctionParameter {
 
 inline at::Tensor PythonArgs::tensor(int i) {
   if (!args[i]) return at::Tensor();
+  if (!THPVariable_Check(args[i])) {
+    type_error("expected Variable as argument %d, but got %s", i, THPUtils_typename(args[i]));
+  }
   return reinterpret_cast<THPVariable*>(args[i])->cdata;
 }
 
@@ -123,6 +134,23 @@ inline at::Scalar PythonArgs::scalar(int i) {
   return at::Scalar(static_cast<int64_t>(THPUtils_unpackLong(args[i])));
 }
 
+inline std::vector<at::Tensor> PythonArgs::tensorlist(int i) {
+  if (!args[i]) return std::vector<at::Tensor>();
+  PyObject* arg = args[i];
+  auto tuple = PyTuple_Check(arg);
+  auto size = tuple ? PyTuple_GET_SIZE(arg) : PyList_GET_SIZE(arg);
+  std::vector<at::Tensor> res(size);
+  for (int idx = 0; idx < size; idx++) {
+    PyObject* obj = tuple ? PyTuple_GET_ITEM(arg, idx) : PyList_GET_ITEM(arg, idx);
+    if (!THPVariable_Check(obj)) {
+      type_error("expected Variable as element %d in argument %d, but got %s",
+                 idx, i, THPUtils_typename(args[i]));
+    }
+    res[idx] = reinterpret_cast<THPVariable*>(obj)->cdata;
+  }
+  return res;
+}
+
 inline std::vector<int64_t> PythonArgs::intlist(int i) {
   if (!args[i]) return std::vector<int64_t>();
   PyObject* arg = args[i];
@@ -131,7 +159,13 @@ inline std::vector<int64_t> PythonArgs::intlist(int i) {
   std::vector<int64_t> res(size);
   for (int idx = 0; idx < size; idx++) {
     PyObject* obj = tuple ? PyTuple_GET_ITEM(arg, idx) : PyList_GET_ITEM(arg, idx);
-    res[idx] = THPUtils_unpackLong(obj);
+    try {
+      res[idx] = THPUtils_unpackLong(obj);
+    } catch (std::runtime_error &e) {
+      type_error("%s(): argument '%s' must be %s, but found element of type %s at pos %d",
+          signature.name.c_str(), signature.params[i].name.c_str(),
+          signature.params[i].type_name().c_str(), Py_TYPE(obj)->tp_name, idx + 1);
+    }
   }
   return res;
 }
@@ -149,6 +183,14 @@ inline double PythonArgs::toDouble(int i) {
 inline bool PythonArgs::toBool(int i) {
   if (!args[i]) return signature.params[i].default_bool;
   return args[i] == Py_True;
+}
+
+inline at::Generator* PythonArgs::generator(int i) {
+  throw std::runtime_error("PythonArgs::generator not implemented");
+}
+
+inline at::Storage& PythonArgs::storage(int i) {
+  throw std::runtime_error("PythonArgs::storage not implemented");
 }
 
 } // namespace torch

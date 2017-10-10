@@ -23,6 +23,7 @@ std::string node_name(Node* n) {
   return n->uniqueName();
 }
 
+
 void encodeGraph(onnx::GraphProto * p_g, const std::shared_ptr<Graph> & g, const std::vector<at::Tensor> & initializers);
 
 void encodeTensor(onnx::TensorProto * p, const at::Tensor & tensor) {
@@ -33,10 +34,16 @@ void encodeTensor(onnx::TensorProto * p, const at::Tensor & tensor) {
   onnx::DataType onnx_type;
   switch(tensor.type().scalarType()) {
     case at::kDouble:
+      onnx_type = onnx::kDOUBLE;
+      at_type = at::kDouble;
+      break;
     case at::kFloat:
-    case at::kHalf:
       onnx_type = onnx::kFLOAT;
       at_type = at::kFloat;
+      break;
+    case at::kHalf:
+      onnx_type = onnx::kFLOAT16;
+      at_type = at::kHalf;
       break;
     case at::kByte:
     case at::kChar:
@@ -112,12 +119,63 @@ void addAttribute(onnx::NodeProto * n_p, jit::Node * n, jit::Symbol name) {
   }
 }
 
+void encodeTypeProtoTensorType(onnx::TypeProtoTensorTypeProto* tensor_type, Node* n) {
+  onnx::TypeProtoTensorShapeProto* shape = tensor_type->mutable_shape();
+  JIT_ASSERT(n->hasType());
+  TensorType* node_type = n->type()->expect<TensorType>();
+  const std::vector<std::int64_t>& sizes = node_type->sizes();
+  for (std::int64_t s : sizes) {
+    shape->add_dim(s);
+  }
+  onnx::DataType onnx_type;
+  switch(node_type->scalarType()) {
+    case at::kDouble:
+      onnx_type = onnx::kDOUBLE;
+      break;
+    case at::kFloat:
+      onnx_type = onnx::kFLOAT;
+      break;
+    case at::kHalf:
+      onnx_type = onnx::kFLOAT16;
+      break;
+    case at::kByte:
+    case at::kChar:
+      onnx_type = onnx::kINT8;
+      break;
+    case at::kShort:
+      onnx_type = onnx::kINT16;
+      break;
+    case at::kInt:
+      onnx_type = onnx::kINT32;
+      break;
+    case at::kLong:
+      onnx_type = onnx::kINT64;
+      break;
+    default:
+      jit::barf("unexpected tensor scalar type");
+      break;
+  }
+  tensor_type->set_data_type(onnx_type);
+}
+
+void encodeValueInfo(onnx::ValueInfoProto* v, Node* n) {
+  v->set_name(node_name(n));
+  onnx::TypeProto* t = v->mutable_type();
+  onnx::TypeProtoTensorTypeProto* tensor_type = t->mutable_tensor_type();
+  encodeTypeProtoTensorType(tensor_type, n);
+}
+
 void encodeGraph(onnx::GraphProto * p_g, const std::shared_ptr<Graph> & g, const std::vector<at::Tensor> & initializers) {
+  JIT_ASSERT(p_g != nullptr);
+  p_g->set_name("torch-jit-export");
+
   for (auto input : g->inputs()) {
-    p_g->add_input(node_name(input));
+    onnx::ValueInfoProto* v = p_g->add_input();
+    encodeValueInfo(v, input);
   }
   for (auto output : g->outputs()) {
-    p_g->add_output(node_name(output));
+    onnx::ValueInfoProto* v = p_g->add_output();
+    encodeValueInfo(v, output);
   }
   for (auto node : g->nodes()) {
     if (node->kind() == kSelect) {
@@ -147,11 +205,17 @@ void encodeGraph(onnx::GraphProto * p_g, const std::shared_ptr<Graph> & g, const
   for (auto & tensor : initializers) {
     // TODO: stop using positions to determine which initializers
     // match to which inputs
-    std::string name = p_g->input(inputs_count++);
+    std::string name = p_g->get_input_name(inputs_count++);
     auto p = p_g->add_initializer();
     p->set_name(name);
     encodeTensor(p, tensor);
   }
+}
+
+void encodeModel(onnx::ModelProto* p_m, const std::shared_ptr<Graph>& g,
+                 const std::vector<at::Tensor>& initializers) {
+  onnx::GraphProto* p_g = p_m->mutable_graph();
+  encodeGraph(p_g, g, initializers);
 }
 
 void standardizeGraph(const std::shared_ptr<Graph>& graph) {
@@ -161,11 +225,6 @@ void standardizeGraph(const std::shared_ptr<Graph>& graph) {
               "maybe it doesn't implement a symbolic definition?");
     IR_IF(*it, AddConstant)
       throw std::runtime_error("can't serialize PyTorch-only node AddConstant (not implemented yet)");
-    IR_ELSEIF(Concat)
-      JIT_ASSERT(!value->hasMultipleOutputs());
-      Node *real_output = value->makeMultireturn();
-      Node *fake_output = graph->createSelect(value, 1);
-      fake_output->insertAfter(real_output);
     IR_ELSEIF(CppOp)
       auto cpp_node = static_cast<torch::jit::CppOp*>(value);
       FAIL_EXPORT(cpp_node->name())
@@ -202,6 +261,7 @@ void standardizeGraph(const std::shared_ptr<Graph>& graph) {
                              ->insertBefore(py_node);
         auto first_select = py_node->uses()[0].user;
         first_select->replaceAllUsesWith(squeeze);
+        squeeze->setType(first_select->typeOption());
         for (auto use : py_node->uses())
           use.user->destroy();
         it.destroyCurrent();
@@ -219,21 +279,21 @@ void standardizeGraph(const std::shared_ptr<Graph>& graph) {
 
 std::string ExportGraph(const std::shared_ptr<Graph>& graph,
                         const std::vector<at::Tensor> & initializers) {
+
   standardizeGraph(graph);
 
-  onnx::GraphProto graph_proto;
-  graph_proto.set_name("torch-jit-export");
-
+  onnx::ModelProto model_proto;
   // Set up nanopb callbacks and compute the amount of space needed to store
   // the resulting protobuf
-  encodeGraph(&graph_proto, graph, initializers);
+  encodeModel(&model_proto, graph, initializers);
+
   size_t out_size;
-  pb_get_encoded_size(&out_size, onnx_GraphProto_fields, &graph_proto.proto);
+  pb_get_encoded_size(&out_size, onnx_ModelProto_fields, &model_proto.proto);
 
   // Allocate storage and export the graph
   std::string out(out_size, '\0');
   pb_ostream_t ostream = pb_ostream_from_buffer(reinterpret_cast<pb_byte_t *>(&out[0]), out_size);
-  pb_encode(&ostream, onnx_GraphProto_fields, &graph_proto.proto);
+  pb_encode(&ostream, onnx_ModelProto_fields, &model_proto.proto);
 
   return out;
 }

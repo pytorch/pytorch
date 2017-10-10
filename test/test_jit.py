@@ -253,6 +253,41 @@ class TestJit(TestCase):
         torch._C._tracer_exit((y,))
         self.assertExpected(str(trace))
 
+    def test_inplace_flags(self):
+        x = Variable(torch.Tensor([0]), requires_grad=True)
+        trace = torch._C._tracer_enter((x,), 0)
+        y = x + 2
+        y.add_(2)
+        y.mul_(4)
+        y = y * 2
+        torch._C._tracer_exit((y,))
+        ops = [n for n in trace.graph().nodes() if n.kind() != 'Select']
+        for op in ops:
+            self.assertTrue(op.hasAttribute('__inplace'))
+        inplace_flags = [False, True, True, False]
+        for op, is_inplace in zip(ops, inplace_flags):
+            self.assertEqual(op.i('__inplace'), is_inplace)
+
+    def test_inplace_check(self):
+        class MyInplaceFn(Function):
+            @staticmethod
+            def forward(self, x):
+                x.add_(1)
+                self.mark_dirty(x)
+                return x
+
+            @staticmethod
+            def backward(self, grad):
+                return grad
+
+        @torch.jit.compile(nderivs=0)
+        def fn(x):
+            return MyInplaceFn.apply(x)
+        x = Variable(torch.randn(5, 5))
+        fn(x)  # trace
+        with self.assertRaisesRegex(RuntimeError, 'inplace MyInplaceFn'):
+            fn(x)  # create closure
+
     def test_backward(self):
         a = Variable(torch.randn(2, 2), requires_grad=True)
         b = Variable(torch.randn(2, 2), requires_grad=True)
@@ -521,6 +556,27 @@ class TestJit(TestCase):
         x = Variable(torch.randn(20, 16, 50, 40).fill_(1.0), requires_grad=True)
         trace, _ = torch.jit.trace(nn.Conv2d(16, 13, 3, bias=False), x)
         self.assertExpected(str(trace))
+
+    def test_reuse_function(self):
+        @torch.jit.compile(nderivs=0)
+        def clinear(*args):
+            return F.linear(*args)
+
+        def cast(x):
+            return x
+
+        input = Variable(cast(torch.randn(1, 1)))
+        weights = Variable(cast(torch.randn(1, 1)))
+        bias = Variable(cast(torch.randn(1, 1)))
+
+        # linear AKA addmm without bias is of particular interest
+        # because we allocate a zero-filled new variable when we execute,
+        # and then *fill* it with the result
+
+        r1 = clinear(clinear(input, weights), weights)
+        r2 = F.linear(F.linear(input, weights), weights)
+
+        self.assertEqual(r1, r2)
 
     def test_mini_wlm(self):
         """Exercise null-edge pruning in the tracer."""

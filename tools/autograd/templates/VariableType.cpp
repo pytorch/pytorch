@@ -12,6 +12,12 @@
 #include <iostream>
 #include <functional>
 
+#ifdef _MSC_VER
+#ifdef Type
+#undef Type
+#endif
+#endif
+
 using namespace at;
 
 namespace torch { namespace autograd {
@@ -21,29 +27,29 @@ VariableType::VariableType(Context* context, Type* baseType)
   , baseType(baseType) {
 }
 
-ScalarType VariableType::scalarType() {
+ScalarType VariableType::scalarType() const {
   return baseType->scalarType();
 }
-Backend VariableType::backend() {
+Backend VariableType::backend() const {
   return baseType->backend();
 }
-bool VariableType::isCuda() { return baseType->isCuda(); }
-bool VariableType::isSparse() { return baseType->isSparse(); }
-bool VariableType::isDistributed() { return baseType->isDistributed(); }
+bool VariableType::isCuda() const { return baseType->isCuda(); }
+bool VariableType::isSparse() const { return baseType->isSparse(); }
+bool VariableType::isDistributed() const { return baseType->isDistributed(); }
 
-std::unique_ptr<Storage> VariableType::storage() {
+std::unique_ptr<Storage> VariableType::storage() const {
   return baseType->storage();
 }
-std::unique_ptr<Storage> VariableType::storage(size_t size) {
+std::unique_ptr<Storage> VariableType::storage(size_t size) const {
   return baseType->storage(size);
 }
-std::unique_ptr<Storage> VariableType::storageFromBlob(void * data, int64_t size) {
+std::unique_ptr<Storage> VariableType::storageFromBlob(void * data, int64_t size) const {
   return baseType->storageFromBlob(data, size);
 }
-Tensor VariableType::unsafeTensorFromTH(void * th_pointer, bool retain) {
+Tensor VariableType::unsafeTensorFromTH(void * th_pointer, bool retain) const {
   return baseType->unsafeTensorFromTH(th_pointer, retain);
 }
-std::unique_ptr<Generator> VariableType::generator() {
+std::unique_ptr<Generator> VariableType::generator() const {
   return baseType->generator();
 }
 
@@ -65,14 +71,35 @@ Tensor & VariableType::checked_unpack(const Tensor & t, const char * name, int p
 {
  if(!t.defined()) {
    runtime_error("Expected a Tensor of type %s but found an undefined Tensor for argument #%d '%s'",
-     toString(),pos,name);
+     toString(), pos, name);
  }
  if (&t.type() == this) {
    return static_cast<VariableImpl*>(t.pImpl)->data;
  }
  runtime_error("Expected object of type %s but found type %s for argument #%d '%s'",
-   toString(),t.type().toString(),pos,name);
+   toString(),t.type().toString(), pos, name);
 }
+
+std::vector<at::Tensor> VariableType::checked_unpack(const at::TensorList &tl, const char *name, int pos) const {
+ std::vector<at::Tensor> ret(tl.size());
+ for (size_t i = 0; i < tl.size(); ++i) {
+   const auto &t = tl[i];
+   if(!t.defined()) {
+     runtime_error("Expected a Tensor of type %s but found an undefined Tensor at position #%d "
+                   "for iterable argument #%d '%s'",
+                   toString(), i, pos, name);
+   }
+   if (&t.type() == this) {
+     ret[i] = static_cast<VariableImpl*>(t.pImpl)->data;
+   } else {
+   runtime_error("Expected object of type %s but found type %s at position #%d "
+                 "for iterable argument #%d '%s'",
+                 toString(),t.type().toString(), i, pos, name);
+   }
+  }
+  return ret;
+}
+
 
 Variable VariableType::as_variable(Tensor tensor) const {
   return make_variable(std::move(tensor));
@@ -112,7 +139,7 @@ void wrap_output(VariableImpl& pImpl, FunctionFlags flags, std::shared_ptr<Funct
   }
 }
 
-void VariableType::copy(const Tensor & src, Tensor & dst) {
+void VariableType::copy(const Tensor & src, Tensor & dst) const {
   auto& src_ = checked_unpack(src, "src", 0);
   auto& dst_ = checked_unpack(dst, "dst", 1);
   auto& pImpl = static_cast<VariableImpl&>(*dst.get());
@@ -123,7 +150,7 @@ void VariableType::copy(const Tensor & src, Tensor & dst) {
   wrap_output(pImpl, std::move(flags), std::make_shared<Identity>());
 }
 
-Tensor & VariableType::m_resize_(Tensor & self, IntList size) {
+Tensor & VariableType::m_resize_(Tensor & self, IntList size) const {
   auto& self_ = checked_unpack(self, "self", 0);
   auto& pImpl = static_cast<VariableImpl&>(*self.get());
   check_inplace(pImpl);
@@ -135,6 +162,14 @@ Tensor & VariableType::m_resize_(Tensor & self, IntList size) {
   }
   baseType->m_resize_(self_, size);
   return self;
+}
+
+std::vector<int64_t> to_arg_sizes(TensorList tensors, int64_t dim) {
+  std::vector<int64_t> arg_sizes(tensors.size());
+  for (size_t i = 0; i < tensors.size(); ++i) {
+    arg_sizes[i] = tensors[i].size(dim);
+  }
+  return arg_sizes;
 }
 
 ${type_derived_method_definitions}

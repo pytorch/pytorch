@@ -112,6 +112,15 @@ class Prod(Function):
 class Mean(Function):
 
     @staticmethod
+    def symbolic(g, input, dim=None, keepdim=None):
+        output = g.create("ReduceMean", [input])
+        if dim is not None:
+            output = output.is_("axes", dim)
+        if keepdim is None or keepdim is False:
+            output = output.i_("keepdims", 0)
+        return g.appendNode(output)
+
+    @staticmethod
     def forward(ctx, input, dim=None, keepdim=None):
         ctx.dim = dim
         ctx.keepdim = False if keepdim is None else keepdim

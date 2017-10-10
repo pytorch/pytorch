@@ -27,7 +27,9 @@ _(Squeeze) \
 _(Undefined) \
 _(FusionGroup) \
 _(Split) \
+_(Gemm) \
 _(AddConstant) \
+_(SubConstant) \
 _(Transpose) \
 _(Reshape) \
 _(split) \
@@ -50,6 +52,8 @@ _(strides) \
 _(stride) \
 _(pads) \
 _(pad) \
+_(beta) \
+_(alpha) \
 _(dilations) \
 _(dilation) \
 _(broadcast) \
@@ -57,7 +61,8 @@ _(axis) \
 _(perm) \
 _(shape) \
 _(axes) \
-_(group)
+_(group) \
+_(__inplace)
 
 enum BuiltinSymbol {
   #define DEFINE_SYMBOL(s) \

@@ -12,10 +12,14 @@
 #include <set>
 #include <stack>
 #include <sstream>
+#include <algorithm>
+#include <string>
 
 namespace py = pybind11;
 
 namespace torch { namespace jit {
+
+constexpr int max_tensor_display_size = 10;
 
 std::string getPythonName(const PyObject* obj, bool is_legacy) {
   AutoGIL gil;
@@ -170,8 +174,21 @@ void printAttributes(std::ostream & out, Node * n) {
         printPrimList(out,n->ss(name));
         break;
       case AttributeKind::t:
-        out << "<Tensor>";
-        break;
+        {
+          at::Tensor t = n->t(name);
+          if (t.numel() <= max_tensor_display_size) {
+            // TODO: This is awful code.  Also it doesn't work on Windows.
+            std::ostringstream tensor_ss;
+            tensor_ss << t;
+            std::string tensor_s{tensor_ss.str()};
+            // Remove newlines
+            std::replace(tensor_s.begin(), tensor_s.end(), '\n', ' ');
+            out << tensor_s;
+          } else {
+            out << "<Tensor>";
+          }
+          break;
+        }
       case AttributeKind::ts:
         out << "[<Tensors>]";
         break;

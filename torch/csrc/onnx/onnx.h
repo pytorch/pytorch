@@ -12,6 +12,9 @@
 
 namespace torch { namespace onnx {
 
+using DataType = onnx_TensorProto_DataType;
+using Dimension = onnx_TypeProto_TensorShapeProto_Dimension;
+
 // Note [Unique vector]
 // ~~~~~~~~~~~~~~~~~~~~
 // Why do we need vectors of unique pointers?  A Google-style C++ Protobuf API
@@ -34,6 +37,7 @@ template <> bool micropb_encode<std::string, nullptr>(pb_ostream_t *stream, std:
 template <> bool micropb_encode<int64_t, nullptr>(pb_ostream_t *stream, int64_t* arg);
 template <> bool micropb_encode<float, nullptr>(pb_ostream_t *stream, float* arg);
 template <> bool micropb_encode<double, nullptr>(pb_ostream_t *stream, double* arg);
+template <> bool micropb_encode<Dimension, nullptr>(pb_ostream_t *stream, Dimension* arg);
 // NB: If we ever add support for signed protobuf integers, we'll need a special
 // wrapper, since we can't overload over them (they look the same from C++ side)
 
@@ -146,8 +150,6 @@ struct MicroProto {
   }
 };
 
-using DataType = onnx_TensorProto_DataType;
-
 #define DEFINE_CONST(C) \
 const auto k##C = onnx_TensorProto_DataType_##C;
 DEFINE_CONST(FLOAT)
@@ -159,19 +161,30 @@ DEFINE_CONST(INT32)
 DEFINE_CONST(INT64)
 DEFINE_CONST(STRING)
 DEFINE_CONST(BOOL)
+DEFINE_CONST(FLOAT16)
+DEFINE_CONST(DOUBLE)
+DEFINE_CONST(UINT32)
+DEFINE_CONST(UINT64)
+DEFINE_CONST(COMPLEX64)
+DEFINE_CONST(COMPLEX128)
 #undef DEFINE_CONST
 // C++ wrappers which simulate the Google C++ Protobuf API
 //
 // These are NOT COMPLETE wrappers. If you find something is missing, add it!
 
 class AttributeProto;
+class TypeProtoTensorShapeProto;
+class TypeProtoTensorTypeProto;
+class TensorProto;
+class TypeProto;
+class ValueInfoProto;
 class NodeProto;
 class GraphProto;
-class TensorProto;
+class ModelProto;
 
 class TensorProto : public MicroProto<onnx_TensorProto> {
 private:
-  std::string name;
+  std::string name; // namespace ValueInfoProto.
   unique_vector<int64_t> dims;
   at::Tensor raw_data;
 public:
@@ -183,6 +196,58 @@ public:
   // Google Protobuf divergence!
   void set_raw_data(const at::Tensor& t) { proto.raw_data = string_from_tensor(&raw_data, t); }
   void set_data_type(onnx_TensorProto_DataType t) { proto.has_data_type = true; proto.data_type = t; }
+};
+
+class TypeProtoTensorShapeProto : public MicroProto<onnx_TypeProto_TensorShapeProto> {
+private:
+  unique_vector<Dimension> dims;
+public:
+  TypeProtoTensorShapeProto() : MicroProto(onnx_TypeProto_TensorShapeProto_init_default) {
+    proto.dim = list<Dimension>(&dims);
+  }
+  void add_dim(std::int64_t d) {
+    Dimension* p_d = new Dimension();
+    p_d->has_dim_value = true;
+    p_d->dim_value = d;
+    dims.emplace_back(p_d);
+  }
+};
+
+class TypeProtoTensorTypeProto : public MicroProto<onnx_TypeProto_TensorTypeProto> {
+private:
+  std::unique_ptr<TypeProtoTensorShapeProto> shape;
+public:
+  TypeProtoTensorTypeProto() : MicroProto(onnx_TypeProto_TensorTypeProto_init_default) {}
+  void set_data_type(onnx_TensorProto_DataType t) { proto.has_elem_type = true; proto.elem_type = t; }
+  TypeProtoTensorShapeProto* mutable_shape() {
+    proto.shape = msg<TypeProtoTensorShapeProto, onnx_TypeProto_TensorShapeProto_fields>(&shape);
+    return shape.get();
+  }
+};
+
+class TypeProto : public MicroProto<onnx_TypeProto> {
+private:
+  std::unique_ptr<TypeProtoTensorTypeProto> tensor_type;
+public:
+  TypeProto() : MicroProto(onnx_TypeProto_init_default) {}
+  TypeProtoTensorTypeProto* mutable_tensor_type() {
+    proto.tensor_type = msg<TypeProtoTensorTypeProto, onnx_TypeProto_TensorTypeProto_fields>(&tensor_type);
+    return tensor_type.get();
+  }
+};
+
+class ValueInfoProto : public MicroProto<onnx_ValueInfoProto> {
+private:
+  std::string name;
+  std::unique_ptr<TypeProto> type;
+public:
+  ValueInfoProto() : MicroProto(onnx_ValueInfoProto_init_default) {}
+  std::string get_name() { return name; }
+  void set_name(const std::string& s) { proto.name = string(&name, s); }
+  TypeProto* mutable_type() {
+    proto.type = msg<TypeProto, onnx_TypeProto_fields>(&type);
+    return type.get();
+  }
 };
 
 class AttributeProto : public MicroProto<onnx_AttributeProto> {
@@ -230,8 +295,8 @@ private:
   unique_vector<AttributeProto> attributes;
 public:
   NodeProto() : MicroProto(onnx_NodeProto_init_default) {
-    proto.input     = list<std::string>(&inputs);
-    proto.output    = list<std::string>(&outputs);
+    proto.input = list<std::string>(&inputs);
+    proto.output = list<std::string>(&outputs);
     proto.attribute = list<AttributeProto, onnx_AttributeProto_fields>(&attributes);
   }
   void add_input(const std::string& s) { inputs.emplace_back(new std::string(s)); }
@@ -249,29 +314,29 @@ public:
 class GraphProto : public MicroProto<onnx_GraphProto> {
 private:
   std::string name;
-  std::string producer_tag;
-  unique_vector<std::string> inputs;
-  unique_vector<std::string> outputs;
+  unique_vector<ValueInfoProto> inputs;
+  unique_vector<ValueInfoProto> outputs;
   unique_vector<NodeProto> nodes;
   unique_vector<TensorProto> initializers;
 public:
   GraphProto() : MicroProto(onnx_GraphProto_init_default) {
-    proto.has_ir_version = true;
-    proto.ir_version = onnx_Version_IR_VERSION;
-    // TODO: stop hard-coding this
-    // TODO: check if this is supposed to be octal
-    proto.has_producer_version = true;
-    proto.producer_version = 20000;
-    proto.producer_tag = string(&producer_tag, "pytorch");
-    proto.input  = list<std::string>(&inputs);
-    proto.output = list<std::string>(&outputs);
-    proto.node   = list<NodeProto, onnx_NodeProto_fields>(&nodes);
+    proto.input = list<ValueInfoProto, onnx_ValueInfoProto_fields>(&inputs);
+    proto.output = list<ValueInfoProto, onnx_ValueInfoProto_fields>(&outputs);
+    proto.node = list<NodeProto, onnx_NodeProto_fields>(&nodes);
     proto.initializer = list<TensorProto, onnx_TensorProto_fields>(&initializers);
   }
   void set_name(const std::string& s) { proto.name = string(&name, s); }
-  void add_input(const std::string& s) { inputs.emplace_back(new std::string(s)); }
-  std::string input(size_t i) { return *inputs.at(i); }
-  void add_output(const std::string& s) { outputs.emplace_back(new std::string(s)); }
+  ValueInfoProto* add_input() {
+    auto ptr = new ValueInfoProto();
+    inputs.emplace_back(ptr);
+    return ptr;
+  }
+  std::string get_input_name(size_t i) { return inputs.at(i)->get_name(); }
+  ValueInfoProto* add_output() {
+    auto ptr = new ValueInfoProto();
+    outputs.emplace_back(ptr);
+    return ptr;
+  }
   NodeProto* add_node() {
     auto ptr = new NodeProto();
     nodes.emplace_back(ptr);
@@ -281,6 +346,30 @@ public:
     auto ptr = new TensorProto();
     initializers.emplace_back(ptr);
     return ptr;
+  }
+};
+
+class ModelProto : public MicroProto<onnx_ModelProto> {
+private:
+  std::string producer_name;
+  std::string producer_version;
+  std::string domain;
+  std::string doc_string;
+  std::unique_ptr<GraphProto> graph;
+public:
+  ModelProto() : MicroProto(onnx_ModelProto_init_default) {
+    proto.has_ir_version = true;
+    proto.ir_version = onnx_Version_IR_VERSION;
+    proto.producer_name = string(&producer_name, "pytorch");
+    // TODO: stop hard-coding this
+    proto.producer_version = string(&producer_version, "0.2");
+    proto.domain = string(&domain, "com.facebook");
+  }
+  void set_model_version(int64_t i) { proto.has_model_version = true; proto.model_version = i; }
+  void set_doc_string(const std::string& s) { proto.doc_string = string(&doc_string, s); }
+  GraphProto* mutable_graph() {
+    proto.graph = msg<GraphProto, onnx_GraphProto_fields>(&graph);
+    return graph.get();
   }
 };
 

@@ -1,27 +1,66 @@
-node {
-  input: "1"
-  output: "2"
-  op_type: "MaxPool"
-  attribute {
-    name: "kernel_shape"
-    ints: 3
+ir_version: 1
+producer_name: "pytorch"
+producer_version: "0.2"
+domain: "com.facebook"
+graph {
+  node {
+    input: "1"
+    output: "2"
+    op_type: "MaxPool"
+    attribute {
+      name: "kernel_shape"
+      ints: 3
+    }
+    attribute {
+      name: "pads"
+      ints: 0
+    }
+    attribute {
+      name: "dilations"
+      ints: 1
+    }
+    attribute {
+      name: "strides"
+      ints: 2
+    }
   }
-  attribute {
-    name: "pads"
-    ints: 0
+  name: "torch-jit-export"
+  input {
+    name: "1"
+    type {
+      tensor_type {
+        elem_type: DOUBLE
+        shape {
+          dim {
+            dim_value: 20
+          }
+          dim {
+            dim_value: 16
+          }
+          dim {
+            dim_value: 50
+          }
+        }
+      }
+    }
   }
-  attribute {
-    name: "dilations"
-    ints: 1
-  }
-  attribute {
-    name: "strides"
-    ints: 2
+  output {
+    name: "2"
+    type {
+      tensor_type {
+        elem_type: DOUBLE
+        shape {
+          dim {
+            dim_value: 20
+          }
+          dim {
+            dim_value: 16
+          }
+          dim {
+            dim_value: 24
+          }
+        }
+      }
+    }
   }
 }
-name: "torch-jit-export"
-input: "1"
-output: "2"
-ir_version: 1
-producer_version: 20000
-producer_tag: "pytorch"

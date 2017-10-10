@@ -493,6 +493,7 @@ void cudnn_convolution_forward(
     THVoidTensor* input, THVoidTensor* weight, THVoidTensor* output,
     Convolution* info, bool benchmark)
 {
+  CHECK(cudnnSetStream(handle, THCState_getCurrentStream(state)));
   assertSameGPU(dataType, input, weight, output);
   int groups = info->groups;
 
@@ -528,6 +529,7 @@ void cudnn_convolution_add_bias(
     THVoidTensor* bias, THVoidTensor* output,
     Convolution* info)
 {
+  CHECK(cudnnSetStream(handle, THCState_getCurrentStream(state)));
   assertSameGPU(dataType, bias, output);
   CHECK_ARG(output->nDimension <= 5);
   TensorDescriptor& bdesc = info->bdesc;
@@ -549,6 +551,7 @@ void cudnn_convolution_backward_data(
     THVoidTensor* gradOutput, THVoidTensor* gradInput, THVoidTensor* weight,
     Convolution* info, bool benchmark)
 {
+  CHECK(cudnnSetStream(handle, THCState_getCurrentStream(state)));
   assertSameGPU(dataType, gradOutput, gradInput, weight);
   int groups = info->params.groups;
 
@@ -583,6 +586,7 @@ void cudnn_convolution_backward_filter(
     THVoidTensor* gradOutput, THVoidTensor* input, THVoidTensor* gradWeight,
     Convolution* info, bool benchmark)
 {
+  CHECK(cudnnSetStream(handle, THCState_getCurrentStream(state)));
   assertSameGPU(dataType, gradOutput, input, gradWeight);
   int groups = info->params.groups;
 
@@ -623,6 +627,7 @@ void cudnn_convolution_backward_bias(
     THCState* state, cudnnHandle_t handle, cudnnDataType_t dataType,
     THVoidTensor* gradOutput, THVoidTensor* gradBias, Convolution* info)
 {
+  CHECK(cudnnSetStream(handle, THCState_getCurrentStream(state)));
   assertSameGPU(dataType, gradOutput, gradBias);
   Constant one(dataType, 1);
   Constant zero(dataType, 0);
@@ -639,6 +644,7 @@ Convolution* cudnn_convolution_full_forward(
     THVoidTensor* input, THVoidTensor* weight, THVoidTensor* bias, THVoidTensor* output,
     std::vector<int> pad, std::vector<int> stride, std::vector<int> dilation, int groups, bool benchmark)
 {
+    CHECK(cudnnSetStream(handle, THCState_getCurrentStream(state)));
     std::unique_ptr<Convolution> info(new Convolution(
         dataType, input, weight, bias, output, pad, stride, dilation, groups, false));
     cudnn_convolution_forward(
@@ -655,6 +661,7 @@ Convolution* cudnn_convolution_transpose_full_forward(
     THVoidTensor* input, THVoidTensor* weight, THVoidTensor* bias, THVoidTensor* output,
     std::vector<int> pad, std::vector<int> stride, std::vector<int> dilation, int groups, bool benchmark)
 {
+    CHECK(cudnnSetStream(handle, THCState_getCurrentStream(state)));
     std::unique_ptr<Convolution> info(new Convolution(
         dataType, output, weight, bias, input, pad, stride, dilation, groups, true));
     cudnn_convolution_backward_data(

@@ -50,7 +50,7 @@ __device__ void inclusivePrefixScan(T *smem, BinaryOp binop) {
   }
 }
 
-// Generic Op that can be be used to support segmented scans by re-using
+// Generic Op that can be used to support segmented scans by re-using
 // the basic inclusiveScanOp. Merely requires that the input data has both
 // a flag and val component
 template <typename T, class BinaryOp>

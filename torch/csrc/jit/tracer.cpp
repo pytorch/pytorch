@@ -33,7 +33,7 @@ struct TraceEval : autograd::Eval {
     }
   }
 
-  virtual variable_list apply(const variable_list& inputs) {
+  virtual variable_list apply(const variable_list& inputs) override {
     auto should_trace = !flag.test_and_set();
     if (should_trace) enterTrace(inputs);
     auto outputs = Eval::apply(inputs);

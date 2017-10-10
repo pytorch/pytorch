@@ -80,19 +80,23 @@ class ClassSimplexCriterion(MSECriterion):
             input,
             self._target,
             self.output_tensor,
-            self.sizeAverage
+            self.sizeAverage,
+            True,  # reduce
         )
         self.output = self.output_tensor[0]
         return self.output
 
     def updateGradInput(self, input, target):
         assert input.nelement() == self._target.nelement()
+        implicit_gradOutput = torch.Tensor([1]).type(input.type())
         self._backend.MSECriterion_updateGradInput(
             self._backend.library_state,
             input,
             self._target,
+            implicit_gradOutput,
             self.gradInput,
-            self.sizeAverage
+            self.sizeAverage,
+            True,  # reduce
         )
         return self.gradInput
 

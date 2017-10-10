@@ -376,6 +376,35 @@ class _TensorBase(object):
     def data(self):
         raise RuntimeError('cannot call .data on a torch.Tensor: did you intend to use autograd.Variable?')
 
+    # Numpy array interface, to support `numpy.asarray(tensor) -> ndarray`
+    def __array__(self, dtype=None):
+        if dtype is None:
+            return self.cpu().numpy()
+        else:
+            return self.cpu().numpy().astype(dtype, copy=False)
+
+    # Wrap Numpy array again in a suitable tensor when done, to support e.g.
+    # `numpy.sin(tensor) -> tensor` or `numpy.greater(tensor, 0) -> ByteTensor`
+    def __array_wrap__(self, array):
+        if array.ndim == 0:
+            # TODO: remove this when 0-dimensional tensors are supported
+            if array.dtype.kind == 'b':
+                return bool(array)
+            elif array.dtype.kind in ('i', 'u'):
+                return int(array)
+            elif array.dtype.kind == 'f':
+                return float(array)
+            elif array.dtype.kind == 'c':
+                return complex(array)
+            else:
+                raise RuntimeError('bad scalar {!r}'.format(array))
+        else:
+            if array.dtype == bool:
+                # Workaround, torch has no built-in bool tensor
+                array = array.astype('uint8')
+
+            return torch.from_numpy(array)
+
 
 _TensorBase.type = _type
 _TensorBase.cuda = _cuda

@@ -159,7 +159,6 @@ list.  The operator set above is sufficient to export the following models:
 * Inception (warning: this model is highly sensitive to changes in operator
   implementation)
 * ResNet
-* SqueezeNet
 * SuperResolution
 * VGG
 * `word_language_model <https://github.com/pytorch/examples/tree/master/word_language_model>`_

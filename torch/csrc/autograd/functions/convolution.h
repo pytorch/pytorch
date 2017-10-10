@@ -31,12 +31,14 @@ struct ConvParams {
   bool benchmark;
   bool cudnn_enabled;
 
+  bool is_strided() const;
   bool is_dilated() const;
   bool is_output_padding_neg() const;
   bool is_output_padding_big() const;
   bool is_padding_neg() const;
   void view1d_as_2d();
   bool use_cudnn(const at::Tensor& input) const;
+  bool use_nnpack(const at::Tensor& input) const;
 };
 
 struct ConvForward : public ForwardFunction<>, public ConvParams, public HasSymbolic {
@@ -46,7 +48,7 @@ struct ConvForward : public ForwardFunction<>, public ConvParams, public HasSymb
   virtual variable_list apply(const variable_list& inputs) override;
   virtual jit::node_list symbolic(SymbolicContext* ctx, jit::node_list inputs) override;
 
-  std::vector<int64_t> output_size(at::Tensor& input, at::Tensor& weight);
+  std::vector<int64_t> output_size(at::Tensor& input, at::Tensor& weight) const;
 };
 
 struct ConvBackward : public Function, public ConvParams {
