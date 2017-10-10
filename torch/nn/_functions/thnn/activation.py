@@ -20,16 +20,11 @@ class PReLU(Function):
     def forward(ctx, input, weight):
         ctx._backend = type2backend[type(input)]
         output = input.new()
-        ctx.num_parameters = weight.numel()
-        if ctx.num_parameters == 1:
-            # num_parameters == 0 is used indicate that a single weight is shared among all input channels.
-            ctx.num_parameters = 0
         ctx._backend.PReLU_updateOutput(
             ctx._backend.library_state,
             input,
             output,
-            weight,
-            ctx.num_parameters
+            weight
         )
         ctx.save_for_backward(input, weight)
         return output
@@ -37,27 +32,23 @@ class PReLU(Function):
     @staticmethod
     def backward(ctx, grad_output):
         input, weight = ctx.saved_variables
-        # alternatively, we could recalculate _backend, num_parameters
-        return PReLUBackward.apply(input, weight, grad_output, ctx._backend, ctx.num_parameters)
+        # alternatively, we could recalculate _backend
+        return PReLUBackward.apply(input, weight, grad_output, ctx._backend)
 
 
 class PReLUBackward(Function):
     @staticmethod
-    def forward(ctx, input, weight, grad_output, backend, num_parameters):
+    def forward(ctx, input, weight, grad_output, backend):
         ctx.save_for_backward(input, weight, grad_output)
-        ctx.num_parameters = num_parameters
         grad_input = input.new()
         backend.PReLU_updateGradInput(
             backend.library_state,
             input,
             grad_output,
             grad_input,
-            weight,
-            num_parameters
+            weight
         )
 
-        buf = weight.new()
-        buf2 = weight.new()
         # TODO: this won't have to be zeroed in the future
         grad_weight = weight.new().resize_as_(weight).zero_()
         backend.PReLU_accGradParameters(
@@ -67,9 +58,6 @@ class PReLUBackward(Function):
             grad_input,
             weight,
             grad_weight,
-            buf,
-            buf2,
-            num_parameters,
             1
         )
         return grad_input, grad_weight
@@ -85,7 +73,7 @@ class PReLUBackward(Function):
         # df/di * gO  = gO      if i > 0      df/dw * g0 = 0      if i > 0
         #             = g0 * w  if i <= 0                = g0 * i  if i <= 0
         # The rest is taking derivatives of these wrt i, w, gO and summing/expanding properly.
-        if ctx.num_parameters == 0:
+        if weight.numel() == 1:
             # from PReLU.forward: num_parameters == 0 is used indicate that a
             # single weight is shared among all input channels.
             mask = positive_mask + nonpositive_mask * weight.expand_as(input)
