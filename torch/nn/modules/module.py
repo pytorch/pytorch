@@ -565,13 +565,13 @@ class Module(object):
 
                 params = 0
                 if hasattr(module, 'weight'):
-                    params += torch.prod(torch.LongTensor(list(module.weight.size())))
+                    params += torch.numel(module.weight.data)
                     if module.weight.requires_grad:
                         summary[m_key]['trainable'] = True
                     else:
                         summary[m_key]['trainable'] = False
                 if hasattr(module, 'bias'):
-                    params += torch.prod(torch.LongTensor(list(module.bias.size())))
+                    params += torch.numel(module.bias.data)
                 summary[m_key]['nb_params'] = params
 
             if not isinstance(module, torch.nn.Sequential) and \
