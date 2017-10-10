@@ -20,7 +20,7 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
-from caffe2.python import schema
+from caffe2.python import core, schema
 from caffe2.python.layers.layers import (
     ModelLayer,
 )
@@ -61,9 +61,19 @@ class BatchDistillLRLoss(ModelLayer):
     def add_ops(self, net):
         label = self.input_record.label()
         if self.input_record.label.field_type() != np.int32:
-            label = net.Cast(label, net.NextScopedBlob('int32_label'), to='int32')
+            label = net.Cast(
+                label,
+                net.NextScopedBlob('int32_label'),
+                to=core.DataType.INT32,
+            )
 
         teacher_label = self.input_record.teacher_label()
+        if self.input_record.teacher_label.field_type() != np.float32:
+            teacher_label = net.Cast(
+                teacher_label,
+                net.NextScopedBlob('float_teacher_label'),
+                to=core.DataType.FLOAT,
+            )
 
         class_probabilities = net.MakeTwoClass(
             self.input_record.prediction(),
