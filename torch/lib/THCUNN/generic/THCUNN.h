@@ -378,16 +378,14 @@ TH_API void THNN_(PReLU_updateOutput)(
                   THCState *state,
                   THCTensor *input,
                   THCTensor *output,
-                  THCTensor *weight,
-                  int64_t nOutputPlane);
+                  THCTensor *weight);
 
 TH_API void THNN_(PReLU_updateGradInput)(
                   THCState *state,
                   THCTensor *input,
                   THCTensor *gradOutput,
                   THCTensor *gradInput,
-                  THCTensor *weight,
-                  int64_t nOutputPlane);
+                  THCTensor *weight);
 
 TH_API void THNN_(PReLU_accGradParameters)(
                   THCState *state,
@@ -396,9 +394,6 @@ TH_API void THNN_(PReLU_accGradParameters)(
                   THCTensor *gradInput,
                   THCTensor *weight,
                   THCTensor *gradWeight,
-                  THCTensor *gradWeightBuf,
-                  THCTensor *gradWeightBuf2,
-                  int64_t nOutputPlane,
                   accreal scale);
 
 TH_API void THNN_(SmoothL1Criterion_updateOutput)(
