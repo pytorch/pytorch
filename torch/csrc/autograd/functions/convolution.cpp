@@ -54,6 +54,14 @@ auto ConvParams::is_dilated() const -> bool {
   return is_dilated;
 }
 
+auto ConvParams::is_padded() const -> bool {
+  bool is_padded = false;
+  for (int p : padding) {
+    is_padded |= (p != 0);
+  }
+  return is_padded;
+}
+
 auto ConvParams::is_output_padding_neg() const -> bool {
   bool is_non_neg = false;
   for (int p : output_padding) {
@@ -117,6 +125,20 @@ auto ConvParams::use_nnpack(const at::Tensor& input) const -> bool {
          input.size(0) >= 16; // ensure large enough batch size to ensure perf, tuneable
 #endif
   return false;
+}
+
+// We currently only have depthwise support for the case where groups ==
+// nInputPlane and nInputPlane == nOutputPlane (the latter due to the lack of
+// a depthwise multiplier)
+auto ConvParams::is_eligible_for_depthwise_convolution(
+        const at::Tensor& input, const at::Tensor& weight, int groups) const -> bool {
+  return input.type().isCuda() &&
+         !is_strided() &&
+         !is_dilated() &&
+         !is_padded() &&
+         input.ndimension() == 4 &&
+         input.size(1) == groups &&
+         input.size(1) == weight.size(0);
 }
 
 std::string ConvForward::name() { return "ConvForward"; }
@@ -220,6 +242,14 @@ static Variable subvariable(const Variable& var, int dim, int groups, int g) {
   return result;
 }
 
+static std::vector<int64_t> vecToInt64(const std::vector<int>& src) {
+  std::vector<int64_t> res(src.size());
+  for (size_t i = 0; i < src.size(); i++) {
+    res[i] = static_cast<int64_t>(src[i]);
+  }
+  return res;
+}
+
 static at::Tensor cat(const tensor_list& tensors, int dim) {
   int num_inputs = tensors.size();
   if (num_inputs == 0) {
@@ -230,7 +260,6 @@ static at::Tensor cat(const tensor_list& tensors, int dim) {
   at::cat_out(output, tensors, dim);
   return output;
 }
-
 
 // ConvForward implementation
 
@@ -289,6 +318,15 @@ auto ConvForward::apply(const variable_list& inputs) -> variable_list {
           padding, stride, dilation, groups, benchmark, deterministic));
     }
 #endif
+  } else if (is_eligible_for_depthwise_convolution(input, weight, groups)) {
+      output.resize_(output_size(input, weight));
+
+      auto kernel_size = weight.sizes().slice(2);
+      auto stride = vecToInt64(this->stride);
+      auto padding = vecToInt64(this->padding);
+      auto dilation = vecToInt64(this->dilation);
+
+      at::conv_depthwise2d_forward_out(output, input, weight, kernel_size, stride, padding, dilation);
   } else {
     for (int g = 0; g < groups; ++g) {
       columns[g] = input.type().tensor();
@@ -403,6 +441,20 @@ auto ConvBackward::apply(const variable_list& grad_outputs) -> variable_list {
       }
     }
 #endif
+  } else if (is_eligible_for_depthwise_convolution(input, weight, groups)) {
+    grad_input = input.type().tensor();
+    grad_input.resize_as_(input);
+
+    auto kernel_size = weight.sizes().slice(2);
+    auto stride = vecToInt64(this->stride);
+    auto padding = vecToInt64(this->padding);
+    auto dilation = vecToInt64(this->dilation);
+
+    std::tie(grad_input, grad_weight) = at::conv_depthwise2d_backward(
+        grad_output, input, weight, kernel_size, stride, padding, dilation,
+        {output_mask[0], output_mask[1]});
+
+      // TODO: handle bias addition at some point
   } else if (groups == 1) {
     std::tie(grad_input, grad_weight, grad_bias) = compute_backward(
         input, grad_output, weight, columns[0], ones[0],
@@ -646,14 +698,6 @@ auto ConvBackwardBackward::releaseVariables() -> void {
   weight_.data.reset();
   bias_.data.reset();
   grad_output_.data.reset();
-}
-
-static std::vector<int64_t> vecToInt64(const std::vector<int>& src) {
-  std::vector<int64_t> res(src.size());
-  for (size_t i = 0; i < src.size(); i++) {
-    res[i] = static_cast<int64_t>(src[i]);
-  }
-  return res;
 }
 
 // Forward and backward functions for Tensor
