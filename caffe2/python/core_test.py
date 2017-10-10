@@ -352,6 +352,7 @@ class TestExtractPredictorNet(test_util.TestCase):
         [data, label] = brew.image_input(
             model,
             "reader", ["xx/data", "label"],
+            is_test=1,
         )
         cnv = brew.conv(model, data, 'cnv', 32, 32, 4)
         a = brew.fc(model, cnv, 'a', 100, 200)

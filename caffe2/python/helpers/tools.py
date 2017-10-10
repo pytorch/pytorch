@@ -24,6 +24,7 @@ from __future__ import unicode_literals
 def image_input(
     model, blob_in, blob_out, order="NCHW", use_gpu_transform=False, **kwargs
 ):
+    assert 'is_test' in kwargs, "Argument 'is_test' is required"
     if order == "NCHW":
         if (use_gpu_transform):
             kwargs['use_gpu_transform'] = 1 if use_gpu_transform else 0
