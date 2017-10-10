@@ -1,3 +1,6 @@
+from torch.autograd._functions.utils import prepare_paddings
+
+
 def threshold_symbolic(g, input, threshold=0, value=0, inplace=False):
     # TODO: [Export inplace]
     if threshold != 0:
@@ -18,8 +21,26 @@ def glu_symbolic(g, input, dim):
     first, second = g.op('Split', input, axis_i=dim, outputs=2)
     return g.op('Mul', first, g.op('Sigmoid', second))
 
+
+def reflectionpad_symbolic(g, input, *params):
+    mode = "reflect"
+    paddings = prepare_paddings(input, params)
+    return g.op("Pad", input, paddings_i=paddings, mode_s=mode)
+
+
+def replicationpad_symbolic(g, input, *params):
+    mode = "edge"
+    paddings = prepare_paddings(input, params)
+    return g.op("Pad", input, paddings_i=paddings, mode_s=mode)
+
+
 symbolic_fns = {
     'Threshold': threshold_symbolic,
     'LeakyReLU': leakyrelu_symbolic,
     'GatedLinear': glu_symbolic,
+    'ReflectionPad1d': reflectionpad_symbolic,
+    'ReflectionPad2d': reflectionpad_symbolic,
+    'ReplicationPad1d': replicationpad_symbolic,
+    'ReplicationPad2d': replicationpad_symbolic,
+    'ReplicationPad3d': replicationpad_symbolic,
 }

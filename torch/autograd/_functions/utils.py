@@ -46,3 +46,19 @@ def maybe_unexpand_or_view(variable, old_size):
         return maybe_unexpand(variable, old_size, False)
     else:
         return maybe_view(variable, old_size, False)
+
+
+# Turn the parameter pad in pytorch into paddings in onnx order.
+def prepare_paddings(input, pad):
+    dim = len(input.type().sizes())
+    # The order of paddings is dim_0_begin, dim_0_end, dim_1_begin, ... , dim_n_end.
+    # n is the dimension of input.
+    assert len(pad) <= dim * 2
+    paddings = []
+    # pad is guaranteed to have even elements.
+    for i, j in zip(pad[0::2], pad[1::2]):
+        paddings = [i, j] + paddings
+    while len(paddings) < 2 * dim:
+        paddings = [0, 0] + paddings
+    assert len(paddings) == dim * 2
+    return paddings
