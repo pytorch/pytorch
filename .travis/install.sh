@@ -140,6 +140,7 @@ elif [ "$TRAVIS_OS_NAME" = 'osx' ]; then
     #####################
     # brew dependencies #
     #####################
+    brew update
     pip uninstall -y numpy  # use brew version (opencv dependency)
     brew tap homebrew/science  # for OpenCV
     brew install \
