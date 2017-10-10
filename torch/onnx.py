@@ -140,7 +140,6 @@ def _add_attribute(node, key, value):
         kind += "s"
     return getattr(node, kind + '_')(name, value)
 
-
 def _newNode(self, opname, *args, **kwargs):
     n = self.create(opname, args)
     for k, v in sorted(kwargs.items()):

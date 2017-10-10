@@ -1,21 +1,12 @@
 from torch.autograd import Function, Variable
+from torch.autograd._functions.utils import prepare_paddings
 
 
 class ConstantPadNd(Function):
 
     @staticmethod
     def symbolic(g, input, pad, value=0):
-        dim = len(input.type().sizes())
-        # The order of paddings is dim_0_begin, dim_0_end, dim_1_begin, ... , dim_n_end.
-        # n is the dimension of input.
-        assert len(pad) <= dim * 2
-        paddings = []
-        # pad is guaranteed to have even elements.
-        for i, j in zip(pad[0::2], pad[1::2]):
-            paddings = [i, j] + paddings
-        while len(paddings) < 2 * dim:
-            paddings = [0, 0] + paddings
-        assert len(paddings) == dim * 2
+        paddings = prepare_paddings(input, pad)
         return g.appendNode(g.create("Pad", [input]).is_("paddings", paddings)
                              .s_("mode", "constant").f_("value", value))
 
