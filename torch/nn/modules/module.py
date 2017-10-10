@@ -618,7 +618,7 @@ class Module(object):
             print('{0: <{3}} {1: <{3}} {2: <{3}}'.format(
                 crop(l_name + ' (' + l_type[:-2] + ')'), crop(str(d['output_shape'])),
                 crop(str(d['nb_params'])), col_width))
-            if i < len(summary)-1:
+            if i < len(summary) - 1:
                 print('_' * summary_width)
         print('=' * summary_width)
         print('Total params: ' + str(total_params))
