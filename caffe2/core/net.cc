@@ -124,7 +124,7 @@ unique_ptr<NetBase> CreateNet(
   }
   VLOG(1) << "Adding a global observer to a net";
   if (net) {
-    net->SetObserver(GlobalNetObserverCreator(net.get()));
+    net->AddObserver(GlobalNetObserverCreator(net.get()));
   }
   return net;
 }
