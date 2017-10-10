@@ -22,7 +22,7 @@ struct THFileVTable
     int (*isOpened)(THFile *self);
 
     size_t (*readByte)(THFile *self, uint8_t *data, size_t n);
-    size_t (*readChar)(THFile *self, char *data, size_t n);
+    size_t (*readChar)(THFile *self, int8_t *data, size_t n);
     size_t (*readShort)(THFile *self, int16_t *data, size_t n);
     size_t (*readInt)(THFile *self, int32_t *data, size_t n);
     size_t (*readLong)(THFile *self, int64_t *data, size_t n);
@@ -32,7 +32,7 @@ struct THFileVTable
     size_t (*readString)(THFile *self, const char *format, char **str_);
 
     size_t (*writeByte)(THFile *self, uint8_t *data, size_t n);
-    size_t (*writeChar)(THFile *self, char *data, size_t n);
+    size_t (*writeChar)(THFile *self, int8_t *data, size_t n);
     size_t (*writeShort)(THFile *self, int16_t *data, size_t n);
     size_t (*writeInt)(THFile *self, int32_t *data, size_t n);
     size_t (*writeLong)(THFile *self, int64_t *data, size_t n);

@@ -13,7 +13,7 @@ import sys
 import os
 
 from tools.setup_helpers.env import check_env_flag
-from tools.setup_helpers.cuda import WITH_CUDA, CUDA_HOME
+from tools.setup_helpers.cuda import WITH_CUDA, CUDA_HOME, CUDA_VERSION
 from tools.setup_helpers.cudnn import WITH_CUDNN, CUDNN_LIB_DIR, CUDNN_INCLUDE_DIR
 from tools.setup_helpers.nccl import WITH_NCCL, WITH_SYSTEM_NCCL, NCCL_LIB_DIR, \
     NCCL_INCLUDE_DIR, NCCL_ROOT_DIR, NCCL_SYSTEM_LIB
@@ -172,6 +172,7 @@ class build_py(setuptools.command.build_py.build_py):
             # library code with DEBUG, but csrc without DEBUG (in which case
             # this would claim to be a release build when it's not.)
             f.write("debug = {}\n".format(repr(DEBUG)))
+            f.write("cuda = {}\n".format(repr(CUDA_VERSION)))
 
 
 class develop(setuptools.command.develop.develop):

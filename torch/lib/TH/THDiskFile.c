@@ -335,19 +335,19 @@ static void THDiskFile_free(THFile *self)
 /*                    true) */
 
 /* Note that we do a trick */
-READ_WRITE_METHODS(unsigned char, Byte,
+READ_WRITE_METHODS(uint8_t, Byte,
                    nread = fread(data, 1, n, dfself->handle); break,
                    nwrite = fwrite(data, 1, n, dfself->handle); break)
 
-READ_WRITE_METHODS(char, Char,
+READ_WRITE_METHODS(int8_t, Char,
                    nread = fread(data, 1, n, dfself->handle); break,
                    nwrite = fwrite(data, 1, n, dfself->handle); break)
 
-READ_WRITE_METHODS(short, Short,
+READ_WRITE_METHODS(int16_t, Short,
                    int ret = fscanf(dfself->handle, "%hd", &data[i]); if(ret <= 0) break; else nread++,
                    int ret = fprintf(dfself->handle, "%hd", data[i]); if(ret <= 0) break; else nwrite++)
 
-READ_WRITE_METHODS(int, Int,
+READ_WRITE_METHODS(int32_t, Int,
                    int ret = fscanf(dfself->handle, "%d", &data[i]); if(ret <= 0) break; else nread++,
                    int ret = fprintf(dfself->handle, "%d", data[i]); if(ret <= 0) break; else nwrite++)
 

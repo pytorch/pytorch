@@ -98,17 +98,16 @@ class TestJit(TestCase):
 
         self.assertExpected(str(trace))
 
-    @unittest.skip("not implemented yet")
-    def test_verify(self):
+    def test_compile_run_twice(self):
         x = Variable(torch.Tensor([0.4]), requires_grad=True)
         y = Variable(torch.Tensor([0.7]), requires_grad=True)
 
-        @torch.jit.compile(verify=True, optimize=False)
+        @torch.jit.compile(nderivs=0, optimize=False)
         def doit(x, y):
             return torch.sigmoid(torch.tanh(x * (x + y)))
 
-        z = traced(x, y)
-        z2 = traced(x, y)
+        z = doit(x, y)
+        z2 = doit(x, y)
         self.assertEqual(z, torch.sigmoid(torch.tanh(x * (x + y))))
         self.assertEqual(z, z2)
 
@@ -164,7 +163,7 @@ class TestJit(TestCase):
         hx = Variable(torch.randn(3, 20))
         cx = Variable(torch.randn(3, 20))
 
-        @torch.jit.compile(verify=True)
+        @torch.jit.compile(nderivs=0)
         class MyLSTMCell(nn.LSTMCell):
             pass
 
@@ -200,6 +199,18 @@ class TestJit(TestCase):
         self.assertEqual(z, z2)
         self.assertEqual(w, w2)
         self.assertEqual(x.grad.data, x_grad)
+
+    def test_verify(self):
+        x = Variable(torch.Tensor([0.4]), requires_grad=True)
+        y = Variable(torch.Tensor([0.7]), requires_grad=True)
+
+        @torch.jit.compile
+        def f(x, y):
+            z = torch.sigmoid(x * (x + y))
+            w = torch.abs(x * x * x + y) + Variable(torch.ones(1))
+            return z, w
+
+        torch.jit.verify(f, (x, y), loss_fn=lambda z, w: z * w, devices=[])
 
     def test_constant(self):
         x = Variable(torch.randn(2, 2), requires_grad=True)
@@ -397,6 +408,8 @@ class TestJit(TestCase):
         out.sum().backward()
         self.assertTrue(cell.has_trace_for(x, w))
 
+        torch.jit.verify(cell, (x, w), devices=[])
+
     def test_output_unflatten(self):
         """Check that outputs of traced functions retain the original structure and nesting"""
         x = Variable(torch.randn(2, 2), requires_grad=True)
@@ -537,8 +550,9 @@ class TestJit(TestCase):
         trace, _ = torch.jit.trace(nn.BatchNorm2d(2), x)
         self.assertExpected(str(trace))
 
-    def test_batchnorm_verify(self):
-        @torch.jit.compile(verify=True)
+    @unittest.skip("unrecognized NodeKind: SpatialBN")
+    def test_batchnorm_run_twice(self):
+        @torch.jit.compile(nderivs=0)
         class MyBatchNorm2d(nn.BatchNorm2d):
             pass
 
@@ -581,7 +595,7 @@ class TestJit(TestCase):
     def test_mini_wlm(self):
         """Exercise null-edge pruning in the tracer."""
 
-        @torch.jit.compile(verify=True)
+        @torch.jit.compile
         class MyModel(nn.Module):
             def __init__(self):
                 super(MyModel, self).__init__()

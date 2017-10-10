@@ -2,6 +2,7 @@ import ctypes
 import sys
 import torch
 import warnings
+from contextlib import contextmanager
 
 enabled = True  # set to False to globally disable cuDNN
 
@@ -58,6 +59,7 @@ def is_acceptable(tensor):
 
 _handles = {}
 
+deterministic = False
 benchmark = False
 verbose = False
 
@@ -79,6 +81,23 @@ CUDNN_SKIP_INPUT = 1
 CUDNN_RNN_ALGO_STANDARD = 0
 CUDNN_RNN_ALGO_PERSIST_STATIC = 1
 CUDNN_RNN_ALGO_PERSIST_DYNAMIC = 2
+
+
+def set_flags(_enabled, _benchmark, _deterministic, _verbose):
+    global enabled, benchmark, deterministic, verbose
+    orig_flags = enabled, benchmark, deterministic, verbose
+    enabled, benchmark, deterministic, verbose = _enabled, _benchmark, _deterministic, _verbose
+    return orig_flags
+
+
+@contextmanager
+def flags(enabled=False, benchmark=False, deterministic=False, verbose=False):
+    orig_flags = set_flags(enabled, benchmark, deterministic, verbose)
+    try:
+        yield
+    finally:
+        # recover the previous values
+        set_flags(orig_flags[0], orig_flags[1], orig_flags[2], orig_flags[3])
 
 
 class CuDNNHandle:

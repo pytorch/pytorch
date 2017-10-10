@@ -712,8 +712,12 @@
         - THTensor* self
         - long k
         - CONSTANT __last_dim
-        - CONSTANT true
-        - CONSTANT true
+        - arg: bool largest
+          default: "true"
+          kwarg_only: True
+        - arg: bool sorted
+          default: "true"
+          kwarg_only: True
     - arguments:
         - arg: THTensor* values
           output: True

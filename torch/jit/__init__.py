@@ -1,5 +1,6 @@
 import torch.autograd.function as function
 import torch._C
+from torch import Tensor
 from torch.autograd import Variable
 from torch.nn import Module, ParameterList, Parameter
 from torch._six import raise_from
@@ -11,6 +12,7 @@ import contextlib
 import os
 import functools
 import inspect
+import copy
 
 
 class Placeholder(object):
@@ -28,8 +30,7 @@ HOLE = Placeholder("HOLE")
 VOLATILE = Placeholder("VOLATILE")
 
 
-# TODO: verify is not implemented yet
-def compile(arg=None, verify=False, **kwargs):
+def compile(arg=None, **kwargs):
     """
     Decorator which marks a function or module class as eligible for
     just-in-time compilation.  The next time the function/module is executed, it
@@ -57,15 +58,9 @@ def compile(arg=None, verify=False, **kwargs):
         tensors) and do not have any untracked external dependencies (e.g.,
         perform input/output or access global variables). If you trace such
         models, you will silently get incorrect results on subsequent
-        invocations of the model.  You can use `verify=True` to check that the
-        original Python code and optimized code are equivalent.
+        invocations of the model.
 
     Keyword arguments:
-        verify (bool, optional): if True, upon all invocations of the
-            function/module, execute both the compiled and interpreted versions
-            of the model, and verify that their results match.  This is an easy
-            (albeit slow) way to check if your function/module can be validly
-            JIT compiled.  Default: False.
         nderivs (int, optional): the number of derivatives which this function/module
             will be used with.  You MUST accurately specify this number: set it too
             low and you will see an error when you attempt to run `backward`;
@@ -346,7 +341,10 @@ class _CompiledMixin(object):
 
     # NB: In principle, there could also be a 'raw' version of this compiler,
     # but since the logic is so complicated, testing code wouldn't benefit much
-    def __new_forward(self, *args):
+    def __new_forward(self, *args, **kwargs):
+        force_trace = kwargs.pop("_force_trace", False)
+        if kwargs:
+            raise TypeError("Unrecognized keyword arguments: {}".format(kwargs.keys()))
         if _JIT_DISABLE or not self.__enabled:
             with _time(self.__name, "unoptimized", self.__time):
                 # Call to the saved old forward function
@@ -359,7 +357,7 @@ class _CompiledMixin(object):
             ktrace = TraceForKey(ktrace_name, in_key, volatile=is_volatile, **self.__ktrace_kwargs)
             self.__ktrace_cache[in_key] = ktrace
         closure = ktrace.maybe_closure()
-        if closure is not None:
+        if closure is not None and not force_trace:
             # We already compiled it!  Run it directly, and
             # use the saved out_struct to unflatten.
             with _time(ktrace.name, "optimized", self.__time):
@@ -368,7 +366,9 @@ class _CompiledMixin(object):
         else:
             # No compiled trace available.  Run it by hand.
             with _time(ktrace.name, "tracing", self.__time):
-                out_vars, out_struct = ktrace.add_trace(self.__old_forward, args, in_vars, in_struct)
+                out_vars, out_struct = ktrace.add_trace(self.__old_forward,
+                                                        args, in_vars, in_struct,
+                                                        overwrite=force_trace)
         if isinstance(out_vars, Variable):
             out_vars = (out_vars, )
         out, unmatched = _unflatten(out_vars, out_struct)
@@ -418,7 +418,12 @@ class TraceForKey(object):
     # The signature here is a little goofy; it's a perf optimization.
     # Additionally, f is passed in as an argument (even though it is fixed as
     # class initialization) to avoid a circular reference.
-    def add_trace(self, f, args, in_vars, in_struct):
+    def add_trace(self, f, args, in_vars, in_struct, overwrite=False):
+        if overwrite:
+            self.closure = None
+        else:
+            assert self.closure is None
+
         # TODO: Deduplicate this code
         @_raw_trace(nderivs=self.nderivs)
         def traced_f(in_vars, in_struct):
@@ -493,36 +498,6 @@ def vars_key(in_vars):
     return is_volatile, tuple(map(var_key, in_vars))
 
 
-@contextlib.contextmanager
-def _fork_rng(enabled=True):
-    """
-    Forks the RNG, so that when you return, the RNG is reset
-    to the state that it was previously in.  This is important
-    if we are evaluating a trace twice, and it incorporates
-    randomness: if we don't reset the seed, we might get totally
-    different results!
-
-    TODO: Randomness in models is a big problem for reproduceability,
-    because it means if we start executing models out of order,
-    they may behave differently.  Interesting question is whether
-    or not backwards pass ever has randomness.  I hope not.
-    """
-    if not enabled:
-        yield
-        return
-
-    cpu_rng_state = torch.get_rng_state()
-    gpu_rng_state = None
-    if torch.cuda.is_available():
-        gpu_rng_state_all = torch.cuda.get_rng_state_all()
-
-    yield
-
-    torch.set_rng_state(cpu_rng_state)
-    if gpu_rng_state is not None:
-        torch.cuda.set_rng_state_all(gpu_rng_state_all)
-
-
 # _flatten and _unflatten are inverses
 def _unflatten(input, proto):
     def unflatten_helper(input, proto):
@@ -541,6 +516,21 @@ def _flatten(obj, params=tuple()):
     obj_vars = tuple(itertools.chain(function._iter_variables(obj), params))
     obj_struct = function._nested_map(lambda o: isinstance(o, Variable), lambda x: HOLE)(obj)
     return obj_vars, obj_struct
+
+
+def _clone_inputs(args):
+    def clone_input(a):
+        if a is None:
+            return None
+        elif isinstance(a, Variable):
+            v = Variable(a.data.clone(), requires_grad=a.requires_grad, volatile=a.volatile)
+            if a.grad is not None:
+                v.grad = clone_input(v.grad)
+            return v
+        else:
+            return a.clone()
+    return function._nested_map(lambda o: isinstance(o, Variable) or torch.is_tensor(o),
+                                clone_input)(args)
 
 
 # This is purely for developer debugging.  We are not going to advertise it.
@@ -578,6 +568,83 @@ def _time(trace_name, name, time=True):
         stream.record_event(end)
         end.synchronize()
         print("{} {} time: {} ms".format(trace_name, name, start.elapsed_time(end)))
+
+
+def verify(model, args, loss_fn=torch.sum, devices=None):
+    """
+    Verify that a JIT compiled model has the same behavior as its uncompiled
+    version along with its backwards pass.  If your model returns multiple
+    outputs, you must also specify a `loss_fn` to produce a loss for which
+    the backwards will be computed.
+
+    This function has side-effects (e.g., it executes your model / saves and loads
+    parameters), so don't expect the model to come out exactly the same as what
+    you passed in.
+
+    Arguments:
+        model (compiled torch.nn.Module or function): the module/function to be
+            verified.  The module/function definition MUST have been decorated with
+            `@torch.jit.compile`.
+        args (tuple or Variable): the positional arguments to pass to the
+            compiled function/module to be verified.  A non-tuple is assumed to
+            be a single positional argument to be passed to the model.
+        loss_fn (function, optional): the loss function to be applied to
+            the output of the model, before backwards is invoked.  By default,
+            we assume that a model returns a single result, and we :func:`torch.sum`
+            before calling backwards; if this is inappropriate, you can pass your
+            own loss function.  Note that if a model returns a tuple of results,
+            these are passed as separate positional arguments to `loss_fn`.
+        devices (iterable of device IDs, optional): the GPU devices which the
+            compiled module will be run on.  This determines the RNG state we
+            must save when running both compiled and uncompiled versions of the model.
+    """
+    # TODO: In principle, we track device information in our trace, so it
+    # should be possible to check if our execution actually obeyed the 'devices'
+    # the user provided.
+
+    # TODO: Consider adding a utility function to torch.jit to test
+    # for this case
+    if not isinstance(model, _CompiledMixin):
+        raise TypeError("Cannot verify an uncompiled module.  Add @torch.jit.compile to compile it")
+
+    if not isinstance(args, tuple):
+        args = (args,)
+
+    saved_args = _clone_inputs(args)
+    saved_state = copy.deepcopy(model.state_dict())
+
+    def run_fwd_bwd(args, force_trace=False):
+        in_vars, _ = _flatten(args, model.state_dict(keep_vars=True).values())
+        # We use a special API to reset the trace and compile it from scratch.
+        out = model(*args, _force_trace=force_trace)
+        if not isinstance(out, tuple):
+            out = (out, )
+        if loss_fn == torch.sum and len(out) != 1:
+            raise ValueError(("Model returns {} outputs, but default loss function "
+                             "(torch.sum) can only handle a single output").format(len(out)))
+        out_vars, _ = _flatten(out)
+        saved_outs = [v.data.clone() for v in out_vars]
+        loss = loss_fn(*out)
+        grads = torch.autograd.grad([loss], in_vars)
+        # TODO: I'm not sure if the clone here is necessary but it is safer
+        saved_grads = [v.data.clone() for v in grads]
+        return (saved_outs, saved_grads)
+
+    with torch.random.fork_rng(devices, _caller="torch.jit.verify"):
+        uncompiled_outs, uncompiled_grads = run_fwd_bwd(args, force_trace=True)
+        assert model.has_trace_for(*args)
+
+    model.load_state_dict(saved_state)
+    compiled_outs, compiled_grads = run_fwd_bwd(args)
+
+    _verify_equal(uncompiled_outs, compiled_outs)
+    _verify_equal(uncompiled_grads, compiled_grads)
+
+
+def _verify_equal(xs, ys):
+    for x, y in zip(xs, ys):
+        if x.sub(y).abs().max() > 1e-6:
+            raise RuntimeError("JIT and real computation mismatch")
 
 
 if not torch._C._jit_init():
