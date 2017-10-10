@@ -1,6 +1,5 @@
 """Functional interface"""
 
-from numbers import Integral
 import warnings
 import math
 from operator import mul
@@ -577,7 +576,7 @@ def tanhshrink(input):
 
 
 def softsign(input):
-    return _functions.activation.Softsign.apply(input)
+    return input / (input.abs() + 1)
 
 
 def softplus(input, beta=1, threshold=20):
@@ -585,7 +584,7 @@ def softplus(input, beta=1, threshold=20):
 
 
 def softmin(input):
-    return _functions.thnn.Softmin.apply(input)
+    return softmax(-input)
 
 
 def softmax(input):

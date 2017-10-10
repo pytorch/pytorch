@@ -23,7 +23,6 @@ def _initialize_backend():
     from .._functions.rnn import RNN, \
         RNNTanhCell, RNNReLUCell, GRUCell, LSTMCell
     from .._functions.dropout import Dropout, FeatureDropout
-    from .._functions.activation import Softsign
     from .._functions.loss import CosineEmbeddingLoss, \
         HingeEmbeddingLoss, HingeEmbeddingLossBackward, MarginRankingLoss
 
@@ -39,7 +38,6 @@ def _initialize_backend():
     backend.register_function('HingeEmbeddingLoss', HingeEmbeddingLoss)
     backend.register_function('HingeEmbeddingLossBackward', HingeEmbeddingLossBackward)
     backend.register_function('MarginRankingLoss', MarginRankingLoss)
-    backend.register_function('Softsign', Softsign)
     for cls in _thnn_functions:
         name = cls.__name__
         backend.register_function(name, cls)
