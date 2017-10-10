@@ -1,4 +1,5 @@
 #ifndef TH_GENERIC_FILE
+
 #define TH_GENERIC_FILE "generic/Tensor.cpp"
 #else
 
@@ -147,7 +148,7 @@ static void THPTensor_(setInconsistentDepthError)(std::vector<size_t> &sizes,
   THPUtils_setError(error.c_str());
 }
 
-#if defined(NUMPY_TYPE_ENUM) || defined(THC_GENERIC_FILE)
+#if defined(NUMPY_TYPE_ENUM) || (defined(WITH_NUMPY) && defined(THC_GENERIC_FILE))
 
 #ifndef THC_REAL_IS_HALF
 #define load_real real
