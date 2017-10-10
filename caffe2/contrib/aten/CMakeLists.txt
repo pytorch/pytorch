@@ -14,7 +14,7 @@ if(USE_ATEN)
   COMMAND
   python ${CMAKE_CURRENT_SOURCE_DIR}/gen_op.py ${PROJECT_SOURCE_DIR}
   DEPENDS
-  ${CMAKE_CURRENT_BINARY_DIR}/aten/src/ATen/ATen/Declarations.yaml
+  ATen
   ${CMAKE_CURRENT_SOURCE_DIR}/gen_op.py
   ${CMAKE_CURRENT_SOURCE_DIR}/aten_op_template.h)
 
