@@ -95,41 +95,41 @@ set(Caffe2_MAIN_LIBS_ORDER)
 set(Caffe2_MAIN_LIBS)
 
 # Compile exposed libraries.
-add_library(Caffe2_CPU ${Caffe2_CPU_SRCS} $<TARGET_OBJECTS:Caffe_PROTO> $<TARGET_OBJECTS:Caffe2_PROTO>)
-target_link_libraries(Caffe2_CPU ${Caffe2_DEPENDENCY_LIBS})
-install(TARGETS Caffe2_CPU DESTINATION lib)
+add_library(caffe2 ${Caffe2_CPU_SRCS} $<TARGET_OBJECTS:Caffe_PROTO> $<TARGET_OBJECTS:Caffe2_PROTO>)
+target_link_libraries(caffe2 ${Caffe2_DEPENDENCY_LIBS})
+install(TARGETS caffe2 DESTINATION lib)
 link_directories(${CMAKE_INSTALL_PREFIX}/lib)
-caffe_add_linker_flag(Caffe2_CPU Caffe2_CPU_LINK)
-list(APPEND Caffe2_MAIN_LIBS_ORDER Caffe2_CPU)
+caffe_add_linker_flag(caffe2 Caffe2_CPU_LINK)
+list(APPEND Caffe2_MAIN_LIBS_ORDER caffe2)
 list(APPEND Caffe2_MAIN_LIBS ${Caffe2_CPU_LINK})
 if (Caffe2_EXTERNAL_DEPENDENCIES)
-  add_dependencies(Caffe2_CPU ${Caffe2_EXTERNAL_DEPENDENCIES})
+  add_dependencies(caffe2 ${Caffe2_EXTERNAL_DEPENDENCIES})
 endif()
 
 # ---[ CUDA library.
 if(USE_CUDA)
-  CUDA_ADD_LIBRARY(Caffe2_GPU ${Caffe2_GPU_SRCS})
-  list(APPEND Caffe2_MAIN_LIBS_ORDER Caffe2_GPU)
-  add_dependencies(Caffe2_GPU Caffe2_PROTO)
+  CUDA_ADD_LIBRARY(caffe2_gpu ${Caffe2_GPU_SRCS})
+  list(APPEND Caffe2_MAIN_LIBS_ORDER caffe2_gpu)
+  add_dependencies(caffe2_gpu Caffe2_PROTO)
   if (BUILD_SHARED_LIBS)
     target_link_libraries(
-        Caffe2_GPU
-        Caffe2_CPU
+        caffe2_gpu
+        caffe2
         ${Caffe2_DEPENDENCY_LIBS}
         ${Caffe2_CUDA_DEPENDENCY_LIBS})
   else()
     target_link_libraries(
-        Caffe2_GPU
+        caffe2_gpu
         ${Caffe2_DEPENDENCY_LIBS}
         ${Caffe2_CUDA_DEPENDENCY_LIBS})
   endif()
-  caffe_add_linker_flag(Caffe2_GPU Caffe2_GPU_LINK)
-  list(APPEND Caffe2_MAIN_LIBS_ORDER Caffe2_GPU)
+  caffe_add_linker_flag(caffe2_gpu Caffe2_GPU_LINK)
+  list(APPEND Caffe2_MAIN_LIBS_ORDER caffe2_gpu)
   list(APPEND Caffe2_MAIN_LIBS ${Caffe2_GPU_LINK})
   if (Caffe2_EXTERNAL_DEPENDENCIES)
-    add_dependencies(Caffe2_GPU ${Caffe2_EXTERNAL_DEPENDENCIES})
+    add_dependencies(caffe2_gpu ${Caffe2_EXTERNAL_DEPENDENCIES})
   endif()
-  install(TARGETS Caffe2_GPU DESTINATION lib)
+  install(TARGETS caffe2_gpu DESTINATION lib)
 endif()
 
 # ---[ Test binaries.
@@ -268,5 +268,9 @@ endif()
 # Binaries
 if (BUILD_BINARY)
   add_subdirectory(binaries)
-  add_subdirectory(share/contrib/binaries)
+  # There is a linking issue that happens in some of the Windows builds.
+  # TODO(Yangqing): after the module redesing, enable this back.
+  if (NOT MSVC)
+    add_subdirectory(share/contrib/binaries)
+  endif()
 endif()
