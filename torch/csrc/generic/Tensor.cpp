@@ -147,7 +147,7 @@ static void THPTensor_(setInconsistentDepthError)(std::vector<size_t> &sizes,
   THPUtils_setError(error.c_str());
 }
 
-#if defined(NUMPY_TYPE_ENUM) || defined(THC_GENERIC_FILE)
+#ifdef WITH_NUMPY
 
 #ifndef THC_REAL_IS_HALF
 #define load_real real
