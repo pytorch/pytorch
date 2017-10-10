@@ -47,6 +47,7 @@ def maybe_unexpand_or_view(variable, old_size):
     else:
         return maybe_view(variable, old_size, False)
 
+
 def prepare_paddings(input, pad):
     dim = len(input.type().sizes())
     # The order of paddings is dim_0_begin, dim_0_end, dim_1_begin, ... , dim_n_end.
