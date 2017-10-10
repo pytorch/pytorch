@@ -564,14 +564,14 @@ class Module(object):
                 summary[m_key]['output_shape'][0] = None
 
                 params = 0
-                if hasattr(module, 'weight'):
-                    params += torch.numel(module.weight.data)
-                    if module.weight.requires_grad:
+                # iterate through parameters and count num params
+                for name, p in module._parameters.items():
+                    params += torch.numel(p.data)
+                    if p.requires_grad:
                         summary[m_key]['trainable'] = True
                     else:
                         summary[m_key]['trainable'] = False
-                if hasattr(module, 'bias'):
-                    params += torch.numel(module.bias.data)
+
                 summary[m_key]['nb_params'] = params
 
             if not isinstance(module, torch.nn.Sequential) and \
@@ -581,7 +581,7 @@ class Module(object):
 
         # check if there are multiple inputs to the network
         if isinstance(input_size[0], (list, tuple)):
-            x = [Variable(th.rand(1, *in_size)) for in_size in input_size]
+            x = [Variable(torch.rand(1, *in_size)) for in_size in input_size]
         else:
             x = Variable(torch.randn(1, *input_size))
 
