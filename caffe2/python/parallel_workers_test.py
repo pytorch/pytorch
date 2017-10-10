@@ -103,3 +103,23 @@ class ParallelWorkersTest(unittest.TestCase):
             )
 
         self.assertTrue(worker_coordinator.stop())
+
+    def testParallelWorkersShutdownFun(self):
+        workspace.ResetWorkspace()
+
+        queue = create_queue()
+        dummy_worker = create_worker(queue, lambda worker_id: str(worker_id))
+        workspace.FeedBlob('data', 'not shutdown')
+
+        def shutdown_fun():
+            workspace.FeedBlob('data', 'shutdown')
+
+        worker_coordinator = parallel_workers.init_workers(
+            dummy_worker, shutdown_fun=shutdown_fun
+        )
+        worker_coordinator.start()
+
+        self.assertTrue(worker_coordinator.stop())
+
+        data = workspace.FetchBlob('data')
+        self.assertEqual(data, b'shutdown', 'Got unexpected value ' + str(data))
