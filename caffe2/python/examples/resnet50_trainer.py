@@ -76,7 +76,8 @@ def AddImageInput(model, reader, batch_size, img_size, dtype):
         std=128.,
         scale=256,
         crop=img_size,
-        mirror=1
+        mirror=1,
+        is_test=0,
     )
 
     data = model.StopGradient(data, data)
