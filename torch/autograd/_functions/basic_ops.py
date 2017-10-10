@@ -171,7 +171,6 @@ class SubConstant(InplaceFunction):
 class MulConstant(InplaceFunction):
     @staticmethod
     def symbolic(g, a, b, inplace=False):
-        assert not inplace, "Exporting inplace MulConstant is not supported yet"
         if isinstance(a, torch._C.Node):
             tensor, scale = a, b
         else:

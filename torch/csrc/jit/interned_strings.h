@@ -30,6 +30,7 @@ _(Split) \
 _(Gemm) \
 _(AddConstant) \
 _(SubConstant) \
+_(Scale) \
 _(Transpose) \
 _(Reshape) \
 _(split) \
@@ -48,6 +49,7 @@ _(consumed_inputs) \
 _(kernels) \
 _(kernel_shape) \
 _(kernel) \
+_(scale) \
 _(strides) \
 _(stride) \
 _(pads) \
