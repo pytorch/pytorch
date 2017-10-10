@@ -58,7 +58,7 @@ class BatchDistillLRLoss(ModelLayer):
             self.get_next_blob_reference('output')
         )
 
-    def add_train_ops(self, net):
+    def add_ops(self, net):
         label = self.input_record.label()
         if self.input_record.label.field_type() != np.int32:
             label = net.Cast(label, net.NextScopedBlob('int32_label'), to='int32')
