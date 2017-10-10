@@ -1,9 +1,11 @@
-import io
 import numpy as np
 
 from torch import nn
 from torch.autograd import Variable, Function
 import torch.onnx
+
+import onnx
+import onnx_caffe2.backend
 
 class MyFunction(Function):
     @staticmethod
@@ -38,14 +40,10 @@ torch.onnx.export(MyModule(),
 #   return (%5);
 # }
 
-import onnx
-import onnx_caffe2.backend
-import numpy as np
-
 graph = onnx.load("output.onnx")
 
-a = np.random.randn(3, 2).astype(np.float32)
-b = np.random.randn(3, 2).astype(np.float32)
+a = np.random.randn(3, 4).astype(np.float32)
+b = np.random.randn(3, 4).astype(np.float32)
 
 prepared_backend = onnx_caffe2.backend.prepare(graph)
 W = {graph.graph.input[0].name: a, graph.graph.input[1].name: b}
