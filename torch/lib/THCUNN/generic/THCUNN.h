@@ -1051,7 +1051,6 @@ TH_API void THNN_(Sigmoid_updateOutput)(
 
 TH_API void THNN_(Sigmoid_updateGradInput)(
                   THCState *state,
-                  THCTensor *input,          // [OPTIONAL]
                   THCTensor *gradOutput,
                   THCTensor *gradInput,
                   THCTensor *output);
