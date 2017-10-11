@@ -554,23 +554,25 @@ class Module(object):
     def summary(self, input_size):
         def register_hook(module):
             def hook(module, input, output):
+                if module._modules: # only want base layers
+                    return
                 class_name = str(module.__class__).split('.')[-1].split("'")[0]
                 module_idx = len(summary)
                 m_key = '%s-%i' % (class_name, module_idx + 1)
                 summary[m_key] = OrderedDict()
                 summary[m_key]['input_shape'] = list(input[0].size())
                 summary[m_key]['input_shape'][0] = None
-                summary[m_key]['output_shape'] = list(output.size())
+                if output.__class__.__name__ == 'tuple':
+                    summary[m_key]['output_shape'] = list(output[0].size())
+                else:
+                    summary[m_key]['output_shape'] = list(output.size())
                 summary[m_key]['output_shape'][0] = None
 
                 params = 0
                 # iterate through parameters and count num params
                 for name, p in module._parameters.items():
                     params += torch.numel(p.data)
-                    if p.requires_grad:
-                        summary[m_key]['trainable'] = True
-                    else:
-                        summary[m_key]['trainable'] = False
+                    summary[m_key]['trainable'] = p.requires_grad
 
                 summary[m_key]['nb_params'] = params
 
@@ -597,7 +599,16 @@ class Module(object):
             h.remove()
 
         # print out neatly
-        names = list(self._modules.keys())
+        def get_names(module, name, acc):
+            if not module._modules:
+                acc.append(name)
+            else:
+                for key in module._modules.keys():
+                    p_name = key if name == "" else name + "." + key
+                    get_names(module._modules[key], p_name, acc)
+        names = []
+        get_names(self, "", names)
+
         col_width = 25  # should be >= 12
         summary_width = 61
 
