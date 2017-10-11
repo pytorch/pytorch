@@ -839,41 +839,6 @@ TH_API void THNN_(SpatialConvolutionMM_accGradParameters)(
           int padW, int padH,
           accreal scale);
 
-TH_API void THNN_(SpatialDepthWiseConvolution_updateOutput)(
-          THNNState *state,
-          THTensor *input,
-          THTensor *output,
-          THTensor *weight,
-          THTensor *bias,         // [OPTIONAL]
-          THTensor *finput,
-          THTensor *fgradInput,
-          int kW, int kH,
-          int dW, int dH,
-          int padW, int padH);
-TH_API void THNN_(SpatialDepthWiseConvolution_updateGradInput)(
-          THNNState *state,
-          THTensor *input,
-          THTensor *gradOutput,
-          THTensor *gradInput,
-          THTensor *weight,
-          THTensor *finput,
-          THTensor *fgradInput,
-          int kW, int kH,
-          int dW, int dH,
-          int padW, int padH);
-TH_API void THNN_(SpatialDepthWiseConvolution_accGradParameters)(
-          THNNState *state,
-          THTensor *input,
-          THTensor *gradOutput,
-          THTensor *gradWeight,
-          THTensor *gradBias,     // [OPTIONAL]
-          THTensor *finput,
-          THTensor *fgradInput,
-          int kW, int kH,
-          int dW, int dH,
-          int padW, int padH,
-          accreal scale);
-
 TH_API void THNN_(SpatialConvolutionLocal_updateOutput)(
           THNNState *state,
           THTensor *input,
