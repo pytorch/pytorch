@@ -137,7 +137,8 @@ __global__ void depthwiseConvolutionAccGradParameters(
     const int outputWidth, const int outputHeight,
     const int kernelWidth, const int kernelHeight,
     const int strideWidth, const int strideHeight,
-    const int padWidth, const int padHeight)
+    const int padWidth, const int padHeight,
+    const int dilationWidth, const int dilationHeight)
 {
   /* if (blockIdx.x == 0 && threadIdx.x == 0) { */
   /*   printf("Params - block nelem: %d, channels: %d, w: %d, h: %d, oW: %d, oH: %d, kW: %d, kH: %d\n", */
@@ -169,8 +170,8 @@ __global__ void depthwiseConvolutionAccGradParameters(
       int go_h_offset = (idx / outputWidth) % outputHeight;
       int batch = (idx / outputWidth / outputHeight) % batchSize;
 
-      int i_w_offset = (go_w_offset * strideWidth) + kW - padWidth;
-      int i_h_offset = (go_h_offset * strideHeight) + kH - padHeight;
+      int i_w_offset = (go_w_offset * strideWidth) + (kW * dilationWidth) - padWidth;
+      int i_h_offset = (go_h_offset * strideHeight) + (kH * dilationHeight) - padHeight;
       if (i_w_offset >= 0 && i_h_offset >= 0 && i_w_offset < inputWidth && i_h_offset < inputHeight) {
         grad = THCNumerics<T>::add(
             grad,

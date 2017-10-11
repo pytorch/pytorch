@@ -39,11 +39,17 @@ void THNN_(DepthwiseConvolution_updateOutput)(
   int height = input->size[2];
   int width = input->size[3];
 
-  int outputHeight = (height + 2 * padH - (dilationH * (kH - 1) + 1)) / dH + 1;
-  int outputWidth = (width + 2 * padW - (dilationW * (kW - 1) + 1)) / dW + 1;
-  /* printf("output h %d, output w %d\n", outputHeight, outputWidth); */
+  /* int outputWidth = (width + 2*padW - (dilationW * (kW - 1) + 1)) / dW + 1; */
+  /* int outputHeight = (height + 2*padH - (dilationH * (kH - 1) + 1)) / dH + 1; */
 
-  THCTensor_(resize4d)(state, output, batchSize, inputChannels, outputHeight, outputWidth);
+  /* int outputHeight = (height + 2 * padH - (dilationH * (kH - 1) + 1)) / dH + 1; */
+  /* int outputWidth = (width + 2 * padW - (dilationW * (kW - 1) + 1)) / dW + 1; */
+
+  int outputHeight = output->size[2];
+  int outputWidth = output->size[3];
+  printf("output h %d, output w %d\n", outputHeight, outputWidth);
+
+  /* THCTensor_(resize4d)(state, output, batchSize, inputChannels, outputHeight, outputWidth); */
 
   THCDeviceTensor<real, 4> dInput = toDeviceTensor<real, 4>(state, input);
   THCDeviceTensor<real, 4> dWeight = toDeviceTensor<real, 4>(state, weight);
@@ -136,7 +142,6 @@ void THNN_(DepthwiseConvolution_accGradParameters)(
   assert(THCTensor_(isContiguous)(state, gradOutput));
 
   // No stride, padding, dilation, yet...
-  assert(dilationW == dilationH == 1);
 
   int batchSize = input->size[0];
   int inputChannels = input->size[1];
@@ -170,7 +175,7 @@ void THNN_(DepthwiseConvolution_accGradParameters)(
 
   depthwiseConvolutionAccGradParameters<<<grid, block, smem, THCState_getCurrentStream(state)>>>(
       dGradOutput, dInput, dGradWeight, batchSize, inputChannels, n, width, height,
-      outputWidth, outputHeight, kW, kH, dW, dH, padW, padH);
+      outputWidth, outputHeight, kW, kH, dW, dH, padW, padH, dilationW, dilationH);
   THCudaCheck(cudaGetLastError());
 }
 
