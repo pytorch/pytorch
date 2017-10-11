@@ -10,7 +10,7 @@
 #include "common.h"
 
 template <typename T, typename IndexType>
-__global__ void depthwiseConvolutionUpdateOutput(
+__global__ void spatialDepthwiseConvolutionUpdateOutput(
     const THCDeviceTensor<T, 4> input,
     THCDeviceTensor<T, 4> output,
     const THCDeviceTensor<T, 4> weight,
@@ -69,7 +69,7 @@ __global__ void depthwiseConvolutionUpdateOutput(
 }
 
 template <typename T, typename IndexType>
-__global__ void depthwiseConvolutionUpdateGradInput(
+__global__ void spatialDepthwiseConvolutionUpdateGradInput(
     const THCDeviceTensor<T, 4> gradOutput,
     THCDeviceTensor<T, 4> gradInput,
     const THCDeviceTensor<T, 4> weight,
@@ -134,7 +134,7 @@ __global__ void depthwiseConvolutionUpdateGradInput(
 }
 
 template <typename T, typename IndexType>
-__global__ void depthwiseConvolutionAccGradParameters(
+__global__ void spatialDepthwiseConvolutionAccGradParameters(
     const THCDeviceTensor<T, 4> gradOutput,
     const THCDeviceTensor<T, 4> input,
     THCDeviceTensor<T, 4> gradWeight,
@@ -214,5 +214,5 @@ __global__ void depthwiseConvolutionAccGradParameters(
   /* } */
 }
 
-#include "generic/DepthwiseConvolution.cu"
+#include "generic/SpatialDepthwiseConvolution.cu"
 #include "THCGenerateFloatTypes.h"

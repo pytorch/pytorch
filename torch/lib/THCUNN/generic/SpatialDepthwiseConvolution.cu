@@ -1,8 +1,8 @@
 #ifndef THC_GENERIC_FILE
-#define THC_GENERIC_FILE "generic/DepthwiseConvolution.cu"
+#define THC_GENERIC_FILE "generic/SpatialDepthwiseConvolution.cu"
 #else
 
-static inline void THNN_(DepthwiseConvolution_shapeCheck)(
+static inline void THNN_(SpatialDepthwiseConvolution_shapeCheck)(
                          THCState *state,
                          THCTensor *input, THCTensor *gradOutput,
                          THCTensor *weight, THCTensor *bias,
@@ -13,7 +13,7 @@ static inline void THNN_(DepthwiseConvolution_shapeCheck)(
 
 }
 
-void THNN_(DepthwiseConvolution_updateOutput)(
+void THNN_(SpatialDepthwiseConvolution_updateOutput)(
                   THCState *state,
                   THCTensor *input,
                   THCTensor *output,
@@ -68,14 +68,14 @@ void THNN_(DepthwiseConvolution_updateOutput)(
   /* dim3 grid(1); */
   /* dim3 block(1); */
 
-  depthwiseConvolutionUpdateOutput<<<grid, block, 0, THCState_getCurrentStream(state)>>>(
+  spatialDepthwiseConvolutionUpdateOutput<<<grid, block, 0, THCState_getCurrentStream(state)>>>(
     dInput, dOutput, dWeight, n, outputChannels, depthwiseMultiplier, width, height, outputWidth, outputHeight,
     kW, kH, dW, dH, padW, padH, dilationW, dilationH);
 
   THCudaCheck(cudaGetLastError());
 }
 
-void THNN_(DepthwiseConvolution_updateGradInput)(
+void THNN_(SpatialDepthwiseConvolution_updateGradInput)(
                   THCState *state,
                   THCTensor *input,
                   THCTensor *gradOutput,
@@ -121,14 +121,14 @@ void THNN_(DepthwiseConvolution_updateGradInput)(
   /* dim3 grid(1); */
   /* dim3 block(1); */
 
-  depthwiseConvolutionUpdateGradInput<<<grid, block, 0, THCState_getCurrentStream(state)>>>(
+  spatialDepthwiseConvolutionUpdateGradInput<<<grid, block, 0, THCState_getCurrentStream(state)>>>(
     dGradOutput, dGradInput, dWeight, n, inputChannels, depthwiseMultiplier, width, height, outputWidth,
     outputHeight, kW, kH, dW, dH, padW, padH, dilationW, dilationH);
 
   THCudaCheck(cudaGetLastError());
 }
 
-void THNN_(DepthwiseConvolution_accGradParameters)(
+void THNN_(SpatialDepthwiseConvolution_accGradParameters)(
                   THCState *state,
                   THCTensor *input,
                   THCTensor *gradOutput,
@@ -183,7 +183,7 @@ void THNN_(DepthwiseConvolution_accGradParameters)(
 
   /* printf("blocks: %d, threads: %d\n", blocks, block.x); */
 
-  depthwiseConvolutionAccGradParameters<<<grid, block, smem, THCState_getCurrentStream(state)>>>(
+  spatialDepthwiseConvolutionAccGradParameters<<<grid, block, smem, THCState_getCurrentStream(state)>>>(
       dGradOutput, dInput, dGradWeight, batchSize, outputChannels, depthwiseMultiplier, n, width, height,
       outputWidth, outputHeight, kW, kH, dW, dH, padW, padH, dilationW, dilationH);
   THCudaCheck(cudaGetLastError());
