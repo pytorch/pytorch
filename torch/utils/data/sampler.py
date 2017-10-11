@@ -18,12 +18,14 @@ class RandomCycleIter:
     def __iter__(self):
         return self
 
-    def next(self):
+    def __next__(self):
         self.i += 1
         if self.i == self.length:
             self.i = 0
             random.shuffle(self.data_list)
         return self.data_list[self.i]
+    
+    next = __next__ # Py2 
 
 def class_aware_sample_generator(cls_iter, data_iter_list, n):
     i = 0
