@@ -93,6 +93,7 @@ from caffe2.proto import caffe2_pb2
 from caffe2.python.parallel_workers import Metrics, State, \
     WorkerCoordinator, GlobalWorkerCoordinator, Worker, run_worker
 
+logging.basicConfig()
 log = logging.getLogger("data_workers")
 log.setLevel(logging.INFO)
 LOG_INT_SECS = 60

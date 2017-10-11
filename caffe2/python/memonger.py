@@ -31,6 +31,7 @@ import logging
 from future.utils import viewitems, viewvalues
 import caffe2.python._import_c_extension as C
 
+logging.basicConfig()
 log = logging.getLogger("memonger")
 log.setLevel(logging.INFO)
 LiveRange = collections.namedtuple('LiveRange', ["defined", "used", "size"])

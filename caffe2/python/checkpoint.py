@@ -26,6 +26,7 @@ from caffe2.python import core, context
 from caffe2.python.net_builder import ops
 from caffe2.python.task import Node, Task, TaskGroup, TaskOutput, WorkspaceType
 
+logging.basicConfig()
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 

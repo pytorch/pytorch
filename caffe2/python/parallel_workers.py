@@ -58,6 +58,7 @@ import traceback
 
 from abc import ABCMeta, abstractmethod
 
+logging.basicConfig()
 log = logging.getLogger("parallel_workers")
 log.setLevel(logging.INFO)
 LOG_INT_SECS = 60

@@ -25,6 +25,7 @@ import tempfile
 import shutil
 import logging
 
+logging.basicConfig()
 log = logging.getLogger("parallelize_gpu_bmuf_distributed_test")
 log.setLevel(logging.INFO)
 
