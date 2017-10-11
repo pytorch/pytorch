@@ -18,11 +18,23 @@
 
 namespace caffe2 {
 
-OPERATOR_SCHEMA(MPICreateCommonWorld);
-OPERATOR_SCHEMA(MPIBroadcast);
-OPERATOR_SCHEMA(MPIReduce);
-OPERATOR_SCHEMA(MPIAllgather);
-OPERATOR_SCHEMA(MPIAllreduce);
+OPERATOR_SCHEMA(MPICreateCommonWorld)
+  .NumInputs(0)
+  .NumOutputs(1);
+OPERATOR_SCHEMA(MPIBroadcast)
+  .NumInputs(2)
+  .NumOutputs(1)
+  .EnforceInplace({{1, 0}});
+OPERATOR_SCHEMA(MPIReduce)
+  .NumInputs(2)
+  .NumOutputs(1);
+OPERATOR_SCHEMA(MPIAllgather)
+  .NumInputs(2)
+  .NumOutputs(1);
+OPERATOR_SCHEMA(MPIAllreduce)
+  .NumInputs(2)
+  .NumOutputs(1)
+  .AllowInplace({{1, 0}});
 OPERATOR_SCHEMA(MPISendTensor);
 OPERATOR_SCHEMA(MPIReceiveTensor);
 
