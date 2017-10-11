@@ -12,7 +12,7 @@ void THNN_(ClassNLLCriterion_updateOutput)(
           THTensor *total_weight,
           int64_t ignore_index)
 {
-  THNN_CHECK_DIM_SIZE(output, 1, 0, 1);
+  THTensor_(resize1d)(output, 1);
   THNN_CHECK_DIM_SIZE(total_weight, 1, 0, 1);
   int n_dims = THTensor_(nDimension)(input);
   int n_classes = THTensor_(size)(input, n_dims - 1);

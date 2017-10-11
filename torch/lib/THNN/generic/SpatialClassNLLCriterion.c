@@ -38,6 +38,7 @@ void THNN_(SpatialClassNLLCriterion_updateOutput)(
           int64_t ignore_index)
 {
   INITIAL_CHECK;
+  THTensor_(resize1d)(output, 1);
 
   input = THTensor_(newContiguous)(input);
   target = THIndexTensor_(newContiguous)(target);
