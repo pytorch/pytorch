@@ -17,8 +17,15 @@ class Addmm(InplaceFunction):
 
     @staticmethod
     def symbolic(g, add_matrix, matrix1, matrix2, beta=1, alpha=1, inplace=False):
-        # TODO: test if broadcasting occurred
-        return g.op("Gemm", matrix1, matrix2, add_matrix, beta_f=beta, alpha_f=alpha, broadcast_i=True)
+        assert matrix1.hasType() and matrix2.hasType() and add_matrix.hasType()
+        sizes1 = matrix1.type().sizes();
+        sizes2 = matrix2.type().sizes();
+        sizes_add = add_matrix.type().sizes();
+        assert len(sizes1) == 2 and len(sizes2) == 2 and len(sizes_add) == 2
+        broadcast = False
+        if sizes_add[0] != sizes1[0] or sizes_add[1] != sizes2[1]:
+            broadcast = True
+        return g.op("Gemm", matrix1, matrix2, add_matrix, beta_f=beta, alpha_f=alpha, broadcast_i=broadcast)
 
     @staticmethod
     def forward(ctx, add_matrix, matrix1, matrix2, beta=1, alpha=1, inplace=False):

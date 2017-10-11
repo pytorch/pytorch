@@ -71,6 +71,14 @@ class TestONNX(TestCase):
         y = Variable(torch.randn(2, 3), volatile=True)
         self.assertONNXExpected(export_to_string(FuncModule(lambda inputs: torch.cat(inputs, 1)), ((x, y),)))
 
+    def test_addmm(self):
+        m1 = Variable(torch.randn(2, 3), requires_grad=True)
+        m2 = Variable(torch.randn(3, 4), requires_grad=True)
+        m3 = Variable(torch.randn(1, 1), requires_grad=True)
+        trace, _ = torch.jit.trace(lambda x, y, z: torch.addmm(torch.addmm(z, x, y), x, y), (m1, m2, m3))
+        torch._C._jit_pass_onnx(trace)
+        self.assertONNXExpected(trace.export())
+
     def test_permute(self):
         x = Variable(torch.Tensor([[[[[[0]]]]]]), requires_grad=True)
         self.assertONNXExpected(export_to_string(FuncModule(lambda x: x.permute(0, 1, 4, 2, 5, 3)), (x, )))
