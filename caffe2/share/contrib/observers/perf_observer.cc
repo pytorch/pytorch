@@ -50,8 +50,7 @@ bool PerfNetObserver::Start() {
        whenever we measure operator delay */
     const auto& operators = subject_->GetOperators();
     for (auto* op : operators) {
-      observerMap_[op] =
-          op->AddObserver(caffe2::make_unique<PerfOperatorObserver>(op, this));
+      op->SetObserver(caffe2::make_unique<PerfOperatorObserver>(op, this));
     }
   }
 
@@ -73,8 +72,7 @@ bool PerfNetObserver::Stop() {
     for (int idx = 0; idx < operators.size(); ++idx) {
       const auto* op = operators[idx];
       auto name = getObserverName(op, idx);
-      double delay = static_cast<const PerfOperatorObserver*>(
-                         op->GetObserver(observerMap_[op]))
+      double delay = static_cast<const PerfOperatorObserver*>(op->GetObserver())
                          ->getMilliseconds();
       std::pair<std::string, double> name_delay_pair = {name, delay};
       operator_delays.push_back(name_delay_pair);
@@ -84,9 +82,8 @@ bool PerfNetObserver::Stop() {
     /* clear all operator delay after use so that we don't spent time
        collecting the operator delay info in later runs */
     for (auto* op : operators) {
-      op->RemoveObserver(observerMap_[op]);
+      op->RemoveObserver();
     }
-    observerMap_.clear();
   }
   return true;
 }
