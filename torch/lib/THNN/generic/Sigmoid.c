@@ -12,7 +12,6 @@ void THNN_(Sigmoid_updateOutput)(
 
 void THNN_(Sigmoid_updateGradInput)(
           THNNState *state,
-          THTensor *input,
           THTensor *gradOutput,
           THTensor *gradInput,
           THTensor *output)
