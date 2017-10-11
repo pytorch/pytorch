@@ -273,13 +273,15 @@ def recurrent_net(
             'backward_link_internal': [str(l) for l in backward_link_internal],
             'backward_link_external': [str(l) for l in backward_link_external],
             'backward_link_offset': backward_link_offset,
-            'backward_step_net': str(backward_cell_net.Proto()),
             'outputs_with_grads': outputs_with_grads,
             'recompute_blobs_on_backward': [
                 str(b) for b in recompute_blobs_on_backward
             ],
             'param_grads': param_grads,
         }
+        if len(backward_cell_net.Proto().op) != 0:
+            backward_args['backward_step_net'] = backward_cell_net.Proto()
+
 
     results = net.RecurrentNetwork(
         all_inputs,
@@ -295,7 +297,7 @@ def recurrent_net(
         link_external=[str(l) for l in link_external],
         link_offset=link_offset,
         enable_rnn_executor=1,
-        step_net=str(cell_net.Proto()),
+        step_net=cell_net.Proto(),
         timestep="timestep" if timestep is None else str(timestep),
         **backward_args
     )

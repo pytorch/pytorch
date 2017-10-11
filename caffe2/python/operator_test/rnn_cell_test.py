@@ -1078,18 +1078,15 @@ class RNNCellTest(hu.HypothesisTestCase):
         self.assertTrue(workspace.RunNet(predict_net.Proto().name))
 
         # Validate device options set correctly for the RNNs
-        import google.protobuf.text_format as protobuftx
         for op in predict_net.Proto().op:
             if op.type == 'RecurrentNetwork':
                 for arg in op.arg:
                     if arg.name == "step_net":
-                        step_proto = caffe2_pb2.NetDef()
-                        protobuftx.Merge(arg.s.decode("ascii"), step_proto)
-                        for step_op in step_proto.op:
+                        for step_op in arg.n.op:
                             self.assertEqual(0, step_op.device_option.device_type)
                             self.assertEqual(1, step_op.device_option.cuda_gpu_id)
                     elif arg.name == 'backward_step_net':
-                        self.assertEqual(b"", arg.s)
+                        self.assertEqual(caffe2_pb2.NetDef(), arg.n)
 
     def test_lstm_params(self):
         model = ModelHelper(name="lstm_params_test")
