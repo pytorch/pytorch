@@ -20,7 +20,7 @@ you can specify optimizer-specific options such as the learning rate, weight dec
 
     If you need to move a model to GPU via `.cuda()`, please do so before 
     constructing optimizers for it. Parameters of a model after `.cuda()` will
-    be differnt objects with those before the call. 
+    be different objects with those before the call. 
 
     In general, you should make sure that optimized parameters live in  
     consistent locations when optimizers are constructed and used.
