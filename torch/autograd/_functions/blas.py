@@ -18,13 +18,19 @@ class Addmm(InplaceFunction):
     @staticmethod
     def symbolic(g, add_matrix, matrix1, matrix2, beta=1, alpha=1, inplace=False):
         assert matrix1.hasType() and matrix2.hasType() and add_matrix.hasType()
-        sizes1 = matrix1.type().sizes();
-        sizes2 = matrix2.type().sizes();
-        sizes_add = add_matrix.type().sizes();
-        assert len(sizes1) == 2 and len(sizes2) == 2 and len(sizes_add) == 2
+        sizes1 = matrix1.type().sizes()
+        sizes2 = matrix2.type().sizes()
+        sizes_add = add_matrix.type().sizes()
         broadcast = False
-        if sizes_add[0] != sizes1[0] or sizes_add[1] != sizes2[1]:
+        assert len(sizes1) + len(sizes2) - 2 >= len(sizes_add)
+        if (len(sizes1) + len(sizes2) - 2 > len(sizes_add)):
             broadcast = True
+        else:
+            sizes12 = sizes1[:-1] + sizes2[1:]
+            for i, j in zip(sizes12, sizes_add):
+                if i != j:
+                    broadcast = True
+                    break
         return g.op("Gemm", matrix1, matrix2, add_matrix, beta_f=beta, alpha_f=alpha, broadcast_i=broadcast)
 
     @staticmethod
