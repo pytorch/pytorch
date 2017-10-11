@@ -16,6 +16,15 @@ To construct an :class:`Optimizer` you have to give it an iterable containing th
 parameters (all should be :class:`~torch.autograd.Variable` s) to optimize. Then,
 you can specify optimizer-specific options such as the learning rate, weight decay, etc.
 
+.. note::
+
+    If you need to move a model to GPU via `.cuda()`, please do so before 
+    constructing optimizers for it. Parameters of a model after `.cuda()` will
+    be differnt objects with those before the call. 
+
+    In general, you should make sure that optimized parameters live in  
+    consistent locations when optimizers are constructed and used.
+
 Example::
 
     optimizer = optim.SGD(model.parameters(), lr = 0.01, momentum=0.9)
