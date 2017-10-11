@@ -331,7 +331,13 @@ bool THC_reduceAll(THCState* state,
   // If our destination is not on the device, copy the value back to
   // the host (synchronous!)
   if (!outOnDevice) {
-    THCudaCheck(cudaMemcpy(out, devOut, sizeof(AccT), cudaMemcpyDeviceToHost));
+    cudaStream_t stream = THCState_getCurrentStream(state);
+    THCudaCheck(cudaMemcpyAsync(out, 
+                                devOut, 
+                                sizeof(AccT), 
+                                cudaMemcpyDeviceToHost, 
+                                stream));
+    THCudaCheck(cudaStreamSynchronize(stream));
   }
 
   if (freeDevOut) {
