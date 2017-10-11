@@ -470,7 +470,7 @@ THC_API void THCTensor_(geometric)(THCState* state, THCTensor *self_, double p)
 THC_API void THCTensor_(clampedRandom)(THCState* state, THCTensor *self_, int64_t min_val, int64_t max_val)
 {
   THArgCheck(min_val < max_val, 2,
-             "max must be greater than min, but got: min = %d, max = %d", min_val, max_val);
+             "max must be greater than min, but got: min = %lld, max = %lld", min_val, max_val);
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, self_));
   Generator* gen = THCRandom_getGenerator(state);
   THCTensor *self = THCTensor_(newContiguous)(state, self_);
@@ -529,6 +529,8 @@ THC_API void THCTensor_(random)(THCState* state, THCTensor *self_)
   THCTensor_(freeCopyTo)(state, self, self_);
 };
 
+#undef HLF_MANT_DIG
+#undef CURAND64
 #undef NUM_BLOCKS
 
 #endif
