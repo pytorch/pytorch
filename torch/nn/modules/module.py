@@ -554,7 +554,7 @@ class Module(object):
     def summary(self, input_size):
         def register_hook(module):
             def hook(module, input, output):
-                if module._modules: # only want base layers
+                if module._modules:  # only want base layers
                     return
                 class_name = str(module.__class__).split('.')[-1].split("'")[0]
                 module_idx = len(summary)
