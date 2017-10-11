@@ -133,7 +133,6 @@ auto ConvParams::use_nnpack(const at::Tensor& input) const -> bool {
 auto ConvParams::is_eligible_for_depthwise_convolution(
         const at::Tensor& input, const at::Tensor& weight, int groups) const -> bool {
   return input.type().isCuda() &&
-         !is_strided() &&
          !is_dilated() &&
          input.ndimension() == 4 &&
          input.size(1) == groups &&

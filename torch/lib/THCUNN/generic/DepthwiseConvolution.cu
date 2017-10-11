@@ -136,7 +136,7 @@ void THNN_(DepthwiseConvolution_accGradParameters)(
   assert(THCTensor_(isContiguous)(state, gradOutput));
 
   // No stride, padding, dilation, yet...
-  assert(dW == dH == dilationW == dilationH == 1);
+  assert(dilationW == dilationH == 1);
 
   int batchSize = input->size[0];
   int inputChannels = input->size[1];
@@ -170,7 +170,7 @@ void THNN_(DepthwiseConvolution_accGradParameters)(
 
   depthwiseConvolutionAccGradParameters<<<grid, block, smem, THCState_getCurrentStream(state)>>>(
       dGradOutput, dInput, dGradWeight, batchSize, inputChannels, n, width, height,
-      outputWidth, outputHeight, kW, kH, padW, padH);
+      outputWidth, outputHeight, kW, kH, dW, dH, padW, padH);
   THCudaCheck(cudaGetLastError());
 }
 
