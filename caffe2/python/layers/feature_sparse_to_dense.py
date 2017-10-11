@@ -103,10 +103,10 @@ class FeatureSparseToDense(ModelLayer):
                          )
                     )
                 ))
-            elif feature_specs.feature_type == 'FLOAT_TENSOR':
-                # We don't know dimensions of tensors in input data. Even though
-                # they should match dimensions from feature config, we keep
-                # ranges blob to check input data later.
+            elif feature_specs.feature_type == 'EMBEDDING':
+                # We don't know dimensions of embeddings in input data.
+                # Even though they should match dimensions from feature config,
+                # we keep ranges blob to check input data later.
                 outputs.append((
                     field,
                     schema.Struct(
@@ -215,7 +215,7 @@ class FeatureSparseToDense(ModelLayer):
                           self.output_schema[field].ids())
                 net.Alias(record[field].values.values(),
                           self.output_schema[field].scores())
-            elif feature_specs.feature_type == 'FLOAT_TENSOR':
+            elif feature_specs.feature_type == 'EMBEDDING':
                 ranges = net.LengthsToRanges(
                     record[field].values.lengths(),
                     net.NextScopedBlob('embeddings_ranges')
