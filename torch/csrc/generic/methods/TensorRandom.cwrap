@@ -20,6 +20,7 @@
   defined_if: "!IS_DISTRIBUTED"
   backends:
     - CPU
+    - CUDA
   return: self
   options:
     - cname: random

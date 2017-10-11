@@ -1130,10 +1130,10 @@ add_docstr_all('random_',
 random_(from=0, to=None, *, generator=None)
 
 Fills this tensor with numbers sampled from the discrete uniform distribution
-over [from, to - 1]. If not specified, the values are only bounded by this
-tensor's data type.
-
-This method is not available for CUDA tensors.  Use :meth:`~Tensor.uniform_` instead.
+over [from, to - 1]. If not specified, the values are usually only bounded by
+this tensor's data type. However, for floating point types, if unspecified,
+range will be [0, 2^mantissa] to ensure that every value is representable.
+For example, `torch.DoubleTensor(1).random_()` will be uniform in [0, 2^53].
 """)
 
 add_docstr_all('reciprocal',
