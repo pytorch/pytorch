@@ -38,10 +38,7 @@
 
 namespace caffe2 {
 
-class OperatorBase;
-typedef ObserverBase<OperatorBase> OperatorObserver;
-
-class OperatorBase : public Observable<OperatorBase> {
+class OperatorBase {
  public:
   explicit OperatorBase(const OperatorDef& operator_def, Workspace* ws);
   virtual ~OperatorBase() noexcept {}
@@ -188,6 +185,14 @@ class OperatorBase : public Observable<OperatorBase> {
   }
 
  public:
+  void SetObserver(std::unique_ptr<ObserverBase<OperatorBase>> observer) {
+    observer_ = std::move(observer);
+  }
+
+  void RemoveObserver() {
+    observer_ = nullptr;
+  }
+
   void RecordLastFailedOpNetPosition() {
     if (net_position_ != kNoNetPositionSet) {
       VLOG(1) << "Operator with id " << net_position_ << " failed";
@@ -229,6 +234,14 @@ class OperatorBase : public Observable<OperatorBase> {
  public:
   static constexpr int kNoNetPositionSet = -1;
 
+  ObserverBase<OperatorBase>* GetObserver() {
+    return observer_.get();
+  }
+
+  const ObserverBase<OperatorBase>* GetObserver() const {
+    return observer_.get();
+  }
+
  private:
   Workspace* operator_ws_;
   std::shared_ptr<const OperatorDef> operator_def_;
@@ -240,6 +253,7 @@ class OperatorBase : public Observable<OperatorBase> {
   int net_position_{kNoNetPositionSet};
 
  protected:
+  std::unique_ptr<ObserverBase<OperatorBase>> observer_;
   // An event used by asynchronous execution.
   Event event_;
 
@@ -310,16 +324,18 @@ class Operator : public OperatorBase {
   // instead of Run().
   bool Run(int stream_id = 0) final {
     try {
-      StartAllObservers();
-
+      if (observer_) {
+        observer_->Start();
+      }
       context_.SwitchToDevice(stream_id);
       bool result = RunOnDevice();
       if (!result) {
         this->RecordLastFailedOpNetPosition();
       }
       context_.FinishDeviceComputation(); // throws on error
-
-      StopAllObservers();
+      if (observer_) {
+        observer_->Stop();
+      }
 
       return result;
     } catch (EnforceNotMet& err) {

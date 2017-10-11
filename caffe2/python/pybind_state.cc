@@ -25,7 +25,6 @@
 #include "caffe2/core/predictor.h"
 #include "caffe2/core/transform.h"
 #include "caffe2/mkl/mkl_utils.h"
-#include "caffe2/observers/time_observer.h"
 #include "caffe2/utils/cpuid.h"
 #include "caffe2/utils/string_utils.h"
 #include "google/protobuf/io/coded_stream.h"
@@ -376,21 +375,6 @@ void addObjectMethods(py::module& m) {
     py::gil_scoped_release g;
     CAFFE_ENFORCE(net->Run());
   });
-
-  py::class_<ObserverBase<NetBase>>(m, "Observer")
-      .def(
-          "average_time",
-          [](ObserverBase<NetBase>* ob) {
-            auto* cast_ob = dynamic_cast_if_rtti<TimeObserver<NetBase>*>(ob);
-            CAFFE_ENFORCE(
-                cast_ob, "Observer does not implement this function.");
-            return cast_ob->average_time();
-          })
-      .def("average_time_children", [](ObserverBase<NetBase>* ob) {
-        auto* cast_ob = dynamic_cast_if_rtti<TimeObserver<NetBase>*>(ob);
-        CAFFE_ENFORCE(cast_ob, "Observer does not implement this function.");
-        return cast_ob->average_time_children();
-      });
 
   py::class_<Blob>(m, "Blob")
       .def(
@@ -901,41 +885,6 @@ void addGlobalMethods(py::module& m) {
     }
     return true;
   });
-  m.def(
-      "add_observer_to_net",
-      [](const std::string& net_name, const std::string& observer_type) {
-        CAFFE_ENFORCE(gWorkspace);
-        CAFFE_ENFORCE(
-            gWorkspace->GetNet(net_name), "Can't find net ", net_name);
-        py::gil_scoped_release g;
-
-        NetBase* net = gWorkspace->GetNet(net_name);
-
-#define REGISTER_PYTHON_EXPOSED_OBSERVER(ob_type) \
-  {                                               \
-    if (observer_type.compare(#ob_type) == 0) {   \
-      unique_ptr<ob_type<NetBase>> net_ob =       \
-          make_unique<ob_type<NetBase>>(net);     \
-      net->AddObserver(std::move(net_ob));        \
-    }                                             \
-  }
-
-        REGISTER_PYTHON_EXPOSED_OBSERVER(TimeObserver);
-
-#undef REGISTER_PYTHON_EXPOSED_OBSERVER
-
-        return net->NumObservers();
-      });
-  m.def(
-      "get_observer_from_net",
-      [](const std::string& net_name, const size_t index) {
-        CAFFE_ENFORCE(gWorkspace);
-        CAFFE_ENFORCE(
-            gWorkspace->GetNet(net_name), "Can't find net ", net_name);
-        py::gil_scoped_release g;
-        NetBase* net = gWorkspace->GetNet(net_name);
-        return py::cast(net->GetObserver(index));
-      });
   m.def(
       "benchmark_net",
       [](const std::string& name,

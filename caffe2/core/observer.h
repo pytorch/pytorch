@@ -16,8 +16,6 @@
 
 #pragma once
 
-#include "caffe2/core/logging.h"
-
 namespace caffe2 {
 
 /**
@@ -44,68 +42,6 @@ class ObserverBase {
 
  protected:
   T* subject_;
-};
-
-/**
- *  Inherit to make your class observable.
- */
-template <class T>
-class Observable {
- public:
-  using Observer = ObserverBase<T>;
-
-  /* Returns a reference to the observer after addition. */
-  Observer* AddObserver(std::unique_ptr<Observer> observer) {
-    observers_.emplace_back(std::move(observer));
-    return observers_.back().get();
-  }
-
-  size_t NumObservers() {
-    return observers_.size();
-  }
-
-  void SetObserver(std::unique_ptr<Observer> observer, size_t index) {
-    CAFFE_ENFORCE(index < observers_.size(), "Index out of bounds.");
-    observers_.at(index) = std::move(observer);
-  }
-
-  size_t GetObserverIndex(Observer* observer) {
-    for (size_t index = 0; index < observers_.size(); ++index) {
-      if (observers_.at(index).get() == observer) {
-        return index;
-      }
-    }
-    CAFFE_THROW("Observer not added to this net.");
-  }
-
-  Observer* GetObserver(size_t index) {
-    CAFFE_ENFORCE(index < observers_.size(), "Index out of bounds.");
-    return observers_.at(index).get();
-  }
-
-  void RemoveObserver(size_t index) {
-    CAFFE_ENFORCE(index < observers_.size(), "Index out of bounds.");
-    observers_.erase(observers_.begin() + index);
-  }
-
-  void RemoveObserver(Observer* observer) {
-    observers_.erase(observers_.begin() + GetObserverIndex(observer));
-  }
-
-  void StartAllObservers() {
-    for (const auto& observer : observers_) {
-      observer->Start();
-    }
-  }
-
-  void StopAllObservers() {
-    for (const auto& observer : observers_) {
-      observer->Stop();
-    }
-  }
-
- protected:
-  vector<std::unique_ptr<ObserverBase<T>>> observers_;
 };
 
 } // namespace caffe2

@@ -1875,13 +1875,6 @@ class Net(object):
             * [ScopedBlobReference(b) for b in outputs]
         )
 
-    def AddObserver(self, observer):
-        return C.add_observer_to_net(self._net.name, observer)
-
-    # This will return any observer added to the net.
-    def GetObserver(self, index):
-        return C.get_observer_from_net(self._net.name, index)
-
     @property
     def external_inputs(self):
         return [_get_blob_ref(x) for x in self._net.external_input]
