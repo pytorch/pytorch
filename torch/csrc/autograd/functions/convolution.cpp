@@ -135,7 +135,7 @@ auto ConvParams::is_eligible_for_depthwise_convolution(
   return input.type().isCuda() &&
          input.ndimension() == 4 &&
          input.size(1) == groups &&
-         input.size(1) == weight.size(0);
+         weight.size(1) % input.size(1) == 0; // output channels must be a multiple of input channels
 }
 
 std::string ConvForward::name() { return "ConvForward"; }

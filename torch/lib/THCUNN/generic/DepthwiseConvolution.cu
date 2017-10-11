@@ -45,9 +45,13 @@ void THNN_(DepthwiseConvolution_updateOutput)(
   /* int outputHeight = (height + 2 * padH - (dilationH * (kH - 1) + 1)) / dH + 1; */
   /* int outputWidth = (width + 2 * padW - (dilationW * (kW - 1) + 1)) / dW + 1; */
 
+  int outputChannels = output->size[1];
   int outputHeight = output->size[2];
   int outputWidth = output->size[3];
-  printf("output h %d, output w %d\n", outputHeight, outputWidth);
+
+  int depthwiseMultiplier = outputChannels / inputChannels;
+
+  printf("output ch %d, output h %d, output w %d, depth multiplier %d\n", outputChannels, outputHeight, outputWidth, depthwiseMultiplier);
 
   /* THCTensor_(resize4d)(state, output, batchSize, inputChannels, outputHeight, outputWidth); */
 
@@ -65,7 +69,7 @@ void THNN_(DepthwiseConvolution_updateOutput)(
   /* dim3 block(1); */
 
   depthwiseConvolutionUpdateOutput<<<grid, block, 0, THCState_getCurrentStream(state)>>>(
-    dInput, dOutput, dWeight, n, inputChannels, width, height, outputWidth, outputHeight,
+    dInput, dOutput, dWeight, n, outputChannels, depthwiseMultiplier, width, height, outputWidth, outputHeight,
     kW, kH, dW, dH, padW, padH, dilationW, dilationH);
 
   THCudaCheck(cudaGetLastError());
@@ -99,8 +103,11 @@ void THNN_(DepthwiseConvolution_updateGradInput)(
   int height = input->size[2];
   int width = input->size[3];
 
+  int outputChannels = gradOutput->size[1];
   int outputHeight = gradOutput->size[2];
   int outputWidth = gradOutput->size[3];
+
+  int depthwiseMultiplier = outputChannels / inputChannels;
 
   THCDeviceTensor<real, 4> dGradOutput = toDeviceTensor<real, 4>(state, gradOutput);
   THCDeviceTensor<real, 4> dGradInput = toDeviceTensor<real, 4>(state, gradInput);
@@ -115,7 +122,7 @@ void THNN_(DepthwiseConvolution_updateGradInput)(
   /* dim3 block(1); */
 
   depthwiseConvolutionUpdateGradInput<<<grid, block, 0, THCState_getCurrentStream(state)>>>(
-    dGradOutput, dGradInput, dWeight, n, inputChannels, width, height, outputWidth,
+    dGradOutput, dGradInput, dWeight, n, inputChannels, depthwiseMultiplier, width, height, outputWidth,
     outputHeight, kW, kH, dW, dH, padW, padH, dilationW, dilationH);
 
   THCudaCheck(cudaGetLastError());
@@ -148,15 +155,18 @@ void THNN_(DepthwiseConvolution_accGradParameters)(
   int height = input->size[2];
   int width = input->size[3];
 
+  int outputChannels = gradOutput->size[1];
   int outputHeight = gradOutput->size[2];
   int outputWidth = gradOutput->size[3];
+
+  int depthwiseMultiplier = outputChannels / inputChannels;
 
   THCDeviceTensor<real, 4> dGradOutput = toDeviceTensor<real, 4>(state, gradOutput);
   THCDeviceTensor<real, 4> dInput = toDeviceTensor<real, 4>(state, input);
   THCDeviceTensor<real, 4> dGradWeight = toDeviceTensor<real, 4>(state, gradWeight);
 
   // We parallelize so that each block computes a single value in gradWeight
-  int blocks = inputChannels * kH * kW;
+  int blocks = outputChannels * kH * kW;
 
   // Because each weight position is a function of convolving the gradOutput over
   // the input, we need batchSize * outputHeight * outputWidth individual calculations
@@ -174,7 +184,7 @@ void THNN_(DepthwiseConvolution_accGradParameters)(
   /* printf("blocks: %d, threads: %d\n", blocks, block.x); */
 
   depthwiseConvolutionAccGradParameters<<<grid, block, smem, THCState_getCurrentStream(state)>>>(
-      dGradOutput, dInput, dGradWeight, batchSize, inputChannels, n, width, height,
+      dGradOutput, dInput, dGradWeight, batchSize, outputChannels, depthwiseMultiplier, n, width, height,
       outputWidth, outputHeight, kW, kH, dW, dH, padW, padH, dilationW, dilationH);
   THCudaCheck(cudaGetLastError());
 }

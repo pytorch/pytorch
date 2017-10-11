@@ -15,7 +15,8 @@ __global__ void depthwiseConvolutionUpdateOutput(
     THCDeviceTensor<T, 4> output,
     const THCDeviceTensor<T, 4> weight,
     IndexType totalElements,
-    const int channels,
+    const int outputChannels,
+    const int depthwiseMultiplier,
     const int inputWidth, const int inputHeight,
     const int outputWidth, const int outputHeight,
     const int kernelWidth, const int kernelHeight,
@@ -31,13 +32,15 @@ __global__ void depthwiseConvolutionUpdateOutput(
   for (IndexType linearIndex = blockIdx.x * blockDim.x + threadIdx.x;
        linearIndex < totalElements;
        linearIndex += gridDim.x * blockDim.x) {
-    const int n = linearIndex / channels / outputHeight / outputWidth;
-    const int c = (linearIndex / outputHeight / outputWidth) % channels;
+    const int n = linearIndex / outputChannels / outputHeight / outputWidth;
+    const int c = (linearIndex / outputHeight / outputWidth) % outputChannels;
     const int h = (linearIndex / outputWidth) % outputHeight;
     const int w = linearIndex % outputWidth;
 
     /* printf("calculating for (n = %d, c = %d, h = %d, w = %d\n", n, c, h, w); */
 
+    const int inputChannel = c / depthwiseMultiplier;
+    const int inputChannels = outputChannels / depthwiseMultiplier;
     int weightOffset = c * kernelHeight * kernelWidth;
 
     T value = ScalarConvert<int, T>::to(0);
@@ -50,7 +53,7 @@ __global__ void depthwiseConvolutionUpdateOutput(
         /* printf("h_in %d, w_in %d\n", h_in, w_in); */
 
         if ((h_in >= 0) && (h_in < inputHeight) && (w_in >= 0) && (w_in < inputWidth)) {
-          const IndexType offset = ((n * channels + c) * inputHeight + h_in) * inputWidth + w_in;
+          const IndexType offset = ((n * inputChannels + inputChannel) * inputHeight + h_in) * inputWidth + w_in;
           /* printf("multiplying input offset: %d with weight offset: %d\n", offset, weightOffset); */
           value = THCNumerics<T>::add(
             value,
@@ -71,7 +74,8 @@ __global__ void depthwiseConvolutionUpdateGradInput(
     THCDeviceTensor<T, 4> gradInput,
     const THCDeviceTensor<T, 4> weight,
     IndexType totalElements,
-    const int channels,
+    const int inputChannels,
+    const int depthwiseMultiplier,
     const int inputWidth, const int inputHeight,
     const int outputWidth, const int outputHeight,
     const int kernelWidth, const int kernelHeight,
@@ -87,38 +91,42 @@ __global__ void depthwiseConvolutionUpdateGradInput(
   for (IndexType linearIndex = blockIdx.x * blockDim.x + threadIdx.x;
        linearIndex < totalElements;
        linearIndex += gridDim.x * blockDim.x) {
-    const int n = linearIndex / channels / inputHeight / inputWidth;
-    const int c = (linearIndex / inputHeight / inputWidth) % channels;
+    const int n = linearIndex / inputChannels / inputHeight / inputWidth;
+    const int c = (linearIndex / inputHeight / inputWidth) % inputChannels;
     const int h = (linearIndex / inputWidth) % inputHeight;
     const int w = linearIndex % inputWidth;
 
     /* printf("calculating for (n = %d, c = %d, h = %d, w = %d\n)", n, c, h, w); */
 
-    int weightOffset = c * kernelHeight * kernelWidth;
     T value = ScalarConvert<int, T>::to(0);
+    const int outputChannels = inputChannels * depthwiseMultiplier;
 
-    for (int kh = 0; kh < kernelHeight; ++kh) {
-      for (int kw = 0; kw < kernelWidth; ++kw) {
-        const int h_out_s = h + padHeight - kh * dilationHeight;
-        const int w_out_s = w + padWidth - kw * dilationWidth;
+    for (int multiplier = 0; multiplier < depthwiseMultiplier; ++multiplier) {
+      int och = (c * depthwiseMultiplier) + multiplier;
+      int weightOffset = och * kernelHeight * kernelWidth;
+      for (int kh = 0; kh < kernelHeight; ++kh) {
+        for (int kw = 0; kw < kernelWidth; ++kw) {
+          const int h_out_s = h + padHeight - kh * dilationHeight;
+          const int w_out_s = w + padWidth - kw * dilationWidth;
 
-        if (((h_out_s % strideHeight) == 0) && ((w_out_s % strideWidth) == 0)) {
-          const int h_out = h_out_s / strideHeight;
-          const int w_out = w_out_s / strideWidth;
+          if (((h_out_s % strideHeight) == 0) && ((w_out_s % strideWidth) == 0)) {
+            const int h_out = h_out_s / strideHeight;
+            const int w_out = w_out_s / strideWidth;
 
-          if ((h_out >= 0) && (h_out < outputHeight)
-                && (w_out >= 0) && (w_out < outputWidth)) {
-            /* printf("gradOutput h %d, w %d\n", h_out, w_out); */
+            if ((h_out >= 0) && (h_out < outputHeight)
+                  && (w_out >= 0) && (w_out < outputWidth)) {
+              /* printf("gradOutput h %d, w %d\n", h_out, w_out); */
 
-            const int offset = ((n * channels + c) * outputHeight + h_out)
-                  * outputWidth + w_out;
-            value = THCNumerics<T>::add(
-              value,
-              THCNumerics<T>::mul(weight.data()[weightOffset], gradOutput.data()[offset]));
+              const int offset = ((n * outputChannels + och) * outputHeight + h_out)
+                    * outputWidth + w_out;
+              value = THCNumerics<T>::add(
+                value,
+                THCNumerics<T>::mul(weight.data()[weightOffset], gradOutput.data()[offset]));
+            }
           }
-        }
 
-        ++weightOffset;
+          ++weightOffset;
+        }
       }
     }
     gradInput.data()[linearIndex] = value;
@@ -131,7 +139,8 @@ __global__ void depthwiseConvolutionAccGradParameters(
     const THCDeviceTensor<T, 4> input,
     THCDeviceTensor<T, 4> gradWeight,
     const int batchSize,
-    const int channels,
+    const int kernelChannels,
+    const int depthwiseMultiplier,
     IndexType blockElements,
     const int inputWidth, const int inputHeight,
     const int outputWidth, const int outputHeight,
@@ -154,7 +163,8 @@ __global__ void depthwiseConvolutionAccGradParameters(
     // (channels x kH x kW)
     int kW = bidx % kernelWidth;
     int kH = (bidx / kernelWidth) % kernelHeight;
-    int ch = (bidx / kernelWidth / kernelHeight) % channels;
+    int ch = (bidx / kernelWidth / kernelHeight) % kernelChannels;
+    int inputCh = ch / depthwiseMultiplier;
 
     /* printf("calculating grad weight for C %d, kH %d, kW %d\n", ch, kH, kW); */
 
@@ -176,7 +186,7 @@ __global__ void depthwiseConvolutionAccGradParameters(
         grad = THCNumerics<T>::add(
             grad,
             THCNumerics<T>::mul(
-              input[batch][ch][i_h_offset].data()[i_w_offset],
+              input[batch][inputCh][i_h_offset].data()[i_w_offset],
               gradOutput[batch][ch][go_h_offset].data()[go_w_offset]));
       }
 
