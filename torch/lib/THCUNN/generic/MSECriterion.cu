@@ -16,7 +16,7 @@ void THNN_(MSECriterion_updateOutput)(
   THCUNN_assertSameGPU(state, 3, input, target, output);
 
   if (reduce) {
-    THCUNN_check_dim_size(state, output, 1, 0, 1);
+    THCTensor_(resize1d)(state, output, 1);
 
     ptrdiff_t size = THCTensor_(nElement)(state, input);
 
@@ -45,11 +45,11 @@ void THNN_(MSECriterion_updateOutput)(
 
   THCTensor_(resizeAs)(state, output, input);
   THC_pointwiseApply3(
-      state, 
-      input, 
-      target, 
-      output, 
-      mse_updateOutput_functor<real>()); 
+      state,
+      input,
+      target,
+      output,
+      mse_updateOutput_functor<real>());
 }
 
 void THNN_(MSECriterion_updateGradInput)(

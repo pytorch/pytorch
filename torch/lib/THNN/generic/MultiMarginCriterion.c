@@ -22,6 +22,7 @@ void THNN_(MultiMarginCriterion_updateOutput)(
 
   THArgCheck((input->nDimension == 1) || (input->nDimension == 2), 2,
 	     "vector or matrix expected");
+  THTensor_(resize1d)(output, 1);
 
   if (input->nDimension == 1)
   {

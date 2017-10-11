@@ -15,13 +15,13 @@ void THNN_(MultiLabelMarginCriterion_updateOutput)(
   target = THCIndexTensor_(newContiguous)(state, target);
   istarget = THCTensor_(newContiguous)(state, istarget);
   THCTensor_(resizeAs)(state, istarget, input);
+  THCTensor_(resize1d)(state, output, 1);
 
   if(input->nDimension == 1)
   {
     int dim = input->size[0];
     THArgCheck((target->nDimension == 1) && (target->size[0] == dim), 3,
         "inconsistent target size");
-    THCTensor_(resize1d)(state, output, 1);
 
     dim3 blocks(1);
     dim3 threads(MULTILABELMARGIN_THREADS);
@@ -58,7 +58,6 @@ void THNN_(MultiLabelMarginCriterion_updateOutput)(
         sizeaverage
         );
     THCudaCheck(cudaGetLastError());
-    THCTensor_(resize1d)(state, output, 1);
     THCTensor_(set1d)(state, output, 0, ScalarConvert<accreal, real>::to(THCTensor_(sumall)(state, output_tmp)));
     THCTensor_(free)(state, output_tmp);
   }

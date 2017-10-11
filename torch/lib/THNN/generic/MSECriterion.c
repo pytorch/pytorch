@@ -13,7 +13,7 @@ void THNN_(MSECriterion_updateOutput)(
   THNN_CHECK_NELEMENT(input, target);
 
   if (reduce) {
-    THNN_CHECK_DIM_SIZE(output, 1, 0, 1);
+    THTensor_(resize1d)(output, 1);
 
     real sum = 0;
 

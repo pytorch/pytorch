@@ -40,6 +40,7 @@ void THNN_(SpatialClassNLLCriterion_updateOutput)(
            int64_t ignore_index)
 {
   THNN_(SpatialClassNLLCriterion_shapeCheck)(state, input, target, weights);
+  THCTensor_(resize1d)(state, output, 1);
 
   if (weights)
     THCUNN_assertSameGPU(state, 5, input, target, weights, output, total_weight);
