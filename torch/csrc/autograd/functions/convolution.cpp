@@ -135,7 +135,6 @@ auto ConvParams::is_eligible_for_depthwise_convolution(
   return input.type().isCuda() &&
          !is_strided() &&
          !is_dilated() &&
-         !is_padded() &&
          input.ndimension() == 4 &&
          input.size(1) == groups &&
          input.size(1) == weight.size(0);

@@ -135,7 +135,8 @@ __global__ void depthwiseConvolutionAccGradParameters(
     IndexType blockElements,
     const int inputWidth, const int inputHeight,
     const int outputWidth, const int outputHeight,
-    const int kernelWidth, const int kernelHeight)
+    const int kernelWidth, const int kernelHeight,
+    const int padWidth, const int padHeight)
 {
   /* if (blockIdx.x == 0 && threadIdx.x == 0) { */
   /*   printf("Params - block nelem: %d, channels: %d, w: %d, h: %d, oW: %d, oH: %d, kW: %d, kH: %d\n", */
@@ -166,16 +167,22 @@ __global__ void depthwiseConvolutionAccGradParameters(
       int go_w_offset = idx % outputWidth;
       int go_h_offset = (idx / outputWidth) % outputHeight;
       int batch = (idx / outputWidth / outputHeight) % batchSize;
+
+      int i_w_offset = go_w_offset + kW - padWidth;
+      int i_h_offset = go_h_offset + kH - padHeight;
+      if (i_w_offset >= 0 && i_h_offset >= 0 && i_w_offset < inputWidth && i_h_offset < inputHeight) {
+        grad = THCNumerics<T>::add(
+            grad,
+            THCNumerics<T>::mul(
+              input[batch][ch][i_h_offset].data()[i_w_offset],
+              gradOutput[batch][ch][go_h_offset].data()[go_w_offset]));
+      }
+
       /* printf("idx %d, go_h %d, go_w %d, batch %d\n", idx, go_h_offset, go_w_offset, batch); */
 
       /* printf("multiplying input[batch %d][ch %d][h %d][w %d] with gradOutput[ch %d][oH %d][oW %d]\n", */
       /*     batch, ch, go_h_offset + kH, go_w_offset + kW, ch, go_h_offset, go_w_offset); */
 
-      grad = THCNumerics<T>::add(
-          grad,
-          THCNumerics<T>::mul(
-            input[batch][ch][go_h_offset + kH].data()[go_w_offset + kW],
-            gradOutput[batch][ch][go_h_offset].data()[go_w_offset]));
     }
     __syncthreads();
 
