@@ -22,7 +22,7 @@ class Addmm(InplaceFunction):
         sizes2 = matrix2.type().sizes()
         sizes_add = add_matrix.type().sizes()
         broadcast = False
-        not_supported = False;
+        not_supported = False
         assert len(sizes1) == 2 and len(sizes2) == 2 and len(sizes_add) <= 2 and len(sizes_add) > 0
         if len(sizes_add) == 1:
             if sizes_add[0] == sizes2[1]:
@@ -32,9 +32,8 @@ class Addmm(InplaceFunction):
         elif sizes1[0] != sizes_add[0] or sizes2[1] != sizes_add[1]:
                 not_supported = True
         if not_supported:
-            raise ValueError(
-                  "Numpy style broadcasting is not supported in ONNX. Input dims are: {}, {}, {}"
-                  .format(add_matrix.type().sizes(), matrix1.type().sizes(), matrix2.type().sizes()))
+            raise ValueError("Numpy style broadcasting is not supported in ONNX. Input dims are: {}, {}, {}"
+                             .format(add_matrix.type().sizes(), matrix1.type().sizes(), matrix2.type().sizes()))
         return g.op("Gemm", matrix1, matrix2, add_matrix, beta_f=beta, alpha_f=alpha, broadcast_i=broadcast)
 
     @staticmethod
