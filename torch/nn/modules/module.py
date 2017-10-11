@@ -173,10 +173,10 @@ class Module(object):
         return self
 
     def cuda(self, device_id=None):
-        """Moves all model parameters and buffers to the GPU. 
+        """Moves all model parameters and buffers to the GPU.
 
-        This also makes associated parameters and buffers different objects. So 
-        it should be called before constructing optimizer if the module will  
+        This also makes associated parameters and buffers different objects. So
+        it should be called before constructing optimizer if the module will
         live on GPU while being optimized.
 
         Arguments:
