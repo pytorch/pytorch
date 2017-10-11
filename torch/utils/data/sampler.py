@@ -24,8 +24,9 @@ class RandomCycleIter:
             self.i = 0
             random.shuffle(self.data_list)
         return self.data_list[self.i]
-    
-    next = __next__ # Py2 
+
+    next = __next__  # Py2
+
 
 def class_aware_sample_generator(cls_iter, data_iter_list, n):
     i = 0
@@ -127,11 +128,11 @@ class ClassAwareSampler(Sampler):
 
     Arguments:
         data_source (Dataset): dataset to sample from
-    
+
     Implemented Class-Aware Sampling: https://arxiv.org/abs/1512.05830
-    Li Shen, Zhouchen Lin, Qingming Huang, Relay Backpropagation for Effective 
+    Li Shen, Zhouchen Lin, Qingming Huang, Relay Backpropagation for Effective
     Learning of Deep Convolutional Neural Networks, ECCV 2016
-    By default num_samples equals to number of samples in the largest class 
+    By default num_samples equals to number of samples in the largest class
     multiplied by num of classes such that all samples can be sampled.
     """
 
