@@ -108,8 +108,12 @@ class Pow(Function):
         return maybe_unexpand(grad_a, ctx.a_size), maybe_unexpand_or_view(grad_b, ctx.b_size)
 
 
-def sort_args(a, b):
-    return (a, b, True) if torch.is_tensor(a) else (b, a, False)
+def is_node(obj):
+    return isinstance(obj, torch._C.Node)
+
+
+def sort_args(a, b, key=torch.is_tensor):
+    return (a, b, True) if key(a) else (b, a, False)
 
 
 @traceable
@@ -137,11 +141,11 @@ class SubConstant(InplaceFunction):
 
     @staticmethod
     def symbolic(g, a, b, inplace=False):
-        tensor_first = isinstance(a, torch._C.Node)
+        tensor, constant, tensor_first = sort_args(a, b, key=is_node)
         if tensor_first:
-            return g.op("SubConstant", a, value_f=b)
+            return g.op("SubConstant", tensor, value_f=constant)
         else:
-            return g.op("AddConstant", g.op("Neg", b).typeAs(b), value_f=a)
+            return g.op("AddConstant", g.op("Neg", tensor).typeAs(tensor), value_f=constant)
 
     @staticmethod
     def forward(ctx, a, b, inplace=False):
@@ -171,6 +175,11 @@ class SubConstant(InplaceFunction):
 class MulConstant(InplaceFunction):
 
     @staticmethod
+    def symbolic(g, a, b, inplace=False):
+        tensor, constant, _ = sort_args(a, b, key=is_node)
+        return g.op('Scale', tensor, scale_f=constant)
+
+    @staticmethod
     def forward(ctx, a, b, inplace=False):
         tensor, ctx.constant, ctx.tensor_first = sort_args(a, b)
         if inplace:
@@ -190,6 +199,11 @@ class MulConstant(InplaceFunction):
 
 @traceable
 class DivConstant(InplaceFunction):
+
+    @staticmethod
+    def symbolic(g, a, b, inplace=False):
+        tensor, constant, _ = sort_args(a, b, key=is_node)
+        return g.op('Scale', tensor, scale_f=(1.0 / constant))
 
     @staticmethod
     def forward(ctx, a, b, inplace=False):

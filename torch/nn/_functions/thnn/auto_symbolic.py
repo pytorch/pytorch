@@ -22,6 +22,10 @@ def glu_symbolic(g, input, dim):
     return g.op('Mul', first, g.op('Sigmoid', second))
 
 
+def softmax_symbolic(g, input):
+    return g.op('Softmax', input)
+
+
 def reflectionpad_symbolic(g, input, *params):
     mode = "reflect"
     paddings = prepare_paddings(input, params)
@@ -38,6 +42,7 @@ symbolic_fns = {
     'Threshold': threshold_symbolic,
     'LeakyReLU': leakyrelu_symbolic,
     'GatedLinear': glu_symbolic,
+    'Softmax': softmax_symbolic,
     'ReflectionPad1d': reflectionpad_symbolic,
     'ReflectionPad2d': reflectionpad_symbolic,
     'ReplicationPad1d': replicationpad_symbolic,

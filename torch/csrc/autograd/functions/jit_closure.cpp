@@ -559,6 +559,11 @@ struct StageClosure {
       return std::make_shared<LambdaFunction>(1, [c](const variable_list& vars) -> variable_list {
         return {vars[0].sub(c)};
       });
+    IR_ELSEIF(Scale)
+      auto c = value->f(kscale);
+      return std::make_shared<LambdaFunction>(1, [c](const variable_list& vars) -> variable_list {
+        return {vars[0].mul(c)};
+      });
     IR_ELSEIF(Neg)
       return std::make_shared<LambdaFunction>(1, [](const variable_list& vars) -> variable_list {
         return {vars[0].neg()};
