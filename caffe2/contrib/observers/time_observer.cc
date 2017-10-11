@@ -14,21 +14,23 @@
  * limitations under the License.
  */
 
-#include "time_observer.h"
+#include "caffe2/contrib/observers/time_observer.h"
 #include "caffe2/core/logging.h"
 
 namespace caffe2 {
 
 template <>
-bool TimeObserverBase<NetBase>::Start() {
-  CAFFE_THROW(
-      "This function is overridden by TimeObserver<NetBase>.\
-              If it was called there is an issue with compilation.");
-  return false;
+bool TimeObserver<NetBase>::Start() {
+  for (auto* op : subject_->GetOperators()) {
+    op->SetObserver(caffe2::make_unique<TimeObserver<OperatorBase>>(op));
+  }
+  start_time_ = timer_.MilliSeconds();
+  ++iterations_;
+  return true;
 }
 
 template <>
-bool TimeObserverBase<NetBase>::Stop() {
+bool TimeObserver<NetBase>::Stop() {
   double current_run = timer_.MilliSeconds() - start_time_;
   total_time_ += current_run;
   VLOG(1) << "This net iteration took " << current_run << " ms to complete.\n";
@@ -36,14 +38,14 @@ bool TimeObserverBase<NetBase>::Stop() {
 }
 
 template <>
-bool TimeObserverBase<OperatorBase>::Start() {
+bool TimeObserver<OperatorBase>::Start() {
   start_time_ = timer_.MilliSeconds();
   ++iterations_;
   return true;
 }
 
 template <>
-bool TimeObserverBase<OperatorBase>::Stop() {
+bool TimeObserver<OperatorBase>::Stop() {
   double current_run = timer_.MilliSeconds() - start_time_;
   total_time_ += current_run;
   VLOG(1) << "This operator iteration took " << current_run
