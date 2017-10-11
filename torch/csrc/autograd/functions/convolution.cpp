@@ -162,9 +162,9 @@ static void check_input_shape_forward(const at::Tensor& input,
 
   if (weight.ndimension() != k) {
       std::stringstream ss;
-      ss << "Expected " << k << "-dimensional weight for " << k 
-         << "-dimensional input " << input.sizes() << ", but got weight of size "
-         << weight.sizes() << " instead";
+      ss << "Expected " << k << "-dimensional input for " << k
+         << "-dimensional weight " << weight.sizes() << ", but got input of size "
+         << input.sizes() << " instead";
       throw std::runtime_error(ss.str());
   }
   if (weight.size(0) < groups) {
@@ -185,11 +185,11 @@ static void check_input_shape_forward(const at::Tensor& input,
       throw std::runtime_error(ss.str());
     }
     if (bias.defined() && (bias.ndimension() != 1 || bias.size(0) != weight.size(0))) {
-        std::stringstream ss;
-        ss << "Given weight of size  " << weight.sizes() 
-           << ", expected bias to be 1-dimensional with " << weight.size(0) << " elements"
-           << ", but got bias of size " << bias.sizes() << " instead";
-        throw std::runtime_error(ss.str());
+      std::stringstream ss;
+      ss << "Given weight of size " << weight.sizes()
+         << ", expected bias to be 1-dimensional with " << weight.size(0) << " elements"
+         << ", but got bias of size " << bias.sizes() << " instead";
+      throw std::runtime_error(ss.str());
     }
   } else { // transposed
     if (input.size(1) != weight.size(0)) {
@@ -201,11 +201,11 @@ static void check_input_shape_forward(const at::Tensor& input,
       throw std::runtime_error(ss.str());
     }
     if (bias.defined() && (bias.ndimension() != 1 || bias.size(0) != weight.size(1) * groups)) {
-        std::stringstream ss;
-        ss << "Given transposed=" << transposed << ", weight of size  " << weight.sizes() 
-           << ", expected bias to be 1-dimensional with " << weight.size(1) * groups << " elements"
-           << ", but got bias of size " << bias.sizes() << " instead";
-        throw std::runtime_error(ss.str());
+      std::stringstream ss;
+      ss << "Given transposed=" << transposed << ", weight of size " << weight.sizes()
+         << ", expected bias to be 1-dimensional with " << weight.size(1) * groups << " elements"
+         << ", but got bias of size " << bias.sizes() << " instead";
+      throw std::runtime_error(ss.str());
     }
   }
 }
