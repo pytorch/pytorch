@@ -62,7 +62,7 @@ view onto the storage data.
 
 Note that if there will be a lot of tensors shared, this strategy will keep a
 large number of file descriptors open most of the time. If your system has low
-limits for the number of open file descriptors, and you can't rise them, you
+limits for the number of open file descriptors, and you can't raise them, you
 should use the ``file_system`` strategy.
 
 File system - ``file_system``
