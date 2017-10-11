@@ -1422,12 +1422,9 @@ def _InferBlobDevice(model):
                 if b not in mapping:
                     mapping[b] = device_option
             if op.type.startswith('RecurrentNetwork'):
-                import google.protobuf.text_format as protobuftx
                 step_args = [a for a in op.arg if a.name.endswith("step_net")]
                 for step_arg in step_args:
-                    step_proto = caffe2_pb2.NetDef()
-                    protobuftx.Merge(step_arg.s.decode("ascii"), step_proto)
-                    map_ops(step_proto)
+                    map_ops(step_arg.n)
     map_ops(model.param_init_net.Proto())
     map_ops(model.net.Proto())
     model._blob_to_device = mapping

@@ -29,7 +29,6 @@ from caffe2.python.optimizer_context import (
     OptimizerContext,
     DEFAULT_OPTIM,
 )
-from caffe2.proto import caffe2_pb2
 
 from future.utils import viewitems, viewkeys
 from itertools import chain
@@ -571,30 +570,26 @@ def ExtractPredictorNet(
             # TODO: when standard argument type for "nets" is introduced,
             # this can be more general
             if op.type == 'RecurrentNetwork':
-                import google.protobuf.text_format as protobuftx
                 for arg in op.arg:
                     if arg.name == 'backward_step_net':
-                        arg.s = b""
+                        arg.ClearField('n')
                     elif arg.name == 'step_net':
-                        step_proto = caffe2_pb2.NetDef()
-                        protobuftx.Merge(arg.s.decode("ascii"), step_proto)
-                        for step_op in step_proto.op:
+                        for step_op in arg.n.op:
                             rename_list(step_op.input)
                             rename_list(step_op.output)
                             if device is not None:
                                 step_op.device_option.device_type = device.device_type
                                 step_op.device_option.cuda_gpu_id = device.cuda_gpu_id
 
-                        rename_list(step_proto.external_input)
-                        rename_list(step_proto.external_output)
+                        rename_list(arg.n.external_input)
+                        rename_list(arg.n.external_output)
 
                         # Add additional external inputs
                         external_inputs.update(
-                            set(step_proto.external_input).intersection(
+                            set(arg.n.external_input).intersection(
                                 orig_external_inputs
                             )
                         )
-                        arg.s = str(step_proto).encode("ascii")
 
             if device is not None:
                 op.device_option.device_type = device.device_type

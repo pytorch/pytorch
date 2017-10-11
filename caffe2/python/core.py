@@ -31,7 +31,6 @@ from caffe2.python import scope, utils, workspace
 from caffe2.python.control_ops_grad import gen_do_gradient, gen_if_gradient
 
 import caffe2.python._import_c_extension as C
-import google.protobuf.text_format as protobuftx
 import pickle
 import numpy as np
 import sys
@@ -1249,16 +1248,14 @@ DEFAULT_REMAP_FUNCS = {
 
 
 def remap_proto(argument, blob_remap):
-    proto = caffe2_pb2.NetDef()
-    protobuftx.Merge(argument.s.decode('utf-8'), proto)
-    subnet = Net(proto)
+    subnet = Net(argument.n)
 
     cloned_sub_net = subnet.Clone(
         'cloned_sub_net',
         blob_remap,
     )
 
-    argument.s = str(cloned_sub_net.Proto()).encode('utf-8')
+    argument.n.CopyFrom(cloned_sub_net.Proto())
 
 
 def clone_and_bind_net(net, name, prefix, blob_remap=None, inputs=None,

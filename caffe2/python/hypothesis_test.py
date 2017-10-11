@@ -1880,8 +1880,8 @@ class TestOperators(hu.HypothesisTestCase):
             backward_link_external=backward_link_external,
             backward_link_offset=backward_link_offset,
             param=[inputs.index(p) for p in step_net.params],
-            step_net=str(step_net.Proto()),
-            backward_step_net=str(backward_step_net.Proto()),
+            step_net=step_net.Proto(),
+            backward_step_net=backward_step_net.Proto(),
             outputs_with_grads=[0],
         )
         workspace.FeedBlob(
