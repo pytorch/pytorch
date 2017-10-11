@@ -146,6 +146,7 @@ def get_thnn_args(thnn_function, params):
 
 
 def remove_unused_args(args, thnn_args):
+    """Returns the subset of args whose name appears in thnn_args"""
     def clean_name(name):
         name = name[:name.index('[')] if '[' in name else name
         if name.endswith('_'):
@@ -173,6 +174,12 @@ def unique_args(argslist):
 
 
 def function_info(name, arguments, cimpls, buffers, backends):
+    """
+    cimpls contains information use to call into THNN:
+        cname: THNN function name
+        arguments: arguments to functional call
+        condition: [optional] guard around call
+    """
     return {
         'mode': 'NN',
         'name': name,
