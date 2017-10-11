@@ -231,7 +231,6 @@ class SELU(InplaceFunction):
         return grad_input, None
 
 
-
 _all_functions.append(PReLU)
 _all_functions.append(PReLUBackward)
 _all_functions.append(RReLU)
