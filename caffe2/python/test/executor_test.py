@@ -34,10 +34,16 @@ def test_settings(func):
         return func
 
 
-@unittest.skipIf(hu.is_travis(), "Disabled in Travis")
+def test_model_names():
+    if not hu.is_travis():
+        return conv_model_generators().keys()
+    else:
+        return ["MLP"]
+
+
 class ExecutorCPUConvNetTest(ExecutorTestBase):
     @given(executor=st.sampled_from(EXECUTORS),
-           model_name=st.sampled_from(conv_model_generators().keys()),
+           model_name=st.sampled_from(test_model_names()),
            batch_size=st.sampled_from([8]),
            num_workers=st.sampled_from([8]))
     @test_settings
