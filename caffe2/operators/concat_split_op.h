@@ -171,7 +171,8 @@ bool SplitOp<Context>::RunOnDevice() {
         input.dim32(axis_) * after,
         output->raw_mutable_data(input.meta()),
         axis_dim * after,
-        &context_);
+        &context_,
+        input.meta().copy());
     input_offset += axis_dim * after * input.itemsize();
   }
   return true;
@@ -259,7 +260,8 @@ bool ConcatOp<Context>::RunOnDevice() {
         static_cast<char*>(output->raw_mutable_data(input_zero.meta())) +
             output_offset,
         output_channels * after,
-        &context_);
+        &context_,
+        input_zero.meta().copy());
     output_offset += axis_dim * after * input.itemsize();
   }
   return true;

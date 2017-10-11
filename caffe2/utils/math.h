@@ -428,8 +428,16 @@ void BiasCHW(
   Context* context);
 
 template <class Context>
-void CopyMatrix(const size_t item_size, const int M, const int N, const void* A,
-                const int lda, void* B, const int ldb, Context* context);
+void CopyMatrix(
+    const size_t item_size,
+    const int M,
+    const int N,
+    const void* A,
+    const int lda,
+    void* B,
+    const int ldb,
+    Context* context,
+    TypeMeta::TypedCopy copy = nullptr);
 
 template <typename T, class Context>
 void CopyVector(const int N, const T* A, T* B, Context* context);

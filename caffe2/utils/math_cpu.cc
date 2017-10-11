@@ -1430,18 +1430,31 @@ void CopyMatrix<CPUContext>(
     const int lda,
     void* B,
     const int ldb,
-    CPUContext* /*context*/) {
+    CPUContext* /*context*/,
+    TypeMeta::TypedCopy copy) {
   if (lda == N && ldb == N) {
     // can coalese to a single memcpy of size M * N
-    memcpy(
-        static_cast<char*>(B), static_cast<const char*>(A), itemsize * N * M);
+    if (copy) {
+      copy(static_cast<const char*>(A), static_cast<char*>(B), N * M);
+    } else {
+      memcpy(
+          static_cast<char*>(B), static_cast<const char*>(A), itemsize * N * M);
+    }
     return;
   }
 
   for (int i = 0; i < M; ++i) {
-    memcpy(static_cast<char*>(B) + ldb * i * itemsize,
-           static_cast<const char*>(A) + lda * i * itemsize,
-           itemsize * N);
+    if (copy) {
+      copy(
+          static_cast<const char*>(A) + lda * i * itemsize,
+          static_cast<char*>(B) + ldb * i * itemsize,
+          N);
+    } else {
+      memcpy(
+          static_cast<char*>(B) + ldb * i * itemsize,
+          static_cast<const char*>(A) + lda * i * itemsize,
+          itemsize * N);
+    }
   }
 }
 

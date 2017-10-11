@@ -51,7 +51,8 @@ class ChannelShuffleOp final : public ConvPoolOpBase<Context> {
             S,
             Y->template mutable_data<float>() + g * S + n * C * S,
             G * S,
-            &context_);
+            &context_,
+            X.meta().copy());
       }
     }
     return true;
@@ -90,7 +91,8 @@ class ChannelShuffleGradientOp final : public ConvPoolOpBase<Context> {
             G * S,
             dX->template mutable_data<float>() + g * K * S + n * C * S,
             S,
-            &context_);
+            &context_,
+            dY.meta().copy());
       }
     }
     return true;

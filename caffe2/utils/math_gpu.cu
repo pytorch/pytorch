@@ -2008,7 +2008,9 @@ void CopyMatrix<CUDAContext>(
     const int lda,
     void* B,
     const int ldb,
-    CUDAContext* context) {
+    CUDAContext* context,
+    TypeMeta::TypedCopy copy) {
+  CAFFE_ENFORCE(!copy, "Copy constructor is not supported in CUDA context");
   cudaMemcpy2DAsync(B, ldb * itemsize, A, lda * itemsize, N * itemsize, M,
                     cudaMemcpyDeviceToDevice, context->cuda_stream());
 }
