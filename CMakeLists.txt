@@ -62,7 +62,6 @@ include(ExternalProject)
 include(cmake/Utils.cmake)
 include(cmake/Summary.cmake)
 
-set(CAFFE2_CPU_FLAGS "" CACHE STRING "Flags to specify CPU features.")
 set(CAFFE2_WHITELIST "" CACHE STRING "A whitelist file of files that one should build.")
 
 # Set default build type
@@ -109,10 +108,6 @@ endif()
 
 if(NOT APPLE AND UNIX)
   list(APPEND Caffe2_DEPENDENCY_LIBS dl)
-endif()
-
-if (CAFFE2_CPU_FLAGS)
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${CAFFE2_CPU_FLAGS}")
 endif()
 
 # Prefix path to Caffe2 headers.
