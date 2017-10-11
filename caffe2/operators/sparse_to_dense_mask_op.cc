@@ -30,7 +30,7 @@ OPERATOR_SCHEMA(SparseToDenseMask)
     .TensorInferenceFunction([](const OperatorDef& def,
                                 const vector<TensorShape>& in) {
       ArgumentHelper helper(def);
-      auto mask = helper.template GetRepeatedArgument<int>("mask");
+      auto mask = helper.template GetRepeatedArgument<int64_t>("mask");
       bool return_presence_mask = helper.template GetSingleArgument<bool>(
           "return_presence_mask", false);
       vector<TensorShape> out(1);

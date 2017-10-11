@@ -33,14 +33,15 @@ class SparseToDenseMaskBase : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   SparseToDenseMaskBase(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws) {
-    std::vector<int> mask =
-        OperatorBase::template GetRepeatedArgument<int>("mask");
+    std::vector<int64_t> mask =
+        OperatorBase::template GetRepeatedArgument<int64_t>("mask");
     featuresCount_ = mask.size();
+
     CAFFE_ENFORCE(!mask.empty(), "mask can't be empty");
     auto biggest = *std::max_element(mask.begin(), mask.end());
     dense_.assign(std::min(kMaxDenseSize, biggest + 1), -1);
     for (int i = 0; i < mask.size(); i++) {
-      int id = mask[i];
+      int64_t id = mask[i];
       CAFFE_ENFORCE_GE(id, 0, "Only positive IDs are allowed.");
       if (id >= kMaxDenseSize) {
         CAFFE_ENFORCE(sparse_.count(id) == 0, "Duplicated id: ", id);
@@ -53,13 +54,13 @@ class SparseToDenseMaskBase : public Operator<Context> {
   }
 
  protected:
-  const int kMaxDenseSize = 1024 * 128;
+  const int64_t kMaxDenseSize = 1024 * 128;
 
-  std::unordered_map<int, int> sparse_;
+  std::unordered_map<int64_t, int> sparse_;
   std::vector<int> dense_;
   int featuresCount_;
 
-  inline int getFeatureIdx(int id) const {
+  inline int getFeatureIdx(int64_t id) const {
     if (id >= kMaxDenseSize) {
       const auto& iter = sparse_.find(id);
       if (iter == sparse_.end()) {
@@ -160,7 +161,7 @@ class SparseToDenseMaskOp : public SparseToDenseMaskBase<Context> {
           rows * cols, false, presence_mask_data, &context_);
     }
 
-    int32_t offset = 0;
+    int64_t offset = 0;
     for (int r = 0; r < rows; r++) {
       for (int c = 0; c < lengths_vec[r]; c++) {
         const auto sparse_index = sparse_indices_vec[offset + c];
