@@ -39,6 +39,7 @@ void THNN_(SpatialClassNLLCriterion_updateOutput)(
 {
   INITIAL_CHECK;
   THTensor_(resize1d)(output, 1);
+  THTensor_(resize1d)(total_weight, 1);
 
   input = THTensor_(newContiguous)(input);
   target = THIndexTensor_(newContiguous)(target);
@@ -91,6 +92,8 @@ void THNN_(SpatialClassNLLCriterion_updateGradInput)(
           int64_t ignore_index)
 {
   INITIAL_CHECK;
+  THTensor_(resizeAs)(gradInput, input);
+  THTensor_(zero)(gradInput);
   THArgCheck(THTensor_(isContiguous)(gradInput), 4,
               "gradInput must be contiguous");
 
