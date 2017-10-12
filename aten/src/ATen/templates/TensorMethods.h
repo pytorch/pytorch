@@ -7,7 +7,7 @@
 namespace at {
 
 inline Tensor Tensor::toType(const Type & t) const {
-  if(type().ID() ==t.ID())
+  if(type() == t)
     return *this;
   return t.copy(*this);
 }
