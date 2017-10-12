@@ -35,7 +35,7 @@ class TestLengthsTileOp(hu.HypothesisTestCase):
                           elements=st.integers(min_value=0, max_value=20)),
             )
         ),
-        **hu.gcs_cpu_only)
+        **hu.gcs)
     def test_lengths_tile(self, inputs, gc, dc):
         data, lengths = inputs
 
