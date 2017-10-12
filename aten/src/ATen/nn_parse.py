@@ -15,7 +15,7 @@ except ImportError:
 NAME_PARAM_REGEX = r'(\w+)\((.*)\)'
 
 
-def argument_to_declaration(param, default_inits=None):
+def argument_to_declaration(param, func=None):
     arg = {}
     arg['type'], name = param.split(' ')
     if arg['type'] == 'Tensor':
@@ -34,10 +34,17 @@ def argument_to_declaration(param, default_inits=None):
         name, default = name.split('=')
         arg['optional'] = True
         arg['default'] = default
-    if default_inits is not None and name in default_inits:
-        # non constexpr defaults
-        arg['default_init'] = default_inits[name]
     arg['name'] = name
+
+    if func is not None:
+        default_inits = func.get('default_init', {})
+        wrap_dims = func.get('wrap_dim', {})
+        if name in default_inits:
+            # non constexpr defaults
+            arg['default_init'] = default_inits[name]
+        if name in wrap_dims:
+            arg['wrap_dim'] = wrap_dims[name]
+
     return arg
 
 
@@ -197,8 +204,7 @@ def base_declaration(func, thnn_function, backends):
     """Creates the NN function without any buffers in it's signature"""
     name, params = re.match(NAME_PARAM_REGEX, func['name']).groups()
     params = params.split(', ')
-    default_inits = func.get('default_init', {})
-    arguments = [argument_to_declaration(a, default_inits) for a in params]
+    arguments = [argument_to_declaration(a, func) for a in params]
     arguments += output_arguments(thnn_function)
     buffers = [argument_to_declaration('Tensor ' + buf)
                for buf in func.get('buffers', [])]
