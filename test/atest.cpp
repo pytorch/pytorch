@@ -76,5 +76,40 @@ int main() {
     threw = true;
   }
   check(threw);
+  {
+    bool isgone = 0;
+    {
+      auto f2 = CPU(kFloat).tensorFromBlob(data, {1,2,3}, [&](void*) {
+        isgone++;
+      });
+      cout << f2 << endl;
+    }
+    check(isgone == 1);
+  }
+  {
+    bool isgone = 0;
+    Tensor a_view;
+    {
+      auto f2 = CPU(kFloat).tensorFromBlob(data, {1,2,3}, [&](void*) {
+        isgone++;
+      });
+      a_view = f2.view({3,2,1});
+    }
+    check(isgone == 0);
+    a_view.reset();
+    check(isgone == 1);
+  }
+
+  if(at::hasCUDA()) {
+    bool isgone = 0;
+    {
+      auto f2 = CUDA(kFloat).tensorFromBlob(nullptr, {1,2,3}, [&](void*) {
+        isgone++;
+      });
+    }
+    check(isgone==1);
+  }
+
+
   return 0;
 }
