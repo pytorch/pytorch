@@ -17,8 +17,6 @@
 #include "caffe2/operators/lengths_tile_op.h"
 
 namespace caffe2 {
-namespace {
-
 REGISTER_CPU_OPERATOR(LengthsTile, LengthsTileOp<CPUContext>);
 
 OPERATOR_SCHEMA(LengthsTile)
@@ -69,6 +67,4 @@ class GetLengthsTileGradient : public GradientMakerBase {
   }
 };
 REGISTER_GRADIENT(LengthsTile, GetLengthsTileGradient);
-
-} // namespace
 } // namespace caffe2

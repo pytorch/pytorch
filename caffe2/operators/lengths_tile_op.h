@@ -37,28 +37,30 @@ class LengthsTileOp : public Operator<Context> {
     CAFFE_ENFORCE_GE(data.ndim(), 1, "DATA should be at least 1-D");
     CAFFE_ENFORCE_EQ(lengths.size(), data.dim(0));
 
-    auto* lengths_data = lengths.template data<int32_t>();
+    // Context::CopyFrom and math::Sum need the same context to avoid race
+    // conditions
+    CPUContext cpuContext;
+    lengths_host_.CopyFrom(lengths, &cpuContext);
+    auto lengths_size = lengths_host_.size();
+    auto* lengths_data = lengths_host_.data<int32_t>();
+
     int32_t total_length = 0;
-    math::Sum<int32_t, Context>(
-        lengths.size(), lengths_data, &total_length, &context_);
+    math::Sum<int32_t, CPUContext>(
+        lengths_size, lengths_data, &total_length, &cpuContext);
 
     auto shape = data.dims();
     shape[0] = total_length;
     output->Resize(shape);
 
-    auto block_size = data.size_from_dim(1);
     auto block_bytesize = data.size_from_dim(1) * data.meta().itemsize();
-    auto N = lengths.size();
-
     auto src = static_cast<const char*>(data.raw_data());
     auto out = static_cast<char*>(output->raw_mutable_data(data.meta()));
 
-    for (TIndex i = 0; i < N; ++i) {
+    for (TIndex i = 0; i < lengths_size; ++i) {
       auto length = lengths_data[i];
       CAFFE_ENFORCE_GE(length, 0);
       for (int32_t j = 0; j < length; ++j) {
-        context_.template CopyItems<Context, Context>(
-            data.meta(), block_size, src, out);
+        context_.template CopyBytes<Context, Context>(block_bytesize, src, out);
         out += block_bytesize;
       }
       src += block_bytesize;
@@ -67,6 +69,9 @@ class LengthsTileOp : public Operator<Context> {
   }
 
   INPUT_TAGS(DATA, LENGTHS);
+
+ private:
+  TensorCPU lengths_host_;
 };
 
 } // namespace caffe2
