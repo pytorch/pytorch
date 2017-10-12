@@ -12,12 +12,42 @@ ${Storage}::${Storage}(Context* context, ${THStorage}* storage):
 ${Storage}::${Storage}(Context* context, std::size_t storage_size)
   : storage(${THStorage}_newWithSize(${state,} storage_size)), context(context) {}
 
+#if ${isCUDA}
+static cudaError_t call_deleter(void * ctx, void * data) {
+  auto fnptr = (std::function<void(void*)>*) ctx;
+  (*fnptr)(data);
+  delete fnptr;
+  return cudaSuccess;
+}
+static THCDeviceAllocator storage_deleter = {
+  nullptr,
+  nullptr,
+  call_deleter,
+  nullptr,
+  nullptr,
+};
+#else
+static void call_deleter(void * ctx, void * data) {
+  auto fnptr = (std::function<void(void*)>*) ctx;
+  (*fnptr)(data);
+  delete fnptr;
+}
+static THAllocator storage_deleter = {
+  nullptr,
+  nullptr,
+  call_deleter,
+};
+#endif
+
 ${Storage}::${Storage}(Context* context,
-  void * data, std::size_t size)
-  : storage(${THStorage}_newWithData(${state,} static_cast<${THScalarType}*>(data), size)),
+  void * data, std::size_t size, const std::function<void(void*)> & deleter)
+  : storage(${THStorage}_newWithDataAndAllocator(${state,}
+     static_cast<${THScalarType}*>(data), size,
+     &storage_deleter,
+     new std::function<void(void*)>(deleter)
+    )),
     context(context) {
     ${THStorage}_clearFlag(${state,} storage, TH_STORAGE_RESIZABLE);
-    ${THStorage}_clearFlag(${state,} storage, TH_STORAGE_FREEMEM);
 }
 
 ${Storage}::~${Storage}() {
