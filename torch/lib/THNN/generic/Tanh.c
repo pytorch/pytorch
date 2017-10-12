@@ -12,7 +12,6 @@ void THNN_(Tanh_updateOutput)(
 
 void THNN_(Tanh_updateGradInput)(
           THNNState *state,
-          THTensor *input,
           THTensor *gradOutput,
           THTensor *gradInput,
           THTensor *output)

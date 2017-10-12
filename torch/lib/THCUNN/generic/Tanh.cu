@@ -16,7 +16,6 @@ void THNN_(Tanh_updateOutput)(
 
 void THNN_(Tanh_updateGradInput)(
            THCState *state,
-           THCTensor *input,
            THCTensor *gradOutput,
            THCTensor *gradInput,
            THCTensor *output)
