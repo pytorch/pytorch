@@ -36,7 +36,7 @@ class ClassNLLCriterion(Criterion):
     def updateGradInput(self, input, target):
         self.gradInput.resize_as_(input).zero_()
         target = target.long()
-        implicit_gradOutput = torch.ones_like(input)
+        implicit_gradOutput = torch.ones(1).type_as(input)
 
         self._backend.ClassNLLCriterion_updateGradInput(
             self._backend.library_state,

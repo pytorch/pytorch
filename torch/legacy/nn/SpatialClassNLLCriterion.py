@@ -33,7 +33,7 @@ class SpatialClassNLLCriterion(Criterion):
 
     def updateGradInput(self, input, target):
         self.gradInput.resize_as_(input).zero_()
-        implicit_gradOutput = torch.ones_like(input)
+        implicit_gradOutput = torch.ones(1).type_as(input)
         self._backend.SpatialClassNLLCriterion_updateGradInput(
             self._backend.library_state,
             input,
