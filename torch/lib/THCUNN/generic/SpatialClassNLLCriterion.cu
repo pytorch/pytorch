@@ -71,7 +71,7 @@ void THNN_(SpatialClassNLLCriterion_updateOutput)(
     int64_t batch_size = THCTensor_(size)(state, input, 0);
     int64_t H = THCTensor_(size)(state, input, 2);
     int64_t W = THCTensor_(size)(state, input, 3);
-    
+
     THCTensor_(resize3d)(state, output, batch_size, H, W);
 
     if (weights) {
@@ -81,11 +81,11 @@ void THNN_(SpatialClassNLLCriterion_updateOutput)(
     int64_t count = batch_size * H * W;
     SpatialClassNLLCriterion_updateOutput_no_reduce_kernel<real>
       <<<GET_BLOCKS(count), CUDA_NUM_THREADS, 0, THCState_getCurrentStream(state)>>>(
-        count, 
-        toDeviceTensor<real, 4>(state, input), 
-        toDeviceTensor<THCIndex_t, 3>(state, target), 
-        toDeviceTensor<real, 3>(state, output), 
-        weights ? THCTensor_(data)(state, weights) : NULL, 
+        count,
+        toDeviceTensor<real, 4>(state, input),
+        toDeviceTensor<THCIndex_t, 3>(state, target),
+        toDeviceTensor<real, 3>(state, output),
+        weights ? THCTensor_(data)(state, weights) : NULL,
         ignore_index);
 
     if (weights) {
@@ -166,8 +166,8 @@ void THNN_(SpatialClassNLLCriterion_updateGradInput)(
 
   if (!reduce) {
     THNN_(SpatialClassNLLCriterion_gradOutput_no_reduce_shapeCheck)(
-        state, 
-        gradOutput, 
+        state,
+        gradOutput,
         target);
 
     int64_t batch_size = THCTensor_(size)(state, input, 0);
@@ -181,19 +181,19 @@ void THNN_(SpatialClassNLLCriterion_updateGradInput)(
     int64_t count = batch_size * H * W;
     SpatialClassNLLCriterion_updateGradInput_no_reduce_kernel<real>
       <<<GET_BLOCKS(count), CUDA_NUM_THREADS, 0, THCState_getCurrentStream(state)>>>(
-        count, 
-        toDeviceTensor<THCIndex_t, 3>(state, target), 
-        toDeviceTensor<real, 3>(state, gradOutput), 
-        toDeviceTensor<real, 4>(state, gradInput), 
-        weights ? THCTensor_(data)(state, weights) : NULL, 
+        count,
+        toDeviceTensor<THCIndex_t, 3>(state, target),
+        toDeviceTensor<real, 3>(state, gradOutput),
+        toDeviceTensor<real, 4>(state, gradInput),
+        weights ? THCTensor_(data)(state, weights) : NULL,
         ignore_index);
 
     if (weights) {
       THCTensor_(free)(state, weights);
     }
     return;
-  }  
-  
+  }
+
   input = THCTensor_(newContiguous)(state, input);
   weights = weights ? THCTensor_(newContiguous)(state, weights) : NULL;
   target = THCIndexTensor_(newContiguous)(state, target);

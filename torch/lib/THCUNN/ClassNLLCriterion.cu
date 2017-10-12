@@ -42,7 +42,7 @@ __global__ void ClassNLLCriterion_updateOutput_no_reduce_kernel(
     int64_t batch_size,
     THCDeviceTensor<Dtype, 2> input,
     THCDeviceTensor<THCIndex_t, 1> target,
-    THCDeviceTensor<Dtype, 1> output, 
+    THCDeviceTensor<Dtype, 1> output,
     Dtype *weights,
     int64_t ignore_index) {
 

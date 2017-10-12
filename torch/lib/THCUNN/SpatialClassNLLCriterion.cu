@@ -33,7 +33,7 @@ __global__ void SpatialClassNLLCriterion_updateOutput_no_reduce_kernel(
       continue;
     }
     Dtype value = input[b][cur_target][h][w];
-    Dtype weight = 
+    Dtype weight =
         weights ? weights[cur_target] : ScalarConvert<int, Dtype>::to(1);
     output[b][h][w] = -value * weight;
   }
@@ -60,7 +60,7 @@ __global__ void SpatialClassNLLCriterion_updateGradInput_no_reduce_kernel(
     if (cur_target == ignore_index) {
       continue;
     }
-    Dtype value = 
+    Dtype value =
         -(weights ? weights[cur_target] : ScalarConvert<int, Dtype>::to(1));
     Dtype gradOutput_value = gradOutput[b][h][w];
     gradInput[b][cur_target][h][w] = value * gradOutput_value;

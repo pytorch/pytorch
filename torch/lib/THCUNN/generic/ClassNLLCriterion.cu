@@ -179,9 +179,9 @@ void THNN_(ClassNLLCriterion_updateGradInput)(
         toDeviceTensor<real, 2>(state, gradInput),
         weights ? THCTensor_(data)(state, weights) : NULL,
         ignore_index);
-    
+ 
     if (weights) {
-      THCTensor_(free)(state, weights); 
+      THCTensor_(free)(state, weights);
     }
     return;
   }
@@ -194,7 +194,7 @@ void THNN_(ClassNLLCriterion_updateGradInput)(
 
   weights = weights ? THCTensor_(newContiguous)(state, weights) : NULL;
   target = THCIndexTensor_(newContiguous)(state, target);
-  
+
   THCUNN_check_dim_size(state, gradOutput, 1, 0, 1);
   real gradOutput_data = THCTensor_(get1d)(state, gradOutput, 0);
   real *weights_data = weights ? THCTensor_(data)(state, weights) : NULL;
