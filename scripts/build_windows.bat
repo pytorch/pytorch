@@ -61,7 +61,7 @@ cmake .. ^
   -DUSE_OPENCV=OFF ^
   -DBUILD_SHARED_LIBS=OFF ^
   -DBUILD_PYTHON=OFF^
-  -DPROTOBUF_PROTOC_EXECUTABLE=%CAFFE2_ROOT%\build_host_protoc\bin\protoc.exe ^
+  -DCAFFE2_CUSTOM_PROTOC_EXECUTABLE=%CAFFE2_ROOT%\build_host_protoc\bin\protoc.exe ^
   || goto :label_error
 
 :: Actually run the build
