@@ -81,7 +81,7 @@ Example:
     });
 
 REGISTER_CPU_OPERATOR(GatherRangesToDense, GatherRangesToDenseOp<CPUContext>);
-SHOULD_NOT_DO_GRADIENT(GatherRangesToDense);
+NO_GRADIENT(GatherRangesToDense);
 
 } // namespace
 } // namespace caffe2
