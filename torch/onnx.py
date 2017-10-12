@@ -136,7 +136,7 @@ def _add_attribute(node, key, value):
             "Invalid attribute specifier '{}' names " +
             " must be suffixed with type, e.g. 'dim_i' or 'dims_i'").format(key))
     name, kind = m.group(1), m.group(2)
-    if not isinstance(value, string_classes) and isinstance(value, collections.Iterable):
+    if not isinstance(value, string_classes) and not torch.is_tensor(value) and isinstance(value, collections.Iterable):
         kind += "s"
     return getattr(node, kind + '_')(name, value)
 
@@ -191,7 +191,7 @@ def _at(self, opname, *args, **kwargs):
 
 
 def _constant(self, value, dims, type=None, *args, **kwargs):
-    assert(isinstance(value, (int, long, float)))
+    assert isinstance(value, (int, long, float))
     # Infer the type based on value.
     if type is None:
         if isinstance(value, int):
@@ -201,6 +201,7 @@ def _constant(self, value, dims, type=None, *args, **kwargs):
         elif isinstance(value, float):
             type = "float"
 
+    type = type.lower()
     if type == "char":
         tensor = torch.CharTensor(*dims)
     elif type == "short":
@@ -216,7 +217,7 @@ def _constant(self, value, dims, type=None, *args, **kwargs):
     elif type == "double":
         tensor = torch.DoubleTensor(*dims)
     else:
-        raise ValueError("Unknown type, type should be one of the following strings:"
+        raise ValueError("Unknown type, type should be one of the following strings: "
                          "char, short, int, long, half, float, double")
     tensor.fill_(value)
     return self.op("Constant", *args, value_t=tensor, **kwargs)

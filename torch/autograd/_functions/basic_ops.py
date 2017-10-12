@@ -136,8 +136,28 @@ def sort_args(a, b, key=torch.is_tensor):
     return (a, b, True) if key(a) else (b, a, False)
 
 
+def gen_inputs(g, a, b):
+    tensor, constant, tensor_first = sort_args(a, b, key=is_node)
+    assert tensor.hasType()
+    type = str(tensor.type().scalarType())
+    broadcast = False
+    if len(tensor.type().sizes()) > 1:
+        broadcast = True
+    constant = g.constant(constant, [tensor.type().sizes()[-1]], type).typeAs(tensor)
+    return tensor, constant, broadcast, tensor_first
+
+
 @traceable
 class AddConstant(InplaceFunction):
+
+    @staticmethod
+    def symbolic(g, a, b, inplace=False):
+        # TODO: [Export inplace]
+        tensor, constant, broadcast, tensor_first = gen_inputs(g, a, b)
+        if tensor_first:
+            return g.op("Add", tensor, constant, broadcast_i=broadcast)
+        else:
+            return g.op("Add", constant, tensor, broadcast_i=broadcast)
 
     @staticmethod
     def forward(ctx, a, b, inplace=False):
@@ -161,11 +181,12 @@ class SubConstant(InplaceFunction):
 
     @staticmethod
     def symbolic(g, a, b, inplace=False):
-        tensor, constant, tensor_first = sort_args(a, b, key=is_node)
+        # TODO: [Export inplace]
+        tensor, constant, broadcast, tensor_first = gen_inputs(g, a, b)
         if tensor_first:
-            return g.op("SubConstant", tensor, value_f=constant)
+            return g.op("Sub", tensor, constant, broadcast_i=broadcast)
         else:
-            return g.op("AddConstant", g.op("Neg", tensor).typeAs(tensor), value_f=constant)
+            return g.op("Add", g.op("Neg", tensor).typeAs(tensor), constant, broadcast_i=broadcast)
 
     @staticmethod
     def forward(ctx, a, b, inplace=False):
