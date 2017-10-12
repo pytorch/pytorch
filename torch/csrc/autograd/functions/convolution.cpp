@@ -324,6 +324,10 @@ auto ConvForward::apply(const variable_list& inputs) -> variable_list {
       auto dilation = vecToInt64(this->dilation);
 
       at::conv_depthwise2d_forward_out(output, input, weight, kernel_size, stride, padding, dilation);
+
+      if (bias.defined()) {
+        output.add_(bias.view({1, -1, 1, 1}));
+      }
   } else {
     for (int g = 0; g < groups; ++g) {
       columns[g] = input.type().tensor();
