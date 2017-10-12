@@ -7,6 +7,18 @@
 
 namespace torch { namespace cudnn {
 
+static void fixSizeOneDimStride(int dim, int *size, int *stride) {
+  int64_t z = 1;
+  for(int d = dim-1; d >= 0; d--)
+  {
+    if (size[d] == 1) {
+      stride[d] = z;
+    } else {
+      z *= size[d];
+    }
+  }
+}
+
 struct TensorDescriptor
 {
   cudnnTensorDescriptor_t desc;
@@ -23,6 +35,7 @@ struct TensorDescriptor
     cudnnDestroyTensorDescriptor(desc);
   }
   void set(cudnnDataType_t dataType, int dim, int* size, int* stride) {
+    fixSizeOneDimStride(dim, size, stride);
     CHECK(cudnnSetTensorNdDescriptor(desc, dataType, dim, size, stride));
   }
 };
