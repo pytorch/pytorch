@@ -40,5 +40,9 @@ CUDAGenerator& CUDAGenerator::manualSeed(uint64_t seed) {
   return *this;
 }
 
+void * CUDAGenerator::unsafeGetTH() {
+  throw std::runtime_error("CUDAGenerator::unsafeGetTH() not implemented");
+}
+
 } // namespace at
 #endif //AT_CUDA_ENABLED

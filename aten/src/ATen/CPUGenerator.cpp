@@ -33,4 +33,8 @@ CPUGenerator& CPUGenerator::manualSeed(uint64_t seed) {
   return *this;
 }
 
+void * CPUGenerator::unsafeGetTH() {
+  return generator;
+}
+
 } // namespace at
