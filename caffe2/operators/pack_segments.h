@@ -37,7 +37,10 @@ class PackSegmentsOp final : public Operator<Context> {
 
   PackSegmentsOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        pad_minf_(OperatorBase::GetSingleArgument<bool>("pad_minf", false)) {
+        pad_minf_(OperatorBase::GetSingleArgument<bool>("pad_minf", false)),
+        return_presence_mask_(OperatorBase::GetSingleArgument<bool>(
+            "return_presence_mask",
+            false)) {
     if (pad_minf_) {
       padding_ = -1.0 * std::numeric_limits<float>::infinity();
     } else {
@@ -54,6 +57,10 @@ class PackSegmentsOp final : public Operator<Context> {
     const auto& data = Input(DATA);
     const auto& lengths = Input(LENGTHS);
     auto* output = Output(0);
+    Tensor<Context>* presence_mask = nullptr;
+    if (return_presence_mask_) {
+      presence_mask = Output(1);
+    }
 
     CAFFE_ENFORCE(data.ndim() >= 1, "DATA should be at least 1-D");
     CAFFE_ENFORCE(lengths.ndim() == 1, "LENGTH should be 1-D");
@@ -69,6 +76,13 @@ class PackSegmentsOp final : public Operator<Context> {
     shape[0] = max_length;
     shape.insert(shape.begin(), lengths.size());
     output->Resize(shape);
+
+    if (return_presence_mask_) {
+      // Shape of presence is batch_size x max_len
+      std::vector<caffe2::TIndex> presence_shape{lengths.size(), max_length};
+      presence_mask->Resize(presence_shape);
+    }
+
     // create output tensor
     auto* out = static_cast<char*>(output->raw_mutable_data(data.meta()));
 
@@ -85,6 +99,11 @@ class PackSegmentsOp final : public Operator<Context> {
           output->template mutable_data<float>(),
           &context_);
     }
+    bool* presence_mask_data = nullptr;
+    if (return_presence_mask_) {
+      presence_mask_data = presence_mask->template mutable_data<bool>();
+      memset(presence_mask_data, (int)false, presence_mask->size());
+    }
 
     int block_size = data.size() / data.dim(0);
     int block_bytesize = data.nbytes() / data.dim(0);
@@ -96,6 +115,9 @@ class PackSegmentsOp final : public Operator<Context> {
           l[i] * block_size,
           d + block_bytesize * start,
           out + block_bytesize * max_length * i);
+      if (return_presence_mask_) {
+        memset(presence_mask_data + max_length * i, (int)true, l[i]);
+      }
       start += l[i];
     }
 
@@ -107,6 +129,7 @@ class PackSegmentsOp final : public Operator<Context> {
  private:
   bool pad_minf_;
   float padding_;
+  bool return_presence_mask_;
 };
 
 template <class Context>
@@ -166,5 +189,5 @@ class UnpackSegmentsOp final : public Operator<Context> {
   INPUT_TAGS(LENGTHS, DATA);
 };
 
-} // namspace caffe2
+} // namespace caffe2
 #endif // CAFFE2_OPERATORS_PACK_SEGMENTS_H_

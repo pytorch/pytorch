@@ -23,7 +23,7 @@ REGISTER_CPU_OPERATOR(UnpackSegments, UnpackSegmentsOp<CPUContext>);
 
 OPERATOR_SCHEMA(PackSegments)
     .NumInputs(2)
-    .NumOutputs(1)
+    .NumOutputs(1, 2)
     .SetDoc(
         "Map N dim tensor to N+1 dim based on length blob. Sequences that \
     are shorter than the longest sequence are padded with zeros.")
@@ -38,9 +38,18 @@ OPERATOR_SCHEMA(PackSegments)
         "N + 1 dim Tensor"
         "where dim(1) is the max length"
         ", dim(0) is the batch size.")
+    .Output(
+        1,
+        "presence_mask",
+        "2 dim boolean tensor"
+        ", false where packed_tensor is padded, true otherwise.")
     .Arg(
-        "pad_minf", "Padding number in the packed segments. Use true to pad \
-    -infinity, otherwise pad zeros");
+        "pad_minf",
+        "Padding number in the packed segments. Use true to pad \
+    -infinity, otherwise pad zeros")
+    .Arg(
+        "return_presence_mask",
+        "bool whether to return presence mask, false by default");
 OPERATOR_SCHEMA(UnpackSegments)
     .NumInputs(2)
     .NumOutputs(1)
@@ -72,4 +81,4 @@ class GetUnpackSegmentsGradient : public GradientMakerBase {
   }
 };
 REGISTER_GRADIENT(UnpackSegments, GetUnpackSegmentsGradient);
-} // namespace
+} // namespace caffe2
