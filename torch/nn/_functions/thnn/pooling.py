@@ -98,6 +98,7 @@ class MaxPool2d(Function):
                  ceil_mode=False):
         if ceil_mode:
             raise RuntimeError("ceil_mode not supported in MaxPool2d")
+        stride = stride or kernel_size
         n = g.appendNode(g.create("MaxPool", [input])
                           .is_("kernel_shape", _pair(kernel_size))
                           .is_("pads", _pair(padding))
@@ -174,6 +175,7 @@ class MaxPool3d(Function):
                  ceil_mode=False):
         if ceil_mode:
             raise RuntimeError("ceil_mode not supported in MaxPool3d")
+        stride = stride or kernel_size
         n = g.appendNode(g.create("MaxPool", [input])
                           .is_("kernel_shape", _triple(kernel_size))
                           .is_("pads", _triple(padding))

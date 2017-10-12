@@ -58,8 +58,9 @@ class Dropout(InplaceFunction):
 class FeatureDropout(Dropout):
 
     @staticmethod
-    def symbolic(input, p=0.5, train=False, inplace=False):
-        return None
+    def symbolic(g, input, p=0.5, train=False, inplace=False):
+        # NB: No FeatureDropout in ONNX, use Dropout instead.
+        return Dropout.symbolic(g, input, p, train, inplace)
 
     @staticmethod
     def _make_noise(input):
