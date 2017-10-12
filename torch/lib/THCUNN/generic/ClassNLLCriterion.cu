@@ -12,7 +12,7 @@ void THNN_(ClassNLLCriterion_updateOutput)(
            THCTensor *total_weight,
            int64_t ignore_index) {
   THCTensor_(resize1d)(state, output, 1);
-  THCUNN_check_dim_size(state, total_weight, 1, 0, 1);
+  THCTensor_(resize1d)(state, total_weight, 1);
   ignore_index -= TH_INDEX_BASE;
 
   if (THCIndexTensor_(nDimension)(state, target) > 1) {
