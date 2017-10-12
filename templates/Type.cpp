@@ -57,7 +57,7 @@ Tensor Type::scalarTensor(Scalar s) const {
 }
 
 bool Type::operator==(const Type& other) const {
-  return this->ID() == other.ID();
+  return this == &other;
 }
 
 ${type_method_definitions}
