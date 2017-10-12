@@ -4,6 +4,7 @@
 struct THPGenerator {
   PyObject_HEAD
   THGenerator *cdata;
+  bool owner;  // if true, frees cdata in destructor
 };
 
 #define THPGenerator_Check(obj) \
@@ -13,6 +14,7 @@ struct THPGenerator {
   ((THPGenerator*)obj)->cdata
 
 THP_API PyObject * THPGenerator_New();
+THP_API PyObject * THPGenerator_NewWithGenerator(THGenerator *cdata);
 extern PyObject *THPGeneratorClass;
 
 #ifdef _THP_CORE
