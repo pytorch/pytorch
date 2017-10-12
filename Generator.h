@@ -15,6 +15,7 @@ struct Generator {
 
   virtual uint64_t seed() = 0;
   virtual Generator& manualSeed(uint64_t seed) = 0;
+  virtual void * unsafeGetTH() = 0;
 };
 
 } // namespace at
