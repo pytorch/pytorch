@@ -16,6 +16,8 @@
 
 - name: glu(Tensor input, int64_t dim=-1)
   cname: GatedLinear
+  wrap_dim:
+    dim: input
 
 - name: threshold(Tensor input, Scalar threshold, Scalar value, bool inplace=false)
   cname: Threshold
