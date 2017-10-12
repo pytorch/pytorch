@@ -13,8 +13,7 @@ inline Tensor Tensor::toType(const Type & t) const {
 }
 
 inline Tensor & Tensor::copy_(const Tensor & src) {
-  resize_(src.sizes());
-  type().copy(src,*this);
+  type().copy(src, *this);
   return *this;
 }
 
