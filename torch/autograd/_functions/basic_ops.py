@@ -143,7 +143,7 @@ def gen_inputs(g, a, b):
     broadcast = False
     if len(tensor.type().sizes()) > 1:
         broadcast = True
-    constant = g.constant(constant, [tensor.type().sizes()[-1]], type).typeAs(tensor)
+    constant = g.constant(constant, [0], type).typeAs(tensor)
     return tensor, constant, broadcast, tensor_first
 
 

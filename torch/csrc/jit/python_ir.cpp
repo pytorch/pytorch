@@ -120,6 +120,21 @@ void initPythonIRBindings(PyObject * module_) {
     .CREATE_ACCESSOR(Graph,g)
     .CREATE_ACCESSOR(Graphs,gs)
 #undef CREATE_ACCESSOR
+    .def("z_",[](Node & n, const char * name, at::Tensor v) {
+        return n.t_(stringToSymbol(name), std::move(v.view({})));
+    })
+    .def("z",[](Node & n, const char * name) {
+        return n.t(stringToSymbol(name));
+    })
+    .def("zs_",[](Node & n, const char * name, TensorsAttr::ValueType v) {
+        for (int i = 0; i < v.size(); ++ i) {
+            v[i] = std::move(v[i].view({}));
+        }
+        return n.ts_(stringToSymbol(name), std::move(v));
+    })
+    .def("zs",[](Node & n, const char * name) {
+        return n.ts(stringToSymbol(name));
+    })
     .def("pyobj",[](Node & n) {
       return py::handle(n.expect<PythonOp>()->pyobj.get()).cast<py::object>();
     })

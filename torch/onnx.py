@@ -112,7 +112,7 @@ def _export(model, args, f, export_params=True, verbose=False, training=False):
     return torch_out
 
 
-attr_pattern = re.compile("^(.+)_([ifstg])$")
+attr_pattern = re.compile("^(.+)_([ifstgz])$")
 
 
 def run_symbolic(op_name, symbolic_fn, args):
@@ -191,9 +191,15 @@ def _at(self, opname, *args, **kwargs):
     return self.op("ATen", *args, operator_s=opname, **kwargs)
 
 
+# This helper function can create either constant tensor or constant scalar.
+# If dims is None or 0 or [0], generate a 0-d tensor (scalar).
 def _constant(self, value, dims, type, *args, **kwargs):
     assert isinstance(value, numbers.Number)
     assert type is not None
+    isscalar = False
+    if dims is None or dims == 0 or set(dims) == set([0]):
+        dims = [1]
+        isscalar = True
     type = type.lower()
     if type == "char":
         tensor = torch.CharTensor(*dims)
@@ -213,6 +219,8 @@ def _constant(self, value, dims, type, *args, **kwargs):
         raise ValueError("Unknown type, type should be one of the following strings: "
                          "char, short, int, long, half, float, double")
     tensor.fill_(value)
+    if isscalar:
+        return self.op("Constant", *args, value_z=tensor, **kwargs)
     return self.op("Constant", *args, value_t=tensor, **kwargs)
 
 torch._C.Graph.op = _op
