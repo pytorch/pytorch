@@ -1590,7 +1590,7 @@ __global__ void im2col_nd_gpu_kernel(
     const int* stride,
     const int* dilation,
     T* data_col) {
-  int d_temp[num_axes]; // NOLINT(runtime/arrays)
+  int d_offset[num_axes]; // NOLINT(runtime/arrays)
   int d_iter[num_axes]; // NOLINT(runtime/arrays)
 
   __shared__ int shared_dilation[num_axes];
@@ -1613,53 +1613,54 @@ __global__ void im2col_nd_gpu_kernel(
   __syncthreads();
 
   int i;
+  int kernel_size = 1;
+  for (i = 0; i < num_axes; ++i) {
+    kernel_size *= shared_kernel_shape[i];
+  }
   CUDA_1D_KERNEL_LOOP(index, n) {
-    // Initialize channel_in, computed in the loop below, with intermediate
-    // computations used to compute the spatial indices.
-    int channel_in = index;
-    int channel_out = 1;
-    for (i = num_axes - 1; i >= 0; --i) {
-      d_temp[i] = channel_in % shared_col_shape[i + 1];
-      channel_in /= shared_col_shape[i + 1];
-      channel_out *= shared_kernel_shape[i];
+    if (index >= col_shape[0]) {
+      break;
     }
-    channel_out *= channel_in;
-    int data_col_inc = 1;
+    // Initialize offset, computed in the loop below, with intermediate
+    // computations used to compute the spatial indices.
+    int offset = index;
+    for (i = num_axes - 1; i >= 0; --i) {
+      if (i < num_axes - 1) {
+        offset /= shared_kernel_shape[i + 1];
+      }
+      d_offset[i] = offset % shared_kernel_shape[i];
+    }
     for (i = 0; i < num_axes; ++i) {
-      channel_out *= shared_col_shape[i + 1];
-      channel_out += d_temp[i];
-      d_temp[i] = d_temp[i] * shared_stride[i] - shared_pad[i];
-      channel_in *= shared_im_shape[i + 1];
-      channel_in += d_temp[i];
-      data_col_inc *= shared_col_shape[i + 1];
       d_iter[i] = 0;
     }
-    T* data_col_ptr = data_col + channel_out;
-    const T* data_im_ptr = data_im + channel_in;
     bool incremented;
     do {
+      int index_col = index;
+      int index_im = index / kernel_size;
       bool in_range = true;
       for (i = 0; i < num_axes; ++i) {
-        const int d_iter_im = d_iter[i] * shared_dilation[i] + d_temp[i];
-        in_range &= d_iter_im >= 0 && d_iter_im < shared_im_shape[i + 1];
-        if (!in_range) {
-          break;
-        }
+        const int d = d_iter[i];
+        const int d_im = d * shared_stride[i] - shared_pad[i] +
+            d_offset[i] * shared_dilation[i];
+        in_range &= (d_im >= 0 && d_im < shared_im_shape[i + 1]);
+
+        index_col *= shared_col_shape[i + 1];
+        index_col += d;
+        index_im *= shared_im_shape[i + 1];
+        index_im += d_im;
       }
       if (in_range) {
-        int data_im_offset = d_iter[0] * shared_dilation[0];
-        for (i = 1; i < num_axes; ++i) {
-          data_im_offset *= shared_im_shape[i + 1];
-          data_im_offset += d_iter[i] * shared_dilation[i];
-        }
-        *data_col_ptr = data_im_ptr[data_im_offset];
+        // data_col[index_col] = 0;
+        data_col[index_col] = data_im[index_im];
+        // T temp = data_im[index_im];
       } else {
-        *data_col_ptr = 0;
+        data_col[index_col] = 0;
       }
-      data_col_ptr += data_col_inc;
+
       incremented = false;
       for (i = num_axes - 1; i >= 0; --i) {
-        const int d_max = shared_kernel_shape[i];
+        // const int d_max = shared_kernel_shape[i];
+        const int d_max = shared_col_shape[i + 1];
         if (d_iter[i] == d_max - 1) {
           d_iter[i] = 0;
         } else { // d_iter[i] < d_max - 1
