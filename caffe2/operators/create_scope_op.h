@@ -90,9 +90,24 @@ class WorkspaceStack {
     return grad_workspace;
   }
 
+  std::shared_ptr<Workspace> reuseLastForwardWorkspace(
+      Workspace* parent_ws,
+      const std::unordered_map<std::string, std::string>& blob_bindings) {
+    checkStack();
+    if (top_ < 0) {
+      return nullptr;
+    }
+    workspaces_[top_]->AddBlobMapping(parent_ws, blob_bindings);
+    return workspaces_[top_];
+  }
+
   void clear() {
     checkStack();
     top_ = -1;
+  }
+
+  bool empty() const {
+    return top_ < 0;
   }
 
  private:

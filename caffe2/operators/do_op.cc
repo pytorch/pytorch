@@ -28,7 +28,13 @@ bool DoOp<CPUContext>::RunOnDevice() {
   if (is_gradient_op_) {
     net_workspace = ws_stack->popGradientWorkspace(parent_ws_, blob_bindings_);
   } else {
-    net_workspace = ws_stack->pushForwardWorkspace(parent_ws_, blob_bindings_);
+    if (reuse_workspace_ && !ws_stack->empty()) {
+      net_workspace =
+          ws_stack->reuseLastForwardWorkspace(parent_ws_, blob_bindings_);
+    } else {
+      net_workspace =
+          ws_stack->pushForwardWorkspace(parent_ws_, blob_bindings_);
+    }
   }
   CAFFE_ENFORCE(net_workspace, "Failed to initialize Do op workspace");
 
@@ -47,12 +53,10 @@ OPERATOR_SCHEMA(Do)
     .NumInputs(1, INT_MAX)
     .NumOutputs(1, INT_MAX)
     .SetDoc(R"DOC(
-'Do' control operator, creates a new workspace and executes a subnet in it.
-Last blob in the output list holds pointer to the op workspace. In case of
-gradient Do, last blob in the input list should should the pointer to the
-forward Do's workspace. Arguments 'inner_blobs' and 'outer_blobs_idx'
-provide a mapping between selected inner blob names and corresponding outer blobs
-indices.
+'Do' control operator, executes a subnet in a separate workspace.
+Last blobs in the input and output lists should be the same blob created with
+CreateScope op. Arguments 'inner_blobs' and 'outer_blobs_idx' provide a mapping
+between selected inner blob names and corresponding outer blob indices.
     )DOC")
     .Arg("net", "Subnet with blob bindings")
     .Arg(
@@ -66,6 +70,9 @@ indices.
         "saved_fwd_blobs",
         "List of blobs from the forward Do operator workspace needed "
         "in backward pass, used in gradient Do operator")
+    .Arg(
+        "reuse_workspace",
+        "Whether to reuse workspace or create a new one in a given scope")
     .AllowInplace([](int in, int out) -> bool { return true; });
 
 } // namespace caffe2

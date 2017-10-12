@@ -39,6 +39,11 @@ class DoOp final : public Operator<Context> {
         "net must be specified in Do operator");
     net_def_ = this->template GetSingleArgument<NetDef>("net", NetDef());
     is_gradient_op_ = operator_def.is_gradient_op();
+    reuse_workspace_ =
+        this->template GetSingleArgument<bool>("reuse_workspace", false);
+    CAFFE_ENFORCE(
+        !is_gradient_op_ || !reuse_workspace_,
+        "Gradient Do op requires use of stacked workspaces");
 
     const auto& inner_blobs =
         this->template GetRepeatedArgument<std::string>("inner_blobs");
@@ -144,6 +149,7 @@ class DoOp final : public Operator<Context> {
 
   std::unordered_map<std::string, std::string> blob_bindings_;
   bool is_gradient_op_;
+  bool reuse_workspace_;
   NetDef net_def_;
   Workspace* parent_ws_;
 };
