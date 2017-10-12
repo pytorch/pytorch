@@ -21,7 +21,7 @@ struct ${Type} final : public Type {
   virtual bool isDistributed() const override;
   virtual std::unique_ptr<Storage> storage() const override;
   virtual std::unique_ptr<Storage> storage(size_t size) const override;
-  virtual std::unique_ptr<Storage> storageFromBlob(void * data, int64_t size) const override;
+  virtual std::unique_ptr<Storage> storageFromBlob(void * data, int64_t size, const std::function<void(void*)> & deleter) const override;
   virtual std::unique_ptr<Generator> generator() const override;
   virtual const char * toString() const override;
   virtual std::size_t elementSizeInBytes() const override;
