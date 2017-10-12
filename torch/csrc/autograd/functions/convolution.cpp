@@ -868,9 +868,9 @@ static tensor_pair compute_grad_params(
 
           if (bias.defined() && params.should_compute_output(2)) {
             // grad_output is in N, C, H, W, we re-shape and make contiguous
-            at::Tensor ones = grad_output.type().ones(input.size(0) * grad_output.size(2) * grad_output.size(3));
-            at::Tensor reshaped = grad_output.transpose(1, 3).contiguous().view({-1, ones.numel()});
-            grad_bias.addmv_(1.0, 1.0, reshaped, ones);
+            at::Tensor transposed = grad_output.transpose(0, 1).contiguous();
+            // sum across all of the channels and add to grad_bias
+            grad_bias.add_(transposed.view({transposed.size(0), -1}).sum(1));
           }
           goto done;
 #endif
