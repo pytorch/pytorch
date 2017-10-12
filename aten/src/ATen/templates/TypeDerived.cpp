@@ -32,9 +32,9 @@ std::unique_ptr<Storage> ${Type}::storage() const {
 std::unique_ptr<Storage> ${Type}::storage(size_t size) const {
   return std::unique_ptr<Storage>(new ${Storage}(context,size));
 }
-std::unique_ptr<Storage> ${Type}::storageFromBlob(void * data, int64_t size) const {
+std::unique_ptr<Storage> ${Type}::storageFromBlob(void * data, int64_t size, const std::function<void(void*)> & deleter) const {
     return std::unique_ptr<Storage>(
-      new ${Storage}(context,data,size));
+      new ${Storage}(context,data,size,deleter));
 }
 Tensor ${Type}::unsafeTensorFromTH(void * th_pointer, bool retain) const {
   if (retain)
