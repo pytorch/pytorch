@@ -44,6 +44,12 @@ class ObserverConfig {
     CAFFE_ENFORCE(reporter_);
     return reporter_.get();
   }
+  static void setMarker(int marker) {
+    marker_ = marker;
+  }
+  static int getMarker() {
+    return marker_;
+  }
 
  private:
   /* Log net metrics after how many net invocations */
@@ -57,6 +63,9 @@ class ObserverConfig {
   static int skipIters_;
 
   static unique_ptr<NetObserverReporter> reporter_;
+
+  /* marker used in identifying the metrics in certain reporters */
+  static int marker_;
 };
 
 }
