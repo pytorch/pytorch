@@ -17,8 +17,24 @@ class Addmm(InplaceFunction):
 
     @staticmethod
     def symbolic(g, add_matrix, matrix1, matrix2, beta=1, alpha=1, inplace=False):
-        # TODO: test if broadcasting occurred
-        return g.op("Gemm", matrix1, matrix2, add_matrix, beta_f=beta, alpha_f=alpha, broadcast_i=True)
+        assert matrix1.hasType() and matrix2.hasType() and add_matrix.hasType()
+        sizes1 = matrix1.type().sizes()
+        sizes2 = matrix2.type().sizes()
+        sizes_add = add_matrix.type().sizes()
+        broadcast = False
+        not_supported = False
+        assert len(sizes1) == 2 and len(sizes2) == 2 and len(sizes_add) <= 2 and len(sizes_add) > 0
+        if len(sizes_add) == 1:
+            if sizes_add[0] == sizes2[1]:
+                broadcast = True
+            else:
+                not_supported = True
+        elif sizes1[0] != sizes_add[0] or sizes2[1] != sizes_add[1]:
+                not_supported = True
+        if not_supported:
+            raise ValueError("Numpy style broadcasting is not supported in ONNX. Input dims are: {}, {}, {}"
+                             .format(add_matrix.type().sizes(), matrix1.type().sizes(), matrix2.type().sizes()))
+        return g.op("Gemm", matrix1, matrix2, add_matrix, beta_f=beta, alpha_f=alpha, broadcast_i=broadcast)
 
     @staticmethod
     def forward(ctx, add_matrix, matrix1, matrix2, beta=1, alpha=1, inplace=False):
