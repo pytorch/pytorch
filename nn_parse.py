@@ -24,6 +24,8 @@ def argument_to_declaration(param, func=None):
         arg['type'] = 'THIndexTensor*'
     elif arg['type'] == 'Scalar':
         arg['type'] = 'accreal'
+    elif arg['type'] == 'Generator*':
+        arg['type'] = 'THGenerator*'
 
     match = re.match(r'IntList\[(\d+)\]', arg['type'])
     if match:
@@ -93,6 +95,8 @@ SUBSTITUTIONS = {
     'weights': 'weight',
     'train': 'training',
     'val': 'value',
+    'lambda': 'lambd',
+    'negval': 'negative_slope',
 }
 
 

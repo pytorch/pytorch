@@ -243,10 +243,8 @@ def create_generic(top_env, declarations):
             return argument['default'] == argument['if_true']
         for pattern, replacement in HEADER_CONSTANT_REPLACEMENTS:
             default = re.sub(pattern, replacement, str(default))
-        if type_str in {'Scalar', 'int64_t'}:
-            return int(default)
-        elif type_str == 'double':
-            return float(default)
+        if type_str in {'Scalar', 'int64_t', 'double'}:
+            return float(default) if '.' in default else int(default)
         elif type_str == 'bool':
             assert default.lower() in ['true', 'false']
             return default.lower() == 'true'
