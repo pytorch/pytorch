@@ -14,6 +14,7 @@ import string
 import json
 import math
 import contextlib
+import numbers
 from ._utils import _range
 from torch._six import string_classes
 
@@ -190,17 +191,9 @@ def _at(self, opname, *args, **kwargs):
     return self.op("ATen", *args, operator_s=opname, **kwargs)
 
 
-def _constant(self, value, dims, type=None, *args, **kwargs):
-    assert isinstance(value, (int, long, float))
-    # Infer the type based on value.
-    if type is None:
-        if isinstance(value, int):
-            type = "int"
-        elif isinstance(value, long):
-            type = "long"
-        elif isinstance(value, float):
-            type = "float"
-
+def _constant(self, value, dims, type, *args, **kwargs):
+    assert isinstance(value, numbers.Number)
+    assert type is not None
     type = type.lower()
     if type == "char":
         tensor = torch.CharTensor(*dims)
