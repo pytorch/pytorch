@@ -77,7 +77,7 @@ class Tanh(InplaceFunction):
         if grad_output.volatile and not ctx._is_tracing:
             grad_input = Variable(grad_output.data.new(grad_output.size()), volatile=True)
             backend = type2backend[type(result.data)]
-            backend.Tanh_updateGradInput(backend.library_state, None, grad_output.data,
+            backend.Tanh_updateGradInput(backend.library_state, grad_output.data,
                                          grad_input.data, result.data)
         else:
             grad_input = grad_output * (1 - result * result)
