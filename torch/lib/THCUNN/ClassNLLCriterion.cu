@@ -130,6 +130,7 @@ __global__ void cunn_ClassNLLCriterion_updateOutput_kernel(Dtype *output,
 template <typename Dtype>
 __global__ void cunn_ClassNLLCriterion_updateGradInput_kernel1(
   Dtype* gradInput,
+  Dtype gradOutput,
   Dtype* weights,
   THCIndex_t* target,
   Dtype* total_weight,
@@ -144,13 +145,14 @@ __global__ void cunn_ClassNLLCriterion_updateGradInput_kernel1(
   int t = (int)*target - TH_INDEX_BASE;
   if (t != (int) ignore_index) {
     assert(t >= 0 && t < n_classes);
-    gradInput[t] = -(weights ? weights[t] : ScalarConvert<int, Dtype>::to(1)) * norm;
+    gradInput[t] = -(weights ? weights[t] : ScalarConvert<int, Dtype>::to(1)) * norm * gradOutput;
   }
 }
 
 template <typename Dtype>
 __global__ void cunn_ClassNLLCriterion_updateGradInput_kernel(
   Dtype *gradInput,
+  Dtype gradOutput,
   THCIndex_t *target,
   Dtype *weights,
   Dtype *total_weight,
@@ -170,7 +172,7 @@ __global__ void cunn_ClassNLLCriterion_updateGradInput_kernel(
     t = (int)target[i] - TH_INDEX_BASE;
     if (t != (int) ignore_index) {
       assert(t >= 0 && t < n_classes);
-      gradInput[i * ndim + t] = -(weights ? weights[t] : ScalarConvert<int, Dtype>::to(1)) * norm;
+      gradInput[i * ndim + t] = -(weights ? weights[t] : ScalarConvert<int, Dtype>::to(1)) * norm * gradOutput;
     }
   }
 }

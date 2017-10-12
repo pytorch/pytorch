@@ -45,8 +45,7 @@ void THNN_(ClassNLLCriterion_updateOutput)(
 
   if (!reduce && n_dims == 2) {
     THCTensor_(resize1d)(state, output, batch_size);
-    bool not_contiguous_weights = weights && !THCTensor_(isContiguous)(state, weights);
-    if (not_contiguous_weights) {
+    if (weights) {
       weights = THCTensor_(newContiguous)(state, weights);
     }
 
@@ -59,7 +58,7 @@ void THNN_(ClassNLLCriterion_updateOutput)(
         weights ? THCTensor_(data)(state, weights) : NULL,
         ignore_index);
 
-    if (not_contiguous_weights) {
+    if (weights) {
       THCTensor_(free)(state, weights);
     }
     return;
@@ -168,8 +167,7 @@ void THNN_(ClassNLLCriterion_updateGradInput)(
 
   if (!reduce && n_dims == 2) {
     THCUNN_check_dim_size(state, gradOutput, 1, 0, batch_size);
-    bool not_contiguous_weights = weights && !THCTensor_(isContiguous)(state, weights);
-    if (not_contiguous_weights) {
+    if (weights) {
       weights = THCTensor_(newContiguous)(state, weights);
     }
 
@@ -182,7 +180,7 @@ void THNN_(ClassNLLCriterion_updateGradInput)(
         weights ? THCTensor_(data)(state, weights) : NULL,
         ignore_index);
     
-    if (not_contiguous_weights) {
+    if (weights) {
       THCTensor_(free)(state, weights); 
     }
     return;
@@ -196,7 +194,9 @@ void THNN_(ClassNLLCriterion_updateGradInput)(
 
   weights = weights ? THCTensor_(newContiguous)(state, weights) : NULL;
   target = THCIndexTensor_(newContiguous)(state, target);
-
+  
+  THCUNN_check_dim_size(state, gradOutput, 1, 0, 1);
+  real gradOutput_data = THCTensor_(get1d)(state, gradOutput, 0);
   real *weights_data = weights ? THCTensor_(data)(state, weights) : NULL;
   real *gradInput_data = THCTensor_(data)(state, gradInput);
   THCIndex_t  *target_data = THCIndexTensor_(data)(state, target);
@@ -206,6 +206,7 @@ void THNN_(ClassNLLCriterion_updateGradInput)(
     cunn_ClassNLLCriterion_updateGradInput_kernel1<real>
       <<<1, 1, 0, THCState_getCurrentStream(state)>>>(
         gradInput_data,
+        gradOutput_data,
         weights_data,
         target_data,
         total_weight_data,
@@ -217,6 +218,7 @@ void THNN_(ClassNLLCriterion_updateGradInput)(
     cunn_ClassNLLCriterion_updateGradInput_kernel<real>
       <<<1, NTHREADS, 0, THCState_getCurrentStream(state)>>>(
         gradInput_data,
+        gradOutput_data,
         target_data,
         weights_data,
         total_weight_data,
