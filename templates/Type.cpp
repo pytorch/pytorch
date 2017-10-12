@@ -14,8 +14,14 @@ void Type::registerAll(Context * context) {
   ${type_registrations}
 }
 
+void Type::copy(const Tensor & src, Tensor & dst) const {
+  Tensor b_src;
+  std::tie(b_src) = expand_inplace(dst, src);
+  s_copy(b_src, dst);
+}
+
 Tensor Type::copy(const Tensor & src) const {
-  Tensor r = this->tensor();
+  Tensor r = this->tensor(src.sizes());
   r.copy_(src);
   return r;
 }

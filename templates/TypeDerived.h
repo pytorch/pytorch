@@ -32,7 +32,7 @@ struct ${Type} final : public Type {
   // example
   // virtual Tensor * add(Tensor & a, Tensor & b) override;
 
-  virtual void copy(const Tensor & src, Tensor & dst) const override;
+  virtual void s_copy(const Tensor & src, Tensor & dst) const override;
   ${type_derived_method_declarations}
 };
 

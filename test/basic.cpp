@@ -153,11 +153,21 @@ static void test(Type & type) {
     std::cout << "copy:" << std::endl;
     Tensor a = type.zeros({4, 3});
     std::cout << a << std::endl;
-    Tensor e = type.rand({3, 4});
+    Tensor e = type.rand({4, 3});
     std::cout << e << std::endl;
     a.copy_(e);
     std::cout << a << std::endl;
     ASSERT(a.equal(e));
+  }
+
+  {
+    std::cout << "copy [broadcasting]:" << std::endl;
+    Tensor a = type.zeros({4, 3});
+    Tensor e = type.rand({3});
+    a.copy_(e);
+    for (int i = 0; i < 4; ++i) {
+      ASSERT(a[i].equal(e));
+    }
   }
 
   {
