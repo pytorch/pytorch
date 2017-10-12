@@ -886,6 +886,7 @@
   name: lt
   variants:
     - method
+    - function
   return: argument 0
   options:
     - cname: ltValue
@@ -919,42 +920,10 @@
         - arg: THTensor* other
 ]]
 [[
-  name: lt
-  variants:
-    - function
-  return: argument 0
-  options:
-    - cname: ltValue
-      arguments:
-        - arg: THBoolTensor* result
-          output: True
-        - THTensor* tensor
-        - real value
-    - cname: ltTensor
-      arguments:
-        - arg: THBoolTensor* result
-          output: True
-        - arg: THTensor* tensor
-          broadcast: other fallback
-        - THTensor* other
-    - cname: ltValueT
-      arguments:
-        - arg: THTensor* result
-          output: True
-        - THTensor* tensor
-        - real value
-    - cname: ltTensorT
-      arguments:
-        - arg: THTensor* result
-          output: True
-        - arg: THTensor* tensor
-          broadcast: other fallback
-        - THTensor* other
-]]
-[[
   name: gt
   variants:
     - method
+    - function
   return: argument 0
   options:
     - cname: gtValue
@@ -988,43 +957,10 @@
         - THTensor* other
 ]]
 [[
-  name: gt
-  variants:
-    - function
-  return: argument 0
-  options:
-    - cname: gtValue
-      arguments:
-        - arg: THBoolTensor* result
-          output: True
-        - THTensor* tensor
-        - real value
-    - cname: gtTensor
-      arguments:
-        - arg: THBoolTensor* result
-          output: True
-        - arg: THTensor* tensor
-          broadcast: other fallback
-        - THTensor* other
-    - cname: gtValueT
-      arguments:
-        - arg: THTensor* result
-          output: True
-        - THTensor* tensor
-        - real value
-    - cname: gtTensorT
-      arguments:
-        - arg: THTensor* result
-          output: True
-        - arg: THTensor* tensor
-          broadcast: other fallback
-        - THTensor* other
-
-]]
-[[
   name: le
   variants:
     - method
+    - function
   return: argument 0
   options:
     - cname: leValue
@@ -1058,42 +994,10 @@
         - THTensor* other
 ]]
 [[
-  name: le
-  variants:
-    - function
-  return: argument 0
-  options:
-    - cname: leValue
-      arguments:
-        - arg: THBoolTensor* result
-          output: True
-        - THTensor* tensor
-        - real value
-    - cname: leTensor
-      arguments:
-        - arg: THBoolTensor* result
-          output: True
-        - arg: THTensor* tensor
-          broadcast: other fallback
-        - THTensor* other
-    - cname: leValueT
-      arguments:
-        - arg: THTensor* result
-          output: True
-        - THTensor* tensor
-        - real value
-    - cname: leTensorT
-      arguments:
-        - arg: THTensor* result
-          output: True
-        - arg: THTensor* tensor
-          broadcast: other fallback
-        - THTensor* other
-]]
-[[
   name: ge
   variants:
     - method
+    - function
   return: argument 0
   options:
     - cname: geValue
@@ -1127,42 +1031,10 @@
         - THTensor* other
 ]]
 [[
-  name: ge
-  variants:
-    - function
-  return: argument 0
-  options:
-    - cname: geValue
-      arguments:
-        - arg: THBoolTensor* result
-          output: True
-        - THTensor* tensor
-        - real value
-    - cname: geTensor
-      arguments:
-        - arg: THBoolTensor* result
-          output: True
-        - arg: THTensor* tensor
-          broadcast: other fallback
-        - THTensor* other
-    - cname: geValueT
-      arguments:
-        - arg: THTensor* result
-          output: True
-        - THTensor* tensor
-        - real value
-    - cname: geTensorT
-      arguments:
-        - arg: THTensor* result
-          output: True
-        - arg: THTensor* tensor
-          broadcast: other fallback
-        - THTensor* other
-]]
-[[
   name: eq
   variants:
     - method
+    - function
   return: argument 0
   options:
     - cname: eqValue
@@ -1196,42 +1068,10 @@
         - THTensor* other
 ]]
 [[
-  name: eq
-  variants:
-    - function
-  return: argument 0
-  options:
-    - cname: eqValue
-      arguments:
-        - arg: THBoolTensor* result
-          output: True
-        - THTensor* tensor
-        - real value
-    - cname: eqTensor
-      arguments:
-        - arg: THBoolTensor* result
-          output: True
-        - arg: THTensor* tensor
-          broadcast: other fallback
-        - THTensor* other
-    - cname: eqValueT
-      arguments:
-        - arg: THTensor* result
-          output: True
-        - THTensor* tensor
-        - real value
-    - cname: eqTensorT
-      arguments:
-        - arg: THTensor* result
-          output: True
-        - arg: THTensor* tensor
-          broadcast: other fallback
-        - THTensor* other
-]]
-[[
   name: ne
   variants:
     - method
+    - function
   return: argument 0
   options:
     - cname: neValue
@@ -1262,39 +1102,6 @@
         - THTensor* self
         - arg: THTensor* self
           broadcast: other inplace fallback
-        - THTensor* other
-]]
-[[
-  name: ne
-  variants:
-    - function
-  return: argument 0
-  options:
-    - cname: neValue
-      arguments:
-        - arg: THBoolTensor* result
-          output: True
-        - THTensor* tensor
-        - real value
-    - cname: neTensor
-      arguments:
-        - arg: THBoolTensor* result
-          output: True
-        - arg: THTensor* tensor
-          broadcast: other fallback
-        - THTensor* other
-    - cname: neValueT
-      arguments:
-        - arg: THTensor* result
-          output: True
-        - THTensor* tensor
-        - real value
-    - cname: neTensorT
-      arguments:
-        - arg: THTensor* result
-          output: True
-        - arg: THTensor* tensor
-          broadcast: other fallback
         - THTensor* other
 ]]
 [[
