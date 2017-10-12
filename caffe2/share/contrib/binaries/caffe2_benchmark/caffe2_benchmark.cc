@@ -7,9 +7,7 @@
 #include "caffe2/core/logging.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/proto/caffe2.pb.h"
-#include "caffe2/share/contrib/observers/net_observer_reporter_print.h"
 #include "caffe2/share/contrib/observers/observer_config.h"
-#include "caffe2/share/contrib/observers/perf_observer.h"
 #include "caffe2/utils/proto_utils.h"
 #include "caffe2/utils/string_utils.h"
 
@@ -159,8 +157,6 @@ int main(int argc, char** argv) {
   LOG(INFO) << "Starting benchmark.";
   caffe2::ObserverConfig::initSampleRate(
       1, caffe2::FLAGS_run_individual, caffe2::FLAGS_warmup);
-  caffe2::ObserverConfig::setReporter(
-      caffe2::make_unique<caffe2::NetObserverReporterPrint>());
   LOG(INFO) << "Running warmup runs.";
   for (int i = 0; i < caffe2::FLAGS_warmup; ++i) {
     CAFFE_ENFORCE(net->Run(), "Warmup run ", i, " has failed.");
