@@ -264,6 +264,7 @@ def backward_declaration(base, thnn_functions):
     def initialize_output_arg(arg):
         # the mask array<bool, N> specifies which return values to compute
         arg['mask'] = True
+        arg['is_nullable'] = True
 
         # grad_weight and grad_bias need to be resized and zeroed
         if arg['name'] == 'grad_weight':
