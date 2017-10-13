@@ -136,6 +136,7 @@ auto ConvParams::is_eligible_for_depthwise_convolution(
          !transposed &&
          input.ndimension() == 4 &&
          input.size(1) == groups &&
+         groups > 1 && // no point if there is only a single group
          weight.size(0) % input.size(1) == 0; // output channels must be a multiple of input channels
 }
 
@@ -287,7 +288,16 @@ auto ConvForward::apply(const variable_list& inputs) -> variable_list {
   tensor_list ones(groups);
   std::unique_ptr<Convolution> convolution;
 
-  if (use_cudnn(input)) {
+  if (is_eligible_for_depthwise_convolution(input, weight, groups)) {
+      output.resize_(output_size(input, weight));
+
+      auto kernel_size = weight.sizes().slice(2);
+      auto stride = vecToInt64(this->stride);
+      auto padding = vecToInt64(this->padding);
+      auto dilation = vecToInt64(this->dilation);
+
+      at::conv_depthwise2d_forward_out(output, input, weight, kernel_size, bias, stride, padding, dilation);
+  } else if (use_cudnn(input)) {
 #ifdef WITH_CUDNN
     if (input.type().ID() != weight.type().ID()){
       std::stringstream ss;
@@ -316,15 +326,6 @@ auto ConvForward::apply(const variable_list& inputs) -> variable_list {
           padding, stride, dilation, groups, benchmark, deterministic));
     }
 #endif
-  } else if (is_eligible_for_depthwise_convolution(input, weight, groups)) {
-      output.resize_(output_size(input, weight));
-
-      auto kernel_size = weight.sizes().slice(2);
-      auto stride = vecToInt64(this->stride);
-      auto padding = vecToInt64(this->padding);
-      auto dilation = vecToInt64(this->dilation);
-
-      at::conv_depthwise2d_forward_out(output, input, weight, kernel_size, bias, stride, padding, dilation);
   } else {
     for (int g = 0; g < groups; ++g) {
       columns[g] = input.type().tensor();
@@ -398,6 +399,8 @@ auto ConvBackward::apply(const variable_list& grad_outputs) -> variable_list {
     grad_output = view4d(grad_output);
   }
 
+
+  bool use_depthwise = this->is_eligible_for_depthwise_convolution(input, weight, groups);
   bool use_cudnn = this->use_cudnn(input);
 
   at::Tensor grad_input;
@@ -410,7 +413,25 @@ auto ConvBackward::apply(const variable_list& grad_outputs) -> variable_list {
     should_compute_output(2) && bias.defined(),
   };
 
-  if (use_cudnn) {
+  if (use_depthwise) {
+    if (output_mask[0] || output_mask[1]) {
+      auto kernel_size = weight.sizes().slice(2);
+      auto stride = vecToInt64(this->stride);
+      auto padding = vecToInt64(this->padding);
+      auto dilation = vecToInt64(this->dilation);
+
+      std::tie(grad_input, grad_weight) = at::conv_depthwise2d_backward(
+          grad_output, input, weight, kernel_size, stride, padding, dilation,
+          {output_mask[0], output_mask[1]});
+      }
+
+      // THCUNN implementation does not handle bias, so we do it ourselves
+      if (output_mask[2]) {
+        grad_bias = bias.type().tensor();
+        grad_bias.resize_as_(bias).zero_();
+        update_grad_bias(grad_output, grad_bias);
+      }
+    } else if (use_cudnn) {
 #ifdef WITH_CUDNN
     if (output_mask[0]) {
       grad_input = input.type().tensor();
@@ -447,25 +468,6 @@ auto ConvBackward::apply(const variable_list& grad_outputs) -> variable_list {
       }
     }
 #endif
-  } else if (is_eligible_for_depthwise_convolution(input, weight, groups)) {
-    grad_input = input.type().tensor();
-    grad_input.resize_as_(input);
-
-    auto kernel_size = weight.sizes().slice(2);
-    auto stride = vecToInt64(this->stride);
-    auto padding = vecToInt64(this->padding);
-    auto dilation = vecToInt64(this->dilation);
-
-    std::tie(grad_input, grad_weight) = at::conv_depthwise2d_backward(
-        grad_output, input, weight, kernel_size, stride, padding, dilation,
-        {output_mask[0], output_mask[1]});
-
-    // THCUNN implementation does not handle bias, so we do it ourselves
-    if (bias.defined() && should_compute_output(2)) {
-      grad_bias = bias.type().tensor();
-      grad_bias.resize_as_(bias).zero_();
-      update_grad_bias(grad_output, grad_bias);
-    }
   } else if (groups == 1) {
     std::tie(grad_input, grad_weight, grad_bias) = compute_backward(
         input, grad_output, weight, columns[0], ones[0],
