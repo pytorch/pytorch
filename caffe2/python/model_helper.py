@@ -572,7 +572,7 @@ def ExtractPredictorNet(
             if op.type == 'RecurrentNetwork':
                 for arg in op.arg:
                     if arg.name == 'backward_step_net':
-                        arg.ClearField('n')
+                        arg.ClearField(str('n'))
                     elif arg.name == 'step_net':
                         for step_op in arg.n.op:
                             rename_list(step_op.input)
