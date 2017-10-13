@@ -4,7 +4,7 @@
 #include "../Types.h"
 #include "THC/THC.h"
 
-#include <cudnn.h>
+#include "cudnn-wrapper.h"
 
 namespace torch { namespace cudnn {
 
