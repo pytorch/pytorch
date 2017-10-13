@@ -43,8 +43,8 @@ std::unique_ptr<Storage> VariableType::storage() const {
 std::unique_ptr<Storage> VariableType::storage(size_t size) const {
   return baseType->storage(size);
 }
-std::unique_ptr<Storage> VariableType::storageFromBlob(void * data, int64_t size) const {
-  return baseType->storageFromBlob(data, size);
+std::unique_ptr<Storage> VariableType::storageFromBlob(void * data, int64_t size, const std::function<void(void*)> & deleter) const {
+  return baseType->storageFromBlob(data, size, deleter);
 }
 Tensor VariableType::unsafeTensorFromTH(void * th_pointer, bool retain) const {
   return baseType->unsafeTensorFromTH(th_pointer, retain);
@@ -139,13 +139,13 @@ void wrap_output(VariableImpl& pImpl, FunctionFlags flags, std::shared_ptr<Funct
   }
 }
 
-void VariableType::copy(const Tensor & src, Tensor & dst) const {
+void VariableType::s_copy(const Tensor & src, Tensor & dst) const {
   auto& src_ = checked_unpack(src, "src", 0);
   auto& dst_ = checked_unpack(dst, "dst", 1);
   auto& pImpl = static_cast<VariableImpl&>(*dst.get());
   check_inplace(pImpl);
   auto flags = Function::flags({ src });
-  baseType->copy(src_, dst_);
+  baseType->s_copy(src_, dst_);
   (*pImpl.version_counter)++;
   wrap_output(pImpl, std::move(flags), std::make_shared<Identity>());
 }
