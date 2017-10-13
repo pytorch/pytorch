@@ -669,6 +669,7 @@ TH_API void THNN_(SpatialDepthwiseConvolution_updateOutput)(
                   THCTensor *input,
                   THCTensor *output,
                   THCTensor *weight,
+                  THCTensor *bias,              // [OPTIONAL]
                   int kW, int kH,
                   int dW, int dH,
                   int padW, int padH,

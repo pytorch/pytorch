@@ -323,11 +323,7 @@ auto ConvForward::apply(const variable_list& inputs) -> variable_list {
       auto padding = vecToInt64(this->padding);
       auto dilation = vecToInt64(this->dilation);
 
-      at::conv_depthwise2d_forward_out(output, input, weight, kernel_size, stride, padding, dilation);
-
-      if (bias.defined()) {
-        output.add_(bias.view({1, -1, 1, 1}));
-      }
+      at::conv_depthwise2d_forward_out(output, input, weight, kernel_size, bias, stride, padding, dilation);
   } else {
     for (int g = 0; g < groups; ++g) {
       columns[g] = input.type().tensor();
@@ -364,6 +360,14 @@ auto ConvForward::apply(const variable_list& inputs) -> variable_list {
   });
 };
 
+// For Convolution strategies that don't implicitly handle grad_bias, we add a helper
+// function here to perform it using simple Tensor operators
+static void update_grad_bias(const at::Tensor& grad_output, at::Tensor& grad_bias) {
+  // grad_output is in N, C, H, W, we re-shape and make contiguous
+  at::Tensor transposed = grad_output.transpose(0, 1).contiguous();
+  // sum across all of the channels and add to grad_bias
+  grad_bias.add_(transposed.view({transposed.size(0), -1}).sum(1));
+}
 
 // ConvBackward implementation
 
@@ -455,7 +459,12 @@ auto ConvBackward::apply(const variable_list& grad_outputs) -> variable_list {
         grad_output, input, weight, kernel_size, stride, padding, dilation,
         {output_mask[0], output_mask[1]});
 
-      // TODO: handle bias addition at some point
+    // THCUNN implementation does not handle bias, so we do it ourselves
+    if (bias.defined() && should_compute_output(2)) {
+      grad_bias = bias.type().tensor();
+      grad_bias.resize_as_(bias).zero_();
+      update_grad_bias(grad_output, grad_bias);
+    }
   } else if (groups == 1) {
     std::tie(grad_input, grad_weight, grad_bias) = compute_backward(
         input, grad_output, weight, columns[0], ones[0],
@@ -836,10 +845,7 @@ static std::tuple<Tensor, Tensor, Tensor> compute_backward(
           }
 
           if (output_mask[2]) {
-            // grad_output is in N, C, H, W, we re-shape and make contiguous
-            at::Tensor transposed = grad_output.transpose(0, 1).contiguous();
-            // sum across all of the channels and add to grad_bias
-            grad_bias = transposed.view({transposed.size(0), -1}).sum(1);
+            compute_grad_bias(grad_output, grad_bias);
           }
 
           return std::make_tuple(grad_input, grad_weight, grad_bias);

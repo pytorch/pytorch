@@ -7,6 +7,7 @@ void THNN_(SpatialDepthwiseConvolution_updateOutput)(
                   THCTensor *input,
                   THCTensor *output,
                   THCTensor *weight,
+                  THCTensor *bias,
                   int kW, int kH,
                   int dW, int dH,
                   int padW, int padH,
@@ -28,6 +29,11 @@ void THNN_(SpatialDepthwiseConvolution_updateOutput)(
   // We verify that the # of output_channels is a multiple of input_channels
   assert(weight->size[0] % input->size[1] == 0);
 
+  // Bias has same # of channels as output
+  if (bias) {
+    assert(bias->size[0] == weight->size[0]);
+  }
+
   // Following the behvaior of other THCUNN functions, we shape the output
   // Tensor ourselves
 
@@ -43,6 +49,10 @@ void THNN_(SpatialDepthwiseConvolution_updateOutput)(
   THCDeviceTensor<real, 4> dInput = toDeviceTensor<real, 4>(state, input);
   THCDeviceTensor<real, 4> dWeight = toDeviceTensor<real, 4>(state, weight);
   THCDeviceTensor<real, 4> dOutput = toDeviceTensor<real, 4>(state, output);
+  THCDeviceTensor<real, 1> dBias;
+  if (bias) {
+    dBias = toDeviceTensor<real, 1>(state, bias);
+  }
 
   // Kernel currently relies upon all the Tensors to be contiguous
   assert(dInput.isContiguous());
@@ -59,7 +69,7 @@ void THNN_(SpatialDepthwiseConvolution_updateOutput)(
   dim3 block(CUDA_NUM_THREADS);
 
   spatialDepthwiseConvolutionUpdateOutput<<<grid, block, 0, THCState_getCurrentStream(state)>>>(
-    dInput, dOutput, dWeight, n, outputChannels, depthwiseMultiplier,
+    dInput, dOutput, dWeight, dBias, bias != NULL, n, outputChannels, depthwiseMultiplier,
     width, height, outputWidth, outputHeight,
     kW, kH, dW, dH, padW, padH, dilationW, dilationH);
 

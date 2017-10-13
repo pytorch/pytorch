@@ -16,6 +16,8 @@ __global__ void spatialDepthwiseConvolutionUpdateOutput(
     const THCDeviceTensor<T, 4> input,
     THCDeviceTensor<T, 4> output,
     const THCDeviceTensor<T, 4> weight,
+    const THCDeviceTensor<T, 1> bias,
+    bool biasEnabled,
     IndexType totalElements,
     const int outputChannels,
     const int depthwiseMultiplier,
@@ -40,7 +42,7 @@ __global__ void spatialDepthwiseConvolutionUpdateOutput(
 
     int weightOffset = c * kernelHeight * kernelWidth;
 
-    T value = ScalarConvert<int, T>::to(0);
+    T value = biasEnabled ? bias.data()[c] : ScalarConvert<int, T>::to(0);
     for (int kH = 0; kH < kernelHeight; ++kH) {
       for (int kW = 0; kW < kernelWidth; ++kW) {
         const int h_in = -padHeight + h * strideHeight + kH * dilationHeight;
