@@ -20,11 +20,12 @@ from __future__ import unicode_literals
 
 from caffe2.python import core, workspace
 from hypothesis import given
+from caffe2.proto import caffe2_pb2
 import caffe2.python.hypothesis_test_util as hu
 import hypothesis.strategies as st
 import numpy as np
 import random
-
+import unittest
 
 class TestUtilityOps(hu.HypothesisTestCase):
 
@@ -70,7 +71,7 @@ class TestUtilityOps(hu.HypothesisTestCase):
             outputs_with_grads=[0],
         )
 
-    @given(dtype=st.sampled_from([np.float32, np.int32, np.int64]),
+    @given(dtype=st.sampled_from([np.float32, np.int32]),
            ndims=st.integers(min_value=1, max_value=5),
            seed=st.integers(min_value=0, max_value=65536),
            null_axes=st.booleans(),
@@ -100,6 +101,31 @@ class TestUtilityOps(hu.HypothesisTestCase):
 
         self.assertReferenceChecks(gc, op, [X, axes],
                                    transpose_ref)
+
+    @unittest.skipIf(not workspace.has_gpu_support, "No gpu support")
+    def test_gpu_transpose_minusones(self):
+        '''
+        Repro a problem with earlier version of CuDNN Transpose Op that
+        casted ints to floats.
+        '''
+        X = -np.ones((2, 10)).astype(np.int32)
+        with core.DeviceScope(core.DeviceOption(caffe2_pb2.CUDA, 0)):
+            workspace.FeedBlob("X", X)
+            print("X:\n{}\n".format(workspace.FetchBlob("X")))
+            op = core.CreateOperator(
+                "Transpose",
+                ["X"],
+                ["Y"],
+                engine='CUDNN'
+            )
+            workspace.RunOperatorOnce(op)
+            Y = workspace.FetchBlob("Y")
+            print("Y:\n{}\n".format(Y))
+
+            for j in list(Y.flatten()):
+                self.assertEqual(-1, j)
+
+
 
     @given(m=st.integers(5, 10), n=st.integers(5, 10),
            o=st.integers(5, 10), nans=st.booleans(), **hu.gcs)
