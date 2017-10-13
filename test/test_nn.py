@@ -3115,14 +3115,14 @@ class TestNNInit(TestCase):
         if isinstance(tensor, Variable):
             tensor = tensor.data
         samples = list(tensor.view(-1))
-        p_value = stats.kstest(samples, 'norm', args=(mean, std)).pvalue
+        p_value = stats.kstest(samples, 'norm', args=(mean, std))[1]
         return p_value > 0.0001
 
     def _is_uniform(self, tensor, a, b):
         if isinstance(tensor, Variable):
             tensor = tensor.data
         samples = list(tensor.view(-1))
-        p_value = stats.kstest(samples, 'uniform', args=(a, (b - a))).pvalue
+        p_value = stats.kstest(samples, 'uniform', args=(a, (b - a)))[1]
         return p_value > 0.0001
 
     def _create_random_nd_tensor(self, dims, size_min, size_max, as_variable):
