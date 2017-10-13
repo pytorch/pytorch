@@ -1,4 +1,6 @@
 import torch
+from functools import reduce
+from operator import mul
 
 
 def maybe_view(variable, size, check_same_size=True):
@@ -48,8 +50,8 @@ def maybe_unexpand_or_view(variable, old_size):
         return maybe_view(variable, old_size, False)
 
 
-# Turn the parameter pad in pytorch into paddings in onnx order.
-def prepare_paddings(input, pad):
+# Turn the parameter pad in pytorch into paddings in ONNX order.
+def prepare_onnx_paddings(input, pad):
     dim = len(input.type().sizes())
     # The order of paddings is dim_0_begin, dim_0_end, dim_1_begin, ... , dim_n_end.
     # n is the dimension of input.
@@ -62,3 +64,27 @@ def prepare_paddings(input, pad):
         paddings = [0, 0] + paddings
     assert len(paddings) == dim * 2
     return paddings
+
+
+# Check whether the op enable broadcasting, and whether it is supported by ONNX.
+# Details can be found here: https://github.com/onnx/onnx/blob/master/docs/Operators.md#Gemm
+def check_onnx_broadcast(dims1, dims2):
+    broadcast = False
+    supported = True
+    len1 = len(dims1)
+    len2 = len(dims2)
+    numel1 = reduce(lambda x, y: x * y, dims1)
+    numel2 = reduce(lambda x, y: x * y, dims2)
+    if len1 < len2:
+        broadcast = True
+        supported = False
+    elif len1 > len2:
+        broadcast = True
+        if numel2 != 1 and dims1[len1 - len2:] != dims2:
+            supported = False
+    else:
+        if dims1 != dims2:
+            broadcast = True
+            if numel2 != 1:
+                supported = False
+    return broadcast, supported
