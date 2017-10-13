@@ -369,8 +369,6 @@ class DataParallelModelTest(TestCase):
                 data_parallel_model.Parallelize_GPU(None, None, None)
 
 
-@unittest.skipIf(not workspace.has_gpu_support, "No gpu support.")
-@unittest.skipIf(workspace.NumCudaDevices() < 2, "Need at least 2 GPUs.")
 class RecurrentNetworkParallelTest(TestCase):
 
     def run_model(self, devices, gpu):
