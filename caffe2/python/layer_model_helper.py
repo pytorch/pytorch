@@ -32,8 +32,6 @@ from future.utils import viewitems
 import logging
 import numpy as np
 import six
-
-logging.basicConfig()
 logger = logging.getLogger(__name__)
 
 

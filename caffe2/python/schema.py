@@ -43,7 +43,6 @@ from past.builtins import basestring
 from future.utils import viewitems, viewkeys, viewvalues
 from itertools import islice
 
-logging.basicConfig()
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 

@@ -26,7 +26,6 @@ from collections import defaultdict
 from caffe2.python import utils
 from future.utils import viewitems
 
-logging.basicConfig()
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 

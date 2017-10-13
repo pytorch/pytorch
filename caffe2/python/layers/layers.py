@@ -27,8 +27,6 @@ from caffe2.proto import caffe2_pb2
 
 from collections import namedtuple
 import numpy as np
-
-logging.basicConfig()
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
