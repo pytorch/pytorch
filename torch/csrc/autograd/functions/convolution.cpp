@@ -133,9 +133,10 @@ auto ConvParams::use_nnpack(const at::Tensor& input) const -> bool {
 auto ConvParams::is_eligible_for_depthwise_convolution(
         const at::Tensor& input, const at::Tensor& weight, int groups) const -> bool {
   return input.type().isCuda() &&
+         !transposed &&
          input.ndimension() == 4 &&
          input.size(1) == groups &&
-         weight.size(1) % input.size(1) == 0; // output channels must be a multiple of input channels
+         weight.size(0) % input.size(1) == 0; // output channels must be a multiple of input channels
 }
 
 std::string ConvForward::name() { return "ConvForward"; }
