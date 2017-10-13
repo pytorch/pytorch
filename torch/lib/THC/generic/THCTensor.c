@@ -222,9 +222,13 @@ THCTensor *THCTensor_(newContiguous)(THCState *state, THCTensor *self)
       new_stride->data[d] = z;
       z *= self->size[d];
     }
-    return THCTensor_(newWithStorage)(state, self->storage, self->storageOffset,
-                                      THCTensor_(newSizeOf)(state, self),
-                                      new_stride);
+    THLongStorage *new_size = THCTensor_(newSizeOf)(state, self);
+    THCTensor*tensor = THCTensor_(newWithStorage)(state, self->storage,
+                                                  self->storageOffset,
+                                                  new_size, new_stride);
+    THLongStorage_free(new_stride);
+    THLongStorage_free(new_size);
+    return tensor;
   } else {
     THCTensor_(retain)(state, self);
     return self;
