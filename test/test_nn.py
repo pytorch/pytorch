@@ -1922,7 +1922,7 @@ class TestNN(NNTestCase):
     # Very similar to test_Conv2d_naive_groups but with special care to handle
     # the number of groups == number of input channels
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
-    def test_Conv2d_depthwise(self):
+    def test_Conv2d_depthwise_naive_groups(self):
         for depth_multiplier in [1, 2]:
             m = nn.Conv2d(2, 2 * depth_multiplier, kernel_size=3, groups=2).cuda()
             i = Variable(torch.randn(2, 2, 6, 6).cuda(), requires_grad=True)
@@ -3840,6 +3840,31 @@ new_module_tests = [
         input_size=(1, 2, 4, 5),
         cudnn=True,
         check_gradgrad=False,
+    ),
+    dict(
+        fullname='Conv2d_depthwise',
+        constructor=lambda: nn.Conv2d(4, 4, (3, 3), groups=4),
+        input_size=(2, 4, 6, 6),
+    ),
+    dict(
+        fullname='Conv2d_depthwise_with_multiplier',
+        constructor=lambda: nn.Conv2d(4, 8, (3, 3), groups=4),
+        input_size=(2, 4, 6, 6),
+    ),
+    dict(
+        fullname='Conv2d_depthwise_strided',
+        constructor=lambda: nn.Conv2d(4, 4, (3, 3), stride=(2, 2), groups=4),
+        input_size=(2, 4, 6, 6),
+    ),
+    dict(
+        fullname='Conv2d_depthwise_padded',
+        constructor=lambda: nn.Conv2d(4, 4, (3, 3), padding=(1, 1), groups=4),
+        input_size=(2, 4, 6, 6),
+    ),
+    dict(
+        fullname='Conv2d_depthwise_dilated',
+        constructor=lambda: nn.Conv2d(4, 4, (2, 2), dilation=(2, 2), groups=4),
+        input_size=(2, 4, 5, 5),
     ),
     dict(
         module_name='MaxPool2d',
