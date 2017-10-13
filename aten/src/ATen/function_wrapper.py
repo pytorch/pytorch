@@ -274,6 +274,8 @@ def create_generic(top_env, declarations):
             translated['output'] = True
         if argument.get('size'):
             translated['size'] = argument['size']
+        if argument.get('is_nullable') is not None:
+            translated['is_nullable'] = argument['is_nullable']
         return translated
 
     def get_formals(option, include_constants=False):
