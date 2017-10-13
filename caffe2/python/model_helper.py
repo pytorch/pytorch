@@ -458,14 +458,14 @@ class ModelHelper(object):
             raise AttributeError(op_type)
 
         if not core.IsOperator(op_type):
-            raise RuntimeError(
+            raise AttributeError(
                 'Method ' + op_type + ' is not a registered operator.' +
                 ' Did you mean: [' +
                 ','.join(workspace.C.nearby_opnames(op_type)) + ']'
             )
         if op_type not in _known_working_ops:
             if not self.allow_not_known_ops:
-                raise RuntimeError(
+                raise AttributeError(
                     "Operator {} is not known to be safe".format(op_type))
 
             logging.warning("You are creating an op that the ModelHelper "
