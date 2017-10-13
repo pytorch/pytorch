@@ -36,7 +36,6 @@ from caffe2.python import scope, utils
 
 import caffe2.python._import_c_extension as C
 
-logging.basicConfig()
 logger = logging.getLogger(__name__)
 
 Blobs = C.blobs

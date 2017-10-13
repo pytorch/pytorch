@@ -31,7 +31,6 @@ from caffe2.python.layers.layers import (
 
 from caffe2.python.layers.tags import Tags
 
-logging.basicConfig()
 logger = logging.getLogger(__name__)
 
 

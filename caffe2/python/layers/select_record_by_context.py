@@ -27,7 +27,6 @@ from caffe2.python.layers.layers import (
 )
 
 
-logging.basicConfig()
 logger = logging.getLogger(__name__)
 
 
