@@ -156,24 +156,55 @@ static auto view3d(const at::Tensor& tensor) -> at::Tensor {
 }
 
 static void check_input_shape_forward(const at::Tensor& input,
-				      const at::Tensor& weight,
+				      const at::Tensor& weight, const at::Tensor& bias,
 				      int64_t groups, bool transposed) {
+  int k = input.ndimension();
+
+  if (weight.ndimension() != k) {
+      std::stringstream ss;
+      ss << "Expected " << k << "-dimensional input for " << k
+         << "-dimensional weight " << weight.sizes() << ", but got input of size "
+         << input.sizes() << " instead";
+      throw std::runtime_error(ss.str());
+  }
+  if (weight.size(0) < groups) {
+    std::stringstream ss;
+    ss << "Given groups=" << groups << ", expected weight to be at least "
+       << groups << " at dimension 0, but got weight of size " << weight.sizes()
+       << " instead";
+    throw std::runtime_error(ss.str());
+  }
+
   if (!transposed) {
     if (input.size(1) != (weight.size(1) * groups)) {
       std::stringstream ss;
       ss << "Given groups=" << groups << ", weight" << weight.sizes()
-	 << ", so expected input" << input.sizes() << "  to have "
+	 << ", so expected input" << input.sizes() << " to have "
 	 << (weight.size(1) * groups) << " channels, but got " << input.size(1)
 	 << " channels instead";
+      throw std::runtime_error(ss.str());
+    }
+    if (bias.defined() && (bias.ndimension() != 1 || bias.size(0) != weight.size(0))) {
+      std::stringstream ss;
+      ss << "Given weight of size " << weight.sizes()
+         << ", expected bias to be 1-dimensional with " << weight.size(0) << " elements"
+         << ", but got bias of size " << bias.sizes() << " instead";
       throw std::runtime_error(ss.str());
     }
   } else { // transposed
     if (input.size(1) != weight.size(0)) {
       std::stringstream ss;
       ss << "Given transposed=" << transposed << ", weight" << weight.sizes()
-	 << ", so expected input" << input.sizes() << "  to have "
+	 << ", so expected input" << input.sizes() << " to have "
 	 << weight.size(0) << " channels, but got " << input.size(1)
 	 << " channels instead";
+      throw std::runtime_error(ss.str());
+    }
+    if (bias.defined() && (bias.ndimension() != 1 || bias.size(0) != weight.size(1) * groups)) {
+      std::stringstream ss;
+      ss << "Given transposed=" << transposed << ", weight of size " << weight.sizes()
+         << ", expected bias to be 1-dimensional with " << weight.size(1) * groups << " elements"
+         << ", but got bias of size " << bias.sizes() << " instead";
       throw std::runtime_error(ss.str());
     }
   }
@@ -218,9 +249,10 @@ auto ConvForward::apply(const variable_list& inputs) -> variable_list {
   auto weight = inputs[1].data();
   auto bias = inputs[2].opt_data();
 
-  check_input_shape_forward(input, weight, groups, transposed);
+  check_input_shape_forward(input, weight, bias, groups, transposed);
 
   int k = input.ndimension();
+
   if (k == 3) {
     view1d_as_2d();
     input = view4d(input);
