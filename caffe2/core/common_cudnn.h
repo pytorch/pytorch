@@ -139,6 +139,22 @@ class cudnnTypeWrapper<float> {
 };
 
 template <>
+class cudnnTypeWrapper<int> {
+ public:
+  static const cudnnDataType_t type = CUDNN_DATA_INT32;
+  typedef const int ScalingParamType;
+  typedef int BNParamType;
+  static ScalingParamType* kOne() {
+    static ScalingParamType v = 1;
+    return &v;
+  }
+  static const ScalingParamType* kZero() {
+    static ScalingParamType v = 0;
+    return &v;
+  }
+};
+
+template <>
 class cudnnTypeWrapper<double> {
  public:
   static const cudnnDataType_t type = CUDNN_DATA_DOUBLE;

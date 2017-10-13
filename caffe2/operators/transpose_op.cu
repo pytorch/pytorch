@@ -15,7 +15,7 @@
  */
 
 #include "caffe2/operators/transpose_op.h"
-
+#include "caffe2/operators/transpose_op_gpu.h"
 #include <limits>
 
 #include "caffe2/core/context_gpu.h"
@@ -55,6 +55,17 @@ template <typename T>
 bool TransposeOp<CUDAContext>::DoRunWithType() {
   const auto& input = Input(0);
   auto* output = Output(0);
+  return TransposeCUDA<T>(axes_, context_, input, output, buffer_cpu_, buffer_);
+}
+
+template <typename T>
+bool TransposeCUDA(
+    vector<int>& axes,
+    CUDAContext& context,
+    const Tensor<CUDAContext>& input,
+    Tensor<CUDAContext>* output,
+    TensorCPU& buffer_cpu,
+    Tensor<CUDAContext>& buffer) {
   int count = input.size();
   int ndim = input.ndim();
   CAFFE_ENFORCE(
@@ -68,8 +79,8 @@ bool TransposeOp<CUDAContext>::DoRunWithType() {
   // (1) the dimenions of the inputs
   // (2) the dimension of the outputs
   // (3) the axis mapping from inputs to outputs
-  buffer_cpu_.Resize(3 * ndim);
-  int* buffer_data = buffer_cpu_.mutable_data<int>();
+  buffer_cpu.Resize(3 * ndim);
+  int* buffer_data = buffer_cpu.mutable_data<int>();
   for (int i = 0; i < ndim; ++i) {
     *(buffer_data++) = input.dim32(i);
   }
@@ -77,14 +88,20 @@ bool TransposeOp<CUDAContext>::DoRunWithType() {
     *(buffer_data++) = output->dim32(i);
   }
   for (int i = 0; i < ndim; ++i) {
-    *(buffer_data++) = axes_[i];
+    *(buffer_data++) = axes[i];
   }
   // Copy the dimension information to GPU.
-  buffer_.CopyFrom(buffer_cpu_, &context_);
-  transpose_gpu<T><<<CAFFE_GET_BLOCKS(count), CAFFE_CUDA_NUM_THREADS,
-                     0, context_.cuda_stream()>>>(
-      count, input.template data<T>(), output->template mutable_data<T>(),
-      buffer_.data<int>(), ndim);
+  buffer.CopyFrom(buffer_cpu, &context);
+  transpose_gpu<T>
+      <<<CAFFE_GET_BLOCKS(count),
+         CAFFE_CUDA_NUM_THREADS,
+         0,
+         context.cuda_stream()>>>(
+          count,
+          input.template data<T>(),
+          output->template mutable_data<T>(),
+          buffer.data<int>(),
+          ndim);
   return true;
 }
 
