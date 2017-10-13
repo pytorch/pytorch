@@ -53,16 +53,28 @@ def argument_to_declaration(param, func=None):
 def output_arguments(thnn_function):
     cname = thnn_function.name
     output_args = []
+
+    def is_output_arg(arg_name, func_name):
+        if arg_name == 'output' and 'updateOutput' in cname:
+            return True
+        if name in {'gradInput', 'gradWeight', 'gradBias'}:
+            return True
+        if arg_name == 'indices' and 'updateOutput' in cname and 'Unpool' not in cname:
+            # indices is an output argument in pooling and an input in unpooling
+            return True
+        return False
+
     for arg in thnn_function.arguments:
         name = arg.name
-        if name == 'output' and 'updateOutput' in cname:
-            output_args.append({'type': 'THTensor*', 'name': name, 'output': True})
-        elif name in {'gradInput', 'gradWeight', 'gradBias'}:
-            name = camel_to_snake(name)
-            output_args.append({'type': 'THTensor*', 'name': name, 'output': True,
-                                'is_nullable': True})
-        elif name == 'indices' and 'updateOutput' in cname:
-            output_args.append({'type': 'THIndexTensor*', 'name': name, 'output': True})
+        if is_output_arg(name, cname):
+            desc = {
+                'type': arg.type,
+                'name': camel_to_snake(name),
+                'output': True,
+            }
+            if name.startswith('grad_'):
+                desc['is_nullable'] = True
+            output_args.append(desc)
     return output_args
 
 

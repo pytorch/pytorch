@@ -72,6 +72,9 @@
 - name: softplus(Tensor input, Scalar beta=1, Scalar threshold=20)
   cname: SoftPlus
 
+- name: softshrink(Tensor input, Scalar lambd=0.5)
+  cname: SoftShrink
+
 - name: threshold(Tensor input, Scalar threshold, Scalar value, bool inplace=false)
   cname: Threshold
 
@@ -85,10 +88,35 @@
   default_init:
     stride: kernel_size
 
-- name: max_pool2d(Tensor input, IntList[2] kernel_size, IntList[2] stride={}, IntList[2] padding=0, bool ceil_mode=false)
-  cname: SpatialMaxPooling
+- name: avg_pool3d(Tensor input, IntList[3] kernel_size, IntList[3] stride={}, IntList[3] padding=0, bool ceil_mode=false, bool count_include_pad=false)
+  cname: VolumetricAveragePooling
   default_init:
     stride: kernel_size
+
+- name: max_pool2d(Tensor input, IntList[2] kernel_size, IntList[2] stride={}, IntList[2] padding=0, IntList[2] dilation=1, bool ceil_mode=false)
+  cname: SpatialDilatedMaxPooling
+  default_init:
+    stride: kernel_size
+
+- name: max_pool3d(Tensor input, IntList[3] kernel_size, IntList[3] stride={}, IntList[3] padding=0, IntList[2] dilation=1, bool ceil_mode=false)
+  cname: VolumetricDilatedMaxPooling
+  default_init:
+    stride: kernel_size
+
+- name: max_unpool2d(Tensor input, LongTensor indices, IntList[2] output_size)
+  cname: SpatialMaxUnpooling
+
+- name: max_unpool3d(Tensor input, LongTensor indices, IntList[3] output_size, IntList[3] stride, IntList[3] padding)
+  cname: VolumetricMaxUnpooling
+
+# Private functions. These also exist in TH, but we want the backwards functions
+# to implement derivatives.
+
+- name: _sigmoid(Tensor input)
+  cname: Sigmoid
+
+- name: _tanh(Tensor input)
+  cname: Tanh
 
 # Batch normalization
 
