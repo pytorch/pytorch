@@ -347,7 +347,7 @@ class TestShapeInference(test_util.TestCase):
 
         self.InferTensorRunAndCompare(model)
 
-
+        # test Flatten with default axis (=1)
         model = model_helper.ModelHelper(name="test_model")
         model.Flatten("X", "Flat")
         model.Flatten("empty", "EmptyFlat")
@@ -355,6 +355,20 @@ class TestShapeInference(test_util.TestCase):
         workspace.FeedBlob("empty", np.random.rand(0, 2, 3).astype(np.float32))
 
         self.InferTensorRunAndCompare(model)
+
+        # test Flatten with axis
+        model = model_helper.ModelHelper(name="test_model")
+        x = np.random.randn(17, 5, 13)
+        for axis in range(x.ndim + 1):
+            model.Flatten("x", "Flat", axis=axis)
+            workspace.FeedBlob("x", x)
+            self.InferTensorRunAndCompare(model)
+
+        empty = np.random.randn(0, 5, 13)
+        for axis in range(empty.ndim + 1):
+            model.Flatten("empty", "Flat", axis=axis)
+            workspace.FeedBlob("empty", empty)
+            self.InferTensorRunAndCompare(model)
 
     def testShapeInferenceReshape(self):
         model = model_helper.ModelHelper(name="test_model")
