@@ -2,7 +2,7 @@
 #define THP_CUDNN_BATCH_NORM_INC
 
 #include "../Types.h"
-#include <cudnn.h>
+#include "cudnn-wrapper.h"
 #include "THC/THC.h"
 
 

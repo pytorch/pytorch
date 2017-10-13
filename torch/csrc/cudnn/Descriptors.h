@@ -3,7 +3,7 @@
 
 #include "Exceptions.h"
 
-#include <cudnn.h>
+#include "cudnn-wrapper.h"
 
 namespace torch { namespace cudnn {
 
