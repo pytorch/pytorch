@@ -6,7 +6,7 @@ class ConstantPadNd(Function):
 
     @staticmethod
     def symbolic(g, input, pad, value=0):
-        paddings = prepare_onnx_paddings(input, pad)
+        paddings = prepare_onnx_paddings(len(input.type().sizes()), pad)
         return g.appendNode(g.create("Pad", [input]).is_("paddings", paddings)
                              .s_("mode", "constant").f_("value", value))
 
