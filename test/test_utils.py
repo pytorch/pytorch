@@ -16,6 +16,8 @@ from torch.utils.trainer import Trainer
 from torch.utils.trainer.plugins import *
 from torch.utils.trainer.plugins.plugin import Plugin
 from torch.utils.serialization import load_lua
+from torch.autograd._functions.utils import prepare_onnx_paddings
+from torch.autograd._functions.utils import check_onnx_broadcast
 
 HAS_CUDA = torch.cuda.is_available()
 
@@ -377,6 +379,71 @@ class TestLuaReader(TestCase):
 
     def _transform_MultiMarginCriterion(self, input, target):
         return input, target.sub(1)
+
+
+class TestONNXUtils(TestCase):
+    def test_prepare_onnx_paddings(self):
+        sizes = [2, 3, 4]
+        pad = [1, 2, 3, 4]
+        paddings = prepare_onnx_paddings(len(sizes), pad)
+        self.assertEqual(paddings, [0, 0, 3, 4, 1, 2])
+
+    def test_check_onnx_broadcast(self):
+        #Case 1
+        dims1 = [3, 4]
+        dims2 = [2, 3, 4]
+        broadcast, supported = check_onnx_broadcast(dims1, dims2)
+        self.assertEqual(broadcast, True)
+        self.assertEqual(supported, False)
+
+        #Case 2
+        dims1 = [3, 4]
+        dims2 = [1, 1, 1]
+        broadcast, supported = check_onnx_broadcast(dims1, dims2)
+        self.assertEqual(broadcast, True)
+        self.assertEqual(supported, True)
+
+        #Case 3
+        dims1 = [1, 1]
+        dims2 = [1]
+        broadcast, supported = check_onnx_broadcast(dims1, dims2)
+        self.assertEqual(broadcast, True)
+        self.assertEqual(supported, True)
+
+        #Case 4
+        dims1 = [2, 3, 4]
+        dims2 = [3, 4]
+        broadcast, supported = check_onnx_broadcast(dims1, dims2)
+        self.assertEqual(broadcast, True)
+        self.assertEqual(supported, True)
+
+        #Case 5
+        dims1 = [2, 3, 4]
+        dims2 = [1, 4]
+        broadcast, supported = check_onnx_broadcast(dims1, dims2)
+        self.assertEqual(broadcast, True)
+        self.assertEqual(supported, False)
+
+        #Case 6
+        dims1 = [3, 4]
+        dims2 = [3, 4]
+        broadcast, supported = check_onnx_broadcast(dims1, dims2)
+        self.assertEqual(broadcast, False)
+        self.assertEqual(supported, True)
+
+        #Case 7
+        dims1 = [3, 4]
+        dims2 = [1, 4]
+        broadcast, supported = check_onnx_broadcast(dims1, dims2)
+        self.assertEqual(broadcast, True)
+        self.assertEqual(supported, False)
+
+        #Case 8
+        dims1 = [3, 4]
+        dims2 = [1, 1]
+        broadcast, supported = check_onnx_broadcast(dims1, dims2)
+        self.assertEqual(broadcast, True)
+        self.assertEqual(supported, True)
 
 
 TestLuaReader.init()
