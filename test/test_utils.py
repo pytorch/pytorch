@@ -389,61 +389,71 @@ class TestONNXUtils(TestCase):
         self.assertEqual(paddings, [0, 0, 3, 4, 1, 2])
 
     def test_check_onnx_broadcast(self):
-        #Case 1
+
+        def try_check_onnx_broadcast(dims1, dims2):
+            broadcast = True
+            failed = False
+            try:
+                broadcast = check_onnx_broadcast(dims1, dims2)
+            except ValueError:
+                failed = True
+            return broadcast, failed
+
+        # Case 1
         dims1 = [3, 4]
         dims2 = [2, 3, 4]
-        broadcast, supported = check_onnx_broadcast(dims1, dims2)
+        broadcast, failed = try_check_onnx_broadcast(dims1, dims2)
         self.assertEqual(broadcast, True)
-        self.assertEqual(supported, False)
+        self.assertEqual(failed, True)
 
-        #Case 2
+        # Case 2
         dims1 = [3, 4]
         dims2 = [1, 1, 1]
-        broadcast, supported = check_onnx_broadcast(dims1, dims2)
+        broadcast, failed = try_check_onnx_broadcast(dims1, dims2)
         self.assertEqual(broadcast, True)
-        self.assertEqual(supported, True)
+        self.assertEqual(failed, False)
 
-        #Case 3
+        # Case 3
         dims1 = [1, 1]
         dims2 = [1]
-        broadcast, supported = check_onnx_broadcast(dims1, dims2)
+        broadcast, failed = try_check_onnx_broadcast(dims1, dims2)
         self.assertEqual(broadcast, True)
-        self.assertEqual(supported, True)
+        self.assertEqual(failed, False)
 
-        #Case 4
+        # Case 4
         dims1 = [2, 3, 4]
         dims2 = [3, 4]
-        broadcast, supported = check_onnx_broadcast(dims1, dims2)
+        broadcast, failed = try_check_onnx_broadcast(dims1, dims2)
         self.assertEqual(broadcast, True)
-        self.assertEqual(supported, True)
+        self.assertEqual(failed, False)
 
-        #Case 5
+        # Case 5
         dims1 = [2, 3, 4]
         dims2 = [1, 4]
-        broadcast, supported = check_onnx_broadcast(dims1, dims2)
+        broadcast, failed = try_check_onnx_broadcast(dims1, dims2)
         self.assertEqual(broadcast, True)
-        self.assertEqual(supported, False)
+        self.assertEqual(failed, True)
 
-        #Case 6
+        # Case 6
         dims1 = [3, 4]
         dims2 = [3, 4]
-        broadcast, supported = check_onnx_broadcast(dims1, dims2)
+        broadcast, failed = try_check_onnx_broadcast(dims1, dims2)
         self.assertEqual(broadcast, False)
-        self.assertEqual(supported, True)
+        self.assertEqual(failed, False)
 
-        #Case 7
+        # Case 7
         dims1 = [3, 4]
         dims2 = [1, 4]
-        broadcast, supported = check_onnx_broadcast(dims1, dims2)
+        broadcast, failed = try_check_onnx_broadcast(dims1, dims2)
         self.assertEqual(broadcast, True)
-        self.assertEqual(supported, False)
+        self.assertEqual(failed, True)
 
-        #Case 8
+        # Case 8
         dims1 = [3, 4]
         dims2 = [1, 1]
-        broadcast, supported = check_onnx_broadcast(dims1, dims2)
+        broadcast, failed = try_check_onnx_broadcast(dims1, dims2)
         self.assertEqual(broadcast, True)
-        self.assertEqual(supported, True)
+        self.assertEqual(failed, False)
 
 
 TestLuaReader.init()
