@@ -4053,7 +4053,6 @@ class TestTorch(TestCase):
         x.__repr__()
         str(x),
 
-
     def test_unsqueeze(self):
         x = torch.randn(2, 3, 4)
         y = x.unsqueeze(1)
