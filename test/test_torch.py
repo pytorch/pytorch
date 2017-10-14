@@ -4049,6 +4049,10 @@ class TestTorch(TestCase):
         x.__repr__()
         str(x)
 
+        x = torch.DoubleTensor([1e-324, 1e-323, 1e-322, 1e307, 1e308, 1e309])
+        x.__repr__()
+        str(x),
+
     def test_unsqueeze(self):
         x = torch.randn(2, 3, 4)
         y = x.unsqueeze(1)
