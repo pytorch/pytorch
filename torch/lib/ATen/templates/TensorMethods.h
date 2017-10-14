@@ -7,14 +7,13 @@
 namespace at {
 
 inline Tensor Tensor::toType(const Type & t) const {
-  if(type().ID() ==t.ID())
+  if(type() == t)
     return *this;
   return t.copy(*this);
 }
 
 inline Tensor & Tensor::copy_(const Tensor & src) {
-  resize_(src.sizes());
-  type().copy(src,*this);
+  type().copy(src, *this);
   return *this;
 }
 

@@ -37,6 +37,8 @@ struct Generator;
 // situation.
 constexpr int64_t kUndefinedDimensions = std::numeric_limits<int64_t>::min();
 
+static void noop_deleter(void*) {}
+
 enum class TypeID {
   ${type_ids}
   NumOptions
@@ -55,7 +57,7 @@ struct ATen_CLASS Type {
   static void registerAll(Context * context);
   virtual std::unique_ptr<Storage> storage() const = 0;
   virtual std::unique_ptr<Storage> storage(size_t size) const = 0;
-  virtual std::unique_ptr<Storage> storageFromBlob(void * data, int64_t size) const = 0;
+  virtual std::unique_ptr<Storage> storageFromBlob(void * data, int64_t size, const std::function<void(void*)> & deleter=noop_deleter) const = 0;
   virtual std::unique_ptr<Generator> generator() const = 0;
   virtual Tensor unsafeTensorFromTH(void * th_pointer, bool retain) const = 0;
   virtual const char * toString() const = 0;
@@ -67,11 +69,12 @@ struct ATen_CLASS Type {
   // for external dispatch
   virtual TypeID ID() const = 0;
 
-  virtual void copy(const Tensor & src, Tensor & dst) const = 0;
   Tensor copy(const Tensor & src) const;
+  void copy(const Tensor & src, Tensor & dst) const;
+  virtual void s_copy(const Tensor & src, Tensor & dst) const = 0;
 
-  Tensor tensorFromBlob(void * data, IntList sizes) const;
-  Tensor tensorFromBlob(void * data, IntList sizes, IntList strides) const;
+  Tensor tensorFromBlob(void * data, IntList sizes, const std::function<void(void*)> & deleter=noop_deleter);
+  Tensor tensorFromBlob(void * data, IntList sizes, IntList strides, const std::function<void(void*)> & deleter=noop_deleter);
   Tensor scalarTensor(Scalar s) const;
 
   bool operator==(const Type& other) const;

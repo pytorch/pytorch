@@ -66,8 +66,6 @@ int main() {
 
   cout << t.sizes() << " " << t.strides() << "\n";
 
-  auto output = CPU(Float).ones(3);
-  at::Abs_updateOutput(t,output);
   Type & T = CPU(Float);
   Tensor x = T.randn({1,10});
   Tensor prev_h = T.randn({1,20});
