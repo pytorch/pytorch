@@ -207,8 +207,9 @@ def load(f, map_location=None, pickle_module=pickle):
     which underlie tensors, specially.  Storages are first deserialized on the
     cpu.  Then, by default, torch.load tries to move the storage to the device
     it was saved from, raising an exception if this fails because the device
-    does not exist.  If a tensor is serialized, it will be recreated from the
-    moved storage and reside on its device.
+    does not exist.  If you serialize a cuda tensor with torch.save, when you
+    deserialize it with torch.load, it will be on the device it will be created
+    on the device it was originally on from a storage that has been moved there.
 
     But torch.load can also dynamically remap tensors to be loaded on a
     different device using the map_location argument.  To understand how this
@@ -255,6 +256,7 @@ def load(f, map_location=None, pickle_module=pickle):
         >>> torch.load('tensors.pt', map_location=lambda storage, loc: storage.cuda())
         # Map tensors from GPU 1 to GPU 0
         >>> torch.load('tensors.pt', map_location={'cuda:1':'cuda:0'})
+
     """
     new_fd = False
     if isinstance(f, str) or (sys.version_info[0] == 2 and isinstance(f, unicode)):
