@@ -203,35 +203,30 @@ def _save(obj, f, pickle_module, pickle_protocol):
 def load(f, map_location=None, pickle_module=pickle):
     """Loads an object saved with :func:`torch.save` from a file.
 
-    torch.load uses python's normal unpickling facilities but treats storages,
-    which underlie tensors, specially.  Storages are first deserialized on the
-    cpu.  Then, by default, torch.load tries to move the storage to the device
-    it was saved from, raising an exception if this fails because the device
-    does not exist.
-
-    But torch.load can also dynamically remap storages to different devices
-    through the map_location argument.
+    torch.load uses Python's unpickling facilities but treats storages,
+    which underlie tensors, specially. They are first deserialized on the
+    CPU and are then moved to the device they were saved from. If this fails
+    (e.g. because the run time system doesn't have certain devices), an exception
+    is raised. However, storages can be dynamically remapped to an alternative
+    set of devices using the map_location argument.
 
     If map_location is a callable, it will be called once for each serialized
     storage with two arguments: storage and location. The storage argument
-    will be the initial deserialization of the storage, still residing on the
-    cpu.  Each serialized storage has a location tag associated with it,
-    identifying the device it was saved from, and this tag is the second
-    argument passed to map_location.  The builtin location tags are 'cpu' for
-    host tensors and 'cuda:device_id' (e.g. 'cuda:2') for cuda
-    tensors.map_location should return either None or a storage.  If
-    map_location returns None, torch.load will attempt to move the storage to
-    the device associated with the location tag, just as if the map_location
-    argument had not been provided.  If map_location returns a storage, that
-    storage will be used as the final deserialization of the storage argument.
+    will be the initial deserialization of the storage, residing on the CPU.
+    Each serialized storage has a location tag associated with it which
+    identifies the device it was saved from, and this tag is the second
+    argument passed to map_location. The builtin location tags are 'cpu' for
+    CPU tensors and 'cuda:device_id' (e.g. 'cuda:2') for CUDA tensors.
+    map_location should return either None or a storage. If map_location returns
+    a storage, it will be used as the final deserialized object, already moved to
+    the right device. Otherwise, torch.load will fall back to the default behavior,
+    as if map_location wasn't specified.
 
-    If map_location is a dict, this dict should map location tags to location
-    tags.  Instead of trying to move each storage from the cpu to the device
-    associated with its location tag, torch.load will try to move it from the
-    cpu to the device associated with the image of its location tag under the
-    dict.
+    If map_location is a dict, it will be used to remap location tags
+    appearing in the file (keys), to ones that specify where to put the
+    storages (values).
 
-    User extensions can create their own location tags and tagging and
+    User extensions can register their own location tags and tagging and
     deserialization methods using register_package.
 
     Args:
