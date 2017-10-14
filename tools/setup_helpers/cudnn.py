@@ -48,7 +48,8 @@ def check_cudnn_version(cudnn_version_string):
         raise RuntimeError(
             'CuDNN v%s found, but need at least CuDNN v%s. '
             'You can get the latest version of CuDNN from '
-            'https://developer.nvidia.com/cudnn' %
+            'https://developer.nvidia.com/cudnn or disable '
+            'CuDNN with NO_CUDNN=1' %
             (cudnn_version_string, cudnn_min_version))
 
 
