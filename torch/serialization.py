@@ -203,16 +203,38 @@ def _save(obj, f, pickle_module, pickle_protocol):
 def load(f, map_location=None, pickle_module=pickle):
     """Loads an object saved with :func:`torch.save` from a file.
 
-    torch.load can dynamically remap storages to be loaded on a different device
-    using the map_location argument. If it's a callable, it will be called with
-    two arguments: storage and location tag. It's expected to either return a
-    storage that's been moved to a different location, or None (and the location
-    will be resolved using the default method). If this argument is a dict it's
-    expected to be a mapping from location tags used in a file, to location
-    tags of the current system.
+    torch.load uses python's normal unpickling facilities but treats storages,
+    which underlie tensors, specially.  Storages are first deserialized on the
+    cpu.  Then, by default, torch.load tries to move the storage to the device
+    it was saved from, raising an exception if this fails because the device
+    does not exist.  If a tensor is serialized, it will be recreated from the
+    moved storage and reside on its device.
 
-    By default the location tags are 'cpu' for host tensors and 'cuda:device_id'
-    (e.g. 'cuda:2') for cuda tensors. User extensions can register their own
+    But torch.load can also dynamically remap tensors to be loaded on a
+    different device using the map_location argument.  To understand how this
+    works, we have to understand how torch.load knows what device to try to
+    move each storage to.  It knows this because torch.save saves a location
+    tag with each storage that says what device it was on.  The builtin
+    location tags are 'cpu' for host tensors and 'cuda:device_id'
+    (e.g. 'cuda:2') for cuda tensors.
+
+    If map_location is a callable, it will be called once for each serialized
+    storage with two arguments: storage and location. The storage argument will
+    be the initial deserialization of the storage, still residing on the cpu.
+    The location argument will be its location tag.  map_location should return
+    either None or a storage.  If map_location returns None, torch.load will
+    attempt to move the storage to the device associated with the location tag,
+    just as if the map_location argument had not been provided.  If
+    map_location returns a storage, that storage will be used as the final
+    deserialization of the storage argument.
+
+    If map_location is a dict, this dict should map location tags to location
+    tags.  Instead of trying to move each storage from the cpu to the device
+    associated with its location tag, torch.load will try to move it from the
+    cpu to the device associated with the image of its location tag under the
+    dict.
+
+    User extensions can invent their own location tags and register their own
     tagging and deserialization methods using register_package.
 
     Args:
@@ -228,6 +250,9 @@ def load(f, map_location=None, pickle_module=pickle):
         >>> torch.load('tensors.pt')
         # Load all tensors onto the CPU
         >>> torch.load('tensors.pt', map_location=lambda storage, loc: storage)
+        # Load all tensors onto the current GPU (GPU 0 unless torch.cuda.set_device
+        # has been called)
+        >>> torch.load('tensors.pt', map_location=lambda storage, loc: storage.cuda())
         # Map tensors from GPU 1 to GPU 0
         >>> torch.load('tensors.pt', map_location={'cuda:1':'cuda:0'})
     """
