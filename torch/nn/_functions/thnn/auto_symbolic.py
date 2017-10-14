@@ -1,4 +1,4 @@
-from torch.autograd._functions.utils import prepare_paddings
+from torch.autograd._functions.utils import prepare_onnx_paddings
 
 
 def threshold_symbolic(g, input, threshold=0, value=0, inplace=False):
@@ -28,13 +28,13 @@ def softmax_symbolic(g, input):
 
 def reflectionpad_symbolic(g, input, *params):
     mode = "reflect"
-    paddings = prepare_paddings(input, params)
+    paddings = prepare_onnx_paddings(input, params)
     return g.op("Pad", input, paddings_i=paddings, mode_s=mode)
 
 
 def replicationpad_symbolic(g, input, *params):
     mode = "edge"
-    paddings = prepare_paddings(input, params)
+    paddings = prepare_onnx_paddings(input, params)
     return g.op("Pad", input, paddings_i=paddings, mode_s=mode)
 
 
