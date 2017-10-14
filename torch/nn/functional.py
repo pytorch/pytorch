@@ -20,41 +20,6 @@ from .modules.utils import _single, _pair, _triple
 ConvNd = torch._C._functions.ConvNd
 
 
-def conv2d(input, weight, bias=None, stride=1, padding=0, dilation=1,
-           groups=1):
-    """Applies a 2D convolution over an input image composed of several input
-    planes.
-
-    See :class:`~torch.nn.Conv2d` for details and output shape.
-
-    Args:
-        input: input tensor (minibatch x in_channels x iH x iW)
-        weight: filters tensor (out_channels, in_channels/groups, kH, kW)
-        bias: optional bias tensor (out_channels). Default: None
-        stride: the stride of the convolving kernel. Can be a single number or
-          a tuple (sh x sw). Default: 1
-        padding: implicit zero padding on the input. Can be a single number or
-          a tuple. Default: 0
-        dilation: the spacing between kernel elements. Default: 1
-        groups: split input into groups, in_channels should be divisible by
-          the number of groups. Default: 1
-
-    Examples::
-
-        >>> # With square kernels and equal stride
-        >>> filters = autograd.Variable(torch.randn(8,4,3,3))
-        >>> inputs = autograd.Variable(torch.randn(1,4,5,5))
-        >>> F.conv2d(inputs, filters, padding=1)
-    """
-    if input is not None and input.dim() != 4:
-        raise ValueError("Expected 4D tensor as input, got {}D tensor instead.".format(input.dim()))
-
-    f = ConvNd(_pair(stride), _pair(padding), _pair(dilation), False,
-               _pair(0), groups, torch.backends.cudnn.benchmark,
-               torch.backends.cudnn.deterministic, torch.backends.cudnn.enabled)
-    return f(input, weight, bias)
-
-
 def conv1d(input, weight, bias=None, stride=1, padding=0, dilation=1,
            groups=1):
     """Applies a 1D convolution over an input signal composed of several input
@@ -64,12 +29,14 @@ def conv1d(input, weight, bias=None, stride=1, padding=0, dilation=1,
 
     Args:
         input: input tensor of shape (minibatch x in_channels x iW)
-        weight: filters of shape (out_channels, in_channels, kW)
+        weight: filters of shape (out_channels x in_channels x kW)
         bias: optional bias of shape (out_channels). Default: None
-        stride: the stride of the convolving kernel, default 1
-        padding: implicit zero padding on the input. Can be a single number or
-          a tuple. Default: 0
-        dilation: the spacing between kernel elements. Default: 1
+        stride: the stride of the convolving kernel. Can be a single number or
+          a tuple (sW,). Default: 1
+        padding: implicit zero paddings on both sides of the input. Can be a
+          single number or a tuple (padW,). Default: 0
+        dilation: the spacing between kernel elements. Can be a single number or
+          a tuple (dW,). Default: 1
         groups: split input into groups, in_channels should be divisible by
           the number of groups. Default: 1
 
@@ -88,6 +55,42 @@ def conv1d(input, weight, bias=None, stride=1, padding=0, dilation=1,
     return f(input, weight, bias)
 
 
+def conv2d(input, weight, bias=None, stride=1, padding=0, dilation=1,
+           groups=1):
+    """Applies a 2D convolution over an input image composed of several input
+    planes.
+
+    See :class:`~torch.nn.Conv2d` for details and output shape.
+
+    Args:
+        input: input tensor (minibatch x in_channels x iH x iW)
+        weight: filters tensor (out_channels x in_channels/groups x kH x kW)
+        bias: optional bias tensor (out_channels). Default: None
+        stride: the stride of the convolving kernel. Can be a single number or a
+          tuple (sH, sW). Default: 1
+        padding: implicit zero paddings on both sides of the input. Can be a
+          single number or a tuple (padH, padW). Default: 0
+        dilation: the spacing between kernel elements. Can be a single number or
+          a tuple (dH, dW). Default: 1
+        groups: split input into groups, in_channels should be divisible by the
+          number of groups. Default: 1
+
+    Examples::
+
+        >>> # With square kernels and equal stride
+        >>> filters = autograd.Variable(torch.randn(8,4,3,3))
+        >>> inputs = autograd.Variable(torch.randn(1,4,5,5))
+        >>> F.conv2d(inputs, filters, padding=1)
+    """
+    if input is not None and input.dim() != 4:
+        raise ValueError("Expected 4D tensor as input, got {}D tensor instead.".format(input.dim()))
+
+    f = ConvNd(_pair(stride), _pair(padding), _pair(dilation), False,
+               _pair(0), groups, torch.backends.cudnn.benchmark,
+               torch.backends.cudnn.deterministic, torch.backends.cudnn.enabled)
+    return f(input, weight, bias)
+
+
 def conv3d(input, weight, bias=None, stride=1, padding=0, dilation=1,
            groups=1):
     """Applies a 3D convolution over an input image composed of several input
@@ -97,13 +100,14 @@ def conv3d(input, weight, bias=None, stride=1, padding=0, dilation=1,
 
     Args:
         input: input tensor of shape (minibatch x in_channels x iT x iH x iW)
-        weight: filters tensor of shape (out_channels, in_channels, kT, kH, kW)
+        weight: filters tensor of shape (out_channels x in_channels x kT x kH x kW)
         bias: optional bias tensor of shape (out_channels). Default: None
-        stride: the stride of the convolving kernel. Can be a single number or
-          a tuple (st x sh x sw). Default: 1
-        padding: implicit zero padding on the input. Can be a single number or
-          a tuple. Default: 0
-        dilation: the spacing between kernel elements. Default: 1
+        stride: the stride of the convolving kernel. Can be a single number or a
+          tuple (sT, sH, sW). Default: 1
+        padding: implicit zero paddings on both sides of the input. Can be a
+          single number or a tuple (padT, padH, padW). Default: 0
+        dilation: the spacing between kernel elements. Can be a single number or
+          a tuple (dT, dH, dW). Default: 1
         groups: split input into groups, in_channels should be divisible by
           the number of groups. Default: 1
 
@@ -134,13 +138,17 @@ def conv_transpose1d(input, weight, bias=None, stride=1, padding=0,
         input: input tensor of shape (minibatch x in_channels x iW)
         weight: filters of shape (in_channels x out_channels x kW)
         bias: optional bias of shape (out_channels). Default: None
-        stride: the stride of the convolving kernel. Default: 1
-        padding: implicit zero padding on the input. Default: 0
-        groups: split input into groups, in_channels should be divisible by
-          the number of groups. Default: 1
-        output_padding: A zero-padding of 0 <= padding < stride that should be
-          added to the output. Default: 0
-        dilation: the spacing between kernel elements. Default: 1
+        stride: the stride of the convolving kernel. Can be a single number or a
+          tuple (sW,). Default: 1
+        padding: implicit zero paddings on both sides of the input. Can be a
+          single number or a tuple (padW,). Default: 0
+        output_padding: implicit zero-paddings of 0 <= padding < stride on both
+          sides of the output. Can be a single number or a tuple (out_padW,).
+          Default: 0
+        groups: split input into groups, in_channels should be divisible by the
+          number of groups. Default: 1
+        dilation: the spacing between kernel elements. Can be a single number or
+          a tuple (dW,). Default: 1
     """
     if input is not None and input.dim() != 3:
         raise ValueError("Expected 3D tensor as input, got {}D tensor instead.".format(input.dim()))
@@ -163,15 +171,17 @@ def conv_transpose2d(input, weight, bias=None, stride=1, padding=0,
         input: input tensor of shape (minibatch x in_channels x iH x iW)
         weight: filters of shape (in_channels x out_channels x kH x kW)
         bias: optional bias of shape (out_channels). Default: None
-        stride: the stride of the convolving kernel, a single number or a
-          tuple (sh x sw). Default: 1
-        padding: implicit zero padding on the input, a single number or a
-          tuple (padh x padw). Default: 0
-        groups: split input into groups, in_channels should be divisible by
-          the number of groups. Default: 1
-        output_padding: A zero-padding of 0 <= padding < stride that should be
-          added to the output. Can be a single number or a tuple. Default: 0
-        dilation: the spacing between kernel elements. Default: 1
+        stride: the stride of the convolving kernel. Can be a single number or a
+          tuple (sH, sW). Default: 1
+        padding: implicit zero paddings on both sides of the input. Can be a
+          single number or a tuple (padH, padW). Default: 0
+        output_padding: implicit zero-paddings of 0 <= padding < stride on both
+          sides of the output. Can be a single number or a tuple
+          (out_padH, out_padW). Default: 0
+        groups: split input into groups, in_channels should be divisible by the
+          number of groups. Default: 1
+        dilation: the spacing between kernel elements. Can be a single number or
+          a tuple (dH, dW). Default: 1
     """
 
     if input is not None and input.dim() != 4:
@@ -194,15 +204,17 @@ def conv_transpose3d(input, weight, bias=None, stride=1, padding=0,
         input: input tensor of shape (minibatch x in_channels x iT x iH x iW)
         weight: filters of shape (in_channels x out_channels x kH x kW)
         bias: optional bias of shape (out_channels). Default: None
-        stride: the stride of the convolving kernel, a single number or a
-          tuple (sh x sw). Default: 1
-        padding: implicit zero padding on the input, a single number or a
-          tuple (padh x padw). Default: 0
-        output_padding: A zero-padding of 0 <= padding < stride that should be
-          added to the output. Can be a single number or a tuple. Default: 0
-        groups: split input into groups, in_channels should be divisible by
-          the number of groups. Default: 1
-        dilation: the spacing between kernel elements. Default: 1
+        stride: the stride of the convolving kernel. Can be a single number or a
+          tuple (sT, sH, sW). Default: 1
+        padding: implicit zero paddings on both sides of the input. Can be a
+          single number or a tuple (padT, padH, padW). Default: 0
+        output_padding: implicit zero-paddings of 0 <= padding < stride on both
+          sides of the output. Can be a single number or a tuple
+          (out_padT, out_padH, out_padW). Default: 0
+        groups: split input into groups, in_channels should be divisible by the
+          number of groups. Default: 1
+        dilation: the spacing between kernel elements. Can be a single number or
+          a tuple (dT, dH, dW). Default: 1
     """
     if input is not None and input.dim() != 5:
         raise ValueError("Expected 5D tensor as input, got {}D tensor instead.".format(input.dim()))
@@ -222,9 +234,13 @@ def avg_pool1d(input, kernel_size, stride=None, padding=0,
     See :class:`~torch.nn.AvgPool1d` for details and output shape.
 
     Args:
-        kernel_size: the size of the window
-        stride: the stride of the window. Default value is :attr:`kernel_size`
-        padding: implicit zero padding to be added on both sides. Default: 0
+        input: input tensor (minibatch x in_channels x iW)
+        kernel_size: the size of the window. Can be a single number or a
+          tuple (kW,)
+        stride: the stride of the window. Can be a single number or a tuple
+          (sW,). Default: :attr:`kernel_size`
+        padding: implicit zero paddings on both sides of the input. Can be a
+          single number or a tuple (padW,). Default: 0
         ceil_mode: when True, will use `ceil` instead of `floor` to compute the
             output shape. Default: False
         count_include_pad: when True, will include the zero-padding in the
@@ -259,12 +275,12 @@ def avg_pool2d(input, kernel_size, stride=None, padding=0,
 
     Args:
         input: input tensor (minibatch x in_channels x iH x iW)
-        kernel_size: size of the pooling region, a single number or a
-          tuple (kh x kw)
-        stride: stride of the pooling operation, a single number or a
-          tuple (sh x sw). Default is equal to kernel size
-        padding: implicit zero padding on the input, a single number or
-          a tuple (padh x padw), Default: 0
+        kernel_size: size of the pooling region. Can be a single number or a
+          tuple (kH x kW)
+        stride: stride of the pooling operation. Can be a single number or a
+          tuple (sH, sW). Default is equal to kernel size
+        padding: implicit zero paddings on both sides of the input. Can be a
+          single number or a tuple (padH, padW). Default: 0
         ceil_mode: when True, will use `ceil` instead of `floor` in the formula
             to compute the output shape. Default: False
         count_include_pad: when True, will include the zero-padding in th
@@ -284,12 +300,12 @@ def avg_pool3d(input, kernel_size, stride=None, padding=0,
 
     Args:
         input: input tensor (minibatch x in_channels x iT x iH x iW)
-        kernel_size: size of the pooling region, a single number or a
-          tuple (kt x kh x kw)
-        stride: stride of the pooling operation, a single number or a
-          tuple (st x sh x sw). Default is equal to kernel size
-        padding: implicit zero padding on the input, a single number or
-          a tuple (padt x padh x padw), Default: 0
+        kernel_size: size of the pooling region. Can be a single number or a
+          tuple (kT x kH x kW)
+        stride: stride of the pooling operation. Can be a single number or a
+          tuple (sT, sH, sW). Default is equal to kernel size
+        padding: implicit zero paddings on both sides of the input. Can be a
+          single number or a tuple (padT, padH, padW), Default: 0
         ceil_mode: when True, will use `ceil` instead of `floor` in the formula
             to compute the output shape
         count_include_pad: when True, will include the zero-padding in th
