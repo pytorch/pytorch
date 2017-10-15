@@ -596,7 +596,10 @@ class AdaptiveMaxPool2d(Function):
 
     @staticmethod
     def forward(ctx, input, output_size):
-        ctx.output_size = _pair(output_size)
+        ctx.output_size = list(_pair(output_size))
+        for i, s in enumerate(ctx.output_size):
+            ctx.output_size[i] = ctx.output_size[i] or input.size(i + 2)
+        ctx.output_size = tuple(ctx.output_size)
         backend = type2backend[type(input)]
         indices, output = input.new().long(), input.new()
         backend.SpatialAdaptiveMaxPooling_updateOutput(backend.library_state,
@@ -640,7 +643,10 @@ class AdaptiveMaxPool3d(Function):
 
     @staticmethod
     def forward(ctx, input, output_size):
-        ctx.output_size = _triple(output_size)
+        ctx.output_size = list(_triple(output_size))
+        for i, s in enumerate(ctx.output_size):
+            ctx.output_size[i] = ctx.output_size[i] or input.size(i + 2)
+        ctx.output_size = tuple(ctx.output_size)
         backend = type2backend[type(input)]
         indices, output = input.new().long(), input.new()
         backend.VolumetricAdaptiveMaxPooling_updateOutput(
@@ -734,7 +740,11 @@ class AdaptiveAvgPool2d(Function):
 
     @staticmethod
     def forward(ctx, input, output_size):
-        ctx.output_size = _pair(output_size)
+        ctx.output_size = list(_pair(output_size))
+        for i, s in enumerate(ctx.output_size):
+            ctx.output_size[i] = ctx.output_size[i] or input.size(i + 2)
+        ctx.output_size = tuple(ctx.output_size)
+
         backend = type2backend[type(input)]
         output = input.new()
         ctx.save_for_backward(input)
@@ -773,7 +783,11 @@ class AdaptiveAvgPool3d(Function):
 
     @staticmethod
     def forward(ctx, input, output_size):
-        ctx.output_size = _triple(output_size)
+        ctx.output_size = list(_pair(output_size))
+        for i, s in enumerate(ctx.output_size):
+            ctx.output_size[i] = ctx.output_size[i] or input.size(i + 2)
+        ctx.output_size = tuple(ctx.output_size)
+
         backend = type2backend[type(input)]
         output = input.new()
         ctx.save_for_backward(input)
