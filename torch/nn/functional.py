@@ -720,7 +720,7 @@ def embedding_bag(embedding_matrix, indices, offsets=None,
         operations.
 
         Args:
-            embedding_matrix: Number of rows should correspond to the maximum possible index + 1,
+            embedding_matrix: FloatTensor, where number of rows should correspond to the maximum possible index + 1,
                               number of columns is the embedding size
             indices (N or BxN): LongTensor containing the indices of the embeddings to extract.
                                 When `input` is 1D Tensor of shape `N`, an `offsets` Tensor is given, that contains the
@@ -748,7 +748,6 @@ def embedding_bag(embedding_matrix, indices, offsets=None,
 
         Examples::
 
-            >>> torch.manual_seed(42)
             >>> # an Embedding module containing 10 tensors of size 3
             >>> embedding_matrix = Variable(torch.rand(10, 3))
             >>> # a batch of 2 samples of 4 indices each
@@ -757,8 +756,8 @@ def embedding_bag(embedding_matrix, indices, offsets=None,
             >>> embedding_bag(embedding_matrix, input, offsets)
 
             Variable containing:
-            -0.7296 -4.6926  0.3295
-            -0.5186 -0.5631 -0.2792
+            -1.1840 -0.2547 -0.5860
+            -0.7126  0.0002 -0.3411
             [torch.FloatTensor of size 2x3]
 
         """
