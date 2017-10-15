@@ -434,8 +434,9 @@ DAGNetBase::~DAGNetBase() {
 }
 
 bool DAGNetBase::RunAsync() {
-  StartAllObservers();
-
+  if (observer_) {
+    observer_->Start();
+  }
   // Lock run_in_progress_ to prevent concurrent Run()s.
   std::unique_lock<std::mutex> run_lock(run_in_progress_);
   VLOG(1) << "Running parallel net.";
@@ -498,8 +499,9 @@ bool DAGNetBase::RunAsync() {
         op.operator_->debug_def().type(),
         ") has some runtime parents left.");
   }
-
-  StopAllObservers();
+  if (observer_) {
+    observer_->Stop();
+  }
   // If the above while loop finished, we know that the current run finished.
   return success_;
 }

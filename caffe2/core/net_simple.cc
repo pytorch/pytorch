@@ -58,8 +58,9 @@ SimpleNet::SimpleNet(
 }
 
 bool SimpleNet::RunAsync() {
-  StartAllObservers();
-
+  if (observer_) {
+    observer_->Start();
+  }
   const auto& net_name = name_.c_str();
   VLOG(1) << "Running net " << name_;
   for (auto& op : operators_) {
@@ -76,7 +77,9 @@ bool SimpleNet::RunAsync() {
       return false;
     }
   }
-  StopAllObservers();
+  if (observer_) {
+    observer_->Stop();
+  }
   return true;
 }
 

@@ -14,11 +14,11 @@
  * limitations under the License.
  */
 
+#include "caffe2/contrib/observers/time_observer.h"
 #include "caffe2/core/common.h"
 #include "caffe2/core/net.h"
 #include "caffe2/core/observer.h"
 #include "caffe2/core/operator.h"
-#include "time_observer.h"
 
 #include <google/protobuf/text_format.h>
 #include <gtest/gtest.h>
@@ -33,9 +33,13 @@ class SleepOp final : public OperatorBase {
  public:
   using OperatorBase::OperatorBase;
   bool Run(int /* unused */) override {
-    StartAllObservers();
+    if (observer_) {
+      observer_->Start();
+    }
     std::this_thread::sleep_for(std::chrono::milliseconds(3000));
-    StopAllObservers();
+    if (observer_) {
+      observer_->Stop();
+    }
     return true;
   }
 };
@@ -76,9 +80,9 @@ TEST(TimeObserverTest, Test3Seconds) {
   unique_ptr<NetBase> net(CreateNetTestHelper(&ws));
   unique_ptr<TimeObserver<NetBase>> net_ob =
       make_unique<TimeObserver<NetBase>>(net.get());
-  const auto* ob = dynamic_cast_if_rtti<const TimeObserver<NetBase>*>(
-      net->AttachObserver(std::move(net_ob)));
+  net->SetObserver(std::move(net_ob));
   net->Run();
+  auto* ob = dynamic_cast_if_rtti<TimeObserver<NetBase>*>(net->GetObserver());
   CAFFE_ENFORCE(ob);
   LOG(INFO) << "av time children: " << ob->average_time_children();
   LOG(INFO) << "av time: " << ob->average_time();
