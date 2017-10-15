@@ -32,7 +32,6 @@
 const char* GLConvolution::fragment_shader = R"GLSL(#version 300 es
 #define TILED_CONVOLUTION           $(TILED_CONVOLUTION)
 #define TRANSPOSED_CONVOLUTION      $(TRANSPOSED_CONVOLUTION)
-#define TEXTURE_BORDER_CLAMP        $(TEXTURE_BORDER_CLAMP)
 
 // batching
 #define INPUT_BATCH_SIZE            $(INPUT_BATCH_SIZE)
@@ -51,6 +50,8 @@ const char* GLConvolution::fragment_shader = R"GLSL(#version 300 es
 #define OUTPUT_TILE_CHUNK_SIZE      $(OUTPUT_TILE_CHUNK_SIZE)
 #define OUTPUT_TILE_BATCH_SIZE      $(OUTPUT_TILE_BATCH_SIZE)
 
+#define BOUNDS_CHECK_MODE           $(BOUNDS_CHECK_MODE)
+
 // common
 const ivec2 input_padding = ivec2($(INPUT_PADDING_X), $(INPUT_PADDING_Y));
 const ivec2 input_stride = ivec2($(INPUT_STRIDE_X), $(INPUT_STRIDE_Y));
@@ -68,8 +69,11 @@ in highp vec2 v_texCoord;
        vec4(unpackHalf2x16(pk.packed_data[1].x), unpackHalf2x16(pk.packed_data[1].y)), \
        vec4(unpackHalf2x16(pk.packed_data[1].z), unpackHalf2x16(pk.packed_data[1].w)))
 
-const bool no_bounds = (TILED_CONVOLUTION == 0) && (bool(TEXTURE_BORDER_CLAMP) || all(equal(input_padding, ivec2(0))));
-#define IN_BOUNDS(p, p0, p1) (all(greaterThanEqual(p, p0)) && all(lessThan(p, p1)))
+#if BOUNDS_CHECK_MODE == 0
+  #define IN_BOUNDS(p, p0, p1) (true)
+#else
+  #define IN_BOUNDS(p, p0, p1) (all(greaterThanEqual(p, p0)) && all(lessThan(p, p1)))
+#endif
 
 #if TILED_CONVOLUTION
 // Tiled convolution
@@ -115,7 +119,7 @@ TEXTURE_OUTPUT(0, outputData0);
     for (int x = p0.x; x < kernel_size.x; x += input_stride.x) { \
       int i = y * kernel_size.x + x; \
       ivec2 idx = tileCoord + ivec2(x, y) - input_padding; \
-      if (no_bounds || IN_BOUNDS(idx, ivec2(0), inputTileSize * input_stride)) { \
+      if IN_BOUNDS(idx, ivec2(0), inputTileSize * input_stride) { \
         vec4 data = TEXTURE_LOAD(inputData[0], inputTileOffset + idx / input_stride); \
         mediump mat4 k = unpackKernel(kernel_block[ib].kernel_data[kernelIdx].data[i]); \
         sum += k * data; \
@@ -130,7 +134,7 @@ TEXTURE_OUTPUT(0, outputData0);
   for (int y = 0, i = 0; y < kernel_size.y; y++) { \
     for (int x = 0; x < kernel_size.x; x++, i++) { \
       ivec2 idx = tileCoord + ivec2(x, y); \
-      if (no_bounds || IN_BOUNDS(idx, ivec2(0), inputTileSize)) { \
+      if IN_BOUNDS(idx, ivec2(0), inputTileSize) { \
         vec4 data = TEXTURE_LOAD(inputData[0], inputTileOffset + idx); \
         mediump mat4 k = unpackKernel(kernel_block[ib].kernel_data[kernelIdx].data[i]); \
         sum += k * data; \
@@ -263,7 +267,7 @@ TEXTURE_OUTPUT(3, outputData3);
     for (int x = p0.x; x < kernel_size.x; x += input_stride.x) { \
       int i = y * kernel_size.x + x; \
       ivec2 idx = texelCoord + ivec2(x, y) - input_padding; \
-      if (no_bounds || IN_BOUNDS(idx, ivec2(0), inputSize * input_stride)) { \
+      if IN_BOUNDS(idx, ivec2(0), inputSize * input_stride) { \
         vec4 data = TEXTURE_LOAD(inputData[ib], idx / input_stride); \
         for (int ob = 0; ob < OUTPUT_BATCH_SIZE; ob++) { \
           mediump mat4 k = unpackKernel(kernel_block[ib].kernel_data[ob].data[i]); \
@@ -280,7 +284,7 @@ TEXTURE_OUTPUT(3, outputData3);
   for (int y = 0, i = 0; y < kernel_size.y; y++) { \
     for (int x = 0; x < kernel_size.x; x++, i++) { \
       ivec2 idx = coord + ivec2(x, y); \
-      if (no_bounds || IN_BOUNDS(idx, ivec2(0), inputSize)) { \
+      if IN_BOUNDS(idx, ivec2(0), inputSize) { \
         vec4 data = TEXTURE_LOAD(inputData[ib], idx); \
         for (int ob = 0; ob < OUTPUT_BATCH_SIZE; ob++) { \
           mediump mat4 k = unpackKernel(kernel_block[ib].kernel_data[ob].data[i]); \
