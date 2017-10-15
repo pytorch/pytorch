@@ -125,28 +125,43 @@ static ScalarType getATenScalarType(const DLDataType& dtype) {
 }
 
 
-// This function returns a shared_ptr to DLpack tensor constructed out ATen tensor
-DLTensor* toDLPack(const Tensor& src, DLTensor* dlTensor) {
-  dlTensor->data = src.data_ptr();
+void destructor(DLManagedTensor * arg) {
+  delete static_cast<ATenDLMTensor*>(arg->ctx);
+}
+
+
+// This function returns a shared_ptr to memory managed DLpack tensor constructed
+// out of ATen tensor
+DLManagedTensor* toDLPack(const Tensor& src) {
+  ATenDLMTensor * atDLMTensor(new ATenDLMTensor);
+  atDLMTensor->handle = src;
+  atDLMTensor->tensor.ctx = atDLMTensor;
+  atDLMTensor->tensor.destructor = &destructor;
+  atDLMTensor->tensor.dlTensor.data = src.data_ptr();
   int64_t device_id = 0;
   if (src.type().isCuda()) {
     device_id = src.get_device();
   }
-  dlTensor->ctx = getDLContext(src.type(), device_id);
-  dlTensor->ndim = src.dim();
-  dlTensor->dtype = getDLDataType(src.type());
-  dlTensor->shape = const_cast<int64_t*>(src.sizes().data());
-  dlTensor->strides = const_cast<int64_t*>(src.strides().data());
-  dlTensor->byte_offset = 0;
-  return dlTensor;
+  atDLMTensor->tensor.dlTensor.ctx = getDLContext(src.type(), device_id);
+  atDLMTensor->tensor.dlTensor.ndim = src.dim();
+  atDLMTensor->tensor.dlTensor.dtype = getDLDataType(src.type());
+  atDLMTensor->tensor.dlTensor.shape = const_cast<int64_t*>(src.sizes().data());
+  atDLMTensor->tensor.dlTensor.strides = const_cast<int64_t*>(src.strides().data());
+  atDLMTensor->tensor.dlTensor.byte_offset = 0;
+  return &(atDLMTensor->tensor);
 }
 
 
-Tensor fromDLPack(const DLTensor* src) {
-  Backend backend = getATenBackend(src->ctx);
-  ScalarType stype = getATenScalarType(src->dtype);
+Tensor fromDLPack(const DLManagedTensor* src) {
+  Backend backend = getATenBackend(src->dlTensor.ctx);
+  ScalarType stype = getATenScalarType(src->dlTensor.dtype);
+  auto deleter = [src](void * self) {
+    src->destructor(const_cast<DLManagedTensor*>(src));
+  };
   return getType(backend, stype).tensorFromBlob(
-      src->data,
-      IntList(src->shape, src->ndim), IntList(src->strides, src->ndim));
+      src->dlTensor.data,
+      IntList(src->dlTensor.shape, src->dlTensor.ndim),
+      IntList(src->dlTensor.strides, src->dlTensor.ndim),
+      deleter);
 }
 } //namespace at

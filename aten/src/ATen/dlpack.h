@@ -114,6 +114,24 @@ typedef struct {
   /*! \brief The offset in bytes to the beginning pointer to data */
   uint64_t byte_offset;
 } DLTensor;
+
+/*!
+ * \brief C Tensor object, manage memory of DLTensor.
+ */
+struct DLManagedTensor {
+  /*! \DLTensor which is being memory managed */
+  DLTensor dlTensor;
+  /*! \brief context in which DLManagedTensor is used in a framework. It can
+   *   also be NULL
+   */
+  void * ctx;
+  /*! \brief Destructor signature void (*)(void*) - this should be called
+   *   to destruct ctx which holds the DLManagedTensor. It can be NULL if there
+   *   is no way for the caller to provide a reasonable destructor.
+   */
+  void (*destructor)(DLManagedTensor * self);
+};
+
 #ifdef __cplusplus
 }  // DLPACK_EXTERN_C
 #endif
