@@ -780,7 +780,7 @@ def embedding_bag(embedding_matrix, indices, offsets=None,
     if offsets is None:
         raise ValueError("offsets has to be a 1D Tensor but got None")
 
-    return torch.nn.backends.thnn.backend._backend.EmbeddingBag.apply(
+    return torch.nn.backends.thnn.backend.EmbeddingBag.apply(
         embedding_matrix, indices, offsets,
         max_norm, norm_type,
         scale_grad_by_freq, mode

@@ -135,6 +135,8 @@ class EmbeddingBag(Function):
     def forward(cls, ctx, weight, indices, offsets,
                 max_norm, norm_type, scale_grad_by_freq, mode):
 
+        ctx.max_norm = max_norm
+        ctx.norm_type = norm_type
         ctx.scale_grad_by_freq = scale_grad_by_freq
 
         if mode == 'sum':
