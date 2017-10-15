@@ -1,8 +1,9 @@
 import torch
-from torch.nn.parameter import Parameter
 from torch.autograd import Variable
+from torch.nn.parameter import Parameter
 
 from .module import Module
+from .. import functional as F
 
 
 class Embedding(Module):
@@ -193,26 +194,9 @@ class EmbeddingBag(Module):
         self.weight.data.normal_(0, 1)
 
     def forward(self, input, offsets=None):
-        if input.dim() == 2:
-            if offsets is not None:
-                raise ValueError("if input is 2D, then offsets has to be None"
-                                 ", as input is treated is a mini-batch of"
-                                 " fixed length sequences. However, found "
-                                 "offsets of type {}".format(type(offsets)))
-            else:
-                offsets = Variable(torch.arange(0, input.numel(), input.size(1),
-                                   out=input.data.new().long()))
-                input = input.view(-1)
-        elif input.dim() != 1:
-            raise ValueError("input has to be 1D or 2D Tensor,"
-                             " but got Tensor of dimension {}".format(input.dim()))
-        if offsets is None:
-            raise ValueError("offsets has to be a 1D Tensor but got None")
-
-        return self._backend.EmbeddingBag(
-            self.max_norm, self.norm_type,
-            self.scale_grad_by_freq, mode=self.mode
-        )(self.weight, input, offsets)
+        return F.embedding_bag(self.weight, input, offsets,
+                               self.max_norm, self.norm_type,
+                               self.scale_grad_by_freq, self.mode)
 
     def __repr__(self):
         s = '{name}({num_embeddings}, {embedding_dim}'
