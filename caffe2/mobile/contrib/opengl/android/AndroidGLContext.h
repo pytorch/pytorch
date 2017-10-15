@@ -21,7 +21,7 @@
 #include "../core/GLTexture.h"
 #include <unordered_map>
 
-enum GL_Renderer { Adreno, Mali /*, PowerVR */ };
+enum GL_Renderer { Adreno, Mali, Tegra /*, PowerVR */ };
 
 class AndroidGLContext : public GLContext {
  private:

@@ -23,7 +23,9 @@ namespace {
 
 static const std::unordered_map<std::string, GL_Renderer>& renderer_map() {
   static std::unordered_map<std::string, GL_Renderer> m = {
-      {"Adreno", Adreno}, {"Mali", Mali} /*, {"PowerVR", PowerVR} */};
+      {"Adreno", Adreno},
+      {"Mali", Mali},
+      {"NVIDIA", Tegra} /*, {"PowerVR", PowerVR} */};
   return m;
 }
 

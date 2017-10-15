@@ -131,9 +131,8 @@ class GLConvolution : public GLFilter {
              {"INPUT_STRIDE_Y", caffe2::to_string(_geometry.input_stride.y)},
              {"TRANSPOSED_CONVOLUTION",
               caffe2::to_string(_geometry.transposed)},
-             {"TEXTURE_BORDER_CLAMP",
-              caffe2::to_string(GLContext::getGLContext()
-                                    ->GL_EXT_texture_border_clamp_defined())}}),
+             {"BOUNDS_CHECK_MODE",
+              caffe2::to_string(bounds_check_mode(_tiling, _geometry))}}),
         kernel(_kernel),
         bias(_bias),
         prelu_scale(_prelu_scale),
@@ -157,6 +156,32 @@ class GLConvolution : public GLFilter {
       const GLImageVector<T>& output_images);
 
  private:
+  /*
+   * Computes BOUNDS_CHECK_MODE for the convolution parameters.
+   *
+   * @retval 0 if bounds check can be skipped
+   * @retval non-zero if bounds check can not be skipped
+   */
+  inline static int bounds_check_mode(bool tiling, const descriptor& geometry) {
+    if (tiling) {
+      return 1;
+    }
+
+    int input_padding_x = geometry.input_padding.x,
+        input_padding_y = geometry.input_padding.y;
+    if (geometry.transposed) {
+      input_padding_x = geometry.kernel_size.x - 1 - input_padding_x;
+      input_padding_y = geometry.kernel_size.y - 1 - input_padding_y;
+    }
+
+    if (GLContext::getGLContext()->GL_EXT_texture_border_clamp_defined() ||
+        (input_padding_x == 0 && input_padding_y == 0)) {
+      return 0;
+    } else {
+      return 1;
+    }
+  }
+
   const std::vector<binding*> input_bindings(
       int input_batch_size,
       int output_batch_size) {

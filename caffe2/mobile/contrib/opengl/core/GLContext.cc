@@ -112,13 +112,15 @@ int iPhoneVersion() {
 #if CAFFE2_ANDROID
 // whitelist of supported GPUs
 bool isSupportedRenderer() {
-  static std::unordered_set<std::string> supported_renderers = {"Adreno (TM) 540",
-                                                                "Adreno (TM) 530",
-                                                                "Adreno (TM) 510",
-                                                                "Adreno (TM) 430",
-                                                                "Adreno (TM) 418",
-                                                                "Mali-G71",
-                                                                "Mali-T880"};
+  static std::unordered_set<std::string> supported_renderers = {
+      "Adreno (TM) 540",
+      "Adreno (TM) 530",
+      "Adreno (TM) 510",
+      "Adreno (TM) 430",
+      "Adreno (TM) 418",
+      "Mali-G71",
+      "Mali-T880",
+      "NVIDIA Tegra"};
   std::string rendererStr((const char*)glGetString(GL_RENDERER));
   LOG(INFO) << "GL_RENDERER: " << rendererStr;
 
