@@ -655,6 +655,7 @@ def embedding(input, embedding_matrix,
         norm_type (float, optional): The p of the p-norm to compute for the max_norm option
         scale_grad_by_freq (boolean, optional): if given, this will scale gradients by the frequency of
                                                 the words in the mini-batch.
+        sparse (boolean, optional): if True, gradient w.r.t. weight matrix will be a sparse tensor.
 
     Shape:
         - Input: LongTensor `(N, W)`, N = mini-batch, W = number of indices to extract per mini-batch
@@ -684,8 +685,9 @@ def embedding(input, embedding_matrix,
         [torch.FloatTensor of size 2x4x3]
 
         >>> # example with padding_idx
-        >>> embedding_matrix = Variable(torch.rand(10, 3))
-        >>> embedding_matrix[0].zero_()
+        >>> weights = torch.rand(10, 3)
+        >>> weights[0, :].zero_()
+        >>> embedding_matrix = Variable(weights)
         >>> input = Variable(torch.LongTensor([[0,2,0,5]]))
         >>> torch.nn.functional.embedding(input, embedding_matrix)
 
