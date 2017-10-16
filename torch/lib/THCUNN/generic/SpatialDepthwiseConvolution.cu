@@ -16,22 +16,22 @@ void THNN_(SpatialDepthwiseConvolution_updateOutput)(
   THCUNN_assertSameGPU(state, 3, input, output, weight);
 
   // Only handle 4D Input Tensors for now
-  assert(THCTensor_(nDimension)(state, input) == 4);
-  assert(THCTensor_(nDimension)(state, weight) == 4);
+  THAssert(THCTensor_(nDimension)(state, input) == 4);
+  THAssert(THCTensor_(nDimension)(state, weight) == 4);
 
   // We assume that the input and weight Tensors are shaped properly by
   // the caller, so we verify that here to some extent
 
   // Weight Tensor is shape (output_channels, 1, kH, kW)
-  assert(weight->size[1] == 1);
+  THAssert(weight->size[1] == 1);
 
   // Input Tensor is shape (N, input_channels, H, W)
   // We verify that the # of output_channels is a multiple of input_channels
-  assert(weight->size[0] % input->size[1] == 0);
+  THAssert(weight->size[0] % input->size[1] == 0);
 
   // Bias has same # of channels as output
   if (bias) {
-    assert(bias->size[0] == weight->size[0]);
+    THAssert(bias->size[0] == weight->size[0]);
   }
 
   // Following the behvaior of other THCUNN functions, we shape the output
@@ -55,9 +55,9 @@ void THNN_(SpatialDepthwiseConvolution_updateOutput)(
   }
 
   // Kernel currently relies upon all the Tensors to be contiguous
-  assert(dInput.isContiguous());
-  assert(dWeight.isContiguous());
-  assert(dOutput.isContiguous());
+  THAssert(dInput.isContiguous());
+  THAssert(dWeight.isContiguous());
+  THAssert(dOutput.isContiguous());
 
   int inputChannels = input->size[1];
   int depthwiseMultiplier = outputChannels / inputChannels;
@@ -90,15 +90,15 @@ void THNN_(SpatialDepthwiseConvolution_updateGradInput)(
   THCUNN_assertSameGPU(state, 3, gradOutput, gradInput, weight);
 
   // Only handle 4D Input Tensors for now
-  assert(THCTensor_(nDimension)(state, input) == 4);
-  assert(THCTensor_(nDimension)(state, weight) == 4);
-  assert(THCTensor_(nDimension)(state, gradOutput) == 4);
+  THAssert(THCTensor_(nDimension)(state, input) == 4);
+  THAssert(THCTensor_(nDimension)(state, weight) == 4);
+  THAssert(THCTensor_(nDimension)(state, gradOutput) == 4);
 
   // Minimal shape checking, as above
   // Same # of elements in batch
-  assert(input->size[0] == gradOutput->size[0]);
+  THAssert(input->size[0] == gradOutput->size[0]);
   // Same # of filters as outputChannels
-  assert(weight->size[0] == gradOutput->size[1]);
+  THAssert(weight->size[0] == gradOutput->size[1]);
 
   // Resize GradInput
   THCTensor_(resizeAs)(state, gradInput, input);
@@ -118,9 +118,9 @@ void THNN_(SpatialDepthwiseConvolution_updateGradInput)(
   THCDeviceTensor<real, 4> dWeight = toDeviceTensor<real, 4>(state, weight);
 
   // Kernel currently relies upon all the Tensors to be contiguous
-  assert(dGradOutput.isContiguous());
-  assert(dGradInput.isContiguous());
-  assert(dWeight.isContiguous());
+  THAssert(dGradOutput.isContiguous());
+  THAssert(dGradInput.isContiguous());
+  THAssert(dWeight.isContiguous());
 
   // One thread per gradInput value
   int n = THCTensor_(nElement)(state, gradInput);
@@ -148,15 +148,15 @@ void THNN_(SpatialDepthwiseConvolution_accGradParameters)(
   THCUNN_assertSameGPU(state, 3, input, gradOutput, gradWeight);
 
   // Only handle 4D Input Tensors for now
-  assert(THCTensor_(nDimension)(state, input) == 4);
-  assert(THCTensor_(nDimension)(state, gradOutput) == 4);
-  assert(THCTensor_(nDimension)(state, gradWeight) == 4);
+  THAssert(THCTensor_(nDimension)(state, input) == 4);
+  THAssert(THCTensor_(nDimension)(state, gradOutput) == 4);
+  THAssert(THCTensor_(nDimension)(state, gradWeight) == 4);
 
   // Minimal shape checking as above
   // Same # of elements in batch
-  assert(input->size[0] == gradOutput->size[0]);
+  THAssert(input->size[0] == gradOutput->size[0]);
   // Same # of filters as outputChannels
-  assert(gradWeight->size[0] == gradOutput->size[1]);
+  THAssert(gradWeight->size[0] == gradOutput->size[1]);
 
   int batchSize = input->size[0];
   int inputChannels = input->size[1];
@@ -174,9 +174,9 @@ void THNN_(SpatialDepthwiseConvolution_accGradParameters)(
   THCDeviceTensor<real, 4> dGradWeight = toDeviceTensor<real, 4>(state, gradWeight);
 
   // Kernel currently relies upon all the Tensors to be contiguous
-  assert(dGradOutput.isContiguous());
-  assert(dInput.isContiguous());
-  assert(dGradWeight.isContiguous());
+  THAssert(dGradOutput.isContiguous());
+  THAssert(dInput.isContiguous());
+  THAssert(dGradWeight.isContiguous());
 
   // We parallelize so that each block computes a single value in gradWeight
   int blocks = outputChannels * kH * kW;
