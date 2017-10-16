@@ -13,7 +13,8 @@ class MaxPool1d(Function):
                  ceil_mode=False):
         if ceil_mode:
             raise RuntimeError("ceil_mode not supported in MaxPool1d")
-        stride = stride or kernel_size
+        if stride is None:
+            stride = kernel_size
         n = g.appendNode(g.create("MaxPool", [input])
                           .is_("kernel_shape", _single(kernel_size))
                           .is_("pads", _single(padding))
@@ -98,6 +99,8 @@ class MaxPool2d(Function):
                  ceil_mode=False):
         if ceil_mode:
             raise RuntimeError("ceil_mode not supported in MaxPool2d")
+        if stride is None:
+            stride = kernel_size
         n = g.appendNode(g.create("MaxPool", [input])
                           .is_("kernel_shape", _pair(kernel_size))
                           .is_("pads", _pair(padding))
@@ -174,6 +177,8 @@ class MaxPool3d(Function):
                  ceil_mode=False):
         if ceil_mode:
             raise RuntimeError("ceil_mode not supported in MaxPool3d")
+        if stride is None:
+            stride = kernel_size
         n = g.appendNode(g.create("MaxPool", [input])
                           .is_("kernel_shape", _triple(kernel_size))
                           .is_("pads", _triple(padding))
@@ -413,7 +418,8 @@ class AvgPool2d(Function):
                  ceil_mode=False, count_include_pad=True):
         if ceil_mode:
             raise RuntimeError("ceil_mode not supported in AvgPool2d")
-        stride = stride or kernel_size
+        if stride is None:
+            stride = kernel_size
         n = g.appendNode(g.create("AveragePool", [input])
                           .is_("kernel_shape", _pair(kernel_size))
                           .is_("strides", _pair(stride))

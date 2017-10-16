@@ -26,6 +26,11 @@ def softmax_symbolic(g, input):
     return g.op('Softmax', input)
 
 
+def logsoftmax_symbolic(g, input):
+    # TODO use logsoftmax to replace this combination.
+    return g.op("Log", g.op('Softmax', input).typeAs(input))
+
+
 def reflectionpad_symbolic(g, input, *params):
     mode = "reflect"
     paddings = prepare_onnx_paddings(len(input.type().sizes()), params)
@@ -43,6 +48,7 @@ symbolic_fns = {
     'LeakyReLU': leakyrelu_symbolic,
     'GatedLinear': glu_symbolic,
     'Softmax': softmax_symbolic,
+    'LogSoftmax': logsoftmax_symbolic,
     'ReflectionPad1d': reflectionpad_symbolic,
     'ReflectionPad2d': reflectionpad_symbolic,
     'ReplicationPad1d': replicationpad_symbolic,
