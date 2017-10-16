@@ -19,6 +19,9 @@
 namespace caffe2 {
 
 REGISTER_CPU_OPERATOR(GivenTensorFill, GivenTensorFillOp<float, CPUContext>);
+REGISTER_CPU_OPERATOR(
+    GivenTensorDoubleFill,
+    GivenTensorFillOp<double, CPUContext>);
 REGISTER_CPU_OPERATOR(GivenTensorBoolFill, GivenTensorFillOp<bool, CPUContext>);
 REGISTER_CPU_OPERATOR(GivenTensorIntFill, GivenTensorFillOp<int, CPUContext>);
 REGISTER_CPU_OPERATOR(
@@ -29,11 +32,17 @@ REGISTER_CPU_OPERATOR(
     GivenTensorFillOp<std::string, CPUContext>);
 
 NO_GRADIENT(GivenTensorFill);
+NO_GRADIENT(GivenTensorDoubleFill);
 NO_GRADIENT(GivenTensorBoolFill);
 NO_GRADIENT(GivenTensorIntFill);
 NO_GRADIENT(GivenTensorInt64Fill);
 
 OPERATOR_SCHEMA(GivenTensorFill)
+    .NumInputs(0, 1)
+    .NumOutputs(1)
+    .AllowInplace({{0, 0}})
+    .TensorInferenceFunction(FillerTensorInference);
+OPERATOR_SCHEMA(GivenTensorDoubleFill)
     .NumInputs(0, 1)
     .NumOutputs(1)
     .AllowInplace({{0, 0}})
