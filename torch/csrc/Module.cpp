@@ -907,13 +907,14 @@ PyMODINIT_FUNC PyInit__C()
   ASSERT_TRUE(THDPByteTensor_init(module));
 #endif
 
-  THPDefaultGenerator = (THPGenerator*)THPGenerator_New();
-  ASSERT_TRUE(THPDefaultGenerator != nullptr);
-  ASSERT_TRUE(PyModule_AddObject(module, "default_generator", (PyObject*)THPDefaultGenerator) == 0);
-
   // force ATen to initialize because it handles
   // setting up TH Errors so that they throw C++ exceptions
   at::init();
+
+  auto& defaultGenerator = at::globalContext().defaultGenerator(at::kCPU);
+  THPDefaultGenerator = (THPGenerator*)THPGenerator_NewWithGenerator(
+    (THGenerator*)defaultGenerator.unsafeGetTH());
+  ASSERT_TRUE(PyModule_AddObject(module, "default_generator", (PyObject*)THPDefaultGenerator) == 0);
 
 #ifdef WITH_NUMPY
   import_array();
