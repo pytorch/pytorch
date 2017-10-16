@@ -390,70 +390,55 @@ class TestONNXUtils(TestCase):
 
     def test_check_onnx_broadcast(self):
 
-        def try_check_onnx_broadcast(dims1, dims2):
+        def try_check_onnx_broadcast(dims1, dims2, expect_broadcast, expect_fail):
             broadcast = True
-            failed = False
+            fail = False
             try:
                 broadcast = check_onnx_broadcast(dims1, dims2)
             except ValueError:
-                failed = True
-            return broadcast, failed
+                fail = True
+            self.assertEqual(broadcast, expect_broadcast)
+            self.assertEqual(fail, expect_fail)
 
-        # Case 1
+        # Case 1, check the case when len(dims1) < len(dims2) and numel(dims2) > 1
         dims1 = [3, 4]
         dims2 = [2, 3, 4]
-        broadcast, failed = try_check_onnx_broadcast(dims1, dims2)
-        self.assertEqual(broadcast, True)
-        self.assertEqual(failed, True)
+        try_check_onnx_broadcast(dims1, dims2, True, True)
 
-        # Case 2
+        # Case 2, check the case when len(dims1) < len(dims2) and numel(dims2) == 1
         dims1 = [3, 4]
         dims2 = [1, 1, 1]
-        broadcast, failed = try_check_onnx_broadcast(dims1, dims2)
-        self.assertEqual(broadcast, True)
-        self.assertEqual(failed, False)
+        try_check_onnx_broadcast(dims1, dims2, True, False)
 
-        # Case 3
+        # Case 3, check the case when len(dims1) > len(dims2) and numel(dims2) == 1
         dims1 = [1, 1]
         dims2 = [1]
-        broadcast, failed = try_check_onnx_broadcast(dims1, dims2)
-        self.assertEqual(broadcast, True)
-        self.assertEqual(failed, False)
+        try_check_onnx_broadcast(dims1, dims2, True, False)
 
-        # Case 4
+        # Case 4, check the case when len(dims1) > len(dims2) and dims1[x:] == dims2
         dims1 = [2, 3, 4]
         dims2 = [3, 4]
-        broadcast, failed = try_check_onnx_broadcast(dims1, dims2)
-        self.assertEqual(broadcast, True)
-        self.assertEqual(failed, False)
+        try_check_onnx_broadcast(dims1, dims2, True, False)
 
-        # Case 5
+        # Case 5, check the case when len(dims1) > len(dims2), but dims1[x:] != dims2
         dims1 = [2, 3, 4]
         dims2 = [1, 4]
-        broadcast, failed = try_check_onnx_broadcast(dims1, dims2)
-        self.assertEqual(broadcast, True)
-        self.assertEqual(failed, True)
+        try_check_onnx_broadcast(dims1, dims2, True, True)
 
-        # Case 6
+        # Case 6, check the equal case, no broadcast
         dims1 = [3, 4]
         dims2 = [3, 4]
-        broadcast, failed = try_check_onnx_broadcast(dims1, dims2)
-        self.assertEqual(broadcast, False)
-        self.assertEqual(failed, False)
+        try_check_onnx_broadcast(dims1, dims2, False, False)
 
-        # Case 7
+        # Case 7, check the case when len(dims1) == len(dims2), but dims1 != dims2
         dims1 = [3, 4]
         dims2 = [1, 4]
-        broadcast, failed = try_check_onnx_broadcast(dims1, dims2)
-        self.assertEqual(broadcast, True)
-        self.assertEqual(failed, True)
+        try_check_onnx_broadcast(dims1, dims2, True, True)
 
-        # Case 8
+        # Case 8, check the case when len(dims1) == len(dims2) and numel(s2) == 1
         dims1 = [3, 4]
         dims2 = [1, 1]
-        broadcast, failed = try_check_onnx_broadcast(dims1, dims2)
-        self.assertEqual(broadcast, True)
-        self.assertEqual(failed, False)
+        try_check_onnx_broadcast(dims1, dims2, True, False)
 
 
 TestLuaReader.init()
