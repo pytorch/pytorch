@@ -213,6 +213,5 @@ THC_API cudaError_t THCudaMemGetInfoCached(THCState *state, size_t* freeBytes, s
 THC_API void THCSetGCHandler(THCState *state,
                              void (*torchGCHandlerFunction)(void *data),
                              void *data );
-THC_API void THCHeapUpdate(THCState *state, ptrdiff_t size);
 
 #endif
