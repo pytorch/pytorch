@@ -14,7 +14,12 @@ struct THPGenerator {
   ((THPGenerator*)obj)->cdata
 
 THP_API PyObject * THPGenerator_New();
+
+// Creates a new Python object wrapping the THGenerator. The reference is
+// borrowed. The caller should ensure that the THGenerator* object lifetime
+// last at least as long as the Python wrapper.
 THP_API PyObject * THPGenerator_NewWithGenerator(THGenerator *cdata);
+
 extern PyObject *THPGeneratorClass;
 
 #ifdef _THP_CORE
