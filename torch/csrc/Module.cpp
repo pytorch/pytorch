@@ -912,7 +912,7 @@ static PyObject* initModule() {
   ASSERT_TRUE(PyModule_AddObject(module, "default_generator", (PyObject*)THPDefaultGenerator) == 0);
 
 #ifdef WITH_NUMPY
-  import_array();
+  if (_import_array() < 0) return NULL;
 #endif
 
   return module;
