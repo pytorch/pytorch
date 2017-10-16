@@ -56,7 +56,9 @@ __global__ void spatialDepthwiseConvolutionUpdateOutput(
                                     inputWidth + w_in;
           value = THCNumerics<AccT>::add(
             value,
-            ScalarConvert<T, AccT>::to(THCNumerics<T>::mul(weight.data()[weightOffset], input.data()[offset])));
+            THCNumerics<AccT>::mul(
+              ScalarConvert<T, AccT>::to(weight.data()[weightOffset]),
+              ScalarConvert<T, AccT>::to(input.data()[offset])));
         }
         ++weightOffset;
       }
@@ -113,7 +115,9 @@ __global__ void spatialDepthwiseConvolutionUpdateGradInput(
                     * outputWidth + w_out;
               value = THCNumerics<AccT>::add(
                 value,
-                ScalarConvert<T, AccT>::to(THCNumerics<T>::mul(weight.data()[weightOffset], gradOutput.data()[offset])));
+                THCNumerics<AccT>::mul(
+                  ScalarConvert<T, AccT>::to(weight.data()[weightOffset]),
+                  ScalarConvert<T, AccT>::to(gradOutput.data()[offset])));
             }
           }
           ++weightOffset;
@@ -176,7 +180,9 @@ __global__ void spatialDepthwiseConvolutionAccGradParameters(
       int outputOffset = ((batch * kernelChannels + ch) * outputHeight + go_h_offset) * outputWidth + go_w_offset;
       grad = THCNumerics<AccT>::add(
           grad,
-          ScalarConvert<T, AccT>::to(THCNumerics<T>::mul( input.data()[inputOffset], gradOutput.data()[outputOffset])));
+          THCNumerics<AccT>::mul(
+            ScalarConvert<T, AccT>::to(input.data()[inputOffset]),
+            ScalarConvert<T, AccT>::to(gradOutput.data()[outputOffset])));
     }
   }
   __syncthreads();

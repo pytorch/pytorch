@@ -1923,8 +1923,10 @@ class TestNN(NNTestCase):
     # the number of groups == number of input channels
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
     def test_Conv2d_depthwise_naive_groups(self):
-        types = [torch.cuda.FloatTensor, torch.cuda.DoubleTensor]
-        for tp in types:
+        types = [torch.cuda.FloatTensor, torch.cuda.DoubleTensor,
+                torch.cuda.HalfTensor]
+        precs = [1e-5, 1e-5, 1e-2]
+        for tp, prec in zip(types, precs):
             for depth_multiplier in [1, 2]:
                 m = nn.Conv2d(2, 2 * depth_multiplier, kernel_size=3, groups=2).type(tp)
                 i = Variable(torch.randn(2, 2, 6, 6).type(tp), requires_grad=True)
@@ -1948,13 +1950,17 @@ class TestNN(NNTestCase):
                 output2 = m2(i2)
                 output2.backward(grad_output[:, offset:].contiguous())
 
-                self.assertEqual(output, torch.cat([output1, output2], 1))
+                self.assertEqual(output, torch.cat([output1, output2], 1),
+                        prec=prec)
                 self.assertEqual(i.grad.data,
-                                 torch.cat([i1.grad.data, i2.grad.data], 1))
+                                 torch.cat([i1.grad.data, i2.grad.data], 1),
+                                 prec=prec)
                 self.assertEqual(m.bias.grad.data,
-                                 torch.cat([m1.bias.grad.data, m2.bias.grad.data], 0))
+                                 torch.cat([m1.bias.grad.data,
+                                     m2.bias.grad.data], 0), prec=prec)
                 self.assertEqual(m.weight.grad.data,
-                                 torch.cat([m1.weight.grad.data, m2.weight.grad.data], 0))
+                                 torch.cat([m1.weight.grad.data,
+                                     m2.weight.grad.data], 0), prec=prec)
 
     def test_MaxUnpool2d_output_size(self):
         m = nn.MaxPool2d(3, stride=2, return_indices=True)

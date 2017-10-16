@@ -215,7 +215,7 @@ def function_info(name, arguments, cimpls, buffers, backends):
     return {
         'mode': 'NN',
         'name': name,
-        'types': ['Float', 'Double'],
+        'types': ['Float', 'Double', 'Half'], # Half will be stripped for CPU backend
         'arguments': arguments,
         'return': get_return(arguments),
         'buffers': buffers,
