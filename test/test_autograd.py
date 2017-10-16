@@ -13,7 +13,7 @@ from operator import mul
 from functools import reduce
 import torch.nn.functional as F
 from torch.autograd import gradcheck
-from torch.autograd.gradcheck import gradgradcheck
+from torch.autograd.gradcheck import gradgradcheck, gradcheck
 from torch.autograd.function import once_differentiable
 from torch.autograd.profiler import profile
 
@@ -96,12 +96,12 @@ class TestAutograd(TestCase):
         y_grad_desc = graph_desc(y.grad.grad_fn)
         self.assertEqual(
             x_grad_desc,
-            'Identity(AddBackward(ExpandBackward(AccumulateGrad()), '
-            'MulBackward(ExpandBackward(AccumulateGrad()), AccumulateGrad())))')
+            'Identity(AddBackward1(ExpandBackward(AccumulateGrad()), '
+            'MulBackward1(ExpandBackward(AccumulateGrad()), AccumulateGrad())))')
         self.assertEqual(
             y_grad_desc,
-            'Identity(AddBackward(MulConstantBackward(ExpandBackward(AccumulateGrad())), '
-            'MulBackward(ExpandBackward(AccumulateGrad()), AccumulateGrad())))')
+            'Identity(AddBackward1(MulBackward0(ExpandBackward(AccumulateGrad())), '
+            'MulBackward1(ExpandBackward(AccumulateGrad()), AccumulateGrad())))')
 
     def test_once_differentiable(self):
         class MyFunction(Function):
@@ -724,36 +724,6 @@ class TestAutograd(TestCase):
         expected_grad = torch.Tensor(4, 4, 4).zero_()
         expected_grad[1].fill_(3)
         self.assertEqual(y.grad.data, expected_grad)
-
-    def test_basic_op_grad_fallback(self):
-        """Grad output might need to be reshaped to match the second argument."""
-        x = Variable(torch.randn(4, 6), requires_grad=True)
-        b = Variable(torch.rand(12, 1) + 1e-2, requires_grad=True)
-        c = Variable(torch.rand(8, 1) + 1e-2, requires_grad=True)
-
-        def y():
-            # .mm() depends on the grad_output being of correct size
-            return b.mm(Variable(torch.rand(1, 2) + 1e-2))
-
-        def z():
-            return c.mm(Variable(torch.rand(1, 3) + 1e-2))
-
-        # suppress broadcastable warning
-        with warnings.catch_warnings(record=True):
-            (x + y()).sum().backward()
-            (x - y()).sum().backward()
-            (x * y()).sum().backward()
-            (x / y()).sum().backward()
-            (x.dist(y())).sum().backward()
-            (x.lerp(y(), 0.5)).sum().backward()
-            (x.max(y())).sum().backward()
-            (x.min(y())).sum().backward()
-            (x.masked_fill(y() < 0, 0.5)).sum().backward()
-            (x.masked_scatter(Variable(y().data < 0.25), z())).sum().backward()
-            (x.masked_select(Variable(y().data < 0.25))).sum().backward()
-            (x.addcmul(1, y(), z())).sum().backward()
-            (x.addcdiv(1, y(), z())).sum().backward()
-            (x.abs() ** y()).sum().backward()
 
     def test_requires_grad(self):
         x = Variable(torch.randn(5, 5))
@@ -1395,52 +1365,6 @@ class TestAutograd(TestCase):
         c = F2()(a, b)
         c.backward(torch.ones(c.size()))
         self.assertEqual(x.grad.data, torch.ones(x.size()))
-
-    def test_keepdim_warning(self):
-        torch.utils.backcompat.keepdim_warning.enabled = True
-        x = Variable(torch.randn(3, 4), requires_grad=True)
-
-        def run_backward(y):
-            y_ = y
-            if type(y) is tuple:
-                y_ = y[0]
-            # check that backward runs smooth
-            y_.backward(y_.data.new(y_.size()).normal_())
-
-        def keepdim_check(f):
-            with warnings.catch_warnings(record=True) as w:
-                warnings.simplefilter("always")
-                y = f(x, 1)
-                self.assertTrue(len(w) == 1)
-                self.assertTrue(issubclass(w[-1].category, UserWarning))
-                self.assertTrue("keepdim" in str(w[-1].message))
-                run_backward(y)
-                self.assertEqual(x.size(), x.grad.size())
-
-                # check against explicit keepdim
-                y2 = f(x, 1, keepdim=False)
-                self.assertEqual(y, y2)
-                run_backward(y2)
-
-                y3 = f(x, 1, keepdim=True)
-                if type(y3) == tuple:
-                    y3 = (y3[0].squeeze(1), y3[1].squeeze(1))
-                else:
-                    y3 = y3.squeeze(1)
-                self.assertEqual(y, y3)
-                run_backward(y3)
-
-        keepdim_check(torch.sum)
-        keepdim_check(torch.prod)
-        keepdim_check(torch.mean)
-        keepdim_check(torch.max)
-        keepdim_check(torch.min)
-        keepdim_check(torch.mode)
-        keepdim_check(torch.median)
-        keepdim_check(torch.kthvalue)
-        keepdim_check(torch.var)
-        keepdim_check(torch.std)
-        torch.utils.backcompat.keepdim_warning.enabled = False
 
     def test_reentrant(self):
         y_data = torch.randn(2, 2)

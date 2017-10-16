@@ -6,13 +6,12 @@ from operator import mul
 from functools import reduce
 
 import torch
-from torch._C import _infer_size
+from torch._C import _infer_size, _add_docstr
 from . import _functions
 from .modules import utils
 from ._functions.linear import Bilinear
 from ._functions.padding import ConstantPadNd
 from ._functions.vision import GridSampler, AffineGridGenerator
-from ..autograd import _functions as _autograd_functions
 from torch.autograd import Variable
 from .modules.utils import _single, _pair, _triple
 
@@ -263,58 +262,55 @@ def avg_pool1d(input, kernel_size, stride=None, padding=0,
     kernel_size = _single(kernel_size) + (1,)
     stride = _single(stride) + (1,) if stride is not None else kernel_size
     padding = _single(padding) + (0,)
-    return _functions.thnn.AvgPool2d.apply(input.unsqueeze(3), kernel_size, stride, padding,
-                                           ceil_mode, count_include_pad).squeeze(3)
+    return avg_pool2d(input.unsqueeze(3), kernel_size, stride, padding,
+                      ceil_mode, count_include_pad).squeeze(3)
 
 
-def avg_pool2d(input, kernel_size, stride=None, padding=0,
-               ceil_mode=False, count_include_pad=True):
-    """Applies 2D average-pooling operation in kh x kw regions by step size
-    dh x dw steps. The number of output features is equal to the number of
-    input planes.
+avg_pool2d = _add_docstr(torch._C._nn.avg_pool2d, r"""
+avg_pool2d(input, kernel_size, stride=None, padding=0, ceil_mode=False, count_include_pad=True) -> Variable
 
-    See :class:`~torch.nn.AvgPool2d` for details and output shape.
+Applies 2D average-pooling operation in kh x kw regions by step size
+dh x dw steps. The number of output features is equal to the number of
+input planes.
 
-    Args:
-        input: input tensor (minibatch x in_channels x iH x iW)
-        kernel_size: size of the pooling region. Can be a single number or a
-          tuple (kH x kW)
-        stride: stride of the pooling operation. Can be a single number or a
-          tuple (sH, sW). Default is equal to kernel size
-        padding: implicit zero paddings on both sides of the input. Can be a
-          single number or a tuple (padH, padW). Default: 0
-        ceil_mode: when True, will use `ceil` instead of `floor` in the formula
-            to compute the output shape. Default: False
-        count_include_pad: when True, will include the zero-padding in th
-            averaging calculation. Default: True
-    """
-    return _functions.thnn.AvgPool2d.apply(input, kernel_size, stride, padding,
-                                           ceil_mode, count_include_pad)
+See :class:`~torch.nn.AvgPool2d` for details and output shape.
 
+Args:
+    input: input tensor (minibatch x in_channels x iH x iW)
+    kernel_size: size of the pooling region. Can be a single number or a
+      tuple (kH x kW)
+    stride: stride of the pooling operation. Can be a single number or a
+      tuple (sH, sW). Default is equal to kernel size
+    padding: implicit zero paddings on both sides of the input. Can be a
+      single number or a tuple (padH, padW). Default: 0
+    ceil_mode: when True, will use `ceil` instead of `floor` in the formula
+        to compute the output shape. Default: False
+    count_include_pad: when True, will include the zero-padding in th
+        averaging calculation. Default: True
+""")
 
-def avg_pool3d(input, kernel_size, stride=None, padding=0,
-               ceil_mode=False, count_include_pad=True):
-    """Applies 3D average-pooling operation in kt x kh x kw regions by step
-    size dt x dh x dw steps. The number of output features is equal to the
-    number of input planes / dt.
+avg_pool3d = _add_docstr(torch._C._nn.avg_pool3d, r"""
+avg_pool3d(input, kernel_size, stride=None, padding=0, ceil_mode=False, count_include_pad=True) -> Variable
 
-    See :class:`~torch.nn.AvgPool3d` for details and output shape.
+Applies 3D average-pooling operation in kt x kh x kw regions by step
+size dt x dh x dw steps. The number of output features is equal to the
+number of input planes / dt.
 
-    Args:
-        input: input tensor (minibatch x in_channels x iT x iH x iW)
-        kernel_size: size of the pooling region. Can be a single number or a
-          tuple (kT x kH x kW)
-        stride: stride of the pooling operation. Can be a single number or a
-          tuple (sT, sH, sW). Default is equal to kernel size
-        padding: implicit zero paddings on both sides of the input. Can be a
-          single number or a tuple (padT, padH, padW), Default: 0
-        ceil_mode: when True, will use `ceil` instead of `floor` in the formula
-            to compute the output shape
-        count_include_pad: when True, will include the zero-padding in th
-            averaging calculation
-    """
-    return _functions.thnn.AvgPool3d.apply(input, kernel_size, stride, padding,
-                                           ceil_mode, count_include_pad)
+See :class:`~torch.nn.AvgPool3d` for details and output shape.
+
+Args:
+    input: input tensor (minibatch x in_channels x iT x iH x iW)
+    kernel_size: size of the pooling region. Can be a single number or a
+      tuple (kT x kH x kW)
+    stride: stride of the pooling operation. Can be a single number or a
+      tuple (sT, sH, sW). Default is equal to kernel size
+    padding: implicit zero paddings on both sides of the input. Can be a
+      single number or a tuple (padT, padH, padW), Default: 0
+    ceil_mode: when True, will use `ceil` instead of `floor` in the formula
+        to compute the output shape
+    count_include_pad: when True, will include the zero-padding in th
+        averaging calculation
+""")
 
 
 # share the same interface
@@ -327,8 +323,7 @@ def max_pool1d(input, kernel_size, stride=None, padding=0, dilation=1,
 
 def max_pool2d(input, kernel_size, stride=None, padding=0, dilation=1,
                ceil_mode=False, return_indices=False):
-    ret = _functions.thnn.MaxPool2d.apply(input, kernel_size, stride, padding, dilation,
-                                          ceil_mode)
+    ret = torch._C._nn.max_pool2d(input, kernel_size, stride, padding, dilation, ceil_mode)
     return ret if return_indices else ret[0]
 
 
@@ -374,7 +369,7 @@ def max_unpool1d(input, indices, kernel_size, stride=None, padding=0,
     padding = _single(padding)
     output_size = _unpool_output_size(input, kernel_size, stride, padding,
                                       output_size)
-    return _functions.thnn.MaxUnpool2d.apply(input.unsqueeze(3), indices.unsqueeze(3), output_size + [1]).squeeze(3)
+    return torch._C._nn.max_unpool2d(input.unsqueeze(3), indices.unsqueeze(3), output_size + [1]).squeeze(3)
 
 
 def max_unpool2d(input, indices, kernel_size, stride=None, padding=0,
@@ -384,7 +379,7 @@ def max_unpool2d(input, indices, kernel_size, stride=None, padding=0,
     padding = _pair(padding)
     output_size = _unpool_output_size(input, kernel_size, stride, padding,
                                       output_size)
-    return _functions.thnn.MaxUnpool2d.apply(input, indices, output_size)
+    return torch._C._nn.max_unpool2d(input, indices, output_size)
 
 
 def max_unpool3d(input, indices, kernel_size, stride=None, padding=0,
@@ -394,7 +389,7 @@ def max_unpool3d(input, indices, kernel_size, stride=None, padding=0,
     padding = _triple(padding)
     output_size = _unpool_output_size(input, kernel_size, stride, padding,
                                       output_size)
-    return _functions.thnn.MaxUnpool3d.apply(input, indices, output_size, stride, padding)
+    return torch._C._nn.max_unpool3d(input, indices, output_size, stride, padding)
 
 
 def lp_pool2d(input, norm_type, kernel_size, stride=None, ceil_mode=False):
@@ -535,70 +530,87 @@ def dropout3d(input, p=0.5, training=False, inplace=False):
     return _functions.dropout.FeatureDropout.apply(input, p, training, inplace)
 
 
-def threshold(input, threshold, value, inplace=False):
-    return _functions.thnn.Threshold.apply(input, threshold, value, inplace)
+threshold = _add_docstr(torch._C._nn.threshold, r"""
+threshold(input, threshold, value, inplace=False) -> Variable
+""")
 
 
 def relu(input, inplace=False):
-    return _functions.thnn.Threshold.apply(input, 0, 0, inplace)
+    return threshold(input, 0, 0, inplace)
 
 
-def glu(input, dim=-1):
-    ndim = input.dim()
-    if dim < -ndim or dim >= ndim:
-        raise IndexError("dim {} is out of range for tensor of dimension {}"
-                         .format(dim, ndim))
-    if dim < 0:
-        dim += ndim
-    return _functions.thnn.GatedLinear.apply(input, dim)
+glu = _add_docstr(torch._C._nn.glu, r"""
+glu(input, dim=-1) -> Variable
 
+The gated linear unit. Computes:
 
-def hardtanh(input, min_val=-1., max_val=1., inplace=False):
-    return _functions.thnn.auto.Hardtanh.apply(input, min_val, max_val, inplace)
+.. math ::
+
+    H = A \times \sigma(B)
+
+where `input` is split in half along `dim` to form `A` and `B`.
+
+See `Language Modeling with Gated Convolutional Networks <https://arxiv.org/abs/1612.08083>`_.
+
+Args:
+    input (Variable): input variable
+    dim (int): dimension on which to split the input
+""")
+
+hardtanh = _add_docstr(torch._C._nn.hardtanh, r"""
+hardtanh(input, min_val=-1., max_val=1., inplace=False) -> Variable
+""")
 
 
 def relu6(input, inplace=False):
-    return _functions.thnn.auto.Hardtanh.apply(input, 0, 6, inplace)
+    return hardtanh(input, 0, 6, inplace)
 
 
-def elu(input, alpha=1., inplace=False):
-    return _functions.thnn.auto.ELU.apply(input, alpha, inplace)
+elu = _add_docstr(torch._C._nn.elu, r"""
+elu(input, alpha=1., inplace=False) -> Variable
+""")
 
 
 def selu(input, inplace=False):
     return _functions.thnn.SELU.apply(input, inplace)
 
 
-def leaky_relu(input, negative_slope=1e-2, inplace=False):
-    return _functions.thnn.LeakyReLU.apply(input, negative_slope, inplace)
+leaky_relu = _add_docstr(torch._C._nn.leaky_relu, r"""
+leaky_relu(input, negative_slope=0.01, inplace=False) -> Variable
+""")
 
 
+# prelu = _add_docstr(torch._C._nn.prelu, r"""
+# prelu(input, weight) -> Variable
+# """)
 def prelu(input, weight):
     return _functions.thnn.PReLU.apply(input, weight)
 
 
-def rrelu(input, lower=1. / 8, upper=1. / 3, training=False, inplace=False):
-    return _functions.thnn.RReLU.apply(input, lower, upper, training, inplace)
+rrelu = _add_docstr(torch._C._nn.rrelu, r"""
+rrelu(input, lower=1./8, upper=1./3, training=False, inplace=False) -> Variable
+""")
 
+logsigmoid = _add_docstr(torch._C._nn.log_sigmoid, r"""
+logsigmoid(input) -> Variable
+""")
 
-def logsigmoid(input):
-    return _functions.thnn.LogSigmoid.apply(input)
-
-
-def hardshrink(input, lambd=0.5):
-    return _functions.thnn.auto.Hardshrink.apply(input, lambd)
+hardshrink = _add_docstr(torch._C._nn.hardshrink, r"""
+hardshrink(input, lambd=0.5) -> Variable
+""")
 
 
 def tanhshrink(input):
-    return input - _autograd_functions.Tanh.apply(input)
+    return input - input.tanh()
 
 
 def softsign(input):
     return input / (input.abs() + 1)
 
 
-def softplus(input, beta=1, threshold=20):
-    return _functions.thnn.auto.Softplus.apply(input, beta, threshold)
+softplus = _add_docstr(torch._C._nn.softplus, r"""
+softplus(input, beta=1, threshold=20) -> Variable
+""")
 
 
 def _get_softmax_dim(name, ndim, stacklevel):
@@ -622,7 +634,7 @@ def softmin(input, dim=None, _stacklevel=3):
     """
     if dim is None:
         dim = _get_softmax_dim('softmin', input.dim(), _stacklevel)
-    return _Softmax(dim)(-input)
+    return torch._C._nn.softmax(-input, dim)
 
 
 def softmax(input, dim=None, _stacklevel=3):
@@ -647,7 +659,7 @@ def softmax(input, dim=None, _stacklevel=3):
     """
     if dim is None:
         dim = _get_softmax_dim('softmax', input.dim(), _stacklevel)
-    return _Softmax(dim)(input)
+    return torch._C._nn.softmax(input, dim)
 
 
 def log_softmax(input, dim=None, _stacklevel=3):
@@ -663,7 +675,7 @@ def log_softmax(input, dim=None, _stacklevel=3):
     """
     if dim is None:
         dim = _get_softmax_dim('log_softmax', input.dim(), _stacklevel)
-    return _LogSoftmax(dim)(input)
+    return torch._C._nn.log_softmax(input, dim)
 
 
 def softshrink(input, lambd=0.5):
@@ -671,11 +683,11 @@ def softshrink(input, lambd=0.5):
 
 
 def tanh(input):
-    return _autograd_functions.Tanh.apply(input)
+    return input.tanh()
 
 
 def sigmoid(input):
-    return _autograd_functions.Sigmoid.apply(input)
+    return input.sigmoid()
 
 
 # etc.
@@ -885,8 +897,8 @@ def nll_loss(input, target, weight=None, size_average=True, ignore_index=-100):
         input: :math:`(N, C)` where `C = number of classes` or `(N, C, H, W)`
             in case of 2D - Loss
         target: :math:`(N)` where each value is `0 <= targets[i] <= C-1`
-        weight (Variable, optional): a manual rescaling weight given to each
-            class. If given, has to be a Variable of size "nclasses"
+        weight (Tensor, optional): a manual rescaling weight given to each
+            class. If given, has to be a Tensor of size "nclasses"
         size_average (bool, optional): By default, the losses are averaged
             over observations for each minibatch. If size_average
             is False, the losses are summed for each minibatch. Default: True
@@ -904,10 +916,12 @@ def nll_loss(input, target, weight=None, size_average=True, ignore_index=-100):
         >>> output.backward()
     """
     dim = input.dim()
+    if torch.is_tensor(weight):
+        weight = Variable(weight)
     if dim == 2:
-        return _functions.thnn.NLLLoss.apply(input, target, weight, size_average, ignore_index)
+        return torch._C._nn.nll_loss(input, target, weight, size_average, ignore_index)
     elif dim == 4:
-        return _functions.thnn.NLLLoss2d.apply(input, target, weight, size_average, ignore_index)
+        return torch._C._nn.nll_loss2d(input, target, weight, size_average, ignore_index)
     else:
         raise ValueError('Expected 2 or 4 dimensions (got {})'.format(dim))
 
@@ -943,20 +957,21 @@ def poisson_nll_loss(input, target, log_input=True, full=False, size_average=Tru
         return torch.sum(loss)
 
 
-def kl_div(input, target, size_average=True, weight=None):
-    r"""The `Kullback-Leibler divergence`_ Loss.
+kl_div = _add_docstr(torch._C._nn.kl_div, r"""
+kl_div(input, target, size_average=True, weight=None) -> Variable
 
-    See :class:`~torch.nn.KLDivLoss` for details.
+The `Kullback-Leibler divergence`_ Loss.
 
-    Args:
-        input: Variable of arbitrary shape
-        target: Variable of the same shape as input
-        size_average: if True the output is divided by the number of elements
-          in input tensor. Default: True
-        weight (Tensor, optional): a manual rescaling weight given to each
-                class. If given, has to be a Tensor of size "nclasses"
-    """
-    return _functions.thnn.KLDivLoss.apply(input, target, size_average)
+See :class:`~torch.nn.KLDivLoss` for details.
+
+Args:
+    input: Variable of arbitrary shape
+    target: Variable of the same shape as input
+    size_average: if True the output is divided by the number of elements
+      in input tensor. Default: True
+    weight (Tensor, optional): a manual rescaling weight given to each
+            class. If given, has to be a Tensor of size "nclasses"
+""")
 
 
 def cross_entropy(input, target, weight=None, size_average=True, ignore_index=-100):
@@ -1022,8 +1037,10 @@ def binary_cross_entropy(input, target, weight=None, size_average=True):
     if weight is not None:
         new_size = _infer_size(target.size(), weight.size())
         weight = weight.expand(new_size)
+        if torch.is_tensor(weight):
+            weight = Variable(weight)
 
-    return _functions.thnn.BCELoss.apply(input, target, weight, size_average)
+    return torch._C._nn.binary_cross_entropy(input, target, weight, size_average)
 
 
 def binary_cross_entropy_with_logits(input, target, weight=None, size_average=True):
@@ -1064,16 +1081,17 @@ def binary_cross_entropy_with_logits(input, target, weight=None, size_average=Tr
         return loss.sum()
 
 
-def smooth_l1_loss(input, target, size_average=True):
-    return _functions.thnn.SmoothL1Loss.apply(input, target, size_average)
+smooth_l1_loss = _add_docstr(torch._C._nn.smooth_l1_loss, r"""
+smooth_l1_loss(input, target, size_average=True) -> Variable
+""")
 
+l1_loss = _add_docstr(torch._C._nn.l1_loss, r"""
+l1_loss(input, target, size_average=True) -> Variable
+""")
 
-def l1_loss(input, target, size_average=True):
-    return _functions.thnn.L1Loss.apply(input, target, size_average)
-
-
-def mse_loss(input, target, size_average=True, reduce=True):
-    return _functions.thnn.MSELoss.apply(input, target, size_average, reduce)
+mse_loss = _add_docstr(torch._C._nn.mse_loss, r"""
+mse_loss(input, target, size_average=True, reduce=True) -> Variable
+""")
 
 
 def margin_ranking_loss(input1, input2, target, margin=0, size_average=True):
@@ -1084,12 +1102,13 @@ def hinge_embedding_loss(input, target, margin=1.0, size_average=True):
     return _functions.loss.HingeEmbeddingLoss.apply(input, target, margin, size_average)
 
 
-def multilabel_margin_loss(input, target, size_average=True):
-    return _functions.thnn.MultiLabelMarginLoss.apply(input, target, size_average)
+multilabel_margin_loss = _add_docstr(torch._C._nn.multilabel_margin_loss, r"""
+multilabel_margin_loss(input, target, size_average=True) -> Variable
+""")
 
-
-def soft_margin_loss(input, target, size_average=True):
-    return _functions.thnn.SoftMarginLoss.apply(input, target, size_average)
+soft_margin_loss = _add_docstr(torch._C._nn.soft_margin_loss, r"""
+soft_margin_loss(input, target, size_average=True) -> Variable
+""")
 
 
 def multilabel_soft_margin_loss(input, target, weight=None, size_average=True):
@@ -1107,7 +1126,7 @@ def multi_margin_loss(input, target, p=1, margin=1, weight=None, size_average=Tr
     if weight is not None and weight.dim() != 1:
         raise ValueError('weight must be one-dimensional')
 
-    return _functions.thnn.MultiMarginLoss.apply(input, target, weight, size_average, p, margin)
+    return torch._C._nn.multi_margin_loss(input, target, p, margin, weight, size_average)
 
 
 def pixel_shuffle(input, upscale_factor):
