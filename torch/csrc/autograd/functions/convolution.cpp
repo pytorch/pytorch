@@ -289,14 +289,14 @@ auto ConvForward::apply(const variable_list& inputs) -> variable_list {
   std::unique_ptr<Convolution> convolution;
 
   if (is_depthwise(input, weight, groups)) {
-      output.resize_(output_size(input, weight));
+      /* output.resize_(output_size(input, weight)); */
 
       auto kernel_size = weight.sizes().slice(2);
       auto stride = vecToInt64(this->stride);
       auto padding = vecToInt64(this->padding);
       auto dilation = vecToInt64(this->dilation);
 
-      at::conv_depthwise2d_forward_out(output, input, weight, kernel_size, bias, stride, padding, dilation);
+      output = at::conv_depthwise2d_forward(input, weight, kernel_size, bias, stride, padding, dilation);
   } else if (use_cudnn(input)) {
 #ifdef WITH_CUDNN
     if (input.type().ID() != weight.type().ID()){
@@ -364,11 +364,11 @@ auto ConvForward::apply(const variable_list& inputs) -> variable_list {
 
 // For Convolution strategies that don't implicitly handle grad_bias, we add a helper
 // function here to perform it using simple Tensor operators
-static void update_grad_bias(const at::Tensor& grad_output, at::Tensor& grad_bias) {
+static at::Tensor compute_grad_bias(const at::Tensor& grad_output) {
   // grad_output is in N, C, H, W, we re-shape and make contiguous
   at::Tensor transposed = grad_output.transpose(0, 1).contiguous();
   // sum across all of the channels and add to grad_bias
-  grad_bias.add_(transposed.view({transposed.size(0), -1}).sum(1));
+  return transposed.view({transposed.size(0), -1}).sum(1);
 }
 
 // ConvBackward implementation
@@ -427,9 +427,7 @@ auto ConvBackward::apply(const variable_list& grad_outputs) -> variable_list {
 
       // THCUNN implementation does not handle bias, so we do it ourselves
       if (output_mask[2]) {
-        grad_bias = bias.type().tensor();
-        grad_bias.resize_as_(bias).zero_();
-        update_grad_bias(grad_output, grad_bias);
+        grad_bias = compute_grad_bias(grad_output);
       }
     } else if (use_cudnn) {
 #ifdef WITH_CUDNN
@@ -848,7 +846,7 @@ static std::tuple<Tensor, Tensor, Tensor> compute_backward(
           }
 
           if (output_mask[2]) {
-            compute_grad_bias(grad_output, grad_bias);
+            grad_bias = compute_grad_bias(grad_output);
           }
 
           return std::make_tuple(grad_input, grad_weight, grad_bias);
