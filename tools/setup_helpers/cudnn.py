@@ -12,6 +12,7 @@ try:  # python 3+
 except:  # python 2.7+
     from itertools import izip_longest as zip_longest
 
+
 def gather_paths(env_vars):
     return list(chain(*(os.getenv(v, '').split(':') for v in env_vars)))
 
