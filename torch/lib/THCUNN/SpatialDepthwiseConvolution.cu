@@ -28,12 +28,15 @@ __global__ void spatialDepthwiseConvolutionUpdateOutput(
     const int padWidth, const int padHeight,
     const int dilationWidth, const int dilationHeight)
 {
+  const int channelStride = outputHeight * outputWidth;
+  const int batchStride = outputChannels * channelStride;
+
   for (IndexType linearIndex = blockIdx.x * blockDim.x + threadIdx.x;
        linearIndex < totalElements;
        linearIndex += gridDim.x * blockDim.x) {
 
-    const int n = linearIndex / outputChannels / outputHeight / outputWidth;
-    const int c = (linearIndex / outputHeight / outputWidth) % outputChannels;
+    const int n = linearIndex / batchStride;
+    const int c = (linearIndex / channelStride) % outputChannels;
     const int h = (linearIndex / outputWidth) % outputHeight;
     const int w = linearIndex % outputWidth;
 
@@ -78,12 +81,15 @@ __global__ void spatialDepthwiseConvolutionUpdateGradInput(
     const int padWidth, const int padHeight,
     const int dilationWidth, const int dilationHeight)
 {
+  const int channelStride = inputHeight * inputWidth;
+  const int batchStride = inputChannels * channelStride;
+
   for (IndexType linearIndex = blockIdx.x * blockDim.x + threadIdx.x;
        linearIndex < totalElements;
        linearIndex += gridDim.x * blockDim.x) {
 
-    const int n = linearIndex / inputChannels / inputHeight / inputWidth;
-    const int c = (linearIndex / inputHeight / inputWidth) % inputChannels;
+    const int n = linearIndex / batchStride;
+    const int c = (linearIndex / channelStride) % inputChannels;
     const int h = (linearIndex / inputWidth) % inputHeight;
     const int w = linearIndex % inputWidth;
 
@@ -135,6 +141,8 @@ __global__ void spatialDepthwiseConvolutionAccGradParameters(
     const int padWidth, const int padHeight,
     const int dilationWidth, const int dilationHeight)
 {
+  const int channelStride = kernelWidth * kernelHeight;
+
   // Have to use a statically typed Shared Memory pointer
   SharedMem<T> smem;
 
@@ -143,7 +151,7 @@ __global__ void spatialDepthwiseConvolutionAccGradParameters(
   int bidx = blockIdx.x;
   int kW = bidx % kernelWidth;
   int kH = (bidx / kernelWidth) % kernelHeight;
-  int ch = (bidx / kernelWidth / kernelHeight) % kernelChannels;
+  int ch = (bidx / channelStride) % kernelChannels;
 
   // Need to calculate which input channel is associated with this filter
   // channel
