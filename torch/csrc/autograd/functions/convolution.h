@@ -41,7 +41,7 @@ struct ConvParams {
   void view1d_as_2d();
   bool use_cudnn(const at::Tensor& input) const;
   bool use_nnpack(const at::Tensor& input) const;
-  bool is_eligible_for_depthwise_convolution(const at::Tensor& input, const at::Tensor& weight, int groups) const;
+  bool is_depthwise(const at::Tensor& input, const at::Tensor& weight, int groups) const;
 };
 
 struct ConvForward : public ForwardFunction<>, public ConvParams, public HasSymbolic {

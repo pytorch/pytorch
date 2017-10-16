@@ -130,7 +130,7 @@ auto ConvParams::use_nnpack(const at::Tensor& input) const -> bool {
 // We currently only have depthwise support for the case where groups ==
 // nInputPlane and nInputPlane == nOutputPlane (the latter due to the lack of
 // a depthwise multiplier)
-auto ConvParams::is_eligible_for_depthwise_convolution(
+auto ConvParams::is_depthwise(
         const at::Tensor& input, const at::Tensor& weight, int groups) const -> bool {
   return input.type().isCuda() &&
          !transposed &&
@@ -288,7 +288,7 @@ auto ConvForward::apply(const variable_list& inputs) -> variable_list {
   tensor_list ones(groups);
   std::unique_ptr<Convolution> convolution;
 
-  if (is_eligible_for_depthwise_convolution(input, weight, groups)) {
+  if (is_depthwise(input, weight, groups)) {
       output.resize_(output_size(input, weight));
 
       auto kernel_size = weight.sizes().slice(2);
@@ -400,7 +400,7 @@ auto ConvBackward::apply(const variable_list& grad_outputs) -> variable_list {
   }
 
 
-  bool use_depthwise = this->is_eligible_for_depthwise_convolution(input, weight, groups);
+  bool use_depthwise = this->is_depthwise(input, weight, groups);
   bool use_cudnn = this->use_cudnn(input);
 
   at::Tensor grad_input;
