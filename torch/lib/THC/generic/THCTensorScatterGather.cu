@@ -12,7 +12,6 @@ void THCTensor_(gather)(THCState* state, THCTensor *tensor,
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, tensor, src));
   THCAssertSameGPU(THCudaLongTensor_checkGPU(state, 1, index));
 
-  // Reverse the order of checks to provide more helpful error messages
   THArgCheck(THCudaLongTensor_nDimension(state, index) == THCTensor_(nDimension)(state, src), 4,
              "Index tensor must have same dimensions as input tensor");
   THLongStorage *indexSize = THCudaLongTensor_newSizeOf(state, index);

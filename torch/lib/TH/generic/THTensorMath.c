@@ -424,7 +424,6 @@ void THTensor_(gather)(THTensor *tensor, THTensor *src, int dim, THLongTensor *i
 {
   int64_t elems_per_row, i, idx;
 
-  // Reverse the order of checks to provide more helpful error messages
   THArgCheck(THLongTensor_nDimension(index) == THTensor_(nDimension)(src), 4,
              "Index tensor must have same dimensions as input tensor");
   THArgCheck(dim < THTensor_(nDimension)(tensor), 3, "Index dimension is out of bounds");
