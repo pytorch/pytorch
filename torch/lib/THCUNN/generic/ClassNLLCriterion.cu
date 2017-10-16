@@ -110,6 +110,8 @@ void THNN_(ClassNLLCriterion_updateGradInput)(
   int n_dims = THCTensor_(nDimension)(state, input);
   int n_classes = THCTensor_(size)(state, input, n_dims - 1);
 
+  THCTensor_(resizeAs)(state, gradInput, input);
+  THCTensor_(zero)(state, gradInput);
   THArgCheck(THCTensor_(isContiguous)(state, gradInput), 4, "gradInput must be contiguous");
 
   if (weights) {

@@ -89,6 +89,9 @@ void THNN_(ClassNLLCriterion_updateGradInput)(
           THTensor *total_weight,
           int64_t ignore_index)
 {
+  THTensor_(resizeAs)(gradInput, input);
+  THTensor_(zero)(gradInput);
+
   int n_dims = THTensor_(nDimension)(input);
   int n_classes = THTensor_(size)(input, n_dims - 1);
   ignore_index -= TH_INDEX_BASE;
