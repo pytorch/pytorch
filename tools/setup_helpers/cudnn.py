@@ -7,6 +7,10 @@ import re
 from .env import check_env_flag
 from .cuda import WITH_CUDA, CUDA_HOME
 
+try:  # python 3+
+    from itertools import zip_longest as zip_longest
+except:  # python 2.7+
+    from itertools import izip_longest as zip_longest
 
 def gather_paths(env_vars):
     return list(chain(*(os.getenv(v, '').split(':') for v in env_vars)))
@@ -16,26 +20,38 @@ def find_cudnn_version(cudnn_lib_dir):
     candidate_names = list(glob.glob(os.path.join(cudnn_lib_dir, 'libcudnn*')))
     candidate_names = [os.path.basename(c) for c in candidate_names]
 
-    # suppose version is MAJOR.MINOR.PATCH, all numbers
-    version_regex = re.compile('\d+\.\d+\.\d+')
-    candidates = [c.group() for c in map(version_regex.search, candidate_names) if c]
-    if len(candidates) > 0:
-        # normally only one will be retrieved, take the first result
-        return candidates[0]
+    # suppose lib file is is libcudnn.so.MAJOR.MINOR.PATCH, all numbers
+    version_regex = re.compile('.so.(\d+\.\d+\.\d+)$')
+    candidates = [c.group(1) for c in map(version_regex.search, candidate_names) if c]
 
-    # if no candidates were found, try MAJOR.MINOR
-    version_regex = re.compile('\d+\.\d+')
-    candidates = [c.group() for c in map(version_regex.search, candidate_names) if c]
-    if len(candidates) > 0:
-        return candidates[0]
+    # libcudnn.so.MAJOR.MINOR
+    version_regex = re.compile('.so.(\d+\.\d+)$')
+    candidates += [c.group(1) for c in map(version_regex.search, candidate_names) if c]
 
-    # if no candidates were found, try MAJOR
-    version_regex = re.compile('\d+')
-    candidates = [c.group() for c in map(version_regex.search, candidate_names) if c]
-    if len(candidates) > 0:
-        return candidates[0]
+    # libcudnn.so.MAJOR
+    version_regex = re.compile('.so.(\d+)$')
+    candidates += [c.group(1) for c in map(version_regex.search, candidate_names) if c]
 
-    return 'unknown'
+    if len(candidates) == 0:
+        return 'unknown'
+
+    # Each candidate represented as list, eg 6.0.21 -> [6, 0, 21]
+    candidates = [[int(x) for x in c.split('.')] for c in candidates]
+
+    # From candidates, take the most recent, then most detailed version string
+    def version_cmp(a, b):
+        for (x, y) in zip_longest(a, b, fillvalue=-1):
+            diff = x - y
+            if diff != 0:
+                return diff
+        return 0
+
+    version = candidates[0]
+    for candidate in candidates:
+        result = version_cmp(version, candidate)
+        if result < 0:  # version < candidate
+            version = candidate
+    return '.'.join([str(v) for v in version])
 
 
 def check_cudnn_version(cudnn_version_string):
