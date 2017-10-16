@@ -1,7 +1,10 @@
 #pragma once
 
 #include "caffe2/core/net.h"
+#include "caffe2/core/observer.h"
 #include "caffe2/core/timer.h"
+
+#include <unordered_map>
 
 namespace caffe2 {
 
@@ -28,6 +31,8 @@ class PerfNetObserver : public NetObserver {
   };
   LogType logType_;
   unsigned int numRuns_;
+  std::unordered_map<const OperatorBase*, const ObserverBase<OperatorBase>*>
+      observerMap_;
 
   caffe2::Timer timer_;
 };
