@@ -1,4 +1,5 @@
 import math
+import torch
 from .optimizer import Optimizer
 
 
@@ -36,12 +37,14 @@ class Rprop(Optimizer):
                 if p.grad is None:
                     continue
                 grad = p.grad.data
+                if grad.is_sparse:
+                    raise RuntimeError('Rprop does not support sparse gradients')
                 state = self.state[p]
 
                 # State initialization
                 if len(state) == 0:
                     state['step'] = 0
-                    state['prev'] = grad.new().resize_as_(grad).zero_()
+                    state['prev'] = torch.zeros_like(p.data)
                     state['step_size'] = grad.new().resize_as_(grad).fill_(group['lr'])
 
                 etaminus, etaplus = group['etas']
