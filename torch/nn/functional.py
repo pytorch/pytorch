@@ -655,12 +655,19 @@ def embedding(input, embedding_matrix,
         norm_type (float, optional): The p of the p-norm to compute for the max_norm option
         scale_grad_by_freq (boolean, optional): if given, this will scale gradients by the frequency of
                                                 the words in the mini-batch.
-        sparse (boolean, optional): if True, gradient w.r.t. weight matrix will be a sparse tensor.
+        sparse (boolean, optional): if True, gradient w.r.t. weight matrix will be a sparse tensor. See Notes for
+                                    more details regarding sparse gradients.
 
     Shape:
         - Input: LongTensor `(N, W)`, N = mini-batch, W = number of indices to extract per mini-batch
         - Embedding_matrix: FloatTensor `(V, embedding_dim)`, V = maximum index + 1, embedding_dim = embedding size
         - Output: `(N, W, embedding_dim)`
+
+    Notes:
+        It is advised to only use `sparse=True` if `embedding_matrix` is a leaf Variable,
+        since some autograd functions may not propagate sparse gradients correctly.
+        Additionally, keep in mind that only a limited number of optimizers support
+        sparse gradients: currently it's `optim.SGD` (`cuda` and `cpu`), and `optim.Adagrad` (`cpu`)
 
     Examples::
 
@@ -700,7 +707,7 @@ def embedding(input, embedding_matrix,
         [torch.FloatTensor of size 1x4x3]
 
     """
-    return torch.nn.backends.thnn.backend.Embedding.apply(
+    return _functions.thnn.Embedding.apply(
         input, embedding_matrix,
         -1, max_norm, norm_type,
         scale_grad_by_freq, sparse
@@ -779,7 +786,7 @@ def embedding_bag(embedding_matrix, indices, offsets=None,
     if offsets is None:
         raise ValueError("offsets has to be a 1D Tensor but got None")
 
-    return torch.nn.backends.thnn.backend.EmbeddingBag.apply(
+    return _functions.thnn.EmbeddingBag.apply(
         embedding_matrix, indices, offsets,
         max_norm, norm_type,
         scale_grad_by_freq, mode
