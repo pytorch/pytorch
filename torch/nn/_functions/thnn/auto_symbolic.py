@@ -27,6 +27,7 @@ def softmax_symbolic(g, input):
 
 
 def logsoftmax_symbolic(g, input):
+    # TODO use logsoftmax to replace this combination.
     return g.op("Log", g.op('Softmax', input).typeAs(input))
 
 

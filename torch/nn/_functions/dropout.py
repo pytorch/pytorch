@@ -60,6 +60,8 @@ class FeatureDropout(Dropout):
     @staticmethod
     def symbolic(g, input, p=0.5, train=False, inplace=False):
         # NB: No FeatureDropout in ONNX, use Dropout instead.
+        if train:
+            raise ValueError("In train mode, FeatureDropout is different from Dropout.")
         return Dropout.symbolic(g, input, p, train, inplace)
 
     @staticmethod
