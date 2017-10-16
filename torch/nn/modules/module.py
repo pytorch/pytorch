@@ -172,7 +172,7 @@ class Module(object):
         fn(self)
         return self
 
-    def cuda(self, device_id=None):
+    def cuda(self, device=None):
         """Moves all model parameters and buffers to the GPU.
 
         This also makes associated parameters and buffers different objects. So
@@ -180,10 +180,10 @@ class Module(object):
         live on GPU while being optimized.
 
         Arguments:
-            device_id (int, optional): if specified, all parameters will be
+            device (int, optional): if specified, all parameters will be
                 copied to that device
         """
-        return self._apply(lambda t: t.cuda(device_id))
+        return self._apply(lambda t: t.cuda(device))
 
     def cpu(self):
         """Moves all model parameters and buffers to the CPU."""

@@ -63,8 +63,8 @@ def _cpu_deserialize(obj, location):
 
 def _cuda_deserialize(obj, location):
     if location.startswith('cuda'):
-        device_id = max(int(location[5:]), 0)
-        return obj.cuda(device_id)
+        device = max(int(location[5:]), 0)
+        return obj.cuda(device)
 
 
 register_package(10, _cpu_tag, _cpu_deserialize)
