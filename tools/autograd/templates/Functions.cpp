@@ -11,7 +11,8 @@ namespace torch { namespace autograd {
 namespace {
 
 Tensor not_implemented(const char* name) {
-  throw std::runtime_error(std::string(name) + " is not differentiable");
+  throw std::runtime_error(
+      std::string("the derivative for '") + name + "' is not implemented");
 }
 
 Tensor maybe_multiply(const Tensor & t, const Scalar & s) {
