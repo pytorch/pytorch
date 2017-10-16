@@ -425,7 +425,7 @@
 
 - name: select  # TODO: ATen definition conflicts with PyTorch
 
-- name: set  # TODO
+- name: set  # fallthrough
 
 - name: sigmoid(Tensor self)
   self: _sigmoid_backward(grad, result)

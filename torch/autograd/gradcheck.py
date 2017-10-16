@@ -64,6 +64,7 @@ def contiguous(input):
 def get_numerical_jacobian(fn, input, target, eps=1e-3):
     # To be able to use .view(-1) input must be contiguous
     input = contiguous(input)
+    target = contiguous(target)
     output_size = fn(input).numel()
     jacobian = make_jacobian(target, output_size)
 
@@ -131,7 +132,11 @@ def _as_tuple(x):
         return x,
 
 
-def gradcheck(func, inputs, eps=1e-6, atol=1e-5, rtol=1e-3, raise_exception=False):
+def _differentiable_outputs(x):
+    return tuple(o for o in _as_tuple(x) if o.requires_grad or o.grad_fn is not None)
+
+
+def gradcheck(func, inputs, eps=1e-6, atol=1e-5, rtol=1e-3, raise_exception=True):
     """Check gradients computed via small finite differences
        against analytical gradients
 
@@ -154,8 +159,7 @@ def gradcheck(func, inputs, eps=1e-6, atol=1e-5, rtol=1e-3, raise_exception=Fals
     Returns:
         True if all differences satisfy allclose condition
     """
-    output = func(*inputs)
-    output = _as_tuple(output)
+    output = _differentiable_outputs(func(*inputs))
 
     def fail_test(msg):
         if raise_exception:
@@ -184,7 +188,7 @@ def gradcheck(func, inputs, eps=1e-6, atol=1e-5, rtol=1e-3, raise_exception=Fals
 
     # check if the backward multiplies by grad_output
     zero_gradients(inputs)
-    output = _as_tuple(func(*inputs))
+    output = _differentiable_outputs(func(*inputs))
     if any([o.requires_grad for o in output]):
         torch.autograd.backward(output, [o.data.new(o.size()).zero_() for o in output], create_graph=True)
         var_inputs = list(filter(lambda i: isinstance(i, Variable), inputs))
@@ -225,8 +229,7 @@ def gradgradcheck(func, inputs, grad_outputs, eps=1e-6, atol=1e-5, rtol=1e-3):
     """
     def new_func(*input_args):
         input_args = input_args[:-len(grad_outputs)]
-        outputs = func(*input_args)
-        outputs = _as_tuple(outputs)
+        outputs = _differentiable_outputs(func(*input_args))
         input_args = tuple(x for x in input_args if isinstance(x, Variable) and x.requires_grad)
         grad_inputs = torch.autograd.grad(outputs, input_args, grad_outputs)
         return grad_inputs

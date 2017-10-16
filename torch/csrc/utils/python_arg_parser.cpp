@@ -78,6 +78,9 @@ bool FunctionParameter::check(PyObject* obj) {
       if (PyTuple_Check(obj) || PyList_Check(obj)) {
         return true;
       }
+      if (optional && obj == Py_None) {
+        return true;
+      }
       // if a size is specified (e.g. IntList[2]) we also allow passing a single int
       return size > 0 && THPUtils_checkLong(obj);
     }
