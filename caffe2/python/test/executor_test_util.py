@@ -10,9 +10,25 @@ from caffe2.python.test_util import TestCase
 import caffe2.python.models.resnet as resnet
 from caffe2.python.modeling.initializers import Initializer
 from caffe2.python import convnet_benchmarks as cb
+from caffe2.python import hypothesis_test_util as hu
 
 import time
 import numpy as np
+from hypothesis import settings
+
+
+CI_MAX_EXAMPLES = 2
+CI_TIMEOUT = 600
+
+
+def executor_test_settings(func):
+    if hu.is_sandcastle() or hu.is_travis():
+        return settings(
+            max_examples=CI_MAX_EXAMPLES,
+            timeout=CI_TIMEOUT
+        )(func)
+    else:
+        return func
 
 
 def gen_test_resnet50(_order, _cudnn_ws):
@@ -43,6 +59,13 @@ def conv_model_generators():
         'MLP': cb.MLP,
         'Resnet50': gen_test_resnet50,
     }
+
+
+def executor_test_model_names():
+    if not hu.is_travis():
+        return conv_model_generators().keys()
+    else:
+        return ["MLP"]
 
 
 def build_conv_model(model_name, batch_size):
