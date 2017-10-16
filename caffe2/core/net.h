@@ -45,9 +45,10 @@ typedef std::function<std::unique_ptr<NetObserver>(NetBase*)>
 
 class OperatorBase;
 class Workspace;
+
 // Net is a thin struct that owns all the operators together with the operator
 // contexts.
-class NetBase {
+class NetBase : public Observable<NetBase> {
  public:
   NetBase(const std::shared_ptr<const NetDef>& net_def, Workspace* ws);
   virtual ~NetBase() noexcept {}
@@ -99,18 +100,6 @@ class NetBase {
    */
   virtual vector<OperatorBase*> GetOperators() const = 0;
 
-  void SetObserver(std::unique_ptr<NetObserver> observer) {
-    observer_ = std::move(observer);
-  }
-
-  void RemoveObserver() {
-    observer_ = nullptr;
-  }
-
-  NetObserver* GetObserver() {
-    return observer_.get();
-  }
-
   const string& Name() const {
     return name_;
   }
@@ -119,7 +108,6 @@ class NetBase {
   vector<string> external_input_;
   vector<string> external_output_;
   string name_;
-  std::unique_ptr<NetObserver> observer_;
   vector<const Event*> events_;
 
   DISABLE_COPY_AND_ASSIGN(NetBase);
