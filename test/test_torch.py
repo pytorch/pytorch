@@ -4417,6 +4417,29 @@ class TestTorch(TestCase):
         id_after = id(t)
         self.assertEqual(id_before, id_after)
 
+    def test_contiguous(self):
+        # x has to have batch_size 1 to test contiguous checks
+        x = torch.randn(1, 16, 5, 5)
+        assert x.is_contiguous()
+        stride = list(x.stride())
+        stride[0] = 20
+        # change the stride in dimension 0. the tensor is still contiguous because size[0] is 1
+        x.set_(x.storage(), 0, x.size(), stride)
+        assert x.is_contiguous()
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA unavailable")
+    def test_contiguous_cuda(self):
+        # x has to have batch_size 1 to test contiguous checks
+        x = torch.randn(1, 16, 5, 5).cuda()
+        assert x.is_contiguous()
+        stride = list(x.stride())
+        stride[0] = 20
+        # change the stride in dimension 0. the tensor is still contiguous because size[0] is 1
+        x.set_(x.storage(), 0, x.size(), stride)
+        assert x.is_contiguous()
+        new_x = x.contiguous()
+        self.assertEqual(new_x.stride(), [400, 25, 5, 1])
+
 # Functions to test negative dimension wrapping
 METHOD = 1
 INPLACE_METHOD = 2
