@@ -1308,7 +1308,7 @@ def triplet_margin_loss(anchor, positive, negative, margin=1.0, p=2, eps=1e-6, s
     assert anchor.size() == positive.size(), "Input sizes between positive and negative must be equal."
     assert anchor.size() == negative.size(), "Input sizes between anchor and negative must be equal."
     assert positive.size() == negative.size(), "Input sizes between positive and negative must be equal."
-    assert anchor.dim() == 2, "Inputd must be a 2D matrix."
+    assert anchor.dim() == 2, "Input must be a 2D matrix."
     assert margin > 0.0, 'Margin should be positive value.'
     d_p = pairwise_distance(anchor, positive, p, eps)
     d_n = pairwise_distance(anchor, negative, p, eps)
