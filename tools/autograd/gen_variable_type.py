@@ -110,7 +110,7 @@ auto flags = Function::flags({ ${tensor_args} });
 auto grad_fn = std::make_shared<${op}>();
 ${save_inputs}
 baseType->${method_prefix}${base_name}(${unpacked_args});
-(*pImpl.version_counter)++;
+pImpl.version_counter.increment();
 wrap_output(self, std::move(flags), grad_fn);
 ${save_outputs}
 return ${return_value};

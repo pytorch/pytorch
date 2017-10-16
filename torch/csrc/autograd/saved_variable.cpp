@@ -15,7 +15,7 @@ SavedVariable::SavedVariable(const Variable& variable, Function* saved_for)
   requires_grad = variable.requires_grad();
   is_volatile = variable.is_volatile();
   expected_version = variable.current_version();
-  version = variable.get()->version_counter->new_saved_ref();
+  version = variable.get()->version_counter.save();
   has_grad_fn = variable.grad_fn() != nullptr;
   output_nr = variable.output_nr();
   if (!has_grad_fn) {
@@ -31,17 +31,16 @@ SavedVariable::SavedVariable(const Variable& variable, Function* saved_for)
 
 auto SavedVariable::unpack(std::shared_ptr<Function> saved_for) const -> Variable {
   if (!data.defined()) {
-    if (version) {
+    if (version.defined()) {
       throw std::runtime_error(ERR_BACKWARD_TWICE);
     }
     return Variable();
   }
 
-  int current_version = **version;
-  if (expected_version != current_version) {
-    throw std::runtime_error("one of the variables "
-        "needed for gradient computation has been modified by an "
-        "inplace operation");
+  if (version.is_modified()) {
+    throw std::runtime_error(
+        "one of the variables needed for gradient computation has been "
+        "modified by an inplace operation");
   }
 
   Variable var = make_variable(data, requires_grad, is_volatile);
@@ -56,7 +55,7 @@ auto SavedVariable::unpack(std::shared_ptr<Function> saved_for) const -> Variabl
     var.grad_fn() = grad_fn;
   }
   var.output_nr() = output_nr;
-  var.get()->version_counter->join_with(*version);
+  var.version_counter() = version;
 
   // If a Variable is a leaf (no grad_fn saved), and it requires_grad, then we
   // should have saved the grad accumulator. Even if the Variable no longer

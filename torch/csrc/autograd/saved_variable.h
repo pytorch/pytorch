@@ -37,7 +37,7 @@ struct SavedVariable {
   bool has_grad_fn;
   std::shared_ptr<Function> grad_fn;
   std::weak_ptr<Function> grad_accumulator;
-  std::unique_ptr<VariableVersion> version;
+  SavedVersion version;
   bool requires_grad;
   bool is_volatile;
   int expected_version;
