@@ -14,7 +14,6 @@
  * limitations under the License.
  */
 
-
 #include "caffe2/core/common.h"
 
 #if CAFFE2_MOBILE && defined(CAFFE2_USE_MPSCNN_TEST)
@@ -23,9 +22,9 @@
 #include "mpscnn_graph_mask.h"
 
 #include "caffe2/core/logging.h"
+#include "caffe2/core/operator_schema.h"
 #include "caffe2/core/workspace.h"
 #include "caffe2/utils/proto_utils.h"
-#include "caffe2/core/operator_schema.h"
 
 namespace caffe2 {
 
@@ -128,6 +127,74 @@ void testMPSCNN() {
                 }
               }
             }
+          }
+        }
+      }
+    }
+  }
+
+  {
+    for (const auto ndim : std::vector<size_t>{1, 2, 3, 4}) {
+      for (const auto N : std::vector<size_t>{1, 2}) {
+        LOG(INFO) << "MPSCNNCopyFrom/To ndim Test";
+        auto mtl = [&](size_t i) {
+          return std::string("X_mtl_") + std::to_string(i);
+        };
+        auto cpu = [&](size_t i) {
+          return std::string("X_cpu_") + std::to_string(i);
+        };
+        auto y_cpu = [&](size_t i) {
+          return std::string("Y_cpu_") + std::to_string(i);
+        };
+
+        Workspace ws;
+        for (auto i = 0; i < N; ++i) {
+          auto* t = ws.CreateBlob(cpu(i))->GetMutable<TensorCPU>();
+          switch (ndim) {
+            case 1:
+              t->Resize(5);
+              break;
+            case 2:
+              t->Resize(5, 3);
+              break;
+            case 3:
+              t->Resize(5, 3, 4);
+              break;
+            case 4:
+              t->Resize(5, 3, 4, 2);
+              break;
+          }
+          CPUContext ctx;
+          math::RandGaussian<float, CPUContext>(
+              t->size(), 0, 1, t->mutable_data<float>(), &ctx);
+        }
+
+        NetDef netdef;
+        {
+          auto& op = *(netdef.add_op());
+          op.set_type("CopyToMPSCNN");
+          for (auto i = 0; i < N; ++i) {
+            op.add_input(cpu(i));
+            op.add_output(mtl(i));
+          }
+        }
+        {
+          auto& op = *(netdef.add_op());
+          op.set_type("CopyFromMPSCNN");
+          for (auto i = 0; i < N; ++i) {
+            op.add_input(mtl(i));
+            op.add_output(y_cpu(i));
+          }
+        }
+
+        ws.RunNetOnce(netdef);
+        for (auto i = 0; i < N; ++i) {
+          const auto& t1 = ws.GetBlob(cpu(i))->Get<TensorCPU>();
+          const auto& t2 = ws.GetBlob(y_cpu(i))->Get<TensorCPU>();
+          CAFFE_ENFORCE_EQ(t1.size(), t2.size());
+          for (auto i = 0; i < t1.size(); ++i) {
+            // FP16 <-> FP32 round trip.
+            CHECK_NEAR(t1.data<float>()[i], t2.data<float>()[i], 1e-2);
           }
         }
       }
@@ -2786,6 +2853,7 @@ void testMPSCNN() {
     CHECK_EQ(i0(2), o0(1));
     CHECK_EQ(o0(2), "Z");
   }
+  LOG(INFO) << "All MPSCNN tests passed.";
 }
 
 NetDef truncateAfter(NetDef def, size_t idx) {

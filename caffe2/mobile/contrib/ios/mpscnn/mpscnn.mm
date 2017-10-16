@@ -254,17 +254,10 @@ class CopyToMPSCNNOp final : public Operator<CPUContext> {
     std::vector<MPSImageWrapper> wrappers(Inputs().size());
     for (auto i = 0; i < Inputs().size(); ++i) {
       const auto& X = Input(i);
-      CAFFE_ENFORCE(X.ndim() == 2 || X.ndim() == 4);
-      size_t XDims[4];
-      XDims[0] = X.dim(0);
-      XDims[1] = X.dim(1);
-      if (X.ndim() == 2) {
-        XDims[2] = 1;
-        XDims[3] = 1;
-      } else if (X.ndim() == 4) {
-        XDims[2] = X.dim(2);
-        XDims[3] = X.dim(3);
-      }
+      CAFFE_ENFORCE(X.ndim() > 0 && X.ndim() <= 4);
+      std::vector<TIndex> XDims = {1, 1, 1, 1};
+      XDims.assign(X.dims().begin(), X.dims().end());
+
       caffe2::Timer t;
       const auto n = XDims[0];
       const auto width = XDims[3];
