@@ -62,7 +62,7 @@ class FeatureDropout(Dropout):
         # NB: No FeatureDropout in ONNX, use Dropout instead.
         if train:
             raise ValueError("In train mode, FeatureDropout is different from Dropout.")
-        return Dropout.symbolic(g, input, p, train, inplace)
+        return input
 
     @staticmethod
     def _make_noise(input):
