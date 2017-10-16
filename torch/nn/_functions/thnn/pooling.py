@@ -783,7 +783,7 @@ class AdaptiveAvgPool3d(Function):
 
     @staticmethod
     def forward(ctx, input, output_size):
-        ctx.output_size = list(_pair(output_size))
+        ctx.output_size = list(_triple(output_size))
         for i, s in enumerate(ctx.output_size):
             ctx.output_size[i] = ctx.output_size[i] or input.size(i + 2)
         ctx.output_size = tuple(ctx.output_size)
