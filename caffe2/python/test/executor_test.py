@@ -4,49 +4,28 @@ from __future__ import print_function
 
 from caffe2.python import workspace
 from caffe2.python.test.executor_test_util import (
-    conv_model_generators,
     build_conv_model,
     build_resnet50_dataparallel_model,
     run_resnet50_epoch,
-    ExecutorTestBase)
+    ExecutorTestBase,
+    executor_test_settings,
+    executor_test_model_names)
 
-from hypothesis import given, settings
+from hypothesis import given
 import hypothesis.strategies as st
-
-from caffe2.python import hypothesis_test_util as hu
 
 import unittest
 
 
 EXECUTORS = ["dag", "async_dag"]
 ITERATIONS = 2
-CI_MAX_EXAMPLES = 2
-CI_TIMEOUT = 600
-
-
-def test_settings(func):
-    if hu.is_sandcastle() or hu.is_travis():
-        return settings(
-            max_examples=CI_MAX_EXAMPLES,
-            timeout=CI_TIMEOUT
-        )(func)
-    else:
-        return func
-
-
-def test_model_names():
-    if not hu.is_travis():
-        return conv_model_generators().keys()
-    else:
-        return ["MLP"]
-
 
 class ExecutorCPUConvNetTest(ExecutorTestBase):
     @given(executor=st.sampled_from(EXECUTORS),
-           model_name=st.sampled_from(test_model_names()),
+           model_name=st.sampled_from(executor_test_model_names()),
            batch_size=st.sampled_from([8]),
            num_workers=st.sampled_from([8]))
-    @test_settings
+    @executor_test_settings
     def test_executor(self, executor, model_name, batch_size, num_workers):
         model = build_conv_model(model_name, batch_size)
         model.Proto().num_workers = num_workers
@@ -69,7 +48,7 @@ class ExecutorCPUConvNetTest(ExecutorTestBase):
 class ExecutorGPUResNetTest(ExecutorTestBase):
     @given(executor=st.sampled_from(EXECUTORS),
            num_workers=st.sampled_from([8]))
-    @test_settings
+    @executor_test_settings
     def test_executor(self, executor, num_workers):
         model = build_resnet50_dataparallel_model(
             num_gpus=workspace.NumCudaDevices(), batch_size=32, epoch_size=32)
