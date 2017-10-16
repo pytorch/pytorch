@@ -166,7 +166,7 @@ class SparseToDenseMaskOp : public SparseToDenseMaskBase<Context> {
       for (int c = 0; c < lengths_vec[r]; c++) {
         const auto sparse_index = sparse_indices_vec[offset + c];
         if (sparse_index < 0 ||
-            sparse_index >= std::numeric_limits<int32_t>::max()) {
+            sparse_index >= std::numeric_limits<TInd>::max()) {
           LOG(WARNING) << "Skipping invalid sparse index: " << sparse_index;
           CAFFE_ENFORCE_LT(
               ++skippedSparseIndices_,
