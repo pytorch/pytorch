@@ -87,7 +87,7 @@ void THNN_(SpatialDepthwiseConvolution_updateGradInput)(
                   int padW, int padH,
                   int dilationW, int dilationH)
 {
-  THCUNN_assertSameGPU(state, 4, input, gradOutput, gradInput, weight);
+  THCUNN_assertSameGPU(state, 3, gradOutput, gradInput, weight);
 
   // Only handle 4D Input Tensors for now
   assert(THCTensor_(nDimension)(state, input) == 4);
