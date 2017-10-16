@@ -68,7 +68,7 @@ void THNN_(SpatialDepthwiseConvolution_updateOutput)(
   dim3 grid(blocks);
   dim3 block(CUDA_NUM_THREADS);
 
-  spatialDepthwiseConvolutionUpdateOutput<<<grid, block, 0, THCState_getCurrentStream(state)>>>(
+  spatialDepthwiseConvolutionUpdateOutput<real, accreal, unsigned int><<<grid, block, 0, THCState_getCurrentStream(state)>>>(
     dInput, dOutput, dWeight, dBias, bias != NULL, n, outputChannels, depthwiseMultiplier,
     width, height, outputWidth, outputHeight,
     kW, kH, dW, dH, padW, padH, dilationW, dilationH);
@@ -128,7 +128,7 @@ void THNN_(SpatialDepthwiseConvolution_updateGradInput)(
   dim3 grid(blocks);
   dim3 block(CUDA_NUM_THREADS);
 
-  spatialDepthwiseConvolutionUpdateGradInput<<<grid, block, 0, THCState_getCurrentStream(state)>>>(
+  spatialDepthwiseConvolutionUpdateGradInput<real, accreal, unsigned int><<<grid, block, 0, THCState_getCurrentStream(state)>>>(
     dGradOutput, dGradInput, dWeight, n, inputChannels, depthwiseMultiplier, outputChannels, width,
     height, outputWidth, outputHeight, kW, kH, dW, dH, padW, padH, dilationW, dilationH);
 
@@ -189,9 +189,9 @@ void THNN_(SpatialDepthwiseConvolution_accGradParameters)(
   // to create the shared memory size for the reduction
   dim3 grid(blocks);
   dim3 block(std::min(nextHighestPowerOf2(n), (unsigned int64_t) CUDA_NUM_THREADS));
-  int smem = block.x * sizeof(real);
+  int smem = block.x * sizeof(accreal);
 
-  spatialDepthwiseConvolutionAccGradParameters<<<grid, block, smem, THCState_getCurrentStream(state)>>>(
+  spatialDepthwiseConvolutionAccGradParameters<real, accreal, unsigned int><<<grid, block, smem, THCState_getCurrentStream(state)>>>(
       dGradOutput, dInput, dGradWeight, batchSize, inputChannels, outputChannels, depthwiseMultiplier, n,
       width, height, outputWidth, outputHeight, kW, kH, dW, dH, padW, padH, dilationW, dilationH);
 

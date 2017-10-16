@@ -11,7 +11,7 @@
 #include "SharedMem.cuh"
 #include "common.h"
 
-template <typename T, typename IndexType>
+template <typename T, typename AccT, typename IndexType>
 __global__ void spatialDepthwiseConvolutionUpdateOutput(
     const THCDeviceTensor<T, 4> input,
     THCDeviceTensor<T, 4> output,
@@ -45,7 +45,7 @@ __global__ void spatialDepthwiseConvolutionUpdateOutput(
 
     int weightOffset = c * kernelHeight * kernelWidth;
 
-    T value = biasEnabled ? bias.data()[c] : ScalarConvert<int, T>::to(0);
+    AccT value = biasEnabled ? ScalarConvert<T, AccT>::to(bias.data()[c]) : ScalarConvert<int, AccT>::to(0);
     for (int kH = 0; kH < kernelHeight; ++kH) {
       for (int kW = 0; kW < kernelWidth; ++kW) {
         const int h_in = -padHeight + h * strideHeight + kH * dilationHeight;
@@ -54,18 +54,18 @@ __global__ void spatialDepthwiseConvolutionUpdateOutput(
         if ((h_in >= 0) && (h_in < inputHeight) && (w_in >= 0) && (w_in < inputWidth)) {
           const IndexType offset = ((n * inputChannels + inputChannel) * inputHeight + h_in) *
                                     inputWidth + w_in;
-          value = THCNumerics<T>::add(
+          value = THCNumerics<AccT>::add(
             value,
-            THCNumerics<T>::mul(weight.data()[weightOffset], input.data()[offset]));
+            ScalarConvert<T, AccT>::to(THCNumerics<T>::mul(weight.data()[weightOffset], input.data()[offset])));
         }
         ++weightOffset;
       }
     }
-    output.data()[linearIndex] = value;
+    output.data()[linearIndex] = ScalarConvert<AccT, T>::to(value);
   }
 }
 
-template <typename T, typename IndexType>
+template <typename T, typename AccT, typename IndexType>
 __global__ void spatialDepthwiseConvolutionUpdateGradInput(
     const THCDeviceTensor<T, 4> gradOutput,
     THCDeviceTensor<T, 4> gradInput,
@@ -93,7 +93,7 @@ __global__ void spatialDepthwiseConvolutionUpdateGradInput(
     const int h = (linearIndex / inputWidth) % inputHeight;
     const int w = linearIndex % inputWidth;
 
-    T value = ScalarConvert<int, T>::to(0);
+    AccT value = ScalarConvert<int, AccT>::to(0);
     for (int multiplier = 0; multiplier < depthwiseMultiplier; ++multiplier) {
       int och = (c * depthwiseMultiplier) + multiplier;
       int weightOffset = och * kernelHeight * kernelWidth;
@@ -111,20 +111,20 @@ __global__ void spatialDepthwiseConvolutionUpdateGradInput(
 
               const int offset = ((n * outputChannels + och) * outputHeight + h_out)
                     * outputWidth + w_out;
-              value = THCNumerics<T>::add(
+              value = THCNumerics<AccT>::add(
                 value,
-                THCNumerics<T>::mul(weight.data()[weightOffset], gradOutput.data()[offset]));
+                ScalarConvert<T, AccT>::to(THCNumerics<T>::mul(weight.data()[weightOffset], gradOutput.data()[offset])));
             }
           }
           ++weightOffset;
         }
       }
     }
-    gradInput.data()[linearIndex] = value;
+    gradInput.data()[linearIndex] = ScalarConvert<AccT, T>::to(value);
   }
 }
 
-template <typename T, typename IndexType>
+template <typename T, typename AccT, typename IndexType>
 __global__ void spatialDepthwiseConvolutionAccGradParameters(
     const THCDeviceTensor<T, 4> gradOutput,
     const THCDeviceTensor<T, 4> input,
@@ -144,7 +144,7 @@ __global__ void spatialDepthwiseConvolutionAccGradParameters(
   const int channelStride = kernelWidth * kernelHeight;
 
   // Have to use a statically typed Shared Memory pointer
-  SharedMem<T> smem;
+  SharedMem<AccT> smem;
 
   // Each Block is responsible for accumulating over a permutation of
   // (channels x kH x kW), use blockIdx to determine which one
@@ -157,7 +157,7 @@ __global__ void spatialDepthwiseConvolutionAccGradParameters(
   // channel
   int inputCh = ch / depthwiseMultiplier;
 
-  T grad = ScalarConvert<float, T>::to(0.0);
+  AccT grad = ScalarConvert<float, AccT>::to(0.0);
 
   // Block-stride loop over the number of elements we need to reduce
   for (IndexType idx = threadIdx.x; idx < blockElements; idx += blockDim.x) {
@@ -174,24 +174,24 @@ __global__ void spatialDepthwiseConvolutionAccGradParameters(
     if (i_w_offset >= 0 && i_h_offset >= 0 && i_w_offset < inputWidth && i_h_offset < inputHeight) {
       int inputOffset = ((batch * inputChannels + inputCh) * inputHeight + i_h_offset) * inputWidth + i_w_offset;
       int outputOffset = ((batch * kernelChannels + ch) * outputHeight + go_h_offset) * outputWidth + go_w_offset;
-      grad = THCNumerics<T>::add(
+      grad = THCNumerics<AccT>::add(
           grad,
-          THCNumerics<T>::mul( input.data()[inputOffset], gradOutput.data()[outputOffset]));
+          ScalarConvert<T, AccT>::to(THCNumerics<T>::mul( input.data()[inputOffset], gradOutput.data()[outputOffset])));
     }
   }
   __syncthreads();
 
   // At this point each thread in the block has a local gradient, which we need to
   // accumulate prior to writing the global value
-  T *buf = smem.getPointer();
-  T tval = reduceBlock<T, ReduceAdd<T, T>>(
-      buf, blockDim.x, grad, ReduceAdd<T, T>(), ScalarConvert<float, T>::to(0));
+  AccT *buf = smem.getPointer();
+  AccT tval = reduceBlock<AccT, ReduceAdd<AccT, AccT>>(
+      buf, blockDim.x, grad, ReduceAdd<AccT, AccT>(), ScalarConvert<float, AccT>::to(0));
 
   // After reduction, first thread in the block has the gradient, so its responsible
   // for writing it to gradWeight
   if (threadIdx.x == 0) {
     int weightOffset = kW + (kernelWidth * kH) + (kernelWidth * kernelHeight * ch);
-    gradWeight.data()[weightOffset] = tval;
+    gradWeight.data()[weightOffset] = ScalarConvert<AccT, T>::to(tval);
   }
 }
 

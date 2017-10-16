@@ -128,8 +128,6 @@ def get_dimensionality(cname):
         return 2
     elif 'Volumetric' in cname:
         return 3
-    elif 'Depthwise' in cname:
-        return 2
     return None
 
 

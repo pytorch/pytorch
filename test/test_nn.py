@@ -1923,36 +1923,38 @@ class TestNN(NNTestCase):
     # the number of groups == number of input channels
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
     def test_Conv2d_depthwise_naive_groups(self):
-        for depth_multiplier in [1, 2]:
-            m = nn.Conv2d(2, 2 * depth_multiplier, kernel_size=3, groups=2).cuda()
-            i = Variable(torch.randn(2, 2, 6, 6).cuda(), requires_grad=True)
-            output = m(i)
-            grad_output = torch.randn(2, 2 * depth_multiplier, 4, 4).cuda()
-            output.backward(grad_output)
+        types = [torch.cuda.FloatTensor, torch.cuda.DoubleTensor]
+        for tp in types:
+            for depth_multiplier in [1, 2]:
+                m = nn.Conv2d(2, 2 * depth_multiplier, kernel_size=3, groups=2).type(tp)
+                i = Variable(torch.randn(2, 2, 6, 6).type(tp), requires_grad=True)
+                output = m(i)
+                grad_output = torch.randn(2, 2 * depth_multiplier, 4, 4).type(tp)
+                output.backward(grad_output)
 
-            offset = 1 * depth_multiplier
+                offset = 1 * depth_multiplier
 
-            m1 = nn.Conv2d(1, 1 * depth_multiplier, kernel_size=3).cuda()
-            m1.weight.data = m.weight.data[:offset].clone()
-            m1.bias.data = m.bias.data[:offset].clone()
-            i1 = Variable(i.data[:, :1].contiguous(), requires_grad=True)
-            output1 = m1(i1)
-            output1.backward(grad_output[:, :offset].contiguous())
+                m1 = nn.Conv2d(1, 1 * depth_multiplier, kernel_size=3).type(tp)
+                m1.weight.data = m.weight.data[:offset].clone()
+                m1.bias.data = m.bias.data[:offset].clone()
+                i1 = Variable(i.data[:, :1].contiguous(), requires_grad=True)
+                output1 = m1(i1)
+                output1.backward(grad_output[:, :offset].contiguous())
 
-            m2 = nn.Conv2d(1, 1 * depth_multiplier, kernel_size=3).cuda()
-            m2.weight.data.copy_(m.weight.data[offset:])
-            m2.bias.data.copy_(m.bias.data[offset:])
-            i2 = Variable(i.data[:, 1:].contiguous(), requires_grad=True)
-            output2 = m2(i2)
-            output2.backward(grad_output[:, offset:].contiguous())
+                m2 = nn.Conv2d(1, 1 * depth_multiplier, kernel_size=3).type(tp)
+                m2.weight.data.copy_(m.weight.data[offset:])
+                m2.bias.data.copy_(m.bias.data[offset:])
+                i2 = Variable(i.data[:, 1:].contiguous(), requires_grad=True)
+                output2 = m2(i2)
+                output2.backward(grad_output[:, offset:].contiguous())
 
-            self.assertEqual(output, torch.cat([output1, output2], 1))
-            self.assertEqual(i.grad.data,
-                             torch.cat([i1.grad.data, i2.grad.data], 1))
-            self.assertEqual(m.bias.grad.data,
-                             torch.cat([m1.bias.grad.data, m2.bias.grad.data], 0))
-            self.assertEqual(m.weight.grad.data,
-                             torch.cat([m1.weight.grad.data, m2.weight.grad.data], 0))
+                self.assertEqual(output, torch.cat([output1, output2], 1))
+                self.assertEqual(i.grad.data,
+                                 torch.cat([i1.grad.data, i2.grad.data], 1))
+                self.assertEqual(m.bias.grad.data,
+                                 torch.cat([m1.bias.grad.data, m2.bias.grad.data], 0))
+                self.assertEqual(m.weight.grad.data,
+                                 torch.cat([m1.weight.grad.data, m2.weight.grad.data], 0))
 
     def test_MaxUnpool2d_output_size(self):
         m = nn.MaxPool2d(3, stride=2, return_indices=True)
