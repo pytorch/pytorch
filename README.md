@@ -89,7 +89,7 @@ Changing the way the network behaves means that one has to start from scratch.
 With PyTorch, we use a technique called reverse-mode auto-differentiation, which allows you to
 change the way your network behaves arbitrarily with zero lag or overhead. Our inspiration comes
 from several research papers on this topic, as well as current and past work such as
-[autograd](https://github.com/twitter/torch-autograd),
+[torch-autograd](https://github.com/twitter/torch-autograd),
 [autograd](https://github.com/HIPS/autograd),
 [Chainer](http://chainer.org), etc.
 
