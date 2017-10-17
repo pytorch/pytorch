@@ -200,29 +200,6 @@ static void maybeTriggerGC(ptrdiff_t curHeapSize) {
   }
 }
 
-// hooks into the TH heap tracking
-void THHeapUpdate(ptrdiff_t size) {
-#ifdef DEBUG
-  if (size > 0 && heapDelta > PTRDIFF_MAX - size)
-    THError("THHeapUpdate: heapDelta(%td) + increased(%td) > PTRDIFF_MAX, heapDelta overflow!", heapDelta, size);
-  if (size < 0 && heapDelta < PTRDIFF_MIN - size)
-    THError("THHeapUpdate: heapDelta(%td) + decreased(%td) < PTRDIFF_MIN, heapDelta underflow!", heapDelta, size);
-#endif
-
-  heapDelta += size;
-
-  // batch updates to global heapSize to minimize thread contention
-  if (heapDelta < heapMaxDelta && heapDelta > heapMinDelta) {
-    return;
-  }
-
-  ptrdiff_t newHeapSize = applyHeapDelta();
-
-  if (size > 0) {
-    maybeTriggerGC(newHeapSize);
-  }
-}
-
 static void* THAllocInternal(ptrdiff_t size)
 {
   void *ptr;
@@ -245,7 +222,6 @@ static void* THAllocInternal(ptrdiff_t size)
     ptr = malloc(size);
   }
 
-  THHeapUpdate(getAllocSize(ptr));
   return ptr;
 }
 
@@ -297,15 +273,11 @@ void* THRealloc(void *ptr, ptrdiff_t size)
   if(!newptr)
     THError("$ Torch: not enough memory: you tried to reallocate %dGB. Buy new RAM!", size/1073741824);
 
-  // update heapSize only after successfully reallocated
-  THHeapUpdate(oldSize + getAllocSize(newptr));
-
   return newptr;
 }
 
 void THFree(void *ptr)
 {
-  THHeapUpdate(-getAllocSize(ptr));
   free(ptr);
 }
 
@@ -382,4 +354,3 @@ TH_API THDescBuff _THSizeDesc(const int64_t *size, const int64_t ndim) {
 
   return buf;
 }
-

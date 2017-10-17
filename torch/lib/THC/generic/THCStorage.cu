@@ -24,14 +24,12 @@ void THCStorage_(resize)(THCState *state, THCStorage *self, ptrdiff_t size)
     THError("Trying to resize storage that is not resizable");
 
   if (self->allocator->realloc) {
-    THCHeapUpdate(state, (size - self->size) * sizeof(real));
     cudaError_t err = (*self->allocator->realloc)(
       self->allocatorContext,
       (void**)&(self->data),
       self->size * sizeof(real),
       size * sizeof(real), THCState_getCurrentStream(state));
     if (err != cudaSuccess) {
-      THCHeapUpdate(state, (self->size - size) * sizeof(real));
       THCudaCheck(err);
     }
     self->size = size;
@@ -44,7 +42,6 @@ void THCStorage_(resize)(THCState *state, THCStorage *self, ptrdiff_t size)
     if(self->flag & TH_STORAGE_FREEMEM) {
       THCudaCheck(
         (*self->allocator->free)(self->allocatorContext, self->data));
-      THCHeapUpdate(state, -self->size * sizeof(real));
     }
     self->data = NULL;
     self->size = 0;
@@ -53,16 +50,11 @@ void THCStorage_(resize)(THCState *state, THCStorage *self, ptrdiff_t size)
   else
   {
     real *data = NULL;
-    // update heap *before* attempting malloc, to free space for the malloc
-    THCHeapUpdate(state, size * sizeof(real));
     cudaError_t err =
       (*self->allocator->malloc)(self->allocatorContext,
                                  (void**)&(data),
                                  size * sizeof(real),
                                  THCState_getCurrentStream(state));
-    if(err != cudaSuccess) {
-      THCHeapUpdate(state, -size * sizeof(real));
-    }
     THCudaCheck(err);
 
     if (self->data) {
@@ -77,7 +69,6 @@ void THCStorage_(resize)(THCState *state, THCStorage *self, ptrdiff_t size)
       if(self->flag & TH_STORAGE_FREEMEM) {
         THCudaCheck(
           (*self->allocator->free)(self->allocatorContext, self->data));
-        THCHeapUpdate(state, -self->size * sizeof(real));
       }
     }
 
