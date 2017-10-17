@@ -129,6 +129,7 @@ struct Attributes {
   CREATE_ACCESSOR(Graphs,gs)
 
   #undef CREATE_ACCESSOR
+
 private:
   Derived* This() {
     return static_cast<Derived*>(this);
