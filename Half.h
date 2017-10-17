@@ -1,5 +1,6 @@
 #pragma once
 
+#include <limits>
 #include <stdint.h>
 #ifdef AT_CUDA_ENABLED
 #include <cuda.h>
@@ -11,6 +12,22 @@ namespace at {
 
 template<typename To, typename From> To convert(From f) {
   return static_cast<To>(f);
+}
+
+template<typename To, typename From> bool overflows(From f) {
+  using limit = std::numeric_limits<To>;
+  return f < limit::lowest() || f > limit::max();
+}
+
+template<typename To, typename From> To checked_convert(From f, const char* name) {
+  if (overflows<To, From>(f)) {
+    std::string msg = "value cannot be converted to type ";
+    msg += name;
+    msg += " without overflow: ";
+    msg += std::to_string(f);
+    throw std::domain_error(std::move(msg));
+  }
+  return convert<To, From>(f);
 }
 
 #if defined(__GNUC__)
@@ -42,6 +59,9 @@ template<> Half convert(double f);
 template<> double convert(Half f);
 template<> Half convert(int64_t f);
 template<> int64_t convert(Half f);
+
+template<> bool overflows<Half, double>(double f);
+template<> bool overflows<Half, int64_t>(int64_t f);
 
 inline Half::operator double() {
   return convert<double,Half>(*this);
