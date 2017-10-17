@@ -1582,7 +1582,7 @@ void testMPSCNN() {
 
     {
       auto* t = ws.CreateBlob("X1_cpu")->GetMutable<TensorCPU>();
-      t->Resize(1);
+      t->Resize(72);
       CPUContext ctx;
       math::RandGaussian<float, CPUContext>(t->size(), 0, 1, t->mutable_data<float>(), &ctx);
     }
@@ -1614,6 +1614,71 @@ void testMPSCNN() {
     {
       auto& op = *(netdef.add_op());
       op.set_type("Mul");
+      op.add_input("X0_cpu");
+      op.add_input("X1_cpu");
+      op.add_output("Y_ref");
+      add_arg_int(op, "broadcast", 1);
+    }
+
+    ws.RunNetOnce(netdef);
+    const auto& t2 = ws.GetBlob("Y_cpu")->Get<TensorCPU>();
+    const auto& t1 = ws.GetBlob("Y_ref")->Get<TensorCPU>();
+
+    CAFFE_ENFORCE_EQ(t1.dims(), t2.dims());
+    for (auto i = 0; i < t1.size(); ++i) {
+      // FP16 <-> FP32 round trip, accumulation, etc.
+      const float t1_i = t1.data<float>()[i];
+      const float t2_i = t2.data<float>()[i];
+      CHECK_NEAR(t1_i, t2_i, 0.01);
+    }
+  }
+
+  {
+    LOG(INFO) << "MPSCNNSub Test";
+    Workspace ws;
+    {
+      auto* t = ws.CreateBlob("X0_cpu")->GetMutable<TensorCPU>();
+      t->Resize(1, 12, 57, 72);
+      CPUContext ctx;
+      math::RandGaussian<float, CPUContext>(
+          t->size(), 0, 1, t->mutable_data<float>(), &ctx);
+    }
+
+    {
+      auto* t = ws.CreateBlob("X1_cpu")->GetMutable<TensorCPU>();
+      t->Resize(72);
+      CPUContext ctx;
+      math::RandGaussian<float, CPUContext>(
+          t->size(), 0, 1, t->mutable_data<float>(), &ctx);
+    }
+
+    NetDef netdef;
+    {
+      auto& op = *(netdef.add_op());
+      op.set_type("CopyToMPSCNN");
+      op.add_input("X0_cpu");
+      op.add_output("X0_mtl");
+    }
+
+    {
+      auto& op = *(netdef.add_op());
+      op.set_type("MPSCNNSub");
+      op.add_input("X0_mtl");
+      op.add_input("X1_cpu");
+      op.add_output("Y_mtl");
+      add_arg_int(op, "broadcast", 1);
+    }
+
+    {
+      auto& op = *(netdef.add_op());
+      op.set_type("CopyFromMPSCNN");
+      op.add_input("Y_mtl");
+      op.add_output("Y_cpu");
+    }
+
+    {
+      auto& op = *(netdef.add_op());
+      op.set_type("Sub");
       op.add_input("X0_cpu");
       op.add_input("X1_cpu");
       op.add_output("Y_ref");

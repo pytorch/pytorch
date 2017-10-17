@@ -14,7 +14,6 @@
  * limitations under the License.
  */
 
-
 #include "caffe2/core/common.h"
 #include "caffe2/core/context.h"
 
@@ -781,11 +780,13 @@ class MPSCNNMulOp final : public Operator<CPUContext> {
  public:
   MPSCNNMulOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<CPUContext>(operator_def, ws) {
-    OPERATOR_NEEDS_FEATURE(OperatorBase::GetSingleArgument<int>("broadcast", 0) == 1,
-                           "OpenGLMul only supports broadcast");
+    OPERATOR_NEEDS_FEATURE(
+        OperatorBase::GetSingleArgument<int>("broadcast", 0) == 1,
+        "MPSCNNMul only supports broadcast");
 
-    OPERATOR_NEEDS_FEATURE(OperatorBase::HasArgument("axis") == false,
-                           "OpenGLMul does not support axis");
+    OPERATOR_NEEDS_FEATURE(
+        OperatorBase::HasArgument("axis") == false,
+        "MPSCNNMul does not support axis");
   }
 
   bool RunOnDevice() override {
@@ -795,11 +796,15 @@ class MPSCNNMulOp final : public Operator<CPUContext> {
     MPSImage* X0 = wrapper0.getImage();
 
     const auto& X1 = Input(1);
-    CAFFE_ENFORCE_EQ(X1.size(), 1); // only scalar is supported
+    CAFFE_ENFORCE_EQ(
+        X1.ndim(),
+        1,
+        "MPSCNNMulOp: Only ndim == 1 for Input(1) is supported for now");
 
-    auto X1_ = [getMPSCNNContext().device newBufferWithBytes:X1.template data<float>()
-                                                      length:sizeof(float)
-                                                     options:MTLResourceOptionCPUCacheModeDefault];
+    auto X1_ = [getMPSCNNContext().device
+        newBufferWithBytes:X1.template data<float>()
+                    length:sizeof(float) * X1.size()
+                   options:MTLResourceOptionCPUCacheModeDefault];
 
     auto outputWrapper = MPSImageWrapper(
         this, &wrapper0, X0.numberOfImages, X0.height, X0.width, X0.featureChannels);
@@ -807,8 +812,12 @@ class MPSCNNMulOp final : public Operator<CPUContext> {
     MPSImage* output = outputWrapper.getImage();
 
     id<MTLComputeCommandEncoder> encoder = [commandBuffer computeCommandEncoder];
-    id<MTLComputePipelineState> state = getMPSCNNContext().getSpecializedPipelineState(
-        @"elementwise_mul", {{ushort(X0.numberOfImages), ushort(X0.featureChannels)}});
+    id<MTLComputePipelineState> state =
+        getMPSCNNContext().getSpecializedPipelineState(
+            @"elementwise_mul",
+            {{ushort(X0.numberOfImages),
+              ushort(X0.featureChannels),
+              ushort(X1.dim32(0))}});
 
     [encoder setComputePipelineState:state];
     [encoder setTexture:[X0 texture] atIndex:0];
@@ -827,6 +836,74 @@ class MPSCNNMulOp final : public Operator<CPUContext> {
 
 REGISTER_CPU_OPERATOR(MPSCNNMul, MPSCNNMulOp);
 OPERATOR_SCHEMA(MPSCNNMul).NumInputs(2).NumOutputs(1).AllowInplace({{0, 0}});
+
+class MPSCNNSubOp final : public Operator<CPUContext> {
+ public:
+  MPSCNNSubOp(const OperatorDef& operator_def, Workspace* ws)
+      : Operator<CPUContext>(operator_def, ws) {
+    OPERATOR_NEEDS_FEATURE(
+        OperatorBase::GetSingleArgument<int>("broadcast", 0) == 1,
+        "MPSCNNSub only supports broadcast");
+
+    OPERATOR_NEEDS_FEATURE(
+        OperatorBase::HasArgument("axis") == false,
+        "MPSCNNSub does not support axis");
+  }
+
+  bool RunOnDevice() override {
+    caffe2::Timer t;
+
+    auto wrapper0 = Inputs()[0]->Get<MPSImageWrapper>();
+    MPSImage* X0 = wrapper0.getImage();
+
+    const auto& X1 = Input(1);
+    CAFFE_ENFORCE_EQ(
+        X1.ndim(),
+        1,
+        "MPSCNNSubOp: Only ndim == 1 for Input(1) is supported for now");
+
+    auto X1_ = [getMPSCNNContext().device
+        newBufferWithBytes:X1.template data<float>()
+                    length:sizeof(float) * X1.size()
+                   options:MTLResourceOptionCPUCacheModeDefault];
+
+    auto outputWrapper = MPSImageWrapper(
+        this,
+        &wrapper0,
+        X0.numberOfImages,
+        X0.height,
+        X0.width,
+        X0.featureChannels);
+    auto commandBuffer = outputWrapper.getCommandBuffer();
+    MPSImage* output = outputWrapper.getImage();
+
+    id<MTLComputeCommandEncoder> encoder =
+        [commandBuffer computeCommandEncoder];
+    id<MTLComputePipelineState> state =
+        getMPSCNNContext().getSpecializedPipelineState(
+            @"elementwise_sub",
+            {{ushort(X0.numberOfImages),
+              ushort(X0.featureChannels),
+              ushort(X1.dim32(0))}});
+
+    [encoder setComputePipelineState:state];
+    [encoder setTexture:[X0 texture] atIndex:0];
+    [encoder setBuffer:X1_ offset:0 atIndex:1];
+    [encoder setTexture:[output texture] atIndex:2];
+    const auto& launchParams =
+        spatialPointwiseKernelLaunchParams(state, output);
+    [encoder dispatchThreadgroups:launchParams.threadgroupsPerGrid
+            threadsPerThreadgroup:launchParams.threadsPerThreadgroup];
+    [encoder endEncoding];
+    wrapper0.markRead();
+    outputWrapper.copyToOutputBlob(Outputs()[0]);
+    VLOG(2) << "ElementwiseSub took: " << t.MilliSeconds();
+    return true;
+  }
+};
+
+REGISTER_CPU_OPERATOR(MPSCNNSub, MPSCNNSubOp);
+OPERATOR_SCHEMA(MPSCNNSub).NumInputs(2).NumOutputs(1).AllowInplace({{0, 0}});
 
 class MPSCNNAddOp final : public Operator<CPUContext> {
  public:
@@ -1224,7 +1301,8 @@ class MPSCNNConvTransposeOp final : public ConvTransposeUnpoolBase<CPUContext> {
     CAFFE_ENFORCE_EQ(conv_.outputFeatureChannels, output_channels * kH * kW);
     CAFFE_ENFORCE_EQ(conv_.kernelWidth, 1);
     CAFFE_ENFORCE_EQ(conv_.kernelHeight, 1);
-    if (divRoundUp(X.numberOfImages * output_channels * kH * kW, 4) > MAX_ARR_LENGTH) {
+    if (divRoundUp(X.numberOfImages * output_channels * kH * kW, 4) >
+        kMetalMaxTextureArrLength) {
       LOG(INFO) << "ConvTranspose " << X.numberOfImages << " " << output_channels << " " << kH
                 << " " << kW;
       LOG(ERROR) << "arrayLength exceeds the maximum allowed length in texture";
@@ -1280,8 +1358,6 @@ class MPSCNNConvTransposeOp final : public ConvTransposeUnpoolBase<CPUContext> {
   // Output: Y
   INPUT_TAGS(INPUT, FILTER, BIAS);
   id<MTLBuffer> biasBuffer_;
-  int MAX_ARR_LENGTH = 2048;
-
   MPSCNNConvolution* conv_{nullptr};
 };
 
@@ -1565,6 +1641,13 @@ class MPSCNNRoIWarpOp final : public Operator<CPUContext> {
             << pooled_width_ << " " << pooled_height_;
     if (R.dim32(0) <= 0) {
       LOG(ERROR) << "number of RoIs <= 0 in RoIWarp " << R.dim32(0);
+      inputWrapper.cleanup();
+      return false;
+    }
+    if (divRoundUp(R.dim32(0) * featureChannels, 4) >
+        kMetalMaxTextureArrLength) {
+      LOG(INFO) << "MPSCNNRoIWarp " << R.dim32(0) << " " << featureChannels;
+      LOG(ERROR) << "arrayLength exceeds the maximum allowed length in texture";
       inputWrapper.cleanup();
       return false;
     }

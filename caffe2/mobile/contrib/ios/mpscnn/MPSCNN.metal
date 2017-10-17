@@ -654,22 +654,54 @@ kernel void elementwise_mul(texture2d<half, access::read> in0[[texture(0), funct
                             texture2d_array<half, access::write> outa[[texture(2), function_constant(in0_is_arr)]],
                             constant float* in1[[buffer(1)]],
                             ushort3 gid[[thread_position_in_grid]]) {
+  ushort last_dim = ushort_arg_2;
+  ushort idx;
   if (in0_is_tex) {
     if (gid.x >= out.get_width() || gid.y >= out.get_height()) {
       return;
     }
+    idx = gid.y * out.get_width() + gid.x;
   } else {
     if (gid.x >= outa.get_width() || gid.y >= outa.get_height()) {
       return;
     }
+    idx = gid.y * outa.get_width() + gid.x;
   }
   ushort2 gid_ = ushort2(gid.x, gid.y);
   if (in0_is_tex) {
-    out.write(in0.read(gid_) * in1[0], gid_);
+    out.write(in0.read(gid_) * in1[idx % last_dim], gid_);
   } else {
-    outa.write(ina0.read(gid_, gid.z) * in1[0], gid_, gid.z);
+    outa.write(ina0.read(gid_, gid.z) * in1[idx % last_dim], gid_, gid.z);
   }
 }
+
+kernel void elementwise_sub(texture2d<half, access::read> in0[[texture(0), function_constant(in0_is_tex)]],
+                            texture2d_array<half, access::read> ina0[[texture(0), function_constant(in0_is_arr)]],
+                            texture2d<half, access::write> out[[texture(2), function_constant(in0_is_tex)]],
+                            texture2d_array<half, access::write> outa[[texture(2), function_constant(in0_is_arr)]],
+                            constant float* in1[[buffer(1)]],
+                            ushort3 gid[[thread_position_in_grid]]) {
+  ushort last_dim = ushort_arg_2;
+  ushort idx;
+  if (in0_is_tex) {
+    if (gid.x >= out.get_width() || gid.y >= out.get_height()) {
+      return;
+    }
+    idx = gid.y * out.get_width() + gid.x;
+  } else {
+    if (gid.x >= outa.get_width() || gid.y >= outa.get_height()) {
+      return;
+    }
+    idx = gid.y * outa.get_width() + gid.x;
+  }
+  ushort2 gid_ = ushort2(gid.x, gid.y);
+  if (in0_is_tex) {
+    out.write(in0.read(gid_) - in1[idx % last_dim], gid_);
+  } else {
+    outa.write(ina0.read(gid_, gid.z) - in1[idx % last_dim], gid_, gid.z);
+  }
+}
+
 
 kernel void elementwise_add_nonarray(texture2d<half, access::read> in0[[texture(0)]],
                                      texture2d<half, access::read> in1[[texture(1)]],

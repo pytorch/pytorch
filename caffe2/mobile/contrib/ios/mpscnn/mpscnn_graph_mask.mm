@@ -14,7 +14,6 @@
  * limitations under the License.
  */
 
-
 #include "mpscnn_graph_mask.h"
 #include "caffe2/core/operator.h"
 #include "mpscnn_context.h"
@@ -48,17 +47,35 @@ string as_string(StorageType st) {
 
 std::unordered_map<string, std::vector<StorageType>> inputStorageTypeMap = {
     {"MPSCNNGenerateProposalsCPP",
-     std::vector<StorageType>{
-         StorageType::CPU, StorageType::CPU, StorageType::CPU, StorageType::CPU}},
-    {"MPSCNNRoIWarp", std::vector<StorageType>{StorageType::MPSTEMPORARYIMAGE, StorageType::CPU}},
+     std::vector<StorageType>{StorageType::CPU,
+                              StorageType::CPU,
+                              StorageType::CPU,
+                              StorageType::CPU}},
+    {"MPSCNNRoIWarp",
+     std::vector<StorageType>{StorageType::MPSTEMPORARYIMAGE,
+                              StorageType::CPU}},
     {"MPSCNNConvRelu",
-     std::vector<StorageType>{StorageType::MPSTEMPORARYIMAGE, StorageType::CPU, StorageType::CPU}},
+     std::vector<StorageType>{StorageType::MPSTEMPORARYIMAGE,
+                              StorageType::CPU,
+                              StorageType::CPU}},
     {"MPSCNNFC",
-     std::vector<StorageType>{StorageType::MPSTEMPORARYIMAGE, StorageType::CPU, StorageType::CPU}},
+     std::vector<StorageType>{StorageType::MPSTEMPORARYIMAGE,
+                              StorageType::CPU,
+                              StorageType::CPU}},
     {"MPSCNNConv",
-     std::vector<StorageType>{StorageType::MPSTEMPORARYIMAGE, StorageType::CPU, StorageType::CPU}},
+     std::vector<StorageType>{StorageType::MPSTEMPORARYIMAGE,
+                              StorageType::CPU,
+                              StorageType::CPU}},
     {"MPSCNNConvTranspose",
-     std::vector<StorageType>{StorageType::MPSTEMPORARYIMAGE, StorageType::CPU, StorageType::CPU}}};
+     std::vector<StorageType>{StorageType::MPSTEMPORARYIMAGE,
+                              StorageType::CPU,
+                              StorageType::CPU}},
+    {"MPSCNNMul",
+     std::vector<StorageType>{StorageType::MPSTEMPORARYIMAGE,
+                              StorageType::CPU}},
+    {"MPSCNNSub",
+     std::vector<StorageType>{StorageType::MPSTEMPORARYIMAGE,
+                              StorageType::CPU}}};
 std::unordered_map<string, std::vector<StorageType>> outputStorageTypeMap = {
     {"MPSCNNGenerateProposalsCPP", std::vector<StorageType>{StorageType::CPU, StorageType::CPU}}};
 std::vector<string> opsNeedsSync = {"MPSCNNGenerateProposalsCPP", "CopyFromMPSCNN", "CopyToMPSCNN"};
@@ -430,7 +447,7 @@ NetDef insertCopies(const NetDef& def) {
         expectedBlobType = StorageType::CPU;
       }
       auto inputBlob = ogOp.input(j);
-      auto version = analysis.ssa[i].outVersions[inputBlob];
+      auto version = analysis.ssa[i].inVersions[inputBlob];
       // Check whether the blob is produced by previous operators
       if (analysis.blobInfoMap.find(inputBlob) != analysis.blobInfoMap.end() &&
           analysis.blobInfoMap[inputBlob][version].storageType != StorageType::INVALID) {
