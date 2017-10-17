@@ -29,7 +29,9 @@ def _type(self, new_type=None, async=False):
         new_type_name = new_type.__module__ + '.' + new_type.__name__
         new_values_type_name = new_type_name.replace('.sparse', '')
         new_values = self._values().type(new_values_type_name, async)
-        return new_type(self._indices(), new_values, self.size())
+        new_indices_type_name = new_type.__module__ + '.LongTensor'
+        new_indices = self._indices().type(new_indices_type_name, async)
+        return new_type(new_indices, new_values, self.size())
     if new_type.is_sparse:
         raise RuntimeError("Cannot cast dense tensor to sparse tensor")
     return new_type(self.size()).copy_(self, async)
