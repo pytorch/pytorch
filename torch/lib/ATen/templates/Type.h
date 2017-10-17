@@ -37,7 +37,7 @@ struct Generator;
 // situation.
 constexpr int64_t kUndefinedDimensions = std::numeric_limits<int64_t>::min();
 
-static void noop_deleter(void*) {}
+static inline void noop_deleter(void*) {}
 
 enum class TypeID {
   ${type_ids}
