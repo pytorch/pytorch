@@ -17,7 +17,9 @@ from tools.setup_helpers.cuda import WITH_CUDA, CUDA_HOME, CUDA_VERSION
 from tools.setup_helpers.cudnn import WITH_CUDNN, CUDNN_LIB_DIR, CUDNN_INCLUDE_DIR
 from tools.setup_helpers.nccl import WITH_NCCL, WITH_SYSTEM_NCCL, NCCL_LIB_DIR, \
     NCCL_INCLUDE_DIR, NCCL_ROOT_DIR, NCCL_SYSTEM_LIB
-from tools.setup_helpers.nnpack import WITH_NNPACK, NNPACK_LIB_DIR, NNPACK_INCLUDE_DIRS
+from tools.setup_helpers.nnpack import WITH_NNPACK, NNPACK_LIB_DIR, \
+    NNPACK_INCLUDE_DIRS, NNPACK_IS_USER_DEFINED, NNPACK_IS_CONDA_DEFINED, \
+    NNPACK_LIB_PATHS, NNPACK_HEADER_PATHS
 from tools.setup_helpers.split_types import split_types
 
 DEBUG = check_env_flag('DEBUG')
@@ -230,7 +232,11 @@ class build_ext(setuptools.command.build_ext.build_ext):
 
         # Do we actually need this here?
         if WITH_NNPACK:
-            print('-- Detected NNPACK at ' + NNPACK_LIB_DIR)
+            if NNPACK_IS_USER_DEFINED:
+                nnpack_dir = NNPACK_LIB_DIR
+            else:
+                nnpack_dir = NNPACK_LIB_PATHS[0]
+            print('-- Detected NNPACK at ' + nnpack_dir)
         else:
             print('-- Not using NNPACK')
 
@@ -507,9 +513,20 @@ if WITH_CUDNN:
     extra_compile_args += ['-DWITH_CUDNN']
 
 if WITH_NNPACK:
-    main_libraries += ['nnpack', 'pthreadpool']
-    include_dirs.extend(NNPACK_INCLUDE_DIRS)
-    library_dirs.append(NNPACK_LIB_DIR)
+    if NNPACK_IS_USER_DEFINED:
+        main_libraries += ['nnpack', 'pthreadpool']
+        include_dirs.extend(NNPACK_INCLUDE_DIRS)
+        library_dirs.append(NNPACK_LIB_DIR)
+    else:
+        # Conda Defined
+        main_link_args.extend(NNPACK_LIB_PATHS)
+
+        # We don't want to add the Conda include dir as an include dir,
+        # just the NNPACK headers, so let's move them somewhere we already
+        # know about, like tmp_install
+        for header in NNPACK_HEADER_PATHS:
+            shutil.copy(header, tmp_install_path + "/include")
+
     main_sources += [
         "torch/csrc/nnpack/NNPACK.cpp",
     ]
