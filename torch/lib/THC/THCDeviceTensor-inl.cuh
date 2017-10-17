@@ -126,19 +126,7 @@ template <typename T, int Dim,
           typename IndexT, template <typename U> class PtrTraits>
 __host__ __device__ bool
 THCDeviceTensor<T, Dim, IndexT, PtrTraits>::isContiguous() const {
-  int64_t prevSize = 1;
-
-  for (int i = Dim - 1; i >= 0; --i) {
-    if (getSize(i) != (IndexT) 1) {
-      if (getStride(i) == prevSize) {
-        prevSize *= getSize(i);
-      } else {
-        return false;
-      }
-    }
-  }
-
-  return true;
+  return isContiguousRange(0, Dim);
 }
 
 template <typename T, int Dim,
@@ -171,11 +159,22 @@ THCDeviceTensor<T, Dim, IndexT, PtrTraits>::isConsistentlySized() const {
 template <typename T, int Dim,
           typename IndexT, template <typename U> class PtrTraits>
 __host__ __device__ bool
-THCDeviceTensor<T, Dim, IndexT, PtrTraits>::isContiguousDim(int i) const {
-  return (i == Dim - 1) || // just in case
-    (getSize(i) == 1) ||
-    ((i < Dim - 1) &&
-     ((getStride(i) / getStride(i + 1)) == getSize(i + 1)));
+THCDeviceTensor<T, Dim, IndexT, PtrTraits>::isContiguousRange(
+  int first, int last) const {
+
+  int64_t prevSize = last < Dim ? getStride(last) * getSize(last) : 1;
+
+  for (int i = last - 1; i >= first; --i) {
+    if (getSize(i) != (IndexT) 1) {
+      if (getStride(i) == prevSize) {
+        prevSize *= getSize(i);
+      } else {
+        return false;
+      }
+    }
+  }
+
+  return true;
 }
 
 template <typename T, int Dim,
@@ -285,18 +284,16 @@ THCDeviceTensor<T, Dim, IndexT, PtrTraits>::downcastOuter() {
   // garbage data in the tensor. The tensor needs to be contiguous
   // in all of the dimensions we are collapsing (no padding in
   // them).
-  for (int i = 0; i < Dim - NewDim; ++i) {
-    bool cont = isContiguousDim(i);
+  bool cont = isContiguousRange(0, Dim - NewDim);
 #ifdef __CUDA_ARCH__
-    // Device code
-    assert(cont);
+  // Device code
+  assert(cont);
 #else
-    // Host code
-    if (!cont) {
-      THError("Can only downcast contiguous tensors");
-    }
-#endif
+  // Host code
+  if (!cont) {
+    THError("Can only downcast contiguous tensors");
   }
+#endif
 
   IndexT newSize[NewDim];
   IndexT newStride[NewDim];
@@ -338,18 +335,16 @@ THCDeviceTensor<T, Dim, IndexT, PtrTraits>::downcastInner() {
   // garbage data in the tensor. The tensor needs to be contiguous
   // in all of the dimensions we are collapsing (no padding in
   // them).
-  for (int i = NewDim; i < Dim; ++i) {
-    bool cont = isContiguousDim(i);
+  bool cont = isContiguousRange(NewDim, Dim);
 #ifdef __CUDA_ARCH__
-    // Device code
-    assert(cont);
+  // Device code
+  assert(cont);
 #else
-    // Host code
-    if (!cont) {
-      THError("Can only downcast contiguous tensors");
-    }
-#endif
+  // Host code
+  if (!cont) {
+    THError("Can only downcast contiguous tensors");
   }
+#endif
 
   IndexT newSize[NewDim];
   IndexT newStride[NewDim];

@@ -184,12 +184,52 @@ THCTensor *THCTensor_(newClone)(THCState *state, THCTensor *self)
   return tensor;
 }
 
+// isContiguous doesn't care about strides for dimensions of size 1. This
+// variant checks those strides while checking contiguity.
+// This function is currently only used by newContiguous and not exposed in API.
+static int THCTensor_(isContiguousDetectOneSizedDimStride)(
+  THCState *state, THCTensor *self, int *should_update_stride)
+{
+  *should_update_stride = 0;
+  int64_t z = 1;
+  int d;
+  for(d = self->nDimension-1; d >= 0; d--)
+  {
+    if(self->size[d] != 1)
+    {
+      if(self->stride[d] == z)
+        z *= self->size[d];
+      else
+        return 0;
+    } else if (!(*should_update_stride)) {
+      *should_update_stride = (self->stride[d] != z);
+    }
+  }
+  return 1;
+}
+
 THCTensor *THCTensor_(newContiguous)(THCState *state, THCTensor *self)
 {
-  if(!THCTensor_(isContiguous)(state, self))
+  int should_update_stride = 0;
+  if(!THCTensor_(isContiguousDetectOneSizedDimStride)(state, self, &should_update_stride)) {
     return THCTensor_(newClone)(state, self);
-  else
-  {
+  }
+  if (should_update_stride) {
+    THLongStorage *new_stride = THLongStorage_newWithSize(self->nDimension);
+    int64_t z = 1;
+    for(int d = self->nDimension-1; d >= 0; d--)
+    {
+      new_stride->data[d] = z;
+      z *= self->size[d];
+    }
+    THLongStorage *new_size = THCTensor_(newSizeOf)(state, self);
+    THCTensor*tensor = THCTensor_(newWithStorage)(state, self->storage,
+                                                  self->storageOffset,
+                                                  new_size, new_stride);
+    THLongStorage_free(new_stride);
+    THLongStorage_free(new_size);
+    return tensor;
+  } else {
     THCTensor_(retain)(state, self);
     return self;
   }
