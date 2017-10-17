@@ -312,7 +312,11 @@ extra_link_args = []
 extra_compile_args = ['-std=c++11', '-Wno-write-strings',
                       # Python 2.6 requires -fno-strict-aliasing, see
                       # http://legacy.python.org/dev/peps/pep-3123/
-                      '-fno-strict-aliasing']
+                      '-fno-strict-aliasing',
+                      # Clang has an unfixed bug leading to spurious missing
+                      # braces warnings, see
+                      # https://bugs.llvm.org/show_bug.cgi?id=21629
+                      '-Wno-missing-braces']
 
 cwd = os.path.dirname(os.path.abspath(__file__))
 lib_path = os.path.join(cwd, "torch", "lib")
