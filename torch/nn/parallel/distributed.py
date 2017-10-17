@@ -56,6 +56,9 @@ class DistributedDataParallel(Module):
         Same applies to buffers.
 
     .. warning::
+        This module assumes all buffers and gradients are dense.
+
+    .. warning::
         This module doesn't work with :func:`torch.autograd.grad` (i.e. it will
         only work if gradients are to be accumulated in ``.grad`` attributes of
         parameters).
@@ -96,7 +99,7 @@ class DistributedDataParallel(Module):
 
         if len(device_ids) > 1:
             # TODO: we don't need to replicate params in here. they're always going to
-            # be broadcasted using larger blocks in broadcast_coalesce, so it might be
+            # be broadcasted using larger blocks in broadcast_coalesced, so it might be
             # better to not pollute the caches with these small blocks
             self._module_copies = replicate(self.module, self.device_ids)
             self._module_copies[0] = self.module

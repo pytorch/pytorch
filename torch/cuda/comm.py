@@ -1,6 +1,6 @@
 import torch
 from . import nccl
-from torch._utils import _accumulate, _take_tensors, _flatten_tensors, _unflatten_tensors
+from torch._utils import _accumulate, _take_tensors, _flatten_tensors, _unflatten_tensors, _reorder_tensors_as
 
 
 def broadcast(tensor, devices):
@@ -16,8 +16,8 @@ def broadcast(tensor, devices):
         A tuple containing copies of the ``tensor``, placed on devices
         corresponding to indices from ``devices``.
     """
-    if nccl.is_available([tensor]) and len(set(devices)) == len(devices):
-        tensors = [tensor]
+    tensors = [tensor]
+    if nccl.is_available(tensors) and len(set(devices)) == len(devices):
         for device in devices[1:]:
             with torch.cuda.device(device):
                 tensors.append(type(tensor)(tensor.size()))
@@ -50,8 +50,12 @@ def broadcast_coalesced(tensors, devices, buffer_size=10485760):
     outputs = [[] for _ in devices]
     # use the original tensors for the first device
     outputs[0].extend(tensors)
-    for chunk in _take_tensors(tensors, buffer_size):
-        results = broadcast(_flatten_tensors(chunk), devices)
+    for chunk in _take_tensors(tensors, buffer_size, False):
+        flat = _flatten_tensors(chunk)
+        if chunk[0].is_sparse:
+            results = tuple(zip(broadcast(flat[0], devices), broadcast(flat[1], devices)))
+        else:
+            results = broadcast(flat, devices)
         # use the broadcasted tensors for the remaining devices
         for dst, res in zip(outputs[1:], results[1:]):
             dst.extend(_unflatten_tensors(res, chunk))
@@ -77,9 +81,11 @@ def reduce_add(inputs, destination=None):
     if destination is None:
         destination = torch.cuda.current_device()
     input_size = inputs[0].size()
+    is_sparse = inputs[0].is_sparse
     nccl_root = None
     for i, inp in enumerate(inputs):
         assert inp.is_cuda, "reduce_add expects all inputs to be on GPUs"
+        assert inp.is_sparse == is_sparse, "reduce_add expects inputs to be either all sparse or all dense"
         if inp.get_device() == destination:
             nccl_root = i
         if inp.size() != input_size:
@@ -89,13 +95,12 @@ def reduce_add(inputs, destination=None):
                              "{}".format(i, got, expected))
     assert nccl_root is not None, "reduce_add expects destination to be on the same GPU with one of the tensors"
     with torch.cuda.device(destination):
-        result = type(inp)(input_size).zero_()
+        result = type(inp)(input_size).resize_as_(inp).zero_()
 
     if nccl.is_available(inputs) and inputs[0].get_device() == destination:
         outputs = [result] + [t.new(t.size()) for t in inputs[1:]]
         nccl.reduce(inputs, outputs, root=nccl_root)
         return result
-
     for inp in inputs:
         input_correct_gpu = inp.cuda(result.get_device())
         result.add_(input_correct_gpu)
@@ -120,12 +125,19 @@ def reduce_add_coalesced(inputs, destination=None, buffer_size=10485760):
         inputs, placed on the ``destination`` device.
     """
     output = []
-    itrs = [_take_tensors(tensors, buffer_size) for tensors in inputs]
+    itrs = [_take_tensors(tensors, buffer_size, True) for tensors in inputs]
     for chunks in zip(*itrs):
-        flattened = [_flatten_tensors(chunk) for chunk in chunks]
-        result = reduce_add(flattened, destination)
-        output.extend(_unflatten_tensors(result, chunks[0]))
-    return tuple(output)
+        is_sparse = chunks[0][0].is_sparse
+        if is_sparse:
+            tensors = [chunk[0] for chunk in chunks]
+        else:
+            tensors = [_flatten_tensors(chunk) for chunk in chunks]
+        result = reduce_add(tensors, destination)
+        if is_sparse:
+            output.append(result)
+        else:
+            output.extend(_unflatten_tensors(result, chunks[0]))
+    return _reorder_tensors_as(tuple(output), inputs[0])
 
 
 def scatter(tensor, devices, chunk_sizes=None, dim=0, streams=None):
