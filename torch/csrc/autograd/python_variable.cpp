@@ -37,7 +37,7 @@ static PyObject* THPVariable_NewWithVar(PyTypeObject* type, Variable var)
   return obj;
 }
 
-PyObject * THPVariable_Wrap(const Variable& var)
+PyObject * THPVariable_Wrap(Variable var)
 {
   if (!var.defined()) {
     Py_RETURN_NONE;
@@ -48,13 +48,7 @@ PyObject * THPVariable_Wrap(const Variable& var)
     return obj;
   }
 
-  THPObjectPtr obj(THPVariable_NewWithVar((PyTypeObject *)THPVariableClass, var));
-  if (obj) {
-    PyObject* data = torch::createPyObject(var.data());
-    if (!data) return NULL;
-    ((THPVariable*)obj.get())->data = data;
-  }
-  return obj.release();
+  return THPVariable_NewWithVar((PyTypeObject *)THPVariableClass, std::move(var));
 }
 
 // This function DOES NOT steal a reference to data
