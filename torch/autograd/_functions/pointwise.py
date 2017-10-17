@@ -1,7 +1,10 @@
+import torch
+import math
+
 from itertools import repeat
 
 from ..._thnn import type2backend
-from ..function import Function, InplaceFunction
+from ..function import Function, InplaceFunction, traceable
 from ..variable import Variable
 from .utils import maybe_unexpand, maybe_unexpand_or_view
 
@@ -50,7 +53,13 @@ class Log1p(Function):
         return grad_output.div(i.add(1))
 
 
+@traceable
 class Tanh(InplaceFunction):
+
+    @staticmethod
+    def symbolic(g, i, inplace=False):
+        # TODO: [Export inplace]
+        return g.op("Tanh", i)
 
     @staticmethod
     def forward(ctx, i, inplace=False):
@@ -65,17 +74,22 @@ class Tanh(InplaceFunction):
     @staticmethod
     def backward(ctx, grad_output):
         result, = ctx.saved_variables
-        if grad_output.volatile:
+        if grad_output.volatile and not ctx._is_tracing:
             grad_input = Variable(grad_output.data.new(grad_output.size()), volatile=True)
             backend = type2backend[type(result.data)]
-            backend.Tanh_updateGradInput(backend.library_state, None, grad_output.data,
+            backend.Tanh_updateGradInput(backend.library_state, grad_output.data,
                                          grad_input.data, result.data)
         else:
             grad_input = grad_output * (1 - result * result)
         return grad_input, None
 
 
+@traceable
 class Sigmoid(InplaceFunction):
+
+    @staticmethod
+    def symbolic(g, i, inplace=False):
+        return g.op("Sigmoid", i)
 
     @staticmethod
     def forward(ctx, i, inplace=False):
@@ -90,10 +104,10 @@ class Sigmoid(InplaceFunction):
     @staticmethod
     def backward(ctx, grad_output):
         result, = ctx.saved_variables
-        if grad_output.volatile:
+        if grad_output.volatile and not ctx._is_tracing:
             grad_input = Variable(grad_output.data.new(grad_output.size()), volatile=True)
             backend = type2backend[type(result.data)]
-            backend.Sigmoid_updateGradInput(backend.library_state, None, grad_output.data,
+            backend.Sigmoid_updateGradInput(backend.library_state, grad_output.data,
                                             grad_input.data, result.data)
         else:
             grad_input = grad_output * ((1 - result) * result)
@@ -255,6 +269,32 @@ class Atan2(Function):
         y, x, = ctx.saved_variables
         denominator = y.mul(y).add(x.mul(x)).reciprocal()
         return grad_output * x.mul(denominator), grad_output * y.neg().mul(denominator)
+
+
+class Erf(Function):
+
+    @staticmethod
+    def forward(ctx, i):
+        ctx.save_for_backward(i)
+        return i.erf()
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        i, = ctx.saved_variables
+        return 2. / math.sqrt(math.pi) * torch.exp(-(i ** 2)) * grad_output
+
+
+class ErfInv(Function):
+
+    @staticmethod
+    def forward(ctx, i):
+        ctx.save_for_backward(i)
+        return i.erfinv()
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        i, = ctx.saved_variables
+        return 0.5 * math.sqrt(math.pi) * torch.exp(i.erfinv() ** 2) * grad_output
 
 
 # TODO: make inplace and update grad formulas

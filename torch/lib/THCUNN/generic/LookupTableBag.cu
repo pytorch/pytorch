@@ -24,7 +24,7 @@ void THNN_(LookupTableBag_updateOutput)(
   ptrdiff_t numIndices = THCIndexTensor_(size)(state, input, 0);
   ptrdiff_t numBags = THCIndexTensor_(size)(state, offsets, 0);
   ptrdiff_t stride = THCTensor_(size)(state, weight, 1);
-  long *bag_size_data = NULL;
+  int64_t *bag_size_data = NULL;
   if (bag_size != NULL) {
     bag_size_data = THCIndexTensor_(data)(state, bag_size);
   }
@@ -83,7 +83,7 @@ void THNN_(LookupTableBag_accGradParameters)(
     THError("Tensors must be contiguous");
   }
 
-  long *bag_size_data = NULL;
+  int64_t *bag_size_data = NULL;
   if (bag_size != NULL) {
     bag_size_data = THCIndexTensor_(data)(state, bag_size);
   }
@@ -95,7 +95,7 @@ void THNN_(LookupTableBag_accGradParameters)(
   }
 
   ptrdiff_t numel = THCIndexTensor_(nElement)(state, input);
-  long stride = THCTensor_(stride)(state, gradWeight, 0);
+  int64_t stride = THCTensor_(stride)(state, gradWeight, 0);
 
   cudaStream_t stream = THCState_getCurrentStream(state);
 
@@ -132,7 +132,7 @@ void THNN_(LookupTableBag_accGradParameters)(
       thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
 #endif
       sortedIndicesIter, sortedIndicesIter + numel,
-      origIndicesIter, ThrustLTOp<long>());
+      origIndicesIter, ThrustLTOp<int64_t>());
   }
 
   THCIndex_t *sortedIndices_data = THCIndexTensor_(data)(state, sortedIndices);
@@ -172,12 +172,12 @@ void THNN_(LookupTableBag_accGradParameters)(
       thrust::make_reverse_iterator(sortedIndices_ptr),
       thrust::make_reverse_iterator(count_ptr + numel),
       thrust::make_reverse_iterator(count_ptr + numel),
-      thrust::equal_to<long>(),
-      thrust::maximum<long>()
+      thrust::equal_to<int64_t>(),
+      thrust::maximum<int64_t>()
     );
   }
 
-  dim3 grid(THCCeilDiv(numel, (ptrdiff_t) 4), THCCeilDiv(stride, (long) 128));
+  dim3 grid(THCCeilDiv(numel, (ptrdiff_t) 4), THCCeilDiv(stride, (int64_t) 128));
   dim3 block(32, 4);
   cunn_LookupTableBag_accGradParametersKernel<real, accreal><<<grid, block, 0, stream>>>(
     sortedIndices_data,

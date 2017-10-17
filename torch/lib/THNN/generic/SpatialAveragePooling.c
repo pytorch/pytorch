@@ -31,21 +31,21 @@ static inline void THNN_(SpatialAveragePooling_shapeCheck)(
 	     "padW = %d, padH = %d, kW = %d, kH = %d",
 	     padW, padH, kW, kH);
 
-  long nInputPlane = input->size[dimh-1];
-  long inputHeight = input->size[dimh];
-  long inputWidth = input->size[dimw];
-  long outputHeight, outputWidth;
-  long nOutputPlane = nInputPlane;
+  int64_t nInputPlane = input->size[dimh-1];
+  int64_t inputHeight = input->size[dimh];
+  int64_t inputWidth = input->size[dimw];
+  int64_t outputHeight, outputWidth;
+  int64_t nOutputPlane = nInputPlane;
 
   if(ceil_mode)
   {
-    outputHeight = (long)(ceil((float)(inputHeight - kH + 2*padH) / dH)) + 1;
-    outputWidth  = (long)(ceil((float)(inputWidth  - kW + 2*padW) / dW)) + 1;
+    outputHeight = (int64_t)(ceil((float)(inputHeight - kH + 2*padH) / dH)) + 1;
+    outputWidth  = (int64_t)(ceil((float)(inputWidth  - kW + 2*padW) / dW)) + 1;
   }
   else
   {
-    outputHeight = (long)(floor((float)(inputHeight - kH + 2*padH) / dH)) + 1;
-    outputWidth  = (long)(floor((float)(inputWidth  - kW + 2*padW) / dW)) + 1;
+    outputHeight = (int64_t)(floor((float)(inputHeight - kH + 2*padH) / dH)) + 1;
+    outputWidth  = (int64_t)(floor((float)(inputWidth  - kW + 2*padW) / dW)) + 1;
   }
 
   if (padW || padH)
@@ -89,15 +89,15 @@ void THNN_(SpatialAveragePooling_updateOutput)(
   int dimw = 2;
   int dimh = 1;
   int dimc = 0;
-  long nbatch = 1;
+  int64_t nbatch = 1;
 
-  long inputWidth;
-  long inputHeight;
-  long outputWidth;
-  long outputHeight;
-  long nInputPlane; // number of channels (or colors)
+  int64_t inputWidth;
+  int64_t inputHeight;
+  int64_t outputWidth;
+  int64_t outputHeight;
+  int64_t nInputPlane; // number of channels (or colors)
 
-  long k;
+  int64_t k;
 
   THNN_(SpatialAveragePooling_shapeCheck)
     (input, NULL, kH, kW, dH, dW, padH, padW, ceil_mode);
@@ -115,13 +115,13 @@ void THNN_(SpatialAveragePooling_updateOutput)(
 
   if(ceil_mode)
   {
-    outputWidth  = (long)(ceil((float)(inputWidth  - kW + 2*padW) / dW)) + 1;
-    outputHeight = (long)(ceil((float)(inputHeight - kH + 2*padH) / dH)) + 1;
+    outputWidth  = (int64_t)(ceil((float)(inputWidth  - kW + 2*padW) / dW)) + 1;
+    outputHeight = (int64_t)(ceil((float)(inputHeight - kH + 2*padH) / dH)) + 1;
   }
   else
   {
-    outputWidth  = (long)(floor((float)(inputWidth  - kW + 2*padW) / dW)) + 1;
-    outputHeight = (long)(floor((float)(inputHeight - kH + 2*padH) / dH)) + 1;
+    outputWidth  = (int64_t)(floor((float)(inputWidth  - kW + 2*padW) / dW)) + 1;
+    outputHeight = (int64_t)(floor((float)(inputHeight - kH + 2*padH) / dH)) + 1;
   }
   if (padW || padH)
   {
@@ -146,14 +146,14 @@ void THNN_(SpatialAveragePooling_updateOutput)(
 #pragma omp parallel for private(k)
   for(k = 0; k < nInputPlane; k++)
   {
-    long p;
+    int64_t p;
     for(p = 0; p < nbatch; p++)
     {
-      long xx, yy;
+      int64_t xx, yy;
       /* For all output pixels... */
       real *ptr_output = output_data + p*nInputPlane*outputWidth*outputHeight + k*outputWidth*outputHeight;
       real *ptr_input = input_data + p*nInputPlane*inputWidth*inputHeight + k*inputWidth*inputHeight;
-      long i;
+      int64_t i;
       for(i = 0; i < outputWidth*outputHeight; i++)
         ptr_output[i] = 0;
 
@@ -162,10 +162,10 @@ void THNN_(SpatialAveragePooling_updateOutput)(
         for(xx = 0; xx < outputWidth; xx++)
         {
           /* Compute the mean of the input image... */
-          long hstart = yy * dH - padH;
-          long wstart = xx * dW - padW;
-          long hend = fminf(hstart + kH, inputHeight + padH);
-          long wend = fminf(wstart + kW, inputWidth + padW);
+          int64_t hstart = yy * dH - padH;
+          int64_t wstart = xx * dW - padW;
+          int64_t hend = fminf(hstart + kH, inputHeight + padH);
+          int64_t wend = fminf(wstart + kW, inputWidth + padW);
           int pool_size = (hend - hstart) * (wend - wstart);
           hstart = fmaxf(hstart, 0);
           wstart = fmaxf(wstart, 0);
@@ -180,7 +180,7 @@ void THNN_(SpatialAveragePooling_updateOutput)(
           else
             divide_factor = (hend - hstart) * (wend - wstart);
 
-          long kx, ky;
+          int64_t kx, ky;
 
           for(ky = hstart; ky < hend; ky++)
           {
@@ -213,19 +213,19 @@ void THNN_(SpatialAveragePooling_updateGradInput)(
   int dimw = 2;
   int dimh = 1;
   int dimc = 0;
-  long nbatch = 1;
-  long ndim = 3;
+  int64_t nbatch = 1;
+  int64_t ndim = 3;
 
-  long inputWidth;
-  long inputHeight;
-  long outputWidth;
-  long outputHeight;
-  long nInputPlane; // number of channels (or colors)
+  int64_t inputWidth;
+  int64_t inputHeight;
+  int64_t outputWidth;
+  int64_t outputHeight;
+  int64_t nInputPlane; // number of channels (or colors)
 
   real *gradOutput_data;
   real *input_data, *gradInput_data;
 
-  long k;
+  int64_t k;
 
   THNN_(SpatialAveragePooling_shapeCheck)
     (input, gradOutput, kH, kW, dH, dW, padH, padW, ceil_mode);
@@ -245,13 +245,13 @@ void THNN_(SpatialAveragePooling_updateGradInput)(
 
   if(ceil_mode)
   {
-    outputWidth  = (long)(ceil((float)(inputWidth  - kW + 2*padW) / dW)) + 1;
-    outputHeight = (long)(ceil((float)(inputHeight - kH + 2*padH) / dH)) + 1;
+    outputWidth  = (int64_t)(ceil((float)(inputWidth  - kW + 2*padW) / dW)) + 1;
+    outputHeight = (int64_t)(ceil((float)(inputHeight - kH + 2*padH) / dH)) + 1;
   }
   else
   {
-    outputWidth  = (long)(floor((float)(inputWidth  - kW + 2*padW) / dW)) + 1;
-    outputHeight = (long)(floor((float)(inputHeight - kH + 2*padH) / dH)) + 1;
+    outputWidth  = (int64_t)(floor((float)(inputWidth  - kW + 2*padW) / dW)) + 1;
+    outputHeight = (int64_t)(floor((float)(inputHeight - kH + 2*padH) / dH)) + 1;
   }
   if (padW || padH)
   {
@@ -277,16 +277,16 @@ void THNN_(SpatialAveragePooling_updateGradInput)(
 #pragma omp parallel for private(k)
   for(k = 0; k < nInputPlane; k++)
   {
-    long p;
+    int64_t p;
     for(p = 0; p < nbatch; p++)
     {
       real *ptr_gradOutput = gradOutput_data + p*nInputPlane*outputHeight*outputWidth + k*outputWidth*outputHeight;
-      long xx, yy;
+      int64_t xx, yy;
 
       real* ptr_gi = gradInput_data + p*nInputPlane*inputWidth*inputHeight + k*inputWidth*inputHeight;
       real *ptr_gradInput = gradInput_data + p*nInputPlane*inputWidth*inputHeight + k*inputWidth*inputHeight;
 
-      long i;
+      int64_t i;
       for(i=0; i<inputWidth*inputHeight; i++)
         ptr_gi[i] = 0.0;
 
@@ -294,10 +294,10 @@ void THNN_(SpatialAveragePooling_updateGradInput)(
       {
         for(xx = 0; xx < outputWidth; xx++)
         {
-          long hstart = yy * dH - padH;
-          long wstart = xx * dW - padW;
-          long hend = fminf(hstart + kH, inputHeight + padH);
-          long wend = fminf(wstart + kW, inputWidth + padW);
+          int64_t hstart = yy * dH - padH;
+          int64_t wstart = xx * dW - padW;
+          int64_t hend = fminf(hstart + kH, inputHeight + padH);
+          int64_t wend = fminf(wstart + kW, inputWidth + padW);
           int pool_size = (hend - hstart) * (wend - wstart);
           hstart = fmaxf(hstart, 0);
           wstart = fmaxf(wstart, 0);
@@ -312,7 +312,7 @@ void THNN_(SpatialAveragePooling_updateGradInput)(
           else
             divide_factor = (hend - hstart) * (wend - wstart);
 
-          long kx, ky;
+          int64_t kx, ky;
           for(ky = hstart ; ky < hend; ky++)
           {
             for(kx = wstart; kx < wend; kx++)

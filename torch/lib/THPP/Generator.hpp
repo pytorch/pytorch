@@ -1,5 +1,7 @@
 #pragma once
 
+#include <stdint.h>
+
 namespace thpp {
 
 struct Generator {
@@ -11,8 +13,8 @@ struct Generator {
   virtual Generator& copy(const Generator& other) = 0;
   virtual Generator& free() = 0;
 
-  virtual unsigned long seed() = 0;
-  virtual Generator& manualSeed(unsigned long seed) = 0;
+  virtual uint64_t seed() = 0;
+  virtual Generator& manualSeed(uint64_t seed) = 0;
 };
 
 } // namespace thpp

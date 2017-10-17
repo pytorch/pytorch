@@ -39,8 +39,8 @@ void THDSend(THDTensorDescriptor* desc, int dst_rank) {
   dataChannel->send(*desc, convertToRank(dst_rank));
 }
 
-void THDRecvAnySource(THDTensorDescriptor* desc) {
-  dataChannel->receive(*desc);
+int THDRecvAnySource(THDTensorDescriptor* desc) {
+  return dataChannel->receive(*desc);
 }
 
 void THDRecv(THDTensorDescriptor* desc, int src_rank) {

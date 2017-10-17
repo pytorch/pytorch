@@ -39,7 +39,7 @@ TH_EXTERNC void sgemm_(char *transa, char *transb, int *m, int *n, int *k, float
 
 
 
-void THBlas_(swap)(long n, real *x, long incx, real *y, long incy)
+void THBlas_(swap)(int64_t n, real *x, int64_t incx, real *y, int64_t incy)
 {
   if(n == 1)
   {
@@ -63,7 +63,7 @@ void THBlas_(swap)(long n, real *x, long incx, real *y, long incy)
   }
 #endif
   {
-    long i;
+    int64_t i;
     for(i = 0; i < n; i++)
     {
       real z = x[i*incx];
@@ -73,7 +73,7 @@ void THBlas_(swap)(long n, real *x, long incx, real *y, long incy)
   }
 }
 
-void THBlas_(scal)(long n, real a, real *x, long incx)
+void THBlas_(scal)(int64_t n, real a, real *x, int64_t incx)
 {
   if(n == 1)
     incx = 1;
@@ -93,7 +93,7 @@ void THBlas_(scal)(long n, real a, real *x, long incx)
   }
 #endif
   {
-    long i;
+    int64_t i;
     for(i = 0; i < n; i++) {
       if (a == 0) {
         x[i*incx] = 0;
@@ -104,7 +104,7 @@ void THBlas_(scal)(long n, real a, real *x, long incx)
   }
 }
 
-void THBlas_(copy)(long n, real *x, long incx, real *y, long incy)
+void THBlas_(copy)(int64_t n, real *x, int64_t incx, real *y, int64_t incy)
 {
   if(n == 1)
   {
@@ -128,13 +128,13 @@ void THBlas_(copy)(long n, real *x, long incx, real *y, long incy)
   }
 #endif
   {
-    long i;
+    int64_t i;
     for(i = 0; i < n; i++)
       y[i*incy] = x[i*incx];
   }
 }
 
-void THBlas_(axpy)(long n, real a, real *x, long incx, real *y, long incy)
+void THBlas_(axpy)(int64_t n, real a, real *x, int64_t incx, real *y, int64_t incy)
 {
   if(n == 1)
   {
@@ -158,13 +158,13 @@ void THBlas_(axpy)(long n, real a, real *x, long incx, real *y, long incy)
   }
 #endif
   {
-    long i;
+    int64_t i;
     for(i = 0; i < n; i++)
       y[i*incy] += a*x[i*incx];
   }
 }
 
-real THBlas_(dot)(long n, real *x, long incx, real *y, long incy)
+real THBlas_(dot)(int64_t n, real *x, int64_t incx, real *y, int64_t incy)
 {
   if(n == 1)
   {
@@ -187,7 +187,7 @@ real THBlas_(dot)(long n, real *x, long incx, real *y, long incy)
   }
 #endif
   {
-    long i;
+    int64_t i;
     real sum = 0;
     for(i = 0; i < n; i++)
     sum += x[i*incx]*y[i*incy];
@@ -195,7 +195,7 @@ real THBlas_(dot)(long n, real *x, long incx, real *y, long incy)
   }
 }
 
-void THBlas_(gemv)(char trans, long m, long n, real alpha, real *a, long lda, real *x, long incx, real beta, real *y, long incy)
+void THBlas_(gemv)(char trans, int64_t m, int64_t n, real alpha, real *a, int64_t lda, real *x, int64_t incx, real beta, real *y, int64_t incy)
 {
   if(n == 1)
     lda = m;
@@ -221,7 +221,7 @@ void THBlas_(gemv)(char trans, long m, long n, real alpha, real *a, long lda, re
   }
 #endif
   {
-    long i, j;
+    int64_t i, j;
 
     if( (trans == 'T') || (trans == 't') )
     {
@@ -253,7 +253,7 @@ void THBlas_(gemv)(char trans, long m, long n, real alpha, real *a, long lda, re
   }
 }
 
-void THBlas_(ger)(long m, long n, real alpha, real *x, long incx, real *y, long incy, real *a, long lda)
+void THBlas_(ger)(int64_t m, int64_t n, real alpha, real *x, int64_t incx, real *y, int64_t incy, real *a, int64_t lda)
 {
   if(n == 1)
     lda = m;
@@ -276,7 +276,7 @@ void THBlas_(ger)(long m, long n, real alpha, real *x, long incx, real *y, long 
   }
 #endif
   {
-    long i, j;
+    int64_t i, j;
     for(j = 0; j < n; j++)
     {
       real *column_ = a+j*lda;
@@ -287,7 +287,7 @@ void THBlas_(ger)(long m, long n, real alpha, real *x, long incx, real *y, long 
   }
 }
 
-void THBlas_(gemm)(char transa, char transb, long m, long n, long k, real alpha, real *a, long lda, real *b, long ldb, real beta, real *c, long ldc)
+void THBlas_(gemm)(char transa, char transb, int64_t m, int64_t n, int64_t k, real alpha, real *a, int64_t lda, real *b, int64_t ldb, real beta, real *c, int64_t ldc)
 {
   int transa_ = ((transa == 't') || (transa == 'T'));
   int transb_ = ((transb == 't') || (transb == 'T'));
@@ -336,7 +336,7 @@ void THBlas_(gemm)(char transa, char transb, long m, long n, long k, real alpha,
   }
 #endif
   {
-    long i, j, l;
+    int64_t i, j, l;
     if(!transa_ && !transb_)
     {
       real *a_ = a;

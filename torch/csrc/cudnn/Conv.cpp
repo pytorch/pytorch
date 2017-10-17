@@ -4,7 +4,7 @@
 #include "Exceptions.h"
 #include "Types.h"
 
-#include <cudnn.h>
+#include "cudnn-wrapper.h"
 #include <functional>
 #include <iterator>
 #include <sstream>
@@ -18,7 +18,9 @@ namespace torch { namespace cudnn {
 
 namespace {
 
-void setTensorDescriptor(TensorDescriptor& desc, cudnnDataType_t dataType, THVoidTensor* tensor, int groups)
+void setTensorDescriptor(
+    TensorDescriptor& desc, cudnnDataType_t dataType, THVoidTensor* tensor,
+    int groups)
 {
   CHECK_ARG(tensor->nDimension <= 5);
   int inputSize[5];
@@ -27,11 +29,15 @@ void setTensorDescriptor(TensorDescriptor& desc, cudnnDataType_t dataType, THVoi
     inputSize[i] = (int) tensor->size[i];
     inputStride[i] = (int) tensor->stride[i];
   }
+#if CUDNN_VERSION < 7000
   inputSize[1] /= groups;
+#endif
   desc.set(dataType, tensor->nDimension, inputSize, inputStride);
 }
 
-void setWeightDescriptor(FilterDescriptor& desc, cudnnDataType_t dataType, THVoidTensor* weight, int groups)
+void setWeightDescriptor(
+    FilterDescriptor& desc, cudnnDataType_t dataType, THVoidTensor* weight,
+    int groups)
 {
   CHECK_ARG(weight->nDimension <= 5);
   int weightSize[5];
@@ -39,7 +45,9 @@ void setWeightDescriptor(FilterDescriptor& desc, cudnnDataType_t dataType, THVoi
   for (int i = 0; i < weight->nDimension; ++i) {
     weightSize[i] = (int) weight->size[i];
   }
+#if CUDNN_VERSION < 7000
   weightSize[0] /= groups;
+#endif
   desc.set(dataType, weight->nDimension, weightSize);
 }
 
@@ -109,24 +117,57 @@ template<typename algo_t>
 struct algorithm_search {
 };
 
-cudnnStatus_t getWorkspaceSize(cudnnHandle_t handle, const Convolution& conv, cudnnConvolutionFwdAlgo_t algo, size_t* sz){
-    return cudnnGetConvolutionForwardWorkspaceSize(handle, conv.idesc.desc, conv.wdesc.desc, conv.cdesc.desc, conv.odesc.desc, algo, sz);
+cudnnStatus_t getWorkspaceSize(
+    cudnnHandle_t handle, const Convolution& conv, cudnnConvolutionFwdAlgo_t algo, size_t* sz)
+{
+    return cudnnGetConvolutionForwardWorkspaceSize(
+        handle,
+        conv.idesc.desc,
+        conv.wdesc.desc,
+        conv.cdesc.desc,
+        conv.odesc.desc,
+        algo,
+        sz
+    );
 }
-cudnnStatus_t getWorkspaceSize(cudnnHandle_t handle, const Convolution& conv, cudnnConvolutionBwdDataAlgo_t algo, size_t* sz){
-    return cudnnGetConvolutionBackwardDataWorkspaceSize(handle, conv.wdesc.desc, conv.odesc.desc, conv.cdesc.desc, conv.idesc.desc, algo, sz);
+cudnnStatus_t getWorkspaceSize(
+    cudnnHandle_t handle, const Convolution& conv,
+    cudnnConvolutionBwdDataAlgo_t algo, size_t* sz)
+{
+    return cudnnGetConvolutionBackwardDataWorkspaceSize(
+        handle,
+        conv.wdesc.desc,
+        conv.odesc.desc,
+        conv.cdesc.desc,
+        conv.idesc.desc,
+        algo,
+        sz);
 }
-cudnnStatus_t getWorkspaceSize(cudnnHandle_t handle, const Convolution& conv, cudnnConvolutionBwdFilterAlgo_t algo, size_t* sz){
-    return cudnnGetConvolutionBackwardFilterWorkspaceSize(handle, conv.idesc.desc, conv.odesc.desc, conv.cdesc.desc, conv.wdesc.desc, algo, sz);
+cudnnStatus_t getWorkspaceSize(
+    cudnnHandle_t handle, const Convolution& conv,
+    cudnnConvolutionBwdFilterAlgo_t algo, size_t* sz)
+{
+    return cudnnGetConvolutionBackwardFilterWorkspaceSize(
+        handle,
+        conv.idesc.desc,
+        conv.odesc.desc,
+        conv.cdesc.desc,
+        conv.wdesc.desc,
+        algo,
+        sz);
 }
 
 template<typename algo_t>
-size_t getMaxWorkspaceSize(cudnnHandle_t handle, const Convolution& conv, algo_t *algo, int n_algo, THCState* state){
+size_t getMaxWorkspaceSize(
+    cudnnHandle_t handle, const Convolution& conv, algo_t *algo, int n_algo,
+    THCState* state)
+{
     size_t max_ws_size = 0;
     size_t max_block_size = 0;
     size_t total_gpu_mem = 0;
     size_t free_gpu_mem = 0;
 
-    THCudaCheck(THCudaMemGetInfoCached(state,&free_gpu_mem,&total_gpu_mem,&max_block_size));
+    THCudaCheck(THCudaMemGetInfoCached(state, &free_gpu_mem, &total_gpu_mem, &max_block_size));
 
     for(int i=0; i<n_algo; i++) {
         cudnnStatus_t err;
@@ -138,6 +179,19 @@ size_t getMaxWorkspaceSize(cudnnHandle_t handle, const Convolution& conv, algo_t
     return max_ws_size;
 }
 
+template<typename perf_t>
+perf_t getBestAlgorithm(perf_t *perfResults, bool deterministic, int n_algo) {
+  if (deterministic) {
+    // iterate over perf results of all algorithms and find the best deterministic algo
+    for (int i = 0; i < n_algo; i++) {
+      if (perfResults[i].status == CUDNN_STATUS_SUCCESS && perfResults[i].determinism == CUDNN_DETERMINISTIC) {
+        return perfResults[i];
+      }
+    }
+  }
+  return perfResults[0];
+}
+
 template<>
 struct algorithm_search<cudnnConvolutionFwdAlgo_t> {
   static constexpr auto DEFAULT_ALGO = CUDNN_CONVOLUTION_FWD_ALGO_IMPLICIT_PRECOMP_GEMM;
@@ -145,10 +199,11 @@ struct algorithm_search<cudnnConvolutionFwdAlgo_t> {
     return fwd_algos;
   }
 
-  static cudnnConvolutionFwdAlgoPerf_t findAlgorithm(THCState* state, cudnnHandle_t handle, const Convolution& conv,
-						      void* in, void* out, void* wght) {
+  static cudnnConvolutionFwdAlgoPerf_t findAlgorithm(
+      THCState* state, cudnnHandle_t handle, const Convolution& conv,
+      void* in, void* out, void* wght, bool deterministic)
+  {
     int algoCount;
-    cudnnConvolutionFwdAlgoPerf_t perfResults;
     cudnnConvolutionFwdAlgo_t algo[] = {
          CUDNN_CONVOLUTION_FWD_ALGO_GEMM,
          CUDNN_CONVOLUTION_FWD_ALGO_FFT,
@@ -159,66 +214,125 @@ struct algorithm_search<cudnnConvolutionFwdAlgo_t> {
          CUDNN_CONVOLUTION_FWD_ALGO_WINOGRAD,
          CUDNN_CONVOLUTION_FWD_ALGO_WINOGRAD_NONFUSED,
     };
-    size_t max_ws_size = getMaxWorkspaceSize<cudnnConvolutionFwdAlgo_t>(handle,conv,algo,sizeof(algo)/sizeof(algo[0]),state);
+    int n_algo = sizeof(algo)/sizeof(algo[0]);
+    cudnnConvolutionFwdAlgoPerf_t perfResults[n_algo];
+    size_t max_ws_size = getMaxWorkspaceSize<cudnnConvolutionFwdAlgo_t>(
+        handle, conv, algo, n_algo, state);
     Workspace ws(state, max_ws_size);
-
-    CHECK(cudnnFindConvolutionForwardAlgorithmEx(handle, conv.idesc.desc, in,
-        conv.wdesc.desc, wght, conv.cdesc.desc, conv.odesc.desc, out, 1, &algoCount,
-        &perfResults, ws.data, ws.size));
-
-    return perfResults;
+    CHECK(cudnnFindConvolutionForwardAlgorithmEx(
+        handle,
+        conv.idesc.desc,
+        in,
+        conv.wdesc.desc,
+        wght,
+        conv.cdesc.desc,
+        conv.odesc.desc,
+        out,
+        1,
+        &algoCount,
+        perfResults,
+        ws.data,
+        ws.size));
+    return getBestAlgorithm<cudnnConvolutionFwdAlgoPerf_t>(perfResults, deterministic, n_algo);
   }
 
-  static void getAlgorithm(cudnnHandle_t handle, const Convolution& conv, cudnnConvolutionFwdAlgo_t* algo) {
+  static void getAlgorithm(
+    cudnnHandle_t handle, const Convolution& conv, cudnnConvolutionFwdAlgo_t* algo)
+  {
     cudnnConvolutionFwdPreference_t pref = CUDNN_CONVOLUTION_FWD_PREFER_FASTEST;
-    CHECK(cudnnGetConvolutionForwardAlgorithm(handle, conv.idesc.desc,
-        conv.wdesc.desc, conv.cdesc.desc, conv.odesc.desc, pref, 0, algo));
+    CHECK(cudnnGetConvolutionForwardAlgorithm(
+        handle,
+        conv.idesc.desc,
+        conv.wdesc.desc,
+        conv.cdesc.desc,
+        conv.odesc.desc,
+        pref,
+        0,
+        algo));
   }
 
-  static void getWorkspaceSize(cudnnHandle_t handle, const Convolution& conv, cudnnConvolutionFwdAlgo_t algo, size_t* workspaceSize) {
-    CHECK(cudnnGetConvolutionForwardWorkspaceSize(handle, conv.idesc.desc, conv.wdesc.desc,
-        conv.cdesc.desc, conv.odesc.desc, algo, workspaceSize));
+  static void getWorkspaceSize(
+    cudnnHandle_t handle, const Convolution& conv,
+    cudnnConvolutionFwdAlgo_t algo, size_t* workspaceSize)
+  {
+    CHECK(cudnnGetConvolutionForwardWorkspaceSize(
+        handle,
+        conv.idesc.desc,
+        conv.wdesc.desc,
+        conv.cdesc.desc,
+        conv.odesc.desc,
+        algo,
+        workspaceSize));
   }
 };
 
 template<>
 struct algorithm_search<cudnnConvolutionBwdDataAlgo_t> {
   static constexpr auto DEFAULT_ALGO = CUDNN_CONVOLUTION_BWD_DATA_ALGO_1;
-  static BenchmarkCache<cudnnConvolutionBwdDataAlgo_t>& cache() {
+
+  static BenchmarkCache<cudnnConvolutionBwdDataAlgo_t>& cache()
+  {
     return bwd_data_algos;
   }
 
-  static cudnnConvolutionBwdDataAlgoPerf_t findAlgorithm(THCState* state,cudnnHandle_t handle, const Convolution& conv,
-							  void* in, void* out, void* wght) {
+  static cudnnConvolutionBwdDataAlgoPerf_t findAlgorithm(
+      THCState* state,cudnnHandle_t handle, const Convolution& conv, void* in,
+      void* out, void* wght, bool deterministic)
+  {
     int algoCount;
-    cudnnConvolutionBwdDataAlgoPerf_t perfResults;
     cudnnConvolutionBwdDataAlgo_t algo[] = {
-         CUDNN_CONVOLUTION_BWD_DATA_ALGO_0,
-         CUDNN_CONVOLUTION_BWD_DATA_ALGO_1,
-         CUDNN_CONVOLUTION_BWD_DATA_ALGO_FFT,
-         CUDNN_CONVOLUTION_BWD_DATA_ALGO_FFT_TILING,
-         CUDNN_CONVOLUTION_BWD_DATA_ALGO_WINOGRAD,
-         CUDNN_CONVOLUTION_BWD_DATA_ALGO_WINOGRAD_NONFUSED
+        CUDNN_CONVOLUTION_BWD_DATA_ALGO_0,
+        CUDNN_CONVOLUTION_BWD_DATA_ALGO_1,
+        CUDNN_CONVOLUTION_BWD_DATA_ALGO_FFT,
+        CUDNN_CONVOLUTION_BWD_DATA_ALGO_FFT_TILING,
+        CUDNN_CONVOLUTION_BWD_DATA_ALGO_WINOGRAD,
+        CUDNN_CONVOLUTION_BWD_DATA_ALGO_WINOGRAD_NONFUSED
     };
-    size_t max_ws_size = getMaxWorkspaceSize<cudnnConvolutionBwdDataAlgo_t>(handle,conv,algo,sizeof(algo)/sizeof(algo[0]),state);
+    int n_algo = sizeof(algo)/sizeof(algo[0]);
+    cudnnConvolutionBwdDataAlgoPerf_t perfResults[n_algo];
+    size_t max_ws_size = getMaxWorkspaceSize<cudnnConvolutionBwdDataAlgo_t>(
+        handle, conv, algo, n_algo, state);
     Workspace ws(state, max_ws_size);
-
-    CHECK(cudnnFindConvolutionBackwardDataAlgorithmEx(handle, conv.wdesc.desc, wght,
-        conv.odesc.desc, out, conv.cdesc.desc, conv.idesc.desc, in, 1, &algoCount,
-        &perfResults, ws.data, ws.size));
-
-    return perfResults;
+    CHECK(cudnnFindConvolutionBackwardDataAlgorithmEx(
+        handle,
+        conv.wdesc.desc,
+        wght,
+        conv.odesc.desc,
+        out,
+        conv.cdesc.desc,
+        conv.idesc.desc,
+        in,
+        1,
+        &algoCount,
+        perfResults,
+        ws.data,
+        ws.size));
+    return getBestAlgorithm<cudnnConvolutionBwdDataAlgoPerf_t>(perfResults, deterministic, n_algo);
   }
 
   static void getAlgorithm(cudnnHandle_t handle, const Convolution& conv, cudnnConvolutionBwdDataAlgo_t* algo) {
-    CHECK(cudnnGetConvolutionBackwardDataAlgorithm(handle, conv.wdesc.desc,
-        conv.odesc.desc, conv.cdesc.desc, conv.idesc.desc,
-        CUDNN_CONVOLUTION_BWD_DATA_PREFER_FASTEST, 0, algo));
+    CHECK(cudnnGetConvolutionBackwardDataAlgorithm(
+        handle,
+        conv.wdesc.desc,
+        conv.odesc.desc,
+        conv.cdesc.desc,
+        conv.idesc.desc,
+        CUDNN_CONVOLUTION_BWD_DATA_PREFER_FASTEST,
+        0,
+        algo));
   }
 
-  static void getWorkspaceSize(cudnnHandle_t handle, const Convolution& conv, cudnnConvolutionBwdDataAlgo_t algo, size_t* workspaceSize) {
-    CHECK(cudnnGetConvolutionBackwardDataWorkspaceSize(handle, conv.wdesc.desc,
-        conv.odesc.desc, conv.cdesc.desc, conv.idesc.desc, algo,
+  static void getWorkspaceSize(
+    cudnnHandle_t handle, const Convolution& conv,
+    cudnnConvolutionBwdDataAlgo_t algo, size_t* workspaceSize)
+  {
+    CHECK(cudnnGetConvolutionBackwardDataWorkspaceSize(
+        handle,
+        conv.wdesc.desc,
+        conv.odesc.desc,
+        conv.cdesc.desc,
+        conv.idesc.desc,
+         algo,
         workspaceSize));
   }
 };
@@ -226,55 +340,95 @@ struct algorithm_search<cudnnConvolutionBwdDataAlgo_t> {
 template<>
 struct algorithm_search<cudnnConvolutionBwdFilterAlgo_t> {
   static constexpr auto DEFAULT_ALGO = CUDNN_CONVOLUTION_BWD_FILTER_ALGO_1;
-  static BenchmarkCache<cudnnConvolutionBwdFilterAlgo_t>& cache() {
+
+  static BenchmarkCache<cudnnConvolutionBwdFilterAlgo_t>& cache()
+  {
     return bwd_filter_algos;
   }
 
-  static cudnnConvolutionBwdFilterAlgoPerf_t findAlgorithm(THCState* state, cudnnHandle_t handle, const Convolution& conv,
-							    void* in, void* out, void* wght) {
+  static cudnnConvolutionBwdFilterAlgoPerf_t findAlgorithm(
+        THCState* state, cudnnHandle_t handle, const Convolution& conv,
+        void* in, void* out, void* wght, bool deterministic)
+  {
     int algoCount;
-    cudnnConvolutionBwdFilterAlgoPerf_t perfResults;
     cudnnConvolutionBwdFilterAlgo_t algo[] = {
-         CUDNN_CONVOLUTION_BWD_FILTER_ALGO_0,
-         CUDNN_CONVOLUTION_BWD_FILTER_ALGO_1,
-         CUDNN_CONVOLUTION_BWD_FILTER_ALGO_FFT,
+        CUDNN_CONVOLUTION_BWD_FILTER_ALGO_0,
+        CUDNN_CONVOLUTION_BWD_FILTER_ALGO_1,
+        CUDNN_CONVOLUTION_BWD_FILTER_ALGO_FFT,
+        CUDNN_CONVOLUTION_BWD_FILTER_ALGO_3,
+        CUDNN_CONVOLUTION_BWD_FILTER_ALGO_WINOGRAD_NONFUSED,
 #if CUDNN_VERSION >= 6000
-         CUDNN_CONVOLUTION_BWD_FILTER_ALGO_FFT_TILING,
+        CUDNN_CONVOLUTION_BWD_FILTER_ALGO_FFT_TILING,
 #endif
-         CUDNN_CONVOLUTION_BWD_FILTER_ALGO_3,
-         CUDNN_CONVOLUTION_BWD_FILTER_ALGO_WINOGRAD_NONFUSED,
     };
-    size_t max_ws_size = getMaxWorkspaceSize<cudnnConvolutionBwdFilterAlgo_t>(handle,conv,algo,sizeof(algo)/sizeof(algo[0]),state);
+    int n_algo = sizeof(algo)/sizeof(algo[0]);
+    cudnnConvolutionBwdFilterAlgoPerf_t perfResults[n_algo];
+    size_t max_ws_size = getMaxWorkspaceSize<cudnnConvolutionBwdFilterAlgo_t>(
+        handle, conv, algo, n_algo, state);
     Workspace ws(state, max_ws_size);
 
-    CHECK(cudnnFindConvolutionBackwardFilterAlgorithmEx(handle, conv.idesc.desc, in,
-        conv.odesc.desc, out, conv.cdesc.desc, conv.wdesc.desc, wght, 1, &algoCount,
-        &perfResults, ws.data, ws.size));
-
-    return perfResults;
+    CHECK(cudnnFindConvolutionBackwardFilterAlgorithmEx(
+        handle,
+        conv.idesc.desc,
+        in,
+        conv.odesc.desc,
+        out,
+        conv.cdesc.desc,
+        conv.wdesc.desc,
+        wght,
+        1,
+        &algoCount,
+        perfResults,
+        ws.data,
+        ws.size));
+    return getBestAlgorithm<cudnnConvolutionBwdFilterAlgoPerf_t>(perfResults, deterministic, n_algo);
   }
 
-  static void getAlgorithm(cudnnHandle_t handle, const Convolution& conv, cudnnConvolutionBwdFilterAlgo_t* algo) {
-    CHECK(cudnnGetConvolutionBackwardFilterAlgorithm(handle, conv.idesc.desc,
-        conv.odesc.desc, conv.cdesc.desc, conv.wdesc.desc,
-        CUDNN_CONVOLUTION_BWD_FILTER_PREFER_FASTEST, 0, algo));
+  static void getAlgorithm(
+      cudnnHandle_t handle, const Convolution& conv, cudnnConvolutionBwdFilterAlgo_t* algo)
+  {
+    CHECK(cudnnGetConvolutionBackwardFilterAlgorithm(
+        handle,
+        conv.idesc.desc,
+        conv.odesc.desc,
+        conv.cdesc.desc,
+        conv.wdesc.desc,
+        CUDNN_CONVOLUTION_BWD_FILTER_PREFER_FASTEST,
+        0,
+        algo)
+    );
   }
 
-  static void getWorkspaceSize(cudnnHandle_t handle, const Convolution& conv, cudnnConvolutionBwdFilterAlgo_t algo, size_t* workspaceSize) {
-    CHECK(cudnnGetConvolutionBackwardFilterWorkspaceSize(handle, conv.idesc.desc,
-        conv.odesc.desc, conv.cdesc.desc, conv.wdesc.desc, algo, workspaceSize));
+  static void getWorkspaceSize(
+      cudnnHandle_t handle, const Convolution& conv,
+      cudnnConvolutionBwdFilterAlgo_t algo, size_t* workspaceSize)
+  {
+    CHECK(cudnnGetConvolutionBackwardFilterWorkspaceSize(
+        handle,
+        conv.idesc.desc,
+        conv.odesc.desc,
+        conv.cdesc.desc,
+        conv.wdesc.desc,
+        algo,
+        workspaceSize));
   }
 };
 
 template<typename algo_t>
 void findAlgorithm(
     THCState* state, cudnnHandle_t handle, const Convolution& conv,
-    bool benchmark, void* in, void* out, void* wght, algo_t* algo)
+    bool benchmark, bool deterministic, void* in, void* out, void* wght,
+    algo_t* algo)
 {
   using search = algorithm_search<algo_t>;
   auto& cache = search::cache();
 
   if (cache.find(conv.params, algo)) {
+    return;
+  }
+
+  if (deterministic && !benchmark) {
+    *algo = search::DEFAULT_ALGO;
     return;
   }
 
@@ -287,11 +441,14 @@ void findAlgorithm(
     // re-check cache since another thread may have benchmarked the algorithm
     return;
   }
-  auto perfResults = search::findAlgorithm(state, handle, conv, in, out, wght);
-  if (perfResults.status == CUDNN_STATUS_SUCCESS) {
-    *algo = perfResults.algo;
+
+  auto perfResults = search::findAlgorithm(state, handle, conv, in, out, wght, deterministic);
+  // for deterministic algo, look at all the perf results and return the best
+  // deterministic algo
+  if (perfResults.status == CUDNN_STATUS_SUCCESS && !(deterministic && perfResults.determinism != CUDNN_DETERMINISTIC)) {
+      *algo = perfResults.algo;
   } else {
-    *algo = search::DEFAULT_ALGO;
+      *algo = search::DEFAULT_ALGO;
   }
   cache.insert(conv.params, *algo);
 
@@ -302,9 +459,10 @@ void findAlgorithm(
 template<typename algo_t>
 Workspace chooseAlgorithm(
     THCState* state, cudnnHandle_t handle, const Convolution& conv,
-    bool benchmark, void* in, void* out, void* wght, algo_t* algo)
+    bool benchmark, bool deterministic, void* in, void* out, void* wght,
+    algo_t* algo)
 {
-  findAlgorithm(state, handle, conv, benchmark, in, out, wght, algo);
+  findAlgorithm(state, handle, conv, benchmark, deterministic, in, out, wght, algo);
 
   using search = algorithm_search<algo_t>;
   size_t workspace_size;
@@ -324,11 +482,14 @@ Workspace chooseAlgorithm(
   }
 }
 
-void* tensorPointer(cudnnDataType_t dataType, THVoidTensor* tensor, int groupIdx, int groups, int dim)
+void* tensorPointer(
+    cudnnDataType_t dataType, THVoidTensor* tensor, int groupIdx, int groups,
+    int dim)
 {
   int elementSize = dataSize(dataType);
   char* ptr = (char*) tensor->storage->data;
   ptr += elementSize * tensor->storageOffset;
+#if CUDNN_VERSION < 7000
   if (groupIdx > 0) {
     long size = 1;
     for (int i = dim; i < tensor->nDimension; ++i) {
@@ -336,12 +497,15 @@ void* tensorPointer(cudnnDataType_t dataType, THVoidTensor* tensor, int groupIdx
     }
     ptr += elementSize * size * groupIdx / groups;
   }
+#endif
   return ptr;
 }
 
 }
 
-static void check_args(const std::vector<int>& args, size_t expected_size, const std::string& arg_name)
+static void check_args(
+    const std::vector<int>& args, size_t expected_size,
+    const std::string& arg_name)
 {
     if (args.size() > expected_size){
       std::stringstream ss;
@@ -375,9 +539,11 @@ static void check_input_size(THVoidTensor* input, THVoidTensor* weight, int grou
     ss << "Need input.size[1] == " << weight->size[1] * groups << " but got " << input->size[1] << " instead.";
     throw std::runtime_error(ss.str());
   }
+
 }
 
-static void check_bias_size(THVoidTensor* bias, THVoidTensor* weight, int groups, bool transposed)
+static void check_bias_size(
+    THVoidTensor* bias, THVoidTensor* weight, int groups, bool transposed)
 {
   if (bias != nullptr){
     if (transposed){
@@ -395,9 +561,10 @@ static void check_bias_size(THVoidTensor* bias, THVoidTensor* weight, int groups
   }
 }
 
-static void check_expected_output_size_is_valid(THVoidTensor* input, THVoidTensor* output, THVoidTensor* weight,
-                                                const std::vector<int>& pad, const std::vector<int>& stride,
-                                                const std::vector<int>& dilation)
+static void check_expected_output_size_is_valid(
+    THVoidTensor* input, THVoidTensor* output, THVoidTensor* weight,
+    const std::vector<int>& pad, const std::vector<int>& stride,
+    const std::vector<int>& dilation)
 {
   std::vector<long> output_sizes(input->nDimension - 2);
   bool invalid_dim_size = false;
@@ -433,10 +600,11 @@ static void check_expected_output_size_is_valid(THVoidTensor* input, THVoidTenso
   }
 }
 
-static void convolution_shape_check(THVoidTensor* input, THVoidTensor* weight, THVoidTensor* bias,
-                                    THVoidTensor* output, const std::vector<int>& pad, const std::vector<int>& stride,
-                                    const std::vector<int>& dilation, int groups, bool transposed){
-
+static void convolution_shape_check(
+    THVoidTensor* input, THVoidTensor* weight, THVoidTensor* bias,
+    THVoidTensor* output, const std::vector<int>& pad, const std::vector<int>& stride,
+    const std::vector<int>& dilation, int groups, bool transposed)
+{
   check_args(pad, input->nDimension - 2, "padding");
   check_args(stride, pad.size(), "stride");
   check_args(dilation, pad.size(), "dilation");
@@ -478,14 +646,15 @@ Convolution::Convolution(
   else
     setTensorDescriptor(odesc_bias, dataType, input, 1);
   setWeightDescriptor(wdesc, dataType, weight, groups);
-  cdesc.set(dataType, pad.size(), pad.data(), stride.data(), dilation.data());
+  cdesc.set(dataType, pad.size(), pad.data(), stride.data(), dilation.data(), groups);
 }
 
 void cudnn_convolution_forward(
     THCState* state, cudnnHandle_t handle, cudnnDataType_t dataType,
     THVoidTensor* input, THVoidTensor* weight, THVoidTensor* output,
-    Convolution* info, bool benchmark)
+    Convolution* info, bool benchmark, bool deterministic)
 {
+  CHECK(cudnnSetStream(handle, THCState_getCurrentStream(state)));
   assertSameGPU(dataType, input, weight, output);
   int groups = info->groups;
 
@@ -494,11 +663,16 @@ void cudnn_convolution_forward(
   void* out  = tensorPointer(dataType, output, 0, groups, 1);
   void* wght = tensorPointer(dataType, weight, 0, groups, 0);
 
-  Workspace workspace = chooseAlgorithm(state, handle, *info, benchmark, in, out, wght, &fwdAlg);
+  Workspace workspace = chooseAlgorithm(
+      state, handle, *info, benchmark, deterministic, in, out, wght, &fwdAlg);
 
   Constant one(dataType, 1);
   Constant zero(dataType, 0);
+#if CUDNN_VERSION < 7000
   for (int i = 0; i < groups; ++i) {
+#else
+    int i = 0;
+#endif
     void* input_ptr = tensorPointer(dataType, input, i, groups, 1);
     void* output_ptr = tensorPointer(dataType, output, i, groups, 1);
     void* weight_ptr = tensorPointer(dataType, weight, i, groups, 0);
@@ -507,7 +681,9 @@ void cudnn_convolution_forward(
       handle, &one, info->idesc.desc, input_ptr, info->wdesc.desc,
               weight_ptr, info->cdesc.desc, fwdAlg, workspace.data,
               workspace.size, &zero, info->odesc.desc, output_ptr));
+#if CUDNN_VERSION < 7000
   }
+#endif
 }
 
 void cudnn_convolution_add_bias(
@@ -515,6 +691,7 @@ void cudnn_convolution_add_bias(
     THVoidTensor* bias, THVoidTensor* output,
     Convolution* info)
 {
+  CHECK(cudnnSetStream(handle, THCState_getCurrentStream(state)));
   assertSameGPU(dataType, bias, output);
   CHECK_ARG(output->nDimension <= 5);
   TensorDescriptor& bdesc = info->bdesc;
@@ -534,8 +711,9 @@ void cudnn_convolution_add_bias(
 void cudnn_convolution_backward_data(
     THCState* state, cudnnHandle_t handle, cudnnDataType_t dataType,
     THVoidTensor* gradOutput, THVoidTensor* gradInput, THVoidTensor* weight,
-    Convolution* info, bool benchmark)
+    Convolution* info, bool benchmark, bool deterministic)
 {
+  CHECK(cudnnSetStream(handle, THCState_getCurrentStream(state)));
   assertSameGPU(dataType, gradOutput, gradInput, weight);
   int groups = info->params.groups;
 
@@ -543,27 +721,36 @@ void cudnn_convolution_backward_data(
   void* in = tensorPointer(dataType, gradInput, 0, groups, 1);
   void* out = tensorPointer(dataType, gradOutput, 0, groups, 1);
   void* wght = tensorPointer(dataType, weight, 0, groups, 0);
-  Workspace workspace = chooseAlgorithm(state, handle, *info, benchmark, in, out, wght, &bwdDataAlg);
+  Workspace workspace = chooseAlgorithm(
+      state, handle, *info, benchmark, deterministic, in, out, wght,
+      &bwdDataAlg);
 
   Constant one(dataType, 1);
   Constant zero(dataType, 0);
+#if CUDNN_VERSION < 7000
   for (int i = 0; i < groups; ++i) {
+#else
+    int i = 0;
+#endif
     void* gradInput_ptr = tensorPointer(dataType, gradInput, i, groups, 1);
     void* gradOutput_ptr = tensorPointer(dataType, gradOutput, i, groups, 1);
     void* weight_ptr = tensorPointer(dataType, weight, i, groups, 0);
 
-    CHECK(cudnnConvolutionBackwardData(
-        handle, &one, info->wdesc.desc, weight_ptr, info->odesc.desc, gradOutput_ptr,
-        info->cdesc.desc, bwdDataAlg, workspace.data, workspace.size, &zero,
-        info->idesc.desc, gradInput_ptr));
+  CHECK(cudnnConvolutionBackwardData(
+      handle, &one, info->wdesc.desc, weight_ptr, info->odesc.desc, gradOutput_ptr,
+      info->cdesc.desc, bwdDataAlg, workspace.data, workspace.size, &zero,
+      info->idesc.desc, gradInput_ptr));
+#if CUDNN_VERSION < 7000
   }
+#endif
 }
 
 void cudnn_convolution_backward_filter(
     THCState* state, cudnnHandle_t handle, cudnnDataType_t dataType,
     THVoidTensor* gradOutput, THVoidTensor* input, THVoidTensor* gradWeight,
-    Convolution* info, bool benchmark)
+    Convolution* info, bool benchmark, bool deterministic)
 {
+  CHECK(cudnnSetStream(handle, THCState_getCurrentStream(state)));
   assertSameGPU(dataType, gradOutput, input, gradWeight);
   int groups = info->params.groups;
 
@@ -574,30 +761,39 @@ void cudnn_convolution_backward_filter(
   if (info->transposed) {
      std::swap(in, out);
   }
-  Workspace workspace = chooseAlgorithm(state, handle, *info, benchmark, in, out, wght, &bwdFilterAlg);
+  Workspace workspace = chooseAlgorithm(
+      state, handle, *info, benchmark, deterministic, in, out, wght,
+      &bwdFilterAlg);
 
   Constant one(dataType, 1);
   Constant zero(dataType, 0);
+#if CUDNN_VERSION < 7000
   for (int i = 0; i < groups; ++i) {
+#else
+    int i = 0;
+#endif
     void* input_ptr = tensorPointer(dataType, input, i, groups, 1);
     void* gradOutput_ptr = tensorPointer(dataType, gradOutput, i, groups, 1);
     void* gradWeight_ptr = tensorPointer(dataType, gradWeight, i, groups, 0);
 
     if (info->transposed) {
-        std::swap(input_ptr, gradOutput_ptr);
+      std::swap(input_ptr, gradOutput_ptr);
     }
 
     CHECK(cudnnConvolutionBackwardFilter(
-        handle, &one, info->idesc.desc, input_ptr, info->odesc.desc, gradOutput_ptr,
-        info->cdesc.desc, bwdFilterAlg, workspace.data, workspace.size, &zero,
-        info->wdesc.desc, gradWeight_ptr));
+      handle, &one, info->idesc.desc, input_ptr, info->odesc.desc, gradOutput_ptr,
+      info->cdesc.desc, bwdFilterAlg, workspace.data, workspace.size, &zero,
+      info->wdesc.desc, gradWeight_ptr));
+#if CUDNN_VERSION < 7000
   }
+#endif
 }
 
 void cudnn_convolution_backward_bias(
     THCState* state, cudnnHandle_t handle, cudnnDataType_t dataType,
     THVoidTensor* gradOutput, THVoidTensor* gradBias, Convolution* info)
 {
+  CHECK(cudnnSetStream(handle, THCState_getCurrentStream(state)));
   assertSameGPU(dataType, gradOutput, gradBias);
   Constant one(dataType, 1);
   Constant zero(dataType, 0);
@@ -611,13 +807,16 @@ void cudnn_convolution_backward_bias(
 
 Convolution* cudnn_convolution_full_forward(
     THCState* state, cudnnHandle_t handle, cudnnDataType_t dataType,
-    THVoidTensor* input, THVoidTensor* weight, THVoidTensor* bias, THVoidTensor* output,
-    std::vector<int> pad, std::vector<int> stride, std::vector<int> dilation, int groups, bool benchmark)
+    THVoidTensor* input, THVoidTensor* weight, THVoidTensor* bias,
+    THVoidTensor* output, std::vector<int> pad, std::vector<int> stride,
+    std::vector<int> dilation, int groups, bool benchmark, bool deterministic)
 {
+    CHECK(cudnnSetStream(handle, THCState_getCurrentStream(state)));
     std::unique_ptr<Convolution> info(new Convolution(
         dataType, input, weight, bias, output, pad, stride, dilation, groups, false));
     cudnn_convolution_forward(
-        state, handle, dataType, input, weight, output, info.get(), benchmark);
+        state, handle, dataType, input, weight, output, info.get(), benchmark,
+        deterministic);
     if (bias) {
         cudnn_convolution_add_bias(
             state, handle, dataType, bias, output, info.get());
@@ -628,12 +827,15 @@ Convolution* cudnn_convolution_full_forward(
 Convolution* cudnn_convolution_transpose_full_forward(
     THCState* state, cudnnHandle_t handle, cudnnDataType_t dataType,
     THVoidTensor* input, THVoidTensor* weight, THVoidTensor* bias, THVoidTensor* output,
-    std::vector<int> pad, std::vector<int> stride, std::vector<int> dilation, int groups, bool benchmark)
+    std::vector<int> pad, std::vector<int> stride, std::vector<int> dilation,
+    int groups, bool benchmark, bool deterministic)
 {
+    CHECK(cudnnSetStream(handle, THCState_getCurrentStream(state)));
     std::unique_ptr<Convolution> info(new Convolution(
         dataType, output, weight, bias, input, pad, stride, dilation, groups, true));
     cudnn_convolution_backward_data(
-        state, handle, dataType, input, output, weight, info.get(), benchmark);
+        state, handle, dataType, input, output, weight, info.get(), benchmark,
+        deterministic);
     if (bias) {
         cudnn_convolution_add_bias(
             state, handle, dataType, bias, output, info.get());

@@ -6,6 +6,7 @@ import torch.sparse as sparse
 import torch.utils.hooks as hooks
 import warnings
 import weakref
+from torch._six import imap
 
 
 class Variable(_C._VariableBase):
@@ -57,6 +58,7 @@ class Variable(_C._VariableBase):
         'dim',
         'get_device',
         'is_cuda',
+        'shape'
     }
 
     def __getattr__(self, name):
@@ -129,7 +131,7 @@ class Variable(_C._VariableBase):
 
         The graph is differentiated using the chain rule. If the variable is
         non-scalar (i.e. its data has more than one element) and requires
-        gradient, the function additionaly requires specifying ``gradient``.
+        gradient, the function additionally requires specifying ``gradient``.
         It should be a tensor of matching type and location, that contains
         the gradient of the differentiated function w.r.t. ``self``.
 
@@ -137,7 +139,7 @@ class Variable(_C._VariableBase):
         zero them before calling it.
 
         Arguments:
-            grad_variables (Tensor, Variable or None): Gradient w.r.t. the
+            gradient (Tensor, Variable or None): Gradient w.r.t. the
                 variable. If it is a tensor, it will be automatically converted
                 to a Variable that is volatile unless ``create_graph`` is True.
                 None values can be specified for scalar Variables or ones that
@@ -275,8 +277,8 @@ class Variable(_C._VariableBase):
         module = torch._import_dotted_name(self.data.__module__)
         return getattr(module, name)
 
-    def cuda(self, device_id=None, async=False):
-        return CudaTransfer.apply(self, device_id, async)
+    def cuda(self, device=None, async=False):
+        return CudaTransfer.apply(self, device, async)
 
     def cpu(self):
         return self.type(getattr(torch, type(self.data).__name__))
@@ -424,6 +426,12 @@ class Variable(_C._VariableBase):
 
     def abs(self):
         return Abs.apply(self)
+
+    def erf(self):
+        return Erf.apply(self)
+
+    def erfinv(self):
+        return ErfInv.apply(self)
 
     def clamp(self, min=None, max=None):
         if min is None and max is None:
@@ -779,11 +787,17 @@ class Variable(_C._VariableBase):
     def gesv(self, a):
         return Gesv.apply(self, a)
 
+    def potrf(self, upper=True):
+        return Potrf.apply(self, upper)
+
     def multinomial(self, num_samples=1, replacement=False):
         return Multinomial(num_samples, replacement)(self)
 
     def bernoulli(self):
         return Bernoulli()(self)
+
+    def zero_(self):
+        return Zero.apply(self, True)
 
     def eq(self, other):
         assert not torch.is_tensor(other), "can't compare Variable and tensor"
@@ -864,7 +878,13 @@ class Variable(_C._VariableBase):
         return len(self.data)
 
     def __iter__(self):
-        return iter(map(lambda i: self[i], range(self.size(0))))
+        # NB: we use 'imap' and not 'map' here, so that in Python 2 we get a
+        # generator and don't eagerly perform all the indexes.  This could
+        # save us work, and also helps keep trace ordering deterministic
+        # (e.g., if you zip(*hiddens), the eager map will force all the
+        # indexes of hiddens[0] before hiddens[1], while the generator
+        # map will interleave them.)
+        return iter(imap(lambda i: self[i], range(self.size(0))))
 
     def __mod__(self, other):
         return self.remainder(other)
@@ -942,7 +962,7 @@ class Variable(_C._VariableBase):
 
 for method in dir(Variable):
     # This will also wrap some methods that normally aren't part of the
-    # funcitonal interface, but we don't care, as they won't ever be used
+    # functional interface, but we don't care, as they won't ever be used
     if method.startswith('_') or method.endswith('_'):
         continue
     if hasattr(Variable._torch, method):

@@ -454,6 +454,20 @@ equal(other) -> bool
 See :func:`torch.equal`
 """)
 
+add_docstr_all('erf',
+               """
+erf() -> Tensor
+
+See :func:`torch.erf`
+""")
+
+add_docstr_all('erfinv',
+               """
+erfinv() -> Tensor
+
+See :func:`torch.erfinv`
+""")
+
 add_docstr_all('exp',
                """
 exp() -> Tensor
@@ -725,7 +739,7 @@ Torch C API as the given tensor.
 
 add_docstr_all('kthvalue',
                """
-kthvalue(k, dim=None) -> (Tensor, LongTensor)
+kthvalue(k, dim=None, keepdim=False) -> (Tensor, LongTensor)
 
 See :func:`torch.kthvalue`
 """)
@@ -867,28 +881,28 @@ See :func:`torch.masked_select`
 
 add_docstr_all('max',
                """
-max(dim=None) -> float or (Tensor, Tensor)
+max(dim=None, keepdim=False) -> float or (Tensor, Tensor)
 
 See :func:`torch.max`
 """)
 
 add_docstr_all('mean',
                """
-mean(dim=None) -> float or (Tensor, Tensor)
+mean(dim=None, keepdim=False) -> float or (Tensor, Tensor)
 
 See :func:`torch.mean`
 """)
 
 add_docstr_all('median',
                """
-median(dim=-1, values=None, indices=None) -> (Tensor, LongTensor)
+median(dim=None, keepdim=False) -> (Tensor, LongTensor)
 
 See :func:`torch.median`
 """)
 
 add_docstr_all('min',
                """
-min(dim=None) -> float or (Tensor, Tensor)
+min(dim=None, keepdim=False) -> float or (Tensor, Tensor)
 
 See :func:`torch.min`
 """)
@@ -902,7 +916,7 @@ See :func:`torch.mm`
 
 add_docstr_all('mode',
                """
-mode(dim=-1, values=None, indices=None) -> (Tensor, LongTensor)
+mode(dim=None, keepdim=False) -> (Tensor, LongTensor)
 
 See :func:`torch.mode`
 """)
@@ -1012,7 +1026,7 @@ See :func:`torch.nonzero`
 
 add_docstr_all('norm',
                """
-norm(p=2) -> float
+norm(p=2, dim=None, keepdim=False) -> float
 
 See :func:`torch.norm`
 """)
@@ -1092,7 +1106,7 @@ In-place version of :meth:`~Tensor.pow`
 
 add_docstr_all('prod',
                """
-prod() -> float
+prod(dim=None, keepdim=False) -> float
 
 See :func:`torch.prod`
 """)
@@ -1116,8 +1130,10 @@ add_docstr_all('random_',
 random_(from=0, to=None, *, generator=None)
 
 Fills this tensor with numbers sampled from the discrete uniform distribution
-over [from, to - 1]. If not specified, the values are only bounded by this
-tensor's data type.
+over [from, to - 1]. If not specified, the values are usually only bounded by
+this tensor's data type. However, for floating point types, if unspecified,
+range will be [0, 2^mantissa] to ensure that every value is representable.
+For example, `torch.DoubleTensor(1).random_()` will be uniform in [0, 2^53].
 """)
 
 add_docstr_all('reciprocal',
@@ -1408,7 +1424,7 @@ In-place version of :meth:`~Tensor.squeeze`
 
 add_docstr_all('std',
                """
-std() -> float
+std(dim=None, unbiased=True, keepdim=False) -> float
 
 See :func:`torch.std`
 """)
@@ -1437,9 +1453,24 @@ Example:
 
 add_docstr_all('stride',
                """
-stride() -> tuple
+stride(dim) -> tuple or int
 
 Returns the stride of the tensor.
+Stride is the jump necessary to go from one element to the next one in the specified dimension dim.
+Tuple is returned when no Argument is passed. So we get stride in all dimensions.
+Integer value is returned when we desire stride in particular dimension.
+
+Args:
+    dim (int): The desired dimension in which stride is required.
+
+Example:
+    >>> x = torch.Tensor([[1, 2, 3, 4, 5], [6, 7, 8, 9, 10]])
+    >>> x.stride()
+    (5, 1)
+    >>>x.stride(0)
+    5
+    >>> x.stride(-1)
+    1
 """)
 
 add_docstr_all('sub',
@@ -1465,7 +1496,7 @@ In-place version of :meth:`~Tensor.sub`
 
 add_docstr_all('sum',
                """
-sum(dim=None) -> float
+sum(dim=None, keepdim=False) -> float
 
 See :func:`torch.sum`
 """)
@@ -1682,7 +1713,7 @@ In-place version of :meth:`~Tensor.unsqueeze`
 
 add_docstr_all('var',
                """
-var() -> float
+var(dim=None, unbiased=True, keepdim=False) -> float
 
 See :func:`torch.var`
 """)
@@ -1714,13 +1745,17 @@ Example:
 
 add_docstr_all('expand',
                """
-expand(tensor, sizes) -> Tensor
+expand(*sizes) -> Tensor
 
 Returns a new view of the tensor with singleton dimensions expanded
 to a larger size.
 
+Passing -1 as the size for a dimension means not changing the size of
+that dimension.
+
 Tensor can be also expanded to a larger number of dimensions, and the
-new ones will be appended at the front.
+new ones will be appended at the front. (For the new dimensions, the
+size cannot be set to -1.)
 
 Expanding a tensor does not allocate new memory, but only creates a
 new view on the existing tensor where a dimension of size one is
@@ -1736,6 +1771,11 @@ Example:
     >>> x.size()
     torch.Size([3, 1])
     >>> x.expand(3, 4)
+     1  1  1  1
+     2  2  2  2
+     3  3  3  3
+    [torch.FloatTensor of size 3x4]
+    >>> x.expand(-1, 4)   # -1 means not changing the size of that dimension
      1  1  1  1
      2  2  2  2
      3  3  3  3

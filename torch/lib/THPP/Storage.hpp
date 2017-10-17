@@ -27,7 +27,7 @@ struct Storage {
   virtual Storage& retain() = 0;
   virtual Storage& free() = 0;
 
-  virtual Storage& resize(long new_size) = 0;
+  virtual Storage& resize(int64_t new_size) = 0;
 
   virtual thpp::Type type() const = 0;
   virtual bool isCuda() const = 0;
@@ -47,7 +47,7 @@ struct StorageScalarInterface : public Storage {
 };
 
 using FloatStorage = StorageScalarInterface<double>;
-using IntStorage = StorageScalarInterface<long long>;
+using IntStorage = StorageScalarInterface<int64_t>;
 
 } // namespace thpp
 

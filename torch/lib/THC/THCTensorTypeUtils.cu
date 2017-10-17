@@ -7,8 +7,8 @@
 namespace {
 
 struct SizeAndStride {
-  long size;
-  long stride;
+  int64_t size;
+  int64_t stride;
 };
 
 int compareSizeAndStride(const void* a, const void* b) {
@@ -94,14 +94,14 @@ TensorUtils<TENSOR_TYPE>::getNumElements(THCState* state,               \
   return TENSOR_TYPE##_nElement(state, t);                              \
 }                                                                       \
                                                                         \
-long                                                                    \
+int64_t                                                                 \
 TensorUtils<TENSOR_TYPE>::getSize(THCState* state,                      \
                                   TENSOR_TYPE* t,                       \
                                   int dim) {                            \
   return TENSOR_TYPE##_size(state, t, dim);                             \
 }                                                                       \
                                                                         \
-long                                                                    \
+int64_t                                                                 \
 TensorUtils<TENSOR_TYPE>::getStride(THCState* state,                    \
                                     TENSOR_TYPE* t,                     \
                                     int dim) {                          \
@@ -143,8 +143,8 @@ bool                                                                    \
 TensorUtils<TENSOR_TYPE>::allSameDevice(THCState* state,                \
                                         TENSOR_TYPE** inputs,           \
                                         int numInputs) {                \
-  THAssert(numInputs > 0);                                                \
-  int device = TensorUtils<TENSOR_TYPE>::getDevice(state, inputs[0]);          \
+  THAssert(numInputs > 0);                                              \
+  int device = TensorUtils<TENSOR_TYPE>::getDevice(state, inputs[0]);   \
   for (int i = 1; i < numInputs; ++i) {                                 \
     if (TensorUtils<TENSOR_TYPE>::getDevice(state, inputs[i]) != device) {     \
       return false;                                                     \
@@ -165,9 +165,9 @@ TensorUtils<TENSOR_TYPE>::overlappingIndices(THCState* state,           \
                                              TENSOR_TYPE* t) {          \
   /* In this function, we don't care about permutations of the */       \
   /* size/stride arrays (transpositions). */                            \
-  /* We order the size/stride arrays by stride, skipping dimensions of */ \
-  /* size 1. Strides of dimensions of size 1 don't matter, since there */ \
-  /* is only one addressing point in them. */                           \
+  /* We order the size/stride arrays by stride, skipping dimensions */  \
+  /* of size 1. Strides of dimensions of size 1 don't matter, since  */ \
+  /* there is only one addressing point in them. */                     \
   /* In this reordered view, the tensor is contiguous if */             \
   /* stride[dim] == size[dim + 1] * stride[dim + 1] for all `dim`. */   \
   /* The tensor has holes if */                                         \
@@ -183,7 +183,7 @@ TensorUtils<TENSOR_TYPE>::overlappingIndices(THCState* state,           \
   int dims = TensorUtils<TENSOR_TYPE>::getDims(state, t);               \
   int nonSize1Dims = 0;                                                 \
   for (int i = 0; i < dims; ++i) {                                      \
-    long size = TensorUtils<TENSOR_TYPE>::getSize(state, t, i);         \
+    int64_t size = TensorUtils<TENSOR_TYPE>::getSize(state, t, i);      \
     if (size > 1) {                                                     \
       info[nonSize1Dims].size = size;                                   \
       info[nonSize1Dims].stride =                                       \
@@ -256,11 +256,11 @@ TensorUtils<TENSOR_TYPE>::all32BitIndexable(THCState* state,            \
   return true;                                                          \
 }
 
-IMPL_TENSOR_UTILS(THCudaByteTensor, unsigned char)
-IMPL_TENSOR_UTILS(THCudaCharTensor, char)
-IMPL_TENSOR_UTILS(THCudaShortTensor, short)
-IMPL_TENSOR_UTILS(THCudaIntTensor, int)
-IMPL_TENSOR_UTILS(THCudaLongTensor, long)
+IMPL_TENSOR_UTILS(THCudaByteTensor, uint8_t)
+IMPL_TENSOR_UTILS(THCudaCharTensor, int8_t)
+IMPL_TENSOR_UTILS(THCudaShortTensor, int16_t)
+IMPL_TENSOR_UTILS(THCudaIntTensor, int32_t)
+IMPL_TENSOR_UTILS(THCudaLongTensor, int64_t)
 IMPL_TENSOR_UTILS(THCudaTensor, float)
 IMPL_TENSOR_UTILS(THCudaDoubleTensor, double)
 

@@ -18,7 +18,7 @@ int main() {
   for (auto s: tensor->sizes())
     assert(s == ++i);
 
-  vector<long> sizes = {2, 2};
+  vector<int64_t> sizes = {2, 2};
   tensor2->resize(sizes);
   tensor2->fill(4);
   tensor->add(*tensor2, 1);

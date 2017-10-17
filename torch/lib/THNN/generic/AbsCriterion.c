@@ -11,6 +11,7 @@ void THNN_(AbsCriterion_updateOutput)(
 {
   real sum = 0;
   THNN_CHECK_NELEMENT(input, target);
+  THTensor_(resize1d)(output, 1);
   TH_TENSOR_APPLY2(real, input, real, target,
     sum += fabs(*input_data - *target_data);
   );

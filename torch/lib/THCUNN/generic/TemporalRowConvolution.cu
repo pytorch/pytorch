@@ -29,9 +29,9 @@ static inline void THNN_(TemporalRowConvolution_shapeCheck)(
   THCUNN_argCheck(state, ndim == 2 || ndim == 3, 1, input,
                   "2D or 3D (batch mode) input tensor expected, but got :%s");
 
-  long inputFrameSize = weight->size[0];
-  long nInputFrame = input->size[dimS];
-  long nOutputFrame = (nInputFrame + 2 * padW - kW) / dW + 1;
+  int64_t inputFrameSize = weight->size[0];
+  int64_t nInputFrame = input->size[dimS];
+  int64_t nOutputFrame = (nInputFrame + 2 * padW - kW) / dW + 1;
 
   if (nOutputFrame < 1) {
     THError("Given input size: (%d x %d). "
@@ -88,12 +88,12 @@ void THNN_(TemporalRowConvolution_updateOutput)(
   }
 
   // Params:
-  long inputFrameSize = weight->size[0];
-  long nInputFrame = input->size[2];
-  long nOutputFrame = (nInputFrame + 2 * padW - kW) / dW + 1;
+  int64_t inputFrameSize = weight->size[0];
+  int64_t nInputFrame = input->size[2];
+  int64_t nOutputFrame = (nInputFrame + 2 * padW - kW) / dW + 1;
 
   // Batch size
-  long batchSize = input->size[0];
+  int64_t batchSize = input->size[0];
 
   // Resize output
   THCTensor_(resize3d)(state, output, batchSize, inputFrameSize, nOutputFrame);
@@ -123,9 +123,9 @@ void THNN_(TemporalRowConvolution_updateOutput)(
     // Do bias first:
     // m_, n_, k_ are dims of matrix A and B
     // (see http://docs.nvidia.com/cuda/cublas/#cublas-lt-t-gt-gemm)
-    long m_ = inputFrameSize;
-    long n_ = nOutputFrame;
-    long k_ = 1;
+    int64_t m_ = inputFrameSize;
+    int64_t n_ = nOutputFrame;
+    int64_t k_ = 1;
 
     // Do GEMM (note: this is a bit confusing because gemm asummes
     // column-major matrices)
@@ -224,12 +224,12 @@ void THNN_(TemporalRowConvolution_updateGradInput)(
   }
 
   // Params:
-  long inputFrameSize = weight->size[0];
-  long nInputFrame = input->size[2];
-  long nOutputFrame = gradOutput->size[2];
+  int64_t inputFrameSize = weight->size[0];
+  int64_t nInputFrame = input->size[2];
+  int64_t nOutputFrame = gradOutput->size[2];
 
   // Batch size
-  long batchSize = input->size[0];
+  int64_t batchSize = input->size[0];
 
   // Resize output
   THCTensor_(resize3d)(state, gradInput, batchSize, inputFrameSize,
@@ -337,12 +337,12 @@ void THNN_(TemporalRowConvolution_accGradParameters)(
   }
 
   // Params:
-  long inputFrameSize = gradWeight->size[0];
-  long nInputFrame = input->size[2];
-  long nOutputFrame = gradOutput->size[2];
+  int64_t inputFrameSize = gradWeight->size[0];
+  int64_t nInputFrame = input->size[2];
+  int64_t nOutputFrame = gradOutput->size[2];
 
   // Batch size
-  long batchSize = input->size[0];
+  int64_t batchSize = input->size[0];
 
   // Define a buffer of ones, for bias accumulation
   if (ones->nDimension != 2 || ones->size[0] * ones->size[1] < nOutputFrame) {
@@ -386,8 +386,8 @@ void THNN_(TemporalRowConvolution_accGradParameters)(
     THCTensor_(free)(state, gradOutput3d);
 
     if (gradBias != NULL) {
-      long m_ = inputFrameSize;
-      long k_ = nOutputFrame;
+      int64_t m_ = inputFrameSize;
+      int64_t k_ = nOutputFrame;
 #if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE)
 #ifdef THC_REAL_IS_FLOAT
       THCudaBlas_Sgemv(

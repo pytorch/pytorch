@@ -1,15 +1,45 @@
 #ifndef TH_TENSOR_DIM_APPLY_INC
 #define TH_TENSOR_DIM_APPLY_INC
 
-#define TH_TENSOR_DIM_APPLY3(TYPE1, TENSOR1, TYPE2, TENSOR2, TYPE3, TENSOR3, DIMENSION, CODE) \
+// This is an example of SIZE_CHECK argument passable to TH_TENSOR_DIM_APPLY3.
+// The TENSOR1, TENSOR2, TENSOR3, DIMENSION will be expanded the same way as
+// TH_TENSOR_DIM_APPLY3.
+// Specifically, this check ensures that TENSOR1, TENSOR2, TENSOR3 have same
+// size except for DIMENSION.
+#define TH_TENSOR_DIM_APPLY3_SIZE_EQ_EXCEPT_DIM(TENSOR1, TENSOR2, TENSOR3, DIMENSION) \
+{ \
+  int shape_check_flag = 0;                                             \
+  for(TH_TENSOR_DIM_APPLY_i = 0; TH_TENSOR_DIM_APPLY_i < TENSOR1->nDimension; TH_TENSOR_DIM_APPLY_i++) \
+  { \
+    if (TH_TENSOR_DIM_APPLY_i == DIMENSION) \
+      continue; \
+    if (TENSOR1->size[TH_TENSOR_DIM_APPLY_i] != TENSOR2->size[TH_TENSOR_DIM_APPLY_i]) { \
+      shape_check_flag = 1; \
+      break; \
+    } \
+    if(TENSOR1->size[TH_TENSOR_DIM_APPLY_i] != TENSOR3->size[TH_TENSOR_DIM_APPLY_i]) { \
+      shape_check_flag = 1; \
+      break; \
+    } \
+  } \
+  if (shape_check_flag == 1) { \
+    THDescBuff T1buff = _THSizeDesc(TENSOR1->size, TENSOR1->nDimension); \
+    THDescBuff T2buff = _THSizeDesc(TENSOR2->size, TENSOR2->nDimension); \
+    THDescBuff T3buff = _THSizeDesc(TENSOR3->size, TENSOR3->nDimension); \
+    THError("Expected %s %s, %s %s and %s %s to have the same size apart from dimension %d", \
+            #TENSOR1, T1buff.str, #TENSOR2, T2buff.str, #TENSOR3, T3buff.str, DIMENSION); \
+  } \
+}
+
+#define TH_TENSOR_DIM_APPLY3(TYPE1, TENSOR1, TYPE2, TENSOR2, TYPE3, TENSOR3, DIMENSION, SIZE_CHECK, CODE) \
 { \
   TYPE1 *TENSOR1##_data = NULL; \
-  long TENSOR1##_stride = 0, TENSOR1##_size = 0; \
+  int64_t TENSOR1##_stride = 0, TENSOR1##_size = 0; \
   TYPE2 *TENSOR2##_data = NULL; \
-  long TENSOR2##_stride = 0, TENSOR2##_size = 0; \
+  int64_t TENSOR2##_stride = 0, TENSOR2##_size = 0; \
   TYPE3 *TENSOR3##_data = NULL; \
-  long TENSOR3##_stride = 0, TENSOR3##_size = 0; \
-  long *TH_TENSOR_DIM_APPLY_counter = NULL; \
+  int64_t TENSOR3##_stride = 0, TENSOR3##_size = 0; \
+  int64_t *TH_TENSOR_DIM_APPLY_counter = NULL; \
   int TH_TENSOR_DIM_APPLY_hasFinished = 0; \
   int TH_TENSOR_DIM_APPLY_i; \
 \
@@ -29,26 +59,9 @@
     THError("inconsistent tensor size, expected %s %s, %s %s and %s %s to have the same " \
             "number of dimensions", #TENSOR1, T1buff.str, #TENSOR2, T2buff.str, #TENSOR3, T3buff.str); \
   }                                                                     \
-  int shape_check_flag = 0;                                             \
-  for(TH_TENSOR_DIM_APPLY_i = 0; TH_TENSOR_DIM_APPLY_i < TENSOR1->nDimension; TH_TENSOR_DIM_APPLY_i++) \
-  { \
-    if(TH_TENSOR_DIM_APPLY_i == DIMENSION) \
-      continue; \
-    if(TENSOR1->size[TH_TENSOR_DIM_APPLY_i] != TENSOR2->size[TH_TENSOR_DIM_APPLY_i]) \
-      shape_check_flag = 1;                                             \
-    if(TENSOR1->size[TH_TENSOR_DIM_APPLY_i] != TENSOR3->size[TH_TENSOR_DIM_APPLY_i]) \
-      shape_check_flag = 1;                                             \
-  } \
-    \
-  if (shape_check_flag == 1) { \
-    THDescBuff T1buff = _THSizeDesc(TENSOR1->size, TENSOR1->nDimension); \
-    THDescBuff T2buff = _THSizeDesc(TENSOR2->size, TENSOR2->nDimension); \
-    THDescBuff T3buff = _THSizeDesc(TENSOR3->size, TENSOR3->nDimension); \
-    THError("Expected %s %s, %s %s and %s %s to have the same size in dimension %d", \
-            #TENSOR1, T1buff.str, #TENSOR2, T2buff.str, #TENSOR3, T3buff.str, DIMENSION); \
-  } \
+  SIZE_CHECK(TENSOR1, TENSOR2, TENSOR3, DIMENSION)                      \
 \
-  TH_TENSOR_DIM_APPLY_counter = (long*)THAlloc(sizeof(long)*(TENSOR1->nDimension)); \
+  TH_TENSOR_DIM_APPLY_counter = (int64_t*)THAlloc(sizeof(int64_t)*(TENSOR1->nDimension)); \
   for(TH_TENSOR_DIM_APPLY_i = 0; TH_TENSOR_DIM_APPLY_i < TENSOR1->nDimension; TH_TENSOR_DIM_APPLY_i++) \
     TH_TENSOR_DIM_APPLY_counter[TH_TENSOR_DIM_APPLY_i] = 0; \
 \
@@ -116,7 +129,7 @@
  * specified DIMENSION. This function makes it easy to store the output from reducing the
  * TENSOR at index. For example, in the sum example described below, we could instead do:
  *
- * long i = 0;
+ * int64_t i = 0;
  * TYPE1 sum;
  *
  * for (i = 0; i < TENSOR1##_size; ++i) {
@@ -130,10 +143,10 @@
 #define TH_TENSOR_DIM_APPLY2(TYPE1, TENSOR1, TYPE2, TENSOR2, DIMENSION, CODE) \
 { \
   TYPE1 *TENSOR1##_data = NULL; \
-  long TENSOR1##_stride = 0, TENSOR1##_size = 0; \
+  int64_t TENSOR1##_stride = 0, TENSOR1##_size = 0; \
   TYPE2 *TENSOR2##_data = NULL; \
-  long TENSOR2##_stride = 0, TENSOR2##_size = 0; \
-  long *TH_TENSOR_DIM_APPLY_counter = NULL; \
+  int64_t TENSOR2##_stride = 0, TENSOR2##_size = 0; \
+  int64_t *TH_TENSOR_DIM_APPLY_counter = NULL; \
   int TH_TENSOR_DIM_APPLY_hasFinished = 0; \
   int TH_TENSOR_DIM_APPLY_i; \
 \
@@ -158,7 +171,7 @@
     }                                                                   \
   } \
 \
-  TH_TENSOR_DIM_APPLY_counter = (long*)THAlloc(sizeof(long)*(TENSOR1->nDimension)); \
+  TH_TENSOR_DIM_APPLY_counter = (int64_t*)THAlloc(sizeof(int64_t)*(TENSOR1->nDimension)); \
   for(TH_TENSOR_DIM_APPLY_i = 0; TH_TENSOR_DIM_APPLY_i < TENSOR1->nDimension; TH_TENSOR_DIM_APPLY_i++) \
     TH_TENSOR_DIM_APPLY_counter[TH_TENSOR_DIM_APPLY_i] = 0; \
 \
@@ -232,7 +245,7 @@
  * And at each point, we can access the data for each of the four elements of the Tensor via
  * TENSOR##_stride. So for example, if we wanted to sum the elements there, we could do:
  *
- * long i = 0;
+ * int64_t i = 0;
  * TYPE sum;
  * for (i = 0; i < TENSOR##_size; i++) {
  *  sum += TENSOR##_data[i * TENSOR##_stride]
@@ -256,8 +269,8 @@
 #define TH_TENSOR_DIM_APPLY(TYPE, TENSOR, DIMENSION, CODE) \
 { \
   TYPE *TENSOR##_data = NULL; \
-  long TENSOR##_stride = 0, TENSOR##_size = 0; \
-  long *TH_TENSOR_DIM_APPLY_counter = NULL; \
+  int64_t TENSOR##_stride = 0, TENSOR##_size = 0; \
+  int64_t *TH_TENSOR_DIM_APPLY_counter = NULL; \
   int TH_TENSOR_DIM_APPLY_hasFinished = 0; \
   int TH_TENSOR_DIM_APPLY_i; \
 \
@@ -268,7 +281,7 @@
   TENSOR##_stride = (TENSOR)->stride[DIMENSION]; \
   TENSOR##_size = TENSOR->size[DIMENSION]; \
   /* Counter stores the indices into the Tensor at any time */ \
-  TH_TENSOR_DIM_APPLY_counter = (long*)THAlloc(sizeof(long)*(TENSOR->nDimension)); \
+  TH_TENSOR_DIM_APPLY_counter = (int64_t*)THAlloc(sizeof(int64_t)*(TENSOR->nDimension)); \
   for(TH_TENSOR_DIM_APPLY_i = 0; TH_TENSOR_DIM_APPLY_i < TENSOR->nDimension; TH_TENSOR_DIM_APPLY_i++) \
     TH_TENSOR_DIM_APPLY_counter[TH_TENSOR_DIM_APPLY_i] = 0; \
 \

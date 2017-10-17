@@ -4,6 +4,8 @@
 
 THC_API void THCTensor_(add)(THCState *state, THCTensor *self, THCTensor *src, real value);
 THC_API void THCTensor_(sub)(THCState *state, THCTensor *self, THCTensor *src, real value);
+THC_API void THCTensor_(add_scaled)(THCState *state, THCTensor *self, THCTensor *src, real value, real alpha);
+THC_API void THCTensor_(sub_scaled)(THCState *state, THCTensor *self, THCTensor *src, real value, real alpha);
 THC_API void THCTensor_(mul)(THCState *state, THCTensor *self, THCTensor *src, real value);
 THC_API void THCTensor_(div)(THCState *state, THCTensor *self, THCTensor *src, real value);
 THC_API void THCTensor_(lshift)(THCState *state, THCTensor *self, THCTensor *src, real value);

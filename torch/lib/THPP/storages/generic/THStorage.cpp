@@ -50,7 +50,7 @@ auto THStorage<real>::free() -> THStorage& {
 }
 
 template<>
-auto THStorage<real>::resize(long new_size) -> THStorage& {
+auto THStorage<real>::resize(int64_t new_size) -> THStorage& {
   THStorage_(resize)(storage, new_size);
   return *this;
 }

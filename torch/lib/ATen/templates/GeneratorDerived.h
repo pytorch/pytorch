@@ -14,8 +14,9 @@ struct ${name}Generator : public Generator {
   virtual ${name}Generator& copy(const Generator& from) override;
   virtual ${name}Generator& free() override;
 
-  virtual unsigned long seed() override;
-  virtual ${name}Generator& manualSeed(unsigned long seed) override;
+  virtual uint64_t seed() override;
+  virtual ${name}Generator& manualSeed(uint64_t seed) override;
+  virtual void * unsafeGetTH() override;
 
 //TODO(zach): figure out friends later
 public:

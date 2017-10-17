@@ -19,29 +19,29 @@
 static pthread_mutex_t ptm = PTHREAD_MUTEX_INITIALIZER;
 #endif
 
-void THAtomicSet(int volatile *a, int newvalue)
+void THAtomicSet(int32_t volatile *a, int32_t newvalue)
 {
 #if defined(USE_C11_ATOMICS)
   atomic_store(a, newvalue);
 #elif defined(USE_MSC_ATOMICS)
-  assert(sizeof(int) == sizeof(long));
-  _InterlockedExchange((long*)a, newvalue);
+  assert(sizeof(int) == sizeof(int32_t));
+  _InterlockedExchange((int32_t*)a, newvalue);
 #elif defined(USE_GCC_ATOMICS)
   __sync_lock_test_and_set(a, newvalue);
 #else
-  int oldvalue;
+  int32_t oldvalue;
   do {
     oldvalue = *a;
   } while (!THAtomicCompareAndSwap(a, oldvalue, newvalue));
 #endif
 }
 
-int THAtomicGet(int volatile *a)
+int THAtomicGet(int32_t volatile *a)
 {
 #if defined(USE_C11_ATOMICS)
   return atomic_load(a);
 #else
-  int value;
+  int32_t value;
   do {
     value = *a;
   } while (!THAtomicCompareAndSwap(a, value, value));
@@ -49,17 +49,16 @@ int THAtomicGet(int volatile *a)
 #endif
 }
 
-int THAtomicAdd(int volatile *a, int value)
+int THAtomicAdd(int32_t volatile *a, int32_t value)
 {
 #if defined(USE_C11_ATOMICS)
   return atomic_fetch_add(a, value);
 #elif defined(USE_MSC_ATOMICS)
-  assert(sizeof(int) == sizeof(long));
-  return _InterlockedExchangeAdd((long*)a, value);
+  return _InterlockedExchangeAdd((int32_t*)a, value);
 #elif defined(USE_GCC_ATOMICS)
   return __sync_fetch_and_add(a, value);
 #else
-  int oldvalue;
+  int32_t oldvalue;
   do {
     oldvalue = *a;
   } while (!THAtomicCompareAndSwap(a, oldvalue, (oldvalue + value)));
@@ -67,27 +66,26 @@ int THAtomicAdd(int volatile *a, int value)
 #endif
 }
 
-void THAtomicIncrementRef(int volatile *a)
+void THAtomicIncrementRef(int32_t volatile *a)
 {
   THAtomicAdd(a, 1);
 }
 
-int THAtomicDecrementRef(int volatile *a)
+int THAtomicDecrementRef(int32_t volatile *a)
 {
   return (THAtomicAdd(a, -1) == 1);
 }
 
-int THAtomicCompareAndSwap(int volatile *a, int oldvalue, int newvalue)
+int THAtomicCompareAndSwap(int32_t volatile *a, int32_t oldvalue, int32_t newvalue)
 {
 #if defined(USE_C11_ATOMICS)
   return atomic_compare_exchange_strong(a, &oldvalue, newvalue);
 #elif defined(USE_MSC_ATOMICS)
-  assert(sizeof(int) == sizeof(long));
-  return (_InterlockedCompareExchange((long*)a, (long)newvalue, (long)oldvalue) == (long)oldvalue);
+  return (_InterlockedCompareExchange((int32_t*)a, (int32_t)newvalue, (int32_t)oldvalue) == (int32_t)oldvalue);
 #elif defined(USE_GCC_ATOMICS)
   return __sync_bool_compare_and_swap(a, oldvalue, newvalue);
 #elif defined(USE_PTHREAD_ATOMICS)
-  int ret = 0;
+  int32_t ret = 0;
   pthread_mutex_lock(&ptm);
   if(*a == oldvalue) {
     *a = newvalue;
@@ -106,28 +104,28 @@ int THAtomicCompareAndSwap(int volatile *a, int oldvalue, int newvalue)
 #endif
 }
 
-void THAtomicSetLong(long volatile *a, long newvalue)
+void THAtomicSetLong(int64_t volatile *a, int64_t newvalue)
 {
 #if defined(USE_C11_ATOMICS)
   atomic_store(a, newvalue);
 #elif defined(USE_MSC_ATOMICS)
-  _InterlockedExchange(a, newvalue);
+  _InterlockedExchange64(a, newvalue);
 #elif defined(USE_GCC_ATOMICS)
   __sync_lock_test_and_set(a, newvalue);
 #else
-  long oldvalue;
+  int64_t oldvalue;
   do {
     oldvalue = *a;
   } while (!THAtomicCompareAndSwapLong(a, oldvalue, newvalue));
 #endif
 }
 
-long THAtomicGetLong(long volatile *a)
+int64_t THAtomicGetLong(int64_t volatile *a)
 {
 #if defined(USE_C11_ATOMICS)
   return atomic_load(a);
 #else
-  long value;
+  int64_t value;
   do {
     value = *a;
   } while (!THAtomicCompareAndSwapLong(a, value, value));
@@ -135,16 +133,16 @@ long THAtomicGetLong(long volatile *a)
 #endif
 }
 
-long THAtomicAddLong(long volatile *a, long value)
+int64_t THAtomicAddLong(int64_t volatile *a, int64_t value)
 {
 #if defined(USE_C11_ATOMICS)
   return atomic_fetch_add(a, value);
 #elif defined(USE_MSC_ATOMICS)
-  return _InterlockedExchangeAdd(a, value);
+  return _InterlockedExchangeAdd64(a, value);
 #elif defined(USE_GCC_ATOMICS)
   return __sync_fetch_and_add(a, value);
 #else
-  long oldvalue;
+  int64_t oldvalue;
   do {
     oldvalue = *a;
   } while (!THAtomicCompareAndSwapLong(a, oldvalue, (oldvalue + value)));
@@ -152,16 +150,16 @@ long THAtomicAddLong(long volatile *a, long value)
 #endif
 }
 
-long THAtomicCompareAndSwapLong(long volatile *a, long oldvalue, long newvalue)
+int64_t THAtomicCompareAndSwapLong(int64_t volatile *a, int64_t oldvalue, int64_t newvalue)
 {
 #if defined(USE_C11_ATOMICS)
   return atomic_compare_exchange_strong(a, &oldvalue, newvalue);
 #elif defined(USE_MSC_ATOMICS)
-  return (_InterlockedCompareExchange(a, newvalue, oldvalue) == oldvalue);
+  return (_InterlockedCompareExchange64(a, newvalue, oldvalue) == oldvalue);
 #elif defined(USE_GCC_ATOMICS)
   return __sync_bool_compare_and_swap(a, oldvalue, newvalue);
 #elif defined(USE_PTHREAD_ATOMICS)
-  long ret = 0;
+  int64_t ret = 0;
   pthread_mutex_lock(&ptm);
   if(*a == oldvalue) {
     *a = newvalue;

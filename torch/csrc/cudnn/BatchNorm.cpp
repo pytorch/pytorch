@@ -62,6 +62,7 @@ void cudnn_batch_norm_forward(
     THVoidTensor* save_mean, THVoidTensor* save_var, bool training,
     double exponential_average_factor, double epsilon)
 {
+  CHECK(cudnnSetStream(handle, THCState_getCurrentStream(state)));
   assertSameGPU(dataType, input, output, weight, bias, running_mean, running_var,
       save_mean, save_var);
   cudnnBatchNormMode_t mode;
@@ -69,6 +70,10 @@ void cudnn_batch_norm_forward(
     mode = CUDNN_BATCHNORM_PER_ACTIVATION;
   } else {
     mode = CUDNN_BATCHNORM_SPATIAL;
+#if CUDNN_VERSION >= 7003
+    if(training)
+      mode = CUDNN_BATCHNORM_SPATIAL_PERSISTENT;
+#endif
   }
 
   TensorDescriptor idesc;  // input descriptor
@@ -124,6 +129,7 @@ void cudnn_batch_norm_backward(
     THVoidTensor* save_mean, THVoidTensor* save_var, bool training,
     double epsilon)
 {
+  CHECK(cudnnSetStream(handle, THCState_getCurrentStream(state)));
   assertSameGPU(dataType, input, grad_output, grad_input, grad_weight, grad_bias, weight,
       running_mean, running_var, save_mean, save_var);
   cudnnBatchNormMode_t mode;
@@ -131,6 +137,11 @@ void cudnn_batch_norm_backward(
     mode = CUDNN_BATCHNORM_PER_ACTIVATION;
   } else {
     mode = CUDNN_BATCHNORM_SPATIAL;
+#if CUDNN_VERSION >= 7003
+    if(training)
+      mode = CUDNN_BATCHNORM_SPATIAL_PERSISTENT;
+#endif
+
   }
 
   THVoidTensor_assertContiguous(input);

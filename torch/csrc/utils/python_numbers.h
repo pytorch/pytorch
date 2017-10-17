@@ -1,9 +1,19 @@
 #pragma once
 
 #include <Python.h>
+#include <stdint.h>
 
 // largest integer that can be represented consecutively in a double
 const int64_t DOUBLE_INT_MAX = 9007199254740992;
+
+inline PyObject* THPUtils_packInt64(int64_t value) {
+#if PY_MAJOR_VERSION == 2
+  if (value <= INT32_MAX && value >= INT32_MIN) {
+    return PyInt_FromLong(static_cast<long>(value));
+  }
+#endif
+  return PyLong_FromLongLong(value);
+}
 
 inline bool THPUtils_checkLong(PyObject* obj) {
 #if PY_MAJOR_VERSION == 2

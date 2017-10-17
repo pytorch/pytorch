@@ -10,9 +10,9 @@ void THNN_(ClassNLLCriterion_updateOutput)(
            bool sizeAverage,
            THCTensor *weights,
            THCTensor *total_weight,
-           long ignore_index) {
-  THCUNN_check_dim_size(state, output, 1, 0, 1);
-  THCUNN_check_dim_size(state, total_weight, 1, 0, 1);
+           int64_t ignore_index) {
+  THCTensor_(resize1d)(state, output, 1);
+  THCTensor_(resize1d)(state, total_weight, 1);
   ignore_index -= TH_INDEX_BASE;
 
   if (THCIndexTensor_(nDimension)(state, target) > 1) {
@@ -34,8 +34,8 @@ void THNN_(ClassNLLCriterion_updateOutput)(
 
   THArgCheck(n_dims <= 2 && n_dims > 0, 2, "vector or matrix expected");
 
-  long batch_size = n_dims == 1 ? 1 : THCTensor_(size)(state, input, 0);
-  long num_targets = THCudaLongTensor_size(state, target, 0);
+  int64_t batch_size = n_dims == 1 ? 1 : THCTensor_(size)(state, input, 0);
+  int64_t num_targets = THCudaLongTensor_size(state, target, 0);
   THArgCheck(batch_size == num_targets,
       2, "mismatch between the batch size of input (%ld) and that of target (%ld)",
       batch_size, num_targets);
@@ -101,7 +101,7 @@ void THNN_(ClassNLLCriterion_updateGradInput)(
            bool sizeAverage,
            THCTensor *weights,
            THCTensor *total_weight,
-           long ignore_index) {
+           int64_t ignore_index) {
   if (THCIndexTensor_(nDimension)(state, target) > 1) {
     THError("multi-target not supported");
   }
@@ -110,6 +110,8 @@ void THNN_(ClassNLLCriterion_updateGradInput)(
   int n_dims = THCTensor_(nDimension)(state, input);
   int n_classes = THCTensor_(size)(state, input, n_dims - 1);
 
+  THCTensor_(resizeAs)(state, gradInput, input);
+  THCTensor_(zero)(state, gradInput);
   THArgCheck(THCTensor_(isContiguous)(state, gradInput), 4, "gradInput must be contiguous");
 
   if (weights) {
@@ -125,8 +127,8 @@ void THNN_(ClassNLLCriterion_updateGradInput)(
 
   THArgCheck(n_dims <= 2 && n_dims > 0, 2, "vector or matrix expected");
 
-  long batch_size = n_dims == 1 ? 1 : THCTensor_(size)(state, input, 0);
-  long num_targets = THCudaLongTensor_size(state, target, 0);
+  int64_t batch_size = n_dims == 1 ? 1 : THCTensor_(size)(state, input, 0);
+  int64_t num_targets = THCudaLongTensor_size(state, target, 0);
   THArgCheck(batch_size == num_targets,
       2, "mismatch between the batch size of input (%ld) and that of target (%ld)",
       batch_size, num_targets);

@@ -24,13 +24,17 @@ CPUGenerator& CPUGenerator::free() {
   return *this;
 }
 
-unsigned long CPUGenerator::seed() {
+uint64_t CPUGenerator::seed() {
   return THRandom_seed(generator);
 }
 
-CPUGenerator& CPUGenerator::manualSeed(unsigned long seed) {
+CPUGenerator& CPUGenerator::manualSeed(uint64_t seed) {
   THRandom_manualSeed(generator, seed);
   return *this;
+}
+
+void * CPUGenerator::unsafeGetTH() {
+  return generator;
 }
 
 } // namespace at

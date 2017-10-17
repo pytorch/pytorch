@@ -24,11 +24,11 @@ THGenerator& THGenerator::free() {
   return *this;
 }
 
-unsigned long THGenerator::seed() {
+uint64_t THGenerator::seed() {
   return THRandom_seed(generator);
 }
 
-THGenerator& THGenerator::manualSeed(unsigned long seed) {
+THGenerator& THGenerator::manualSeed(uint64_t seed) {
   THRandom_manualSeed(generator, seed);
   return *this;
 }

@@ -78,7 +78,7 @@ class StepLR(_LRScheduler):
         optimizer (Optimizer): Wrapped optimizer.
         step_size (int): Period of learning rate decay.
         gamma (float): Multiplicative factor of learning rate decay.
-            Default: -0.1.
+            Default: 0.1.
         last_epoch (int): The index of last epoch. Default: -1.
 
     Example:
@@ -113,7 +113,7 @@ class MultiStepLR(_LRScheduler):
         optimizer (Optimizer): Wrapped optimizer.
         milestones (list): List of epoch indices. Must be increasing.
         gamma (float): Multiplicative factor of learning rate decay.
-            Default: -0.1.
+            Default: 0.1.
         last_epoch (int): The index of last epoch. Default: -1.
 
     Example:
@@ -197,7 +197,7 @@ class ReduceLROnPlateau(object):
 
     Example:
         >>> optimizer = torch.optim.SGD(model.parameters(), lr=0.1, momentum=0.9)
-        >>> scheduler = torch.optim.ReduceLROnPlateau(optimizer, 'min')
+        >>> scheduler = ReduceLROnPlateau(optimizer, 'min')
         >>> for epoch in range(10):
         >>>     train(...)
         >>>     val_loss = validate(...)

@@ -1,7 +1,7 @@
 #include "THCSortUtils.cuh"
 
 // Returns 2^(ceil(lg(n)) from Stanford bit twiddling hacks
-unsigned long nextHighestPowerOf2(unsigned long n) {
+uint64_t nextHighestPowerOf2(uint64_t n) {
   n--;
   n |= n >> 1;
   n |= n >> 2;

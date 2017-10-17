@@ -1,72 +1,74 @@
 #include <immintrin.h>
 #include "common_simd.h"
+#include <stdint.h>
+
 
 #define CLEAR_AVX() _mm256_zeroupper()
 
-void convolve_5x5_1_avx(float* output, float* image, float* weight, long count, long outputStride, long inputStride) {
-  long i = 0;
-  long alignedCount = count & 0xFFFFFFF8;
+void convolve_5x5_1_avx(float* output, float* image, float* weight, int64_t count, int64_t outputStride, int64_t inputStride) {
+  int64_t i = 0;
+  int64_t alignedCount = count & 0xFFFFFFF8;
   DECLARE_OUTPUT_1()
   for (; i < alignedCount; i+=8) {
     CONVOLVE_8COLS_XROWS(1, i)
   }
 }
 
-void convolve_5x5_2_avx(float* output, float* image, float* weight, long count, long outputStride, long inputStride) {
-  long i = 0;
-  long alignedCount = count & 0xFFFFFFF8;
+void convolve_5x5_2_avx(float* output, float* image, float* weight, int64_t count, int64_t outputStride, int64_t inputStride) {
+  int64_t i = 0;
+  int64_t alignedCount = count & 0xFFFFFFF8;
   DECLARE_OUTPUT_2()
   for (; i < alignedCount; i+=8) {
     CONVOLVE_8COLS_XROWS(2, i)
   }
 }
 
-void convolve_5x5_4_avx(float* output, float* image, float* weight, long count, long outputStride, long inputStride) {
-  long i = 0;
-  long alignedCount = count & 0xFFFFFFF8;
+void convolve_5x5_4_avx(float* output, float* image, float* weight, int64_t count, int64_t outputStride, int64_t inputStride) {
+  int64_t i = 0;
+  int64_t alignedCount = count & 0xFFFFFFF8;
   DECLARE_OUTPUT_4()
   for (; i < alignedCount; i+=8) {
     CONVOLVE_8COLS_XROWS(4, i)
   }
 }
 
-void convolve_5x5_5_avx(float* output, float* image, float* weight, long count, long outputStride, long inputStride) {
-  long i = 0;
-  long alignedCount = count & 0xFFFFFFF8;
+void convolve_5x5_5_avx(float* output, float* image, float* weight, int64_t count, int64_t outputStride, int64_t inputStride) {
+  int64_t i = 0;
+  int64_t alignedCount = count & 0xFFFFFFF8;
   DECLARE_OUTPUT_5()
   for (; i < alignedCount; i+=8) {
     CONVOLVE_8COLS_XROWS(5, i)
   }
 }
 
-void convolve_5x5_6_avx(float* output, float* image, float* weight, long count, long outputStride, long inputStride) {
-  long i = 0;
-  long alignedCount = count & 0xFFFFFFF8;
+void convolve_5x5_6_avx(float* output, float* image, float* weight, int64_t count, int64_t outputStride, int64_t inputStride) {
+  int64_t i = 0;
+  int64_t alignedCount = count & 0xFFFFFFF8;
   DECLARE_OUTPUT_6()
   for (; i < alignedCount; i+=8) {
     CONVOLVE_8COLS_XROWS(6, i)
   }
 }
 
-void convolve_5x5_7_avx(float* output, float* image, float* weight, long count, long outputStride, long inputStride) {
-  long i = 0;
-  long alignedCount = count & 0xFFFFFFF8;
+void convolve_5x5_7_avx(float* output, float* image, float* weight, int64_t count, int64_t outputStride, int64_t inputStride) {
+  int64_t i = 0;
+  int64_t alignedCount = count & 0xFFFFFFF8;
   DECLARE_OUTPUT_7()
   for (; i < alignedCount; i+=8) {
     CONVOLVE_8COLS_XROWS(7, i)
   }
 }
 
-void convolve_5x5_8_avx(float* output, float* image, float* weight, long count, long outputStride, long inputStride) {
-  long i = 0;
-  long alignedCount = count & 0xFFFFFFF8;
+void convolve_5x5_8_avx(float* output, float* image, float* weight, int64_t count, int64_t outputStride, int64_t inputStride) {
+  int64_t i = 0;
+  int64_t alignedCount = count & 0xFFFFFFF8;
   DECLARE_OUTPUT_8()
   for (; i < alignedCount; i+=8) {
     CONVOLVE_8COLS_XROWS(8, i)
   }
 }
 
-void convolve_5x5_64x64_avx(float* output, float* image, float* weight, long count, long outputStride, long inputStride) {
+void convolve_5x5_64x64_avx(float* output, float* image, float* weight, int64_t count, int64_t outputStride, int64_t inputStride) {
   for(int i = 0; i < 60; i+=6)
   {
     DECLARE_OUTPUT_6()
@@ -92,7 +94,7 @@ void convolve_5x5_64x64_avx(float* output, float* image, float* weight, long cou
   CONVOLVE_8COLS_XROWS(4, 56)
 }
 
-void convolve_5x5_32x32_avx(float* output, float* image, float* weight, long count, long outputStride, long inputStride) {
+void convolve_5x5_32x32_avx(float* output, float* image, float* weight, int64_t count, int64_t outputStride, int64_t inputStride) {
   for(int i = 0; i < 30; i+=6)
   {
     DECLARE_OUTPUT_6()
@@ -110,7 +112,7 @@ void convolve_5x5_32x32_avx(float* output, float* image, float* weight, long cou
   CONVOLVE_8COLS_XROWS(2, 24)
 }
 
-void convolve_5x5_16x16_avx(float* output, float* image, float* weight, long count, long outputStride, long inputStride) {
+void convolve_5x5_16x16_avx(float* output, float* image, float* weight, int64_t count, int64_t outputStride, int64_t inputStride) {
   for(int i = 0; i < 12; i+=6)
   {
     DECLARE_OUTPUT_6()
@@ -124,16 +126,16 @@ void convolve_5x5_16x16_avx(float* output, float* image, float* weight, long cou
   CONVOLVE_8COLS_XROWS(4, 8)
 }
 
-void convolve_5x5_8x8_avx(float* output, float* image, float* weight, long count, long outputStride, long inputStride) {
+void convolve_5x5_8x8_avx(float* output, float* image, float* weight, int64_t count, int64_t outputStride, int64_t inputStride) {
   DECLARE_OUTPUT_8()
   CONVOLVE_8COLS_XROWS(8, 0)
 }
 
-void convolve_5x5_sse(float* output, float* input, float* kernel, long outRows, long outCols, long outStride, long inCols);
+void convolve_5x5_sse(float* output, float* input, float* kernel, int64_t outRows, int64_t outCols, int64_t outStride, int64_t inCols);
 
-void convolve_5x5_avx(float* output, float* input, float* kernel, long outRows, long outCols, long outStride, long inCols) {
-  long ic = inCols;
-  long yy = 0;
+void convolve_5x5_avx(float* output, float* input, float* kernel, int64_t outRows, int64_t outCols, int64_t outStride, int64_t inCols) {
+  int64_t ic = inCols;
+  int64_t yy = 0;
   float* t_ = input;
   float* r_ = output;
   float* k_ = kernel;
@@ -201,8 +203,8 @@ void convolve_5x5_avx(float* output, float* input, float* kernel, long outRows, 
     r_ += (outStride * 1);
   }
 
-  long procCols = outCols & 0xFFFFFFF8; // avx version processes 8 cols at a time
-  long remCols = outCols - procCols;
+  int64_t procCols = outCols & 0xFFFFFFF8; // avx version processes 8 cols at a time
+  int64_t remCols = outCols - procCols;
 
   //process the rest using sse
   if( remCols > 0) {

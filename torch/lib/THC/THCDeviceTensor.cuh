@@ -47,7 +47,7 @@ struct DefaultPtrTraits {
 - `T` is the contained type (e.g., `float`)
 - `Dim` is the tensor rank
 - `IndexT` is the integer type used for size/stride arrays, and for
-- all indexing math. Default is `int`, but for large tensors, `long`
+- all indexing math. Default is `int`, but for large tensors, `int64_t`
 - can be used instead.
 - `PtrTraits` are traits applied to our data pointer (T*). By default,
 - this is just T*, but RestrictPtrTraits can be used to apply T*

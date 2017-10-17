@@ -10,8 +10,8 @@ void THNN_(DistKLDivCriterion_updateOutput)(
           bool sizeAverage)
 {
   THNN_CHECK_NELEMENT(input, target);
-  THNN_CHECK_DIM_SIZE(output, 1, 0, 1);
-  
+  THTensor_(resize1d)(output, 1);
+
   real sum = 0;
 
   TH_TENSOR_APPLY2(real, input, real, target,
@@ -32,7 +32,7 @@ void THNN_(DistKLDivCriterion_updateGradInput)(
           bool sizeAverage)
 {
   THNN_CHECK_NELEMENT(input, target);
-  
+
   real norm = (sizeAverage ? 1./((real)THTensor_(nElement)(input)) : 1.);
 
   THTensor_(resizeAs)(gradInput, input);

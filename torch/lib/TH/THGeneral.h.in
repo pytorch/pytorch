@@ -1,6 +1,7 @@
 #ifndef TH_GENERAL_INC
 #define TH_GENERAL_INC
 
+#include <stdint.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <stdarg.h>
@@ -10,6 +11,7 @@
 #include <time.h>
 #include <string.h>
 #include <stddef.h>
+#include <inttypes.h>
 
 #cmakedefine USE_BLAS
 #cmakedefine USE_LAPACK
@@ -50,7 +52,7 @@ typedef struct {
 
 
 TH_API double THLog1p(const double x);
-TH_API THDescBuff _THSizeDesc(const long *size, const long ndim);
+TH_API THDescBuff _THSizeDesc(const int64_t *size, const int64_t ndim);
 TH_API void _THError(const char *file, const int line, const char *fmt, ...);
 TH_API void _THAssertionFailed(const char *file, const int line, const char *exp, const char *fmt, ...);
 TH_API void THSetErrorHandler(THErrorHandlerFunction new_handler, void *data);
@@ -120,7 +122,12 @@ do {                                                                  \
 #define THMax(X, Y)  ((X) > (Y) ? (X) : (Y))
 
 #if (defined(_MSC_VER) || defined(__MINGW32__))
-# define log1p(x) THLog1p(x)
+#if defined(_MSC_VER)
+__inline double log1p(double x) { return THLog1p(x); }
+#else
+inline double log1p(double x) { return THLog1p(x); }
+#endif
+
 #define snprintf _snprintf
 #define popen _popen
 #define pclose _pclose

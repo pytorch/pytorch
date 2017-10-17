@@ -1,5 +1,7 @@
 #pragma once
 
+#include <memory>
+
 namespace torch { namespace autograd {
 
 struct VariableVersion {
@@ -51,4 +53,3 @@ struct VariableVersion {
 };
 
 }} // namespace torch::autograd
-

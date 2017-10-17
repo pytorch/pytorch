@@ -19,6 +19,8 @@ THC_API void THCTensor_(tan)(THCState *state, THCTensor *self, THCTensor *src);
 THC_API void THCTensor_(atan)(THCState *state, THCTensor *self, THCTensor *src);
 THC_API void THCTensor_(atan2)(THCState *state, THCTensor *r_, THCTensor *tx, THCTensor *ty);
 THC_API void THCTensor_(tanh)(THCState *state, THCTensor *self, THCTensor *src);
+THC_API void THCTensor_(erf)(THCState *state, THCTensor *self, THCTensor *src);
+THC_API void THCTensor_(erfinv)(THCState *state, THCTensor *self, THCTensor *src);
 THC_API void THCTensor_(pow)(THCState *state, THCTensor *self, THCTensor *src, real value);
 THC_API void THCTensor_(tpow)(THCState *state, THCTensor *self, real value, THCTensor *src);
 THC_API void THCTensor_(sqrt)(THCState *state, THCTensor *self, THCTensor *src);
@@ -30,8 +32,14 @@ THC_API void THCTensor_(trunc)(THCState *state, THCTensor *self, THCTensor *src)
 THC_API void THCTensor_(frac)(THCState *state, THCTensor *self, THCTensor *src);
 THC_API void THCTensor_(lerp)(THCState *state, THCTensor *result, THCTensor *a, THCTensor *b, real w);
 
-THC_API void THCTensor_(neg)(THCState *state, THCTensor *self, THCTensor *src);
 THC_API void THCTensor_(cinv)(THCState *state, THCTensor *self, THCTensor *src);
+
+#endif
+
+#if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE) || defined(THC_REAL_IS_HALF) || \
+    defined(THC_REAL_IS_SHORT) || defined(THC_REAL_IS_INT) || defined(THC_REAL_IS_LONG)
+
+THC_API void THCTensor_(neg)(THCState *state, THCTensor *self, THCTensor *src);
 
 #endif
 

@@ -10,10 +10,10 @@ void THNN_(ClassNLLCriterion_updateOutput)(
           bool sizeAverage,
           THTensor *weights,
           THTensor *total_weight,
-          long ignore_index)
+          int64_t ignore_index)
 {
-  THNN_CHECK_DIM_SIZE(output, 1, 0, 1);
-  THNN_CHECK_DIM_SIZE(total_weight, 1, 0, 1);
+  THTensor_(resize1d)(output, 1);
+  THTensor_(resize1d)(total_weight, 1);
   int n_dims = THTensor_(nDimension)(input);
   int n_classes = THTensor_(size)(input, n_dims - 1);
   ignore_index -= TH_INDEX_BASE;
@@ -87,8 +87,11 @@ void THNN_(ClassNLLCriterion_updateGradInput)(
           bool sizeAverage,
           THTensor *weights,
           THTensor *total_weight,
-          long ignore_index)
+          int64_t ignore_index)
 {
+  THTensor_(resizeAs)(gradInput, input);
+  THTensor_(zero)(gradInput);
+
   int n_dims = THTensor_(nDimension)(input);
   int n_classes = THTensor_(size)(input, n_dims - 1);
   ignore_index -= TH_INDEX_BASE;

@@ -9,7 +9,7 @@ def replicate(network, devices):
 
     params = list(network.parameters())
     param_indices = {param: idx for idx, param in enumerate(params)}
-    param_copies = Broadcast(devices)(*params)
+    param_copies = Broadcast.apply(devices, *params)
     if len(params) > 0:
         param_copies = [param_copies[i:i + len(params)]
                         for i in range(0, len(param_copies), len(params))]

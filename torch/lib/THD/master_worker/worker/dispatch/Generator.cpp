@@ -24,13 +24,13 @@ static void generatorCopy(rpc::RPCMessage& raw_message) {
 static void generatorSeed(rpc::RPCMessage& raw_message) {
   thpp::Generator* _generator = unpackRetrieveGenerator(raw_message);
   finalize(raw_message);
-  long long response = _generator->seed();
+  int64_t response = _generator->seed();
   sendValueToMaster(response);
 }
 
 static void generatorManualSeed(rpc::RPCMessage& raw_message) {
   thpp::Generator* _generator = unpackRetrieveGenerator(raw_message);
-  unsigned long seed = unpackInteger(raw_message);
+  uint64_t seed = unpackInteger(raw_message);
   finalize(raw_message);
   _generator->manualSeed(seed);
 }

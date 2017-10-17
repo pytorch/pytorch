@@ -16,23 +16,23 @@ __global__ void cuda_VolumetricMaxUnpooling_updateOutput(
   int dT, int dH, int dW,
   int padT, int padH, int padW, int offsetZ)
 {
-  long iColumn = blockIdx.x * blockDim.x + threadIdx.x;
-  long iRow    = blockIdx.y * blockDim.y + threadIdx.y;
-  long iFrame  = (blockIdx.z + offsetZ) % input.getSize(1); // intput frame/time
-  long slice   = (blockIdx.z + offsetZ) / input.getSize(1); // intput slice/feature
+  int64_t iColumn = blockIdx.x * blockDim.x + threadIdx.x;
+  int64_t iRow    = blockIdx.y * blockDim.y + threadIdx.y;
+  int64_t iFrame  = (blockIdx.z + offsetZ) % input.getSize(1); // intput frame/time
+  int64_t slice   = (blockIdx.z + offsetZ) / input.getSize(1); // intput slice/feature
 
   if (iRow < input.getSize(2) && iColumn < input.getSize(3))
   {
-    long start_t = iFrame * dT - padT;
-    long start_h = iRow * dH - padH;
-    long start_w = iColumn * dW - padW;
+    int64_t start_t = iFrame * dT - padT;
+    int64_t start_h = iRow * dH - padH;
+    int64_t start_w = iColumn * dW - padW;
 
     Dtype val = input[slice][iFrame][iRow][iColumn];
 
     THCIndex_t *idx = &indices[slice][iFrame][iRow][iColumn];
-    long maxz = ((unsigned char*)(idx))[0];
-    long maxy = ((unsigned char*)(idx))[1];
-    long maxx = ((unsigned char*)(idx))[2];
+    int64_t maxz = ((unsigned char*)(idx))[0];
+    int64_t maxy = ((unsigned char*)(idx))[1];
+    int64_t maxx = ((unsigned char*)(idx))[2];
     output[slice][start_t + maxz][start_h + maxy][start_w + maxx] = val;
   }
 }
@@ -53,14 +53,14 @@ __global__ void cuda_VolumetricMaxUnpooling_updateGradInput(
   if (iRow < gradInput.getSize(2) && iColumn < gradInput.getSize(3))
   {
 
-    long start_t = iFrame * dT - padT;
-    long start_h = iRow * dH - padH;
-    long start_w = iColumn * dW - padW;
+    int64_t start_t = iFrame * dT - padT;
+    int64_t start_h = iRow * dH - padH;
+    int64_t start_w = iColumn * dW - padW;
 
     THCIndex_t *idx = &indices[slice][iFrame][iRow][iColumn];
-    long maxz = ((unsigned char*)(idx))[0];
-    long maxy = ((unsigned char*)(idx))[1];
-    long maxx = ((unsigned char*)(idx))[2];
+    int64_t maxz = ((unsigned char*)(idx))[0];
+    int64_t maxy = ((unsigned char*)(idx))[1];
+    int64_t maxx = ((unsigned char*)(idx))[2];
 
     Dtype grad_val = gradOutput[slice][start_t + maxz][start_h + maxy][start_w + maxx];
 

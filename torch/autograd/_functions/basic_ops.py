@@ -1,10 +1,36 @@
 import torch
-from ..function import Function, InplaceFunction
+from ..function import Function, InplaceFunction, traceable
 from .utils import maybe_unexpand, maybe_unexpand_or_view
 import math
 
 
+# Note [Export inplace]
+# ~~~~~~~~~~~~~~~~~~~~~
+# In abstract, it would be better for us to export inplace annotations,
+# than to not export them, since it is useful information that can
+# help the target of an ONNX export export more efficiently.  Unfortunately,
+# there are a few barriers to actually making this happen:
+#
+#   - ONNX does not currently standardize any notion of inplace
+#   - PyTorch's parallel execution engine (which executes these operators)
+#     doesn't handle inplace operations correctly
+#   - If we did add inplace, we would also need a notion of *aliasing*,
+#     to determine when reordering past an inplace operation is sound
+#     or not.
+#
+# In short, while it may seem awkward and terrible for us to simply
+# unconditionally discard the inplace annotations on our autograd functions;
+# it is *sound* to do so (inplace ops still "return" the result
+# of the inplace operation), and is not easy to fix.
+
+
+@traceable
 class Add(InplaceFunction):
+
+    @staticmethod
+    def symbolic(g, a, b, inplace=False):
+        # TODO: [Export inplace]
+        return g.op("Add", a, b)
 
     @staticmethod
     def forward(ctx, a, b, inplace=False):
@@ -21,7 +47,13 @@ class Add(InplaceFunction):
         return maybe_unexpand(grad_output, ctx.a_size), maybe_unexpand_or_view(grad_output, ctx.b_size), None
 
 
+@traceable
 class Sub(InplaceFunction):
+
+    @staticmethod
+    def symbolic(g, a, b, inplace=False):
+        # TODO: [Export inplace]
+        return g.appendNode(g.create("Sub", [a, b]))
 
     @staticmethod
     def forward(ctx, a, b, inplace=False):
@@ -38,7 +70,13 @@ class Sub(InplaceFunction):
         return maybe_unexpand(grad_output, ctx.a_size), maybe_unexpand_or_view(grad_output.neg(), ctx.b_size), None
 
 
+@traceable
 class Mul(Function):
+
+    @staticmethod
+    def symbolic(g, a, b, inplace=False):
+        # TODO: [Export inplace]
+        return g.op("Mul", a, b)
 
     @staticmethod
     def forward(ctx, a, b):
@@ -53,6 +91,7 @@ class Mul(Function):
         return maybe_unexpand(grad_output.mul(b), ctx.a_size), maybe_unexpand_or_view(grad_output.mul(a), ctx.b_size)
 
 
+@traceable
 class Div(Function):
 
     @staticmethod
@@ -71,6 +110,7 @@ class Div(Function):
         return maybe_unexpand(grad_a, ctx.a_size), maybe_unexpand_or_view(grad_b, ctx.b_size)
 
 
+@traceable
 class Pow(Function):
 
     @staticmethod
@@ -88,11 +128,36 @@ class Pow(Function):
         return maybe_unexpand(grad_a, ctx.a_size), maybe_unexpand_or_view(grad_b, ctx.b_size)
 
 
-def sort_args(a, b):
-    return (a, b, True) if torch.is_tensor(a) else (b, a, False)
+def is_node(obj):
+    return isinstance(obj, torch._C.Node)
 
 
+def sort_args(a, b, key=torch.is_tensor):
+    return (a, b, True) if key(a) else (b, a, False)
+
+
+def gen_inputs(g, a, b):
+    tensor, constant, tensor_first = sort_args(a, b, key=is_node)
+    assert tensor.hasType()
+    type = str(tensor.type().scalarType())
+    broadcast = False
+    if len(tensor.type().sizes()) > 1:
+        broadcast = True
+    constant = g.constant(constant, [0], type).typeAs(tensor)
+    return tensor, constant, broadcast, tensor_first
+
+
+@traceable
 class AddConstant(InplaceFunction):
+
+    @staticmethod
+    def symbolic(g, a, b, inplace=False):
+        # TODO: [Export inplace]
+        tensor, constant, broadcast, tensor_first = gen_inputs(g, a, b)
+        if tensor_first:
+            return g.op("Add", tensor, constant, broadcast_i=broadcast)
+        else:
+            return g.op("Add", constant, tensor, broadcast_i=broadcast)
 
     @staticmethod
     def forward(ctx, a, b, inplace=False):
@@ -111,7 +176,17 @@ class AddConstant(InplaceFunction):
             return None, grad_output, None
 
 
+@traceable
 class SubConstant(InplaceFunction):
+
+    @staticmethod
+    def symbolic(g, a, b, inplace=False):
+        # TODO: [Export inplace]
+        tensor, constant, broadcast, tensor_first = gen_inputs(g, a, b)
+        if tensor_first:
+            return g.op("Sub", tensor, constant, broadcast_i=broadcast)
+        else:
+            return g.op("Add", g.op("Neg", tensor).typeAs(tensor), constant, broadcast_i=broadcast)
 
     @staticmethod
     def forward(ctx, a, b, inplace=False):
@@ -137,7 +212,13 @@ class SubConstant(InplaceFunction):
             return None, grad_output.neg(), None
 
 
+@traceable
 class MulConstant(InplaceFunction):
+
+    @staticmethod
+    def symbolic(g, a, b, inplace=False):
+        tensor, constant, _ = sort_args(a, b, key=is_node)
+        return g.op('Scale', tensor, scale_f=constant)
 
     @staticmethod
     def forward(ctx, a, b, inplace=False):
@@ -157,7 +238,13 @@ class MulConstant(InplaceFunction):
             return None, grad_input, None
 
 
+@traceable
 class DivConstant(InplaceFunction):
+
+    @staticmethod
+    def symbolic(g, a, b, inplace=False):
+        tensor, constant, _ = sort_args(a, b, key=is_node)
+        return g.op('Scale', tensor, scale_f=(1.0 / constant))
 
     @staticmethod
     def forward(ctx, a, b, inplace=False):
@@ -190,6 +277,7 @@ class DivConstant(InplaceFunction):
                 return None, grad_output.mul(v_rep).mul(v_rep).mul_(-ctx.constant), None
 
 
+@traceable
 class PowConstant(Function):
 
     @staticmethod
@@ -213,7 +301,13 @@ class PowConstant(Function):
             return None, grad_output.mul(var_result).mul_(math.log(ctx.constant))
 
 
+@traceable
 class Negate(InplaceFunction):
+
+    @staticmethod
+    def symbolic(g, i, inplace=False):
+        # TODO: [Export inplace]
+        return g.appendNode(g.create("Scale", [i]).f_("scale", -1))
 
     @staticmethod
     def forward(ctx, i, inplace=False):

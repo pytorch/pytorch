@@ -1,7 +1,7 @@
 #include "torch/csrc/cuda/THCP.h"
 
 // Declare/Define the expansion functions that have THCState.  Note that we
-// still need to define the CPU-type verisons because the copy functions that
+// still need to define the CPU-type versions because the copy functions that
 // copy from GPU to CPU type have a THCState.
 
 #define CUDA_EXPAND 1

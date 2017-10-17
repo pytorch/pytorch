@@ -20,28 +20,28 @@ const int MODE_MEAN = 1;
 
 template <typename Dtype, typename Acctype>
 __global__ void cunn_LookupTableBag_updateOutputKernel(
-  long *input, long *offsets, Dtype *weight, Dtype *output,
-  long *offset2bag, long numIndices, long numBags, long stride, int mode,
-  long *bag_size) {
+  int64_t *input, int64_t *offsets, Dtype *weight, Dtype *output,
+  int64_t *offset2bag, int64_t numIndices, int64_t numBags, int64_t stride, int mode,
+  int64_t *bag_size) {
 
   // the strategy here is that each bag x feature is handled by a single thread
 
-  long chunksPerBag = THCCeilDiv(stride, (long) blockDim.x);
-  long numChunks = numBags * chunksPerBag;
-  long chunkOffset = blockIdx.x * blockDim.y + threadIdx.y;
-  long chunkStride = gridDim.x * blockDim.y;
+  int64_t chunksPerBag = THCCeilDiv(stride, (int64_t) blockDim.x);
+  int64_t numChunks = numBags * chunksPerBag;
+  int64_t chunkOffset = blockIdx.x * blockDim.y + threadIdx.y;
+  int64_t chunkStride = gridDim.x * blockDim.y;
 
-  for (long chunk = chunkOffset; chunk < numChunks; chunk += chunkStride) {
-    long featureDim = (chunk % chunksPerBag) * blockDim.x + threadIdx.x;
+  for (int64_t chunk = chunkOffset; chunk < numChunks; chunk += chunkStride) {
+    int64_t featureDim = (chunk % chunksPerBag) * blockDim.x + threadIdx.x;
     if (featureDim < stride) {
-      long bag = chunk / chunksPerBag;
+      int64_t bag = chunk / chunksPerBag;
       Dtype*  weightFeat = weight + featureDim;
-      long begin = offsets[bag] - TH_INDEX_BASE;
-      long end = (bag < numBags - 1) ? (offsets[bag + 1] - TH_INDEX_BASE) : numIndices;
+      int64_t begin = offsets[bag] - TH_INDEX_BASE;
+      int64_t end = (bag < numBags - 1) ? (offsets[bag + 1] - TH_INDEX_BASE) : numIndices;
       assert(end >= begin);
       Acctype weightFeatSum = ScalarConvert<float, Acctype>::to(0);
-      long bag_size_ = 0;
-      for (long emb = begin; emb < end; emb++) {
+      int64_t bag_size_ = 0;
+      for (int64_t emb = begin; emb < end; emb++) {
         const int weightRow = ((int) input[emb] - TH_INDEX_BASE) * stride;
         weightFeatSum += ScalarConvert<Dtype, Acctype>::to(weightFeat[weightRow]);
 	bag_size_ ++;
@@ -50,7 +50,7 @@ __global__ void cunn_LookupTableBag_updateOutputKernel(
         }
       }
       if (mode == MODE_MEAN) {
-	weightFeatSum = weightFeatSum / ScalarConvert<long, Acctype>::to(bag_size_);
+	weightFeatSum = weightFeatSum / ScalarConvert<int64_t, Acctype>::to(bag_size_);
 	bag_size[bag] = bag_size_;
       }
       output[bag * stride + featureDim] = ScalarConvert<Acctype, Dtype>::to(weightFeatSum);
@@ -65,9 +65,9 @@ __global__ void cunn_LookupTableBag_updateOutputKernel(
 
 template <typename Dtype, typename Acctype>
 __global__ void cunn_LookupTableBag_accGradParametersKernel(
-  long *input, long *indices, Dtype *gradOutput, Dtype *gradWeight, long *offset2bag,
-  long *count, Dtype defaultScale, ptrdiff_t numel, long stride,
-  int mode, long *bag_size) {
+  int64_t *input, int64_t *indices, Dtype *gradOutput, Dtype *gradWeight, int64_t *offset2bag,
+  int64_t *count, Dtype defaultScale, ptrdiff_t numel, int64_t stride,
+  int mode, int64_t *bag_size) {
 
   int idx = blockIdx.x * 4 + threadIdx.y;
 

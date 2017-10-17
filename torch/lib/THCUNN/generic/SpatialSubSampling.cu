@@ -25,8 +25,8 @@ static inline void THNN_(SpatialSubSampling_shapeCheck)(
     dimp++;
   }
 
-  long nInputCols = input->size[dimc];
-  long nInputRows = input->size[dimr];
+  int64_t nInputCols = input->size[dimc];
+  int64_t nInputRows = input->size[dimr];
   THArgCheck(input->size[dimp] == nInputPlane, 2, "invalid number of input planes");
   THArgCheck(nInputCols >= kW && nInputRows >= kH, 2, "input image smaller than kernel size");
 }
@@ -51,10 +51,10 @@ void THNN_(SpatialSubSampling_updateOutput)(
   THNN_(SpatialSubSampling_shapeCheck)(state, input, NULL, weight, kW, kH);
 
   if (input->nDimension == 3) {
-    long nInputCols = input->size[2];
-    long nInputRows = input->size[1];
-    long nOutputCols = (nInputCols - kW) / dW + 1;
-    long nOutputRows = (nInputRows - kH) / dH + 1;
+    int64_t nInputCols = input->size[2];
+    int64_t nInputRows = input->size[1];
+    int64_t nOutputCols = (nInputCols - kW) / dW + 1;
+    int64_t nOutputRows = (nInputRows - kH) / dH + 1;
 
     input = THCTensor_(newContiguous)(state, input);
     input_data = THCTensor_(data)(state, input);
@@ -74,11 +74,11 @@ void THNN_(SpatialSubSampling_updateOutput)(
       nInputPlane, nInputRows, nInputCols, kH, kW, dH, dW);
     THCudaCheck(cudaGetLastError());
   } else {
-    long nInputCols = input->size[3];
-    long nInputRows = input->size[2];
-    long nbatch = input->size[0];
-    long nOutputCols = (nInputCols - kW) / dW + 1;
-    long nOutputRows = (nInputRows - kH) / dH + 1;
+    int64_t nInputCols = input->size[3];
+    int64_t nInputRows = input->size[2];
+    int64_t nbatch = input->size[0];
+    int64_t nOutputCols = (nInputCols - kW) / dW + 1;
+    int64_t nOutputRows = (nInputRows - kH) / dH + 1;
 
     input = THCTensor_(newContiguous)(state, input);
     input_data = THCTensor_(data)(state, input);
@@ -119,8 +119,8 @@ void THNN_(SpatialSubSampling_updateGradInput)(
   int nInputPlane = THCTensor_(size)(state, weight, 0);
 
   if (input->nDimension == 3) {
-    long nInputCols = input->size[2];
-    long nInputRows = input->size[1];
+    int64_t nInputCols = input->size[2];
+    int64_t nInputRows = input->size[1];
 
     real *weight_data = THCTensor_(data)(state, weight);
     gradOutput = THCTensor_(newContiguous)(state, gradOutput);
@@ -149,9 +149,9 @@ void THNN_(SpatialSubSampling_updateGradInput)(
     }
     THCudaCheck(cudaGetLastError());
   } else {
-    long nInputCols = input->size[3];
-    long nInputRows = input->size[2];
-    long nbatch = input->size[0];
+    int64_t nInputCols = input->size[3];
+    int64_t nInputRows = input->size[2];
+    int64_t nbatch = input->size[0];
 
     real *weight_data = THCTensor_(data)(state, weight);
     gradOutput = THCTensor_(newContiguous)(state, gradOutput);
@@ -199,8 +199,8 @@ void THNN_(SpatialSubSampling_accGradParameters)(
   int nInputPlane = THCTensor_(size)(state, gradWeight, 0);
 
   if (input->nDimension == 3) {
-    long nInputCols = input->size[2];
-    long nInputRows = input->size[1];
+    int64_t nInputCols = input->size[2];
+    int64_t nInputRows = input->size[1];
 
     real *gradWeight_data = THCTensor_(data)(state, gradWeight);
     real *gradBias_data = THCTensor_(data)(state, gradBias);
@@ -221,9 +221,9 @@ void THNN_(SpatialSubSampling_accGradParameters)(
       nInputPlane, nInputRows, nInputCols, kH, kW, dH, dW, scale);
     THCudaCheck(cudaGetLastError());
   } else {
-    long nInputCols = input->size[3];
-    long nInputRows = input->size[2];
-    long nbatch = input->size[0];
+    int64_t nInputCols = input->size[3];
+    int64_t nInputRows = input->size[2];
+    int64_t nbatch = input->size[0];
 
     real *gradWeight_data = THCTensor_(data)(state, gradWeight);
     real *gradBias_data = THCTensor_(data)(state, gradBias);
@@ -239,7 +239,7 @@ void THNN_(SpatialSubSampling_accGradParameters)(
     dim3 threads(32,8);
 
     // run gradweight kernel
-    long sl;
+    int64_t sl;
     for (sl=0; sl<nbatch; sl++) {
       subgradweight<real, accreal> <<<blocks, threads, 0, THCState_getCurrentStream(state)>>> (
         input_data + sl*input->stride[0],

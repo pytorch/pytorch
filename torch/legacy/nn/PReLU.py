@@ -11,16 +11,13 @@ class PReLU(Module):
         self.nOutputPlane = nOutputPlane
         self.weight = torch.Tensor(nOutputPlane or 1).fill_(0.25)
         self.gradWeight = torch.Tensor(nOutputPlane or 1)
-        self.gradWeightBuf = None
-        self.gradWeightBuf2 = None
 
     def updateOutput(self, input):
         self._backend.PReLU_updateOutput(
             self._backend.library_state,
             input,
             self.output,
-            self.weight,
-            self.nOutputPlane
+            self.weight
         )
         return self.output
 
@@ -30,16 +27,11 @@ class PReLU(Module):
             input,
             gradOutput,
             self.gradInput,
-            self.weight,
-            self.nOutputPlane
+            self.weight
         )
         return self.gradInput
 
     def accGradParameters(self, input, gradOutput, scale=1):
-        if self.gradWeightBuf is None:
-            self.gradWeightBuf = input.new()
-        if self.gradWeightBuf2 is None:
-            self.gradWeightBuf2 = input.new()
         self._backend.PReLU_accGradParameters(
             self._backend.library_state,
             input,
@@ -47,9 +39,6 @@ class PReLU(Module):
             self.gradInput,
             self.weight,
             self.gradWeight,
-            self.gradWeightBuf,
-            self.gradWeightBuf2,
-            self.nOutputPlane,
             scale
         )
         return self.gradWeight

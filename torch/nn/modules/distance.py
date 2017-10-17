@@ -17,7 +17,7 @@ class PairwiseDistance(Module):
 
     Shape:
         - Input1: :math:`(N, D)` where `D = vector dimension`
-        - Input2: :math:`(N, D), same shape as the Input1
+        - Input2: :math:`(N, D)`, same shape as the Input1
         - Output: :math:`(N, 1)`
 
     Examples::
@@ -67,8 +67,3 @@ class CosineSimilarity(Module):
 
     def forward(self, x1, x2):
         return F.cosine_similarity(x1, x2, self.dim, self.eps)
-
-
-# TODO: Cosine
-# TODO: Euclidean
-# TODO: WeightedEuclidean

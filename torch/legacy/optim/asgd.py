@@ -12,7 +12,7 @@ def asgd(opfunc, x, config, state=None):
         eta_t = eta0 / (1 + lambda eta0 t) ^ 0.75
         mu_t = 1/max(1,t-t0)
 
-    implements ASGD algoritm as in L.Bottou's sgd-2.0
+    implements ASGD algorithm as in L.Bottou's sgd-2.0
 
     ARGS:
 

@@ -144,6 +144,10 @@ view of a storage and defines numeric operations on it.
    .. automethod:: eq
    .. automethod:: eq_
    .. automethod:: equal
+   .. automethod:: erf
+   .. automethod:: erf_
+   .. automethod:: erfinv
+   .. automethod:: erfinv_
    .. automethod:: exp
    .. automethod:: exp_
    .. automethod:: expand

@@ -2,8 +2,8 @@
 #error "You must define THD_GENERIC_FILE before including THDGenerateAllTypes.h"
 #endif
 
-#define real unsigned char
-#define accreal long
+#define real uint8_t
+#define accreal int64_t
 #define Real Byte
 #define THDInf UCHAR_MAX
 #define THD_REAL_IS_BYTE
@@ -15,8 +15,8 @@
 #undef THDInf
 #undef THD_REAL_IS_BYTE
 
-#define real char
-#define accreal long
+#define real int8_t
+#define accreal int64_t
 #define Real Char
 #define THDInf CHAR_MAX
 #define THD_REAL_IS_CHAR
@@ -28,8 +28,8 @@
 #undef THDInf
 #undef THD_REAL_IS_CHAR
 
-#define real short
-#define accreal long
+#define real int16_t
+#define accreal int64_t
 #define Real Short
 #define THDInf SHRT_MAX
 #define THD_REAL_IS_SHORT
@@ -41,8 +41,8 @@
 #undef THDInf
 #undef THD_REAL_IS_SHORT
 
-#define real int
-#define accreal long
+#define real int32_t
+#define accreal int64_t
 #define Real Int
 #define THDInf INT_MAX
 #define THD_REAL_IS_INT
@@ -54,8 +54,8 @@
 #undef THDInf
 #undef THD_REAL_IS_INT
 
-#define real long
-#define accreal long
+#define real int64_t
+#define accreal int64_t
 #define Real Long
 #define THDInf LONG_MAX
 #define THD_REAL_IS_LONG

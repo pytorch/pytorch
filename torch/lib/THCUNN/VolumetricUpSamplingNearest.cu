@@ -57,11 +57,11 @@ __device__ int translate_idx_inv(int ii, int d1, int d2, int d3, int d4, int sca
 }
 
 template <typename Dtype>
-__global__ void vupscale(Dtype *input, Dtype *output, long no_elements,
+__global__ void vupscale(Dtype *input, Dtype *output, int64_t no_elements,
                          int scale_factor, int d1, int d2, int d3, int d4)
 {
   // output offset:
-  long ii = threadIdx.x + blockDim.x * blockIdx.x;
+  int64_t ii = threadIdx.x + blockDim.x * blockIdx.x;
   ii += threadIdx.y + blockDim.y * (blockDim.x * gridDim.x) * blockIdx.y;
   if (ii >= no_elements) return;
   int ipidx = translate_idx(ii, d1, d2, d3, d4, scale_factor);
@@ -72,11 +72,11 @@ __global__ void vupscale(Dtype *input, Dtype *output, long no_elements,
  * Description:
  */
 template <typename Dtype, typename Acctype>
-__global__ void vdownscale(Dtype *gradInput_data, Dtype *gradOutput_data, long no_elements,
+__global__ void vdownscale(Dtype *gradInput_data, Dtype *gradOutput_data, int64_t no_elements,
                               int scale_factor, int d1, int d2, int d3, int d4)
 {
   // output offset:
-  long ii = threadIdx.x + blockDim.x * blockIdx.x;
+  int64_t ii = threadIdx.x + blockDim.x * blockIdx.x;
   ii += threadIdx.y + blockDim.y * (blockDim.x * gridDim.x) * blockIdx.y;
   if (ii >= no_elements) return;
   Acctype sum = Acctype(0);

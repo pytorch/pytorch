@@ -1,8 +1,21 @@
 """
 Weight Normalization from https://arxiv.org/abs/1602.07868
 """
-import torch.utils.hooks as hooks
 from torch.nn.parameter import Parameter
+
+
+def _norm(p, dim):
+    """Computes the norm over all dimensions except dim"""
+    if dim is None:
+        return p.norm()
+    elif dim == 0:
+        output_size = (p.size(0),) + (1,) * (p.dim() - 1)
+        return p.contiguous().view(p.size(0), -1).norm(dim=1).view(*output_size)
+    elif dim == p.dim() - 1:
+        output_size = (1,) * (p.dim() - 1) + (p.size(-1),)
+        return p.contiguous().view(-1, p.size(-1)).norm(dim=0).view(*output_size)
+    else:
+        return _norm(p.transpose(0, dim), 0).transpose(0, dim)
 
 
 class WeightNorm(object):
@@ -13,19 +26,7 @@ class WeightNorm(object):
     def compute_weight(self, module):
         g = getattr(module, self.name + '_g')
         v = getattr(module, self.name + '_v')
-        return v * (g / self.norm(v))
-
-    def norm(self, p):
-        """Computes the norm over all dimensions except dim"""
-        if self.dim is None:
-            return p.norm()
-        if self.dim != 0:
-            p = p.transpose(0, self.dim)
-        output_size = (p.size(0),) + (1,) * (p.dim() - 1)
-        p = p.contiguous().view(p.size(0), -1).norm(dim=1).view(*output_size)
-        if self.dim != 0:
-            p = p.transpose(0, self.dim)
-        return p
+        return v * (g / _norm(v, self.dim))
 
     @staticmethod
     def apply(module, name, dim):
@@ -37,7 +38,7 @@ class WeightNorm(object):
         del module._parameters[name]
 
         # add g and v as new parameters and express w as g/||v|| * v
-        module.register_parameter(name + '_g', Parameter(fn.norm(weight).data))
+        module.register_parameter(name + '_g', Parameter(_norm(weight, dim).data))
         module.register_parameter(name + '_v', Parameter(weight.data))
         setattr(module, name, fn.compute_weight(module))
 

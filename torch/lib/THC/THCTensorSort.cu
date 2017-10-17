@@ -3,11 +3,11 @@
 void THCudaLongTensor_fillSliceWithIndex(THCState* state,
                                          THCudaLongTensor* t,
                                          int dim) {
-  long dims = THCudaLongTensor_nDimension(state, t);
+  int64_t dims = THCudaLongTensor_nDimension(state, t);
   THArgCheck(dims <= MAX_CUTORCH_DIMS, 2, CUTORCH_DIM_WARNING);
 
   ptrdiff_t inElements = THCudaLongTensor_nElement(state, t);
-  long sliceSize = THCudaLongTensor_size(state, t, dim);
+  int64_t sliceSize = THCudaLongTensor_size(state, t, dim);
   ptrdiff_t numSlices = inElements / sliceSize;
 
   dim3 grid;
@@ -15,9 +15,9 @@ void THCudaLongTensor_fillSliceWithIndex(THCState* state,
     THError("Slice to fill with indices is too large");
   }
 
-  long maxThreads =
+  int64_t maxThreads =
     THCState_getCurrentDeviceProperties(state)->maxThreadsPerBlock;
-  long numThreads = sliceSize;
+  int64_t numThreads = sliceSize;
   if (numThreads > maxThreads) {
     numThreads = maxThreads;
   }
@@ -30,7 +30,7 @@ void THCudaLongTensor_fillSliceWithIndex(THCState* state,
       info, numSlices, sliceSize, info.strides[collapseDim])
 
   if (TensorUtils<THCudaLongTensor>::canUse32BitIndexMath(state, t)) {
-    TensorInfo<long, unsigned int> info =
+    TensorInfo<int64_t, uint32_t> info =
       getTensorInfo<THCudaLongTensor, unsigned int>(state, t);
     info.reduceDim(dim);
     int collapseDim = info.collapseDims(dim);
@@ -47,13 +47,13 @@ void THCudaLongTensor_fillSliceWithIndex(THCState* state,
       }
     }
   } else {
-    TensorInfo<long, unsigned long> info =
-      getTensorInfo<THCudaLongTensor, unsigned long>(state, t);
+    TensorInfo<int64_t, uint64_t> info =
+      getTensorInfo<THCudaLongTensor, uint64_t>(state, t);
     info.reduceDim(dim);
     int collapseDim = info.collapseDims(dim);
 
     // catch-all implementation
-    FILL_INDEX(unsigned long, -1);
+    FILL_INDEX(uint64_t, -1);
   }
 
 #undef FILL_INDEX

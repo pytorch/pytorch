@@ -10,7 +10,7 @@ import torch.utils.hooks as hooks
 
 def _addindent(s_, numSpaces):
     s = s_.split('\n')
-    # dont do anything for single-line stuff
+    # don't do anything for single-line stuff
     if len(s) == 1:
         return s_
     first = s.pop(0)
@@ -76,6 +76,9 @@ class Module(object):
         Example:
             >>> self.register_buffer('running_mean', torch.zeros(num_features))
         """
+        if hasattr(self, name) and name not in self._buffers:
+            raise KeyError("attribute '{}' already exists".format(name))
+
         self._buffers[name] = tensor
 
     def register_parameter(self, name, param):
@@ -86,6 +89,10 @@ class Module(object):
         if '_parameters' not in self.__dict__:
             raise AttributeError(
                 "cannot assign parameter before Module.__init__() call")
+
+        if hasattr(self, name) and name not in self._parameters:
+            raise KeyError("attribute '{}' already exists".format(name))
+
         if param is None:
             self._parameters[name] = None
         elif not isinstance(param, Parameter):
@@ -106,11 +113,11 @@ class Module(object):
 
         The module can be accessed as an attribute using the given name.
         """
-        if hasattr(self, name):
-            raise KeyError("attribute already exists '{}'".format(name))
         if not isinstance(module, Module) and module is not None:
             raise TypeError("{} is not a Module subclass".format(
                 torch.typename(module)))
+        if hasattr(self, name) and name not in self._modules:
+            raise KeyError("attribute '{}' already exists".format(name))
         self._modules[name] = module
 
     def _apply(self, fn):
@@ -132,19 +139,51 @@ class Module(object):
         return self
 
     def apply(self, fn):
+        """Applies ``fn`` recursively to every submodule (as returned by ``.children()``)
+        as well as self. Typical use includes initializing the parameters of a model
+        (see also :ref:`torch-nn-init`).
+
+        Example:
+            >>> def init_weights(m):
+            >>>     print(m)
+            >>>     if type(m) == nn.Linear:
+            >>>         m.weight.data.fill_(1.0)
+            >>>         print(m.weight)
+            >>>
+            >>> net = nn.Sequential(nn.Linear(2, 2), nn.Linear(2, 2))
+            >>> net.apply(init_weights)
+            Linear (2 -> 2)
+            Parameter containing:
+             1  1
+             1  1
+            [torch.FloatTensor of size 2x2]
+            Linear (2 -> 2)
+            Parameter containing:
+             1  1
+             1  1
+            [torch.FloatTensor of size 2x2]
+            Sequential (
+              (0): Linear (2 -> 2)
+              (1): Linear (2 -> 2)
+            )
+        """
         for module in self.children():
             module.apply(fn)
         fn(self)
         return self
 
-    def cuda(self, device_id=None):
+    def cuda(self, device=None):
         """Moves all model parameters and buffers to the GPU.
 
+        This also makes associated parameters and buffers different objects. So
+        it should be called before constructing optimizer if the module will
+        live on GPU while being optimized.
+
         Arguments:
-            device_id (int, optional): if specified, all parameters will be
+            device (int, optional): if specified, all parameters will be
                 copied to that device
         """
-        return self._apply(lambda t: t.cuda(device_id))
+        return self._apply(lambda t: t.cuda(device))
 
     def cpu(self):
         """Moves all model parameters and buffers to the CPU."""
@@ -231,7 +270,10 @@ class Module(object):
         if len(self._backward_hooks) > 0:
             var = result
             while not isinstance(var, Variable):
-                var = var[0]
+                if isinstance(var, dict):
+                    var = next((v for v in var.values() if isinstance(v, Variable)))
+                else:
+                    var = var[0]
             grad_fn = var.grad_fn
             if grad_fn is not None:
                 for hook in self._backward_hooks.values():
@@ -315,11 +357,14 @@ class Module(object):
         else:
             object.__delattr__(self, name)
 
-    def state_dict(self, destination=None, prefix=''):
+    def state_dict(self, destination=None, prefix='', keep_vars=False):
         """Returns a dictionary containing a whole state of the module.
 
         Both parameters and persistent buffers (e.g. running averages) are
         included. Keys are corresponding parameter and buffer names.
+
+        When keep_vars is true, it returns a Variable for each parameter
+        (rather than a Tensor).
 
         Example:
             >>> module.state_dict().keys()
@@ -329,13 +374,13 @@ class Module(object):
             destination = OrderedDict()
         for name, param in self._parameters.items():
             if param is not None:
-                destination[prefix + name] = param.data
+                destination[prefix + name] = param if keep_vars else param.data
         for name, buf in self._buffers.items():
             if buf is not None:
                 destination[prefix + name] = buf
         for name, module in self._modules.items():
             if module is not None:
-                module.state_dict(destination, prefix + name + '.')
+                module.state_dict(destination, prefix + name + '.', keep_vars=keep_vars)
         return destination
 
     def load_state_dict(self, state_dict):

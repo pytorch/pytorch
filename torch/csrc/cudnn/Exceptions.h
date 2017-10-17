@@ -2,7 +2,7 @@
 #define THP_CUDNN_EXCEPTIONS_INC
 
 #include <THC/THC.h>
-#include <cudnn.h>
+#include "cudnn-wrapper.h"
 #include <string>
 #include <stdexcept>
 #include <sstream>

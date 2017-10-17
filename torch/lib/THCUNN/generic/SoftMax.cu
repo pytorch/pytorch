@@ -13,8 +13,8 @@ void THNN_(SoftMax_updateOutput)(
 
   input = THCTensor_(newContiguous)(state, input);
   THCTensor_(resizeAs)(state, output, input);
-  long batchSize, dim, stride0, stride1 = 1;
-  long blocksY = 1, blocksZ = 1;
+  int64_t batchSize, dim, stride0, stride1 = 1;
+  int64_t blocksY = 1, blocksZ = 1;
 
   if (input->nDimension == 1)
   {
@@ -88,8 +88,8 @@ void THNN_(SoftMax_updateGradInput)(
   gradOutput = THCTensor_(newContiguous)(state, gradOutput);
 
   THCTensor_(resizeAs)(state, gradInput, output);
-  long batchSize, dim, stride0, stride1 = 1;
-  long blocksY = 1, blocksZ = 1;
+  int64_t batchSize, dim, stride0, stride1 = 1;
+  int64_t blocksY = 1, blocksZ = 1;
 
   if (gradInput->nDimension == 1)
   {

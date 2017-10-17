@@ -26,7 +26,7 @@ class Backend(object):
         self.loading_lock = threading.Lock()
 
     def load(self):
-        # This looks a little weird, but it's neccesary for thread safe loading.
+        # This looks a little weird, but it's necessary for thread safe loading.
         # Loading the backend can take some time, so multiple threads can enter
         # the if clause. We have to ensure that only the first one to acquire
         # the lock will actually load the backend, and that the rest won't

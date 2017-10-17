@@ -22,7 +22,7 @@ typedef struct THAllocator {
 /* default malloc/free allocator. malloc and realloc raise an error (using
  * THError) on allocation failure.
  */
-extern THAllocator THDefaultAllocator;
+TH_API THAllocator THDefaultAllocator;
 
 /* file map allocator
  */
@@ -37,7 +37,7 @@ TH_API void THMapAllocatorContext_free(THMapAllocatorContext *ctx);
 TH_API void THRefcountedMapAllocator_incref(THMapAllocatorContext *ctx, void *data);
 TH_API int THRefcountedMapAllocator_decref(THMapAllocatorContext *ctx, void *data);
 
-extern THAllocator THMapAllocator;
-extern THAllocator THRefcountedMapAllocator;
+TH_API THAllocator THMapAllocator;
+TH_API THAllocator THRefcountedMapAllocator;
 
 #endif

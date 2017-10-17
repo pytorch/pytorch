@@ -8,6 +8,6 @@ THC_API void THCTensor_(topk)(THCState* state,
                                THCTensor* topK,
                                THCudaLongTensor* indices,
                                THCTensor* input,
-                               long k, int dim, int dir, int sorted);
+                               int64_t k, int dim, int dir, int sorted);
 
 #endif // THC_GENERIC_FILE

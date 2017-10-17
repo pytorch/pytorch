@@ -162,6 +162,12 @@ Pooling Layers
 .. autoclass:: AdaptiveMaxPool2d
     :members:
 
+:hidden:`AdaptiveMaxPool3d`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: AdaptiveMaxPool3d
+    :members:
+
 :hidden:`AdaptiveAvgPool1d`
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -172,6 +178,12 @@ Pooling Layers
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autoclass:: AdaptiveAvgPool2d
+    :members:
+
+:hidden:`AdaptiveAvgPool3d`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: AdaptiveAvgPool3d
     :members:
 
 
@@ -314,6 +326,12 @@ Non-linear Activations
 .. autoclass:: Softmax
     :members:
 
+:hidden:`Softmax2d`
+~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: Softmax2d
+    :members:
+
 :hidden:`LogSoftmax`
 ~~~~~~~~~~~~~~~~~~~~
 
@@ -408,6 +426,11 @@ Linear layers
 .. autoclass:: Linear
     :members:
 
+:hidden:`Bilinear`
+~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: Bilinear
+    :members:
 
 Dropout layers
 ----------------------------------
@@ -620,7 +643,7 @@ DataParallel layers (multi-GPU, distributed)
 :hidden:`DistributedDataParallel`
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-.. autoclass:: torch.nn.parallel.DataParallel
+.. autoclass:: torch.nn.parallel.DistributedDataParallel
     :members:
 
 
@@ -764,6 +787,11 @@ Pooling functions
 
 .. autofunction:: adaptive_max_pool2d
 
+:hidden:`adaptive_max_pool3d`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: adaptive_max_pool3d
+
 :hidden:`adaptive_avg_pool1d`
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -773,6 +801,11 @@ Pooling functions
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autofunction:: adaptive_avg_pool2d
+
+:hidden:`adaptive_avg_pool3d`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: adaptive_avg_pool3d
 
 
 Non-linear activation functions

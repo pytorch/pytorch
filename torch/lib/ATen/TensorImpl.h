@@ -1,13 +1,15 @@
 #pragma once
 
 #include <atomic>
-
-#include "ATen/Type.h"
 #include <iostream>
+
+#include "ATen/ScalarType.h"
+
 namespace at {
 
 struct Type;
 class Scalar;
+
 struct TensorImpl {
   explicit TensorImpl(Type * type)
   :  refcount(1), is_scalar(false), type_(type) {}

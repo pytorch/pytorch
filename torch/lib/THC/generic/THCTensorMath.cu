@@ -44,10 +44,26 @@ THCTensor_(zeros)(THCState *state, THCTensor *r_, THLongStorage *size)
 }
 
 THC_API void
+THCTensor_(zerosLike)(THCState *state, THCTensor *r_, THCTensor *input)
+{
+  THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, r_, input));
+  THCTensor_(resizeAs)(state, r_, input);
+  THCTensor_(zero)(state, r_);
+}
+
+THC_API void
 THCTensor_(ones)(THCState *state, THCTensor *r_, THLongStorage *size)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, r_));
   THCTensor_(resize)(state, r_, size, NULL);
+  THCTensor_(fill)(state, r_, ScalarConvert<int, real>::to(1));
+}
+
+THC_API void
+THCTensor_(onesLike)(THCState *state, THCTensor *r_, THCTensor *input)
+{
+  THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, r_, input));
+  THCTensor_(resizeAs)(state, r_, input);
   THCTensor_(fill)(state, r_, ScalarConvert<int, real>::to(1));
 }
 
@@ -79,7 +95,7 @@ void THCTensor_(catArray)(THCState *state, THCTensor *result,
 {
   THLongStorage *size;
   int i, j, cohortMax;
-  long offset;
+  int64_t offset;
   bool hasEmptyInput = false;
 
   // Even in the case where dimension is negative (i.e. when we want
@@ -112,7 +128,7 @@ void THCTensor_(catArray)(THCState *state, THCTensor *result,
   for(i = 0; i < maxDim; i++)
   {
     // dimSize is either the size of the dim if it exists, either 1 if #dim > 0, otherwise 0
-    long dimSize = i < THCTensor_(nDimension)(state, inputs[0])
+    int64_t dimSize = i < THCTensor_(nDimension)(state, inputs[0])
                        ? THCTensor_(size)(state, inputs[0], i)
                        : THMin(THCTensor_(nDimension)(state, inputs[0]), 1);
     if (i == cat_dimension)
@@ -130,7 +146,7 @@ void THCTensor_(catArray)(THCState *state, THCTensor *result,
     {
       for (j = 1; j < numInputs; j++)
       {
-        long sz = i < THCTensor_(nDimension)(state, inputs[j])
+        int64_t sz = i < THCTensor_(nDimension)(state, inputs[j])
                       ? THCTensor_(size)(state, inputs[j], i)
                       : THMin(THCTensor_(nDimension)(state, inputs[j]), 1);
 
@@ -191,7 +207,7 @@ void THCTensor_(catArray)(THCState *state, THCTensor *result,
 
     // Template Declarations for dim = 1, 2, 3, 4
 #define HANDLE_CASE(DIMS) \
-  CatArrayBatchedCopy<real, unsigned int, DIMS><<<applyGrid, applyBlock, 0, stream->stream>>>(data, d_inputs, param, cat_dimension, param.outputStride[cat_dimension]);
+  CatArrayBatchedCopy<real, unsigned int, DIMS><<<catGrid, applyBlock, 0, stream->stream>>>(data, d_inputs, param, cat_dimension, param.outputStride[cat_dimension]);
 
     // Now we loop
     offset = 0;
@@ -200,7 +216,7 @@ void THCTensor_(catArray)(THCState *state, THCTensor *result,
       CatArrInputTensor<real, unsigned int>* stackInputs = (CatArrInputTensor<real, unsigned int>*) THCudaHostAlloc(state, tensorMetadataSize);
       cohortMax = 0;
       for (j = 0; j < CAT_ARRAY_BATCH_SIZE && (i+j) < numInputs; ++j) {
-        long dimSize = cat_dimension < THCTensor_(nDimension)(state, inputs[i+j])
+        int64_t dimSize = cat_dimension < THCTensor_(nDimension)(state, inputs[i+j])
           ? THCTensor_(size)(state, inputs[i+j], cat_dimension)
           : 1;
 
@@ -227,15 +243,12 @@ void THCTensor_(catArray)(THCState *state, THCTensor *result,
       // is based on.
       dim3 applyBlock = getApplyBlock();
 
-      // We also re-use the applyGrid - but note that we use the maximum number of
-      // elements for a given tensor in this grouping to determine the count
-      dim3 applyGrid;
-      getApplyGrid(state, cohortMax, applyGrid);
+      //Get grid where x dim fills half gpu and y dim is number of tensors.
+      //This will have cating two tensors fill the entire grid, but prevent
+      //many threads from needlessly load meta data if their sizes is small.
+      dim3 catGrid;
+      getCatGrid(state, j, catGrid);
 
-      // Next, we set our grid's y component to be the number of tensors in
-      // the batch. This will allow the kernel to determine which input
-      // tensor it is responsible for copying
-      applyGrid.y = j;
 
       switch (maxDim) {
         case 1:
@@ -262,7 +275,7 @@ void THCTensor_(catArray)(THCState *state, THCTensor *result,
       // No reason to copy when input is empty
       if (!THCTensor_(nDimension)(state, inputs[j])) continue;
 
-      long dimSize = cat_dimension < THCTensor_(nDimension)(state, inputs[j])
+      int64_t dimSize = cat_dimension < THCTensor_(nDimension)(state, inputs[j])
                ? THCTensor_(size)(state, inputs[j], cat_dimension)
                : 1;
 
@@ -288,16 +301,16 @@ void THCTensor_(nonzero)(THCState* state, THCudaLongTensor *tensor,
   thrust::device_ptr<real> self_data(THCTensor_(data)(state, self));
 
   int num_dim = THCTensor_(nDimension)(state, self);
-  long N = THCTensor_(nElement)(state, self);
+  int64_t N = THCTensor_(nElement)(state, self);
 
   THCudaLongTensor_resize2d(state, tensor, N, num_dim);
   tensor = THCudaLongTensor_newContiguous(state, tensor);
-  thrust::device_ptr<long> tensor_data(THCudaLongTensor_data(state, tensor));
+  thrust::device_ptr<int64_t> tensor_data(THCudaLongTensor_data(state, tensor));
 
-  thrust::counting_iterator<long> idxfirst(0);
-  thrust::counting_iterator<long> idxlast = idxfirst + N;
+  thrust::counting_iterator<int64_t> idxfirst(0);
+  thrust::counting_iterator<int64_t> idxlast = idxfirst + N;
 
-  typedef thrust::device_ptr<long> Iter;
+  typedef thrust::device_ptr<int64_t> Iter;
   strided_range<Iter> strided_tensor(tensor_data,
                                      tensor_data+N*num_dim, num_dim);
 
@@ -316,9 +329,9 @@ void THCTensor_(nonzero)(THCState* state, THCudaLongTensor *tensor,
     NonZeroOp<real>()
   );
 
-  long num_nonzeros = thrust::distance(strided_tensor.begin(), dend);
+  int64_t num_nonzeros = thrust::distance(strided_tensor.begin(), dend);
 
-  long div = 1;
+  int64_t div = 1;
   for (int dim = num_dim-1; dim >= 0; dim--) {
     strided_range<Iter> stride_dim(tensor_data+dim,
                                    tensor_data+N*num_dim, num_dim);
@@ -342,38 +355,60 @@ void THCTensor_(nonzero)(THCState* state, THCudaLongTensor *tensor,
   THCudaCheck(cudaGetLastError());
 }
 
-void THCTensor_(diag)(THCState *state, THCTensor *self_, THCTensor *src_, long k){
+void THCTensor_(diag)(THCState *state, THCTensor *self_, THCTensor *src_, int64_t k){
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self_, src_));
   int nDimension = THCTensor_(nDimension)(state, src_);
   THArgCheck((nDimension == 2) || (nDimension == 1), 1, "expected a matrix or a vector");
   if (nDimension == 2) {
-    long stride0 = THCTensor_(stride)(state, src_, 0);
-    long stride1 = THCTensor_(stride)(state, src_, 1);
-    long size0 = THCTensor_(size)(state, src_, 0);
-    long size1 = THCTensor_(size)(state, src_, 1);
-    long size = (k > 0) ? min((long long)size0, (long long)size1 - k) : min((long long)size0 + k, (long long)size1);
+    int64_t stride0 = THCTensor_(stride)(state, src_, 0);
+    int64_t stride1 = THCTensor_(stride)(state, src_, 1);
+    int64_t size0 = THCTensor_(size)(state, src_, 0);
+    int64_t size1 = THCTensor_(size)(state, src_, 1);
+    int64_t size = (k > 0) ? min((int64_t)size0, (int64_t)size1 - k) : min((int64_t)size0 + k, (int64_t)size1);
     THCTensor_(resize1d)(state, self_, size);
-    long strideSelf = THCTensor_(stride)(state, self_, 0);
-    const dim3 threads(min((long long)THCState_getCurrentDeviceProperties(state)->maxThreadsPerBlock, (long long)size));
-    dim3 grid(min((long long)1024, (long long)THCCeilDiv(size, (long)threads.x)));
-    long start = (k >= 0 ? k * stride1 : -k * stride0);
+    int64_t strideSelf = THCTensor_(stride)(state, self_, 0);
+    const dim3 threads(min((int64_t)THCState_getCurrentDeviceProperties(state)->maxThreadsPerBlock, (int64_t)size));
+    dim3 grid(min((int64_t)1024, (int64_t)THCCeilDiv(size, (int64_t)threads.x)));
+    int64_t start = (k >= 0 ? k * stride1 : -k * stride0);
     THCTensor_copyFromDiagonal<real><<<grid, threads, 0, THCState_getCurrentStream(state)>>>
     (THCTensor_(data)(state, self_), THCTensor_(data)(state, src_), start, size, stride0 + stride1, strideSelf);
   } else {
     ptrdiff_t totalElements = THCTensor_(nElement)(state, src_);
     ptrdiff_t size = (k > 0) ? totalElements + k : totalElements - k;
-    long strideSrc = THCTensor_(stride)(state, src_, 0);
+    int64_t strideSrc = THCTensor_(stride)(state, src_, 0);
     THCTensor_(resize2d)(state, self_, size, size);
     THCTensor_(zero)(state, self_);
-    long stride0 = THCTensor_(stride)(state, self_, 0);
-    long stride1 = THCTensor_(stride)(state, self_, 1);
-    const dim3 threads(min((long long)THCState_getCurrentDeviceProperties(state)->maxThreadsPerBlock, (long long)size));
-    dim3 grid(min((long long)1024, (long long)THCCeilDiv(size, (ptrdiff_t)threads.x)));
+    int64_t stride0 = THCTensor_(stride)(state, self_, 0);
+    int64_t stride1 = THCTensor_(stride)(state, self_, 1);
+    const dim3 threads(min((int64_t)THCState_getCurrentDeviceProperties(state)->maxThreadsPerBlock, (int64_t)size));
+    dim3 grid(min((int64_t)1024, (int64_t)THCCeilDiv(size, (ptrdiff_t)threads.x)));
     ptrdiff_t start = (k >= 0 ? k * stride1 : -k * stride0);
     THCTensor_copyToDiagonal<real><<<grid, threads, 0, THCState_getCurrentStream(state)>>>
     (THCTensor_(data)(state, self_), THCTensor_(data)(state, src_), start, totalElements, stride0 + stride1, strideSrc);
   }
   THCudaCheck(cudaGetLastError());
+}
+
+void THCTensor_(eye)(THCState *state, THCTensor *self_, int64_t n, int64_t m)
+{
+  THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, self_));
+  THArgCheck(n > 0, 1, "invalid argument");
+
+  if(m <= 0)
+    m = n;
+
+  THCTensor_(resize2d)(state, self_, n, m);
+  THCTensor_(zero)(state, self_);
+
+  int64_t sz = THMin(n, m);
+  int64_t stride = THCTensor_(stride)(state, self_, 0) +
+                   THCTensor_(stride)(state, self_, 1);
+
+  THCTensor *diag = THCTensor_(newWithStorage1d)(state, self_->storage,
+      self_->storageOffset,  sz, stride);
+
+  THCTensor_(fill)(state, diag, ScalarConvert<int, real>::to(1));
+  THCTensor_(free)(state, diag);
 }
 
 accreal THCTensor_(trace)(THCState *state, THCTensor *src_) {
@@ -388,7 +423,7 @@ accreal THCTensor_(trace)(THCState *state, THCTensor *src_) {
 
 #if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE) || defined(THC_REAL_IS_HALF)
 
-void THCTensor_(linspace)(THCState *state, THCTensor *r_, real a, real b, long n) {
+void THCTensor_(linspace)(THCState *state, THCTensor *r_, real a, real b, int64_t n) {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, r_));
   THArgCheck(n > 1 || (n == 1 && (a == b)), 3, "invalid number of points");
   if (THCTensor_(nElement)(state, r_) != n) THCTensor_(resize1d)(state, r_, n);
@@ -398,7 +433,7 @@ void THCTensor_(linspace)(THCState *state, THCTensor *r_, real a, real b, long n
                    ? r_ // if r_ is contiguous we can direct work on it
                    : THCTensor_(newContiguous)(state, r_);
     real step = THCNumerics<real>::div(THCNumerics<real>::sub(b, a),
-                                       ScalarConvert<long,real>::to(n - 1));
+                                       ScalarConvert<int64_t,real>::to(n - 1));
     LinspaceOp<real> linspace_method(a, step);
     thrust::device_ptr<real> data_(THCTensor_(data)(state, r));
     thrust::tabulate(data_, data_ + n, linspace_method);
@@ -409,7 +444,7 @@ void THCTensor_(linspace)(THCState *state, THCTensor *r_, real a, real b, long n
   THCudaCheck(cudaGetLastError());
 }
 
-void THCTensor_(logspace)(THCState *state, THCTensor *r_, real a, real b, long n) {
+void THCTensor_(logspace)(THCState *state, THCTensor *r_, real a, real b, int64_t n) {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, r_));
   THArgCheck(n > 1 || (n == 1 && (a == b)), 3, "invalid number of points");
   if (THCTensor_(nElement)(state, r_) != n) THCTensor_(resize1d)(state, r_, n);
@@ -419,7 +454,7 @@ void THCTensor_(logspace)(THCState *state, THCTensor *r_, real a, real b, long n
                    ? r_
                    : THCTensor_(newContiguous)(state, r_);
     real step = THCNumerics<real>::div(THCNumerics<real>::sub(b, a),
-                                       ScalarConvert<long,real>::to(n - 1));
+                                       ScalarConvert<int64_t,real>::to(n - 1));
     LogspaceOp<real> logspace_method(a, step);
     thrust::device_ptr<real> data_(THCTensor_(data)(state, r));
     thrust::tabulate(data_, data_ + n, logspace_method);

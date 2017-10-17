@@ -13,7 +13,7 @@ THD_API void THDBroadcast(THDTensorDescriptor* desc, int src_rank, THDGroup grou
 THD_API THDRequest* THDIsend(THDTensorDescriptor* desc, int dst_rank);
 THD_API THDRequest* THDIrecv(THDTensorDescriptor* desc, int src_rank);
 THD_API void THDSend(THDTensorDescriptor* desc, int dst_rank);
-THD_API void THDRecvAnySource(THDTensorDescriptor* desc);
+THD_API int THDRecvAnySource(THDTensorDescriptor* desc);
 THD_API void THDRecv(THDTensorDescriptor* desc, int src_rank);
 THD_API void THDAllGather(THDTensorDescriptor** output, size_t len,
                           THDTensorDescriptor* input, THDGroup group);

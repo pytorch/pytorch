@@ -64,7 +64,7 @@ inline void _appendData(ByteArray& str, THLongStorage* arg) {
   if (!arg) return;
   _appendScalar<ptrdiff_t>(str, arg->size);
   for (ptrdiff_t i = 0; i < arg->size; i++)
-    _appendScalar<long>(str, arg->data[i]);
+    _appendScalar<int64_t>(str, arg->data[i]);
 }
 
 template<typename T>

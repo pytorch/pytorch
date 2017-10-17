@@ -2,6 +2,7 @@
 #define TH_VECTOR_INC
 
 #include "THGeneral.h"
+#include "THMath.h"
 
 #define THVector_(NAME) TH_CONCAT_4(TH,Real,Vector_,NAME)
 

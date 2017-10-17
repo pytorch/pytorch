@@ -1295,6 +1295,30 @@ Example::
     True
 """)
 
+add_docstr(torch._C.erf,
+           """
+erf(tensor, out=None) -> Tensor
+
+Computes the error function of each element.
+
+Example::
+
+    >>> torch.erf(torch.Tensor([0, -1., 10.]))
+    torch.FloatTensor([0., -0.8427, 1.])
+""")
+
+add_docstr(torch._C.erfinv,
+           """
+erfinv(tensor, out=None) -> Tensor
+
+Computes the inverse error function of each element.
+
+Example::
+
+    >>> torch.erfinv(torch.Tensor([0, 0.5., -1.]))
+    torch.FloatTensor([0., 0.4769, -inf])
+""")
+
 add_docstr(torch._C.exp,
            """
 exp(tensor, out=None) -> Tensor
@@ -1528,7 +1552,7 @@ Returns:
 
 .. note::
 
-    The returned matrices will always be tranposed, irrespective of the strides
+    The returned matrices will always be transposed, irrespective of the strides
     of the input matrices. That is, they will have stride `(1, m)` instead of
     `(m, 1)`.
 
@@ -1817,7 +1841,7 @@ along a given dimension.
 If :attr:`dim` is not given, the last dimension of the `input` is chosen.
 
 A tuple of `(values, indices)` is returned, where the `indices` is the indices
-of the kth-smallest element in the original `input` Tensor in dimention `dim`.
+of the kth-smallest element in the original `input` Tensor in dimension `dim`.
 
 If :attr:`keepdim` is true, both the :attr:`values` and :attr:`indices` Tensors
 are the same size as :attr:`input`, except in the dimension :attr:`dim` where
@@ -3096,6 +3120,26 @@ Example::
 
 """)
 
+add_docstr(torch._C.ones_like,
+           """
+ones_like(input, out=None) -> Tensor
+
+Returns a Tensor filled with the scalar value `1`, with the same size as :attr:`input`.
+
+Args:
+    input (Tensor): The size of the input will determine the size of the output.
+    out (Tensor, optional): the result Tensor
+
+Example::
+
+    >>> input = torch.FloatTensor(2, 3)
+    >>> torch.ones_like(input)
+
+     1  1  1
+     1  1  1
+    [torch.FloatTensor of size 2x3]
+""")
+
 # TODO
 # add_docstr(torch._C.orgqr,
 # """
@@ -4069,12 +4113,16 @@ Example::
 
 add_docstr(torch._C.std,
            """
-.. function:: std(input) -> float
+.. function:: std(input, unbiased=True) -> float
 
 Returns the standard-deviation of all elements in the :attr:`input` Tensor.
 
+If :attr:`unbiased` is false, then the standard-deviation will be calculated via
+the biased estimator. Otherwise, Bessel's correction will be used.
+
 Args:
     input (Tensor): the input `Tensor`
+    unbiased (bool): whether to use the unbiased estimation or not
 
 Example::
 
@@ -4088,7 +4136,7 @@ Example::
     1.3782334731508061
 
 
-.. function:: std(input, dim, keepdim=False, out=None) -> Tensor
+.. function:: std(input, dim, keepdim=False, unbiased=True, out=None) -> Tensor
 
 Returns the standard-deviation of each row of the :attr:`input` Tensor in the
 given dimension :attr:`dim`.
@@ -4098,10 +4146,14 @@ If :attr:`keepdim` is true, the output Tensor is of the same size as
 Otherwise, :attr:`dim` is squeezed (see :func:`torch.squeeze`), resulting
 in the output Tensor having 1 fewer dimension than :attr:`input`.
 
+If :attr:`unbiased` is false, then the standard-deviation will be calculated via
+the biased estimator. Otherwise, Bessel's correction will be used.
+
 Args:
     input (Tensor): the input `Tensor`
     dim (int): the dimension to reduce
     keepdim (bool): whether the output Tensor has :attr:`dim` retained or not
+    unbiased (bool): whether to use the unbiased estimation or not
     out (Tensor, optional): the result Tensor
 
 Example::
@@ -4534,7 +4586,7 @@ Example::
 
 add_docstr(torch._C.tril,
            """
-tril(input, k=0, out=None) -> Tensor
+tril(input, diagonal=0, out=None) -> Tensor
 
 Returns the lower triangular part of the matrix (2D Tensor) :attr:`input`,
 the other elements of the result Tensor :attr:`out` are set to 0.
@@ -4542,15 +4594,15 @@ the other elements of the result Tensor :attr:`out` are set to 0.
 The lower triangular part of the matrix is defined as the elements on and
 below the diagonal.
 
-The argument :attr:`k` controls which diagonal to consider.
+The argument :attr:`diagonal` controls which diagonal to consider.
 
-- :attr:`k` = 0, is the main diagonal.
-- :attr:`k` > 0, is above the main diagonal.
-- :attr:`k` < 0, is below the main diagonal.
+- :attr:`diagonal` = 0, is the main diagonal.
+- :attr:`diagonal` > 0, is above the main diagonal.
+- :attr:`diagonal` < 0, is below the main diagonal.
 
 Args:
     input (Tensor): the input `Tensor`
-    k (int, optional): the diagonal to consider
+    diagonal (int, optional): the diagonal to consider
     out (Tensor, optional): The result `Tensor`
 
 Example::
@@ -4570,14 +4622,14 @@ Example::
      1.2469  0.0064 -1.6250
     [torch.FloatTensor of size 3x3]
 
-    >>> torch.tril(a, k=1)
+    >>> torch.tril(a, diagonal=1)
 
      1.3225  1.7304  0.0000
     -0.3052 -0.3111 -0.1809
      1.2469  0.0064 -1.6250
     [torch.FloatTensor of size 3x3]
 
-    >>> torch.tril(a, k=-1)
+    >>> torch.tril(a, diagonal=-1)
 
      0.0000  0.0000  0.0000
     -0.3052  0.0000  0.0000
@@ -4588,7 +4640,7 @@ Example::
 
 add_docstr(torch._C.triu,
            """
-triu(input, k=0, out=None) -> Tensor
+triu(input, diagonal=0, out=None) -> Tensor
 
 Returns the upper triangular part of the matrix (2D Tensor) :attr:`input`,
 the other elements of the result Tensor :attr:`out` are set to 0.
@@ -4596,15 +4648,15 @@ the other elements of the result Tensor :attr:`out` are set to 0.
 The upper triangular part of the matrix is defined as the elements on and
 above the diagonal.
 
-The argument :attr:`k` controls which diagonal to consider.
+The argument :attr:`diagonal` controls which diagonal to consider.
 
-- :attr:`k` = 0, is the main diagonal.
-- :attr:`k` > 0, is above the main diagonal.
-- :attr:`k` < 0, is below the main diagonal.
+- :attr:`diagonal` = 0, is the main diagonal.
+- :attr:`diagonal` > 0, is above the main diagonal.
+- :attr:`diagonal` < 0, is below the main diagonal.
 
 Args:
     input (Tensor): the input `Tensor`
-    k (int, optional): the diagonal to consider
+    diagonal (int, optional): the diagonal to consider
     out (Tensor, optional): The result `Tensor`
 
 Example::
@@ -4624,14 +4676,14 @@ Example::
      0.0000  0.0000 -1.6250
     [torch.FloatTensor of size 3x3]
 
-    >>> torch.triu(a, k=1)
+    >>> torch.triu(a, diagonal=1)
 
      0.0000  1.7304  1.4573
      0.0000  0.0000 -0.1809
      0.0000  0.0000  0.0000
     [torch.FloatTensor of size 3x3]
 
-    >>> torch.triu(a, k=-1)
+    >>> torch.triu(a, diagonal=-1)
 
      1.3225  1.7304  1.4573
     -0.3052 -0.3111 -0.1809
@@ -4709,12 +4761,16 @@ Example:
 
 add_docstr(torch._C.var,
            """
-.. function:: var(input) -> float
+.. function:: var(input, unbiased=True) -> float
 
 Returns the variance of all elements in the :attr:`input` Tensor.
 
+If :attr:`unbiased` is false, then the variance will be calculated via the
+biased estimator. Otherwise, Bessel's correction will be used.
+
 Args:
     input (Tensor): the input `Tensor`
+    unbiased (bool): whether to use the unbiased estimation or not
 
 Example::
 
@@ -4728,7 +4784,7 @@ Example::
     1.899527506513334
 
 
-.. function:: var(input, dim, keepdim=False, out=None) -> Tensor
+.. function:: var(input, dim, keepdim=False, unbiased=True, out=None) -> Tensor
 
 Returns the variance of each row of the :attr:`input` Tensor in the given
 dimension :attr:`dim`.
@@ -4738,10 +4794,14 @@ as :attr:`input` except in the dimension :attr:`dim` where they are of size 1.
 Otherwise, :attr:`dim` is squeezed (see :func:`torch.squeeze`), resulting in
 the outputs Tensor having 1 fewer dimension than :attr:`input`.
 
+If :attr:`unbiased` is false, then the variance will be calculated via the
+biased estimator. Otherwise, Bessel's correction will be used.
+
 Args:
     input (Tensor): the input `Tensor`
     dim (int): the dimension to reduce
     keepdim (bool): whether the output Tensor has :attr:`dim` retained or not
+    unbiased (bool): whether to use the unbiased estimation or not
     out (Tensor, optional): the result Tensor
 
 Example::
@@ -4793,6 +4853,26 @@ Example::
      0
     [torch.FloatTensor of size 5]
 
+""")
+
+add_docstr(torch._C.zeros_like,
+           """
+zeros_like(input, out=None) -> Tensor
+
+Returns a Tensor filled with the scalar value `0`, with the same size as :attr:`input`.
+
+Args:
+    input (Tensor): The size of the input will determine the size of the output.
+    out (Tensor, optional): the result Tensor
+
+Example::
+
+    >>> input = torch.FloatTensor(2, 3)
+    >>> torch.zeros_like(input)
+
+     0  0  0
+     0  0  0
+    [torch.FloatTensor of size 2x3]
 """)
 
 add_docstr(torch._C.btrifact,

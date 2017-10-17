@@ -4,9 +4,13 @@
 #include <vector>
 #include <string>
 #include <type_traits>
-
+#include <ATen/ATen.h>
 #include "torch/csrc/utils/object_ptr.h"
 #include "torch/csrc/utils/python_numbers.h"
+
+#ifdef WITH_CUDA
+#include <THC/THC.h>
+#endif
 
 #define THPUtils_(NAME) TH_CONCAT_4(THP,Real,Utils_,NAME)
 
@@ -115,6 +119,16 @@ THP_API void THPUtils_invalidArguments(
         PyObject *given_args, PyObject *given_kwargs,
         const char *function_name, size_t num_options, ...);
 
+#define THPUtils_assert_PyImport(name, module)                          \
+  PyObject* module = PyImport_ImportModule(name);                       \
+  if (!module) {                                                        \
+    if (PyErr_Occurred()) {                                             \
+      PyErr_Print();                                                    \
+    }                                                                   \
+    THPUtils_setError("class loader couldn't access %s", name);         \
+    return NULL;                                                        \
+  }
+
 #ifdef _THP_CORE
 
 bool THPUtils_checkIntTuple(PyObject *arg);
@@ -174,6 +188,12 @@ bool getBackCompatBroadcastWarn();
 void setBackCompatKeepdimWarn(bool warn);
 bool getBackCompatKeepdimWarn();
 bool maybeThrowBackCompatKeepdimWarn(char *func);
+
+std::vector<at::Tensor> THPUtils_PySequence_to_TensorList(PyObject *obj);
+
+#ifdef WITH_CUDA
+std::vector <THCStream*> THPUtils_PySequence_to_THCStreamList(PyObject *obj);
+#endif
 
 #endif /* _THP_CORE */
 

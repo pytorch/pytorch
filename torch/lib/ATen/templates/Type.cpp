@@ -3,6 +3,7 @@
 #include "ATen/Storage.h"
 #include "ATen/Scalar.h"
 #include "ATen/SparseTensorRef.h"
+#include "ATen/ExpandUtils.h"
 
 #include <iostream>
 ${type_headers}
@@ -13,29 +14,35 @@ void Type::registerAll(Context * context) {
   ${type_registrations}
 }
 
-Tensor Type::copy(const Tensor & src) {
-  Tensor r = this->tensor();
+void Type::copy(const Tensor & src, Tensor & dst) const {
+  Tensor b_src;
+  std::tie(b_src) = expand_inplace(dst, src);
+  s_copy(b_src, dst);
+}
+
+Tensor Type::copy(const Tensor & src) const {
+  Tensor r = this->tensor(src.sizes());
   r.copy_(src);
   return r;
 }
 
-Type & Type::toBackend(Backend b) {
+Type & Type::toBackend(Backend b) const {
   return context->getType(b,scalarType());
 }
-Type & Type::toScalarType(ScalarType s) {
+Type & Type::toScalarType(ScalarType s) const {
   return context->getType(backend(),s);
 }
 
-Tensor Type::tensorFromBlob(void * data, IntList sizes) {
+Tensor Type::tensorFromBlob(void * data, IntList sizes, const std::function<void(void*)> & deleter) {
   std::vector<int64_t> strides(sizes.size());
   int64_t stride = 1;
   for(size_t i = sizes.size(); i > 0; --i) {
     strides[i-1] = stride;
     stride *= sizes[i-1];
   }
-  return tensorFromBlob(data, sizes, strides);
+  return tensorFromBlob(data, sizes, strides, deleter);
 }
-Tensor Type::tensorFromBlob(void * data, IntList sizes, IntList strides) {
+Tensor Type::tensorFromBlob(void * data, IntList sizes, IntList strides, const std::function<void(void*)> & deleter) {
   // size of the underlying storage is 1 bigger than the offset
   // of the last element according to stride
   int64_t size = 1;
@@ -46,17 +53,17 @@ Tensor Type::tensorFromBlob(void * data, IntList sizes, IntList strides) {
     }
     size += strides[i]*(sizes[i]-1);
   }
-  auto storage = storageFromBlob(data,size);
+  auto storage = storageFromBlob(data,size,deleter);
   return tensor(*storage, 0, sizes, strides);
 }
-Tensor Type::scalarTensor(Scalar s) {
+Tensor Type::scalarTensor(Scalar s) const {
   if(s.isBackedByTensor())
-    return s.t.toType(*this);
+    return Tensor(s.t).toType(*this);
   return tensor({}).fill_(s);
 }
 
 bool Type::operator==(const Type& other) const {
-  return this->ID() == other.ID();
+  return this == &other;
 }
 
 ${type_method_definitions}

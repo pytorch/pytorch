@@ -6,7 +6,7 @@ struct TopKTypeConfig {};
 
 template <>
 struct TopKTypeConfig<float> {
-  typedef unsigned int RadixType;
+  typedef uint32_t RadixType;
 
   // Converts a float to an integer representation with the same
   // sorting; i.e., for floats f1, f2:
@@ -29,76 +29,76 @@ struct TopKTypeConfig<float> {
 };
 
 template <>
-struct TopKTypeConfig<unsigned char> {
-  typedef unsigned int RadixType;
+struct TopKTypeConfig<uint8_t> {
+  typedef uint32_t RadixType;
 
-  static inline __device__ RadixType convert(unsigned char v) {
+  static inline __device__ RadixType convert(uint8_t v) {
     return v;
   }
 
-  static inline __device__ unsigned char deconvert(RadixType v) {
+  static inline __device__ uint8_t deconvert(RadixType v) {
     return v;
   }
 };
 
 template <>
-struct TopKTypeConfig<char> {
-  typedef unsigned int RadixType;
+struct TopKTypeConfig<int8_t> {
+  typedef uint32_t RadixType;
 
-  static inline __device__ RadixType convert(char v) {
+  static inline __device__ RadixType convert(int8_t v) {
     return 128u + v;
   }
 
-  static inline __device__ char deconvert(RadixType v) {
+  static inline __device__ int8_t deconvert(RadixType v) {
     return v - 128;
   }
 };
 
 template <>
-struct TopKTypeConfig<short> {
-  typedef unsigned int RadixType;
+struct TopKTypeConfig<int16_t> {
+  typedef uint32_t RadixType;
 
-  static inline __device__ RadixType convert(short v) {
+  static inline __device__ RadixType convert(int16_t v) {
     assert(sizeof(short) == 2);
     return 32768u + v;
   }
 
-  static inline __device__ short deconvert(RadixType v) {
+  static inline __device__ int16_t deconvert(RadixType v) {
     return v - 32768;
   }
 };
 
 template <>
-struct TopKTypeConfig<int> {
-  typedef unsigned int RadixType;
+struct TopKTypeConfig<int32_t> {
+  typedef uint32_t RadixType;
 
-  static inline __device__ RadixType convert(int v) {
+  static inline __device__ RadixType convert(int32_t v) {
     assert(sizeof(int) == 4);
     return 2147483648u + v;
   }
 
-  static inline __device__ int deconvert(RadixType v) {
+  static inline __device__ int32_t deconvert(RadixType v) {
     return v - 2147483648u;
   }
 };
 
 template <>
-struct TopKTypeConfig<long> {
-  typedef unsigned long long int RadixType;
+struct TopKTypeConfig<int64_t> {
+  typedef uint64_t RadixType;
 
-  static inline __device__ RadixType convert(long v) {
-    assert(sizeof(long) == 8);
+  static inline __device__ RadixType convert(int64_t v) {
+    assert(sizeof(int64_t) == 8);
     return 9223372036854775808ull + v;
   }
 
-  static inline __device__ long deconvert(RadixType v) {
+  static inline __device__ int64_t deconvert(RadixType v) {
     return v - 9223372036854775808ull;
   }
 };
 
 template <>
 struct TopKTypeConfig<double> {
-  typedef unsigned long long int RadixType;
+  typedef uint64_t RadixType;
 
   static inline __device__ RadixType convert(double v) {
     RadixType x = __double_as_longlong(v);
@@ -115,7 +115,7 @@ struct TopKTypeConfig<double> {
 #ifdef CUDA_HALF_TENSOR
 template <>
 struct TopKTypeConfig<half> {
-  typedef unsigned int RadixType;
+  typedef uint32_t RadixType;
 
   static inline __device__ RadixType convert(half v) {
 #if CUDA_VERSION >= 8000
@@ -364,7 +364,7 @@ __global__ void gatherTopK(TensorInfo<T, IndexType> input,
                            IndexType numTopKSlices,
                            IndexType topKWithinSliceStride,
 
-                           TensorInfo<long, IndexType> indices,
+                           TensorInfo<int64_t, IndexType> indices,
                            IndexType indicesWithinSliceStride) {
   // Indices are limited to integer fp precision, so counts can fit in
   // int32, regardless of IndexType
@@ -381,11 +381,11 @@ __global__ void gatherTopK(TensorInfo<T, IndexType> input,
   IndexType topKSliceStartIndex =
     IndexToOffset<T, IndexType, Dim>::get(slice, topK);
   IndexType indicesSliceStartIndex =
-    IndexToOffset<long, IndexType, Dim>::get(slice, indices);
+    IndexToOffset<int64_t, IndexType, Dim>::get(slice, indices);
 
   T* inputSliceStart = &input.data[sliceStartIndex];
   T* topKSliceStart = &topK.data[topKSliceStartIndex];
-  long* indicesSliceStart = &indices.data[indicesSliceStartIndex];
+  int64_t* indicesSliceStart = &indices.data[indicesSliceStartIndex];
 
   // Find the k-th highest element in our input
   T topKValue = ScalarConvert<int, T>::to(0);

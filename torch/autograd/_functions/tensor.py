@@ -2,9 +2,20 @@ from functools import reduce
 import torch
 from torch._utils import _accumulate
 
-from ..function import Function, InplaceFunction, once_differentiable
+from ..function import Function, InplaceFunction, once_differentiable, traceable
 from ..variable import Variable
 from .utils import maybe_unexpand
+
+
+def _preprocess_adv_index_seq(index):
+    result = []
+    for indexer in index:
+        if isinstance(indexer, Variable):
+            assert not indexer.requires_grad
+            result.append(indexer.data)
+        else:
+            result.append(indexer)
+    return result
 
 
 class Index(Function):
@@ -13,9 +24,13 @@ class Index(Function):
     def forward(ctx, i, index):
         ctx.input_size = i.size()
         ctx.index = index
-        result = i.index(ctx.index)
         ctx.advanced_indexing = i._check_advanced_indexing(index)
-        if not ctx.advanced_indexing:
+        if ctx.advanced_indexing:
+            # handle any Variable arguments in the index sequence
+            ctx.index = _preprocess_adv_index_seq(index)
+            result = i.index(ctx.index)
+        else:
+            result = i.index(ctx.index)
             ctx.mark_shared_storage((i, result))
         return result
 
@@ -40,6 +55,9 @@ class SetItem(InplaceFunction):
         ctx.tensor_value = torch.is_tensor(value)
         if ctx.tensor_value:
             ctx.value_size = value.size()
+        ctx.advanced_indexing = i._check_advanced_indexing(index)
+        if ctx.advanced_indexing:
+            ctx.index = _preprocess_adv_index_seq(index)
         i._set_index(ctx.index, value)
         return i
 
@@ -73,7 +91,19 @@ class NoGrad(Function):
     __call__ = _do_forward
 
 
+@traceable
 class Transpose(Function):
+
+    @staticmethod
+    def symbolic(g, i, dim1, dim2):
+        # NB: Swap dim1 and dim2, which is different from ONNX's
+        # Transpose, which is actually a permute.
+        if dim1 == dim2:
+            return i
+
+        axes = list(range(len(i.type().sizes())))
+        axes[dim1], axes[dim2] = axes[dim2], axes[dim1]
+        return g.op("Transpose", i, perm_i=axes)
 
     @staticmethod
     def forward(ctx, i, dim1, dim2):
@@ -88,6 +118,12 @@ class Transpose(Function):
 
 
 class View(Function):
+
+    @staticmethod
+    def symbolic(g, i, sizes):
+        if len(sizes) == 1 and isinstance(sizes[0], torch.Size):
+            sizes = sizes[0]
+        return g.op("Reshape", i, shape_i=sizes)
 
     @staticmethod
     def forward(ctx, i, sizes):
@@ -132,21 +168,26 @@ class Type(Function):
     @staticmethod
     def forward(ctx, i, dest_type):
         ctx.input_type = type(i)
+        ctx.input_device = -1 if not i.is_cuda else i.get_device()
         return i.type(dest_type)
 
     @staticmethod
     def backward(ctx, grad_output):
-        return grad_output.type(ctx.input_type), None
+        if ctx.input_device == -1:
+            return grad_output.type(ctx.input_type), None
+        else:
+            with torch.cuda.device(ctx.input_device):
+                return grad_output.type(ctx.input_type), None
 
 
 class CudaTransfer(Function):
 
     @staticmethod
-    def forward(ctx, i, device_id=None, async=False):
+    def forward(ctx, i, device=None, async=False):
         ctx.source_device = -1 if not i.is_cuda else i.get_device()
         ctx.source_was_cuda = i.is_cuda
-        if device_id is not None:
-            return i.cuda(device_id, async=async)
+        if device is not None:
+            return i.cuda(device, async=async)
         else:
             return i.cuda(async=async)
 
@@ -161,6 +202,12 @@ class CudaTransfer(Function):
 
 
 class Permute(Function):
+
+    @staticmethod
+    def symbolic(g, input, dim_indices):
+        if dim_indices == list(range(0, len(dim_indices))):
+            return input
+        return g.op("Transpose", input, perm_i=dim_indices)
 
     @staticmethod
     def forward(ctx, input, dim_indices):
@@ -213,7 +260,10 @@ class AdvancedIndexAdd(InplaceFunction):
             ctx.adv_index = adv_index
         ctx.mark_dirty(tensor1)
         ctx.tensor2_size = tensor2.size()
-        return tensor1._advanced_index_add(adv_index, tensor2)
+        index = _preprocess_adv_index_seq(adv_index)
+        if ctx.needs_input_grad[2]:
+            ctx.adv_index = index
+        return tensor1._advanced_index_add(index, tensor2)
 
     @staticmethod
     @once_differentiable
@@ -311,6 +361,10 @@ class IndexSelect(Function):
 class Concat(Function):
 
     @staticmethod
+    def symbolic(g, dim, *inputs):
+        return g.op("Concat", *inputs, axis_i=dim)
+
+    @staticmethod
     def forward(ctx, dim, *inputs):
         ctx.dim = dim
         ctx.input_sizes = [i.size(dim) for i in inputs]
@@ -362,6 +416,18 @@ class Clone(Function):
 
 
 class Squeeze(InplaceFunction):
+
+    @staticmethod
+    def symbolic(g, input, dim, inplace=False):
+        # TODO: [Export inplace]
+        if dim is None:
+            dims = []
+            for i, size in enumerate(input.type().sizes()):
+                if size == 1:
+                    dims.append(i)
+        else:
+            dims = [dim]
+        return g.op("Squeeze", input, axes_i=dims)
 
     @staticmethod
     def forward(ctx, input, dim=None, inplace=False):
@@ -534,7 +600,25 @@ class Topk(_MultiSelectionFunction):
         return _MultiSelectionFunction.forward(ctx, input, dim, return_indices, args)
 
 
+@traceable
 class Chunk(Function):
+
+    @staticmethod
+    def symbolic(g, i, num_chunks, dim=0):
+        dim_size = i.type().sizes()[dim]
+        split_size = (dim_size + num_chunks - 1) // num_chunks
+        lengths = []
+        count_chunks = 0
+        while (dim_size > 0):
+            this_split_size = split_size if dim_size >= split_size else dim_size
+            lengths.append(this_split_size)
+            dim_size = dim_size - split_size
+            count_chunks = count_chunks + 1
+        result = []
+        n = g.appendNode(g.create("Split", [i]).is_("split", lengths).i_("axis", dim))
+        for i in range(count_chunks):
+            result.append(g.appendNode(g.createSelect(n, i)))
+        return tuple(result)
 
     @staticmethod
     def forward(ctx, i, num_chunks, dim=0):

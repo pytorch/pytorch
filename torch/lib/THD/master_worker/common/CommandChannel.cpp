@@ -44,10 +44,10 @@ std::unique_ptr<rpc::RPCMessage> receiveMessage(int socket) {
 
 MasterCommandChannel::MasterCommandChannel(InitMethod::Config config)
   : _rank(0)
+  , _sockets(config.world_size, -1)
   , _poll_events(nullptr)
   , _error_pipe(-1)
   , _error(nullptr)
-  , _sockets(config.world_size, -1)
   , _mutexes(config.world_size)
 {
   _sockets[0] = config.master.listen_socket;

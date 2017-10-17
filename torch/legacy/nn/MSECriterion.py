@@ -17,17 +17,22 @@ class MSECriterion(Criterion):
             input,
             target,
             self.output_tensor,
-            self.sizeAverage
+            self.sizeAverage,
+            True,  # reduce
         )
         self.output = self.output_tensor[0]
         return self.output
 
     def updateGradInput(self, input, target):
+        implicit_gradOutput = torch.Tensor([1]).type(input.type())
+
         self._backend.MSECriterion_updateGradInput(
             self._backend.library_state,
             input,
             target,
+            implicit_gradOutput,
             self.gradInput,
-            self.sizeAverage
+            self.sizeAverage,
+            True,  # reduce
         )
         return self.gradInput

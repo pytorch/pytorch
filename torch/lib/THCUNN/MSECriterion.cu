@@ -25,6 +25,23 @@ struct mse_functor
   }
 };
 
+
+template <typename Dtype>
+struct mse_updateOutput_functor
+{
+  mse_updateOutput_functor() {}
+
+  __device__ void operator()(
+      const Dtype *input, 
+      const Dtype *target, 
+      Dtype *output)
+  {
+    Dtype diff = THCNumerics<Dtype>::sub(*input, *target);
+    *output = THCNumerics<Dtype>::mul(diff, diff);
+  }
+};
+
+
 template <typename Dtype, typename Acctype>
 struct mse_updateGradInput_functor
 {

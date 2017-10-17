@@ -35,9 +35,11 @@ PyObject* CppFunction_pynew(PyTypeObject *type, PyObject *args, PyObject *kwds)
   {(char*)"register_hook", (PyCFunction)THPCppFunction_register_hook, METH_O, NULL}
 
 #define THP_FUNCTION_DEFAULT_PROPERTIES \
-  {(char*)"next_functions", (getter)THPCppFunction_next_functions, NULL, NULL, NULL}
+  {(char*)"next_functions", (getter)THPCppFunction_next_functions, NULL, NULL, NULL}, \
+  {(char*)"requires_grad", (getter)THPCppFunction_requires_grad, NULL, NULL, NULL}
 
 PyObject* THPCppFunction_next_functions(THPCppFunction* self, PyObject* hook);
+PyObject* THPCppFunction_requires_grad(THPCppFunction* self);
 PyObject* THPCppFunction_register_hook_dict(PyObject* self, PyObject* _var);
 PyObject* THPCppFunction_register_hook(PyObject* self, PyObject* hook);
 

@@ -4,9 +4,9 @@
 
 static void THNN_(SpatialReflectionPadding_updateOutput_frame)(
   real *input_p, real *output_p,
-  long nslices,
-  long iwidth, long iheight,
-  long owidth, long oheight,
+  int64_t nslices,
+  int64_t iwidth, int64_t iheight,
+  int64_t owidth, int64_t oheight,
   int pad_l, int pad_r,
   int pad_t, int pad_b)
 {
@@ -15,12 +15,12 @@ static void THNN_(SpatialReflectionPadding_updateOutput_frame)(
   int oStartX = fmax(0, pad_l);
   int oStartY = fmax(0, pad_t);
 
-  long k, ip_x, ip_y;
+  int64_t k, ip_x, ip_y;
 #pragma omp parallel for private(k, ip_x, ip_y)
 
   for (k = 0; k < nslices; k++)
   {
-    long i, j;
+    int64_t i, j;
     for (i = 0; i < oheight; i++) {
       for (j = 0; j < owidth; j++) {
         if (j < pad_l) {
@@ -58,12 +58,12 @@ void THNN_(SpatialReflectionPadding_updateOutput)(THNNState *state,
   int dimw = 2;
   int dimh = 1;
   int dimslices = 0;
-  long nbatch = 1;
-  long nslices;
-  long iheight;
-  long iwidth;
-  long oheight;
-  long owidth;
+  int64_t nbatch = 1;
+  int64_t nslices;
+  int64_t iheight;
+  int64_t iwidth;
+  int64_t oheight;
+  int64_t owidth;
   real *input_data;
   real *output_data;
 
@@ -78,10 +78,22 @@ void THNN_(SpatialReflectionPadding_updateOutput)(THNNState *state,
     dimslices++;
   }
 
-  /* sizes */
+  /* input sizes */
   nslices = input->size[dimslices];
   iheight = input->size[dimh];
   iwidth = input->size[dimw];
+
+  THArgCheck(pad_l <= iwidth && pad_r <= iwidth, 4,
+             "Padding size should not exceed corresponding input dimension, "
+             "but got: padding (%d, %d) at dimension %d of input %s",
+             pad_l, pad_r, dimw, _THSizeDesc(input->size, input->nDimension).str);
+
+  THArgCheck(pad_t <= iheight && pad_b <= iheight, 6,
+             "Padding size should not exceed corresponding input dimension, "
+             "but got: padding (%d, %d) at dimension %d of input %s",
+             pad_t, pad_b, dimh, _THSizeDesc(input->size, input->nDimension).str);
+
+  /* output sizes */
   oheight = iheight + pad_t + pad_b;
   owidth  = iwidth + pad_l + pad_r;
 
@@ -110,7 +122,7 @@ void THNN_(SpatialReflectionPadding_updateOutput)(THNNState *state,
   }
   else
   {
-    long p;
+    int64_t p;
 
     THTensor_(resize4d)(output, nbatch, nslices, oheight, owidth);
 
@@ -137,9 +149,9 @@ void THNN_(SpatialReflectionPadding_updateOutput)(THNNState *state,
 
 static void THNN_(SpatialReflectionPadding_updateGradInput_frame)(
   real *ginput_p, real *goutput_p,
-  long nslices,
-  long iwidth, long iheight,
-  long owidth, long oheight,
+  int64_t nslices,
+  int64_t iwidth, int64_t iheight,
+  int64_t owidth, int64_t oheight,
   int pad_l, int pad_r,
   int pad_t, int pad_b)
 {
@@ -148,12 +160,12 @@ static void THNN_(SpatialReflectionPadding_updateGradInput_frame)(
   int oStartX = fmax(0, pad_l);
   int oStartY = fmax(0, pad_t);
 
-  long k, ip_x, ip_y;
+  int64_t k, ip_x, ip_y;
 #pragma omp parallel for private(k, ip_x, ip_y)
 
   for (k = 0; k < nslices; k++)
   {
-    long i, j;
+    int64_t i, j;
     for (i = 0; i < oheight; i++) {
       for (j = 0; j < owidth; j++) {
         if (j < pad_l) {
@@ -192,12 +204,12 @@ void THNN_(SpatialReflectionPadding_updateGradInput)(THNNState *state,
   int dimw = 2;
   int dimh = 1;
   int dimslices = 0;
-  long nbatch = 1;
-  long nslices;
-  long iheight;
-  long iwidth;
-  long oheight;
-  long owidth;
+  int64_t nbatch = 1;
+  int64_t nslices;
+  int64_t iheight;
+  int64_t iwidth;
+  int64_t oheight;
+  int64_t owidth;
 
   if (input->nDimension == 4)
   {
@@ -239,7 +251,7 @@ void THNN_(SpatialReflectionPadding_updateGradInput)(THNNState *state,
       pad_l, pad_r,
       pad_t, pad_b);
   } else {
-    long p;
+    int64_t p;
 #pragma omp parallel for private(p)
     for (p = 0; p < nbatch; p++) {
       THNN_(SpatialReflectionPadding_updateGradInput_frame)(

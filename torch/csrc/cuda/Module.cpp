@@ -13,6 +13,7 @@
 
 #include "THCP.h"
 
+#include "torch/csrc/utils/python_strings.h"
 #include "ModuleSparse.cpp"
 
 THCState *state;
@@ -117,6 +118,18 @@ PyObject * THCPModule_getDeviceCount_wrap(PyObject *self)
     ndevice = 0;
   }
   return PyLong_FromLong(ndevice);
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject * THCPModule_getDeviceName_wrap(PyObject *self, PyObject *arg)
+{
+  HANDLE_TH_ERRORS
+  THPUtils_assert(THPUtils_checkLong(arg), "invalid argument to getDeviceName");
+  long device = THPUtils_unpackLong(arg);
+
+  cudaDeviceProp prop;
+  THCudaCheck(cudaGetDeviceProperties(&prop, device));
+  return THPUtils_packString(prop.name);
   END_HANDLE_TH_ERRORS
 }
 
@@ -332,6 +345,8 @@ PyObject * THCPModule_initExtension(PyObject *self)
 }
 
 #ifdef WITH_NCCL
+#include "nccl.h"
+
 void THCPModule_useNccl()
 {
   // Use NCCL to ensure that the symbols are loaded
@@ -346,4 +361,41 @@ PyObject * THCPModule_getCurrentBlasHandle_wrap(PyObject *self)
   cublasHandle_t handle = THCState_getCurrentBlasHandle(state);
   return PyLong_FromVoidPtr(handle);
   END_HANDLE_TH_ERRORS
+}
+
+static struct PyMethodDef _THCPModule_methods[] = {
+  {"_cuda_init",        (PyCFunction)THCPModule_initExtension,    METH_NOARGS,  NULL},
+  {"_cuda_setDevice",   (PyCFunction)THCPModule_setDevice_wrap,   METH_O,       NULL},
+  {"_cuda_getDevice",   (PyCFunction)THCPModule_getDevice_wrap,   METH_NOARGS,  NULL},
+  {"_cuda_getDeviceCount", (PyCFunction)THCPModule_getDeviceCount_wrap, METH_NOARGS, NULL},
+  {"_cuda_getDeviceName", (PyCFunction)THCPModule_getDeviceName_wrap, METH_O,   NULL},
+  {"_cuda_getCurrentStream", (PyCFunction)THCPModule_getCurrentStream_wrap, METH_NOARGS, NULL},
+  {"_cuda_getCurrentBlasHandle", (PyCFunction)THCPModule_getCurrentBlasHandle_wrap, METH_NOARGS, NULL},
+  {"_cuda_setStream",    (PyCFunction)THCPModule_setStream_wrap,  METH_O, NULL},
+  {"_cuda_isDriverSufficient", (PyCFunction)THCPModule_isDriverSufficient, METH_NOARGS, NULL},
+  {"_cuda_getDriverVersion", (PyCFunction)THCPModule_getDriverVersion, METH_NOARGS, NULL},
+  {"_cuda_getRNGState", (PyCFunction)THCPModule_getRNGState,      METH_NOARGS,  NULL},
+  {"_cuda_setRNGState", (PyCFunction)THCPModule_setRNGState,      METH_O,       NULL},
+  {"_cuda_manualSeed",  (PyCFunction)THCPModule_manualSeed,       METH_O,       NULL},
+  {"_cuda_manualSeedAll", (PyCFunction)THCPModule_manualSeedAll,  METH_O,       NULL},
+  {"_cuda_seed",        (PyCFunction)THCPModule_seed,             METH_NOARGS,  NULL},
+  {"_cuda_seedAll",     (PyCFunction)THCPModule_seedAll,          METH_NOARGS,  NULL},
+  {"_cuda_initialSeed", (PyCFunction)THCPModule_initialSeed,      METH_NOARGS,  NULL},
+  {"_cuda_cudaHostAllocator", (PyCFunction)THCPModule_cudaHostAllocator, METH_NOARGS, NULL},
+  {"_cuda_synchronize", (PyCFunction)THCPModule_cudaSynchronize, METH_NOARGS, NULL},
+  {"_cuda_sleep", (PyCFunction)THCPModule_cudaSleep, METH_O, NULL},
+  {"_cuda_lock_mutex",   (PyCFunction)THCPModule_cudaLockMutex,   METH_NOARGS,  NULL},
+  {"_cuda_unlock_mutex", (PyCFunction)THCPModule_cudaUnlockMutex, METH_NOARGS,  NULL},
+#ifdef WITH_NCCL
+  {"_nccl_reduce", (PyCFunction)THCPModule_nccl_reduce, METH_VARARGS, NULL},
+  {"_nccl_all_reduce", (PyCFunction)THCPModule_nccl_all_reduce, METH_VARARGS, NULL},
+  {"_nccl_broadcast", (PyCFunction)THCPModule_nccl_broadcast, METH_VARARGS, NULL},
+  {"_nccl_all_gather", (PyCFunction)THCPModule_nccl_all_gather, METH_VARARGS, NULL},
+  {"_nccl_reduce_scatter", (PyCFunction)THCPModule_nccl_reduce_scatter, METH_VARARGS, NULL},
+#endif
+  {NULL}
+};
+
+PyMethodDef* THCPModule_methods() {
+  return _THCPModule_methods;
 }

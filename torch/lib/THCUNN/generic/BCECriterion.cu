@@ -12,7 +12,7 @@ void THNN_(BCECriterion_updateOutput)(
 {
   THCUNN_check_nElement(state, input, target);
   THCUNN_check_nElement(state, input, weights);
-  THCUNN_check_dim_size(state, output, 1, 0, 1);
+  THCTensor_(resize1d)(state, output, 1);
   THCUNN_assertSameGPU(state, 3, input, target, weights);
 
   ptrdiff_t size = THCTensor_(nElement)(state, input);

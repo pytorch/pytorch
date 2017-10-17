@@ -117,12 +117,12 @@ TensorInfo<T, IndexType>::collapseDims(int excludeDim) {
   // dimensions.
   // size/strideInner are the size/strides of the previous inner
   // non-collapsible dim we encounter.
-  long sizeInner = sizes[firstNonOneDim];
-  long strideInner = strides[firstNonOneDim];
+  int64_t sizeInner = sizes[firstNonOneDim];
+  int64_t strideInner = strides[firstNonOneDim];
 
   for (int i = firstNonOneDim - 1; i >= 0; --i) {
-    long sizeOuter = sizes[i];
-    long strideOuter = strides[i];
+    int64_t sizeOuter = sizes[i];
+    int64_t strideOuter = strides[i];
 
     // Don't collapse this dimension if we want to exclude it from
     // collapsing.

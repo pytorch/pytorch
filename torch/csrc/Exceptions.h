@@ -38,6 +38,7 @@ struct python_error : public std::exception {
 
   /** Saves the exception so that it can be re-thrown on a different thread */
   inline void persist() {
+    if (type) return; // Don't overwrite exceptions
     // PyErr_Fetch overwrites the pointers
     AutoGIL gil;
     Py_XDECREF(type);

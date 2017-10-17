@@ -2,7 +2,7 @@
 
 #define THCIndexTensor THCudaLongTensor
 #define THCIndexTensor_(NAME) THCudaLongTensor_ ## NAME
-typedef long THCIndex_t;
+typedef int64_t THCIndex_t;
 
 #define THNN_(NAME) TH_CONCAT_3(THNN_, CReal, NAME)
 

@@ -75,7 +75,7 @@ void THNN_(VolumetricUpSamplingNearest_updateOutput)(
 
   input = THCTensor_(newContiguous)(state, input);
   // This is for allocating output Tensor
-  long no_elements = 1;
+  int64_t no_elements = 1;
   for(int i = 0; i < input->nDimension; i++){
     no_elements *= input->size[i];
   }
@@ -102,12 +102,12 @@ void THNN_(VolumetricUpSamplingNearest_updateOutput)(
   real *output_data = THCTensor_(data)(state, output);
 
   // cuda blocks & threads:
-  long nthreads = 256;
+  int64_t nthreads = 256;
   // Max number of blocks: http://en.wikipedia.org/wiki/CUDA
   // 65535 for SM 2.x, 2^32 -1 for >= 3.0
   // TODO: When we move to SM 3.5 we should update this
-  long n_xblocks = min(max((int)ceil((float)no_elements / nthreads), 1), 65535);
-  long n_yblocks = (long)ceil((float)no_elements / (float)(n_xblocks * nthreads));
+  int64_t n_xblocks = min(max((int)ceil((float)no_elements / nthreads), 1), 65535);
+  int64_t n_yblocks = (int64_t)ceil((float)no_elements / (float)(n_xblocks * nthreads));
   if (n_yblocks > 65535) {
     THError("Input size is too large!  aborting");
   }
@@ -140,7 +140,7 @@ void THNN_(VolumetricUpSamplingNearest_updateGradInput)(
   real *gradInput_data = THCTensor_(data)(state, gradInput);
   real *gradOutput_data = THCTensor_(data)(state, gradOutput);
 
-  long no_elements = 1;
+  int64_t no_elements = 1;
   for(int i = 0; i < gradInput->nDimension; i++){
     no_elements *= gradInput->size[i];
   }
@@ -163,12 +163,12 @@ void THNN_(VolumetricUpSamplingNearest_updateGradInput)(
   }
 
   // cuda blocks & threads:
-  long nthreads = 256;
+  int64_t nthreads = 256;
   // Max number of blocks: http://en.wikipedia.org/wiki/CUDA
   // 65535 for SM 2.x, 2^32 -1 for >= 3.0
   // TODO: When we move to SM 3.5 we should update this
-  long n_xblocks = min(max((int)ceil((float)no_elements / nthreads), 1), 65535);
-  long n_yblocks = (long)ceil((float)no_elements / (float)(n_xblocks * nthreads));
+  int64_t n_xblocks = min(max((int)ceil((float)no_elements / nthreads), 1), 65535);
+  int64_t n_yblocks = (int64_t)ceil((float)no_elements / (float)(n_xblocks * nthreads));
   if (n_yblocks > 65535) {
     THError("Input size is too large!  aborting");
   }

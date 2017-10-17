@@ -32,7 +32,7 @@ class _ContextMethodMixin(object):
 
         Every tensor that's been modified in-place in a call to :func:`forward`
         should be given to this function, to ensure correctness of our checks.
-        It doesn't matter wheter the function is called before or after
+        It doesn't matter whether the function is called before or after
         modification.
         """
         self.dirty_tensors = args
@@ -135,51 +135,62 @@ class Function(with_metaclass(FunctionMeta, _C._FunctionBase, _ContextMethodMixi
     subclasses and defining new operations. This is a recommended way of
     extending torch.autograd.
 
-    Since Function logic is a hotspot in most scripts, almost all of it
-    was moved to our C backend, to ensure that the framework overhead is
-    minimal.
-
     Each function is meant to be used only once (in the forward pass).
 
     Attributes:
-        saved_tensors: Tuple of Tensors that were saved in the call to
-            :func:`forward`.
-        saved_variables: Tuple of Variables that correspond to the tensors
-            saved in the call to :func:`forward`.
-        needs_input_grad: Tuple of booleans of length :attr:`num_inputs`,
-            indicating whether a given input requires gradient. This can be
-            used to optimize buffers saved for backward, and ignoring gradient
-            computation in :func:`~Function.backward`.
-        num_inputs: Number of inputs given to :func:`forward`.
-        num_outputs: Number of tensors returned by :func:`forward`.
         requires_grad: Boolean indicating whether the :func:`backward` will
             ever need to be called.
+
+    Examples::
+
+        >>> class Exp(Function):
+        >>>
+        >>>     @staticmethod
+        >>>     def forward(ctx, i):
+        >>>         result = i.exp()
+        >>>         ctx.save_for_backward(result)
+        >>>         return result
+        >>>
+        >>>     @staticmethod
+        >>>     def backward(ctx, grad_output):
+        >>>         result, = ctx.saved_variables
+        >>>         return grad_output * result
     """
 
     # only for backward compatibility
     __call__ = _C._FunctionBase._do_forward
 
+    # for the tracer
+    is_traceable = False
+
     @staticmethod
-    def forward(*args, **kwargs):
+    def forward(ctx, *args, **kwargs):
         """Performs the operation.
 
         This function is to be overriden by all subclasses.
 
-        It can take and return an arbitrary number of tensors.
+        It must accept a context ctx as the first argument, followed by any
+        number of arguments (tensors or other types).
+
+        The context can be used to store variables that can be then retrieved
+        during the backward pass.
         """
         raise NotImplementedError
 
     @staticmethod
-    def backward(*grad_outputs):
+    def backward(ctx, *grad_outputs):
         """Defines a formula for differentiating the operation.
 
         This function is to be overriden by all subclasses.
 
-        All arguments are tensors. It has to accept exactly as many arguments,
-        as many outputs did :func:`forward` return, and it should return as
-        many tensors, as there were inputs to :func:`forward`. Each argument
-        is the gradient w.r.t the given output, and each returned value should
-        be the gradient w.r.t. the corresponding input.
+        It must accept a context ctx as the first argument, followed by as many
+        outputs did :func:`forward` return, and it should return as many
+        tensors, as there were inputs to :func:`forward`. Each argument is the
+        gradient w.r.t the given output, and each returned value should be the
+        gradient w.r.t. the corresponding input.
+
+        The context can be used to retrieve variables saved during the forward
+        pass.
         """
         raise NotImplementedError
 
@@ -217,6 +228,21 @@ def once_differentiable(fn):
         return err_fn(*[Variable(o, **kwargs) if o is not None else None
                       for o in outputs])
     return wrapper
+
+
+def traceable(fn_cls):
+    """Marks Function as traceable for the JIT.
+
+    Traceable functions have additional restrictions - they can't pass any
+    data-dependent values to backward (e.g. Prod passes the output, which makes
+    it non-traceable), and their backward should be implemented entirely in terms
+    of operations on autograd Variables in all cases (even when grads are volatile).
+
+    DON'T USE THIS DECORATOR. IT IS FOR INTERNAL USE ONLY AND SHOULD BE HANDLED WITH
+    CARE (or can give incorrect results otherwise).
+    """
+    fn_cls.is_traceable = True
+    return fn_cls
 
 
 class InplaceFunction(Function):
@@ -269,6 +295,24 @@ def _unflatten(input, proto):
         return type(proto)(res), input
 
     return unflatten_helper(input, proto)[0]
+
+
+# Return suitable 'prototype' that doesn't hold
+# references possibly big options from 'obj'
+def _to_proto(obj):
+    def helper(obj):
+        if isinstance(obj, torch.autograd.Variable):
+            return "HOLE"
+        elif obj is None:
+            return None
+        elif isinstance(obj, (list, tuple)):
+            type_ = type(obj)
+            return type_(helper(o) for o in obj)
+        else:
+            raise ValueError("NestedIOFunction doesn't know how to process "
+                             "an input object of type " + torch.typename(obj))
+    return helper(obj)
+
 
 _iter_variables = _iter_filter(lambda o: isinstance(o, torch.autograd.Variable))
 _iter_tensors = _iter_filter(torch.is_tensor)

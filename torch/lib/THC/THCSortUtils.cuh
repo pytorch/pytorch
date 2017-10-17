@@ -211,6 +211,6 @@ bitonicSortKVInPlace(TensorInfo<K, IndexType> keys,
   }
 }
 
-unsigned long nextHighestPowerOf2(unsigned long n);
+uint64_t nextHighestPowerOf2(uint64_t n);
 
 #endif // THC_SORT_UTILS_INC

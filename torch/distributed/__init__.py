@@ -1,6 +1,6 @@
 """
 torch.distributed provides an MPI-like interface for exchanging tensor
-data accross multi-machine networks. It supports a few different backends
+data across multi-machine networks. It supports a few different backends
 and initialization methods.
 """
 import torch
@@ -30,6 +30,9 @@ def init_process_group(backend, init_method='env://', **kwargs):
         world_size (int, optional): Number of processes participating in the job.
         rank (int, optional): Rank of the current process.
         group_name (str, optional): Group name. See description of init methods.
+
+    To enable ``backend == mpi``, PyTorch needs to built from source on a system that
+    supports MPI.
     """
     world_size = kwargs.pop('world_size', -1)
     group_name = kwargs.pop('group_name', '')
@@ -105,7 +108,7 @@ class _DistributedRequest(object):
 def get_rank():
     """Returns the rank of current process.
 
-    Rank is a unique identifier assigned to each process withing a distributed
+    Rank is a unique identifier assigned to each process within a distributed
     group. They are always consecutive integers ranging from 0 to ``world_size``.
     """
     assert torch.distributed._initialized
@@ -165,7 +168,11 @@ def recv(tensor, src=None):
 
     Arguments:
         tensor (Tensor): Tensor to fill with received data.
-        src (int): Source rank.
+        src (int, optional): Source rank. Will receive from any
+            process if unspecified.
+
+    Returns:
+        Sender rank.
     """
     assert torch.distributed._initialized == _INITIALIZED_PG, \
         "collective only supported in process-group mode"
@@ -192,7 +199,7 @@ def broadcast(tensor, src, group=group.WORLD):
 
 
 def all_reduce(tensor, op=reduce_op.SUM, group=group.WORLD):
-    """Reduces the tensor data accross all machines in such a way that all get
+    """Reduces the tensor data across all machines in such a way that all get
     the final result.
 
     After the call ``tensor`` is going to be bitwise identical in all processes.
@@ -210,7 +217,7 @@ def all_reduce(tensor, op=reduce_op.SUM, group=group.WORLD):
 
 
 def reduce(tensor, dst, op=reduce_op.SUM, group=group.WORLD):
-    """Reduces the tensor data accross all machines.
+    """Reduces the tensor data across all machines.
 
     Only the process with rank ``dst`` is going to receive the final result.
 

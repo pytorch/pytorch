@@ -7,7 +7,7 @@
 #define MAX_GRID_SIZE 65535LL
 
 void THCCheckTensorDims(THCState* state, THCudaTensor* tensor, int arg) {
-  long dims = THCudaTensor_nDimension(state, tensor);
+  int64_t dims = THCudaTensor_nDimension(state, tensor);
   THArgCheck(dims <= MAX_CUTORCH_DIMS, arg, CUTORCH_DIM_WARNING);
 }
 
@@ -16,9 +16,9 @@ bool THC_getGridFromTiles(ptrdiff_t gridTiles, dim3& grid) {
     return false;
   }
 
-  long gridX = gridTiles > MAX_GRID_SIZE ? MAX_GRID_SIZE : gridTiles;
-  long gridY = 1;
-  long gridZ = 1;
+  int64_t gridX = gridTiles > MAX_GRID_SIZE ? MAX_GRID_SIZE : gridTiles;
+  int64_t gridY = 1;
+  int64_t gridZ = 1;
 
   if (gridTiles > MAX_GRID_SIZE) {
     gridTiles = THCCeilDiv(gridTiles, (ptrdiff_t) MAX_GRID_SIZE);

@@ -2,8 +2,9 @@
 #error "You must define TH_GENERIC_FILE before including THGenerateIntType.h"
 #endif
 
-#define real int
-#define accreal long
+#define real int32_t
+#define ureal uint32_t
+#define accreal int64_t
 #define TH_CONVERT_REAL_TO_ACCREAL(_val) (accreal)(_val)
 #define TH_CONVERT_ACCREAL_TO_REAL(_val) (real)(_val)
 #define Real Int
@@ -12,6 +13,7 @@
 #line 1 TH_GENERIC_FILE
 #include TH_GENERIC_FILE
 #undef real
+#undef ureal
 #undef accreal
 #undef Real
 #undef THInf

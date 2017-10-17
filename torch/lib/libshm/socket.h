@@ -58,7 +58,7 @@ protected:
         bytes_received += step_received;
         buffer += step_received;
       } else if (pfd.revents & (POLLERR | POLLHUP)) {
-        throw std::runtime_error("An error occured while waiting for the data");
+        throw std::runtime_error("An error occurred while waiting for the data");
       } else {
         throw std::runtime_error("Shared memory manager connection has timed out");
       }

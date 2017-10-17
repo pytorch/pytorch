@@ -10,7 +10,9 @@ else(${CMAKE_VERSION} VERSION_LESS "2.8.12")
   endif(${CMAKE_VERSION} VERSION_LESS "3.1")
 endif(${CMAKE_VERSION} VERSION_LESS "2.8.12")
 
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -pedantic -Wno-vla")
+IF(NOT MSVC)
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -pedantic -Wno-vla")
+ENDIF(NOT MSVC)
 
 ################################################################################
 # Helper functions
@@ -61,32 +63,34 @@ MESSAGE(STATUS "THNN_LIBRARIES: ${THNN_LIBRARIES}")
 IF ($ENV{TH_BINARY_BUILD})
   MESSAGE(STATUS "TH_BINARY_BUILD detected. Statically linking libstdc++")
   SET(CMAKE_CXX_FLAGS "-static-libstdc++ ${CMAKE_CXX_FLAGS}")
+  IF (UNIX AND NOT APPLE)
+    # hiding statically linked library symbols, this flag is not available for the linker under MACOSX
+    SET(CMAKE_CXX_FLAGS "-Wl,--exclude-libs,libstdc++.a ${CMAKE_CXX_FLAGS}")
+  ENDIF(UNIX AND NOT APPLE)
 ENDIF()
 
 IF(NO_CUDA)
   MESSAGE(STATUS "ignoring CUDA")
   SET(CUDA_FLAG -n)
 ELSE()
-  FIND_PACKAGE(CUDA 5.5)
-  IF(CUDA_FOUND)
-    ADD_DEFINITIONS(-DAT_CUDA_ENABLED)
-    INCLUDE_DIRECTORIES(${CUDA_INCLUDE_DIRS})
+  FIND_PACKAGE(CUDA 5.5 REQUIRED)
+  ADD_DEFINITIONS(-DAT_CUDA_ENABLED)
+  INCLUDE_DIRECTORIES(${CUDA_INCLUDE_DIRS})
 
-    IF(NOT THC_LIBRARIES)
-      SET(THC_LIBRARIES "THC")
-    ENDIF(NOT THC_LIBRARIES)
-    MESSAGE(STATUS "THC_LIBRARIES: ${THC_LIBRARIES}")
+  IF(NOT THC_LIBRARIES)
+    SET(THC_LIBRARIES "THC")
+  ENDIF(NOT THC_LIBRARIES)
+  MESSAGE(STATUS "THC_LIBRARIES: ${THC_LIBRARIES}")
 
-    IF(NOT THCS_LIBRARIES)
-      SET(THCS_LIBRARIES "THCS")
-    ENDIF(NOT THCS_LIBRARIES)
-    MESSAGE(STATUS "THCS_LIBRARIES: ${THCS_LIBRARIES}")
+  IF(NOT THCS_LIBRARIES)
+    SET(THCS_LIBRARIES "THCS")
+  ENDIF(NOT THCS_LIBRARIES)
+  MESSAGE(STATUS "THCS_LIBRARIES: ${THCS_LIBRARIES}")
 
-    IF(NOT THCUNN_LIBRARIES)
-      SET(THCUNN_LIBRARIES "THCUNN")
-    ENDIF(NOT THCUNN_LIBRARIES)
-    MESSAGE(STATUS "THCUNN_LIBRARIES: ${THCUNN_LIBRARIES}")
-  ENDIF()
+  IF(NOT THCUNN_LIBRARIES)
+    SET(THCUNN_LIBRARIES "THCUNN")
+  ENDIF(NOT THCUNN_LIBRARIES)
+  MESSAGE(STATUS "THCUNN_LIBRARIES: ${THCUNN_LIBRARIES}")
 ENDIF()
 
 # Can be compiled standalone
@@ -103,26 +107,36 @@ FILE(GLOB base_cpp RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} "*.cpp")
 FILE(GLOB all_python RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} "*.py")
 
 IF(NOT DEFINED cwrap_files)
-  SET(CWRAP_FILES_BASE ${CMAKE_CURRENT_SOURCE_DIR}/../../csrc  )
+  IF(NOT DEFINED CWRAP_FILES_BASE)
+    SET(CWRAP_FILES_BASE ${CMAKE_CURRENT_SOURCE_DIR}/../..  )
+  ENDIF()
   SET(cwrap_files
-  # ${CWRAP_FILES_BASE}/cudnn/cuDNN.cwrap
-    ${CWRAP_FILES_BASE}/generic/TensorMethods.cwrap
-  # ${CWRAP_FILES_BASE}/generic/methods/SparseTensor.cwrap
-    ${CWRAP_FILES_BASE}/generic/methods/Tensor.cwrap
-    ${CWRAP_FILES_BASE}/generic/methods/TensorApply.cwrap
-    ${CWRAP_FILES_BASE}/generic/methods/TensorCompare.cwrap
-    ${CWRAP_FILES_BASE}/generic/methods/TensorCuda.cwrap
-    ${CWRAP_FILES_BASE}/generic/methods/TensorMath.cwrap
-    ${CWRAP_FILES_BASE}/generic/methods/TensorRandom.cwrap
-  #  ${CWRAP_FILES_BASE}/generic/methods/TensorSerialization.cwrap
+  # ${CWRAP_FILES_BASE}/csrc/cudnn/cuDNN.cwrap
+    ${CWRAP_FILES_BASE}/csrc/generic/TensorMethods.cwrap
+  # ${CWRAP_FILES_BASE}/csrc/generic/methods/SparseTensor.cwrap
+    ${CWRAP_FILES_BASE}/csrc/generic/methods/Tensor.cwrap
+    ${CWRAP_FILES_BASE}/csrc/generic/methods/TensorApply.cwrap
+    ${CWRAP_FILES_BASE}/csrc/generic/methods/TensorCompare.cwrap
+    ${CWRAP_FILES_BASE}/csrc/generic/methods/TensorCuda.cwrap
+    ${CWRAP_FILES_BASE}/csrc/generic/methods/TensorMath.cwrap
+    ${CWRAP_FILES_BASE}/csrc/generic/methods/TensorRandom.cwrap
+  #  ${CWRAP_FILES_BASE}/csrc/generic/methods/TensorSerialization.cwrap
     ${CMAKE_CURRENT_SOURCE_DIR}/Local.cwrap
-    ${CMAKE_CURRENT_SOURCE_DIR}/../THNN/generic/THNN.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/../THCUNN/generic/THCUNN.h
+    ${CWRAP_FILES_BASE}/lib/THNN/generic/THNN.h
+    ${CWRAP_FILES_BASE}/lib/THCUNN/generic/THCUNN.h
   )
 ENDIF()
 
+
+IF(DEFINED ENV{PYTORCH_PYTHON})
+  message(STATUS "Using python found in $ENV{PYTORCH_PYTHON}")
+  SET(PYCMD "$ENV{PYTORCH_PYTHON}")
+ELSE()
+  SET(PYCMD "python")
+ENDIF()
+
 SET(GEN_COMMAND
-    python ${CMAKE_CURRENT_SOURCE_DIR}/gen.py ${CUDA_FLAG}
+    ${PYCMD} ${CMAKE_CURRENT_SOURCE_DIR}/gen.py ${CUDA_FLAG}
     -s ${CMAKE_CURRENT_SOURCE_DIR}
     ${cwrap_files}
 )

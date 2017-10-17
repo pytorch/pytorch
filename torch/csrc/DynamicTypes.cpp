@@ -64,7 +64,7 @@ at::Tensor createTensor(PyObject *data)
   auto tensor = ((THPVoidTensor *)data)->cdata;
   return tensor_type->unsafeTensorFromTH(tensor, true); // Calls retain on underlying TH Tensor
 }
-PyObject* createPyObject(at::Tensor& tensor)
+PyObject* createPyObject(const at::Tensor& tensor)
 {
   auto type = getPyTypeObject(tensor);
   PyObject *obj = type->tp_alloc(type, 0);

@@ -15,18 +15,19 @@ void THNN_(MultiLabelMarginCriterion_updateOutput)(
   target = THCIndexTensor_(newContiguous)(state, target);
   istarget = THCTensor_(newContiguous)(state, istarget);
   THCTensor_(resizeAs)(state, istarget, input);
+  THCTensor_(resize1d)(state, output, 1);
 
   if(input->nDimension == 1)
   {
     int dim = input->size[0];
     THArgCheck((target->nDimension == 1) && (target->size[0] == dim), 3,
         "inconsistent target size");
-    THCTensor_(resize1d)(state, output, 1);
 
     dim3 blocks(1);
     dim3 threads(MULTILABELMARGIN_THREADS);
 
-    cunn_MultiLabelMarginCriterion_updateOutput_kernel<real, accreal> <<<blocks,threads>>>(
+    cunn_MultiLabelMarginCriterion_updateOutput_kernel<real, accreal>
+      <<<blocks, threads, 0, THCState_getCurrentStream(state)>>>(
         THCTensor_(data)(state, output),
         THCTensor_(data)(state, input),
         THCIndexTensor_(data)(state, target),
@@ -47,7 +48,8 @@ void THNN_(MultiLabelMarginCriterion_updateOutput)(
     dim3 blocks(input->size[0]);
     dim3 threads(MULTILABELMARGIN_THREADS);
 
-    cunn_MultiLabelMarginCriterion_updateOutput_kernel<real, accreal> <<<blocks,threads>>>(
+    cunn_MultiLabelMarginCriterion_updateOutput_kernel<real, accreal>
+      <<<blocks, threads, 0, THCState_getCurrentStream(state)>>>(
         THCTensor_(data)(state, output_tmp),
         THCTensor_(data)(state, input),
         THCIndexTensor_(data)(state, target),
@@ -56,7 +58,6 @@ void THNN_(MultiLabelMarginCriterion_updateOutput)(
         sizeaverage
         );
     THCudaCheck(cudaGetLastError());
-    THCTensor_(resize1d)(state, output, 1);
     THCTensor_(set1d)(state, output, 0, ScalarConvert<accreal, real>::to(THCTensor_(sumall)(state, output_tmp)));
     THCTensor_(free)(state, output_tmp);
   }
@@ -91,7 +92,9 @@ void THNN_(MultiLabelMarginCriterion_updateGradInput)(
     dim3 blocks(1);
     dim3 threads(MULTILABELMARGIN_THREADS);
 
-    cunn_MultiLabelMarginCriterion_updateGradInput_kernel<real, accreal> <<<blocks,threads>>>(THCTensor_(data)(state, gradInput),
+    cunn_MultiLabelMarginCriterion_updateGradInput_kernel<real, accreal>
+      <<<blocks, threads, 0, THCState_getCurrentStream(state)>>>(
+        THCTensor_(data)(state, gradInput),
         THCTensor_(data)(state, input),
         THCIndexTensor_(data)(state, target),
         THCTensor_(data)(state, istarget),
@@ -110,7 +113,9 @@ void THNN_(MultiLabelMarginCriterion_updateGradInput)(
     dim3 blocks(gradInput->size[0]);
     dim3 threads(MULTILABELMARGIN_THREADS);
 
-    cunn_MultiLabelMarginCriterion_updateGradInput_kernel<real, accreal> <<<blocks,threads>>>(THCTensor_(data)(state, gradInput),
+    cunn_MultiLabelMarginCriterion_updateGradInput_kernel<real, accreal>
+      <<<blocks, threads, 0, THCState_getCurrentStream(state)>>>(
+        THCTensor_(data)(state, gradInput),
         THCTensor_(data)(state, input),
         THCIndexTensor_(data)(state, target),
         THCTensor_(data)(state, istarget),

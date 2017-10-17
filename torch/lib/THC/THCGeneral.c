@@ -907,7 +907,7 @@ cudaError_t THCudaMemGetInfoCached(THCState *state,  size_t* freeBytes, size_t* 
 
   if (allocator->cacheInfo != NULL)
     allocator->cacheInfo(allocator->state, device, &cachedBytes, largestBlock);
-  
+
   /* Adjust resulting free bytes number. largesBlock unused for now */
   *freeBytes += cachedBytes;
   return cudaSuccess;
@@ -933,19 +933,6 @@ static void maybeTriggerGC(THCState *state, ptrdiff_t curHeapSize) {
     if (newHeapSize > state->heapSoftmax * heapSoftmaxGrowthThresh) {
       state->heapSoftmax = (ptrdiff_t)state->heapSoftmax * heapSoftmaxGrowthFactor;
     }
-  }
-}
-
-void THCHeapUpdate(THCState *state, ptrdiff_t size) {
-  state->heapDelta += size;
-  // batch updates to global heapSize to minimize thread contention
-  if (state->heapDelta < heapMaxDelta && state->heapDelta > heapMinDelta) {
-    return;
-  }
-
-  ptrdiff_t newHeapSize = applyHeapDelta(state);
-  if (size > 0) {
-    maybeTriggerGC(state, newHeapSize);
   }
 }
 

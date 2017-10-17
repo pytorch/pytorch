@@ -372,21 +372,21 @@ struct TensorFmodOp<half> {
 
 template <typename T, int Upper>
 struct TensorTriOp {
-  TensorTriOp(T *start_, long stride0_, long stride1_, long k_)
+  TensorTriOp(T *start_, int64_t stride0_, int64_t stride1_, int64_t k_)
     : start(start_), stride0(stride0_), stride1(stride1_), k(k_) {}
 
   __device__ __forceinline__ int mask(T *in) {
     ptrdiff_t n = in - start;
-    long row, col;
+    int64_t row, col;
     if (stride0 > stride1)
     {
-      row = (long) (n / stride0);
-      col = (long) ((n % stride0) / stride1);
+      row = (int64_t) (n / stride0);
+      col = (int64_t) ((n % stride0) / stride1);
     }
     else
     {
-      row = (long) ((n % stride1) / stride0);
-      col = (long) (n / stride1);
+      row = (int64_t) ((n % stride1) / stride0);
+      col = (int64_t) (n / stride1);
     }
 
     return Upper ? (col - row >= k) : (col - row <= k);
@@ -402,7 +402,7 @@ struct TensorTriOp {
   }
 
   const T *start;
-  const long stride0, stride1, k;
+  const int64_t stride0, stride1, k;
 };
 
 template <typename T>

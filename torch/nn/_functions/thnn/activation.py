@@ -4,23 +4,27 @@ from torch._thnn import type2backend
 from torch.autograd.variable import Variable
 
 from . import _all_functions
+from .auto_double_backwards import softmax_double_backwards
 
 
 class PReLU(Function):
+
+    @staticmethod
+    def symbolic(g, input, weight):
+        # TODO: Properly support numel in type()
+        if all(s == 1 for s in weight.type().sizes()):
+            raise RuntimeError("single weight shared among input channels not supported")
+        return g.appendNode(g.create("PRelu", [input, weight]))
+
     @staticmethod
     def forward(ctx, input, weight):
         ctx._backend = type2backend[type(input)]
         output = input.new()
-        ctx.num_parameters = weight.numel()
-        if ctx.num_parameters == 1:
-            # num_parameters == 0 is used indicate that a single weight is shared among all input channels.
-            ctx.num_parameters = 0
         ctx._backend.PReLU_updateOutput(
             ctx._backend.library_state,
             input,
             output,
-            weight,
-            ctx.num_parameters
+            weight
         )
         ctx.save_for_backward(input, weight)
         return output
@@ -28,27 +32,23 @@ class PReLU(Function):
     @staticmethod
     def backward(ctx, grad_output):
         input, weight = ctx.saved_variables
-        # alternatively, we could recalculate _backend, num_parameters
-        return PReLUBackward.apply(input, weight, grad_output, ctx._backend, ctx.num_parameters)
+        # alternatively, we could recalculate _backend
+        return PReLUBackward.apply(input, weight, grad_output, ctx._backend)
 
 
 class PReLUBackward(Function):
     @staticmethod
-    def forward(ctx, input, weight, grad_output, backend, num_parameters):
+    def forward(ctx, input, weight, grad_output, backend):
         ctx.save_for_backward(input, weight, grad_output)
-        ctx.num_parameters = num_parameters
         grad_input = input.new()
         backend.PReLU_updateGradInput(
             backend.library_state,
             input,
             grad_output,
             grad_input,
-            weight,
-            num_parameters
+            weight
         )
 
-        buf = weight.new()
-        buf2 = weight.new()
         # TODO: this won't have to be zeroed in the future
         grad_weight = weight.new().resize_as_(weight).zero_()
         backend.PReLU_accGradParameters(
@@ -58,9 +58,6 @@ class PReLUBackward(Function):
             grad_input,
             weight,
             grad_weight,
-            buf,
-            buf2,
-            num_parameters,
             1
         )
         return grad_input, grad_weight
@@ -76,7 +73,7 @@ class PReLUBackward(Function):
         # df/di * gO  = gO      if i > 0      df/dw * g0 = 0      if i > 0
         #             = g0 * w  if i <= 0                = g0 * i  if i <= 0
         # The rest is taking derivatives of these wrt i, w, gO and summing/expanding properly.
-        if ctx.num_parameters == 0:
+        if weight.numel() == 1:
             # from PReLU.forward: num_parameters == 0 is used indicate that a
             # single weight is shared among all input channels.
             mask = positive_mask + nonpositive_mask * weight.expand_as(input)
@@ -116,49 +113,76 @@ class PReLUBackward(Function):
 
 class RReLU(InplaceFunction):
 
-    def __init__(self, lower, upper, train, inplace=False):
-        super(RReLU, self).__init__(inplace)
-        self.lower = lower
-        self.upper = upper
-        self.train = train
-
-    def forward(self, input):
-        self._backend = type2backend[type(input)]
-        if self.inplace:
-            self.mark_dirty(input)
+    @staticmethod
+    def forward(ctx, input, lower, upper, train, inplace):
+        ctx.lower = lower
+        ctx.upper = upper
+        ctx.train = train
+        ctx.inplace = inplace
+        ctx._backend = type2backend[type(input)]
+        if ctx.inplace:
+            ctx.mark_dirty(input)
             output = input
         else:
             output = input.new(input.size())
-        self.noise = input.new()
-        self._backend.RReLU_updateOutput(
-            self._backend.library_state,
+        ctx.noise = input.new()
+        ctx._backend.RReLU_updateOutput(
+            ctx._backend.library_state,
             input,
             output,
-            self.noise,
-            self.lower,
-            self.upper,
-            self.train,
-            self.inplace,
+            ctx.noise,
+            ctx.lower,
+            ctx.upper,
+            ctx.train,
+            ctx.inplace,
             torch.default_generator if not input.is_cuda else 0
         )
-        self.save_for_backward(input)
+        ctx.save_for_backward(input)
         return output
 
-    def backward(self, grad_output):
-        input, = self.saved_tensors
+    @staticmethod
+    def backward(ctx, grad_output):
+        input, = ctx.saved_variables
+        return (RReLUBackward.apply(input, grad_output, ctx.noise, ctx.lower, ctx.upper, ctx.train),
+                None, None, None, None)
+
+
+class RReLUBackward(Function):
+
+    @staticmethod
+    def forward(ctx, input, grad_output, noise, lower, upper, train):
+        ctx.noise = noise
+        ctx.lower = lower
+        ctx.upper = upper
+        ctx.train = train
+        ctx._backend = type2backend[type(input)]
+        ctx.save_for_backward(input)
+
         grad_input = input.new()
-        self._backend.RReLU_updateGradInput(
-            self._backend.library_state,
+        ctx._backend.RReLU_updateGradInput(
+            ctx._backend.library_state,
             input,
             grad_output,
             grad_input,
-            self.noise,
-            self.lower,
-            self.upper,
-            self.train,
+            ctx.noise,
+            ctx.lower,
+            ctx.upper,
+            ctx.train,
             False
         )
         return grad_input
+
+    @staticmethod
+    def backward(ctx, ggI):
+        input, = ctx.saved_variables
+
+        gI = None
+
+        positive_mask = (input > 0).type_as(ggI)
+        nonpositive_mask = (input <= 0).type_as(ggI)
+        mask = positive_mask + nonpositive_mask * Variable(ctx.noise)
+        ggO = ggI * mask
+        return gI, ggO, None, None, None, None
 
 
 class SELU(InplaceFunction):
@@ -207,35 +231,8 @@ class SELU(InplaceFunction):
         return grad_input, None
 
 
-class Softmin(Function):
-
-    def forward(self, input):
-        self._backend = type2backend[type(input)]
-        self.mininput = input.clone().mul(-1)
-        output = input.new()
-        self._backend.SoftMax_updateOutput(
-            self._backend.library_state,
-            self.mininput,
-            output
-        )
-        self.save_for_backward(output)
-        return output
-
-    def backward(self, grad_output):
-        output, = self.saved_tensors
-        grad_input = grad_output.new()
-        self._backend.SoftMax_updateGradInput(
-            self._backend.library_state,
-            self.mininput,
-            grad_output,
-            grad_input,
-            output
-        )
-        return grad_input.mul(-1)
-
-
 _all_functions.append(PReLU)
 _all_functions.append(PReLUBackward)
 _all_functions.append(RReLU)
+_all_functions.append(RReLUBackward)
 _all_functions.append(SELU)
-_all_functions.append(Softmin)

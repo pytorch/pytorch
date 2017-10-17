@@ -354,7 +354,7 @@ void DataChannelMPI::receive(Scalar& data, rank_type src_rank) {
 }
 
 
-void DataChannelMPI::receive(thpp::Tensor& data) {
+rank_type DataChannelMPI::receive(thpp::Tensor& data) {
   if (!data.isContiguous())
     throw std::logic_error("tensor to receive is not contiguous");
 
@@ -364,8 +364,10 @@ void DataChannelMPI::receive(thpp::Tensor& data) {
 
   std::uint64_t actual_tensor_bytes = data.elementSize() * data.numel();
   if (actual_tensor_bytes == tensor_bytes) {
+    MPI_Status status;
     MPI_Recv(data.data(), tensor_bytes, MPI_UINT8_T, MPI_ANY_SOURCE, 0, MPI_COMM_WORLD,
-             MPI_STATUS_IGNORE);
+             &status);
+    return status.MPI_SOURCE;
   } else {
     // receive invalid data
     std::unique_ptr<std::uint8_t[]> bytes(new std::uint8_t[tensor_bytes]);

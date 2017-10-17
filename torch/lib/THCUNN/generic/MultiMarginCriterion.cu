@@ -15,6 +15,7 @@ void THNN_(MultiMarginCriterion_updateOutput)(
 {
   real margin = ScalarConvert<accreal, real>::to(margin_);
   THCUNN_assertSameGPU(state, 2, input, target);
+  THCTensor_(resize1d)(state, output, 1);
   input = THCTensor_(newContiguous)(state, input);
   if(weights)
     weights = THCTensor_(newContiguous)(state, weights);

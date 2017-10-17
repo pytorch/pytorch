@@ -77,7 +77,17 @@ def add_variants(option):
 
 def handle_outputs_taken_as_arguments(options):
     new_options = []
+
+    def is_nullable(arg):
+        return (arg['type'] in {'THIntegerTensor*', 'THTensor*'} and
+                arg.get('default', '') in {'NULL', 'nullptr'})
+
     for option in options:
+        for arg in option['arguments']:
+            # mark arguments which can be null
+            if is_nullable(arg):
+                arg['is_nullable'] = True
+
         if any('output' in arg for arg in option['arguments']):
             allocate_option = deepcopy(option)
             # the allocating option needs to be marked
@@ -196,8 +206,9 @@ def run(declarations):
     declarations = [d for d in declarations if not exclude(d)]
     for declaration in declarations:
         common_with_cwrap.set_declaration_defaults(declaration)
-        common_with_cwrap.enumerate_options_due_to_default(
-            declaration,
+        declaration['options'] = [deepcopy(o) for o in declaration['options']]
+        declaration['options'] = common_with_cwrap.filter_unique_options(
+            declaration['options'],
             allow_kwarg=False,
             type_to_signature=TYPE_FORMAL_GENERIC,
             remove_self=True)

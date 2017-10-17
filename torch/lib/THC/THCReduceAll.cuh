@@ -312,17 +312,17 @@ bool THC_reduceAll(THCState* state,
     HANDLE_IN_CASE(unsigned int, inInfo.dims);
   } else {
     TensorInfo<typename TensorUtils<TensorType>::DataType,
-               unsigned long long> inInfo =
-      getTensorInfo<TensorType, unsigned long long>(state, in);
+               uint64_t> inInfo =
+      getTensorInfo<TensorType, uint64_t>(state, in);
     inInfo.collapseDims();
 
     // For large tensors, we only compile the completely contiguous
     // version and the completely generic version, to reduce
     // compilation time.
     if (inInfo.isContiguous()) {
-      HANDLE_IN_CASE(unsigned long long, -2);
+      HANDLE_IN_CASE(uint64_t, -2);
     } else {
-      HANDLE_IN_CASE(unsigned long long, -1);
+      HANDLE_IN_CASE(uint64_t, -1);
     }
   }
 #undef HANDLE_CASE
@@ -331,7 +331,13 @@ bool THC_reduceAll(THCState* state,
   // If our destination is not on the device, copy the value back to
   // the host (synchronous!)
   if (!outOnDevice) {
-    THCudaCheck(cudaMemcpy(out, devOut, sizeof(AccT), cudaMemcpyDeviceToHost));
+    cudaStream_t stream = THCState_getCurrentStream(state);
+    THCudaCheck(cudaMemcpyAsync(out, 
+                                devOut, 
+                                sizeof(AccT), 
+                                cudaMemcpyDeviceToHost, 
+                                stream));
+    THCudaCheck(cudaStreamSynchronize(stream));
   }
 
   if (freeDevOut) {

@@ -60,7 +60,7 @@ struct DataChannelGloo : DataChannel {
   void send(Scalar& data, rank_type dst_id) override;
   void send(thpp::Tensor& data, rank_type dst_id) override;
   void receive(Scalar& data, rank_type src_id) override;
-  void receive(thpp::Tensor& data) override;
+  rank_type receive(thpp::Tensor& data) override;
   void receive(thpp::Tensor& data, rank_type src_id) override;
   RequestGloo* isend(thpp::Tensor& data, rank_type dst_rank) override;
   RequestGloo* ireceive(thpp::Tensor& data, rank_type src_rank) override;

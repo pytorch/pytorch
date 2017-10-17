@@ -21,6 +21,13 @@ struct AutoGPU {
     setDevice(t.type().isCuda() ? t.get_device() : -1);
   }
 
+  explicit AutoGPU(at::TensorList &tl) {
+    if (tl.size() > 0) {
+      auto& t = tl[0];
+      setDevice(t.type().isCuda() ? t.get_device() : -1);
+    }
+  }
+
   ~AutoGPU() {
 #ifdef WITH_CUDA
     if (original_device != -1) {

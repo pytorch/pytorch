@@ -42,7 +42,7 @@ thpp::Type unpackType(RPCMessage& raw_message);
 thpp::Type peekType(RPCMessage& raw_message);
 double unpackFloat(RPCMessage& raw_message);
 function_id_type unpackFunctionId(RPCMessage& raw_message);
-long long unpackInteger(RPCMessage& raw_message);
+int64_t unpackInteger(RPCMessage& raw_message);
 object_id_type unpackGenerator(RPCMessage& raw_message);
 object_id_type unpackTensor(RPCMessage& raw_message);
 object_id_type unpackStorage(RPCMessage& raw_message);

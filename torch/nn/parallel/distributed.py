@@ -1,6 +1,7 @@
 import sys
 import math
 import threading
+import copy
 
 import torch
 from torch.autograd import Variable
@@ -33,8 +34,8 @@ class DistributedDataParallel(Module):
     should also be an integer multiple of the number of GPUs so that each chunk
     is the same size (so that each GPU processes the same number of samples).
 
-    See also: :ref:`cuda-nn-dataparallel-instead`. The same constraints on input
-    as in :class:`torch.nn.DataParallel` apply.
+    See also: :ref:`distributed-basics` and :ref:`cuda-nn-dataparallel-instead`.
+    The same constraints on input as in :class:`torch.nn.DataParallel` apply.
 
     Creation of this class requires the distributed package to be already
     initialized in the process group mode
@@ -104,7 +105,7 @@ class DistributedDataParallel(Module):
                     copy_param.detach_()
                     copy_param.requires_grad = param.requires_grad
         else:
-            self._modules_copies = [self.module]
+            self._module_copies = [self.module]
 
         # Split parameters into buckets that will coalesce reductions
         # TODO: different types need different buckets
@@ -143,6 +144,7 @@ class DistributedDataParallel(Module):
         attrs = copy.copy(self.__dict__)
         del attrs['_grad_accs'], attrs['_reduction_queues'], attrs['_reduction_streams'], \
             attrs['_reduction_threads'], attrs['_nccl_streams'], attrs['_default_streams']
+        return attrs
 
     def __setstate__(self, state):
         super(DistributedDataParallel, self).__setstate__(state)
@@ -150,10 +152,10 @@ class DistributedDataParallel(Module):
         self._start_reduction_threads()
 
     def forward(self, *inputs, **kwargs):
-        if len(self.device_ids) == 1:
-            return self.module(*inputs, **kwargs)
         inputs, kwargs = self.scatter(inputs, kwargs, self.device_ids)
         self._sync_params()
+        if len(self.device_ids) == 1:
+            return self.module(*inputs[0], **kwargs[0])
         outputs = self.parallel_apply(self._module_copies, inputs, kwargs)
         return self.gather(outputs, self.output_device)
 
@@ -178,28 +180,29 @@ class DistributedDataParallel(Module):
             for tensor, param in zip(tensors, module.parameters()):
                 param.data.set_(tensor)
 
-        # cross-node buffer sync
         buffers = list(self.module._all_buffers())
-        flat_buffers = _flatten_tensors(buffers)
-        dist.broadcast(flat_buffers, 0)
-        for buf, synced in zip(buffers, _unflatten_tensors(flat_buffers, buffers)):
-            buf.copy_(synced)
+        if len(buffers) > 0:
+            # cross-node buffer sync
+            flat_buffers = _flatten_tensors(buffers)
+            dist.broadcast(flat_buffers, 0)
+            for buf, synced in zip(buffers, _unflatten_tensors(flat_buffers, buffers)):
+                buf.copy_(synced)
 
-        # intra-node buffer sync
-        result = broadcast_coalesced(buffers, self.device_ids, self.broadcast_bucket_size)
-        for tensors, module in zip(result[1:], self._module_copies[1:]):
-            for tensor, buf in zip(tensors, module._all_buffers()):
-                buf.set_(tensor)
+            # intra-node buffer sync
+            result = broadcast_coalesced(buffers, self.device_ids, self.broadcast_bucket_size)
+            for tensors, module in zip(result[1:], self._module_copies[1:]):
+                for tensor, buf in zip(tensors, module._all_buffers()):
+                    buf.set_(tensor)
 
     def _register_grad_hooks(self):
         self._grad_accs = []  # need to keep them in scope
         for device_idx, module in enumerate(self._module_copies):
             for p in module.parameters():
-                # TODO: no-op for these that don't require grad
-                p_tmp = p.expand_as(p)
-                grad_acc = p_tmp.grad_fn.next_functions[0][0]
-                grad_acc.register_hook(self._make_param_hook(p, device_idx))
-                self._grad_accs.append(grad_acc)
+                if p.requires_grad:
+                    p_tmp = p.expand_as(p)
+                    grad_acc = p_tmp.grad_fn.next_functions[0][0]
+                    grad_acc.register_hook(self._make_param_hook(p, device_idx))
+                    self._grad_accs.append(grad_acc)
 
     def _make_param_hook(self, param, device_idx):
         bucket_idx = self.bucket_map[param]
@@ -279,6 +282,7 @@ class DistributedDataParallel(Module):
             self._reduction_threads.append(threading.Thread(
                 target=self._reduction_thread_fn,
                 args=(reduction_queue, group_id, self.device_ids, reduction_streams, self._nccl_streams)))
+            self._reduction_threads[-1].daemon = True
             self._reduction_threads[-1].start()
 
     @staticmethod
@@ -296,7 +300,7 @@ class DistributedDataParallel(Module):
             # Wait for all copies to complete before starting the NCCL kernel
             for stream in reduction_streams:
                 stream.synchronize()
-            nccl.reduce(dev_coalesced, root=device_ids[0], streams=nccl_streams)
+            nccl.reduce(dev_coalesced, root=0, streams=nccl_streams)
 
             # From now on we're only going to work on the first device (from device_ids)
             grad_batch = dev_grad_batch[0]

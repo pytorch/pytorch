@@ -25,13 +25,13 @@ __host__ void THCTensor_(scanThrust)(
 
 template<class BinaryOp>
 __host__ void THCTensor_(scanOuterDim)(THCState *state, THCTensor *tgt,
-                                       THCTensor *src, long dimension,
+                                       THCTensor *src, int dimension,
                                        real init, BinaryOp binary_op)
 {
   unsigned ndim = THCTensor_(nDimension)(state, src);
   // Treat all outer dimensions (i.e. dim < dimension) as one.
   unsigned num_orows = 1;
-  for (long dim = 0; dim < dimension; dim++) {
+  for (int dim = 0; dim < dimension; dim++) {
     num_orows *= THCTensor_(size)(state, src, dim);
   }
   unsigned row_size = THCTensor_(size)(state, src, dimension);
@@ -76,7 +76,7 @@ __host__ void THCTensor_(scanInnermostDim)(THCState *state, THCTensor *tgt,
 
 template<class BinaryFunction>
 void THCTensor_(scanDim)(THCState *state, THCTensor *self_, THCTensor *src,
-                         long dimension, real init, BinaryFunction binary_op)
+                         int dimension, real init, BinaryFunction binary_op)
 {
   // "init" must be the identity element for binary_op
   int ndim = THCTensor_(nDimension)(state, src);
@@ -103,14 +103,14 @@ void THCTensor_(scanDim)(THCState *state, THCTensor *self_, THCTensor *src,
   THCTensor_(freeCopyTo)(state, self, self_);
 }
 
-void THCTensor_(cumsum)(THCState *state, THCTensor *self, THCTensor *src, long dimension)
+void THCTensor_(cumsum)(THCState *state, THCTensor *self, THCTensor *src, int dimension)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self, src));
   return THCTensor_(scanDim)(state, self, src, dimension,
                              ScalarConvert<float, real>::to(0.0), AddOp<real>());
 }
 
-void THCTensor_(cumprod)(THCState *state, THCTensor *self, THCTensor *src, long dimension)
+void THCTensor_(cumprod)(THCState *state, THCTensor *self, THCTensor *src, int dimension)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self, src));
   return THCTensor_(scanDim)(state, self, src, dimension,

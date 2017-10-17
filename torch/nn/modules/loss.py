@@ -248,11 +248,18 @@ class MSELoss(_Loss):
     The division by `n` can be avoided if one sets the internal variable
     `size_average` to `False`.
 
+    To get a batch of losses, a loss per batch element, set `reduce` to `True`.
+    These losses are not averaged and are not affected by `size_average`.
+
     Args:
         size_average (bool, optional): By default, the losses are averaged
            over observations for each minibatch. However, if the field
            size_average is set to False, the losses are instead summed for
-           each minibatch. Default: True
+           each minibatch. Only applies when reduce is True. Default: True
+        reduce (bool, optional): By default, the losses are averaged
+           over observations for each minibatch, or summed, depending on
+           size_average. When reduce is False, returns a loss per batch
+           element instead and ignores size_average. Default: True
 
     Shape:
         - Input: :math:`(N, *)` where `*` means, any number of additional
@@ -267,9 +274,13 @@ class MSELoss(_Loss):
         >>> output = loss(input, target)
         >>> output.backward()
     """
+    def __init__(self, size_average=True, reduce=True):
+        super(MSELoss, self).__init__(size_average)
+        self.reduce = reduce
+
     def forward(self, input, target):
         _assert_no_grad(target)
-        return F.mse_loss(input, target, size_average=self.size_average)
+        return F.mse_loss(input, target, size_average=self.size_average, reduce=self.reduce)
 
 
 class BCELoss(_WeightedLoss):
@@ -286,10 +297,25 @@ class BCELoss(_WeightedLoss):
     an auto-encoder. Note that the targets `t[i]` should be numbers
     between 0 and 1.
 
-    By default, the losses are averaged for each minibatch over observations
-    *as well as* over dimensions. However, if the field `size_average` is set
-    to `False`, the losses are instead summed.
+    Args:
+        size_average (bool, optional): By default, the losses are averaged
+            over observations for each minibatch. However, if the field
+            size_average is set to False, the losses are instead summed for
+            each minibatch. Default: True
 
+    Shape:
+        - Input: :math:`(N, *)` where `*` means, any number of additional
+          dimensions
+        - Target: :math:`(N, *)`, same shape as the input
+
+    Examples::
+
+        >>> m = nn.Sigmoid()
+        >>> loss = nn.BCELoss()
+        >>> input = autograd.Variable(torch.randn(3), requires_grad=True)
+        >>> target = autograd.Variable(torch.FloatTensor(3).random_(2))
+        >>> output = loss(m(input), target)
+        >>> output.backward()
     """
     def forward(self, input, target):
         _assert_no_grad(target)
@@ -316,10 +342,24 @@ class BCEWithLogitsLoss(Module):
     an auto-encoder. Note that the targets `t[i]` should be numbers
     between 0 and 1.
 
-    By default, the losses are averaged for each minibatch over observations
-    *as well as* over dimensions. However, if the field `size_average` is set
-    to `False`, the losses are instead summed.
+    Args:
+        size_average (bool, optional): By default, the losses are averaged
+            over observations for each minibatch. However, if the field
+            size_average is set to False, the losses are instead summed for
+            each minibatch. Default: True
 
+     Shape:
+         - Input: :math:`(N, *)` where `*` means, any number of additional
+           dimensions
+         - Target: :math:`(N, *)`, same shape as the input
+
+     Examples::
+
+         >>> loss = nn.BCEWithLogitsLoss()
+         >>> input = autograd.Variable(torch.randn(3), requires_grad=True)
+         >>> target = autograd.Variable(torch.FloatTensor(3).random_(2))
+         >>> output = loss(input, target)
+         >>> output.backward()
     """
     def __init__(self, weight=None, size_average=True):
         super(BCEWithLogitsLoss, self).__init__()
@@ -334,18 +374,18 @@ class BCEWithLogitsLoss(Module):
 
 
 class HingeEmbeddingLoss(_Loss):
-    r"""Measures the loss given an input `x` which is a 2D mini-batch tensor
-    and a labels `y`, a 1D tensor containg values (`1` or `-1`).
+    r"""Measures the loss given an input tensor `x` and a labels tensor `y`
+    containing values (`1` or `-1`).
     This is usually used for measuring whether two inputs are similar or
-    dissimilar, e.g. using the L1 pairwise distance, and is typically used
-    for learning nonlinear embeddings or semi-supervised learning::
+    dissimilar, e.g. using the L1 pairwise distance as `x`, and is typically
+    used for learning nonlinear embeddings or semi-supervised learning::
 
                          { x_i,                  if y_i ==  1
         loss(x, y) = 1/n {
                          { max(0, margin - x_i), if y_i == -1
 
-    `x` and `y` arbitrary shapes with a total of `n` elements each
-    the sum operation still operates over all the elements, and divides by `n`.
+    `x` and `y` can be of arbitrary shapes with a total of `n` elements each.
+    The sum operation operates over all the elements.
 
     The division by `n` can be avoided if one sets the internal
     variable `size_average=False`.
@@ -371,7 +411,7 @@ class MultiLabelMarginLoss(_Loss):
         loss(x, y) = sum_ij(max(0, 1 - (x[y[j]] - x[i]))) / x.size(0)
 
     where `i == 0` to `x.size(0)`, `j == 0` to `y.size(0)`,
-    `y[j] != 0`, and `i != y[j]` for all `i` and `j`.
+    `y[j] >= 0`, and `i != y[j]` for all `i` and `j`.
 
     `y` and `x` must have the same size.
 
@@ -433,10 +473,10 @@ class CrossEntropyLoss(_WeightedLoss):
 
     The `input` is expected to contain scores for each class.
 
-    `input` has to be a 2D `Tensor` of size `batch x n`.
+    `input` has to be a 2D `Tensor` of size `(minibatch,n)`.
 
     This criterion expects a class index (0 to nClasses-1) as the
-    `target` for each value of a 1D tensor of size `n`
+    `target` for each value of a 1D tensor of size `minibatch`
 
     The loss can be described as::
 

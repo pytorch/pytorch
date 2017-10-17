@@ -2,8 +2,8 @@
 #error "You must define THC_GENERIC_FILE before including THGenerateByteType.h"
 #endif
 
-#define real unsigned char
-#define accreal long
+#define real uint8_t
+#define accreal int64_t
 #define Real Byte
 #define CReal CudaByte
 #define THC_REAL_IS_BYTE

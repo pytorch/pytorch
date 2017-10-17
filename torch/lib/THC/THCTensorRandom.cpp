@@ -5,7 +5,7 @@
 
 
 void initializeGenerator(THCState *state, Generator* gen);
-void createGeneratorState(Generator* gen, unsigned long long seed);
+void createGeneratorState(Generator* gen, uint64_t seed);
 
 
 /* Frees memory allocated during setup. */
@@ -23,10 +23,10 @@ void destroyGenerator(THCState *state, Generator* gen)
   }
 }
 
-static unsigned long long createSeed(std::random_device& rd)
+static uint64_t createSeed(std::random_device& rd)
 {
   // limit to 53 bits to ensure unique representation in double
-  unsigned long long seed = (((unsigned long long)rd()) << 32) + rd();
+  uint64_t seed = (((uint64_t)rd()) << 32) + rd();
   return seed & 0x1FFFFFFFFFFFFF;
 }
 
@@ -88,24 +88,24 @@ struct curandStateMtgp32* THCRandom_generatorStates(struct THCState* state)
 }
 
 /* Random seed */
-unsigned long long THCRandom_seed(THCState* state)
+uint64_t THCRandom_seed(THCState* state)
 {
   std::random_device rd;
-  unsigned long long s = createSeed(rd);
+  uint64_t s = createSeed(rd);
   THCRandom_manualSeed(state, s);
   return s;
 }
 
-unsigned long long THCRandom_seedAll(THCState* state)
+uint64_t THCRandom_seedAll(THCState* state)
 {
   std::random_device rd;
-  unsigned long long s = createSeed(rd);
+  uint64_t s = createSeed(rd);
   THCRandom_manualSeedAll(state, s);
   return s;
 }
 
 /* Manually set the seed */
-void THCRandom_manualSeed(THCState* state, unsigned long long seed)
+void THCRandom_manualSeed(THCState* state, uint64_t seed)
 {
   Generator* gen = THCRandom_rawGenerator(state);
   gen->initial_seed = seed;
@@ -114,7 +114,7 @@ void THCRandom_manualSeed(THCState* state, unsigned long long seed)
   }
 }
 
-void THCRandom_manualSeedAll(THCState* state, unsigned long long seed)
+void THCRandom_manualSeedAll(THCState* state, uint64_t seed)
 {
   THCRNGState* rng_state = THCState_getRngState(state);
   int currentDevice;
@@ -127,7 +127,7 @@ void THCRandom_manualSeedAll(THCState* state, unsigned long long seed)
 }
 
 /* Get the initial seed */
-unsigned long long THCRandom_initialSeed(THCState* state)
+uint64_t THCRandom_initialSeed(THCState* state)
 {
   return THCRandom_getGenerator(state)->initial_seed;
 }

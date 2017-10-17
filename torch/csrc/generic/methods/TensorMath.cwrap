@@ -482,6 +482,68 @@
     - THTensor* self
 ]]
 
+[[
+  name: erf_
+  types:
+    - floating_point
+  backends:
+    - CPU
+    - CUDA
+  cname: erf
+  return: self
+  arguments:
+    - THTensor* self
+    - THTensor* self
+]]
+
+[[
+  name: erf
+  types:
+    - floating_point
+  backends:
+    - CPU
+    - CUDA
+  variants:
+    - method
+    - function
+  return: argument 0
+  arguments:
+    - arg: THTensor* result
+      output: True
+    - THTensor* self
+]]
+
+[[
+  name: erfinv_
+  types:
+    - floating_point
+  backends:
+    - CPU
+    - CUDA
+  cname: erfinv
+  return: self
+  arguments:
+    - THTensor* self
+    - THTensor* self
+]]
+
+[[
+  name: erfinv
+  types:
+    - floating_point
+  backends:
+    - CPU
+    - CUDA
+  variants:
+    - method
+    - function
+  return: argument 0
+  arguments:
+    - arg: THTensor* result
+      output: True
+    - THTensor* self
+]]
+
 
 [[
   name: sqrt_
@@ -979,6 +1041,9 @@
   name: neg
   types:
     - floating_point
+    - Long
+    - Int
+    - Short
   backends:
     - CPU
     - CUDA
@@ -998,6 +1063,9 @@
   name: neg_
   types:
     - floating_point
+    - Long
+    - Int
+    - Short
   backends:
     - CPU
     - CUDA
@@ -1757,6 +1825,7 @@
   name: eye
   backends:
     - CPU
+    - CUDA
   variants:
     - function
   return: argument 0

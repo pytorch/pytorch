@@ -8,7 +8,9 @@ class WrapDim(CWrapPlugin):
         """${arg_tensor}->nDimension""")
 
     CODE_TEMPLATE = Template(
-        """THPUtils_assert(${arg_dim} >= -(${ndim}) && ${arg_dim} < (${ndim}),
+        """THPUtils_assert(${ndim} > 0,
+         "dimension specified as %d, but tensor has no dimensions", ${arg_dim});
+         THPUtils_assert(${arg_dim} >= -(${ndim}) && ${arg_dim} < (${ndim}),
          "dimension out of range (expected to be in range of [%d, %d], but got %d)",
          -(${ndim}), (${ndim})-1, ${arg_dim});
          if (${arg_dim} < 0) ${arg_dim} += (${ndim});""")

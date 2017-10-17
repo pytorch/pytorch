@@ -15,7 +15,6 @@ void THNN_(Sigmoid_updateOutput)(
 
 void THNN_(Sigmoid_updateGradInput)(
            THCState *state,
-           THCTensor *input,
            THCTensor *gradOutput,
            THCTensor *gradInput,
            THCTensor *output)

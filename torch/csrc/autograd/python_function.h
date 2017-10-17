@@ -5,13 +5,17 @@
 #include <utility>
 #include <memory>
 
+#include "torch/csrc/Exceptions.h"
 #include "torch/csrc/autograd/function.h"
 #include "torch/csrc/autograd/variable.h"
+#include "torch/csrc/autograd/saved_variable.h"
 #include "torch/csrc/utils/object_ptr.h"
 
 // (class, gpu id, sizes)
 using output_info_type = std::tuple<PyObject *, int, std::vector<int64_t>>;
 
+
+namespace torch { namespace jit { struct Graph; }}
 namespace torch { namespace autograd {
 
 // A Function which is implemented by a Python object (i.e., a THPFunction).
@@ -24,10 +28,27 @@ struct PyFunction : public Function {
 
   virtual void releaseVariables() override;
   virtual std::string name() override;
+  virtual std::shared_ptr<Function> getSharedPtr() override;
+  virtual bool is_traceable() override;
 
   // THPFunction this Function is wrapping.
   PyObject* obj;
 };
+
+/**
+ * Cast an object into a tuple, if it is not a tuple already. Returns true
+ * if the original object was not a tuple.
+ */
+inline bool ensure_tuple(THPObjectPtr& obj) {
+  if (PyTuple_Check(obj.get()))
+    return false;
+
+  PyObject *tuple = PyTuple_New(1);
+  if (!tuple) throw python_error();
+  PyTuple_SET_ITEM(tuple, 0, obj.release());
+  obj = tuple;
+  return true;
+}
 
 }} // namespace torch::autograd
 
@@ -58,6 +79,7 @@ struct THPFunction {
     // For each input, true if the input is a THPVariable
     std::vector<bool> *is_variable_input;
     char has_freed_buffers;
+    char is_traced;
 
     // The C++ wrapper for this Python function.
     // See a comment in THPFunction_asFunction for details about this field.

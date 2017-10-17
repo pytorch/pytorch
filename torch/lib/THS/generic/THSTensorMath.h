@@ -7,7 +7,7 @@
  * sspOP returns a sparse result
  * spOPs has all arguments sparse
  *
- * Everything is is up to discretion
+ * Everything is up to discretion
  */
 
 TH_API void THSTensor_(zero)(THSTensor *r_);

@@ -133,9 +133,9 @@ template<typename Real>
 __global__ void THCTensor_kernel_renorm(Real *data, const Real value, const ptrdiff_t size, const Real maxnorm)
 {
   __shared__ Real buffer[32];
-  long tx = threadIdx.x;
-  long bx = blockIdx.x;
-  long step = blockDim.x;
+  int64_t tx = threadIdx.x;
+  int64_t bx = blockIdx.x;
+  int64_t step = blockDim.x;
   Real *row = data + size*bx;
 
   buffer[tx] = ScalarConvert<int, Real>::to(0);
@@ -330,12 +330,12 @@ __global__ void THCTensor_kernel_varOuterDim(Real *tgt, Real *src_, unsigned num
 }
 
 template<typename TensorTypeK, typename Real, bool apply_sqrt>
-__host__ void THCTensor_varOuterDim(THCState *state, TensorTypeK *tgt, TensorTypeK *src, long dimension, int flag)
+__host__ void THCTensor_varOuterDim(THCState *state, TensorTypeK *tgt, TensorTypeK *src, int64_t dimension, int flag)
 {
   unsigned ndim = TensorUtils<TensorTypeK>::getDims(state, src);
   // Treat all outer dimensions (i.e. dim < dimension) as one.
   unsigned num_orows = 1;
-  for (long dim = 0; dim < dimension; dim++) {
+  for (int64_t dim = 0; dim < dimension; dim++) {
     num_orows *= TensorUtils<TensorTypeK>::getSize(state, src, dim);
   }
   unsigned row_size = TensorUtils<TensorTypeK>::getSize(state, src, dimension);
@@ -488,14 +488,14 @@ THC_transformReduceOuterDimIndex(THCState *state,
                                  TensorTypeK *tgt1,
                                  TensorTypeIndex *tgt2,
                                  TensorTypeK *src,
-                                 long rdim,
+                                 int64_t rdim,
                                  const thrust::pair<
                                  typename TensorUtils<TensorTypeK>::DataType,
                                  typename TensorUtils<TensorTypeIndex>::DataType>& init,
                                  BinaryFunction binary_op) {
   unsigned ndim = TensorUtils<TensorTypeK>::getDims(state, src);
   unsigned num_orows = 1;
-  for (long dim = 0; dim < rdim; dim++) {
+  for (int64_t dim = 0; dim < rdim; dim++) {
     num_orows *= TensorUtils<TensorTypeK>::getSize(state, src, dim);
   }
   unsigned row_size = TensorUtils<TensorTypeK>::getSize(state, src, rdim);
@@ -624,7 +624,7 @@ THC_reduceDimIndex(THCState *state,
                    TensorTypeK *tgt1_,
                    TensorTypeIndex *tgt2_,
                    TensorTypeK *src,
-                   long dimension,
+                   int64_t dimension,
                    int keepdim,
                    const thrust::pair<
                    typename TensorUtils<TensorTypeK>::DataType,

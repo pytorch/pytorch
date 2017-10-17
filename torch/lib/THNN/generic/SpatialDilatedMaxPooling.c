@@ -34,21 +34,21 @@ static inline void THNN_(SpatialDilatedMaxPooling_shapeCheck)(
 	     "padW = %d, padH = %d, kW = %d, kH = %d",
 	     padW, padH, kW, kH);
 
-  long nInputPlane = input->size[dimh-1];
-  long inputHeight = input->size[dimh];
-  long inputWidth = input->size[dimw];
-  long outputHeight, outputWidth;
-  long nOutputPlane = nInputPlane;
+  int64_t nInputPlane = input->size[dimh-1];
+  int64_t inputHeight = input->size[dimh];
+  int64_t inputWidth = input->size[dimw];
+  int64_t outputHeight, outputWidth;
+  int64_t nOutputPlane = nInputPlane;
 
   if (ceil_mode)
   {
-    outputHeight = (long)(ceil((float)(inputHeight - (dilationH * (kH - 1) + 1) + 2*padH) / dH)) + 1;
-    outputWidth  = (long)(ceil((float)(inputWidth  - (dilationW * (kW - 1) + 1) + 2*padW) / dW)) + 1;
+    outputHeight = (int64_t)(ceil((float)(inputHeight - (dilationH * (kH - 1) + 1) + 2*padH) / dH)) + 1;
+    outputWidth  = (int64_t)(ceil((float)(inputWidth  - (dilationW * (kW - 1) + 1) + 2*padW) / dW)) + 1;
   }
   else
   {
-    outputHeight = (long)(floor((float)(inputHeight - (dilationH * (kH - 1) + 1) + 2*padH) / dH)) + 1;
-    outputWidth  = (long)(floor((float)(inputWidth  - (dilationW * (kW - 1) + 1) + 2*padW) / dW)) + 1;
+    outputHeight = (int64_t)(floor((float)(inputHeight - (dilationH * (kH - 1) + 1) + 2*padH) / dH)) + 1;
+    outputWidth  = (int64_t)(floor((float)(inputWidth  - (dilationW * (kW - 1) + 1) + 2*padW) / dW)) + 1;
   }
 
   if (padW || padH)
@@ -82,11 +82,11 @@ static void THNN_(SpatialDilatedMaxPooling_updateOutput_frame)(
           real *input_p,
           real *output_p,
           THIndex_t *ind_p,
-          long nslices,
-          long iwidth,
-          long iheight,
-          long owidth,
-          long oheight,
+          int64_t nslices,
+          int64_t iwidth,
+          int64_t iheight,
+          int64_t owidth,
+          int64_t oheight,
           int kW,
           int kH,
           int dW,
@@ -97,21 +97,21 @@ static void THNN_(SpatialDilatedMaxPooling_updateOutput_frame)(
           int dilationH
           )
 {
-  long k;
+  int64_t k;
 #pragma omp parallel for private(k)
   for (k = 0; k < nslices; k++)
   {
     /* loop over output */
-    long i, j;
+    int64_t i, j;
     real *ip = input_p   + k*iwidth*iheight;
     for(i = 0; i < oheight; i++)
     {
       for(j = 0; j < owidth; j++)
       {
-        long hstart = i * dH - padH;
-        long wstart = j * dW - padW;
-        long hend = fminf(hstart + (kH - 1) * dilationH + 1, iheight);
-        long wend = fminf(wstart + (kW - 1) * dilationW + 1, iwidth);
+        int64_t hstart = i * dH - padH;
+        int64_t wstart = j * dW - padW;
+        int64_t hend = fminf(hstart + (kH - 1) * dilationH + 1, iheight);
+        int64_t wend = fminf(wstart + (kW - 1) * dilationW + 1, iwidth);
         while(hstart < 0)
           hstart += dilationH;
         while(wstart < 0)
@@ -122,10 +122,10 @@ static void THNN_(SpatialDilatedMaxPooling_updateOutput_frame)(
         THIndex_t *indp = ind_p   + k*owidth*oheight + i*owidth + j;
 
         /* compute local max: */
-        long maxindex = -1;
+        int64_t maxindex = -1;
         real maxval = -THInf;
-        long tcntr = 0;
-        long x,y;
+        int64_t tcntr = 0;
+        int64_t x,y;
         for(y = hstart; y < hend; y += dilationH)
         {
           for(x = wstart; x < wend; x += dilationW)
@@ -168,12 +168,12 @@ void THNN_(SpatialDilatedMaxPooling_updateOutput)(
 
   int dimw = 2;
   int dimh = 1;
-  long nbatch = 1;
-  long nInputPlane;
-  long inputHeight;
-  long inputWidth;
-  long outputHeight;
-  long outputWidth;
+  int64_t nbatch = 1;
+  int64_t nInputPlane;
+  int64_t inputHeight;
+  int64_t inputWidth;
+  int64_t outputHeight;
+  int64_t outputWidth;
   real *input_data;
   real *output_data;
   THIndex_t *indices_data;
@@ -195,13 +195,13 @@ void THNN_(SpatialDilatedMaxPooling_updateOutput)(
   inputWidth = input->size[dimw];
   if (ceil_mode)
   {
-    outputHeight = (long)(ceil((float)(inputHeight - (dilationH * (kH - 1) + 1) + 2*padH) / dH)) + 1;
-    outputWidth  = (long)(ceil((float)(inputWidth  - (dilationW * (kW - 1) + 1) + 2*padW) / dW)) + 1;
+    outputHeight = (int64_t)(ceil((float)(inputHeight - (dilationH * (kH - 1) + 1) + 2*padH) / dH)) + 1;
+    outputWidth  = (int64_t)(ceil((float)(inputWidth  - (dilationW * (kW - 1) + 1) + 2*padW) / dW)) + 1;
   }
   else
   {
-    outputHeight = (long)(floor((float)(inputHeight - (dilationH * (kH - 1) + 1) + 2*padH) / dH)) + 1;
-    outputWidth  = (long)(floor((float)(inputWidth  - (dilationW * (kW - 1) + 1) + 2*padW) / dW)) + 1;
+    outputHeight = (int64_t)(floor((float)(inputHeight - (dilationH * (kH - 1) + 1) + 2*padH) / dH)) + 1;
+    outputWidth  = (int64_t)(floor((float)(inputWidth  - (dilationW * (kW - 1) + 1) + 2*padW) / dW)) + 1;
   }
 
   if (padW || padH)
@@ -241,7 +241,7 @@ void THNN_(SpatialDilatedMaxPooling_updateOutput)(
   }
   else
   {
-    long p;
+    int64_t p;
 
     THTensor_(resize4d)(output, nbatch, nInputPlane, outputHeight, outputWidth);
     /* indices will contain the locations for each output point */
@@ -276,15 +276,15 @@ static void THNN_(SpatialDilatedMaxPooling_updateGradInput_frame)(
           real *gradInput_p,
           real *gradOutput_p,
           THIndex_t *ind_p,
-          long nInputPlane,
-          long inputWidth,
-          long inputHeight,
-          long outputWidth,
-          long outputHeight,
+          int64_t nInputPlane,
+          int64_t inputWidth,
+          int64_t inputHeight,
+          int64_t outputWidth,
+          int64_t outputHeight,
           int dW,
           int dH)
 {
-  long k;
+  int64_t k;
 #pragma omp parallel for private(k)
   for (k = 0; k < nInputPlane; k++)
   {
@@ -293,13 +293,13 @@ static void THNN_(SpatialDilatedMaxPooling_updateGradInput_frame)(
     THIndex_t *ind_p_k = ind_p + k*outputWidth*outputHeight;
 
     /* calculate max points */
-    long i, j;
+    int64_t i, j;
     for(i = 0; i < outputHeight; i++)
     {
       for(j = 0; j < outputWidth; j++)
       {
         /* retrieve position of max */
-        long maxp = ind_p_k[i*outputWidth + j] - TH_INDEX_BASE;
+        int64_t maxp = ind_p_k[i*outputWidth + j] - TH_INDEX_BASE;
 	if (maxp != -1) {
 	  /* update gradient */
 	  gradInput_p_k[maxp] += gradOutput_p_k[i*outputWidth + j];
@@ -327,7 +327,7 @@ void THNN_(SpatialDilatedMaxPooling_updateGradInput)(
 {
   int dimw = 2;
   int dimh = 1;
-  long nbatch = 1;
+  int64_t nbatch = 1;
   int nInputPlane;
   int inputHeight;
   int inputWidth;
@@ -379,7 +379,7 @@ void THNN_(SpatialDilatedMaxPooling_updateGradInput)(
   }
   else
   {
-    long p;
+    int64_t p;
 #pragma omp parallel for private(p)
     for (p = 0; p < nbatch; p++)
     {

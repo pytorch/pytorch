@@ -19,6 +19,7 @@ static inline Tensor & copy_out(const Tensor & src, Tensor & dst) {
 ${function_declarations}
 
 static inline Type & infer_type(const Tensor & t) {
+  AT_ASSERT(t.defined(), "undefined Tensor");
   return t.type();
 }
 static inline Type & infer_type(const TensorList & tl) {

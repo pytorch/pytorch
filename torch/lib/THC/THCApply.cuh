@@ -101,23 +101,16 @@ inline dim3 getApplyBlock() {
   return dim3(THC_APPLY_THREADS_PER_BLOCK);
 }
 
-inline bool getApplyGrid(THCState* state, ptrdiff_t totalElements, dim3& grid) {
+inline bool getApplyGrid(THCState* state, uint64_t totalElements, dim3& grid) {
   int curDevice = -1;
   cudaGetDevice(&curDevice);
+  if (curDevice == -1) return false;
 
-  if (curDevice == -1) {
-    return false;
-  }
-
-  // Assume a reasonable number of SMs if no state is available
-  int numSM =
-    state ? THCState_getCurrentDeviceProperties(state)->multiProcessorCount : 15;
-
-  // 16 warps per block * 4 per SM gives 64 warps per SM at maximum,
-  // which seems to be a good sweetspot for latency hiding
-  grid = dim3(min((long long) THCCeilDiv(totalElements,
-                                         (ptrdiff_t) THC_APPLY_THREADS_PER_BLOCK),
-                  4LL * numSM));
+  uint64_t numBlocks = THCCeilDiv(totalElements, static_cast<uint64_t>(THC_APPLY_THREADS_PER_BLOCK));
+  uint64_t maxGridX = THCState_getCurrentDeviceProperties(state)->maxGridSize[0];
+  if (numBlocks > maxGridX)
+      numBlocks = maxGridX;
+  grid = dim3(numBlocks);
   return true;
 }
 
@@ -208,8 +201,8 @@ bool THC_pointwiseApply1(THCState* state,
 
     HANDLE_A_CASE(unsigned int, aInfo.dims);
   } else {
-    TensorInfo<typename TensorUtils<TensorTypeA>::DataType, unsigned long> aInfo =
-      getTensorInfo<TensorTypeA, unsigned long>(state, a);
+    TensorInfo<typename TensorUtils<TensorTypeA>::DataType, uint64_t> aInfo =
+      getTensorInfo<TensorTypeA, uint64_t>(state, a);
     aInfo.collapseDims();
 
     // For large tensors, we only compile the completely contiguous
@@ -218,15 +211,15 @@ bool THC_pointwiseApply1(THCState* state,
     if (aInfo.isContiguous()) {
       kernelPointwiseApply1<Op,
                             typename TensorUtils<TensorTypeA>::DataType,
-                            unsigned long, -2>
+                            uint64_t, -2>
         <<<grid, block, 0, THCState_getCurrentStream(state)>>>(
-          aInfo, (unsigned long) totalElements, op);
+          aInfo, (uint64_t) totalElements, op);
     } else {
       kernelPointwiseApply1<Op,
                             typename TensorUtils<TensorTypeA>::DataType,
-                            unsigned long, -1>
+                            uint64_t, -1>
         <<<grid, block, 0, THCState_getCurrentStream(state)>>>(
-          aInfo, (unsigned long) totalElements, op);
+          aInfo, (uint64_t) totalElements, op);
     }
   }
 #undef HANDLE_CASE
@@ -367,12 +360,12 @@ bool THC_pointwiseApply2(THCState* state,
 
     HANDLE_A_CASE(unsigned int, aInfo.dims, bInfo.dims);
   } else {
-    TensorInfo<typename TensorUtils<TensorTypeA>::DataType, unsigned long> aInfo =
-      getTensorInfo<TensorTypeA, unsigned long>(state, a);
+    TensorInfo<typename TensorUtils<TensorTypeA>::DataType, uint64_t> aInfo =
+      getTensorInfo<TensorTypeA, uint64_t>(state, a);
     aInfo.collapseDims();
 
-    TensorInfo<typename TensorUtils<TensorTypeB>::DataType, unsigned long> bInfo =
-      getTensorInfo<TensorTypeB, unsigned long>(state, b);
+    TensorInfo<typename TensorUtils<TensorTypeB>::DataType, uint64_t> bInfo =
+      getTensorInfo<TensorTypeB, uint64_t>(state, b);
     bInfo.collapseDims();
 
     // For large tensors, we only compile the completely contiguous
@@ -382,16 +375,16 @@ bool THC_pointwiseApply2(THCState* state,
       kernelPointwiseApply2<Op,
                             typename TensorUtils<TensorTypeA>::DataType,
                             typename TensorUtils<TensorTypeB>::DataType,
-                            unsigned long, -2, -2>
+                            uint64_t, -2, -2>
         <<<grid, block, 0, THCState_getCurrentStream(state)>>>(
-          aInfo, bInfo, (unsigned long) totalElements, op);
+          aInfo, bInfo, (uint64_t) totalElements, op);
     } else {
       kernelPointwiseApply2<Op,
                             typename TensorUtils<TensorTypeA>::DataType,
                             typename TensorUtils<TensorTypeB>::DataType,
-                            unsigned long, -1, -1>
+                            uint64_t, -1, -1>
         <<<grid, block, 0, THCState_getCurrentStream(state)>>>(
-          aInfo, bInfo, (unsigned long) totalElements, op);
+          aInfo, bInfo, (uint64_t) totalElements, op);
     }
   }
 #undef HANDLE_CASE
@@ -571,16 +564,16 @@ bool THC_pointwiseApply3(THCState* state,
 
     HANDLE_A_CASE(unsigned int, aInfo.dims, bInfo.dims, cInfo.dims);
   } else {
-    TensorInfo<typename TensorUtils<TensorTypeA>::DataType, unsigned long> aInfo =
-      getTensorInfo<TensorTypeA, unsigned long>(state, a);
+    TensorInfo<typename TensorUtils<TensorTypeA>::DataType, uint64_t> aInfo =
+      getTensorInfo<TensorTypeA, uint64_t>(state, a);
     aInfo.collapseDims();
 
-    TensorInfo<typename TensorUtils<TensorTypeB>::DataType, unsigned long> bInfo =
-      getTensorInfo<TensorTypeB, unsigned long>(state, b);
+    TensorInfo<typename TensorUtils<TensorTypeB>::DataType, uint64_t> bInfo =
+      getTensorInfo<TensorTypeB, uint64_t>(state, b);
     bInfo.collapseDims();
 
-    TensorInfo<typename TensorUtils<TensorTypeC>::DataType, unsigned long> cInfo =
-      getTensorInfo<TensorTypeC, unsigned long>(state, c);
+    TensorInfo<typename TensorUtils<TensorTypeC>::DataType, uint64_t> cInfo =
+      getTensorInfo<TensorTypeC, uint64_t>(state, c);
     cInfo.collapseDims();
 
     // For large tensors, we only compile the completely contiguous
@@ -591,17 +584,17 @@ bool THC_pointwiseApply3(THCState* state,
                             typename TensorUtils<TensorTypeA>::DataType,
                             typename TensorUtils<TensorTypeB>::DataType,
                             typename TensorUtils<TensorTypeC>::DataType,
-                            unsigned long, -2, -2, -2>
+                            uint64_t, -2, -2, -2>
         <<<grid, block, 0, THCState_getCurrentStream(state)>>>(
-          aInfo, bInfo, cInfo, (unsigned long) totalElements, op);
+          aInfo, bInfo, cInfo, (uint64_t) totalElements, op);
     } else {
       kernelPointwiseApply3<Op,
                             typename TensorUtils<TensorTypeA>::DataType,
                             typename TensorUtils<TensorTypeB>::DataType,
                             typename TensorUtils<TensorTypeC>::DataType,
-                            unsigned long, -1, -1, -1>
+                            uint64_t, -1, -1, -1>
         <<<grid, block, 0, THCState_getCurrentStream(state)>>>(
-          aInfo, bInfo, cInfo, (unsigned long) totalElements, op);
+          aInfo, bInfo, cInfo, (uint64_t) totalElements, op);
     }
   }
 #undef HANDLE_CASE

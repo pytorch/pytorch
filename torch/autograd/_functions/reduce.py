@@ -71,7 +71,8 @@ class Prod(Function):
             exclusive_normal = exclusive_normal_nocp.cumprod(dim)
 
             def reverse_dim(var, dim):
-                return var.index_select(dim, Variable(torch.arange(var.size(dim) - 1, -1, -1)).long())
+                index = Variable(torch.arange(var.size(dim) - 1, -1, -1, out=var.data.new().long()))
+                return var.index_select(dim, index)
 
             narrow_reverse = reverse_dim(inp.narrow(dim, 1, inp.size(dim) - 1), dim)
             exclusive_reverse_nocp = torch.cat((ones, narrow_reverse), dim)
@@ -111,6 +112,15 @@ class Prod(Function):
 class Mean(Function):
 
     @staticmethod
+    def symbolic(g, input, dim=None, keepdim=None):
+        output = g.create("ReduceMean", [input])
+        if dim is not None:
+            output = output.is_("axes", dim)
+        if keepdim is None or keepdim is False:
+            output = output.i_("keepdims", 0)
+        return g.appendNode(output)
+
+    @staticmethod
     def forward(ctx, input, dim=None, keepdim=None):
         ctx.dim = dim
         ctx.keepdim = False if keepdim is None else keepdim
@@ -142,7 +152,7 @@ class _SelectionFunction(Function):
     has_all_reduce = True
     # additional_args is prepended before dim when calling the tensor
     # function. It's a no-op for subclasses other than kthvalue.
-    # kthvalue not only requires us to pass a dim, but also preceed it with k.
+    # kthvalue not only requires us to pass a dim, but also precede it with k.
 
     @classmethod
     def forward(cls, ctx, input, dim=None, keepdim=None, additional_args=tuple()):
@@ -225,43 +235,34 @@ class Norm(Function):
         ctx.keepdim = False if keepdim is None else keepdim
 
         if dim is None:
-            ctx.norm = input.norm(p)
-            ctx.save_for_backward(input)
-            return input.new((ctx.norm,))
+            norm = input.norm(p)
+            output = input.new((norm,))
         else:
             if keepdim is not None:
                 output = input.norm(p, dim, keepdim=keepdim)
             else:
                 output = input.norm(p, dim)
-            ctx.save_for_backward(input, output)
-            return output
+        ctx.save_for_backward(input, output)
+        return output
 
     @staticmethod
     def backward(ctx, grad_output):
-        if ctx.dim is None:
-            input, = ctx.saved_variables
-            if ctx.p == 2:
-                scale_v = (grad_output / ctx.norm).expand_as(input)
-                return input.mul(scale_v), None, None, None
-            else:
-                pow = input.abs().pow(ctx.p - 2)
-                scale_v = (grad_output / ctx.norm ** (ctx.p - 1)).expand_as(input)
-                return input.mul(pow).mul(scale_v), None, None, None
+        input, output = ctx.saved_variables
+        if ctx.dim is not None and ctx.keepdim is False and input.dim() != 1:
+            grad_output = grad_output.unsqueeze(ctx.dim)
+            output = output.unsqueeze(ctx.dim)
+
+        if ctx.p == 2:
+            grad_input = input.mul(grad_output).div(output)
         else:
-            input, output = ctx.saved_variables
+            input_pow = input.abs().pow(ctx.p - 2)
+            output_pow = output.pow(ctx.p - 1)
+            grad_input = input.mul(input_pow).mul(grad_output).div(output_pow)
 
-            if ctx.keepdim is False and input.dim() != 1:
-                grad_output = grad_output.unsqueeze(ctx.dim)
-                output = output.unsqueeze(ctx.dim)
+        # Special case at 0 where we return a subgradient containing 0
+        grad_input.masked_fill_(output == 0, 0)
 
-            big_grad_output = grad_output.expand_as(input)
-            if ctx.p == 2:
-                big_output = output.expand_as(input)
-                return input.mul(big_grad_output).div(big_output), None, None, None
-            else:
-                pow = input.abs().pow(ctx.p - 2)
-                big_output = output.pow(ctx.p - 1).expand_as(input)
-                return input.mul(pow).mul(big_grad_output).div(big_output), None, None, None
+        return grad_input, None, None, None
 
 
 # TODO: renorm

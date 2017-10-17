@@ -9,13 +9,20 @@ from . import _all_functions
 class Embedding(Function):
 
     @staticmethod
-    def _renorm(ctx, indices, weight, max_norm, norm_type):
-        if indices.dim() == 2:
-            indices = indices.clone().view(-1)
+    def symbolic(g, indices, weight, padding_idx, max_norm, norm_type, scale_grad_by_freq,
+                 sparse=False):
+        if max_norm is not None:
+            raise ValueError('Right now, re-norm is not supported.')
 
+        output = g.appendNode(g.create("Gather", [weight, indices]))
+        return output
+
+    @staticmethod
+    def _renorm(ctx, indices, weight, max_norm, norm_type):
+        # clone indices since LookupTable_renorm modifies it in-place
         ctx._backend.LookupTable_renorm(
             ctx._backend.library_state,
-            indices,
+            indices.clone().view(-1),
             weight,
             max_norm,
             norm_type
@@ -45,7 +52,7 @@ class Embedding(Function):
 
         output = weight.new()
         if max_norm is not None:
-            cls._renorm(indices, weight, max_norm, norm_type)
+            cls._renorm(ctx, indices, weight, max_norm, norm_type)
 
         if indices.dim() == 1:
             output = torch.index_select(weight, 0, indices)

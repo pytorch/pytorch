@@ -1345,7 +1345,7 @@ static void THFloatVector_divs_VSX(float *y, const float*x, const float c, const
 //	TODO
 //
 //
-//    Finished runnning all tests. All tests PASSED.
+//    Finished running all tests. All tests PASSED.
 //
 //------------------------------------------------
 #ifdef RUN_VSX_TESTS
@@ -2509,7 +2509,7 @@ int main()
 
 
 
-    printf("Finished runnning all tests. All tests PASSED.\n");
+    printf("Finished running all tests. All tests PASSED.\n");
     return 0;
 }
 

@@ -307,11 +307,12 @@ PyObject* THDPModule_recvAnySource(PyObject *_unused, PyObject *_tensor)
   }
 
   THDPTensorDesc desc {THDPModule_makeDescriptor(_tensor)};
+  int sender;
   {
     AutoNoGIL guard;
-    THDRecvAnySource(desc);
+    sender = THDRecvAnySource(desc);
   }
-  Py_RETURN_NONE;
+  return PyInt_FromLong(sender);
   END_HANDLE_TH_ERRORS
 }
 
@@ -330,7 +331,9 @@ PyObject* THDPModule_recv(PyObject *_unused, PyObject *args)
     AutoNoGIL guard;
     THDRecv(desc, src_rank);
   }
-  Py_RETURN_NONE;
+  // Return sender rank
+  Py_INCREF(PyTuple_GET_ITEM(args, 1));
+  return PyTuple_GET_ITEM(args, 1);
   END_HANDLE_TH_ERRORS
 }
 

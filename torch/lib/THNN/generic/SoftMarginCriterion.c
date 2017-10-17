@@ -10,7 +10,7 @@ void THNN_(SoftMarginCriterion_updateOutput)(
   bool sizeAverage)
 {
   THNN_CHECK_NELEMENT(input, target);
-  THNN_CHECK_DIM_SIZE(output, 1, 0, 1);
+  THTensor_(resize1d)(output, 1);
 
   real sum;
 

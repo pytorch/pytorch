@@ -17,7 +17,7 @@ public:
   THPPointer& operator =(T *new_ptr) { free(); ptr = new_ptr; return *this; }
   THPPointer& operator =(THPPointer &&p) { free(); ptr = p.ptr; p.ptr = nullptr; return *this; }
   T * operator ->() { return ptr; }
-  operator bool() { return ptr != nullptr; }
+  operator bool() const { return ptr != nullptr; }
 
 private:
   void free();

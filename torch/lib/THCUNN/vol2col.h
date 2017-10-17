@@ -120,14 +120,12 @@ __global__ void vol2im_kernel(const int n, const Dtype* data_col,
 template <typename Dtype, typename Acctype>
 void col2vol(cudaStream_t stream, const Dtype* data_col, const int channels,
     const int depth, const int height, const int width,
+    const int output_depth, const int output_height, const int output_width,
     const int patch_t, const int patch_h, const int patch_w,
     const int pad_t, const int pad_h, const int pad_w,
     const int stride_t, const int stride_h, const int stride_w,
     const int dilation_t, const int dilation_h, const int dilation_w,
     Dtype* data_vol) {
-  int depth_col = (depth + 2 * pad_t - (dilation_t * (patch_t - 1) + 1)) / stride_t + 1;
-  int height_col = (height + 2 * pad_h - (dilation_h * (patch_h - 1) + 1)) / stride_h + 1;
-  int width_col = (width + 2 * pad_w - (dilation_w * (patch_w - 1) + 1)) / stride_w + 1;
   int num_kernels = channels * depth * height * width;
   // To avoid involving atomic operations, we will launch one kernel per
   // bottom dimension, and then in the kernel add up the top dimensions.
@@ -135,7 +133,7 @@ void col2vol(cudaStream_t stream, const Dtype* data_col, const int channels,
       num_kernels, data_col, depth, height, width, channels,
       patch_t, patch_h, patch_w, pad_t, pad_h, pad_w, stride_t, stride_h, stride_w,
       dilation_t, dilation_h, dilation_w,
-      depth_col, height_col, width_col, data_vol
+      output_depth, output_height, output_width, data_vol
   );
   THCudaCheck(cudaGetLastError());
 }

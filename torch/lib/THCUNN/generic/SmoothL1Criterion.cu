@@ -10,7 +10,7 @@ void THNN_(SmoothL1Criterion_updateOutput)(
            bool sizeAverage)
 {
   THCUNN_check_nElement(state, input, target);
-  THCUNN_check_dim_size(state, output, 1, 0, 1);
+  THCTensor_(resize1d)(state, output, 1);
   THCUNN_assertSameGPU(state, 2, input, target);
   THArgCheck(
     THCTensor_(nElement)(state, input) == THCTensor_(nElement)(state, target), 2,

@@ -25,17 +25,17 @@ struct Bitfield<unsigned int> {
 };
 
 template <>
-struct Bitfield<unsigned long long int> {
+struct Bitfield<uint64_t> {
   static __device__ __forceinline__
-  unsigned long long int getBitfield(unsigned long long int val, int pos, int len) {
-    unsigned long long int ret;
+  uint64_t getBitfield(uint64_t val, int pos, int len) {
+    uint64_t ret;
     asm("bfe.u64 %0, %1, %2, %3;" : "=l"(ret) : "l"(val), "r"(pos), "r"(len));
     return ret;
   }
 
   static __device__ __forceinline__
-  unsigned long long int setBitfield(unsigned long long int val, unsigned long long int toInsert, int pos, int len) {
-    unsigned long long int ret;
+  uint64_t setBitfield(uint64_t val, uint64_t toInsert, int pos, int len) {
+    uint64_t ret;
     asm("bfi.b64 %0, %1, %2, %3, %4;" :
         "=l"(ret) : "l"(toInsert), "l"(val), "r"(pos), "r"(len));
     return ret;

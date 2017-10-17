@@ -2,8 +2,8 @@
 #error "You must define THCS_GENERIC_FILE before including THGenerateCharType.h"
 #endif
 
-#define real char
-#define accreal long
+#define real int8_t
+#define accreal int64_t
 #define Real Char
 #define CReal CudaChar
 #define THCS_REAL_IS_CHAR
