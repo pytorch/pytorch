@@ -250,6 +250,19 @@ class TestAutograd(TestCase):
         self.assertFalse(hook_called[0])
         self.assertIsNone(x.grad)
 
+    def test_grad_retain_graph(self):
+        # Calling .grad should not free buffers in parts of the graph
+        # that don't need to be processed.
+        x = Variable(torch.ones(4) * 2, requires_grad=True)
+        intermediates = [x * i * x for i in range(4)]
+        grads = [grad for i in intermediates
+                      for grad in torch.autograd.grad((i * i).sum(), i)]
+        for i, (interm, g) in enumerate(zip(intermediates, grads)):
+            self.assertEqual(g.data, torch.ones(4) * 2 * interm.data)
+        torch.autograd.backward(intermediates, grads)
+        self.assertEqual(x.grad.data,
+                         sum(torch.ones(4) * i * i for i in range(4)) * 4 * 2 ** 3)
+
     def test_backward_badcalls(self):
         x = Variable(torch.ones(1))
         with self.assertRaisesRegex(RuntimeError, 'does not require grad'):

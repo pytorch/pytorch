@@ -202,7 +202,7 @@ static variable_list call_function(FunctionTask& task) {
   auto& pre_callbacks = task.base->pre_callbacks;
   for (auto it_p = pre_callbacks.equal_range(&fn); it_p.first != it_p.second; ++it_p.first) {
     auto& callback = it_p.first->second;
-    if (!callback(&fn, inputs)) return variable_list(fn.next_functions.size());
+    if (!callback(&fn, inputs)) return variable_list();
   }
 
   auto outputs = fn(inputs);
@@ -210,17 +210,30 @@ static variable_list call_function(FunctionTask& task) {
   auto& post_callbacks = task.base->post_callbacks;
   for (auto it_p = post_callbacks.equal_range(&fn); it_p.first != it_p.second; ++it_p.first) {
     auto& callback = it_p.first->second;
-    if (!callback(&fn, inputs, outputs)) return variable_list(fn.next_functions.size());
+    if (!callback(&fn, inputs, outputs)) return variable_list();
   }
 
   return call_post_hooks(fn, std::move(outputs), std::move(inputs));
 }
 
 auto Engine::evaluate_function(FunctionTask& task) -> void {
+  auto& fn = *task.fn;
   auto outputs = call_function(task);
 
-  auto& fn = *task.fn;
-  if (!task.base->keep_graph) {
+  // We use an empty output list to signal that the graph should not be
+  // expanded further (no new functions should be added to ready queues).
+  // We can't just bail out at this point, because this function might still
+  // need to free some dependencies of functions that have already been added
+  // to the queue.
+  // NOTE: this will also get triggered by nodes with no outputs, but they don't
+  // expand anything anyway.
+  bool expand_graph = true;
+  if (outputs.size() == 0) {
+    outputs.resize(fn.next_functions.size()); // fake zero outputs
+    expand_graph = false;
+  }
+
+  if (!task.base->keep_graph && expand_graph) {
     fn.releaseVariables();
   }
 
@@ -232,6 +245,8 @@ auto Engine::evaluate_function(FunctionTask& task) -> void {
   }
 
   int num_outputs = outputs.size();
+  if (num_outputs == 0) return; // A micro optimization to not acquire the mutex
+  std::lock_guard<std::mutex> lock(task.base->mutex);
   for (int i = 0; i < num_outputs; ++i) {
     auto& output = outputs[i];
     auto& next_fn = fn.next_functions[i].first;
@@ -247,7 +262,6 @@ auto Engine::evaluate_function(FunctionTask& task) -> void {
       continue;
     }
 
-    std::lock_guard<std::mutex> lock(task.base->mutex);
     // Check if the next function is ready to be computed
     bool is_ready = false;
     auto& dependencies = task.base->dependencies;
@@ -263,6 +277,7 @@ auto Engine::evaluate_function(FunctionTask& task) -> void {
     auto& not_ready = task.base->not_ready;
     auto not_ready_it = not_ready.find(next_fn.get());
     if (not_ready_it == not_ready.end()) {
+      if (!expand_graph) continue;
       // No buffers have been allocated for the function
       InputBuffer input_buffer(next_fn->num_inputs);
       input_buffer.add(input_nr, std::move(output));

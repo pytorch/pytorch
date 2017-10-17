@@ -63,10 +63,10 @@ struct CallbackContext {
   THPObjectPtr outputs;
   // Used to determine which callback arguments should be used to
   // fill outputs.
-  // Function -> ([grad_nr, outputs_idx], is_leaf)
+  // Function -> [grad_nr, outputs_idx]
   std::unordered_map<
     std::shared_ptr<Function>,
-    std::pair<std::vector<std::pair<int, int>>, bool>> output_map;
+    std::vector<std::pair<int, int>>> output_map;
 };
 
 void compute_partial_exec_callbacks(const function_list& roots,
@@ -112,7 +112,6 @@ void compute_partial_exec_callbacks(const function_list& roots,
     if (!allow_unreachable && rev_edges_it == rev_graph.end())
       throw std::runtime_error("differentiated input is unreachable");
     queue.emplace_back(input);
-    needed.insert(input);
   }
   while (!queue.empty()) {
     auto fn = queue.back(); queue.pop_back();
@@ -127,6 +126,21 @@ void compute_partial_exec_callbacks(const function_list& roots,
   for (auto fn : all_functions) {
     if (needed.count(fn) > 0) continue;
     map.emplace(fn, abort_callback);
+  }
+
+  // Register callbacks that will gather the outputs
+  for (auto& entry : ctx.output_map) {
+    auto& saved_outputs = entry.second;
+    bool is_needed = needed.count(entry.first.get());
+    map.erase(entry.first.get()); // Erase a stop callback we registered for this node
+    map.emplace(entry.first.get(), [is_needed, &ctx, &saved_outputs](Function* _unused, variable_list& grads) {
+      AutoGIL gil;
+      for (auto& saved_out : saved_outputs) {
+        PyTuple_SET_ITEM(ctx.outputs.get(), saved_out.second,
+          THPVariable_Wrap(grads[saved_out.first]));
+      }
+      return is_needed;
+    });
   }
 }
 
@@ -205,9 +219,8 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
       THPVariable *input_var = (THPVariable*)input;
       auto grad_fn = input_var->cdata.grad_fn();
       int output_nr = input_var->cdata.output_nr();
-      bool is_leaf = !grad_fn;
-      if (is_leaf) {
-          grad_fn = input_var->cdata.get()->grad_accumulator.lock();
+      if (!grad_fn) {
+        grad_fn = input_var->cdata.get()->grad_accumulator.lock();
       }
       THPUtils_assert(input_var->cdata.requires_grad(),
           "One of the differentiated Variables does not require grad");
@@ -216,32 +229,10 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
           "One of the differentiated Variables appears to not have been used in the graph");
       THPUtils_assert(grad_fn->is_executable,
           "One of the differentiated Variables has a non-executable grad_fn. Submit a bug report.");
-      auto& fn_info = ctx.output_map[grad_fn];
-      fn_info.first.emplace_back(output_nr, i);
-      fn_info.second = is_leaf;
-    }
-    // Register callbacks that will gather the outputs
-    for (auto& entry : ctx.output_map) {
-      auto& fn_info = entry.second;
-      callbacks.emplace(entry.first.get(), [&ctx, &fn_info](Function* _unused, variable_list& grads) {
-        auto& saved_outputs = fn_info.first;
-        bool is_leaf = fn_info.second;
-        AutoGIL gil;
-        for (auto& saved_out : saved_outputs) {
-          PyTuple_SET_ITEM(ctx.outputs.get(), saved_out.second,
-            THPVariable_Wrap(grads[saved_out.first]));
-        }
-        // Suppress grad accumulation.
-        // If the variable is a leaf, the next function to execute
-        // is a grad_accumulator.  But when inputs != NULL, we should
-        // NOT accumulate, so terminate execution.
-        return !is_leaf;
-      });
+      ctx.output_map[grad_fn].emplace_back(output_nr, i);
     }
     // Disable execution for all unneeded functions
-    if (only_inputs) {
-      compute_partial_exec_callbacks(roots, ctx, callbacks, allow_unreachable);
-    }
+    compute_partial_exec_callbacks(roots, ctx, callbacks, allow_unreachable);
   }
 
   {
