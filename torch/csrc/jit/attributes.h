@@ -129,6 +129,17 @@ struct Attributes {
   CREATE_ACCESSOR(Graphs,gs)
 
   #undef CREATE_ACCESSOR
+
+  // The overloaded accessors are convenient for the generated code
+  // in VariableType.cpp
+  void rawSet(Symbol name, int64_t v)             { i_(name, v); }
+  void rawSet(Symbol name, const at::Scalar& v)   { t_(name, v.toTensor()); }
+  void rawSet(Symbol name, const at::IntList& v)  { is_(name, v); }
+  void rawSet(Symbol name, bool v)                { i_(name, v); }
+  void rawSet(Symbol name, double v)              { f_(name, v); }
+  template<unsigned long N>
+  void rawSet(Symbol name, std::array<bool, N> v) { is_(name, std::vector<int64_t>(v.begin(), v.end())); }
+
 private:
   Derived* This() {
     return static_cast<Derived*>(this);
