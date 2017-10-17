@@ -44,6 +44,13 @@ namespace caffe2 {
 
 namespace {
 
+bool has_nnpack() {
+  // nnp_initialize is a noop after the first call so it's safe to invoke it
+  // repeatedly
+  auto nnpack_status = nnp_initialize();
+  return nnpack_status == nnp_status_success;
+}
+
 nnp_convolution_algorithm get_nnp_convolution_algorithm(
     const std::string& algo) {
   if (algo == "AUTO") {
@@ -117,11 +124,9 @@ class NNPACKConvOp final : public ConvPoolOpBase<CPUContext> {
     OPERATOR_NEEDS_FEATURE(
         dilation_h() == 1 && dilation_w() == 1,
         "The NNPack convolution does not support dilation yet.");
-#ifdef CAFFE2_USE_FBCODE
-    // Facebook's nnpack build assumes existence of avx2, so we explicitly
-    // check if the machine has avx2 support.
-    OPERATOR_NEEDS_FEATURE(GetCpuId().avx2(), "NNPack requires AVX2");
-#endif
+    // NNPACK can be built with avx2 support only and might not be able to run
+    // on a given machine.
+    OPERATOR_NEEDS_FEATURE(has_nnpack(), "NNPack can't run here. No AVX2?");
   }
 
   bool RunOnDeviceWithOrderNCHW() override {
@@ -252,11 +257,9 @@ class NNPACKMaxPoolOp final : public ConvPoolOpBase<CPUContext> {
     OPERATOR_NEEDS_FEATURE(
         this->pad_b() == 0,
         "NNPack Pooling differs from Caffe2 Pooling when pad > 0!");
-#ifdef CAFFE2_USE_FBCODE
-    // Facebook's nnpack build assumes existence of avx2, so we explicitly
-    // check if the machine has avx2 support.
-    OPERATOR_NEEDS_FEATURE(GetCpuId().avx2(), "NNPack requires AVX2");
-#endif
+    // NNPACK can be built with avx2 support only and might not be able to run
+    // on a given machine.
+    OPERATOR_NEEDS_FEATURE(has_nnpack(), "NNPack can't run here. No AVX2?");
   }
 
   bool RunOnDeviceWithOrderNCHW() override {
@@ -307,11 +310,9 @@ class NNPACKReluOp final : public Operator<CPUContext> {
  public:
   NNPACKReluOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<CPUContext>(operator_def, ws) {
-#ifdef CAFFE2_USE_FBCODE
-    // Facebook's nnpack build assumes existence of avx2, so we explicitly
-    // check if the machine has avx2 support.
-    OPERATOR_NEEDS_FEATURE(GetCpuId().avx2(), "NNPack requires AVX2");
-#endif
+    // NNPACK can be built with avx2 support only and might not be able to run
+    // on a given machine.
+    OPERATOR_NEEDS_FEATURE(has_nnpack(), "NNPack can't run here. No AVX2?");
   }
 
   bool RunOnDevice() override {
@@ -335,11 +336,9 @@ class NNPACKLeakyReluOp final : public LeakyReluOp<float, CPUContext> {
  public:
   NNPACKLeakyReluOp(const OperatorDef& operator_def, Workspace* ws)
       : LeakyReluOp<float, CPUContext>(operator_def, ws) {
-#ifdef CAFFE2_USE_FBCODE
-    // Facebook's nnpack build assumes existence of avx2, so we explicitly
-    // check if the machine has avx2 support.
-    OPERATOR_NEEDS_FEATURE(GetCpuId().avx2(), "NNPack requires AVX2");
-#endif
+    // NNPACK can be built with avx2 support only and might not be able to run
+    // on a given machine.
+    OPERATOR_NEEDS_FEATURE(has_nnpack(), "NNPack can't run here. No AVX2?");
   }
 
   bool RunOnDevice() override {
