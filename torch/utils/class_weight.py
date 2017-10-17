@@ -1,4 +1,6 @@
 import torch
+from torch.autograd import Variable
+
 
 def compute_sample_weight(y, n_classes=2, class_weight=None, eps=1e-8):
     """Estimate sample weights by class for unbalanced datasets.
@@ -11,7 +13,7 @@ def compute_sample_weight(y, n_classes=2, class_weight=None, eps=1e-8):
     samples. This normalization isn't present in sklearn's version.
 
     Args:
-        y: 1D tensor
+        y: 1D Tensor or Variable
             Array of original class labels per sample.
         n_classes: int
             Number of unique classes
@@ -27,18 +29,19 @@ def compute_sample_weight(y, n_classes=2, class_weight=None, eps=1e-8):
     Examples:
     >>> y = torch.FloatTensor([1, 0, 0, 0])
     >>> compute_sample_weight(y)
-        2.0000
-        0.6667
-        0.6667
-        0.6667
+        0.5000
+        0.1667
+        0.1667
+        0.1667
         [torch.FloatTensor of size 4]
 
     >>> compute_sample_weight(y, n_classes=2,
                               class_weight=torch.FloatTensor([.4, .6]))
-        1.3333
-        0.8889
-        0.8889
-        0.8889
+        1.3636
+        0.9091
+        0.9091
+        0.9091
+        0.9091
         [torch.FloatTensor of size 5]
 
     Computing weight in forward pass:
@@ -58,7 +61,15 @@ def compute_sample_weight(y, n_classes=2, class_weight=None, eps=1e-8):
     y = y.long()
     batch_size = y.size(0)
 
-    y_onehot = torch.zeros(batch_size, n_classes).float()
+    if isinstance(y, Variable):
+        weights = compute_sample_weight(y.data, n_classes, class_weight, eps)
+        return Variable(weights)
+
+    if y.is_cuda:
+        y_onehot = torch.cuda.zeros(batch_size, n_classes).float()
+    else:
+        y_onehot = torch.zeros(batch_size, n_classes).float()
+
     y_onehot.scatter_(1, y.view(-1, 1), 1)
 
     if class_weight is None:
