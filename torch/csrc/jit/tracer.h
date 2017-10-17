@@ -60,11 +60,34 @@ inline std::vector<VariableFlags> getVarFlags(const variable_list& vars) {
 // Should a function which takes 'vars' as inputs be traced?
 // It sufficies for ONE variable to be tracing: any "untraced" variables
 // are treated as constants.
-inline bool isTracing(const variable_list& vars) {
+//
+// TODO: This code lives in the hotpath; make sure it is fast
+inline bool isTracing(const Variable& var) {
+  if (!var.defined() || !var.tracing_state()) return false;
+  return std::any_of(var.tracing_state()->begin(), var.tracing_state()->end(), detail::isElemActive);
+}
+
+inline bool isTracing(std::initializer_list<Variable> vars) {
+  // Reference to avoid refcount bump
   for (auto& var : vars) {
-    if (!var.defined() || !var.tracing_state()) continue;
-    if (std::any_of(var.tracing_state()->begin(), var.tracing_state()->end(), detail::isElemActive))
-      return true;
+    if (isTracing(var)) return true;
+  }
+  return false;
+}
+
+inline bool isTracing(const at::ArrayRef<Variable>& vars) {
+  // Reference to avoid refcount bump
+  for (const Variable& var : vars) {
+    if (isTracing(var)) return true;
+  }
+  return false;
+}
+
+inline bool isTracing(const at::TensorList& vars) {
+  // NB: This can't be a ref, because we need to actually implicit-construct a
+  // Variable.  That means a refcount bump does happen here (sigh).
+  for (Variable var : vars) {
+    if (isTracing(var)) return true;
   }
   return false;
 }
@@ -231,6 +254,23 @@ inline VariableFlags VariableFlags::of(const Variable& var) {
 inline bool VariableFlags::verify(const Variable& var) {
   if (!var.defined()) return was_null;
   return !was_null && requires_grad == var.requires_grad() && is_volatile == var.is_volatile();
+}
+
+Node* recordTraceHelper(std::string op, at::ArrayRef<Variable> inputs, at::ArrayRef<Variable> outputs);
+
+// These overloads are intended to simplify code generation
+inline Node* recordTrace(std::string op, std::initializer_list<Variable> inputs, const Variable& output) {
+  return recordTraceHelper(op, inputs, {output});
+}
+inline Node* recordTrace(std::string op, std::initializer_list<Variable> inputs, const std::tuple<Variable, Variable>& outputs) {
+  return recordTraceHelper(op, inputs, {std::get<0>(outputs), std::get<1>(outputs)});
+}
+inline Node* recordTrace(std::string op, std::initializer_list<Variable> inputs, const std::tuple<Variable, Variable, Variable>& outputs) {
+  return recordTraceHelper(op, inputs, {std::get<0>(outputs), std::get<1>(outputs), std::get<2>(outputs)});
+}
+inline Node* recordTrace(std::string op, at::TensorList inputs, const Variable& output) {
+  // TODO: Eliminate the intermediate vector allocation
+  return recordTraceHelper(op, variable_list(inputs.begin(), inputs.end()), {output});
 }
 
 }}} // namespace torch::jit::tracer

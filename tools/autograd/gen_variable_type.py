@@ -100,6 +100,7 @@ auto ret = as_variable(baseType->${method_prefix}${base_name}(${unpacked_args}))
 ${version_counter}
 wrap_output(ret, std::move(flags), grad_fn);
 ${save_outputs}
+${record_trace}
 return ${return_value};
 """)
 
@@ -113,6 +114,7 @@ baseType->${method_prefix}${base_name}(${unpacked_args});
 pImpl.version_counter.increment();
 wrap_output(self, std::move(flags), grad_fn);
 ${save_outputs}
+${record_trace}
 return ${return_value};
 """)
 
@@ -121,8 +123,19 @@ auto flags = Function::flags({ ${tensor_args} });
 auto grad_fn = std::make_shared<Error>("${api_name} is not differentiable");
 auto ret = as_variable(baseType->${method_prefix}${api_name}(${unpacked_args}));
 wrap_output(ret, std::move(flags), std::move(grad_fn));
+${record_trace}
 return ret;
 """)
+
+RECORD_TRACE = CodeTemplate("""\
+if (jit::tracer::isTracing({ ${tensor_args} })) {
+  jit::Node *n = jit::tracer::recordTrace( "${api_name}", { ${tensor_args} }, ${return_name} );
+  ${record_attributes}
+}
+""")
+
+RECORD_ATTRIBUTE = CodeTemplate("""\
+setattr(n, jit::stringToSymbol("${name}"), ${name});""")
 
 CONDITIONAL = CodeTemplate("""\
 if (${cond}) {
@@ -628,6 +641,19 @@ def create_variable_type(top_env, aten_declarations):
             body.extend(METHOD_DEFINITION_DERIVATIVE.substitute(combined).split('\n'))
         return body
 
+    def emit_record_trace(env, declaration):
+        local = {}
+        local['record_attributes'] = [];
+        for arg in declaration['arguments']:
+            if arg['simple_type'] in {'Tensor', 'TensorList'}:
+                continue
+            local['record_attributes'].append(RECORD_ATTRIBUTE.substitute(name=arg['name']))
+        if not local['record_attributes']:
+            local['record_attributes'].append('(void)n;');
+
+        combined = nested_dict(local, nested_dict(env, declaration))
+        return RECORD_TRACE.substitute(combined)
+
     def process_function(declaration):
         if skip_function(declaration['name']):
             return
@@ -638,8 +664,10 @@ def create_variable_type(top_env, aten_declarations):
 
         if declaration['inplace']:
             env['return_value'] = 'self'
+            env['return_name'] = 'self'
         else:
             env['return_value'] = '{}(std::move(ret))'.format(declaration['return_type'])
+            env['return_name'] = 'ret'
 
         if declaration.get('derivative') is not None:
             func = declaration['derivative']
@@ -657,6 +685,11 @@ def create_variable_type(top_env, aten_declarations):
         else:
             env['tensor_args'] = [arg['name'] for arg in declaration['arguments']
                                   if arg['simple_type'] in {'Tensor', 'TensorList'}]
+
+        if any(arg['simple_type'] in {'Generator', 'Storage'} for arg in declaration['arguments']):
+            env['record_trace'] = []
+        else:
+            env['record_trace'] = emit_record_trace(env, declaration)
 
         env['type_definition_body'] = emit_body(env, declaration)
 

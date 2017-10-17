@@ -8,6 +8,7 @@
 #include "torch/csrc/autograd/generated/Functions.h"
 #include "torch/csrc/autograd/functions/tensor.h"
 #include "torch/csrc/autograd/functions/basic_ops.h"
+#include "torch/csrc/jit/tracer.h"
 
 #include <initializer_list>
 #include <iostream>
@@ -23,6 +24,19 @@ using namespace at;
 using namespace torch::autograd::generated;
 
 namespace torch { namespace autograd {
+
+// Helper methods for working with Attributes (torch/csrc/jit/attributes.h)
+
+// The overloaded accessors are convenient for the generated code (since we
+// don't want to make the codegen do the dispatch manually)
+static void setattr(jit::Node* n, jit::Symbol name, int64_t v)             { n->i_(name, v); }
+static void setattr(jit::Node* n, jit::Symbol name, int v)                 { n->i_(name, v); }
+static void setattr(jit::Node* n, jit::Symbol name, const at::Scalar& v)   { n->t_(name, v.toTensor()); }
+static void setattr(jit::Node* n, jit::Symbol name, const at::IntList& v)  { n->is_(name, v); }
+static void setattr(jit::Node* n, jit::Symbol name, bool v)                { n->i_(name, v); }
+static void setattr(jit::Node* n, jit::Symbol name, double v)              { n->f_(name, v); }
+template<unsigned long N>
+static void setattr(jit::Node* n, jit::Symbol name, std::array<bool, N> v) { n->is_(name, std::vector<int64_t>(v.begin(), v.end())); }
 
 VariableType::VariableType(Context* context, Type* baseType)
   : Type(context)
