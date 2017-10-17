@@ -12,6 +12,8 @@ SUM = 0  # ncclRedOp_t
 def is_available(tensors):
     devices = set()
     for tensor in tensors:
+        if tensor.is_sparse:
+            return False
         if not tensor.is_contiguous():
             return False
         if not tensor.is_cuda:
@@ -22,7 +24,7 @@ def is_available(tensors):
         devices.add(device)
 
     if not hasattr(torch._C, '_nccl_all_reduce'):
-        warnings.warn('PyTorch Not compiled with NCCL support')
+        warnings.warn('PyTorch is not compiled with NCCL support')
         return False
 
     return True

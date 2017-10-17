@@ -1,6 +1,8 @@
 import torch
 from . import nccl
-from torch._utils import _accumulate, _take_tensors, _flatten_tensors, _unflatten_tensors
+from torch._utils import _accumulate, _take_tensors, _flatten_dense_tensors, \
+    _flatten_sparse_tensors, _unflatten_dense_tensors, \
+    _unflatten_sparse_tensors, _reorder_tensors_as
 
 
 def broadcast(tensor, devices):
@@ -16,8 +18,8 @@ def broadcast(tensor, devices):
         A tuple containing copies of the ``tensor``, placed on devices
         corresponding to indices from ``devices``.
     """
-    if nccl.is_available([tensor]) and len(set(devices)) == len(devices):
-        tensors = [tensor]
+    tensors = [tensor]
+    if nccl.is_available(tensors) and len(set(devices)) == len(devices):
         for device in devices[1:]:
             with torch.cuda.device(device):
                 tensors.append(type(tensor)(tensor.size()))
@@ -51,10 +53,20 @@ def broadcast_coalesced(tensors, devices, buffer_size=10485760):
     # use the original tensors for the first device
     outputs[0].extend(tensors)
     for chunk in _take_tensors(tensors, buffer_size):
-        results = broadcast(_flatten_tensors(chunk), devices)
+        if chunk[0].is_sparse:
+            flat_indices, flat_values = _flatten_sparse_tensors(chunk)
+            result_indices = broadcast(flat_indices, devices)
+            result_values = broadcast(flat_values, devices)
+            unflat_results = tuple(_unflatten_sparse_tensors(iv, chunk) for iv in zip(result_indices, result_values))
+        else:
+            flat = _flatten_dense_tensors(chunk)
+            results = broadcast(flat, devices)
+            unflat_results = tuple(_unflatten_dense_tensors(tensor, chunk) for tensor in results)
         # use the broadcasted tensors for the remaining devices
-        for dst, res in zip(outputs[1:], results[1:]):
-            dst.extend(_unflatten_tensors(res, chunk))
+        for dst, unflat_res in zip(outputs[1:], unflat_results[1:]):
+            dst.extend(unflat_res)
+    for i, output in enumerate(outputs):
+        outputs[i] = _reorder_tensors_as(output, tensors)
     return tuple(outputs)
 
 
@@ -77,6 +89,7 @@ def reduce_add(inputs, destination=None):
     if destination is None:
         destination = torch.cuda.current_device()
     input_size = inputs[0].size()
+    is_sparse = inputs[0].is_sparse
     nccl_root = None
     for i, inp in enumerate(inputs):
         assert inp.is_cuda, "reduce_add expects all inputs to be on GPUs"
@@ -89,13 +102,12 @@ def reduce_add(inputs, destination=None):
                              "{}".format(i, got, expected))
     assert nccl_root is not None, "reduce_add expects destination to be on the same GPU with one of the tensors"
     with torch.cuda.device(destination):
-        result = type(inp)(input_size).zero_()
+        result = type(inp)().resize_as_(inp).zero_()
 
     if nccl.is_available(inputs) and inputs[0].get_device() == destination:
         outputs = [result] + [t.new(t.size()) for t in inputs[1:]]
         nccl.reduce(inputs, outputs, root=nccl_root)
         return result
-
     for inp in inputs:
         input_correct_gpu = inp.cuda(result.get_device())
         result.add_(input_correct_gpu)
@@ -119,13 +131,20 @@ def reduce_add_coalesced(inputs, destination=None, buffer_size=10485760):
         A tuple of tensors containing an elementwise sum of each group of
         inputs, placed on the ``destination`` device.
     """
+    dense_tensors = []  # shape (num_tensors, num_gpus)
     output = []
-    itrs = [_take_tensors(tensors, buffer_size) for tensors in inputs]
+    for tensor_at_gpus in zip(*inputs):
+        if tensor_at_gpus[0].is_sparse:
+            result = reduce_add(tensor_at_gpus, destination)
+            output.append(result)
+        else:
+            dense_tensors.append(tensor_at_gpus)
+    itrs = [_take_tensors(tensors, buffer_size) for tensors in zip(*dense_tensors)]
     for chunks in zip(*itrs):
-        flattened = [_flatten_tensors(chunk) for chunk in chunks]
-        result = reduce_add(flattened, destination)
-        output.extend(_unflatten_tensors(result, chunks[0]))
-    return tuple(output)
+        tensors = [_flatten_dense_tensors(chunk) for chunk in chunks]
+        result = reduce_add(tensors, destination)
+        output.extend(_unflatten_dense_tensors(result, chunks[0]))
+    return tuple(_reorder_tensors_as(output, inputs[0]))
 
 
 def scatter(tensor, devices, chunk_sizes=None, dim=0, streams=None):

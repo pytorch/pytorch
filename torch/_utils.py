@@ -1,5 +1,6 @@
 import torch
 import importlib
+from collections import defaultdict
 
 
 def _type(self, new_type=None, async=False):
@@ -103,8 +104,14 @@ def _accumulate(iterable, fn=lambda x, y: x + y):
         yield total
 
 
-def _flatten_tensors(tensors):
-    """Flatten tensors into a single contiguous 1D buffer"""
+def _flatten_dense_tensors(tensors):
+    """Flatten dense tensors into a contiguous 1D buffer. Assume tensors are of
+    same dense type.
+
+    Since inputs are dense, the resulting tensor will be a concatenated 1D
+    buffer. Element-wise operation on this buffer will be equivalent to
+    operating individually.
+    """
     if len(tensors) == 1:
         return tensors[0].contiguous().view(-1)
     numels = [tensor.numel() for tensor in tensors]
@@ -117,8 +124,19 @@ def _flatten_tensors(tensors):
     return flat
 
 
-def _unflatten_tensors(flat, tensors):
-    """View a flat buffer using the sizes of tensors"""
+def _flatten_sparse_tensors(tensors):
+    """Flatten sparse tensors into two contiguous 1D buffers, one of indices and
+    one of values. Assume tensors are of same sparse type.
+    """
+    flat_indices = _flatten_dense_tensors([t._indices() for t in tensors])
+    flat_values = _flatten_dense_tensors([t._values() for t in tensors])
+    return flat_indices, flat_values
+
+
+def _unflatten_dense_tensors(flat, tensors):
+    """View a flat buffer using the sizes of tensors. Assume that tensors are of
+    same dense type, and that flat is given by _flatten_dense_tensors.
+    """
     outputs = []
     offset = 0
     for tensor in tensors:
@@ -128,20 +146,57 @@ def _unflatten_tensors(flat, tensors):
     return tuple(outputs)
 
 
+def _unflatten_sparse_tensors(flat, tensors):
+    """View flat buffer (containing indices and values) using the sizes of
+    tensors. Assume that tensors are of same sparse type, and that flat is given
+    by _flatten_sparse_tensors.
+    """
+    flat_indices, flat_values = flat
+    indices = _unflatten_dense_tensors(flat_indices, [t._indices() for t in tensors])
+    values = _unflatten_dense_tensors(flat_values, [t._values() for t in tensors])
+    outputs = []
+    for t, i, v in zip(tensors, indices, values):
+        outputs.append(t.new(i, v, t.size()))
+    return tuple(outputs)
+
+
+def _reorder_tensors_as(tensors, ordered_tensors):
+    """Assume that tensors are of same order as ordered_tensors within their
+    types, e.g. from _take_tensors. Reorder them to be of same order as
+    ordered_tensors.
+    """
+    type_dict = defaultdict(list)
+    for tensor in tensors:
+        type_dict[type(tensor)].append(tensor)
+    type_dict = {t: iter(coll) for t, coll in type_dict.items()}
+    return tuple(next(type_dict[type(tensor)]) for tensor in ordered_tensors)
+
+
 def _take_tensors(tensors, size_limit):
-    """Groups tensors into lists of up to size_limit bytes"""
-    buf = []
-    size = 0
-    last_type = type(tensors[0]) if len(tensors) > 0 else None
+    """Group tensors into chunks. This generator yields a chunk at each call,
+    each containing tensors of same type up to certain byte limit in total size.
+    The yielded tensors are only ordered as the original sequence within its
+    types.
+
+    Args:
+        tensors (Sequence): A sequence of tensors to be separated into chunks.
+        size_limit (int): The limit of each chunk in bytes.
+    """
+    buf_dict = defaultdict(lambda: [[], 0])
     for tensor in tensors:
         t = type(tensor)
-        param_size = tensor.numel() * tensor.element_size()
-        if t is not last_type or (size + param_size > size_limit and size > 0):
+        if tensor.is_sparse:
+            indices = tensor._indices()
+            values = tensor._values()
+            size = indices.numel() * indices.element_size() + values.numel() * values.element_size()
+        else:
+            size = tensor.numel() * tensor.element_size()
+        buf_and_size = buf_dict[t]
+        if buf_and_size[1] + size > size_limit and buf_and_size[1] > 0:
+            yield buf_and_size[0]
+            buf_and_size = buf_dict[t] = [[], 0]
+        buf_and_size[0].append(tensor)
+        buf_and_size[1] += size
+    for buf, _ in buf_dict.values():
+        if len(buf) > 0:
             yield buf
-            last_type = t
-            size = 0
-            buf = []
-        buf.append(tensor)
-        size += param_size
-    if len(buf) > 0:
-        yield buf
