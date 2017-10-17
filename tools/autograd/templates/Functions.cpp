@@ -265,7 +265,7 @@ Tensor glu_double_backward(const Tensor & grad, const Tensor & grad_output, cons
 
 Tensor glu_double_backward_grad_output(const Tensor & grad, const Tensor & input, int64_t dim) {
   if (dim < 0) dim += input.dim();
-  auto sizes = std::vector<int64_t>{input.sizes()};
+  std::vector<int64_t> sizes = input.sizes();
   sizes[dim] /= 2;
   auto tmp = grad * glu_backward(input.type().ones(sizes), input, dim);
   return tmp.narrow(dim, 0, sizes[dim]) + tmp.narrow(dim, sizes[dim], sizes[dim]);
