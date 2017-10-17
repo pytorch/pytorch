@@ -59,6 +59,9 @@ class BatchNorm1d(_BatchNorm):
 
     During evaluation, this running mean/variance is used for normalization.
 
+    Because the BatchNorm is done over the `C` dimension, computing statistics
+    on `(N, L)` slices, it's common terminology to call this Temporal BatchNorm
+
     Args:
         num_features: num_features from an expected input of size
             `batch_size x num_features [x width]`
@@ -106,6 +109,9 @@ class BatchNorm2d(_BatchNorm):
 
     During evaluation, this running mean/variance is used for normalization.
 
+    Because the BatchNorm is done over the `C` dimension, computing statistics
+    on `(N, H, W)` slices, it's common terminology to call this Spatial BatchNorm
+
     Args:
         num_features: num_features from an expected input of
             size batch_size x num_features x height x width
@@ -152,6 +158,10 @@ class BatchNorm3d(_BatchNorm):
     and variance. The running sum is kept with a default momentum of 0.1.
 
     During evaluation, this running mean/variance is used for normalization.
+
+    Because the BatchNorm is done over the `C` dimension, computing statistics
+    on `(N, D, H, W)` slices, it's common terminology to call this Volumetric BatchNorm
+    or Spatio-temporal BatchNorm
 
     Args:
         num_features: num_features from an expected input of
