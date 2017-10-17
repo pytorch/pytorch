@@ -86,6 +86,61 @@ class TestCrossEntropyOps(hu.HypothesisTestCase):
             output_to_grad='xentropy',
             grad_reference=sigmoid_xentr_logit_grad_ref)
 
+    @given(
+        inputs=st.lists(
+            elements=st.integers(min_value=1, max_value=5),
+            min_size=1,
+            max_size=2,
+            average_size=2,
+        ).flatmap(
+            lambda shape: st.tuples(
+                hu.arrays(
+                    dims=shape,
+                    elements=st.one_of(
+                        st.floats(min_value=-1.0, max_value=-0.1),
+                        st.floats(min_value=0.1, max_value=1.0),
+                    )),
+                hu.arrays(
+                    dims=shape,
+                    elements=st.sampled_from([0.0, 1.0]),
+                ),
+                hu.arrays(
+                    dims=shape,
+                    elements=st.floats(min_value=0.1, max_value=1.0),
+                ),
+            )
+        ),
+        **hu.gcs
+    )
+    def test_weighted_sigmoid_cross_entropy_with_logits(self, inputs, gc, dc):
+        logits, targets, weights = inputs
+
+        def weighted_sigmoid_xentr_logit_ref(logits, targets, weights):
+            s = sigmoid_cross_entropy_with_logits(logits, targets)
+            s = np.multiply(s, weights)
+            m = np.mean(s, axis=len(logits.shape) - 1)
+            return (m, )
+
+        def weighted_sigmoid_xentr_logit_grad_ref(g_out, outputs, fwd_inputs):
+            fwd_logits, fwd_targets, fwd_weights = fwd_inputs
+            inner_size = fwd_logits.shape[-1]
+            m = fwd_targets - sigmoid(fwd_logits)
+            m = np.multiply(m, weights)
+            g_in = -np.expand_dims(g_out, axis=-1) * m / inner_size
+            return (g_in, None, None)
+
+        op = core.CreateOperator(
+            'WeightedSigmoidCrossEntropyWithLogits',
+            ['logits', 'targets', 'weights'],
+            ['xentropy'])
+        self.assertReferenceChecks(
+            device_option=gc,
+            op=op,
+            inputs=[logits, targets, weights],
+            reference=weighted_sigmoid_xentr_logit_ref,
+            output_to_grad='xentropy',
+            grad_reference=weighted_sigmoid_xentr_logit_grad_ref)
+
     @given(n=st.integers(2, 10),
            b=st.integers(1, 5),
            **hu.gcs_cpu_only)

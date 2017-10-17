@@ -97,6 +97,23 @@ class SigmoidCrossEntropyWithLogitsGradientOp final : public Operator<Context> {
 };
 
 template <typename T, class Context>
+class WeightedSigmoidCrossEntropyWithLogitsOp final : public Operator<Context> {
+ public:
+  USE_SIMPLE_CTOR_DTOR(WeightedSigmoidCrossEntropyWithLogitsOp);
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
+  bool RunOnDevice() override;
+};
+
+template <typename T, class Context>
+class WeightedSigmoidCrossEntropyWithLogitsGradientOp final
+    : public Operator<Context> {
+ public:
+  USE_SIMPLE_CTOR_DTOR(WeightedSigmoidCrossEntropyWithLogitsGradientOp);
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
+  bool RunOnDevice() override;
+};
+
+template <typename T, class Context>
 class CrossEntropyOp final : public Operator<Context> {
  public:
   USE_SIMPLE_CTOR_DTOR(CrossEntropyOp);
