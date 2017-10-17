@@ -1,5 +1,11 @@
 # TODO: refactor nested_dict into common library with ATen
 class nested_dict(object):
+    """
+    A nested dict is a dictionary with a parent.  If key lookup fails,
+    it recursively continues into the parent.  Writes always happen to
+    the top level dict.
+    """
+
     def __init__(self, base, parent):
         self.base, self.parent = base, parent
 
