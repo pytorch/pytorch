@@ -791,10 +791,10 @@ class Variable(_C._VariableBase):
         return Potrf.apply(self, upper)
 
     def multinomial(self, num_samples=1, replacement=False):
-        return Multinomial(num_samples, replacement)(self)
+        return Multinomial.apply(self, num_samples, replacement)
 
     def bernoulli(self):
-        return Bernoulli()(self)
+        return Bernoulli.apply(self)
 
     def zero_(self):
         return Zero.apply(self, True)
@@ -918,10 +918,7 @@ class Variable(_C._VariableBase):
 
         @staticmethod
         def normal(means, std=1):
-            if isinstance(std, Variable):
-                return Normal()(means, std)
-            else:
-                return Normal(std)(means)
+            return Normal.apply(means, std)
 
         @staticmethod
         def _blas(cls, args, inplace):
