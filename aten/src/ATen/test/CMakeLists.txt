@@ -15,3 +15,6 @@ target_link_libraries(wrapdim_test ATen)
 
 add_executable(dlconvertor_test dlconvertor_test.cpp)
 target_link_libraries(dlconvertor_test ATen)
+
+add_executable(native_test native_test.cpp)
+target_link_libraries(native_test ATen)
