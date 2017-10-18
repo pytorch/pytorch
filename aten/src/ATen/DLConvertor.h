@@ -10,12 +10,6 @@
 
 namespace at {
 
-
-struct ATenDLMTensor {
-  Tensor handle;
-  DLManagedTensor tensor;
-};
-
 DLManagedTensor * toDLPack(const Tensor& src);
 Tensor fromDLPack(const DLManagedTensor* src);
 
