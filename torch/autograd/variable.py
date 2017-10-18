@@ -737,9 +737,6 @@ class Variable(_C._VariableBase):
             raise RuntimeError("t() expects a 2D Variable, but self is {}D".format(self.dim()))
         return Transpose.apply(self, 0, 1)
 
-    def transpose(self, dim1, dim2):
-        return Transpose.apply(self, dim1, dim2)
-
     def select(self, dim, _index):
         dim = dim if dim >= 0 else dim + self.dim()
         index = tuple(slice(None, None) for _ in range(dim)) + (_index,)
