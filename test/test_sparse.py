@@ -575,6 +575,15 @@ class TestSparse(TestCase):
         self._test_sparse_mask_shape([50, 30, 20], [2])
         self._test_sparse_mask_shape([5, 5, 5, 5, 5, 5], [2])
 
+    def test_sparse_add_coalesce(self):
+        i = self.IndexTensor([[1, 2, 1]])
+        v = self.ValueTensor([3, 4, 5])
+        x = self.SparseTensor(i, v, torch.Size([3]))
+        y = self.SparseTensor(i, v, torch.Size([3]))
+        z = x + y
+
+        self.assertFalse(z._indices().numel() != 2 and z.is_coalesced())
+
     @cuda_only
     def test_storage_not_null(self):
         x = torch.cuda.sparse.FloatTensor(2)

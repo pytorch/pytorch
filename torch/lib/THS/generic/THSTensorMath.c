@@ -115,6 +115,7 @@ void THSTensor_(cadd)(THSTensor *r_, THSTensor *t, real value, THSTensor *src) {
 
   // saving those because they can be overwritten when doing in-place operations
   ptrdiff_t t_nnz = t->nnz, s_nnz = src->nnz, max_nnz = t_nnz + s_nnz;
+  int t_coalesced = t->coalesced, s_coalesced = src->coalesced;
   int64_t nDimI = THSTensor_(nDimensionI)(src);
   int64_t nDimV = THSTensor_(nDimensionV)(src);
   THLongTensor *t_indices_ = THSTensor_(newIndices)(t);
@@ -170,7 +171,11 @@ void THSTensor_(cadd)(THSTensor *r_, THSTensor *t, real value, THSTensor *src) {
   }
 
   r_->nnz = r_i;
-  r_->coalesced = 1;
+  // TODO: I think it may be possible to track inside the loop and
+  // detect when we are uncoalesced (e.g., by observing that an
+  // index goes backwards) which may be more precise than using the
+  // coalesced flag here.  But this is easy.
+  r_->coalesced = t_coalesced && s_coalesced;
 
   THLongTensor_free(t_indices_);
   THTensor_(free)(t_values_);
