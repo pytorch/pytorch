@@ -54,6 +54,14 @@ auto ConvParams::is_dilated() const -> bool {
   return is_dilated;
 }
 
+auto ConvParams::is_padded() const -> bool {
+  bool is_padded = false;
+  for (int p : padding) {
+    is_padded |= (p != 0);
+  }
+  return is_padded;
+}
+
 auto ConvParams::is_output_padding_neg() const -> bool {
   bool is_non_neg = false;
   for (int p : output_padding) {
@@ -117,6 +125,19 @@ auto ConvParams::use_nnpack(const at::Tensor& input) const -> bool {
          input.size(0) >= 16; // ensure large enough batch size to ensure perf, tuneable
 #endif
   return false;
+}
+
+// We currently only have depthwise support for the case where groups ==
+// nInputPlane and nInputPlane == nOutputPlane (the latter due to the lack of
+// a depthwise multiplier)
+auto ConvParams::is_depthwise(
+        const at::Tensor& input, const at::Tensor& weight, int groups) const -> bool {
+  return input.type().isCuda() &&
+         !transposed &&
+         input.ndimension() == 4 &&
+         input.size(1) == groups &&
+         groups > 1 && // no point if there is only a single group
+         weight.size(0) % input.size(1) == 0; // output channels must be a multiple of input channels
 }
 
 std::string ConvForward::name() { return "ConvForward"; }
@@ -220,6 +241,14 @@ static Variable subvariable(const Variable& var, int dim, int groups, int g) {
   return result;
 }
 
+static std::vector<int64_t> vecToInt64(const std::vector<int>& src) {
+  std::vector<int64_t> res(src.size());
+  for (size_t i = 0; i < src.size(); i++) {
+    res[i] = static_cast<int64_t>(src[i]);
+  }
+  return res;
+}
+
 static at::Tensor cat(const tensor_list& tensors, int dim) {
   int num_inputs = tensors.size();
   if (num_inputs == 0) {
@@ -230,7 +259,6 @@ static at::Tensor cat(const tensor_list& tensors, int dim) {
   at::cat_out(output, tensors, dim);
   return output;
 }
-
 
 // ConvForward implementation
 
@@ -260,7 +288,16 @@ auto ConvForward::apply(const variable_list& inputs) -> variable_list {
   tensor_list ones(groups);
   std::unique_ptr<Convolution> convolution;
 
-  if (use_cudnn(input)) {
+  if (is_depthwise(input, weight, groups)) {
+      /* output.resize_(output_size(input, weight)); */
+
+      auto kernel_size = weight.sizes().slice(2);
+      auto stride = vecToInt64(this->stride);
+      auto padding = vecToInt64(this->padding);
+      auto dilation = vecToInt64(this->dilation);
+
+      output = at::conv_depthwise2d_forward(input, weight, kernel_size, bias, stride, padding, dilation);
+  } else if (use_cudnn(input)) {
 #ifdef WITH_CUDNN
     if (input.type().ID() != weight.type().ID()){
       std::stringstream ss;
@@ -325,6 +362,14 @@ auto ConvForward::apply(const variable_list& inputs) -> variable_list {
   });
 };
 
+// For Convolution strategies that don't implicitly handle grad_bias, we add a helper
+// function here to perform it using simple Tensor operators
+static at::Tensor compute_grad_bias(const at::Tensor& grad_output) {
+  // grad_output is in N, C, H, W, we re-shape and make contiguous
+  at::Tensor transposed = grad_output.transpose(0, 1).contiguous();
+  // sum across all of the channels and add to grad_bias
+  return transposed.view({transposed.size(0), -1}).sum(1);
+}
 
 // ConvBackward implementation
 
@@ -354,6 +399,8 @@ auto ConvBackward::apply(const variable_list& grad_outputs) -> variable_list {
     grad_output = view4d(grad_output);
   }
 
+
+  bool use_depthwise = this->is_depthwise(input, weight, groups);
   bool use_cudnn = this->use_cudnn(input);
 
   at::Tensor grad_input;
@@ -366,7 +413,23 @@ auto ConvBackward::apply(const variable_list& grad_outputs) -> variable_list {
     should_compute_output(2) && bias.defined(),
   };
 
-  if (use_cudnn) {
+  if (use_depthwise) {
+    if (output_mask[0] || output_mask[1]) {
+      auto kernel_size = weight.sizes().slice(2);
+      auto stride = vecToInt64(this->stride);
+      auto padding = vecToInt64(this->padding);
+      auto dilation = vecToInt64(this->dilation);
+
+      std::tie(grad_input, grad_weight) = at::conv_depthwise2d_backward(
+          grad_output, input, weight, kernel_size, stride, padding, dilation,
+          {output_mask[0], output_mask[1]});
+      }
+
+      // THCUNN implementation does not handle bias, so we do it ourselves
+      if (output_mask[2]) {
+        grad_bias = compute_grad_bias(grad_output);
+      }
+    } else if (use_cudnn) {
 #ifdef WITH_CUDNN
     if (output_mask[0]) {
       grad_input = input.type().tensor();
@@ -648,14 +711,6 @@ auto ConvBackwardBackward::releaseVariables() -> void {
   grad_output_.data.reset();
 }
 
-static std::vector<int64_t> vecToInt64(const std::vector<int>& src) {
-  std::vector<int64_t> res(src.size());
-  for (size_t i = 0; i < src.size(); i++) {
-    res[i] = static_cast<int64_t>(src[i]);
-  }
-  return res;
-}
-
 // Forward and backward functions for Tensor
 
 static at::Tensor compute_output(
@@ -791,10 +846,7 @@ static std::tuple<Tensor, Tensor, Tensor> compute_backward(
           }
 
           if (output_mask[2]) {
-            // grad_output is in N, C, H, W, we re-shape and make contiguous
-            at::Tensor transposed = grad_output.transpose(0, 1).contiguous();
-            // sum across all of the channels and add to grad_bias
-            grad_bias = transposed.view({transposed.size(0), -1}).sum(1);
+            grad_bias = compute_grad_bias(grad_output);
           }
 
           return std::make_tuple(grad_input, grad_weight, grad_bias);

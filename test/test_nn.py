@@ -1942,6 +1942,49 @@ class TestNN(NNTestCase):
             self.assertEqual(m.weight.grad.data,
                              torch.cat([m1.weight.grad.data, m2.weight.grad.data], 0))
 
+    # Very similar to test_Conv2d_naive_groups but with special care to handle
+    # the number of groups == number of input channels
+    @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
+    def test_Conv2d_depthwise_naive_groups(self):
+        types = [torch.cuda.FloatTensor, torch.cuda.DoubleTensor,
+                 torch.cuda.HalfTensor]
+        precs = [1e-5, 1e-5, 1e-2]
+        for tp, prec in zip(types, precs):
+            for depth_multiplier in [1, 2]:
+                m = nn.Conv2d(2, 2 * depth_multiplier, kernel_size=3, groups=2).type(tp)
+                i = Variable(torch.randn(2, 2, 6, 6).type(tp), requires_grad=True)
+                output = m(i)
+                grad_output = torch.randn(2, 2 * depth_multiplier, 4, 4).type(tp)
+                output.backward(grad_output)
+
+                offset = 1 * depth_multiplier
+
+                m1 = nn.Conv2d(1, 1 * depth_multiplier, kernel_size=3).type(tp)
+                m1.weight.data = m.weight.data[:offset].clone()
+                m1.bias.data = m.bias.data[:offset].clone()
+                i1 = Variable(i.data[:, :1].contiguous(), requires_grad=True)
+                output1 = m1(i1)
+                output1.backward(grad_output[:, :offset].contiguous())
+
+                m2 = nn.Conv2d(1, 1 * depth_multiplier, kernel_size=3).type(tp)
+                m2.weight.data.copy_(m.weight.data[offset:])
+                m2.bias.data.copy_(m.bias.data[offset:])
+                i2 = Variable(i.data[:, 1:].contiguous(), requires_grad=True)
+                output2 = m2(i2)
+                output2.backward(grad_output[:, offset:].contiguous())
+
+                self.assertEqual(output, torch.cat([output1, output2], 1),
+                                 prec=prec)
+                self.assertEqual(i.grad.data,
+                                 torch.cat([i1.grad.data, i2.grad.data], 1),
+                                 prec=prec)
+                self.assertEqual(m.bias.grad.data,
+                                 torch.cat([m1.bias.grad.data,
+                                            m2.bias.grad.data], 0), prec=prec)
+                self.assertEqual(m.weight.grad.data,
+                                 torch.cat([m1.weight.grad.data,
+                                            m2.weight.grad.data], 0), prec=prec)
+
     def test_MaxUnpool2d_output_size(self):
         m = nn.MaxPool2d(3, stride=2, return_indices=True)
         mu = nn.MaxUnpool2d(3, stride=2)
@@ -3828,6 +3871,31 @@ new_module_tests = [
         input_size=(1, 2, 4, 5),
         cudnn=True,
         check_gradgrad=False,
+    ),
+    dict(
+        fullname='Conv2d_depthwise',
+        constructor=lambda: nn.Conv2d(4, 4, (3, 3), groups=4),
+        input_size=(2, 4, 6, 6),
+    ),
+    dict(
+        fullname='Conv2d_depthwise_with_multiplier',
+        constructor=lambda: nn.Conv2d(4, 8, (3, 3), groups=4),
+        input_size=(2, 4, 6, 6),
+    ),
+    dict(
+        fullname='Conv2d_depthwise_strided',
+        constructor=lambda: nn.Conv2d(4, 4, (3, 3), stride=(2, 2), groups=4),
+        input_size=(2, 4, 6, 6),
+    ),
+    dict(
+        fullname='Conv2d_depthwise_padded',
+        constructor=lambda: nn.Conv2d(4, 4, (3, 3), padding=(1, 1), groups=4),
+        input_size=(2, 4, 6, 6),
+    ),
+    dict(
+        fullname='Conv2d_depthwise_dilated',
+        constructor=lambda: nn.Conv2d(4, 4, (2, 2), dilation=(2, 2), groups=4),
+        input_size=(2, 4, 5, 5),
     ),
     dict(
         module_name='MaxPool2d',

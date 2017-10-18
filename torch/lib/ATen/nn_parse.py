@@ -54,6 +54,15 @@ def output_arguments(thnn_function):
     cname = thnn_function.name
     output_args = []
 
+    # function_wrapper expects everything in a declaration to be in
+    # the base type (i.e. THTensor*), but if we pull a THCUNN only
+    # implementation, it will have THCTensor* as the arg type. So we
+    # strip the THC here before returning
+    def map_to_th_type(t):
+        if t.startswith('THC'):
+            t = t.replace('THC', 'TH')
+        return t
+
     def is_output_arg(arg_name, func_name):
         if arg_name == 'output' and 'updateOutput' in cname:
             return True
@@ -68,7 +77,7 @@ def output_arguments(thnn_function):
         name = arg.name
         if is_output_arg(name, cname):
             desc = {
-                'type': arg.type,
+                'type': map_to_th_type(arg.type),
                 'name': camel_to_snake(name),
                 'output': True,
             }
@@ -206,7 +215,7 @@ def function_info(name, arguments, cimpls, buffers, backends):
     return {
         'mode': 'NN',
         'name': name,
-        'types': ['Float', 'Double'],
+        'types': ['Float', 'Double', 'Half'],  # Half will be stripped for CPU backend
         'arguments': arguments,
         'return': get_return(arguments),
         'buffers': buffers,
