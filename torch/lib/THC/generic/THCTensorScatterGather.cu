@@ -12,16 +12,16 @@ void THCTensor_(gather)(THCState* state, THCTensor *tensor,
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, tensor, src));
   THCAssertSameGPU(THCudaLongTensor_checkGPU(state, 1, index));
 
-  THArgCheck(THCTensor_(nDimension)(state, src) == THCTensor_(nDimension)(state, tensor), 2,
-             "Input tensor must have same dimensions as output tensor");
-  THArgCheck(dim >= 0 && dim < THCTensor_(nDimension)(state, tensor), 3,
-             "Index dimension is out of bounds");
   THArgCheck(THCudaLongTensor_nDimension(state, index) == THCTensor_(nDimension)(state, src), 4,
              "Index tensor must have same dimensions as input tensor");
   THLongStorage *indexSize = THCudaLongTensor_newSizeOf(state, index);
   THArgCheck(THCTensor_(isSize)(state, tensor, indexSize), 4,
              "Index tensor must have the same size as output tensor.");
   THLongStorage_free(indexSize);
+  THArgCheck(dim >= 0 && dim < THCTensor_(nDimension)(state, tensor), 3,
+             "Index dimension is out of bounds");
+  THArgCheck(THCTensor_(nDimension)(state, src) == THCTensor_(nDimension)(state, tensor), 2,
+             "Input tensor must have same dimensions as output tensor");
 
   for (int d = 0; d < THCTensor_(nDimension)(state, tensor); d++) {
     if (d != dim) {
