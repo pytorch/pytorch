@@ -124,6 +124,10 @@ static ScalarType getATenScalarType(const DLDataType& dtype) {
   return stype;
 }
 
+struct ATenDLMTensor {
+  Tensor handle;
+  DLManagedTensor tensor;
+};
 
 void destructor(DLManagedTensor * arg) {
   delete static_cast<ATenDLMTensor*>(arg->ctx);
