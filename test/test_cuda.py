@@ -53,6 +53,17 @@ def make_tensor(t, *sizes):
     return t(*sizes).copy_(torch.randn(*sizes))
 
 
+def make_sparse_tensor(t, n, *sizes):
+    assert t.is_sparse
+    tensor = t()
+    i = tensor._indices()
+    i = i.new(len(sizes), n).copy_(
+        torch.cat([torch.LongTensor(1, n).random_(s) for s in sizes], 0))
+    v = tensor._values()
+    v = v.new(n).copy_(torch.randn(n))
+    return t(i, v, torch.Size(sizes))
+
+
 def small_2d(t):
     return make_tensor(t, S, S)
 
@@ -480,8 +491,43 @@ class TestCuda(TestCase):
     def test_broadcast_gpu(self):
         self._test_broadcast(torch.randn(5, 5))
 
+    @staticmethod
+    def _test_broadcast_coalesced(self, tensors, buffer_size):
+        b_tensors = [comm.broadcast(t, (0, 1)) for t in tensors]
+        for (_, bt), t in zip(b_tensors, tensors):
+            self.assertEqual(bt.get_device(), 1)
+            self.assertEqual(bt, t)
+            self.assertIsInstance(bt, type(t))
+
+        bc_tensors = comm.broadcast_coalesced(tensors, (0, 1), buffer_size=buffer_size)
+        bc_tensors_t = list(zip(*bc_tensors))
+        self.assertEqual(b_tensors, bc_tensors_t)
+        for (_, bt), (_, bct) in zip(b_tensors, bc_tensors_t):
+            self.assertEqual(bt.get_device(), bct.get_device())
+            self.assertIsInstance(bct, type(bt))
+
     @unittest.skipIf(torch.cuda.device_count() < 2, "only one GPU detected")
     def test_broadcast_coalesced(self):
+        numel = 5
+        num_bytes = numel * 8
+        tensors = [
+            make_sparse_tensor(torch.cuda.sparse.DoubleTensor, 1, 2, 3),
+            torch.randn(numel).long().cuda(),
+            torch.randn(numel).cuda(),
+            make_sparse_tensor(torch.cuda.sparse.DoubleTensor, 10, 2, 3),
+            make_sparse_tensor(torch.cuda.sparse.DoubleTensor, 5, 2, 3),
+            make_sparse_tensor(torch.cuda.sparse.LongTensor, 7, 3, 3),
+            make_sparse_tensor(torch.cuda.sparse.FloatTensor, 2, 2, 3),
+            torch.randn(numel).long().cuda(),
+            torch.randn(numel).long().cuda(),
+            make_sparse_tensor(torch.cuda.sparse.LongTensor, 3, 2, 7),
+            torch.randn(numel * 2).int().cuda(),  # int is 2x shorter
+            torch.randn(numel).cuda(),
+        ]
+        self._test_broadcast_coalesced(self, tensors, num_bytes * 5 // 2)
+
+    @unittest.skipIf(torch.cuda.device_count() < 2, "only one GPU detected")
+    def test_broadcast_coalesced_dense_only(self):
         numel = 5
         num_bytes = numel * 8
         tensors = [
@@ -492,19 +538,7 @@ class TestCuda(TestCase):
             torch.randn(numel * 2).int().cuda(),  # int is 2x shorter
             torch.randn(numel).cuda(),
         ]
-
-        b_tensors = [comm.broadcast(t, (0, 1)) for t in tensors]
-        for (_, bt), t in zip(b_tensors, tensors):
-            self.assertEqual(bt.get_device(), 1)
-            self.assertEqual(bt, t)
-            self.assertIsInstance(bt, type(t))
-
-        bc_tensors = comm.broadcast_coalesced(tensors, (0, 1), buffer_size=num_bytes * 5 // 2)
-        bc_tensors_t = list(zip(*bc_tensors))
-        self.assertEqual(b_tensors, bc_tensors_t)
-        for (_, bt), (_, bct) in zip(b_tensors, bc_tensors_t):
-            self.assertEqual(bt.get_device(), bct.get_device())
-            self.assertIsInstance(bct, type(bt))
+        self._test_broadcast_coalesced(self, tensors, num_bytes * 5 // 2)
 
     @unittest.skipIf(torch.cuda.device_count() < 2, "only one GPU detected")
     def test_reduce_add(self):
@@ -516,8 +550,44 @@ class TestCuda(TestCase):
         self.assertEqual(result.get_device(), 0)
         self.assertEqual(result.cpu(), x + y)
 
+    @staticmethod
+    def _test_reduce_add_coalesced(self, tensors, buffer_size):
+        dup_tensors = [tensors, list(map(lambda t: t.cuda(1), tensors))]
+
+        r_tensors = list(map(comm.reduce_add, zip(*dup_tensors)))
+        for r, t in zip(r_tensors, tensors):
+            self.assertEqual(r.get_device(), t.get_device())
+            self.assertEqual(r, t * 2)
+            self.assertIsInstance(r, type(t))
+
+        rc_tensors = comm.reduce_add_coalesced(dup_tensors, buffer_size=buffer_size)
+        self.assertEqual(r_tensors, rc_tensors)
+        for r, rc in zip(r_tensors, rc_tensors):
+            self.assertEqual(rc.get_device(), r.get_device())
+            self.assertIsInstance(rc, type(r))
+
     @unittest.skipIf(torch.cuda.device_count() < 2, "only one GPU detected")
     def test_reduce_add_coalesced(self):
+        numel = 5
+        num_bytes = numel * 8
+        tensors = [
+            make_sparse_tensor(torch.cuda.sparse.DoubleTensor, 1, 2, 3),
+            torch.randn(numel).long().cuda(),
+            torch.randn(numel).cuda(),
+            make_sparse_tensor(torch.cuda.sparse.DoubleTensor, 10, 2, 3),
+            make_sparse_tensor(torch.cuda.sparse.DoubleTensor, 5, 2, 3),
+            make_sparse_tensor(torch.cuda.sparse.LongTensor, 7, 3, 3),
+            make_sparse_tensor(torch.cuda.sparse.FloatTensor, 2, 2, 3),
+            torch.randn(numel).long().cuda(),
+            torch.randn(numel).long().cuda(),
+            make_sparse_tensor(torch.cuda.sparse.LongTensor, 3, 2, 7),
+            torch.randn(numel * 2).int().cuda(),  # int is 2x shorter
+            torch.randn(numel).cuda(),
+        ]
+        self._test_reduce_add_coalesced(self, tensors, num_bytes * 5 // 2)
+
+    @unittest.skipIf(torch.cuda.device_count() < 2, "only one GPU detected")
+    def test_reduce_add_coalesced_dense_only(self):
         numel = 5
         num_bytes = numel * 8
         tensors = [
@@ -528,19 +598,7 @@ class TestCuda(TestCase):
             torch.randn(numel * 2).int().cuda(),  # int is 2x shorter
             torch.randn(numel).cuda(),
         ]
-        dup_tensors = [tensors, list(map(lambda t: t.cuda(1), tensors))]
-
-        r_tensors = list(map(comm.reduce_add, zip(*dup_tensors)))
-        for r, t in zip(r_tensors, tensors):
-            self.assertEqual(r.get_device(), t.get_device())
-            self.assertEqual(r, t * 2)
-            self.assertIsInstance(r, type(t))
-
-        rc_tensors = comm.reduce_add_coalesced(dup_tensors, buffer_size=num_bytes * 5 // 2)
-        self.assertEqual(r_tensors, rc_tensors)
-        for r, rc in zip(r_tensors, rc_tensors):
-            self.assertEqual(rc.get_device(), r.get_device())
-            self.assertIsInstance(rc, type(r))
+        self._test_reduce_add_coalesced(self, tensors, num_bytes * 5 // 2)
 
     def _test_scatter(self, input, chunk_sizes=None, dim=0):
         if torch.cuda.device_count() < 2:
