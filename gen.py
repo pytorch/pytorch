@@ -3,6 +3,7 @@ import yaml
 
 import cwrap_parser
 import nn_parse
+import native_parse
 import preprocess_declarations
 import function_wrapper
 import dispatch_macros
@@ -46,6 +47,8 @@ TENSOR_H = CodeTemplate.from_file(TEMPLATE_PATH + "/Tensor.h")
 TENSOR_METHODS_H = CodeTemplate.from_file(TEMPLATE_PATH + "/TensorMethods.h")
 
 FUNCTIONS_H = CodeTemplate.from_file(TEMPLATE_PATH + "/Functions.h")
+
+NATIVE_FUNCTIONS_PATH = options.source_path + "/NativeFunctions.h"
 
 generators = {
     'CPUGenerator.h': {
@@ -223,6 +226,7 @@ declarations = [d
                 for file in cwrap_files
                 for d in cwrap_parser.parse(file)]
 declarations += nn_parse.run(nn_files)
+declarations += native_parse.parse(NATIVE_FUNCTIONS_PATH)
 declarations = preprocess_declarations.run(declarations)
 for fname, env in generators.items():
     write(fname, GENERATOR_DERIVED.substitute(env))

@@ -23,7 +23,8 @@ ${return_type} Type::${method_prefix}${api_name}(${formals}) const {
     return ${method_prefix_derived}${api_name}(${broadcast_modified_actuals});
 }
 """)
-# 3. add virtual dispatch declaration to Type.h and default impl to Type.cpp
+# 3. add virtual dispatch declaration to Type.h and impl to Type.cpp (this is usually
+#    a default impl because actual implementations are in the derived Types).
 TYPE_METHOD_DECLARATION = CodeTemplate("""\
 virtual ${return_type} ${method_prefix}${api_name}(${formals_with_defaults}) const;
 """)
@@ -32,6 +33,12 @@ ${return_type} Type::${method_prefix}${api_name}(${formals}) const {
     throw std::runtime_error(std::string("${api_name} is not implemented for type ") + toString());
 }
 """)
+TYPE_METHOD_DEFINITION_LEVEL_BASE = CodeTemplate("""\
+${return_type} Type::${method_prefix}${api_name}(${formals}) const {
+    ${return_call} ${type_method_definition_dispatch}(${actuals});
+}
+""")
+
 # 4. add virtual override to TypeDerived.h
 TYPE_DERIVED_DECLARATION = CodeTemplate("""\
 virtual ${return_type} ${method_prefix_derived}${api_name}(${formals}) const override;
@@ -132,6 +139,7 @@ TYPE_RETURN = {
     'real': 'Scalar',
     'accreal': 'Scalar',
     'long': 'int64_t',
+    'TensorList': 'std::vector<Tensor>'
 }
 CHECKED_CAST = {
     'THTensor*': CodeTemplate('checked_cast<${Tensor}>(${arg_name}.pImpl,"${arg_name}",${arg_pos}, ${null_okay})'),
@@ -430,9 +438,16 @@ def create_generic(top_env, declarations):
         if broadcast_arg is None:
             top_env['type_method_declarations'].append(
                 TYPE_METHOD_DECLARATION.substitute(env))
-            top_env['type_method_definitions'].append(
-                TYPE_METHOD_DEFINITION.substitute(env))
+            if option.get('type_method_definition_level') == 'base':
+                top_env['type_method_definitions'].append(
+                    TYPE_METHOD_DEFINITION_LEVEL_BASE.substitute(env))
+            else:
+                top_env['type_method_definitions'].append(
+                    TYPE_METHOD_DEFINITION.substitute(env))
         else:
+            if option.get('type_method_definition_level') == 'base':
+                raise Exception("\'base\' type_method_definition_level not supported for broadcasting "
+                                "operation {}".format(option['name']))
             top_env['type_method_declarations'].append(
                 TYPE_METHOD_DECLARATION_NON_VIRTUAL.substitute(env))
 
@@ -795,7 +810,10 @@ def create_derived(backend_type_env, declarations):
     def process_option(option):
         pair = (backend_type_env['Backend'],
                 backend_type_env['ScalarName'])
-        if pair in option['backend_type_pairs']:
+        if pair in option['backend_type_pairs'] and option.get('type_method_definition_level') != 'base':
+            if option.get('type_method_definition_dispatch'):
+                raise Exception("type_method_definition_dispatch currently only supported with "
+                                "type_method_definition_level of \'base\'")
             env = nested_dict(option, backend_type_env)
             body = emit_body(env, option)
             option['type_definition_body'] = body
