@@ -671,11 +671,19 @@ def embedding(input, embedding_matrix,
         norm_type (float, optional): The p of the p-norm to compute for the max_norm option
         scale_grad_by_freq (boolean, optional): if given, this will scale gradients by the frequency of
                                                 the words in the mini-batch.
+        sparse (boolean, optional): if True, gradient w.r.t. weight matrix will be a sparse tensor. See Notes for
+                                    more details regarding sparse gradients.
 
     Shape:
         - Input: LongTensor `(N, W)`, N = mini-batch, W = number of indices to extract per mini-batch
         - Embedding_matrix: FloatTensor `(V, embedding_dim)`, V = maximum index + 1, embedding_dim = embedding size
         - Output: `(N, W, embedding_dim)`
+
+    Notes:
+        It is advised to only use `sparse=True` if `embedding_matrix` is a leaf Variable,
+        since some autograd functions may not propagate sparse gradients correctly.
+        Additionally, keep in mind that only a limited number of optimizers support
+        sparse gradients: currently it's `optim.SGD` (`cuda` and `cpu`), and `optim.Adagrad` (`cpu`)
 
     Examples::
 
@@ -700,8 +708,9 @@ def embedding(input, embedding_matrix,
         [torch.FloatTensor of size 2x4x3]
 
         >>> # example with padding_idx
-        >>> embedding_matrix = Variable(torch.rand(10, 3))
-        >>> embedding_matrix[0].zero_()
+        >>> weights = torch.rand(10, 3)
+        >>> weights[0, :].zero_()
+        >>> embedding_matrix = Variable(weights)
         >>> input = Variable(torch.LongTensor([[0,2,0,5]]))
         >>> torch.nn.functional.embedding(input, embedding_matrix)
 
@@ -714,10 +723,89 @@ def embedding(input, embedding_matrix,
         [torch.FloatTensor of size 1x4x3]
 
     """
-    return torch.nn.backends.thnn.backend.Embedding.apply(
+    return _functions.thnn.Embedding.apply(
         input, embedding_matrix,
         -1, max_norm, norm_type,
         scale_grad_by_freq, sparse
+    )
+
+
+def embedding_bag(embedding_matrix, indices, offsets=None,
+                  max_norm=None, norm_type=2, scale_grad_by_freq=False, mode='mean'):
+    r"""Computes sums or means of 'bags' of embeddings, without instantiating the
+        intermediate embeddings.
+
+        For bags of constant length,
+            * embedding_bag with `mode=sum` is equivalent to nn.functional.embedding followed by `torch.sum(dim=1)`
+            * with `mode=mean` is equivalent to nn.functional.embedding followed by `torch.mean(dim=1)`
+
+        However, embedding_bag is much more time and memory efficient than using a chain of these
+        operations.
+
+        Args:
+            embedding_matrix: FloatTensor, where number of rows should correspond to the maximum possible index + 1,
+                              number of columns is the embedding size
+            indices (N or BxN): LongTensor containing the indices of the embeddings to extract.
+                                When `input` is 1D Tensor of shape `N`, an `offsets` Tensor is given, that contains the
+                                starting position of each new sequence in the mini-batch.
+            offsets (B or None): LongTensor containing the starting positions of each sample in a mini-batch of variable
+                                 length sequences. If `input` is 2D (BxN), then offsets does not need to be given,
+                                 as the `input` is treated as a mini-batch of fixed length sequences of length `N` each.
+            max_norm (float, optional): If given, will renormalize the embeddings to always have a norm lesser than this
+            norm_type (float, optional): The p of the p-norm to compute for the max_norm option
+            scale_grad_by_freq (boolean, optional): if given, this will scale gradients by the frequency of
+                                                    the words in the dictionary.
+            mode (string, optional): 'sum' | 'mean'. Specifies the way to reduce the bag. Default: 'mean'
+
+        Shape:
+            - Embedding_matrix: FloatTensor `(V, embedding_dim)`,
+                                V = number of embeddings, embedding_dim = embedding size
+            - Input: LongTensor `N`, N = number of embeddings to extract
+                     (or) LongTensor `BxN`, B = number of sequences in mini-batch,
+                                            N = number of embeddings per sequence
+            - Offsets: LongTensor `B`, B = number of bags. The values are the
+                       offsets in `input` for each bag, i.e. the cumsum of lengths.
+                       Offsets is not given if Input is 2D `BxN` Tensor,
+                       the input is considered to be of fixed-length sequences
+            - Output: `(B, embedding_dim)`
+
+        Examples::
+
+            >>> # an Embedding module containing 10 tensors of size 3
+            >>> embedding_matrix = Variable(torch.rand(10, 3))
+            >>> # a batch of 2 samples of 4 indices each
+            >>> input = Variable(torch.LongTensor([1,2,4,5,4,3,2,9]))
+            >>> offsets = Variable(torch.LongTensor([0,4]))
+            >>> embedding_bag(embedding_matrix, input, offsets)
+
+            Variable containing:
+            -1.1840 -0.2547 -0.5860
+            -0.7126  0.0002 -0.3411
+            [torch.FloatTensor of size 2x3]
+
+        """
+    if indices.dim() == 2:
+        if offsets is not None:
+            raise ValueError("if input is 2D, then offsets has to be None"
+                             ", as input is treated is a mini-batch of"
+                             " fixed length sequences. However, found "
+                             "offsets of type {}".format(type(offsets)))
+        else:
+            offsets = Variable(torch.arange(0, indices.numel(), indices.size(1),
+                               out=indices.data.new().long()))
+            indices = indices.view(-1)
+
+    elif indices.dim() != 1:
+        raise ValueError("input has to be 1D or 2D Tensor,"
+                         " but got Tensor of dimension {}".format(indices.dim()))
+
+    if offsets is None:
+        raise ValueError("offsets has to be a 1D Tensor but got None")
+
+    return _functions.thnn.EmbeddingBag.apply(
+        embedding_matrix, indices, offsets,
+        max_norm, norm_type,
+        scale_grad_by_freq, mode
     )
 
 
