@@ -62,7 +62,7 @@ class FeatureDropout(Dropout):
         # NB: In inference mode, FeatureDropout is exported as an identity op.
         if train:
             raise ValueError("Exporting ONNX FeatureDropout in train mode is not supported, "
-                             "and the exported FeatureDropout should not be used for training. "
+                             "and the exported model should not be used for training. "
                              "The FeatureDropout support in ONNX is still under construction.")
         return input
 
