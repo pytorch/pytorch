@@ -317,7 +317,7 @@ static PyObject * THPTensor_(pynew)(PyTypeObject *type, PyObject *args, PyObject
 #endif
 
   // torch.Tensor(Sequence data)
-  if (num_args == 1 && PySequence_Check(first_arg)) {
+  if (num_args == 1 && PySequence_Check(first_arg) && !THPVariable_Check(first_arg)) {
     Py_ssize_t length = PySequence_Length(first_arg);
     THPUtils_assert(length >= 0, "couldn't obtain the length of %s",
         THPUtils_typename(first_arg));
