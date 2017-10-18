@@ -383,38 +383,39 @@ class Module(object):
                 module.state_dict(destination, prefix + name + '.', keep_vars=keep_vars)
         return destination
 
-    def load_state_dict(self, state_dict, ignored_keys=[]):
+    def load_state_dict(self, state_dict, strict=True):
         """Copies parameters and buffers from :attr:`state_dict` into
-        this module and its descendants. The keys of :attr:`state_dict`,
-        excluding the keys in :attr:`ignored_keys`, must exactly match
-        the keys returned by this module's :func:`state_dict()` function.
+        this module and its descendants. If :attr:`strict` is `True` then
+        the keys of :attr:`state_dict` must exactly match the keys returned
+        by this module's :func:`state_dict()` function.
 
         Arguments:
             state_dict (dict): A dict containing parameters and
                 persistent buffers.
-            ignored_keys (list): A list containing keys to ignore from
-                the :attr:`state_dict`
+            strict (bool): Strictly enforce that the keys in :attr:`state_dict`
+                match the keys returned by this module's `:func:`state_dict()`
+                function.
         """
         own_state = self.state_dict()
         for name, param in state_dict.items():
-            if name not in ignored_keys:
-                if name not in own_state:
-                    raise KeyError('unexpected key "{}" in state_dict'
-                                   .format(name))
-                if isinstance(param, Parameter):
-                    # backwards compatibility for serialized parameters
-                    param = param.data
-                try:
-                    own_state[name].copy_(param)
-                except:
-                    raise RuntimeError('While copying the parameter named {}, ' +
-                                       'whose dimensions in the model are {} and ' +
-                                       'whose dimensions in the checkpoint are {}.'
-                                       .format(name, own_state[name].size(), param.size()))
+            if name not in own_state:
+                raise KeyError('unexpected key "{}" in state_dict'
+                               .format(name))
+            if isinstance(param, Parameter):
+                # backwards compatibility for serialized parameters
+                param = param.data
+            try:
+                own_state[name].copy_(param)
+            except:
+                raise RuntimeError('While copying the parameter named {}, ' +
+                                   'whose dimensions in the model are {} and ' +
+                                   'whose dimensions in the checkpoint are {}.'
+                                   .format(name, own_state[name].size(), param.size()))
 
-        missing = set(own_state.keys()) - set(state_dict.keys())
-        if len(missing) > 0:
-            raise KeyError('missing keys in state_dict: "{}"'.format(missing))
+        if strict:
+            missing = set(own_state.keys()) - set(state_dict.keys())
+            if len(missing) > 0:
+                raise KeyError('missing keys in state_dict: "{}"'.format(missing))
 
     def parameters(self):
         """Returns an iterator over module parameters.
