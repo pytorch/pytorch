@@ -751,7 +751,7 @@ static at::Tensor compute_output(
           // THNN functions handle resizing the output Tensor themselves,
           // but NNPACK expects the Tensors to be in the appropriate shape
           // already, so we resize here
-          auto output = input.tensor(params.output_size(input, weight));
+          auto output = input.type().tensor(params.output_size(input, weight));
           nnpack::SpatialConvolution_updateOutput(
               input, output, weight, bias,
               kernel_size[1], kernel_size[0],
