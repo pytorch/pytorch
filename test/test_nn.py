@@ -1650,6 +1650,7 @@ class TestNN(NNTestCase):
             'linear1.weight': torch.ones(5, 5),
             'block.conv1.bias': torch.arange(1, 4),
             'bn.running_mean': torch.randn(2),
+            'nonexistent_key': torch.rand(3)
         }
         net.load_state_dict(state_dict, strict=False)
         self.assertEqual(net.linear1.weight.data, state_dict['linear1.weight'])

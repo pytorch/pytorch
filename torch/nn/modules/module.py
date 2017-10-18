@@ -398,20 +398,20 @@ class Module(object):
         """
         own_state = self.state_dict()
         for name, param in state_dict.items():
-            if name not in own_state:
+            if name in own_state:
+                if isinstance(param, Parameter):
+                    # backwards compatibility for serialized parameters
+                    param = param.data
+                try:
+                    own_state[name].copy_(param)
+                except:
+                    raise RuntimeError('While copying the parameter named {}, ' +
+                                       'whose dimensions in the model are {} and ' +
+                                       'whose dimensions in the checkpoint are {}.'
+                                       .format(name, own_state[name].size(), param.size()))
+            elif strict:
                 raise KeyError('unexpected key "{}" in state_dict'
                                .format(name))
-            if isinstance(param, Parameter):
-                # backwards compatibility for serialized parameters
-                param = param.data
-            try:
-                own_state[name].copy_(param)
-            except:
-                raise RuntimeError('While copying the parameter named {}, ' +
-                                   'whose dimensions in the model are {} and ' +
-                                   'whose dimensions in the checkpoint are {}.'
-                                   .format(name, own_state[name].size(), param.size()))
-
         if strict:
             missing = set(own_state.keys()) - set(state_dict.keys())
             if len(missing) > 0:
