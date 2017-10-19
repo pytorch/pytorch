@@ -16,6 +16,9 @@
 
 #pragma once
 
+#include <map>
+#include <memory>
+
 namespace caffe2 {
 
 /**
