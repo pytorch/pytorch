@@ -200,9 +200,7 @@ static void wrap_output(std::tuple<Variable, Variable, Variable>& t, FunctionFla
 }
 
 static void increment_version(const Tensor & t) {
-  // accept a const Tensor & because some functions (e.g. relu) mark inputs as
-  // const even though they may be modified in-place.
-  auto& var = static_cast<Variable&>(const_cast<Tensor&>(t));
+  auto& var = static_cast<const Variable&>(t);
   var.version_counter().increment();
 }
 

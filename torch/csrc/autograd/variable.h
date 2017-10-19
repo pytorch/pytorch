@@ -55,8 +55,7 @@ struct Variable : public at::Tensor {
 
   inline int current_version() const;
 
-  inline const VariableVersion& version_counter() const;
-  inline       VariableVersion& version_counter();
+  inline VariableVersion& version_counter() const;
 
   inline const int& output_nr() const;
   inline       int& output_nr();
@@ -182,11 +181,7 @@ inline int Variable::current_version() const {
   return get()->version_counter.current_version();
 }
 
-inline const VariableVersion& Variable::version_counter() const {
-  return get()->version_counter;
-}
-
-inline VariableVersion& Variable::version_counter() {
+inline VariableVersion& Variable::version_counter() const {
   return get()->version_counter;
 }
 
