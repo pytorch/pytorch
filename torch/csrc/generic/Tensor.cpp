@@ -60,10 +60,10 @@
   std::unique_ptr<load_real> data_guard(new load_real[SIZE]);           \
   load_real *data = data_guard.get();                                   \
   for (size_t i=0; i<SIZE; i++) {                                       \
-    data[i] = arrdata[i];                                   \
+    data[i] = arrdata[i];                                               \
   }                                                                     \
   THFloatStorage *cpu_storage =                                         \
-      THFloatStorage_newWithData(data_guard.get(), storage_size);       \
+      THFloatStorage_newWithData(data_guard.get(), SIZE);               \
   cpu_storage->flag &= ~TH_STORAGE_FREEMEM;                             \
   THCudaHalfStorage_copyFloat(LIBRARY_STATE STORAGE, cpu_storage);      \
   THFloatStorage_free(cpu_storage);                                     \
