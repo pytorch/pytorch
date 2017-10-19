@@ -324,6 +324,7 @@ criterion_tests = [
         module_name='NLLLoss2d',
         input_size=(2, 3, 5, 5),
         target_fn=lambda: torch.rand(2, 5, 5).mul(3).floor().long(),
+        check_no_size_average=True,
     ),
     dict(
         module_name='NLLLoss2d',
@@ -356,6 +357,7 @@ criterion_tests = [
         module_name='MultiLabelMarginLoss',
         input_size=(5, 10),
         target_fn=lambda: torch.rand(5, 10).mul(10).floor().long(),
+        check_no_size_average=True,
         check_gradgrad=False,
     ),
     dict(

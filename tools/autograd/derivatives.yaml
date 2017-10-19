@@ -1,16 +1,4 @@
 # Defines derivative formulas and Python signatures of methods on Variable
-
-- name: __and__
-- name: __iand__
-- name: __ilshift__
-- name: __ior__
-- name: __irshift__
-- name: __ixor__
-- name: __lshift__
-- name: __or__
-- name: __rshift__
-- name: __xor__
-
 - name: abs(Tensor self)
   self: grad * self.sign()
 
@@ -25,14 +13,14 @@
   other: grad * alpha
 
 - name: addbmm(Tensor self, Tensor batch1, Tensor batch2, *, Scalar beta=1, Scalar alpha=1)
-  self: grad * alpha
-  batch1: grad.bmm(batch2.transpose(1, 2)) * beta
-  batch2: batch1.transpose(1, 2).bmm(grad) * beta
+  self: grad * beta
+  batch1: grad.unsqueeze(0).expand({ batch1.size(0), batch1.size(1), batch2.size(2) }).bmm(batch2.transpose(1, 2)) * alpha
+  batch2: batch1.transpose(1, 2).bmm(grad.unsqueeze(0).expand({ batch1.size(0), batch1.size(1), batch2.size(2) })) * alpha
 
 - name: addcdiv(Tensor self, Tensor tensor1, Tensor tensor2, *, Scalar value=1)
-  self: grad * value
-  tensor1: grad / tensor2 * value
-  tensor2: -grad * tensor1 / (tensor2 * tensor2)
+  self: grad
+  tensor1: grad * value / tensor2
+  tensor2: -grad * value * tensor1 / (tensor2 * tensor2)
 
 - name: addcmul(Tensor self, Tensor tensor1, Tensor tensor2, *, Scalar value=1)
   self: grad
@@ -58,6 +46,8 @@
 
 - name: any  # fallthrough
 
+- name: arange  # fallthrough
+
 - name: asin(Tensor self)
   self: grad * (-self * self + 1).sqrt().reciprocal()
 
@@ -77,21 +67,21 @@
   self: grad.bmm(mat2.transpose(1, 2))
   mat2: self.transpose(1, 2).bmm(grad)
 
-- name: btrifact
-- name: btrisolve
+- name: btrifact(Tensor self, Tensor info, bool pivot)
+  self: not_implemented("btrifact")
+
+- name: btrisolve(Tensor self, Tensor LU_data, Tensor LU_pivots)
+  self: not_implemented("btrisolve")
 
 - name: cat(TensorList tensors, int64_t dim=0)
-  tensors: cat_tensors_backward(grad, tensors.sizes(dim), dim)
+  tensors: cat_tensors_backward(grad, to_arg_sizes(tensors, dim), dim)
 
-- name: cauchy
+- name: cauchy  # TODO: reinforce
 
 - name: ceil(Tensor self)
-  self: zeros_like(self)
+  self: zeros_like(grad)
 
 - name: clone(Tensor self)
-  self: grad
-
-- name: contiguous(Tensor self)
   self: grad
 
 - name: cos(Tensor self)
@@ -104,7 +94,7 @@
   self: other.cross(grad, dim)
   other: grad.cross(self, dim)
 
-- name: cumprod
+- name: cumprod  # complicated
 
 - name: cumsum(Tensor self, int64_t dim)
   self: cumsum_backward(grad, dim)
@@ -129,75 +119,197 @@
   self: grad * tensor
   tensor: grad * self
 
-- name: eig
-- name: eq
-- name: equal
+- name: eig(Tensor self, bool eigenvectors)
+  self: not_implemented("eig")
+
+- name: eq(Tensor self, Scalar value)
+  self: zeros_like(self)
+
+- name: eq(Tensor self, Tensor other)
+  self: zeros_like(self)
+  other: zeros_like(other)
+
+- name: equal  # fallthrough
+
+- name: erf(Tensor self)
+  self: 2.0 / sqrt(M_PI) * exp(-(self.pow(2))) * grad
+
+- name: erfinv(Tensor self)
+  self: 0.5 * sqrt(M_PI) * exp(self.erfinv().pow(2)) * grad
 
 - name: exp(Tensor self)
-  self: grad * output
+  self: grad * result
 
 - name: expand(Tensor self, IntList size)
   self: reduce_to(grad, self.sizes())
+  __view__: True
 
-- name: eye
-- name: fill
-- name: floor
-- name: fmod
-- name: frac
-- name: gather
-- name: ge
-- name: gels
-- name: geometric
-- name: geqrf
+- name: eye  # fallthrough
+
+- name: fill(Tensor self, Scalar value)  # FIXME
+
+- name: floor(Tensor self)
+  self: zeros_like(grad)
+
+- name: fmod(Tensor self, Scalar value)
+  self: grad
+
+- name: fmod(Tensor self, Tensor other)
+  self: grad
+  other: 'not_implemented("fmod: other")'
+
+- name: frac(Tensor self)
+  self: grad
+
+- name: gather(Tensor self, int64_t dim, Tensor index)
+  self: grad.type().zeros(self.sizes()).scatter_add_(dim, index, grad)
+
+- name: ge(Tensor self, Scalar value)
+  self: zeros_like(self)
+
+- name: ge(Tensor self, Tensor other)
+  self: zeros_like(self)
+  other: zeros_like(other)
+
+- name: gels(Tensor self, Tensor A)
+  self: not_implemented("gels")
+  A: not_implemented("gels")
+
+- name: geometric(Tensor self, double p, Generator Generator)
+  self: zeros_like(grad)
+
+- name: geqrf(Tensor self)
+  self: not_implemented("geqrf")
 
 - name: ger(Tensor self, Tensor vec2)
   self: grad.mv(vec2)
   vec2: grad.t().mv(self)
 
-- name: gesv
+- name: gesv(Tensor self, Tensor A)
+  self: std::get<0>(gesv(grad, A.t()))
+  A: -at::mm(std::get<0>(gesv(grad, A.t())), solution.t())
 
 - name: get_device  # fallthrough
 
-- name: gt
-- name: histc
-- name: index_add
-- name: index_copy
-- name: index_fill
-- name: index_select
-- name: inverse
+- name: gt(Tensor self, Scalar value)
+  self: zeros_like(self)
 
-- name: is_contiguous
+- name: gt(Tensor self, Tensor other)
+  self: zeros_like(self)
+  other: zeros_like(other)
+
+- name: histc(Tensor self, int64_t bins, Scalar min, Scalar max)
+  self: not_implemented("histc")
+
+- name: index_add(Tensor self, int64_t dim, Tensor index, Tensor source)
+  self: grad
+  source: grad.index_select(dim, index)
+
+- name: index_copy(Tensor self, int64_t dim, Tensor index, Tensor source)
+  self: grad.clone().index_fill_(dim, index, 0)
+  source: grad.index_select(dim, index)
+
+- name: index_fill(Tensor self, int64_t dim, Tensor index, Scalar value)
+  self: grad.clone().index_fill_(dim, index, 0)
+
+- name: index_select(Tensor self, int64_t dim, Tensor index)
+  self: grad.type().zeros(self.sizes()).index_add_(dim, index, grad)
+  __view__: True
+
+- name: inverse(Tensor self)
+  self: -at::mm(output.t(), at::mm(grad, output.t()))
+
+- name: is_contiguous  # fallthrough
 
 - name: is_same_size  # fallthrough
 
 - name: is_set_to  # fallthrough
 
-- name: kthvalue
-- name: le
-- name: lerp
-- name: lgamma
-- name: linspace
+- name: kthvalue(Tensor self, int64_t k, int64_t dim, bool keepdim)
+  self: select_backward(grad, dim, indices, self.sizes(), keepdim)
+
+- name: le(Tensor self, Scalar value)
+  self: zeros_like(self)
+
+- name: le(Tensor self, Tensor other)
+  self: zeros_like(self)
+  other: zeros_like(other)
+
+- name: lerp(Tensor self, Tensor end, Scalar weight)
+  self: grad * (1 - weight.toDouble())
+  end: grad * weight
+
+- name: lgamma(Tensor self)
+  self: not_implemented("lgamma")
+
+- name: linspace(Scalar start, Scalar end, int64_t steps)
 
 - name: log(Tensor self)
   self: grad.div(self)
 
-- name: log1p
-- name: log_normal
-- name: logspace
-- name: lt
-- name: masked_fill
-- name: masked_scatter
-- name: masked_select
-- name: max
-- name: mean
-- name: median
-- name: min
+- name: log1p(Tensor self)
+  self: grad / (self + 1)
+
+- name: log_normal(Tensor self, double mean, double std, Generator generator)
+  self: zeros_like(grad)
+
+- name: logspace  # fallthrough
+
+- name: lt(Tensor self, Scalar value)
+  self: zeros_like(self)
+
+- name: lt(Tensor self, Tensor other)
+  self: zeros_like(self)
+  other: zeros_like(other)
+
+- name: masked_fill(Tensor self, Tensor mask, Scalar value)
+  self: grad.clone().masked_fill_(mask, 0)
+
+- name: masked_scatter(Tensor self, Tensor mask, Tensor source)
+  self: grad.clone().masked_fill_(mask, 0)
+  source: masked_scatter_backward(grad, mask, source.sizes())
+
+- name: masked_select(Tensor self, Tensor mask)
+  self: zeros_like(self).masked_scatter_(mask, grad)
+
+- name: max(Tensor self, int64_t dim, bool keepdim)
+  self: select_backward(grad, dim, max_indices, self.sizes(), keepdim)
+
+- name: max(Tensor self)
+  self: select_backward_scalar(grad, self, result)
+
+- name: max(Tensor self, Tensor other)
+  self: grad.clone().masked_fill_(self <= other, 0)
+  other: grad.clone().masked_fill_(self > other, 0)
+
+- name: mean(Tensor self, int64_t dim, bool keepdim)
+  self: sum_backward(grad, self.sizes(), dim, keepdim) / self.size(dim)
+
+- name: mean(Tensor self)
+  self: grad.expand(self.sizes()) / self.numel()
+
+- name: median(Tensor self)
+  self: select_backward_scalar(grad, self, result)
+
+- name: median(Tensor self, int64_t dim, bool keepdim)
+  self: select_backward(grad, dim, indices, self.sizes(), keepdim)
+
+- name: min(Tensor self, int64_t dim, bool keepdim)
+  self: select_backward(grad, dim, min_indices, self.sizes(), keepdim)
+
+- name: min(Tensor self)
+  self: select_backward_scalar(grad, self, result)
+
+- name: min(Tensor self, Tensor other)
+  self: grad.clone().masked_fill_(self >= other, 0)
+  other: grad.clone().masked_fill_(self < other, 0)
 
 - name: mm(Tensor self, Tensor mat2)
   self: grad.mm(mat2.t())
   mat2: self.t().mm(grad)
 
-- name: mode
+- name: mode(Tensor self, int64_t dim, bool keepdim)
+  self: select_backward(grad, dim, indices, self.sizes(), keepdim)
 
 - name: mul(Tensor self, Scalar value)
   self: grad * value
@@ -206,7 +318,7 @@
   self: grad * other
   other: grad * self
 
-- name: multinomial
+- name: multinomial  # TODO: reinforce
 
 - name: mv(Tensor self, Tensor vec)
   self: grad.ger(vec)
@@ -214,16 +326,23 @@
 
 - name: narrow(Tensor self, int64_t dimension, int64_t start, int64_t length)
   self: grad._unnarrow(dimension, start, self.size(dimension))
+  __view__: True
 
 - name: _unnarrow(Tensor self, int64_t dimension, int64_t offset, int64_t dimSize)
   self: grad.narrow(dimension, offset, self.size(dimension))
 
-- name: ne
+- name: ne(Tensor self, Scalar value)
+  self: zeros_like(self)
+
+- name: ne(Tensor self, Tensor other)
+  self: zeros_like(self)
+  other: zeros_like(other)
 
 - name: neg(Tensor self)
   self: grad.neg()
 
-- name: nonzero
+- name: nonzero(Tensor self)
+  self: zeros_like(grad)
 
 - name: norm(Tensor self, Scalar p=2)
   self: norm_backward(grad, self, p)
@@ -231,13 +350,27 @@
 - name: norm(Tensor self, Scalar p, int64_t dim, bool keepdim=False)
   self: norm_backward(grad, self, p, dim, keepdim)
 
-- name: numel
-- name: ones
-- name: orgqr
-- name: ormqr
-- name: potrf
-- name: potri
-- name: potrs
+- name: numel  # fallthrough
+- name: ones  # fallthrough
+
+- name: orgqr(Tensor self, Tensor input2)
+  self: not_implemented("orgqr")
+  input2: not_implemented("orgqr")
+
+- name: ormqr(Tensor self, Tensor input2, Tensor input3, bool left, bool transpose)
+  self: not_implemented("ormqr")
+  input2: not_implemented("ormqr")
+  input3: not_implemented("ormqr")
+
+- name: potrf(Tensor self, bool upper)
+  self: potrf_backward(grad, upper, output)
+
+- name: potri(Tensor self, bool upper)
+  self: not_implemented("potri")
+
+- name: potrs(Tensor self, Tensor input2, bool upper)
+  self: not_implemented("potri")
+  input2: not_implemented("potri")
 
 - name: pow(Tensor self, Scalar exponent)
   self: grad * exponent * self.pow(exponent.toDouble() - 1)
@@ -246,28 +379,56 @@
   self: grad * exponent * self.pow(exponent - 1)
   exponent: grad * self.pow(exponent) * self.log()
 
-- name: prod
-- name: pstrf
-- name: qr
-- name: rand
-- name: randn
-- name: randperm
-- name: range
+# TODO: complicated
+# - name: prod(Tensor self, int64_t dim, bool keepdim)
+
+# - name: prod(Tensor self)
+
+- name: pstrf(Tensor self, bool upper, Scalar tol)
+  self: not_implemented("pstrf")
+
+- name: qr(Tensor self)
+  self: not_implemented("qr")
+
+- name: rand  # fallthrough
+- name: randn  # fallthrough
+- name: randperm  # fallthrough
+- name: range  # fallthrough
 
 - name: reciprocal(Tensor self)
   self: grad / -(self * self)
 
-- name: remainder
-- name: renorm
-- name: resize
-- name: resize_as
-- name: round
-- name: rsqrt
-- name: scatter
-- name: scatter_add
-- name: select
-- name: set
-- name: sigmoid
+- name: remainder(Tensor self, Scalar value)
+  self: grad
+
+- name: remainder(Tensor self, Tensor other)
+  self: grad
+
+- name: renorm  # TODO!
+
+- name: round(Tensor self)
+  self: zeros_like(grad)
+
+- name: rsqrt(Tensor self)
+  self: -0.5 * grad * result.pow(3)
+
+- name: scatter(Tensor self, int64_t dim, Tensor index, Tensor src)
+  self: grad.clone().scatter_(dim, index, 0)
+  src: grad.gather(dim, index)
+
+- name: scatter(Tensor self, int64_t dim, Tensor index, Scalar value)
+  self: grad.clone().scatter_(dim, index, 0)
+
+- name: scatter_add(Tensor self, int64_t dim, Tensor index, Tensor src)
+  self: grad
+  src: grad.gather(dim, index)
+
+- name: select  # TODO: ATen definition conflicts with PyTorch
+
+- name: set  # TODO
+
+- name: sigmoid(Tensor self)
+  self: _sigmoid_backward(grad, result)
 
 - name: sign(Tensor self)
   self: zeros_like(grad)
@@ -278,17 +439,21 @@
 - name: sinh(Tensor self)
   self: grad * self.cosh()
 
-- name: size
-- name: sort
+- name: size  # fallthrough
+
+- name: sort(Tensor self, int64_t dim, bool descending)
+  self: select_backward(grad, dim, indices, self.sizes(), true)
 
 - name: sqrt(Tensor self)
   self: grad * self.pow(-0.5) / 2
 
 - name: squeeze(Tensor self)
   self: unsqueeze_to(grad, self.sizes());
+  __view__: True
 
 - name: squeeze(Tensor self, int64_t dim)
-  self: grad.unsqueeze(dim)
+  self: maybe_unsqueeze(grad, dim, self.size(dim))
+  __view__: True
 
 - name: std
 
@@ -309,22 +474,33 @@
 - name: sum(Tensor self, int64_t dim, bool keepdim=False)
   self: sum_backward(grad, self.sizes(), dim, keepdim)
 
-- name: svd
-- name: symeig
+- name: svd(Tensor self, bool some)
+  self: not_implemented("svd")
+
+- name: symeig(Tensor self, bool eigenvectors, bool upper)
+  self: not_implemented("symeig")
 
 - name: t(Tensor self)
   self: grad.t()
+  __view__: True
 
-- name: tan
-- name: tanh
+- name: tan(Tensor self)
+  self: grad / self.cos().pow(2)
+
+- name: tanh(Tensor self)
+  self: _tanh_backward(grad, result)
 
 - name: tensor  # fallthrough
 
-- name: topk
-- name: trace
+- name: topk(Tensor self, int64_t k, int64_t dim, bool largest, bool sorted)
+  self: select_backward(grad, dim, indices, self.sizes(), true)
+
+- name: trace(Tensor self)
+  self: trace_backward(grad, self.sizes())
 
 - name: transpose(Tensor self, int64_t dim0, int64_t dim1)
   self: grad.transpose(dim0, dim1)
+  __view__: True
 
 - name: tril(Tensor self, int64_t diagonal=0)
   self: grad.tril(diagonal)
@@ -332,18 +508,129 @@
 - name: triu(Tensor self, int64_t diagonal=0)
   self: grad.triu(diagonal)
 
-- name: trtrs
-- name: trunc
-- name: unfold
-- name: uniform
+- name: trtrs(Tensor self, Tensor A, bool upper, bool transpose, bool unitriangular)
+  self: not_implemented("trtrs")
+
+- name: trunc(Tensor self)
+  self: zeros_like(grad)
+
+- name: unfold(Tensor self, int64_t dimension, int64_t size, int64_t step)
+  self: unfold_backward(grad, self.sizes(), dimension, size, step)
+
+- name: uniform  # fallthrough
 
 - name: unsqueeze(Tensor self, int64_t dim)
   self: grad.squeeze(dim)
+  __view__: True
 
-- name: var
+- name: var  # TODO
 
 - name: view(Tensor self, IntList size)
   self: grad.contiguous().view(self.sizes())
+  __view__: True
 
-- name: zero
-- name: zeros
+- name: zero(Tensor self)
+  self: zeros_like(grad)
+
+- name: zeros  # fallthrough
+
+# NN double backwards support
+
+- name: avg_pool2d_backward(Tensor grad_output, Tensor input, IntList kernel_size, IntList stride, IntList padding, bool ceil_mode, bool count_include_pad)
+  grad_output: avg_pool2d(grad, kernel_size, stride, padding, ceil_mode, count_include_pad)
+  input: zeros_like(input)
+
+- name: avg_pool3d_backward(Tensor grad_output, Tensor input, IntList kernel_size, IntList stride, IntList padding, bool ceil_mode, bool count_include_pad)
+  grad_output: avg_pool3d(grad, kernel_size, stride, padding, ceil_mode, count_include_pad)
+  input: zeros_like(input)
+
+- name: elu_backward(Tensor grad_output, Tensor input, Scalar alpha, bool inplace, Tensor output)
+  grad_output: elu_backward(grad, input, alpha, inplace, output)
+  input: grad * grad_input * (input < 0).toType(grad.type())
+
+- name: glu_backward(Tensor grad_output, Tensor input, int64_t dim)
+  grad_output: glu_double_backward_grad_output(grad, input, dim)
+  input: glu_double_backward(grad, grad_output, input, dim)
+
+- name: hardshrink_backward(Tensor grad_output, Tensor input, Scalar lambd)
+  grad_output: hardshrink_backward(grad, input, lambd)
+  input: zeros_like(grad)
+
+- name: hardtanh_backward(Tensor grad_output, Tensor input, Scalar min_val, Scalar max_val, bool inplace)
+  grad_output: hardtanh_backward(grad, input, min_val, max_val, false)
+  input: zeros_like(grad)
+
+- name: kl_div_backward(Tensor input, Tensor target, bool size_average)
+  input: zeros_like(grad)
+
+- name: l1_loss_backward(Tensor input, Tensor target, bool size_average)
+  input: zeros_like(grad)
+
+- name: log_sigmoid_backward(Tensor grad_output, Tensor input, Tensor buffer)
+  grad_output: log_sigmoid_backward(grad, input, buffer)
+  input: log_sigmoid_double_backward(grad * grad_output, input)
+
+- name: log_softmax_backward(Tensor grad_output, Tensor input, int dim, Tensor output)
+  grad_output: grad - (grad * output.exp()).sum(dim, true)
+  input: log_softmax_double_backward(grad, grad_output, dim, output)
+
+- name: leaky_relu_backward(Tensor grad_output, Tensor input, Scalar negative_slope, bool inplace)
+  grad_output: leaky_relu_backward(grad, input, negative_slope, false)
+  input: zeros_like(grad)
+
+- name: max_pool2d_backward(Tensor grad_output, Tensor input, IntList kernel_size, IntList stride, IntList padding, IntList dilation, bool ceil_mode, Tensor indices)
+  grad_output: max_pool2d_double_backward(grad, indices);
+  input: zeros_like(input)
+
+- name: max_unpool2d_backward(Tensor grad_output, Tensor input, Tensor indices, IntList output_size)
+  grad_output: max_unpool2d(grad, indices, output_size)
+  input: zeros_like(input)
+
+- name: mse_loss_backward(Tensor grad_output, Tensor input, Tensor target, bool size_average, bool reduce)
+  grad_output: mse_loss_double_backward_grad_output(grad, grad_output, input, target, size_average, reduce)
+  input: mse_loss_double_backward(grad * grad_output, input, size_average, reduce)
+
+- name: nll_loss_backward(Tensor input, Tensor target, Tensor weight, bool size_average, int64_t ignore_index, Tensor total_weight)
+  input: zeros_like(grad)
+
+- name: nll_loss2d_backward(Tensor input, Tensor target, Tensor weight, bool size_average, int64_t ignore_index, Tensor total_weight)
+  input: zeros_like(grad)
+
+- name: prelu_backward(Tensor grad_output, Tensor input, Tensor weight, std::array<bool, 2> output_mask)
+  grad_output: zeros_like(grad_output)
+  input: zeros_like(input)
+  weight: zeros_like(weight)
+
+- name: rrelu_backward(Tensor grad_output, Tensor input, Scalar lower, Scalar upper, bool training, bool inplace, Tensor noise)
+  grad_output: rrelu_backward(grad, input, lower, upper, training, false, noise)
+  input: zeros_like(grad)
+
+- name: smooth_l1_loss_backward(Tensor input, Tensor target, bool size_average)
+  input: smooth_l1_loss_double_backward(grad, input, target, size_average)
+
+- name: softplus_backward(Tensor grad_output, Tensor input, Scalar beta, Scalar threshold, Tensor output)
+  grad_output: softplus_backward(grad, input, beta, threshold, output)
+  input: softplus_double_backward(grad * grad_output, input, beta, threshold)
+
+- name: softmax_backward(Tensor grad_output, Tensor input, int dim, Tensor output)
+  grad_output: softmax_backward(grad, input, dim, output)
+  input: softmax_double_backward(grad, grad_output, dim, output)
+
+- name: soft_margin_loss_backward(Tensor input, Tensor target, bool size_average)
+  input: soft_margin_loss_double_backward(grad, input, target, size_average)
+
+- name: softshrink_backward(Tensor grad_output, Tensor input, Scalar lambd)
+  grad_output: softshrink_backward(grad, input, lambd)
+  input: zeros_like(grad)
+
+- name: threshold_backward(Tensor grad_output, Tensor input, Scalar threshold, Scalar value, bool inplace)
+  grad_output: threshold_backward(grad, input, threshold, value, false)
+  input: zeros_like(grad)
+
+- name: _sigmoid_backward(Tensor grad_output, Tensor output)
+  grad_output: _sigmoid_backward(grad, output)
+  output: grad * grad_output * (-2 * output + 1)
+
+- name: _tanh_backward(Tensor grad_output, Tensor output)
+  grad_output: _tanh_backward(grad, output)
+  output: -2 * output * grad * grad_output

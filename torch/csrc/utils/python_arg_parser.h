@@ -108,11 +108,13 @@ struct FunctionParameter {
   ParameterType type_;
   bool optional;
   bool keyword_only;
+  int size;
   std::string name;
   // having this as a raw PyObject * will presumably leak it, but these are only held by static objects
   // anyway, and Py_Finalize can already be called when this is destructed.
   PyObject *python_name;
   at::Scalar default_scalar;
+  std::vector<int64_t> default_intlist;
   union {
     bool default_bool;
     int64_t default_int;
@@ -121,7 +123,7 @@ struct FunctionParameter {
 };
 
 inline at::Tensor PythonArgs::tensor(int i) {
-  if (!args[i]) return at::Tensor();
+  if (!args[i] || args[i] == Py_None) return at::Tensor();
   if (!THPVariable_Check(args[i])) {
     type_error("expected Variable as argument %d, but got %s", i, THPUtils_typename(args[i]));
   }
@@ -154,10 +156,14 @@ inline std::vector<at::Tensor> PythonArgs::tensorlist(int i) {
 }
 
 inline std::vector<int64_t> PythonArgs::intlist(int i) {
-  if (!args[i]) return std::vector<int64_t>();
+  if (!args[i]) return signature.params[i].default_intlist;
   PyObject* arg = args[i];
+  auto size = signature.params[i].size;
+  if (size > 0 && THPUtils_checkLong(arg)) {
+    return std::vector<int64_t>(size, THPUtils_unpackLong(arg));
+  }
   auto tuple = PyTuple_Check(arg);
-  auto size = tuple ? PyTuple_GET_SIZE(arg) : PyList_GET_SIZE(arg);
+  size = tuple ? PyTuple_GET_SIZE(arg) : PyList_GET_SIZE(arg);
   std::vector<int64_t> res(size);
   for (int idx = 0; idx < size; idx++) {
     PyObject* obj = tuple ? PyTuple_GET_ITEM(arg, idx) : PyList_GET_ITEM(arg, idx);
@@ -188,6 +194,7 @@ inline bool PythonArgs::toBool(int i) {
 }
 
 inline at::Generator* PythonArgs::generator(int i) {
+  if (!args[i]) return nullptr;
   throw std::runtime_error("PythonArgs::generator not implemented");
 }
 

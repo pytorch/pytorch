@@ -3,6 +3,7 @@
 // ${generated_comment}
 
 #include <ATen/ATen.h>
+#include <string>
 
 namespace torch { namespace autograd {
 
@@ -38,13 +39,23 @@ struct VariableType : public at::Type {
   ${type_derived_method_declarations}
 
 private:
-  at::Tensor & checked_unpack(const Tensor & t, const char * name, int pos) const;
-  std::vector<at::Tensor> checked_unpack(const at::TensorList &tl, const char *name, int pos) const;
-  Variable as_variable(Tensor tensor) const;
+  // checks that t is actually a Variable with the given expected_type
+  static Variable & checked_cast(const Type & expected_type, const Tensor & t, const char * name, int pos);
+  at::Tensor & unpack(const Tensor & t, const char * name, int pos) const;
+  at::Tensor & unpack_long(const Tensor & t, const char * name, int pos) const;
+  at::Tensor & unpack_byte(const Tensor & t, const char * name, int pos) const;
+  at::Tensor & unpack_any(const Tensor & t, const char * name, int pos) const;
+  at::Tensor unpack_opt(const Tensor & t, const char * name, int pos) const;
+  std::vector<at::Tensor> unpack(const at::TensorList &tl, const char *name, int pos) const;
+
   Variable as_variable(const Scalar & scalar) const;
+  Variable as_variable(Tensor tensor) const;
+  std::tuple<Variable, Variable> as_variable(std::tuple<Tensor, Tensor> tensor) const;
+  std::tuple<Variable, Variable, Variable> as_variable(std::tuple<Tensor, Tensor, Tensor> tensor) const;
 
 private:
   at::Type* baseType;
+  std::string str;
 };
 
 }} // namespace torch::autograd

@@ -121,6 +121,12 @@ struct Function : std::enable_shared_from_this<Function> {
     return false;
   }
 
+  inline bool should_compute_output(std::initializer_list<int> idxs) const {
+    return std::any_of(idxs.begin(), idxs.end(), [this](int i) {
+      return should_compute_output(i);
+    });
+  }
+
   inline void set_flags(FunctionFlags&& flags) {
     is_executable = flags.is_executable;
     next_functions = std::move(flags.next_functions);
