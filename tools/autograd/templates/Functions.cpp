@@ -1,5 +1,7 @@
 #include "Functions.h"
 
+#include <math.h>
+
 // ${generated_comment}
 
 using at::Tensor;
