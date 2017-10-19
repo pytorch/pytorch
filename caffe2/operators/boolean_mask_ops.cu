@@ -165,6 +165,24 @@ __global__ void sequenceMaskKernel(
 }
 
 template <typename T>
+__global__ void repeatedSequenceMaskKernel(
+    int N,
+    int M,
+    int D,
+    const T* in,
+    const int* seq_lengths,
+    T fill_val,
+    T* out) {
+  CUDA_1D_KERNEL_LOOP(index, N * M * D) {
+    int h = index / D;
+    int i = h / M;
+    int j = h % M;
+
+    out[index] = (j >= seq_lengths[i] ? fill_val : in[index]);
+  }
+}
+
+template <typename T>
 __global__ void windowMaskKernel(
     int N,
     int M,
@@ -339,18 +357,37 @@ bool SequenceMaskOp<CUDAContext>::DoRunWithType() {
 
   T fill_val = convert::To<float, T>(grad_ ? 0.0f : fill_val_);
   if (mode_ == "sequence") {
-    sequenceMaskKernel<<<
-        CAFFE_GET_BLOCKS(left * right),
-        CAFFE_CUDA_NUM_THREADS,
-        0,
-        context_.cuda_stream()>>>(
-        left,
-        right,
-        batch_dim,
-        input->data<T>(),
-        sequence_lengths->data<int>(),
-        fill_val,
-        output->mutable_data<T>());
+    if (HasArgument("repeat_from_axis")) {
+      const int canonical_repeat_from =
+          input->canonical_axis_index(repeat_from_);
+      const int repeated_dims = input->size_from_dim(canonical_repeat_from);
+      const int masked_dims = right / repeated_dims;
+      repeatedSequenceMaskKernel<<<
+          CAFFE_GET_BLOCKS(left * right),
+          CAFFE_CUDA_NUM_THREADS,
+          0,
+          context_.cuda_stream()>>>(
+          left,
+          masked_dims,
+          repeated_dims,
+          input->data<T>(),
+          sequence_lengths->data<int>(),
+          fill_val,
+          output->mutable_data<T>());
+    } else {
+      sequenceMaskKernel<<<
+          CAFFE_GET_BLOCKS(left * right),
+          CAFFE_CUDA_NUM_THREADS,
+          0,
+          context_.cuda_stream()>>>(
+          left,
+          right,
+          batch_dim,
+          input->data<T>(),
+          sequence_lengths->data<int>(),
+          fill_val,
+          output->mutable_data<T>());
+    }
   } else if (mode_ == "window") {
     windowMaskKernel<<<
         CAFFE_GET_BLOCKS(left * right),
@@ -422,4 +459,4 @@ bool SequenceMaskOp<CUDAContext>::DoRunWithType() {
 
 REGISTER_CUDA_OPERATOR(SequenceMask, SequenceMaskOp<CUDAContext>);
 
-} // caffe2
+} // namespace caffe2
