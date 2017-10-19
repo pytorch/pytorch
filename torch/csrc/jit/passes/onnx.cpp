@@ -40,6 +40,9 @@ void ToONNX(std::shared_ptr<tracer::TracingState>& state) {
   ctx.buffer_map = &new_buffer_map;
   std::unordered_map<Node*, Node*> env;
 
+  py::object onnx = py::module::import("torch.onnx");
+  py::object onnx_symbolic = py::module::import("torch.onnx.symbolic");
+
   // Returns a node that n maps to in the new graph
   auto envFn = [&env](Node * n) -> Node* {
     auto it = env.find(n);
@@ -117,7 +120,34 @@ void ToONNX(std::shared_ptr<tracer::TracingState>& state) {
     }
   };
 
-  auto callPySymbolic = [&](PythonOp* op) {
+  auto callPySymbolicFunction = [&](Node* n) {
+    // The idea is delegate as much of the actual argument massaging to
+    // Python as possible
+
+    py::tuple py_inputs(n->inputs().size());
+    Py_ssize_t input_nr = 0;
+    for (auto* input : n->inputs()) {
+        py_inputs[input_nr++] = py::cast(envFn(input));
+    }
+
+    py::object raw_output = onnx.attr("_run_symbolic_function")(ctx.graph, n, py_inputs);
+
+    if (raw_output.ptr() == Py_None) {
+      cloneNode(n);
+    } else {
+      // Cast the outputs back to C++ and put them in the new graph
+      node_list outputs;
+      if (py::isinstance<Node>(raw_output)) {
+        outputs = node_list{py::cast<Node*>(raw_output)};
+      } else {
+        outputs = py::cast<std::vector<Node*>>(raw_output);
+      }
+
+      setOutputs(symbolToString(n->kind()), n, outputs);
+    }
+  };
+
+  auto callPySymbolicMethod = [&](PythonOp* op) {
     // Prepare args for Python. First one is the graph, and is followed
     // by regular args, with Variables replaced by corresponding nodes.
     auto pyobj = py::handle(op->pyobj.get());
@@ -140,10 +170,9 @@ void ToONNX(std::shared_ptr<tracer::TracingState>& state) {
       py_symbolic_args[input_nr++] = obj;
     }
     // Call the symbolic function
-    py::object onnx = py::module::import("torch.onnx");
     // Use a little trampoline function so we can give good error messages
     // upon argument mismatch
-    py::object raw_output = onnx.attr("run_symbolic")(op->name(), pyobj.attr("symbolic"), py_symbolic_args);
+    py::object raw_output = onnx.attr("_run_symbolic_method")(op->name(), pyobj.attr("symbolic"), py_symbolic_args);
     if (raw_output.ptr() == Py_None)
       throw std::runtime_error("PythonOp's symbolic returned None, indicating conversion not supported " + op->name());
 
@@ -154,7 +183,6 @@ void ToONNX(std::shared_ptr<tracer::TracingState>& state) {
       return py::cast<std::vector<Node*>>(raw_output);
     }
   };
-
 
   // Finally, visit all nodes in the graph
   for (auto node : state->graph->nodes()) {
@@ -180,13 +208,13 @@ void ToONNX(std::shared_ptr<tracer::TracingState>& state) {
     IR_ELSEIFM(PythonOp)
       auto pyobj = py::handle(value->pyobj.get());
       if (py::hasattr(pyobj, "symbolic")) {
-        auto outputs = callPySymbolic(value);
+        auto outputs = callPySymbolicMethod(value);
         setOutputs(value->name(), node, outputs);
       } else {
         cloneNode(node);
       }
     IR_ELSE()
-      cloneNode(node);
+      callPySymbolicFunction(node);
     IR_END()
   }
   for (auto output : state->graph->outputs()) {

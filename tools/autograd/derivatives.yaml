@@ -1,4 +1,7 @@
 # Defines derivative formulas and Python signatures of methods on Variable
+#
+# NB: The parameter names here MUST be consistent with the parameter names
+# in ./torch/lib/ATen/Declarations.cwrap
 - name: abs(Tensor self)
   self: grad * self.sign()
 
@@ -122,7 +125,7 @@
 - name: eig(Tensor self, bool eigenvectors)
   self: not_implemented("eig")
 
-- name: eq(Tensor self, Scalar value)
+- name: eq(Tensor self, Scalar other)
   self: zeros_like(self)
 
 - name: eq(Tensor self, Tensor other)
@@ -151,7 +154,7 @@
 - name: floor(Tensor self)
   self: zeros_like(grad)
 
-- name: fmod(Tensor self, Scalar value)
+- name: fmod(Tensor self, Scalar other)
   self: grad
 
 - name: fmod(Tensor self, Tensor other)
@@ -164,7 +167,7 @@
 - name: gather(Tensor self, int64_t dim, Tensor index)
   self: grad.type().zeros(self.sizes()).scatter_add_(dim, index, grad)
 
-- name: ge(Tensor self, Scalar value)
+- name: ge(Tensor self, Scalar other)
   self: zeros_like(self)
 
 - name: ge(Tensor self, Tensor other)
@@ -191,7 +194,7 @@
 
 - name: get_device  # fallthrough
 
-- name: gt(Tensor self, Scalar value)
+- name: gt(Tensor self, Scalar other)
   self: zeros_like(self)
 
 - name: gt(Tensor self, Tensor other)
@@ -228,7 +231,7 @@
 - name: kthvalue(Tensor self, int64_t k, int64_t dim, bool keepdim)
   self: select_backward(grad, dim, indices, self.sizes(), keepdim)
 
-- name: le(Tensor self, Scalar value)
+- name: le(Tensor self, Scalar other)
   self: zeros_like(self)
 
 - name: le(Tensor self, Tensor other)
@@ -255,7 +258,7 @@
 
 - name: logspace  # fallthrough
 
-- name: lt(Tensor self, Scalar value)
+- name: lt(Tensor self, Scalar other)
   self: zeros_like(self)
 
 - name: lt(Tensor self, Tensor other)
@@ -331,7 +334,7 @@
 - name: _unnarrow(Tensor self, int64_t dimension, int64_t offset, int64_t dimSize)
   self: grad.narrow(dimension, offset, self.size(dimension))
 
-- name: ne(Tensor self, Scalar value)
+- name: ne(Tensor self, Scalar other)
   self: zeros_like(self)
 
 - name: ne(Tensor self, Tensor other)
@@ -398,7 +401,7 @@
 - name: reciprocal(Tensor self)
   self: grad / -(self * self)
 
-- name: remainder(Tensor self, Scalar value)
+- name: remainder(Tensor self, Scalar other)
   self: grad
 
 - name: remainder(Tensor self, Tensor other)

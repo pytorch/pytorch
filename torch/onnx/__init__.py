@@ -15,7 +15,8 @@ import json
 import math
 import contextlib
 import numbers
-from ._utils import _range
+import warnings
+from torch._utils import _range
 from torch._six import string_classes
 
 
@@ -115,9 +116,10 @@ def _export(model, args, f, export_params=True, verbose=False, training=False):
 attr_pattern = re.compile("^(.+)_([ifstgz])$")
 
 
-def run_symbolic(op_name, symbolic_fn, args):
+def _run_symbolic_method(op_name, symbolic_fn, args):
     """
-    This trampoline function gets invoked for every symbolic call.
+    This trampoline function gets invoked for every symbolic method
+    call from C++.
     """
     try:
         return symbolic_fn(*args)
@@ -142,26 +144,23 @@ def _add_attribute(node, key, value):
     return getattr(node, kind + '_')(name, value)
 
 
-def _newNode(self, opname, *args, **kwargs):
-    n = self.create(opname, args)
+def _newNode(g, opname, *args, **kwargs):
+    n = g.create(opname, args)
     for k, v in sorted(kwargs.items()):
         _add_attribute(n, k, v)
     return n
 
 
-def _op(self, opname, *args, **kwargs):
+def _graph_op(g, opname, *raw_args, **kwargs):
     """
-    Create an ONNX operator 'opname', taking 'args' as inputs
-    and attributes 'kwargs' and add it to the current graph,
-    returning the node representing the single output of this
-    operator (see the `outputs` keyword argument for multi-return
-    nodes).
+    Create an ONNX operator 'opname', taking 'args' as inputs and attributes
+    'kwargs'; returning the node representing the single output of this operator
+    (see the `outputs` keyword argument for multi-return nodes).
 
     The set of operators and the inputs/attributes they take
     is documented at https://github.com/onnx/onnx/blob/master/docs/Operators.md
 
-    This op is monkey-patched to be available on the 'Graph' object
-    passed in as the first argument.
+    This function is monkey-patched onto Graph.
 
     Arguments:
         opname (string): The ONNX operator name, e.g., `Abs` or `Add`.
@@ -181,19 +180,68 @@ def _op(self, opname, *args, **kwargs):
             in positional.
     """
     outputs = kwargs.pop('outputs', 1)
-    n = self.appendNode(_newNode(self, opname, *args, **kwargs))
+    # Filter out None attributes, this can be convenient client side
+    kwargs = dict((k, v) for k, v in kwargs.iteritems() if v is not None)
+
+    def const_if_tensor(arg):
+        if isinstance(arg, torch._C.Node):
+            return arg
+        else:
+            return g.op("Constant", value_z=arg)
+
+    args = list(const_if_tensor(arg) for arg in raw_args)
+    n = g.appendNode(_newNode(g, opname, *args, **kwargs))
     if outputs == 1:
         return n
-    return tuple(self.appendNode(self.createSelect(n, i)) for i in _range(outputs))
+    return tuple(g.appendNode(g.createSelect(n, i)) for i in _range(outputs))
 
 
-def _at(self, opname, *args, **kwargs):
-    return self.op("ATen", *args, operator_s=opname, **kwargs)
+# Note [Export inplace]
+# ~~~~~~~~~~~~~~~~~~~~~
+# In abstract, it would be better for us to export inplace annotations,
+# than to not export them, since it is useful information that can
+# help the target of an ONNX export export more efficiently.  However,
+# ONNX doesn't currently formalize inplace.  Fortunately, it's sound to drop
+# inplace annotations, but we are losing information this way.
+
+
+def _run_symbolic_function(g, n, inputs):
+    import torch.onnx.symbolic
+
+    try:
+        # See Note [Export inplace]
+        if n.kind().endswith('_'):
+            op_name = n.kind()[:-1]
+        else:
+            op_name = n.kind()
+        if not hasattr(torch.onnx.symbolic, op_name):
+            warnings.warn("ONNX conversion of {} not supported".format(op_name))
+            return None
+        fn = getattr(torch.onnx.symbolic, op_name)
+        attrs = {k: n[k] for k in n.attributeNames()}
+        r = fn(g, *inputs, **attrs)
+        if r is None:
+            raise NotImplementedError("torch.onnx.symbolic.{} returned None, "
+                                      "indicating ONNX translation not supported".format(op_name))
+        return r
+
+    except TypeError as e:
+        # Handle the specific case where we didn't successfully dispatch.
+        # Otherwise, the backtrace will have the clues you need.
+        e.args = ("{} (occurred when translating {})".format(e.args[0], op_name), )
+        raise
+
+
+def _graph_at(g, opname, *args, **kwargs):
+    return g.op("ATen", *args, operator_s=opname, **kwargs)
 
 
 # This helper function can create either constant tensor or constant scalar.
 # If dims is None or 0 or [0], generate a 0-d tensor (scalar).
-def _constant(self, value, dims, type, *args, **kwargs):
+#
+# TODO: We might not need this anymore, since most scalars now show up
+# as tensors
+def _graph_constant(g, value, dims, type, *args, **kwargs):
     assert isinstance(value, numbers.Number)
     assert type is not None
     isscalar = False
@@ -220,9 +268,22 @@ def _constant(self, value, dims, type, *args, **kwargs):
                          "char, short, int, long, half, float, double")
     tensor.fill_(value)
     if isscalar:
-        return self.op("Constant", *args, value_z=tensor, **kwargs)
-    return self.op("Constant", *args, value_t=tensor, **kwargs)
+        return g.op("Constant", *args, value_z=tensor, **kwargs)
+    return g.op("Constant", *args, value_t=tensor, **kwargs)
 
-torch._C.Graph.op = _op
-torch._C.Graph.at = _at
-torch._C.Graph.constant = _constant
+
+def _node_getitem(self, k):
+    """
+    Accessor for attributes of a node which is polymorphic over
+    return type.
+
+    NB: This is monkey-patched onto Node.
+    """
+    sel = self.kindOf(k)
+    return getattr(self, sel)(k)
+
+
+torch._C.Graph.op = _graph_op
+torch._C.Graph.at = _graph_at
+torch._C.Graph.constant = _graph_constant
+torch._C.Node.__getitem__ = _node_getitem

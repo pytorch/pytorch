@@ -643,13 +643,13 @@ def create_variable_type(top_env, aten_declarations):
 
     def emit_record_trace(env, declaration):
         local = {}
-        local['record_attributes'] = [];
+        local['record_attributes'] = []
         for arg in declaration['arguments']:
             if arg['simple_type'] in {'Tensor', 'TensorList'}:
                 continue
             local['record_attributes'].append(RECORD_ATTRIBUTE.substitute(name=arg['name']))
         if not local['record_attributes']:
-            local['record_attributes'].append('(void)n;');
+            local['record_attributes'].append('(void)n;')
 
         combined = nested_dict(local, nested_dict(env, declaration))
         return RECORD_TRACE.substitute(combined)

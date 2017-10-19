@@ -91,53 +91,6 @@ class NoGrad(Function):
     __call__ = _do_forward
 
 
-@traceable
-class Transpose(Function):
-
-    @staticmethod
-    def symbolic(g, i, dim1, dim2):
-        # NB: Swap dim1 and dim2, which is different from ONNX's
-        # Transpose, which is actually a permute.
-        if dim1 == dim2:
-            return i
-
-        axes = list(range(len(i.type().sizes())))
-        axes[dim1], axes[dim2] = axes[dim2], axes[dim1]
-        return g.op("Transpose", i, perm_i=axes)
-
-    @staticmethod
-    def forward(ctx, i, dim1, dim2):
-        result = i.transpose(dim1, dim2)
-        ctx.dims = (dim1, dim2)
-        ctx.mark_shared_storage((i, result))
-        return result
-
-    @staticmethod
-    def backward(ctx, grad_output):
-        return grad_output.transpose(*ctx.dims), None, None
-
-
-class View(Function):
-
-    @staticmethod
-    def symbolic(g, i, sizes):
-        if len(sizes) == 1 and isinstance(sizes[0], torch.Size):
-            sizes = sizes[0]
-        return g.op("Reshape", i, shape_i=sizes)
-
-    @staticmethod
-    def forward(ctx, i, sizes):
-        ctx.new_sizes = sizes
-        ctx.old_size = i.size()
-        result = i.view(*sizes)
-        ctx.mark_shared_storage((i, result))
-        return result
-
-    @staticmethod
-    def backward(ctx, grad_output):
-        return grad_output.contiguous().view(ctx.old_size), None
-
-
 class Expand(Function):
 
     @staticmethod
@@ -413,44 +366,6 @@ class Clone(Function):
     @staticmethod
     def backward(ctx, grad_output):
         return grad_output
-
-
-class Squeeze(InplaceFunction):
-
-    @staticmethod
-    def symbolic(g, input, dim, inplace=False):
-        # TODO: [Export inplace]
-        if dim is None:
-            dims = []
-            for i, size in enumerate(input.type().sizes()):
-                if size == 1:
-                    dims.append(i)
-        else:
-            dims = [dim]
-        return g.op("Squeeze", input, axes_i=dims)
-
-    @staticmethod
-    def forward(ctx, input, dim=None, inplace=False):
-        ctx.dim = dim
-        ctx.input_size = input.size()
-        if inplace:
-            ctx.mark_dirty(input)
-            if dim is not None:
-                return input.squeeze_(dim)
-            else:
-                return input.squeeze_()
-        else:
-            if dim is not None:
-                result = input.squeeze(dim)
-            else:
-                result = input.squeeze()
-
-            ctx.mark_shared_storage((input, result))
-            return result
-
-    @staticmethod
-    def backward(ctx, grad_output):
-        return grad_output.contiguous().view(ctx.input_size), None, None
 
 
 class Unsqueeze(Function):

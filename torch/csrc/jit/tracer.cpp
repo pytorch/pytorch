@@ -100,7 +100,7 @@ Node* recordTraceHelper(std::string op, // TODO: make this a Symbol
 
   Node *n = graph->create(stringToSymbol(op));
   for (Variable input : inputs) {
-    graph->addInput(getValueTrace(state, input));
+    n->addInput(getValueTrace(state, input));
   }
 
   // NB: Order matters. This must append after inputs but before outputs.
