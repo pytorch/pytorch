@@ -156,7 +156,7 @@ inline std::vector<at::Tensor> PythonArgs::tensorlist(int i) {
 }
 
 inline std::vector<int64_t> PythonArgs::intlist(int i) {
-  if (!args[i]) return signature.params[i].default_intlist;
+  if (!args[i] || args[i] == Py_None) return signature.params[i].default_intlist;
   PyObject* arg = args[i];
   auto size = signature.params[i].size;
   if (size > 0 && THPUtils_checkLong(arg)) {
