@@ -99,7 +99,7 @@ struct Function : std::enable_shared_from_this<Function> {
   // of input variables
   static FunctionFlags flags(const variable_list& inputs);
   static FunctionFlags flags(const std::initializer_list<Variable>& inputs);
-  static FunctionFlags flags(const tensor_list& inputs);
+  static FunctionFlags flags(at::TensorList inputs);
 
   // Releases saved variables if the operation won't be reused
   virtual inline void releaseVariables() {}
