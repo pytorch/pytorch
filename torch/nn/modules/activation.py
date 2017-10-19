@@ -204,8 +204,33 @@ class Sigmoid(Module):
 
     def __repr__(self):
         return self.__class__.__name__ + ' ()'
+    
+    
+class Swish(Module):
+    """Implementation of Swish: a Self-Gated Activation Function
+        Swish activation is simply f(x)=x⋅sigmoid(x)
+        Paper: https://arxiv.org/abs/1710.05941
 
+    Shape:
+        - Input: :math:`(N, *)` where `*` means, any number of additional
+          dimensions
+        - Output: :math:`(N, *)`, same shape as the input
 
+    Examples::
+
+        >>> m = nn.Swish()
+        >>> input = autograd.Variable(torch.randn(2))
+        >>> print(input)
+        >>> print(m(input))
+    """
+
+    def forward(self, input):
+        return (input * torch.sigmoid(input))
+
+    def __repr__(self):
+        return self.__class__.__name__ + ' ()'
+
+    
 class Tanh(Module):
     """Applies element-wise,
     :math:`f(x) = (exp(x) - exp(-x)) / (exp(x) + exp(-x))`
