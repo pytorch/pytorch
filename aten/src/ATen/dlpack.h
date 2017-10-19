@@ -36,14 +36,14 @@ extern "C" {
  * \brief The device type in DLContext.
  */
 typedef enum {
-  kCPU = 1,
-  kGPU = 2,
-  // kCPUPinned = kCPU | kGPU
-  kCPUPinned = 3,
-  kOpenCL = 4,
-  kMetal = 8,
-  kVPI = 9,
-  kROCM = 10,
+  kDLCPU = 1,
+  kDLGPU = 2,
+  // kDLCPUPinned = kDLCPU | kDLGPU
+  kDLCPUPinned = 3,
+  kDLOpenCL = 4,
+  kDLMetal = 8,
+  kDLVPI = 9,
+  kDLROCM = 10,
 } DLDeviceType;
 
 /*!
@@ -60,9 +60,9 @@ typedef struct {
  * \brief The type code options DLDataType.
  */
 typedef enum {
-  kInt = 0U,
-  kUInt = 1U,
-  kFloat = 2U,
+  kDLInt = 0U,
+  kDLUInt = 1U,
+  kDLFloat = 2U,
 } DLDataTypeCode;
 
 /*!
