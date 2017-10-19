@@ -41,31 +41,33 @@ OPERATOR_SCHEMA(GivenTensorFill)
     .NumInputs(0, 1)
     .NumOutputs(1)
     .AllowInplace({{0, 0}})
-    .TensorInferenceFunction(FillerTensorInference);
+    .TensorInferenceFunction(FillerTensorInference<>);
 OPERATOR_SCHEMA(GivenTensorDoubleFill)
     .NumInputs(0, 1)
     .NumOutputs(1)
     .AllowInplace({{0, 0}})
-    .TensorInferenceFunction(FillerTensorInference);
+    .TensorInferenceFunction(
+        FillerTensorInference<TensorProto_DataType_DOUBLE>);
 OPERATOR_SCHEMA(GivenTensorBoolFill)
     .NumInputs(0, 1)
     .NumOutputs(1)
     .AllowInplace({{0, 0}})
-    .TensorInferenceFunction(FillerTensorInference);
+    .TensorInferenceFunction(FillerTensorInference<TensorProto_DataType_BOOL>);
 OPERATOR_SCHEMA(GivenTensorIntFill)
     .NumInputs(0, 1)
     .NumOutputs(1)
     .AllowInplace({{0, 0}})
-    .TensorInferenceFunction(FillerTensorInference);
+    .TensorInferenceFunction(FillerTensorInference<TensorProto_DataType_INT32>);
 OPERATOR_SCHEMA(GivenTensorInt64Fill)
     .NumInputs(0, 1)
     .NumOutputs(1)
     .AllowInplace({{0, 0}})
-    .TensorInferenceFunction(FillerTensorInference);
+    .TensorInferenceFunction(FillerTensorInference<TensorProto_DataType_INT64>);
 OPERATOR_SCHEMA(GivenTensorStringFill)
     .NumInputs(0, 1)
     .NumOutputs(1)
     .AllowInplace({{0, 0}})
-    .TensorInferenceFunction(FillerTensorInference);
+    .TensorInferenceFunction(
+        FillerTensorInference<TensorProto_DataType_STRING>);
 
 } // namespace caffe2
