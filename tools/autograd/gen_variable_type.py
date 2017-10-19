@@ -242,7 +242,7 @@ def saved_variables(formula, args):
 
 def create_derivative(declaration, formula, output_indices, var_names):
     returns = [r for r in declaration['returns'] if r.get('name') != 'self']
-    arguments = [arg for arg in declaration['arguments']]
+    arguments = declaration['arguments']
     if any(arg['name'] == 'inplace' for arg in arguments):
         for arg in arguments:
             if arg['name'] == 'input':

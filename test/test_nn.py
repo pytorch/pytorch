@@ -3573,8 +3573,7 @@ def add_test(test):
     if hasattr(TestNN, cuda_test_name):
         raise RuntimeError('Found two tests with the same name: ' + cuda_test_name)
     setattr(TestNN, test_name, lambda self, test=test: test(self))
-    if test_name != 'test_Hardshrink':  # no CUDA implementation
-        setattr(TestNN, cuda_test_name, lambda self, test=test: test.test_cuda(self))
+    setattr(TestNN, cuda_test_name, lambda self, test=test: test.test_cuda(self))
 
 
 def wrap_functional(fn, **kwargs):
