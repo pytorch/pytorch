@@ -377,17 +377,10 @@ class AdagradOptimizer(Optimizer):
 
         if self.rowWise:
             shape = param_init_net.Shape(param, str(param) + "_shape")
-            slice_starts = np.array([0]).astype(np.int32)
-            slice_ends = np.array([1]).astype(np.int32)
-            slice_starts = param_init_net.GivenTensorIntFill(
-                [], shape=[1], values=slice_starts
-            )
-            slice_ends = param_init_net.GivenTensorIntFill(
-                [], shape=[1], values=slice_ends
-            )
             num_rows = param_init_net.Slice(
-                [shape, slice_starts, slice_ends],
-                str(shape) + "_numrows"
+                [shape],
+                str(shape) + "_numrows",
+                starts=[0], ends=[1]
             )
             param_squared_sum = param_init_net.ConstantFill(
                 num_rows,
