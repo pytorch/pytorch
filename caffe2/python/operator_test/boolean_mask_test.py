@@ -354,3 +354,38 @@ class TestBooleanMaskOp(hu.HypothesisTestCase):
         stepsize = 0.1 if dtype == np.float16 else 0.05
         self.assertGradientChecks(gc, op, [x], 0, [0],
                                   threshold=threshold, stepsize=stepsize)
+
+    @given(x=hu.tensor(min_dim=3,
+                       max_dim=5,
+                       elements=st.floats(min_value=0.5, max_value=1.0)),
+           dtype=st.sampled_from([np.float32, np.float16]),
+           **hu.gcs)
+    def test_sequence_mask_repeated(self, x, dtype, gc, dc):
+        x, dc = self._dtype_conversion(x, dtype, gc, dc)
+        # finite fill value needed for gradient check
+        fill_val = 1e-3 if dtype == np.float16 else 1e-9
+        op = core.CreateOperator("SequenceMask",
+                                 ["data", "lengths"],
+                                 ["masked_data"],
+                                 mode="sequence",
+                                 axis=len(x.shape) - 2,
+                                 repeat_from_axis=-1,
+                                 fill_val=fill_val)
+
+        elem_dim = x.shape[-2]
+        leading_dim = 1
+        for dim in x.shape[:-2]:
+            leading_dim *= dim
+        lengths = np.random.randint(0, elem_dim, [leading_dim])\
+            .astype(np.int32)
+
+        def ref(x, lengths):
+            ref = np.reshape(x, [leading_dim, elem_dim, -1])
+            for i in range(leading_dim):
+                for j in range(elem_dim):
+                    if j >= lengths[i]:
+                        ref[i, j, :] = fill_val
+            return [ref.reshape(x.shape)]
+
+        self.assertReferenceChecks(gc, op, [x, lengths], ref)
+        self.assertDeviceChecks(dc, op, [x, lengths], [0])

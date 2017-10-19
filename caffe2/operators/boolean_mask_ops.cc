@@ -201,11 +201,32 @@ void MaskWithFunctor(
   }
 }
 
+// Repeat masking along continuous segments (right axes) of size D
+template <typename Functor>
+void RepeatedMaskWithFunctor(
+    size_t N,
+    size_t M,
+    int D,
+    const float* in,
+    Functor fn,
+    float fill_val,
+    float* out) {
+  for (int i = 0; i < N; ++i) {
+    for (int j = 0; j < M; ++j) {
+      for (int k = 0; k < D; ++k) {
+        auto val = in[M * D * i + D * j + k];
+        out[M * D * i + D * j + k] = (fn(i, j, val) ? fill_val : val);
+      }
+    }
+  }
+}
+
 namespace {
 
 class SequenceFunctor {
  public:
-  explicit SequenceFunctor(const int* sl, const size_t len) : sl_(sl), len_(len) {}
+  explicit SequenceFunctor(const int* sl, const size_t len)
+      : sl_(sl), len_(len) {}
   bool operator()(int i, int j, float /* val*/) {
     CAFFE_ENFORCE(i < len_, "Out of bound.");
     return j >= sl_[i];
@@ -260,7 +281,7 @@ class LowerDiagFunctor {
 
 template <>
 bool SequenceMaskOp<CPUContext>::RunOnDevice() {
-    return DispatchHelper<TensorTypes<float>>::call(this, Input(0));
+  return DispatchHelper<TensorTypes<float>>::call(this, Input(0));
 }
 
 template <>
@@ -310,15 +331,31 @@ bool SequenceMaskOp<CPUContext>::DoRunWithType() {
   if (mode_ == "sequence") {
     CAFFE_ENFORCE(
         sequence_lengths, "Sequence length not provided for mode 'sequence'!");
-    MaskWithFunctor(
-        left,
-        right,
-        batch_dim,
-        input->data<T>(),
-        SequenceFunctor(
-            sequence_lengths->data<int>(), sequence_lengths->size()),
-        fill_val,
-        output->mutable_data<T>());
+    if (HasArgument("repeat_from_axis")) {
+      const int canonical_repeat_from =
+          input->canonical_axis_index(repeat_from_);
+      const int repeated_dims = input->size_from_dim(canonical_repeat_from);
+      const int masked_dims = right / repeated_dims;
+      RepeatedMaskWithFunctor(
+          left,
+          masked_dims,
+          repeated_dims,
+          input->data<T>(),
+          SequenceFunctor(
+              sequence_lengths->data<int>(), sequence_lengths->size()),
+          fill_val,
+          output->mutable_data<T>());
+    } else {
+      MaskWithFunctor(
+          left,
+          right,
+          batch_dim,
+          input->data<T>(),
+          SequenceFunctor(
+              sequence_lengths->data<int>(), sequence_lengths->size()),
+          fill_val,
+          output->mutable_data<T>());
+    }
   } else if (mode_ == "window") {
     MaskWithFunctor(
         left,
@@ -417,7 +454,12 @@ Two current operating modes:
         "will be treated as column indices in the 2D mask")
     .Arg("grad", "(bool) operate in gradient mode")
     .Arg("radius", "(int) radius of windows in window mode")
-    .Arg("batch", "(int) batch dimension of tensor (optional)");
+    .Arg("batch", "(int) batch dimension of tensor (optional)")
+    .Arg(
+        "repeat_from_axis",
+        "(int) used when mask should be repeated for "
+        "one or more data dimensions (beginning at this axis).  "
+        "(currently only supported for sequence mode without batch argument)");
 
 class GetSequenceMaskGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;

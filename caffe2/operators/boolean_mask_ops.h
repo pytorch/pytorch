@@ -52,6 +52,17 @@ class SequenceMaskOp final : public Operator<Context> {
     if (HasArgument("batch")) {
       batch_ = GetArgument(operator_def, "batch").i();
     }
+
+    if (HasArgument("repeat_from_axis")) {
+      CAFFE_ENFORCE(
+          mode_ == "sequence",
+          "repeat_from_axis currently only supported in sequence mode.");
+      CAFFE_ENFORCE(
+          !HasArgument("batch"),
+          "repeat_from_axis and batch not currently supported together.");
+      repeat_from_ =
+          OperatorBase::GetSingleArgument<int>("repeat_from_axis", -1);
+    }
   }
 
   bool RunOnDevice() override;
@@ -66,8 +77,9 @@ class SequenceMaskOp final : public Operator<Context> {
   bool grad_;
   float fill_val_;
   int batch_;
+  int repeat_from_;
 };
 
-} // caffe2
+} // namespace caffe2
 
 #endif
