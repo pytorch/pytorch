@@ -88,8 +88,11 @@
 
 #define COPY_FROM_HALF_ARRAY_CUDA_HALF(ARRAY, STORAGE, SIZE)            \
 { \
-  char *arrdata = (char*)PyArray_DATA(ARRAY);                           \
-  cudaMemcpy(STORAGE->data, arrdata, SIZE * 2, cudaMemcpyHostToDevice); \
+  THHalf *arrdata = (THHalf*)PyArray_DATA(ARRAY);                       \
+  THHostStorage *cpu_storage =                                          \
+      THHostStorage_(newWithData)(arrdata, SIZE);                       \
+  cpu_storage->flag &= ~TH_STORAGE_FREEMEM;                             \
+  THCStorage_(copyCPU)(LIBRARY_STATE STORAGE, cpu_storage);             \
 }
 
 #define IDENTITY(X) (X)
