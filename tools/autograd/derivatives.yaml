@@ -279,8 +279,8 @@
   self: select_backward_scalar(grad, self, result)
 
 - name: max(Tensor self, Tensor other)
-  self: grad * (self > other).toType(grad.type())
-  other: grad * (self <= other).toType(grad.type())
+  self: grad.clone().masked_fill_(self <= other, 0)
+  other: grad.clone().masked_fill_(self > other, 0)
 
 - name: mean(Tensor self, int64_t dim, bool keepdim)
   self: sum_backward(grad, self.sizes(), dim, keepdim) / self.size(dim)
@@ -301,8 +301,8 @@
   self: select_backward_scalar(grad, self, result)
 
 - name: min(Tensor self, Tensor other)
-  self: grad * (self < other).toType(grad.type())
-  other: grad * (self >= other).toType(grad.type())
+  self: grad.clone().masked_fill_(self >= other, 0)
+  other: grad.clone().masked_fill_(self < other, 0)
 
 - name: mm(Tensor self, Tensor mat2)
   self: grad.mm(mat2.t())
