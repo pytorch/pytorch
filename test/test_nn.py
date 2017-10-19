@@ -3585,7 +3585,11 @@ def add_test(test):
     if hasattr(TestNN, cuda_test_name):
         raise RuntimeError('Found two tests with the same name: ' + cuda_test_name)
     setattr(TestNN, test_name, lambda self, test=test: test(self))
-    setattr(TestNN, cuda_test_name, lambda self, test=test: test.test_cuda(self))
+    # Hardshrink is not implemented in CUDA, so we must not test it.
+    # TODO: Figure out why this codepath is being executed; we have another
+    # test for this already in the file
+    if test_name != "test_Hardshrink":
+        setattr(TestNN, cuda_test_name, lambda self, test=test: test.test_cuda(self))
 
 
 def wrap_functional(fn, **kwargs):
