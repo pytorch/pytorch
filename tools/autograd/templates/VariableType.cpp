@@ -69,7 +69,7 @@ const char * VariableType::typeString() {
   return "VariableType";
 }
 
-Tensor & VariableType::unpack(const Type & type, const Tensor & t, const char * name, int pos) {
+Variable & VariableType::checked_cast(const Type & type, const Tensor & t, const char * name, int pos) {
   if(!t.defined()) {
     runtime_error("Expected a Tensor of type %s but found an undefined Tensor for argument #%d '%s'",
         type.toString(), pos, name);
@@ -78,31 +78,31 @@ Tensor & VariableType::unpack(const Type & type, const Tensor & t, const char * 
     runtime_error("Expected object of type %s but found type %s for argument #%d '%s'",
         type.toString(), t.type().toString(), pos, name);
   }
-  return static_cast<VariableImpl*>(t.pImpl)->data;
+  return static_cast<Variable&>(const_cast<Tensor&>(t));
 }
 
 Tensor & VariableType::unpack(const Tensor & t, const char * name, int pos) const {
-  return unpack(*this, t, name, pos);
+  return checked_cast(*this, t, name, pos).data();
 }
 
 Tensor & VariableType::unpack_long(const Tensor & t, const char * name, int pos) const {
   auto& type = *VariableImpl::getType(baseType->toScalarType(kLong));
-  return unpack(type, t, name, pos);
+  return checked_cast(type, t, name, pos).data();
 }
 
 Tensor & VariableType::unpack_byte(const Tensor & t, const char * name, int pos) const {
   auto& type = *VariableImpl::getType(baseType->toScalarType(kByte));
-  return unpack(type, t, name, pos);
+  return checked_cast(type, t, name, pos).data();
 }
 
-Tensor & VariableType::unpack_var(const Tensor & t, const char * name, int pos) const {
+Tensor & VariableType::unpack_any(const Tensor & t, const char * name, int pos) const {
   if (!t.defined()) {
     runtime_error("Expected a Tensor of type Variable but found an undefined Tensor for argument #%d '%s'",
         pos, name);
   }
   auto scalarType = t.type().scalarType();
   auto& type = *VariableImpl::getType(baseType->toScalarType(scalarType));
-  return unpack(type, t, name, pos);
+  return checked_cast(type, t, name, pos).data();
 }
 
 Tensor VariableType::unpack_opt(const Tensor & t, const char * name, int pos) const {
@@ -157,17 +157,6 @@ Variable VariableType::as_variable(const Scalar & scalar) const {
     tensor = tensor.toType(*baseType);
   }
   return make_variable(std::move(tensor));
-}
-
-using TensorRef = std::reference_wrapper<const Tensor>;
-using TensorRefList = std::initializer_list<TensorRef>;
-
-static FunctionFlags _flags(const std::initializer_list<Tensor>& tensors) {
-  return Function::flags(tensors);
-}
-
-static FunctionFlags _flags(TensorList tensors) {
-  return Function::flags(tensors);
 }
 
 static void check_inplace(const VariableImpl& pImpl) {
@@ -229,7 +218,7 @@ static bool isFloatingPoint(ScalarType s) {
 void VariableType::s_copy(const Tensor & src, Tensor & dst) const {
   // TODO: once copy is exposed in Declarations.yaml we may be able to bind
   // it automatically
-  auto& src_ = unpack_var(src, "src", 0);
+  auto& src_ = unpack_any(src, "src", 0);
   auto& dst_ = unpack(dst, "dst", 1);
   auto& pImpl = static_cast<VariableImpl&>(*dst.get());
   check_inplace(pImpl);

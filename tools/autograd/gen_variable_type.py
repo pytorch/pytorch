@@ -92,7 +92,7 @@ if (should_compute_any_outputs()) {
 """)
 
 METHOD_DEFINITION_DERIVATIVE = CodeTemplate("""\
-auto flags = _flags({ ${tensor_args} });
+auto flags = Function::flags({ ${tensor_args} });
 auto grad_fn = std::make_shared<${op}>();
 ${buffers}
 ${save_inputs}
@@ -106,7 +106,7 @@ return ${return_value};
 METHOD_DEFINITION_INPLACE = CodeTemplate("""\
 auto& pImpl = static_cast<VariableImpl&>(*self.get());
 check_inplace(pImpl);
-auto flags = _flags({ ${tensor_args} });
+auto flags = Function::flags({ ${tensor_args} });
 auto grad_fn = std::make_shared<${op}>();
 ${save_inputs}
 baseType->${method_prefix}${base_name}(${unpacked_args});
@@ -117,7 +117,7 @@ return ${return_value};
 """)
 
 METHOD_DEFINITION_NOT_DIFFERENTIABLE = CodeTemplate("""\
-auto flags = _flags({ ${tensor_args} });
+auto flags = Function::flags({ ${tensor_args} });
 auto grad_fn = std::make_shared<Error>("${api_name} is not differentiable");
 auto ret = as_variable(baseType->${method_prefix}${api_name}(${unpacked_args}));
 wrap_output(ret, std::move(flags), std::move(grad_fn));
@@ -301,6 +301,8 @@ def load_derivatives(path, declarations_by_signature):
         for declaration in declarations:
             if declaration['name'] == name:
                 return declaration
+        # some functions only have in-place variants
+        assert name + '_' == declarations[0]['name']
         return declarations[0]
 
     # Parse each entry from derivatives.yaml
@@ -346,7 +348,7 @@ def ensure_unique_names(autograd_functions):
     functions_by_name = defaultdict(list)
     for func in autograd_functions:
         functions_by_name[func['op']].append(func)
-    for op in sorted(functions_by_name.keys()):
+    for op in functions_by_name.keys():
         overloads = functions_by_name[op]
         if len(overloads) > 1:
             for i, func in enumerate(overloads):
@@ -369,7 +371,7 @@ def preprocess_nn_functions(declarations):
             continue
         declaration['base_name'] = fwd_name
 
-        fwd = declarations_by_name[name + '_forward'][0]
+        fwd = declarations_by_name[fwd_name][0]
 
         input_num = 0
         bwd_name = name + '_backward'

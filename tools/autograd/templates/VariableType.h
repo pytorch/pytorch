@@ -39,11 +39,12 @@ struct VariableType : public at::Type {
   ${type_derived_method_declarations}
 
 private:
-  static at::Tensor & unpack(const Type & expected_type, const Tensor & t, const char * name, int pos);
+  // checks that t is actually a Variable with the given expected_type
+  static Variable & checked_cast(const Type & expected_type, const Tensor & t, const char * name, int pos);
   at::Tensor & unpack(const Tensor & t, const char * name, int pos) const;
   at::Tensor & unpack_long(const Tensor & t, const char * name, int pos) const;
   at::Tensor & unpack_byte(const Tensor & t, const char * name, int pos) const;
-  at::Tensor & unpack_var(const Tensor & t, const char * name, int pos) const;
+  at::Tensor & unpack_any(const Tensor & t, const char * name, int pos) const;
   at::Tensor unpack_opt(const Tensor & t, const char * name, int pos) const;
   std::vector<at::Tensor> unpack(const at::TensorList &tl, const char *name, int pos) const;
 

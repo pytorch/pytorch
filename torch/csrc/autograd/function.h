@@ -122,12 +122,9 @@ struct Function : std::enable_shared_from_this<Function> {
   }
 
   inline bool should_compute_output(std::initializer_list<int> idxs) const {
-    for (auto idx : idxs) {
-      if (should_compute_output(idx)) {
-        return true;
-      }
-    }
-    return false;
+    return std::any_of(idxs.begin(), idxs.end(), [this](int i) {
+      return should_compute_output(i);
+    });
   }
 
   inline void set_flags(FunctionFlags&& flags) {
