@@ -44,7 +44,11 @@ FunctionParameter::FunctionParameter(const std::string& fmt, bool keyword_only)
   }
 
   auto name_str = fmt.substr(space + 1);
-  type_ = type_map[type_str];
+  auto it = type_map.find(type_str);
+  if (it == type_map.end()) {
+    throw std::runtime_error("FunctionParameter(): invalid type string: " + type_str);
+  }
+  type_ = it->second;
 
   auto eq = name_str.find('=');
   if (eq != std::string::npos) {
