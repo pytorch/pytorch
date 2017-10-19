@@ -60,7 +60,17 @@ class TestShapeInference(test_util.TestCase):
         model = model_helper.ModelHelper(name="test_model")
         model.net.Slice(["x"], ["y"], starts=[0, 0, 0, 0], ends=[-1, -1, -3, -1])
         workspace.FeedBlob("x", np.random.rand(64, 1, 255, 384).astype(np.float32))
-        self.InferTensorRunAndCompare(model)
+
+        slice_starts = np.array([0, 0, 0, 0]).astype(np.int32)
+        slice_ends = np.array([-1, -1, -3, -1]).astype(np.int32)
+        slice_starts = model.net.GivenTensorIntFill(
+            [], shape=[4], values=slice_starts)
+        slice_ends = model.net.GivenTensorIntFill(
+            [], shape=[4], values=slice_ends)
+        model.net.Slice(["x2", slice_starts, slice_ends], ["y2"])
+        workspace.FeedBlob("x2", np.random.rand(64, 1, 255, 384).astype(np.float32))
+
+        self.InferTensorRunAndCompare(model, ["y2"])
 
     def testShapeInferenceDistances(self):
         model = model_helper.ModelHelper(name="test_model")
@@ -463,10 +473,13 @@ class TestShapeInference(test_util.TestCase):
                 np.random.rand(2, 5).astype(np.float32))
             self.InferTensorRunAndCompare(model)
 
-    def InferTensorRunAndCompare(self, model):
+    def InferTensorRunAndCompare(self, model, expected_uninferred_blobs=None):
         '''
         Runs shape inference, and then the model to check
         that the inferred shapes agree with the actual ones
+
+        'expected_uninferred_blobs' is the list of blobs for which type and
+        shape cannot be inferred.
         '''
         (shapes, types) = workspace.InferShapesAndTypes(
             [model.param_init_net, model.net],
@@ -511,7 +524,12 @@ class TestShapeInference(test_util.TestCase):
             else:
                 correct_types[b] = str(type(arr))
 
+        if expected_uninferred_blobs is None:
+            expected_uninferred_blobs = []
         for b in correct_shapes:
+            # skip blobs for which shape couldn't be inferred
+            if b in expected_uninferred_blobs:
+                continue
             self.assertTrue(
                 np.array_equal(
                     np.array(shapes[b]).astype(np.int32),

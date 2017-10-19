@@ -523,13 +523,14 @@ class LengthsRangeFillOp : public Operator<Context> {
   }
 };
 
+template <int VALUE_TYPE = TensorProto_DataType_FLOAT>
 inline std::vector<TensorShape> FillerTensorInference(
     const OperatorDef& def,
     const vector<TensorShape>& in) {
   vector<TensorShape> out(1);
   ArgumentHelper helper(def);
   out[0].set_data_type(static_cast<TensorProto_DataType>(
-      helper.GetSingleArgument<int>("dtype", TensorProto_DataType_FLOAT)));
+      helper.GetSingleArgument<int>("dtype", VALUE_TYPE)));
 
   if (in.size()) {
     // TODO
