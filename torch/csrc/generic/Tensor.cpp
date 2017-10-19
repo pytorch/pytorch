@@ -93,6 +93,7 @@
       THHostStorage_(newWithData)(arrdata, SIZE);                       \
   cpu_storage->flag &= ~TH_STORAGE_FREEMEM;                             \
   THCStorage_(copyCPU)(LIBRARY_STATE STORAGE, cpu_storage);             \
+  THHostStorage_(free)(cpu_storage);                                    \
 }
 
 #define IDENTITY(X) (X)
