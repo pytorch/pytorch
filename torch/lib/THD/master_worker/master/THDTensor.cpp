@@ -1,3 +1,5 @@
+#include __STDC_FORMAT_MACROS
+
 #include "THDTensor.h"
 #include "State.hpp"
 #include "Utils.hpp"
