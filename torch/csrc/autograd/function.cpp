@@ -42,13 +42,9 @@ auto Function::flags(const std::initializer_list<Variable>& inputs) -> FunctionF
   return makeFlags(inputs);
 }
 
-auto Function::flags(const tensor_list& inputs) -> FunctionFlags {
-  // this could be made more efficient by using something like a boost filter iterator.
-  variable_list variables(inputs.size());
-  for (size_t i = 0; i < inputs.size(); ++i) {
-    variables[i] = inputs[i];
-  }
-  return makeFlags(variables);
+auto Function::flags(at::TensorList inputs) -> FunctionFlags {
+  // TODO: Eliminate the intermediate vector allocation
+  return makeFlags(variable_list(inputs.begin(), inputs.end()));
 }
 
 auto Function::name() -> std::string {
