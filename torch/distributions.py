@@ -15,8 +15,8 @@ Example::
     loss.backward()
 """
 import math
+from numbers import Number
 import torch
-from torch.autograd import Variable
 
 
 __all__ = ['Distribution', 'Bernoulli', 'Multinomial', 'Normal']
@@ -130,14 +130,10 @@ class Normal(Distribution):
         [torch.FloatTensor of size 1]
 
     Args:
-        mean (Tensor or Variable): mean of the distribution
-        std (Tensor or Variable): standard deviation of the distribution
+        mean (float or Tensor or Variable): mean of the distribution
+        std (float or Tensor or Variable): standard deviation of the distribution
     """
     def __init__(self, mean, std):
-        if not torch.is_tensor(mean) and not isinstance(mean, Variable):
-            raise TypeError('mean must be a Tensor or Variable')
-        if not torch.is_tensor(std) and not isinstance(std, Variable):
-            raise TypeError('std must be a Tensor or Variable')
         self.mean = mean
         self.std = std
 
@@ -147,4 +143,5 @@ class Normal(Distribution):
     def log_prob(self, value):
         # compute the variance
         var = (self.std ** 2)
-        return -((value - self.mean) ** 2) / (2 * var) - self.std.log() - math.log(math.sqrt(2 * math.pi))
+        log_std = math.log(self.std) if isinstance(self.std, Number) else self.std.log()
+        return -((value - self.mean) ** 2) / (2 * var) - log_std - math.log(math.sqrt(2 * math.pi))

@@ -62,6 +62,8 @@ class TestDistributions(TestCase):
         std = Variable(torch.randn(5, 5).abs(), requires_grad=True)
         self.assertEqual(Normal(mean, std).sample().size(), (5, 5))
         self._gradcheck_log_prob(Normal, (mean, std))
+        self._gradcheck_log_prob(Normal, (mean, 1.0))
+        self._gradcheck_log_prob(Normal, (0.0, std))
 
         def ref_log_prob(idx, x, log_prob):
             m = mean.data.view(-1)[idx]
