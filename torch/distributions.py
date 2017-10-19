@@ -16,6 +16,7 @@ Example::
 """
 import math
 import torch
+from torch.autograd import Variable
 
 
 __all__ = ['Distribution', 'Bernoulli', 'Multinomial', 'Normal']
@@ -31,7 +32,7 @@ class Distribution(object):
         Generates a single sample or single batch of samples if the distribution
         parameters are batched.
         """
-        raise NotImplemented
+        raise NotImplementedError
 
     def log_prob(self, value):
         """
@@ -41,7 +42,7 @@ class Distribution(object):
         Args:
             value (Tensor or Variable):
         """
-        raise NotImplemented
+        raise NotImplementedError
 
 
 class Bernoulli(Distribution):
@@ -129,11 +130,14 @@ class Normal(Distribution):
         [torch.FloatTensor of size 1]
 
     Args:
-        mean (float or Tensor or Variable): mean of the distribution
-        std (float or Tensor or Variable): standard deviation of the distribution
+        mean (Tensor or Variable): mean of the distribution
+        std (Tensor or Variable): standard deviation of the distribution
     """
     def __init__(self, mean, std):
-        # TODO: handle the case
+        if not torch.is_tensor(mean) and not isinstance(mean, Variable):
+            raise TypeError('mean must be a Tensor or Variable')
+        if not torch.is_tensor(std) and not isinstance(std, Variable):
+            raise TypeError('std must be a Tensor or Variable')
         self.mean = mean
         self.std = std
 
@@ -143,4 +147,4 @@ class Normal(Distribution):
     def log_prob(self, value):
         # compute the variance
         var = (self.std ** 2)
-        return -((value - self.mean) ** 2) / (2 * var) - (self.std).log() - math.log(math.sqrt(2 * math.pi))
+        return -((value - self.mean) ** 2) / (2 * var) - self.std.log() - math.log(math.sqrt(2 * math.pi))
