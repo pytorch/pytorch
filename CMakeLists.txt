@@ -7,8 +7,7 @@ set(CAFFE2_VERSION_MAJOR 0)
 set(CAFFE2_VERSION_MINOR 8)
 set(CAFFE2_VERSION_PATCH 1)
 set(CAFFE2_VERSION
-    ${CAFFE2_VERSION_MAJOR}.${CAFFE2_VERSION_MINOR}.${CAFFE2_VERSION_PATCH})
-
+    "${CAFFE2_VERSION_MAJOR}.${CAFFE2_VERSION_MINOR}.${CAFFE2_VERSION_PATCH}")
 
 # ---[ Do not search cmake install prefix. See the following link for details:
 # https://github.com/caffe2/caffe2/commit/251d2d0c521c781276eea3748d92fc92e5dbceab
@@ -52,8 +51,6 @@ option(USE_ZMQ "Use ZMQ" OFF)
 
 # ---[ CMake scripts + modules
 list(APPEND CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake/Modules)
-set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
-set(CMAKE_MACOSX_RPATH 1)
 
 enable_testing()
 
@@ -130,6 +127,8 @@ add_subdirectory(caffe2)
 
 caffe2_print_configuration_summary()
 
+# ---[ CMake related files
+# Uninistall option.
 if(NOT TARGET uninstall)
   configure_file(
       ${CMAKE_CURRENT_SOURCE_DIR}/cmake/cmake_uninstall.cmake.in
@@ -139,4 +138,45 @@ if(NOT TARGET uninstall)
   add_custom_target(uninstall
       COMMAND ${CMAKE_COMMAND} -P
       ${CMAKE_CURRENT_BINARY_DIR}/cmake_uninstall.cmake)
+endif()
+
+# ---[ Make configuration files for cmake to allow dependent libraries
+# easier access to Caffe2.
+
+# Specific interface link libraries for caffe2
+if ((NOT USE_GLOG) OR (NOT USE_GFLAGS) OR CAFFE2_USE_CUSTOM_PROTOBUF)
+  message(WARNING
+      "Generated cmake files are only fully available if one builds "
+      "with system glog, gflags and protobuf.")
+else()
+  # Since one would use glog, gflags and protobuf functionalities, any
+  # dependent library will have to depend on glog, gflags and protobuf
+  # as well, so we mark them as INTERFACE transitive dependency.
+  target_link_libraries(caffe2 INTERFACE glog gflags protobuf)
+  if (USE_CUDA)
+    target_link_libraries(caffe2_gpu INTERFACE glog gflags protobuf)
+  endif()
+endif()
+
+# Note(jiayq): Android cmake has an unresolved issue right now
+# (install(EXPORT "Caffe2Targets" ...) includes target "caffe2" which
+#  requires target "cpufeatures" that is not in the export set.)
+# and as a result we disable it for now.
+if (NOT ANDROID)
+  configure_file(
+      ${PROJECT_SOURCE_DIR}/cmake/Caffe2ConfigVersion.cmake.in
+      ${PROJECT_BINARY_DIR}/Caffe2ConfigVersion.cmake
+      @ONLY)
+  configure_file(
+      ${PROJECT_SOURCE_DIR}/cmake/Caffe2Config.cmake.in
+      ${PROJECT_BINARY_DIR}/Caffe2Config.cmake
+      @ONLY)
+  install(FILES
+      ${PROJECT_BINARY_DIR}/Caffe2ConfigVersion.cmake
+      ${PROJECT_BINARY_DIR}/Caffe2Config.cmake
+      DESTINATION share/cmake/Caffe2
+      COMPONENT dev)
+  install(EXPORT Caffe2Targets DESTINATION share/cmake/Caffe2
+      FILE Caffe2Targets.cmake
+      COMPONENT dev)
 endif()

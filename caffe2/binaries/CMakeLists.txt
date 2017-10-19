@@ -11,6 +11,7 @@ caffe2_binary_target("split_db.cc")
 
 if (USE_CUDA)
   caffe2_binary_target("inspect_gpus.cc")
+  target_link_libraries(inspect_gpus ${CUDA_LIBRARIES})
   caffe2_binary_target("print_core_object_sizes.cc")
 endif()
 
