@@ -55,7 +55,7 @@ static PyObject * THSPTensor_(pynew)(PyTypeObject *type, PyObject *args, PyObjec
   HANDLE_TH_ERRORS
 
 #ifdef THC_GENERIC_FILE
-  THCPAutoGPU gpu_guard;
+  THCPAutoGPU gpu_guard(args, NULL);
 #endif
 
   Py_ssize_t num_args = args ? PyTuple_Size(args) : 0;

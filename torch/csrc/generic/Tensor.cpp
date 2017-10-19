@@ -238,7 +238,7 @@ static PyObject * THPTensor_(pynew)(PyTypeObject *type, PyObject *args, PyObject
   }
   self->cdata = NULL;
 #ifdef THC_GENERIC_FILE
-  THCPAutoGPU gpu_guard;
+  THCPAutoGPU gpu_guard(args, NULL);
 #endif
 
   // Internally we allow constructing with a keyword only argument cdata
