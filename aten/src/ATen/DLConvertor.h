@@ -10,6 +10,7 @@
 
 namespace at {
 
+ScalarType toScalarType(const DLDataType& dtype);
 DLManagedTensor * toDLPack(const Tensor& src);
 Tensor fromDLPack(const DLManagedTensor* src);
 
