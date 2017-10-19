@@ -703,7 +703,7 @@ void addObjectMethods(py::module& m) {
           "run",
           [](Predictor& instance,
              std::vector<py::object> inputs) -> std::vector<py::object> {
-            std::vector<TensorCPU*> tensors;
+            Predictor::TensorVector tensors;
             std::vector<TensorCPU> tensors_data(inputs.size());
             for (auto i = 0; i < inputs.size(); ++i) {
               auto input = inputs[i];
@@ -718,6 +718,33 @@ void addObjectMethods(py::module& m) {
             }
             std::vector<TensorCPU*> out;
             instance.run(tensors, &out);
+            std::vector<py::object> pyout;
+            for (auto t : out) {
+              pyout.push_back(
+                  TensorFetcher<CPUContext>().FetchTensor(*t, true).obj);
+            }
+            return pyout;
+          })
+      .def(
+          "run",
+          [](Predictor& instance, std::map<std::string, py::object> inputs)
+              -> std::vector<py::object> {
+            Predictor::TensorMap tensors;
+            std::map<std::string, TensorCPU> tensors_data{};
+            for (const auto pair : inputs) {
+              const auto& name = pair.first;
+              const auto& input = pair.second;
+              CAFFE_ENFORCE(
+                  PyArray_Check(input.ptr()),
+                  "Input must be of type numpy array.");
+              PyArrayObject* array =
+                  reinterpret_cast<PyArrayObject*>(input.ptr());
+              TensorFeeder<CPUContext>().FeedTensor(
+                  DeviceOption(), array, &tensors_data[name]);
+              tensors.insert(std::make_pair(name, &tensors_data[name]));
+            }
+            std::vector<TensorCPU*> out;
+            instance.run_map(tensors, &out);
             std::vector<py::object> pyout;
             for (auto t : out) {
               pyout.push_back(
