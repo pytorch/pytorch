@@ -60,8 +60,28 @@ inline std::vector<VariableFlags> getVarFlags(const variable_list& vars) {
 // Should a function which takes 'vars' as inputs be traced?
 // It sufficies for ONE variable to be tracing: any "untraced" variables
 // are treated as constants.
-inline bool isTracing(const variable_list& vars) {
+//
+// TODO: Deduplicate this in some not horrible way...
+inline bool isTracing(std::initializer_list<Variable> vars) {
   for (auto& var : vars) {
+    if (!var.defined() || !var.tracing_state()) continue;
+    if (std::any_of(var.tracing_state()->begin(), var.tracing_state()->end(), detail::isElemActive))
+      return true;
+  }
+  return false;
+}
+
+inline bool isTracing(const at::TensorList& vars) {
+  for (Variable var : vars) {
+    if (!var.defined() || !var.tracing_state()) continue;
+    if (std::any_of(var.tracing_state()->begin(), var.tracing_state()->end(), detail::isElemActive))
+      return true;
+  }
+  return false;
+}
+
+inline bool isTracing(const at::ArrayRef<Variable>& vars) {
+  for (const Variable& var : vars) {
     if (!var.defined() || !var.tracing_state()) continue;
     if (std::any_of(var.tracing_state()->begin(), var.tracing_state()->end(), detail::isElemActive))
       return true;
@@ -231,6 +251,26 @@ inline VariableFlags VariableFlags::of(const Variable& var) {
 inline bool VariableFlags::verify(const Variable& var) {
   if (!var.defined()) return was_null;
   return !was_null && requires_grad == var.requires_grad() && is_volatile == var.is_volatile();
+}
+
+Node* recordTraceWorker(std::string op, at::ArrayRef<Variable> inputs, at::ArrayRef<Variable> outputs);
+
+inline Node* recordTrace(std::string op, std::initializer_list<Variable> inputs, const Variable& output) {
+  return recordTraceWorker(op, inputs, {output});
+}
+inline Node* recordTrace(std::string op, std::initializer_list<Variable> inputs, const std::tuple<Variable, Variable>& outputs) {
+  return recordTraceWorker(op, inputs, {std::get<0>(outputs), std::get<1>(outputs)});
+}
+inline Node* recordTrace(std::string op, std::initializer_list<Variable> inputs, const std::tuple<Variable, Variable, Variable>& outputs) {
+  return recordTraceWorker(op, inputs, {std::get<0>(outputs), std::get<1>(outputs), std::get<2>(outputs)});
+}
+inline Node* recordTrace(std::string op, std::initializer_list<Variable> inputs, at::TensorList& outputs) {
+  // TODO: Eliminate the intermediate vector allocation
+  return recordTraceWorker(op, inputs, std::vector<Variable>(outputs.begin(), outputs.end()));
+}
+inline Node* recordTrace(std::string op, at::TensorList inputs, const Variable& output) {
+  // TODO: Eliminate the intermediate vector allocation
+  return recordTraceWorker(op, std::vector<Variable>(inputs.begin(), inputs.end()), {output});
 }
 
 }}} // namespace torch::jit::tracer

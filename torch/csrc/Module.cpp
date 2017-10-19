@@ -11,6 +11,7 @@
 #include <ATen/DLConvertor.h>
 
 #include "torch/csrc/DynamicTypes.h"
+#include "torch/csrc/autograd/generated/python_nn_functions.h"
 #include "torch/csrc/utils/python_strings.h"
 #include "torch/csrc/jit/python_tracer.h"
 #include "torch/csrc/jit/init.h"
@@ -474,7 +475,8 @@ PyObject *THPModule_addDocStr(PyObject *_unused, PyObject *args)
         "don't know how to add docstring to type '%s'", Py_TYPE(obj)->tp_name);
   }
 
-  Py_RETURN_NONE;
+  Py_INCREF(obj);
+  return obj;
 }
 
 
@@ -774,19 +776,11 @@ static std::vector<PyMethodDef> methods;
 PyMethodDef* THDPModule_methods();
 #endif
 
-#if PY_MAJOR_VERSION == 2
-PyMODINIT_FUNC init_C()
-#else
-PyMODINIT_FUNC PyInit__C()
-#endif
-{
+static PyObject* initModule() {
+  HANDLE_TH_ERRORS
   THInferNumThreads();
 
-#if PY_MAJOR_VERSION == 2
-#define ASSERT_TRUE(cmd) if (!(cmd)) {PyErr_SetString(PyExc_ImportError, "initialization error"); return;}
-#else
 #define ASSERT_TRUE(cmd) if (!(cmd)) return NULL
-#endif
 
   THPUtils_addPyMethodDefs(methods, TorchMethods);
 #ifdef WITH_CUDA
@@ -820,6 +814,7 @@ PyMODINIT_FUNC PyInit__C()
   ASSERT_TRUE(THPEngine_initModule(module));
   torch::autograd::initAutogradClosureBindings(module);
   torch::jit::initJITBindings(module);
+  torch::autograd::initNNFunctions(module);
   ASSERT_TRUE(THPDoubleStorage_init(module));
   ASSERT_TRUE(THPFloatStorage_init(module));
   ASSERT_TRUE(THPHalfStorage_init(module));
@@ -920,11 +915,22 @@ PyMODINIT_FUNC PyInit__C()
   ASSERT_TRUE(PyModule_AddObject(module, "default_generator", (PyObject*)THPDefaultGenerator) == 0);
 
 #ifdef WITH_NUMPY
-  import_array();
+  if (_import_array() < 0) return NULL;
 #endif
 
-#if PY_MAJOR_VERSION == 2
-#else
   return module;
+  END_HANDLE_TH_ERRORS
+}
+
+#if PY_MAJOR_VERSION == 2
+PyMODINIT_FUNC init_C()
+#else
+PyMODINIT_FUNC PyInit__C()
+#endif
+{
+#if PY_MAJOR_VERSION == 2
+  initModule();
+#else
+  return initModule();
 #endif
 }
