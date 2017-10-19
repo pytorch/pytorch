@@ -1,6 +1,7 @@
 # Finds Google Protocol Buffers library and compilers and extends
 # the standard cmake script with version and python generation support
 function(custom_protobuf_find)
+  set(CAFFE2_USE_CUSTOM_PROTOBUF ON PARENT_SCOPE)
   message(STATUS "Use custom protobuf build.")
   # For a custom protobuf build, we will always use static protobuf.
   option(protobuf_BUILD_SHARED_LIBS "" OFF)

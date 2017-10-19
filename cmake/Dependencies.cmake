@@ -80,29 +80,35 @@ if(USE_NNPACK)
   endif()
 endif()
 
-# ---[ Google-glog
-if(USE_GLOG)
-  include("cmake/External/glog.cmake")
-  if(GLOG_FOUND)
-    set(CAFFE2_USE_GOOGLE_GLOG 1)
-    caffe2_include_directories(${GLOG_INCLUDE_DIRS})
-    list(APPEND Caffe2_DEPENDENCY_LIBS ${GLOG_LIBRARIES})
-  else()
-    message(WARNING "Not compiling with glog. Suppress this warning with -DUSE_GLOG=OFF")
-    set(USE_GLOG OFF)
-  endif()
-endif()
-
-# ---[ Google-gflags
+# ---[ gflags
 if(USE_GFLAGS)
-  include("cmake/External/gflags.cmake")
+  find_package(GFlags)
   if(GFLAGS_FOUND)
     set(CAFFE2_USE_GFLAGS 1)
     caffe2_include_directories(${GFLAGS_INCLUDE_DIRS})
     list(APPEND Caffe2_DEPENDENCY_LIBS ${GFLAGS_LIBRARIES})
   else()
-    message(WARNING "Not compiling with gflags. Suppress this warning with -DUSE_GFLAGS=OFF")
+    message(WARNING
+        "gflags is not found. Caffe2 will build without gflags support but it "
+        "is strongly recommended that you install gflags. Suppress this "
+        "warning with -DUSE_GFLAGS=OFF")
     set(USE_GFLAGS OFF)
+  endif()
+endif()
+
+# ---[ Google-glog
+if(USE_GLOG)
+  find_package(Glog)
+  if(GLOG_FOUND)
+    set(CAFFE2_USE_GOOGLE_GLOG 1)
+    caffe2_include_directories(${GLOG_INCLUDE_DIRS})
+    list(APPEND Caffe2_DEPENDENCY_LIBS ${GLOG_LIBRARIES})
+  else()
+    message(WARNING
+        "glog is not found. Caffe2 will build without glog support but it is "
+        "strongly recommended that you install glog. Suppress this warning "
+        "with -DUSE_GLOG=OFF")
+    set(USE_GLOG OFF)
   endif()
 endif()
 
@@ -219,10 +225,12 @@ endif()
 
 # ---[ EIGEN
 set(EIGEN_MPL2_ONLY 1)
-find_package(Eigen3 QUIET)
+find_package(Eigen3)
 if(EIGEN3_FOUND)
+  message(STATUS "Found system Eigen at " ${EIGEN3_INCLUDE_DIRS})
   caffe2_include_directories(${EIGEN3_INCLUDE_DIRS})
 else()
+  message(STATUS "Did not find system Eigen. Using third party subdirectory.")
   caffe2_include_directories(${PROJECT_SOURCE_DIR}/third_party/eigen)
 endif()
 
