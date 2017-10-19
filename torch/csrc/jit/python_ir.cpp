@@ -91,7 +91,7 @@ void initPythonIRBindings(PyObject * module_) {
     .NS(removeInput)
     .NS(removeAllInputs)
     .NS(destroy)
-    .def("typeAs", [](Node * node, Node * other) {
+    .def("setTypeAs", [](Node * node, Node * other) {
       node->setType(other->typeOption());
       return node;
     })

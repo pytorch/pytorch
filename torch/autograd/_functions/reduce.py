@@ -109,45 +109,6 @@ class Prod(Function):
             return grad_input, None, None
 
 
-class Mean(Function):
-
-    @staticmethod
-    def symbolic(g, input, dim=None, keepdim=None):
-        output = g.create("ReduceMean", [input])
-        if dim is not None:
-            output = output.is_("axes", dim)
-        if keepdim is None or keepdim is False:
-            output = output.i_("keepdims", 0)
-        return g.appendNode(output)
-
-    @staticmethod
-    def forward(ctx, input, dim=None, keepdim=None):
-        ctx.dim = dim
-        ctx.keepdim = False if keepdim is None else keepdim
-        ctx.input_size = input.size()
-        if dim is None:
-            return input.new((input.mean(),))
-        else:
-            if keepdim is not None:
-                return input.mean(dim, keepdim=keepdim)
-            else:
-                return input.mean(dim)
-
-    @staticmethod
-    def backward(ctx, grad_output):
-        if ctx.dim is None:
-            grad_input_val = grad_output / reduce(lambda x, y: x * y, ctx.input_size, 1)
-            return grad_input_val.expand(ctx.input_size), None, None
-        else:
-            if ctx.keepdim is False and len(ctx.input_size) != 1:
-                grad_output = grad_output.unsqueeze(ctx.dim)
-
-            repeats = [1 for _ in ctx.input_size]
-            dim_size = ctx.input_size[ctx.dim]
-            repeats[ctx.dim] = dim_size
-            return grad_output.repeat(*repeats).div_(dim_size), None, None
-
-
 class _SelectionFunction(Function):
     has_all_reduce = True
     # additional_args is prepended before dim when calling the tensor

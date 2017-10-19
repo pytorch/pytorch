@@ -12,7 +12,6 @@ from itertools import product
 from operator import mul
 from functools import reduce
 import torch.nn.functional as F
-from torch.autograd import gradcheck
 from torch.autograd.gradcheck import gradgradcheck, gradcheck
 from torch.autograd.function import once_differentiable
 from torch.autograd.profiler import profile

@@ -53,67 +53,6 @@ class Log1p(Function):
         return grad_output.div(i.add(1))
 
 
-@traceable
-class Tanh(InplaceFunction):
-
-    @staticmethod
-    def symbolic(g, i, inplace=False):
-        # TODO: [Export inplace]
-        return g.op("Tanh", i)
-
-    @staticmethod
-    def forward(ctx, i, inplace=False):
-        if inplace:
-            ctx.mark_dirty(i)
-            result = i.tanh_()
-        else:
-            result = i.tanh()
-        ctx.save_for_backward(result)
-        return result
-
-    @staticmethod
-    def backward(ctx, grad_output):
-        result, = ctx.saved_variables
-        if grad_output.volatile and not ctx._is_tracing:
-            grad_input = Variable(grad_output.data.new(grad_output.size()), volatile=True)
-            backend = type2backend[type(result.data)]
-            backend.Tanh_updateGradInput(backend.library_state, grad_output.data,
-                                         grad_input.data, result.data)
-        else:
-            grad_input = grad_output * (1 - result * result)
-        return grad_input, None
-
-
-@traceable
-class Sigmoid(InplaceFunction):
-
-    @staticmethod
-    def symbolic(g, i, inplace=False):
-        return g.op("Sigmoid", i)
-
-    @staticmethod
-    def forward(ctx, i, inplace=False):
-        if inplace:
-            ctx.mark_dirty(i)
-            result = i.sigmoid_()
-        else:
-            result = i.sigmoid()
-        ctx.save_for_backward(result)
-        return result
-
-    @staticmethod
-    def backward(ctx, grad_output):
-        result, = ctx.saved_variables
-        if grad_output.volatile and not ctx._is_tracing:
-            grad_input = Variable(grad_output.data.new(grad_output.size()), volatile=True)
-            backend = type2backend[type(result.data)]
-            backend.Sigmoid_updateGradInput(backend.library_state, grad_output.data,
-                                            grad_input.data, result.data)
-        else:
-            grad_input = grad_output * ((1 - result) * result)
-        return grad_input, None
-
-
 class Sinh(Function):
 
     @staticmethod

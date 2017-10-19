@@ -62,7 +62,6 @@ def create_python_bindings(
         'Generator *': 'generator',
         'Storage &': 'storage',
         'int64_t': 'toInt64',
-        'int': 'toInt64',
         'bool': 'toBool',
         'double': 'toDouble',
     }

@@ -122,6 +122,7 @@ def is_iterable(obj):
 
 class TestCase(unittest.TestCase):
     precision = 1e-5
+    maxDiff = None
 
     def setUp(self):
         torch.manual_seed(SEED)
