@@ -173,12 +173,61 @@ Variable VariableType::as_variable(const Scalar & scalar) const {
   return make_variable(std::move(tensor));
 }
 
-static void check_inplace(const VariableImpl& pImpl) {
-  if (pImpl.requires_grad && !pImpl.grad_fn) {
+struct VariableFlags {
+  bool requires_grad;
+  bool is_volatile;
+};
+
+template<typename T>
+static VariableFlags compute_flags_tmpl(T tensors) {
+  VariableFlags flags = {false, false};
+  for (const Tensor& tensor : tensors) {
+    auto& var = static_cast<const Variable&>(tensor);
+    if (var.defined()) {
+      flags.requires_grad |= var.requires_grad();
+      flags.is_volatile |= var.is_volatile();
+    }
+  }
+  flags.requires_grad &= !flags.is_volatile;
+  return flags;
+}
+
+using TensorRef = std::reference_wrapper<const Tensor>;
+using TensorRefList = std::initializer_list<TensorRef>;
+
+static VariableFlags compute_flags(const TensorRefList& tensors) {
+  return compute_flags_tmpl(tensors);
+}
+
+static VariableFlags compute_flags(TensorList tensors) {
+  return compute_flags_tmpl(tensors);
+}
+
+static void check_no_requires_grad(const Tensor& tensor, const char* name) {
+  auto& var = static_cast<const Variable&>(tensor);
+  if (var.defined() && var.requires_grad()) {
+    std::string msg = "the derivative for '";
+    msg += name;
+    msg += "' is not implemented";
+    throw std::runtime_error(msg);
+  }
+}
+
+static function_list compute_next_functions(const std::initializer_list<Tensor>& tensors) {
+  return Function::flags(tensors).next_functions;
+}
+
+static function_list compute_next_functions(TensorList tensors) {
+  return Function::flags(tensors).next_functions;
+}
+
+static void check_inplace(const Tensor& tensor) {
+  auto& var = static_cast<const Variable&>(tensor);
+  if (var.requires_grad() && !var.grad_fn()) {
     at::runtime_error(
       "a leaf Variable that requires grad has been used in an in-place operation.");
   }
-  auto live_refs = pImpl.version_counter.live_refs();
+  auto live_refs = var.version_counter().live_refs();
   if (live_refs > 1) {
     at::runtime_error(
       "in-place operations can be only used on variables that don't share "
@@ -187,29 +236,13 @@ static void check_inplace(const VariableImpl& pImpl) {
   }
 }
 
-static void wrap_output(VariableImpl& pImpl, FunctionFlags flags, std::shared_ptr<Function> grad_fn) {
-  // Hooks up the grad_fn and sets the flags of the function output. This only
-  // supports a single differentiable output.
-  pImpl.requires_grad = flags.is_executable;
-  pImpl.is_volatile = flags.is_volatile;
-  if (!flags.is_volatile) {
-    pImpl.output_nr = grad_fn->num_inputs++;
-    grad_fn->set_flags(std::move(flags));
-    pImpl.grad_fn = std::move(grad_fn);
+static void set_flags(Variable& var, VariableFlags flags, std::shared_ptr<Function> grad_fn) {
+  var.requires_grad() = flags.requires_grad;
+  var.is_volatile() = flags.is_volatile;
+  if (grad_fn) {
+    var.output_nr() = grad_fn->num_inputs++;
+    var.grad_fn() = std::move(grad_fn);
   }
-}
-
-static void wrap_output(Tensor& t, FunctionFlags flags, std::shared_ptr<Function> grad_fn) {
-  auto pImpl = static_cast<VariableImpl*>(t.get());
-  wrap_output(*pImpl, std::move(flags), std::move(grad_fn));
-}
-
-static void wrap_output(std::tuple<Variable, Variable>& t, FunctionFlags flags, std::shared_ptr<Function> grad_fn) {
-  wrap_output(std::get<0>(t), std::move(flags), std::move(grad_fn));
-}
-
-static void wrap_output(std::tuple<Variable, Variable, Variable>& t, FunctionFlags flags, std::shared_ptr<Function> grad_fn) {
-  wrap_output(std::get<0>(t), std::move(flags), std::move(grad_fn));
 }
 
 static void increment_version(const Tensor & t) {
@@ -234,30 +267,29 @@ void VariableType::s_copy(const Tensor & src, Tensor & dst) const {
   // it automatically
   auto& src_ = unpack_any(src, "src", 0);
   auto& dst_ = unpack(dst, "dst", 1);
-  auto& pImpl = static_cast<VariableImpl&>(*dst.get());
-  check_inplace(pImpl);
-  auto flags = Function::flags({ src });
-  baseType->s_copy(src_, dst_);
-  pImpl.version_counter.increment();
-  if (isFloatingPoint(dst.type().scalarType())) {
-    if (isFloatingPoint(src.type().scalarType())) {
-      // TODO: handle type conversions
-      wrap_output(pImpl, std::move(flags), std::make_shared<Identity>());
-    } else {
-      // TODO: handle type conversions
-      wrap_output(pImpl, std::move(flags), std::make_shared<Identity>());
-    }
+  check_inplace(dst);
+  std::shared_ptr<Identity> grad_fn;
+  auto flags = compute_flags({ src });
+  flags.requires_grad &= isFloatingPoint(dst.type().scalarType());
+  if (flags.requires_grad) {
+    // TODO: handle type conversions
+    grad_fn = std::make_shared<Identity>();
+    grad_fn->is_executable = true;
+    grad_fn->next_functions = compute_next_functions({ src });
   }
+  baseType->s_copy(src_, dst_);
+  increment_version(dst);
+  set_flags(static_cast<Variable&>(dst), flags, std::move(grad_fn));
 }
 
 Tensor & VariableType::m_resize_(Tensor & self, IntList size) const {
   auto& self_ = unpack(self, "self", 0);
-  auto& pImpl = static_cast<VariableImpl&>(*self.get());
-  check_inplace(pImpl);
-  if (pImpl.grad_fn) {
+  check_inplace(self);
+  auto& self_var = static_cast<Variable&>(self);
+  if (self_var.grad_fn()) {
     at::runtime_error("cannot resize non-leaf variables");
   }
-  if (pImpl.requires_grad) {
+  if (self_var.requires_grad()) {
     at::runtime_error("cannot resize variables which require grad");
   }
   baseType->m_resize_(self_, size);
