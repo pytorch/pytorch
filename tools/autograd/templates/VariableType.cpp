@@ -20,6 +20,7 @@
 #endif
 
 using namespace at;
+using namespace torch::autograd::generated;
 
 namespace torch { namespace autograd {
 

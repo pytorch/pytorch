@@ -8,7 +8,7 @@
 #include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/autograd/saved_variable.h"
 
-namespace torch { namespace autograd {
+namespace torch { namespace autograd { namespace generated {
 
 using at::Scalar;
 using at::Tensor;
@@ -34,4 +34,4 @@ inline Tensor maybe_multiply(const Tensor & t, const Scalar & s);
 
 ${autograd_function_declarations}
 
-}} // namespace torch::autograd
+}}} // namespace torch::autograd::generated

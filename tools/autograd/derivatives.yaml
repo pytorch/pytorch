@@ -570,9 +570,9 @@
   grad_output: log_sigmoid_backward(grad, input, buffer)
   input: log_sigmoid_double_backward(grad * grad_output, input)
 
-- name: log_softmax_backward(Tensor grad_output, Tensor input, Tensor output)
-  grad_output: grad - (grad * output.exp()).sum(1, true)
-  input: log_softmax_double_backward(grad, grad_output, output)
+- name: log_softmax_backward(Tensor grad_output, Tensor input, int dim, Tensor output)
+  grad_output: grad - (grad * output.exp()).sum(dim, true)
+  input: log_softmax_double_backward(grad, grad_output, dim, output)
 
 - name: leaky_relu_backward(Tensor grad_output, Tensor input, Scalar negative_slope, bool inplace)
   grad_output: leaky_relu_backward(grad, input, negative_slope, false)
@@ -612,9 +612,9 @@
   grad_output: softplus_backward(grad, input, beta, threshold, output)
   input: softplus_double_backward(grad * grad_output, input, beta, threshold)
 
-- name: softmax_backward(Tensor grad_output, Tensor input, Tensor output)
-  grad_output: softmax_backward(grad, input, output)
-  input: softmax_double_backward(grad, grad_output, output)
+- name: softmax_backward(Tensor grad_output, Tensor input, int dim, Tensor output)
+  grad_output: softmax_backward(grad, input, dim, output)
+  input: softmax_double_backward(grad, grad_output, dim, output)
 
 - name: soft_margin_loss_backward(Tensor input, Tensor target, bool size_average)
   input: soft_margin_loss_double_backward(grad, input, target, size_average)

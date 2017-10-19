@@ -6,7 +6,7 @@ using at::Tensor;
 using at::Scalar;
 using at::IntList;
 
-namespace torch { namespace autograd {
+namespace torch { namespace autograd { namespace generated {
 
 namespace {
 
@@ -276,26 +276,26 @@ Tensor log_sigmoid_double_backward(const Tensor & grad, const Tensor & input) {
   return grad * (z - 1) * z;
 }
 
-Tensor softmax_double_backward(const Tensor & grad, const Tensor & grad_output, const Tensor & output) {
+Tensor softmax_double_backward(const Tensor & grad, const Tensor & grad_output, int dim, const Tensor & output) {
   auto gO = grad_output;
   auto ggI = grad;
 
   auto ggI_output = ggI * output;
-  auto ggI_out_sum = ggI_output.sum(1, true);
+  auto ggI_out_sum = ggI_output.sum(dim, true);
   auto ggI_out_sum_output = ggI_out_sum * output;
-  auto gO_out_sum = (gO * output).sum(1, true);
+  auto gO_out_sum = (gO * output).sum(dim, true);
 
   // gI calculation
   auto gI_t0 = ggI_output * (gO - gO_out_sum);
-  auto gI_t1 = output * ((ggI_output * gO).sum(1, true).sub_(gO_out_sum * ggI_out_sum));
+  auto gI_t1 = output * ((ggI_output * gO).sum(dim, true).sub_(gO_out_sum * ggI_out_sum));
   auto gI_t2 = ggI_out_sum_output * gO;
   auto gI_t3 = ggI_out_sum_output * gO_out_sum;
   return gI_t0 - gI_t1 - gI_t2 + gI_t3;
 }
 
-Tensor log_softmax_double_backward(const Tensor & grad, const Tensor & grad_output, const Tensor & output) {
+Tensor log_softmax_double_backward(const Tensor & grad, const Tensor & grad_output, int dim, const Tensor & output) {
   auto z = output.exp();
-  return z * grad_output.sum(1, true) * ((grad * z).sum(1, true) - grad);
+  return z * grad_output.sum(dim, true) * ((grad * z).sum(dim, true) - grad);
 }
 
 Tensor smooth_l1_loss_double_backward(const Tensor & grad, const Tensor & input, const Tensor & target, bool size_average) {
@@ -351,4 +351,4 @@ Tensor softplus_double_backward(const Tensor & grad, const Tensor & input, Scala
 
 ${autograd_function_definitions}
 
-}} // namespace torch::autograd
+}}} // namespace torch::autograd::generated
