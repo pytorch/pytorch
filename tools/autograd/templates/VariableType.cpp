@@ -161,16 +161,16 @@ Variable VariableType::as_variable(const Scalar & scalar) const {
 }
 
 static void check_inplace(const VariableImpl& pImpl) {
-  auto& version_counter = *pImpl.version_counter;
   if (pImpl.requires_grad && !pImpl.grad_fn) {
     at::runtime_error(
       "a leaf Variable that requires grad has been used in an in-place operation.");
   }
-  if (version_counter.var_refcnt() > 1) {
+  auto live_refs = pImpl.version_counter.live_refs();
+  if (live_refs > 1) {
     at::runtime_error(
       "in-place operations can be only used on variables that don't share "
       "storage with any other variables, but detected that there are %d objects "
-      "sharing it", version_counter.var_refcnt());
+      "sharing it", live_refs);
   }
 }
 
@@ -200,16 +200,16 @@ static void wrap_output(std::tuple<Variable, Variable, Variable>& t, FunctionFla
 }
 
 static void increment_version(const Tensor & t) {
-  auto pImpl = static_cast<VariableImpl*>(t.get());
-  (*pImpl->version_counter)++;
+  auto& var = static_cast<const Variable&>(t);
+  var.version_counter().increment();
 }
 
 static void take_version_counter(Tensor & dst, const Tensor & src) {
   // replaces the version counter in dst with the one in src
   // call when dst is a view of src
-  auto srcImpl = static_cast<VariableImpl*>(src.get());
-  auto dstImpl = static_cast<VariableImpl*>(dst.get());
-  dstImpl->version_counter->join_with(*srcImpl->version_counter);
+  auto& src_var = static_cast<const Variable&>(src);
+  auto& dst_var = static_cast<Variable&>(dst);
+  dst_var.version_counter() = src_var.version_counter();
 }
 
 static bool isFloatingPoint(ScalarType s) {
@@ -225,7 +225,7 @@ void VariableType::s_copy(const Tensor & src, Tensor & dst) const {
   check_inplace(pImpl);
   auto flags = Function::flags({ src });
   baseType->s_copy(src_, dst_);
-  (*pImpl.version_counter)++;
+  pImpl.version_counter.increment();
   if (isFloatingPoint(dst.type().scalarType())) {
     if (isFloatingPoint(src.type().scalarType())) {
       // TODO: handle type conversions
