@@ -1,4 +1,5 @@
 from ..stochastic_function import StochasticFunction
+import torch
 
 # Gradient formulas are based on Simple Statistical Gradient-Following
 # Algorithms for Connectionist Reinforcement Learning, available at
@@ -30,9 +31,13 @@ class Multinomial(StochasticFunction):
         output_probs = probs.gather(1, samples)
         output_probs.add_(1e-6).reciprocal_()
         output_probs.neg_().mul_(reward)
-        # TODO: add batched index_add
-        for i in range(probs.size(0)):
-            grad_probs[i].index_add_(0, samples[i], output_probs[i])
+        # Fill in gradients
+        mask = grad_probs.new().resize_as_(grad_probs).fill_(0).repeat(samples.size(1), 1)
+        unrolled_samples = samples.t().contiguous().view(-1)
+        unrolled_output_probs = output_probs.t().contiguous().view(-1)
+        mask[torch.arange(0, mask.size(0)).long(), unrolled_samples] = unrolled_output_probs
+        mask = mask.view(-1, grad_probs.size(0), grad_probs.size(1)).sum(0)
+        grad_probs += mask
         return grad_probs
 
 
