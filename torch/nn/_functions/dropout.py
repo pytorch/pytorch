@@ -59,9 +59,11 @@ class FeatureDropout(Dropout):
 
     @staticmethod
     def symbolic(g, input, p=0.5, train=False, inplace=False):
-        # NB: No FeatureDropout in ONNX, use Dropout instead.
+        # NB: In inference mode, FeatureDropout is exported as an identity op.
         if train:
-            raise ValueError("In train mode, FeatureDropout is different from Dropout.")
+            raise ValueError("Exporting ONNX FeatureDropout in train mode is not supported, "
+                             "and the exported model should not be used for training. "
+                             "The FeatureDropout support in ONNX is still under construction.")
         return input
 
     @staticmethod
