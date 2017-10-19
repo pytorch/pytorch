@@ -28,6 +28,13 @@ struct NcclCommList {
   ~NcclCommList() {
     if (comms) {
       for (int i = 0; i < ndevices; i++) {
+        int dummy_var;
+        if (cudaGetDevice(&dummy_var) != cudaSuccess) {
+          /* there are cases when this destructor is called after the
+           CUDA driver is already unloaded from the process.
+           In these cases, skip ncclCommDestroy */
+          return;
+        }
 	ncclCommDestroy(comms[i]);
       }
     }
@@ -107,7 +114,7 @@ static void _check_inputs(std::vector<at::Tensor> &inputs, std::vector<at::Tenso
     if (input.numel() != numel) {
       throw std::runtime_error("all inputs must have the same number of elements");
     }
-  
+
     if (output.numel() * output_multiplier != numel * input_multiplier) {
       throw std::runtime_error("output must be of size input_size * size_multiplier");
     }
@@ -144,7 +151,7 @@ PyObject * THCPModule_nccl_reduce(PyObject *self, PyObject *args) {
   std::vector<THCStream*> streams = THPUtils_PySequence_to_THCStreamList(_streams);
 
   THPUtils_assert(inputs.size() == streams.size(), "number of streams is not equal to number of inputs");
-  
+
   // we can safely release GIL after this line, no python API used
   AutoNoGIL no_gil;
   _check_inputs(inputs, outputs, 1, 1);

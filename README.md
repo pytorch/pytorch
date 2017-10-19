@@ -89,7 +89,7 @@ Changing the way the network behaves means that one has to start from scratch.
 With PyTorch, we use a technique called reverse-mode auto-differentiation, which allows you to
 change the way your network behaves arbitrarily with zero lag or overhead. Our inspiration comes
 from several research papers on this topic, as well as current and past work such as
-[autograd](https://github.com/twitter/torch-autograd),
+[torch-autograd](https://github.com/twitter/torch-autograd),
 [autograd](https://github.com/HIPS/autograd),
 [Chainer](http://chainer.org), etc.
 
@@ -159,7 +159,7 @@ Once you have [Anaconda](https://www.continuum.io/downloads) installed, here are
 
 If you want to compile with CUDA support, install
 - [NVIDIA CUDA](https://developer.nvidia.com/cuda-downloads) 7.5 or above
-- [NVIDIA cuDNN](https://developer.nvidia.com/cudnn) v5.x or above
+- [NVIDIA cuDNN](https://developer.nvidia.com/cudnn) v6.x or above
 
 If you want to disable CUDA support, export environment variable `NO_CUDA=1`.
 

@@ -4,13 +4,33 @@ from .utils import maybe_unexpand, maybe_unexpand_or_view
 import math
 
 
+# Note [Export inplace]
+# ~~~~~~~~~~~~~~~~~~~~~
+# In abstract, it would be better for us to export inplace annotations,
+# than to not export them, since it is useful information that can
+# help the target of an ONNX export export more efficiently.  Unfortunately,
+# there are a few barriers to actually making this happen:
+#
+#   - ONNX does not currently standardize any notion of inplace
+#   - PyTorch's parallel execution engine (which executes these operators)
+#     doesn't handle inplace operations correctly
+#   - If we did add inplace, we would also need a notion of *aliasing*,
+#     to determine when reordering past an inplace operation is sound
+#     or not.
+#
+# In short, while it may seem awkward and terrible for us to simply
+# unconditionally discard the inplace annotations on our autograd functions;
+# it is *sound* to do so (inplace ops still "return" the result
+# of the inplace operation), and is not easy to fix.
+
+
 @traceable
 class Add(InplaceFunction):
 
     @staticmethod
     def symbolic(g, a, b, inplace=False):
         # TODO: [Export inplace]
-        return g.appendNode(g.create("Add", [a, b]))
+        return g.op("Add", a, b)
 
     @staticmethod
     def forward(ctx, a, b, inplace=False):
@@ -116,8 +136,28 @@ def sort_args(a, b, key=torch.is_tensor):
     return (a, b, True) if key(a) else (b, a, False)
 
 
+def gen_inputs(g, a, b):
+    tensor, constant, tensor_first = sort_args(a, b, key=is_node)
+    assert tensor.hasType()
+    type = str(tensor.type().scalarType())
+    broadcast = False
+    if len(tensor.type().sizes()) > 1:
+        broadcast = True
+    constant = g.constant(constant, [0], type).typeAs(tensor)
+    return tensor, constant, broadcast, tensor_first
+
+
 @traceable
 class AddConstant(InplaceFunction):
+
+    @staticmethod
+    def symbolic(g, a, b, inplace=False):
+        # TODO: [Export inplace]
+        tensor, constant, broadcast, tensor_first = gen_inputs(g, a, b)
+        if tensor_first:
+            return g.op("Add", tensor, constant, broadcast_i=broadcast)
+        else:
+            return g.op("Add", constant, tensor, broadcast_i=broadcast)
 
     @staticmethod
     def forward(ctx, a, b, inplace=False):
@@ -141,11 +181,12 @@ class SubConstant(InplaceFunction):
 
     @staticmethod
     def symbolic(g, a, b, inplace=False):
-        tensor, constant, tensor_first = sort_args(a, b, key=is_node)
+        # TODO: [Export inplace]
+        tensor, constant, broadcast, tensor_first = gen_inputs(g, a, b)
         if tensor_first:
-            return g.op("SubConstant", tensor, value_f=constant)
+            return g.op("Sub", tensor, constant, broadcast_i=broadcast)
         else:
-            return g.op("AddConstant", g.op("Neg", tensor).typeAs(tensor), value_f=constant)
+            return g.op("Add", g.op("Neg", tensor).typeAs(tensor), constant, broadcast_i=broadcast)
 
     @staticmethod
     def forward(ctx, a, b, inplace=False):

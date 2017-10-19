@@ -162,7 +162,7 @@ class NewModuleTest(InputVariableMixin, ModuleTest):
                 test_case.assertEqual(type(p.data), torch.DoubleTensor)
 
             # TODO: Hardshrink is lacking a CUDA implementation
-            if TEST_CUDA and type(module) != nn.Hardshrink:
+            if TEST_CUDA and self.should_test_cuda and type(module) != nn.Hardshrink:
                 # to GPU0
                 input = input.float().cuda()
                 module.float().cuda()
@@ -1652,6 +1652,29 @@ class TestNN(NNTestCase):
         del state_dict['linear1.weight']
         self.assertRaises(KeyError, lambda: net.load_state_dict(state_dict))
 
+        state_dict = net.state_dict()
+        state_dict.update({'bn.running_mean': torch.rand(14, 4)})  # wrong size
+        self.assertRaises(RuntimeError, lambda: net.load_state_dict(state_dict))
+
+        state_dict = net.state_dict()
+        old_state_dict = deepcopy(state_dict)
+        state_dict = {
+            'linear1.weight': torch.ones(5, 5),
+            'block.conv1.bias': torch.arange(1, 4),
+            'bn.running_mean': torch.randn(2),
+            'nonexistent_key': torch.rand(3)
+        }
+        net.load_state_dict(state_dict, strict=False)
+        self.assertEqual(net.linear1.weight.data, state_dict['linear1.weight'])
+        self.assertEqual(net.block.conv1.bias.data, state_dict['block.conv1.bias'])
+        self.assertEqual(net.bn.running_mean, state_dict['bn.running_mean'])
+        new_state_dict = net.state_dict()
+        del old_state_dict['linear1.weight']
+        del old_state_dict['block.conv1.bias']
+        del old_state_dict['bn.running_mean']
+        for k, v, in old_state_dict.items():
+            self.assertTrue(v.equal(new_state_dict[k]))
+
     def test_parameter_assignment(self):
         l = nn.Linear(5, 5)
 
@@ -1930,6 +1953,49 @@ class TestNN(NNTestCase):
                              torch.cat([i1.grad.data, i2.grad.data], 1))
             self.assertEqual(m.weight.grad.data,
                              torch.cat([m1.weight.grad.data, m2.weight.grad.data], 0))
+
+    # Very similar to test_Conv2d_naive_groups but with special care to handle
+    # the number of groups == number of input channels
+    @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
+    def test_Conv2d_depthwise_naive_groups(self):
+        types = [torch.cuda.FloatTensor, torch.cuda.DoubleTensor,
+                 torch.cuda.HalfTensor]
+        precs = [1e-5, 1e-5, 1e-2]
+        for tp, prec in zip(types, precs):
+            for depth_multiplier in [1, 2]:
+                m = nn.Conv2d(2, 2 * depth_multiplier, kernel_size=3, groups=2).type(tp)
+                i = Variable(torch.randn(2, 2, 6, 6).type(tp), requires_grad=True)
+                output = m(i)
+                grad_output = torch.randn(2, 2 * depth_multiplier, 4, 4).type(tp)
+                output.backward(grad_output)
+
+                offset = 1 * depth_multiplier
+
+                m1 = nn.Conv2d(1, 1 * depth_multiplier, kernel_size=3).type(tp)
+                m1.weight.data = m.weight.data[:offset].clone()
+                m1.bias.data = m.bias.data[:offset].clone()
+                i1 = Variable(i.data[:, :1].contiguous(), requires_grad=True)
+                output1 = m1(i1)
+                output1.backward(grad_output[:, :offset].contiguous())
+
+                m2 = nn.Conv2d(1, 1 * depth_multiplier, kernel_size=3).type(tp)
+                m2.weight.data.copy_(m.weight.data[offset:])
+                m2.bias.data.copy_(m.bias.data[offset:])
+                i2 = Variable(i.data[:, 1:].contiguous(), requires_grad=True)
+                output2 = m2(i2)
+                output2.backward(grad_output[:, offset:].contiguous())
+
+                self.assertEqual(output, torch.cat([output1, output2], 1),
+                                 prec=prec)
+                self.assertEqual(i.grad.data,
+                                 torch.cat([i1.grad.data, i2.grad.data], 1),
+                                 prec=prec)
+                self.assertEqual(m.bias.grad.data,
+                                 torch.cat([m1.bias.grad.data,
+                                            m2.bias.grad.data], 0), prec=prec)
+                self.assertEqual(m.weight.grad.data,
+                                 torch.cat([m1.weight.grad.data,
+                                            m2.weight.grad.data], 0), prec=prec)
 
     def test_MaxUnpool2d_output_size(self):
         m = nn.MaxPool2d(3, stride=2, return_indices=True)
@@ -3127,14 +3193,14 @@ class TestNNInit(TestCase):
         if isinstance(tensor, Variable):
             tensor = tensor.data
         samples = list(tensor.view(-1))
-        p_value = stats.kstest(samples, 'norm', args=(mean, std)).pvalue
+        p_value = stats.kstest(samples, 'norm', args=(mean, std))[1]
         return p_value > 0.0001
 
     def _is_uniform(self, tensor, a, b):
         if isinstance(tensor, Variable):
             tensor = tensor.data
         samples = list(tensor.view(-1))
-        p_value = stats.kstest(samples, 'uniform', args=(a, (b - a))).pvalue
+        p_value = stats.kstest(samples, 'uniform', args=(a, (b - a)))[1]
         return p_value > 0.0001
 
     def _create_random_nd_tensor(self, dims, size_min, size_max, as_variable):
@@ -3522,6 +3588,13 @@ def add_test(test):
     setattr(TestNN, cuda_test_name, lambda self, test=test: test.test_cuda(self))
 
 
+def wrap_functional(fn, **kwargs):
+    class FunctionalModule(nn.Module):
+        def forward(self, *args):
+            return fn(*args, **kwargs)
+    return FunctionalModule
+
+
 new_criterion_tests = [
     dict(
         module_name='BCEWithLogitsLoss',
@@ -3817,6 +3890,31 @@ new_module_tests = [
         input_size=(1, 2, 4, 5),
         cudnn=True,
         check_gradgrad=False,
+    ),
+    dict(
+        fullname='Conv2d_depthwise',
+        constructor=lambda: nn.Conv2d(4, 4, (3, 3), groups=4),
+        input_size=(2, 4, 6, 6),
+    ),
+    dict(
+        fullname='Conv2d_depthwise_with_multiplier',
+        constructor=lambda: nn.Conv2d(4, 8, (3, 3), groups=4),
+        input_size=(2, 4, 6, 6),
+    ),
+    dict(
+        fullname='Conv2d_depthwise_strided',
+        constructor=lambda: nn.Conv2d(4, 4, (3, 3), stride=(2, 2), groups=4),
+        input_size=(2, 4, 6, 6),
+    ),
+    dict(
+        fullname='Conv2d_depthwise_padded',
+        constructor=lambda: nn.Conv2d(4, 4, (3, 3), padding=(1, 1), groups=4),
+        input_size=(2, 4, 6, 6),
+    ),
+    dict(
+        fullname='Conv2d_depthwise_dilated',
+        constructor=lambda: nn.Conv2d(4, 4, (2, 2), dilation=(2, 2), groups=4),
+        input_size=(2, 4, 5, 5),
     ),
     dict(
         module_name='MaxPool2d',
@@ -4287,6 +4385,44 @@ new_module_tests = [
         constructor_args=(1,),
         input_size=(5, 6, 7),
         desc='dim'
+    ),
+    dict(
+        constructor=wrap_functional(F.softmax, dim=1),
+        input_size=(2, 3, 4, 5),
+        fullname='softmax',
+        pickle=False,
+    ),
+    dict(
+        constructor=wrap_functional(F.softmax, dim=0),
+        input_size=(2, 3, 4, 5),
+        fullname='softmax_dim0',
+        test_cuda=False,
+        pickle=False,
+    ),
+    dict(
+        constructor=wrap_functional(F.softmax, dim=3),
+        input_size=(2, 3, 4, 5),
+        fullname='softmax_dim3',
+        test_cuda=False,
+        pickle=False,
+    ),
+    dict(
+        constructor=wrap_functional(F.log_softmax, dim=1),
+        input_size=(2, 3, 4, 5),
+        fullname='log_softmax',
+        pickle=False,
+    ),
+    dict(
+        constructor=wrap_functional(F.log_softmax, dim=0),
+        input_size=(2, 3, 4, 5),
+        fullname='log_softmax_dim0',
+        pickle=False,
+    ),
+    dict(
+        constructor=wrap_functional(F.log_softmax, dim=3),
+        input_size=(2, 3, 4, 5),
+        fullname='log_softmax_dim3',
+        pickle=False,
     ),
 ]
 

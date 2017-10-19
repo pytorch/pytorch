@@ -14,6 +14,7 @@ import string
 import json
 import math
 import contextlib
+import numbers
 from ._utils import _range
 from torch._six import string_classes
 
@@ -111,7 +112,7 @@ def _export(model, args, f, export_params=True, verbose=False, training=False):
     return torch_out
 
 
-attr_pattern = re.compile("^(.+)_([ifstg])$")
+attr_pattern = re.compile("^(.+)_([ifstgz])$")
 
 
 def run_symbolic(op_name, symbolic_fn, args):
@@ -136,7 +137,7 @@ def _add_attribute(node, key, value):
             "Invalid attribute specifier '{}' names " +
             " must be suffixed with type, e.g. 'dim_i' or 'dims_i'").format(key))
     name, kind = m.group(1), m.group(2)
-    if not isinstance(value, string_classes) and isinstance(value, collections.Iterable):
+    if not isinstance(value, string_classes) and not torch.is_tensor(value) and isinstance(value, collections.Iterable):
         kind += "s"
     return getattr(node, kind + '_')(name, value)
 
@@ -149,6 +150,36 @@ def _newNode(self, opname, *args, **kwargs):
 
 
 def _op(self, opname, *args, **kwargs):
+    """
+    Create an ONNX operator 'opname', taking 'args' as inputs
+    and attributes 'kwargs' and add it to the current graph,
+    returning the node representing the single output of this
+    operator (see the `outputs` keyword argument for multi-return
+    nodes).
+
+    The set of operators and the inputs/attributes they take
+    is documented at https://github.com/onnx/onnx/blob/master/docs/Operators.md
+
+    This op is monkey-patched to be available on the 'Graph' object
+    passed in as the first argument.
+
+    Arguments:
+        opname (string): The ONNX operator name, e.g., `Abs` or `Add`.
+        args (Node...): The inputs to the operator; usually provided
+            as arguments to the `symbolic` definition.
+        kwargs: The attributes of the ONNX operator, with keys named
+            according to the following convention: `alpha_f` indicates
+            the `alpha` attribute with type `f`.  The valid type specifiers are
+            `f` (float), `i` (int), `s` (string) or `t` (Tensor).  An attribute
+            specified with type float accepts either a single float, or a
+            list of floats (e.g., you would say `dims_i` for a `dims` attribute
+            that takes a list of integers).
+        outputs (int, optional):  The number of outputs this operator returns;
+            by default an operator is assumed to return a single output.
+            If `outputs` is greater than one, this functions returns a tuple
+            of output `Node`, representing each output of the ONNX operator
+            in positional.
+    """
     outputs = kwargs.pop('outputs', 1)
     n = self.appendNode(_newNode(self, opname, *args, **kwargs))
     if outputs == 1:
@@ -160,5 +191,38 @@ def _at(self, opname, *args, **kwargs):
     return self.op("ATen", *args, operator_s=opname, **kwargs)
 
 
+# This helper function can create either constant tensor or constant scalar.
+# If dims is None or 0 or [0], generate a 0-d tensor (scalar).
+def _constant(self, value, dims, type, *args, **kwargs):
+    assert isinstance(value, numbers.Number)
+    assert type is not None
+    isscalar = False
+    if dims is None or dims == 0 or set(dims) == set([0]):
+        dims = [1]
+        isscalar = True
+    type = type.lower()
+    if type == "char":
+        tensor = torch.CharTensor(*dims)
+    elif type == "short":
+        tensor = torch.ShortTensor(*dims)
+    elif type == "int":
+        tensor = torch.IntTensor(*dims)
+    elif type == "long":
+        tensor = torch.LongTensor(*dims)
+    elif type == "half":
+        tensor = torch.HalfTensor(*dims)
+    elif type == "float":
+        tensor = torch.FloatTensor(*dims)
+    elif type == "double":
+        tensor = torch.DoubleTensor(*dims)
+    else:
+        raise ValueError("Unknown type, type should be one of the following strings: "
+                         "char, short, int, long, half, float, double")
+    tensor.fill_(value)
+    if isscalar:
+        return self.op("Constant", *args, value_z=tensor, **kwargs)
+    return self.op("Constant", *args, value_t=tensor, **kwargs)
+
 torch._C.Graph.op = _op
 torch._C.Graph.at = _at
+torch._C.Graph.constant = _constant

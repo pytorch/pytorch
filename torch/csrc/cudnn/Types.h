@@ -4,7 +4,7 @@
 #include <Python.h>
 #include <cstddef>
 #include <string>
-#include <cudnn.h>
+#include "cudnn-wrapper.h"
 #include "../Types.h"
 #include <ATen/Tensor.h>
 

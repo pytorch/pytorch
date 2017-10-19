@@ -39,7 +39,7 @@ class profile(object):
         ...     y = x ** 2
         ...     y.backward()
         >>> # NOTE: some columns were removed for brevity
-        ... print(prof)
+        ... print(prof.key_averages())
         -------------------------------------  ---------------  ---------------
         Name                                          CPU time        CUDA time
         -------------------------------------  ---------------  ---------------

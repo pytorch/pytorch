@@ -41,6 +41,7 @@ void THNN_(SpatialClassNLLCriterion_updateOutput)(
 {
   THNN_(SpatialClassNLLCriterion_shapeCheck)(state, input, target, weights);
   THCTensor_(resize1d)(state, output, 1);
+  THCTensor_(resize1d)(state, total_weight, 1);
 
   if (weights)
     THCUNN_assertSameGPU(state, 5, input, target, weights, output, total_weight);
@@ -105,6 +106,8 @@ void THNN_(SpatialClassNLLCriterion_updateGradInput)(
            int64_t ignore_index)
 {
   THNN_(SpatialClassNLLCriterion_shapeCheck)(state, input, target, weights);
+  THCTensor_(resizeAs)(state, gradInput, input);
+  THCTensor_(zero)(state, gradInput);
   THArgCheck(THCTensor_(isContiguous)(state, gradInput), 4,
              "gradInput must be contiguous");
 

@@ -21,7 +21,7 @@ struct ${Type} final : public Type {
   virtual bool isDistributed() const override;
   virtual std::unique_ptr<Storage> storage() const override;
   virtual std::unique_ptr<Storage> storage(size_t size) const override;
-  virtual std::unique_ptr<Storage> storageFromBlob(void * data, int64_t size) const override;
+  virtual std::unique_ptr<Storage> storageFromBlob(void * data, int64_t size, const std::function<void(void*)> & deleter) const override;
   virtual std::unique_ptr<Generator> generator() const override;
   virtual const char * toString() const override;
   virtual std::size_t elementSizeInBytes() const override;
@@ -32,7 +32,7 @@ struct ${Type} final : public Type {
   // example
   // virtual Tensor * add(Tensor & a, Tensor & b) override;
 
-  virtual void copy(const Tensor & src, Tensor & dst) const override;
+  virtual void s_copy(const Tensor & src, Tensor & dst) const override;
   ${type_derived_method_declarations}
 };
 

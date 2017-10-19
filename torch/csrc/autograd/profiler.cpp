@@ -51,9 +51,8 @@ thread_event_lists disableProfiler() {
         ++it;
       }
     }
-    return std::move(result);
+    return result;
   }
 }
 
 }}}
-

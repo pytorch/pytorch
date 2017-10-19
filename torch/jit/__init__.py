@@ -343,9 +343,11 @@ class _CompiledMixin(object):
     # but since the logic is so complicated, testing code wouldn't benefit much
     def __new_forward(self, *args, **kwargs):
         force_trace = kwargs.pop("_force_trace", False)
+        assert_compiled = kwargs.pop("_assert_compiled", False)
         if kwargs:
             raise TypeError("Unrecognized keyword arguments: {}".format(kwargs.keys()))
         if _JIT_DISABLE or not self.__enabled:
+            assert not assert_compiled
             with _time(self.__name, "unoptimized", self.__time):
                 # Call to the saved old forward function
                 return self.__old_forward(*args)
@@ -365,6 +367,7 @@ class _CompiledMixin(object):
                 out_struct = ktrace.out_struct
         else:
             # No compiled trace available.  Run it by hand.
+            assert not assert_compiled
             with _time(ktrace.name, "tracing", self.__time):
                 out_vars, out_struct = ktrace.add_trace(self.__old_forward,
                                                         args, in_vars, in_struct,
@@ -613,10 +616,10 @@ def verify(model, args, loss_fn=torch.sum, devices=None):
     saved_args = _clone_inputs(args)
     saved_state = copy.deepcopy(model.state_dict())
 
-    def run_fwd_bwd(args, force_trace=False):
+    def run_fwd_bwd(args, force_trace=False, assert_compiled=False):
         in_vars, _ = _flatten(args, model.state_dict(keep_vars=True).values())
         # We use a special API to reset the trace and compile it from scratch.
-        out = model(*args, _force_trace=force_trace)
+        out = model(*args, _force_trace=force_trace, _assert_compiled=assert_compiled)
         if not isinstance(out, tuple):
             out = (out, )
         if loss_fn == torch.sum and len(out) != 1:
@@ -635,7 +638,7 @@ def verify(model, args, loss_fn=torch.sum, devices=None):
         assert model.has_trace_for(*args)
 
     model.load_state_dict(saved_state)
-    compiled_outs, compiled_grads = run_fwd_bwd(args)
+    compiled_outs, compiled_grads = run_fwd_bwd(args, assert_compiled=True)
 
     _verify_equal(uncompiled_outs, compiled_outs)
     _verify_equal(uncompiled_grads, compiled_grads)

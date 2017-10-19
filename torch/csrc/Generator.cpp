@@ -20,9 +20,21 @@ PyObject * THPGenerator_New()
   return result;
 }
 
+PyObject * THPGenerator_NewWithGenerator(THGenerator *cdata)
+{
+  auto type = (PyTypeObject*)THPGeneratorClass;
+  auto self = THPObjectPtr{type->tp_alloc(type, 0)};
+  if (!self) throw python_error();
+  auto self_ = reinterpret_cast<THPGenerator*>(self.get());
+  self_->cdata = cdata;
+  return self.release();
+}
+
 static void THPGenerator_dealloc(THPGenerator* self)
 {
-  THGenerator_free(self->cdata);
+  if (self->owner) {
+    THGenerator_free(self->cdata);
+  }
   Py_TYPE(self)->tp_free((PyObject*)self);
 }
 
@@ -35,7 +47,7 @@ static PyObject * THPGenerator_pynew(PyTypeObject *type, PyObject *args, PyObjec
   }
   THPGeneratorPtr self((THPGenerator *)type->tp_alloc(type, 0));
   self->cdata = THGenerator_new();
-
+  self->owner = true;
   return (PyObject*)self.release();
   END_HANDLE_TH_ERRORS
 }

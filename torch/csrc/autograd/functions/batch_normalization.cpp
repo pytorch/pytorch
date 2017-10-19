@@ -62,12 +62,13 @@ auto BatchNormForward::apply(const variable_list& inputs) -> variable_list {
 #endif
 
   auto input_data = input.data();
-  auto output = input_data.type().tensor(input.sizes());
+  Tensor output;
   auto save_mean = running_mean.type().tensor(running_mean.sizes());
   auto save_std = running_var.type().tensor(running_var.sizes());
 
   if (use_cudnn && eps >= CUDNN_BN_MIN_EPSILON) {
 #ifdef WITH_CUDNN
+    output = input_data.type().tensor(input.sizes());
     torch::cudnn::cudnn_batch_norm_forward(
         state,
         torch::cudnn::getCudnnHandle(),
@@ -85,18 +86,10 @@ auto BatchNormForward::apply(const variable_list& inputs) -> variable_list {
         eps);
 #endif
   } else {
-    at::BatchNormalization_updateOutput(
-      input_data,
-      output,
-      weight.opt_data(),
-      bias.opt_data(),
-      running_mean,
-      running_var,
-      save_mean,
-      save_std,
-      training,
-      momentum,
-      eps);
+    output = at::batch_norm_forward(
+        input_data, weight.opt_data(), bias.opt_data(),
+        running_mean, running_var, training, momentum, eps,
+        save_mean, save_std);
   }
 
   auto outputs = as_tensor_list(std::move(output));
@@ -129,30 +122,16 @@ auto BatchNormBackward::apply(const variable_list& grad_outputs) -> variable_lis
 #endif
 
   at::Tensor grad_input;
-  if (should_compute_output(0) || use_cudnn) {
-    grad_input = input.type().tensor(input.sizes());
-  }
-
   at::Tensor grad_weight;
-  if (should_compute_output(1) || use_cudnn) {
-    grad_weight = weight.type().tensor(weight.sizes());
-    if (!use_cudnn) {
-      grad_weight.zero_();
-    }
-  }
-
   at::Tensor grad_bias;
-  if (should_compute_output(2) || use_cudnn) {
-    grad_bias = bias.type().tensor(bias.sizes());
-    if (!use_cudnn) {
-      grad_bias.zero_();
-    }
-  }
 
   auto grad_output = grad_outputs[0].data().contiguous();
 
   if (use_cudnn && eps >= CUDNN_BN_MIN_EPSILON) {
 #ifdef WITH_CUDNN
+    grad_input = input.type().tensor(input.sizes());
+    grad_weight = weight.type().tensor(weight.sizes());
+    grad_bias = bias.type().tensor(bias.sizes());
     torch::cudnn::cudnn_batch_norm_backward(
         state,
         torch::cudnn::getCudnnHandle(),
@@ -171,20 +150,15 @@ auto BatchNormBackward::apply(const variable_list& grad_outputs) -> variable_lis
         eps);
 #endif
   } else {
-    at::BatchNormalization_backward(
-        input,
-        grad_output,
-        grad_input,
-        grad_weight,
-        grad_bias,
-        weight,
-        running_mean,
-        running_var,
-        save_mean,
-        save_std,
-        training,
-        1.0,
-        eps);
+    std::array<bool, 3> mask = {
+      should_compute_output(0),
+      should_compute_output(1),
+      should_compute_output(2),
+    };
+    std::tie(grad_input, grad_weight, grad_bias) = at::batch_norm_backward(
+        grad_output, input, weight, running_mean, running_var,
+        training, eps, save_mean, save_std,
+        mask);
   }
 
   // Add saved variables used out of the pure autograd to inputs

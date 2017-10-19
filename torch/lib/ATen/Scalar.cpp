@@ -36,6 +36,13 @@ template<> int64_t convert(Half f) {
   return static_cast<int64_t>(convert<double,Half>(f));
 }
 
+template<> bool overflows<Half, double>(double f) {
+  return f > 65504 || f < -65504;
+}
+template<> bool overflows<Half, int64_t>(int64_t f) {
+  return f > 65504 || f < -65504;
+}
+
 
 #ifdef AT_CUDA_ENABLED
 template<> half convert(double d) {

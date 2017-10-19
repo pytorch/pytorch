@@ -80,9 +80,10 @@ class Conv1d(_ConvNd):
 
     where :math:`\star` is the valid `cross-correlation`_ operator
 
-    | :attr:`stride` controls the stride for the cross-correlation.
-    | If :attr:`padding` is non-zero, then the input is implicitly zero-padded
-      on both sides for :attr:`padding` number of points.
+    | :attr:`stride` controls the stride for the cross-correlation, a single
+      number or a tuple.
+    | :attr:`padding` controls the amount of implicit zero-paddings on both
+    |  sides for :attr:`padding` number of points.
     | :attr:`dilation` controls the spacing between the kernel points; also
       known as the à trous algorithm. It is harder to describe, but this `link`_
       has a nice visualization of what :attr:`dilation` does.
@@ -172,9 +173,10 @@ class Conv2d(_ConvNd):
 
     where :math:`\star` is the valid 2D `cross-correlation`_ operator
 
-    | :attr:`stride` controls the stride for the cross-correlation.
-    | If :attr:`padding` is non-zero, then the input is implicitly zero-padded
-      on both sides for :attr:`padding` number of points.
+    | :attr:`stride` controls the stride for the cross-correlation, a single
+      number or a tuple.
+    | :attr:`padding` controls the amount of implicit zero-paddings on both
+    |  sides for :attr:`padding` number of points for each dimension.
     | :attr:`dilation` controls the spacing between the kernel points; also
       known as the à trous algorithm. It is harder to describe, but this `link`_
       has a nice visualization of what :attr:`dilation` does.
@@ -272,8 +274,8 @@ class Conv3d(_ConvNd):
     where :math:`\star` is the valid 3D `cross-correlation`_ operator
 
     | :attr:`stride` controls the stride for the cross-correlation.
-    | If :attr:`padding` is non-zero, then the input is implicitly zero-padded on both sides
-      for :attr:`padding` number of points.
+    | :attr:`padding` controls the amount of implicit zero-paddings on both
+    |  sides for :attr:`padding` number of points for each dimension.
     | :attr:`dilation` controls the spacing between the kernel points; also known as the à trous algorithm.
       It is harder to describe, but this `link`_ has a nice visualization of what :attr:`dilation` does.
     | :attr:`groups` controls the connections between inputs and outputs. `in_channels` and `out_channels`
@@ -401,10 +403,11 @@ class ConvTranspose1d(_ConvTransposeMixin, _ConvNd):
     a deconvolution (although it is not an actual deconvolution operation).
 
     | :attr:`stride` controls the stride for the cross-correlation.
-    | If :attr:`padding` is non-zero, then the input is implicitly zero-padded on both sides
-      for :attr:`padding` number of points.
-    | If :attr:`output_padding` is non-zero, then the output is implicitly zero-padded on one side
-      for :attr:`output_padding` number of points.
+    | :attr:`padding` controls the amount of implicit zero-paddings on both
+    |  sides for :attr:`padding` number of points.
+    | :attr:`output_padding` controls the amount of implicit zero-paddings on
+    | both sides of the output for :attr:`output_padding` number of points.
+    | number of points.
     | :attr:`dilation` controls the spacing between the kernel points; also known as the à trous algorithm.
       It is harder to describe, but this `link`_ has a nice visualization of what :attr:`dilation` does.
     | :attr:`groups` controls the connections between inputs and outputs. `in_channels` and `out_channels`
@@ -472,10 +475,11 @@ class ConvTranspose2d(_ConvTransposeMixin, _ConvNd):
     a deconvolution (although it is not an actual deconvolution operation).
 
     | :attr:`stride` controls the stride for the cross-correlation.
-    | If :attr:`padding` is non-zero, then the input is implicitly zero-padded on both sides
-      for :attr:`padding` number of points.
-    | If :attr:`output_padding` is non-zero, then the output is implicitly zero-padded on one side
-      for :attr:`output_padding` number of points.
+    | :attr:`padding` controls the amount of implicit zero-paddings on both
+    |  sides for :attr:`padding` number of points for each dimension.
+    | :attr:`output_padding` controls the amount of implicit zero-paddings on
+    | both sides of the output for :attr:`output_padding` number of points for
+    | each dimension.
     | :attr:`dilation` controls the spacing between the kernel points; also known as the à trous algorithm.
       It is harder to describe, but this `link`_ has a nice visualization of what :attr:`dilation` does.
     | :attr:`groups` controls the connections between inputs and outputs. `in_channels` and `out_channels`
@@ -578,10 +582,11 @@ class ConvTranspose3d(_ConvTransposeMixin, _ConvNd):
     a deconvolution (although it is not an actual deconvolution operation).
 
     | :attr:`stride` controls the stride for the cross-correlation.
-    | If :attr:`padding` is non-zero, then the input is implicitly zero-padded on both sides
-      for :attr:`padding` number of points.
-    | If :attr:`output_padding` is non-zero, then the output is implicitly zero-padded on one side
-      for :attr:`output_padding` number of points.
+    | :attr:`padding` controls the amount of implicit zero-paddings on both
+    |  sides for :attr:`padding` number of points for each dimension.
+    | :attr:`output_padding` controls the amount of implicit zero-paddings on
+    | both sides of the output for :attr:`output_padding` number of points for
+    | each dimension.
     | :attr:`dilation` controls the spacing between the kernel points; also known as the à trous algorithm.
       It is harder to describe, but this `link`_ has a nice visualization of what :attr:`dilation` does.
     | :attr:`groups` controls the connections between inputs and outputs. `in_channels` and `out_channels`

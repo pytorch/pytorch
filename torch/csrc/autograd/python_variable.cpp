@@ -37,7 +37,7 @@ static PyObject* THPVariable_NewWithVar(PyTypeObject* type, Variable var)
   return obj;
 }
 
-PyObject * THPVariable_Wrap(const Variable& var)
+PyObject * THPVariable_Wrap(Variable var)
 {
   if (!var.defined()) {
     Py_RETURN_NONE;
@@ -48,13 +48,7 @@ PyObject * THPVariable_Wrap(const Variable& var)
     return obj;
   }
 
-  THPObjectPtr obj(THPVariable_NewWithVar((PyTypeObject *)THPVariableClass, var));
-  if (obj) {
-    PyObject* data = torch::createPyObject(var.data());
-    if (!data) return NULL;
-    ((THPVariable*)obj.get())->data = data;
-  }
-  return obj.release();
+  return THPVariable_NewWithVar((PyTypeObject *)THPVariableClass, std::move(var));
 }
 
 // This function DOES NOT steal a reference to data
@@ -104,9 +98,22 @@ static int THPVariable_traverse(THPVariable *self, visitproc visit, void *arg)
   Py_VISIT(self->backward_hooks);
   if (self->cdata.defined()) {
     // Only visit this if we actually own it (no one else use the shared pointer)
-    if (self->cdata.grad_fn().use_count() == 1) {
-      if (auto fn = dynamic_cast<PyFunction*>(self->cdata.grad_fn().get())) {
+    auto& grad_fn = self->cdata.grad_fn();
+    if (grad_fn.use_count() == 1) {
+      if (auto fn = dynamic_cast<PyFunction*>(grad_fn.get())) {
         Py_VISIT(fn->obj);
+      } else {
+        // visit hooks in C++ implemented autograd functions
+        for (auto& hook : grad_fn->pre_hooks) {
+          if (auto pyhook = dynamic_cast<PyFunctionPreHook*>(hook.get())) {
+            Py_VISIT(pyhook->dict);
+          }
+        }
+        for (auto& hook : grad_fn->post_hooks) {
+          if (auto pyhook = dynamic_cast<PyFunctionPostHook*>(hook.get())) {
+            Py_VISIT(pyhook->dict);
+          }
+        }
       }
     }
     for (auto& hook : self->cdata.hooks()) {

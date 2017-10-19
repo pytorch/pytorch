@@ -19,6 +19,7 @@ cd "$(dirname "$0")/../.."
 BASE_DIR=$(pwd)
 cd torch/lib
 INSTALL_DIR="$(pwd)/tmp_install"
+CMAKE_VERSION=${CMAKE_VERSION:="cmake"}
 C_FLAGS=" -DTH_INDEX_BASE=0 -I$INSTALL_DIR/include \
   -I$INSTALL_DIR/include/TH -I$INSTALL_DIR/include/THC \
   -I$INSTALL_DIR/include/THS -I$INSTALL_DIR/include/THCS \
@@ -44,7 +45,8 @@ CWRAP_FILES="\
 $BASE_DIR/torch/lib/ATen/Declarations.cwrap;\
 $BASE_DIR/torch/lib/ATen/Local.cwrap;\
 $BASE_DIR/torch/lib/THNN/generic/THNN.h;\
-$BASE_DIR/torch/lib/THCUNN/generic/THCUNN.h"
+$BASE_DIR/torch/lib/THCUNN/generic/THCUNN.h;\
+$BASE_DIR/torch/lib/ATen/nn.yaml"
 
 # Used to build an individual library, e.g. build TH
 function build() {
@@ -58,7 +60,7 @@ function build() {
       nanopb ) BUILD_C_FLAGS=$C_FLAGS" -fPIC -fexceptions";;
       *) BUILD_C_FLAGS=$C_FLAGS" -fexceptions";;
   esac
-  cmake ../../$1 -DCMAKE_MODULE_PATH="$BASE_DIR/cmake/FindCUDA" \
+  ${CMAKE_VERSION} ../../$1 -DCMAKE_MODULE_PATH="$BASE_DIR/cmake/FindCUDA" \
               -DTorch_FOUND="1" \
               -DCMAKE_INSTALL_PREFIX="$INSTALL_DIR" \
               -DCMAKE_C_FLAGS="$BUILD_C_FLAGS" \
@@ -110,7 +112,7 @@ function build() {
 function build_nccl() {
    mkdir -p build/nccl
    cd build/nccl
-   cmake ../../nccl -DCMAKE_MODULE_PATH="$BASE_DIR/cmake/FindCUDA" \
+   ${CMAKE_VERSION} ../../nccl -DCMAKE_MODULE_PATH="$BASE_DIR/cmake/FindCUDA" \
                -DCMAKE_BUILD_TYPE=Release \
                -DCMAKE_INSTALL_PREFIX="$INSTALL_DIR" \
                -DCMAKE_C_FLAGS="$C_FLAGS" \

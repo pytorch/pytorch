@@ -6,7 +6,7 @@
 
 #include "Descriptors.h"
 
-#include <cudnn.h>
+#include "cudnn-wrapper.h"
 #include <vector>
 
 namespace torch { namespace cudnn {

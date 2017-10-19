@@ -13,7 +13,7 @@ public:
   ${Storage}(Context* context, ${THStorage} *wrapped);
   ${Storage}(Context* context, std::size_t size);
   ${Storage}(Context* context,
-    void * data, std::size_t size);
+    void * data, std::size_t size, const std::function<void(void*)> & deleter);
   virtual ~${Storage}();
 
   virtual std::size_t elementSize() const override;

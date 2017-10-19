@@ -2,6 +2,10 @@ import math
 import torch
 from functools import reduce
 from ._utils import _range
+from sys import float_info
+
+
+__MIN_LOG_SCALE = math.ceil(math.log(float_info.min * float_info.epsilon, 10))
 
 
 class __PrinterOptions(object):
@@ -119,7 +123,7 @@ def _number_format(tensor, min_sz=-1):
         else:
             if exp_max > prec + 1 or exp_max < 0:
                 sz = max(min_sz, 7)
-                scale = math.pow(10, exp_max - 1)
+                scale = math.pow(10, max(exp_max - 1, __MIN_LOG_SCALE))
             else:
                 if exp_max == 0:
                     sz = 7

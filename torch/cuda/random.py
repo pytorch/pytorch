@@ -1,20 +1,20 @@
 from torch import _C
-from . import _lazy_init, _lazy_call, device_count, device
+from . import _lazy_init, _lazy_call, device_count, device as device_ctx_manager
 
 
-def get_rng_state(device_id=-1):
+def get_rng_state(device=-1):
     r"""Returns the random number generator state of the current
     GPU as a ByteTensor.
 
     Args:
-        device_id (int, optional): The device to return the RNG state of.
+        device (int, optional): The device to return the RNG state of.
             Default: -1 (i.e., use the current device).
 
     .. warning::
         This function eagerly initializes CUDA.
     """
     _lazy_init()
-    with device(device_id):
+    with device_ctx_manager(device):
         return _C._cuda_getRNGState()
 
 
@@ -23,12 +23,12 @@ def get_rng_state_all():
 
     results = []
     for i in range(device_count()):
-        with device(i):
+        with device_ctx_manager(i):
             results.append(get_rng_state())
     return results
 
 
-def set_rng_state(new_state, device_id=-1):
+def set_rng_state(new_state, device=-1):
     r"""Sets the random number generator state of the current GPU.
 
     Args:
@@ -36,14 +36,14 @@ def set_rng_state(new_state, device_id=-1):
     """
     new_state_copy = new_state.clone()
 
-    # NB: What if device_id=-1?  You might be afraid that the "current"
+    # NB: What if device=-1?  You might be afraid that the "current"
     # device would change by the time we actually get around to invoking
     # the lazy callback.  But actually, this is not possible: changing
     # the current device involves a CUDA call, which would in turn
     # initialize the state.  So then _lazy_call would execute cb
     # immediately.
     def cb():
-        with device(device_id):
+        with device_ctx_manager(device):
             _C._cuda_setRNGState(new_state_copy)
 
     _lazy_call(cb)

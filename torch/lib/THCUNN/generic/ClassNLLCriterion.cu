@@ -12,7 +12,7 @@ void THNN_(ClassNLLCriterion_updateOutput)(
            THCTensor *total_weight,
            int64_t ignore_index) {
   THCTensor_(resize1d)(state, output, 1);
-  THCUNN_check_dim_size(state, total_weight, 1, 0, 1);
+  THCTensor_(resize1d)(state, total_weight, 1);
   ignore_index -= TH_INDEX_BASE;
 
   if (THCIndexTensor_(nDimension)(state, target) > 1) {
@@ -110,6 +110,8 @@ void THNN_(ClassNLLCriterion_updateGradInput)(
   int n_dims = THCTensor_(nDimension)(state, input);
   int n_classes = THCTensor_(size)(state, input, n_dims - 1);
 
+  THCTensor_(resizeAs)(state, gradInput, input);
+  THCTensor_(zero)(state, gradInput);
   THArgCheck(THCTensor_(isContiguous)(state, gradInput), 4, "gradInput must be contiguous");
 
   if (weights) {

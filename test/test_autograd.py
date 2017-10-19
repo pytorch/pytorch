@@ -2013,11 +2013,11 @@ method_tests = [
     ('masked_select', (M,), (Variable(mask_not_all_zeros((M, M)), requires_grad=False),), 'broadcast_lhs'),
     ('masked_select', (M, 1, M), (Variable(mask_not_all_zeros((M, M)), requires_grad=False),),
      'broadcast_all'),
-    ('masked_fill_', (M, M), (Variable(torch.ByteTensor(M, M).bernoulli_(), requires_grad=False), 10)),
+    ('masked_fill', (M, M), (Variable(torch.ByteTensor(M, M).bernoulli_(), requires_grad=False), 10)),
     # no lhs or all broadcast on masked_fill or masked_scatter because it's always inplace
-    ('masked_fill_', (M, M), (Variable(torch.ByteTensor(M,).bernoulli_(), requires_grad=False), 10), 'broadcast_rhs'),
-    ('masked_scatter_', (M, M), (Variable(torch.ByteTensor(M, M).bernoulli_(), requires_grad=False), (M, M))),
-    ('masked_scatter_', (M, M), (Variable(torch.ByteTensor(M,).bernoulli_(), requires_grad=False), (M, M)),
+    ('masked_fill', (M, M), (Variable(torch.ByteTensor(M,).bernoulli_(), requires_grad=False), 10), 'broadcast_rhs'),
+    ('masked_scatter', (M, M), (Variable(torch.ByteTensor(M, M).bernoulli_(), requires_grad=False), (M, M))),
+    ('masked_scatter', (M, M), (Variable(torch.ByteTensor(M,).bernoulli_(), requires_grad=False), (M, M)),
      'broadcast_rhs'),
     ('resize', (S, S, S), (torch.Size([S * S, S])), 'fewer_dims'),
     ('resize_as', (S, S, S), (Variable(torch.randn((S * S, S)), requires_grad=False),)),
@@ -2141,6 +2141,8 @@ def exclude_tensor_method(name, test_name):
         'index_add',
         'index_copy',
         'index_fill',
+        'masked_fill',
+        'masked_scatter',
         'resize',
         'resize_as',
         'scatter',
@@ -2148,8 +2150,8 @@ def exclude_tensor_method(name, test_name):
     }
     if test_name in exclude_all_tensor_method_by_test_name:
         return True
-    is_rhs_operator = name[:3] == "__r" and name[-2:] == "__"
-    is_inplace = name[-1] == "_" and not is_rhs_operator
+    is_magic_method = name[:2] == '__' and name[-2:] == '__'
+    is_inplace = name[-1] == "_" and not is_magic_method
     if not is_inplace and name in exclude_outplace_tensor_method:
         return True
     return False
@@ -2226,8 +2228,8 @@ for test in method_tests:
         # we want to close over in some way
         def do_test(self, name=name, self_size=self_size, args=new_args, test_name=test_name):
             def check(name):
-                is_rhs_operator = name[:3] == "__r" and name[-2:] == "__"
-                is_inplace = name[-1] == "_" and not is_rhs_operator
+                is_magic_method = name[:2] == '__' and name[-2:] == '__'
+                is_inplace = name[-1] == "_" and not is_magic_method
                 self_variable = create_input((self_size,), requires_grad=not is_inplace)[0]
                 args_variable = create_input(args, requires_grad=not is_inplace)
                 self_tensor = deepcopy(self_variable.data)

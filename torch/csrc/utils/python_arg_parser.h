@@ -109,7 +109,9 @@ struct FunctionParameter {
   bool optional;
   bool keyword_only;
   std::string name;
-  THPObjectPtr python_name;
+  // having this as a raw PyObject * will presumably leak it, but these are only held by static objects
+  // anyway, and Py_Finalize can already be called when this is destructed.
+  PyObject *python_name;
   at::Scalar default_scalar;
   union {
     bool default_bool;

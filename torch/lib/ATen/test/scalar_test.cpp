@@ -1,4 +1,5 @@
 #include <iostream>
+#include <math.h>
 #include "ATen/ATen.h"
 #include "ATen/Dispatch.h"
 #include "test_assert.h"
@@ -40,6 +41,24 @@ void test_ctors() {
   ASSERT(s3.isBackedByTensor() && s3.toFloat() == 1.0);
 }
 
+void test_overflow() {
+  auto s1 = Scalar(M_PI);
+  ASSERT(s1.toFloat() == static_cast<float>(M_PI));
+  s1.toHalf();
+
+  s1 = Scalar(100000);
+  ASSERT(s1.toFloat() == 100000.0);
+  ASSERT(s1.toInt() == 100000);
+
+  bool threw = false;
+  try {
+    s1.toHalf();
+  } catch (std::domain_error& e) {
+    threw = true;
+  }
+  ASSERT(threw);
+}
+
 int main() {
   Scalar what = 257;
   Scalar bar = 3.0;
@@ -66,8 +85,6 @@ int main() {
 
   cout << t.sizes() << " " << t.strides() << "\n";
 
-  auto output = CPU(Float).ones(3);
-  at::Abs_updateOutput(t,output);
   Type & T = CPU(Float);
   Tensor x = T.randn({1,10});
   Tensor prev_h = T.randn({1,20});
@@ -87,6 +104,7 @@ int main() {
   ASSERT(threw);
 
   test_ctors();
+  test_overflow();
 
   if(at::hasCUDA()) {
     auto r = CUDA(Float).copy(next_h);

@@ -120,35 +120,37 @@ MODE_MEAN = 1
 
 class EmbeddingBag(Function):
 
-    def __init__(self, max_norm, norm_type, scale_grad_by_freq, mode):
-        super(EmbeddingBag, self).__init__()
-        self.max_norm = max_norm
-        self.norm_type = norm_type
-        self.scale_grad_by_freq = scale_grad_by_freq
-        self._indices = None
-        assert mode is not None
+    @staticmethod
+    def _renorm(ctx, indices, weight, max_norm, norm_type):
+        # clone indices since LookupTable_renorm modifies it in-place
+        ctx._backend.LookupTable_renorm(
+            ctx._backend.library_state,
+            indices.clone().view(-1),
+            weight,
+            max_norm,
+            norm_type
+        )
+
+    @classmethod
+    def forward(cls, ctx, weight, indices, offsets,
+                max_norm, norm_type, scale_grad_by_freq, mode):
+
+        ctx.max_norm = max_norm
+        ctx.norm_type = norm_type
+        ctx.scale_grad_by_freq = scale_grad_by_freq
+
         if mode == 'sum':
-            self.mode = MODE_SUM
+            ctx.mode = MODE_SUM
         elif mode == 'mean':
-            self.mode = MODE_MEAN
+            ctx.mode = MODE_MEAN
         else:
             raise ValueError("mode needs to be 'sum' or 'mean', but got {}"
                              .format(mode))
 
-    def _renorm(self, indices, weight):
-        self._backend.LookupTable_renorm(
-            self._backend.library_state,
-            indices,
-            weight,
-            self.max_norm,
-            self.norm_type
-        )
-
-    def forward(self, weight, indices, offsets):
-        assert not self.needs_input_grad[1], "EmbeddingBag doesn't " \
+        assert not ctx.needs_input_grad[1], "EmbeddingBag doesn't " \
             "compute the gradient w.r.t. the indices"
 
-        assert not self.needs_input_grad[2], "EmbeddingBag doesn't " \
+        assert not ctx.needs_input_grad[2], "EmbeddingBag doesn't " \
             "compute the gradient w.r.t. the offsets"
 
         assert indices.dim() == 1
@@ -164,57 +166,60 @@ class EmbeddingBag(Function):
                              " ({}), but got offsets[-1] of {}"
                              .format(indices.size(0), offsets[-1]))
 
-        self._backend = type2backend[type(weight)]
-        self._weight_size = weight.size()
-        self._offset2bag = offsets.new()
+        ctx._backend = type2backend[type(weight)]
+        ctx._weight_size = weight.size()
+        ctx._offset2bag = offsets.new()
 
-        self.save_for_backward(indices)
+        ctx.save_for_backward(indices)
 
         indices = indices.contiguous().view(-1)
         output = weight.new()
-        if self.max_norm is not None:
-            self._renorm(indices, weight)
+
+        if ctx.max_norm is not None:
+            cls._renorm(ctx, indices, weight, max_norm=max_norm, norm_type=norm_type)
 
         if weight.is_cuda:
-            if self.mode == MODE_MEAN:
-                self.bag_size = offsets.new().resize_(offsets.size())
+            if ctx.mode == MODE_MEAN:
+                ctx.bag_size = offsets.new().resize_(offsets.size())
             else:
-                self.bag_size = None
+                ctx.bag_size = None
 
-            self._backend.LookupTableBag_updateOutput(
-                self._backend.library_state,
+            ctx._backend.LookupTableBag_updateOutput(
+                ctx._backend.library_state,
                 indices,
                 offsets,
                 weight,
                 output,
-                self._offset2bag,
-                self.mode,
-                self.bag_size
+                ctx._offset2bag,
+                ctx.mode,
+                ctx.bag_size
             )
         else:
             # slow CPU implementation
             index_output = torch.index_select(weight, 0, indices)
             # indices = [1, 2, 30, 100, 12], offsets = [0, 2, 3]
-            self._offset2bag.resize_(indices.size(0)).zero_()  # offset2bag = [0 0 0 0 0]
-            self._offset2bag.index_fill_(0, offsets, 1)  # offset2bag = [1 0 1 0 1]
-            self._offset2bag[0] = 0  # offset2bag = [0 0 1 0 1]
-            self._offset2bag = self._offset2bag.cumsum(0)  # offset2bag = [0 0 1 1 2]
+            ctx._offset2bag.resize_(indices.size(0)).zero_()  # offset2bag = [0 0 0 0 0]
+            ctx._offset2bag.index_fill_(0, offsets, 1)  # offset2bag = [1 0 1 0 1]
+            ctx._offset2bag[0] = 0  # offset2bag = [0 0 1 0 1]
+            ctx._offset2bag = ctx._offset2bag.cumsum(0)  # offset2bag = [0 0 1 1 2]
             output.resize_(offsets.size(0), weight.size(1)).zero_()
-            output.index_add_(0, self._offset2bag, index_output)
-            if self.mode == MODE_MEAN:
+            output.index_add_(0, ctx._offset2bag, index_output)
+            if ctx.mode == MODE_MEAN:
                 if offsets.size(0) == 1:
-                    self.bag_size = indices.size(0)
+                    ctx.bag_size = indices.size(0)
                 else:
-                    self.bag_size = weight.new().resize_(offsets.size())
-                    self.bag_size[:-1] = offsets[1:] - offsets[:-1]
-                    self.bag_size[-1] = indices.size(0) - offsets[-1]
-                    self.bag_size = self.bag_size[:, None].expand_as(output)
-                output /= self.bag_size
+                    ctx.bag_size = weight.new().resize_(offsets.size())
+                    ctx.bag_size[:-1] = offsets[1:] - offsets[:-1]
+                    ctx.bag_size[-1] = indices.size(0) - offsets[-1]
+                    ctx.bag_size = ctx.bag_size[:, None].expand_as(output)
+                output /= ctx.bag_size
 
         return output
 
-    def backward(self, grad_output):
-        indices, = self.saved_tensors
+    @staticmethod
+    @once_differentiable
+    def backward(ctx, grad_output):
+        indices, = ctx.saved_tensors
         indices = indices.contiguous().view(-1)
         grad_output = grad_output.contiguous()
 
@@ -227,44 +232,44 @@ class EmbeddingBag(Function):
                 _count = torch.IntTensor()
                 _sorted = _indices = None
 
-        grad_weight = grad_output.new(self._weight_size).zero_()
+        grad_weight = grad_output.new(ctx._weight_size).zero_()
 
         if grad_output.is_cuda:
-            self._backend.LookupTableBag_accGradParameters(
-                self._backend.library_state,
+            ctx._backend.LookupTableBag_accGradParameters(
+                ctx._backend.library_state,
                 indices,
                 grad_output,
                 grad_weight,
-                self._offset2bag,
+                ctx._offset2bag,
                 _count,
                 _sorted,
                 _indices,
-                self.scale_grad_by_freq,
-                self.mode,
-                self.bag_size,
+                ctx.scale_grad_by_freq,
+                ctx.mode,
+                ctx.bag_size,
                 1
             )
         else:
             # slow CPU implementation
-            if self.mode == MODE_MEAN:
+            if ctx.mode == MODE_MEAN:
                 # divide by average count
-                grad_output = grad_output / self.bag_size
+                grad_output = grad_output / ctx.bag_size
 
-            index_grad_output = grad_output.index_select(0, self._offset2bag)
-            self._backend.LookupTable_accGradParameters(
-                self._backend.library_state,
+            index_grad_output = grad_output.index_select(0, ctx._offset2bag)
+            ctx._backend.LookupTable_accGradParameters(
+                ctx._backend.library_state,
                 indices,
                 index_grad_output,
                 grad_weight,
                 _count,
                 _sorted,
                 _indices,
-                self.scale_grad_by_freq,
+                ctx.scale_grad_by_freq,
                 -1,
                 1
             )
 
-        return grad_weight, None, None
+        return grad_weight, None, None, None, None, None, None
 
 
 _all_functions.append(EmbeddingBag)

@@ -4,7 +4,7 @@
 #include "Exceptions.h"
 #include "Types.h"
 
-#include <cudnn.h>
+#include "cudnn-wrapper.h"
 #include <functional>
 #include <iterator>
 #include <sstream>

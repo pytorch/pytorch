@@ -10,6 +10,7 @@ from .cuda import WITH_CUDA, CUDA_HOME
 def gather_paths(env_vars):
     return list(chain(*(os.getenv(v, '').split(':') for v in env_vars)))
 
+
 is_conda = 'conda' in sys.version or 'Continuum' in sys.version
 conda_dir = os.path.join(os.path.dirname(sys.executable), '..')
 

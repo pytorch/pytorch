@@ -1,4 +1,6 @@
 import torch
+from functools import reduce
+from operator import mul
 
 
 def maybe_view(variable, size, check_same_size=True):
@@ -48,9 +50,13 @@ def maybe_unexpand_or_view(variable, old_size):
         return maybe_view(variable, old_size, False)
 
 
-# Turn the parameter pad in pytorch into paddings in onnx order.
-def prepare_paddings(input, pad):
-    dim = len(input.type().sizes())
+# Generate paddings in ONNX order based on pad in pytorch.
+# Arguments:
+#     dim: the dimension of the tensor.
+#     pad: the paddings in pytorch.
+#          The order is dim_n_begin, dim_n_end, dim_n-1_begin, dim_n-1_end, ...
+def prepare_onnx_paddings(dim, pad):
+    assert isinstance(dim, int)
     # The order of paddings is dim_0_begin, dim_0_end, dim_1_begin, ... , dim_n_end.
     # n is the dimension of input.
     assert len(pad) <= dim * 2
@@ -62,3 +68,37 @@ def prepare_paddings(input, pad):
         paddings = [0, 0] + paddings
     assert len(paddings) == dim * 2
     return paddings
+
+
+# Check whether the op enable broadcasting, and whether it is supported by ONNX.
+# If dims1 and dims2 are different, then broadcast is True.
+# We always assume the combination of dims1 and dims2 is broadcastable.
+# The following types of broadcasting are supported in ONNX:
+#     1) Only one element in dims2, such as dims2 = [1, 1]
+#     2) dims2 is suffix of dims1, such as dims1 = [2, 3, 4], and dims2 = [3, 4]
+# Details can be found here: https://github.com/onnx/onnx/blob/master/docs/Operators.md#Gemm
+def check_onnx_broadcast(dims1, dims2):
+    broadcast = False
+    supported = True
+    len1 = len(dims1)
+    len2 = len(dims2)
+    numel1 = reduce(lambda x, y: x * y, dims1)
+    numel2 = reduce(lambda x, y: x * y, dims2)
+    if len1 < len2:
+        broadcast = True
+        if numel2 != 1:
+            supported = False
+    elif len1 > len2:
+        broadcast = True
+        if numel2 != 1 and dims1[len1 - len2:] != dims2:
+            supported = False
+    else:
+        if dims1 != dims2:
+            broadcast = True
+            if numel2 != 1:
+                supported = False
+
+    if not supported:
+        raise ValueError("Numpy style broadcasting is not supported in ONNX. "
+                         "Input dims are: {}, {}".format(dims1, dims2))
+    return broadcast

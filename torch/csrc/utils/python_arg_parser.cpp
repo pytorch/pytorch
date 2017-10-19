@@ -226,7 +226,7 @@ static void missing_args(const FunctionSignature& signature, int idx) {
 static ssize_t find_param(FunctionSignature& signature, PyObject* name) {
   ssize_t i = 0;
   for (auto& param : signature.params) {
-    int cmp = PyObject_RichCompareBool(name, param.python_name.get(), Py_EQ);
+    int cmp = PyObject_RichCompareBool(name, param.python_name, Py_EQ);
     if (cmp < 0) {
       throw python_error();
     } else if (cmp) {
@@ -309,7 +309,7 @@ bool FunctionSignature::parse(PyObject* args, PyObject* kwargs, PyObject* dst[],
       }
     }
 
-    obj = kwargs ? PyDict_GetItem(kwargs, param.python_name.get()) : nullptr;
+    obj = kwargs ? PyDict_GetItem(kwargs, param.python_name) : nullptr;
     if (obj) {
       remaining_kwargs--;
       if (!param.check(obj)) {
