@@ -1,6 +1,6 @@
 import torch
 from ..function import Function, InplaceFunction, traceable
-from .utils import maybe_unexpand, maybe_unexpand_or_view
+from .utils import maybe_unexpand, maybe_unexpand_or_view, check_onnx_broadcast
 import math
 
 
@@ -23,6 +23,11 @@ import math
 # it is *sound* to do so (inplace ops still "return" the result
 # of the inplace operation), and is not easy to fix.
 
+def gen_broadcast(n, a, b):
+    broadcast = check_onnx_broadcast(a.type().sizes(), b.type().sizes())
+    if broadcast:
+        n.i_("broadcast", 1)
+    return n
 
 @traceable
 class Add(InplaceFunction):
@@ -30,7 +35,8 @@ class Add(InplaceFunction):
     @staticmethod
     def symbolic(g, a, b, inplace=False):
         # TODO: [Export inplace]
-        return g.op("Add", a, b)
+        n = g.op("Add", a, b)
+        return gen_broadcast(n, a, b)
 
     @staticmethod
     def forward(ctx, a, b, inplace=False):
@@ -53,7 +59,8 @@ class Sub(InplaceFunction):
     @staticmethod
     def symbolic(g, a, b, inplace=False):
         # TODO: [Export inplace]
-        return g.appendNode(g.create("Sub", [a, b]))
+        n = g.op("Sub", a, b)
+        return gen_broadcast(n, a, b)
 
     @staticmethod
     def forward(ctx, a, b, inplace=False):
@@ -76,7 +83,8 @@ class Mul(Function):
     @staticmethod
     def symbolic(g, a, b, inplace=False):
         # TODO: [Export inplace]
-        return g.op("Mul", a, b)
+        n = g.op("Mul", a, b)
+        return gen_broadcast(n, a, b)
 
     @staticmethod
     def forward(ctx, a, b):
