@@ -1083,7 +1083,7 @@ class TestNN(NNTestCase):
         stride[0] = 20
         # change the stride in dimension 0. the tensor is still contiguous because size[0] is 1
         x.set_(x.storage(), 0, x.size(), stride)
-        assert x.is_contiguous()
+        self.assertTrue(x.is_contiguous())
         F.conv_transpose2d(Variable(x), Variable(torch.randn(16, 1, 1, 1)).cuda())
         F.conv2d(Variable(x), Variable(torch.randn(1, 16, 1, 1)).cuda())
 

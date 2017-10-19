@@ -1239,12 +1239,12 @@ class TestTorch(TestCase):
     @staticmethod
     def _test_contiguous(self, cast):
         x = cast(torch.randn(1, 16, 5, 5))
-        assert x.is_contiguous()
+        self.assertTrue(x.is_contiguous())
         stride = list(x.stride())
         stride[0] = 20
         # change the stride in dimension 0. the tensor is still contiguous because size[0] is 1
         x.set_(x.storage(), 0, x.size(), stride)
-        assert x.is_contiguous()
+        self.assertTrue(x.is_contiguous())
 
     def test_contiguous(self):
         return self._test_contiguous(self, lambda t: t)
