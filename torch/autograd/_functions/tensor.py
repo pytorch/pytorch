@@ -19,6 +19,18 @@ def _preprocess_adv_index_seq(index):
 
 
 class Index(Function):
+    @staticmethod
+    def symbolic(g, i, index):
+        # We should only expect index as an integer in this case.
+        # We use "Slice" to get the index-th element in i,
+        # Then we reduce the dimension using "Reshape".
+        if not isinstance(index, int):
+            raise ValueError('Right now, only int-type index is suppported.')
+        axes = g.constant(0, [1], "int")
+        starts = g.constant(index, [1], "int")
+        ends = g.constant(index + 1, [1], "int")
+        slice = g.op("Slice", i, axes, starts, ends)
+        return g.op("Squeeze", slice, axes_i=[0])
 
     @staticmethod
     def forward(ctx, i, index):

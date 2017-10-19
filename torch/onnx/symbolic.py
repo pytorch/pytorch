@@ -108,7 +108,6 @@ def div(g, self, other):
     return g.op("Div", self, _if_scalar_type_as(other, self), **_broadcast_if_scalar(other))
 
 
-# TODO: untested
 def addmm(g, self, mat1, mat2, beta, alpha):
     return g.op("Gemm", mat1, mat2, self, beta_f=_scalar(beta), alpha_f=_scalar(alpha))
 
