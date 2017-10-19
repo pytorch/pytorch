@@ -16,6 +16,8 @@
 
 #include "caffe2/core/predictor.h"
 
+#include <unordered_set>
+
 namespace caffe2 {
 
 namespace {
@@ -53,6 +55,17 @@ Predictor::Predictor(
     Workspace* parent)
     : run_net_(run_net), ws_(parent) {
   CAFFE_ENFORCE(ws_.RunNetOnce(init_net));
+
+  // real model inputs can be fed later in run* functions
+  const auto& initialized_vec = ws_.Blobs();
+  const std::unordered_set<std::string> initialized{initialized_vec.begin(),
+                                                    initialized_vec.end()};
+  for (const auto& name : run_net.external_input()) {
+    if (!initialized.count(name)) {
+      auto* blob = ws_.CreateBlob(name);
+      blob->template GetMutable<TensorCPU>();
+    }
+  }
   CAFFE_ENFORCE(ws_.CreateNet(run_net));
 }
 

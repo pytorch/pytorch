@@ -48,19 +48,6 @@ const char* initSpec = R"DOC(
         type: "dag"
         op {
           type: "ConstantFill"
-          output: "data"
-          arg {
-            name: "shape"
-            ints: 1
-            ints: 4
-          }
-          arg {
-            name: "value"
-            f: 2.0
-          }
-        }
-        op {
-          type: "ConstantFill"
           output: "W"
           arg {
             name: "shape"
