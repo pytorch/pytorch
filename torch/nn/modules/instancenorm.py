@@ -77,8 +77,8 @@ class LayerNorm(Module):
         self.affine = num_features is not None
         self.eps = eps
         if self.affine:
-            self.weight = Parameter(torch.ones(num_features))
-            self.bias = Parameter(torch.zeros(num_features))
+            self.weight = Parameter(torch.Tensor(num_features))
+            self.bias = Parameter(torch.Tensor(num_features))
         else:
             self.register_parameter('weight', None)
             self.register_parameter('bias', None)
@@ -100,12 +100,6 @@ class LayerNorm(Module):
         else:
             return ('{name}(eps={eps})'
                     .format(name=self.__class__.__name__, **self.__dict__))
-
-    def _check_input_dim(self, input):
-        if input.dim() != 2:
-            raise ValueError('expected 2D input (got {}D input)'
-                             .format(input.dim()))
-        super(LayerNorm, self)._check_input_dim(input)
 
 
 class InstanceNorm1d(_InstanceNorm):

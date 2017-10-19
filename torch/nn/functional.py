@@ -732,6 +732,9 @@ def batch_norm(input, running_mean, running_var, weight=None, bias=None,
 
 
 def layer_norm(input, weight=None, bias=None, eps=1e-5):
+    if input is not None and input.dim() != 2:
+        raise ValueError("Expected 2D tensor as input, got {}D tensor instead.".format(input.dim()))
+
     mean = input.mean(1, keepdim=True)
     std = input.std(1, keepdim=True)
     output = (input - mean) / (std + eps)
