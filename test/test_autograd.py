@@ -536,16 +536,6 @@ class TestAutograd(TestCase):
         self.assertEqual(b.grad.data, grad_c * a.data)
         self.assertEqual(q.grad.data, (grad_c + grad_z) * 2)
 
-    def test_multi_backward_stochastic(self):
-        x = Variable(torch.randn(5, 5), requires_grad=True)
-        y = Variable(torch.randn(5, 5), requires_grad=True)
-
-        z = x + y
-        q = torch.normal(x)
-        q.reinforce(torch.randn(5, 5))
-
-        torch.autograd.backward([z, q], [torch.ones(5, 5), None])
-
     def test_multi_backward_no_grad(self):
         x = Variable(torch.randn(5, 5), requires_grad=True)
         y = Variable(torch.randn(5, 5), requires_grad=False)
@@ -1360,101 +1350,6 @@ class TestAutograd(TestCase):
         y = MyFn()(x)
         y.sum().backward()
         self.assertEqual(x.grad.data, x.data.clone().fill_(1))
-
-    def test_reinforce_check(self):
-        x = Variable(torch.randn(5, 5), requires_grad=True)
-
-        # these should be ok
-        y = torch.normal(x)
-        y.reinforce(torch.randn(5, 5))
-        y = torch.normal(x)
-        y.reinforce(2)
-
-        # can't call reinforce on non-stochastic variables
-        self.assertRaises(RuntimeError, lambda: x.reinforce(2))
-
-        # can't call reinforce twice
-        y = torch.normal(x)
-        y.reinforce(2)
-        self.assertRaises(RuntimeError, lambda: y.reinforce(2))
-
-        # check type of reward
-        y = torch.normal(x)
-        self.assertRaises(TypeError, lambda: y.reinforce(torch.randn(5, 5).long()))
-
-        # check size of reward
-        y = torch.normal(x)
-        self.assertRaises(ValueError, lambda: y.reinforce(torch.randn(4, 5)))
-
-    def test_stochastic(self):
-        x = Variable(torch.rand(2, 10), requires_grad=True)
-        stddevs = Variable(torch.rand(2, 10) * 5, requires_grad=True)
-        y = (x * 2).clamp(0, 1)
-        y = y / y.sum(1, True).expand_as(y)
-        samples_multi = y.multinomial(5)
-        samples_multi_flat = y[0].multinomial(5)
-        samples_bernoulli = y.bernoulli()
-        samples_norm = torch.normal(y)
-        samples_norm_std = torch.normal(y, stddevs)
-        z = samples_multi * 2 + 4
-        z = z + samples_multi_flat.unsqueeze(0).expand_as(samples_multi)
-        z = torch.cat([z, z], 1)
-        z = z.double()
-        z = z + samples_bernoulli + samples_norm + samples_norm_std
-        last_sample = torch.normal(z, 4)
-        z = last_sample + 2
-        self.assertFalse(z.requires_grad)
-
-        self.assertRaises(RuntimeError, lambda: z.backward(retain_graph=True))
-        samples_multi.reinforce(torch.randn(2, 5))
-        self.assertRaises(RuntimeError, lambda: z.backward(retain_graph=True))
-        samples_multi_flat.reinforce(torch.randn(5))
-        self.assertRaises(RuntimeError, lambda: z.backward(retain_graph=True))
-        samples_bernoulli.reinforce(torch.randn(2, 10))
-        self.assertRaises(RuntimeError, lambda: z.backward(retain_graph=True))
-        samples_norm.reinforce(torch.randn(2, 10))
-        self.assertRaises(RuntimeError, lambda: z.backward(retain_graph=True))
-        samples_norm_std.reinforce(torch.randn(2, 10))
-        # We don't have to specify rewards w.r.t. last_sample - it doesn't
-        # require gradient
-
-        last_sample.backward(retain_graph=True)
-        z.backward()
-
-        self.assertGreater(x.grad.data.abs().sum(), 0)
-
-    def test_stochastic_require_grad(self):
-        # This tests a DSD function sequence (D=deterministic, S=stochastic),
-        # where all functions require grad.
-        x = Variable(torch.randn(2, 10), requires_grad=True)
-        y = Variable(torch.randn(2, 10), requires_grad=True)
-        z = torch.normal(x + 2, 2)
-        o = z + y
-        z.reinforce(torch.randn(2, 10))
-        o.sum().backward()
-        self.assertEqual(y.grad.data, torch.ones(2, 10))
-        self.assertGreater(x.grad.data.abs().sum(), 0)
-
-    def test_stochastic_sequence(self):
-        x = Variable(torch.rand(10).clamp_(0, 1), requires_grad=True)
-        b = x.bernoulli()
-        n1 = torch.normal(b, x)
-        n2 = torch.normal(n1, 2)
-
-        b.reinforce(torch.randn(10))
-        n1.reinforce(torch.randn(10))
-        n2.reinforce(torch.randn(10))
-
-        n2.backward()
-
-        self.assertGreater(x.grad.data.abs().sum(), 0)
-
-    def test_stochastic_output(self):
-        x = Variable(torch.rand(10), requires_grad=True)
-        b = x.clone().clamp(0, 1).bernoulli()
-        b.reinforce(torch.randn(10))
-        b.backward()
-        self.assertGreater(x.grad.data.abs().sum(), 0)
 
     def test_pickle(self):
         x = Variable(torch.randn(10, 10), requires_grad=True)

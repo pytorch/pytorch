@@ -309,6 +309,7 @@ import torch.sparse
 import torch.utils.backcompat
 import torch.onnx
 import torch.random
+import torch.distributions
 
 _C._init_names(list(torch._tensor_classes) + list(torch._storage_classes))
 
