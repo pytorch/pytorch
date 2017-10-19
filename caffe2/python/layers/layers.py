@@ -321,7 +321,7 @@ class ModelLayer(object):
                 init_net._net.op.extend([init_op])
 
     def create_param(self, param_name, shape, initializer, optimizer,
-                       ps_param=None):
+                     ps_param=None):
         with scope.NameScope(self.name, reset=True):
             param = self.model.create_param(param_name=param_name,
                                             shape=shape,
