@@ -537,23 +537,26 @@ PyObject *THPModule_hasDistributed(PyObject *_unused)
 #endif
 }
 
-void destroy_DLPack_PyCapsule(PyObject * obj) {
-  delete (DLTensor*)PyCapsule_GetPointer(obj, "tensor");
-}
-
 PyObject *THPModule_toDLPack(PyObject *_unused, PyObject *data)
 {
   THPUtils_assert(THPModule_isTensor(data), "data must be a Tensor");
   auto atTensor = torch::createTensor(data);
-  DLTensor * dlTensor(new DLTensor);
-  at::toDLPack(atTensor, dlTensor);
-  return PyCapsule_New(dlTensor, "tensor", destroy_DLPack_PyCapsule);
+  DLManagedTensor* dlMTensor = at::toDLPack(atTensor);
+  return PyCapsule_New(dlMTensor, "dltensor", NULL);
 }
 
 PyObject *THPModule_fromDLPack(PyObject *_unused, PyObject *data)
 {
-  DLTensor * dlTensor = (DLTensor *)PyCapsule_GetPointer(data, "tensor");
-  at::Tensor atensor = at::fromDLPack(dlTensor);
+  DLManagedTensor * dlMTensor = (DLManagedTensor *)PyCapsule_GetPointer(data, "dltensor");
+  THPUtils_assert(dlMTensor, "from_dlpack received an invalid capsule. "
+    "Note that DLTensor capsules can be consumed only once, "
+    "so you might have already constructed a tensor from it once.")
+  // atensor steals the ownership of the underlying storage. It also passes a
+  // destructor function that will be called when the underlying storage goes
+  // out of scope. When the destructor is called, the dlMTensor is destructed too.
+  at::Tensor atensor = at::fromDLPack(dlMTensor);
+  // Make sure this capsule will never be used again.
+  PyCapsule_SetName(data, "used_dltensor");
   return torch::createPyObject(atensor);
 }
 
