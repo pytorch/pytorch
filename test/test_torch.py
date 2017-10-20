@@ -8,6 +8,7 @@ import torch.cuda
 import tempfile
 import unittest
 import warnings
+from torch.utils.dlpack import from_dlpack, to_dlpack
 from itertools import product, combinations
 from common import TestCase, iter_indices, TEST_NUMPY, run_tests, download_file, skipIfNoLapack, \
     suppress_warnings
@@ -4248,8 +4249,7 @@ class TestTorch(TestCase):
 
     def test_dlpack_conversion(self):
         x = torch.randn(1, 2, 3, 4).type('torch.FloatTensor')
-        y = torch._C._to_dlpack(x)
-        z = torch._C._from_dlpack(y)
+        z = from_dlpack(to_dlpack(x))
         self.assertEqual(z, x)
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
