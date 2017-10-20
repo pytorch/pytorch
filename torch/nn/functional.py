@@ -742,13 +742,13 @@ def layer_norm(input, weight=None, bias=None, eps=1e-5):
     # Resize weights and biases to match dims
     if weight is not None:
         if input.size(1) != weight.nelement():
-            raise RuntimeError('got {}-feature tensor, expected {}'
-                               .format(input.size(1), weight.nelement()))
+            raise RuntimeError('Expected {} features as input, got {} features instead.'
+                               .format(weight.nelement(), input.size(1)))
         output = weight * output
     if bias is not None:
         if input.size(1) != bias.nelement():
-            raise RuntimeError('got {}-feature tensor, expected {}'
-                               .format(input.size(1), bias.nelement()))
+            raise RuntimeError('Expected {} features as input, got {} features instead.'
+                               .format(bias.nelement(), input.size(1)))
         output = output + bias
 
     return output
