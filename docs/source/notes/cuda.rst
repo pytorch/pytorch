@@ -44,6 +44,23 @@ Below you can find a small example showcasing this::
 Best practices
 --------------
 
+Device-agnostic code
+^^^^^^^^^^^^^^^^^^^^
+
+Due to the structure of PyTorch, you may need to explicitly write
+device-agnostic (CPU or GPU) code; an example may be creating a new tensor as
+the initial hidden state of a recurrent neural network. Some common examples
+are as follows:
+
+...
+
+If you have a tensor and would like to create a new tensor of the same type,
+then you can use the `.new()` function::
+
+  x_cpu = torch.FloatTensor(1)
+  x_gpu = torch.cuda.FloatTensor(1)
+
+
 Use pinned memory buffers
 ^^^^^^^^^^^^^^^^^^^^^^^^^
 
