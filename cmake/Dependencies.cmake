@@ -128,9 +128,8 @@ if(BUILD_TEST)
 
   # We will not need to test benchmark lib itself.
   set(BENCHMARK_ENABLE_TESTING OFF)
-  # We will not need to install benchmark. This is pending 
-  # https://github.com/google/benchmark/pull/463
-  set(INSTALL_BENCHMARK OFF)
+  # We will not need to install benchmark since we link it statically. 
+  set(BENCHMARK_ENABLE_INSTALL OFF)
   add_subdirectory(${PROJECT_SOURCE_DIR}/third_party/benchmark)
   caffe2_include_directories(${PROJECT_SOURCE_DIR}/third_party/benchmark/include)
 
