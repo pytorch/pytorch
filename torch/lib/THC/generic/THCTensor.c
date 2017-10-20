@@ -186,10 +186,9 @@ THCTensor *THCTensor_(newClone)(THCState *state, THCTensor *self)
 
 THCTensor *THCTensor_(newContiguous)(THCState *state, THCTensor *self)
 {
-  if(!THCTensor_(isContiguous)(state, self))
+  if(!THCTensor_(isContiguous)(state, self)) {
     return THCTensor_(newClone)(state, self);
-  else
-  {
+  } else {
     THCTensor_(retain)(state, self);
     return self;
   }

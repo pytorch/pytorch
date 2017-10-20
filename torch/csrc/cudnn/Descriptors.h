@@ -29,6 +29,18 @@ inline cudnnDataType_t getDataType(const at::Tensor& t) {
   throw std::runtime_error("TensorDescriptor only supports double, float and half tensors");
 }
 
+static inline void fixSizeOneDimStride(int dim, int *size, int *stride) {
+  int64_t z = 1;
+  for(int d = dim-1; d >= 0; d--)
+  {
+    if (size[d] == 1) {
+      stride[d] = z;
+    } else {
+      z *= size[d];
+    }
+  }
+}
+
 struct TensorDescriptor
 {
   cudnnTensorDescriptor_t desc;
@@ -46,6 +58,7 @@ struct TensorDescriptor
     cudnnDestroyTensorDescriptor(desc);
   }
   void set(cudnnDataType_t dataType, int dim, int* size, int* stride) {
+    fixSizeOneDimStride(dim, size, stride);
     CHECK(cudnnSetTensorNdDescriptor(desc, dataType, dim, size, stride));
   }
   void set(const at::Tensor &t, int pad = 0) {

@@ -1075,6 +1075,18 @@ class TestNN(NNTestCase):
 
         y.backward(grad)
 
+    @unittest.skipIf(not TEST_CUDNN, "needs cudnn")
+    def test_contig_wrong_stride_cudnn(self):
+        # x has to have batch_size 1 to test contiguous checks
+        x = torch.randn(1, 16, 5, 5).cuda()
+        stride = list(x.stride())
+        stride[0] = 20
+        # change the stride in dimension 0. the tensor is still contiguous because size[0] is 1
+        x.set_(x.storage(), 0, x.size(), stride)
+        self.assertTrue(x.is_contiguous())
+        F.conv_transpose2d(Variable(x), Variable(torch.randn(16, 1, 1, 1)).cuda())
+        F.conv2d(Variable(x), Variable(torch.randn(1, 16, 1, 1)).cuda())
+
     def test_EmbeddingBag(self):
         self._test_EmbeddingBag(False, 'sum')
         self._test_EmbeddingBag(False, 'mean')

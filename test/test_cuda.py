@@ -859,6 +859,9 @@ class TestCuda(TestCase):
     def test_broadcast(self):
         TestTorch._test_broadcast(self, lambda t: t.cuda())
 
+    def test_contiguous(self):
+        TestTorch._test_contiguous(self, lambda t: t.cuda())
+
     def test_broadcast_fallback(self):
         TestTorch._test_broadcast_fallback(self, lambda t: t.cuda())
 
