@@ -259,10 +259,14 @@ void THTensor_(gels)(THTensor *rb_, THTensor *ra_, THTensor *b, THTensor *a)
                                      if (free_b) THTensor_(free)(b);),
                            "gels", info,"");
 
-  /* rb__ is currently ldb by nrhs; resize it to n by nrhs */
-  rb__->size[0] = n;
-  if (rb__ != rb_)
+  /*
+   * In the m < n case, if the input b is used as the result (so b == _rb),
+   * then rb_ was originally m by nrhs but now should be n by nrhs.
+   * This is larger than before, so we need to expose the new rows by resizing.
+   */
+  if (m < n && b == rb_) {
     THTensor_(resize2d)(rb_, n, nrhs);
+  }
 
   THTensor_(freeCopyTo)(ra__, ra_);
   THTensor_(freeCopyTo)(rb__, rb_);

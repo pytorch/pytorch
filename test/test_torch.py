@@ -2060,7 +2060,11 @@ class TestTorch(TestCase):
 
     @skipIfNoLapack
     def test_gels(self):
-        def _test(a, b, expectedNorm):
+        def _test_underdetermined(a, b, expectedNorm):
+            m = a.size()[0]
+            n = a.size()[1]
+            assert(m <= n)
+
             a_copy = a.clone()
             b_copy = b.clone()
             res1 = torch.gels(b, a)[0]
@@ -2082,6 +2086,46 @@ class TestTorch(TestCase):
             self.assertEqual(res1, res2, 0)
             self.assertEqual(res1, res3, 0)
 
+        def _test_overdetermined(a, b, expectedNorm):
+            m = a.size()[0]
+            n = a.size()[1]
+            assert(m > n)
+
+            def check_norm(a, b, expected_norm, gels_result):
+                # Checks |ax - b| and the residual info from the result
+                n = a.size()[1]
+
+                # The first n rows is the least square solution.
+                # Rows n to m-1 contain residual information.
+                x = gels_result[:n]
+                resid_info = gels_result[n:]
+
+                resid_norm = (torch.mm(a, x) - b).norm()
+                self.assertEqual(resid_norm, expectedNorm, 1e-8)
+                self.assertEqual(resid_info.norm(), resid_norm, 1e-8)
+
+            a_copy = a.clone()
+            b_copy = b.clone()
+            res1 = torch.gels(b, a)[0]
+            self.assertEqual(a, a_copy, 0)
+            self.assertEqual(b, b_copy, 0)
+            check_norm(a, b, expectedNorm, res1)
+
+            ta = torch.Tensor()
+            tb = torch.Tensor()
+            res2 = torch.gels(b, a, out=(tb, ta))[0]
+            self.assertEqual(a, a_copy, 0)
+            self.assertEqual(b, b_copy, 0)
+            check_norm(a, b, expectedNorm, res2)
+
+            res3 = torch.gels(b, a, out=(b, a))[0]
+            check_norm(a_copy, b_copy, expectedNorm, res3)
+
+            self.assertEqual(res1, tb, 0)
+            self.assertEqual(res1, b, 0)
+            self.assertEqual(res1, res2, 0)
+            self.assertEqual(res1, res3, 0)
+
         # basic test
         expectedNorm = 0
         a = torch.Tensor(((1.44, -9.96, -7.55, 8.34),
@@ -2090,7 +2134,7 @@ class TestTorch(TestCase):
                           (4.53, 3.83, -6.64, 2.06))).t()
         b = torch.Tensor(((8.58, 8.26, 8.48, -5.28),
                           (9.35, -4.43, -0.70, -0.26))).t()
-        _test(a, b, expectedNorm)
+        _test_underdetermined(a, b, expectedNorm)
 
         # test overderemined
         expectedNorm = 17.390200628863
@@ -2100,7 +2144,7 @@ class TestTorch(TestCase):
                           (4.53, 3.83, -6.64, 2.06, -2.47, 4.70))).t()
         b = torch.Tensor(((8.58, 8.26, 8.48, -5.28, 5.72, 8.93),
                           (9.35, -4.43, -0.70, -0.26, -7.36, -2.52))).t()
-        _test(a, b, expectedNorm)
+        _test_overdetermined(a, b, expectedNorm)
 
         # test underdetermined
         expectedNorm = 0
@@ -2110,7 +2154,7 @@ class TestTorch(TestCase):
                           (4.53, 3.83, -6.64))).t()
         b = torch.Tensor(((8.58, 8.26, 8.48),
                           (9.35, -4.43, -0.70))).t()
-        _test(a, b, expectedNorm)
+        _test_underdetermined(a, b, expectedNorm)
 
         # test reuse
         expectedNorm = 0
