@@ -114,17 +114,28 @@ endif()
 
 # ---[ Googletest and benchmark
 if(BUILD_TEST)
+  set(TEMP_BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS})
+  # We will build gtest as static libs and embed it directly into the binary.
+  set(BUILD_SHARED_LIBS OFF)
+  # For gtest, we will simply embed it into our test binaries, so we won't
+  # need to install it.
+  set(BUILD_GTEST ON)
+  set(INSTALL_GTEST OFF)
+  # We currently don't need gmock right now.
+  set(BUILD_GMOCK OFF)
   add_subdirectory(${PROJECT_SOURCE_DIR}/third_party/googletest)
   caffe2_include_directories(${PROJECT_SOURCE_DIR}/third_party/googletest/googletest/include)
 
-  find_package(Benchmark)
-  if(Benchmark_FOUND)
-    list(APPEND Caffe2_DEPENDENCY_LIBS ${Benchmark_LIBRARIES})
-    caffe2_include_directories(${Benchmark_INCLUDE_DIRS})
-  else()
-    add_subdirectory(${PROJECT_SOURCE_DIR}/third_party/benchmark)
-    caffe2_include_directories(${PROJECT_SOURCE_DIR}/third_party/benchmark/include)
-  endif()
+  # We will not need to test benchmark lib itself.
+  set(BENCHMARK_ENABLE_TESTING OFF)
+  # We will not need to install benchmark. This is pending 
+  # https://github.com/google/benchmark/pull/463
+  set(INSTALL_BENCHMARK OFF)
+  add_subdirectory(${PROJECT_SOURCE_DIR}/third_party/benchmark)
+  caffe2_include_directories(${PROJECT_SOURCE_DIR}/third_party/benchmark/include)
+
+  # Recover the build shared libs option.
+  set(BUILD_SHARED_LIBS ${TEMP_BUILD_SHARED_LIBS})
 endif()
 
 # ---[ LMDB

@@ -13,6 +13,12 @@ if (USE_CUDA)
   caffe2_binary_target("inspect_gpus.cc")
   target_link_libraries(inspect_gpus ${CUDA_LIBRARIES})
   caffe2_binary_target("print_core_object_sizes.cc")
+
+  if (BUILD_TEST)
+    # Core overhead benchmark
+    caffe2_binary_target("core_overhead_benchmark.cc")
+    target_link_libraries(core_overhead_benchmark benchmark)
+  endif()
 endif()
 
 if (USE_ZMQ)
