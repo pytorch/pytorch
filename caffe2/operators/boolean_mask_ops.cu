@@ -174,9 +174,8 @@ __global__ void repeatedSequenceMaskKernel(
     T fill_val,
     T* out) {
   CUDA_1D_KERNEL_LOOP(index, N * M * D) {
-    int h = index / D;
-    int i = h / M;
-    int j = h % M;
+    int i = index / (D * M);
+    int j = (index / D) % M;
 
     out[index] = (j >= seq_lengths[i] ? fill_val : in[index]);
   }
