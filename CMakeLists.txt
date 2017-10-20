@@ -9,12 +9,6 @@ set(CAFFE2_VERSION_PATCH 1)
 set(CAFFE2_VERSION
     "${CAFFE2_VERSION_MAJOR}.${CAFFE2_VERSION_MINOR}.${CAFFE2_VERSION_PATCH}")
 
-# ---[ Do not search cmake install prefix. See the following link for details:
-# https://github.com/caffe2/caffe2/commit/251d2d0c521c781276eea3748d92fc92e5dbceab
-message(STATUS "Setting CMAKE_FIND_NO_INSTALL_PREFIX")
-set(CMAKE_FIND_NO_INSTALL_PREFIX TRUE)
-
-
 # ---[ Options.
 # Note to developers: if you add an option below, make sure you also add it to
 # cmake/Summary.cmake so that the summary prints out the option values.
