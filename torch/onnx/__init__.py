@@ -180,8 +180,10 @@ def _graph_op(g, opname, *raw_args, **kwargs):
             in positional.
     """
     outputs = kwargs.pop('outputs', 1)
-    # Filter out None attributes, this can be convenient client side
-    kwargs = dict((k, v) for k, v in kwargs.iteritems() if v is not None)
+
+    # Filter out None attributes, this can be convenient client side because
+    # now they can pass through None attributes, and have them not show up
+    kwargs = dict((k, v) for k, v in kwargs.items() if v is not None)
 
     def const_if_tensor(arg):
         if isinstance(arg, torch._C.Node):
