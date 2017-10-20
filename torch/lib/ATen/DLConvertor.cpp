@@ -13,28 +13,28 @@ static DLDataType getDLDataType(const Type& type) {
   dtype.bits = type.elementSizeInBytes() * 8;
   switch (type.scalarType()) {
     case ScalarType::Byte:
-      dtype.code = DLDataTypeCode::kUInt;
+      dtype.code = DLDataTypeCode::kDLUInt;
       break;
     case ScalarType::Char:
-      dtype.code = DLDataTypeCode::kInt;
+      dtype.code = DLDataTypeCode::kDLInt;
       break;
     case ScalarType::Double:
-      dtype.code = DLDataTypeCode::kFloat;
+      dtype.code = DLDataTypeCode::kDLFloat;
       break;
     case ScalarType::Float:
-      dtype.code = DLDataTypeCode::kFloat;
+      dtype.code = DLDataTypeCode::kDLFloat;
       break;
     case ScalarType::Int:
-      dtype.code = DLDataTypeCode::kInt;
+      dtype.code = DLDataTypeCode::kDLInt;
       break;
     case ScalarType::Long:
-      dtype.code = DLDataTypeCode::kInt;
+      dtype.code = DLDataTypeCode::kDLInt;
       break;
     case ScalarType::Short:
-      dtype.code = DLDataTypeCode::kInt;
+      dtype.code = DLDataTypeCode::kDLInt;
       break;
     case ScalarType::Half:
-      dtype.code = DLDataTypeCode::kFloat;
+      dtype.code = DLDataTypeCode::kDLFloat;
       break;
     case ScalarType::NumOptions:
       throw std::logic_error("NumOptions is not a valid ScalarType");
@@ -47,9 +47,9 @@ static DLContext getDLContext(const Type& type, const int64_t& device_id) {
   DLContext ctx;
   ctx.device_id = device_id;
   if (type.isCuda()) {
-    ctx.device_type = DLDeviceType::kGPU;
+    ctx.device_type = DLDeviceType::kDLGPU;
   } else {
-    ctx.device_type = DLDeviceType::kCPU;
+    ctx.device_type = DLDeviceType::kDLCPU;
   }
   return ctx;
 }
@@ -58,10 +58,10 @@ static DLContext getDLContext(const Type& type, const int64_t& device_id) {
 static Backend getATenBackend(const DLContext& ctx) {
   Backend backend;
   switch (ctx.device_type) {
-    case DLDeviceType::kCPU:
+    case DLDeviceType::kDLCPU:
       backend = Backend::CPU;
       break;
-    case DLDeviceType::kGPU:
+    case DLDeviceType::kDLGPU:
       backend = Backend::CUDA;
       break;
     default:
@@ -71,12 +71,11 @@ static Backend getATenBackend(const DLContext& ctx) {
 }
 
 
-// TODO: use macros?
-static ScalarType getATenScalarType(const DLDataType& dtype) {
+ScalarType toScalarType(const DLDataType& dtype) {
   ScalarType stype;
   if (dtype.lanes != 1) throw std::logic_error("ATen does not support lanes != 1");
   switch (dtype.code) {
-    case DLDataTypeCode::kUInt:
+    case DLDataTypeCode::kDLUInt:
       switch (dtype.bits) {
         case 8:
           stype = ScalarType::Byte;
@@ -85,7 +84,7 @@ static ScalarType getATenScalarType(const DLDataType& dtype) {
           throw std::logic_error("Unsupported kUInt bits " + std::to_string(dtype.bits));
       }
       break;
-    case DLDataTypeCode::kInt:
+    case DLDataTypeCode::kDLInt:
       switch (dtype.bits) {
         case 8:
           stype = ScalarType::Char;
@@ -103,7 +102,7 @@ static ScalarType getATenScalarType(const DLDataType& dtype) {
           throw std::logic_error("Unsupported kInt bits " + std::to_string(dtype.bits));
       }
       break;
-    case DLDataTypeCode::kFloat:
+    case DLDataTypeCode::kDLFloat:
       switch (dtype.bits) {
         case 16:
           stype = ScalarType::Half;
@@ -158,7 +157,7 @@ DLManagedTensor* toDLPack(const Tensor& src) {
 
 Tensor fromDLPack(const DLManagedTensor* src) {
   Backend backend = getATenBackend(src->dlTensor.ctx);
-  ScalarType stype = getATenScalarType(src->dlTensor.dtype);
+  ScalarType stype = toScalarType(src->dlTensor.dtype);
   auto deleter = [src](void * self) {
     src->destructor(const_cast<DLManagedTensor*>(src));
   };
