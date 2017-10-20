@@ -110,9 +110,15 @@ class TestSparse(TestCase):
         self.assertEqual(i, x._indices())
         self.assertEqual(v, x._values())
         self.assertEqual(x.ndimension(), 3)
-        self.assertEqual(x.coalesce()._nnz(), 10)
+        self.assertEqual(self.safeCoalesce(x)._nnz(), 10)
         for i in range(3):
             self.assertEqual(x.size(i), 100)
+
+        # Make sure that coalesce handles duplicate indices correctly
+        i = self.IndexTensor([[9, 0, 0, 0, 8, 1, 1, 1, 2, 7, 2, 2, 3, 4, 6, 9]])
+        v = self.ValueTensor([[idx**2, idx] for idx in range(i.size(1))])
+        x = self.SparseTensor(i, v, torch.Size([10, 2]))
+        self.assertEqual(self.safeCoalesce(x)._nnz(), 9)
 
         # Make sure we can access empty indices / values
         x = self.SparseTensor()
