@@ -105,8 +105,8 @@
   self: grad.diag(diagonal)
 
 - name: dist(Tensor self, Tensor other, Scalar p=2)
-  self: norm_backward(grad, self - other, p, result)
-  other: -norm_backward(grad, self - other, p, result)
+  self: norm_backward(grad, self - other, p)
+  other: -norm_backward(grad, self - other, p)
 
 - name: div(Tensor self, Scalar other)
   self: grad / other
@@ -345,10 +345,10 @@
   self: zeros_like(grad)
 
 - name: norm(Tensor self, Scalar p=2)
-  self: norm_backward(grad, self, p, result)
+  self: norm_backward(grad, self, p)
 
 - name: norm(Tensor self, Scalar p, int64_t dim, bool keepdim=False)
-  self: norm_backward(grad, self, p, destination, dim, keepdim)
+  self: norm_backward(grad, self, p, dim, keepdim)
 
 - name: numel  # fallthrough
 - name: ones  # fallthrough

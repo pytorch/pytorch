@@ -32,28 +32,41 @@ Tensor maybe_multiply(const Tensor & t, const Scalar & s) {
   }
 }
 
-Tensor norm_backward(const Tensor & grad, const Tensor & self, const Scalar & p_, const Tensor & norm) {
-  double p = p_.toDouble();
-  Tensor self_scaled;
-  Tensor scale_v;
-  if (p == 2.0) {
-    self_scaled = self;
-    scale_v = grad / norm;
-  } else {
-    self_scaled = self.abs().pow(p - 2);
-    scale_v = grad / norm.pow(p - 1);
+Tensor norm_backward(const Tensor & grad, const Tensor & self, const Scalar & p_) {
+  auto p = p_.toDouble();
+  auto norm = self.norm(p_);
+
+  if (norm.toDouble() == 0.0) {
+    // handle case at 0 where we return a subgradient containing 0
+    return zeros_like(self);
   }
-  // handle case at 0 where we return a subgradient containing 0
-  scale_v.masked_fill_(grad == 0, 0);
-  return self_scaled * scale_v;
+
+  if (p == 2.0) {
+    return self * (grad / norm);
+  } else {
+    auto pow_ = self.abs().pow(p - 2);
+    auto scale_v = grad / norm.toTensor().pow(p - 1);
+    return self * pow_ * scale_v;
+  }
 }
 
-Tensor norm_backward(Tensor grad, const Tensor & self, const Scalar & p_, Tensor norm, int64_t dim, bool keepdim) {
+Tensor norm_backward(Tensor grad, const Tensor & self, const Scalar & p_, int64_t dim, bool keepdim) {
   if (!keepdim && self.dim() > 1) {
     grad = grad.unsqueeze(dim);
-    norm = norm.unsqueeze(dim);
   }
-  return norm_backward(grad, self, p_, norm);
+  auto p = p_.toDouble();
+  auto norm = self.norm(p, dim, true);
+  Tensor grad_input;
+  if (p == 2.0) {
+    grad_input = self * (grad / norm);
+  } else {
+    auto pow_ = self.abs().pow(p - 2);
+    auto scale_v = grad / norm.pow(p - 1);
+    grad_input = self * pow_ * scale_v;
+  }
+  // handle case at 0 where we return a subgradient containing 0
+  grad_input.masked_fill_(norm == 0, 0);
+  return grad_input;
 }
 
 Tensor reduce_to(const Tensor & grad, IntList sizes) {
