@@ -108,8 +108,8 @@
   self: norm_backward(grad, self - other, p, result)
   other: -norm_backward(grad, self - other, p, result)
 
-- name: div(Tensor self, Scalar value)
-  self: grad / value
+- name: div(Tensor self, Scalar other)
+  self: grad / other
 
 - name: div(Tensor self, Tensor other)
   self: grad / other
@@ -311,8 +311,8 @@
 - name: mode(Tensor self, int64_t dim, bool keepdim)
   self: select_backward(grad, dim, indices, self.sizes(), keepdim)
 
-- name: mul(Tensor self, Scalar value)
-  self: grad * value
+- name: mul(Tensor self, Scalar other)
+  self: grad * other
 
 - name: mul(Tensor self, Tensor other)
   self: grad * other
@@ -570,7 +570,7 @@
   grad_output: log_sigmoid_backward(grad, input, buffer)
   input: log_sigmoid_double_backward(grad * grad_output, input)
 
-- name: log_softmax_backward(Tensor grad_output, Tensor input, int dim, Tensor output)
+- name: log_softmax_backward(Tensor grad_output, Tensor input, int64_t dim, Tensor output)
   grad_output: grad - (grad * output.exp()).sum(dim, true)
   input: log_softmax_double_backward(grad, grad_output, dim, output)
 
@@ -612,7 +612,7 @@
   grad_output: softplus_backward(grad, input, beta, threshold, output)
   input: softplus_double_backward(grad * grad_output, input, beta, threshold)
 
-- name: softmax_backward(Tensor grad_output, Tensor input, int dim, Tensor output)
+- name: softmax_backward(Tensor grad_output, Tensor input, int64_t dim, Tensor output)
   grad_output: softmax_backward(grad, input, dim, output)
   input: softmax_double_backward(grad, grad_output, dim, output)
 
