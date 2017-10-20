@@ -277,7 +277,7 @@ void THCSTensor_(spcadd)(THCState *state, THCTensor *r_, THCTensor *dense, real 
           (uint64_t) nnz);
     }
   } else {
-    THCIndexTensor *indices1D = THCSTensor_(newFlattenedIndices)(state, sparse);
+    THCIndexTensor *indices1D = THCSTensor_(newFlattenedIndices)(state, sparse, 0);
     THCIndexTensor_(resize1d)(state, indices1D, nnz);
 
     if (value != ScalarConvert<int, real>::to(1)) {
