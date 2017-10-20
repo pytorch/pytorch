@@ -70,10 +70,11 @@ class TestScatterOps(hu.HypothesisTestCase):
     @given(first_dim=st.integers(1, 20),
            index_dim=st.integers(1, 10),
            extra_dims=st.lists(st.integers(1, 4), min_size=0, max_size=3),
+           data_type=st.sampled_from([np.float16, np.float32, np.int32, np.int64]),
            ind_type=st.sampled_from([np.int32, np.int64]),
            **hu.gcs_cpu_only)
     def testScatterAssign(
-        self, first_dim, index_dim, extra_dims, ind_type, gc, dc):
+            self, first_dim, index_dim, extra_dims, data_type, ind_type, gc, dc):
         op = core.CreateOperator('ScatterAssign',
                                  ['data', 'indices', 'slices'], ['data'])
         def ref(d, ind, x):
@@ -84,10 +85,10 @@ class TestScatterOps(hu.HypothesisTestCase):
         # let's have indices unique
         if first_dim < index_dim:
             first_dim, index_dim = index_dim, first_dim
-        d = rand_array(first_dim, *extra_dims)
+        d = (rand_array(first_dim, *extra_dims) * 10).astype(data_type)
         ind = np.random.choice(first_dim, index_dim,
                                replace=False).astype(ind_type)
-        x = rand_array(index_dim, *extra_dims)
+        x = (rand_array(index_dim, *extra_dims) * 10).astype(data_type)
         self.assertReferenceChecks(gc, op, [d, ind, x], ref, threshold=1e-3)
 
 if __name__ == "__main__":
