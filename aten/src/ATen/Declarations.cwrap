@@ -666,7 +666,7 @@
         - arg: THTensor* result
           output: True
         - THTensor* self
-        - real value
+        - real other
     - cname: cbitand
       arguments:
         - arg: THTensor* result
@@ -686,7 +686,7 @@
       arguments:
         - THTensor* self
         - THTensor* self
-        - real value
+        - real other
     - cname: cbitand
       arguments:
         - THTensor* self
@@ -706,7 +706,7 @@
         - arg: THTensor* result
           output: True
         - THTensor* self
-        - real value
+        - real other
     - cname: cbitor
       arguments:
         - arg: THTensor* result
@@ -726,7 +726,7 @@
       arguments:
         - THTensor* self
         - THTensor* self
-        - real value
+        - real other
     - cname: cbitor
       arguments:
         - THTensor* self
@@ -746,7 +746,7 @@
         - arg: THTensor* result
           output: True
         - THTensor* self
-        - real value
+        - real other
     - cname: cbitxor
       arguments:
         - arg: THTensor* result
@@ -766,7 +766,7 @@
       arguments:
         - THTensor* self
         - THTensor* self
-        - real value
+        - real other
     - cname: cbitxor
       arguments:
         - THTensor* self
@@ -786,7 +786,7 @@
         - arg: THTensor* result
           output: True
         - THTensor* self
-        - real value
+        - real other
     - cname: clshift
       arguments:
         - arg: THTensor* result
@@ -806,7 +806,7 @@
       arguments:
         - THTensor* self
         - THTensor* self
-        - real value
+        - real other
     - cname: clshift
       arguments:
         - THTensor* self
@@ -826,7 +826,7 @@
         - arg: THTensor* result
           output: True
         - THTensor* self
-        - real value
+        - real other
     - cname: crshift
       arguments:
         - arg: THTensor* result
@@ -846,7 +846,7 @@
       arguments:
         - THTensor* self
         - THTensor* self
-        - real value
+        - real other
     - cname: crshift
       arguments:
         - THTensor* self
@@ -894,7 +894,7 @@
         - arg: THBoolTensor* result
           output: True
         - THTensor* self
-        - real value
+        - real other
     - cname: ltTensor
       arguments:
         - arg: THBoolTensor* result
@@ -911,7 +911,7 @@
       arguments:
         - THTensor* self
         - THTensor* self
-        - real value
+        - real other
     - cname: ltTensorT
       arguments:
         - THTensor* self
@@ -931,7 +931,7 @@
         - arg: THBoolTensor* result
           output: True
         - THTensor* self
-        - real value
+        - real other
     - cname: gtTensor
       arguments:
         - arg: THBoolTensor* result
@@ -948,7 +948,7 @@
       arguments:
         - THTensor* self
         - THTensor* self
-        - real value
+        - real other
     - cname: gtTensorT
       arguments:
         - THTensor* self
@@ -968,7 +968,7 @@
         - arg: THBoolTensor* result
           output: True
         - THTensor* self
-        - real value
+        - real other
     - cname: leTensor
       arguments:
         - arg: THBoolTensor* result
@@ -985,7 +985,7 @@
       arguments:
         - THTensor* self
         - THTensor* self
-        - real value
+        - real other
     - cname: leTensorT
       arguments:
         - THTensor* self
@@ -1005,7 +1005,7 @@
         - arg: THBoolTensor* result
           output: True
         - THTensor* self
-        - real value
+        - real other
     - cname: geTensor
       arguments:
         - arg: THBoolTensor* result
@@ -1022,7 +1022,7 @@
       arguments:
         - THTensor* self
         - THTensor* self
-        - real value
+        - real other
     - cname: geTensorT
       arguments:
         - THTensor* self
@@ -1042,7 +1042,7 @@
         - arg: THBoolTensor* result
           output: True
         - THTensor* self
-        - real value
+        - real other
     - cname: eqTensor
       arguments:
         - arg: THBoolTensor* result
@@ -1059,7 +1059,7 @@
       arguments:
         - THTensor* self
         - THTensor* self
-        - real value
+        - real other
     - cname: eqTensorT
       arguments:
         - THTensor* self
@@ -1079,7 +1079,7 @@
         - arg: THBoolTensor* result
           output: True
         - THTensor* self
-        - real value
+        - real other
     - cname: neTensor
       arguments:
         - arg: THBoolTensor* result
@@ -1096,7 +1096,7 @@
       arguments:
         - THTensor* self
         - THTensor* self
-        - real value
+        - real other
     - cname: neTensorT
       arguments:
         - THTensor* self
@@ -2564,7 +2564,7 @@
         - arg: THTensor* result
           output: True
         - THTensor* self
-        - real value
+        - real other
         - arg: real alpha
           default: AS_REAL(1)
           kwarg_only: True
@@ -2599,7 +2599,7 @@
       arguments:
         - THTensor* self
         - THTensor* self
-        - real value
+        - real other
         - arg: real alpha
           default: AS_REAL(1)
           kwarg_only: True
@@ -2636,7 +2636,7 @@
         - arg: THTensor* result
           output: True
         - THTensor* self
-        - real value
+        - real other
         - arg: real alpha
           default: AS_REAL(1)
           kwarg_only: True
@@ -2659,7 +2659,7 @@
       arguments:
         - THTensor* self
         - THTensor* self
-        - real value
+        - real other
         - arg: real alpha
           default: AS_REAL(1)
           kwarg_only: True
@@ -2685,7 +2685,7 @@
         - arg: THTensor* result
           output: True
         - THTensor* self
-        - real value
+        - real other
     - cname: cmul
       arguments:
         - arg: THTensor* result
@@ -2702,7 +2702,7 @@
       arguments:
         - THTensor* self
         - THTensor* self
-        - real value
+        - real other
     - cname: cmul
       arguments:
         - THTensor* self
@@ -2722,7 +2722,7 @@
         - arg: THTensor* result
           output: True
         - THTensor* self
-        - real value
+        - real other
     - cname: cdiv
       arguments:
         - arg: THTensor* result
@@ -2739,7 +2739,7 @@
       arguments:
         - THTensor* self
         - THTensor* self
-        - real value
+        - real other
     - cname: cdiv
       arguments:
         - THTensor* self
@@ -2759,7 +2759,7 @@
         - arg: THTensor* result
           output: True
         - THTensor* self
-        - real value
+        - real other
     - cname: cfmod
       arguments:
         - arg: THTensor* result
@@ -2776,7 +2776,7 @@
       arguments:
         - THTensor* self
         - THTensor* self
-        - real value
+        - real other
     - cname: cfmod
       arguments:
         - THTensor* self
@@ -2796,7 +2796,7 @@
         - arg: THTensor* result
           output: True
         - THTensor* self
-        - real value
+        - real other
     - cname: cremainder
       arguments:
         - arg: THTensor* result
@@ -2813,7 +2813,7 @@
       arguments:
         - THTensor* self
         - THTensor* self
-        - real value
+        - real other
     - cname: cremainder
       arguments:
         - THTensor* self
