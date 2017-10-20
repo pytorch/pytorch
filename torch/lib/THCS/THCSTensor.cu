@@ -274,7 +274,7 @@ __global__ void THCSTensor_coalesceValuesKernel(
 
   int seg = blockIdx.x * 4 + threadIdx.y;
 
-  // Number of values proceessed by each thread (grain size)
+  // Number of values processed by each thread (grain size)
   const int SZ = 4;
 
   if (seg < newNnz) {
