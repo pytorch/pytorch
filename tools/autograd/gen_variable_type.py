@@ -690,7 +690,7 @@ def load_aten_declarations(path):
 
         declaration['base_name'] = declaration['name']
 
-        # if the return value is missing a name, call it 'result'
+        # if the return value is missing a name, call it 'output'
         for ret in declaration['returns']:
             if 'name' not in ret:
                 assert len(declaration['returns']) == 1
