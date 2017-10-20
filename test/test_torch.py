@@ -2113,7 +2113,6 @@ class TestTorch(TestCase):
             self.assertEqual(res1, res2, 0)
             self.assertEqual(res1, res3, 0)
 
-
         # basic test
         expectedNorm = 0
         a = torch.Tensor(((1.44, -9.96, -7.55, 8.34),
