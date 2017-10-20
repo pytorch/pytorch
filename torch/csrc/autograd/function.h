@@ -6,9 +6,9 @@
 // Subclasses may represent "forward" or "backward" operations (i.e functions
 // and their derivatives). Some functions may be used as both.
 
-#include <Python.h>
 #include "torch/csrc/autograd/saved_variable.h"
 #include "torch/csrc/utils/auto_unique_ptr.h"
+#include "torch/csrc/utils/python_stub.h"
 #include "torch/csrc/autograd/function_hook.h"
 #include "torch/csrc/autograd/profiler.h"
 #include "torch/csrc/jit/tracer.h"
@@ -99,7 +99,7 @@ struct Function : std::enable_shared_from_this<Function> {
   // of input variables
   static FunctionFlags flags(const variable_list& inputs);
   static FunctionFlags flags(const std::initializer_list<Variable>& inputs);
-  static FunctionFlags flags(const tensor_list& inputs);
+  static FunctionFlags flags(at::TensorList inputs);
 
   // Releases saved variables if the operation won't be reused
   virtual inline void releaseVariables() {}
@@ -119,6 +119,12 @@ struct Function : std::enable_shared_from_this<Function> {
       }
     }
     return false;
+  }
+
+  inline bool should_compute_output(std::initializer_list<int> idxs) const {
+    return std::any_of(idxs.begin(), idxs.end(), [this](int i) {
+      return should_compute_output(i);
+    });
   }
 
   inline void set_flags(FunctionFlags&& flags) {

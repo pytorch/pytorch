@@ -1,3 +1,5 @@
+#include <Python.h>
+
 #include "torch/csrc/jit/ir.h"
 #include "torch/csrc/jit/pybind.h"
 #include "torch/csrc/jit/python_tracer.h"

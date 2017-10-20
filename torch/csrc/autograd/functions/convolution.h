@@ -34,12 +34,14 @@ struct ConvParams {
 
   bool is_strided() const;
   bool is_dilated() const;
+  bool is_padded() const;
   bool is_output_padding_neg() const;
   bool is_output_padding_big() const;
   bool is_padding_neg() const;
   void view1d_as_2d();
   bool use_cudnn(const at::Tensor& input) const;
   bool use_nnpack(const at::Tensor& input) const;
+  bool is_depthwise(const at::Tensor& input, const at::Tensor& weight, int groups) const;
 };
 
 struct ConvForward : public ForwardFunction<>, public ConvParams, public HasSymbolic {

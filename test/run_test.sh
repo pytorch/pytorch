@@ -30,6 +30,9 @@ echo "Running autograd tests"
 $PYCMD test_autograd.py $@
 $PYCMD test_potrf.py $@
 
+echo "Running torch.distributions tests"
+$PYCMD test_distributions.py $@
+
 echo "Running sparse tests"
 $PYCMD test_sparse.py $@
 

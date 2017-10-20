@@ -59,3 +59,7 @@ Profiler
 .. autoclass:: torch.autograd.profiler.profile
     :members:
 
+.. autoclass:: torch.autograd.profiler.emit_nvtx
+    :members:
+
+.. autofunction:: torch.autograd.profiler.load_nvprof

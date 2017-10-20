@@ -17,7 +17,9 @@ from torch.autograd import Variable
 from .modules.utils import _single, _pair, _triple
 
 # Convolutions
-ConvNd = torch._C._functions.ConvNd
+_ConvNd = torch._C._functions.ConvNd
+_Softmax = torch._C._functions.Softmax
+_LogSoftmax = torch._C._functions.LogSoftmax
 
 
 def conv1d(input, weight, bias=None, stride=1, padding=0, dilation=1,
@@ -49,9 +51,9 @@ def conv1d(input, weight, bias=None, stride=1, padding=0, dilation=1,
     if input is not None and input.dim() != 3:
         raise ValueError("Expected 3D tensor as input, got {}D tensor instead.".format(input.dim()))
 
-    f = ConvNd(_single(stride), _single(padding), _single(dilation), False,
-               _single(0), groups, torch.backends.cudnn.benchmark,
-               torch.backends.cudnn.deterministic, torch.backends.cudnn.enabled)
+    f = _ConvNd(_single(stride), _single(padding), _single(dilation), False,
+                _single(0), groups, torch.backends.cudnn.benchmark,
+                torch.backends.cudnn.deterministic, torch.backends.cudnn.enabled)
     return f(input, weight, bias)
 
 
@@ -85,9 +87,9 @@ def conv2d(input, weight, bias=None, stride=1, padding=0, dilation=1,
     if input is not None and input.dim() != 4:
         raise ValueError("Expected 4D tensor as input, got {}D tensor instead.".format(input.dim()))
 
-    f = ConvNd(_pair(stride), _pair(padding), _pair(dilation), False,
-               _pair(0), groups, torch.backends.cudnn.benchmark,
-               torch.backends.cudnn.deterministic, torch.backends.cudnn.enabled)
+    f = _ConvNd(_pair(stride), _pair(padding), _pair(dilation), False,
+                _pair(0), groups, torch.backends.cudnn.benchmark,
+                torch.backends.cudnn.deterministic, torch.backends.cudnn.enabled)
     return f(input, weight, bias)
 
 
@@ -121,9 +123,9 @@ def conv3d(input, weight, bias=None, stride=1, padding=0, dilation=1,
     if input is not None and input.dim() != 5:
         raise ValueError("Expected 5D tensor as input, got {}D tensor instead.".format(input.dim()))
 
-    f = ConvNd(_triple(stride), _triple(padding), _triple(dilation), False,
-               _triple(0), groups, torch.backends.cudnn.benchmark,
-               torch.backends.cudnn.deterministic, torch.backends.cudnn.enabled)
+    f = _ConvNd(_triple(stride), _triple(padding), _triple(dilation), False,
+                _triple(0), groups, torch.backends.cudnn.benchmark,
+                torch.backends.cudnn.deterministic, torch.backends.cudnn.enabled)
     return f(input, weight, bias)
 
 
@@ -153,10 +155,10 @@ def conv_transpose1d(input, weight, bias=None, stride=1, padding=0,
     if input is not None and input.dim() != 3:
         raise ValueError("Expected 3D tensor as input, got {}D tensor instead.".format(input.dim()))
 
-    f = ConvNd(_single(stride), _single(padding), _single(dilation), True,
-               _single(output_padding),
-               groups, torch.backends.cudnn.benchmark, torch.backends.cudnn.deterministic,
-               torch.backends.cudnn.enabled)
+    f = _ConvNd(_single(stride), _single(padding), _single(dilation), True,
+                _single(output_padding),
+                groups, torch.backends.cudnn.benchmark, torch.backends.cudnn.deterministic,
+                torch.backends.cudnn.enabled)
     return f(input, weight, bias)
 
 
@@ -187,9 +189,9 @@ def conv_transpose2d(input, weight, bias=None, stride=1, padding=0,
     if input is not None and input.dim() != 4:
         raise ValueError("Expected 4D tensor as input, got {}D tensor instead.".format(input.dim()))
 
-    f = ConvNd(_pair(stride), _pair(padding), _pair(dilation), True,
-               _pair(output_padding), groups, torch.backends.cudnn.benchmark,
-               torch.backends.cudnn.deterministic, torch.backends.cudnn.enabled)
+    f = _ConvNd(_pair(stride), _pair(padding), _pair(dilation), True,
+                _pair(output_padding), groups, torch.backends.cudnn.benchmark,
+                torch.backends.cudnn.deterministic, torch.backends.cudnn.enabled)
     return f(input, weight, bias)
 
 
@@ -219,9 +221,9 @@ def conv_transpose3d(input, weight, bias=None, stride=1, padding=0,
     if input is not None and input.dim() != 5:
         raise ValueError("Expected 5D tensor as input, got {}D tensor instead.".format(input.dim()))
 
-    f = ConvNd(_triple(stride), _triple(padding), _triple(dilation), True,
-               _triple(output_padding), groups, torch.backends.cudnn.benchmark,
-               torch.backends.cudnn.deterministic, torch.backends.cudnn.enabled)
+    f = _ConvNd(_triple(stride), _triple(padding), _triple(dilation), True,
+                _triple(output_padding), groups, torch.backends.cudnn.benchmark,
+                torch.backends.cudnn.deterministic, torch.backends.cudnn.enabled)
     return f(input, weight, bias)
 
 
@@ -599,20 +601,73 @@ def softplus(input, beta=1, threshold=20):
     return _functions.thnn.auto.Softplus.apply(input, beta, threshold)
 
 
-def softmin(input):
-    return softmax(-input)
+def _get_softmax_dim(name, ndim, stacklevel):
+    warnings.warn("Implicit dimension choice for " + name + " has been deprecated. "
+                  "Change the call to include dim=X as an argument.", stacklevel=stacklevel)
+    if ndim == 0 or ndim == 3:
+        return 0
+    else:
+        return 1
 
 
-def softmax(input):
-    return _functions.thnn.auto.Softmax.apply(input)
+def softmin(input, dim=None, _stacklevel=3):
+    """Applies a softmin function.
+
+    Note that softmin(x) = softmax(-x). See softmax definition for mathematical formula.
+
+    Arguments:
+        input (Variable): input
+        dim (int): A dimension along which softmin will be computed (so every slice
+            along dim will sum to 1).
+    """
+    if dim is None:
+        dim = _get_softmax_dim('softmin', input.dim(), _stacklevel)
+    return _Softmax(dim)(-input)
+
+
+def softmax(input, dim=None, _stacklevel=3):
+    """Applies a softmax function.
+
+    Softmax is defined as:
+
+    :math:`softmax(x) = \frac{exp(-x_i)}{\sum_j exp(-x_j)}`
+
+    It is applied to all slices along dim, and will rescale them so that the elements
+    lie in the range `(0, 1)` and sum to 1.
+
+    Arguments:
+        input (Variable): input
+        dim (int): A dimension along which softmax will be computed.
+
+    .. note::
+        This function doesn't work directly with NLLLoss,
+        which expects the Log to be computed between the Softmax and itself.
+        Use log_softmax instead (it's faster and has better numerical properties).
+
+    """
+    if dim is None:
+        dim = _get_softmax_dim('softmax', input.dim(), _stacklevel)
+    return _Softmax(dim)(input)
+
+
+def log_softmax(input, dim=None, _stacklevel=3):
+    """Applies a softmax followed by a logarithm.
+
+    While mathematically equivalent to log(softmax(x)), doing these two
+    operations separately is slower, and numerically unstable. This function
+    uses an alternative formulation to compute the output and gradient correctly.
+
+    Arguments:
+        input (Variable): input
+        dim (int): A dimension along which log_softmax will be computed.
+    """
+    if dim is None:
+        dim = _get_softmax_dim('log_softmax', input.dim(), _stacklevel)
+    return _LogSoftmax(dim)(input)
 
 
 def softshrink(input, lambd=0.5):
     return _functions.thnn.auto.Softshrink.apply(input, lambd)
-
-
-def log_softmax(input):
-    return _functions.thnn.LogSoftmax.apply(input)
 
 
 def tanh(input):
@@ -671,11 +726,19 @@ def embedding(input, embedding_matrix,
         norm_type (float, optional): The p of the p-norm to compute for the max_norm option
         scale_grad_by_freq (boolean, optional): if given, this will scale gradients by the frequency of
                                                 the words in the mini-batch.
+        sparse (boolean, optional): if True, gradient w.r.t. weight matrix will be a sparse tensor. See Notes for
+                                    more details regarding sparse gradients.
 
     Shape:
         - Input: LongTensor `(N, W)`, N = mini-batch, W = number of indices to extract per mini-batch
         - Embedding_matrix: FloatTensor `(V, embedding_dim)`, V = maximum index + 1, embedding_dim = embedding size
         - Output: `(N, W, embedding_dim)`
+
+    Notes:
+        It is advised to only use `sparse=True` if `embedding_matrix` is a leaf Variable,
+        since some autograd functions may not propagate sparse gradients correctly.
+        Additionally, keep in mind that only a limited number of optimizers support
+        sparse gradients: currently it's `optim.SGD` (`cuda` and `cpu`), and `optim.Adagrad` (`cpu`)
 
     Examples::
 
@@ -700,8 +763,9 @@ def embedding(input, embedding_matrix,
         [torch.FloatTensor of size 2x4x3]
 
         >>> # example with padding_idx
-        >>> embedding_matrix = Variable(torch.rand(10, 3))
-        >>> embedding_matrix[0].zero_()
+        >>> weights = torch.rand(10, 3)
+        >>> weights[0, :].zero_()
+        >>> embedding_matrix = Variable(weights)
         >>> input = Variable(torch.LongTensor([[0,2,0,5]]))
         >>> torch.nn.functional.embedding(input, embedding_matrix)
 
@@ -714,10 +778,89 @@ def embedding(input, embedding_matrix,
         [torch.FloatTensor of size 1x4x3]
 
     """
-    return torch.nn.backends.thnn.backend.Embedding.apply(
+    return _functions.thnn.Embedding.apply(
         input, embedding_matrix,
         -1, max_norm, norm_type,
         scale_grad_by_freq, sparse
+    )
+
+
+def embedding_bag(embedding_matrix, indices, offsets=None,
+                  max_norm=None, norm_type=2, scale_grad_by_freq=False, mode='mean'):
+    r"""Computes sums or means of 'bags' of embeddings, without instantiating the
+        intermediate embeddings.
+
+        For bags of constant length,
+            * embedding_bag with `mode=sum` is equivalent to nn.functional.embedding followed by `torch.sum(dim=1)`
+            * with `mode=mean` is equivalent to nn.functional.embedding followed by `torch.mean(dim=1)`
+
+        However, embedding_bag is much more time and memory efficient than using a chain of these
+        operations.
+
+        Args:
+            embedding_matrix: FloatTensor, where number of rows should correspond to the maximum possible index + 1,
+                              number of columns is the embedding size
+            indices (N or BxN): LongTensor containing the indices of the embeddings to extract.
+                                When `input` is 1D Tensor of shape `N`, an `offsets` Tensor is given, that contains the
+                                starting position of each new sequence in the mini-batch.
+            offsets (B or None): LongTensor containing the starting positions of each sample in a mini-batch of variable
+                                 length sequences. If `input` is 2D (BxN), then offsets does not need to be given,
+                                 as the `input` is treated as a mini-batch of fixed length sequences of length `N` each.
+            max_norm (float, optional): If given, will renormalize the embeddings to always have a norm lesser than this
+            norm_type (float, optional): The p of the p-norm to compute for the max_norm option
+            scale_grad_by_freq (boolean, optional): if given, this will scale gradients by the frequency of
+                                                    the words in the dictionary.
+            mode (string, optional): 'sum' | 'mean'. Specifies the way to reduce the bag. Default: 'mean'
+
+        Shape:
+            - Embedding_matrix: FloatTensor `(V, embedding_dim)`,
+                                V = number of embeddings, embedding_dim = embedding size
+            - Input: LongTensor `N`, N = number of embeddings to extract
+                     (or) LongTensor `BxN`, B = number of sequences in mini-batch,
+                                            N = number of embeddings per sequence
+            - Offsets: LongTensor `B`, B = number of bags. The values are the
+                       offsets in `input` for each bag, i.e. the cumsum of lengths.
+                       Offsets is not given if Input is 2D `BxN` Tensor,
+                       the input is considered to be of fixed-length sequences
+            - Output: `(B, embedding_dim)`
+
+        Examples::
+
+            >>> # an Embedding module containing 10 tensors of size 3
+            >>> embedding_matrix = Variable(torch.rand(10, 3))
+            >>> # a batch of 2 samples of 4 indices each
+            >>> input = Variable(torch.LongTensor([1,2,4,5,4,3,2,9]))
+            >>> offsets = Variable(torch.LongTensor([0,4]))
+            >>> embedding_bag(embedding_matrix, input, offsets)
+
+            Variable containing:
+            -1.1840 -0.2547 -0.5860
+            -0.7126  0.0002 -0.3411
+            [torch.FloatTensor of size 2x3]
+
+        """
+    if indices.dim() == 2:
+        if offsets is not None:
+            raise ValueError("if input is 2D, then offsets has to be None"
+                             ", as input is treated is a mini-batch of"
+                             " fixed length sequences. However, found "
+                             "offsets of type {}".format(type(offsets)))
+        else:
+            offsets = Variable(torch.arange(0, indices.numel(), indices.size(1),
+                               out=indices.data.new().long()))
+            indices = indices.view(-1)
+
+    elif indices.dim() != 1:
+        raise ValueError("input has to be 1D or 2D Tensor,"
+                         " but got Tensor of dimension {}".format(indices.dim()))
+
+    if offsets is None:
+        raise ValueError("offsets has to be a 1D Tensor but got None")
+
+    return _functions.thnn.EmbeddingBag.apply(
+        embedding_matrix, indices, offsets,
+        max_norm, norm_type,
+        scale_grad_by_freq, mode
     )
 
 
@@ -866,7 +1009,7 @@ def cross_entropy(input, target, weight=None, size_average=True, ignore_index=-1
         >>> loss = F.cross_entropy(input, target)
         >>> loss.backward()
     """
-    return nll_loss(log_softmax(input), target, weight, size_average, ignore_index)
+    return nll_loss(log_softmax(input, 1), target, weight, size_average, ignore_index)
 
 
 def binary_cross_entropy(input, target, weight=None, size_average=True):

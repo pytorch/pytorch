@@ -181,8 +181,8 @@ class THCDeviceTensor {
   // touch the same memory locations multiple times.
   __host__ __device__ bool isConsistentlySized() const;
 
-  /// Returns true if the given dimension index has no padding
-  __host__ __device__ bool isContiguousDim(int i) const;
+  /// Returns true if the given dimension range [first, last) has no padding.
+  __host__ __device__ bool isContiguousRange(int first, int last) const;
 
   /// Returns a tensor of the same dimension after transposing the two
   /// dimensions given. Does not actually move elements; transposition

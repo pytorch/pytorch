@@ -1,4 +1,5 @@
 #include <iostream>
+#include <math.h>
 #include "ATen/ATen.h"
 #include "ATen/Dispatch.h"
 #include "test_assert.h"
@@ -38,6 +39,24 @@ void test_ctors() {
   s3 = std::move(s2);
   ASSERT(s2.isBackedByTensor() && !s2.toTensor().defined());
   ASSERT(s3.isBackedByTensor() && s3.toFloat() == 1.0);
+}
+
+void test_overflow() {
+  auto s1 = Scalar(M_PI);
+  ASSERT(s1.toFloat() == static_cast<float>(M_PI));
+  s1.toHalf();
+
+  s1 = Scalar(100000);
+  ASSERT(s1.toFloat() == 100000.0);
+  ASSERT(s1.toInt() == 100000);
+
+  bool threw = false;
+  try {
+    s1.toHalf();
+  } catch (std::domain_error& e) {
+    threw = true;
+  }
+  ASSERT(threw);
 }
 
 int main() {
@@ -85,6 +104,7 @@ int main() {
   ASSERT(threw);
 
   test_ctors();
+  test_overflow();
 
   if(at::hasCUDA()) {
     auto r = CUDA(Float).copy(next_h);

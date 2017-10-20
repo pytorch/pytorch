@@ -17,7 +17,8 @@ from tools.setup_helpers.cuda import WITH_CUDA, CUDA_HOME, CUDA_VERSION
 from tools.setup_helpers.cudnn import WITH_CUDNN, CUDNN_LIB_DIR, CUDNN_INCLUDE_DIR
 from tools.setup_helpers.nccl import WITH_NCCL, WITH_SYSTEM_NCCL, NCCL_LIB_DIR, \
     NCCL_INCLUDE_DIR, NCCL_ROOT_DIR, NCCL_SYSTEM_LIB
-from tools.setup_helpers.nnpack import WITH_NNPACK, NNPACK_LIB_DIR, NNPACK_INCLUDE_DIRS
+from tools.setup_helpers.nnpack import WITH_NNPACK, NNPACK_LIB_PATHS, \
+    NNPACK_INCLUDE_DIRS
 from tools.setup_helpers.split_types import split_types
 
 DEBUG = check_env_flag('DEBUG')
@@ -230,7 +231,8 @@ class build_ext(setuptools.command.build_ext.build_ext):
 
         # Do we actually need this here?
         if WITH_NNPACK:
-            print('-- Detected NNPACK at ' + NNPACK_LIB_DIR)
+            nnpack_dir = NNPACK_LIB_PATHS[0]
+            print('-- Detected NNPACK at ' + nnpack_dir)
         else:
             print('-- Not using NNPACK')
 
@@ -310,7 +312,11 @@ extra_link_args = []
 extra_compile_args = ['-std=c++11', '-Wno-write-strings',
                       # Python 2.6 requires -fno-strict-aliasing, see
                       # http://legacy.python.org/dev/peps/pep-3123/
-                      '-fno-strict-aliasing']
+                      '-fno-strict-aliasing',
+                      # Clang has an unfixed bug leading to spurious missing
+                      # braces warnings, see
+                      # https://bugs.llvm.org/show_bug.cgi?id=21629
+                      '-Wno-missing-braces']
 
 cwd = os.path.dirname(os.path.abspath(__file__))
 lib_path = os.path.join(cwd, "torch", "lib")
@@ -414,8 +420,10 @@ main_sources = [
     "torch/csrc/autograd/generated/Functions.cpp",
     "torch/csrc/autograd/generated/python_variable_methods.cpp",
     "torch/csrc/autograd/generated/python_functions.cpp",
+    "torch/csrc/autograd/generated/python_nn_functions.cpp",
     "torch/csrc/autograd/functions/batch_normalization.cpp",
     "torch/csrc/autograd/functions/convolution.cpp",
+    "torch/csrc/autograd/functions/softmax.cpp",
     "torch/csrc/autograd/functions/basic_ops.cpp",
     "torch/csrc/autograd/functions/tensor.cpp",
     "torch/csrc/autograd/functions/accumulate_grad.cpp",
@@ -507,9 +515,8 @@ if WITH_CUDNN:
     extra_compile_args += ['-DWITH_CUDNN']
 
 if WITH_NNPACK:
-    main_libraries += ['nnpack', 'pthreadpool']
     include_dirs.extend(NNPACK_INCLUDE_DIRS)
-    library_dirs.append(NNPACK_LIB_DIR)
+    main_link_args.extend(NNPACK_LIB_PATHS)
     main_sources += [
         "torch/csrc/nnpack/NNPACK.cpp",
     ]

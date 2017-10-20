@@ -5,64 +5,48 @@
 void THNN_(LogSoftMax_updateOutput)(
           THNNState *state,
           THTensor *input,
-          THTensor *output)
+          THTensor *output,
+          int dim)
 {
-  real *input_data, *output_data;
-  ptrdiff_t nframe = 0, dim = 0, stride = 0;
-  ptrdiff_t t, d;
+  THArgCheck(dim >= 0 && dim < input->nDimension, 4,
+	     "dim out of range (got %d, but input has %d dims)", dim, input->nDimension);
 
-  if (input->nDimension == 1)
-  {
-    nframe = 1;
-    dim = input->size[0];
-    stride = 1;
-  }
-  else if (input->nDimension == 2)
-  {
-    nframe = input->size[0];
-    dim = input->size[1];
-    stride = 1;
-  }
-  else if (input->nDimension == 3)
-  {
-    nframe = 1;
-    dim = input->size[0];
-    stride = input->size[1]*input->size[2];
-  }
-  else if (input->nDimension == 4)
-  {
-    nframe = input->size[0];
-    dim = input->size[1];
-    stride = input->size[2]*input->size[3];
-  }
-  else
-    THArgCheck(0, 2, "1D, 2D, 3D or 4D tensor expected");
+  uint64_t outer_size = 1;
+  uint64_t dim_size = input->size[dim];
+  uint64_t inner_size = 1;
+  for (uint64_t i = 0; i < dim; ++i)
+    outer_size *= input->size[i];
+  for (uint64_t i = dim + 1; i < input->nDimension; ++i)
+    inner_size *= input->size[i];
 
   input = THTensor_(newContiguous)(input);
   THTensor_(resizeAs)(output, input);
 
-  real *input_data0 = THTensor_(data)(input);
-  real *output_data0 = THTensor_(data)(output);
+  real *input_data_base  = THTensor_(data)(input);
+  real *output_data_base = THTensor_(data)(output);
 
-  accreal logsum;
-  real maxInput;
-  #pragma omp parallel for private(t, d, maxInput, logsum, input_data, output_data)
-  for (t = 0; t < stride*nframe; t++)
+  uint64_t dim_stride = inner_size;
+  uint64_t outer_stride = dim_size * dim_stride;
+
+#pragma omp parallel for
+  for (uint64_t i = 0; i < outer_size * inner_size; i++)
   {
-    logsum = 0;
-    maxInput = -THInf;
-    input_data = input_data0 + (t/stride)*dim*stride + t % stride;
-    output_data = output_data0 + (t/stride)*dim*stride + t % stride;
+    uint64_t outer_idx = i / inner_size;
+    uint64_t inner_idx = i % inner_size;
+    real *input_data  = input_data_base  + outer_idx * outer_stride + inner_idx;
+    real *output_data = output_data_base + outer_idx * outer_stride + inner_idx;
 
-    for (d = 0; d < dim; d++)
-      maxInput = THMax(maxInput, input_data[d*stride]);
+    real max_input = -THInf;
+    for (uint64_t d = 1; d < dim_size; d++)
+      max_input = THMax(max_input, input_data[d * dim_stride]);
 
-    for (d = 0; d < dim; d++)
-      logsum += exp(input_data[d*stride] - maxInput);
-    logsum = maxInput + log(logsum);
+    accreal logsum = 0;
+    for (uint64_t d = 0; d < dim_size; d++)
+      logsum += exp(input_data[d * dim_stride] - max_input);
+    logsum = max_input + log(logsum);
 
-    for (d = 0; d < dim; d++)
-      output_data[d*stride] = input_data[d*stride] - logsum;
+    for (uint64_t d = 0; d < dim_size; d++)
+      output_data[d * dim_stride] = input_data[d * dim_stride] - logsum;
   }
 
   THTensor_(free)(input);
@@ -73,61 +57,47 @@ void THNN_(LogSoftMax_updateGradInput)(
           THTensor *input,
           THTensor *gradOutput,
           THTensor *gradInput,
-          THTensor *output)
+          THTensor *output,
+          int dim)
 {
-  THNN_CHECK_SHAPE(input, gradOutput);
-  real *gradInput_data, *gradOutput_data, *output_data;
-  ptrdiff_t nframe = 0, dim = 0, stride = 0;
-  ptrdiff_t t, d;
+  THNN_CHECK_SHAPE(output, gradOutput);
+  THArgCheck(dim >= 0 && dim < output->nDimension, 6,
+	     "dim out of range (got %d, but input has %d dims)", dim, output->nDimension);
 
-  if (output->nDimension == 1)
-  {
-    nframe = 1;
-    dim = output->size[0];
-    stride = 1;
-  }
-  else if (output->nDimension == 2)
-  {
-    nframe = output->size[0];
-    dim = output->size[1];
-    stride = 1;
-  }
-  else if (output->nDimension == 3)
-  {
-    nframe = 1;
-    dim = output->size[0];
-    stride = output->size[1]*output->size[2];
-  }
-  else if (output->nDimension == 4)
-  {
-    nframe = output->size[0];
-    dim = output->size[1];
-    stride = output->size[2]*output->size[3];
-  }
-  else
-    THError("1D, 2D, 3D or 4D tensor expected");
+  uint64_t outer_size = 1;
+  uint64_t dim_size = output->size[dim];
+  uint64_t inner_size = 1;
+  for (uint64_t i = 0; i < dim; ++i)
+    outer_size *= output->size[i];
+  for (uint64_t i = dim + 1; i < output->nDimension; ++i)
+    inner_size *= output->size[i];
 
-  output = THTensor_(newContiguous)(output);
   gradOutput = THTensor_(newContiguous)(gradOutput);
-
+  output = THTensor_(newContiguous)(output);
   THTensor_(resizeAs)(gradInput, output);
-  real *gradInput_data0 = THTensor_(data)(gradInput);
-  real *output_data0 = THTensor_(data)(output);
-  real *gradOutput_data0 = THTensor_(data)(gradOutput);
-  accreal sum;
-  #pragma omp parallel for private(t, sum, d, gradInput_data, output_data, gradOutput_data)
-  for (t = 0; t < stride*nframe; t++)
+
+  real *gradInput_data_base  = THTensor_(data)(gradInput);
+  real *output_data_base     = THTensor_(data)(output);
+  real *gradOutput_data_base = THTensor_(data)(gradOutput);
+
+  uint64_t dim_stride = inner_size;
+  uint64_t outer_stride = dim_size * dim_stride;
+
+#pragma omp parallel for
+  for (uint64_t i = 0; i < outer_size * inner_size; i++)
   {
-    sum = 0;
-    gradInput_data = gradInput_data0 + (t/stride)*dim*stride + t % stride;
-    output_data = output_data0 + (t/stride)*dim*stride + t % stride;
-    gradOutput_data = gradOutput_data0 + (t/stride)*dim*stride + t % stride;
+    uint64_t outer_idx = i / inner_size;
+    uint64_t inner_idx = i % inner_size;
+    real *gradInput_data  = gradInput_data_base  + outer_idx * outer_stride + inner_idx;
+    real *output_data     = output_data_base     + outer_idx * outer_stride + inner_idx;
+    real *gradOutput_data = gradOutput_data_base + outer_idx * outer_stride + inner_idx;
 
-    for (d = 0; d < dim; d++)
-      sum += gradOutput_data[d*stride];
+    accreal sum = 0;
+    for (uint64_t d = 0; d < dim_size; d++)
+      sum += gradOutput_data[d * dim_stride];
 
-    for (d = 0; d < dim; d++)
-      gradInput_data[d*stride] = gradOutput_data[d*stride] - exp(output_data[d*stride])*sum;
+    for (uint64_t d = 0; d < dim_size; d++)
+      gradInput_data[d * dim_stride] = gradOutput_data[d * dim_stride] - exp(output_data[d * dim_stride]) * sum;
   }
 
   THTensor_(free)(gradOutput);

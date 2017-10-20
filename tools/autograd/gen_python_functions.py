@@ -50,7 +50,8 @@ UNPACK_SELF = "auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;"
 
 
 def create_python_bindings(
-        python_functions, py_methods, py_method_defs, py_method_dispatch):
+        python_functions, py_methods, py_method_defs, py_method_dispatch,
+        is_class):
     """python_variable_methods.cpp
 
     Generates Python bindings to Variable methods
@@ -61,6 +62,7 @@ def create_python_bindings(
         'Generator *': 'generator',
         'Storage &': 'storage',
         'int64_t': 'toInt64',
+        'int': 'toInt64',
         'bool': 'toBool',
         'double': 'toDouble',
     }
@@ -157,7 +159,7 @@ def create_python_bindings(
             tmpl = PY_VARIABLE_METHOD_VARARGS
             env['flags'] = 'METH_VARARGS | METH_KEYWORDS'
 
-        if not is_method:
+        if is_class and not is_method:
             env['flags'] += ' | METH_STATIC'
 
         py_methods.append(tmpl.substitute(env))

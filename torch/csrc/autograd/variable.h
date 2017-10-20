@@ -3,7 +3,6 @@
 // A wrapper around at::Tensor to represent autograd Variables. Variables
 // can be implicitly converted to an at::Tensor.
 
-#include <Python.h>
 #include <mutex>
 #include <memory>
 #include <vector>
@@ -54,6 +53,9 @@ struct Variable : public at::Tensor {
   inline auto_unique_ptr<jit::tracer::ValueTracingState>& tracing_state() const;
 
   inline int current_version() const;
+
+  inline VariableVersion& version_counter() const;
+
   inline const int& output_nr() const;
   inline       int& output_nr();
 
@@ -94,7 +96,7 @@ public:
   at::Tensor data;
   Variable grad;
   std::shared_ptr<Function> grad_fn;
-  std::unique_ptr<VariableVersion> version_counter;
+  VariableVersion version_counter;
   std::vector<std::shared_ptr<FunctionPreHook>> hooks;
   std::weak_ptr<Function> grad_accumulator;
   std::mutex grad_accumulator_lock;
@@ -175,7 +177,11 @@ inline auto_unique_ptr<jit::tracer::ValueTracingState>& Variable::tracing_state(
 };
 
 inline int Variable::current_version() const {
-  return **get()->version_counter;
+  return get()->version_counter.current_version();
+}
+
+inline VariableVersion& Variable::version_counter() const {
+  return get()->version_counter;
 }
 
 inline const int& Variable::output_nr() const {

@@ -1,7 +1,6 @@
 #ifndef THP_TYPES_INC
 #define THP_TYPES_INC
 
-#include <Python.h>
 #include <cstddef>
 
 template <typename T> struct THPTypeInfo {};
@@ -29,13 +28,6 @@ typedef struct THVoidTensor
    int refcount;
    char flag;
 } THVoidTensor;
-
-struct THPVoidTensor {
-  PyObject_HEAD
-  THVoidTensor *cdata;
-  char device_type;
-  char data_type;
-};
 
 }  // namespace torch
 

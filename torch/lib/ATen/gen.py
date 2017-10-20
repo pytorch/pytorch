@@ -222,6 +222,7 @@ nn_files = [f for f in files if f.endswith('.yaml') or f.endswith('.h')]
 declarations = [d
                 for file in cwrap_files
                 for d in cwrap_parser.parse(file)]
+print(nn_files)
 declarations += nn_parse.run(nn_files)
 declarations = preprocess_declarations.run(declarations)
 for fname, env in generators.items():

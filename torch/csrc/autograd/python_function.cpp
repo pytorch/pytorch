@@ -335,12 +335,13 @@ static void _mark_dirty(THPFunction *self, t2var_type &t2var,
       THPFunction_assert(false, "mark_dirty only accepts input tensors, but "
           "argument %d isn't one", i);
     }
-    auto &v_counter = *variable->cdata.get()->version_counter;
-    THPFunction_assert(v_counter.var_refcnt() == 1, "in-place operations can be "
-        "only used on variables that don't share storage with any other "
-        "variables, but detected that there are %d objects sharing it",
-        v_counter.var_refcnt());
-    v_counter++;
+    auto& version_counter = variable->cdata.version_counter();
+    THPFunction_assert(version_counter.live_refs() == 1,
+        "in-place operations can be only used on variables that don't share "
+        "storage with any other variables, but detected that there are %d "
+        "objects sharing it",
+        version_counter.live_refs());
+    version_counter.increment();
   }
   // We're not going to ever need this so let's remove references now
   Py_DECREF(self->dirty_tensors);
@@ -448,7 +449,7 @@ static void _wrap_outputs(THPFunction *self, t2var_type &t2var,
             output_var = (THPVariable*)THPVariable_NewWithFunction(output, cdata);
           }
           if (!output_var) throw python_error();
-          output_var->cdata.get()->version_counter->join_with(*input_var->cdata.get()->version_counter);
+          output_var->cdata.version_counter() = input_var->cdata.version_counter();
         }
       }
     }
@@ -542,7 +543,7 @@ static void _join_version_counters(THPFunction *self, t2var_type &t2var)
           "and output tensors, but argument %d doesn't satify this "
           "condition", i);
     }
-    v2->cdata.get()->version_counter->join_with(*v1->cdata.get()->version_counter);
+    v2->cdata.version_counter() = v1->cdata.version_counter();
   }
   // Free .shared_pairs
   Py_DECREF(self->shared_pairs);
