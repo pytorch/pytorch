@@ -139,8 +139,8 @@ TYPE_RETURN = {
     'real': 'Scalar',
     'accreal': 'Scalar',
     'long': 'int64_t',
-    'TensorList': 'std::vector<Tensor>'
 }
+
 CHECKED_CAST = {
     'THTensor*': CodeTemplate('checked_cast<${Tensor}>(${arg_name}.pImpl,"${arg_name}",${arg_pos}, ${null_okay})'),
     'THSTensor*':
@@ -438,16 +438,9 @@ def create_generic(top_env, declarations):
         if broadcast_arg is None:
             top_env['type_method_declarations'].append(
                 TYPE_METHOD_DECLARATION.substitute(env))
-            if option.get('type_method_definition_level') == 'base':
-                top_env['type_method_definitions'].append(
-                    TYPE_METHOD_DEFINITION_LEVEL_BASE.substitute(env))
-            else:
-                top_env['type_method_definitions'].append(
-                    TYPE_METHOD_DEFINITION.substitute(env))
+            top_env['type_method_definitions'].append(
+                TYPE_METHOD_DEFINITION.substitute(env))
         else:
-            if option.get('type_method_definition_level') == 'base':
-                raise Exception("\'base\' type_method_definition_level not supported for broadcasting "
-                                "operation {}".format(option['name']))
             top_env['type_method_declarations'].append(
                 TYPE_METHOD_DECLARATION_NON_VIRTUAL.substitute(env))
 
@@ -503,12 +496,125 @@ def create_generic(top_env, declarations):
             'inplace': option['inplace'],
         })
 
+    def native_get_formals(option, include_constants=False):
+        seen = set()
+        pos_args = []
+        kwd_args = []
+
+        def insert(argument):
+            if argument['name'] not in seen:
+                seen.add(argument['name'])
+                if argument.get('kwarg_only', False):
+                    kwd_args.append(argument)
+                else:
+                    pos_args.append(argument)
+
+        for argument in option['arguments']:
+            insert(argument)
+
+        # not clear we need dynamic_type translation as we can specify the correct type
+        # directly in native functions
+        def add_type_as_dynamic_type(argument, option):
+            argument['dynamic_type'] = argument['type']
+            return argument
+
+        result = pos_args + kwd_args
+        return [add_type_as_dynamic_type(argument, option) for argument in result]
+
+    def native_get_return_types(option):
+        ret = option['return']
+        if ret['kind'] != 'type':
+            raise Exception("native functions only support \'type\' return")
+
+        # can't actually return a TensorList (since it's a reference object)
+        actual_return_type = {'TensorList': 'std::vector<Tensor>'}.get(ret['type'], ret['type'])
+        return [{
+            'type': actual_return_type,
+            'dynamic_type': ret['type'],
+        }]
+
+    def process_native(option, output_options):
+        option['inplace'] = re.search(
+            '(^__i|[^_]_$)', option['api_name']) is not None
+
+        formals = native_get_formals(option)
+        option['formals_list'] = formals
+        option['formals'] = [format_formal(f) for f in formals]
+        option['formals_with_defaults'] = [formal_with_default(f) for f in formals]
+        option['returns'] = native_get_return_types(option)
+        option['return_type'] = format_return_type(option['returns'])
+        option['return_call'] = 'return ' if option['return_type'] != 'void' else ''
+        option['actuals'] = [f['name'] for f in formals]
+
+        option['method_formals'] = [format_formal(f) for f in formals
+                                    if f['name'] != 'self']
+        option['method_formals_with_defaults'] = (
+            [formal_with_default(f) for f in formals if f['name'] != 'self'])
+        option['method_actuals'] = [
+            f['name'] if f['name'] != 'self' else '*this' for f in formals]
+
+        option['const_mark'] = '' if option['inplace'] else ' const'
+
+        is_method = 'method' in option['variants']
+        is_function = 'function' in option['variants']
+        dispatch_tensor = find_dispatch_tensor(formals)
+        is_namespace_function = is_function and dispatch_tensor is not None
+
+        # method-only things are prefixed with m_ in Type so that
+        # another function-only variant can exist without the name colliding
+        option['method_prefix'] = 'm_' if is_method and not is_function else ''
+        env = nested_dict(option, top_env)
+
+        broadcast_arg = get_broadcast_argument(option)
+        if broadcast_arg is not None:
+            raise Exception("broadcasting is not yet supported for native functions, "
+                            "but specified for function {}", option['name'])
+
+        def_level = option.get('type_method_definition_level')
+        if def_level != 'base':
+            raise Exception("\'base\' is currently the only supported type_method_definition_level "
+                            "for native functions, got level {} for {}", def_level, option['name'])
+
+        top_env['type_method_declarations'].append(
+            TYPE_METHOD_DECLARATION.substitute(env))
+        top_env['type_method_definitions'].append(
+            TYPE_METHOD_DEFINITION_LEVEL_BASE.substitute(env))
+
+        method_of = ['Type']
+        if is_method:
+            top_env['tensor_method_declarations'].append(
+                TENSOR_METHOD_DECLARATION.substitute(env))
+            top_env['tensor_method_definitions'].append(
+                TENSOR_METHOD_DEFINITION.substitute(env))
+            method_of.append('Tensor')
+
+        if is_namespace_function:
+            option['inferred_type'] = 'infer_type({})'.format(dispatch_tensor)
+            top_env['function_declarations'].append(
+                FUNCTION_DECLARATION.substitute(env))
+            top_env['function_definitions'].append(
+                FUNCTION_DEFINITION.substitute(env))
+            method_of.append('namespace')
+
+        output_options.append({
+            'name': option['api_name'],
+            'method_prefix': option['method_prefix'],
+            'arguments': formals,
+            'method_of': method_of,
+            'mode': option['mode'],
+            'returns': option['returns'],
+            'inplace': option['inplace'],
+        })
+
     output_declarations = []
     for declaration in declarations:
         output_options = []
         for option in declaration['options']:
             try:
-                process_option(option, output_options)
+                if option['mode'] != 'native':
+                    process_option(option, output_options)
+                else:
+                    process_native(option, output_options)
             except NYIError:
                 option['skip'] = True
         output_declarations.extend(output_options)
@@ -810,10 +916,7 @@ def create_derived(backend_type_env, declarations):
     def process_option(option):
         pair = (backend_type_env['Backend'],
                 backend_type_env['ScalarName'])
-        if pair in option['backend_type_pairs'] and option.get('type_method_definition_level') != 'base':
-            if option.get('type_method_definition_dispatch'):
-                raise Exception("type_method_definition_dispatch currently only supported with "
-                                "type_method_definition_level of \'base\'")
+        if pair in option['backend_type_pairs']:
             env = nested_dict(option, backend_type_env)
             body = emit_body(env, option)
             option['type_definition_body'] = body
@@ -822,11 +925,20 @@ def create_derived(backend_type_env, declarations):
             type_object_definitions.append(
                 TYPE_DERIVED_DEFINITION.substitute(env))
 
+    def process_native(option):
+        def_level = option.get('type_method_definition_level')
+        if def_level != 'base':
+            raise Exception("\'base\' is currently the only supported type_method_definition_level "
+                            "for native functions, got level {} for {}", def_level, option['name'])
+
     for declaration in declarations:
         for option in declaration['options']:
             if not option.get('skip', False):
                 try:
-                    process_option(option)
+                    if option['mode'] != 'native':
+                        process_option(option)
+                    else:
+                        process_native(option)
                 except NYIError:
                     pass
     return type_object_declarations, type_object_definitions
