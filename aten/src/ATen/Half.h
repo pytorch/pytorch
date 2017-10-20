@@ -1,6 +1,7 @@
 #pragma once
 
 #include <limits>
+#include <string>
 #include <stdint.h>
 #ifdef AT_CUDA_ENABLED
 #include <cuda.h>
