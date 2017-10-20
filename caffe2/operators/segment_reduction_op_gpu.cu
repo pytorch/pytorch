@@ -89,7 +89,7 @@ class ReduceDimsOp : public Operator<CUDAContext> {
     const auto* input_data = input.template data<T>();
     auto* Y = Output(0);
 
-    CHECK_LT(num_reduce_dims_, input.dims().size());
+    CHECK_LE(num_reduce_dims_, input.dims().size());
     const int M = FIRSTDIMS
         ? input.size_to_dim(num_reduce_dims_)
         : input.size_to_dim(input.ndim() - num_reduce_dims_);
