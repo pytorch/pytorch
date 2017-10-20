@@ -2,6 +2,7 @@
 
 #include <limits>
 #include <stdint.h>
+#include <string>
 #ifdef AT_CUDA_ENABLED
 #include <cuda.h>
 #include <cuda_runtime.h>
