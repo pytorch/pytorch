@@ -6,7 +6,7 @@ def parse(filename):
             if '[NativeFunction]' in line:
                 in_declaration = True
                 arguments = []
-                declaration = {}
+                declaration = {'mode': 'native'}
             elif '[/NativeFunction]' in line:
                 in_declaration = False
                 declaration['arguments'] = arguments
