@@ -219,10 +219,23 @@ def is_mutable_formal_argument(argument, option):
     return argument.get('output') or option['inplace'] and argument['name'] == 'self'
 
 
-def to_return_type(arg, option):
+# Note [Clang and "Attempted to construct a reference element in a tuple with an rvalue"]
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# to_return_type can be used in contexts where we are doing multiple
+# return, in which case it will be incorporated into an expression like:
+# std::tuple<at::Tensor, at::Tensor>.  Originally, this code assumed it
+# would be valid to return a reference, e.g., as in
+# std::tuple<at::Tensor, const at::Tensor&>.  This is accepted by GCC
+# and early versions of Clang, but not by recent Clang; c.f.
+# https://bugs.llvm.org/show_bug.cgi?id=20855   To work around this
+# problem, we don't create references in this case.
+#
+# TODO: Figure out how to portably return references in multiple return, as
+# it *is* more efficient (avoids refcount.)
+def to_return_type(arg, option, multiple_return):
     t = arg['type']
     rt = TYPE_RETURN.get(t, t)
-    if rt == 'Tensor' and not arg.get('allocate'):
+    if rt == 'Tensor' and not arg.get('allocate') and not multiple_return:
         rt = rt + ' &'
         if not is_mutable_formal_argument(arg, option):
             rt = 'const ' + rt
@@ -322,9 +335,9 @@ def create_generic(top_env, declarations):
             argument_indices = ret['arguments']
             if len(argument_indices) == 1:
                 the_arg = option['arguments'][argument_indices[0]]
-                return [to_return_type(the_arg, option)]
+                return [to_return_type(the_arg, option, multiple_return=False)]
             else:
-                return [to_return_type(option['arguments'][idx], option)
+                return [to_return_type(option['arguments'][idx], option, multiple_return=True)
                         for idx in argument_indices]
         elif ret['kind'] == 'type':
             return [{
@@ -767,7 +780,7 @@ def create_derived(backend_type_env, declarations):
                 arg = arguments[0]
                 body.append("return {};".format(arg['name']))
             else:
-                types = [to_return_type(arg, option)['type']
+                types = [to_return_type(arg, option, multiple_return=True)['type']
                          for arg in arguments]
                 # TODO: check for move semantics...
                 names = [arg['name'] for arg in arguments]
