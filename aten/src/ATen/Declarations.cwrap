@@ -3670,7 +3670,7 @@
   variants:
     - method
     - function
-  return: argument 0,1
+  return: argument 0
   arguments:
     - arg: THTensor* result
       output: True
@@ -3687,7 +3687,7 @@
   variants:
     - method
     - function
-  return: argument 0,1
+  return: argument 0
   arguments:
     - arg: THTensor* result
       output: True
