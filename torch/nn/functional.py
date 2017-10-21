@@ -17,8 +17,6 @@ from .modules.utils import _single, _pair, _triple
 
 # Convolutions
 _ConvNd = torch._C._functions.ConvNd
-_Softmax = torch._C._functions.Softmax
-_LogSoftmax = torch._C._functions.LogSoftmax
 
 
 def conv1d(input, weight, bias=None, stride=1, padding=0, dilation=1,
