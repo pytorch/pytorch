@@ -2,6 +2,7 @@
 
 #include <memory>
 #include <limits>
+#include <functional>
 
 #include "ATen/ATenGeneral.h"
 #include "ATen/ArrayRef.h"
