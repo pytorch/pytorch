@@ -3,13 +3,11 @@
 #else
 
 #ifdef _MSC_VER
-  #define SOFTMAX_SIZE_TYPE int64_t
-  #define SOFTMAX_CAST_TYPE (int64_t)
-  #define SOFTMAX_LITERALS(x) x
+  #define SOFTMAX_DEFINITIONS int64_t i, d;
+  #define SOFTMAX_FOR(i, s, n) for (i = s; i < (int64_t)(n); i++)
 #else
-  #define SOFTMAX_SIZE_TYPE uint64_t
-  #define SOFTMAX_CAST_TYPE
-  #define SOFTMAX_LITERALS(x) x ## UL
+  #define SOFTMAX_DEFINITIONS
+  #define SOFTMAX_FOR(i, s, n) for(uint64_t i = s; i < n; i++)
 #endif
 
 void THNN_(SoftMax_updateOutput)(
@@ -37,29 +35,29 @@ void THNN_(SoftMax_updateOutput)(
   uint64_t dim_stride = inner_size;
   uint64_t outer_stride = dim_size * dim_stride;
 
-  SOFTMAX_SIZE_TYPE i, d;
+  SOFTMAX_DEFINITIONS
 
 #pragma omp parallel for
-  for (i = SOFTMAX_LITERALS(0); i < SOFTMAX_CAST_TYPE (outer_size * inner_size); i++) {
+  SOFTMAX_FOR(i, 0, outer_size * inner_size) {
     uint64_t outer_idx = i / inner_size;
     uint64_t inner_idx = i % inner_size;
     real *input_data  = input_data_base  + outer_idx * outer_stride + inner_idx;
     real *output_data = output_data_base + outer_idx * outer_stride + inner_idx;
 
     real input_max = -THInf;
-    for (d = 0; d < SOFTMAX_CAST_TYPE dim_size; d++) {
+    SOFTMAX_FOR(d, 0, dim_size) {
       if (input_data[d * dim_stride] >= input_max) input_max = input_data[d * dim_stride];
     }
 
     accreal sum = 0;
-    for (d = SOFTMAX_LITERALS(0); d < SOFTMAX_CAST_TYPE dim_size; d++) {
+    SOFTMAX_FOR(d, 0, dim_size) {
       real z = exp(input_data[d * dim_stride] - input_max);
       output_data[d * dim_stride] = z;
       sum += z;
     }
 
     real invsum = 1 / sum; // NOTE: truncate sum to real once
-    for (d = SOFTMAX_LITERALS(0); d < SOFTMAX_CAST_TYPE dim_size; d++) {
+    SOFTMAX_FOR(d, 0, dim_size) {
       output_data[d * dim_stride] *= invsum;
     }
   }
@@ -98,10 +96,10 @@ void THNN_(SoftMax_updateGradInput)(
   uint64_t dim_stride = inner_size;
   uint64_t outer_stride = dim_size * dim_stride;
 
-  SOFTMAX_SIZE_TYPE i, d;
+  SOFTMAX_DEFINITIONS
 
 #pragma omp parallel for
-  for (i = SOFTMAX_LITERALS(0); i < SOFTMAX_CAST_TYPE (outer_size * inner_size); i++)
+  SOFTMAX_FOR(i, 0, outer_size * inner_size)
   {
     uint64_t outer_idx = i / inner_size;
     uint64_t inner_idx = i % inner_size;
@@ -110,10 +108,10 @@ void THNN_(SoftMax_updateGradInput)(
     real *gradOutput_data = gradOutput_data_base + outer_idx * outer_stride + inner_idx;
 
     accreal sum = 0;
-    for (d = SOFTMAX_LITERALS(0); d < SOFTMAX_CAST_TYPE dim_size; d++)
+    SOFTMAX_FOR(d, 0, dim_size)
       sum += ((accreal)gradOutput_data[d * dim_stride]) * ((accreal)output_data[d * dim_stride]);
 
-    for (d = SOFTMAX_LITERALS(0); d < SOFTMAX_CAST_TYPE dim_size; d++)
+    SOFTMAX_FOR(d, 0, dim_size)
       gradInput_data[d * dim_stride] = output_data[d * dim_stride] * (gradOutput_data[d * dim_stride] - sum);
   }
 
