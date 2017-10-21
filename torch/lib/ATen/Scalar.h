@@ -17,7 +17,7 @@ namespace at {
 
 struct Tensor;
 
-class Scalar {
+class ATen_CLASS Scalar {
 public:
   Scalar() : Scalar(int64_t(0)) {}
 
