@@ -542,8 +542,12 @@ class TestAutograd(TestCase):
         z = x + y
         q = y * 2
 
-        torch.autograd.backward([z, q], [torch.ones(5, 5), torch.ones(5, 5)])
-        self.assertEqual(x.grad.data, torch.ones(5, 5))
+        # NB: we currently raise an exception if any arguments to backwards
+        # have requires_grad=False and don't have a grad_fn. We may want to
+        # relax that check to a warning.
+        def call_backwards():
+            torch.autograd.backward([z, q], [torch.ones(5, 5), torch.ones(5, 5)])
+        self.assertRaises(RuntimeError, call_backwards)
 
     def test_dependent_backward(self):
         x = Variable(torch.randn(10), requires_grad=True)
