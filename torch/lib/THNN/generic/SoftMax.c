@@ -45,7 +45,7 @@ void THNN_(SoftMax_updateOutput)(
     real *output_data = output_data_base + outer_idx * outer_stride + inner_idx;
 
     real input_max = -THInf;
-    SOFTMAX_FOR(d, 0, dim_size) {
+    for (d = 0; d < SOFTMAX_CAST_TYPE dim_size; d++) {
       if (input_data[d * dim_stride] >= input_max) input_max = input_data[d * dim_stride];
     }
 
