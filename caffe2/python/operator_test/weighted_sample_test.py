@@ -16,10 +16,15 @@ import caffe2.python.hypothesis_test_util as hu
 class TestWeightedSample(hu.HypothesisTestCase):
     @given(
         batch=st.integers(min_value=0, max_value=128),
-        weights_len=st.integers(min_value=0, max_value=128)
+        weights_len=st.integers(min_value=0, max_value=128),
+        **hu.gcs
     )
-    def test_weighted_sample(self, batch, weights_len):
-        op = core.CreateOperator("WeightedSample", ["weights"], ["indices"])
+    def test_weighted_sample(self, batch, weights_len, gc, dc):
+        op = core.CreateOperator(
+            "WeightedSample",
+            ["weights"],
+            ["indices"],
+        )
 
         weights = np.zeros((batch, weights_len))
         rand_indices = []
@@ -40,6 +45,7 @@ class TestWeightedSample(hu.HypothesisTestCase):
         else:
             np.testing.assert_allclose(rand_indices, result)
 
+        self.assertDeviceChecks(dc, op, [weights.astype(np.float32)], [0])
 
 if __name__ == "__main__":
     import unittest
