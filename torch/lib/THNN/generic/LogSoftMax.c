@@ -3,11 +3,11 @@
 #else
 
 #ifdef _MSC_VER
-#define LOG_SOFTMAX_DEFINITIONS int64_t i, d;
-#define LOG_SOFTMAX_FOR(i, s, n) for (i = s; i < (int64_t)(n); i++)
+  #define LOG_SOFTMAX_SIZE_TYPE int64_t
+  #define LOG_SOFTMAX_CAST_TYPE (int64_t)
 #else
-#define LOG_SOFTMAX_DEFINITIONS
-#define LOG_SOFTMAX_FOR(i, s, n) for(uint64_t i = s; i < n; i++)
+  #define LOG_SOFTMAX_SIZE_TYPE uint64_t
+  #define LOG_SOFTMAX_CAST_TYPE
 #endif
 
 void THNN_(LogSoftMax_updateOutput)(
@@ -36,10 +36,10 @@ void THNN_(LogSoftMax_updateOutput)(
   uint64_t dim_stride = inner_size;
   uint64_t outer_stride = dim_size * dim_stride;
 
-  LOG_SOFTMAX_DEFINITIONS
+  LOG_SOFTMAX_SIZE_TYPE i, d;
 
-#pragma omp parallel for
-  LOG_SOFTMAX_FOR(i, 0, outer_size * inner_size)
+#pragma omp parallel for private(i)
+  for (i = 0; i < LOG_SOFTMAX_CAST_TYPE (outer_size * inner_size); i++)
   {
     uint64_t outer_idx = i / inner_size;
     uint64_t inner_idx = i % inner_size;
@@ -47,15 +47,15 @@ void THNN_(LogSoftMax_updateOutput)(
     real *output_data = output_data_base + outer_idx * outer_stride + inner_idx;
 
     real max_input = -THInf;
-    LOG_SOFTMAX_FOR(d, 1, dim_size)
+    for (d = 1; d < LOG_SOFTMAX_CAST_TYPE dim_size; d++)
       max_input = THMax(max_input, input_data[d * dim_stride]);
 
     accreal logsum = 0;
-    LOG_SOFTMAX_FOR(d, 0, dim_size)
+    for (d = 0; d < LOG_SOFTMAX_CAST_TYPE dim_size; d++)
       logsum += exp(input_data[d * dim_stride] - max_input);
     logsum = max_input + log(logsum);
 
-    LOG_SOFTMAX_FOR(d, 0, dim_size)
+    for (d = 0; d < LOG_SOFTMAX_CAST_TYPE dim_size; d++)
       output_data[d * dim_stride] = input_data[d * dim_stride] - logsum;
   }
 
@@ -93,10 +93,10 @@ void THNN_(LogSoftMax_updateGradInput)(
   uint64_t dim_stride = inner_size;
   uint64_t outer_stride = dim_size * dim_stride;
 
-  LOG_SOFTMAX_DEFINITIONS
+  LOG_SOFTMAX_SIZE_TYPE i, d;
 
-#pragma omp parallel for
-  LOG_SOFTMAX_FOR(i, 0, outer_size * inner_size)
+#pragma omp parallel for private(i)
+  for (i = 0; i < LOG_SOFTMAX_CAST_TYPE (outer_size * inner_size); i++)
   {
     uint64_t outer_idx = i / inner_size;
     uint64_t inner_idx = i % inner_size;
@@ -105,10 +105,10 @@ void THNN_(LogSoftMax_updateGradInput)(
     real *gradOutput_data = gradOutput_data_base + outer_idx * outer_stride + inner_idx;
 
     accreal sum = 0;
-    LOG_SOFTMAX_FOR(d, 0, dim_size)
+    for (d = 0; d < LOG_SOFTMAX_CAST_TYPE dim_size; d++)
       sum += gradOutput_data[d * dim_stride];
 
-    LOG_SOFTMAX_FOR(d, 0, dim_size)
+    for (d = 0; d < LOG_SOFTMAX_CAST_TYPE dim_size; d++)
       gradInput_data[d * dim_stride] = gradOutput_data[d * dim_stride] - exp(output_data[d * dim_stride]) * sum;
   }
 

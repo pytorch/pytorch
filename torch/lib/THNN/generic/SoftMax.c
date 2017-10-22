@@ -3,11 +3,11 @@
 #else
 
 #ifdef _MSC_VER
-  #define SOFTMAX_DEFINITIONS int64_t i, d;
-  #define SOFTMAX_FOR(i, s, n) for (i = s; i < (int64_t)(n); i++)
+  #define SOFTMAX_SIZE_TYPE int64_t
+  #define SOFTMAX_CAST_TYPE (int64_t)
 #else
-  #define SOFTMAX_DEFINITIONS
-  #define SOFTMAX_FOR(i, s, n) for(uint64_t i = s; i < n; i++)
+  #define SOFTMAX_SIZE_TYPE uint64_t
+  #define SOFTMAX_CAST_TYPE
 #endif
 
 void THNN_(SoftMax_updateOutput)(
@@ -35,10 +35,10 @@ void THNN_(SoftMax_updateOutput)(
   uint64_t dim_stride = inner_size;
   uint64_t outer_stride = dim_size * dim_stride;
 
-  SOFTMAX_DEFINITIONS
+  SOFTMAX_SIZE_TYPE i, d;
 
-#pragma omp parallel for
-  SOFTMAX_FOR(i, 0, outer_size * inner_size) {
+#pragma omp parallel for private(i)
+  for (i = 0; i < SOFTMAX_CAST_TYPE (outer_size * inner_size); i++) {
     uint64_t outer_idx = i / inner_size;
     uint64_t inner_idx = i % inner_size;
     real *input_data  = input_data_base  + outer_idx * outer_stride + inner_idx;
@@ -50,14 +50,14 @@ void THNN_(SoftMax_updateOutput)(
     }
 
     accreal sum = 0;
-    SOFTMAX_FOR(d, 0, dim_size) {
+    for (d = 0; d < SOFTMAX_CAST_TYPE dim_size; d++) {
       real z = exp(input_data[d * dim_stride] - input_max);
       output_data[d * dim_stride] = z;
       sum += z;
     }
 
     real invsum = 1 / sum; // NOTE: truncate sum to real once
-    SOFTMAX_FOR(d, 0, dim_size) {
+    for (d = 0; d < SOFTMAX_CAST_TYPE dim_size; d++) {
       output_data[d * dim_stride] *= invsum;
     }
   }
@@ -96,10 +96,10 @@ void THNN_(SoftMax_updateGradInput)(
   uint64_t dim_stride = inner_size;
   uint64_t outer_stride = dim_size * dim_stride;
 
-  SOFTMAX_DEFINITIONS
+  SOFTMAX_SIZE_TYPE i, d;
 
-#pragma omp parallel for
-  SOFTMAX_FOR(i, 0, outer_size * inner_size)
+#pragma omp parallel for private(i)
+  for (i = 0; i < SOFTMAX_CAST_TYPE (outer_size * inner_size); i++)
   {
     uint64_t outer_idx = i / inner_size;
     uint64_t inner_idx = i % inner_size;
@@ -108,10 +108,10 @@ void THNN_(SoftMax_updateGradInput)(
     real *gradOutput_data = gradOutput_data_base + outer_idx * outer_stride + inner_idx;
 
     accreal sum = 0;
-    SOFTMAX_FOR(d, 0, dim_size)
+    for (d = 0; d < SOFTMAX_CAST_TYPE dim_size; d++)
       sum += ((accreal)gradOutput_data[d * dim_stride]) * ((accreal)output_data[d * dim_stride]);
 
-    SOFTMAX_FOR(d, 0, dim_size)
+    for (d = 0; d < SOFTMAX_CAST_TYPE dim_size; d++)
       gradInput_data[d * dim_stride] = output_data[d * dim_stride] * (gradOutput_data[d * dim_stride] - sum);
   }
 
