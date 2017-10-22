@@ -64,7 +64,6 @@ PyObject * THPTensor_(toNumpy)(THPTensor *self, PyObject *args) {
   THPUtils_setError("numpy conversion for %s is not supported\n", THPUtils_typename(self));
   return NULL;
 #else
-
   npy_intp zero = 0;
   int ndim;
   npy_intp* sizes_ptr;
