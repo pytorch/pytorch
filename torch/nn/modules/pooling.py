@@ -66,7 +66,7 @@ class MaxPool1d(Module):
 
     def __repr__(self):
         return self.__class__.__name__ + ' (' \
-            + 'size=' + str(self.kernel_size) \
+            + 'kernel_size=' + str(self.kernel_size) \
             + ', stride=' + str(self.stride) \
             + ', padding=' + str(self.padding) \
             + ', dilation=' + str(self.dilation) \
@@ -230,7 +230,7 @@ class MaxUnpool1d(Module):
 
     def __repr__(self):
         return self.__class__.__name__ + ' (' \
-            + 'size=' + str(self.kernel_size) \
+            + 'kernel_size=' + str(self.kernel_size) \
             + ', stride=' + str(self.stride) \
             + ', padding=' + str(self.padding) + ')'
 
@@ -311,7 +311,7 @@ class MaxUnpool2d(Module):
 
     def __repr__(self):
         return self.__class__.__name__ + ' (' \
-            + 'size=' + str(self.kernel_size) \
+            + 'kernel_size=' + str(self.kernel_size) \
             + ', stride=' + str(self.stride) \
             + ', padding=' + str(self.padding) + ')'
 
@@ -372,7 +372,7 @@ class MaxUnpool3d(Module):
 
     def __repr__(self):
         return self.__class__.__name__ + ' (' \
-            + 'size=' + str(self.kernel_size) \
+            + 'kernel_size=' + str(self.kernel_size) \
             + ', stride=' + str(self.stride) \
             + ', padding=' + str(self.padding) + ')'
 
@@ -437,7 +437,7 @@ class AvgPool1d(Module):
 
     def __repr__(self):
         return self.__class__.__name__ + ' (' \
-            + 'size=' + str(self.kernel_size) \
+            + 'kernel_size=' + str(self.kernel_size) \
             + ', stride=' + str(self.stride) \
             + ', padding=' + str(self.padding) \
             + ', ceil_mode=' + str(self.ceil_mode) \
@@ -506,7 +506,7 @@ class AvgPool2d(Module):
 
     def __repr__(self):
         return self.__class__.__name__ + ' (' \
-            + 'size=' + str(self.kernel_size) \
+            + 'kernel_size=' + str(self.kernel_size) \
             + ', stride=' + str(self.stride) \
             + ', padding=' + str(self.padding) \
             + ', ceil_mode=' + str(self.ceil_mode) \
@@ -585,7 +585,7 @@ class MaxPool3d(Module):
 
     def __repr__(self):
         return self.__class__.__name__ + ' (' \
-            + 'size=' + str(self.kernel_size) \
+            + 'kernel_size=' + str(self.kernel_size) \
             + ', stride=' + str(self.stride) \
             + ', padding=' + str(self.padding) \
             + ', dilation=' + str(self.dilation) \
@@ -661,7 +661,7 @@ class AvgPool3d(Module):
 
     def __repr__(self):
         return self.__class__.__name__ + ' (' \
-            + 'size=' + str(self.kernel_size) \
+            + 'kernel_size=' + str(self.kernel_size) \
             + ', stride=' + str(self.stride) \
             + ', padding=' + str(self.padding) \
             + ', ceil_mode=' + str(self.ceil_mode) \
