@@ -64,11 +64,17 @@ PyObject * THPTensor_(toNumpy)(THPTensor *self, PyObject *args) {
   THPUtils_setError("numpy conversion for %s is not supported\n", THPUtils_typename(self));
   return NULL;
 #else
+
   npy_intp zero = 0;
   int ndim;
   npy_intp* sizes_ptr;
   std::unique_ptr<npy_intp[]> sizes;
   std::unique_ptr<npy_intp[]> strides;
+
+  if (!PyArg_ParseTuple(args, "")) {
+    THPUtils_setError("numpy() takes no positional arguments");
+    return NULL;
+  }
 
   // Numpy and Torch disagree on empty tensors. In Torch, an empty tensor
   // is a tensor with zero dimensions. In Numpy, a tensor with zero dimensions
