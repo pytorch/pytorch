@@ -38,7 +38,7 @@ void THNN_(LogSoftMax_updateOutput)(
 
   LOG_SOFTMAX_SIZE_TYPE i, d;
 
-#pragma omp parallel for private(i)
+#pragma omp parallel for private(i, d)
   for (i = 0; i < LOG_SOFTMAX_CAST_TYPE (outer_size * inner_size); i++)
   {
     uint64_t outer_idx = i / inner_size;
@@ -95,7 +95,7 @@ void THNN_(LogSoftMax_updateGradInput)(
 
   LOG_SOFTMAX_SIZE_TYPE i, d;
 
-#pragma omp parallel for private(i)
+#pragma omp parallel for private(i, d)
   for (i = 0; i < LOG_SOFTMAX_CAST_TYPE (outer_size * inner_size); i++)
   {
     uint64_t outer_idx = i / inner_size;

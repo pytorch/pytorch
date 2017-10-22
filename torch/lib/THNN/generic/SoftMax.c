@@ -37,7 +37,7 @@ void THNN_(SoftMax_updateOutput)(
 
   SOFTMAX_SIZE_TYPE i, d;
 
-#pragma omp parallel for private(i)
+#pragma omp parallel for private(i, d)
   for (i = 0; i < SOFTMAX_CAST_TYPE (outer_size * inner_size); i++) {
     uint64_t outer_idx = i / inner_size;
     uint64_t inner_idx = i % inner_size;
@@ -98,7 +98,7 @@ void THNN_(SoftMax_updateGradInput)(
 
   SOFTMAX_SIZE_TYPE i, d;
 
-#pragma omp parallel for private(i)
+#pragma omp parallel for private(i, d)
   for (i = 0; i < SOFTMAX_CAST_TYPE (outer_size * inner_size); i++)
   {
     uint64_t outer_idx = i / inner_size;
