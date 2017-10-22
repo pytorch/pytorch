@@ -40,6 +40,10 @@
 
 - func: stride(Tensor self, int64_t dim) -> int64_t
 
+- func: index(Tensor self, TensorList indices) -> Tensor
+
+- func: index_put_(Tensor self, TensorList indices, Tensor values) -> Tensor
+
 - func: is_same_size(Tensor self, Tensor other) -> bool
 
 - func: is_cuda(Tensor self) -> bool

@@ -7,6 +7,7 @@
 #include "torch/csrc/Types.h"
 #include "torch/csrc/autograd/python_cpp_function.h"
 #include "torch/csrc/autograd/python_hook.h"
+#include "torch/csrc/autograd/python_variable_indexing.h"
 #include "torch/csrc/autograd/functions/accumulate_grad.h"
 #include "torch/csrc/autograd/utils/wrap_outputs.h"
 #include "torch/csrc/cuda/AutoGPU.h"
@@ -477,6 +478,12 @@ static struct PyGetSetDef THPVariable_properties[] = {
   {NULL}
 };
 
+static PyMappingMethods THPVariable_as_mapping = {
+  THPVariable_length,
+  THPVariable_getitem,
+  THPVariable_setitem,
+};
+
 PyTypeObject THPVariableType = {
   PyVarObject_HEAD_INIT(NULL, 0)
   "torch._C._VariableBase",              /* tp_name */
@@ -490,7 +497,7 @@ PyTypeObject THPVariableType = {
   0,                                     /* tp_repr */
   0,                                     /* tp_as_number */
   0,                                     /* tp_as_sequence */
-  0,                                     /* tp_as_mapping */
+  &THPVariable_as_mapping,               /* tp_as_mapping */
   0,                                     /* tp_hash  */
   0,                                     /* tp_call */
   0,                                     /* tp_str */

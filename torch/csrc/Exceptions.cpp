@@ -2,6 +2,7 @@
 
 #include <utility>
 #include <vector>
+#include <cstdarg>
 
 #include "THP.h"
 
@@ -21,8 +22,8 @@ void replaceAll(std::string & str,
     const std::string & old_str,
     const std::string & new_str) {
   std::string::size_type pos = 0u;
-  while ((pos = str.find(old_str, pos)) != std::string::npos){
-     str.replace(pos, old_str.length(), new_str);
+  while ((pos = str.find(old_str, pos)) != std::string::npos) {
+    str.replace(pos, old_str.length(), new_str);
   }
 }
 
@@ -70,5 +71,26 @@ std::string processErrorMsg(std::string str) {
 
   return str;
 }
+
+static std::string formatMessage(const char *format, va_list fmt_args) {
+  static const size_t ERROR_BUF_SIZE = 1024;
+  char error_buf[ERROR_BUF_SIZE];
+  vsnprintf(error_buf, ERROR_BUF_SIZE, format, fmt_args);
+  return std::string(error_buf);
 }
 
+IndexError::IndexError(const char *format, ...) {
+  va_list fmt_args;
+  va_start(fmt_args, format);
+  msg = formatMessage(format, fmt_args);
+  va_end(fmt_args);
+}
+
+TypeError::TypeError(const char *format, ...) {
+  va_list fmt_args;
+  va_start(fmt_args, format);
+  msg = formatMessage(format, fmt_args);
+  va_end(fmt_args);
+}
+
+} // namespace torch

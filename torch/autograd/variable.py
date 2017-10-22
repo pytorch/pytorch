@@ -46,26 +46,6 @@ class Variable(_C._VariableBase):
         volatile (bool): Value of the volatile flag. **Keyword only.**
     """
 
-    def __getitem__(self, key):
-        if torch.is_tensor(key):
-            key = Variable(key)  # auto-wrap tensors
-        if isinstance(key, Variable):
-            if type(key.data).__name__ == 'ByteTensor':
-                return MaskedSelect.apply(self, key)
-            elif type(key.data).__name__ == 'LongTensor':
-                return IndexSelect.apply(self, 0, key)
-            # else fall through and raise an error in Index
-        return Index.apply(self, key)
-
-    def __setitem__(self, key, value):
-        if isinstance(key, Variable) and type(key.data).__name__ == 'ByteTensor':
-            if isinstance(value, Variable):
-                return MaskedScatter.apply(self, key, value, True)
-            else:
-                return MaskedFill.apply(self, key, value, True)
-        else:
-            return SetItem.apply(self, key, value)
-
     def __deepcopy__(self, memo):
         if not self.is_leaf:
             raise RuntimeError("Only Variables created explicitly by the user "
@@ -316,9 +296,6 @@ class Variable(_C._VariableBase):
 
     def index_add(self, dim, index, tensor):
         return self.clone().index_add_(dim, index, tensor)
-
-    def _advanced_index_add(self, index, tensor):
-        return AdvancedIndexAdd.apply(self, index, tensor)
 
     def index_copy(self, dim, index, tensor):
         return self.clone().index_copy_(dim, index, tensor)
