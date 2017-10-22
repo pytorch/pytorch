@@ -61,15 +61,12 @@ void addCUDAGlobalMethods(py::module& m) {
   });
 };
 
-PYBIND11_PLUGIN(caffe2_pybind11_state_gpu) {
-  py::module m(
-      "caffe2_pybind11_state_gpu",
-      "pybind11 stateful interface to Caffe2 workspaces - GPU edition");
+PYBIND11_MODULE(caffe2_pybind11_state_gpu, m) {
+  m.doc() = "pybind11 stateful interface to Caffe2 workspaces - GPU edition";
 
   addGlobalMethods(m);
   addCUDAGlobalMethods(m);
   addObjectMethods(m);
-  return m.ptr();
 }
 } // namespace python
 } // namespace caffe2
