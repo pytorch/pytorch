@@ -122,17 +122,14 @@ class TensorFetcher : public BlobFetcherBase {
     result.copied = force_copy || NeedsCopy(tensor.meta());
     void* outPtr;
     if (result.copied) {
-      result.obj = pybind11::object(
-          PyArray_SimpleNew(tensor.ndim(), npy_dims.data(), numpy_type),
-          /* borrowed */ false);
+      result.obj = py::reinterpret_steal<py::object>(
+          PyArray_SimpleNew(tensor.ndim(), npy_dims.data(), numpy_type));
       outPtr = static_cast<void*>(
           PyArray_DATA(reinterpret_cast<PyArrayObject*>(result.obj.ptr())));
     } else {
       outPtr = const_cast<Tensor<Context>&>(tensor).raw_mutable_data();
-      result.obj = pybind11::object(
-          PyArray_SimpleNewFromData(
-              tensor.ndim(), npy_dims.data(), numpy_type, outPtr),
-          /* borrowed */ false);
+      result.obj = py::reinterpret_steal<py::object>(PyArray_SimpleNewFromData(
+          tensor.ndim(), npy_dims.data(), numpy_type, outPtr));
     }
 
     if (numpy_type == NPY_OBJECT) {
