@@ -75,7 +75,7 @@ class ReLU(Threshold):
 
     def __repr__(self):
         inplace_str = 'inplace' if self.inplace else ''
-        return self.__class__.__name__ + ' (' \
+        return self.__class__.__name__ + '(' \
             + inplace_str + ')'
 
 
@@ -92,7 +92,7 @@ class RReLU(Module):
 
     def __repr__(self):
         inplace_str = ', inplace' if self.inplace else ''
-        return self.__class__.__name__ + ' (' \
+        return self.__class__.__name__ + '(' \
             + str(self.lower) \
             + ', ' + str(self.upper) \
             + inplace_str + ')'
@@ -149,7 +149,7 @@ class Hardtanh(Module):
 
     def __repr__(self):
         inplace_str = ', inplace' if self.inplace else ''
-        return self.__class__.__name__ + ' (' \
+        return self.__class__.__name__ + '(' \
             + 'min_val=' + str(self.min_val) \
             + ', max_val=' + str(self.max_val) \
             + inplace_str + ')'
@@ -179,7 +179,7 @@ class ReLU6(Hardtanh):
 
     def __repr__(self):
         inplace_str = 'inplace' if self.inplace else ''
-        return self.__class__.__name__ + ' (' \
+        return self.__class__.__name__ + '(' \
             + inplace_str + ')'
 
 
@@ -203,7 +203,7 @@ class Sigmoid(Module):
         return torch.sigmoid(input)
 
     def __repr__(self):
-        return self.__class__.__name__ + ' ()'
+        return self.__class__.__name__ + '()'
 
 
 class Tanh(Module):
@@ -227,7 +227,7 @@ class Tanh(Module):
         return torch.tanh(input)
 
     def __repr__(self):
-        return self.__class__.__name__ + ' ()'
+        return self.__class__.__name__ + '()'
 
 
 class ELU(Module):
@@ -261,7 +261,7 @@ class ELU(Module):
 
     def __repr__(self):
         inplace_str = ', inplace' if self.inplace else ''
-        return self.__class__.__name__ + ' (' \
+        return self.__class__.__name__ + '(' \
             + 'alpha=' + str(self.alpha) \
             + inplace_str + ')'
 
@@ -300,7 +300,7 @@ class SELU(Module):
         return F.selu(input, self.inplace)
 
     def __repr__(self):
-        inplace_str = ' (inplace)' if self.inplace else ''
+        inplace_str = '(inplace)' if self.inplace else ''
         return self.__class__.__name__ + inplace_str
 
 
@@ -333,7 +333,7 @@ class GLU(Module):
         return F.glu(input, self.dim)
 
     def __repr__(self):
-        return '{} (dim={})'.format(self.__class__.__name__, self.dim)
+        return '{}(dim={})'.format(self.__class__.__name__, self.dim)
 
 
 class Hardshrink(Module):
@@ -367,7 +367,7 @@ class Hardshrink(Module):
         return F.hardshrink(input, self.lambd)
 
     def __repr__(self):
-        return self.__class__.__name__ + ' (' \
+        return self.__class__.__name__ + '(' \
             + str(self.lambd) + ')'
 
 
@@ -402,7 +402,7 @@ class LeakyReLU(Module):
 
     def __repr__(self):
         inplace_str = ', inplace' if self.inplace else ''
-        return self.__class__.__name__ + ' (' \
+        return self.__class__.__name__ + '(' \
             + str(self.negative_slope) \
             + inplace_str + ')'
 
@@ -427,7 +427,7 @@ class LogSigmoid(Module):
         return F.logsigmoid(input)
 
     def __repr__(self):
-        return self.__class__.__name__ + ' ()'
+        return self.__class__.__name__ + '()'
 
 
 class Softplus(Module):
@@ -465,7 +465,7 @@ class Softplus(Module):
         return F.softplus(input, self.beta, self.threshold)
 
     def __repr__(self):
-        return self.__class__.__name__ + ' (' \
+        return self.__class__.__name__ + '(' \
             + 'beta=' + str(self.beta) \
             + ', threshold=' + str(self.threshold) + ')'
 
@@ -502,7 +502,7 @@ class Softshrink(Module):
         return F.softshrink(input, self.lambd)
 
     def __repr__(self):
-        return self.__class__.__name__ + ' (' \
+        return self.__class__.__name__ + '(' \
             + str(self.lambd) + ')'
 
 
@@ -543,8 +543,8 @@ class PReLU(Module):
         return F.prelu(input, self.weight)
 
     def __repr__(self):
-        return self.__class__.__name__ + ' (' \
-            + str(self.num_parameters) + ')'
+        return self.__class__.__name__ + '(' \
+            + 'num_parameters=' + str(self.num_parameters) + ')'
 
 
 class Softsign(Module):
@@ -567,7 +567,7 @@ class Softsign(Module):
         return F.softsign(input)
 
     def __repr__(self):
-        return self.__class__.__name__ + ' ()'
+        return self.__class__.__name__ + '()'
 
 
 class Tanhshrink(Module):
@@ -590,7 +590,7 @@ class Tanhshrink(Module):
         return F.tanhshrink(input)
 
     def __repr__(self):
-        return self.__class__.__name__ + ' ()'
+        return self.__class__.__name__ + '()'
 
 
 class Softmin(Module):
@@ -627,7 +627,7 @@ class Softmin(Module):
         return F.softmin(input, self.dim, _stacklevel=5)
 
     def __repr__(self):
-        return self.__class__.__name__ + ' ()'
+        return self.__class__.__name__ + '()'
 
 
 class Softmax(Module):
@@ -676,7 +676,7 @@ class Softmax(Module):
         return F.softmax(input, self.dim, _stacklevel=5)
 
     def __repr__(self):
-        return self.__class__.__name__ + ' ()'
+        return self.__class__.__name__ + '()'
 
 
 class Softmax2d(Module):
@@ -708,7 +708,7 @@ class Softmax2d(Module):
         return F.softmax(input, 1, _stacklevel=5)
 
     def __repr__(self):
-        return self.__class__.__name__ + ' ()'
+        return self.__class__.__name__ + '()'
 
 
 class LogSoftmax(Module):
@@ -750,4 +750,4 @@ class LogSoftmax(Module):
         return F.log_softmax(input, self.dim, _stacklevel=5)
 
     def __repr__(self):
-        return self.__class__.__name__ + ' ()'
+        return self.__class__.__name__ + '()'

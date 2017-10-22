@@ -47,7 +47,7 @@ class _ConvNd(Module):
             self.bias.data.uniform_(-stdv, stdv)
 
     def __repr__(self):
-        s = ('{name}({in_channels}, {out_channels}, kernel_size={kernel_size}'
+        s = ('{name} ({in_channels}, {out_channels}, kernel_size={kernel_size}'
              ', stride={stride}')
         if self.padding != (0,) * len(self.padding):
             s += ', padding={padding}'

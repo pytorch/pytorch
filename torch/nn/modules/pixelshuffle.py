@@ -40,4 +40,4 @@ class PixelShuffle(Module):
         return F.pixel_shuffle(input, self.upscale_factor)
 
     def __repr__(self):
-        return self.__class__.__name__ + ' (upscale_factor=' + str(self.upscale_factor) + ')'
+        return self.__class__.__name__ + '(upscale_factor=' + str(self.upscale_factor) + ')'
