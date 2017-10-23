@@ -42,6 +42,10 @@ static_assert(
 #cmakedefine CAFFE2_USE_MKL
 #cmakedefine CAFFE2_USE_NVTX
 
+#ifndef EIGEN_MPL2_ONLY
+#cmakedefine EIGEN_MPL2_ONLY
+#endif
+
 // Useful build settings that are recorded in the compiled binary
 #define CAFFE2_BUILD_STRINGS { \
   {"GIT_VERSION", "${CAFFE2_GIT_VERSION}"}, \

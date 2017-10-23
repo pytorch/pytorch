@@ -234,6 +234,7 @@ if(USE_FFMPEG)
 endif()
 
 # ---[ EIGEN
+# Due to license considerations, we will only use the MPL2 parts of Eigen.
 set(EIGEN_MPL2_ONLY 1)
 find_package(Eigen3)
 if(EIGEN3_FOUND)
