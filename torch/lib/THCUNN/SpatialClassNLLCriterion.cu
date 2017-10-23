@@ -62,8 +62,7 @@ __global__ void SpatialClassNLLCriterion_updateGradInput_no_reduce_kernel(
     }
     Dtype value =
         -(weights ? weights[cur_target] : ScalarConvert<int, Dtype>::to(1));
-    Dtype gradOutput_value = gradOutput[b][h][w];
-    gradInput[b][cur_target][h][w] = value * gradOutput_value;
+    gradInput[b][cur_target][h][w] = value * gradOutput[b][h][w];
   }
 }
 
@@ -127,7 +126,7 @@ __global__ void cunn_SpatialClassNLLCriterion_sizeAverage_kernel(
 template<typename T>
 __global__ void cunn_SpatialClassNLLCriterion_updateGradInput_kernel(
           T *gradInput,
-          T gradOutput,
+          T *gradOutput,
           THCIndex_t *target,
           T *weights,
           T *total_weight,
@@ -154,7 +153,7 @@ __global__ void cunn_SpatialClassNLLCriterion_updateGradInput_kernel(
     t = (int)target[toffset + i] - TH_INDEX_BASE;
     if (t != ignore_index) {
       assert(t >= 0 && t < n_classes);
-      gradInput[ioffset + i + map_nelem * t] = -(weights ? weights[t] : ScalarConvert<int, T>::to(1)) * norm * gradOutput;
+      gradInput[ioffset + i + map_nelem * t] = -(weights ? weights[t] : ScalarConvert<int, T>::to(1)) * norm * gradOutput[0];
     }
   }
 }

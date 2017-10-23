@@ -198,6 +198,7 @@ void THNN_(SpatialClassNLLCriterion_updateGradInput)(
   weights = weights ? THCTensor_(newContiguous)(state, weights) : NULL;
   target = THCIndexTensor_(newContiguous)(state, target);
 
+  real *gradOutput_data = THCTensor_(data)(state, gradOutput);
   real *weights_data = weights ? THCTensor_(data)(state, weights) : NULL;
   real *gradInput_data = THCTensor_(data)(state, gradInput);
   THCIndex_t *target_data = THCIndexTensor_(data)(state, target);
@@ -212,7 +213,7 @@ void THNN_(SpatialClassNLLCriterion_updateGradInput)(
   cunn_SpatialClassNLLCriterion_updateGradInput_kernel
     <<<total_blocks, CUDA_NUM_THREADS, 0, THCState_getCurrentStream(state)>>>(
       gradInput_data,
-      THCTensor_(get1d)(state, gradOutput, 0),
+      gradOutput_data,
       target_data,
       weights_data,
       total_weight_data,

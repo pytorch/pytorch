@@ -196,7 +196,7 @@ void THNN_(ClassNLLCriterion_updateGradInput)(
   target = THCIndexTensor_(newContiguous)(state, target);
 
   THCUNN_check_dim_size(state, gradOutput, 1, 0, 1);
-  real gradOutput_data = THCTensor_(get1d)(state, gradOutput, 0);
+  real *gradOutput_data = THCTensor_(data)(state, gradOutput);
   real *weights_data = weights ? THCTensor_(data)(state, weights) : NULL;
   real *gradInput_data = THCTensor_(data)(state, gradInput);
   THCIndex_t  *target_data = THCIndexTensor_(data)(state, target);

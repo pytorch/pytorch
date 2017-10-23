@@ -39,15 +39,15 @@ __global__ void cunn_ClassNLLCriterion_updateOutput_kernel1(Dtype *output,
 
 template <typename Dtype>
 __global__ void ClassNLLCriterion_updateOutput_no_reduce_kernel(
-    int64_t batch_size,
+    int batch_size,
     THCDeviceTensor<Dtype, 2> input,
     THCDeviceTensor<THCIndex_t, 1> target,
     THCDeviceTensor<Dtype, 1> output,
     Dtype *weights,
-    int64_t ignore_index) {
+    int ignore_index) {
 
   CUDA_KERNEL_LOOP(index, batch_size) {
-    int64_t cur_target = target[index];
+    int cur_target = target[index];
     if (cur_target == ignore_index) {
       output[index] = ScalarConvert<int, Dtype>::to(0);
       continue;
@@ -60,15 +60,15 @@ __global__ void ClassNLLCriterion_updateOutput_no_reduce_kernel(
 
 template <typename Dtype>
 __global__ void ClassNLLCriterion_updateGradInput_no_reduce_kernel(
-    int64_t batch_size,
+    int batch_size,
     THCDeviceTensor<THCIndex_t, 1> target,
     THCDeviceTensor<Dtype, 1> gradOutput,
     THCDeviceTensor<Dtype, 2> gradInput,
     Dtype *weights,
-    int64_t ignore_index) {
+    int ignore_index) {
 
   CUDA_KERNEL_LOOP(index, batch_size) {
-    int64_t cur_target = target[index];
+    int cur_target = target[index];
     if (cur_target == ignore_index) {
       continue;
     }
@@ -130,7 +130,7 @@ __global__ void cunn_ClassNLLCriterion_updateOutput_kernel(Dtype *output,
 template <typename Dtype>
 __global__ void cunn_ClassNLLCriterion_updateGradInput_kernel1(
   Dtype* gradInput,
-  Dtype gradOutput,
+  Dtype* gradOutput,
   Dtype* weights,
   THCIndex_t* target,
   Dtype* total_weight,
@@ -145,14 +145,14 @@ __global__ void cunn_ClassNLLCriterion_updateGradInput_kernel1(
   int t = (int)*target - TH_INDEX_BASE;
   if (t != (int) ignore_index) {
     assert(t >= 0 && t < n_classes);
-    gradInput[t] = -(weights ? weights[t] : ScalarConvert<int, Dtype>::to(1)) * norm * gradOutput;
+    gradInput[t] = -(weights ? weights[t] : ScalarConvert<int, Dtype>::to(1)) * norm * gradOutput[0];
   }
 }
 
 template <typename Dtype>
 __global__ void cunn_ClassNLLCriterion_updateGradInput_kernel(
   Dtype *gradInput,
-  Dtype gradOutput,
+  Dtype *gradOutput,
   THCIndex_t *target,
   Dtype *weights,
   Dtype *total_weight,
@@ -172,7 +172,7 @@ __global__ void cunn_ClassNLLCriterion_updateGradInput_kernel(
     t = (int)target[i] - TH_INDEX_BASE;
     if (t != (int) ignore_index) {
       assert(t >= 0 && t < n_classes);
-      gradInput[i * ndim + t] = -(weights ? weights[t] : ScalarConvert<int, Dtype>::to(1)) * norm * gradOutput;
+      gradInput[i * ndim + t] = -(weights ? weights[t] : ScalarConvert<int, Dtype>::to(1)) * norm * gradOutput[0];
     }
   }
 }

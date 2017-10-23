@@ -74,12 +74,12 @@ void THNN_(SpatialClassNLLCriterion_updateOutput)(
         for (w = 0; w < W; w++) {
           int64_t cur_target = (int64_t)THIndexTensor_(get3d)(target, b, h, w);
           if (cur_target == ignore_index) {
-            THTensor_(set3d)(output, b, h, w, 0.0f);
+            THTensor_fastSet3d(output, b, h, w, 0.0f);
             continue;
           }
-          real value = THTensor_(get4d)(input, b, cur_target, h, w);
-          real weight = weights ? THTensor_(get1d)(weights, cur_target) : 1.0f;
-          THTensor_(set3d)(output, b, h, w, -value * weight);
+          real value = THTensor_fastGet4d(input, b, cur_target, h, w);
+          real weight = weights ? THTensor_fastGet1d(weights, cur_target) : 1.0f;
+          THTensor_fastSet3d(output, b, h, w, -value * weight);
         }
       }
     }
@@ -161,9 +161,9 @@ void THNN_(SpatialClassNLLCriterion_updateGradInput)(
           if (cur_target == ignore_index) {
             continue;
           }
-          real value = -(weights ? THTensor_(get1d)(weights, cur_target) : 1.0f);
-          real gradOutput_value = THTensor_(get3d)(gradOutput, b, h, w);
-          THTensor_(set4d)(gradInput, b, cur_target, h, w, value * gradOutput_value);
+          real value = -(weights ? THTensor_fastGet1d(weights, cur_target) : 1.0f);
+          real gradOutput_value = THTensor_fastGet3d(gradOutput, b, h, w);
+          THTensor_fastSet4d(gradInput, b, cur_target, h, w, value * gradOutput_value);
         }
       }
     }
@@ -201,8 +201,7 @@ void THNN_(SpatialClassNLLCriterion_updateGradInput)(
 
       int index = b * sample_size + cur_target * map_size + elem;
       gradInput_data[index] =
-        -(weights ? weights_data[cur_target] : 1.0f) / normalize;
-      gradInput_data[index] *= THTensor_(get1d)(gradOutput, 0);
+        -(weights ? weights_data[cur_target] : 1.0f) / normalize * THTensor_fastGet1d(gradOutput, 0);
     }
   }
 
