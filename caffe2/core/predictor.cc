@@ -47,6 +47,40 @@ TensorCPU* extractOutputTensor(Workspace* ws, const std::string& name) {
   CAFFE_ENFORCE(blob, "Blob: ", name, " does not exist");
   return blob->template GetMutable<TensorCPU>();
 }
+
+const NetDef& getNet(const MetaNetDef& def, const std::string& name) {
+  for (const auto& n : def.nets()) {
+    if (n.key() == name) {
+      return n.value();
+    }
+  }
+  CAFFE_THROW("Net not found: ", name);
+}
+
+const ::google::protobuf::RepeatedPtrField<::std::string>& getBlobs(
+    const MetaNetDef& def,
+    const std::string& name) {
+  for (const auto& b : def.blobs()) {
+    if (b.key() == name) {
+      return b.value();
+    }
+  }
+  CAFFE_THROW("Blob not found: ", name);
+}
+} // namespace
+
+Predictor::Predictor(const MetaNetDef& def, Workspace* parent)
+    : Predictor(
+          getNet(
+              def,
+              PredictorConsts::default_instance().global_init_net_type()),
+          getNet(def, PredictorConsts::default_instance().predict_net_type()),
+          parent) {
+  const auto& inputs =
+      getBlobs(def, PredictorConsts::default_instance().inputs_blob_type());
+  for (const auto& input : inputs) {
+    inputNames_.insert(input);
+  }
 }
 
 Predictor::Predictor(
@@ -89,7 +123,13 @@ bool Predictor::run(const TensorVector& inputs, TensorVector* outputs) {
 }
 
 bool Predictor::run_map(const TensorMap& inputs, TensorVector* outputs) {
+  if (!inputNames_.empty()) {
+    CAFFE_ENFORCE_EQ(inputs.size(), inputNames_.size());
+  }
   for (auto input : inputs) {
+    if (!inputNames_.empty()) {
+      CAFFE_ENFORCE_GT(inputNames_.count(input.first), 0);
+    }
     shareInputTensor(&ws_, input.first, input.second);
   }
 
