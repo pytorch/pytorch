@@ -130,7 +130,7 @@ void initPythonIRBindings(PyObject * module_) {
     })
     .def("zs_",[](Node & n, const char * name, TensorsAttr::ValueType v) {
         for (int i = 0; i < v.size(); ++ i) {
-            v[i] = std::move(v[i].view({}));
+            v[i] = v[i].view({});
         }
         return n.ts_(stringToSymbol(name), std::move(v));
     })
