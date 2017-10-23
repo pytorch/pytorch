@@ -25,6 +25,7 @@ static PyMethodDef nn_functions[] = {
 void initNNFunctions(PyObject* module) {
 #if PY_MAJOR_VERSION == 2
   PyObject* nn = Py_InitModule("torch._C._nn", nn_functions);
+  Py_XINCREF(nn);  // Py_InitModule returns "borrowed" reference
 #else
   static struct PyModuleDef def = {
      PyModuleDef_HEAD_INIT,
@@ -38,6 +39,7 @@ void initNNFunctions(PyObject* module) {
   if (!nn) {
     throw python_error();
   }
+  // steals a reference to nn
   if (PyModule_AddObject(module, "_nn", nn) != 0) {
     throw python_error();
   }
