@@ -34,6 +34,13 @@ class Distribution(object):
         """
         raise NotImplementedError
 
+    def sample_n(self, n):
+        """
+        Generates n samples or n batches of samples if the distribution parameters
+        are batched.
+        """
+        raise NotImplementedError
+
     def log_prob(self, value):
         """
         Returns the log of the probability density/mass function evaluated at
@@ -67,6 +74,10 @@ class Bernoulli(Distribution):
 
     def sample(self):
         return torch.bernoulli(self.probs)
+
+    def sample_n(self, n):
+        expanded_probs = self.probs.unsqueeze(0).expand(n, *self.probs.size())
+        return torch.bernoulli(expanded_probs)
 
     def log_prob(self, value):
         # compute the log probabilities for 0 and 1
@@ -108,6 +119,9 @@ class Multinomial(Distribution):
     def sample(self):
         return torch.multinomial(self.probs, 1, True).squeeze(-1)
 
+    def sample_n(self, n):
+        return torch.cat([self.sample().unsqueeze(0) for _ in range(n)], dim=0)
+
     def log_prob(self, value):
         p = self.probs / self.probs.sum(-1, keepdim=True)
         if value.dim() == 1 and self.probs.dim() == 1:
@@ -139,6 +153,14 @@ class Normal(Distribution):
 
     def sample(self):
         return torch.normal(self.mean, self.std)
+
+    def sample_n(self, n):
+      def expand(v): # cleanly expand float or Tensor or Variable inputs
+        if isinstance(v, Number):
+          return torch.Tensor(n).fill_(v).unsqueeze(-1)
+        else:
+          return v.unsqueeze(0).expand(n, *v.size())
+      return torch.normal(expand(self.mean), expand(self.std))
 
     def log_prob(self, value):
         # compute the variance
