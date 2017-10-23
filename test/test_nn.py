@@ -4391,20 +4391,20 @@ new_module_tests = [
     dict(
         constructor=wrap_functional(F.softmax, dim=1),
         input_size=(2, 3, 4, 5),
-        fullname='softmax',
+        fullname='softmax_functional',
         pickle=False,
     ),
     dict(
         constructor=wrap_functional(F.softmax, dim=0),
         input_size=(2, 3, 4, 5),
-        fullname='softmax_dim0',
+        fullname='softmax_functional_dim0',
         test_cuda=False,
         pickle=False,
     ),
     dict(
         constructor=wrap_functional(F.softmax, dim=3),
         input_size=(2, 3, 4, 5),
-        fullname='softmax_dim3',
+        fullname='softmax_functional_dim3',
         test_cuda=False,
         pickle=False,
     ),
