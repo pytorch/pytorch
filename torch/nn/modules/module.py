@@ -404,7 +404,7 @@ class Module(object):
                     param = param.data
                 try:
                     own_state[name].copy_(param)
-                except:
+                except Exception:
                     raise RuntimeError('While copying the parameter named {}, ' +
                                        'whose dimensions in the model are {} and ' +
                                        'whose dimensions in the checkpoint are {}.'
