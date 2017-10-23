@@ -4390,8 +4390,20 @@ new_module_tests = [
     ),
     dict(
         constructor=wrap_functional(F.softmax, dim=1),
-        input_size=(2, 3, 4, 5),
-        fullname='softmax_functional',
+        input_size=(2, 128),  # trigger the last-dim algo in CUDA
+        fullname='softmax_lastdim',
+        pickle=False,
+    ),
+    dict(
+        constructor=wrap_functional(F.softmax, dim=1),
+        input_size=(2, 128, 2, 2),  # trigger special case of spatial CUDA algo
+        fullname='softmax_spatial_special',
+        pickle=False,
+    ),
+    dict(
+        constructor=wrap_functional(F.softmax, dim=1),
+        input_size=(2, 2, 4, 4),  # regular spatial algorithm
+        fullname='softmax_spatial',
         pickle=False,
     ),
     dict(
@@ -4410,8 +4422,20 @@ new_module_tests = [
     ),
     dict(
         constructor=wrap_functional(F.log_softmax, dim=1),
-        input_size=(2, 3, 4, 5),
-        fullname='log_softmax',
+        input_size=(2, 128),  # trigger the last-dim algo in CUDA
+        fullname='log_softmax_lastdim',
+        pickle=False,
+    ),
+    dict(
+        constructor=wrap_functional(F.log_softmax, dim=1),
+        input_size=(2, 128, 2, 2),  # trigger special case of spatial CUDA algo
+        fullname='log_softmax_spatial_special',
+        pickle=False,
+    ),
+    dict(
+        constructor=wrap_functional(F.log_softmax, dim=1),
+        input_size=(2, 2, 4, 4),  # regular spatial algorithm
+        fullname='log_softmax_spatial',
         pickle=False,
     ),
     dict(
