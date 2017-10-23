@@ -30,11 +30,14 @@ import unittest
 class TestGivenTensorFillOps(hu.HypothesisTestCase):
     @given(X=hu.tensor(min_dim=1, max_dim=4, dtype=np.int32),
            t=st.sampled_from([
+               (core.DataType.BOOL, np.bool_, "GivenTensorFill"),
+               (core.DataType.INT32, np.int32, "GivenTensorFill"),
                (core.DataType.FLOAT, np.float32, "GivenTensorFill"),
                (core.DataType.INT32, np.int32, "GivenTensorIntFill"),
                (core.DataType.INT64, np.int64, "GivenTensorInt64Fill"),
                (core.DataType.BOOL, np.bool_, "GivenTensorBoolFill"),
                (core.DataType.DOUBLE, np.double, "GivenTensorDoubleFill"),
+               (core.DataType.INT32, np.double, "GivenTensorDoubleFill"),
            ]),
            **hu.gcs)
     def test_given_tensor_fill(self, X, t, gc, dc):
