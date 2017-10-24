@@ -148,7 +148,10 @@ def view(g, self, size):
 
 def split(g, self, split_size, dim):
     size = self.type().sizes()[dim]
-    splits = [split_size] * (size // split_size) + [size % split_size]
+    splits = [split_size] * (size // split_size)
+    leftover = size % split_size
+    if leftover:
+        splits.append(leftover)
     return g.op("Split", self, split_i=splits, axis_i=dim, outputs=len(splits))
 
 
