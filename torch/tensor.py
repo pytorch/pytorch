@@ -76,7 +76,7 @@ class _TensorBase(object):
         if self.is_cuda:
             raise TypeError("cannot pin '{0}' only CPU memory can be pinned"
                             .format(self.type()))
-        storage = self.storage()
+        storage = self.contiguous().storage()
         if storage is None:
             storage = (self.storage_type())()
         return type(self)().set_(storage.pin_memory()).view_as(self)
