@@ -75,7 +75,18 @@ follows::
       x = x.cuda()
       net.cuda()
 
-To avoid the if statement for tensors, an alternative is to have a default
+When working with multiple GPUs on a system, you can use the
+`CUDA_VISIBLE_DEVICES` environment flag to manage which GPUs are available to
+PyTorch. To manually control which GPU a tensor is created on, the best practice
+is to use the `torch.cuda.device()` context manager::
+
+    torch.cuda.set_device(0)
+    print("Outside device is 0")  # On device 0
+    with torch.cuda.device(1):
+        print("Inside device is 1")  # On device 1
+    print("Outside device is still 0")  # On device 0
+
+When creating tensors, an alternative to the if statement is to have a default
 datatype defined, and cast all tensors using that. An example when using a
 dataloader would be as follows::
 
@@ -83,10 +94,13 @@ dataloader would be as follows::
     for i, x in enumerate(train_loader):
         x = Variable(x.type(dtype))
 
-If you have a tensor and would like to create a new tensor of the same type,
-then you can use the `.new()` function, which acts the same as a normal tensor
-constructor. This is the recommended practice when creating modules in which
-new tensors/variables need to be created internally during the forward pass::
+If you have a tensor and would like to create a new tensor of the same type on
+the same device, then you can use the `.new()` function, which acts the same as
+a normal tensor constructor; this holds even when the device is different to the
+one in the current context.
+
+This is the recommended practice when creating modules in which new
+tensors/variables need to be created internally during the forward pass::
 
     x_cpu = torch.FloatTensor(1)
     x_gpu = torch.cuda.FloatTensor(1)
