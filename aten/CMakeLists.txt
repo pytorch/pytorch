@@ -13,6 +13,7 @@ set(CMAKE_SKIP_BUILD_RPATH  FALSE)
 set(CMAKE_BUILD_WITH_INSTALL_RPATH FALSE)
 set(CMAKE_INSTALL_RPATH "${CMAKE_INSTALL_PREFIX}/lib")
 set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
+set(CMAKE_POSITION_INDEPENDENT_CODE TRUE)
 list(FIND CMAKE_PLATFORM_IMPLICIT_LINK_DIRECTORIES "${CMAKE_INSTALL_PREFIX}/lib" isSystemDir)
 if("${isSystemDir}" STREQUAL "-1")
   set(CMAKE_INSTALL_RPATH "${CMAKE_INSTALL_PREFIX}/lib")
@@ -24,6 +25,7 @@ set(CMAKE_CXX_FLAGS "--std=c++11 ${CMAKE_CXX_FLAGS}")
 # TH stuff
 set(Torch_FOUND 1)
 add_definitions(-DTH_INDEX_BASE=0)
+set(TH_LINK_STYLE STATIC)
 add_subdirectory(src/TH)
 include_directories(
   # dense
@@ -62,11 +64,6 @@ set(cwrap_files
 include_directories(
 ${CMAKE_CURRENT_SOURCE_DIR}/src/THNN
 ${CMAKE_CURRENT_SOURCE_DIR}/src/THCUNN)
-
-if(NOT TH_LINK_STYLE)
-  set(TH_LINK_STYLE SHARED)
-endif()
-
 
 add_subdirectory(src/ATen)
 include_directories(
