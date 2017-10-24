@@ -35,7 +35,7 @@ import os as _dl_flags
 # or there is risk that later c modules will segfault when importing numpy
 try:
     import numpy as np
-except:
+except ImportError:
     pass
 
 # first check if the os package has the required flags
