@@ -146,6 +146,12 @@ def view(g, self, size):
     return g.op("Reshape", self, shape_i=size)
 
 
+def split(g, self, split_size, dim):
+    size = self.type().sizes()[dim]
+    splits = [split_size] * (size // split_size) + [size % split_size]
+    return g.op("Split", self, split_i=splits, axis_i=dim, outputs=len(splits))
+
+
 def squeeze(g, self, dim=None):
     if dim is None:
         dims = []
