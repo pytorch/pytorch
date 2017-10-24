@@ -72,7 +72,7 @@ class TestScatterOps(hu.HypothesisTestCase):
            extra_dims=st.lists(st.integers(1, 4), min_size=0, max_size=3),
            data_type=st.sampled_from([np.float16, np.float32, np.int32, np.int64]),
            ind_type=st.sampled_from([np.int32, np.int64]),
-           **hu.gcs_cpu_only)
+           **hu.gcs)
     def testScatterAssign(
             self, first_dim, index_dim, extra_dims, data_type, ind_type, gc, dc):
         op = core.CreateOperator('ScatterAssign',
