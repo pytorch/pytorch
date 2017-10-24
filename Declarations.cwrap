@@ -1296,7 +1296,7 @@
   python_name: get_device
   backends:
     - CUDA
-    - SparseCUDA
+  aten_sparse: True
   return: long
   arguments:
     - THTensor* self
