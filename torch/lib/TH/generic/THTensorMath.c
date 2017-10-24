@@ -368,10 +368,6 @@ static int64_t THTensor_(wrapLinearIndex)(int64_t linearIndex, int64_t numel) {
 
 void THTensor_(take)(THTensor *r_, THTensor *src, THLongTensor *index)
 {
-  ptrdiff_t nIndices = THLongTensor_nElement(index);
-  THArgCheck(nIndices != THTensor_(nElement)(src), 2,
-    "src should have the same number of elements as index");
-
   THTensor_(resizeNd)(r_, index->nDimension, index->size, NULL);
   THTensor* dst = THTensor_(newContiguous)(r_);
 
@@ -381,6 +377,7 @@ void THTensor_(take)(THTensor *r_, THTensor *src, THLongTensor *index)
   real* src_data = THTensor_(data)(src);
   real* dst_data = THTensor_(data)(dst);
 
+  ptrdiff_t nIndices = THLongTensor_nElement(index);
   if (THTensor_(isContiguous)(src)) {
     #pragma omp parallel for if(nIndices > TH_OMP_OVERHEAD_THRESHOLD)
     for (ptrdiff_t i = 0; i < nIndices; i++) {
