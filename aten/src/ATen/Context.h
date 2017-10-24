@@ -11,7 +11,7 @@ struct THCState;
 
 namespace at {
 
-class ATen_CLASS  Context {
+class AT_API Context {
 public:
   Context();
   Type & getType(Backend p, ScalarType s) {
@@ -53,7 +53,7 @@ private:
   std::once_flag thc_init;
 };
 
-ATen_CLASS Context & globalContext();
+AT_API Context & globalContext();
 
 static inline void init() {
   globalContext();
