@@ -74,7 +74,7 @@ struct SavedVersion {
   }
 
 private:
-  friend class VariableVersion;
+  friend struct VariableVersion;
   int expected_version;
   std::shared_ptr<VersionBlock> version_block;  // may be null
 };

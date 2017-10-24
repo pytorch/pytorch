@@ -89,9 +89,9 @@ void nontraceableBackwardSubgraph(const variable_list& inputs, const variable_li
   std::make_shared<autograd::Eval>()->replaceSubgraph(inputs, outputs);
 }
 
-Node* recordTraceHelper(std::string op, // TODO: make this a Symbol
-                        at::ArrayRef<Variable> inputs,
-                        at::ArrayRef<Variable> outputs) {
+Node* recordTrace(std::string op, // TODO: make this a Symbol
+                  at::ArrayRef<Variable> inputs,
+                  at::ArrayRef<Variable> outputs) {
   auto state = getTracingState(inputs);
   auto& graph = state->graph;
   // TODO: Technically, we could reduce the scope of the lock, but since we

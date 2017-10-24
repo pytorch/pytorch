@@ -195,6 +195,13 @@ static VariableFlags compute_flags_tmpl(T tensors) {
 using TensorRef = std::reference_wrapper<const Tensor>;
 using TensorRefList = std::initializer_list<TensorRef>;
 
+// ArrayRef is not covariant, so we need to do some work to apply the
+// implicit constructor
+static variable_list castTensorList(const TensorList& tensors) {
+  // TODO: Eliminate the intermediate vector allocation
+  return variable_list(tensors.begin(), tensors.end());
+}
+
 static VariableFlags compute_flags(const TensorRefList& tensors) {
   return compute_flags_tmpl(tensors);
 }
