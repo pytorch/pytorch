@@ -38,8 +38,6 @@ __global__ void spatialDepthwiseConvolutionUpdateOutput(
     const int padWidth, const int padHeight,
     const int dilationWidth, const int dilationHeight)
 {
-  const int channelStride = outputHeight * outputWidth;
-  const int batchStride = outputChannels * channelStride;
   const int KW_LIMIT = (kSize !=0) ? kSize : kernelWidth;
   const int KH_LIMIT = (kSize !=0) ? kSize : kernelHeight;
   
@@ -47,6 +45,13 @@ __global__ void spatialDepthwiseConvolutionUpdateOutput(
   for (IndexType linearIndex = blockIdx.x * blockDim.x + threadIdx.x;
        linearIndex < totalElements;
        linearIndex += gridDim.x * blockDim.x) {
+    //calculate n,c,h,w indices, replacing modulos by divide and multiply add, 
+    //result is same as would be in the code below
+    //const int n = linearIndex / batchStride; //batchStride = outputChannels * outputHeight * outputWidth
+    //const int c = (linearIndex / channelStride) % outputChannels; //channelStride = outputHeight * outputWidth
+    //const int h = (linearIndex / outputWidth) % outputHeight;
+    //const int w = linearIndex % outputWidth;
+    
     int indtmp1 = linearIndex/outputWidth;
     const int w = linearIndex - indtmp1 * outputWidth;
     int indtmp2 = indtmp1/outputHeight;
@@ -105,8 +110,6 @@ __global__ void spatialDepthwiseConvolutionUpdateGradInput(
     const int padWidth, const int padHeight,
     const int dilationWidth, const int dilationHeight)
 {
-  const int channelStride = inputHeight * inputWidth;
-  const int batchStride = inputChannels * channelStride;
   const int KW_LIMIT = (kSize !=0) ? kSize : kernelWidth;
   const int KH_LIMIT = (kSize !=0) ? kSize : kernelHeight;
   const int strideW = (stride !=0) ? stride : strideWidth;
@@ -171,7 +174,6 @@ __global__ void spatialDepthwiseConvolutionAccGradParameters(
     const int inputChannels,
     const int kernelChannels,
     const int depthwiseMultiplier,
-    IndexType blockElements,
     const int inputWidth, const int inputHeight,
     const int outputWidth, const int outputHeight,
     const int kernelWidth, const int kernelHeight,
@@ -197,13 +199,13 @@ __global__ void spatialDepthwiseConvolutionAccGradParameters(
 
   AccT grad = ScalarConvert<float, AccT>::to(0.0);
 
-  // Block-stride loop over the number of elements we need to reduce
   const int laneId = threadIdx.x % WARP_SIZE;
   const int batch = threadIdx.x / WARP_SIZE;
   const int nwarps = blockDim.x / WARP_SIZE;
   const int imageElements = outputWidth * outputHeight;
   //use warp per item
   for (int batchIdx = batch; batchIdx < batchSize; batchIdx += nwarps){  
+    //warp-stride loop over elements in a batch item
     for (IndexType idx = laneId; idx < imageElements; idx += WARP_SIZE) {
     // Need to calculate the following: batch position, and offset into the gradOutput
     // in height, and width. We can intuit the corresponding position in the input from

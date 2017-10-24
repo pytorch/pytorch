@@ -231,9 +231,6 @@ void THNN_(SpatialDepthwiseConvolution_accGradParameters)(
   // We parallelize so that each block computes a single value in gradWeight
   int blocks = outputChannels * kH * kW;
 
-  // Because each weight position is a function of convolving the gradOutput over
-  // the input, we need batchSize * outputHeight * outputWidth individual calculations
-  int n = batchSize * outputHeight * outputWidth;
 
   // Make sure we have enough threads to perform the reduction, and use this number
   // to create the shared memory size for the reduction
@@ -242,7 +239,7 @@ void THNN_(SpatialDepthwiseConvolution_accGradParameters)(
   int smem = block.x * sizeof(accreal);
 
   spatialDepthwiseConvolutionAccGradParameters<real, accreal, unsigned int><<<grid, block, smem, THCState_getCurrentStream(state)>>>(
-      dGradOutput, dInput, dGradWeight, batchSize, inputChannels, outputChannels, depthwiseMultiplier, n,
+      dGradOutput, dInput, dGradWeight, batchSize, inputChannels, outputChannels, depthwiseMultiplier, 
       width, height, outputWidth, outputHeight, kW, kH, dW, dH, padW, padH, dilationW, dilationH);
 
   THCudaCheck(cudaGetLastError());
