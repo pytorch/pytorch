@@ -630,7 +630,7 @@ def create_variable_type(top_env, aten_declarations):
         if len(tensor_args) == 1 and tensor_args[0]['simple_type'] == 'TensorList':
             # Special case for TensorList.  This only works when there
             # is a single argument
-            local['trace_inputs'] = "castTensorList({})".format(declaration['arguments'][0]['name'])
+            local['trace_inputs'] = "cast_tensor_list({})".format(declaration['arguments'][0]['name'])
         else:
             local['trace_inputs'] = CodeTemplate("{ ${tensor_args} }").substitute(env)
 
