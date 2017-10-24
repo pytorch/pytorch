@@ -18,7 +18,6 @@ import math
 from numbers import Number
 import torch
 
-
 __all__ = ['Distribution', 'Bernoulli', 'Multinomial', 'Normal']
 
 
@@ -69,6 +68,7 @@ class Bernoulli(Distribution):
     Args:
         probs (Tensor or Variable): the probabilty of sampling `1`
     """
+
     def __init__(self, probs):
         self.probs = probs
 
@@ -110,6 +110,7 @@ class Multinomial(Distribution):
     Args:
         probs (Tensor or Variable): event probabilities
     """
+
     def __init__(self, probs):
         if probs.dim() != 1 and probs.dim() != 2:
             # TODO: treat higher dimensions as part of the batch
@@ -147,6 +148,7 @@ class Normal(Distribution):
         mean (float or Tensor or Variable): mean of the distribution
         std (float or Tensor or Variable): standard deviation of the distribution
     """
+
     def __init__(self, mean, std):
         self.mean = mean
         self.std = std
@@ -155,12 +157,13 @@ class Normal(Distribution):
         return torch.normal(self.mean, self.std)
 
     def sample_n(self, n):
-      def expand(v): # cleanly expand float or Tensor or Variable inputs
-        if isinstance(v, Number):
-          return torch.Tensor(n).fill_(v).unsqueeze(-1)
-        else:
-          return v.unsqueeze(0).expand(n, *v.size())
-      return torch.normal(expand(self.mean), expand(self.std))
+        # cleanly expand float or Tensor or Variable parameters
+        def expand(v):
+            if isinstance(v, Number):
+                return torch.Tensor(n).fill_(v).unsqueeze(-1)
+            else:
+                return v.unsqueeze(0).expand(n, *v.size())
+        return torch.normal(expand(self.mean), expand(self.std))
 
     def log_prob(self, value):
         # compute the variance
