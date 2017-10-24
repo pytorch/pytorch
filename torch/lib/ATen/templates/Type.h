@@ -2,6 +2,7 @@
 
 #include <memory>
 #include <limits>
+#include <functional>
 
 #include "ATen/ATenGeneral.h"
 #include "ATen/ArrayRef.h"
@@ -45,7 +46,7 @@ enum class TypeID {
 };
 
 
-struct ATen_CLASS Type {
+struct AT_API Type {
   explicit Type(Context * context)
   : context(context) {}
   virtual ~Type() {}
