@@ -3429,6 +3429,33 @@ class TestTorch(TestCase):
             dest2[idx[i]] = dest2[idx[i]] + src[i]
         self.assertEqual(dest, dest2)
 
+    def test_take(self):
+        def check(src, idx):
+            expected = src.contiguous().view(-1).index_select(
+                0, idx.contiguous().view(-1)).view_as(idx)
+            actual = src.take(idx)
+            self.assertEqual(actual.size(), idx.size())
+            self.assertEqual(expected, actual)
+
+        src = torch.randn(2, 3, 5)
+        idx = torch.LongTensor([[0, 2], [3, 4]])
+        check(src, idx)
+        check(src.transpose(1, 2), idx)
+
+    def test_put_(self):
+        def check(dst, idx, value):
+            expected = dst.clone().view(-1).index_copy_(
+                0, idx.contiguous().view(-1), value.contiguous().view(-1))
+            expected = expected.view_as(dst)
+            dst.put_(idx, value)
+            self.assertEqual(expected, dst)
+
+        dst = torch.randn(2, 3, 5)
+        idx = torch.LongTensor([[0, 2], [3, 4]])
+        values = torch.randn(2, 2)
+        check(dst, idx, values)
+        check(dst.transpose(1, 2), idx, values)
+
     # Fill idx with valid indices.
     @staticmethod
     def _fill_indices(self, idx, dim, dim_size, elems_per_row, m, n, o):

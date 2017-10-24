@@ -349,6 +349,84 @@ void THTensor_(indexCopy)(THTensor *tensor, int dim, THLongTensor *index, THTens
   THLongTensor_free(index);
 }
 
+static ptrdiff_t THTensor_(dataOffset)(THTensor* tensor, ptrdiff_t linearIndex) {
+  int64_t *size = tensor->size;
+  int64_t *stride = tensor->stride;
+  int nDim = tensor->nDimension;
+  ptrdiff_t dataOffset = 0;
+  for (int i = nDim - 1; i >= 0; i--) {
+    dataOffset += (linearIndex % size[i]) * stride[i];
+    linearIndex /= size[i];
+  }
+  return dataOffset;
+}
+
+static int64_t THTensor_(wrapLinearIndex)(int64_t linearIndex, int64_t numel) {
+  THArgCheck(linearIndex < numel && linearIndex >= -numel, 2, "out of range");
+  return linearIndex < 0 ? linearIndex + numel : linearIndex;
+}
+
+void THTensor_(take)(THTensor *r_, THTensor *src, THLongTensor *index)
+{
+  ptrdiff_t nIndices = THLongTensor_nElement(index);
+  THArgCheck(nIndices != THTensor_(nElement)(src), 2,
+    "src should have the same number of elements as index");
+
+  THTensor_(resizeNd)(r_, index->nDimension, index->size, NULL);
+  THTensor* dst = THTensor_(newContiguous)(r_);
+
+  index = THLongTensor_newContiguous(index);
+  long* index_data = THLongTensor_data(index);
+  ptrdiff_t srcElements = THTensor_(nElement)(src);
+  real* src_data = THTensor_(data)(src);
+  real* dst_data = THTensor_(data)(dst);
+
+  if (THTensor_(isContiguous)(src)) {
+    #pragma omp parallel for if(nIndices > TH_OMP_OVERHEAD_THRESHOLD)
+    for (ptrdiff_t i = 0; i < nIndices; i++) {
+      int64_t linearIndex = THTensor_(wrapLinearIndex)(index_data[i], srcElements);
+      dst_data[i] = src_data[linearIndex];
+    }
+  } else {
+    #pragma omp parallel for if(nIndices > TH_OMP_OVERHEAD_THRESHOLD)
+    for (ptrdiff_t i = 0; i < nIndices; i++) {
+      int64_t linearIndex = THTensor_(wrapLinearIndex)(index_data[i], srcElements);
+      int64_t dataOffset = THTensor_(dataOffset)(src, linearIndex);
+      dst_data[i] = src_data[dataOffset];
+    }
+  }
+
+  THLongTensor_free(index);
+  THTensor_(freeCopyTo)(dst, r_);
+}
+
+void THTensor_(put)(THTensor *tensor, THLongTensor *index, THTensor *src)
+{
+  THArgCheck(THLongTensor_nElement(index) == THTensor_(nElement)(src), 3,
+    "src should have the same number of elements as index");
+
+  index = THLongTensor_newContiguous(index);
+  src = THTensor_(newContiguous)(src);
+  real* data = THTensor_(data)(tensor);
+  ptrdiff_t numel = THTensor_(nElement)(tensor);
+
+  if (THTensor_(isContiguous)(tensor)) {
+    TH_TENSOR_APPLY2(int64_t, index, real, src,
+      int64_t linearIndex = THTensor_(wrapLinearIndex)(*index_data, numel);
+      data[linearIndex] = *src_data;
+    );
+  } else {
+    TH_TENSOR_APPLY2(int64_t, index, real, src,
+      int64_t linearIndex = THTensor_(wrapLinearIndex)(*index_data, numel);
+      int64_t dataOffset = THTensor_(dataOffset)(tensor, linearIndex);
+      data[dataOffset] = *src_data;
+    );
+  }
+
+  THTensor_(free)(src);
+  THLongTensor_free(index);
+}
+
 void THTensor_(indexAdd)(THTensor *tensor, int dim, THLongTensor *index, THTensor *src)
 {
   ptrdiff_t i, numel;

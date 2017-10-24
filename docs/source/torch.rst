@@ -36,6 +36,7 @@ Indexing, Slicing, Joining, Mutating Ops
 .. autofunction:: squeeze
 .. autofunction:: stack
 .. autofunction:: t
+.. autofunction:: take
 .. autofunction:: transpose
 .. autofunction:: unbind
 .. autofunction:: unsqueeze
@@ -200,4 +201,3 @@ BLAS and LAPACK Operations
 .. autofunction:: svd
 .. autofunction:: symeig
 .. autofunction:: trtrs
-

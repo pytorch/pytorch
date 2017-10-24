@@ -398,5 +398,53 @@ __global__ void calculateLinearIndices(
    }
 }
 
+template <typename T, typename IndexType, int Dims>
+struct TensorPutOp {
+  TensorPutOp(TensorInfo<T, IndexType> info) : info(info) {}
+
+  __device__ __forceinline__ void operator()(T* value, int64_t* index) {
+    IndexType linearIndex = static_cast<IndexType>(*index);
+    IndexType offset = IndexToOffset<T, IndexType, Dims>::get(linearIndex, info) - TH_INDEX_BASE;
+    info.data[offset] = *value;
+  }
+
+  const TensorInfo<T, IndexType> info;
+};
+
+template <typename T, typename IndexType, int Dims>
+struct TensorTakeOp {
+  TensorTakeOp(TensorInfo<T, IndexType> info) : info(info) {}
+
+  __device__ __forceinline__ void operator()(T* out, int64_t* index) {
+    IndexType linearIndex = static_cast<IndexType>(*index);
+    IndexType offset = IndexToOffset<T, IndexType, Dims>::get(linearIndex, info) - TH_INDEX_BASE;
+    *out = info.data[offset];
+  }
+
+  const TensorInfo<T, IndexType> info;
+};
+
+template<typename IndexType, typename real, template<class, class, int> class Op, typename TensorType>
+void dispatchTakePutImpl(THCState *state, TensorType *a, TensorType *b, THCudaLongTensor *index) {
+  auto aInfo = getTensorInfo<TensorType, IndexType>(state, a);
+  aInfo.collapseDims();
+  if (aInfo.isContiguous()) {
+    auto op = Op<real, IndexType, -2>(aInfo);
+    THC_pointwiseApply2(state, b, index, op);
+  } else {
+    auto op = Op<real, IndexType, -1>(aInfo);
+    THC_pointwiseApply2(state, b, index, op);
+  }
+}
+
+template<typename real, template<class, class, int> class Op, typename TensorType>
+void dispatchTakePut(THCState *state, TensorType *a, TensorType *b, THCudaLongTensor *index) {
+  if (TensorUtils<TensorType>::canUse32BitIndexMath(state, a)) {
+    dispatchTakePutImpl<uint32_t, real, Op>(state, a, b, index);
+  } else {
+    dispatchTakePutImpl<uint64_t, real, Op>(state, a, b, index);
+  }
+}
+
 #include "generic/THCTensorIndex.cu"
 #include "THCGenerateAllTypes.h"
