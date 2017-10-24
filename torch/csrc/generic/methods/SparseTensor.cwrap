@@ -63,6 +63,24 @@ PyObject * THSPTensor_(size)(PyObject *self, PyObject *args, PyObject *kwargs)
 ]]
 
 [[
+  name: nDimensionI
+  python_name: _dimI
+  sparse: yes
+  return: long
+  arguments:
+  - THSTensor* self
+]]
+
+[[
+  name: nDimensionV
+  python_name: _dimV
+  sparse: yes
+  return: long
+  arguments:
+  - THSTensor* self
+]]
+
+[[
   name: isCoalesced
   sparse: yes
   python_name: is_coalesced
