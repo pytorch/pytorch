@@ -686,6 +686,8 @@ void SetOpEnginePref(
     const std::string& op_type,
     const CaffeMap<int, EnginePrefType>& op_pref);
 
+TensorShape GetTensorShapeOfBlob(const Blob* b);
+
 TensorShapes InferBlobShapesAndTypesFromWorkspace(
     Workspace* ws,
     const vector<std::unique_ptr<NetDef>>& nets);

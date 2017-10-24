@@ -58,6 +58,25 @@ class TestWorkspace(unittest.TestCase):
         self.assertEqual(len(blobs), 1)
         self.assertEqual(blobs[0], "testblob")
 
+    def testGetOperatorCost(self):
+        op = core.CreateOperator(
+            "Conv2D",
+            ["X", "W"], ["Y"],
+            stride_h=1,
+            stride_w=1,
+            pad_t=1,
+            pad_l=1,
+            pad_b=1,
+            pad_r=1,
+            kernel=3,
+        )
+        X = np.zeros((1, 8, 8, 8))
+        W = np.zeros((1, 1, 3, 3))
+        workspace.FeedBlob("X", X)
+        workspace.FeedBlob("W", W)
+        flops, _ = workspace.GetOperatorCost(op.SerializeToString(), ["X", "W"])
+        self.assertEqual(flops, 648)
+
     def testRunNetOnce(self):
         self.assertEqual(
             workspace.RunNetOnce(self.net.Proto().SerializeToString()), True)

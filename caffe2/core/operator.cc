@@ -60,8 +60,6 @@ OperatorBase::OperatorBase(const OperatorDef& operator_def, Workspace* ws)
   }
 }
 
-TensorShape GetTensorShapeOfBlob(const Blob* b);
-
 vector<TensorShape> OperatorBase::InputTensorShapes() {
   vector<TensorShape> tps;
   for (const auto& blob : inputs_) {
