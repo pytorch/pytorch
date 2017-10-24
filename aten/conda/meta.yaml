@@ -1,0 +1,33 @@
+{% set version = "0.1.dev" %}
+
+package:
+  name: aten
+  version: {{ version }}
+
+source:
+  path: ..
+
+build:
+  number: 1
+  skip: True  # [win]
+  script_env:
+    - CONDA_CMAKE_ARGS
+
+requirements:
+  build:
+    - cmake
+    - pyyaml
+    - setuptools
+    - python
+    - mkl # [not osx]
+  run:
+    - mkl # [not osx]
+
+about:
+  home: https://github.com/zdevito/ATen
+  license: BSD
+  summary: A TENsor library for C++11
+
+extra:
+  recipe-maintainers:
+    - ezyang
