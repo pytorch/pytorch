@@ -39,8 +39,6 @@ try:
 except ImportError:
     pass
 
-old_flags = None
-
 if platform.system() == 'Windows':
     _dl_flags.environ['PATH'] = _dl_flags.path.dirname(__file__) + '\\lib\\;' + _dl_flags.environ['PATH']
 
@@ -54,9 +52,10 @@ else:
             # as a last attempt, use compile-time constants
             import torch._dl as _dl_flags
 
-        old_flags = sys.getdlopenflags()
-        sys.setdlopenflags(_dl_flags.RTLD_GLOBAL | _dl_flags.RTLD_LAZY)
-        del _dl_flags
+    old_flags = sys.getdlopenflags()
+    sys.setdlopenflags(_dl_flags.RTLD_GLOBAL | _dl_flags.RTLD_LAZY)
+
+del _dl_flags
 
 try:
     import torch._nvrtc
