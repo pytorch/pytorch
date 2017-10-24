@@ -39,6 +39,8 @@ try:
 except ImportError:
     pass
 
+old_flags = None
+
 if platform.system() == 'Windows':
     _dl_flags.environ['PATH'] = _dl_flags.path.dirname(__file__) + '\\lib\\;' + _dl_flags.environ['PATH']
 
