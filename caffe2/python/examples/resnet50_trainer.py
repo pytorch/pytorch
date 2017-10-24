@@ -336,6 +336,7 @@ def Train(args):
                 num_labels=args.num_labels,
                 no_bias=True,
                 no_loss=True,
+                fp16_data=True if args.dtype == 'float16' else False,
             )
 
         if args.dtype == 'float16':
@@ -349,16 +350,29 @@ def Train(args):
 
     def add_optimizer(model):
         stepsz = int(30 * args.epoch_size / total_batch_size / num_shards)
-        optimizer.add_weight_decay(model, args.weight_decay)
-        opt = optimizer.build_multi_precision_sgd(
-            model,
-            args.base_learning_rate,
-            momentum=0.9,
-            nesterov=1,
-            policy="step",
-            stepsize=stepsz,
-            gamma=0.1
-        )
+
+        if args.dtype == 'float16':
+            opt = optimizer.build_fp16_sgd(
+                model,
+                args.base_learning_rate,
+                momentum=0.9,
+                nesterov=1,
+                weight_decay=args.weight_decay,   # weight decay included
+                policy="step",
+                stepsize=stepsz,
+                gamma=0.1
+            )
+        else:
+            optimizer.add_weight_decay(model, args.weight_decay)
+            opt = optimizer.build_multi_precision_sgd(
+                model,
+                args.base_learning_rate,
+                momentum=0.9,
+                nesterov=1,
+                policy="step",
+                stepsize=stepsz,
+                gamma=0.1
+            )
         return opt
 
     # Define add_image_input function.
