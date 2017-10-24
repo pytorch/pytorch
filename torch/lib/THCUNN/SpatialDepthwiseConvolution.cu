@@ -13,6 +13,8 @@
 
 
 const int WARP_SIZE = 32;
+// Crude benchmarks suggest 256 is better than 512 and 1024
+// TODO: Autotune/use better heuristics, improve speed more.
 const int MAX_BLOCK_SIZE = 256;
 
 static int getGradParamsNumThreads(int batchSize){
@@ -203,9 +205,16 @@ __global__ void spatialDepthwiseConvolutionAccGradParameters(
   const int batch = threadIdx.x / WARP_SIZE;
   const int nwarps = blockDim.x / WARP_SIZE;
   const int imageElements = outputWidth * outputHeight;
-  //use warp per item
+  // Use warp per item.  In the original kernel, a threadblock was used to sum over NHW.
+  // Here, we use a warp to sum values over HW dimension, and if batchSize is larger than the
+  // number of warps, a warp would loop over remaining batch items (e.g. if there are 8 warps,
+  // warp 0 would go over 0-8-16 etc image, warp 1 over 1-9-17 etc). Later in blockReduce,
+  // all the warps will be reduced anyway, thus the full reduction will be over NHW, like it
+  // should be. That allows to get rid of one modulo operation inside the loop (because n/batchIdx
+  // now does not have to be computed through modulo, you are just looping over it), and
+  // bring a nice speed-up.
   for (int batchIdx = batch; batchIdx < batchSize; batchIdx += nwarps){  
-    //warp-stride loop over elements in a batch item
+    // Warp-stride loop over elements in a batch item
     for (IndexType idx = laneId; idx < imageElements; idx += WARP_SIZE) {
     // Need to calculate the following: batch position, and offset into the gradOutput
     // in height, and width. We can intuit the corresponding position in the input from
