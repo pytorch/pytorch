@@ -18,6 +18,7 @@ import math
 from numbers import Number
 import torch
 
+
 __all__ = ['Distribution', 'Bernoulli', 'Multinomial', 'Normal']
 
 
@@ -76,8 +77,7 @@ class Bernoulli(Distribution):
         return torch.bernoulli(self.probs)
 
     def sample_n(self, n):
-        expanded_probs = self.probs.unsqueeze(0).expand(n, *self.probs.size())
-        return torch.bernoulli(expanded_probs)
+        return torch.bernoulli(self.probs.expand(n, *self.probs.size()))
 
     def log_prob(self, value):
         # compute the log probabilities for 0 and 1
@@ -121,7 +121,7 @@ class Multinomial(Distribution):
         return torch.multinomial(self.probs, 1, True).squeeze(-1)
 
     def sample_n(self, n):
-        return torch.cat([self.sample().unsqueeze(0) for _ in range(n)], dim=0)
+        return torch.multinomial(self.probs, n, True).t()
 
     def log_prob(self, value):
         p = self.probs / self.probs.sum(-1, keepdim=True)
@@ -160,9 +160,9 @@ class Normal(Distribution):
         # cleanly expand float or Tensor or Variable parameters
         def expand(v):
             if isinstance(v, Number):
-                return torch.Tensor(n).fill_(v).unsqueeze(-1)
+                return torch.Tensor([v]).expand(n, 1)
             else:
-                return v.unsqueeze(0).expand(n, *v.size())
+                return v.expand(n, *v.size())
         return torch.normal(expand(self.mean), expand(self.std))
 
     def log_prob(self, value):
