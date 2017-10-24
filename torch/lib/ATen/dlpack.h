@@ -36,14 +36,14 @@ extern "C" {
  * \brief The device type in DLContext.
  */
 typedef enum {
-  kDLCPU = 1,
-  kDLGPU = 2,
-  // kDLCPUPinned = kDLCPU | kDLGPU
-  kDLCPUPinned = 3,
-  kDLOpenCL = 4,
-  kDLMetal = 8,
-  kDLVPI = 9,
-  kDLROCM = 10,
+  kCPU = 1,
+  kGPU = 2,
+  // kCPUPinned = kCPU | kGPU
+  kCPUPinned = 3,
+  kOpenCL = 4,
+  kMetal = 8,
+  kVPI = 9,
+  kROCM = 10,
 } DLDeviceType;
 
 /*!
@@ -60,9 +60,9 @@ typedef struct {
  * \brief The type code options DLDataType.
  */
 typedef enum {
-  kDLInt = 0U,
-  kDLUInt = 1U,
-  kDLFloat = 2U,
+  kInt = 0U,
+  kUInt = 1U,
+  kFloat = 2U,
 } DLDataTypeCode;
 
 /*!
@@ -118,7 +118,7 @@ typedef struct {
 /*!
  * \brief C Tensor object, manage memory of DLTensor.
  */
-struct DLManagedTensor {
+typedef struct DLManagedTensor {
   /*! \DLTensor which is being memory managed */
   DLTensor dlTensor;
   /*! \brief context in which DLManagedTensor is used in a framework. It can
@@ -130,7 +130,7 @@ struct DLManagedTensor {
    *   is no way for the caller to provide a reasonable destructor.
    */
   void (*destructor)(DLManagedTensor * self);
-};
+} DLManagedTensor;
 
 #ifdef __cplusplus
 }  // DLPACK_EXTERN_C
