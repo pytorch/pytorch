@@ -116,7 +116,7 @@ return ${return_value};
 
 RECORD_TRACE = CodeTemplate("""\
 if (jit::tracer::isTracing({ ${tensor_args} })) {
-  jit::Node *n = jit::tracer::recordTrace( "${api_name}", { ${tensor_args} }, ${return_name} );
+  jit::Node *n = jit::tracer::recordTrace( "${api_name}", ${trace_inputs}, ${trace_outputs} );
   ${record_attributes}
 }
 """)
@@ -599,7 +599,41 @@ def create_variable_type(top_env, aten_declarations):
         return res
 
     def emit_record_trace(env, declaration):
+
+        # Note [clang-802.0.42 tuple overload bug]
+        # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        # Originally, my plan for emit_$ecord_trace was to keep it as
+        # simple as possible, if at the expense of some somewhat ugly
+        # overloads.  So this meant we had a 'recordTrace' function
+        # with overloads like this:
+        #
+        #   recordTrace(..., const Variable& out)
+        #   recordTrace(..., const std::tuple<Variable, Variable>& out)
+        #
+        # Unfortunately, this triggers a bug in clang-802.0.42
+        # (widely used in macOS Sierra 10.12.6) wherein a Variable is
+        # implicitly convertible into a std::tuple<Variable, Variable>;
+        # a minimal repro can be seen below here:
+        #
+        #   #include <tuple>
+        #   struct T {};
+        #   void f(const std::tuple<T, T>&) {}
+        #   void g(T& x) { f(x); }
+        #
+        # To work around this bug, the code generator is a bit more
+        # complicated, and is taught how to handle this situation.
+
         local = {}
+
+        arguments = declaration['arguments']
+        tensor_args = [arg for arg in arguments if arg['simple_type'] in {'Tensor', 'TensorList'}]
+        if len(tensor_args) == 1 and tensor_args[0]['simple_type'] == 'TensorList':
+            # Special case for TensorList.  This only works when there
+            # is a single argument
+            local['trace_inputs'] = "cast_tensor_list({})".format(declaration['arguments'][0]['name'])
+        else:
+            local['trace_inputs'] = CodeTemplate("{ ${tensor_args} }").substitute(env)
+
         local['record_attributes'] = []
         for arg in declaration['arguments']:
             if arg['simple_type'] in {'Tensor', 'TensorList'}:
@@ -651,12 +685,18 @@ def create_variable_type(top_env, aten_declarations):
 
         if declaration['inplace']:
             env['return_value'] = 'self'
-            env['return_name'] = 'self'
             env['result'] = 'static_cast<Variable&>(self)'
+            env['trace_outputs'] = '{ self }'
         else:
             env['return_value'] = '{}(std::move(ret))'.format(declaration['return_type'])
-            env['return_name'] = 'ret'
             env['result'] = 'std::get<0>(ret)' if len(declaration['returns']) > 1 else 'ret'
+            if len(declaration['returns']) > 1:
+                # NB: This won't work if we get heterogenous outputs
+                outs = ['std::get<{}>(ret)'.format(i)
+                        for i, v in enumerate(declaration['returns']) if v['type'] == 'Tensor']
+            else:
+                outs = ['ret']
+            env['trace_outputs'] = CodeTemplate("{ ${outs} }").substitute(outs=outs)
 
         if any(arg['simple_type'] in {'Generator', 'Storage'} for arg in arguments):
             env['record_trace'] = []
