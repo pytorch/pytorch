@@ -206,6 +206,31 @@ class Sigmoid(Module):
         return self.__class__.__name__ + ' ()'
 
 
+class Swish(Module):
+    """Applies the element-wise function :math:`f(x) = x / ( 1 + exp(-x))`
+
+    Shape:
+        - Input: :math:`(N, *)` where `*` means, any number of additional
+          dimensions
+        - Output: :math:`(N, *)`, same shape as the input
+
+    Examples::
+
+        >>> m = nn.Swish()
+        >>> input = autograd.Variable(torch.randn(2))
+        >>> print(input)
+        >>> print(m(input))
+    """
+
+    def forward(self, input):
+        p = torch.sigmoid(input)
+        p = p.mul_(input)
+        return p
+
+    def __repr__(self):
+        return self.__class__.__name__ + ' ()'
+
+
 class Tanh(Module):
     """Applies element-wise,
     :math:`f(x) = (exp(x) - exp(-x)) / (exp(x) + exp(-x))`

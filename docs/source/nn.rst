@@ -278,6 +278,12 @@ Non-linear Activations
 .. autoclass:: Sigmoid
     :members:
 
+:hidden:`Swish`
+~~~~~~~~~~~~~~~~~
+
+.. autoclass:: Swish
+    :members:
+
 :hidden:`Tanh`
 ~~~~~~~~~~~~~~
 
