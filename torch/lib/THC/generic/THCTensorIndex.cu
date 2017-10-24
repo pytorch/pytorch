@@ -149,11 +149,13 @@ void THCTensor_(put)(THCState *state, THCTensor *dst, THCudaLongTensor *index, T
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, dst, src));
   THCAssertSameGPU(THCudaLongTensor_checkGPU(state, 1, index));
 
+  ptrdiff_t numIndices = THCudaLongTensor_nElement(state, index);
+  THArgCheck(THCTensor_(nElement)(state, src) == numIndices,
+    3, "src should have the same number of elements as index");
+
   THArgCheck(THCTensor_(nDimension)(state, dst) <= MAX_CUTORCH_DIMS, 2, CUTORCH_DIM_WARNING);
   THArgCheck(THCTensor_(nDimension)(state, src) <= MAX_CUTORCH_DIMS, 2, CUTORCH_DIM_WARNING);
   THArgCheck(THCudaLongTensor_nDimension(state, index) <= MAX_CUTORCH_DIMS, 2, CUTORCH_DIM_WARNING);
-
-  ptrdiff_t numIndices = THCudaLongTensor_nElement(state, index);
 
   int srcDims = THCTensor_(nDimension)(state, src);
   THArgCheck(srcDims > 0, 2, "Source tensor is empty");

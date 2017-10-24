@@ -362,7 +362,7 @@ static ptrdiff_t THTensor_(dataOffset)(THTensor* tensor, ptrdiff_t linearIndex) 
 }
 
 static int64_t THTensor_(wrapLinearIndex)(int64_t linearIndex, int64_t numel) {
-  THArgCheck(linearIndex < numel && linearIndex >= -numel, 2, "out of range");
+  THArgCheck(linearIndex < numel && linearIndex >= -numel, 2, "out of range: %d out of %d", (int)linearIndex, (int)numel);
   return linearIndex < 0 ? linearIndex + numel : linearIndex;
 }
 
@@ -379,14 +379,16 @@ void THTensor_(take)(THTensor *r_, THTensor *src, THLongTensor *index)
 
   ptrdiff_t nIndices = THLongTensor_nElement(index);
   if (THTensor_(isContiguous)(src)) {
-    #pragma omp parallel for if(nIndices > TH_OMP_OVERHEAD_THRESHOLD)
-    for (ptrdiff_t i = 0; i < nIndices; i++) {
+    ptrdiff_t i;
+    #pragma omp parallel for if(nIndices > TH_OMP_OVERHEAD_THRESHOLD) private(i)
+    for (i = 0; i < nIndices; i++) {
       int64_t linearIndex = THTensor_(wrapLinearIndex)(index_data[i], srcElements);
       dst_data[i] = src_data[linearIndex];
     }
   } else {
-    #pragma omp parallel for if(nIndices > TH_OMP_OVERHEAD_THRESHOLD)
-    for (ptrdiff_t i = 0; i < nIndices; i++) {
+    ptrdiff_t i;
+    #pragma omp parallel for if(nIndices > TH_OMP_OVERHEAD_THRESHOLD) private(i)
+    for (i = 0; i < nIndices; i++) {
       int64_t linearIndex = THTensor_(wrapLinearIndex)(index_data[i], srcElements);
       int64_t dataOffset = THTensor_(dataOffset)(src, linearIndex);
       dst_data[i] = src_data[dataOffset];
