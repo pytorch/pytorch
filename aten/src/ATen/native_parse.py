@@ -1,3 +1,10 @@
+def python_num(s):
+    try:
+        return int(s)
+    except Exception:
+        return float(s)
+
+
 def parse(filename):
     with open(filename, 'r') as file:
         declarations = []
@@ -19,7 +26,13 @@ def parse(filename):
                 key = ls[0].strip()
                 value = ls[1].strip()
                 if key == 'arg':
-                    arguments.append({key: value})
+                    t, name = value.split(" ", 1)
+                    if '=' in name:
+                        ns = name.split("=", 1)
+                        name, default = ns[0], python_num(ns[1])
+                        arguments.append({'type': t, 'name': name, 'default': default})
+                    else:
+                        arguments.append({'type': t, 'name': name})
                 else:
                     declaration[key] = value
         return declarations
