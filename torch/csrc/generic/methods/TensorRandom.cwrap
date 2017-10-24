@@ -12,7 +12,7 @@
     - arg: THGenerator* generator
       default: THPDefaultGenerator->cdata
       kwarg_only: True
-    - long n
+    - int64_t n
 ]]
 
 [[
@@ -35,15 +35,15 @@
         - arg: THGenerator* generator
           default: THPDefaultGenerator->cdata
           kwarg_only: True
-        - long to
+        - int64_t to
     - cname: clampedRandom
       arguments:
         - THTensor* self
         - arg: THGenerator* generator
           default: THPDefaultGenerator->cdata
           kwarg_only: True
-        - long from
-        - long to
+        - int64_t from
+        - int64_t to
 ]]
 
 [[
@@ -64,7 +64,7 @@
       default: THPDefaultGenerator->cdata
       kwarg_only: True
     - THTensor* self
-    - long num_samples
+    - int num_samples
     - arg: bool replacement
       default: "false"
 ]]

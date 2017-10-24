@@ -4,6 +4,7 @@ import torch
 import warnings
 from torch.version import cuda
 from contextlib import contextmanager
+from subprocess import Popen, PIPE
 
 enabled = True  # set to False to globally disable cuDNN
 
@@ -12,10 +13,28 @@ __cudnn_version = None
 # TODO: dynamic version checks via cudnnGetVersion
 
 
+def find_cudnn_windows_lib():
+    proc = Popen(['where', 'cudnn64*.dll'], stdout=PIPE, stderr=PIPE)
+    out, err = proc.communicate()
+    out = out.decode().strip()
+    if len(out) > 0:
+        if out.find('\r\n') != -1:
+            out = out.split('\r\n')[0]
+        cudnn_lib_name = os.path.basename(out)
+        cudnn_lib = os.path.splitext(cudnn_lib_name)[0]
+        cudnn_lib = str(cudnn_lib)
+        return ctypes.cdll.LoadLibrary(cudnn_lib)
+    else:
+        return None
+
+
 def _libcudnn():
     global lib, __cudnn_version
     if lib is None:
-        lib = ctypes.cdll.LoadLibrary(None)
+        if sys.platform == "win32":
+            lib = find_cudnn_windows_lib()
+        else:
+            lib = ctypes.cdll.LoadLibrary(None)
         if hasattr(lib, 'cudnnGetErrorString'):
             lib.cudnnGetErrorString.restype = ctypes.c_char_p
             __cudnn_version = lib.cudnnGetVersion()

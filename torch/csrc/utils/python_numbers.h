@@ -23,14 +23,14 @@ inline bool THPUtils_checkLong(PyObject* obj) {
 #endif
 }
 
-inline long THPUtils_unpackLong(PyObject* obj) {
+inline int64_t THPUtils_unpackLong(PyObject* obj) {
   if (PyLong_Check(obj)) {
     int overflow;
     long long value = PyLong_AsLongLongAndOverflow(obj, &overflow);
     if (overflow != 0) {
       throw std::runtime_error("Overflow when unpacking long");
     }
-    return (long)value;
+    return (int64_t)value;
   }
 #if PY_MAJOR_VERSION == 2
   if (PyInt_Check(obj)) {

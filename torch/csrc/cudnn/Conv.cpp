@@ -491,7 +491,7 @@ void* tensorPointer(
   ptr += elementSize * tensor->storageOffset;
 #if CUDNN_VERSION < 7000
   if (groupIdx > 0) {
-    long size = 1;
+    size_t size = 1;
     for (int i = dim; i < tensor->nDimension; ++i) {
       size *= tensor->size[i];
     }
@@ -566,12 +566,12 @@ static void check_expected_output_size_is_valid(
     const std::vector<int>& pad, const std::vector<int>& stride,
     const std::vector<int>& dilation)
 {
-  std::vector<long> output_sizes(input->nDimension - 2);
+  std::vector<int64_t> output_sizes(input->nDimension - 2);
   bool invalid_dim_size = false;
   int dim_idx = 0;
 
   for (int i = 2; i != input->nDimension; ++i, ++dim_idx){
-    long output = (input->size[i] + 2*pad[dim_idx] - (dilation[dim_idx] * (weight->size[i] - 1) + 1)) / stride[dim_idx] + 1;
+    int64_t output = (input->size[i] + 2*pad[dim_idx] - (dilation[dim_idx] * (weight->size[i] - 1) + 1)) / stride[dim_idx] + 1;
     output_sizes[dim_idx] = output;
     if (output < 1){
       invalid_dim_size = true;

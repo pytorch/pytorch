@@ -64,12 +64,16 @@ static PyObject* wrap_tuple_fn(Args ... args)
   return result.release();
 }
 
-static auto sq_concat = PyTuple_Type.tp_as_sequence->sq_concat;
-static auto sq_repeat = PyTuple_Type.tp_as_sequence->sq_repeat;
-#if PY_MAJOR_VERSION == 2
-static auto sq_slice = PyTuple_Type.tp_as_sequence->sq_slice;
-#endif
-static auto mp_subscript = PyTuple_Type.tp_as_mapping->mp_subscript;
+// We use an anonymous namespace instead of static to work around
+// (what @peterjc123 think is) a bug in Visual Studio
+namespace {
+  auto sq_concat = PyTuple_Type.tp_as_sequence->sq_concat;
+  auto sq_repeat = PyTuple_Type.tp_as_sequence->sq_repeat;
+  #if PY_MAJOR_VERSION == 2
+  auto sq_slice = PyTuple_Type.tp_as_sequence->sq_slice;
+  #endif
+  binaryfunc mp_subscript = PyTuple_Type.tp_as_mapping->mp_subscript;
+}
 
 
 static PySequenceMethods THPSize_as_sequence = {

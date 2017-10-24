@@ -4067,7 +4067,8 @@ class TestTorch(TestCase):
         b += [(t1.storage(), t1.storage(), t2.storage())]
         b += [a[0].storage()[0:2]]
         for use_name in (False, True):
-            with tempfile.NamedTemporaryFile() as f:
+            delete = sys.platform != 'win32' or not use_name
+            with tempfile.NamedTemporaryFile(delete=delete) as f:
                 handle = f if not use_name else f.name
                 torch.save(b, handle)
                 f.seek(0)
@@ -4226,7 +4227,8 @@ class TestTorch(TestCase):
 
     def test_from_file(self):
         size = 10000
-        with tempfile.NamedTemporaryFile() as f:
+        delete = sys.platform != 'win32'
+        with tempfile.NamedTemporaryFile(delete=delete) as f:
             s1 = torch.FloatStorage.from_file(f.name, True, size)
             t1 = torch.FloatTensor(s1).copy_(torch.randn(size))
 

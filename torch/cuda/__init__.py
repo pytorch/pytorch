@@ -15,6 +15,7 @@ import os
 import torch
 import traceback
 from torch._six import raise_from
+from subprocess import Popen, PIPE
 from multiprocessing.util import register_after_fork as _register_after_fork
 
 _initialized = False
@@ -22,6 +23,21 @@ _queued_calls = []  # don't invoke these until initialization occurs
 _in_bad_fork = False  # this global is also used in torch.manual_seed
 _original_pid = False
 _cudart = None
+
+
+def find_cuda_windows_lib():
+    proc = Popen(['where', 'cudart64*.dll'], stdout=PIPE, stderr=PIPE)
+    out, err = proc.communicate()
+    out = out.decode().strip()
+    if len(out) > 0:
+        if out.find('\r\n') != -1:
+            out = out.split('\r\n')[0]
+        cuda_lib_name = os.path.basename(out)
+        cuda_lib = os.path.splitext(cuda_lib_name)[0]
+        cuda_lib = str(cuda_lib)
+        return ctypes.cdll.LoadLibrary(cuda_lib)
+    else:
+        return None
 
 
 def is_available():
@@ -38,7 +54,10 @@ def _sleep(cycles):
 
 def _load_cudart():
     # First check the main program for CUDA symbols
-    lib = ctypes.cdll.LoadLibrary(None)
+    if platform.system() == 'Windows':
+        lib = find_cuda_windows_lib()
+    else:
+        lib = ctypes.cdll.LoadLibrary(None)
     if hasattr(lib, 'cudaGetErrorName'):
         return lib
 

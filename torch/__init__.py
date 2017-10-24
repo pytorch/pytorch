@@ -9,6 +9,7 @@ on an NVIDIA GPU with compute capability >= 3.0.
 """
 
 import sys
+import platform
 from ._utils import _import_dotted_name
 from .version import __version__
 
@@ -38,30 +39,37 @@ try:
 except ImportError:
     pass
 
-# first check if the os package has the required flags
-if not hasattr(_dl_flags, 'RTLD_GLOBAL') or not hasattr(_dl_flags, 'RTLD_LAZY'):
-    try:
-        # next try if DLFCN exists
-        import DLFCN as _dl_flags
-    except ImportError:
-        # as a last attempt, use compile-time constants
-        import torch._dl as _dl_flags
+if platform.system() == 'Windows':
+    _dl_flags.environ['PATH'] = _dl_flags.path.dirname(__file__) + '\\lib\\;' + _dl_flags.environ['PATH']
 
-old_flags = sys.getdlopenflags()
-sys.setdlopenflags(_dl_flags.RTLD_GLOBAL | _dl_flags.RTLD_LAZY)
+else:
+    # first check if the os package has the required flags
+    if not hasattr(_dl_flags, 'RTLD_GLOBAL') or not hasattr(_dl_flags, 'RTLD_LAZY'):
+        try:
+            # next try if DLFCN exists
+            import DLFCN as _dl_flags
+        except ImportError:
+            # as a last attempt, use compile-time constants
+            import torch._dl as _dl_flags
+
+        old_flags = sys.getdlopenflags()
+        sys.setdlopenflags(_dl_flags.RTLD_GLOBAL | _dl_flags.RTLD_LAZY)
+        del _dl_flags
+
 try:
     import torch._nvrtc
 except ImportError:
     pass
+
 from torch._C import *
 
 __all__ += [name for name in dir(_C)
             if name[0] != '_' and
             not name.endswith('Base')]
 
-sys.setdlopenflags(old_flags)
-del _dl_flags
-del old_flags
+if platform.system() != 'Windows':
+    sys.setdlopenflags(old_flags)
+    del old_flags
 
 ################################################################################
 # Define basic utilities
@@ -261,6 +269,8 @@ from .functional import *
 ################################################################################
 
 def manager_path():
+    if platform.system() == 'Windows':
+        return b""
     import os
     path = os.path.join(os.path.abspath(os.path.dirname(__file__)), 'lib', 'torch_shm_manager')
     if not os.path.exists(path):

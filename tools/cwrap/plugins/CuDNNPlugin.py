@@ -9,7 +9,7 @@ class CuDNNPlugin(CWrapPlugin):
 
     TYPE_UNPACK = {
         'THTensor*': Template('((THPVoidTensor*)$arg)->cdata'),
-        'int': Template('THPUtils_unpackLong($arg)'),
+        'int': Template('((int) THPUtils_unpackLong($arg))'),
         'std::vector<int>': Template('THPUtils_unpackIntTuple($arg)'),
         'cudnnDataType_t': Template('$arg'),
         'cudnnHandle_t': Template('$arg'),
@@ -51,8 +51,8 @@ PyMethodDef* THCUDNN_methods()
 static PyObject * $name(PyObject *self, PyObject *args, PyObject *kwargs)
 {
     HANDLE_TH_ERRORS
-    int __tuplecount = args ? PyTuple_Size(args) : 0;
-    int __dictcount = kwargs ? PyDict_Size(kwargs) : 0;
+    int __tuplecount = args ? (int) PyTuple_Size(args) : 0;
+    int __dictcount = kwargs ? (int) PyDict_Size(kwargs) : 0;
     int __argcount = __tuplecount + __dictcount;
     PyObject* tensorClass = getTensorClass(args);
     THCPAutoGPU __autogpu_guard = THCPAutoGPU(args);

@@ -19,10 +19,16 @@ from tools.setup_helpers.nccl import WITH_NCCL, WITH_SYSTEM_NCCL, NCCL_LIB_DIR, 
     NCCL_INCLUDE_DIR, NCCL_ROOT_DIR, NCCL_SYSTEM_LIB
 from tools.setup_helpers.nnpack import WITH_NNPACK, NNPACK_LIB_PATHS, \
     NNPACK_INCLUDE_DIRS
+from tools.setup_helpers.nvtoolext import NVTOOLEXT_HOME
 from tools.setup_helpers.split_types import split_types
 
 DEBUG = check_env_flag('DEBUG')
-WITH_DISTRIBUTED = not check_env_flag('NO_DISTRIBUTED')
+
+IS_WINDOWS = (platform.system() == 'Windows')
+IS_DARWIN = (platform.system() == 'Darwin')
+IS_LINUX = (platform.system() == 'Linux')
+
+WITH_DISTRIBUTED = not check_env_flag('NO_DISTRIBUTED') and not IS_WINDOWS
 WITH_DISTRIBUTED_MW = WITH_DISTRIBUTED and check_env_flag('WITH_DISTRIBUTED_MW')
 
 
@@ -82,14 +88,17 @@ distutils.unixccompiler.UnixCCompiler.link = patched_link
 
 dep_libs = [
     'nccl', 'ATen',
-    'libshm', 'gloo', 'THD', 'nanopb',
+    'libshm', 'libshm_windows', 'gloo', 'THD', 'nanopb',
 ]
 
 
 def build_libs(libs):
     for lib in libs:
         assert lib in dep_libs, 'invalid lib: {}'.format(lib)
-    build_libs_cmd = ['bash', 'torch/lib/build_libs.sh']
+    if IS_WINDOWS:
+        build_libs_cmd = ['torch\\lib\\build_libs.bat']
+    else:
+        build_libs_cmd = ['bash', 'torch/lib/build_libs.sh']
     my_env = os.environ.copy()
     my_env["PYTORCH_PYTHON"] = sys.executable
     if WITH_SYSTEM_NCCL:
@@ -119,7 +128,11 @@ class build_deps(Command):
         libs = []
         if WITH_NCCL and not WITH_SYSTEM_NCCL:
             libs += ['nccl']
-        libs += ['ATen', 'libshm', 'nanopb']
+        libs += ['ATen', 'nanopb']
+        if IS_WINDOWS:
+            libs += ['libshm_windows']
+        else:
+            libs += ['libshm']
         if WITH_DISTRIBUTED:
             if sys.platform.startswith('linux'):
                 libs += ['gloo']
@@ -201,6 +214,8 @@ def monkey_patch_THD_link_flags():
 class build_ext(setuptools.command.build_ext.build_ext):
 
     def run(self):
+        global _C_LIB, THNN, THCUNN
+
         # Print build options
         if WITH_NUMPY:
             print('-- Building with NumPy bindings')
@@ -273,6 +288,19 @@ class build_ext(setuptools.command.build_ext.build_ext):
             'torch/lib/tmp_install/share/ATen/Declarations.yaml',
             jit_gen_dir)
 
+        if IS_WINDOWS:
+            build_temp = self.build_temp
+            build_dir = 'torch/csrc'
+
+            ext_filename = self.get_ext_filename('_C')
+            lib_filename = '.'.join(ext_filename.split('.')[:-1]) + '.lib'
+
+            _C_LIB = os.path.join(build_temp, build_dir, lib_filename).replace('\\', '/')
+
+            THNN.extra_link_args += [_C_LIB]
+            if WITH_CUDA:
+                THCUNN.extra_link_args += [_C_LIB]
+
         # It's an old-style class in Python 2.7...
         setuptools.command.build_ext.build_ext.run(self)
 
@@ -315,14 +343,18 @@ class clean(distutils.command.clean.clean):
 include_dirs = []
 library_dirs = []
 extra_link_args = []
-extra_compile_args = ['-std=c++11', '-Wno-write-strings',
-                      # Python 2.6 requires -fno-strict-aliasing, see
-                      # http://legacy.python.org/dev/peps/pep-3123/
-                      '-fno-strict-aliasing',
-                      # Clang has an unfixed bug leading to spurious missing
-                      # braces warnings, see
-                      # https://bugs.llvm.org/show_bug.cgi?id=21629
-                      '-Wno-missing-braces']
+
+if IS_WINDOWS:
+    extra_compile_args = ['/Z7', '/EHa', '/DNOMINMAX']
+else:
+    extra_compile_args = ['-std=c++11', '-Wno-write-strings',
+                          # Python 2.6 requires -fno-strict-aliasing, see
+                          # http://legacy.python.org/dev/peps/pep-3123/
+                          '-fno-strict-aliasing',
+                          # Clang has an unfixed bug leading to spurious missing
+                          # braces warnings, see
+                          # https://bugs.llvm.org/show_bug.cgi?id=21629
+                          '-Wno-missing-braces']
 
 cwd = os.path.dirname(os.path.abspath(__file__))
 lib_path = os.path.join(cwd, "torch", "lib")
@@ -355,12 +387,24 @@ library_dirs.append(lib_path)
 ATEN_LIB = os.path.join(lib_path, 'libATen.so.1')
 THD_LIB = os.path.join(lib_path, 'libTHD.a')
 NCCL_LIB = os.path.join(lib_path, 'libnccl.so.1')
-if platform.system() == 'Darwin':
-    ATEN_LIB = os.path.join(lib_path, 'libATen.1.dylib')
-    NCCL_LIB = os.path.join(lib_path, 'libnccl.1.dylib')
 
 # static library only
 NANOPB_STATIC_LIB = os.path.join(lib_path, 'libprotobuf-nanopb.a')
+
+if IS_DARWIN:
+    ATEN_LIB = os.path.join(lib_path, 'libATen.1.dylib')
+    NCCL_LIB = os.path.join(lib_path, 'libnccl.1.dylib')
+
+if IS_WINDOWS:
+    TH_LIB = os.path.join(lib_path, 'TH.lib')
+    THS_LIB = os.path.join(lib_path, 'THS.lib')
+    THC_LIB = os.path.join(lib_path, 'THC.lib')
+    THCS_LIB = os.path.join(lib_path, 'THCS.lib')
+    THNN_LIB = os.path.join(lib_path, 'THNN.lib')
+    THCUNN_LIB = os.path.join(lib_path, 'THCUNN.lib')
+    THPP_LIB = os.path.join(lib_path, 'THPP.lib')
+    ATEN_LIB = os.path.join(lib_path, 'ATen.lib')
+    NANOPB_STATIC_LIB = os.path.join(lib_path, 'protobuf-nanopb.lib')
 
 main_compile_args = ['-D_THP_CORE']
 main_libraries = ['shm']
@@ -432,6 +476,7 @@ main_sources = [
     "torch/csrc/autograd/functions/onnx/basic_ops.cpp",
     "torch/csrc/onnx/onnx.pb.cpp",
     "torch/csrc/onnx/onnx.cpp",
+    "torch/csrc/cuda/AutoGPU.cpp",
 ]
 main_sources += split_types("torch/csrc/Tensor.cpp")
 
@@ -458,24 +503,38 @@ if WITH_DISTRIBUTED:
     main_link_args += [THD_LIB]
 
 if WITH_CUDA:
-    cuda_lib_dirs = ['lib64', 'lib']
+    nvtoolext_lib_name = None
+    if IS_WINDOWS:
+        cuda_lib_path = CUDA_HOME + '/lib/x64/'
+        nvtoolext_lib_path = NVTOOLEXT_HOME + '/lib/x64/'
+        nvtoolext_include_path = os.path.join(NVTOOLEXT_HOME, 'include')
+
+        library_dirs.append(nvtoolext_lib_path)
+        include_dirs.append(nvtoolext_include_path)
+
+        nvtoolext_lib_name = 'nvToolsExt64_1'
+    else:
+        cuda_lib_dirs = ['lib64', 'lib']
+
+        for lib_dir in cuda_lib_dirs:
+            cuda_lib_path = os.path.join(CUDA_HOME, lib_dir)
+            if os.path.exists(cuda_lib_path):
+                break
+        extra_link_args.append('-Wl,-rpath,' + cuda_lib_path)
+
+        nvtoolext_lib_name = 'nvToolsExt'
+
+    library_dirs.append(cuda_lib_path)
     cuda_include_path = os.path.join(CUDA_HOME, 'include')
-    for lib_dir in cuda_lib_dirs:
-        cuda_lib_path = os.path.join(CUDA_HOME, lib_dir)
-        if os.path.exists(cuda_lib_path):
-            break
     include_dirs.append(cuda_include_path)
     include_dirs.append(tmp_install_path + "/include/THCUNN")
-    library_dirs.append(cuda_lib_path)
-    extra_link_args.append('-Wl,-rpath,' + cuda_lib_path)
     extra_compile_args += ['-DWITH_CUDA']
     extra_compile_args += ['-DCUDA_LIB_PATH=' + cuda_lib_path]
-    main_libraries += ['cudart', 'nvToolsExt']
+    main_libraries += ['cudart', nvtoolext_lib_name]
     main_sources += [
         "torch/csrc/cuda/Module.cpp",
         "torch/csrc/cuda/Storage.cpp",
         "torch/csrc/cuda/Stream.cpp",
-        "torch/csrc/cuda/AutoGPU.cpp",
         "torch/csrc/cuda/utils.cpp",
         "torch/csrc/cuda/expand_utils.cpp",
         "torch/csrc/cuda/serialization.cpp",
@@ -519,8 +578,11 @@ if WITH_NNPACK:
     extra_compile_args += ['-DWITH_NNPACK']
 
 if DEBUG:
-    extra_compile_args += ['-O0', '-g']
-    extra_link_args += ['-O0', '-g']
+    if IS_WINDOWS:
+        extra_link_args.append('/DEBUG:FULL')
+    else:
+        extra_compile_args += ['-O0', '-g']
+        extra_link_args += ['-O0', '-g']
 
 if os.getenv('PYTORCH_BINARY_BUILD') and platform.system() == 'Linux':
     print('PYTORCH_BINARY_BUILD found. Static linking libstdc++ on Linux')
@@ -537,8 +599,10 @@ if os.getenv('PYTORCH_BINARY_BUILD') and platform.system() == 'Linux':
 
 
 def make_relative_rpath(path):
-    if platform.system() == 'Darwin':
+    if IS_DARWIN:
         return '-Wl,-rpath,@loader_path/' + path
+    elif IS_WINDOWS:
+        return ''
     else:
         return '-Wl,-rpath,$ORIGIN/' + path
 
@@ -559,11 +623,12 @@ C = Extension("torch._C",
               )
 extensions.append(C)
 
-DL = Extension("torch._dl",
-               sources=["torch/csrc/dl.c"],
-               language='c',
-               )
-extensions.append(DL)
+if not IS_WINDOWS:
+    DL = Extension("torch._dl",
+                   sources=["torch/csrc/dl.c"],
+                   language='c',
+                   )
+    extensions.append(DL)
 
 THNN = Extension("torch._thnn._THNN",
                  sources=['torch/csrc/nn/THNN.cpp'],
@@ -634,7 +699,7 @@ setup(name="torch", version=version,
       cmdclass=cmdclass,
       packages=packages,
       package_data={'torch': [
-          'lib/*.so*', 'lib/*.dylib*',
+          'lib/*.so*', 'lib/*.dylib*', 'lib/*.dll',
           'lib/torch_shm_manager',
           'lib/*.h',
           'lib/include/TH/*.h', 'lib/include/TH/generic/*.h',

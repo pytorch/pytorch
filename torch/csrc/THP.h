@@ -6,6 +6,17 @@
 #include <TH/TH.h>
 #include <THS/THS.h>
 
+// macros for Windows compatibility
+#ifdef _WIN32
+#undef PyLong_FromLong
+#undef PyLong_AsLong
+#undef PyLong_FromUnsignedLong
+
+#define PyLong_FromLong         PyLong_FromLongLong
+#define PyLong_AsLong           PyLong_AsLongLong
+#define PyLong_FromUnsignedLong PyLong_FromUnsignedLongLong
+#endif
+
 // Back-compatibility macros, Thanks to http://cx-oracle.sourceforge.net/
 // define PyInt_* macros for Python 3.x.  NB: We must include Python.h first,
 // otherwise we'll incorrectly conclude PyInt_Check isn't defined!
@@ -22,7 +33,18 @@
 #define LIBRARY_STATE_TYPE
 #define LIBRARY_STATE_TYPE_NOARGS
 
-#define THP_API extern "C"
+#ifdef _WIN32
+# ifdef _THP_CORE
+#  define THP_API extern "C" __declspec(dllexport)
+#  define THP_CLASS __declspec(dllexport)
+# else
+#  define THP_API extern "C" __declspec(dllimport)
+#  define THP_CLASS __declspec(dllimport)
+# endif
+#else
+# define THP_API extern "C"
+# define THP_CLASS
+#endif
 
 #include "PtrWrapper.h"
 #include "Exceptions.h"

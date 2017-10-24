@@ -28,6 +28,19 @@ extern PyObject *THPException_FatalError;
 struct python_error : public std::exception {
   python_error() : type(nullptr), value(nullptr), traceback(nullptr) {}
 
+  python_error(const python_error &other) : type(other.type), value(other.value), traceback(other.traceback) {
+    AutoGIL gil;
+    Py_XINCREF(type);
+    Py_XINCREF(value);
+    Py_XINCREF(traceback);
+  }
+
+  python_error(python_error&& other) {
+    type = std::move(other.type);
+    value = std::move(other.value);
+    traceback = std::move(other.traceback);
+  }
+
   ~python_error() {
     if (type || value || traceback) {
       AutoGIL gil;
