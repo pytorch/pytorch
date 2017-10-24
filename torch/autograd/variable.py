@@ -321,9 +321,6 @@ class Variable(_C._VariableBase):
     def view_as(self, tensor):
         return self.view(tensor.size())
 
-    def split(self, split_size, dim=0):
-        return torch.split(self, split_size, dim)
-
     def repeat(self, *repeats):
         if len(repeats) == 1 and isinstance(repeats[0], torch.Size):
             repeats = repeats[0]
@@ -419,9 +416,6 @@ class Variable(_C._VariableBase):
         dim = dim if dim >= 0 else dim + self.dim()
         index = tuple(slice(None, None) for _ in range(dim)) + (_index,)
         return Index.apply(self, index)
-
-    def chunk(self, num_chunks, dim=0):
-        return Chunk.apply(self, num_chunks, dim)
 
     def permute(self, *permutation):
         return Permute.apply(self, permutation)

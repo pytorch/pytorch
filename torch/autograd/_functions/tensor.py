@@ -527,39 +527,6 @@ class Topk(_MultiSelectionFunction):
         return _MultiSelectionFunction.forward(ctx, input, dim, return_indices, args)
 
 
-@traceable
-class Chunk(Function):
-
-    @staticmethod
-    def symbolic(g, i, num_chunks, dim=0):
-        dim_size = i.type().sizes()[dim]
-        split_size = (dim_size + num_chunks - 1) // num_chunks
-        lengths = []
-        count_chunks = 0
-        while (dim_size > 0):
-            this_split_size = split_size if dim_size >= split_size else dim_size
-            lengths.append(this_split_size)
-            dim_size = dim_size - split_size
-            count_chunks = count_chunks + 1
-        result = []
-        n = g.appendNode(g.create("Split", [i]).is_("split", lengths).i_("axis", dim))
-        for i in range(count_chunks):
-            result.append(g.appendNode(g.createSelect(n, i)))
-        return tuple(result)
-
-    @staticmethod
-    def forward(ctx, i, num_chunks, dim=0):
-        ctx.dim = dim
-        result = i.chunk(num_chunks, dim)
-        ctx.mark_shared_storage(*((i, chunk) for chunk in result))
-        return result
-
-    @staticmethod
-    def backward(ctx, *grad_output):
-        grad_input = torch.cat(grad_output, ctx.dim)
-        return grad_input, None, None
-
-
 class Gather(Function):
 
     @staticmethod
