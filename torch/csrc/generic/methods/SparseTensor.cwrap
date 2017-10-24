@@ -296,6 +296,33 @@ PyObject * THSPTensor_(size)(PyObject *self, PyObject *args, PyObject *kwargs)
 ]]
 
 [[
+  name: zeros
+  sparse: yes
+  variants:
+    - function
+  auto_gpu: False
+  return: argument 0
+  arguments:
+    - arg: THSTensor* result
+      output: True
+    - arg: THSize* size
+      long_args: True
+]]
+
+[[
+  name: zeros_like
+  sparse: yes
+  cname: zerosLike
+  variants:
+    - function
+  return: argument 0
+  arguments:
+    - arg: THSTensor* result
+      output: True
+    - THSTensor* input
+]]
+
+[[
   name: add
   sparse: yes
   variants:

@@ -15,6 +15,18 @@ void THSTensor_(zero)(THSTensor *self) {
   self->nnz = 0;
 }
 
+void THSTensor_(zeros)(THSTensor *r_, THLongStorage *size)
+{
+  THSTensor_(resize)(r_, size);
+  THSTensor_(zero)(r_);
+}
+
+void THSTensor_(zerosLike)(THSTensor *r_, THSTensor *input)
+{
+  THSTensor_(resizeAs)(r_, input);
+  THSTensor_(zero)(r_);
+}
+
 void THSTensor_(mul)(THSTensor *r_, THSTensor *t, real value) {
   if (r_ == t) {
     THTensor *r_values_ = THSTensor_(newValues)(r_);
@@ -68,7 +80,7 @@ void THSTensor_(pow)(THSTensor *r_, THSTensor *t_, real value) {
   THTensor_(free)(r_values_);
   THLongTensor_free(t_indices_);
   THTensor_(free)(t_values_);
-    
+
   THSTensor_(free)(t);
 }
 #endif
