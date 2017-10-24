@@ -354,6 +354,47 @@ REGISTER_CUDA_OPERATOR(
     ScatterWeightedSum,
     ScatterWeightedSumOp<float, CUDAContext>);
 
+namespace {
+
+template <typename Index, typename T>
+__global__ void scatter_assign_kernel(
+    T* data,
+    const Index* idxs,
+    const T* slicesData,
+    TIndex N,
+    TIndex K,
+    TIndex block_size) {
+  for (TIndex i = blockIdx.x; i < K; i += gridDim.x) {
+    Index idx = idxs[i];
+    CUDA_KERNEL_ASSERT(0 <= idx && idx < N);
+    const T* src = slicesData + block_size * i;
+    T* dest = data + block_size * idx;
+    for (TIndex j = threadIdx.x; j < block_size; j += blockDim.x) {
+      dest[j] = src[j];
+    }
+  }
+}
+
+} // namespace
+
+template <>
+template <typename Index, typename T>
+void ScatterAssignOp<CUDAContext>::DoScatterAssign(
+    T* data,
+    const Index* idxs,
+    const T* slicesData,
+    TIndex N,
+    TIndex K,
+    TIndex block_size) {
+  scatter_assign_kernel<<<
+      std::min(K, static_cast<TIndex>(CAFFE_MAXIMUM_NUM_BLOCKS)),
+      CAFFE_CUDA_NUM_THREADS,
+      0,
+      context_.cuda_stream()>>>(data, idxs, slicesData, N, K, block_size);
+}
+
+REGISTER_CUDA_OPERATOR(ScatterAssign, ScatterAssignOp<CUDAContext>);
+
 #if THRUST_VERSION >= 100800
 __global__ void remap_kernel(
     thrust::device_ptr<int> second_order,

@@ -676,6 +676,17 @@ class ScatterAssignOp : public Operator<Context> {
     T* data = output->template mutable_data<T>();
     const Index* idxs = indices.template data<Index>();
     const T* slicesData = slices.template data<T>();
+    DoScatterAssign(data, idxs, slicesData, N, K, block_size);
+  }
+
+  template <typename Index, typename T>
+  void DoScatterAssign(
+      T* data,
+      const Index* idxs,
+      const T* slicesData,
+      TIndex N,
+      TIndex K,
+      TIndex block_size) {
     for (int i = 0; i < K; ++i) {
       Index idx = idxs[i];
       // double-checking the indices, but it's fine as it's DCHECK only
