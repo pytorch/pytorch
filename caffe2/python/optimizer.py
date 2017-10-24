@@ -318,6 +318,99 @@ class MultiPrecisionSgdOptimizer(SgdOptimizer):
         net.FloatToHalf(param_fp32, param)
 
 
+class FP16SgdOptimizer(SgdOptimizer):
+    def __init__(self, base_learning_rate=0.1, momentum=0.0,
+                 policy="fixed", nesterov=1, weight_decay=0.0001,
+                 sparse_dedup_aggregator=None,
+                 **kwargs):
+        super(SgdOptimizer, self).__init__()
+        self.base_learning_rate = base_learning_rate
+        self.momentum = momentum
+        self.policy = policy
+        self.nesterov = nesterov
+        self.sparse_dedup_aggregator = sparse_dedup_aggregator
+        self.init_kwargs = kwargs
+        self.weight_decay = weight_decay
+
+    def _run(self, net, param_init_net, param_info, fp32_update=False):
+
+        fp32_update_flag = 0
+        param_name = str(param_info.blob)
+
+        # should only be triggered in FP16 training by SpatialBN, which
+        # requires FP32 params in CuDNN.
+        if param_name.find("spatbn") != -1:
+            fp32_update = True
+
+        if fp32_update:
+            # doing a 32bit update
+            # Have to assume param_info.blob is FP32 as there is no way
+            # (that i currently know of) to query a blob's type in python
+            fp32_update_flag = 1
+            param = param_info.blob
+            param_fp32 = param_info.blob
+        else:
+            if param_info.blob_copy is None:
+                # doing a 32bit update
+                # Have to assume param_info.blob is FP32 as there is no way
+                # (that i currently know of) to query a blob's type in python
+                fp32_update_flag = 1
+                param = param_info.blob
+                param_fp32 = param_info.blob
+            else:
+                if core.DataType.FLOAT in param_info.blob_copy:
+                    param = param_info.blob
+                    param_fp32 = param_info.blob_copy[core.DataType.FLOAT]
+                elif core.DataType.FLOAT16 in param_info.blob_copy:
+                    param = param_info.blob_copy[core.DataType.FLOAT16]
+                    param_fp32 = param_info.blob
+                else:
+                    assert (False), (
+                        "Unrecognized parameter format to be updated "
+                        "by FP16 Optimizer. Parameter: {}".format(param_info.name)
+                    )
+
+        grad = param_info.grad
+
+        if self.base_learning_rate == 0:
+            return
+        assert self.base_learning_rate > 0
+
+        lr, _ = self.build_lr(
+            net, param_init_net,
+            base_learning_rate=-self.base_learning_rate,
+            policy=self.policy,
+            **(self.init_kwargs)
+        )
+
+        momentum_data_fp32 = param_init_net.ConstantFill(
+            param_fp32, str(param) + "_momentum_fp32", value=0.)
+
+        momentum_data = param_init_net.FloatToHalf(
+            momentum_data_fp32, str(param) + "_momentum")
+
+        self._aux_params.local.append(momentum_data)
+
+        assert not isinstance(grad, core.GradientSlice), \
+                "Doesn't support sparse gradients"
+
+        if fp32_update_flag == 0:
+            net.FP16MomentumSGDUpdate(
+                [grad, momentum_data, lr, param],
+                [grad, momentum_data, param],
+                momentum=self.momentum,
+                nesterov=self.nesterov,
+                weight_decay=self.weight_decay)
+        else:
+            # flag set to 1, therefore doing FP32 update
+            net.FP32MomentumSGDUpdate(
+                [grad, momentum_data_fp32, lr, param],
+                [grad, momentum_data_fp32, param],
+                momentum=self.momentum,
+                nesterov=self.nesterov,
+                weight_decay=self.weight_decay)
+
+
 class WeightDecayBuilder(Optimizer):
     def __init__(self, weight_decay):
         self.weight_decay = weight_decay
@@ -897,6 +990,13 @@ def build_multi_precision_sgd(
         max_gradient_norm=max_gradient_norm,
         allow_lr_injection=allow_lr_injection,
     )
+
+
+def build_fp16_sgd(model, base_learning_rate, **kwargs):
+    fp16_sgd_optimizer = FP16SgdOptimizer(
+        base_learning_rate, **kwargs
+    )
+    return _build(model, fp16_sgd_optimizer)
 
 
 def build_ftrl(model, engine="SIMD", **kwargs):
