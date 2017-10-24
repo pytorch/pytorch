@@ -502,6 +502,7 @@ if WITH_CUDNN:
     # NOTE: this this at the front, in case there's another cuDNN in CUDA path
     include_dirs.insert(0, CUDNN_INCLUDE_DIR)
     library_dirs.append(CUDNN_LIB_DIR)
+    extra_link_args.append('-Wl,-rpath,' + CUDNN_LIB_DIR)
     main_sources += [
         "torch/csrc/cudnn/BatchNorm.cpp",
         "torch/csrc/cudnn/Conv.cpp",
