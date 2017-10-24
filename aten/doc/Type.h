@@ -739,8 +739,8 @@ struct AT_API Type {
   virtual Tensor prelu_forward(const Tensor & input, const Tensor & weight) const;
   virtual std::tuple<Tensor &,Tensor &> prelu_backward_out(Tensor & grad_input, Tensor & grad_weight, const Tensor & grad_output, const Tensor & input, const Tensor & weight) const;
   virtual std::tuple<Tensor,Tensor> prelu_backward(const Tensor & grad_output, const Tensor & input, const Tensor & weight, std::array<bool, 2> output_mask={true, true}) const;
-  virtual Tensor & rrelu_out(Tensor & output, const Tensor & input, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=false, bool inplace=false, Generator * generator=nullptr) const;
-  virtual Tensor rrelu(const Tensor & input, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=false, bool inplace=false, Generator * generator=nullptr) const;
+  virtual Tensor & rrelu_out(Tensor & output, const Tensor & input, Scalar lower=0.125, Scalar upper=0.333333333333, bool training=false, bool inplace=false, Generator * generator=nullptr) const;
+  virtual Tensor rrelu(const Tensor & input, Scalar lower=0.125, Scalar upper=0.333333333333, bool training=false, bool inplace=false, Generator * generator=nullptr) const;
   virtual Tensor & rrelu_forward_out(Tensor & output, const Tensor & input, Scalar lower, Scalar upper, bool training, bool inplace, Generator * generator, const Tensor & noise) const;
   virtual Tensor rrelu_forward(const Tensor & input, Scalar lower, Scalar upper, bool training, bool inplace, Generator * generator, const Tensor & noise) const;
   virtual Tensor & rrelu_backward_out(Tensor & grad_input, const Tensor & grad_output, const Tensor & input, Scalar lower, Scalar upper, bool training, bool inplace, const Tensor & noise) const;
