@@ -270,7 +270,7 @@ static void tensorSelect(rpc::RPCMessage& raw_message) {
   int dimension = unpackInteger(raw_message);
   int64_t sliceIndex = unpackInteger(raw_message);
   finalize(raw_message);
-  at::select_out(src, dimension, sliceIndex, tensor);
+  at::select_out(tensor, src, dimension, sliceIndex);
 }
 
 static void tensorTranspose(rpc::RPCMessage& raw_message) {
@@ -304,7 +304,7 @@ static void tensorSqueeze1d(rpc::RPCMessage& raw_message) {
   at::Tensor src = unpackRetrieveTensor(raw_message);
   int dimension = unpackInteger(raw_message);
   finalize(raw_message);
-  at::squeeze_out(src, dimension, tensor);
+  at::squeeze_out(tensor, src, dimension);
 }
 
 static void tensorFree(rpc::RPCMessage& raw_message) {
@@ -318,7 +318,7 @@ static void tensorGather(rpc::RPCMessage& raw_message) {
   int dim = unpackInteger(raw_message);
   at::Tensor index = unpackRetrieveTensor(raw_message);
   finalize(raw_message);
-  at::gather_out(src, dim, index, tensor);
+  at::gather_out(tensor, src, dim, index);
 }
 
 static void tensorScatter(rpc::RPCMessage& raw_message) {
@@ -446,11 +446,11 @@ static void tensorAdd(rpc::RPCMessage& raw_message) {
   if (at::isIntegralType(tensor.type().scalarType())) {
     int64_t value = unpackInteger(raw_message);
     finalize(raw_message);
-    at::add_out(src, at::Scalar((int64_t)value), tensor);
+    at::add_out(tensor, src, at::Scalar(value));
   } else if (at::isFloatingType(tensor.type().scalarType())) {
     double value = unpackFloat(raw_message);
     finalize(raw_message);
-    at::add_out(src, value, tensor);
+    at::add_out(tensor, src, value);
   } else {
     throw std::invalid_argument("expected scalar type");
   }
@@ -463,11 +463,11 @@ static void tensorSub(rpc::RPCMessage& raw_message) {
   if (at::isIntegralType(tensor.type().scalarType())) {
     int64_t value = unpackInteger(raw_message);
     finalize(raw_message);
-    at::sub_out(src, at::Scalar((int64_t)value), tensor);
+    at::sub_out(tensor, src, at::Scalar((int64_t)value));
   } else if (at::isFloatingType(tensor.type().scalarType())) {
     double value = unpackFloat(raw_message);
     finalize(raw_message);
-    at::sub_out(src, value, tensor);
+    at::sub_out(tensor, src, value);
   } else {
     throw std::invalid_argument("expected scalar type");
   }
@@ -480,11 +480,11 @@ static void tensorMul(rpc::RPCMessage& raw_message) {
   if (at::isIntegralType(tensor.type().scalarType())) {
     int64_t value = unpackInteger(raw_message);
     finalize(raw_message);
-    at::mul_out(src, at::Scalar((int64_t)value), tensor);
+    at::mul_out(tensor, src, at::Scalar((int64_t)value));
   } else if (at::isFloatingType(tensor.type().scalarType())) {
     double value = unpackFloat(raw_message);
     finalize(raw_message);
-    at::mul_out(src, value, tensor);
+    at::mul_out(tensor, src, value);
   } else {
     throw std::invalid_argument("expected scalar type");
   }
@@ -497,11 +497,11 @@ static void tensorDiv(rpc::RPCMessage& raw_message) {
   if (at::isIntegralType(tensor.type().scalarType())) {
     int64_t value = unpackInteger(raw_message);
     finalize(raw_message);
-    at::div_out(src, at::Scalar((int64_t)value), tensor);
+    at::div_out(tensor, src, at::Scalar((int64_t)value));
   } else if (at::isFloatingType(tensor.type().scalarType())) {
     double value = unpackFloat(raw_message);
     finalize(raw_message);
-    at::div_out(src, value, tensor);
+    at::div_out(tensor, src, value);
   } else {
     throw std::invalid_argument("expected scalar type");
   }
@@ -514,11 +514,11 @@ static void tensorFmod(rpc::RPCMessage& raw_message) {
   if (at::isIntegralType(tensor.type().scalarType())) {
     int64_t value = unpackInteger(raw_message);
     finalize(raw_message);
-    at::fmod_out(src, at::Scalar((int64_t)value), tensor);
+    at::fmod_out(tensor, src, at::Scalar((int64_t)value));
   } else {
     double value = unpackFloat(raw_message);
     finalize(raw_message);
-    at::fmod_out(src, value, tensor);
+    at::fmod_out(tensor, src, value);
   }
 }
 
@@ -529,11 +529,11 @@ static void tensorRemainder(rpc::RPCMessage& raw_message) {
   if (at::isIntegralType(tensor.type().scalarType())) {
     int64_t value = unpackInteger(raw_message);
     finalize(raw_message);
-    at::remainder_out(src, at::Scalar((int64_t)value), tensor);
+    at::remainder_out(tensor, src, at::Scalar((int64_t)value));
   } else if (at::isFloatingType(tensor.type().scalarType())) {
     double value = unpackFloat(raw_message);
     finalize(raw_message);
-    at::remainder_out(src, value, tensor);
+    at::remainder_out(tensor, src, value);
   } else {
     throw std::invalid_argument("expected scalar type");
   }
@@ -547,12 +547,12 @@ static void tensorClamp(rpc::RPCMessage& raw_message) {
     int64_t min_value = unpackInteger(raw_message);
     int64_t max_value = unpackInteger(raw_message);
     finalize(raw_message);
-    at::clamp_out(src, at::Scalar((int64_t)min_value), at::Scalar((int64_t)max_value), tensor);
+    at::clamp_out(tensor, src, at::Scalar((int64_t)min_value), at::Scalar((int64_t)max_value));
   } else if (at::isFloatingType(tensor.type().scalarType())) {
     double min_value = unpackFloat(raw_message);
     double max_value = unpackFloat(raw_message);
     finalize(raw_message);
-    at::clamp_out(src, min_value, max_value, tensor);
+    at::clamp_out(tensor, src, min_value, max_value);
   } else {
     throw std::invalid_argument("expected scalar type");
   }
@@ -566,11 +566,11 @@ static void tensorCadd(rpc::RPCMessage& raw_message) {
   if (at::isIntegralType(tensor.type().scalarType())) {
     int64_t value = unpackInteger(raw_message);
     finalize(raw_message);
-    at::add_out(src1, at::Scalar((int64_t)value), src2, tensor);
+    at::add_out(tensor, src1, src2, at::Scalar((int64_t)value));
   } else if (at::isFloatingType(tensor.type().scalarType())) {
     double value = unpackFloat(raw_message);
     finalize(raw_message);
-    at::add_out(src1, value, src2, tensor);
+    at::add_out(tensor, src1, src2, value);
   } else {
     throw std::invalid_argument("expected scalar type");
   }
@@ -584,11 +584,11 @@ static void tensorCsub(rpc::RPCMessage& raw_message) {
   if (at::isIntegralType(tensor.type().scalarType())) {
     int64_t value = unpackInteger(raw_message);
     finalize(raw_message);
-    at::sub_out(src1, at::Scalar((int64_t)value), src2, tensor);
+    at::sub_out(tensor, src1, src2, at::Scalar((int64_t)value));
   } else if (at::isFloatingType(tensor.type().scalarType())) {
     double value = unpackFloat(raw_message);
     finalize(raw_message);
-    at::sub_out(src1, value, src2, tensor);
+    at::sub_out(tensor, src1, src2, value);
   } else {
     throw std::invalid_argument("expected scalar type");
   }
@@ -599,7 +599,7 @@ static void tensorCmul(rpc::RPCMessage& raw_message) {
   at::Tensor src1 = unpackRetrieveTensor(raw_message);
   at::Tensor src2 = unpackRetrieveTensor(raw_message);
   finalize(raw_message);
-  at::mul_out(src1, src2, tensor);
+  at::mul_out(tensor, src1, src2);
 }
 
 static void tensorCpow(rpc::RPCMessage& raw_message) {
@@ -607,7 +607,7 @@ static void tensorCpow(rpc::RPCMessage& raw_message) {
   at::Tensor src1 = unpackRetrieveTensor(raw_message);
   at::Tensor src2 = unpackRetrieveTensor(raw_message);
   finalize(raw_message);
-  at::pow_out(src1, src2, tensor);
+  at::pow_out(tensor, src1, src2);
 }
 
 static void tensorCdiv(rpc::RPCMessage& raw_message) {
@@ -615,7 +615,7 @@ static void tensorCdiv(rpc::RPCMessage& raw_message) {
   at::Tensor src1 = unpackRetrieveTensor(raw_message);
   at::Tensor src2 = unpackRetrieveTensor(raw_message);
   finalize(raw_message);
-  at::div_out(src1, src2, tensor);
+  at::div_out(tensor, src1, src2);
 }
 
 static void tensorCfmod(rpc::RPCMessage& raw_message) {
@@ -623,7 +623,7 @@ static void tensorCfmod(rpc::RPCMessage& raw_message) {
   at::Tensor src1 = unpackRetrieveTensor(raw_message);
   at::Tensor src2 = unpackRetrieveTensor(raw_message);
   finalize(raw_message);
-  at::fmod_out(src1, src2, tensor);
+  at::fmod_out(tensor, src1, src2);
 }
 
 static void tensorCremainder(rpc::RPCMessage& raw_message) {
@@ -631,7 +631,7 @@ static void tensorCremainder(rpc::RPCMessage& raw_message) {
   at::Tensor src1 = unpackRetrieveTensor(raw_message);
   at::Tensor src2 = unpackRetrieveTensor(raw_message);
   finalize(raw_message);
-  at::remainder_out(src1, src2, tensor);
+  at::remainder_out(tensor, src1, src2);
 }
 
 static void tensorAddcmul(rpc::RPCMessage& raw_message) {
@@ -643,11 +643,11 @@ static void tensorAddcmul(rpc::RPCMessage& raw_message) {
   if (at::isIntegralType(tensor.type().scalarType())) {
     int64_t value = unpackInteger(raw_message);
     finalize(raw_message);
-    at::addcmul_out(src1, at::Scalar((int64_t)value), src2, src3, tensor);
+    at::addcmul_out(tensor, src1, src2, src3, at::Scalar((int64_t)value));
   } else if (at::isFloatingType(tensor.type().scalarType())) {
     double value = unpackFloat(raw_message);
     finalize(raw_message);
-    at::addcmul_out(src1, value, src2, src3, tensor);
+    at::addcmul_out(tensor, src1, src2, src3, value);
   } else {
     throw std::invalid_argument("expected scalar type");
   }
@@ -662,11 +662,11 @@ static void tensorAddcdiv(rpc::RPCMessage& raw_message) {
   if (at::isIntegralType(tensor.type().scalarType())) {
     int64_t value = unpackInteger(raw_message);
     finalize(raw_message);
-    at::addcdiv_out(src1, at::Scalar((int64_t)value), src2, src3, tensor);
+    at::addcdiv_out(tensor, src1, src2, src3, at::Scalar((int64_t)value));
   } else if (at::isFloatingType(tensor.type().scalarType())) {
     double value = unpackFloat(raw_message);
     finalize(raw_message);
-    at::addcdiv_out(src1, value, src2, src3, tensor);
+    at::addcdiv_out(tensor, src1, src2, src3, value);
   } else {
     throw std::invalid_argument("expected scalar type");
   }
@@ -682,12 +682,12 @@ static void tensorAddmv(rpc::RPCMessage& raw_message) {
     int64_t beta = unpackInteger(raw_message);
     int64_t alpha = unpackInteger(raw_message);
     finalize(raw_message);
-    at::addmv_out(at::Scalar((int64_t)beta), src, at::Scalar((int64_t)alpha), mat, vec, tensor);
+    at::addmv_out(tensor, src, mat, vec, at::Scalar((int64_t)beta), at::Scalar((int64_t)alpha));
   } else if (at::isFloatingType(tensor.type().scalarType())) {
     double beta = unpackFloat(raw_message);
     double alpha = unpackFloat(raw_message);
     finalize(raw_message);
-    at::addmv_out(beta, src, alpha, mat, vec, tensor);
+    at::addmv_out(tensor, src, mat, vec, beta, alpha);
   } else {
     throw std::invalid_argument("expected scalar type");
   }
@@ -703,12 +703,12 @@ static void tensorAddmm(rpc::RPCMessage& raw_message) {
     int64_t beta = unpackInteger(raw_message);
     int64_t alpha = unpackInteger(raw_message);
     finalize(raw_message);
-    at::addmm_out(at::Scalar((int64_t)beta), src, at::Scalar((int64_t)alpha), mat1, mat2, tensor);
+    at::addmm_out(tensor, src, mat1, mat2, at::Scalar((int64_t)beta), at::Scalar((int64_t)alpha));
   } else if (at::isFloatingType(tensor.type().scalarType())) {
     double beta = unpackFloat(raw_message);
     double alpha = unpackFloat(raw_message);
     finalize(raw_message);
-    at::addmm_out(beta, src, alpha, mat1, mat2, tensor);
+    at::addmm_out(tensor, src, mat1, mat2, beta, alpha);
   } else {
     throw std::invalid_argument("expected scalar type");
   }
@@ -724,12 +724,12 @@ static void tensorAddr(rpc::RPCMessage& raw_message) {
     int64_t beta = unpackInteger(raw_message);
     int64_t alpha = unpackInteger(raw_message);
     finalize(raw_message);
-    at::addr_out(at::Scalar((int64_t)beta), src, at::Scalar((int64_t)alpha), vec1, vec2, tensor);
+    at::addr_out(tensor, src, vec1, vec2,at::Scalar((int64_t)beta), at::Scalar((int64_t)alpha));
   } else if (at::isFloatingType(tensor.type().scalarType())) {
     double beta = unpackFloat(raw_message);
     double alpha = unpackFloat(raw_message);
     finalize(raw_message);
-    at::addr_out(beta, src, alpha, vec1, vec2, tensor);
+    at::addr_out(tensor, src, vec1, vec2, beta, alpha);
   } else {
     throw std::invalid_argument("expected scalar type");
   }
@@ -745,12 +745,12 @@ static void tensorAddbmm(rpc::RPCMessage& raw_message) {
     int64_t beta = unpackInteger(raw_message);
     int64_t alpha = unpackInteger(raw_message);
     finalize(raw_message);
-    at::addbmm_out(at::Scalar((int64_t)beta), src, at::Scalar((int64_t)alpha), batch1, batch2, tensor);
+    at::addbmm_out(tensor, src, batch1, batch2, at::Scalar((int64_t)beta), at::Scalar((int64_t)alpha));
   } else if (at::isFloatingType(tensor.type().scalarType())) {
     double beta = unpackFloat(raw_message);
     double alpha = unpackFloat(raw_message);
     finalize(raw_message);
-    at::addbmm_out(beta, src, alpha, batch1, batch2, tensor);
+    at::addbmm_out(tensor, src, batch1, batch2, beta, alpha);
   } else {
     throw std::invalid_argument("expected scalar type");
   }
@@ -766,30 +766,12 @@ static void tensorBaddbmm(rpc::RPCMessage& raw_message) {
     int64_t beta = unpackInteger(raw_message);
     int64_t alpha = unpackInteger(raw_message);
     finalize(raw_message);
-    at::baddbmm_out(at::Scalar((int64_t)beta), src, at::Scalar((int64_t)alpha), batch1, batch2, tensor);
+    at::baddbmm_out(tensor, src, batch1, batch2, at::Scalar((int64_t)beta), at::Scalar((int64_t)alpha));
   } else if (at::isFloatingType(tensor.type().scalarType())) {
     double beta = unpackFloat(raw_message);
     double alpha = unpackFloat(raw_message);
     finalize(raw_message);
-    at::baddbmm_out(beta, src, alpha, batch1, batch2, tensor);
-  } else {
-    throw std::invalid_argument("expected scalar type");
-  }
-}
-
-static void tensorMatch(rpc::RPCMessage& raw_message) {
-  thpp::Tensor *tensor = unpackRetrieveTensor(raw_message);
-  thpp::Tensor *m1 = unpackRetrieveTensor(raw_message);
-  thpp::Tensor *m2 = unpackRetrieveTensor(raw_message);
-
-  if (thpp::isInteger(tensor->type())) {
-    int64_t gain = unpackInteger(raw_message);
-    finalize(raw_message);
-    dynamic_cast<thpp::IntTensor*>(tensor)->match(*m1, *m2, gain);
-  } else if (thpp::isFloat(tensor->type())) {
-    double gain = unpackFloat(raw_message);
-    finalize(raw_message);
-    dynamic_cast<thpp::FloatTensor*>(tensor)->match(*m1, *m2, gain);
+    at::baddbmm_out(tensor, src, batch1, batch2, beta, alpha);
   } else {
     throw std::invalid_argument("expected scalar type");
   }
@@ -802,7 +784,7 @@ static void tensorMax(rpc::RPCMessage& raw_message) {
   int dimension = unpackInteger(raw_message);
   int keepdim = unpackInteger(raw_message);
   finalize(raw_message);
-  at::max_out(src, dimension, keepdim, tensor, indices_);
+  at::max_out(tensor, indices_, src, dimension, keepdim);
 }
 
 static void tensorMin(rpc::RPCMessage& raw_message) {
@@ -812,7 +794,7 @@ static void tensorMin(rpc::RPCMessage& raw_message) {
   int dimension = unpackInteger(raw_message);
   int keepdim = unpackInteger(raw_message);
   finalize(raw_message);
-  at::min_out(src, dimension, keepdim, tensor, indices_);
+  at::min_out(tensor, indices_, src, dimension, keepdim);
 }
 
 static void tensorKthvalue(rpc::RPCMessage& raw_message) {
@@ -823,7 +805,7 @@ static void tensorKthvalue(rpc::RPCMessage& raw_message) {
   int dimension = unpackInteger(raw_message);
   int keepdim = unpackInteger(raw_message);
   finalize(raw_message);
-  at::kthvalue_out(src, k, dimension, keepdim, tensor, indices_);
+  at::kthvalue_out(tensor, indices_, src, k, dimension, keepdim);
 }
 
 static void tensorMode(rpc::RPCMessage& raw_message) {
@@ -833,7 +815,7 @@ static void tensorMode(rpc::RPCMessage& raw_message) {
   int dimension = unpackInteger(raw_message);
   int keepdim = unpackInteger(raw_message);
   finalize(raw_message);
-  at::mode_out(src, dimension, keepdim, tensor, indices_);
+  at::mode_out(tensor, indices_, src, dimension, keepdim);
 }
 
 static void tensorMedian(rpc::RPCMessage& raw_message) {
@@ -843,7 +825,7 @@ static void tensorMedian(rpc::RPCMessage& raw_message) {
   int dimension = unpackInteger(raw_message);
   int keepdim = unpackInteger(raw_message);
   finalize(raw_message);
-  at::median_out(src, dimension, keepdim, tensor, indices_);
+  at::median_out(tensor, indices_, src, dimension, keepdim);
 }
 
 static void tensorSum(rpc::RPCMessage& raw_message) {
@@ -852,7 +834,7 @@ static void tensorSum(rpc::RPCMessage& raw_message) {
   int dimension = unpackInteger(raw_message);
   int keepdim = unpackInteger(raw_message);
   finalize(raw_message);
-  at::sum_out(src, dimension, keepdim, tensor);
+  at::sum_out(tensor, src, dimension, keepdim);
 }
 
 static void tensorProd(rpc::RPCMessage& raw_message) {
@@ -861,7 +843,7 @@ static void tensorProd(rpc::RPCMessage& raw_message) {
   int dimension = unpackInteger(raw_message);
   int keepdim = unpackInteger(raw_message);
   finalize(raw_message);
-  at::prod_out(src, dimension, keepdim, tensor);
+  at::prod_out(tensor, src, dimension, keepdim);
 }
 
 static void tensorCumsum(rpc::RPCMessage& raw_message) {
@@ -869,7 +851,7 @@ static void tensorCumsum(rpc::RPCMessage& raw_message) {
   at::Tensor src = unpackRetrieveTensor(raw_message);
   int dimension = unpackInteger(raw_message);
   finalize(raw_message);
-  at::cumsum_out(src, dimension, tensor);
+  at::cumsum_out(tensor, src, dimension);
 }
 
 static void tensorCumprod(rpc::RPCMessage& raw_message) {
@@ -877,14 +859,14 @@ static void tensorCumprod(rpc::RPCMessage& raw_message) {
   at::Tensor src = unpackRetrieveTensor(raw_message);
   int dimension = unpackInteger(raw_message);
   finalize(raw_message);
-  at::cumprod_out(src, dimension, tensor);
+  at::cumprod_out(tensor, src, dimension);
 }
 
 static void tensorSign(rpc::RPCMessage& raw_message) {
   at::Tensor tensor = unpackRetrieveTensor(raw_message);
   at::Tensor src = unpackRetrieveTensor(raw_message);
   finalize(raw_message);
-  at::sign_out(src, tensor);
+  at::sign_out(tensor, src);
 }
 
 static void tensorTrace(rpc::RPCMessage& raw_message) {
@@ -908,7 +890,7 @@ static void tensorCross(rpc::RPCMessage& raw_message) {
   at::Tensor src2 = unpackRetrieveTensor(raw_message);
   int dimension = unpackInteger(raw_message);
   finalize(raw_message);
-  at::cross_out(src1, src2, dimension, tensor);
+  at::cross_out(tensor, src1, src2, dimension);
 }
 
 static void tensorCmax(rpc::RPCMessage& raw_message) {
@@ -916,7 +898,7 @@ static void tensorCmax(rpc::RPCMessage& raw_message) {
   at::Tensor src1 = unpackRetrieveTensor(raw_message);
   at::Tensor src2 = unpackRetrieveTensor(raw_message);
   finalize(raw_message);
-  at::max_out(src1, src2, tensor);
+  at::max_out(tensor, src1, src2);
 }
 
 static void tensorCmin(rpc::RPCMessage& raw_message) {
@@ -924,7 +906,7 @@ static void tensorCmin(rpc::RPCMessage& raw_message) {
   at::Tensor src1 = unpackRetrieveTensor(raw_message);
   at::Tensor src2 = unpackRetrieveTensor(raw_message);
   finalize(raw_message);
-  at::min_out(src1, src2, tensor);
+  at::min_out(tensor, src1, src2);
 }
 
 /* static void tensorCmaxValue(rpc::RPCMessage& raw_message) { */
@@ -934,11 +916,11 @@ static void tensorCmin(rpc::RPCMessage& raw_message) {
 /*   if (at::isIntegralType(tensor.type().scalarType())) { */
 /*     int64_t value = unpackInteger(raw_message); */
 /*     finalize(raw_message); */
-/*     at::clamp_out(src, at::Scalar((int64_t)value), tensor); */
+/*     at::clamp_out(tensor, src, at::Scalar((int64_t)value)); */
 /*   } else if (at::isFloatingType(tensor.type().scalarType())) { */
 /*     double value = unpackFloat(raw_message); */
 /*     finalize(raw_message); */
-/*     at::clamp_out(src, value, tensor); */
+/*     at::clamp_out(tensor, src, value); */
 /*   } else { */
 /*     throw std::invalid_argument("expected scalar type"); */
 /*   } */
