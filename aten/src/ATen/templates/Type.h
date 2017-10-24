@@ -46,7 +46,7 @@ enum class TypeID {
 };
 
 
-struct ATen_CLASS Type {
+struct AT_API Type {
   explicit Type(Context * context)
   : context(context) {}
   virtual ~Type() {}
