@@ -16,8 +16,8 @@ except ImportError:
 
 if not requests_available:
     if sys.version_info[0] == 2:
-        from urlparse import urlparse
-        from urllib2 import urlopen
+        from urlparse import urlparse  # noqa f811
+        from urllib2 import urlopen  # noqa f811
     else:
         from urllib.request import urlopen
         from urllib.parse import urlparse
