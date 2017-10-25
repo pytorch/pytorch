@@ -228,7 +228,7 @@ class Module(object):
     def register_forward_pre_hook(self, hook):
         """Registers a forward pre-hook on the module.
 
-        The hook will be called before :func:`forward` is invoked.
+        The hook will be called every time before :func:`forward` is invoked.
         It should have the following signature::
 
             hook(module, input) -> None
@@ -244,7 +244,7 @@ class Module(object):
     def register_forward_hook(self, hook):
         """Registers a forward hook on the module.
 
-        The hook will be called every time :func:`forward` computes an output.
+        The hook will be called every time after :func:`forward` has computed an output.
         It should have the following signature::
 
             hook(module, input, output) -> None
