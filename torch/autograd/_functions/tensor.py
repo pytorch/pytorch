@@ -27,8 +27,8 @@ class Index(Function):
         if not isinstance(index, int):
             raise ValueError('Right now, only int-type index is suppported.')
         axes = g.constant(0, [1], "int")
-        starts = g.constant(index, [1], "int")
-        ends = g.constant(index + 1, [1], "int")
+        starts = g.constant(index, [1], "long")
+        ends = g.constant(index + 1, [1], "long")
         slice = g.op("Slice", i, axes, starts, ends)
         return g.op("Squeeze", slice, axes_i=[0])
 
