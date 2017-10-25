@@ -250,6 +250,7 @@ class build_ext(setuptools.command.build_ext.build_ext):
         from tools.cwrap.plugins.Broadcast import Broadcast
         from tools.cwrap.plugins.ProcessorSpecificPlugin import ProcessorSpecificPlugin
         from tools.autograd.gen_variable_type import gen_variable_type
+        from tools.jit.gen_jit_dispatch import gen_jit_dispatch
         thp_plugin = THPPlugin()
         cwrap('torch/csrc/generic/TensorMethods.cwrap', plugins=[
             ProcessorSpecificPlugin(), BoolOption(), thp_plugin,
@@ -261,11 +262,16 @@ class build_ext(setuptools.command.build_ext.build_ext):
         ])
         # Build ATen based Variable classes
         autograd_gen_dir = 'torch/csrc/autograd/generated'
-        if not os.path.exists(autograd_gen_dir):
-            os.mkdir(autograd_gen_dir)
+        jit_gen_dir = 'torch/csrc/jit/generated'
+        for d in (autograd_gen_dir, jit_gen_dir):
+            if not os.path.exists(d):
+                os.mkdir(d)
         gen_variable_type(
             'torch/lib/build/ATen/ATen/Declarations.yaml',
             autograd_gen_dir)
+        gen_jit_dispatch(
+            'torch/lib/build/ATen/ATen/Declarations.yaml',
+            jit_gen_dir)
 
         # It's an old-style class in Python 2.7...
         setuptools.command.build_ext.build_ext.run(self)
@@ -403,6 +409,7 @@ main_sources = [
     "torch/csrc/jit/passes/onnx.cpp",
     "torch/csrc/jit/passes/dead_code_elimination.cpp",
     "torch/csrc/jit/passes/common_subexpression_elimination.cpp",
+    "torch/csrc/jit/generated/aten_dispatch.cpp",
     "torch/csrc/autograd/init.cpp",
     "torch/csrc/autograd/engine.cpp",
     "torch/csrc/autograd/function.cpp",
