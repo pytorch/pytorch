@@ -492,7 +492,9 @@ class AdagradOptimizer(Optimizer):
 
         if self.rowWise:
             assert isinstance(grad, core.GradientSlice),\
-                'If SparseAdagrad with rowWise=True, gradient must be gradientslice'
+                'If SparseAdagrad with rowWise=True, gradient must be '\
+                'a gradientslice. PLease ensure that rowWise is not enabled '\
+                'for the dense Adagrad optimizer, as it is not supported.'
         if isinstance(grad, core.GradientSlice):
             assert self.decay == 1.,\
                 'Decay is not implemented for SparseAdagrad and must be set to 1'
