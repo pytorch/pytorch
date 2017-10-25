@@ -137,7 +137,7 @@ class profile(object):
         return self.function_events.export_chrome_trace(path)
     export_chrome_trace.__doc__ = EventList.export_chrome_trace.__doc__
 
-    def key_averages(self, path):
+    def key_averages(self):
         if self.function_events is None:
             raise RuntimeError("can't average a trace that didn't finish running")
         return self.function_events.key_averages()
