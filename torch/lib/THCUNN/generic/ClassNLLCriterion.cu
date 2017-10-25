@@ -18,6 +18,7 @@ void THNN_(ClassNLLCriterion_updateOutput)(
 
   int n_dims = THCTensor_(nDimension)(state, input);
   int n_classes = THCTensor_(size)(state, input, n_dims - 1);
+  ignore_index -= TH_INDEX_BASE;
 
   if (weights) {
     THCUNN_assertSameGPU(
@@ -70,8 +71,6 @@ void THNN_(ClassNLLCriterion_updateOutput)(
 
   THCTensor_(resize1d)(state, output, 1);
   THCTensor_(resize1d)(state, total_weight, 1);
-  ignore_index -= TH_INDEX_BASE;
-
 
   input = THCTensor_(newContiguous)(state, input);
   weights = weights ? THCTensor_(newContiguous)(state, weights) : NULL;

@@ -60,6 +60,7 @@ void THNN_(SpatialClassNLLCriterion_updateOutput)(
   INITIAL_CHECK;
   THTensor_(resize1d)(output, 1);
   THTensor_(resize1d)(total_weight, 1);
+  ignore_index -= TH_INDEX_BASE;
 
   if (!reduce) {
     int64_t batch_size = THTensor_(size)(input, 0);
@@ -72,7 +73,7 @@ void THNN_(SpatialClassNLLCriterion_updateOutput)(
     for (b = 0; b < batch_size; b++) {
       for (h = 0; h < H; h++) {
         for (w = 0; w < W; w++) {
-          int64_t cur_target = (int64_t)THIndexTensor_(get3d)(target, b, h, w);
+          int64_t cur_target = (int64_t)THIndexTensor_(get3d)(target, b, h, w) - TH_INDEX_BASE;
           if (cur_target == ignore_index) {
             THTensor_fastSet3d(output, b, h, w, 0.0f);
             continue;
@@ -144,6 +145,7 @@ void THNN_(SpatialClassNLLCriterion_updateGradInput)(
   THArgCheck(THTensor_(isContiguous)(gradInput), 4,
               "gradInput must be contiguous");
   THNN_CHECK_SHAPE(input, gradInput);
+  ignore_index -= TH_INDEX_BASE;
 
   if (!reduce) {
     GRADOUTPUT_SHAPE_CHECK;
@@ -157,7 +159,7 @@ void THNN_(SpatialClassNLLCriterion_updateGradInput)(
     for (b = 0; b < batch_size; b++) {
       for (h = 0; h < H; h++) {
         for (w = 0; w < W; w++) {
-          int64_t cur_target = (int64_t)THIndexTensor_(get3d)(target, b, h, w);
+          int64_t cur_target = (int64_t)THIndexTensor_(get3d)(target, b, h, w) - TH_INDEX_BASE;
           if (cur_target == ignore_index) {
             continue;
           }

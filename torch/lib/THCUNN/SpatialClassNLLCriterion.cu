@@ -27,7 +27,7 @@ __global__ void SpatialClassNLLCriterion_updateOutput_no_reduce_kernel(
     const int64_t h = (index / batch_size) % H;
     const int64_t w = (index / (batch_size * H)) % W;
 
-    int64_t cur_target = target[b][h][w];
+    int64_t cur_target = target[b][h][w] - TH_INDEX_BASE;
     if (cur_target == ignore_index) {
       output[b][h][w] = ScalarConvert<int, Dtype>::to(0);
       continue;
@@ -56,7 +56,7 @@ __global__ void SpatialClassNLLCriterion_updateGradInput_no_reduce_kernel(
     const int64_t h = (index / batch_size) % H;
     const int64_t w = (index / (batch_size * H)) % W;
 
-    int64_t cur_target = target[b][h][w];
+    int64_t cur_target = target[b][h][w] - TH_INDEX_BASE;
     if (cur_target == ignore_index) {
       continue;
     }

@@ -47,7 +47,7 @@ __global__ void ClassNLLCriterion_updateOutput_no_reduce_kernel(
     int ignore_index) {
 
   CUDA_KERNEL_LOOP(index, batch_size) {
-    int cur_target = target[index];
+    int cur_target = target[index] - TH_INDEX_BASE;
     if (cur_target == ignore_index) {
       output[index] = ScalarConvert<int, Dtype>::to(0);
       continue;
@@ -68,7 +68,7 @@ __global__ void ClassNLLCriterion_updateGradInput_no_reduce_kernel(
     int ignore_index) {
 
   CUDA_KERNEL_LOOP(index, batch_size) {
-    int cur_target = target[index];
+    int cur_target = target[index] - TH_INDEX_BASE;
     if (cur_target == ignore_index) {
       continue;
     }
