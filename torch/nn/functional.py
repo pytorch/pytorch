@@ -917,9 +917,9 @@ def nll_loss(input, target, weight=None, size_average=True, ignore_index=-100, r
     if torch.is_tensor(weight):
         weight = Variable(weight)
     if dim == 2:
-        return torch._C._nn.nll_loss(input, target, weight, size_average, ignore_index)
+        return torch._C._nn.nll_loss(input, target, weight, size_average, ignore_index, reduce)
     elif dim == 4:
-        return torch._C._nn.nll_loss2d(input, target, weight, size_average, ignore_index)
+        return torch._C._nn.nll_loss2d(input, target, weight, size_average, ignore_index, reduce)
     else:
         raise ValueError('Expected 2 or 4 dimensions (got {})'.format(dim))
 
