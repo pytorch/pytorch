@@ -121,7 +121,10 @@ class Multinomial(Distribution):
         return torch.multinomial(self.probs, 1, True).squeeze(-1)
 
     def sample_n(self, n):
-        return torch.multinomial(self.probs, n, True).t()
+        if n == 1:
+            return self.sample().expand(1, 1)
+        else:
+            return torch.multinomial(self.probs, n, True).t()
 
     def log_prob(self, value):
         p = self.probs / self.probs.sum(-1, keepdim=True)
