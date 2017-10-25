@@ -564,7 +564,6 @@ class TestSparse(TestCase):
                 self._test_zeros([2, 3, 4], i_shapes[:i_dim], v_shapes[:v_dim])
 
     def _test_zeros_like(self, template_shape_i, template_shape_v=None):
-        # import pdb; pdb.set_trace()
         template_shape_v = template_shape_v or []
         template_shape = template_shape_i + template_shape_v
         for nnz in [9, 12]:
