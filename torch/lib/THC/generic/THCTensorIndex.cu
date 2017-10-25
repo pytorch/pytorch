@@ -164,6 +164,7 @@ void THCTensor_(indexAdd)(THCState *state, THCTensor *dst, int dim, THCudaLongTe
   THArgCheck(dim < srcDims, 4, "Indexing dim is out of bounds");
   THArgCheck(srcDims > 0, 2, "Source tensor is empty");
   THArgCheck(numIndices == src->size[dim], 4, "length of src.size[dim] is not equal to length of indices");
+  THArgCheck(dst->storage != src->storage, 5, "Output and input tensors should not share storage");
 
   int indContig = THCudaLongTensor_isContiguous(state, indices);
 

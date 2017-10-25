@@ -359,6 +359,7 @@ void THTensor_(indexAdd)(THTensor *tensor, int dim, THLongTensor *index, THTenso
   THArgCheck(index->nDimension == 1, 3, "Index is supposed to be a vector");
   THArgCheck(dim < src->nDimension, 4,"Indexing dim %d is out of bounds of tensor", dim + TH_INDEX_BASE);
   THArgCheck(numel == src->size[dim],4,"Number of indices should be equal to source:size(dim)");
+  THArgCheck(tensor->storage != src->storage, 4, "Output and input tensors should not share storage");
 
   index = THLongTensor_newContiguous(index);
   index_data = THLongTensor_data(index);
@@ -514,6 +515,7 @@ void THTensor_(scatterAdd)(THTensor *tensor, int dim, THLongTensor *index, THTen
              "Index tensor must have same dimensions as output tensor");
   THArgCheck(THTensor_(nDimension)(src) == THTensor_(nDimension)(tensor), 4,
              "Input tensor must have same dimensions as output tensor");
+  THArgCheck(tensor->storage != src->storage, 4, "Output and input tensors should not share storage");
 
   elems_per_row = THLongTensor_size(index, dim);
 
