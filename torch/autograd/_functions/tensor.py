@@ -24,13 +24,66 @@ class Index(Function):
         # We should only expect index as an integer in this case.
         # We use "Slice" to get the index-th element in i,
         # Then we reduce the dimension using "Reshape".
-        if not isinstance(index, int):
-            raise ValueError('Right now, only int-type index is suppported.')
-        axes = g.constant(0, [1], "int")
-        starts = g.constant(index, [1], "long")
-        ends = g.constant(index + 1, [1], "long")
-        slice = g.op("Slice", i, axes, starts, ends)
-        return g.op("Squeeze", slice, axes_i=[0])
+        if isinstance(index, int):
+            axes = g.constant(0, [1], "int")
+            starts = g.constant(index, [1], "long")
+            ends = g.constant(index + 1, [1], "long")
+            slice = g.op("Slice", i, axes, starts, ends)
+            return g.op("Squeeze", slice, axes_i=[0])
+        elif isinstance(index, tuple):
+            dims = i.type().sizes()
+            ndims = len(dims)
+            axes_ten = torch.IntTensor([idx for idx in range(ndims)])
+            axes = g.op("Constant", value_t=axes_ten)
+            starts_list = []
+            ends_list = []
+            squeeze_indices = []
+
+            # Given an index, size of dimension, a list, and a default fill val,
+            # fill in based on these conditions:
+            # 1) not specified (None) - fill with fillval (e.g. 0 or size)
+            # 2) negative index - calculate corresponding positive index and append
+            # 3) positive index - append to list
+            # 4) integer - keep only that integer and squeeze it at the end
+            def append_advanced_index(index, dim, list, fillval):
+                if index is None:
+                    list.append(fillval)
+                else:
+                    addend = (dim if index < 0 else 0)
+                    list.append(index + addend)
+
+            for idx in range(ndims):
+                # Don't slice if we're off the end of the tuple
+                if idx > len(index):
+                    starts_list.append(0)
+                    ends_list.append(dims[idx])
+                    continue
+
+                if isinstance(index[idx], int):
+                    starts_list.append(index[idx])
+                    ends_list.append(index[idx] + 1)
+                    squeeze_indices.append(idx)
+                    continue
+
+                # Start index
+                append_advanced_index(index[idx].start, dims[idx], starts_list, 0)
+                # End index
+                append_advanced_index(index[idx].stop, dims[idx], ends_list, dims[idx])
+
+                if index[idx].step is not None:
+                    raise ValueError("Strided slice is not supported at this time")
+
+            starts_ten = torch.LongTensor(starts_list)
+            starts = g.op("Constant", value_t=starts_ten)
+            ends_ten = torch.LongTensor(ends_list)
+            ends = g.op("Constant", value_t=ends_ten)
+            slice = g.op("Slice", i, axes, starts, ends)
+            if squeeze_indices:
+                return g.op('Squeeze', slice, axes_i=squeeze_indices)
+            else:
+                return slice
+        else:
+            raise ValueError('Unsupported index type {}'.format(type(index)))
 
     @staticmethod
     def forward(ctx, i, index):
