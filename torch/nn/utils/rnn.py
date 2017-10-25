@@ -70,6 +70,8 @@ def pack_padded_sequence(input, lengths, batch_first=False):
             steps.append(input[prev_l:l, :c_batch_size].contiguous().view(-1, input.size(2)))
             batch_sizes.extend([c_batch_size] * (l - prev_l))
             prev_l = l
+        elif prev_l > l:  # remember that new_length is the preceding length in the array
+            raise ValueError("lengths array has to be sorted in decreasing order")
 
     return PackedSequence(torch.cat(steps), batch_sizes)
 
