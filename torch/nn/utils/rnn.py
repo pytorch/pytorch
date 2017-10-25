@@ -105,14 +105,21 @@ def pad_packed_sequence(sequence, batch_first=False, padding_value=0.0):
     lengths = []
     data_offset = 0
     prev_batch_size = batch_sizes[0]
+    prev_i = 0
     for i, batch_size in enumerate(batch_sizes):
-        output[i, :batch_size] = var_data[data_offset:data_offset + batch_size]
-        data_offset += batch_size
-
+        if batch_size != prev_batch_size:
+            l = prev_batch_size * (i - prev_i)
+            output[prev_i:i, :prev_batch_size] = var_data[data_offset:data_offset + l]
+            data_offset += l
+            prev_i = i
         dec = prev_batch_size - batch_size
         if dec > 0:
             lengths.extend((i,) * dec)
         prev_batch_size = batch_size
+
+    l = prev_batch_size * (len(batch_sizes) - prev_i)
+    output[prev_i:, :prev_batch_size] = var_data[data_offset:data_offset + l]
+
     lengths.extend((i + 1,) * batch_size)
     lengths.reverse()
 
