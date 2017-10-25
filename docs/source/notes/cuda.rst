@@ -75,17 +75,6 @@ follows::
       x = x.cuda()
       net.cuda()
 
-When working with multiple GPUs on a system, you can use the
-`CUDA_VISIBLE_DEVICES` environment flag to manage which GPUs are available to
-PyTorch. To manually control which GPU a tensor is created on, the best practice
-is to use the `torch.cuda.device()` context manager::
-
-    torch.cuda.set_device(0)
-    print("Outside device is 0")  # On device 0
-    with torch.cuda.device(1):
-        print("Inside device is 1")  # On device 1
-    print("Outside device is still 0")  # On device 0
-
 When creating tensors, an alternative to the if statement is to have a default
 datatype defined, and cast all tensors using that. An example when using a
 dataloader would be as follows::
@@ -94,10 +83,20 @@ dataloader would be as follows::
     for i, x in enumerate(train_loader):
         x = Variable(x.type(dtype))
 
+When working with multiple GPUs on a system, you can use the
+`CUDA_VISIBLE_DEVICES` environment flag to manage which GPUs are available to
+PyTorch. To manually control which GPU a tensor is created on, the best practice
+is to use the `torch.cuda.device()` context manager::
+
+    print("Outside device is 0")  # On device 0 (default in most scenarios)
+    with torch.cuda.device(1):
+        print("Inside device is 1")  # On device 1
+    print("Outside device is still 0")  # On device 0
+
 If you have a tensor and would like to create a new tensor of the same type on
 the same device, then you can use the `.new()` function, which acts the same as
-a normal tensor constructor; this holds even when the device is different to the
-one in the current context.
+a normal tensor constructor. Whilst the previously mentioned methods depend on
+the current GPU context, `new()` preserves the device of the original tensor.
 
 This is the recommended practice when creating modules in which new
 tensors/variables need to be created internally during the forward pass::
@@ -112,13 +111,14 @@ tensors/variables need to be created internally during the forward pass::
 
 If you want to create a tensor of the same type and size of another tensor, and
 fill it with either ones or zeros, `torch.ones_like()` or `torch.zeros_like()`
-are provided as more convenient functions::
+are provided as more convenient functions (which also preserve device)::
 
     x_cpu = torch.FloatTensor(1)
     x_gpu = torch.cuda.FloatTensor(1)
 
     y_cpu = torch.ones_like(x_cpu)
     y_gpu = torch.zeros_like(x_gpu)
+
 
 Use pinned memory buffers
 ^^^^^^^^^^^^^^^^^^^^^^^^^
