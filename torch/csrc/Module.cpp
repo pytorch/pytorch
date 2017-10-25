@@ -192,30 +192,66 @@ PyObject * THPModule_fromNumpy(PyObject *_unused, PyObject *array)
  * STATELESS FUNCTIONS
  **/
 
+static PyObject * findTensor(PyObject *args, PyObject *kwargs) {
+  for (int i = 0; i < PyTuple_Size(args); i++) {
+    PyObject *item = PyTuple_GET_ITEM(args, i);
+    if (THPModule_isTensor(item) || THPVariable_Check(item)) {
+      return item;
+    }
+  }
+  if (kwargs) {
+    Py_ssize_t pos = 0;
+    PyObject *key, *value;
+    while (PyDict_Next(kwargs, &pos, &key, &value)) {
+      if (THPModule_isTensor(value) || THPVariable_Check(value)) {
+        return value;
+      }
+    }
+  }
+  return THPDefaultTensorClass;
+}
+
+static PyObject * swapFirstTwoItems(PyObject *args) {
+  // Returns a tuple with the first two items swapped
+  auto size = PyTuple_GET_SIZE(args);
+  auto r = THPObjectPtr{PyTuple_New(size)};
+  if (!r) return nullptr;
+  for (Py_ssize_t i = 0; i < size; i++) {
+    PyObject* obj = PyTuple_GET_ITEM(args, (i <= 1 ? 1 - i : i));
+    Py_INCREF(obj);
+    PyTuple_SET_ITEM(r.get(), i, obj);
+  }
+  return r.release();
+}
+
+static PyObject * dispatchStateless(PyObject *args, PyObject *kwargs, const char *name) {
+  PyObject *tensor = findTensor(args, kwargs);
+  return THPUtils_dispatchStateless(tensor, name, args, kwargs);
+}
+
+static PyObject * dispatchStatelessAddXX(PyObject *args, PyObject *kwargs, const char *name) {
+  PyObject *tensor = findTensor(args, kwargs);
+  if (THPVariable_Check(tensor) && PyTuple_GET_SIZE(args) >= 2 && tensor == PyTuple_GET_ITEM(args, 1)) {
+    // On Variables, swap the first two arguments if the 'self' argument comes
+    // second. This handles the deprecated torch.addxx signatures. For example,
+    // torch.addmm(1, var, 2, a, b) -> var.addmm(1, 2, a, b)
+    auto newArgs = THPObjectPtr{swapFirstTwoItems(args)};
+    return THPUtils_dispatchStateless(tensor, name, newArgs.get(), kwargs);
+  } else {
+    return THPUtils_dispatchStateless(tensor, name, args, kwargs);
+  }
+}
+
 #define IMPLEMENT_STATELESS(name)                                              \
 static PyObject * TH_CONCAT_2(THPModule_, name)(PyObject *_unused, PyObject *args, PyObject *kwargs) \
 {                                                                              \
-  PyObject *tensor = THPDefaultTensorClass;                                    \
-  PyObject *key, *value;                                                       \
-  Py_ssize_t pos = 0;                                                          \
-  for (int i = 0; i < PyTuple_Size(args); i++) {                               \
-    PyObject *item = PyTuple_GET_ITEM(args, i);                                \
-    if (THPModule_isTensor(item) || THPVariable_Check(item)) {                 \
-      tensor = item;                                                           \
-      goto dispatch;                                                           \
-    }                                                                          \
-  }                                                                            \
-  if (kwargs) {                                                                \
-    while (PyDict_Next(kwargs, &pos, &key, &value)) {                          \
-      if (THPModule_isTensor(value) || THPVariable_Check(value)) {             \
-        tensor = value;                                                        \
-        goto dispatch;                                                         \
-      }                                                                        \
-    }                                                                          \
-  }                                                                            \
-                                                                               \
-dispatch:                                                                      \
-  return THPUtils_dispatchStateless(tensor, #name, args, kwargs);              \
+  return dispatchStateless(args, kwargs, #name);                               \
+}
+
+#define IMPLEMENT_STATELESS_ADDXX(name)                                        \
+static PyObject * TH_CONCAT_2(THPModule_, name)(PyObject *_unused, PyObject *args, PyObject *kwargs) \
+{                                                                              \
+  return dispatchStatelessAddXX(args, kwargs, #name);                          \
 }
 
 IMPLEMENT_STATELESS(sigmoid)
@@ -293,15 +329,8 @@ IMPLEMENT_STATELESS(zeros_like)
 IMPLEMENT_STATELESS(ones)
 IMPLEMENT_STATELESS(ones_like)
 IMPLEMENT_STATELESS(index_select)
-IMPLEMENT_STATELESS(addmm)
-IMPLEMENT_STATELESS(addmv)
-IMPLEMENT_STATELESS(addr)
 IMPLEMENT_STATELESS(ger)
 IMPLEMENT_STATELESS(mv)
-IMPLEMENT_STATELESS(addbmm)
-IMPLEMENT_STATELESS(baddbmm)
-IMPLEMENT_STATELESS(addcmul)
-IMPLEMENT_STATELESS(addcdiv)
 IMPLEMENT_STATELESS(mm)
 IMPLEMENT_STATELESS(bmm)
 // TODO: this doesn't implement options that return numbers!
@@ -331,45 +360,23 @@ IMPLEMENT_STATELESS(orgqr)
 IMPLEMENT_STATELESS(ormqr)
 IMPLEMENT_STATELESS(btrifact)
 IMPLEMENT_STATELESS(btrisolve)
+IMPLEMENT_STATELESS(gt)
+IMPLEMENT_STATELESS(lt)
+IMPLEMENT_STATELESS(ge)
+IMPLEMENT_STATELESS(le)
+IMPLEMENT_STATELESS(eq)
+IMPLEMENT_STATELESS(ne)
+
+IMPLEMENT_STATELESS_ADDXX(addmm)
+IMPLEMENT_STATELESS_ADDXX(addmv)
+IMPLEMENT_STATELESS_ADDXX(addr)
+IMPLEMENT_STATELESS_ADDXX(addbmm)
+IMPLEMENT_STATELESS_ADDXX(baddbmm)
+IMPLEMENT_STATELESS_ADDXX(addcmul)
+IMPLEMENT_STATELESS_ADDXX(addcdiv)
 
 #undef IMPLEMENT_STATELESS
-
-// For logical functions a reverse type search is required (if the first argument
-// is a ByteTensor (result), it shouldn't pick it's version).
-#define IMPLEMENT_STATELESS_REVERSED(name)                                     \
-static PyObject * TH_CONCAT_2(THPModule_, name)(PyObject *_unused, PyObject *args, PyObject *kwargs) \
-{                                                                              \
-  PyObject *tensor = THPDefaultTensorClass;                                    \
-  PyObject *key, *value;                                                       \
-  Py_ssize_t pos = 0;                                                          \
-  for (int i = PyTuple_Size(args)-1; i >= 0; i--) {                            \
-    PyObject *item = PyTuple_GET_ITEM(args, i);                                \
-    if (THPModule_isTensor(item) || THPVariable_Check(item)) {                 \
-      tensor = item;                                                           \
-      goto dispatch;                                                           \
-    }                                                                          \
-  }                                                                            \
-  if (kwargs) {                                                                \
-    while (PyDict_Next(kwargs, &pos, &key, &value)) {                          \
-      if (THPModule_isTensor(value) || THPVariable_Check(value)) {             \
-        tensor = value;                                                        \
-        goto dispatch;                                                         \
-      }                                                                        \
-    }                                                                          \
-  }                                                                            \
-                                                                               \
-dispatch:                                                                      \
-  return THPUtils_dispatchStateless(tensor, #name, args, kwargs);              \
-}
-
-IMPLEMENT_STATELESS_REVERSED(gt)
-IMPLEMENT_STATELESS_REVERSED(lt)
-IMPLEMENT_STATELESS_REVERSED(ge)
-IMPLEMENT_STATELESS_REVERSED(le)
-IMPLEMENT_STATELESS_REVERSED(eq)
-IMPLEMENT_STATELESS_REVERSED(ne)
-
-#undef IMPLEMENT_STATELESS
+#undef IMPLEMENT_STATELESS_ADDXX
 
 // In nonzero, the first argument might be a LongTensor that will be used
 // for indices output, so we should pick a function based on second
