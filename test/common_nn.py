@@ -27,8 +27,12 @@ PRECISION = 1e-5
 def get_size_average(m):
     return getattr(m, 'size_average', False) or getattr(m, 'sizeAverage', False)
 
+
 def get_weight(m):
-    return getattr(m, 'weight', None)
+    result = getattr(m, 'weight', None)
+    if result is not None:
+        return result
+    return getattr(m, 'weights', None)
 
 module_tests = [
     dict(
