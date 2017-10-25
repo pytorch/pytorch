@@ -18,6 +18,8 @@ script:
     - cmake .. -DNO_CUDA=1 -DCMAKE_INSTALL_PREFIX=../install
     - make install
     - ../tools/run_tests.sh .
+    - cd ..
+    - tools/test_install.sh $(pwd)/install $(pwd)
 
 matrix:
     fast_finish: true
