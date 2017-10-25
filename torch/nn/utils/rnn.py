@@ -59,28 +59,20 @@ def pack_padded_sequence(input, lengths, batch_first=False):
     steps = []
     batch_sizes = []
     lengths_iter = reversed(lengths)
-    current_length = next(lengths_iter)
     batch_size = input.size(1)
     if len(lengths) != batch_size:
         raise ValueError("lengths array has incorrect size")
 
-    for step, step_value in enumerate(input, 1):
-        steps.append(step_value[:batch_size])
-        batch_sizes.append(batch_size)
+    prev_l = 0
+    for i, l in enumerate(lengths_iter):
+        if l > prev_l:
+            c_batch_size = batch_size - i
+            steps.append(input[prev_l:l, :c_batch_size].contiguous().view(-1, input.size(2)))
+            batch_sizes.extend([c_batch_size] * (l - prev_l))
+            prev_l = l
+        elif prev_l > l:  # remember that new_length is the preceding length in the array
+            raise ValueError("lengths array has to be sorted in decreasing order")
 
-        while step == current_length:
-            try:
-                new_length = next(lengths_iter)
-            except StopIteration:
-                current_length = None
-                break
-
-            if current_length > new_length:  # remember that new_length is the preceding length in the array
-                raise ValueError("lengths array has to be sorted in decreasing order")
-            batch_size -= 1
-            current_length = new_length
-        if current_length is None:
-            break
     return PackedSequence(torch.cat(steps), batch_sizes)
 
 
