@@ -19,11 +19,11 @@ const char * ${Tensor}::toString() const {
   return "${Tensor}";
 }
 
-IntList ${Tensor}::sizes() {
+IntList ${Tensor}::sizes() const {
   return IntList(reinterpret_cast<int64_t*>(tensor->size),dim());
 }
 
-int64_t ${Tensor}::dim() {
+int64_t ${Tensor}::dim() const {
   if(isScalar())
     return 0;
   int64_t d = ${THTensor_nDimension};
