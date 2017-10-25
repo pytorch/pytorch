@@ -49,5 +49,20 @@ static inline std::vector<Tensor> chunk(const Tensor &self, int64_t chunks, int6
   return self.split(split_size, dim);
 }
 
+/*
+[NativeFunction]
+name: is_same_size
+arg: Tensor self
+arg: Tensor other
+return: bool
+variants: method, function
+type_method_definition_level: base
+type_method_definition_dispatch: at::native::is_same_size
+[/NativeFunction]
+*/
+static inline bool is_same_size(const Tensor &self, const Tensor &other) {
+  return self.dim() == other.dim() && self.sizes().equals(other.sizes());
+}
+
 }
 }
