@@ -514,50 +514,9 @@ class Variable(_C._VariableBase):
         return id(self)
 
     class _torch(object):
-
-        @staticmethod
-        def cat(iterable, dim=0):
-            return Concat.apply(dim, *iterable)
-
         @staticmethod
         def normal(means, std=1):
             return Normal.apply(means, std)
-
-        @staticmethod
-        def _blas(cls, args, inplace):
-            num_args = len(args)
-            alpha = beta = 1
-            if num_args > 5:
-                raise RuntimeError("too many args")
-            if num_args == 5:
-                alpha, beta = args[0], args[2]
-                tensors = args[1:2] + args[3:]
-            elif num_args == 4:
-                alpha = args[0]
-                tensors = args[1:]
-            else:
-                tensors = args
-            return cls.apply(*(tensors + (alpha, beta, inplace)))
-
-        @classmethod
-        def addmm(cls, *args):
-            return cls._blas(Addmm, args, False)
-
-        @classmethod
-        def addbmm(cls, *args):
-            return cls._blas(Addbmm, args, False)
-
-        @classmethod
-        def baddbmm(cls, *args):
-            return cls._blas(Baddbmm, args, False)
-
-        @classmethod
-        def addmv(cls, *args):
-            return cls._blas(Addmv, args, False)
-
-        @classmethod
-        def addr(cls, *args):
-            return cls._blas(Addr, args, False)
 
 
 for method in dir(Variable):
