@@ -56,7 +56,7 @@ struct TraceEval : autograd::Eval {
       setValueTrace(tracing_state, input, input_node);
       input_node->inferTypeFrom(input.data());
     }
-    tracing_state->var_flags.at(graph->stage()) = detail::getVarFlags(inputs);
+    tracing_state->var_flags.at(graph->stage()).first = detail::getVarFlags(inputs);
   }
 
   void exitTrace(const variable_list& inputs, const variable_list& outputs) {

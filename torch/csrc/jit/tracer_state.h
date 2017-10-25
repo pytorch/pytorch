@@ -64,7 +64,8 @@ struct TracingState : public std::enable_shared_from_this<TracingState> {
   // TODO: Perhaps, turn this into an owning reference.  The buffers
   // are persistent, so this won't lead to a leak.
   std::unordered_map<void*, Node*> buffer_map;
-  std::vector<std::vector<VariableFlags>> var_flags;
+  // A pair of (input_flags, output_flags) for each stage
+  std::vector<std::pair<std::vector<VariableFlags>, std::vector<VariableFlags>>> var_flags;
   std::vector<function_list> output_edges;
 
   std::mutex mutex;

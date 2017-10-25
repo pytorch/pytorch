@@ -1,10 +1,10 @@
 graph(%1 : Double(2)
       %2 : Double(2)) {
-  %3 : Double(2) = Add(%1, %2), uses = [%5.i0, %5.i1, %7.i1];
-  %5 : Double(2) = Mul(%3, %3), uses = [%7.i0];
-  %7 : Double(2) = Mul(%5, %3), uses = [%8.i0, %16.i0];
-  %8 : Double(2) = Tanh(%7), uses = [%10.i0, %10.i1];
-  %10 : Double(2) = Add(%8, %8), uses = [%16.i1];
-  %16 : Double(2) = Add(%7, %10), uses = [%0.i0];
-  return (%16);
+  %4 : Double(2) = add[alpha={1}](%1, %2), uses = [[%7.i0, %7.i1, %11.i1]];
+  %8 : Double(2) = mul(%4, %4), uses = [[%11.i0]];
+  %12 : Double(2) = mul(%8, %4), uses = [[%13.i0, %29.i0]];
+  %14 : Double(2) = tanh(%12), uses = [[%17.i0, %17.i1]];
+  %18 : Double(2) = add[alpha={1}](%14, %14), uses = [[%29.i1]];
+  %30 : Double(2) = add[alpha={1}](%12, %18), uses = [[%0.i0]];
+  return (%30);
 }

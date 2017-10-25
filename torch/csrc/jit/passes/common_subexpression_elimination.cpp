@@ -8,6 +8,16 @@
 
 namespace torch { namespace jit {
 
+namespace {
+
+bool tensorEqual(const at::Tensor& lhs, const at::Tensor& rhs) {
+  return &lhs.type() == &rhs.type() && lhs.equal(rhs);
+}
+
+bool tensorListEqual(const std::vector<at::Tensor>& lhs, const std::vector<at::Tensor>& rhs) {
+  if (lhs.size() != rhs.size()) return false;
+  return std::equal(lhs.begin(), lhs.end(), rhs.begin(), tensorEqual);
+};
 
 
 // Check whether two nodes have the same attributes in CSE.
@@ -24,6 +34,8 @@ bool attributesEqualCSE(const Node* lhs, const Node* rhs) {
 
   auto lnames = lhs->attributeNames();
   auto rnames = rhs->attributeNames();
+  std::sort(lnames.begin(), lnames.end());
+  std::sort(rnames.begin(), rnames.end());
   if (lnames != rnames) return false;
 
   for (auto name : lnames) {
@@ -40,8 +52,13 @@ bool attributesEqualCSE(const Node* lhs, const Node* rhs) {
       COMPARE_ATTRIBUTEVALUE(is)
       COMPARE_ATTRIBUTEVALUE(s)
       COMPARE_ATTRIBUTEVALUE(ss)
+      case AttributeKind::t:
+        if (!tensorEqual(lhs->t(name), rhs->t(name))) return false;
+        break;
+      case AttributeKind::ts:
+        if (!tensorListEqual(lhs->ts(name), rhs->ts(name))) return false;
       default:
-        // NB: Comparison of nodes with tensor(s) or graph(s) will return false.
+        // NB: Comparison of nodes with graph(s) will return false.
         return false;
     }
 
@@ -91,6 +108,8 @@ struct EqualNodeCSE {
     return true;
   }
 };
+
+} // anonymous namespace
 
 // The function implements common subexpression elimination.
 // Since the nodes are visited in topological order, one pass is enough.

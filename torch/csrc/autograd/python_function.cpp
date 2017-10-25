@@ -711,7 +711,7 @@ static void _trace_create(PyObject* op_obj, THPFunction* bw_obj,
     sel->inferTypeFrom(output.data());
     tracer::setValueTrace(tracing_state, output, sel);
   }
-  this_expr->i_(k__inplace, is_inplace);
+  this_expr->i_(kinplace, is_inplace);
 
   // See definition in function.cpp.
   THPObjectPtr passes_py_bool {PyObject_GetAttrString(op_obj, "is_traceable")};

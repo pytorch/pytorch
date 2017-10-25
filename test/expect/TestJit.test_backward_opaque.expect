@@ -1,9 +1,10 @@
 graph(%1 : Double(3, 3)
       %2 : Double(3, 3)
       -------- stage 1 --------
-      %6 : Double(3, 3)) {
-  %4 : Double(3, 3), %5 : Handle = ^Cross()(%1, %2), uses = [[%0.i0], [%7.i1]];
+      %5 : Double(3, 3)) {
+  %4 : Double(3, 3) = cross[dim=-1](%1, %2), uses = [[%0.i0]];
   ---------------- stage 1 ----------------
-  %17 : Double(3, 3), %18 : Double(3, 3), %19 : Handle = CppOp[N5torch8autograd4EvalE](%6, %5), uses = [[%0.i1], [%0.i2], []];
-  return (%4, %17, %18);
+  %7 : Double(3, 3) = cross[dim=-1](%2, %5), uses = [[%0.i1]];
+  %9 : Double(3, 3) = cross[dim=-1](%5, %1), uses = [[%0.i2]];
+  return (%4, %7, %9);
 }
