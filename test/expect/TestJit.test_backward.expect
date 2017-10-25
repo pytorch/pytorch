@@ -5,19 +5,19 @@ graph(%1 : Double(2, 2)
       -------- stage 2 --------
       %14 : Double(2, 2!)
       %15 : Double(2, 2)) {
-  %4 : Double(2, 2) = ^MulConstant(2)(%2), uses = [[%5.i0, %10.i1, %16.i1]];
-  %6 : Double(2, 2) = ^Mul()(%4, %1), uses = [[%0.i0]];
+  %4 : Double(2, 2) = mul[other={2}](%2), uses = [[%5.i0, %10.i1, %16.i1]];
+  %6 : Double(2, 2) = mul(%4, %1), uses = [[%0.i0]];
   ---------------- stage 1 ----------------
-  %9 : Double(2, 2) = ^Mul()(%7, %1), uses = [[%12.i0]];
-  %11 : Double(2, 2) = ^Mul()(%7, %4), uses = [[%0.i1]];
-  %13 : Double(2, 2) = ^MulConstant(2)(%9), uses = [[%0.i2]];
+  %9 : Double(2, 2) = mul(%7, %1), uses = [[%12.i0]];
+  %11 : Double(2, 2) = mul(%7, %4), uses = [[%0.i1]];
+  %13 : Double(2, 2) = mul[other={2}](%9), uses = [[%0.i2]];
   ---------------- stage 2 ----------------
-  %17 : Double(2, 2) = ^Mul()(%14, %4), uses = [[%28.i0]];
-  %19 : Double(2, 2) = ^Mul()(%14, %7), uses = [[%22.i0]];
-  %21 : Double(2, 2) = ^MulConstant(2)(%15), uses = [[%24.i0, %26.i0]];
-  %23 : Double(2, 2) = ^MulConstant(2)(%19), uses = [[%0.i5]];
-  %25 : Double(2, 2) = ^Mul()(%21, %1), uses = [[%28.i1]];
-  %27 : Double(2, 2) = ^Mul()(%21, %7), uses = [[%0.i4]];
+  %17 : Double(2, 2) = mul(%14, %4), uses = [[%28.i0]];
+  %19 : Double(2, 2) = mul(%14, %7), uses = [[%22.i0]];
+  %21 : Double(2, 2) = mul[other={2}](%15), uses = [[%24.i0, %26.i0]];
+  %23 : Double(2, 2) = mul[other={2}](%19), uses = [[%0.i5]];
+  %25 : Double(2, 2) = mul(%21, %1), uses = [[%28.i1]];
+  %27 : Double(2, 2) = mul(%21, %7), uses = [[%0.i4]];
   %29 : Double(2, 2) = CppOp[N5torch8autograd3AddE](%17, %25), uses = [[%0.i3]];
   return (%6, %11, %13, %29, %27, %23);
 }

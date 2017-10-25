@@ -28,7 +28,7 @@ struct AutogradClosure : public Function {
   virtual variable_list apply(const variable_list& inputs) override;
 
 private:
-  AutogradClosure(const std::shared_ptr<MultiStageClosure>& desc, std::size_t stage, FunctionFlags&& f);
+  AutogradClosure(const std::shared_ptr<MultiStageClosure>& desc, std::size_t stage);
 
   variable_list rewrapInputs(const variable_list& inputs);
 
