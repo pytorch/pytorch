@@ -66,7 +66,7 @@ def set_printoptions(
         PRINT_OPTS.linewidth = linewidth
 
 
-def _min_log_scale():
+def _get_min_log_scale():
     min_positive = float_info.min * float_info.epsilon  # get smallest denormal
     if min_positive == 0:  # use smallest normal if DAZ/FTZ is set
         min_positive = float_info.min
@@ -74,6 +74,7 @@ def _min_log_scale():
 
 
 def _number_format(tensor, min_sz=-1):
+    _min_log_scale = _get_min_log_scale()
     min_sz = max(min_sz, 2)
     tensor = torch.DoubleTensor(tensor.size()).copy_(tensor).abs_().view(tensor.nelement())
 
@@ -127,7 +128,7 @@ def _number_format(tensor, min_sz=-1):
         else:
             if exp_max > prec + 1 or exp_max < 0:
                 sz = max(min_sz, 7)
-                scale = math.pow(10, max(exp_max - 1, _min_log_scale()))
+                scale = math.pow(10, max(exp_max - 1, _min_log_scale))
             else:
                 if exp_max == 0:
                     sz = 7
