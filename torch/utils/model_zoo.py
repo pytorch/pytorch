@@ -13,8 +13,6 @@ try:
     requests_available = True
 except ImportError:
     requests_available = False
-
-if not requests_available:
     if sys.version_info[0] == 2:
         from urlparse import urlparse  # noqa f811
         from urllib2 import urlopen  # noqa f811
