@@ -909,14 +909,6 @@ class TestAutograd(TestCase):
         x = Variable(torch.ones(2, 3))
         self.assertTrue(x.resize(3, 2).size() == (3, 2))
 
-    def test_shared_storage(self):
-        x = Variable(torch.ones(5, 5))
-        y = x.t()
-        z = x[1]
-        self.assertRaises(RuntimeError, lambda: x.add_(2))
-        self.assertRaises(RuntimeError, lambda: y.add_(2))
-        self.assertRaises(RuntimeError, lambda: z.add_(2))
-
     def _test_setitem(self, size, index):
         x = Variable(torch.ones(*size), requires_grad=True)
         y = x + 2
@@ -1527,6 +1519,65 @@ class TestAutograd(TestCase):
 
         for key in keys:
             self.assertTrue(hasattr(x, key))
+
+    def test_as_strided(self):
+        x = Variable(torch.arange(0, 25).view(5, 5), requires_grad=True)
+
+        def as_strided(x):
+            return x.as_strided([3, 3], [6, 2], 2)
+
+        gradcheck(as_strided, [x], raise_exception=True)
+        gradgradcheck(as_strided, [x], [Variable(torch.randn(3, 3))])
+
+    def test_inplace_view1(self):
+        root = Variable(torch.randn(2, 2), requires_grad=True)
+        x = root.clone()
+        v1 = x.narrow(0, 0, 1)
+        v1.mul_(2)
+        x.sum().backward()
+        self.assertEqual(root.grad.data.tolist(), [[2, 2], [1, 1]])
+
+    def test_inplace_view2(self):
+        root = Variable(torch.randn(2, 2), requires_grad=True)
+        x = root.clone()
+        v1 = x.narrow(0, 0, 1)
+        v2 = x.narrow(0, 0, 1)
+        v1.mul_(2)
+        v2.sum().backward()
+        self.assertEqual(root.grad.data.tolist(), [[2, 2], [0, 0]])
+
+    def test_inplace_view3(self):
+        root = Variable(torch.randn(2, 2), requires_grad=True)
+        x = root.clone()
+        v1 = x.narrow(0, 0, 1)
+        v2 = v1.narrow(1, 1, 1)
+        v2.mul_(2)
+        x.sum().backward()
+        self.assertEqual(root.grad.data.tolist(), [[1, 2], [1, 1]])
+
+    def test_inplace_view4(self):
+        a = Variable(torch.randn(4, 4), requires_grad=True)
+        b = Variable(torch.randn(2, 2), requires_grad=True)
+
+        def func(root, b):
+            x = root.clone()
+            x.narrow(1, 2, 2).narrow(0, 1, 2).mul_(b)
+            x.narrow(1, 0, 2).narrow(0, 1, 2).mul_(b)
+            return x
+
+        gradcheck(func, [a, b], raise_exception=True)
+        go = Variable(torch.randn(a.size()), requires_grad=True)
+        gradgradcheck(func, (a, b), (go,))
+
+    def test_inplace_view_non_contig(self):
+        data = torch.ones(2, 3, 2).select(2, 1).t()
+        root = Variable(data, requires_grad=True)
+        x = root.clone()
+        v1 = x.narrow(0, 0, 1)
+        v2 = v1.narrow(1, 1, 1)
+        v2.mul_(2)
+        x.sum().backward()
+        self.assertEqual(root.grad.data.tolist(), [[1, 2], [1, 1], [1, 1]])
 
 
 def index_variable(shape, max_indices):

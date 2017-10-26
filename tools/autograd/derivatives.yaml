@@ -51,6 +51,9 @@
 
 - name: arange  # fallthrough
 
+- name: as_strided(Tensor self, IntList size, IntList stride, int64_t storage_offset)
+  self: as_strided_backward(grad, TensorGeometry(self), size, stride, storage_offset)
+
 - name: asin(Tensor self)
   self: grad * (-self * self + 1).sqrt().reciprocal()
 
@@ -145,7 +148,6 @@
 
 - name: expand(Tensor self, IntList size)
   self: reduce_to(grad, self.sizes())
-  __view__: True
 
 - name: eye  # fallthrough
 
@@ -218,7 +220,6 @@
 
 - name: index_select(Tensor self, int64_t dim, Tensor index)
   self: grad.type().zeros(self.sizes()).index_add_(dim, index, grad)
-  __view__: True
 
 - name: inverse(Tensor self)
   self: -at::mm(output.t(), at::mm(grad, output.t()))
@@ -330,7 +331,6 @@
 
 - name: narrow(Tensor self, int64_t dimension, int64_t start, int64_t length)
   self: grad._unnarrow(dimension, start, self.size(dimension))
-  __view__: True
 
 - name: _unnarrow(Tensor self, int64_t dimension, int64_t offset, int64_t dimSize)
   self: grad.narrow(dimension, offset, self.size(dimension))
@@ -368,7 +368,6 @@
 
 - name: permute(Tensor self, IntList dims)
   self: permute_backwards(grad, dims)
-  __view__: True
 
 - name: potrf(Tensor self, bool upper)
   self: potrf_backward(grad, upper, output)
@@ -437,7 +436,6 @@
 
 - name: select(Tensor self, int64_t dim, int64_t sliceIndex)
   self: maybe_unsqueeze(grad, dim, self.sizes().size() != 1)._unnarrow(dim, sliceIndex, self.size(dim))
-  __view__: True
 
 - name: set  # fallthrough
 
@@ -466,11 +464,9 @@
 
 - name: squeeze(Tensor self)
   self: unsqueeze_to(grad, self.sizes());
-  __view__: True
 
 - name: squeeze(Tensor self, int64_t dim)
   self: maybe_unsqueeze(grad, dim, self.size(dim) == 1)
-  __view__: True
 
 - name: std
 
@@ -499,7 +495,6 @@
 
 - name: t(Tensor self)
   self: grad.t()
-  __view__: True
 
 - name: take(Tensor self, Tensor index)
   self: zeros_like(self).put_(index, grad, true)
@@ -520,7 +515,6 @@
 
 - name: transpose(Tensor self, int64_t dim0, int64_t dim1)
   self: grad.transpose(dim0, dim1)
-  __view__: True
 
 - name: tril(Tensor self, int64_t diagonal=0)
   self: grad.tril(diagonal)
@@ -541,13 +535,11 @@
 
 - name: unsqueeze(Tensor self, int64_t dim)
   self: grad.squeeze(dim)
-  __view__: True
 
 - name: var  # TODO
 
 - name: view(Tensor self, IntList size)
   self: grad.contiguous().view(self.sizes())
-  __view__: True
 
 - name: zero(Tensor self)
   self: zeros_like(grad)

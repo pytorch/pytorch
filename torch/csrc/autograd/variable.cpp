@@ -1,6 +1,7 @@
 #include "torch/csrc/autograd/variable.h"
 
 #include "torch/csrc/autograd/generated/VariableType.h"
+#include "torch/csrc/autograd/generated/Functions.h"
 #include "torch/csrc/autograd/functions/accumulate_grad.h"
 
 using namespace at;
@@ -14,6 +15,7 @@ VariableImpl::VariableImpl(Tensor data_, bool requires_grad, bool is_volatile)
   , version_counter()
   , requires_grad(requires_grad)
   , is_volatile(is_volatile)
+  , is_view(false)
   , output_nr(0)
   , pyobj(nullptr) {
   if (!data.defined()) {
@@ -24,9 +26,9 @@ VariableImpl::VariableImpl(Tensor data_, bool requires_grad, bool is_volatile)
 VariableImpl::VariableImpl(Tensor data, std::shared_ptr<Function> grad_fn)
   : VariableImpl(std::move(data))
 {
-  this->grad_fn = grad_fn;
   requires_grad = grad_fn->is_executable;
   output_nr = grad_fn->num_inputs++;
+  _grad_fn = std::move(grad_fn);
 }
 
 VariableImpl::VariableImpl(Tensor data)
@@ -70,7 +72,7 @@ void VariableImpl::assign_(Scalar s) {
 }
 
 std::shared_ptr<Function> VariableImpl::get_grad_accumulator() {
-  if (grad_fn) {
+  if (_grad_fn) {
     throw std::logic_error("get_grad_accumulator() should be only called on leaf Variables");
   }
   if (!requires_grad) {
@@ -85,6 +87,37 @@ std::shared_ptr<Function> VariableImpl::get_grad_accumulator() {
   result = std::make_shared<AccumulateGrad>(Variable(this, true));
   grad_accumulator = result;
   return result;
+}
+
+VariableViewImpl::VariableViewImpl(Variable base_, at::Tensor data_)
+  : VariableImpl(std::move(data_))
+  , base(std::move(base_))
+  , expected_version(0) {
+  if (!base.defined()) {
+    throw std::runtime_error("base is undefined");
+  }
+  if (base.is_view()) {
+    base = base.base();
+  }
+  is_view = true;
+  version_counter = base.version_counter();
+  expected_version = version_counter.current_version();
+}
+
+std::shared_ptr<Function>& VariableViewImpl::get_grad_fn() {
+  std::lock_guard<std::mutex> lock(grad_accumulator_lock);
+  if (expected_version != version_counter.current_version()) {
+    auto fn = std::make_shared<generated::AsStridedBackward>();
+    fn->self_geometry = TensorGeometry(base);
+    fn->size = sizes();
+    fn->stride = strides();
+    fn->storage_offset = Variable(this, true).storage_offset();
+    fn->set_flags(Function::flags({ base }));
+    fn->num_inputs = 1;
+    _grad_fn = std::move(fn);
+    expected_version = version_counter.current_version();
+  }
+  return _grad_fn;
 }
 
 namespace {

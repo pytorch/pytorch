@@ -42,6 +42,8 @@ struct Variable : public at::Tensor {
   inline const Variable & grad() const;
   inline       Variable & grad();
 
+  inline bool is_leaf() const;
+
   inline const std::shared_ptr<Function>& grad_fn() const;
   inline       std::shared_ptr<Function>& grad_fn();
 
@@ -64,6 +66,9 @@ struct Variable : public at::Tensor {
 
   inline const bool& is_volatile() const;
   inline       bool& is_volatile();
+
+  inline bool is_view() const;
+  inline Variable& base() const;
 
   inline Variable & operator=(Variable && rhs) &;
   inline Variable & operator=(const Variable & rhs) &;
@@ -92,16 +97,20 @@ public:
 
 public:
   std::shared_ptr<Function> get_grad_accumulator();
+  virtual std::shared_ptr<Function>& get_grad_fn() {
+    return _grad_fn;
+  }
 
   at::Tensor data;
   Variable grad;
-  std::shared_ptr<Function> grad_fn;
+  std::shared_ptr<Function> _grad_fn;
   VariableVersion version_counter;
   std::vector<std::shared_ptr<FunctionPreHook>> hooks;
   std::weak_ptr<Function> grad_accumulator;
   std::mutex grad_accumulator_lock;
   bool requires_grad;
   bool is_volatile;
+  bool is_view;
   // The "output number" of this variable; e.g., if this variable
   // was the second output of a function, then output_nr == 1.
   // We use this to make sure we can setup the backwards trace
@@ -114,6 +123,15 @@ public:
   friend struct VariableType;
 };
 
+struct VariableViewImpl : public VariableImpl {
+  VariableViewImpl(Variable base, at::Tensor data);
+
+  virtual std::shared_ptr<Function>& get_grad_fn() override;
+
+  Variable base;
+  int expected_version;
+};
+
 inline Variable make_variable(at::Tensor data) {
   return Variable(new VariableImpl(std::move(data)), false);
 }
@@ -124,6 +142,10 @@ inline Variable make_variable(at::Tensor data, std::shared_ptr<Function> grad_fn
 
 inline Variable make_variable(at::Tensor data, bool requires_grad, bool is_volatile=false) {
   return Variable(new VariableImpl(std::move(data), requires_grad, is_volatile), false);
+}
+
+inline Variable make_variable_view(Variable base, at::Tensor data) {
+  return Variable(new VariableViewImpl(std::move(base), std::move(data)), false);
 }
 
 
@@ -155,11 +177,15 @@ inline Variable & Variable::grad() {
   return get()->grad;
 }
 
+inline bool Variable::is_leaf() const {
+  return get()->_grad_fn == nullptr;
+}
+
 inline const std::shared_ptr<Function>& Variable::grad_fn() const {
-  return get()->grad_fn;
+  return get()->get_grad_fn();
 };
 inline std::shared_ptr<Function>& Variable::grad_fn() {
-  return get()->grad_fn;
+  return get()->get_grad_fn();
 };
 inline std::shared_ptr<Function> Variable::grad_accumulator() const {
   return get()->get_grad_accumulator();
@@ -204,6 +230,16 @@ inline const bool& Variable::is_volatile() const {
 }
 inline bool& Variable::is_volatile() {
   return get()->is_volatile;
+}
+
+inline bool Variable::is_view()const {
+  return get()->is_view;
+}
+inline Variable& Variable::base() const {
+  if (is_view()) {
+    return static_cast<VariableViewImpl&>(*get()).base;
+  }
+  throw std::runtime_error("Can't get base of non-view");
 }
 
 inline Variable & Variable::operator=(Variable && rhs) & {
