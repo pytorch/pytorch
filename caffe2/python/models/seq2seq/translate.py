@@ -476,7 +476,7 @@ class Seq2SeqModelCaffe2EnsembleDecoder(object):
             np.array([max_output_seq_len]).astype(dtype=np.int64),
         )
 
-        workspace.RunNetOnce(self.model.net)
+        workspace.RunNet(self.model.net)
 
         num_steps = max_output_seq_len
         score_beam_list = workspace.FetchBlob(self.output_score_beam_list)
