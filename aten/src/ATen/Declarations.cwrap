@@ -157,7 +157,7 @@
   return: argument 0
   options:
     - cname: set
-      scalar_check: source
+      scalar_check: source_->isScalar()
       arguments:
         - THTensor* self
         - THTensor* source
@@ -331,70 +331,6 @@
     - CONSTANT 1
 ]]
 [[
-  name: squeeze
-  cpu_half: True
-  variants:
-    - method
-    - function
-  return: argument 0
-  options:
-    - arguments:
-        - arg: THTensor* result
-          output: True
-        - THTensor* self
-    - cname: squeeze1d
-      arguments:
-        - arg: THTensor* result
-          output: True
-        - THTensor* self
-        - arg: long dim
-          wrap_dim: self
-]]
-[[
-  name: squeeze_
-  cpu_half: True
-  return: self
-  options:
-    - cname: squeeze
-      arguments:
-        - THTensor* self
-        - THTensor* self
-    - cname: squeeze1d
-      arguments:
-        - THTensor* self
-        - THTensor* self
-        - arg: long dim
-          wrap_dim: self
-]]
-[[
-  name: unsqueeze
-  variants:
-    - method
-    - function
-  cpu_half: True
-  auto_gpu: False
-  return: argument 0
-  cname: unsqueeze1d
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - THTensor* self
-    - arg: long dim
-      wrap_dim: self+1
-]]
-[[
-  name: unsqueeze_
-  cpu_half: True
-  auto_gpu: False
-  return: self
-  cname: unsqueeze1d
-  arguments:
-    - THTensor* self
-    - THTensor* self
-    - arg: long dim
-      wrap_dim: self+1
-]]
-[[
   name: nonzero
   variants:
     - method
@@ -435,7 +371,7 @@
   python_name: resize_as_
   cname: resizeAs
   return: self
-  scalar_check: the_template
+  scalar_check: the_template_->isScalar()
   arguments:
     - THTensor* self
     - THTensor* the_template
@@ -1109,6 +1045,7 @@
       - THTensor* other
     - cname: min
       return: argument 0,1
+      scalar_check: keepdim == false && self_->dim() == 1
       arguments:
         - arg: THTensor* min
           output: True
@@ -1140,6 +1077,7 @@
       - THTensor* other
     - cname: max
       return: argument 0,1
+      scalar_check: keepdim == false && self_->dim() == 1
       arguments:
         - arg: THTensor* max
           output: True
@@ -1159,6 +1097,7 @@
     - method
     - function
   return: argument 0,1
+  scalar_check: keepdim == false && self_->dim() == 1
   arguments:
     - arg: THTensor* values
       output: True
@@ -1178,6 +1117,7 @@
     - method
     - function
   return: argument 0,1
+  scalar_check: keepdim == false && self_->dim() == 1
   arguments:
     - arg: THTensor* values
       output: True
@@ -1202,6 +1142,7 @@
       arguments:
         - THTensor* self
     - cname: median
+      scalar_check: keepdim == false && self_->dim() == 1
       arguments:
         - arg: THTensor* values
           output: True
@@ -2022,6 +1963,7 @@
         - THTensor* self
     - cname: mean
       return: argument 0
+      scalar_check: keepdim == false && self_->dim() == 1
       arguments:
         - arg: THTensor* destination
           output: True
@@ -2052,6 +1994,7 @@
           default: 0
     - cname: var
       return: argument 0
+      scalar_check: keepdim == false && self_->dim() == 1
       arguments:
         - arg: THTensor* destination
           output: True
@@ -2086,6 +2029,7 @@
           default: 0
     - cname: std
       return: argument 0
+      scalar_check: keepdim == false && self_->dim() == 1
       arguments:
         - arg: THTensor* destination
           output: True
@@ -2118,6 +2062,7 @@
           default: AS_REAL(2)
     - cname: norm
       return: argument 0
+      scalar_check: keepdim == false && self_->dim() == 1
       arguments:
         - arg: THTensor* destination
           output: True
@@ -2454,6 +2399,7 @@
         - THTensor* self
     - cname: sum
       return: argument 0
+      scalar_check: keepdim == false && self_->dim() == 1
       arguments:
         - arg: THTensor* result
           output: True
@@ -2475,6 +2421,7 @@
         - THTensor* self
     - cname: prod
       return: argument 0
+      scalar_check: keepdim == false && self_->dim() == 1
       arguments:
         - arg: THTensor* result
           output: True
