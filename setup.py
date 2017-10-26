@@ -81,7 +81,7 @@ distutils.unixccompiler.UnixCCompiler.link = patched_link
 ################################################################################
 
 dep_libs = [
-    'TH', 'THS', 'THNN', 'THC', 'THCS', 'THCUNN', 'nccl', 'libshm',
+    'nccl', 'libshm',
     'ATen', 'gloo', 'THD', 'nanopb',
 ]
 
@@ -101,7 +101,7 @@ def build_libs(libs):
     if subprocess.call(build_libs_cmd + libs, env=my_env) != 0:
         sys.exit(1)
 
-    if 'THNN' in libs or 'THCUNN' in libs:
+    if 'ATen' in libs:
         from tools.nnwrap import generate_wrappers as generate_nn_wrappers
         generate_nn_wrappers()
 
@@ -116,9 +116,7 @@ class build_deps(Command):
         pass
 
     def run(self):
-        libs = ['TH', 'THS', 'THNN']
-        if WITH_CUDA:
-            libs += ['THC', 'THCS', 'THCUNN']
+        libs = []
         if WITH_NCCL and not WITH_SYSTEM_NCCL:
             libs += ['nccl']
         libs += ['libshm', 'ATen', 'nanopb']
@@ -235,7 +233,6 @@ class build_ext(setuptools.command.build_ext.build_ext):
             print('-- Detected NNPACK at ' + nnpack_dir)
         else:
             print('-- Not using NNPACK')
-
         # cwrap depends on pyyaml, so we can't import it earlier
         from tools.cwrap import cwrap
         from tools.cwrap.plugins.THPPlugin import THPPlugin
@@ -244,14 +241,17 @@ class build_ext(setuptools.command.build_ext.build_ext):
         from tools.cwrap.plugins.BoolOption import BoolOption
         from tools.cwrap.plugins.KwargsPlugin import KwargsPlugin
         from tools.cwrap.plugins.NullableArguments import NullableArguments
+
         from tools.cwrap.plugins.CuDNNPlugin import CuDNNPlugin
         from tools.cwrap.plugins.WrapDim import WrapDim
         from tools.cwrap.plugins.AssertNDim import AssertNDim
+
         from tools.cwrap.plugins.Broadcast import Broadcast
         from tools.cwrap.plugins.ProcessorSpecificPlugin import ProcessorSpecificPlugin
         from tools.autograd.gen_variable_type import gen_variable_type
         from tools.jit.gen_jit_dispatch import gen_jit_dispatch
         thp_plugin = THPPlugin()
+
         cwrap('torch/csrc/generic/TensorMethods.cwrap', plugins=[
             ProcessorSpecificPlugin(), BoolOption(), thp_plugin,
             AutoGPU(condition='IS_CUDA'), ArgcountSortPlugin(), KwargsPlugin(),
@@ -267,7 +267,7 @@ class build_ext(setuptools.command.build_ext.build_ext):
             if not os.path.exists(d):
                 os.mkdir(d)
         gen_variable_type(
-            'torch/lib/build/ATen/ATen/Declarations.yaml',
+            'torch/lib/tmp_install/share/ATen/Declarations.yaml',
             autograd_gen_dir)
         gen_jit_dispatch(
             'torch/lib/build/ATen/ATen/Declarations.yaml',
@@ -352,22 +352,10 @@ include_dirs += [
 library_dirs.append(lib_path)
 
 # we specify exact lib names to avoid conflict with lua-torch installs
-TH_LIB = os.path.join(lib_path, 'libTH.so.1')
-THS_LIB = os.path.join(lib_path, 'libTHS.so.1')
-THC_LIB = os.path.join(lib_path, 'libTHC.so.1')
-THCS_LIB = os.path.join(lib_path, 'libTHCS.so.1')
-THNN_LIB = os.path.join(lib_path, 'libTHNN.so.1')
-THCUNN_LIB = os.path.join(lib_path, 'libTHCUNN.so.1')
 ATEN_LIB = os.path.join(lib_path, 'libATen.so.1')
 THD_LIB = os.path.join(lib_path, 'libTHD.a')
 NCCL_LIB = os.path.join(lib_path, 'libnccl.so.1')
 if platform.system() == 'Darwin':
-    TH_LIB = os.path.join(lib_path, 'libTH.1.dylib')
-    THS_LIB = os.path.join(lib_path, 'libTHS.1.dylib')
-    THC_LIB = os.path.join(lib_path, 'libTHC.1.dylib')
-    THCS_LIB = os.path.join(lib_path, 'libTHCS.1.dylib')
-    THNN_LIB = os.path.join(lib_path, 'libTHNN.1.dylib')
-    THCUNN_LIB = os.path.join(lib_path, 'libTHCUNN.1.dylib')
     ATEN_LIB = os.path.join(lib_path, 'libATen.1.dylib')
     NCCL_LIB = os.path.join(lib_path, 'libnccl.1.dylib')
 
@@ -376,7 +364,7 @@ NANOPB_STATIC_LIB = os.path.join(lib_path, 'libprotobuf-nanopb.a')
 
 main_compile_args = ['-D_THP_CORE']
 main_libraries = ['shm']
-main_link_args = [TH_LIB, THS_LIB, THNN_LIB, ATEN_LIB, NANOPB_STATIC_LIB]
+main_link_args = [ATEN_LIB, NANOPB_STATIC_LIB]
 main_sources = [
     "torch/csrc/PtrWrapper.cpp",
     "torch/csrc/Module.cpp",
@@ -481,7 +469,6 @@ if WITH_CUDA:
     extra_compile_args += ['-DWITH_CUDA']
     extra_compile_args += ['-DCUDA_LIB_PATH=' + cuda_lib_path]
     main_libraries += ['cudart', 'nvToolsExt']
-    main_link_args += [THC_LIB, THCS_LIB, THCUNN_LIB]
     main_sources += [
         "torch/csrc/cuda/Module.cpp",
         "torch/csrc/cuda/Storage.cpp",
@@ -559,7 +546,6 @@ def make_relative_rpath(path):
 
 extensions = []
 packages = find_packages(exclude=('tools', 'tools.*',))
-
 C = Extension("torch._C",
               libraries=main_libraries,
               sources=main_sources,
@@ -583,8 +569,7 @@ THNN = Extension("torch._thnn._THNN",
                  extra_compile_args=extra_compile_args,
                  include_dirs=include_dirs,
                  extra_link_args=extra_link_args + [
-                     TH_LIB,
-                     THNN_LIB,
+                     ATEN_LIB,
                      make_relative_rpath('../lib'),
                  ]
                  )
@@ -610,9 +595,7 @@ if WITH_CUDA:
                        extra_compile_args=extra_compile_args,
                        include_dirs=include_dirs,
                        extra_link_args=extra_link_args + [
-                           TH_LIB,
-                           THC_LIB,
-                           THCUNN_LIB,
+                           ATEN_LIB,
                            make_relative_rpath('../lib'),
                        ]
                        )
@@ -641,6 +624,7 @@ cmdclass = {
     'clean': clean,
 }
 cmdclass.update(build_dep_cmds)
+
 
 setup(name="torch", version=version,
       description="Tensors and Dynamic neural networks in Python with strong GPU acceleration",

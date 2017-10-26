@@ -76,6 +76,7 @@ function build() {
               -DCMAKE_SHARED_LINKER_FLAGS="$LDFLAGS" \
               -DCMAKE_INSTALL_LIBDIR="$INSTALL_DIR/lib" \
               -DCUDA_NVCC_FLAGS="$CUDA_NVCC_FLAGS" \
+              -DCMAKE_PREFIX_PATH="$INSTALL_DIR" \
               -Dcwrap_files="$CWRAP_FILES" \
               -DTH_INCLUDE_PATH="$INSTALL_DIR/include" \
               -DTH_LIB_PATH="$INSTALL_DIR/lib" \
@@ -124,11 +125,27 @@ function build_nccl() {
                -DCMAKE_C_FLAGS="$C_FLAGS" \
                -DCMAKE_CXX_FLAGS="$C_FLAGS $CPP_FLAGS"
    make install
+   mkdir -p ${INSTALL_DIR}/lib
    cp "lib/libnccl.so.1" "${INSTALL_DIR}/lib/libnccl.so.1"
    if [ ! -f "${INSTALL_DIR}/lib/libnccl.so" ]; then
      ln -s "${INSTALL_DIR}/lib/libnccl.so.1" "${INSTALL_DIR}/lib/libnccl.so"
    fi
    cd ../..
+}
+
+# purpusefully not using build() because we need ATen to build the same
+# regardless of whether it is inside pytorch or not, so it
+# cannot take any special flags
+# special flags need to be part of the ATen build itself
+function build_aten() {
+  mkdir -p build/aten
+  cd  build/aten
+  ${CMAKE_VERSION} ../../../../aten \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_INSTALL_PREFIX="$INSTALL_DIR"
+  # purpusefully not passing C_FLAGS for the same reason as above
+  make -j$(getconf _NPROCESSORS_ONLN) install
+  cd ../..
 }
 
 # In the torch/lib directory, create an installation directory
@@ -140,6 +157,8 @@ for arg in "$@"; do
         build_nccl
     elif [[ "$arg" == "gloo" ]]; then
         build gloo $GLOO_FLAGS
+    elif [[ "$arg" == "ATen" ]]; then
+        build_aten
     else
         build $arg
     fi
@@ -153,8 +172,8 @@ cp $INSTALL_DIR/lib/* .
 if [ -d "$INSTALL_DIR/lib64/" ]; then
     cp $INSTALL_DIR/lib64/* .
 fi
-cp THNN/generic/THNN.h .
-cp THCUNN/generic/THCUNN.h .
+cp ../../aten/src/THNN/generic/THNN.h .
+cp ../../aten/src/THCUNN/generic/THCUNN.h .
 cp -r $INSTALL_DIR/include .
 if [ -d "$INSTALL_DIR/bin/" ]; then
     cp $INSTALL_DIR/bin/* .
