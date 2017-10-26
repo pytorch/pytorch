@@ -9,25 +9,46 @@ template <typename T, class Context>
 class GluOp final : public Operator<Context> {
  public:
   GluOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws) {}
+      : Operator<Context>(operator_def, ws),
+        dim_(OperatorBase::GetSingleArgument<int>("dim", -1)) {}
 
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
   bool RunOnDevice() {
     auto& X = Input(0);
     auto* Y = Output(0);
-    const int M = X.size_to_dim(X.ndim() - 1);
-    const int N = X.dim32(X.ndim() - 1);
     vector<TIndex> Yshape;
     Yshape.insert(Yshape.end(), X.dims().begin(), X.dims().end());
-    Yshape[Yshape.size() - 1] = N / 2;
+    const int split_index = dim_ == -1 ? Yshape.size() - 1 : dim_;
+    CAFFE_ENFORCE(
+        Yshape[split_index] % 2 == 0,
+        "Split dimension ",
+        Yshape[split_index],
+        " should be divided by two");
+    const int split_dim_size = Yshape[split_index] / 2;
+    const int M = X.size_to_dim(split_index);
+    const int N = X.size_from_dim(split_index + 1);
+    Yshape[split_index] = split_dim_size;
     Y->Resize(Yshape);
-    ComputeGlu(M, N / 2, X.template data<T>(), Y->template mutable_data<T>());
+    ComputeGlu(
+        M,
+        split_dim_size,
+        N,
+        X.template data<T>(),
+        Y->template mutable_data<T>());
     return true;
   }
 
  protected:
-  void ComputeGlu(const int M, const int N, const T* X, T* output);
+  void ComputeGlu(
+      const int M,
+      const int split_dim_size,
+      const int N,
+      const T* X,
+      T* output);
+
+ private:
+  const int dim_;
 };
 } // namespace caffe2
 
