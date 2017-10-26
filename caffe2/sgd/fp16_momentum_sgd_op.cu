@@ -261,5 +261,4 @@ it expects FP16 data and performs its updates in either FP16 precision
 (default), or FP32 precision if the 'fp32_update' flag is set to True.
 
 )DOC");
-SHOULD_NOT_DO_GRADIENT(FP16MomentumSGDUpdate);
 }
