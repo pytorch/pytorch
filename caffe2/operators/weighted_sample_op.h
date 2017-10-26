@@ -22,8 +22,6 @@ class WeightedSampleOp final : public Operator<Context> {
 
  private:
   vector<float> cum_mass_;
-  float r_;
-  int offset_;
   Tensor<Context> unif_samples_;
 };
 
