@@ -66,7 +66,7 @@ template <>
 bool SigmoidCrossEntropyWithLogitsOp<float, CPUContext>::RunOnDevice() {
   auto& logits = Input(0);
   auto& targets = Input(1);
-  CAFFE_ENFORCE(logits.dims() == targets.dims());
+  CAFFE_ENFORCE_EQ(logits.dims(), targets.dims());
   const auto inner_size = logits.ndim() > 0 ? logits.dims().back() : 1;
   const auto outer_size = logits.size() / inner_size;
 
