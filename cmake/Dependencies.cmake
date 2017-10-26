@@ -127,9 +127,9 @@ if(BUILD_TEST)
   caffe2_include_directories(${PROJECT_SOURCE_DIR}/third_party/googletest/googletest/include)
 
   # We will not need to test benchmark lib itself.
-  set(BENCHMARK_ENABLE_TESTING OFF)
+  set(BENCHMARK_ENABLE_TESTING OFF CACHE BOOL "Disable benchmark testing as we don't need it.")
   # We will not need to install benchmark since we link it statically. 
-  set(BENCHMARK_ENABLE_INSTALL OFF)
+  set(BENCHMARK_ENABLE_INSTALL OFF CACHE BOOL "Disable benchmark install to avoid overwriting vendor install.")
   add_subdirectory(${PROJECT_SOURCE_DIR}/third_party/benchmark)
   caffe2_include_directories(${PROJECT_SOURCE_DIR}/third_party/benchmark/include)
 
