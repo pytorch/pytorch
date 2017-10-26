@@ -25,6 +25,7 @@ static_assert(
    CAFFE2_VERSION_PATCH)
 
 #cmakedefine CAFFE2_ANDROID
+#cmakedefine CAFFE2_BUILD_SHARED_LIBS
 #cmakedefine CAFFE2_FORCE_FALLBACK_CUDA_MPI
 #cmakedefine CAFFE2_HAS_MKL_DNN
 #cmakedefine CAFFE2_HAS_MKL_SGEMM_PACK

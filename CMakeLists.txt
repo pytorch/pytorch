@@ -46,6 +46,11 @@ option(USE_ZMQ "Use ZMQ" OFF)
 # ---[ CMake scripts + modules
 list(APPEND CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake/Modules)
 
+# ---[ CMake build directories
+set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
+set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
+
 enable_testing()
 
 # External projects
@@ -76,9 +81,6 @@ if(CMAKE_COMPILER_IS_GNUCXX AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 4.8.0
   message(STATUS "GCC ${CMAKE_CXX_COMPILER_VERSION}: Adding gcc and gcc_s libs to link line")
   list(APPEND Caffe2_DEPENDENCY_LIBS gcc_s gcc)
 endif()
-
-# ---[ Set output directories
-set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "binaries")
 
 # ---[ Build flags
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -std=c11")
@@ -174,3 +176,7 @@ if (NOT ANDROID)
       FILE Caffe2Targets.cmake
       COMPONENT dev)
 endif()
+
+
+# ---[ Modules
+add_subdirectory(modules/module_test)
