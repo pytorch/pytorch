@@ -450,7 +450,7 @@ class TestLRScheduler(TestCase):
 
     def test_cos_anneal_lr(self):
         epochs = 10
-        eta_min = 0.0005
+        eta_min = 0
         single_targets = [eta_min + (0.05 - eta_min) *
                           (1 + math.cos(x / epochs * math.pi)) / 2
                           for x in range(epochs)]
