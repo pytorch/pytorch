@@ -1,6 +1,7 @@
 #pragma once
 
-#include <ATen/ATen.h>
+#include "ATen/ATen.h"
+#include "ATen/WrapDimUtils.h"
 #include <vector>
 
 namespace at {
@@ -62,6 +63,39 @@ type_method_definition_dispatch: at::native::is_same_size
 */
 static inline bool is_same_size(const Tensor &self, const Tensor &other) {
   return self.dim() == other.dim() && self.sizes().equals(other.sizes());
+}
+
+/*
+[NativeFunction]
+name: permute
+arg: Tensor self
+arg: IntList dims
+return: Tensor
+variants: method, function
+type_method_definition_level: base
+type_method_definition_dispatch: at::native::permute
+[/NativeFunction]
+*/
+static inline Tensor permute(const Tensor & self, IntList dims) {
+  auto nDims = self.dim();
+  if (dims.size() != (size_t)nDims) {
+    runtime_error("number of dims don't match in permute");
+  }
+  auto oldSizes = self.sizes();
+  auto oldStrides = self.strides();
+  std::vector<int64_t> newSizes(nDims);
+  std::vector<int64_t> newStrides(nDims);
+  std::vector<bool> seen(nDims);
+  for (int64_t i = 0; i < nDims; i++) {
+    auto dim = maybe_wrap_dim(dims[i], nDims);
+    if (seen[dim]) {
+      runtime_error("repeated dim in permute");
+    }
+    seen[dim] = true;
+    newSizes[i] = oldSizes[dim];
+    newStrides[i] = oldStrides[dim];
+  }
+  return self.as_strided(newSizes, newStrides);
 }
 
 }
