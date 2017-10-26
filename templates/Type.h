@@ -63,8 +63,8 @@ struct AT_API Type {
   virtual Tensor unsafeTensorFromTH(void * th_pointer, bool retain) const = 0;
   virtual const char * toString() const = 0;
   virtual std::size_t elementSizeInBytes() const = 0;
-  Type & toBackend(Backend b) const;
-  Type & toScalarType(ScalarType s) const;
+  virtual Type & toBackend(Backend b) const;
+  virtual Type & toScalarType(ScalarType s) const;
 
   // contingious IDs for all types in the system
   // for external dispatch
