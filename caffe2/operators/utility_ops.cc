@@ -26,6 +26,11 @@ bool WeightedSumOp<CPUContext>::RunOnDevice() {
 }
 
 template <>
+bool WeightedSumGradientOp<CPUContext>::RunOnDevice() {
+  return DoRunWithType<float>();
+}
+
+template <>
 template <typename T>
 void UniqueOp<CPUContext>::DoRun() {
   auto& inputTensor = Input(0);
@@ -76,6 +81,7 @@ REGISTER_CPU_OPERATOR(Alias, AliasOp<CPUContext>);
 REGISTER_CPU_OPERATOR(ResizeLike, ResizeLikeOp<CPUContext>);
 REGISTER_CPU_OPERATOR(SumInt, SumOp<CPUContext>);
 REGISTER_CPU_OPERATOR(WeightedSum, WeightedSumOp<CPUContext>);
+REGISTER_CPU_OPERATOR(WeightedSumGradient, WeightedSumGradientOp<CPUContext>);
 REGISTER_CPU_OPERATOR(
     ScatterWeightedSum,
     ScatterWeightedSumOp<float, CPUContext>);
@@ -262,6 +268,10 @@ only be done with X_0 also as the output, but not other X_i.
     .Input(0, "data_0", "First of the input tensors.")
     .Input(0, "weight_0", "Weight of the first input in the sum.")
     .Output(0, "output", "Result containing weighted elem-wise sum of inputs.");
+
+OPERATOR_SCHEMA(WeightedSumGradient)
+    .NumInputs([](int n) { return (n > 0 && n % 2 == 1); })
+    .NumOutputs(1, INT_MAX);
 
 OPERATOR_SCHEMA(ScatterWeightedSum)
     .NumInputs([](int n) { return (n > 3 && (n - 3) % 2 == 0); })
@@ -827,11 +837,33 @@ class GetSumGradient : public GradientMakerBase {
 };
 REGISTER_GRADIENT(Sum, GetSumGradient);
 
-// TODO(jiayq): Weighted sum is originally intended to be used in SGD, but in
-// theory, its gradient DOES exist. Should we enable the gradient?
-SHOULD_NOT_DO_GRADIENT(WeightedSum);
 SHOULD_NOT_DO_GRADIENT(ScatterWeightedSum);
 SHOULD_NOT_DO_GRADIENT(ScatterAssign);
+
+class GetWeightedSumGradient : public GradientMakerBase {
+  using GradientMakerBase::GradientMakerBase;
+  vector<OperatorDef> GetGradientDefs() override {
+    ArgumentHelper argsHelper(def_);
+    const bool grad_on_w = argsHelper.GetSingleArgument<bool>("grad_on_w", 0);
+
+    auto inputs = vector<string>{GO(0)};
+    auto outputs = vector<string>();
+    for (int i = 0; i < def_.input_size(); i += 2) {
+      inputs.push_back(I(i));
+      inputs.push_back(I(i + 1));
+      outputs.push_back(GI(i));
+    }
+
+    if (grad_on_w) {
+      for (int i = 0; i < def_.input_size(); i += 2) {
+        outputs.push_back(GI(i + 1));
+      }
+    }
+
+    return SingleGradientDef("WeightedSumGradient", "", inputs, outputs);
+  }
+};
+REGISTER_GRADIENT(WeightedSum, GetWeightedSumGradient);
 
 class GetMaxGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;
