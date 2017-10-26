@@ -3,9 +3,68 @@
 #include "THCHalfAutoNumerics.cuh"
 #include "THCAtomics.cuh"
 #include "common.h"
+#include "THCDeviceTensor.cuh"
+#include "THCDeviceTensorUtils.cuh"
+#include "THCDeviceUtils.cuh"
 #include <THC/THCApply.cuh>
 
 #include <thrust/functional.h>
+
+template <typename Dtype>
+__global__ void SpatialClassNLLCriterion_updateOutput_no_reduce_kernel(
+    int64_t nthreads,
+    THCDeviceTensor<Dtype, 4> input,
+    THCDeviceTensor<THCIndex_t, 3> target,
+    THCDeviceTensor<Dtype, 3> output,
+    Dtype *weights,
+    int64_t ignore_index) {
+  int64_t batch_size = input.getSize(0);
+  int64_t H = input.getSize(2);
+  int64_t W = input.getSize(3);
+
+  CUDA_KERNEL_LOOP(index, nthreads) {
+    const int64_t b = index % batch_size;
+    const int64_t h = (index / batch_size) % H;
+    const int64_t w = (index / (batch_size * H)) % W;
+
+    int64_t cur_target = target[b][h][w] - TH_INDEX_BASE;
+    if (cur_target == ignore_index) {
+      output[b][h][w] = ScalarConvert<int, Dtype>::to(0);
+      continue;
+    }
+    Dtype value = input[b][cur_target][h][w];
+    Dtype weight =
+        weights ? weights[cur_target] : ScalarConvert<int, Dtype>::to(1);
+    output[b][h][w] = -value * weight;
+  }
+}
+
+template <typename Dtype>
+__global__ void SpatialClassNLLCriterion_updateGradInput_no_reduce_kernel(
+    int64_t nthreads,
+    THCDeviceTensor<THCIndex_t, 3> target,
+    THCDeviceTensor<Dtype, 3> gradOutput,
+    THCDeviceTensor<Dtype, 4> gradInput,
+    Dtype *weights,
+    int64_t ignore_index) {
+  int64_t batch_size = target.getSize(0);
+  int64_t H = target.getSize(1);
+  int64_t W = target.getSize(2);
+
+  CUDA_KERNEL_LOOP(index, nthreads) {
+    const int64_t b = index % batch_size;
+    const int64_t h = (index / batch_size) % H;
+    const int64_t w = (index / (batch_size * H)) % W;
+
+    int64_t cur_target = target[b][h][w] - TH_INDEX_BASE;
+    if (cur_target == ignore_index) {
+      continue;
+    }
+    Dtype value =
+        -(weights ? weights[cur_target] : ScalarConvert<int, Dtype>::to(1));
+    gradInput[b][cur_target][h][w] = value * gradOutput[b][h][w];
+  }
+}
 
 template <typename T, typename AccumT>
 __global__ void cunn_SpatialClassNLLCriterion_updateOutput_kernel(
@@ -67,6 +126,7 @@ __global__ void cunn_SpatialClassNLLCriterion_sizeAverage_kernel(
 template<typename T>
 __global__ void cunn_SpatialClassNLLCriterion_updateGradInput_kernel(
           T *gradInput,
+          T *gradOutput,
           THCIndex_t *target,
           T *weights,
           T *total_weight,
@@ -93,7 +153,7 @@ __global__ void cunn_SpatialClassNLLCriterion_updateGradInput_kernel(
     t = (int)target[toffset + i] - TH_INDEX_BASE;
     if (t != ignore_index) {
       assert(t >= 0 && t < n_classes);
-      gradInput[ioffset + i + map_nelem * t] = -(weights ? weights[t] : ScalarConvert<int, T>::to(1)) * norm;
+      gradInput[ioffset + i + map_nelem * t] = -(weights ? weights[t] : ScalarConvert<int, T>::to(1)) * norm * gradOutput[0];
     }
   }
 }

@@ -596,10 +596,12 @@
   grad_output: mse_loss_double_backward_grad_output(grad, grad_output, input, target, size_average, reduce)
   input: mse_loss_double_backward(grad * grad_output, input, size_average, reduce)
 
-- name: nll_loss_backward(Tensor input, Tensor target, Tensor weight, bool size_average, int64_t ignore_index, Tensor total_weight)
+- name: nll_loss_backward(Tensor grad_output, Tensor input, Tensor target, Tensor weight, bool size_average, int64_t ignore_index, bool reduce, Tensor total_weight)
+  grad_output: nll_loss(grad, target, weight, size_average, ignore_index, reduce)
   input: zeros_like(grad)
 
-- name: nll_loss2d_backward(Tensor input, Tensor target, Tensor weight, bool size_average, int64_t ignore_index, Tensor total_weight)
+- name: nll_loss2d_backward(Tensor grad_output, Tensor input, Tensor target, Tensor weight, bool size_average, int64_t ignore_index, bool reduce, Tensor total_weight)
+  grad_output: nll_loss2d(grad, target, weight, size_average, ignore_index, reduce)
   input: zeros_like(grad)
 
 - name: prelu_backward(Tensor grad_output, Tensor input, Tensor weight, std::array<bool, 2> output_mask)

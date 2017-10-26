@@ -27,7 +27,7 @@ from torch.nn import Parameter
 from torch.nn.parallel._functions import Broadcast
 from common_nn import NNTestCase, ModuleTest, CriterionTest, TestBase, \
     module_tests, criterion_tests, TEST_CUDA, TEST_MULTIGPU, TEST_CUDNN, \
-    TEST_CUDNN_VERSION
+    TEST_CUDNN_VERSION, nllloss_reference, nllloss2d_reference
 from common import freeze_rng_state, run_tests, TestCase, skipIfNoLapack, \
     TEST_SCIPY, download_file
 
@@ -3636,7 +3636,7 @@ class TestMSELoss(torch.nn.modules.module.Module):
         return self.mseloss.forward(input, self.target.type_as(input))
 
 
-def mseloss_no_reduce_module_test():
+def mseloss_no_reduce_test():
     input_size = (2, 3, 4, 5)
     target = torch.randn(*input_size)
     return dict(
@@ -3648,8 +3648,138 @@ def mseloss_no_reduce_module_test():
         reference_fn=lambda i, m: (i - target).pow(2))
 
 
+def nllloss_no_reduce_test():
+    t = Variable(torch.Tensor(15).uniform_().mul(10).floor().long())
+    kwargs = {'reduce': False}
+    return dict(
+        fullname='NLLLoss_no_reduce',
+        constructor=wrap_functional(
+            lambda i: F.nll_loss(i, t.type_as(i).long(), **kwargs)),
+        input_fn=lambda: torch.rand(15, 10).log(),
+        reference_fn=lambda i, _:
+            nllloss_reference(i, t.type_as(i).long(), **kwargs),
+        pickle=False)
+
+
+def nllloss_no_reduce_ignore_index_test():
+    t = Variable(torch.Tensor(15).uniform_().mul(10).floor().long())
+    kwargs = {'ignore_index': 2, 'reduce': False}
+    return dict(
+        fullname='NLLLoss_no_reduce_ignore_index',
+        constructor=wrap_functional(
+            lambda i: F.nll_loss(i, t.type_as(i).long(), **kwargs)),
+        input_fn=lambda: torch.rand(15, 10).log(),
+        reference_fn=lambda i, _:
+            nllloss_reference(i, t.type_as(i).long(), **kwargs),
+        pickle=False)
+
+
+def nllloss_no_reduce_weights_test():
+    t = Variable(torch.Tensor(15).uniform_().mul(10).floor().long())
+    weight = torch.rand(10)
+
+    def kwargs(i):
+        return {'weight': weight.type_as(i), 'reduce': False}
+
+    return dict(
+        fullname='NLLLoss_no_reduce_weights',
+        constructor=wrap_functional(
+            lambda i: F.nll_loss(i, t.type_as(i).long(), **kwargs(i.data))),
+        input_fn=lambda: torch.rand(15, 10).add(1e-2).log(),
+        reference_fn=lambda i, _:
+            nllloss_reference(i, t.type_as(i).long(), **kwargs(i)),
+        pickle=False)
+
+
+def nllloss_no_reduce_weights_ignore_index_test():
+    t = Variable(torch.Tensor(15).uniform_().mul(10).floor().long())
+    weight = torch.rand(10)
+
+    def kwargs(i):
+        return {'weight': weight.type_as(i), 'reduce': False,
+                'ignore_index': 2}
+
+    return dict(
+        fullname='NLLLoss_no_reduce_weights_ignore_index',
+        constructor=wrap_functional(
+            lambda i: F.nll_loss(i, t.type_as(i).long(), **kwargs(i.data))),
+        input_fn=lambda: torch.rand(15, 10).add(1e-2).log(),
+        reference_fn=lambda i, _:
+            nllloss_reference(i, t.type_as(i).long(), **kwargs(i)),
+        pickle=False)
+
+
+def nllloss_no_reduce_weights_ignore_index_neg_test():
+    t = Variable(torch.Tensor(15).uniform_().mul(10).floor().long())
+    weight = torch.rand(10)
+
+    def kwargs(i):
+        return {'weight': weight.type_as(i), 'reduce': False,
+                'ignore_index': -1}
+
+    return dict(
+        fullname='NLLLoss_no_reduce_weights_ignore_index_neg',
+        constructor=wrap_functional(
+            lambda i: F.nll_loss(i, t.type_as(i).long(), **kwargs(i.data))),
+        input=torch.rand(15, 10).add(1e-2).log(),
+        reference_fn=lambda i, _:
+            nllloss_reference(i, t.type_as(i).long(), **kwargs(i)),
+        pickle=False)
+
+
+def nllloss2d_no_reduce_test():
+    t = Variable(torch.rand(2, 5, 5).mul(3).floor().long())
+    kwargs = {'reduce': False}
+    return dict(
+        fullname='NLLLoss2d_no_reduce',
+        constructor=wrap_functional(
+            lambda i: F.nll_loss(i, t.type_as(i).long(), **kwargs)),
+        input_fn=lambda: torch.rand(2, 3, 5, 5).log(),
+        reference_fn=lambda i, _:
+            nllloss2d_reference(i, t.type_as(i).long(), **kwargs),
+        pickle=False)
+
+
+def nllloss2d_no_reduce_ignore_index_test():
+    t = Variable(torch.rand(2, 5, 5).mul(3).floor().long())
+    kwargs = {'ignore_index': 1, 'reduce': False}
+    return dict(
+        fullname='NLLLoss2d_no_reduce_ignore_index',
+        constructor=wrap_functional(
+            lambda i: F.nll_loss(i, t.type_as(i).long(), **kwargs)),
+        input_fn=lambda: torch.rand(2, 3, 5, 5).log(),
+        reference_fn=lambda i, _:
+            nllloss2d_reference(i, t.type_as(i).long(), **kwargs),
+        pickle=False)
+
+
+def nllloss2d_no_reduce_weights_test():
+    t = Variable(torch.rand(2, 5, 5).mul(3).floor().long())
+    weight = torch.rand(3)
+
+    def kwargs(i):
+        return {'weight': weight.type_as(i), 'reduce': False}
+
+    return dict(
+        fullname='NLLLoss2d_no_reduce_weights',
+        constructor=wrap_functional(
+            lambda i: F.nll_loss(i, t.type_as(i).long(), **kwargs(i.data))),
+        input_fn=lambda: torch.rand(2, 3, 5, 5).log(),
+        reference_fn=lambda i, _:
+            nllloss2d_reference(i, t.type_as(i).long(), **kwargs(i)),
+        pickle=False)
+
+
 new_module_tests = [
-    mseloss_no_reduce_module_test(),
+    mseloss_no_reduce_test(),
+    nllloss_no_reduce_test(),
+    nllloss_no_reduce_ignore_index_test(),
+    nllloss_no_reduce_weights_test(),
+    nllloss_no_reduce_weights_ignore_index_test(),
+    nllloss_no_reduce_weights_ignore_index_neg_test(),
+    nllloss2d_no_reduce_test(),
+    nllloss2d_no_reduce_weights_test(),
+    nllloss2d_no_reduce_ignore_index_test(),
     dict(
         module_name='BatchNorm1d',
         constructor_args=(10,),
