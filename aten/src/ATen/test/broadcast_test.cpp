@@ -70,7 +70,7 @@ int main() {
       assert(false);
     } catch(std::runtime_error &e) {}
 
-    // with mistmatched sizes
+    // with mismatched sizes
     try {
       auto c = T.randn({5, 5, 5});
       a.addcmul(b, c);
@@ -137,7 +137,7 @@ int main() {
     aScalar.get()->maybeScalar(true);
     assert(aScalar.addmm(b, c).equal(aScalar.expand({5, 7}).addmm(b, c)));
 
-    // with mistmatched sizes
+    // with mismatched sizes
     try {
       auto a = T.randn({3, 3});
       a.addmm(b, c);
