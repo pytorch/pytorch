@@ -35,6 +35,7 @@ addons:
 
 script:
     - OMP_NUM_THREADS=2 ./test/run_test.sh
+    - tools/run_aten_tests.sh
 
 # This reportedly works around an issue downloading packages from pypi on
 # travis.  Consider removing this after the underlying issue is fixed.
