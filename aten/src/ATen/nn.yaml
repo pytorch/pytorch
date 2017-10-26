@@ -138,6 +138,10 @@
   cname: SpatialConvolutionMM
   buffers: [finput, fgrad_input]
 
+- name: conv_depthwise2d(Tensor input, Tensor weight, IntList[2] kernel_size, Tensor bias={}, IntList[2] stride=1, IntList[2] padding=0, IntList[2] dilation=1)
+  cname: SpatialDepthwiseConvolution
+  buffers: []
+
 - name: conv3d(Tensor input, Tensor weight, IntList[3] kernel_size, Tensor bias={}, IntList[3] stride=1, IntList[3] padding=0)
   cname: VolumetricConvolutionMM
   buffers: [finput, fgrad_input]
