@@ -44,6 +44,20 @@
           default: NULL
 ]]
 
+# In theory, this could be a part of the above declaration. But in
+# practice this leads to all sorts of problems with ambiguous overloads.
+# So we add it here with a separate name.
+[[
+  name: alias
+  return: THTensor*
+  cpu_half: True
+  variants: [function]
+  options:
+    - cname: newWithTensor
+      arguments: 
+        - THTensor* tensor
+]]
+
 [[
   name: select
   cpu_half: True
