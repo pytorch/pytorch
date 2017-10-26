@@ -545,6 +545,43 @@ class TestSparse(TestCase):
         self._test_sparse_mask_shape([50, 30, 20])
         self._test_sparse_mask_shape([5, 5, 5, 5, 5, 5])
 
+    def _test_zeros(self, shape, out_shape_i, out_shape_v=None):
+        out_shape = out_shape_i + (out_shape_v or [])
+        for nnz in [9, 12]:
+            out, _, _ = self._gen_sparse(len(out_shape_i), nnz, out_shape)
+            torch.zeros(*shape, out=out)
+            self.assertEqual(tuple(out.size()), tuple(shape))
+            self.assertTrue(out._indices().numel() == out._values().numel() == 0)
+            self.assertEqual(out._nnz(), 0)
+            self.assertEqual(out._dimI(), len(shape))
+            self.assertEqual(out._dimV(), 0)
+
+    def test_zeros(self):
+        i_shapes = [2, 3, 4]
+        v_shapes = [3, 4, 5, 6]
+        for i_dim in range(1, len(i_shapes) + 1):
+            for v_dim in range(len(v_shapes) + 1):
+                self._test_zeros([2, 3, 4], i_shapes[:i_dim], v_shapes[:v_dim])
+
+    def _test_zeros_like(self, template_shape_i, template_shape_v=None):
+        template_shape_v = template_shape_v or []
+        template_shape = template_shape_i + template_shape_v
+        for nnz in [9, 12]:
+            t, _, _ = self._gen_sparse(len(template_shape_i), nnz, template_shape)
+            res = torch.zeros_like(t)
+            self.assertEqual(tuple(res.size()), tuple(template_shape))
+            self.assertTrue(res._indices().numel() == res._values().numel() == 0)
+            self.assertEqual(res._nnz(), 0)
+            self.assertEqual(res._dimI(), len(template_shape_i))
+            self.assertEqual(res._dimV(), len(template_shape_v))
+
+    def test_zeros_like(self):
+        i_shapes = [2, 3, 4]
+        v_shapes = [3, 4, 5, 6]
+        for i_dim in range(1, len(i_shapes) + 1):
+            for v_dim in range(len(v_shapes) + 1):
+                self._test_zeros_like(i_shapes[:i_dim], v_shapes[:v_dim])
+
     def _test_sparse_mask_hybrid_fixed(self):
         i = self.IndexTensor([
             [1, 3, 0, 4],
