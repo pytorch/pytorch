@@ -137,5 +137,4 @@ This op is also functionally equivalent to the FP16MomentumSGDUpdateOp, however
 it expects FP32 data and performs its updates in FP32 precision.
 
 )DOC");
-SHOULD_NOT_DO_GRADIENT(FP32MomentumSGDUpdate);
 }
