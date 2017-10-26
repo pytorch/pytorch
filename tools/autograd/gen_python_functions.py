@@ -1,7 +1,7 @@
 from .nested_dict import nested_dict
 from tools.shared.module_loader import import_module
 
-CodeTemplate = import_module('code_template', 'torch/lib/ATen/code_template.py').CodeTemplate
+CodeTemplate = import_module('code_template', 'aten/src/ATen/code_template.py').CodeTemplate
 
 
 PY_VARIABLE_METHOD_VARARGS = CodeTemplate("""\

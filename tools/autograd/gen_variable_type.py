@@ -7,7 +7,7 @@ from collections import defaultdict
 from tools.shared.module_loader import import_module
 from .nested_dict import nested_dict
 
-CodeTemplate = import_module('code_template', 'torch/lib/ATen/code_template.py').CodeTemplate
+CodeTemplate = import_module('code_template', 'aten/src/ATen/code_template.py').CodeTemplate
 
 
 try:
