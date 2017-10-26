@@ -84,10 +84,8 @@ inline bool isTracing(const at::ArrayRef<Variable>& vars) {
 }
 
 inline bool isTracing(const at::TensorList& vars) {
-  // NB: This can't be a ref, because we need to actually implicit-construct a
-  // Variable.  That means a refcount bump does happen here (sigh).
-  for (Variable var : vars) {
-    if (isTracing(var)) return true;
+  for (const auto & var_t : vars) {
+    if (isTracing(static_cast<const Variable&>(var_t))) return true;
   }
   return false;
 }
