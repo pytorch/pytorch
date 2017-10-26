@@ -27,7 +27,7 @@ from caffe2.python.checkpoint import (
     CheckpointManager, MultiNodeCheckpointManager, Job, JobRunner,
     UploadTaskGroupBuilder)
 from caffe2.python.net_builder import ops
-from caffe2.python.task import Node, Task, TaskGroup, WorkspaceType
+from caffe2.python.task import Node, Task, TaskGroup, WorkspaceType, Cluster
 from caffe2.python.test_util import TestCase
 from caffe2.python.dataio import ReaderWithLimit
 
@@ -35,10 +35,9 @@ import numpy as np
 import os
 import shutil
 import tempfile
-import unittest
 
 def build_pipeline(node_id):
-    with Node('trainer:%d' % node_id):
+    with Node('trainer_%d' % node_id):
         with Job.current().init_group, Task():
             data_arr = Struct(('val', np.array(list(range(10)))))
             data = ConstRecord(ops, data_arr)
@@ -80,30 +79,32 @@ class UploadToLocalFile(UploadTaskGroupBuilder):
 
 class TestCheckpoint(TestCase):
     def run_with(self, builder):
-        with Job() as job:
-            outputs = build_pipeline(node_id=0)
-        output_fetcher = Task(step=core.Net('empty'), outputs=outputs)
+        with Cluster():
+            with Job() as job:
+                outputs = build_pipeline(node_id=0)
+            output_fetcher = Task(step=core.Net('empty'), outputs=outputs)
 
-        def fetch_total(session):
-            session.run(output_fetcher)
-            return output_fetcher.outputs()[0].fetch()
+            def fetch_total(session):
+                session.run(output_fetcher)
+                return output_fetcher.outputs()[0].fetch()
 
-        session, checkpoint = builder()
-        compiled_job = job.compile(LocalSession)
-        num_epochs = JobRunner(compiled_job, checkpoint)(session)
-        self.assertEquals(num_epochs, len(EXPECTED_TOTALS))
-        self.assertEquals(fetch_total(session), EXPECTED_TOTALS[-1])
-
-        for initial_epoch in range(1, num_epochs + 1):
             session, checkpoint = builder()
-            JobRunner(
-                compiled_job,
-                checkpoint, resume_from_epoch=initial_epoch)(session)
+            compiled_job = job.compile(LocalSession)
+            num_epochs = JobRunner(compiled_job, checkpoint)(session)
+            self.assertEquals(num_epochs, len(EXPECTED_TOTALS))
             self.assertEquals(fetch_total(session), EXPECTED_TOTALS[-1])
 
-        for epoch in range(1, num_epochs + 1):
-            session.run(checkpoint.load(epoch))
-            self.assertEquals(fetch_total(session), EXPECTED_TOTALS[epoch - 1])
+            for initial_epoch in range(1, num_epochs + 1):
+                session, checkpoint = builder()
+                JobRunner(
+                    compiled_job,
+                    checkpoint, resume_from_epoch=initial_epoch)(session)
+                self.assertEquals(fetch_total(session), EXPECTED_TOTALS[-1])
+
+            for epoch in range(1, num_epochs + 1):
+                session.run(checkpoint.load(epoch))
+                self.assertEquals(fetch_total(session),
+                                  EXPECTED_TOTALS[epoch - 1])
 
     def test_single_checkpoint(self):
         # test single node
@@ -134,24 +135,42 @@ class TestCheckpoint(TestCase):
         finally:
             shutil.rmtree(tmpdir)
 
-    # Note(wyiming): we are yet to find out why Travis gives out like:
-    # E: AssertionError: 'trainer:1/task/GivenTensorInt64Fill:0, a C++ native class of type nullptr (uninitialized).' != array([103])
-    # See for example https://travis-ci.org/caffe2/caffe2/jobs/265665119
-    # As a result, we will check if this is travis, and if yes, disable it.
-    @unittest.skipIf(os.environ.get("TRAVIS"), "DPMTest has a known issue with Travis.")
-    def test_load_model_from_checkpoints(self):
+    def test_ckpt_name_and_load_model_from_ckpts(self):
         try:
+            num_nodes = 3
             tmpdir = tempfile.mkdtemp()
+            # First, check if the checkpoint name generation mechanism is
+            # correct.
+            checkpoint = MultiNodeCheckpointManager(tmpdir, 'minidb')
+            with Cluster():
+                with Job() as job:
+                    for node_id in range(num_nodes):
+                        build_pipeline(node_id)
+                compiled_job = job.compile(LocalSession)
+                checkpoint.init(compiled_job.nodes_to_checkpoint())
 
-            for node_id in range(3):
+                for node_id in range(num_nodes):
+                    epoch = 5
+                    node_name = 'trainer_%d' % node_id
+                    expected_db_name = tmpdir + '/' + node_name + '.5'
+                    self.assertEquals(
+                        checkpoint.get_ckpt_db_name(node_name, epoch),
+                        expected_db_name)
+            shutil.rmtree(tmpdir)
+
+            # Next, check mechanism to load model from checkpoints.
+            tmpdir = tempfile.mkdtemp()
+            workspace.ResetWorkspace()
+            for node_id in range(num_nodes):
                 ws = workspace.C.Workspace()
                 session = LocalSession(ws)
                 checkpoint = MultiNodeCheckpointManager(tmpdir, 'minidb')
-                with Job() as job:
-                    build_pipeline(node_id)
-                compiled_job = job.compile(LocalSession)
-                job_runner = JobRunner(compiled_job, checkpoint)
-                num_epochs = job_runner(session)
+                with Cluster():
+                    with Job() as job:
+                        build_pipeline(node_id)
+                    compiled_job = job.compile(LocalSession)
+                    job_runner = JobRunner(compiled_job, checkpoint)
+                    num_epochs = job_runner(session)
                 self.assertEquals(num_epochs, len(EXPECTED_TOTALS))
 
                 # There are 12 global blobs after finishing up the job runner.
@@ -161,54 +180,34 @@ class TestCheckpoint(TestCase):
             ws = workspace.C.Workspace()
             session = LocalSession(ws)
             self.assertEquals(len(ws.blobs), 0)
-            model_blob_names = ['trainer:1/task/GivenTensorInt64Fill:0',
-                                'trainer:2/task/GivenTensorInt64Fill:0']
+            model_blob_names = ['trainer_1/task_2/GivenTensorInt64Fill:0',
+                                'trainer_2/task_2/GivenTensorInt64Fill:0']
             checkpoint = MultiNodeCheckpointManager(tmpdir, 'minidb')
-            with Job() as job:
-                for node_id in range(3):
-                    build_pipeline(node_id)
-            compiled_job = job.compile(LocalSession)
-            job_runner = JobRunner(compiled_job, checkpoint)
-            job_runner.load_blobs_from_checkpoints(blob_names=model_blob_names,
-                                                   epoch=1, session=session)
-
-            # Check that we can successfully load from checkpoints of epochs
-            # 1 to 4, but not epoch 5.
-            for epoch in range(1, 5):
-                self.assertTrue(
-                    job_runner.load_blobs_from_checkpoints(
-                        blob_names=model_blob_names, epoch=epoch,
-                        session=session))
-                # Check that all the model blobs are loaded.
-                for blob_name in model_blob_names:
-                    self.assertTrue(ws.has_blob(blob_name))
-                    self.assertEquals(ws.fetch_blob(blob_name),
-                                      np.array([EXPECTED_TOTALS[epoch - 1]]))
-            self.assertFalse(
+            with Cluster():
+                with Job() as job:
+                    for node_id in range(num_nodes):
+                        build_pipeline(node_id)
+                compiled_job = job.compile(LocalSession)
+                job_runner = JobRunner(compiled_job, checkpoint)
                 job_runner.load_blobs_from_checkpoints(
-                    blob_names=model_blob_names, epoch=5, session=session))
+                    blob_names=model_blob_names, epoch=1, session=session)
 
-        finally:
-            shutil.rmtree(tmpdir)
-
-    def test_get_ckpt_db_name(self):
-        try:
-            tmpdir = tempfile.mkdtemp()
-            num_nodes = 3
-            checkpoint = MultiNodeCheckpointManager(tmpdir, 'minidb')
-            with Job() as job:
-                for node_id in range(num_nodes):
-                    build_pipeline(node_id)
-            compiled_job = job.compile(LocalSession)
-            checkpoint.init(compiled_job.nodes_to_checkpoint())
-
-            for node_id in range(num_nodes):
-                epoch = 5
-                node_name = 'trainer:%d' % node_id
-                expected_db_name = tmpdir + '/' + node_name + '.5'
-                self.assertEquals(
-                    checkpoint.get_ckpt_db_name(node_name, epoch),
-                    expected_db_name)
+                # Check that we can successfully load from checkpoints of epochs
+                # 1 to 4, but not epoch 5.
+                for epoch in range(1, 5):
+                    self.assertTrue(
+                        job_runner.load_blobs_from_checkpoints(
+                            blob_names=model_blob_names, epoch=epoch,
+                            session=session))
+                    # Check that all the model blobs are loaded.
+                    for blob_name in model_blob_names:
+                        self.assertTrue(ws.has_blob(blob_name))
+                        self.assertEquals(
+                            ws.fetch_blob(blob_name),
+                            np.array([EXPECTED_TOTALS[epoch - 1]]))
+                self.assertFalse(
+                    job_runner.load_blobs_from_checkpoints(
+                        blob_names=model_blob_names, epoch=5, session=session))
 
         finally:
             shutil.rmtree(tmpdir)
@@ -222,7 +221,7 @@ class TestCheckpoint(TestCase):
 
             # The uploaded files do not exist yet.
             for node_id in range(num_nodes):
-                node_name = 'trainer:%d' % node_id
+                node_name = 'trainer_%d' % node_id
                 upload_path = os.path.join(upload_dir, node_name)
                 self.assertFalse(os.path.exists(upload_path))
 
@@ -231,19 +230,20 @@ class TestCheckpoint(TestCase):
                 ws = workspace.C.Workspace()
                 session = LocalSession(ws)
                 checkpoint = MultiNodeCheckpointManager(tmpdir, 'minidb')
-                with Job() as job:
-                    build_pipeline(node_id)
-                compiled_job = job.compile(LocalSession)
-                local_upload_builder = UploadToLocalFile(upload_dir)
-                job_runner = JobRunner(
-                    compiled_job, checkpoint,
-                    upload_task_group_builder=local_upload_builder)
-                num_epochs = job_runner(session)
-                self.assertEquals(num_epochs, len(EXPECTED_TOTALS))
+                with Cluster():
+                    with Job() as job:
+                        build_pipeline(node_id)
+                    compiled_job = job.compile(LocalSession)
+                    local_upload_builder = UploadToLocalFile(upload_dir)
+                    job_runner = JobRunner(
+                        compiled_job, checkpoint,
+                        upload_task_group_builder=local_upload_builder)
+                    num_epochs = job_runner(session)
+                    self.assertEquals(num_epochs, len(EXPECTED_TOTALS))
 
             # The uploaded files should exist now.
             for node_id in range(num_nodes):
-                node_name = 'trainer:%d' % node_id
+                node_name = 'trainer_%d' % node_id
                 upload_path = os.path.join(upload_dir, node_name)
                 self.assertTrue(os.path.exists(upload_path))
 
