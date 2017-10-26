@@ -48,12 +48,7 @@ int main() {
 
     // unsqueeze
     if (t.numel() != 0) {
-      if (t.dim() > 0) {
-        assert(t.unsqueeze(0).dim() == t.dim() + 1);
-      } else {
-        // FIXME: should be able to remove this if/else, unsqueezing a scalar should give 1-dimension
-        assert(t.unsqueeze(0).dim() == t.dim() + 2);
-      }
+      assert(t.unsqueeze(0).dim() == t.dim() + 1);
     } else {
       try {
         // can't unsqueeze empty tensor
@@ -62,11 +57,25 @@ int main() {
       } catch (std::runtime_error &e) {}
     }
 
-    // squeeze
+    // unsqueeze_
+    {
+      auto t2 = T.ones(*s);
+      if (t2.numel() != 0) {
+        auto r = t2.unsqueeze_(0);
+        assert(r.dim() == t.dim() + 1);
+      } else {
+        try {
+          // can't unsqueeze empty tensor
+          t2.unsqueeze_(0);
+          assert (false);
+        } catch (std::runtime_error &e) {}
+      }
+    }
+
+    // squeeze (with dimension argument)
     if (t.dim() > 0 && t.sizes()[0] == 1) {
-      // FIXME: the max should be 0, but we don't reduce down to scalars properly yet
-      assert(t.squeeze(0).dim() == std::max<int64_t>(t.dim() - 1, 1));
-    } else if (t.dim() == 0 || t.numel() == 0)  {
+      assert(t.squeeze(0).dim() == t.dim() - 1);
+    } else if (t.dim() == 0) {
       try {
         t.squeeze(0);
         assert(false);
@@ -77,10 +86,69 @@ int main() {
       assert(t.squeeze(0).dim() == t.dim());
     }
 
-    // reduce
+    // squeeze (with no dimension argument)
+    {
+      std::vector<int64_t> size_without_ones;
+      for (auto size : *s) {
+        if (size != 1) {
+          size_without_ones.push_back(size);
+        }
+      }
+      auto result = t.squeeze();
+      assert_equal_size_dim(result, T.ones(size_without_ones));
+    }
+
+    {
+      // squeeze_ (with dimension argument)
+      auto t2 = T.ones(*s);
+      if (t2.dim() > 0 && t2.sizes()[0] == 1) {
+        assert(t2.squeeze_(0).dim() == t.dim() - 1);
+      } else if (t2.dim() == 0) {
+        try {
+          t2.squeeze_(0);
+          assert(false);
+        } catch (std::runtime_error &e) {}
+      } else {
+        // In PyTorch, it is a no-op to try to squeeze a dimension that has size != 1;
+        // in NumPy this is an error.
+        assert(t2.squeeze_(0).dim() == t.dim());
+      }
+    }
+
+    // squeeze_ (with no dimension argument)
+    {
+      auto t2 = T.ones(*s);
+      std::vector<int64_t> size_without_ones;
+      for (auto size : *s) {
+        if (size != 1) {
+          size_without_ones.push_back(size);
+        }
+      }
+      auto r = t2.squeeze_();
+      assert_equal_size_dim(t2, T.ones(size_without_ones));
+    }
+
+    // reduce (with dimension argument and with 1 return argument)
     if (t.dim() > 0 && t.numel() != 0) {
-      // FIXME: the max should be 0, but we don't reduce down to scalars properly yet
-      assert(t.sum(0).dim() == std::max<int64_t>(t.dim() - 1, 1));
+      assert(t.sum(0).dim() == t.dim() - 1);
+    } else if (t.dim() == 0) {
+      try {
+        t.sum(0);
+        assert(false);
+      } catch (std::runtime_error &e) {}
+    } else {
+      // FIXME: you should be able to reduce over size {0}
+      try {
+        t.sum(0);
+        assert(false);
+      } catch (std::runtime_error &e) {}
+    }
+
+    // reduce (with dimension argument and with 2 return arguments)
+    if (t.dim() > 0 && t.numel() != 0) {
+      auto ret = t.min(0);
+      assert(std::get<0>(ret).dim() == t.dim() - 1);
+      assert(std::get<1>(ret).dim() == t.dim() - 1);
     } else if (t.dim() == 0) {
       try {
         t.sum(0);
