@@ -77,7 +77,7 @@ static const std::unordered_map<rpc::function_id_type, dispatch_fn> functions {
 
     {Functions::tensorNew, tensorNew},
     {Functions::tensorNewWithSize, tensorNewWithSize},
-    /* {Functions::tensorNewWithStorage, tensorNewWithStorage}, */
+    {Functions::tensorNewWithStorage, tensorNewWithStorage},
     {Functions::tensorResize, tensorResize},
     {Functions::tensorResizeAs, tensorResizeAs},
     {Functions::tensorResize1d, tensorResize1d},
