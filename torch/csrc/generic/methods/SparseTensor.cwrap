@@ -38,6 +38,24 @@ PyObject * THSPTensor_(size)(PyObject *self, PyObject *args, PyObject *kwargs)
 #endif
 
 [[
+  name: THSPTensor_(new)
+  python_name: new
+  method_flags: METH_KEYWORDS
+  backends:
+    - CUDA
+  only_register: True
+  sparse: yes
+]]
+#if IS_CUDA
+static PyObject * THSPTensor_(pynew)(PyTypeObject *type, PyObject *args, PyObject *kwargs);
+PyObject * THSPTensor_(new)(THPTensor *self, PyObject *args, PyObject *kwargs)
+{
+  THCPAutoGPU gpu_guard(args, (PyObject*)self);
+  return THSPTensor_(pynew)(Py_TYPE(self), args, kwargs);
+}
+#endif
+
+[[
   name: nDimension
   sparse: yes
   python_name: ndimension
