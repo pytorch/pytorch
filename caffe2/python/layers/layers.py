@@ -328,6 +328,10 @@ class ModelLayer(object):
                                             initializer=initializer,
                                             optimizer=optimizer,
                                             ps_param=ps_param)
+
+            # make sure we don't share parameters in the same layer
+            assert all(param.parameter != p.parameter for p in self.params)
+
             self.params.append(param)
             return param.parameter
 

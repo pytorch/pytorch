@@ -117,3 +117,20 @@ class ParameterSharingTest(LayersTestCase):
                 )
                 self.assertEquals(self.model.layers[-1].w,
                                   'global_scope/shared_fc/w')
+
+    def test_layer_shared_parameter_name_different_shapes(self):
+        output_dims = 2
+        with scope.NameScope('global_scope'):
+            with ParameterSharing({'fc_auto_0': 'fc'}):
+                self.model.FC(
+                    self.model.input_feature_schema.float_features,
+                    output_dims
+                )
+                self.assertEquals(self.model.layers[-1].w,
+                                  'global_scope/fc/w')
+
+                with self.assertRaisesRegexp(ValueError, 'Got inconsistent shapes .*'):
+                    self.model.FC(
+                        self.model.input_feature_schema.float_features,
+                        output_dims + 1
+                    )
