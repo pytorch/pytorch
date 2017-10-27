@@ -774,9 +774,9 @@ void DataChannelTCP::_reduce(at::Tensor& result, at::Tensor& data,
   assertSameSizeAndType(result, data, "reduce");
 
   if (operation == THDReduceOp::THDReduceMIN) {
-    result = result.min(data);
+    at::min_out(result, result, data);
   } else if (operation == THDReduceOp::THDReduceMAX) {
-    result = result.max(data);
+    at::max_out(result, result, data);
   } else if (operation == THDReduceOp::THDReduceSUM) {
     result.add_(data);
   } else if (operation == THDReduceOp::THDReducePRODUCT) {
