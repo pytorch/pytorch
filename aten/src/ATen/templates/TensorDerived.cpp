@@ -22,6 +22,7 @@ const char * ${Tensor}::toString() const {
 IntList ${Tensor}::sizes() const {
   int64_t d = ${THTensor_nDimension};
   if (d != 0) {
+    // note: this will return "{}" for a scalar because dim() will return 0 in that case.
     return IntList(reinterpret_cast<int64_t*>(tensor->size),dim());
   } else {
     return IntList(kEmptySizes);
