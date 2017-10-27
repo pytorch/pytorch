@@ -96,7 +96,10 @@ def _export(model, args, f, export_params=True, verbose=False, training=False):
         raise RuntimeError("state_dict changed after running the tracer; "
                            "something weird is happening in your model!")
 
+    torch._C._jit_pass_peephole(trace)
+    torch._C._jit_pass_lint(trace)
     torch._C._jit_pass_onnx(trace)
+    torch._C._jit_pass_lint(trace)
 
     if verbose:
         print(trace)

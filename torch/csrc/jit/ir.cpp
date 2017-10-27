@@ -265,17 +265,6 @@ std::ostream& operator<<(std::ostream & out, Node & n) {
 }
 
 std::ostream& operator<<(std::ostream & out, Graph & g) {
-  // Uncomment this to debug all_nodes issues
-  /*
-  {
-    size_t i = 0;
-    for (auto& n : g.all_nodes) {
-      if (i++ > 0) out << ", ";
-      out << *n;
-    }
-    out << "\n";
-  }
-  */
   out << "graph(" << node_list_with_types(g.inputs(), true) << ") {\n";
   std::vector<Node*> groups;
   size_t prev_stage = 0;
@@ -294,6 +283,16 @@ std::ostream& operator<<(std::ostream & out, Graph & g) {
   for(auto fg : groups) {
     out << "with fusion_group_" <<i++ << " = " << *fg->g(kSubgraph);
   }
+  /*
+  // Uncomment this to debug all_nodes issues
+  {
+    out << "\n";
+    out << "all_nodes:\n";
+    for (auto& n : g.all_nodes) {
+      printNode(out, const_cast<Node*>(n), nullptr);
+    }
+  }
+  */
   return out;
 }
 
@@ -326,6 +325,11 @@ void Node::lint() const {
       JIT_ASSERT(std::find(ALL_OF(input->uses_), Use(const_cast<Node*>(this), i)) != input->uses_.end());
       JIT_ASSERT(stage_ >= input->stage_);
       JIT_ASSERT(graph_->all_nodes.count(this) == 1);
+      if (kind_ == kSelect) {
+        JIT_ASSERT(input->hasType() && input->type()->kind() == TypeKind::MultiType);
+      } else {
+        JIT_ASSERT(!input->hasType() || input->type()->kind() != TypeKind::MultiType);
+      }
       // Handle invariant
       if (i != inputs_.size() - 1) {
         JIT_ASSERT(!input->hasType() || input->type()->kind() != TypeKind::HandleType);
@@ -351,6 +355,8 @@ void Node::lint() const {
         IR_ELSE()
           JIT_ASSERT(0);
         IR_END()
+      } else {
+        JIT_ASSERT(use.user->kind() != kSelect);
       }
       i++;
     }
@@ -408,11 +414,13 @@ void Node::lint() const {
 
 }
 
+// TODO: When lint fails, give better indication about which
+// instruction triggered the failure.
 void Graph::lint() const {
   // Graph invariants
 
   // Uncomment the following to see the graph
-  // std::cout << *this << std::endl;
+  // std::cout << *const_cast<Graph*>(this);
 
   // nodes
   // - nodes_ is a valid topological ordering for inputs
@@ -420,26 +428,12 @@ void Graph::lint() const {
   // - Params and return do NOT occur in nodes
   // - next_unique_ is greater than all uniques in graph
   // - uniques in all_nodes are unique
+  // - every use will occur later in the topsort
 
   std::unordered_set<const Node*> in_scope;
   std::unordered_set<size_t> seen_uniques;
+  std::unordered_map<const Node*, int64_t> anticipated_uses;
   auto check_node = [&](const Node* n) {
-    auto b = in_scope.insert(n);
-    JIT_ASSERT(b.second);
-    auto b2 = seen_uniques.insert(n->unique_);
-    JIT_ASSERT(b2.second);
-    JIT_ASSERT(n->unique_ < next_unique_);
-  };
-
-  for (auto input : inputs_) {
-    JIT_ASSERT(input->kind_ == kParam);
-    input->lint();
-    check_node(input);
-  }
-  for (auto n : nodes()) {
-    n->lint();
-    JIT_ASSERT(n->kind_ != kParam);
-    JIT_ASSERT(n->kind_ != kReturn);
     for (auto input : n->inputs_) {
       if (in_scope.count(input) != 1) {
         if (n->kind_ == kSelect) {
@@ -449,18 +443,41 @@ void Graph::lint() const {
         }
       }
     }
+    JIT_ASSERT(anticipated_uses[n] == static_cast<int64_t>(n->inputs_.size()));
+    anticipated_uses[n] = -1;  // we saw the anticipated user!
+
+    auto b = in_scope.insert(n);
+    JIT_ASSERT(b.second);  // insertion took place
+    auto b2 = seen_uniques.insert(n->unique_);
+    JIT_ASSERT(b2.second);  // insertion took place
+    JIT_ASSERT(n->unique_ < next_unique_);
+
     for (auto use : n->uses_) {
       JIT_ASSERT(in_scope.count(use.user) == 0);
       JIT_ASSERT(all_nodes.count(use.user) == 1);
+      anticipated_uses[use.user]++;  // int default constructs to 0
     }
+
+    n->lint();
+  };
+
+  for (auto input : inputs_) {
+    JIT_ASSERT(input->kind_ == kParam);
+    check_node(input);
+  }
+
+  for (auto n : nodes()) {
+    JIT_ASSERT(n->kind_ != kParam);
+    JIT_ASSERT(n->kind_ != kReturn);
     check_node(n);
   }
+
   JIT_ASSERT(output_->kind() == kReturn);
-  output_->lint();
-  for (auto output : output_->inputs_) {
-    JIT_ASSERT(in_scope.count(output) == 1);
-  }
   check_node(output_);
+
+  for (auto kv : anticipated_uses) {
+    JIT_ASSERT(kv.second == -1);
+  }
 
   // all_nodes
   // - inputs_, output_ and nodes_ are all included in all_nodes
