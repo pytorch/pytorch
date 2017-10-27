@@ -3667,6 +3667,18 @@ new_criterion_tests = [
 ]
 
 
+def kldivloss_no_reduce_test():
+    t = Variable(torch.randn(10, 10))
+    return dict(
+        fullname='KLDivLoss_no_reduce',
+        constructor=wrap_functional(
+            lambda i: F.kl_div(i, t.type_as(i), reduce=False)),
+        input_fn=lambda: torch.rand(10, 10).log(),
+        reference_fn=lambda i, _:
+            loss_reference_fns['KLDivLoss'](i, t.data.type_as(i), reduce=False),
+        pickle=False)
+
+
 def l1loss_no_reduce_test():
     t = Variable(torch.randn(2, 3, 4))
     return dict(
@@ -3825,6 +3837,7 @@ def smoothl1loss_no_reduce_test():
 
 
 new_module_tests = [
+    kldivloss_no_reduce_test(),
     l1loss_no_reduce_test(),
     mseloss_no_reduce_test(),
     nllloss_no_reduce_test(),

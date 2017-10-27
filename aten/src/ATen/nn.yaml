@@ -3,7 +3,7 @@
 - name: binary_cross_entropy(Tensor input, Tensor target, Tensor weight={}, bool size_average=true)
   cname: BCECriterion
 
-- name: kl_div(Tensor input, Tensor target, bool size_average=true)
+- name: kl_div(Tensor input, Tensor target, bool size_average=true, bool reduce=true)
   cname: DistKLDivCriterion
 
 - name: l1_loss(Tensor input, Tensor target, bool size_average=true, bool reduce=True)

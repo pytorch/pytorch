@@ -20,17 +20,42 @@ struct kl_functor
 };
 
 template <typename Dtype>
+struct kl_updateOutput_no_reduce_functor
+{
+  __forceinline__ __host__ __device__ void operator()(
+      const Dtype *x,
+      const Dtype *y,
+      Dtype *output)
+  {
+      *output = *y > 0 ? *y * (THCNumerics<Dtype>::log(*y) - *x) : ScalarConvert<int, Dtype>::to(0);
+  }
+};
+
+template <typename Dtype>
+struct kl_updateGradInput_no_reduce_functor
+{
+  __host__ __device__ void operator()(
+      const Dtype *target,
+      const Dtype *gradOutput,
+      Dtype *gradInput)
+  {
+      *gradInput = *target > 0 ? (-*target) * *gradOutput : ScalarConvert<int, Dtype>::to(0);
+  }
+};
+
+template <typename Dtype>
 struct kl_updateGradInput_functor
 {
   const Dtype norm;
+  const Dtype gradOutput;
 
-  kl_updateGradInput_functor(Dtype norm_)
-    : norm(norm_)
+  kl_updateGradInput_functor(Dtype norm_, Dtype gradOutput_)
+    : norm(norm_), gradOutput(gradOutput_)
   {}
 
   __host__ __device__ Dtype operator()(const Dtype& x, const Dtype& y) const
   {
-      return y > 0 ? norm * (-y) : ScalarConvert<int, Dtype>::to(0);
+      return y > 0 ? norm * (-y) : ScalarConvert<int, Dtype>::to(0) * gradOutput;
   }
 };
 
