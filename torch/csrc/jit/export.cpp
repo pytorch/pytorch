@@ -220,7 +220,108 @@ void encodeModel(onnx::ModelProto* p_m, const std::shared_ptr<Graph>& g,
   encodeGraph(p_g, g, initializers);
 }
 
+// Broadcasting operators have the following property:
+// They support a 'broadcast' flag, which enables broadcasting
+// on the last argument.  ATM this is not full-Numpy broadcasting,
+// only left-size extension (no size 1 to size n broadcast)
+std::unordered_set<NodeKind> broadcasting = {
+  kAdd,
+  kDiv,
+  kMul,
+  kPow,
+  kSub,
+  kGemm,
+};
+
+bool isBroadcasting(Node *node) {
+  return broadcasting.count(node->kind());
+}
+
+// When iterating over the dimension sizes, starting at the trailing dimension,
+// the dimension sizes must either be equal, or one of them does not exist.
+//
+//  equivalently:
+//
+// Test that 'from' is a suffix of 'to'.
+bool fusibleExpandTo(at::IntList from, at::IntList to) {
+  auto f = from.rbegin();
+  auto t = to.rbegin();
+  for (; f != from.rend() && t != to.rend(); f++, t++) {
+    // TODO: if 1->n expansion is supported, adjust this conditional.
+    if (*f != *t) return false;
+  }
+  return f == from.rend();
+}
+
+// This optimization fuses expand calls into ONNX operators, because it is
+// easier for non-strided backends to more efficiently do broadcasts if this is
+// local information.  This optimization is not useful for PyTorch as 'expand'
+// is free.
+void fuseBroadcast(const std::shared_ptr<Graph>& graph) {
+  for (auto it = graph->nodes().begin(); it != graph->nodes().end(); ++it) {
+    auto* n = *it;
+
+    // Can't fuse into nodes that don't support broadcasting
+    if (!isBroadcasting(n)) continue;
+
+    // If the node already broadcasts, can't "rebroadcast"
+    // TODO: Actually, maybe you can, if there is a broadcast for some
+    // dims, and then another broadcast for the rest.  But this will
+    // never happen in practice so I didn't implement it.
+    if (n->hasAttribute(kbroadcast) && n->i(kbroadcast)) continue;
+    JIT_ASSERT(!n->hasAttribute(kaxis));
+
+    // TODO: switch ATen tracing to not insert selects for single output.
+    auto* rhs_select = n->inputs().at(n->inputs().size() - 1);
+
+    if (rhs_select->kind() != kSelect) continue;
+    auto* rhs = rhs_select->input();
+
+    // The rhs input isn't actually an expand, so no fusion available
+    // NB: Awkward!  It's a test for an ATen expand (see the lowercase)
+    // TODO: Update this once we add a broadcast operator to ONNX, and a
+    // symbolic here.
+    if (rhs->kind() != kexpand) continue;
+
+    auto* new_rhs = rhs->input();
+
+    // We need to know what the type pre-expand is.  We should basically
+    // always have this information (because expands are only ever traced,
+    // not generated from symbolic), but if for some reason we don't
+    // have it, we need to skip.
+    if (!new_rhs->hasType()) continue;
+
+    // Not all broadcasts are supported by ONNX broadcast.
+    if (!fusibleExpandTo(new_rhs->type()->expect<TensorType>()->sizes(),    // from
+                         rhs_select->type()->expect<TensorType>()->sizes()) // to
+       ) continue;
+
+    auto *new_n = graph->createClone(n, [&](Node* n) { return n == rhs_select ? new_rhs : n; });
+    new_n->i_(kbroadcast, 1);
+    new_n->insertAfter(n);
+    n->replaceAllUsesWith(new_n);
+    it.destroyCurrent();
+    if (rhs_select->uses().size() == 0) {
+      JIT_ASSERT(rhs->uses().size() == 1);
+      // TODO: This is awful!  See https://github.com/ezyang/pytorch/issues/254
+      if (*it == rhs_select) {
+        it.destroyCurrent();
+      } else {
+        rhs_select->destroy();
+      }
+      if (*it == rhs) {
+        it.destroyCurrent();
+      } else {
+        rhs->destroy();
+      }
+    }
+  }
+}
+
+
 void standardizeGraph(const std::shared_ptr<Graph>& graph) {
+  fuseBroadcast(graph);
+
   for (auto it = graph->nodes().begin(); it != graph->nodes().end(); ++it) {
 #define FAIL_EXPORT(name) \
       throw std::runtime_error(std::string("Couldn't export ") + name + " function - " \
@@ -233,6 +334,8 @@ void standardizeGraph(const std::shared_ptr<Graph>& graph) {
       FAIL_EXPORT(py_node->name())
     IR_ELSE()
       // Do nothing.
+      // TODO: Test if the op is lower-case.  If it is, that means we have
+      // an ATen op that snuck through. Bad!
     IR_END()
 #undef FAIL_EXPORT
   }

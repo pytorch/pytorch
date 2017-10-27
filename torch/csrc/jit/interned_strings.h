@@ -16,8 +16,11 @@ _(Select) \
 _(Return) \
 _(Eval) \
 _(Add) \
+_(Div) \
 _(Mul) \
 _(Neg) \
+_(Sub) \
+_(Pow) \
 _(Sigmoid) \
 _(Tanh) \
 _(Constant) \
@@ -43,6 +46,7 @@ _(Caffe2ConvTranspose) \
 _(ConvTranspose) \
 _(is_test) \
 _(epsilon) \
+_(expand) \
 _(order) \
 _(momentum) \
 _(consumed_inputs) \
@@ -60,6 +64,7 @@ _(dilations) \
 _(dilation) \
 _(broadcast) \
 _(axis) \
+_(size) \
 _(perm) \
 _(shape) \
 _(axes) \
