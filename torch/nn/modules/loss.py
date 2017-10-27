@@ -506,14 +506,19 @@ class CrossEntropyLoss(_WeightedLoss):
            If given, has to be a Tensor of size "nclasses"
         size_average (bool, optional): By default, the losses are averaged over observations for each minibatch.
            However, if the field size_average is set to False, the losses are
-           instead summed for each minibatch.
+           instead summed for each minibatch. Ignored if reduce is False.
         ignore_index (int, optional): Specifies a target value that is ignored
             and does not contribute to the input gradient. When size_average is
             True, the loss is averaged over non-ignored targets.
+        reduce (bool, optional): By default, the losses are averaged or summed over
+            observations for each minibatch depending on size_average. When reduce
+            is False, returns a loss per batch element instead and ignores
+            size_average. Default: True
 
     Shape:
         - Input: :math:`(N, C)` where `C = number of classes`
         - Target: :math:`(N)` where each value is `0 <= targets[i] <= C-1`
+        - Output: scalar. If reduce is False, then :math:`(N)` instead.
 
     Examples::
 
@@ -524,14 +529,15 @@ class CrossEntropyLoss(_WeightedLoss):
         >>> output.backward()
     """
 
-    def __init__(self, weight=None, size_average=True, ignore_index=-100):
+    def __init__(self, weight=None, size_average=True, ignore_index=-100, reduce=True):
         super(CrossEntropyLoss, self).__init__(weight, size_average)
         self.ignore_index = ignore_index
+        self.reduce = reduce
 
     def forward(self, input, target):
         _assert_no_grad(target)
         return F.cross_entropy(input, target, self.weight, self.size_average,
-                               self.ignore_index)
+                               self.ignore_index, self.reduce)
 
 
 class MultiLabelSoftMarginLoss(_WeightedLoss):
