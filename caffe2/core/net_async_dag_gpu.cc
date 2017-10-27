@@ -95,12 +95,17 @@ AsyncDAGNet::AsyncDAGNet(
   eventRecorded_.resize(net_def->op_size());
 
   // For all chains, their tail should consist the list of events that we are
-  // needing for synchronization in the Run() inteface.
+  // needing for synchronization in the Run() inteface, unless there are other
+  // chains depending on it.
   events_.reserve(execution_chains_.size());
   for (const auto& chain : execution_chains_) {
     const int tail_op_idx = chain.second.back();
-    events_.push_back(&operator_nodes_[tail_op_idx].operator_->event());
+    if (operator_nodes_[tail_op_idx].children_.empty()) {
+      events_.push_back(&operator_nodes_[tail_op_idx].operator_->event());
+    }
   }
+  VLOG(1) << "Total " << execution_chains_.size()
+          << " chains, final waiting on " << events_.size() << " events";
 }
 
 bool AsyncDAGNet::RunAt(const std::vector<int>& chain) {
