@@ -26,17 +26,16 @@ class Index(Function):
         # We use "Slice" to get the index-th element in i,
         # Then we reduce the dimension using "Reshape".
         if isinstance(index, int_classes):
-            axes = g.constant(0, [1], "int")
-            starts = g.constant(index, [1], "long")
-            ends = g.constant(index + 1, [1], "long")
-            slice_node = g.op("Slice", i, axes, starts, ends)
+            axes = [0]
+            starts = [index]
+            ends = [index + 1]
+            slice_node = g.op("Slice", i, axes_i=axes, starts_i=starts, ends_i=ends)
             return g.op("Squeeze", slice_node, axes_i=[0])
         elif isinstance(index, tuple):
             dims = i.type().sizes()
-            axes_ten = torch.IntTensor([idx for idx in range(len(index))])
-            axes = g.op("Constant", value_t=axes_ten)
-            starts_list = []
-            ends_list = []
+            axes = [idx for idx in range(len(index))]
+            starts = []
+            ends = []
             squeeze_indices = []
 
             # Given an index, size of dimension, a list, and a default fill val,
@@ -54,24 +53,20 @@ class Index(Function):
 
             for idx in range(len(index)):
                 if isinstance(index[idx], int_classes):
-                    starts_list.append(index[idx])
-                    ends_list.append(index[idx] + 1)
+                    starts.append(index[idx])
+                    ends.append(index[idx] + 1)
                     squeeze_indices.append(idx)
                     continue
 
                 # Start index
-                append_index(index[idx].start, dims[idx], starts_list, 0)
+                append_index(index[idx].start, dims[idx], starts, 0)
                 # End index
-                append_index(index[idx].stop, dims[idx], ends_list, dims[idx])
+                append_index(index[idx].stop, dims[idx], ends, dims[idx])
 
                 if index[idx].step is not None:
                     raise ValueError("Strided slice is not supported at this time")
 
-            starts_ten = torch.LongTensor(starts_list)
-            starts = g.op("Constant", value_t=starts_ten)
-            ends_ten = torch.LongTensor(ends_list)
-            ends = g.op("Constant", value_t=ends_ten)
-            slice_node = g.op("Slice", i, axes, starts, ends)
+            slice_node = g.op("Slice", i, axes_i=axes, starts_i=starts, ends_i=ends)
             if squeeze_indices:
                 return g.op('Squeeze', slice_node, axes_i=squeeze_indices)
             else:
