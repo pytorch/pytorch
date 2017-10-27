@@ -1,27 +1,20 @@
 
 template<typename... Ts>
-static std::unique_ptr<thpp::Tensor> createTensor(thpp::Type type, Ts &... args) {
+static at::Tensor createTensor(thpp::Type type, Ts &... args) {
   if (type == thpp::Type::UCHAR)
-    return std::unique_ptr<thpp::Tensor>(
-        new thpp::THTensor<unsigned char>(std::forward<Ts>(args)...));
+    return at::CPU(at::kByte).tensor(std::forward<Ts>(args)...);
   else if (type == thpp::Type::CHAR)
-    return std::unique_ptr<thpp::Tensor>(
-        new thpp::THTensor<int8_t>(std::forward<Ts>(args)...));
+    return at::CPU(at::kChar).tensor(std::forward<Ts>(args)...);
   else if (type == thpp::Type::SHORT)
-    return std::unique_ptr<thpp::Tensor>(
-        new thpp::THTensor<short>(std::forward<Ts>(args)...));
+    return at::CPU(at::kShort).tensor(std::forward<Ts>(args)...);
   else if (type == thpp::Type::INT)
-    return std::unique_ptr<thpp::Tensor>(
-        new thpp::THTensor<int>(std::forward<Ts>(args)...));
+    return at::CPU(at::kInt).tensor(std::forward<Ts>(args)...);
   else if (type == thpp::Type::LONG)
-    return std::unique_ptr<thpp::Tensor>(
-        new thpp::THTensor<int64_t>(std::forward<Ts>(args)...));
+    return at::CPU(at::kLong).tensor(std::forward<Ts>(args)...);
   else if (type == thpp::Type::FLOAT)
-    return std::unique_ptr<thpp::Tensor>(
-        new thpp::THTensor<float>(std::forward<Ts>(args)...));
+    return at::CPU(at::kFloat).tensor(std::forward<Ts>(args)...);
   else if (type == thpp::Type::DOUBLE)
-    return std::unique_ptr<thpp::Tensor>(
-        new thpp::THTensor<double>(std::forward<Ts>(args)...));
+    return at::CPU(at::kDouble).tensor(std::forward<Ts>(args)...);
   throw std::invalid_argument("passed character doesn't represent a tensor type");
 }
 
@@ -41,40 +34,46 @@ static void tensorNewWithSize(rpc::RPCMessage& raw_message) {
   THLongStorage *size = unpackTHLongStorage(raw_message);
   THLongStorage *stride = unpackTHLongStorage(raw_message);
   finalize(raw_message);
+
+  at::IntList sz(size->data, size->size);
+  at::IntList str(stride->data, stride->size);
   workerTensors.emplace(
     id,
-    createTensor(type, size, stride)
+    createTensor(type, sz, str)
   );
   THLongStorage_free(size);
   THLongStorage_free(stride);
 }
 
-static void tensorNewWithStorage(rpc::RPCMessage& raw_message) {
-  thpp::Type type = unpackType(raw_message);
-  thd::object_id_type id = unpackTensor(raw_message);
-  at::Storage *storage = unpackRetrieveStorage(raw_message);
-  ptrdiff_t storageOffset = unpackInteger(raw_message);
-  THLongStorage *size = unpackTHLongStorage(raw_message);
-  THLongStorage *stride = unpackTHLongStorage(raw_message);
-  finalize(raw_message);
-  workerTensors.emplace(
-    id,
-    createTensor(type, *storage, storageOffset, size, stride)
-  );
-  THLongStorage_free(size);
-  THLongStorage_free(stride);
-}
+/* static void tensorNewWithStorage(rpc::RPCMessage& raw_message) { */
+/*   thpp::Type type = unpackType(raw_message); */
+/*   thd::object_id_type id = unpackTensor(raw_message); */
+/*   at::Storage *storage = unpackRetrieveStorage(raw_message); */
+/*   ptrdiff_t storageOffset = unpackInteger(raw_message); */
+/*   THLongStorage *size = unpackTHLongStorage(raw_message); */
+/*   THLongStorage *stride = unpackTHLongStorage(raw_message); */
+/*   finalize(raw_message); */
 
-static void tensorNewWithTensor(rpc::RPCMessage& raw_message) {
-  thpp::Type type = unpackType(raw_message);
-  thd::object_id_type id = unpackTensor(raw_message);
-  at::Tensor self = unpackRetrieveTensor(raw_message);
-  finalize(raw_message);
-  workerTensors.emplace(
-    id,
-    createTensor(type, self)
-  );
-}
+/*   at::IntList sz(size->data, size->size); */
+/*   at::IntList str(stride->data, stride->size); */
+/*   workerTensors.emplace( */
+/*     id, */
+/*     createTensor(type, *storage, storageOffset, sz, str) */
+/*   ); */
+/*   THLongStorage_free(size); */
+/*   THLongStorage_free(stride); */
+/* } */
+
+/* static void tensorNewWithTensor(rpc::RPCMessage& raw_message) { */
+/*   thpp::Type type = unpackType(raw_message); */
+/*   thd::object_id_type id = unpackTensor(raw_message); */
+/*   at::Tensor self = unpackRetrieveTensor(raw_message); */
+/*   finalize(raw_message); */
+/*   workerTensors.emplace( */
+/*     id, */
+/*     createTensor(type, self) */
+/*   ); */
+/* } */
 
 static void tensorNewClone(rpc::RPCMessage& raw_message) {
   thd::object_id_type id = unpackTensor(raw_message);

@@ -77,7 +77,7 @@ static const std::unordered_map<rpc::function_id_type, dispatch_fn> functions {
 
     {Functions::tensorNew, tensorNew},
     {Functions::tensorNewWithSize, tensorNewWithSize},
-    {Functions::tensorNewWithStorage, tensorNewWithStorage},
+    /* {Functions::tensorNewWithStorage, tensorNewWithStorage}, */
     {Functions::tensorResize, tensorResize},
     {Functions::tensorResizeAs, tensorResizeAs},
     {Functions::tensorResize1d, tensorResize1d},
@@ -132,7 +132,7 @@ static const std::unordered_map<rpc::function_id_type, dispatch_fn> functions {
     {Functions::tensorAddr, tensorAddr},
     {Functions::tensorAddbmm, tensorAddbmm},
     {Functions::tensorBaddbmm, tensorBaddbmm},
-    {Functions::tensorMatch, tensorMatch},
+    /* {Functions::tensorMatch, tensorMatch}, */
     {Functions::tensorMax, tensorMax},
     {Functions::tensorMin, tensorMin},
     {Functions::tensorKthvalue, tensorKthvalue},
@@ -147,8 +147,8 @@ static const std::unordered_map<rpc::function_id_type, dispatch_fn> functions {
     {Functions::tensorCross, tensorCross},
     {Functions::tensorCmax, tensorCmax},
     {Functions::tensorCmin, tensorCmin},
-    {Functions::tensorCmaxValue, tensorCmaxValue},
-    {Functions::tensorCminValue, tensorCminValue},
+    /* {Functions::tensorCmaxValue, tensorCmaxValue}, */
+    /* {Functions::tensorCminValue, tensorCminValue}, */
 
     {Functions::tensorFill, tensorFill},
     {Functions::tensorMaskedFill, tensorMaskedFill},
@@ -224,7 +224,7 @@ static const std::unordered_map<rpc::function_id_type, dispatch_fn> functions {
     {Functions::tensorRenorm, tensorRenorm},
     {Functions::tensorDist, tensorDist},
     {Functions::tensorHistc, tensorHistc},
-    {Functions::tensorBhistc, tensorBhistc},
+    /* {Functions::tensorBhistc, tensorBhistc}, */
     {Functions::tensorMeanall, tensorMeanall},
     {Functions::tensorVarall, tensorVarall},
     {Functions::tensorStdall, tensorStdall},

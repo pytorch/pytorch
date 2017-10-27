@@ -126,11 +126,11 @@ rank_type DataChannelGloo::getNumProcesses() {
 
 
 template<typename T>
-void DataChannelGloo::allGatherT(std::vector<at::Tensor*>& output,
+void DataChannelGloo::allGatherT(std::vector<at::Tensor>& output,
                                  at::Tensor& input, THDGroup group_id) {
   auto input_device = getDeviceType(input);
   for (auto& out : output) {
-    if (input_device != getDeviceType(*out)) {
+    if (input_device != getDeviceType(out)) {
       throw std::runtime_error("allGather got input and output on different devices");
     }
   }
@@ -145,7 +145,7 @@ void DataChannelGloo::allGatherT(std::vector<at::Tensor*>& output,
     std::memcpy(GlooCache::input_buffer(ret).get(), input.data_ptr(), tensor_bytes);
     GlooCache::algorithm(ret)->run();
     for (std::size_t i = 0; i < output.size(); i++) {
-      std::memcpy(output.at(i)->data_ptr(),
+      std::memcpy(output.at(i).data_ptr(),
                   GlooCache::output_buffer(ret).get() + (i * tensor_bytes),
                   tensor_bytes);
     }
@@ -153,7 +153,7 @@ void DataChannelGloo::allGatherT(std::vector<at::Tensor*>& output,
 
 }
 
-void DataChannelGloo::allGather(std::vector<at::Tensor*>& output,
+void DataChannelGloo::allGather(std::vector<at::Tensor>& output,
                                 at::Tensor& input, THDGroup group_id) {
   RETURN_IF_NOT_IN_GROUP
 
@@ -161,14 +161,14 @@ void DataChannelGloo::allGather(std::vector<at::Tensor*>& output,
     throw std::logic_error("allGather: number of output tensors and group size does not match");
 
   for (auto out_tensor : output)
-    assertSameSizeAndType(*out_tensor, input, "allGather");
+    assertSameSizeAndType(out_tensor, input, "allGather");
 
   GENERATE_ALL_TYPES(input.type().scalarType(), allGatherT, output, input, group_id)
 }
 
 
 // XXX: `gather` is not supported by Gloo yet.
-void DataChannelGloo::gather(std::vector<at::Tensor*>& output,
+void DataChannelGloo::gather(std::vector<at::Tensor>& output,
                              at::Tensor& input, rank_type dst_rank,
                              THDGroup group_id) {
   throw std::runtime_error("DataChannelGloo doesn't support gather");
@@ -176,7 +176,7 @@ void DataChannelGloo::gather(std::vector<at::Tensor*>& output,
 
 
 // XXX: `scatter` is not supported by Gloo yet.
-void DataChannelGloo::scatter(std::vector<at::Tensor*>& input,
+void DataChannelGloo::scatter(std::vector<at::Tensor>& input,
                               at::Tensor& output,
                               rank_type src_rank, THDGroup group_id) {
   throw std::runtime_error("DataChannelGloo does not support scatter");

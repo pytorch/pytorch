@@ -76,11 +76,11 @@ struct DataChannel {
   virtual rank_type getRank() = 0;
   virtual rank_type getNumProcesses() = 0;
 
-  virtual void allGather(std::vector<at::Tensor*>& output, at::Tensor& input,
+  virtual void allGather(std::vector<at::Tensor>& output, at::Tensor& input,
                          THDGroup group_id = THDGroupWORLD) = 0;
-  virtual void gather(std::vector<at::Tensor*>& output, at::Tensor& input,
+  virtual void gather(std::vector<at::Tensor>& output, at::Tensor& input,
                       rank_type dst_rank, THDGroup group_id = THDGroupWORLD) = 0;
-  virtual void scatter(std::vector<at::Tensor*>& input, at::Tensor& output,
+  virtual void scatter(std::vector<at::Tensor>& input, at::Tensor& output,
                        rank_type src_rank, THDGroup group_id = THDGroupWORLD) = 0;
   virtual void allReduce(at::Tensor& data, THDReduceOp operation,
                          THDGroup group_id = THDGroupWORLD) = 0;

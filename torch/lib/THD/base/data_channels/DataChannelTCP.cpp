@@ -243,7 +243,7 @@ rank_type DataChannelTCP::getNumProcesses() {
 }
 
 
-void DataChannelTCP::allGather(std::vector<at::Tensor*>& output,
+void DataChannelTCP::allGather(std::vector<at::Tensor>& output,
                                at::Tensor& input, THDGroup group_id) {
   /*
    * Allgather algorithm is simple ring algorithm. This algorithm perfroms
@@ -268,17 +268,17 @@ void DataChannelTCP::allGather(std::vector<at::Tensor*>& output,
     throw std::logic_error("allGather: number of output tensors and group size does not match");
 
   for (auto out_tensor : output)
-    assertSameSizeAndType(*out_tensor, input, "allGather");
+    assertSameSizeAndType(out_tensor, input, "allGather");
 
   rank_type left = (group.size() + group_rank - 1) % group.size();
   rank_type right = (group_rank + 1) % group.size();
 
-  memcpy(output[group_rank]->data_ptr(), input.data_ptr(), input.type().elementSizeInBytes() * input.numel());
+  memcpy(output[group_rank].data_ptr(), input.data_ptr(), input.type().elementSizeInBytes() * input.numel());
 
   auto j = group_rank, jnext = left;
   for (rank_type i = 0; i < group.size(); ++i) {
-    req_ptr send_request {isend(*(output[j]), group.mustGetGlobalRank(right))};
-    receive(*(output[jnext]), group.mustGetGlobalRank(left));
+    req_ptr send_request {isend((output[j]), group.mustGetGlobalRank(right))};
+    receive((output[jnext]), group.mustGetGlobalRank(left));
     send_request->wait();
 
     j = jnext;
@@ -287,7 +287,7 @@ void DataChannelTCP::allGather(std::vector<at::Tensor*>& output,
 }
 
 
-void DataChannelTCP::gather(std::vector<at::Tensor*>& output,
+void DataChannelTCP::gather(std::vector<at::Tensor>& output,
                             at::Tensor& input, rank_type dst_rank, THDGroup group_id) {
   std::lock_guard<std::mutex> lock(_mutex);
 
@@ -307,21 +307,21 @@ void DataChannelTCP::gather(std::vector<at::Tensor*>& output,
       throw std::logic_error("gather: number of output tensors and group size does not match");
 
     for (auto out_tensor : output)
-      assertSameSizeAndType(*out_tensor, input, "gather");
+      assertSameSizeAndType(out_tensor, input, "gather");
 
     for (rank_type i = 0; i < group.size(); ++i) {
       auto global_rank = group.mustGetGlobalRank(i);
       if (_rank != global_rank) {
-        receive(*(output.at(i)), global_rank);
+        receive((output.at(i)), global_rank);
       } else {
-        memcpy(output.at(i)->data_ptr(), input.data_ptr(), input.numel() * input.type().elementSizeInBytes());
+        memcpy(output.at(i).data_ptr(), input.data_ptr(), input.numel() * input.type().elementSizeInBytes());
       }
     }
   }
 }
 
 
-void DataChannelTCP::scatter(std::vector<at::Tensor*>& input,
+void DataChannelTCP::scatter(std::vector<at::Tensor>& input,
                              at::Tensor& output, rank_type src_rank,
                              THDGroup group_id) {
   std::lock_guard<std::mutex> lock(_mutex);
@@ -342,14 +342,14 @@ void DataChannelTCP::scatter(std::vector<at::Tensor*>& input,
       throw std::logic_error("scatter: number of input tensors and group size does not match");
 
     for (auto in_tensor : input)
-      assertSameSizeAndType(*in_tensor, output, "scatter");
+      assertSameSizeAndType(in_tensor, output, "scatter");
 
     for (rank_type i = 0; i < group.size(); ++i) {
       auto global_rank = group.mustGetGlobalRank(i);
       if (_rank != global_rank) {
-        send(*(input.at(i)), global_rank);
+        send((input.at(i)), global_rank);
       } else {
-        memcpy(output.data_ptr(), input.at(i)->data_ptr(), output.numel() * output.type().elementSizeInBytes());
+        memcpy(output.data_ptr(), input.at(i).data_ptr(), output.numel() * output.type().elementSizeInBytes());
       }
     }
   }

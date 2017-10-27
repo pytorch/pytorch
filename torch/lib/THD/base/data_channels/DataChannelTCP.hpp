@@ -35,11 +35,11 @@ struct DataChannelTCP : DataChannel {
   rank_type getRank() override;
   rank_type getNumProcesses() override;
 
-  void allGather(std::vector<at::Tensor*>& output, at::Tensor& input,
+  void allGather(std::vector<at::Tensor>& output, at::Tensor& input,
                  THDGroup group_id = THDGroupWORLD) override;
-  void gather(std::vector<at::Tensor*>& output, at::Tensor& input,
+  void gather(std::vector<at::Tensor>& output, at::Tensor& input,
               rank_type dst_rank, THDGroup group_id = THDGroupWORLD) override;
-  void scatter(std::vector<at::Tensor*>& input, at::Tensor& output,
+  void scatter(std::vector<at::Tensor>& input, at::Tensor& output,
                rank_type src_rank, THDGroup group_id = THDGroupWORLD) override;
   void allReduce(at::Tensor& data, THDReduceOp operation,
                  THDGroup group_id = THDGroupWORLD) override;

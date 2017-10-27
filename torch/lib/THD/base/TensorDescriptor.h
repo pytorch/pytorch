@@ -7,8 +7,10 @@
 #endif
 
 #ifndef _THD_CORE
-struct _THDTensorDescriptor;
-typedef struct _THDTensorDescriptor THDTensorDescriptor;
+#include <ATen/ATen.h>
+using THDTensorDescriptor = at::Tensor;
+/* struct _THDTensorDescriptor; */
+/* typedef struct _THDTensorDescriptor THDTensorDescriptor; */
 #endif
 
 THD_API THDTensorDescriptor THDTensorDescriptor_newFromTHDoubleTensor(THDoubleTensor *tensor);
