@@ -22,6 +22,9 @@ from caffe2.python import scope
 
 import contextlib
 import itertools
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class ParameterSharingContext(object):
@@ -67,7 +70,12 @@ class ParameterSharingContext(object):
                         sub_scopes[best_scope_idx + 1:]))
 
     def get_parameter_name(self, name):
-        best_scope = self._resolve_scope_overrides(scope.CurrentNameScope())
+        candidate_scope = scope.CurrentNameScope()
+        best_scope = self._resolve_scope_overrides(candidate_scope)
+        if best_scope != candidate_scope:
+            logger.info("Overwiting scope {0} with scope {1}".format(
+                candidate_scope, best_scope))
+
         return best_scope + name
 
     def add_scope_overrides(self, shared_scopes):

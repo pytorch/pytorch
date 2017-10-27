@@ -20,7 +20,7 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
-from caffe2.python import core, model_helper, schema
+from caffe2.python import core, model_helper, schema, scope
 from caffe2.python.modeling.parameter_sharing import (
     parameter_sharing_context,
 )
@@ -32,6 +32,7 @@ from future.utils import viewitems
 import logging
 import numpy as np
 import six
+import copy
 logger = logging.getLogger(__name__)
 
 
@@ -52,6 +53,7 @@ class LayerModelHelper(model_helper.ModelHelper):
         super(LayerModelHelper, self).__init__(name=name)
         self._layer_names = set()
         self._layers = []
+        self._param_to_shape = {}
 
         # optimizer bookkeeping
         self.param_to_optim = {}
@@ -145,6 +147,19 @@ class LayerModelHelper(model_helper.ModelHelper):
         self._add_global_constants(init_net)
         return init_net
 
+    def _validate_param_shape(self, param_name, shape):
+        if param_name not in self._param_to_shape:
+            return
+
+        ref_shape = self._param_to_shape[param_name]
+
+        if shape != ref_shape:
+            raise ValueError(
+                "Got inconsistent shapes between shared parameters "
+                "when trying to map a blob in scope {0} to {1}.".format(
+                    scope.CurrentNameScope(), param_name)
+            )
+
     def create_param(self, param_name, shape, initializer, optimizer=None,
                      ps_param=None):
         if isinstance(param_name, core.BlobReference):
@@ -163,8 +178,9 @@ class LayerModelHelper(model_helper.ModelHelper):
             init_op_args = {}
         else:
             assert len(initializer) == 2
-            init_op_args = initializer[1]
+            init_op_args = copy.deepcopy(initializer[1])
         if shape is not None:
+            assert 'shape' not in init_op_args
             init_op_args.update({'shape': shape})
 
         initializer_op = None
@@ -182,6 +198,10 @@ class LayerModelHelper(model_helper.ModelHelper):
             optimizer=optimizer,
             ps_param=ps_param,
         )
+
+        self._validate_param_shape(param_name, shape)
+
+        self._param_to_shape[param_name] = shape
 
         return param
 
