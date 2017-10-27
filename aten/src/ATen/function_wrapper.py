@@ -318,7 +318,7 @@ def create_generic(top_env, declarations):
             insert({
                 'name': 'output_mask',
                 'type': 'std::array<bool, {}>'.format(mask_size),
-                'default': '{' + ', '.join(['true'] * mask_size) + '}',
+                'default': '{{' + ', '.join(['true'] * mask_size) + '}}',
             })
 
         result = pos_args + kwd_args
