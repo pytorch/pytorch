@@ -304,7 +304,7 @@ static PyObject * THPTensor_(pynew)(PyTypeObject *type, PyObject *args, PyObject
     return (PyObject *)self.release();
   }
 
-#if defined(NUMPY_TYPE_ENUM) || defined(THC_GENERIC_FILE)
+#if defined(NUMPY_TYPE_ENUM) || (defined(WITH_NUMPY) && defined(THC_GENERIC_FILE))
   // torch.Tensor(np.ndarray array)
   if (num_args == 1 && PyArray_Check(first_arg)) {
     THPObjectPtr numpy_array(
