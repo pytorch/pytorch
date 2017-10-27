@@ -7,7 +7,7 @@ PackedSequence_ = namedtuple('PackedSequence', ['data', 'batch_sizes'])
 
 
 class PackedSequence(PackedSequence_):
-    """Holds the data and list of batch_sizes of a packed sequence.
+    r"""Holds the data and list of batch_sizes of a packed sequence.
 
     All RNN modules accept packed sequences as inputs.
 
@@ -24,7 +24,7 @@ class PackedSequence(PackedSequence_):
 
 
 def pack_padded_sequence(input, lengths, batch_first=False):
-    """Packs a Variable containing padded sequences of variable length.
+    r"""Packs a Variable containing padded sequences of variable length.
 
     Input can be of size ``TxBx*`` where T is the length of the longest sequence
     (equal to ``lengths[0]``), B is the batch size, and * is any number of
@@ -77,7 +77,7 @@ def pack_padded_sequence(input, lengths, batch_first=False):
 
 
 def pad_packed_sequence(sequence, batch_first=False, padding_value=0.0):
-    """Pads a packed batch of variable length sequences.
+    r"""Pads a packed batch of variable length sequences.
 
     It is an inverse operation to :func:`pack_padded_sequence`.
 

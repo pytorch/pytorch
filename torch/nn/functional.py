@@ -21,7 +21,7 @@ _ConvNd = torch._C._functions.ConvNd
 
 def conv1d(input, weight, bias=None, stride=1, padding=0, dilation=1,
            groups=1):
-    """Applies a 1D convolution over an input signal composed of several input
+    r"""Applies a 1D convolution over an input signal composed of several input
     planes.
 
     See :class:`~torch.nn.Conv1d` for details and output shape.
@@ -56,7 +56,7 @@ def conv1d(input, weight, bias=None, stride=1, padding=0, dilation=1,
 
 def conv2d(input, weight, bias=None, stride=1, padding=0, dilation=1,
            groups=1):
-    """Applies a 2D convolution over an input image composed of several input
+    r"""Applies a 2D convolution over an input image composed of several input
     planes.
 
     See :class:`~torch.nn.Conv2d` for details and output shape.
@@ -92,7 +92,7 @@ def conv2d(input, weight, bias=None, stride=1, padding=0, dilation=1,
 
 def conv3d(input, weight, bias=None, stride=1, padding=0, dilation=1,
            groups=1):
-    """Applies a 3D convolution over an input image composed of several input
+    r"""Applies a 3D convolution over an input image composed of several input
     planes.
 
     See :class:`~torch.nn.Conv3d` for details and output shape.
@@ -128,7 +128,7 @@ def conv3d(input, weight, bias=None, stride=1, padding=0, dilation=1,
 
 def conv_transpose1d(input, weight, bias=None, stride=1, padding=0,
                      output_padding=0, groups=1, dilation=1):
-    """Applies a 1D transposed convolution operator over an input signal
+    r"""Applies a 1D transposed convolution operator over an input signal
     composed of several input planes, sometimes also called "deconvolution".
 
     See :class:`~torch.nn.ConvTranspose1d` for details and output shape.
@@ -161,7 +161,7 @@ def conv_transpose1d(input, weight, bias=None, stride=1, padding=0,
 
 def conv_transpose2d(input, weight, bias=None, stride=1, padding=0,
                      output_padding=0, groups=1, dilation=1):
-    """Applies a 2D transposed convolution operator over an input image
+    r"""Applies a 2D transposed convolution operator over an input image
     composed of several input planes, sometimes also called "deconvolution".
 
     See :class:`~torch.nn.ConvTranspose2d` for details and output shape.
@@ -194,7 +194,7 @@ def conv_transpose2d(input, weight, bias=None, stride=1, padding=0,
 
 def conv_transpose3d(input, weight, bias=None, stride=1, padding=0,
                      output_padding=0, groups=1, dilation=1):
-    """Applies a 3D transposed convolution operator over an input image
+    r"""Applies a 3D transposed convolution operator over an input image
     composed of several input planes, sometimes also called "deconvolution"
 
     See :class:`~torch.nn.ConvTranspose3d` for details and output shape.
@@ -621,7 +621,7 @@ def _get_softmax_dim(name, ndim, stacklevel):
 
 
 def softmin(input, dim=None, _stacklevel=3):
-    """Applies a softmin function.
+    r"""Applies a softmin function.
 
     Note that softmin(x) = softmax(-x). See softmax definition for mathematical formula.
 
@@ -636,7 +636,7 @@ def softmin(input, dim=None, _stacklevel=3):
 
 
 def softmax(input, dim=None, _stacklevel=3):
-    """Applies a softmax function.
+    r"""Applies a softmax function.
 
     Softmax is defined as:
 
@@ -661,7 +661,7 @@ def softmax(input, dim=None, _stacklevel=3):
 
 
 def log_softmax(input, dim=None, _stacklevel=3):
-    """Applies a softmax followed by a logarithm.
+    r"""Applies a softmax followed by a logarithm.
 
     While mathematically equivalent to log(softmax(x)), doing these two
     operations separately is slower, and numerically unstable. This function
@@ -1164,7 +1164,7 @@ def pixel_shuffle(input, upscale_factor):
 
 
 def upsample(input, size=None, scale_factor=None, mode='nearest'):
-    """Upsamples the input to either the given :attr:`size` or the given
+    r"""Upsamples the input to either the given :attr:`size` or the given
     :attr:`scale_factor`
 
     The algorithm used for upsampling is determined by :attr:`mode`.
@@ -1217,7 +1217,7 @@ def upsample(input, size=None, scale_factor=None, mode='nearest'):
 
 
 def upsample_nearest(input, size=None, scale_factor=None):
-    """Upsamples the input, using nearest neighbours' pixel values.
+    r"""Upsamples the input, using nearest neighbours' pixel values.
 
     **Note:: This function is deprecated. Use nn.functional.upsample instead**
 
@@ -1236,7 +1236,7 @@ def upsample_nearest(input, size=None, scale_factor=None):
 
 
 def upsample_bilinear(input, size=None, scale_factor=None):
-    """Upscales the input, using bilinear upsampling.
+    r"""Upscales the input, using bilinear upsampling.
 
     **Note:: This function is deprecated. Use nn.functional.upsample instead**
 
@@ -1254,7 +1254,7 @@ def upsample_bilinear(input, size=None, scale_factor=None):
 
 
 def grid_sample(input, grid, mode='bilinear'):
-    """Given an :attr:`input` and a flow-field :attr:`grid`, computes the
+    r"""Given an :attr:`input` and a flow-field :attr:`grid`, computes the
     `output` using input pixel locations from the grid.
 
     Uses bilinear interpolation to sample the input pixels.
@@ -1287,7 +1287,7 @@ def grid_sample(input, grid, mode='bilinear'):
 
 
 def affine_grid(theta, size):
-    """Generates a 2d flow field, given a batch of affine matrices :attr:`theta`
+    r"""Generates a 2d flow field, given a batch of affine matrices :attr:`theta`
     Generally used in conjunction with :func:`grid_sample` to
     implement Spatial Transformer Networks.
 
@@ -1303,7 +1303,7 @@ def affine_grid(theta, size):
 
 
 def pad(input, pad, mode='constant', value=0):
-    """Pads tensor.
+    r"""Pads tensor.
 
     Nd constant padding:  The number of dimensions to pad is
         len(padding) // 2 and the dimensions that gets padded begins with the

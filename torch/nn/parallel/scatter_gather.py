@@ -4,7 +4,7 @@ from ._functions import Scatter, Gather
 
 
 def scatter(inputs, target_gpus, dim=0):
-    """
+    r"""
     Slices variables into approximately equal chunks and
     distributes them across given GPUs. Duplicates
     references to objects that are not variables. Does not
@@ -26,7 +26,7 @@ def scatter(inputs, target_gpus, dim=0):
 
 
 def scatter_kwargs(inputs, kwargs, target_gpus, dim=0):
-    """Scatter with support for kwargs dictionary"""
+    r"""Scatter with support for kwargs dictionary"""
     inputs = scatter(inputs, target_gpus, dim) if inputs else []
     kwargs = scatter(kwargs, target_gpus, dim) if kwargs else []
     if len(inputs) < len(kwargs):
@@ -39,7 +39,7 @@ def scatter_kwargs(inputs, kwargs, target_gpus, dim=0):
 
 
 def gather(outputs, target_device, dim=0):
-    """
+    r"""
     Gathers variables from different GPUs on a specified device
       (-1 means the CPU).
     """

@@ -3,7 +3,7 @@ from torch.autograd import Variable
 
 
 def parameters_to_vector(parameters):
-    """Convert parameters to one vector
+    r"""Convert parameters to one vector
 
     Arguments:
         parameters (Iterable[Variable]): an iterator of Variables that are the
@@ -25,7 +25,7 @@ def parameters_to_vector(parameters):
 
 
 def vector_to_parameters(vec, parameters):
-    """Convert one vector to the parameters
+    r"""Convert one vector to the parameters
 
     Arguments:
         vec (Variable): a single vector represents the parameters of a model.
@@ -55,7 +55,7 @@ def vector_to_parameters(vec, parameters):
 
 
 def _check_param_device(param, old_param_device):
-    """This helper function is to check if the parameters are located
+    r"""This helper function is to check if the parameters are located
     in the same device. Currently, the conversion between model parameters
     and single vector form is not supported for multiple allocations,
     e.g. parameters in different GPUs, or mixture of CPU/GPU.
