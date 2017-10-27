@@ -17,9 +17,9 @@
 #ifndef CAFFE2_OPERATORS_RECURRENT_OP_CUDNN_H_
 #define CAFFE2_OPERATORS_RECURRENT_OP_CUDNN_H_
 
-#include "caffe2/core/common_cudnn.h"
 #include "caffe2/core/context.h"
 #include "caffe2/core/context_gpu.h"
+#include "caffe2/core/cudnn_wrappers.h"
 #include "caffe2/core/logging.h"
 #include "caffe2/core/operator.h"
 

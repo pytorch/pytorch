@@ -15,12 +15,11 @@
  */
 
 #include "caffe2/core/common_cudnn.h"
+#include "caffe2/core/cudnn_wrappers.h"
 
 #include "caffe2/core/init.h"
 
 namespace caffe2 {
-
-thread_local CuDNNHandles CuDNNWrapper::tls_cudnn_handles_;
 
 CuDNNWrapper::PerGPUCuDNNStates& CuDNNWrapper::cudnn_states() {
   // New it (never delete) to avoid calling the destructors on process

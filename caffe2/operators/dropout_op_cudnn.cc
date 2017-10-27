@@ -14,8 +14,8 @@
  * limitations under the License.
  */
 
-#include "caffe2/core/common_cudnn.h"
 #include "caffe2/core/context_gpu.h"
+#include "caffe2/core/cudnn_wrappers.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/core/types.h"
 
