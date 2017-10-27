@@ -177,7 +177,17 @@ void printAttributes(std::ostream & out, Node * n) {
       case AttributeKind::t:
         {
           at::Tensor t = n->t(name);
-          if (t.numel() <= max_tensor_display_size) {
+          // 1-elem tensors are usually boxed scalars, so print them like it
+          if (t.numel() == 1) {
+            auto scalar = at::Scalar(t.view({})).local();
+            out << "{";
+            if (scalar.isFloatingPoint()) {
+              out << scalar.toDouble();
+            } else {
+              out << scalar.toLong();
+            }
+            out << "}";
+          } else if (t.numel() <= max_tensor_display_size) {
             // TODO: This is awful code.  Also it doesn't work on Windows.
             std::ostringstream tensor_ss;
             tensor_ss << t;

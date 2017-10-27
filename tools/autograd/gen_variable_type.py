@@ -49,8 +49,8 @@ UNPACK_TENSOR = CodeTemplate("""\
 auto${ref} ${arg_name}_ = unpack${suffix}(${arg_name}, "${arg_name}", ${arg_pos});""")
 
 FUNCTION_DECLARATION = CodeTemplate("""\
-struct ${op} : public Function {
-  using Function::Function;
+struct ${op} : public TraceableFunction {
+  using TraceableFunction::TraceableFunction;
   variable_list apply(const variable_list& grads) override;
   std::string name() override { return "${op}"; }
   void releaseVariables() override {
@@ -116,7 +116,7 @@ return ${return_value};
 
 RECORD_TRACE = CodeTemplate("""\
 if (jit::tracer::isTracing({ ${tensor_args} })) {
-  jit::Node *n = jit::tracer::recordTrace( "${api_name}", ${trace_inputs}, ${trace_outputs} );
+  jit::Node *n = jit::tracer::recordTrace( "${trace_name}", ${trace_inputs}, ${trace_outputs} );
   ${record_attributes}
 }
 """)
@@ -642,6 +642,10 @@ def create_variable_type(top_env, aten_declarations):
         if not local['record_attributes']:
             local['record_attributes'].append('(void)n;')
 
+        local['trace_name'] = declaration['api_name']
+        if local['trace_name'].endswith('_'):
+            local['trace_name'] = local['trace_name'][:-1]
+
         combined = nested_dict(local, nested_dict(env, declaration))
         return RECORD_TRACE.substitute(combined)
 
@@ -778,12 +782,10 @@ def load_aten_declarations(path):
 
     # enrich declarations with additional information
     for declaration in declarations:
-        args = []
         for arg in declaration['arguments']:
             simple_type = arg['type']
             simple_type = simple_type.replace(' &', '').replace('const ', '')
             simple_type = simple_type.replace('Generator *', 'Generator')
-            args.append(simple_type)
             arg['simple_type'] = simple_type
         declaration['formals'] = [arg['type'] + ' ' + arg['name']
                                   for arg in declaration['arguments']]
@@ -863,9 +865,6 @@ def load_deprecated_signatures(declarations_by_signature):
 
 def gen_variable_type(declarations, out):
     aten_decls = load_aten_declarations(declarations)
-
-    def by_name(option):
-        return option['name']
 
     def group_declarations_by_signature():
         d = defaultdict(list)

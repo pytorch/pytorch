@@ -63,6 +63,24 @@ PyObject * THSPTensor_(size)(PyObject *self, PyObject *args, PyObject *kwargs)
 ]]
 
 [[
+  name: nDimensionI
+  python_name: _dimI
+  sparse: yes
+  return: long
+  arguments:
+  - THSTensor* self
+]]
+
+[[
+  name: nDimensionV
+  python_name: _dimV
+  sparse: yes
+  return: long
+  arguments:
+  - THSTensor* self
+]]
+
+[[
   name: isCoalesced
   sparse: yes
   python_name: is_coalesced
@@ -293,6 +311,33 @@ PyObject * THSPTensor_(size)(PyObject *self, PyObject *args, PyObject *kwargs)
   return: self
   arguments:
     - THSTensor* self
+]]
+
+[[
+  name: zeros
+  sparse: yes
+  variants:
+    - function
+  auto_gpu: False
+  return: argument 0
+  arguments:
+    - arg: THSTensor* result
+      output: True
+    - arg: THSize* size
+      long_args: True
+]]
+
+[[
+  name: zeros_like
+  sparse: yes
+  cname: zerosLike
+  variants:
+    - function
+  return: argument 0
+  arguments:
+    - arg: THSTensor* result
+      output: True
+    - THSTensor* input
 ]]
 
 [[

@@ -125,6 +125,13 @@ static void test(Type & type) {
   }
 
   {
+    Tensor a = type.rand({3, 4, 5});
+    Tensor b = a.permute({1, 2, 0});
+    ASSERT(b.sizes().equals({4, 5, 3}));
+    ASSERT(b.strides().equals({5, 1, 20}));
+  }
+
+  {
     std::cout << "mm:" << std::endl;
     Tensor a = type.rand({3, 4});
     Tensor b = type.rand({4});

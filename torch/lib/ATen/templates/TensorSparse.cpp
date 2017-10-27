@@ -1,5 +1,5 @@
 // included as 'TensorDenseOrSparse' in TensorDerived.cpp
-IntList ${Tensor}::strides() {
+IntList ${Tensor}::strides() const {
   runtime_error("Sparse tensors do not have strides.");
 }
 Scalar ${Tensor}::localScalar() {

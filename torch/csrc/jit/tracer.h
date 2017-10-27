@@ -200,7 +200,7 @@ inline std::shared_ptr<TracingState> enter(std::vector<TraceInput>&& trace_input
     }
   }
   // TODO: this might not work with the way we handle buffers
-  state->var_flags[0] = detail::getVarFlags(inputs);
+  state->var_flags[0].first = detail::getVarFlags(inputs);
   state->active = true;
   state->inputs = inputs;
   return state;
@@ -214,6 +214,7 @@ inline void _exit(const std::shared_ptr<TracingState>& state, const variable_lis
     state->graph->registerOutput(getValueTrace(state, output, true));
   }
   state->active = false;
+  state->var_flags[state->graph->stage()].second = detail::getVarFlags(outputs);
 }
 
 // Marks a backwards subgraph that should be traced as the next stage.

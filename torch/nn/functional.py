@@ -886,7 +886,7 @@ def batch_norm(input, running_mean, running_var, weight=None, bias=None,
 
 # loss
 
-def nll_loss(input, target, weight=None, size_average=True, ignore_index=-100):
+def nll_loss(input, target, weight=None, size_average=True, ignore_index=-100, reduce=True):
     r"""The negative log likelihood loss.
 
     See :class:`~torch.nn.NLLLoss` for details.
@@ -917,9 +917,9 @@ def nll_loss(input, target, weight=None, size_average=True, ignore_index=-100):
     if torch.is_tensor(weight):
         weight = Variable(weight)
     if dim == 2:
-        return torch._C._nn.nll_loss(input, target, weight, size_average, ignore_index)
+        return torch._C._nn.nll_loss(input, target, weight, size_average, ignore_index, reduce)
     elif dim == 4:
-        return torch._C._nn.nll_loss2d(input, target, weight, size_average, ignore_index)
+        return torch._C._nn.nll_loss2d(input, target, weight, size_average, ignore_index, reduce)
     else:
         raise ValueError('Expected 2 or 4 dimensions (got {})'.format(dim))
 

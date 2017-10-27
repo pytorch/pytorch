@@ -78,9 +78,9 @@ public:
   VariableImpl(at::Tensor data, bool requires_grad, bool is_volatile=false);
   virtual ~VariableImpl();
   virtual const char * toString() const override;
-  virtual at::IntList sizes() override;
-  virtual at::IntList strides() override;
-  virtual int64_t dim() override;
+  virtual at::IntList sizes() const override;
+  virtual at::IntList strides() const override;
+  virtual int64_t dim() const override;
   virtual at::Scalar localScalar() override;
   virtual void assign_(at::Scalar s) override;
   virtual void * unsafeGetTH(bool retain) override;

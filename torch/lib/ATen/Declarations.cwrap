@@ -213,16 +213,6 @@
     - real value
 ]]
 [[
-  name: isSameSizeAs
-  python_name: is_same_size
-  cpu_half: True
-  auto_gpu: False
-  return: bool
-  arguments:
-    - THTensor* self
-    - THTensor* other
-]]
-[[
   name: isContiguous
   python_name: is_contiguous
   cpu_half: True

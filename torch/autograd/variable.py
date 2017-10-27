@@ -426,15 +426,12 @@ class Variable(_C._VariableBase):
     def bernoulli(self):
         return Bernoulli.apply(self)
 
-    def __add__(self, other):
-        return self.add(other)
-    __radd__ = __add__
+    __radd__ = __add__ = _C._VariableBase.add
 
     def __iadd__(self, other):
         return self.add_(other)
 
-    def __sub__(self, other):
-        return self.sub(other)
+    __sub__ = _C._VariableBase.sub
 
     def __isub__(self, other):
         return self.sub_(other)
@@ -442,9 +439,7 @@ class Variable(_C._VariableBase):
     def __rsub__(self, other):
         return -self + other
 
-    def __mul__(self, other):
-        return self.mul(other)
-    __rmul__ = __mul__
+    __rmul__ = __mul__ = _C._VariableBase.mul
 
     def __imul__(self, other):
         return self.mul_(other)
@@ -454,9 +449,7 @@ class Variable(_C._VariableBase):
             return NotImplemented
         return self.matmul(other)
 
-    def __div__(self, other):
-        return self.div(other)
-    __truediv__ = __div__
+    __truediv__ = __div__ = _C._VariableBase.div
 
     def __rdiv__(self, other):
         return self.reciprocal() * other
@@ -465,8 +458,7 @@ class Variable(_C._VariableBase):
     def __idiv__(self, other):
         return self.div_(other)
 
-    def __pow__(self, other):
-        return self.pow(other)
+    __pow__ = _C._VariableBase.pow
 
     def __ipow__(self, other):
         raise NotImplementedError("in-place pow not implemented")
