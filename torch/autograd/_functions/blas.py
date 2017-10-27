@@ -13,59 +13,6 @@ def _get_output(ctx, arg, inplace=False):
         return arg.new().resize_as_(arg)
 
 
-class Addmm(InplaceFunction):
-
-    @staticmethod
-    def symbolic(g, add_matrix, matrix1, matrix2, beta=1, alpha=1, inplace=False):
-        assert matrix1.hasType() and matrix2.hasType() and add_matrix.hasType()
-        sizes1 = matrix1.type().sizes()
-        sizes2 = matrix2.type().sizes()
-        sizes_add = add_matrix.type().sizes()
-        assert len(sizes1) == 2 and len(sizes2) == 2 and len(sizes_add) <= 2 and len(sizes_add) > 0
-        broadcast = check_onnx_broadcast([sizes1[0], sizes2[1]], sizes_add)
-        return g.op("Gemm", matrix1, matrix2, add_matrix, beta_f=beta, alpha_f=alpha, broadcast_i=broadcast)
-
-    @staticmethod
-    def forward(ctx, add_matrix, matrix1, matrix2, beta=1, alpha=1, inplace=False):
-        ctx.beta = beta
-        ctx.alpha = alpha
-        ctx.add_matrix_size = add_matrix.size()
-        ctx.save_for_backward(matrix1, matrix2)
-        output = _get_output(ctx, add_matrix, inplace=inplace)
-        return torch.addmm(beta, add_matrix, alpha,
-                           matrix1, matrix2, out=output)
-
-    @staticmethod
-    def backward(ctx, grad_output):
-        matrix1, matrix2 = ctx.saved_variables
-        grad_add_matrix = grad_matrix1 = grad_matrix2 = None
-
-        if ctx.needs_input_grad[0]:
-            grad_add_matrix = maybe_unexpand(grad_output, ctx.add_matrix_size)
-            if ctx.beta != 1:
-                grad_add_matrix = grad_add_matrix.mul(ctx.beta)
-
-        if ctx.needs_input_grad[1]:
-            if matrix1.stride() == (1, matrix1.size(0)):
-                # column major gradient if input is column major
-                grad_matrix1 = torch.mm(matrix2, grad_output.t()).t()
-            else:
-                grad_matrix1 = torch.mm(grad_output, matrix2.t())
-            if ctx.alpha != 1:
-                grad_matrix1 *= ctx.alpha
-
-        if ctx.needs_input_grad[2]:
-            if matrix2.stride() == (1, matrix2.size(0)):
-                # column major gradient if input is column major
-                grad_matrix2 = torch.mm(grad_output.t(), matrix1).t()
-            else:
-                grad_matrix2 = torch.mm(matrix1.t(), grad_output)
-            if ctx.alpha != 1:
-                grad_matrix2 *= ctx.alpha
-
-        return grad_add_matrix, grad_matrix1, grad_matrix2, None, None, None
-
-
 class Addbmm(InplaceFunction):
 
     @staticmethod

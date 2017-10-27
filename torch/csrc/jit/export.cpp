@@ -272,16 +272,10 @@ void fuseBroadcast(const std::shared_ptr<Graph>& graph) {
     JIT_ASSERT(!n->hasAttribute(kaxis));
 
     // TODO: switch ATen tracing to not insert selects for single output.
-    auto* rhs_select = n->inputs().at(n->inputs().size() - 1);
-
-    if (rhs_select->kind() != kSelect) continue;
-    auto* rhs = rhs_select->input();
+    auto* rhs = n->inputs().at(n->inputs().size() - 1);
 
     // The rhs input isn't actually an expand, so no fusion available
-    // NB: Awkward!  It's a test for an ATen expand (see the lowercase)
-    // TODO: Update this once we add a broadcast operator to ONNX, and a
-    // symbolic here.
-    if (rhs->kind() != kexpand) continue;
+    if (rhs->kind() != kExpand) continue;
 
     auto* new_rhs = rhs->input();
 
@@ -293,22 +287,15 @@ void fuseBroadcast(const std::shared_ptr<Graph>& graph) {
 
     // Not all broadcasts are supported by ONNX broadcast.
     if (!fusibleExpandTo(new_rhs->type()->expect<TensorType>()->sizes(),    // from
-                         rhs_select->type()->expect<TensorType>()->sizes()) // to
+                         rhs->type()->expect<TensorType>()->sizes()) // to
        ) continue;
 
-    auto *new_n = graph->createClone(n, [&](Node* n) { return n == rhs_select ? new_rhs : n; });
+    auto *new_n = graph->createClone(n, [&](Node* n) { return n == rhs ? new_rhs : n; });
     new_n->i_(kbroadcast, 1);
     new_n->insertAfter(n);
     n->replaceAllUsesWith(new_n);
     it.destroyCurrent();
-    if (rhs_select->uses().size() == 0) {
-      JIT_ASSERT(rhs->uses().size() == 1);
-      // TODO: This is awful!  See https://github.com/ezyang/pytorch/issues/254
-      if (*it == rhs_select) {
-        it.destroyCurrent();
-      } else {
-        rhs_select->destroy();
-      }
+    if (rhs->uses().size() == 0) {
       if (*it == rhs) {
         it.destroyCurrent();
       } else {
@@ -320,22 +307,36 @@ void fuseBroadcast(const std::shared_ptr<Graph>& graph) {
 
 
 void standardizeGraph(const std::shared_ptr<Graph>& graph) {
+  // TODO: move this out of here...
   fuseBroadcast(graph);
 
   for (auto it = graph->nodes().begin(); it != graph->nodes().end(); ++it) {
+      // Macro'ed so we get a marginally better line number on failed export
 #define FAIL_EXPORT(name) \
-      throw std::runtime_error(std::string("Couldn't export ") + name + " function - " \
-              "maybe it doesn't implement a symbolic definition?");
+      throw std::runtime_error(std::string("ONNX export failed: ") + name + "\n\nGraph we tried to export:\n" + graph->toString());
     IR_IF(*it, CppOp)
       auto cpp_node = static_cast<torch::jit::CppOp*>(value);
-      FAIL_EXPORT(cpp_node->name())
+      FAIL_EXPORT("Couldn't export C++ operator " + cpp_node->name())
     IR_ELSEIF(PythonOp)
       auto py_node = static_cast<torch::jit::PythonOp*>(value);
-      FAIL_EXPORT(py_node->name())
+      FAIL_EXPORT("Couldn't export Python operator " + py_node->name())
     IR_ELSE()
-      // Do nothing.
-      // TODO: Test if the op is lower-case.  If it is, that means we have
-      // an ATen op that snuck through. Bad!
+      // Expand is not a real ONNX operator yet, reject it
+      if (it->kind() == kExpand) {
+        FAIL_EXPORT("Couldn't export operator expand; this usually means you used a form of broadcasting that ONNX does not currently support");
+      }
+      if (it->kind() == kUndefined) {
+        FAIL_EXPORT("Couldn't export undefined constant tensor (please file an issue)")
+      }
+      std::string n = symbolToString(it->kind());
+      if (n.size() == 0) {
+        FAIL_EXPORT("Operator to export had empty name (please file an issue)")
+      }
+      // NB: Upper-case is ONNX, lower-case is ATen.  If we want to be more
+      // robust, need to explicitly flag operators as ONNX or ATen
+      if (!isupper(n[0])) {
+        FAIL_EXPORT("Couldn't export operator " + n);
+      }
     IR_END()
 #undef FAIL_EXPORT
   }

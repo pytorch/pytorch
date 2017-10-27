@@ -148,9 +148,16 @@ void ToONNX(std::shared_ptr<tracer::TracingState>& state) {
   };
 
   auto callPySymbolicMethod = [&](PythonOp* op) {
+
+    // Test if there is a symbolic function; bail if there is not
+    auto pyobj = py::handle(op->pyobj.get());
+    if (!py::hasattr(pyobj, "symbolic")) {
+      cloneNode(op);
+      return;
+    }
+
     // Prepare args for Python. First one is the graph, and is followed
     // by regular args, with Variables replaced by corresponding nodes.
-    auto pyobj = py::handle(op->pyobj.get());
     Py_ssize_t input_nr = 0;
     py::tuple py_symbolic_args(1 + op->cconv.size());
     py_symbolic_args[input_nr++] = py::cast(ctx.graph);
@@ -169,19 +176,26 @@ void ToONNX(std::shared_ptr<tracer::TracingState>& state) {
       }
       py_symbolic_args[input_nr++] = obj;
     }
+
     // Call the symbolic function
     // Use a little trampoline function so we can give good error messages
     // upon argument mismatch
     py::object raw_output = onnx.attr("_run_symbolic_method")(op->name(), pyobj.attr("symbolic"), py_symbolic_args);
-    if (raw_output.ptr() == Py_None)
-      throw std::runtime_error("PythonOp's symbolic returned None, indicating conversion not supported " + op->name());
+
+    if (raw_output.ptr() == Py_None) {
+      cloneNode(op);
+      return;
+    }
 
     // Cast the outputs back to C++ and put them in the new graph
+    std::vector<Node*> outputs;
     if (py::isinstance<Node>(raw_output)) {
-      return node_list{py::cast<Node*>(raw_output)};
+      outputs = node_list{py::cast<Node*>(raw_output)};
     } else {
-      return py::cast<std::vector<Node*>>(raw_output);
+      outputs = py::cast<std::vector<Node*>>(raw_output);
     }
+
+    setOutputs(op->name(), op, outputs);
   };
 
   // Finally, visit all nodes in the graph
@@ -206,15 +220,15 @@ void ToONNX(std::shared_ptr<tracer::TracingState>& state) {
         cloneNode(node);
       }
     IR_ELSEIFM(PythonOp)
-      auto pyobj = py::handle(value->pyobj.get());
-      if (py::hasattr(pyobj, "symbolic")) {
-        auto outputs = callPySymbolicMethod(value);
-        setOutputs(value->name(), node, outputs);
-      } else {
-        cloneNode(node);
-      }
+      callPySymbolicMethod(value);
     IR_ELSE()
-      callPySymbolicFunction(node);
+      if (node->kind() == kUndefined) {
+        // Undefined nodes get passed into Convolution, but then they are
+        // removed.  We'll test for leftover Undefined in export.cpp
+        cloneNode(node);
+      } else {
+        callPySymbolicFunction(node);
+      }
     IR_END()
   }
   for (auto output : state->graph->outputs()) {
