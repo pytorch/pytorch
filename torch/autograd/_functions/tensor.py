@@ -367,24 +367,6 @@ class IndexSelect(Function):
         return grad_tensor, None, None
 
 
-class Concat(Function):
-
-    @staticmethod
-    def symbolic(g, dim, *inputs):
-        return g.op("Concat", *inputs, axis_i=dim)
-
-    @staticmethod
-    def forward(ctx, dim, *inputs):
-        ctx.dim = dim
-        ctx.input_sizes = [i.size(dim) for i in inputs]
-        return torch.cat(inputs, dim)
-
-    @staticmethod
-    def backward(ctx, grad_output):
-        return (None,) + tuple(grad_output.narrow(ctx.dim, end - size, size) for size, end
-                               in zip(ctx.input_sizes, _accumulate(ctx.input_sizes)))
-
-
 # TODO: deprecate this
 class Resize(Function):
 

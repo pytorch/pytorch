@@ -633,6 +633,12 @@ public:
       delete n;
   }
 
+  std::string toString() {
+    std::ostringstream oss;
+    oss << *this;
+    return oss.str();
+  }
+
   friend std::ostream& operator<<(std::ostream & out, Graph & g);
 
 private:

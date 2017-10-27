@@ -1,6 +1,7 @@
 import torch
 from torch.autograd._functions.utils import check_onnx_broadcast  # TODO: move me
 from torch.nn.modules.utils import _pair
+import warnings
 
 # EDITING THIS FILE? READ THIS FIRST!
 #
@@ -46,6 +47,10 @@ def _broadcast_if_scalar(x):
         return {"broadcast_i": 1}
 
 
+def _unimplemented(op, msg):
+    warnings.warn("ONNX export failed on " + op + " because " + msg + " not supported")
+
+
 # ---------------------------------------------------------------------
 # Symbolic definitions
 # ---------------------------------------------------------------------
@@ -86,14 +91,14 @@ def _broadcast_if_scalar(x):
 
 def add(g, self, other, alpha):
     if _scalar(alpha) != 1:
-        raise NotImplementedError("add: alpha != 1")
+        return _unimplemented("add", "alpha != 1")
     # See Note [Pointwise by scalar]
     return g.op("Add", self, _if_scalar_type_as(other, self), **_broadcast_if_scalar(other))
 
 
 def sub(g, self, other, alpha):
     if _scalar(alpha) != 1:
-        raise NotImplementedError("sub: alpha != 1")
+        return _unimplemented("sub", "alpha != 1")
     # See Note [Pointwise by scalar]
     return g.op("Sub", self, _if_scalar_type_as(other, self), **_broadcast_if_scalar(other))
 
@@ -106,6 +111,13 @@ def mul(g, self, other):
 def div(g, self, other):
     # See Note [Pointwise by scalar]
     return g.op("Div", self, _if_scalar_type_as(other, self), **_broadcast_if_scalar(other))
+
+
+# This syntax is Python 2 portable
+def cat(g, *tensors, **kwargs):
+    dim = kwargs.pop("dim")
+    assert not kwargs
+    return g.op("Concat", *tensors, axis_i=dim)
 
 
 def mm(g, self, other):
@@ -138,6 +150,11 @@ def mean(g, self, dim=None, keepdim=None):
 
 def t(g, self):
     return g.op("Transpose", self, perm_i=(1, 0))
+
+
+def expand(g, self, size):
+    # TODO: This is not a real ONNX operator at the moment
+    return g.op("Expand", self, shape_i=size)
 
 
 def transpose(g, self, dim0, dim1):
@@ -174,18 +191,19 @@ def squeeze(g, self, dim=None):
     return g.op("Squeeze", self, axes_i=dims)
 
 
+# NB: This appears to be dead at the moment
 def prelu(g, input, weight):
     if all(s == 1 for s in weight.type().sizes()):
-        raise RuntimeError("single weight shared among input channels not supported")
+        return _unimplemented("prelu", "single weight shared among input channels")
     return g.op("PRelu", input, weight)
 
 
 def threshold(g, input, threshold, value, inplace):
     # See Note [Export inplace]
     if _scalar(threshold) != 0:
-        raise RuntimeError("threshold: Non-zero threshold in Threshold not supported")
+        return _unimplemented("threshold", "non-zero threshold")
     if _scalar(value) != 0:
-        raise RuntimeError("threshold: Non-zero value in Threshold not supported")
+        return _unimplemented("threshold", "non-zero value")
     return g.op("Relu", input)
 
 
@@ -208,7 +226,7 @@ def softmax(g, input, dim=None):
 
 def max_pool2d(g, input, kernel_size, stride, padding, dilation, ceil_mode):
     if ceil_mode:
-        raise RuntimeError("ceil_mode not supported in MaxPool2d")
+        return _unimplemented("max_pool2d", "ceil_mode")
     if not stride:
         stride = kernel_size
     r = g.op("MaxPool", input,
@@ -221,7 +239,7 @@ def max_pool2d(g, input, kernel_size, stride, padding, dilation, ceil_mode):
 
 def avg_pool2d(g, input, kernel_size, stride, padding, ceil_mode, count_include_pad):
     if ceil_mode:
-        raise RuntimeError("ceil_mode not supported in AvgPool2d")
+        return _unimplemented("avg_pool2d", "ceil_mode")
     if not stride:
         stride = kernel_size
     # TODO: What about count_include_pad?!

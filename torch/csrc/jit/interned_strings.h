@@ -47,6 +47,7 @@ _(ConvTranspose) \
 _(is_test) \
 _(epsilon) \
 _(expand) \
+_(Expand) \
 _(order) \
 _(momentum) \
 _(consumed_inputs) \
