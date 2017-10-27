@@ -32,7 +32,7 @@ int64_t ${Tensor}::dim() const {
   if(isScalar())
     return 0;
   int64_t d = ${THTensor_nDimension};
-  // See Note [Undefined-dim versus 0-dim]
+  // See Note [Empty versus 0-dim tensors]
   if (d != 0)
     return d;
   return kEmptySizes.size();

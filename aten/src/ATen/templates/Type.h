@@ -26,7 +26,7 @@ class Context;
 struct Storage;
 struct Generator;
 
-// Note [Undefined-dim versus 0-dim]
+// Note [Empty versus 0-dim tensors]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 // Unlike Torch, ATen treats zero-dimension tensors as having ONE
 // element (that is to say, a zero-dimensional tensor is a scalar!)
