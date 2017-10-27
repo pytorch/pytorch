@@ -177,6 +177,23 @@ class TestTensorPackOps(hu.HypothesisTestCase):
         self.assertEqual(presence_mask.shape, expected_presence_mask.shape)
         np.testing.assert_array_equal(presence_mask, expected_presence_mask)
 
+    @given(**hu.gcs)
+    def test_presence_mask_empty(self, gc, dc):
+        lengths = np.array([], dtype=np.int32)
+        data = np.array([], dtype=np.float32)
+
+        op = core.CreateOperator(
+            'PackSegments', ['l', 'd'], ['t', 'p'], return_presence_mask=True
+        )
+        workspace.FeedBlob('l', lengths)
+        workspace.FeedBlob('d', data)
+        workspace.RunOperatorOnce(op)
+
+        output = workspace.FetchBlob('p')
+        expected_output_shape = (0, 0)
+        self.assertEquals(output.shape, expected_output_shape)
+
+
 if __name__ == "__main__":
     import unittest
     unittest.main()

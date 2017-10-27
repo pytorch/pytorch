@@ -77,14 +77,16 @@ class PackSegmentsOp final : public Operator<Context> {
     shape.insert(shape.begin(), lengths.size());
     output->Resize(shape);
 
+    // create output tensor
+    auto* out = static_cast<char*>(output->raw_mutable_data(data.meta()));
+
+    bool* presence_mask_data = nullptr;
     if (return_presence_mask_) {
       // Shape of presence is batch_size x max_len
       std::vector<caffe2::TIndex> presence_shape{lengths.size(), max_length};
       presence_mask->Resize(presence_shape);
+      presence_mask_data = presence_mask->template mutable_data<bool>();
     }
-
-    // create output tensor
-    auto* out = static_cast<char*>(output->raw_mutable_data(data.meta()));
 
     if (!data.dim(0)) {
       // Return empty output (with the proper shape)
@@ -99,9 +101,7 @@ class PackSegmentsOp final : public Operator<Context> {
           output->template mutable_data<float>(),
           &context_);
     }
-    bool* presence_mask_data = nullptr;
     if (return_presence_mask_) {
-      presence_mask_data = presence_mask->template mutable_data<bool>();
       memset(presence_mask_data, (int)false, presence_mask->size());
     }
 
