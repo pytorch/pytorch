@@ -297,6 +297,15 @@ PyObject * THCPModule_cudaUnlockMutex(PyObject *module)
   Py_RETURN_NONE;
 }
 
+PyObject * THCPModule_emptyCache(PyObject *_unused)
+{
+  HANDLE_TH_ERRORS
+  auto device_allocator = THCState_getDeviceAllocator(state);
+  THCudaCheck(device_allocator->emptyCache(device_allocator->state));
+  END_HANDLE_TH_ERRORS
+  Py_RETURN_NONE;
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // Cuda module initialization
 ////////////////////////////////////////////////////////////////////////////////
@@ -376,6 +385,7 @@ static struct PyMethodDef _THCPModule_methods[] = {
   {"_cuda_getDriverVersion", (PyCFunction)THCPModule_getDriverVersion, METH_NOARGS, NULL},
   {"_cuda_getRNGState", (PyCFunction)THCPModule_getRNGState,      METH_NOARGS,  NULL},
   {"_cuda_setRNGState", (PyCFunction)THCPModule_setRNGState,      METH_O,       NULL},
+  {"_cuda_emptyCache", (PyCFunction) THCPModule_emptyCache,       METH_NOARGS,  NULL},
   {"_cuda_manualSeed",  (PyCFunction)THCPModule_manualSeed,       METH_O,       NULL},
   {"_cuda_manualSeedAll", (PyCFunction)THCPModule_manualSeedAll,  METH_O,       NULL},
   {"_cuda_seed",        (PyCFunction)THCPModule_seed,             METH_NOARGS,  NULL},

@@ -267,6 +267,11 @@ def current_blas_handle():
     return torch._C._cuda_getCurrentBlasHandle()
 
 
+def empty_cache():
+    """Frees all unused memory currently held by the cache allocator"""
+    return torch._C._cuda_emptyCache()
+
+
 def _host_allocator():
     _lazy_init()
     return torch._C._cuda_cudaHostAllocator()
