@@ -4,6 +4,8 @@
 
 namespace at {
 
+// Returns true if size represents an "no element" or "empty" tensor.
+// See Note [empty versus 0-dim tensors]
 static inline bool is_noelem_tensor_size(ArrayRef<int64_t> size) {
   return size.size() == 1 && size[0] == 0;
 }
