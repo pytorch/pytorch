@@ -2,6 +2,7 @@
 
 #include "ATen/ATen.h"
 #include "ATen/WrapDimUtils.h"
+#include "ATen/ExpandUtils.h"
 #include <vector>
 
 namespace at {
@@ -62,7 +63,7 @@ type_method_definition_dispatch: at::native::is_same_size
 [/NativeFunction]
 */
 static inline bool is_same_size(const Tensor &self, const Tensor &other) {
-  return self.dim() == other.dim() && self.sizes().equals(other.sizes());
+  return self.sizes().equals(other.sizes());
 }
 
 /*
@@ -96,6 +97,206 @@ static inline Tensor permute(const Tensor & self, IntList dims) {
     newStrides[i] = oldStrides[dim];
   }
   return self.as_strided(newSizes, newStrides);
+}
+
+/*
+[NativeFunction]
+name: expand
+arg: Tensor self
+arg: IntList sizes
+return: Tensor
+variants: method, function
+type_method_definition_level: base
+type_method_definition_dispatch: at::native::expand
+[/NativeFunction]
+*/
+static inline Tensor expand(const Tensor &self, IntList sizes) {
+  if (sizes.size() < (size_t)self.dim()) {
+    throw std::runtime_error("the number of sizes provided must be greater or equal to the "
+                             "number of dimensions in the tensor");
+  }
+
+  std::vector<int64_t> expandedSizes;
+  std::vector<int64_t> expandedStrides;
+  std::tie(expandedSizes, expandedStrides) = inferExpandGeometry(self, sizes);
+
+  return self.as_strided(expandedSizes, expandedStrides);
+}
+
+static inline std::tuple<std::vector<int64_t>, std::vector<int64_t> >
+inferSqueezeGeometry(const Tensor &tensor) {
+  std::vector<int64_t> sizes;
+  std::vector<int64_t> strides;
+
+  for(int64_t d = 0; d < tensor.dim(); d++) {
+    if(tensor.sizes()[d] != 1) {
+      sizes.push_back(tensor.sizes()[d]);
+      strides.push_back(tensor.strides()[d]);
+    }
+  }
+
+  return std::make_tuple(sizes, strides);
+}
+
+static inline std::tuple<std::vector<int64_t>, std::vector<int64_t> >
+inferSqueezeGeometry(const Tensor &tensor, int64_t dim) {
+  std::vector<int64_t> sizes;
+  std::vector<int64_t> strides;
+
+  for(int64_t d = 0; d < tensor.dim(); d++) {
+    if(d != dim || tensor.sizes()[dim] != 1) {
+      sizes.push_back(tensor.sizes()[d]);
+      strides.push_back(tensor.strides()[d]);
+    }
+  }
+  return std::make_tuple(sizes, strides);
+}
+
+static inline std::tuple<std::vector<int64_t>, std::vector<int64_t> >
+inferUnsqueezeGeometry(const Tensor &tensor, int64_t dim) {
+  if (tensor.numel() == 0) {
+    throw std::runtime_error("cannot unsqueeze empty tensor");
+  }
+
+  std::vector<int64_t> sizes(tensor.sizes());
+  std::vector<int64_t> strides(tensor.strides());
+  int64_t new_stride = dim >= tensor.dim() - 1 ? 1 : sizes[dim] * strides[dim];
+  sizes.insert(sizes.begin() + dim, 1);
+  strides.insert(strides.begin() + dim, new_stride);
+
+  return std::make_tuple(sizes, strides);
+}
+
+/*
+[NativeFunction]
+name: squeeze
+arg: Tensor self
+return: Tensor
+variants: method, function
+type_method_definition_level: base
+type_method_definition_dispatch: at::native::squeeze
+[/NativeFunction]
+*/
+static inline Tensor squeeze(const Tensor & self) {
+  auto g = inferSqueezeGeometry(self);
+  return self.as_strided(std::get<0>(g), std::get<1>(g));
+}
+
+/*
+[NativeFunction]
+name: squeeze
+arg: Tensor self
+arg: int64_t dim
+return: Tensor
+variants: method, function
+type_method_definition_level: base
+type_method_definition_dispatch: at::native::squeeze
+[/NativeFunction]
+*/
+static inline Tensor squeeze(const Tensor & self, int64_t dim) {
+  dim = maybe_wrap_dim(dim, self.dim());
+
+  if (self.sizes()[dim] != 1) {
+    return self.as_strided(self.sizes().vec(), self.strides().vec());
+  }
+  auto g = inferSqueezeGeometry(self, dim);
+  return self.as_strided(std::get<0>(g), std::get<1>(g));
+}
+
+/*
+[NativeFunction]
+name: squeeze_
+arg: Tensor self
+return: Tensor
+variants: method, function
+type_method_definition_level: base
+type_method_definition_dispatch: at::native::squeeze_
+[/NativeFunction]
+*/
+static inline Tensor squeeze_(Tensor self) {
+  auto g = inferSqueezeGeometry(self);
+  return self.as_strided_(std::get<0>(g), std::get<1>(g));
+}
+
+/*
+[NativeFunction]
+name: squeeze_
+arg: Tensor self
+arg: int64_t dim
+return: Tensor
+variants: method, function
+type_method_definition_level: base
+type_method_definition_dispatch: at::native::squeeze_
+[/NativeFunction]
+*/
+static inline Tensor squeeze_(Tensor self, int64_t dim) {
+  dim = maybe_wrap_dim(dim, self.dim());
+
+  if (self.sizes()[dim] != 1) {
+    return self.as_strided_(self.sizes().vec(), self.strides().vec());
+  }
+  auto g = inferSqueezeGeometry(self, dim);
+  return self.as_strided_(std::get<0>(g), std::get<1>(g));
+}
+
+/*
+[NativeFunction]
+name: unsqueeze
+arg: Tensor self
+arg: int64_t dim
+return: Tensor
+variants: method, function
+type_method_definition_level: base
+type_method_definition_dispatch: at::native::unsqueeze
+[/NativeFunction]
+*/
+static inline Tensor unsqueeze(const Tensor & self, int64_t dim) {
+  dim = maybe_wrap_dim(dim, self.dim() + 1);
+
+  auto g = inferUnsqueezeGeometry(self, dim);
+  return self.as_strided(std::get<0>(g), std::get<1>(g));
+}
+
+/*
+[NativeFunction]
+name: unsqueeze_
+arg: Tensor self
+arg: int64_t dim
+return: Tensor
+variants: method, function
+type_method_definition_level: base
+type_method_definition_dispatch: at::native::unsqueeze_
+[/NativeFunction]
+*/
+static inline Tensor unsqueeze_(Tensor self, int64_t dim) {
+  dim = maybe_wrap_dim(dim, self.dim() + 1);
+
+  auto g = inferUnsqueezeGeometry(self, dim);
+  return self.as_strided_(std::get<0>(g), std::get<1>(g));
+}
+
+/*
+[NativeFunction]
+name: stack
+arg: TensorList list
+arg: int64_t dim=0
+return: Tensor
+variants: function
+type_method_definition_level: base
+type_method_definition_dispatch: at::native::stack
+[/NativeFunction]
+*/
+static inline Tensor stack(TensorList list, int64_t dim=0) {
+  if (list.size() == 0) {
+    throw std::runtime_error("stack expects a non-empty TensorList");
+  }
+  dim = maybe_wrap_dim(dim, list[0].dim() + 1);
+
+  std::vector<Tensor> inputs(list.size());
+  for (size_t i = 0; i < list.size(); ++i) {
+    inputs[i] = list[i].unsqueeze(dim);
+  }
+  return at::cat(inputs, dim);
 }
 
 }
