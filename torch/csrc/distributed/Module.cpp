@@ -184,32 +184,29 @@ extern PyObject* THCPByteTensorClass;
 THDTensorDescriptor THDPModule_makeDescriptor(PyObject *obj)
 {
   PyObject *type = (PyObject*)Py_TYPE(obj);
-#define REGISTER_TH_DESCRIPTOR(TYPE, REAL)                                           \
+#define REGISTER_TH_DESCRIPTOR(TYPE)                                           \
   if (type == THP##TYPE##Class)                                                \
-    return at::CPU(REAL).unsafeTensorFromTH(((THP##TYPE*)obj)->cdata, true);
-    /* return THDTensorDescriptor_newFromTH##TYPE(((THP##TYPE*)obj)->cdata); */
-  REGISTER_TH_DESCRIPTOR(DoubleTensor, at::kDouble);
-  REGISTER_TH_DESCRIPTOR(FloatTensor, at::kFloat);
-  REGISTER_TH_DESCRIPTOR(LongTensor, at::kLong);
-  REGISTER_TH_DESCRIPTOR(IntTensor, at::kInt);
-  REGISTER_TH_DESCRIPTOR(ShortTensor, at::kShort);
-  REGISTER_TH_DESCRIPTOR(CharTensor, at::kChar);
-  REGISTER_TH_DESCRIPTOR(ByteTensor, at::kByte);
+    return THDTensorDescriptor_newFromTH##TYPE(((THP##TYPE*)obj)->cdata);
+  REGISTER_TH_DESCRIPTOR(DoubleTensor);
+  REGISTER_TH_DESCRIPTOR(FloatTensor);
+  REGISTER_TH_DESCRIPTOR(LongTensor);
+  REGISTER_TH_DESCRIPTOR(IntTensor);
+  REGISTER_TH_DESCRIPTOR(ShortTensor);
+  REGISTER_TH_DESCRIPTOR(CharTensor);
+  REGISTER_TH_DESCRIPTOR(ByteTensor);
 #undef REGISTER_TH_DESCRIPTOR
 #ifdef WITH_CUDA
-#define REGISTER_THC_DESCRIPTOR(TYPE, REAL)                                           \
+#define REGISTER_THC_DESCRIPTOR(TYPE)                                           \
   if (type == THCP##TYPE##Class)                                                \
-    return at::CUDA(REAL).unsafeTensorFromTH(((THP##TYPE*)obj)->cdata, true);
-    /* return THDTensorDescriptor_newFromTHCuda##TYPE((THCuda##TYPE*)(((torch::THPVoidTensor*)obj)->cdata)); */
-  REGISTER_THC_DESCRIPTOR(DoubleTensor, at::kDouble);
+    return THDTensorDescriptor_newFromTHCuda##TYPE((THCuda##TYPE*)(((torch::THPVoidTensor*)obj)->cdata));
+  REGISTER_THC_DESCRIPTOR(DoubleTensor);
   if (type == THCPFloatTensorClass)
-    return at::CUDA(at::kFloat).unsafeTensorFromTH((THCudaTensor*)(((torch::THPVoidTensor*)obj)->cdata), true);
-    /* return THDTensorDescriptor_newFromTHCudaFloatTensor((THCudaTensor*)(((torch::THPVoidTensor*)obj)->cdata)); */
-  REGISTER_THC_DESCRIPTOR(LongTensor, at::kLong);
-  REGISTER_THC_DESCRIPTOR(IntTensor, at::kInt);
-  REGISTER_THC_DESCRIPTOR(ShortTensor, at::kShort);
-  REGISTER_THC_DESCRIPTOR(CharTensor, at::kChar);
-  REGISTER_THC_DESCRIPTOR(ByteTensor, at::kByte);
+    return THDTensorDescriptor_newFromTHCudaFloatTensor((THCudaTensor*)(((torch::THPVoidTensor*)obj)->cdata));
+  REGISTER_THC_DESCRIPTOR(LongTensor);
+  REGISTER_THC_DESCRIPTOR(IntTensor);
+  REGISTER_THC_DESCRIPTOR(ShortTensor);
+  REGISTER_THC_DESCRIPTOR(CharTensor);
+  REGISTER_THC_DESCRIPTOR(ByteTensor);
 #undef REGISTER_THC_DESCRIPTOR
 #endif
   throw std::runtime_error(std::string("don't know how to create a THDTensorDesciptor for "

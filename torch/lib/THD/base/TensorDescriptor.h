@@ -9,8 +9,6 @@
 #ifndef _THD_CORE
 #include <ATen/ATen.h>
 using THDTensorDescriptor = at::Tensor;
-/* struct _THDTensorDescriptor; */
-/* typedef struct _THDTensorDescriptor THDTensorDescriptor; */
 #endif
 
 THD_API THDTensorDescriptor THDTensorDescriptor_newFromTHDoubleTensor(THDoubleTensor *tensor);
