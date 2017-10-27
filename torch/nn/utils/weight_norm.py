@@ -59,7 +59,7 @@ class WeightNorm(object):
 
 
 def weight_norm(module, name='weight', dim=0):
-    """Applies weight normalization to a parameter in the given module.
+    r"""Applies weight normalization to a parameter in the given module.
 
     .. math::
          \mathbf{w} = g \dfrac{\mathbf{v}}{\|\mathbf{v}\|}
@@ -101,7 +101,7 @@ def weight_norm(module, name='weight', dim=0):
 
 
 def remove_weight_norm(module, name='weight'):
-    """Removes the weight normalization reparameterization from a module.
+    r"""Removes the weight normalization reparameterization from a module.
 
     Args:
         module (nn.Module): containing module

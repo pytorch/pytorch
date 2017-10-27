@@ -21,7 +21,7 @@ def _addindent(s_, numSpaces):
 
 
 class Module(object):
-    """Base class for all neural network modules.
+    r"""Base class for all neural network modules.
 
     Your models should also subclass this class.
 
