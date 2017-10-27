@@ -972,7 +972,7 @@ Args:
 """)
 
 
-def cross_entropy(input, target, weight=None, size_average=True, ignore_index=-100):
+def cross_entropy(input, target, weight=None, size_average=True, ignore_index=-100, reduce=True):
     r"""This criterion combines `log_softmax` and `nll_loss` in a single
     function.
 
@@ -987,10 +987,14 @@ def cross_entropy(input, target, weight=None, size_average=True, ignore_index=-1
         size_average (bool, optional): By default, the losses are averaged
                 over observations for each minibatch. However, if the field
                 sizeAverage is set to False, the losses are instead summed
-                for each minibatch. Default: True
+                for each minibatch. Ignored if reduce is False. Default: True
         ignore_index (int, optional): Specifies a target value that is ignored
                 and does not contribute to the input gradient. When size_average is
                 True, the loss is averaged over non-ignored targets. Default: -100
+        reduce (bool, optional): By default, the losses are averaged or summed over
+                observations for each minibatch depending on size_average. When reduce
+                is False, returns a loss per batch element instead and ignores
+                size_average. Default: True
 
     Examples::
 
@@ -999,7 +1003,7 @@ def cross_entropy(input, target, weight=None, size_average=True, ignore_index=-1
         >>> loss = F.cross_entropy(input, target)
         >>> loss.backward()
     """
-    return nll_loss(log_softmax(input, 1), target, weight, size_average, ignore_index)
+    return nll_loss(log_softmax(input, 1), target, weight, size_average, ignore_index, reduce)
 
 
 def binary_cross_entropy(input, target, weight=None, size_average=True):
