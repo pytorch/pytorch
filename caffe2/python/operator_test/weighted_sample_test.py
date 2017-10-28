@@ -38,6 +38,8 @@ class TestWeightedSample(hu.HypothesisTestCase):
         rand_values = np.array(rand_values, dtype=np.float32)
         workspace.FeedBlob("weights", weights.astype(np.float32))
         workspace.FeedBlob("values", values.astype(np.float32))
+
+        # output both indices and values
         op = core.CreateOperator(
             "WeightedSample", ["weights", "values"],
             ["sample_indices", "sample_values"]
@@ -45,7 +47,6 @@ class TestWeightedSample(hu.HypothesisTestCase):
         workspace.RunOperatorOnce(op)
         result_indices = workspace.FetchBlob("sample_indices")
         result_values = workspace.FetchBlob("sample_values")
-
         if batch > 0 and weights_len > 0:
             for i in range(batch):
                 np.testing.assert_allclose(rand_indices[i], result_indices[i])
@@ -53,21 +54,25 @@ class TestWeightedSample(hu.HypothesisTestCase):
         else:
             np.testing.assert_allclose(rand_indices, result_indices)
             np.testing.assert_allclose(rand_values, result_values)
+        self.assertDeviceChecks(
+            dc,
+            op,
+            [weights.astype(np.float32), values.astype(np.float32)],
+            [0, 1]
+        )
 
+        # output indices only
         op2 = core.CreateOperator(
             "WeightedSample", ["weights"], ["sample_indices_2"]
         )
         workspace.RunOperatorOnce(op2)
         result = workspace.FetchBlob("sample_indices_2")
-
         if batch > 0 and weights_len > 0:
             for i in range(batch):
                 np.testing.assert_allclose(rand_indices[i], result[i])
         else:
             np.testing.assert_allclose(rand_indices, result)
-
-        # Add this back after CUDA operator is updated
-        # self.assertDeviceChecks(dc, op, [weights.astype(np.float32)], [0])
+        self.assertDeviceChecks(dc, op2, [weights.astype(np.float32)], [0])
 
 
 if __name__ == "__main__":
