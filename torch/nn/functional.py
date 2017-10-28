@@ -947,7 +947,7 @@ def poisson_nll_loss(input, target, log_input=True, full=False, size_average=Tru
     if log_input:
         loss = torch.exp(input) - target * input
     else:
-        loss = input - target * torch.log(input+eps)
+        loss = input - target * torch.log(input + eps)
     if full:
         mask = target > 1
         loss[mask] += (target * torch.log(target) - target + 0.5 * torch.log(2 * math.pi * target))[mask]
