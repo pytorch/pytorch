@@ -598,7 +598,7 @@ class Softmin(Module):
     rescaling them so that the elements of the n-dimensional output Tensor
     lie in the range `(0, 1)` and sum to 1
 
-    :math:`f(x) = exp(-x_i) / sum_j exp(-x_j)`
+    :math:`f(x) = \frac{\exp(-x_i)}{\sum_j \exp(-x_j)}`
 
     Shape:
         - Input: any shape
@@ -636,7 +636,7 @@ class Softmax(Module):
     lie in the range (0,1) and sum to 1
 
     Softmax is defined as
-    :math:`f_i(x) = exp(x_i) / sum_j exp(x_j)`
+    :math:`f_i(x) = \frac{\exp(x_i)}{\sum_j \exp(x_j)}`
 
     Shape:
         - Input: any shape
