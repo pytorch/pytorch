@@ -6,10 +6,10 @@
 
 namespace at {
 
-ATen_CLASS std::ostream& operator<<(std::ostream & out, IntList list);
-ATen_CLASS std::ostream& operator<<(std::ostream & out, Backend b);
-ATen_CLASS std::ostream& operator<<(std::ostream & out, ScalarType t);
-ATen_CLASS std::ostream& print(std::ostream& stream, const Tensor & tensor, int64_t linesize);
+AT_API std::ostream& operator<<(std::ostream & out, IntList list);
+AT_API std::ostream& operator<<(std::ostream & out, Backend b);
+AT_API std::ostream& operator<<(std::ostream & out, ScalarType t);
+AT_API std::ostream& print(std::ostream& stream, const Tensor & tensor, int64_t linesize);
 static inline std::ostream& operator<<(std::ostream & out, const Tensor & t) {
   return print(out,t,80);
 }

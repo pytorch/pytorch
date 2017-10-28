@@ -32,6 +32,12 @@ else:
     string_classes = (str, bytes)
 
 
+if PY2:
+    int_classes = (int, long)
+else:
+    int_classes = int
+
+
 def with_metaclass(meta, *bases):
     """Create a base class with a metaclass."""
     # This requires a bit of explanation: the basic idea is to make a dummy

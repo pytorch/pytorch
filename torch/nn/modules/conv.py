@@ -395,7 +395,7 @@ class _ConvTransposeMixin(object):
 
 
 class ConvTranspose1d(_ConvTransposeMixin, _ConvNd):
-    """Applies a 1D transposed convolution operator over an input image
+    r"""Applies a 1D transposed convolution operator over an input image
     composed of several input planes.
 
     This module can be seen as the gradient of Conv1d with respect to its input.

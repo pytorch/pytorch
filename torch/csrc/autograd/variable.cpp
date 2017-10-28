@@ -41,11 +41,15 @@ const char * VariableImpl::toString() const {
   return "Variable";
 }
 
-IntList VariableImpl::sizes() {
+IntList VariableImpl::sizes() const {
   return data.sizes();
 }
 
-int64_t VariableImpl::dim() {
+IntList VariableImpl::strides() const {
+  return data.strides();
+}
+
+int64_t VariableImpl::dim() const {
   return data.dim();
 }
 
@@ -55,10 +59,6 @@ const char * VariableImpl::typeString() {
 
 void * VariableImpl::unsafeGetTH(bool retain) {
   return data.unsafeGetTH(retain);
-}
-
-IntList VariableImpl::strides() {
-  return data.strides();
 }
 
 Scalar VariableImpl::localScalar() {

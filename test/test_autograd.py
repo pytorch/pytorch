@@ -542,8 +542,12 @@ class TestAutograd(TestCase):
         z = x + y
         q = y * 2
 
-        torch.autograd.backward([z, q], [torch.ones(5, 5), torch.ones(5, 5)])
-        self.assertEqual(x.grad.data, torch.ones(5, 5))
+        # NB: we currently raise an exception if any arguments to backwards
+        # have requires_grad=False and don't have a grad_fn. We may want to
+        # relax that check to a warning.
+        def call_backwards():
+            torch.autograd.backward([z, q], [torch.ones(5, 5), torch.ones(5, 5)])
+        self.assertRaises(RuntimeError, call_backwards)
 
     def test_dependent_backward(self):
         x = Variable(torch.randn(10), requires_grad=True)
@@ -1820,6 +1824,10 @@ method_tests = [
     ('unsqueeze', (S, S, S), (0,), 'first', [0]),
     ('unsqueeze', (S, S, S), (1,), 'middle', [0]),
     ('unsqueeze', (S, S, S), (3,), 'last', [0]),
+    ('chunk', (S, S, S), (2,)),
+    ('chunk', (S, S, S), (S, 1), 'dim', [1]),
+    ('split', (S, S, S), (2,)),
+    ('split', (S, S, S), (S, 1), 'dim', [1]),
     ('gather', (M, S), (0, gather_variable((S, S), 1, M, True)), 'dim0', [0]),
     ('gather', (M, S), (1, gather_variable((M, S // 2), 0, S, True)), 'dim1', [0]),
     ('scatter', (M, S), (0, gather_variable((S, S), 1, M), (S, S)), 'dim0', [0]),

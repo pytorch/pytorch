@@ -2,6 +2,7 @@
 
 #include <memory>
 #include <limits>
+#include <functional>
 
 #include "ATen/ATenGeneral.h"
 #include "ATen/ArrayRef.h"
@@ -45,7 +46,7 @@ enum class TypeID {
 };
 
 
-struct ATen_CLASS Type {
+struct AT_API Type {
   explicit Type(Context * context)
   : context(context) {}
   virtual ~Type() {}
@@ -62,8 +63,8 @@ struct ATen_CLASS Type {
   virtual Tensor unsafeTensorFromTH(void * th_pointer, bool retain) const = 0;
   virtual const char * toString() const = 0;
   virtual std::size_t elementSizeInBytes() const = 0;
-  Type & toBackend(Backend b) const;
-  Type & toScalarType(ScalarType s) const;
+  virtual Type & toBackend(Backend b) const;
+  virtual Type & toScalarType(ScalarType s) const;
 
   // contingious IDs for all types in the system
   // for external dispatch

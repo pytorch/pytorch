@@ -669,7 +669,7 @@ class AvgPool3d(Module):
 
 
 class FractionalMaxPool2d(Module):
-    """Applies a 2D fractional max pooling over an input signal composed of several input planes.
+    r"""Applies a 2D fractional max pooling over an input signal composed of several input planes.
 
     Fractiona MaxPooling is described in detail in the paper `Fractional MaxPooling`_ by Ben Graham
 
@@ -832,7 +832,7 @@ class LPPool1d(Module):
 
 
 class AdaptiveMaxPool1d(Module):
-    """Applies a 1D adaptive max pooling over an input signal composed of several input planes.
+    r"""Applies a 1D adaptive max pooling over an input signal composed of several input planes.
 
     The output size is H, for any input size.
     The number of output features is equal to the number of input planes.
@@ -864,7 +864,7 @@ class AdaptiveMaxPool1d(Module):
 
 
 class AdaptiveMaxPool2d(Module):
-    """Applies a 2D adaptive max pooling over an input signal composed of several input planes.
+    r"""Applies a 2D adaptive max pooling over an input signal composed of several input planes.
 
     The output is of size H x W, for any input size.
     The number of output features is equal to the number of input planes.
@@ -901,7 +901,7 @@ class AdaptiveMaxPool2d(Module):
 
 
 class AdaptiveMaxPool3d(Module):
-    """Applies a 3D adaptive max pooling over an input signal composed of several input planes.
+    r"""Applies a 3D adaptive max pooling over an input signal composed of several input planes.
 
     The output is of size D x H x W, for any input size.
     The number of output features is equal to the number of input planes.
@@ -938,7 +938,7 @@ class AdaptiveMaxPool3d(Module):
 
 
 class AdaptiveAvgPool1d(Module):
-    """Applies a 1D adaptive average pooling over an input signal composed of several input planes.
+    r"""Applies a 1D adaptive average pooling over an input signal composed of several input planes.
 
     The output size is H, for any input size.
     The number of output features is equal to the number of input planes.
@@ -967,7 +967,7 @@ class AdaptiveAvgPool1d(Module):
 
 
 class AdaptiveAvgPool2d(Module):
-    """Applies a 2D adaptive average pooling over an input signal composed of several input planes.
+    r"""Applies a 2D adaptive average pooling over an input signal composed of several input planes.
 
     The output is of size H x W, for any input size.
     The number of output features is equal to the number of input planes.
@@ -1001,7 +1001,7 @@ class AdaptiveAvgPool2d(Module):
 
 
 class AdaptiveAvgPool3d(Module):
-    """Applies a 3D adaptive average pooling over an input signal composed of several input planes.
+    r"""Applies a 3D adaptive average pooling over an input signal composed of several input planes.
 
     The output is of size D x H x W, for any input size.
     The number of output features is equal to the number of input planes.

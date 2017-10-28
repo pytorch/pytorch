@@ -7,7 +7,7 @@ from .. import functional as F
 
 
 class Threshold(Module):
-    """Thresholds each element of the input Tensor
+    r"""Thresholds each element of the input Tensor
 
     Threshold is defined as::
 
@@ -51,7 +51,7 @@ class Threshold(Module):
 
 
 class ReLU(Threshold):
-    """Applies the rectified linear unit function element-wise
+    r"""Applies the rectified linear unit function element-wise
     :math:`{ReLU}(x)= max(0, x)`
 
     Args:
@@ -99,7 +99,7 @@ class RReLU(Module):
 
 
 class Hardtanh(Module):
-    """Applies the HardTanh function element-wise
+    r"""Applies the HardTanh function element-wise
 
     HardTanh is defined as::
 
@@ -156,7 +156,7 @@ class Hardtanh(Module):
 
 
 class ReLU6(Hardtanh):
-    """Applies the element-wise function :math:`{ReLU6}(x) = min(max(0,x), 6)`
+    r"""Applies the element-wise function :math:`{ReLU6}(x) = min(max(0,x), 6)`
 
     Args:
         inplace: can optionally do the operation in-place. Default: False
@@ -184,7 +184,7 @@ class ReLU6(Hardtanh):
 
 
 class Sigmoid(Module):
-    """Applies the element-wise function :math:`f(x) = 1 / ( 1 + exp(-x))`
+    r"""Applies the element-wise function :math:`f(x) = 1 / ( 1 + exp(-x))`
 
     Shape:
         - Input: :math:`(N, *)` where `*` means, any number of additional
@@ -207,7 +207,7 @@ class Sigmoid(Module):
 
 
 class Tanh(Module):
-    """Applies element-wise,
+    r"""Applies element-wise,
     :math:`f(x) = (exp(x) - exp(-x)) / (exp(x) + exp(-x))`
 
     Shape:
@@ -231,7 +231,7 @@ class Tanh(Module):
 
 
 class ELU(Module):
-    """Applies element-wise,
+    r"""Applies element-wise,
     :math:`f(x) = max(0,x) + min(0, alpha * (exp(x) - 1))`
 
     Args:
@@ -267,7 +267,7 @@ class ELU(Module):
 
 
 class SELU(Module):
-    """Applies element-wise,
+    r"""Applies element-wise,
     :math:`f(x) = scale * (\max(0,x) + \min(0, alpha * (\exp(x) - 1)))`,
     with ``alpha=1.6732632423543772848170429916717`` and
     ``scale=1.0507009873554804934193349852946``.
@@ -305,7 +305,7 @@ class SELU(Module):
 
 
 class GLU(Module):
-    """Applies the gated linear unit function
+    r"""Applies the gated linear unit function
     :math:`{GLU}(a, b)= a \otimes \sigma(b)` where `a` is the first half of
     the input vector and `b` is the second half.
 
@@ -337,7 +337,7 @@ class GLU(Module):
 
 
 class Hardshrink(Module):
-    """Applies the hard shrinkage function element-wise
+    r"""Applies the hard shrinkage function element-wise
     Hardshrink is defined as::
         f(x) = x, if x >  lambda
         f(x) = x, if x < -lambda
@@ -372,7 +372,7 @@ class Hardshrink(Module):
 
 
 class LeakyReLU(Module):
-    """Applies element-wise,
+    r"""Applies element-wise,
     :math:`f(x) = max(0, x) + {negative\_slope} * min(0, x)`
 
     Args:
@@ -408,7 +408,7 @@ class LeakyReLU(Module):
 
 
 class LogSigmoid(Module):
-    """Applies element-wise :math:`LogSigmoid(x) = log( 1 / (1 + exp(-x_i)))`
+    r"""Applies element-wise :math:`LogSigmoid(x) = log( 1 / (1 + exp(-x_i)))`
 
     Shape:
         - Input: :math:`(N, *)` where `*` means, any number of additional
@@ -431,7 +431,7 @@ class LogSigmoid(Module):
 
 
 class Softplus(Module):
-    """Applies element-wise :math:`f(x) = 1/beta * log(1 + exp(beta * x_i))`
+    r"""Applies element-wise :math:`f(x) = 1/beta * log(1 + exp(beta * x_i))`
 
     SoftPlus is a smooth approximation to the ReLU function and can be used
     to constrain the output of a machine to always be positive.
@@ -471,7 +471,7 @@ class Softplus(Module):
 
 
 class Softshrink(Module):
-    """Applies the soft shrinkage function elementwise
+    r"""Applies the soft shrinkage function elementwise
 
     SoftShrinkage operator is defined as::
 
@@ -507,7 +507,7 @@ class Softshrink(Module):
 
 
 class PReLU(Module):
-    """Applies element-wise the function
+    r"""Applies element-wise the function
     :math:`PReLU(x) = max(0,x) + a * min(0,x)` Here "a" is a learnable
     parameter. When called without arguments, nn.PReLU() uses a single
     parameter "a" across all input channels. If called with nn.PReLU(nChannels),
@@ -548,7 +548,7 @@ class PReLU(Module):
 
 
 class Softsign(Module):
-    """Applies element-wise, the function :math:`f(x) = x / (1 + |x|)`
+    r"""Applies element-wise, the function :math:`f(x) = x / (1 + |x|)`
 
     Shape:
         - Input: :math:`(N, *)` where `*` means, any number of additional
@@ -571,7 +571,7 @@ class Softsign(Module):
 
 
 class Tanhshrink(Module):
-    """Applies element-wise, :math:`Tanhshrink(x) = x - Tanh(x)`
+    r"""Applies element-wise, :math:`Tanhshrink(x) = x - Tanh(x)`
 
     Shape:
         - Input: :math:`(N, *)` where `*` means, any number of additional
@@ -594,7 +594,7 @@ class Tanhshrink(Module):
 
 
 class Softmin(Module):
-    """Applies the Softmin function to an n-dimensional input Tensor
+    r"""Applies the Softmin function to an n-dimensional input Tensor
     rescaling them so that the elements of the n-dimensional output Tensor
     lie in the range `(0, 1)` and sum to 1
 
@@ -631,7 +631,7 @@ class Softmin(Module):
 
 
 class Softmax(Module):
-    """Applies the Softmax function to an n-dimensional input Tensor
+    r"""Applies the Softmax function to an n-dimensional input Tensor
     rescaling them so that the elements of the n-dimensional output Tensor
     lie in the range (0,1) and sum to 1
 
@@ -680,7 +680,7 @@ class Softmax(Module):
 
 
 class Softmax2d(Module):
-    """Applies SoftMax over features to each spatial location
+    r"""Applies SoftMax over features to each spatial location
 
     When given an image of Channels x Height x Width, it will
 
@@ -712,7 +712,7 @@ class Softmax2d(Module):
 
 
 class LogSoftmax(Module):
-    """Applies the Log(Softmax(x)) function to an n-dimensional input Tensor.
+    r"""Applies the Log(Softmax(x)) function to an n-dimensional input Tensor.
     The LogSoftmax formulation can be simplified as
 
     :math:`f_i(x) = log(exp(x_i) / sum_j exp(x_j) )`

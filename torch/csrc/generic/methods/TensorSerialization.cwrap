@@ -70,6 +70,8 @@ PyObject * THPTensor_(toNumpy)(THPTensor *self, PyObject *args) {
   std::unique_ptr<npy_intp[]> sizes;
   std::unique_ptr<npy_intp[]> strides;
 
+  THPUtils_assert(PyTuple_Size(args) == 0, "numpy() takes no positional arguments");
+
   // Numpy and Torch disagree on empty tensors. In Torch, an empty tensor
   // is a tensor with zero dimensions. In Numpy, a tensor with zero dimensions
   // is a scalar (with one element). So we'll convert an empty Torch tensor

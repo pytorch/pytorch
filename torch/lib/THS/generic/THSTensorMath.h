@@ -11,6 +11,8 @@
  */
 
 TH_API void THSTensor_(zero)(THSTensor *r_);
+TH_API void THSTensor_(zeros)(THSTensor *r_, THLongStorage *size);
+TH_API void THSTensor_(zerosLike)(THSTensor *r_, THSTensor *input);
 
 TH_API void THSTensor_(mul)(THSTensor *r_, THSTensor *t, real value);
 TH_API void THSTensor_(div)(THSTensor *r_, THSTensor *t, real value);

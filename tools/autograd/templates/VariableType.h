@@ -52,6 +52,7 @@ private:
   Variable as_variable(Tensor tensor) const;
   std::tuple<Variable, Variable> as_variable(std::tuple<Tensor, Tensor> tensor) const;
   std::tuple<Variable, Variable, Variable> as_variable(std::tuple<Tensor, Tensor, Tensor> tensor) const;
+  std::vector<Variable> as_variable(TensorList tensor) const;
 
 private:
   at::Type* baseType;

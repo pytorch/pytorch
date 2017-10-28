@@ -1,4 +1,5 @@
 #include "Functions.h"
+#include <ATen/WrapDimUtils.h>
 
 #include <math.h>
 
@@ -7,6 +8,7 @@
 using at::Tensor;
 using at::Scalar;
 using at::IntList;
+using at::TensorList;
 
 namespace torch { namespace autograd { namespace generated {
 
@@ -244,6 +246,29 @@ Tensor potrf_backward(Tensor grad, bool upper, Tensor L) {
   std::tie(S, std::ignore) = at::gesv(S.t(), L.t());
   S = phi(S);
   return S;
+}
+
+Tensor split_backward(const std::vector<torch::autograd::Variable> &grads, int64_t split_size, int64_t dim, IntList sizes, const Type &type) {
+  dim = at::maybe_wrap_dim(dim, sizes.size());
+  int64_t dim_size = sizes[dim];
+  int64_t num_splits = (dim_size + split_size - 1) / split_size;
+
+  // it's possible some of the grads are not defined (represents tensors of all 0s).
+  // Since at::cat can't handle those, let's define them
+  std::vector<Tensor> grads_all_defined(grads.size());
+  for (size_t j = 0; j < grads.size(); ++j) {
+    if (grads[j].defined()) {
+      grads_all_defined[ j ] = grads[ j ];
+    } else {
+      auto length = (int64_t)j < (num_splits - 1) ? split_size : split_size - (split_size * num_splits - dim_size);
+      std::vector<int64_t> grad_size(sizes);
+      grad_size[ dim ] = length;
+      grads_all_defined[ j ] = type.zeros(grad_size);
+    }
+  }
+
+  auto ret =  at::cat(grads_all_defined, dim);
+  return ret;
 }
 
 Tensor glu_double_backward(const Tensor & grad, const Tensor & grad_output, const Tensor & input, int64_t dim) {
