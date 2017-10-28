@@ -79,7 +79,7 @@ OPERATOR_SCHEMA(WeightedSample)
       vector<TensorShape> out(2);
       int batch_size = in[0].dims(0);
       out[0] = CreateTensorShape(vector<int>{batch_size}, TensorProto::INT32);
-      out[1] = CreateTensorShape(vector<float>{batch_size}, TensorProto::FLOAT);
+      out[1] = CreateTensorShape(vector<int>{batch_size}, TensorProto::FLOAT);
       return out;
     })
     .SetDoc(R"DOC(
