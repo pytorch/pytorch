@@ -1443,7 +1443,7 @@ def triplet_margin_loss(anchor, positive, negative, margin=1.0, p=2, eps=1e-6, s
     .. math::
         L(a, p, n) = \frac{1}{N} \left( \sum_{i=1}^N \max \{d(a_i, p_i) - d(a_i, n_i) + {\rm margin}, 0\} \right)
 
-    where :math:`d(x_i, y_i) = \| {\bf x}_i - {\bf y}_i \|_2^2`.
+    where :math:`d(x_i, y_i) = \left\lVert {\bf x}_i - {\bf y}_i \right\rVert_p`.
 
     Args:
         anchor: anchor input tensor
