@@ -7,3 +7,4 @@ from .blas import *
 from .stochastic import *
 from .compare import *
 from .initializers import *
+from ..stochastic_function import StochasticFunction
