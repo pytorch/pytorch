@@ -1222,7 +1222,7 @@ See :class:`~torch.nn.SmoothL1Loss` for details.
 """)
 
 l1_loss = _add_docstr(torch._C._nn.l1_loss, r"""
-l1_loss(input, target, size_average=True) -> Variable
+l1_loss(input, target, size_average=True, reduce=True) -> Variable
 
 Function that takes the mean element-wise absolute value difference.
 

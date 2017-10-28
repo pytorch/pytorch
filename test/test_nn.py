@@ -3653,6 +3653,17 @@ new_criterion_tests = [
 ]
 
 
+def l1loss_no_reduce_test():
+    t = Variable(torch.randn(2, 3, 4))
+    return dict(
+        fullname='L1Loss_no_reduce',
+        constructor=wrap_functional(
+            lambda i: F.l1_loss(i, t.type_as(i), reduce=False)),
+        input_fn=lambda: torch.randn(2, 3, 4),
+        reference_fn=lambda i, m: (i - t.data.type_as(i)).abs(),
+        pickle=False)
+
+
 class TestMSELoss(torch.nn.modules.module.Module):
     def __init__(self, target, *args, **kwargs):
         super(TestMSELoss, self).__init__()
@@ -3798,6 +3809,7 @@ def nllloss2d_no_reduce_weights_test():
 
 
 new_module_tests = [
+    l1loss_no_reduce_test(),
     mseloss_no_reduce_test(),
     nllloss_no_reduce_test(),
     nllloss_no_reduce_ignore_index_test(),

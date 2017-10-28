@@ -41,12 +41,18 @@ class L1Loss(_Loss):
         size_average (bool, optional): By default, the losses are averaged
            over observations for each minibatch. However, if the field
            size_average is set to False, the losses are instead summed for
-           each minibatch. Default: True
+           each minibatch. Ignored when reduce is False. Default: True
+        reduce (bool, optional): By default, the losses are averaged or summed
+           for each minibatch. When reduce is False, the loss function returns
+           a loss per batch element instead and ignores size_average.
+           Default: True
 
     Shape:
         - Input: :math:`(N, *)` where `*` means, any number of additional
           dimensions
         - Target: :math:`(N, *)`, same shape as the input
+        - Output: scalar. If reduce is False, then
+          :math:`(N, *)`, same shape as the input
 
     Examples::
 
@@ -56,9 +62,14 @@ class L1Loss(_Loss):
         >>> output = loss(input, target)
         >>> output.backward()
     """
+    def __init__(self, size_average=True, reduce=True):
+        super(L1Loss, self).__init__(size_average)
+        self.reduce = reduce
+
     def forward(self, input, target):
         _assert_no_grad(target)
-        return F.l1_loss(input, target, size_average=self.size_average)
+        return F.l1_loss(input, target, size_average=self.size_average,
+                         reduce=self.reduce)
 
 
 class NLLLoss(_WeightedLoss):

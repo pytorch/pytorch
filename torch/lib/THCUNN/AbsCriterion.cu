@@ -20,17 +20,46 @@ struct abs_functor
 };
 
 template <typename Dtype>
+struct abs_updateOutput_functor
+{
+  __host__ __device__ void operator()(const Dtype* x, const Dtype* y, Dtype *out)
+  {
+    Dtype z = *x - *y;
+    *out = z >= 0 ? z : -z;
+  }
+};
+
+template <typename Dtype>
+struct abs_updateGradInput_no_reduce_functor
+{
+  __host__ __device__ void operator()(const Dtype *x, const Dtype *y, Dtype *gradInput)
+  {
+    *gradInput = ScalarConvert<int, Dtype>::to(*x >= *y ? 1 : -1);
+  }
+};
+
+template <typename Dtype>
+struct multiply_and_store_functor
+{
+  __host__ __device__ void operator()(const Dtype *x, Dtype *y)
+  {
+    *y *= *x;
+  }
+};
+
+template <typename Dtype>
 struct abs_updateGradInput_functor
 {
   const Dtype norm;
+  const Dtype *gradOutput;
 
-  abs_updateGradInput_functor(Dtype norm_)
-    : norm(norm_)
+  abs_updateGradInput_functor(Dtype norm_, Dtype *gradOutput_)
+    : norm(norm_), gradOutput(gradOutput_)
   {}
 
   __host__ __device__ Dtype operator()(const Dtype& x, const Dtype& y) const
   {
-    return (x - y) >= 0 ? norm : -norm;
+    return ((x - y) >= 0 ? norm : -norm) * *gradOutput;
   }
 };
 
