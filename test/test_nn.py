@@ -3939,11 +3939,10 @@ new_module_tests = [
         cudnn=True,
     ),
     dict(
-        module_name='ConvTranspose1d',
-        constructor_args=(3, 4, 3, (3,), 1, (1,)),
+        fullname='ConvTranspose1d',
+        constructor=lambda: nn.ConvTranspose1d(3, 4, kernel_size=3, stride=(3,), padding=1, output_padding=(1,)),
         cudnn=True,
         input_size=(1, 3, 7),
-        check_gradgrad=False,
     ),
     dict(
         module_name='ConvTranspose1d',
@@ -3951,7 +3950,6 @@ new_module_tests = [
         input_size=(1, 3, 6),
         cudnn=True,
         desc='no_bias',
-        check_gradgrad=False,
     ),
     dict(
         module_name='ConvTranspose1d',
@@ -3959,7 +3957,12 @@ new_module_tests = [
         input_size=(1, 3, 6),
         cudnn=True,
         desc='dilated',
-        check_gradgrad=False,
+    ),
+    dict(
+        fullname='ConvTranspose1d_groups',
+        constructor=lambda: nn.ConvTranspose1d(4, 6, 3, stride=(3,), padding=1, output_padding=(1,), groups=2),
+        cudnn=True,
+        input_size=(2, 4, 7),
     ),
     dict(
         module_name='MaxPool1d',
@@ -4025,7 +4028,6 @@ new_module_tests = [
         constructor_args=(3, 4, 3, (3, 2), 1, (1, 1)),
         cudnn=True,
         input_size=(1, 3, 7, 6),
-        check_gradgrad=False,
     ),
     dict(
         module_name='ConvTranspose2d',
@@ -4033,7 +4035,6 @@ new_module_tests = [
         input_size=(1, 3, 6, 7),
         cudnn=True,
         desc='dilated',
-        check_gradgrad=False,
     ),
     dict(
         module_name='ConvTranspose2d',
@@ -4041,14 +4042,12 @@ new_module_tests = [
         input_size=(1, 3, 6, 7),
         cudnn=True,
         desc='no_bias',
-        check_gradgrad=False,
     ),
     dict(
         fullname='ConvTranspose2d_groups',
         constructor=lambda: nn.ConvTranspose2d(2, 4, (2, 3), groups=2),
         input_size=(1, 2, 4, 5),
         cudnn=True,
-        check_gradgrad=False,
     ),
     dict(
         fullname='Conv2d_depthwise',
@@ -4231,7 +4230,6 @@ new_module_tests = [
         constructor_args=(2, 3, (2, 3, 2)),
         cudnn=True,
         input_size=(1, 2, 4, 5, 4),
-        check_gradgrad=False,
     ),
     dict(
         module_name='ConvTranspose3d',
@@ -4239,7 +4237,6 @@ new_module_tests = [
         cudnn=True,
         input_size=(1, 2, 4, 5, 4),
         desc='dilated',
-        check_gradgrad=False,
     ),
     dict(
         module_name='MaxPool3d',
