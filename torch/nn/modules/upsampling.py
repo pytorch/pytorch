@@ -6,8 +6,7 @@ from .. import functional as F
 
 
 class Upsample(Module):
-    """
-    Upsamples a given multi-channel 1D (temporal), 2D (spatial) or 3D (volumetric) data.
+    r"""Upsamples a given multi-channel 1D (temporal), 2D (spatial) or 3D (volumetric) data.
 
     The input data is assumed to be of the form `minibatch x channels x [depth] x [height] x width`.
     Hence, for spatial inputs, we expect a 4D Tensor and for volumetric inputs, we expect a 5D Tensor.
@@ -89,8 +88,7 @@ class Upsample(Module):
 
 
 class UpsamplingNearest2d(Upsample):
-    """
-    Applies a 2D nearest neighbor upsampling to an input signal composed of several input
+    r"""Applies a 2D nearest neighbor upsampling to an input signal composed of several input
     channels.
 
     To specify the scale, it takes either the :attr:`size` or the :attr:`scale_factor`
@@ -137,8 +135,7 @@ class UpsamplingNearest2d(Upsample):
 
 
 class UpsamplingBilinear2d(Upsample):
-    """
-    Applies a 2D bilinear upsampling to an input signal composed of several input
+    r"""Applies a 2D bilinear upsampling to an input signal composed of several input
     channels.
 
     To specify the scale, it takes either the :attr:`size` or the :attr:`scale_factor`

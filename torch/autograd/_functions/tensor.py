@@ -1,5 +1,6 @@
 from functools import reduce
 import torch
+from torch._six import int_classes
 from torch._utils import _accumulate
 
 from ..function import Function, InplaceFunction, once_differentiable, traceable
@@ -19,6 +20,61 @@ def _preprocess_adv_index_seq(index):
 
 
 class Index(Function):
+    @staticmethod
+    def symbolic(g, i, index):
+        # We should only expect index as an integer in this case.
+        # We use "Slice" to get the index-th element in i,
+        # Then we reduce the dimension using "Reshape".
+        if isinstance(index, int_classes):
+            slice_node = g.op("Slice", i,
+                              axes_i=[0],
+                              starts_i=[index],
+                              ends_i=[index + 1])
+            return g.op("Squeeze", slice_node, axes_i=[0])
+        elif isinstance(index, tuple):
+            dims = i.type().sizes()
+            starts_list = []
+            ends_list = []
+            squeeze_indices = []
+
+            # Given an index, size of dimension, a list, and a default fill val,
+            # fill in based on these conditions:
+            # 1) not specified (None) - fill with fillval (e.g. 0 or size)
+            # 2) negative index - calculate corresponding positive index and append
+            # 3) positive index - append to list
+            # 4) integer - keep only that integer and squeeze it at the end
+            def append_index(index, dim, append_list, fillval):
+                if index is None:
+                    append_list.append(fillval)
+                else:
+                    addend = (dim if index < 0 else 0)
+                    append_list.append(index + addend)
+
+            for idx in range(len(index)):
+                if isinstance(index[idx], int_classes):
+                    starts_list.append(index[idx])
+                    ends_list.append(index[idx] + 1)
+                    squeeze_indices.append(idx)
+                    continue
+
+                # Start index
+                append_index(index[idx].start, dims[idx], starts_list, 0)
+                # End index
+                append_index(index[idx].stop, dims[idx], ends_list, dims[idx])
+
+                if index[idx].step is not None:
+                    raise ValueError("Strided slice is not supported at this time")
+
+            slice_node = g.op("Slice", i,
+                              axes_i=list(range(len(index))),
+                              starts_i=starts_list,
+                              ends_i=ends_list)
+            if squeeze_indices:
+                return g.op('Squeeze', slice_node, axes_i=squeeze_indices)
+            else:
+                return slice_node
+        else:
+            raise ValueError('Unsupported index type {}'.format(type(index)))
 
     @staticmethod
     def forward(ctx, i, index):
@@ -513,39 +569,6 @@ class Topk(_MultiSelectionFunction):
         args = (k, ctx.dim, largest, sort)
         ctx.num_flags = 5
         return _MultiSelectionFunction.forward(ctx, input, dim, return_indices, args)
-
-
-@traceable
-class Chunk(Function):
-
-    @staticmethod
-    def symbolic(g, i, num_chunks, dim=0):
-        dim_size = i.type().sizes()[dim]
-        split_size = (dim_size + num_chunks - 1) // num_chunks
-        lengths = []
-        count_chunks = 0
-        while (dim_size > 0):
-            this_split_size = split_size if dim_size >= split_size else dim_size
-            lengths.append(this_split_size)
-            dim_size = dim_size - split_size
-            count_chunks = count_chunks + 1
-        result = []
-        n = g.appendNode(g.create("Split", [i]).is_("split", lengths).i_("axis", dim))
-        for i in range(count_chunks):
-            result.append(g.appendNode(g.createSelect(n, i)))
-        return tuple(result)
-
-    @staticmethod
-    def forward(ctx, i, num_chunks, dim=0):
-        ctx.dim = dim
-        result = i.chunk(num_chunks, dim)
-        ctx.mark_shared_storage(*((i, chunk) for chunk in result))
-        return result
-
-    @staticmethod
-    def backward(ctx, *grad_output):
-        grad_input = torch.cat(grad_output, ctx.dim)
-        return grad_input, None, None
 
 
 class Gather(Function):

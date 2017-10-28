@@ -6,7 +6,7 @@ from .parallel_apply import parallel_apply
 
 
 class DataParallel(Module):
-    """Implements data parallelism at the module level.
+    r"""Implements data parallelism at the module level.
 
     This container parallelizes the application of the given module by
     splitting the input across the specified devices by chunking in the batch
@@ -74,7 +74,7 @@ class DataParallel(Module):
 
 
 def data_parallel(module, inputs, device_ids=None, output_device=None, dim=0, module_kwargs=None):
-    """Evaluates module(input) in parallel across the GPUs given in device_ids.
+    r"""Evaluates module(input) in parallel across the GPUs given in device_ids.
 
     This is the functional version of the DataParallel module.
 

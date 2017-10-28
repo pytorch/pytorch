@@ -49,7 +49,7 @@ def _pin_memory_loop(in_queue, out_queue, done_event):
     while True:
         try:
             r = in_queue.get()
-        except:
+        except Exception:
             if done_event.is_set():
                 return
             raise

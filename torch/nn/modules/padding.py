@@ -39,7 +39,7 @@ class ConstantPad1d(Module):
 
     def __repr__(self):
         return self.__class__.__name__ + '(' \
-               + str(self.padding) + ')'
+            + str(self.padding) + ')'
 
 
 class ConstantPad2d(Module):

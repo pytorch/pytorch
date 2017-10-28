@@ -808,6 +808,11 @@ class TestCuda(TestCase):
             tmp3 = torch.cuda.FloatTensor(t.size())
             self.assertEqual(tmp3.data_ptr(), ptr[0], 'allocation not re-used')
 
+    def test_noncontiguous_pinned_memory(self):
+        # See issue #3266
+        x = torch.arange(0, 10).view((2, 5))
+        self.assertEqual(x.t(), x.t().pin_memory())
+
     def test_caching_pinned_memory(self):
         cycles_per_ms = get_cycles_per_ms()
 

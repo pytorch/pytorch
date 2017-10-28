@@ -33,6 +33,15 @@ inline PyObject* wrap(std::tuple<at::Tensor, at::Tensor, at::Tensor> tensors) {
   return r.release();
 }
 
+inline PyObject* wrap(at::TensorList tl) {
+  auto r = THPObjectPtr{PyTuple_New(tl.size())};
+  if (!r) throw python_error();
+  for (size_t i = 0; i < tl.size(); ++i) {
+    PyTuple_SET_ITEM(r.get(), i, wrap(tl[i]));
+  }
+  return r.release();
+}
+
 inline PyObject* wrap(bool value) {
   if (value) {
     Py_RETURN_TRUE;

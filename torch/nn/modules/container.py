@@ -17,7 +17,7 @@ class Container(Module):
 
 
 class Sequential(Module):
-    """A sequential container.
+    r"""A sequential container.
     Modules will be added to it in the order they are passed in the constructor.
     Alternatively, an ordered dict of modules can also be passed in.
 
@@ -69,7 +69,7 @@ class Sequential(Module):
 
 
 class ModuleList(Module):
-    """Holds submodules in a list.
+    r"""Holds submodules in a list.
 
     ModuleList can be indexed like a regular Python list, but modules it
     contains are properly registered, and will be visible by all Module methods.
@@ -116,7 +116,7 @@ class ModuleList(Module):
         return self.extend(modules)
 
     def append(self, module):
-        """Appends a given module at the end of the list.
+        r"""Appends a given module at the end of the list.
 
         Arguments:
             module (nn.Module): module to append
@@ -125,7 +125,7 @@ class ModuleList(Module):
         return self
 
     def extend(self, modules):
-        """Appends modules from a Python list at the end.
+        r"""Appends modules from a Python list at the end.
 
         Arguments:
             modules (list): list of modules to append
@@ -140,7 +140,7 @@ class ModuleList(Module):
 
 
 class ParameterList(Module):
-    """Holds parameters in a list.
+    r"""Holds parameters in a list.
 
     ParameterList can be indexed like a regular Python list, but parameters it
     contains are properly registered, and will be visible by all Module methods.

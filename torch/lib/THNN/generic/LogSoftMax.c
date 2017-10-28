@@ -47,7 +47,7 @@ void THNN_(LogSoftMax_updateOutput)(
     real *output_data = output_data_base + outer_idx * outer_stride + inner_idx;
 
     real max_input = -THInf;
-    for (d = 1; d < LOG_SOFTMAX_CAST_TYPE dim_size; d++)
+    for (d = 0; d < LOG_SOFTMAX_CAST_TYPE dim_size; d++)
       max_input = THMax(max_input, input_data[d * dim_stride]);
 
     accreal logsum = 0;

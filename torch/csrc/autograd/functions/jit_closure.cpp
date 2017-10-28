@@ -11,6 +11,7 @@
 #include "torch/csrc/autograd/python_engine.h"
 #include "torch/csrc/autograd/python_variable.h"
 #include "torch/csrc/autograd/python_function.h"
+#include "torch/csrc/jit/generated/aten_dispatch.h"
 #ifdef WITH_CUDA
 #include "torch/csrc/jit/fusion_compiler.h"
 #endif
@@ -115,20 +116,28 @@ struct EmitNull : public Function {
   };
 };
 
-// A hack that will let us implement some of the ops we care
-// about before the major Python -> C++ Function migration
 struct LambdaFunction : public Function {
+  LambdaFunction(const jit::TensorOp& op)
+    : LambdaFunction(op.num_inputs, op.op) {
+    this->name_ = op.name;
+  }
+
   LambdaFunction(int num_inputs, std::function<variable_list(const variable_list&)> fn)
-    : fn(fn) {
+    : fn_(fn) {
     this->is_executable = true;
     this->num_inputs = num_inputs;
   }
 
-  virtual variable_list apply(const variable_list& inputs) {
-    return fn(inputs);
+  virtual std::string name() override {
+    return name_.size() == 0 ? "LambdaFunction" : name_;
   }
 
-  std::function<variable_list(const variable_list&)> fn;
+  virtual variable_list apply(const variable_list& inputs) override {
+    return fn_(inputs);
+  }
+
+  std::string name_;
+  std::function<variable_list(const variable_list&)> fn_;
 };
 
 // Wraps a PythonOp and dispatches calls to Functions implemented in Python
@@ -583,7 +592,7 @@ struct StageClosure {
     IR_ELSEIF(Concat)
       return std::make_shared<torch::autograd::Cat>(value->i(kaxis));
     IR_ELSE()
-      throw std::runtime_error(std::string("unrecognized NodeKind: ") + symbolToString(node->kind()));
+      return std::make_shared<LambdaFunction>(getTensorOp(node));
     IR_END()
   }
 
@@ -671,7 +680,7 @@ struct StageClosure {
   // Roots for a call to the engine. The list contains function in this order:
   // [ apply input roots | prev stage input roots | constant factory ]
   function_list roots;
-  std::vector<VariableFlags> var_flags;
+  std::pair<std::vector<VariableFlags>, std::vector<VariableFlags>> var_flags;
 
   // Output node
   std::shared_ptr<Function> output;
@@ -703,15 +712,14 @@ struct MultiStageClosure {
 };
 
 AutogradClosure::AutogradClosure(const std::shared_ptr<MultiStageClosure>& desc)
-  : AutogradClosure(desc, 0, {}) {}
+  : AutogradClosure(desc, 0) {}
 
 // TODO: there's a lot processing involved in creating a new AutogradClosure instance,
 // so it might be worth to keep a pool of unused instances (or at least their attrs)
 // for all stages. We can't save saved_vars and saved_handles, but all callbacks
 // can be made reusable.
-AutogradClosure::AutogradClosure(const std::shared_ptr<MultiStageClosure>& desc, std::size_t stage, FunctionFlags &&f)
-  : Function(std::move(f))
-  , desc(desc)
+AutogradClosure::AutogradClosure(const std::shared_ptr<MultiStageClosure>& desc, std::size_t stage)
+  : desc(desc)
   , stage(stage) {
   auto & stage_desc = desc->stages[stage];
 
@@ -777,10 +785,10 @@ variable_list AutogradClosure::apply(const variable_list& inputs) {
 
   // Validate inputs
   auto num_inputs = inputs.size();
-  if (num_inputs != stage_closure.var_flags.size())
+  if (num_inputs != stage_closure.var_flags.first.size())
     throw std::runtime_error("AutogradClosure received an incorrect number of inputs");
   for (std::size_t i = 0; i < num_inputs; ++i) {
-    auto & flags = stage_closure.var_flags[i];
+    auto & flags = stage_closure.var_flags.first[i];
     if (!flags.verify(inputs[i]))
       throw std::runtime_error("AutogradClosure received inputs with different flags");
   }
@@ -797,16 +805,15 @@ variable_list AutogradClosure::apply(const variable_list& inputs) {
   auto& engine = python::PythonEngine::getDefaultEngine();
   engine.execute(stage_closure.roots, input_leaves, true, pre_callbacks, post_callbacks);
 
-  // See Note [Null-edge pruning]
-  auto relevant_inputs = filter(inputs, [](const Variable& var) { return var.defined() && var.requires_grad(); });
-  auto result = wrap_outputs(relevant_inputs, std::move(outputs), [this](FunctionFlags f) -> std::shared_ptr<Function> {
+  // Create the backward function lazily
+  auto make_grad_fn = [this]() -> std::shared_ptr<Function> {
     if (this->stage == this->desc->stages.size() - 1) {
       std::string msg = "JIT closure compiled only for ";
       msg += std::to_string(this->stage);
       msg += " backwards";
-      return std::make_shared<Error>(std::move(msg), std::move(f));
+      return std::make_shared<Error>(std::move(msg));
     }
-    auto bw_fn = std::shared_ptr<AutogradClosure>(new AutogradClosure(this->desc, this->stage + 1, std::move(f)));
+    auto bw_fn = std::shared_ptr<AutogradClosure>(new AutogradClosure(this->desc, this->stage + 1));
     // TODO: don't make a full copy of saved_* - copy only the things that bw needs
     bw_fn->saved_vars = this->saved_vars;
     bw_fn->saved_vars.insert(std::make_move_iterator(this->captured_vars.begin()),
@@ -824,7 +831,33 @@ variable_list AutogradClosure::apply(const variable_list& inputs) {
     // was run, so it must have been executable).
     bw_fn->is_executable = true;
     return bw_fn;
-  });
+  };
+
+  // See Note [Null-edge pruning]
+  variable_list result;
+  auto num_outputs = outputs.size();
+  std::shared_ptr<Function> grad_fn;
+  JIT_ASSERT(outputs.size() == stage_closure.var_flags.second.size());
+  for (std::size_t i = 0; i < num_outputs; ++i) {
+    auto & flags = stage_closure.var_flags.second[i];
+    if (flags.requires_grad) {
+      if (!grad_fn) grad_fn = make_grad_fn();
+      result.push_back(make_variable(outputs[i], grad_fn));
+    } else {
+      result.push_back(make_variable(outputs[i], flags.requires_grad, flags.is_volatile));
+    }
+  }
+
+  // If we created grad_fn for any of the outputs, we also need to fill in next_functions
+  if (grad_fn) {
+    for (auto & input : inputs) {
+      if (!input.requires_grad()) continue;
+      grad_fn->next_functions.emplace_back(
+        input.grad_fn() ? input.grad_fn() : input.grad_accumulator(),
+        input.output_nr());
+    }
+  }
+
   captured_vars.clear();
   captured_handles.clear();
   outputs.clear();

@@ -7,5 +7,5 @@ def _check_inplace(trace):
     graph = trace.graph()
     for node in graph.nodes():
         if node.kind() == 'PythonOp':
-            if node.i('__inplace'):
+            if node.i('inplace'):
                 raise RuntimeError("inplace {} not supported in the JIT".format(node.pyname()))

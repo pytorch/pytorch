@@ -5,76 +5,33 @@
 #include "../common.h"
 
 void THNN_(SoftMax_updateOutput)(
-           THCState *state,
-           THCTensor *input,
-           THCTensor *output,
-           int _dim)
+          THCState *state,
+          THCTensor *input,
+          THCTensor *output,
+          int dim)
 {
   THCUNN_assertSameGPU(state, 2, input, output);
+  THArgCheck(dim >= 0 && dim < input->nDimension, 4,
+        "dim out of range (got %d, but input has %d dims)", dim, input->nDimension);
+  THArgCheck(TensorUtils<THCTensor>::canUse32BitIndexMath(state, input), 4,
+        "input tensor is too large (unsupported size. file a feature request)");
 
   input = THCTensor_(newContiguous)(state, input);
   THCTensor_(resizeAs)(state, output, input);
-  int64_t batchSize, dim, stride0, stride1 = 1;
-  int64_t blocksY = 1, blocksZ = 1;
 
-  if (input->nDimension == 1)
-  {
-    batchSize = 1;
-    dim = input->size[0];
-    stride0 = 1;
-    THArgCheck(_dim == 0, 4, "dim has to be 0 for 1D input");
-  }
-  else if (input->nDimension == 2)
-  {
-    batchSize = input->size[0];
-    dim = input->size[1];
-    stride0 = 1;
-    THArgCheck(_dim == 1, 4, "dim has to be 1 for 2D input");
-  }
-  else if (input->nDimension == 3)
-  {
-    batchSize = 1;
-    dim = input->size[0];
-    blocksY = input->size[1];
-    blocksZ = input->size[2];
-    stride0 = blocksY * blocksZ;
-    stride1 = blocksZ;
-    THArgCheck(_dim == 0, 4, "dim has to be 0 for 3D input");
-  }
-  else if (input->nDimension == 4)
-  {
-    batchSize = input->size[0];
-    dim = input->size[1];
-    blocksY = input->size[2];
-    blocksZ = input->size[3];
-    stride0 = blocksY * blocksZ;
-    stride1 = blocksZ;
-    THArgCheck(_dim == 1, 4, "dim has to be 1 for 4D input");
-  }
-  else
-  {
-    THError("1D, 2D, 3D or 4D tensor expected");
-  }
+  uint64_t outer_size = 1;
+  uint64_t dim_size = input->size[dim];
+  uint64_t inner_size = 1;
+  for (uint64_t i = 0; i < dim; ++i)
+    outer_size *= input->size[i];
+  for (uint64_t i = dim + 1; i < input->nDimension; ++i)
+    inner_size *= input->size[i];
 
-  // when possible use only 2d grid of thread blocks to stay compatible with compute capability 2.X devices.
-  if (blocksY * blocksZ < 65536)
-  {
-    blocksY *= blocksZ;
-    blocksZ = 1;
-    if (input->nDimension == 3 || input->nDimension == 4) {
-      stride0 = blocksY * blocksZ;
-      stride1 = blocksZ;
-    }
-  }
-
-  dim3 blocks(batchSize, blocksY, blocksZ);
-  dim3 threads(SOFTMAX_THREADS);
-  cunn_SoftMax_updateOutput_kernel<real, accreal><<<blocks, threads, 0, THCState_getCurrentStream(state)>>>(
-    THCTensor_(data)(state, output),
-    THCTensor_(data)(state, input),
-    batchSize, dim, stride0, stride1
-  );
-  THCudaCheck(cudaGetLastError());
+  HostSoftMaxForward<real, accreal, SoftMaxForwardEpilogue>(
+      state,
+      THCTensor_(data)(state, input), THCTensor_(data)(state, output),
+      outer_size, dim_size, inner_size,
+      dim);
 
   THCTensor_(free)(state, input);
 }
@@ -85,77 +42,40 @@ void THNN_(SoftMax_updateGradInput)(
            THCTensor *gradOutput,
            THCTensor *gradInput,
            THCTensor *output,
-           int _dim)
+           int dim)
 {
+  THArgCheck(dim >= 0 && dim < output->nDimension, 6,
+             "dim out of range (got %d, but input has %d dims)", dim, output->nDimension);
+        THArgCheck(TensorUtils<THCTensor>::canUse32BitIndexMath(state, output), 6,
+             "input tensor is too large (unsupported size. file a feature request)");
   THCUNN_check_nElement(state, output, gradOutput);
   THCUNN_assertSameGPU(state, 3, output, gradOutput, gradInput);
 
-  output = THCTensor_(newContiguous)(state, output);
-  gradOutput = THCTensor_(newContiguous)(state, gradOutput);
-
   THCTensor_(resizeAs)(state, gradInput, output);
-  int64_t batchSize, dim, stride0, stride1 = 1;
-  int64_t blocksY = 1, blocksZ = 1;
 
-  if (gradInput->nDimension == 1)
+  uint64_t outer_size = 1;
+  uint64_t dim_size = output->size[dim];
+  uint64_t inner_size = 1;
+  for (uint64_t i = 0; i < dim; ++i)
+    outer_size *= output->size[i];
+  for (uint64_t i = dim + 1; i < output->nDimension; ++i)
+    inner_size *= output->size[i];
+
+  output = THCTensor_(newContiguous)(state, output);
+  // SoftMaxBackward kernels only sum gradOutput, but softmax needs a gradOutput * output sum
   {
-    batchSize = 1;
-    dim = gradInput->size[0];
-    stride0 = 1;
-    THArgCheck(_dim == 0, 6, "dim has to be 0 for 1D input");
-  }
-  else if (gradInput->nDimension == 2)
-  {
-    batchSize = gradInput->size[0];
-    dim = gradInput->size[1];
-    stride0 = 1;
-    THArgCheck(_dim == 1, 6, "dim has to be 0 for 2D input");
-  }
-  else if (gradInput->nDimension == 3)
-  {
-    batchSize = 1;
-    dim = gradInput->size[0];
-    blocksY = gradInput->size[1];
-    blocksZ = gradInput->size[2];
-    stride0 = blocksY * blocksZ;
-    stride1 = blocksZ;
-    THArgCheck(_dim == 0, 6, "dim has to be 0 for 3D input");
-  }
-  else if (gradInput->nDimension == 4)
-  {
-    batchSize = gradInput->size[0];
-    dim = gradInput->size[1];
-    blocksY = gradInput->size[2];
-    blocksZ = gradInput->size[3];
-    stride0 = blocksY * blocksZ;
-    stride1 = blocksZ;
-    THArgCheck(_dim == 1, 6, "dim has to be 0 for 4D input");
-  }
-  else
-  {
-    THError("1D, 2D, 3D or 4D tensor expected");
+    THCTensor *tmp = THCTensor_(new)(state);
+    THCTensor_(cmul)(state, tmp, gradOutput, output);
+    gradOutput = tmp;
   }
 
-  // when possible use only 2d grid of thread blocks to stay compatible with compute capability 2.X devices.
-  if (blocksY * blocksZ < 65536)
-  {
-    blocksY *= blocksZ;
-    blocksZ = 1;
-    if (output->nDimension == 3 || output->nDimension == 4) {
-      stride0 = blocksY * blocksZ;
-      stride1 = blocksZ;
-    }
-  }
-
-  dim3 blocks(batchSize, blocksY, blocksZ);
-  dim3 threads(SOFTMAX_THREADS);
-  cunn_SoftMax_updateGradInput_kernel<real, accreal><<<blocks, threads, 0, THCState_getCurrentStream(state)>>>(
-    THCTensor_(data)(state, gradInput),
-    THCTensor_(data)(state, output),
-    THCTensor_(data)(state, gradOutput),
-    batchSize, dim, stride0, stride1
-  );
-  THCudaCheck(cudaGetLastError());
+  HostSoftMaxBackward<real, accreal, SoftMaxBackwardEpilogue>(
+      state,
+      THCTensor_(data)(state, gradOutput),
+      THCTensor_(data)(state, gradInput),
+      THCTensor_(data)(state, output),
+      outer_size, dim_size, inner_size,
+      dim);
 
   THCTensor_(free)(state, gradOutput);
   THCTensor_(free)(state, output);

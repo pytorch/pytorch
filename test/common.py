@@ -116,7 +116,7 @@ def is_iterable(obj):
     try:
         iter(obj)
         return True
-    except:
+    except TypeError:
         return False
 
 
@@ -210,7 +210,7 @@ class TestCase(unittest.TestCase):
             try:
                 self.assertLessEqual(abs(x - y), prec, message)
                 return
-            except:
+            except (TypeError, AssertionError):
                 pass
             super(TestCase, self).assertEqual(x, y, message)
 
@@ -242,7 +242,7 @@ class TestCase(unittest.TestCase):
             try:
                 self.assertGreaterEqual(abs(x - y), prec, message)
                 return
-            except:
+            except (TypeError, AssertionError):
                 pass
             super(TestCase, self).assertNotEqual(x, y, message)
 

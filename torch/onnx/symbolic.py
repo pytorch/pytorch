@@ -108,7 +108,14 @@ def div(g, self, other):
     return g.op("Div", self, _if_scalar_type_as(other, self), **_broadcast_if_scalar(other))
 
 
-# TODO: untested
+def mm(g, self, other):
+    # Create a dummy C tensor. Only needed for API purposes, the value is
+    # since beta = 0
+    ty = self.type().scalarType().lower()
+    C = g.constant(0, [1], ty)
+    return g.op("Gemm", self, other, C, beta_f=0.0, alpha_f=1.0, broadcast_i=True)
+
+
 def addmm(g, self, mat1, mat2, beta, alpha):
     return g.op("Gemm", mat1, mat2, self, beta_f=_scalar(beta), alpha_f=_scalar(alpha))
 
@@ -145,6 +152,15 @@ def transpose(g, self, dim0, dim1):
 
 def view(g, self, size):
     return g.op("Reshape", self, shape_i=size)
+
+
+def split(g, self, split_size, dim):
+    size = self.type().sizes()[dim]
+    splits = [split_size] * (size // split_size)
+    leftover = size % split_size
+    if leftover:
+        splits.append(leftover)
+    return g.op("Split", self, split_i=splits, axis_i=dim, outputs=len(splits))
 
 
 def squeeze(g, self, dim=None):
@@ -217,3 +233,7 @@ def avg_pool2d(g, input, kernel_size, stride, padding, ceil_mode, count_include_
 
 def log_softmax(g, input, dim=None):
     return g.op("Log", g.op('Softmax', input, axis_i=dim).setTypeAs(input))
+
+
+def unfold(g, input, dimension, size, step):
+    return g.op("ATen", input, operator_s="unfold", dimension_i=dimension, size_i=size, step_i=step)
