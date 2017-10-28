@@ -639,6 +639,7 @@ auto ConvBackwardBackward::apply(const variable_list& grad_grad_inputs) -> varia
     for (size_t i = 2; i < gW_size.size(); ++i) {
       if (gW_size[i] > w_size[i]) {
           gW = apply_fn<Narrow>(i, 0, w_size[i])(gW);
+          gW_size = gW.sizes();
       }
     }
   }
@@ -665,6 +666,7 @@ auto ConvBackwardBackward::apply(const variable_list& grad_grad_inputs) -> varia
       for (size_t i = 2; i < gI_size.size(); ++i) {
         if (gI_size[i] > i_size[i]) {
           gI = apply_fn<Narrow>(i, 0, i_size[i])(gI);
+          gI_size = gI.sizes();
         }
       }
     } else {
@@ -725,7 +727,6 @@ auto ConvBackwardBackward::apply(const variable_list& grad_grad_inputs) -> varia
       gI = apply_fn<Transpose>(0, 1)(gIt);
     }
   }
-
   return {ggO, gI, gW};
 }
 

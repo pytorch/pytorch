@@ -3897,7 +3897,6 @@ new_module_tests = [
         input_size=(2, 4, 10),
         cudnn=True,
         desc='stride',
-        check_gradgrad=False,
     ),
     dict(
         module_name='Conv1d',
@@ -3987,7 +3986,6 @@ new_module_tests = [
         input_size=(2, 3, 6, 6),
         cudnn=True,
         desc='strided',
-        check_gradgrad=False
     ),
     dict(
         module_name='Conv2d',
@@ -3995,7 +3993,6 @@ new_module_tests = [
         input_size=(2, 3, 6, 6),
         cudnn=True,
         desc='padding',
-        check_gradgrad=False
     ),
     dict(
         module_name='Conv2d',
@@ -4003,7 +4000,6 @@ new_module_tests = [
         input_size=(2, 3, 8, 8),
         cudnn=True,
         desc='dilated',
-        check_gradgrad=False,
     ),
     dict(
         module_name='Conv2d',
@@ -4186,7 +4182,6 @@ new_module_tests = [
         constructor_args=(3, 4, (2, 3, 4)),
         input_size=(2, 3, 3, 4, 5),
         cudnn=True,
-        check_gradgrad=False,
     ),
     dict(
         module_name='Conv3d',
@@ -4194,7 +4189,6 @@ new_module_tests = [
         input_size=(2, 3, 3, 4, 5),
         cudnn=True,
         desc='no_bias',
-        check_gradgrad=False,
     ),
     dict(
         module_name='Conv3d',
@@ -4202,7 +4196,6 @@ new_module_tests = [
         input_size=(2, 3, 5, 5, 5),
         cudnn=True,
         desc='stride',
-        check_gradgrad=False,
     ),
     dict(
         module_name='Conv3d',
@@ -4210,20 +4203,22 @@ new_module_tests = [
         input_size=(2, 3, 5, 5, 5),
         cudnn=True,
         desc='stride_padding',
-        check_gradgrad=False,
     ),
     dict(
         fullname='Conv3d_groups',
         constructor=lambda: nn.Conv3d(4, 6, kernel_size=3, groups=2),
         input_size=(2, 4, 4, 5, 4),
         cudnn=True,
-        check_gradgrad=False,
     ),
     dict(
         fullname='Conv3d_dilated',
         constructor=lambda: nn.Conv3d(3, 4, kernel_size=2, dilation=2),
         input_size=(2, 3, 5, 5, 5),
-        check_gradgrad=False
+    ),
+    dict(
+        fullname='Conv3d_dilated_strided',
+        constructor=lambda: nn.Conv3d(3, 4, kernel_size=2, dilation=2, stride=2),
+        input_size=(2, 3, 5, 5, 5),
     ),
     dict(
         module_name='ConvTranspose3d',
