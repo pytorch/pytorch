@@ -62,6 +62,16 @@ class TestConcatDataset(TestCase):
             # this one goes to 11
             result[11]
 
+    def test_add_dataset(self):
+        d1 = TensorDataset(torch.rand(7, 3, 28, 28), torch.rand(7))
+        d2 = TensorDataset(torch.rand(7, 3, 28, 28), torch.rand(7))
+        d3 = TensorDataset(torch.rand(7, 3, 28, 28), torch.rand(7))
+        result = d1 + d2 + d3
+        self.assertEqual(21, len(result))
+        self.assertEqual(0, (d1[0][0] - result[0][0]).abs().sum())
+        self.assertEqual(0, (d2[0][0] - result[7][0]).abs().sum())
+        self.assertEqual(0, (d3[0][0] - result[14][0]).abs().sum())
+
 
 class ErrorDataset(Dataset):
 
