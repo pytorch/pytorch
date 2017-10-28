@@ -56,8 +56,8 @@ class Linear(Module):
 
     def __repr__(self):
         return self.__class__.__name__ + '(' \
-           + 'in_features=' + str(self.in_features) \
-           + ', out_features=' + str(self.out_features) + ')'
+            + 'in_features=' + str(self.in_features) \
+            + ', out_features=' + str(self.out_features) + ')'
 
 
 class Bilinear(Module):
