@@ -60,7 +60,7 @@ class DataParallel(Module):
 
     def forward(self, *inputs, **kwargs):
 
-        if not torch.cuda.is_available():
+        if not self.device_ids:
             return self.module(*inputs, **kwargs)
 
         inputs, kwargs = self.scatter(inputs, kwargs, self.device_ids)
