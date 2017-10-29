@@ -41,29 +41,33 @@ class DataParallel(Module):
 
     def __init__(self, module, device_ids=None, output_device=None, dim=0):
         super(DataParallel, self).__init__()
-        if torch.cuda.is_available() and device_ids is None:
+
+        self.module = module
+
+        if not torch.cuda.is_available():
+            return
+
+        if device_ids is None:
             device_ids = list(range(torch.cuda.device_count()))
-        if torch.cuda.is_available() and output_device is None:
+        if output_device is None:
             output_device = device_ids[0]
         self.dim = dim
-        self.module = module
         self.device_ids = device_ids
         self.output_device = output_device
-        if torch.cuda.is_available() and len(self.device_ids) == 1:
+        if len(self.device_ids) == 1:
             self.module.cuda(device_ids[0])
 
     def forward(self, *inputs, **kwargs):
 
-        if torch.cuda.is_available():
-
-            inputs, kwargs = self.scatter(inputs, kwargs, self.device_ids)
-            if len(self.device_ids) == 1:
-                return self.module(*inputs[0], **kwargs[0])
-            replicas = self.replicate(self.module, self.device_ids[:len(inputs)])
-            outputs = self.parallel_apply(replicas, inputs, kwargs)
-            return self.gather(outputs, self.output_device)
-        else:
+        if not torch.cuda.is_available():
             return self.module(*inputs, **kwargs)
+
+        inputs, kwargs = self.scatter(inputs, kwargs, self.device_ids)
+        if len(self.device_ids) == 1:
+            return self.module(*inputs[0], **kwargs[0])
+        replicas = self.replicate(self.module, self.device_ids[:len(inputs)])
+        outputs = self.parallel_apply(replicas, inputs, kwargs)
+        return self.gather(outputs, self.output_device)
 
     def replicate(self, module, device_ids):
         return replicate(module, device_ids)
