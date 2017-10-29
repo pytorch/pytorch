@@ -41,6 +41,12 @@ class DataParallel(Module):
 
     def __init__(self, module, device_ids=None, output_device=None, dim=0):
         super(DataParallel, self).__init__()
+
+        if not torch.cuda.is_available():
+            self.module = module
+            self.device_ids = []
+            return
+
         if device_ids is None:
             device_ids = list(range(torch.cuda.device_count()))
         if output_device is None:
@@ -53,6 +59,8 @@ class DataParallel(Module):
             self.module.cuda(device_ids[0])
 
     def forward(self, *inputs, **kwargs):
+        if not self.device_ids:
+            return self.module(*inputs, **kwargs)
         inputs, kwargs = self.scatter(inputs, kwargs, self.device_ids)
         if len(self.device_ids) == 1:
             return self.module(*inputs[0], **kwargs[0])
