@@ -4576,6 +4576,29 @@ class TestTorch(TestCase):
         id_after = id(t)
         self.assertEqual(id_before, id_after)
 
+    def test_simple_scalar_cast(self):
+        ok = [torch.Tensor([1.5]), torch.zeros(1, 1, 1, 1)]
+        ok_values = [1.5, 0]
+
+        not_ok = map(torch.Tensor, [[], [1, 2], [[1, 2], [3, 4]]])
+
+        for tensor, value in zip(ok, ok_values):
+            self.assertEqual(int(tensor), int(value))
+            self.assertEqual(float(tensor), float(value))
+            if sys.version_info[0] < 3:
+                self.assertEqual(long(tensor), long(value))
+
+        for tensor in not_ok:
+            self.assertRaises(TypeError, lambda: int(tensor))
+            self.assertRaises(TypeError, lambda: float(tensor))
+            if sys.version_info[0] < 3:
+                self.assertRaises(TypeError, lambda: long(tensor))
+
+    def test_offset_scalar_cast(self):
+        x = torch.Tensor([1, 2, 3])
+        y = x[2:]
+        self.assertEqual(int(y), 3)
+
 # Functions to test negative dimension wrapping
 METHOD = 1
 INPLACE_METHOD = 2
