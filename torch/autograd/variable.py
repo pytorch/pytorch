@@ -126,6 +126,15 @@ class Variable(_C._VariableBase):
 
     __nonzero__ = __bool__
 
+    def __int__(self):
+        return int(self.data)
+
+    def __long__(self):
+        return long(self.data)
+
+    def __float__(self):
+        return float(self.data)
+
     def backward(self, gradient=None, retain_graph=None, create_graph=None, retain_variables=None):
         """Computes the gradient of current variable w.r.t. graph leaves.
 
