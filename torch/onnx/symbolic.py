@@ -108,6 +108,10 @@ def div(g, self, other):
     return g.op("Div", self, _if_scalar_type_as(other, self), **_broadcast_if_scalar(other))
 
 
+def bmm(g, self, other):
+    return g.op("BatchMatMul", self, other)
+
+
 def mm(g, self, other):
     # Create a dummy C tensor. Only needed for API purposes, the value is
     # since beta = 0
