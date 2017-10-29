@@ -45,6 +45,7 @@ class DataParallel(Module):
         self.module = module
 
         if not torch.cuda.is_available():
+            self.device_ids = []
             return
 
         if device_ids is None:
