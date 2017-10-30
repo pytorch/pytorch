@@ -34,11 +34,12 @@ std::string getPythonName(const PyObject* obj, bool is_legacy) {
     return THPUtils_unpackString(name.get());
   }
 }
-void printNodeRef(std::ostream & out, Node * n) {
+void printNodeRef(std::ostream & out, const Node * n) {
   out << "%" << n->uniqueName();
 }
 
-std::ostream& operator<<(std::ostream & out, const node_list & nodes) {
+template <typename T>
+std::ostream& operator<<(std::ostream & out, const std::vector<T> & nodes) {
   size_t i = 0;
   for(auto n : nodes) {
     if(i++ > 0)
@@ -48,8 +49,9 @@ std::ostream& operator<<(std::ostream & out, const node_list & nodes) {
   return out;
 }
 
-static std::ostream& operator<<(std::ostream & out, THPObjectPtr& obj) {
-  auto pyobj = py::handle(obj.get());
+std::ostream& printPyObject(std::ostream & out, const THPObjectPtr& obj) {
+  AutoGIL gil;
+  auto pyobj = py::handle(const_cast<PyObject*>(obj.get()));
   if (py::isinstance<py::tuple>(pyobj)) {
     // This special-case for printing tuples handles a problem where
     // str((2L, 3L)) outputs "(2L, 3L)" in Python 2 but "(2, 3)"
@@ -82,20 +84,19 @@ static std::ostream& operator<<(std::ostream & out, THPObjectPtr& obj) {
     out << ")";
     return out;
   } else {
-    THPObjectPtr str { PyObject_Str(obj.get()) };
-    return out << THPUtils_unpackString(str.get());
+    return out << THPUtils_unpackString(py::str(pyobj).ptr());
   }
 }
 
-std::string PythonOp::name() {
+std::string PythonOp::name() const {
   return getPythonName(pyobj.get(),is_legacy);
 }
 
-std::string CppOp::name() {
+std::string CppOp::name() const {
   return fn->name();
 }
 
-static void emitUses(std::ostream & out, Node * n) {
+static void emitUses(std::ostream & out, const Node * n) {
   size_t i = 0;
   for(auto u : n->uses()) {
     if(i++ > 0)
@@ -105,13 +106,13 @@ static void emitUses(std::ostream & out, Node * n) {
   }
 }
 
-struct node_list_with_types {
-  const node_list& nodes;
+struct const_node_list_with_types {
+  const std::vector<const Node*>& nodes;
   bool use_newlines;
-  node_list_with_types(const node_list& nodes, bool use_newlines = false)
+  const_node_list_with_types(const std::vector<const Node*>& nodes, bool use_newlines = false)
     : nodes(nodes), use_newlines(use_newlines) {}
 };
-std::ostream& operator<<(std::ostream & out, node_list_with_types l) {
+std::ostream& operator<<(std::ostream & out, const_node_list_with_types l) {
   size_t i = 0;
   size_t prev_stage = 0;
   for(auto n : l.nodes) {
@@ -147,7 +148,7 @@ void printPrimList(std::ostream & out, const std::vector<T> & items) {
   }
   out << "]";
 }
-void printAttributes(std::ostream & out, Node * n) {
+void printAttributes(std::ostream & out, const Node * n) {
   out << "[";
   auto names = n->attributeNames();
   int i = 0;
@@ -214,18 +215,18 @@ void printAttributes(std::ostream & out, Node * n) {
   out << "]";
 }
 
-std::ostream& printNode(std::ostream & out, Node * n, std::vector<Node*> * groups) {
-  node_list outputs = n->outputs();
-  out << node_list_with_types(outputs);
+std::ostream& printNode(std::ostream & out, const Node * n, std::vector<const Node*> * groups) {
+  auto outputs = n->outputs();
+  out << const_node_list_with_types(outputs);
   out << " = ";
-  IR_IFM(n,PythonOp)
+  IR_IFM_CONST(n,PythonOp)
     out << "^" << value->name();
     out << "(";
     int i = 0;
     for (auto& scalar : value->scalar_args) {
       if (i++ > 0)
         out << ", ";
-      out << scalar;
+      printPyObject(out, scalar);
     }
     out << ")";
   IR_ELSEIF(FusionGroup)
@@ -235,7 +236,7 @@ std::ostream& printNode(std::ostream & out, Node * n, std::vector<Node*> * group
     } else {
       out << "fusion_group[" << *n->g(kSubgraph) << "]";
     }
-  IR_ELSEIFM(CppOp)
+  IR_ELSEIFM_CONST(CppOp)
     out << "CppOp[" << value->name() << "]";
   IR_ELSE()
     out << symbolToString(n->kind());
@@ -260,13 +261,13 @@ std::ostream& printNode(std::ostream & out, Node * n, std::vector<Node*> * group
   return out;
 }
 
-std::ostream& operator<<(std::ostream & out, Node & n) {
+std::ostream& operator<<(std::ostream & out, const Node & n) {
   return printNode(out, &n, nullptr);
 }
 
-std::ostream& operator<<(std::ostream & out, Graph & g) {
-  out << "graph(" << node_list_with_types(g.inputs(), true) << ") {\n";
-  std::vector<Node*> groups;
+std::ostream& operator<<(std::ostream & out, const Graph & g) {
+  out << "graph(" << const_node_list_with_types(g.inputs(), true) << ") {\n";
+  std::vector<const Node*> groups;
   size_t prev_stage = 0;
   for(auto n : g.nodes()) {
     if(n->kind() != kSelect) { //improve readibility by printing selects inline
@@ -490,14 +491,14 @@ void Graph::lint() const {
   JIT_ASSERT(std::includes(ALL_OF(sum_set), ALL_OF(all_nodes_set)));
 
   // graph->stage() should be equal to max(node.stage for node in graph->nodes())
-  if (nodes().begin() == nodes().end()) {
+  if (begin() == end()) {
     JIT_ASSERT(stage() == 0);
   } else {
-    JIT_ASSERT(stage() == nodes().rbegin()->stage());
+    JIT_ASSERT(stage() == rbegin()->stage());
   }
 }
 
-void Graph::dump() {
+void Graph::dump() const {
   std::cout << *this << "\n";
 }
 

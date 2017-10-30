@@ -501,7 +501,7 @@ struct StageClosure {
 
         // All Eval nodes take context edges as an input, and we need to register
         // all such places
-        auto & inputs = value->inputs();
+        auto inputs = value->inputs();
         JIT_ASSERT(inputs.size() > 0);
         auto handle_input = inputs[inputs.size() - 1];
         JIT_ASSERT(handle_input->type()->kind() == TypeKind::HandleType);
