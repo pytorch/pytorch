@@ -650,15 +650,27 @@ class TestSparse(TestCase):
         v = self.ValueTensor([5]).cuda(0)
         self.assertRaises(RuntimeError, lambda: self.SparseTensor(i, v, torch.Size([3])))
 
+    def _test_new_device(self, size, device):
+        with torch.cuda.device(device):
+            x = torch.cuda.sparse.DoubleTensor(*size)
+        self.assertEqual(x.get_device(), device)
+        x1 = x.new()
+        x2 = x.new(2, 3)
+        self.assertEqual(x1.get_device(), device)
+        self.assertEqual(x2.get_device(), device)
+
+    @cuda_only
+    def test_new_device_single_gpu(self):
+        self._test_new_device((), 0)
+        self._test_new_device((30, 20), 0)
+        self._test_new_device((30, 20, 10), 0)
+
     @cuda_only
     @unittest.skipIf(torch.cuda.device_count() < 2, "only one GPU detected")
-    def test_new_device(self):
-        with torch.cuda.device(1):
-            x = torch.cuda.sparse.DoubleTensor(30, 2)
-        self.assertEqual(x.get_device(), 1)
-
-        y = x.new(2, 3)
-        self.assertEqual(y.get_device(), 1)
+    def test_new_device_multi_gpu(self):
+        self._test_new_device((), 1)
+        self._test_new_device((30, 20), 1)
+        self._test_new_device((30, 20, 10), 1)
 
 
 class TestUncoalescedSparse(TestSparse):
