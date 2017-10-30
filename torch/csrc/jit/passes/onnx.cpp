@@ -11,7 +11,8 @@ namespace torch { namespace jit {
 namespace {
 
 bool hasHandleOutput(Node *node) {
-  JIT_ASSERT(node->hasMultipleOutputs());
+  if(!node->hasMultipleOutputs())
+    return false;
   Node * last_output = node->outputs().back();
   return last_output->typeOption() && last_output->typeOption()->kind() == TypeKind::HandleType;
 }
