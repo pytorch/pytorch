@@ -15,6 +15,7 @@ _(Param) \
 _(Select) \
 _(Return) \
 _(Eval) \
+_(add) \
 _(Add) \
 _(Div) \
 _(Mul) \
@@ -23,15 +24,17 @@ _(Sub) \
 _(Pow) \
 _(Sigmoid) \
 _(Tanh) \
+_(mul) \
+_(neg) \
+_(sigmoid) \
+_(tanh) \
 _(Constant) \
 _(Concat) \
 _(Slice) \
 _(Squeeze) \
 _(Undefined) \
 _(FusionGroup) \
-_(Split) \
 _(Gemm) \
-_(AddConstant) \
 _(SubConstant) \
 _(Scale) \
 _(Transpose) \

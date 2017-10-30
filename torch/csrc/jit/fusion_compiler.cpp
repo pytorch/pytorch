@@ -131,13 +131,17 @@ std::string nodeName(Node * n) {
 
 // TODO: we need to support double-precision
 std::unordered_map<NodeKind,std::function<std::string(Node*)>> simple_map_ops = {
-  {kSigmoid,         [](Node*) { return "1.f / (1.f + expf(-${0}))"; }},
-  {kTanh,            [](Node*) { return "tanhf(${0})"; }},
-  {kMul,             [](Node*) { return "${0} * ${1}"; }},
-  {kAdd,             [](Node*) { return "${0} + ${1}"; }},
-  {kNeg,             [](Node*) { return "(-${0})"; }},
-  // TODO: support both float and int constants
-  {kAddConstant,     [](Node* n) { return std::to_string(n->f(kvalue)) + " + ${0}"; }},
+  {ksigmoid,         [](Node*) { return "1.f / (1.f + expf(-${0}))"; }},
+  {ktanh,            [](Node*) { return "tanhf(${0})"; }},
+  {kmul,             [](Node*) { return "${0} * ${1}"; }},
+  {kadd,             [](Node*n) -> std::string {
+    if(n->inputs().size() == 2)
+      return "${0} + ${1}";
+    else // TODO: support both float and int constants
+      return "${0} + " + std::to_string(n->f(kvalue));
+  }},
+  {kneg,             [](Node*) { return "(-${0})"; }},
+
 };
 
 const char * scalarTypeName(at::ScalarType type) {
@@ -253,10 +257,9 @@ CompiledFusionFunction::CompiledFusionFunction(const std::string & name, Annotat
 
   std::stringstream cu;
   concat_desc = codegen::emitCompilationUnit(cu, name, agraph);
-  compliation_unit = cu.str();
-
+  compilation_unit = cu.str();
   nvrtcProgram program;
-  JIT_NVRTC_CHECK(nvrtcCreateProgram(&program, compliation_unit.c_str(), NULL, 0, nullptr, nullptr));
+  JIT_NVRTC_CHECK(nvrtcCreateProgram(&program, compilation_unit.c_str(), NULL, 0, nullptr, nullptr));
 
   std::string compute = "--gpu-architecture=compute_" + std::to_string(prop.major) + std::to_string(prop.minor);
   std::vector<const char *> args = {"--std=c++11", compute.c_str()};

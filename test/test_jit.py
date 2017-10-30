@@ -47,7 +47,6 @@ class TestJit(TestCase):
         torch._C._jit_pass_lint(trace)
         self.assertExpected(str(trace))
 
-    @unittest.skip("Fuser is broken")
     @unittest.skipIf(not torch.cuda.is_available(), "fuser requires CUDA")
     def test_lstm_fusion(self):
         input = Variable(torch.randn(3, 10).cuda())
@@ -61,7 +60,6 @@ class TestJit(TestCase):
         torch._C._jit_pass_lint(trace)
         self.assertExpected(str(trace))
 
-    @unittest.skip("Fuser is broken")
     @unittest.skipIf(not torch.cuda.is_available(), "fuser requires CUDA")
     def test_run_lstm_fusion(self):
         input = Variable(torch.randn(3, 10).cuda())
@@ -75,7 +73,6 @@ class TestJit(TestCase):
         z2 = CompiledLSTMCell(input, (hx, cx), *module.parameters(), _assert_compiled=True)
         self.assertEqual(z, z2)
 
-    @unittest.skip("Fuser is broken")
     @unittest.skipIf(not torch.cuda.is_available(), "fuser requires CUDA")
     def test_fusion_distribute(self):
         def f(x, y):
