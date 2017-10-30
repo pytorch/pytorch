@@ -47,26 +47,33 @@ class BatchMatMulOp final : public Operator<Context> {
     const auto& B = Input(1);
     auto* Y = Output(0);
 
-    CAFFE_ENFORCE_EQ(A.ndim(), 3);
-    CAFFE_ENFORCE_EQ(B.ndim(), 3);
-    CAFFE_ENFORCE_EQ(A.dim32(0), B.dim32(0));
+    CAFFE_ENFORCE_EQ(A.ndim(), B.ndim());
+    auto ndim = A.ndim();
+    CAFFE_ENFORCE_GE(ndim, 2);
+    for (int axis = 0; axis < (ndim - 2); ++axis) {
+      CAFFE_ENFORCE_EQ(
+          A.dim32(axis),
+          B.dim32(axis),
+          "Every axis of A and B should match except for the last two. Axis No",
+          axis);
+    }
 
     int a_dim0, a_dim1, b_dim0, b_dim1;
 
     if (trans_a_) {
-      a_dim0 = A.dim32(2);
-      a_dim1 = A.dim32(1);
+      a_dim0 = A.dim32(ndim - 1);
+      a_dim1 = A.dim32(ndim - 2);
     } else {
-      a_dim0 = A.dim32(1);
-      a_dim1 = A.dim32(2);
+      a_dim0 = A.dim32(ndim - 2);
+      a_dim1 = A.dim32(ndim - 1);
     }
 
     if (trans_b_) {
-      b_dim0 = B.dim32(2);
-      b_dim1 = B.dim32(1);
+      b_dim0 = B.dim32(ndim - 1);
+      b_dim1 = B.dim32(ndim - 2);
     } else {
-      b_dim0 = B.dim32(1);
-      b_dim1 = B.dim32(2);
+      b_dim0 = B.dim32(ndim - 2);
+      b_dim1 = B.dim32(ndim - 1);
     }
 
     // Error checking
@@ -82,9 +89,13 @@ class BatchMatMulOp final : public Operator<Context> {
         " ",
         b_dim1);
 
-    Y->Resize(A.dim(0), a_dim0, b_dim1);
+    auto y_dims = A.dims();
+    y_dims[ndim - 2] = a_dim0;
+    y_dims[ndim - 1] = b_dim1;
+    Y->Resize(y_dims);
 
-    if (!A.dim(0)) {
+    const auto batches = A.size_to_dim(ndim - 2);
+    if (!batches) {
       Y->template mutable_data<T>(); // create output tensor
       return true;
     }
@@ -94,9 +105,9 @@ class BatchMatMulOp final : public Operator<Context> {
         trans_a_ ? CblasTrans : CblasNoTrans,
         trans_b_ ? CblasTrans : CblasNoTrans,
         A.size(),
-        A.dim32(0),
+        batches,
         B.size(),
-        B.dim32(0),
+        batches,
         a_dim0, // M
         b_dim1, // N
         a_dim1, // K
