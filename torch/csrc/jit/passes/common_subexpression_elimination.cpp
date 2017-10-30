@@ -98,9 +98,12 @@ struct EqualNodeCSE {
     if (lhs->stage() != rhs->stage()) return false;
 
     // Check whether the inputs are the same.
-    if (lhs->inputs().size() != rhs->inputs().size()) return false;
+    auto lhs_inputs = lhs->inputs();
+    auto rhs_inputs = rhs->inputs();
 
-    if (!std::equal(lhs->inputs().begin(), lhs->inputs().end(), rhs->inputs().begin())) return false;
+    if (lhs_inputs.size() != rhs_inputs.size()) return false;
+
+    if (!std::equal(lhs_inputs.begin(), lhs_inputs.end(), rhs_inputs.begin())) return false;
 
     // Check the attributes.
     if (!attributesEqualCSE(lhs, rhs)) return false;
@@ -114,9 +117,8 @@ struct EqualNodeCSE {
 // The function implements common subexpression elimination.
 // Since the nodes are visited in topological order, one pass is enough.
 void EliminateCommonSubexpression(std::shared_ptr<Graph>& graph) {
-  auto nodes = graph->nodes();
   std::unordered_set<Node*, HashNodeCSE, EqualNodeCSE> subexprs;
-  for (auto it = nodes.begin(); it != nodes.end(); ++ it) {
+  for (auto it = graph->begin(); it != graph->end(); ++ it) {
     auto node = *it;
     if (node->kind() == kPythonOp
         || node->kind() == kCppOp

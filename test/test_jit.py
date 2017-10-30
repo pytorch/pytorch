@@ -621,6 +621,11 @@ class TestJit(TestCase):
         trace, _ = torch.jit.trace(nn.BatchNorm2d(2), x)
         self.assertExpected(str(trace))
 
+    def test_dropout(self):
+        x = Variable(torch.randn(2, 2).fill_(1.0), requires_grad=True)
+        trace, _ = torch.jit.trace(nn.Dropout(0.6), x)
+        self.assertExpected(str(trace))
+
     @unittest.skip("unrecognized NodeKind: SpatialBN")
     def test_batchnorm_run_twice(self):
         @torch.jit.compile(nderivs=0)

@@ -113,7 +113,6 @@ struct GraphFuser {
   }
   Node * mergeNodeIntoGroup(Node* group, Node * n) {
     auto & subgraph = getSubgraph(group);
-    auto & inputs = group->inputs();
     // map from nodes in the surrounding graph to parameters in the fusion
     // group's subgraph that correspond to them
     std::unordered_map<Node*,Node*> inputs_map;
@@ -139,6 +138,7 @@ struct GraphFuser {
     // we need to remove it because n is now inside the fusion group
     // remapping nodes that used the input to the newly-merged node
     // n is not an input when the fusion group is empty
+    auto inputs = group->inputs();
     auto it = std::find(inputs.begin(), inputs.end(), n);
     if(it != inputs.end()) {
       size_t p = it - inputs.begin();
