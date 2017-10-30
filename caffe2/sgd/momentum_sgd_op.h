@@ -103,8 +103,8 @@ class MomentumSGDUpdateOp final : public Operator<Context> {
     // Iter live on the CPU
     CAFFE_ENFORCE(OperatorBase::InputIsType<Tensor<Context>>(GRAD));
     CAFFE_ENFORCE(OperatorBase::InputIsType<Tensor<Context>>(MOMENTUM));
-    CAFFE_ENFORCE(Input(LR).size() == 1);
-    CAFFE_ENFORCE(Input(GRAD).size() == Input(MOMENTUM).size());
+    CAFFE_ENFORCE_EQ(Input(LR).size(), 1);
+    CAFFE_ENFORCE_EQ(Input(GRAD).size(), Input(MOMENTUM).size());
     Output(OUTPUT_GRAD)->ResizeLike(Input(GRAD));
     Output(OUTPUT_MOMENTUM)->ResizeLike(Input(MOMENTUM));
 
