@@ -896,7 +896,7 @@ def nll_loss(input, target, weight=None, size_average=True, ignore_index=-100, r
             in case of 2D - Loss
         target: :math:`(N)` where each value is `0 <= targets[i] <= C-1`
         weight (Tensor, optional): a manual rescaling weight given to each
-            class. If given, has to be a Tensor of size "nclasses"
+            class. If given, has to be a Tensor of size `C`
         size_average (bool, optional): By default, the losses are averaged
             over observations for each minibatch. If size_average
             is False, the losses are summed for each minibatch. Default: True
@@ -906,9 +906,9 @@ def nll_loss(input, target, weight=None, size_average=True, ignore_index=-100, r
 
     Example::
 
-        >>> # input is of size nBatch x nClasses = 3 x 5
+        >>> # input is of size N x C = 3 x 5
         >>> input = autograd.Variable(torch.randn(3, 5))
-        >>> # each element in target has to have 0 <= value < nclasses
+        >>> # each element in target has to have 0 <= value < C
         >>> target = autograd.Variable(torch.LongTensor([1, 0, 4]))
         >>> output = F.nll_loss(F.log_softmax(input), target)
         >>> output.backward()
@@ -968,7 +968,7 @@ Args:
     size_average: if True the output is divided by the number of elements
       in input tensor. Default: True
     weight (Tensor, optional): a manual rescaling weight given to each
-            class. If given, has to be a Tensor of size "nclasses"
+            class. If given, has to be a Tensor of size `C`
 """)
 
 
@@ -983,7 +983,7 @@ def cross_entropy(input, target, weight=None, size_average=True, ignore_index=-1
         target: Variable :math:`(N)` where each value is
             `0 <= targets[i] <= C-1`
         weight (Tensor, optional): a manual rescaling weight given to each
-                class. If given, has to be a Tensor of size "nclasses"
+                class. If given, has to be a Tensor of size `C`
         size_average (bool, optional): By default, the losses are averaged
                 over observations for each minibatch. However, if the field
                 sizeAverage is set to False, the losses are instead summed
