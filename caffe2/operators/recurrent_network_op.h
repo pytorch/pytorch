@@ -67,11 +67,10 @@ struct ScratchWorkspaces {
 };
 
 inline void UpdateTimestepBlob(Workspace* ws, std::string blob_name, int t) {
-  ws->CreateBlob(blob_name)->template GetMutable<TensorCPU>()->Resize(1);
+  ws->CreateBlob(blob_name)->GetMutable<TensorCPU>()->Resize(1);
   auto timestepBlob = ws->GetBlob(blob_name);
   CAFFE_ENFORCE(timestepBlob);
-  timestepBlob->template GetMutable<TensorCPU>()
-      ->template mutable_data<int32_t>()[0] = t;
+  timestepBlob->GetMutable<TensorCPU>()->mutable_data<int32_t>()[0] = t;
 }
 
 std::map<string, string> GetRecurrentMapping(

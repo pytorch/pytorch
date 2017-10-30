@@ -393,7 +393,8 @@ class BeamSearchForwardOnly(object):
             step_net=self.step_model.net.Proto(),
             timestep=str(self.timestep),
             outputs_with_grads=[],
-            enable_rnn_executor=0,  # disable until fixing a perf bug in exec
+            enable_rnn_executor=1,
+            rnn_executor_debug=0
         )
         score_t_all, tokens_t_all, hypo_t_all, attention_t_all = results[:4]
 
