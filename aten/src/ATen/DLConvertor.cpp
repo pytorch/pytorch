@@ -13,28 +13,28 @@ static DLDataType getDLDataType(const Type& type) {
   dtype.bits = type.elementSizeInBytes() * 8;
   switch (type.scalarType()) {
     case ScalarType::Byte:
-      dtype.code = DLDataTypeCode::kUInt;
+      dtype.code = DLDataTypeCode::kDLUInt;
       break;
     case ScalarType::Char:
-      dtype.code = DLDataTypeCode::kInt;
+      dtype.code = DLDataTypeCode::kDLInt;
       break;
     case ScalarType::Double:
-      dtype.code = DLDataTypeCode::kFloat;
+      dtype.code = DLDataTypeCode::kDLFloat;
       break;
     case ScalarType::Float:
-      dtype.code = DLDataTypeCode::kFloat;
+      dtype.code = DLDataTypeCode::kDLFloat;
       break;
     case ScalarType::Int:
-      dtype.code = DLDataTypeCode::kInt;
+      dtype.code = DLDataTypeCode::kDLInt;
       break;
     case ScalarType::Long:
-      dtype.code = DLDataTypeCode::kInt;
+      dtype.code = DLDataTypeCode::kDLInt;
       break;
     case ScalarType::Short:
-      dtype.code = DLDataTypeCode::kInt;
+      dtype.code = DLDataTypeCode::kDLInt;
       break;
     case ScalarType::Half:
-      dtype.code = DLDataTypeCode::kFloat;
+      dtype.code = DLDataTypeCode::kDLFloat;
       break;
     case ScalarType::NumOptions:
       throw std::logic_error("NumOptions is not a valid ScalarType");
@@ -47,9 +47,9 @@ static DLContext getDLContext(const Type& type, const int64_t& device_id) {
   DLContext ctx;
   ctx.device_id = device_id;
   if (type.isCuda()) {
-    ctx.device_type = DLDeviceType::kGPU;
+    ctx.device_type = DLDeviceType::kDLGPU;
   } else {
-    ctx.device_type = DLDeviceType::kCPU;
+    ctx.device_type = DLDeviceType::kDLCPU;
   }
   return ctx;
 }
@@ -58,10 +58,10 @@ static DLContext getDLContext(const Type& type, const int64_t& device_id) {
 static Backend getATenBackend(const DLContext& ctx) {
   Backend backend;
   switch (ctx.device_type) {
-    case DLDeviceType::kCPU:
+    case DLDeviceType::kDLCPU:
       backend = Backend::CPU;
       break;
-    case DLDeviceType::kGPU:
+    case DLDeviceType::kDLGPU:
       backend = Backend::CUDA;
       break;
     default:
@@ -75,7 +75,7 @@ ScalarType toScalarType(const DLDataType& dtype) {
   ScalarType stype;
   if (dtype.lanes != 1) throw std::logic_error("ATen does not support lanes != 1");
   switch (dtype.code) {
-    case DLDataTypeCode::kUInt:
+    case DLDataTypeCode::kDLUInt:
       switch (dtype.bits) {
         case 8:
           stype = ScalarType::Byte;
@@ -84,7 +84,7 @@ ScalarType toScalarType(const DLDataType& dtype) {
           throw std::logic_error("Unsupported kUInt bits " + std::to_string(dtype.bits));
       }
       break;
-    case DLDataTypeCode::kInt:
+    case DLDataTypeCode::kDLInt:
       switch (dtype.bits) {
         case 8:
           stype = ScalarType::Char;
@@ -102,7 +102,7 @@ ScalarType toScalarType(const DLDataType& dtype) {
           throw std::logic_error("Unsupported kInt bits " + std::to_string(dtype.bits));
       }
       break;
-    case DLDataTypeCode::kFloat:
+    case DLDataTypeCode::kDLFloat:
       switch (dtype.bits) {
         case 16:
           stype = ScalarType::Half;
@@ -128,8 +128,8 @@ struct ATenDLMTensor {
   DLManagedTensor tensor;
 };
 
-void destructor(DLManagedTensor * arg) {
-  delete static_cast<ATenDLMTensor*>(arg->ctx);
+void deleter(DLManagedTensor * arg) {
+  delete static_cast<ATenDLMTensor*>(arg->manager_ctx);
 }
 
 
@@ -138,33 +138,33 @@ void destructor(DLManagedTensor * arg) {
 DLManagedTensor* toDLPack(const Tensor& src) {
   ATenDLMTensor * atDLMTensor(new ATenDLMTensor);
   atDLMTensor->handle = src;
-  atDLMTensor->tensor.ctx = atDLMTensor;
-  atDLMTensor->tensor.destructor = &destructor;
-  atDLMTensor->tensor.dlTensor.data = src.data_ptr();
+  atDLMTensor->tensor.manager_ctx = atDLMTensor;
+  atDLMTensor->tensor.deleter = &deleter;
+  atDLMTensor->tensor.dl_tensor.data = src.data_ptr();
   int64_t device_id = 0;
   if (src.type().isCuda()) {
     device_id = src.get_device();
   }
-  atDLMTensor->tensor.dlTensor.ctx = getDLContext(src.type(), device_id);
-  atDLMTensor->tensor.dlTensor.ndim = src.dim();
-  atDLMTensor->tensor.dlTensor.dtype = getDLDataType(src.type());
-  atDLMTensor->tensor.dlTensor.shape = const_cast<int64_t*>(src.sizes().data());
-  atDLMTensor->tensor.dlTensor.strides = const_cast<int64_t*>(src.strides().data());
-  atDLMTensor->tensor.dlTensor.byte_offset = 0;
+  atDLMTensor->tensor.dl_tensor.ctx = getDLContext(src.type(), device_id);
+  atDLMTensor->tensor.dl_tensor.ndim = src.dim();
+  atDLMTensor->tensor.dl_tensor.dtype = getDLDataType(src.type());
+  atDLMTensor->tensor.dl_tensor.shape = const_cast<int64_t*>(src.sizes().data());
+  atDLMTensor->tensor.dl_tensor.strides = const_cast<int64_t*>(src.strides().data());
+  atDLMTensor->tensor.dl_tensor.byte_offset = 0;
   return &(atDLMTensor->tensor);
 }
 
 
 Tensor fromDLPack(const DLManagedTensor* src) {
-  Backend backend = getATenBackend(src->dlTensor.ctx);
-  ScalarType stype = toScalarType(src->dlTensor.dtype);
+  Backend backend = getATenBackend(src->dl_tensor.ctx);
+  ScalarType stype = toScalarType(src->dl_tensor.dtype);
   auto deleter = [src](void * self) {
-    src->destructor(const_cast<DLManagedTensor*>(src));
+    src->deleter(const_cast<DLManagedTensor*>(src));
   };
   return getType(backend, stype).tensorFromBlob(
-      src->dlTensor.data,
-      IntList(src->dlTensor.shape, src->dlTensor.ndim),
-      IntList(src->dlTensor.strides, src->dlTensor.ndim),
+      src->dl_tensor.data,
+      IntList(src->dl_tensor.shape, src->dl_tensor.ndim),
+      IntList(src->dl_tensor.strides, src->dl_tensor.ndim),
       deleter);
 }
 } //namespace at
