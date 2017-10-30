@@ -1,6 +1,6 @@
 PyObject *THSPTensorClass = NULL;
 
-static void THSPTensor_(initStorage)(THSTensor* tensor)
+static void THSTensor_(initStorage)(THSTensor* tensor)
 {
   // Ensure that PyTorch's "storage is not NULL" invariant is upheld.
   // See Note [Storage is not NULL]
@@ -16,13 +16,6 @@ static void THSPTensor_(initStorage)(THSTensor* tensor)
   }
 }
 
-PyObject * THSPTensor_(NewEmpty)()
-{
-  auto r = THSTensor_(new)(LIBRARY_STATE_NOARGS);
-  THSPTensor_(initStorage)(r);
-  return THSPTensor_(New)(r);
-}
-
 PyObject * THSPTensor_(New)(THSTensor *tensor)
 {
   THSTensorPtr ptr(tensor);
@@ -32,6 +25,13 @@ PyObject * THSPTensor_(New)(THSTensor *tensor)
     ((THSPTensor *)obj)->cdata = ptr.release();
   }
   return obj;
+}
+
+PyObject * THSPTensor_(NewEmpty)()
+{
+  THSTensorPtr tensor(THSTensor_(new)(LIBRARY_STATE_NOARGS));
+  THSTensor_(initStorage)(tensor.get());
+  return THSPTensor_(New)(tensor.release());
 }
 
 static void THSPTensor_(dealloc)(THSPTensor* self)
@@ -100,63 +100,61 @@ static PyObject * THSPTensor_(pynew)(PyTypeObject *type, PyObject *args, PyObjec
   // torch.SparseTensor()
   if (num_args == 0) {
     self->cdata = THSTensor_(new)(LIBRARY_STATE_NOARGS);
-    return (PyObject*)self.release();
-  }
+  } else {
+    PyObject *first_arg = PyTuple_GET_ITEM(args, 0);
 
-  PyObject *first_arg = PyTuple_GET_ITEM(args, 0);
+    // torch.SparseTensor(size)
+    if (num_args == 1 && THPUtils_checkLong(first_arg)) {
+      long size = THPUtils_unpackLong(first_arg);
+      self->cdata = THSTensor_(newWithSize1d)(LIBRARY_STATE size);
+    }
+    // torch.SparseTensor(torch.Size sizes)
+    else if (num_args == 1 && THPSize_Check(first_arg)) {
+      THLongStoragePtr sizes(THPUtils_unpackSize(first_arg));
+      self->cdata = THSTensor_(newWithSize)(LIBRARY_STATE sizes.get());
+    }
+    // torch.SparseTensor(torch.LongTensor indices, torch.LongTensor values)
+    else if (num_args == 2 && THPIndexTensor_Check(first_arg)) {
+      PyObject *second_arg = PyTuple_GET_ITEM(args, 1);
+      if (!THPTensor_(Check)(second_arg)) goto invalid_arguments;
 
-  // torch.SparseTensor(size)
-  if (num_args == 1 && THPUtils_checkLong(first_arg)) {
-    long size = THPUtils_unpackLong(first_arg);
-    self->cdata = THSTensor_(newWithSize1d)(LIBRARY_STATE size);
-  }
-  // torch.SparseTensor(torch.Size sizes)
-  else if (num_args == 1 && THPSize_Check(first_arg)) {
-    THLongStoragePtr sizes(THPUtils_unpackSize(first_arg));
-    self->cdata = THSTensor_(newWithSize)(LIBRARY_STATE sizes.get());
-  }
-  // torch.SparseTensor(torch.LongTensor indices, torch.LongTensor values)
-  else if (num_args == 2 && THPIndexTensor_Check(first_arg)) {
-    PyObject *second_arg = PyTuple_GET_ITEM(args, 1);
-    if (!THPTensor_(Check)(second_arg)) goto invalid_arguments;
-
-    THIndexTensor *indices = ((THPIndexTensor*)first_arg)->cdata;
-    THTensor *values = ((THPTensor*)second_arg)->cdata;
+      THIndexTensor *indices = ((THPIndexTensor*)first_arg)->cdata;
+      THTensor *values = ((THPTensor*)second_arg)->cdata;
 
 #ifdef THC_GENERIC_FILE
-    THCAssertSameGPU(THSTensor_(checkGPU)(LIBRARY_STATE 0, 2, indices, values));
+      THCAssertSameGPU(THSTensor_(checkGPU)(LIBRARY_STATE 0, 2, indices, values));
 #endif
 
-    self->cdata = THSTensor_(newWithTensor)(LIBRARY_STATE indices, values);
-  }
-  // torch.SparseTensor(torch.LongTensor indices,
-  //                    torch.Tensor values,
-  //                    torch.Size sizes)
-  else if (num_args > 2 && THPIndexTensor_Check(first_arg)) {
-    PyObject *second_arg = PyTuple_GET_ITEM(args, 1);
-    PyObject *third_arg = PyTuple_GET_ITEM(args, 2);
-    if (!THPTensor_(Check)(second_arg)) goto invalid_arguments;
-    if (!THPSize_Check(third_arg)) goto invalid_arguments;
+      self->cdata = THSTensor_(newWithTensor)(LIBRARY_STATE indices, values);
+    }
+    // torch.SparseTensor(torch.LongTensor indices,
+    //                    torch.Tensor values,
+    //                    torch.Size sizes)
+    else if (num_args > 2 && THPIndexTensor_Check(first_arg)) {
+      PyObject *second_arg = PyTuple_GET_ITEM(args, 1);
+      PyObject *third_arg = PyTuple_GET_ITEM(args, 2);
+      if (!THPTensor_(Check)(second_arg)) goto invalid_arguments;
+      if (!THPSize_Check(third_arg)) goto invalid_arguments;
 
-    THIndexTensor *indices = ((THPIndexTensor*)first_arg)->cdata;
-    THTensor *values = ((THPTensor*)second_arg)->cdata;
-    THLongStoragePtr sizes(THPUtils_unpackSize(third_arg));
+      THIndexTensor *indices = ((THPIndexTensor*)first_arg)->cdata;
+      THTensor *values = ((THPTensor*)second_arg)->cdata;
+      THLongStoragePtr sizes(THPUtils_unpackSize(third_arg));
 
 #ifdef THC_GENERIC_FILE
-    THCAssertSameGPU(THSTensor_(checkGPU)(LIBRARY_STATE 0, 2, indices, values));
+      THCAssertSameGPU(THSTensor_(checkGPU)(LIBRARY_STATE 0, 2, indices, values));
 #endif
 
-    self->cdata = THSTensor_(newWithTensorAndSize)(
-        LIBRARY_STATE indices, values, sizes);
+      self->cdata = THSTensor_(newWithTensorAndSize)(
+          LIBRARY_STATE indices, values, sizes);
+    }
+    // torch.SparseTensor(int ...)
+    else if (THPUtils_tryUnpackLongVarArgs(args, 0, sizes)) {
+      self->cdata = THSTensor_(newWithSize)(LIBRARY_STATE sizes.get());
+    }
+    else goto invalid_arguments; // All other cases
   }
-  // torch.SparseTensor(int ...)
-  else if (THPUtils_tryUnpackLongVarArgs(args, 0, sizes)) {
-    self->cdata = THSTensor_(newWithSize)(LIBRARY_STATE sizes.get());
-  }
-  else goto invalid_arguments; // All other cases
 
-  THSPTensor_(initStorage)(self->cdata);
-
+  THSTensor_(initStorage)(self->cdata);
   return (PyObject*)self.release();
 
 invalid_arguments:
