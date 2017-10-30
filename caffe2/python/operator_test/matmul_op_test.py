@@ -141,7 +141,7 @@ class TestMatMul(hu.HypothesisTestCase):
 class TestBatchMatMul(hu.HypothesisTestCase):
     @settings(max_examples=30)
     @given(
-        C=st.integers(min_value=1, max_value=10),
+        C=st.integers(min_value=0, max_value=3),  # number of batch dims
         M=st.integers(min_value=1, max_value=10),
         K=st.integers(min_value=1, max_value=10),
         N=st.integers(min_value=1, max_value=10),
@@ -156,25 +156,26 @@ class TestBatchMatMul(hu.HypothesisTestCase):
             assume(gc.device_type == caffe2_pb2.CUDA)
             dc = [d for d in dc if d.device_type == caffe2_pb2.CUDA]
 
-        X = np.random.rand(C, M, K).astype(dtype) - 0.5
+        batch_dims = np.random.randint(
+            low=1,
+            high=3,
+            size=C,
+            dtype=np.int64).tolist()
+        X = np.random.rand(*(batch_dims + [M, K])).astype(dtype) - 0.5
         if trans_a:
-            X = X.swapaxes(1, 2)
-
-        Y = np.random.rand(C, K, N).astype(dtype) - 0.5
+            X = X.swapaxes(-1, -2)
+        Y = np.random.rand(*(batch_dims + [K, N])).astype(dtype) - 0.5
         if trans_b:
-            Y = Y.swapaxes(1, 2)
+            Y = Y.swapaxes(-1, -2)
 
         op = core.CreateOperator(
             'BatchMatMul', ['X', 'Y'], 'out', trans_a=trans_a, trans_b=trans_b
         )
 
         def matmul_ref(X, Y, trans_a, trans_b):
-            XX = X.swapaxes(1, 2) if trans_a else X
-            YY = Y.swapaxes(1, 2) if trans_b else Y
-            output = np.zeros((C, M, N)).astype(XX.dtype)
-            for i in range(C):
-                output[i] = XX[i].dot(YY[i])
-            return (output, )
+            XX = X.swapaxes(-1, -2) if trans_a else X
+            YY = Y.swapaxes(-1, -2) if trans_b else Y
+            return (np.matmul(XX, YY),)
 
         # Check against numpy reference
         self.assertReferenceChecks(gc, op, [X, Y, trans_a, trans_b], matmul_ref)
