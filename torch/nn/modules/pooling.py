@@ -65,7 +65,7 @@ class MaxPool1d(Module):
                             self.return_indices)
 
     def __repr__(self):
-        return self.__class__.__name__ + ' (' \
+        return self.__class__.__name__ + '(' \
             + 'kernel_size=' + str(self.kernel_size) \
             + ', stride=' + str(self.stride) \
             + ', padding=' + str(self.padding) \
@@ -151,8 +151,8 @@ class MaxPool2d(Module):
             if padh != 0 and padw != 0 else ''
         dilation_str = (', dilation=(' + str(dilh) + ', ' + str(dilw) + ')'
                         if dilh != 0 and dilw != 0 else '')
-        return self.__class__.__name__ + ' (' \
-            + 'size=(' + str(kh) + ', ' + str(kw) + ')' \
+        return self.__class__.__name__ + '(' \
+            + 'kernel_size=(' + str(kh) + ', ' + str(kw) + ')' \
             + ', stride=(' + str(dh) + ', ' + str(dw) + ')' \
             + padding_str + dilation_str + ')'
 
@@ -229,7 +229,7 @@ class MaxUnpool1d(Module):
                               self.padding, output_size)
 
     def __repr__(self):
-        return self.__class__.__name__ + ' (' \
+        return self.__class__.__name__ + '(' \
             + 'kernel_size=' + str(self.kernel_size) \
             + ', stride=' + str(self.stride) \
             + ', padding=' + str(self.padding) + ')'
@@ -310,7 +310,7 @@ class MaxUnpool2d(Module):
                               self.padding, output_size)
 
     def __repr__(self):
-        return self.__class__.__name__ + ' (' \
+        return self.__class__.__name__ + '(' \
             + 'kernel_size=' + str(self.kernel_size) \
             + ', stride=' + str(self.stride) \
             + ', padding=' + str(self.padding) + ')'
@@ -371,7 +371,7 @@ class MaxUnpool3d(Module):
                               self.padding, output_size)
 
     def __repr__(self):
-        return self.__class__.__name__ + ' (' \
+        return self.__class__.__name__ + '(' \
             + 'kernel_size=' + str(self.kernel_size) \
             + ', stride=' + str(self.stride) \
             + ', padding=' + str(self.padding) + ')'
@@ -436,7 +436,7 @@ class AvgPool1d(Module):
             self.count_include_pad)
 
     def __repr__(self):
-        return self.__class__.__name__ + ' (' \
+        return self.__class__.__name__ + '(' \
             + 'kernel_size=' + str(self.kernel_size) \
             + ', stride=' + str(self.stride) \
             + ', padding=' + str(self.padding) \
@@ -505,7 +505,7 @@ class AvgPool2d(Module):
                             self.padding, self.ceil_mode, self.count_include_pad)
 
     def __repr__(self):
-        return self.__class__.__name__ + ' (' \
+        return self.__class__.__name__ + '(' \
             + 'kernel_size=' + str(self.kernel_size) \
             + ', stride=' + str(self.stride) \
             + ', padding=' + str(self.padding) \
@@ -584,7 +584,7 @@ class MaxPool3d(Module):
                             self.return_indices)
 
     def __repr__(self):
-        return self.__class__.__name__ + ' (' \
+        return self.__class__.__name__ + '(' \
             + 'kernel_size=' + str(self.kernel_size) \
             + ', stride=' + str(self.stride) \
             + ', padding=' + str(self.padding) \
@@ -660,7 +660,7 @@ class AvgPool3d(Module):
         self.__dict__.setdefault('count_include_pad', True)
 
     def __repr__(self):
-        return self.__class__.__name__ + ' (' \
+        return self.__class__.__name__ + '(' \
             + 'kernel_size=' + str(self.kernel_size) \
             + ', stride=' + str(self.stride) \
             + ', padding=' + str(self.padding) \
@@ -779,7 +779,7 @@ class LPPool2d(Module):
                            self.stride, self.ceil_mode)
 
     def __repr__(self):
-        return self.__class__.__name__ + ' (' \
+        return self.__class__.__name__ + '(' \
             + str(self.norm_type) + ', ' \
             + str(self.kernel_size) + ', ' \
             + 'stride=' + str(self.stride) + ', ' \
@@ -824,7 +824,7 @@ class LPPool1d(Module):
                            self.stride, self.ceil_mode)
 
     def __repr__(self):
-        return self.__class__.__name__ + ' (' \
+        return self.__class__.__name__ + '(' \
             + str(self.norm_type) + ', ' \
             + str(self.kernel_size) + ', ' \
             + 'stride=' + str(self.stride) + ', ' \
@@ -859,7 +859,7 @@ class AdaptiveMaxPool1d(Module):
         return F.adaptive_max_pool1d(input, self.output_size, self.return_indices)
 
     def __repr__(self):
-        return self.__class__.__name__ + ' (' \
+        return self.__class__.__name__ + '(' \
             + 'output_size=' + str(self.output_size) + ')'
 
 
@@ -896,7 +896,7 @@ class AdaptiveMaxPool2d(Module):
         return F.adaptive_max_pool2d(input, self.output_size, self.return_indices)
 
     def __repr__(self):
-        return self.__class__.__name__ + ' (' \
+        return self.__class__.__name__ + '(' \
             + 'output_size=' + str(self.output_size) + ')'
 
 
@@ -933,7 +933,7 @@ class AdaptiveMaxPool3d(Module):
         return F.adaptive_max_pool3d(input, self.output_size, self.return_indices)
 
     def __repr__(self):
-        return self.__class__.__name__ + ' (' \
+        return self.__class__.__name__ + '(' \
             + 'output_size=' + str(self.output_size) + ')'
 
 
@@ -962,7 +962,7 @@ class AdaptiveAvgPool1d(Module):
         return F.adaptive_avg_pool1d(input, self.output_size)
 
     def __repr__(self):
-        return self.__class__.__name__ + ' (' \
+        return self.__class__.__name__ + '(' \
             + 'output_size=' + str(self.output_size) + ')'
 
 
@@ -996,7 +996,7 @@ class AdaptiveAvgPool2d(Module):
         return F.adaptive_avg_pool2d(input, self.output_size)
 
     def __repr__(self):
-        return self.__class__.__name__ + ' (' \
+        return self.__class__.__name__ + '(' \
             + 'output_size=' + str(self.output_size) + ')'
 
 
@@ -1030,5 +1030,5 @@ class AdaptiveAvgPool3d(Module):
         return F.adaptive_avg_pool3d(input, self.output_size)
 
     def __repr__(self):
-        return self.__class__.__name__ + ' (' \
+        return self.__class__.__name__ + '(' \
             + 'output_size=' + str(self.output_size) + ')'

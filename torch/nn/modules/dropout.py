@@ -47,8 +47,8 @@ class Dropout(Module):
 
     def __repr__(self):
         inplace_str = ', inplace' if self.inplace else ''
-        return self.__class__.__name__ + ' (' \
-            + 'p = ' + str(self.p) \
+        return self.__class__.__name__ + '(' \
+            + 'p=' + str(self.p) \
             + inplace_str + ')'
 
 
@@ -100,7 +100,7 @@ class Dropout2d(Module):
 
     def __repr__(self):
         inplace_str = ', inplace' if self.inplace else ''
-        return self.__class__.__name__ + ' (' \
+        return self.__class__.__name__ + '(' \
             + 'p=' + str(self.p) \
             + inplace_str + ')'
 
@@ -153,7 +153,7 @@ class Dropout3d(Module):
 
     def __repr__(self):
         inplace_str = ', inplace' if self.inplace else ''
-        return self.__class__.__name__ + ' (' \
+        return self.__class__.__name__ + '(' \
             + 'p=' + str(self.p) \
             + inplace_str + ')'
 
@@ -205,5 +205,5 @@ class AlphaDropout(Module):
         return F.alpha_dropout(input, self.p, self.training)
 
     def __repr__(self):
-        return self.__class__.__name__ + ' (' \
-            + 'p = ' + str(self.p) + ')'
+        return self.__class__.__name__ + '(' \
+            + 'p=' + str(self.p) + ')'

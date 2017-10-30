@@ -564,7 +564,7 @@ class Module(object):
         return self._apply(lambda t: t.share_memory_())
 
     def __repr__(self):
-        tmpstr = self.__class__.__name__ + ' (\n'
+        tmpstr = self.__class__.__name__ + '(\n'
         for key, module in self._modules.items():
             modstr = module.__repr__()
             modstr = _addindent(modstr, 2)
