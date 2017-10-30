@@ -426,37 +426,17 @@ class Variable(_C._VariableBase):
     def bernoulli(self):
         return Bernoulli.apply(self)
 
-    __radd__ = __add__ = _C._VariableBase.add
-
-    def __iadd__(self, other):
-        return self.add_(other)
-
-    __sub__ = _C._VariableBase.sub
-
-    def __isub__(self, other):
-        return self.sub_(other)
-
     def __rsub__(self, other):
         return -self + other
-
-    __rmul__ = __mul__ = _C._VariableBase.mul
-
-    def __imul__(self, other):
-        return self.mul_(other)
 
     def __matmul__(self, other):
         if not isinstance(other, Variable):
             return NotImplemented
         return self.matmul(other)
 
-    __truediv__ = __div__ = _C._VariableBase.div
-
     def __rdiv__(self, other):
         return self.reciprocal() * other
     __rtruediv__ = __rdiv__
-
-    def __idiv__(self, other):
-        return self.div_(other)
 
     __pow__ = _C._VariableBase.pow
 
@@ -466,8 +446,14 @@ class Variable(_C._VariableBase):
     def __rpow__(self, other):
         return PowConstant.apply(other, self)
 
-    def __neg__(self):
-        return Negate.apply(self)
+    __neg__ = _C._VariableBase.neg
+
+    __eq__ = _C._VariableBase.eq
+    __ne__ = _C._VariableBase.ne
+    __lt__ = _C._VariableBase.lt
+    __le__ = _C._VariableBase.le
+    __gt__ = _C._VariableBase.gt
+    __ge__ = _C._VariableBase.ge
 
     def __len__(self):
         return len(self.data)
@@ -480,27 +466,6 @@ class Variable(_C._VariableBase):
         # indexes of hiddens[0] before hiddens[1], while the generator
         # map will interleave them.)
         return iter(imap(lambda i: self[i], range(self.size(0))))
-
-    def __mod__(self, other):
-        return self.remainder(other)
-
-    def __eq__(self, other):
-        return self.eq(other)
-
-    def __ne__(self, other):
-        return self.ne(other)
-
-    def __lt__(self, other):
-        return self.lt(other)
-
-    def __le__(self, other):
-        return self.le(other)
-
-    def __gt__(self, other):
-        return self.gt(other)
-
-    def __ge__(self, other):
-        return self.ge(other)
 
     def __hash__(self):
         return id(self)
