@@ -255,3 +255,7 @@ def log_softmax(g, input, dim=None):
 
 def unfold(g, input, dimension, size, step):
     return g.op("ATen", input, operator_s="unfold", dimension_i=dimension, size_i=size, step_i=step)
+
+
+def expand(g, input, size):
+    return g.op("ATen", input, operator_s="expand", size_i=size)
