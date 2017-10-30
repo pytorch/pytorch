@@ -615,7 +615,7 @@ else:
     try:
         sha = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=cwd).decode('ascii').strip()
         version += '+' + sha[:7]
-    except subprocess.CalledProcessError:
+    except Exception:
         pass
 
 cmdclass = {
