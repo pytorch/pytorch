@@ -111,6 +111,12 @@ def _flatten_dense_tensors(tensors):
     Since inputs are dense, the resulting tensor will be a concatenated 1D
     buffer. Element-wise operation on this buffer will be equivalent to
     operating individually.
+
+    Arguments:
+        tensors (Iterable[Tensor]): dense tensors to flatten.
+
+    Returns:
+        A contiguous 1D buffer containing input tensors.
     """
     if len(tensors) == 1:
         return tensors[0].contiguous().view(-1)
@@ -127,6 +133,13 @@ def _flatten_dense_tensors(tensors):
 def _flatten_sparse_tensors(tensors):
     """Flatten sparse tensors into two contiguous 1D buffers, one of indices and
     one of values. Assume tensors are of same sparse type.
+
+    Arguments:
+        tensors (Iterable[Tensor]): sparse tensors to flatten.
+
+    Returns:
+        A tuple of two contiguous 1D buffers, one containing input tensors'
+        indices and the other containing the values.
     """
     flat_indices = _flatten_dense_tensors([t._indices() for t in tensors])
     flat_values = _flatten_dense_tensors([t._values() for t in tensors])
@@ -136,6 +149,15 @@ def _flatten_sparse_tensors(tensors):
 def _unflatten_dense_tensors(flat, tensors):
     """View a flat buffer using the sizes of tensors. Assume that tensors are of
     same dense type, and that flat is given by _flatten_dense_tensors.
+
+    Arguments:
+        flat (Tensor): flattened dense tensors to unflatten.
+        tensors (Iterable[Tensor]): dense tensors whose sizes will be used to
+          unflatten flat.
+
+    Returns:
+        Unflattened dense tensors with sizes same as tensors and values from
+        flat.
     """
     outputs = []
     offset = 0
@@ -150,6 +172,16 @@ def _unflatten_sparse_tensors(flat, tensors):
     """View flat buffer (containing indices and values) using the sizes of
     tensors. Assume that tensors are of same sparse type, and that flat is given
     by _flatten_sparse_tensors.
+
+    Arguments:
+        flat (tuple(Tensor, Tensor)): flattened indices and values of sparse
+          tensors to unflatten.
+        tensors (Iterable[Tensor]): sparse tensors whose sizes will be used to
+          unflatten flat.
+
+    Returns:
+        Unflattened sparse tensors with sizes same as tensors and values from
+        flat.
     """
     flat_indices, flat_values = flat
     indices = _unflatten_dense_tensors(flat_indices, [t._indices() for t in tensors])
@@ -162,8 +194,18 @@ def _unflatten_sparse_tensors(flat, tensors):
 
 def _reorder_tensors_as(tensors, ordered_tensors):
     """Assume that tensors are of same order as ordered_tensors within their
-    types, e.g. from _take_tensors. Reorder them to be of same order as
+    types, e.g., from _take_tensors. Reorder them to be of same order as
     ordered_tensors.
+
+    Arguments:
+        tensors (Iterable[Tensor]): tensors to be reordered. They should be of
+          the same order as ordered_tensors within their own types.
+        ordered_tensors (Iterable[Tensor]): tensors whose order will be the
+          reference.
+
+    Returns:
+        Ordered tuple of tensors with contents from tensors and order of
+        ordered_tensors.
     """
     type_dict = defaultdict(list)
     for tensor in tensors:
@@ -173,14 +215,16 @@ def _reorder_tensors_as(tensors, ordered_tensors):
 
 
 def _take_tensors(tensors, size_limit):
-    """Group tensors into chunks. This generator yields a chunk at each call,
+    """Group tensors into chunks. This generator yields a chunk at each time,
     each containing tensors of same type up to certain byte limit in total size.
-    The yielded tensors are only ordered as the original sequence within its
-    types.
 
     Args:
         tensors (Sequence): A sequence of tensors to be separated into chunks.
         size_limit (int): The limit of each chunk in bytes.
+
+    Yields:
+        Blocks of tensors of same type and within size_limit. The yielded
+        tensors are only ordered as the original sequence within its types.
     """
     buf_dict = defaultdict(lambda: [[], 0])
     for tensor in tensors:
