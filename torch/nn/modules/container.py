@@ -146,7 +146,7 @@ class ParameterList(Module):
     contains are properly registered, and will be visible by all Module methods.
 
     Arguments:
-        modules (list, optional): a list of :class:`nn.Parameter`` to add
+        modules (list, optional): a list of :class:`~torch.nn.Parameter`` to add
 
     Example::
 

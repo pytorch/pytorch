@@ -73,6 +73,11 @@ class Module(object):
 
         Buffers can be accessed as attributes using given names.
 
+        Args:
+            name (string): name of the buffer. The buffer can be accessed
+                from this module using the given name
+            tensor (Tensor): buffer to be registered.
+
         Example:
             >>> self.register_buffer('running_mean', torch.zeros(num_features))
         """
@@ -85,6 +90,11 @@ class Module(object):
         """Adds a parameter to the module.
 
         The parameter can be accessed as an attribute using given name.
+
+        Args:
+            name (string): name of the parameter. The parameter can be accessed
+                from this module using the given name
+            parameter (Parameter): parameter to be added to the module.
         """
         if '_parameters' not in self.__dict__:
             raise AttributeError(
@@ -112,6 +122,11 @@ class Module(object):
         """Adds a child module to the current module.
 
         The module can be accessed as an attribute using the given name.
+
+        Args:
+            name (string): name of the child module. The child module can be
+                accessed from this module using the given name
+            parameter (Module): child module to be added to the module.
         """
         if not isinstance(module, Module) and module is not None:
             raise TypeError("{} is not a Module subclass".format(
@@ -142,6 +157,12 @@ class Module(object):
         """Applies ``fn`` recursively to every submodule (as returned by ``.children()``)
         as well as self. Typical use includes initializing the parameters of a model
         (see also :ref:`torch-nn-init`).
+
+        Args:
+            fn (:class:`Module` -> None): function to be applied to each submodule
+
+        Returns:
+            Module: self
 
         Example:
             >>> def init_weights(m):
@@ -182,26 +203,53 @@ class Module(object):
         Arguments:
             device (int, optional): if specified, all parameters will be
                 copied to that device
+
+        Returns:
+            Module: self
         """
         return self._apply(lambda t: t.cuda(device))
 
     def cpu(self):
-        """Moves all model parameters and buffers to the CPU."""
+        """Moves all model parameters and buffers to the CPU.
+
+        Returns:
+            Module: self
+        """
         return self._apply(lambda t: t.cpu())
 
     def type(self, dst_type):
+        """Casts all parameters and buffers to dst_type.
+
+        Arguments:
+            dst_type (type or string): the desired type
+
+        Returns:
+            Module: self
+        """
         return self._apply(lambda t: t.type(dst_type))
 
     def float(self):
-        """Casts all parameters and buffers to float datatype."""
+        """Casts all parameters and buffers to float datatype.
+
+        Returns:
+            Module: self
+        """
         return self._apply(lambda t: t.float())
 
     def double(self):
-        """Casts all parameters and buffers to double datatype."""
+        """Casts all parameters and buffers to double datatype.
+
+        Returns:
+            Module: self
+        """
         return self._apply(lambda t: t.double())
 
     def half(self):
-        """Casts all parameters and buffers to half datatype."""
+        """Casts all parameters and buffers to half datatype.
+
+        Returns:
+            Module: self
+        """
         return self._apply(lambda t: t.half())
 
     def register_backward_hook(self, hook):
@@ -218,8 +266,10 @@ class Module(object):
         input that will be used in place of :attr:`grad_input` in subsequent
         computations.
 
-        This function returns a handle with a method ``handle.remove()``
-        that removes the hook from the module.
+        Returns:
+            :class:`torch.utils.hooks.RemovableHandle`:
+                a handle that can be used to remove the added hook by calling
+                ``handle.remove()``
         """
         handle = hooks.RemovableHandle(self._backward_hooks)
         self._backward_hooks[handle.id] = hook
@@ -234,15 +284,18 @@ class Module(object):
             hook(module, input) -> None
 
         The hook should not modify the input.
-        This function returns a handle with a method ``handle.remove()``
-        that removes the hook from the module.
+
+        Returns:
+            :class:`torch.utils.hooks.RemovableHandle`:
+                a handle that can be used to remove the added hook by calling
+                ``handle.remove()``
         """
         handle = hooks.RemovableHandle(self._forward_pre_hooks)
         self._forward_pre_hooks[handle.id] = hook
         return handle
 
     def register_forward_hook(self, hook):
-        """Registers a forward hook on the module.
+        r"""Registers a forward hook on the module.
 
         The hook will be called every time after :func:`forward` has computed an output.
         It should have the following signature::
@@ -250,8 +303,11 @@ class Module(object):
             hook(module, input, output) -> None
 
         The hook should not modify the input or output.
-        This function returns a handle with a method ``handle.remove()``
-        that removes the hook from the module.
+
+        Returns:
+            :class:`torch.utils.hooks.RemovableHandle`:
+                a handle that can be used to remove the added hook by calling
+                ``handle.remove()``
         """
         handle = hooks.RemovableHandle(self._forward_hooks)
         self._forward_hooks[handle.id] = hook
@@ -366,6 +422,20 @@ class Module(object):
         When keep_vars is true, it returns a Variable for each parameter
         (rather than a Tensor).
 
+        Args:
+            destination (dict, optional):
+                if not None, the return dictionary is stored into destination.
+                Default: None
+            prefix (string, optional): Adds a prefix to the key (name) of every
+                parameter and buffer in the result dictionary. Default: ''
+            keep_vars (bool, optional): if true, returns a Variable for each
+                parameter. If false, returns a Tensor for each parameter.
+                Default: False
+
+        Returns:
+            dict:
+                a dictionary containing a whole state of the module
+
         Example:
             >>> module.state_dict().keys()
             ['bias', 'weight']
@@ -422,6 +492,9 @@ class Module(object):
 
         This is typically passed to an optimizer.
 
+        Yields:
+            Parameter: module parameter
+
         Example:
             >>> for param in model.parameters():
             >>>     print(type(param.data), param.size())
@@ -434,6 +507,9 @@ class Module(object):
     def named_parameters(self, memo=None, prefix=''):
         """Returns an iterator over module parameters, yielding both the
         name of the parameter as well as the parameter itself
+
+        Yields:
+            (string, Parameter): Tuple containing the name and parameter
 
         Example:
             >>> for name, param in self.named_parameters():
@@ -463,13 +539,20 @@ class Module(object):
                 yield b
 
     def children(self):
-        """Returns an iterator over immediate children modules."""
+        """Returns an iterator over immediate children modules.
+
+        Yields:
+            Module: a child module
+        """
         for name, module in self.named_children():
             yield module
 
     def named_children(self):
         """Returns an iterator over immediate children modules, yielding both
         the name of the module as well as the module itself.
+
+        Yields:
+            (string, Module): Tuple containing a name and child module
 
         Example:
             >>> for name, module in model.named_children():
@@ -484,6 +567,9 @@ class Module(object):
 
     def modules(self):
         """Returns an iterator over all modules in the network.
+
+        Yields:
+            Module: a module in the network
 
         Note:
             Duplicate modules are returned only once. In the following
@@ -505,6 +591,9 @@ class Module(object):
     def named_modules(self, memo=None, prefix=''):
         """Returns an iterator over all modules in the network, yielding
         both the name of the module as well as the module itself.
+
+        Yields:
+            (string, Module): Tuple of name and module
 
         Note:
             Duplicate modules are returned only once. In the following
@@ -537,6 +626,9 @@ class Module(object):
         """Sets the module in training mode.
 
         This has any effect only on modules such as Dropout or BatchNorm.
+
+        Returns:
+            Module: self
         """
         self.training = mode
         for module in self.children():
