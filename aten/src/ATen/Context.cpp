@@ -55,6 +55,11 @@ Context & globalContext() {
 
 bool Context::hasCUDA() const {
 #ifdef AT_CUDA_ENABLED
+  int count;
+  cudaError_t err = cudaGetDeviceCount(&count);
+  if (err == cudaErrorInsufficientDriver) {
+    return false;
+  }
   return true;
 #else
   return false;
