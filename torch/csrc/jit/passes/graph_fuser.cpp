@@ -40,6 +40,9 @@ struct GraphFuser {
   bool isCuda(Node * node) {
     return node->type()->expect<TensorType>()->device() != -1;
   }
+  // TODO: the fusion compiler needs to know how to handle 'alpha'
+  // and other attributes in code generation for us to be able to fuse them
+  // then it is safe to remove the !hasSpecialAlpha check
   bool hasSpecialAlpha(Node * node) {
     if(!node->hasAttribute(kalpha))
       return false;
@@ -195,7 +198,7 @@ struct GraphFuser {
   }
 
   bool isChunk(Node * node) {
-    return (node->kind() == ksplit);
+    return node->kind() == ksplit;
   }
 
   // in places where op can be fused into a consumer but chunk is in the way

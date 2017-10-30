@@ -115,31 +115,10 @@ Node* recordTrace(std::string op, // TODO: make this a Symbol
   if(outputs.size() == 1) {
     assignOutput(outputs[0],n);
   } else {
-    int i = 0;
-    for (Variable output : outputs) {
-      assignOutput(output, graph->appendNode(graph->createSelect(n, i)));
-      i++;
+    for(size_t i = 0; i < outputs.size(); i++) {
+      assignOutput(outputs[i], graph->appendNode(graph->createSelect(n, i)));
     }
   }
-
-  /*
-  // Want to do this eventually, but we also need to deal with Handles in this
-  // world
-  if (outputs.size() != 1) {
-    int i = 0;
-    for (Variable output : outputs) {
-      Node* sel = graph->appendNode(graph->createSelect(n, i));
-      // TODO: Track inplace operations (needed for JIT).
-      if (output.defined()) {
-        sel->inferTypeFrom(output.data());
-        setValueTrace(state, output, sel);
-      }
-      i++;
-    }
-  } else {
-    setValueTrace(state, outputs.front(), n);
-  }
-  */
 
   // Return the n so that attributes can be added.
   return n;

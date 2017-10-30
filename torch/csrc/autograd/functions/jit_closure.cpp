@@ -515,7 +515,6 @@ struct StageClosure {
     IR_ELSEIF(Select)
       // No-op. Selects are handled by their inputs.
       return nullptr;
-#undef IR_ELSEIF_TRIVIAL
     IR_ELSEIF(FusionGroup)
 #ifdef WITH_CUDA
       // TODO: make this more robust - handle device and contiguity changes!
