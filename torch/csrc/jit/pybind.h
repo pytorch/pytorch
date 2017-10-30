@@ -83,5 +83,16 @@ public:
   }
 };
 
+// See https://github.com/pybind/pybind11/issues/637
+using ListCasterBase = pybind11::detail::list_caster<std::vector<torch::jit::Node *>, torch::jit::Node *>;
+template<> struct type_caster<std::vector<torch::jit::Node *>> : ListCasterBase {
+    static handle cast(const std::vector<torch::jit::Node *> &src, return_value_policy, handle parent) {
+        return ListCasterBase::cast(src, return_value_policy::reference, parent);
+    }
+    static handle cast(const std::vector<torch::jit::Node *> *src, return_value_policy pol, handle parent) {
+        return cast(*src, pol, parent);
+    }
+};
+
 }} // namespace pybind11::detail
 

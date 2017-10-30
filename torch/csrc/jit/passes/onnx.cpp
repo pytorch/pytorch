@@ -162,7 +162,8 @@ void ToONNX(std::shared_ptr<tracer::TracingState>& state) {
     Py_ssize_t input_nr = 0;
     py::tuple py_symbolic_args(1 + op->cconv.size());
     py_symbolic_args[input_nr++] = py::cast(ctx.graph);
-    auto node_it = op->inputs().begin();
+    auto inputs = op->inputs();
+    auto node_it = inputs.begin();
     auto scalar_it = op->scalar_args.begin();
     for (auto arg_type : op->cconv) {
       py::object obj;
@@ -170,7 +171,7 @@ void ToONNX(std::shared_ptr<tracer::TracingState>& state) {
         JIT_ASSERTM(scalar_it != op->scalar_args.end(), "expected too many scalar args");
         obj = py::reinterpret_borrow<py::object>(py::handle((scalar_it++)->get()));
       } else if (arg_type == 't') {
-        JIT_ASSERTM(node_it != op->inputs().end(), "expected too many inputs");
+        JIT_ASSERTM(node_it != inputs.end(), "expected too many inputs");
         obj = py::cast(envFn(*node_it++));
       } else {
         throw std::runtime_error("unexpected calling convention");

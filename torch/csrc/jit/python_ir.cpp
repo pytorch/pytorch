@@ -21,10 +21,11 @@ void initPythonIRBindings(PyObject * module_) {
       ss << g;
       return ss.str();
     })
-    .GS(inputs)
-    .GS(outputs)
+    .def("inputs",[](Graph &g) { return g.inputs(); })
+    .def("outputs",[](Graph &g) { return g.outputs(); })
+    // TODO: Iterator invalidation might make this hazardous
     .def("nodes",[](Graph &g) {
-      return py::make_iterator(g.nodes().begin(),g.nodes().end());
+      return py::make_iterator(g.begin(), g.end());
     })
     .def("addInput",[](Graph &g) { return g.addInput(); })
     .GS(advanceStage)
@@ -75,9 +76,9 @@ void initPythonIRBindings(PyObject * module_) {
     .NS(uniqueName)
     .NS(setStage)
     .NS(stage)
-    .NS(inputs)
-    .NS(input)
-    .NS(outputs)
+    .def("inputs",[](Node &n) { return n.inputs(); })
+    .def("outputs",[](Node &n) { return n.outputs(); })
+    .def("input",[](Node &n) { return n.input(); })
     .NS(offset)
     .NS(uses)
     .NS(addInput)

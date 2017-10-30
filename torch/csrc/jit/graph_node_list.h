@@ -35,6 +35,7 @@ struct generic_graph_node_list_iterator;
 
 struct Node;
 using graph_node_list = generic_graph_node_list<Node>;
+using const_graph_node_list = generic_graph_node_list<const Node>;
 using graph_node_list_iterator = generic_graph_node_list_iterator<Node>;
 using const_graph_node_list_iterator = generic_graph_node_list_iterator<const Node>;
 

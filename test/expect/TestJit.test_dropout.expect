@@ -1,0 +1,4 @@
+graph(%1 : Double(2, 2)) {
+  %3 : Double(2, 2), %4 : Handle = ^Dropout(0.6, True, False)(%1), uses = [[%0.i0], []];
+  return (%3);
+}

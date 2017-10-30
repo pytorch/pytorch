@@ -258,7 +258,7 @@ bool fusibleExpandTo(at::IntList from, at::IntList to) {
 // local information.  This optimization is not useful for PyTorch as 'expand'
 // is free.
 void fuseBroadcast(const std::shared_ptr<Graph>& graph) {
-  for (auto it = graph->nodes().begin(); it != graph->nodes().end(); ++it) {
+  for (auto it = graph->begin(); it != graph->end(); ++it) {
     auto* n = *it;
 
     // Can't fuse into nodes that don't support broadcasting
@@ -271,28 +271,29 @@ void fuseBroadcast(const std::shared_ptr<Graph>& graph) {
     if (n->hasAttribute(kbroadcast) && n->i(kbroadcast)) continue;
     JIT_ASSERT(!n->hasAttribute(kaxis));
 
-    auto* rhs = n->inputs().at(n->inputs().size() - 1);
+    auto input_index = n->inputs().size() - 1;
+    auto* expanded_rhs = n->inputs().at(input_index);
 
-    // The rhs input isn't actually an expand, so no fusion available
-    if (rhs->kind() != kExpand) continue;
+    // The expanded_rhs input isn't actually an expand, so no fusion available
+    if (expanded_rhs->kind() != kExpand) continue;
 
-    auto* new_rhs = rhs->input();
+    auto* unexpanded_rhs = expanded_rhs->input();
 
     // We need to know what the type pre-expand is.  We should basically
     // always have this information (because expands are only ever traced,
     // not generated from symbolic), but if for some reason we don't
     // have it, we need to skip.
-    if (!new_rhs->hasType()) continue;
+    if (!unexpanded_rhs->hasType()) continue;
 
     // Not all broadcasts are supported by ONNX broadcast.
-    if (!fusibleExpandTo(new_rhs->type()->expect<TensorType>()->sizes(),    // from
-                         rhs->type()->expect<TensorType>()->sizes()) // to
+    if (!fusibleExpandTo(unexpanded_rhs->type()->expect<TensorType>()->sizes(),    // from
+                         expanded_rhs->type()->expect<TensorType>()->sizes()) // to
        ) continue;
 
-    n->replaceInput(n->inputs().size() - 1, new_rhs);
-    n->i_(kbroadcast,1);
-    if (rhs->uses().size() == 0) {
-      rhs->destroy();
+    n->replaceInput(input_index, unexpanded_rhs);
+    n->i_(kbroadcast, 1);
+    if (expanded_rhs->uses().size() == 0) {
+      expanded_rhs->destroy();
     }
   }
 }
@@ -302,7 +303,7 @@ void standardizeGraph(const std::shared_ptr<Graph>& graph) {
   // TODO: move this out of here...
   fuseBroadcast(graph);
 
-  for (auto it = graph->nodes().begin(); it != graph->nodes().end(); ++it) {
+  for (auto it = graph->begin(); it != graph->end(); ++it) {
       // Macro'ed so we get a marginally better line number on failed export
 #define FAIL_EXPORT(name) \
       throw std::runtime_error(std::string("ONNX export failed: ") + name + "\n\nGraph we tried to export:\n" + graph->toString());
