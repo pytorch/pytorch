@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+#include "caffe2/core/common_gpu.h"
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/operators/fully_connected_op.h"
 
@@ -29,12 +30,33 @@ bool FullyConnectedOp<CUDAContext>::RunOnDevice() {
         float, // Y
         float>(); // Math
   } else if (Input(0).IsType<float16>()) {
-    return DoRunWithType<
-        float16, // X
-        float16, // W
-        float16, // B
-        float16, // Y
-        float>(); // Math
+    if (float16_compute_) {
+      const cudaDeviceProp& prop = GetDeviceProperty(0);
+      if (prop.major >= 6) {
+        return DoRunWithType<
+            float16, // X
+            float16, // W
+            float16, // B
+            float16, // Y
+            float16>(); // Math
+      } else {
+        LOG(INFO)
+            << "CUDA Device does not support FP16 computation, falling back to FP32.";
+        return DoRunWithType<
+            float16, // X
+            float16, // W
+            float16, // B
+            float16, // Y
+            float>(); // Math
+      }
+    } else {
+      return DoRunWithType<
+          float16, // X
+          float16, // W
+          float16, // B
+          float16, // Y
+          float>(); // Math
+    }
   } else {
     CAFFE_THROW("Unsupported type");
   }
@@ -54,15 +76,42 @@ bool FullyConnectedGradientOp<CUDAContext>::RunOnDevice() {
         float, // dB
         float>(); // Math
   } else if (Input(0).IsType<float16>()) {
-    return DoRunWithType<
-        float16, //  X
-        float16, //  W
-        float16, // dY
-        float16, //  B
-        float16, // dX
-        float16, // dW
-        float16, // dB
-        float>(); // Math
+    if (float16_compute_) {
+      const cudaDeviceProp& prop = GetDeviceProperty(0);
+      if (prop.major >= 6) {
+        return DoRunWithType<
+            float16, //  X
+            float16, //  W
+            float16, // dY
+            float16, //  B
+            float16, // dX
+            float16, // dW
+            float16, // dB
+            float16>(); // Math
+      } else {
+        LOG(INFO)
+            << "CUDA Device does not support FP16 computation, falling back to FP32.";
+        return DoRunWithType<
+            float16, //  X
+            float16, //  W
+            float16, // dY
+            float16, //  B
+            float16, // dX
+            float16, // dW
+            float16, // dB
+            float>(); // Math
+      }
+    } else {
+      return DoRunWithType<
+          float16, //  X
+          float16, //  W
+          float16, // dY
+          float16, //  B
+          float16, // dX
+          float16, // dW
+          float16, // dB
+          float>(); // Math
+    }
   } else {
     CAFFE_THROW("Unsupported type");
   }
@@ -140,4 +189,4 @@ REGISTER_CUDA_OPERATOR_WITH_ENGINE(
     FullyConnectedGradientOp<CUDAContext, TensorCoreEngine>);
 #endif
 
-}  // namespace caffe2
+} // namespace caffe2

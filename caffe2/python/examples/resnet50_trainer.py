@@ -322,13 +322,14 @@ def Train(args):
 
     # Model building functions
     def create_resnet50_model_ops(model, loss_scale):
-        initializer = (pFP16Initializer if args.dtype == 'float16'
-                       else Initializer)
+        enable_float16 = True if args.dtype == 'float16' else False
+        initializer = (pFP16Initializer if enable_float16 else Initializer)
 
         with brew.arg_scope([brew.conv, brew.fc],
                             WeightInitializer=initializer,
                             BiasInitializer=initializer,
-                            enable_tensor_core=args.enable_tensor_core):
+                            enable_tensor_core=args.enable_tensor_core,
+                            float16_compute=enable_float16):
             pred = resnet.create_resnet50(
                 model,
                 "data",
@@ -336,11 +337,8 @@ def Train(args):
                 num_labels=args.num_labels,
                 no_bias=True,
                 no_loss=True,
-                fp16_data=True if args.dtype == 'float16' else False,
+                fp16_data=enable_float16,
             )
-
-        if args.dtype == 'float16':
-            pred = model.net.HalfToFloat(pred, pred + '_fp32')
 
         softmax, loss = model.SoftmaxWithLoss([pred, 'label'],
                                               ['softmax', 'loss'])

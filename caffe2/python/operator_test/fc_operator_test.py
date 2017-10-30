@@ -67,6 +67,12 @@ class TestFcOperator(hu.HypothesisTestCase):
             engine=engine,
         )
 
+        if dtype == np.float16 and gc.device_type == caffe2_pb2.CUDA:
+            a = caffe2_pb2.Argument()
+            a.i = 1
+            a.name = "float16_compute"
+            op.arg.extend([a])
+
         # Check against numpy reference
         self.assertReferenceChecks(
             device_option=gc,
