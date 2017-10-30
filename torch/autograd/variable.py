@@ -446,8 +446,14 @@ class Variable(_C._VariableBase):
     def __rpow__(self, other):
         return PowConstant.apply(other, self)
 
-    def __neg__(self):
-        return Negate.apply(self)
+    __neg__ = _C._VariableBase.neg
+
+    __eq__ = _C._VariableBase.eq
+    __ne__ = _C._VariableBase.ne
+    __lt__ = _C._VariableBase.lt
+    __le__ = _C._VariableBase.le
+    __gt__ = _C._VariableBase.gt
+    __ge__ = _C._VariableBase.ge
 
     def __len__(self):
         return len(self.data)

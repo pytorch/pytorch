@@ -30,12 +30,6 @@ PyMethodDef variable_methods[] = {
   {"__div__", (PyCFunction)THPVariable_div, METH_VARARGS | METH_KEYWORDS, NULL},
   {"__truediv__", (PyCFunction)THPVariable_div, METH_VARARGS | METH_KEYWORDS, NULL},
   {"__idiv__", (PyCFunction)THPVariable_div_, METH_VARARGS | METH_KEYWORDS, NULL},
-  {"__eq__", (PyCFunction)THPVariable_eq, METH_VARARGS | METH_KEYWORDS, NULL},
-  {"__ne__", (PyCFunction)THPVariable_ne, METH_VARARGS | METH_KEYWORDS, NULL},
-  {"__lt__", (PyCFunction)THPVariable_lt, METH_VARARGS | METH_KEYWORDS, NULL},
-  {"__le__", (PyCFunction)THPVariable_le, METH_VARARGS | METH_KEYWORDS, NULL},
-  {"__gt__", (PyCFunction)THPVariable_gt, METH_VARARGS | METH_KEYWORDS, NULL},
-  {"__le__", (PyCFunction)THPVariable_ge, METH_VARARGS | METH_KEYWORDS, NULL},
   {"__mod__", (PyCFunction)THPVariable_remainder, METH_VARARGS | METH_KEYWORDS, NULL},
   ${py_method_defs}
   {NULL}
