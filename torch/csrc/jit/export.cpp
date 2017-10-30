@@ -271,7 +271,6 @@ void fuseBroadcast(const std::shared_ptr<Graph>& graph) {
     if (n->hasAttribute(kbroadcast) && n->i(kbroadcast)) continue;
     JIT_ASSERT(!n->hasAttribute(kaxis));
 
-    // TODO: switch ATen tracing to not insert selects for single output.
     auto* rhs = n->inputs().at(n->inputs().size() - 1);
 
     // The rhs input isn't actually an expand, so no fusion available
@@ -290,17 +289,10 @@ void fuseBroadcast(const std::shared_ptr<Graph>& graph) {
                          rhs->type()->expect<TensorType>()->sizes()) // to
        ) continue;
 
-    auto *new_n = graph->createClone(n, [&](Node* n) { return n == rhs ? new_rhs : n; });
-    new_n->i_(kbroadcast, 1);
-    new_n->insertAfter(n);
-    n->replaceAllUsesWith(new_n);
-    it.destroyCurrent();
+    n->replaceInput(n->inputs().size() - 1, new_rhs);
+    n->i_(kbroadcast,1);
     if (rhs->uses().size() == 0) {
-      if (*it == rhs) {
-        it.destroyCurrent();
-      } else {
-        rhs->destroy();
-      }
+      rhs->destroy();
     }
   }
 }
