@@ -38,6 +38,7 @@ struct RNNNetOperator {
   std::vector<int> dependencies;
   std::vector<int> parents;
   bool frontier = true;
+  bool has_timestep_blob = false;
 
   explicit RNNNetOperator(const OperatorDef& def, int order) : order(order) {
     proc_inputs = 0;
