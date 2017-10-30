@@ -129,6 +129,13 @@ std::string nodeName(Node * n) {
   return "n" + std::to_string(n->unique());
 }
 
+ std::string scalarValue(const at::Tensor & t) {
+  auto s =  at::Scalar(t);
+  return (s.isIntegral()) ?
+    std::to_string(s.toLong()) :
+    std::to_string(s.toDouble());
+}
+
 // TODO: we need to support double-precision
 std::unordered_map<NodeKind,std::function<std::string(Node*)>> simple_map_ops = {
   {ksigmoid,         [](Node*) { return "1.f / (1.f + expf(-${0}))"; }},
@@ -137,8 +144,8 @@ std::unordered_map<NodeKind,std::function<std::string(Node*)>> simple_map_ops = 
   {kadd,             [](Node*n) -> std::string {
     if(n->inputs().size() == 2)
       return "${0} + ${1}";
-    else // TODO: support both float and int constants
-      return "${0} + " + std::to_string(n->f(kvalue));
+    else
+      return "${0} + " + scalarValue(n->t(kother));
   }},
   {kneg,             [](Node*) { return "(-${0})"; }},
 
@@ -345,6 +352,7 @@ void compressContiguous(
 } // anonymous namespace
 
 void CompiledFusionFunction::launch(at::ArrayRef<at::Tensor> inputs, at::ArrayRef<at::Tensor> outputs) {
+  AutoGPU gpu_guard(inputs);
   JIT_ASSERT(inputs.size() == input_desc.size());
   JIT_ASSERT(outputs.size() == output_desc.size());
   size_t flat_outputs_size = 0;

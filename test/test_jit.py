@@ -146,6 +146,20 @@ class TestJit(TestCase):
         self.assertEqual(z, torch.sigmoid(torch.tanh(x * (x + y))))
         self.assertEqual(z, z2)
 
+    @unittest.skipIf(not torch.cuda.is_available(), "fuser requires CUDA")
+    def test_compile_addc(self):
+        x = Variable(torch.Tensor([0.4]), requires_grad=True).cuda()
+        y = Variable(torch.Tensor([0.7]), requires_grad=True).cuda()
+
+        @torch.jit.compile(nderivs=0)
+        def doit(x, y):
+            return torch.sigmoid(torch.tanh(x / 2 * (x + y) + 1))
+
+        z = doit(x, y)
+        z2 = doit(x, y, _assert_compiled=True)
+        self.assertEqual(z, torch.sigmoid(torch.tanh(x / 2 * (x + y) + 1)))
+        self.assertEqual(z, z2)
+
     def test_traced_function(self):
         x = Variable(torch.Tensor([0.4]), requires_grad=True)
         y = Variable(torch.Tensor([0.7]), requires_grad=True)
