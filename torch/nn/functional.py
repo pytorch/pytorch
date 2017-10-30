@@ -314,6 +314,11 @@ Args:
 # share the same interface
 def max_pool1d(input, kernel_size, stride=None, padding=0, dilation=1,
                ceil_mode=False, return_indices=False):
+    """Applies a 1D max pooling over an input signal composed of several input
+    planes.
+
+    See :class:`~torch.nn.MaxPool1d` for details.
+    """
     ret = _functions.thnn.MaxPool1d.apply(input, kernel_size, stride, padding, dilation,
                                           ceil_mode)
     return ret if return_indices else ret[0]
@@ -321,12 +326,22 @@ def max_pool1d(input, kernel_size, stride=None, padding=0, dilation=1,
 
 def max_pool2d(input, kernel_size, stride=None, padding=0, dilation=1,
                ceil_mode=False, return_indices=False):
+    """Applies a 2D max pooling over an input signal composed of several input
+    planes.
+
+    See :class:`~torch.nn.MaxPool2d` for details.
+    """
     ret = torch._C._nn.max_pool2d(input, kernel_size, stride, padding, dilation, ceil_mode)
     return ret if return_indices else ret[0]
 
 
 def max_pool3d(input, kernel_size, stride=None, padding=0, dilation=1,
                ceil_mode=False, return_indices=False):
+    """Applies a 3D max pooling over an input signal composed of several input
+    planes.
+
+    See :class:`~torch.nn.MaxPool2d` for details.
+    """
     ret = _functions.thnn.MaxPool3d.apply(input, kernel_size, stride, padding, dilation,
                                           ceil_mode)
     return ret if return_indices else ret[0]
@@ -362,6 +377,10 @@ def _unpool_output_size(input, kernel_size, stride, padding, output_size):
 
 def max_unpool1d(input, indices, kernel_size, stride=None, padding=0,
                  output_size=None):
+    """Computes a partial inverse of :class:`MaxPool1d`.
+
+    See :class:`~torch.nn.MaxUnpool1d` for details.
+    """
     kernel_size = _single(kernel_size)
     stride = _single(stride)
     padding = _single(padding)
@@ -372,6 +391,10 @@ def max_unpool1d(input, indices, kernel_size, stride=None, padding=0,
 
 def max_unpool2d(input, indices, kernel_size, stride=None, padding=0,
                  output_size=None):
+    """Computes a partial inverse of :class:`MaxPool2d`.
+
+    See :class:`~torch.nn.MaxUnpool2d` for details.
+    """
     kernel_size = _pair(kernel_size)
     stride = _pair(stride)
     padding = _pair(padding)
@@ -382,6 +405,10 @@ def max_unpool2d(input, indices, kernel_size, stride=None, padding=0,
 
 def max_unpool3d(input, indices, kernel_size, stride=None, padding=0,
                  output_size=None):
+    """Computes a partial inverse of :class:`MaxPool3d`.
+
+    See :class:`~torch.nn.MaxUnpool3d` for details.
+    """
     kernel_size = _triple(kernel_size)
     stride = _triple(stride)
     padding = _triple(padding)
@@ -391,12 +418,22 @@ def max_unpool3d(input, indices, kernel_size, stride=None, padding=0,
 
 
 def lp_pool2d(input, norm_type, kernel_size, stride=None, ceil_mode=False):
+    """Applies a 2D power-average pooling over an input signal composed of
+    several input planes.
+
+    See :class:`~torch.nn.LPPool2d` for details.
+    """
     kw, kh = utils._pair(kernel_size)
     out = avg_pool2d(input.pow(norm_type), kernel_size, stride, 0, ceil_mode)
     return out.mul(kw * kh).pow(1. / norm_type)
 
 
 def lp_pool1d(input, norm_type, kernel_size, stride=None, ceil_mode=False):
+    """Applies a 1D power-average pooling over an input signal composed of
+    several input planes.
+
+    See :class:`~torch.nn.LPPool1d` for details.
+    """
     out = avg_pool1d(input.pow(norm_type), kernel_size, stride, 0, ceil_mode)
     return out.mul(kernel_size).pow(1. / norm_type)
 
@@ -530,10 +567,19 @@ def dropout3d(input, p=0.5, training=False, inplace=False):
 
 threshold = _add_docstr(torch._C._nn.threshold, r"""
 threshold(input, threshold, value, inplace=False) -> Variable
+
+Thresholds each element of the input Tensor.
+
+See :class:`~torch.nn.Threshold` for more details.
 """)
 
 
 def relu(input, inplace=False):
+    """relu(input, threshold, value, inplace=False) -> Variable
+
+    Applies the rectified linear unit function element-wise. See
+    :class:`~torch.nn.ReLU` for more details.
+    """
     return threshold(input, 0, 0, inplace)
 
 
@@ -557,24 +603,52 @@ Args:
 
 hardtanh = _add_docstr(torch._C._nn.hardtanh, r"""
 hardtanh(input, min_val=-1., max_val=1., inplace=False) -> Variable
+
+Applies the HardTanh function element-wise. See :class:`~torch.nn.Hardtanh` for more
+details.
 """)
 
 
 def relu6(input, inplace=False):
+    r"""relu6(input, inplace=False) -> Variable
+
+    Applies the element-wise function :math:`{ReLU6}(x) = min(max(0,x), 6)`.
+
+    See :class:`~torch.nn.ReLU6` for more details.
+    """
     return hardtanh(input, 0, 6, inplace)
 
 
 elu = _add_docstr(torch._C._nn.elu, r"""
 elu(input, alpha=1., inplace=False) -> Variable
+
+Applies element-wise,
+:math:`f(x) = max(0,x) + min(0, alpha * (exp(x) - 1))`.
+
+See :class:`~torch.nn.ELU` for more details.
 """)
 
 
 def selu(input, inplace=False):
+    r"""selu(input, inplace=False) -> Variable
+
+    Applies element-wise,
+    :math:`f(x) = scale * (\max(0,x) + \min(0, alpha * (\exp(x) - 1)))`,
+    with ``alpha=1.6732632423543772848170429916717`` and
+    ``scale=1.0507009873554804934193349852946``.
+
+    See :class:`~torch.nn.SELU` for more details.
+    """
     return _functions.thnn.SELU.apply(input, inplace)
 
 
 leaky_relu = _add_docstr(torch._C._nn.leaky_relu, r"""
 leaky_relu(input, negative_slope=0.01, inplace=False) -> Variable
+
+Applies element-wise,
+:math:`f(x) = max(0, x) + {negative\_slope} * min(0, x)`
+
+See :class:`~torch.nn.LeakyReLU` for more details.
 """)
 
 
@@ -582,6 +656,14 @@ leaky_relu(input, negative_slope=0.01, inplace=False) -> Variable
 # prelu(input, weight) -> Variable
 # """)
 def prelu(input, weight):
+    r"""prelu(input, weight) -> Variable
+
+    Applies element-wise the function
+    :math:`PReLU(x) = max(0,x) + weight * min(0,x)` where weight is a
+    learnable parameter.
+
+    See :class:`~torch.nn.PReLU` for more details.
+    """
     return _functions.thnn.PReLU.apply(input, weight)
 
 
@@ -591,18 +673,40 @@ rrelu(input, lower=1./8, upper=1./3, training=False, inplace=False) -> Variable
 
 logsigmoid = _add_docstr(torch._C._nn.log_sigmoid, r"""
 logsigmoid(input) -> Variable
+
+Applies element-wise :math:`LogSigmoid(x) = log( 1 / (1 + exp(-x_i)))`
+
+See :class:`~torch.nn.LogSigmoid` for more details.
 """)
 
 hardshrink = _add_docstr(torch._C._nn.hardshrink, r"""
 hardshrink(input, lambd=0.5) -> Variable
+
+Applies the hard shrinkage function element-wise
+
+See :class:`~torch.nn.Hardshrink` for more details.
+
+
 """)
 
 
 def tanhshrink(input):
+    r"""tanhshrink(input) -> Variable
+
+    Applies element-wise, :math:`Tanhshrink(x) = x - Tanh(x)`
+
+    See :class:`~torch.nn.Tanhshrink` for more details.
+    """
     return input - input.tanh()
 
 
 def softsign(input):
+    r"""softsign(input) -> Variable
+
+    Applies element-wise, the function :math:`f(x) = x / (1 + |x|)`
+
+    See :class:`~torch.nn.Softsign` for more details.
+    """
     return input / (input.abs() + 1)
 
 
@@ -625,6 +729,8 @@ def softmin(input, dim=None, _stacklevel=3):
 
     Note that softmin(x) = softmax(-x). See softmax definition for mathematical formula.
 
+    See :class:`~torch.nn.Softmin` for more details.
+
     Arguments:
         input (Variable): input
         dim (int): A dimension along which softmin will be computed (so every slice
@@ -644,6 +750,8 @@ def softmax(input, dim=None, _stacklevel=3):
 
     It is applied to all slices along dim, and will rescale them so that the elements
     lie in the range `(0, 1)` and sum to 1.
+
+    See :class:`~torch.nn.Softmax` for more details.
 
     Arguments:
         input (Variable): input
@@ -667,6 +775,8 @@ def log_softmax(input, dim=None, _stacklevel=3):
     operations separately is slower, and numerically unstable. This function
     uses an alternative formulation to compute the output and gradient correctly.
 
+    See :class:`~torch.nn.LogSoftmax` for more details.
+
     Arguments:
         input (Variable): input
         dim (int): A dimension along which log_softmax will be computed.
@@ -677,14 +787,33 @@ def log_softmax(input, dim=None, _stacklevel=3):
 
 
 def softshrink(input, lambd=0.5):
+    r"""softshrink(input, lambd=0.5) -> Variable
+
+    Applies the soft shrinkage function elementwise
+
+    See :class:`~torch.nn.Softshrink` for more details.
+    """
     return _functions.thnn.auto.Softshrink.apply(input, lambd)
 
 
 def tanh(input):
+    r"""tanh(input) -> Variable
+
+    Applies element-wise,
+    :math:`f(x) = (exp(x) - exp(-x)) / (exp(x) + exp(-x))`
+
+    See :class:`~torch.nn.Tanh` for more details.
+    """
     return input.tanh()
 
 
 def sigmoid(input):
+    r"""sigmoid(input) -> Variable
+
+    Applies the element-wise function :math:`f(x) = 1 / ( 1 + exp(-x))`
+
+    See :class:`~torch.nn.Sigmoid` for more details.
+    """
     return input.sigmoid()
 
 
@@ -976,7 +1105,7 @@ def cross_entropy(input, target, weight=None, size_average=True, ignore_index=-1
     r"""This criterion combines `log_softmax` and `nll_loss` in a single
     function.
 
-    See :class:`torch.nn.CrossEntropyLoss` for details.
+    See :class:`~torch.nn.CrossEntropyLoss` for details.
 
     Args:
         input: Variable :math:`(N, C)` where `C = number of classes`
@@ -1085,44 +1214,81 @@ def binary_cross_entropy_with_logits(input, target, weight=None, size_average=Tr
 
 smooth_l1_loss = _add_docstr(torch._C._nn.smooth_l1_loss, r"""
 smooth_l1_loss(input, target, size_average=True) -> Variable
+
+Function that uses a squared term if the absolute
+element-wise error falls below 1 and an L1 term otherwise.
+
+See :class:`~torch.nn.SmoothL1Loss` for details.
 """)
 
 l1_loss = _add_docstr(torch._C._nn.l1_loss, r"""
 l1_loss(input, target, size_average=True) -> Variable
+
+Function that takes the mean element-wise absolute value difference.
+
+See :class:`~torch.nn.L1Loss` for details.
 """)
 
 mse_loss = _add_docstr(torch._C._nn.mse_loss, r"""
 mse_loss(input, target, size_average=True, reduce=True) -> Variable
+
+Measures the element-wise mean squared error.
+
+See :class:`~torch.nn.MSELoss` for details.
 """)
 
 
 def margin_ranking_loss(input1, input2, target, margin=0, size_average=True):
+    """margin_ranking_loss(input1, input2, target, margin=0, size_average=True) -> Variable
+
+    See :class:`~torch.nn.MarginRankingLoss` for details.
+    """
     return _functions.loss.MarginRankingLoss.apply(input1, input2, target, margin, size_average)
 
 
 def hinge_embedding_loss(input, target, margin=1.0, size_average=True):
+    """hinge_embedding_loss(input, target, margin=1.0, size_average=True) -> Variable
+
+    See :class:`~torch.nn.HingeEmbeddingLoss` for details.
+    """
     return _functions.loss.HingeEmbeddingLoss.apply(input, target, margin, size_average)
 
 
 multilabel_margin_loss = _add_docstr(torch._C._nn.multilabel_margin_loss, r"""
 multilabel_margin_loss(input, target, size_average=True) -> Variable
+
+See :class:`~torch.nn.MultiLabelMarginLoss` for details.
 """)
 
 soft_margin_loss = _add_docstr(torch._C._nn.soft_margin_loss, r"""
 soft_margin_loss(input, target, size_average=True) -> Variable
+
+See :class:`~torch.nn.SoftMarginLoss` for details.
 """)
 
 
 def multilabel_soft_margin_loss(input, target, weight=None, size_average=True):
+    """multilabel_soft_margin_loss(input, target, weight=None, size_average=True) -> Variable
+
+    See :class:`~torch.nn.MultiLabelSoftMarginLoss` for details.
+    """
     input = torch.sigmoid(input)
     return binary_cross_entropy(input, target, weight, size_average)
 
 
 def cosine_embedding_loss(input1, input2, target, margin=0, size_average=True):
+    """cosine_embedding_loss(input1, input2, target, margin=0, size_average=True) -> Variable
+
+    See :class:`~torch.nn.CosineEmbeddingLoss` for details.
+    """
     return _functions.loss.CosineEmbeddingLoss.apply(input1, input2, target, margin, size_average)
 
 
 def multi_margin_loss(input, target, p=1, margin=1, weight=None, size_average=True):
+    """multi_margin_loss(input, target, p=1, margin=1, weight=None, size_average=True) -> Variable
+
+    See :class:`~torch.nn.MultiMarginLoss` for details.
+    """
     if p != 1 and p != 2:
         raise ValueError('only p == 1 and p == 2 supported')
     if weight is not None and weight.dim() != 1:
