@@ -202,7 +202,7 @@ void THBlas_(gemv)(char trans, int64_t m, int64_t n, real alpha, real *a, int64_
 
 #if defined(USE_BLAS) && (defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_FLOAT))
   if( (m <= INT_MAX) && (n <= INT_MAX) &&
-      (lda > 0) && (lda <= INT_MAX) &&
+      (lda >= THMax(1, n)) && (lda <= INT_MAX) &&
       (incx > 0) && (incx <= INT_MAX) &&
       (incy > 0) && (incy <= INT_MAX) )
   {
@@ -259,7 +259,10 @@ void THBlas_(ger)(int64_t m, int64_t n, real alpha, real *x, int64_t incx, real 
     lda = m;
 
 #if defined(USE_BLAS) && (defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_FLOAT))
-  if( (m <= INT_MAX) && (n <= INT_MAX) && (lda <= INT_MAX)  && (incx <= INT_MAX) && (incy <= INT_MAX) )
+  if( (m <= INT_MAX) && (n <= INT_MAX) &&
+      (lda >= THMax(1, n)) && (lda <= INT_MAX) &&
+      (incx > 0) && (incx <= INT_MAX) &&
+      (incy > 0) && (incy <= INT_MAX) )
   {
     int i_m = (int)m;
     int i_n = (int)n;
@@ -318,7 +321,10 @@ void THBlas_(gemm)(char transa, char transb, int64_t m, int64_t n, int64_t k, re
   }
 
 #if defined(USE_BLAS) && (defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_FLOAT))
-  if( (m <= INT_MAX) && (n <= INT_MAX) && (k <= INT_MAX) && (lda <= INT_MAX)  && (ldb <= INT_MAX) && (ldc <= INT_MAX) )
+  if( (m <= INT_MAX) && (n <= INT_MAX) && (k <= INT_MAX) &&
+      (lda >= THMax(1, (transa_ ? m : k))) && (lda <= INT_MAX) &&
+      (ldb >= THMax(1, (transb_ ? k : n))) && (ldb <= INT_MAX) &&
+      (ldc >= THMax(1, n)) && (ldc <= INT_MAX) )
   {
     int i_m = (int)m;
     int i_n = (int)n;
