@@ -29,7 +29,7 @@ _(neg) \
 _(sigmoid) \
 _(tanh) \
 _(Constant) \
-_(Concat) \
+_(cat) \
 _(Slice) \
 _(Squeeze) \
 _(Undefined) \
@@ -69,6 +69,7 @@ _(dilation) \
 _(broadcast) \
 _(axis) \
 _(size) \
+_(dim) \
 _(perm) \
 _(shape) \
 _(axes) \

@@ -553,8 +553,6 @@ struct StageClosure {
       return std::make_shared<LambdaFunction>(3, [beta, alpha](const variable_list& vars) -> variable_list {
         return {vars[2].addmm(vars[0], vars[1], beta, alpha)};
       });
-    IR_ELSEIF(Concat)
-      return std::make_shared<torch::autograd::Cat>(value->i(kaxis));
     IR_ELSE()
       return std::make_shared<LambdaFunction>(getTensorOp(node));
     IR_END()

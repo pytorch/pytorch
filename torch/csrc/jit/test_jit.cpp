@@ -181,7 +181,7 @@ static void fusionTests() {
     Node * i1 = graph.addInput();
     auto o0 = appendNewNode(kmul,graph,{i0, i1});
     graph.registerOutput(o0);
-    graph.registerOutput(appendNewNode(kConcat, graph, {i0,o0})->i_(kaxis, dim));
+    graph.registerOutput(appendNewNode(kcat, graph, {i0,o0})->i_(kdim, dim));
     auto a = at::CUDA(at::kFloat).rand({3,4,5});
     auto b = at::CUDA(at::kFloat).rand({4,3,5}).transpose(0,1);
     auto o = at::CUDA(at::kFloat).zeros({3,4,5});
@@ -236,11 +236,12 @@ void internedStringsTests () {
   JIT_ASSERT(kParam == stringToSymbol("Param"));
   JIT_ASSERT(kReturn == stringToSymbol("Return"));
   JIT_ASSERT(symbolToString(kReturn) == std::string("Return"));
-  JIT_ASSERT(stringToSymbol("What") == kLastSymbol);
-  JIT_ASSERT(stringToSymbol("What2") == kLastSymbol+1);
-  JIT_ASSERT(stringToSymbol("What") == kLastSymbol);
-  JIT_ASSERT(stringToSymbol("What2") == kLastSymbol+1);
-  JIT_ASSERT(symbolToString(kLastSymbol+1) == std::string("What2"));
+  size_t symstart = stringToSymbol("__NEW_SYMBOL");
+  JIT_ASSERT(stringToSymbol("What") == symstart+1);
+  JIT_ASSERT(stringToSymbol("What2") == symstart+2);
+  JIT_ASSERT(stringToSymbol("What") == symstart+1);
+  JIT_ASSERT(stringToSymbol("What2") == symstart+2);
+  JIT_ASSERT(symbolToString(symstart+2) == std::string("What2"));
 }
 
 

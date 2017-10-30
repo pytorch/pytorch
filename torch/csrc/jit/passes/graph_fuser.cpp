@@ -58,7 +58,7 @@ struct GraphFuser {
   bool isFusableAsExitNode(Node * node) {
     if(isFusable(node))
       return true;
-    if(node->kind() != kConcat || !isCuda(node))
+    if(node->kind() != kcat || !isCuda(node))
       return false;
 
     // this concat fusion only works when all the inputs are the same size

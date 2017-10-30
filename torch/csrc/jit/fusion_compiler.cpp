@@ -187,13 +187,13 @@ std::vector<ConcatDesc> emitCompilationUnit(std::ostream & out,
     size_t i = 0;
     for(auto o : subgraph.outputs()) {
       auto & desc = agraph.output_desc[i++];
-      if(o->kind() != kConcat) {
+      if(o->kind() != kcat) {
         emitFormal(o, desc);
         concat_desc.emplace_back();
         flat_output_nodes.push_back(o);
       } else {
         size_t nInputs = o->inputs().size();
-        concat_desc.emplace_back(desc, nInputs, o->i(kaxis));
+        concat_desc.emplace_back(desc, nInputs, o->i(kdim));
         for(auto c : o->inputs()) {
           emitFormal(c, *concat_desc.back().subtensorDesc);
           flat_output_nodes.push_back(c);
@@ -210,7 +210,7 @@ std::vector<ConcatDesc> emitCompilationUnit(std::ostream & out,
     body << format("auto ${node} = ${access};\n",env);
   }
   for(auto n : subgraph.nodes()) {
-    if(n->kind() == kConcat)
+    if(n->kind() == kcat)
       continue; // Concat nodes by narrowing the output Tensors before the kernel runs
     size_t i = 0;
     for(auto in : n->inputs()) {
