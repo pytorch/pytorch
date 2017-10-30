@@ -77,6 +77,7 @@ OPERATOR_SCHEMA(FC)
         "(int32_t) default to 1; describes the axis of the weight matrix W; "
         "defaults to one because the 0th axis most likely describes "
         "the batch_size")
+    .Arg("float16_compute", "Whether to use float-16 compute kernel")
     .Input(
         0,
         "X",
