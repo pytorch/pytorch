@@ -150,6 +150,20 @@ addr_(beta=1, alpha=1, vec1, vec2) -> Tensor
 In-place version of :meth:`~Tensor.addr`
 """)
 
+add_docstr_all('all',
+               """
+all() -> bool
+
+Returns True if all elements in the tensor are non-zero, False otherwise.
+""")
+
+add_docstr_all('any',
+               """
+any() -> bool
+
+Returns True if any elements in the tensor are non-zero, False otherwise.
+""")
+
 add_docstr_all('apply_',
                """
 apply_(callable) -> Tensor

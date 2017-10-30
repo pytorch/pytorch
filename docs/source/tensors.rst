@@ -311,3 +311,10 @@ view of a storage and defines numeric operations on it.
    .. automethod:: view
    .. automethod:: view_as
    .. automethod:: zero_
+
+.. class:: ByteTensor()
+
+   The following methods are unique to :class:`torch.ByteTensor`.
+
+   .. automethod:: all
+   .. automethod:: any
