@@ -167,14 +167,37 @@ class BeamSearchForwardOnly(object):
             value=0,
             dtype=core.DataType.INT32,
         )
-        SLICE_END = self._hack_get_slice_end(
-            self.model,
-            self.step_model,
-            self.timestep,
+        MINUS_ONE_INT32 = self.model.param_init_net.ConstantFill(
+            [],
+            'MINUS_ONE_INT32',
+            value=-1,
+            shape=[1],
+            dtype=core.DataType.INT32,
         )
+        BEAM_SIZE = self.model.param_init_net.ConstantFill(
+            [],
+            'beam_size',
+            shape=[1],
+            value=self.beam_size,
+            dtype=core.DataType.INT32,
+        )
+
+        # current_beam_size (predecessor states from previous step)
+        # is 1 on first step (so we just need beam_size scores),
+        # and beam_size subsequently (so we need all beam_size * beam_size
+        # scores)
+        on_initial_step = self.step_model.net.EQ(
+            [ZERO, self.timestep],
+            'on_initial_step',
+        )
+        slice_end = self.step_model.net.Conditional(
+            [on_initial_step, BEAM_SIZE, MINUS_ONE_INT32],
+            ['slice_end'],
+        )
+
         # [current_beam_size * beam_size]
         output_scores_flattened_slice = self.step_model.net.Slice(
-            [output_scores_flattened, ZERO, SLICE_END],
+            [output_scores_flattened, ZERO, slice_end],
             'output_scores_flattened_slice',
         )
         # [1, current_beam_size * beam_size]
@@ -192,16 +215,14 @@ class BeamSearchForwardOnly(object):
             ['scores_t', 'best_indices'],
             k=self.beam_size,
         )
-        BEAM_SIZE = self.model.param_init_net.ConstantFill(
-            [],
-            'beam_size',
-            shape=[1],
-            value=self.beam_size,
-            dtype=core.DataType.INT64,
+        BEAM_SIZE_64 = self.model.param_init_net.Cast(
+            BEAM_SIZE,
+            'BEAM_SIZE_64',
+            to=core.DataType.INT64,
         )
         # [1, beam_size]
         hypo_t_int32 = self.step_model.net.Div(
-            [best_indices, BEAM_SIZE],
+            [best_indices, BEAM_SIZE_64],
             'hypo_t_int32',
             broadcast=1,
         )
@@ -423,57 +444,3 @@ class BeamSearchForwardOnly(object):
             output_score_beam_list,
             output_attention_weights_beam_list,
         )
-
-    def _max_int32(self, model, a_int32, b_int32, output_name):
-        a_float = model.net.Cast(a_int32, 'a_float', to=core.DataType.FLOAT)
-        b_float = model.net.Cast(b_int32, 'b_float', to=core.DataType.FLOAT)
-        m_float = model.net.Max([a_float, b_float], output_name + '_float')
-        m_int32 = model.net.Cast(m_float, output_name, to=core.DataType.INT32)
-        return m_int32
-
-    # Function returns (beam_size if timestep == 0 else -1)
-    def _hack_get_slice_end(self, param_init_model, model, timestep):
-        timestep_negative = model.net.Negative(
-            timestep,
-            'timestep_negative',
-        )
-        ONE_INT32 = param_init_model.param_init_net.ConstantFill(
-            [],
-            'ONE_INT32',
-            value=1,
-            shape=[1],
-            dtype=core.DataType.INT32,
-        )
-        MINUS_ONE_INT32 = param_init_model.param_init_net.ConstantFill(
-            [],
-            'MINUS_ONE_INT32',
-            value=-1,
-            shape=[1],
-            dtype=core.DataType.INT32,
-        )
-        zero_or_minus_one = self._max_int32(
-            model=model,
-            a_int32=timestep_negative,
-            b_int32=MINUS_ONE_INT32,
-            output_name='zero_or_minus_one',
-        )
-        BEAM_SIZE_PLUS_ONE = param_init_model.param_init_net.ConstantFill(
-            [],
-            'BEAM_SIZE_PLUS_ONE',
-            value=self.beam_size + 1,
-            shape=[1],
-            dtype=core.DataType.INT32,
-        )
-        one_or_zero = model.net.Add(
-            [zero_or_minus_one, ONE_INT32],
-            'one_or_zero',
-        )
-        beam_size_plus_one_or_zero = model.net.Mul(
-            [BEAM_SIZE_PLUS_ONE, one_or_zero],
-            'beam_size_plus_one_or_zero',
-        )
-        beam_size_or_minus_one = model.net.Add(
-            [beam_size_plus_one_or_zero, MINUS_ONE_INT32],
-            'beam_size_or_minus_one'
-        )
-        return beam_size_or_minus_one
