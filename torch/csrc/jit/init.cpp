@@ -8,6 +8,7 @@
 #include "torch/csrc/jit/passes/dead_code_elimination.h"
 #include "torch/csrc/jit/passes/common_subexpression_elimination.h"
 #include "torch/csrc/jit/passes/peephole.h"
+#include "torch/csrc/jit/passes/onnx/peephole.h"
 
 
 
@@ -39,6 +40,7 @@ void initJITBindings(PyObject *module) {
 
   m.def("_jit_init", loadPythonClasses)
    .def("_jit_pass_onnx", ToONNX)
+   .def("_jit_pass_onnx_peephole", graph_pass<PeepholeOptimizeONNX>)
    .def("_jit_pass_fuse", graph_pass<FuseGraph>)
    .def("_jit_pass_dce", graph_pass<EliminateDeadCode>)
    .def("_jit_pass_cse", graph_pass<EliminateCommonSubexpression>)
