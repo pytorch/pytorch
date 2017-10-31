@@ -139,6 +139,12 @@ namespace at {
       return Data[Index];
     }
 
+    /// Vector compatibility
+    const T &at(size_t Index) const {
+      assert(Index < Length && "Invalid index!");
+      return Data[Index];
+    }
+
     /// Disallow accidental assignment from a temporary.
     ///
     /// The declaration here is extra complicated so that "arrayRef = {}"
