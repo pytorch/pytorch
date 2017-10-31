@@ -171,15 +171,19 @@ public:
   size_t stage() const {
     return stage_;
   }
-  // NB: this interface returns a copy!  This is the only reasonable
-  // way to get a vector of const Node*.  But it's easy to argument
-  // that this interface is more intuitive, since it avoids an alias
-  // to an underlying vector that could be mutated.
-  std::vector<Node*> inputs() {
+  // NB: This returns an ArrayRef; that means that it will
+  // get invalidated if you resize inputs (e.g., using addInput)
+  // We can't return a std::vector<Node*>& because there's no
+  // way to soundly cast to std::vector<const Node*> (an insane
+  // implementation of std::vector could make this representationally
+  // different.)
+  at::ArrayRef<Node*> inputs() {
     return inputs_;
   }
-  std::vector<const Node*> inputs() const {
-    return {inputs_.begin(), inputs_.end()};
+  at::ArrayRef<const Node*> inputs() const {
+    // Vectors are not convertible in const-ness of elements, but
+    // raw pointers are.
+    return {inputs_.data(), inputs_.size()};
   }
   // lots of things like select/chunk have a single input, so we have a
   // helper to make accessing it easier
@@ -191,10 +195,20 @@ public:
     JIT_ASSERT(inputs_.size() == 1);
     return inputs_.at(0);
   }
+  // Access a particular input.  This is a checked index.
+  Node * input(size_t i) {
+    return inputs_.at(i);
+  }
+  const Node * input(size_t i) const {
+    return inputs_.at(i);
+  }
   // this is a function helps handle
   // single and multi-return nodes in a consistent way
   // it also provides a layer of abstraction if we
   // ever need to change the way we represent multiple outputs
+  //
+  // WARNING: this returns a COPY of the outputs, so editing
+  // this vector isn't going to do anything.
   std::vector<const Node*> outputs() const {
     if(!hasMultipleOutputs())
       return { this };
@@ -531,16 +545,16 @@ public:
   , new_node_stage_(0)
   , output_(initOutput(create(kReturn))) {}
 
-  std::vector<const Node*> inputs() const {
-    return {inputs_.begin(), inputs_.end()};
-  }
-  std::vector<Node*> inputs() {
+  at::ArrayRef<Node*> inputs() {
     return inputs_;
   }
-  std::vector<Node*> outputs() {
+  at::ArrayRef<const Node*> inputs() const {
+    return {inputs_.data(), inputs_.size()};
+  }
+  at::ArrayRef<Node*> outputs() {
     return output_->inputs();
   }
-  std::vector<const Node*> outputs() const {
+  at::ArrayRef<const Node*> outputs() const {
     return static_cast<const Node*>(output_)->inputs();
   }
   graph_node_list nodes() {
