@@ -21,7 +21,9 @@ from __future__ import unicode_literals
 import functools
 
 import hypothesis
-from hypothesis import given, strategies as st
+from hypothesis import given, assume, strategies as st
+from caffe2.proto import caffe2_pb2
+from caffe2.python import workspace
 import numpy as np
 
 from caffe2.python import core
@@ -31,11 +33,21 @@ import caffe2.python.hypothesis_test_util as hu
 class TestAdagrad(hu.HypothesisTestCase):
 
     @staticmethod
-    def ref_adagrad(param_in, mom_in, grad, lr, epsilon):
-        mom_out = mom_in + np.square(grad)
+    def ref_adagrad(param_in, mom_in, grad, lr, epsilon, using_fp16=False):
+        mom_in_f32 = mom_in
+        param_in_f32 = param_in
+        if(using_fp16):
+            mom_in_f32 = mom_in.astype(np.float32)
+            param_in_f32 = param_in.astype(np.float32)
+
+        mom_out = mom_in_f32 + np.square(grad)
         grad_adj = lr * grad / (np.sqrt(mom_out) + epsilon)
-        param_out = param_in + grad_adj
-        return (param_out, mom_out)
+        param_out = param_in_f32 + grad_adj
+
+        if(using_fp16):
+            return (param_out.astype(np.float16), mom_out.astype(np.float16))
+        else:
+            return (param_out.astype(np.float32), mom_out.astype(np.float32))
 
     @staticmethod
     def ref_row_wise_adagrad(param_in, mom_in, grad, lr, epsilon):
@@ -102,18 +114,40 @@ class TestAdagrad(hu.HypothesisTestCase):
             epsilon=epsilon,
             device_option=gc)
 
-        def ref_sparse(param, momentum, indices, grad, lr):
+        def ref_sparse(param, momentum, indices, grad, lr, ref_using_fp16=False):
             param_out = np.copy(param)
             momentum_out = np.copy(momentum)
             for i, index in enumerate(indices):
                 param_out[index], momentum_out[index] = self.ref_adagrad(
-                    param[index], momentum[index], grad[i], lr, epsilon)
+                    param[index],
+                    momentum[index],
+                    grad[i],
+                    lr,
+                    epsilon,
+                    using_fp16=ref_using_fp16
+                )
             return (param_out, momentum_out)
 
+        ref_using_fp16_values = [False]
+        if workspace.has_gpu_support:
+            ref_using_fp16_values.append(True)
+
+        for ref_using_fp16 in ref_using_fp16_values:
+            if(ref_using_fp16):
+                print('test_sparse_adagrad with half precision embedding')
+                assume(gc.device_type == caffe2_pb2.CUDA)
+                dc = [do for do in dc if do.device_type == caffe2_pb2.CUDA]
+                momentum_i = momentum.astype(np.float16)
+                param_i = param.astype(np.float16)
+            else:
+                print('test_sparse_adagrad with full precision embedding')
+                momentum_i = momentum.astype(np.float32)
+                param_i = param.astype(np.float32)
+
         self.assertReferenceChecks(
-            gc, op,
-            [param, momentum, indices, grad, lr],
-            ref_sparse)
+            gc, op, [param_i, momentum_i, indices, grad, lr, ref_using_fp16],
+            ref_sparse
+        )
 
     @given(inputs=hu.tensors(n=2),
            lr=st.floats(min_value=0.01, max_value=0.99,
@@ -145,10 +179,25 @@ class TestAdagrad(hu.HypothesisTestCase):
             momentum_out = np.copy(momentum)
             return (param_out, momentum_out)
 
+        ref_using_fp16_values = [False]
+        if workspace.has_gpu_support:
+            ref_using_fp16_values.append(True)
+
+        for ref_using_fp16 in ref_using_fp16_values:
+            if(ref_using_fp16):
+                print('test_sparse_adagrad_empty with half precision embedding')
+                assume(gc.device_type == caffe2_pb2.CUDA)
+                dc = [do for do in dc if do.device_type == caffe2_pb2.CUDA]
+                momentum_i = momentum.astype(np.float16)
+                param_i = param.astype(np.float16)
+            else:
+                print('test_sparse_adagrad_empty with full precision embedding')
+                momentum_i = momentum.astype(np.float32)
+                param_i = param.astype(np.float32)
+
         self.assertReferenceChecks(
-            gc, op,
-            [param, momentum, indices, grad, lr],
-            ref_sparse)
+            gc, op, [param_i, momentum_i, indices, grad, lr], ref_sparse
+        )
 
     @given(inputs=hu.tensors(n=2),
            lr=st.floats(min_value=0.01, max_value=0.99,
