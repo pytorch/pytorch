@@ -81,6 +81,7 @@ numpy_type_map = {
 
 def default_collate(batch):
     "Puts each data field into a tensor with outer dimension batch size"
+    elem_type = type(batch[0])
     if torch.is_tensor(batch[0]):
         out = None
         if _use_shared_memory:
@@ -90,9 +91,9 @@ def default_collate(batch):
             storage = batch[0].storage()._new_shared(numel)
             out = batch[0].new(storage)
         return torch.stack(batch, 0, out=out)
-    elif type(batch[0]).__module__ == 'numpy':
+    elif elem_type.__module__ == 'numpy' and elem_type.__name__ != 'str_':
         elem = batch[0]
-        if type(elem).__name__ == 'ndarray':
+        if elem_type.__name__ == 'ndarray':
             return torch.stack([torch.from_numpy(b) for b in batch], 0)
         if elem.shape == ():  # scalars
             py_type = float if elem.dtype.name.startswith('float') else int
