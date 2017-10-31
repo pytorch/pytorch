@@ -308,8 +308,8 @@
   other: grad.clone().masked_fill_(self < other, 0)
 
 - name: mm(Tensor self, Tensor mat2)
-  self: grad.mm(mat2.t())
-  mat2: self.t().mm(grad)
+  self: addmm_mat1_backward(grad, self, mat2, 1) #grad.mm(mat2.t())
+  mat2: addmm_mat2_backward(grad, self, mat2, 1) #self.t().mm(grad)
 
 - name: mode(Tensor self, int64_t dim, bool keepdim)
   self: select_backward(grad, dim, indices, self.sizes(), keepdim)
