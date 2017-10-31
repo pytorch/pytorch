@@ -19,18 +19,19 @@ using operator_constructor = std::function<TensorOp(jit::Node*)>;
 
 namespace {
 
-variable_list pack_list(Tensor v) { return { std::move(v) }; }
-variable_list pack_list(Scalar v) { return { v.toTensor() }; }
-variable_list pack_list(std::vector<Tensor> t) { return fmap<Variable>(t); }
-variable_list pack_list(std::tuple<Tensor, Tensor> v) {
-  return { std::move(std::get<0>(v)), std::move(std::get<1>(v)) };
+void pack_list(std::vector<Tensor> & outputs, Tensor v) { outputs.push_back(v); }
+void pack_list(std::vector<Tensor> & outputs, Scalar v) { outputs.push_back(v.toTensor()); }
+void pack_list(std::vector<Tensor> & outputs, const std::vector<Tensor> & t) {
+  outputs.insert(outputs.end(), t.begin(), t.end());
 }
-variable_list pack_list(std::tuple<Tensor, Tensor, Tensor> v) {
-  return { std::get<0>(v), std::get<1>(v), std::get<2>(v) };
+void pack_list(std::vector<Tensor> & outputs, std::tuple<Tensor, Tensor> v) {
+  outputs.push_back(std::get<0>(v));
+  outputs.push_back(std::get<1>(v));
 }
-
-std::vector<Tensor> as_tensor_list(const variable_list& vars) {
-  return fmap(vars, [](Variable v) { return static_cast<Tensor>(v); });
+void pack_list(std::vector<Tensor> & outputs, std::tuple<Tensor, Tensor, Tensor> v) {
+  outputs.push_back(std::get<0>(v));
+  outputs.push_back(std::get<1>(v));
+  outputs.push_back(std::get<2>(v));
 }
 
 template<size_t N>
