@@ -1,9 +1,5 @@
 #include "TensorDescriptor.hpp"
 #include "Cuda.hpp"
-#include <THPP/tensors/THTensor.hpp>
-#ifdef WITH_CUDA
-#include <THPP/tensors/THCTensor.hpp>
-#endif
 
 THDTensorDescriptor THDTensorDescriptor_newFromTHDoubleTensor(THDoubleTensor *tensor) {
   return at::getType(at::Backend::CPU, at::ScalarType::Double).unsafeTensorFromTH((void*)tensor, true);
