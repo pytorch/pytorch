@@ -28,9 +28,10 @@ OPERATOR_SCHEMA(Slice)
 Produces a slice of the input tensor. Currently, only slicing in a single
 dimension is supported.
 Slices are passed as 2 1D vectors or as two keyword argument lists with starting
-and end indices for each dimension of the input `data` tensor. End indices are
-non-inclusive. If a negative value is passed for any of the start or end
-indices, it represent number of elements before the end of that dimension.
+and end indices for each dimension of the input `data` tensor. If a negative
+value is passed for any of the start or end indices, it represents the number of
+elements before the end of that dimension. End indices are non-inclusive unless
+negative (end index -1 means up to and including the last element).
 
 Example:
 
