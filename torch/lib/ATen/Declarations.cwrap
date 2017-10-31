@@ -495,7 +495,9 @@
   arguments:
     - THTensor* self
     - THIndexTensor* index
-    - arg: THTensor* source
+    - THTensor* source
+    - arg: bool accumulate
+      default: "false"
 ]]
 [[
   name: indexAdd_

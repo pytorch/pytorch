@@ -3456,6 +3456,13 @@ class TestTorch(TestCase):
         check(dst, idx, values)
         check(dst.transpose(1, 2), idx, values)
 
+    def test_put_accumulate(self):
+        dst = torch.ones(2, 2)
+        idx = torch.LongTensor([[0, 1], [0, 1]])
+        src = torch.Tensor([1, 2, 3, 4])
+        dst.put_(idx, src, accumulate=True)
+        self.assertEqual(dst.tolist(), [[5, 7], [1, 1]])
+
     # Fill idx with valid indices.
     @staticmethod
     def _fill_indices(self, idx, dim, dim_size, elems_per_row, m, n, o):

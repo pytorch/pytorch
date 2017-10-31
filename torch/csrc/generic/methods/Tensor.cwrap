@@ -659,7 +659,9 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
   arguments:
     - THTensor* self
     - THIndexTensor* index
-    - arg: THTensor* source
+    - THTensor* source
+    - arg: bool accumulate
+      default: "false"
 ]]
 [[
   name: indexAdd_
