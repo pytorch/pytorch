@@ -132,7 +132,8 @@ def init_data_input_workers(
         global_coordinator.get_queue(input_source_name, max_buffered_batches),
         metrics,
         dont_rebatch,
-        batch_columns
+        batch_columns,
+        timeout=timeout
     )
 
     # Create coordinator object
