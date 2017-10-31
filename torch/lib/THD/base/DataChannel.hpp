@@ -15,6 +15,7 @@
 
 MAKE_HASHABLE(THDReduceOp, static_cast<int>(t));
 MAKE_HASHABLE(thpp::Type, static_cast<char>(t));
+MAKE_HASHABLE(at::ScalarType, static_cast<int>(t));
 
 
 namespace thd {
