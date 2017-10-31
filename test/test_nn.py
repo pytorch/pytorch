@@ -27,8 +27,7 @@ from torch.nn import Parameter
 from torch.nn.parallel._functions import Broadcast
 from common_nn import NNTestCase, ModuleTest, CriterionTest, TestBase, \
     module_tests, criterion_tests, TEST_CUDA, TEST_MULTIGPU, TEST_CUDNN, \
-    TEST_CUDNN_VERSION, nllloss_reference, nllloss2d_reference, \
-    smoothl1loss_reference
+    TEST_CUDNN_VERSION, loss_reference_fns
 from common import freeze_rng_state, run_tests, TestCase, skipIfNoLapack, \
     TEST_SCIPY, download_file
 
@@ -3685,7 +3684,7 @@ def nllloss_no_reduce_test():
             lambda i: F.nll_loss(i, t.type_as(i).long(), **kwargs)),
         input_fn=lambda: torch.rand(15, 10).log(),
         reference_fn=lambda i, _:
-            nllloss_reference(i, t.type_as(i).long(), **kwargs),
+            loss_reference_fns['NLLLoss'](i, t.type_as(i).long(), **kwargs),
         pickle=False)
 
 
@@ -3698,7 +3697,7 @@ def nllloss_no_reduce_ignore_index_test():
             lambda i: F.nll_loss(i, t.type_as(i).long(), **kwargs)),
         input_fn=lambda: torch.rand(15, 10).log(),
         reference_fn=lambda i, _:
-            nllloss_reference(i, t.type_as(i).long(), **kwargs),
+            loss_reference_fns['NLLLoss'](i, t.type_as(i).long(), **kwargs),
         pickle=False)
 
 
@@ -3715,7 +3714,7 @@ def nllloss_no_reduce_weights_test():
             lambda i: F.nll_loss(i, t.type_as(i).long(), **kwargs(i.data))),
         input_fn=lambda: torch.rand(15, 10).add(1e-2).log(),
         reference_fn=lambda i, _:
-            nllloss_reference(i, t.type_as(i).long(), **kwargs(i)),
+            loss_reference_fns['NLLLoss'](i, t.type_as(i).long(), **kwargs(i)),
         pickle=False)
 
 
@@ -3733,7 +3732,7 @@ def nllloss_no_reduce_weights_ignore_index_test():
             lambda i: F.nll_loss(i, t.type_as(i).long(), **kwargs(i.data))),
         input_fn=lambda: torch.rand(15, 10).add(1e-2).log(),
         reference_fn=lambda i, _:
-            nllloss_reference(i, t.type_as(i).long(), **kwargs(i)),
+            loss_reference_fns['NLLLoss'](i, t.type_as(i).long(), **kwargs(i)),
         pickle=False)
 
 
@@ -3751,7 +3750,7 @@ def nllloss_no_reduce_weights_ignore_index_neg_test():
             lambda i: F.nll_loss(i, t.type_as(i).long(), **kwargs(i.data))),
         input=torch.rand(15, 10).add(1e-2).log(),
         reference_fn=lambda i, _:
-            nllloss_reference(i, t.type_as(i).long(), **kwargs(i)),
+            loss_reference_fns['NLLLoss'](i, t.type_as(i).long(), **kwargs(i)),
         pickle=False)
 
 
@@ -3764,7 +3763,7 @@ def nllloss2d_no_reduce_test():
             lambda i: F.nll_loss(i, t.type_as(i).long(), **kwargs)),
         input_fn=lambda: torch.rand(2, 3, 5, 5).log(),
         reference_fn=lambda i, _:
-            nllloss2d_reference(i, t.type_as(i).long(), **kwargs),
+            loss_reference_fns['NLLLoss2d'](i, t.type_as(i).long(), **kwargs),
         pickle=False)
 
 
@@ -3777,7 +3776,7 @@ def nllloss2d_no_reduce_ignore_index_test():
             lambda i: F.nll_loss(i, t.type_as(i).long(), **kwargs)),
         input_fn=lambda: torch.rand(2, 3, 5, 5).log(),
         reference_fn=lambda i, _:
-            nllloss2d_reference(i, t.type_as(i).long(), **kwargs),
+            loss_reference_fns['NLLLoss2d'](i, t.type_as(i).long(), **kwargs),
         pickle=False)
 
 
@@ -3794,7 +3793,7 @@ def nllloss2d_no_reduce_weights_test():
             lambda i: F.nll_loss(i, t.type_as(i).long(), **kwargs(i.data))),
         input_fn=lambda: torch.rand(2, 3, 5, 5).log(),
         reference_fn=lambda i, _:
-            nllloss2d_reference(i, t.type_as(i).long(), **kwargs(i)),
+            loss_reference_fns['NLLLoss2d'](i, t.type_as(i).long(), **kwargs(i)),
         pickle=False)
 
 
@@ -3806,7 +3805,7 @@ def smoothl1loss_no_reduce_test():
             lambda i: F.smooth_l1_loss(i, t.type_as(i), reduce=False)),
         input_fn=lambda: torch.randn(2, 3, 4),
         reference_fn=lambda i, _:
-            smoothl1loss_reference(i, t.data.type_as(i), reduce=False),
+            loss_reference_fns['SmoothL1Loss'](i, t.data.type_as(i), reduce=False),
         pickle=False)
 
 

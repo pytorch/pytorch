@@ -26,11 +26,11 @@ struct smoothl1_functor
 };
 
 template <typename Dtype>
-struct smoothl1_update_functor
+struct smoothl1_updateOutput_no_reduce_functor
 {
-  smoothl1_update_functor() {}
+  smoothl1_updateOutput_no_reduce_functor() {}
 
-  __host__ __device__ void operator()(
+  __forceinline__ __host__ __device__ void operator()(
       const Dtype *x, 
       const Dtype *y,
       Dtype *out) const
@@ -65,21 +65,12 @@ struct smoothl1_updateGradInput_no_reduce_functor
 };
 
 template <typename Dtype>
-struct multiply_and_store_functor
-{
-  __host__ __device__ void operator()(const Dtype *x, Dtype *y)
-  {
-    *y *= *x;
-  }
-};
-
-template <typename Dtype>
 struct smoothl1_updateGradInput_functor
 {
   const Dtype norm;
-  const Dtype *gradOutput;
+  const Dtype gradOutput;
 
-  smoothl1_updateGradInput_functor(Dtype norm_, Dtype *gradOutput_)
+  smoothl1_updateGradInput_functor(Dtype norm_, Dtype gradOutput_)
     : norm(norm_), gradOutput(gradOutput_)
   {}
 
@@ -87,11 +78,11 @@ struct smoothl1_updateGradInput_functor
   {
     Dtype z = x - y;
     if (z < ScalarConvert<int, Dtype>::to(-1))
-      return -norm * *gradOutput;
+      return -norm * gradOutput;
     else if (z > ScalarConvert<int, Dtype>::to(1))
-      return norm * *gradOutput;
+      return norm * gradOutput;
     else
-      return norm * z * *gradOutput;
+      return norm * z * gradOutput;
   }
 };
 

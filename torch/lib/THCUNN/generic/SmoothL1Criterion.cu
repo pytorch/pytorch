@@ -22,7 +22,7 @@ void THNN_(SmoothL1Criterion_updateOutput)(
   if (!reduce) {
     THCTensor_(resizeAs)(state, output, input);
     THC_pointwiseApply3(state, input, target, output,
-                        smoothl1_update_functor<real>());
+                        smoothl1_updateOutput_no_reduce_functor<real>());
     return;
   }
 
@@ -75,8 +75,7 @@ void THNN_(SmoothL1Criterion_updateGradInput)(
     THCUNN_check_nElement(state, gradOutput, input);
     THC_pointwiseApply3(state, input, target, gradInput,
                         smoothl1_updateGradInput_no_reduce_functor<real>());
-    THC_pointwiseApply2(state, gradOutput, gradInput,
-                        multiply_and_store_functor<real>());
+    THCTensor_(cmul)(state, gradInput, gradInput, gradOutput);
     return;
   }
 
@@ -98,7 +97,7 @@ void THNN_(SmoothL1Criterion_updateGradInput)(
     thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
 #endif
     input_data, input_data+size, target_data, gradInput_data,
-    smoothl1_updateGradInput_functor<real>(norm, THCTensor_(data)(state, gradOutput))
+    smoothl1_updateGradInput_functor<real>(norm, THCTensor_(get1d)(state, gradOutput, 0))
   );
 
   THCTensor_(free)(state, input);

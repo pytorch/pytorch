@@ -308,6 +308,13 @@ def smoothl1loss_reference(input, target, size_average=True, reduce=True):
     return output
 
 
+loss_reference_fns = {
+    'NLLLoss': nllloss_reference,
+    'NLLLoss2d': nllloss2d_reference,
+    'SmoothL1Loss': smoothl1loss_reference,
+}
+
+
 criterion_tests = [
     dict(
         module_name='L1Loss',
