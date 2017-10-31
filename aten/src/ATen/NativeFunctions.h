@@ -275,5 +275,29 @@ static inline Tensor unsqueeze_(Tensor self, int64_t dim) {
   return self.as_strided_(std::get<0>(g), std::get<1>(g));
 }
 
+/*
+[NativeFunction]
+name: stack
+arg: TensorList list
+arg: int64_t dim=0
+return: Tensor
+variants: method, function
+type_method_definition_level: base
+type_method_definition_dispatch: at::native::stack
+[/NativeFunction]
+*/
+static inline Tensor stack(TensorList list, int64_t dim=0) {
+  if (list.size() == 0) {
+    throw std::runtime_error("stack expects a non-empty TensorList");
+  }
+  dim = maybe_wrap_dim(dim, list[0].dim() + 1);
+
+  std::vector<Tensor> inputs(list.size());
+  for (size_t i = 0; i < list.size(); ++i) {
+    inputs[i] = list[i].unsqueeze(dim);
+  }
+  return at::cat(inputs, dim);
+}
+
 }
 }
