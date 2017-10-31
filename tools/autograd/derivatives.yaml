@@ -31,9 +31,9 @@
   tensor2: grad * tensor1 * value
 
 - name: addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1)
-  self: addmm_self_backward(grad, beta)
-  mat1: addmm_mat1_backward(grad, mat1, mat2, alpha)
-  mat2: addmm_mat2_backward(grad, mat1, mat2, alpha)
+  self: maybe_multiply(grad, beta)
+  mat1: mm_mat1_backward(grad, mat2, mat1.sizes(), mat1.strides(), alpha)
+  mat2: mm_mat2_backward(grad, mat1, mat2.sizes(), mat2.strides(), alpha)
 
 - name: addmv(Tensor self, Tensor mat, Tensor vec, *, Scalar beta=1, Scalar alpha=1)
   self: grad * beta
@@ -308,8 +308,8 @@
   other: grad.clone().masked_fill_(self < other, 0)
 
 - name: mm(Tensor self, Tensor mat2)
-  self: grad.mm(mat2.t())
-  mat2: self.t().mm(grad)
+  self: mm_mat1_backward(grad, mat2, self.sizes(), self.strides(), 1)
+  mat2: mm_mat2_backward(grad, self, mat2.sizes(), mat2.strides(), 1)
 
 - name: mode(Tensor self, int64_t dim, bool keepdim)
   self: select_backward(grad, dim, indices, self.sizes(), keepdim)
