@@ -66,7 +66,7 @@ struct GraphFuser {
 
     // this concat fusion only works when all the inputs are the same size
     // otherwise they cannot partipate in the same map
-    auto sizes = node->inputs().at(0)->type()->expect<TensorType>()->sizes();
+    auto sizes = node->input(0)->type()->expect<TensorType>()->sizes();
     for(auto i : node->inputs()) {
       if(sizes != i->type()->expect<TensorType>()->sizes()){
         return false;

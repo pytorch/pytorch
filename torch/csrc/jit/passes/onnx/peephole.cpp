@@ -50,7 +50,7 @@ void fuseBroadcast(std::shared_ptr<Graph>& graph) {
     JIT_ASSERT(!n->hasAttribute(kaxis));
 
     auto input_index = n->inputs().size() - 1;
-    auto* expanded_rhs = n->inputs().at(input_index);
+    auto* expanded_rhs = n->input(input_index);
 
     // The expanded_rhs input isn't actually an expand, so no fusion available
     if (expanded_rhs->kind() != kExpand) continue;

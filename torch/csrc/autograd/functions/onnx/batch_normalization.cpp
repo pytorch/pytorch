@@ -20,8 +20,8 @@ jit::node_list BatchNormForward::symbolic(SymbolicContext* ctx, jit::node_list i
   auto orig_output = g->appendNode(g->createSelect(bn, 0));
 
   if(this->training) {
-    g->appendNode(g->createSelect(bn, 1)->setType(bn->inputs().at(3)->type()));
-    g->appendNode(g->createSelect(bn, 2)->setType(bn->inputs().at(4)->type()));
+    g->appendNode(g->createSelect(bn, 1)->setType(bn->input(3)->type()));
+    g->appendNode(g->createSelect(bn, 2)->setType(bn->input(4)->type()));
     // dummy output
     for(int i = 3; i < 5; i++) {
       g->appendNode(g->createSelect(bn, i)->setDebugName("batch_norm_dead_output"));
