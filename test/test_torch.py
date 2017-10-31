@@ -4074,6 +4074,7 @@ class TestTorch(TestCase):
                 f.seek(0)
                 c = torch.load(handle)
                 if not delete:
+                    f.close()
                     os.remove(f.name)
             self.assertEqual(b, c, 0)
             self.assertTrue(isinstance(c[0], torch.FloatTensor))
@@ -4250,6 +4251,7 @@ class TestTorch(TestCase):
             self.assertEqual(t1, t2, 0)
 
             if not delete:
+                f.close()
                 os.remove(f.name)
 
     def test_print(self):
