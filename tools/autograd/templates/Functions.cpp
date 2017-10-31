@@ -121,31 +121,6 @@ Tensor maybe_unsqueeze(const Tensor & self, int64_t dim, int64_t prev_size) {
   return self;
 }
 
-Tensor addmm_self_backward(const Tensor & grad, const Scalar &beta) {
-  return maybe_multiply(grad, beta);
-}
-
-Tensor addmm_mat1_backward(const Tensor & grad, const Tensor & mat1, const Tensor & mat2, const Scalar & alpha) {
-  auto mat1Strides = mat1.strides();
-  auto mat1Sizes = mat1.sizes();
-  if (mat1Strides[0] == 1 && mat1Strides[1] == mat1Sizes[0]) {
-    return maybe_multiply(mat2.mm(grad.t()).t(), alpha);
-  } else {
-    return maybe_multiply(grad.mm(mat2.t()), alpha);
-  }
-}
-
-Tensor addmm_mat2_backward(const Tensor & grad, const Tensor & mat1, const Tensor & mat2, const Scalar & alpha) {
-  auto mat2Strides = mat2.strides();
-  auto mat2Sizes = mat2.sizes();
-
-  if (mat2Strides[0] == 1 && mat2Strides[1] == mat2Sizes[0]) {
-    return maybe_multiply(grad.t().mm(mat1).t(), alpha);
-  } else {
-    return maybe_multiply(mat1.t().mm(grad), alpha);
-  }
-}
-
 variable_list cat_tensors_backward(const Tensor & grad, const std::vector<int64_t> &sizes, int64_t dim) {
   variable_list grad_inputs(sizes.size());
   int64_t accumulate = 0;
@@ -155,6 +130,24 @@ variable_list cat_tensors_backward(const Tensor & grad, const std::vector<int64_
     grad_inputs[i] = grad.narrow(dim, accumulate - size, size);
   }
   return grad_inputs;
+}
+
+Tensor mm_mat1_backward(const Tensor & grad, const Tensor & mat2, IntList sizes, IntList strides, const Scalar & alpha) {
+  // if input was column-major, return grad as column-order for efficiency
+  if (strides[0] == 1 && strides[1] == sizes[0]) {
+    return maybe_multiply(mat2.mm(grad.t()).t(), alpha);
+  } else {
+    return maybe_multiply(grad.mm(mat2.t()), alpha);
+  }
+}
+
+Tensor mm_mat2_backward(const Tensor & grad, const Tensor & mat1, IntList sizes, IntList strides, const Scalar & alpha) {
+  // if input was column-major, return grad as column-order for efficiency
+  if (strides[0] == 1 && strides[1] == sizes[0]) {
+    return maybe_multiply(grad.t().mm(mat1).t(), alpha);
+  } else {
+    return maybe_multiply(mat1.t().mm(grad), alpha);
+  }
 }
 
 Tensor select_backward_scalar(Tensor grad, const Tensor & input, const Tensor & value) {
