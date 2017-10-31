@@ -1,6 +1,5 @@
 #include "AutoGPU.h"
 
-#ifdef WITH_CUDA
 #include "THCP.h"
 #include <THC/THC.h>
 
@@ -67,7 +66,3 @@ THCPAutoGPU::THCPAutoGPU(PyObject *args, PyObject *self)
 void THCPAutoGPU::setObjDevice(PyObject *obj) {
   setDevice(getObjDevice(obj));
 }
-#endif
-
-THCPAutoGPU::THCPAutoGPU(int device_id) : AutoGPU(device_id) {}
-

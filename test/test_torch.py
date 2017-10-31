@@ -4073,6 +4073,8 @@ class TestTorch(TestCase):
                 torch.save(b, handle)
                 f.seek(0)
                 c = torch.load(handle)
+                if not delete:
+                    os.remove(f.name)
             self.assertEqual(b, c, 0)
             self.assertTrue(isinstance(c[0], torch.FloatTensor))
             self.assertTrue(isinstance(c[1], torch.FloatTensor))
@@ -4246,6 +4248,9 @@ class TestTorch(TestCase):
             rnum = random.uniform(-1, 1)
             t2.fill_(rnum)
             self.assertEqual(t1, t2, 0)
+
+            if not delete:
+                os.remove(f.name)
 
     def test_print(self):
         for t in torch._tensor_classes:

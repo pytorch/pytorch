@@ -214,7 +214,7 @@ def monkey_patch_THD_link_flags():
 class build_ext(setuptools.command.build_ext.build_ext):
 
     def run(self):
-        global _C_LIB, THNN, THCUNN
+        global THNN, THCUNN
 
         # Print build options
         if WITH_NUMPY:
@@ -345,7 +345,14 @@ library_dirs = []
 extra_link_args = []
 
 if IS_WINDOWS:
-    extra_compile_args = ['/Z7', '/EHa', '/DNOMINMAX']
+    extra_compile_args = [
+        # Symbolic debugging information in .obj files
+        '/Z7',
+        # Native C++ catch support for asynchronous
+        # structured exception handling (SEH)
+        '/EHa',
+        # Remove builtin min/max functions
+        '/DNOMINMAX']
 else:
     extra_compile_args = ['-std=c++11', '-Wno-write-strings',
                           # Python 2.6 requires -fno-strict-aliasing, see
@@ -476,7 +483,6 @@ main_sources = [
     "torch/csrc/autograd/functions/onnx/basic_ops.cpp",
     "torch/csrc/onnx/onnx.pb.cpp",
     "torch/csrc/onnx/onnx.cpp",
-    "torch/csrc/cuda/AutoGPU.cpp",
 ]
 main_sources += split_types("torch/csrc/Tensor.cpp")
 
@@ -501,6 +507,9 @@ if WITH_DISTRIBUTED:
         extra_compile_args += ['-DWITH_DISTRIBUTED_MW']
     include_dirs += [tmp_install_path + "/include/THD"]
     main_link_args += [THD_LIB]
+
+if IS_WINDOWS and not WITH_CUDA:
+    main_sources += ["torch/csrc/cuda/AutoGPU.h"]
 
 if WITH_CUDA:
     nvtoolext_lib_name = None
@@ -535,6 +544,7 @@ if WITH_CUDA:
         "torch/csrc/cuda/Module.cpp",
         "torch/csrc/cuda/Storage.cpp",
         "torch/csrc/cuda/Stream.cpp",
+        "torch/csrc/cuda/AutoGPU.cpp",
         "torch/csrc/cuda/utils.cpp",
         "torch/csrc/cuda/expand_utils.cpp",
         "torch/csrc/cuda/serialization.cpp",

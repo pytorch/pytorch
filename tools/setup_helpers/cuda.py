@@ -8,7 +8,7 @@ from subprocess import Popen, PIPE
 from .env import check_env_flag
 
 LINUX_HOME = '/usr/local/cuda'
-WINDOWS_HOME = 'C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v8.0'
+WINDOWS_HOME = glob.glob('C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v*.*')
 
 IS_WINDOWS = platform.system() == 'Windows'
 IS_LINUX = platform.system() == 'Linux'
@@ -69,7 +69,9 @@ if check_env_flag('NO_CUDA'):
     CUDA_VERSION = None
 else:
     if IS_WINDOWS:
-        CUDA_HOME = os.getenv('CUDA_PATH', WINDOWS_HOME).replace('\\', '/')
+        CUDA_HOME = os.getenv('CUDA_PATH', None).replace('\\', '/')
+        if len(WINDOWS_HOME) > 0:
+            CUDA_HOME = WINDOWS_HOME[0].replace('\\', '/')
     else:
         CUDA_HOME = os.getenv('CUDA_HOME', LINUX_HOME)
     if not os.path.exists(CUDA_HOME):

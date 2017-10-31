@@ -7,7 +7,7 @@
 
 class THP_CLASS THCPAutoGPU : public AutoGPU {
 public:
-  explicit THCPAutoGPU(int device_id=-1);
+  explicit THCPAutoGPU(int device_id=-1) : AutoGPU(device_id) {}
 #ifdef WITH_CUDA
   THCPAutoGPU(PyObject *args, PyObject *self=NULL);
   void setObjDevice(PyObject *obj);
