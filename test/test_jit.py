@@ -153,11 +153,11 @@ class TestJit(TestCase):
 
         @torch.jit.compile(nderivs=0)
         def doit(x, y):
-            return torch.sigmoid(torch.tanh(x / 2 * (x + y) + 1))
+            return torch.sigmoid(torch.tanh(x * (x + y) + 1))
 
         z = doit(x, y)
         z2 = doit(x, y, _assert_compiled=True)
-        self.assertEqual(z, torch.sigmoid(torch.tanh(x / 2 * (x + y) + 1)))
+        self.assertEqual(z, torch.sigmoid(torch.tanh(x * (x + y) + 1)))
         self.assertEqual(z, z2)
 
     def test_traced_function(self):

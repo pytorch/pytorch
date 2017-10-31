@@ -416,6 +416,11 @@ void CompiledFusionFunction::launch(uint32_t numel, void ** arguments) {
   //std::cout << "maxBlocks = " << maxBlocks << " needed blocks: " << ceilDiv(numel,blockSize)
   //          << " numblocks =  " << numBlocks;
 
+  // it is possible that this is the first cuda call on this thread
+  // so make sure we initialize the Driver API's context
+  // cudaFree(0) accomplishes this.
+  cudaFree(0);
+
   JIT_CU_CHECK(cuLaunchKernel(
     function,
     numBlocks, 1, 1,
