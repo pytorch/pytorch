@@ -966,6 +966,9 @@ def _SyncAllParams(
 
 
 def AddBlobSync(model, blobs, net=None):
+    '''
+    Sync a blob across devices and hosts
+    '''
     if len(blobs) == 0:
         return
     net = model.net if net is None else net
@@ -984,6 +987,30 @@ def AddBlobSync(model, blobs, net=None):
         net,
         model._rendezvous,
         set(blobs))
+
+
+def AddDistributedBlobSync(model, blobs):
+    '''
+    Sync blobs across machines (but not across devices)
+    '''
+    if model._rendezvous is None:
+        return
+    synth_name = "_".join([str(b) for b in blobs])
+    comm_world = _CreateOrCloneCommonWorld(
+        model.param_init_net,
+        "blob_sync_cw_" + synth_name,
+        rendezvous=model._rendezvous,
+        status_blob="create_blob_sync_cw_{}_cw_status".format(
+            synth_name,
+        ),
+    )
+
+    model.net.Allreduce(
+        inputs=[comm_world] + blobs,
+        outputs=blobs,
+        engine=model._rendezvous['engine'],
+        status_blob="blob_sync_allred_{}_status".format(synth_name),
+    )
 
 
 def _SyncAllParamsDistributed(
@@ -1671,7 +1698,6 @@ def _CreateOrCloneCommonWorld(
             kwargs['interface'] = rendezvous['interface']
         if 'mpi_rendezvous' in rendezvous:
             kwargs['mpi_rendezvous'] = rendezvous['mpi_rendezvous']
-
         comm_world = net.CreateCommonWorld(
             rendezvous['kv_handler'] or [],
             common_world_blob,
