@@ -124,7 +124,7 @@ class Hardtanh(Module):
 
     Examples::
 
-        >>> m = nn.HardTanh(-2, 2)
+        >>> m = nn.Hardtanh(-2, 2)
         >>> input = autograd.Variable(torch.randn(2))
         >>> print(input)
         >>> print(m(input))
