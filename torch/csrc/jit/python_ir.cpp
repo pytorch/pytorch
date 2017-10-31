@@ -21,8 +21,12 @@ void initPythonIRBindings(PyObject * module_) {
       ss << g;
       return ss.str();
     })
-    .def("inputs",[](Graph &g) { return g.inputs(); })
-    .def("outputs",[](Graph &g) { return g.outputs(); })
+    .def("inputs",[](Graph &g) {
+      return py::make_iterator(g.inputs().begin(), g.inputs().end());
+    })
+    .def("outputs",[](Graph &g) {
+      return py::make_iterator(g.outputs().begin(), g.outputs().end());
+    })
     // TODO: Iterator invalidation might make this hazardous
     .def("nodes",[](Graph &g) {
       return py::make_iterator(g.begin(), g.end());
@@ -76,9 +80,14 @@ void initPythonIRBindings(PyObject * module_) {
     .NS(uniqueName)
     .NS(setStage)
     .NS(stage)
-    .def("inputs",[](Node &n) { return n.inputs(); })
+    .def("inputs",[](Node &n) {
+      return py::make_iterator(n.inputs().begin(), n.inputs().end());
+    })
+    // NB: outputs on Node returns a COPY.  So we better not make_iterator
+    // on a temporary!
     .def("outputs",[](Node &n) { return n.outputs(); })
     .def("input",[](Node &n) { return n.input(); })
+    .def("input",[](Node &n, size_t i) { return n.input(i); })
     .NS(offset)
     .NS(uses)
     .NS(addInput)
