@@ -34,6 +34,13 @@ class Distribution(object):
         """
         raise NotImplementedError
 
+    def sample_n(self, n):
+        """
+        Generates n samples or n batches of samples if the distribution parameters
+        are batched.
+        """
+        raise NotImplementedError
+
     def log_prob(self, value):
         """
         Returns the log of the probability density/mass function evaluated at
@@ -62,11 +69,15 @@ class Bernoulli(Distribution):
     Args:
         probs (Tensor or Variable): the probabilty of sampling `1`
     """
+
     def __init__(self, probs):
         self.probs = probs
 
     def sample(self):
         return torch.bernoulli(self.probs)
+
+    def sample_n(self, n):
+        return torch.bernoulli(self.probs.expand(n, *self.probs.size()))
 
     def log_prob(self, value):
         # compute the log probabilities for 0 and 1
@@ -99,6 +110,7 @@ class Multinomial(Distribution):
     Args:
         probs (Tensor or Variable): event probabilities
     """
+
     def __init__(self, probs):
         if probs.dim() != 1 and probs.dim() != 2:
             # TODO: treat higher dimensions as part of the batch
@@ -107,6 +119,12 @@ class Multinomial(Distribution):
 
     def sample(self):
         return torch.multinomial(self.probs, 1, True).squeeze(-1)
+
+    def sample_n(self, n):
+        if n == 1:
+            return self.sample().expand(1, 1)
+        else:
+            return torch.multinomial(self.probs, n, True).t()
 
     def log_prob(self, value):
         p = self.probs / self.probs.sum(-1, keepdim=True)
@@ -133,12 +151,22 @@ class Normal(Distribution):
         mean (float or Tensor or Variable): mean of the distribution
         std (float or Tensor or Variable): standard deviation of the distribution
     """
+
     def __init__(self, mean, std):
         self.mean = mean
         self.std = std
 
     def sample(self):
         return torch.normal(self.mean, self.std)
+
+    def sample_n(self, n):
+        # cleanly expand float or Tensor or Variable parameters
+        def expand(v):
+            if isinstance(v, Number):
+                return torch.Tensor([v]).expand(n, 1)
+            else:
+                return v.expand(n, *v.size())
+        return torch.normal(expand(self.mean), expand(self.std))
 
     def log_prob(self, value):
         # compute the variance
