@@ -36,7 +36,14 @@ class TensorDataset(Dataset):
         self.target_tensor = target_tensor
 
     def __getitem__(self, index):
-        return self.data_tensor[index], self.target_tensor[index]
+        def select_and_keep_type(tensor, idx):
+            if tensor.dim() is 1:
+                return tensor.unsqueeze(1)[idx]
+            else:
+                return tensor[idx]
+
+        return (select_and_keep_type(self.data_tensor, index),
+                select_and_keep_type(self.target_tensor, index))
 
     def __len__(self):
         return self.data_tensor.size(0)
