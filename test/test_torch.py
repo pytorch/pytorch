@@ -3600,6 +3600,10 @@ class TestTorch(TestCase):
         self.assertEqual(tensor.var(unbiased=True), 0.5)
         self.assertEqual(tensor.var(unbiased=False), 0.25)
 
+        tensor = torch.FloatTensor([1.0, 2.0, 3.0])
+        self.assertEqual(tensor.var(unbiased=True), 1.0)
+        self.assertEqual(tensor.var(unbiased=False), 2.0 / 3.0)
+
         tensor = torch.randn(100)
         self.assertEqual(tensor.std(0), tensor.std(0, unbiased=True))
         self.assertEqual(tensor.std(), tensor.std(unbiased=True))
