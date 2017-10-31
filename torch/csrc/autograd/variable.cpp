@@ -79,7 +79,7 @@ std::shared_ptr<Function> VariableImpl::get_grad_accumulator() {
     return nullptr;
   }
 
-  std::lock_guard<std::mutex> lock(grad_accumulator_lock);
+  std::lock_guard<std::mutex> lock(mutex);
 
   auto result = grad_accumulator.lock();
   if (result) return result;
@@ -92,7 +92,7 @@ std::shared_ptr<Function> VariableImpl::get_grad_accumulator() {
 VariableViewImpl::VariableViewImpl(Variable base_, at::Tensor data_)
   : VariableImpl(std::move(data_))
   , base(std::move(base_))
-  , expected_version(0) {
+  , attr_version(0) {
   if (!base.defined()) {
     throw std::runtime_error("base is undefined");
   }
@@ -101,21 +101,22 @@ VariableViewImpl::VariableViewImpl(Variable base_, at::Tensor data_)
   }
   is_view = true;
   version_counter = base.version_counter();
-  expected_version = version_counter.current_version();
+  attr_version = version_counter.current_version();
 }
 
 std::shared_ptr<Function>& VariableViewImpl::get_grad_fn() {
-  std::lock_guard<std::mutex> lock(grad_accumulator_lock);
-  if (expected_version != version_counter.current_version()) {
+  std::lock_guard<std::mutex> lock(mutex);
+  auto current_version = version_counter.current_version();
+  if (attr_version != current_version) {
     auto fn = std::make_shared<generated::AsStridedBackward>();
     fn->self_geometry = TensorGeometry(base);
     fn->size = sizes();
     fn->stride = strides();
-    fn->storage_offset = Variable(this, true).storage_offset();
+    fn->storage_offset = data.storage_offset();
     fn->set_flags(Function::flags({ base }));
     fn->num_inputs = 1;
     _grad_fn = std::move(fn);
-    expected_version = version_counter.current_version();
+    attr_version = current_version;
   }
   return _grad_fn;
 }

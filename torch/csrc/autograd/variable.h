@@ -107,7 +107,9 @@ public:
   VariableVersion version_counter;
   std::vector<std::shared_ptr<FunctionPreHook>> hooks;
   std::weak_ptr<Function> grad_accumulator;
-  std::mutex grad_accumulator_lock;
+  // Mutex to ensure that concurrent read operations that modify internal state
+  // are still thread-safe. Used by get_grad_fn and get_grad_accumulator.
+  std::mutex mutex;
   bool requires_grad;
   bool is_volatile;
   bool is_view;
@@ -123,13 +125,21 @@ public:
   friend struct VariableType;
 };
 
+// A Variable that is a view on another Variable. The base and view share the
+// same version_counter.
 struct VariableViewImpl : public VariableImpl {
   VariableViewImpl(Variable base, at::Tensor data);
 
+  // Gets the up-to-date grad_fn. If the shared data or base was modified, we
+  // re-create the grad_fn to express the up-to-date view relationship between
+  // this and the base Variable.
   virtual std::shared_ptr<Function>& get_grad_fn() override;
 
+  // The base Variable, which is never a view
   Variable base;
-  int expected_version;
+
+  // The value of the version_counter at the time grad_fn was created.
+  int attr_version;
 };
 
 inline Variable make_variable(at::Tensor data) {

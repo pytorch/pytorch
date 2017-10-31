@@ -349,24 +349,6 @@ static void _mark_dirty(THPFunction *self, t2var_type &t2var,
   self->dirty_tensors = NULL;
 }
 
-static void _transplant_var(Variable& var, std::shared_ptr<Function> fn, int output_nr, bool is_volatile)
-{
-  if (is_volatile) {
-    fn = nullptr;
-    output_nr = 0;
-  }
-  var.is_volatile() = is_volatile;
-  var.requires_grad() = fn && fn->is_executable;
-  var.output_nr() = output_nr;
-  var.grad_fn() = std::move(fn);
-  var.get()->grad.reset();
-  var.get()->hooks.clear();
-  if (auto grad_acc_fn = var.get()->grad_accumulator.lock()) {
-    auto grad_acc = dynamic_cast<AccumulateGrad*>(grad_acc_fn.get());
-    grad_acc->variable.reset();
-  }
-}
-
 // Given a Python tuple of raw output tensors (raw_output), set each of
 // the corresponding entries in a different Python tuple (outputs) with
 // these tensors wrapped with variables.  We save the gradient function (self)
@@ -383,7 +365,8 @@ static void _wrap_outputs(THPFunction *self, t2var_type &t2var,
     const t2var_type &shared_pairs,
     PyObject *raw_output, PyObject *outputs, bool is_volatile)
 {
-  auto cdata = is_volatile ? nullptr : THPFunction_asFunction(self);
+  bool is_executable = self->cdata.is_executable && !is_volatile;
+  auto cdata = is_executable ? THPFunction_asFunction(self) : nullptr;
   Py_ssize_t num_outputs = PyTuple_GET_SIZE(raw_output);
   if (self->cdata.is_executable) {
     self->output_info.clear();
@@ -391,10 +374,10 @@ static void _wrap_outputs(THPFunction *self, t2var_type &t2var,
   }
 
   // Given an output tensor, find the input Variable with which it shares storage
-  auto get_shared_base = [&shared_pairs, &t2var](PyObject* tensor) -> Variable {
+  auto get_shared_base = [&](PyObject* tensor) -> Variable {
     auto input_it = t2var.find(tensor);
     if (input_it != t2var.end()) {
-      // If the output is an input, it's a view on itself
+      // If the output is an input treat that as the base
       return input_it->second->cdata;
     }
     auto it = shared_pairs.find(tensor);
@@ -405,75 +388,72 @@ static void _wrap_outputs(THPFunction *self, t2var_type &t2var,
     return Variable();
   };
 
-  // Creates a new Variable from a PyObject* of type THPTensor
-  auto new_variable = [&get_shared_base, is_volatile, cdata](PyObject* output) -> Variable {
-    Variable var;
-    auto base = get_shared_base(output);
-    if (base.defined()) {
-      var = make_variable_view(std::move(base), torch::createTensor(output));
-    } else {
-      var = make_variable(torch::createTensor(output));
+  // Wraps an output Tensor in a Variable or returns the previous wrapper in
+  // the case of in-place modification.
+  auto wrap_output = [&](at::Tensor data, Variable prev, bool is_modified) -> Variable {
+    if (!prev.defined()) {
+      return make_variable(std::move(data));
     }
-    var.is_volatile() = is_volatile;
-    if (!is_volatile) {
-      var.grad_fn() = cdata;
-      var.requires_grad() = cdata->is_executable;
+    if (is_modified) {
+      if (prev.is_leaf() && prev.requires_grad()) {
+        throw std::runtime_error("a leaf Variable that requires grad has been used in an in-place operation.");
+      }
+      // If the input was modified, transplant the grad_fn in the graph:
+      // grad_fn <- variable <- self  ==>  grad_fn <- self <- variable
+      prev.get()->grad.reset();
+      prev.get()->hooks.clear();
+      if (auto grad_acc_fn = prev.get()->grad_accumulator.lock()) {
+        auto grad_acc = dynamic_cast<AccumulateGrad*>(grad_acc_fn.get());
+        grad_acc->variable.reset();
+      }
+      return prev;
     }
-    return var;
+    // An input has been returned, but it wasn't modified. Return it as a view
+    // so that we can attach a new grad_fn to the Variable.
+    return make_variable_view(std::move(prev), std::move(data));
   };
 
+  t2var_type output2var;
   for (int i = 0; i < num_outputs; i++) {
     PyObject *output = PyTuple_GET_ITEM(raw_output, i);
-    auto it = t2var.find(output);
-    bool is_leaf = false;
 
-    // If the output is an input tensor, find the associated Variable
-    Variable var;
-    if (it != t2var.end()) {
-      var = it->second->cdata;
-      is_leaf = var.is_leaf();
+    THPVariable* output_var;
+    auto it = output2var.find(output);
+    if (it != output2var.end()) {
+      output_var = it->second;
+      Py_INCREF(output_var);
+    } else {
+      // Wrap the output in a Variable
+      bool is_modified = dirty_inputs.count(output) > 0;
+      Variable var = wrap_output(
+          torch::createTensor(output),
+          get_shared_base(output),
+          is_modified);
+      var.output_nr() = i;
+      var.is_volatile() = is_volatile;
+      var.requires_grad() = is_executable;
+      var.grad_fn() = cdata;
+
+      output_var = (THPVariable*)THPVariable_Wrap(var);
+      if (!output_var) throw python_error();
+
+      // We already have the data tensor wrapped as a PyObject*
+      Py_INCREF(output);
+      Py_CLEAR(output_var->data);
+      output_var->data = output;
+
+      output2var[output] = output_var;
     }
-
-    if (var.defined()) {
-      // If one of the outputs was also an input tensor it's a bit more complicated.
-      if (dirty_inputs.count(output) > 0) {
-        if (is_leaf && var.requires_grad()) {
-          throw std::runtime_error("a leaf Variable that requires grad has been used in an in-place operation.");
-        }
-        // If the input was modified, transplant the grad_fn in the graph:
-        // grad_fn <- variable <- self  ==>  grad_fn <- self <- variable
-        _transplant_var(var, cdata, i, is_volatile);
-      } else if (is_leaf) {
-        // An input has been returned, but it wasn't modified. It's better
-        // not to move the Variable, because there are some legitimate cases
-        // where making it non-leaf would break stuff (e.g. broadcast). Also,
-        // returning the input Variable is not a good option either,
-        // because if someone registers hooks on it, they will fire with grads
-        // from all usages, not only from usages of this output. This is why
-        // we return a view on the input Variable.
-        var = new_variable(output);
-      }
-    }
-
-    // Wrap new tensors in Variables
-    if (!var.defined()) {
-      var = new_variable(output);
-    }
-
-    THPVariable* output_var = (THPVariable*)THPVariable_Wrap(var);
-    if (!output_var) throw python_error();
-
-    // We already have the data tensor wrapped as a PyObject*
-    Py_INCREF(output);
-    Py_CLEAR(output_var->data);
-    output_var->data = output;
 
     if (self->cdata.is_executable) {
       self->output_info.emplace_back(output_var->cdata);
     }
-    t2var[output] = output_var;
-    var.output_nr() = i;
     PyTuple_SET_ITEM(outputs, i, (PyObject*)output_var);
+  }
+
+  // Add every entry in output2var to t2var
+  for (auto& entry : output2var) {
+    t2var[entry.first] = entry.second;
   }
 }
 
@@ -547,7 +527,11 @@ static t2var_type _parse_shared_pairs(THPFunction *self, t2var_type &t2var)
         "and output tensors, but argument %d doesn't satify this "
         "condition", i);
 
-    map.emplace(t2, it->second);
+    bool inserted;
+    std::tie(std::ignore, inserted) = map.emplace(t2, it->second);
+    THPFunction_assert(inserted,
+        "mark_shared_storages got a duplicate pair for an output tensor at "
+        "argument %d", i);
   }
   return map;
 }

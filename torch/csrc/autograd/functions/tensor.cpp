@@ -14,7 +14,14 @@ auto Identity::apply(const variable_list& inputs) -> variable_list {
 auto CopyBackwards::apply(const variable_list& grads) -> variable_list {
   check_input_variables("CopyBackwards", grads, 1);
   auto& grad = grads[0];
-  return variable_list{zeros_like(grad), grad};
+  variable_list grad_inputs(2);
+  if (should_compute_output(0)) {
+    grad_inputs[0] = at::zeros_like(grad);
+  }
+  if (should_compute_output(1)) {
+    grad_inputs[1] = grad;
+  }
+  return grad_inputs;
 };
 
 auto Clone::apply(const variable_list& inputs) -> variable_list {
@@ -145,14 +152,17 @@ auto CopySlices::apply(const variable_list& inputs) -> variable_list {
   auto result = grad.type().tensor(base.sizes, base.strides);
   result.copy_(grad);
 
-  variable_list grad_inputs(next_functions.size());
-  grad_inputs[0] = result;
-
   auto offset = view.storage_offset - base.storage_offset;
   auto grad_slice = result.as_strided(view.sizes, view.strides, offset);
+
+  // TODO: We clone grad_slice because we modify it below and "fn" might save
+  // it for the backward of res. We might be able to avoid the clone() if
+  // grad_slice is volatile.
   auto res = (*fn)({ grad_slice.clone() });
   grad_slice.copy_(res[0]);
 
+  variable_list grad_inputs(next_functions.size());
+  grad_inputs[0] = result;
   for (size_t i = 1; i < res.size(); i++) {
     grad_inputs[i] = std::move(res[i]);
   }

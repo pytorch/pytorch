@@ -784,8 +784,6 @@ def create_variable_type(top_env, aten_declarations):
             base_call = 'auto ret = as_view(static_cast<const Variable&>(self), {})'.format(base_call)
         elif not declaration['inplace']:
             base_call = 'auto ret = as_variable({})'.format(base_call)
-
-
         env['base_impl_call'] = base_call + ';'
 
         body.extend(METHOD_DEFINITION_DERIVATIVE.substitute(combined).split('\n'))
