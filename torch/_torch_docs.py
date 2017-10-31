@@ -2399,7 +2399,7 @@ Example::
      0.4729 -0.2266 -0.2085
     [torch.FloatTensor of size 1x3]
 
-    >>> torch.max(a)
+    >>> torch.median(a)
     -0.2085
 
 
