@@ -300,6 +300,10 @@ class build_ext(setuptools.command.build_ext.build_ext):
             THNN.extra_link_args += [_C_LIB]
             if WITH_CUDA:
                 THCUNN.extra_link_args += [_C_LIB]
+            else:
+                if os.path.exists("torch/csrc/generated/AutoGPU_cpu_win.cpp"):
+                    os.remove("torch/csrc/generated/AutoGPU_cpu_win.cpp")
+                shutil.copyfile("torch/csrc/cuda/AutoGPU.h", "torch/csrc/generated/AutoGPU_cpu_win.cpp")
 
         # It's an old-style class in Python 2.7...
         setuptools.command.build_ext.build_ext.run(self)
@@ -509,7 +513,7 @@ if WITH_DISTRIBUTED:
     main_link_args += [THD_LIB]
 
 if IS_WINDOWS and not WITH_CUDA:
-    main_sources += ["torch/csrc/cuda/AutoGPU.h"]
+    main_sources += ["torch/csrc/generated/AutoGPU_cpu_win.cpp"]
 
 if WITH_CUDA:
     nvtoolext_lib_name = None
