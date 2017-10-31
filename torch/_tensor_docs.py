@@ -1134,15 +1134,20 @@ See :func:`torch.pstrf`
 
 add_docstr_all('put_',
                """
-put_(indices, tensor) -> Tensor
+put_(indices, tensor, accumulate=False) -> Tensor
 
 Copies the elements from :attr:`tensor` into the positions specified by
 indices. For the puropose of indexing, the ``self`` tensor is treated as if it
 were a 1D tensor.
 
+If :attr:`accumulate` is ``True``, the elements in :attr:`tensor` are added to
+:attr:`self`. If accumulate is ``False``, the behavior is undefined if indices
+contains duplicate elements.
+
 Args:
     indices (LongTensor): the indices into self
     tensor (Tensor): Tensor containing values to copy
+    accumulate (bool): True to accumulate into self
 
 Example::
 
