@@ -63,7 +63,7 @@ void THNN_(TemporalUpSamplingNearest_updateOutput)(
   for(int i = 0; i < input->nDimension; i++){
     no_elements *= input->size[i];
   }
-  no_elements *= scale_factor * scale_factor;
+  no_elements *= scale_factor;
 
   int d1;
   int d2;

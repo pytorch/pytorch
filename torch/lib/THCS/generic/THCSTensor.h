@@ -76,6 +76,7 @@ TH_API void THCSTensor_(rawResize)(THCState *state, THCSTensor *self, int nDimI,
 TH_API THCTensor *THCSTensor_(newValuesWithSizeOf)(THCState *state, THCTensor *values, int64_t nnz);
 TH_API THCSTensor* THCSTensor_(_move)(THCState *state, THCSTensor *self, THCIndexTensor *indices, THCTensor *values);
 TH_API THCSTensor* THCSTensor_(_set)(THCState *state, THCSTensor *self, THCIndexTensor *indices, THCTensor *values);
-TH_API THCIndexTensor* THCSTensor_(newFlattenedIndices)(THCState *state, THCSTensor *self);
+// forceClone is intended to use as a boolean
+TH_API THCIndexTensor* THCSTensor_(newFlattenedIndices)(THCState *state, THCSTensor *self, int forceClone);
 
 #endif

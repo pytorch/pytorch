@@ -13,12 +13,11 @@ namespace {
 // Some of these restrictions may be relaxable, but you should
 // carefully read the code first, as we rely on these assumptions.
 std::unordered_set<NodeKind> simple_mappable = {
-  kSigmoid,
-  kTanh,
-  kMul,
-  kAdd,
-  kNeg,
-  kAddConstant,
+  ksigmoid,
+  ktanh,
+  kmul,
+  kadd,
+  kneg,
 };
 
 bool isSimpleMap(Node *node) {
@@ -41,11 +40,18 @@ struct GraphFuser {
   bool isCuda(Node * node) {
     return node->type()->expect<TensorType>()->device() != -1;
   }
-
+  // TODO: the fusion compiler needs to know how to handle 'alpha'
+  // and other attributes in code generation for us to be able to fuse them
+  // then it is safe to remove the !hasSpecialAlpha check
+  bool hasSpecialAlpha(Node * node) {
+    if(!node->hasAttribute(kalpha))
+      return false;
+    return at::Scalar(node->t(kalpha)).toDouble() != 1;
+  }
   bool isFusable(Node * node) {
     if (!node->hasType()) return false;
     if (node->kind() == kFusionGroup) return true;
-    return isSimpleMap(node) && isCuda(node);
+    return isSimpleMap(node) && !hasSpecialAlpha(node) && isCuda(node);
   }
 
   // Can this node produce an _output_ of a fusion group?
@@ -55,7 +61,7 @@ struct GraphFuser {
   bool isFusableAsExitNode(Node * node) {
     if(isFusable(node))
       return true;
-    if(node->kind() != kConcat || !isCuda(node))
+    if(node->kind() != kcat || !isCuda(node))
       return false;
 
     // this concat fusion only works when all the inputs are the same size
@@ -192,12 +198,7 @@ struct GraphFuser {
   }
 
   bool isChunk(Node * node) {
-    if (node->kind() != kSplit) return false;
-    // All splits have to be equal
-    auto & splits = node->is(ksplit);
-    for (auto s : splits)
-      if (s != splits[0]) return false;
-    return true;
+    return node->kind() == ksplit;
   }
 
   // in places where op can be fused into a consumer but chunk is in the way
@@ -254,7 +255,7 @@ struct GraphFuser {
       // NB: I decided not to use cloneFrom here, because if we make cloneFrom
       // copy selects one day, it is definitely not what you want here (selects
       // have different types).
-      Node * input_chunk = graph->create(kSplit);
+      Node * input_chunk = graph->create(ksplit);
       input_chunk->setType(multiType());
       input_chunk->copyAttributes(*chunk);
       input_chunk->addInput(input);

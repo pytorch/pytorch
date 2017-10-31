@@ -244,7 +244,8 @@ std::ostream& print(std::ostream& stream, const Tensor & tensor_, int64_t linesi
   if(!tensor_.defined()) {
     stream << "[ Tensor (empty) ]";
   } else {
-    Tensor tensor = tensor_.toType(getType(kCPU,kDouble)).contiguous();
+    Type& cpudouble = tensor_.type().toBackend(kCPU).toScalarType(kDouble);
+    Tensor tensor = tensor_.toType(cpudouble).contiguous();
     if(tensor.ndimension() == 0) {
       stream << defaultfloat << tensor.data<double>()[0] << std::endl;
       stream << "[ " << tensor_.pImpl->toString() << "{} ]";

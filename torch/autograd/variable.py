@@ -126,6 +126,15 @@ class Variable(_C._VariableBase):
 
     __nonzero__ = __bool__
 
+    def __int__(self):
+        return int(self.data)
+
+    def __long__(self):
+        return long(self.data)
+
+    def __float__(self):
+        return float(self.data)
+
     def backward(self, gradient=None, retain_graph=None, create_graph=None, retain_variables=None):
         """Computes the gradient of current variable w.r.t. graph leaves.
 
@@ -321,9 +330,6 @@ class Variable(_C._VariableBase):
     def view_as(self, tensor):
         return self.view(tensor.size())
 
-    def split(self, split_size, dim=0):
-        return torch.split(self, split_size, dim)
-
     def repeat(self, *repeats):
         if len(repeats) == 1 and isinstance(repeats[0], torch.Size):
             repeats = repeats[0]
@@ -420,9 +426,6 @@ class Variable(_C._VariableBase):
         index = tuple(slice(None, None) for _ in range(dim)) + (_index,)
         return Index.apply(self, index)
 
-    def chunk(self, num_chunks, dim=0):
-        return Chunk.apply(self, num_chunks, dim)
-
     def permute(self, *permutation):
         return Permute.apply(self, permutation)
 
@@ -432,47 +435,19 @@ class Variable(_C._VariableBase):
     def bernoulli(self):
         return Bernoulli.apply(self)
 
-    def __add__(self, other):
-        return self.add(other)
-    __radd__ = __add__
-
-    def __iadd__(self, other):
-        return self.add_(other)
-
-    def __sub__(self, other):
-        return self.sub(other)
-
-    def __isub__(self, other):
-        return self.sub_(other)
-
     def __rsub__(self, other):
         return -self + other
-
-    def __mul__(self, other):
-        return self.mul(other)
-    __rmul__ = __mul__
-
-    def __imul__(self, other):
-        return self.mul_(other)
 
     def __matmul__(self, other):
         if not isinstance(other, Variable):
             return NotImplemented
         return self.matmul(other)
 
-    def __div__(self, other):
-        return self.div(other)
-    __truediv__ = __div__
-
     def __rdiv__(self, other):
         return self.reciprocal() * other
     __rtruediv__ = __rdiv__
 
-    def __idiv__(self, other):
-        return self.div_(other)
-
-    def __pow__(self, other):
-        return self.pow(other)
+    __pow__ = _C._VariableBase.pow
 
     def __ipow__(self, other):
         raise NotImplementedError("in-place pow not implemented")
@@ -480,8 +455,14 @@ class Variable(_C._VariableBase):
     def __rpow__(self, other):
         return PowConstant.apply(other, self)
 
-    def __neg__(self):
-        return Negate.apply(self)
+    __neg__ = _C._VariableBase.neg
+
+    __eq__ = _C._VariableBase.eq
+    __ne__ = _C._VariableBase.ne
+    __lt__ = _C._VariableBase.lt
+    __le__ = _C._VariableBase.le
+    __gt__ = _C._VariableBase.gt
+    __ge__ = _C._VariableBase.ge
 
     def __len__(self):
         return len(self.data)
@@ -495,75 +476,13 @@ class Variable(_C._VariableBase):
         # map will interleave them.)
         return iter(imap(lambda i: self[i], range(self.size(0))))
 
-    def __mod__(self, other):
-        return self.remainder(other)
-
-    def __eq__(self, other):
-        return self.eq(other)
-
-    def __ne__(self, other):
-        return self.ne(other)
-
-    def __lt__(self, other):
-        return self.lt(other)
-
-    def __le__(self, other):
-        return self.le(other)
-
-    def __gt__(self, other):
-        return self.gt(other)
-
-    def __ge__(self, other):
-        return self.ge(other)
-
     def __hash__(self):
         return id(self)
 
     class _torch(object):
-
-        @staticmethod
-        def cat(iterable, dim=0):
-            return Concat.apply(dim, *iterable)
-
         @staticmethod
         def normal(means, std=1):
             return Normal.apply(means, std)
-
-        @staticmethod
-        def _blas(cls, args, inplace):
-            num_args = len(args)
-            alpha = beta = 1
-            if num_args > 5:
-                raise RuntimeError("too many args")
-            if num_args == 5:
-                alpha, beta = args[0], args[2]
-                tensors = args[1:2] + args[3:]
-            elif num_args == 4:
-                alpha = args[0]
-                tensors = args[1:]
-            else:
-                tensors = args
-            return cls.apply(*(tensors + (alpha, beta, inplace)))
-
-        @classmethod
-        def addmm(cls, *args):
-            return cls._blas(Addmm, args, False)
-
-        @classmethod
-        def addbmm(cls, *args):
-            return cls._blas(Addbmm, args, False)
-
-        @classmethod
-        def baddbmm(cls, *args):
-            return cls._blas(Baddbmm, args, False)
-
-        @classmethod
-        def addmv(cls, *args):
-            return cls._blas(Addmv, args, False)
-
-        @classmethod
-        def addr(cls, *args):
-            return cls._blas(Addr, args, False)
 
 
 for method in dir(Variable):

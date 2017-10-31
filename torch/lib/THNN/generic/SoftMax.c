@@ -2,6 +2,14 @@
 #define TH_GENERIC_FILE "generic/SoftMax.c"
 #else
 
+#ifdef _MSC_VER
+  #define SOFTMAX_SIZE_TYPE int64_t
+  #define SOFTMAX_CAST_TYPE (int64_t)
+#else
+  #define SOFTMAX_SIZE_TYPE uint64_t
+  #define SOFTMAX_CAST_TYPE
+#endif
+
 void THNN_(SoftMax_updateOutput)(
           THNNState *state,
           THTensor *input,
@@ -27,27 +35,29 @@ void THNN_(SoftMax_updateOutput)(
   uint64_t dim_stride = inner_size;
   uint64_t outer_stride = dim_size * dim_stride;
 
-#pragma omp parallel for
-  for (uint64_t i = 0; i < outer_size * inner_size; i++) {
+  SOFTMAX_SIZE_TYPE i, d;
+
+#pragma omp parallel for private(i, d)
+  for (i = 0; i < SOFTMAX_CAST_TYPE (outer_size * inner_size); i++) {
     uint64_t outer_idx = i / inner_size;
     uint64_t inner_idx = i % inner_size;
     real *input_data  = input_data_base  + outer_idx * outer_stride + inner_idx;
     real *output_data = output_data_base + outer_idx * outer_stride + inner_idx;
 
     real input_max = -THInf;
-    for (uint64_t d = 0; d < dim_size; d++) {
+    for (d = 0; d < SOFTMAX_CAST_TYPE dim_size; d++) {
       if (input_data[d * dim_stride] >= input_max) input_max = input_data[d * dim_stride];
     }
 
     accreal sum = 0;
-    for (uint64_t d = 0; d < dim_size; d++) {
+    for (d = 0; d < SOFTMAX_CAST_TYPE dim_size; d++) {
       real z = exp(input_data[d * dim_stride] - input_max);
       output_data[d * dim_stride] = z;
       sum += z;
     }
 
     real invsum = 1 / sum; // NOTE: truncate sum to real once
-    for (uint64_t d = 0; d < dim_size; d++) {
+    for (d = 0; d < SOFTMAX_CAST_TYPE dim_size; d++) {
       output_data[d * dim_stride] *= invsum;
     }
   }
@@ -86,8 +96,10 @@ void THNN_(SoftMax_updateGradInput)(
   uint64_t dim_stride = inner_size;
   uint64_t outer_stride = dim_size * dim_stride;
 
-#pragma omp parallel for
-  for (uint64_t i = 0; i < outer_size * inner_size; i++)
+  SOFTMAX_SIZE_TYPE i, d;
+
+#pragma omp parallel for private(i, d)
+  for (i = 0; i < SOFTMAX_CAST_TYPE (outer_size * inner_size); i++)
   {
     uint64_t outer_idx = i / inner_size;
     uint64_t inner_idx = i % inner_size;
@@ -96,10 +108,10 @@ void THNN_(SoftMax_updateGradInput)(
     real *gradOutput_data = gradOutput_data_base + outer_idx * outer_stride + inner_idx;
 
     accreal sum = 0;
-    for (uint64_t d = 0; d < dim_size; d++)
+    for (d = 0; d < SOFTMAX_CAST_TYPE dim_size; d++)
       sum += ((accreal)gradOutput_data[d * dim_stride]) * ((accreal)output_data[d * dim_stride]);
 
-    for (uint64_t d = 0; d < dim_size; d++)
+    for (d = 0; d < SOFTMAX_CAST_TYPE dim_size; d++)
       gradInput_data[d * dim_stride] = output_data[d * dim_stride] * (gradOutput_data[d * dim_stride] - sum);
   }
 

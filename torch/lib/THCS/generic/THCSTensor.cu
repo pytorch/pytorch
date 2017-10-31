@@ -55,9 +55,6 @@ THCSTensor *THCSTensor_(newCoalesce)(THCState *state, THCSTensor *self) {
   // For indices, a simple sort + unique suffices
   // For values, we use a custom kernel for segmented reduction (can't use Thrust due to indirection).
 
-  THCIndexTensor *indices_ = THCSTensor_(newIndices)(state, self);
-  THCIndexTensor *indices = THCIndexTensor_(newContiguous)(state, indices_);
-  THCIndexTensor_(free)(state, indices_);
   THCTensor *values_ = THCSTensor_(newValues)(state, self);
   THCTensor *values = THCTensor_(newContiguous)(state, values_);
   THCTensor_(free)(state, values_);
@@ -67,7 +64,9 @@ THCSTensor *THCSTensor_(newCoalesce)(THCState *state, THCSTensor *self) {
 
   cudaStream_t stream = THCState_getCurrentStream(state);
 
-  THCIndexTensor *indices1D = THCSTensor_(newFlattenedIndices)(state, self);
+  // indices will be modified by Thrust, so we have to clone or use new storage
+  // here.
+  THCIndexTensor *indices1D = THCSTensor_(newFlattenedIndices)(state, self, 1);
 
   THCIndexTensor *origIndices = THCIndexTensor_(newWithSize1d)(state, nnz);
   THCIndexTensor *uniqueOffsets = THCIndexTensor_(newWithSize1d)(state, nnz);
@@ -162,7 +161,6 @@ THCSTensor *THCSTensor_(newCoalesce)(THCState *state, THCSTensor *self) {
   THCSTensor *dst = THCSTensor_(newWithTensorAndSize)(state, newIndices, newValues, size);
   THLongStorage_free(size);
 
-  THCIndexTensor_(free)(state, indices);
   THCTensor_(free)(state, values);
   THCIndexTensor_(free)(state, newIndices);
   THCTensor_(free)(state, newValues);
@@ -173,11 +171,19 @@ THCSTensor *THCSTensor_(newCoalesce)(THCState *state, THCSTensor *self) {
 #undef THRUST_EXEC
 }
 
-THCIndexTensor* THCSTensor_(newFlattenedIndices)(THCState *state, THCSTensor *self) {
+// forceClone is intended to use as a boolean, if set, the result will forced to
+// be a clone of self.
+THCIndexTensor* THCSTensor_(newFlattenedIndices)(THCState *state, THCSTensor *self, int forceClone) {
   THCIndexTensor *indices = THCSTensor_(newIndices)(state, self);
   int nDimI = self->nDimensionI;
   if (nDimI == 1) {
-    return indices;
+    if (forceClone) {
+      THCIndexTensor *indices_clone = THCIndexTensor_(newClone)(state, indices);
+      THCIndexTensor_(free)(state, indices);
+      return indices_clone;
+    } else {
+      return indices;
+    }
   } else {
     // FIXME TH_INDEX_BASE
     int64_t factor = 1;

@@ -15,9 +15,9 @@ public:
   ${Tensor}(Context* context, ${THTensor} * tensor);
   virtual ~${Tensor}();
   virtual const char * toString() const override;
-  virtual IntList sizes() override;
-  virtual IntList strides() override;
-  virtual int64_t dim() override;
+  virtual IntList sizes() const override;
+  virtual IntList strides() const override;
+  virtual int64_t dim() const override;
   virtual Scalar localScalar() override;
   virtual void assign_(Scalar s) override;
   virtual void * unsafeGetTH(bool retain) override;

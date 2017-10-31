@@ -84,10 +84,8 @@ inline bool isTracing(const at::ArrayRef<Variable>& vars) {
 }
 
 inline bool isTracing(const at::TensorList& vars) {
-  // NB: This can't be a ref, because we need to actually implicit-construct a
-  // Variable.  That means a refcount bump does happen here (sigh).
-  for (Variable var : vars) {
-    if (isTracing(var)) return true;
+  for (const auto & var_t : vars) {
+    if (isTracing(static_cast<const Variable&>(var_t))) return true;
   }
   return false;
 }
@@ -200,7 +198,7 @@ inline std::shared_ptr<TracingState> enter(std::vector<TraceInput>&& trace_input
     }
   }
   // TODO: this might not work with the way we handle buffers
-  state->var_flags[0] = detail::getVarFlags(inputs);
+  state->var_flags[0].first = detail::getVarFlags(inputs);
   state->active = true;
   state->inputs = inputs;
   return state;
@@ -214,6 +212,7 @@ inline void _exit(const std::shared_ptr<TracingState>& state, const variable_lis
     state->graph->registerOutput(getValueTrace(state, output, true));
   }
   state->active = false;
+  state->var_flags[state->graph->stage()].second = detail::getVarFlags(outputs);
 }
 
 // Marks a backwards subgraph that should be traced as the next stage.
@@ -256,21 +255,6 @@ inline bool VariableFlags::verify(const Variable& var) {
   return !was_null && requires_grad == var.requires_grad() && is_volatile == var.is_volatile();
 }
 
-Node* recordTraceHelper(std::string op, at::ArrayRef<Variable> inputs, at::ArrayRef<Variable> outputs);
-
-// These overloads are intended to simplify code generation
-inline Node* recordTrace(std::string op, std::initializer_list<Variable> inputs, const Variable& output) {
-  return recordTraceHelper(op, inputs, {output});
-}
-inline Node* recordTrace(std::string op, std::initializer_list<Variable> inputs, const std::tuple<Variable, Variable>& outputs) {
-  return recordTraceHelper(op, inputs, {std::get<0>(outputs), std::get<1>(outputs)});
-}
-inline Node* recordTrace(std::string op, std::initializer_list<Variable> inputs, const std::tuple<Variable, Variable, Variable>& outputs) {
-  return recordTraceHelper(op, inputs, {std::get<0>(outputs), std::get<1>(outputs), std::get<2>(outputs)});
-}
-inline Node* recordTrace(std::string op, at::TensorList inputs, const Variable& output) {
-  // TODO: Eliminate the intermediate vector allocation
-  return recordTraceHelper(op, variable_list(inputs.begin(), inputs.end()), {output});
-}
+Node* recordTrace(std::string op, at::ArrayRef<Variable> inputs, at::ArrayRef<Variable> outputs);
 
 }}} // namespace torch::jit::tracer

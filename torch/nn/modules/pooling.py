@@ -65,8 +65,8 @@ class MaxPool1d(Module):
                             self.return_indices)
 
     def __repr__(self):
-        return self.__class__.__name__ + ' (' \
-            + 'size=' + str(self.kernel_size) \
+        return self.__class__.__name__ + '(' \
+            + 'kernel_size=' + str(self.kernel_size) \
             + ', stride=' + str(self.stride) \
             + ', padding=' + str(self.padding) \
             + ', dilation=' + str(self.dilation) \
@@ -151,8 +151,8 @@ class MaxPool2d(Module):
             if padh != 0 and padw != 0 else ''
         dilation_str = (', dilation=(' + str(dilh) + ', ' + str(dilw) + ')'
                         if dilh != 0 and dilw != 0 else '')
-        return self.__class__.__name__ + ' (' \
-            + 'size=(' + str(kh) + ', ' + str(kw) + ')' \
+        return self.__class__.__name__ + '(' \
+            + 'kernel_size=(' + str(kh) + ', ' + str(kw) + ')' \
             + ', stride=(' + str(dh) + ', ' + str(dw) + ')' \
             + padding_str + dilation_str + ')'
 
@@ -229,8 +229,8 @@ class MaxUnpool1d(Module):
                               self.padding, output_size)
 
     def __repr__(self):
-        return self.__class__.__name__ + ' (' \
-            + 'size=' + str(self.kernel_size) \
+        return self.__class__.__name__ + '(' \
+            + 'kernel_size=' + str(self.kernel_size) \
             + ', stride=' + str(self.stride) \
             + ', padding=' + str(self.padding) + ')'
 
@@ -310,8 +310,8 @@ class MaxUnpool2d(Module):
                               self.padding, output_size)
 
     def __repr__(self):
-        return self.__class__.__name__ + ' (' \
-            + 'size=' + str(self.kernel_size) \
+        return self.__class__.__name__ + '(' \
+            + 'kernel_size=' + str(self.kernel_size) \
             + ', stride=' + str(self.stride) \
             + ', padding=' + str(self.padding) + ')'
 
@@ -371,8 +371,8 @@ class MaxUnpool3d(Module):
                               self.padding, output_size)
 
     def __repr__(self):
-        return self.__class__.__name__ + ' (' \
-            + 'size=' + str(self.kernel_size) \
+        return self.__class__.__name__ + '(' \
+            + 'kernel_size=' + str(self.kernel_size) \
             + ', stride=' + str(self.stride) \
             + ', padding=' + str(self.padding) + ')'
 
@@ -436,8 +436,8 @@ class AvgPool1d(Module):
             self.count_include_pad)
 
     def __repr__(self):
-        return self.__class__.__name__ + ' (' \
-            + 'size=' + str(self.kernel_size) \
+        return self.__class__.__name__ + '(' \
+            + 'kernel_size=' + str(self.kernel_size) \
             + ', stride=' + str(self.stride) \
             + ', padding=' + str(self.padding) \
             + ', ceil_mode=' + str(self.ceil_mode) \
@@ -505,8 +505,8 @@ class AvgPool2d(Module):
                             self.padding, self.ceil_mode, self.count_include_pad)
 
     def __repr__(self):
-        return self.__class__.__name__ + ' (' \
-            + 'size=' + str(self.kernel_size) \
+        return self.__class__.__name__ + '(' \
+            + 'kernel_size=' + str(self.kernel_size) \
             + ', stride=' + str(self.stride) \
             + ', padding=' + str(self.padding) \
             + ', ceil_mode=' + str(self.ceil_mode) \
@@ -584,8 +584,8 @@ class MaxPool3d(Module):
                             self.return_indices)
 
     def __repr__(self):
-        return self.__class__.__name__ + ' (' \
-            + 'size=' + str(self.kernel_size) \
+        return self.__class__.__name__ + '(' \
+            + 'kernel_size=' + str(self.kernel_size) \
             + ', stride=' + str(self.stride) \
             + ', padding=' + str(self.padding) \
             + ', dilation=' + str(self.dilation) \
@@ -660,8 +660,8 @@ class AvgPool3d(Module):
         self.__dict__.setdefault('count_include_pad', True)
 
     def __repr__(self):
-        return self.__class__.__name__ + ' (' \
-            + 'size=' + str(self.kernel_size) \
+        return self.__class__.__name__ + '(' \
+            + 'kernel_size=' + str(self.kernel_size) \
             + ', stride=' + str(self.stride) \
             + ', padding=' + str(self.padding) \
             + ', ceil_mode=' + str(self.ceil_mode) \
@@ -669,7 +669,7 @@ class AvgPool3d(Module):
 
 
 class FractionalMaxPool2d(Module):
-    """Applies a 2D fractional max pooling over an input signal composed of several input planes.
+    r"""Applies a 2D fractional max pooling over an input signal composed of several input planes.
 
     Fractiona MaxPooling is described in detail in the paper `Fractional MaxPooling`_ by Ben Graham
 
@@ -779,7 +779,7 @@ class LPPool2d(Module):
                            self.stride, self.ceil_mode)
 
     def __repr__(self):
-        return self.__class__.__name__ + ' (' \
+        return self.__class__.__name__ + '(' \
             + str(self.norm_type) + ', ' \
             + str(self.kernel_size) + ', ' \
             + 'stride=' + str(self.stride) + ', ' \
@@ -824,7 +824,7 @@ class LPPool1d(Module):
                            self.stride, self.ceil_mode)
 
     def __repr__(self):
-        return self.__class__.__name__ + ' (' \
+        return self.__class__.__name__ + '(' \
             + str(self.norm_type) + ', ' \
             + str(self.kernel_size) + ', ' \
             + 'stride=' + str(self.stride) + ', ' \
@@ -832,7 +832,7 @@ class LPPool1d(Module):
 
 
 class AdaptiveMaxPool1d(Module):
-    """Applies a 1D adaptive max pooling over an input signal composed of several input planes.
+    r"""Applies a 1D adaptive max pooling over an input signal composed of several input planes.
 
     The output size is H, for any input size.
     The number of output features is equal to the number of input planes.
@@ -859,12 +859,12 @@ class AdaptiveMaxPool1d(Module):
         return F.adaptive_max_pool1d(input, self.output_size, self.return_indices)
 
     def __repr__(self):
-        return self.__class__.__name__ + ' (' \
+        return self.__class__.__name__ + '(' \
             + 'output_size=' + str(self.output_size) + ')'
 
 
 class AdaptiveMaxPool2d(Module):
-    """Applies a 2D adaptive max pooling over an input signal composed of several input planes.
+    r"""Applies a 2D adaptive max pooling over an input signal composed of several input planes.
 
     The output is of size H x W, for any input size.
     The number of output features is equal to the number of input planes.
@@ -896,12 +896,12 @@ class AdaptiveMaxPool2d(Module):
         return F.adaptive_max_pool2d(input, self.output_size, self.return_indices)
 
     def __repr__(self):
-        return self.__class__.__name__ + ' (' \
+        return self.__class__.__name__ + '(' \
             + 'output_size=' + str(self.output_size) + ')'
 
 
 class AdaptiveMaxPool3d(Module):
-    """Applies a 3D adaptive max pooling over an input signal composed of several input planes.
+    r"""Applies a 3D adaptive max pooling over an input signal composed of several input planes.
 
     The output is of size D x H x W, for any input size.
     The number of output features is equal to the number of input planes.
@@ -933,12 +933,12 @@ class AdaptiveMaxPool3d(Module):
         return F.adaptive_max_pool3d(input, self.output_size, self.return_indices)
 
     def __repr__(self):
-        return self.__class__.__name__ + ' (' \
+        return self.__class__.__name__ + '(' \
             + 'output_size=' + str(self.output_size) + ')'
 
 
 class AdaptiveAvgPool1d(Module):
-    """Applies a 1D adaptive average pooling over an input signal composed of several input planes.
+    r"""Applies a 1D adaptive average pooling over an input signal composed of several input planes.
 
     The output size is H, for any input size.
     The number of output features is equal to the number of input planes.
@@ -962,12 +962,12 @@ class AdaptiveAvgPool1d(Module):
         return F.adaptive_avg_pool1d(input, self.output_size)
 
     def __repr__(self):
-        return self.__class__.__name__ + ' (' \
+        return self.__class__.__name__ + '(' \
             + 'output_size=' + str(self.output_size) + ')'
 
 
 class AdaptiveAvgPool2d(Module):
-    """Applies a 2D adaptive average pooling over an input signal composed of several input planes.
+    r"""Applies a 2D adaptive average pooling over an input signal composed of several input planes.
 
     The output is of size H x W, for any input size.
     The number of output features is equal to the number of input planes.
@@ -996,12 +996,12 @@ class AdaptiveAvgPool2d(Module):
         return F.adaptive_avg_pool2d(input, self.output_size)
 
     def __repr__(self):
-        return self.__class__.__name__ + ' (' \
+        return self.__class__.__name__ + '(' \
             + 'output_size=' + str(self.output_size) + ')'
 
 
 class AdaptiveAvgPool3d(Module):
-    """Applies a 3D adaptive average pooling over an input signal composed of several input planes.
+    r"""Applies a 3D adaptive average pooling over an input signal composed of several input planes.
 
     The output is of size D x H x W, for any input size.
     The number of output features is equal to the number of input planes.
@@ -1030,5 +1030,5 @@ class AdaptiveAvgPool3d(Module):
         return F.adaptive_avg_pool3d(input, self.output_size)
 
     def __repr__(self):
-        return self.__class__.__name__ + ' (' \
+        return self.__class__.__name__ + '(' \
             + 'output_size=' + str(self.output_size) + ')'

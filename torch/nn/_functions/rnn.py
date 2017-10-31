@@ -1,5 +1,6 @@
 import warnings
 from torch.autograd import Function, NestedIOFunction, Variable
+from torch.autograd.function import _iter_variables, _unflatten
 import torch.backends.cudnn as cudnn
 from .. import functional as F
 from .thnn import rnnFusedPointwise as fusedBackend
@@ -24,7 +25,7 @@ def LSTMCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
     if input.is_cuda:
         igates = F.linear(input, w_ih)
         hgates = F.linear(hidden[0], w_hh)
-        state = fusedBackend.LSTMFused()
+        state = fusedBackend.LSTMFused.apply
         return state(igates, hgates, hidden[1]) if b_ih is None else state(igates, hgates, hidden[1], b_ih, b_hh)
 
     hx, cx = hidden
@@ -48,7 +49,7 @@ def GRUCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
     if input.is_cuda:
         gi = F.linear(input, w_ih)
         gh = F.linear(hidden, w_hh)
-        state = fusedBackend.GRUFused()
+        state = fusedBackend.GRUFused.apply
         return state(gi, gh, hidden) if b_ih is None else state(gi, gh, hidden, b_ih, b_hh)
 
     gi = F.linear(input, w_ih, b_ih)
@@ -342,12 +343,45 @@ class CudnnRNN(NestedIOFunction):
         return grad_input, grad_weight, grad_hx
 
 
+def hack_onnx_rnn(fargs, output, args, kwargs):
+    input, all_weights, hx = fargs
+    output_tensors = tuple(v.data for v in _iter_variables(output))
+    flat_weights = tuple(_iter_variables(all_weights))
+    flat_hx = tuple(_iter_variables(hx))
+
+    class RNNSymbolic(Function):
+        @staticmethod
+        def symbolic(g, *fargs):
+            # NOTE: fargs contains Variable inputs (input + weight + hidden)
+            # NOTE: args/kwargs contain RNN parameters
+            raise RuntimeError("hack_onnx_rnn NYI")
+
+        @staticmethod
+        def forward(ctx, *fargs):
+            return output_tensors
+
+        @staticmethod
+        def backward(ctx, *gargs, **gkwargs):
+            raise RuntimeError("FIXME: Traced RNNs don't support backward")
+
+    flat_output = RNNSymbolic.apply(*((input,) + flat_weights + flat_hx))
+    return _unflatten(flat_output, output)
+
+
 def RNN(*args, **kwargs):
     def forward(input, *fargs, **fkwargs):
         if cudnn.is_acceptable(input.data):
             func = CudnnRNN(*args, **kwargs)
         else:
             func = AutogradRNN(*args, **kwargs)
-        return func(input, *fargs, **fkwargs)
+
+        # Hack for the tracer that allows us to represent RNNs as single
+        # nodes and export them to ONNX in this form
+        if torch._C._jit_is_tracing(input):
+            assert not fkwargs
+            output = func(input, *fargs)
+            return hack_onnx_rnn((input,) + fargs, output, args, kwargs)
+        else:
+            return func(input, *fargs, **fkwargs)
 
     return forward

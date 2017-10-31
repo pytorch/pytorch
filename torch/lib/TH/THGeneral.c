@@ -262,7 +262,6 @@ void* THRealloc(void *ptr, ptrdiff_t size)
   if(size < 0)
     THError("$ Torch: invalid memory size -- maybe an overflow?");
 
-  ptrdiff_t oldSize = -getAllocSize(ptr);
   void *newptr = realloc(ptr, size);
 
   if(!newptr && torchGCFunction) {

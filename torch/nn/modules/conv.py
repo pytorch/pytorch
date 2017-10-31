@@ -47,7 +47,7 @@ class _ConvNd(Module):
             self.bias.data.uniform_(-stdv, stdv)
 
     def __repr__(self):
-        s = ('{name}({in_channels}, {out_channels}, kernel_size={kernel_size}'
+        s = ('{name} ({in_channels}, {out_channels}, kernel_size={kernel_size}'
              ', stride={stride}')
         if self.padding != (0,) * len(self.padding):
             s += ', padding={padding}'
@@ -395,7 +395,7 @@ class _ConvTransposeMixin(object):
 
 
 class ConvTranspose1d(_ConvTransposeMixin, _ConvNd):
-    """Applies a 1D transposed convolution operator over an input image
+    r"""Applies a 1D transposed convolution operator over an input image
     composed of several input planes.
 
     This module can be seen as the gradient of Conv1d with respect to its input.

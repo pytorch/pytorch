@@ -1,7 +1,7 @@
 graph(%1 : Double(4, 4)
       %2 : Double(4, 4)) {
-  %4 : Double(4, 4) = ^Add(False)(%1, %2), uses = [[%5.i0]];
-  %6 : Double(4!, 2), %7 : Double(4!, 2) = ^Chunk(2, 1)(%4), uses = [[%8.i0], [%8.i1]];
-  %9 : Double(4, 2) = ^Mul()(%6, %7), uses = [[%0.i0]];
-  return (%9);
+  %3 : Double(4, 4) = add[alpha={1}](%1, %2), uses = [%4.i0];
+  %5 : Double(4!, 2), %6 : Double(4!, 2) = split[split_size=2, dim=1](%3), uses = [[%7.i0], [%7.i1]];
+  %7 : Double(4, 2) = mul(%5, %6), uses = [%0.i0];
+  return (%7);
 }

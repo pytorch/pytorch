@@ -55,9 +55,9 @@ class Linear(Module):
         return F.linear(input, self.weight, self.bias)
 
     def __repr__(self):
-        return self.__class__.__name__ + ' (' \
-            + str(self.in_features) + ' -> ' \
-            + str(self.out_features) + ')'
+        return self.__class__.__name__ + '(' \
+            + 'in_features=' + str(self.in_features) \
+            + ', out_features=' + str(self.out_features) + ')'
 
 
 class Bilinear(Module):
@@ -112,7 +112,7 @@ class Bilinear(Module):
         return F.bilinear(input1, input2, self.weight, self.bias)
 
     def __repr__(self):
-        return self.__class__.__name__ + ' (' \
+        return self.__class__.__name__ + '(' \
             + 'in1_features=' + str(self.in1_features) \
             + ', in2_features=' + str(self.in2_features) \
             + ', out_features=' + str(self.out_features) + ')'

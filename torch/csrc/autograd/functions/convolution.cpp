@@ -365,10 +365,8 @@ auto ConvForward::apply(const variable_list& inputs) -> variable_list {
 // For Convolution strategies that don't implicitly handle grad_bias, we add a helper
 // function here to perform it using simple Tensor operators
 static at::Tensor compute_grad_bias(const at::Tensor& grad_output) {
-  // grad_output is in N, C, H, W, we re-shape and make contiguous
-  at::Tensor transposed = grad_output.transpose(0, 1).contiguous();
-  // sum across all of the channels and add to grad_bias
-  return transposed.view({transposed.size(0), -1}).sum(1);
+  // grad_output is in N, C, H, W, we re-shape and reduce over spatial dims and batches 
+  return grad_output.contiguous().view({grad_output.size(0), grad_output.size(1), -1}).sum(0).sum(1);
 }
 
 // ConvBackward implementation
@@ -529,7 +527,6 @@ auto ConvBackward::releaseVariables() -> void {
 
 auto ConvBackwardBackward::apply(const variable_list& grad_grad_inputs) -> variable_list {
   check_input_variables("ConvNdBackwardBackward", grad_grad_inputs, 3, 0);
-  if (transposed) throw std::runtime_error("ConvBackwardBackward does not support transposed convolution");
 
   auto ggI = grad_grad_inputs[0];
   auto ggW = grad_grad_inputs[1];
@@ -541,7 +538,7 @@ auto ConvBackwardBackward::apply(const variable_list& grad_grad_inputs) -> varia
 
   AutoGPU guard(input.data());
 
-  // Compute ggO = conv(w, ggI) + conv(ggW, i) + ggb
+  // Compute ggO = conv(ggI, w) + conv(i, ggW) + ggb
   Variable ggO;
   if (ggI.defined()) {
     if (weight.type().isCuda()) {
@@ -554,7 +551,7 @@ auto ConvBackwardBackward::apply(const variable_list& grad_grad_inputs) -> varia
     if (ggW.type().isCuda()) {
       ggW = apply_fn<Contiguous>()(ggW);
     }
-    auto ggW_term = apply_fn<ConvForward>(*this)(input_.unpack(), ggW, Variable());
+    auto ggW_term = apply_fn<ConvForward>(*this)(input, ggW, Variable());
     if (ggO.defined()) {
       ggO = apply_fn<Add>()(ggO, ggW_term);
     } else {
@@ -581,7 +578,7 @@ auto ConvBackwardBackward::apply(const variable_list& grad_grad_inputs) -> varia
     }
   }
 
-  // Compute gW = conv(ggI, g0)
+  // Compute gW = conv(ggI, gO)
   Variable gW;
   if (ggI.defined()) {
     // Modified params with correct padding
@@ -604,7 +601,12 @@ auto ConvBackwardBackward::apply(const variable_list& grad_grad_inputs) -> varia
       }
 
       // Compute conv
-      gWt = apply_fn<ConvForward>(gw_conv_params)(ggIt, gOt, Variable());
+      if (transposed) {
+        gw_conv_params.transposed = false;
+        gWt = apply_fn<ConvForward>(gw_conv_params)(gOt, ggIt, Variable());
+      } else {
+        gWt = apply_fn<ConvForward>(gw_conv_params)(ggIt, gOt, Variable());
+      }
     } else {
       variable_list gWt_list(groups);
       for (int g = 0; g < groups; ++g) {
@@ -614,7 +616,13 @@ auto ConvBackwardBackward::apply(const variable_list& grad_grad_inputs) -> varia
           gOt_g = apply_fn<Contiguous>()(gOt_g);
         }
 
-        gWt_list[g] = apply_fn<ConvForward>(gw_conv_params)(ggIt_g, gOt_g, Variable());
+        // Compute conv
+        if (transposed) {
+          gw_conv_params.transposed = false;
+          gWt_list[g] = apply_fn<ConvForward>(gw_conv_params)(gOt_g, ggIt_g, Variable());
+        } else {
+          gWt_list[g] = apply_fn<ConvForward>(gw_conv_params)(ggIt_g, gOt_g, Variable());
+        }
       }
 
       gWt = apply_fn<Cat>(1)(gWt_list);
@@ -631,76 +639,94 @@ auto ConvBackwardBackward::apply(const variable_list& grad_grad_inputs) -> varia
     for (size_t i = 2; i < gW_size.size(); ++i) {
       if (gW_size[i] > w_size[i]) {
           gW = apply_fn<Narrow>(i, 0, w_size[i])(gW);
+          gW_size = gW.sizes();
       }
     }
   }
 
-  // Compute gI = convT(gO, ggW)
+  // Compute gI = convT(ggW, gO.t()) if !transposed
+  //         gI = conv(go, ggw)      if transposed
   Variable gI;
   if (ggW.defined()) {
-    // select conv transpose
     ConvParams gi_conv_params(*this);
-    gi_conv_params.transposed = true;
+    gi_conv_params.transposed = !transposed;
 
-    // swap stride and dilation
-    std::swap(gi_conv_params.dilation, gi_conv_params.stride);
+    if (transposed) {
+      if (gO.type().isCuda()) {
+        gO = apply_fn<Contiguous>()(gO);
+      }
+      gI = apply_fn<ConvForward>(gi_conv_params)(gO, ggW, Variable());
 
-    // calculate output_padding
-    auto kernel_size = weight.sizes().slice(2);
-    auto input_shape = input.sizes().slice(2);
-    auto grad_output_shape = gO.sizes().slice(2);
+      // narrow gI to only relevant portion
+      // we do it this way because negative output_padding is not supported
+      // TODO: figure out if we can narrow gO and save some compute,
+      // rather than narrowing the computed gI
+      auto gI_size = gI.sizes();
+      auto i_size = input.sizes();
+      for (size_t i = 2; i < gI_size.size(); ++i) {
+        if (gI_size[i] > i_size[i]) {
+          gI = apply_fn<Narrow>(i, 0, i_size[i])(gI);
+          gI_size = gI.sizes();
+        }
+      }
+    } else {
+      auto groups = gi_conv_params.groups;
+      gi_conv_params.groups = 1;
+      // swap stride and dilation
+      std::swap(gi_conv_params.dilation, gi_conv_params.stride);
 
-    if (kernel_size.size() == 1) {
-      auto expected_input_shape = (kernel_size[0] - 1) * gi_conv_params.stride[1]
+      auto ggWt = apply_fn<Transpose>(0, 1)(ggW);
+      auto gOt = apply_fn<Transpose>(0, 1)(gO);
+
+      // calculate output_padding
+      auto kernel_size = weight.sizes().slice(2);
+      auto input_shape = input.sizes().slice(2);
+      auto grad_output_shape = gO.sizes().slice(2);
+
+      if (kernel_size.size() == 1) {
+        auto expected_input_shape = (kernel_size[0] - 1) * gi_conv_params.stride[1]
           - 2 * gi_conv_params.padding[1]
           + (gi_conv_params.dilation[1] * (grad_output_shape[0] - 1) + 1);
-      if (expected_input_shape != input_shape[0]) {
+        if (expected_input_shape != input_shape[0]) {
           gi_conv_params.output_padding[1] = input_shape[0] - expected_input_shape;
-      }
-    } else {
-      for(size_t i = 0; i < kernel_size.size(); ++i) {
-        // Check if whole input has been used or not
-        auto expected_input_shape = (kernel_size[i] - 1) * gi_conv_params.stride[i]
-          - 2 * gi_conv_params.padding[i]
-          + (gi_conv_params.dilation[i] * (grad_output_shape[i] - 1) + 1);
-        if (expected_input_shape != input_shape[i]) {
-          gi_conv_params.output_padding[i] = input_shape[i] - expected_input_shape;
+        }
+      } else {
+        for(size_t i = 0; i < kernel_size.size(); ++i) {
+          // Check if whole input has been used or not
+          auto expected_input_shape = (kernel_size[i] - 1) * gi_conv_params.stride[i]
+            - 2 * gi_conv_params.padding[i]
+            + (gi_conv_params.dilation[i] * (grad_output_shape[i] - 1) + 1);
+          if (expected_input_shape != input_shape[i]) {
+            gi_conv_params.output_padding[i] = input_shape[i] - expected_input_shape;
+          }
         }
       }
-    }
 
-    // Disable groups as they are handled separately
-    auto groups = gi_conv_params.groups;
-    gi_conv_params.groups = 1;
-
-    auto ggWt = apply_fn<Transpose>(0, 1)(ggW);
-    auto gOt = apply_fn<Transpose>(0, 1)(gO);
-
-    Variable gIt;
-    if (groups == 1) {
-      if (gOt.type().isCuda()) {
-        gOt = apply_fn<Contiguous>()(gOt);
-      }
-
-      gIt = apply_fn<ConvForward>(gi_conv_params)(ggWt, gOt, Variable());
-    } else {
-      variable_list gIt_list(groups);
-      for (int g = 0; g < groups; ++g) {
-        auto ggWt_g = subvariable(ggWt, 1, groups, g);
-        auto gOt_g = subvariable(gOt, 0, groups, g);
-        if (gOt_g.type().isCuda()) {
-          gOt_g = apply_fn<Contiguous>()(gOt_g);
+      Variable gIt;
+      if (groups == 1) {
+        if (gOt.type().isCuda()) {
+          gOt = apply_fn<Contiguous>()(gOt);
         }
 
-        gIt_list[g] = apply_fn<ConvForward>(gi_conv_params)(ggWt_g, gOt_g, Variable());
+        gIt = apply_fn<ConvForward>(gi_conv_params)(ggWt, gOt, Variable());
+      } else {
+        variable_list gIt_list(groups);
+        for (int g = 0; g < groups; ++g) {
+          auto ggWt_g = subvariable(ggWt, 1, groups, g);
+          auto gOt_g = subvariable(gOt, 0, groups, g);
+          if (gOt_g.type().isCuda()) {
+            gOt_g = apply_fn<Contiguous>()(gOt_g);
+          }
+
+          gIt_list[g] = apply_fn<ConvForward>(gi_conv_params)(ggWt_g, gOt_g, Variable());
+        }
+
+        gIt = apply_fn<Cat>(0)(gIt_list);
       }
 
-      gIt = apply_fn<Cat>(0)(gIt_list);
+      gI = apply_fn<Transpose>(0, 1)(gIt);
     }
-
-    gI = apply_fn<Transpose>(0, 1)(gIt);
   }
-
   return {ggO, gI, gW};
 }
 

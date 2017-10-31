@@ -220,6 +220,14 @@ public:
   // Result:  %3 = f(%1, %2, %4)
   Node* addInput(Node * node) {
     JIT_ASSERT(graph_ == node->graph_);
+    // Select invariant
+    if (kind_ == kSelect) {
+      // You have no excuse for not having accurate type information on
+      // multi-return
+      JIT_ASSERT(node->hasType() && node->type()->kind() == TypeKind::MultiType);
+    } else {
+      JIT_ASSERT(!node->hasType() || node->type()->kind() != TypeKind::MultiType);
+    }
     node->uses_.emplace_back(this, inputs_.size());
     inputs_.push_back(node);
     return node;
@@ -623,6 +631,12 @@ public:
   ~Graph() {
     for (const Node * n : all_nodes)
       delete n;
+  }
+
+  std::string toString() {
+    std::ostringstream oss;
+    oss << *this;
+    return oss.str();
   }
 
   friend std::ostream& operator<<(std::ostream & out, Graph & g);

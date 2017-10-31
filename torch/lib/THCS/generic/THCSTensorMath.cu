@@ -32,6 +32,20 @@ void THCSTensor_(zero)(THCState *state, THCSTensor *self) {
   self->nnz = 0;
 }
 
+void THCSTensor_(zeros)(THCState *state, THCSTensor *r_, THLongStorage *size)
+{
+  THCAssertSameGPU(THCSTensor_(checkGPU)(state, 1, 1, r_));
+  THCSTensor_(resize)(state, r_, size);
+  THCSTensor_(zero)(state, r_);
+}
+
+void THCSTensor_(zerosLike)(THCState *state, THCSTensor *r_, THCSTensor *input)
+{
+  THCAssertSameGPU(THCSTensor_(checkGPU)(state, 2, 2, r_, input));
+  THCSTensor_(resizeAs)(state, r_, input);
+  THCSTensor_(zero)(state, r_);
+}
+
 void THCTensor_(spaddcmul)(THCState *state, THCTensor *r_, THCTensor *t, real value, THCSTensor *src1, THCSTensor *src2) {
   THError("WARNING: Sparse Cuda Tensor op spaddcmul is not implemented");
 }
@@ -263,7 +277,7 @@ void THCSTensor_(spcadd)(THCState *state, THCTensor *r_, THCTensor *dense, real 
           (uint64_t) nnz);
     }
   } else {
-    THCIndexTensor *indices1D = THCSTensor_(newFlattenedIndices)(state, sparse);
+    THCIndexTensor *indices1D = THCSTensor_(newFlattenedIndices)(state, sparse, 0);
     THCIndexTensor_(resize1d)(state, indices1D, nnz);
 
     if (value != ScalarConvert<int, real>::to(1)) {

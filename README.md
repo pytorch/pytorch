@@ -217,7 +217,7 @@ should increase shared memory size either with `--ipc=host` or `--shm-size` comm
 Three pointers to get you started:
 - [Tutorials: get you started with understanding and using PyTorch](http://pytorch.org/tutorials/)
 - [Examples: easy to understand pytorch code across all domains](https://github.com/pytorch/examples)
-- The API Reference: [http://pytorch.org/docs/](http://pytorch.org/docs/)
+- [The API Reference](http://pytorch.org/docs/)
 
 ## Communication
 * forums: discuss implementations, research, etc. http://discuss.pytorch.org

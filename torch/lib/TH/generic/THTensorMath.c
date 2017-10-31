@@ -3043,31 +3043,29 @@ void THTensor_(std)(THTensor *r_, THTensor *t, int dimension, int biased, int ke
   THLongStorage_free(dim);
 
   TH_TENSOR_DIM_APPLY2(real, t, real, r_, dimension,
-                       accreal sum = 0;
-                       accreal sum2 = 0;
+                       // Uses Welford's algorithm for numeric stability
+                       accreal mean = 0;
+                       accreal M2 = 0;
+
                        int64_t i;
-                       for(i = 0; i < t_size; i++)
+                       for (i = 0; i < t_size; i++)
                        {
                          real z = t_data[i*t_stride];
-                         sum += z;
-                         sum2 += z*z;
+                         real delta = z - mean;
+                         mean += delta / (i + 1);
+                         real delta2 = z - mean;
+                         M2 += delta * delta2;
                        }
 
-                       if(biased)
+                       if (biased && t_size >= 2)
                        {
-                         sum /= t_size;
-                         sum2 /= t_size;
-                         sum2 -= sum*sum;
-                         sum2 = (sum2 < 0 ? 0 : sum2);
-                         *r__data = (real)TH_MATH_NAME(sqrt)(sum2);
-                       }
-                       else
-                       {
-                         sum /= t_size;
-                         sum2 /= t_size-1;
-                         sum2 -= ((real)t_size)/((real)(t_size-1))*sum*sum;
-                         sum2 = (sum2 < 0 ? 0 : sum2);
-                         *r__data = (real)TH_MATH_NAME(sqrt)(sum2);
+                         *r__data = TH_MATH_NAME(sqrt)(M2 / t_size);
+                       } else if (!biased && t_size >= 2) {
+                         *r__data = TH_MATH_NAME(sqrt)(M2 / (t_size - 1));
+                       } else if (biased && t_size == 1) {
+                         *r__data = 0;
+                       } else {
+                         *r__data = NAN;
                        });
 
   if (!keepdim) {
@@ -3088,31 +3086,29 @@ void THTensor_(var)(THTensor *r_, THTensor *t, int dimension, int biased, int ke
   THLongStorage_free(dim);
 
   TH_TENSOR_DIM_APPLY2(real, t, real, r_, dimension,
-                       accreal sum = 0;
-                       accreal sum2 = 0;
+                       // Uses Welford's algorithm for numeric stability
+                       accreal mean = 0;
+                       accreal M2 = 0;
+
                        int64_t i;
-                       for(i = 0; i < t_size; i++)
+                       for (i = 0; i < t_size; i++)
                        {
                          real z = t_data[i*t_stride];
-                         sum += z;
-                         sum2 += z*z;
+                         real delta = z - mean;
+                         mean += delta / (i + 1);
+                         real delta2 = z - mean;
+                         M2 += delta * delta2;
                        }
 
-                       if(biased)
+                       if (biased && t_size >= 2)
                        {
-                         sum /= t_size;
-                         sum2 /= t_size;
-                         sum2 -= sum*sum;
-                         sum2 = (sum2 < 0 ? 0 : sum2);
-                         *r__data = sum2;
-                       }
-                       else
-                       {
-                         sum /= t_size;
-                         sum2 /= t_size-1;
-                         sum2 -= ((real)t_size)/((real)(t_size-1))*sum*sum;
-                         sum2 = (sum2 < 0 ? 0 : sum2);
-                         *r__data = (real)sum2;
+                         *r__data = M2 / t_size;
+                       } else if (!biased && t_size >= 2) {
+                         *r__data = M2 / (t_size - 1);
+                       } else if (biased && t_size == 1) {
+                         *r__data = 0;
+                       } else {
+                         *r__data = NAN;
                        });
 
   if (!keepdim) {

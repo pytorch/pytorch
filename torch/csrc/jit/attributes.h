@@ -170,6 +170,9 @@ private:
     auto it = std::find_if(values_.begin(), values_.end(),[&](const AVPtr & v) {
       return v->name == name;
     });
+    if(required && it == values_.end()) {
+      ::torch::jit::barf("%s:%u: %s: required undefined attribute '%s'", __FILE__, __LINE__, __func__, symbolToString(name));
+    }
     JIT_ASSERT(!required || it != values_.end());
     return it;
   }

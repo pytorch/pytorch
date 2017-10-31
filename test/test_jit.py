@@ -33,7 +33,11 @@ def LSTMCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
     return hy, cy
 
 
-@unittest.skip("JIT tests temporarily broken")
+def LSTMCellC(*args, **kwargs):
+    hy, cy = LSTMCell(*args, **kwargs)
+    return torch.cat((hy, cy))
+
+
 class TestJit(TestCase):
     maxDiff = None
 
@@ -45,11 +49,7 @@ class TestJit(TestCase):
             return torch.sigmoid(torch.tanh(x * (x + y)))
 
         trace, z = torch.jit.trace(f, (x, y), nderivs=0)
-
         torch._C._jit_pass_lint(trace)
-        torch._C._jit_pass_onnx(trace)
-        torch._C._jit_pass_lint(trace)
-
         self.assertExpected(str(trace))
 
     @unittest.skipIf(not torch.cuda.is_available(), "fuser requires CUDA")
@@ -60,8 +60,6 @@ class TestJit(TestCase):
         module = nn.LSTMCell(10, 20).cuda()  # Just to allocate weights with correct sizes
 
         trace, _ = torch.jit.trace(LSTMCell, (input, (hx, cx)) + tuple(module.parameters()))
-        torch._C._jit_pass_lint(trace)
-        torch._C._jit_pass_onnx(trace)
         torch._C._jit_pass_lint(trace)
         torch._C._jit_pass_fuse(trace)
         torch._C._jit_pass_lint(trace)
@@ -81,6 +79,33 @@ class TestJit(TestCase):
         self.assertEqual(z, z2)
 
     @unittest.skipIf(not torch.cuda.is_available(), "fuser requires CUDA")
+    def test_run_lstm_fusion_concat(self):
+        input = Variable(torch.randn(3, 10).cuda())
+        hx = Variable(torch.randn(3, 20).cuda())
+        cx = Variable(torch.randn(3, 20).cuda())
+        module = nn.LSTMCell(10, 20).cuda()  # Just to allocate weights with correct sizes
+
+        CompiledLSTMCell = torch.jit.compile(nderivs=0)(LSTMCellC)
+
+        z = CompiledLSTMCell(input, (hx, cx), *module.parameters())
+        z2 = CompiledLSTMCell(input, (hx, cx), *module.parameters(), _assert_compiled=True)
+        self.assertEqual(z, z2)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "fuser requires CUDA")
+    def test_concat_fusion(self):
+        hx = Variable(torch.randn(3, 20).cuda())
+        cx = Variable(torch.randn(3, 20).cuda())
+
+        def Foo(hx, cx):
+            return torch.cat((hx + cx, hx * cx))
+
+        trace, _ = torch.jit.trace(Foo, (hx, cx))
+        torch._C._jit_pass_lint(trace)
+        torch._C._jit_pass_fuse(trace)
+        torch._C._jit_pass_lint(trace)
+        self.assertExpected(str(trace))
+
+    @unittest.skipIf(not torch.cuda.is_available(), "fuser requires CUDA")
     def test_fusion_distribute(self):
         def f(x, y):
             z1, z2 = (x + y).chunk(2, dim=1)
@@ -90,9 +115,6 @@ class TestJit(TestCase):
         trace, _ = torch.jit.trace(f, (x, y), nderivs=0)
         torch._C._jit_pass_lint(trace)
         self.assertExpected(str(trace), 'raw')
-        torch._C._jit_pass_onnx(trace)
-        torch._C._jit_pass_lint(trace)
-        self.assertExpected(str(trace), 'onnx')
         torch._C._jit_pass_fuse(trace)
         torch._C._jit_pass_lint(trace)
         self.assertExpected(str(trace))
@@ -106,8 +128,6 @@ class TestJit(TestCase):
         t = torch.tanh(w) + torch.tanh(w)
         z = (x + y) * (x + y) * (x + y) + t
         torch._C._tracer_exit((z,))
-        torch._C._jit_pass_lint(trace)
-        torch._C._jit_pass_onnx(trace)
         torch._C._jit_pass_lint(trace)
         torch._C._jit_pass_cse(trace)
 
@@ -124,6 +144,20 @@ class TestJit(TestCase):
         z = doit(x, y)
         z2 = doit(x, y, _assert_compiled=True)
         self.assertEqual(z, torch.sigmoid(torch.tanh(x * (x + y))))
+        self.assertEqual(z, z2)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "fuser requires CUDA")
+    def test_compile_addc(self):
+        x = Variable(torch.Tensor([0.4]), requires_grad=True).cuda()
+        y = Variable(torch.Tensor([0.7]), requires_grad=True).cuda()
+
+        @torch.jit.compile(nderivs=0)
+        def doit(x, y):
+            return torch.sigmoid(torch.tanh(x * (x + y) + 1))
+
+        z = doit(x, y)
+        z2 = doit(x, y, _assert_compiled=True)
+        self.assertEqual(z, torch.sigmoid(torch.tanh(x * (x + y) + 1)))
         self.assertEqual(z, z2)
 
     def test_traced_function(self):
@@ -280,19 +314,38 @@ class TestJit(TestCase):
         self.assertExpected(str(trace))
 
     def test_inplace_flags(self):
+        class InplaceFn(Function):
+            @staticmethod
+            def forward(ctx, x):
+                ctx.mark_dirty(x)
+                return x.add_(1)
+
+            @staticmethod
+            def backward(ctx, go):
+                return go
+
+        class RegularFn(Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x.add(1)
+
+            @staticmethod
+            def backward(ctx, go):
+                return go
+
         x = Variable(torch.Tensor([0]), requires_grad=True)
         trace = torch._C._tracer_enter((x,), 0)
-        y = x + 2
-        y.add_(2)
-        y.mul_(4)
-        y = y * 2
+        y = RegularFn.apply(x)
+        y = InplaceFn.apply(y)
+        y = InplaceFn.apply(y)
+        y = RegularFn.apply(y)
         torch._C._tracer_exit((y,))
         ops = [n for n in trace.graph().nodes() if n.kind() != 'Select']
         for op in ops:
-            self.assertTrue(op.hasAttribute('__inplace'))
+            self.assertTrue(op.hasAttribute('inplace'))
         inplace_flags = [False, True, True, False]
         for op, is_inplace in zip(ops, inplace_flags):
-            self.assertEqual(op.i('__inplace'), is_inplace)
+            self.assertEqual(op.i('inplace'), is_inplace)
 
     def test_inplace_check(self):
         class MyInplaceFn(Function):
@@ -548,7 +601,6 @@ class TestJit(TestCase):
                 assert(n_.i("some_value") == len(node.scalar_args()))
             else:
                 n_ = g2.createClone(node, lambda x: g_to_g2[x])
-                assert(n_.kindOf("Offset") == "i")
 
             g_to_g2[node] = g2.appendNode(n_)
 

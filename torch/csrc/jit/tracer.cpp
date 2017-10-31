@@ -56,7 +56,7 @@ struct TraceEval : autograd::Eval {
       setValueTrace(tracing_state, input, input_node);
       input_node->inferTypeFrom(input.data());
     }
-    tracing_state->var_flags.at(graph->stage()) = detail::getVarFlags(inputs);
+    tracing_state->var_flags.at(graph->stage()).first = detail::getVarFlags(inputs);
   }
 
   void exitTrace(const variable_list& inputs, const variable_list& outputs) {
@@ -89,9 +89,9 @@ void nontraceableBackwardSubgraph(const variable_list& inputs, const variable_li
   std::make_shared<autograd::Eval>()->replaceSubgraph(inputs, outputs);
 }
 
-Node* recordTraceHelper(std::string op, // TODO: make this a Symbol
-                        at::ArrayRef<Variable> inputs,
-                        at::ArrayRef<Variable> outputs) {
+Node* recordTrace(std::string op, // TODO: make this a Symbol
+                  at::ArrayRef<Variable> inputs,
+                  at::ArrayRef<Variable> outputs) {
   auto state = getTracingState(inputs);
   auto& graph = state->graph;
   // TODO: Technically, we could reduce the scope of the lock, but since we
@@ -106,35 +106,19 @@ Node* recordTraceHelper(std::string op, // TODO: make this a Symbol
   // NB: Order matters. This must append after inputs but before outputs.
   graph->appendNode(n);
 
-  int i = 0;
-  for (Variable output : outputs) {
-    Node* sel = graph->appendNode(graph->createSelect(n, i));
-    // TODO: Track inplace operations (needed for JIT).
+  auto assignOutput = [&state](const Variable & output, Node * value) {
     if (output.defined()) {
-      sel->inferTypeFrom(output.data());
-      setValueTrace(state, output, sel);
+      value->inferTypeFrom(output.data());
+      setValueTrace(state, output, value);
     }
-    i++;
-  }
-
-  /*
-  // Want to do this eventually, but we also need to deal with Handles in this
-  // world
-  if (outputs.size() != 1) {
-    int i = 0;
-    for (Variable output : outputs) {
-      Node* sel = graph->appendNode(graph->createSelect(n, i));
-      // TODO: Track inplace operations (needed for JIT).
-      if (output.defined()) {
-        sel->inferTypeFrom(output.data());
-        setValueTrace(state, output, sel);
-      }
-      i++;
-    }
+  };
+  if(outputs.size() == 1) {
+    assignOutput(outputs[0],n);
   } else {
-    setValueTrace(state, outputs.front(), n);
+    for(size_t i = 0; i < outputs.size(); i++) {
+      assignOutput(outputs[i], graph->appendNode(graph->createSelect(n, i)));
+    }
   }
-  */
 
   // Return the n so that attributes can be added.
   return n;

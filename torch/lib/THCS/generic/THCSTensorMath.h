@@ -11,6 +11,8 @@
  */
 
 TH_API void THCSTensor_(zero)(THCState *state, THCSTensor *r_);
+TH_API void THCSTensor_(zeros)(THCState *state, THCSTensor *r_, THLongStorage *size);
+TH_API void THCSTensor_(zerosLike)(THCState *state, THCSTensor *r_, THCSTensor *input);
 
 TH_API void THCTensor_(spaddcmul)(THCState *state, THCTensor *r_, THCTensor *t, real value, THCSTensor *src1, THCSTensor *src2);
 TH_API void THCTensor_(spaddcdiv)(THCState *state, THCTensor *r_, THCTensor *t, real value, THCSTensor *src1, THCSTensor *src2);

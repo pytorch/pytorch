@@ -76,7 +76,7 @@ class _TensorBase(object):
         if self.is_cuda:
             raise TypeError("cannot pin '{0}' only CPU memory can be pinned"
                             .format(self.type()))
-        storage = self.storage()
+        storage = self.contiguous().storage()
         if storage is None:
             storage = (self.storage_type())()
         return type(self)().set_(storage.pin_memory()).view_as(self)
@@ -370,6 +370,24 @@ class _TensorBase(object):
 
     def __hash__(self):
         return id(self)
+
+    def __int__(self):
+        if self.numel() == 1:
+            return int(self[(0,) * self.ndimension()])
+        raise TypeError("only 1-element tensors can be converted "
+                        "to Python scalars")
+
+    def __long__(self):
+        if self.numel() == 1:
+            return long(self[(0,) * self.ndimension()])
+        raise TypeError("only 1-element tensors can be converted "
+                        "to Python scalars")
+
+    def __float__(self):
+        if self.numel() == 1:
+            return float(self[(0,) * self.ndimension()])
+        raise TypeError("only 1-element tensors can be converted "
+                        "to Python scalars")
 
     # provide user guidance when they inavertently call autograd properties on a Tensor
     @property

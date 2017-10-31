@@ -8,6 +8,7 @@ import torch.cuda
 import tempfile
 import unittest
 import warnings
+from torch.utils.dlpack import from_dlpack, to_dlpack
 from itertools import product, combinations
 from common import TestCase, iter_indices, TEST_NUMPY, run_tests, download_file, skipIfNoLapack, \
     suppress_warnings
@@ -32,6 +33,104 @@ class TestTorch(TestCase):
             res2 = 0
             for i, j in zip(v1, v2):
                 res2 += i * j
+            self.assertEqual(res1, res2)
+
+        # Test 0-strided
+        for tname, _prec in types.items():
+            v1 = torch.randn(1).type(tname).expand(100)
+            v2 = torch.randn(100).type(tname)
+            res1 = torch.dot(v1, v2)
+            res2 = 0
+            for i, j in zip(v1, v2):
+                res2 += i * j
+            self.assertEqual(res1, res2)
+
+    def test_ger(self):
+        types = {
+            'torch.DoubleTensor': 1e-8,
+            'torch.FloatTensor': 1e-4,
+        }
+        for tname, _prec in types.items():
+            v1 = torch.randn(100).type(tname)
+            v2 = torch.randn(100).type(tname)
+            res1 = torch.ger(v1, v2)
+            res2 = torch.zeros(100, 100).type(tname)
+            for i in range(100):
+                for j in range(100):
+                    res2[i, j] = v1[i] * v2[j]
+            self.assertEqual(res1, res2)
+
+        # Test 0-strided
+        for tname, _prec in types.items():
+            v1 = torch.randn(1).type(tname).expand(100)
+            v2 = torch.randn(100).type(tname)
+            res1 = torch.ger(v1, v2)
+            res2 = torch.zeros(100, 100).type(tname)
+            for i in range(100):
+                for j in range(100):
+                    res2[i, j] = v1[i] * v2[j]
+            self.assertEqual(res1, res2)
+
+    def test_addmv(self):
+        types = {
+            'torch.DoubleTensor': 1e-8,
+            'torch.FloatTensor': 1e-4,
+        }
+        for tname, _prec in types.items():
+            t = torch.randn(10).type(tname)
+            m = torch.randn(10, 100).type(tname)
+            v = torch.randn(100).type(tname)
+            res1 = torch.addmv(t, m, v)
+            res2 = torch.zeros(10).type(tname)
+            res2 += t
+            for i in range(10):
+                for j in range(100):
+                    res2[i] += m[i, j] * v[j]
+            self.assertEqual(res1, res2)
+
+        # Test 0-strided
+        for tname, _prec in types.items():
+            t = torch.randn(1).type(tname).expand(10)
+            m = torch.randn(10, 1).type(tname).expand(10, 100)
+            v = torch.randn(100).type(tname)
+            res1 = torch.addmv(t, m, v)
+            res2 = torch.zeros(10).type(tname)
+            res2 += t
+            for i in range(10):
+                for j in range(100):
+                    res2[i] += m[i, j] * v[j]
+            self.assertEqual(res1, res2)
+
+    def test_addmm(self):
+        types = {
+            'torch.DoubleTensor': 1e-8,
+            'torch.FloatTensor': 1e-4,
+        }
+        for tname, _prec in types.items():
+            M = torch.randn(10, 25).type(tname)
+            m1 = torch.randn(10, 50).type(tname)
+            m2 = torch.randn(50, 25).type(tname)
+            res1 = torch.addmm(M, m1, m2)
+            res2 = torch.zeros(10, 25).type(tname)
+            res2 += M
+            for i in range(10):
+                for j in range(25):
+                    for k in range(50):
+                        res2[i, j] += m1[i, k] * m2[k, j]
+            self.assertEqual(res1, res2)
+
+        # Test 0-strided
+        for tname, _prec in types.items():
+            M = torch.randn(10, 1).type(tname).expand(10, 25)
+            m1 = torch.randn(10, 1).type(tname).expand(10, 50)
+            m2 = torch.randn(50, 25).type(tname)
+            res1 = torch.addmm(M, m1, m2)
+            res2 = torch.zeros(10, 25).type(tname)
+            res2 += M
+            for i in range(10):
+                for j in range(25):
+                    for k in range(50):
+                        res2[i, j] += m1[i, k] * m2[k, j]
             self.assertEqual(res1, res2)
 
     def _testMath(self, torchfn, mathfn):
@@ -3501,6 +3600,10 @@ class TestTorch(TestCase):
         self.assertEqual(tensor.var(unbiased=True), 0.5)
         self.assertEqual(tensor.var(unbiased=False), 0.25)
 
+        tensor = torch.FloatTensor([1.0, 2.0, 3.0])
+        self.assertEqual(tensor.var(unbiased=True), 1.0)
+        self.assertEqual(tensor.var(unbiased=False), 2.0 / 3.0)
+
         tensor = torch.randn(100)
         self.assertEqual(tensor.std(0), tensor.std(0, unbiased=True))
         self.assertEqual(tensor.std(), tensor.std(unbiased=True))
@@ -4248,8 +4351,7 @@ class TestTorch(TestCase):
 
     def test_dlpack_conversion(self):
         x = torch.randn(1, 2, 3, 4).type('torch.FloatTensor')
-        y = torch._C._to_dlpack(x)
-        z = torch._C._from_dlpack(y)
+        z = from_dlpack(to_dlpack(x))
         self.assertEqual(z, x)
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
@@ -4477,6 +4579,29 @@ class TestTorch(TestCase):
         t /= 2
         id_after = id(t)
         self.assertEqual(id_before, id_after)
+
+    def test_simple_scalar_cast(self):
+        ok = [torch.Tensor([1.5]), torch.zeros(1, 1, 1, 1)]
+        ok_values = [1.5, 0]
+
+        not_ok = map(torch.Tensor, [[], [1, 2], [[1, 2], [3, 4]]])
+
+        for tensor, value in zip(ok, ok_values):
+            self.assertEqual(int(tensor), int(value))
+            self.assertEqual(float(tensor), float(value))
+            if sys.version_info[0] < 3:
+                self.assertEqual(long(tensor), long(value))
+
+        for tensor in not_ok:
+            self.assertRaises(TypeError, lambda: int(tensor))
+            self.assertRaises(TypeError, lambda: float(tensor))
+            if sys.version_info[0] < 3:
+                self.assertRaises(TypeError, lambda: long(tensor))
+
+    def test_offset_scalar_cast(self):
+        x = torch.Tensor([1, 2, 3])
+        y = x[2:]
+        self.assertEqual(int(y), 3)
 
 # Functions to test negative dimension wrapping
 METHOD = 1

@@ -20,12 +20,16 @@ void THNN_(HardTanh_updateOutput)(
   if (input->nDimension == 1 || !THTensor_(isContiguous)(input) || !THTensor_(isContiguous)(output))
   {
     if (inplace)
+    {
       TH_TENSOR_APPLY(real, input,
         if (*input_data < min_val)
           *input_data = min_val;
         else if (*input_data > max_val)
           *input_data = max_val;
       );
+    }
+    else
+    {
       TH_TENSOR_APPLY2(real, output, real, input,
         if (*input_data < min_val)
           *output_data = min_val;
@@ -34,6 +38,7 @@ void THNN_(HardTanh_updateOutput)(
         else
           *output_data = max_val;
       );
+    }
   }
   else
   {

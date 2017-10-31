@@ -1,0 +1,12 @@
+graph(%1 : Double(3, 20)
+      %2 : Double(3, 20)) {
+  %7 : Double(6, 20) = fusion_group_0(%1, %2), uses = [[%0.i0]];
+  return (%7);
+}
+with fusion_group_0 = graph(%4 : Double(3, 20)
+      %5 : Double(3, 20)) {
+  %7 : Double(3, 20) = add[alpha={1}](%4, %5), uses = [%3.i0];
+  %6 : Double(3, 20) = mul(%4, %5), uses = [%3.i1];
+  %3 : Double(6, 20) = cat[dim=0](%7, %6), uses = [%0.i0];
+  return (%3);
+}

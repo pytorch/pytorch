@@ -96,7 +96,12 @@ def _export(model, args, f, export_params=True, verbose=False, training=False):
         raise RuntimeError("state_dict changed after running the tracer; "
                            "something weird is happening in your model!")
 
+    torch._C._jit_pass_peephole(trace)
+    torch._C._jit_pass_lint(trace)
     torch._C._jit_pass_onnx(trace)
+    torch._C._jit_pass_lint(trace)
+    torch._C._jit_pass_dce(trace)
+    torch._C._jit_pass_lint(trace)
 
     if verbose:
         print(trace)
@@ -217,15 +222,12 @@ def _run_symbolic_function(g, n, inputs):
         else:
             op_name = n.kind()
         if not hasattr(torch.onnx.symbolic, op_name):
-            warnings.warn("ONNX conversion of {} not supported".format(op_name))
+            warnings.warn("ONNX export failed on {} because torch.onnx.symbolic.{} does not exist"
+                          .format(op_name, op_name))
             return None
         fn = getattr(torch.onnx.symbolic, op_name)
         attrs = {k: n[k] for k in n.attributeNames()}
-        r = fn(g, *inputs, **attrs)
-        if r is None:
-            raise NotImplementedError("torch.onnx.symbolic.{} returned None, "
-                                      "indicating ONNX translation not supported".format(op_name))
-        return r
+        return fn(g, *inputs, **attrs)
 
     except TypeError as e:
         # Handle the specific case where we didn't successfully dispatch.

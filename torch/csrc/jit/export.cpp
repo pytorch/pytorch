@@ -220,58 +220,115 @@ void encodeModel(onnx::ModelProto* p_m, const std::shared_ptr<Graph>& g,
   encodeGraph(p_g, g, initializers);
 }
 
-void standardizeGraph(const std::shared_ptr<Graph>& graph) {
+// Broadcasting operators have the following property:
+// They support a 'broadcast' flag, which enables broadcasting
+// on the last argument.  ATM this is not full-Numpy broadcasting,
+// only left-size extension (no size 1 to size n broadcast)
+std::unordered_set<NodeKind> broadcasting = {
+  kAdd,
+  kDiv,
+  kMul,
+  kPow,
+  kSub,
+  kGemm,
+};
+
+bool isBroadcasting(Node *node) {
+  return broadcasting.count(node->kind());
+}
+
+// When iterating over the dimension sizes, starting at the trailing dimension,
+// the dimension sizes must either be equal, or one of them does not exist.
+//
+//  equivalently:
+//
+// Test that 'from' is a suffix of 'to'.
+bool fusibleExpandTo(at::IntList from, at::IntList to) {
+  auto f = from.rbegin();
+  auto t = to.rbegin();
+  for (; f != from.rend() && t != to.rend(); f++, t++) {
+    // TODO: if 1->n expansion is supported, adjust this conditional.
+    if (*f != *t) return false;
+  }
+  return f == from.rend();
+}
+
+// This optimization fuses expand calls into ONNX operators, because it is
+// easier for non-strided backends to more efficiently do broadcasts if this is
+// local information.  This optimization is not useful for PyTorch as 'expand'
+// is free.
+void fuseBroadcast(const std::shared_ptr<Graph>& graph) {
   for (auto it = graph->nodes().begin(); it != graph->nodes().end(); ++it) {
+    auto* n = *it;
+
+    // Can't fuse into nodes that don't support broadcasting
+    if (!isBroadcasting(n)) continue;
+
+    // If the node already broadcasts, can't "rebroadcast"
+    // TODO: Actually, maybe you can, if there is a broadcast for some
+    // dims, and then another broadcast for the rest.  But this will
+    // never happen in practice so I didn't implement it.
+    if (n->hasAttribute(kbroadcast) && n->i(kbroadcast)) continue;
+    JIT_ASSERT(!n->hasAttribute(kaxis));
+
+    auto* rhs = n->inputs().at(n->inputs().size() - 1);
+
+    // The rhs input isn't actually an expand, so no fusion available
+    if (rhs->kind() != kExpand) continue;
+
+    auto* new_rhs = rhs->input();
+
+    // We need to know what the type pre-expand is.  We should basically
+    // always have this information (because expands are only ever traced,
+    // not generated from symbolic), but if for some reason we don't
+    // have it, we need to skip.
+    if (!new_rhs->hasType()) continue;
+
+    // Not all broadcasts are supported by ONNX broadcast.
+    if (!fusibleExpandTo(new_rhs->type()->expect<TensorType>()->sizes(),    // from
+                         rhs->type()->expect<TensorType>()->sizes()) // to
+       ) continue;
+
+    n->replaceInput(n->inputs().size() - 1, new_rhs);
+    n->i_(kbroadcast,1);
+    if (rhs->uses().size() == 0) {
+      rhs->destroy();
+    }
+  }
+}
+
+
+void standardizeGraph(const std::shared_ptr<Graph>& graph) {
+  // TODO: move this out of here...
+  fuseBroadcast(graph);
+
+  for (auto it = graph->nodes().begin(); it != graph->nodes().end(); ++it) {
+      // Macro'ed so we get a marginally better line number on failed export
 #define FAIL_EXPORT(name) \
-      throw std::runtime_error(std::string("Couldn't export ") + name + " function - " \
-              "maybe it doesn't implement a symbolic definition?");
-    IR_IF(*it, AddConstant)
-      throw std::runtime_error("can't serialize PyTorch-only node AddConstant (not implemented yet)");
-    IR_ELSEIF(CppOp)
+      throw std::runtime_error(std::string("ONNX export failed: ") + name + "\n\nGraph we tried to export:\n" + graph->toString());
+    IR_IF(*it, CppOp)
       auto cpp_node = static_cast<torch::jit::CppOp*>(value);
-      FAIL_EXPORT(cpp_node->name())
+      FAIL_EXPORT("Couldn't export C++ operator " + cpp_node->name())
     IR_ELSEIF(PythonOp)
       auto py_node = static_cast<torch::jit::PythonOp*>(value);
-      if (py_node->name() == "Index") {
-        if (py_node->scalar_args.size() != 1 ||
-            !THPUtils_checkLong(py_node->scalar_args[0].get())) {
-          throw std::runtime_error("ONNX export only support indexing with a single int");
-        }
-        auto index = THPUtils_unpackLong(py_node->scalar_args[0].get());
-        JIT_ASSERT(py_node->inputs().size() == 1);
-        auto input = py_node->inputs()[0];
-        auto input_type = input->type()->expect<TensorType>();
-        int64_t ndim = input_type->sizes().size();
-
-        // Create starts and ends
-        auto starts = at::CPU(at::kInt).zeros({ndim});
-        auto starts_data = starts.toIntData();
-        auto ends = at::CPU(at::kInt).tensor({ndim});
-        auto ends_data = ends.toIntData();
-
-        // Fill them to select out a single slice along first dim
-        starts_data[0] = index;
-        std::copy(input_type->sizes().begin(), input_type->sizes().end(), ends_data);
-        ends_data[0] = index + 1;
-
-        Node *starts_constant = graph->create(kConstant)->t_(kvalue, starts)->insertBefore(py_node);
-        Node *ends_constant = graph->create(kConstant)->t_(kvalue, ends)->insertBefore(py_node);
-
-        Node *slice = graph->create(kSlice, {input, starts_constant, ends_constant})
-                           ->insertBefore(py_node);
-        Node *squeeze = graph->create(kSqueeze, {slice})->is_(kaxes, {0})
-                             ->insertBefore(py_node);
-        auto first_select = py_node->uses()[0].user;
-        first_select->replaceAllUsesWith(squeeze);
-        squeeze->setType(first_select->typeOption());
-        for (auto use : py_node->uses())
-          use.user->destroy();
-        it.destroyCurrent();
-      } else {
-        FAIL_EXPORT(py_node->name())
-      }
+      FAIL_EXPORT("Couldn't export Python operator " + py_node->name())
     IR_ELSE()
-      // Do nothing.
+      // Expand is not a real ONNX operator yet, reject it
+      if (it->kind() == kExpand) {
+        FAIL_EXPORT("Couldn't export operator expand; this usually means you used a form of broadcasting that ONNX does not currently support");
+      }
+      if (it->kind() == kUndefined) {
+        FAIL_EXPORT("Couldn't export undefined constant tensor (please file an issue)")
+      }
+      std::string n = symbolToString(it->kind());
+      if (n.size() == 0) {
+        FAIL_EXPORT("Operator to export had empty name (please file an issue)")
+      }
+      // NB: Upper-case is ONNX, lower-case is ATen.  If we want to be more
+      // robust, need to explicitly flag operators as ONNX or ATen
+      if (!isupper(n[0])) {
+        FAIL_EXPORT("Couldn't export operator " + n);
+      }
     IR_END()
 #undef FAIL_EXPORT
   }

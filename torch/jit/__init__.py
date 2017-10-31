@@ -469,9 +469,9 @@ class TraceForKey(object):
 
             # It's important to always run DCE, because backward can create a lot of unnecessary nodes
             _run_pass(torch._C._jit_pass_dce, complete_trace)
-            _run_pass(torch._C._jit_pass_onnx, complete_trace)
             _run_pass(_passes._check_inplace, complete_trace)
             if self.optimize:
+                _run_pass(torch._C._jit_pass_peephole, complete_trace)
                 _run_pass(torch._C._jit_pass_fuse, complete_trace)
 
             _dump_trace(self.name, "final", self.key, complete_trace)
