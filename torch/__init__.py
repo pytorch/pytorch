@@ -39,7 +39,7 @@ except ImportError:
     pass
 
 # first check if the os package has the required flags
-if not hasattr(_dl_flags, 'RTLD_GLOBAL') or not hasattr(_dl_flags, 'RTLD_NOW'):
+if not hasattr(_dl_flags, 'RTLD_GLOBAL') or not hasattr(_dl_flags, 'RTLD_LAZY'):
     try:
         # next try if DLFCN exists
         import DLFCN as _dl_flags
@@ -48,8 +48,11 @@ if not hasattr(_dl_flags, 'RTLD_GLOBAL') or not hasattr(_dl_flags, 'RTLD_NOW'):
         import torch._dl as _dl_flags
 
 old_flags = sys.getdlopenflags()
-sys.setdlopenflags(_dl_flags.RTLD_GLOBAL | _dl_flags.RTLD_NOW)
-
+sys.setdlopenflags(_dl_flags.RTLD_GLOBAL | _dl_flags.RTLD_LAZY)
+try:
+    import torch._nvrtc
+except ImportError:
+    pass
 from torch._C import *
 
 __all__ += [name for name in dir(_C)
