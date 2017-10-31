@@ -5,14 +5,16 @@ graph(%1 : Double(3, 10)
       %5 : Double(80, 20)
       %6 : Double(80)
       %7 : Double(80)) {
-  %8 : Double(10!, 80!) = Transpose[perm=[1, 0]](%4), uses = [%9.i1];
-  %9 : Double(3, 80) = Gemm[alpha=1, beta=1, broadcast=1](%1, %8, %6), uses = [%30.i0];
-  %10 : Double(20!, 80!) = Transpose[perm=[1, 0]](%5), uses = [%11.i1];
-  %11 : Double(3, 80) = Gemm[alpha=1, beta=1, broadcast=1](%2, %10, %7), uses = [%35.i0];
-  %31 : Double(3!, 20), %32 : Double(3!, 20), %33 : Double(3!, 20), %34 : Double(3!, 20) = Split[split=[20, 20, 20, 20], axis=1](%9), uses = [[%27.i7], [%27.i5], [%27.i3], [%27.i1]];
-  %36 : Double(3!, 20), %37 : Double(3!, 20), %38 : Double(3!, 20), %39 : Double(3!, 20) = Split[split=[20, 20, 20, 20], axis=1](%11), uses = [[%27.i8], [%27.i6], [%27.i4], [%27.i2]];
-  %28 : Double(3, 20), %29 : Double(3, 20) = fusion_group_0(%3, %34, %39, %33, %38, %32, %37, %31, %36), uses = [[%0.i0], [%0.i1]];
-  return (%28, %29);
+  %8 : Double(10!, 80!) = t(%4), uses = [%10.i2];
+  %9 : Double(3!, 80) = expand[size=[3, 80]](%6), uses = [%10.i0];
+  %10 : Double(3, 80) = addmm[beta={1}, alpha={1}](%9, %1, %8), uses = [%32.i0];
+  %11 : Double(20!, 80!) = t(%5), uses = [%13.i2];
+  %12 : Double(3!, 80) = expand[size=[3, 80]](%7), uses = [%13.i0];
+  %13 : Double(3, 80) = addmm[beta={1}, alpha={1}](%12, %2, %11), uses = [%37.i0];
+  %33 : Double(3!, 20), %34 : Double(3!, 20), %35 : Double(3!, 20), %36 : Double(3!, 20) = split[split_size=20, dim=1](%10), uses = [[%29.i7], [%29.i5], [%29.i3], [%29.i1]];
+  %38 : Double(3!, 20), %39 : Double(3!, 20), %40 : Double(3!, 20), %41 : Double(3!, 20) = split[split_size=20, dim=1](%13), uses = [[%29.i8], [%29.i6], [%29.i4], [%29.i2]];
+  %30 : Double(3, 20), %31 : Double(3, 20) = fusion_group_0(%3, %36, %41, %35, %40, %34, %39, %33, %38), uses = [[%0.i0], [%0.i1]];
+  return (%30, %31);
 }
 with fusion_group_0 = graph(%13 : Double(3, 20)
       %23 : Double(3!, 20)
@@ -23,18 +25,18 @@ with fusion_group_0 = graph(%13 : Double(3, 20)
       %30 : Double(3!, 20)
       %32 : Double(3!, 20)
       %33 : Double(3!, 20)) {
-  %34 : Double(3, 20) = Add(%32, %33), uses = [%22.i0];
-  %31 : Double(3, 20) = Add(%29, %30), uses = [%20.i0];
-  %28 : Double(3, 20) = Add(%26, %27), uses = [%18.i0];
-  %25 : Double(3, 20) = Add(%23, %24), uses = [%16.i0];
-  %22 : Double(3, 20) = Sigmoid(%34), uses = [%11.i0];
-  %20 : Double(3, 20) = Sigmoid(%31), uses = [%14.i0];
-  %18 : Double(3, 20) = Tanh(%28), uses = [%11.i1];
-  %16 : Double(3, 20) = Sigmoid(%25), uses = [%3.i0];
-  %14 : Double(3, 20) = Mul(%20, %13), uses = [%8.i0];
-  %11 : Double(3, 20) = Mul(%22, %18), uses = [%8.i1];
-  %8 : Double(3, 20) = Add(%14, %11), uses = [%5.i0, %0.i1];
-  %5 : Double(3, 20) = Tanh(%8), uses = [%3.i1];
-  %3 : Double(3, 20) = Mul(%16, %5), uses = [%0.i0];
+  %34 : Double(3, 20) = add[alpha={1}](%32, %33), uses = [%22.i0];
+  %31 : Double(3, 20) = add[alpha={1}](%29, %30), uses = [%20.i0];
+  %28 : Double(3, 20) = add[alpha={1}](%26, %27), uses = [%18.i0];
+  %25 : Double(3, 20) = add[alpha={1}](%23, %24), uses = [%16.i0];
+  %22 : Double(3, 20) = sigmoid(%34), uses = [%11.i0];
+  %20 : Double(3, 20) = sigmoid(%31), uses = [%14.i0];
+  %18 : Double(3, 20) = tanh(%28), uses = [%11.i1];
+  %16 : Double(3, 20) = sigmoid(%25), uses = [%3.i0];
+  %14 : Double(3, 20) = mul(%20, %13), uses = [%8.i0];
+  %11 : Double(3, 20) = mul(%22, %18), uses = [%8.i1];
+  %8 : Double(3, 20) = add[alpha={1}](%14, %11), uses = [%5.i0, %0.i1];
+  %5 : Double(3, 20) = tanh(%8), uses = [%3.i1];
+  %3 : Double(3, 20) = mul(%16, %5), uses = [%0.i0];
   return (%3, %8);
 }

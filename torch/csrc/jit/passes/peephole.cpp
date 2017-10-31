@@ -15,11 +15,7 @@ void PeepholeOptimize(std::shared_ptr<Graph>& graph) {
 
     if (n->kind() == kexpand) {
       if (n->is(ksize) == n->input()->type()->expect<TensorType>()->sizes()) {
-        // Attractive but wrong way to do this:
-        // n->replaceAllUsesWith(n->input());
-        auto* out = n->outputs().at(0);
-        out->replaceAllUsesWith(n->input());
-        out->destroy();
+        n->replaceAllUsesWith(n->input());
         it.destroyCurrent();
         continue;
       }

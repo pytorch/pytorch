@@ -106,35 +106,19 @@ Node* recordTrace(std::string op, // TODO: make this a Symbol
   // NB: Order matters. This must append after inputs but before outputs.
   graph->appendNode(n);
 
-  int i = 0;
-  for (Variable output : outputs) {
-    Node* sel = graph->appendNode(graph->createSelect(n, i));
-    // TODO: Track inplace operations (needed for JIT).
+  auto assignOutput = [&state](const Variable & output, Node * value) {
     if (output.defined()) {
-      sel->inferTypeFrom(output.data());
-      setValueTrace(state, output, sel);
+      value->inferTypeFrom(output.data());
+      setValueTrace(state, output, value);
     }
-    i++;
-  }
-
-  /*
-  // Want to do this eventually, but we also need to deal with Handles in this
-  // world
-  if (outputs.size() != 1) {
-    int i = 0;
-    for (Variable output : outputs) {
-      Node* sel = graph->appendNode(graph->createSelect(n, i));
-      // TODO: Track inplace operations (needed for JIT).
-      if (output.defined()) {
-        sel->inferTypeFrom(output.data());
-        setValueTrace(state, output, sel);
-      }
-      i++;
-    }
+  };
+  if(outputs.size() == 1) {
+    assignOutput(outputs[0],n);
   } else {
-    setValueTrace(state, outputs.front(), n);
+    for(size_t i = 0; i < outputs.size(); i++) {
+      assignOutput(outputs[i], graph->appendNode(graph->createSelect(n, i)));
+    }
   }
-  */
 
   // Return the n so that attributes can be added.
   return n;

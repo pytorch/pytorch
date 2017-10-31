@@ -395,21 +395,9 @@ void Node::lint() const {
   IR_ELSEIF(Eval)
     // TODO: add invariants
   // TODO: It's not good for these ops to be top-level, it makes cases longer.
-  IR_ELSEIF(Add)
-    JIT_ASSERT(inputs_.size() == 2);
-  IR_ELSEIF(Mul)
-    JIT_ASSERT(inputs_.size() == 2);
-  IR_ELSEIF(Neg)
-    JIT_ASSERT(inputs_.size() == 1);
-  IR_ELSEIF(Sigmoid)
-    JIT_ASSERT(inputs_.size() == 1);
-  IR_ELSEIF(Tanh)
-    JIT_ASSERT(inputs_.size() == 1);
   IR_ELSEIF(FusionGroup)
     // TODO: Typecheck the parameters
     value->g(kSubgraph)->lint();
-  IR_ELSEIF(Split)
-    JIT_ASSERT(inputs_.size() == 1);
   IR_END()
 
 }

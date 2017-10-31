@@ -132,6 +132,10 @@ def addmm(g, self, mat1, mat2, beta, alpha):
     return g.op("Gemm", mat1, mat2, self, beta_f=_scalar(beta), alpha_f=_scalar(alpha))
 
 
+def neg(g, self):
+    return g.op("Neg", self)
+
+
 def tanh(g, self):
     return g.op("Tanh", self)
 
