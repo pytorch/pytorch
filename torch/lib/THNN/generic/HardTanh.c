@@ -26,6 +26,7 @@ void THNN_(HardTanh_updateOutput)(
         else if (*input_data > max_val)
           *input_data = max_val;
       );
+	else
       TH_TENSOR_APPLY2(real, output, real, input,
         if (*input_data < min_val)
           *output_data = min_val;
