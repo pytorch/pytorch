@@ -234,11 +234,7 @@ def create_resnet50(
     conv1_kernel=7,
     conv1_stride=2,
     final_avg_kernel=7,
-    fp16_data=False,  # whether to use FP16 input
 ):
-    if fp16_data:
-        data = model.FloatToHalf(data, data + "_fp16")
-
     # conv1 + maxpool
     brew.conv(
         model,
@@ -302,9 +298,6 @@ def create_resnet50(
     last_out = brew.fc(
         model, final_avg, 'last_out_L{}'.format(num_labels), 2048, num_labels
     )
-
-    if fp16_data:
-        last_out = model.net.HalfToFloat(last_out, last_out + '_fp32')
 
     if no_loss:
         return last_out
