@@ -6,6 +6,7 @@ from torch.nn import Module, ParameterList, Parameter
 from torch._six import raise_from
 from collections import defaultdict
 from . import passes as _passes
+import warnings
 import itertools
 import types
 import contextlib
@@ -332,6 +333,8 @@ class _CompiledMixin(object):
         _CompiledMixin.__next_id += 1
         self.__ktrace_cache = {}
         self.__next_ktrace_id = 0
+        self.__hits = 0
+        self.__misses = 0
 
     def __process_args(self, args):
         in_vars, in_struct = _flatten(args, self.state_dict(keep_vars=True).values())
@@ -362,11 +365,13 @@ class _CompiledMixin(object):
         if closure is not None and not force_trace:
             # We already compiled it!  Run it directly, and
             # use the saved out_struct to unflatten.
+            self.__hits += 1
             with _time(ktrace.name, "optimized", self.__time):
                 out_vars = closure()(*in_vars)
                 out_struct = ktrace.out_struct
         else:
             # No compiled trace available.  Run it by hand.
+            self.__misses += 1
             assert not assert_compiled
             with _time(ktrace.name, "tracing", self.__time):
                 out_vars, out_struct = ktrace.add_trace(self.__old_forward,
@@ -386,6 +391,18 @@ class _CompiledMixin(object):
         if ktrace is None:
             return False
         return ktrace.maybe_closure() is not None
+
+    def __del__(self):
+        # TODO: Figure out how to call parent destructor, if there is one.
+        # Apparently, this is buggy:
+        #     https://stackoverflow.com/questions/22972720/python-cant-invoke-parent-class-destructor-with-super
+        if self.__misses != 0 and self.__hits == 0:
+            warnings.warn("{} was marked with JIT and invoked {} times, "
+                          "but we never successfully used compiled code."
+                          .format(repr(self), self.__hits))
+        if _JIT_STATS:
+            print("{} - hits: {}, misses: {}, cache_size: {}"
+                  .format(repr(self), self.__hits, self.__misses, len(self.__ktrace_cache)))
 
     # TODO: Provide more compiled code management utility methods
 
@@ -540,6 +557,7 @@ def _clone_inputs(args):
 _JIT_DUMP = os.environ.get('PYTORCH_JIT_DUMP', False)
 _JIT_TIME = os.environ.get('PYTORCH_JIT_TIME', False)  # CUDA-only timing
 _JIT_DISABLE = os.environ.get('PYTORCH_JIT_DISABLE', False)
+_JIT_STATS = os.environ.get('PYTORCH_JIT_STATS', False)
 
 
 def _dump_trace(trace_name, pass_name, input_key, trace):
