@@ -6,9 +6,9 @@
 #ifdef WITH_MPI
 #include "data_channels/DataChannelMPI.hpp"
 #endif // WITH_MPI
-#if defined(WITH_CUDA) && defined(WITH_SYSTEM_NCCL)
+#if defined(WITH_CUDA) && defined(WITH_DISTRIBUTED_NCCL)
 #include "data_channels/DataChannelNccl.hpp"
-#endif // WITH_SYSTEM_NCCL
+#endif // WITH_DISTRIBUTED_NCCL
 #include "data_channels/DataChannelTCP.hpp"
 
 #include <algorithm>
@@ -44,7 +44,7 @@ DataChannel* DataChannel::newChannel(THDChannelType type, std::string init_metho
       );
 
     case THDChannelNccl:
-#if defined(WITH_CUDA) && defined(WITH_SYSTEM_NCCL)
+#if defined(WITH_CUDA) && defined(WITH_DISTRIBUTED_NCCL)
       return new DataChannelNccl(GET_CONFIG);
 #endif
       throw std::runtime_error(
