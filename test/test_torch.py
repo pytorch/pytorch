@@ -2729,6 +2729,10 @@ class TestTorch(TestCase):
 
     def test_index(self):
         reference = self._consecutive((3, 3, 3))
+
+        # empty tensor indexing
+        self.assertEqual(reference[torch.LongTensor()], reference.new())
+
         self.assertEqual(reference[0], self._consecutive((3, 3)), 0)
         self.assertEqual(reference[1], self._consecutive((3, 3), 10), 0)
         self.assertEqual(reference[2], self._consecutive((3, 3), 19), 0)

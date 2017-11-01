@@ -245,9 +245,9 @@ void THTensor_(indexSelect)(THTensor *tensor, THTensor *src, int dim, THLongTens
   int64_t *index_data;
   real *tensor_data, *src_data;
 
-  THArgCheck(index->nDimension == 1, 3, "Index is supposed to be a vector");
-  THArgCheck(dim < src->nDimension, 4,"Indexing dim %d is out of bounds of tensor", dim + TH_INDEX_BASE);
-  THArgCheck(src->nDimension > 0,2,"Source tensor is empty");
+  THArgCheck(index->nDimension <= 1, 3, "Index is supposed to be an empty tensor or a vector");
+  THArgCheck(dim < src->nDimension, 4, "Indexing dim %d is out of bounds of tensor", dim + TH_INDEX_BASE);
+  THArgCheck(src->nDimension > 0, 2, "Source tensor is empty");
 
   numel = THLongTensor_nElement(index);
 
