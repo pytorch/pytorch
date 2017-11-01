@@ -231,6 +231,19 @@ THC_API void THCTensor_(mode)(THCState *state,
 
     // Macro that calls kernel --> note that we set the block dimensions here, and
     // the amount of shared memory
+#if defined(__HIP_PLATFORM_HCC__)
+  #define HANDLE_MODE(SIZE) \
+  { \
+    dim3 blockSize(SIZE / 2); \
+\
+    int memsize = (sizeof(real) * SIZE) + (2 * SIZE * sizeof(unsigned int)); \
+    hipLaunchKernelGGL( \
+      (computeMode<real, SIZE>), \
+        grid, blockSize, memsize, THCState_getCurrentStream(state), \
+        THCTensor_(data)(state, contiguous), make_magic_wrapper(tiValues), \
+        make_magic_wrapper(tiIndices), sliceSize); \
+  }
+#else
   #define HANDLE_MODE(SIZE) \
   { \
     dim3 blockSize(SIZE / 2); \
@@ -240,6 +253,7 @@ THC_API void THCTensor_(mode)(THCState *state,
       <<<grid, blockSize, memsize, THCState_getCurrentStream(state)>>>( \
         THCTensor_(data)(state, contiguous), tiValues, tiIndices, sliceSize); \
   }
+#endif
 
     // Tradeoff between compilation time and the number of specializations. Ideally we would have
     // one HANDLE_MODE for each power of 2
