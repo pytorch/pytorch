@@ -123,8 +123,8 @@ Tensor unsqueeze_to(const Tensor & self, IntList sizes) {
   return result;
 }
 
-Tensor maybe_unsqueeze(const Tensor & self, int64_t dim, int64_t prev_size) {
-  if (prev_size == 1) {
+Tensor maybe_unsqueeze(const Tensor & self, int64_t dim, bool unsqueeze) {
+  if (unsqueeze) {
     return self.unsqueeze(dim);
   }
   return self;
