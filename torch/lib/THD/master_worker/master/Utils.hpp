@@ -2,8 +2,6 @@
 
 #include "process_group/General.hpp"
 
-#include <THPP/Traits.hpp>
-
 template<typename T>
 T receiveValueFromWorker(int worker_id) {
   thd::RPCType type = thd::type_traits<T>::type;

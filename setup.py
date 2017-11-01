@@ -81,7 +81,7 @@ distutils.unixccompiler.UnixCCompiler.link = patched_link
 ################################################################################
 
 dep_libs = [
-    'TH', 'THS', 'THNN', 'THC', 'THCS', 'THCUNN', 'nccl', 'THPP', 'libshm',
+    'TH', 'THS', 'THNN', 'THC', 'THCS', 'THCUNN', 'nccl', 'libshm',
     'ATen', 'gloo', 'THD', 'nanopb',
 ]
 
@@ -121,7 +121,7 @@ class build_deps(Command):
             libs += ['THC', 'THCS', 'THCUNN']
         if WITH_NCCL and not WITH_SYSTEM_NCCL:
             libs += ['nccl']
-        libs += ['THPP', 'libshm', 'ATen', 'nanopb']
+        libs += ['libshm', 'ATen', 'nanopb']
         if WITH_DISTRIBUTED:
             if sys.platform.startswith('linux'):
                 libs += ['gloo']
@@ -345,7 +345,6 @@ include_dirs += [
     lib_path + "/pybind11/include",
     tmp_install_path + "/include",
     tmp_install_path + "/include/TH",
-    tmp_install_path + "/include/THPP",
     tmp_install_path + "/include/THNN",
     tmp_install_path + "/include/ATen",
 ]
