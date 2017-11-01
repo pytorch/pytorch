@@ -34,12 +34,15 @@ BASE_CALL = CodeTemplate("""\
 baseType->${method_prefix}${base_name}(${unpacked_args})""")
 
 METHOD_DEFINITION_FALLTHROUGH = CodeTemplate("""\
+${unpack_args}
 return baseType->${method_prefix}${api_name}(${unpacked_args});""")
 
 METHOD_DEFINITION_FALLTHROUGH_VARIABLE = CodeTemplate("""\
+${unpack_args}
 return as_variable(baseType->${method_prefix}${api_name}(${unpacked_args}));""")
 
 METHOD_DEFINITION_FALLTHROUGH_INPLACE = CodeTemplate("""\
+${unpack_args}
 baseType->${method_prefix}${api_name}(${unpacked_args});
 increment_version(self);
 return self;
@@ -95,6 +98,8 @@ if (should_compute_any_outputs()) {
 """)
 
 METHOD_DEFINITION_DERIVATIVE = CodeTemplate("""\
+profiler::RecordFunction profiler("${name}");
+${unpack_args}
 ${buffers}
 ${check_inplace}
 ${check_no_requires_grad}
@@ -671,7 +676,7 @@ def create_variable_type(top_env, aten_declarations):
 
         env = {}
         body = []
-        body += unpack_args(env, declaration)
+        env['unpack_args'] = unpack_args(env, declaration)
 
         combined = nested_dict(env, declaration)
         if declaration['return_type'] in FALLTHROUGH_RETURN_TYPES:

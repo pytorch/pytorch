@@ -1457,7 +1457,8 @@ class TestAutograd(TestCase):
             y = x * 2 + 4
 
         last_end = 0
-        names = ['MulConstant', 'AddConstant']
+        names = ['mul', 'add']
+        self.assertEqual(len(p.function_events), len(names))
         for info, expected_name in zip(p.function_events, names):
             self.assertGreater(info.start, last_end)
             self.assertEqual(info.name, expected_name)
