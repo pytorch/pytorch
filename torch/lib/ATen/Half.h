@@ -3,6 +3,7 @@
 #include <limits>
 #include <string>
 #include <stdint.h>
+#include <cmath>
 #ifdef AT_CUDA_ENABLED
 #include <cuda.h>
 #include <cuda_runtime.h>
@@ -17,6 +18,12 @@ template<typename To, typename From> To convert(From f) {
 
 template<typename To, typename From> bool overflows(From f) {
   using limit = std::numeric_limits<To>;
+  if (limit::has_infinity && std::isinf(f)) {
+    return false;
+  }
+  if (!limit::has_quiet_NaN && std::isnan(f)) {
+    return true;
+  }
   return f < limit::lowest() || f > limit::max();
 }
 

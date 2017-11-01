@@ -57,6 +57,26 @@ void test_overflow() {
     threw = true;
   }
   ASSERT(threw);
+
+  s1 = Scalar(NAN);
+  ASSERT(std::isnan(s1.toFloat()));
+  threw = false;
+  try {
+    s1.toInt();
+  } catch (std::domain_error& e) {
+    threw = true;
+  }
+  ASSERT(threw);
+
+  s1 = Scalar(INFINITY);
+  ASSERT(std::isinf(s1.toFloat()));
+  threw = false;
+  try {
+    s1.toInt();
+  } catch (std::domain_error& e) {
+    threw = true;
+  }
+  ASSERT(threw);
 }
 
 int main() {
