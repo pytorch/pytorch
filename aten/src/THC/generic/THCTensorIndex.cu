@@ -419,8 +419,7 @@ void THCTensor_(indexFill)(THCState *state, THCTensor *dst, int dim, THCudaLongT
   #define SMALL_INDEX(TENSOR_TYPE, TYPE, DST_DIM, IDX_DIM)  \
     indexFillSmallIndex<TENSOR_TYPE, TYPE, DST_DIM, IDX_DIM> \
       <<<smallIndexGrid, smallIndexBlock, 0, stream>>>(   \
-        make_magic_wrapper(dstInfo),                        \
-        make_magic_wrapper(indicesInfo),                    \
+        dstInfo, indicesInfo,                             \
         dstFillDim, sliceSize, dstFillDimSize, val);
   
   #define LARGE_INDEX(TENSOR_TYPE, TYPE, DST_DIM, IDX_DIM)  \
