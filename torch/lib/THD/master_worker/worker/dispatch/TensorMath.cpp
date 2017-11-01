@@ -1,12 +1,12 @@
 
 static void tensorFill(rpc::RPCMessage& raw_message) {
   at::Tensor t = unpackRetrieveTensor(raw_message);
-  thpp::Type type = peekType(raw_message);
-  if (thpp::isInteger(type)) {
+  RPCType type = peekType(raw_message);
+  if (isInteger(type)) {
     auto value = (int64_t) unpackInteger(raw_message);
     finalize(raw_message);
     t.fill_(value);
-  } else if (thpp::isFloat(type)) {
+  } else if (isFloat(type)) {
     auto value = unpackFloat(raw_message);
     finalize(raw_message);
     t.fill_(value);
@@ -18,12 +18,12 @@ static void tensorFill(rpc::RPCMessage& raw_message) {
 static void tensorMaskedFill(rpc::RPCMessage& raw_message) {
   at::Tensor t = unpackRetrieveTensor(raw_message);
   at::Tensor mask = unpackRetrieveTensor(raw_message);
-  thpp::Type type = peekType(raw_message);
-  if (thpp::isInteger(type)) {
+  RPCType type = peekType(raw_message);
+  if (isInteger(type)) {
     auto value = (int64_t) unpackInteger(raw_message);
     finalize(raw_message);
     t.masked_fill_(mask, value);
-  } else if (thpp::isFloat(type)) {
+  } else if (isFloat(type)) {
     auto value = unpackFloat(raw_message);
     finalize(raw_message);
     t.masked_fill_(mask, value);
@@ -88,12 +88,12 @@ static void tensorIndexFill(rpc::RPCMessage& raw_message) {
   at::Tensor tensor = unpackRetrieveTensor(raw_message);
   int dim = unpackInteger(raw_message);
   at::Tensor index = unpackRetrieveTensor(raw_message);
-  thpp::Type type = peekType(raw_message);
-  if (thpp::isInteger(type)) {
+  RPCType type = peekType(raw_message);
+  if (isInteger(type)) {
     auto val = (int64_t) unpackInteger(raw_message);
     finalize(raw_message);
     tensor.index_fill_(dim, index, val);
-  } else if (thpp::isFloat(type)) {
+  } else if (isFloat(type)) {
     auto val = unpackFloat(raw_message);
     finalize(raw_message);
     tensor.index_fill_(dim, index, val);
@@ -120,14 +120,14 @@ static void tensorEye(rpc::RPCMessage& raw_message) {
 
 static void tensorRange(rpc::RPCMessage& raw_message) {
   at::Tensor r = unpackRetrieveTensor(raw_message);
-  thpp::Type type = peekType(raw_message);
-  if (thpp::isInteger(type)) {
+  RPCType type = peekType(raw_message);
+  if (isInteger(type)) {
     int64_t xmin = unpackInteger(raw_message);
     int64_t xmax = unpackInteger(raw_message);
     int64_t step = unpackInteger(raw_message);
     finalize(raw_message);
     at::range_out(r, xmin, xmax, step);
-  } else if (thpp::isFloat(type)) {
+  } else if (isFloat(type)) {
     double xmin = unpackFloat(raw_message);
     double xmax = unpackFloat(raw_message);
     double step = unpackFloat(raw_message);

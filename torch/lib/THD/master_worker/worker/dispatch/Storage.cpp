@@ -1,22 +1,22 @@
-static std::unique_ptr<at::Storage> createStorage(thpp::Type type) {
-  if (type == thpp::Type::UCHAR)
+static std::unique_ptr<at::Storage> createStorage(RPCType type) {
+  if (type == RPCType::UCHAR)
     return at::getType(at::Backend::CPU, at::ScalarType::Byte).storage();
-  else if (type == thpp::Type::CHAR)
+  else if (type == RPCType::CHAR)
     return at::getType(at::Backend::CPU, at::ScalarType::Char).storage();
-  else if (type == thpp::Type::SHORT)
+  else if (type == RPCType::SHORT)
     return at::getType(at::Backend::CPU, at::ScalarType::Short).storage();
-  else if (type == thpp::Type::INT)
+  else if (type == RPCType::INT)
     return at::getType(at::Backend::CPU, at::ScalarType::Int).storage();
-  else if (type == thpp::Type::LONG)
+  else if (type == RPCType::LONG)
     return at::getType(at::Backend::CPU, at::ScalarType::Long).storage();
-  else if (type == thpp::Type::FLOAT)
+  else if (type == RPCType::FLOAT)
     return at::getType(at::Backend::CPU, at::ScalarType::Float).storage();
-  else if (type == thpp::Type::DOUBLE)
+  else if (type == RPCType::DOUBLE)
     return at::getType(at::Backend::CPU, at::ScalarType::Double).storage();
   throw std::invalid_argument("passed character doesn't represent a storage type");
 }
 
-static std::unique_ptr<at::Storage> createStorage(thpp::Type type, std::size_t size) {
+static std::unique_ptr<at::Storage> createStorage(RPCType type, std::size_t size) {
   std::unique_ptr<at::Storage> storage = createStorage(type);
   storage->resize(size);
   return storage;
@@ -25,12 +25,12 @@ static std::unique_ptr<at::Storage> createStorage(thpp::Type type, std::size_t s
 static void storageSet(rpc::RPCMessage& raw_message) {
   at::Storage *storage = unpackRetrieveStorage(raw_message);
   ptrdiff_t offset = unpackInteger(raw_message);
-  thpp::Type type = peekType(raw_message);
-  if (thpp::isInteger(type)) {
+  RPCType type = peekType(raw_message);
+  if (isInteger(type)) {
     int64_t value = unpackInteger(raw_message);
     finalize(raw_message);
     storage->set(offset, value);
-  } else if (thpp::isFloat(type)) {
+  } else if (isFloat(type)) {
     double value = unpackFloat(raw_message);
     finalize(raw_message);
     storage->set(offset, value);
@@ -42,12 +42,12 @@ static void storageSet(rpc::RPCMessage& raw_message) {
 static void storageGet(rpc::RPCMessage& raw_message) {
   at::Storage *storage = unpackRetrieveStorage(raw_message);
   ptrdiff_t offset = unpackInteger(raw_message);
-  thpp::Type type = unpackType(raw_message);
+  RPCType type = unpackType(raw_message);
   finalize(raw_message);
-  if (thpp::isInteger(type)) {
+  if (isInteger(type)) {
     int64_t value = storage->get(offset).to<int64_t>();
     sendValueToMaster(value);
-  } else if (thpp::isFloat(type)) {
+  } else if (isFloat(type)) {
     double value = storage->get(offset).to<double>();
     sendValueToMaster(value);
   } else {
@@ -56,7 +56,7 @@ static void storageGet(rpc::RPCMessage& raw_message) {
 }
 
 static void storageNew(rpc::RPCMessage& raw_message) {
-  thpp::Type storage_type = unpackType(raw_message);
+  RPCType storage_type = unpackType(raw_message);
   object_id_type storage_id = unpackStorage(raw_message);
   finalize(raw_message);
   workerStorages.emplace(
@@ -66,7 +66,7 @@ static void storageNew(rpc::RPCMessage& raw_message) {
 }
 
 static void storageNewWithSize(rpc::RPCMessage& raw_message) {
-  thpp::Type storage_type = unpackType(raw_message);
+  RPCType storage_type = unpackType(raw_message);
   object_id_type storage_id = unpackStorage(raw_message);
   int64_t size = unpackInteger(raw_message);
   finalize(raw_message);
@@ -77,18 +77,18 @@ static void storageNewWithSize(rpc::RPCMessage& raw_message) {
 }
 
 static void storageNewWithSizeN(rpc::RPCMessage& raw_message, std::size_t size) {
-  thpp::Type storage_type = unpackType(raw_message);
+  RPCType storage_type = unpackType(raw_message);
   object_id_type storage_id = unpackStorage(raw_message);
   std::unique_ptr<at::Storage> storage = createStorage(storage_type, size);
-  thpp::Type value_type = peekType(raw_message);
-  if (thpp::isInteger(value_type)) {
+  RPCType value_type = peekType(raw_message);
+  if (isInteger(value_type)) {
     int64_t values[size];
     for (std::size_t i = 0; i < size; i++)
       values[i] = unpackInteger(raw_message);
     finalize(raw_message);
     for (std::size_t i = 0; i < size; i++)
       storage->fast_set(i, values[i]);
-  } else if (thpp::isFloat(value_type)) {
+  } else if (isFloat(value_type)) {
     double values[size];
     for (std::size_t i = 0; i < size; i++)
       values[i] = unpackInteger(raw_message);
@@ -136,12 +136,12 @@ static void storageResize(rpc::RPCMessage& raw_message) {
 
 static void storageFill(rpc::RPCMessage& raw_message) {
   at::Storage *storage = unpackRetrieveStorage(raw_message);
-  thpp::Type type = peekType(raw_message);
-  if (thpp::isInteger(type)) {
+  RPCType type = peekType(raw_message);
+  if (isInteger(type)) {
     int64_t val = unpackInteger(raw_message);
     finalize(raw_message);
     storage->fill(val);
-  } else if (thpp::isFloat(type)) {
+  } else if (isFloat(type)) {
     double val = unpackFloat(raw_message);
     finalize(raw_message);
     storage->fill(val);

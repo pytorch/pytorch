@@ -6,12 +6,12 @@
 
 template<typename T>
 T receiveValueFromWorker(int worker_id) {
-  thpp::Type type = thpp::type_traits<T>::type;
-  if (thpp::isInteger(type)) {
+  thd::RPCType type = thd::type_traits<T>::type;
+  if (thd::isInteger(type)) {
     thd::IntScalar wrapped_value;
     thd::dataChannel->receive(wrapped_value, worker_id);
     return static_cast<T>(wrapped_value.value());
-  } else if (thpp::isFloat(type)) {
+  } else if (thd::isFloat(type)) {
     thd::FloatScalar wrapped_value;
     thd::dataChannel->receive(wrapped_value, worker_id);
     return static_cast<T>(wrapped_value.value());

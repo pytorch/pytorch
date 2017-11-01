@@ -1,6 +1,6 @@
 #include <cstdint>
-#include <THPP/Traits.hpp>
 #include "TH/THStorage.h"
+#include "Type.hpp"
 #include "Traits.hpp"
 
 namespace thd { namespace rpc { namespace detail {
@@ -14,7 +14,7 @@ inline void _appendScalar(ByteArray& str, real data) {
   str.append(reinterpret_cast<char*>(&data), sizeof(data));
 }
 
-inline void _appendType(ByteArray& str, thpp::Type _type) {
+inline void _appendType(ByteArray& str, RPCType _type) {
   char type = static_cast<char>(_type);
   str.append(&type, sizeof(type));
 }
@@ -22,28 +22,28 @@ inline void _appendType(ByteArray& str, thpp::Type _type) {
 template<typename T>
 inline void __appendData(ByteArray& str, const T& arg,
     std::false_type is_generator, std::false_type is_tensor, std::false_type is_storage) {
-  _appendType(str, thpp::type_traits<T>::type);
+  _appendType(str, type_traits<T>::type);
   _appendScalar<T>(str, arg);
 }
 
 template<typename T>
 inline void __appendData(ByteArray& str, const T& arg,
     std::true_type is_generator, std::false_type is_tensor, std::false_type is_storage) {
-  _appendType(str, thpp::Type::GENERATOR);
+  _appendType(str, RPCType::GENERATOR);
   _appendScalar<object_id_type>(str, arg->generator_id);
 }
 
 template<typename T>
 inline void __appendData(ByteArray& str, const T& arg,
     std::false_type is_generator, std::true_type is_tensor, std::false_type is_storage) {
-  _appendType(str, thpp::Type::TENSOR);
+  _appendType(str, RPCType::TENSOR);
   _appendScalar<object_id_type>(str, arg->tensor_id);
 }
 
 template<typename T>
 inline void __appendData(ByteArray& str, const T& arg,
     std::false_type is_generator, std::false_type is_tensor, std::true_type is_storage) {
-  _appendType(str, thpp::Type::STORAGE);
+  _appendType(str, RPCType::STORAGE);
   _appendScalar<object_id_type>(str, arg->storage_id);
 }
 
@@ -59,7 +59,7 @@ inline void _appendData(ByteArray& str, const T& arg) {
 }
 
 inline void _appendData(ByteArray& str, THLongStorage* arg) {
-  _appendType(str, thpp::Type::LONG_STORAGE);
+  _appendType(str, RPCType::LONG_STORAGE);
   _appendScalar<char>(str, arg == NULL);
   if (!arg) return;
   _appendScalar<ptrdiff_t>(str, arg->size);
@@ -81,7 +81,7 @@ inline void _appendData(ByteArray& str, const std::vector<T>& arg) {
     );
 }
 
-inline void _appendData(ByteArray& str, thpp::Type type) {
+inline void _appendData(ByteArray& str, RPCType type) {
   _appendType(str, type);
 }
 

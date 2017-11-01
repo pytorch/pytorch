@@ -26,7 +26,7 @@ size_t THDStorage_(elementSize)(void) {
 
 THDStorage* THDStorage_(new)() {
   THDStorage* storage = THDStorage_(_alloc)();
-  thpp::Type type = thpp::type_traits<real>::type;
+  RPCType type = type_traits<real>::type;
   masterCommandChannel->sendMessage(
     packMessage(
       Functions::storageNew,
@@ -56,7 +56,7 @@ real THDStorage_(get)(const THDStorage* storage, ptrdiff_t offset) {
       Functions::storageGet,
       storage,
       offset,
-      thpp::type_traits<real>::type
+      type_traits<real>::type
     ),
     THDState::s_current_worker
   );
@@ -64,7 +64,7 @@ real THDStorage_(get)(const THDStorage* storage, ptrdiff_t offset) {
 }
 
 THDStorage* THDStorage_(newWithSize)(ptrdiff_t size) {
-  thpp::Type type = thpp::type_traits<real>::type;
+  RPCType type = type_traits<real>::type;
   THDStorage *storage = THDStorage_(_alloc)();
   storage->size = size;
   masterCommandChannel->sendMessage(
@@ -80,7 +80,7 @@ THDStorage* THDStorage_(newWithSize)(ptrdiff_t size) {
 }
 
 THDStorage* THDStorage_(newWithSize1)(real value) {
-  thpp::Type type = thpp::type_traits<real>::type;
+  RPCType type = type_traits<real>::type;
   THDStorage *storage = THDStorage_(_alloc)();
   storage->size = 1;
   masterCommandChannel->sendMessage(
@@ -96,7 +96,7 @@ THDStorage* THDStorage_(newWithSize1)(real value) {
 }
 
 THDStorage* THDStorage_(newWithSize2)(real value1, real value2) {
-  thpp::Type type = thpp::type_traits<real>::type;
+  RPCType type = type_traits<real>::type;
   THDStorage *storage = THDStorage_(_alloc)();
   storage->size = 2;
   masterCommandChannel->sendMessage(
@@ -113,7 +113,7 @@ THDStorage* THDStorage_(newWithSize2)(real value1, real value2) {
 }
 
 THDStorage* THDStorage_(newWithSize3)(real value1, real value2, real value3) {
-  thpp::Type type = thpp::type_traits<real>::type;
+  RPCType type = type_traits<real>::type;
   THDStorage *storage = THDStorage_(_alloc)();
   storage->size = 3;
   masterCommandChannel->sendMessage(
@@ -131,7 +131,7 @@ THDStorage* THDStorage_(newWithSize3)(real value1, real value2, real value3) {
 }
 
 THDStorage* THDStorage_(newWithSize4)(real value1, real value2, real value3, real value4) {
-  thpp::Type type = thpp::type_traits<real>::type;
+  RPCType type = type_traits<real>::type;
   THDStorage *storage = THDStorage_(_alloc)();
   storage->size = 4;
   masterCommandChannel->sendMessage(

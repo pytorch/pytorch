@@ -131,12 +131,12 @@ static void tensorPstrf(rpc::RPCMessage& raw_message) {
   at::Tensor rpiv = unpackRetrieveTensor(raw_message);
   at::Tensor a = unpackRetrieveTensor(raw_message);
   auto uplo = unpackInteger(raw_message);
-  thpp::Type type = peekType(raw_message);
-  if (thpp::isInteger(type)) {
+  RPCType type = peekType(raw_message);
+  if (isInteger(type)) {
     auto tol = unpackInteger(raw_message);
     finalize(raw_message);
     at::pstrf_out(ra, rpiv, a, uplo, tol);
-  } else if (thpp::isFloat(type)) {
+  } else if (isFloat(type)) {
     auto tol = unpackFloat(raw_message);
     finalize(raw_message);
     at::pstrf_out(ra, rpiv, a, uplo, tol);
