@@ -131,20 +131,26 @@ def reduce_add_coalesced(inputs, destination=None, buffer_size=10485760):
         A tuple of tensors containing an elementwise sum of each group of
         inputs, placed on the ``destination`` device.
     """
-    dense_tensors = []  # shape (num_tensors, num_gpus)
+    dense_tensors = [[] for _ in inputs]  # shape (num_gpus, num_tensors)
     output = []
+    ref_order = []
+    # process sparse ones first since they may have different sizes on different gpus
     for tensor_at_gpus in zip(*inputs):
-        if tensor_at_gpus[0].is_sparse:
+        if all(t.is_sparse for t in tensor_at_gpus):
             result = reduce_add(tensor_at_gpus, destination)
             output.append(result)
+            ref_order.append(tensor_at_gpus[0])
         else:
-            dense_tensors.append(tensor_at_gpus)
-    itrs = [_take_tensors(tensors, buffer_size) for tensors in zip(*dense_tensors)]
+            for coll, t in zip(dense_tensors, tensor_at_gpus):
+                coll.append(t.to_dense() if t.is_sparse else t)
+            ref_order.append(dense_tensors[0][-1])
+    itrs = [_take_tensors(tensors, buffer_size) for tensors in dense_tensors]
+    # now the dense ones, which have consistent sizes
     for chunks in zip(*itrs):
-        tensors = [_flatten_dense_tensors(chunk) for chunk in chunks]
-        result = reduce_add(tensors, destination)
-        output.extend(_unflatten_dense_tensors(result, chunks[0]))
-    return tuple(_reorder_tensors_as(output, inputs[0]))
+        flat_tensors = [_flatten_dense_tensors(chunk) for chunk in chunks]
+        flat_result = reduce_add(flat_tensors, destination)
+        output.extend(_unflatten_dense_tensors(flat_result, chunks[0]))
+    return tuple(_reorder_tensors_as(output, ref_order))
 
 
 def scatter(tensor, devices, chunk_sizes=None, dim=0, streams=None):
