@@ -359,7 +359,7 @@ private:
 public:
   ModelProto() : MicroProto(onnx_ModelProto_init_default) {
     proto.has_ir_version = true;
-    proto.ir_version = onnx_Version_IR_VERSION;
+    proto.ir_version = 1; // TODO: onnx_Version_IR_VERSION;
     proto.producer_name = string(&producer_name, "pytorch");
     // TODO: stop hard-coding this
     proto.producer_version = string(&producer_version, "0.2");
