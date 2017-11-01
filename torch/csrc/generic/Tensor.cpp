@@ -1486,15 +1486,15 @@ static PyObject * THPTensor_(getValue)(THPTensor *self, PyObject *index)
 
     // TH will also throw an error, but its a Runtime Error that is less interpretable
     // than doing it at this layer
-    if (THIndexTensor_(nDimension)(LIBRARY_STATE index_t) != 1) {
+    if (THIndexTensor_(nDimension)(LIBRARY_STATE index_t) > 1) {
       PyErr_Format(PyExc_IndexError, "Indexing a Tensor with a "
 #ifndef THC_GENERIC_FILE
       "torch.LongTensor "
 #else
       "torch.cuda.LongTensor "
 #endif
-      "triggers index_select semantics, and thus we expect a vector, but the indexing "
-      "Tensor passed has %lld dimensions",
+      "triggers index_select semantics, and thus we expect an empty tensor or a vector, "
+      "but the indexing Tensor passed has %lld dimensions",
       (long long) THIndexTensor_(nDimension)(LIBRARY_STATE index_t));
       throw python_error();
     }
