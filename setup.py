@@ -481,7 +481,7 @@ if WITH_CUDA:
     extra_link_args.append('-Wl,-rpath,' + cuda_lib_path)
     extra_compile_args += ['-DWITH_CUDA']
     extra_compile_args += ['-DCUDA_LIB_PATH=' + cuda_lib_path]
-    main_libraries += ['cudart', 'nvToolsExt', 'nvrtc', 'cuda']
+    main_libraries += ['cudart', 'nvToolsExt']
     main_link_args += [THC_LIB, THCS_LIB, THCUNN_LIB]
     main_sources += [
         "torch/csrc/cuda/Module.cpp",
@@ -592,6 +592,16 @@ THNN = Extension("torch._thnn._THNN",
 extensions.append(THNN)
 
 if WITH_CUDA:
+    THNVRTC = Extension("torch._nvrtc",
+                        libraries=['nvrtc', 'cuda'],
+                        sources=['torch/csrc/nvrtc.cpp'],
+                        language='c++',
+                        include_dirs=include_dirs,
+                        library_dirs=library_dirs + [cuda_lib_path + '/stubs'],
+                        extra_link_args=extra_link_args + [make_relative_rpath('lib')],
+                        )
+    extensions.append(THNVRTC)
+
     THCUNN = Extension("torch._thnn._THCUNN",
                        sources=['torch/csrc/nn/THCUNN.cpp'],
                        language='c++',
