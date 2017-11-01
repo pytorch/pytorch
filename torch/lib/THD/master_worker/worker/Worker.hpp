@@ -3,8 +3,6 @@
 #include "../common/CommandChannel.hpp"
 #include "../../base/DataChannel.hpp"
 
-#include <THPP/THPP.h>
-
 #include <memory>
 
 namespace thd { namespace worker {

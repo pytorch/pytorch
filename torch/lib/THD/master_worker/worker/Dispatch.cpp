@@ -10,9 +10,6 @@
 #include "../common/Functions.hpp"
 #include "../common/RPC.hpp"
 #include "../master/Master.hpp"
-#include "THPP/THPP.h"
-#include "THPP/storages/THStorage.hpp"
-#include "THPP/tensors/THTensor.hpp"
 #include "Worker.hpp"
 
 namespace thd {
