@@ -204,7 +204,7 @@ uint64_t THRandom_random(THGenerator *_generator)
 static double __uniform__(THGenerator *_generator)
 {
   /* divided by 2^32 */
-  return (double)THRandom_random(_generator) * (1.0/4294967296.0);
+  return (double)(THRandom_random(_generator) - 1.0) * (1.0/4294967296.0);
 }
 
 /*********************************************************
