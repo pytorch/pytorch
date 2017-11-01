@@ -55,6 +55,7 @@ void THCTensor_(spaddcdiv)(THCState *state, THCTensor *r_, THCTensor *t, real va
 }
 
 void THCSTensor_(spaddmm)(THCState *state, THCTensor *r_, real beta, THCTensor *t, real alpha, THCSTensor *sparse_, THCTensor *dense) {
+#if !defined(__HIP_PLATFORM_HCC__)
 #if defined(THCS_REAL_IS_FLOAT) || defined(THCS_REAL_IS_DOUBLE)
   THCAssertSameGPU(THCSTensor_(checkGPU)(state, 1, 4, sparse_, r_, t, dense));
   THCudaIntTensor *csr;
@@ -164,19 +165,26 @@ void THCSTensor_(spaddmm)(THCState *state, THCTensor *r_, real beta, THCTensor *
 #else
   THError("unimplemented data type");
 #endif
+#endif
 }
 
 void THCSTensor_(sspaddmm)(THCState *state, THCSTensor *r_, real beta, THCSTensor *t, real alpha, THCSTensor *sparse, THCTensor *dense) {
+#if !defined(__HIP_PLATFORM_HCC__)
   THError("WARNING: Sparse Cuda Tensor op sspaddmm is not implemented");
   // TODO Write some kernels
+#endif
 }
 
 void THCSTensor_(hspmm)(THCState *state, THCSTensor *r_, real alpha, THCSTensor *sparse_, THCTensor *dense) {
+#if defined(__HIP_PLATFORM_HCC__)
+#define THRUST_EXEC(fn, ...) // whitespace 
+#else
 #if CUDA_VERSION >= 7000
   THCThrustAllocator thrustAlloc(state);
 #define THRUST_EXEC(fn, ...) fn(thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)), ##__VA_ARGS__)
 #else
 #define THRUST_EXEC(fn, ...) fn(##__VA_ARGS__)
+#endif
 #endif
 
   THCAssertSameGPU(THCSTensor_(checkGPU)(state, 2, 3, r_, sparse_, dense));
@@ -229,6 +237,7 @@ void THCSTensor_(hspmm)(THCState *state, THCSTensor *r_, real alpha, THCSTensor 
 }
 
 void THCSTensor_(spcadd)(THCState *state, THCTensor *r_, THCTensor *dense, real value, THCSTensor *sparse) {
+#if !defined(__HIP_PLATFORM_HCC__)
   THCAssertSameGPU(THCSTensor_(checkGPU)(state, 1, 3, sparse, r_, dense));
 
   const ptrdiff_t nnz = THCSTensor_(nnz)(state, sparse);
@@ -312,9 +321,11 @@ void THCSTensor_(spcadd)(THCState *state, THCTensor *r_, THCTensor *dense, real 
   THCIndexTensor_(free)(state, indices);
   THCTensor_(free)(state, values);
   THCTensor_(free)(state, r);
+#endif
 }
 
 void THCSTensor_(mul)(THCState *state, THCSTensor *r_, THCSTensor *t, real value) {
+#if !defined(__HIP_PLATFORM_HCC__)
   if (r_ == t) {
     THCTensor *r_values_ = THCSTensor_(newValues)(state, r_);
     THCTensor_(mul)(state, r_values_, r_values_, value);
@@ -338,9 +349,11 @@ void THCSTensor_(mul)(THCState *state, THCSTensor *r_, THCSTensor *t, real value
     THCIndexTensor_(free)(state, t_indices_);
     THCTensor_(free)(state, t_values_);
   }
+#endif
 }
 
 void THCSTensor_(div)(THCState *state, THCSTensor *r_, THCSTensor *t, real value) {
+#if !defined(__HIP_PLATFORM_HCC__)
   if (r_ == t) {
     THCTensor *r_values_ = THCSTensor_(newValues)(state, r_);
     THCTensor_(div)(state, r_values_, r_values_, value);
@@ -364,9 +377,11 @@ void THCSTensor_(div)(THCState *state, THCSTensor *r_, THCSTensor *t, real value
     THCIndexTensor_(free)(state, t_indices_);
     THCTensor_(free)(state, t_values_);
   }
+#endif
 }
 
 void THCSTensor_(cadd)(THCState *state, THCSTensor *r_, THCSTensor *t, real value, THCSTensor *src) {
+#if !defined(__HIP_PLATFORM_HCC__)
   THCAssertSameGPU(THCSTensor_(checkGPU)(state, 3, 3, r_, t, src));
   if(!THCSTensor_(isSameSizeAs)(state, t, src)) {
     THError("cadd operands have incompatible sizes or dimension types");
@@ -414,13 +429,17 @@ void THCSTensor_(cadd)(THCState *state, THCSTensor *r_, THCSTensor *t, real valu
   THCTensor_(free)(state, t_values_);
   THCIndexTensor_(free)(state, s_indices_);
   THCTensor_(free)(state, s_values_);
+#endif
 }
 
 void THCSTensor_(csub)(THCState *state, THCSTensor *r_, THCSTensor *t, real value, THCSTensor *src) {
+#if !defined(__HIP_PLATFORM_HCC__)
   THCSTensor_(cadd)(state, r_, t, ScalarNegate<real>::to(value), src);
+#endif
 }
 
 void THCSTensor_(cmul)(THCState *state, THCSTensor *r_, THCSTensor *t_, THCSTensor *src_) {
+#if !defined(__HIP_PLATFORM_HCC__)
   THCAssertSameGPU(THCSTensor_(checkGPU)(state, 3, 3, r_, t_, src_));
   if(!THCSTensor_(isSameSizeAs)(state, t_, src_)) {
     THError("cmul operands have incompatible sizes or dimension types");
@@ -476,10 +495,12 @@ void THCSTensor_(cmul)(THCState *state, THCSTensor *r_, THCSTensor *t_, THCSTens
   THCTensor_(free)(state, s_values_);
   THCSTensor_(free)(state, t);
   THCSTensor_(free)(state, src);
+#endif
 }
 
 #if defined(THCS_REAL_IS_FLOAT) || defined(THCS_REAL_IS_DOUBLE)
 void THCSTensor_(pow)(THCState *state, THCSTensor *r_, THCSTensor *t_, real value) {
+#if !defined(__HIP_PLATFORM_HCC__)
   if (value == 0) {
     THError("cannot raise to zeroth power on sparse tensor");
   }
@@ -502,6 +523,7 @@ void THCSTensor_(pow)(THCState *state, THCSTensor *r_, THCSTensor *t_, real valu
   THCIndexTensor_(free)(state, t_indices_);
   THCTensor_(free)(state, t_values_);
   THCSTensor_(free)(state, t);
+#endif
 }
 #endif
 

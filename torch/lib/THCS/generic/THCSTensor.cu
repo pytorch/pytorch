@@ -20,6 +20,7 @@
 #define V_INFO(tensor) getTensorInfo<THCTensor, uint64_t>(state, tensor)
 
 THCTensor *THCSTensor_(toDense)(THCState *state, THCSTensor *self) {
+#if !defined(__HIP_PLATFORM_HCC__)
   THLongStorage *size;
   THCTensor *dst;
 
@@ -33,9 +34,13 @@ THCTensor *THCSTensor_(toDense)(THCState *state, THCSTensor *self) {
   THCSTensor_(spcadd)(state, dst, dst, one, self);
   THCudaCheck(cudaGetLastError());
   return dst;
+#else
+  return nullptr;
+#endif
 }
 
 THCSTensor *THCSTensor_(newCoalesce)(THCState *state, THCSTensor *self) {
+#if !defined(__HIP_PLATFORM_HCC__)
   ptrdiff_t nnz = self->nnz;
   if (nnz < 2) {
     self->coalesced = 1;
@@ -169,11 +174,15 @@ THCSTensor *THCSTensor_(newCoalesce)(THCState *state, THCSTensor *self) {
   THCudaCheck(cudaGetLastError());
   return dst;
 #undef THRUST_EXEC
+#else
+  return nullptr;
+#endif
 }
 
 // forceClone is intended to use as a boolean, if set, the result will forced to
 // be a clone of self.
 THCIndexTensor* THCSTensor_(newFlattenedIndices)(THCState *state, THCSTensor *self, int forceClone) {
+#if !defined(__HIP_PLATFORM_HCC__)
   THCIndexTensor *indices = THCSTensor_(newIndices)(state, self);
   int nDimI = self->nDimensionI;
   if (nDimI == 1) {
@@ -202,10 +211,14 @@ THCIndexTensor* THCSTensor_(newFlattenedIndices)(THCState *state, THCSTensor *se
     THCIndexTensor_(free)(state, indicesSlice);
     return indices1D;
   }
+#else
+  return nullptr;
+#endif
 }
 
 // In place transpose
 void THCSTensor_(transpose)(THCState *state, THCSTensor *self, int d1, int d2) {
+#if !defined(__HIP_PLATFORM_HCC__)
   int64_t nDimI = THCSTensor_(nDimensionI)(state, self);
   int64_t nDimV = THCSTensor_(nDimensionV)(state, self);
   THArgCheck(d1 < nDimI && d2 < nDimI, 1, "Transposed dimensions should be sparse. Got nDimI: %ld, d1: %ld, d2: %ld", nDimI, d1, d2);
@@ -225,11 +238,16 @@ void THCSTensor_(transpose)(THCState *state, THCSTensor *self, int d1, int d2) {
   THCIndexTensor_(free)(state, buffer);
   THCIndexTensor_(free)(state, slice1);
   THCIndexTensor_(free)(state, slice2);
+#endif
 }
 
 int THCSTensor_(getDevice)(THCState* state, const THCSTensor* tensor) {
+#if !defined(__HIP_PLATFORM_HCC__)
   if (!tensor->values || !tensor->values->storage) return -1;
   return THCStorage_(getDevice)(state, tensor->values->storage);
+#else
+  return 0;
+#endif
 }
 
 #endif
