@@ -4074,6 +4074,7 @@ class TestTorch(TestCase):
                 f.seek(0)
                 c = torch.load(handle)
                 if not delete:
+                    del handle
                     f.close()
                     os.remove(f.name)
             self.assertEqual(b, c, 0)
@@ -4251,6 +4252,7 @@ class TestTorch(TestCase):
             self.assertEqual(t1, t2, 0)
 
             if not delete:
+                del s1, t1, s2, t2
                 f.close()
                 os.remove(f.name)
 
