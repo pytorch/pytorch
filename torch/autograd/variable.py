@@ -421,14 +421,6 @@ class Variable(_C._VariableBase):
     def expand_as(self, tensor):
         return self.expand(tensor.size())
 
-    def select(self, dim, _index):
-        dim = dim if dim >= 0 else dim + self.dim()
-        index = tuple(slice(None, None) for _ in range(dim)) + (_index,)
-        return Index.apply(self, index)
-
-    def permute(self, *permutation):
-        return Permute.apply(self, permutation)
-
     def multinomial(self, num_samples=1, replacement=False):
         return Multinomial.apply(self, num_samples, replacement)
 

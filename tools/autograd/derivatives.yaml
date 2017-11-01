@@ -365,6 +365,9 @@
   input2: not_implemented("ormqr")
   input3: not_implemented("ormqr")
 
+- name: permute(Tensor self, IntList dims)
+  self: permute_backwards(grad, dims)
+
 - name: potrf(Tensor self, bool upper)
   self: potrf_backward(grad, upper, output)
 
@@ -430,7 +433,8 @@
   self: grad
   src: grad.gather(dim, index)
 
-- name: select  # TODO: ATen definition conflicts with PyTorch
+- name: select(Tensor self, int64_t dim, int64_t sliceIndex)
+  self: maybe_unsqueeze(grad, dim, self.size(dim))._unnarrow(dim, sliceIndex, self.size(dim))
 
 - name: set  # fallthrough
 

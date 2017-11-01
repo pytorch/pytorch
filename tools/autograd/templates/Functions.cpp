@@ -87,6 +87,15 @@ Tensor reduce_to(const Tensor & grad, IntList sizes) {
   return result;
 }
 
+Tensor permute_backwards(const Tensor & grad, IntList fwd_dims) {
+  // invert the permutation
+  std::vector<int64_t> dims(fwd_dims.size());
+  for (size_t i = 0; i < fwd_dims.size(); i++) {
+    dims[fwd_dims[i]] = i;
+  }
+  return grad.permute(dims);
+}
+
 Tensor sum_backward(const Tensor & grad, IntList sizes, int64_t dim, bool keepdim) {
   if (!keepdim && sizes.size() > 1) {
     return grad.unsqueeze(dim).expand(sizes);
