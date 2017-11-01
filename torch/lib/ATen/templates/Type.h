@@ -26,7 +26,6 @@ class Context;
 struct Storage;
 struct Generator;
 
-<<<<<<< HEAD
 static inline bool isIntegralType(ScalarType t) {
   return (t == ScalarType::Byte ||
           t == ScalarType::Char ||
