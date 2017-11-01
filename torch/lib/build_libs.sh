@@ -25,6 +25,10 @@ C_FLAGS=" -DTH_INDEX_BASE=0 -I$INSTALL_DIR/include \
   -I$INSTALL_DIR/include/THS -I$INSTALL_DIR/include/THCS \
   -I$INSTALL_DIR/include/THPP -I$INSTALL_DIR/include/THNN \
   -I$INSTALL_DIR/include/THCUNN"
+# Workaround OpenMPI build failure
+# ImportError: /build/pytorch-0.2.0/.pybuild/pythonX.Y_3.6/build/torch/_C.cpython-36m-x86_64-linux-gnu.so: undefined symbol: _ZN3MPI8Datatype4FreeEv
+# https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=686926
+C_FLAGS="${C_FLAGS} -DOMPI_SKIP_MPICXX=1"
 LDFLAGS="-L$INSTALL_DIR/lib "
 LD_POSTFIX=".so.1"
 LD_POSTFIX_UNVERSIONED=".so"
