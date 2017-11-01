@@ -34,8 +34,10 @@ BlobStatRegistry& BlobStatRegistry::instance() {
 void BlobStatRegistry::doRegister(
     CaffeTypeId id,
     std::unique_ptr<BlobStatGetter>&& v) {
-  CAFFE_ENFORCE_EQ(
-      map_.count(id), 0, "BlobStatRegistry: Type already registered.");
+  // don't use CAFFE_ENFORCE_EQ to avoid static initialization order fiasco.
+  if (map_.count(id) > 0) {
+    throw std::runtime_error("BlobStatRegistry: Type already registered.");
+  }
   map_[id] = std::move(v);
 }
 
