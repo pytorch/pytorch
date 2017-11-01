@@ -450,10 +450,31 @@ class SmoothL1Loss(_Loss):
 
     The division by `n` can be avoided if one sets the internal variable
     `size_average` to `False`
+
+    Args:
+        size_average (bool, optional): By default, the losses are averaged
+           over all elements. However, if the field size_average is set to False,
+           the losses are instead summed. Ignored when reduce is False. Default: True
+        reduce (bool, optional): By default, the losses are averaged or summed
+           over elements. When reduce is False, the loss function returns
+           a loss per element instead and ignores size_average. Default: True
+
+    Shape:
+        - Input: :math:`(N, *)` where `*` means, any number of additional
+          dimensions
+        - Target: :math:`(N, *)`, same shape as the input
+        - Output: scalar. If reduce is False, then
+          :math:`(N, *)`, same shape as the input
+
     """
+    def __init__(self, size_average=True, reduce=True):
+        super(SmoothL1Loss, self).__init__(size_average)
+        self.reduce = reduce
+
     def forward(self, input, target):
         _assert_no_grad(target)
-        return F.smooth_l1_loss(input, target, size_average=self.size_average)
+        return F.smooth_l1_loss(input, target, size_average=self.size_average,
+                                reduce=self.reduce)
 
 
 class SoftMarginLoss(_Loss):

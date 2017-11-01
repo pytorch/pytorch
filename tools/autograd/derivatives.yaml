@@ -620,8 +620,9 @@
   grad_output: rrelu_backward(grad, input, lower, upper, training, false, noise)
   input: zeros_like(grad)
 
-- name: smooth_l1_loss_backward(Tensor input, Tensor target, bool size_average)
-  input: smooth_l1_loss_double_backward(grad, input, target, size_average)
+- name: smooth_l1_loss_backward(Tensor grad_output, Tensor input, Tensor target, bool size_average, bool reduce)
+  grad_output: smooth_l1_loss_double_backward_grad_output(grad, grad_output, input, target, size_average, reduce)
+  input: smooth_l1_loss_double_backward(grad * grad_output, input, target, size_average, reduce)
 
 - name: softplus_backward(Tensor grad_output, Tensor input, Scalar beta, Scalar threshold, Tensor output)
   grad_output: softplus_backward(grad, input, beta, threshold, output)
