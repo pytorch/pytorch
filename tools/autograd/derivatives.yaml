@@ -576,7 +576,8 @@
 - name: kl_div_backward(Tensor input, Tensor target, bool size_average)
   input: zeros_like(grad)
 
-- name: l1_loss_backward(Tensor input, Tensor target, bool size_average)
+- name: l1_loss_backward(Tensor grad_output, Tensor input, Tensor target, bool size_average, bool reduce)
+  grad_output: l1_loss_double_backward_grad_output(grad, input, target, size_average, reduce)
   input: zeros_like(grad)
 
 - name: log_sigmoid_backward(Tensor grad_output, Tensor input, Tensor buffer)
