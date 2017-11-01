@@ -172,6 +172,17 @@ int main() {
         ASSERT(false);
       } catch (std::runtime_error &e) {}
     }
+
+    // fill_
+    if (t.dim() > 0 && t.numel() != 0) {
+      try {
+        // can only fill_ 0-dim tensors
+        t.fill_(t.sum(0));
+        assert(t.dim() == 1);
+      } catch (std::runtime_error &e) {
+        assert(t.dim() != 1);
+      }
+    }
   }
 
   for (auto lhs_it = sizes.begin(); lhs_it != sizes.end(); ++lhs_it) {

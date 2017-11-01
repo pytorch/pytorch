@@ -78,6 +78,12 @@ if(${check_name}.dim() == 0) {
     return static_cast<const Type*>(this)->${method_prefix}${api_name}(${zero_dim_actuals});
 }""")
 
+ZERO_DIM_ONLY = CodeTemplate("""\
+else {
+    runtime_error("${api_name} only supports a 0-dimensional ${check_name} tensor, but got tensor "
+                  "with %" PRId64 " dimension(s)", ${check_name}.dim());
+}""")
+
 SPARSE_CHECK = CodeTemplate("""\
 if(${check_name}.type().isSparse()) {
     return static_cast<const Type*>(this)->${method_prefix}${api_name}(${sparse_actuals});
@@ -708,6 +714,9 @@ def create_derived(backend_type_env, declarations):
             return backend_type_env['AccScalarName'] == 'Long'
         return False
 
+    def only_zero_dim(env, option):
+        return option.get('zero_dim_tensor_only', False)
+
     def handle_zero_dim(env, option):
         if 'zero_dim_dispatch_when_scalar' not in option:
             return []
@@ -715,7 +724,12 @@ def create_derived(backend_type_env, declarations):
         zero_dim_actuals = [arg['name']
                             if arg['name'] != check_name else "Scalar({})".format(arg['name'])
                             for arg in option['formals_list']]
-        return [ZERO_DIM_CHECK.substitute(env, check_name=check_name, zero_dim_actuals=zero_dim_actuals)]
+        zero_dim_check = ZERO_DIM_CHECK.substitute(env, check_name=check_name, zero_dim_actuals=zero_dim_actuals)
+        if only_zero_dim(env, option):
+            zero_dim_only = ZERO_DIM_ONLY.substitute(env, check_name=check_name)
+            return [zero_dim_check] + [zero_dim_only]
+        else:
+            return [zero_dim_check]
 
     def handle_sparse(env, option):
         if 'when_sparse_dispatch' not in option or 'Sparse' in backend_type_env['Backend']:
@@ -776,6 +790,8 @@ def create_derived(backend_type_env, declarations):
         body = []
         body += handle_sparse(env, option)
         body += handle_zero_dim(env, option)
+        if only_zero_dim(env, option):
+            return body
         body += handle_buffers(env, option)
         # arguments are potentially duplicated because of one argument
         # referencing another
