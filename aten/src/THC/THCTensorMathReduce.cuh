@@ -373,44 +373,111 @@ __host__ void THCTensor_varOuterDim(THCState *state, TensorTypeK *tgt, TensorTyp
  * considered as having 'num_rows' rows of size 'row_size'.
  * Each thread block processes one or more sets of contiguous rows (processing multiple rows
  * per thread block is quicker than processing a single row, especially for short rows).
+ *
+ * Uses Welford's algorithm for numeric stability. Divides the dataset into parallel groups
+ * and computes the M2 and mean for each group. (M2 is \sum (x - \bar{x})^2)
+ * For example, if the data is split into two groups x and y, the overall M2 can
+ * be computed by:
+ *
+ *    overall_M2 = M2x + nx * (mean(x) - overall_mean)^2
+ *               + M2y + ny * (mean(x) - overall_mean)^2
+ *
  */
 template<typename Real, bool flag, bool apply_sqrt>
 __global__ void THCTensor_kernel_varInnermostDim(Real *tgt, Real *src_, unsigned num_rows, unsigned row_size)
 {
-  __shared__ Real ssum[32][16];
-  __shared__ Real ssum2[32][16];
+  __shared__ Real mean[16];
+  __shared__ Real local_sum[32][16];
+  __shared__ Real adjusted_M2[32][16];
 
+  // Each block computes the var/std of blockDim.x (16) rows at once
   for (unsigned block_row = blockIdx.x * blockDim.y; block_row < num_rows; block_row += blockDim.y * gridDim.x) {
     unsigned row = block_row + threadIdx.y;
-    Real sum = ScalarConvert<int, Real>::to(0), sum2 = ScalarConvert<int, Real>::to(0);
+
+    /*
+     * Compute local mean, local M2 via Welford's algorithm
+     * in blockDim.y threads through sequential reduction in each thread.
+     */
+    Real local_mean = ScalarConvert<int, Real>::to(0);
+    Real local_M2 = ScalarConvert<int, Real>::to(0);
+    unsigned count = 0;
+
     if (row < num_rows) {
       Real *src = src_ + row * row_size;
-      // Sequential reduction within a thread.
+
       for (unsigned col = threadIdx.x; col < row_size; col += blockDim.x) {
+        ++count;
         Real val = src[col];
-        sum = THCNumerics<Real>::add(sum, val);
-        sum2 = THCNumerics<Real>::add(sum2, THCNumerics<Real>::mul(val, val));
+        Real delta = THCNumerics<Real>::sub(val, local_mean);
+        local_mean = THCNumerics<Real>::add(
+            local_mean,
+            THCNumerics<Real>::div(delta, ScalarConvert<int, Real>::to(count)));
+        Real delta2 = THCNumerics<Real>::sub(val, local_mean);
+        local_M2 = THCNumerics<Real>::add(
+            local_M2,
+            THCNumerics<Real>::mul(delta, delta2));
       }
     }
-    ssum[threadIdx.y][threadIdx.x] = sum;
-    ssum2[threadIdx.y][threadIdx.x] = sum2;
+
+    local_sum[threadIdx.y][threadIdx.x] =
+        THCNumerics<Real>::mul(local_mean, ScalarConvert<int, Real>::to(count));
     __syncthreads();
 
-    // Reduce intermediate values to single value.
+
+    // Compute the true mean of each of the blockDim.x rows by reducing the sums
     for (unsigned s = 8; s > 1; s >>= 1) {
       if (row < num_rows && threadIdx.x < s) {
-        ssum[threadIdx.y][threadIdx.x] =
-          THCNumerics<Real>::add(ssum[threadIdx.y][threadIdx.x], ssum[threadIdx.y][threadIdx.x + s]);
-        ssum2[threadIdx.y][threadIdx.x] =
-          THCNumerics<Real>::add(ssum2[threadIdx.y][threadIdx.x], ssum2[threadIdx.y][threadIdx.x + s]);
+        local_sum[threadIdx.y][threadIdx.x] = THCNumerics<Real>::add(
+            local_sum[threadIdx.y][threadIdx.x],
+            local_sum[threadIdx.y][threadIdx.x + s]);
       }
       __syncthreads();
     }
 
     if (row < num_rows && threadIdx.x == 0) {
-      sum = THCNumerics<Real>::add(ssum[threadIdx.y][0], ssum[threadIdx.y][1]);
-      sum2 = THCNumerics<Real>::add(ssum2[threadIdx.y][0], ssum2[threadIdx.y][1]);
-      tgt[row] = THCTensor_computeVar<Real, flag, apply_sqrt>(sum, sum2, row_size);
+      mean[threadIdx.y] = THCNumerics<Real>::div(
+          THCNumerics<Real>::add(local_sum[threadIdx.y][0], local_sum[threadIdx.y][1]),
+          ScalarConvert<int, Real>::to(row_size));
+    }
+    __syncthreads();
+
+
+    /*
+     * Adjust each local_M2 according to the following:
+     *   adjusted_M2 = local_M2 + mean_diff * mean_diff * count
+     * The sum of these adjusted M2s is equal to the overall M2.
+     */
+    if (row < num_rows) {
+      Real mean_diff = THCNumerics<Real>::sub(mean[threadIdx.y], local_mean);
+      adjusted_M2[threadIdx.y][threadIdx.x] = THCNumerics<Real>::add(
+          local_M2,
+          THCNumerics<Real>::mul(
+              THCNumerics<Real>::mul(mean_diff, mean_diff),
+              ScalarConvert<int, Real>::to(count)));
+    }
+    __syncthreads();
+
+
+    // Sum the adjusted M2s to get the M2 for each of the blockDim.x rows
+    for (unsigned s = 8; s > 1; s >>= 1) {
+      if (row < num_rows && threadIdx.x < s) {
+        adjusted_M2[threadIdx.y][threadIdx.x] =
+          THCNumerics<Real>::add(
+              adjusted_M2[threadIdx.y][threadIdx.x],
+              adjusted_M2[threadIdx.y][threadIdx.x + s]);
+      }
+      __syncthreads();
+    }
+
+    if (row < num_rows && threadIdx.x == 0) {
+      Real M2 = THCNumerics<Real>::add(adjusted_M2[threadIdx.y][0], adjusted_M2[threadIdx.y][1]);
+      Real variance;
+      if (flag) {
+        variance = THCNumerics<Real>::div(M2, ScalarConvert<int, Real>::to(row_size));
+      } else {
+        variance = THCNumerics<Real>::div(M2, ScalarConvert<int, Real>::to(row_size - 1));
+      }
+      tgt[row] = apply_sqrt ? THCNumerics<Real>::sqrt(variance) : variance;
     }
     __syncthreads();
   }
