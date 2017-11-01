@@ -59,13 +59,13 @@ Then, you can run::
 
     import onnx
 
-    graph = onnx.load("alexnet.proto")
+    model = onnx.load("alexnet.proto")
 
     # Check that the IR is well formed
-    onnx.checker.check_graph(graph)
+    onnx.checker.check_model(model)
 
     # Print a human readable representation of the graph
-    onnx.helper.printable_graph(graph)
+    onnx.helper.printable_graph(model.graph)
 
 To run the exported script with `caffe2 <https://caffe2.ai/>`_, you will need three things:
 
