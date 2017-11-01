@@ -432,7 +432,7 @@ bool CudnnConvOp::DoRunWithType() {
       vector<int> dims = {N, M, H_out, W_out, D_out};
       vector<int> strides = {M * H_out * W_out * D_out,
                              H_out * W_out * D_out,
-                             H_out * D_out,
+                             W_out * D_out,
                              D_out,
                              1};
       CUDNN_ENFORCE(cudnnSetTensorNdDescriptor(
@@ -795,7 +795,7 @@ bool CudnnConvGradientOp::DoRunWithType() {
       vector<int> dims = {N, M, H_out, W_out, D_out};
       vector<int> strides = {M * H_out * W_out * D_out,
                              H_out * W_out * D_out,
-                             H_out * D_out,
+                             W_out * D_out,
                              D_out,
                              1};
       CUDNN_ENFORCE(cudnnSetTensorNdDescriptor(
