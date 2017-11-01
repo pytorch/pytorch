@@ -6,7 +6,7 @@
 #include "Scalar.hpp"
 #include "init_methods/InitMethod.hpp"
 
-#include <THPP/Tensor.hpp>
+#include <ATen/ATen.h>
 
 #include <vector>
 #include <unordered_map>
@@ -15,6 +15,7 @@
 
 MAKE_HASHABLE(THDReduceOp, static_cast<int>(t));
 MAKE_HASHABLE(thpp::Type, static_cast<char>(t));
+MAKE_HASHABLE(at::ScalarType, static_cast<int>(t));
 
 
 namespace thd {
@@ -76,25 +77,25 @@ struct DataChannel {
   virtual rank_type getRank() = 0;
   virtual rank_type getNumProcesses() = 0;
 
-  virtual void allGather(std::vector<thpp::Tensor*>& output, thpp::Tensor& input,
+  virtual void allGather(std::vector<at::Tensor>& output, at::Tensor& input,
                          THDGroup group_id = THDGroupWORLD) = 0;
-  virtual void gather(std::vector<thpp::Tensor*>& output, thpp::Tensor& input,
+  virtual void gather(std::vector<at::Tensor>& output, at::Tensor& input,
                       rank_type dst_rank, THDGroup group_id = THDGroupWORLD) = 0;
-  virtual void scatter(std::vector<thpp::Tensor*>& input, thpp::Tensor& output,
+  virtual void scatter(std::vector<at::Tensor>& input, at::Tensor& output,
                        rank_type src_rank, THDGroup group_id = THDGroupWORLD) = 0;
-  virtual void allReduce(thpp::Tensor& data, THDReduceOp operation,
+  virtual void allReduce(at::Tensor& data, THDReduceOp operation,
                          THDGroup group_id = THDGroupWORLD) = 0;
-  virtual void reduce(thpp::Tensor& data, THDReduceOp operation,
+  virtual void reduce(at::Tensor& data, THDReduceOp operation,
                       rank_type dst_rank, THDGroup group_id = THDGroupWORLD) = 0;
-  virtual void broadcast(thpp::Tensor& data, rank_type src_rank,
+  virtual void broadcast(at::Tensor& data, rank_type src_rank,
                          THDGroup group_id = THDGroupWORLD) = 0;
   virtual void send(Scalar& value, rank_type src_rank) = 0;
-  virtual void send(thpp::Tensor& data, rank_type dst_rank) = 0;
+  virtual void send(at::Tensor& data, rank_type dst_rank) = 0;
   virtual void receive(Scalar& value, rank_type src_rank) = 0;
-  virtual rank_type receive(thpp::Tensor& data) = 0; // receive from any source
-  virtual void receive(thpp::Tensor& data, rank_type src_rank) = 0;
-  virtual Request* isend(thpp::Tensor& data, rank_type dst_rank) = 0;
-  virtual Request* ireceive(thpp::Tensor& data, rank_type src_rank) = 0;
+  virtual rank_type receive(at::Tensor& data) = 0; // receive from any source
+  virtual void receive(at::Tensor& data, rank_type src_rank) = 0;
+  virtual Request* isend(at::Tensor& data, rank_type dst_rank) = 0;
+  virtual Request* ireceive(at::Tensor& data, rank_type src_rank) = 0;
 
   virtual void barrier(THDGroup group_id = THDGroupWORLD) = 0;
 

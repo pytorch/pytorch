@@ -14,68 +14,68 @@ int THDGetNumProcesses() {
   return static_cast<int>(dataChannel->getNumProcesses());
 }
 
-void THDAllReduce(THDTensorDescriptor* desc, THDReduceOp operation, THDGroup group) {
-  dataChannel->allReduce(*desc, operation, group);
+void THDAllReduce(THDTensorDescriptor& desc, THDReduceOp operation, THDGroup group) {
+  dataChannel->allReduce(desc, operation, group);
 }
 
-void THDReduce(THDTensorDescriptor* desc, THDReduceOp operation,
+void THDReduce(THDTensorDescriptor& desc, THDReduceOp operation,
                int dst_rank, THDGroup group) {
-  dataChannel->reduce(*desc, operation, convertToRank(dst_rank), group);
+  dataChannel->reduce(desc, operation, convertToRank(dst_rank), group);
 }
 
-void THDBroadcast(THDTensorDescriptor* desc, int src_rank, THDGroup group) {
-  dataChannel->broadcast(*desc, convertToRank(src_rank), group);
+void THDBroadcast(THDTensorDescriptor& desc, int src_rank, THDGroup group) {
+  dataChannel->broadcast(desc, convertToRank(src_rank), group);
 }
 
-THDRequest* THDIsend(THDTensorDescriptor* desc, int dst_rank) {
-  return dataChannel->isend(*desc, convertToRank(dst_rank));
+THDRequest* THDIsend(THDTensorDescriptor& desc, int dst_rank) {
+  return dataChannel->isend(desc, convertToRank(dst_rank));
 }
 
-THDRequest* THDIrecv(THDTensorDescriptor* desc, int src_rank) {
-  return dataChannel->ireceive(*desc, convertToRank(src_rank));
+THDRequest* THDIrecv(THDTensorDescriptor& desc, int src_rank) {
+  return dataChannel->ireceive(desc, convertToRank(src_rank));
 }
 
-void THDSend(THDTensorDescriptor* desc, int dst_rank) {
-  dataChannel->send(*desc, convertToRank(dst_rank));
+void THDSend(THDTensorDescriptor& desc, int dst_rank) {
+  dataChannel->send(desc, convertToRank(dst_rank));
 }
 
-int THDRecvAnySource(THDTensorDescriptor* desc) {
-  return dataChannel->receive(*desc);
+int THDRecvAnySource(THDTensorDescriptor& desc) {
+  return dataChannel->receive(desc);
 }
 
-void THDRecv(THDTensorDescriptor* desc, int src_rank) {
-  dataChannel->receive(*desc, convertToRank(src_rank));
+void THDRecv(THDTensorDescriptor& desc, int src_rank) {
+  dataChannel->receive(desc, convertToRank(src_rank));
 }
 
-void THDAllGather(THDTensorDescriptor** output, size_t len,
-                  THDTensorDescriptor* input, THDGroup group) {
-  std::vector<thpp::Tensor*> v_output(output, output + len);
-  dataChannel->allGather(v_output, *input, group);
+void THDAllGather(THDTensorDescriptor* output, size_t len,
+                  THDTensorDescriptor& input, THDGroup group) {
+  std::vector<at::Tensor> v_output(output, output + len);
+  dataChannel->allGather(v_output, input, group);
 }
 
-void THDGatherSend(THDTensorDescriptor* input, int dst_rank, THDGroup group) {
-  std::vector<thpp::Tensor*> v_output;
-  dataChannel->gather(v_output, *input, convertToRank(dst_rank), group);
+void THDGatherSend(THDTensorDescriptor& input, int dst_rank, THDGroup group) {
+  std::vector<at::Tensor> v_output;
+  dataChannel->gather(v_output, input, convertToRank(dst_rank), group);
 }
 
-void THDGatherRecv(THDTensorDescriptor** output, size_t len,
-                   THDTensorDescriptor* input, THDGroup group) {
-  std::vector<thpp::Tensor*> v_output(output, output + len);
-  dataChannel->gather(v_output, *input, dataChannel->getRank(), group);
+void THDGatherRecv(THDTensorDescriptor* output, size_t len,
+                   THDTensorDescriptor& input, THDGroup group) {
+  std::vector<at::Tensor> v_output(output, output + len);
+  dataChannel->gather(v_output, input, dataChannel->getRank(), group);
 }
 
-void THDScatterSend(THDTensorDescriptor** input, size_t len,
-                    THDTensorDescriptor* output, THDGroup group) {
-  std::vector<thpp::Tensor*> v_input(input, input + len);
-  dataChannel->scatter(v_input, *output, dataChannel->getRank(), group);
+void THDScatterSend(THDTensorDescriptor* input, size_t len,
+                    THDTensorDescriptor& output, THDGroup group) {
+  std::vector<at::Tensor> v_input(input, input + len);
+  dataChannel->scatter(v_input, output, dataChannel->getRank(), group);
 }
 
-void THDScatterRecv(THDTensorDescriptor* output, int src_rank, THDGroup group) {
+void THDScatterRecv(THDTensorDescriptor& output, int src_rank, THDGroup group) {
   if (src_rank < 0)
     throw std::domain_error("src_rank should not be negative");
 
-  std::vector<thpp::Tensor*> v_input;
-  dataChannel->scatter(v_input, *output, convertToRank(src_rank), group);
+  std::vector<at::Tensor> v_input;
+  dataChannel->scatter(v_input, output, convertToRank(src_rank), group);
 }
 
 void THDBarrier(THDGroup group) {

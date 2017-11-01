@@ -161,17 +161,17 @@ struct GlooCache {
     return it->second;
   }
 
-  static void memcpy_input(value_type& info, thpp::Tensor& t) {
-    std::uint64_t tensor_bytes = t.elementSize() * t.numel();
+  static void memcpy_input(value_type& info, at::Tensor& t) {
+    std::uint64_t tensor_bytes = t.type().elementSizeInBytes() * t.numel();
     auto t_dev = getDeviceType(t);
     auto input_buffer = GlooCache::input_buffer(info).get();
 
     if (t_dev == DeviceType::CPU) {
-      std::memcpy(input_buffer, t.data(), tensor_bytes);
+      std::memcpy(input_buffer, t.data_ptr(), tensor_bytes);
 #ifdef WITH_CUDA
     } else if (t_dev == DeviceType::CUDA) {
       auto stream = THCState_getCurrentStream(THDGetCudaState());
-      THCudaCheck(cudaMemcpyAsync(input_buffer, t.data(), tensor_bytes,
+      THCudaCheck(cudaMemcpyAsync(input_buffer, t.data_ptr(), tensor_bytes,
                                   cudaMemcpyDeviceToDevice, stream));
 #endif
     } else {
@@ -179,17 +179,17 @@ struct GlooCache {
     }
   }
 
-  static void memcpy_output(value_type& info, thpp::Tensor& t) {
-    std::uint64_t tensor_bytes = t.elementSize() * t.numel();
+  static void memcpy_output(value_type& info, at::Tensor& t) {
+    std::uint64_t tensor_bytes = t.type().elementSizeInBytes() * t.numel();
     auto t_dev = getDeviceType(t);
     auto output_buffer = GlooCache::output_buffer(info).get();
 
     if (t_dev == DeviceType::CPU) {
-      std::memcpy(t.data(), output_buffer, tensor_bytes);
+      std::memcpy(t.data_ptr(), output_buffer, tensor_bytes);
 #ifdef WITH_CUDA
     } else if (t_dev == DeviceType::CUDA) {
       auto stream = THCState_getCurrentStream(THDGetCudaState());
-      THCudaCheck(cudaMemcpyAsync(t.data(), output_buffer, tensor_bytes,
+      THCudaCheck(cudaMemcpyAsync(t.data_ptr(), output_buffer, tensor_bytes,
                                   cudaMemcpyDeviceToDevice, stream));
 #endif
     } else {

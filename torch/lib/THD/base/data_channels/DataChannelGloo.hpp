@@ -45,25 +45,25 @@ struct DataChannelGloo : DataChannel {
   rank_type getRank() override;
   rank_type getNumProcesses() override;
 
-  void allGather(std::vector<thpp::Tensor*>& output, thpp::Tensor& input,
+  void allGather(std::vector<at::Tensor>& output, at::Tensor& input,
                  THDGroup group_id = THDGroupWORLD) override;
-  void gather(std::vector<thpp::Tensor*>& output, thpp::Tensor& input,
+  void gather(std::vector<at::Tensor>& output, at::Tensor& input,
               rank_type dst_rank, THDGroup group_id = THDGroupWORLD) override;
-  void scatter(std::vector<thpp::Tensor*>& input, thpp::Tensor& output,
+  void scatter(std::vector<at::Tensor>& input, at::Tensor& output,
                rank_type src_rank, THDGroup group_id = THDGroupWORLD) override;
-  void allReduce(thpp::Tensor& data, THDReduceOp operation,
+  void allReduce(at::Tensor& data, THDReduceOp operation,
                  THDGroup group_id = THDGroupWORLD) override;
-  void reduce(thpp::Tensor& data, THDReduceOp operation, rank_type dst_rank,
+  void reduce(at::Tensor& data, THDReduceOp operation, rank_type dst_rank,
               THDGroup group_id = THDGroupWORLD) override;
-  void broadcast(thpp::Tensor& data, rank_type src_id,
+  void broadcast(at::Tensor& data, rank_type src_id,
                  THDGroup group_id = THDGroupWORLD) override;
   void send(Scalar& data, rank_type dst_id) override;
-  void send(thpp::Tensor& data, rank_type dst_id) override;
+  void send(at::Tensor& data, rank_type dst_id) override;
   void receive(Scalar& data, rank_type src_id) override;
-  rank_type receive(thpp::Tensor& data) override;
-  void receive(thpp::Tensor& data, rank_type src_id) override;
-  RequestGloo* isend(thpp::Tensor& data, rank_type dst_rank) override;
-  RequestGloo* ireceive(thpp::Tensor& data, rank_type src_rank) override;
+  rank_type receive(at::Tensor& data) override;
+  void receive(at::Tensor& data, rank_type src_id) override;
+  RequestGloo* isend(at::Tensor& data, rank_type dst_rank) override;
+  RequestGloo* ireceive(at::Tensor& data, rank_type src_rank) override;
 
   void barrier(THDGroup group_id = THDGroupWORLD) override;
 
@@ -72,15 +72,15 @@ struct DataChannelGloo : DataChannel {
 private:
 
   template<typename T>
-  void allGatherT(std::vector<thpp::Tensor*>& output,
-                  thpp::Tensor& input, THDGroup group_id);
+  void allGatherT(std::vector<at::Tensor>& output,
+                  at::Tensor& input, THDGroup group_id);
 
   template<typename T>
-  void allReduceT(thpp::Tensor& data, THDReduceOp operation,
+  void allReduceT(at::Tensor& data, THDReduceOp operation,
                   THDGroup group_id = THDGroupWORLD);
 
   template<typename T>
-  void broadcastT(thpp::Tensor& data, rank_type src_rank,
+  void broadcastT(at::Tensor& data, rank_type src_rank,
                   THDGroup group_id = THDGroupWORLD);
 
   rank_type _rank; // Current process' rank
