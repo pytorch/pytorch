@@ -387,6 +387,11 @@ void THTensor_(syev)(THTensor *re_, THTensor *rv_, THTensor *a, const char *jobz
                                      THTensor_(free)(work);),
                            "syev", info,"");
 
+  // No eigenvectors specified
+  if (*jobz == 'N') {
+    THTensor_(fill)(rv_, 0);
+  }
+
   THTensor_(freeCopyTo)(rv__, rv_);
   THTensor_(freeCopyTo)(re__, re_);
   THTensor_(free)(work);
