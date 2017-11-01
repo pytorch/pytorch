@@ -91,7 +91,7 @@ static void fusionTests() {
     Graph graph;
     Node * i0 = graph.addInput();
     Node * i1 = graph.addInput();
-    auto o0 = appendNewNode(kMul,graph,{i0, i1});
+    auto o0 = appendNewNode(kmul,graph,{i0, i1});
     graph.registerOutput(o0);
     auto a = at::CUDA(at::kFloat).rand({3,4});
     auto b = at::CUDA(at::kFloat).rand({4,3}).transpose(0,1);
@@ -114,15 +114,15 @@ static void fusionTests() {
     Node * i3 = graph.addInput();
     Node * i4 = graph.addInput();
 
-    auto p22 = appendNewNode(kSigmoid,graph,{i4});
-    auto p20 = appendNewNode(kSigmoid,graph,{i3});
-    auto p18 = appendNewNode(kTanh,graph,{i2});
-    auto p16 = appendNewNode(kSigmoid,graph,{i1});
-    auto p14 = appendNewNode(kMul,graph,{p20, i0});
-    auto p11 = appendNewNode(kMul,graph,{p22, p18});
-    auto o1 = appendNewNode(kAdd,graph,{p14, p11});
-    auto p5 = appendNewNode(kTanh,graph,{o1});
-    auto o0 = appendNewNode(kMul,graph,{p16, p5});
+    auto p22 = appendNewNode(ksigmoid,graph,{i4});
+    auto p20 = appendNewNode(ksigmoid,graph,{i3});
+    auto p18 = appendNewNode(ktanh,graph,{i2});
+    auto p16 = appendNewNode(ksigmoid,graph,{i1});
+    auto p14 = appendNewNode(kmul,graph,{p20, i0});
+    auto p11 = appendNewNode(kmul,graph,{p22, p18});
+    auto o1 = appendNewNode(kadd,graph,{p14, p11});
+    auto p5 = appendNewNode(ktanh,graph,{o1});
+    auto o0 = appendNewNode(kmul,graph,{p16, p5});
 
     graph.registerOutput(o0);
     graph.registerOutput(o1);
@@ -179,9 +179,9 @@ static void fusionTests() {
     Graph graph;
     Node * i0 = graph.addInput();
     Node * i1 = graph.addInput();
-    auto o0 = appendNewNode(kMul,graph,{i0, i1});
+    auto o0 = appendNewNode(kmul,graph,{i0, i1});
     graph.registerOutput(o0);
-    graph.registerOutput(appendNewNode(kConcat, graph, {i0,o0})->i_(kaxis, dim));
+    graph.registerOutput(appendNewNode(kcat, graph, {i0,o0})->i_(kdim, dim));
     auto a = at::CUDA(at::kFloat).rand({3,4,5});
     auto b = at::CUDA(at::kFloat).rand({4,3,5}).transpose(0,1);
     auto o = at::CUDA(at::kFloat).zeros({3,4,5});
@@ -213,34 +213,35 @@ void attributesTest() {
   auto four = kSlice;
   Attr attr;
   attr.f_(one,3.4)->i_(two,5)->s_(three,"what");
-  assert(attr.f(one) == 3.4);
-  assert(attr.s(three) == "what");
-  assert(attr.i(two) == 5);
+  JIT_ASSERT(attr.f(one) == 3.4);
+  JIT_ASSERT(attr.s(three) == "what");
+  JIT_ASSERT(attr.i(two) == 5);
   attr.s_(one,"no");
-  assert(attr.s(one) == "no");
-  assert(attr.hasAttribute(three));
-  assert(!attr.hasAttribute(four));
+  JIT_ASSERT(attr.s(one) == "no");
+  JIT_ASSERT(attr.hasAttribute(three));
+  JIT_ASSERT(!attr.hasAttribute(four));
   attr.ss_(two, {"hi", "now"});
-  assert(attr.ss(two).at(1) == "now");
+  JIT_ASSERT(attr.ss(two).at(1) == "now");
 
   Attr attr2;
   attr2.copyAttributes(attr);
-  assert(attr2.s(one) == "no");
+  JIT_ASSERT(attr2.s(one) == "no");
   attr2.f_(one,5);
-  assert(attr.s(one) == "no");
-  assert(attr2.f(one) == 5);
+  JIT_ASSERT(attr.s(one) == "no");
+  JIT_ASSERT(attr2.f(one) == 5);
 }
 
 void internedStringsTests () {
 
-  assert(kParam == stringToSymbol("Param"));
-  assert(kReturn == stringToSymbol("Return"));
-  assert(symbolToString(kReturn) == std::string("Return"));
-  assert(stringToSymbol("What") == kLastSymbol);
-  assert(stringToSymbol("What2") == kLastSymbol+1);
-  assert(stringToSymbol("What") == kLastSymbol);
-  assert(stringToSymbol("What2") == kLastSymbol+1);
-  assert(symbolToString(kLastSymbol+1) == std::string("What2"));
+  JIT_ASSERT(kParam == stringToSymbol("Param"));
+  JIT_ASSERT(kReturn == stringToSymbol("Return"));
+  JIT_ASSERT(symbolToString(kReturn) == std::string("Return"));
+  size_t symstart = stringToSymbol("__NEW_SYMBOL");
+  JIT_ASSERT(stringToSymbol("What") == symstart+1);
+  JIT_ASSERT(stringToSymbol("What2") == symstart+2);
+  JIT_ASSERT(stringToSymbol("What") == symstart+1);
+  JIT_ASSERT(stringToSymbol("What2") == symstart+2);
+  JIT_ASSERT(symbolToString(symstart+2) == std::string("What2"));
 }
 
 

@@ -1132,6 +1132,33 @@ pstrf(upper=True, tol=-1) -> (Tensor, IntTensor)
 See :func:`torch.pstrf`
 """)
 
+add_docstr_all('put_',
+               """
+put_(indices, tensor, accumulate=False) -> Tensor
+
+Copies the elements from :attr:`tensor` into the positions specified by
+indices. For the puropose of indexing, the ``self`` tensor is treated as if it
+were a 1D tensor.
+
+If :attr:`accumulate` is ``True``, the elements in :attr:`tensor` are added to
+:attr:`self`. If accumulate is ``False``, the behavior is undefined if indices
+contains duplicate elements.
+
+Args:
+    indices (LongTensor): the indices into self
+    tensor (Tensor): Tensor containing values to copy
+    accumulate (bool): True to accumulate into self
+
+Example::
+
+    >>> src = torch.Tensor([[4, 3, 5],
+    ...                     [6, 7, 8]])
+    >>> src.put_(torch.LongTensor([1, 3]), torch.Tensor([9, 10]))
+      4   9   5
+     10   7   8
+    [torch.FloatTensor of size 2x3]
+""")
+
 add_docstr_all('qr',
                """
 qr() -> (Tensor, Tensor)
@@ -1543,11 +1570,11 @@ t_() -> Tensor
 In-place version of :meth:`~Tensor.t`
 """)
 
-add_docstr_all('tan',
+add_docstr_all('take',
                """
-tan() -> Tensor
+take(indices) -> Tensor
 
-See :func:`torch.tan`
+See :func:`torch.take`
 """)
 
 add_docstr_all('tan_',

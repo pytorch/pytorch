@@ -129,15 +129,26 @@ std::string nodeName(Node * n) {
   return "n" + std::to_string(n->unique());
 }
 
+ std::string scalarValue(const at::Tensor & t) {
+  auto s =  at::Scalar(t);
+  return (s.isIntegral()) ?
+    std::to_string(s.toLong()) :
+    std::to_string(s.toDouble());
+}
+
 // TODO: we need to support double-precision
 std::unordered_map<NodeKind,std::function<std::string(Node*)>> simple_map_ops = {
-  {kSigmoid,         [](Node*) { return "1.f / (1.f + expf(-${0}))"; }},
-  {kTanh,            [](Node*) { return "tanhf(${0})"; }},
-  {kMul,             [](Node*) { return "${0} * ${1}"; }},
-  {kAdd,             [](Node*) { return "${0} + ${1}"; }},
-  {kNeg,             [](Node*) { return "(-${0})"; }},
-  // TODO: support both float and int constants
-  {kAddConstant,     [](Node* n) { return std::to_string(n->f(kvalue)) + " + ${0}"; }},
+  {ksigmoid,         [](Node*) { return "1.f / (1.f + expf(-${0}))"; }},
+  {ktanh,            [](Node*) { return "tanhf(${0})"; }},
+  {kmul,             [](Node*) { return "${0} * ${1}"; }},
+  {kadd,             [](Node*n) -> std::string {
+    if(n->inputs().size() == 2)
+      return "${0} + ${1}";
+    else
+      return "${0} + " + scalarValue(n->t(kother));
+  }},
+  {kneg,             [](Node*) { return "(-${0})"; }},
+
 };
 
 const char * scalarTypeName(at::ScalarType type) {
@@ -183,13 +194,13 @@ std::vector<ConcatDesc> emitCompilationUnit(std::ostream & out,
     size_t i = 0;
     for(auto o : subgraph.outputs()) {
       auto & desc = agraph.output_desc[i++];
-      if(o->kind() != kConcat) {
+      if(o->kind() != kcat) {
         emitFormal(o, desc);
         concat_desc.emplace_back();
         flat_output_nodes.push_back(o);
       } else {
         size_t nInputs = o->inputs().size();
-        concat_desc.emplace_back(desc, nInputs, o->i(kaxis));
+        concat_desc.emplace_back(desc, nInputs, o->i(kdim));
         for(auto c : o->inputs()) {
           emitFormal(c, *concat_desc.back().subtensorDesc);
           flat_output_nodes.push_back(c);
@@ -206,7 +217,7 @@ std::vector<ConcatDesc> emitCompilationUnit(std::ostream & out,
     body << format("auto ${node} = ${access};\n",env);
   }
   for(auto n : subgraph.nodes()) {
-    if(n->kind() == kConcat)
+    if(n->kind() == kcat)
       continue; // Concat nodes by narrowing the output Tensors before the kernel runs
     size_t i = 0;
     for(auto in : n->inputs()) {
@@ -253,10 +264,9 @@ CompiledFusionFunction::CompiledFusionFunction(const std::string & name, Annotat
 
   std::stringstream cu;
   concat_desc = codegen::emitCompilationUnit(cu, name, agraph);
-  compliation_unit = cu.str();
-
+  compilation_unit = cu.str();
   nvrtcProgram program;
-  JIT_NVRTC_CHECK(nvrtcCreateProgram(&program, compliation_unit.c_str(), NULL, 0, nullptr, nullptr));
+  JIT_NVRTC_CHECK(nvrtcCreateProgram(&program, compilation_unit.c_str(), NULL, 0, nullptr, nullptr));
 
   std::string compute = "--gpu-architecture=compute_" + std::to_string(prop.major) + std::to_string(prop.minor);
   std::vector<const char *> args = {"--std=c++11", compute.c_str()};
@@ -342,6 +352,7 @@ void compressContiguous(
 } // anonymous namespace
 
 void CompiledFusionFunction::launch(at::ArrayRef<at::Tensor> inputs, at::ArrayRef<at::Tensor> outputs) {
+  AutoGPU gpu_guard(inputs);
   JIT_ASSERT(inputs.size() == input_desc.size());
   JIT_ASSERT(outputs.size() == output_desc.size());
   size_t flat_outputs_size = 0;
@@ -404,6 +415,11 @@ void CompiledFusionFunction::launch(uint32_t numel, void ** arguments) {
   int numBlocks = std::min(maxBlocks, ceilDiv(numel, blockSize));
   //std::cout << "maxBlocks = " << maxBlocks << " needed blocks: " << ceilDiv(numel,blockSize)
   //          << " numblocks =  " << numBlocks;
+
+  // it is possible that this is the first cuda call on this thread
+  // so make sure we initialize the Driver API's context
+  // cudaFree(0) accomplishes this.
+  cudaFree(0);
 
   JIT_CU_CHECK(cuLaunchKernel(
     function,

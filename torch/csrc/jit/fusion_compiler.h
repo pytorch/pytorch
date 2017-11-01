@@ -93,7 +93,7 @@ private:
   void launch(uint32_t numel, void ** arguments);
   std::string name;
   // We keep these around for debugging
-  std::string compliation_unit;
+  std::string compilation_unit;
   std::vector<char> ptx;
   CUmodule module;
   CUfunction function;

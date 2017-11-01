@@ -31,9 +31,9 @@
   tensor2: grad * tensor1 * value
 
 - name: addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1)
-  self: addmm_self_backward(grad, beta)
-  mat1: addmm_mat1_backward(grad, mat1, mat2, alpha)
-  mat2: addmm_mat2_backward(grad, mat1, mat2, alpha)
+  self: maybe_multiply(grad, beta)
+  mat1: mm_mat1_backward(grad, mat2, mat1.sizes(), mat1.strides(), alpha)
+  mat2: mm_mat2_backward(grad, mat1, mat2.sizes(), mat2.strides(), alpha)
 
 - name: addmv(Tensor self, Tensor mat, Tensor vec, *, Scalar beta=1, Scalar alpha=1)
   self: grad * beta
@@ -308,8 +308,8 @@
   other: grad.clone().masked_fill_(self < other, 0)
 
 - name: mm(Tensor self, Tensor mat2)
-  self: grad.mm(mat2.t())
-  mat2: self.t().mm(grad)
+  self: mm_mat1_backward(grad, mat2, self.sizes(), self.strides(), 1)
+  mat2: mm_mat2_backward(grad, self, mat2.sizes(), mat2.strides(), 1)
 
 - name: mode(Tensor self, int64_t dim, bool keepdim)
   self: select_backward(grad, dim, indices, self.sizes(), keepdim)
@@ -389,6 +389,10 @@
 
 - name: pstrf(Tensor self, bool upper, Scalar tol)
   self: not_implemented("pstrf")
+
+- name: put(Tensor self, Tensor index, Tensor source, bool accumulate)
+  self: zeros_like(self).put_(index, source, accumulate)
+  source: grad.take(index)
 
 - name: qr(Tensor self)
   self: not_implemented("qr")
@@ -489,6 +493,9 @@
 - name: t(Tensor self)
   self: grad.t()
   __view__: True
+
+- name: take(Tensor self, Tensor index)
+  self: zeros_like(self).put_(index, grad, true)
 
 - name: tan(Tensor self)
   self: grad / self.cos().pow(2)
@@ -614,8 +621,9 @@
   grad_output: rrelu_backward(grad, input, lower, upper, training, false, noise)
   input: zeros_like(grad)
 
-- name: smooth_l1_loss_backward(Tensor input, Tensor target, bool size_average)
-  input: smooth_l1_loss_double_backward(grad, input, target, size_average)
+- name: smooth_l1_loss_backward(Tensor grad_output, Tensor input, Tensor target, bool size_average, bool reduce)
+  grad_output: smooth_l1_loss_double_backward_grad_output(grad, grad_output, input, target, size_average, reduce)
+  input: smooth_l1_loss_double_backward(grad * grad_output, input, target, size_average, reduce)
 
 - name: softplus_backward(Tensor grad_output, Tensor input, Scalar beta, Scalar threshold, Tensor output)
   grad_output: softplus_backward(grad, input, beta, threshold, output)

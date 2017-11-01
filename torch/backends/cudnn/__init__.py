@@ -2,6 +2,7 @@ import ctypes
 import sys
 import torch
 import warnings
+from torch.version import cuda
 from contextlib import contextmanager
 
 enabled = True  # set to False to globally disable cuDNN
@@ -81,6 +82,9 @@ CUDNN_SKIP_INPUT = 1
 CUDNN_RNN_ALGO_STANDARD = 0
 CUDNN_RNN_ALGO_PERSIST_STATIC = 1
 CUDNN_RNN_ALGO_PERSIST_DYNAMIC = 2
+
+CUDNN_DEFAULT_MATH = 0
+CUDNN_TENSOR_OP_MATH = 1
 
 
 def set_flags(_enabled, _benchmark, _deterministic, _verbose):
@@ -253,6 +257,10 @@ class RNNDescriptor(object):
                 CUDNN_RNN_ALGO_STANDARD,
                 datatype
             ))
+        if version() >= 7000 and int(cuda[0]) >= 9:
+            lib.cudnnSetRNNMatrixMathType(self, CUDNN_DEFAULT_MATH)
+            if datatype == CUDNN_DATA_HALF:
+                lib.cudnnSetRNNMatrixMathType(self, CUDNN_TENSOR_OP_MATH)
         else:
             check_error(lib.cudnnSetRNNDescriptor(
                 self,

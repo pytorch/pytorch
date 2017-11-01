@@ -27,7 +27,7 @@ from torch.nn import Parameter
 from torch.nn.parallel._functions import Broadcast
 from common_nn import NNTestCase, ModuleTest, CriterionTest, TestBase, \
     module_tests, criterion_tests, TEST_CUDA, TEST_MULTIGPU, TEST_CUDNN, \
-    TEST_CUDNN_VERSION, nllloss_reference, nllloss2d_reference
+    TEST_CUDNN_VERSION, loss_reference_fns
 from common import freeze_rng_state, run_tests, TestCase, skipIfNoLapack, \
     TEST_SCIPY, download_file
 
@@ -3664,26 +3664,16 @@ def l1loss_no_reduce_test():
         pickle=False)
 
 
-class TestMSELoss(torch.nn.modules.module.Module):
-    def __init__(self, target, *args, **kwargs):
-        super(TestMSELoss, self).__init__()
-        self.mseloss = torch.nn.MSELoss(*args, **kwargs)
-        self.target = target
-
-    def forward(self, input):
-        return self.mseloss.forward(input, self.target.type_as(input))
-
-
 def mseloss_no_reduce_test():
     input_size = (2, 3, 4, 5)
     target = torch.randn(*input_size)
     return dict(
         fullname='MSELoss_no_reduce',
-        module_name='TestMSELoss',
-        constructor=TestMSELoss,
-        constructor_args=(Variable(target, requires_grad=False), False, False),
+        constructor=wrap_functional(
+            lambda i: F.mse_loss(i, Variable(target.type_as(i.data)), reduce=False)),
         input_size=input_size,
-        reference_fn=lambda i, m: (i - target).pow(2))
+        reference_fn=lambda i, m: (i - target).pow(2),
+        pickle=False)
 
 
 def nllloss_no_reduce_test():
@@ -3695,7 +3685,7 @@ def nllloss_no_reduce_test():
             lambda i: F.nll_loss(i, t.type_as(i).long(), **kwargs)),
         input_fn=lambda: torch.rand(15, 10).log(),
         reference_fn=lambda i, _:
-            nllloss_reference(i, t.type_as(i).long(), **kwargs),
+            loss_reference_fns['NLLLoss'](i, t.type_as(i).long(), **kwargs),
         pickle=False)
 
 
@@ -3708,7 +3698,7 @@ def nllloss_no_reduce_ignore_index_test():
             lambda i: F.nll_loss(i, t.type_as(i).long(), **kwargs)),
         input_fn=lambda: torch.rand(15, 10).log(),
         reference_fn=lambda i, _:
-            nllloss_reference(i, t.type_as(i).long(), **kwargs),
+            loss_reference_fns['NLLLoss'](i, t.type_as(i).long(), **kwargs),
         pickle=False)
 
 
@@ -3725,7 +3715,7 @@ def nllloss_no_reduce_weights_test():
             lambda i: F.nll_loss(i, t.type_as(i).long(), **kwargs(i.data))),
         input_fn=lambda: torch.rand(15, 10).add(1e-2).log(),
         reference_fn=lambda i, _:
-            nllloss_reference(i, t.type_as(i).long(), **kwargs(i)),
+            loss_reference_fns['NLLLoss'](i, t.type_as(i).long(), **kwargs(i)),
         pickle=False)
 
 
@@ -3743,7 +3733,7 @@ def nllloss_no_reduce_weights_ignore_index_test():
             lambda i: F.nll_loss(i, t.type_as(i).long(), **kwargs(i.data))),
         input_fn=lambda: torch.rand(15, 10).add(1e-2).log(),
         reference_fn=lambda i, _:
-            nllloss_reference(i, t.type_as(i).long(), **kwargs(i)),
+            loss_reference_fns['NLLLoss'](i, t.type_as(i).long(), **kwargs(i)),
         pickle=False)
 
 
@@ -3761,7 +3751,7 @@ def nllloss_no_reduce_weights_ignore_index_neg_test():
             lambda i: F.nll_loss(i, t.type_as(i).long(), **kwargs(i.data))),
         input=torch.rand(15, 10).add(1e-2).log(),
         reference_fn=lambda i, _:
-            nllloss_reference(i, t.type_as(i).long(), **kwargs(i)),
+            loss_reference_fns['NLLLoss'](i, t.type_as(i).long(), **kwargs(i)),
         pickle=False)
 
 
@@ -3774,7 +3764,7 @@ def nllloss2d_no_reduce_test():
             lambda i: F.nll_loss(i, t.type_as(i).long(), **kwargs)),
         input_fn=lambda: torch.rand(2, 3, 5, 5).log(),
         reference_fn=lambda i, _:
-            nllloss2d_reference(i, t.type_as(i).long(), **kwargs),
+            loss_reference_fns['NLLLoss2d'](i, t.type_as(i).long(), **kwargs),
         pickle=False)
 
 
@@ -3787,7 +3777,7 @@ def nllloss2d_no_reduce_ignore_index_test():
             lambda i: F.nll_loss(i, t.type_as(i).long(), **kwargs)),
         input_fn=lambda: torch.rand(2, 3, 5, 5).log(),
         reference_fn=lambda i, _:
-            nllloss2d_reference(i, t.type_as(i).long(), **kwargs),
+            loss_reference_fns['NLLLoss2d'](i, t.type_as(i).long(), **kwargs),
         pickle=False)
 
 
@@ -3804,7 +3794,19 @@ def nllloss2d_no_reduce_weights_test():
             lambda i: F.nll_loss(i, t.type_as(i).long(), **kwargs(i.data))),
         input_fn=lambda: torch.rand(2, 3, 5, 5).log(),
         reference_fn=lambda i, _:
-            nllloss2d_reference(i, t.type_as(i).long(), **kwargs(i)),
+            loss_reference_fns['NLLLoss2d'](i, t.type_as(i).long(), **kwargs(i)),
+        pickle=False)
+
+
+def smoothl1loss_no_reduce_test():
+    t = Variable(torch.randn(2, 3, 4))
+    return dict(
+        fullname='SmoothL1Loss_no_reduce',
+        constructor=wrap_functional(
+            lambda i: F.smooth_l1_loss(i, t.type_as(i), reduce=False)),
+        input_fn=lambda: torch.randn(2, 3, 4),
+        reference_fn=lambda i, _:
+            loss_reference_fns['SmoothL1Loss'](i, t.data.type_as(i), reduce=False),
         pickle=False)
 
 
@@ -3819,6 +3821,7 @@ new_module_tests = [
     nllloss2d_no_reduce_test(),
     nllloss2d_no_reduce_weights_test(),
     nllloss2d_no_reduce_ignore_index_test(),
+    smoothl1loss_no_reduce_test(),
     dict(
         module_name='BatchNorm1d',
         constructor_args=(10,),

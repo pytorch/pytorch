@@ -132,6 +132,10 @@ def addmm(g, self, mat1, mat2, beta, alpha):
     return g.op("Gemm", mat1, mat2, self, beta_f=_scalar(beta), alpha_f=_scalar(alpha))
 
 
+def neg(g, self):
+    return g.op("Neg", self)
+
+
 def tanh(g, self):
     return g.op("Tanh", self)
 
@@ -255,7 +259,3 @@ def log_softmax(g, input, dim=None):
 
 def unfold(g, input, dimension, size, step):
     return g.op("ATen", input, operator_s="unfold", dimension_i=dimension, size_i=size, step_i=step)
-
-
-def expand(g, input, size):
-    return g.op("ATen", input, operator_s="expand", size_i=size)

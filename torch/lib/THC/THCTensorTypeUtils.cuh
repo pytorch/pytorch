@@ -67,7 +67,7 @@ struct TensorUtils {
     /* the same piece of data)? */                                      \
     static bool overlappingIndices(THCState* state, TENSOR_TYPE* t);    \
     /* Can we use 32 bit math for indexing? */                          \
-    static bool canUse32BitIndexMath(THCState* state, TENSOR_TYPE* t);  \
+    static bool canUse32BitIndexMath(THCState* state, TENSOR_TYPE* t, ptrdiff_t max_elem=UINT32_MAX);  \
     /* Are all tensors 32-bit indexable? */                             \
     static bool all32BitIndexable(THCState* state, TENSOR_TYPE** inputs, int numInputs); \
   }

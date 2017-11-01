@@ -33,6 +33,11 @@ def LSTMCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
     return hy, cy
 
 
+def LSTMCellC(*args, **kwargs):
+    hy, cy = LSTMCell(*args, **kwargs)
+    return torch.cat((hy, cy))
+
+
 class TestJit(TestCase):
     maxDiff = None
 
@@ -47,7 +52,6 @@ class TestJit(TestCase):
         torch._C._jit_pass_lint(trace)
         self.assertExpected(str(trace))
 
-    @unittest.skip("Fuser is broken")
     @unittest.skipIf(not torch.cuda.is_available(), "fuser requires CUDA")
     def test_lstm_fusion(self):
         input = Variable(torch.randn(3, 10).cuda())
@@ -61,7 +65,6 @@ class TestJit(TestCase):
         torch._C._jit_pass_lint(trace)
         self.assertExpected(str(trace))
 
-    @unittest.skip("Fuser is broken")
     @unittest.skipIf(not torch.cuda.is_available(), "fuser requires CUDA")
     def test_run_lstm_fusion(self):
         input = Variable(torch.randn(3, 10).cuda())
@@ -75,7 +78,33 @@ class TestJit(TestCase):
         z2 = CompiledLSTMCell(input, (hx, cx), *module.parameters(), _assert_compiled=True)
         self.assertEqual(z, z2)
 
-    @unittest.skip("Fuser is broken")
+    @unittest.skipIf(not torch.cuda.is_available(), "fuser requires CUDA")
+    def test_run_lstm_fusion_concat(self):
+        input = Variable(torch.randn(3, 10).cuda())
+        hx = Variable(torch.randn(3, 20).cuda())
+        cx = Variable(torch.randn(3, 20).cuda())
+        module = nn.LSTMCell(10, 20).cuda()  # Just to allocate weights with correct sizes
+
+        CompiledLSTMCell = torch.jit.compile(nderivs=0)(LSTMCellC)
+
+        z = CompiledLSTMCell(input, (hx, cx), *module.parameters())
+        z2 = CompiledLSTMCell(input, (hx, cx), *module.parameters(), _assert_compiled=True)
+        self.assertEqual(z, z2)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "fuser requires CUDA")
+    def test_concat_fusion(self):
+        hx = Variable(torch.randn(3, 20).cuda())
+        cx = Variable(torch.randn(3, 20).cuda())
+
+        def Foo(hx, cx):
+            return torch.cat((hx + cx, hx * cx))
+
+        trace, _ = torch.jit.trace(Foo, (hx, cx))
+        torch._C._jit_pass_lint(trace)
+        torch._C._jit_pass_fuse(trace)
+        torch._C._jit_pass_lint(trace)
+        self.assertExpected(str(trace))
+
     @unittest.skipIf(not torch.cuda.is_available(), "fuser requires CUDA")
     def test_fusion_distribute(self):
         def f(x, y):
@@ -115,6 +144,20 @@ class TestJit(TestCase):
         z = doit(x, y)
         z2 = doit(x, y, _assert_compiled=True)
         self.assertEqual(z, torch.sigmoid(torch.tanh(x * (x + y))))
+        self.assertEqual(z, z2)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "fuser requires CUDA")
+    def test_compile_addc(self):
+        x = Variable(torch.Tensor([0.4]), requires_grad=True).cuda()
+        y = Variable(torch.Tensor([0.7]), requires_grad=True).cuda()
+
+        @torch.jit.compile(nderivs=0)
+        def doit(x, y):
+            return torch.sigmoid(torch.tanh(x * (x + y) + 1))
+
+        z = doit(x, y)
+        z2 = doit(x, y, _assert_compiled=True)
+        self.assertEqual(z, torch.sigmoid(torch.tanh(x * (x + y) + 1)))
         self.assertEqual(z, z2)
 
     def test_traced_function(self):

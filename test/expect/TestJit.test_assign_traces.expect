@@ -3,6 +3,6 @@ graph(%1 : Double(10, 10)
       %4 : Double(10, 10!)) {
   %3 : Double(10, 10) = ^MyFn()(%1), uses = [[%0.i0, %5.i0]];
   ---------------- stage 1 ----------------
-  %6 : Double(10, 10) = mul(%3, %4), uses = [[%0.i1]];
-  return (%3, %6);
+  %5 : Double(10, 10) = mul(%3, %4), uses = [%0.i1];
+  return (%3, %5);
 }

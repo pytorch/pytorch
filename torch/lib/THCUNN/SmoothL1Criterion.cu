@@ -26,23 +26,63 @@ struct smoothl1_functor
 };
 
 template <typename Dtype>
+struct smoothl1_updateOutput_no_reduce_functor
+{
+  smoothl1_updateOutput_no_reduce_functor() {}
+
+  __forceinline__ __host__ __device__ void operator()(
+      const Dtype *x, 
+      const Dtype *y,
+      Dtype *out) const
+  {
+    Dtype oneHalf = ScalarConvert<float, Dtype>::to(0.5f);
+    Dtype z = THCNumerics<Dtype>::abs(*x - *y);
+    *out = z < ScalarConvert<int, Dtype>::to(1) ? oneHalf * z * z : z - oneHalf;
+  }
+};
+
+template <typename Dtype>
+struct smoothl1_updateGradInput_no_reduce_functor
+{
+  smoothl1_updateGradInput_no_reduce_functor() {}
+
+  __host__ __device__ void operator()(
+      const Dtype *x, 
+      const Dtype *y,
+      Dtype *gradInput) const
+  {
+    Dtype z = *x - *y;
+    Dtype one = ScalarConvert<int, Dtype>::to(1);
+    Dtype minusOne = ScalarConvert<int, Dtype>::to(-1);
+    if (z < minusOne) {
+      *gradInput = minusOne;
+    } else if (z > one) {
+      *gradInput = one;
+    } else {
+      *gradInput = z;
+    }
+  }
+};
+
+template <typename Dtype>
 struct smoothl1_updateGradInput_functor
 {
   const Dtype norm;
+  const Dtype gradOutput;
 
-  smoothl1_updateGradInput_functor(Dtype norm_)
-    : norm(norm_)
+  smoothl1_updateGradInput_functor(Dtype norm_, Dtype gradOutput_)
+    : norm(norm_), gradOutput(gradOutput_)
   {}
 
   __host__ __device__ Dtype operator()(const Dtype &x, const Dtype &y) const
   {
     Dtype z = x - y;
     if (z < ScalarConvert<int, Dtype>::to(-1))
-      return -norm;
+      return -norm * gradOutput;
     else if (z > ScalarConvert<int, Dtype>::to(1))
-      return norm;
+      return norm * gradOutput;
     else
-      return norm * z;
+      return norm * z * gradOutput;
   }
 };
 

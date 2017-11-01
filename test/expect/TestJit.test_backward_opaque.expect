@@ -1,10 +1,10 @@
 graph(%1 : Double(3, 3)
       %2 : Double(3, 3)
       -------- stage 1 --------
-      %5 : Double(3, 3)) {
-  %4 : Double(3, 3) = cross[dim=-1](%1, %2), uses = [[%0.i0]];
+      %4 : Double(3, 3)) {
+  %3 : Double(3, 3) = cross[dim=-1](%1, %2), uses = [%0.i0];
   ---------------- stage 1 ----------------
-  %7 : Double(3, 3) = cross[dim=-1](%2, %5), uses = [[%0.i1]];
-  %9 : Double(3, 3) = cross[dim=-1](%5, %1), uses = [[%0.i2]];
-  return (%4, %7, %9);
+  %5 : Double(3, 3) = cross[dim=-1](%2, %4), uses = [%0.i1];
+  %6 : Double(3, 3) = cross[dim=-1](%4, %1), uses = [%0.i2];
+  return (%3, %5, %6);
 }

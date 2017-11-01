@@ -10,6 +10,10 @@
 #include "THCDeviceUtils.cuh"
 #include "THCNumerics.cuh"
 #include "THCAtomics.cuh"
+#include "THCThrustAllocator.cuh"
+#include "THCTensorSort.cuh"
+#include <thrust/device_ptr.h>
+#include <thrust/sort.h>
 #include <algorithm> // for std::min
 
 // We prefer this kernel to avoid reloading index points if the number
@@ -396,6 +400,111 @@ __global__ void calculateLinearIndices(
          i += blockDim.x * gridDim.x) {
       output[i] = baseOffset + calculateOffset<IndexType, Dims>(i, data);
    }
+}
+
+template <int Dims, typename T, typename IndexType>
+__device__ __forceinline__ IndexType indexToOffset(
+    const TensorInfo<T, IndexType>& info,
+    int64_t index,
+    IndexType size)
+{
+  IndexType linearIndex = static_cast<IndexType>(index);
+  assert(linearIndex < size && linearIndex >= -size);
+  if (linearIndex < 0) {
+    linearIndex += size;
+  }
+  return IndexToOffset<T, IndexType, Dims>::get(linearIndex, info) - TH_INDEX_BASE;
+}
+
+struct WrapIndexOp {
+  WrapIndexOp(int64_t size) : size(size) {}
+
+  __device__ __forceinline__ void operator()(int64_t* out, int64_t* in) {
+    auto idx = *in;
+    assert(idx < size && idx >= -size);
+    *out = idx < 0 ? idx + size : idx;
+  }
+
+  int64_t size;
+};
+
+template <typename T, typename IndexType, int Dims>
+struct TensorTakeOp {
+  TensorTakeOp(TensorInfo<T, IndexType> info, IndexType numel, int64_t*, int64_t*)
+    : info(info), numel(numel) {}
+
+  __device__ __forceinline__ void operator()(T* out, int64_t* index) {
+    auto offset = indexToOffset<Dims>(info, *index, numel);
+    *out = info.data[offset];
+  }
+
+  const TensorInfo<T, IndexType> info;
+  IndexType numel;
+};
+
+template <typename T, typename IndexType, int Dims>
+struct TensorPutOp {
+  TensorPutOp(TensorInfo<T, IndexType> info, IndexType numel, int64_t*, int64_t*)
+    : info(info), numel(numel) {}
+
+  __device__ __forceinline__ void operator()(T* value, int64_t* index) {
+    auto offset = indexToOffset<Dims>(info, *index, numel);
+    info.data[offset] = *value;
+  }
+
+  const TensorInfo<T, IndexType> info;
+  IndexType numel;
+};
+
+template <typename T, typename IndexType, int Dims>
+struct TensorPutAccumulateOp {
+  TensorPutAccumulateOp(TensorInfo<T, IndexType> info, IndexType numel, int64_t* start, int64_t* end)
+    : info(info), numel(numel), start(start), end(end) {}
+
+  __device__ __forceinline__ void operator()(T* value, int64_t* index) {
+    if (index == start || *index != *(index - 1)) {
+      int64_t linear_index = *index;
+      auto offset = indexToOffset<Dims>(info, linear_index, numel);
+      do {
+        info.data[offset] = THCNumerics<T>::add(info.data[offset], *value);
+        index++;
+        value++;
+      } while (index != end && *index == linear_index);
+    }
+  }
+
+  const TensorInfo<T, IndexType> info;
+  IndexType numel;
+  int64_t* start;
+  int64_t* end;
+};
+
+
+template<typename IndexType, typename real, template<class, class, int> class Op, typename TensorType>
+void dispatchTakePutImpl(THCState *state, TensorType *a, TensorType *b, THCudaLongTensor *index) {
+  // These are only valid if index is contiguous
+  auto start = THCudaLongTensor_data(state, index);
+  auto end = start + THCudaLongTensor_numel(state, index);
+
+  auto aInfo = getTensorInfo<TensorType, IndexType>(state, a);
+  aInfo.collapseDims();
+  auto numel = TensorUtils<TensorType>::getNumElements(state, a);
+  if (aInfo.isContiguous()) {
+    auto op = Op<real, IndexType, -2>(aInfo, numel, start, end);
+    THC_pointwiseApply2(state, b, index, op);
+  } else {
+    auto op = Op<real, IndexType, -1>(aInfo, numel, start, end);
+    THC_pointwiseApply2(state, b, index, op);
+  }
+}
+
+template<typename real, template<class, class, int> class Op, typename TensorType>
+void dispatchTakePut(THCState *state, TensorType *a, TensorType *b, THCudaLongTensor *index) {
+  if (TensorUtils<TensorType>::canUse32BitIndexMath(state, a, INT_MAX)) {
+    dispatchTakePutImpl<int32_t, real, Op>(state, a, b, index);
+  } else {
+    dispatchTakePutImpl<int64_t, real, Op>(state, a, b, index);
+  }
 }
 
 #include "generic/THCTensorIndex.cu"

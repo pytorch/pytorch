@@ -219,9 +219,10 @@ TensorUtils<TENSOR_TYPE>::overlappingIndices(THCState* state,           \
                                                                         \
 bool                                                                    \
 TensorUtils<TENSOR_TYPE>::canUse32BitIndexMath(THCState* state,         \
-                                               TENSOR_TYPE* t) {        \
+                                               TENSOR_TYPE* t,          \
+                                               ptrdiff_t max_elem) {    \
   ptrdiff_t elements = TensorUtils<TENSOR_TYPE>::getNumElements(state, t);   \
-  if (elements >= UINT_MAX) {                                           \
+  if (elements >= max_elem) {                                           \
     return false;                                                       \
   }                                                                     \
                                                                         \
@@ -237,7 +238,7 @@ TensorUtils<TENSOR_TYPE>::canUse32BitIndexMath(THCState* state,         \
     linearId /= TensorUtils<TENSOR_TYPE>::getSize(state, t, i);         \
   }                                                                     \
                                                                         \
-  if (offset >= UINT_MAX) {                                             \
+  if (offset >= max_elem) {                                             \
     return false;                                                       \
   }                                                                     \
                                                                         \

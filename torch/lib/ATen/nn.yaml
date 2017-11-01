@@ -27,7 +27,7 @@
   cname: SpatialClassNLLCriterion
   buffers: [total_weight]
 
-- name: smooth_l1_loss(Tensor input, Tensor target, bool size_average=true)
+- name: smooth_l1_loss(Tensor input, Tensor target, bool size_average=true, bool reduce=true)
   cname: SmoothL1Criterion
 
 - name: soft_margin_loss(Tensor input, Tensor target, bool size_average=true)

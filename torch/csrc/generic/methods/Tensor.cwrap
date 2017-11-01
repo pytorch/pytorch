@@ -636,7 +636,33 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
     - THIndexTensor* index
     - THTensor* source
 ]]
-
+[[
+  name: take
+  cname: take
+  variants:
+    - method
+    - function
+  return: argument 0
+  arguments:
+    - arg: THTensor* result
+      output: True
+    - THTensor* self
+    - THIndexTensor* index
+]]
+[[
+  name: put_
+  cname: put
+  backends:
+    - CPU
+    - CUDA
+  return: argument 0
+  arguments:
+    - THTensor* self
+    - THIndexTensor* index
+    - THTensor* source
+    - arg: bool accumulate
+      default: "false"
+]]
 [[
   name: indexAdd_
   python_name: index_add_
