@@ -15,6 +15,8 @@ TH_API void THTensor_(indexSelect)(THTensor *tensor, THTensor *src, int dim, THL
 TH_API void THTensor_(indexCopy)(THTensor *tensor, int dim, THLongTensor *index, THTensor *src);
 TH_API void THTensor_(indexAdd)(THTensor *tensor, int dim, THLongTensor *index, THTensor *src);
 TH_API void THTensor_(indexFill)(THTensor *tensor, int dim, THLongTensor *index, real val);
+TH_API void THTensor_(take)(THTensor *tensor, THTensor *src, THLongTensor *index);
+TH_API void THTensor_(put)(THTensor *tensor, THLongTensor *index, THTensor *src, int accumulate);
 
 TH_API void THTensor_(gather)(THTensor *tensor, THTensor *src, int dim, THLongTensor *index);
 TH_API void THTensor_(scatter)(THTensor *tensor, int dim, THLongTensor *index, THTensor *src);

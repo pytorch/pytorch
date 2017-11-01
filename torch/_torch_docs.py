@@ -4405,6 +4405,28 @@ Example::
 
 """)
 
+add_docstr(torch._C.take, """\
+take(input, indices) -> Tensor
+
+Returns a new `Tensor` with the elements of :attr:`input` at the given indices.
+The input tensor is treated as if it were viewed as a 1D tensor. The result
+takes the same shape as the indices.
+
+Args:
+    input (Tensor): the input `Tensor`
+    indices (LongTensor): the indices into `Tensor`
+
+Example::
+
+    >>> src = torch.Tensor([[4, 3, 5],
+    ...                     [6, 7, 8]])
+    >>> torch.take(src, torch.LongTensor([0, 2, 5]))
+     4
+     5
+     8
+    [torch.FloatTensor of size 3]
+""")
+
 add_docstr(torch._C.tan,
            """
 tan(input, out=None) -> Tensor

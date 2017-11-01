@@ -128,6 +128,10 @@ def large_2d_lapack(t):
     return t(1000, 1000).normal_()
 
 
+def long_type(t):
+    return torch.cuda.LongTensor if 'cuda' in t.__module__ else torch.LongTensor
+
+
 def new_t(*sizes):
     def tmp(t):
         return t(*sizes).copy_(torch.randn(*sizes))
@@ -249,6 +253,8 @@ tests = [
     ('norm', small_3d, lambda t: [3, -2], '3_norm_neg_dim'),
     ('ones', small_3d, lambda t: [1, 2, 3, 4, 5],),
     ('permute', new_t(1, 2, 3, 4), lambda t: [2, 1, 3, 0],),
+    ('put_', new_t(2, 5, 3), lambda t: [long_type(t)([[0], [-2]]), t([[3], [4]])],),
+    ('put_', new_t(2, 2), lambda t: [long_type(t)([[1], [-3]]), t([[1], [2]]), True], 'accumulate'),
     ('prod', small_2d_oneish, lambda t: [],),
     ('prod', small_3d, lambda t: [1], 'dim'),
     ('prod', small_3d, lambda t: [-1], 'neg_dim'),
@@ -274,6 +280,7 @@ tests = [
     ('squeeze', new_t(1, 2, 1, 4), lambda t: [2], 'dim'),
     ('squeeze', new_t(1, 2, 1, 4), lambda t: [-2], 'neg_dim'),
     ('t', new_t(1, 2), lambda t: [],),
+    ('take', new_t(3, 4), lambda t: [long_type(t)([[0], [-2]])],),
     ('transpose', new_t(1, 2, 3, 4), lambda t: [1, 2],),
     ('transpose', new_t(1, 2, 3, 4), lambda t: [-1, -2], 'neg_dim'),
     ('to_list', small_3d, lambda t: [],),

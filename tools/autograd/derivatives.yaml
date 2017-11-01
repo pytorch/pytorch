@@ -390,6 +390,10 @@
 - name: pstrf(Tensor self, bool upper, Scalar tol)
   self: not_implemented("pstrf")
 
+- name: put(Tensor self, Tensor index, Tensor source, bool accumulate)
+  self: zeros_like(self).put_(index, source, accumulate)
+  source: grad.take(index)
+
 - name: qr(Tensor self)
   self: not_implemented("qr")
 
@@ -489,6 +493,9 @@
 - name: t(Tensor self)
   self: grad.t()
   __view__: True
+
+- name: take(Tensor self, Tensor index)
+  self: zeros_like(self).put_(index, grad, true)
 
 - name: tan(Tensor self)
   self: grad / self.cos().pow(2)

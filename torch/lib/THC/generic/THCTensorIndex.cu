@@ -130,6 +130,68 @@ void THCTensor_(indexCopy)(THCState *state, THCTensor *dst, int dim, THCudaLongT
 #undef LARGE_INDEX
 }
 
+void THCTensor_(take)(THCState *state, THCTensor *dst, THCTensor *src, THCudaLongTensor *index)
+{
+  THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, dst, src));
+  THCAssertSameGPU(THCudaLongTensor_checkGPU(state, 1, index));
+
+  THArgCheck(THCTensor_(nDimension)(state, src) <= MAX_CUTORCH_DIMS, 2, CUTORCH_DIM_WARNING);
+  THArgCheck(THCTensor_(nDimension)(state, dst) <= MAX_CUTORCH_DIMS, 2, CUTORCH_DIM_WARNING);
+  THArgCheck(THCudaLongTensor_nDimension(state, index) <= MAX_CUTORCH_DIMS, 2, CUTORCH_DIM_WARNING);
+
+  THCTensor_(resizeNd)(state, dst, index->nDimension, index->size, NULL);
+
+  dispatchTakePut<real, TensorTakeOp>(state, src, dst, index);
+}
+
+static void THCTensor_(sort_indices)(THCState *state, THCudaLongTensor *index, THCTensor *src) {
+  THCThrustAllocator thrustAlloc(state);
+
+  auto index_iter = thrust::device_ptr<int64_t>(THCudaLongTensor_data(state, index));
+  auto src_iter = thrust::device_ptr<real>(THCTensor_(data)(state, src));
+  auto numel = THCTensor_(numel)(state, src);
+
+  thrust::sort_by_key(
+    thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
+    index_iter, index_iter + numel,
+    src_iter, ThrustLTOp<int64_t>());
+}
+
+void THCTensor_(put)(THCState *state, THCTensor *dst, THCudaLongTensor *index, THCTensor *src, int accumulate)
+{
+  THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, dst, src));
+  THCAssertSameGPU(THCudaLongTensor_checkGPU(state, 1, index));
+
+  ptrdiff_t dstSize = THCTensor_(nElement)(state, dst);
+  ptrdiff_t numIndices = THCudaLongTensor_nElement(state, index);
+  THArgCheck(THCTensor_(nElement)(state, src) == numIndices,
+    3, "src should have the same number of elements as index");
+
+  THArgCheck(THCTensor_(nDimension)(state, dst) <= MAX_CUTORCH_DIMS, 2, CUTORCH_DIM_WARNING);
+  THArgCheck(THCTensor_(nDimension)(state, src) <= MAX_CUTORCH_DIMS, 2, CUTORCH_DIM_WARNING);
+  THArgCheck(THCudaLongTensor_nDimension(state, index) <= MAX_CUTORCH_DIMS, 2, CUTORCH_DIM_WARNING);
+
+  int srcDims = THCTensor_(nDimension)(state, src);
+  THArgCheck(srcDims > 0, 2, "Source tensor is empty");
+
+  if (accumulate) {
+    // wrap indices so to replace negative indices
+    THCudaLongTensor* sorted_index = THCudaLongTensor_new(state);
+    THCudaLongTensor_resizeAs(state, sorted_index, index);
+    THC_pointwiseApply2(state, sorted_index, index, WrapIndexOp(dstSize));
+
+    THCTensor* sorted_src = THCTensor_(newClone)(state, src);
+
+    THCTensor_(sort_indices)(state, sorted_index, sorted_src);
+    dispatchTakePut<real, TensorPutAccumulateOp>(state, dst, src, index);
+
+    THCTensor_(free)(state, sorted_src);
+    THCudaLongTensor_free(state, sorted_index);
+  } else {
+    dispatchTakePut<real, TensorPutOp>(state, dst, src, index);
+  }
+}
+
 void THCTensor_(indexAdd_long)(THCState *state, THCTensor *dst, int dim, THLongTensor *indices, THCTensor *src)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, dst, src));

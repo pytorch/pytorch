@@ -329,6 +329,7 @@ IMPLEMENT_STATELESS(zeros_like)
 IMPLEMENT_STATELESS(ones)
 IMPLEMENT_STATELESS(ones_like)
 IMPLEMENT_STATELESS(index_select)
+IMPLEMENT_STATELESS(take)
 IMPLEMENT_STATELESS(ger)
 IMPLEMENT_STATELESS(mv)
 IMPLEMENT_STATELESS(mm)
@@ -678,6 +679,7 @@ static PyMethodDef TorchMethods[] = {
   {"ones",            (PyCFunction)THPModule_ones,              METH_VARARGS | METH_KEYWORDS, NULL},
   {"ones_like",       (PyCFunction)THPModule_ones_like,         METH_VARARGS | METH_KEYWORDS, NULL},
   {"index_select",    (PyCFunction)THPModule_index_select,      METH_VARARGS | METH_KEYWORDS, NULL},
+  {"take",            (PyCFunction)THPModule_take,              METH_VARARGS | METH_KEYWORDS, NULL},
   {"addmm",           (PyCFunction)THPModule_addmm,             METH_VARARGS | METH_KEYWORDS, NULL},
   {"addmv",           (PyCFunction)THPModule_addmv,             METH_VARARGS | METH_KEYWORDS, NULL},
   {"addr",            (PyCFunction)THPModule_addr,              METH_VARARGS | METH_KEYWORDS, NULL},
