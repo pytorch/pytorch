@@ -59,21 +59,19 @@ Then, you can run::
 
     import onnx
 
-    graph = onnx.load("alexnet.proto")
+    # Load the ONNX model
+    model = onnx.load("alexnet.proto")
 
     # Check that the IR is well formed
-    onnx.checker.check_graph(graph)
+    onnx.checker.check_model(model)
 
     # Print a human readable representation of the graph
-    onnx.helper.printable_graph(graph)
+    onnx.helper.printable_graph(model.graph)
 
 To run the exported script with `caffe2 <https://caffe2.ai/>`_, you will need three things:
 
-1. You'll need an install of Caffe2.  If you don't have one already,
-   you should make sure you have a Python 2 interpreter (Caffe2
-   doesn't officially support Python 3) and
-   `follow the install instructions <https://caffe2.ai/docs/getting-started.html>`_
-   (no Conda packaging for Caffe2 is available at the moment).
+1. You'll need an install of Caffe2.  If you don't have one already, Please
+   `follow the install instructions <https://caffe2.ai/docs/getting-started.html>`_.
 
 2. You'll need `onnx-caffe2 <https://github.com/onnx/onnx-caffe2>`_, a
    pure-Python library which provides a Caffe2 backend for ONNX.  You can install ``onnx-caffe2``
@@ -89,7 +87,7 @@ Once these are installed, you can use the backend for Caffe2::
     import onnx_caffe2.backend as backend
     import numpy as np
 
-    rep = backend.prepare(graph, device="CUDA:0") # or "CPU"
+    rep = backend.prepare(model, device="CUDA:0") # or "CPU"
     # For the Caffe2 backend:
     #     rep.predict_net is the Caffe2 protobuf for the network
     #     rep.workspace is the Caffe2 workspace for the network
