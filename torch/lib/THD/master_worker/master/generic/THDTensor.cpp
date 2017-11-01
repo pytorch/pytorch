@@ -75,7 +75,7 @@ void THDTensor_(clearFlag)(THDTensor *self, char flag) {
 
 THDTensor *THDTensor_(new)() {
   THDTensor *tensor = THDTensor_(_alloc)();
-  thpp::Type constructed_type = thpp::type_traits<real>::type;
+  RPCType constructed_type = type_traits<real>::type;
   masterCommandChannel->sendMessage(
     packMessage(
       Functions::tensorNew,
@@ -97,7 +97,7 @@ THDTensor *THDTensor_(newWithTensor)(THDTensor *self) {
     self->size,
     self->stride
   );
-  thpp::Type constructed_type = thpp::type_traits<real>::type;
+  RPCType constructed_type = type_traits<real>::type;
   masterCommandChannel->sendMessage(
     packMessage(
       Functions::tensorNewWithTensor,
@@ -115,7 +115,7 @@ THDTensor *THDTensor_(newWithSize)(THLongStorage *size, THLongStorage *stride) {
   if (size && stride)
     THArgCheck(size->size == stride->size, 4, "inconsistent size");
   THDTensor_(_resize)(tensor, size->size, size->data, stride ? stride->data : nullptr);
-  thpp::Type constructed_type = thpp::type_traits<real>::type;
+  RPCType constructed_type = type_traits<real>::type;
   masterCommandChannel->sendMessage(
     packMessage(
       Functions::tensorNewWithSize,
@@ -169,7 +169,7 @@ THDTensor *THDTensor_(newWithStorage)(THDStorage *storage, ptrdiff_t storageOffs
     (size ? size->data : nullptr),
     (stride ? stride->data : nullptr)
   );
-  thpp::Type constructed_type = thpp::type_traits<real>::type;
+  RPCType constructed_type = type_traits<real>::type;
   masterCommandChannel->sendMessage(
     packMessage(
       Functions::tensorNewWithStorage,

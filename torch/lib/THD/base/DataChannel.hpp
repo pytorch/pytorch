@@ -5,6 +5,7 @@
 #include "DataChannel.h"
 #include "Scalar.hpp"
 #include "init_methods/InitMethod.hpp"
+#include "../master_worker/common/RPCType.hpp"
 
 #include <ATen/ATen.h>
 
@@ -14,7 +15,7 @@
 
 
 MAKE_HASHABLE(THDReduceOp, static_cast<int>(t));
-MAKE_HASHABLE(thpp::Type, static_cast<char>(t));
+MAKE_HASHABLE(thd::RPCType, static_cast<char>(t));
 MAKE_HASHABLE(at::ScalarType, static_cast<int>(t));
 
 

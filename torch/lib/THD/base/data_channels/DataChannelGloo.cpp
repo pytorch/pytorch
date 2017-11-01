@@ -31,17 +31,6 @@
   switch (type) {                                                             \
     case ::at::ScalarType::Float: func<float>(args); break;                   \
     case ::at::ScalarType::Double: func<double>(args); break;                 \
-    /* case ::thpp::Type::CHAR: func<int8_t>(args); break; */                   \
-    /* case ::thpp::Type::UCHAR: func<uint8_t>(args); break; */         \
-    /* case ::thpp::Type::HALF: func<float>(args); break; */                  \
-    /* case ::thpp::Type::SHORT: func<int16_t>(args); break; */                 \
-    /* case ::thpp::Type::USHORT: func<uint16_t>(args); break; */       \
-    /* case ::thpp::Type::INT: func<int32_t>(args); break; */                     \
-    /* case ::thpp::Type::UINT: func<uint32_t>(args); break; */           \
-    /* case ::thpp::Type::LONG: func<int64_t>(args); break; */                   \
-    /* case ::thpp::Type::ULONG: func<uint64_t>(args); break; */         \
-    /* case ::thpp::Type::LONG_LONG: func<int64_t>(args); break; */         \
-    /* case ::thpp::Type::ULONG_LONG: func<uint64_t>(args); break; */ \
     default:                                                                  \
       throw std::runtime_error("Invalid " + std::string(#func) + " function type"); \
   }
