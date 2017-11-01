@@ -270,7 +270,7 @@ class build_ext(setuptools.command.build_ext.build_ext):
             'torch/lib/tmp_install/share/ATen/Declarations.yaml',
             autograd_gen_dir)
         gen_jit_dispatch(
-            'torch/lib/build/ATen/ATen/Declarations.yaml',
+            'torch/lib/tmp_install/share/ATen/Declarations.yaml',
             jit_gen_dir)
 
         # It's an old-style class in Python 2.7...
