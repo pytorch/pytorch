@@ -199,13 +199,15 @@ class PoissonNLLLoss(_Loss):
     Args:
         log_input (bool, optional): if True the loss is computed as
             `exp(input) - target * input`, if False the loss is
-            `input - target * log(input)`.
+            `input - target * log(input+eps)`.
         full (bool, optional): whether to compute full loss, i. e. to add the
             Stirling approximation term
             `target * log(target) - target + 0.5 * log(2 * pi * target)`.
         size_average (bool, optional): By default, the losses are averaged over
             observations for each minibatch. However, if the field size_average
             is set to False, the losses are instead summed for each minibatch.
+        eps (float, optional): Small value to avoid evaluation of log(0) when
+            log_input=False. Default: 1e-8
 
     Examples::
 
@@ -215,15 +217,16 @@ class PoissonNLLLoss(_Loss):
         >>> output = loss(log_input, target)
         >>> output.backward()
     """
-    def __init__(self, log_input=True, full=False, size_average=True):
+    def __init__(self, log_input=True, full=False, size_average=True, eps=1e-8):
         super(PoissonNLLLoss, self).__init__()
         self.log_input = log_input
         self.full = full
         self.size_average = size_average
+        self.eps = eps
 
     def forward(self, log_input, target):
         _assert_no_grad(target)
-        return F.poisson_nll_loss(log_input, target, self.log_input, self.full, self.size_average)
+        return F.poisson_nll_loss(log_input, target, self.log_input, self.full, self.size_average, self.eps)
 
 
 class KLDivLoss(_Loss):

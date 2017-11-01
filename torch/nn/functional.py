@@ -1053,7 +1053,7 @@ def nll_loss(input, target, weight=None, size_average=True, ignore_index=-100, r
         raise ValueError('Expected 2 or 4 dimensions (got {})'.format(dim))
 
 
-def poisson_nll_loss(input, target, log_input=True, full=False, size_average=True):
+def poisson_nll_loss(input, target, log_input=True, full=False, size_average=True, eps=1e-8):
     r"""Poisson negative log likelihood loss.
 
     See :class:`~torch.nn.PoissonNLLLoss` for details.
@@ -1063,18 +1063,20 @@ def poisson_nll_loss(input, target, log_input=True, full=False, size_average=Tru
         target: random sample :math:`target \sim Pois(input)`.
         log_input: if True the loss is computed as
             `exp(input) - target * input`, if False then loss is
-            `input - target * log(input)`. Default: True
+            `input - target * log(input+eps)`. Default: True
         full: whether to compute full loss, i. e. to add the Stirling
             approximation term. Default: False
             `target * log(target) - target + 0.5 * log(2 * pi * target)`.
         size_average: By default, the losses are averaged over observations for
             each minibatch. However, if the field sizeAverage is set to False,
             the losses are instead summed for each minibatch. Default: True
+        eps (float, optional): Small value to avoid evaluation of log(0) when
+            log_input=False. Default: 1e-8
     """
     if log_input:
         loss = torch.exp(input) - target * input
     else:
-        loss = input - target * torch.log(input)
+        loss = input - target * torch.log(input + eps)
     if full:
         mask = target > 1
         loss[mask] += (target * torch.log(target) - target + 0.5 * torch.log(2 * math.pi * target))[mask]
