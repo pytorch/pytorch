@@ -19,11 +19,11 @@
   cname: MultiLabelMarginCriterion
   buffers: [is_target]
 
-- name: nll_loss(Tensor input, LongTensor target, Tensor weight={}, bool size_average=true, int64_t ignore_index=-100)
+- name: nll_loss(Tensor input, LongTensor target, Tensor weight={}, bool size_average=true, int64_t ignore_index=-100, bool reduce=True)
   cname: ClassNLLCriterion
   buffers: [total_weight]
 
-- name: nll_loss2d(Tensor input, LongTensor target, Tensor weight={}, bool size_average=true, int64_t ignore_index=-100)
+- name: nll_loss2d(Tensor input, LongTensor target, Tensor weight={}, bool size_average=true, int64_t ignore_index=-100, bool reduce=True)
   cname: SpatialClassNLLCriterion
   buffers: [total_weight]
 
