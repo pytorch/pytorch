@@ -746,7 +746,7 @@ def softmax(input, dim=None, _stacklevel=3):
 
     Softmax is defined as:
 
-    :math:`softmax(x) = \frac{exp(-x_i)}{\sum_j exp(-x_j)}`
+    :math:`softmax(x) = \frac{exp(x_i)}{\sum_j exp(x_j)}`
 
     It is applied to all slices along dim, and will rescale them so that the elements
     lie in the range `(0, 1)` and sum to 1.
