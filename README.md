@@ -163,6 +163,8 @@ If you want to compile with CUDA support, install
 
 If you want to disable CUDA support, export environment variable `NO_CUDA=1`.
 
+if you want to disable AVX2/FMA CPU extensions (to provide a build that runs on older processor), export environment variable `NO_AVX2=1`.
+
 #### Install optional dependencies
 
 On Linux
