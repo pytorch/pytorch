@@ -6,6 +6,7 @@ import sys
 import traceback
 import threading
 from torch._six import string_classes
+import numpy as np
 
 
 if sys.version_info[0] == 2:
@@ -81,6 +82,8 @@ numpy_type_map = {
 
 def default_collate(batch):
     "Puts each data field into a tensor with outer dimension batch size"
+
+    error_msg = "batch must contain tensors, numbers, dicts or lists; found {}"
     elem_type = type(batch[0])
     if torch.is_tensor(batch[0]):
         out = None
@@ -94,6 +97,8 @@ def default_collate(batch):
     elif elem_type.__module__ == 'numpy' and elem_type.__name__ != 'str_':
         elem = batch[0]
         if elem_type.__name__ == 'ndarray':
+            if not np.issubdtype(elem.dtype, np.number):
+                raise TypeError(error_msg.format(elem.dtype))
             return torch.stack([torch.from_numpy(b) for b in batch], 0)
         if elem.shape == ():  # scalars
             py_type = float if elem.dtype.name.startswith('float') else int
@@ -110,8 +115,7 @@ def default_collate(batch):
         transposed = zip(*batch)
         return [default_collate(samples) for samples in transposed]
 
-    raise TypeError(("batch must contain tensors, numbers, dicts or lists; found {}"
-                     .format(type(batch[0]))))
+    raise TypeError((error_msg.format(type(batch[0]))))
 
 
 def pin_memory_batch(batch):
