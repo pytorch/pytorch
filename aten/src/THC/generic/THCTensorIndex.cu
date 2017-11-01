@@ -437,7 +437,7 @@ void THCTensor_(indexFill)(THCState *state, THCTensor *dst, int dim, THCudaLongT
 void THCTensor_(indexSelect_long)(THCState *state, THCTensor *dst, THCTensor *src, int dim, THLongTensor *indices)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, dst, src));
-  THArgCheck(indices->nDimension == 1, 3, "Index is supposed to be a vector");
+  THArgCheck(indices->nDimension <= 1, 3, "Index is supposed to be an empty tensor or a vector");
 
   THCudaLongTensor *indices_ = THCudaLongTensor_newWithSize1d(state, indices->size[0]);
   THCudaLongTensor_copyLong(state, indices_, indices);
@@ -463,12 +463,22 @@ void THCTensor_(indexSelect)(THCState *state, THCTensor *dst, THCTensor *src, in
   int srcDims = THCTensor_(nDimension)(state, src);
   cudaStream_t stream = THCState_getCurrentStream(state);
 
-  THArgCheck(THCudaLongTensor_nDimension(state, indices) == 1, 3,
-             "expecting vector of indices");
+  THArgCheck(THCudaLongTensor_nDimension(state, indices) <= 1, 3,
+             "Index is supposed to be an empty tensor or a vector");
   THArgCheck(dim < srcDims, 4, "Indexing dim is out of bounds");
   THArgCheck(srcDims > 0, 2, "Source tensor is empty");
 
-  THLongStorage *newSize = THCTensor_(newSizeOf)(state, src);
+  THLongStorage *newSize;
+
+  if (numIndices == 0) {
+    newSize = THCTensor_(newSizeOf)(state, src);
+    THLongStorage_set(newSize, 0, numIndices);
+    THCTensor_(resize)(state, dst, newSize, NULL);
+    THLongStorage_free(newSize);
+    return;
+  }
+
+  newSize = THCTensor_(newSizeOf)(state, src);
   THLongStorage_set(newSize, dim, numIndices);
   THCTensor_(resize)(state, dst, newSize, NULL);
   THLongStorage_free(newSize);
