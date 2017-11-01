@@ -28,7 +28,7 @@ ${return_type} VariableType::${method_prefix}${api_name}(${formals}) const {
 """)
 
 METHOD_DEFINITION_NYI = CodeTemplate("""\
-throw std::runtime_error("${api_name}: NYI");""")
+throw std::runtime_error("VariableType::${api_name} NYI");""")
 
 BASE_CALL = CodeTemplate("""\
 baseType->${method_prefix}${base_name}(${unpacked_args})""")
