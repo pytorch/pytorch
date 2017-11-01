@@ -3643,6 +3643,7 @@ class TestTorch(TestCase):
         self.assertEqual(tensor.std(), tensor.std(unbiased=True))
         self.assertEqual(tensor.std(unbiased=False), tensor.std(0, unbiased=False)[0])
 
+    @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
     def test_unbiased_cuda(self):
         tensor = torch.randn(100).cuda()
         self.assertEqual(tensor.var(0), tensor.var(0, unbiased=True))
@@ -3658,6 +3659,7 @@ class TestTorch(TestCase):
         self.assertEqual(tensor.std(), tensor.std(unbiased=True))
         self.assertEqual(tensor.std(unbiased=False), tensor.std(0, unbiased=False)[0])
 
+    @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
     def test_variance_large_input_cuda(self):
         # Large, not-nice input
         tensor_cpu = torch.randn(2 * 32 * 1024 + 1, 2, 67)
