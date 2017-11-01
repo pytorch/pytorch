@@ -367,6 +367,7 @@
 
 - name: permute(Tensor self, IntList dims)
   self: permute_backwards(grad, dims)
+  __view__: True
 
 - name: potrf(Tensor self, bool upper)
   self: potrf_backward(grad, upper, output)
@@ -435,6 +436,7 @@
 
 - name: select(Tensor self, int64_t dim, int64_t sliceIndex)
   self: maybe_unsqueeze(grad, dim, self.size(dim))._unnarrow(dim, sliceIndex, self.size(dim))
+  __view__: True
 
 - name: set  # fallthrough
 
