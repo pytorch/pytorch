@@ -598,7 +598,7 @@ if WITH_CUDA:
                         language='c++',
                         include_dirs=include_dirs,
                         library_dirs=library_dirs + [cuda_lib_path + '/stubs'],
-                        extra_link_args=extra_link_args + [make_relative_rpath('lib')],
+                        extra_link_args=['-Wl,--no-as-needed'] + extra_link_args + [make_relative_rpath('lib')],
                         )
     extensions.append(THNVRTC)
 
