@@ -1,60 +1,60 @@
 template<typename... Ts>
-static at::Tensor createTensor(thpp::Type type, Ts &... args) {
-  if (type == thpp::Type::UCHAR)
+static at::Tensor createTensor(RPCType type, Ts &... args) {
+  if (type == RPCType::UCHAR)
     return at::CPU(at::kByte).tensor(std::forward<Ts>(args)...);
-  else if (type == thpp::Type::CHAR)
+  else if (type == RPCType::CHAR)
     return at::CPU(at::kChar).tensor(std::forward<Ts>(args)...);
-  else if (type == thpp::Type::SHORT)
+  else if (type == RPCType::SHORT)
     return at::CPU(at::kShort).tensor(std::forward<Ts>(args)...);
-  else if (type == thpp::Type::INT)
+  else if (type == RPCType::INT)
     return at::CPU(at::kInt).tensor(std::forward<Ts>(args)...);
-  else if (type == thpp::Type::LONG)
+  else if (type == RPCType::LONG)
     return at::CPU(at::kLong).tensor(std::forward<Ts>(args)...);
-  else if (type == thpp::Type::FLOAT)
+  else if (type == RPCType::FLOAT)
     return at::CPU(at::kFloat).tensor(std::forward<Ts>(args)...);
-  else if (type == thpp::Type::DOUBLE)
+  else if (type == RPCType::DOUBLE)
     return at::CPU(at::kDouble).tensor(std::forward<Ts>(args)...);
   throw std::invalid_argument("passed character doesn't represent a tensor type");
 }
 
-static at::Tensor createTensorWithStorage(thpp::Type type, at::Storage* storage, ptrdiff_t storageOffset, at::IntList size, at::IntList stride) {
-  if (type == thpp::Type::UCHAR)
+static at::Tensor createTensorWithStorage(RPCType type, at::Storage* storage, ptrdiff_t storageOffset, at::IntList size, at::IntList stride) {
+  if (type == RPCType::UCHAR)
     return at::CPU(at::kByte).tensor(*storage, storageOffset, size, stride);
-  else if (type == thpp::Type::CHAR)
+  else if (type == RPCType::CHAR)
     return at::CPU(at::kChar).tensor(*storage, storageOffset, size, stride);
-  else if (type == thpp::Type::SHORT)
+  else if (type == RPCType::SHORT)
     return at::CPU(at::kShort).tensor(*storage, storageOffset, size, stride);
-  else if (type == thpp::Type::INT)
+  else if (type == RPCType::INT)
     return at::CPU(at::kInt).tensor(*storage, storageOffset, size, stride);
-  else if (type == thpp::Type::LONG)
+  else if (type == RPCType::LONG)
     return at::CPU(at::kLong).tensor(*storage, storageOffset, size, stride);
-  else if (type == thpp::Type::FLOAT)
+  else if (type == RPCType::FLOAT)
     return at::CPU(at::kFloat).tensor(*storage, storageOffset, size, stride);
-  else if (type == thpp::Type::DOUBLE)
+  else if (type == RPCType::DOUBLE)
     return at::CPU(at::kDouble).tensor(*storage, storageOffset, size, stride);
   throw std::invalid_argument("passed character doesn't represent a tensor type");
 }
 
-static at::Tensor createTensorWithTensor(thpp::Type type, at::Tensor& tensor) {
-  if (type == thpp::Type::UCHAR)
+static at::Tensor createTensorWithTensor(RPCType type, at::Tensor& tensor) {
+  if (type == RPCType::UCHAR)
     return at::CPU(at::kByte).alias(tensor);
-  else if (type == thpp::Type::CHAR)
+  else if (type == RPCType::CHAR)
     return at::CPU(at::kChar).alias(tensor);
-  else if (type == thpp::Type::SHORT)
+  else if (type == RPCType::SHORT)
     return at::CPU(at::kShort).alias(tensor);
-  else if (type == thpp::Type::INT)
+  else if (type == RPCType::INT)
     return at::CPU(at::kInt).alias(tensor);
-  else if (type == thpp::Type::LONG)
+  else if (type == RPCType::LONG)
     return at::CPU(at::kLong).alias(tensor);
-  else if (type == thpp::Type::FLOAT)
+  else if (type == RPCType::FLOAT)
     return at::CPU(at::kFloat).alias(tensor);
-  else if (type == thpp::Type::DOUBLE)
+  else if (type == RPCType::DOUBLE)
     return at::CPU(at::kDouble).alias(tensor);
   throw std::invalid_argument("passed character doesn't represent a tensor type");
 }
 
 static void tensorNew(rpc::RPCMessage& raw_message) {
-  thpp::Type type = unpackType(raw_message);
+  RPCType type = unpackType(raw_message);
   thd::object_id_type id = unpackTensor(raw_message);
   finalize(raw_message);
   workerTensors.emplace(
@@ -64,7 +64,7 @@ static void tensorNew(rpc::RPCMessage& raw_message) {
 }
 
 static void tensorNewWithSize(rpc::RPCMessage& raw_message) {
-  thpp::Type type = unpackType(raw_message);
+  RPCType type = unpackType(raw_message);
   thd::object_id_type id = unpackTensor(raw_message);
   THLongStorage *size = unpackTHLongStorage(raw_message);
   THLongStorage *stride = unpackTHLongStorage(raw_message);
@@ -81,7 +81,7 @@ static void tensorNewWithSize(rpc::RPCMessage& raw_message) {
 }
 
 static void tensorNewWithStorage(rpc::RPCMessage& raw_message) {
-  thpp::Type type = unpackType(raw_message);
+  RPCType type = unpackType(raw_message);
   thd::object_id_type id = unpackTensor(raw_message);
   at::Storage *storage = unpackRetrieveStorage(raw_message);
   ptrdiff_t storageOffset = unpackInteger(raw_message);
@@ -100,7 +100,7 @@ static void tensorNewWithStorage(rpc::RPCMessage& raw_message) {
 }
 
 static void tensorNewWithTensor(rpc::RPCMessage& raw_message) {
-  thpp::Type type = unpackType(raw_message);
+  RPCType type = unpackType(raw_message);
   thd::object_id_type id = unpackTensor(raw_message);
   at::Tensor self = unpackRetrieveTensor(raw_message);
   finalize(raw_message);
