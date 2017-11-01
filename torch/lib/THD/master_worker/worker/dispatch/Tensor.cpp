@@ -1,27 +1,55 @@
-
 template<typename... Ts>
-static std::unique_ptr<thpp::Tensor> createTensor(thpp::Type type, Ts &... args) {
+static at::Tensor createTensor(thpp::Type type, Ts &... args) {
   if (type == thpp::Type::UCHAR)
-    return std::unique_ptr<thpp::Tensor>(
-        new thpp::THTensor<unsigned char>(std::forward<Ts>(args)...));
+    return at::CPU(at::kByte).tensor(std::forward<Ts>(args)...);
   else if (type == thpp::Type::CHAR)
-    return std::unique_ptr<thpp::Tensor>(
-        new thpp::THTensor<int8_t>(std::forward<Ts>(args)...));
+    return at::CPU(at::kChar).tensor(std::forward<Ts>(args)...);
   else if (type == thpp::Type::SHORT)
-    return std::unique_ptr<thpp::Tensor>(
-        new thpp::THTensor<short>(std::forward<Ts>(args)...));
+    return at::CPU(at::kShort).tensor(std::forward<Ts>(args)...);
   else if (type == thpp::Type::INT)
-    return std::unique_ptr<thpp::Tensor>(
-        new thpp::THTensor<int>(std::forward<Ts>(args)...));
+    return at::CPU(at::kInt).tensor(std::forward<Ts>(args)...);
   else if (type == thpp::Type::LONG)
-    return std::unique_ptr<thpp::Tensor>(
-        new thpp::THTensor<int64_t>(std::forward<Ts>(args)...));
+    return at::CPU(at::kLong).tensor(std::forward<Ts>(args)...);
   else if (type == thpp::Type::FLOAT)
-    return std::unique_ptr<thpp::Tensor>(
-        new thpp::THTensor<float>(std::forward<Ts>(args)...));
+    return at::CPU(at::kFloat).tensor(std::forward<Ts>(args)...);
   else if (type == thpp::Type::DOUBLE)
-    return std::unique_ptr<thpp::Tensor>(
-        new thpp::THTensor<double>(std::forward<Ts>(args)...));
+    return at::CPU(at::kDouble).tensor(std::forward<Ts>(args)...);
+  throw std::invalid_argument("passed character doesn't represent a tensor type");
+}
+
+static at::Tensor createTensorWithStorage(thpp::Type type, at::Storage* storage, ptrdiff_t storageOffset, at::IntList size, at::IntList stride) {
+  if (type == thpp::Type::UCHAR)
+    return at::CPU(at::kByte).tensor(*storage, storageOffset, size, stride);
+  else if (type == thpp::Type::CHAR)
+    return at::CPU(at::kChar).tensor(*storage, storageOffset, size, stride);
+  else if (type == thpp::Type::SHORT)
+    return at::CPU(at::kShort).tensor(*storage, storageOffset, size, stride);
+  else if (type == thpp::Type::INT)
+    return at::CPU(at::kInt).tensor(*storage, storageOffset, size, stride);
+  else if (type == thpp::Type::LONG)
+    return at::CPU(at::kLong).tensor(*storage, storageOffset, size, stride);
+  else if (type == thpp::Type::FLOAT)
+    return at::CPU(at::kFloat).tensor(*storage, storageOffset, size, stride);
+  else if (type == thpp::Type::DOUBLE)
+    return at::CPU(at::kDouble).tensor(*storage, storageOffset, size, stride);
+  throw std::invalid_argument("passed character doesn't represent a tensor type");
+}
+
+static at::Tensor createTensorWithTensor(thpp::Type type, at::Tensor& tensor) {
+  if (type == thpp::Type::UCHAR)
+    return at::CPU(at::kByte).alias(tensor);
+  else if (type == thpp::Type::CHAR)
+    return at::CPU(at::kChar).alias(tensor);
+  else if (type == thpp::Type::SHORT)
+    return at::CPU(at::kShort).alias(tensor);
+  else if (type == thpp::Type::INT)
+    return at::CPU(at::kInt).alias(tensor);
+  else if (type == thpp::Type::LONG)
+    return at::CPU(at::kLong).alias(tensor);
+  else if (type == thpp::Type::FLOAT)
+    return at::CPU(at::kFloat).alias(tensor);
+  else if (type == thpp::Type::DOUBLE)
+    return at::CPU(at::kDouble).alias(tensor);
   throw std::invalid_argument("passed character doesn't represent a tensor type");
 }
 
@@ -41,9 +69,12 @@ static void tensorNewWithSize(rpc::RPCMessage& raw_message) {
   THLongStorage *size = unpackTHLongStorage(raw_message);
   THLongStorage *stride = unpackTHLongStorage(raw_message);
   finalize(raw_message);
+
+  at::IntList sz(size->data, size->size);
+  at::IntList str(stride->data, stride->size);
   workerTensors.emplace(
     id,
-    createTensor(type, size, stride)
+    createTensor(type, sz, str)
   );
   THLongStorage_free(size);
   THLongStorage_free(stride);
@@ -52,14 +83,17 @@ static void tensorNewWithSize(rpc::RPCMessage& raw_message) {
 static void tensorNewWithStorage(rpc::RPCMessage& raw_message) {
   thpp::Type type = unpackType(raw_message);
   thd::object_id_type id = unpackTensor(raw_message);
-  thpp::Storage *storage = unpackRetrieveStorage(raw_message);
+  at::Storage *storage = unpackRetrieveStorage(raw_message);
   ptrdiff_t storageOffset = unpackInteger(raw_message);
   THLongStorage *size = unpackTHLongStorage(raw_message);
   THLongStorage *stride = unpackTHLongStorage(raw_message);
   finalize(raw_message);
+
+  at::IntList sz(size->data, size->size);
+  at::IntList str(stride->data, stride->size);
   workerTensors.emplace(
     id,
-    createTensor(type, *storage, storageOffset, size, stride)
+    createTensorWithStorage(type, storage, storageOffset, sz, str)
   );
   THLongStorage_free(size);
   THLongStorage_free(stride);
@@ -68,49 +102,51 @@ static void tensorNewWithStorage(rpc::RPCMessage& raw_message) {
 static void tensorNewWithTensor(rpc::RPCMessage& raw_message) {
   thpp::Type type = unpackType(raw_message);
   thd::object_id_type id = unpackTensor(raw_message);
-  thpp::Tensor *self = unpackRetrieveTensor(raw_message);
+  at::Tensor self = unpackRetrieveTensor(raw_message);
   finalize(raw_message);
   workerTensors.emplace(
     id,
-    createTensor(type, *self)
+    createTensorWithTensor(type, self)
   );
 }
 
 static void tensorNewClone(rpc::RPCMessage& raw_message) {
   thd::object_id_type id = unpackTensor(raw_message);
-  thpp::Tensor *tensor = unpackRetrieveTensor(raw_message);
+  at::Tensor tensor = unpackRetrieveTensor(raw_message);
   finalize(raw_message);
   workerTensors.emplace(
     id,
-    std::unique_ptr<thpp::Tensor>(tensor->clone())
+    tensor.clone()
   );
 }
 
 static void tensorResize(rpc::RPCMessage& raw_message) {
-  thpp::Tensor *tensor = unpackRetrieveTensor(raw_message);
+  at::Tensor tensor = unpackRetrieveTensor(raw_message);
   THLongStorage *size = unpackTHLongStorage(raw_message);
   THLongStorage *stride = unpackTHLongStorage(raw_message);
   finalize(raw_message);
-  tensor->resize(size, stride);
+  at::ArrayRef<int64_t> sizeRef(size->data, size->size);
+  at::ArrayRef<int64_t> strideRef(stride->data, stride->size);
+  tensor.reshape_(sizeRef, strideRef);
   THLongStorage_free(size);
   THLongStorage_free(stride);
 }
 
 static void tensorResizeAs(rpc::RPCMessage& raw_message) {
-  thpp::Tensor *tensor = unpackRetrieveTensor(raw_message);
-  thpp::Tensor *src = unpackRetrieveTensor(raw_message);
+  at::Tensor tensor = unpackRetrieveTensor(raw_message);
+  at::Tensor src = unpackRetrieveTensor(raw_message);
   finalize(raw_message);
-  tensor->resizeAs(*src);
+  tensor.resize_as_(src);
 }
 
 static void tensorResizeNd(rpc::RPCMessage& raw_message, std::size_t N) {
-  thpp::Tensor *tensor = unpackRetrieveTensor(raw_message);
+  at::Tensor tensor = unpackRetrieveTensor(raw_message);
   std::vector<int64_t> size(N);
   for (std::size_t i = 0; i < N; ++i) {
     size[i] = unpackInteger(raw_message);
   }
   finalize(raw_message);
-  tensor->resize(size);
+  tensor.resize_(size);
 }
 
 static void tensorResize1d(rpc::RPCMessage& raw_message) {
@@ -134,51 +170,51 @@ static void tensorResize5d(rpc::RPCMessage& raw_message) {
 }
 
 static void tensorSet(rpc::RPCMessage& raw_message) {
-  thpp::Tensor *tensor = unpackRetrieveTensor(raw_message);
-  thpp::Tensor *src = unpackRetrieveTensor(raw_message);
+  at::Tensor tensor = unpackRetrieveTensor(raw_message);
+  at::Tensor src = unpackRetrieveTensor(raw_message);
   finalize(raw_message);
-  tensor->set(*src);
+  tensor.set_(src);
 }
 
 static void tensorSetStorage(rpc::RPCMessage& raw_message) {
-  thpp::Tensor *tensor = unpackRetrieveTensor(raw_message);
-  thpp::Storage *storage = unpackRetrieveStorage(raw_message);
+  at::Tensor tensor = unpackRetrieveTensor(raw_message);
+  at::Storage *storage = unpackRetrieveStorage(raw_message);
   ptrdiff_t storageOffset = unpackInteger(raw_message);
   THLongStorage *size = unpackTHLongStorage(raw_message);
   THLongStorage *stride = unpackTHLongStorage(raw_message);
   finalize(raw_message);
-  tensor->setStorage(
+  at::ArrayRef<int64_t> sizeRef(size->data, size->size);
+  at::ArrayRef<int64_t> strideRef(stride->data, stride->size);
+  tensor.set_(
       *storage,
       storageOffset,
-      size,
-      stride
+      sizeRef,
+      strideRef
   );
   THLongStorage_free(size);
   THLongStorage_free(stride);
 }
 
 static void tensorSetStorage1d(rpc::RPCMessage& raw_message) {
-  thpp::Tensor *tensor = unpackRetrieveTensor(raw_message);
-  thpp::Storage *storage = unpackRetrieveStorage(raw_message);
+  at::Tensor tensor = unpackRetrieveTensor(raw_message);
+  at::Storage *storage = unpackRetrieveStorage(raw_message);
   ptrdiff_t storageOffset = unpackInteger(raw_message);
   int64_t size0 = unpackInteger(raw_message);
   int64_t stride0 = unpackInteger(raw_message);
   finalize(raw_message);
-  THLongStorage *sizes = THLongStorage_newWithSize1(size0);
-  THLongStorage *strides = THLongStorage_newWithSize1(stride0);
-  tensor->setStorage(
+  at::ArrayRef<int64_t> sizes(size0);
+  at::ArrayRef<int64_t> strides(stride0);
+  tensor.set_(
     *storage,
     storageOffset,
     sizes,
     strides
   );
-  THLongStorage_free(sizes);
-  THLongStorage_free(strides);
 }
 
 static void tensorSetStorage2d(rpc::RPCMessage& raw_message) {
-  thpp::Tensor *tensor = unpackRetrieveTensor(raw_message);
-  thpp::Storage *storage = unpackRetrieveStorage(raw_message);
+  at::Tensor tensor = unpackRetrieveTensor(raw_message);
+  at::Storage *storage = unpackRetrieveStorage(raw_message);
   ptrdiff_t storageOffset = unpackInteger(raw_message);
   int64_t size0 = unpackInteger(raw_message);
   int64_t stride0 = unpackInteger(raw_message);
@@ -187,19 +223,21 @@ static void tensorSetStorage2d(rpc::RPCMessage& raw_message) {
   finalize(raw_message);
   THLongStorage *sizes = THLongStorage_newWithSize2(size0, size1);
   THLongStorage *strides = THLongStorage_newWithSize2(stride0, stride1);
-  tensor->setStorage(
+  at::ArrayRef<int64_t> sizeRef(sizes->data, sizes->size);
+  at::ArrayRef<int64_t> strideRef(strides->data, strides->size);
+  tensor.set_(
     *storage,
     storageOffset,
-    sizes,
-    strides
+    sizeRef,
+    strideRef
   );
   THLongStorage_free(sizes);
   THLongStorage_free(strides);
 }
 
 static void tensorSetStorage3d(rpc::RPCMessage& raw_message) {
-  thpp::Tensor *tensor = unpackRetrieveTensor(raw_message);
-  thpp::Storage *storage = unpackRetrieveStorage(raw_message);
+  at::Tensor tensor = unpackRetrieveTensor(raw_message);
+  at::Storage *storage = unpackRetrieveStorage(raw_message);
   ptrdiff_t storageOffset = unpackInteger(raw_message);
   int64_t size0 = unpackInteger(raw_message);
   int64_t stride0 = unpackInteger(raw_message);
@@ -210,19 +248,21 @@ static void tensorSetStorage3d(rpc::RPCMessage& raw_message) {
   finalize(raw_message);
   THLongStorage *sizes = THLongStorage_newWithSize3(size0, size1, size2);
   THLongStorage *strides = THLongStorage_newWithSize3(stride0, stride1, stride2);
-  tensor->setStorage(
+  at::ArrayRef<int64_t> sizeRef(sizes->data, sizes->size);
+  at::ArrayRef<int64_t> strideRef(strides->data, strides->size);
+  tensor.set_(
     *storage,
     storageOffset,
-    sizes,
-    strides
+    sizeRef,
+    strideRef
   );
   THLongStorage_free(sizes);
   THLongStorage_free(strides);
 }
 
 static void tensorSetStorage4d(rpc::RPCMessage& raw_message) {
-  thpp::Tensor *tensor = unpackRetrieveTensor(raw_message);
-  thpp::Storage *storage = unpackRetrieveStorage(raw_message);
+  at::Tensor tensor = unpackRetrieveTensor(raw_message);
+  at::Storage *storage = unpackRetrieveStorage(raw_message);
   ptrdiff_t storageOffset = unpackInteger(raw_message);
   int64_t size0 = unpackInteger(raw_message);
   int64_t stride0 = unpackInteger(raw_message);
@@ -236,67 +276,69 @@ static void tensorSetStorage4d(rpc::RPCMessage& raw_message) {
   THLongStorage *sizes = THLongStorage_newWithSize4(size0, size1, size2, size3);
   THLongStorage *strides = THLongStorage_newWithSize4(stride0, stride1,
                                                       stride2, stride3);
-  tensor->setStorage(
+  at::ArrayRef<int64_t> sizeRef(sizes->data, sizes->size);
+  at::ArrayRef<int64_t> strideRef(strides->data, strides->size);
+  tensor.set_(
     *storage,
     storageOffset,
-    sizes,
-    strides
+    sizeRef,
+    strideRef
   );
   THLongStorage_free(sizes);
   THLongStorage_free(strides);
 }
 
 static void tensorNarrow(rpc::RPCMessage& raw_message) {
-  thpp::Tensor *tensor = unpackRetrieveTensor(raw_message);
-  thpp::Tensor *src = unpackRetrieveTensor(raw_message);
+  at::Tensor tensor = unpackRetrieveTensor(raw_message);
+  at::Tensor src = unpackRetrieveTensor(raw_message);
   int dimension = unpackInteger(raw_message);
   int64_t firstIndex = unpackInteger(raw_message);
   int64_t size = unpackInteger(raw_message);
   finalize(raw_message);
-  tensor->narrow(*src, dimension, firstIndex, size);
+  tensor = src.narrow(dimension, firstIndex, size);
 }
 
 static void tensorSelect(rpc::RPCMessage& raw_message) {
-  thpp::Tensor *tensor = unpackRetrieveTensor(raw_message);
-  thpp::Tensor *src = unpackRetrieveTensor(raw_message);
+  at::Tensor tensor = unpackRetrieveTensor(raw_message);
+  at::Tensor src = unpackRetrieveTensor(raw_message);
   int dimension = unpackInteger(raw_message);
   int64_t sliceIndex = unpackInteger(raw_message);
   finalize(raw_message);
-  tensor->select(*src, dimension, sliceIndex);
+  at::select_out(tensor, src, dimension, sliceIndex);
 }
 
 static void tensorTranspose(rpc::RPCMessage& raw_message) {
-  thpp::Tensor *tensor = unpackRetrieveTensor(raw_message);
-  thpp::Tensor *src = unpackRetrieveTensor(raw_message);
+  at::Tensor tensor = unpackRetrieveTensor(raw_message);
+  at::Tensor src = unpackRetrieveTensor(raw_message);
   int dimension1 = unpackInteger(raw_message);
   int dimension2 = unpackInteger(raw_message);
   finalize(raw_message);
-  tensor->transpose(*src, dimension1, dimension2);
+  tensor = src.transpose(dimension1, dimension2);
 }
 
 static void tensorUnfold(rpc::RPCMessage& raw_message) {
-  thpp::Tensor *tensor = unpackRetrieveTensor(raw_message);
-  thpp::Tensor *src = unpackRetrieveTensor(raw_message);
+  at::Tensor tensor = unpackRetrieveTensor(raw_message);
+  at::Tensor src = unpackRetrieveTensor(raw_message);
   int dimension = unpackInteger(raw_message);
   int64_t size = unpackInteger(raw_message);
   int64_t step = unpackInteger(raw_message);
   finalize(raw_message);
-  tensor->unfold(*src, dimension, size, step);
+  tensor = src.unfold(dimension, size, step);
 }
 
 static void tensorSqueeze(rpc::RPCMessage& raw_message) {
-  thpp::Tensor *tensor = unpackRetrieveTensor(raw_message);
-  thpp::Tensor *src = unpackRetrieveTensor(raw_message);
+  at::Tensor tensor = unpackRetrieveTensor(raw_message);
+  at::Tensor src = unpackRetrieveTensor(raw_message);
   finalize(raw_message);
-  tensor->squeeze(*src);
+  at::squeeze_out(src, tensor);
 }
 
 static void tensorSqueeze1d(rpc::RPCMessage& raw_message) {
-  thpp::Tensor *tensor = unpackRetrieveTensor(raw_message);
-  thpp::Tensor *src = unpackRetrieveTensor(raw_message);
+  at::Tensor tensor = unpackRetrieveTensor(raw_message);
+  at::Tensor src = unpackRetrieveTensor(raw_message);
   int dimension = unpackInteger(raw_message);
   finalize(raw_message);
-  tensor->squeeze(*src, dimension);
+  at::squeeze_out(tensor, src, dimension);
 }
 
 static void tensorFree(rpc::RPCMessage& raw_message) {
@@ -305,51 +347,51 @@ static void tensorFree(rpc::RPCMessage& raw_message) {
 }
 
 static void tensorGather(rpc::RPCMessage& raw_message) {
-  thpp::Tensor *tensor = unpackRetrieveTensor(raw_message);
-  thpp::Tensor *src = unpackRetrieveTensor(raw_message);
+  at::Tensor tensor = unpackRetrieveTensor(raw_message);
+  at::Tensor src = unpackRetrieveTensor(raw_message);
   int dim = unpackInteger(raw_message);
-  thpp::Tensor *index = unpackRetrieveTensor(raw_message);
+  at::Tensor index = unpackRetrieveTensor(raw_message);
   finalize(raw_message);
-  tensor->gather(*src, dim, *index);
+  at::gather_out(tensor, src, dim, index);
 }
 
 static void tensorScatter(rpc::RPCMessage& raw_message) {
-  thpp::Tensor *tensor = unpackRetrieveTensor(raw_message);
+  at::Tensor tensor = unpackRetrieveTensor(raw_message);
   int dim = unpackInteger(raw_message);
-  thpp::Tensor *index = unpackRetrieveTensor(raw_message);
-  thpp::Tensor *src = unpackRetrieveTensor(raw_message);
+  at::Tensor index = unpackRetrieveTensor(raw_message);
+  at::Tensor src = unpackRetrieveTensor(raw_message);
   finalize(raw_message);
-  tensor->scatter(dim, *index, *src);
+  tensor.scatter_(dim, index, src);
 }
 
 static void tensorScatterFill(rpc::RPCMessage& raw_message) {
-  thpp::Tensor *tensor = unpackRetrieveTensor(raw_message);
+  at::Tensor tensor = unpackRetrieveTensor(raw_message);
   int dim = unpackInteger(raw_message);
-  thpp::Tensor *index = unpackRetrieveTensor(raw_message);
+  at::Tensor index = unpackRetrieveTensor(raw_message);
 
-  if (thpp::isInteger(tensor->type())) {
+  if (at::isIntegralType(tensor.type().scalarType())) {
     int64_t value = unpackInteger(raw_message);
     finalize(raw_message);
-    dynamic_cast<thpp::IntTensor*>(tensor)->scatterFill(dim, *index, value);
-  } else if (thpp::isFloat(tensor->type())) {
+    tensor.scatter_(dim, index, value);
+  } else if (at::isFloatingType(tensor.type().scalarType())) {
     double value = unpackFloat(raw_message);
     finalize(raw_message);
-    dynamic_cast<thpp::FloatTensor*>(tensor)->scatterFill(dim, *index, value);
+    tensor.scatter_(dim, index, value);
   } else {
     throw std::invalid_argument("expected scalar type");
   }
 }
 
 static void tensorDot(rpc::RPCMessage& raw_message) {
-  thpp::Tensor *tensor = unpackRetrieveTensor(raw_message);
-  thpp::Tensor *src = unpackRetrieveTensor(raw_message);
+  at::Tensor tensor = unpackRetrieveTensor(raw_message);
+  at::Tensor src = unpackRetrieveTensor(raw_message);
   finalize(raw_message);
 
-  if (thpp::isInteger(tensor->type())) {
-    int64_t value = dynamic_cast<thpp::IntTensor*>(tensor)->dot(*src);
+  if (at::isIntegralType(tensor.type().scalarType())) {
+    int64_t value = tensor.dot(src).toLong();
     sendValueToMaster(value);
-  } else if (thpp::isFloat(tensor->type())) {
-    double value = dynamic_cast<thpp::FloatTensor*>(tensor)->dot(*src);
+  } else if (at::isFloatingType(tensor.type().scalarType())) {
+    double value = tensor.dot(src).toDouble();
     sendValueToMaster(value);
   } else {
     throw std::invalid_argument("expected scalar type");
@@ -357,14 +399,14 @@ static void tensorDot(rpc::RPCMessage& raw_message) {
 }
 
 static void tensorMinall(rpc::RPCMessage& raw_message) {
-  thpp::Tensor *tensor = unpackRetrieveTensor(raw_message);
+  at::Tensor tensor = unpackRetrieveTensor(raw_message);
   finalize(raw_message);
 
-  if (thpp::isInteger(tensor->type())) {
-    int64_t value = dynamic_cast<thpp::IntTensor*>(tensor)->minall();
+  if (at::isIntegralType(tensor.type().scalarType())) {
+    int64_t value = tensor.min().toLong();
     sendValueToMaster(value);
-  } else if (thpp::isFloat(tensor->type())) {
-    double value = dynamic_cast<thpp::FloatTensor*>(tensor)->minall();
+  } else if (at::isFloatingType(tensor.type().scalarType())) {
+    double value = tensor.min().toDouble();
     sendValueToMaster(value);
   } else {
     throw std::invalid_argument("expected scalar type");
@@ -372,14 +414,14 @@ static void tensorMinall(rpc::RPCMessage& raw_message) {
 }
 
 static void tensorMaxall(rpc::RPCMessage& raw_message) {
-  thpp::Tensor *tensor = unpackRetrieveTensor(raw_message);
+  at::Tensor tensor = unpackRetrieveTensor(raw_message);
   finalize(raw_message);
 
-  if (thpp::isInteger(tensor->type())) {
-    int64_t value = dynamic_cast<thpp::IntTensor*>(tensor)->maxall();
+  if (at::isIntegralType(tensor.type().scalarType())) {
+    int64_t value = tensor.max().toLong();
     sendValueToMaster(value);
-  } else if (thpp::isFloat(tensor->type())) {
-    double value = dynamic_cast<thpp::FloatTensor*>(tensor)->maxall();
+  } else if (at::isFloatingType(tensor.type().scalarType())) {
+    double value = tensor.max().toDouble();
     sendValueToMaster(value);
   } else {
     throw std::invalid_argument("expected scalar type");
@@ -387,14 +429,14 @@ static void tensorMaxall(rpc::RPCMessage& raw_message) {
 }
 
 static void tensorMedianall(rpc::RPCMessage& raw_message) {
-  thpp::Tensor *tensor = unpackRetrieveTensor(raw_message);
+  at::Tensor tensor = unpackRetrieveTensor(raw_message);
   finalize(raw_message);
 
-  if (thpp::isInteger(tensor->type())) {
-    int64_t value = dynamic_cast<thpp::IntTensor*>(tensor)->medianall();
+  if (at::isIntegralType(tensor.type().scalarType())) {
+    int64_t value = tensor.median().toLong();
     sendValueToMaster(value);
-  } else if (thpp::isFloat(tensor->type())) {
-    double value = dynamic_cast<thpp::FloatTensor*>(tensor)->medianall();
+  } else if (at::isFloatingType(tensor.type().scalarType())) {
+    double value = tensor.median().toDouble();
     sendValueToMaster(value);
   } else {
     throw std::invalid_argument("expected scalar type");
@@ -402,14 +444,14 @@ static void tensorMedianall(rpc::RPCMessage& raw_message) {
 }
 
 static void tensorSumall(rpc::RPCMessage& raw_message) {
-  thpp::Tensor *tensor = unpackRetrieveTensor(raw_message);
+  at::Tensor tensor = unpackRetrieveTensor(raw_message);
   finalize(raw_message);
 
-  if (thpp::isInteger(tensor->type())) {
-    int64_t value = dynamic_cast<thpp::IntTensor*>(tensor)->sumall();
+  if (at::isIntegralType(tensor.type().scalarType())) {
+    int64_t value = tensor.sum().toLong();
     sendValueToMaster(value);
-  } else if (thpp::isFloat(tensor->type())) {
-    double value = dynamic_cast<thpp::FloatTensor*>(tensor)->sumall();
+  } else if (at::isFloatingType(tensor.type().scalarType())) {
+    double value = tensor.sum().toDouble();
     sendValueToMaster(value);
   } else {
     throw std::invalid_argument("expected scalar type");
@@ -417,14 +459,14 @@ static void tensorSumall(rpc::RPCMessage& raw_message) {
 }
 
 static void tensorProdall(rpc::RPCMessage& raw_message) {
-  thpp::Tensor *tensor = unpackRetrieveTensor(raw_message);
+  at::Tensor tensor = unpackRetrieveTensor(raw_message);
   finalize(raw_message);
 
-  if (thpp::isInteger(tensor->type())) {
-    int64_t value = dynamic_cast<thpp::IntTensor*>(tensor)->prodall();
+  if (at::isIntegralType(tensor.type().scalarType())) {
+    int64_t value = tensor.prod().toLong();
     sendValueToMaster(value);
-  } else if (thpp::isFloat(tensor->type())) {
-    double value = dynamic_cast<thpp::FloatTensor*>(tensor)->prodall();
+  } else if (at::isFloatingType(tensor.type().scalarType())) {
+    double value = tensor.prod().toDouble();
     sendValueToMaster(value);
   } else {
     throw std::invalid_argument("expected scalar type");
@@ -432,462 +474,444 @@ static void tensorProdall(rpc::RPCMessage& raw_message) {
 }
 
 static void tensorAdd(rpc::RPCMessage& raw_message) {
-  thpp::Tensor *tensor = unpackRetrieveTensor(raw_message);
-  thpp::Tensor *src = unpackRetrieveTensor(raw_message);
+  at::Tensor tensor = unpackRetrieveTensor(raw_message);
+  at::Tensor src = unpackRetrieveTensor(raw_message);
 
-  if (thpp::isInteger(tensor->type())) {
+  if (at::isIntegralType(tensor.type().scalarType())) {
     int64_t value = unpackInteger(raw_message);
     finalize(raw_message);
-    dynamic_cast<thpp::IntTensor*>(tensor)->add(*src, value);
-  } else if (thpp::isFloat(tensor->type())) {
+    at::add_out(tensor, src, at::Scalar(value));
+  } else if (at::isFloatingType(tensor.type().scalarType())) {
     double value = unpackFloat(raw_message);
     finalize(raw_message);
-    dynamic_cast<thpp::FloatTensor*>(tensor)->add(*src, value);
+    at::add_out(tensor, src, value);
   } else {
     throw std::invalid_argument("expected scalar type");
   }
 }
 
 static void tensorSub(rpc::RPCMessage& raw_message) {
-  thpp::Tensor *tensor = unpackRetrieveTensor(raw_message);
-  thpp::Tensor *src = unpackRetrieveTensor(raw_message);
+  at::Tensor tensor = unpackRetrieveTensor(raw_message);
+  at::Tensor src = unpackRetrieveTensor(raw_message);
 
-  if (thpp::isInteger(tensor->type())) {
+  if (at::isIntegralType(tensor.type().scalarType())) {
     int64_t value = unpackInteger(raw_message);
     finalize(raw_message);
-    dynamic_cast<thpp::IntTensor*>(tensor)->sub(*src, value);
-  } else if (thpp::isFloat(tensor->type())) {
+    at::sub_out(tensor, src, at::Scalar((int64_t)value));
+  } else if (at::isFloatingType(tensor.type().scalarType())) {
     double value = unpackFloat(raw_message);
     finalize(raw_message);
-    dynamic_cast<thpp::FloatTensor*>(tensor)->sub(*src, value);
+    at::sub_out(tensor, src, value);
   } else {
     throw std::invalid_argument("expected scalar type");
   }
 }
 
 static void tensorMul(rpc::RPCMessage& raw_message) {
-  thpp::Tensor *tensor = unpackRetrieveTensor(raw_message);
-  thpp::Tensor *src = unpackRetrieveTensor(raw_message);
+  at::Tensor tensor = unpackRetrieveTensor(raw_message);
+  at::Tensor src = unpackRetrieveTensor(raw_message);
 
-  if (thpp::isInteger(tensor->type())) {
+  if (at::isIntegralType(tensor.type().scalarType())) {
     int64_t value = unpackInteger(raw_message);
     finalize(raw_message);
-    dynamic_cast<thpp::IntTensor*>(tensor)->mul(*src, value);
-  } else if (thpp::isFloat(tensor->type())) {
+    at::mul_out(tensor, src, at::Scalar((int64_t)value));
+  } else if (at::isFloatingType(tensor.type().scalarType())) {
     double value = unpackFloat(raw_message);
     finalize(raw_message);
-    dynamic_cast<thpp::FloatTensor*>(tensor)->mul(*src, value);
+    at::mul_out(tensor, src, value);
   } else {
     throw std::invalid_argument("expected scalar type");
   }
 }
 
 static void tensorDiv(rpc::RPCMessage& raw_message) {
-  thpp::Tensor *tensor = unpackRetrieveTensor(raw_message);
-  thpp::Tensor *src = unpackRetrieveTensor(raw_message);
+  at::Tensor tensor = unpackRetrieveTensor(raw_message);
+  at::Tensor src = unpackRetrieveTensor(raw_message);
 
-  if (thpp::isInteger(tensor->type())) {
+  if (at::isIntegralType(tensor.type().scalarType())) {
     int64_t value = unpackInteger(raw_message);
     finalize(raw_message);
-    dynamic_cast<thpp::IntTensor*>(tensor)->div(*src, value);
-  } else if (thpp::isFloat(tensor->type())) {
+    at::div_out(tensor, src, at::Scalar((int64_t)value));
+  } else if (at::isFloatingType(tensor.type().scalarType())) {
     double value = unpackFloat(raw_message);
     finalize(raw_message);
-    dynamic_cast<thpp::FloatTensor*>(tensor)->div(*src, value);
+    at::div_out(tensor, src, value);
   } else {
     throw std::invalid_argument("expected scalar type");
   }
 }
 
 static void tensorFmod(rpc::RPCMessage& raw_message) {
-  thpp::Tensor *tensor = unpackRetrieveTensor(raw_message);
-  thpp::Tensor *src = unpackRetrieveTensor(raw_message);
+  at::Tensor tensor = unpackRetrieveTensor(raw_message);
+  at::Tensor src = unpackRetrieveTensor(raw_message);
 
-  if (thpp::isInteger(tensor->type())) {
+  if (at::isIntegralType(tensor.type().scalarType())) {
     int64_t value = unpackInteger(raw_message);
     finalize(raw_message);
-    dynamic_cast<thpp::IntTensor*>(tensor)->fmod(*src, value);
+    at::fmod_out(tensor, src, at::Scalar((int64_t)value));
   } else {
     double value = unpackFloat(raw_message);
     finalize(raw_message);
-    dynamic_cast<thpp::FloatTensor*>(tensor)->fmod(*src, value);
+    at::fmod_out(tensor, src, value);
   }
 }
 
 static void tensorRemainder(rpc::RPCMessage& raw_message) {
-  thpp::Tensor *tensor = unpackRetrieveTensor(raw_message);
-  thpp::Tensor *src = unpackRetrieveTensor(raw_message);
+  at::Tensor tensor = unpackRetrieveTensor(raw_message);
+  at::Tensor src = unpackRetrieveTensor(raw_message);
 
-  if (thpp::isInteger(tensor->type())) {
+  if (at::isIntegralType(tensor.type().scalarType())) {
     int64_t value = unpackInteger(raw_message);
     finalize(raw_message);
-    dynamic_cast<thpp::IntTensor*>(tensor)->remainder(*src, value);
-  } else if (thpp::isFloat(tensor->type())) {
+    at::remainder_out(tensor, src, at::Scalar((int64_t)value));
+  } else if (at::isFloatingType(tensor.type().scalarType())) {
     double value = unpackFloat(raw_message);
     finalize(raw_message);
-    dynamic_cast<thpp::FloatTensor*>(tensor)->remainder(*src, value);
+    at::remainder_out(tensor, src, value);
   } else {
     throw std::invalid_argument("expected scalar type");
   }
 }
 
 static void tensorClamp(rpc::RPCMessage& raw_message) {
-  thpp::Tensor *tensor = unpackRetrieveTensor(raw_message);
-  thpp::Tensor *src = unpackRetrieveTensor(raw_message);
+  at::Tensor tensor = unpackRetrieveTensor(raw_message);
+  at::Tensor src = unpackRetrieveTensor(raw_message);
 
-  if (thpp::isInteger(tensor->type())) {
+  if (at::isIntegralType(tensor.type().scalarType())) {
     int64_t min_value = unpackInteger(raw_message);
     int64_t max_value = unpackInteger(raw_message);
     finalize(raw_message);
-    dynamic_cast<thpp::IntTensor*>(tensor)->clamp(*src, min_value, max_value);
-  } else if (thpp::isFloat(tensor->type())) {
+    at::clamp_out(tensor, src, at::Scalar((int64_t)min_value), at::Scalar((int64_t)max_value));
+  } else if (at::isFloatingType(tensor.type().scalarType())) {
     double min_value = unpackFloat(raw_message);
     double max_value = unpackFloat(raw_message);
     finalize(raw_message);
-    dynamic_cast<thpp::FloatTensor*>(tensor)->clamp(*src, min_value, max_value);
+    at::clamp_out(tensor, src, min_value, max_value);
   } else {
     throw std::invalid_argument("expected scalar type");
   }
 }
 
 static void tensorCadd(rpc::RPCMessage& raw_message) {
-  thpp::Tensor *tensor = unpackRetrieveTensor(raw_message);
-  thpp::Tensor *src1 = unpackRetrieveTensor(raw_message);
-  thpp::Tensor *src2 = unpackRetrieveTensor(raw_message);
+  at::Tensor tensor = unpackRetrieveTensor(raw_message);
+  at::Tensor src1 = unpackRetrieveTensor(raw_message);
+  at::Tensor src2 = unpackRetrieveTensor(raw_message);
 
-  if (thpp::isInteger(tensor->type())) {
+  if (at::isIntegralType(tensor.type().scalarType())) {
     int64_t value = unpackInteger(raw_message);
     finalize(raw_message);
-    dynamic_cast<thpp::IntTensor*>(tensor)->cadd(*src1, value, *src2);
-  } else if (thpp::isFloat(tensor->type())) {
+    at::add_out(tensor, src1, src2, at::Scalar((int64_t)value));
+  } else if (at::isFloatingType(tensor.type().scalarType())) {
     double value = unpackFloat(raw_message);
     finalize(raw_message);
-    dynamic_cast<thpp::FloatTensor*>(tensor)->cadd(*src1, value, *src2);
+    at::add_out(tensor, src1, src2, value);
   } else {
     throw std::invalid_argument("expected scalar type");
   }
 }
 
 static void tensorCsub(rpc::RPCMessage& raw_message) {
-  thpp::Tensor *tensor = unpackRetrieveTensor(raw_message);
-  thpp::Tensor *src1 = unpackRetrieveTensor(raw_message);
-  thpp::Tensor *src2 = unpackRetrieveTensor(raw_message);
+  at::Tensor tensor = unpackRetrieveTensor(raw_message);
+  at::Tensor src1 = unpackRetrieveTensor(raw_message);
+  at::Tensor src2 = unpackRetrieveTensor(raw_message);
 
-  if (thpp::isInteger(tensor->type())) {
+  if (at::isIntegralType(tensor.type().scalarType())) {
     int64_t value = unpackInteger(raw_message);
     finalize(raw_message);
-    dynamic_cast<thpp::IntTensor*>(tensor)->csub(*src1, value, *src2);
-  } else if (thpp::isFloat(tensor->type())) {
+    at::sub_out(tensor, src1, src2, at::Scalar((int64_t)value));
+  } else if (at::isFloatingType(tensor.type().scalarType())) {
     double value = unpackFloat(raw_message);
     finalize(raw_message);
-    dynamic_cast<thpp::FloatTensor*>(tensor)->csub(*src1, value, *src2);
+    at::sub_out(tensor, src1, src2, value);
   } else {
     throw std::invalid_argument("expected scalar type");
   }
 }
 
 static void tensorCmul(rpc::RPCMessage& raw_message) {
-  thpp::Tensor *tensor = unpackRetrieveTensor(raw_message);
-  thpp::Tensor *src1 = unpackRetrieveTensor(raw_message);
-  thpp::Tensor *src2 = unpackRetrieveTensor(raw_message);
+  at::Tensor tensor = unpackRetrieveTensor(raw_message);
+  at::Tensor src1 = unpackRetrieveTensor(raw_message);
+  at::Tensor src2 = unpackRetrieveTensor(raw_message);
   finalize(raw_message);
-  tensor->cmul(*src1, *src2);
+  at::mul_out(tensor, src1, src2);
 }
 
 static void tensorCpow(rpc::RPCMessage& raw_message) {
-  thpp::Tensor *tensor = unpackRetrieveTensor(raw_message);
-  thpp::Tensor *src1 = unpackRetrieveTensor(raw_message);
-  thpp::Tensor *src2 = unpackRetrieveTensor(raw_message);
+  at::Tensor tensor = unpackRetrieveTensor(raw_message);
+  at::Tensor src1 = unpackRetrieveTensor(raw_message);
+  at::Tensor src2 = unpackRetrieveTensor(raw_message);
   finalize(raw_message);
-  tensor->cpow(*src1, *src2);
+  at::pow_out(tensor, src1, src2);
 }
 
 static void tensorCdiv(rpc::RPCMessage& raw_message) {
-  thpp::Tensor *tensor = unpackRetrieveTensor(raw_message);
-  thpp::Tensor *src1 = unpackRetrieveTensor(raw_message);
-  thpp::Tensor *src2 = unpackRetrieveTensor(raw_message);
+  at::Tensor tensor = unpackRetrieveTensor(raw_message);
+  at::Tensor src1 = unpackRetrieveTensor(raw_message);
+  at::Tensor src2 = unpackRetrieveTensor(raw_message);
   finalize(raw_message);
-  tensor->cdiv(*src1, *src2);
+  at::div_out(tensor, src1, src2);
 }
 
 static void tensorCfmod(rpc::RPCMessage& raw_message) {
-  thpp::Tensor *tensor = unpackRetrieveTensor(raw_message);
-  thpp::Tensor *src1 = unpackRetrieveTensor(raw_message);
-  thpp::Tensor *src2 = unpackRetrieveTensor(raw_message);
+  at::Tensor tensor = unpackRetrieveTensor(raw_message);
+  at::Tensor src1 = unpackRetrieveTensor(raw_message);
+  at::Tensor src2 = unpackRetrieveTensor(raw_message);
   finalize(raw_message);
-  tensor->cfmod(*src1, *src2);
+  at::fmod_out(tensor, src1, src2);
 }
 
 static void tensorCremainder(rpc::RPCMessage& raw_message) {
-  thpp::Tensor *tensor = unpackRetrieveTensor(raw_message);
-  thpp::Tensor *src1 = unpackRetrieveTensor(raw_message);
-  thpp::Tensor *src2 = unpackRetrieveTensor(raw_message);
+  at::Tensor tensor = unpackRetrieveTensor(raw_message);
+  at::Tensor src1 = unpackRetrieveTensor(raw_message);
+  at::Tensor src2 = unpackRetrieveTensor(raw_message);
   finalize(raw_message);
-  tensor->cremainder(*src1, *src2);
+  at::remainder_out(tensor, src1, src2);
 }
 
 static void tensorAddcmul(rpc::RPCMessage& raw_message) {
-  thpp::Tensor *tensor = unpackRetrieveTensor(raw_message);
-  thpp::Tensor *src1 = unpackRetrieveTensor(raw_message);
-  thpp::Tensor *src2 = unpackRetrieveTensor(raw_message);
-  thpp::Tensor *src3 = unpackRetrieveTensor(raw_message);
+  at::Tensor tensor = unpackRetrieveTensor(raw_message);
+  at::Tensor src1 = unpackRetrieveTensor(raw_message);
+  at::Tensor src2 = unpackRetrieveTensor(raw_message);
+  at::Tensor src3 = unpackRetrieveTensor(raw_message);
 
-  if (thpp::isInteger(tensor->type())) {
+  if (at::isIntegralType(tensor.type().scalarType())) {
     int64_t value = unpackInteger(raw_message);
     finalize(raw_message);
-    dynamic_cast<thpp::IntTensor*>(tensor)->addcmul(*src1, value, *src2, *src3);
-  } else if (thpp::isFloat(tensor->type())) {
+    at::addcmul_out(tensor, src1, src2, src3, at::Scalar((int64_t)value));
+  } else if (at::isFloatingType(tensor.type().scalarType())) {
     double value = unpackFloat(raw_message);
     finalize(raw_message);
-    dynamic_cast<thpp::FloatTensor*>(tensor)->addcmul(*src1, value, *src2, *src3);
+    at::addcmul_out(tensor, src1, src2, src3, value);
   } else {
     throw std::invalid_argument("expected scalar type");
   }
 }
 
 static void tensorAddcdiv(rpc::RPCMessage& raw_message) {
-  thpp::Tensor *tensor = unpackRetrieveTensor(raw_message);
-  thpp::Tensor *src1 = unpackRetrieveTensor(raw_message);
-  thpp::Tensor *src2 = unpackRetrieveTensor(raw_message);
-  thpp::Tensor *src3 = unpackRetrieveTensor(raw_message);
+  at::Tensor tensor = unpackRetrieveTensor(raw_message);
+  at::Tensor src1 = unpackRetrieveTensor(raw_message);
+  at::Tensor src2 = unpackRetrieveTensor(raw_message);
+  at::Tensor src3 = unpackRetrieveTensor(raw_message);
 
-  if (thpp::isInteger(tensor->type())) {
+  if (at::isIntegralType(tensor.type().scalarType())) {
     int64_t value = unpackInteger(raw_message);
     finalize(raw_message);
-    dynamic_cast<thpp::IntTensor*>(tensor)->addcdiv(*src1, value, *src2, *src3);
-  } else if (thpp::isFloat(tensor->type())) {
+    at::addcdiv_out(tensor, src1, src2, src3, at::Scalar((int64_t)value));
+  } else if (at::isFloatingType(tensor.type().scalarType())) {
     double value = unpackFloat(raw_message);
     finalize(raw_message);
-    dynamic_cast<thpp::FloatTensor*>(tensor)->addcdiv(*src1, value, *src2, *src3);
+    at::addcdiv_out(tensor, src1, src2, src3, value);
   } else {
     throw std::invalid_argument("expected scalar type");
   }
 }
 
 static void tensorAddmv(rpc::RPCMessage& raw_message) {
-  thpp::Tensor *tensor = unpackRetrieveTensor(raw_message);
-  thpp::Tensor *src = unpackRetrieveTensor(raw_message);
-  thpp::Tensor *mat = unpackRetrieveTensor(raw_message);
-  thpp::Tensor *vec = unpackRetrieveTensor(raw_message);
+  at::Tensor tensor = unpackRetrieveTensor(raw_message);
+  at::Tensor src = unpackRetrieveTensor(raw_message);
+  at::Tensor mat = unpackRetrieveTensor(raw_message);
+  at::Tensor vec = unpackRetrieveTensor(raw_message);
 
-  if (thpp::isInteger(tensor->type())) {
+  if (at::isIntegralType(tensor.type().scalarType())) {
     int64_t beta = unpackInteger(raw_message);
     int64_t alpha = unpackInteger(raw_message);
     finalize(raw_message);
-    dynamic_cast<thpp::IntTensor*>(tensor)->addmv(beta, *src, alpha, *mat, *vec);
-  } else if (thpp::isFloat(tensor->type())) {
+    at::addmv_out(tensor, src, mat, vec, at::Scalar((int64_t)beta), at::Scalar((int64_t)alpha));
+  } else if (at::isFloatingType(tensor.type().scalarType())) {
     double beta = unpackFloat(raw_message);
     double alpha = unpackFloat(raw_message);
     finalize(raw_message);
-    dynamic_cast<thpp::FloatTensor*>(tensor)->addmv(beta, *src, alpha, *mat, *vec);
+    at::addmv_out(tensor, src, mat, vec, beta, alpha);
   } else {
     throw std::invalid_argument("expected scalar type");
   }
 }
 
 static void tensorAddmm(rpc::RPCMessage& raw_message) {
-  thpp::Tensor *tensor = unpackRetrieveTensor(raw_message);
-  thpp::Tensor *src = unpackRetrieveTensor(raw_message);
-  thpp::Tensor *mat1 = unpackRetrieveTensor(raw_message);
-  thpp::Tensor *mat2 = unpackRetrieveTensor(raw_message);
+  at::Tensor tensor = unpackRetrieveTensor(raw_message);
+  at::Tensor src = unpackRetrieveTensor(raw_message);
+  at::Tensor mat1 = unpackRetrieveTensor(raw_message);
+  at::Tensor mat2 = unpackRetrieveTensor(raw_message);
 
-  if (thpp::isInteger(tensor->type())) {
+  if (at::isIntegralType(tensor.type().scalarType())) {
     int64_t beta = unpackInteger(raw_message);
     int64_t alpha = unpackInteger(raw_message);
     finalize(raw_message);
-    dynamic_cast<thpp::IntTensor*>(tensor)->addmm(beta, *src, alpha, *mat1, *mat2);
-  } else if (thpp::isFloat(tensor->type())) {
+    at::addmm_out(tensor, src, mat1, mat2, at::Scalar((int64_t)beta), at::Scalar((int64_t)alpha));
+  } else if (at::isFloatingType(tensor.type().scalarType())) {
     double beta = unpackFloat(raw_message);
     double alpha = unpackFloat(raw_message);
     finalize(raw_message);
-    dynamic_cast<thpp::FloatTensor*>(tensor)->addmm(beta, *src, alpha, *mat1, *mat2);
+    at::addmm_out(tensor, src, mat1, mat2, beta, alpha);
   } else {
     throw std::invalid_argument("expected scalar type");
   }
 }
 
 static void tensorAddr(rpc::RPCMessage& raw_message) {
-  thpp::Tensor *tensor = unpackRetrieveTensor(raw_message);
-  thpp::Tensor *src = unpackRetrieveTensor(raw_message);
-  thpp::Tensor *vec1 = unpackRetrieveTensor(raw_message);
-  thpp::Tensor *vec2 = unpackRetrieveTensor(raw_message);
+  at::Tensor tensor = unpackRetrieveTensor(raw_message);
+  at::Tensor src = unpackRetrieveTensor(raw_message);
+  at::Tensor vec1 = unpackRetrieveTensor(raw_message);
+  at::Tensor vec2 = unpackRetrieveTensor(raw_message);
 
-  if (thpp::isInteger(tensor->type())) {
+  if (at::isIntegralType(tensor.type().scalarType())) {
     int64_t beta = unpackInteger(raw_message);
     int64_t alpha = unpackInteger(raw_message);
     finalize(raw_message);
-    dynamic_cast<thpp::IntTensor*>(tensor)->addr(beta, *src, alpha, *vec1, *vec2);
-  } else if (thpp::isFloat(tensor->type())) {
+    at::addr_out(tensor, src, vec1, vec2,at::Scalar((int64_t)beta), at::Scalar((int64_t)alpha));
+  } else if (at::isFloatingType(tensor.type().scalarType())) {
     double beta = unpackFloat(raw_message);
     double alpha = unpackFloat(raw_message);
     finalize(raw_message);
-    dynamic_cast<thpp::FloatTensor*>(tensor)->addr(beta, *src, alpha, *vec1, *vec2);
+    at::addr_out(tensor, src, vec1, vec2, beta, alpha);
   } else {
     throw std::invalid_argument("expected scalar type");
   }
 }
 
 static void tensorAddbmm(rpc::RPCMessage& raw_message) {
-  thpp::Tensor *tensor = unpackRetrieveTensor(raw_message);
-  thpp::Tensor *src = unpackRetrieveTensor(raw_message);
-  thpp::Tensor *batch1 = unpackRetrieveTensor(raw_message);
-  thpp::Tensor *batch2 = unpackRetrieveTensor(raw_message);
+  at::Tensor tensor = unpackRetrieveTensor(raw_message);
+  at::Tensor src = unpackRetrieveTensor(raw_message);
+  at::Tensor batch1 = unpackRetrieveTensor(raw_message);
+  at::Tensor batch2 = unpackRetrieveTensor(raw_message);
 
-  if (thpp::isInteger(tensor->type())) {
+  if (at::isIntegralType(tensor.type().scalarType())) {
     int64_t beta = unpackInteger(raw_message);
     int64_t alpha = unpackInteger(raw_message);
     finalize(raw_message);
-    dynamic_cast<thpp::IntTensor*>(tensor)->addbmm(beta, *src, alpha, *batch1, *batch2);
-  } else if (thpp::isFloat(tensor->type())) {
+    at::addbmm_out(tensor, src, batch1, batch2, at::Scalar((int64_t)beta), at::Scalar((int64_t)alpha));
+  } else if (at::isFloatingType(tensor.type().scalarType())) {
     double beta = unpackFloat(raw_message);
     double alpha = unpackFloat(raw_message);
     finalize(raw_message);
-    dynamic_cast<thpp::FloatTensor*>(tensor)->addbmm(beta, *src, alpha, *batch1, *batch2);
+    at::addbmm_out(tensor, src, batch1, batch2, beta, alpha);
   } else {
     throw std::invalid_argument("expected scalar type");
   }
 }
 
 static void tensorBaddbmm(rpc::RPCMessage& raw_message) {
-  thpp::Tensor *tensor = unpackRetrieveTensor(raw_message);
-  thpp::Tensor *src = unpackRetrieveTensor(raw_message);
-  thpp::Tensor *batch1 = unpackRetrieveTensor(raw_message);
-  thpp::Tensor *batch2 = unpackRetrieveTensor(raw_message);
+  at::Tensor tensor = unpackRetrieveTensor(raw_message);
+  at::Tensor src = unpackRetrieveTensor(raw_message);
+  at::Tensor batch1 = unpackRetrieveTensor(raw_message);
+  at::Tensor batch2 = unpackRetrieveTensor(raw_message);
 
-  if (thpp::isInteger(tensor->type())) {
+  if (at::isIntegralType(tensor.type().scalarType())) {
     int64_t beta = unpackInteger(raw_message);
     int64_t alpha = unpackInteger(raw_message);
     finalize(raw_message);
-    dynamic_cast<thpp::IntTensor*>(tensor)->baddbmm(beta, *src, alpha, *batch1, *batch2);
-  } else if (thpp::isFloat(tensor->type())) {
+    at::baddbmm_out(tensor, src, batch1, batch2, at::Scalar((int64_t)beta), at::Scalar((int64_t)alpha));
+  } else if (at::isFloatingType(tensor.type().scalarType())) {
     double beta = unpackFloat(raw_message);
     double alpha = unpackFloat(raw_message);
     finalize(raw_message);
-    dynamic_cast<thpp::FloatTensor*>(tensor)->baddbmm(beta, *src, alpha, *batch1, *batch2);
-  } else {
-    throw std::invalid_argument("expected scalar type");
-  }
-}
-
-static void tensorMatch(rpc::RPCMessage& raw_message) {
-  thpp::Tensor *tensor = unpackRetrieveTensor(raw_message);
-  thpp::Tensor *m1 = unpackRetrieveTensor(raw_message);
-  thpp::Tensor *m2 = unpackRetrieveTensor(raw_message);
-
-  if (thpp::isInteger(tensor->type())) {
-    int64_t gain = unpackInteger(raw_message);
-    finalize(raw_message);
-    dynamic_cast<thpp::IntTensor*>(tensor)->match(*m1, *m2, gain);
-  } else if (thpp::isFloat(tensor->type())) {
-    double gain = unpackFloat(raw_message);
-    finalize(raw_message);
-    dynamic_cast<thpp::FloatTensor*>(tensor)->match(*m1, *m2, gain);
+    at::baddbmm_out(tensor, src, batch1, batch2, beta, alpha);
   } else {
     throw std::invalid_argument("expected scalar type");
   }
 }
 
 static void tensorMax(rpc::RPCMessage& raw_message) {
-  thpp::Tensor *tensor = unpackRetrieveTensor(raw_message);
-  thpp::Tensor *indices_ = unpackRetrieveTensor(raw_message);
-  thpp::Tensor *src = unpackRetrieveTensor(raw_message);
+  at::Tensor tensor = unpackRetrieveTensor(raw_message);
+  at::Tensor indices_ = unpackRetrieveTensor(raw_message);
+  at::Tensor src = unpackRetrieveTensor(raw_message);
   int dimension = unpackInteger(raw_message);
   int keepdim = unpackInteger(raw_message);
   finalize(raw_message);
-  tensor->max(*indices_, *src, dimension, keepdim);
+  at::max_out(tensor, indices_, src, dimension, keepdim);
 }
 
 static void tensorMin(rpc::RPCMessage& raw_message) {
-  thpp::Tensor *tensor = unpackRetrieveTensor(raw_message);
-  thpp::Tensor *indices_ = unpackRetrieveTensor(raw_message);
-  thpp::Tensor *src = unpackRetrieveTensor(raw_message);
+  at::Tensor tensor = unpackRetrieveTensor(raw_message);
+  at::Tensor indices_ = unpackRetrieveTensor(raw_message);
+  at::Tensor src = unpackRetrieveTensor(raw_message);
   int dimension = unpackInteger(raw_message);
   int keepdim = unpackInteger(raw_message);
   finalize(raw_message);
-  tensor->min(*indices_, *src, dimension, keepdim);
+  at::min_out(tensor, indices_, src, dimension, keepdim);
 }
 
 static void tensorKthvalue(rpc::RPCMessage& raw_message) {
-  thpp::Tensor *tensor = unpackRetrieveTensor(raw_message);
-  thpp::Tensor *indices_ = unpackRetrieveTensor(raw_message);
-  thpp::Tensor *src = unpackRetrieveTensor(raw_message);
+  at::Tensor tensor = unpackRetrieveTensor(raw_message);
+  at::Tensor indices_ = unpackRetrieveTensor(raw_message);
+  at::Tensor src = unpackRetrieveTensor(raw_message);
   int k = unpackInteger(raw_message);
   int dimension = unpackInteger(raw_message);
   int keepdim = unpackInteger(raw_message);
   finalize(raw_message);
-  tensor->kthvalue(*indices_, *src, k, dimension, keepdim);
+  at::kthvalue_out(tensor, indices_, src, k, dimension, keepdim);
 }
 
 static void tensorMode(rpc::RPCMessage& raw_message) {
-  thpp::Tensor *tensor = unpackRetrieveTensor(raw_message);
-  thpp::Tensor *indices_ = unpackRetrieveTensor(raw_message);
-  thpp::Tensor *src = unpackRetrieveTensor(raw_message);
+  at::Tensor tensor = unpackRetrieveTensor(raw_message);
+  at::Tensor indices_ = unpackRetrieveTensor(raw_message);
+  at::Tensor src = unpackRetrieveTensor(raw_message);
   int dimension = unpackInteger(raw_message);
   int keepdim = unpackInteger(raw_message);
   finalize(raw_message);
-  tensor->mode(*indices_, *src, dimension, keepdim);
+  at::mode_out(tensor, indices_, src, dimension, keepdim);
 }
 
 static void tensorMedian(rpc::RPCMessage& raw_message) {
-  thpp::Tensor *tensor = unpackRetrieveTensor(raw_message);
-  thpp::Tensor *indices_ = unpackRetrieveTensor(raw_message);
-  thpp::Tensor *src = unpackRetrieveTensor(raw_message);
+  at::Tensor tensor = unpackRetrieveTensor(raw_message);
+  at::Tensor indices_ = unpackRetrieveTensor(raw_message);
+  at::Tensor src = unpackRetrieveTensor(raw_message);
   int dimension = unpackInteger(raw_message);
   int keepdim = unpackInteger(raw_message);
   finalize(raw_message);
-  tensor->median(*indices_, *src, dimension, keepdim);
+  at::median_out(tensor, indices_, src, dimension, keepdim);
 }
 
 static void tensorSum(rpc::RPCMessage& raw_message) {
-  thpp::Tensor *tensor = unpackRetrieveTensor(raw_message);
-  thpp::Tensor *src = unpackRetrieveTensor(raw_message);
+  at::Tensor tensor = unpackRetrieveTensor(raw_message);
+  at::Tensor src = unpackRetrieveTensor(raw_message);
   int dimension = unpackInteger(raw_message);
   int keepdim = unpackInteger(raw_message);
   finalize(raw_message);
-  tensor->sum(*src, dimension, keepdim);
+  at::sum_out(tensor, src, dimension, keepdim);
 }
 
 static void tensorProd(rpc::RPCMessage& raw_message) {
-  thpp::Tensor *tensor = unpackRetrieveTensor(raw_message);
-  thpp::Tensor *src = unpackRetrieveTensor(raw_message);
+  at::Tensor tensor = unpackRetrieveTensor(raw_message);
+  at::Tensor src = unpackRetrieveTensor(raw_message);
   int dimension = unpackInteger(raw_message);
   int keepdim = unpackInteger(raw_message);
   finalize(raw_message);
-  tensor->prod(*src, dimension, keepdim);
+  at::prod_out(tensor, src, dimension, keepdim);
 }
 
 static void tensorCumsum(rpc::RPCMessage& raw_message) {
-  thpp::Tensor *tensor = unpackRetrieveTensor(raw_message);
-  thpp::Tensor *src = unpackRetrieveTensor(raw_message);
+  at::Tensor tensor = unpackRetrieveTensor(raw_message);
+  at::Tensor src = unpackRetrieveTensor(raw_message);
   int dimension = unpackInteger(raw_message);
   finalize(raw_message);
-  tensor->cumsum(*src, dimension);
+  at::cumsum_out(tensor, src, dimension);
 }
 
 static void tensorCumprod(rpc::RPCMessage& raw_message) {
-  thpp::Tensor *tensor = unpackRetrieveTensor(raw_message);
-  thpp::Tensor *src = unpackRetrieveTensor(raw_message);
+  at::Tensor tensor = unpackRetrieveTensor(raw_message);
+  at::Tensor src = unpackRetrieveTensor(raw_message);
   int dimension = unpackInteger(raw_message);
   finalize(raw_message);
-  tensor->cumprod(*src, dimension);
+  at::cumprod_out(tensor, src, dimension);
 }
 
 static void tensorSign(rpc::RPCMessage& raw_message) {
-  thpp::Tensor *tensor = unpackRetrieveTensor(raw_message);
-  thpp::Tensor *src = unpackRetrieveTensor(raw_message);
+  at::Tensor tensor = unpackRetrieveTensor(raw_message);
+  at::Tensor src = unpackRetrieveTensor(raw_message);
   finalize(raw_message);
-  tensor->sign(*src);
+  at::sign_out(tensor, src);
 }
 
 static void tensorTrace(rpc::RPCMessage& raw_message) {
-  thpp::Tensor *tensor = unpackRetrieveTensor(raw_message);
+  at::Tensor tensor = unpackRetrieveTensor(raw_message);
   finalize(raw_message);
 
-  if (thpp::isInteger(tensor->type())) {
-    int64_t value = dynamic_cast<thpp::IntTensor*>(tensor)->trace();
+  if (at::isIntegralType(tensor.type().scalarType())) {
+    int64_t value = tensor.trace().toLong();
     sendValueToMaster(value);
-  } else if (thpp::isFloat(tensor->type())) {
-    double value = dynamic_cast<thpp::FloatTensor*>(tensor)->trace();
+  } else if (at::isFloatingType(tensor.type().scalarType())) {
+    double value = tensor.trace().toDouble();
     sendValueToMaster(value);
   } else {
     throw std::invalid_argument("expected scalar type");
@@ -895,60 +919,60 @@ static void tensorTrace(rpc::RPCMessage& raw_message) {
 }
 
 static void tensorCross(rpc::RPCMessage& raw_message) {
-  thpp::Tensor *tensor = unpackRetrieveTensor(raw_message);
-  thpp::Tensor *src1 = unpackRetrieveTensor(raw_message);
-  thpp::Tensor *src2 = unpackRetrieveTensor(raw_message);
+  at::Tensor tensor = unpackRetrieveTensor(raw_message);
+  at::Tensor src1 = unpackRetrieveTensor(raw_message);
+  at::Tensor src2 = unpackRetrieveTensor(raw_message);
   int dimension = unpackInteger(raw_message);
   finalize(raw_message);
-  tensor->cross(*src1, *src2, dimension);
+  at::cross_out(tensor, src1, src2, dimension);
 }
 
 static void tensorCmax(rpc::RPCMessage& raw_message) {
-  thpp::Tensor *tensor = unpackRetrieveTensor(raw_message);
-  thpp::Tensor *src1 = unpackRetrieveTensor(raw_message);
-  thpp::Tensor *src2 = unpackRetrieveTensor(raw_message);
+  at::Tensor tensor = unpackRetrieveTensor(raw_message);
+  at::Tensor src1 = unpackRetrieveTensor(raw_message);
+  at::Tensor src2 = unpackRetrieveTensor(raw_message);
   finalize(raw_message);
-  tensor->cmax(*src1, *src2);
+  at::max_out(tensor, src1, src2);
 }
 
 static void tensorCmin(rpc::RPCMessage& raw_message) {
-  thpp::Tensor *tensor = unpackRetrieveTensor(raw_message);
-  thpp::Tensor *src1 = unpackRetrieveTensor(raw_message);
-  thpp::Tensor *src2 = unpackRetrieveTensor(raw_message);
+  at::Tensor tensor = unpackRetrieveTensor(raw_message);
+  at::Tensor src1 = unpackRetrieveTensor(raw_message);
+  at::Tensor src2 = unpackRetrieveTensor(raw_message);
   finalize(raw_message);
-  tensor->cmin(*src1, *src2);
+  at::min_out(tensor, src1, src2);
 }
 
-static void tensorCmaxValue(rpc::RPCMessage& raw_message) {
-  thpp::Tensor *tensor = unpackRetrieveTensor(raw_message);
-  thpp::Tensor *src = unpackRetrieveTensor(raw_message);
+/* static void tensorCmaxValue(rpc::RPCMessage& raw_message) { */
+/*   at::Tensor tensor = unpackRetrieveTensor(raw_message); */
+/*   at::Tensor src = unpackRetrieveTensor(raw_message); */
 
-  if (thpp::isInteger(tensor->type())) {
-    int64_t value = unpackInteger(raw_message);
-    finalize(raw_message);
-    dynamic_cast<thpp::IntTensor*>(tensor)->cmaxValue(*src, value);
-  } else if (thpp::isFloat(tensor->type())) {
-    double value = unpackFloat(raw_message);
-    finalize(raw_message);
-    dynamic_cast<thpp::FloatTensor*>(tensor)->cmaxValue(*src, value);
-  } else {
-    throw std::invalid_argument("expected scalar type");
-  }
-}
+/*   if (at::isIntegralType(tensor.type().scalarType())) { */
+/*     int64_t value = unpackInteger(raw_message); */
+/*     finalize(raw_message); */
+/*     at::clamp_out(tensor, src, at::Scalar((int64_t)value)); */
+/*   } else if (at::isFloatingType(tensor.type().scalarType())) { */
+/*     double value = unpackFloat(raw_message); */
+/*     finalize(raw_message); */
+/*     at::clamp_out(tensor, src, value); */
+/*   } else { */
+/*     throw std::invalid_argument("expected scalar type"); */
+/*   } */
+/* } */
 
-static void tensorCminValue(rpc::RPCMessage& raw_message) {
-  thpp::Tensor *tensor = unpackRetrieveTensor(raw_message);
-  thpp::Tensor *src = unpackRetrieveTensor(raw_message);
+/* static void tensorCminValue(rpc::RPCMessage& raw_message) { */
+/*   at::Tensor tensor = unpackRetrieveTensor(raw_message); */
+/*   at::Tensor src = unpackRetrieveTensor(raw_message); */
 
-  if (thpp::isInteger(tensor->type())) {
-    int64_t value = unpackInteger(raw_message);
-    finalize(raw_message);
-    dynamic_cast<thpp::IntTensor*>(tensor)->cminValue(*src, value);
-  } else if (thpp::isFloat(tensor->type())) {
-    double value = unpackFloat(raw_message);
-    finalize(raw_message);
-    dynamic_cast<thpp::FloatTensor*>(tensor)->cminValue(*src, value);
-  } else {
-    throw std::invalid_argument("expected scalar type");
-  }
-}
+/*   if (at::isIntegralType(tensor.type().scalarType())) { */
+/*     int64_t value = unpackInteger(raw_message); */
+/*     finalize(raw_message); */
+/*     dynamic_cast<thpp::IntTensor*>(tensor)->cminValue(*src, value); */
+/*   } else if (at::isFloatingType(tensor.type().scalarType())) { */
+/*     double value = unpackFloat(raw_message); */
+/*     finalize(raw_message); */
+/*     dynamic_cast<thpp::FloatTensor*>(tensor)->cminValue(*src, value); */
+/*   } else { */
+/*     throw std::invalid_argument("expected scalar type"); */
+/*   } */
+/* } */

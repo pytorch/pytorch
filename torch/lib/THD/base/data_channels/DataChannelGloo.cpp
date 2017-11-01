@@ -29,8 +29,8 @@
 // useful and unambiguous.
 #define GENERATE_ALL_TYPES(type, func, args...)                               \
   switch (type) {                                                             \
-    case ::thpp::Type::FLOAT: func<float>(args); break;                       \
-    case ::thpp::Type::DOUBLE: func<double>(args); break;                     \
+    case ::at::ScalarType::Float: func<float>(args); break;                   \
+    case ::at::ScalarType::Double: func<double>(args); break;                 \
     /* case ::thpp::Type::CHAR: func<int8_t>(args); break; */                   \
     /* case ::thpp::Type::UCHAR: func<uint8_t>(args); break; */         \
     /* case ::thpp::Type::HALF: func<float>(args); break; */                  \
@@ -126,15 +126,15 @@ rank_type DataChannelGloo::getNumProcesses() {
 
 
 template<typename T>
-void DataChannelGloo::allGatherT(std::vector<thpp::Tensor*>& output,
-                                 thpp::Tensor& input, THDGroup group_id) {
+void DataChannelGloo::allGatherT(std::vector<at::Tensor>& output,
+                                 at::Tensor& input, THDGroup group_id) {
   auto input_device = getDeviceType(input);
   for (auto& out : output) {
-    if (input_device != getDeviceType(*out)) {
+    if (input_device != getDeviceType(out)) {
       throw std::runtime_error("allGather got input and output on different devices");
     }
   }
-  std::uint64_t tensor_bytes = input.elementSize() * input.numel();
+  std::uint64_t tensor_bytes = input.type().elementSizeInBytes() * input.numel();
   std::uint64_t all_tensor_bytes = tensor_bytes * output.size();
   auto ret = _cache->getAlgorithm<CollectiveType::ALL_GATHER, T>(
     group_id, _groups.at(group_id), input_device, tensor_bytes, all_tensor_bytes, input.numel());
@@ -142,10 +142,10 @@ void DataChannelGloo::allGatherT(std::vector<thpp::Tensor*>& output,
 
   {
     std::lock_guard<std::mutex> lock(*GlooCache::mutex(ret));
-    std::memcpy(GlooCache::input_buffer(ret).get(), input.data(), tensor_bytes);
+    std::memcpy(GlooCache::input_buffer(ret).get(), input.data_ptr(), tensor_bytes);
     GlooCache::algorithm(ret)->run();
     for (std::size_t i = 0; i < output.size(); i++) {
-      std::memcpy(output.at(i)->data(),
+      std::memcpy(output.at(i).data_ptr(),
                   GlooCache::output_buffer(ret).get() + (i * tensor_bytes),
                   tensor_bytes);
     }
@@ -153,40 +153,40 @@ void DataChannelGloo::allGatherT(std::vector<thpp::Tensor*>& output,
 
 }
 
-void DataChannelGloo::allGather(std::vector<thpp::Tensor*>& output,
-                                thpp::Tensor& input, THDGroup group_id) {
+void DataChannelGloo::allGather(std::vector<at::Tensor>& output,
+                                at::Tensor& input, THDGroup group_id) {
   RETURN_IF_NOT_IN_GROUP
 
   if (output.size() != _groups.at(group_id).size())
     throw std::logic_error("allGather: number of output tensors and group size does not match");
 
   for (auto out_tensor : output)
-    assertSameSizeAndType(*out_tensor, input, "allGather");
+    assertSameSizeAndType(out_tensor, input, "allGather");
 
-  GENERATE_ALL_TYPES(input.type(), allGatherT, output, input, group_id)
+  GENERATE_ALL_TYPES(input.type().scalarType(), allGatherT, output, input, group_id)
 }
 
 
 // XXX: `gather` is not supported by Gloo yet.
-void DataChannelGloo::gather(std::vector<thpp::Tensor*>& output,
-                             thpp::Tensor& input, rank_type dst_rank,
+void DataChannelGloo::gather(std::vector<at::Tensor>& output,
+                             at::Tensor& input, rank_type dst_rank,
                              THDGroup group_id) {
   throw std::runtime_error("DataChannelGloo doesn't support gather");
 }
 
 
 // XXX: `scatter` is not supported by Gloo yet.
-void DataChannelGloo::scatter(std::vector<thpp::Tensor*>& input,
-                              thpp::Tensor& output,
+void DataChannelGloo::scatter(std::vector<at::Tensor>& input,
+                              at::Tensor& output,
                               rank_type src_rank, THDGroup group_id) {
   throw std::runtime_error("DataChannelGloo does not support scatter");
 }
 
 
 template<typename T>
-void DataChannelGloo::allReduceT(thpp::Tensor& t, THDReduceOp operation,
+void DataChannelGloo::allReduceT(at::Tensor& t, THDReduceOp operation,
                                  THDGroup group_id) {
-  std::uint64_t tensor_bytes = t.elementSize() * t.numel();
+  std::uint64_t tensor_bytes = t.type().elementSizeInBytes() * t.numel();
   auto ret = _cache->getAlgorithm<CollectiveType::ALL_REDUCE, T>(
     group_id, _groups.at(group_id), getDeviceType(t), tensor_bytes, t.numel(), operation);
 
@@ -198,24 +198,24 @@ void DataChannelGloo::allReduceT(thpp::Tensor& t, THDReduceOp operation,
   }
 }
 
-void DataChannelGloo::allReduce(thpp::Tensor& data, THDReduceOp operation,
+void DataChannelGloo::allReduce(at::Tensor& data, THDReduceOp operation,
                                 THDGroup group_id) {
   RETURN_IF_NOT_IN_GROUP
-  GENERATE_ALL_TYPES(data.type(), allReduceT, data, operation, group_id)
+  GENERATE_ALL_TYPES(data.type().scalarType(), allReduceT, data, operation, group_id)
 }
 
 
 // XXX: `reduce` is not supported by Gloo yet.
-void DataChannelGloo::reduce(thpp::Tensor& data, THDReduceOp operation,
+void DataChannelGloo::reduce(at::Tensor& data, THDReduceOp operation,
                              rank_type dst_rank, THDGroup group_id) {
   throw std::runtime_error("DataChannelGloo does not support reduce");
 }
 
 
 template<typename T>
-void DataChannelGloo::broadcastT(thpp::Tensor& data, rank_type src_rank,
+void DataChannelGloo::broadcastT(at::Tensor& data, rank_type src_rank,
                                  THDGroup group_id) {
-  std::uint64_t tensor_bytes = data.elementSize() * data.numel();
+  std::uint64_t tensor_bytes = data.type().elementSizeInBytes() * data.numel();
   auto ret = _cache->getAlgorithm<CollectiveType::BROADCAST, T>(
     group_id, _groups.at(group_id), getDeviceType(data), tensor_bytes, data.numel(),
     _groups.at(group_id).mustGetGroupRank(src_rank));
@@ -236,10 +236,10 @@ void DataChannelGloo::broadcastT(thpp::Tensor& data, rank_type src_rank,
 }
 
 
-void DataChannelGloo::broadcast(thpp::Tensor& data, rank_type src_rank,
+void DataChannelGloo::broadcast(at::Tensor& data, rank_type src_rank,
                                 THDGroup group_id) {
   RETURN_IF_NOT_IN_GROUP
-  GENERATE_ALL_TYPES(data.type(), broadcastT, data, src_rank, group_id)
+  GENERATE_ALL_TYPES(data.type().scalarType(), broadcastT, data, src_rank, group_id)
 }
 
 
@@ -248,7 +248,7 @@ void DataChannelGloo::send(Scalar& data, rank_type dst_rank) {
 }
 
 
-void DataChannelGloo::send(thpp::Tensor& data, rank_type dst_rank) {
+void DataChannelGloo::send(at::Tensor& data, rank_type dst_rank) {
   throw std::runtime_error("DataChannelGloo does not support send");
 }
 
@@ -258,22 +258,22 @@ void DataChannelGloo::receive(Scalar& data, rank_type src_rank) {
 }
 
 
-rank_type DataChannelGloo::receive(thpp::Tensor& data) {
+rank_type DataChannelGloo::receive(at::Tensor& data) {
   throw std::runtime_error("DataChannelGloo does not support receive from any source");
 }
 
 
-void DataChannelGloo::receive(thpp::Tensor& data, rank_type src_rank) {
+void DataChannelGloo::receive(at::Tensor& data, rank_type src_rank) {
   throw std::runtime_error("DataChannelGloo does not support receive");
 }
 
 
-auto DataChannelGloo::isend(thpp::Tensor& data, rank_type dst_rank) -> RequestGloo* {
+auto DataChannelGloo::isend(at::Tensor& data, rank_type dst_rank) -> RequestGloo* {
   throw std::runtime_error("DataChannelGloo does not support isend");
 }
 
 
-auto DataChannelGloo::ireceive(thpp::Tensor& data, rank_type src_rank) -> RequestGloo* {
+auto DataChannelGloo::ireceive(at::Tensor& data, rank_type src_rank) -> RequestGloo* {
   throw std::runtime_error("DataChannelGloo does not support ireceive");
 }
 

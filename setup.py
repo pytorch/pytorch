@@ -458,7 +458,6 @@ if WITH_DISTRIBUTED:
     extra_compile_args += ['-DWITH_DISTRIBUTED']
     main_sources += [
         "torch/csrc/distributed/Module.cpp",
-        "torch/csrc/distributed/utils.cpp",
     ]
     if WITH_DISTRIBUTED_MW:
         main_sources += [

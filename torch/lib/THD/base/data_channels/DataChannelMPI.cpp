@@ -22,19 +22,14 @@ std::unordered_map<THDReduceOp, MPI_Op> mpi_op = {
   {THDReduceOp::THDReducePRODUCT, MPI_PROD},
 };
 
-std::unordered_map<thpp::Type, MPI_Datatype> mpi_datatype = {
-  {thpp::Type::CHAR, MPI_CHAR},
-  {thpp::Type::UCHAR, MPI_UNSIGNED_CHAR},
-  {thpp::Type::FLOAT, MPI_FLOAT},
-  {thpp::Type::DOUBLE, MPI_DOUBLE},
-  {thpp::Type::SHORT, MPI_SHORT},
-  {thpp::Type::USHORT, MPI_UNSIGNED_SHORT},
-  {thpp::Type::INT, MPI_INT},
-  {thpp::Type::UINT, MPI_UNSIGNED},
-  {thpp::Type::LONG, MPI_LONG},
-  {thpp::Type::ULONG, MPI_UNSIGNED_LONG},
-  {thpp::Type::LONG_LONG, MPI_LONG_LONG},
-  {thpp::Type::ULONG_LONG, MPI_UNSIGNED_LONG_LONG},
+std::unordered_map<at::ScalarType, MPI_Datatype> mpi_datatype = {
+	{at::kByte, MPI_UNSIGNED_CHAR},
+	{at::kChar, MPI_CHAR},
+	{at::kDouble, MPI_DOUBLE},
+	{at::kFloat, MPI_FLOAT},
+	{at::kInt, MPI_INT},
+	{at::kLong, MPI_LONG},
+	{at::kShort, MPI_SHORT},
 };
 
 } // namespace
@@ -68,12 +63,15 @@ void DataChannelMPI::RequestMPI::steal_buffer(std::shared_ptr<T> ptr) {
   _buffers.push_back(std::static_pointer_cast<void>(ptr));
 }
 
+void DataChannelMPI::RequestMPI::steal_tensor_buffer(at::Tensor& t) {
+	_tensor_buffers.push_back(t);
+}
+
 
 MPI_Request& DataChannelMPI::RequestMPI::new_request() {
   _requests.push_back(MPI_Request());
   return _requests.back();
 }
-
 
 DataChannelMPI::DataChannelMPI()
   : _rank(-1)
@@ -131,8 +129,8 @@ rank_type DataChannelMPI::getNumProcesses() {
 }
 
 
-void DataChannelMPI::allGather(std::vector<thpp::Tensor*>& output,
-                               thpp::Tensor& input, THDGroup group_id) {
+void DataChannelMPI::allGather(std::vector<at::Tensor>& output,
+                               at::Tensor& input, THDGroup group_id) {
   const auto& group_pair = _groups.at(group_id);
   const auto& comm = group_pair.first;
   if (comm == MPI_COMM_NULL)
@@ -142,25 +140,25 @@ void DataChannelMPI::allGather(std::vector<thpp::Tensor*>& output,
     throw std::logic_error("allGather: number of output tensors and group size does not match");
 
   for (auto out_tensor : output)
-    assertSameSizeAndType(*out_tensor, input, "allGather");
+    assertSameSizeAndType(out_tensor, input, "allGather");
 
-  std::uint64_t tensor_bytes = input.elementSize() * input.numel();
+  std::uint64_t tensor_bytes = input.type().elementSizeInBytes() * input.numel();
   std::uint64_t all_tensors_bytes = tensor_bytes * output.size();
   std::unique_ptr<std::uint8_t[]> tmp_data(new std::uint8_t[all_tensors_bytes]);
 
   MPI_Allgather(
-    input.data(), input.numel(), mpi_datatype.at(input.type()),
-    tmp_data.get(), input.numel(), mpi_datatype.at(input.type()),
+    input.data_ptr(), input.numel(), mpi_datatype.at(input.type().scalarType()),
+    tmp_data.get(), input.numel(), mpi_datatype.at(input.type().scalarType()),
     comm
   );
 
   for (std::size_t i = 0; i < output.size(); ++i)
-    memcpy(output.at(i)->data(), tmp_data.get() + (i * tensor_bytes), tensor_bytes);
+    memcpy(output.at(i).data_ptr(), tmp_data.get() + (i * tensor_bytes), tensor_bytes);
 }
 
 
-void DataChannelMPI::gather(std::vector<thpp::Tensor*>& output,
-                            thpp::Tensor& input, rank_type dst_rank,
+void DataChannelMPI::gather(std::vector<at::Tensor>& output,
+                            at::Tensor& input, rank_type dst_rank,
                             THDGroup group_id) {
   /*
    * Output vector size is 0 for _rank != dst_rank.
@@ -179,27 +177,27 @@ void DataChannelMPI::gather(std::vector<thpp::Tensor*>& output,
       throw std::logic_error("gather: number of output tensors and group size does not match");
 
     for (auto out_tensor : output)
-      assertSameSizeAndType(*out_tensor, input, "gather");
+      assertSameSizeAndType(out_tensor, input, "gather");
   }
 
   rank_type group_dst_rank = group_pair.second.mustGetGroupRank(dst_rank);
-  std::uint64_t tensor_bytes = input.elementSize() * input.numel();
+  std::uint64_t tensor_bytes = input.type().elementSizeInBytes() * input.numel();
   std::uint64_t all_tensors_bytes = tensor_bytes * output.size();
   std::unique_ptr<std::uint8_t[]> tmp_data(new std::uint8_t[all_tensors_bytes]);
 
   MPI_Gather(
-    input.data(), input.numel(), mpi_datatype.at(input.type()),
-    tmp_data.get(), input.numel(), mpi_datatype.at(input.type()),
+    input.data_ptr(), input.numel(), mpi_datatype.at(input.type().scalarType()),
+    tmp_data.get(), input.numel(), mpi_datatype.at(input.type().scalarType()),
     group_dst_rank, comm
   );
 
   for (std::size_t i = 0; i < output.size(); ++i)
-    memcpy(output.at(i)->data(), tmp_data.get() + (i * tensor_bytes), tensor_bytes);
+    memcpy(output.at(i).data_ptr(), tmp_data.get() + (i * tensor_bytes), tensor_bytes);
 }
 
 
-void DataChannelMPI::scatter(std::vector<thpp::Tensor*>& input,
-                             thpp::Tensor& output,
+void DataChannelMPI::scatter(std::vector<at::Tensor>& input,
+                             at::Tensor& output,
                              rank_type src_rank, THDGroup group_id) {
   /*
    * Input vector size is 0 for _rank != dst_rank.
@@ -218,41 +216,41 @@ void DataChannelMPI::scatter(std::vector<thpp::Tensor*>& input,
       throw std::logic_error("scatter: number of input tensors and group size does not match");
 
     for (auto in_tensor : input)
-      assertSameSizeAndType(*in_tensor, output, "scatter");
-  }
+      assertSameSizeAndType(in_tensor, output, "scatter");
+	}
 
   rank_type group_src_rank = group_pair.second.mustGetGroupRank(src_rank);
-  std::uint64_t tensor_bytes = output.elementSize() * output.numel();
+  std::uint64_t tensor_bytes = output.type().elementSizeInBytes() * output.numel();
   std::uint64_t all_tensors_bytes = tensor_bytes * input.size();
   std::unique_ptr<std::uint8_t[]> tmp_data(new std::uint8_t[all_tensors_bytes]);
 
   for (std::size_t i = 0; i < input.size(); ++i)
-    memcpy(tmp_data.get() + (i * tensor_bytes), input.at(i)->data(), tensor_bytes);
+    memcpy(tmp_data.get() + (i * tensor_bytes), input.at(i).data_ptr(), tensor_bytes);
 
   MPI_Scatter(
-    tmp_data.get(), output.numel(), mpi_datatype.at(output.type()),
-    output.data(), output.numel(), mpi_datatype.at(output.type()),
+    tmp_data.get(), output.numel(), mpi_datatype.at(output.type().scalarType()),
+    output.data_ptr(), output.numel(), mpi_datatype.at(output.type().scalarType()),
     group_src_rank, comm
   );
 }
 
 
-void DataChannelMPI::allReduce(thpp::Tensor& data, THDReduceOp operation,
+void DataChannelMPI::allReduce(at::Tensor& data, THDReduceOp operation,
                                THDGroup group_id) {
   const auto& comm = _groups.at(group_id).first;
   if (comm == MPI_COMM_NULL)
     return;
 
-  std::uint64_t tensor_bytes = data.elementSize() * data.numel();
+  std::uint64_t tensor_bytes = data.type().elementSizeInBytes() * data.numel();
   std::unique_ptr<std::uint8_t[]> tmp_data(new std::uint8_t[tensor_bytes]);
 
-  MPI_Allreduce(data.data(), tmp_data.get(), data.numel(),
-                mpi_datatype.at(data.type()), mpi_op.at(operation), comm);
-  memcpy(data.data(), tmp_data.get(), tensor_bytes);
+  MPI_Allreduce(data.data_ptr(), tmp_data.get(), data.numel(),
+                mpi_datatype.at(data.type().scalarType()), mpi_op.at(operation), comm);
+  memcpy(data.data_ptr(), tmp_data.get(), tensor_bytes);
 }
 
 
-void DataChannelMPI::reduce(thpp::Tensor& data, THDReduceOp operation,
+void DataChannelMPI::reduce(at::Tensor& data, THDReduceOp operation,
                             rank_type dst_rank, THDGroup group_id) {
   const auto& group_pair = _groups.at(group_id);
   const auto& comm = group_pair.first;
@@ -262,33 +260,33 @@ void DataChannelMPI::reduce(thpp::Tensor& data, THDReduceOp operation,
   auto group_dst_rank = group_pair.second.mustGetGroupRank(dst_rank);
   // we want to allocate recv memory only for dst_rank
   std::uint64_t tensor_bytes = (_rank == dst_rank) ?
-    (data.elementSize() * data.numel()) : 0;
+    (data.type().elementSizeInBytes() * data.numel()) : 0;
   std::unique_ptr<std::uint8_t[]> tmp_data(new std::uint8_t[tensor_bytes]);
 
-  MPI_Reduce(data.data(), tmp_data.get(), data.numel(), mpi_datatype.at(data.type()),
+  MPI_Reduce(data.data_ptr(), tmp_data.get(), data.numel(), mpi_datatype.at(data.type().scalarType()),
              mpi_op.at(operation), group_dst_rank, comm);
   if (_rank == dst_rank)
-    memcpy(data.data(), tmp_data.get(), tensor_bytes);
+    memcpy(data.data_ptr(), tmp_data.get(), tensor_bytes);
 }
 
 
-void DataChannelMPI::_broadcastPack(thpp::Tensor& data, rank_type src_rank,
+void DataChannelMPI::_broadcastPack(at::Tensor& data, rank_type src_rank,
                                     MPI_Comm comm) const {
-  std::uint64_t tensor_bytes = data.elementSize() * data.numel();
+  std::uint64_t tensor_bytes = data.type().elementSizeInBytes() * data.numel();
   MPI_Bcast(&tensor_bytes, 1, MPI_UINT64_T, src_rank, comm);
-  MPI_Bcast(reinterpret_cast<std::uint8_t*>(data.data()), tensor_bytes,
+  MPI_Bcast(reinterpret_cast<std::uint8_t*>(data.data_ptr()), tensor_bytes,
       MPI_UINT8_T, src_rank, comm);
 }
 
 
-void DataChannelMPI::_broadcastUnpack(thpp::Tensor& data, rank_type src_rank,
+void DataChannelMPI::_broadcastUnpack(at::Tensor& data, rank_type src_rank,
                                       MPI_Comm comm) const {
   std::uint64_t tensor_bytes;
   MPI_Bcast(&tensor_bytes, 1, MPI_UINT64_T, src_rank, comm);
 
-  std::uint64_t actual_tensor_bytes = data.elementSize() * data.numel();
+  std::uint64_t actual_tensor_bytes = data.type().elementSizeInBytes() * data.numel();
   if (actual_tensor_bytes == tensor_bytes) {
-      MPI_Bcast(data.data(), tensor_bytes, MPI_UINT8_T, src_rank, comm);
+      MPI_Bcast(data.data_ptr(), tensor_bytes, MPI_UINT8_T, src_rank, comm);
   } else {
     // receive invalid data
     std::unique_ptr<std::uint8_t[]> bytes(new std::uint8_t[tensor_bytes]);
@@ -300,7 +298,7 @@ void DataChannelMPI::_broadcastUnpack(thpp::Tensor& data, rank_type src_rank,
 }
 
 
-void DataChannelMPI::broadcast(thpp::Tensor& data, rank_type src_rank,
+void DataChannelMPI::broadcast(at::Tensor& data, rank_type src_rank,
                                THDGroup group_id) {
   const auto& group_pair = _groups.at(group_id);
   const auto& comm = group_pair.first;
@@ -324,13 +322,13 @@ void DataChannelMPI::send(Scalar& data, rank_type dst_rank) {
 }
 
 
-void DataChannelMPI::send(thpp::Tensor& data, rank_type dst_rank) {
-  if (!data.isContiguous())
+void DataChannelMPI::send(at::Tensor& data, rank_type dst_rank) {
+  if (!data.is_contiguous())
     throw std::logic_error("tensor to send is not contiguous");
 
-  std::uint64_t tensor_bytes = data.elementSize() * data.numel();
+  std::uint64_t tensor_bytes = data.type().elementSizeInBytes() * data.numel();
   MPI_Send(&tensor_bytes, 1, MPI_UINT64_T, dst_rank, 0, MPI_COMM_WORLD);
-  MPI_Send(reinterpret_cast<std::uint8_t*>(data.data()), tensor_bytes,
+  MPI_Send(reinterpret_cast<std::uint8_t*>(data.data_ptr()), tensor_bytes,
            MPI_UINT8_T, dst_rank, 0, MPI_COMM_WORLD);
 }
 
@@ -354,18 +352,18 @@ void DataChannelMPI::receive(Scalar& data, rank_type src_rank) {
 }
 
 
-rank_type DataChannelMPI::receive(thpp::Tensor& data) {
-  if (!data.isContiguous())
+rank_type DataChannelMPI::receive(at::Tensor& data) {
+  if (!data.is_contiguous())
     throw std::logic_error("tensor to receive is not contiguous");
 
   std::uint64_t tensor_bytes;
   MPI_Recv(&tensor_bytes, 1, MPI_UINT64_T, MPI_ANY_SOURCE, 0,
            MPI_COMM_WORLD, MPI_STATUS_IGNORE);
 
-  std::uint64_t actual_tensor_bytes = data.elementSize() * data.numel();
+  std::uint64_t actual_tensor_bytes = data.type().elementSizeInBytes() * data.numel();
   if (actual_tensor_bytes == tensor_bytes) {
     MPI_Status status;
-    MPI_Recv(data.data(), tensor_bytes, MPI_UINT8_T, MPI_ANY_SOURCE, 0, MPI_COMM_WORLD,
+    MPI_Recv(data.data_ptr(), tensor_bytes, MPI_UINT8_T, MPI_ANY_SOURCE, 0, MPI_COMM_WORLD,
              &status);
     return status.MPI_SOURCE;
   } else {
@@ -378,17 +376,17 @@ rank_type DataChannelMPI::receive(thpp::Tensor& data) {
 }
 
 
-void DataChannelMPI::receive(thpp::Tensor& data, rank_type src_rank) {
-  if (!data.isContiguous())
+void DataChannelMPI::receive(at::Tensor& data, rank_type src_rank) {
+  if (!data.is_contiguous())
     throw std::logic_error("tensor to receive is not contiguous");
 
   std::uint64_t tensor_bytes;
   MPI_Recv(&tensor_bytes, 1, MPI_UINT64_T, src_rank, 0, MPI_COMM_WORLD,
            MPI_STATUS_IGNORE);
 
-  std::uint64_t actual_tensor_bytes = data.elementSize() * data.numel();
+  std::uint64_t actual_tensor_bytes = data.type().elementSizeInBytes() * data.numel();
   if (actual_tensor_bytes == tensor_bytes) {
-    MPI_Recv(data.data(), tensor_bytes, MPI_UINT8_T, src_rank, 0, MPI_COMM_WORLD,
+    MPI_Recv(data.data_ptr(), tensor_bytes, MPI_UINT8_T, src_rank, 0, MPI_COMM_WORLD,
              MPI_STATUS_IGNORE);
   } else {
     // receive invalid data
@@ -409,13 +407,13 @@ void DataChannelMPI::barrier(THDGroup group_id) {
 }
 
 
-DataChannelMPI::RequestMPI* DataChannelMPI::isend(thpp::Tensor& data,
+DataChannelMPI::RequestMPI* DataChannelMPI::isend(at::Tensor& data,
                                                   rank_type dst_rank) {
-  if (!data.isContiguous())
+  if (!data.is_contiguous())
     throw std::logic_error("tensor to send is not contiguous");
 
   RequestMPI* request = new RequestMPI();
-  std::uint64_t tensor_bytes = data.elementSize() * data.numel();
+  std::uint64_t tensor_bytes = data.type().elementSizeInBytes() * data.numel();
   {
     std::shared_ptr<std::uint64_t> size_buffer =
       std::make_shared<std::uint64_t>(tensor_bytes);
@@ -426,10 +424,9 @@ DataChannelMPI::RequestMPI* DataChannelMPI::isend(thpp::Tensor& data,
   }
 
   {
-    std::shared_ptr<thpp::Tensor> copy_tensor(data.clone_shallow());
-    request->steal_buffer(copy_tensor);
+    request->steal_tensor_buffer(data);
     auto& mpi_request = request->new_request();
-    MPI_Isend(data.data(), tensor_bytes, MPI_UINT8_T, dst_rank, 0,
+    MPI_Isend(data.data_ptr(), tensor_bytes, MPI_UINT8_T, dst_rank, 0,
               MPI_COMM_WORLD, &mpi_request);
   }
 
@@ -437,18 +434,18 @@ DataChannelMPI::RequestMPI* DataChannelMPI::isend(thpp::Tensor& data,
 }
 
 
-DataChannelMPI::RequestMPI* DataChannelMPI::ireceive(thpp::Tensor& data,
+DataChannelMPI::RequestMPI* DataChannelMPI::ireceive(at::Tensor& data,
                                                      rank_type src_rank) {
   /*
    * This function does **NOT** perform length and size checking. It assumes that
    * someone is using this very carefully.
    */
 
-  if (!data.isContiguous())
+  if (!data.is_contiguous())
     throw std::logic_error("tensor to receive is not contiguous");
 
   RequestMPI* request = new RequestMPI();
-  std::uint64_t tensor_bytes = data.elementSize() * data.numel();
+  std::uint64_t tensor_bytes = data.type().elementSizeInBytes() * data.numel();
   {
     std::shared_ptr<std::uint64_t> size_buffer =
       std::make_shared<std::uint64_t>(tensor_bytes);
@@ -459,10 +456,9 @@ DataChannelMPI::RequestMPI* DataChannelMPI::ireceive(thpp::Tensor& data,
   }
 
   {
-    std::shared_ptr<thpp::Tensor> copy_tensor(data.clone_shallow());
-    request->steal_buffer(copy_tensor);
+    request->steal_tensor_buffer(data);
     auto& mpi_request = request->new_request();
-    MPI_Irecv(data.data(), tensor_bytes, MPI_UINT8_T, src_rank, 0,
+    MPI_Irecv(data.data_ptr(), tensor_bytes, MPI_UINT8_T, src_rank, 0,
               MPI_COMM_WORLD, &mpi_request);
   }
 

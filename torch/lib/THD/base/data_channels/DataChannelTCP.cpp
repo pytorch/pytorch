@@ -243,8 +243,8 @@ rank_type DataChannelTCP::getNumProcesses() {
 }
 
 
-void DataChannelTCP::allGather(std::vector<thpp::Tensor*>& output,
-                               thpp::Tensor& input, THDGroup group_id) {
+void DataChannelTCP::allGather(std::vector<at::Tensor>& output,
+                               at::Tensor& input, THDGroup group_id) {
   /*
    * Allgather algorithm is simple ring algorithm. This algorithm perfroms
    * well on large data (> 512 KB) and generalize well on large group of nodes.
@@ -268,17 +268,17 @@ void DataChannelTCP::allGather(std::vector<thpp::Tensor*>& output,
     throw std::logic_error("allGather: number of output tensors and group size does not match");
 
   for (auto out_tensor : output)
-    assertSameSizeAndType(*out_tensor, input, "allGather");
+    assertSameSizeAndType(out_tensor, input, "allGather");
 
   rank_type left = (group.size() + group_rank - 1) % group.size();
   rank_type right = (group_rank + 1) % group.size();
 
-  memcpy(output[group_rank]->data(), input.data(), input.elementSize() * input.numel());
+  memcpy(output[group_rank].data_ptr(), input.data_ptr(), input.type().elementSizeInBytes() * input.numel());
 
   auto j = group_rank, jnext = left;
   for (rank_type i = 0; i < group.size(); ++i) {
-    req_ptr send_request {isend(*(output[j]), group.mustGetGlobalRank(right))};
-    receive(*(output[jnext]), group.mustGetGlobalRank(left));
+    req_ptr send_request {isend((output[j]), group.mustGetGlobalRank(right))};
+    receive((output[jnext]), group.mustGetGlobalRank(left));
     send_request->wait();
 
     j = jnext;
@@ -287,8 +287,8 @@ void DataChannelTCP::allGather(std::vector<thpp::Tensor*>& output,
 }
 
 
-void DataChannelTCP::gather(std::vector<thpp::Tensor*>& output,
-                            thpp::Tensor& input, rank_type dst_rank, THDGroup group_id) {
+void DataChannelTCP::gather(std::vector<at::Tensor>& output,
+                            at::Tensor& input, rank_type dst_rank, THDGroup group_id) {
   std::lock_guard<std::mutex> lock(_mutex);
 
   const auto& group = _groups.at(group_id);
@@ -307,22 +307,22 @@ void DataChannelTCP::gather(std::vector<thpp::Tensor*>& output,
       throw std::logic_error("gather: number of output tensors and group size does not match");
 
     for (auto out_tensor : output)
-      assertSameSizeAndType(*out_tensor, input, "gather");
+      assertSameSizeAndType(out_tensor, input, "gather");
 
     for (rank_type i = 0; i < group.size(); ++i) {
       auto global_rank = group.mustGetGlobalRank(i);
       if (_rank != global_rank) {
-        receive(*(output.at(i)), global_rank);
+        receive((output.at(i)), global_rank);
       } else {
-        memcpy(output.at(i)->data(), input.data(), input.numel() * input.elementSize());
+        memcpy(output.at(i).data_ptr(), input.data_ptr(), input.numel() * input.type().elementSizeInBytes());
       }
     }
   }
 }
 
 
-void DataChannelTCP::scatter(std::vector<thpp::Tensor*>& input,
-                             thpp::Tensor& output, rank_type src_rank,
+void DataChannelTCP::scatter(std::vector<at::Tensor>& input,
+                             at::Tensor& output, rank_type src_rank,
                              THDGroup group_id) {
   std::lock_guard<std::mutex> lock(_mutex);
 
@@ -342,21 +342,21 @@ void DataChannelTCP::scatter(std::vector<thpp::Tensor*>& input,
       throw std::logic_error("scatter: number of input tensors and group size does not match");
 
     for (auto in_tensor : input)
-      assertSameSizeAndType(*in_tensor, output, "scatter");
+      assertSameSizeAndType(in_tensor, output, "scatter");
 
     for (rank_type i = 0; i < group.size(); ++i) {
       auto global_rank = group.mustGetGlobalRank(i);
       if (_rank != global_rank) {
-        send(*(input.at(i)), global_rank);
+        send((input.at(i)), global_rank);
       } else {
-        memcpy(output.data(), input.at(i)->data(), output.numel() * output.elementSize());
+        memcpy(output.data_ptr(), input.at(i).data_ptr(), output.numel() * output.type().elementSizeInBytes());
       }
     }
   }
 }
 
 
-void DataChannelTCP::allReduce(thpp::Tensor& data, THDReduceOp operation,
+void DataChannelTCP::allReduce(at::Tensor& data, THDReduceOp operation,
                                THDGroup group_id) {
   /*
    * Allreduce implementation is recursive doubling algorithm. It is good
@@ -382,8 +382,8 @@ void DataChannelTCP::allReduce(thpp::Tensor& data, THDReduceOp operation,
   if (!exists)
     return;
 
-  std::uint64_t tensor_bytes = data.elementSize() * data.numel();
-  auto tmp_tensor = std::unique_ptr<thpp::Tensor>(data.clone());
+  std::uint64_t tensor_bytes = data.type().elementSizeInBytes() * data.numel();
+  auto tmp_tensor = data.clone();
 
   auto pof2 = pow2(group.size());
   int rem = group.size() - pof2;
@@ -394,8 +394,8 @@ void DataChannelTCP::allReduce(thpp::Tensor& data, THDReduceOp operation,
       send(data, group.mustGetGlobalRank(group_rank + 1));
       newrank = -1;
     } else {
-      receive(*tmp_tensor, group.mustGetGlobalRank(group_rank - 1));
-      _reduce(data, *tmp_tensor, operation);
+      receive(tmp_tensor, group.mustGetGlobalRank(group_rank - 1));
+      _reduce(data, tmp_tensor, operation);
       newrank = group_rank / 2;
     }
   } else {
@@ -410,14 +410,14 @@ void DataChannelTCP::allReduce(thpp::Tensor& data, THDReduceOp operation,
 
       auto dst_global_rank = group.mustGetGlobalRank(dst);
       req_ptr send_request {isend(data, dst_global_rank)};
-      receive(*tmp_tensor, dst_global_rank);
+      receive(tmp_tensor, dst_global_rank);
       send_request->wait();
 
       if (dst < group_rank) {
-        _reduce(data, *tmp_tensor, operation);
+        _reduce(data, tmp_tensor, operation);
       } else {
-        _reduce(*tmp_tensor, data, operation);
-        std::memcpy(data.data(), tmp_tensor->data(), tensor_bytes);
+        _reduce(tmp_tensor, data, operation);
+        std::memcpy(data.data_ptr(), tmp_tensor.data_ptr(), tensor_bytes);
       }
 
       mask <<= 1;
@@ -434,7 +434,7 @@ void DataChannelTCP::allReduce(thpp::Tensor& data, THDReduceOp operation,
 }
 
 
-void DataChannelTCP::reduce(thpp::Tensor& data, THDReduceOp operation,
+void DataChannelTCP::reduce(at::Tensor& data, THDReduceOp operation,
                             rank_type dst_rank, THDGroup group_id) {
   /*
    * Idea of this algorithm is similar to broadcast but with reversed
@@ -455,7 +455,7 @@ void DataChannelTCP::reduce(thpp::Tensor& data, THDReduceOp operation,
   int dim = log2ceil(group.size());
   rank_type virtual_rank = (group_rank + group.size() - group_dst_rank) % group.size();
   int64_t mask = 0;
-  auto result_tensor = std::unique_ptr<thpp::Tensor>(data.clone());
+  auto result_tensor = data.clone();
 
   for (int k = 0; k <= dim - 1; mask ^= (1 << k), ++k) {
     if ((virtual_rank & mask) == 0) {
@@ -465,20 +465,20 @@ void DataChannelTCP::reduce(thpp::Tensor& data, THDReduceOp operation,
 
       partner = group.mustGetGlobalRank((partner + group_dst_rank) % group.size());
       if ((virtual_rank & (1 << k)) != 0) {
-        send(*result_tensor, partner);
+        send(result_tensor, partner);
       } else {
         receive(data, partner);
-        _reduce(*result_tensor, data, operation);
+        _reduce(result_tensor, data, operation);
       }
     }
   }
 
   if (_rank == dst_rank)
-    std::memcpy(data.data(), result_tensor->data(), data.elementSize() * data.numel());
+    std::memcpy(data.data_ptr(), result_tensor.data_ptr(), data.type().elementSizeInBytes() * data.numel());
 }
 
 
-void DataChannelTCP::broadcast(thpp::Tensor& data, rank_type src_rank,
+void DataChannelTCP::broadcast(at::Tensor& data, rank_type src_rank,
                                THDGroup group_id) {
   /*
    * General idea of this algorithm is to send data in `d` dimensional
@@ -531,7 +531,7 @@ void DataChannelTCP::send(Scalar& data, rank_type dst_rank) {
 }
 
 
-void DataChannelTCP::send(thpp::Tensor& data, rank_type dst_rank) {
+void DataChannelTCP::send(at::Tensor& data, rank_type dst_rank) {
   auto request = _send_worker.push([this, &data, dst_rank]{
     this->_send(data, dst_rank);
   });
@@ -547,7 +547,7 @@ void DataChannelTCP::receive(Scalar& data, rank_type src_rank) {
 }
 
 
-rank_type DataChannelTCP::receive(thpp::Tensor& data) {
+rank_type DataChannelTCP::receive(at::Tensor& data) {
   rank_type sender;
   auto request = _receive_worker.push([this, &data, &sender]{
     if (!this->_poll_events) {
@@ -585,7 +585,7 @@ rank_type DataChannelTCP::receive(thpp::Tensor& data) {
 }
 
 
-void DataChannelTCP::receive(thpp::Tensor& data, rank_type src_rank) {
+void DataChannelTCP::receive(at::Tensor& data, rank_type src_rank) {
   auto request = _receive_worker.push([this, &data, src_rank]{
     this->_receive(data, src_rank);
   });
@@ -593,21 +593,19 @@ void DataChannelTCP::receive(thpp::Tensor& data, rank_type src_rank) {
 }
 
 
-DataChannelTCP::RequestTCP* DataChannelTCP::isend(thpp::Tensor& data,
+DataChannelTCP::RequestTCP* DataChannelTCP::isend(at::Tensor& data,
                                                   rank_type dst_rank) {
-  std::shared_ptr<thpp::Tensor> copy_tensor(data.clone_shallow());
-  auto request = _send_worker.push([this, copy_tensor, dst_rank]{
-    this->_send(*copy_tensor, dst_rank);
+  auto request = _send_worker.push([this, data, dst_rank]{
+    this->_send(data, dst_rank);
   });
   return new DataChannelTCP::RequestTCP(std::move(request));
 }
 
 
-DataChannelTCP::RequestTCP* DataChannelTCP::ireceive(thpp::Tensor& data,
+DataChannelTCP::RequestTCP* DataChannelTCP::ireceive(at::Tensor& data,
                                                      rank_type src_rank) {
-  std::shared_ptr<thpp::Tensor> copy_tensor(data.clone_shallow());
-  auto request = _receive_worker.push([this, copy_tensor, src_rank]{
-    this->_receive(*copy_tensor, src_rank);
+  auto request = _receive_worker.push([this, data, src_rank]{
+    this->_receive(data, src_rank);
   });
   return new DataChannelTCP::RequestTCP(std::move(request));
 }
@@ -683,7 +681,7 @@ void DataChannelTCP::_send(const Scalar& data, rank_type dst_rank) {
 }
 
 
-void DataChannelTCP::_send(thpp::Tensor& data, rank_type dst_rank) {
+void DataChannelTCP::_send(const at::Tensor& data, rank_type dst_rank) {
   /*
    * We have to check if dst_rank is positive to properly use `.at` function in vector.
    * Not checking that can result in int overflow and strange errors.
@@ -693,17 +691,17 @@ void DataChannelTCP::_send(thpp::Tensor& data, rank_type dst_rank) {
   if (process_dst.rank == _rank)
     throw std::logic_error("cannot send tensor to process with same rank");
 
-  if (!data.isContiguous())
+  if (!data.is_contiguous())
     throw std::logic_error("tensor to send is not contiguous");
 
   // send size of tensor data in bytes
-  std::uint64_t tensor_bytes = data.elementSize() * data.numel();
+  std::uint64_t tensor_bytes = data.type().elementSizeInBytes() * data.numel();
   send_bytes<std::uint64_t>(process_dst.socket, &tensor_bytes, 1, true);
 
   // send data (bytes)
   send_bytes<std::uint8_t>(
     process_dst.socket,
-    reinterpret_cast<const std::uint8_t*>(data.data()),
+    reinterpret_cast<const std::uint8_t*>(data.data_ptr()),
     tensor_bytes
   );
 }
@@ -739,7 +737,7 @@ void DataChannelTCP::_receive(Scalar& data, rank_type src_rank) {
 }
 
 
-void DataChannelTCP::_receive(thpp::Tensor& data, rank_type src_rank) {
+void DataChannelTCP::_receive(const at::Tensor& data, rank_type src_rank) {
   /*
    * We have to check if src_rank is positive to properly use `.at` function in vector.
    * Not checking that can result in int overflow and strange errors.
@@ -749,18 +747,18 @@ void DataChannelTCP::_receive(thpp::Tensor& data, rank_type src_rank) {
   if (process_src.rank == _rank)
     throw std::logic_error("cannot receive tensor from process with same rank");
 
-  if (!data.isContiguous())
+  if (!data.is_contiguous())
     throw std::logic_error("tensor to receive is not contiguous");
 
   // get size of tensor data in bytes
   std::uint64_t tensor_bytes;
   recv_bytes<std::uint64_t>(process_src.socket, &tensor_bytes, 1);
 
-  std::uint64_t actual_tensor_bytes = data.elementSize() * data.numel();
+  std::uint64_t actual_tensor_bytes = data.type().elementSizeInBytes() * data.numel();
   if (actual_tensor_bytes == tensor_bytes) {
     recv_bytes<std::uint8_t>(
       process_src.socket,
-      reinterpret_cast<std::uint8_t*>(data.data()),
+      reinterpret_cast<std::uint8_t*>(data.data_ptr()),
       tensor_bytes
     );
   } else {
@@ -771,18 +769,18 @@ void DataChannelTCP::_receive(thpp::Tensor& data, rank_type src_rank) {
   }
 }
 
-void DataChannelTCP::_reduce(thpp::Tensor& result, thpp::Tensor& data,
+void DataChannelTCP::_reduce(at::Tensor& result, at::Tensor& data,
                              THDReduceOp operation) const {
   assertSameSizeAndType(result, data, "reduce");
 
   if (operation == THDReduceOp::THDReduceMIN) {
-    result.cmin(result, data);
+    at::min_out(result, result, data);
   } else if (operation == THDReduceOp::THDReduceMAX) {
-    result.cmax(result, data);
+    at::max_out(result, result, data);
   } else if (operation == THDReduceOp::THDReduceSUM) {
-    result.cadd(result, data);
+    result.add_(data);
   } else if (operation == THDReduceOp::THDReducePRODUCT) {
-    result.cmul(result, data);
+    result.mul_(data);
   } else {
     throw std::logic_error("unsupported reduce operation");
   }

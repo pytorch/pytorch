@@ -26,6 +26,20 @@ class Context;
 struct Storage;
 struct Generator;
 
+static inline bool isIntegralType(ScalarType t) {
+  return (t == ScalarType::Byte ||
+          t == ScalarType::Char ||
+          t == ScalarType::Int ||
+          t == ScalarType::Long ||
+          t == ScalarType::Short);
+}
+
+static inline bool isFloatingType(ScalarType t) {
+  return (t == ScalarType::Double ||
+          t == ScalarType::Float ||
+          t == ScalarType::Half);
+}
+
 // Note [Undefined-dim versus 0-dim]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 // Unlike Torch, ATen treats zero-dimension tensors as having ONE

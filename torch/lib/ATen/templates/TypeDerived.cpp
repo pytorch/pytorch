@@ -48,6 +48,7 @@ std::unique_ptr<Generator> ${Type}::generator() const {
 const char * ${Type}::toString() const {
   return ${Type}::typeString();
 }
+
 TypeID ${Type}::ID() const {
   return ${TypeID};
 }
