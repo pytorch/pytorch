@@ -318,13 +318,21 @@ Tensor log_softmax_double_backward(const Tensor & grad, const Tensor & grad_outp
   return z * grad_output.sum(dim, true) * ((grad * z).sum(dim, true) - grad);
 }
 
-Tensor smooth_l1_loss_double_backward(const Tensor & grad, const Tensor & input, const Tensor & target, bool size_average) {
+Tensor smooth_l1_loss_double_backward(const Tensor & grad, const Tensor & input, const Tensor & target, bool size_average, bool reduce) {
   auto d = (input - target).abs();
   auto grad_input = grad * (d < 1).toType(grad.type());
-  if (size_average) {
+  if (size_average && reduce) {
     grad_input /= input.numel();
   }
   return grad_input;
+}
+
+Tensor smooth_l1_loss_double_backward_grad_output(const Tensor & grad, const Tensor & grad_output, const Tensor & input, const Tensor & target, bool size_average, bool reduce) {
+  if (!reduce) {
+    return smooth_l1_loss_backward(grad, input, target, size_average, reduce);
+  }
+  auto r = smooth_l1_loss_backward(ones_like(grad_output), input, target, size_average, true);
+  return (r * grad).sum().toTensor().view({1});
 }
 
 Tensor max_pool2d_double_backward(const Tensor & grad, const Tensor & indices) {

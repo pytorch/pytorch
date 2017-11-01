@@ -296,6 +296,25 @@ def nllloss_reference(input, target, weight=None, ignore_index=-100,
         return losses_tensor
 
 
+def smoothl1loss_reference(input, target, size_average=True, reduce=True):
+    abs_diff = (input - target).abs()
+    ge_one_mask = (abs_diff >= 1).type_as(abs_diff)
+    lt_one_mask = (abs_diff < 1).type_as(abs_diff)
+    output = ge_one_mask * (abs_diff - 0.5) + lt_one_mask * 0.5 * (abs_diff ** 2)
+    if reduce and size_average:
+        return output.mean()
+    elif reduce:
+        return output.sum()
+    return output
+
+
+loss_reference_fns = {
+    'NLLLoss': nllloss_reference,
+    'NLLLoss2d': nllloss2d_reference,
+    'SmoothL1Loss': smoothl1loss_reference,
+}
+
+
 criterion_tests = [
     dict(
         module_name='L1Loss',
@@ -457,6 +476,8 @@ criterion_tests = [
         input_size=(5, 10),
         target_size=(5, 10),
         check_no_size_average=True,
+        reference_fn=lambda i, t, m:
+            smoothl1loss_reference(i, t, size_average=get_size_average(m)),
     ),
     dict(
         module_name='SoftMarginLoss',
