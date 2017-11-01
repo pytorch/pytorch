@@ -12,11 +12,19 @@
 #include "torch/csrc/utils/object_ptr.h"
 
 // (class, gpu id, sizes)
-using output_info_type = std::tuple<PyObject *, int, std::vector<int64_t>>;
+using tensor_info_type = std::tuple<at::Type*, int, std::vector<int64_t>>;
 
 
 namespace torch { namespace jit { struct Graph; }}
 namespace torch { namespace autograd {
+
+struct VariableInfo {
+  explicit VariableInfo(const Variable& var);
+  at::Type* type;
+  int device;
+  std::vector<int64_t> size;
+  bool requires_grad;
+};
 
 // A Function which is implemented by a Python object (i.e., a THPFunction).
 // Calls to 'apply' are forwarded to the Python method implementation.
@@ -74,7 +82,8 @@ struct THPFunction {
     // modified inplace.
     PyObject *dirty_tensors;
 
-    std::vector<output_info_type> *output_info;
+    std::vector<torch::autograd::VariableInfo> *output_info;
+    std::vector<torch::autograd::VariableInfo> *input_info;
     std::vector<torch::autograd::SavedVariable> *saved_variables;
     // For each input, true if the input is a THPVariable
     std::vector<bool> *is_variable_input;
