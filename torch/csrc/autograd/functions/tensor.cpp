@@ -159,12 +159,18 @@ auto CopySlices::apply(const variable_list& inputs) -> variable_list {
   // it for the backward of res. We might be able to avoid the clone() if
   // grad_slice is volatile.
   auto res = (*fn)({ grad_slice.clone() });
-  grad_slice.copy_(res[0]);
 
   variable_list grad_inputs(next_functions.size());
-  grad_inputs[0] = result;
-  for (size_t i = 1; i < res.size(); i++) {
-    grad_inputs[i] = std::move(res[i]);
+  for (size_t i = 0; i < res.size(); i++) {
+    if (should_compute_output(i)) {
+      TORCH_ASSERT(res[i].defined());
+      if (i == 0) {
+        grad_slice.copy_(res[i]);
+        grad_inputs[i] = std::move(result);
+      } else {
+        grad_inputs[i] = std::move(res[i]);
+      }
+    }
   }
 
   return grad_inputs;

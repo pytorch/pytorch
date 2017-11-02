@@ -1587,6 +1587,14 @@ class TestAutograd(TestCase):
         go = Variable(torch.randn(a.size()), requires_grad=True)
         gradgradcheck(func, (a, b), (go,))
 
+    def test_inplace_view5(self):
+        a = Variable(torch.Tensor([2, 5]), requires_grad=False)
+        b = Variable(torch.Tensor([3]), requires_grad=True)
+        res = a.narrow(0, 1, 1).mul_(b)
+        res.sum().backward()
+        self.assertEqual(b.grad.data.tolist(), [5])
+        self.assertIsNone(a.grad)
+
     def test_inplace_view_python(self):
         a = Variable(torch.randn(4, 4), requires_grad=True)
         b = Variable(torch.randn(2, 2), requires_grad=True)
