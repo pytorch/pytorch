@@ -6,7 +6,7 @@
 - name: kl_div(Tensor input, Tensor target, bool size_average=true)
   cname: DistKLDivCriterion
 
-- name: l1_loss(Tensor input, Tensor target, bool size_average=true)
+- name: l1_loss(Tensor input, Tensor target, bool size_average=true, bool reduce=True)
   cname: AbsCriterion
 
 - name: mse_loss(Tensor input, Tensor target, bool size_average=true, bool reduce=true)
@@ -27,7 +27,7 @@
   cname: SpatialClassNLLCriterion
   buffers: [total_weight]
 
-- name: smooth_l1_loss(Tensor input, Tensor target, bool size_average=true)
+- name: smooth_l1_loss(Tensor input, Tensor target, bool size_average=true, bool reduce=true)
   cname: SmoothL1Criterion
 
 - name: soft_margin_loss(Tensor input, Tensor target, bool size_average=true)
