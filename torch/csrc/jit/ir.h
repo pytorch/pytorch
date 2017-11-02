@@ -18,7 +18,7 @@
 
 #include "ATen/ArrayRef.h"
 #include "torch/csrc/jit/generic_if.h"
-#include "torch/csrc/jit/assert.h"
+#include "torch/csrc/assertions.h"
 #include "torch/csrc/jit/interned_strings.h"
 #include "torch/csrc/jit/attributes.h"
 #include "torch/csrc/jit/resource_guard.h"

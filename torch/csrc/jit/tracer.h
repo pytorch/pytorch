@@ -2,7 +2,7 @@
 
 #include "torch/csrc/jit/ir.h"
 #include "torch/csrc/jit/tracer_state.h"
-#include "torch/csrc/jit/assert.h"
+#include "torch/csrc/assertions.h"
 #include "torch/csrc/utils/functional.h"
 #include "torch/csrc/autograd/function_hook.h"
 #include "torch/csrc/autograd/variable.h"

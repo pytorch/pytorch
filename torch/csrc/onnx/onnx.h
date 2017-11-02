@@ -1,7 +1,7 @@
 #pragma once
 
 #include "torch/csrc/onnx/onnx.pb.h"
-#include "torch/csrc/jit/assert.h"
+#include "torch/csrc/assertions.h"
 
 #include <pb_encode.h>
 #include <ATen/ATen.h>
