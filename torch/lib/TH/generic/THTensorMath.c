@@ -372,7 +372,7 @@ void THTensor_(take)(THTensor *r_, THTensor *src, THLongTensor *index)
   THTensor* dst = THTensor_(newContiguous)(r_);
 
   index = THLongTensor_newContiguous(index);
-  long* index_data = THLongTensor_data(index);
+  int64_t* index_data = THLongTensor_data(index);
   ptrdiff_t srcElements = THTensor_(nElement)(src);
   real* src_data = THTensor_(data)(src);
   real* dst_data = THTensor_(data)(dst);
