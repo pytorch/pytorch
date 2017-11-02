@@ -178,6 +178,14 @@ class Workspace {
    */
   Blob* CreateBlob(const string& name);
   /**
+   * Similar to CreateBlob(), but it creates a blob in the local workspace even
+   * if another blob with the same name already exists in the parent workspace
+   * -- in such case the new blob hides the blob in parent workspace. If a blob
+   * of the given name already exists in the local workspace, the creation is
+   * skipped and the existing blob is returned.
+   */
+  Blob* CreateLocalBlob(const string& name);
+  /**
    * Remove the blob of the given name. Return true if removed and false if
    * not exist.
    * Will NOT remove from the shared workspace.
