@@ -888,7 +888,8 @@ class TestAutograd(TestCase):
 
     def test_mark_non_differentiable_none(self):
         # This used to segfault because MyFunction would send back null
-        # gradients to MulBackward
+        # gradients to MulBackward, which is implemented in C++. C++
+        # implemented functions expect incoming  grad_ouptuts to be non-null.
         class MyFunction(Function):
             @staticmethod
             def forward(ctx, input):
