@@ -272,8 +272,9 @@ class MSELoss(_Loss):
     The division by `n` can be avoided if one sets the internal variable
     `size_average` to `False`.
 
-    To get a batch of losses, a loss per batch element, set `reduce` to `True`.
-    These losses are not averaged and are not affected by `size_average`.
+    To get a batch of losses, a loss per batch element, set `reduce` to
+    `False`. These losses are not averaged and are not affected by
+    `size_average`.
 
     Args:
         size_average (bool, optional): By default, the losses are averaged
