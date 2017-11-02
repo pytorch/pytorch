@@ -19,7 +19,9 @@
 #include "caffe2/mkl/utils/mkl_operator.h"
 #include "caffe2/operators/cross_entropy_op.h"
 #include "caffe2/operators/filler_op.h"
+#include "caffe2/operators/load_save_op.h"
 #include "caffe2/operators/loss_op.h"
+#include "caffe2/operators/reshape_op.h"
 #include "caffe2/operators/softmax_op.h"
 #include "caffe2/operators/utility_ops.h"
 
@@ -28,6 +30,9 @@ namespace caffe2 {
 REGISTER_MKL_OPERATOR(
     Softmax,
     mkl::MKLFallbackOp<SoftmaxOp<float, CPUContext>>);
+REGISTER_MKL_OPERATOR(
+    Reshape,
+    mkl::MKLFallbackOp<ReshapeOp<float, CPUContext>, SkipIndices<1>>);
 REGISTER_MKL_OPERATOR(
     LabelCrossEntropy,
     mkl::MKLFallbackOp<LabelCrossEntropyOp<float, CPUContext>>);
@@ -48,5 +53,7 @@ REGISTER_MKL_OPERATOR(
 REGISTER_MKL_OPERATOR(
     MSRAFill,
     mkl::MKLFallbackOp<MSRAFillOp<float, CPUContext>>);
+REGISTER_MKL_OPERATOR(Load, mkl::MKLFallbackOp<LoadOp<CPUContext>>);
+REGISTER_MKL_OPERATOR(Save, mkl::MKLFallbackOp<SaveOp<CPUContext>>);
 
 } // namespace caffe2
