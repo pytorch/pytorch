@@ -1,5 +1,6 @@
 #include "torch/csrc/autograd/variable.h"
 
+#include "torch/csrc/assertions.h"
 #include "torch/csrc/autograd/generated/VariableType.h"
 #include "torch/csrc/autograd/generated/Functions.h"
 #include "torch/csrc/autograd/functions/accumulate_grad.h"
@@ -109,6 +110,7 @@ std::shared_ptr<Function>& VariableViewImpl::get_grad_fn() {
   std::lock_guard<std::mutex> lock(mutex);
   auto current_version = version_counter.current_version();
   if (attr_version != current_version) {
+    TORCH_ASSERT(output_nr == 0);
     auto fn = std::make_shared<generated::AsStridedBackward>();
     fn->self_geometry = TensorGeometry(base);
     fn->size = sizes();
@@ -122,18 +124,22 @@ std::shared_ptr<Function>& VariableViewImpl::get_grad_fn() {
   return _grad_fn;
 }
 
-void VariableViewImpl::set_grad_fn(std::shared_ptr<Function> grad_fn) {
-  if (this->_grad_fn && grad_fn) {
-    // If we have a previous grad_fn then this is an in-place modification
-    if (output_nr != 0 || grad_fn->num_inputs != 1) {
-      throw std::runtime_error("Functions which modify views in-place must return a single Variable");
-    }
-    auto copySlices = std::make_shared<CopySlices>(base, TensorGeometry(data), std::move(grad_fn));
-    base.output_nr() = 0;
-    base.grad_fn() = std::move(copySlices);
-  } else {
-    _grad_fn = std::move(grad_fn);
+void VariableViewImpl::rebase_grad_fn(std::shared_ptr<Function> grad_fn) {
+  if (!grad_fn) {
+    TORCH_ASSERTM(!requires_grad, "Can't set null grad_fn on view with requires_grad=True");
+    TORCH_ASSERTM(!base.requires_grad(), "base.requires_grad does not match view.requires_grad");
+    return;
   }
+
+  TORCH_ASSERTM(requires_grad, "Can't set grad_fn on view with requires_grad=False");
+  TORCH_ASSERT(output_nr == 0);
+  if (grad_fn->num_inputs != 1) {
+    throw std::runtime_error("Functions which modify views in-place must return a single Variable");
+  }
+  auto copySlices = std::make_shared<CopySlices>(base, TensorGeometry(data), std::move(grad_fn));
+  base.output_nr() = 0;
+  base.grad_fn() = std::move(copySlices);
+  base.requires_grad() = true;
 }
 
 namespace {

@@ -124,7 +124,7 @@ set_flags(${result}, flags, grad_fn);
 """)
 
 SET_FLAGS_INPLACE = CodeTemplate("""\
-set_flags(static_cast<Variable&>(self), flags, grad_fn, ${modifies_data});
+set_flags(${result}, flags, grad_fn, ${modifies_data});
 """)
 
 RECORD_TRACE = CodeTemplate("""\
@@ -723,13 +723,11 @@ def create_variable_type(top_env, aten_declarations):
         if declaration['inplace']:
             env['return_value'] = 'self'
             env['trace_outputs'] = '{ self }'
-            modifies_data = 'false' if is_view else 'true'
-            env['set_flags'] = SET_FLAGS_INPLACE.substitute(combined, modifies_data=modifies_data)
+            env['result'] = 'static_cast<Variable&>(self)'
         elif declaration['return_type'] == 'std::vector<Tensor>':
             env['return_value'] = 'as_tensor_list(ret)'
             env['result'] = 'ret'
             env['trace_outputs'] = 'ret'
-            env['set_flags'] = SET_FLAGS.substitute(combined)
         else:
             env['return_value'] = '{}(std::move(ret))'.format(declaration['return_type'])
             env['result'] = 'std::get<0>(ret)' if len(declaration['returns']) > 1 else 'ret'
@@ -740,7 +738,6 @@ def create_variable_type(top_env, aten_declarations):
             else:
                 outs = ['ret']
             env['trace_outputs'] = CodeTemplate("{ ${outs} }").substitute(outs=outs)
-            env['set_flags'] = SET_FLAGS.substitute(combined)
 
         if any(arg['simple_type'] in {'Generator', 'Storage'} for arg in arguments):
             env['record_trace'] = []
@@ -771,19 +768,26 @@ def create_variable_type(top_env, aten_declarations):
 
         env['check_inplace'] = ''
         env['version_counter'] = ''
+        maybe_inplace = any(arg['name'] == 'inplace' for arg in arguments)
         base_call = BASE_CALL.substitute(combined)
         if declaration['inplace']:
             env['check_inplace'] = 'check_inplace(self);'
             env['version_counter'] = 'increment_version(self);'
-        elif any(arg['name'] == 'inplace' for arg in arguments):
+            modifies_data = 'false' if is_view else 'true'
+            env['set_flags'] = SET_FLAGS_INPLACE.substitute(combined, modifies_data=modifies_data)
+        elif maybe_inplace:
             assert not is_view, declaration['name']
             env['check_inplace'] = 'if (inplace) check_inplace(input);'
             env['version_counter'] = 'if (inplace) increment_version(input);'
+            env['set_flags'] = SET_FLAGS_INPLACE.substitute(combined, modifies_data='inplace')
+            base_call = 'auto ret = maybe_wrap({}, input, inplace)'.format(base_call)
+        else:
+            env['set_flags'] = SET_FLAGS.substitute(combined)
+            if is_view:
+                base_call = 'auto ret = as_view(static_cast<const Variable&>(self), {})'.format(base_call)
+            else:
+                base_call = 'auto ret = as_variable({})'.format(base_call)
 
-        if is_view:
-            base_call = 'auto ret = as_view(static_cast<const Variable&>(self), {})'.format(base_call)
-        elif not declaration['inplace']:
-            base_call = 'auto ret = as_variable({})'.format(base_call)
         env['base_impl_call'] = base_call + ';'
 
         body.extend(METHOD_DEFINITION_DERIVATIVE.substitute(combined).split('\n'))

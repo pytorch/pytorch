@@ -181,6 +181,13 @@ Variable VariableType::as_variable(const Scalar & scalar) const {
   return make_variable(std::move(tensor));
 }
 
+Variable VariableType::maybe_wrap(Tensor data, const Variable & self, bool inplace) const {
+  if (inplace) {
+    return self;
+  }
+  return as_variable(data);
+}
+
 static Variable as_view(Variable base, Tensor tensor) {
   if (base.is_view()) {
     base = base.base();
@@ -254,7 +261,11 @@ static void set_flags(Variable& var, VarFlags flags, std::shared_ptr<Function> g
   if (grad_fn) {
     grad_fn->num_inputs = 1;
   }
-  var.set_history(flags, 0, std::move(grad_fn));
+  if (inplace) {
+    var.rebase_history(flags, 0, std::move(grad_fn));
+  } else {
+    var.set_history(flags, 0, std::move(grad_fn));
+  }
 }
 
 static void set_flags(std::vector<Variable> &vl, VarFlags flags, std::shared_ptr<Function> grad_fn) {
@@ -292,7 +303,7 @@ void VariableType::s_copy(const Tensor & src, Tensor & dst) const {
   auto& dst_ = unpack(dst, "dst", 1);
   check_inplace(dst);
   std::shared_ptr<CopyBackwards> grad_fn;
-  auto flags = compute_flags({ src });
+  auto flags = compute_flags({ dst, src });
   flags.requires_grad &= isFloatingPoint(dst.type().scalarType());
   if (flags.requires_grad) {
     // TODO: handle type conversions

@@ -424,7 +424,11 @@ static void _wrap_outputs(THPFunction *self, t2var_type &t2var,
           torch::createTensor(output),
           get_shared_base(output),
           is_modified);
-      var.set_history(VarFlags(is_executable, is_volatile), i, cdata);
+      if (is_modified) {
+        var.rebase_history(VarFlags(is_executable, is_volatile), i, cdata);
+      } else {
+        var.set_history(VarFlags(is_executable, is_volatile), i, cdata);
+      }
 
       output_var = (THPVariable*)THPVariable_Wrap(var);
       if (!output_var) throw python_error();
