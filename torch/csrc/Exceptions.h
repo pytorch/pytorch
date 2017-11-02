@@ -14,7 +14,7 @@
   } catch (python_error &e) {                                                  \
     return retval;                                                             \
   } catch (std::exception &e) {                                                \
-    PyErr_SetString(PyExc_RuntimeError, e.what());                             \
+    PyErr_SetString(PyExc_RuntimeError, processErrorMsg(e.what()));            \
     return retval;                                                             \
   }
 
@@ -67,5 +67,7 @@ struct python_error : public std::exception {
 
 bool THPException_init(PyObject *module);
 #endif
+
+const char * processErrorMsg(std::string str);
 
 #endif
