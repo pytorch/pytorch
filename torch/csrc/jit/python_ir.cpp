@@ -184,7 +184,7 @@ void initPythonIRBindings(PyObject * module_) {
       TYPE_ELSEIF(TensorType)
         return "TensorType";
       TYPE_END()
-      jit::barf("unknown type kind");
+      torch::barf("unknown type kind");
       return "";
     })
     .def("sizes",[](Type& t) {

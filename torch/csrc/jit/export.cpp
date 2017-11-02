@@ -65,7 +65,7 @@ void encodeTensor(onnx::TensorProto * p, const at::Tensor & tensor) {
       at_type = at::kLong;
       break;
     default:
-      jit::barf("unexpected tensor scalar type");
+      torch::barf("unexpected tensor scalar type");
       break;
   }
   p->set_data_type(onnx_type);
@@ -154,7 +154,7 @@ void encodeTypeProtoTensorType(onnx::TypeProtoTensorTypeProto* tensor_type, Node
       onnx_type = onnx::kINT64;
       break;
     default:
-      jit::barf("unexpected tensor scalar type");
+      torch::barf("unexpected tensor scalar type");
       break;
   }
   tensor_type->set_data_type(onnx_type);

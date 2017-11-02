@@ -1,9 +1,9 @@
-#include "torch/csrc/jit/assert.h"
+#include "torch/csrc/assertions.h"
 
 #include <cstdarg>
 #include <cstdio>
 
-namespace torch { namespace jit {
+namespace torch {
 
 void
 barf(const char *fmt, ...)
@@ -18,4 +18,4 @@ barf(const char *fmt, ...)
   throw assert_error(msg);
 }
 
-}}
+}

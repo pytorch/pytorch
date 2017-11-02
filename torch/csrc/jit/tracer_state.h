@@ -1,7 +1,7 @@
 #pragma once
 
 #include "torch/csrc/jit/ir.h"
-#include "torch/csrc/jit/assert.h"
+#include "torch/csrc/assertions.h"
 
 #include <memory>
 #include <mutex>
