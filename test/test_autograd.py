@@ -1817,6 +1817,7 @@ method_tests = [
     ('le', (S, S, S), (0,), 'scalar'),
     ('permute', (1, 2, 3, 4), (0, 2, 3, 1)),
     ('select', (S, S, S), (1, 2), 'dim', [0]),
+    ('select', (S,), (0, 2), '1d'),
     ('narrow', (S, S, S), (1, 2, 2), 'dim', [0]),
     ('_unnarrow', (S, S, S), (0, 2, M), 'dim', [0]),
     ('squeeze', (S, 1, S, 1), ()),
