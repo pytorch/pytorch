@@ -79,6 +79,17 @@ class TestScope(unittest.TestCase):
 
         self.assertEquals(scope.CurrentDeviceScope(), None)
 
+    def testEmptyDevicescopeBasic(self):
+        self.assertEquals(scope.CurrentDeviceScope(), None)
+
+        dsc = core.DeviceOption(caffe2_pb2.CUDA, 9)
+        with scope.DeviceScope(dsc):
+            self.assertEquals(scope.CurrentDeviceScope(), dsc)
+            with scope.EmptyDeviceScope():
+                self.assertEquals(scope.CurrentDeviceScope(), None)
+            self.assertEquals(scope.CurrentDeviceScope(), dsc)
+        self.assertEquals(scope.CurrentDeviceScope(), None)
+
     def testDevicescopeAssertion(self):
         self.assertEquals(scope.CurrentDeviceScope(), None)
 
