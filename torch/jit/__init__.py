@@ -396,6 +396,10 @@ class _CompiledMixin(object):
         # TODO: Figure out how to call parent destructor, if there is one.
         # Apparently, this is buggy:
         #     https://stackoverflow.com/questions/22972720/python-cant-invoke-parent-class-destructor-with-super
+        # NB: Have to mangle this by hand!
+        if not (hasattr(self, '_CompiledMixin__misses') and hasattr(self, '_CompiledMixin___hits')):
+            # Probably died during construction
+            return
         if self.__misses != 0 and self.__hits == 0:
             warnings.warn("{} was marked with JIT and invoked {} times, "
                           "but we never successfully used compiled code."
