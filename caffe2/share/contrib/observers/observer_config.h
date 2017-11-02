@@ -5,29 +5,49 @@
 namespace caffe2 {
 
 /*
-  netSampleRate_ == 1 && operatorNetSampleRatio_ == 1 :
+  netInitSampleRate_ == 1 && operatorNetSampleRatio_ == 1 :
       Log operator metrics in every iteration
-  netSampleRate_ == 1 && operatorNetSampleRatio_ == 0 :
+  netInitSampleRate_ == 1 && operatorNetSampleRatio_ == 0 :
       Log net metrics in every iterationn
-  netSampleRate_ == n && operatorNetSampleRatio_ == 1 :
-      Log operator metrics every n iterations
-  netSampleRate_ == n && operatorNetSampleRatio_ == 0 :
-      Log net metrics every n iterations
-  netSampleRate_ == n && operatorNetSampleRatio_ == m :
-      Log net metrics every n iterations (except n * m iterations)
-      Log operator metrics every n * m iterations
+  netInitSampleRate_ == n && netFollowupSampleRate_ == m &&
+          netFollowupSampleCount == c && operatorNetSampleRatio_ == 1 :
+      Log operator metrics first at odds of 1 / n. Once first logged,
+      the following c logs are at odds of 1 / min(n, m). Then repeat
+  netInitSampleRate_ == n && netFollowupSampleRate_ == m &&
+          netFollowupSampleCount == c && operatorNetSampleRatio_ == 0 :
+      Log net metrics first at odds of 1 / n. Once first logged,
+      the following c logs are at odds of 1 / min(n, m). Then repeat
+  netInitSampleRate_ == n && netFollowupSampleRate_ == m &&
+          netFollowupSampleCount == c && operatorNetSampleRatio_ == o :
+      Log net metrics first at odds of 1 / n. Once first logged,
+      the following c logs are at odds of 1 / min(n, m), if the random number
+      is multiples of o, log operator metrics instead. Then repeat
   skipIters_ == n: skip the first n iterations of the net.
 */
 class ObserverConfig {
  public:
-  static void
-  initSampleRate(int netSampleRate, int operatorNetSampleRatio, int skipIters) {
-    netSampleRate_ = netSampleRate;
+  static void initSampleRate(
+      int netInitSampleRate,
+      int netFollowupSampleRate,
+      int netFollowupSampleCount,
+      int operatorNetSampleRatio,
+      int skipIters) {
+    CAFFE_ENFORCE(netFollowupSampleRate <= netInitSampleRate);
+    CAFFE_ENFORCE(netFollowupSampleRate >= 1 || netInitSampleRate == 0);
+    netInitSampleRate_ = netInitSampleRate;
+    netFollowupSampleRate_ = netFollowupSampleRate;
+    netFollowupSampleCount_ = netFollowupSampleCount;
     operatorNetSampleRatio_ = operatorNetSampleRatio;
     skipIters_ = skipIters;
   }
-  static int getNetSampleRate() {
-    return netSampleRate_;
+  static int getNetInitSampleRate() {
+    return netInitSampleRate_;
+  }
+  static int getNetFollowupSampleRate() {
+    return netFollowupSampleRate_;
+  }
+  static int getNetFollowupSampleCount() {
+    return netFollowupSampleCount_;
   }
   static int getOpoeratorNetSampleRatio() {
     return operatorNetSampleRatio_;
@@ -52,11 +72,18 @@ class ObserverConfig {
   }
 
  private:
-  /* Log net metrics after how many net invocations */
-  static int netSampleRate_;
+  /* The odds of log net metric initially or immediately after reset */
+  static int netInitSampleRate_;
 
-  /* log operator metrics after how many net logs.
-     when the operator is logged the net is not logged. */
+  /* The odds of log net metric after log once after start of reset */
+  static int netFollowupSampleRate_;
+
+  /* The number of follow up logs to be collected for odds of
+     netFollowupSampleRate_ */
+  static int netFollowupSampleCount_;
+
+  /* The odds to log the operator metric instead of the net metric.
+     When the operator is logged the net is not logged. */
   static int operatorNetSampleRatio_;
 
   /* skip the first few iterations */

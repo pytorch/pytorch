@@ -28,13 +28,20 @@ PerfNetObserver::PerfNetObserver(NetBase* subject_)
 PerfNetObserver::~PerfNetObserver() {}
 
 bool PerfNetObserver::Start() {
+  static int visitCount = 0;
   // Select whether to log the operator or the net.
   // We have one sample rate for the entire app.
-  int netSampleRate = ObserverConfig::getNetSampleRate();
+  int netInitSampleRate = ObserverConfig::getNetInitSampleRate();
+  int netFollowupSampleRate = ObserverConfig::getNetFollowupSampleRate();
+  int netFollowupSampleCount = ObserverConfig::getNetFollowupSampleCount();
   int operatorNetSampleRatio = ObserverConfig::getOpoeratorNetSampleRatio();
   int skipIters = ObserverConfig::getSkipIters();
-  if (skipIters <= numRuns_ && netSampleRate > 0 &&
-      rand() % netSampleRate == 0) {
+  int sampleRate = visitCount > 0 ? netFollowupSampleRate : netInitSampleRate;
+  if (skipIters <= numRuns_ && sampleRate > 0 && rand() % sampleRate == 0) {
+    visitCount++;
+    if (visitCount == netFollowupSampleCount) {
+      visitCount = 0;
+    }
     if (operatorNetSampleRatio > 0 && rand() % operatorNetSampleRatio == 0) {
       logType_ = PerfNetObserver::OPERATOR_DELAY;
     } else {
