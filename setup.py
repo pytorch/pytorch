@@ -591,13 +591,16 @@ THNN = Extension("torch._thnn._THNN",
 extensions.append(THNN)
 
 if WITH_CUDA:
+    thnvrtc_link_flags =  extra_link_args + [make_relative_rpath('lib')]
+    if platform.system() == 'Linux':
+        thnvrtc_link_flags = ['-Wl,--no-as-needed'] + thnvrtc_link_flags
     THNVRTC = Extension("torch._nvrtc",
                         libraries=['nvrtc', 'cuda'],
                         sources=['torch/csrc/nvrtc.cpp'],
                         language='c++',
                         include_dirs=include_dirs,
                         library_dirs=library_dirs + [cuda_lib_path + '/stubs'],
-                        extra_link_args=['-Wl,--no-as-needed'] + extra_link_args + [make_relative_rpath('lib')],
+                        extra_link_args=thnvrtc_link_flags,
                         )
     extensions.append(THNVRTC)
 
