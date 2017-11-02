@@ -67,6 +67,20 @@ static inline const char * toString(ScalarType t) {
 #undef DEFINE_CASE
 }
 
+static inline bool isIntegralType(ScalarType t) {
+  return (t == ScalarType::Byte ||
+          t == ScalarType::Char ||
+          t == ScalarType::Int ||
+          t == ScalarType::Long ||
+          t == ScalarType::Short);
+}
+
+static inline bool isFloatingType(ScalarType t) {
+  return (t == ScalarType::Double ||
+          t == ScalarType::Float ||
+          t == ScalarType::Half);
+}
+
 struct Tensor;
 typedef ArrayRef<int64_t> IntList;
 typedef ArrayRef<Tensor> TensorList;

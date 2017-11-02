@@ -54,7 +54,7 @@
   variants: [function]
   options:
     - cname: newWithTensor
-      arguments: 
+      arguments:
         - THTensor* tensor
 ]]
 
@@ -155,4 +155,15 @@
     - arg: int64_t dim
       wrap_dim: tensors
       default: 0
+]]
+
+[[
+  name: reshape_
+  cname: resize
+  cpu_half: True
+  return: self
+  arguments:
+    - THTensor* self
+    - arg: THSize* size
+    - arg: THStride* stride
 ]]
