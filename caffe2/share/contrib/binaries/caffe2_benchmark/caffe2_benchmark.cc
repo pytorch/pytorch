@@ -156,7 +156,7 @@ int main(int argc, char** argv) {
 
   LOG(INFO) << "Starting benchmark.";
   caffe2::ObserverConfig::initSampleRate(
-      1, caffe2::FLAGS_run_individual, caffe2::FLAGS_warmup);
+      1, 1, 1, caffe2::FLAGS_run_individual, caffe2::FLAGS_warmup);
   LOG(INFO) << "Running warmup runs.";
   for (int i = 0; i < caffe2::FLAGS_warmup; ++i) {
     CAFFE_ENFORCE(net->Run(), "Warmup run ", i, " has failed.");
