@@ -50,6 +50,10 @@ $BASE_DIR/torch/lib/ATen/Local.cwrap;\
 $BASE_DIR/torch/lib/THNN/generic/THNN.h;\
 $BASE_DIR/torch/lib/THCUNN/generic/THCUNN.h;\
 $BASE_DIR/torch/lib/ATen/nn.yaml"
+CUDA_NVCC_FLAGS=$C_FLAGS
+if [[ $CUDA_DEBUG -eq 1 ]]; then
+  CUDA_NVCC_FLAGS="$CUDA_NVCC_FLAGS -g -G"
+fi
 
 # Used to build an individual library, e.g. build TH
 function build() {
@@ -71,7 +75,7 @@ function build() {
               -DCMAKE_EXE_LINKER_FLAGS="$LDFLAGS" \
               -DCMAKE_SHARED_LINKER_FLAGS="$LDFLAGS" \
               -DCMAKE_INSTALL_LIBDIR="$INSTALL_DIR/lib" \
-              -DCUDA_NVCC_FLAGS="$C_FLAGS" \
+              -DCUDA_NVCC_FLAGS="$CUDA_NVCC_FLAGS" \
               -Dcwrap_files="$CWRAP_FILES" \
               -DTH_INCLUDE_PATH="$INSTALL_DIR/include" \
               -DTH_LIB_PATH="$INSTALL_DIR/lib" \

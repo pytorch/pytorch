@@ -181,5 +181,15 @@ export PATH=~/ccache/lib:$PATH
 export CUDA_NVCC_EXECUTABLE=~/ccache/cuda/nvcc
 ```
 
+## CUDA Development tips
+
+If you are working on the CUDA code, here are some useful CUDA debugging tips:
+
+1. `CUDA_DEBUG=1` will enable CUDA debugging symbols (-g -G). This is particularly
+    helpful in debugging device code. However, it will slow down the build process,
+    so use wisely.
+2. `cuda-gdb` and `cuda-memcheck` are your best CUDA debuging friends. Unlike`gdb`,
+   `cuda-gdb` can display actual values in a CUDA tensor (rather than all zeros).
+
 
 Hope this helps, and thanks for considering to contribute.
