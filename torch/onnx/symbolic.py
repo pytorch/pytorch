@@ -259,3 +259,8 @@ def log_softmax(g, input, dim=None):
 
 def unfold(g, input, dimension, size, step):
     return g.op("ATen", input, operator_s="unfold", dimension_i=dimension, size_i=size, step_i=step)
+
+
+def elu(g, input, alpha, inplace):
+    # See Note [Export inplace]
+    return g.op("Elu", input, alpha_f=_scalar(alpha))
