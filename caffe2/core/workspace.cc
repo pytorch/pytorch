@@ -131,6 +131,16 @@ Blob* Workspace::CreateBlob(const string& name) {
   return GetBlob(name);
 }
 
+Blob* Workspace::CreateLocalBlob(const string& name) {
+  if (blob_map_.count(name)) {
+    VLOG(1) << "Blob " << name << " already exists. Skipping.";
+  } else {
+    VLOG(1) << "Creating blob " << name;
+    blob_map_[name] = unique_ptr<Blob>(new Blob());
+  }
+  return GetBlob(name);
+}
+
 bool Workspace::RemoveBlob(const string& name) {
   auto it = blob_map_.find(name);
   if (it != blob_map_.end()) {

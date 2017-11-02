@@ -56,6 +56,12 @@ TEST(WorkspaceTest, BlobAccess) {
   // When not null, we should only call with the right type.
   EXPECT_NE(&blob->Get<int>(), nullptr);
 
+  // Re-creating the blob through CreateLocalBlob does not change the content
+  // either.
+  EXPECT_NE(nullptr, ws.CreateLocalBlob("newblob"));
+  EXPECT_TRUE(blob->IsType<int>());
+  EXPECT_NE(&blob->Get<int>(), nullptr);
+
   // test removing blob
   EXPECT_FALSE(ws.HasBlob("nonexisting"));
   EXPECT_FALSE(ws.RemoveBlob("nonexisting"));
@@ -92,6 +98,13 @@ TEST(WorkspaceTest, Sharing) {
     EXPECT_TRUE(parent.CreateBlob("b"));
     // But child has local overrides
     EXPECT_NE(child.GetBlob("b"), parent.GetBlob("b"));
+    // Child can create a blob that already exists in the parent
+    EXPECT_TRUE(child.CreateBlob("a"));
+    EXPECT_EQ(child.GetBlob("a"), parent.GetBlob("a"));
+    // Child can create a local blob for the blob already exists in the parent
+    EXPECT_TRUE(child.CreateLocalBlob("a"));
+    // But the local blob will be different from the one in parent workspace
+    EXPECT_NE(child.GetBlob("a"), parent.GetBlob("a"));
   }
 }
 
