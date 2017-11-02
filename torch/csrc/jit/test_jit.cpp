@@ -4,7 +4,7 @@
 #include "torch/csrc/jit/fusion_compiler.h"
 #endif
 #include "torch/csrc/jit/code_template.h"
-#include "torch/csrc/jit/assert.h"
+#include "torch/csrc/assertions.h"
 #include "torch/csrc/jit/ir.h"
 #include "torch/csrc/jit/attributes.h"
 #include "torch/csrc/jit/interned_strings.h"

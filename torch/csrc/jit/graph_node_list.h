@@ -1,4 +1,4 @@
-#include "torch/csrc/jit/assert.h"
+#include "torch/csrc/assertions.h"
 
 namespace torch { namespace jit {
 
