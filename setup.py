@@ -81,8 +81,8 @@ distutils.unixccompiler.UnixCCompiler.link = patched_link
 ################################################################################
 
 dep_libs = [
-    'nccl', 'libshm',
-    'ATen', 'gloo', 'THD', 'nanopb',
+    'nccl', 'ATen',
+    'libshm', 'gloo', 'THD', 'nanopb',
 ]
 
 
@@ -119,7 +119,7 @@ class build_deps(Command):
         libs = []
         if WITH_NCCL and not WITH_SYSTEM_NCCL:
             libs += ['nccl']
-        libs += ['libshm', 'ATen', 'nanopb']
+        libs += ['ATen', 'libshm', 'nanopb']
         if WITH_DISTRIBUTED:
             if sys.platform.startswith('linux'):
                 libs += ['gloo']
