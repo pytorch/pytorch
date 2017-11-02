@@ -330,7 +330,9 @@ static void tensorSqueeze(rpc::RPCMessage& raw_message) {
   at::Tensor tensor = unpackRetrieveTensor(raw_message);
   at::Tensor src = unpackRetrieveTensor(raw_message);
   finalize(raw_message);
-  at::squeeze_out(src, tensor);
+  // FIXME: could be at::squeeze_out(tensor, src), but we don't generate
+  // _out functions for native ATen functions (and may not want to).
+   tensor.set_(src.squeeze());
 }
 
 static void tensorSqueeze1d(rpc::RPCMessage& raw_message) {
@@ -338,7 +340,9 @@ static void tensorSqueeze1d(rpc::RPCMessage& raw_message) {
   at::Tensor src = unpackRetrieveTensor(raw_message);
   int dimension = unpackInteger(raw_message);
   finalize(raw_message);
-  at::squeeze_out(tensor, src, dimension);
+  // FIXME: could be at::squeeze_out(tensor, src, dimension), but we don't generate
+  // _out functions for native ATen functions (and may not want to).
+  tensor.set_(src.squeeze(dimension));
 }
 
 static void tensorFree(rpc::RPCMessage& raw_message) {
