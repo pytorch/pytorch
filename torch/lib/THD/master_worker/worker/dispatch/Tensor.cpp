@@ -330,7 +330,8 @@ static void tensorSqueeze(rpc::RPCMessage& raw_message) {
   at::Tensor tensor = unpackRetrieveTensor(raw_message);
   at::Tensor src = unpackRetrieveTensor(raw_message);
   finalize(raw_message);
-  at::squeeze_out(src, tensor);
+  //at::squeeze_out(src, tensor);
+  src.set_(tensor.squeeze());
 }
 
 static void tensorSqueeze1d(rpc::RPCMessage& raw_message) {
@@ -338,7 +339,9 @@ static void tensorSqueeze1d(rpc::RPCMessage& raw_message) {
   at::Tensor src = unpackRetrieveTensor(raw_message);
   int dimension = unpackInteger(raw_message);
   finalize(raw_message);
-  at::squeeze_out(tensor, src, dimension);
+  //at::squeeze_out(tensor, src, dimension);
+  src.set_(tensor.squeeze(dimension));
+
 }
 
 static void tensorFree(rpc::RPCMessage& raw_message) {
