@@ -20,7 +20,7 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
-from caffe2.python import core
+from caffe2.python import core, scope
 
 
 def create_predict_net(predictor_export_meta):
@@ -57,7 +57,12 @@ def create_predict_init_net(ws, predictor_export_meta):
                         blob, ws.blobs))
 
             shape = ws.blobs[blob].fetch().shape
-        net.ConstantFill([], blob, shape=shape, value=0.0)
+
+        # Explicitly null-out the scope so users (e.g. PredictorGPU)
+        # can control (at a Net-global level) the DeviceOption of
+        # these filling operators.
+        with scope.EmptyDeviceScope():
+            net.ConstantFill([], blob, shape=shape, value=0.0)
 
     external_blobs = predictor_export_meta.inputs + \
         predictor_export_meta.outputs
