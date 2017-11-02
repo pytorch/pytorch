@@ -40,18 +40,18 @@ except ImportError:
     pass
 
 if platform.system() == 'Windows':
-    # first append nvToolsExt PATH if CUDA is available
-    if torch.cuda.is_available():
-        from torch.cuda.nvtx import windows_nvToolsExt_path
+    # first get nvToolsExt PATH
+    def get_nvToolsExt_path():
+        NVTOOLEXT_HOME = _dl_flags.getenv('NVTOOLSEXT_PATH', 'C:\\Program Files\\NVIDIA Corporation\\NvToolsExt')
 
-        nvToolsExt_path = windows_nvToolsExt_path()
-        del append_nvToolsExt_info
+        if _dl_flags.path.exists(NVTOOLEXT_HOME):
+            return NVTOOLEXT_HOME + '\\bin\\x64\\'
+        else:
+            return ''
 
-    # then add torch lib path
-    _dl_flags.environ['PATH'] = nvToolsExt_path + \
-        _dl_flags.path.dirname(__file__) + '\\lib\\;' + \
-        _dl_flags.environ['PATH']
-    del nvToolsExt_path
+    # then add the path to env
+    _dl_flags.environ['PATH'] = _dl_flags.path.dirname(
+        __file__) + '\\lib\\;' + get_nvToolsExt_path() + ';' + _dl_flags.environ['PATH']
 
 else:
     # first check if the os package has the required flags

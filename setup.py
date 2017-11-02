@@ -214,7 +214,6 @@ def monkey_patch_THD_link_flags():
 class build_ext(setuptools.command.build_ext.build_ext):
 
     def run(self):
-        # global THNN, THCUNN
 
         # Print build options
         if WITH_NUMPY:
@@ -301,6 +300,8 @@ class build_ext(setuptools.command.build_ext.build_ext):
             if WITH_CUDA:
                 THCUNN.extra_link_args += [_C_LIB]
             else:
+                # To generate .obj files for AutoGPU for the export class
+                # a header file cannot build, so it has to be copied to someplace as a source file
                 if os.path.exists("torch/csrc/generated/AutoGPU_cpu_win.cpp"):
                     os.remove("torch/csrc/generated/AutoGPU_cpu_win.cpp")
                 shutil.copyfile("torch/csrc/cuda/AutoGPU.h", "torch/csrc/generated/AutoGPU_cpu_win.cpp")
@@ -349,14 +350,12 @@ library_dirs = []
 extra_link_args = []
 
 if IS_WINDOWS:
-    extra_compile_args = [
-        # Symbolic debugging information in .obj files
-        '/Z7',
-        # Native C++ catch support for asynchronous
-        # structured exception handling (SEH)
-        '/EHa',
-        # Remove builtin min/max functions
-        '/DNOMINMAX']
+    extra_compile_args = ['/Z7', '/EHa', '/DNOMINMAX'
+                          # /Z7 turns on symbolic debugging information in .obj files
+                          # /EHa is about native C++ catch support for asynchronous
+                          # structured exception handling (SEH)
+                          # /DNOMINMAX removes builtin min/max functions
+                          ]
 else:
     extra_compile_args = ['-std=c++11', '-Wno-write-strings',
                           # Python 2.6 requires -fno-strict-aliasing, see

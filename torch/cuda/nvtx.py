@@ -11,8 +11,8 @@ __all__ = ['range_push', 'range_pop', 'mark']
 def windows_nvToolsExt_lib():
     lib_path = windows_nvToolsExt_path()
     if len(lib_path) > 0:
-        lib_name = os.path.basename(nvToolsExt_lib_path)
-        lib = os.path.splitext(nvToolsExt_lib_name)[0]
+        lib_name = os.path.basename(lib_path)
+        lib = os.path.splitext(lib_name)[0]
         return ctypes.cdll.LoadLibrary(lib)
     else:
         return None
@@ -24,7 +24,7 @@ def windows_nvToolsExt_path():
     if os.path.exists(NVTOOLEXT_HOME):
         lib_paths = glob.glob(NVTOOLEXT_HOME + '/bin/x64/nvToolsExt*.dll')
         if len(lib_paths) > 0:
-            lib_path = nvToolsExt_lib_paths[0]
+            lib_path = lib_paths[0]
             return lib_path
     return ''
 

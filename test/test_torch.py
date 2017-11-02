@@ -4245,8 +4245,6 @@ class TestTorch(TestCase):
             t2.fill_(rnum)
             self.assertEqual(t1, t2, 0)
 
-            del s1, t1, s2, t2
-
     def test_print(self):
         for t in torch._tensor_classes:
             if t == torch.HalfTensor:
