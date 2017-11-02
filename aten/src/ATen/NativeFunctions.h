@@ -103,22 +103,22 @@ static inline Tensor permute(const Tensor & self, IntList dims) {
 [NativeFunction]
 name: expand
 arg: Tensor self
-arg: IntList sizes
+arg: IntList size
 return: Tensor
 variants: method, function
 type_method_definition_level: base
 type_method_definition_dispatch: at::native::expand
 [/NativeFunction]
 */
-static inline Tensor expand(const Tensor &self, IntList sizes) {
-  if (sizes.size() < (size_t)self.dim()) {
+static inline Tensor expand(const Tensor &self, IntList size) {
+  if (size.size() < (size_t)self.dim()) {
     throw std::runtime_error("the number of sizes provided must be greater or equal to the "
                              "number of dimensions in the tensor");
   }
 
   std::vector<int64_t> expandedSizes;
   std::vector<int64_t> expandedStrides;
-  std::tie(expandedSizes, expandedStrides) = inferExpandGeometry(self, sizes);
+  std::tie(expandedSizes, expandedStrides) = inferExpandGeometry(self, size);
 
   return self.as_strided(expandedSizes, expandedStrides);
 }
