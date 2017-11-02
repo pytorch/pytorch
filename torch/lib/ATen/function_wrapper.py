@@ -159,8 +159,8 @@ CHECKED_CAST = {
     'THGenerator*':
         CodeTemplate(
             'check_generator<${Backend}Generator>(${arg_name}, &context->defaultGenerator(backend()))'),
-    'THSize*': CodeTemplate('THLongStorageView::make(${arg_name}, true)'),
-    'THStride*': CodeTemplate('THLongStorageView::make(${arg_name}, false, true)'),
+    'THSize*': CodeTemplate('THLongStorageView::makeFromSize(${arg_name})'),
+    'THStride*': CodeTemplate('THLongStorageView::makeFromStride(${arg_name}, ${noelem_to_empty})'),
     'real': CodeTemplate('${arg_name}.to${ScalarName}()'),
     'accreal': CodeTemplate('${arg_name}.to${AccScalarName}()'),
     'TensorList': CodeTemplate('tensor_list_checked_cast<${Tensor}, Tensor, '
@@ -194,7 +194,7 @@ CONSTANT_REPLACEMENTS = [
     ('THPDefaultGenerator->cdata',
      'dynamic_cast<${Generator}&>().generator'),
     ('__storage_size.get\\(\\)',
-     'THLongStorageView::make(static_cast<int64_t>(storage.size()))'),
+     'THLongStorageView::makeFromLength(static_cast<int64_t>(storage.size()))'),
     ('__last_dim', 'self.ndimension()-1'),
 ]
 
@@ -318,7 +318,7 @@ def create_generic(top_env, declarations):
             insert({
                 'name': 'output_mask',
                 'type': 'std::array<bool, {}>'.format(mask_size),
-                'default': '{' + ', '.join(['true'] * mask_size) + '}',
+                'default': '{{' + ', '.join(['true'] * mask_size) + '}}',
             })
 
         result = pos_args + kwd_args
@@ -773,30 +773,34 @@ def create_derived(backend_type_env, declarations):
         # if there is a THSize* argument, then its dimensions are used to determine scalar.
         # otherwise, it is true if all the input tensors are scalars,
         scalar_check_is_from_size = False
+        scalar_check_is_from_option = False
         scalar_check = None
+        scalar_check_opt = option.get('scalar_check')
+        if scalar_check_opt is not None:
+            if isinstance(scalar_check_opt, bool):
+                scalar_check = str(scalar_check_opt).lower()
+            else:
+                scalar_check = scalar_check_opt
+            scalar_check_is_from_option = True
+
         for arg in option['arguments']:
             if is_real_argument_to_wrapper(arg):
                 count += 1
-            if arg['type'] == 'THSize*':
+            if arg['type'] == 'THSize*' and not scalar_check_is_from_option:
                 scalar_check_is_from_size = True
                 scalar_check = '{}.size() == 0'.format(arg['name'])
             if arg['type'] == 'TensorList':
                 seen_tensorlists.add(arg['name'])
 
-            wrap_dim_arg = arg.get('wrap_dim', None)
-            if wrap_dim_arg is not None:
-                # wrap_dim specification can have (add) expressions, e.g. self+1
-                wrap_dim_params = wrap_dim_arg.split("+")
-
+            wrap_dim_target = arg.get('wrap_dim', None)
+            if wrap_dim_target is not None:
                 # for Tensors, "name_" is the TensorImpl, but for TensorLists, it is an
                 # std::vector of TH*s.  Since TH*s have different dimension rules, we used
                 # "name" instead, but keep "name_" for tensor to avoid an extra function call.
-                if wrap_dim_params[0] not in seen_tensorlists:
-                    wrap_dim_params[0] = wrap_dim_params[0] + "_"
-                wrap_dim_target = wrap_dim_params[0]
-                wrap_dim_toadd = 0 if len(wrap_dim_params) == 1 else wrap_dim_params[1]
-                body.append("{} = maybe_wrap_dim({}, {}, {});"
-                            .format(arg['name'], arg['name'], wrap_dim_target, wrap_dim_toadd))
+                if wrap_dim_target not in seen_tensorlists:
+                    wrap_dim_target = wrap_dim_target + "_"
+                body.append("{} = maybe_wrap_dim({}, {});"
+                            .format(arg['name'], arg['name'], wrap_dim_target))
 
             # only generated checked casts the first time we see it
             if arg['name'] not in seen_names and requires_checked_cast(arg):
@@ -816,10 +820,12 @@ def create_derived(backend_type_env, declarations):
                     if 'default_init' in arg:
                         default_init.append(arg['default_init'])
 
+                    noelem_to_empty = 'is_noelem_tensor_size(size)' if 'size' in seen_names else 'false'
                     check_cast = CHECKED_CAST[arg['type']].substitute(
                         env, arg_name=arg['name'], arg_pos=count,
                         null_okay=null_okay, default_init=default_init,
-                        size=arg.get('size'))
+                        size=arg.get('size'),
+                        noelem_to_empty=noelem_to_empty)
                     body.append("auto {}_ = {};".format(
                         arg['name'], check_cast))
                 if drop_argument(arg, option) or replace_with_null(arg):
@@ -845,12 +851,15 @@ def create_derived(backend_type_env, declarations):
                 else:
                     body += initializers
 
-                # isScalar() for all input tensors is and'd to form
+                # for out-of-place: isScalar() for all input tensors is and'd to form
                 # the test for whether the output is also a scalar
+                # for in-place: isScalar() shouldn't change as a result of the operation
                 if (not arg.get('output') and 'Tensor' in arg['type'] and
                         'TensorList' not in arg['type'] and
                         'THS' not in arg['type'] and
-                        not scalar_check_is_from_size):
+                        not scalar_check_is_from_size and
+                        not scalar_check_is_from_option and
+                        not option['inplace']):
                     check = '{}->isScalar()'.format(arg['name'] + '_')
                     if nullable_argument(arg):
                         check = '(!{} || {})'.format(arg['name'] + '_', check)
