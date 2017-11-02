@@ -11,12 +11,20 @@
 #include "torch/csrc/autograd/saved_variable.h"
 #include "torch/csrc/utils/object_ptr.h"
 
-// (class, gpu id, sizes)
-using output_info_type = std::tuple<PyObject *, int, std::vector<int64_t>>;
-
 
 namespace torch { namespace jit { struct Graph; }}
 namespace torch { namespace autograd {
+
+struct VariableInfo {
+  explicit VariableInfo(const Variable& var);
+
+  Variable zeros(AutoGPU& gpu_guard) const;
+
+  at::Type* type;
+  int device;
+  std::vector<int64_t> size;
+  bool requires_grad;
+};
 
 // A Function which is implemented by a Python object (i.e., a THPFunction).
 // Calls to 'apply' are forwarded to the Python method implementation.
@@ -74,10 +82,11 @@ struct THPFunction {
     // modified inplace.
     PyObject *dirty_tensors;
 
-    std::vector<output_info_type> *output_info;
-    std::vector<torch::autograd::SavedVariable> *saved_variables;
+    std::vector<torch::autograd::VariableInfo> output_info;
+    std::vector<torch::autograd::VariableInfo> input_info;
+    std::vector<torch::autograd::SavedVariable> saved_variables;
     // For each input, true if the input is a THPVariable
-    std::vector<bool> *is_variable_input;
+    std::vector<bool> is_variable_input;
     char has_freed_buffers;
     char is_traced;
 

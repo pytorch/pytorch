@@ -36,26 +36,22 @@ PyObject *THPBatchNormBackwardBackwardFunction = NULL;
 #define THPFunction_assert(condition, ...)                                     \
   if (!(condition)) { THPUtils_setError(__VA_ARGS__); throw python_error(); }
 
-/**
- * Call into Python to allocate and zero a tensor as per info.
- */
-static PyObject* _allocate_grad_output(output_info_type& info, AutoGPU& gpu_guard)
-{
-  // TODO: no need to do this for non-differentiable outputs
-  PyObject *tensor_cls = std::get<0>(info);
-  gpu_guard.setDevice(std::get<1>(info));
-  std::vector<int64_t> &sizes = std::get<2>(info);
+namespace torch { namespace autograd {
 
-  THPObjectPtr grad_size(THPSize_New(sizes.size(), sizes.data()));
-  if (!grad_size) throw python_error();
-  THPObjectPtr new_grad(PyObject_CallFunctionObjArgs(tensor_cls, grad_size.get(), NULL));
-  if (!new_grad) throw python_error();
-  THPObjectPtr result(PyObject_CallMethod(new_grad.get(), "zero_", ""));
-  if (!result) throw python_error();
-  return new_grad.release();
+VariableInfo::VariableInfo(const Variable& var)
+  : type(&var.type())
+  , device(-1)
+  , size(var.sizes())
+  , requires_grad(var.requires_grad()) {
+  if (var.type().isCuda()) {
+    device = var.get_device();
+  }
 }
 
-namespace torch { namespace autograd {
+Variable VariableInfo::zeros(AutoGPU& gpu_guard) const {
+  gpu_guard.setDevice(device);
+  return type->zeros(size);
+}
 
 auto PyFunction::legacy_apply(const variable_list& inputs) -> variable_list {
   AutoGIL gil;
@@ -122,14 +118,13 @@ auto PyFunction::apply(const variable_list& inputs) -> variable_list {
   auto num_inputs = inputs.size();
   THPObjectPtr pyInputs(PyTuple_New(num_inputs));
   if (!pyInputs) throw python_error();
-  auto& output_info = *py_fn->output_info;
+  auto& output_info = py_fn->output_info;
   for (size_t i = 0; i < num_inputs; ++i) {
     PyObject* input;
     if (inputs[i].defined()) {
       input = THPVariable_Wrap(inputs[i]);
     } else {
-      THPObjectPtr tensor(_allocate_grad_output(output_info[i], _gpu_guard));
-      input = THPVariable_NewLeaf(tensor);
+      input = THPVariable_Wrap(output_info[i].zeros(_gpu_guard));
     }
     if (!input) throw python_error();
     PyTuple_SET_ITEM(pyInputs.get(), i, input);
@@ -141,7 +136,7 @@ auto PyFunction::apply(const variable_list& inputs) -> variable_list {
   if (!r) throw python_error();
   ensure_tuple(r);
 
-  auto& is_variable_input = *py_fn->is_variable_input;
+  auto& is_variable_input = py_fn->is_variable_input;
   int num_outputs = PyTuple_GET_SIZE(r.get());
   int num_forward_inputs = is_variable_input.size();
   // Returning too many results is ok, but only as long as they're all None.
@@ -170,6 +165,7 @@ auto PyFunction::apply(const variable_list& inputs) -> variable_list {
   // Massage the Python results tuple back into a C++ variable_list
   variable_list results;
   results.reserve(num_outputs);
+  auto& input_info = py_fn->input_info;
   for (int i = 0; i != num_outputs; ++i) {
     PyObject* output = PyTuple_GET_ITEM(r.get(), i);
     bool was_variable = is_variable_input[i];
@@ -182,7 +178,14 @@ auto PyFunction::apply(const variable_list& inputs) -> variable_list {
       }
       continue;
     }
-    if (output != Py_None) {
+    if (output == Py_None) {
+      auto& info = input_info[results.size()];
+      if (info.requires_grad) {
+        results.emplace_back(info.zeros(_gpu_guard));
+      } else {
+        results.emplace_back();
+      }
+    } else {
       if (!THPVariable_Check(output)) {
         std::string msg("expected Variable or None (got ");
         msg += THPUtils_typename(output);
@@ -190,8 +193,6 @@ auto PyFunction::apply(const variable_list& inputs) -> variable_list {
         throw std::runtime_error(msg);
       }
       results.emplace_back(((THPVariable*)output)->cdata);
-    } else {
-      results.emplace_back();
     }
   }
 
@@ -210,8 +211,7 @@ auto PyFunction::is_traceable() -> bool {
 auto PyFunction::releaseVariables() -> void {
   AutoGIL gil;
   auto f = (THPFunction*) obj;
-  delete f->saved_variables;
-  f->saved_variables = nullptr;
+  f->saved_variables.clear();
   f->has_freed_buffers = 1;
 }
 
@@ -263,17 +263,10 @@ static int THPFunction_clear(THPFunction *self)
   Py_CLEAR(self->non_differentiable);
   Py_CLEAR(self->dirty_tensors);
 
-  auto saved_variables = self->saved_variables;
-  self->saved_variables = NULL;
-  delete saved_variables;
-
-  auto output_info = self->output_info;
-  self->output_info = NULL;
-  delete output_info;
-
-  auto is_variable_input = self->is_variable_input;
-  self->is_variable_input = NULL;
-  delete is_variable_input;
+  self->output_info.clear();
+  self->input_info.clear();
+  self->saved_variables.clear();
+  self->is_variable_input.clear();
 
   // XXX: this will clear all hooks (not only Python ones)
   // I guess it's ok to leave it as is for now.
@@ -288,6 +281,10 @@ static void THPFunction_dealloc(THPFunction* self)
   PyObject_GC_UnTrack(self);
   THPFunction_clear(self);
   self->cdata.~PyFunction();
+  self->output_info.~vector();
+  self->input_info.~vector();
+  self->saved_variables.~vector();
+  self->is_variable_input.~vector();
   Py_TYPE(self)->tp_free((PyObject*)self);
 }
 
@@ -299,6 +296,10 @@ PyObject *THPFunction_new(PyTypeObject *type, PyObject *args, PyObject *kwargs)
   // most fields
   THPFunction* self = (THPFunction*)obj;
   new (&self->cdata) PyFunction(obj);
+  new (&self->output_info) std::vector<VariableInfo>();
+  new (&self->input_info) std::vector<VariableInfo>();
+  new (&self->saved_variables) std::vector<SavedVariable>();
+  new (&self->is_variable_input) std::vector<bool>();
   self->cdata.num_inputs = -1;
   self->cdata.is_stochastic = PyObject_IsInstance(obj, THPStochasticFunctionClass);
   return obj;
@@ -387,8 +388,8 @@ static void _wrap_outputs(THPFunction *self, t2var_type &t2var,
   auto cdata = is_volatile ? nullptr : THPFunction_asFunction(self);
   Py_ssize_t num_outputs = PyTuple_GET_SIZE(raw_output);
   if (self->cdata.is_executable) {
-    self->output_info = new std::vector<output_info_type>();
-    self->output_info->reserve(num_outputs);
+    self->output_info.clear();
+    self->output_info.reserve(num_outputs);
   }
   for (int i = 0; i < num_outputs; i++) {
     PyObject *output = PyTuple_GET_ITEM(raw_output, i);
@@ -455,13 +456,8 @@ static void _wrap_outputs(THPFunction *self, t2var_type &t2var,
     }
     if (!output_var) throw python_error();
 
-    if (self->output_info) {
-      auto& output_tensor = output_var->cdata.data();
-      self->output_info->emplace_back(
-        (PyObject *)getPyTypeObject(output_tensor),
-        output_tensor.type().isCuda() ? output_tensor.get_device() : -1,
-        output_tensor.sizes()
-      );
+    if (self->cdata.is_executable) {
+      self->output_info.emplace_back(output_var->cdata);
     }
     t2var[output] = output_var;
     output_var->cdata.get()->output_nr = i;
@@ -478,13 +474,13 @@ static void _save_variables(THPFunction* self, t2var_type &t2var)
       "error: to_save attribute is expected to be a tuple but is %s",
       THPUtils_typename(self->to_save));
   Py_ssize_t num_saved = PyTuple_GET_SIZE(self->to_save);
-  self->saved_variables = new std::vector<torch::autograd::SavedVariable>();
-  self->saved_variables->reserve(num_saved);
+  self->saved_variables.clear();
+  self->saved_variables.reserve(num_saved);
   auto cdata_ptr = &self->cdata;
   for (int i = 0; i < num_saved; i++) {
     PyObject *tensor = PyTuple_GET_ITEM(self->to_save, i);
     if (tensor == Py_None) {
-      self->saved_variables->emplace_back();
+      self->saved_variables.emplace_back();
       continue;
     }
 
@@ -499,7 +495,7 @@ static void _save_variables(THPFunction* self, t2var_type &t2var)
           "tensors, but argument %d doesn't satisfy this condition", i);
     }
 
-    self->saved_variables->emplace_back(variable->cdata, cdata_ptr);
+    self->saved_variables.emplace_back(variable->cdata, cdata_ptr);
   }
   // Free .to_save
   Py_DECREF(self->to_save);
@@ -736,6 +732,15 @@ PyObject* process_outputs(PyObject *op_obj, THPFunction* grad_fn, const Unpacked
 
   grad_fn->cdata.num_inputs = num_outputs;
 
+  // Record type, device, and size information about inputs
+  if (grad_fn->cdata.is_executable) {
+    grad_fn->input_info.clear();
+    grad_fn->input_info.reserve(unpacked.input_vars.size());
+    for (auto& var : unpacked.input_vars) {
+      grad_fn->input_info.emplace_back(var);
+    }
+  }
+
   // Initialize t2var map with input tensors
   t2var_type t2var;
   for (auto& c_var : unpacked.input_vars) {
@@ -821,7 +826,7 @@ PyObject *THPFunction_apply(PyObject *cls, PyObject *inputs)
   bool is_volatile = input_info.flags.is_volatile;
   ctx->cdata.set_flags(std::move(input_info.flags));
   ctx->needs_input_grad = input_info.needs_input_grad.release();
-  ctx->is_variable_input = new std::vector<bool>(std::move(input_info.is_variable_input));
+  ctx->is_variable_input = std::move(input_info.is_variable_input);
 
   // Prepend ctx to tensor_input, in preparation for static method call
   auto num_args = PyTuple_GET_SIZE(inputs);
@@ -868,11 +873,12 @@ static void _prepare_grad_output(THPFunction *self, THPObjectPtr& raw_grad_outpu
   if (!grad_output) throw python_error();
 
   // Look for Nones and replace them with new buffers
-  auto& output_info = *self->output_info;
+  auto& output_info = self->output_info;
   for (int i = 0; i < num_grad_output; i++) {
     PyObject *grad = PyTuple_GET_ITEM(raw_grad_output.get(), i);
     if (grad == Py_None) {
-      grad = _allocate_grad_output(output_info[i], gpu_guard);
+      grad = createPyObject(output_info[i].zeros(gpu_guard).data());
+      if (!grad) throw python_error();
     } else {
       Py_INCREF(grad);
     }
@@ -972,15 +978,15 @@ static PyObject *unpack_saved_variables(
     std::function<PyObject*(const Variable&)> unpack_fn)
 {
   THPUtils_assert(!self->has_freed_buffers, ERR_BACKWARD_TWICE);
-  if (!self->saved_variables)
+  auto& saved_variables = self->saved_variables;
+  if (saved_variables.empty())
     return PyTuple_New(0);
 
-  int num_saved = self->saved_variables->size();
+  int num_saved = saved_variables.size();
   THPObjectPtr saved(PyTuple_New(num_saved));
   if (!saved)
     return NULL;
   auto saved_for = THPFunction_asFunction(self);
-  auto& saved_variables = *self->saved_variables;
   for (int i = 0; i < num_saved; i++) {
     auto unpacked_var = saved_variables[i].unpack(saved_for);
     THPObjectPtr value;

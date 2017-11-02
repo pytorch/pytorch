@@ -886,6 +886,25 @@ class TestAutograd(TestCase):
         y = x.masked_fill(mask, 0)
         y.sum().backward()
 
+    def test_mark_non_differentiable_none(self):
+        # This used to segfault because MyFunction would send back null
+        # gradients to MulBackward, which is implemented in C++. C++
+        # implemented functions expect incoming  grad_ouptuts to be non-null.
+        class MyFunction(Function):
+            @staticmethod
+            def forward(ctx, input):
+                output = input.clone()
+                ctx.mark_non_differentiable(output)
+                return output
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                return None
+
+        x = Variable(torch.randn(5, 5), requires_grad=True)
+        r = MyFunction.apply(x * x)
+        (r * x).sum().backward()
+
     def test_resize(self):
         x = Variable(torch.ones(2, 3))
         self.assertTrue(x.resize(3, 2).size() == (3, 2))
