@@ -5,6 +5,9 @@
 #ifdef WITH_MPI
 #include "data_channels/DataChannelMPI.hpp"
 #endif // WITH_MPI
+#if defined(WITH_CUDA) && defined(WITH_DISTRIBUTED_NCCL)
+#include "data_channels/DataChannelNccl.hpp"
+#endif // WITH_DISTRIBUTED_NCCL
 #include "data_channels/DataChannelTCP.hpp"
 
 #include <algorithm>
@@ -37,6 +40,15 @@ DataChannel* DataChannel::newChannel(THDChannelType type, std::string init_metho
       throw std::runtime_error(
         "the Gloo backend is not available; "
         "try to recompile the THD package with Gloo support"
+      );
+
+    case THDChannelNccl:
+#if defined(WITH_CUDA) && defined(WITH_DISTRIBUTED_NCCL)
+      return new DataChannelNccl(GET_CONFIG);
+#endif
+      throw std::runtime_error(
+        "the distributed NCCL backend is not available; "
+        "try to recompile the THD package with CUDA and NCCL 2+ support"
       );
 
     default:
