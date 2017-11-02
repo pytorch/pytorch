@@ -344,6 +344,12 @@ class MKLMemory {
       const dnnPrimitive_t primitive = nullptr,
       const dnnResourceType_t type = dnnResourceNumber) {
     if (buffer_.get() == other->buffer_.get()) {
+      CAFFE_ENFORCE(
+          dnnLayoutCompare<T>(other->layout_, layout_),
+          "MKLMemory layout does not match, despite in-place buffers");
+      CAFFE_ENFORCE(
+          other->dims() == dims(),
+          "MKLMemory dimensions do not match, despite in-place buffers");
       VLOG(2) << "CopyTo does not need actual copying, as we are sharing "
                  "memory with the output.";
       // This is already mapping to the same memory region. Skip copy.
@@ -355,21 +361,13 @@ class MKLMemory {
     // consistently copying stuff with fixed src and dst layouts, consider
     // making a cache for the primitive below.
     VLOG(2) << "CopyTo requires copying. Performing direct copy.";
+    if (dims() != other->dims()) {
+      other->Reset(dims(), primitive, type);
+    }
     PrimitiveWrapper<T> convert(
         dnnConversionCreate<T>, layout_, other->layout_);
-    if (dnnPrimitive_t(convert) == nullptr ||
-        dnnConversionExecute<T>(convert, buffer_.get(), other->buffer()) !=
-            E_SUCCESS) {
-      VLOG(2) << "Direct copy failed, will need to allocate output.";
-      // If CopyTo directly did not succeed, it could be because the target
-      // MKLMemory is not having the right layout. In this case we will reset
-      // the target and then do another copy.
-      other->Reset(dims_, primitive, type);
-      PrimitiveWrapper<T> convert2(
-          dnnConversionCreate<T>, layout_, other->layout_);
-      MKLDNN_SAFE_CALL(
-          dnnConversionExecute<T>(convert2, buffer_.get(), other->buffer()));
-    }
+    MKLDNN_SAFE_CALL(
+        dnnConversionExecute<T>(convert, buffer_.get(), other->buffer()));
   }
 
   inline void* buffer() {
