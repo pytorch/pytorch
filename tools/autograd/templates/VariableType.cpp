@@ -188,14 +188,9 @@ static Variable as_view(Variable base, Tensor tensor) {
   return make_variable_view(std::move(base), std::move(tensor));
 }
 
-struct VariableFlags {
-  bool requires_grad;
-  bool is_volatile;
-};
-
 template<typename T>
-static VariableFlags compute_flags_tmpl(T tensors) {
-  VariableFlags flags = {false, false};
+static VarFlags compute_flags_tmpl(T tensors) {
+  VarFlags flags = {false, false};
   for (const Tensor& tensor : tensors) {
     auto& var = static_cast<const Variable&>(tensor);
     if (var.defined()) {
@@ -221,11 +216,11 @@ static variable_list cast_tensor_list(const TensorList& tensors) {
   return variable_list(tensors.begin(), tensors.end());
 }
 
-static VariableFlags compute_flags(const TensorRefList& tensors) {
+static VarFlags compute_flags(const TensorRefList& tensors) {
   return compute_flags_tmpl(tensors);
 }
 
-static VariableFlags compute_flags(TensorList tensors) {
+static VarFlags compute_flags(TensorList tensors) {
   return compute_flags_tmpl(tensors);
 }
 
@@ -255,41 +250,21 @@ static void check_inplace(const Tensor& tensor) {
   }
 }
 
-static void set_base_fn(Variable& var, std::shared_ptr<Function> grad_fn) {
-  // Called when var is a view of another Variable. Modifes the
-  // var.base().grad_fn() instead of var's grad_fn.
-  //
-  // We make a few important assumptions about the grad_fn for the in-place op:
-  //
-  // 1. It takes in a single grad as input (the in-place op must only produce
-  //    a single output).
-  // 2. It may produce multiple grad_inputs (the in-place op may use multiple
-  //    inputs), but the grad_input for "self" must come first.
-  //
-  grad_fn->num_inputs = 1;
-
-  auto& base = var.base();
-  auto copySlices = std::make_shared<CopySlices>(base, TensorGeometry(var), std::move(grad_fn));
-  base.output_nr() = 0;
-  base.grad_fn() = std::move(copySlices);
-}
-
-static void set_flags(Variable& var, VariableFlags flags, std::shared_ptr<Function> grad_fn, bool inplace=false) {
-  var.requires_grad() = flags.requires_grad;
-  var.is_volatile() = flags.is_volatile;
+static void set_flags(Variable& var, VarFlags flags, std::shared_ptr<Function> grad_fn, bool inplace=false) {
   if (grad_fn) {
-    if (inplace && var.is_view()) {
-      set_base_fn(var, std::move(grad_fn));
-    } else {
-      var.output_nr() = grad_fn->num_inputs++;
-      var.grad_fn() = std::move(grad_fn);
-    }
+    grad_fn->num_inputs = 1;
   }
+  var.set_history(flags, 0, std::move(grad_fn));
 }
 
-static void set_flags(std::vector<Variable> &vl, VariableFlags flags, std::shared_ptr<Function> grad_fn) {
-  for (auto& v : vl) {
-    set_flags(v, flags, grad_fn);
+static void set_flags(std::vector<Variable> &vl, VarFlags flags, std::shared_ptr<Function> grad_fn) {
+  if (grad_fn) {
+    grad_fn->num_inputs = vl.size();
+  }
+  int64_t output_nr = 0;
+  for (auto& var : vl) {
+    var.set_history(flags, output_nr, grad_fn);
+    output_nr++;
   }
 }
 
@@ -324,6 +299,7 @@ void VariableType::s_copy(const Tensor & src, Tensor & dst) const {
     grad_fn = std::make_shared<CopyBackwards>();
     grad_fn->is_executable = true;
     grad_fn->next_functions = compute_next_functions({ dst, src });
+    grad_fn->num_inputs = 1;
   }
   baseType->s_copy(src_, dst_);
   increment_version(dst);

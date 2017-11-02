@@ -21,6 +21,15 @@ namespace torch { namespace autograd {
 using at::Tensor;
 struct VariableImpl;
 
+// TODO: fix name conflict with jit VariableFlags
+struct VarFlags {
+  VarFlags(bool requires_grad, bool is_volatile)
+    : requires_grad(requires_grad), is_volatile(is_volatile) {}
+  VarFlags() : VarFlags(false, false) {}
+  bool requires_grad;
+  bool is_volatile;
+};
+
 struct Variable : public at::Tensor {
   inline Variable(VariableImpl * self, bool retain);
   Variable() : Tensor() {}
@@ -46,6 +55,8 @@ struct Variable : public at::Tensor {
 
   inline const std::shared_ptr<Function>& grad_fn() const;
   inline       std::shared_ptr<Function>& grad_fn();
+
+  inline void set_history(VarFlags flags, int output_nr, std::shared_ptr<Function> grad_fn);
 
   std::shared_ptr<Function> grad_accumulator() const;
 
@@ -97,8 +108,9 @@ public:
 
 public:
   std::shared_ptr<Function> get_grad_accumulator();
-  virtual std::shared_ptr<Function>& get_grad_fn() {
-    return _grad_fn;
+  virtual std::shared_ptr<Function>& get_grad_fn() { return _grad_fn; }
+  virtual void set_grad_fn(std::shared_ptr<Function> grad_fn) {
+    _grad_fn = std::move(grad_fn);
   }
 
   at::Tensor data;
@@ -134,6 +146,8 @@ struct VariableViewImpl : public VariableImpl {
   // re-create the grad_fn to express the up-to-date view relationship between
   // this and the base Variable.
   virtual std::shared_ptr<Function>& get_grad_fn() override;
+  // Sets the grad_fn. If
+  virtual void set_grad_fn(std::shared_ptr<Function> grad_fn) override;
 
   // The base Variable, which is never a view
   Variable base;
@@ -197,6 +211,16 @@ inline const std::shared_ptr<Function>& Variable::grad_fn() const {
 inline std::shared_ptr<Function>& Variable::grad_fn() {
   return get()->get_grad_fn();
 };
+inline void Variable::set_history(VarFlags flags, int output_nr, std::shared_ptr<Function> grad_fn) {
+  get()->requires_grad = flags.requires_grad;
+  get()->is_volatile = flags.is_volatile;
+  get()->output_nr = output_nr;
+  if (!grad_fn) {
+    get()->_grad_fn = nullptr;
+  } else {
+    get()->set_grad_fn(grad_fn);
+  }
+}
 inline std::shared_ptr<Function> Variable::grad_accumulator() const {
   return get()->get_grad_accumulator();
 };

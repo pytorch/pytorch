@@ -337,11 +337,6 @@ static void _mark_dirty(THPFunction *self, t2var_type &t2var,
           "argument %d isn't one", i);
     }
     auto& version_counter = variable->cdata.version_counter();
-    THPFunction_assert(version_counter.live_refs() == 1,
-        "in-place operations can be only used on variables that don't share "
-        "storage with any other variables, but detected that there are %d "
-        "objects sharing it",
-        version_counter.live_refs());
     version_counter.increment();
   }
   // We're not going to ever need this so let's remove references now
@@ -429,10 +424,7 @@ static void _wrap_outputs(THPFunction *self, t2var_type &t2var,
           torch::createTensor(output),
           get_shared_base(output),
           is_modified);
-      var.output_nr() = i;
-      var.is_volatile() = is_volatile;
-      var.requires_grad() = is_executable;
-      var.grad_fn() = cdata;
+      var.set_history(VarFlags(is_executable, is_volatile), i, cdata);
 
       output_var = (THPVariable*)THPVariable_Wrap(var);
       if (!output_var) throw python_error();

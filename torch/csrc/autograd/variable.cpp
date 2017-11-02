@@ -3,6 +3,7 @@
 #include "torch/csrc/autograd/generated/VariableType.h"
 #include "torch/csrc/autograd/generated/Functions.h"
 #include "torch/csrc/autograd/functions/accumulate_grad.h"
+#include "torch/csrc/autograd/functions/tensor.h"
 
 using namespace at;
 
@@ -119,6 +120,20 @@ std::shared_ptr<Function>& VariableViewImpl::get_grad_fn() {
     attr_version = current_version;
   }
   return _grad_fn;
+}
+
+void VariableViewImpl::set_grad_fn(std::shared_ptr<Function> grad_fn) {
+  if (this->_grad_fn && grad_fn) {
+    // If we have a previous grad_fn then this is an in-place modification
+    if (output_nr != 0 || grad_fn->num_inputs != 1) {
+      throw std::runtime_error("Functions which modify views in-place must return a single Variable");
+    }
+    auto copySlices = std::make_shared<CopySlices>(base, TensorGeometry(data), std::move(grad_fn));
+    base.output_nr() = 0;
+    base.grad_fn() = std::move(copySlices);
+  } else {
+    _grad_fn = std::move(grad_fn);
+  }
 }
 
 namespace {

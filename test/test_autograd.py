@@ -1587,6 +1587,31 @@ class TestAutograd(TestCase):
         go = Variable(torch.randn(a.size()), requires_grad=True)
         gradgradcheck(func, (a, b), (go,))
 
+    def test_inplace_view_python(self):
+        a = Variable(torch.randn(4, 4), requires_grad=True)
+        b = Variable(torch.randn(2, 2), requires_grad=True)
+
+        class PyAdd(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x, y):
+                ctx.mark_dirty(x)
+                x.add_(y)
+                return x
+
+            @staticmethod
+            def backward(ctx, grad):
+                return grad, grad
+
+        def func(root, b):
+            x = root.clone()
+            PyAdd.apply(x.narrow(1, 2, 2).narrow(0, 1, 2), b)
+            PyAdd.apply(x.narrow(1, 0, 2).narrow(0, 1, 2), b)
+            return x
+
+        gradcheck(func, [a, b], raise_exception=True)
+        go = Variable(torch.randn(a.size()), requires_grad=True)
+        gradgradcheck(func, (a, b), (go,))
+
     def test_inplace_view_non_contig(self):
         data = torch.ones(2, 3, 2).select(2, 1).t()
         root = Variable(data, requires_grad=True)
