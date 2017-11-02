@@ -18,12 +18,26 @@
 
 #include "caffe2/mkl/utils/mkl_operator.h"
 #include "caffe2/operators/cross_entropy_op.h"
+#include "caffe2/operators/elementwise_op.h"
 #include "caffe2/operators/filler_op.h"
 #include "caffe2/operators/load_save_op.h"
 #include "caffe2/operators/loss_op.h"
 #include "caffe2/operators/reshape_op.h"
 #include "caffe2/operators/softmax_op.h"
 #include "caffe2/operators/utility_ops.h"
+
+namespace caffe2 {
+namespace {
+struct SigmoidCPUFunctor {
+  template <typename T>
+  inline void
+  operator()(const int n, const T* x, T* y, CPUContext* /*device_context*/) {
+    ConstEigenVectorArrayMap<T> xM(x, n);
+    EigenVectorArrayMap<T>(y, n) = 1. / (1. + (-xM).exp());
+  }
+};
+} // namespace
+} // namespace caffe2
 
 // can add more non-MKL operators if needed
 namespace caffe2 {
@@ -55,5 +69,10 @@ REGISTER_MKL_OPERATOR(
     mkl::MKLFallbackOp<MSRAFillOp<float, CPUContext>>);
 REGISTER_MKL_OPERATOR(Load, mkl::MKLFallbackOp<LoadOp<CPUContext>>);
 REGISTER_MKL_OPERATOR(Save, mkl::MKLFallbackOp<SaveOp<CPUContext>>);
+
+REGISTER_MKL_OPERATOR(
+    Sigmoid,
+    mkl::MKLFallbackOp<
+        UnaryElementwiseOp<TensorTypes<float>, CPUContext, SigmoidCPUFunctor>>);
 
 } // namespace caffe2
