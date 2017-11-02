@@ -75,12 +75,16 @@ class SparseAdam(Optimizer):
                 #      old <- b * old + (1 - b) * new
                 # <==> old += (1 - b) * (new - old)
                 old_exp_avg_values = exp_avg._sparse_mask(grad)._values()
-                exp_avg.add_(make_sparse(grad_values.sub(old_exp_avg_values).mul_(1 - beta1)))
+                exp_avg_update_values = grad_values.sub(old_exp_avg_values).mul_(1 - beta1)
+                exp_avg.add_(make_sparse(exp_avg_update_values))
                 old_exp_avg_sq_values = exp_avg_sq._sparse_mask(grad)._values()
-                exp_avg_sq.add_(make_sparse(grad_values.pow(2).sub_(old_exp_avg_sq_values).mul_(1 - beta2)))
+                exp_avg_sq_update_values = grad_values.pow(2).sub_(old_exp_avg_sq_values).mul_(1 - beta2)
+                exp_avg_sq.add_(make_sparse(exp_avg_sq_update_values))
 
-                numer = exp_avg._sparse_mask(grad)._values()
-                denom = exp_avg_sq._sparse_mask(grad)._values().sqrt_().add_(group['eps'])
+                # Dense addition again is intended, avoiding another _sparse_mask
+                numer = exp_avg_update_values.add_(old_exp_avg_values)
+                denom = exp_avg_sq_update_values.add_(old_exp_avg_sq_values).sqrt_().add_(group['eps'])
+                del exp_avg_update_values, exp_avg_sq_update_values
 
                 bias_correction1 = 1 - beta1 ** state['step']
                 bias_correction2 = 1 - beta2 ** state['step']
