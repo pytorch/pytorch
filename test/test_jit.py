@@ -613,6 +613,7 @@ class TestJit(TestCase):
         assert(torch.equal(torch.ones([2, 2]), t_node.t("a")))
         self.assertExpected(str(g2))
 
+    @unittest.skipIf(not torch.cuda.is_available(), "cpp tests require CUDA")
     def test_cpp(self):
         torch._C._jit_run_cpp_tests()
 
