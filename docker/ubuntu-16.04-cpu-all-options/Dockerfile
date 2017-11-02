@@ -5,7 +5,6 @@ LABEL maintainer="aaronmarkham@fb.com"
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libgflags-dev \
-    libgflags-dev \
     libgtest-dev \
     libiomp-dev \
     libleveldb-dev \
