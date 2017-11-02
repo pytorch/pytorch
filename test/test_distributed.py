@@ -577,6 +577,7 @@ elif BACKEND == 'mpi':
 elif BACKEND == 'nccl':
     dist.init_process_group(init_method=INIT_METHOD, backend='nccl')
     # TODO
+
     class TestNCCL(TestCase, _DistTestBase):
         pass
 

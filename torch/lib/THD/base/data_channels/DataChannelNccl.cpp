@@ -25,20 +25,18 @@ std::unordered_map<THDReduceOp, ncclRedOp_t> ncclOp = {
 };
 
 
-std::unordered_map<thpp::Type, ncclDataType_t> ncclDatatype = {
-  {thpp::Type::CHAR, ncclInt8},
-  {thpp::Type::UCHAR, ncclUint8},
-  {thpp::Type::FLOAT, ncclFloat},
-  {thpp::Type::DOUBLE, ncclDouble},
-  {thpp::Type::INT, ncclInt32},
-  {thpp::Type::UINT, ncclUint32},
-  {thpp::Type::LONG_LONG, ncclInt64},
-  {thpp::Type::ULONG_LONG, ncclUint64},
+std::unordered_map<at::ScalarType, ncclDataType_t> ncclDatatype = {
+  {at::kChar, ncclInt8},
+  {at::kByte, ncclUint8},
+  {at::kFloat, ncclFloat},
+  {at::kDouble, ncclDouble},
+  {at::kInt, ncclInt32},
+  {at::kLong, ncclInt64},
 };
 
 
 // Helper function that gets the data type and issues error if not supported
-static ncclDataType_t _getNcclDataType(thpp::Type type) {
+static ncclDataType_t _getNcclDataType(at::ScalarType type) {
   if (ncclDatatype.find(type) == ncclDatatype.end()) {
     throw std::runtime_error("Unsupported data type for NCCL");
   }
@@ -253,7 +251,7 @@ rank_type DataChannelNccl::getNumProcesses() {
 
 std::pair<std::vector<ncclComm_t>*, std::vector<cudaEvent_t>*>
 DataChannelNccl::_getNcclCommsAndEvents(
-    std::vector<thpp::Tensor*>& input,
+    std::vector<at::Tensor>& input,
     THDGroup groupId) {
 
   if (input.empty()) {
@@ -264,9 +262,9 @@ DataChannelNccl::_getNcclCommsAndEvents(
   std::string deviceList;
   for (auto tensor : input) {
     if (deviceList.empty()) {
-      deviceList = std::to_string(tensor->getDevice());
+      deviceList = std::to_string(tensor.get_device());
     } else {
-      deviceList += "," + std::to_string(tensor->getDevice());
+      deviceList += "," + std::to_string(tensor.get_device());
     }
   }
 
@@ -313,14 +311,14 @@ DataChannelNccl::_getNcclCommsAndEvents(
 
   // Now creating the CUDA events
   for (size_t i = 0; i < input.size(); ++i) {
-    THCudaCheck(cudaSetDevice(input[i]->getDevice()));
+    THCudaCheck(cudaSetDevice(input[i].get_device()));
     THCudaCheck(cudaEventCreate(&((*events)[i])));
   }
   // Create the communicator on each device of the input
   NCCL_CHECK(ncclGroupStart());
   for (size_t i = 0; i < input.size(); ++i) {
     int nRanks = int(_numProcesses) * input.size();
-    THCudaCheck(cudaSetDevice(input[i]->getDevice()));
+    THCudaCheck(cudaSetDevice(input[i].get_device()));
     NCCL_CHECK(ncclCommInitRank(&((*comms)[i]),
                                 nRanks,
                                 ncclId,
@@ -342,8 +340,8 @@ DataChannelNccl::_getNcclCommsAndEvents(
 
 // Helper function that checks the input and output tensors for validity
 void DataChannelNccl::_tensorCheckHelper(
-    const std::vector<thpp::Tensor*>& input,
-    const std::vector<thpp::Tensor*>& output,
+    const std::vector<at::Tensor>& input,
+    const std::vector<at::Tensor>& output,
     size_t outputOverInput) {
 
   if (input.size() <= 0) {
@@ -362,46 +360,47 @@ void DataChannelNccl::_tensorCheckHelper(
   std::unordered_set<int> usedDevices;
   usedDevices.reserve(input.size());
 
-  uint64_t inputNumElement = input[0]->numel();
-  auto elementType = input[0]->type();
+  uint64_t inputNumElement = input[0].numel();
+  auto elementType = input[0].type().scalarType();
 
   for (size_t i = 0; i < input.size(); ++i) {
 
     //  Check to make sure it's a GPU dense tensor
-    if (!(input[i]->isCuda() && !input[i]->isSparse() &&
-          output[i]->isCuda()  && !output[i]->isSparse())) {
+    if (!(input[i].type().isCuda() && !input[i].type().isSparse() &&
+          output[i].type().isCuda()  && !output[i].type().isSparse())) {
       throw std::runtime_error("Only CUDA dense tensor is supported for NCCL "
                                "collective operations");
     }
     // Check the tensor type is identical
-    if (input[i]->type() != elementType || output[i]->type() != elementType) {
+    if (input[i].type().scalarType() != elementType ||
+        output[i].type().scalarType() != elementType) {
       throw std::runtime_error("Expecting all GPU tensors to have identical "
                                "type");
     }
     // Check the input tensor size is identical
-    if (input[i]->numel() != inputNumElement) {
+    if (input[i].numel() != inputNumElement) {
       throw std::runtime_error("Expecting all input tensors to have identical "
                                "number of elements");
     }
     // Check the output tensor size equals to input tensor size
-    if (output[i]->numel() != inputNumElement * outputOverInput) {
+    if (output[i].numel() != inputNumElement * outputOverInput) {
       throw std::runtime_error("The number of elements of output tensor does "
                                "not match the number of elements of the input "
                                "tensor");
     }
     // Contiguous verification
-    if (!input[i]->isContiguous() || !output[i]->isContiguous()) {
+    if (!input[i].is_contiguous() || !output[i].is_contiguous()) {
       throw std::runtime_error("Expecting all GPU tensors to be contiguous");
     }
     // Device verification
-    if (usedDevices.find(input[i]->getDevice()) != usedDevices.end()) {
+    if (usedDevices.find(input[i].get_device()) != usedDevices.end()) {
       throw std::runtime_error("Expecting inputs on different GPU devices");
     }
 
-    usedDevices.insert(input[i]->getDevice());
+    usedDevices.insert(input[i].get_device());
 
     // Now check the output device
-    if (input[i]->getDevice() != output[i]->getDevice()) {
+    if (input[i].get_device() != output[i].get_device()) {
       throw std::runtime_error("Expecting input and output tensors to be on "
                                "the same device");
     }
@@ -409,8 +408,8 @@ void DataChannelNccl::_tensorCheckHelper(
 }
 
 
-void DataChannelNccl::allReduce(std::vector<thpp::Tensor*>& input,
-                                std::vector<thpp::Tensor*>& output,
+void DataChannelNccl::allReduce(std::vector<at::Tensor>& input,
+                                std::vector<at::Tensor>& output,
                                 THDReduceOp operation,
                                 THDGroup groupId) {
 
@@ -432,13 +431,13 @@ void DataChannelNccl::allReduce(std::vector<thpp::Tensor*>& input,
   NCCL_CHECK(ncclGroupStart());
   for (size_t i = 0; i < input.size(); ++i) {
 
-    THCudaCheck(cudaSetDevice(input[i]->getDevice()));
+    THCudaCheck(cudaSetDevice(input[i].get_device()));
     auto stream = THCState_getCurrentStream(THDGetCudaState());
 
-    NCCL_CHECK(ncclAllReduce(input[i]->data(),
-                             output[i]->data(),
-                             input[i]->numel(),
-                             _getNcclDataType(input[i]->type()),
+    NCCL_CHECK(ncclAllReduce(input[i].data_ptr(),
+                             output[i].data_ptr(),
+                             input[i].numel(),
+                             _getNcclDataType(input[i].type().scalarType()),
                              ncclOp[operation],
                              (*comms)[i],
                              stream));
@@ -453,18 +452,18 @@ void DataChannelNccl::allReduce(std::vector<thpp::Tensor*>& input,
 }
 
 
-void DataChannelNccl::allReduce(thpp::Tensor& data,
+void DataChannelNccl::allReduce(at::Tensor& data,
                                 THDReduceOp operation,
                                 THDGroup groupId) {
 
-  std::vector<thpp::Tensor*> dataVec;
-  dataVec.push_back(&data);
+  std::vector<at::Tensor> dataVec;
+  dataVec.push_back(data);
   allReduce(dataVec, dataVec, operation, groupId);
 }
 
 
-void DataChannelNccl::allGather(std::vector<thpp::Tensor*>& input,
-                                std::vector<thpp::Tensor*>& output,
+void DataChannelNccl::allGather(std::vector<at::Tensor>& input,
+                                std::vector<at::Tensor>& output,
                                 THDGroup groupId) {
 
   std::unique_lock<std::mutex> channelLock(_mutex);
@@ -485,13 +484,13 @@ void DataChannelNccl::allGather(std::vector<thpp::Tensor*>& input,
   NCCL_CHECK(ncclGroupStart());
   for (size_t i = 0; i < input.size(); ++i) {
 
-    THCudaCheck(cudaSetDevice(input[i]->getDevice()));
+    THCudaCheck(cudaSetDevice(input[i].get_device()));
     auto stream = THCState_getCurrentStream(THDGetCudaState());
 
-    NCCL_CHECK(ncclAllGather(input[i]->data(),
-                             output[i]->data(),
-                             input[i]->numel(),
-                             _getNcclDataType(input[i]->type()),
+    NCCL_CHECK(ncclAllGather(input[i].data_ptr(),
+                             output[i].data_ptr(),
+                             input[i].numel(),
+                             _getNcclDataType(input[i].type().scalarType()),
                              (*comms)[i],
                              stream));
     THCudaCheck(cudaEventRecord((*events)[i], stream));
@@ -505,17 +504,17 @@ void DataChannelNccl::allGather(std::vector<thpp::Tensor*>& input,
 }
 
 
-void DataChannelNccl::allGather(std::vector<thpp::Tensor*>& output,
-                                thpp::Tensor& input,
+void DataChannelNccl::allGather(std::vector<at::Tensor>& output,
+                                at::Tensor& input,
                                 THDGroup groupId) {
 
-  std::vector<thpp::Tensor*> inputDataVec;
-  inputDataVec.push_back(&input);
+  std::vector<at::Tensor> inputDataVec;
+  inputDataVec.push_back(input);
   allGather(inputDataVec, output, groupId);
 }
 
 
-void DataChannelNccl::reduce(std::vector<thpp::Tensor*>& data,
+void DataChannelNccl::reduce(std::vector<at::Tensor>& data,
                              THDReduceOp operation,
                              rank_type dstRank,
                              THDGroup groupId) {
@@ -539,13 +538,13 @@ void DataChannelNccl::reduce(std::vector<thpp::Tensor*>& data,
   NCCL_CHECK(ncclGroupStart());
   for (size_t i = 0; i < data.size(); ++i) {
 
-    THCudaCheck(cudaSetDevice(data[i]->getDevice()));
+    THCudaCheck(cudaSetDevice(data[i].get_device()));
     auto stream = THCState_getCurrentStream(THDGetCudaState());
 
-    NCCL_CHECK(ncclReduce(data[i]->data(),
-                          data[i]->data(),
-                          data[i]->numel(),
-                          _getNcclDataType(data[i]->type()),
+    NCCL_CHECK(ncclReduce(data[i].data_ptr(),
+                          data[i].data_ptr(),
+                          data[i].numel(),
+                          _getNcclDataType(data[i].type().scalarType()),
                           ncclOp[operation],
                           dstRank * data.size(),
                           (*comms)[i],
@@ -560,17 +559,17 @@ void DataChannelNccl::reduce(std::vector<thpp::Tensor*>& data,
   THCudaCheck(cudaSetDevice(curDevice));
 }
 
-void DataChannelNccl::reduce(thpp::Tensor& data,
+void DataChannelNccl::reduce(at::Tensor& data,
                              THDReduceOp operation,
                              rank_type dstRank,
                              THDGroup groupId) {
 
-  std::vector<thpp::Tensor*> dataVec;
-  dataVec.push_back(&data);
+  std::vector<at::Tensor> dataVec;
+  dataVec.push_back(data);
   reduce(dataVec, operation, dstRank, groupId);
 }
 
-void DataChannelNccl::broadcast(std::vector<thpp::Tensor*>& data,
+void DataChannelNccl::broadcast(std::vector<at::Tensor>& data,
                                 rank_type srcRank,
                                 THDGroup groupId) {
 
@@ -593,12 +592,12 @@ void DataChannelNccl::broadcast(std::vector<thpp::Tensor*>& data,
   NCCL_CHECK(ncclGroupStart());
   for (size_t i = 0; i < data.size(); ++i) {
 
-    THCudaCheck(cudaSetDevice(data[i]->getDevice()));
+    THCudaCheck(cudaSetDevice(data[i].get_device()));
     auto stream = THCState_getCurrentStream(THDGetCudaState());
 
-    NCCL_CHECK(ncclBcast(data[i]->data(),
-                         data[i]->numel(),
-                         _getNcclDataType(data[i]->type()),
+    NCCL_CHECK(ncclBcast(data[i].data_ptr(),
+                         data[i].numel(),
+                         _getNcclDataType(data[i].type().scalarType()),
                          srcRank * data.size(),
                          (*comms)[i],
                          stream));
@@ -613,12 +612,12 @@ void DataChannelNccl::broadcast(std::vector<thpp::Tensor*>& data,
 }
 
 
-void DataChannelNccl::broadcast(thpp::Tensor& data,
+void DataChannelNccl::broadcast(at::Tensor& data,
                                 rank_type srcRank,
                                 THDGroup groupId) {
 
-  std::vector<thpp::Tensor*> dataVec;
-  dataVec.push_back(&data);
+  std::vector<at::Tensor> dataVec;
+  dataVec.push_back(data);
   broadcast(dataVec, srcRank, groupId);
 }
 
@@ -679,8 +678,8 @@ void DataChannelNccl::_checkGroupIdValid(THDGroup groupId) {
 }
 
 
-void DataChannelNccl::gather(std::vector<thpp::Tensor*>& output,
-                             thpp::Tensor& input,
+void DataChannelNccl::gather(std::vector<at::Tensor>& output,
+                             at::Tensor& input,
                              rank_type dstRank,
                              THDGroup groupId) {
 
@@ -688,8 +687,8 @@ void DataChannelNccl::gather(std::vector<thpp::Tensor*>& output,
 }
 
 
-void DataChannelNccl::scatter(std::vector<thpp::Tensor*>& input,
-                              thpp::Tensor& output,
+void DataChannelNccl::scatter(std::vector<at::Tensor>& input,
+                              at::Tensor& output,
                               rank_type srcRank,
                               THDGroup groupId) {
 
@@ -702,7 +701,7 @@ void DataChannelNccl::send(Scalar& data, rank_type dstRank) {
 }
 
 
-void DataChannelNccl::send(thpp::Tensor& data, rank_type dstRank) {
+void DataChannelNccl::send(at::Tensor& data, rank_type dstRank) {
   throw std::runtime_error("DataChannelNccl does not support send");
 }
 
@@ -712,26 +711,26 @@ void DataChannelNccl::receive(Scalar& data, rank_type srcRank) {
 }
 
 
-rank_type DataChannelNccl::receive(thpp::Tensor& data) {
+rank_type DataChannelNccl::receive(at::Tensor& data) {
   throw std::runtime_error("DataChannelNccl does not support receive "
                            "from any source");
 }
 
 
-void DataChannelNccl::receive(thpp::Tensor& data, rank_type srcRank) {
+void DataChannelNccl::receive(at::Tensor& data, rank_type srcRank) {
   throw std::runtime_error("DataChannelNccl does not support receive");
 }
 
 
 
-DataChannelNccl::RequestNccl* DataChannelNccl::isend(thpp::Tensor& data,
+DataChannelNccl::RequestNccl* DataChannelNccl::isend(at::Tensor& data,
                                                      rank_type dstRank) {
 
   throw std::runtime_error("DataChannelNccl does not support isend");
 }
 
 
-DataChannelNccl::RequestNccl* DataChannelNccl::ireceive(thpp::Tensor& data,
+DataChannelNccl::RequestNccl* DataChannelNccl::ireceive(at::Tensor& data,
                                                         rank_type srcRank) {
 
   throw std::runtime_error("DataChannelNccl does not support ireceive");

@@ -374,8 +374,8 @@ PyObject* THDPModule_allReduceMultiGPU(PyObject *_unused, PyObject *args)
   PyObject* sequence = PyTuple_GET_ITEM(args, 0);
   Py_ssize_t tmp_length;
   std::size_t length;
-  std::vector<THDPTensorDesc> descriptors;
-  std::vector<THDTensorDescriptor*> raw_descriptors;
+  std::vector<at::Tensor> descriptors;
+  std::vector<at::Tensor> raw_descriptors;
   THDGroup group;
   THDReduceOp op;
 
@@ -396,7 +396,7 @@ PyObject* THDPModule_allReduceMultiGPU(PyObject *_unused, PyObject *args)
     }
 
     descriptors.push_back(
-      THDPTensorDesc(THDPModule_makeDescriptor(PySequence_ITEM(sequence, i)))
+      THDPModule_makeDescriptor(PySequence_ITEM(sequence, i))
     );
     raw_descriptors.push_back(descriptors.back());
   }
@@ -424,8 +424,8 @@ PyObject* THDPModule_reduceMultiGPU(PyObject *_unused, PyObject *args)
   PyObject* sequence = PyTuple_GET_ITEM(args, 0);
   Py_ssize_t tmp_length;
   std::size_t length;
-  std::vector<THDPTensorDesc> descriptors;
-  std::vector<THDTensorDescriptor*> raw_descriptors;
+  std::vector<at::Tensor> descriptors;
+  std::vector<at::Tensor> raw_descriptors;
   THDGroup group;
   THDReduceOp op;
   int dst_rank;
@@ -448,7 +448,7 @@ PyObject* THDPModule_reduceMultiGPU(PyObject *_unused, PyObject *args)
     }
 
     descriptors.push_back(
-      THDPTensorDesc(THDPModule_makeDescriptor(PySequence_ITEM(sequence, i)))
+      THDPModule_makeDescriptor(PySequence_ITEM(sequence, i))
     );
     raw_descriptors.push_back(descriptors.back());
   }
@@ -478,8 +478,8 @@ PyObject* THDPModule_broadcastMultiGPU(PyObject *_unused, PyObject *args)
   PyObject* sequence = PyTuple_GET_ITEM(args, 0);
   Py_ssize_t tmp_length;
   std::size_t length;
-  std::vector<THDPTensorDesc> descriptors;
-  std::vector<THDTensorDescriptor*> raw_descriptors;
+  std::vector<at::Tensor> descriptors;
+  std::vector<at::Tensor> raw_descriptors;
   THDGroup group;
   int src_rank;
 
@@ -501,7 +501,7 @@ PyObject* THDPModule_broadcastMultiGPU(PyObject *_unused, PyObject *args)
     }
 
     descriptors.push_back(
-      THDPTensorDesc(THDPModule_makeDescriptor(PySequence_ITEM(sequence, i)))
+      THDPModule_makeDescriptor(PySequence_ITEM(sequence, i))
     );
     raw_descriptors.push_back(descriptors.back());
   }
@@ -535,11 +535,11 @@ PyObject* THDPModule_allGatherMultiGPU(PyObject *_unused, PyObject *args)
   size_t length_one;
   size_t length_two;
 
-  std::vector<THDPTensorDesc> output_descriptors;
-  std::vector<THDTensorDescriptor*> output_raw_descriptors;
+  std::vector<at::Tensor> output_descriptors;
+  std::vector<at::Tensor> output_raw_descriptors;
 
-  std::vector<THDPTensorDesc> input_descriptors;
-  std::vector<THDTensorDescriptor*> input_raw_descriptors;
+  std::vector<at::Tensor> input_descriptors;
+  std::vector<at::Tensor> input_raw_descriptors;
 
   THDGroup group;
 
@@ -574,14 +574,12 @@ PyObject* THDPModule_allGatherMultiGPU(PyObject *_unused, PyObject *args)
     }
 
     input_descriptors.push_back(
-      THDPTensorDesc(THDPModule_makeDescriptor(
-          PySequence_ITEM(sequence_two, i)))
+      THDPModule_makeDescriptor(PySequence_ITEM(sequence_two, i))
     );
     input_raw_descriptors.push_back(input_descriptors.back());
 
     output_descriptors.push_back(
-      THDPTensorDesc(THDPModule_makeDescriptor(
-          PySequence_ITEM(sequence_one, i)))
+      THDPModule_makeDescriptor(PySequence_ITEM(sequence_one, i))
     );
     output_raw_descriptors.push_back(output_descriptors.back());
   }
