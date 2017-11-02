@@ -214,7 +214,7 @@ def monkey_patch_THD_link_flags():
 class build_ext(setuptools.command.build_ext.build_ext):
 
     def run(self):
-        global THNN, THCUNN
+        # global THNN, THCUNN
 
         # Print build options
         if WITH_NUMPY:

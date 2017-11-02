@@ -4067,16 +4067,11 @@ class TestTorch(TestCase):
         b += [(t1.storage(), t1.storage(), t2.storage())]
         b += [a[0].storage()[0:2]]
         for use_name in (False, True):
-            delete = sys.platform != 'win32' or not use_name
-            with tempfile.NamedTemporaryFile(delete=delete) as f:
+            with tempfile.NamedTemporaryFile() as f:
                 handle = f if not use_name else f.name
                 torch.save(b, handle)
                 f.seek(0)
                 c = torch.load(handle)
-                if not delete:
-                    del handle
-                    f.close()
-                    os.remove(f.name)
             self.assertEqual(b, c, 0)
             self.assertTrue(isinstance(c[0], torch.FloatTensor))
             self.assertTrue(isinstance(c[1], torch.FloatTensor))
@@ -4231,8 +4226,7 @@ class TestTorch(TestCase):
 
     def test_from_file(self):
         size = 10000
-        delete = sys.platform != 'win32'
-        with tempfile.NamedTemporaryFile(delete=delete) as f:
+        with tempfile.NamedTemporaryFile() as f:
             s1 = torch.FloatStorage.from_file(f.name, True, size)
             t1 = torch.FloatTensor(s1).copy_(torch.randn(size))
 
@@ -4251,10 +4245,7 @@ class TestTorch(TestCase):
             t2.fill_(rnum)
             self.assertEqual(t1, t2, 0)
 
-            if not delete:
-                del s1, t1, s2, t2
-                f.close()
-                os.remove(f.name)
+            del s1, t1, s2, t2
 
     def test_print(self):
         for t in torch._tensor_classes:
