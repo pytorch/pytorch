@@ -7,3 +7,6 @@
 [submodule "torch/lib/nanopb"]
 	path = torch/lib/nanopb
 	url = https://github.com/nanopb/nanopb.git
+[submodule "aten"]
+	path = aten
+	url = https://github.com/zdevito/aten
