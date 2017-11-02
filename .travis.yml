@@ -15,16 +15,18 @@ cache:
     - directories:
         - $HOME/.ccache
 
-install:
+script:
     - unset CCACHE_DISABLE
     - export CCACHE_DIR=$HOME/.ccache
     - export CC="ccache gcc-5"
     - export CXX="ccache g++-5"
     - ccache --show-stats
+    - tools/run_aten_tests.sh
     - travis_retry pip install --upgrade pip setuptools wheel
     - travis_retry pip install -r requirements.txt --only-binary=scipy
     - git submodule update --init --recursive
     - MAX_JOBS=8 python setup.py install
+    - OMP_NUM_THREADS=2 ./test/run_test.sh
 
 addons:
     apt:
@@ -32,10 +34,7 @@ addons:
             - ubuntu-toolchain-r-test
         packages:
             - g++-5
-
-script:
-    - OMP_NUM_THREADS=2 ./test/run_test.sh
-    - tools/run_aten_tests.sh
+            - valgrind
 
 # This reportedly works around an issue downloading packages from pypi on
 # travis.  Consider removing this after the underlying issue is fixed.
