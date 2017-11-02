@@ -14,6 +14,8 @@ bool THPException_init(PyObject *module)
   return true;
 }
 
+namespace torch {
+
 void replaceAll(std::string & str,
     const std::string & old_str,
     const std::string & new_str) {
@@ -23,7 +25,7 @@ void replaceAll(std::string & str,
   }
 }
 
-const char * processErrorMsg(std::string str) {
+std::string processErrorMsg(std::string str) {
 
   // Translate Aten types to their respective pytorch ones
   std::map<std::string, std::string> changes = {
@@ -65,6 +67,7 @@ const char * processErrorMsg(std::string str) {
     replaceAll(str, it.first, it.second);
   }
 
-  return str.c_str();
+  return str;
+}
 }
 
