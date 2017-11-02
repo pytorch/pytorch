@@ -55,6 +55,7 @@ class MKLFullyConnectedOp final : public MKLOperator<T> {
         inputSizes[0] = X.dim32(1);
         inputSizes[1] = X.dim32(0);
       } else {
+        CAFFE_ENFORCE(X.ndim(), 4);
         inputSizes[0] = X.dim32(3);
         inputSizes[1] = X.dim32(2);
         inputSizes[2] = X.dim32(1);
