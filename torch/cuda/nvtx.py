@@ -5,11 +5,13 @@ import platform
 
 lib = None
 
+WINDOWS_HOME = 'C:/Program Files/NVIDIA Corporation/NvToolsExt'
+WINDOWS_LIB = 'nvToolsExt_1'
+
 __all__ = ['range_push', 'range_pop', 'mark']
 
-WINDOWS_HOME = 'C:/Program Files/NVIDIA Corporation/NvToolsExt'
 
-def find_nvToolsExt_windows_lib():
+def append_nvToolsExt_info():
     NVTOOLEXT_HOME = os.getenv('NVTOOLSEXT_PATH', WINDOWS_HOME)
     if os.path.exists(NVTOOLEXT_HOME):
         lib_paths = glob.glob(NVTOOLEXT_HOME + '/bin/x64/nvToolsExt*.dll')
@@ -17,13 +19,10 @@ def find_nvToolsExt_windows_lib():
             lib_path = nvToolsExt_lib_paths[0]
             lib_name = os.path.basename(nvToolsExt_lib_path)
             lib = os.path.splitext(nvToolsExt_lib_name)[0]
-            lib_path = os.path.dirname(nvToolsExt_lib_path).replace('\\', '/')
+            WINDOWS_LIB = os.path.dirname(nvToolsExt_lib_path).replace('\\', '/')
 
             os.environ['PATH'] = nvToolsExt_lib_path + ';' + os.environ['PATH']
-
-            return ctypes.cdll.LoadLibrary(nvToolsExt_lib)
-    return None
-
+    
 
 def _libnvToolsExt():
     global lib
@@ -31,7 +30,7 @@ def _libnvToolsExt():
         if platform.system() != 'Windows':
             lib = ctypes.cdll.LoadLibrary(None)
         else:
-            lib = find_nvToolsExt_windows_lib()
+            lib = ctypes.cdll.LoadLibrary(WINDOWS_LIB)
         lib.nvtxMarkA.restype = None
     return lib
 
