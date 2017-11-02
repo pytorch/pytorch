@@ -138,7 +138,9 @@ public:
 };
 
 // A Variable that is a view on another Variable. The base and view share the
-// same version_counter.
+// same version_counter. The _grad_fn field of the Variable may become stale
+// due to in-place modifications of the shared data. Accesses should go through
+// get_grad_fn(). All other fields are always valid.
 struct VariableViewImpl : public VariableImpl {
   VariableViewImpl(Variable base, at::Tensor data);
 
@@ -146,13 +148,17 @@ struct VariableViewImpl : public VariableImpl {
   // re-create the grad_fn to express the up-to-date view relationship between
   // this and the base Variable.
   virtual std::shared_ptr<Function>& get_grad_fn() override;
-  // Sets the grad_fn. If
+
+  // Sets the grad_fn. If this view already has a grad_fn then this call is
+  // treated  as an in-place modification and changes the base variable's
+  // grad_fn.
   virtual void set_grad_fn(std::shared_ptr<Function> grad_fn) override;
 
-  // The base Variable, which is never a view
+  // The base Variable (never a view)
   Variable base;
 
-  // The value of the version_counter at the time grad_fn was created.
+  // The value of the version_counter at the time grad_fn was created. The
+  // _grad_fn field is stale if attr_version != version_counter.current_version()
   int attr_version;
 };
 
