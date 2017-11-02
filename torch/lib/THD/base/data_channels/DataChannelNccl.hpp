@@ -48,38 +48,38 @@ struct DataChannelNccl : DataChannel {
   rank_type getRank() override;
   rank_type getNumProcesses() override;
 
-  void allReduce(std::vector<thpp::Tensor*>& input,
-                 std::vector<thpp::Tensor*>& output,
+  void allReduce(std::vector<at::Tensor>& input,
+                 std::vector<at::Tensor>& output,
                  THDReduceOp operation,
                  THDGroup = THDGroupWORLD) override;
 
-  void allReduce(thpp::Tensor& data,
+  void allReduce(at::Tensor& data,
                  THDReduceOp operation,
                  THDGroup groupId = THDGroupWORLD) override;
 
-  void allGather(std::vector<thpp::Tensor*>& input,
-                 std::vector<thpp::Tensor*>& output,
+  void allGather(std::vector<at::Tensor>& input,
+                 std::vector<at::Tensor>& output,
                  THDGroup groupId = THDGroupWORLD) override;
 
-  void allGather(std::vector<thpp::Tensor*>& output,
-                 thpp::Tensor& input,
+  void allGather(std::vector<at::Tensor>& output,
+                 at::Tensor& input,
                  THDGroup groupId = THDGroupWORLD) override;
 
-  void reduce(std::vector<thpp::Tensor*>& input,
+  void reduce(std::vector<at::Tensor>& input,
               THDReduceOp operation,
               rank_type dstRank,
               THDGroup groupId = THDGroupWORLD) override;
 
-  void reduce(thpp::Tensor& data,
+  void reduce(at::Tensor& data,
               THDReduceOp operation,
               rank_type dstRank,
               THDGroup groupId = THDGroupWORLD) override;
 
-  void broadcast(std::vector<thpp::Tensor*>& data,
+  void broadcast(std::vector<at::Tensor>& data,
                  rank_type srcRank,
                  THDGroup groupId = THDGroupWORLD) override;
 
-  void broadcast(thpp::Tensor& data,
+  void broadcast(at::Tensor& data,
                  rank_type srcRank,
                  THDGroup groupId = THDGroupWORLD) override;
 
@@ -90,29 +90,29 @@ struct DataChannelNccl : DataChannel {
   void destroyGroup(THDGroup groupId = THDGroupWORLD) override;
 
   // Not supported functions
-  void gather(std::vector<thpp::Tensor*>& output,
-              thpp::Tensor& input,
+  void gather(std::vector<at::Tensor>& output,
+              at::Tensor& input,
               rank_type dstRank,
               THDGroup groupId = THDGroupWORLD) override;
 
-  void scatter(std::vector<thpp::Tensor*>& input,
-               thpp::Tensor& output,
+  void scatter(std::vector<at::Tensor>& input,
+               at::Tensor& output,
                rank_type srcRank,
                THDGroup groupId = THDGroupWORLD) override;
 
   void send(Scalar& data, rank_type dstRank) override;
 
-  void send(thpp::Tensor& data, rank_type dstRank) override;
+  void send(at::Tensor& data, rank_type dstRank) override;
 
   void receive(Scalar& data, rank_type srcRank) override;
 
-  rank_type receive(thpp::Tensor& data) override;
+  rank_type receive(at::Tensor& data) override;
 
-  void receive(thpp::Tensor& data, rank_type srcRank) override;
+  void receive(at::Tensor& data, rank_type srcRank) override;
 
-  RequestNccl* isend(thpp::Tensor& data, rank_type dstRank) override;
+  RequestNccl* isend(at::Tensor& data, rank_type dstRank) override;
 
-  RequestNccl* ireceive(thpp::Tensor& data, rank_type srcRank) override;
+  RequestNccl* ireceive(at::Tensor& data, rank_type srcRank) override;
 
 private:
 
@@ -154,7 +154,7 @@ private:
 
   // Helper function that gets the NCCL communicator
   std::pair<std::vector<ncclComm_t>*, std::vector<cudaEvent_t>*>
-    _getNcclCommsAndEvents(std::vector<thpp::Tensor*>& input,
+    _getNcclCommsAndEvents(std::vector<at::Tensor>& input,
                            THDGroup groupId);
 
   // Helper function that broadcasts the NCCL unique ID to everyone in the rank
@@ -162,8 +162,8 @@ private:
                              ncclUniqueId* dstNcclId);
 
   // Helper that checks the input and output tensors
-  void _tensorCheckHelper(const std::vector<thpp::Tensor*>& input,
-                          const std::vector<thpp::Tensor*>& output,
+  void _tensorCheckHelper(const std::vector<at::Tensor>& input,
+                          const std::vector<at::Tensor>& output,
                           size_t outputOverInput = 1);
 
   // Group validity checker

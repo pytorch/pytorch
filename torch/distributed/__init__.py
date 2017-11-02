@@ -5,7 +5,7 @@ and initialization methods.
 """
 import torch
 import warnings
-from torch._utils import _flatten_tensors, _unflatten_tensors
+from torch._utils import _flatten_dense_tensors, _unflatten_dense_tensors
 
 _INITIALIZED_PG = 1
 _INITIALIZED_MW = 2
@@ -311,6 +311,7 @@ def reduce_multigpu(tensor_list, dst, op=reduce_op.SUM, group=group.WORLD):
         "Multi GPU collectives only supported in nccl backend"
     return torch._C._dist_reduce_multigpu(tensor_list, dst, op, group)
 
+
 def reduce(tensor, dst, op=reduce_op.SUM, group=group.WORLD):
     """Reduces the tensor data across all machines.
 
@@ -353,7 +354,7 @@ def all_gather_multigpu(output_tensor_lists,
 
     flatten_tensor_list = []
     for output_tensor_list in output_tensor_lists:
-        flatten_tensor_list.append(_flatten_tensors(output_tensor_list))
+        flatten_tensor_list.append(_flatten_dense_tensors(output_tensor_list))
 
     ret = torch._C._dist_all_gather_multigpu(flatten_tensor_list,
                                              input_tensor_list,
@@ -362,8 +363,8 @@ def all_gather_multigpu(output_tensor_lists,
     for output_tensor_list, flatten_tensor in zip(output_tensor_lists,
                                                   flatten_tensor_list):
         for tensor, value in zip(output_tensor_list,
-                                 _unflatten_tensors(flatten_tensor,
-                                                    output_tensor_list)):
+                                 _unflatten_dense_tensors(flatten_tensor,
+                                                          output_tensor_list)):
             tensor.copy_(value)
 
     return ret

@@ -1,4 +1,3 @@
-/* definition to expand macro then apply to pragma message */
 #include "DataChannel.hpp"
 #ifdef WITH_GLOO
 #include "data_channels/DataChannelGloo.hpp"

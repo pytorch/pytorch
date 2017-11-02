@@ -790,8 +790,8 @@ void DataChannelTCP::_reduce(at::Tensor& result, at::Tensor& data,
   }
 }
 
-void DataChannelTCP::allReduce(std::vector<thpp::Tensor*>& input,
-                               std::vector<thpp::Tensor*>& output,
+void DataChannelTCP::allReduce(std::vector<at::Tensor>& input,
+                               std::vector<at::Tensor>& output,
                                THDReduceOp operation,
                                THDGroup groupId) {
 
@@ -800,8 +800,8 @@ void DataChannelTCP::allReduce(std::vector<thpp::Tensor*>& input,
 }
 
 
-void DataChannelTCP::allGather(std::vector<thpp::Tensor*>& input,
-                               std::vector<thpp::Tensor*>& output,
+void DataChannelTCP::allGather(std::vector<at::Tensor>& input,
+                               std::vector<at::Tensor>& output,
                                THDGroup groupId) {
 
   throw std::runtime_error("DataChannelTCP does not support mult-GPU cross "
@@ -809,7 +809,7 @@ void DataChannelTCP::allGather(std::vector<thpp::Tensor*>& input,
 }
 
 
-void DataChannelTCP::reduce(std::vector<thpp::Tensor*>& data,
+void DataChannelTCP::reduce(std::vector<at::Tensor>& data,
                             THDReduceOp operation,
                             rank_type dstRank,
                             THDGroup groupId) {
@@ -819,7 +819,7 @@ void DataChannelTCP::reduce(std::vector<thpp::Tensor*>& data,
 }
 
 
-void DataChannelTCP::broadcast(std::vector<thpp::Tensor*>& data,
+void DataChannelTCP::broadcast(std::vector<at::Tensor>& data,
                                rank_type srcRank,
                                THDGroup groupId) {
 

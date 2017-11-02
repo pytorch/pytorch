@@ -268,8 +268,8 @@ auto DataChannelGloo::ireceive(at::Tensor& data, rank_type src_rank) -> RequestG
 }
 
 
-void DataChannelGloo::allReduce(std::vector<thpp::Tensor*>& input,
-                                std::vector<thpp::Tensor*>& output,
+void DataChannelGloo::allReduce(std::vector<at::Tensor>& input,
+                                std::vector<at::Tensor>& output,
                                 THDReduceOp operation,
                                 THDGroup groupId) {
 
@@ -278,8 +278,8 @@ void DataChannelGloo::allReduce(std::vector<thpp::Tensor*>& input,
 }
 
 
-void DataChannelGloo::allGather(std::vector<thpp::Tensor*>& input,
-                                std::vector<thpp::Tensor*>& output,
+void DataChannelGloo::allGather(std::vector<at::Tensor>& input,
+                                std::vector<at::Tensor>& output,
                                 THDGroup groupId) {
 
   throw std::runtime_error("DataChannelGloo does not support mult-GPU cross "
@@ -287,7 +287,7 @@ void DataChannelGloo::allGather(std::vector<thpp::Tensor*>& input,
 }
 
 
-void DataChannelGloo::reduce(std::vector<thpp::Tensor*>& data,
+void DataChannelGloo::reduce(std::vector<at::Tensor>& data,
                              THDReduceOp operation,
                              rank_type dstRank,
                              THDGroup groupId) {
@@ -297,7 +297,7 @@ void DataChannelGloo::reduce(std::vector<thpp::Tensor*>& data,
 }
 
 
-void DataChannelGloo::broadcast(std::vector<thpp::Tensor*>& data,
+void DataChannelGloo::broadcast(std::vector<at::Tensor>& data,
                                 rank_type srcRank,
                                 THDGroup groupId) {
 
