@@ -266,29 +266,8 @@ bool SumReduceLikeOp<CUDAContext>::DoRunWithType() {
   if (B.size() == 1) {
     device_reduce<T>(Adata, Cdata, count, &sum_buffer_, &context_);
   } else {
-    CAFFE_ENFORCE_GT(
-        A.ndim(),
-        B.ndim(),
-        "If you are doing ReduceSumLike, input1 should have "
-        "a smaller number of dimensions.");
-    const int axis = (axis_ == -1 ? A.ndim() - B.ndim() : axis_);
-    CAFFE_ENFORCE(
-        axis >= 0 && axis < A.ndim(),
-        "ReduceSum axis should be in the range of the number "
-        "of dimensions of the first input.");
-    size_t pre = 1, n = 1, post = 1;
-    for (int i = 0; i < axis; ++i) {
-      pre *= A.dim(i);
-    }
-    for (int i = 0; i < B.ndim(); ++i) {
-      CAFFE_ENFORCE_EQ(
-          A.dim(i + axis), B.dim(i), "Broadcast dimension mismatch.");
-      n *= B.dim(i);
-    }
-    for (int i = axis + B.ndim(); i < A.ndim(); ++i) {
-      post *= A.dim(i);
-    }
-
+    size_t pre, n, post;
+    std::tie(pre, n, post) = calculate_broadcast_sizes(A, B, axis_);
     // because we check shape(B) \in shape(A) before,
     // post and pre cannot be 1 at same time
     if (post == 1) {
@@ -419,29 +398,8 @@ class CUDAAddOp final : public Operator<CUDAContext> {
           0,
           context_.cuda_stream()>>>(X0.size(), X0data, X1data, outputData);
     } else {
-      CAFFE_ENFORCE_GT(
-          X0.ndim(),
-          X1.ndim(),
-          "If you are doing broadcasting, input1 should have "
-          "a smaller number of dimensions.");
-      const int axis = (axis_ == -1 ? X0.ndim() - X1.ndim() : axis_);
-      CAFFE_ENFORCE(
-          axis >= 0 && axis < X0.ndim(),
-          "Broadcast axis should be in the range of the number "
-          "of dimensions of the first input.");
-      size_t pre = 1, n = 1, post = 1;
-      for (int i = 0; i < axis; ++i) {
-        pre *= X0.dim(i);
-      }
-      for (int i = 0; i < X1.ndim(); ++i) {
-        CAFFE_ENFORCE_EQ(
-            X0.dim(i + axis), X1.dim(i), "Broadcast dimension mismatch.");
-        n *= X1.dim(i);
-      }
-      for (int i = axis + X1.ndim(); i < X0.ndim(); ++i) {
-        post *= X0.dim(i);
-      }
-
+      size_t pre, n, post;
+      std::tie(pre, n, post) = calculate_broadcast_sizes(X0, X1, axis_);
       if (post == 1) {
         binary_add_kernel_broadcast<true, T, M><<<
             CAFFE_GET_BLOCKS(pre * n),
