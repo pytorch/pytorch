@@ -281,7 +281,7 @@ name: stack
 arg: TensorList list
 arg: int64_t dim=0
 return: Tensor
-variants: method, function
+variants: function
 type_method_definition_level: base
 type_method_definition_dispatch: at::native::stack
 [/NativeFunction]
