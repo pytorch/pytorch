@@ -164,7 +164,14 @@ ADD_CUSTOM_COMMAND(OUTPUT ${generated_cpp}
 COMMAND ${GEN_COMMAND}
 DEPENDS ${all_python} ${all_templates} ${cwrap_files})
 
-SET(all_cpp ${base_cpp} ${generated_cpp})
+SET(all_cpp ${base_cpp} ${generated_cpp} ${ATen_CPU_SRCS})
+
+INCLUDE_DIRECTORIES(${ATen_CPU_INCLUDE})
+IF(NOT NO_CUDA)
+  INCLUDE_DIRECTORIES(${ATen_CUDA_INCLUDE})
+  SET(all_cpp ${all_cpp} ${ATen_CUDA_SRCS})
+endif()
+
 filter_list(generated_h generated_cpp "\\.h$")
 
 INCLUDE_DIRECTORIES(${CMAKE_CURRENT_SOURCE_DIR}/..)
@@ -190,7 +197,7 @@ endif()
 
 TARGET_LINK_LIBRARIES(ATen PRIVATE
   ${WHOLE_ARCHIVE}
-  ${TH_LIBRARIES} ${THNN_LIBRARIES} ${THS_LIBRARIES}
+  ${TH_LIBRARIES} ${THNN_LIBRARIES}
   ${END_WHOLE_ARCHIVE})
 IF(CUDA_FOUND)
   TARGET_LINK_LIBRARIES(ATen PRIVATE
