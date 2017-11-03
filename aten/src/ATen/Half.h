@@ -10,6 +10,15 @@
 #include <cuda_fp16.h>
 #endif
 
+#ifdef _MSC_VER
+// MSVC does not support std::inf and std::nan for integral types
+#define ISINF(x) std::isinf((double)x)
+#define ISNAN(x) std::isnan((double)x)
+#else
+#define ISINF(x) std::isinf(x)
+#define ISNAN(x) std::isnan(x)
+#endif
+
 namespace at {
 
 template<typename To, typename From> To convert(From f) {
@@ -18,10 +27,10 @@ template<typename To, typename From> To convert(From f) {
 
 template<typename To, typename From> bool overflows(From f) {
   using limit = std::numeric_limits<To>;
-  if (limit::has_infinity && std::isinf(f)) {
+  if (limit::has_infinity && ISINF(f)) {
     return false;
   }
-  if (!limit::has_quiet_NaN && std::isnan(f)) {
+  if (!limit::has_quiet_NaN && ISNAN(f)) {
     return true;
   }
   return f < limit::lowest() || f > limit::max();
