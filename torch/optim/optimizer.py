@@ -192,3 +192,32 @@ class Optimizer(object):
             else:
                 if filter_func(value):
                     state[key] = transformation(value)
+
+
+    def cuda(self, device=None):
+        """Moves all tensors in the optimizer state to the GPU specified by ``device``.
+
+        Arguments:
+            device (int, optional): if specified, all tensors will be
+                copied to that device
+
+        Returns:
+            Optimizer: self
+        """
+
+        self._transform_state(lambda t: t.cuda(device),
+                              lambda t: torch.is_tensor(t))
+
+        return self
+
+    def cpu(self):
+        """Moves all tensors in the optimizer state to the GPU specified by ``device``.
+
+        Returns:
+            Optimizer: self
+        """
+
+        self._transform_state(lambda t: t.cpu(),
+                              lambda t: torch.is_tensor(t))
+
+        return self
