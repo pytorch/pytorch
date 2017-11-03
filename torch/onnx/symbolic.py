@@ -52,6 +52,30 @@ def _unimplemented(op, msg):
 
 
 # ---------------------------------------------------------------------
+# ONNX operator version
+# ---------------------------------------------------------------------
+
+# READ ME BEFORE EDITING _onnx_opset_version:
+#
+# The variable below controls which ONNX operator set version we are
+# targeting.   THIS VARIABLE HAS SEMANTIC EFFECT!  Say a breaking
+# change occurred in version 8.  As long as this variable < 8, you can
+# export models targeting the old behavior.  However, if you bump
+# this variable to 8 or later, the breaking change will take into effect:
+# you MUST adjust any symbolic affected by breaking changes.  The ONNX
+# spec publishes a *comprehensive* list of BC-breaking changes for every
+# operator revision at:
+#
+#   https://github.com/onnx/onnx/blob/master/docs/Changelog.md
+#
+# Please be sure to go through and check all of our implementations here before
+# increasing this number.  This includes symbolic definitions NOT in this
+# file, so grep for "OpName" (with quotes)
+
+_onnx_opset_version = 2
+
+
+# ---------------------------------------------------------------------
 # Symbolic definitions
 # ---------------------------------------------------------------------
 
