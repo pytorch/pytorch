@@ -1006,6 +1006,32 @@ class TestAutograd(TestCase):
         self.assertEqual(y.grad.data, grad[1])
         self.assertEqual(z.grad.data, grad[2])
 
+    def test_put(self):
+        root = Variable(torch.randn(4, 5), requires_grad=True)
+        values = Variable(torch.randn(6), requires_grad=True)
+        idx = Variable(torch.LongTensor([1, 2, 3, -1, -2, -3]))
+
+        def func(root, values):
+            x = root.clone()
+            x.put_(idx, values)
+            return x
+
+        gradcheck(func, [root, values])
+        gradgradcheck(func, [root, values])
+
+    def test_put_accumulate(self):
+        root = Variable(torch.randn(4, 5), requires_grad=True)
+        values = Variable(torch.randn(6), requires_grad=True)
+        idx = Variable(torch.LongTensor([1, 2, 3, 1, 2, 3]))
+
+        def func(root, values):
+            x = root.clone()
+            x.put_(idx, values, accumulate=True)
+            return x
+
+        gradcheck(func, [root, values])
+        gradgradcheck(func, [root, values])
+
     def test_unused_output(self):
         x = Variable(torch.randn(10, 10), requires_grad=True)
         outputs = x.chunk(5)
@@ -1875,6 +1901,7 @@ method_tests = [
     ('topk', (S, M, S), (3, 1), 'dim'),
     ('topk', (S, M, S), (3, 1, True), 'dim_desc'),
     ('topk', (S, M, S), (3, 1, True, True), 'dim_desc_sort'),
+    ('take', (S, S, S), (Variable(torch.LongTensor([[-3, 2], [20, 2]])),)),
     ('__getitem__', torch.randn(S, S, S), (dont_convert([1, 2]),)),
     ('__getitem__', torch.randn(S, S, S), (slice(0, 3),), 'slice'),
     ('__getitem__', torch.randn(S, S, S), (dont_convert([slice(0, 3), 1]),), 'slice_index'),
