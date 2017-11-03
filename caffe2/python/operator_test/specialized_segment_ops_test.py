@@ -249,6 +249,36 @@ class TestSpecializedSegmentOps(hu.HypothesisTestCase):
                                    rtol=1e-3, atol=atol)
 
 
+    @given(batchsize=st.integers(1, 20),
+           blocksize=st.sampled_from([8, 16, 17, 26, 32, 64, 85, 96, 128, 148, 163]),
+           normalize_by_lengths=st.booleans(), **hu.gcs)
+    def test_sparse_lengths_sum_8BitsRowwiseOp_cpu_invalid_index(
+            self, batchsize, blocksize, normalize_by_lengths, gc, dc):
+
+        tblsize = 300
+        Tbl = np.random.randint(7, size = (tblsize, blocksize)).astype(np.uint8)
+
+        # array of each row length
+        Lengths = np.random.randint(1, 30, size=batchsize).astype(np.int32)
+        # flat indices
+        Indices = np.random.randint(
+            0, tblsize, size=sum(Lengths)).astype(np.int64)
+        Indices[0] += 1000
+        Scale_Bias = np.random.rand(tblsize, 2).astype(np.float32)
+
+        if normalize_by_lengths == False:
+            op = core.CreateOperator("SparseLengthsSum8BitsRowwise", [
+                                     "Tbl", "Indices", "Lengths", "Scale_Bias"], "out")
+        else:
+            op = core.CreateOperator("SparseLengthsMean8BitsRowwise", [
+                                     "Tbl", "Indices", "Lengths", "Scale_Bias"], "out")
+
+        self.ws.create_blob("Tbl").feed(Tbl)
+        self.ws.create_blob("Indices").feed(Indices)
+        self.ws.create_blob("Lengths").feed(Lengths)
+        self.ws.create_blob("Scale_Bias").feed(Scale_Bias)
+        with self.assertRaises(RuntimeError):
+            self.ws.run(op)
 
 
 if __name__ == "__main__":

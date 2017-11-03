@@ -65,6 +65,14 @@ void EmbeddingLookup_int32_t_float_float__avx2_fma(
       for (int32_t start = dataInd; dataInd < start + lengths[rangeIndex];
            ++dataInd) {
         const int32_t idx = indices[dataInd];
+        CAFFE_ENFORCE(
+            idx >= 0 && idx < data_size,
+            "Index ",
+            dataInd,
+            " is out of bounds: ",
+            idx,
+            ", range 0 to ",
+            data_size);
         float wgt = 1.f;
         if (weights) {
           wgt = weights[dataInd];
@@ -75,9 +83,7 @@ void EmbeddingLookup_int32_t_float_float__avx2_fma(
             ? (dataInd + prefdist_T0)
             : dataInd;
         const int32_t idx_pref_T0 = indices[next_T0];
-        CAFFE_ENFORCE(
-            idx >= 0 && idx_pref_T0 >= 0 && idx < data_size &&
-            idx_pref_T0 < data_size);
+        CAFFE_ENFORCE(idx_pref_T0 >= 0 && idx_pref_T0 < data_size);
         const float* ip_next_T0 = &input[idx_pref_T0 * block_size];
         vop0 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (0)), vop0);
         _mm_prefetch((&ip_next_T0[0]), _MM_HINT_T0);
@@ -165,6 +171,14 @@ void EmbeddingLookup_int32_t_float_float__avx2_fma(
       for (int32_t start = dataInd; dataInd < start + lengths[rangeIndex];
            ++dataInd) {
         const int32_t idx = indices[dataInd];
+        CAFFE_ENFORCE(
+            idx >= 0 && idx < data_size,
+            "Index ",
+            dataInd,
+            " is out of bounds: ",
+            idx,
+            ", range 0 to ",
+            data_size);
         float wgt = 1.f;
         if (weights) {
           wgt = weights[dataInd];
@@ -175,9 +189,7 @@ void EmbeddingLookup_int32_t_float_float__avx2_fma(
             ? (dataInd + prefdist_T0)
             : dataInd;
         const int32_t idx_pref_T0 = indices[next_T0];
-        CAFFE_ENFORCE(
-            idx >= 0 && idx_pref_T0 >= 0 && idx < data_size &&
-            idx_pref_T0 < data_size);
+        CAFFE_ENFORCE(idx_pref_T0 >= 0 && idx_pref_T0 < data_size);
         const float* ip_next_T0 = &input[idx_pref_T0 * block_size];
         vop0 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (0)), vop0);
         _mm_prefetch((&ip_next_T0[0]), _MM_HINT_T0);
@@ -229,6 +241,14 @@ void EmbeddingLookup_int32_t_float_float__avx2_fma(
       for (int32_t start = dataInd; dataInd < start + lengths[rangeIndex];
            ++dataInd) {
         const int32_t idx = indices[dataInd];
+        CAFFE_ENFORCE(
+            idx >= 0 && idx < data_size,
+            "Index ",
+            dataInd,
+            " is out of bounds: ",
+            idx,
+            ", range 0 to ",
+            data_size);
         float wgt = 1.f;
         if (weights) {
           wgt = weights[dataInd];
@@ -239,9 +259,7 @@ void EmbeddingLookup_int32_t_float_float__avx2_fma(
             ? (dataInd + prefdist_T0)
             : dataInd;
         const int32_t idx_pref_T0 = indices[next_T0];
-        CAFFE_ENFORCE(
-            idx >= 0 && idx_pref_T0 >= 0 && idx < data_size &&
-            idx_pref_T0 < data_size);
+        CAFFE_ENFORCE(idx_pref_T0 >= 0 && idx_pref_T0 < data_size);
         const float* ip_next_T0 = &input[idx_pref_T0 * block_size];
         vop0 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (0)), vop0);
         _mm_prefetch((&ip_next_T0[0]), _MM_HINT_T0);
@@ -275,6 +293,14 @@ void EmbeddingLookup_int32_t_float_float__avx2_fma(
       for (int32_t start = dataInd; dataInd < start + lengths[rangeIndex];
            ++dataInd) {
         const int32_t idx = indices[dataInd];
+        CAFFE_ENFORCE(
+            idx >= 0 && idx < data_size,
+            "Index ",
+            dataInd,
+            " is out of bounds: ",
+            idx,
+            ", range 0 to ",
+            data_size);
         float wgt = 1.f;
         if (weights) {
           wgt = weights[dataInd];
@@ -285,9 +311,7 @@ void EmbeddingLookup_int32_t_float_float__avx2_fma(
             ? (dataInd + prefdist_T0)
             : dataInd;
         const int32_t idx_pref_T0 = indices[next_T0];
-        CAFFE_ENFORCE(
-            idx >= 0 && idx_pref_T0 >= 0 && idx < data_size &&
-            idx_pref_T0 < data_size);
+        CAFFE_ENFORCE(idx_pref_T0 >= 0 && idx_pref_T0 < data_size);
         const float* ip_next_T0 = &input[idx_pref_T0 * block_size];
         vop0 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (0)), vop0);
         _mm_prefetch((&ip_next_T0[0]), _MM_HINT_T0);
@@ -318,6 +342,14 @@ void EmbeddingLookup_int32_t_float_float__avx2_fma(
       for (int32_t start = dataInd; dataInd < start + lengths[rangeIndex];
            ++dataInd) {
         const int32_t idx = indices[dataInd];
+        CAFFE_ENFORCE(
+            idx >= 0 && idx < data_size,
+            "Index ",
+            dataInd,
+            " is out of bounds: ",
+            idx,
+            ", range 0 to ",
+            data_size);
         float wgt = 1.f;
         if (weights) {
           wgt = weights[dataInd];
@@ -328,9 +360,7 @@ void EmbeddingLookup_int32_t_float_float__avx2_fma(
             ? (dataInd + prefdist_T0)
             : dataInd;
         const int32_t idx_pref_T0 = indices[next_T0];
-        CAFFE_ENFORCE(
-            idx >= 0 && idx_pref_T0 >= 0 && idx < data_size &&
-            idx_pref_T0 < data_size);
+        CAFFE_ENFORCE(idx_pref_T0 >= 0 && idx_pref_T0 < data_size);
         const float* ip_next_T0 = &input[idx_pref_T0 * block_size];
         j = 0;
         for (; j + 8 <= block_size; j += 8) {
@@ -398,6 +428,14 @@ void EmbeddingLookup_int64_t_float_float__avx2_fma(
       for (int64_t start = dataInd; dataInd < start + lengths[rangeIndex];
            ++dataInd) {
         const int64_t idx = indices[dataInd];
+        CAFFE_ENFORCE(
+            idx >= 0 && idx < data_size,
+            "Index ",
+            dataInd,
+            " is out of bounds: ",
+            idx,
+            ", range 0 to ",
+            data_size);
         float wgt = 1.f;
         if (weights) {
           wgt = weights[dataInd];
@@ -408,9 +446,7 @@ void EmbeddingLookup_int64_t_float_float__avx2_fma(
             ? (dataInd + prefdist_T0)
             : dataInd;
         const int64_t idx_pref_T0 = indices[next_T0];
-        CAFFE_ENFORCE(
-            idx >= 0 && idx_pref_T0 >= 0 && idx < data_size &&
-            idx_pref_T0 < data_size);
+        CAFFE_ENFORCE(idx_pref_T0 >= 0 && idx_pref_T0 < data_size);
         const float* ip_next_T0 = &input[idx_pref_T0 * block_size];
         vop0 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (0)), vop0);
         _mm_prefetch((&ip_next_T0[0]), _MM_HINT_T0);
@@ -498,6 +534,14 @@ void EmbeddingLookup_int64_t_float_float__avx2_fma(
       for (int64_t start = dataInd; dataInd < start + lengths[rangeIndex];
            ++dataInd) {
         const int64_t idx = indices[dataInd];
+        CAFFE_ENFORCE(
+            idx >= 0 && idx < data_size,
+            "Index ",
+            dataInd,
+            " is out of bounds: ",
+            idx,
+            ", range 0 to ",
+            data_size);
         float wgt = 1.f;
         if (weights) {
           wgt = weights[dataInd];
@@ -508,9 +552,7 @@ void EmbeddingLookup_int64_t_float_float__avx2_fma(
             ? (dataInd + prefdist_T0)
             : dataInd;
         const int64_t idx_pref_T0 = indices[next_T0];
-        CAFFE_ENFORCE(
-            idx >= 0 && idx_pref_T0 >= 0 && idx < data_size &&
-            idx_pref_T0 < data_size);
+        CAFFE_ENFORCE(idx_pref_T0 >= 0 && idx_pref_T0 < data_size);
         const float* ip_next_T0 = &input[idx_pref_T0 * block_size];
         vop0 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (0)), vop0);
         _mm_prefetch((&ip_next_T0[0]), _MM_HINT_T0);
@@ -562,6 +604,14 @@ void EmbeddingLookup_int64_t_float_float__avx2_fma(
       for (int64_t start = dataInd; dataInd < start + lengths[rangeIndex];
            ++dataInd) {
         const int64_t idx = indices[dataInd];
+        CAFFE_ENFORCE(
+            idx >= 0 && idx < data_size,
+            "Index ",
+            dataInd,
+            " is out of bounds: ",
+            idx,
+            ", range 0 to ",
+            data_size);
         float wgt = 1.f;
         if (weights) {
           wgt = weights[dataInd];
@@ -572,9 +622,7 @@ void EmbeddingLookup_int64_t_float_float__avx2_fma(
             ? (dataInd + prefdist_T0)
             : dataInd;
         const int64_t idx_pref_T0 = indices[next_T0];
-        CAFFE_ENFORCE(
-            idx >= 0 && idx_pref_T0 >= 0 && idx < data_size &&
-            idx_pref_T0 < data_size);
+        CAFFE_ENFORCE(idx_pref_T0 >= 0 && idx_pref_T0 < data_size);
         const float* ip_next_T0 = &input[idx_pref_T0 * block_size];
         vop0 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (0)), vop0);
         _mm_prefetch((&ip_next_T0[0]), _MM_HINT_T0);
@@ -608,6 +656,14 @@ void EmbeddingLookup_int64_t_float_float__avx2_fma(
       for (int64_t start = dataInd; dataInd < start + lengths[rangeIndex];
            ++dataInd) {
         const int64_t idx = indices[dataInd];
+        CAFFE_ENFORCE(
+            idx >= 0 && idx < data_size,
+            "Index ",
+            dataInd,
+            " is out of bounds: ",
+            idx,
+            ", range 0 to ",
+            data_size);
         float wgt = 1.f;
         if (weights) {
           wgt = weights[dataInd];
@@ -618,9 +674,7 @@ void EmbeddingLookup_int64_t_float_float__avx2_fma(
             ? (dataInd + prefdist_T0)
             : dataInd;
         const int64_t idx_pref_T0 = indices[next_T0];
-        CAFFE_ENFORCE(
-            idx >= 0 && idx_pref_T0 >= 0 && idx < data_size &&
-            idx_pref_T0 < data_size);
+        CAFFE_ENFORCE(idx_pref_T0 >= 0 && idx_pref_T0 < data_size);
         const float* ip_next_T0 = &input[idx_pref_T0 * block_size];
         vop0 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (0)), vop0);
         _mm_prefetch((&ip_next_T0[0]), _MM_HINT_T0);
@@ -651,6 +705,14 @@ void EmbeddingLookup_int64_t_float_float__avx2_fma(
       for (int64_t start = dataInd; dataInd < start + lengths[rangeIndex];
            ++dataInd) {
         const int64_t idx = indices[dataInd];
+        CAFFE_ENFORCE(
+            idx >= 0 && idx < data_size,
+            "Index ",
+            dataInd,
+            " is out of bounds: ",
+            idx,
+            ", range 0 to ",
+            data_size);
         float wgt = 1.f;
         if (weights) {
           wgt = weights[dataInd];
@@ -661,9 +723,7 @@ void EmbeddingLookup_int64_t_float_float__avx2_fma(
             ? (dataInd + prefdist_T0)
             : dataInd;
         const int64_t idx_pref_T0 = indices[next_T0];
-        CAFFE_ENFORCE(
-            idx >= 0 && idx_pref_T0 >= 0 && idx < data_size &&
-            idx_pref_T0 < data_size);
+        CAFFE_ENFORCE(idx_pref_T0 >= 0 && idx_pref_T0 < data_size);
         const float* ip_next_T0 = &input[idx_pref_T0 * block_size];
         j = 0;
         for (; j + 8 <= block_size; j += 8) {
@@ -731,6 +791,14 @@ void EmbeddingLookup_int32_t_float16_float__avx2_fma(
       for (int32_t start = dataInd; dataInd < start + lengths[rangeIndex];
            ++dataInd) {
         const int32_t idx = indices[dataInd];
+        CAFFE_ENFORCE(
+            idx >= 0 && idx < data_size,
+            "Index ",
+            dataInd,
+            " is out of bounds: ",
+            idx,
+            ", range 0 to ",
+            data_size);
         float wgt = 1.f;
         if (weights) {
           wgt = weights[dataInd];
@@ -741,9 +809,7 @@ void EmbeddingLookup_int32_t_float16_float__avx2_fma(
             ? (dataInd + prefdist_T0)
             : dataInd;
         const int32_t idx_pref_T0 = indices[next_T0];
-        CAFFE_ENFORCE(
-            idx >= 0 && idx_pref_T0 >= 0 && idx < data_size &&
-            idx_pref_T0 < data_size);
+        CAFFE_ENFORCE(idx_pref_T0 >= 0 && idx_pref_T0 < data_size);
         const float16* ip_next_T0 = &input[idx_pref_T0 * block_size];
         vop0 = _mm256_fmadd_ps(
             vwgt,
@@ -895,6 +961,14 @@ void EmbeddingLookup_int32_t_float16_float__avx2_fma(
       for (int32_t start = dataInd; dataInd < start + lengths[rangeIndex];
            ++dataInd) {
         const int32_t idx = indices[dataInd];
+        CAFFE_ENFORCE(
+            idx >= 0 && idx < data_size,
+            "Index ",
+            dataInd,
+            " is out of bounds: ",
+            idx,
+            ", range 0 to ",
+            data_size);
         float wgt = 1.f;
         if (weights) {
           wgt = weights[dataInd];
@@ -905,9 +979,7 @@ void EmbeddingLookup_int32_t_float16_float__avx2_fma(
             ? (dataInd + prefdist_T0)
             : dataInd;
         const int32_t idx_pref_T0 = indices[next_T0];
-        CAFFE_ENFORCE(
-            idx >= 0 && idx_pref_T0 >= 0 && idx < data_size &&
-            idx_pref_T0 < data_size);
+        CAFFE_ENFORCE(idx_pref_T0 >= 0 && idx_pref_T0 < data_size);
         const float16* ip_next_T0 = &input[idx_pref_T0 * block_size];
         vop0 = _mm256_fmadd_ps(
             vwgt,
@@ -991,6 +1063,14 @@ void EmbeddingLookup_int32_t_float16_float__avx2_fma(
       for (int32_t start = dataInd; dataInd < start + lengths[rangeIndex];
            ++dataInd) {
         const int32_t idx = indices[dataInd];
+        CAFFE_ENFORCE(
+            idx >= 0 && idx < data_size,
+            "Index ",
+            dataInd,
+            " is out of bounds: ",
+            idx,
+            ", range 0 to ",
+            data_size);
         float wgt = 1.f;
         if (weights) {
           wgt = weights[dataInd];
@@ -1001,9 +1081,7 @@ void EmbeddingLookup_int32_t_float16_float__avx2_fma(
             ? (dataInd + prefdist_T0)
             : dataInd;
         const int32_t idx_pref_T0 = indices[next_T0];
-        CAFFE_ENFORCE(
-            idx >= 0 && idx_pref_T0 >= 0 && idx < data_size &&
-            idx_pref_T0 < data_size);
+        CAFFE_ENFORCE(idx_pref_T0 >= 0 && idx_pref_T0 < data_size);
         const float16* ip_next_T0 = &input[idx_pref_T0 * block_size];
         vop0 = _mm256_fmadd_ps(
             vwgt,
@@ -1053,6 +1131,14 @@ void EmbeddingLookup_int32_t_float16_float__avx2_fma(
       for (int32_t start = dataInd; dataInd < start + lengths[rangeIndex];
            ++dataInd) {
         const int32_t idx = indices[dataInd];
+        CAFFE_ENFORCE(
+            idx >= 0 && idx < data_size,
+            "Index ",
+            dataInd,
+            " is out of bounds: ",
+            idx,
+            ", range 0 to ",
+            data_size);
         float wgt = 1.f;
         if (weights) {
           wgt = weights[dataInd];
@@ -1063,9 +1149,7 @@ void EmbeddingLookup_int32_t_float16_float__avx2_fma(
             ? (dataInd + prefdist_T0)
             : dataInd;
         const int32_t idx_pref_T0 = indices[next_T0];
-        CAFFE_ENFORCE(
-            idx >= 0 && idx_pref_T0 >= 0 && idx < data_size &&
-            idx_pref_T0 < data_size);
+        CAFFE_ENFORCE(idx_pref_T0 >= 0 && idx_pref_T0 < data_size);
         const float16* ip_next_T0 = &input[idx_pref_T0 * block_size];
         vop0 = _mm256_fmadd_ps(
             vwgt,
@@ -1104,6 +1188,14 @@ void EmbeddingLookup_int32_t_float16_float__avx2_fma(
       for (int32_t start = dataInd; dataInd < start + lengths[rangeIndex];
            ++dataInd) {
         const int32_t idx = indices[dataInd];
+        CAFFE_ENFORCE(
+            idx >= 0 && idx < data_size,
+            "Index ",
+            dataInd,
+            " is out of bounds: ",
+            idx,
+            ", range 0 to ",
+            data_size);
         float wgt = 1.f;
         if (weights) {
           wgt = weights[dataInd];
@@ -1114,9 +1206,7 @@ void EmbeddingLookup_int32_t_float16_float__avx2_fma(
             ? (dataInd + prefdist_T0)
             : dataInd;
         const int32_t idx_pref_T0 = indices[next_T0];
-        CAFFE_ENFORCE(
-            idx >= 0 && idx_pref_T0 >= 0 && idx < data_size &&
-            idx_pref_T0 < data_size);
+        CAFFE_ENFORCE(idx_pref_T0 >= 0 && idx_pref_T0 < data_size);
         const float16* ip_next_T0 = &input[idx_pref_T0 * block_size];
         j = 0;
         for (; j + 8 <= block_size; j += 8) {
@@ -1190,6 +1280,14 @@ void EmbeddingLookup_int64_t_float16_float__avx2_fma(
       for (int64_t start = dataInd; dataInd < start + lengths[rangeIndex];
            ++dataInd) {
         const int64_t idx = indices[dataInd];
+        CAFFE_ENFORCE(
+            idx >= 0 && idx < data_size,
+            "Index ",
+            dataInd,
+            " is out of bounds: ",
+            idx,
+            ", range 0 to ",
+            data_size);
         float wgt = 1.f;
         if (weights) {
           wgt = weights[dataInd];
@@ -1200,9 +1298,7 @@ void EmbeddingLookup_int64_t_float16_float__avx2_fma(
             ? (dataInd + prefdist_T0)
             : dataInd;
         const int64_t idx_pref_T0 = indices[next_T0];
-        CAFFE_ENFORCE(
-            idx >= 0 && idx_pref_T0 >= 0 && idx < data_size &&
-            idx_pref_T0 < data_size);
+        CAFFE_ENFORCE(idx_pref_T0 >= 0 && idx_pref_T0 < data_size);
         const float16* ip_next_T0 = &input[idx_pref_T0 * block_size];
         vop0 = _mm256_fmadd_ps(
             vwgt,
@@ -1354,6 +1450,14 @@ void EmbeddingLookup_int64_t_float16_float__avx2_fma(
       for (int64_t start = dataInd; dataInd < start + lengths[rangeIndex];
            ++dataInd) {
         const int64_t idx = indices[dataInd];
+        CAFFE_ENFORCE(
+            idx >= 0 && idx < data_size,
+            "Index ",
+            dataInd,
+            " is out of bounds: ",
+            idx,
+            ", range 0 to ",
+            data_size);
         float wgt = 1.f;
         if (weights) {
           wgt = weights[dataInd];
@@ -1364,9 +1468,7 @@ void EmbeddingLookup_int64_t_float16_float__avx2_fma(
             ? (dataInd + prefdist_T0)
             : dataInd;
         const int64_t idx_pref_T0 = indices[next_T0];
-        CAFFE_ENFORCE(
-            idx >= 0 && idx_pref_T0 >= 0 && idx < data_size &&
-            idx_pref_T0 < data_size);
+        CAFFE_ENFORCE(idx_pref_T0 >= 0 && idx_pref_T0 < data_size);
         const float16* ip_next_T0 = &input[idx_pref_T0 * block_size];
         vop0 = _mm256_fmadd_ps(
             vwgt,
@@ -1450,6 +1552,14 @@ void EmbeddingLookup_int64_t_float16_float__avx2_fma(
       for (int64_t start = dataInd; dataInd < start + lengths[rangeIndex];
            ++dataInd) {
         const int64_t idx = indices[dataInd];
+        CAFFE_ENFORCE(
+            idx >= 0 && idx < data_size,
+            "Index ",
+            dataInd,
+            " is out of bounds: ",
+            idx,
+            ", range 0 to ",
+            data_size);
         float wgt = 1.f;
         if (weights) {
           wgt = weights[dataInd];
@@ -1460,9 +1570,7 @@ void EmbeddingLookup_int64_t_float16_float__avx2_fma(
             ? (dataInd + prefdist_T0)
             : dataInd;
         const int64_t idx_pref_T0 = indices[next_T0];
-        CAFFE_ENFORCE(
-            idx >= 0 && idx_pref_T0 >= 0 && idx < data_size &&
-            idx_pref_T0 < data_size);
+        CAFFE_ENFORCE(idx_pref_T0 >= 0 && idx_pref_T0 < data_size);
         const float16* ip_next_T0 = &input[idx_pref_T0 * block_size];
         vop0 = _mm256_fmadd_ps(
             vwgt,
@@ -1512,6 +1620,14 @@ void EmbeddingLookup_int64_t_float16_float__avx2_fma(
       for (int64_t start = dataInd; dataInd < start + lengths[rangeIndex];
            ++dataInd) {
         const int64_t idx = indices[dataInd];
+        CAFFE_ENFORCE(
+            idx >= 0 && idx < data_size,
+            "Index ",
+            dataInd,
+            " is out of bounds: ",
+            idx,
+            ", range 0 to ",
+            data_size);
         float wgt = 1.f;
         if (weights) {
           wgt = weights[dataInd];
@@ -1522,9 +1638,7 @@ void EmbeddingLookup_int64_t_float16_float__avx2_fma(
             ? (dataInd + prefdist_T0)
             : dataInd;
         const int64_t idx_pref_T0 = indices[next_T0];
-        CAFFE_ENFORCE(
-            idx >= 0 && idx_pref_T0 >= 0 && idx < data_size &&
-            idx_pref_T0 < data_size);
+        CAFFE_ENFORCE(idx_pref_T0 >= 0 && idx_pref_T0 < data_size);
         const float16* ip_next_T0 = &input[idx_pref_T0 * block_size];
         vop0 = _mm256_fmadd_ps(
             vwgt,
@@ -1563,6 +1677,14 @@ void EmbeddingLookup_int64_t_float16_float__avx2_fma(
       for (int64_t start = dataInd; dataInd < start + lengths[rangeIndex];
            ++dataInd) {
         const int64_t idx = indices[dataInd];
+        CAFFE_ENFORCE(
+            idx >= 0 && idx < data_size,
+            "Index ",
+            dataInd,
+            " is out of bounds: ",
+            idx,
+            ", range 0 to ",
+            data_size);
         float wgt = 1.f;
         if (weights) {
           wgt = weights[dataInd];
@@ -1573,9 +1695,7 @@ void EmbeddingLookup_int64_t_float16_float__avx2_fma(
             ? (dataInd + prefdist_T0)
             : dataInd;
         const int64_t idx_pref_T0 = indices[next_T0];
-        CAFFE_ENFORCE(
-            idx >= 0 && idx_pref_T0 >= 0 && idx < data_size &&
-            idx_pref_T0 < data_size);
+        CAFFE_ENFORCE(idx_pref_T0 >= 0 && idx_pref_T0 < data_size);
         const float16* ip_next_T0 = &input[idx_pref_T0 * block_size];
         j = 0;
         for (; j + 8 <= block_size; j += 8) {
@@ -1649,13 +1769,21 @@ void EmbeddingLookup_int32_t_uint8_t_float__avx2_fma(
       for (int32_t start = dataInd; dataInd < start + lengths[rangeIndex];
            ++dataInd) {
         const int32_t idx = indices[dataInd];
+        CAFFE_ENFORCE(
+            idx >= 0 && idx < data_size,
+            "Index ",
+            dataInd,
+            " is out of bounds: ",
+            idx,
+            ", range 0 to ",
+            data_size);
         float wgt = 1.f;
         float bio;
         if (weights) {
           wgt = weights[dataInd];
         }
-        bio = wgt * scale_bias[2 * indices[dataInd] + 1];
-        wgt = wgt * scale_bias[2 * indices[dataInd]];
+        bio = wgt * scale_bias[2 * idx + 1];
+        wgt = wgt * scale_bias[2 * idx];
         __m256 vbio = _mm256_set1_ps(bio);
         __m256 vwgt = _mm256_set1_ps(wgt);
         const uint8_t* ip = &input[idx * block_size];
@@ -1663,9 +1791,7 @@ void EmbeddingLookup_int32_t_uint8_t_float__avx2_fma(
             ? (dataInd + prefdist_T0)
             : dataInd;
         const int32_t idx_pref_T0 = indices[next_T0];
-        CAFFE_ENFORCE(
-            idx >= 0 && idx_pref_T0 >= 0 && idx < data_size &&
-            idx_pref_T0 < data_size);
+        CAFFE_ENFORCE(idx_pref_T0 >= 0 && idx_pref_T0 < data_size);
         const uint8_t* ip_next_T0 = &input[idx_pref_T0 * block_size];
         vop0 = _mm256_fmadd_ps(
             vwgt,
@@ -1817,13 +1943,21 @@ void EmbeddingLookup_int32_t_uint8_t_float__avx2_fma(
       for (int32_t start = dataInd; dataInd < start + lengths[rangeIndex];
            ++dataInd) {
         const int32_t idx = indices[dataInd];
+        CAFFE_ENFORCE(
+            idx >= 0 && idx < data_size,
+            "Index ",
+            dataInd,
+            " is out of bounds: ",
+            idx,
+            ", range 0 to ",
+            data_size);
         float wgt = 1.f;
         float bio;
         if (weights) {
           wgt = weights[dataInd];
         }
-        bio = wgt * scale_bias[2 * indices[dataInd] + 1];
-        wgt = wgt * scale_bias[2 * indices[dataInd]];
+        bio = wgt * scale_bias[2 * idx + 1];
+        wgt = wgt * scale_bias[2 * idx];
         __m256 vbio = _mm256_set1_ps(bio);
         __m256 vwgt = _mm256_set1_ps(wgt);
         const uint8_t* ip = &input[idx * block_size];
@@ -1831,9 +1965,7 @@ void EmbeddingLookup_int32_t_uint8_t_float__avx2_fma(
             ? (dataInd + prefdist_T0)
             : dataInd;
         const int32_t idx_pref_T0 = indices[next_T0];
-        CAFFE_ENFORCE(
-            idx >= 0 && idx_pref_T0 >= 0 && idx < data_size &&
-            idx_pref_T0 < data_size);
+        CAFFE_ENFORCE(idx_pref_T0 >= 0 && idx_pref_T0 < data_size);
         const uint8_t* ip_next_T0 = &input[idx_pref_T0 * block_size];
         vop0 = _mm256_fmadd_ps(
             vwgt,
@@ -1917,13 +2049,21 @@ void EmbeddingLookup_int32_t_uint8_t_float__avx2_fma(
       for (int32_t start = dataInd; dataInd < start + lengths[rangeIndex];
            ++dataInd) {
         const int32_t idx = indices[dataInd];
+        CAFFE_ENFORCE(
+            idx >= 0 && idx < data_size,
+            "Index ",
+            dataInd,
+            " is out of bounds: ",
+            idx,
+            ", range 0 to ",
+            data_size);
         float wgt = 1.f;
         float bio;
         if (weights) {
           wgt = weights[dataInd];
         }
-        bio = wgt * scale_bias[2 * indices[dataInd] + 1];
-        wgt = wgt * scale_bias[2 * indices[dataInd]];
+        bio = wgt * scale_bias[2 * idx + 1];
+        wgt = wgt * scale_bias[2 * idx];
         __m256 vbio = _mm256_set1_ps(bio);
         __m256 vwgt = _mm256_set1_ps(wgt);
         const uint8_t* ip = &input[idx * block_size];
@@ -1931,9 +2071,7 @@ void EmbeddingLookup_int32_t_uint8_t_float__avx2_fma(
             ? (dataInd + prefdist_T0)
             : dataInd;
         const int32_t idx_pref_T0 = indices[next_T0];
-        CAFFE_ENFORCE(
-            idx >= 0 && idx_pref_T0 >= 0 && idx < data_size &&
-            idx_pref_T0 < data_size);
+        CAFFE_ENFORCE(idx_pref_T0 >= 0 && idx_pref_T0 < data_size);
         const uint8_t* ip_next_T0 = &input[idx_pref_T0 * block_size];
         vop0 = _mm256_fmadd_ps(
             vwgt,
@@ -1983,13 +2121,21 @@ void EmbeddingLookup_int32_t_uint8_t_float__avx2_fma(
       for (int32_t start = dataInd; dataInd < start + lengths[rangeIndex];
            ++dataInd) {
         const int32_t idx = indices[dataInd];
+        CAFFE_ENFORCE(
+            idx >= 0 && idx < data_size,
+            "Index ",
+            dataInd,
+            " is out of bounds: ",
+            idx,
+            ", range 0 to ",
+            data_size);
         float wgt = 1.f;
         float bio;
         if (weights) {
           wgt = weights[dataInd];
         }
-        bio = wgt * scale_bias[2 * indices[dataInd] + 1];
-        wgt = wgt * scale_bias[2 * indices[dataInd]];
+        bio = wgt * scale_bias[2 * idx + 1];
+        wgt = wgt * scale_bias[2 * idx];
         __m256 vbio = _mm256_set1_ps(bio);
         __m256 vwgt = _mm256_set1_ps(wgt);
         const uint8_t* ip = &input[idx * block_size];
@@ -1997,9 +2143,7 @@ void EmbeddingLookup_int32_t_uint8_t_float__avx2_fma(
             ? (dataInd + prefdist_T0)
             : dataInd;
         const int32_t idx_pref_T0 = indices[next_T0];
-        CAFFE_ENFORCE(
-            idx >= 0 && idx_pref_T0 >= 0 && idx < data_size &&
-            idx_pref_T0 < data_size);
+        CAFFE_ENFORCE(idx_pref_T0 >= 0 && idx_pref_T0 < data_size);
         const uint8_t* ip_next_T0 = &input[idx_pref_T0 * block_size];
         vop0 = _mm256_fmadd_ps(
             vwgt,
@@ -2038,14 +2182,22 @@ void EmbeddingLookup_int32_t_uint8_t_float__avx2_fma(
       for (int32_t start = dataInd; dataInd < start + lengths[rangeIndex];
            ++dataInd) {
         const int32_t idx = indices[dataInd];
+        CAFFE_ENFORCE(
+            idx >= 0 && idx < data_size,
+            "Index ",
+            dataInd,
+            " is out of bounds: ",
+            idx,
+            ", range 0 to ",
+            data_size);
         float wgt = 1.f;
         float bio;
         if (weights) {
           wgt = weights[dataInd];
         }
         assert(scale_bias);
-        bio = wgt * scale_bias[2 * indices[dataInd] + 1];
-        wgt = wgt * scale_bias[2 * indices[dataInd]];
+        bio = wgt * scale_bias[2 * idx + 1];
+        wgt = wgt * scale_bias[2 * idx];
         __m256 vbio = _mm256_set1_ps(bio);
         __m256 vwgt = _mm256_set1_ps(wgt);
         const uint8_t* ip = &input[idx * block_size];
@@ -2053,9 +2205,7 @@ void EmbeddingLookup_int32_t_uint8_t_float__avx2_fma(
             ? (dataInd + prefdist_T0)
             : dataInd;
         const int32_t idx_pref_T0 = indices[next_T0];
-        CAFFE_ENFORCE(
-            idx >= 0 && idx_pref_T0 >= 0 && idx < data_size &&
-            idx_pref_T0 < data_size);
+        CAFFE_ENFORCE(idx_pref_T0 >= 0 && idx_pref_T0 < data_size);
         const uint8_t* ip_next_T0 = &input[idx_pref_T0 * block_size];
         j = 0;
         for (; j + 8 <= block_size; j += 8) {
@@ -2126,13 +2276,21 @@ void EmbeddingLookup_int64_t_uint8_t_float__avx2_fma(
       for (int64_t start = dataInd; dataInd < start + lengths[rangeIndex];
            ++dataInd) {
         const int64_t idx = indices[dataInd];
+        CAFFE_ENFORCE(
+            idx >= 0 && idx < data_size,
+            "Index ",
+            dataInd,
+            " is out of bounds: ",
+            idx,
+            ", range 0 to ",
+            data_size);
         float wgt = 1.f;
         float bio;
         if (weights) {
           wgt = weights[dataInd];
         }
-        bio = wgt * scale_bias[2 * indices[dataInd] + 1];
-        wgt = wgt * scale_bias[2 * indices[dataInd]];
+        bio = wgt * scale_bias[2 * idx + 1];
+        wgt = wgt * scale_bias[2 * idx];
         __m256 vbio = _mm256_set1_ps(bio);
         __m256 vwgt = _mm256_set1_ps(wgt);
         const uint8_t* ip = &input[idx * block_size];
@@ -2140,9 +2298,7 @@ void EmbeddingLookup_int64_t_uint8_t_float__avx2_fma(
             ? (dataInd + prefdist_T0)
             : dataInd;
         const int64_t idx_pref_T0 = indices[next_T0];
-        CAFFE_ENFORCE(
-            idx >= 0 && idx_pref_T0 >= 0 && idx < data_size &&
-            idx_pref_T0 < data_size);
+        CAFFE_ENFORCE(idx_pref_T0 >= 0 && idx_pref_T0 < data_size);
         const uint8_t* ip_next_T0 = &input[idx_pref_T0 * block_size];
         vop0 = _mm256_fmadd_ps(
             vwgt,
@@ -2294,13 +2450,21 @@ void EmbeddingLookup_int64_t_uint8_t_float__avx2_fma(
       for (int64_t start = dataInd; dataInd < start + lengths[rangeIndex];
            ++dataInd) {
         const int64_t idx = indices[dataInd];
+        CAFFE_ENFORCE(
+            idx >= 0 && idx < data_size,
+            "Index ",
+            dataInd,
+            " is out of bounds: ",
+            idx,
+            ", range 0 to ",
+            data_size);
         float wgt = 1.f;
         float bio;
         if (weights) {
           wgt = weights[dataInd];
         }
-        bio = wgt * scale_bias[2 * indices[dataInd] + 1];
-        wgt = wgt * scale_bias[2 * indices[dataInd]];
+        bio = wgt * scale_bias[2 * idx + 1];
+        wgt = wgt * scale_bias[2 * idx];
         __m256 vbio = _mm256_set1_ps(bio);
         __m256 vwgt = _mm256_set1_ps(wgt);
         const uint8_t* ip = &input[idx * block_size];
@@ -2308,9 +2472,7 @@ void EmbeddingLookup_int64_t_uint8_t_float__avx2_fma(
             ? (dataInd + prefdist_T0)
             : dataInd;
         const int64_t idx_pref_T0 = indices[next_T0];
-        CAFFE_ENFORCE(
-            idx >= 0 && idx_pref_T0 >= 0 && idx < data_size &&
-            idx_pref_T0 < data_size);
+        CAFFE_ENFORCE(idx_pref_T0 >= 0 && idx_pref_T0 < data_size);
         const uint8_t* ip_next_T0 = &input[idx_pref_T0 * block_size];
         vop0 = _mm256_fmadd_ps(
             vwgt,
@@ -2394,13 +2556,21 @@ void EmbeddingLookup_int64_t_uint8_t_float__avx2_fma(
       for (int64_t start = dataInd; dataInd < start + lengths[rangeIndex];
            ++dataInd) {
         const int64_t idx = indices[dataInd];
+        CAFFE_ENFORCE(
+            idx >= 0 && idx < data_size,
+            "Index ",
+            dataInd,
+            " is out of bounds: ",
+            idx,
+            ", range 0 to ",
+            data_size);
         float wgt = 1.f;
         float bio;
         if (weights) {
           wgt = weights[dataInd];
         }
-        bio = wgt * scale_bias[2 * indices[dataInd] + 1];
-        wgt = wgt * scale_bias[2 * indices[dataInd]];
+        bio = wgt * scale_bias[2 * idx + 1];
+        wgt = wgt * scale_bias[2 * idx];
         __m256 vbio = _mm256_set1_ps(bio);
         __m256 vwgt = _mm256_set1_ps(wgt);
         const uint8_t* ip = &input[idx * block_size];
@@ -2408,9 +2578,7 @@ void EmbeddingLookup_int64_t_uint8_t_float__avx2_fma(
             ? (dataInd + prefdist_T0)
             : dataInd;
         const int64_t idx_pref_T0 = indices[next_T0];
-        CAFFE_ENFORCE(
-            idx >= 0 && idx_pref_T0 >= 0 && idx < data_size &&
-            idx_pref_T0 < data_size);
+        CAFFE_ENFORCE(idx_pref_T0 >= 0 && idx_pref_T0 < data_size);
         const uint8_t* ip_next_T0 = &input[idx_pref_T0 * block_size];
         vop0 = _mm256_fmadd_ps(
             vwgt,
@@ -2460,13 +2628,21 @@ void EmbeddingLookup_int64_t_uint8_t_float__avx2_fma(
       for (int64_t start = dataInd; dataInd < start + lengths[rangeIndex];
            ++dataInd) {
         const int64_t idx = indices[dataInd];
+        CAFFE_ENFORCE(
+            idx >= 0 && idx < data_size,
+            "Index ",
+            dataInd,
+            " is out of bounds: ",
+            idx,
+            ", range 0 to ",
+            data_size);
         float wgt = 1.f;
         float bio;
         if (weights) {
           wgt = weights[dataInd];
         }
-        bio = wgt * scale_bias[2 * indices[dataInd] + 1];
-        wgt = wgt * scale_bias[2 * indices[dataInd]];
+        bio = wgt * scale_bias[2 * idx + 1];
+        wgt = wgt * scale_bias[2 * idx];
         __m256 vbio = _mm256_set1_ps(bio);
         __m256 vwgt = _mm256_set1_ps(wgt);
         const uint8_t* ip = &input[idx * block_size];
@@ -2474,9 +2650,7 @@ void EmbeddingLookup_int64_t_uint8_t_float__avx2_fma(
             ? (dataInd + prefdist_T0)
             : dataInd;
         const int64_t idx_pref_T0 = indices[next_T0];
-        CAFFE_ENFORCE(
-            idx >= 0 && idx_pref_T0 >= 0 && idx < data_size &&
-            idx_pref_T0 < data_size);
+        CAFFE_ENFORCE(idx_pref_T0 >= 0 && idx_pref_T0 < data_size);
         const uint8_t* ip_next_T0 = &input[idx_pref_T0 * block_size];
         vop0 = _mm256_fmadd_ps(
             vwgt,
@@ -2515,14 +2689,22 @@ void EmbeddingLookup_int64_t_uint8_t_float__avx2_fma(
       for (int64_t start = dataInd; dataInd < start + lengths[rangeIndex];
            ++dataInd) {
         const int64_t idx = indices[dataInd];
+        CAFFE_ENFORCE(
+            idx >= 0 && idx < data_size,
+            "Index ",
+            dataInd,
+            " is out of bounds: ",
+            idx,
+            ", range 0 to ",
+            data_size);
         float wgt = 1.f;
         float bio;
         if (weights) {
           wgt = weights[dataInd];
         }
         assert(scale_bias);
-        bio = wgt * scale_bias[2 * indices[dataInd] + 1];
-        wgt = wgt * scale_bias[2 * indices[dataInd]];
+        bio = wgt * scale_bias[2 * idx + 1];
+        wgt = wgt * scale_bias[2 * idx];
         __m256 vbio = _mm256_set1_ps(bio);
         __m256 vwgt = _mm256_set1_ps(wgt);
         const uint8_t* ip = &input[idx * block_size];
@@ -2530,9 +2712,7 @@ void EmbeddingLookup_int64_t_uint8_t_float__avx2_fma(
             ? (dataInd + prefdist_T0)
             : dataInd;
         const int64_t idx_pref_T0 = indices[next_T0];
-        CAFFE_ENFORCE(
-            idx >= 0 && idx_pref_T0 >= 0 && idx < data_size &&
-            idx_pref_T0 < data_size);
+        CAFFE_ENFORCE(idx_pref_T0 >= 0 && idx_pref_T0 < data_size);
         const uint8_t* ip_next_T0 = &input[idx_pref_T0 * block_size];
         j = 0;
         for (; j + 8 <= block_size; j += 8) {
