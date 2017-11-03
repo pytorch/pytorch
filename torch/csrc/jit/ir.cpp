@@ -41,6 +41,7 @@ void printNodeRef(std::ostream & out, const Node * n) {
 template <typename T>
 std::ostream& operator<<(std::ostream & out, const std::vector<T> & nodes) {
   out << at::ArrayRef<T>{nodes};
+  return out;
 }
 
 template <typename T>
