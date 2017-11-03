@@ -183,7 +183,7 @@ void THCTensor_(put)(THCState *state, THCTensor *dst, THCudaLongTensor *index, T
     THCTensor* sorted_src = THCTensor_(newClone)(state, src);
 
     THCTensor_(sort_indices)(state, sorted_index, sorted_src);
-    dispatchTakePut<real, TensorPutAccumulateOp>(state, dst, src, index);
+    dispatchTakePut<real, TensorPutAccumulateOp>(state, dst, sorted_src, sorted_index);
 
     THCTensor_(free)(state, sorted_src);
     THCudaLongTensor_free(state, sorted_index);
