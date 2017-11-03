@@ -1394,7 +1394,7 @@ def pairwise_distance(x1, x2, p=2, eps=1e-6, squared=False):
     """
     assert x1.size() == x2.size(), "Input sizes must be equal."
     assert x1.dim() == 2, "Input must be a 2D matrix."
-    assert (squared and p==2) or not squared, "Squared distances applicable only if p=2."
+    assert (squared and p == 2) or not squared, "Squared distances applicable only if p=2."
     diff = torch.abs(x1 - x2)
     out = torch.pow(diff + eps, p).sum(dim=1, keepdim=True)
     if squared:
