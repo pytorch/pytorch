@@ -113,8 +113,8 @@ std::shared_ptr<Function>& VariableViewImpl::get_grad_fn() {
     // but that might require sharing requires_grad between the base and the view
     throw std::runtime_error(
         "requires_grad is False and base.requires_grad is True. Cannot use "
-        "this view in a differentiable operation. Re-create the view from the "
-        "base Variable.");
+        "this view in a differentiable operation. Re-create the view from its "
+        "base Variable after the last in-place modification.");
   }
   auto current_version = version_counter.current_version();
   if (attr_version != current_version) {

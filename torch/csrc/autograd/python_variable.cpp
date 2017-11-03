@@ -431,7 +431,7 @@ static struct PyGetSetDef THPVariable_properties[] = {
   {"data", (getter)THPVariable_get_data, (setter)THPVariable_set_data, NULL, NULL},
   {"_grad", (getter)THPVariable_get_grad, (setter)THPVariable_set_grad, NULL, NULL}, // only for legacy reasons
   {"grad", (getter)THPVariable_get_grad, (setter)THPVariable_set_grad, NULL, NULL},
-  {"_base", (getter)THPVariable_get_base, NULL, NULL, NULL}, // only for legacy reasons
+  {"_base", (getter)THPVariable_get_base, NULL, NULL, NULL},
   {"volatile", (getter)THPVariable_get_volatile, (setter)THPVariable_set_volatile, NULL, NULL},
   {"output_nr", (getter)THPVariable_get_output_nr, NULL, NULL, NULL},
   {"requires_grad", (getter)THPVariable_get_requires_grad, (setter)THPVariable_set_requires_grad, NULL, NULL},
