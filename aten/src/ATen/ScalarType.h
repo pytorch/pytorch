@@ -64,7 +64,7 @@ static inline const char * toString(ScalarType t) {
   switch(t) {
     AT_FORALL_SCALAR_TYPES(DEFINE_CASE)
     default:
-      return "UNKNOWN_SCALAR_TYPE";
+      return "UNKNOWN_SCALAR";
   }
 #undef DEFINE_CASE
 }

@@ -32,11 +32,11 @@ int main() {
   ASSERT_THROWS(und.mm(und), "mm");
 
   und.toType(und.type());
-  ASSERT_THROWS(und.toType(ft.type()), ""); // FIXME: UNKNOWN_BACKENDFloatType is not enabled
-  ASSERT_THROWS(ft.toType(und.type()), ""); // FIXME: tensor is not implemented for type UndefinedType
+  ASSERT_THROWS(und.toType(ft.type()), "UndefinedType");
+  ASSERT_THROWS(ft.toType(und.type()), "UndefinedType");
   und.toType(ScalarType::Undefined);
   ASSERT_THROWS(und.toType(ScalarType::Float), "toScalarType");
-  ASSERT_THROWS(ft.toType(ScalarType::Undefined), ""); // FIXME: CPUUNKNOWN_SCALAR_TYPEType is not enabled.
+  ASSERT_THROWS(ft.toType(ScalarType::Undefined), "UndefinedType");
 
   // copy_
   ASSERT_THROWS(und.copy_(und), "copy");
@@ -45,7 +45,7 @@ int main() {
 
   und.toBackend(Backend::Undefined);
   ASSERT_THROWS(und.toBackend(Backend::CPU), "toBackend");
-  ASSERT_THROWS(ft.toBackend(Backend::Undefined), ""); // UNKNOWN_BACKENDFloatType is not enabled.
+  ASSERT_THROWS(ft.toBackend(Backend::Undefined), "UndefinedType");
 
   return 0;
 }
