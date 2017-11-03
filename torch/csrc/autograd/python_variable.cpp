@@ -200,38 +200,48 @@ typedef int (*setter)(PyObject *, PyObject *, void *);
 
 PyObject *THPVariable_get_version(THPVariable *self)
 {
+  HANDLE_TH_ERRORS
   auto& var = self->cdata;
   return PyInt_FromLong(var.current_version());
+  END_HANDLE_TH_ERRORS
 }
 
 PyObject *THPVariable_get_grad_fn(THPVariable *self)
 {
+  HANDLE_TH_ERRORS
   auto& var = self->cdata;
   if (!var.grad_fn()) {
     Py_RETURN_NONE;
   }
   return functionToPyObject(var.grad_fn());
+  END_HANDLE_TH_ERRORS
 }
 
 int THPVariable_set_grad_fn(THPVariable *self, PyObject *obj)
 {
+  HANDLE_TH_ERRORS
   THPUtils_assertRet(-1, obj == Py_None, "_grad_fn can be only set to None");
   self->cdata.get()->_grad_fn = nullptr;
   return 0;
+  END_HANDLE_TH_ERRORS_RET(-1)
 }
 
 PyObject *THPVariable_is_leaf(THPVariable *self)
 {
+  HANDLE_TH_ERRORS
   return PyBool_FromLong(!self->cdata.grad_fn());
+  END_HANDLE_TH_ERRORS
 }
 
 PyObject * THPVariable_get_data(THPVariable *self)
 {
+  HANDLE_TH_ERRORS
   if (!self->data) {
     self->data = torch::createPyObject(self->cdata.data());
   }
   Py_XINCREF(self->data);
   return self->data;
+  END_HANDLE_TH_ERRORS
 }
 
 namespace {
@@ -260,6 +270,7 @@ template struct Rob<TensorImpl_Type, &TensorImpl::type_>;
 
 int THPVariable_set_data(THPVariable *self, PyObject *data)
 {
+  HANDLE_TH_ERRORS
   THPUtils_assertRet(-1, THPModule_isTensor(data), "Variable data has to "
       "be a tensor, but got %s", THPUtils_typename(data));
   Py_INCREF(data);
@@ -273,15 +284,19 @@ int THPVariable_set_data(THPVariable *self, PyObject *data)
   }
   self->cdata.data() = tensor;
   return 0;
+  END_HANDLE_TH_ERRORS_RET(-1)
 }
 
 PyObject *THPVariable_get_grad(THPVariable *self)
 {
+  HANDLE_TH_ERRORS
   return THPVariable_Wrap(self->cdata.grad());
+  END_HANDLE_TH_ERRORS
 }
 
 int THPVariable_set_grad(THPVariable *self, PyObject *other)
 {
+  HANDLE_TH_ERRORS
   auto& var = self->cdata;
   if (other == Py_None) {
     var.grad().reset();
@@ -311,35 +326,45 @@ int THPVariable_set_grad(THPVariable *self, PyObject *other)
 
   var.grad() = other_var;
   return 0;
+  END_HANDLE_TH_ERRORS_RET(-1)
 }
 
 PyObject *THPVariable_get_volatile(THPVariable *self)
 {
+  HANDLE_TH_ERRORS
   auto& var = self->cdata;
   return PyBool_FromLong(var.is_volatile());
+  END_HANDLE_TH_ERRORS
 }
 
 int THPVariable_set_volatile(THPVariable *self, PyObject *obj)
 {
+  HANDLE_TH_ERRORS
   THPUtils_assertRet(-1, PyBool_Check(obj), "volatile must be a bool");
   THPUtils_assertRet(-1, !self->cdata.grad_fn(),
       "volatile can only be set on leaf variables");
   self->cdata.is_volatile() = (obj == Py_True);
   return 0;
+  END_HANDLE_TH_ERRORS_RET(-1)
 }
 
 PyObject *THPVariable_get_output_nr(THPVariable *self)
 {
+  HANDLE_TH_ERRORS
   return PyInt_FromLong(self->cdata.output_nr());
+  END_HANDLE_TH_ERRORS
 }
 
 PyObject *THPVariable_get_requires_grad(THPVariable *self)
 {
+  HANDLE_TH_ERRORS
   return PyBool_FromLong(self->cdata.requires_grad());
+  END_HANDLE_TH_ERRORS
 }
 
 int THPVariable_set_requires_grad(THPVariable *self, PyObject *obj)
 {
+  HANDLE_TH_ERRORS
   THPUtils_assertRet(-1, PyBool_Check(obj), "requires_grad must be a bool");
   auto& var = self->cdata;
   if (var.grad_fn()) {
@@ -357,19 +382,23 @@ int THPVariable_set_requires_grad(THPVariable *self, PyObject *obj)
     grad_accumulator->is_executable = var.requires_grad();
   }
   return 0;
+  END_HANDLE_TH_ERRORS_RET(-1)
 }
 
 PyObject *THPVariable_get_backwards_hooks(THPVariable *self)
 {
+  HANDLE_TH_ERRORS
   if (self->backward_hooks) {
     Py_INCREF(self->backward_hooks);
     return self->backward_hooks;
   }
   Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
 }
 
 int THPVariable_set_backwards_hooks(THPVariable *self, PyObject *obj)
 {
+  HANDLE_TH_ERRORS
   if (obj == Py_None) {
     obj = nullptr;
   }
@@ -381,6 +410,17 @@ int THPVariable_set_backwards_hooks(THPVariable *self, PyObject *obj)
     self->cdata.hooks().emplace_back(new PyFunctionPreHook(obj, 0));
   }
   return 0;
+  END_HANDLE_TH_ERRORS_RET(-1)
+}
+
+PyObject *THPVariable_get_base(THPVariable *self)
+{
+  HANDLE_TH_ERRORS
+  if (self->cdata.is_view()) {
+    return THPVariable_Wrap(self->cdata.base());
+  }
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
 }
 
 static struct PyGetSetDef THPVariable_properties[] = {
@@ -391,6 +431,7 @@ static struct PyGetSetDef THPVariable_properties[] = {
   {"data", (getter)THPVariable_get_data, (setter)THPVariable_set_data, NULL, NULL},
   {"_grad", (getter)THPVariable_get_grad, (setter)THPVariable_set_grad, NULL, NULL}, // only for legacy reasons
   {"grad", (getter)THPVariable_get_grad, (setter)THPVariable_set_grad, NULL, NULL},
+  {"_base", (getter)THPVariable_get_base, NULL, NULL, NULL}, // only for legacy reasons
   {"volatile", (getter)THPVariable_get_volatile, (setter)THPVariable_set_volatile, NULL, NULL},
   {"output_nr", (getter)THPVariable_get_output_nr, NULL, NULL, NULL},
   {"requires_grad", (getter)THPVariable_get_requires_grad, (setter)THPVariable_set_requires_grad, NULL, NULL},
