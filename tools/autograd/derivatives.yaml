@@ -395,7 +395,7 @@
   self: not_implemented("pstrf")
 
 - name: put(Tensor self, Tensor index, Tensor source, bool accumulate)
-  self: zeros_like(self).put_(index, source, accumulate)
+  self: grad.clone().put_(index, zeros_like(source), accumulate)
   source: grad.take(index)
 
 - name: qr(Tensor self)
