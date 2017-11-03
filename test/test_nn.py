@@ -4841,6 +4841,12 @@ new_module_tests = [
         input_size=(2, 4, 5, 5),
     ),
     dict(
+        module_name='IndexedConv',
+        constructor_args=(1, 1, (10 * torch.rand(10, 3)).type(torch.LongTensor)),
+        input_size=(1, 1, 10),
+        check_gradgrad=False,
+    ),
+    dict(
         module_name='MaxPool2d',
         constructor_args=((3, 3), (2, 2), (1, 1)),
         input_size=(1, 3, 7, 7),

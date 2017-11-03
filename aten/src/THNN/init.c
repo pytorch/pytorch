@@ -98,6 +98,9 @@
 #include "generic/GatedLinearUnit.c"
 #include "THGenerateFloatTypes.h"
 
+#include "generic/IndexedConvolution.c"
+#include "THGenerateFloatTypes.h"
+
 #include "generic/L1Cost.c"
 #include "THGenerateFloatTypes.h"
 

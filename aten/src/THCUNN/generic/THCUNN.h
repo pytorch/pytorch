@@ -256,6 +256,36 @@ TH_API void THNN_(GRUFused_updateGradInput)(
                   THCTensor *gradInputHx,
                   THCTensor *storage);
 
+TH_API void THNN_(IndexedConvolution_updateOutput)(
+                  THCState *state,
+                  THCTensor *input,
+                  THCTensor *output,
+                  THCTensor *weight,
+                  THCTensor *bias,  // [OPTIONAL]
+                  THCIndexTensor *indices,
+                  THCTensor *columns,
+                  THCTensor *ones);
+
+TH_API void THNN_(IndexedConvolution_updateGradInput)(
+                  THCState *state,
+                  THCTensor *input,
+                  THCTensor *gradOutput,
+                  THCTensor *gradInput,
+                  THCTensor *weight,
+                  THCIndexTensor *indices,
+                  THCTensor *gradColumns);
+
+TH_API void THNN_(IndexedConvolution_accGradParameters)(
+                  THCState *state,
+                  THCTensor *input,
+                  THCTensor *gradOutput,
+                  THCTensor *gradWeight,
+                  THCTensor *gradBias, // [OPTIONAL]
+                  THCIndexTensor *indices,
+                  THCTensor *columns,
+                  THCTensor *ones,
+                  accreal scale_);
+
 TH_API void THNN_(LSTMFused_updateOutput)(
                   THCState *state,
                   THCTensor *input,
