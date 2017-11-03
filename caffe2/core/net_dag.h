@@ -28,40 +28,24 @@
 #include "caffe2/core/blob.h"
 #include "caffe2/core/common.h"
 #include "caffe2/core/logging.h"
-#include "caffe2/core/net.h"
+#include "caffe2/core/net_dag_utils.h"
 #include "caffe2/core/observer.h"
 #include "caffe2/core/operator_schema.h"
 #include "caffe2/core/registry.h"
+#include "caffe2/core/stats.h"
 #include "caffe2/core/tensor.h"
+#include "caffe2/core/timer.h"
 #include "caffe2/core/workspace.h"
 #include "caffe2/proto/caffe2.pb.h"
 #include "caffe2/utils/simple_queue.h"
 
 namespace caffe2 {
 
-namespace internal {
-struct OperatorNode {
-  unique_ptr<OperatorBase> operator_;
-  vector<int> children_;
-  vector<int> parents_;
-  std::atomic<int> runtime_parent_count_;
-  bool is_chain_start_ = false;
-};
-
-struct OpGraphNode {
-  vector<int> children_;
-  vector<int> parents_;
-  int visited_inputs = 0;
-  int num_orig_parents;
-};
-}
-
 class DAGNetBase : public NetBase {
  public:
-  using ExecutionChains = std::unordered_map<int, std::vector<int>>;
   DAGNetBase(const std::shared_ptr<const NetDef>& net_def, Workspace* ws);
   ~DAGNetBase() override;
-  bool RunAsync() override;
+
   // WorkerFunction() is a function wrapper to allow us to run worker threads.
   // It checks out one ready-to-run operator from the job queue, runs it,
   // notifies all its children, and for any children that is ready, enqueues
@@ -72,28 +56,26 @@ class DAGNetBase : public NetBase {
       const int main_runs,
       const bool run_individual) override;
 
-  const ExecutionChains& TEST_execution_chains() const {
+  const dag_utils::ExecutionChains& TEST_execution_chains() const {
     return execution_chains_;
   }
 
   vector<OperatorBase*> GetOperators() const override {
-    vector<OperatorBase*> op_list;
-    for (auto& op_node : operator_nodes_) {
-      op_list.push_back(op_node.operator_.get());
-    }
-    return op_list;
+    return operators_;
   }
 
  protected:
-  virtual bool RunAt(const std::vector<int>& chain) = 0;
+  bool DoRunAsync() override;
 
-  vector<internal::OperatorNode> operator_nodes_;
-  ExecutionChains execution_chains_;
+  virtual bool RunAt(int chain_id, const std::vector<int>& chain) = 0;
+
+  vector<dag_utils::OperatorNode> operator_nodes_;
+  vector<OperatorBase*> operators_;
+  dag_utils::ExecutionChains execution_chains_;
   vector<int> initial_frontier_;
   std::unique_ptr<SimpleQueue<int>> job_queue_;
   std::vector<std::thread> workers_;
   int num_workers_;
-  int num_workers_first_iteration_;
   int remaining_ops_;
 
   bool success_;
@@ -101,6 +83,16 @@ class DAGNetBase : public NetBase {
   std::mutex remaining_ops_mutex_;
   std::condition_variable cv_;
   std::mutex run_in_progress_;
+
+  struct DAGNetStats {
+    CAFFE_STAT_CTOR(DAGNetStats);
+    CAFFE_AVG_EXPORTED_STAT(task_pool_wait_time_us);
+    CAFFE_AVG_EXPORTED_STAT(task_time_to_scheduled_us);
+    CAFFE_AVG_EXPORTED_STAT(task_time_to_succeeded_ms);
+    CAFFE_AVG_EXPORTED_STAT(task_wait_time_us);
+  };
+  mutable std::vector<DAGNetStats> stats_;
+  std::unordered_map<int, std::unique_ptr<Timer>> task_timers_;
 
   DISABLE_COPY_AND_ASSIGN(DAGNetBase);
 };
@@ -110,7 +102,7 @@ class DAGNet : public DAGNetBase {
   using DAGNetBase::DAGNetBase;
 
  protected:
-  bool RunAt(const std::vector<int>& chain) override;
+  bool RunAt(int chain_id, const std::vector<int>& chain) override;
   bool SupportsAsync() override {
     return false;
   }

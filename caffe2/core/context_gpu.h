@@ -158,9 +158,9 @@ class CUDAContext final {
     ev.Wait(CUDA, this);
   }
 
-  inline void Record(Event* ev) const {
+  inline void Record(Event* ev, const char* err_msg = nullptr) const {
     CAFFE_ENFORCE(ev, "Event must not be null.");
-    ev->Record(CUDA, this);
+    ev->Record(CUDA, this, err_msg);
   }
 
   void FinishDeviceComputation() {
@@ -171,7 +171,9 @@ class CUDAContext final {
     }
   }
 
-  inline int cuda_gpu_id() const { return gpu_id_; }
+  inline int cuda_gpu_id() const {
+    return gpu_id_;
+  }
 
   inline cudaStream_t cuda_stream() {
     return cuda_stream(gpu_id_, stream_id_);
@@ -240,6 +242,15 @@ class CUDAContext final {
   CopyItems(const TypeMeta& meta, size_t n, const void* src, void* dst) {
     CAFFE_ENFORCE(!meta.copy(), "CUDAContext requires fundamental types.");
     CopyBytes<SrcContext, DstContext>(n * meta.itemsize(), src, dst);
+  }
+
+  // By default CUDA operators have async device parts
+  static bool HasAsyncPartDefault() {
+    return true;
+  }
+
+  static bool SupportsAsyncScheduling() {
+    return true;
   }
 
  protected:

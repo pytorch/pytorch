@@ -17,7 +17,7 @@ import hypothesis.strategies as st
 import unittest
 
 
-EXECUTORS = ["dag", "async_dag"]
+EXECUTORS = ["async_polling", "dag", "async_dag"]
 ITERATIONS = 2
 
 class ExecutorCPUConvNetTest(ExecutorTestBase):
@@ -51,11 +51,11 @@ class ExecutorGPUResNetTest(ExecutorTestBase):
     @executor_test_settings
     def test_executor(self, executor, num_workers):
         model = build_resnet50_dataparallel_model(
-            num_gpus=workspace.NumCudaDevices(), batch_size=32, epoch_size=32)
+            num_gpus=workspace.NumCudaDevices(), batch_size=8, epoch_size=8)
         model.Proto().num_workers = num_workers
 
         def run_model():
-            run_resnet50_epoch(model, batch_size=32, epoch_size=32)
+            run_resnet50_epoch(model, batch_size=8, epoch_size=8)
 
         self.compare_executors(
             model,

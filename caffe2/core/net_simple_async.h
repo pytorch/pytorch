@@ -39,7 +39,6 @@ class AsyncSimpleNet : public NetBase {
   bool SupportsAsync() override {
     return true;
   }
-  bool RunAsync() override;
 
   vector<float> TEST_Benchmark(
       const int warmup_runs,
@@ -61,6 +60,8 @@ class AsyncSimpleNet : public NetBase {
   }
 
  protected:
+  bool DoRunAsync() override;
+
   vector<unique_ptr<OperatorBase>> operators_;
 
   DISABLE_COPY_AND_ASSIGN(AsyncSimpleNet);

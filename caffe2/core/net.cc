@@ -96,6 +96,13 @@ NetBase::NetBase(
       *remaining_output.begin());
 }
 
+bool NetBase::RunAsync() {
+  for (auto& op : GetOperators()) {
+    op->ResetEvent();
+  }
+  return DoRunAsync();
+}
+
 static NetObserverCreator GlobalNetObserverCreator = [](NetBase* net) {
   // A no-op ObserverBase<NetBase> observer
   return std::unique_ptr<NetObserver>(new NetObserver(net));

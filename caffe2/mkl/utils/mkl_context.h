@@ -46,13 +46,16 @@ class MKLContext final {
   ~MKLContext() {}
 
   inline void SwitchToDevice(int /*stream_id*/ = 0) {}
+
   inline void WaitEvent(const Event& ev) {
     ev.Wait(MKLDNN, this);
   }
-  inline void Record(Event* ev) const {
+
+  inline void Record(Event* ev, const char* err_msg = nullptr) const {
     CAFFE_ENFORCE(ev, "Event must not be null.");
-    ev->Record(MKLDNN, this);
+    ev->Record(MKLDNN, this, err_msg);
   }
+
   inline void FinishDeviceComputation() {}
 
   inline std::mt19937& RandGenerator() {
@@ -92,6 +95,15 @@ class MKLContext final {
     } else {
       CopyBytes<SrcContext, DstContext>(n * meta.itemsize(), src, dst);
     }
+  }
+
+  // By default MKL operators don't have async device parts
+  static bool HasAsyncPartDefault() {
+    return false;
+  }
+
+  static bool SupportsAsyncScheduling() {
+    return false;
   }
 
  protected:

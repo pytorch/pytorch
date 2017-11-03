@@ -95,9 +95,10 @@ class CPUContext final {
   inline void WaitEvent(const Event& ev) {
     ev.Wait(CPU, this);
   }
-  inline void Record(Event* ev) const {
+
+  inline void Record(Event* ev, const char* err_msg = nullptr) const {
     CAFFE_ENFORCE(ev, "Event must not be null.");
-    ev->Record(CPU, this);
+    ev->Record(CPU, this, err_msg);
   }
 
   inline void FinishDeviceComputation() {}
@@ -125,9 +126,10 @@ class CPUContext final {
   template <typename T, class SrcContext, class DstContext>
   inline void Copy(size_t n, const T* src, T* dst) {
     if (std::is_fundamental<T>::value) {
-      CopyBytes<SrcContext, DstContext>(n * sizeof(T),
-                                     static_cast<const void*>(src),
-                                     static_cast<void*>(dst));
+      CopyBytes<SrcContext, DstContext>(
+          n * sizeof(T),
+          static_cast<const void*>(src),
+          static_cast<void*>(dst));
     } else {
       for (int i = 0; i < n; ++i) {
         dst[i] = src[i];
@@ -143,6 +145,15 @@ class CPUContext final {
     } else {
       CopyBytes<SrcContext, DstContext>(n * meta.itemsize(), src, dst);
     }
+  }
+
+  // By default CPU operators don't have async device parts
+  static bool HasAsyncPartDefault() {
+    return false;
+  }
+
+  static bool SupportsAsyncScheduling() {
+    return false;
   }
 
  protected:

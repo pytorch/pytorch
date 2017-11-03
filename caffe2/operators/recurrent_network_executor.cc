@@ -42,6 +42,8 @@ bool ThreadedRecurrentNetworkExecutor::Run(int T) {
   countdown_ = T * timestep_ops_[0].size();
   finished_timesteps_ = 0;
 
+  ResetEvents();
+
   // Frontier
   CHECK(job_queue_.size() == 0);
 
@@ -59,6 +61,8 @@ bool ThreadedRecurrentNetworkExecutor::RunBackwards(int T) {
   CAFFE_ENFORCE(timestep_ops_.size() >= T);
   countdown_ = T * timestep_ops_[0].size();
   finished_timesteps_ = 0;
+
+  ResetEvents();
 
   // Frontier
   CHECK(job_queue_.size() == 0);
