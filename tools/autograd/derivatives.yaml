@@ -149,7 +149,8 @@
 
 - name: eye  # fallthrough
 
-- name: fill(Tensor self, Scalar value)  # FIXME
+- name: fill(Tensor self, Scalar value)
+  self: zeros_like(grad)
 
 - name: floor(Tensor self)
   self: zeros_like(grad)
