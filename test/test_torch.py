@@ -2727,19 +2727,26 @@ class TestTorch(TestCase):
         sequence.add_(start - 1)
         return sequence.resize_(*size)
 
-    def test_index(self):
-        reference = self._consecutive((3, 3, 3))
+    @staticmethod
+    def _test_index(self, conv_fn):
+
+        def consec(size, start=1):
+            sequence = torch.ones(int(torch.Tensor(size).prod(0)[0])).cumsum(0)
+            sequence.add_(start - 1)
+            return sequence.view(*size)
+
+        reference = conv_fn(consec((3, 3, 3)))
 
         # empty tensor indexing
-        self.assertEqual(reference[torch.LongTensor()], reference.new())
+        self.assertEqual(reference[conv_fn(torch.LongTensor())], reference.new())
 
-        self.assertEqual(reference[0], self._consecutive((3, 3)), 0)
-        self.assertEqual(reference[1], self._consecutive((3, 3), 10), 0)
-        self.assertEqual(reference[2], self._consecutive((3, 3), 19), 0)
-        self.assertEqual(reference[0, 1], self._consecutive((3,), 4), 0)
-        self.assertEqual(reference[0:2], self._consecutive((2, 3, 3)), 0)
+        self.assertEqual(reference[0], consec((3, 3)), 0)
+        self.assertEqual(reference[1], consec((3, 3), 10), 0)
+        self.assertEqual(reference[2], consec((3, 3), 19), 0)
+        self.assertEqual(reference[0, 1], consec((3,), 4), 0)
+        self.assertEqual(reference[0:2], consec((2, 3, 3)), 0)
         self.assertEqual(reference[2, 2, 2], 27, 0)
-        self.assertEqual(reference[:], self._consecutive((3, 3, 3)), 0)
+        self.assertEqual(reference[:], consec((3, 3, 3)), 0)
 
         # indexing with Ellipsis
         self.assertEqual(reference[..., 2], torch.Tensor([[3, 6, 9],
@@ -2755,15 +2762,15 @@ class TestTorch(TestCase):
         self.assertEqual(reference[2, 2, 2, ...], 27, 0)
         self.assertEqual(reference[...], reference, 0)
 
-        reference_5d = self._consecutive((3, 3, 3, 3, 3))
+        reference_5d = conv_fn(consec((3, 3, 3, 3, 3)))
         self.assertEqual(reference_5d[..., 1, 0], reference_5d[:, :, :, 1, 0], 0)
         self.assertEqual(reference_5d[2, ..., 1, 0], reference_5d[2, :, :, 1, 0], 0)
         self.assertEqual(reference_5d[2, 1, 0, ..., 1], reference_5d[2, 1, 0, :, 1], 0)
         self.assertEqual(reference_5d[...], reference_5d, 0)
 
         # LongTensor indexing
-        reference = self._consecutive((5, 5, 5))
-        idx = torch.LongTensor([2, 4])
+        reference = conv_fn(consec((5, 5, 5)))
+        idx = conv_fn(torch.LongTensor([2, 4]))
         self.assertEqual(reference[idx], torch.stack([reference[2], reference[4]]))
         # TODO: enable one indexing is implemented like in numpy
         # self.assertEqual(reference[2, idx], torch.stack([reference[2, 2], reference[2, 4]]))
@@ -2777,7 +2784,7 @@ class TestTorch(TestCase):
         self.assertEqual(reference[None, 2:5, None, None], reference.unsqueeze(0)[:, 2:5].unsqueeze(2).unsqueeze(2))
 
         # indexing with step
-        reference = self._consecutive((10, 10, 10))
+        reference = consec((10, 10, 10))
         self.assertEqual(reference[1:5:2], torch.stack([reference[1], reference[3]], 0))
         self.assertEqual(reference[1:6:2], torch.stack([reference[1], reference[3], reference[5]], 0))
         self.assertEqual(reference[1:9:4], torch.stack([reference[1], reference[5]], 0))
@@ -2788,7 +2795,7 @@ class TestTorch(TestCase):
                          torch.stack([reference[:, 2, 1], reference[:, 2, 3], reference[:, 2, 5]], 1))
 
         lst = [list(range(i, i + 10)) for i in range(0, 100, 10)]
-        tensor = torch.DoubleTensor(lst)
+        tensor = conv_fn(torch.DoubleTensor(lst))
         for _i in range(100):
             idx1_start = random.randrange(10)
             idx1_end = idx1_start + random.randrange(1, 10 - idx1_start + 1)
@@ -2819,6 +2826,9 @@ class TestTorch(TestCase):
         self.assertRaises(TypeError, lambda: reference[0.0, :, 0.0:2.0])
         self.assertRaises(TypeError, lambda: reference[0.0, ..., 0.0:2.0])
         self.assertRaises(TypeError, lambda: reference[0.0, :, 0.0])
+
+    def test_index(self):
+        self._test_index(self, lambda x: x)
 
     @staticmethod
     def _test_advancedindex(self, conv_fn):
