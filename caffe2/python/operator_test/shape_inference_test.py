@@ -56,6 +56,14 @@ class TestShapeInference(test_util.TestCase):
         workspace.FeedBlob("b", np.random.rand(36,).astype(np.float32))
         self.InferTensorRunAndCompare(model)
 
+    def testFCTransposed(self):
+        model = model_helper.ModelHelper(name="test_model")
+        model.net.FCTransposed(["x", "wt", "b"], ["y"])
+        workspace.FeedBlob("x", np.random.rand(20, 36).astype(np.float32))
+        workspace.FeedBlob("wt", np.random.rand(36, 48).astype(np.float32))
+        workspace.FeedBlob("b", np.random.rand(48,).astype(np.float32))
+        self.InferTensorRunAndCompare(model)
+
     def testShapeInferenceSlice(self):
         model = model_helper.ModelHelper(name="test_model")
         model.net.Slice(["x"], ["y"], starts=[0, 0, 0, 0], ends=[-1, -1, -3, -1])

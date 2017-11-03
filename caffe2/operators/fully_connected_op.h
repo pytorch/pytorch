@@ -25,7 +25,10 @@
 namespace caffe2 {
 
 // This is Caffe's InnerProductOp, with a name that fits its purpose better.
-template <class Context, class Engine = DefaultEngine>
+template <
+    class Context,
+    class Engine = DefaultEngine,
+    bool TransposeWeight = true>
 class FullyConnectedOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
@@ -54,7 +57,8 @@ class FullyConnectedOp final : public Operator<Context> {
     const auto M = X.size_to_dim(canonical_axis);
     const auto K = X.size_from_dim(canonical_axis);
     const auto canonical_axis_w = W.canonical_axis_index(axis_w_);
-    const int N = W.size_to_dim(canonical_axis_w);
+    const int N = TransposeWeight ? W.size_to_dim(canonical_axis_w)
+                                  : W.size_from_dim(canonical_axis_w);
 
     auto dimErrorString = [&]() {
       return MakeString(
@@ -104,7 +108,7 @@ class FullyConnectedOp final : public Operator<Context> {
     // W * x
     math::Gemm<T_X, Context, Engine>(
         CblasNoTrans,
-        CblasTrans,
+        TransposeWeight ? CblasTrans : CblasNoTrans,
         M,
         N,
         K,
