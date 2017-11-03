@@ -33,6 +33,19 @@ import math
 import unittest
 
 
+class TestMomentumSgd(OptimizerTestBase, TestCase):
+    def build_optimizer(self, model, **kwargs):
+        self._skip_gpu = False
+        return build_sgd(model, base_learning_rate=0.1, momentum=0.1, **kwargs)
+
+    def check_optimizer(self, optimizer):
+        self.assertTrue(optimizer.get_auxiliary_parameters().shared)
+        self.assertTrue(optimizer.get_auxiliary_parameters().local)
+        for param in optimizer.get_auxiliary_parameters().shared:
+            tensor = workspace.FetchBlob(param)
+            np.testing.assert_allclose(np.array([1.0]), tensor, atol=1e-5)
+
+
 class TestSgd(OptimizerTestBase, LRModificationTestBase, TestCase):
     def build_optimizer(self, model, **kwargs):
         self._skip_gpu = False
