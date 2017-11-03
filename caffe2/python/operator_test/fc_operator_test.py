@@ -94,6 +94,32 @@ class TestFcOperator(hu.HypothesisTestCase):
                                   threshold=threshold, stepsize=stepsize)
 
 
+    @settings(max_examples=50)
+    @given(n=st.integers(1, 5),
+           m=st.integers(0, 5),
+           k=st.integers(1, 5))
+    def test_fc_transposed(self, n, m, k):
+        X = np.random.rand(m, k).astype(np.float32) - 0.5
+        W = np.random.rand(n, k).astype(np.float32).T - 0.5
+        b = np.random.rand(n).astype(np.float32) - 0.5
+
+        def fc_op(X, W, b):
+            return [np.dot(X, W) + b]
+
+        op = core.CreateOperator(
+            'FCTransposed',
+            ['X', 'W', 'b'],
+            'out',
+        )
+
+        # Check against numpy reference
+        self.assertReferenceChecks(
+            device_option=hu.cpu_do,
+            op=op,
+            inputs=[X, W, b],
+            reference=fc_op,
+        )
+
 if __name__ == "__main__":
     import unittest
     unittest.main()
