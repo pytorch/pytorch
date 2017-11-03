@@ -480,6 +480,9 @@ if WITH_CUDA:
         "torch/csrc/jit/fusion_compiler.cpp",
     ]
     main_sources += split_types("torch/csrc/cuda/Tensor.cpp")
+    if int(CUDA_VERSION.split(".")[0])>=9:
+        extra_link_args.append("-L" + cuda_lib_path)
+        main_libraries += ["cuda", "nvrtc"]
 
 if WITH_NCCL:
     if WITH_SYSTEM_NCCL:
