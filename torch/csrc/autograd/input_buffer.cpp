@@ -1,5 +1,6 @@
 #include "torch/csrc/autograd/input_buffer.h"
 
+#include "torch/csrc/assertions.h"
 #include "torch/csrc/autograd/functions/basic_ops.h"
 #include "torch/csrc/utils/auto_gpu.h"
 
@@ -10,6 +11,7 @@ InputBuffer::InputBuffer(size_t size)
   {}
 
 void InputBuffer::add(size_t pos, Variable var) {
+  TORCH_ASSERT(pos >= 0 && pos < buffer.size());
   if (!var.defined()) {
     return;
   }
