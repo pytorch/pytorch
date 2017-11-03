@@ -50,7 +50,7 @@ def unroll(uf, IndexType, InType, OutType, use_weights, isa):
                         % (regid, regid, regid))
         elif InType == "uint8_t":
             code.append("vop%d = _mm256_fmadd_ps(vwgt,  \
-                   _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(_mm_loadu_si128(reinterpret_cast<const __m128i*>(ip + (%d))))), \
+                   _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(_mm_loadl_epi64(reinterpret_cast<const __m128i*>(ip + (%d))))), \
                    _mm256_add_ps(vop%d, vbio));"
                         % (regid, regid, regid))
         else:
@@ -149,7 +149,7 @@ def generic(IndexType, InType, OutType, use_weights, isa):
         elif InType == "uint8_t":
             code.append("_mm256_storeu_ps(&op[j], \
                    _mm256_fmadd_ps(vwgt, \
-                     _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(_mm_loadu_si128(reinterpret_cast<const __m128i*>(&ip[j])))), \
+                     _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(_mm_loadl_epi64(reinterpret_cast<const __m128i*>(&ip[j])))), \
                      _mm256_add_ps(_mm256_loadu_ps(&op[j]), vbio) ) \
                                    );")
         else:
