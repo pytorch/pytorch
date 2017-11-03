@@ -210,7 +210,7 @@ THC_API void THCTensor_(geev)(THCState *state, THCTensor *re_, THCTensor *rv_, T
   magma_vec_t jobvr = jobvrs[0] == 'N' ? MagmaNoVec : MagmaVec;
   int n = a_->size[0];
 
-  real *a_data = th_magma_malloc_pinned<real>(n * n);
+  real *a_data = th_magma_malloc_pinned<real>((size_t)n * (size_t)n);
   THCTensor_(copyTensor2d)(state, a_data, a_);
 
   real *wr = th_magma_malloc_pinned<real>(n);
@@ -220,7 +220,7 @@ THC_API void THCTensor_(geev)(THCState *state, THCTensor *re_, THCTensor *rv_, T
   int ldvr = 1;
   if (jobvr == MagmaVec)
   {
-    vr_data = th_magma_malloc_pinned<real>(n * n);
+    vr_data = th_magma_malloc_pinned<real>((size_t)n * (size_t)n);
     ldvr = n;
   }
 
@@ -295,12 +295,12 @@ THC_API void THCTensor_(gesvd2)(THCState *state, THCTensor *ru_, THCTensor *rs_,
   int j = (jobz == MagmaAllVec) ? m : k;
   int jv = (jobz == MagmaAllVec) ? n : k;
 
-  real *a_data = th_magma_malloc_pinned<real>(m * n);
+  real *a_data = th_magma_malloc_pinned<real>((size_t)m * (size_t)n);
   THCTensor_(copyTensor2d)(state, a_data, a);
 
   real *rs_data = th_magma_malloc_pinned<real>(k);
-  real *ru_data = th_magma_malloc_pinned<real>(m * j);
-  real *rv_data = th_magma_malloc_pinned<real>(n * n);
+  real *ru_data = th_magma_malloc_pinned<real>((size_t)m * (size_t)j);
+  real *rv_data = th_magma_malloc_pinned<real>((size_t)n * (size_t)n);
 
   real wkopt;
   int info;
@@ -313,7 +313,7 @@ THC_API void THCTensor_(gesvd2)(THCState *state, THCTensor *ru_, THCTensor *rs_,
 
   int lwork = (int) wkopt;
   real *work_data = th_magma_malloc_pinned<real>(lwork);
-  int *iwork = th_magma_malloc_pinned<int>(8 * k);
+  int *iwork = th_magma_malloc_pinned<int>(8 * (size_t)k);
 
 #if defined(THC_REAL_IS_FLOAT)
   magma_sgesdd(jobz, m, n, a_data, m, rs_data, ru_data, m, rv_data, n, work_data, lwork, iwork, &info);
