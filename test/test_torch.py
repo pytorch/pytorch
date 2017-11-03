@@ -4511,6 +4511,19 @@ class TestTorch(TestCase):
             for i in range(len(x)):
                 self.assertEqual(geq2_x[i], geq2_array[i])
 
+    def test_error_msg_type_translation(self):
+        with self.assertRaisesRegex(
+                RuntimeError,
+                # message includes both torch.DoubleTensor and torch.LongTensor
+                '(?=.*torch\.DoubleTensor)(?=.*torch\.LongTensor)'):
+
+            # Calls model with a DoubleTensor input but LongTensor weights
+            input = torch.autograd.Variable(torch.randn(1, 1, 1, 6).double())
+            weight = torch.zeros(1, 1, 1, 3).long()
+            model = torch.nn.Conv2d(1, 1, (1, 3), stride=1, padding=0, bias=False)
+            model.weight.data = weight
+            out = model(input)
+
     def test_comparison_ops(self):
         x = torch.randn(5, 5)
         y = torch.randn(5, 5)
