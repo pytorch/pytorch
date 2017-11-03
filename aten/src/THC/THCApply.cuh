@@ -655,5 +655,6 @@ bool THC_pointwiseApply3(THCState* state,
 }
 
 #undef THC_APPLY_THREADS_PER_BLOCK
+#undef THC_APPLY_BLOCKS_PER_SM
 
 #endif // THC_APPLY_INC
