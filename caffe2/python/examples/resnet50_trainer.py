@@ -28,6 +28,7 @@ import os
 from caffe2.python import core, workspace, experiment_util, data_parallel_model
 from caffe2.python import dyndep, optimizer
 from caffe2.python import timeout_guard, model_helper, brew
+from caffe2.proto import caffe2_pb2
 
 import caffe2.python.models.resnet as resnet
 from caffe2.python.modeling.initializers import Initializer, pFP16Initializer
@@ -150,8 +151,17 @@ def LoadModel(path, model):
 
     predict_init_net.RunAllOnGPU()
     init_net.RunAllOnGPU()
+
     assert workspace.RunNetOnce(predict_init_net)
     assert workspace.RunNetOnce(init_net)
+
+    # Hack: fix iteration counter which is in CUDA context after load model
+    itercnt = workspace.FetchBlob("optimizer_iteration")
+    workspace.FeedBlob(
+        "optimizer_iteration",
+        itercnt,
+        device_option=core.DeviceOption(caffe2_pb2.CPU, 0)
+    )
 
 
 def RunEpoch(
