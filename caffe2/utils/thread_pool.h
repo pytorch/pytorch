@@ -24,7 +24,9 @@
 #include <thread>
 #include <utility>
 
-class TaskThreadPool{
+namespace caffe2 {
+
+class TaskThreadPool {
  private:
     struct task_element_t {
         bool run_with_id;
@@ -85,6 +87,10 @@ class TaskThreadPool{
         tasks_.push(task_element_t(static_cast<std::function< void() >>(task)));
         complete_ = false;
         condition_.notify_one();
+    }
+
+    void run(const std::function<void()>& func) {
+      runTask(func);
     }
 
     template <typename Task>
@@ -157,5 +163,7 @@ class TaskThreadPool{
         }  // while running_
     }
 };
+
+} // namespace caffe2
 
 #endif

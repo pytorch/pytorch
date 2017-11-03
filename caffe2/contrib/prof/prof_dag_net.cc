@@ -59,12 +59,12 @@ void ProfDAGNet::ValidateOpTensorDevices() {
   }
 }
 
-bool ProfDAGNet::RunAsync() {
+bool ProfDAGNet::DoRunAsync() {
   runs_++;
 
   // don't collect statistics from first run
   if (runs_ <= 1) {
-    bool success = DAGNetBase::RunAsync();
+    bool success = DAGNetBase::DoRunAsync();
     ValidateOpTensorDevices();
     return success;
   }
@@ -79,7 +79,7 @@ bool ProfDAGNet::RunAsync() {
 
   // create a copy and later collect the differences
   vector<Stats> time_per_op_run(time_per_op_);
-  bool success = DAGNetBase::RunAsync();
+  bool success = DAGNetBase::DoRunAsync();
 
   // aggregate this run's stats per operator type
   CaffeMap<string, float> time_per_op_type_run;
@@ -118,7 +118,7 @@ ProfDAGProtos ProfDAGNet::GetOperatorStats() {
   return prof_dag_protos;
 }
 
-bool ProfDAGNet::RunAt(const std::vector<int>& chain) {
+bool ProfDAGNet::RunAt(int /* unused */, const std::vector<int>& chain) {
   bool success = true;
   Timer timer;
   for (const auto idx : chain) {

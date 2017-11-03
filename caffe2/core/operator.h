@@ -121,20 +121,36 @@ class OperatorBase : public Observable<OperatorBase> {
   inline const vector<Blob*>& Outputs() { return outputs_; }
   vector<TensorShape> InputTensorShapes();
 
-  virtual void WaitEvent(const Event& ev) {
-    CAFFE_NOT_IMPLEMENTED;
+  virtual void WaitEvent(const Event& ev, int stream_id = -1) {
+    ev.Finish();
   }
 
-  inline void Wait(const OperatorBase& other) {
-    WaitEvent(other.event());
+  inline void Wait(const OperatorBase& other, int stream_id = -1) {
+    WaitEvent(other.event(), stream_id);
   }
 
-  virtual void Record() {
-    CAFFE_NOT_IMPLEMENTED;
+  virtual void WaitEvents(
+      const std::vector<const Event*>& events,
+      int stream_id = -1) {
+    for (const auto& ev : events) {
+      ev->Finish();
+    }
+  }
+
+  virtual void Finish() {
+    event_.Finish();
   }
 
   virtual bool Run(int /* unused */ /*stream_id*/ = 0) {
     CAFFE_NOT_IMPLEMENTED;
+  }
+
+  virtual bool HasAsyncPart() const {
+    return false;
+  }
+
+  virtual bool SupportsAsyncScheduling() const {
+    return false;
   }
 
   // RunAsync, if implemenented by the specific operators, will schedule the
@@ -213,6 +229,14 @@ class OperatorBase : public Observable<OperatorBase> {
     return event_;
   }
 
+  Event& event() {
+    return event_;
+  }
+
+  void ResetEvent() {
+    event_.Reset();
+  }
+
   const std::string& type() {
     CAFFE_ENFORCE(operator_def_.get() != nullptr);
     return operator_def_->type();
@@ -240,6 +264,10 @@ class OperatorBase : public Observable<OperatorBase> {
   int net_position_{kNoNetPositionSet};
 
  protected:
+  virtual void RecordEvent(const char* err_msg = nullptr) {
+    CAFFE_NOT_IMPLEMENTED;
+  }
+
   // An event used by asynchronous execution.
   Event event_;
 
@@ -273,7 +301,6 @@ class OperatorBase : public Observable<OperatorBase> {
 #define OUTPUT_TAGS(first_input, ...)                                          \
   enum _OutputTags { first_input = 0, __VA_ARGS__ }
 
-
 // Operator is the class that you usually want to derive, if your operator will
 // run on different devices. You should then implement the RunOnDevice()
 // function.
@@ -281,8 +308,7 @@ template <class Context>
 class Operator : public OperatorBase {
  public:
   explicit Operator(const OperatorDef& operator_def, Workspace* ws)
-      : OperatorBase(operator_def, ws),
-        context_(operator_def.device_option()) {
+      : OperatorBase(operator_def, ws), context_(operator_def.device_option()) {
     // In the constructor, we switch to the device so that the child class
     // constructors will run on that device.
     context_.SwitchToDevice(0);
@@ -290,24 +316,34 @@ class Operator : public OperatorBase {
   ~Operator() noexcept override {}
 
   inline const Tensor<Context>& Input(int idx) {
-    return OperatorBase::template Input<Tensor<Context> >(idx); }
+    return OperatorBase::template Input<Tensor<Context>>(idx);
+  }
   inline Tensor<Context>* Output(int idx) {
     return OperatorBase::template Output<Tensor<Context>>(idx);
   }
 
-  void WaitEvent(const Event& ev) final {
-    context_.SwitchToDevice();
+  void WaitEvent(const Event& ev, int stream_id = -1) final {
+    if (stream_id >= 0) {
+      context_.SwitchToDevice(stream_id);
+    }
     context_.WaitEvent(ev);
   }
 
-  void Record() final {
-    context_.SwitchToDevice();
-    context_.Record(&event_);
+  void WaitEvents(const std::vector<const Event*>& events, int stream_id = -1)
+      final {
+    if (stream_id >= 0) {
+      context_.SwitchToDevice(stream_id);
+    }
+    for (const auto& ev : events) {
+      context_.WaitEvent(*ev);
+    }
   }
 
   // The run function of Operator switches to the device, and then carries out
   // the actual computation with RunOnDevice(). You should implement RunOnDevice
   // instead of Run().
+  // Note: Run does not update operator's event and can be used only with
+  // non-async executors that do not rely on events
   bool Run(int stream_id = 0) final {
     try {
       StartAllObservers();
@@ -340,10 +376,18 @@ class Operator : public OperatorBase {
     try {
       context_.SwitchToDevice(stream_id);
       auto result = RunOnDevice();
-      if (!result) {
+      if (result) {
+        if (HasAsyncPart()) {
+          RecordEvent();
+        } else {
+          // Manually set CPU operator's event status to finished,
+          // unless this is an async CPU operator
+          event().SetFinished();
+        }
+      } else {
+        RecordEvent(getErrorMsg().c_str());
         this->RecordLastFailedOpNetPosition();
       }
-      context_.Record(&event_);
       return result;
     } catch (EnforceNotMet& err) {
       if (has_debug_def()) {
@@ -351,9 +395,11 @@ class Operator : public OperatorBase {
             "Error from operator: \n" + ProtoDebugString(debug_def()));
         AddRelatedBlobInfo(&err);
       }
+      RecordEvent(err.what());
       this->RecordLastFailedOpNetPosition();
       throw;
     } catch (...) {
+      RecordEvent(getErrorMsg().c_str());
       this->RecordLastFailedOpNetPosition();
       throw;
     }
@@ -361,7 +407,47 @@ class Operator : public OperatorBase {
 
   virtual bool RunOnDevice() = 0;
 
+  // Returns whether operator has async on device part.
+  // CUDA operators by default have async parts, CPU operators by default
+  // don't have async parts and are finished after RunOnDevice call.
+  // Events of operators that don't have async parts are automatically set
+  // to finished state by RunAsync.
+  // Defaulting to the value from context (true for CUDA, false for CPU).
+  // Override in case of async CPU operators
+  bool HasAsyncPart() const override {
+    return context_.HasAsyncPartDefault();
+  }
+
+  // Returns whether operator's RunOnDevice schedules async on device part and
+  // can be run without waiting for parent operator's async part to be finished
+  // on the same device.
+  // Note: when true, RunOnDevice must not access the content of the input blobs
+  // as they might not be computed yet
+  // Note: when true, operator's device needs to support async scheduling:
+  //  - supports concept of streams: async ops scheduled on the same stream are
+  //    guaranteed to be executed in the same order they were scheduled
+  //  - provides non-blocking cross device/cross stream synchronization
+  //    primitives
+  //
+  // By default, assuming an op with an async part can be scheduled
+  // asynchronously if device supports async scheduling
+  bool SupportsAsyncScheduling() const override {
+    return HasAsyncPart() && context_.SupportsAsyncScheduling();
+  }
+
  protected:
+  void RecordEvent(const char* err_msg = nullptr) final {
+    context_.Record(&event_, err_msg);
+  }
+
+  std::string getErrorMsg() {
+    if (has_debug_def()) {
+      return "Error from operator: " + ProtoDebugString(debug_def());
+    } else {
+      return "Error from operator: no op def";
+    }
+  }
+
   Context context_;
 };
 
@@ -533,10 +619,17 @@ CAFFE2_DEFINE_TENSOR_TYPES_DISPATCHER(
 //     registry function.
 // (2) Then, one can call the operator registry function to further create the
 //     operators.
-typedef Registry<std::string, OperatorBase, const OperatorDef&, Workspace*>
+typedef Registry<
+    std::string,
+    std::unique_ptr<OperatorBase>,
+    const OperatorDef&,
+    Workspace*>
     OperatorRegistry;
-typedef Registry<std::string, OperatorBase, const OperatorDef&, Workspace*>* (
-    *RegistryFunction)();
+typedef Registry<
+    std::string,
+    std::unique_ptr<OperatorBase>,
+    const OperatorDef&,
+    Workspace*>* (*RegistryFunction)();
 std::map<int32_t, OperatorRegistry*>* gDeviceTypeRegistry();
 
 struct DeviceTypeRegisterer {

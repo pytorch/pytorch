@@ -57,7 +57,7 @@ SimpleNet::SimpleNet(
   }
 }
 
-bool SimpleNet::RunAsync() {
+bool SimpleNet::DoRunAsync() {
   StartAllObservers();
 
   const auto& net_name = name_.c_str();
@@ -122,6 +122,9 @@ vector<float> SimpleNet::TEST_Benchmark(
   CaffeMap<string, float> time_per_op_type;
   if (run_individual) {
     for (int i = 0; i < main_runs; ++i) {
+      for (auto& op : operators_) {
+        op->ResetEvent();
+      }
       int idx = 0;
       for (auto& op : operators_) {
         const string& op_type = op->debug_def().type();

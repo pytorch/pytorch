@@ -391,6 +391,17 @@ class RecurrentNetworkExecutorBase {
     }
   }
 
+  void ResetEvents() {
+    for (auto time_idx = 0; time_idx < timestep_ops_.size(); ++time_idx) {
+      for (auto op_idx = 0; op_idx < timestep_ops_[time_idx].size(); ++op_idx) {
+        auto op = timestep_ops_[time_idx][op_idx].op;
+        if (op) {
+          op->ResetEvent();
+        }
+      }
+    }
+  }
+
   virtual void AnalyzeOps() {}
 
   virtual bool ignoreLinkDependencies() = 0;

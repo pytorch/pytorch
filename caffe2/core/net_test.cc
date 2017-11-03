@@ -148,7 +148,7 @@ void testExecution(std::unique_ptr<NetBase>& net, int num_ops) {
 
 void checkChainingAndRun(
     const char* spec,
-    const DAGNetBase::ExecutionChains& expected) {
+    const dag_utils::ExecutionChains& expected) {
   Workspace ws;
   ws.CreateBlob("in");
   NetDef net_def;

@@ -53,10 +53,10 @@ inline void PrintOffendingKey(const string& key) {
  * helper macros below to declare specific registries as well as registering
  * objects.
  */
-template <class SrcType, class ObjectType, class... Args>
+template <class SrcType, class ObjectPtrType, class... Args>
 class Registry {
  public:
-  typedef std::function<std::unique_ptr<ObjectType> (Args ...)> Creator;
+  typedef std::function<ObjectPtrType(Args...)> Creator;
 
   Registry() : registry_() {}
 
@@ -83,7 +83,7 @@ class Registry {
 
   inline bool Has(const SrcType& key) { return (registry_.count(key) != 0); }
 
-  unique_ptr<ObjectType> Create(const SrcType& key, Args ... args) {
+  ObjectPtrType Create(const SrcType& key, Args... args) {
     if (registry_.count(key) == 0) {
       // Returns nullptr if the key is not registered.
       return nullptr;
@@ -122,23 +122,24 @@ class Registry {
   DISABLE_COPY_AND_ASSIGN(Registry);
 };
 
-template <class SrcType, class ObjectType, class... Args>
+template <class SrcType, class ObjectPtrType, class... Args>
 class Registerer {
  public:
-  Registerer(const SrcType& key,
-             Registry<SrcType, ObjectType, Args...>* registry,
-             typename Registry<SrcType, ObjectType, Args...>::Creator creator,
-             const string& help_msg="") {
+  Registerer(
+      const SrcType& key,
+      Registry<SrcType, ObjectPtrType, Args...>* registry,
+      typename Registry<SrcType, ObjectPtrType, Args...>::Creator creator,
+      const string& help_msg = "") {
     registry->Register(key, creator, help_msg);
   }
 
   template <class DerivedType>
-  static unique_ptr<ObjectType> DefaultCreator(Args ... args) {
+  static ObjectPtrType DefaultCreator(Args... args) {
     // TODO(jiayq): old versions of NVCC does not handle make_unique well
     // so we are forced to use a unique_ptr constructor here. Check if it is
     // fine to use make_unique in the future.
     // return make_unique<DerivedType>(args...);
-    return std::unique_ptr<ObjectType>(new DerivedType(args...));
+    return ObjectPtrType(new DerivedType(args...));
   }
 };
 
@@ -160,16 +161,18 @@ class Registerer {
  * declaration, as well as creating a convenient typename for its corresponding
  * registerer.
  */
-#define CAFFE_DECLARE_TYPED_REGISTRY(RegistryName, SrcType, ObjectType, ...) \
-  Registry<SrcType, ObjectType, ##__VA_ARGS__>* RegistryName();              \
-  typedef Registerer<SrcType, ObjectType, ##__VA_ARGS__>                     \
+#define CAFFE_DECLARE_TYPED_REGISTRY(                                    \
+    RegistryName, SrcType, ObjectType, PtrType, ...)                     \
+  Registry<SrcType, PtrType<ObjectType>, ##__VA_ARGS__>* RegistryName(); \
+  typedef Registerer<SrcType, PtrType<ObjectType>, ##__VA_ARGS__>        \
       Registerer##RegistryName;
 
-#define CAFFE_DEFINE_TYPED_REGISTRY(RegistryName, SrcType, ObjectType, ...) \
-  Registry<SrcType, ObjectType, ##__VA_ARGS__>* RegistryName() {            \
-    static Registry<SrcType, ObjectType, ##__VA_ARGS__>* registry =         \
-        new Registry<SrcType, ObjectType, ##__VA_ARGS__>();                 \
-    return registry;                                                        \
+#define CAFFE_DEFINE_TYPED_REGISTRY(                                         \
+    RegistryName, SrcType, ObjectType, PtrType, ...)                         \
+  Registry<SrcType, PtrType<ObjectType>, ##__VA_ARGS__>* RegistryName() {    \
+    static Registry<SrcType, PtrType<ObjectType>, ##__VA_ARGS__>* registry = \
+        new Registry<SrcType, PtrType<ObjectType>, ##__VA_ARGS__>();         \
+    return registry;                                                         \
   }
 
 // Note(Yangqing): The __VA_ARGS__ below allows one to specify a templated
@@ -194,11 +197,19 @@ class Registerer {
 // type, because that is the most commonly used cases.
 #define CAFFE_DECLARE_REGISTRY(RegistryName, ObjectType, ...) \
   CAFFE_DECLARE_TYPED_REGISTRY(                               \
-      RegistryName, std::string, ObjectType, ##__VA_ARGS__)
+      RegistryName, std::string, ObjectType, std::unique_ptr, ##__VA_ARGS__)
 
 #define CAFFE_DEFINE_REGISTRY(RegistryName, ObjectType, ...) \
   CAFFE_DEFINE_TYPED_REGISTRY(                               \
-      RegistryName, std::string, ObjectType, ##__VA_ARGS__)
+      RegistryName, std::string, ObjectType, std::unique_ptr, ##__VA_ARGS__)
+
+#define CAFFE_DECLARE_SHARED_REGISTRY(RegistryName, ObjectType, ...) \
+  CAFFE_DECLARE_TYPED_REGISTRY(                                      \
+      RegistryName, std::string, ObjectType, std::shared_ptr, ##__VA_ARGS__)
+
+#define CAFFE_DEFINE_SHARED_REGISTRY(RegistryName, ObjectType, ...) \
+  CAFFE_DEFINE_TYPED_REGISTRY(                                      \
+      RegistryName, std::string, ObjectType, std::shared_ptr, ##__VA_ARGS__)
 
 // CAFFE_REGISTER_CREATOR and CAFFE_REGISTER_CLASS are hard-wired to use string
 // as the key

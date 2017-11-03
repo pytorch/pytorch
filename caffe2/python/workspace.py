@@ -51,6 +51,7 @@ RootFolder = C.root_folder
 Workspaces = C.workspaces
 BenchmarkNet = C.benchmark_net
 Predictor = C.Predictor
+GetStats = C.get_stats
 
 operator_tracebacks = defaultdict(dict)
 

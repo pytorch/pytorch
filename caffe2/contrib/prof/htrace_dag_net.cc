@@ -42,14 +42,6 @@ class HTraceDAGNet : public DAGNetBase {
     return false;
   }
 
-  bool RunAsync() override {
-    htrace::Scope run_scope(
-        htrace_tracer_,
-        htrace_root_scope_.GetSpanId(),
-        "run-scope-" + caffe2::to_string(run_count_++));
-    return DAGNetBase::RunAsync();
-  }
-
   ~HTraceDAGNet() {
     VLOG(1) << "Closing all htrace scopes for workers";
 
@@ -63,7 +55,15 @@ class HTraceDAGNet : public DAGNetBase {
   }
 
  protected:
-  bool RunAt(const std::vector<int>& chain) override {
+  bool DoRunAsync() override {
+    htrace::Scope run_scope(
+        htrace_tracer_,
+        htrace_root_scope_.GetSpanId(),
+        "run-scope-" + caffe2::to_string(run_count_++));
+    return DAGNetBase::DoRunAsync();
+  }
+
+  bool RunAt(int /* unused */, const std::vector<int>& chain) override {
     std::thread::id thread_id = std::this_thread::get_id();
     auto worker_scope = htrace_worker_scope_map_[thread_id];
 

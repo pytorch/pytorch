@@ -109,7 +109,8 @@ void TensorSerializer<CPUContext>::StoreDeviceDetail(
 CAFFE_DEFINE_TYPED_REGISTRY(
     BlobSerializerRegistry,
     CaffeTypeId,
-    BlobSerializerBase);
+    BlobSerializerBase,
+    std::unique_ptr);
 
 CAFFE_DEFINE_REGISTRY(BlobDeserializerRegistry, BlobDeserializerBase);
 

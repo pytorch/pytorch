@@ -23,6 +23,7 @@
 #include "caffe2/core/db.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/core/predictor.h"
+#include "caffe2/core/stats.h"
 #include "caffe2/core/transform.h"
 #include "caffe2/mkl/mkl_utils.h"
 #include "caffe2/observers/time_observer.h"
@@ -51,8 +52,16 @@ static std::string gCurrentWorkspaceName;
 BlobFetcherBase::~BlobFetcherBase() {}
 BlobFeederBase::~BlobFeederBase() {}
 
-CAFFE_DEFINE_TYPED_REGISTRY(BlobFetcherRegistry, CaffeTypeId, BlobFetcherBase);
-CAFFE_DEFINE_TYPED_REGISTRY(BlobFeederRegistry, int, BlobFeederBase);
+CAFFE_DEFINE_TYPED_REGISTRY(
+    BlobFetcherRegistry,
+    CaffeTypeId,
+    BlobFetcherBase,
+    std::unique_ptr);
+CAFFE_DEFINE_TYPED_REGISTRY(
+    BlobFeederRegistry,
+    int,
+    BlobFeederBase,
+    std::unique_ptr);
 
 REGISTER_BLOB_FETCHER((TypeMeta::Id<TensorCPU>()), TensorFetcher<CPUContext>);
 REGISTER_BLOB_FEEDER(CPU, TensorFeeder<CPUContext>);
@@ -1260,6 +1269,15 @@ void addGlobalMethods(py::module& m) {
       out_res.push_back(py::bytes(protob));
     }
     return std::make_pair(in_res, out_res);
+  });
+  m.def("get_stats", []() {
+    ExportedStatList stats;
+    StatRegistry::get().publish(stats);
+    std::unordered_map<std::string, int> stats_map;
+    for (const auto& stat : stats) {
+      stats_map[stat.key] = stat.value;
+    }
+    return stats_map;
   });
 
 #define CAFFE2_CPU_FEATURE_SUPPORT(feature) \

@@ -38,18 +38,6 @@ class HTraceAsyncDAGNet : public AsyncDAGNet {
     }
   }
 
-  bool SupportsAsync() override {
-    return true;
-  }
-
-  bool RunAsync() override {
-    htrace::Scope run_scope(
-        htrace_tracer_,
-        htrace_root_scope_.GetSpanId(),
-        "run-scope-" + caffe2::to_string(run_count_++));
-    return AsyncDAGNet::RunAsync();
-  }
-
   ~HTraceAsyncDAGNet() {
     VLOG(1) << "Closing all htrace scopes for workers";
 
@@ -63,6 +51,14 @@ class HTraceAsyncDAGNet : public AsyncDAGNet {
   }
 
  protected:
+  bool DoRunAsync() override {
+    htrace::Scope run_scope(
+        htrace_tracer_,
+        htrace_root_scope_.GetSpanId(),
+        "run-scope-" + caffe2::to_string(run_count_++));
+    return AsyncDAGNet::DoRunAsync();
+  }
+
   htrace::Conf htrace_conf_{defaultHTraceConf(name_)};
   htrace::Tracer htrace_tracer_{"htrace-tracer", htrace_conf_};
   htrace::Sampler htrace_sampler_{&htrace_tracer_, htrace_conf_};

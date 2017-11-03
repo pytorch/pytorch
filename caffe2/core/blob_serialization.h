@@ -43,7 +43,8 @@ constexpr auto kChunkIdSeparator = "#%";
 CAFFE_DECLARE_TYPED_REGISTRY(
     BlobSerializerRegistry,
     CaffeTypeId,
-    BlobSerializerBase);
+    BlobSerializerBase,
+    std::unique_ptr);
 #define REGISTER_BLOB_SERIALIZER(id, ...) \
   CAFFE_REGISTER_TYPED_CLASS(BlobSerializerRegistry, id, __VA_ARGS__)
 // Creates an operator with the given operator definition.

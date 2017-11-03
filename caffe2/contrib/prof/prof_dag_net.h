@@ -41,11 +41,11 @@ class ProfDAGNet : public DAGNetBase {
   bool SupportsAsync() override {
     return false;
   }
-  bool RunAsync() override;
   ProfDAGProtos GetOperatorStats();
 
  protected:
-  bool RunAt(const std::vector<int>& chain) override;
+  bool DoRunAsync() override;
+  bool RunAt(int chain_id, const std::vector<int>& chain) override;
   void PrintStats();
   void ValidateOpTensorDevices();
   ProfDAGProto ProtoMsg(std::pair<std::string, Stats> op_stat) const;
