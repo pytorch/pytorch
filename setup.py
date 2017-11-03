@@ -518,6 +518,9 @@ if WITH_CUDA:
         include_dirs.append(nvtoolext_include_path)
 
         nvtoolext_lib_name = 'nvToolsExt64_1'
+
+        # MSVC doesn't support runtime symbol resolving, `nvrtc` and `cuda` should be linked
+        main_libraries += ['nvrtc', 'cuda']
     else:
         cuda_lib_dirs = ['lib64', 'lib']
 
@@ -563,7 +566,8 @@ if WITH_CUDNN:
     library_dirs.append(CUDNN_LIB_DIR)
     # NOTE: these are at the front, in case there's another cuDNN in CUDA path
     include_dirs.insert(0, CUDNN_INCLUDE_DIR)
-    extra_link_args.insert(0, '-Wl,-rpath,' + CUDNN_LIB_DIR)
+    if not IS_WINDOWS:
+        extra_link_args.insert(0, '-Wl,-rpath,' + CUDNN_LIB_DIR)
     main_sources += [
         "torch/csrc/cudnn/BatchNorm.cpp",
         "torch/csrc/cudnn/Conv.cpp",
@@ -650,7 +654,7 @@ extensions.append(THNN)
 
 if WITH_CUDA:
     thnvrtc_link_flags = extra_link_args + [make_relative_rpath('lib')]
-    if platform.system() == 'Linux':
+    if IS_LINUX:
         thnvrtc_link_flags = ['-Wl,--no-as-needed'] + thnvrtc_link_flags
     THNVRTC = Extension("torch._nvrtc",
                         libraries=['nvrtc', 'cuda'],
