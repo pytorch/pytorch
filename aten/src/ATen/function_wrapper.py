@@ -519,7 +519,14 @@ def create_generic(top_env, declarations):
             return argument
 
         result = pos_args + kwd_args
-        return [add_type_as_dynamic_type(argument, option) for argument in result]
+        result = [add_type_as_dynamic_type(argument, option) for argument in result]
+
+        def native_translate_formals(argument, option):
+            argument['type'] = {'Tensor': 'const Tensor &'}.get(argument['type'], argument['type'])
+            return argument
+
+        result = [native_translate_formals(argument, option) for argument in result]
+        return result
 
     def native_get_return_types(option):
         ret = option['return']
