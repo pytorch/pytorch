@@ -68,8 +68,8 @@ THC_API void THCTensor_(gesv)(THCState *state, THCTensor *rb_, THCTensor *ra_, T
   THArgCheck(a_->size[0] == a_->size[1], 1, "A should be square");
   THArgCheck(b_->size[0] == a_->size[0], 2, "A,b size incompatible");
 
-  int n = a_->size[0];
-  int nrhs = b_->size[1];
+  int64_t n = a_->size[0];
+  int64_t nrhs = b_->size[1];
 
   THCTensor *a = THCTensor_(newColumnMajor)(state, ra_, a_);
   THCTensor *b = THCTensor_(newColumnMajor)(state, rb_, b_);
@@ -111,9 +111,9 @@ THC_API void THCTensor_(gels)(THCState *state, THCTensor *rb_, THCTensor *ra_, T
   real *a_data = THCTensor_(data)(state, a);
   real *b_data = THCTensor_(data)(state, b);
 
-  int m = a->size[0];
-  int n = a->size[1];
-  int nrhs = b->size[1];
+  int64_t m = a->size[0];
+  int64_t n = a->size[1];
+  int64_t nrhs = b->size[1];
   real wkopt;
 
   int info;
@@ -146,8 +146,8 @@ THC_API void THCTensor_(gels)(THCState *state, THCTensor *rb_, THCTensor *ra_, T
 THC_API void THCTensor_(syev)(THCState *state, THCTensor *re_, THCTensor *rv_, THCTensor *a, const char *jobzs, const char *uplos)
 {
 #ifdef USE_MAGMA
-  int n = a->size[0];
-  int lda = n;
+  int64_t n = a->size[0];
+  int64_t lda = n;
 
   magma_uplo_t uplo = uplos[0] == 'U' ?  MagmaUpper : MagmaLower;
   magma_vec_t jobz = jobzs[0] == 'N' ? MagmaNoVec : MagmaVec;
@@ -208,7 +208,7 @@ THC_API void THCTensor_(geev)(THCState *state, THCTensor *re_, THCTensor *rv_, T
   THArgCheck(a_->size[0] == a_->size[1], 3, "A should be square");
 
   magma_vec_t jobvr = jobvrs[0] == 'N' ? MagmaNoVec : MagmaVec;
-  int n = a_->size[0];
+  int64_t n = a_->size[0];
 
   real *a_data = th_magma_malloc_pinned<real>(n * n);
   THCTensor_(copyTensor2d)(state, a_data, a_);
@@ -217,7 +217,7 @@ THC_API void THCTensor_(geev)(THCState *state, THCTensor *re_, THCTensor *rv_, T
   real *wi = th_magma_malloc_pinned<real>(n);
 
   real *vr_data = NULL;
-  int ldvr = 1;
+  int64_t ldvr = 1;
   if (jobvr == MagmaVec)
   {
     vr_data = th_magma_malloc_pinned<real>(n * n);
@@ -289,11 +289,11 @@ THC_API void THCTensor_(gesvd2)(THCState *state, THCTensor *ru_, THCTensor *rs_,
   magma_vec_t jobz = jobus[0] == 'A' ? MagmaAllVec : jobus[0] == 'S' ? MagmaSomeVec : jobus[0] == 'O' ? MagmaOverwriteVec : MagmaNoVec;
 
   int iunused[1];
-  int m = a->size[0];
-  int n = a->size[1];
-  int k = m < n ? m : n;
-  int j = (jobz == MagmaAllVec) ? m : k;
-  int jv = (jobz == MagmaAllVec) ? n : k;
+  int64_t m = a->size[0];
+  int64_t n = a->size[1];
+  int64_t k = m < n ? m : n;
+  int64_t j = (jobz == MagmaAllVec) ? m : k;
+  int64_t jv = (jobz == MagmaAllVec) ? n : k;
 
   real *a_data = th_magma_malloc_pinned<real>(m * n);
   THCTensor_(copyTensor2d)(state, a_data, a);
@@ -352,7 +352,7 @@ THC_API void THCTensor_(getri)(THCState *state, THCTensor *ra_, THCTensor *a)
 
 #ifdef USE_MAGMA
   int info;
-  int n = a->size[0];
+  int64_t n = a->size[0];
   int lwork = n * magma_get_sgetri_nb(n);
 
   THCTensor *input = THCTensor_(newColumnMajor)(state, ra_, a);
@@ -391,7 +391,7 @@ THC_API void THCTensor_(getri)(THCState *state, THCTensor *ra_, THCTensor *a)
   magma_free_pinned(ipiv);
   THCTensor_(freeCopyTo)(state, input, ra_);
 #else
-  int n = a->size[0];
+  int64_t n = a->size[0];
 
   // input
   THCTensor *input = THCTensor_(newColumnMajor)(state, a, a);
@@ -482,7 +482,7 @@ THC_API void THCTensor_(potri)(THCState *state, THCTensor *ra_, THCTensor *a, co
   THArgCheck(a->nDimension == 2, 2, "A should be 2 dimensional");
   THArgCheck(a->size[0] == a->size[1], 2, "A should be square");
 
-  int n = a->size[0];
+  int64_t n = a->size[0];
   magma_uplo_t ul = uplo[0] == 'U' ?  MagmaUpper : MagmaLower;
 
   THCTensor *input = THCTensor_(newColumnMajor)(state, ra_, a);
@@ -522,7 +522,7 @@ THC_API void THCTensor_(potrf)(THCState *state, THCTensor *ra_, THCTensor *a, co
   THArgCheck(a->nDimension == 2, 2, "A should be 2 dimensional");
   THArgCheck(a->size[0] == a->size[1], 2, "A should be square");
 
-  int n = a->size[0];
+  int64_t n = a->size[0];
   magma_uplo_t ul = uplo[0] == 'U' ?  MagmaUpper : MagmaLower;
 
   THCTensor *input = THCTensor_(newColumnMajor)(state, ra_, a);
@@ -557,8 +557,8 @@ THC_API void THCTensor_(potrs)(THCState *state, THCTensor *rb_, THCTensor *b, TH
 #ifdef USE_MAGMA
   THArgCheck(a->size[0] == a->size[1], 2, "A should be square");
 
-  int n = a->size[0];
-  int nrhs = b->size[1];
+  int64_t n = a->size[0];
+  int64_t nrhs = b->size[1];
   magma_uplo_t ul = uplo[0] == 'U' ?  MagmaUpper : MagmaLower;
 
   THCTensor *b_ = THCTensor_(newColumnMajor)(state, rb_, b);
@@ -590,21 +590,21 @@ THC_API void THCTensor_(qr)(THCState *state, THCTensor *rq_, THCTensor *rr_, THC
   THArgCheck(a_->nDimension == 2, 2, "A should be 2 dimensional");
 
   THCTensor *a = THCTensor_(newColumnMajor)(state, rr_, a_);
-  int m = a->size[0];
-  int n = a->size[1];
-  int k = (m < n ? m : n);
+  int64_t m = a->size[0];
+  int64_t n = a->size[1];
+  int64_t k = (m < n ? m : n);
 
 #ifdef MAGMA_V2
 #if defined(THC_REAL_IS_FLOAT)
-  int nb = magma_get_sgeqrf_nb(m, n);
+  int64_t nb = magma_get_sgeqrf_nb(m, n);
 #else
-  int nb = magma_get_dgeqrf_nb(m, n);
+  int64_t nb = magma_get_dgeqrf_nb(m, n);
 #endif
 #else
 #if defined(THC_REAL_IS_FLOAT)
-  int nb = magma_get_sgeqrf_nb(m);
+  int64_t nb = magma_get_sgeqrf_nb(m);
 #else
-  int nb = magma_get_dgeqrf_nb(m);
+  int64_t nb = magma_get_dgeqrf_nb(m);
 #endif
 #endif
 
