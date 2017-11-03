@@ -406,13 +406,6 @@ if IS_DARWIN:
     NCCL_LIB = os.path.join(lib_path, 'libnccl.1.dylib')
 
 if IS_WINDOWS:
-    TH_LIB = os.path.join(lib_path, 'TH.lib')
-    THS_LIB = os.path.join(lib_path, 'THS.lib')
-    THC_LIB = os.path.join(lib_path, 'THC.lib')
-    THCS_LIB = os.path.join(lib_path, 'THCS.lib')
-    THNN_LIB = os.path.join(lib_path, 'THNN.lib')
-    THCUNN_LIB = os.path.join(lib_path, 'THCUNN.lib')
-    THPP_LIB = os.path.join(lib_path, 'THPP.lib')
     ATEN_LIB = os.path.join(lib_path, 'ATen.lib')
     NANOPB_STATIC_LIB = os.path.join(lib_path, 'protobuf-nanopb.lib')
 
