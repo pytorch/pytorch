@@ -24,6 +24,7 @@ from caffe2.python.helpers.arg_scope import get_current_scope
 from caffe2.python import schema
 from caffe2.python.layers.layers import (
     get_categorical_limit,
+    get_key,
     IdList,
     IdScoreList,
     LayerPsParam,
@@ -67,7 +68,9 @@ class SparseLookup(ModelLayer):
         self.reducer = reducer
 
         input_dim = get_categorical_limit(input_record)
-        assert input_dim is not None, "Unbounded features are not supported"
+        assert input_dim > 0, (
+            "{} should have categorical limit > 0, but got {}".format(
+                get_key(input_record)(), input_dim))
 
         scale = math.sqrt(1.0 / input_dim)
         self.shape = [input_dim] + inner_shape

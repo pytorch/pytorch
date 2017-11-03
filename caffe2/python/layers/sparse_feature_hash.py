@@ -32,13 +32,13 @@ import numpy as np
 
 class SparseFeatureHash(ModelLayer):
 
-    def __init__(self, model, input_record, seed,
+    def __init__(self, model, input_record, seed, modulo=None,
                  name='sparse_feature_hash', **kwargs):
         super(SparseFeatureHash, self).__init__(model, name, input_record, **kwargs)
 
         self.seed = seed
         if schema.equal_schemas(input_record, IdList):
-            self.modulo = self.extract_hash_size(input_record.items.metadata)
+            self.modulo = modulo or self.extract_hash_size(input_record.items.metadata)
             metadata = schema.Metadata(
                 categorical_limit=self.modulo,
                 feature_specs=input_record.items.metadata.feature_specs,
@@ -53,7 +53,7 @@ class SparseFeatureHash(ModelLayer):
                 lengths_blob=input_record.lengths,
             )
         elif schema.equal_schemas(input_record, IdScoreList):
-            self.modulo = self.extract_hash_size(input_record.keys.metadata)
+            self.modulo = modulo or self.extract_hash_size(input_record.keys.metadata)
             metadata = schema.Metadata(
                 categorical_limit=self.modulo,
                 feature_specs=input_record.keys.metadata.feature_specs,
