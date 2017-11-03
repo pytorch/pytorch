@@ -462,6 +462,21 @@ class TestSegmentOps(hu.HypothesisTestCase):
         out2 = workspace.FetchBlob("out2")
         self.assertTrue((out1 == out2).all())
 
+    @given(**hu.gcs)
+    def test_sparse_lengths_sum_invalid_index(self, gc, dc):
+        D = np.random.rand(50, 3, 4, 5).astype(np.float32)
+        I = (np.random.randint(0, 10000, size=10) + 10000).astype(np.int64)
+        L = np.asarray([4, 4, 2]).astype(np.int32)
+        op = core.CreateOperator(
+            "SparseLengthsSum",
+            ["D", "I", "L"],
+            "out")
+        workspace.FeedBlob('D', D)
+        workspace.FeedBlob('I', I)
+        workspace.FeedBlob('L', L)
+        with self.assertRaises(RuntimeError):
+            workspace.RunOperatorOnce(op)
+
 
 if __name__ == "__main__":
     import unittest
