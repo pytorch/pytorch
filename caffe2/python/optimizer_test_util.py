@@ -191,7 +191,7 @@ class LRModificationTestBase(object):
         return norm_ratio
 
     def test_global_norm_based_gradient_clipping(self):
-        max_gradient_norm = 1
+        max_gradient_norm = 1.0
         model, perfect_model, data, label = self._createDense()
         opt = self.build_optimizer(model, max_gradient_norm=max_gradient_norm)
 

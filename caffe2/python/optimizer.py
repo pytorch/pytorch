@@ -238,12 +238,18 @@ class SgdOptimizer(Optimizer):
             self._aux_params.local.append(momentum_data)
 
         if isinstance(grad, core.GradientSlice):
-            assert self.momentum == 0., "Doesn't support momentum for sparse"
             grad = self.dedup(net, self.sparse_dedup_aggregator, grad)
-            net.ScatterWeightedSum(
-                [param, ONE, grad.indices, grad.values, lr],
-                param
-            )
+            if self.momentum > 0.:
+                net.SparseMomentumSGDUpdate(
+                    [grad.values, momentum_data, lr, param, grad.indices],
+                    [grad.values, momentum_data, param],
+                    momentum=self.momentum,
+                    nesterov=self.nesterov)
+            else:
+                net.ScatterWeightedSum(
+                    [param, ONE, grad.indices, grad.values, lr],
+                    param
+                )
         else:
             if self.momentum > 0.:
                 net.MomentumSGDUpdate(
