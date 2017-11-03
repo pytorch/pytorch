@@ -1,9 +1,12 @@
 import torch
 import torch.multiprocessing as multiprocessing
+from torch._C import _set_worker_signal_handlers, _set_main_signal_handlers, \
+    _remove_main_signal_handlers
 from .sampler import SequentialSampler, RandomSampler, BatchSampler
 import collections
 import re
 import sys
+import signal
 import traceback
 import threading
 from torch._six import string_classes
@@ -30,6 +33,11 @@ class ExceptionWrapper(object):
 def _worker_loop(dataset, index_queue, data_queue, collate_fn):
     global _use_shared_memory
     _use_shared_memory = True
+
+    # Intialize C side signal handlers because Python signal handler on things
+    # like SIGBUS and SIGSEGV will still be executed in C and likely cause error
+    # again.
+    _set_worker_signal_handlers()
 
     torch.set_num_threads(1)
     while True:
@@ -143,6 +151,7 @@ class DataLoaderIter(object):
         self.batch_sampler = loader.batch_sampler
         self.num_workers = loader.num_workers
         self.pin_memory = loader.pin_memory
+        self.timeout = loader.timeout
         self.done_event = threading.Event()
 
         self.sample_iter = iter(self.batch_sampler)
@@ -151,6 +160,7 @@ class DataLoaderIter(object):
             self.index_queue = multiprocessing.SimpleQueue()
             self.data_queue = multiprocessing.SimpleQueue()
             self.batches_outstanding = 0
+            self.handlers_set = False
             self.shutdown = False
             self.send_idx = 0
             self.rcvd_idx = 0
@@ -165,6 +175,11 @@ class DataLoaderIter(object):
             for w in self.workers:
                 w.daemon = True  # ensure that the worker exits on process exit
                 w.start()
+
+            self.worker_pids = tuple(w.pid for w in self.workers)
+
+            _set_main_signal_handlers(self.worker_pids)
+            self.handlers_set = True
 
             if self.pin_memory:
                 in_data = self.data_queue
@@ -182,6 +197,15 @@ class DataLoaderIter(object):
     def __len__(self):
         return len(self.batch_sampler)
 
+    def _get_batch(self):
+        if self.timeout > 0:
+            signal.alarm(self.timeout)
+            result = self.data_queue.get()
+            signal.alarm(0)
+            return result
+        else:
+            return self.data_queue.get()
+
     def __next__(self):
         if self.num_workers == 0:  # same-process loading
             indices = next(self.sample_iter)  # may raise StopIteration
@@ -196,12 +220,13 @@ class DataLoaderIter(object):
             return self._process_next_batch(batch)
 
         if self.batches_outstanding == 0:
+            self._remove_handers()
             self._shutdown_workers()
             raise StopIteration
 
         while True:
             assert (not self.shutdown and self.batches_outstanding > 0)
-            idx, batch = self.data_queue.get()
+            idx, batch = self._get_batch()
             self.batches_outstanding -= 1
             if idx != self.rcvd_idx:
                 # store out-of-order samples
@@ -245,8 +270,14 @@ class DataLoaderIter(object):
             for _ in self.workers:
                 self.index_queue.put(None)
 
+    def _remove_handers(self):
+        if self.handlers_set:
+            _remove_main_signal_handlers(self.worker_pids)
+            self.handlers_set = False
+
     def __del__(self):
         if self.num_workers > 0:
+            self._remove_handers()
             self._shutdown_workers()
 
 
@@ -276,16 +307,24 @@ class DataLoader(object):
             if the dataset size is not divisible by the batch size. If ``False`` and
             the size of dataset is not divisible by the batch size, then the last batch
             will be smaller. (default: False)
+        timeout (int, optional): if positive, the timeout value for collecting a batch
+            from workers. (default: 0)
     """
 
     def __init__(self, dataset, batch_size=1, shuffle=False, sampler=None, batch_sampler=None,
-                 num_workers=0, collate_fn=default_collate, pin_memory=False, drop_last=False):
+                 num_workers=0, collate_fn=default_collate, pin_memory=False, drop_last=False,
+                 timeout=0):
         self.dataset = dataset
         self.batch_size = batch_size
         self.num_workers = num_workers
         self.collate_fn = collate_fn
         self.pin_memory = pin_memory
         self.drop_last = drop_last
+
+        if not isinstance(timeout, int):
+            raise ValueError('timeout must be an integer')
+
+        self.timeout = timeout
 
         if batch_sampler is not None:
             if batch_size > 1 or shuffle or sampler is not None or drop_last:

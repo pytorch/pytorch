@@ -5,6 +5,8 @@
 #include <sys/socket.h>
 #endif
 
+#include <set>
+#include <signal.h>
 #include <stdbool.h>
 #include <unordered_map>
 #include <libshm.h>
@@ -575,6 +577,118 @@ PyObject *THPModule_fromDLPack(PyObject *_unused, PyObject *data)
   return torch::createPyObject(atensor);
 }
 
+// In cases like data loader, if a worker process die due to bus error/segfault
+// or just hang, the main process, if implemented with multiprocessing.queue.,
+// will hang waiting for data. This is difficult to avoid on PyTorch side as it
+// can be caused by limited shm, other libraries users call in the workers. The
+// following methods is an effort to do our best provide some error message to
+// users when such unfortunate events happen.
+
+// Critical signal handlers should be registered on worker processes before
+// doing work.
+// Python handle is _set_worker_signal_handlers().
+#define SIGNAL_HANDLER(SIGNAL, HANDLER_NAME, ERROR_MSG)                       \
+static void HANDLER_NAME(int sig)                                             \
+{                                                                             \
+    write(fileno(stderr), ERROR_MSG, strlen(ERROR_MSG));                      \
+    _exit(EXIT_FAILURE);                                                      \
+}
+
+SIGNAL_HANDLER(SIGBUS, handler_SIGBUS, "ERROR: Unexpected bus error encountered in worker. "
+  "This might be caused by insufficient shared memory (shm).\n");
+SIGNAL_HANDLER(SIGSEGV, handler_SIGSEGV, "ERROR: Unexpected segmentation fault encountered in worker.\n");
+
+static std::mutex worker_pid_mutex;
+static std::vector<pid_t> worker_pid_vec = {};
+// The following are needed since std::vector is not asynchronous safe.
+static pid_t *worker_pids;
+static size_t num_worker_pids = 0;
+
+PyObject *THPModule_setWorkerSignalHandlers(PyObject *module, PyObject *arg) {
+    signal(SIGBUS, handler_SIGBUS);
+    signal(SIGSEGV, handler_SIGSEGV);
+    Py_RETURN_NONE;
+}
+
+// SIGCHLD hander should be registered on main loader process to catch any
+// worker failing. SIGALRM handler is needed for implementing timeout.
+// Python handles are _set_main_signal_handers() and
+// _remove_main_signal_handers().
+static void handler_SIGCHLD_main(int sig) {
+  int status;
+  pid_t p;
+  pid_t *pid_ptr;
+
+  // The flags and status checks ensure that we are really observing a child
+  // exiting, rather than other cases such as SIGSTOP and SIGCONT.
+  // https://stackoverflow.com/a/40707100
+  while ((p = waitpid(-1, &status, WNOHANG|WUNTRACED|WCONTINUED)) > 0) {
+    if (WIFCONTINUED(status) || WIFSTOPPED(status))
+      continue;
+    if (WIFEXITED(status) != 0 && WEXITSTATUS(status) == 0)
+      continue;
+    // child must have exited with signal/error, check if it is one of the pid
+    // we care about.
+    pid_ptr = worker_pids;
+    for (size_t i = 0; i < num_worker_pids; i++) {
+      if (*pid_ptr == p)
+        _exit(EXIT_FAILURE);
+      pid_ptr++;
+    }
+  }
+}
+
+SIGNAL_HANDLER(SIGALRM, handler_SIGALRM, "ERROR: Time out when fetching data in DataLoader.\n")
+
+// We don't want to exit on any SIGCHLD from any child. child_pids is a sequence
+// of pids we are interested in.
+PyObject *THPModule_setMainSignalHandlers(PyObject *module, PyObject *child_pids) {
+  auto tuple = PyTuple_Check(child_pids);
+  THPUtils_assert(tuple || PyList_Check(child_pids), "_set_main_signal_handler "
+        "expects a tuple or list, but got %s", THPUtils_typename(child_pids));
+
+  auto size = tuple ? PyTuple_GET_SIZE(child_pids) : PyList_GET_SIZE(child_pids);
+  {
+    std::unique_lock<std::mutex> lock(worker_pid_mutex);
+    for (int idx = 0; idx < size; idx++) {
+      PyObject* obj = tuple ? PyTuple_GET_ITEM(child_pids, idx) : PyList_GET_ITEM(child_pids, idx);
+      worker_pid_vec.push_back((pid_t) THPUtils_unpackLong(obj));
+    }
+    worker_pids = &worker_pid_vec[0];
+    num_worker_pids = worker_pid_vec.size();
+  }
+
+  signal(SIGCHLD, handler_SIGCHLD_main);
+  signal(SIGALRM, handler_SIGALRM);
+  Py_RETURN_NONE;
+}
+
+PyObject *THPModule_removeMainSignalHandlers(PyObject *module, PyObject *child_pids) {
+  auto tuple = PyTuple_Check(child_pids);
+  THPUtils_assert(tuple || PyList_Check(child_pids), "_remove_main_signal_handler "
+        "expects a tuple or list, but got %s", THPUtils_typename(child_pids));
+
+  auto size = tuple ? PyTuple_GET_SIZE(child_pids) : PyList_GET_SIZE(child_pids);
+  std::set<pid_t> pid_set;
+  for (int idx = 0; idx < size; idx++) {
+    PyObject* obj = tuple ? PyTuple_GET_ITEM(child_pids, idx) : PyList_GET_ITEM(child_pids, idx);
+    pid_set.insert((pid_t) THPUtils_unpackLong(obj));
+  }
+  {
+    std::unique_lock<std::mutex> lock(worker_pid_mutex);
+    worker_pid_vec.erase(std::remove_if(worker_pid_vec.begin(), worker_pid_vec.end(),
+      [&](pid_t p){return pid_set.find(p) != pid_set.end();}), worker_pid_vec.end());
+    worker_pids = &worker_pid_vec[0];
+    num_worker_pids = worker_pid_vec.size();
+  }
+
+  signal(SIGCHLD, SIG_DFL);
+  signal(SIGALRM, SIG_DFL);
+  Py_RETURN_NONE;
+}
+
+#undef SIGNAL_HANDLER
+
 #ifdef WITH_CUDA
 extern PyObject * THCSPModule_initExtension(PyObject *self);
 #endif
@@ -601,6 +715,9 @@ static PyMethodDef TorchMethods[] = {
   {"from_numpy",      (PyCFunction)THPModule_fromNumpy,         METH_O,       NULL},
   {"_to_dlpack",      (PyCFunction)THPModule_toDLPack,          METH_O,       NULL},
   {"_from_dlpack",    (PyCFunction)THPModule_fromDLPack,        METH_O,       NULL},
+  {"_set_worker_signal_handlers",    (PyCFunction)THPModule_setWorkerSignalHandlers,    METH_NOARGS,  NULL},
+  {"_set_main_signal_handlers",      (PyCFunction)THPModule_setMainSignalHandlers,      METH_O,       NULL},
+  {"_remove_main_signal_handlers",   (PyCFunction)THPModule_removeMainSignalHandlers,   METH_O,       NULL},
 
   {"sigmoid",         (PyCFunction)THPModule_sigmoid,           METH_VARARGS | METH_KEYWORDS, NULL},
   {"log",             (PyCFunction)THPModule_log,               METH_VARARGS | METH_KEYWORDS, NULL},
