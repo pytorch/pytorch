@@ -169,3 +169,26 @@ class Optimizer(object):
             raise ValueError("some parameters appear in more than one parameter group")
 
         self.param_groups.append(param_group)
+
+    def _transform_state(self, transformation, filter_func, state=None):
+        """Applies ``transformation`` recursively to each item in ``self.state``
+        for which ``filter_func`` returns True.
+
+        Arguments:
+            transformation (item -> item): function to be applied to each item passing ``filter_func``.
+
+            filter_func (item -> `bool`): function which must return True for each item to which ``transformation`` should be applied.
+
+        """
+
+        if state == None:
+            state = self.state
+
+        for key, value in state.items():
+
+            if isinstance(value, dict):
+                self._transform_state(transformation, filter_func, value)
+
+            else:
+                if filter_func(value):
+                    state[key] = transformation(value)
