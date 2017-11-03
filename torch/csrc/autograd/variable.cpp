@@ -146,7 +146,7 @@ void VariableViewImpl::rebase_grad_fn(std::shared_ptr<Function> grad_fn) {
   }
   auto copySlices = std::make_shared<CopySlices>(base, TensorGeometry(data), std::move(grad_fn));
   base.output_nr() = 0;
-  base.grad_fn() = std::move(copySlices);
+  base.get()->_grad_fn = std::move(copySlices);
   base.requires_grad() = true;
 }
 

@@ -31,7 +31,7 @@ static PyObject* THPVariable_NewWithVar(PyTypeObject* type, Variable var)
     if (auto fn = dynamic_cast<PyFunction*>(v->cdata.grad_fn().get())) {
       // Create a new reference to the THPFunction. This ensures that ref count
       // of the THPFunction is at least the number of referring THPVariables.
-      v->cdata.grad_fn() = THPFunction_asFunction((THPFunction*)fn->obj);
+      v->cdata.get()->_grad_fn = THPFunction_asFunction((THPFunction*)fn->obj);
     }
   }
   return obj;
@@ -49,23 +49,6 @@ PyObject * THPVariable_Wrap(Variable var)
   }
 
   return THPVariable_NewWithVar((PyTypeObject *)THPVariableClass, std::move(var));
-}
-
-// This function DOES NOT steal a reference to data
-PyObject * THPVariable_NewWithFunction(PyObject *data, const std::shared_ptr<torch::autograd::Function>& grad_fn)
-{
-  THPUtils_assert(THPModule_isTensor(data), "data must be a Tensor");
-
-  Variable v = make_variable(torch::createTensor(data));
-  v.requires_grad() = grad_fn->is_executable;
-  v.grad_fn() = grad_fn;
-
-  PyObject* obj = THPVariable_NewWithVar((PyTypeObject*)THPVariableClass, std::move(v));
-  if (obj) {
-    ((THPVariable*)obj)->data = data;
-    Py_INCREF(data);
-  }
-  return obj;
 }
 
 // This function DOES NOT steal a reference to data
@@ -233,7 +216,7 @@ PyObject *THPVariable_get_grad_fn(THPVariable *self)
 int THPVariable_set_grad_fn(THPVariable *self, PyObject *obj)
 {
   THPUtils_assertRet(-1, obj == Py_None, "_grad_fn can be only set to None");
-  self->cdata.grad_fn() = nullptr;
+  self->cdata.get()->_grad_fn = nullptr;
   return 0;
 }
 

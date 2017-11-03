@@ -54,10 +54,10 @@ struct Variable : public at::Tensor {
   inline bool is_leaf() const;
 
   inline const std::shared_ptr<Function>& grad_fn() const;
-  inline       std::shared_ptr<Function>& grad_fn();
 
   // Sets the flags and grad_fn ("history") of a new Variable
   inline void set_history(VarFlags flags, int output_nr, std::shared_ptr<Function> grad_fn);
+
   // Updates the flags and grad_fn of an existing Variable. Called after in-place modifications.
   inline void rebase_history(VarFlags flags, int output_nr, std::shared_ptr<Function> grad_fn);
 
@@ -214,9 +214,6 @@ inline bool Variable::is_leaf() const {
 }
 
 inline const std::shared_ptr<Function>& Variable::grad_fn() const {
-  return get()->get_grad_fn();
-};
-inline std::shared_ptr<Function>& Variable::grad_fn() {
   return get()->get_grad_fn();
 };
 inline void Variable::set_history(VarFlags flags, int output_nr, std::shared_ptr<Function> grad_fn) {
