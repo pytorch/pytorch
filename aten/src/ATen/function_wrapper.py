@@ -522,7 +522,11 @@ def create_generic(top_env, declarations):
         result = [add_type_as_dynamic_type(argument, option) for argument in result]
 
         def native_translate_formals(argument, option):
-            argument['type'] = {'Tensor': 'const Tensor &'}.get(argument['type'], argument['type'])
+            if option['inplace']:
+                argument['type'] = {'Tensor': 'Tensor &'}.get(argument['type'], argument['type'])
+            else:
+                argument['type'] = {'Tensor': 'const Tensor &'}.get(argument['type'], argument['type'])
+
             return argument
 
         result = [native_translate_formals(argument, option) for argument in result]
