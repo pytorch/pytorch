@@ -265,11 +265,18 @@ void validateGraph(const std::shared_ptr<Graph>& graph) {
 }
 
 std::string ExportGraph(const std::shared_ptr<Graph>& graph,
-                        const std::vector<at::Tensor> & initializers) {
+                        const std::vector<at::Tensor> & initializers,
+                        int64_t onnx_opset_version) {
 
   validateGraph(graph);
 
   onnx::ModelProto model_proto;
+  model_proto.set_producer_name("pytorch");
+  model_proto.set_producer_version("0.3");
+  auto* imp = model_proto.add_opset_import();
+  // This is the version of ONNX operator set we are targeting
+  imp->set_version(onnx_opset_version);
+
   // Set up nanopb callbacks and compute the amount of space needed to store
   // the resulting protobuf
   encodeModel(&model_proto, graph, initializers);

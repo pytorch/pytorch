@@ -367,6 +367,15 @@ public:
   }
 };
 
+class OperatorSetIdProto : public MicroProto<onnx_OperatorSetIdProto> {
+private:
+  std::string domain;
+public:
+  OperatorSetIdProto() : MicroProto(onnx_OperatorSetIdProto_init_default) {}
+  void set_domain(const std::string& s) { proto.domain = string(&domain, s); }
+  void set_version(int64_t v) { proto.has_version = true; proto.version = v; }
+};
+
 class ModelProto : public MicroProto<onnx_ModelProto> {
 private:
   std::string producer_name;
@@ -374,20 +383,25 @@ private:
   std::string domain;
   std::string doc_string;
   std::unique_ptr<GraphProto> graph;
+  unique_vector<OperatorSetIdProto> opset_import;
 public:
   ModelProto() : MicroProto(onnx_ModelProto_init_default) {
     proto.has_ir_version = true;
-    proto.ir_version = 1; // TODO: onnx_Version_IR_VERSION;
-    proto.producer_name = string(&producer_name, "pytorch");
-    // TODO: stop hard-coding this
-    proto.producer_version = string(&producer_version, "0.2");
-    proto.domain = string(&domain, "com.facebook");
+    proto.ir_version = onnx_Version_IR_VERSION;
+    proto.opset_import = list<OperatorSetIdProto, onnx_OperatorSetIdProto_fields>(&opset_import);
   }
   void set_model_version(int64_t i) { proto.has_model_version = true; proto.model_version = i; }
   void set_doc_string(const std::string& s) { proto.doc_string = string(&doc_string, s); }
+  void set_producer_name(const std::string& s) { proto.producer_name = string(&producer_name, s); }
+  void set_producer_version(const std::string& s) { proto.producer_version = string(&producer_version, s); }
   GraphProto* mutable_graph() {
     proto.graph = msg<GraphProto, onnx_GraphProto_fields>(&graph);
     return graph.get();
+  }
+  OperatorSetIdProto* add_opset_import() {
+    auto ptr = new OperatorSetIdProto();
+    opset_import.emplace_back(ptr);
+    return ptr;
   }
 };
 

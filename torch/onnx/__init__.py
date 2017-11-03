@@ -131,12 +131,13 @@ def _export(model, args, f, export_params=True, verbose=False, training=False, i
         print(trace)
 
     # TODO: Don't allocate a in-memory string for the protobuf
+    from torch.onnx.symbolic import _onnx_opset_version
     if export_params:
         # NB: OrderedDict values is not actually a list, but trace.export is
         # not duck-typed and expects an actual list.
-        proto = trace.export(list(model.state_dict().values()))
+        proto = trace.export(list(model.state_dict().values()), _onnx_opset_version)
     else:
-        proto = trace.export()
+        proto = trace.export([], _onnx_opset_version)
 
     torch.serialization._with_file_like(f, "wb", lambda f: f.write(proto))
     return torch_out

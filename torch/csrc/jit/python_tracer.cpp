@@ -32,13 +32,9 @@ void initPythonTracerBindings(PyObject* module_) {
       ss << *s.graph;
       return ss.str();
     })
-    .def("export", [](TracingState& s) {
+    .def("export", [](TracingState& s, const std::vector<at::Tensor>& initializers, int64_t onnx_opset_version) {
       ASSERT_UNEXPIRED("export");
-      return py::bytes(ExportGraph(s.graph, {}));
-    })
-    .def("export", [](TracingState& s, const std::vector<at::Tensor>& initializers) {
-      ASSERT_UNEXPIRED("export");
-      return py::bytes(ExportGraph(s.graph, initializers));
+      return py::bytes(ExportGraph(s.graph, initializers, onnx_opset_version));
     })
     .def("graph", [](TracingState& s) {
       return s.graph;
