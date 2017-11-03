@@ -36,6 +36,8 @@ static DLDataType getDLDataType(const Type& type) {
     case ScalarType::Half:
       dtype.code = DLDataTypeCode::kDLFloat;
       break;
+    case ScalarType::Undefined:
+      throw std::logic_error("Undefined is not a valid ScalarType");
     case ScalarType::NumOptions:
       throw std::logic_error("NumOptions is not a valid ScalarType");
   }

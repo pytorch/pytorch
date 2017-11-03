@@ -23,6 +23,7 @@ enum class ScalarType {
   n,
   AT_FORALL_SCALAR_TYPES(DEFINE_ENUM)
 #undef DEFINE_ENUM
+  Undefined,
   NumOptions
 };
 
@@ -31,6 +32,7 @@ enum class Backend {
   CUDA,
   SparseCPU,
   SparseCUDA,
+  Undefined,
   NumOptions
 };
 
