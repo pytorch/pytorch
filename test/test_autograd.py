@@ -1595,6 +1595,19 @@ class TestAutograd(TestCase):
         self.assertEqual(b.grad.data.tolist(), [5])
         self.assertIsNone(a.grad)
 
+    def test_inplace_view6(self):
+        x = Variable(torch.ones(5))
+        r = Variable(torch.ones(1), requires_grad=True)
+        r2 = Variable(torch.ones(1), requires_grad=True)
+        v = x.select(0, 1)
+        x.add_(r)
+        self.assertFalse(v.requires_grad)
+        self.assertTrue(x.requires_grad)
+        # v is dependent on r due to the addition above, but v still doesn't
+        # requires_grad. The addition to r2 should raise an error until we
+        # share requires_grad between base and views.
+        self.assertRaisesRegex(RuntimeError, 'requires_grad', lambda: v + r2)
+
     def test_inplace_view_python(self):
         a = Variable(torch.randn(4, 4), requires_grad=True)
         b = Variable(torch.randn(2, 2), requires_grad=True)

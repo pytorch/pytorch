@@ -108,6 +108,14 @@ VariableViewImpl::VariableViewImpl(Variable base_, at::Tensor data_)
 
 std::shared_ptr<Function>& VariableViewImpl::get_grad_fn() {
   std::lock_guard<std::mutex> lock(mutex);
+  if (base.requires_grad() && !requires_grad) {
+    // TODO: See test_inplace_view6. It would be good to support this operation
+    // but that might require sharing requires_grad between the base and the view
+    throw std::runtime_error(
+        "requires_grad is False and base.requires_grad is True. Cannot use "
+        "this view in a differentiable operation. Re-create the view from the "
+        "base Variable.");
+  }
   auto current_version = version_counter.current_version();
   if (attr_version != current_version) {
     TORCH_ASSERT(output_nr == 0);

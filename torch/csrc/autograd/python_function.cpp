@@ -360,7 +360,8 @@ static void _wrap_outputs(THPFunction *self, t2var_type &t2var,
     const t2var_type &shared_pairs,
     PyObject *raw_output, PyObject *outputs, bool is_volatile)
 {
-  bool is_executable = self->cdata.is_executable && !is_volatile;
+  bool is_executable = self->cdata.is_executable;
+  TORCH_ASSERT(!is_volatile || !is_executable);
   auto cdata = is_executable ? THPFunction_asFunction(self) : nullptr;
   Py_ssize_t num_outputs = PyTuple_GET_SIZE(raw_output);
   if (self->cdata.is_executable) {
