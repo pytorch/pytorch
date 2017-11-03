@@ -1149,6 +1149,10 @@ class TestAutograd(TestCase):
         self.assertEqual(x.grad.data, torch.ones(10, 10) * 2)
         self.assertEqual(y.grad.data, torch.ones(10, 10) * 2)
 
+        # in-place deatch on a view raises an exception
+        view = x.narrow(0, 1, 4)
+        self.assertRaisesRegex(RuntimeError, 'view', lambda: view.detach_())
+
     def test_type_conversions(self):
         x = Variable(torch.randn(5, 5))
         self.assertIs(type(x.float().data), torch.FloatTensor)

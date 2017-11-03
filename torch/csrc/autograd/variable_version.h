@@ -2,6 +2,16 @@
 
 #include <memory>
 
+// Every Variable has a version counter. Version counters are incremented
+// whenever  the data or shape of a tensor changes through Variable operations.
+// These are typicallly in-place operations. Version counters are used to
+// detect modifications to saved varaibles which would result in incorrect
+// gradient calculations. Version counters may be shared between Variables:
+//
+// 1. A view shares the version counter of the base Variable
+// 2. Detached variables share the version counter of the source
+// 3. Unpacked saved variables share the version counter of the source
+
 namespace torch { namespace autograd {
 
 struct VersionBlock {
