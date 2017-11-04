@@ -57,6 +57,7 @@ OPERATOR_SCHEMA(LeakyRelu)
     .NumOutputs(1)
     .Arg("alpha", "Coefficient of leakage")
     .AllowInplace({{0, 0}})
+    .CostInferenceFunction(PointwiseCostInference<2>)
     .IdenticalTypeAndShape()
     .SetDoc(R"DOC(
 LeakyRelu takes input data (Tensor<T>) and an argument alpha, and produces one
