@@ -20,10 +20,10 @@
 #include <atomic>
 #include <climits>
 #include <cstddef>
-#include <thread>  // NOLINT
+#include <thread> // NOLINT
 #include <typeinfo>
-#include <vector>
 #include <unordered_map>
+#include <vector>
 
 #include "caffe2/core/blob.h"
 #include "caffe2/core/common.h"
@@ -120,6 +120,10 @@ class NetBase : public Observable<NetBase> {
     return name_;
   }
 
+  inline const std::shared_ptr<const NetDef> debug_def() const {
+    return net_def_;
+  }
+
  protected:
   virtual bool DoRunAsync() = 0;
 
@@ -127,7 +131,7 @@ class NetBase : public Observable<NetBase> {
   vector<string> external_output_;
   string name_;
   vector<const Event*> events_;
-
+  std::shared_ptr<const NetDef> net_def_;
   DISABLE_COPY_AND_ASSIGN(NetBase);
 };
 
@@ -155,6 +159,6 @@ unique_ptr<NetBase> CreateNet(
 
 void SetGlobalNetObserverCreator(NetObserverCreator creator);
 
-}  // namespace caffe2
+} // namespace caffe2
 
-#endif  // CAFFE2_CORE_NET_H_
+#endif // CAFFE2_CORE_NET_H_
