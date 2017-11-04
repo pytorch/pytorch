@@ -1032,6 +1032,17 @@ class TestAutograd(TestCase):
         gradcheck(func, [root, values])
         gradgradcheck(func, [root, values])
 
+    def test_fill(self):
+        root = Variable(torch.randn(4, 5), requires_grad=True)
+
+        def func(root):
+            x = root.clone()
+            x.fill_(2)
+            return x
+
+        gradcheck(func, [root])
+        gradgradcheck(func, [root])
+
     def test_unused_output(self):
         x = Variable(torch.randn(10, 10), requires_grad=True)
         outputs = x.chunk(5)
