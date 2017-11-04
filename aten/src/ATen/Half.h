@@ -10,7 +10,6 @@
 #include <cuda_fp16.h>
 #endif
 
-
 namespace at {
 
 template<typename To, typename From> To convert(From f) {
