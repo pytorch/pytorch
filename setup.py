@@ -24,7 +24,6 @@ from tools.setup_helpers.split_types import split_types
 DEBUG = check_env_flag('DEBUG')
 WITH_DISTRIBUTED = not check_env_flag('NO_DISTRIBUTED')
 WITH_DISTRIBUTED_MW = WITH_DISTRIBUTED and check_env_flag('WITH_DISTRIBUTED_MW')
-
 WITH_ROCM=False
 
 ################################################################################
@@ -471,12 +470,6 @@ if WITH_DISTRIBUTED:
     main_link_args += [THD_LIB]
 
 if WITH_ROCM:
-    # rocm_include_path = os.path.join(ROCM_HOME, '/include')
-    # hcc_include_path = os.path.join(ROCM_HOME, '/hcc/include')
-    # hipblas_include_path = os.path.join(ROCM_HOME, '/hipblas/include')
-    # hipsparse_include_path = os.path.join(ROCM_HOME, '/hcsparse/include')
-    # hip_lib_path = os.path.join(ROCM_HOME, '/hip/lib')
-    # hcc_lib_path = os.path.join(ROCM_HOME, '/hcc/lib')
     rocm_include_path = '/opt/rocm/include'
     hcc_include_path = '/opt/rocm/hcc/include'
     hipblas_include_path = '/opt/rocm/hipblas/include'
@@ -508,7 +501,6 @@ if WITH_ROCM:
         "torch/csrc/cuda/utils.cpp",
         "torch/csrc/cuda/expand_utils.cpp",
         "torch/csrc/cuda/serialization.cpp",
-    #    "torch/csrc/jit/fusion_compiler.cpp",
     ]
     main_sources += split_types("torch/csrc/cuda/Tensor.cpp")
 
