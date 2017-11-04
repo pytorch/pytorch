@@ -43,7 +43,8 @@ NetBase::NetBase(
       external_output_(
           def->external_output().begin(),
           def->external_output().end()),
-      name_(def->name()) {
+      name_(def->name()),
+      net_def_(def) {
   // Check that node_name is empty for all ops
   for (const OperatorDef& op : def->op()) {
     if (op.has_device_option()) {
