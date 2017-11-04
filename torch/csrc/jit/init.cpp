@@ -2,6 +2,7 @@
 
 #include "torch/csrc/jit/python_tracer.h"
 #include "torch/csrc/jit/python_ir.h"
+#include "torch/csrc/jit/python_arg_flatten.h"
 #include "torch/csrc/jit/export.h"
 #include "torch/csrc/jit/passes/graph_fuser.h"
 #include "torch/csrc/jit/passes/onnx.h"
@@ -46,7 +47,9 @@ void initJITBindings(PyObject *module) {
    .def("_jit_pass_cse", graph_pass<EliminateCommonSubexpression>)
    .def("_jit_pass_peephole", graph_pass<PeepholeOptimize>)
    .def("_jit_pass_lint", graph_pass<LintGraph>)
-   .def("_jit_run_cpp_tests", runJITCPPTests);
+   .def("_jit_run_cpp_tests", runJITCPPTests)
+   .def("_jit_flatten", python::flatten)
+   .def("_jit_unflatten", python::unflatten);
 
   initPythonIRBindings(module);
   initPythonTracerBindings(module);
