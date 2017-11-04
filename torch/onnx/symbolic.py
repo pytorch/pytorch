@@ -171,6 +171,12 @@ def transpose(g, self, dim0, dim1):
     return g.op("Transpose", self, perm_i=axes)
 
 
+def permute(g, self, dims):
+    if dims == list(range(0, len(dims))):
+        return self
+    return g.op("Transpose", self, perm_i=dims)
+
+
 def view(g, self, size):
     return g.op("Reshape", self, shape_i=size)
 
