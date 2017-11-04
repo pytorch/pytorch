@@ -459,6 +459,22 @@ InferOpInputOutputDevice(const OperatorDef& op) {
   return op_schema->InferDevice(op);
 }
 
+template <uint64_t OpsPerPoint>
+OpSchema::Cost PointwiseCostInference(
+    const OperatorDef& /* unused */,
+    const vector<TensorShape>& inputs) {
+  struct OpSchema::Cost c;
+  const TensorShape X = inputs[0];
+  uint64_t size = 1;
+
+  for (auto i = 0; i < X.dims().size(); ++i) {
+    size *= X.dims(i);
+  }
+
+  c.flops = size * OpsPerPoint;
+  return c;
+}
+
 } // namespace caffe2
 
 #ifndef CAFFE2_NO_OPERATOR_SCHEMA
