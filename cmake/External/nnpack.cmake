@@ -53,6 +53,10 @@ if (ANDROID OR IOS OR ${CMAKE_SYSTEM_NAME} STREQUAL "Linux" OR ${CMAKE_SYSTEM_NA
     add_subdirectory(
       "${NNPACK_PREFIX}"
       "${CONFU_DEPENDENCIES_BINARY_DIR}")
+    # We build static versions of nnpack and pthreadpool but link
+    # them into a shared library for Caffe2, so they need PIC.
+    set_property(TARGET nnpack PROPERTY POSITION_INDEPENDENT_CODE ON)
+    set_property(TARGET pthreadpool PROPERTY POSITION_INDEPENDENT_CODE ON)
   endif()
 
   set(NNPACK_FOUND TRUE)
