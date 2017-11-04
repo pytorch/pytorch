@@ -8,6 +8,18 @@ import itertools
 from collections import defaultdict, namedtuple
 
 
+class range(object):
+    def __init__(self, name):
+        self.name = name
+
+    def __enter__(self):
+        torch.autograd._push_range(self.name)
+
+    def __exit__(self, *args):
+        torch.autograd._pop_range()
+        return False
+
+
 class EventList(list):
     """A list of Events (for pretty printing)"""
     def __init__(self, *args, **kwargs):
