@@ -51,9 +51,10 @@ class NNPACKConvOp final : public ConvPoolOpBase<CPUContext> {
  public:
   NNPACKConvOp(const OperatorDef& operator_def, Workspace* ws)
       : ConvPoolOpBase<CPUContext>(operator_def, ws),
-        algorithm_(getConvolutionAlgorithm()),
-        transformStrategy_(getConvolutionTransformStrategy()),
+        algo_(getConvolutionAlgorithm()),
+        kts_(getConvolutionTransformStrategy()),
         ws_(ws) {
+
     OPERATOR_NEEDS_FEATURE(this->order_ == StorageOrder::NCHW,
                            "NNPack only supports NCHW order. Please consider add \
             TransposeOp with axes=[0, 3, 1, 2] before NNPack Conv.");
@@ -71,12 +72,12 @@ class NNPACKConvOp final : public ConvPoolOpBase<CPUContext> {
   nnp_convolution_algorithm getConvolutionAlgorithm() const;
   nnp_convolution_transform_strategy getConvolutionTransformStrategy() const;
 
-  const nnp_convolution_algorithm algorithm_;
+  const nnp_convolution_algorithm algo_;
   // Modified after precomputing the kernels. State transitions are:
   // - precompute -> (first call to Run()) -> reuse (on successful precompute)
   //                                       -> compute (on failing precompute)
   // - compute
-  nnp_convolution_transform_strategy transformStrategy_;
+  nnp_convolution_transform_strategy kts_;
   Workspace* ws_;
   // Per-group transformed filters
   std::vector<TensorCPU*> transformedFilters_;
@@ -155,6 +156,11 @@ bool NNPACKConvOp::RunOnDeviceWithOrderNCHW() {
   CAFFE_ENFORCE(bias.dim32(0) == M, "");
   ConvPoolOpBase<CPUContext>::SetOutputSize(X, Y, filter.dim32(0));
   const int oH = Y->dim32(2), oW = Y->dim32(3);
+  if (N > 1) {
+    // NNPack only supports stride = 1 when doing batch feedforward
+    CAFFE_ENFORCE(stride_h() == 1, "");
+    CAFFE_ENFORCE(stride_w() == 1, "");
+  }
 
   const size_t batch_size = X.dim32(0);
   const size_t input_channels = X.dim32(1);
@@ -176,189 +182,89 @@ bool NNPACKConvOp::RunOnDeviceWithOrderNCHW() {
   pthreadpool pool(ws_->GetThreadPool());
 
   runWithSharedBuffer<CPUContext>(ws_, [&](Tensor<CPUContext>* buffer) {
-    if (transformStrategy_ == nnp_convolution_transform_strategy_precompute) {
+    struct nnp_allocator allocator;
+    allocator.ctx = buffer;
+    allocator.allocator = [](void* ctx, size_t bytes) -> void* {
+      Tensor<CPUContext>* b = (Tensor<CPUContext>*)ctx;
+      // Uses float in ConvPoolOpBase (TODO: fix), so use float here.
+      // Just in case bytes are odd, but shouldn't be.
+      const size_t num_elements = (bytes + sizeof(float) - 1) / sizeof(float);
+      b->Resize(num_elements);
+      return (void*)b->template mutable_data<float>();
+    };
+
+    if (kts_ == nnp_convolution_transform_strategy_precompute) {
       transformedFilters_.resize(group_);
 
-      size_t transformedFilterSize = 0;
-      nnp_status status = nnp_convolution_inference(
-          algorithm_,
-          nnp_convolution_transform_strategy_precompute,
-          C / group_,
-          M / group_,
-          input_size,
-          padding,
-          kernel_size,
-          output_subsample,
-          nullptr /* input */,
-          nullptr /* filters */,
-          nullptr /* bias */,
-          nullptr /* output */,
-          nullptr /* workspace buffer = transformed filter */,
-          &transformedFilterSize,
-          nnp_activation_identity,
-          nullptr /* activation parameter */,
-          &pool,
-          nullptr /* profile */);
-      if (status == nnp_status_success) {
-        /* For these convolution parameters filter transforms can be
-         * pre-computed */
-
-        /* Division with rounding up, in case size is not multiple of
-         * sizeof(float) */
-        const size_t transformedFilterElements =
-            (transformedFilterSize + sizeof(float) - 1) / sizeof(float);
-
-        for (auto g = 0; g < group_; g++) {
-          transformedFilters_[g] =
-              ws_->CreateBlob(
-                     debug_def().name() + "_transformed_" + to_string(g))
-                  ->GetMutable<TensorCPU>();
-          transformedFilters_[g]->Resize(transformedFilterElements);
-
-          status = nnp_convolution_inference(
-              algorithm_,
-              nnp_convolution_transform_strategy_precompute,
-              C / group_,
-              M / group_,
-              input_size,
-              padding,
-              kernel_size,
-              output_subsample,
-              nullptr /* input */,
-              filter.template data<float>() + filter.size() / group_ * g,
-              nullptr /* bias */,
-              nullptr /* output */,
-              static_cast<void*>(
-                  transformedFilters_[g]->template mutable_data<float>()),
-              &transformedFilterSize,
-              nnp_activation_identity,
-              nullptr /* activation parameter */,
-              &pool,
-              nullptr /* profile */);
-          CAFFE_ENFORCE(
-              nnp_status_success == status,
-              "NNPACK convolution filter pre-transformation return error");
+      for (auto g = 0; g < group_; ++g) {
+        nnp_profile profile;
+        const auto status =
+            nnp_convolution_inference(algo_,
+                                      nnp_convolution_transform_strategy_precompute,
+                                      C / group_,
+                                      M / group_,
+                                      input_size,
+                                      padding,
+                                      kernel_size,
+                                      output_subsample,
+                                      nullptr,
+                                      filter.template data<float>() + filter.size() / group_ * g,
+                                      nullptr,
+                                      nullptr,
+                                      &pool,
+                                      FLAGS_caffe2_profile_nnpack ? &profile : nullptr,
+                                      &allocator);
+        if (status != nnp_status_success) {
+          // e.g. unsupported algorithm - i.e. passing precompute to a 1x1 direct conv.
+          LOG(ERROR) << "Failed to precompute kernels, falling back to compute";
+          kts_ = nnp_convolution_transform_strategy_compute;
+          break;
         }
 
-        /*
-         * Now, we've precomputed all our filter transformations.
-         * Switch to reuse strategy to avoid doing transformation again on next
-         * iteration.
-         */
-        if (transformStrategy_ ==
-            nnp_convolution_transform_strategy_precompute) {
-          CAFFE_ENFORCE_EQ(transformedFilters_.size(), group_);
-          transformStrategy_ = nnp_convolution_transform_strategy_reuse;
-        }
-      } else {
-        LOG(ERROR)
-            << "Failed to query workspace size to precompute kernels, falling back to re-compute strategy";
-        transformStrategy_ = nnp_convolution_transform_strategy_compute;
+        auto* trnsFilter = ws_->CreateBlob(debug_def().name() + "_transformed_" + to_string(g))
+                               ->GetMutable<TensorCPU>();
+        trnsFilter->CopyFrom<CPUContext>(*buffer);
+        transformedFilters_[g] = trnsFilter;
+      }
+
+      // Now, we've precomputed all our filters. Switch to reuse so we know to
+      // reuse these in the future.
+      if (kts_ == nnp_convolution_transform_strategy_precompute) {
+        CAFFE_ENFORCE_EQ(transformedFilters_.size(), group_);
+        kts_ = nnp_convolution_transform_strategy_reuse;
       }
 
       // Enforce when we leave this block that we have transitioned out of the
       // precompute state.
-      CAFFE_ENFORCE(
-          transformStrategy_ != nnp_convolution_transform_strategy_precompute);
+      CAFFE_ENFORCE(kts_ != nnp_convolution_transform_strategy_precompute);
     }
 
-    CAFFE_ENFORCE(
-        transformStrategy_ == nnp_convolution_transform_strategy_reuse ||
-        transformStrategy_ == nnp_convolution_transform_strategy_compute);
+    CAFFE_ENFORCE(kts_ == nnp_convolution_transform_strategy_reuse ||
+                  kts_ == nnp_convolution_transform_strategy_compute);
     const auto N = X.dim32(0);
     for (auto n = 0; n < N; ++n) {
       for (auto g = 0; g < group_; ++g) {
         nnp_profile profile;
-        size_t workspaceSize = buffer->nbytes();
-        if (workspaceSize == 0) {
-          /* Allocate some memory to ensure buffer pointer is not NULL. This
-           * simplifies further logic. */
-          buffer->Resize(1);
-          workspaceSize = buffer->nbytes();
-        }
-        nnp_status status = nnp_convolution_inference(
-            algorithm_,
-            transformStrategy_,
+        const auto status = nnp_convolution_inference(
+            algo_,
+            kts_,
             C / group_,
             M / group_,
             input_size,
             padding,
             kernel_size,
             output_subsample,
-            X.template data<float>() + n * C * H * W + g * H * W * (C / group_),
-            transformStrategy_ == nnp_convolution_transform_strategy_reuse
+            X.template data<float>() + n * H * W * C + g * H * W * (C / group_),
+            kts_ == nnp_convolution_transform_strategy_reuse
                 ? transformedFilters_[g]->template data<float>()
                 : filter.template data<float>() + filter.size() / group_ * g,
             bias.template data<float>() + bias.size() / group_ * g,
-            Y->template mutable_data<float>() + n * oH * oW * M +
-                g * oH * oW * (M / group_),
-            static_cast<void*>(buffer->template mutable_data<float>()),
-            &workspaceSize,
-            nnp_activation_identity,
-            nullptr /* activation parameter */,
+            Y->template mutable_data<float>() + n * oH * oW * M + g * oH * oW * (M / group_),
             &pool,
-            FLAGS_caffe2_profile_nnpack ? &profile : nullptr);
-        if (status == nnp_status_insufficient_buffer) {
-          /* Query required workspace size, increase buffer, and try again */
-          status = nnp_convolution_inference(
-              algorithm_,
-              transformStrategy_,
-              C / group_,
-              M / group_,
-              input_size,
-              padding,
-              kernel_size,
-              output_subsample,
-              nullptr /* input */,
-              nullptr,
-              nullptr /* bias */,
-              nullptr /* output */,
-              nullptr /* workspace buffer */,
-              &workspaceSize,
-              nnp_activation_identity,
-              nullptr /* activation parameter */,
-              &pool,
-              nullptr /* profile */);
-          if (status == nnp_status_success) {
-            /* Division with rounding up, in case size is not multiple of
-             * sizeof(float) */
-            const size_t workspace_elements =
-                (workspaceSize + sizeof(float) - 1) / sizeof(float);
-            buffer->Resize(workspace_elements);
-
-            /* Try convolution_inference again. If this time it fails, it is
-             * fatal. */
-            status = nnp_convolution_inference(
-                algorithm_,
-                transformStrategy_,
-                C / group_,
-                M / group_,
-                input_size,
-                padding,
-                kernel_size,
-                output_subsample,
-                X.template data<float>() + n * C * H * W +
-                    g * H * W * (C / group_),
-                transformStrategy_ == nnp_convolution_transform_strategy_reuse
-                    ? transformedFilters_[g]->template data<float>()
-                    : filter.template data<float>() +
-                        filter.size() / group_ * g,
-                bias.template data<float>() + bias.size() / group_ * g,
-                Y->template mutable_data<float>() + n * oH * oW * M +
-                    g * oH * oW * (M / group_),
-                static_cast<void*>(buffer->template mutable_data<float>()),
-                &workspaceSize,
-                nnp_activation_identity,
-                nullptr /* activation parameter */,
-                &pool,
-                FLAGS_caffe2_profile_nnpack ? &profile : nullptr);
-          }
-        }
-
-        VLOG(1) << "NNPACK buffer size: " << buffer->nbytes();
-        CAFFE_ENFORCE(
-            nnp_status_success == status,
-            "NNPACK convolution computation returned error");
+            FLAGS_caffe2_profile_nnpack ? &profile : nullptr,
+            &allocator);
+        VLOG(1) << "NNPACK buffer size: " << buffer->size();
+        CAFFE_ENFORCE(nnp_status_success == status, "");
         if (FLAGS_caffe2_profile_nnpack) {
           char buffer[1024];
           const double gmacs = double(Y->dim32(2) * Y->dim32(3) * Y->dim32(1) * X.dim32(1) *
