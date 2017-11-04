@@ -16,19 +16,8 @@ import inspect
 import copy
 
 
-class Placeholder(object):
-    def __init__(self, s):
-        self.s = s
-
-    def __str__(self):
-        return self.s
-
-    def __repr__(self):
-        return self.s
-
-
-HOLE = Placeholder("HOLE")
-VOLATILE = Placeholder("VOLATILE")
+_flatten = torch._C._jit_flatten
+_unflatten = torch._C._jit_unflatten
 
 
 def compile(arg=None, **kwargs):
@@ -226,41 +215,19 @@ class TracedModule(Module):
         self.inner = inner
         self.nderivs = nderivs
 
-    def forward(self, *args, **kwargs):
-        # TODO: Possible optimization: use the unflattened
-        # output so we don't unflatten it when we get out
-        # NB: Not a method because _raw_trace can't deal
-        # with methods
-        @_raw_trace(nderivs=self.nderivs)
-        def traced_inner(in_vars, in_struct):
-            return _flatten(self.inner(*args, **kwargs))
-
-        kw_items = list(kwargs.items())
-        kw_items.sort()
-        in_vars, in_struct = _flatten((args, tuple(kw_items)), self.state_dict(keep_vars=True).values())
-        trace, (out_vars, out_struct) = traced_inner(in_vars, in_struct)
-        out, unmatched = _unflatten(out_vars, out_struct)
-        assert len(unmatched) == 0
-        return trace, out
+    def forward(self, *args):
+        in_vars, _, _ = _flatten((args, list(self.parameters())))
+        return _get_trace(self.inner, args, in_vars, self.nderivs)
 
 
 # Functional version that assumes that all parameters are explicitly
 # specified
-def _raw_trace(nderivs=0):
-    def raw_trace(f):
-        # f takes two arguments, (in_vars, in_struct) (as determined
-        # by _flatten); furthermore, it must be the case that in_vars
-        # contains all Variable inputs (including parameters.)  It must
-        # produce two outputs, (out_vars, out_struct) (also as determined
-        # by _flatten).
-        @functools.wraps(f)
-        def wrapper(in_vars, in_struct=None):
-            trace = torch._C._tracer_enter(in_vars, nderivs)
-            out_vars, out_struct = f(in_vars, in_struct)
-            torch._C._tracer_exit(out_vars)
-            return trace, (out_vars, out_struct)
-        return wrapper
-    return raw_trace
+def _get_trace(f, args, in_vars, nderivs=0):
+    trace = torch._C._tracer_enter(in_vars, nderivs)
+    out = f(*args)
+    out_vars, out_struct, _ = _flatten(out)
+    torch._C._tracer_exit(out_vars)
+    return trace, out
 
 
 # Lifecycle of a compiler:
@@ -336,11 +303,12 @@ class _CompiledMixin(object):
         self.__hits = 0
         self.__misses = 0
 
-    def __process_args(self, args):
-        in_vars, in_struct = _flatten(args, self.state_dict(keep_vars=True).values())
-        is_volatile, in_vars_key = vars_key(in_vars)
-        in_key = (in_vars_key, in_struct)
-        return in_vars, in_struct, is_volatile, in_key
+    def __new_ktrace(self, in_key, is_volatile):
+        ktrace_name = '{}_{}'.format(self.__name, self.__next_ktrace_id)
+        self.__next_ktrace_id += 1
+        ktrace = TraceForKey(ktrace_name, in_key, volatile=is_volatile, **self.__ktrace_kwargs)
+        self.__ktrace_cache[in_key] = ktrace
+        return ktrace
 
     # NB: In principle, there could also be a 'raw' version of this compiler,
     # but since the logic is so complicated, testing code wouldn't benefit much
@@ -349,18 +317,21 @@ class _CompiledMixin(object):
         assert_compiled = kwargs.pop("_assert_compiled", False)
         if kwargs:
             raise TypeError("Unrecognized keyword arguments: {}".format(kwargs.keys()))
+
+        # Fall through
         if _JIT_DISABLE or not self.__enabled:
             assert not assert_compiled
             with _time(self.__name, "unoptimized", self.__time):
                 # Call to the saved old forward function
                 return self.__old_forward(*args)
-        in_vars, in_struct, is_volatile, in_key = self.__process_args(args)
+
+        # Parse args and check if we've seen this configuration before
+        in_vars, in_key, is_volatile = _flatten((args, list(self.parameters())))
         ktrace = self.__ktrace_cache.get(in_key)
         if ktrace is None:
-            ktrace_name = '{}_{}'.format(self.__name, self.__next_ktrace_id)
-            self.__next_ktrace_id += 1
-            ktrace = TraceForKey(ktrace_name, in_key, volatile=is_volatile, **self.__ktrace_kwargs)
-            self.__ktrace_cache[in_key] = ktrace
+            ktrace = self.__new_ktrace(in_key, is_volatile)
+
+        # See if we have a compiled closure to use, or trace again
         closure = ktrace.maybe_closure()
         if closure is not None and not force_trace:
             # We already compiled it!  Run it directly, and
@@ -375,18 +346,17 @@ class _CompiledMixin(object):
             assert not assert_compiled
             with _time(ktrace.name, "tracing", self.__time):
                 out_vars, out_struct = ktrace.add_trace(self.__old_forward,
-                                                        args, in_vars, in_struct,
+                                                        args, in_vars,
                                                         overwrite=force_trace)
+        # Wrap outputs and return
         if isinstance(out_vars, Variable):
-            out_vars = (out_vars, )
-        out, unmatched = _unflatten(out_vars, out_struct)
-        assert len(unmatched) == 0
-        return out
+            out_vars = (out_vars,)
+        return _unflatten(out_vars, out_struct)
 
     def has_trace_for(self, *args):
         # Ensure we are not shadowing this method on the class we mixed with
         assert not hasattr(super(_CompiledMixin, self), "has_trace_for")
-        in_vars, in_struct, is_volatile, in_key = self.__process_args(args)
+        _, in_key, _ = _flatten((args, list(self.parameters())))
         ktrace = self.__ktrace_cache.get(in_key)
         if ktrace is None:
             return False
@@ -407,8 +377,6 @@ class _CompiledMixin(object):
         if _JIT_STATS:
             print("{} - hits: {}, misses: {}, cache_size: {}"
                   .format(repr(self), self.__hits, self.__misses, len(self.__ktrace_cache)))
-
-    # TODO: Provide more compiled code management utility methods
 
 
 # CompiledModule memoizes multiple traces and switches between them based on
@@ -439,21 +407,16 @@ class TraceForKey(object):
         self.out_struct = None  # initialized when we call trace, checked thereafter
         self.time = time
 
-    # The signature here is a little goofy; it's a perf optimization.
     # Additionally, f is passed in as an argument (even though it is fixed as
     # class initialization) to avoid a circular reference.
-    def add_trace(self, f, args, in_vars, in_struct, overwrite=False):
+    def add_trace(self, f, args, in_vars, overwrite=False):
         if overwrite:
             self.closure = None
         else:
             assert self.closure is None
 
-        # TODO: Deduplicate this code
-        @_raw_trace(nderivs=self.nderivs)
-        def traced_f(in_vars, in_struct):
-            return _flatten(f(*args))
-
-        trace, (out_vars, out_struct) = traced_f(in_vars, in_struct)
+        trace, out = _get_trace(f, args, in_vars, nderivs=self.nderivs)
+        out_vars, out_struct, _ = _flatten(out)
         if self.out_struct is None:
             self.out_struct = out_struct
         else:
@@ -499,47 +462,6 @@ class TraceForKey(object):
 
             self.closure = torch._C._jit_createAutogradClosure(complete_trace)
             return self.closure
-
-
-def vars_key(in_vars):
-    """
-    Compute the key for variables: some properties of variables
-    affect the trace, e.g., size and requires_grad.
-    """
-    is_volatile = any(x.volatile if isinstance(x, Variable) else False for x in in_vars)
-
-    def var_key(x):
-        if isinstance(x, Variable):
-            grad_key = x.requires_grad
-            ty = x.data.type()
-        else:
-            grad_key = False
-            ty = x.type()
-        if is_volatile:
-            grad_key = VOLATILE
-        return ty, grad_key, x.size()
-
-    return is_volatile, tuple(map(var_key, in_vars))
-
-
-# _flatten and _unflatten are inverses
-def _unflatten(input, proto):
-    def unflatten_helper(input, proto):
-        res = []
-        if not isinstance(proto, (list, tuple)):
-            return input[0], input[1:]
-        for e in proto:
-            res_e, input = unflatten_helper(input, e)
-            res.append(res_e)
-        return type(proto)(res), input
-
-    return unflatten_helper(input, proto)
-
-
-def _flatten(obj, params=tuple()):
-    obj_vars = tuple(itertools.chain(function._iter_variables(obj), params))
-    obj_struct = function._nested_map(lambda o: isinstance(o, Variable), lambda x: HOLE)(obj)
-    return obj_vars, obj_struct
 
 
 def _clone_inputs(args):
@@ -639,7 +561,7 @@ def verify(model, args, loss_fn=torch.sum, devices=None):
     saved_state = copy.deepcopy(model.state_dict())
 
     def run_fwd_bwd(args, force_trace=False, assert_compiled=False):
-        in_vars, _ = _flatten(args, model.state_dict(keep_vars=True).values())
+        in_vars, _, _ = _flatten((args, list(model.parameters())))
         # We use a special API to reset the trace and compile it from scratch.
         out = model(*args, _force_trace=force_trace, _assert_compiled=assert_compiled)
         if not isinstance(out, tuple):
@@ -647,7 +569,7 @@ def verify(model, args, loss_fn=torch.sum, devices=None):
         if loss_fn == torch.sum and len(out) != 1:
             raise ValueError(("Model returns {} outputs, but default loss function "
                              "(torch.sum) can only handle a single output").format(len(out)))
-        out_vars, _ = _flatten(out)
+        out_vars, _, _ = _flatten(out)
         saved_outs = [v.data.clone() for v in out_vars]
         loss = loss_fn(*out)
         grads = torch.autograd.grad([loss], in_vars)
