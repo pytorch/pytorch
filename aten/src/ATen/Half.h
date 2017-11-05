@@ -26,12 +26,10 @@ typename std::enable_if<std::is_integral<From>::value, bool>::type overflows(Fro
 template<typename To, typename From>
 typename std::enable_if<!std::is_integral<From>::value, bool>::type overflows(From f) {
   using limit = std::numeric_limits<To>;
-  if (limit::has_infinity && std::isinf(f))
-  {
+  if (limit::has_infinity && std::isinf(f)) {
     return false;
   }
-  if (!limit::has_quiet_NaN && std::isnan(f))
-  {
+  if (!limit::has_quiet_NaN && std::isnan(f)) {
     return true;
   }
   return f < limit::lowest() || f > limit::max();
