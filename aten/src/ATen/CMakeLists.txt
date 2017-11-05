@@ -72,21 +72,6 @@ ELSE()
   FIND_PACKAGE(CUDA 5.5 REQUIRED)
   ADD_DEFINITIONS(-DAT_CUDA_ENABLED)
   INCLUDE_DIRECTORIES(${CUDA_INCLUDE_DIRS})
-
-  IF(NOT THC_LIBRARIES)
-    SET(THC_LIBRARIES "THC")
-  ENDIF(NOT THC_LIBRARIES)
-  MESSAGE(STATUS "THC_LIBRARIES: ${THC_LIBRARIES}")
-
-  IF(NOT THCS_LIBRARIES)
-    SET(THCS_LIBRARIES "THCS")
-  ENDIF(NOT THCS_LIBRARIES)
-  MESSAGE(STATUS "THCS_LIBRARIES: ${THCS_LIBRARIES}")
-
-  IF(NOT THCUNN_LIBRARIES)
-    SET(THCUNN_LIBRARIES "THCUNN")
-  ENDIF(NOT THCUNN_LIBRARIES)
-  MESSAGE(STATUS "THCUNN_LIBRARIES: ${THCUNN_LIBRARIES}")
 ENDIF()
 
 # Can be compiled standalone
@@ -160,6 +145,7 @@ SET(all_cpp ${base_cpp} ${generated_cpp} ${ATen_CPU_SRCS})
 INCLUDE_DIRECTORIES(${ATen_CPU_INCLUDE})
 IF(NOT NO_CUDA)
   INCLUDE_DIRECTORIES(${ATen_CUDA_INCLUDE})
+  INCLUDE_DIRECTORIES("${CUDA_SDK_ROOT_DIR}/common/inc")
   SET(all_cpp ${all_cpp} ${ATen_CUDA_SRCS})
 endif()
 
@@ -196,14 +182,29 @@ TARGET_LINK_LIBRARIES(ATen PRIVATE
   ${TH_LIBRARIES}
   ${END_WHOLE_ARCHIVE})
 IF(CUDA_FOUND)
-  TARGET_LINK_LIBRARIES(ATen PRIVATE
-    ${WHOLE_ARCHIVE}
-    ${THC_LIBRARIES}
-    ${END_WHOLE_ARCHIVE})
   TARGET_LINK_LIBRARIES(ATen
     ${CUDA_LIBRARIES}
-    ${CUDA_cusparse_LIBRARY})
+    ${CUDA_cusparse_LIBRARY}
+    ${CUDA_curand_LIBRARY})
   CUDA_ADD_CUBLAS_TO_TARGET(ATen)
+  IF(USE_MAGMA)
+    TARGET_LINK_LIBRARIES(ATen ${MAGMA_LIBRARIES})
+    IF ($ENV{TH_BINARY_BUILD})
+      # because magma is linked statically and it wants a BLAS,
+      # we need to link the BLAS lib against THC. Usually TH will
+      # load a BLAS library and it's all fine, but in the binary builds,
+      # TH uses static linkage to MKL, so it doesn't have all symbols that
+      # magma needs. So in this case, explicitly find a BLAS and link against it
+      # just like in TH
+      SET(CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/../TH/cmake ${CMAKE_MODULE_PATH})
+      FIND_PACKAGE(BLAS)
+      IF(BLAS_FOUND)
+        TARGET_LINK_LIBRARIES(ATen "${BLAS_LIBRARIES};${BLAS_LIBRARIES};${BLAS_LIBRARIES}")
+      ELSE(BLAS_FOUND)
+        MESSAGE(FATAL_ERROR "Binary build needs blas to be found here")
+      ENDIF(BLAS_FOUND)
+    ENDIF($ENV{TH_BINARY_BUILD})
+  ENDIF(USE_MAGMA)
 ENDIF()
 
 INSTALL(TARGETS ATen
