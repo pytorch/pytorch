@@ -2,9 +2,10 @@
 The ``distributions`` package contains parameterizable probability distributions
 and sampling functions.
 
-Policy gradient methods can be implemented using the :meth:`log_prob` method,
-when the probability density function is differentiable with respect to its
-parameters. A basic method is the REINFORCE rule:
+Policy gradient methods can be implemented using the
+:meth:`~torch.distributions.Distribution.log_prob` method, when the probability
+density function is differentiable with respect to its parameters. A basic
+method is the REINFORCE rule:
 
 .. math::
 
