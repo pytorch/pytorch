@@ -514,6 +514,7 @@
     - arg: THTensor* result
       output: True
     - accreal start
+      default: 0
     - accreal end
     - arg: accreal step
       default: 1
