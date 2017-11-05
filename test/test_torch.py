@@ -1111,6 +1111,11 @@ class TestTorch(TestCase):
         torch.arange(0, 1, out=res2)
         self.assertEqual(res1, res2, 0)
 
+        # Check arange with only one argument
+        res1 = torch.arange(10)
+        res2 = torch.arange(0, 10)
+        self.assertEqual(res1, res2, 0)
+
         # Check arange for non-contiguous tensors.
         x = torch.zeros(2, 3)
         torch.arange(0, 4, out=x.narrow(1, 1, 2))
