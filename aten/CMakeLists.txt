@@ -243,6 +243,12 @@ ENDIF(C_AVX2_FOUND)
 
 CHECK_C_SOURCE_RUNS("
 #include <stdatomic.h>
+// ATOMIC_INT_LOCK_FREE is flaky on some older gcc versions
+// so if this define is not usable a preprocessor definition
+// we fail this check and fall back to GCC atomics
+#if ATOMIC_INT_LOCK_FREE == 2
+#define TH_ATOMIC_IPC_REFCOUNT 1
+#endif
 int main()
 {
   int a;
