@@ -475,18 +475,30 @@ class AdagradOptimizer(Optimizer):
         )
 
         if self.rowWise:
-            shape = param_init_net.Shape(param, str(param) + "_shape")
-            num_rows = param_init_net.Slice(
-                [shape],
-                str(shape) + "_numrows",
-                starts=[0], ends=[1]
-            )
-            param_squared_sum = param_init_net.ConstantFill(
-                num_rows,
-                str(param) + "_avg_squared_sum",
-                input_as_shape=1,
-                value=0.0
-            )
+            shapes, types = workspace.InferShapesAndTypes([param_init_net])
+            if str(param) not in shapes:
+                # Type/shape inference is not available for this param, fallback
+                # on Shape/Slice logic
+                shape = param_init_net.Shape(param, str(param) + "_shape")
+                num_rows = param_init_net.Slice(
+                    [shape],
+                    str(shape) + "_numrows",
+                    starts=[0], ends=[1]
+                )
+                param_squared_sum = param_init_net.ConstantFill(
+                    num_rows,
+                    str(param) + "_avg_squared_sum",
+                    input_as_shape=1,
+                    value=0.0
+                )
+            else:
+                param_squared_sum = param_init_net.ConstantFill(
+                    [],
+                    str(param) + "_avg_squared_sum",
+                    shape=[shapes[str(param)][0]],
+                    value=0.0
+                )
+
         else:
             param_squared_sum = param_init_net.ConstantFill(
                 [param],
