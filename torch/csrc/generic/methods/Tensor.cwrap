@@ -761,6 +761,12 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
         - accreal start
         - accreal end
         - CONSTANT 1
+      - arguments:
+        - arg: THTensor* result
+          output: True
+        - CONSTANT 0
+        - accreal end
+        - CONSTANT 1
 ]]
 
 [[
