@@ -1520,6 +1520,14 @@ class TestAutograd(TestCase):
             self.assertEqual(info.name, expected_name)
             last_end = info.end
 
+    def test_dir(self):
+        x = Variable(torch.randn(10, 10))
+        keys = dir(x)
+        self.assertIn('shape', keys)
+
+        for key in keys:
+            self.assertTrue(hasattr(x, key))
+
 
 def index_variable(shape, max_indices):
     if not isinstance(shape, tuple):
