@@ -92,7 +92,6 @@ VariableViewImpl::VariableViewImpl(Variable base_, at::Tensor data_, VarFlags fl
   , base(std::move(base_))
   , attr_version(0) {
   TORCH_ASSERTM(base.defined(), "base is undefined");
-  TORCH_ASSERTM(output_nr == 0, "view must have output_nr=0");
   if (base.is_view()) {
     base = base.base();
   }

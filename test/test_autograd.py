@@ -397,7 +397,7 @@ class TestAutograd(TestCase):
             def forward(self, x, y):
                 assert self.needs_input_grad[0]
                 assert not self.needs_input_grad[1]
-                return x, y.clone()
+                return x, y
 
             def backward(self, grad_x, grad_y):
                 return grad_x, None
