@@ -1,5 +1,4 @@
 import torch
-
 from .optimizer import Optimizer
 
 
@@ -28,7 +27,7 @@ class Adagrad(Optimizer):
             for p in group['params']:
                 state = self.state[p]
                 state['step'] = 0
-                state['sum'] = p.data.new().resize_as_(p.data).zero_()
+                state['sum'] = torch.zeros_like(p.data)
 
     def share_memory(self):
         for group in self.param_groups:
@@ -59,21 +58,21 @@ class Adagrad(Optimizer):
 
                 if group['weight_decay'] != 0:
                     if p.grad.data.is_sparse:
-                        raise RuntimeError("weight_decay option is not compatible with sparse gradients ")
+                        raise RuntimeError("weight_decay option is not compatible with sparse gradients")
                     grad = grad.add(group['weight_decay'], p.data)
 
                 clr = group['lr'] / (1 + (state['step'] - 1) * group['lr_decay'])
 
-                if p.grad.data.is_sparse:
+                if grad.is_sparse:
                     grad = grad.coalesce()  # the update is non-linear so indices must be unique
                     grad_indices = grad._indices()
                     grad_values = grad._values()
-                    size = torch.Size([x for x in grad.size()])
+                    size = grad.size()
 
                     def make_sparse(values):
-                        constructor = type(p.grad.data)
+                        constructor = grad.new
                         if grad_indices.dim() == 0 or values.dim() == 0:
-                            return constructor()
+                            return constructor().resize_as_(grad)
                         return constructor(grad_indices, values, size)
                     state['sum'].add_(make_sparse(grad_values.pow(2)))
                     std = state['sum']._sparse_mask(grad)

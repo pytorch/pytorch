@@ -41,13 +41,15 @@ class Adamax(Optimizer):
                 if p.grad is None:
                     continue
                 grad = p.grad.data
+                if grad.is_sparse:
+                    raise RuntimeError('Adamax does not support sparse gradients')
                 state = self.state[p]
 
                 # State initialization
                 if len(state) == 0:
                     state['step'] = 0
-                    state['exp_avg'] = grad.new().resize_as_(grad).zero_()
-                    state['exp_inf'] = grad.new().resize_as_(grad).zero_()
+                    state['exp_avg'] = torch.zeros_like(p.data)
+                    state['exp_inf'] = torch.zeros_like(p.data)
 
                 exp_avg, exp_inf = state['exp_avg'], state['exp_inf']
                 beta1, beta2 = group['betas']
