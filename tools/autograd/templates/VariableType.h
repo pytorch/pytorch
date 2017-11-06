@@ -53,6 +53,7 @@ private:
   std::tuple<Variable, Variable> as_variable(std::tuple<Tensor, Tensor> tensor) const;
   std::tuple<Variable, Variable, Variable> as_variable(std::tuple<Tensor, Tensor, Tensor> tensor) const;
   std::vector<Variable> as_variable(TensorList tensor) const;
+  Variable maybe_wrap(Tensor data, const Variable & self, bool inplace) const;
 
 private:
   at::Type* baseType;

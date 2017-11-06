@@ -388,6 +388,12 @@ Tensor softplus_double_backward(const Tensor & grad, const Tensor & input, Scala
   return _sigmoid_backward(grad, x.sigmoid()) * (x < threshold).toType(grad.type()) * beta;
 }
 
+Tensor as_strided_backward(const Tensor & grad, TensorGeometry base, IntList sizes, IntList strides, int64_t storage_offset) {
+  auto src = base.zeros_with_stride(grad.type());
+  src.as_strided(sizes, strides, storage_offset - base.storage_offset).copy_(grad);
+  return src;
+}
+
 }
 
 ${autograd_function_definitions}
