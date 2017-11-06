@@ -1522,7 +1522,7 @@ class TestAutograd(TestCase):
 
     def test_dir(self):
         x = Variable(torch.randn(10, 10))
-        keys = x.__dir__()
+        keys = dir(x)
         self.assertIn('shape', keys)
 
         for key in keys:
