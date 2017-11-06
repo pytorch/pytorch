@@ -45,6 +45,7 @@ void THNN_(Threshold_updateGradInput)(
 {
   real threshold = ScalarConvert<accreal, real>::to(threshold_);
   real val = ScalarConvert<accreal, real>::to(val_);
+  (void) val;
   THCUNN_check_nElement(state, input, gradOutput);
   THCUNN_assertSameGPU(state, 3, input, gradInput, gradOutput);
 
