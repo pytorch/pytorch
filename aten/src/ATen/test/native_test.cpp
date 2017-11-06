@@ -1,11 +1,12 @@
 #include "ATen/ATen.h"
+#include "test_assert.h"
 
 using namespace at;
 
 void assertEqualTensorList(TensorList t1, TensorList t2) {
-  assert(t1.size() == t2.size());
+  ASSERT(t1.size() == t2.size());
   for (size_t i = 0; i < t1.size(); ++i) {
-    assert(t1[ i ].equal(t2[ i ]));
+    ASSERT(t1[ i ].equal(t2[ i ]));
   }
 }
 
@@ -23,7 +24,7 @@ int main() {
     assertEqualTensorList(splitMethod, splitNs);
 
     // test rebuilding with cat
-    assert(at::cat(splitMethod, 0).equal(t));
+    ASSERT(at::cat(splitMethod, 0).equal(t));
   }
 
   {
@@ -35,7 +36,7 @@ int main() {
     assertEqualTensorList(chunkMethod, chunkNs);
 
     // test rebuilding with cat
-    assert(at::cat(chunkMethod, 0).equal(t));
+    ASSERT(at::cat(chunkMethod, 0).equal(t));
   }
 
   // stack
@@ -51,11 +52,11 @@ int main() {
       expected_size.insert(expected_size.end(), 3);
       expected_size.insert(expected_size.end(), x.sizes().begin() + dim, x.sizes().end());
 
-      assert(res.equal(res_neg));
-      assert(res.sizes().equals(expected_size));
-      assert(res.select(dim, 0).equal(x));
-      assert(res.select(dim, 1).equal(y));
-      assert(res.select(dim, 2).equal(z));
+      ASSERT(res.equal(res_neg));
+      ASSERT(res.sizes().equals(expected_size));
+      ASSERT(res.select(dim, 0).equal(x));
+      ASSERT(res.select(dim, 1).equal(y));
+      ASSERT(res.select(dim, 2).equal(z));
     }
   }
 
