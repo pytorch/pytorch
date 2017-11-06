@@ -63,8 +63,8 @@ std::string processErrorMsg(std::string str) {
     {"CPUHalfType", "torch.HalfTensor"},
   };
 
-  for (const auto & it : changes) {
-    replaceAll(str, it.first, it.second);
+  for (auto it = changes.rbegin(); it != changes.rend(); ++it) {
+    replaceAll(str, it->first, it->second);
   }
 
   return str;
