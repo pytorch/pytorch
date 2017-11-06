@@ -37,4 +37,6 @@ void UndefinedTensor::assign_(Scalar s) {
   runtime_error("assign_() called on undefined Tensor");
 }
 
+UndefinedTensor UndefinedTensor::_singleton;
+
 }
