@@ -9,9 +9,10 @@ namespace at {
 std::vector<int64_t> infer_size(IntList a, IntList b);
 std::tuple<std::vector<int64_t>, std::vector<int64_t> > inferExpandGeometry(const Tensor &tensor, IntList sizes);
 
-inline void check_defined(TensorList tensors, const char *api_name) {
+// avoid copy-construction of Tensor by using a reference_wrapper.
+inline void check_defined(std::initializer_list<std::reference_wrapper<const Tensor>> tensors, const char *api_name) {
   for (auto& t : tensors) {
-    if (!t.defined()) {
+    if (!t.get().defined()) {
       runtime_error("%s(...) called with an undefined Tensor", api_name);
     }
   }
