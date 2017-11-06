@@ -54,7 +54,7 @@ def _worker_loop(dataset, index_queue, data_queue, collate_fn):
             data_queue.put((idx, samples))
 
 
-def _pin_memory_loop(in_queue, out_queue, done_event):
+def _process_loop(in_queue, out_queue, done_event, pin_memory):
     while True:
         try:
             r = in_queue.get()
@@ -69,12 +69,12 @@ def _pin_memory_loop(in_queue, out_queue, done_event):
             continue
         idx, batch = r
         try:
-            batch = pin_memory_batch(batch)
+            if pin_memory:
+                batch = pin_memory_batch(batch)
         except Exception:
             out_queue.put((idx, ExceptionWrapper(sys.exc_info())))
         else:
             out_queue.put((idx, batch))
-
 
 numpy_type_map = {
     'float64': torch.DoubleTensor,
@@ -158,7 +158,7 @@ class DataLoaderIter(object):
 
         if self.num_workers > 0:
             self.index_queue = multiprocessing.SimpleQueue()
-            self.data_queue = multiprocessing.SimpleQueue()
+            self.worker_result_queue = multiprocessing.SimpleQueue()
             self.batches_outstanding = 0
             self.handlers_set = False
             self.shutdown = False
@@ -169,7 +169,7 @@ class DataLoaderIter(object):
             self.workers = [
                 multiprocessing.Process(
                     target=_worker_loop,
-                    args=(self.dataset, self.index_queue, self.data_queue, self.collate_fn))
+                    args=(self.dataset, self.index_queue, self.worker_result_queue, self.collate_fn))
                 for _ in range(self.num_workers)]
 
             for w in self.workers:
@@ -178,17 +178,17 @@ class DataLoaderIter(object):
 
             self.worker_pids = tuple(w.pid for w in self.workers)
 
-            _set_main_signal_handlers(self.worker_pids)
-            self.handlers_set = True
+            self.handlers_set = _set_main_signal_handlers(self.worker_pids)
 
-            if self.pin_memory:
-                in_data = self.data_queue
+            if self.pin_memory or self.timeout > 0:
                 self.data_queue = queue.Queue()
-                self.pin_thread = threading.Thread(
-                    target=_pin_memory_loop,
-                    args=(in_data, self.data_queue, self.done_event))
-                self.pin_thread.daemon = True
-                self.pin_thread.start()
+                self.process_thread = threading.Thread(
+                    target=_process_loop,
+                    args=(self.worker_result_queue, self.data_queue, self.done_event, self.pin_memory))
+                self.process_thread.daemon = True
+                self.process_thread.start()
+            else:
+                self.data_queue = self.worker_result_queue
 
             # prime the prefetch loop
             for _ in range(2 * self.num_workers):
@@ -199,10 +199,12 @@ class DataLoaderIter(object):
 
     def _get_batch(self):
         if self.timeout > 0:
-            signal.alarm(self.timeout)
-            result = self.data_queue.get()
-            signal.alarm(0)
-            return result
+            try:
+                return self.data_queue.get(True, self.timeout)
+            except queue.Empty:
+                ex = RuntimeError('DataLoader timed out after {} seconds'.format(self.timeout))
+                ex.__cause__ = ex  # prevent exception chaining in python 3
+                raise ex
         else:
             return self.data_queue.get()
 
@@ -267,8 +269,14 @@ class DataLoaderIter(object):
         if not self.shutdown:
             self.shutdown = True
             self.done_event.set()
+            # if process_thread is waiting to put
+            if not self.data_queue.empty():
+                self.data_queue.get()
             for _ in self.workers:
                 self.index_queue.put(None)
+            # if all workers hang, still put None to let process_thread exit
+            if self.worker_result_queue.empty():
+                self.worker_result_queue.put(None)
 
     def _remove_handers(self):
         if self.handlers_set:
