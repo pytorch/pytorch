@@ -1552,6 +1552,7 @@ class TestAutograd(TestCase):
         gradgradcheck(as_strided, [x], [Variable(torch.randn(3, 3))])
 
     def test_inplace_view1(self):
+        # modify view and back-prop through base
         root = Variable(torch.randn(2, 2), requires_grad=True)
         x = root.clone()
         v1 = x.narrow(0, 0, 1)
@@ -1559,7 +1560,8 @@ class TestAutograd(TestCase):
         x.sum().backward()
         self.assertEqual(root.grad.data.tolist(), [[2, 2], [1, 1]])
 
-    def test_inplace_view2(self):
+    def test_inplace_view_backprop_view_of_view(self):
+        # modify view and backprop through view-of-view
         root = Variable(torch.randn(2, 2), requires_grad=True)
         x = root.clone()
         v1 = x.narrow(0, 0, 1)
@@ -1568,7 +1570,8 @@ class TestAutograd(TestCase):
         v2.sum().backward()
         self.assertEqual(root.grad.data.tolist(), [[2, 2], [0, 0]])
 
-    def test_inplace_view3(self):
+    def test_inplace_view_of_view(self):
+        # modify view-of-view and backprop through base
         root = Variable(torch.randn(2, 2), requires_grad=True)
         x = root.clone()
         v1 = x.narrow(0, 0, 1)
@@ -1577,7 +1580,8 @@ class TestAutograd(TestCase):
         x.sum().backward()
         self.assertEqual(root.grad.data.tolist(), [[1, 2], [1, 1]])
 
-    def test_inplace_view4(self):
+    def test_inplace_view_gradcheck(self):
+        # gradcheck modifications to views
         a = Variable(torch.randn(4, 4), requires_grad=True)
         b = Variable(torch.randn(2, 2), requires_grad=True)
 
@@ -1591,7 +1595,8 @@ class TestAutograd(TestCase):
         go = Variable(torch.randn(a.size()), requires_grad=True)
         gradgradcheck(func, (a, b), (go,))
 
-    def test_inplace_view5(self):
+    def test_inplace_view_backprop_view(self):
+        # modify view and backprop through view
         a = Variable(torch.Tensor([2, 5]), requires_grad=False)
         b = Variable(torch.Tensor([3]), requires_grad=True)
         res = a.narrow(0, 1, 1).mul_(b)
@@ -1599,7 +1604,9 @@ class TestAutograd(TestCase):
         self.assertEqual(b.grad.data.tolist(), [5])
         self.assertIsNone(a.grad)
 
-    def test_inplace_view6(self):
+    def test_inplace_view_flags(self):
+        # check that an exception is thrown if the flags on the base do not
+        # match the flags on the view
         x = Variable(torch.ones(5))
         r = Variable(torch.ones(1), requires_grad=True)
         r2 = Variable(torch.ones(1), requires_grad=True)
@@ -1613,6 +1620,7 @@ class TestAutograd(TestCase):
         self.assertRaisesRegex(RuntimeError, 'requires_grad', lambda: v + r2)
 
     def test_inplace_view_python(self):
+        # in-place modifications of Python-autograd created view
         a = Variable(torch.randn(4, 4), requires_grad=True)
         b = Variable(torch.randn(2, 2), requires_grad=True)
 

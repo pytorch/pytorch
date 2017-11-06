@@ -264,7 +264,11 @@ static void set_flags(Variable& var, VarFlags flags, std::shared_ptr<Function> g
   if (inplace) {
     var.rebase_history(flags, 0, std::move(grad_fn));
   } else {
-    var.set_history(flags, 0, std::move(grad_fn));
+    // TODO: combine this code path with the Variable construction
+    var.get()->requires_grad = flags.requires_grad;
+    var.get()->is_volatile = flags.is_volatile;
+    var.get()->output_nr = 0;
+    var.get()->_grad_fn = std::move(grad_fn);
   }
 }
 
@@ -274,7 +278,11 @@ static void set_flags(std::vector<Variable> &vl, VarFlags flags, std::shared_ptr
   }
   int64_t output_nr = 0;
   for (auto& var : vl) {
-    var.set_history(flags, output_nr, grad_fn);
+    // TODO: combine this with the Variable construction
+    var.get()->requires_grad = flags.requires_grad;
+    var.get()->is_volatile = flags.is_volatile;
+    var.get()->output_nr = output_nr;
+    var.get()->_grad_fn = grad_fn;
     output_nr++;
   }
 }

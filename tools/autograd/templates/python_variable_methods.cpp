@@ -34,7 +34,9 @@ static PyObject * THPVariable_detach_(PyObject* self, PyObject* args)
   if (self_.is_view()) {
     throw std::runtime_error("Can't detach views in-place. Use detach() instead");
   }
-  self_.set_history(VarFlags(false, self_.is_volatile()), 0, nullptr);
+  self_.get()->requires_grad = false;
+  self_.output_nr() = 0;
+  self_.get()->_grad_fn = nullptr;
   Py_INCREF(self);
   return self;
   END_HANDLE_TH_ERRORS

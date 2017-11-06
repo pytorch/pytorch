@@ -363,6 +363,7 @@ static void _wrap_outputs(THPFunction *self, t2var_type &t2var,
   bool is_executable = self->cdata.is_executable;
   TORCH_ASSERT(!is_volatile || !is_executable);
   auto cdata = is_executable ? THPFunction_asFunction(self) : nullptr;
+  auto flags = VarFlags(is_executable, is_volatile);
   Py_ssize_t num_outputs = PyTuple_GET_SIZE(raw_output);
   if (self->cdata.is_executable) {
     self->output_info.clear();
@@ -386,9 +387,9 @@ static void _wrap_outputs(THPFunction *self, t2var_type &t2var,
 
   // Wraps an output Tensor in a Variable or returns the previous wrapper in
   // the case of in-place modification.
-  auto wrap_output = [&](at::Tensor data, Variable prev, bool is_modified) -> Variable {
+  auto wrap_output = [&](at::Tensor data, Variable prev, int output_nr, bool is_modified) -> Variable {
     if (!prev.defined()) {
-      return make_variable(std::move(data));
+      return make_variable(std::move(data), flags, output_nr, cdata);
     }
     if (is_modified) {
       if (prev.is_leaf() && prev.requires_grad()) {
@@ -402,11 +403,12 @@ static void _wrap_outputs(THPFunction *self, t2var_type &t2var,
         auto grad_acc = dynamic_cast<AccumulateGrad*>(grad_acc_fn.get());
         grad_acc->variable.reset();
       }
+      prev.rebase_history(flags, output_nr, cdata);
       return prev;
     }
     // An input has been returned, but it wasn't modified. Return it as a view
     // so that we can attach a new grad_fn to the Variable.
-    return make_variable_view(std::move(prev), std::move(data));
+    return make_variable_view(std::move(prev), std::move(data), flags, output_nr, cdata);
   };
 
   t2var_type output2var;
@@ -424,12 +426,8 @@ static void _wrap_outputs(THPFunction *self, t2var_type &t2var,
       Variable var = wrap_output(
           torch::createTensor(output),
           get_shared_base(output),
+          i,
           is_modified);
-      if (is_modified) {
-        var.rebase_history(VarFlags(is_executable, is_volatile), i, cdata);
-      } else {
-        var.set_history(VarFlags(is_executable, is_volatile), i, cdata);
-      }
 
       output_var = (THPVariable*)THPVariable_Wrap(var);
       if (!output_var) throw python_error();

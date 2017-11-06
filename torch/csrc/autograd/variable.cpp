@@ -10,32 +10,27 @@ using namespace at;
 
 namespace torch { namespace autograd {
 
-VariableImpl::VariableImpl(Tensor data_, bool requires_grad, bool is_volatile)
+Variable make_variable(at::Tensor data, std::shared_ptr<Function> grad_fn) {
+  TORCH_ASSERT(grad_fn);
+  auto flags = VarFlags(grad_fn->is_executable, false);
+  int output_nr = grad_fn->num_inputs++;
+  return make_variable(std::move(data), flags, output_nr, std::move(grad_fn));
+}
+
+VariableImpl::VariableImpl(Tensor data_, VarFlags flags, int output_nr, std::shared_ptr<Function> grad_fn)
   : TensorImpl(getType(data_))
   , data(std::move(data_))
   , grad()
+  , _grad_fn(std::move(grad_fn))
   , version_counter()
-  , requires_grad(requires_grad)
-  , is_volatile(is_volatile)
+  , requires_grad(flags.requires_grad)
+  , is_volatile(flags.is_volatile)
   , is_view(false)
-  , output_nr(0)
+  , output_nr(output_nr)
   , pyobj(nullptr) {
   if (!data.defined()) {
     throw std::runtime_error("data is undefined");
   }
-}
-
-VariableImpl::VariableImpl(Tensor data, std::shared_ptr<Function> grad_fn)
-  : VariableImpl(std::move(data))
-{
-  requires_grad = grad_fn->is_executable;
-  output_nr = grad_fn->num_inputs++;
-  _grad_fn = std::move(grad_fn);
-}
-
-VariableImpl::VariableImpl(Tensor data)
-  : VariableImpl(std::move(data), false, false)
-{
 }
 
 VariableImpl::~VariableImpl() {
@@ -91,8 +86,9 @@ std::shared_ptr<Function> VariableImpl::get_grad_accumulator() {
   return result;
 }
 
-VariableViewImpl::VariableViewImpl(Variable base_, at::Tensor data_)
-  : VariableImpl(std::move(data_))
+VariableViewImpl::VariableViewImpl(Variable base_, at::Tensor data_, VarFlags flags,
+                                   int output_nr, std::shared_ptr<Function> grad_fn)
+  : VariableImpl(std::move(data_), flags, output_nr, std::move(grad_fn))
   , base(std::move(base_))
   , attr_version(0) {
   if (!base.defined()) {
@@ -109,7 +105,7 @@ VariableViewImpl::VariableViewImpl(Variable base_, at::Tensor data_)
 std::shared_ptr<Function>& VariableViewImpl::get_grad_fn() {
   std::lock_guard<std::mutex> lock(mutex);
   if (base.requires_grad() && !requires_grad) {
-    // TODO: See test_inplace_view6. It would be good to support this operation
+    // TODO: See test_inplace_view_flags. It would be good to support this operation
     // but that might require sharing requires_grad between the base and the view
     throw std::runtime_error(
         "requires_grad is False and base.requires_grad is True. Cannot use "
@@ -133,6 +129,7 @@ std::shared_ptr<Function>& VariableViewImpl::get_grad_fn() {
 }
 
 void VariableViewImpl::rebase_grad_fn(std::shared_ptr<Function> grad_fn) {
+  TORCH_ASSERT(output_nr == 0);
   if (!grad_fn) {
     TORCH_ASSERTM(!requires_grad, "Can't set null grad_fn on view with requires_grad=True");
     TORCH_ASSERTM(!base.requires_grad(), "base.requires_grad does not match view.requires_grad");
@@ -140,7 +137,6 @@ void VariableViewImpl::rebase_grad_fn(std::shared_ptr<Function> grad_fn) {
   }
 
   TORCH_ASSERTM(requires_grad, "Can't set grad_fn on view with requires_grad=False");
-  TORCH_ASSERT(output_nr == 0);
   if (grad_fn->num_inputs != 1) {
     throw std::runtime_error("Functions which modify views in-place must return a single Variable");
   }

@@ -46,7 +46,7 @@ auto SavedVariable::unpack(std::shared_ptr<Function> saved_for) const -> Variabl
         "modified by an inplace operation");
   }
 
-  Variable var = base.defined() ? make_variable_view(base, data) : make_variable(data);
+  auto flags = VarFlags(requires_grad, is_volatile);
   auto grad_fn = _grad_fn;
   if (has_grad_fn && !grad_fn) {
     if (!saved_for) {
@@ -56,7 +56,13 @@ auto SavedVariable::unpack(std::shared_ptr<Function> saved_for) const -> Variabl
     }
     grad_fn = std::move(saved_for);
   }
-  var.set_history(VarFlags(requires_grad, is_volatile), output_nr, std::move(grad_fn));
+
+  Variable var;
+  if (base.defined()) {
+    var = make_variable_view(base, data, flags, output_nr, std::move(grad_fn));
+  } else {
+    var = make_variable(data, flags, output_nr, std::move(grad_fn));
+  }
   var.version_counter() = version;
 
   // If a Variable is a leaf (no grad_fn saved), and it requires_grad, then we
