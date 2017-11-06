@@ -1,6 +1,7 @@
 #include <Python.h>
 
-#include <map>
+#include <utility>
+#include <vector>
 
 #include "THP.h"
 
@@ -28,7 +29,7 @@ void replaceAll(std::string & str,
 std::string processErrorMsg(std::string str) {
 
   // Translate Aten types to their respective pytorch ones
-  std::map<std::string, std::string> changes = {
+  std::vector<std::pair<std::string, std::string>> changes {
     {"SparseCUDAByteType", "torch.cuda.sparse.ByteTensor"},
     {"SparseCUDACharType", "torch.cuda.sparse.CharTensor"},
     {"SparseCUDADoubleType", "torch.cuda.sparse.DoubleTensor"},
