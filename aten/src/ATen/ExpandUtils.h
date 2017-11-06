@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ATen/Tensor.h"
+#include <functional>
 #include <sstream>
 #include <tuple>
 
