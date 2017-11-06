@@ -13,6 +13,7 @@ void PeepholeOptimize(std::shared_ptr<Graph>& graph) {
   for (auto it = graph->begin(); it != graph->end(); ++it) {
     auto* n = *it;
 
+    // eliminate redundant expand
     if (n->kind() == kexpand) {
       if (n->is(ksize) == n->input()->type()->expect<TensorType>()->sizes()) {
         n->output()->replaceAllUsesWith(n->input());

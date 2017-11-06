@@ -20,6 +20,27 @@ std::unordered_set<NodeKind> broadcasting = {
   kGemm,
 };
 
+bool isNopTranspose(const std::vector<int64_t> & perm) {
+  for (size_t i = 0; i < perm.size(); i++)
+    if (perm[i] != i)
+      return false;
+  return true;
+}
+
+// returns a vector `ret` such that transposing by `ret` is equivalent
+// to transposing by `t1` and then by `t2`
+std::vector<int64_t> composeTransposes(const std::vector<int64_t> & t1,
+                                       const std::vector<int64_t> & t2) {
+  JIT_ASSERT(t1.size() == t2.size());
+  std::vector<int64_t> ret;
+  for (size_t i = 0; i < t1.size(); i++) {
+    JIT_ASSERT(   t1[i]  < t2.size());
+    JIT_ASSERT(t2[t1[i]] < t2.size());
+    ret.push_back(t2[t1[i]]);
+  }
+  return ret;
+}
+
 bool isBroadcasting(Node *node) {
   return broadcasting.count(node->kind());
 }
@@ -98,6 +119,58 @@ void fuseBroadcast(std::shared_ptr<Graph>& graph) {
   }
 }
 
+void fuseConsecutiveTransposes(std::shared_ptr<Graph>& graph) {
+  for (auto it = graph->begin(); it != graph->end(); ++it) {
+    auto* n = *it;
+
+    if (n->kind() == kTranspose && n->input()->node()->kind() == kTranspose) {
+      auto origInput = n->input();
+      n->is_(kperm, composeTransposes(origInput->node()->is(kperm), n->is(kperm)));
+      n->replaceInput(0, origInput->node()->input());
+      if (origInput->uses().size() == 0) {
+        origInput->node()->destroy();
+      }
+      continue;
+    }
+  }
+}
+
+void eliminateNopTranspose(std::shared_ptr<Graph>& graph) {
+  for (auto it = graph->begin(); it != graph->end(); ++it) {
+    auto* n = *it;
+
+    if (n->kind() == kTranspose) {
+      if (isNopTranspose(n->is(kperm))) {
+        n->replaceAllUsesWith(n->input()->node());
+        it.destroyCurrent();
+        continue;
+      }
+    }
+  }
+}
+
+void fuseTransposeIntoGemm(std::shared_ptr<Graph>& graph) {
+  static const std::vector<int64_t> simpleTransPerm({1,0});
+
+  for (auto it = graph->begin(); it != graph->end(); ++it) {
+    auto* n = *it;
+
+    if (n->kind() == kGemm) {
+      for (size_t i : {0,1}) {
+        auto inp = n->inputs()[i];
+        auto trans = i == 0 ? ktransA : ktransB;
+        if (inp->node()->kind() == kTranspose && inp->node()->is(kperm) == simpleTransPerm) {
+          n->replaceInput(i, inp->node()->input());
+          n->i_(trans, n->hasAttribute(trans) ? !n->i(trans) : 1);
+          if (inp->uses().size() == 0) {
+            inp->node()->destroy();
+          }
+        }
+      }
+    }
+  }
+}
+
 // This optimization does ONNX-specific peephole optimizations.
 //
 // At the moment, here are the optimizations it does:
@@ -105,6 +178,9 @@ void fuseBroadcast(std::shared_ptr<Graph>& graph) {
 //    easier for non-strided backends to more efficiently do broadcasts if this is
 //    local information.  This optimization is not useful for PyTorch as 'expand'
 //    is free.
+//  - Fusing of consecutive transposes
+//  - Elimiation of NOP transposes
+//  - Fusing of transposes into Gemm
 //
 // Before you write an optimization here, ask yourself, "Could I do this
 // optimization on ATen operators"?  If so, you should seriously consider
@@ -116,6 +192,9 @@ void PeepholeOptimizeONNX(std::shared_ptr<Graph>& graph) {
   // TODO: make it easier not to do O(k) iterations over the graph, where
   // k is the number of distinct peephole optimizations
   fuseBroadcast(graph);
+  fuseConsecutiveTransposes(graph);
+  eliminateNopTranspose(graph);
+  fuseTransposeIntoGemm(graph);
 }
 
 }}
