@@ -70,5 +70,10 @@ include_directories(
 ${CMAKE_CURRENT_SOURCE_DIR}/src
 ${CMAKE_CURRENT_BINARY_DIR}/src/ATen)
 add_subdirectory(src/ATen/test)
-add_subdirectory(contrib/data)
-add_subdirectory(contrib/meter)
+
+if(ATEN_NO_CONTRIB)
+  message("disable contrib because ATEN_NO_CONTRIB is set")
+else()
+  add_subdirectory(contrib/data)
+  add_subdirectory(contrib/meter)
+endif()
