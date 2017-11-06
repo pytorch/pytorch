@@ -4500,7 +4500,7 @@ class TestTorch(TestCase):
 
         # Test __array__ with dtype argument
         for dtype in dtypes:
-            x = torch.Tensor([1, -2, 3, -4])
+            x = torch.IntTensor([1, -2, 3, -4])
             asarray = np.asarray(x, dtype=dtype)
             self.assertEqual(asarray.dtype, dtype)
             if np.dtype(dtype).kind == 'u':
