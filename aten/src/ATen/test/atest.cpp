@@ -1,4 +1,5 @@
 #include "ATen/ATen.h"
+#include "test_assert.h"
 
 #include<iostream>
 using namespace std;
@@ -12,7 +13,7 @@ void check(bool c) {
 void trace() {
   Tensor foo = CPU(kFloat).rand({12,12});
 
-  // assert foo is 2-dimensional and holds floats.
+  // ASSERT foo is 2-dimensional and holds floats.
   auto foo_a = foo.accessor<float,2>();
   float trace = 0;
 
@@ -23,7 +24,7 @@ void trace() {
 }
 int main() {
   auto foo = CPU(kFloat).rand({12,6});
-  assert(foo.data<float>() == foo.toFloatData());
+  ASSERT(foo.data<float>() == foo.toFloatData());
 
   cout << foo << "\n" << foo.size(0) << " " << foo.size(1) << endl;
 

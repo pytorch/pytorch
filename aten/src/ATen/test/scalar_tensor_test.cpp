@@ -1,12 +1,13 @@
 #include "ATen/ATen.h"
+#include "test_assert.h"
 #include <iostream>
 #include <numeric>
 
 using namespace at;
 
 void assert_equal_size_dim(const Tensor &lhs, const Tensor &rhs) {
-  assert(lhs.dim() == rhs.dim());
-  assert(lhs.sizes().equals(rhs.sizes()));
+  ASSERT(lhs.dim() == rhs.dim());
+  ASSERT(lhs.sizes().equals(rhs.sizes()));
 }
 
 bool should_expand(const IntList &from_size, const IntList &to_size) {
@@ -32,12 +33,12 @@ int main() {
   for (auto s = sizes.begin(); s != sizes.end(); ++s) {
     // verify that the dim, sizes, strides, etc match what was requested.
     auto t = T.ones(*s);
-    assert(t.dim() == s->size());
-    assert(t.ndimension() == s->size());
-    assert(t.sizes().equals(*s));
-    assert(t.strides().size() == s->size());
+    ASSERT(t.dim() == s->size());
+    ASSERT(t.ndimension() == s->size());
+    ASSERT(t.sizes().equals(*s));
+    ASSERT(t.strides().size() == s->size());
     auto numel = std::accumulate(s->begin(), s->end(), 1, std::multiplies<int64_t>());
-    assert(t.numel() == numel);
+    ASSERT(t.numel() == numel);
     // verify we can output
     std::cout << t << std::endl;
 
@@ -48,7 +49,7 @@ int main() {
 
     // unsqueeze
     if (t.numel() != 0) {
-      assert(t.unsqueeze(0).dim() == t.dim() + 1);
+      ASSERT(t.unsqueeze(0).dim() == t.dim() + 1);
     } else {
       try {
         // can't unsqueeze empty tensor
@@ -62,7 +63,7 @@ int main() {
       auto t2 = T.ones(*s);
       if (t2.numel() != 0) {
         auto r = t2.unsqueeze_(0);
-        assert(r.dim() == t.dim() + 1);
+        ASSERT(r.dim() == t.dim() + 1);
       } else {
         try {
           // can't unsqueeze empty tensor
@@ -74,16 +75,16 @@ int main() {
 
     // squeeze (with dimension argument)
     if (t.dim() > 0 && t.sizes()[0] == 1) {
-      assert(t.squeeze(0).dim() == t.dim() - 1);
+      ASSERT(t.squeeze(0).dim() == t.dim() - 1);
     } else if (t.dim() == 0) {
       try {
         t.squeeze(0);
-        assert(false);
+        ASSERT(false);
       } catch (std::runtime_error &e) {}
     } else {
       // In PyTorch, it is a no-op to try to squeeze a dimension that has size != 1;
       // in NumPy this is an error.
-      assert(t.squeeze(0).dim() == t.dim());
+      ASSERT(t.squeeze(0).dim() == t.dim());
     }
 
     // squeeze (with no dimension argument)
@@ -102,16 +103,16 @@ int main() {
       // squeeze_ (with dimension argument)
       auto t2 = T.ones(*s);
       if (t2.dim() > 0 && t2.sizes()[0] == 1) {
-        assert(t2.squeeze_(0).dim() == t.dim() - 1);
+        ASSERT(t2.squeeze_(0).dim() == t.dim() - 1);
       } else if (t2.dim() == 0) {
         try {
           t2.squeeze_(0);
-          assert(false);
+          ASSERT(false);
         } catch (std::runtime_error &e) {}
       } else {
         // In PyTorch, it is a no-op to try to squeeze a dimension that has size != 1;
         // in NumPy this is an error.
-        assert(t2.squeeze_(0).dim() == t.dim());
+        ASSERT(t2.squeeze_(0).dim() == t.dim());
       }
     }
 
@@ -130,45 +131,45 @@ int main() {
 
     // reduce (with dimension argument and with 1 return argument)
     if (t.dim() > 0 && t.numel() != 0) {
-      assert(t.sum(0).dim() == t.dim() - 1);
+      ASSERT(t.sum(0).dim() == t.dim() - 1);
     } else if (t.dim() == 0) {
       try {
         t.sum(0);
-        assert(false);
+        ASSERT(false);
       } catch (std::runtime_error &e) {}
     } else {
       // FIXME: you should be able to reduce over size {0}
       try {
         t.sum(0);
-        assert(false);
+        ASSERT(false);
       } catch (std::runtime_error &e) {}
     }
 
     // reduce (with dimension argument and with 2 return arguments)
     if (t.dim() > 0 && t.numel() != 0) {
       auto ret = t.min(0);
-      assert(std::get<0>(ret).dim() == t.dim() - 1);
-      assert(std::get<1>(ret).dim() == t.dim() - 1);
+      ASSERT(std::get<0>(ret).dim() == t.dim() - 1);
+      ASSERT(std::get<1>(ret).dim() == t.dim() - 1);
     } else if (t.dim() == 0) {
       try {
         t.sum(0);
-        assert(false);
+        ASSERT(false);
       } catch (std::runtime_error &e) {}
     } else {
       // FIXME: you should be able to reduce over size {0}
       try {
         t.sum(0);
-        assert(false);
+        ASSERT(false);
       } catch (std::runtime_error &e) {}
     }
 
     // simple indexing
     if (t.dim() > 0 && t.numel() != 0) {
-      assert(t[0].dim() == std::max<int64_t>(t.dim() - 1, 0));
+      ASSERT(t[0].dim() == std::max<int64_t>(t.dim() - 1, 0));
     } else if (t.dim() == 0) {
       try {
         t[0];
-        assert(false);
+        ASSERT(false);
       } catch (std::runtime_error &e) {}
     }
   }
@@ -180,8 +181,8 @@ int main() {
           auto lhs = T.ones(*lhs_it);
           auto rhs = T.ones(*rhs_it);
           if(*lhs_it != *rhs_it) {
-            assert(!lhs.is_same_size(rhs));
-            assert(!rhs.is_same_size(lhs));
+            ASSERT(!lhs.is_same_size(rhs));
+            ASSERT(!rhs.is_same_size(lhs));
           }
       }
       // forced size functions (resize_, resize_as, set_)
@@ -216,7 +217,7 @@ int main() {
             auto storage = T.storage(rhs.numel());
             lhs.set_(*storage);
             // should not be dim 0 because an empty storage is dim 1; all other storages aren't scalars
-            assert(lhs.dim() != 0);
+            ASSERT(lhs.dim() != 0);
           }
           {
             // with storage, offset, sizes, strides
@@ -235,11 +236,11 @@ int main() {
           auto rhs = T.ones(*rhs_it);
           try {
             lhs.assign_(rhs);
-            assert(lhs_save.numel() == rhs.numel());
+            ASSERT(lhs_save.numel() == rhs.numel());
             // ensure didn't change shape
             assert_equal_size_dim(lhs, lhs_save);
           } catch (std::runtime_error &e) {
-            assert(lhs_save.numel() != rhs.numel());
+            ASSERT(lhs_save.numel() != rhs.numel());
           }
         }
       }
@@ -251,10 +252,10 @@ int main() {
         auto rhs_size = *rhs_it;
         try {
           auto result = lhs.view(rhs_size);
-          assert(lhs.numel() == rhs.numel());
+          ASSERT(lhs.numel() == rhs.numel());
           assert_equal_size_dim(result, rhs);
         } catch (std::runtime_error &e) {
-          assert(lhs.numel() != rhs.numel());
+          ASSERT(lhs.numel() != rhs.numel());
         }
       }
 
@@ -267,10 +268,10 @@ int main() {
         bool should_pass = should_expand(lhs_size, rhs_size);
         try {
           auto result = lhs.expand(rhs_size);
-          assert(should_pass);
+          ASSERT(should_pass);
           assert_equal_size_dim(result, rhs);
         } catch (std::runtime_error &e) {
-          assert(!should_pass);
+          ASSERT(!should_pass);
         }
 
         // in-place functions (would be good if we can also do a non-broadcasting one, b/c
@@ -280,10 +281,10 @@ int main() {
           bool should_pass_inplace = should_expand(rhs_size, lhs_size);
           try {
             lhs.add_(rhs);
-            assert(should_pass_inplace);
+            ASSERT(should_pass_inplace);
             assert_equal_size_dim(lhs, T.ones(*lhs_it));
           } catch (std::runtime_error &e) {
-            assert(!should_pass_inplace);
+            ASSERT(!should_pass_inplace);
           }
         }
       }
