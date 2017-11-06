@@ -3662,6 +3662,11 @@ class TestTorch(TestCase):
         self.assertEqual(tensor.std(), tensor.std(unbiased=True))
         self.assertEqual(tensor.std(unbiased=False), tensor.std(0, unbiased=False)[0])
 
+    def test_var_stability(self):
+        tensor = torch.FloatTensor([2281.5, 2281.25])
+        self.assertEqual(tensor.var(0)[0], 0.03125)
+        self.assertEqual(tensor.var(), 0.03125)
+
     def test_view(self):
         tensor = torch.rand(15)
         template = torch.rand(3, 5)

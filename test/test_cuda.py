@@ -971,6 +971,47 @@ class TestCuda(TestCase):
     def test_tensor_scatterFill(self):
         TestTorch._test_scatter_base(self, lambda t: t.cuda(), 'scatter_', True, test_bounds=False)
 
+    def test_var(self):
+        cpu_tensor = torch.randn(2, 3, 3)
+        gpu_tensor = cpu_tensor.cuda()
+        self.assertEqual(gpu_tensor.var(), cpu_tensor.var())
+        self.assertEqual(gpu_tensor.var(1), cpu_tensor.var(1))
+        self.assertEqual(gpu_tensor.var(2), cpu_tensor.var(2))
+        self.assertEqual(gpu_tensor.std(), cpu_tensor.std())
+        self.assertEqual(gpu_tensor.std(1), cpu_tensor.std(1))
+        self.assertEqual(gpu_tensor.var(2), cpu_tensor.var(2))
+
+        cpu_tensor = torch.randn(100)
+        gpu_tensor = cpu_tensor.cuda()
+        self.assertEqual(gpu_tensor.var(), cpu_tensor.var())
+
+    def test_var_unbiased(self):
+        tensor = torch.randn(100).cuda()
+        self.assertEqual(tensor.var(0), tensor.var(0, unbiased=True))
+        self.assertEqual(tensor.var(), tensor.var(unbiased=True))
+        self.assertEqual(tensor.var(unbiased=False), tensor.var(0, unbiased=False)[0])
+
+        tensor = torch.FloatTensor([1.0, 2.0]).cuda()
+        self.assertEqual(tensor.var(unbiased=True), 0.5)
+        self.assertEqual(tensor.var(unbiased=False), 0.25)
+
+        tensor = torch.randn(100).cuda()
+        self.assertEqual(tensor.std(0), tensor.std(0, unbiased=True))
+        self.assertEqual(tensor.std(), tensor.std(unbiased=True))
+        self.assertEqual(tensor.std(unbiased=False), tensor.std(0, unbiased=False)[0])
+
+    def test_var_large_input(self):
+        # Large, not-nice input
+        tensor_cpu = torch.randn(2 * 32 * 1024 + 1, 2, 67)
+        tensor_cuda = tensor_cpu.cuda()
+
+        self.assertEqual(tensor_cpu.var(2), tensor_cuda.var(2).cpu())
+
+    def test_var_stability(self):
+        tensor = torch.FloatTensor([2281.5, 2281.25]).cuda()
+        self.assertEqual(tensor.var(0)[0], 0.03125)
+        self.assertEqual(tensor.var(), 0.03125)
+
     def test_arange(self):
         for t in ['IntTensor', 'LongTensor', 'FloatTensor', 'DoubleTensor']:
             a = torch.cuda.__dict__[t]()
