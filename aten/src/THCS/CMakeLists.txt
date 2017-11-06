@@ -39,4 +39,4 @@ INSTALL(FILES
           generic/THCSTensor.h
           generic/THCSTensorMath.h
           generic/THCSTensorMath.cu
-          DESTINATION "$ATEN_INSTALL_INCLUDE_SUBDIR}/THCS/generic")
+          DESTINATION "${ATEN_INSTALL_INCLUDE_SUBDIR}/THCS/generic")
