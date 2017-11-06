@@ -32,6 +32,13 @@ set(CMAKE_CXX_FLAGS "--std=c++11 ${CMAKE_CXX_FLAGS}")
 ############################################
 # Flags
 # When using MSVC
+
+# Detect CUDA architecture and get best NVCC flags
+# finding cuda must be first because other things depend on the result
+IF(NOT CUDA_FOUND)
+  FIND_PACKAGE(CUDA 5.5)
+ENDIF()
+
 IF(MSVC)
   # we want to respect the standard, and we are bored of those **** .
   ADD_DEFINITIONS(-D_CRT_SECURE_NO_DEPRECATE=1)
@@ -44,8 +51,6 @@ IF (CMAKE_VERSION VERSION_LESS "3.1")
 ELSE ()
   SET(CMAKE_C_STANDARD 11)
 ENDIF ()
-
-
 
 if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
   if(CMAKE_CXX_COMPILER_VERSION VERSION_GREATER "4.9")
@@ -66,7 +71,6 @@ if(NOT CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
   SET(CMAKE_CXX_STANDARD 11)
 endif()
 
-# Detect CUDA architecture and get best NVCC flags
 IF(NOT COMMAND CUDA_SELECT_NVCC_ARCH_FLAGS)
   INCLUDE(${CMAKE_CURRENT_SOURCE_DIR}/cmake/select_compute_arch.cmake)
 ENDIF()
@@ -131,9 +135,6 @@ ENDIF (WITH_OPENMP)
 
 SET(CUDA_ATTACH_VS_BUILD_RULE_TO_CUDA_FILE OFF)
 
-IF(NOT CUDA_FOUND)
-  FIND_PACKAGE(CUDA 5.5)
-ENDIF()
 FIND_PACKAGE(MAGMA)
 IF(CUDA_FOUND AND MAGMA_FOUND)
   INCLUDE_DIRECTORIES("${MAGMA_INCLUDE_DIR}")
