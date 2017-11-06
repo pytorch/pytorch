@@ -61,13 +61,14 @@ class TestOptim(TestCase):
 
         self.assertLessEqual(params.data.dist(solution), initial_dist)
 
-    def _test_rosenbrock_sparse(self, constructor):
+    def _test_rosenbrock_sparse(self, constructor, sparse_only=False):
         params_t = torch.Tensor([1.5, 1.5])
 
-        params = Variable(torch.Tensor([1.5, 1.5]), requires_grad=True)
-        params_c = Variable(torch.Tensor([1.5, 1.5]), requires_grad=True)
+        params = Variable(params_t, requires_grad=True)
         optimizer = constructor([params])
-        optimizer_c = constructor([params_c])
+        if not sparse_only:
+            params_c = Variable(params_t.clone(), requires_grad=True)
+            optimizer_c = constructor([params_c])
 
         solution = torch.Tensor([1, 1])
         initial_dist = params.data.dist(solution)
@@ -99,8 +100,9 @@ class TestOptim(TestCase):
             # Do cyclic coordinate descent
             w = i % 2
             optimizer.step(functools.partial(eval, params, True, w))
-            optimizer_c.step(functools.partial(eval, params_c, False, w))
-            self.assertEqual(params.data, params_c.data)
+            if not sparse_only:
+                optimizer_c.step(functools.partial(eval, params_c, False, w))
+                self.assertEqual(params.data, params_c.data)
 
         self.assertLessEqual(params.data.dist(solution), initial_dist)
 
@@ -229,6 +231,11 @@ class TestOptim(TestCase):
                 lr=1e-3)
         )
 
+    def test_sgd_sparse(self):
+        self._test_rosenbrock_sparse(
+            lambda params: optim.SGD(params, lr=5e-3)
+        )
+
     def test_adam(self):
         self._test_rosenbrock(
             lambda params: optim.Adam(params, lr=1e-2),
@@ -245,6 +252,12 @@ class TestOptim(TestCase):
             lambda weight, bias: optim.Adam(
                 self._build_params_dict(weight, bias, lr=1e-2),
                 lr=1e-3)
+        )
+
+    def test_sparse_adam(self):
+        self._test_rosenbrock_sparse(
+            lambda params: optim.SparseAdam(params, lr=4e-2),
+            True
         )
 
     def test_adadelta(self):
