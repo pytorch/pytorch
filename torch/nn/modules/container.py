@@ -1,8 +1,17 @@
-from collections import OrderedDict
+from collections import OrderedDict, Iterable
 import string
 import torch
 import warnings
 from .module import Module
+
+
+def _addPrefix(s_, prefix):
+    if prefix is None:
+        return s_
+    if len(s_) == 0:
+        return prefix
+    else:
+        return prefix + "." + s_
 
 
 class Container(Module):
@@ -75,7 +84,7 @@ class ModuleList(Module):
     contains are properly registered, and will be visible by all Module methods.
 
     Arguments:
-        modules (list, optional): a list of modules to add
+        modules (iterable, optional): an iterable of modules to add
 
     Example::
 
@@ -97,11 +106,17 @@ class ModuleList(Module):
             self += modules
 
     def __getitem__(self, idx):
-        if not (-len(self) <= idx < len(self)):
-            raise IndexError('index {} is out of range'.format(idx))
-        if idx < 0:
-            idx += len(self)
-        return self._modules[str(idx)]
+        if isinstance(idx, int):
+            if not (-len(self) <= idx < len(self)):
+                raise IndexError('index {} is out of range'.format(idx))
+            if idx < 0:
+                idx += len(self)
+            items = self._modules.items()
+            if not isinstance(items, list):
+                items = list(items)
+            return items[idx][1]
+        else:
+            return self._modules[idx]
 
     def __setitem__(self, idx, module):
         return setattr(self, str(idx), module)
@@ -115,27 +130,38 @@ class ModuleList(Module):
     def __iadd__(self, modules):
         return self.extend(modules)
 
-    def append(self, module):
-        r"""Appends a given module at the end of the list.
+    def append(self, module, prefix=None):
+        r"""Appends a given module to the end of the list.
 
         Arguments:
-            module (nn.Module): module to append
+            module (nn.Module or tuple (str, nn.Module)): module to append
         """
-        self.add_module(str(len(self)), module)
+        if isinstance(module, tuple):
+            k, module = module
+            module_key = _addPrefix(str(k), prefix)
+        else:
+            module_key = _addPrefix(str(len(self)), prefix)
+        self.add_module(module_key, module)
         return self
 
-    def extend(self, modules):
-        r"""Appends modules from a Python list at the end.
+    def extend(self, modules, prefix=None):
+        r"""Appends modules from a Python iterable to the end of the list.
 
         Arguments:
-            modules (list): list of modules to append
+            modules (iterable): iterable of modules to append
         """
-        if not isinstance(modules, list):
+        if not isinstance(modules, Iterable) or isinstance(modules, str):
             raise TypeError("ModuleList.extend should be called with a "
-                            "list, but got " + type(modules).__name__)
+                            "non-string iterable, but got " +
+                            type(modules).__name__)
         offset = len(self)
         for i, module in enumerate(modules):
-            self.add_module(str(offset + i), module)
+            if isinstance(module, tuple):
+                k, module = module
+                module_key = _addPrefix(str(k), prefix)
+            else:
+                module_key = _addPrefix(str(len(self)), prefix)
+            self.add_module(module_key, module)
         return self
 
 
@@ -146,7 +172,7 @@ class ParameterList(Module):
     contains are properly registered, and will be visible by all Module methods.
 
     Arguments:
-        modules (list, optional): a list of :class:`~torch.nn.Parameter`` to add
+        parameters (iterable, optional): an iterable of :class:`~torch.nn.Parameter`` to add
 
     Example::
 
@@ -156,7 +182,7 @@ class ParameterList(Module):
                 self.params = nn.ParameterList([nn.Parameter(torch.randn(10, 10)) for i in range(10)])
 
             def forward(self, x):
-                # ModuleList can act as an iterable, or be indexed using ints
+                # ParameterList can act as an iterable, or be indexed using ints
                 for i, p in enumerate(self.params):
                     x = self.params[i // 2].mm(x) + p.mm(x)
                 return x
@@ -168,11 +194,17 @@ class ParameterList(Module):
             self += parameters
 
     def __getitem__(self, idx):
-        if not (-len(self) <= idx < len(self)):
-            raise IndexError('index {} is out of range'.format(idx))
-        if idx < 0:
-            idx += len(self)
-        return self._parameters[str(idx)]
+        if isinstance(idx, int):
+            if not (-len(self) <= idx < len(self)):
+                raise IndexError('index {} is out of range'.format(idx))
+            if idx < 0:
+                idx += len(self)
+            items = self._parameters.items()
+            if not isinstance(items, list):
+                items = list(items)
+            return items[idx][1]
+        else:
+            return self._parameters[idx]
 
     def __setitem__(self, idx, param):
         return self.register_parameter(str(idx), param)
@@ -186,25 +218,47 @@ class ParameterList(Module):
     def __iadd__(self, parameters):
         return self.extend(parameters)
 
-    def append(self, parameter):
+    def append(self, parameter, prefix=None):
         """Appends a given parameter at the end of the list.
 
         Arguments:
             parameter (nn.Parameter): parameter to append
         """
-        self.register_parameter(str(len(self)), parameter)
+        if isinstance(parameter, tuple):
+            k, parameter = parameter
+            param_key = _addPrefix(str(k), prefix)
+        else:
+            param_key = _addPrefix(str(len(self)), prefix)
+        self.register_parameter(param_key, parameter)
         return self
 
-    def extend(self, parameters):
-        """Appends parameters from a Python list at the end.
+    def extend(self, parameters, prefix=None):
+        """Appends parameters from a Python iterable to the end of the list.
 
         Arguments:
-            parameters (list): list of parameters to append
+            parameters (iterable): iterable of parameters to append
         """
-        if not isinstance(parameters, list):
-            raise TypeError("ParameterList.extend should be called with a "
-                            "list, but got " + type(parameters).__name__)
+        if not isinstance(parameters, Iterable) or isinstance(parameters, str):
+            raise TypeError("ParameterList.extend should be called with an "
+                            "iterable, but got " + type(parameters).__name__)
         offset = len(self)
         for i, param in enumerate(parameters):
-            self.register_parameter(str(offset + i), param)
+            if isinstance(param, tuple):
+                k, param = param
+                param_key = _addPrefix(str(k), prefix)
+            else:
+                param_key = _addPrefix(str(offset + i), prefix)
+            self.register_parameter(param_key, param)
         return self
+
+    def __repr__(self):
+        tmpstr = self.__class__.__name__ + '(\n'
+        for k, p in self._parameters.items():
+            size_str = 'x'.join(str(size) for size in p.size())
+            device_str = '' if not p.is_cuda else \
+                ' (GPU {})'.format(p.get_device())
+            parastr = '[Parameter ({}) of size {}{}]'.format(
+                torch.typename(p.data), size_str, device_str)
+            tmpstr = tmpstr + '  (' + k + '): ' + parastr + '\n'
+        tmpstr = tmpstr + ')'
+        return tmpstr
