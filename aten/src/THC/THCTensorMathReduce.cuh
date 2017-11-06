@@ -373,50 +373,118 @@ __host__ void THCTensor_varOuterDim(THCState *state, TensorTypeK *tgt, TensorTyp
  * considered as having 'num_rows' rows of size 'row_size'.
  * Each thread block processes one or more sets of contiguous rows (processing multiple rows
  * per thread block is quicker than processing a single row, especially for short rows).
+ *
+ * Uses Welford's algorithm for numeric stability. Divides the dataset into parallel groups
+ * and computes the M2 and mean for each group. (M2 is \sum (x - \bar{x})^2)
+ * For example, if the data is split into two groups x and y, the overall M2 can
+ * be computed by:
+ *
+ *    overall_M2 = M2x + nx * (mean(x) - overall_mean)^2
+ *               + M2y + ny * (mean(x) - overall_mean)^2
+ *
  */
-template<typename Real, bool flag, bool apply_sqrt>
+template<typename Real, typename Accreal, bool flag, bool apply_sqrt>
 __global__ void THCTensor_kernel_varInnermostDim(Real *tgt, Real *src_, unsigned num_rows, unsigned row_size)
 {
-  __shared__ Real ssum[32][16];
-  __shared__ Real ssum2[32][16];
+  __shared__ Accreal mean[16];
+  __shared__ Accreal local_sum[32][16];
+  __shared__ Accreal adjusted_M2[32][16];
 
+  // Each block computes the var/std of blockDim.x (16) rows at once
   for (unsigned block_row = blockIdx.x * blockDim.y; block_row < num_rows; block_row += blockDim.y * gridDim.x) {
     unsigned row = block_row + threadIdx.y;
-    Real sum = ScalarConvert<int, Real>::to(0), sum2 = ScalarConvert<int, Real>::to(0);
+
+    /*
+     * Compute local mean, local M2 via Welford's algorithm
+     * in blockDim.y threads through sequential reduction in each thread.
+     */
+    Accreal local_mean = ScalarConvert<int, Accreal>::to(0);
+    Accreal local_M2 = ScalarConvert<int, Accreal>::to(0);
+    unsigned count = 0;
+
     if (row < num_rows) {
       Real *src = src_ + row * row_size;
-      // Sequential reduction within a thread.
+
       for (unsigned col = threadIdx.x; col < row_size; col += blockDim.x) {
-        Real val = src[col];
-        sum = THCNumerics<Real>::add(sum, val);
-        sum2 = THCNumerics<Real>::add(sum2, THCNumerics<Real>::mul(val, val));
+        ++count;
+        Accreal val = ScalarConvert<Real, Accreal>::to(src[col]);
+        Accreal delta = THCNumerics<Accreal>::sub(val, local_mean);
+        local_mean = THCNumerics<Accreal>::add(
+            local_mean,
+            THCNumerics<Accreal>::div(delta, ScalarConvert<int, Accreal>::to(count)));
+        Accreal delta2 = THCNumerics<Accreal>::sub(val, local_mean);
+        local_M2 = THCNumerics<Accreal>::add(
+            local_M2,
+            THCNumerics<Accreal>::mul(delta, delta2));
       }
     }
-    ssum[threadIdx.y][threadIdx.x] = sum;
-    ssum2[threadIdx.y][threadIdx.x] = sum2;
+
+    local_sum[threadIdx.y][threadIdx.x] =
+        THCNumerics<Accreal>::mul(local_mean, ScalarConvert<int, Accreal>::to(count));
     __syncthreads();
 
-    // Reduce intermediate values to single value.
+
+    // Compute the true mean of each of the blockDim.x rows by reducing the sums
     for (unsigned s = 8; s > 1; s >>= 1) {
       if (row < num_rows && threadIdx.x < s) {
-        ssum[threadIdx.y][threadIdx.x] =
-          THCNumerics<Real>::add(ssum[threadIdx.y][threadIdx.x], ssum[threadIdx.y][threadIdx.x + s]);
-        ssum2[threadIdx.y][threadIdx.x] =
-          THCNumerics<Real>::add(ssum2[threadIdx.y][threadIdx.x], ssum2[threadIdx.y][threadIdx.x + s]);
+        local_sum[threadIdx.y][threadIdx.x] = THCNumerics<Accreal>::add(
+            local_sum[threadIdx.y][threadIdx.x],
+            local_sum[threadIdx.y][threadIdx.x + s]);
       }
       __syncthreads();
     }
 
     if (row < num_rows && threadIdx.x == 0) {
-      sum = THCNumerics<Real>::add(ssum[threadIdx.y][0], ssum[threadIdx.y][1]);
-      sum2 = THCNumerics<Real>::add(ssum2[threadIdx.y][0], ssum2[threadIdx.y][1]);
-      tgt[row] = THCTensor_computeVar<Real, flag, apply_sqrt>(sum, sum2, row_size);
+      mean[threadIdx.y] = THCNumerics<Accreal>::div(
+          THCNumerics<Accreal>::add(local_sum[threadIdx.y][0], local_sum[threadIdx.y][1]),
+          ScalarConvert<int, Accreal>::to(row_size));
+    }
+    __syncthreads();
+
+
+    /*
+     * Adjust each local_M2 according to the following:
+     *   adjusted_M2 = local_M2 + mean_diff * mean_diff * count
+     * The sum of these adjusted M2s is equal to the overall M2.
+     */
+    if (row < num_rows) {
+      Accreal mean_diff = THCNumerics<Accreal>::sub(mean[threadIdx.y], local_mean);
+      adjusted_M2[threadIdx.y][threadIdx.x] = THCNumerics<Accreal>::add(
+          local_M2,
+          THCNumerics<Accreal>::mul(
+              THCNumerics<Accreal>::mul(mean_diff, mean_diff),
+              ScalarConvert<int, Accreal>::to(count)));
+    }
+    __syncthreads();
+
+
+    // Sum the adjusted M2s to get the M2 for each of the blockDim.x rows
+    for (unsigned s = 8; s > 1; s >>= 1) {
+      if (row < num_rows && threadIdx.x < s) {
+        adjusted_M2[threadIdx.y][threadIdx.x] =
+          THCNumerics<Accreal>::add(
+              adjusted_M2[threadIdx.y][threadIdx.x],
+              adjusted_M2[threadIdx.y][threadIdx.x + s]);
+      }
+      __syncthreads();
+    }
+
+    if (row < num_rows && threadIdx.x == 0) {
+      Accreal M2 = THCNumerics<Accreal>::add(adjusted_M2[threadIdx.y][0], adjusted_M2[threadIdx.y][1]);
+      Accreal variance;
+      if (flag) {
+        variance = THCNumerics<Accreal>::div(M2, ScalarConvert<int, Accreal>::to(row_size));
+      } else {
+        variance = THCNumerics<Accreal>::div(M2, ScalarConvert<int, Accreal>::to(row_size - 1));
+      }
+      tgt[row] = ScalarConvert<Accreal, Real>::to(
+          apply_sqrt ? THCNumerics<Accreal>::sqrt(variance) : variance);
     }
     __syncthreads();
   }
 }
 
-template<typename TensorTypeK, typename Real, bool apply_sqrt>
+template<typename TensorTypeK, typename Real, typename Accreal, bool apply_sqrt>
 __host__ void THCTensor_varInnermostDim(THCState *state, TensorTypeK *tgt, TensorTypeK *src, int flag)
 {
   unsigned ndim = TensorUtils<TensorTypeK>::getDims(state, src);
@@ -432,10 +500,10 @@ __host__ void THCTensor_varInnermostDim(THCState *state, TensorTypeK *tgt, Tenso
   dim3 grid(min(1024, THCCeilDiv(num_rows, threads.y)));
 
   if (flag) {
-    THCTensor_kernel_varInnermostDim<Real, true, apply_sqrt><<<grid, threads, 0, THCState_getCurrentStream(state)>>>(
+    THCTensor_kernel_varInnermostDim<Real, Accreal, true, apply_sqrt><<<grid, threads, 0, THCState_getCurrentStream(state)>>>(
         TensorUtils<TensorTypeK>::getData(state, tgt), TensorUtils<TensorTypeK>::getData(state, src), num_rows, row_size);
   } else {
-    THCTensor_kernel_varInnermostDim<Real, false, apply_sqrt><<<grid, threads, 0, THCState_getCurrentStream(state)>>>(
+    THCTensor_kernel_varInnermostDim<Real, Accreal, false, apply_sqrt><<<grid, threads, 0, THCState_getCurrentStream(state)>>>(
         TensorUtils<TensorTypeK>::getData(state, tgt), TensorUtils<TensorTypeK>::getData(state, src), num_rows, row_size);
   }
   cudaError errcode = cudaGetLastError();
