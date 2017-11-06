@@ -1498,13 +1498,14 @@ class TestAutograd(TestCase):
     def test_norm_subgradient(self):
         def run_test(input_size, norm_deg):
             input = Variable(torch.zeros(*input_size), requires_grad=True)
-            out = input.norm(norm_deg)
-            out.backward()
+            input.norm(norm_deg).backward()
             self.assertEqual(input.grad.data.abs().sum(), 0)
 
         run_test((10,), 2)
         run_test((10, 10), 2)
         run_test((10,), 3)
+        run_test((10,), 1)
+        run_test((10,), 1.5)
 
     def test_profiler(self):
         x = Variable(torch.randn(10, 10))
@@ -1809,8 +1810,14 @@ method_tests = [
     ('addcdiv', (S, S), (0.5, (S, 1), (1, S)), 'scale_broadcast_rhs'),
     ('addcdiv', (1,), (0.5, (S, S, 1), (1, S)), 'scale_broadcast_all'),
     ('zero_', (S, S, S), ()),
-    ('norm', (S, S, S), (2,)),
-    ('norm', (S, S, S), (3,), '3'),
+    ('norm', (S, S), (2,)),
+    ('norm', (S, S), (0,), '0'),
+    ('norm', (S, S), (0.5,), '0_5'),
+    ('norm', (S, S), (1,), '1'),
+    ('norm', (S, S), (3,), '3'),
+    ('norm', (S, S), (-1,), 'neg_1'),
+    ('norm', (S, S), (-0.5,), 'neg_0_5'),
+    ('norm', (S, S), (-1.5,), 'neg_1_5'),
     ('norm', torch.rand(S, S, S) + 5e-2, (1.5,), '1_5'),
     ('norm', (S, S, S), (2, 1), '2_dim', [1]),
     ('norm', (S, S, S), (3, 1), '3_dim', [1]),
