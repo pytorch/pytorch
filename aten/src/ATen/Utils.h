@@ -2,6 +2,7 @@
 
 #include "ArrayRef.h"
 #include "ATenGeneral.h"
+#include "UndefinedTensor.h"
 #include <algorithm>
 #include <sstream>
 #include <typeinfo>
@@ -14,7 +15,18 @@ namespace at {
 AT_API void runtime_error(const char *format, ...);
 
 template <typename T, typename Base>
-static inline T* checked_cast(Base* expr, const char * name, int pos, bool allowNull) {
+static inline T* checked_cast_storage(Base* expr, const char * name, int pos) {
+  if (typeid(*expr) != typeid(T))
+    runtime_error("Expected object of type %s but found type %s for argument #%d '%s'",
+      T::typeString(),expr->type().toString(),pos,name);
+  return static_cast<T*>(expr);
+}
+
+template <typename T, typename Base>
+inline T* checked_cast_tensor(Base* expr, const char * name, int pos, bool allowNull) {
+  if(allowNull && expr == UndefinedTensor::singleton()) {
+    return nullptr;
+  }
   if (typeid(*expr) != typeid(T))
     runtime_error("Expected object of type %s but found type %s for argument #%d '%s'",
       T::typeString(),expr->type().toString(),pos,name);
