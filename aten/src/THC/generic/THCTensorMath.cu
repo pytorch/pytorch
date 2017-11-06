@@ -224,7 +224,7 @@ void THCTensor_(catArray)(THCState *state, THCTensor *result,
         stackInputs[j].offset = offset;
         stackInputs[j].dimSize = dimSize;
         stackInputs[j].nElements = THCTensor_(nElement)(state, inputs[i+j]);
-        cohortMax = cohortMax > stackInputs[j].nElements ? cohortMax : stackInputs[j].nElements;
+        cohortMax = cohortMax > (int) stackInputs[j].nElements ? cohortMax : (int) stackInputs[j].nElements;
 
         // update offset
         offset += dimSize;

@@ -53,6 +53,7 @@ __global__ void cunn_LookupTableBag_updateOutputKernel(
 	weightFeatSum = weightFeatSum / ScalarConvert<int64_t, Acctype>::to(bag_size_);
 	bag_size[bag] = bag_size_;
       }
+      (void) MODE_SUM; //silence warnings about unused MODE_SUM;
       output[bag * stride + featureDim] = ScalarConvert<Acctype, Dtype>::to(weightFeatSum);
     }
   }

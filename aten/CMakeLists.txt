@@ -1,5 +1,10 @@
 cmake_minimum_required(VERSION 3.0)
-set(CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake/FindCUDA ${CMAKE_MODULE_PATH})
+set(CMAKE_MODULE_PATH
+  ${CMAKE_CURRENT_SOURCE_DIR}/cmake
+  ${CMAKE_CURRENT_SOURCE_DIR}/cmake/FindCUDA
+  /usr/lib/x86_64-linux-gnu/
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/TH/cmake
+  ${CMAKE_MODULE_PATH})
 project(ATen)
 
 cmake_policy(SET CMP0012 NEW)
@@ -22,7 +27,331 @@ endif()
 # C++11
 set(CMAKE_CXX_FLAGS "--std=c++11 ${CMAKE_CXX_FLAGS}")
 
-# TH stuff
+
+# Top-level build config
+############################################
+# Flags
+# When using MSVC
+
+# Detect CUDA architecture and get best NVCC flags
+# finding cuda must be first because other things depend on the result
+IF(NOT CUDA_FOUND)
+  FIND_PACKAGE(CUDA 5.5)
+ENDIF()
+
+IF(MSVC)
+  # we want to respect the standard, and we are bored of those **** .
+  ADD_DEFINITIONS(-D_CRT_SECURE_NO_DEPRECATE=1)
+  LIST(APPEND CUDA_NVCC_FLAGS "-Xcompiler /wd4819 -Xcompiler /wd4503")
+  ADD_DEFINITIONS(-DTH_EXPORTS)
+ENDIF(MSVC)
+
+IF (CMAKE_VERSION VERSION_LESS "3.1")
+  SET(CMAKE_C_FLAGS "-std=c11 ${CMAKE_C_FLAGS}")
+ELSE ()
+  SET(CMAKE_C_STANDARD 11)
+ENDIF ()
+
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+  if(CMAKE_CXX_COMPILER_VERSION VERSION_GREATER "4.9")
+    if(CUDA_VERSION VERSION_LESS "8.0")
+      MESSAGE(STATUS "Found gcc >=5 and CUDA <= 7.5, adding workaround C++ flags")
+      set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -D_FORCE_INLINES -D_MWAITXINTRIN_H_INCLUDED -D__STRICT_ANSI__")
+    endif(CUDA_VERSION VERSION_LESS "8.0")
+  endif(CMAKE_CXX_COMPILER_VERSION VERSION_GREATER "4.9")
+endif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+
+if(CUDA_VERSION VERSION_GREATER "8.0")
+
+endif(CUDA_VERSION VERSION_GREATER "8.0")
+
+LIST(APPEND CUDA_NVCC_FLAGS -Wno-deprecated-gpu-targets)
+
+if(NOT CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+  SET(CMAKE_CXX_STANDARD 11)
+endif()
+
+IF(NOT COMMAND CUDA_SELECT_NVCC_ARCH_FLAGS)
+  INCLUDE(${CMAKE_CURRENT_SOURCE_DIR}/cmake/select_compute_arch.cmake)
+ENDIF()
+LIST(APPEND CUDA_NVCC_FLAGS $ENV{TORCH_NVCC_FLAGS})
+CUDA_SELECT_NVCC_ARCH_FLAGS(NVCC_FLAGS_EXTRA $ENV{TORCH_CUDA_ARCH_LIST})
+LIST(APPEND CUDA_NVCC_FLAGS ${NVCC_FLAGS_EXTRA})
+IF(CMAKE_POSITION_INDEPENDENT_CODE)
+  LIST(APPEND CUDA_NVCC_FLAGS "-Xcompiler -fPIC")
+ENDIF()
+
+IF(CUDA_HAS_FP16 OR NOT ${CUDA_VERSION} LESS 7.5)
+  MESSAGE(STATUS "Found CUDA with FP16 support, compiling with torch.CudaHalfTensor")
+  LIST(APPEND CUDA_NVCC_FLAGS "-DCUDA_HAS_FP16=1")
+  SET(CMAKE_C_FLAGS "-DCUDA_HAS_FP16=1 ${CMAKE_C_FLAGS}")
+ELSE(CUDA_HAS_FP16 OR NOT ${CUDA_VERSION} LESS 7.5)
+  MESSAGE(STATUS "Could not find CUDA with FP16 support, compiling without torch.CudaHalfTensor")
+ENDIF(CUDA_HAS_FP16 OR NOT ${CUDA_VERSION} LESS 7.5)
+
+OPTION(NDEBUG "disable asserts (WARNING: this may result in silent UB e.g. with out-of-bound indices)")
+IF(NOT NDEBUG)
+  MESSAGE(STATUS "Removing -DNDEBUG from compile flags")
+  STRING(REPLACE "-DNDEBUG" "" CMAKE_C_FLAGS "" ${CMAKE_C_FLAGS})
+  STRING(REPLACE "-DNDEBUG" "" CMAKE_C_FLAGS_DEBUG "" ${CMAKE_C_FLAGS_DEBUG})
+  STRING(REPLACE "-DNDEBUG" "" CMAKE_C_FLAGS_RELEASE "" ${CMAKE_C_FLAGS_RELEASE})
+  STRING(REPLACE "-DNDEBUG" "" CMAKE_CXX_FLAGS "" ${CMAKE_CXX_FLAGS})
+  STRING(REPLACE "-DNDEBUG" "" CMAKE_CXX_FLAGS_DEBUG "" ${CMAKE_CXX_FLAGS_DEBUG})
+  STRING(REPLACE "-DNDEBUG" "" CMAKE_CXX_FLAGS_RELEASE "" ${CMAKE_CXX_FLAGS_RELEASE})
+ENDIF()
+
+if(CUDA_VERSION VERSION_GREATER "8.0")
+  LIST(APPEND CUDA_NVCC_FLAGS "-D__CUDA_NO_HALF_OPERATORS__")
+endif(CUDA_VERSION VERSION_GREATER "8.0")
+
+# OpenMP support?
+SET(WITH_OPENMP ON CACHE BOOL "OpenMP support if available?")
+IF (APPLE AND CMAKE_COMPILER_IS_GNUCC)
+  EXEC_PROGRAM (uname ARGS -v  OUTPUT_VARIABLE DARWIN_VERSION)
+  STRING (REGEX MATCH "[0-9]+" DARWIN_VERSION ${DARWIN_VERSION})
+  MESSAGE (STATUS "MAC OS Darwin Version: ${DARWIN_VERSION}")
+  IF (DARWIN_VERSION GREATER 9)
+    SET(APPLE_OPENMP_SUCKS 1)
+  ENDIF (DARWIN_VERSION GREATER 9)
+  EXECUTE_PROCESS (COMMAND ${CMAKE_C_COMPILER} -dumpversion
+    OUTPUT_VARIABLE GCC_VERSION)
+  IF (APPLE_OPENMP_SUCKS AND GCC_VERSION VERSION_LESS 4.6.2)
+    MESSAGE(STATUS "Warning: Disabling OpenMP (unstable with this version of GCC)")
+    MESSAGE(STATUS " Install GCC >= 4.6.2 or change your OS to enable OpenMP")
+    SET(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wno-unknown-pragmas")
+    SET(WITH_OPENMP OFF CACHE BOOL "OpenMP support if available?" FORCE)
+  ENDIF ()
+ENDIF ()
+
+IF (WITH_OPENMP)
+  FIND_PACKAGE(OpenMP)
+  IF(OPENMP_FOUND)
+    MESSAGE(STATUS "Compiling with OpenMP support")
+    SET(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${OpenMP_C_FLAGS}")
+    SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_CXX_FLAGS}")
+    SET(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${OpenMP_EXE_LINKER_FLAGS}")
+  ENDIF(OPENMP_FOUND)
+ENDIF (WITH_OPENMP)
+
+SET(CUDA_ATTACH_VS_BUILD_RULE_TO_CUDA_FILE OFF)
+
+FIND_PACKAGE(MAGMA)
+IF(CUDA_FOUND AND MAGMA_FOUND)
+  INCLUDE_DIRECTORIES("${MAGMA_INCLUDE_DIR}")
+  SET(CMAKE_REQUIRED_INCLUDES "${MAGMA_INCLUDE_DIR};${CUDA_INCLUDE_DIRS}")
+  INCLUDE(CheckPrototypeDefinition)
+  check_prototype_definition(magma_get_sgeqrf_nb
+   "magma_int_t magma_get_sgeqrf_nb( magma_int_t m, magma_int_t n );"
+   "0"
+   "magma.h"
+    MAGMA_V2)
+  IF (MAGMA_V2)
+    add_definitions(-DMAGMA_V2)
+  ENDIF (MAGMA_V2)
+
+  SET(USE_MAGMA 1)
+  MESSAGE(STATUS "Compiling with MAGMA support")
+  MESSAGE(STATUS "MAGMA INCLUDE DIRECTORIES: ${MAGMA_INCLUDE_DIR}")
+  MESSAGE(STATUS "MAGMA LIBRARIES: ${MAGMA_LIBRARIES}")
+  MESSAGE(STATUS "MAGMA V2 check: ${MAGMA_V2}")
+ELSE()
+  MESSAGE(STATUS "MAGMA not found. Compiling without MAGMA support")
+ENDIF()
+
+
+# ARM specific flags
+FIND_PACKAGE(ARM)
+IF (ASIMD_FOUND)
+  MESSAGE(STATUS "asimd/Neon found with compiler flag : -D__NEON__")
+  SET(CMAKE_C_FLAGS "-D__NEON__ ${CMAKE_C_FLAGS}")
+ELSEIF (NEON_FOUND)
+  MESSAGE(STATUS "Neon found with compiler flag : -mfpu=neon -D__NEON__")
+  SET(CMAKE_C_FLAGS "-mfpu=neon -D__NEON__ ${CMAKE_C_FLAGS}")
+ENDIF (ASIMD_FOUND)
+IF (CORTEXA8_FOUND)
+  MESSAGE(STATUS "Cortex-A8 Found with compiler flag : -mcpu=cortex-a8")
+  SET(CMAKE_C_FLAGS "-mcpu=cortex-a8 -fprefetch-loop-arrays ${CMAKE_C_FLAGS}")
+ENDIF (CORTEXA8_FOUND)
+IF (CORTEXA9_FOUND)
+  MESSAGE(STATUS "Cortex-A9 Found with compiler flag : -mcpu=cortex-a9")
+  SET(CMAKE_C_FLAGS "-mcpu=cortex-a9 ${CMAKE_C_FLAGS}")
+ENDIF (CORTEXA9_FOUND)
+
+IF(UNIX)
+  # prevent Unknown CMake command "check_function_exists".
+  INCLUDE(CheckFunctionExists)
+ENDIF(UNIX)
+
+INCLUDE (CheckIncludeFile)
+INCLUDE (CheckCSourceCompiles)
+CHECK_INCLUDE_FILE(cpuid.h HAVE_CPUID_H)
+# Check for a cpuid intrinsic
+IF(HAVE_CPUID_H)
+    CHECK_C_SOURCE_COMPILES("#include <cpuid.h>
+        int main()
+        {
+            unsigned int eax, ebx, ecx, edx;
+            return __get_cpuid(0, &eax, &ebx, &ecx, &edx);
+        }" HAVE_GCC_GET_CPUID)
+ENDIF()
+IF(HAVE_GCC_GET_CPUID)
+  SET(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -DHAVE_GCC_GET_CPUID")
+ENDIF(HAVE_GCC_GET_CPUID)
+
+CHECK_C_SOURCE_COMPILES("#include <stdint.h>
+    static inline void cpuid(uint32_t *eax, uint32_t *ebx,
+    			 uint32_t *ecx, uint32_t *edx)
+    {
+      uint32_t a = *eax, b, c = *ecx, d;
+      asm volatile ( \"cpuid\" : \"+a\"(a), \"=b\"(b), \"+c\"(c), \"=d\"(d) );
+      *eax = a; *ebx = b; *ecx = c; *edx = d;
+    }
+    int main() {
+      uint32_t a,b,c,d;
+      cpuid(&a, &b, &c, &d);
+      return 0;
+    }" NO_GCC_EBX_FPIC_BUG)
+
+IF(NOT NO_GCC_EBX_FPIC_BUG)
+  SET(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -DUSE_GCC_GET_CPUID")
+ENDIF(NOT NO_GCC_EBX_FPIC_BUG)
+
+FIND_PACKAGE(SSE) # checks SSE, AVX and AVX2
+IF(C_SSE2_FOUND)
+  MESSAGE(STATUS "SSE2 Found")
+  SET(CMAKE_C_FLAGS "${C_SSE2_FLAGS} -DUSE_SSE2 ${CMAKE_C_FLAGS}")
+ENDIF(C_SSE2_FOUND)
+IF(C_SSE4_1_FOUND AND C_SSE4_2_FOUND)
+  SET(CMAKE_C_FLAGS "${C_SSE4_1_FLAGS} -DUSE_SSE4_1 ${C_SSE4_2_FLAGS} -DUSE_SSE4_2 ${CMAKE_C_FLAGS}")
+ENDIF()
+IF(C_SSE3_FOUND)
+  MESSAGE(STATUS "SSE3 Found")
+  SET(CMAKE_C_FLAGS "${C_SSE3_FLAGS} -DUSE_SSE3 ${CMAKE_C_FLAGS}")
+ENDIF(C_SSE3_FOUND)
+
+# we don't set -mavx and -mavx2 flags globally, but only for specific files
+# however, we want to enable the AVX codepaths, so we still need to
+# add USE_AVX and USE_AVX2 macro defines
+IF(C_AVX_FOUND)
+  MESSAGE(STATUS "AVX Found")
+  SET(CMAKE_C_FLAGS "-DUSE_AVX ${CMAKE_C_FLAGS}")
+ENDIF(C_AVX_FOUND)
+IF(C_AVX2_FOUND)
+  MESSAGE(STATUS "AVX2 Found")
+  SET(CMAKE_C_FLAGS "-DUSE_AVX2 ${CMAKE_C_FLAGS}")
+ENDIF(C_AVX2_FOUND)
+
+CHECK_C_SOURCE_RUNS("
+#include <stdatomic.h>
+// ATOMIC_INT_LOCK_FREE is flaky on some older gcc versions
+// so if this define is not usable a preprocessor definition
+// we fail this check and fall back to GCC atomics
+#if ATOMIC_INT_LOCK_FREE == 2
+#define TH_ATOMIC_IPC_REFCOUNT 1
+#endif
+int main()
+{
+  int a;
+  int oa;
+  atomic_store(&a, 1);
+  atomic_fetch_add(&a, 1);
+  oa = atomic_load(&a);
+  if(!atomic_compare_exchange_strong(&a, &oa, 3))
+    return -1;
+  return 0;
+}
+" HAS_C11_ATOMICS)
+
+IF(NOT HAS_C11_ATOMICS)
+  CHECK_C_SOURCE_RUNS("
+#include <intrin.h>
+int main()
+{
+  long a;
+  _InterlockedExchange(&a, 1);
+  _InterlockedExchangeAdd(&a, 1);
+  if(_InterlockedCompareExchange(&a, 3, 2) != 2)
+    return -1;
+  return 0;
+}
+" HAS_MSC_ATOMICS)
+
+  CHECK_C_SOURCE_RUNS("
+int main()
+{
+  int a;
+  __sync_lock_test_and_set(&a, 1);
+  __sync_fetch_and_add(&a, 1);
+  if(!__sync_bool_compare_and_swap(&a, 2, 3))
+    return -1;
+  return 0;
+}
+" HAS_GCC_ATOMICS)
+ENDIF()
+
+IF(HAS_C11_ATOMICS)
+  ADD_DEFINITIONS(-DUSE_C11_ATOMICS=1)
+  MESSAGE(STATUS "Atomics: using C11 intrinsics")
+ELSEIF(HAS_MSC_ATOMICS)
+  ADD_DEFINITIONS(-DUSE_MSC_ATOMICS=1)
+  MESSAGE(STATUS "Atomics: using MSVC intrinsics")
+ELSEIF(HAS_GCC_ATOMICS)
+  ADD_DEFINITIONS(-DUSE_GCC_ATOMICS=1)
+    MESSAGE(STATUS "Atomics: using GCC intrinsics")
+ELSE()
+  SET(CMAKE_THREAD_PREFER_PTHREAD TRUE)
+  FIND_PACKAGE(Threads)
+  IF(THREADS_FOUND)
+    ADD_DEFINITIONS(-DUSE_PTHREAD_ATOMICS=1)
+    TARGET_LINK_LIBRARIES(TH ${CMAKE_THREAD_LIBS_INIT})
+    MESSAGE(STATUS "Atomics: using pthread")
+  ENDIF()
+ENDIF()
+
+IF (WIN32 AND NOT CYGWIN)
+  SET(BLAS_INSTALL_LIBRARIES "OFF"
+    CACHE BOOL "Copy the required BLAS DLLs into the TH install dirs")
+ENDIF (WIN32 AND NOT CYGWIN)
+
+MACRO(Install_Required_Library ln)
+    get_filename_component(libpath ${ln} PATH)
+    get_filename_component(libname ${ln} NAME_WE)
+    file(GLOB libdlls "${libpath}/${libname}*.dll")
+    install(PROGRAMS ${libdlls}
+      DESTINATION "${TH_INSTALL_BIN_SUBDIR}")
+ENDMACRO(Install_Required_Library libname)
+
+IF (BLAS_FOUND AND BLAS_INSTALL_LIBRARIES)
+  IF (BLAS_goto2_LIBRARY)
+    Install_Required_Library(${BLAS_goto2_LIBRARY})
+    Install_Required_Library("${libpath}/libgfortran")
+    Install_Required_Library("${libpath}/libquadmath")
+    Install_Required_Library("${libpath}/libgcc")
+  ENDIF()
+  IF (BLAS_openblas_LIBRARY)
+    Install_Required_Library(${BLAS_openblas_LIBRARY})
+    Install_Required_Library("${libpath}/libquadmath")
+    Install_Required_Library("${libpath}/libgfortran")
+    Install_Required_Library("${libpath}/libgcc")
+  ENDIF()
+ENDIF()
+
+FIND_PACKAGE(LAPACK)
+IF(LAPACK_FOUND)
+  SET(USE_LAPACK 1)
+ENDIF(LAPACK_FOUND)
+
+#############################################
+
+set(ATen_CPU_SRCS)
+set(ATen_CPU_INCLUDE)
+set(ATen_CUDA_SRCS)
+set(ATen_CUDA_INCLUDE)
+SET(ATEN_INSTALL_BIN_SUBDIR "bin" CACHE PATH "ATen install binary subdirectory")
+SET(ATEN_INSTALL_LIB_SUBDIR "lib" CACHE PATH "ATen install library subdirectory")
+SET(ATEN_INSTALL_INCLUDE_SUBDIR "include" CACHE PATH "ATen install include subdirectory")
+
+
 set(Torch_FOUND 1)
 add_definitions(-DTH_INDEX_BASE=0)
 set(TH_LINK_STYLE STATIC)

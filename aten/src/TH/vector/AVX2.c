@@ -3,6 +3,7 @@
 #include <x86intrin.h>
 #else
 #include <intrin.h>
+#include <immintrin.h>
 #endif
 #include "AVX2.h"
 
