@@ -172,6 +172,8 @@ PyObject * THPModule_fromNumpy(PyObject *_unused, PyObject *array)
     return PyObject_CallFunctionObjArgs(THPDoubleTensorClass, array, NULL);
   } else if (type == NPY_FLOAT) {
     return PyObject_CallFunctionObjArgs(THPFloatTensorClass, array, NULL);
+  } else if (type == NPY_HALF) {
+    return PyObject_CallFunctionObjArgs(THPHalfTensorClass, array, NULL);
   } else if (type == NPY_INT64) {
     return PyObject_CallFunctionObjArgs(THPLongTensorClass, array, NULL);
   } else if (type == NPY_INT32) {
@@ -182,8 +184,8 @@ PyObject * THPModule_fromNumpy(PyObject *_unused, PyObject *array)
     return PyObject_CallFunctionObjArgs(THPByteTensorClass, array, NULL);
   }
   THPUtils_setError("can't convert a given np.ndarray to a tensor - it has an "
-      "invalid type. The only supported types are: double, float, int64, "
-      "int32, and uint8.");
+      "invalid type. The only supported types are: double, float, half, "
+      "int64, int32, and uint8.");
   return NULL;
 #endif
 }

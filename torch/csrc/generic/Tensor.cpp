@@ -11,6 +11,9 @@
 #ifdef TH_REAL_IS_FLOAT
 #define NUMPY_TYPE_ENUM NPY_FLOAT
 #endif
+#ifdef TH_REAL_IS_HALF
+#define NUMPY_TYPE_ENUM NPY_HALF
+#endif
 #ifdef TH_REAL_IS_LONG
 #define NUMPY_TYPE_ENUM NPY_INT64
 #endif
