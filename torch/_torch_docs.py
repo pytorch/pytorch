@@ -3691,7 +3691,7 @@ Example::
 
 add_docstr(torch._C.arange,
            """
-arange(start, end, step=1, out=None) -> Tensor
+arange(start=0, end, step=1, out=None) -> Tensor
 
 Returns a 1D Tensor of size :math:`floor((end - start) / step)` with values
 from the interval ``[start, end)`` taken with step :attr:`step` starting
@@ -3704,6 +3704,15 @@ Args:
     out (Tensor, optional): The result `Tensor`
 
 Example::
+
+    >>> torch.arange(5)
+
+     0
+     1
+     2
+     3
+     4
+    [torch.FloatTensor of size 5]
 
     >>> torch.arange(1, 4)
 

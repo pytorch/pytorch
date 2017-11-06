@@ -510,13 +510,22 @@
     - CPU
     - CUDA
   return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - accreal start
-    - accreal end
-    - arg: accreal step
-      default: 1
+  options:
+    - cname: arange
+      arguments:
+        - arg: THTensor* result
+          output: True
+        - accreal start
+        - accreal end
+        - arg: accreal step
+          default: 1
+    - cname: arange
+      arguments:
+        - arg: THTensor* result
+          output: True
+        - CONSTANT 0
+        - accreal end
+        - CONSTANT 1
 ]]
 [[
   name: scatter_
