@@ -7,6 +7,7 @@ import torch.utils.hooks as hooks
 import warnings
 import weakref
 from torch._six import imap
+from torch._C import _add_docstr
 
 
 class Variable(_C._VariableBase):
@@ -220,28 +221,23 @@ class Variable(_C._VariableBase):
                                "of stochastic functions")
         self.grad_fn._reinforce(reward)
 
-    def detach(self):
-        """Returns a new Variable, detached from the current graph.
+    detach = _add_docstr(_C._VariableBase.detach, r"""
+    Returns a new Variable, detached from the current graph.
 
-        Result will never require gradient. If the input is volatile, the output
-        will be volatile too.
+    Result will never require gradient. If the input is volatile, the output
+    will be volatile too.
 
-        .. note::
+    .. note::
 
-          Returned Variable uses the same data tensor, as the original one, and
-          in-place modifications on either of them will be seen, and may trigger
-          errors in correctness checks.
-        """
-        result = NoGrad()(self)  # this is needed, because it merges version counters
-        result._grad_fn = None
-        return result
+      Returned Variable uses the same data tensor, as the original one, and
+      in-place modifications on either of them will be seen, and may trigger
+      errors in correctness checks.
+    """)
 
-    def detach_(self):
-        """Detaches the Variable from the graph that created it, making it a
-        leaf.
-        """
-        self._grad_fn = None
-        self.requires_grad = False
+    detach_ = _add_docstr(_C._VariableBase.detach_, r"""
+    Detaches the Variable from the graph that created it, making it a leaf.
+    Views cannot be detached in-place.
+    """)
 
     def retain_grad(self):
         """Enables .grad attribute for non-leaf Variables."""

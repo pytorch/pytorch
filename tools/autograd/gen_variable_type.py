@@ -113,10 +113,18 @@ if (flags.requires_grad) {
 }
 ${base_impl_call}
 ${version_counter}
-set_flags(${result}, flags, grad_fn);
+${set_flags}
 ${save_outputs}
 ${record_trace}
 return ${return_value};
+""")
+
+SET_FLAGS = CodeTemplate("""\
+set_flags(${result}, flags, grad_fn);
+""")
+
+SET_FLAGS_INPLACE = CodeTemplate("""\
+set_flags(${result}, flags, grad_fn, ${modifies_data});
 """)
 
 RECORD_TRACE = CodeTemplate("""\
@@ -173,6 +181,10 @@ FALLTHROUGH_FUNCTIONS = {
     '__and__', '__iand__', '__ilshift__', '__ior__', '__irshift__', '__ixor__',
     '__lshift__', '__or__', '__rshift__', '__xor__',
 }
+VIEW_FUNCTIONS = {
+    'as_strided', 'expand', 'narrow', 'permute', 'select', 'squeeze', 't',
+    'transpose', 'unfold', 'unsqueeze', 'view',
+}
 MANUAL_IMPLEMENTATIONS = {
     'contiguous', 'resize_', 'resize_as_'
 }
@@ -203,45 +215,67 @@ def saved_variables(formula, args):
     # find which arguments need to be saved
     saved = []
 
+    REPLACEMENTS = [
+        # replace self.sizes() with self_sizes
+        (r'{}.sizes\(\)', {
+            'suffix': '_sizes',
+            'type': 'IntList',
+        }),
+        # replace zeros_like(self) with self_info
+        (r'zeros_like\({}\)', {
+            'suffix': '_info',
+            'type': 'TypeAndSize',
+            'expr': lambda name: name,  # at save-time
+            'res': lambda name: name + '_info.zeros()',  # at eval-time
+        }),
+        # replace self.size(2) with self_size_2
+        (r'{}.size\((\w+)\)', {
+            'suffix': lambda m: '_argsize_{}'.format(*m.groups()),
+            'type': 'int64_t',
+        }),
+        # replace to_arg_sizes(self, 2) with self_argsizes_2
+        (r'to_arg_sizes\({}, (\w+)\)', {
+            'suffix': lambda m: '_sizes_{}'.format(*m.groups()),
+            'type': 'IntList',
+        }),
+        # replace TensorGeometry(self) with self_geometry
+        (r'TensorGeometry\({}\)', {
+            'suffix': '_geometry',
+            'type': 'TensorGeometry',
+        }),
+    ]
+
     for arg in args:
         if 'name' not in arg:
             # some returned arguments do not have names
             continue
+
         name = arg['name']
 
-        def replace_sizes(m):
-            res = name + '_sizes'
-            saved.append({'name': res, 'type': 'IntList'})
-            return res
+        # First search the formula for expressions which can be evaluated
+        # when the autograd Function is created to avoid saving variables
+        for regex, info in REPLACEMENTS:
+            def repl(m):
+                suffix = info['suffix']
+                suffix = suffix(m) if callable(suffix) else suffix
+                expr = info['expr'](name) if 'expr' in info else m.group(0)
+                saved.append({
+                    'name': name + suffix,
+                    'type': info['type'],
+                    'expr': expr,
+                })
+                if 'res' in info:
+                    return info['res'](name)
+                return name + suffix
 
-        def replace_zeros(m):
-            r = name + '_info'
-            saved.append({'name': r, 'type': 'TypeAndSize'})
-            return r + '.zeros()'
+            formula = re.sub(regex.format(name), repl, formula)
 
-        def replace_size_n(m):
-            res = name + '_argsize_{}'.format(*m.groups())
-            saved.append({'name': res, 'type': 'int64_t'})
-            return res
-
-        def replace_to_arg_sizes(m):
-            res = name + '_argsizes_{}'.format(*m.groups())
-            saved.append({'name': res, 'type': 'IntList'})
-            return res
-
-        # replace self.sizes() with self_sizes
-        formula = re.sub(r'{}.sizes\(\)'.format(name), replace_sizes, formula)
-        # replace zeros_like(self) with self_info
-        formula = re.sub(r'zeros_like\({}\)'.format(name), replace_zeros, formula)
-        # replace self.size(2) with self_size_2
-        formula = re.sub(r'{}.size\((\w+)\)'.format(name), replace_size_n, formula)
-        # replace to_arg_sizes(self, 2) with self_argsizes_2
-        formula = re.sub(r'to_arg_sizes\({}, (\w+)\)'.format(name), replace_to_arg_sizes, formula)
-
+        # Find any variables which remain in the formula and save them
         if re.search(IDENT_REGEX.format(name), formula):
             arg = copy.deepcopy(arg)
             arg['type'] = arg['type'].replace('const ', '').replace(' &', '')
             saved.append(arg)
+
     return formula, saved
 
 
@@ -340,7 +374,6 @@ def load_derivatives(path, declarations_by_signature):
             derivatives.append(create_derivative(canonical, formula, output_indices, [arg['name']]))
 
         func = create_autograd_function(name, derivatives, num_inputs)
-        func['__view__'] = defn.get('__view__', False)
         autograd_functions.append(func)
         for declaration in declarations:
             declaration['derivative'] = func
@@ -507,8 +540,9 @@ def create_variable_type(top_env, aten_declarations):
     type_declarations = top_env['type_derived_method_declarations']
     type_definitions = top_env['type_derived_method_definitions']
 
-    def skip_function(name):
-        return (name.endswith('_out') or name.endswith('_forward'))
+    def skip_function(declaration):
+        name = declaration['name']
+        return name.endswith('_out') or name.endswith('_forward')
 
     def find_args_with_derivatives(func, tensor_arg_names):
         """Find arguments that have derivative definitions"""
@@ -524,7 +558,7 @@ def create_variable_type(top_env, aten_declarations):
         stmts = []
         for arg in saved_variables:
             name = arg['name']
-            expr = arg['name']
+            expr = arg.get('expr', arg['name'])
             if is_output and not option['inplace']:
                 if len(option['returns']) > 1:
                     # unpack multiple outputs
@@ -533,17 +567,7 @@ def create_variable_type(top_env, aten_declarations):
                     stmts.append('auto& {} = std::get<{}>(ret);'.format(name, idx))
                 elif name != 'input':
                     stmts.append('auto& {} = ret;'.format(name))
-            if '_sizes' in name:
-                expr = name.replace('_sizes', '.sizes()')
-            elif name.endswith('_info'):
-                expr = name.replace('_info', '')
-            elif '_argsize_' in name:
-                # turn x_argsize_y into x.size(y)
-                expr = re.sub(r"(\w+)_argsize_(\w+)", r"\1.size(\2)", name)
-            elif '_argsizes_' in name:
-                # turn x_argsizes_y into to_arg_sizes(x, y)
-                expr = re.sub(r"(\w+)_argsizes_(\w+)", r"to_arg_sizes(\1, \2)", name)
-            elif arg['type'] == 'Tensor' or (is_output and arg['type'] == 'Scalar'):
+            if arg['type'] == 'Tensor' or (is_output and arg['type'] == 'Scalar'):
                 name += '_'
                 var = arg['name']
                 if var == 'self' and option['inplace']:
@@ -692,10 +716,14 @@ def create_variable_type(top_env, aten_declarations):
         tensor_args = [arg for arg in arguments if arg['simple_type'] in {'Tensor', 'TensorList'}]
         env['tensor_args'] = [arg['name'] for arg in tensor_args]
 
+        name = declaration['name']
+        base_name = name[:-1] if declaration['inplace'] else name
+        is_view = base_name in VIEW_FUNCTIONS
+
         if declaration['inplace']:
             env['return_value'] = 'self'
-            env['result'] = 'static_cast<Variable&>(self)'
             env['trace_outputs'] = '{ self }'
+            env['result'] = 'static_cast<Variable&>(self)'
         elif declaration['return_type'] == 'std::vector<Tensor>':
             env['return_value'] = 'as_tensor_list(ret)'
             env['result'] = 'ret'
@@ -716,7 +744,6 @@ def create_variable_type(top_env, aten_declarations):
         else:
             env['record_trace'] = emit_record_trace(env, declaration)
 
-        is_view = False
         func = declaration.get('derivative')
         if func is not None:
             env['op'] = func['op']
@@ -725,7 +752,6 @@ def create_variable_type(top_env, aten_declarations):
             env['save_inputs'] = save_variables(declaration, func['saved_inputs'], False)
             env['save_outputs'] = save_variables(declaration, func['saved_outputs'], True)
             env['args_with_derivatives'] = find_args_with_derivatives(func, env['tensor_args'])
-            is_view = func.get('__view__', False)
         else:
             env['op'] = 'Error'
             env['op_ctor'] = '"the derivative for {} is not implemented"'.format(declaration['api_name'])
@@ -742,26 +768,33 @@ def create_variable_type(top_env, aten_declarations):
 
         env['check_inplace'] = ''
         env['version_counter'] = ''
+        maybe_inplace = any(arg['name'] == 'inplace' for arg in arguments)
+        base_call = BASE_CALL.substitute(combined)
         if declaration['inplace']:
             env['check_inplace'] = 'check_inplace(self);'
             env['version_counter'] = 'increment_version(self);'
-        elif any(arg['name'] == 'inplace' for arg in arguments):
+            modifies_data = 'false' if is_view else 'true'
+            env['set_flags'] = SET_FLAGS_INPLACE.substitute(combined, modifies_data=modifies_data)
+        elif maybe_inplace:
             assert not is_view, declaration['name']
             env['check_inplace'] = 'if (inplace) check_inplace(input);'
             env['version_counter'] = 'if (inplace) increment_version(input);'
-        elif is_view:
-            env['version_counter'] = 'take_version_counter(ret, self);'
+            env['set_flags'] = SET_FLAGS_INPLACE.substitute(combined, modifies_data='inplace')
+            base_call = 'auto ret = maybe_wrap({}, input, inplace)'.format(base_call)
+        else:
+            env['set_flags'] = SET_FLAGS.substitute(combined)
+            if is_view:
+                base_call = 'auto ret = as_view(static_cast<const Variable&>(self), {})'.format(base_call)
+            else:
+                base_call = 'auto ret = as_variable({})'.format(base_call)
 
-        base_call = BASE_CALL.substitute(combined)
-        if not declaration['inplace']:
-            base_call = 'auto ret = as_variable({})'.format(base_call)
         env['base_impl_call'] = base_call + ';'
 
         body.extend(METHOD_DEFINITION_DERIVATIVE.substitute(combined).split('\n'))
         return body
 
     def process_function(declaration):
-        if skip_function(declaration['name']):
+        if skip_function(declaration):
             return
 
         if declaration.get('derivative') is None and declaration['mode'] == 'native':

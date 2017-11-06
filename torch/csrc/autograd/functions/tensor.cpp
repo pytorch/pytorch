@@ -11,6 +11,19 @@ auto Identity::apply(const variable_list& inputs) -> variable_list {
   return inputs;
 };
 
+auto CopyBackwards::apply(const variable_list& grads) -> variable_list {
+  check_input_variables("CopyBackwards", grads, 1);
+  auto& grad = grads[0];
+  variable_list grad_inputs(2);
+  if (should_compute_output(0)) {
+    grad_inputs[0] = at::zeros_like(grad);
+  }
+  if (should_compute_output(1)) {
+    grad_inputs[1] = grad;
+  }
+  return grad_inputs;
+};
+
 auto Clone::apply(const variable_list& inputs) -> variable_list {
   check_input_variables("Clone", inputs, 1);
   auto& input = inputs[0].data();
@@ -112,6 +125,55 @@ auto Chunk::apply(const variable_list& inputs) -> variable_list {
   return wrap_outputs(inputs, std::move(outputs), [](FunctionFlags f) {
     return std::make_shared<Error>("Chunk is not differentiable", std::move(f));
   });
+}
+
+CopySlices::CopySlices(const Variable& base_var, TensorGeometry view, std::shared_ptr<Function> fn_)
+  : base(base_var)
+  , view(std::move(view))
+  , fn(std::move(fn_))
+{
+  is_executable = true;
+  num_inputs = 1;
+
+  // Take the next_functions of fn as our own, except for index 0 which goes
+  // to base instead of the view.
+  next_functions.resize(fn->next_functions.size());
+  next_functions[0] = std::make_pair(base_var.grad_fn(), base_var.output_nr());
+  fn->next_functions[0] = next_functions[0];
+  for (size_t i = 1; i < next_functions.size(); i++) {
+    next_functions[i] = fn->next_functions[i];
+  }
+}
+
+auto CopySlices::apply(const variable_list& inputs) -> variable_list {
+  check_input_variables("CopySlices", inputs, 1);
+  auto& grad = inputs[0];
+
+  auto result = grad.type().tensor(base.sizes, base.strides);
+  result.copy_(grad);
+
+  auto offset = view.storage_offset - base.storage_offset;
+  auto grad_slice = result.as_strided(view.sizes, view.strides, offset);
+
+  // TODO: We clone grad_slice because we modify it below and "fn" might save
+  // it for the backward of res. We might be able to avoid the clone() if
+  // grad_slice is volatile.
+  auto res = (*fn)({ grad_slice.clone() });
+
+  variable_list grad_inputs(next_functions.size());
+  for (size_t i = 0; i < res.size(); i++) {
+    if (should_compute_output(i)) {
+      TORCH_ASSERT(res[i].defined());
+      if (i == 0) {
+        grad_slice.copy_(res[i]);
+        grad_inputs[i] = std::move(result);
+      } else {
+        grad_inputs[i] = std::move(res[i]);
+      }
+    }
+  }
+
+  return grad_inputs;
 }
 
 }} // namespace torch::autograd

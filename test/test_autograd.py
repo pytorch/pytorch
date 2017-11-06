@@ -128,6 +128,24 @@ class TestAutograd(TestCase):
         self.assertEqual(graph_desc(y.grad.grad_fn),
                          'Identity(Error(AccumulateGrad(), None, AccumulateGrad()))')
 
+    def test_function_returns_input(self):
+        class MyFunction(Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x
+
+            @staticmethod
+            def backward(ctx, grad):
+                return grad * 2
+
+        v = Variable(torch.ones(1), requires_grad=True)
+        MyFunction.apply(v).backward()
+        self.assertEqual(v.grad.data.tolist(), [2])
+
+        v.grad.data.zero_()
+        MyFunction.apply(v.clone()).backward()
+        self.assertEqual(v.grad.data.tolist(), [2])
+
     def test_accumulate_grad(self):
         grad_output = Variable(torch.ones(5, 5))
         for start_volatile, end_volatile in product((True, False), repeat=2):
@@ -909,14 +927,6 @@ class TestAutograd(TestCase):
         x = Variable(torch.ones(2, 3))
         self.assertTrue(x.resize(3, 2).size() == (3, 2))
 
-    def test_shared_storage(self):
-        x = Variable(torch.ones(5, 5))
-        y = x.t()
-        z = x[1]
-        self.assertRaises(RuntimeError, lambda: x.add_(2))
-        self.assertRaises(RuntimeError, lambda: y.add_(2))
-        self.assertRaises(RuntimeError, lambda: z.add_(2))
-
     def _test_setitem(self, size, index):
         x = Variable(torch.ones(*size), requires_grad=True)
         y = x + 2
@@ -1138,6 +1148,10 @@ class TestAutograd(TestCase):
         (y + a).sum().backward()  # this won't backprop to x
         self.assertEqual(x.grad.data, torch.ones(10, 10) * 2)
         self.assertEqual(y.grad.data, torch.ones(10, 10) * 2)
+
+        # in-place deatch on a view raises an exception
+        view = x.narrow(0, 1, 4)
+        self.assertRaisesRegex(RuntimeError, 'view', lambda: view.detach_())
 
     def test_type_conversions(self):
         x = Variable(torch.randn(5, 5))
@@ -1528,6 +1542,135 @@ class TestAutograd(TestCase):
 
         for key in keys:
             self.assertTrue(hasattr(x, key))
+
+    def test_as_strided(self):
+        x = Variable(torch.arange(0, 25).view(5, 5), requires_grad=True)
+
+        def as_strided(x):
+            return x.as_strided([3, 3], [6, 2], 2)
+
+        gradcheck(as_strided, [x], raise_exception=True)
+        gradgradcheck(as_strided, [x], [Variable(torch.randn(3, 3))])
+
+    def test_inplace_view_backprop_base(self):
+        # modify view and back-prop through base
+        root = Variable(torch.randn(2, 2), requires_grad=True)
+        x = root.clone()
+        v1 = x.narrow(0, 0, 1)
+        v1.mul_(2)
+        x.sum().backward()
+        self.assertEqual(root.grad.data.tolist(), [[2, 2], [1, 1]])
+
+    def test_inplace_view_backprop_view_of_view(self):
+        # modify view and backprop through view-of-view
+        root = Variable(torch.randn(2, 2), requires_grad=True)
+        x = root.clone()
+        v1 = x.narrow(0, 0, 1)
+        v2 = x.narrow(0, 0, 1)
+        v1.mul_(2)
+        v2.sum().backward()
+        self.assertEqual(root.grad.data.tolist(), [[2, 2], [0, 0]])
+
+    def test_inplace_view_of_view(self):
+        # modify view-of-view and backprop through base
+        root = Variable(torch.randn(2, 2), requires_grad=True)
+        x = root.clone()
+        v1 = x.narrow(0, 0, 1)
+        v2 = v1.narrow(1, 1, 1)
+        v2.mul_(2)
+        x.sum().backward()
+        self.assertEqual(root.grad.data.tolist(), [[1, 2], [1, 1]])
+
+    def test_inplace_view_gradcheck(self):
+        # gradcheck modifications to views
+        a = Variable(torch.randn(4, 4), requires_grad=True)
+        b = Variable(torch.randn(2, 2), requires_grad=True)
+
+        def func(root, b):
+            x = root.clone()
+            x.narrow(1, 2, 2).narrow(0, 1, 2).mul_(b)
+            x.narrow(1, 0, 2).narrow(0, 1, 2).mul_(b)
+            return x
+
+        gradcheck(func, [a, b], raise_exception=True)
+        go = Variable(torch.randn(a.size()), requires_grad=True)
+        gradgradcheck(func, (a, b), (go,))
+
+    def test_inplace_view_makes_base_require_grad(self):
+        # in-place modification to view makes base require grad
+        a = Variable(torch.randn(4, 4), requires_grad=False)
+        b = Variable(torch.randn(4, 2), requires_grad=True)
+
+        def func(root, b):
+            x = root.clone()
+            self.assertFalse(x.requires_grad)
+            x.narrow(1, 2, 2).mul_(b)
+            self.assertTrue(x.requires_grad)
+            return x
+
+        gradcheck(func, [a, b], raise_exception=True)
+        go = Variable(torch.randn(a.size()), requires_grad=True)
+        gradgradcheck(func, (a, b), (go,))
+
+    def test_inplace_view_backprop_view(self):
+        # modify view and backprop through view
+        a = Variable(torch.Tensor([2, 5]), requires_grad=False)
+        b = Variable(torch.Tensor([3]), requires_grad=True)
+        res = a.narrow(0, 1, 1).mul_(b)
+        res.sum().backward()
+        self.assertEqual(b.grad.data.tolist(), [5])
+        self.assertIsNone(a.grad)
+
+    def test_inplace_view_flags(self):
+        # check that an exception is thrown if the flags on the base do not
+        # match the flags on the view
+        x = Variable(torch.ones(5))
+        r = Variable(torch.ones(1), requires_grad=True)
+        r2 = Variable(torch.ones(1), requires_grad=True)
+        v = x.select(0, 1)
+        x.add_(r)
+        self.assertFalse(v.requires_grad)
+        self.assertTrue(x.requires_grad)
+        # v is dependent on r due to the addition above, but v still doesn't
+        # requires_grad. The addition to r2 should raise an error until we
+        # share requires_grad between base and views.
+        self.assertRaisesRegex(RuntimeError, 'requires_grad', lambda: v + r2)
+
+    def test_inplace_view_python(self):
+        # in-place modifications of Python-autograd created view
+        a = Variable(torch.randn(4, 4), requires_grad=True)
+        b = Variable(torch.randn(2, 2), requires_grad=True)
+
+        class PyAdd(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x, y):
+                ctx.mark_dirty(x)
+                x.add_(y)
+                return x
+
+            @staticmethod
+            def backward(ctx, grad):
+                return grad, grad
+
+        def func(root, b):
+            x = root.clone()
+            PyAdd.apply(x.narrow(1, 2, 2).narrow(0, 1, 2), b)
+            PyAdd.apply(x.narrow(1, 0, 2).narrow(0, 1, 2), b)
+            return x
+
+        gradcheck(func, [a, b], raise_exception=True)
+        go = Variable(torch.randn(a.size()), requires_grad=True)
+        gradgradcheck(func, (a, b), (go,))
+
+    def test_inplace_view_non_contig(self):
+        data = torch.ones(2, 3, 2).select(2, 1).t()
+        root = Variable(data, requires_grad=True)
+        x = root.clone()
+        v1 = x.narrow(0, 0, 1)
+        v2 = v1.narrow(1, 1, 1)
+        v2.mul_(2)
+        x.sum().backward()
+        self.assertEqual(root.grad.data.tolist(), [[1, 2], [1, 1], [1, 1]])
 
 
 def index_variable(shape, max_indices):

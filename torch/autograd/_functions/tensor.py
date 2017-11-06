@@ -127,26 +127,6 @@ class SetItem(InplaceFunction):
         return grad_input, None, grad_value
 
 
-# TODO: how to do NoGrad in new style
-class NoGrad(Function):
-
-    def forward(self, i):
-        result = i.new(i)
-        self.mark_non_differentiable(result)
-        self.mark_shared_storage((i, result))
-        return result
-
-    def backward(self, grad_output):
-        assert False, "backward of NoGrad should never be called"
-
-    def _do_forward(self, *args, **kwargs):
-        result = super(NoGrad, self)._do_forward(*args, **kwargs)
-        self.requires_grad = False
-        return result
-
-    __call__ = _do_forward
-
-
 class Expand(Function):
 
     @staticmethod

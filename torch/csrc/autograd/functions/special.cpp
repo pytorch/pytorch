@@ -241,7 +241,7 @@ bool Eval::replaceSubgraph(const variable_list& inputs, const variable_list& _ou
 
   // Rebase outputs.
   for (auto & output : relevant_outputs) {
-    output.grad_fn() = shared_from_this();
+    output.get()->_grad_fn = shared_from_this();
     output.get()->output_nr = num_inputs++;
   }
 
