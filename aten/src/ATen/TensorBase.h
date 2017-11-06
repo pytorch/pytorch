@@ -7,26 +7,27 @@ namespace at { namespace detail {
 
 // TensorBase is the base class for Tensor which handles the reference counting
 struct TensorBase {
-  TensorBase(): TensorBase(UndefinedTensor::singleton(), true) {}
+  TensorBase(): TensorBase(UndefinedTensor::singleton(), false) {}
   TensorBase(TensorImpl * self, bool retain)
   : pImpl(self) {
     if (pImpl == nullptr) {
       throw std::runtime_error("TensorBase with nullptr not supported");
     }
-    if(retain)
+    if(retain && pImpl != UndefinedTensor::singleton())
       pImpl->retain();
   }
   TensorBase(const TensorBase & rhs)
   : pImpl(rhs.pImpl) {
-    pImpl->retain();
+    if (pImpl != UndefinedTensor::singleton())
+      pImpl->retain();
   }
   TensorBase(TensorBase && rhs) noexcept
   : pImpl(rhs.pImpl) {
     rhs.pImpl = UndefinedTensor::singleton();
-    rhs.pImpl->retain();
   }
   ~TensorBase() {
-    pImpl->release();
+    if (pImpl != UndefinedTensor::singleton())
+      pImpl->release();
   }
   TensorBase & operator=(TensorBase && rhs) & {
     rhs.swap(*this);
