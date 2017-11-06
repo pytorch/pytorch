@@ -397,7 +397,7 @@ class TestAutograd(TestCase):
             def forward(self, x, y):
                 assert self.needs_input_grad[0]
                 assert not self.needs_input_grad[1]
-                return x, y
+                return x, y.clone()
 
             def backward(self, grad_x, grad_y):
                 return grad_x, None
@@ -1551,7 +1551,7 @@ class TestAutograd(TestCase):
         gradcheck(as_strided, [x], raise_exception=True)
         gradgradcheck(as_strided, [x], [Variable(torch.randn(3, 3))])
 
-    def test_inplace_view1(self):
+    def test_inplace_view_backprop_base(self):
         # modify view and back-prop through base
         root = Variable(torch.randn(2, 2), requires_grad=True)
         x = root.clone()
@@ -1589,6 +1589,22 @@ class TestAutograd(TestCase):
             x = root.clone()
             x.narrow(1, 2, 2).narrow(0, 1, 2).mul_(b)
             x.narrow(1, 0, 2).narrow(0, 1, 2).mul_(b)
+            return x
+
+        gradcheck(func, [a, b], raise_exception=True)
+        go = Variable(torch.randn(a.size()), requires_grad=True)
+        gradgradcheck(func, (a, b), (go,))
+
+    def test_inplace_view_makes_base_require_grad(self):
+        # in-place modification to view makes base require grad
+        a = Variable(torch.randn(4, 4), requires_grad=False)
+        b = Variable(torch.randn(4, 2), requires_grad=True)
+
+        def func(root, b):
+            x = root.clone()
+            self.assertFalse(x.requires_grad)
+            x.narrow(1, 2, 2).mul_(b)
+            self.assertTrue(x.requires_grad)
             return x
 
         gradcheck(func, [a, b], raise_exception=True)
