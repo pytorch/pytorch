@@ -6,8 +6,11 @@ namespace at {
 
 struct UndefinedTensor final : public TensorImpl {
 public:
-  static UndefinedTensor * singleton();
-  virtual ~UndefinedTensor();
+  static inline UndefinedTensor * singleton() {
+    static UndefinedTensor *udt = new UndefinedTensor();
+    return udt;
+  }
+  virtual ~UndefinedTensor() {}
   virtual const char * toString() const override;
   virtual IntList sizes() const override;
   virtual IntList strides() const override;

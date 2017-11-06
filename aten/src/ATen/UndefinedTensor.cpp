@@ -3,17 +3,9 @@
 
 namespace at {
 
-UndefinedTensor * UndefinedTensor::singleton() {
-  static UndefinedTensor *udt = new UndefinedTensor();
-  return udt;
-}
-
 // should this use the globalContext?  Can it get a context passed in somehow?
 UndefinedTensor::UndefinedTensor()
 : TensorImpl(&(globalContext().getType(Backend::Undefined,ScalarType::Undefined))) {
-}
-
-UndefinedTensor::~UndefinedTensor() {
 }
 
 const char * UndefinedTensor::toString() const {

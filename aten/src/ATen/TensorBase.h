@@ -18,16 +18,15 @@ struct TensorBase {
   }
   TensorBase(const TensorBase & rhs)
   : pImpl(rhs.pImpl) {
-    if(pImpl != nullptr)
-      pImpl->retain();
+    pImpl->retain();
   }
   TensorBase(TensorBase && rhs) noexcept
   : pImpl(rhs.pImpl) {
-    rhs.pImpl = nullptr;
+    rhs.pImpl = UndefinedTensor::singleton();
+    rhs.pImpl->retain();
   }
   ~TensorBase() {
-    if(pImpl != nullptr)
-      pImpl->release();
+    pImpl->release();
   }
   TensorBase & operator=(TensorBase && rhs) & {
     rhs.swap(*this);
