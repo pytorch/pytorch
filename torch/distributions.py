@@ -1,4 +1,4 @@
-"""
+r"""
 The ``distributions`` package contains parameterizable probability distributions
 and sampling functions.
 
