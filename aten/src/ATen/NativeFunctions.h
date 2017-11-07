@@ -213,7 +213,7 @@ type_method_definition_level: base
 type_method_definition_dispatch: at::native::squeeze_
 [/NativeFunction]
 */
-static inline Tensor squeeze_(Tensor self) {
+static inline Tensor & squeeze_(Tensor & self) {
   auto g = inferSqueezeGeometry(self);
   return self.as_strided_(std::get<0>(g), std::get<1>(g));
 }
@@ -229,7 +229,7 @@ type_method_definition_level: base
 type_method_definition_dispatch: at::native::squeeze_
 [/NativeFunction]
 */
-static inline Tensor squeeze_(Tensor self, int64_t dim) {
+static inline Tensor & squeeze_(Tensor & self, int64_t dim) {
   dim = maybe_wrap_dim(dim, self.dim());
 
   if (self.sizes()[dim] != 1) {
@@ -268,7 +268,7 @@ type_method_definition_level: base
 type_method_definition_dispatch: at::native::unsqueeze_
 [/NativeFunction]
 */
-static inline Tensor unsqueeze_(Tensor self, int64_t dim) {
+static inline Tensor & unsqueeze_(Tensor & self, int64_t dim) {
   dim = maybe_wrap_dim(dim, self.dim() + 1);
 
   auto g = inferUnsqueezeGeometry(self, dim);
