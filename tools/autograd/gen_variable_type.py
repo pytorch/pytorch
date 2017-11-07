@@ -345,36 +345,66 @@ def load_derivatives(path, declarations_by_signature):
         assert name + '_' == declarations[0]['name']
         return declarations[0]
 
+    def split_names(raw_names):
+        """Given "foo, bar", return ["foo", "bar"]."""
+        return [x.strip() for x in raw_names.split(',')]
+
+    def lookup_pred(pred, xs):
+        """Return the index of the first element of xs matching pred."""
+        return next((i, x) for i, x in enumerate(xs) if pred(x))
+
     # Parse each entry from derivatives.yaml
     autograd_functions = []
     for defn in definitions:
         if '(' not in defn['name']:
             continue
 
-        name, params = split_name_params(defn['name'])
+        # NB: Removes 'name' from defn dictionary
+        defn_name, params = split_name_params(defn.pop('name'))
         param_types = [p.split(' ')[0] for p in params if p != '*']
-        signature = '{}({})'.format(name, ', '.join(param_types))
+        signature = '{}({})'.format(defn_name, ', '.join(param_types))
 
         declarations = declarations_by_signature[signature]
         if len(declarations) == 0:
             raise RuntimeError('no ATen declaration found for: {}'.format(signature))
-        canonical = canonical_declaration(declarations, name)
+        canonical = canonical_declaration(declarations, defn_name)
 
-        num_inputs = 0
-        derivatives = []
+        # First, let us determine the set of inputs for which gradients
+        # were specified in declarations.  We'll use this in layout
+        # computation.
+        args_with_gradients = set()
+        for raw_names in defn:
+            args_with_gradients |= set(split_names(raw_names))
+
+        # Next, let us compute the layout of the grad_inputs we will
+        # return.  In general this is not in one-to-one correspondence
+        # with the inputs, because some will not have gradients, and we
+        # will not bother allocating an undefined tensor for them.
+        num_inputs = 0  # number of grad_inputs to return
+        arg_name_to_output_index = {}
         for arg in canonical['arguments']:
-            if arg['name'] not in defn:
+            if arg['name'] not in args_with_gradients:
                 continue
-            formula = defn[arg['name']]
             if arg['type'] == 'TensorList':
                 num_inputs = ''
-                output_indices = '*'
+                output_index = '*'  # variable length thing
             else:
-                output_indices = [num_inputs]
+                output_index = num_inputs  # the current index
                 num_inputs += 1
-            derivatives.append(create_derivative(canonical, formula, output_indices, [arg['name']]))
+            arg_name_to_output_index[arg['name']] = output_index
 
-        func = create_autograd_function(name, derivatives, num_inputs)
+        # Finally, let us set up the derivative information
+        derivatives = []
+        for raw_names, formula in defn.items():
+            names = split_names(raw_names)
+            output_indices = []
+            args = []
+            for name in names:
+                output_indices.append(arg_name_to_output_index[name])
+                args.append(name)
+            derivatives.append(create_derivative(canonical, formula, output_indices, args))
+
+        func = create_autograd_function(defn_name, derivatives, num_inputs)
         autograd_functions.append(func)
         for declaration in declarations:
             declaration['derivative'] = func
@@ -498,7 +528,7 @@ def create_autograd_functions(top_env, autogen_functions):
         def emit_derivative(derivative):
             formula = derivative['formula']
             idxs = derivative['output_indices']
-            if idxs == '*':
+            if idxs == ['*']:
                 return DERIVATIVE_TENSORLIST.substitute(derivative=formula)
             elif len(idxs) == 1:
                 return DERIVATIVE_TENSOR.substitute(idx=idxs[0], derivative=formula)
