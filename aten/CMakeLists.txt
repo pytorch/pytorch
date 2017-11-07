@@ -43,6 +43,10 @@ IF(MSVC)
   # we want to respect the standard, and we are bored of those **** .
   ADD_DEFINITIONS(-D_CRT_SECURE_NO_DEPRECATE=1)
   LIST(APPEND CUDA_NVCC_FLAGS "-Xcompiler /wd4819 -Xcompiler /wd4503")
+  ADD_DEFINITIONS(-DTH_EXPORTS)
+  IF (NOT NO_CUDA)
+    ADD_DEFINITIONS(-DTHC_EXPORTS)
+  ENDIF()
 ENDIF(MSVC)
 
 IF (CMAKE_VERSION VERSION_LESS "3.1")
