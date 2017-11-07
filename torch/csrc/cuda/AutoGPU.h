@@ -2,7 +2,7 @@
 #define THCP_AUTOGPU_INC
 
 #include <Python.h>
-#include "THP.h"
+#include "THP_export.h"
 #include "torch/csrc/utils/auto_gpu.h"
 
 class THP_CLASS THCPAutoGPU : public AutoGPU {

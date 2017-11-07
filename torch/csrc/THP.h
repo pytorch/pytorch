@@ -17,6 +17,8 @@
 #define PyLong_FromUnsignedLong PyLong_FromUnsignedLongLong
 #endif
 
+#include "THP_export.h"
+
 // Back-compatibility macros, Thanks to http://cx-oracle.sourceforge.net/
 // define PyInt_* macros for Python 3.x.  NB: We must include Python.h first,
 // otherwise we'll incorrectly conclude PyInt_Check isn't defined!
@@ -32,19 +34,6 @@
 #define LIBRARY_STATE_NOARGS
 #define LIBRARY_STATE_TYPE
 #define LIBRARY_STATE_TYPE_NOARGS
-
-#ifdef _WIN32
-# ifdef _THP_CORE
-#  define THP_API extern "C" __declspec(dllexport)
-#  define THP_CLASS __declspec(dllexport)
-# else
-#  define THP_API extern "C" __declspec(dllimport)
-#  define THP_CLASS __declspec(dllimport)
-# endif
-#else
-# define THP_API extern "C"
-# define THP_CLASS
-#endif
 
 #include "PtrWrapper.h"
 #include "Exceptions.h"
