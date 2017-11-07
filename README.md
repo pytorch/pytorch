@@ -202,9 +202,11 @@ MACOSX_DEPLOYMENT_TARGET=10.9 CC=clang CXX=clang++ python setup.py install
 Dockerfile is supplied to build images with cuda support and cudnn v6. Build as usual
 ```
 docker build -t pytorch .
+```
 
 Dockerfile to build with cuda 9 and cudnn v7 (with Volta support) is in tools/docker, the build command is
 
+```
 docker build -t pytorch_cuda9 -f tools/docker/Dockerfile9 .
 ```
 Alternatively, if you want to use a runtime image, you can use the pre-built one from Docker Hub and run with nvidia-docker:
