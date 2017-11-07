@@ -30,7 +30,8 @@ jit::value_list BatchNormForward::symbolic(
     bn->addOutput()->setType(bn->input(4)->type());
     // dummy output
     for(int i = 3; i < 5; i++) {
-      bn->addOutput()->setDebugName("batch_norm_dead_output");
+      auto o = bn->addOutput();
+      o->setUniqueName("batch_norm_dead_output-" + o->uniqueName());
     }
   }
   bn->is_(jit::kconsumed_inputs,{0,0,0,1,1});
