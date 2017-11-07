@@ -268,7 +268,9 @@ def current_blas_handle():
 
 
 def empty_cache():
-    """Frees all unused memory currently held by the cache allocator"""
+    """Releases all unoccupied cached memory currently held by the caching
+    allocator so that those can be used in other GPU application and visible in
+    `nvidia-smi`."""
     return torch._C._cuda_emptyCache()
 
 
