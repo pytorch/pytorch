@@ -143,8 +143,9 @@ function build_aten() {
   ${CMAKE_VERSION} ../../../../aten \
   -DCMAKE_BUILD_TYPE=Release \
   -DNO_CUDA=$((1-$WITH_CUDA)) \
-  -DATEN_NO_CONTRIB=1 \
-  -DCMAKE_INSTALL_PREFIX="$INSTALL_DIR"
+  -DCMAKE_INSTALL_PREFIX="$INSTALL_DIR" \
+  -DCMAKE_CXX_FLAGS="-fexceptions" \
+  -DCMAKE_C_FLAGS="-fexceptions"
   # purpusefully not passing C_FLAGS for the same reason as above
   make -j$(getconf _NPROCESSORS_ONLN) install
   cd ../..
