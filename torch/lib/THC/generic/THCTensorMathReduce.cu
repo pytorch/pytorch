@@ -88,7 +88,7 @@ THCTensor_(std)(THCState *state, THCTensor *self_, THCTensor *src, int dimension
   if (dimension == THCTensor_(nDimension)(state, src) - 1) {
     THCTensor_varInnermostDim<THCTensor, real, accreal, true>(state, self, src, biased);
   } else {
-    THCTensor_varOuterDim<THCTensor, real, true>(state, self, src, dimension, biased);
+    THCTensor_varOuterDim<THCTensor, real, accreal, true>(state, self, src, dimension, biased);
   }
 
   THCTensor_(free)(state, src);
@@ -114,7 +114,7 @@ THCTensor_(var)(THCState *state, THCTensor *self_, THCTensor *src, int dimension
   if (dimension == THCTensor_(nDimension)(state, src) - 1) {
     THCTensor_varInnermostDim<THCTensor, real, accreal, false>(state, self, src, biased);
   } else {
-    THCTensor_varOuterDim<THCTensor, real, false>(state, self, src, dimension, biased);
+    THCTensor_varOuterDim<THCTensor, real, accreal, false>(state, self, src, dimension, biased);
   }
 
   THCTensor_(free)(state, src);
