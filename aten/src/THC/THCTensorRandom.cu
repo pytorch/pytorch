@@ -77,6 +77,16 @@ __host__ void THCRandom_setRNGState(THCState* state, THByteTensor *rng_state)
   memcpy(&gen->initial_seed, THByteTensor_data(rng_state) + states_size, seed_size);
 }
 
+// Goes from (0, 1] to [0, 1). Note 1-x is not sufficient since for some floats
+// eps near 0, 1-eps will round to 1.
+template <typename T>
+__device__ inline T reverse_bounds(T value) {
+  if (value == ScalarConvert<int, T>::to(1)) {
+    return ScalarConvert<int, T>::to(0);
+  }
+  return value;
+}
+
 #define GENERATE_KERNEL1(NAME, T, ARG1, CURAND_T, CURAND_FUNC, TRANSFORM)      \
 __global__ void NAME(curandStateMtgp32 *state, int size, T *result, ARG1)      \
 {                                                                              \
@@ -130,8 +140,9 @@ __global__ void generate_bernoulli_tensor(curandStateMtgp32 *state, int size,
   }
 }
 
-GENERATE_KERNEL2(generate_uniform, float, double a, double b, float, curand_uniform, x * (b-a) + a)
-GENERATE_KERNEL2(generate_uniform, double, double a, double b, double, curand_uniform_double, x * (b-a) + a)
+// NOTE: curand_uniform is (0, 1] and we want [a, b)
+GENERATE_KERNEL2(generate_uniform, float, float a, float b, float, curand_uniform, reverse_bounds(x) * (b-a) + a)
+GENERATE_KERNEL2(generate_uniform, double, double a, double b, double, curand_uniform_double, reverse_bounds(x) * (b-a) + a)
 
 GENERATE_KERNEL2(generate_normal, float, double mean, double stdv, float, curand_normal, (x * stdv) + mean)
 GENERATE_KERNEL2(generate_normal, double, double mean, double stdv, double, curand_normal_double, (x * stdv) + mean)
@@ -143,7 +154,7 @@ GENERATE_KERNEL2(generate_cauchy, float, double median, double sigma, float, cur
 GENERATE_KERNEL2(generate_cauchy, double, double median, double sigma, double, curand_uniform_double, (double)(median + sigma * tan(M_PI*(x-0.5))))
 
 #ifdef CUDA_HALF_TENSOR
-GENERATE_KERNEL2(generate_uniform, half, double a, double b, float, curand_uniform, (ScalarConvert<float, half>::to(x * (b-a) + a)))
+GENERATE_KERNEL2(generate_uniform, half, double a, double b, float, curand_uniform, (__float2half_rd(reverse_bounds(x) * (b-a) + a)))
 GENERATE_KERNEL2(generate_normal, half, double mean, double stdv, float, curand_normal, (ScalarConvert<float, half>::to((x * stdv) + mean)))
 GENERATE_KERNEL1(generate_exponential, half, double lambda, float, curand_uniform, (ScalarConvert<float, half>::to((float)(-1. / lambda * log(x)))))
 GENERATE_KERNEL2(generate_cauchy, half, double median, double sigma, float, curand_uniform, (ScalarConvert<float, half>::to((float)(median + sigma * tan(M_PI*(x-0.5))))))
