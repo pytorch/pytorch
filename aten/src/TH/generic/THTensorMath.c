@@ -1404,6 +1404,8 @@ void THTensor_(addmm)(THTensor *r_, real beta, THTensor *t, real alpha, THTensor
 {
   char transpose_r, transpose_m1, transpose_m2;
   THTensor *r__, *m1_, *m2_;
+  int free_m1 = 0;
+  int free_m2 = 0;
 
   if( (m1->nDimension != 2) || (m2->nDimension != 2))
     THError("matrices expected, got %dD, %dD tensors", m1->nDimension, m2->nDimension);
@@ -1475,6 +1477,7 @@ void THTensor_(addmm)(THTensor *r_, real beta, THTensor *t, real alpha, THTensor
   {
     transpose_m1 = (transpose_r == 'n' ? 't' : 'n');
     m1_ = THTensor_(newContiguous)(m1);
+    free_m1 = 1;
   }
 
   /* m2 */
@@ -1494,6 +1497,7 @@ void THTensor_(addmm)(THTensor *r_, real beta, THTensor *t, real alpha, THTensor
   {
     transpose_m2 = (transpose_r == 'n' ? 't' : 'n');
     m2_ = THTensor_(newContiguous)(m2);
+    free_m2 = 1;
   }
 
 #pragma omp critical(blasgemm)
@@ -1513,10 +1517,10 @@ void THTensor_(addmm)(THTensor *r_, real beta, THTensor *t, real alpha, THTensor
                 r__->stride[(transpose_r == 'n' ? 1 : 0)]);
 
   /* free intermediate variables */
-  if(m1_ != m1)
+  if(free_m1)
     THTensor_(free)(m1_);
 
-  if(m2_ != m2)
+  if(free_m2)
     THTensor_(free)(m2_);
 
   if(r__ != r_)
