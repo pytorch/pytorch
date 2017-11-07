@@ -1,0 +1,60 @@
+/**
+ * Copyright (c) 2016-present, Facebook, Inc.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+#include "caffe2/operators/mod_op.h"
+
+#include "caffe2/core/operator.h"
+#include "caffe2/core/tensor.h"
+
+namespace caffe2 {
+
+template <>
+template <typename T>
+bool ModOp<CPUContext>::DoRunWithType() {
+  auto& data = Input(DATA);
+  auto N = data.size();
+  const auto* data_ptr = data.template data<T>();
+
+  auto* output = Output(0);
+  output->ResizeLike(Input(DATA));
+  auto* output_ptr = output->template mutable_data<T>();
+
+  for (auto i = 0; i < N; i++) {
+    output_ptr[i] = data_ptr[i] % divisor_;
+  }
+  return true;
+}
+
+namespace {
+
+REGISTER_CPU_OPERATOR(Mod, ModOp<CPUContext>);
+OPERATOR_SCHEMA(Mod)
+    .NumInputs(1)
+    .NumOutputs(1)
+    .Arg("divisor", "The divisor of the modulo operation. Must >= 1")
+    .IdenticalTypeAndShape()
+    .AllowInplace({{0, 0}})
+    .SetDoc(R"DOC(
+Elementwise modulo operation. Each element in the output is the modulo result
+of the corresponding elment in the input data. The divisor of the modulo is
+provided by the operator argument `divisor`.
+)DOC")
+    .Input(0, "data", "input int32 or int64 data")
+    .Output(0, "output", "output of data with modulo operation applied");
+
+SHOULD_NOT_DO_GRADIENT(ModOp);
+} // namespace
+} // namespace caffe2
