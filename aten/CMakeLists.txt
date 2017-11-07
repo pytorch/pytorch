@@ -384,7 +384,6 @@ endif()
 
 set(cwrap_files
   ${CMAKE_CURRENT_SOURCE_DIR}/src/ATen/Declarations.cwrap
-  ${CMAKE_CURRENT_SOURCE_DIR}/src/ATen/Local.cwrap
   ${CMAKE_CURRENT_SOURCE_DIR}/src/THNN/generic/THNN.h
   ${CMAKE_CURRENT_SOURCE_DIR}/src/THCUNN/generic/THCUNN.h
   ${CMAKE_CURRENT_SOURCE_DIR}/src/ATen/nn.yaml
