@@ -28,6 +28,9 @@ ACCEPT = args.accept
 UNITTEST_ARGS = [sys.argv[0]] + remaining
 
 
+parse_set_seed_once()
+
+
 def run_tests():
     unittest.main(argv=UNITTEST_ARGS)
 
