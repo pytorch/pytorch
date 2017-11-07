@@ -94,7 +94,9 @@ class MKLOperator : public OperatorBase {
   }
 
   void RecordEvent(const char* err_msg = nullptr) final {
-    context_.Record(&event_, err_msg);
+    if (event_) {
+      context_.Record(event_.get(), err_msg);
+    }
   }
 
   virtual bool RunOnDevice() = 0;

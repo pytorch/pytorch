@@ -150,13 +150,11 @@ void CUDARecurrentNetworkExecutor::_ExecRange(int from, int to) {
 }
 
 bool CUDARecurrentNetworkExecutor::Run(int T) {
-  ResetEvents();
   _ExecRange(0, T);
   return true;
 }
 
 bool CUDARecurrentNetworkExecutor::RunBackwards(int T) {
-  ResetEvents();
   _ExecRange(T - 1, -1);
   return true;
 }

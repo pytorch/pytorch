@@ -138,7 +138,9 @@ class OperatorBase : public Observable<OperatorBase> {
   }
 
   virtual void Finish() {
-    event_.Finish();
+    if (event_) {
+      event_->Finish();
+    }
   }
 
   virtual bool Run(int /* unused */ /*stream_id*/ = 0) {
@@ -226,15 +228,27 @@ class OperatorBase : public Observable<OperatorBase> {
   }
 
   const Event& event() const {
-    return event_;
+    CAFFE_ENFORCE(event_, "Event is disabled");
+    return *event_;
   }
 
   Event& event() {
-    return event_;
+    CAFFE_ENFORCE(event_, "Event is disabled");
+    return *event_;
   }
 
   void ResetEvent() {
-    event_.Reset();
+    if (event_) {
+      event_->Reset();
+    }
+  }
+
+  void DisableEvent() {
+    event_ = nullptr;
+  }
+
+  bool IsEventDisabled() const {
+    return !event_;
   }
 
   const std::string& type() {
@@ -269,7 +283,7 @@ class OperatorBase : public Observable<OperatorBase> {
   }
 
   // An event used by asynchronous execution.
-  Event event_;
+  std::unique_ptr<Event> event_;
 
   DISABLE_COPY_AND_ASSIGN(OperatorBase);
 };
@@ -437,7 +451,9 @@ class Operator : public OperatorBase {
 
  protected:
   void RecordEvent(const char* err_msg = nullptr) final {
-    context_.Record(&event_, err_msg);
+    if (event_) {
+      context_.Record(event_.get(), err_msg);
+    }
   }
 
   std::string getErrorMsg() {

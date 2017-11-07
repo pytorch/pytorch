@@ -131,6 +131,8 @@ class RecurrentNetworkExecutorBase {
             rnn_op.op = CreateOperator(step_net_def_.op(rnn_op.order), ws);
           }
         }
+        rnn_op.op->DisableEvent();
+
         timestep_ops_[t].emplace_back(rnn_op);
       }
     }
@@ -388,17 +390,6 @@ class RecurrentNetworkExecutorBase {
     for (auto& rnn_op : rnn_ops) {
       LOG(INFO) << "Operator " << rnn_op.order;
       LOG(INFO) << ProtoDebugString(rnn_op.op->debug_def());
-    }
-  }
-
-  void ResetEvents() {
-    for (auto time_idx = 0; time_idx < timestep_ops_.size(); ++time_idx) {
-      for (auto op_idx = 0; op_idx < timestep_ops_[time_idx].size(); ++op_idx) {
-        auto op = timestep_ops_[time_idx][op_idx].op;
-        if (op) {
-          op->ResetEvent();
-        }
-      }
     }
   }
 
