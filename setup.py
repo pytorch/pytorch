@@ -117,8 +117,8 @@ class build_deps(Command):
 
     def run(self):
         libs = []
-        if WITH_NCCL and not WITH_SYSTEM_NCCL:
-            libs += ['nccl']
+        #if WITH_NCCL and not WITH_SYSTEM_NCCL:
+        #    libs += ['nccl']
         libs += ['ATen', 'libshm', 'nanopb']
         if WITH_DISTRIBUTED:
             if sys.platform.startswith('linux'):
