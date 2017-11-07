@@ -310,6 +310,9 @@ class BCELoss(_WeightedLoss):
     between 0 and 1.
 
     Args:
+        weight (Tensor, optional): a manual rescaling weight given to the loss
+            of each batch element. If given, has to be a Tensor of size
+            "nbatch".
         size_average (bool, optional): By default, the losses are averaged
             over observations for each minibatch. However, if the field
             size_average is set to False, the losses are instead summed for
@@ -355,6 +358,9 @@ class BCEWithLogitsLoss(Module):
     between 0 and 1.
 
     Args:
+        weight (Tensor, optional): a manual rescaling weight given to the loss
+            of each batch element. If given, has to be a Tensor of size
+            "nbatch".
         size_average (bool, optional): By default, the losses are averaged
             over observations for each minibatch. However, if the field
             size_average is set to False, the losses are instead summed for
