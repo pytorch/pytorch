@@ -468,7 +468,7 @@
   __view__: True
 
 - name: squeeze(Tensor self, int64_t dim)
-  self: maybe_unsqueeze(grad, dim, self.size(dim) == 1)
+  self: maybe_unsqueeze(grad, dim, self.size(dim) == 1 && self.sizes().size() != 1)
   __view__: True
 
 - name: std

@@ -34,6 +34,15 @@ Tensor maybe_multiply(const Tensor & t, const Scalar & s) {
   }
 }
 
+// Don't expose ATen scalars to Variable API, because they are not supported yet.
+void ensure_no_aten_scalars(variable_list &vars) {
+  for (auto& v : vars) {
+    if (v.defined() && v.dim() == 0) {
+      v.data().as_strided_({1}, {1});
+    }
+  }
+}
+
 Tensor norm_backward(const Tensor & grad, const Tensor & self, const Scalar & p_, const Tensor & norm) {
   double p = p_.toDouble();
   Tensor self_scaled;
