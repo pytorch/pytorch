@@ -413,6 +413,13 @@ Tensor as_strided_backward(const Tensor & grad, TensorGeometry base, IntList siz
   return src;
 }
 
+std::tuple<Tensor, Tensor> atan2_backward(const Tensor& grad, const Tensor& self, const Tensor& other, std::array<bool, 2> output_mask) {
+  auto recip = (self * self + other * other).reciprocal();
+  return std::tuple<Tensor,Tensor>{
+            output_mask[0] ? grad * other * recip : Tensor(),
+            output_mask[1] ? grad * -self * recip : Tensor() };
+}
+
 }
 
 ${autograd_function_definitions}

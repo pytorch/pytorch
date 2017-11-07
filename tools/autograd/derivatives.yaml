@@ -61,8 +61,7 @@
   self: grad * (self * self + 1).reciprocal()
 
 - name: atan2(Tensor self, Tensor other)
-  self: grad * other * ((self * self + other * other).reciprocal())
-  other: grad * -self * ((self * self + other * other).reciprocal())
+  self, other: atan2_backward(grad, self, other, output_mask)
 
 - name: baddbmm(Tensor self, Tensor batch1, Tensor batch2, *, Scalar beta=1, Scalar alpha=1)
   self: maybe_multiply(grad, beta)
