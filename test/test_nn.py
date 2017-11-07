@@ -584,13 +584,18 @@ class TestNN(NNTestCase):
         linear._test_submodule = nn.Linear(2, 2)
         linear._test_parameter = Parameter(torch.Tensor(2, 2))
         linear.register_buffer('_test_buffer', torch.Tensor(2, 2))
-        keys = linear.__dir__()
+        keys = dir(linear)
         self.assertIn('_test_submodule', keys)
         self.assertIn('_test_parameter', keys)
         self.assertIn('_test_buffer', keys)
 
         for key in keys:
             self.assertTrue(hasattr(linear, key))
+
+    def test_dir_digit(self):
+        model = nn.Sequential(nn.Linear(2, 2))
+        keys = dir(model)
+        self.assertNotIn('0', keys)
 
     def test_named_children(self):
         l1 = nn.Linear(2, 2)
