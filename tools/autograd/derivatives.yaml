@@ -218,7 +218,6 @@
 
 - name: index_select(Tensor self, int64_t dim, Tensor index)
   self: grad.type().zeros(self.sizes()).index_add_(dim, index, grad)
-  __view__: True
 
 - name: inverse(Tensor self)
   self: -at::mm(output.t(), at::mm(grad, output.t()))
