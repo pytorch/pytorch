@@ -183,6 +183,9 @@ void THRandom_nextState(THGenerator *_generator)
   *p = p[m-n] ^ TWIST(p[0], _generator->state[0]);
 }
 
+// TODO: this only returns 32-bits of randomness but as a uint64_t. This is
+// weird and should be fixed. We should also fix the state to be uint32_t
+// instead of uint64_t. (Or switch to a 64-bit random number generator).
 uint64_t THRandom_random(THGenerator *_generator)
 {
   uint64_t y;
@@ -200,11 +203,33 @@ uint64_t THRandom_random(THGenerator *_generator)
   return y;
 }
 
-/* generates a random number on [0,1)-double-interval */
-static double __uniform__(THGenerator *_generator)
+uint64_t THRandom_random64(THGenerator *_generator)
 {
-  /* divided by 2^32 */
-  return (double)THRandom_random(_generator) * (1.0/4294967296.0);
+  uint64_t hi = THRandom_random(_generator);
+  uint64_t lo = THRandom_random(_generator);
+  return (hi << 32) | lo;
+}
+
+// doubles have 52 bits of mantissa (fractional part)
+static uint64_t DOUBLE_MASK = (1ULL << 53) - 1;
+static double DOUBLE_DIVISOR = 1.0 / (1ULL << 53);
+
+// floats have 23 bits of mantissa (fractional part)
+static uint32_t FLOAT_MASK = (1 << 24) - 1;
+static float FLOAT_DIVISOR = 1.0f / (1 << 24);
+
+/* generates a random number on [0,1)-double-interval */
+static double uniform_double(THGenerator *_generator)
+{
+  uint64_t x = THRandom_random64(_generator);
+  return (x & DOUBLE_MASK) * DOUBLE_DIVISOR;
+}
+
+/* generates a random number on [0,1)-double-interval */
+static float uniform_float(THGenerator *_generator)
+{
+  uint32_t x = (uint32_t)THRandom_random(_generator);
+  return (x & FLOAT_MASK) * FLOAT_DIVISOR;
 }
 
 /*********************************************************
@@ -217,7 +242,12 @@ static double __uniform__(THGenerator *_generator)
 
 double THRandom_uniform(THGenerator *_generator, double a, double b)
 {
-  return(__uniform__(_generator) * (b - a) + a);
+  return(uniform_double(_generator) * (b - a) + a);
+}
+
+float THRandom_uniformFloat(THGenerator *_generator, float a, float b)
+{
+  return(uniform_float(_generator) * (b - a) + a);
 }
 
 double THRandom_normal(THGenerator *_generator, double mean, double stdv)
@@ -227,8 +257,8 @@ double THRandom_normal(THGenerator *_generator, double mean, double stdv)
   /* This is known as the Box-Muller method */
   if(!_generator->normal_is_valid)
   {
-    _generator->normal_x = __uniform__(_generator);
-    _generator->normal_y = __uniform__(_generator);
+    _generator->normal_x = uniform_double(_generator);
+    _generator->normal_y = uniform_double(_generator);
     _generator->normal_rho = sqrt(-2. * log(1.0-_generator->normal_y));
     _generator->normal_is_valid = 1;
   }
@@ -243,12 +273,12 @@ double THRandom_normal(THGenerator *_generator, double mean, double stdv)
 
 double THRandom_exponential(THGenerator *_generator, double lambda)
 {
-  return(-1. / lambda * log(1-__uniform__(_generator)));
+  return(-1. / lambda * log(1-uniform_double(_generator)));
 }
 
 double THRandom_cauchy(THGenerator *_generator, double median, double sigma)
 {
-  return(median + sigma * tan(M_PI*(__uniform__(_generator)-0.5)));
+  return(median + sigma * tan(M_PI*(uniform_double(_generator)-0.5)));
 }
 
 /* Faut etre malade pour utiliser ca.
@@ -262,11 +292,11 @@ double THRandom_logNormal(THGenerator *_generator, double mean, double stdv)
 int THRandom_geometric(THGenerator *_generator, double p)
 {
   THArgCheck(p > 0 && p < 1, 1, "must be > 0 and < 1");
-  return((int)(log(1-__uniform__(_generator)) / log(p)) + 1);
+  return((int)(log(1-uniform_double(_generator)) / log(p)) + 1);
 }
 
 int THRandom_bernoulli(THGenerator *_generator, double p)
 {
   THArgCheck(p >= 0 && p <= 1, 1, "must be >= 0 and <= 1");
-  return(__uniform__(_generator) <= p);
+  return(uniform_double(_generator) <= p);
 }

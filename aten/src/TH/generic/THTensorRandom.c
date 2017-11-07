@@ -2,8 +2,6 @@
 #define TH_GENERIC_FILE "generic/THTensorRandom.c"
 #else
 
-#define RANDOM64(GENERATOR) ((THRandom_random(GENERATOR) << 32) | THRandom_random(GENERATOR))
-
 void THTensor_(random)(THTensor *self, THGenerator *_generator)
 {
 
@@ -16,11 +14,11 @@ void THTensor_(random)(THTensor *self, THGenerator *_generator)
 #elif defined(TH_REAL_IS_INT)
   TH_TENSOR_APPLY(real, self, *self_data = (int32_t)(THRandom_random(_generator) % (INT32_MAX + 1UL)););
 #elif defined(TH_REAL_IS_LONG)
-  TH_TENSOR_APPLY(real, self, *self_data = (uint64_t)(RANDOM64(_generator) % (LONG_MAX + 1ULL)););
+  TH_TENSOR_APPLY(real, self, *self_data = (uint64_t)(THRandom_random64(_generator) % (LONG_MAX + 1ULL)););
 #elif defined(TH_REAL_IS_FLOAT)
   TH_TENSOR_APPLY(real, self, *self_data = (float)(THRandom_random(_generator) % ((1ULL << FLT_MANT_DIG) + 1)););
 #elif defined(TH_REAL_IS_DOUBLE)
-  TH_TENSOR_APPLY(real, self, *self_data = (double)(RANDOM64(_generator) % ((1ULL << DBL_MANT_DIG) + 1)););
+  TH_TENSOR_APPLY(real, self, *self_data = (double)(THRandom_random64(_generator) % ((1ULL << DBL_MANT_DIG) + 1)););
 #else
 #error "Unknown type"
 #endif
@@ -32,7 +30,7 @@ void THTensor_(clampedRandom)(THTensor *self, THGenerator *_generator, int64_t m
   uint64_t range = max - min;
 #if defined(TH_REAL_IS_LONG) || defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
     if (range >= 1ULL << 32) {
-      TH_TENSOR_APPLY(real, self, *self_data = (real)((RANDOM64(_generator) % range) + min);)
+      TH_TENSOR_APPLY(real, self, *self_data = (real)((THRandom_random64(_generator) % range) + min);)
       return;
     }
 #endif
@@ -68,7 +66,12 @@ void THTensor_(bernoulli_DoubleTensor)(THTensor *self, THGenerator *_generator, 
 
 void THTensor_(uniform)(THTensor *self, THGenerator *_generator, double a, double b)
 {
-  TH_TENSOR_APPLY(real, self, *self_data = (real)THRandom_uniform(_generator, a, b););
+  TH_TENSOR_APPLY(real, self, *self_data =
+    #if defined(TH_REAL_IS_FLOAT)
+    (real)THRandom_uniformFloat(_generator, (real)a, (real)b););
+    #else
+    (real)THRandom_uniform(_generator, a, b););
+    #endif
 }
 
 void THTensor_(normal)(THTensor *self, THGenerator *_generator, double mean, double stdv)
@@ -408,7 +411,5 @@ void THTensor_(setRNGState)(THGenerator *_generator, THTensor *self)
   THGenerator_copy(_generator, rng_state);
 }
 #endif
-
-#undef RANDOM64
 
 #endif
