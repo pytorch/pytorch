@@ -42,6 +42,16 @@ Below you can find a small example showcasing this::
         d = torch.randn(2).cuda(2)
         # d.get_device() == 2
 
+Memory management
+-----------------
+
+PyTorch use a caching memory allocator to speed up memory allocations. This
+allows fast memory deallocation without device synchronizations. However, the
+unused memory managed by the allocator will still show as if used in
+`nvidia-smi`. Calling :meth:`~torch.cuda.empty_cache` can release all unused
+cached memory from PyTorch so that those can be used by other GPU applications.
+
+
 Best practices
 --------------
 
@@ -50,7 +60,7 @@ Device-agnostic code
 
 Due to the structure of PyTorch, you may need to explicitly write
 device-agnostic (CPU or GPU) code; an example may be creating a new tensor as
-the initial hidden state of a recurrent neural network. 
+the initial hidden state of a recurrent neural network.
 
 The first step is to determine whether the GPU should be used or not. A common
 pattern is to use Python's ``argparse`` module to read in user arguments, and

@@ -267,6 +267,13 @@ def current_blas_handle():
     return torch._C._cuda_getCurrentBlasHandle()
 
 
+def empty_cache():
+    """Releases all unoccupied cached memory currently held by the caching
+    allocator so that those can be used in other GPU application and visible in
+    `nvidia-smi`."""
+    return torch._C._cuda_emptyCache()
+
+
 def _host_allocator():
     _lazy_init()
     return torch._C._cuda_cudaHostAllocator()
