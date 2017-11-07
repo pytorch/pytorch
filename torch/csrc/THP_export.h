@@ -13,3 +13,5 @@
 # define THP_API extern "C"
 # define THP_CLASS
 #endif
+
+#endif
