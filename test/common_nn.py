@@ -246,6 +246,17 @@ module_tests = [
 ]
 
 
+def kldivloss_reference(input, target, size_average=True, reduce=True):
+    safe_target = target * (target > 0).type_as(target)
+    safe_target_log = (safe_target + (target <= 0).type_as(target)).log()
+    result = safe_target * (safe_target_log - input)
+    if reduce and size_average:
+        return result.mean()
+    elif reduce:
+        return result.sum()
+    return result
+
+
 def nllloss2d_reference(input, target, weight=None, ignore_index=-100,
                         size_average=True, reduce=True):
     N, C, H, W = input.size()
@@ -309,6 +320,7 @@ def smoothl1loss_reference(input, target, size_average=True, reduce=True):
 
 
 loss_reference_fns = {
+    'KLDivLoss': kldivloss_reference,
     'NLLLoss': nllloss_reference,
     'NLLLoss2d': nllloss2d_reference,
     'SmoothL1Loss': smoothl1loss_reference,
@@ -370,6 +382,8 @@ criterion_tests = [
         module_name='KLDivLoss',
         input_fn=lambda: torch.rand(10, 10).log(),
         target_fn=lambda: torch.rand(10, 10),
+        reference_fn=lambda i, t, m:
+            kldivloss_reference(i, t, get_size_average(m), reduce=True),
         check_no_size_average=True,
     ),
     dict(

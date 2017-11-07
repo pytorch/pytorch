@@ -108,13 +108,16 @@ TH_API void THNN_(DistKLDivCriterion_updateOutput)(
           THTensor *input,             // input tensor
           THTensor *target,            // target tensor
           THTensor *output,            // [OUT] a one-element tensor containing the loss
-          bool sizeAverage);           // if true, the loss will be normalized **by total number of elements**
+          bool sizeAverage,            // if true, the loss will be normalized **by total number of elements**
+          bool reduce);                // if true, returns summed or averaged loss. if false, returns a loss per element.
 TH_API void THNN_(DistKLDivCriterion_updateGradInput)(
           THNNState *state,            // library's state
           THTensor *input,             // input tensor
           THTensor *target,            // target tensor
+          THTensor *gradOutput,        // grad output tensor
           THTensor *gradInput,         // [OUT] gradient w.r.t. input
-          bool sizeAverage);           // if true, the loss will be normalized **by total number of elements**
+          bool sizeAverage,            // if true, the loss will be normalized **by total number of elements**
+          bool reduce);                // if true, returns summed or averaged loss. if false, returns a loss per element.
 
 TH_API void THNN_(GatedLinear_updateOutput)(
           THNNState *state,            // library's state

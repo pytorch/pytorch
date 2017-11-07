@@ -104,14 +104,17 @@ TH_API void THNN_(DistKLDivCriterion_updateOutput)(
                   THCTensor *input,
                   THCTensor *target,
                   THCTensor *output,
-                  bool sizeAverage);
+                  bool sizeAverage,
+                  bool reduce);
 
 TH_API void THNN_(DistKLDivCriterion_updateGradInput)(
                   THCState *state,
                   THCTensor *input,
                   THCTensor *target,
+                  THCTensor *gradOutput,
                   THCTensor *gradInput,
-                  bool sizeAverage);
+                  bool sizeAverage,
+                  bool reduce);
 
 TH_API void THNN_(ELU_updateOutput)(
                   THCState *state,
