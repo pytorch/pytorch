@@ -129,6 +129,24 @@
 ]]
 
 [[
+  name: as_strided_
+  variants: [method,function]
+  return: argument 0
+  arguments:
+    - THTensor* self
+    - THSize* size
+    - THStride* stride
+    - arg: int64_t storage_offset
+      default: -1
+  aten_custom_call: |
+    if (storage_offset == -1) {
+      storage_offset = self_->tensor->storageOffset;
+    }
+    ${THTensor}_setStorage(${state,}self_->tensor, self_->tensor->storage, storage_offset, size_, stride_);
+    self_->maybeScalar(size.size() == 0);
+]]
+
+[[
   name: cat
   cname: catArray
   variants: [function]
