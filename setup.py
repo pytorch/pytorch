@@ -24,7 +24,6 @@ from tools.setup_helpers.split_types import split_types
 DEBUG = check_env_flag('DEBUG')
 WITH_DISTRIBUTED = not check_env_flag('NO_DISTRIBUTED')
 WITH_DISTRIBUTED_MW = WITH_DISTRIBUTED and check_env_flag('WITH_DISTRIBUTED_MW')
-
 WITH_ROCM=False
 
 ################################################################################
@@ -498,7 +497,6 @@ if WITH_ROCM:
         "torch/csrc/cuda/utils.cpp",
         "torch/csrc/cuda/expand_utils.cpp",
         "torch/csrc/cuda/serialization.cpp",
-    #    "torch/csrc/jit/fusion_compiler.cpp",
     ]
     main_sources += split_types("torch/csrc/cuda/Tensor.cpp")
 
