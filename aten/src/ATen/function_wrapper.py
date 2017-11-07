@@ -519,7 +519,19 @@ def create_generic(top_env, declarations):
             return argument
 
         result = pos_args + kwd_args
-        return [add_type_as_dynamic_type(argument, option) for argument in result]
+        result = [add_type_as_dynamic_type(argument, option) for argument in result]
+
+        # ensure we get reference-type formals when appropriate
+        def native_translate_formals(argument, option):
+            if option['inplace']:
+                argument['type'] = {'Tensor': 'Tensor &'}.get(argument['type'], argument['type'])
+            else:
+                argument['type'] = {'Tensor': 'const Tensor &'}.get(argument['type'], argument['type'])
+
+            return argument
+
+        result = [native_translate_formals(argument, option) for argument in result]
+        return result
 
     def native_get_return_types(option):
         ret = option['return']
@@ -528,6 +540,9 @@ def create_generic(top_env, declarations):
 
         # can't actually return a TensorList (since it's a reference object)
         actual_return_type = {'TensorList': 'std::vector<Tensor>'}.get(ret['type'], ret['type'])
+        if actual_return_type == 'Tensor' and option['inplace']:
+            # follow normal ATen convention of returning Tensor & for inplace functions.
+            actual_return_type = 'Tensor &'
         return [{
             'type': actual_return_type,
             'dynamic_type': ret['type'],
