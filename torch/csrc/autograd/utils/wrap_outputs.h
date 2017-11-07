@@ -13,6 +13,10 @@
 namespace torch { namespace autograd { namespace utils {
 
 inline PyObject* wrap(at::Tensor tensor) {
+  if (tensor.defined() && tensor.dim() == 0) {
+    // don't expose 0-dim tensors to Variable API.
+    Variable(tensor).data().as_strided_({1}, {1});
+  }
   return THPVariable_Wrap(Variable(std::move(tensor)));
 }
 
