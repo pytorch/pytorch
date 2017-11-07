@@ -94,7 +94,8 @@ def default_collate(batch):
             storage = batch[0].storage()._new_shared(numel)
             out = batch[0].new(storage)
         return torch.stack(batch, 0, out=out)
-    elif elem_type.__module__ == 'numpy' and elem_type.__name__ != 'str_':
+    elif elem_type.__module__ == 'numpy' and elem_type.__name__ != 'str_' \
+            and elem_type.__name__ != 'string_':
         elem = batch[0]
         if elem_type.__name__ == 'ndarray':
             # array of string classes and object
