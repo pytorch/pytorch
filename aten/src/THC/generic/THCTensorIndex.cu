@@ -2,6 +2,8 @@
 #define THC_GENERIC_FILE "generic/THCTensorIndex.cu"
 #else
 
+#include <thrust/system/cuda/execution_policy.h>
+
 void THCTensor_(indexCopy_long)(THCState *state, THCTensor *dst, int dim, THLongTensor *indices, THCTensor *src)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, dst, src));
@@ -152,7 +154,11 @@ static void THCTensor_(sort_indices)(THCState *state, THCudaLongTensor *index, T
   auto numel = THCTensor_(numel)(state, src);
 
   thrust::sort_by_key(
+#if CUDART_VERSION >= 7000
     thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
+#else
+    thrust::cuda::par,
+#endif
     index_iter, index_iter + numel,
     src_iter, ThrustLTOp<int64_t>());
 }

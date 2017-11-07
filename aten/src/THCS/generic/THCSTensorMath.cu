@@ -5,6 +5,7 @@
 #include "THCThrustAllocator.cuh"
 #include <thrust/device_ptr.h>
 #include <thrust/sequence.h>
+#include <thrust/system/cuda/execution_policy.h>
 
 #define ROW_PTR2(t, r) (THCTensor_(data)(THCState *state, t) + (r) * (t)->stride[0])
 #define COL_PTR2(t, c) (THCTensor_(data)(THCState *state, t) + (c) * (t)->stride[1])
@@ -176,7 +177,7 @@ void THCSTensor_(hspmm)(THCState *state, THCSTensor *r_, real alpha, THCSTensor 
   THCThrustAllocator thrustAlloc(state);
 #define THRUST_EXEC(fn, ...) fn(thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)), ##__VA_ARGS__)
 #else
-#define THRUST_EXEC(fn, ...) fn(##__VA_ARGS__)
+#define THRUST_EXEC(fn, ...) fn(thrust::cuda::par, ##__VA_ARGS__)
 #endif
 
   THCAssertSameGPU(THCSTensor_(checkGPU)(state, 2, 3, r_, sparse_, dense));
