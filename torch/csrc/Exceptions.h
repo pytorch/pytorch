@@ -83,7 +83,7 @@ bool THPException_init(PyObject *module);
 #endif
 
 namespace torch {
-std::string processErrorMsg(std::string str);
+THP_CLASS std::string processErrorMsg(std::string str);
 }
 
 #endif
