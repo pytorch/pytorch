@@ -79,40 +79,50 @@ void addAttribute(onnx::NodeProto * n_p, jit::Node * n, jit::Symbol name) {
   switch(n->kindOf(name)) {
     case AttributeKind::f:
       attr->set_f(n->f(name));
+      attr->set_type(onnx::aFLOAT);
       break;
     case AttributeKind::fs:
+      attr->set_type(onnx::aFLOATS);
       for(auto & v : n->fs(name))
         attr->add_floats(v);
       break;
     case AttributeKind::i:
+      attr->set_type(onnx::aINT);
       attr->set_i(n->i(name));
       break;
     case AttributeKind::is:
+      attr->set_type(onnx::aINTS);
       for(auto & v : n->is(name))
         attr->add_ints(v);
       break;
     case AttributeKind::s:
+      attr->set_type(onnx::aSTRING);
       attr->set_s(n->s(name));
       break;
     case AttributeKind::ss:
+      attr->set_type(onnx::aSTRINGS);
       for(auto & v : n->ss(name))
         attr->add_strings(v);
       break;
     case AttributeKind::t: {
+      attr->set_type(onnx::aTENSOR);
       auto t = attr->mutable_t();
       encodeTensor(t, n->t(name));
     } break;
     case AttributeKind::ts:
+      attr->set_type(onnx::aTENSORS);
       for(auto & v : n->ts(name)) {
         auto t = attr->add_tensors();
         encodeTensor(t, v);
       }
       break;
     case AttributeKind::g: {
+      attr->set_type(onnx::aGRAPH);
       auto g = attr->mutable_g();
       encodeGraph(g, n->g(name), {});
     } break;
     case AttributeKind::gs:
+      attr->set_type(onnx::aGRAPHS);
       for(auto & v : n->gs(name)) {
         auto g = attr->add_graphs();
         encodeGraph(g, v, {});

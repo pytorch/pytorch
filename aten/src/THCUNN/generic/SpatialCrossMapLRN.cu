@@ -54,7 +54,7 @@ void LRNbackward(THCState* state, THCTensor* input, THCTensor* output,
   real alpha = ScalarConvert<accreal, real>::to(alpha_);
   real beta = ScalarConvert<accreal, real>::to(beta_);
   real k = ScalarConvert<accreal, real>::to(k_);
-
+  (void) k;
   THCTensor_(resizeAs)(state, gradInput, input);
 
   int batchSize;

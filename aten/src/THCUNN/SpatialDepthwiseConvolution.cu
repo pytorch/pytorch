@@ -10,6 +10,7 @@
 #include "THCTensorMathReduce.cuh"
 #include "SharedMem.cuh"
 #include "common.h"
+#include <algorithm>
 
 
 const int WARP_SIZE = 32;

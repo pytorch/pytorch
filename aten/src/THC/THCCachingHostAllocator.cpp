@@ -134,7 +134,6 @@ struct HostAllocator
   cudaError_t recordEvent(void* ptr, THCStream *stream)
   {
     std::lock_guard<std::mutex> lock(mutex);
-    cudaError_t err;
 
     auto it = blocks.find(ptr);
     if (it == blocks.end()) {

@@ -18,11 +18,11 @@ you can specify optimizer-specific options such as the learning rate, weight dec
 
 .. note::
 
-    If you need to move a model to GPU via `.cuda()`, please do so before 
+    If you need to move a model to GPU via `.cuda()`, please do so before
     constructing optimizers for it. Parameters of a model after `.cuda()` will
-    be different objects with those before the call. 
+    be different objects with those before the call.
 
-    In general, you should make sure that optimized parameters live in  
+    In general, you should make sure that optimized parameters live in
     consistent locations when optimizers are constructed and used.
 
 Example::
@@ -110,6 +110,8 @@ Algorithms
 .. autoclass:: Adagrad
     :members:
 .. autoclass:: Adam
+    :members:
+.. autoclass:: SparseAdam
     :members:
 .. autoclass:: Adamax
     :members:

@@ -168,6 +168,21 @@ DEFINE_CONST(UINT64)
 DEFINE_CONST(COMPLEX64)
 DEFINE_CONST(COMPLEX128)
 #undef DEFINE_CONST
+
+#define DEFINE_CONST(C) \
+const auto a##C = onnx_AttributeProto_AttributeType_##C;
+DEFINE_CONST(FLOAT)
+DEFINE_CONST(INT)
+DEFINE_CONST(STRING)
+DEFINE_CONST(TENSOR)
+DEFINE_CONST(GRAPH)
+DEFINE_CONST(FLOATS)
+DEFINE_CONST(INTS)
+DEFINE_CONST(STRINGS)
+DEFINE_CONST(TENSORS)
+DEFINE_CONST(GRAPHS)
+#undef DEFINE_CONST
+
 // C++ wrappers which simulate the Google C++ Protobuf API
 //
 // These are NOT COMPLETE wrappers. If you find something is missing, add it!
@@ -270,6 +285,7 @@ public:
     proto.graphs  = list<GraphProto, onnx_GraphProto_fields>(&graphs);
   }
   void set_name(const std::string& s) { proto.name = string(&name, s); }
+  void set_type(onnx_AttributeProto_AttributeType t) { proto.has_type = true; proto.type = t; }
   void set_f(float f) { proto.has_f = true; proto.f = f; }
   void set_i(int64_t i) { proto.has_i = true; proto.i = i; }
   void set_s(std::string s_) { proto.s = string(&s, s_); }
@@ -359,7 +375,7 @@ private:
 public:
   ModelProto() : MicroProto(onnx_ModelProto_init_default) {
     proto.has_ir_version = true;
-    proto.ir_version = onnx_Version_IR_VERSION;
+    proto.ir_version = 1; // TODO: onnx_Version_IR_VERSION;
     proto.producer_name = string(&producer_name, "pytorch");
     // TODO: stop hard-coding this
     proto.producer_version = string(&producer_version, "0.2");

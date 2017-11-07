@@ -337,37 +337,11 @@ static void _mark_dirty(THPFunction *self, t2var_type &t2var,
           "argument %d isn't one", i);
     }
     auto& version_counter = variable->cdata.version_counter();
-    THPFunction_assert(version_counter.live_refs() == 1,
-        "in-place operations can be only used on variables that don't share "
-        "storage with any other variables, but detected that there are %d "
-        "objects sharing it",
-        version_counter.live_refs());
     version_counter.increment();
   }
   // We're not going to ever need this so let's remove references now
   Py_DECREF(self->dirty_tensors);
   self->dirty_tensors = NULL;
-}
-
-static void _transplant_var(VariableImpl& var, const std::shared_ptr<Function>& fn, int output_nr, bool is_volatile)
-{
-  if (is_volatile) {
-    var.grad_fn = nullptr;
-    var.requires_grad = false;
-    var.is_volatile = true;
-    var.output_nr = 0;
-  } else {
-    var.grad_fn = fn;
-    var.requires_grad = fn->is_executable;
-    var.is_volatile = is_volatile;
-    var.output_nr = output_nr;
-  }
-  var.grad.reset();
-  var.hooks.clear();
-  if (auto grad_acc_fn = var.grad_accumulator.lock()) {
-    auto grad_acc = dynamic_cast<AccumulateGrad*>(grad_acc_fn.get());
-    grad_acc->variable.reset();
-  }
 }
 
 // Given a Python tuple of raw output tensors (raw_output), set each of
@@ -382,86 +356,99 @@ static void _transplant_var(VariableImpl& var, const std::shared_ptr<Function>& 
 // do in this case.  After this method is run, t2var is extended with
 // mappings for output tensors as well.
 static void _wrap_outputs(THPFunction *self, t2var_type &t2var,
-    std::unordered_set<PyObject *> &dirty_inputs, PyObject *raw_output,
-    PyObject *outputs, bool is_volatile)
+    std::unordered_set<PyObject *> &dirty_inputs,
+    const t2var_type &shared_pairs,
+    PyObject *raw_output, PyObject *outputs, bool is_volatile)
 {
-  auto cdata = is_volatile ? nullptr : THPFunction_asFunction(self);
+  bool is_executable = self->cdata.is_executable;
+  TORCH_ASSERT(!is_volatile || !is_executable);
+  auto cdata = is_executable ? THPFunction_asFunction(self) : nullptr;
+  auto flags = VarFlags(is_executable, is_volatile);
   Py_ssize_t num_outputs = PyTuple_GET_SIZE(raw_output);
   if (self->cdata.is_executable) {
     self->output_info.clear();
     self->output_info.reserve(num_outputs);
   }
+
+  // Given an output tensor, find the input Variable with which it shares storage
+  auto get_shared_base = [&](PyObject* tensor) -> Variable {
+    auto input_it = t2var.find(tensor);
+    if (input_it != t2var.end()) {
+      // If the output is an input treat that as the base
+      return input_it->second->cdata;
+    }
+    auto it = shared_pairs.find(tensor);
+    if (it != shared_pairs.end()) {
+      // It's explicitly marked as shared via mark_shared_storage
+      return it->second->cdata;
+    }
+    return Variable();
+  };
+
+  // Wraps an output Tensor in a Variable or returns the previous wrapper in
+  // the case of in-place modification.
+  auto wrap_output = [&](at::Tensor data, Variable prev, int output_nr, bool is_modified) -> Variable {
+    if (!prev.defined()) {
+      return make_variable(std::move(data), flags, output_nr, cdata);
+    }
+    if (is_modified) {
+      if (prev.is_leaf() && prev.requires_grad()) {
+        throw std::runtime_error("a leaf Variable that requires grad has been used in an in-place operation.");
+      }
+      // If the input was modified, transplant the grad_fn in the graph:
+      // grad_fn <- variable <- self  ==>  grad_fn <- self <- variable
+      prev.get()->grad.reset();
+      prev.get()->hooks.clear();
+      if (auto grad_acc_fn = prev.get()->grad_accumulator.lock()) {
+        auto grad_acc = dynamic_cast<AccumulateGrad*>(grad_acc_fn.get());
+        grad_acc->variable.reset();
+      }
+      prev.rebase_history(flags, output_nr, cdata);
+      return prev;
+    }
+    // An input has been returned, but it wasn't modified. Return it as a view
+    // so that we can attach a new grad_fn to the Variable.
+    return make_variable_view(std::move(prev), std::move(data), flags, output_nr, cdata);
+  };
+
+  t2var_type output2var;
   for (int i = 0; i < num_outputs; i++) {
     PyObject *output = PyTuple_GET_ITEM(raw_output, i);
-    THPVariable *output_var;
-    auto it = t2var.find(output);
-    if (it == t2var.end()) {
-      // A completely new tensor - just wrap it and continue
-      if (is_volatile) {
-        output_var = (THPVariable*)THPVariable_NewVolatile(output);
-      } else {
-        output_var = (THPVariable*)THPVariable_NewWithFunction(output, cdata);
-      }
+
+    THPVariable* output_var;
+    auto it = output2var.find(output);
+    if (it != output2var.end()) {
+      output_var = it->second;
+      Py_INCREF(output_var);
     } else {
-      // If one of the outputs was also an input tensor it's a bit more complicated.
-      THPVariable *input_var = it->second;
-      auto& input_var_ = input_var->cdata;
-      if (input_var_.grad_fn()) {
-        Py_INCREF(input_var);
-        output_var = input_var;
-        // If it's not a leaf we want to move it in the graph so backprop
-        // will be computed correctly, but only if it was modified. Otherwise
-        // it's better to minimize the number of operations that mutate the graph.
-        // grad_fn <- variable <- self  ==>  grad_fn <- self <- variable
-        if (dirty_inputs.count(output) > 0) {
-          _transplant_var(*input_var_.get(), cdata, i, is_volatile);
-        }
-      } else {
-        // If the leaf Variable has been returned, we have to move it after the
-        // current function to ensure the gradient is computed correctly.
-        // There are two cases now:
-        // 1. It has been modified in-place. If it didn't require_grad it's ok,
-        // but if it does, then it's a clear error.
-        // 2. It hasn't been modified. This means that it must have been
-        // returned unchanged, and we can simply return a new Variable
-        // referencing the same storage.
-        if (dirty_inputs.count(output) > 0) {
-          if (!input_var_.requires_grad()) {
-            Py_INCREF(input_var);
-            output_var = input_var;
-            _transplant_var(*input_var_.get(), cdata, i, is_volatile);
-          } else { // input_var_.requires_grad
-            throw std::runtime_error("a leaf Variable that requires grad has been used in an in-place operation.");
-          }
-        } else {
-          // An input has been returned, but it wasn't modified. It's better
-          // not to move the Variable, because there are some legitimate cases
-          // where making it non-leaf would break stuff (e.g. broadcast). Also,
-          // returning the input Variable is not a good option either,
-          // because if someone registers hooks on it, they will fire with grads
-          // from all usages, not only from usages of this output. This is why
-          // we'll return a copy and join their version counters. This has
-          // a side-effect of making in-place ops on any of these Variables an
-          // immediate error, but it would be raised anyway once someone
-          // calls backward.
-          if (is_volatile) {
-            output_var = (THPVariable*)THPVariable_NewVolatile(output);
-          } else {
-            output_var = (THPVariable*)THPVariable_NewWithFunction(output, cdata);
-          }
-          if (!output_var) throw python_error();
-          output_var->cdata.version_counter() = input_var->cdata.version_counter();
-        }
-      }
+      // Wrap the output in a Variable
+      bool is_modified = dirty_inputs.count(output) > 0;
+      Variable var = wrap_output(
+          torch::createTensor(output),
+          get_shared_base(output),
+          i,
+          is_modified);
+
+      output_var = (THPVariable*)THPVariable_Wrap(var);
+      if (!output_var) throw python_error();
+
+      // We already have the data tensor wrapped as a PyObject*
+      Py_INCREF(output);
+      Py_CLEAR(output_var->data);
+      output_var->data = output;
+
+      output2var[output] = output_var;
     }
-    if (!output_var) throw python_error();
 
     if (self->cdata.is_executable) {
       self->output_info.emplace_back(output_var->cdata);
     }
-    t2var[output] = output_var;
-    output_var->cdata.get()->output_nr = i;
     PyTuple_SET_ITEM(outputs, i, (PyObject*)output_var);
+  }
+
+  // Add every entry in output2var to t2var
+  for (auto& entry : output2var) {
+    t2var[entry.first] = entry.second;
   }
 }
 
@@ -503,9 +490,10 @@ static void _save_variables(THPFunction* self, t2var_type &t2var)
 }
 
 // t2var maps input and output tensors to variables
-static void _join_version_counters(THPFunction *self, t2var_type &t2var)
+static t2var_type _parse_shared_pairs(THPFunction *self, t2var_type &t2var)
 {
-  if (!self->shared_pairs) return;
+  t2var_type map;
+  if (!self->shared_pairs) return map;
   THPFunction_assert(PyTuple_Check(self->shared_pairs), "autograd internal "
       "error: shared_pairs attribute is expected to be a tuple but is %s",
       THPUtils_typename(self->shared_pairs));
@@ -520,30 +508,27 @@ static void _join_version_counters(THPFunction *self, t2var_type &t2var)
         "%d elements", i, PyTuple_GET_SIZE(shared_tuple));
 
     // Now we're sure it's really a pair!
-    THPVariable *v1, *v2;
-    try {
-      // NB: According to the documentation, v1 is an input tensor, and v2
-      // is an output tensor, but we don't actually check this
-      v1 = t2var.at(PyTuple_GET_ITEM(shared_tuple, 0));
-      v2 = t2var.at(PyTuple_GET_ITEM(shared_tuple, 1));
-    } catch(std::out_of_range &e) {
-      // One tuple items wasn't present in t2var, so there are two cases:
-      // 1. it's not a tensor
-      // 2. it's not an input nor an output
-      PyObject *t1 = PyTuple_GET_ITEM(shared_tuple, 0);
-      PyObject *t2 = PyTuple_GET_ITEM(shared_tuple, 1);
-      THPFunction_assert(THPModule_isTensor(t1) && THPModule_isTensor(t2),
-        "mark_shared_storages accepts pairs of tensors, but one of them "
-        "contains %s and %s", THPUtils_typename(t1), THPUtils_typename(t2));
-      THPFunction_assert(false, "mark_shared_storages only accepts pairs of input "
-          "and output tensors, but argument %d doesn't satify this "
-          "condition", i);
-    }
-    v2->cdata.version_counter() = v1->cdata.version_counter();
+    // NB: According to the documentation, v1 is an input tensor, and v2
+    // is an output tensor, but we don't actually check this
+    PyObject* t1 = PyTuple_GET_ITEM(shared_tuple, 0);
+    PyObject* t2 = PyTuple_GET_ITEM(shared_tuple, 1);
+    THPFunction_assert(THPModule_isTensor(t1) && THPModule_isTensor(t2),
+      "mark_shared_storages accepts pairs of tensors, but one of them "
+      "contains %s and %s", THPUtils_typename(t1), THPUtils_typename(t2));
+
+    auto it = t2var.find(t1);
+    THPFunction_assert(it != t2var.end(),
+        "mark_shared_storages only accepts pairs of input "
+        "and output tensors, but argument %d doesn't satify this "
+        "condition", i);
+
+    bool inserted;
+    std::tie(std::ignore, inserted) = map.emplace(t2, it->second);
+    THPFunction_assert(inserted,
+        "mark_shared_storages got a duplicate pair for an output tensor at "
+        "argument %d", i);
   }
-  // Free .shared_pairs
-  Py_DECREF(self->shared_pairs);
-  self->shared_pairs = NULL;
+  return map;
 }
 
 // Mark requires_grad = 0 on non-differentiable variables (as per non_differentiable)
@@ -751,9 +736,12 @@ PyObject* process_outputs(PyObject *op_obj, THPFunction* grad_fn, const Unpacked
   std::unordered_set<PyObject *> dirty_inputs;
   bool is_inplace = static_cast<bool>(grad_fn->dirty_tensors);
   _mark_dirty(grad_fn, t2var, dirty_inputs);
-  _wrap_outputs(grad_fn, t2var, dirty_inputs, raw_output, outputs, is_volatile);
+  _wrap_outputs(grad_fn, t2var, dirty_inputs,
+      _parse_shared_pairs(grad_fn, t2var),
+      raw_output, outputs, is_volatile);
+  // Free shared_pairs
+  Py_CLEAR(grad_fn->shared_pairs);
   // At this point, t2var contains output tensors as well
-  _join_version_counters(grad_fn, t2var);
   if (grad_fn->cdata.is_executable) {
     _mark_non_differentiable(grad_fn, t2var);
   }

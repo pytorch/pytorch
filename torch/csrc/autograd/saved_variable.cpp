@@ -22,7 +22,10 @@ SavedVariable::SavedVariable(const Variable& variable, Function* saved_for)
     grad_accumulator = variable.grad_accumulator();
   }
   if (variable.grad_fn().get() != saved_for) {
-    grad_fn = variable.grad_fn();
+    _grad_fn = variable.grad_fn();
+  }
+  if (variable.is_view()) {
+    base = variable.base();
   }
   if (variable.tracing_state()) {
     tracing_state.reset(new jit::tracer::ValueTracingState(*variable.tracing_state()));
@@ -43,18 +46,23 @@ auto SavedVariable::unpack(std::shared_ptr<Function> saved_for) const -> Variabl
         "modified by an inplace operation");
   }
 
-  Variable var = make_variable(data, requires_grad, is_volatile);
+  auto flags = VarFlags(requires_grad, is_volatile);
+  auto grad_fn = _grad_fn;
   if (has_grad_fn && !grad_fn) {
     if (!saved_for) {
       // If saving the grad_fn would create a circular reference, then it must
       // be passed in to the unpack function.
       throw std::runtime_error("No grad_fn for non-leaf saved variable");
     }
-    var.grad_fn() = saved_for;
-  } else {
-    var.grad_fn() = grad_fn;
+    grad_fn = std::move(saved_for);
   }
-  var.output_nr() = output_nr;
+
+  Variable var;
+  if (base.defined()) {
+    var = make_variable_view(base, data, flags, output_nr, std::move(grad_fn));
+  } else {
+    var = make_variable(data, flags, output_nr, std::move(grad_fn));
+  }
   var.version_counter() = version;
 
   // If a Variable is a leaf (no grad_fn saved), and it requires_grad, then we

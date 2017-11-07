@@ -15,13 +15,13 @@
 // Threads per block for our apply kernel
 // FIXME: use occupancy calculator instead
 #define THC_APPLY_THREADS_PER_BLOCK 32 * 16
-
+#define THC_APPLY_BLOCKS_PER_SM 4
 template <typename Op,
           typename Ta,
           typename IndexType,
           int ADims>
 #if __CUDA_ARCH__ >= 350
-__launch_bounds__(32 * 16, 4)
+__launch_bounds__(THC_APPLY_THREADS_PER_BLOCK, THC_APPLY_BLOCKS_PER_SM)
 #endif
 __global__ void
 kernelPointwiseApply1(TensorInfo<Ta, IndexType> a,
@@ -43,7 +43,7 @@ template <typename Op,
           typename IndexType,
           int ADims, int BDims>
 #if __CUDA_ARCH__ >= 350
-__launch_bounds__(32 * 16, 4)
+__launch_bounds__(THC_APPLY_THREADS_PER_BLOCK, THC_APPLY_BLOCKS_PER_SM)
 #endif
 __global__ void
 kernelPointwiseApply2(TensorInfo<Ta, IndexType> a,
@@ -70,7 +70,7 @@ template <typename Op,
           typename IndexType,
           int ADims, int BDims, int CDims>
 #if __CUDA_ARCH__ >= 350
-__launch_bounds__(32 * 16, 4)
+__launch_bounds__(THC_APPLY_THREADS_PER_BLOCK, THC_APPLY_BLOCKS_PER_SM)
 #endif
 __global__ void
 kernelPointwiseApply3(TensorInfo<Ta, IndexType> a,
@@ -198,7 +198,10 @@ bool THC_pointwiseApply1(THCState* state,
     TensorInfo<typename TensorUtils<TensorTypeA>::DataType, unsigned int> aInfo =
       getTensorInfo<TensorTypeA, unsigned int>(state, a);
     aInfo.collapseDims();
-
+#if CUDA_VERSION < 9000
+    if (!aInfo.isContiguous())
+        grid.x = min(THCState_getCurrentDeviceProperties(state)->multiProcessorCount * THC_APPLY_BLOCKS_PER_SM , grid.x);
+#endif
     HANDLE_A_CASE(unsigned int, aInfo.dims);
   } else {
     TensorInfo<typename TensorUtils<TensorTypeA>::DataType, uint64_t> aInfo =
@@ -215,6 +218,10 @@ bool THC_pointwiseApply1(THCState* state,
         <<<grid, block, 0, THCState_getCurrentStream(state)>>>(
           aInfo, (uint64_t) totalElements, op);
     } else {
+
+#if CUDA_VERSION < 9000
+        grid.x = min(THCState_getCurrentDeviceProperties(state)->multiProcessorCount * THC_APPLY_BLOCKS_PER_SM , grid.x);
+#endif
       kernelPointwiseApply1<Op,
                             typename TensorUtils<TensorTypeA>::DataType,
                             uint64_t, -1>
@@ -357,6 +364,10 @@ bool THC_pointwiseApply2(THCState* state,
     TensorInfo<typename TensorUtils<TensorTypeB>::DataType, unsigned int> bInfo =
       getTensorInfo<TensorTypeB, unsigned int>(state, b);
     bInfo.collapseDims();
+#if CUDA_VERSION < 9000
+    if (!(aInfo.isContiguous() && bInfo.isContiguous()))
+        grid.x = min(THCState_getCurrentDeviceProperties(state)->multiProcessorCount * THC_APPLY_BLOCKS_PER_SM , grid.x);
+#endif
 
     HANDLE_A_CASE(unsigned int, aInfo.dims, bInfo.dims);
   } else {
@@ -379,6 +390,9 @@ bool THC_pointwiseApply2(THCState* state,
         <<<grid, block, 0, THCState_getCurrentStream(state)>>>(
           aInfo, bInfo, (uint64_t) totalElements, op);
     } else {
+#if CUDA_VERSION < 9000
+      grid.x = min(THCState_getCurrentDeviceProperties(state)->multiProcessorCount * THC_APPLY_BLOCKS_PER_SM , grid.x);
+#endif
       kernelPointwiseApply2<Op,
                             typename TensorUtils<TensorTypeA>::DataType,
                             typename TensorUtils<TensorTypeB>::DataType,
@@ -562,6 +576,10 @@ bool THC_pointwiseApply3(THCState* state,
       getTensorInfo<TensorTypeC, unsigned int>(state, c);
     cInfo.collapseDims();
 
+#if CUDA_VERSION < 9000
+      if (!(aInfo.isContiguous() && bInfo.isContiguous() && cInfo.isContiguous()))
+          grid.x = min(THCState_getCurrentDeviceProperties(state)->multiProcessorCount * THC_APPLY_BLOCKS_PER_SM , grid.x);
+#endif
     HANDLE_A_CASE(unsigned int, aInfo.dims, bInfo.dims, cInfo.dims);
   } else {
     TensorInfo<typename TensorUtils<TensorTypeA>::DataType, uint64_t> aInfo =
@@ -588,7 +606,11 @@ bool THC_pointwiseApply3(THCState* state,
         <<<grid, block, 0, THCState_getCurrentStream(state)>>>(
           aInfo, bInfo, cInfo, (uint64_t) totalElements, op);
     } else {
-      kernelPointwiseApply3<Op,
+#if CUDA_VERSION < 9000
+      grid.x = min(THCState_getCurrentDeviceProperties(state)->multiProcessorCount * THC_APPLY_BLOCKS_PER_SM , grid.x);
+#endif
+
+	kernelPointwiseApply3<Op,
                             typename TensorUtils<TensorTypeA>::DataType,
                             typename TensorUtils<TensorTypeB>::DataType,
                             typename TensorUtils<TensorTypeC>::DataType,
@@ -633,5 +655,6 @@ bool THC_pointwiseApply3(THCState* state,
 }
 
 #undef THC_APPLY_THREADS_PER_BLOCK
+#undef THC_APPLY_BLOCKS_PER_SM
 
 #endif // THC_APPLY_INC
