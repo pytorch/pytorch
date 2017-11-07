@@ -495,3 +495,9 @@ THC_API std::mutex* THCCachingAllocator_getCudaFreeMutex()
 {
   return &caching_allocator.cuda_free_mutex;
 }
+
+THC_API cudaError_t THCCachingAllocator_emptyCache(void)
+{
+  return caching_allocator.emptyCache();
+}
+
