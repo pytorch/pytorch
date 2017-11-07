@@ -1005,6 +1005,16 @@ class TestAutograd(TestCase):
         self._test_setitem_tensor((5, 5), Variable(mask))
         self._test_setitem_tensor((5,), Variable(mask[0]))
 
+    def test_select_sum(self):
+        # both select and sum return Scalars in ATen; ensure they work together.
+        x = Variable(torch.randn(10), requires_grad=True)
+
+        def func(x):
+            return x.select(0, 1).sum()
+
+        gradcheck(func, [x])
+        gradgradcheck(func, [x])
+
     def test_stack(self):
         x = Variable(torch.randn(10, 10), requires_grad=True)
         y = Variable(torch.randn(10, 10), requires_grad=True)
@@ -2037,6 +2047,7 @@ method_tests = [
     ('squeeze', (S, 1, S, 1), ()),
     ('squeeze', (S, 1, S, 1), (1,), '1_dim', [0]),
     ('squeeze', (S, 1, S, 1), (2,), 'not_1_dim', [0]),
+    ('squeeze', (1,), (0,), '1d_dim0', [0]),
     ('unsqueeze', (S, S, S), (0,), 'first', [0]),
     ('unsqueeze', (S, S, S), (1,), 'middle', [0]),
     ('unsqueeze', (S, S, S), (3,), 'last', [0]),
