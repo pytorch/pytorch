@@ -67,6 +67,7 @@ FUNCTION_DEFINITION = CodeTemplate("""\
 variable_list ${op}::apply(const variable_list& grads) {
   variable_list grad_inputs{${num_inputs}};
   ${body}
+  ensure_no_aten_scalars(grad_inputs);
   return grad_inputs;
 }
 """)

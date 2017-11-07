@@ -996,13 +996,14 @@ class TestAutograd(TestCase):
         self._test_setitem_tensor((5,), Variable(mask[0]))
 
     def test_select_sum(self):
-            x = Variable(torch.randn(10), requires_grad=True)
+        # both select and sum return Scalars in ATen; ensure they work together.
+        x = Variable(torch.randn(10), requires_grad=True)
 
-            def func(x):
-                return x.select(0, 1).sum()
+        def func(x):
+            return x.select(0, 1).sum()
 
-            gradcheck(func, [x])
-            gradgradcheck(func, [x])
+        gradcheck(func, [x])
+        gradgradcheck(func, [x])
 
     def test_stack(self):
         x = Variable(torch.randn(10, 10), requires_grad=True)

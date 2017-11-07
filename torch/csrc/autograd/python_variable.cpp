@@ -43,7 +43,9 @@ PyObject * THPVariable_Wrap(Variable var)
     Py_RETURN_NONE;
   }
 
-  THPUtils_assert(var.dim() > 0, "variable must have at least 1 dimension");
+  if (var.dim() == 0) {
+    throw std::runtime_error("Variable API does not support Scalars");
+  }
 
   if (auto obj = var.get()->pyobj) {
     Py_INCREF(obj);
