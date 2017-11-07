@@ -2,11 +2,11 @@ import torch
 import torch.multiprocessing as multiprocessing
 from .sampler import SequentialSampler, RandomSampler, BatchSampler
 import collections
+import re
 import sys
 import traceback
 import threading
 from torch._six import string_classes
-import numpy as np
 
 
 if sys.version_info[0] == 2:
@@ -97,8 +97,10 @@ def default_collate(batch):
     elif elem_type.__module__ == 'numpy' and elem_type.__name__ != 'str_':
         elem = batch[0]
         if elem_type.__name__ == 'ndarray':
-            if not np.issubdtype(elem.dtype, np.number):
+            # array of string classes and object
+            if re.search('[SaUO]', elem.dtype.str) is not None:
                 raise TypeError(error_msg.format(elem.dtype))
+
             return torch.stack([torch.from_numpy(b) for b in batch], 0)
         if elem.shape == ():  # scalars
             py_type = float if elem.dtype.name.startswith('float') else int
