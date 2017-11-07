@@ -22,7 +22,7 @@ template <typename T>
 struct logSigmoid_updateOutput_functor
 {
   __device__ void operator()(T *output, const T *input) const {
-    const T max = fmaxType(ZERO_MACRO, -*input);
+    const T max = fmaxType((T)ZERO_MACRO, -*input);
     const T z = THCNumerics<T>::exp(-max) + THCNumerics<T>::exp(-*input -max);
     *output = -(max + THCNumerics<T>::log(z));
   }
@@ -33,7 +33,7 @@ template <typename T>
 struct logSigmoid_updateGradInput_functor
 {
   __device__ void operator()(T *gradInput, const T *input, const T *gradOutput) const {
-    const T max = fmaxType(ZERO_MACRO, -*input);
+    const T max = fmaxType((T)ZERO_MACRO, -*input);
     const T z = THCNumerics<T>::exp(-max) + THCNumerics<T>::exp(-*input -max);
     T max_deriv = 0.f;
     T sign = -1.f;
