@@ -74,12 +74,12 @@ static inline ${return_type} ${api_name}(${formals}) {
 # implementation of ${api_name} if we have overloaded a function with
 # the same name (but different signature) already
 ZERO_DIM_CHECK = CodeTemplate("""\
-if(${check_name}.dim() == 0) {
+if (${check_name}.dim() == 0) {
     return static_cast<const Type*>(this)->${method_prefix}${api_name}(${zero_dim_actuals});
 }""")
 
 ZERO_DIM_ONLY = CodeTemplate("""\
-else {
+if (${check_name}.dim() != 0) {
     runtime_error("${api_name} only supports a 0-dimensional ${check_name} tensor, but got tensor "
                   "with %" PRId64 " dimension(s)", ${check_name}.dim());
 }""")
