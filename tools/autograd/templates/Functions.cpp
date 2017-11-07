@@ -294,6 +294,16 @@ Tensor glu_double_backward_grad_output(const Tensor & grad, const Tensor & input
   return tmp.narrow(dim, 0, sizes[dim]) + tmp.narrow(dim, sizes[dim], sizes[dim]);
 }
 
+Tensor kl_div_double_backward_grad_output(const Tensor & grad, const Tensor & input, const Tensor & target, bool size_average, bool reduce) {
+  auto result = kl_div_backward(grad, input, target, size_average, false);
+  if (reduce && size_average) {
+    return result.mean().toTensor();
+  } else if (reduce) {
+    return result.sum().toTensor();
+  }
+  return result;
+}
+
 Tensor log_sigmoid_double_backward(const Tensor & grad, const Tensor & input) {
   auto z = input.sigmoid();
   return grad * (z - 1) * z;

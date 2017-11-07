@@ -1087,7 +1087,7 @@ def poisson_nll_loss(input, target, log_input=True, full=False, size_average=Tru
 
 
 kl_div = _add_docstr(torch._C._nn.kl_div, r"""
-kl_div(input, target, size_average=True, weight=None) -> Variable
+kl_div(input, target, size_average=True) -> Variable
 
 The `Kullback-Leibler divergence`_ Loss.
 
@@ -1097,9 +1097,12 @@ Args:
     input: Variable of arbitrary shape
     target: Variable of the same shape as input
     size_average: if True the output is divided by the number of elements
-      in input tensor. Default: True
-    weight (Tensor, optional): a manual rescaling weight given to each
-            class. If given, has to be a Tensor of size `C`
+        in input tensor. Default: True
+    reduce (bool, optional): By default, the losses are averaged
+        over observations for each minibatch, or summed, depending on
+        size_average. When reduce is False, returns a loss per batch
+        element instead and ignores size_average. Default: True
+
 """)
 
 
