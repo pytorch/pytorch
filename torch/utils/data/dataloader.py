@@ -1,7 +1,8 @@
 import torch
 import torch.multiprocessing as multiprocessing
-from torch._C import _set_worker_signal_handlers, _set_main_signal_handlers, \
-    _remove_main_signal_handlers
+from torch._C import _set_worker_signal_handlers, \
+    _set_main_signal_handlers_for_workers, \
+    _remove_main_signal_handlers_for_workers
 from .sampler import SequentialSampler, RandomSampler, BatchSampler
 import collections
 import re
@@ -37,6 +38,7 @@ def _worker_loop(dataset, index_queue, data_queue, collate_fn):
     # Intialize C side signal handlers because Python signal handler on things
     # like SIGBUS and SIGSEGV will still be executed in C and likely cause error
     # again.
+    # https://docs.python.org/3/library/signal.html Sec. 18.8.1.1
     _set_worker_signal_handlers()
 
     torch.set_num_threads(1)
@@ -54,7 +56,7 @@ def _worker_loop(dataset, index_queue, data_queue, collate_fn):
             data_queue.put((idx, samples))
 
 
-def _process_loop(in_queue, out_queue, done_event, pin_memory):
+def _worker_manager_loop(in_queue, out_queue, done_event, pin_memory):
     while True:
         try:
             r = in_queue.get()
@@ -178,15 +180,15 @@ class DataLoaderIter(object):
 
             self.worker_pids = tuple(w.pid for w in self.workers)
 
-            self.handlers_set = _set_main_signal_handlers(self.worker_pids)
+            self.handlers_set = _set_main_signal_handlers_for_workers(self.worker_pids)
 
             if self.pin_memory or self.timeout > 0:
                 self.data_queue = queue.Queue()
-                self.process_thread = threading.Thread(
-                    target=_process_loop,
+                self.worker_manager_thread = threading.Thread(
+                    target=_worker_manager_loop,
                     args=(self.worker_result_queue, self.data_queue, self.done_event, self.pin_memory))
-                self.process_thread.daemon = True
-                self.process_thread.start()
+                self.worker_manager_thread.daemon = True
+                self.worker_manager_thread.start()
             else:
                 self.data_queue = self.worker_result_queue
 
@@ -202,9 +204,7 @@ class DataLoaderIter(object):
             try:
                 return self.data_queue.get(True, self.timeout)
             except queue.Empty:
-                ex = RuntimeError('DataLoader timed out after {} seconds'.format(self.timeout))
-                ex.__cause__ = ex  # prevent exception chaining in python 3
-                raise ex
+                raise RuntimeError('DataLoader timed out after {} seconds'.format(self.timeout))
         else:
             return self.data_queue.get()
 
@@ -269,18 +269,19 @@ class DataLoaderIter(object):
         if not self.shutdown:
             self.shutdown = True
             self.done_event.set()
-            # if process_thread is waiting to put
+            # if worker_manager_thread is waiting to put
             if not self.data_queue.empty():
                 self.data_queue.get()
             for _ in self.workers:
                 self.index_queue.put(None)
-            # if all workers hang, still put None to let process_thread exit
+            # if all workers hang, no None is showed to worker_manager_thread,
+            # we put None to let worker_manager_thread exit
             if self.worker_result_queue.empty():
                 self.worker_result_queue.put(None)
 
     def _remove_handers(self):
         if self.handlers_set:
-            _remove_main_signal_handlers(self.worker_pids)
+            _remove_main_signal_handlers_for_workers(self.worker_pids)
             self.handlers_set = False
 
     def __del__(self):
@@ -315,8 +316,8 @@ class DataLoader(object):
             if the dataset size is not divisible by the batch size. If ``False`` and
             the size of dataset is not divisible by the batch size, then the last batch
             will be smaller. (default: False)
-        timeout (int, optional): if positive, the timeout value for collecting a batch
-            from workers. (default: 0)
+        timeout (numeric, optional): if positive, the timeout value for collecting a batch
+            from workers. Should always be non-negative. (default: 0)
     """
 
     def __init__(self, dataset, batch_size=1, shuffle=False, sampler=None, batch_sampler=None,
@@ -328,11 +329,10 @@ class DataLoader(object):
         self.collate_fn = collate_fn
         self.pin_memory = pin_memory
         self.drop_last = drop_last
-
-        if not isinstance(timeout, int):
-            raise ValueError('timeout must be an integer')
-
         self.timeout = timeout
+
+        if timeout < 0:
+            raise ValueError('timeout option should be non-negative')
 
         if batch_sampler is not None:
             if batch_size > 1 or shuffle or sampler is not None or drop_last:

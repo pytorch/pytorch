@@ -1,6 +1,5 @@
 import math
 import sys
-import os
 import ctypes
 import torch
 import time
@@ -179,8 +178,19 @@ class TestDataLoader(TestCase):
             self.assertTrue(input.is_pinned())
             self.assertTrue(target.is_pinned())
 
+    def test_multiple_dataloaders(self):
+        loader1_it = iter(DataLoader(self.dataset, num_workers = 1))
+        loader2_it = iter(DataLoader(self.dataset, num_workers = 2))
+        next(loader1_it)
+        next(loader1_it)
+        next(loader2_it)
+        next(loader2_it)
+        next(loader1_it)
+        next(loader2_it)
+
     def test_segfault(self):
         def _test_segfault():
+            sys.stderr.close()
             dataset = SegfaultDataset(10)
             dataloader = DataLoader(dataset, batch_size=2, num_workers=1)
             _ = next(iter(dataloader))
@@ -196,11 +206,10 @@ class TestDataLoader(TestCase):
 
     def test_timeout(self):
         def _test_timeout():
-            sys.stderr = open(os.devnull,'wb')
+            sys.stderr.close()
             dataset = SleepDataset(10, 10)
             dataloader = DataLoader(dataset, batch_size=2, num_workers=2, timeout=1)
             _ = next(iter(dataloader))
-
 
         p = multiprocessing.Process(target=_test_timeout)
         p.start()
@@ -286,7 +295,7 @@ class TestDataLoader(TestCase):
         "check that workers exit even if the iterator is not exhausted"
         loader = iter(DataLoader(self.dataset, batch_size=2, num_workers=4, pin_memory=True))
         workers = loader.workers
-        process_thread = loader.process_thread
+        worker_manager_thread = loader.worker_manager_thread
         for i, sample in enumerate(loader):
             if i == 3:
                 break
@@ -295,8 +304,8 @@ class TestDataLoader(TestCase):
             w.join(1.0)  # timeout of one second
             self.assertFalse(w.is_alive(), 'subprocess not terminated')
             self.assertEqual(w.exitcode, 0)
-        process_thread.join(1.0)
-        self.assertFalse(process_thread.is_alive())
+        worker_manager_thread.join(1.0)
+        self.assertFalse(worker_manager_thread.is_alive())
 
     def test_len(self):
         def check_len(dl, expected):
