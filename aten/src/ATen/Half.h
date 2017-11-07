@@ -16,7 +16,15 @@ template<typename To, typename From> To convert(From f) {
   return static_cast<To>(f);
 }
 
-template<typename To, typename From> bool overflows(From f) {
+// skip isnan and isinf check for integral types
+template<typename To, typename From>
+typename std::enable_if<std::is_integral<From>::value, bool>::type overflows(From f) {
+  using limit = std::numeric_limits<To>;
+  return f < limit::lowest() || f > limit::max();
+}
+
+template<typename To, typename From>
+typename std::enable_if<!std::is_integral<From>::value, bool>::type overflows(From f) {
   using limit = std::numeric_limits<To>;
   if (limit::has_infinity && std::isinf(f)) {
     return false;
