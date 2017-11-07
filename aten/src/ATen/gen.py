@@ -12,8 +12,16 @@ import copy_wrapper
 from code_template import CodeTemplate
 
 
+# This file is the top-level entry point for code generation in ATen.
+# It takes an arbitrary number of arguments specifying metadata files to
+# process (.cwrap, .yaml and .h) and outputs a number generated header
+# and cpp files in ATen/ (see invocations of 'write' for each file that
+# is written.) It is invoked from cmake; look for the 'cwrap_files'
+# variable for an up-to-date list of files which are passed.
+
+
 parser = OptionParser()
-parser.add_option('-s', '--source-path', help='path to source director for tensorlib',
+parser.add_option('-s', '--source-path', help='path to source directory for ATen',
                   action='store', default='.')
 parser.add_option('-o', '--output-dependencies',
                   help='only output a list of dependencies', action='store')
