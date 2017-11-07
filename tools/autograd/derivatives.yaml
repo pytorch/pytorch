@@ -572,7 +572,8 @@
   grad_output: hardtanh_backward(grad, input, min_val, max_val, false)
   input: zeros_like(grad)
 
-- name: kl_div_backward(Tensor input, Tensor target, bool size_average)
+- name: kl_div_backward(Tensor grad_output, Tensor input, Tensor target, bool size_average, bool reduce)
+  grad_output: kl_div_double_backward_grad_output(grad, input, target, size_average, reduce)
   input: zeros_like(grad)
 
 - name: l1_loss_backward(Tensor grad_output, Tensor input, Tensor target, bool size_average, bool reduce)
