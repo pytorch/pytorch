@@ -1,18 +1,4 @@
 [[
-  name: THPTensor_(elementSize)
-  python_name: element_size
-  cpu_half: True
-  auto_gpu: False
-  only_register: True
-]]
-[[
-  name: THPTensor_(storage)
-  python_name: storage
-  cpu_half: True
-  auto_gpu: False
-  only_register: True
-]]
-[[
   name: storageOffset
   python_name: storage_offset
   cpu_half: True
@@ -29,44 +15,6 @@
   return: long
   arguments:
     - THTensor* self
-]]
-[[
-  name: THPTensor_(nDimension)
-  python_name: dim
-  cpu_half: True
-  auto_gpu: False
-  only_register: True
-  method_flags: METH_KEYWORDS
-]]
-[[
-  python_name: index
-  name: THPTensor_(getValue)<true>
-  only_register: True
-  override_method_flags: METH_O
-]]
-[[
-  python_name: _set_index
-  name: THPTensor_(setIndex)
-  only_register: True
-]]
-[[
-  python_name: _check_advanced_indexing
-  name: THPTensor_(checkAdvancedIndexing)
-  cpu_half: False
-  only_register: True
-  override_method_flags: METH_O
-]]
-[[
-  python_name: _advanced_index_add
-  name: THPTensor_(advancedIndexAdd)
-  cpu_half: False
-  only_register: True
-]]
-[[
-  python_name: _advanced_index_select
-  name: THPTensor_(advancedIndexSelect)
-  cpu_half: False
-  only_register: True
 ]]
 [[
   name: resize_
@@ -142,14 +90,6 @@
     - THTensor* self
 ]]
 [[
-  name: THPTensor_(numel)
-  python_name: nelement
-  cpu_half: True
-  auto_gpu: False
-  only_register: True
-  method_flags: METH_KEYWORDS
-]]
-[[
   name: set_
   cname: set
   cpu_half: True
@@ -183,29 +123,6 @@
         - THSize* size
         - arg: THStride* stride
           default: NULL
-]]
-[[
-  name: THPTensor_(select)
-  python_name: select
-  cpu_half: True
-  auto_gpu: False
-  only_register: True
-]]
-[[
-  name: THPTensor_(size)
-  python_name: size
-  cpu_half: True
-  auto_gpu: False
-  method_flags: METH_KEYWORDS
-  only_register: True
-]]
-[[
-  name: THPTensor_(stride)
-  python_name: stride
-  cpu_half: True
-  auto_gpu: False
-  method_flags: METH_KEYWORDS
-  only_register: True
 ]]
 [[
   name: fill_
@@ -576,14 +493,6 @@
     - THIndexTensor* index
 ]]
 [[
-  name: THPTensor_stateless_(cat)
-  python_name: cat
-  method_flags: METH_KEYWORDS
-  only_register: True
-  variants:
-    - function
-]]
-[[
   name: data_ptr
   defined_if: "!IS_DISTRIBUTED"
   with_gil: True
@@ -603,13 +512,6 @@
   arguments:
     - THTensor* self
     - THTensor* other
-]]
-[[
-  python_name: copy_
-  name: THPTensor_(copy_)
-  cpu_half: True
-  method_flags: METH_KEYWORDS
-  only_register: True
 ]]
 [[
   name: __and__
@@ -810,34 +712,6 @@
         - arg: THTensor* self
           broadcast: other inplace fallback
         - THTensor* other
-]]
-[[
-  name: THPTensor_(apply)
-  python_name: apply_
-  defined_if: "!IS_DISTRIBUTED"
-  backends:
-    - CPU
-  cpu_half: True
-  only_register: True
-  override_method_flags: METH_O
-]]
-[[
-  name: THPTensor_(map)
-  python_name: map_
-  defined_if: "!IS_DISTRIBUTED"
-  backends:
-    - CPU
-  cpu_half: True
-  only_register: True
-]]
-[[
-  name: THPTensor_(map2)
-  python_name: map2_
-  defined_if: "!IS_DISTRIBUTED"
-  backends:
-    - CPU
-  cpu_half: True
-  only_register: True
 ]]
 [[
   name: lt
@@ -1262,22 +1136,6 @@
   return: long
   arguments:
     - THTensor* self
-]]
-[[
-  name: THPTensor_(new)
-  python_name: new
-  method_flags: METH_KEYWORDS
-  backends:
-    - CUDA
-  only_register: True
-]]
-[[
-  name: THPTensor_(recordStream)
-  python_name: record_stream
-  override_method_flags: METH_O
-  backends:
-    - CUDA
-  only_register: True
 ]]
 [[
   name: abs
