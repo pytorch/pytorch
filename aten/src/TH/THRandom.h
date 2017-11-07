@@ -45,8 +45,14 @@ TH_API uint64_t THRandom_initialSeed(THGenerator *_generator);
 /* Generates a uniform 32 bits integer. */
 TH_API uint64_t THRandom_random(THGenerator *_generator);
 
-/* Generates a uniform random number on [0,1[. */
+/* Generates a uniform 64 bits integer. */
+TH_API uint64_t THRandom_random64(THGenerator *_generator);
+
+/* Generates a uniform random double on [0,1). */
 TH_API double THRandom_uniform(THGenerator *_generator, double a, double b);
+
+/* Generates a uniform random float on [0,1). */
+TH_API float THRandom_uniformFloat(THGenerator *_generator, float a, float b);
 
 /** Generates a random number from a normal distribution.
     (With mean #mean# and standard deviation #stdv >= 0#).
