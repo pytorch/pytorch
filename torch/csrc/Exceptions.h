@@ -4,6 +4,7 @@
 #include <exception>
 #include <stdexcept>
 #include <string>
+#include "THP.h"
 #include "torch/csrc/utils/object_ptr.h"
 #include "torch/csrc/utils/auto_gil.h"
 
