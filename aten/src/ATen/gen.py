@@ -77,7 +77,7 @@ scalar_types = [
     ('Int', 'int', 'Long', 'int32_t'),
     ('Long', 'int64_t', 'Long', 'int64_t'),
     ('Short', 'int16_t', 'Long', 'int16_t'),
-    ('Half', 'Half', 'Double', 'THHalf'),
+#    ('Half', 'Half', 'Double', 'THHalf'),
 ]
 
 # shared environment for non-derived base classes Type.h Tensor.h Storage.h

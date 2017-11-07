@@ -7,7 +7,9 @@
 #ifdef AT_CUDA_ENABLED
 #include <cuda.h>
 #include <cuda_runtime.h>
+#if CUDA_HALF_TENSOR
 #include <cuda_fp16.h>
+#endif
 #endif
 
 namespace at {
@@ -50,6 +52,7 @@ template<typename To, typename From> To checked_convert(From f, const char* name
 typedef struct  AT_ALIGN(2) {
   unsigned short x;
 #ifdef AT_CUDA_ENABLED
+#if CUDA_HALF_TENSOR
 #if CUDA_VERSION < 9000
   operator half() { return half{ x }; }
 #else
@@ -58,6 +61,7 @@ typedef struct  AT_ALIGN(2) {
     x_raw.x = x;
     return half(x_raw);
   }
+#endif
 #endif
 #endif
   operator double();
@@ -75,7 +79,9 @@ inline Half::operator double() {
   return convert<double,Half>(*this);
 }
 #ifdef AT_CUDA_ENABLED
+#if CUDA_HALF_TENSOR
 template<> half convert(double d);
+#endif
 #endif
 
 template<typename To, typename From>
@@ -84,6 +90,7 @@ static inline To HalfFix(From h) {
 }
 
 #ifdef AT_CUDA_ENABLED
+#if CUDA_HALF_TENSOR
 #if CUDA_VERSION >= 9000
 template<>
   inline __half HalfFix<__half, Half>(Half h) {
@@ -97,6 +104,7 @@ template<>
   __half_raw raw(h);
   return Half { raw.x };
 }
+#endif
 #endif
 #endif
 }
