@@ -183,6 +183,9 @@ void THRandom_nextState(THGenerator *_generator)
   *p = p[m-n] ^ TWIST(p[0], _generator->state[0]);
 }
 
+// TODO: this only returns 32-bits of randomness but as a uint64_t. This is
+// weird and should be fixed. We should also fix the state to be uint32_t
+// instead of uint64_t. (Or switch to a 64-bit random number generator).
 uint64_t THRandom_random(THGenerator *_generator)
 {
   uint64_t y;
