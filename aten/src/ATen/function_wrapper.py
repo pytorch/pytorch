@@ -142,7 +142,9 @@ TYPE_RETURN = {
 }
 
 CHECKED_CAST = {
-    'THTensor*': CodeTemplate('checked_cast_tensor<${Tensor}>(${arg_name}.pImpl,"${arg_name}",${arg_pos}, ${null_okay})'),
+    'THTensor*':
+        CodeTemplate(
+            'checked_cast_tensor<${Tensor}>(${arg_name}.pImpl,"${arg_name}",${arg_pos}, ${null_okay})'),
     'THSTensor*':
     CodeTemplate(
         'checked_cast_tensor<Sparse${Tensor}>(${arg_name}.tref.pImpl,"${arg_name}",${arg_pos},false)'),
@@ -720,11 +722,14 @@ def create_derived(backend_type_env, declarations):
     def allocate_arg(env, arg, output_count):
         name = arg['name']
         allocation = CodeTemplate(ALLOC_WRAP[arg['type']]).substitute(env)
+        tensor_arg = '{}_'.format(name)
         if arg.get('mask', False):
             allocation = 'output_mask[{}] ? {} : nullptr'.format(output_count, allocation)
+            tensor_arg = ('{}_ == nullptr ? (TensorImpl*)UndefinedTensor::singleton() : (TensorImpl*){}_'
+                          .format(name, name))
         return [
             'auto {}_ = {};'.format(name, allocation),
-            'auto {} = Tensor({}_,false);'.format(name, name),
+            'auto {} = Tensor({}, false);'.format(name, tensor_arg),
         ]
 
     def resize_arg(arg):
