@@ -1009,8 +1009,16 @@ class TestCuda(TestCase):
 
     def test_var_stability(self):
         tensor = torch.FloatTensor([2281.5, 2281.25]).cuda()
+
+        # Stability for inner dim
         self.assertEqual(tensor.var(0)[0], 0.03125)
+
+        # General stability
         self.assertEqual(tensor.var(), 0.03125)
+
+        # Stability for outer dimensions
+        tensor = tensor.unsqueeze(1)
+        self.assertEqual(tensor.var(0)[0], 0.03125)
 
     def test_arange(self):
         for t in ['IntTensor', 'LongTensor', 'FloatTensor', 'DoubleTensor']:
