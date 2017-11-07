@@ -131,7 +131,6 @@ IF(NOT DEFINED cwrap_files)
     ${CWRAP_FILES_BASE}/csrc/generic/methods/TensorMath.cwrap
     ${CWRAP_FILES_BASE}/csrc/generic/methods/TensorRandom.cwrap
   #  ${CWRAP_FILES_BASE}/csrc/generic/methods/TensorSerialization.cwrap
-    ${CMAKE_CURRENT_SOURCE_DIR}/Local.cwrap
     ${CWRAP_FILES_BASE}/lib/THNN/generic/THNN.h
     ${CWRAP_FILES_BASE}/lib/THCUNN/generic/THCUNN.h
   )
