@@ -35,12 +35,7 @@ class MKLBNOp final : public SpatialBNOp<MKLContext> {
         operator_def.input(0) != operator_def.output(0),
         "Inplace BN not supported");
   }
-  ~MKLBNOp() {
-    if (scale_bias_buffer_ != NULL) {
-      dnnReleaseBuffer<T>(scale_bias_buffer_);
-      scale_bias_buffer_ = NULL;
-    }
-  }
+
   bool RunOnDevice() {
     auto& X = OperatorBase::Input<MKLMemory<float>>(INPUT);
     auto& scale = OperatorBase::Input<MKLMemory<float>>(SCALE);
@@ -101,15 +96,15 @@ class MKLBNOp final : public SpatialBNOp<MKLContext> {
       buffer_.Reset(X.dims(), primitive_, dnnResourceDst, true);
 
       scale_bias_layout_.Reset(primitive_, dnnResourceScaleShift);
-      MKLDNN_SAFE_CALL(mkl::dnnAllocateBuffer<float>(
-          (void**)(&scale_bias_buffer_), scale_bias_layout_));
+      scale_bias_buffer_ =
+          caffe2::make_unique<MKLWorkspace<float>>(scale_bias_layout_);
 
       // fill scale and bias into a single buffer
       scale_buf = (T*)scale.buffer();
       bias_buf = (T*)bias.buffer();
       for (int i = 0; i < C; i++) {
-        scale_bias_buffer_[i] = scale_buf[i];
-        scale_bias_buffer_[C + i] = bias_buf[i];
+        scale_bias_buffer_->buffer()[i] = scale_buf[i];
+        scale_bias_buffer_->buffer()[C + i] = bias_buf[i];
       }
     }
 
@@ -119,7 +114,7 @@ class MKLBNOp final : public SpatialBNOp<MKLContext> {
     buffer_.ShareFrom(*Y);
     resources_[dnnResourceSrc] = X.buffer();
     resources_[dnnResourceDst] = buffer_.buffer();
-    resources_[dnnResourceScaleShift] = scale_bias_buffer_;
+    resources_[dnnResourceScaleShift] = scale_bias_buffer_->buffer();
 
     if (is_test_) {
       auto& est_mean = OperatorBase::Input<MKLMemory<float>>(EST_MEAN);
@@ -158,7 +153,7 @@ class MKLBNOp final : public SpatialBNOp<MKLContext> {
   LayoutWrapper<T> saved_var_layout_;
   LayoutWrapper<T> running_mean_layout_;
   LayoutWrapper<T> running_var_layout_;
-  T* scale_bias_buffer_ = nullptr;
+  std::unique_ptr<MKLWorkspace<T>> scale_bias_buffer_;
   T* scale_buf = nullptr;
   T* bias_buf = nullptr;
   T* saved_mean_buf = nullptr;

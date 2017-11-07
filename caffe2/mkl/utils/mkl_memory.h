@@ -483,6 +483,24 @@ class MKLMemory {
   DISABLE_COPY_AND_ASSIGN(MKLMemory);
 };
 
+template <typename T>
+class MKLWorkspace {
+ public:
+  MKLWorkspace(const LayoutWrapper<T>& layout) {
+    MKLDNN_SAFE_CALL(mkl::dnnAllocateBuffer<T>(&buffer_, layout));
+  }
+  ~MKLWorkspace() {
+    dnnReleaseBuffer<T>(buffer_);
+  }
+  T* buffer() {
+    return reinterpret_cast<T*>(buffer_);
+  }
+
+ private:
+  void* buffer_;
+  DISABLE_COPY_AND_ASSIGN(MKLWorkspace);
+};
+
 } // namespace mkl
 } // namespace caffe2
 
