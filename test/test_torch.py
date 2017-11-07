@@ -3733,7 +3733,7 @@ class TestTorch(TestCase):
         self.assertEqual(result.size(), target, 'Error in repeat using result')
         result = tensor.repeat(torchSize)
         self.assertEqual(result.size(), target, 'Error in repeat using result and LongStorage')
-        self.assertEqual((result.mean(0).view(8, 4) - tensor).abs().max(), 0, 'Error in repeat (not equal)')
+        self.assertEqual(result.mean(0).view(8, 4), tensor, 'Error in repeat (not equal)')
 
     def test_is_same_size(self):
         t1 = torch.Tensor(3, 4, 9, 10)

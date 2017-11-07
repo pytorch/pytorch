@@ -170,6 +170,9 @@ class TestCase(unittest.TestCase):
         return x, y
 
     def assertEqual(self, x, y, prec=None, message=''):
+        if isinstance(prec, str) and message == '':
+            message = prec
+            prec = None
         if prec is None:
             prec = self.precision
 
