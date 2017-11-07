@@ -27,6 +27,9 @@ endif()
 # C++11
 set(CMAKE_CXX_FLAGS "--std=c++11 ${CMAKE_CXX_FLAGS}")
 
+set(CMAKE_C_FLAGS "-fexceptions ${CMAKE_CXX_FLAGS}")
+set(CMAKE_CXX_FLAGS "-fexceptions ${CMAKE_CXX_FLAGS}")
+
 
 # Top-level build config
 ############################################
