@@ -141,7 +141,7 @@ function build_aten() {
   mkdir -p build/aten
   cd  build/aten
   ${CMAKE_VERSION} ../../../../aten \
-  -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_BUILD_TYPE=$([ $DEBUG ] && echo Debug || echo Release) \
   -DNO_CUDA=$((1-$WITH_CUDA)) \
   -DATEN_NO_CONTRIB=1 \
   -DCMAKE_INSTALL_PREFIX="$INSTALL_DIR"
