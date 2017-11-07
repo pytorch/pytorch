@@ -102,6 +102,7 @@ void ArgsSetup(KernelArgs<T> *args, const void* sendbuff, void* recvbuff,
   args->pushrecv = comm->globalMemSpace;
 }
 
+#if CUDART_VERSION >= 7050
 #define LAUNCH_KERNEL(K, THREADS, UNROLL, FUNC, T, \
 		args, stream) do { \
   dim3 grid(1, 1, 1); \
@@ -111,5 +112,13 @@ void ArgsSetup(KernelArgs<T> *args, const void* sendbuff, void* recvbuff,
             (void*)K<THREADS, UNROLL, FUNC, T>, \
             grid, block, argptrs, 0, stream), ncclUnhandledCudaError); \
 } while (0)
-
+#else
+#define LAUNCH_KERNEL(K, THREADS, UNROLL, FUNC, T, \
+                args, stream) do { \
+  cuLaunchKernel( \
+             (CUfunction)K<THREADS, UNROLL, FUNC, T>, \
+             1, 1, 1, THREADS+1, 1, 1, \
+             0, stream, (void**)&args, NULL); \
+} while (0)
+#endif
 #endif
