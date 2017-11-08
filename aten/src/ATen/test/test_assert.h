@@ -28,3 +28,11 @@ static inline void barf(const char *fmt, ...) {
   if (AT_EXPECT(!(cond), 0)) { \
     barf("%s:%u: %s: Assertion `%s` failed: " msg , __FILE__, __LINE__, __func__, #cond,##__VA_ARGS__); \
   }
+
+#define ASSERT_THROWS(fn, message)                                  \
+try {                                                               \
+  fn;                                                               \
+  ASSERT(false);                                                    \
+} catch(std::runtime_error &e) {                                    \
+  ASSERT(std::string(e.what()).find(message) != std::string::npos); \
+}

@@ -60,5 +60,20 @@ int main() {
     }
   }
 
+  // size / stride
+  {
+    auto scalar = T.randn({});
+    ASSERT_THROWS(scalar.size(0), "dimension specified as 0 but tensor has no dimensions");
+    ASSERT_THROWS(scalar.size(-1), "dimension specified as -1 but tensor has no dimensions");
+    ASSERT_THROWS(scalar.stride(0), "dimension specified as 0 but tensor has no dimensions");
+    ASSERT_THROWS(scalar.stride(-1), "dimension specified as -1 but tensor has no dimensions");
+
+    auto empty = T.randn({0});
+    ASSERT(empty.size(0) == 0);
+    ASSERT(empty.size(-1) == 0);
+    ASSERT(empty.stride(0) == 1);
+    ASSERT(empty.stride(-1) == 1);
+  }
+
   return 0;
 }
