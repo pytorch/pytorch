@@ -72,7 +72,7 @@ else:
     if IS_LINUX or IS_DARWIN:
         CUDA_HOME = os.getenv('CUDA_HOME', LINUX_HOME)
     else:
-        CUDA_HOME = os.getenv('CUDA_PATH', None).replace('\\', '/')
+        CUDA_HOME = os.getenv('CUDA_HOME', None).replace('\\', '/')
         if len(WINDOWS_HOME) > 0:
             CUDA_HOME = WINDOWS_HOME[0].replace('\\', '/')
     if not os.path.exists(CUDA_HOME):
