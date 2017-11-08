@@ -229,8 +229,8 @@ struct algorithm_search<cudnnConvolutionFwdAlgo_t> {
         conv.odesc.desc,
         out,
         1,
-        &algoCount.get(),
-        perfResults,
+        &algoCount,
+        perfResults.get(),
         ws.data,
         ws.size));
     return getBestAlgorithm<cudnnConvolutionFwdAlgoPerf_t>(perfResults.get(), deterministic, n_algo);
@@ -303,8 +303,8 @@ struct algorithm_search<cudnnConvolutionBwdDataAlgo_t> {
         conv.idesc.desc,
         in,
         1,
-        &algoCount.get(),
-        perfResults,
+        &algoCount,
+        perfResults.get(),
         ws.data,
         ws.size));
     return getBestAlgorithm<cudnnConvolutionBwdDataAlgoPerf_t>(perfResults.get(), deterministic, n_algo);
@@ -377,8 +377,8 @@ struct algorithm_search<cudnnConvolutionBwdFilterAlgo_t> {
         conv.wdesc.desc,
         wght,
         1,
-        &algoCount.get(),
-        perfResults,
+        &algoCount,
+        perfResults.get(),
         ws.data,
         ws.size));
     return best_algo = getBestAlgorithm<cudnnConvolutionBwdFilterAlgoPerf_t>(perfResults.get(), deterministic, n_algo);
