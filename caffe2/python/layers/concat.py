@@ -54,7 +54,7 @@ class Concat(ModelLayer):
 
         if add_axis:
             for i in range(len(shapes)):
-                shapes[i].insert(axis, 1)
+                shapes[i].insert(axis - 1, 1)
 
         if axis == 0:
             self.output_schema = schema.from_blob_list(
