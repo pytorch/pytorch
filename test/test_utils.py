@@ -342,7 +342,8 @@ class TestLuaReader(TestCase):
             path = download_file('https://download.pytorch.org/test_data/legacy_modules.t7')
         except unittest.SkipTest:
             return
-        tests = load_lua(path)
+        long_size = 8 if sys.platform == 'win32' else None
+        tests = load_lua(path, long_size=long_size)
         for name, test in tests['modules'].items():
             test_name = 'test_' + name.replace('nn.', '')
             setattr(cls, test_name, cls._module_test(name, test))

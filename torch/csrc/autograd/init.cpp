@@ -4,6 +4,12 @@
 
 #include "THP.h"
 
+#ifdef _MSC_VER
+#define ENSURE_UNREACHABLE __assume(0);
+#else
+#define ENSURE_UNREACHABLE __builtin_unreachable();
+#endif
+
 namespace pybind11 { namespace detail {
 
 template <> struct type_caster<torch::autograd::profiler::EventKind> {
@@ -36,7 +42,7 @@ public:
       case torch::autograd::profiler::EventKind::Mark:
         return py::cast("mark").release();
     }
-    __builtin_unreachable();
+    ENSURE_UNREACHABLE
   }
 };
 

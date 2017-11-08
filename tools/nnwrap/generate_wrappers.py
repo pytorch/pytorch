@@ -21,8 +21,8 @@ FUNCTION_TEMPLATE = Template("""\
 """)
 
 COMMON_TRANSFORMS = {
-    'THIndex_t': 'long',
-    'THCIndex_t': 'long',
+    'THIndex_t': 'int64_t',
+    'THCIndex_t': 'int64_t',
     'THInteger_t': 'int',
 }
 COMMON_CPU_TRANSFORMS = {
@@ -74,7 +74,7 @@ for t in ['CudaHalf', 'Cuda', 'CudaDouble']:
 def wrap_function(name, type, arguments):
     cname = 'THNN_' + type + name
     declaration = ''
-    declaration += 'extern "C" void ' + cname + \
+    declaration += 'TH_API void ' + cname + \
         '(' + ', '.join(TYPE_TRANSFORMS[type].get(arg.type, arg.type)
                         for arg in arguments) + ');\n'
     declaration += FUNCTION_TEMPLATE.substitute(name=type + name, cname=cname)

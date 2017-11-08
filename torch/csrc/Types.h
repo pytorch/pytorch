@@ -3,6 +3,10 @@
 
 #include <cstddef>
 
+#ifndef INT64_MAX
+#include "stdint.h"
+#endif
+
 template <typename T> struct THPTypeInfo {};
 
 namespace torch {
@@ -20,8 +24,8 @@ typedef struct THVoidStorage
 
 typedef struct THVoidTensor
 {
-   long *size;
-   long *stride;
+   int64_t *size;
+   int64_t *stride;
    int nDimension;
    THVoidStorage *storage;
    ptrdiff_t storageOffset;

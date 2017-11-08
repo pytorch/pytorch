@@ -16,7 +16,11 @@
 
 #define THPUtils_typename(obj) (Py_TYPE(obj)->tp_name)
 
-
+#if defined(__GNUC__) || defined(__ICL) || defined(__clang__)
+#define THP_EXPECT(x, y) (__builtin_expect((x), (y)))
+#else
+#define THP_EXPECT(x, y) (x)
+#endif
 
 #if PY_MAJOR_VERSION == 2
 #define THPUtils_checkReal_FLOAT(object)                                       \
@@ -81,39 +85,39 @@
 #define THPHalfUtils_newAccreal(value)        THPUtils_newReal_FLOAT(value)
 
 #define THPLongUtils_checkReal(object)        THPUtils_checkReal_INT(object)
-#define THPLongUtils_unpackReal(object)       (long)THPUtils_unpackReal_INT(object)
+#define THPLongUtils_unpackReal(object)       (int64_t)THPUtils_unpackReal_INT(object)
 #define THPLongUtils_newReal(value)           THPUtils_newReal_INT(value)
 #define THPLongUtils_checkAccreal(object)     THPUtils_checkReal_INT(object)
-#define THPLongUtils_unpackAccreal(object)    (long)THPUtils_unpackReal_INT(object)
+#define THPLongUtils_unpackAccreal(object)    (int64_t)THPUtils_unpackReal_INT(object)
 #define THPLongUtils_newAccreal(value)        THPUtils_newReal_INT(value)
 #define THPIntUtils_checkReal(object)         THPUtils_checkReal_INT(object)
 #define THPIntUtils_unpackReal(object)        (int)THPUtils_unpackReal_INT(object)
 #define THPIntUtils_newReal(value)            THPUtils_newReal_INT(value)
 #define THPIntUtils_checkAccreal(object)      THPUtils_checkReal_INT(object)
-#define THPIntUtils_unpackAccreal(object)     (long)THPUtils_unpackReal_INT(object)
+#define THPIntUtils_unpackAccreal(object)     (int64_t)THPUtils_unpackReal_INT(object)
 #define THPIntUtils_newAccreal(value)         THPUtils_newReal_INT(value)
 #define THPShortUtils_checkReal(object)       THPUtils_checkReal_INT(object)
 #define THPShortUtils_unpackReal(object)      (short)THPUtils_unpackReal_INT(object)
 #define THPShortUtils_newReal(value)          THPUtils_newReal_INT(value)
 #define THPShortUtils_checkAccreal(object)    THPUtils_checkReal_INT(object)
-#define THPShortUtils_unpackAccreal(object)   (long)THPUtils_unpackReal_INT(object)
+#define THPShortUtils_unpackAccreal(object)   (int64_t)THPUtils_unpackReal_INT(object)
 #define THPShortUtils_newAccreal(value)       THPUtils_newReal_INT(value)
 #define THPCharUtils_checkReal(object)        THPUtils_checkReal_INT(object)
 #define THPCharUtils_unpackReal(object)       (char)THPUtils_unpackReal_INT(object)
 #define THPCharUtils_newReal(value)           THPUtils_newReal_INT(value)
 #define THPCharUtils_checkAccreal(object)     THPUtils_checkReal_INT(object)
-#define THPCharUtils_unpackAccreal(object)    (long)THPUtils_unpackReal_INT(object)
+#define THPCharUtils_unpackAccreal(object)    (int64_t)THPUtils_unpackReal_INT(object)
 #define THPCharUtils_newAccreal(value)        THPUtils_newReal_INT(value)
 #define THPByteUtils_checkReal(object)        THPUtils_checkReal_INT(object)
 #define THPByteUtils_unpackReal(object)       (unsigned char)THPUtils_unpackReal_INT(object)
 #define THPByteUtils_newReal(value)           THPUtils_newReal_INT(value)
 #define THPByteUtils_checkAccreal(object)     THPUtils_checkReal_INT(object)
-#define THPByteUtils_unpackAccreal(object)    (long)THPUtils_unpackReal_INT(object)
+#define THPByteUtils_unpackAccreal(object)    (int64_t)THPUtils_unpackReal_INT(object)
 #define THPByteUtils_newAccreal(value)        THPUtils_newReal_INT(value)
 
 #define THPUtils_assert(cond, ...) THPUtils_assertRet(NULL, cond, __VA_ARGS__)
 #define THPUtils_assertRet(value, cond, ...)                                   \
-if (__builtin_expect(!(cond), 0)) { THPUtils_setError(__VA_ARGS__); return value; }
+if (THP_EXPECT(!(cond), 0)) { THPUtils_setError(__VA_ARGS__); return value; }
 THP_API void THPUtils_setError(const char *format, ...);
 THP_API void THPUtils_invalidArguments(
         PyObject *given_args, PyObject *given_kwargs,

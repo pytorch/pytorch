@@ -2,6 +2,7 @@
 #define THP_SIZE_INC
 
 #include <Python.h>
+#include "stdint.h"
 
 extern PyObject *THPSizeClass;
 

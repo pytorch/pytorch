@@ -20,7 +20,7 @@ THP_API PyObject * THPGenerator_New();
 // last at least as long as the Python wrapper.
 THP_API PyObject * THPGenerator_NewWithGenerator(THGenerator *cdata);
 
-extern PyObject *THPGeneratorClass;
+THP_API PyObject *THPGeneratorClass;
 
 #ifdef _THP_CORE
 bool THPGenerator_init(PyObject *module);
