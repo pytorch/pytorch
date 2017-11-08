@@ -1424,7 +1424,7 @@ def upsample_bilinear(input, size=None, scale_factor=None):
     return upsample(input, size, scale_factor, mode='bilinear')
 
 
-def grid_sample(input, grid, mode='bilinear'):
+def grid_sample(input, grid, mode='bilinear', padding_mode='zeros'):
     r"""Given an :attr:`input` and a flow-field :attr:`grid`, computes the
     `output` using input pixel locations from the grid.
 
@@ -1454,7 +1454,7 @@ def grid_sample(input, grid, mode='bilinear'):
 
     """
     batch_size, channels, in_height, in_width = input.size()
-    return GridSampler.apply(input, grid)
+    return GridSampler.apply(input, grid, padding_mode)
 
 
 def affine_grid(theta, size):
