@@ -19,7 +19,7 @@ ${return_type} ${method_prefix}${api_name}(${formals_with_defaults}) const;
 TYPE_METHOD_DEFINITION_BROADCAST = CodeTemplate("""\
 ${return_type} Type::${method_prefix}${api_name}(${formals}) const {
     Tensor ${broadcast_returns};
-    std::tie(${broadcast_returns}) = ${broadcast_function}(${broadcast_actuals});
+    std::tie(${broadcast_returns}) = ${broadcast_function}(${broadcast_actuals}, "${api_name}");
     return ${method_prefix_derived}${api_name}(${broadcast_modified_actuals});
 }
 """)
@@ -142,20 +142,22 @@ TYPE_RETURN = {
 }
 
 CHECKED_CAST = {
-    'THTensor*': CodeTemplate('checked_cast<${Tensor}>(${arg_name}.pImpl,"${arg_name}",${arg_pos}, ${null_okay})'),
+    'THTensor*':
+        CodeTemplate(
+            'checked_cast_tensor<${Tensor}>(${arg_name}.pImpl,"${arg_name}",${arg_pos}, ${null_okay})'),
     'THSTensor*':
     CodeTemplate(
-        'checked_cast<Sparse${Tensor}>(${arg_name}.tref.pImpl,"${arg_name}",${arg_pos},false)'),
+        'checked_cast_tensor<Sparse${Tensor}>(${arg_name}.tref.pImpl,"${arg_name}",${arg_pos},false)'),
     'THBoolTensor*':
         CodeTemplate(
-            'checked_cast<${Backend}ByteTensor>(${arg_name}.pImpl,"${arg_name}",${arg_pos}, ${null_okay})'),
+            'checked_cast_tensor<${Backend}ByteTensor>(${arg_name}.pImpl,"${arg_name}",${arg_pos}, ${null_okay})'),
     'THIndexTensor*':
         CodeTemplate(
-            'checked_cast<${Backend}LongTensor>(${arg_name}.pImpl,"${arg_name}",${arg_pos}, ${null_okay})'),
+            'checked_cast_tensor<${Backend}LongTensor>(${arg_name}.pImpl,"${arg_name}",${arg_pos}, ${null_okay})'),
     'THIntegerTensor*':
         CodeTemplate(
-            'checked_cast<${Backend}IntTensor>(${arg_name}.pImpl,"${arg_name}",${arg_pos}, ${null_okay})'),
-    'THStorage*': CodeTemplate('checked_cast<${Storage}>(&${arg_name},"${arg_name}",${arg_pos}, false)'),
+            'checked_cast_tensor<${Backend}IntTensor>(${arg_name}.pImpl,"${arg_name}",${arg_pos}, ${null_okay})'),
+    'THStorage*': CodeTemplate('checked_cast_storage<${Storage}>(&${arg_name},"${arg_name}",${arg_pos})'),
     'THGenerator*':
         CodeTemplate(
             'check_generator<${Backend}Generator>(${arg_name}, &context->defaultGenerator(backend()))'),
@@ -735,11 +737,14 @@ def create_derived(backend_type_env, declarations):
     def allocate_arg(env, arg, output_count):
         name = arg['name']
         allocation = CodeTemplate(ALLOC_WRAP[arg['type']]).substitute(env)
+        tensor_arg = '{}_'.format(name)
         if arg.get('mask', False):
             allocation = 'output_mask[{}] ? {} : nullptr'.format(output_count, allocation)
+            tensor_arg = ('{}_ == nullptr ? (TensorImpl*)UndefinedTensor::singleton() : (TensorImpl*){}_'
+                          .format(name, name))
         return [
             'auto {}_ = {};'.format(name, allocation),
-            'auto {} = Tensor({}_,false);'.format(name, name),
+            'auto {} = Tensor({}, false);'.format(name, tensor_arg),
         ]
 
     def resize_arg(arg):

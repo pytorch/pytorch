@@ -23,6 +23,7 @@ enum class ScalarType {
   n,
   AT_FORALL_SCALAR_TYPES(DEFINE_ENUM)
 #undef DEFINE_ENUM
+  Undefined,
   NumOptions
 };
 
@@ -31,6 +32,7 @@ enum class Backend {
   CUDA,
   SparseCPU,
   SparseCUDA,
+  Undefined,
   NumOptions
 };
 
@@ -62,7 +64,7 @@ static inline const char * toString(ScalarType t) {
   switch(t) {
     AT_FORALL_SCALAR_TYPES(DEFINE_CASE)
     default:
-      return "UNKNOWN_SCALAR_TYPE";
+      return "UNKNOWN_SCALAR";
   }
 #undef DEFINE_CASE
 }
