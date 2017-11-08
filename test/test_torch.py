@@ -4490,23 +4490,22 @@ class TestTorch(TestCase):
                     self.assertEqual(tensor[i], array[i])
 
             # Downcast (sometimes)
-            if np.issubsctype(dtype, np.floating):
-                tensor = torch.FloatTensor(array)
+            tensor = torch.FloatTensor(array)
+            for i in range(len(array)):
+                self.assertEqual(tensor[i], array[i])
+
+            tensor = torch.HalfTensor(array)
+            for i in range(len(array)):
+                self.assertEqual(tensor[i], array[i])
+
+            if torch.cuda.is_available():
+                tensor = torch.cuda.FloatTensor(array)
                 for i in range(len(array)):
                     self.assertEqual(tensor[i], array[i])
 
-                tensor = torch.HalfTensor(array)
+                tensor = torch.cuda.HalfTensor(array)
                 for i in range(len(array)):
                     self.assertEqual(tensor[i], array[i])
-
-                if torch.cuda.is_available():
-                    tensor = torch.cuda.FloatTensor(array)
-                    for i in range(len(array)):
-                        self.assertEqual(tensor[i], array[i])
-
-                    tensor = torch.cuda.HalfTensor(array)
-                    for i in range(len(array)):
-                        self.assertEqual(tensor[i], array[i])
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_numpy_index(self):
