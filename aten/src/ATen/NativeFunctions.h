@@ -146,8 +146,12 @@ type_method_definition_dispatch: at::native::expand
 */
 static inline Tensor expand(const Tensor &self, IntList size) {
   if (size.size() < (size_t)self.dim()) {
-    throw std::runtime_error("the number of sizes provided must be greater or equal to the "
-                             "number of dimensions in the tensor");
+    std::ostringstream ss;
+    ss << "expand(" << self.type() << "{" << self.sizes() << "}, size=" << size
+       << "): the number of sizes provided (" << size.size() << ") "
+       << "must be greater or equal to the number of dimensions in the tensor ("
+       << self.dim() << ")";
+    throw std::runtime_error(ss.str());
   }
 
   std::vector<int64_t> expandedSizes;
