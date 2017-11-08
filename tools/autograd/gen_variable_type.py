@@ -799,14 +799,19 @@ def create_variable_type(top_env, aten_declarations):
             env['trace_outputs'] = 'ret'
         else:
             env['return_value'] = '{}(std::move(ret))'.format(declaration['return_type'])
-            env['result'] = 'ret'
             if len(declaration['returns']) > 1:
                 # NB: This won't work if we get heterogenous outputs
-                outs = ['std::get<{}>(ret)'.format(i)
-                        for i, v in enumerate(declaration['returns']) if v['type'] == 'Tensor']
+                def mk_tuple_getters(pred):
+                    return ['std::get<{}>(ret)'.format(i)
+                            for i, v in enumerate(declaration['returns'])
+                            if v['type'] == 'Tensor' and pred(v)]
+                diff_outs = mk_tuple_getters(lambda v: v['dynamic_type'] == 'Tensor')
+                trace_outs = mk_tuple_getters(lambda v: True)
             else:
-                outs = ['ret']
-            env['trace_outputs'] = CodeTemplate("{ ${outs} }").substitute(outs=outs)
+                diff_outs = ['ret']
+                trace_outs = ['ret']
+            env['result'] = CodeTemplate("{ ${outs} }").substitute(outs=diff_outs)
+            env['trace_outputs'] = CodeTemplate("{ ${outs} }").substitute(outs=trace_outs)
 
         if any(arg['simple_type'] in {'Generator', 'Storage'} for arg in arguments):
             env['record_trace'] = []
