@@ -98,7 +98,7 @@ class TestElementwiseOps(hu.HypothesisTestCase):
         self.assertGradientChecks(
             gc, op, [X], 0, [0], stepsize=1e-4, threshold=1e-2)
 
-    @given(n=st.integers(5, 6), m=st.integers(4, 6), **hu.gcs)
+    @given(n=st.integers(5, 6), m=st.integers(4, 6), **hu.gcs_cpu_only)
     def test_swish(self, n, m, gc, dc):
         X = np.random.rand(n, m).astype(np.float32)
 
@@ -121,7 +121,7 @@ class TestElementwiseOps(hu.HypothesisTestCase):
         self.assertGradientChecks(
             gc, op, [X], 0, [0], stepsize=1e-4, threshold=1e-2)
 
-    @given(n=st.integers(5, 6), m=st.integers(4, 6), **hu.gcs)
+    @given(n=st.integers(5, 6), m=st.integers(4, 6), **hu.gcs_cpu_only)
     def test_swish_gradient_inplace(self, n, m, gc, dc):
 
         def swish(X):

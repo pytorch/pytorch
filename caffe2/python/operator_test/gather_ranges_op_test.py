@@ -128,7 +128,7 @@ class TestGatherRanges(hu.HypothesisTestCase):
             reference=gather_ranges,
         )
 
-    @given(tensor_splits=_tensor_splits(), **hu.gcs)
+    @given(tensor_splits=_tensor_splits(), **hu.gcs_cpu_only)
     def test_gather_ranges_split(self, tensor_splits, gc, dc):
         data, ranges, lengths = tensor_splits
 
