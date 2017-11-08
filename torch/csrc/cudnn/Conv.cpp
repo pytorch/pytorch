@@ -215,7 +215,7 @@ struct algorithm_search<cudnnConvolutionFwdAlgo_t> {
          CUDNN_CONVOLUTION_FWD_ALGO_WINOGRAD_NONFUSED,
     };
     int n_algo = sizeof(algo)/sizeof(algo[0]);
-    cudnnConvolutionFwdAlgoPerf_t *perfResults = (cudnnConvolutionFwdAlgoPerf_t *)THAlloc(n_algo * sizeof(cudnnConvolutionFwdAlgoPerf_t));
+    std::unique_ptr<cudnnConvolutionFwdAlgoPerf_t[]> perfResults {new cudnnConvolutionFwdAlgoPerf_t[n_algo]};
     size_t max_ws_size = getMaxWorkspaceSize<cudnnConvolutionFwdAlgo_t>(
         handle, conv, algo, n_algo, state);
     Workspace ws(state, max_ws_size);
@@ -233,9 +233,7 @@ struct algorithm_search<cudnnConvolutionFwdAlgo_t> {
         perfResults,
         ws.data,
         ws.size));
-    auto best_algo = getBestAlgorithm<cudnnConvolutionFwdAlgoPerf_t>(perfResults, deterministic, n_algo);
-    THFree(perfResults);
-    return best_algo;
+    return getBestAlgorithm<cudnnConvolutionFwdAlgoPerf_t>(perfResults, deterministic, n_algo);
   }
 
   static void getAlgorithm(
@@ -291,7 +289,7 @@ struct algorithm_search<cudnnConvolutionBwdDataAlgo_t> {
         CUDNN_CONVOLUTION_BWD_DATA_ALGO_WINOGRAD_NONFUSED
     };
     int n_algo = sizeof(algo)/sizeof(algo[0]);
-    cudnnConvolutionBwdDataAlgoPerf_t *perfResults = (cudnnConvolutionBwdDataAlgoPerf_t *)THAlloc(n_algo * sizeof(cudnnConvolutionBwdDataAlgoPerf_t));
+    std::unique_ptr<cudnnConvolutionBwdDataAlgoPerf_t[]> perfResults {new cudnnConvolutionBwdDataAlgoPerf_t[n_algo]};
     size_t max_ws_size = getMaxWorkspaceSize<cudnnConvolutionBwdDataAlgo_t>(
         handle, conv, algo, n_algo, state);
     Workspace ws(state, max_ws_size);
@@ -309,9 +307,7 @@ struct algorithm_search<cudnnConvolutionBwdDataAlgo_t> {
         perfResults,
         ws.data,
         ws.size));
-    auto best_algo = getBestAlgorithm<cudnnConvolutionBwdDataAlgoPerf_t>(perfResults, deterministic, n_algo);
-    THFree(perfResults);
-    return best_algo;
+    return getBestAlgorithm<cudnnConvolutionBwdDataAlgoPerf_t>(perfResults, deterministic, n_algo);
   }
 
   static void getAlgorithm(cudnnHandle_t handle, const Convolution& conv, cudnnConvolutionBwdDataAlgo_t* algo) {
@@ -366,7 +362,7 @@ struct algorithm_search<cudnnConvolutionBwdFilterAlgo_t> {
 #endif
     };
     int n_algo = sizeof(algo)/sizeof(algo[0]);
-    cudnnConvolutionBwdFilterAlgoPerf_t *perfResults = (cudnnConvolutionBwdFilterAlgoPerf_t *)THAlloc(n_algo * sizeof(cudnnConvolutionBwdFilterAlgoPerf_t));
+    std::unique_ptr<cudnnConvolutionBwdFilterAlgoPerf_t[]> perfResults {new cudnnConvolutionBwdFilterAlgoPerf_t[n_algo]};
     size_t max_ws_size = getMaxWorkspaceSize<cudnnConvolutionBwdFilterAlgo_t>(
         handle, conv, algo, n_algo, state);
     Workspace ws(state, max_ws_size);
@@ -385,9 +381,7 @@ struct algorithm_search<cudnnConvolutionBwdFilterAlgo_t> {
         perfResults,
         ws.data,
         ws.size));
-    auto best_algo = getBestAlgorithm<cudnnConvolutionBwdFilterAlgoPerf_t>(perfResults, deterministic, n_algo);
-    THFree(perfResults);
-    return best_algo;
+    return best_algo = getBestAlgorithm<cudnnConvolutionBwdFilterAlgoPerf_t>(perfResults, deterministic, n_algo);
   }
 
   static void getAlgorithm(

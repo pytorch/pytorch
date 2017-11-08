@@ -12,6 +12,7 @@ WINDOWS_HOME = glob.glob('C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v*.
 
 IS_WINDOWS = platform.system() == 'Windows'
 IS_LINUX = platform.system() == 'Linux'
+IS_DARWIN = platform.system() == 'Darwin'
 
 
 def find_nvcc():
@@ -68,12 +69,12 @@ if check_env_flag('NO_CUDA'):
     CUDA_HOME = None
     CUDA_VERSION = None
 else:
-    if IS_WINDOWS:
+    if IS_LINUX or IS_DARWIN:
+        CUDA_HOME = os.getenv('CUDA_HOME', LINUX_HOME)
+    else:
         CUDA_HOME = os.getenv('CUDA_PATH', None).replace('\\', '/')
         if len(WINDOWS_HOME) > 0:
             CUDA_HOME = WINDOWS_HOME[0].replace('\\', '/')
-    else:
-        CUDA_HOME = os.getenv('CUDA_HOME', LINUX_HOME)
     if not os.path.exists(CUDA_HOME):
         # We use nvcc path on Linux and cudart path on macOS
         if IS_LINUX or IS_WINDOWS:

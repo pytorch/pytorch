@@ -40,6 +40,9 @@ struct python_error : public std::exception {
     type = std::move(other.type);
     value = std::move(other.value);
     traceback = std::move(other.traceback);
+    other.type = nullptr;
+    other.value = nullptr;
+    other.traceback = nullptr;
   }
 
   ~python_error() {
