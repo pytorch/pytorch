@@ -256,19 +256,32 @@ static void check_inplace(const Tensor& tensor) {
   }
 }
 
-static void set_flags(Variable& var, VarFlags flags, std::shared_ptr<Function> grad_fn, bool inplace=false) {
+static void set_flags(Variable& var, VarFlags flags, std::shared_ptr<Function> grad_fn, bool inplace=false, int output_nr = 0) {
   if (grad_fn) {
     grad_fn->num_inputs = 1;
   }
   if (inplace) {
-    var.rebase_history(flags, 0, std::move(grad_fn));
+    var.rebase_history(flags, output_nr, std::move(grad_fn));
   } else {
     // TODO: combine this code path with the Variable construction
     var.get()->requires_grad = flags.requires_grad;
     var.get()->is_volatile = flags.is_volatile;
-    var.get()->output_nr = 0;
+    var.get()->output_nr = output_nr;
     var.get()->_grad_fn = std::move(grad_fn);
   }
+}
+
+static void set_flags(std::tuple<Variable, Variable> var, VarFlags flags, std::shared_ptr<Function> grad_fn, bool inplace=false) {
+  set_flags(std::get<0>(var), flags, grad_fn, inplace, 0);
+  set_flags(std::get<1>(var), flags, grad_fn, inplace, 1);
+  if (grad_fn) grad_fn->num_inputs = 2;
+}
+
+static void set_flags(std::tuple<Variable, Variable, Variable> var, VarFlags flags, std::shared_ptr<Function> grad_fn, bool inplace=false) {
+  set_flags(std::get<0>(var), flags, grad_fn, inplace, 0);
+  set_flags(std::get<1>(var), flags, grad_fn, inplace, 1);
+  set_flags(std::get<2>(var), flags, grad_fn, inplace, 2);
+  if (grad_fn) grad_fn->num_inputs = 3;
 }
 
 static void set_flags(std::vector<Variable> &vl, VarFlags flags, std::shared_ptr<Function> grad_fn) {
