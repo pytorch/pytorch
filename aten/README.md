@@ -222,3 +222,21 @@ Tensor same_tensor = CUDA(kFloat).scalarTensor(on_gpu);
 ```
 
 Operators aware of the location of Scalars can arrange to do the minimal number of copies required.
+
+### Developer notes
+
+ATen relies heavily on code generation to automatically generate headers
+and implementations for all of the tensor methods it supports.  The main
+entry point for the script which does all this work is
+[`src/ATen/gen.py`](src/ATen/gen.py), which ingests
+[`src/ATen/Declarations.cwrap`](src/ATen/Declarations.cwrap),
+[`src/ATen/nn.yaml`](src/ATen/nn.yaml) and the THNN/THCUNN headers and
+produces all of the headers and wrapping code necessary to generate
+the ATen interface.
+
+If you need to understand how ATen understands a declaration after all
+of this processing occurs, it's helpful to look at the generated file
+`Declarations.yaml` (NB: not cwrap) which contains information for all
+ATen methods in a uniform manner.  This file is utilized by PyTorch
+which further extends the ATen interface with support for automatic
+differentation.
