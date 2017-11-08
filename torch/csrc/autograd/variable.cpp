@@ -1,3 +1,4 @@
+#include "Python.h"
 #include "torch/csrc/autograd/variable.h"
 
 #include "torch/csrc/assertions.h"
