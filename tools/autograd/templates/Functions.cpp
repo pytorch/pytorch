@@ -7,6 +7,7 @@
 #include <ciso646>
 #endif
 #include <math.h>
+#include <algorithm>
 
 // ${generated_comment}
 
@@ -412,6 +413,80 @@ std::tuple<Tensor, Tensor> atan2_backward(const Tensor& grad, const Tensor& self
   return std::tuple<Tensor,Tensor>{
             output_mask[0] ? grad * other * recip : Tensor(),
             output_mask[1] ? grad * -self * recip : Tensor() };
+}
+
+// TODO: Seriously consider writing the derivative formulas for
+// each output separately; there is not all that much sharing
+// of computation going on here.
+std::tuple<Tensor, Tensor, Tensor> prelu_double_backward(
+    const Tensor & mb_ggI,
+    const Tensor & mb_ggW,
+    const Tensor & mb_gO,
+    const Tensor & input,
+    const Tensor & weight,
+    std::array<bool, 3> output_mask) {
+
+  // Zero-fill undefined grads (TODO: do this more efficiently)
+  auto ggI = mb_ggI.defined() ? mb_ggI : input.type().zeros_like(input);
+  auto ggW = mb_ggW.defined() ? mb_ggW : weight.type().zeros_like(weight);
+  auto gO = mb_gO.defined() ? mb_gO : input.type().zeros_like(input);
+
+  auto positive_mask = (input > 0).type_as(ggI);
+  auto nonpositive_mask = (input <= 0).type_as(ggW);
+
+  // Explanation: Let input be i, weight be w, grad_output be gO.
+  // f(i, w) = i  if i > 0
+  //         = wi if i <= 0
+  // df/di * gO  = gO      if i > 0      df/dw * g0 = 0      if i > 0
+  //             = g0 * w  if i <= 0                = g0 * i  if i <= 0
+  // The rest is taking derivatives of these wrt i, w, gO and summing/expanding properly.
+
+  if (weight.numel() == 1) {
+      // from PReLU.forward: num_parameters == 0 is used indicate that a
+      // single weight is shared among all input channels.
+      auto mask = positive_mask + nonpositive_mask * weight.expand_as(input);
+      auto ggO = ggI * mask + ggW.expand_as(gO) * (nonpositive_mask * input);
+      return std::tuple<Tensor, Tensor, Tensor>(
+                ggO,
+                ggW.expand_as(gO) * gO * nonpositive_mask,
+                (ggI * gO * nonpositive_mask).sum()
+          );
+  } else {
+      // Expand ggW to match size of ggI; a simple expand doesn't work because
+      // ggW is the size of the input channel (dim==1 unless there is only 1 dimension).  For example,
+      // let ggI be size (3,4,5,6,7) and ggW be size (4).  Then we unsqueeze ggW to be size (4,1,1,1)
+      // so the expand succeeds.
+      auto dims_to_unsqueeze = std::max<int64_t>(input.dim() - 2, 0);
+      auto ggW_expanded = ggW;
+      for (int64_t i = 0; i < dims_to_unsqueeze; i++) {
+          ggW_expanded = ggW_expanded.unsqueeze(1);
+      }
+      ggW_expanded = ggW_expanded.expand_as(ggI);
+
+      auto gI = ggW_expanded * gO * nonpositive_mask;
+
+      auto gW = ggI * gO * nonpositive_mask;
+      if (input.dim() > 1) {
+          gW = gW.sum(0);
+      }
+      while (gW.dim() > 1) {
+          gW = gW.sum(1);
+      }
+
+      Tensor ggO;
+      if (output_mask[0]) {
+          // expand weight as input as in ggW/ggI above
+          auto weight_expanded = weight;
+          for (int64_t i = 0; i < dims_to_unsqueeze; i++) {
+              weight_expanded = weight_expanded.unsqueeze(1);
+          }
+          weight_expanded = weight_expanded.expand_as(input);
+
+          auto mask = positive_mask + nonpositive_mask * weight_expanded;
+          ggO = ggI * mask + ggW_expanded * nonpositive_mask * input;
+      }
+      return std::tuple<Tensor,Tensor,Tensor>{ggO, gI, gW};
+  }
 }
 
 }

@@ -2,8 +2,7 @@
 #
 # Each entry consists of:
 #   - A 'name', which specifies the ATen name of the function you
-#     are defining derivatives for, and a C-style argument
-#     specification.
+#     are defining derivatives for, and an argument specification.
 #   - One or more gradients entries, mapping a differentiable input
 #     names to a formula specifying how to compute its gradient.
 #     Note that a single gradient entry can specify the gradient
@@ -20,13 +19,10 @@
 #   - Any of the input arguments, tensor or non-tensor
 #   - 'output', representing the result of evaluating the forward
 #     expression
-#   - 'output_mask', a std::array<bool, n> (where n is the number
+#   - 'grad_input_mask', a std::array<bool, n> (where n is the number
 #     of differentiable inputs), specifying which inputs actually
 #     require gradient.  (This is only available when multiple
 #     derivatives are being computed by a single formula.)
-#     For double backwards, this is called 'grad_mask' (reserving
-#     'output_mask' to refer to the output_mask input of the
-#     backwards.)
 #
 # If you need a complex expression, e.g., with local variables,
 # write a _backward function in tools/autograd/templates/Function.cpp
@@ -39,6 +35,12 @@
 # derivative formula for every input, including inputs named things
 # like 'grad_output', and (2) the gradient to multiply with is always
 # called 'grad' (even though it really is a grad-grad).
+#
+# LOOKING FOR AN THNN DEFINITION?  These are implicitly defined by
+# preprocess_nn_functions, because THNN functions follow a specific
+# convention; thus, you don't have to explicitly write it down in
+# derivatives.yaml (in fact, you MUST NOT write it down, because then
+# you'll have two derivative definitions!)
 #
 # NB: There are a number of gradient definitions in here which are bogus
 # (implemented using zeros_like).  These gradients are (hopefully) not
@@ -106,7 +108,7 @@
   self: grad * (self * self + 1).reciprocal()
 
 - name: atan2(Tensor self, Tensor other)
-  self, other: atan2_backward(grad, self, other, output_mask)
+  self, other: atan2_backward(grad, self, other, grad_input_mask)
 
 - name: baddbmm(Tensor self, Tensor batch1, Tensor batch2, *, Scalar beta, Scalar alpha)
   self: maybe_multiply(grad, beta)
@@ -656,10 +658,8 @@
   grad_output: nll_loss2d(grad, target, weight, size_average, ignore_index, reduce)
   input: zeros_like(grad)
 
-- name: prelu_backward(Tensor grad_output, Tensor input, Tensor weight, std::array<bool, 2> output_mask)
-  grad_output: zeros_like(grad_output)
-  input: zeros_like(input)
-  weight: zeros_like(weight)
+- name: prelu_backward(Tensor grad_output, Tensor input, Tensor weight, std::array<bool,2> output_mask)
+  grad_output, input, weight: prelu_double_backward(grads[0], grads[1], grad_output, input, weight, grad_input_mask)
 
 - name: rrelu_backward(Tensor grad_output, Tensor input, Scalar lower, Scalar upper, bool training, bool inplace, Tensor noise)
   grad_output: rrelu_backward(grad, input, lower, upper, training, false, noise)

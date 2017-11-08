@@ -84,7 +84,7 @@ if (should_compute_output(${idx})) {
 
 DERIVATIVE_MULTI = CodeTemplate("""\
 if (should_compute_output({ ${idxs} })) {
-  auto output_mask = std::array<bool, ${n}>{
+  auto grad_input_mask = std::array<bool, ${n}>{
     ${masks}
   };
   std::tie(${grad_inputs}) = ${derivative};
@@ -367,6 +367,11 @@ def load_derivatives(path, declarations_by_signature):
         # NB: Removes 'name' from defn dictionary
         defn_name, params = split_name_params(defn.pop('name'))
         param_types, param_names = unzip([p.split(' ') for p in params if p != '*'])
+        if 'grad_input_mask' in param_names:
+            raise RuntimeError("Signature for {} has an argument named grad_input_mask, "
+                               "but this name would be shadowed by our codegen. "
+                               "Please use a different name in Declarations.cwrap."
+                               .format(defn_name))
         signature = '{}({})'.format(defn_name, ', '.join(param_types))
 
         declarations = declarations_by_signature[signature]
@@ -435,6 +440,10 @@ def load_derivatives(path, declarations_by_signature):
 
 def ensure_unique_names(autograd_functions):
     # de-duplicate operation names
+    # you end up with something like:
+    #   AddBackward0
+    #   AddBackward1
+    # one for each overload
     functions_by_name = defaultdict(list)
     for func in autograd_functions:
         functions_by_name[func['op']].append(func)
@@ -470,6 +479,14 @@ def preprocess_nn_functions(declarations):
 
         def actual(arg):
             name = arg['name']
+            # To avoid confusion, we bind the mask in backwards
+            # to the name 'grad_input_mask', which is not the same
+            # as the argument naming convention in NN, which is
+            # 'output_mask'.  When we are autogenerating NN
+            # entries, we want to pass in 'grad_input_mask'
+            # as 'output_mask'; thus the substitution here.
+            if name == 'output_mask':
+                return 'grad_input_mask'
             return name if name != 'inplace' else 'false'
 
         actuals = [actual(arg) for arg in bwd['arguments']]
@@ -782,7 +799,7 @@ def create_variable_type(top_env, aten_declarations):
             env['trace_outputs'] = 'ret'
         else:
             env['return_value'] = '{}(std::move(ret))'.format(declaration['return_type'])
-            env['result'] = 'std::get<0>(ret)' if len(declaration['returns']) > 1 else 'ret'
+            env['result'] = 'ret'
             if len(declaration['returns']) > 1:
                 # NB: This won't work if we get heterogenous outputs
                 outs = ['std::get<{}>(ret)'.format(i)
