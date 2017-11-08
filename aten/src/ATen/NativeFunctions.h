@@ -53,6 +53,40 @@ static inline std::vector<Tensor> chunk(const Tensor &self, int64_t chunks, int6
 
 /*
 [NativeFunction]
+name: size
+arg: Tensor self
+arg: int64_t dim
+return: int64_t
+variants: method, function
+type_method_definition_level: base
+type_method_definition_dispatch: at::native::size
+[/NativeFunction]
+*/
+static inline int64_t size(const Tensor &self, int64_t dim) {
+  dim = maybe_wrap_dim(dim, self.dim());
+  // wrap_dim guarantees bounds are correct.
+  return self.sizes()[dim];
+}
+
+/*
+[NativeFunction]
+name: stride
+arg: Tensor self
+arg: int64_t dim
+return: int64_t
+variants: method, function
+type_method_definition_level: base
+type_method_definition_dispatch: at::native::stride
+[/NativeFunction]
+*/
+static inline int64_t stride(const Tensor &self, int64_t dim) {
+  dim = maybe_wrap_dim(dim, self.dim());
+  // wrap_dim guarantees bounds are correct.
+  return self.strides()[dim];
+}
+
+/*
+[NativeFunction]
 name: is_same_size
 arg: Tensor self
 arg: Tensor other
