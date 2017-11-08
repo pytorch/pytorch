@@ -1,3 +1,5 @@
+#define __STDC_FORMAT_MACROS
+
 #include "ATen/${Type}.h"
 #include "ATen/${Storage}.h"
 #include "ATen/${Tensor}.h"
