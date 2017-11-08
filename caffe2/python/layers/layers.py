@@ -52,6 +52,10 @@ def get_categorical_limit(record):
     return key.metadata.categorical_limit
 
 
+def get_avg_length(record):
+    return record['lengths'].metadata.expected_value
+
+
 def set_request_only(field):
     for f in field.all_scalars():
         categorical_limit, expected_value = None, None
