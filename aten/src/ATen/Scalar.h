@@ -36,6 +36,7 @@ public:
   AT_FORALL_SCALAR_TYPES(DEFINE_IMPLICIT_CTOR)
 
 #ifdef AT_CUDA_ENABLED
+#if CUDA_HALF_TENSOR
   Scalar(half vv)
   : tag(Tag::HAS_d) {
 #if CUDA_VERSION < 9000
@@ -45,6 +46,7 @@ public:
     v.d = convert<double,Half>(Half{vv_raw.x});
 #endif
   }
+#endif
 #endif
 
 #undef DEFINE_IMPLICIT_CTOR

@@ -13,7 +13,14 @@ PROFAPI ?= 0
 BUILDDIR ?= build
 BUILDDIR := $(abspath $(BUILDDIR))
 
+ARCH := $(shell getconf LONG_BIT)
+
+ifeq ($(ARCH), 32)
+CUDA_LIB ?= $(CUDA_HOME)/lib
+else
 CUDA_LIB ?= $(CUDA_HOME)/lib64
+endif
+
 CUDA_INC ?= $(CUDA_HOME)/include
 NVCC ?= $(CUDA_HOME)/bin/nvcc
 
@@ -21,6 +28,14 @@ CUDA_VERSION ?= $(shell ls $(CUDA_LIB)/libcudart.so.* | head -1 | rev | cut -d "
 CUDA_MAJOR = $(shell echo $(CUDA_VERSION) | cut -d "." -f 1)
 CUDA_MINOR = $(shell echo $(CUDA_VERSION) | cut -d "." -f 2)
 
+
+ifeq ($(CUDA_MAJOR), 6)
+NVCC_GENCODE ?= -gencode=arch=compute_30,code=sm_30 \
+                -gencode=arch=compute_35,code=sm_35 \
+                -gencode=arch=compute_50,code=sm_50 \
+                -gencode=arch=compute_52,code=sm_52 \
+                -gencode=arch=compute_52,code=compute_52
+else
 ifeq ($(CUDA_MAJOR), 7)
 NVCC_GENCODE ?= -gencode=arch=compute_30,code=sm_30 \
                 -gencode=arch=compute_35,code=sm_35 \
@@ -35,6 +50,7 @@ NVCC_GENCODE ?= -gencode=arch=compute_30,code=sm_30 \
                 -gencode=arch=compute_60,code=sm_60\
                 -gencode=arch=compute_61,code=sm_61 \
                 -gencode=arch=compute_60,code=compute_60
+endif
 endif
 
 CXXFLAGS   := -I$(CUDA_INC) -fPIC -fvisibility=hidden

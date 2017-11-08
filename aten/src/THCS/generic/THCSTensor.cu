@@ -12,7 +12,7 @@
 #include <thrust/sort.h>
 #include <thrust/transform.h>
 #include <thrust/unique.h>
-#if CUDA_VERSION >= 7000
+#if CUDA_VERSION >= 6050
 #include <thrust/system/cuda/execution_policy.h>
 #endif
 
@@ -49,7 +49,7 @@ THCSTensor *THCSTensor_(newCoalesce)(THCState *state, THCSTensor *self) {
   THCThrustAllocator thrustAlloc(state);
 #define THRUST_EXEC(fn, ...) fn(thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)), ##__VA_ARGS__)
 #else
-#define THRUST_EXEC(fn, ...) fn(##__VA_ARGS__)
+#define THRUST_EXEC(fn, ...) fn(thrust::cuda::par, ##__VA_ARGS__)
 #endif
 
   // For indices, a simple sort + unique suffices

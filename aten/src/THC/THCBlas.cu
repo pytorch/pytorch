@@ -456,12 +456,16 @@ THC_API void THCudaBlas_Sgetrs(THCState *state, char transa, int n, int nrhs, co
             "with the bound [val] <= %d", INT_MAX);
   }
 
+#if CUDART_VERSION >= 7000
   // no need to adjust leading dimensions, since matrices are square
   cublasOperation_t opa = convertTransToCublasOperation(transa);
 
   cublasHandle_t handle = THCState_getCurrentBlasHandle(state);
   cublasSetStream(handle, THCState_getCurrentStream(state));
   THCublasCheck(cublasSgetrsBatched(handle, opa, n, nrhs, a, lda, pivot, b, ldb, info, batchSize));
+#else
+  THError("Not Supported: %s", __FUNCTION__);
+#endif
 }
 
 
@@ -473,12 +477,16 @@ THC_API void THCudaBlas_Dgetrs(THCState *state, char transa, int n, int nrhs, co
             "with the bound [val] <= %d", INT_MAX);
   }
 
+#if CUDART_VERSION >= 7000
   // no need to adjust leading dimensions, since matrices are square
   cublasOperation_t opa = convertTransToCublasOperation(transa);
 
   cublasHandle_t handle = THCState_getCurrentBlasHandle(state);
   cublasSetStream(handle, THCState_getCurrentStream(state));
   THCublasCheck(cublasDgetrsBatched(handle, opa, n, nrhs, a, lda, pivot, b, ldb, info, batchSize));
+#else
+  THError("Not Supported: %s", __FUNCTION__);
+#endif
 }
 
 void THCudaBlas_Sgetri(THCState *state, int n, const float **a, int lda, int *pivot, float **c, int ldc, int *info, int batchSize) {

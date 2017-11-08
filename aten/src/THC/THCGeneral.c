@@ -942,6 +942,7 @@ static void maybeTriggerGC(THCState *state, ptrdiff_t curHeapSize) {
 #include "THCStorage.c"
 #include "THCAllocator.c"
 
+#if CUDA_HALF_TENSOR 
 /* from THCHalf.h */
 
 half THC_float2half(float f)
@@ -957,3 +958,4 @@ float  THC_half2float(half h)
   TH_halfbits2float(&h.x, &f);
   return f;
 }
+#endif

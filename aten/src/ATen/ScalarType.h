@@ -78,9 +78,14 @@ static inline bool isIntegralType(ScalarType t) {
 }
 
 static inline bool isFloatingType(ScalarType t) {
+#if CUDA_HALF_TENSOR
   return (t == ScalarType::Double ||
           t == ScalarType::Float ||
           t == ScalarType::Half);
+#else
+  return (t == ScalarType::Double ||
+          t == ScalarType::Float);
+#endif
 }
 
 struct Tensor;

@@ -120,7 +120,7 @@ class build_deps(Command):
         if WITH_NCCL and not WITH_SYSTEM_NCCL:
             libs += ['nccl']
         libs += ['ATen', 'libshm', 'nanopb']
-        if WITH_DISTRIBUTED:
+        if WITH_DISTRIBUTED and platform.architecture()[0]=='64bit':
             if sys.platform.startswith('linux'):
                 libs += ['gloo']
             libs += ['THD']

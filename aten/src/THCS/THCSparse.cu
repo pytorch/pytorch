@@ -98,11 +98,15 @@ void THCudaSparse_CreateIdentityPermutation(THCState *state, int64_t nnz, int *P
   THAssertMsg((nnz <= INT_MAX),
     "Xcsrsort_bufferSizeExt only supports m, n, nnz with the bound [val] <= %d",
     INT_MAX);
+#if CUDART_VERSION >= 7000
   int i_nnz = (int)nnz;
 
   cusparseHandle_t handle = THCState_getCurrentSparseHandle(state);
   cusparseSetStream(handle, THCState_getCurrentStream(state));
   cusparseCreateIdentityPermutation(handle, i_nnz, P);
+#else
+  THError("Not supported: %s", __FUNCTION__);
+#endif
 }
 
 void THCudaSparse_Xcsrsort_bufferSizeExt(THCState *state, int64_t m, int64_t n, int64_t nnz, const int *csrRowPtr, const int *csrColInd, size_t *pBufferSizeInBytes)
@@ -110,6 +114,7 @@ void THCudaSparse_Xcsrsort_bufferSizeExt(THCState *state, int64_t m, int64_t n, 
   THAssertMsg((m <= INT_MAX) && (n <= INT_MAX) && (nnz <= INT_MAX),
     "Xcsrsort_bufferSizeExt only supports m, n, nnz with the bound [val] <= %d",
     INT_MAX);
+#if CUDART_VERSION >= 7000
   int i_m = (int)m;
   int i_n = (int)n;
   int i_nnz = (int)nnz;
@@ -117,6 +122,9 @@ void THCudaSparse_Xcsrsort_bufferSizeExt(THCState *state, int64_t m, int64_t n, 
   cusparseHandle_t handle = THCState_getCurrentSparseHandle(state);
   cusparseSetStream(handle, THCState_getCurrentStream(state));
   THCusparseCheck(cusparseXcsrsort_bufferSizeExt(handle, i_m, i_n, i_nnz, csrRowPtr, csrColInd, pBufferSizeInBytes));
+#else
+  THError("Not supported: %s", __FUNCTION__);
+#endif
 }
 
 void THCudaSparse_Xcsrsort(THCState *state, int64_t m, int64_t n, int64_t nnz, const int *csrRowPtr, int *csrColInd, int *P, void *pBuffer)
@@ -124,6 +132,7 @@ void THCudaSparse_Xcsrsort(THCState *state, int64_t m, int64_t n, int64_t nnz, c
   THAssertMsg((m <= INT_MAX) && (n <= INT_MAX) && (nnz <= INT_MAX),
     "Xcsrsort only supports m, n, nnz with the bound [val] <= %d",
     INT_MAX);
+#if CUDART_VERSION >= 7000
   int i_m = (int)m;
   int i_n = (int)n;
   int i_nnz = (int)nnz;
@@ -136,6 +145,9 @@ void THCudaSparse_Xcsrsort(THCState *state, int64_t m, int64_t n, int64_t nnz, c
   cusparseSetMatIndexBase(&desc, CUSPARSE_INDEX_BASE_ONE);
 #endif
   THCusparseCheck(cusparseXcsrsort(handle, i_m, i_n, i_nnz, desc, csrRowPtr, csrColInd, P, pBuffer));
+#else
+  THError("Not supported: %s", __FUNCTION__);
+#endif
 }
 
 void THCudaSparse_Xcoosort_bufferSizeExt(THCState *state, int64_t m, int64_t n, int64_t nnz, const int *cooRows, const int *cooCols, size_t *pBufferSizeInBytes)
@@ -143,6 +155,7 @@ void THCudaSparse_Xcoosort_bufferSizeExt(THCState *state, int64_t m, int64_t n, 
   THAssertMsg((m <= INT_MAX) && (n <= INT_MAX) && (nnz <= INT_MAX),
     "Xcoosort_bufferSizeExt only supports m, n, nnz with the bound [val] <= %d",
     INT_MAX);
+#if CUDART_VERSION >= 7000
   int i_m = (int)m;
   int i_n = (int)n;
   int i_nnz = (int)nnz;
@@ -150,6 +163,9 @@ void THCudaSparse_Xcoosort_bufferSizeExt(THCState *state, int64_t m, int64_t n, 
   cusparseHandle_t handle = THCState_getCurrentSparseHandle(state);
   cusparseSetStream(handle, THCState_getCurrentStream(state));
   THCusparseCheck(cusparseXcoosort_bufferSizeExt(handle, i_m, i_n, i_nnz, cooRows, cooCols, pBufferSizeInBytes));
+#else
+  THError("Not supported: %s", __FUNCTION__);
+#endif
 }
 
 void THCudaSparse_XcoosortByRow(THCState *state, int64_t m, int64_t n, int64_t nnz, int *cooRows, int *cooCols, int *P, void *pBuffer)
@@ -157,6 +173,7 @@ void THCudaSparse_XcoosortByRow(THCState *state, int64_t m, int64_t n, int64_t n
   THAssertMsg((m <= INT_MAX) && (n <= INT_MAX) && (nnz <= INT_MAX),
     "XcoosortByRow only supports m, n, nnz with the bound [val] <= %d",
     INT_MAX);
+#if CUDART_VERSION >= 7000
   int i_m = (int)m;
   int i_n = (int)n;
   int i_nnz = (int)nnz;
@@ -164,4 +181,7 @@ void THCudaSparse_XcoosortByRow(THCState *state, int64_t m, int64_t n, int64_t n
   cusparseHandle_t handle = THCState_getCurrentSparseHandle(state);
   cusparseSetStream(handle, THCState_getCurrentStream(state));
   THCusparseCheck(cusparseXcoosortByRow(handle, i_m, i_n, i_nnz, cooRows, cooCols, P, pBuffer));
+#else
+  THError("Not supported: %s", __FUNCTION__);
+#endif
 }

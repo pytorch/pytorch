@@ -26,6 +26,8 @@ parser.add_option('-s', '--source-path', help='path to source directory for ATen
 parser.add_option('-o', '--output-dependencies',
                   help='only output a list of dependencies', action='store')
 parser.add_option('-n', '--no-cuda', action='store_true')
+parser.add_option('-v', '--cuda-version',
+                  help='cuda version to check if half is supported', action='store')
 
 options, files = parser.parse_args()
 if options.output_dependencies is not None:
@@ -85,8 +87,10 @@ scalar_types = [
     ('Int', 'int', 'Long', 'int32_t'),
     ('Long', 'int64_t', 'Long', 'int64_t'),
     ('Short', 'int16_t', 'Long', 'int16_t'),
-    ('Half', 'Half', 'Double', 'THHalf'),
 ]
+
+if not options.cuda_version is None and float(options.cuda_version) >= 7:
+    scalar_types += [('Half', 'Half', 'Double', 'THHalf')]
 
 # shared environment for non-derived base classes Type.h Tensor.h Storage.h
 top_env = {

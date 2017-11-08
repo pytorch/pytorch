@@ -3,6 +3,7 @@
 #include "THFilePrivate.h"
 
 #include <stdint.h>
+#include <stdio.h>
 #ifndef LLONG_MAX
 #define LLONG_MAX 9223372036854775807LL
 #endif
