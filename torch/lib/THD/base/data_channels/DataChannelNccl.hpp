@@ -162,7 +162,7 @@ private:
                              ncclUniqueId* dstNcclId);
 
   // Helper that checks the input and output tensors
-  void _tensorCheckHelper(const std::vector<at::Tensor>& input,
+  bool _tensorCheckHelper(const std::vector<at::Tensor>& input,
                           const std::vector<at::Tensor>& output,
                           size_t outputOverInput = 1);
 

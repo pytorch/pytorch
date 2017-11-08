@@ -22,7 +22,7 @@ else:
 
 
 class DistributedDataParallel(Module):
-    r"""Implements distributed data parallelism at the module level.
+    """Implements distributed data parallelism at the module level.
 
     This container parallelizes the application of the given module by
     splitting the input across the specified devices by chunking in the batch
@@ -214,6 +214,8 @@ class DistributedDataParallel(Module):
             flat_buffers = _flatten_dense_tensors(buffers)
 
             if dist._backend == "nccl":
+                # TODO: deprecate this broadcast along with
+                # dist.all_reduce_multigpu
                 dist.broadcast(flat_buffers, 0, self.bcast_grp)
             else:
                 dist.broadcast(flat_buffers, 0)
@@ -272,7 +274,13 @@ class DistributedDataParallel(Module):
 
         # Queue the reduction and make sure backward waits for it
         event = threading.Event()
-        self._reduction_queues[bucket_idx].put((dev_buckets, dev_events, event))
+
+        if dist._backend == "nccl":
+            # NCCL backend, all buckets will share a single reduction queue
+            self._reduction_queues[0].put((dev_buckets, dev_events, event))
+        else:
+            self._reduction_queues[bucket_idx].put((dev_buckets, dev_events, event))
+
         Variable._execution_engine.queue_callback(lambda: event.wait())
 
         # Reset bucket state
@@ -283,41 +291,75 @@ class DistributedDataParallel(Module):
             self.reduced = [False] * len(self.bucket_sizes)
 
             def sync_reduction_streams():
-                # We only have to sync with the first one, but it's safer to do it this way
-                # in case we change the way in which we paralellize work
-                r_streams = zip(*self._reduction_streams)
-                for dev_id, default_stream, dev_r_streams in zip(self.device_ids, self._default_streams, r_streams):
-                    with torch.cuda.device(dev_id):
-                        for reduction_stream in dev_r_streams:
-                            default_stream.wait_stream(reduction_stream)
+                # We sync on the default streams for NCCL backend since all
+                # nccl reduction kernels goes to the default streams
+                if dist._backend == "nccl":
+                    for dev_id, default_stream in zip(self.device_ids, self._default_streams):
+                        with torch.cuda.device(dev_id):
+                            default_stream.synchronize()
+                else:
+                    # We only have to sync with the first one, but it's safer to do it this way
+                    # in case we change the way in which we paralellize work
+                    r_streams = zip(*self._reduction_streams)
+                    for dev_id, default_stream, dev_r_streams in zip(self.device_ids, self._default_streams, r_streams):
+                        with torch.cuda.device(dev_id):
+                            for reduction_stream in dev_r_streams:
+                                default_stream.wait_stream(reduction_stream)
+
             Variable._execution_engine.queue_callback(sync_reduction_streams)
 
     def _start_reduction_threads(self):
         num_buckets = len(self.bucket_sizes)
-        self._reduction_queues = [queue.Queue() for _ in range(num_buckets)]
+
+        if dist._backend == "nccl":
+            # Let NCCL backend uses a single Queue for all reduction buckets
+            # in order to maintain the NCCL kernel launch order on different
+            # nodes to avoid the deadlock. In other words, we will only maintain
+            # a single reduction thread for this purpose. This is OK since all
+            # distributed NCCL calls are asynchronous
+            self._reduction_queues = [queue.Queue()]
+            self._reduction_streams = [[]]
+        else:
+            self._reduction_queues = [queue.Queue() for _ in range(num_buckets)]
+            self._reduction_streams = [[] for _ in range(num_buckets)]
+
         self._reduction_threads = []
-        self._reduction_streams = [[] for _ in range(num_buckets)]
         self._nccl_streams = []
         self._default_streams = []
+
         for dev_id in self.device_ids:
             with torch.cuda.device(dev_id):
                 # TODO: don't assume we're on a default stream
                 self._default_streams.append(torch.cuda.current_stream())
-                self._nccl_streams.append(torch.cuda.Stream())
+                # NCCL stream is not needed for NCCL backend since current
+                # implmentation uses the default stream
+                if dist._backend != "nccl":
+                    self._nccl_streams.append(torch.cuda.Stream())
+
         for reduction_queue, reduction_streams in zip(self._reduction_queues, self._reduction_streams):
-            for dev_id in self.device_ids:
-                with torch.cuda.device(dev_id):
-                    reduction_streams.append(torch.cuda.Stream())
-            # We only use the first device for distributed reductions
-            dist._register_stream(reduction_streams[0])
+            # Reduction stream not needed for NCCL backend
+            if dist._backend != "nccl":
+                for dev_id in self.device_ids:
+                    with torch.cuda.device(dev_id):
+                        reduction_streams.append(torch.cuda.Stream())
+                # We only use the first device for distributed reductions
+                dist._register_stream(reduction_streams[0])
+
             group_id = dist.new_group()
 
             if dist._backend == "nccl":
                 self.reduce_grp.add(group_id)
+                self._reduction_threads.append(threading.Thread(
+                    target=self._reduction_thread_fn_nccl,
+                    args=(reduction_queue,
+                          group_id,
+                          self.device_ids,
+                          self._default_streams)))
+            else:
+                self._reduction_threads.append(threading.Thread(
+                    target=self._reduction_thread_fn,
+                    args=(reduction_queue, group_id, self.device_ids, reduction_streams, self._nccl_streams)))
 
-            self._reduction_threads.append(threading.Thread(
-                target=self._reduction_thread_fn,
-                args=(reduction_queue, group_id, self.device_ids, reduction_streams, self._nccl_streams)))
             self._reduction_threads[-1].daemon = True
             self._reduction_threads[-1].start()
 
@@ -348,6 +390,50 @@ class DistributedDataParallel(Module):
                 dist.all_reduce(coalesced, group=group_id)
                 for grad, reduced in zip(grad_batch, _unflatten_dense_tensors(coalesced, grad_batch)):
                     grad.copy_(reduced)
+            job_event.set()
+
+        with torch.cuda.device(device_ids[0]):
+            while True:
+                _process_batch()  # just to have a clear scope
+
+    @staticmethod
+    def _reduction_thread_fn_nccl(queue, group_id, device_ids, default_streams):
+        """
+        Reduction thread function specifically for NCCL, the reduction will use
+        default CUDA streams
+        """
+        def _process_batch():
+            dev_grad_batch, dev_events, job_event = queue.get()
+            dev_coalesced = []
+            # Coalesce the tensors on all devices and start a local reduction
+            for dev_id, grad_batch, event, default_stream in \
+                    zip(device_ids,
+                        dev_grad_batch,
+                        dev_events,
+                        default_streams):
+                with torch.cuda.device(dev_id), \
+                        torch.cuda.stream(default_stream):
+                    default_stream.wait_event(event)
+                    coalesced = _flatten_dense_tensors(grad_batch)
+                    dev_coalesced.append(coalesced)
+
+            # TODO: remove nccl.reduce with
+            #       dist.all_reduce_multigpus
+            nccl.reduce(dev_coalesced, root=0, streams=default_streams)
+
+            grad_batch = dev_grad_batch[0]
+            coalesced = dev_coalesced[0]
+            coalesced /= dist.get_world_size()
+
+            # TODO: replace dist.all_reduce with
+            #       dist.all_reduce_multigpus
+            dist.all_reduce(coalesced, group=group_id)
+
+            for grad, reduced in \
+                    zip(grad_batch,
+                        _unflatten_dense_tensors(coalesced, grad_batch)):
+                grad.copy_(reduced)
+
             job_event.set()
 
         with torch.cuda.device(device_ids[0]):

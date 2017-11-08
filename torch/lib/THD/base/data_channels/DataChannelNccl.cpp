@@ -1,4 +1,5 @@
 #include "../Cuda.hpp"
+#include "../../../csrc/utils/auto_gpu.h"
 #include "DataChannelNccl.hpp"
 #include "DataChannelUtils.hpp"
 
@@ -152,8 +153,9 @@ void DataChannelNccl::destroy() {
     ::close(_masterListeningSocket);
     _masterListeningSocket = -1;
   }
-  int curDevice = 0;
-  THCudaCheck(cudaGetDevice(&curDevice));
+
+  // Guard GPU device
+  AutoGPU gpuGuard;
 
   // Destroy the CUDA and NCCL resources
   for (auto& itemPair : _ncclCommsAndEvents) {
@@ -163,7 +165,7 @@ void DataChannelNccl::destroy() {
     // Destroy the CUDA events
     size_t idx = 0;
     for (auto& event : *(itemPair.second.second)) {
-      THCudaCheck(cudaSetDevice(devices[idx++]));
+      gpuGuard.setDevice(devices[idx++]);
       THCudaCheck(cudaEventSynchronize(event));
       THCudaCheck(cudaEventDestroy(event));
     }
@@ -176,9 +178,6 @@ void DataChannelNccl::destroy() {
   _ncclCommsAndEvents.clear();
   _groups.clear();
   _groupDevices.clear();
-
-  // Restore to previous device
-  THCudaCheck(cudaSetDevice(curDevice));
 }
 
 
@@ -188,14 +187,13 @@ void DataChannelNccl::destroyGroup(THDGroup groupId) {
   std::unique_lock<std::mutex> channelLock(_mutex);
 
   if (_ncclCommsAndEvents.find(groupId) != _ncclCommsAndEvents.end()) {
-    int curDevice = 0;
-    THCudaCheck(cudaGetDevice(&curDevice));
-
+    // Guard GPU device
+    AutoGPU gpuGuard;
     // Destroy the CUDA events
     size_t idx = 0;
     for (auto& event : *(_ncclCommsAndEvents[groupId].second)) {
       auto devices = getDevicesList(_groupDevices[groupId]);
-      THCudaCheck(cudaSetDevice(devices[idx++]));
+      gpuGuard.setDevice(devices[idx++]);
       THCudaCheck(cudaEventSynchronize(event));
       THCudaCheck(cudaEventDestroy(event));
     }
@@ -203,8 +201,6 @@ void DataChannelNccl::destroyGroup(THDGroup groupId) {
     for (auto& comm : *(_ncclCommsAndEvents[groupId].first)) {
       NCCL_CHECK(ncclCommDestroy(comm));
     }
-    // Restore to previous device
-    THCudaCheck(cudaSetDevice(curDevice));
     _ncclCommsAndEvents.erase(groupId);
   }
   if (_groups.find(groupId) != _groups.end()) {
@@ -306,19 +302,19 @@ DataChannelNccl::_getNcclCommsAndEvents(
   // Broadcast so that each process can have a unique NCCL ID
   broadcastUniqueNcclId(&ncclId, &ncclId);
 
-  int curDevice = 0;
-  THCudaCheck(cudaGetDevice(&curDevice));
+  // Guard GPU device
+  AutoGPU gpuGuard;
 
   // Now creating the CUDA events
   for (size_t i = 0; i < input.size(); ++i) {
-    THCudaCheck(cudaSetDevice(input[i].get_device()));
+    gpuGuard.setDevice(input[i].get_device());
     THCudaCheck(cudaEventCreate(&((*events)[i])));
   }
   // Create the communicator on each device of the input
   NCCL_CHECK(ncclGroupStart());
   for (size_t i = 0; i < input.size(); ++i) {
     int nRanks = int(_numProcesses) * input.size();
-    THCudaCheck(cudaSetDevice(input[i].get_device()));
+    gpuGuard.setDevice(input[i].get_device());
     NCCL_CHECK(ncclCommInitRank(&((*comms)[i]),
                                 nRanks,
                                 ncclId,
@@ -326,12 +322,10 @@ DataChannelNccl::_getNcclCommsAndEvents(
   }
   NCCL_CHECK(ncclGroupEnd());
 
-  // Restore to previous device
-  THCudaCheck(cudaSetDevice(curDevice));
-
   // Move into the hash table
-  _ncclCommsAndEvents[groupId] = std::move(std::make_pair(std::move(comms),
-                                                          std::move(events)));
+  _ncclCommsAndEvents.emplace(
+      std::make_pair(groupId, std::make_pair(std::move(comms),
+                                             std::move(events))));
 
   return std::make_pair(_ncclCommsAndEvents[groupId].first.get(),
                         _ncclCommsAndEvents[groupId].second.get());
@@ -339,18 +333,21 @@ DataChannelNccl::_getNcclCommsAndEvents(
 
 
 // Helper function that checks the input and output tensors for validity
-void DataChannelNccl::_tensorCheckHelper(
+bool DataChannelNccl::_tensorCheckHelper(
     const std::vector<at::Tensor>& input,
     const std::vector<at::Tensor>& output,
     size_t outputOverInput) {
 
-  if (input.size() <= 0) {
-    throw std::runtime_error("Input tensor sequence cannot be empty");
-  }
   if (input.size() != output.size()) {
-    throw std::runtime_error("Input tensor sequence should have the same size "
-                             "as output tensor sequence");
+    throw std::runtime_error("Input tensor sequence should have the same "
+                             "number of tensors as the output tensor sequence");
   }
+
+  if (input.size() == 0) {
+    // Return false saying this is a no-op
+    return false;
+  }
+
   if (input.size() > _numGPUs) {
     throw std::runtime_error("The number of input tensors is larger than "
                              "the number of available GPUs");
@@ -392,12 +389,12 @@ void DataChannelNccl::_tensorCheckHelper(
     if (!input[i].is_contiguous() || !output[i].is_contiguous()) {
       throw std::runtime_error("Expecting all GPU tensors to be contiguous");
     }
-    // Device verification
-    if (usedDevices.find(input[i].get_device()) != usedDevices.end()) {
+
+    auto res = usedDevices.insert(input[i].get_device());
+    // Device verification, if the insertion didn't take place
+    if (!res.second) {
       throw std::runtime_error("Expecting inputs on different GPU devices");
     }
-
-    usedDevices.insert(input[i].get_device());
 
     // Now check the output device
     if (input[i].get_device() != output[i].get_device()) {
@@ -405,6 +402,7 @@ void DataChannelNccl::_tensorCheckHelper(
                                "the same device");
     }
   }
+  return true;
 }
 
 
@@ -415,15 +413,17 @@ void DataChannelNccl::allReduce(std::vector<at::Tensor>& input,
 
   std::unique_lock<std::mutex> channelLock(_mutex);
   // Check the tensor vector for consistency
-  _tensorCheckHelper(input, output);
+  if (!_tensorCheckHelper(input, output)) {
+    return;
+  }
   _checkGroupIdValid(groupId);
 
   auto commsAndEvents = _getNcclCommsAndEvents(input, groupId);
   auto comms = commsAndEvents.first;
   auto events = commsAndEvents.second;
 
-  int curDevice = 0;
-  THCudaCheck(cudaGetDevice(&curDevice));
+  // Guard GPU device
+  AutoGPU gpuGuard;
 
   std::unique_lock<std::mutex> cudaFreeMutexLock(
       *(THCCachingAllocator_getCudaFreeMutex()));
@@ -431,7 +431,7 @@ void DataChannelNccl::allReduce(std::vector<at::Tensor>& input,
   NCCL_CHECK(ncclGroupStart());
   for (size_t i = 0; i < input.size(); ++i) {
 
-    THCudaCheck(cudaSetDevice(input[i].get_device()));
+    gpuGuard.setDevice(input[i].get_device());
     auto stream = THCState_getCurrentStream(THDGetCudaState());
 
     NCCL_CHECK(ncclAllReduce(input[i].data_ptr(),
@@ -446,9 +446,6 @@ void DataChannelNccl::allReduce(std::vector<at::Tensor>& input,
   NCCL_CHECK(ncclGroupEnd());
 
   cudaFreeMutexLock.unlock();
-
-  // Restore to previous device
-  THCudaCheck(cudaSetDevice(curDevice));
 }
 
 
@@ -468,15 +465,17 @@ void DataChannelNccl::allGather(std::vector<at::Tensor>& input,
 
   std::unique_lock<std::mutex> channelLock(_mutex);
 
-  _tensorCheckHelper(input, output, _numProcesses * input.size());
+  if (!_tensorCheckHelper(input, output, _numProcesses * input.size())) {
+    return;
+  }
   _checkGroupIdValid(groupId);
 
   auto commsAndEvents = _getNcclCommsAndEvents(input, groupId);
   auto comms = commsAndEvents.first;
   auto events = commsAndEvents.second;
 
-  int curDevice = 0;
-  THCudaCheck(cudaGetDevice(&curDevice));
+  // Guard GPU device
+  AutoGPU gpuGuard;
 
   std::unique_lock<std::mutex> cudaFreeMutexLock(
       *(THCCachingAllocator_getCudaFreeMutex()));
@@ -484,7 +483,7 @@ void DataChannelNccl::allGather(std::vector<at::Tensor>& input,
   NCCL_CHECK(ncclGroupStart());
   for (size_t i = 0; i < input.size(); ++i) {
 
-    THCudaCheck(cudaSetDevice(input[i].get_device()));
+    gpuGuard.setDevice(input[i].get_device());
     auto stream = THCState_getCurrentStream(THDGetCudaState());
 
     NCCL_CHECK(ncclAllGather(input[i].data_ptr(),
@@ -498,9 +497,6 @@ void DataChannelNccl::allGather(std::vector<at::Tensor>& input,
   NCCL_CHECK(ncclGroupEnd());
 
   cudaFreeMutexLock.unlock();
-
-  // Restore to previous device
-  THCudaCheck(cudaSetDevice(curDevice));
 }
 
 
@@ -522,15 +518,17 @@ void DataChannelNccl::reduce(std::vector<at::Tensor>& data,
   std::unique_lock<std::mutex> channelLock(_mutex);
 
   // Check the tensor vector for consistency
-  _tensorCheckHelper(data, data);
+  if (!_tensorCheckHelper(data, data)) {
+    return;
+  }
   _checkGroupIdValid(groupId);
 
   auto commsAndEvents = _getNcclCommsAndEvents(data, groupId);
   auto comms = commsAndEvents.first;
   auto events = commsAndEvents.second;
 
-  int curDevice = 0;
-  THCudaCheck(cudaGetDevice(&curDevice));
+  // Guard GPU device
+  AutoGPU gpuGuard;
 
   std::unique_lock<std::mutex> cudaFreeMutexLock(
       *(THCCachingAllocator_getCudaFreeMutex()));
@@ -538,7 +536,7 @@ void DataChannelNccl::reduce(std::vector<at::Tensor>& data,
   NCCL_CHECK(ncclGroupStart());
   for (size_t i = 0; i < data.size(); ++i) {
 
-    THCudaCheck(cudaSetDevice(data[i].get_device()));
+    gpuGuard.setDevice(data[i].get_device());
     auto stream = THCState_getCurrentStream(THDGetCudaState());
 
     NCCL_CHECK(ncclReduce(data[i].data_ptr(),
@@ -554,9 +552,6 @@ void DataChannelNccl::reduce(std::vector<at::Tensor>& data,
   NCCL_CHECK(ncclGroupEnd());
 
   cudaFreeMutexLock.unlock();
-
-  // Restore to previous device
-  THCudaCheck(cudaSetDevice(curDevice));
 }
 
 void DataChannelNccl::reduce(at::Tensor& data,
@@ -576,15 +571,17 @@ void DataChannelNccl::broadcast(std::vector<at::Tensor>& data,
   std::unique_lock<std::mutex> channelLock(_mutex);
 
   // Check the tensor vector for consistency
-  _tensorCheckHelper(data, data);
+  if (!_tensorCheckHelper(data, data)) {
+    return;
+  }
   _checkGroupIdValid(groupId);
 
   auto commsAndEvents = _getNcclCommsAndEvents(data, groupId);
   auto comms = commsAndEvents.first;
   auto events = commsAndEvents.second;
 
-  int curDevice = 0;
-  THCudaCheck(cudaGetDevice(&curDevice));
+  // Guard GPU device
+  AutoGPU gpuGuard;
 
   std::unique_lock<std::mutex> cudaFreeMutexLock(
       *(THCCachingAllocator_getCudaFreeMutex()));
@@ -592,7 +589,7 @@ void DataChannelNccl::broadcast(std::vector<at::Tensor>& data,
   NCCL_CHECK(ncclGroupStart());
   for (size_t i = 0; i < data.size(); ++i) {
 
-    THCudaCheck(cudaSetDevice(data[i].get_device()));
+    gpuGuard.setDevice(data[i].get_device());
     auto stream = THCState_getCurrentStream(THDGetCudaState());
 
     NCCL_CHECK(ncclBcast(data[i].data_ptr(),
@@ -606,9 +603,6 @@ void DataChannelNccl::broadcast(std::vector<at::Tensor>& data,
   NCCL_CHECK(ncclGroupEnd());
 
   cudaFreeMutexLock.unlock();
-
-  // Restore to previous device
-  THCudaCheck(cudaSetDevice(curDevice));
 }
 
 
@@ -635,18 +629,15 @@ void DataChannelNccl::barrier(THDGroup groupId) {
 
   auto devices = getDevicesList(_groupDevices[groupId]);
 
-  int curDevice = 0;
-  THCudaCheck(cudaGetDevice(&curDevice));
+  // Guard GPU device
+  AutoGPU gpuGuard;
 
   int idx = 0;
   // Synchronize on the CUDA events
   for (auto& event : *(_ncclCommsAndEvents[groupId].second)) {
-    THCudaCheck(cudaSetDevice(devices[idx++]));
+    gpuGuard.setDevice(devices[idx++]);
     THCudaCheck(cudaEventSynchronize(event));
   }
-
-  // Restore to previous device
-  THCudaCheck(cudaSetDevice(curDevice));
 }
 
 
