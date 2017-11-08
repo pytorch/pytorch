@@ -55,13 +55,29 @@ static std::vector<pid_t> worker_pid_vec = {};
 // The following are needed since std::vector is not asynchronous safe.
 static std::atomic<pid_t *> worker_pids;
 static std::atomic<size_t> num_worker_pids(0);
+// Pipe used as a lock to avoid update of the above and SIGCHLD handler in parallel.
+static int comm_pipe[2] = {-1, -1};
 
-static void updatePIDsArray() {
+static int updatePIDsArray() {
+
   size_t new_size =  worker_pid_vec.size();
   auto new_ptr = (pid_t *)malloc(sizeof(pid_t) * new_size);
   for (size_t idx = 0; idx < new_size; idx++) {
     new_ptr[idx] = worker_pid_vec[idx];
   }
+
+  // Block SIGCHLD handler for this thread so SIGCHLD handler can't interrupt
+  // from this thread
+  sigset_t sigset, old_sigset;
+  sigemptyset(&sigset);
+  sigaddset(&sigset, SIGCHLD);
+  if (sigprocmask(SIG_BLOCK, &sigset, &old_sigset) != 0) {
+    return -1;
+  }
+  // Acquire ``lock'' so handlers on other threads can't interrupt
+  char c;
+  read(comm_pipe[0], &c, 1);
+
   pid_t *old_ptr = worker_pids;
   if (new_size < num_worker_pids) {
     num_worker_pids = new_size;
@@ -71,6 +87,14 @@ static void updatePIDsArray() {
     num_worker_pids = new_size;
   }
   free(old_ptr);
+
+  // Release ``lock''
+  write(comm_pipe[1], &c, 1);
+  // Restore handler for this thread.
+  if (sigprocmask(SIG_SETMASK, &old_sigset, NULL) != 0) {
+    return -1;
+  }
+  return 0;
 }
 
 static struct sigaction orig_SIGCHLD_sa;
@@ -80,6 +104,10 @@ static struct sigaction orig_SIGCHLD_sa;
 // Python handles are _set_main_signal_handers_for_workers() and
 // _remove_main_signal_handers_for_workers().
 static void handler_SIGCHLD_main(int sig, siginfo_t *info, void *ctx) {
+  // Acquire ``lock'' so make sure that worker_pids won't change
+  char c;
+  read(comm_pipe[0], &c, 1);
+
   int error;
   siginfo_t infop;
 
@@ -91,23 +119,37 @@ static void handler_SIGCHLD_main(int sig, siginfo_t *info, void *ctx) {
     error = waitid(P_PID, worker_pids[i], &infop, WEXITED|WNOHANG|WNOWAIT);
     if (error < 0)  // ignore errors
       continue;
-    if (infop.si_code == CLD_EXITED && infop.si_status == 0)  // ignore ones that exited w/o error
-      continue;
-    if (infop.si_code == CLD_TRAPPED || infop.si_code == CLD_CONTINUED)
-      continue;
-    _exit(EXIT_FAILURE);
+    if ((infop.si_code == CLD_EXITED && infop.si_status != 0) ||  // exit with error
+        (infop.si_code == CLD_KILLED) ||
+        (infop.si_code == CLD_DUMPED) ||
+        (infop.si_code == CLD_TRAPPED)) {
+      _exit(EXIT_FAILURE);
+    }
   }
+
+  // Release ``lock''
+  write(comm_pipe[1], &c, 1);
 
   // Call the overridden handler.
   if ((orig_SIGCHLD_sa.sa_flags | SA_SIGINFO) != 0) {
-    orig_SIGCHLD_sa.sa_sigaction(sig, info, ctx);
-  } else if (orig_SIGCHLD_sa.sa_handler == SIG_DFL) {
-    // SIG_DFL for SIGCHLD is to leave the child as a zombie.. so do thing
-  } else if (orig_SIGCHLD_sa.sa_handler == SIG_IGN) {
-    // SIG_IGN for SIGCHLD is to reap the child and do nothing else.
-    while (waitpid(-1, 0, WNOHANG) > 0) {}
+    // handler is sa_sigaction, this shouldn't really be SIG_IGN or SIG_DFL, but
+    // they happen to be a union, and this fact is apparently used in Python,
+    // so check here.
+    if (orig_SIGCHLD_sa.sa_sigaction == (void (*)(int, siginfo_t *, void *)) SIG_IGN) {
+      // SIG_IGN for SIGCHLD is to reap the child and do nothing else.
+      while (waitpid(-1, 0, WNOHANG) > 0) {}
+    } else if (orig_SIGCHLD_sa.sa_sigaction != (void (*)(int, siginfo_t *, void *)) SIG_DFL) {
+      // SIG_DFL for SIGCHLD is to leave the child as a zombie (do nothing)
+      orig_SIGCHLD_sa.sa_sigaction(sig, info, ctx);
+    }
   } else {
-    orig_SIGCHLD_sa.sa_handler(sig);
+    // handler is sa_handler
+    // https://stackoverflow.com/a/24080440
+    if (orig_SIGCHLD_sa.sa_handler == SIG_IGN) {
+      while (waitpid(-1, 0, WNOHANG) > 0) {}
+    } else if (orig_SIGCHLD_sa.sa_handler != SIG_DFL) {
+      orig_SIGCHLD_sa.sa_handler(sig);
+    }
   }
 }
 
@@ -122,7 +164,9 @@ static int isSIGCHLDHanderSet() {
   }
 }
 
-// We don't want to exit on any SIGCHLD from any child. child_pids is a sequence
+#define SAFECALL(CALL) if ((CALL) == -1) Py_RETURN_FALSE
+
+// We don't want to exit on any SIGCHLD from any child. child_pids is a tuple
 // of pids we are interested in.
 PyObject *THPModule_setMainSignalHandlers(PyObject *module, PyObject *child_pids) {
   HANDLE_TH_ERRORS
@@ -133,22 +177,28 @@ PyObject *THPModule_setMainSignalHandlers(PyObject *module, PyObject *child_pids
   THPUtils_assert(PyTuple_Check(child_pids), "_set_main_signal_handlers_for_workers "
         "expects a tuple, but got %s", THPUtils_typename(child_pids));
 
+  if (comm_pipe[0] == -1) {
+    // we have GIL here so we are fine
+    SAFECALL(pipe(comm_pipe));
+    char c = '_';
+    write(comm_pipe[1], &c, 1);
+  }
+
   auto size = PyTuple_GET_SIZE(child_pids);
   for (int idx = 0; idx < size; idx++) {
     PyObject* obj = PyTuple_GET_ITEM(child_pids, idx);
     worker_pid_vec.push_back((pid_t) THPUtils_unpackLong(obj));
   }
-  updatePIDsArray();
+  SAFECALL(updatePIDsArray());
 
   // To avoid chain calling our handler, check if the current handler is already
   // set as ours.
-  int error = 0;
-  int set = isSIGCHLDHanderSet();
-  error |= set < 0;
+  int set = 0;
+  SAFECALL(set = isSIGCHLDHanderSet());
   if (set == 0) {
-    error |= setSignalHandler(SIGCHLD, &handler_SIGCHLD_main, &orig_SIGCHLD_sa) != 0;
+    SAFECALL(setSignalHandler(SIGCHLD, &handler_SIGCHLD_main, &orig_SIGCHLD_sa));
   }
-  return PyBool_FromLong(!error);
+  Py_RETURN_TRUE;
   END_HANDLE_TH_ERRORS
 }
 
@@ -167,13 +217,12 @@ PyObject *THPModule_removeMainSignalHandlers(PyObject *module, PyObject *child_p
      [&](pid_t p){return pid_set.find(p) != pid_set.end();}), worker_pid_vec.end());
   updatePIDsArray();
 
-  int error = 0;
-  int set = isSIGCHLDHanderSet();
-  error |= set < 0;
+  int set = 0;
+  SAFECALL(set = isSIGCHLDHanderSet());
   if (set == 1) {
-    error |= sigaction(SIGCHLD, &orig_SIGCHLD_sa, NULL) != 0;
+    SAFECALL(sigaction(SIGCHLD, &orig_SIGCHLD_sa, NULL));
   }
-  return PyBool_FromLong(!error);
+  Py_RETURN_TRUE;
   END_HANDLE_TH_ERRORS
 }
 

@@ -281,8 +281,7 @@ class DataLoaderIter(object):
 
     def _remove_handers(self):
         if self.handlers_set:
-            _remove_main_signal_handlers_for_workers(self.worker_pids)
-            self.handlers_set = False
+            self.handlers_set = not _remove_main_signal_handlers_for_workers(self.worker_pids)
 
     def __del__(self):
         if self.num_workers > 0:
