@@ -229,7 +229,7 @@ struct algorithm_search<cudnnConvolutionFwdAlgo_t> {
         conv.odesc.desc,
         out,
         1,
-        &algoCount,
+        &algoCount.get(),
         perfResults,
         ws.data,
         ws.size));
@@ -303,7 +303,7 @@ struct algorithm_search<cudnnConvolutionBwdDataAlgo_t> {
         conv.idesc.desc,
         in,
         1,
-        &algoCount,
+        &algoCount.get(),
         perfResults,
         ws.data,
         ws.size));
@@ -377,7 +377,7 @@ struct algorithm_search<cudnnConvolutionBwdFilterAlgo_t> {
         conv.wdesc.desc,
         wght,
         1,
-        &algoCount,
+        &algoCount.get(),
         perfResults,
         ws.data,
         ws.size));
