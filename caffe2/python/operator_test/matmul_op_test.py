@@ -18,6 +18,8 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
+import inspect
+
 import numpy as np
 
 from hypothesis import assume, given, settings
@@ -177,19 +179,26 @@ class TestBatchMatMul(hu.HypothesisTestCase):
             YY = Y.swapaxes(-1, -2) if trans_b else Y
             return (np.matmul(XX, YY),)
 
+        # relaxing the "threshold" for fp16 to 150x of the default
+        def relax_fp16_check(check_func, *args, **kwargs):
+            # inspect the default "threshold" value in check_func
+            argspec = inspect.getargspec(check_func)
+            threshold = argspec.defaults[
+                argspec.args.index('threshold') -
+                (len(argspec.args) - len(argspec.defaults))]
+
+            if dtype == np.float16:
+                threshold = 150 * threshold
+            check_func(*args, threshold=threshold, **kwargs)
+
         # Check against numpy reference
-        self.assertReferenceChecks(gc, op, [X, Y, trans_a, trans_b], matmul_ref)
+        relax_fp16_check(self.assertReferenceChecks, gc, op, [X, Y, trans_a, trans_b], matmul_ref)
         # Check over multiple devices
-        self.assertDeviceChecks(dc, op, [X, Y], [0])
-
-        kwargs = {}
-        if dtype == np.float16:
-            kwargs['threshold'] = 0.75  # default is 0.005
-
+        relax_fp16_check(self.assertDeviceChecks, dc, op, [X, Y], [0])
         # Gradient check wrt X
-        self.assertGradientChecks(gc, op, [X, Y], 0, [0], **kwargs)
+        relax_fp16_check(self.assertGradientChecks, gc, op, [X, Y], 0, [0])
         # Gradient check wrt Y
-        self.assertGradientChecks(gc, op, [X, Y], 1, [0], **kwargs)
+        relax_fp16_check(self.assertGradientChecks, gc, op, [X, Y], 1, [0])
 
 
 if __name__ == "__main__":
