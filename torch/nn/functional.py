@@ -652,19 +652,15 @@ See :class:`~torch.nn.LeakyReLU` for more details.
 """)
 
 
-# prelu = _add_docstr(torch._C._nn.prelu, r"""
-# prelu(input, weight) -> Variable
-# """)
-def prelu(input, weight):
-    r"""prelu(input, weight) -> Variable
+prelu = _add_docstr(torch._C._nn.prelu, r"""
+prelu(input, weight) -> Variable
 
-    Applies element-wise the function
-    :math:`PReLU(x) = max(0,x) + weight * min(0,x)` where weight is a
-    learnable parameter.
+Applies element-wise the function
+:math:`PReLU(x) = max(0,x) + weight * min(0,x)` where weight is a
+learnable parameter.
 
-    See :class:`~torch.nn.PReLU` for more details.
-    """
-    return _functions.thnn.PReLU.apply(input, weight)
+See :class:`~torch.nn.PReLU` for more details.
+""")
 
 
 rrelu = _add_docstr(torch._C._nn.rrelu, r"""
