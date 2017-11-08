@@ -74,9 +74,14 @@ static inline ${return_type} ${api_name}(${formals}) {
 # implementation of ${api_name} if we have overloaded a function with
 # the same name (but different signature) already
 ZERO_DIM_CHECK = CodeTemplate("""\
-if(${check_name}.dim() == 0) {
+if (${check_name}.dim() == 0) {
     return static_cast<const Type*>(this)->${method_prefix}${api_name}(${zero_dim_actuals});
 }""")
+
+ZERO_DIM_ONLY = CodeTemplate("""\
+runtime_error("${api_name} only supports a 0-dimensional ${check_name} tensor, but got tensor "
+    "with %" PRId64 " dimension(s)", ${check_name}.dim());
+""")
 
 SPARSE_CHECK = CodeTemplate("""\
 if(${check_name}.type().isSparse()) {
@@ -136,8 +141,8 @@ TYPE_RETURN = {
     'THIndexTensor*': 'Tensor',
     'THBoolTensor*': 'Tensor',
     'THIntegerTensor*': 'Tensor',
-    'real': 'Scalar',
-    'accreal': 'Scalar',
+    'real': 'Tensor',
+    'accreal': 'Tensor',
     'long': 'int64_t',
 }
 
@@ -710,14 +715,24 @@ def create_derived(backend_type_env, declarations):
             return backend_type_env['AccScalarName'] == 'Long'
         return False
 
+    def get_zero_dim_dispatch_when_scalar(option):
+        return option.get('zero_dim_dispatch_when_scalar', False)
+
     def handle_zero_dim(env, option):
-        if 'zero_dim_dispatch_when_scalar' not in option:
+        zero_dim_dispatch = get_zero_dim_dispatch_when_scalar(option)
+        if not zero_dim_dispatch:
             return []
-        check_name = option['zero_dim_dispatch_when_scalar']
         zero_dim_actuals = [arg['name']
-                            if arg['name'] != check_name else "Scalar({})".format(arg['name'])
+                            if arg['name'] != zero_dim_dispatch else "Scalar({})".format(arg['name'])
                             for arg in option['formals_list']]
-        return [ZERO_DIM_CHECK.substitute(env, check_name=check_name, zero_dim_actuals=zero_dim_actuals)]
+        return [ZERO_DIM_CHECK.substitute(env, check_name=zero_dim_dispatch, zero_dim_actuals=zero_dim_actuals)]
+
+    def handle_only_zero_dim(env, option):
+        if option.get('zero_dim_tensor_only', False):
+            check_name = get_zero_dim_dispatch_when_scalar(option)
+            return [ZERO_DIM_ONLY.substitute(env, check_name=check_name)]
+        else:
+            return None
 
     def handle_sparse(env, option):
         if 'when_sparse_dispatch' not in option or 'Sparse' in backend_type_env['Backend']:
@@ -781,6 +796,12 @@ def create_derived(backend_type_env, declarations):
         body = []
         body += handle_sparse(env, option)
         body += handle_zero_dim(env, option)
+        only_zero_dim_check = handle_only_zero_dim(env, option)
+        if only_zero_dim_check is not None:
+            #  code below only_zero_dim_check is unreachable so we do not need to generate the rest.
+            body += only_zero_dim_check
+            return body
+
         body += handle_buffers(env, option)
         # arguments are potentially duplicated because of one argument
         # referencing another
@@ -933,6 +954,10 @@ def create_derived(backend_type_env, declarations):
                 return_tensor = "return Tensor((new ${Tensor}(context,${arg_name}))${maybe_scalar},false);"
                 body.append(CodeTemplate(return_tensor).substitute(
                     env, arg_name=call, maybe_scalar=maybe_scalar))
+            # return the same underlying Tensor type for both real and accreal; this ensures
+            # e.g. x.sum(0) and x.sum() return the same type.
+            elif ret['type'] == 'accreal' or ret['type'] == 'real':
+                body.append('return scalarTensor({});'.format(call))
             else:
                 # we using int64_t for long in the API, so correct it here...
                 if is_actual_return_long(ret):

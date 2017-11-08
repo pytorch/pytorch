@@ -105,7 +105,7 @@ int main() {
   auto t = CPU(Float).ones({4,4});
 
   auto wha2 = CPU(Float).zeros({4,4}).add(t).sum();
-  cout << wha2.toDouble() << " <-ndim\n";
+  cout << wha2.toCDouble() << " <-ndim\n";
 
   cout << t.sizes() << " " << t.strides() << "\n";
 
@@ -143,6 +143,18 @@ int main() {
   ASSERT(Scalar(CPU(kFloat).ones({})).toTensor().type().scalarType() == kFloat);
 
   dispatch<Foo>(x.type(),x,prev_h);
+
+  // test direct C-scalar type conversions
+  try {
+    auto x = T.ones({1,2});
+    x.toCFloat();
+    ASSERT(false);
+  } catch (std::runtime_error &e) {}
+  auto float_one = T.ones({});
+  ASSERT(float_one.toCFloat() == 1);
+  ASSERT(float_one.toCInt() == 1);
+  ASSERT(float_one.toCHalf() == 1);
+
   return 0;
 
 }

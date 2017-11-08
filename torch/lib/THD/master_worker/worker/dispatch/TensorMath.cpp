@@ -407,13 +407,13 @@ static void tensorNormall(rpc::RPCMessage& raw_message) {
     int64_t value = (int64_t) unpackInteger(raw_message);
     finalize(raw_message);
 
-    int64_t response = r.norm(value).toLong();
+    int64_t response = r.norm(value).toCLong();
     sendValueToMaster(response);
   } else if (at::isFloatingType(r.type().scalarType())) {
     double value = unpackFloat(raw_message);
     finalize(raw_message);
 
-    double response = r.norm(value).toDouble();
+    double response = r.norm(value).toCDouble();
     sendValueToMaster(response);
   } else {
     throw std::invalid_argument("expected scalar type");
@@ -450,13 +450,13 @@ static void tensorDist(rpc::RPCMessage& raw_message) {
     int64_t value = (int64_t) unpackInteger(raw_message);
     finalize(raw_message);
 
-    int64_t response = src.dist(tensor, value).toLong();
+    int64_t response = src.dist(tensor, value).toCLong();
     sendValueToMaster(response);
   } else if (at::isFloatingType(tensor.type().scalarType())) {
     double value = unpackFloat(raw_message);
     finalize(raw_message);
 
-    double response = src.dist(tensor, value).toDouble();
+    double response = src.dist(tensor, value).toCDouble();
     sendValueToMaster(response);
   } else {
     throw std::invalid_argument("expected scalar type");
@@ -468,10 +468,10 @@ static void tensorMeanall(rpc::RPCMessage& raw_message) {
   finalize(raw_message);
 
   if (at::isIntegralType(tensor.type().scalarType())) {
-    int64_t response = tensor.mean().toLong();
+    int64_t response = tensor.mean().toCLong();
     sendValueToMaster(response);
   } else if (at::isFloatingType(tensor.type().scalarType())) {
-    double response = tensor.mean().toLong();
+    double response = tensor.mean().toCLong();
     sendValueToMaster(response);
   } else {
     throw std::invalid_argument("expected scalar type");
@@ -484,10 +484,10 @@ static void tensorVarall(rpc::RPCMessage& raw_message) {
   finalize(raw_message);
 
   if (at::isIntegralType(tensor.type().scalarType())) {
-    int64_t response = tensor.var((bool)biased).toLong();
+    int64_t response = tensor.var((bool)biased).toCLong();
     sendValueToMaster(response);
   } else if (at::isFloatingType(tensor.type().scalarType())) {
-    double response = tensor.var((bool)biased).toDouble();
+    double response = tensor.var((bool)biased).toCDouble();
     sendValueToMaster(response);
   } else {
     throw std::invalid_argument("expected scalar type");
@@ -500,10 +500,10 @@ static void tensorStdall(rpc::RPCMessage& raw_message) {
   finalize(raw_message);
 
   if (at::isIntegralType(tensor.type().scalarType())) {
-    int64_t response = tensor.std((bool)biased).toLong();
+    int64_t response = tensor.std((bool)biased).toCLong();
     sendValueToMaster(response);
   } else if (at::isFloatingType(tensor.type().scalarType())) {
-    double response = tensor.std((bool)biased).toDouble();
+    double response = tensor.std((bool)biased).toCDouble();
     sendValueToMaster(response);
   } else {
     throw std::invalid_argument("expected scalar type");

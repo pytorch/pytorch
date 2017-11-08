@@ -82,7 +82,7 @@ void APMeter::value(Tensor& val) {
          if(targetbuffer_d[n] != 0.)
             val_d[k] += precision_d[n];
       }
-      auto norm = sum(targetbuffer).toDouble();
+      auto norm = sum(targetbuffer).toCDouble();
       if(norm > 0)
         val_d[k] /= norm;
    }

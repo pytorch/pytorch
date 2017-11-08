@@ -392,10 +392,10 @@ static void tensorDot(rpc::RPCMessage& raw_message) {
   finalize(raw_message);
 
   if (at::isIntegralType(tensor.type().scalarType())) {
-    int64_t value = tensor.dot(src).toLong();
+    int64_t value = tensor.dot(src).toCLong();
     sendValueToMaster(value);
   } else if (at::isFloatingType(tensor.type().scalarType())) {
-    double value = tensor.dot(src).toDouble();
+    double value = tensor.dot(src).toCDouble();
     sendValueToMaster(value);
   } else {
     throw std::invalid_argument("expected scalar type");
@@ -407,10 +407,10 @@ static void tensorMinall(rpc::RPCMessage& raw_message) {
   finalize(raw_message);
 
   if (at::isIntegralType(tensor.type().scalarType())) {
-    int64_t value = tensor.min().toLong();
+    int64_t value = tensor.min().toCLong();
     sendValueToMaster(value);
   } else if (at::isFloatingType(tensor.type().scalarType())) {
-    double value = tensor.min().toDouble();
+    double value = tensor.min().toCDouble();
     sendValueToMaster(value);
   } else {
     throw std::invalid_argument("expected scalar type");
@@ -422,10 +422,10 @@ static void tensorMaxall(rpc::RPCMessage& raw_message) {
   finalize(raw_message);
 
   if (at::isIntegralType(tensor.type().scalarType())) {
-    int64_t value = tensor.max().toLong();
+    int64_t value = tensor.max().toCLong();
     sendValueToMaster(value);
   } else if (at::isFloatingType(tensor.type().scalarType())) {
-    double value = tensor.max().toDouble();
+    double value = tensor.max().toCDouble();
     sendValueToMaster(value);
   } else {
     throw std::invalid_argument("expected scalar type");
@@ -437,10 +437,10 @@ static void tensorMedianall(rpc::RPCMessage& raw_message) {
   finalize(raw_message);
 
   if (at::isIntegralType(tensor.type().scalarType())) {
-    int64_t value = tensor.median().toLong();
+    int64_t value = tensor.median().toCLong();
     sendValueToMaster(value);
   } else if (at::isFloatingType(tensor.type().scalarType())) {
-    double value = tensor.median().toDouble();
+    double value = tensor.median().toCDouble();
     sendValueToMaster(value);
   } else {
     throw std::invalid_argument("expected scalar type");
@@ -452,10 +452,10 @@ static void tensorSumall(rpc::RPCMessage& raw_message) {
   finalize(raw_message);
 
   if (at::isIntegralType(tensor.type().scalarType())) {
-    int64_t value = tensor.sum().toLong();
+    int64_t value = tensor.sum().toCLong();
     sendValueToMaster(value);
   } else if (at::isFloatingType(tensor.type().scalarType())) {
-    double value = tensor.sum().toDouble();
+    double value = tensor.sum().toCDouble();
     sendValueToMaster(value);
   } else {
     throw std::invalid_argument("expected scalar type");
@@ -467,10 +467,10 @@ static void tensorProdall(rpc::RPCMessage& raw_message) {
   finalize(raw_message);
 
   if (at::isIntegralType(tensor.type().scalarType())) {
-    int64_t value = tensor.prod().toLong();
+    int64_t value = tensor.prod().toCLong();
     sendValueToMaster(value);
   } else if (at::isFloatingType(tensor.type().scalarType())) {
-    double value = tensor.prod().toDouble();
+    double value = tensor.prod().toCDouble();
     sendValueToMaster(value);
   } else {
     throw std::invalid_argument("expected scalar type");
@@ -912,10 +912,10 @@ static void tensorTrace(rpc::RPCMessage& raw_message) {
   finalize(raw_message);
 
   if (at::isIntegralType(tensor.type().scalarType())) {
-    int64_t value = tensor.trace().toLong();
+    int64_t value = tensor.trace().toCLong();
     sendValueToMaster(value);
   } else if (at::isFloatingType(tensor.type().scalarType())) {
-    double value = tensor.trace().toDouble();
+    double value = tensor.trace().toCDouble();
     sendValueToMaster(value);
   } else {
     throw std::invalid_argument("expected scalar type");

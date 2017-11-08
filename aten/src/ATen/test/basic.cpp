@@ -33,11 +33,11 @@ static void test(Type & type) {
     std::cout << "ones and dot:" << std::endl;
     Tensor b = type.ones({3, 4});
     std::cout << b << std::endl;
-    ASSERT(24 == (b+b).sum().toDouble());
+    ASSERT(24 == (b+b).sum().toCDouble());
     std::cout << b.numel() << std::endl;
     ASSERT(12 == b.numel());
     std::cout << b.dot(b) << std::endl;
-    ASSERT(b.dot(b).toDouble() == 12);
+    ASSERT(b.dot(b).toCDouble() == 12);
   }
 
   {
@@ -97,8 +97,8 @@ static void test(Type & type) {
     }
     auto end = std::chrono::high_resolution_clock::now();
     std::cout << std::dec << "   " << std::chrono::duration_cast<std::chrono::milliseconds>(end-begin).count() << " ms" << std::endl;
-    ASSERT(norm(100000*d).toDouble() == norm(r).toDouble());
-    std::cout << "   norm: " << norm(r).toDouble() << std::endl;
+    ASSERT(norm(100000*d).toCDouble() == norm(r).toCDouble());
+    std::cout << "   norm: " << norm(r).toCDouble() << std::endl;
   }
 
   {
@@ -111,8 +111,8 @@ static void test(Type & type) {
     }
     auto end = std::chrono::high_resolution_clock::now();
     std::cout << std::dec << "   " << std::chrono::duration_cast<std::chrono::milliseconds>(end-begin).count() << " ms" << std::endl;
-    ASSERT(norm(100000*d).toDouble() == norm(r).toDouble());
-    std::cout << "   norm: " << norm(r).toDouble() << std::endl;
+    ASSERT(norm(100000*d).toCDouble() == norm(r).toCDouble());
+    std::cout << "   norm: " << norm(r).toCDouble() << std::endl;
   }
 
   {
@@ -247,7 +247,7 @@ static void test(Type & type) {
       std::cout << c << std::endl;
 
       Tensor e = CPU(kFloat).rand({});
-      ASSERT(*e.data<float>()== e.sum().toFloat());
+      ASSERT(*e.data<float>()== e.sum().toCFloat());
   }
   {
     Tensor b = CPU(kFloat).ones({3,7})*.0000001f;
