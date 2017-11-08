@@ -4,6 +4,7 @@ import torch
 import traceback
 import unittest
 from torch.utils.data import Dataset, TensorDataset, DataLoader, ConcatDataset
+from torch.utils.data.dataloader import default_collate
 from common import TestCase, run_tests, TEST_NUMPY
 from common_nn import TEST_CUDA
 
@@ -275,6 +276,23 @@ class TestDataLoader(TestCase):
             loader = DataLoader(dset, batch_size=2)
             batch = next(iter(loader))
             self.assertIsInstance(batch, tt)
+
+    @unittest.skipIf(not TEST_NUMPY, "numpy unavailable")
+    def test_default_colate_bad_numpy_types(self):
+        import numpy as np
+
+        # Should be a no-op
+        arr = np.array(['a', 'b', 'c'])
+        default_collate(arr)
+
+        arr = np.array([[['a', 'b', 'c']]])
+        self.assertRaises(TypeError, lambda: default_collate(arr))
+
+        arr = np.array([object(), object(), object()])
+        self.assertRaises(TypeError, lambda: default_collate(arr))
+
+        arr = np.array([[[object(), object(), object()]]])
+        self.assertRaises(TypeError, lambda: default_collate(arr))
 
 
 class StringDataset(Dataset):
