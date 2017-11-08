@@ -381,7 +381,7 @@ struct algorithm_search<cudnnConvolutionBwdFilterAlgo_t> {
         perfResults.get(),
         ws.data,
         ws.size));
-    return best_algo = getBestAlgorithm<cudnnConvolutionBwdFilterAlgoPerf_t>(perfResults.get(), deterministic, n_algo);
+    return getBestAlgorithm<cudnnConvolutionBwdFilterAlgoPerf_t>(perfResults.get(), deterministic, n_algo);
   }
 
   static void getAlgorithm(
