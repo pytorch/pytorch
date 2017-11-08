@@ -131,6 +131,10 @@ struct Tensor : public detail::TensorBase {
   Tensor& operator/=(Scalar other);
   Tensor operator[](int64_t idx) const;
 
+  // STOP.  Thinking of adding a method here, which only makes use
+  // of other ATen methods?  Define it in ATen/NativeFunctions.h
+  // instead.
+
   //example
   //Tensor * add(Tensor & b);
   ${tensor_method_declarations}
