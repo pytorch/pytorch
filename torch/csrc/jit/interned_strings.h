@@ -75,7 +75,53 @@ _(shape) \
 _(axes) \
 _(group) \
 _(inplace) \
-_(other)
+_(other) \
+_(__and__) \
+_(__lshift__) \
+_(__or__) \
+_(__rshift__) \
+_(__xor__) \
+_(abs) \
+_(acos) \
+_(asin) \
+_(atan) \
+_(atan2) \
+_(ceil) \
+_(clamp) \
+_(cos) \
+_(cosh) \
+_(div) \
+_(eq) \
+_(equal) \
+_(exp) \
+_(floor) \
+_(fmod) \
+_(frac) \
+_(ge) \
+_(gt) \
+_(le) \
+_(lerp) \
+_(lgamma) \
+_(log) \
+_(log1p) \
+_(lt) \
+_(max) \
+_(min) \
+_(ne) \
+_(ones) \
+_(pow) \
+_(reciprocal) \
+_(remainder) \
+_(round) \
+_(rsqrt) \
+_(sin) \
+_(sinh) \
+_(sqrt) \
+_(sub) \
+_(tan) \
+_(trunc) \
+_(zeros) \
+_(exponent)
 
 enum BuiltinSymbol {
   #define DEFINE_SYMBOL(s) \
