@@ -3903,27 +3903,6 @@
         - BackendDoubleTensor* float_p
 ]]
 [[
-  name: size
-  return: int64_t
-  cpu_half: True
-  arguments:
-    - THTensor* self
-    - arg: int64_t dim
-      wrap_dim: self
-]]
-
-[[
-  name: stride
-  return: int64_t
-  cpu_half: True
-  arguments:
-    - THTensor* self
-    - arg: int64_t dim
-      wrap_dim: self
-]]
-
-
-[[
   name: tensor
   return: THTensor*
   cpu_half: True
