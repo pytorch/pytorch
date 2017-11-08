@@ -19,12 +19,8 @@ if not torch.cuda.is_available():
 
 HAS_MAGMA = HAS_CUDA
 if HAS_CUDA:
-    try:
-        x = torch.ones(1, 1).cuda()
-        x.symeig()
-    except RuntimeError as err:
-        if re.search("No CUDA implementation of '\w+'. Install MAGMA and", str(err)) is not None:
-            HAS_MAGMA = False
+    torch.ones(1).cuda()  # has_magma shows up after cuda is initialized
+    HAS_MAGMA = torch.cuda.has_magma
 
 
 def is_floating(t):
