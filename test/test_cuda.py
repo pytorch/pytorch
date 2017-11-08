@@ -1,5 +1,6 @@
 import math
 import tempfile
+import re
 import unittest
 from itertools import repeat
 
@@ -15,6 +16,15 @@ if not torch.cuda.is_available():
     print('CUDA not available, skipping tests')
     TestCase = object  # noqa: F811
     HAS_CUDA = False
+
+HAS_MAGMA = HAS_CUDA
+if HAS_CUDA:
+    try:
+        x = torch.ones(1, 1).cuda()
+        x.symeig()
+    except RuntimeError as err:
+        if re.search("No CUDA implementation of '\w+'. Install MAGMA and", str(err)) is not None:
+            HAS_MAGMA = False
 
 
 def is_floating(t):
@@ -1019,6 +1029,20 @@ class TestCuda(TestCase):
         # Stability for outer dimensions
         tensor = tensor.unsqueeze(1)
         self.assertEqual(tensor.var(0)[0], 0.03125)
+
+    @unittest.skipIf(not HAS_MAGMA, "no MAGMA library detected")
+    def test_symeig(self):
+        # Small case
+        tensor = torch.randn(3, 3).cuda()
+        tensor = torch.mm(tensor, tensor.t())
+        eigval, eigvec = torch.symeig(tensor, eigenvectors=True)
+        self.assertEqual(tensor, torch.mm(torch.mm(eigvec, eigval.diag()), eigvec.t()))
+
+        # Large case
+        tensor = torch.randn(257, 257).cuda()
+        tensor = torch.mm(tensor, tensor.t())
+        eigval, eigvec = torch.symeig(tensor, eigenvectors=True)
+        self.assertEqual(tensor, torch.mm(torch.mm(eigvec, eigval.diag()), eigvec.t()))
 
     def test_arange(self):
         for t in ['IntTensor', 'LongTensor', 'FloatTensor', 'DoubleTensor']:
