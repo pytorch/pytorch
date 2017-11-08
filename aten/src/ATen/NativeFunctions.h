@@ -5,8 +5,49 @@
 #include "ATen/ExpandUtils.h"
 #include <vector>
 
+/**
+ * ATen native functions are ways to write ATen methods which make only
+ * make use of other ATen operations (e.g., it is not necessary to
+ * bind into TH/THC code or drop into CUDA kernels.)  These functions
+ * are written as both functions as well as cwrap fragments, which are
+ * then folded into the ATen code generation process; define a function
+ * here, and it will show up as a method on at::Tensor.
+ *
+ * At the moment, only type_method_definition_level: base is supported.
+ */
+
 namespace at {
 namespace native {
+
+/*
+[NativeFunction]
+name: type_as
+arg: Tensor self
+arg: Tensor other
+return: Tensor
+variants: method, function
+type_method_definition_level: base
+type_method_definition_dispatch: at::native::type_as
+[/NativeFunction]
+*/
+static inline Tensor type_as(const Tensor &self, const Tensor &other) {
+  return self.toType(other.type());;
+}
+
+/*
+[NativeFunction]
+name: expand_as
+arg: Tensor self
+arg: Tensor other
+return: Tensor
+variants: method, function
+type_method_definition_level: base
+type_method_definition_dispatch: at::native::expand_as
+[/NativeFunction]
+*/
+static inline Tensor expand_as(const Tensor &self, const Tensor &other) {
+  return self.expand(other.sizes());
+}
 
 /*
 [NativeFunction]
