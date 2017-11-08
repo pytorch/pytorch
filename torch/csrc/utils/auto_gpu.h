@@ -18,7 +18,7 @@ struct AutoGPU {
   }
 
   explicit AutoGPU(const at::Tensor& t) {
-    setDevice(t.type().isCuda() ? t.get_device() : -1);
+    setDevice(t.type().isCuda() ? (int) t.get_device() : -1);
   }
 
   explicit AutoGPU(at::TensorList &tl) {

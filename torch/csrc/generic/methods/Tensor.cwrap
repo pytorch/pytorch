@@ -37,7 +37,7 @@ static PyObject * THPTensor_(storage)(THPTensor *self, PyObject *args)
   python_name: storage_offset
   cpu_half: True
   auto_gpu: False
-  return: long
+  return: int64_t
   arguments:
     - THTensor* self
 ]]
@@ -47,7 +47,7 @@ static PyObject * THPTensor_(storage)(THPTensor *self, PyObject *args)
   python_name: ndimension
   cpu_half: True
   auto_gpu: False
-  return: long
+  return: int64_t
   arguments:
     - THTensor* self
 ]]
@@ -171,7 +171,7 @@ PyObject * THPTensor_(setIndex)(THPTensor *self, PyObject *args)
 
 [[
   name: numel
-  return: long
+  return: int64_t
   cname: nElement
   cpu_half: True
   auto_gpu: False
@@ -217,7 +217,7 @@ PyObject * THPTensor_(setIndex)(THPTensor *self, PyObject *args)
       arguments:
         - THTensor* self
         - THStorage* sourceStorage
-        - long storage_offset
+        - int64_t storage_offset
         - THSize* size
         - arg: THStride* stride
           default: NULL
@@ -233,8 +233,8 @@ PyObject * THPTensor_(setIndex)(THPTensor *self, PyObject *args)
 static PyObject * THPTensor_(select)(THPTensor *self, PyObject *args)
 {
   HANDLE_TH_ERRORS
-  long dim, idx;
-  if (!PyArg_ParseTuple(args, "ll", &dim, &idx))
+  int64_t dim, idx;
+  if (!PyArg_ParseTuple(args, "LL", &dim, &idx))
     return NULL;
 
   int ndim = THTensor_(nDimension)(LIBRARY_STATE self->cdata);
@@ -246,7 +246,7 @@ static PyObject * THPTensor_(select)(THPTensor *self, PyObject *args)
 
   if(ndim > 1) {
     THTensorPtr selected(THTensor_(newWithTensor)(LIBRARY_STATE self->cdata));
-    THTensor_(select)(LIBRARY_STATE selected.get(), NULL, dim, idx);
+    THTensor_(select)(LIBRARY_STATE selected.get(), NULL, (int) dim, idx);
     return THPTensor_(New)(selected.release());
   }
   else {
@@ -264,8 +264,8 @@ PyObject * THPTensor_(size)(PyObject *self, PyObject *args, PyObject *kwargs)
     return THPSize_New(tensor->nDimension, tensor->size);
   }
 
-  int tuplecount = args ? PyTuple_Size(args) : 0;
-  int dictcount = kwargs ? PyDict_Size(kwargs) : 0;
+  int tuplecount = args ? (int) PyTuple_Size(args) : 0;
+  int dictcount = kwargs ? (int) PyDict_Size(kwargs) : 0;
 
   PyObject* pydim = NULL;
   if (tuplecount == 1 && dictcount == 0) {
@@ -306,8 +306,8 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
     return stride;
   }
 
-  int tuplecount = args ? PyTuple_Size(args) : 0;
-  int dictcount = kwargs ? PyDict_Size(kwargs) : 0;
+  int tuplecount = args ? (int) PyTuple_Size(args) : 0;
+  int dictcount = kwargs ? (int) PyDict_Size(kwargs) : 0;
 
   PyObject* pydim = NULL;
   if (tuplecount == 1 && dictcount == 0) {
@@ -427,9 +427,9 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
   return: THTensor*
   arguments:
     - THTensor* self
-    - arg: long dim0
+    - arg: int64_t dim0
       wrap_dim: self
-    - arg: long dim1
+    - arg: int64_t dim1
       wrap_dim: self
 ]]
 
@@ -442,9 +442,9 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
   arguments:
     - THTensor* self
     - THTensor* self
-    - arg: long dim0
+    - arg: int64_t dim0
       wrap_dim: self
-    - arg: long dim1
+    - arg: int64_t dim1
       wrap_dim: self
 ]]
 
@@ -457,7 +457,7 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
   cname: newTranspose
   return: THTensor*
   before_call: |
-    long ndim = arg_self->nDimension;
+    int64_t ndim = arg_self->nDimension;
     THPUtils_assert(ndim == 2, "t() expects a 2D tensor, but self is %ldD", ndim);
   arguments:
     - THTensor* self
@@ -471,7 +471,7 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
   auto_gpu: False
   return: self
   before_call: |
-    long ndim = arg_self->nDimension;
+    int64_t ndim = arg_self->nDimension;
     THPUtils_assert(ndim == 2, "t_() expects a 2D tensor, but self is %ldD", ndim);
   arguments:
     - THTensor* self
@@ -497,7 +497,7 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
         - arg: THTensor* result
           output: True
         - THTensor* self
-        - arg: long dim
+        - arg: int64_t dim
           wrap_dim: self
 ]]
 
@@ -514,7 +514,7 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
       arguments:
         - THTensor* self
         - THTensor* self
-        - arg: long dim
+        - arg: int64_t dim
           wrap_dim: self
 ]]
 
@@ -531,7 +531,7 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
     - arg: THTensor* result
       output: True
     - THTensor* self
-    - arg: long dim
+    - arg: int64_t dim
       wrap_dim: self+1
 ]]
 
@@ -544,7 +544,7 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
   arguments:
     - THTensor* self
     - THTensor* self
-    - arg: long dim
+    - arg: int64_t dim
       wrap_dim: self+1
 ]]
 
@@ -619,7 +619,7 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
     - arg: THTensor* result
       output: True
     - THTensor* self
-    - arg: long dim
+    - arg: int64_t dim
       wrap_dim: self
     - THIndexTensor* index
 ]]
@@ -631,7 +631,7 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
   return: argument 0
   arguments:
     - THTensor* self
-    - arg: long dim
+    - arg: int64_t dim
       wrap_dim: self
     - THIndexTensor* index
     - THTensor* source
@@ -670,7 +670,7 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
   return: argument 0
   arguments:
     - THTensor* self
-    - arg: long dim
+    - arg: int64_t dim
       wrap_dim: self
     - THIndexTensor* index
     - THTensor* source
@@ -683,7 +683,7 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
   return: argument 0
   arguments:
     - THTensor* self
-    - arg: long dim
+    - arg: int64_t dim
       wrap_dim: self
     - THIndexTensor* index
     - real value
@@ -698,10 +698,10 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
     - arg: THTensor* result
       output: True
     - THTensor* self
-    - arg: long dimension
+    - arg: int64_t dimension
       wrap_dim: self
-    - long start
-    - long length
+    - int64_t start
+    - int64_t length
 ]]
 
 [[
@@ -713,10 +713,10 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
     - arg: THTensor* result
       output: True
     - THTensor* self
-    - arg: long dimension
+    - arg: int64_t dimension
       wrap_dim: self
-    - long size
-    - long step
+    - int64_t size
+    - int64_t step
 ]]
 
 [[
@@ -776,14 +776,14 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
     - cname: scatter
       arguments:
         - THTensor* self
-        - arg: long dim
+        - arg: int64_t dim
           wrap_dim: self
         - THIndexTensor* index
         - THTensor* src
     - cname: scatterFill
       arguments:
         - THTensor* self
-        - arg: long dim
+        - arg: int64_t dim
           wrap_dim: self
         - THIndexTensor* index
         - real value
@@ -796,7 +796,7 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
     - cname: scatterAdd
       arguments:
         - THTensor* self
-        - arg: long dim
+        - arg: int64_t dim
           wrap_dim: self
         - THIndexTensor* index
         - THTensor* src
@@ -816,7 +816,7 @@ PyObject * THPTensor_(stride)(PyObject *self, PyObject *args, PyObject *kwargs)
       output: True
       resize: index
     - THTensor* self
-    - arg: long dim
+    - arg: int64_t dim
       wrap_dim: self
     - THIndexTensor* index
 ]]
@@ -838,15 +838,15 @@ static PyObject * THPTensor_stateless_(cat)(THPTensor *_unused, PyObject *args, 
 #endif
   static char* argnames[] = { "seq", "dim", "out", NULL };
   PyObject *_seq = NULL;
-  long dim = 0;
-  PyObject *__out = NULL;
+  int dim = 0;
+  PyObject *___out = NULL;
 
   THPObjectPtr sequence;
   std::vector<THTensor *> tensors;
   THPTensorPtr result;
   Py_ssize_t len;
 
-  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "O|lO", argnames, &_seq, &dim, &__out)) {
+  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "O|iO", argnames, &_seq, &dim, &___out)) {
     goto invalid_arguments;
   }
 
@@ -859,12 +859,12 @@ static PyObject * THPTensor_stateless_(cat)(THPTensor *_unused, PyObject *args, 
   len = PySequence_Fast_GET_SIZE(sequence.get());
   THPUtils_assert(len > 0, "seq can't be empty");
 
-  if (__out && __out != Py_None) {
-    if (!THPTensor_(Check)(__out)) {
+  if (___out && ___out != Py_None) {
+    if (!THPTensor_(Check)(___out)) {
       goto invalid_arguments;
     }
-    Py_INCREF(__out);
-    result = (THPTensor *)__out;
+    Py_INCREF(___out);
+    result = (THPTensor *)___out;
   } else {
     result = (THPTensor *)THPTensor_(NewEmpty)();
     if (!result) return NULL;
@@ -892,7 +892,7 @@ static PyObject * THPTensor_stateless_(cat)(THPTensor *_unused, PyObject *args, 
   __autogpu_guard.setDevice(THTensor_(getDevice)(LIBRARY_STATE tensors[0]));
 #endif
 
-  THTensor_(catArray)(LIBRARY_STATE result->cdata, tensors.data(), tensors.size(), dim);
+  THTensor_(catArray)(LIBRARY_STATE result->cdata, tensors.data(), (int) tensors.size(), dim);
   return (PyObject*)result.release();
 
 invalid_arguments:

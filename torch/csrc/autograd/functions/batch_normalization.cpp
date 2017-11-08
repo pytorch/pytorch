@@ -19,7 +19,7 @@ extern THCState* state;
 #endif
 
 namespace {
-    void check_dims_match_num_input_features(const std::string& arg_name, long expected, long actual){
+    void check_dims_match_num_input_features(const std::string& arg_name, int64_t expected, int64_t actual){
       if (actual != expected){
         std::stringstream ss;
         ss << arg_name << " should contain " << expected << " elements not " << actual ;

@@ -462,7 +462,7 @@
         - arg: THIndexTensor* min_indices
           output: True
         - THTensor* self
-        - arg: long dim
+        - arg: int64_t dim
           wrap_dim: self
         - bool keepdim
     - cname: min
@@ -474,7 +474,7 @@
         - arg: THIndexTensor* min_indices
           output: True
         - THTensor* self
-        - arg: long dim
+        - arg: int64_t dim
           wrap_dim: self
         - CONSTANT false
 ]]
@@ -505,7 +505,7 @@
         - arg: THIndexTensor* max_indices
           output: True
         - THTensor* self
-        - arg: long dim
+        - arg: int64_t dim
           wrap_dim: self
         - bool keepdim
     - cname: max
@@ -517,7 +517,7 @@
         - arg: THIndexTensor* max_indices
           output: True
         - THTensor* self
-        - arg: long dim
+        - arg: int64_t dim
           wrap_dim: self
         - CONSTANT false
 ]]
@@ -531,18 +531,18 @@
     - function
   return: argument 0,1
   options:
-    - before_call: long __last_dim = THTensor_(nDimension)(LIBRARY_STATE ((THPTensor*)$arg2)->cdata)-1;
+    - before_call: int64_t __last_dim = THTensor_(nDimension)(LIBRARY_STATE ((THPTensor*)$arg2)->cdata)-1;
       arguments:
         - arg: THTensor* values
           output: True
         - arg: THIndexTensor* indices
           output: True
         - THTensor* self
-        - long k
+        - int64_t k
         - CONSTANT __last_dim
         - bool keepdim
     - before_call: |
-        long __last_dim = THTensor_(nDimension)(LIBRARY_STATE ((THPTensor*)$arg2)->cdata)-1;
+        int64_t __last_dim = THTensor_(nDimension)(LIBRARY_STATE ((THPTensor*)$arg2)->cdata)-1;
         maybeThrowBackCompatKeepdimWarn("kthvalue");
       arguments:
         - arg: THTensor* values
@@ -550,7 +550,7 @@
         - arg: THIndexTensor* indices
           output: True
         - THTensor* self
-        - long k
+        - int64_t k
         - CONSTANT __last_dim
         - CONSTANT false
     - arguments:
@@ -559,8 +559,8 @@
         - arg: THIndexTensor* indices
           output: True
         - THTensor* self
-        - long k
-        - arg: long dim
+        - int64_t k
+        - arg: int64_t dim
           wrap_dim: self
         - bool keepdim
     - before_call: maybeThrowBackCompatKeepdimWarn("kthvalue");
@@ -570,8 +570,8 @@
         - arg: THIndexTensor* indices
           output: True
         - THTensor* self
-        - long k
-        - arg: long dim
+        - int64_t k
+        - arg: int64_t dim
           wrap_dim: self
         - CONSTANT false
 ]]
@@ -583,7 +583,7 @@
     - function
   return: argument 0,1
   options:
-    - before_call: long __last_dim = THTensor_(nDimension)(LIBRARY_STATE ((THPTensor*)$arg2)->cdata)-1;
+    - before_call: int64_t __last_dim = THTensor_(nDimension)(LIBRARY_STATE ((THPTensor*)$arg2)->cdata)-1;
       arguments:
         - arg: THTensor* values
           output: True
@@ -593,7 +593,7 @@
         - CONSTANT __last_dim
         - bool keepdim
     - before_call: |
-        long __last_dim = THTensor_(nDimension)(LIBRARY_STATE ((THPTensor*)$arg2)->cdata)-1;
+        int64_t __last_dim = THTensor_(nDimension)(LIBRARY_STATE ((THPTensor*)$arg2)->cdata)-1;
         maybeThrowBackCompatKeepdimWarn("mode");
       arguments:
         - arg: THTensor* values
@@ -609,7 +609,7 @@
         - arg: THIndexTensor* indices
           output: True
         - THTensor* self
-        - arg: long dim
+        - arg: int64_t dim
           wrap_dim: self
         - bool keepdim
     - before_call: maybeThrowBackCompatKeepdimWarn("mode");
@@ -619,7 +619,7 @@
         - arg: THIndexTensor* indices
           output: True
         - THTensor* self
-        - arg: long dim
+        - arg: int64_t dim
           wrap_dim: self
         - CONSTANT false
 ]]
@@ -636,7 +636,7 @@
       arguments:
         - THTensor* self
     - cname: median
-      before_call: long __last_dim = THTensor_(nDimension)(LIBRARY_STATE ((THPTensor*)$arg2)->cdata)-1;
+      before_call: int64_t __last_dim = THTensor_(nDimension)(LIBRARY_STATE ((THPTensor*)$arg2)->cdata)-1;
       arguments:
         - arg: THTensor* values
           output: True
@@ -652,7 +652,7 @@
         - arg: THIndexTensor* indices
           output: True
         - THTensor* self
-        - arg: long dim
+        - arg: int64_t dim
           wrap_dim: self
         - CONSTANT false
     - arguments:
@@ -661,7 +661,7 @@
         - arg: THIndexTensor* indices
           output: True
         - THTensor* self
-        - arg: long dim
+        - arg: int64_t dim
           wrap_dim: self
         - bool keepdim
 ]]
@@ -673,7 +673,7 @@
     - function
   return: argument 0,1
   options:
-    - before_call: long __last_dim = THTensor_(nDimension)(LIBRARY_STATE ((THPTensor*)$arg2)->cdata)-1;
+    - before_call: int64_t __last_dim = THTensor_(nDimension)(LIBRARY_STATE ((THPTensor*)$arg2)->cdata)-1;
       arguments:
         - arg: THTensor* values
           output: True
@@ -690,7 +690,7 @@
         - arg: THIndexTensor* indices
           output: True
         - THTensor* self
-        - arg: long dim
+        - arg: int64_t dim
           wrap_dim: self
         - arg: bool descending
           default: "false"
@@ -703,14 +703,14 @@
     - function
   return: argument 0,1
   options:
-    - before_call: long __last_dim = THTensor_(nDimension)(LIBRARY_STATE ((THPTensor*)$arg2)->cdata)-1;
+    - before_call: int64_t __last_dim = THTensor_(nDimension)(LIBRARY_STATE ((THPTensor*)$arg2)->cdata)-1;
       arguments:
         - arg: THTensor* values
           output: True
         - arg: THIndexTensor* indices
           output: True
         - THTensor* self
-        - long k
+        - int64_t k
         - CONSTANT __last_dim
         - arg: bool largest
           default: "true"
@@ -724,8 +724,8 @@
         - arg: THIndexTensor* indices
           output: True
         - THTensor* self
-        - long k
-        - arg: long dim
+        - int64_t k
+        - arg: int64_t dim
           wrap_dim: self
         - arg: bool largest
           default: "true"
