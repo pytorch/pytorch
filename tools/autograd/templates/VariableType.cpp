@@ -1,3 +1,4 @@
+#include "Python.h"
 #include "VariableType.h"
 
 // ${generated_comment}
