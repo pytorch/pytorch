@@ -9,6 +9,7 @@
 #include "ATen/Utils.h"
 #include "ATen/WrapDimUtils.h"
 #include "ATen/THLongStorageView.h"
+#include "ATen/UndefinedTensor.h"
 #include <iostream>
 #include <sstream>
 

@@ -1,29 +1,32 @@
 #pragma once
 
 #include "ATen/TensorImpl.h"
+#include "ATen/UndefinedTensor.h"
 
 namespace at { namespace detail {
 
 // TensorBase is the base class for Tensor which handles the reference counting
 struct TensorBase {
-  TensorBase()
-  : pImpl(nullptr) {}
+  TensorBase(): TensorBase(UndefinedTensor::singleton(), false) {}
   TensorBase(TensorImpl * self, bool retain)
   : pImpl(self) {
-    if(pImpl != nullptr && retain)
+    if (pImpl == nullptr) {
+      throw std::runtime_error("TensorBase with nullptr not supported");
+    }
+    if(retain && pImpl != UndefinedTensor::singleton())
       pImpl->retain();
   }
   TensorBase(const TensorBase & rhs)
   : pImpl(rhs.pImpl) {
-    if(pImpl != nullptr)
+    if (pImpl != UndefinedTensor::singleton())
       pImpl->retain();
   }
   TensorBase(TensorBase && rhs) noexcept
   : pImpl(rhs.pImpl) {
-    rhs.pImpl = nullptr;
+    rhs.pImpl = UndefinedTensor::singleton();
   }
   ~TensorBase() {
-    if(pImpl != nullptr)
+    if (pImpl != UndefinedTensor::singleton())
       pImpl->release();
   }
   TensorBase & operator=(TensorBase && rhs) & {
@@ -47,6 +50,9 @@ struct TensorBase {
   }
   TensorImpl * get() const {
     return pImpl;
+  }
+  bool defined() const {
+    return pImpl != UndefinedTensor::singleton();
   }
 
   friend struct Type;

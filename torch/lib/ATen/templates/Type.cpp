@@ -5,6 +5,7 @@
 #include "ATen/SparseTensorRef.h"
 #include "ATen/ExpandUtils.h"
 #include "ATen/NativeFunctions.h"
+#include "ATen/UndefinedType.h"
 
 #include <iostream>
 ${type_headers}
@@ -13,15 +14,17 @@ namespace at {
 
 void Type::registerAll(Context * context) {
   ${type_registrations}
+  context->type_registry[static_cast<int>(Backend::Undefined)][static_cast<int>(ScalarType::Undefined)].reset(new UndefinedType(context));
 }
 
 void Type::copy(const Tensor & src, Tensor & dst) const {
   Tensor b_src;
-  std::tie(b_src) = expand_inplace(dst, src);
+  std::tie(b_src) = expand_inplace(dst, src, "copy");
   s_copy(b_src, dst);
 }
 
 Tensor Type::copy(const Tensor & src) const {
+  AT_ASSERT(src.defined(), "attempt to copy an undefined tensor");
   Tensor r = this->tensor(src.sizes());
   r.copy_(src);
   return r;
