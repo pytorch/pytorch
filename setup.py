@@ -576,6 +576,9 @@ elif WITH_CUDA:
         nvtoolext_lib_name = 'nvToolsExt'
 
     library_dirs.append(cuda_lib_path)
+=======
+    cuda_lib_dirs = ['lib64', 'lib']
+>>>>>>> 68f28d2240ad9962d9c24072396efb1b8c28f96f
     cuda_include_path = os.path.join(CUDA_HOME, 'include')
     include_dirs.append(cuda_include_path)
     include_dirs.append(tmp_install_path + "/include/THCUNN")
