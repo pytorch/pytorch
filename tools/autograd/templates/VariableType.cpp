@@ -271,20 +271,7 @@ static void set_flags(Variable& var, VarFlags flags, std::shared_ptr<Function> g
   }
 }
 
-static void set_flags(std::tuple<Variable, Variable> var, VarFlags flags, std::shared_ptr<Function> grad_fn, bool inplace=false) {
-  set_flags(std::get<0>(var), flags, grad_fn, inplace, 0);
-  set_flags(std::get<1>(var), flags, grad_fn, inplace, 1);
-  if (grad_fn) grad_fn->num_inputs = 2;
-}
-
-static void set_flags(std::tuple<Variable, Variable, Variable> var, VarFlags flags, std::shared_ptr<Function> grad_fn, bool inplace=false) {
-  set_flags(std::get<0>(var), flags, grad_fn, inplace, 0);
-  set_flags(std::get<1>(var), flags, grad_fn, inplace, 1);
-  set_flags(std::get<2>(var), flags, grad_fn, inplace, 2);
-  if (grad_fn) grad_fn->num_inputs = 3;
-}
-
-static void set_flags(std::vector<Variable> &vl, VarFlags flags, std::shared_ptr<Function> grad_fn) {
+static void set_flags(at::ArrayRef<Variable> vl, VarFlags flags, std::shared_ptr<Function> grad_fn) {
   if (grad_fn) {
     grad_fn->num_inputs = vl.size();
   }
