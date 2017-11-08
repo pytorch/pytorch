@@ -233,7 +233,7 @@ struct algorithm_search<cudnnConvolutionFwdAlgo_t> {
         perfResults,
         ws.data,
         ws.size));
-    return getBestAlgorithm<cudnnConvolutionFwdAlgoPerf_t>(perfResults.release(), deterministic, n_algo);
+    return getBestAlgorithm<cudnnConvolutionFwdAlgoPerf_t>(perfResults.get(), deterministic, n_algo);
   }
 
   static void getAlgorithm(
@@ -307,7 +307,7 @@ struct algorithm_search<cudnnConvolutionBwdDataAlgo_t> {
         perfResults,
         ws.data,
         ws.size));
-    return getBestAlgorithm<cudnnConvolutionBwdDataAlgoPerf_t>(perfResults.release(), deterministic, n_algo);
+    return getBestAlgorithm<cudnnConvolutionBwdDataAlgoPerf_t>(perfResults.get(), deterministic, n_algo);
   }
 
   static void getAlgorithm(cudnnHandle_t handle, const Convolution& conv, cudnnConvolutionBwdDataAlgo_t* algo) {
