@@ -24,7 +24,7 @@ from tools.setup_helpers.split_types import split_types
 DEBUG = check_env_flag('DEBUG')
 WITH_DISTRIBUTED = not check_env_flag('NO_DISTRIBUTED')
 WITH_DISTRIBUTED_MW = WITH_DISTRIBUTED and check_env_flag('WITH_DISTRIBUTED_MW')
-WITH_ROCM=False
+WITH_ROCM = False
 
 ################################################################################
 # Workaround setuptools -Wstrict-prototypes warnings
