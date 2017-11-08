@@ -215,7 +215,7 @@ struct algorithm_search<cudnnConvolutionFwdAlgo_t> {
          CUDNN_CONVOLUTION_FWD_ALGO_WINOGRAD_NONFUSED,
     };
     int n_algo = sizeof(algo)/sizeof(algo[0]);
-    std::unique_ptr<cudnnConvolutionFwdAlgoPerf_t*> perfResults {new cudnnConvolutionFwdAlgoPerf_t[n_algo]};
+    std::unique_ptr<cudnnConvolutionFwdAlgoPerf_t[]> perfResults (new cudnnConvolutionFwdAlgoPerf_t[n_algo]);
     size_t max_ws_size = getMaxWorkspaceSize<cudnnConvolutionFwdAlgo_t>(
         handle, conv, algo, n_algo, state);
     Workspace ws(state, max_ws_size);
@@ -289,7 +289,7 @@ struct algorithm_search<cudnnConvolutionBwdDataAlgo_t> {
         CUDNN_CONVOLUTION_BWD_DATA_ALGO_WINOGRAD_NONFUSED
     };
     int n_algo = sizeof(algo)/sizeof(algo[0]);
-    std::unique_ptr<cudnnConvolutionBwdDataAlgoPerf_t*> perfResults {new cudnnConvolutionBwdDataAlgoPerf_t[n_algo]};
+    std::unique_ptr<cudnnConvolutionBwdDataAlgoPerf_t[]> perfResults (new cudnnConvolutionBwdDataAlgoPerf_t[n_algo]);
     size_t max_ws_size = getMaxWorkspaceSize<cudnnConvolutionBwdDataAlgo_t>(
         handle, conv, algo, n_algo, state);
     Workspace ws(state, max_ws_size);
@@ -362,7 +362,7 @@ struct algorithm_search<cudnnConvolutionBwdFilterAlgo_t> {
 #endif
     };
     int n_algo = sizeof(algo)/sizeof(algo[0]);
-    std::unique_ptr<cudnnConvolutionBwdFilterAlgoPerf_t*> perfResults {new cudnnConvolutionBwdFilterAlgoPerf_t[n_algo]};
+    std::unique_ptr<cudnnConvolutionBwdFilterAlgoPerf_t[]> perfResults (new cudnnConvolutionBwdFilterAlgoPerf_t[n_algo]);
     size_t max_ws_size = getMaxWorkspaceSize<cudnnConvolutionBwdFilterAlgo_t>(
         handle, conv, algo, n_algo, state);
     Workspace ws(state, max_ws_size);
