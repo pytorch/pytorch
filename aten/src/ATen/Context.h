@@ -17,8 +17,15 @@ public:
   Type & getType(Backend p, ScalarType s) {
     initCUDAIfNeeded(p);
     auto & type = type_registry[static_cast<int>(p)][static_cast<int>(s)];
-    if(!type)
+
+    if(!type) {
+      // there is only a single Undefined Type.
+      if (p == Backend::Undefined || s == ScalarType::Undefined) {
+        auto & undef = type_registry[static_cast<int>(Backend::Undefined)][static_cast<int>(ScalarType::Undefined)];
+        if (undef) return *undef;
+      }
       runtime_error("%s%sType is not enabled.",toString(p),toString(s));
+    }
     return *type;
   }
   Generator & defaultGenerator(Backend p) {

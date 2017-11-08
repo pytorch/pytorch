@@ -1,0 +1,37 @@
+#pragma once
+
+#include "ATen/Type.h"
+#include "ATen/Context.h"
+#include "ATen/CheckGenerator.h"
+
+#ifdef _MSC_VER
+#ifdef Type
+#undef Type
+#endif
+#endif
+
+namespace at {
+
+struct UndefinedType final : public Type {
+  explicit UndefinedType(Context* context);
+  virtual ScalarType scalarType() const override;
+  virtual Backend backend() const override;
+  virtual bool isCuda() const override;
+  virtual bool isSparse() const override;
+  virtual bool isDistributed() const override;
+  virtual std::unique_ptr<Storage> storage() const override;
+  virtual std::unique_ptr<Storage> storage(size_t size) const override;
+  virtual std::unique_ptr<Storage> storageFromBlob(void * data, int64_t size, const std::function<void(void*)> & deleter) const override;
+  virtual std::unique_ptr<Generator> generator() const override;
+  virtual const char * toString() const override;
+  virtual std::size_t elementSizeInBytes() const override;
+  virtual Type & toBackend(Backend b) const;
+  virtual Type & toScalarType(ScalarType s) const;
+  virtual TypeID ID() const override;
+  static const char * typeString();
+  Tensor unsafeTensorFromTH(void * th_pointer, bool retain) const override;
+
+  virtual void s_copy(const Tensor & src, Tensor & dst) const override;
+};
+
+} // namespace at
