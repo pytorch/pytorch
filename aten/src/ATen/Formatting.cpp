@@ -49,6 +49,10 @@ std::ostream& operator<<(std::ostream & out, ScalarType t) {
   return out << toString(t);
 }
 
+std::ostream& operator<<(std::ostream & out, const Type& t) {
+  return out << t.toString();
+}
+
 static std::tuple<double, int64_t> __printFormat(std::ostream& stream, const Tensor& self) {
   auto size = self.numel();
   if(size == 0) {
