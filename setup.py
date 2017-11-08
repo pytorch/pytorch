@@ -30,7 +30,7 @@ IS_LINUX = (platform.system() == 'Linux')
 
 WITH_DISTRIBUTED = not check_env_flag('NO_DISTRIBUTED') and not IS_WINDOWS
 WITH_DISTRIBUTED_MW = WITH_DISTRIBUTED and check_env_flag('WITH_DISTRIBUTED_MW')
-WITH_ROCM=False
+WITH_ROCM = False
 
 ################################################################################
 # Workaround setuptools -Wstrict-prototypes warnings
