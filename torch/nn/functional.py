@@ -879,8 +879,9 @@ def layer_norm(input, weight=None, bias=None, eps=1e-5):
         raise ValueError("Expected 2D tensor as input, got {}D tensor instead.".format(input.dim()))
 
     mean = input.mean(1, keepdim=True)
-    std = input.std(1, keepdim=True)
-    output = (input - mean) / (std + eps)
+    # Prevent NaN gradients when sample std is 0 by using alternative standard deviation calculation
+    std = ((input - mean).pow(2).sum(1, keepdim=True).div(input.size(1) - 1) + eps).sqrt()
+    output = (input - mean) / std
 
     # Resize weights and biases to match dims
     if weight is not None:
