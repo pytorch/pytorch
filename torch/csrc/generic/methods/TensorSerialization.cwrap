@@ -50,6 +50,7 @@ PyObject * THPTensor_(newWithMetadataFile)(PyObject *_null, PyObject *args)
   name: THPTensor_(toNumpy)
   python_name: numpy
   only_register: True
+  cpu_half: True
 ]]
 // Adapted from fblualib
 PyObject * THPTensor_(toNumpy)(THPTensor *self, PyObject *args) {
