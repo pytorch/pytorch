@@ -2,6 +2,8 @@
 
 namespace torch { namespace jit { namespace python {
 
+using namespace torch::autograd;
+
 // Alphabet used to describe structure of inputs/outputs (D for desc)
 namespace D {
 static constexpr char ListOpen          = '[';
@@ -12,20 +14,6 @@ static constexpr char VariableVolatile  = 'v';
 static constexpr char VariableGrad      = 'r';
 static constexpr char VariableNoGrad    = 'n';
 } // namespace D
-
-struct ParsedArgs {
-  // Flat vector of Variables found in arguments
-  std::vector<py::handle> vars;
-  // Description of argument structure. Variables are replaced with
-  // different characters, depending on their flags, beginnings and
-  // ends of tuples and lists are denoted by a pair of parenthesis
-  // of their corresponding kind. They should always be paired.
-  // Example desc: (rn[n(r)r]). Would be (vv[v(v)v]) if **any**
-  // input Variable was volatile (even non-volatile ones are marked with v).
-  std::string desc;
-  // True iff any of vars is volatile
-  bool is_volatile = false;
-};
 
 namespace {
 
@@ -51,7 +39,7 @@ void flatten_rec(PyObject* obj, ParsedArgs& args) {
     args.desc.push_back(D::ListClose);
   } else if (THPVariable_Check(obj)) {
     auto& var = reinterpret_cast<THPVariable*>(obj)->cdata;
-    args.vars.push_back(obj);
+    args.vars.push_back(var);
     args.is_volatile |= var.is_volatile();
     if (args.is_volatile) {
       args.desc.push_back(D::VariableVolatile);
@@ -79,7 +67,7 @@ void mark_all_volatile(std::string& desc) {
 
 } // anonymous namespace
 
-flattened_args flatten(py::handle obj) {
+ParsedArgs flatten(py::handle obj) {
   ParsedArgs args;
   flatten_rec(obj.ptr(), args);
   // We might have put some Variable descriptors in desc before we discovered
@@ -87,12 +75,10 @@ flattened_args flatten(py::handle obj) {
   if (args.is_volatile) {
     mark_all_volatile(args.desc);
   }
-  return std::make_tuple(cast_handle_sequence<py::tuple>(args.vars), py::bytes(args.desc), args.is_volatile);
+  return args;
 }
 
 namespace {
-
-using tuple_iterator = decltype(std::declval<py::tuple>().begin());
 
 template<typename T>
 py::object cast_sequence(std::vector<py::object> objs) {
@@ -103,8 +89,8 @@ py::object cast_sequence(std::vector<py::object> objs) {
   return sequence;
 }
 
-py::object unflatten_rec(tuple_iterator& var_it,
-                         tuple_iterator& var_it_end,
+py::object unflatten_rec(variable_list::iterator& var_it,
+                         variable_list::iterator& var_it_end,
                          std::string::iterator& desc_it) {
   char type = *desc_it++;
   if (type == D::TupleOpen) {
@@ -123,23 +109,22 @@ py::object unflatten_rec(tuple_iterator& var_it,
     if (var_it == var_it_end)
       throw std::runtime_error("Not enough Variables given to unflatten");
     auto var = *var_it++;
-    return py::reinterpret_borrow<py::object>(var);
+    return py::reinterpret_borrow<py::object>(THPVariable_Wrap(var));
   }
 }
 
 } // anonymous namespace
 
-py::object unflatten(py::tuple vars, py::bytes descriptor) {
+PyObject* unflatten(variable_list vars, std::string desc) {
   // NB: We don't do correctness checking on descriptor.
   // It has to be a correct bytes object produced by unflatten.
-  std::string desc = descriptor; // <sigh> we have to make a copy
   auto vars_it = vars.begin();
   auto vars_it_end = vars.end();
   auto desc_it = desc.begin();
   auto output = unflatten_rec(vars_it, vars_it_end, desc_it);
   if (vars_it != vars_it_end)
     throw std::runtime_error("Too many Variables given to unflatten");
-  return output;
+  return output.release().ptr();
 }
 
 }}} // namespace torch::jit::python
