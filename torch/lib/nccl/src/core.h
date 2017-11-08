@@ -10,6 +10,7 @@
 
 #include "nccl.h"
 #include <cstdio>
+#include <cuda.h>
 #include <cuda_runtime.h>
 
 #define MAXRANKS 32
