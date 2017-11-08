@@ -98,7 +98,7 @@ static void fusionTests() {
     auto o = at::CUDA(at::kFloat).zeros({3,4});
     comp.debugLaunchGraph(graph, {a,b}, {o});
     auto o2 = a*b;
-    float max_diff = (o2 - o).abs().max().toDouble();
+    float max_diff = (o2 - o).abs().max().toCDouble();
     //std::cout << "max diff: " << max_diff << "\n";
     JIT_ASSERT(max_diff == 0);
   };
@@ -160,7 +160,7 @@ static void fusionTests() {
     //auto out0 = inputs[0]*inputs[1];
     comp.debugLaunchGraph(graph, inputs, outputs);
     JIT_ASSERT(out0.is_same_size(outputs.front()));
-    float max_diff = (outputs.front() - out0).abs().max().toDouble();
+    float max_diff = (outputs.front() - out0).abs().max().toCDouble();
     JIT_ASSERT(max_diff < 1e-6);
 
   };
@@ -191,9 +191,9 @@ static void fusionTests() {
     auto o2 = at::CUDA(at::kFloat).zeros(o2_r.sizes());
     comp.debugLaunchGraph(graph, {a,b}, {o, o2});
 
-    float max_diff = (o_r - o).abs().max().toDouble();
+    float max_diff = (o_r - o).abs().max().toCDouble();
     JIT_ASSERT(max_diff == 0);
-    float max_diff2 = (o2_r - o2).abs().max().toDouble();
+    float max_diff2 = (o2_r - o2).abs().max().toCDouble();
     JIT_ASSERT(max_diff2 == 0);
   };
   testConcat(0);

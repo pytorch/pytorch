@@ -76,7 +76,7 @@ Tensor norm_backward(Tensor grad, const Tensor & self, const Scalar & p_, Tensor
 
 Tensor reduce_to(const Tensor & grad, IntList sizes) {
   if (sizes.size() == 0) {
-    return grad.sum().toTensor();
+    return grad.sum();
   }
   Tensor result = grad;
   while (result.dim() > (int64_t)sizes.size()) {
@@ -306,9 +306,9 @@ Tensor glu_double_backward_grad_output(const Tensor & grad, const Tensor & input
 Tensor kl_div_double_backward_grad_output(const Tensor & grad, const Tensor & input, const Tensor & target, bool size_average, bool reduce) {
   auto result = kl_div_backward(grad, input, target, size_average, false);
   if (reduce && size_average) {
-    return result.mean().toTensor();
+    return result.mean();
   } else if (reduce) {
-    return result.sum().toTensor();
+    return result.sum();
   }
   return result;
 }
@@ -343,9 +343,9 @@ Tensor log_softmax_double_backward(const Tensor & grad, const Tensor & grad_outp
 Tensor l1_loss_double_backward_grad_output(const Tensor & grad, const Tensor & input, const Tensor & target, bool size_average, bool reduce) {
   auto output = l1_loss_backward(grad, input, target, size_average, false);
   if (reduce and size_average) {
-    return output.mean().toTensor();
+    return output.mean();
   } else if (reduce) {
-    return output.sum().toTensor();
+    return output.sum();
   }
   return output;
 }
@@ -364,7 +364,7 @@ Tensor smooth_l1_loss_double_backward_grad_output(const Tensor & grad, const Ten
     return smooth_l1_loss_backward(grad, input, target, size_average, reduce);
   }
   auto r = smooth_l1_loss_backward(ones_like(grad_output), input, target, size_average, true);
-  return (r * grad).sum().toTensor().view({1});
+  return (r * grad).sum().view({1});
 }
 
 Tensor max_pool2d_double_backward(const Tensor & grad, const Tensor & indices) {
@@ -389,7 +389,7 @@ Tensor mse_loss_double_backward_grad_output(const Tensor & grad, const Tensor & 
     return mse_loss_backward(grad, input, target, size_average, reduce);
   }
   auto r = mse_loss_backward(ones_like(grad_output), input, target, size_average, true);
-  return (r * grad).sum().toTensor().view({1});
+  return (r * grad).sum().view({1});
 }
 
 Tensor soft_margin_loss_double_backward(const Tensor & grad, const Tensor & input, const Tensor & target, bool size_average) {

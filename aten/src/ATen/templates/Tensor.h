@@ -108,6 +108,11 @@ struct Tensor : public detail::TensorBase {
   AT_FORALL_SCALAR_TYPES(TO_TYPE_DATA)
   #undef TO_TYPE_DATA
 
+  #define TO_C_TYPE(T,name,_) \
+  T toC##name () const;
+  AT_FORALL_SCALAR_TYPES(TO_C_TYPE)
+  #undef TO_C_TYPE
+
   template<typename T, size_t N>
   TensorAccessor<T,N> accessor() {
     static_assert(N > 0, "accessor is used for indexing tensor, for scalars use *data<T>()");

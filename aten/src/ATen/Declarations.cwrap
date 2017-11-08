@@ -126,11 +126,16 @@
 ]]
 [[
   name: fill_
-  cname: fill
   return: self
-  arguments:
-    - THTensor* self
-    - real value
+  cname: fill
+  options:
+    - arguments:
+      - THTensor* self
+      - real value
+    - zero_dim_tensor_only: True
+      arguments:
+      - THTensor* self
+      - THTensor* value
 ]]
 [[
   name: isContiguous
@@ -156,11 +161,18 @@
   cname: maskedFill
   python_name: masked_fill_
   return: self
-  arguments:
-    - arg: THTensor* self
-      broadcast: mask inplace fallback types:Byte
-    - THBoolTensor* mask
-    - real value
+  options:
+    - arguments:
+      - arg: THTensor* self
+        broadcast: mask inplace fallback types:Byte
+      - THBoolTensor* mask
+      - real value
+    - zero_dim_tensor_only: True
+      arguments:
+      - arg: THTensor* self
+        broadcast: mask inplace fallback types:Byte
+      - THBoolTensor* mask
+      - THTensor* value
 ]]
 [[
   name: maskedCopy_
@@ -364,12 +376,20 @@
   python_name: index_fill_
   cname: indexFill
   return: argument 0
-  arguments:
-    - THTensor* self
-    - arg: long dim
-      wrap_dim: self
-    - THIndexTensor* index
-    - real value
+  options:
+    - arguments:
+      - THTensor* self
+      - arg: long dim
+        wrap_dim: self
+      - THIndexTensor* index
+      - real value
+    - zero_dim_tensor_only: True
+      arguments:
+        - THTensor* self
+        - arg: long dim
+          wrap_dim: self
+        - THIndexTensor* index
+        - THTensor* value
 ]]
 [[
   name: narrow
