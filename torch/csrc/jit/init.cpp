@@ -4,6 +4,7 @@
 #include "torch/csrc/jit/python_ir.h"
 #include "torch/csrc/jit/python_arg_flatten.h"
 #include "torch/csrc/jit/export.h"
+#include "torch/csrc/jit/python_compiled_function.h"
 #include "torch/csrc/jit/passes/graph_fuser.h"
 #include "torch/csrc/jit/passes/onnx.h"
 #include "torch/csrc/jit/passes/dead_code_elimination.h"
@@ -53,6 +54,7 @@ void initJITBindings(PyObject *module) {
 
   initPythonIRBindings(module);
   initPythonTracerBindings(module);
+  python::initCompilerMixin(module);
 }
 
 }}
