@@ -157,7 +157,7 @@ THC_API void THCTensor_(syev)(THCState *state, THCTensor *re_, THCTensor *rv_, T
 
   // eigen values and workspace
   real *w = th_magma_malloc_pinned<real>(n);
-  real *wA = th_magma_malloc_pinned<real>(lda);
+  real *wA = th_magma_malloc_pinned<real>(lda * n);
 
   // compute optimal size of work array
   int info;
