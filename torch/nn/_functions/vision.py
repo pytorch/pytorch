@@ -8,6 +8,7 @@ import torch.backends.cudnn as cudnn
 MODE_ZEROS = 0
 MODE_BORDER = 1
 
+
 class GridSampler(Function):
 
     @staticmethod
@@ -23,7 +24,7 @@ class GridSampler(Function):
                              .format(padding_mode))
 
         grid_sz = grid.size()
-        if cudnn.is_acceptable(input) and padding_mode=='zeros':
+        if cudnn.is_acceptable(input) and padding_mode == 'zeros':
             output = input.new(grid_sz[0], input.size(1), grid_sz[1], grid_sz[2])
             grid = grid.contiguous()
             if 0 in input.stride():
@@ -32,7 +33,8 @@ class GridSampler(Function):
         else:
             backend = type2backend[type(input)]
             output = input.new(grid_sz[0], input.size(1), grid_sz[1], grid_sz[2])
-            backend.SpatialGridSamplerBilinear_updateOutput(backend.library_state, input, grid, output, ctx.padding_mode)
+            backend.SpatialGridSamplerBilinear_updateOutput(
+                backend.library_state, input, grid, output, ctx.padding_mode)
         return output
 
     @staticmethod
@@ -41,7 +43,7 @@ class GridSampler(Function):
         input, grid = ctx.saved_tensors
         padding_mode = ctx.padding_mode
 
-        if cudnn.is_acceptable(input) and padding_mode=='zeros':
+        if cudnn.is_acceptable(input) and padding_mode == 'zeros':
             grad_input = input.new(input.size())
             grad_grid = grid.new(grid.size())
             grid = grid.contiguous()
