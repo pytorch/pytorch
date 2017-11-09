@@ -63,6 +63,8 @@ xcopy /Y ..\..\aten\src\THCUNN\generic\THCUNN.h .
 goto:eof
 
 :build
+  @setlocal
+  IF NOT "%PREBUILD_COMMAND%"=="" call %PREBUILD_COMMAND%
   mkdir build\%~1
   cd build/%~1
   cmake ../../%~1 %CMAKE_GENERATOR_COMMAND% ^
@@ -93,10 +95,13 @@ goto:eof
 
   %MAKE_COMMAND%
   cd ../..
+  @endlocal
 
 goto:eof
 
 :build_aten
+  @setlocal
+  IF NOT "%PREBUILD_COMMAND%"=="" call %PREBUILD_COMMAND%
   mkdir build\%~1
   cd build/%~1
   cmake ../../../../%~1 %CMAKE_GENERATOR_COMMAND% ^
@@ -108,6 +113,7 @@ goto:eof
 
   %MAKE_COMMAND%
   cd ../..
+  @setlocal
 
 goto:eof
 
