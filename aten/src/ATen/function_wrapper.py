@@ -533,7 +533,7 @@ def create_generic(top_env, declarations):
 
         # ensure we get reference-type formals when appropriate
         def native_translate_formals(argument, option):
-            if option['inplace'] or argument.get('output', False):
+            if (option['inplace'] and argument['name'] == 'self') or argument.get('output', False):
                 argument['type'] = {'Tensor': 'Tensor &'}.get(argument['type'], argument['type'])
             else:
                 argument['type'] = {'Tensor': 'const Tensor &'}.get(argument['type'], argument['type'])
@@ -548,15 +548,22 @@ def create_generic(top_env, declarations):
         if ret['kind'] != 'type':
             raise Exception("native functions only support \'type\' return")
 
-        # can't actually return a TensorList (since it's a reference object)
-        actual_return_type = {'TensorList': 'std::vector<Tensor>'}.get(ret['type'], ret['type'])
-        if actual_return_type == 'Tensor' and option['inplace']:
-            # follow normal ATen convention of returning Tensor & for inplace functions.
-            actual_return_type = 'Tensor &'
-        return [{
-            'type': actual_return_type,
-            'dynamic_type': ret['type'],
-        }]
+        types = [x.strip() for x in ret['type'].split(',')]
+        return_types = []
+        for t in types:
+            # can't actually return a TensorList (since it's a reference object)
+            actual_return_type = {'TensorList': 'std::vector<Tensor>'}.get(t, t)
+
+            if actual_return_type == 'Tensor' and option['inplace']:
+                # follow normal ATen convention of returning Tensor & for inplace functions.
+                actual_return_type = 'Tensor &'
+
+            return_types.append({
+                'type': actual_return_type,
+                'dynamic_type': t,
+            })
+
+        return return_types
 
     def process_native(option, output_options):
         option['inplace'] = re.search(

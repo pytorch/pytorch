@@ -13,12 +13,10 @@ def parse(filename):
             if '[NativeFunction]' in line:
                 in_declaration = True
                 arguments = []
-                variants = []
                 declaration = {'mode': 'native'}
             elif '[/NativeFunction]' in line:
                 in_declaration = False
                 declaration['arguments'] = arguments
-                declaration['variants'] = variants
                 declarations.append(declaration)
                 if declaration.get('type_method_definition_level') != 'base':
                     raise RuntimeError("Native functions currently only support (and must be specified with) "
@@ -47,7 +45,7 @@ def parse(filename):
 
                     arguments.append(argument_dict)
                 elif key == 'variants':
-                    variants = [x.strip() for x in value.split(',')]
+                    declaration[key] = [x.strip() for x in value.split(',')]
                 else:
                     declaration[key] = value
         return declarations
