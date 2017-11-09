@@ -658,9 +658,11 @@ extensions.append(THNN)
 if WITH_CUDA:
     thnvrtc_link_flags = extra_link_args + [make_relative_rpath('lib')]
     if IS_LINUX:
-        thnvrtc_link_flags = ['-Wl,--no-as-needed'] + thnvrtc_link_flags
+        thnvrtc_link_flags = thnvrtc_link_flags + ['-Wl,--no-as-needed']
+    # these have to be specified as -lcuda in link_flags because they
+    # have to come right after the `no-as-needed` option
+    thnvrtc_link_flags += ['-lcuda', '-lnvrtc']
     THNVRTC = Extension("torch._nvrtc",
-                        libraries=['nvrtc', 'cuda'],
                         sources=['torch/csrc/nvrtc.cpp'],
                         language='c++',
                         include_dirs=include_dirs,
