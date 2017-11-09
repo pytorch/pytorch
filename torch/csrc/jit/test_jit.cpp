@@ -121,6 +121,7 @@ static void fusionTests() {
     auto p14 = appendNewNode(kmul,graph,{p20, i0});
     auto p11 = appendNewNode(kmul,graph,{p22, p18});
     auto o1 = appendNewNode(kadd,graph,{p14, p11});
+    o1->t_(kalpha, at::Scalar(1).toTensor());
     auto p5 = appendNewNode(ktanh,graph,{o1});
     auto o0 = appendNewNode(kmul,graph,{p16, p5});
 
