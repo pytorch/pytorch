@@ -106,17 +106,11 @@ class ModuleList(Module):
             self += modules
 
     def __getitem__(self, idx):
-        if isinstance(idx, int):
-            if not (-len(self) <= idx < len(self)):
-                raise IndexError('index {} is out of range'.format(idx))
-            if idx < 0:
-                idx += len(self)
-            items = self._modules.items()
-            if not isinstance(items, list):
-                items = list(items)
-            return items[idx][1]
-        else:
-            return self._modules[idx]
+        if not (-len(self) <= idx < len(self)):
+            raise IndexError('index {} is out of range'.format(idx))
+        if idx < 0:
+            idx += len(self)
+        return self._modules[str(idx)]
 
     def __setitem__(self, idx, module):
         return setattr(self, str(idx), module)
@@ -134,14 +128,9 @@ class ModuleList(Module):
         r"""Appends a given module to the end of the list.
 
         Arguments:
-            module (nn.Module or tuple (str, nn.Module)): module to append
+            module (nn.Module): module to append
         """
-        if isinstance(module, tuple):
-            k, module = module
-            module_key = _addPrefix(str(k), prefix)
-        else:
-            module_key = _addPrefix(str(len(self)), prefix)
-        self.add_module(module_key, module)
+        self.add_module(str(len(self)), module)
         return self
 
     def extend(self, modules, prefix=None):
@@ -157,11 +146,8 @@ class ModuleList(Module):
         offset = len(self)
         for i, module in enumerate(modules):
             if isinstance(module, tuple):
-                k, module = module
-                module_key = _addPrefix(str(k), prefix)
-            else:
-                module_key = _addPrefix(str(len(self)), prefix)
-            self.add_module(module_key, module)
+                _, module = module
+            self.add_module(str(len(self)), module)
         return self
 
 
@@ -194,17 +180,11 @@ class ParameterList(Module):
             self += parameters
 
     def __getitem__(self, idx):
-        if isinstance(idx, int):
-            if not (-len(self) <= idx < len(self)):
-                raise IndexError('index {} is out of range'.format(idx))
-            if idx < 0:
-                idx += len(self)
-            items = self._parameters.items()
-            if not isinstance(items, list):
-                items = list(items)
-            return items[idx][1]
-        else:
-            return self._parameters[idx]
+        if not (-len(self) <= idx < len(self)):
+            raise IndexError('index {} is out of range'.format(idx))
+        if idx < 0:
+            idx += len(self)
+        return self._parameters[str(idx)]
 
     def __setitem__(self, idx, param):
         return self.register_parameter(str(idx), param)
@@ -218,18 +198,13 @@ class ParameterList(Module):
     def __iadd__(self, parameters):
         return self.extend(parameters)
 
-    def append(self, parameter, prefix=None):
+    def append(self, parameter):
         """Appends a given parameter at the end of the list.
 
         Arguments:
             parameter (nn.Parameter): parameter to append
         """
-        if isinstance(parameter, tuple):
-            k, parameter = parameter
-            param_key = _addPrefix(str(k), prefix)
-        else:
-            param_key = _addPrefix(str(len(self)), prefix)
-        self.register_parameter(param_key, parameter)
+        self.register_parameter(str(len(self)), parameter)
         return self
 
     def extend(self, parameters, prefix=None):
@@ -244,20 +219,16 @@ class ParameterList(Module):
         offset = len(self)
         for i, param in enumerate(parameters):
             if isinstance(param, tuple):
-                k, param = param
-                param_key = _addPrefix(str(k), prefix)
-            else:
-                param_key = _addPrefix(str(offset + i), prefix)
-            self.register_parameter(param_key, param)
+                _, param = param
+            self.register_parameter(str(offset + i), param)
         return self
 
     def __repr__(self):
         tmpstr = self.__class__.__name__ + '(\n'
         for k, p in self._parameters.items():
             size_str = 'x'.join(str(size) for size in p.size())
-            device_str = '' if not p.is_cuda else \
-                ' (GPU {})'.format(p.get_device())
-            parastr = '[Parameter ({}) of size {}{}]'.format(
+            device_str = '' if not p.is_cuda else ' (GPU {})'.format(p.get_device())
+            parastr = 'Parameter containing: [{} of size {}{}]'.format(
                 torch.typename(p.data), size_str, device_str)
             tmpstr = tmpstr + '  (' + k + '): ' + parastr + '\n'
         tmpstr = tmpstr + ')'

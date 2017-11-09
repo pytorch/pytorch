@@ -771,10 +771,6 @@ class TestNN(NNTestCase):
         module_list = nn.ModuleList()
         module_list.extend(s.named_modules())
         check()
-        self.assertIn("layer3", module_list._modules)
-        module_list = nn.ModuleList()
-        module_list.extend(s.subnet_layer.named_modules(), "sub_lay1")
-        self.assertIn("sub_lay1.0", module_list._modules)
 
     def test_ParameterList(self):
         def make_param():
@@ -832,7 +828,6 @@ class TestNN(NNTestCase):
         param_list = nn.ParameterList()
         param_list.extend(s.named_parameters())
         check()
-        self.assertIn("layer1.weight", param_list._parameters)
 
     def test_add_module(self):
         l = nn.Linear(10, 20)
