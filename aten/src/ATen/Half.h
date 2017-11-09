@@ -71,10 +71,10 @@ typedef struct  AT_ALIGN(2) {
   operator double();
 } Half;
 
-template<> Half convert(double f);
-template<> double convert(Half f);
-template<> Half convert(int64_t f);
-template<> int64_t convert(Half f);
+template<> AT_API Half convert(double f);
+template<> AT_API double convert(Half f);
+template<> AT_API Half convert(int64_t f);
+template<> AT_API int64_t convert(Half f);
 
 template<> bool overflows<Half, double>(double f);
 template<> bool overflows<Half, int64_t>(int64_t f);
