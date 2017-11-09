@@ -206,9 +206,30 @@ class Variable(_C._VariableBase):
         return handle
 
     def reinforce(self, reward):
-        raise RuntimeError(
-            "reinforce() was removed. Use torch.distributions instead.\n"
-            "See http://pytorch.org/docs/master/distributions.html")
+        def trim(str):
+            return '\n'.join([line.strip() for line in str.split('\n')])
+
+        raise RuntimeError(trim(r"""reinforce() was removed.
+            Use torch.distributions instead.
+            See http://pytorch.org/docs/master/distributions.html
+
+            Instead of:
+
+            probs = policy_network(state)
+            action = probs.multinomial()
+            next_state, reward = env.step(action)
+            action.reinforce(reward)
+            action.backward()
+
+            Use:
+
+            probs = policy_network(state)
+            m = torch.distributions.Multinomial(probs)
+            action = m.sample()
+            next_state, reward = env.step(action)
+            loss = -m.log_prob(action) * reward
+            loss.backward()
+        """))
 
     detach = _add_docstr(_C._VariableBase.detach, r"""
     Returns a new Variable, detached from the current graph.
