@@ -18,7 +18,7 @@ class Dropout(Module):
 
     Args:
         p: probability of an element to be zeroed. Default: 0.5
-        inplace: If set to True, will do this operation in-place. Default: false
+        inplace: If set to ``True``, will do this operation in-place. Default: ``False``
 
     Shape:
         - Input: `Any`. Input can be of any shape
@@ -70,7 +70,7 @@ class Dropout2d(Module):
 
     Args:
         p (float, optional): probability of an element to be zeroed.
-        inplace (bool, optional): If set to True, will do this operation
+        inplace (bool, optional): If set to ``True``, will do this operation
             in-place
 
     Shape:
@@ -123,7 +123,7 @@ class Dropout3d(Module):
 
     Args:
         p (float, optional): probability of an element to be zeroed.
-        inplace (bool, optional): If set to True, will do this operation
+        inplace (bool, optional): If set to ``True``, will do this operation
             in-place
 
     Shape:

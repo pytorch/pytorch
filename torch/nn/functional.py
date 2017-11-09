@@ -241,9 +241,9 @@ def avg_pool1d(input, kernel_size, stride=None, padding=0,
         padding: implicit zero paddings on both sides of the input. Can be a
           single number or a tuple (padW,). Default: 0
         ceil_mode: when True, will use `ceil` instead of `floor` to compute the
-            output shape. Default: False
+            output shape. Default: ``False``
         count_include_pad: when True, will include the zero-padding in the
-            averaging calculation. Default: True
+            averaging calculation. Default: ``True``
 
     Example:
         >>> # pool of square window of size=3, stride=2
@@ -282,9 +282,9 @@ Args:
     padding: implicit zero paddings on both sides of the input. Can be a
       single number or a tuple (padH, padW). Default: 0
     ceil_mode: when True, will use `ceil` instead of `floor` in the formula
-        to compute the output shape. Default: False
+        to compute the output shape. Default: ``False``
     count_include_pad: when True, will include the zero-padding in th
-        averaging calculation. Default: True
+        averaging calculation. Default: ``True``
 """)
 
 avg_pool3d = _add_docstr(torch._C._nn.avg_pool3d, r"""
@@ -446,7 +446,7 @@ def adaptive_max_pool1d(input, output_size, return_indices=False):
 
     Args:
         output_size: the target output size (single integer)
-        return_indices: whether to return pooling indices. Default: False
+        return_indices: whether to return pooling indices. Default: ``False``
     """
     ret = _functions.thnn.AdaptiveMaxPool1d.apply(input, output_size)
     return ret if return_indices else ret[0]
@@ -461,7 +461,7 @@ def adaptive_max_pool2d(input, output_size, return_indices=False):
     Args:
         output_size: the target output size (single integer or
             double-integer tuple)
-        return_indices: whether to return pooling indices. Default: False
+        return_indices: whether to return pooling indices. Default: ``False``
     """
     ret = _functions.thnn.AdaptiveMaxPool2d.apply(input, output_size)
     return ret if return_indices else ret[0]
@@ -476,7 +476,7 @@ def adaptive_max_pool3d(input, output_size, return_indices=False):
     Args:
         output_size: the target output size (single integer or
             triple-integer tuple)
-        return_indices: whether to return pooling indices. Default: False
+        return_indices: whether to return pooling indices. Default: ``False``
     """
     ret = _functions.thnn.AdaptiveMaxPool3d.apply(input, output_size)
     return ret if return_indices else ret[0]
@@ -533,7 +533,7 @@ def alpha_dropout(input, p=0.5, training=False):
 
     Args:
         p (float, optional): the drop probability. Default: 0.5
-        training (bool, optional): switch between training and evaluation mode. Default: False
+        training (bool, optional): switch between training and evaluation mode. Default: ``False``
     """
     if p < 0 or p > 1:
         raise ValueError("dropout probability has to be between 0 and 1, "
@@ -865,7 +865,7 @@ def embedding(input, embedding_matrix,
         norm_type (float, optional): The p of the p-norm to compute for the max_norm option
         scale_grad_by_freq (boolean, optional): if given, this will scale gradients by the frequency of
                                                 the words in the mini-batch.
-        sparse (boolean, optional): if True, gradient w.r.t. weight matrix will be a sparse tensor. See Notes for
+        sparse (boolean, optional): if ``True``, gradient w.r.t. weight matrix will be a sparse tensor. See Notes for
                                     more details regarding sparse gradients.
 
     Shape:
@@ -1028,7 +1028,7 @@ def nll_loss(input, target, weight=None, size_average=True, ignore_index=-100, r
             class. If given, has to be a Tensor of size `C`
         size_average (bool, optional): By default, the losses are averaged
             over observations for each minibatch. If size_average
-            is False, the losses are summed for each minibatch. Default: True
+            is False, the losses are summed for each minibatch. Default: ``True``
         ignore_index (int, optional): Specifies a target value that is ignored
             and does not contribute to the input gradient. When size_average is
             True, the loss is averaged over non-ignored targets. Default: -100
@@ -1061,15 +1061,15 @@ def poisson_nll_loss(input, target, log_input=True, full=False, size_average=Tru
     Args:
         input: expectation of underlying Poisson distribution.
         target: random sample :math:`target \sim Pois(input)`.
-        log_input: if True the loss is computed as
-            `exp(input) - target * input`, if False then loss is
-            `input - target * log(input+eps)`. Default: True
+        log_input: if ``True`` the loss is computed as
+            `exp(input) - target * input`, if ``False`` then loss is
+            `input - target * log(input+eps)`. Default: ``True``
         full: whether to compute full loss, i. e. to add the Stirling
-            approximation term. Default: False
+            approximation term. Default: ``False``
             `target * log(target) - target + 0.5 * log(2 * pi * target)`.
         size_average: By default, the losses are averaged over observations for
             each minibatch. However, if the field sizeAverage is set to False,
-            the losses are instead summed for each minibatch. Default: True
+            the losses are instead summed for each minibatch. Default: ``True``
         eps (float, optional): Small value to avoid evaluation of log(0) when
             log_input=False. Default: 1e-8
     """
@@ -1096,12 +1096,12 @@ See :class:`~torch.nn.KLDivLoss` for details.
 Args:
     input: Variable of arbitrary shape
     target: Variable of the same shape as input
-    size_average: if True the output is divided by the number of elements
-        in input tensor. Default: True
+    size_average: if ``True`` the output is divided by the number of elements
+        in input tensor. Default: ``True``
     reduce (bool, optional): By default, the losses are averaged
         over observations for each minibatch, or summed, depending on
         size_average. When reduce is False, returns a loss per batch
-        element instead and ignores size_average. Default: True
+        element instead and ignores size_average. Default: ``True``
 
 """)
 
@@ -1121,14 +1121,14 @@ def cross_entropy(input, target, weight=None, size_average=True, ignore_index=-1
         size_average (bool, optional): By default, the losses are averaged
                 over observations for each minibatch. However, if the field
                 sizeAverage is set to False, the losses are instead summed
-                for each minibatch. Ignored if reduce is False. Default: True
+                for each minibatch. Ignored if reduce is False. Default: ``True``
         ignore_index (int, optional): Specifies a target value that is ignored
                 and does not contribute to the input gradient. When size_average is
                 True, the loss is averaged over non-ignored targets. Default: -100
         reduce (bool, optional): By default, the losses are averaged or summed over
                 observations for each minibatch depending on size_average. When reduce
                 is False, returns a loss per batch element instead and ignores
-                size_average. Default: True
+                size_average. Default: ``True``
 
     Examples::
 
@@ -1154,7 +1154,7 @@ def binary_cross_entropy(input, target, weight=None, size_average=True):
         size_average (bool, optional): By default, the losses are averaged
                 over observations for each minibatch. However, if the field
                 sizeAverage is set to False, the losses are instead summed
-                for each minibatch. Default: True
+                for each minibatch. Default: ``True``
 
     Examples::
 
@@ -1193,7 +1193,7 @@ def binary_cross_entropy_with_logits(input, target, weight=None, size_average=Tr
         size_average (bool, optional): By default, the losses are averaged
                 over observations for each minibatch. However, if the field
                 sizeAverage is set to False, the losses are instead summed
-                for each minibatch. Default: True
+                for each minibatch. Default: ``True``
 
     Examples::
 
@@ -1623,7 +1623,7 @@ def triplet_margin_loss(anchor, positive, negative, margin=1.0, p=2, eps=1e-6, s
         margin: the margin value. Default: 1
         p: the norm degree. Default: 2
         eps: small epsilon value to avoid numerical issues. Default: 1e-6
-        swap: compute distance swap. Default: False
+        swap: compute distance swap. Default: ``False``
 
     Shape:
         - Input: :math:`(N, D)` where `D = vector dimension`

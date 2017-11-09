@@ -322,10 +322,10 @@ It may be of a different data type or reside on a different device.
 
 Args:
     src (Tensor): Source tensor to copy
-    async (bool): If True and this copy is between CPU and GPU, then the copy
+    async (bool): If ``True`` and this copy is between CPU and GPU, then the copy
         may occur asynchronously with respect to the host. For other
         copies, this argument has no effect.
-    broadcast (bool): If True, :attr:`src` will be broadcast to the shape of
+    broadcast (bool): If ``True``, :attr:`src` will be broadcast to the shape of
         the underlying tensor.
 """)
 

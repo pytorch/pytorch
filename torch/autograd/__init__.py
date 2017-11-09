@@ -63,16 +63,16 @@ def backward(variables, grad_variables=None, retain_graph=None, create_graph=Non
         grad_variables (sequence of (Tensor, Variable or None)): Gradients w.r.t.
             each element of corresponding variables.  Any tensors will be
             automatically converted to Variables that are volatile unless
-            ``create_graph`` is True.  None values can be specified for scalar
+            ``create_graph`` is ``True``.  None values can be specified for scalar
             Variables or ones that don't require grad. If a None value would
             be acceptable for all grad_variables, then this argument is optional.
-        retain_graph (bool, optional): If False, the graph used to compute the grad
-            will be freed. Note that in nearly all cases setting this option to True
+        retain_graph (bool, optional): If ``False``, the graph used to compute the grad
+            will be freed. Note that in nearly all cases setting this option to ``True``
             is not needed and often can be worked around in a much more efficient
             way. Defaults to the value of ``create_graph``.
-        create_graph (bool, optional): If true, graph of the derivative will
+        create_graph (bool, optional): If ``True``, graph of the derivative will
             be constructed, allowing to compute higher order derivative products.
-            Defaults to False, unless ``grad_variables`` contains at least one
+            Defaults to ``False``, unless ``grad_variables`` contains at least one
             non-volatile Variable.
     """
     variables = (variables,) if isinstance(variables, Variable) else tuple(variables)
@@ -109,8 +109,8 @@ def grad(outputs, inputs, grad_outputs=None, retain_graph=None, create_graph=Non
     Gradients can be given as Tensors when one doesn't need the graph of the
     derivative, or as Variables, in which case the graph will be created.
 
-    If ``only_inputs`` is True, the function will only return a list of gradients
-    w.r.t the specified inputs. If it's False, then gradient w.r.t. all remaining
+    If ``only_inputs`` is ``True``, the function will only return a list of gradients
+    w.r.t the specified inputs. If it's ``False``, then gradient w.r.t. all remaining
     leaves will still be computed, and will be accumulated into their ``.grad``
     attribute.
 
@@ -120,24 +120,24 @@ def grad(outputs, inputs, grad_outputs=None, retain_graph=None, create_graph=Non
             returned (and not accumulated into ``.grad``).
         grad_outputs (sequence of Tensor or Variable): Gradients w.r.t. each output.
             Any tensors will be automatically converted to Variables that are
-            volatile unless ``create_graph`` is True.  None values can be
+            volatile unless ``create_graph`` is ``True``. None values can be
             specified for scalar Variables or ones that don't require grad.
             If a None value would be acceptable for all grad_variables, then
             this argument is optional.
-        retain_graph (bool, optional): If False, the graph used to compute the grad
-            will be freed. Note that in nearly all cases setting this option to True
+        retain_graph (bool, optional): If ``False``, the graph used to compute the grad
+            will be freed. Note that in nearly all cases setting this option to ``True``
             is not needed and often can be worked around in a much more efficient
             way. Defaults to the value of ``create_graph``.
-        create_graph (bool, optional): If True, graph of the derivative will
+        create_graph (bool, optional): If ``True``, graph of the derivative will
             be constructed, allowing to compute higher order derivative products.
-            Defaults to False, unless ``grad_variables`` contains at least one
+            Defaults to ``False``, unless ``grad_variables`` contains at least one
             non-volatile Variable.
-        only_inputs (bool, optional): If True, gradient w.r.t. leaves that are
+        only_inputs (bool, optional): If ``True``, gradient w.r.t. leaves that are
             part of the graph, but don't appear in ``inputs`` won't be computed
-            and accumulated. Defaults to True.
-        allow_unused (bool, optional): If False, specifying inputs that were not
+            and accumulated. Defaults to ``True``.
+        allow_unused (bool, optional): If ``False``, specifying inputs that were not
             used when computing outputs (and therefore their grad is always zero)
-            is an error. Default: False.
+            is an error. Defaults to ``False``.
     """
 
     outputs = (outputs,) if isinstance(outputs, Variable) else tuple(outputs)

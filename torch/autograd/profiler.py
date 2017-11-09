@@ -83,7 +83,7 @@ class profile(object):
 
     Arguments:
         enabled (bool, optional): Setting this to False makes this context manager a no-op.
-            Default: True.
+            Default: ``True``.
 
     .. warning:
         This context managers should not be called recursively, i.e. at most one
@@ -187,7 +187,7 @@ class emit_nvtx(object):
 
     Arguments:
         enabled (bool, optional): Setting this to False makes this context manager a no-op.
-            Default: True.
+            Default: ``True``.
 
     Example:
         >>> with torch.cuda.profiler.profile():
