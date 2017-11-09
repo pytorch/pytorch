@@ -380,17 +380,30 @@ static inline Tensor stack(TensorList tensors, int64_t dim=0) {
 
 /*
 [NativeFunction]
-name: asdf
-arg: Tensor a [output]
-arg: int64_t dim=0
-return: Tensor
+name: SpatialRoIPooling_forward
+arg: Tensor input
+arg: Tensor rois
+arg: int64_t pooledHeight
+arg: int64_t pooledWidth
+arg: float spatialScale
+arg: Tensor output [output]
+arg: Tensor argmaxes [output]
+return: void
 variants: function
 type_method_definition_level: base
-type_method_definition_dispatch: at::native::asdf
+type_method_definition_dispatch: at::native::SpatialRoIPooling_forward
 [/NativeFunction]
 */
-static inline Tensor asdf(Tensor &a, int64_t dim=0) {
-  return a;
+static inline void SpatialRoIPooling_forward(
+	const Tensor& input,
+	const Tensor& rois,
+	int64_t pooledHeight,
+	int64_t pooledWidth,
+	float spatialScale,
+	Tensor& output,
+	Tensor& argmaxes)
+{
+
 }
 
 }
