@@ -48,7 +48,6 @@ private:
   at::Tensor unpack_opt(const Tensor & t, const char * name, int pos) const;
   std::vector<at::Tensor> unpack(const at::TensorList &tl, const char *name, int pos) const;
 
-  Variable as_variable(const Scalar & scalar) const;
   Variable as_variable(Tensor tensor) const;
   std::tuple<Variable, Variable> as_variable(std::tuple<Tensor, Tensor> tensor) const;
   std::tuple<Variable, Variable, Variable> as_variable(std::tuple<Tensor, Tensor, Tensor> tensor) const;

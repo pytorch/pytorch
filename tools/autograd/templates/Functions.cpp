@@ -39,15 +39,6 @@ Tensor maybe_multiply(const Tensor & t, const Scalar & s) {
   }
 }
 
-// Don't expose ATen scalars to Variable API, because they are not supported yet.
-void ensure_no_aten_scalars(variable_list &vars) {
-  for (auto& v : vars) {
-    if (v.defined() && v.dim() == 0) {
-      v.data().as_strided_({1}, {1});
-    }
-  }
-}
-
 Tensor norm_backward(const Tensor & grad, const Tensor & self, const Scalar & p_, const Tensor & norm) {
   double p = p_.toDouble();
   Tensor self_scaled;
@@ -168,12 +159,9 @@ Tensor mm_mat2_backward(const Tensor & grad, const Tensor & mat1, IntList sizes,
 }
 
 Tensor select_backward_scalar(Tensor grad, const Tensor & input, const Tensor & value) {
-  if (grad.dim() == 1) {
-    // TODO: remove this once zero-dim tensor work properly in PyTorch
-    grad = grad.view({});
-  }
+  auto grad_data = static_cast<Variable&>(grad).data();
   auto grad_input = zeros_like(input);
-  grad_input.masked_fill_(input == value, Scalar(grad));
+  grad_input.masked_fill_(input == value, Scalar(grad_data[0]));
   return grad_input;
 }
 
@@ -191,12 +179,13 @@ Tensor trace_backward(const Tensor & grad, IntList sizes) {
   }
 
   // TODO: simplify once toScalarType is virtual
+  auto grad_data = static_cast<const Variable&>(grad).data();
   auto& long_type = *VariableImpl::getType(
-      Variable(grad).data().type().toScalarType(at::kLong));
+      grad_data.type().toScalarType(at::kLong));
 
   auto grad_input = grad.type().zeros(sizes[0] * sizes[1]);
   auto indices = long_type.arange(0, grad_input.numel(), sizes[1] + 1);
-  grad_input.index_fill_(0, indices, Scalar(grad.view({})));
+  grad_input.index_fill_(0, indices, Scalar(grad_data[0]));
   return grad_input.view(sizes);
 }
 
