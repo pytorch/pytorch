@@ -42,20 +42,30 @@ THLongStorage *THCSTensor_(newSizeOf)(THCState *state, THCSTensor *self)
 
 /*** TODO: watch out for memory leaks ***/
 THCIndexTensor *THCSTensor_(newIndices)(THCState *state, const THCSTensor *self) {
+#if !defined(__HIP_PLATFORM_HCC__)
   if (self->nnz == 0) {
     // Narrows don't work on 0-length tensors
     THCIndexTensor_(retain)(state, self->indices);
     return self->indices;
   }
   return THCIndexTensor_(newNarrow)(state, self->indices, 1, 0, self->nnz);
+#else
+  THError("not supported on HIP_PLATFORM");
+  return NULL;
+#endif
 }
 
 THCTensor *THCSTensor_(newValues)(THCState *state, const THCSTensor *self) {
+#if !defined(__HIP_PLATFORM_HCC__)
   if (self->nnz == 0) {
     THCTensor_(retain)(state, self->values);
     return self->values;
   }
   return THCTensor_(newNarrow)(state, self->values, 0, 0, self->nnz);
+#else
+  THError("not supported on HIP_PLATFORM");
+  return NULL;
+#endif
 }
 
 
@@ -66,6 +76,7 @@ THCTensor *THCSTensor_(newValues)(THCState *state, const THCSTensor *self) {
 /*** Helper methods ***/
 static void THCSTensor_(rawInit)(THCState *state, THCSTensor *self)
 {
+#if !defined(__HIP_PLATFORM_HCC__)
   self->size = NULL;
   self->indices = THCIndexTensor_(new)(state);
   self->values = THCTensor_(new)(state);
@@ -75,9 +86,13 @@ static void THCSTensor_(rawInit)(THCState *state, THCSTensor *self)
   self->nnz = 0;
   // self->flag = TH_TENSOR_REFCOUNTED;
   self->refcount = 1;
+#else
+  THError("not supported on HIP_PLATFORM");
+#endif
 }
 
 void THCSTensor_(rawResize)(THCState *state, THCSTensor *self, int nDimI, int nDimV, int64_t *size) {
+#if !defined(__HIP_PLATFORM_HCC__)
   // Only resize valid sizes into tensor.
   self->size = THRealloc(self->size, sizeof(int64_t)*(nDimI + nDimV));
 
@@ -87,10 +102,14 @@ void THCSTensor_(rawResize)(THCState *state, THCSTensor *self, int nDimI, int nD
   self->nDimensionI = nDimI;
   self->nDimensionV = nDimV;
   self->coalesced = 0;
+#else
+  THError("not supported on HIP_PLATFORM");
+#endif
 }
 
 // directly assign without cloning or retaining (internal method)
 THCSTensor* THCSTensor_(_move)(THCState *state, THCSTensor *self, THCIndexTensor *indices, THCTensor *values) {
+#if !defined(__HIP_PLATFORM_HCC__)
   int empty = THCTensor_(nDimension)(state, values) == 0;
   if (!empty) {
     THArgCheck(THCIndexTensor_(nDimension)(state, indices) == 2, 2,
@@ -113,11 +132,20 @@ THCSTensor* THCSTensor_(_move)(THCState *state, THCSTensor *self, THCIndexTensor
   self->coalesced = 0;
 
   return self;
+#else
+  THError("not supported on HIP_PLATFORM");
+  return NULL;
+#endif
 }
 
 THCSTensor* THCSTensor_(_set)(THCState *state, THCSTensor *self, THCIndexTensor *indices, THCTensor *values) {
+#if !defined(__HIP_PLATFORM_HCC__)
   // Note: Not like torch.set, this is an internal method
   return THCSTensor_(_move)(state, self, THCIndexTensor_(newClone)(state, indices), THCTensor_(newClone)(state, values));
+#else
+  THError("not supported on HIP_PLATFORM");
+  return NULL;
+#endif
 }
 
 /*** end helper methods ***/
@@ -125,19 +153,30 @@ THCSTensor* THCSTensor_(_set)(THCState *state, THCSTensor *self, THCIndexTensor 
 /* Empty init */
 THCSTensor *THCSTensor_(new)(THCState *state)
 {
+#if !defined(__HIP_PLATFORM_HCC__)
   THCSTensor *self = THAlloc(sizeof(THCSTensor));
   THCSTensor_(rawInit)(state, self);
   return self;
+#else
+  THError("not supported on HIP_PLATFORM");
+  return NULL;
+#endif
 }
 
 /* Pointer-copy init */
 THCSTensor *THCSTensor_(newWithTensor)(THCState *state, THCIndexTensor *indices, THCTensor *values)
 {
+#if !defined(__HIP_PLATFORM_HCC__)
   return THCSTensor_(newWithTensorAndSize)(state, indices, values, NULL);
+#else
+  THError("not supported on HIP_PLATFORM");
+  return NULL;
+#endif
 }
 
 THCSTensor *THCSTensor_(newWithTensorAndSize)(THCState *state, THCIndexTensor *indices, THCTensor *values, THLongStorage *sizes)
 {  // If sizes are not given, it is inferred as max index of each dim.
+#if !defined(__HIP_PLATFORM_HCC__)
   int64_t nDimI, nDimV;
 
   THCSTensor *self = THAlloc(sizeof(THCSTensor));
@@ -176,19 +215,29 @@ THCSTensor *THCSTensor_(newWithTensorAndSize)(THCState *state, THCIndexTensor *i
   THCSTensor_(_move)(state, self, THCIndexTensor_(newWithTensor)(state, indices), THCTensor_(newWithTensor)(state, values));
 
   return self;
+#else
+  THError("not supported on HIP_PLATFORM");
+  return NULL;
+#endif
 }
 
 THCSTensor *THCSTensor_(newWithSize)(THCState *state, THLongStorage *size)
 {
+#if !defined(__HIP_PLATFORM_HCC__)
   THCSTensor *self = THAlloc(sizeof(THCSTensor));
   THCSTensor_(rawInit)(state, self);
   THCSTensor_(rawResize)(state, self, size->size, 0, size->data);
 
   return self;
+#else
+  THError("not supported on HIP_PLATFORM");
+  return NULL;
+#endif
 }
 
 THCSTensor *THCSTensor_(newWithSize1d)(THCState *state, int64_t size0)
 {
+#if !defined(__HIP_PLATFORM_HCC__)
   int64_t size[1] = {size0};
 
   THCSTensor *self = THAlloc(sizeof(THCSTensor));
@@ -196,10 +245,15 @@ THCSTensor *THCSTensor_(newWithSize1d)(THCState *state, int64_t size0)
   THCSTensor_(rawResize)(state, self, 1, 0, size);
 
   return self;
+#else
+  THError("not supported on HIP_PLATFORM");
+  return NULL;
+#endif
 }
 
 THCSTensor *THCSTensor_(newWithSize2d)(THCState *state, int64_t size0, int64_t size1)
 {
+#if !defined(__HIP_PLATFORM_HCC__)
   int64_t size[2] = {size0, size1};
 
   THCSTensor *self = THAlloc(sizeof(THCSTensor));
@@ -207,10 +261,15 @@ THCSTensor *THCSTensor_(newWithSize2d)(THCState *state, int64_t size0, int64_t s
   THCSTensor_(rawResize)(state, self, 2, 0, size);
 
   return self;
+#else
+  THError("not supported on HIP_PLATFORM");
+  return NULL;
+#endif
 }
 
 THCSTensor *THCSTensor_(newWithSize3d)(THCState *state, int64_t size0, int64_t size1, int64_t size2)
 {
+#if !defined(__HIP_PLATFORM_HCC__)
   int64_t size[3] = {size0, size1, size2};
 
   THCSTensor *self = THAlloc(sizeof(THCSTensor));
@@ -218,10 +277,15 @@ THCSTensor *THCSTensor_(newWithSize3d)(THCState *state, int64_t size0, int64_t s
   THCSTensor_(rawResize)(state, self, 3, 0, size);
 
   return self;
+#else
+  THError("not supported on HIP_PLATFORM");
+  return NULL;
+#endif
 }
 
 THCSTensor *THCSTensor_(newWithSize4d)(THCState *state, int64_t size0, int64_t size1, int64_t size2, int64_t size3)
 {
+#if !defined(__HIP_PLATFORM_HCC__)
   int64_t size[4] = {size0, size1, size2, size3};
 
   THCSTensor *self = THAlloc(sizeof(THCSTensor));
@@ -229,9 +293,14 @@ THCSTensor *THCSTensor_(newWithSize4d)(THCState *state, int64_t size0, int64_t s
   THCSTensor_(rawResize)(state, self, 4, 0, size);
 
   return self;
+#else
+  THError("not supported on HIP_PLATFORM");
+  return NULL;
+#endif
 }
 
 THCSTensor *THCSTensor_(newClone)(THCState *state, THCSTensor *self) {
+#if !defined(__HIP_PLATFORM_HCC__)
   THCSTensor *other = THCSTensor_(new)(state);
   THCSTensor_(rawResize)(state, other, self->nDimensionI, self->nDimensionV, self->size);
 
@@ -240,15 +309,25 @@ THCSTensor *THCSTensor_(newClone)(THCState *state, THCSTensor *self) {
   other->nnz = self->nnz;
   other->coalesced = self->coalesced;
   return other;
+#else
+  THError("not supported on HIP_PLATFORM");
+  return NULL;
+#endif
 }
 
 THCSTensor *THCSTensor_(newTranspose)(THCState *state, THCSTensor *self, int d1, int d2) {
+#if !defined(__HIP_PLATFORM_HCC__)
   THCSTensor *other = THCSTensor_(newClone)(state, self);
   THCSTensor_(transpose)(state, other, d1, d2);
   return other;
+#else
+  THError("not supported on HIP_PLATFORM");
+  return NULL;
+#endif
 }
 
 THCTensor *THCSTensor_(newValuesWithSizeOf)(THCState *state, THCTensor *values, int64_t nnz) {
+#if !defined(__HIP_PLATFORM_HCC__)
   THCTensor *new_values;
   if (THCTensor_(nDimension)(state, values) == 0) { // values tensor uninitialized
     new_values = THCTensor_(newWithSize1d)(state, nnz);
@@ -259,6 +338,10 @@ THCTensor *THCSTensor_(newValuesWithSizeOf)(THCState *state, THCTensor *values, 
     THLongStorage_free(size);
   }
   return new_values;
+#else
+  THError("not supported on HIP_PLATFORM");
+  return NULL;
+#endif
 }
 
 /******************************************************************************
@@ -267,6 +350,7 @@ THCTensor *THCSTensor_(newValuesWithSizeOf)(THCState *state, THCTensor *values, 
 
 int THCSTensor_(isSameSizeAs)(THCState *state, const THCSTensor *self, const THCSTensor* src)
 {
+#if !defined(__HIP_PLATFORM_HCC__)
   if (self->nDimensionI != src->nDimensionI || self->nDimensionV != src->nDimensionV)
     return 0;
   for(int d = 0; d < self->nDimensionI + self->nDimensionV; ++d) {
@@ -275,10 +359,15 @@ int THCSTensor_(isSameSizeAs)(THCState *state, const THCSTensor *self, const THC
     }
   }
   return 1;
+#else
+  THError("not supported on HIP_PLATFORM");
+  return 0;
+#endif
 }
 
 int THCSTensor_(isSameSizeAsDense)(THCState *state, const THCSTensor *self, const THCTensor* src)
 {
+#if !defined(__HIP_PLATFORM_HCC__)
   if (self->nDimensionI + self->nDimensionV != src->nDimension)
     return 0;
   for(int d = 0; d < src->nDimension; ++d) {
@@ -287,64 +376,108 @@ int THCSTensor_(isSameSizeAsDense)(THCState *state, const THCSTensor *self, cons
     }
   }
   return 1;
+#else
+  THError("not supported on HIP_PLATFORM");
+  return 0;
+#endif
 }
 
 THCSTensor *THCSTensor_(resize)(THCState *state, THCSTensor *self, THLongStorage *size)
 {
+#if !defined(__HIP_PLATFORM_HCC__)
   THCSTensor_(rawResize)(state, self, size->size, 0, size->data);
   return self;
+#else
+  THError("not supported on HIP_PLATFORM");
+  return NULL;
+#endif
 }
 
 THCSTensor *THCSTensor_(resizeAs)(THCState *state, THCSTensor *self, THCSTensor *src)
 {
+#if !defined(__HIP_PLATFORM_HCC__)
   if(!THCSTensor_(isSameSizeAs)(state, self, src)) {
     THCSTensor_(rawResize)(state, self, src->nDimensionI, src->nDimensionV, src->size);
   }
   return self;
+#else
+  THError("not supported on HIP_PLATFORM");
+  return NULL;
+#endif
 }
 
 THCSTensor *THCSTensor_(resize1d)(THCState *state, THCSTensor *self, int64_t size0)
 {
+#if !defined(__HIP_PLATFORM_HCC__)
   int64_t size[1] = {size0};
   THCSTensor_(rawResize)(state, self, 1, 0, size);
   return self;
+#else
+  THError("not supported on HIP_PLATFORM");
+  return NULL;
+#endif
 }
 
 THCSTensor *THCSTensor_(resize2d)(THCState *state, THCSTensor *self, int64_t size0, int64_t size1)
 {
+#if !defined(__HIP_PLATFORM_HCC__)
   int64_t size[2] = {size0, size1};
   THCSTensor_(rawResize)(state, self, 2, 0, size);
   return self;
+#else
+  THError("not supported on HIP_PLATFORM");
+  return NULL;
+#endif
 }
 
 THCSTensor *THCSTensor_(resize3d)(THCState *state, THCSTensor *self, int64_t size0, int64_t size1, int64_t size2)
 {
+#if !defined(__HIP_PLATFORM_HCC__)
   int64_t size[3] = {size0, size1, size2};
   THCSTensor_(rawResize)(state, self, 3, 0, size);
   return self;
+#else
+  THError("not supported on HIP_PLATFORM");
+  return NULL;
+#endif
 }
 
 THCSTensor *THCSTensor_(resize4d)(THCState *state, THCSTensor *self, int64_t size0, int64_t size1, int64_t size2, int64_t size3)
 {
+#if !defined(__HIP_PLATFORM_HCC__)
   int64_t size[4] = {size0, size1, size2, size3};
   THCSTensor_(rawResize)(state, self, 4, 0, size);
   return self;
+#else
+  THError("not supported on HIP_PLATFORM");
+  return NULL;
+#endif
 }
 
 void THCSTensor_(copy)(THCState *state, THCSTensor *self, THCSTensor *src) {
+#if !defined(__HIP_PLATFORM_HCC__)
   if (self == src) return;
   THCSTensor_(rawResize)(state, self, src->nDimensionI, src->nDimensionV, src->size);
   THCSTensor_(_set)(state, self, src->indices, src->values);
   self->nnz = src->nnz;
   self->coalesced = src->coalesced;
+#else
+  THError("not supported on HIP_PLATFORM");
+#endif
 }
 
 int THCSTensor_(isCoalesced)(THCState *state, const THCSTensor *self) {
+#if !defined(__HIP_PLATFORM_HCC__)
   return self->coalesced;
+#else
+  THError("not supported on HIP_PLATFORM");
+  return 0;
+#endif
 }
 
 void THCSTensor_(free)(THCState *state, THCSTensor *self)
 {
+#if !defined(__HIP_PLATFORM_HCC__)
   if(!self)
     return;
   if(THAtomicDecrementRef(&self->refcount))
@@ -354,15 +487,23 @@ void THCSTensor_(free)(THCState *state, THCSTensor *self)
     THCTensor_(free)(state, self->values);
     THFree(self);
   }
+#else
+  THError("not supported on HIP_PLATFORM");
+#endif
 }
 
 void THCSTensor_(retain)(THCState *state, THCSTensor *self)
 {
+#if !defined(__HIP_PLATFORM_HCC__)
   THAtomicIncrementRef(&self->refcount);
+#else
+  THError("not supported on HIP_PLATFORM");
+#endif
 }
 
 int THCSTensor_(checkGPU)(THCState *state, unsigned int nSparseTensors, unsigned int nTensors, ...)
 {
+#if !defined(__HIP_PLATFORM_HCC__)
   /* FIXME: remove this flag after any users stop using it since it is
      now superseded by the runtime option */
 #ifdef DISABLE_CHECK_GPU
@@ -419,9 +560,14 @@ int THCSTensor_(checkGPU)(THCState *state, unsigned int nSparseTensors, unsigned
   va_end(args);
   return valid;
 #endif // DISABLE_CHECK_GPU
+#else
+  THError("not supported on HIP_PLATFORM");
+  return 0;
+#endif
 }
 
 void THCTensor_(sparseMask)(THCState *state, THCSTensor *r_, THCTensor *t, THCSTensor *mask) {
+#if !defined(__HIP_PLATFORM_HCC__)
   THArgCheck(mask->coalesced, 2, "mask is uncoalesced");
   THCAssertSameGPU(THCSTensor_(checkGPU)(state, 2, 3, r_, mask, t));
   if(!THCSTensor_(isSameSizeAsDense)(state, mask, t)) {
@@ -463,6 +609,9 @@ void THCTensor_(sparseMask)(THCState *state, THCSTensor *r_, THCTensor *t, THCST
   THCTensor_(free)(state, t_view);
   THCIndexTensor_(free)(state, maskIndices);
   THCTensor_(free)(state, maskValues);
+#else
+  THError("not supported on HIP_PLATFORM");
+#endif
 }
 
 #endif
