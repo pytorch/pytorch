@@ -1,8 +1,8 @@
-#ifndef THP_CUDNN_GRID_SAMPLER_INC
-#define THP_CUDNN_GRID_SAMPLER_INC
+#pragma once
 
-#include "../Types.h"
 #include "THC/THC.h"
+
+#include <ATen/ATen.h>
 
 #include "cudnn-wrapper.h"
 
@@ -10,14 +10,13 @@ namespace torch { namespace cudnn {
 
 void cudnn_grid_sampler_forward(
     THCState* state, cudnnHandle_t handle, cudnnDataType_t dataType,
-    THVoidTensor* input, THVoidTensor* grid, THVoidTensor* output);
+    const at::Tensor& input, const at::Tensor& grid, const at::Tensor& output);
+
 
 void cudnn_grid_sampler_backward(
     THCState* state, cudnnHandle_t handle, cudnnDataType_t dataType,
-    THVoidTensor* input, THVoidTensor* grad_input,
-    THVoidTensor* grid, THVoidTensor* grad_grid,
-    THVoidTensor* grad_output);
+    const at::Tensor& input, const at::Tensor& grad_input,
+    const at::Tensor& grid, const at::Tensor& grad_grid,
+    const at::Tensor& grad_output);
 
 }}
-
-#endif

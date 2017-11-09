@@ -15,6 +15,7 @@
 #include "torch/csrc/cudnn/BatchNorm.h"
 #include "torch/csrc/cudnn/Handles.h"
 #include "torch/csrc/cudnn/Types.h"
+#include "torch/csrc/cudnn/DynamicTypes.h"
 extern THCState* state;
 #endif
 
@@ -73,14 +74,14 @@ auto BatchNormForward::apply(const variable_list& inputs) -> variable_list {
         state,
         torch::cudnn::getCudnnHandle(),
         torch::cudnn::getCudnnDataType(input),
-        (THVoidTensor*)input.unsafeGetTH(false),
-        (THVoidTensor*)output.unsafeGetTH(false),
-        (THVoidTensor*)weight.unsafeGetTH(false),
-        (THVoidTensor*)bias.unsafeGetTH(false),
-        (THVoidTensor*)running_mean.unsafeGetTH(false),
-        (THVoidTensor*)running_var.unsafeGetTH(false),
-        (THVoidTensor*)save_mean.unsafeGetTH(false),
-        (THVoidTensor*)save_std.unsafeGetTH(false),
+        input_data,
+        output,
+        weight.opt_data(),
+        bias.opt_data(),
+        running_mean,
+        running_var,
+        save_mean,
+        save_std,
         training,
         momentum,
         eps);
@@ -136,16 +137,16 @@ auto BatchNormBackward::apply(const variable_list& grad_outputs) -> variable_lis
         state,
         torch::cudnn::getCudnnHandle(),
         torch::cudnn::getCudnnDataType(input),
-        (THVoidTensor*)input.unsafeGetTH(false),
-        (THVoidTensor*)grad_output.unsafeGetTH(false),
-        (THVoidTensor*)grad_input.unsafeGetTH(false),
-        (THVoidTensor*)grad_weight.unsafeGetTH(false),
-        (THVoidTensor*)grad_bias.unsafeGetTH(false),
-        (THVoidTensor*)weight.unsafeGetTH(false),
-        (THVoidTensor*)running_mean.unsafeGetTH(false),
-        (THVoidTensor*)running_var.unsafeGetTH(false),
-        (THVoidTensor*)save_mean.unsafeGetTH(false),
-        (THVoidTensor*)save_std.unsafeGetTH(false),
+        input,
+        grad_output,
+        grad_input,
+        grad_weight,
+        grad_bias,
+        weight,
+        running_mean,
+        running_var,
+        save_mean,
+        save_std,
         training,
         eps);
 #endif

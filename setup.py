@@ -257,7 +257,7 @@ class build_ext(setuptools.command.build_ext.build_ext):
         from tools.cwrap.plugins.AutoGPU import AutoGPU
         from tools.cwrap.plugins.BoolOption import BoolOption
         from tools.cwrap.plugins.KwargsPlugin import KwargsPlugin
-        from tools.cwrap.plugins.NullableArguments import NullableArguments
+        from tools.cwrap.plugins.NullableArguments import NullableArguments, UndefinedArguments
 
         from tools.cwrap.plugins.CuDNNPlugin import CuDNNPlugin
         from tools.cwrap.plugins.WrapDim import WrapDim
@@ -275,7 +275,7 @@ class build_ext(setuptools.command.build_ext.build_ext):
             AssertNDim(), WrapDim(), Broadcast()
         ])
         cwrap('torch/csrc/cudnn/cuDNN.cwrap', plugins=[
-            CuDNNPlugin(), NullableArguments()
+            CuDNNPlugin(), UndefinedArguments()
         ])
         # Build ATen based Variable classes
         autograd_gen_dir = 'torch/csrc/autograd/generated'
@@ -577,6 +577,7 @@ if WITH_CUDNN:
         "torch/csrc/cudnn/cuDNN.cpp",
         "torch/csrc/cudnn/GridSampler.cpp",
         "torch/csrc/cudnn/AffineGridGenerator.cpp",
+        "torch/csrc/cudnn/DynamicTypes.cpp",
         "torch/csrc/cudnn/Types.cpp",
         "torch/csrc/cudnn/Handles.cpp",
     ]

@@ -1,10 +1,10 @@
-#ifndef THP_CUDNN_CONV_INC
-#define THP_CUDNN_CONV_INC
+#pragma once
 
-#include "../Types.h"
 #include "THC/THC.h"
 
 #include "Descriptors.h"
+
+#include <ATen/ATen.h>
 
 #include "cudnn-wrapper.h"
 #include <vector>
@@ -41,49 +41,47 @@ struct Convolution
   // backward_filter)
 
   Convolution(
-      cudnnDataType_t dataType, THVoidTensor* input, THVoidTensor* weight,
-      THVoidTensor* bias, THVoidTensor* output, std::vector<int> pad,
+      cudnnDataType_t dataType, const at::Tensor& input, const at::Tensor& weight,
+      const at::Tensor& bias, const at::Tensor& output, std::vector<int> pad,
       std::vector<int> stride, std::vector<int> dilation, int groups,
       bool transposed);
 };
 
 void cudnn_convolution_forward(
     THCState* state, cudnnHandle_t handle, cudnnDataType_t dataType,
-    THVoidTensor* input, THVoidTensor* weight, THVoidTensor* output,
+    const at::Tensor& input, const at::Tensor& weight, const at::Tensor& output,
     Convolution* info, bool benchmark, bool deterministic);
 
 void cudnn_convolution_add_bias(
     THCState* state, cudnnHandle_t handle, cudnnDataType_t dataType,
-    THVoidTensor* bias, THVoidTensor* output, Convolution* info);
+    const at::Tensor& bias, const at::Tensor& output, Convolution* info);
 
 void cudnn_convolution_backward_data(
     THCState* state, cudnnHandle_t handle, cudnnDataType_t dataType,
-    THVoidTensor* gradOutput, THVoidTensor* gradInput, THVoidTensor* weight,
+    const at::Tensor& gradOutput, const at::Tensor& gradInput, const at::Tensor& weight,
     Convolution* info, bool benchmark, bool deterministic);
 
 void cudnn_convolution_backward_filter(
     THCState* state, cudnnHandle_t handle, cudnnDataType_t dataType,
-    THVoidTensor* gradOutput, THVoidTensor* input, THVoidTensor* gradWeight,
+    const at::Tensor& gradOutput, const at::Tensor& input, const at::Tensor& gradWeight,
     Convolution* info, bool benchmark, bool deterministic);
 
 void cudnn_convolution_backward_bias(
     THCState* state, cudnnHandle_t handle, cudnnDataType_t dataType,
-    THVoidTensor* gradOutput, THVoidTensor* gradBias, Convolution* info);
+    const at::Tensor& gradOutput, const at::Tensor& gradBias, Convolution* info);
 
 // Helpers that allow to queue initialization, conv kernel and bias addition
 // without reacquiring GIL in between.
 Convolution* cudnn_convolution_full_forward(
     THCState* state, cudnnHandle_t handle, cudnnDataType_t dataType,
-    THVoidTensor* input, THVoidTensor* weight, THVoidTensor* bias,
-    THVoidTensor* output, std::vector<int> pad, std::vector<int> stride,
+    const at::Tensor& input, const at::Tensor& weight, const at::Tensor& bias,
+    const at::Tensor& output, std::vector<int> pad, std::vector<int> stride,
     std::vector<int> dilation, int groups, bool benchmark, bool deterministic);
 
 Convolution* cudnn_convolution_transpose_full_forward(
     THCState* state, cudnnHandle_t handle, cudnnDataType_t dataType,
-    THVoidTensor* input, THVoidTensor* weight, THVoidTensor* bias,
-    THVoidTensor* output, std::vector<int> pad, std::vector<int> stride,
+    const at::Tensor& input, const at::Tensor& weight, const at::Tensor& bias,
+    const at::Tensor& output, std::vector<int> pad, std::vector<int> stride,
     std::vector<int> dilation, int groups, bool benchmark, bool deterministic);
 
 }}  // namespace torch::cudnn
-
-#endif

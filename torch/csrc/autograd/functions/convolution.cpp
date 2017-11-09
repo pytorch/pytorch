@@ -14,6 +14,7 @@
 #include "torch/csrc/cudnn/Conv.h"
 #include "torch/csrc/cudnn/Handles.h"
 #include "torch/csrc/cudnn/Types.h"
+#include "torch/csrc/cudnn/DynamicTypes.h"
 extern THCState* state;
 using namespace torch::cudnn;
 #endif
@@ -315,14 +316,14 @@ auto ConvForward::apply(const variable_list& inputs) -> variable_list {
     if (transposed) {
       convolution.reset(cudnn_convolution_transpose_full_forward(
           state, torch::cudnn::getCudnnHandle(), torch::cudnn::getCudnnDataType(input),
-          (THVoidTensor*)input.unsafeGetTH(false), (THVoidTensor*)weight.unsafeGetTH(false),
-          bias.defined() ? (THVoidTensor*)bias.unsafeGetTH(false) : nullptr, (THVoidTensor*)output.unsafeGetTH(false),
+          input, weight,
+          bias, output,
           padding, stride, dilation, groups, benchmark, deterministic));
     } else {
       convolution.reset(cudnn_convolution_full_forward(
           state, torch::cudnn::getCudnnHandle(), torch::cudnn::getCudnnDataType(input),
-          (THVoidTensor*)input.unsafeGetTH(false), (THVoidTensor*)weight.unsafeGetTH(false),
-          bias.defined() ? (THVoidTensor*)bias.unsafeGetTH(false) : nullptr, (THVoidTensor*)output.unsafeGetTH(false),
+          input, weight,
+          bias, output,
           padding, stride, dilation, groups, benchmark, deterministic));
     }
 #endif
@@ -437,12 +438,12 @@ auto ConvBackward::apply(const variable_list& grad_outputs) -> variable_list {
         // but swaps forward and backward calls
         cudnn_convolution_forward(
             state, torch::cudnn::getCudnnHandle(), torch::cudnn::getCudnnDataType(input),
-            (THVoidTensor*)grad_output.unsafeGetTH(false), (THVoidTensor*)weight.unsafeGetTH(false), (THVoidTensor*)grad_input.unsafeGetTH(false),
+            grad_output, weight, grad_input,
             convolution.get(), benchmark, deterministic);
       } else {
         cudnn_convolution_backward_data(
             state, torch::cudnn::getCudnnHandle(), torch::cudnn::getCudnnDataType(input),
-            (THVoidTensor*)grad_output.unsafeGetTH(false), (THVoidTensor*)grad_input.unsafeGetTH(false), (THVoidTensor*)weight.unsafeGetTH(false),
+            grad_output, grad_input, weight,
             convolution.get(), benchmark, deterministic);
       }
     }
@@ -451,7 +452,7 @@ auto ConvBackward::apply(const variable_list& grad_outputs) -> variable_list {
       grad_weight.resize_as_(weight);
       cudnn_convolution_backward_filter(
           state, torch::cudnn::getCudnnHandle(), torch::cudnn::getCudnnDataType(input),
-          (THVoidTensor*)grad_output.unsafeGetTH(false), (THVoidTensor*)input.unsafeGetTH(false), (THVoidTensor*)grad_weight.unsafeGetTH(false),
+          grad_output, input, grad_weight,
           convolution.get(), benchmark, deterministic);
 
       if (output_mask[2]) {
@@ -459,7 +460,7 @@ auto ConvBackward::apply(const variable_list& grad_outputs) -> variable_list {
         grad_bias.resize_as_(bias);
         cudnn_convolution_backward_bias(
             state, torch::cudnn::getCudnnHandle(), torch::cudnn::getCudnnDataType(input),
-            (THVoidTensor*)grad_output.unsafeGetTH(false), (THVoidTensor*)grad_bias.unsafeGetTH(false),
+            grad_output, grad_bias,
             convolution.get());
       }
     }

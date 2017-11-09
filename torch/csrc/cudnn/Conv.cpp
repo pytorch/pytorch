@@ -19,37 +19,38 @@ namespace torch { namespace cudnn {
 namespace {
 
 void setTensorDescriptor(
-    TensorDescriptor& desc, cudnnDataType_t dataType, THVoidTensor* tensor,
+    TensorDescriptor& desc, cudnnDataType_t dataType, const at::Tensor& tensor,
     int groups)
 {
-  CHECK_ARG(tensor->nDimension <= 5);
+  CHECK_ARG(tensor.dim() <= 5);
   int inputSize[5];
   int inputStride[5];
-  for (int i = 0; i < tensor->nDimension; ++i) {
-    inputSize[i] = (int) tensor->size[i];
-    inputStride[i] = (int) tensor->stride[i];
+  for (int i = 0; i < tensor.dim(); ++i) {
+    inputSize[i] = (int) tensor.size(i);
+    inputStride[i] = (int) tensor.stride(i);
   }
 #if CUDNN_VERSION < 7000
   inputSize[1] /= groups;
 #endif
-  desc.set(dataType, tensor->nDimension, inputSize, inputStride);
+  desc.set(dataType, tensor.dim(), inputSize, inputStride);
 }
 
 void setWeightDescriptor(
-    FilterDescriptor& desc, cudnnDataType_t dataType, THVoidTensor* weight,
+    FilterDescriptor& desc, cudnnDataType_t dataType, const at::Tensor& weight,
     int groups)
 {
-  CHECK_ARG(weight->nDimension <= 5);
+  CHECK_ARG(weight.dim() <= 5);
   int weightSize[5];
-  THVoidTensor_assertContiguous(weight);
-  for (int i = 0; i < weight->nDimension; ++i) {
-    weightSize[i] = (int) weight->size[i];
+  cudnn_assertContiguous(weight);
+  for (int i = 0; i < weight.dim(); ++i) {
+    weightSize[i] = (int) weight.size(i);
   }
 #if CUDNN_VERSION < 7000
   weightSize[0] /= groups;
 #endif
-  desc.set(dataType, weight->nDimension, weightSize);
+  desc.set(dataType, weight.dim(), weightSize);
 }
+
 
 struct ParamsHash {
   std::size_t operator()(const ConvolutionParams& params) const {
@@ -482,18 +483,18 @@ Workspace chooseAlgorithm(
   }
 }
 
+
 void* tensorPointer(
-    cudnnDataType_t dataType, THVoidTensor* tensor, int groupIdx, int groups,
+    cudnnDataType_t dataType, const at::Tensor& tensor, int groupIdx, int groups,
     int dim)
 {
   int elementSize = dataSize(dataType);
-  char* ptr = (char*) tensor->storage->data;
-  ptr += elementSize * tensor->storageOffset;
+  char* ptr = (char*) tensor.data_ptr();
 #if CUDNN_VERSION < 7000
   if (groupIdx > 0) {
     size_t size = 1;
-    for (int i = dim; i < tensor->nDimension; ++i) {
-      size *= tensor->size[i];
+    for (int i = dim; i < tensor.dim(); ++i) {
+      size *= tensor.size(i);
     }
     ptr += elementSize * size * groupIdx / groups;
   }
@@ -528,50 +529,50 @@ static void check_args(
     }
 }
 
-static void check_input_size(THVoidTensor* input, THVoidTensor* weight, int groups)
+static void check_input_size(const at::Tensor& input, const at::Tensor& weight, int groups)
 {
-  if (input->nDimension > 5){
+  if (input.dim() > 5){
     throw std::runtime_error("input has more than 5 dimensions");
   }
 
-  if (input->size[1]/groups != weight->size[1]){
+  if (input.size(1)/groups != weight.size(1)){
     std::stringstream ss;
-    ss << "Need input.size[1] == " << weight->size[1] * groups << " but got " << input->size[1] << " instead.";
+    ss << "Need input.size[1] == " << weight.size(1) * groups << " but got " << input.size(1) << " instead.";
     throw std::runtime_error(ss.str());
   }
 
 }
 
 static void check_bias_size(
-    THVoidTensor* bias, THVoidTensor* weight, int groups, bool transposed)
+    const at::Tensor& bias, const at::Tensor& weight, int groups, bool transposed)
 {
-  if (bias != nullptr){
+  if (bias.defined()){
     if (transposed){
-      if (bias->size[0]/groups != weight->size[1]){
+      if (bias.size(0)/groups != weight.size(1)){
         std::stringstream ss;
-        ss << "Need bias.size[0] == " << weight->size[1]*groups << " but instead it is " << bias->size[0];
+        ss << "Need bias.size[0] == " << weight.size(1)*groups << " but instead it is " << bias.size(0);
         throw std::runtime_error(ss.str());
       }
     }
-    else if (bias->size[0] != weight->size[0]){
+    else if (bias.size(0) != weight.size(0)){
       std::stringstream ss;
-      ss << "Need bias.size[0] == " << weight->size[0] << " but instead it is " << bias->size[0];
+      ss << "Need bias.size[0] == " << weight.size(0) << " but instead it is " << bias.size(0);
       throw std::runtime_error(ss.str());
     }
   }
 }
 
 static void check_expected_output_size_is_valid(
-    THVoidTensor* input, THVoidTensor* output, THVoidTensor* weight,
+    const at::Tensor& input, const at::Tensor& output, const at::Tensor& weight,
     const std::vector<int>& pad, const std::vector<int>& stride,
     const std::vector<int>& dilation)
 {
-  std::vector<int64_t> output_sizes(input->nDimension - 2);
+  std::vector<int64_t> output_sizes(input.dim() - 2);
   bool invalid_dim_size = false;
   int dim_idx = 0;
 
-  for (int i = 2; i != input->nDimension; ++i, ++dim_idx){
-    int64_t output = (input->size[i] + 2*pad[dim_idx] - (dilation[dim_idx] * (weight->size[i] - 1) + 1)) / stride[dim_idx] + 1;
+  for (int i = 2; i != input.dim(); ++i, ++dim_idx){
+    int64_t output = (input.size(i) + 2*pad[dim_idx] - (dilation[dim_idx] * (weight.size(i) - 1) + 1)) / stride[dim_idx] + 1;
     output_sizes[dim_idx] = output;
     if (output < 1){
       invalid_dim_size = true;
@@ -581,10 +582,10 @@ static void check_expected_output_size_is_valid(
   if (invalid_dim_size){
     std::stringstream ss;
     ss <<  "Given input size: (";
-    for (int i = 1; i != input->nDimension - 1; ++i){
-      ss << input->size[i] << ", ";
+    for (int i = 1; i != input.dim() - 1; ++i){
+      ss << input.size(i) << ", ";
     }
-    ss << input->size[input->nDimension - 1] << "). Calculated output size: (" << input->size[0] << ", ";
+    ss << input.size(input.dim() - 1) << "). Calculated output size: (" << input.size(0) << ", ";
     for (size_t i = 0; i != output_sizes.size() - 1; ++i){
       ss << output_sizes[i] << ", ";
     }
@@ -592,20 +593,20 @@ static void check_expected_output_size_is_valid(
     throw std::runtime_error(ss.str());
   }
 
-  if (input->nDimension != output->nDimension){
+  if (input.dim() != output.dim()){
     std::stringstream ss;
-    ss << "input (" << input->nDimension <<"D) and output ("<< output->nDimension;
+    ss << "input (" << input.dim() <<"D) and output ("<< output.dim();
     ss << "D) do not have the same number of dimensions";
     throw std::runtime_error(ss.str());
   }
 }
 
 static void convolution_shape_check(
-    THVoidTensor* input, THVoidTensor* weight, THVoidTensor* bias,
-    THVoidTensor* output, const std::vector<int>& pad, const std::vector<int>& stride,
+    const at::Tensor& input, const at::Tensor& weight, const at::Tensor& bias,
+    const at::Tensor& output, const std::vector<int>& pad, const std::vector<int>& stride,
     const std::vector<int>& dilation, int groups, bool transposed)
 {
-  check_args(pad, input->nDimension - 2, "padding");
+  check_args(pad, input.dim() - 2, "padding");
   check_args(stride, pad.size(), "stride");
   check_args(dilation, pad.size(), "dilation");
 
@@ -618,8 +619,8 @@ static void convolution_shape_check(
 static_assert(std::is_pod<ConvolutionParams>::value, "ConvolutionParams not POD");
 
 Convolution::Convolution(
-    cudnnDataType_t dataType, THVoidTensor* input, THVoidTensor* weight,
-    THVoidTensor* bias, THVoidTensor* output, std::vector<int> pad,
+    cudnnDataType_t dataType, const at::Tensor& input, const at::Tensor& weight,
+    const at::Tensor& bias, const at::Tensor& output, std::vector<int> pad,
     std::vector<int> stride, std::vector<int> dilation, int groups, bool transposed)
   : idesc(), odesc(), odesc_bias(), bdesc(), wdesc(), cdesc(), groups(groups)
   , transposed(transposed)
@@ -627,10 +628,10 @@ Convolution::Convolution(
   convolution_shape_check(input, weight, bias, output, pad, stride, dilation, groups, transposed);
   memset(&params, 0, sizeof(ConvolutionParams));
   params.dataType = dataType;
-  for (int i = 0; i != input->nDimension; ++i) {
-    params.input_size[i] = (int) input->size[i];
-    params.input_stride[i] = (int) input->stride[i];
-    params.weight_size[i] = (int) weight->size[i];
+  for (int i = 0; i != input.dim(); ++i) {
+    params.input_size[i] = (int) input.size(i);
+    params.input_stride[i] = (int) input.stride(i);
+    params.weight_size[i] = (int) weight.size(i);
   }
   for (size_t i = 0; i != pad.size(); ++i) {
     params.pad[i] = pad[i];
@@ -651,11 +652,11 @@ Convolution::Convolution(
 
 void cudnn_convolution_forward(
     THCState* state, cudnnHandle_t handle, cudnnDataType_t dataType,
-    THVoidTensor* input, THVoidTensor* weight, THVoidTensor* output,
+    const at::Tensor& input, const at::Tensor& weight, const at::Tensor& output,
     Convolution* info, bool benchmark, bool deterministic)
 {
   CHECK(cudnnSetStream(handle, THCState_getCurrentStream(state)));
-  assertSameGPU(dataType, input, weight, output);
+  assertSameGPU(input, weight, output);
   int groups = info->groups;
 
   cudnnConvolutionFwdAlgo_t fwdAlg;
@@ -688,17 +689,17 @@ void cudnn_convolution_forward(
 
 void cudnn_convolution_add_bias(
     THCState* state, cudnnHandle_t handle, cudnnDataType_t dataType,
-    THVoidTensor* bias, THVoidTensor* output,
+    const at::Tensor& bias, const at::Tensor& output,
     Convolution* info)
 {
   CHECK(cudnnSetStream(handle, THCState_getCurrentStream(state)));
-  assertSameGPU(dataType, bias, output);
-  CHECK_ARG(output->nDimension <= 5);
+  assertSameGPU(bias, output);
+  CHECK_ARG(output.dim() <= 5);
   TensorDescriptor& bdesc = info->bdesc;
 
-  int size[5] = { 1, (int)bias->size[0], 1, 1, 1 };
-  int stride[5] = { 1, (int)bias->stride[0], 1, 1, 1 };
-  bdesc.set(dataType, output->nDimension, size, stride);
+  int size[5] = { 1, (int)bias.size(0), 1, 1, 1 };
+  int stride[5] = { 1, (int)bias.stride(0), 1, 1, 1 };
+  bdesc.set(dataType, output.dim(), size, stride);
 
   void* bias_ptr = tensorPointer(dataType, bias, 0, 1, 0);
   void* output_ptr = tensorPointer(dataType, output, 0, 1, 1);
@@ -710,11 +711,11 @@ void cudnn_convolution_add_bias(
 
 void cudnn_convolution_backward_data(
     THCState* state, cudnnHandle_t handle, cudnnDataType_t dataType,
-    THVoidTensor* gradOutput, THVoidTensor* gradInput, THVoidTensor* weight,
+    const at::Tensor& gradOutput, const at::Tensor& gradInput, const at::Tensor& weight,
     Convolution* info, bool benchmark, bool deterministic)
 {
   CHECK(cudnnSetStream(handle, THCState_getCurrentStream(state)));
-  assertSameGPU(dataType, gradOutput, gradInput, weight);
+  assertSameGPU(gradOutput, gradInput, weight);
   int groups = info->params.groups;
 
   cudnnConvolutionBwdDataAlgo_t bwdDataAlg;
@@ -747,11 +748,11 @@ void cudnn_convolution_backward_data(
 
 void cudnn_convolution_backward_filter(
     THCState* state, cudnnHandle_t handle, cudnnDataType_t dataType,
-    THVoidTensor* gradOutput, THVoidTensor* input, THVoidTensor* gradWeight,
+    const at::Tensor& gradOutput, const at::Tensor& input, const at::Tensor& gradWeight,
     Convolution* info, bool benchmark, bool deterministic)
 {
   CHECK(cudnnSetStream(handle, THCState_getCurrentStream(state)));
-  assertSameGPU(dataType, gradOutput, input, gradWeight);
+  assertSameGPU(gradOutput, input, gradWeight);
   int groups = info->params.groups;
 
   cudnnConvolutionBwdFilterAlgo_t bwdFilterAlg;
@@ -791,10 +792,10 @@ void cudnn_convolution_backward_filter(
 
 void cudnn_convolution_backward_bias(
     THCState* state, cudnnHandle_t handle, cudnnDataType_t dataType,
-    THVoidTensor* gradOutput, THVoidTensor* gradBias, Convolution* info)
+    const at::Tensor& gradOutput, const at::Tensor& gradBias, Convolution* info)
 {
   CHECK(cudnnSetStream(handle, THCState_getCurrentStream(state)));
-  assertSameGPU(dataType, gradOutput, gradBias);
+  assertSameGPU(gradOutput, gradBias);
   Constant one(dataType, 1);
   Constant zero(dataType, 0);
   void* gradOutput_ptr = tensorPointer(dataType, gradOutput, 0, 1, 0);
@@ -807,8 +808,8 @@ void cudnn_convolution_backward_bias(
 
 Convolution* cudnn_convolution_full_forward(
     THCState* state, cudnnHandle_t handle, cudnnDataType_t dataType,
-    THVoidTensor* input, THVoidTensor* weight, THVoidTensor* bias,
-    THVoidTensor* output, std::vector<int> pad, std::vector<int> stride,
+    const at::Tensor& input, const at::Tensor& weight, const at::Tensor& bias,
+    const at::Tensor& output, std::vector<int> pad, std::vector<int> stride,
     std::vector<int> dilation, int groups, bool benchmark, bool deterministic)
 {
     CHECK(cudnnSetStream(handle, THCState_getCurrentStream(state)));
@@ -817,7 +818,7 @@ Convolution* cudnn_convolution_full_forward(
     cudnn_convolution_forward(
         state, handle, dataType, input, weight, output, info.get(), benchmark,
         deterministic);
-    if (bias) {
+    if (bias.defined()) {
         cudnn_convolution_add_bias(
             state, handle, dataType, bias, output, info.get());
     }
@@ -826,7 +827,7 @@ Convolution* cudnn_convolution_full_forward(
 
 Convolution* cudnn_convolution_transpose_full_forward(
     THCState* state, cudnnHandle_t handle, cudnnDataType_t dataType,
-    THVoidTensor* input, THVoidTensor* weight, THVoidTensor* bias, THVoidTensor* output,
+    const at::Tensor& input, const at::Tensor& weight, const at::Tensor& bias, const at::Tensor& output,
     std::vector<int> pad, std::vector<int> stride, std::vector<int> dilation,
     int groups, bool benchmark, bool deterministic)
 {
@@ -836,7 +837,7 @@ Convolution* cudnn_convolution_transpose_full_forward(
     cudnn_convolution_backward_data(
         state, handle, dataType, input, output, weight, info.get(), benchmark,
         deterministic);
-    if (bias) {
+    if (bias.defined()) {
         cudnn_convolution_add_bias(
             state, handle, dataType, bias, output, info.get());
     }
