@@ -76,10 +76,11 @@ class TestTorch(TestCase):
             'torch.DoubleTensor': 1e-8,
             'torch.FloatTensor': 1e-4,
         }
-        def run_test(m, v1, v2, m_transform = lambda x: x):
+
+        def run_test(m, v1, v2, m_transform=lambda x: x):
             m = m_transform(m.clone())
             ref = m.clone()
-            torch.addr(m, v1, v2, out = m)
+            torch.addr(m, v1, v2, out=m)
             for i in range(m.size(0)):
                 for j in range(m.size(1)):
                     ref[i, j] += v1[i] * v2[j]
