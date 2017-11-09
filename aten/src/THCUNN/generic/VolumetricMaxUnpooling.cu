@@ -16,7 +16,7 @@ static inline void THNN_(VolumetricMaxUnpooling_shapeCheck)(
                          int pT,
                          int pW,
                          int pH) {
-  int inputSlices;
+  int inputSlices = 0;
 
   THCUNN_check_shape_indices(state, indices, input);
 
@@ -71,11 +71,11 @@ void THNN_(VolumetricMaxUnpooling_updateOutput)(
            int dT, int dW, int dH,
            int padT, int padW, int padH)
 {
-  int batchSize;
-  int inputSlices;
-  int inputTime;
-  int inputHeight;
-  int inputWidth;
+  int batchSize = 0;
+  int inputSlices = 0;
+  int inputTime = 0;
+  int inputHeight = 0;
+  int inputWidth = 0;
 
   THNN_(VolumetricMaxUnpooling_shapeCheck)(
         state, input, NULL, indices,
@@ -170,11 +170,11 @@ void THNN_(VolumetricMaxUnpooling_updateGradInput)(
            int padT, int padW, int padH)
 {
 
-  int batchSize;
-  int inputSlices;
-  int inputTime;
-  int inputHeight;
-  int inputWidth;
+  int batchSize = 0;
+  int inputSlices = 0;
+  int inputTime = 0;
+  int inputHeight = 0;
+  int inputWidth = 0;
 
   THNN_(VolumetricMaxUnpooling_shapeCheck)(
         state, input, gradOutput, indices,
