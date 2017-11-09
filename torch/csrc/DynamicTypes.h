@@ -1,6 +1,6 @@
 #pragma once
 
-// Provides conversions between Python tensor objects and thpp::Tensors.
+// Provides conversions between Python tensor objects and at::Tensor.
 
 #include <Python.h>
 #include <memory>
