@@ -514,7 +514,6 @@
 ]]
 [[
   name: data_ptr
-  defined_if: "!IS_DISTRIBUTED"
   with_gil: True
   auto_gpu: False
   return: void*
@@ -3171,7 +3170,6 @@
         - THTensor* tensor1
         - THTensor* tensor2
     - cname: spaddcmul
-      defined_if: "!IS_DISTRIBUTED"
       return: argument 0
       arguments:
         - THTensor* self
@@ -3596,7 +3594,6 @@
 ]]
 [[
   name: randperm
-  defined_if: "!IS_DISTRIBUTED"
   backends:
     - CPU
   variants:
@@ -3612,7 +3609,6 @@
 ]]
 [[
   name: random_
-  defined_if: "!IS_DISTRIBUTED"
   backends:
     - CPU
   return: self
@@ -3835,7 +3831,6 @@
 ]]
 [[
   name: geometric_
-  defined_if: "!IS_DISTRIBUTED"
   backends:
     - CPU
     - CUDA
@@ -3873,7 +3868,6 @@
 ]]
 [[
   name: bernoulli_
-  defined_if: "!IS_DISTRIBUTED"
   backends:
     - CPU
     - CUDA
