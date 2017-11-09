@@ -113,7 +113,7 @@ goto:eof
 
   %MAKE_COMMAND%
   cd ../..
-  @setlocal
+  @endlocal
 
 goto:eof
 
