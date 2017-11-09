@@ -225,7 +225,7 @@
   self: not_implemented("gels")
   A: not_implemented("gels")
 
-- name: geometric(Tensor self, double p, Generator Generator)
+- name: geometric(Tensor self, double p, Generator generator)
   self: zeros_like(grad)
 
 - name: geqrf(Tensor self)
