@@ -3010,7 +3010,6 @@ LAB_IMPLEMENT_BASIC_FUNCTION(neg,-)
 #define TENSOR_IMPLEMENT_LOGICAL_SUM(NAME, OP, INIT_VALUE) \
   int THTensor_(NAME)(THTensor *tensor) \
   { \
-    THArgCheck(tensor->nDimension > 0, 1, "empty Tensor"); \
     int sum = INIT_VALUE;                               \
     TH_TENSOR_APPLY(real, tensor, sum = sum OP *tensor_data;); \
     return sum; \
