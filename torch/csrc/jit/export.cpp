@@ -201,6 +201,7 @@ void encodeGraph(onnx::GraphProto * p_g, const std::shared_ptr<Graph> & g, const
       continue;
     }
     auto p_n = p_g->add_node();
+    p_n->set_doc_string(node->debugName());
     for(auto input : node->inputs()) {
       p_n->add_input(node_name(input));
     }

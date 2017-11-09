@@ -140,8 +140,12 @@ void ToONNX(std::shared_ptr<tracer::TracingState>& state) {
       node_list outputs;
       if (py::isinstance<Node>(raw_output)) {
         outputs = node_list{py::cast<Node*>(raw_output)};
+        outputs[0]->setDebugName(n->debugName());
       } else {
         outputs = py::cast<std::vector<Node*>>(raw_output);
+        for (Node* node : outputs) {
+          node->setDebugName(n->debugName());
+        }
       }
 
       setOutputs(symbolToString(n->kind()), n, outputs);

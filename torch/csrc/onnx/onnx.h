@@ -306,6 +306,7 @@ public:
 class NodeProto : public MicroProto<onnx_NodeProto> {
 private:
   std::string op_type;
+  std::string doc_string;
   unique_vector<std::string> inputs;
   unique_vector<std::string> outputs;
   unique_vector<AttributeProto> attributes;
@@ -325,6 +326,7 @@ public:
     return ptr;
   }
   void set_op_type(const std::string& s) { proto.op_type= string(&op_type, s); }
+  void set_doc_string(const std::string& s) { proto.doc_string = string(&doc_string, s); }
 };
 
 class GraphProto : public MicroProto<onnx_GraphProto> {

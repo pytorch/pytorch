@@ -6,6 +6,10 @@
 #include "torch/csrc/autograd/python_engine.h"
 #include "torch/csrc/autograd/functions/special.h"
 
+#include <Python.h>
+#include <frameobject.h>
+#include <patchlevel.h>
+
 namespace torch { namespace jit { namespace tracer {
 
 namespace {
@@ -90,6 +94,44 @@ void nontraceableBackwardSubgraph(const variable_list& inputs, const variable_li
   std::make_shared<autograd::Eval>()->replaceSubgraph(inputs, outputs);
 }
 
+namespace {
+// https://stackoverflow.com/a/38600095
+std::string pyObjToString(PyObject *in) {
+  PyObject *s;
+  if (PyUnicode_Check(in)) {
+    s = PyUnicode_AsUTF8String(in);
+  } else if PyBytes_Check(in) {
+    s = PyObject_Bytes(in);
+  } else {
+    // TODO: bail
+  }
+  const char* retval = PyBytes_AsString(s);
+  Py_XDECREF(s);
+  return retval;
+}
+
+// Python interpreter retrieval routine adapted from
+// https://stackoverflow.com/a/8706144
+std::string getPythonInterpreterStackTrace() {
+  std::stringstream stack_trace;
+  PyGILState_STATE state = PyGILState_Ensure();
+  PyThreadState *tstate = PyThreadState_GET();
+  if (NULL != tstate && NULL != tstate->frame) {
+    PyFrameObject *frame = tstate->frame;
+
+    while (NULL != frame) {
+      int line = PyCode_Addr2Line(frame->f_code, frame->f_lasti);
+      std::string filename = pyObjToString(frame->f_code->co_filename);
+      std::string funcname = pyObjToString(frame->f_code->co_name);
+      stack_trace << filename << "(" << line << "): " << funcname << "\n";
+      frame = frame->f_back;
+    }
+  }
+  PyGILState_Release(state);
+  return stack_trace.str();
+}
+}  // namespace
+
 Node* recordTrace(std::string op, // TODO: make this a Symbol
                   at::ArrayRef<Variable> inputs,
                   at::ArrayRef<Variable> outputs) {
@@ -100,6 +142,8 @@ Node* recordTrace(std::string op, // TODO: make this a Symbol
   auto state_lock = state->lock();
 
   Node *n = graph->create(stringToSymbol(op));
+  n->setDebugName(getPythonInterpreterStackTrace());
+
   for (Variable input : inputs) {
     n->addInput(getValueTrace(state, input));
   }
