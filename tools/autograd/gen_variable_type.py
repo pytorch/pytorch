@@ -361,15 +361,34 @@ def load_derivatives(path, declarations_by_signature):
         if '(' not in defn['name']:
             continue
 
+        def unzip(xs):
+            return zip(*xs)
+
         # NB: Removes 'name' from defn dictionary
         defn_name, params = split_name_params(defn.pop('name'))
-        param_types = [p.split(' ')[0] for p in params if p != '*']
+        param_types, param_names = unzip([p.split(' ') for p in params if p != '*'])
         signature = '{}({})'.format(defn_name, ', '.join(param_types))
 
         declarations = declarations_by_signature[signature]
         if len(declarations) == 0:
             raise RuntimeError('no ATen declaration found for: {}'.format(signature))
         canonical = canonical_declaration(declarations, defn_name)
+
+        # TODO: Check the types line up
+        if len(param_names) != len(canonical['args']):
+            raise RuntimeError('Signature for {} has {} arguments ({}), but '
+                               'Declarations.yaml records {} arguments ({})'
+                               .format(defn_name,
+                                       len(param_names),
+                                       ', '.join(param_names),
+                                       len(canonical['args']),
+                                       ', '.join(canonical['args'])))
+        for i, (x, y) in enumerate(zip(param_names, canonical['args'])):
+            if x != y:
+                raise RuntimeError('Argument {} of {} has different names in '
+                                   'derivatives.yaml ({}) and '
+                                   'Declarations.yaml ({})'
+                                   .format(i, defn_name, x, y))
 
         # First, let us determine the set of inputs for which gradients
         # were specified in declarations.  We'll use this in layout
