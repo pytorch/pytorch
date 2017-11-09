@@ -1070,8 +1070,8 @@ class GradientRegistry(object):
                 )
             else:
                 raise Exception(
-                    "Exception when creating the gradient for [{}]: {}.".
-                    format(op.type, e)
+                    "Exception when creating gradient for [{}]:{}.\nOp: \n{}".
+                    format(op.type, e, str(op))
                 )
 
         if gradient_ops is None:
