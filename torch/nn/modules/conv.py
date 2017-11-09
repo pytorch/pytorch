@@ -115,7 +115,7 @@ class Conv1d(_ConvNd):
             elements. Default: 1
         groups (int, optional): Number of blocked connections from input
             channels to output channels. Default: 1
-        bias (bool, optional): If True, adds a learnable bias to the output. Default: True
+        bias (bool, optional): If ``True``, adds a learnable bias to the output. Default: ``True``
 
     Shape:
         - Input: :math:`(N, C_{in}, L_{in})`
@@ -211,7 +211,7 @@ class Conv2d(_ConvNd):
         padding (int or tuple, optional): Zero-padding added to both sides of the input. Default: 0
         dilation (int or tuple, optional): Spacing between kernel elements. Default: 1
         groups (int, optional): Number of blocked connections from input channels to output channels. Default: 1
-        bias (bool, optional): If True, adds a learnable bias to the output. Default: True
+        bias (bool, optional): If ``True``, adds a learnable bias to the output. Default: ``True``
 
     Shape:
         - Input: :math:`(N, C_{in}, H_{in}, W_{in})`
@@ -308,7 +308,7 @@ class Conv3d(_ConvNd):
         padding (int or tuple, optional): Zero-padding added to all three sides of the input. Default: 0
         dilation (int or tuple, optional): Spacing between kernel elements. Default: 1
         groups (int, optional): Number of blocked connections from input channels to output channels. Default: 1
-        bias (bool, optional): If True, adds a learnable bias to the output. Default: True
+        bias (bool, optional): If ``True``, adds a learnable bias to the output. Default: ``True``
 
     Shape:
         - Input: :math:`(N, C_{in}, D_{in}, H_{in}, W_{in})`
@@ -434,7 +434,7 @@ class ConvTranspose1d(_ConvTransposeMixin, _ConvNd):
         padding (int or tuple, optional): Zero-padding added to both sides of the input. Default: 0
         output_padding (int or tuple, optional): Zero-padding added to one side of the output. Default: 0
         groups (int, optional): Number of blocked connections from input channels to output channels. Default: 1
-        bias (bool, optional): If True, adds a learnable bias to the output. Default: True
+        bias (bool, optional): If ``True``, adds a learnable bias to the output. Default: ``True``
         dilation (int or tuple, optional): Spacing between kernel elements. Default: 1
 
     Shape:
@@ -513,7 +513,7 @@ class ConvTranspose2d(_ConvTransposeMixin, _ConvNd):
         padding (int or tuple, optional): Zero-padding added to both sides of the input. Default: 0
         output_padding (int or tuple, optional): Zero-padding added to one side of the output. Default: 0
         groups (int, optional): Number of blocked connections from input channels to output channels. Default: 1
-        bias (bool, optional): If True, adds a learnable bias to the output. Default: True
+        bias (bool, optional): If ``True``, adds a learnable bias to the output. Default: ``True``
         dilation (int or tuple, optional): Spacing between kernel elements. Default: 1
 
     Shape:
@@ -620,7 +620,7 @@ class ConvTranspose3d(_ConvTransposeMixin, _ConvNd):
         padding (int or tuple, optional): Zero-padding added to all three sides of the input. Default: 0
         output_padding (int or tuple, optional): Zero-padding added to one side of the output. Default: 0
         groups (int, optional): Number of blocked connections from input channels to output channels. Default: 1
-        bias (bool, optional): If True, adds a learnable bias to the output. Default: True
+        bias (bool, optional): If ``True``, adds a learnable bias to the output. Default: ``True``
         dilation (int or tuple, optional): Spacing between kernel elements. Default: 1
 
     Shape:

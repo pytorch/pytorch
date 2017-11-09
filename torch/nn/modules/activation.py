@@ -17,7 +17,7 @@ class Threshold(Module):
     Args:
         threshold: The value to threshold at
         value: The value to replace with
-        inplace: can optionally do the operation in-place. Default: False
+        inplace: can optionally do the operation in-place. Default: ``False``
 
     Shape:
         - Input: :math:`(N, *)` where `*` means, any number of additional
@@ -55,7 +55,7 @@ class ReLU(Threshold):
     :math:`{ReLU}(x)= max(0, x)`
 
     Args:
-        inplace: can optionally do the operation in-place. Default: False
+        inplace: can optionally do the operation in-place. Default: ``False``
 
     Shape:
         - Input: :math:`(N, *)` where `*` means, any number of additional
@@ -112,7 +112,7 @@ class Hardtanh(Module):
     Args:
         min_val: minimum value of the linear region range. Default: -1
         max_val: maximum value of the linear region range. Default: 1
-        inplace: can optionally do the operation in-place. Default: False
+        inplace: can optionally do the operation in-place. Default: ``False``
 
     Keyword arguments :attr:`min_value` and :attr:`max_value`
     have been deprecated in favor of :attr:`min_val` and :attr:`max_val`
@@ -159,7 +159,7 @@ class ReLU6(Hardtanh):
     r"""Applies the element-wise function :math:`{ReLU6}(x) = min(max(0,x), 6)`
 
     Args:
-        inplace: can optionally do the operation in-place. Default: False
+        inplace: can optionally do the operation in-place. Default: ``False``
 
     Shape:
         - Input: :math:`(N, *)` where `*` means, any number of additional
@@ -236,7 +236,7 @@ class ELU(Module):
 
     Args:
         alpha: the alpha value for the ELU formulation. Default: 1.0
-        inplace: can optionally do the operation in-place. Default: False
+        inplace: can optionally do the operation in-place. Default: ``False``
 
     Shape:
         - Input: :math:`(N, *)` where `*` means, any number of additional
@@ -275,7 +275,7 @@ class SELU(Module):
     More details can be found in the paper `Self-Normalizing Neural Networks`_ .
 
     Args:
-        inplace (bool, optional): can optionally do the operation in-place. Default: False
+        inplace (bool, optional): can optionally do the operation in-place. Default: ``False``
 
     Shape:
         - Input: :math:`(N, *)` where `*` means, any number of additional
@@ -377,7 +377,7 @@ class LeakyReLU(Module):
 
     Args:
         negative_slope: Controls the angle of the negative slope. Default: 1e-2
-        inplace: can optionally do the operation in-place. Default: False
+        inplace: can optionally do the operation in-place. Default: ``False``
 
     Shape:
         - Input: :math:`(N, *)` where `*` means, any number of additional
