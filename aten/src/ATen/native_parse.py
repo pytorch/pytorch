@@ -26,13 +26,24 @@ def parse(filename):
                 key = ls[0].strip()
                 value = ls[1].strip()
                 if key == 'arg':
-                    t, name = value.split(" ", 1)
+                    t, name = value.split(' ', 1)
+                    default = None
+                    output_arg = '[output]' in name
+
+                    if output_arg:
+                        name, _ = name.split(' ', 1)
+
                     if '=' in name:
-                        ns = name.split("=", 1)
+                        ns = name.split('=', 1)
                         name, default = ns[0], python_num(ns[1])
-                        arguments.append({'type': t, 'name': name, 'default': default})
-                    else:
-                        arguments.append({'type': t, 'name': name})
+
+                    argument_dict = {'type': t, 'name': name}
+                    if default is not None:
+                        argument_dict['default'] = default
+                    if output_arg:
+                        argument_dict['output'] = True
+
+                    arguments.append(argument_dict)
                 else:
                     declaration[key] = value
         return declarations
