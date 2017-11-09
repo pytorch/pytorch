@@ -4,7 +4,7 @@
 
 namespace at {
 
-struct UndefinedTensor final : public TensorImpl {
+struct AT_API UndefinedTensor final : public TensorImpl {
 public:
   static inline UndefinedTensor * singleton() {
     return &_singleton;

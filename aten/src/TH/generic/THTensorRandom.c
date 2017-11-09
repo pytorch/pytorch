@@ -66,12 +66,13 @@ void THTensor_(bernoulli_DoubleTensor)(THTensor *self, THGenerator *_generator, 
 
 void THTensor_(uniform)(THTensor *self, THGenerator *_generator, double a, double b)
 {
+  #if defined(TH_REAL_IS_FLOAT)
   TH_TENSOR_APPLY(real, self, *self_data =
-    #if defined(TH_REAL_IS_FLOAT)
     (real)THRandom_uniformFloat(_generator, (real)a, (real)b););
-    #else
+  #else
+  TH_TENSOR_APPLY(real, self, *self_data =
     (real)THRandom_uniform(_generator, a, b););
-    #endif
+  #endif
 }
 
 void THTensor_(normal)(THTensor *self, THGenerator *_generator, double mean, double stdv)
