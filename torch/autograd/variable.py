@@ -155,14 +155,14 @@ class Variable(_C._VariableBase):
                 None values can be specified for scalar Variables or ones that
                 don't require grad. If a None value would be acceptable then
                 this argument is optional.
-            retain_graph (bool, optional): If False, the graph used to compute
+            retain_graph (bool, optional): If ``False``, the graph used to compute
                 the grads will be freed. Note that in nearly all cases setting
                 this option to True is not needed and often can be worked around
                 in a much more efficient way. Defaults to the value of
                 ``create_graph``.
-            create_graph (bool, optional): If true, graph of the derivative will
+            create_graph (bool, optional): If ``True``, graph of the derivative will
                 be constructed, allowing to compute higher order derivative
-                products. Defaults to False, unless ``gradient`` is a volatile
+                products. Defaults to ``False``, unless ``gradient`` is a volatile
                 Variable.
         """
         torch.autograd.backward(self, gradient, retain_graph, create_graph, retain_variables)

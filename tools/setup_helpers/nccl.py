@@ -15,7 +15,10 @@ def gather_paths(env_vars):
 is_conda = 'conda' in sys.version or 'Continuum' in sys.version
 conda_dir = os.path.join(os.path.dirname(sys.executable), '..')
 
-WITH_NCCL = WITH_CUDA and platform.system() != 'Darwin'
+IS_WINDOWS = (platform.system() == 'Windows')
+IS_DARWIN = (platform.system() == 'Darwin')
+
+WITH_NCCL = WITH_CUDA and not IS_DARWIN and not IS_WINDOWS
 WITH_SYSTEM_NCCL = False
 NCCL_LIB_DIR = None
 NCCL_SYSTEM_LIB = None

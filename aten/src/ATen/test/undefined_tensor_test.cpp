@@ -3,17 +3,7 @@
 #include <string>
 #include "test_assert.h"
 
-
 using namespace at;
-
-#define ASSERT_THROWS(fn, message)                                  \
-try {                                                               \
-  fn;                                                               \
-  ASSERT(false);                                                    \
-} catch(std::runtime_error &e) {                                    \
-  ASSERT(std::string(e.what()).find(message) != std::string::npos); \
-}
-
 
 int main() {
   // mainly test ops on undefined tensors don't segfault and give a reasonable errror message.

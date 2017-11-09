@@ -92,7 +92,7 @@ PyObject * THCPModule_setDevice_wrap(PyObject *self, PyObject *arg)
 {
   HANDLE_TH_ERRORS
   THPUtils_assert(THPUtils_checkLong(arg), "invalid argument to setDevice");
-  long device = THPUtils_unpackLong(arg);
+  int64_t device = THPUtils_unpackLong(arg);
 
   THCPModule_setDevice(device);
 
@@ -171,7 +171,7 @@ PyObject * THCPModule_getDriverVersion(PyObject *self)
                     err, cudaGetErrorString(err));
     return NULL;
   }
-  return PyLong_FromLong((long) driverVersion);
+  return PyLong_FromLong((int64_t) driverVersion);
 }
 
 PyObject * THCPModule_getRNGState(PyObject *_unused)

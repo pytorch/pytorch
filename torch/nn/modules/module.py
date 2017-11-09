@@ -61,6 +61,12 @@ class Module(object):
         """Defines the computation performed at every call.
 
         Should be overriden by all subclasses.
+
+        .. note::
+            Although the recipe for forward pass needs to be defined within
+            this function, one should call the :class:`Module` instance afterwards
+            instead of this since the former takes care of running the
+            registered hooks while the latter silently ignores them.
         """
         raise NotImplementedError
 
@@ -419,7 +425,7 @@ class Module(object):
         Both parameters and persistent buffers (e.g. running averages) are
         included. Keys are corresponding parameter and buffer names.
 
-        When keep_vars is true, it returns a Variable for each parameter
+        When keep_vars is ``True``, it returns a Variable for each parameter
         (rather than a Tensor).
 
         Args:
@@ -428,9 +434,9 @@ class Module(object):
                 Default: None
             prefix (string, optional): Adds a prefix to the key (name) of every
                 parameter and buffer in the result dictionary. Default: ''
-            keep_vars (bool, optional): if true, returns a Variable for each
-                parameter. If false, returns a Tensor for each parameter.
-                Default: False
+            keep_vars (bool, optional): if ``True``, returns a Variable for each
+                parameter. If ``False``, returns a Tensor for each parameter.
+                Default: ``False``
 
         Returns:
             dict:
@@ -455,7 +461,7 @@ class Module(object):
 
     def load_state_dict(self, state_dict, strict=True):
         """Copies parameters and buffers from :attr:`state_dict` into
-        this module and its descendants. If :attr:`strict` is `True` then
+        this module and its descendants. If :attr:`strict` is ``True`` then
         the keys of :attr:`state_dict` must exactly match the keys returned
         by this module's :func:`state_dict()` function.
 

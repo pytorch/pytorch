@@ -1,6 +1,11 @@
 #include "Functions.h"
 #include <ATen/WrapDimUtils.h>
 
+// define constants like M_PI and C keywords for MSVC
+#ifdef _MSC_VER
+#define _USE_MATH_DEFINES
+#include <ciso646>
+#endif
 #include <math.h>
 
 // ${generated_comment}

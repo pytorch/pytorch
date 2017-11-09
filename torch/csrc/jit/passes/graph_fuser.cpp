@@ -13,15 +13,64 @@ namespace {
 // Some of these restrictions may be relaxable, but you should
 // carefully read the code first, as we rely on these assumptions.
 std::unordered_set<NodeKind> simple_mappable = {
-  ksigmoid,
-  ktanh,
-  kmul,
+  k__and__,
+  k__lshift__,
+  k__or__,
+  k__rshift__,
+  k__xor__,
+  kabs,
+  kacos,
   kadd,
+  kasin,
+  katan,
+  katan2,
+  kceil,
+  kclamp,
+  kcos,
+  kcosh,
+  kdiv,
+  keq,
+  kexp,
+  kfloor,
+  kfmod,
+  kfrac,
+  kge,
+  kgt,
+  kle,
+  klerp,
+  klgamma,
+  klog,
+  klog1p,
+  klt,
+  kmax,
+  kmin,
+  kmul,
+  kne,
   kneg,
+  kones,
+  kpow,
+  kreciprocal,
+  kremainder,
+  kround,
+  krsqrt,
+  ksigmoid,
+  ksin,
+  ksinh,
+  ksqrt,
+  ksub,
+  ktan,
+  ktanh,
+  ktrunc,
+  kzeros,
 };
 
 bool isSimpleMap(Node *node) {
-  return simple_mappable.count(node->kind());
+  if(simple_mappable.count(node->kind())) {
+    if(node->kind() == kmin || node->kind() == kmax)
+      return node->inputs().size() == 2; // unary min/max is a reduction...
+    return true;
+  }
+  return false;
 }
 
 struct GraphFuser {
@@ -40,18 +89,35 @@ struct GraphFuser {
   bool isCuda(Node * node) {
     return node->type()->expect<TensorType>()->device() != -1;
   }
-  // TODO: the fusion compiler needs to know how to handle 'alpha'
-  // and other attributes in code generation for us to be able to fuse them
-  // then it is safe to remove the !hasSpecialAlpha check
-  bool hasSpecialAlpha(Node * node) {
-    if(!node->hasAttribute(kalpha))
+  // TODO: the fusion compiler has a lot of float-specific codegen
+  // so for now we only consider nodes that operate on floating point numbers
+  bool hasFloatType(Node * node) {
+    if(!node->hasType()) {
       return false;
-    return at::Scalar(node->t(kalpha)).toDouble() != 1;
+    }
+    if(auto tt = node->type()->cast<TensorType>()) {
+      return tt->scalarType() != at::kFloat;
+    } else {
+      return false;
+    }
+  }
+  bool allFloatIO(Node * node) {
+    for(auto & o : node->outputs()) {
+      if(!hasFloatType(o)) {
+        return false;
+      }
+    }
+    for(auto & o : node->inputs()) {
+      if(!hasFloatType(o)) {
+        return false;
+      }
+    }
+    return true;
   }
   bool isFusable(Node * node) {
     if (!node->hasType()) return false;
     if (node->kind() == kFusionGroup) return true;
-    return isSimpleMap(node) && !hasSpecialAlpha(node) && isCuda(node);
+    return isSimpleMap(node) && allFloatIO(node) && isCuda(node);
   }
 
   // Can this node produce an _output_ of a fusion group?

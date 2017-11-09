@@ -140,12 +140,13 @@ endif()
 file(READ ${CMAKE_CURRENT_BINARY_DIR}/generated_cpp.txt generated_cpp)
 
 FILE(GLOB_RECURSE all_templates "templates/*")
+SET(native_functions ${CMAKE_CURRENT_SOURCE_DIR}/NativeFunctions.h)
 
 FILE(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/ATen)
 
 ADD_CUSTOM_COMMAND(OUTPUT ${generated_cpp}
 COMMAND ${GEN_COMMAND}
-DEPENDS ${all_python} ${all_templates} ${cwrap_files})
+DEPENDS ${all_python} ${all_templates} ${native_functions} ${cwrap_files})
 
 SET(all_cpp ${base_cpp} ${generated_cpp} ${ATen_CPU_SRCS})
 
@@ -250,6 +251,9 @@ IF(CUDA_FOUND)
     ${CUDA_cusparse_LIBRARY}
     ${CUDA_curand_LIBRARY})
   CUDA_ADD_CUBLAS_TO_TARGET(ATen)
+  IF(USE_CUDNN)
+    TARGET_LINK_LIBRARIES(ATen ${CUDNN_LIBRARIES})
+  ENDIF(USE_CUDNN)
   IF(USE_MAGMA)
     TARGET_LINK_LIBRARIES(ATen ${MAGMA_LIBRARIES})
     IF ($ENV{TH_BINARY_BUILD})

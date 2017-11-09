@@ -59,8 +59,6 @@ static int getObjDevice(PyObject *args, PyObject *self) {
   return -1;
 }
 
-THCPAutoGPU::THCPAutoGPU(int device_id) : AutoGPU(device_id) {}
-
 THCPAutoGPU::THCPAutoGPU(PyObject *args, PyObject *self)
   : AutoGPU(getObjDevice(args, self)) {
 }
