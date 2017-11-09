@@ -177,8 +177,8 @@ class ReduceLROnPlateau(object):
             reduced. new_lr = lr * factor. Default: 0.1.
         patience (int): Number of epochs with no improvement after
             which learning rate will be reduced. Default: 10.
-        verbose (bool): If True, prints a message to stdout for
-            each update. Default: False.
+        verbose (bool): If ``True``, prints a message to stdout for
+            each update. Default: ``False``.
         threshold (float): Threshold for measuring the new optimum,
             to only focus on significant changes. Default: 1e-4.
         threshold_mode (str): One of `rel`, `abs`. In `rel` mode,

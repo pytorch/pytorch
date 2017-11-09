@@ -12,7 +12,7 @@ def _type(self, new_type=None, async=False):
 
     Args:
         new_type (type or string): The desired type
-        async (bool): If True, and the source is in pinned memory and
+        async (bool): If ``True``, and the source is in pinned memory and
                       destination is on the GPU or vice versa, the copy is
                       performed asynchronously with respect to the host.
                       Otherwise, the argument has no effect.
@@ -46,7 +46,7 @@ def _cuda(self, device=None, async=False):
 
     Args:
         device (int): The destination GPU id. Defaults to the current device.
-        async (bool): If True and the source is in pinned memory, the copy will
+        async (bool): If ``True`` and the source is in pinned memory, the copy will
                       be asynchronous with respect to the host. Otherwise, the
                       argument has no effect.
     """

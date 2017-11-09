@@ -19,7 +19,7 @@ class RMSprop(Optimizer):
         alpha (float, optional): smoothing constant (default: 0.99)
         eps (float, optional): term added to the denominator to improve
             numerical stability (default: 1e-8)
-        centered (bool, optional) : if True, compute the centered RMSProp,
+        centered (bool, optional) : if ``True``, compute the centered RMSProp,
             the gradient is normalized by an estimation of its variance
         weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
 

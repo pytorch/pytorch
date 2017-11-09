@@ -29,7 +29,7 @@ class MaxPool1d(Module):
         stride: the stride of the window. Default value is :attr:`kernel_size`
         padding: implicit zero padding to be added on both sides
         dilation: a parameter that controls the stride of elements in the window
-        return_indices: if True, will return the max indices along with the outputs.
+        return_indices: if ``True``, will return the max indices along with the outputs.
                         Useful when Unpooling later
         ceil_mode: when True, will use `ceil` instead of `floor` to compute the output shape
 
@@ -104,7 +104,7 @@ class MaxPool2d(Module):
         stride: the stride of the window. Default value is :attr:`kernel_size`
         padding: implicit zero padding to be added on both sides
         dilation: a parameter that controls the stride of elements in the window
-        return_indices: if True, will return the max indices along with the outputs.
+        return_indices: if ``True``, will return the max indices along with the outputs.
                         Useful when Unpooling later
         ceil_mode: when True, will use `ceil` instead of `floor` to compute the output shape
 
@@ -544,7 +544,7 @@ class MaxPool3d(Module):
         stride: the stride of the window. Default value is :attr:`kernel_size`
         padding: implicit zero padding to be added on all three sides
         dilation: a parameter that controls the stride of elements in the window
-        return_indices: if True, will return the max indices along with the outputs.
+        return_indices: if ``True``, will return the max indices along with the outputs.
                         Useful when Unpooling later
         ceil_mode: when True, will use `ceil` instead of `floor` to compute the output shape
 
@@ -684,8 +684,8 @@ class FractionalMaxPool2d(Module):
                      Can be a tuple (oH, oW) or a single number oH for a square image oH x oH
         output_ratio: If one wants to have an output size as a ratio of the input size, this option can be given.
                       This has to be a number or tuple in the range (0, 1)
-        return_indices: if True, will return the indices along with the outputs.
-                        Useful to pass to nn.MaxUnpool2d. Default: False
+        return_indices: if ``True``, will return the indices along with the outputs.
+                        Useful to pass to nn.MaxUnpool2d. Default: ``False``
 
     Examples:
         >>> # pool of square window of size=3, and target output size 13x12
@@ -839,8 +839,8 @@ class AdaptiveMaxPool1d(Module):
 
     Args:
         output_size: the target output size H
-        return_indices: if True, will return the indices along with the outputs.
-                        Useful to pass to nn.MaxUnpool1d. Default: False
+        return_indices: if ``True``, will return the indices along with the outputs.
+                        Useful to pass to nn.MaxUnpool1d. Default: ``False``
 
     Examples:
         >>> # target output size of 5
@@ -872,8 +872,8 @@ class AdaptiveMaxPool2d(Module):
     Args:
         output_size: the target output size of the image of the form H x W.
                      Can be a tuple (H, W) or a single number H for a square image H x H
-        return_indices: if True, will return the indices along with the outputs.
-                        Useful to pass to nn.MaxUnpool2d. Default: False
+        return_indices: if ``True``, will return the indices along with the outputs.
+                        Useful to pass to nn.MaxUnpool2d. Default: ``False``
 
     Examples:
         >>> # target output size of 5x7
@@ -909,8 +909,8 @@ class AdaptiveMaxPool3d(Module):
     Args:
         output_size: the target output size of the image of the form D x H x W.
                      Can be a tuple (D, H, W) or a single number D for a cube D x D x D
-        return_indices: if True, will return the indices along with the outputs.
-                        Useful to pass to nn.MaxUnpool3d. Default: False
+        return_indices: if ``True``, will return the indices along with the outputs.
+                        Useful to pass to nn.MaxUnpool3d. Default: ``False``
 
     Examples:
         >>> # target output size of 5x7x9
