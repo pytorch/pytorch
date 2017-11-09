@@ -328,6 +328,8 @@ def to_camel_case(name):
     return ''.join([p.title() for p in name.split('_')])
 
 
+# TODO: Use a real parser here; this will get bamboozled
+# by signatures that contain things like std::array<bool, 2> (note the space)
 def split_name_params(prototype):
     name, params = re.match('(\w+)\((.*)\)', prototype).groups()
     return name, params.split(', ')

@@ -325,7 +325,9 @@ def create_generic(top_env, declarations):
             mask_size = sum(has_output_mask(arg) for arg in option['arguments'])
             insert({
                 'name': 'output_mask',
-                'type': 'std::array<bool, {}>'.format(mask_size),
+                # NB: Lack of space in comma works around parsing
+                # problem in gen_variable_type.py
+                'type': 'std::array<bool,{}>'.format(mask_size),
                 'default': '{{' + ', '.join(['true'] * mask_size) + '}}',
             })
 

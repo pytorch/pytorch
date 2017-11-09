@@ -17,13 +17,13 @@ ATTR_METHOD_MAP = {
     'Scalar': 't',
     'bool': 'i',
     'double': 'f',
-    'std::array<bool, 2>': 'is',
-    'std::array<bool, 3>': 'is',
+    'std::array<bool,2>': 'is',
+    'std::array<bool,3>': 'is',
 }
 
 TYPE_CASTS = {
-    'std::array<bool, 2>': 'as_bool_array<2>',
-    'std::array<bool, 3>': 'as_bool_array<3>',
+    'std::array<bool,2>': 'as_bool_array<2>',
+    'std::array<bool,3>': 'as_bool_array<3>',
     'Scalar': 'Scalar',
     'IntList': 'std::vector<int64_t>',
 }
