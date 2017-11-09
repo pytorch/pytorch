@@ -58,10 +58,10 @@ def compile(arg=None, **kwargs):
             (as we always wait to see all derivatives before compiling.)
             Default: 1 (i.e., we will compile forwards and backwards, but not
             double-backwards).
-        optimize (bool, optional): whether or not to apply optimizations.  Default: True.
+        optimize (bool, optional): whether or not to apply optimizations.  Default: ``True``.
 
     Debug arguments:
-        time (bool, optional): if True, whenever we execute the model in question, we
+        time (bool, optional): if ``True``, whenever we execute the model in question, we
             will also print out some timing information for how long the model
             took to execute.  At the moment, there are three types of timings we
             emit:
@@ -76,10 +76,10 @@ def compile(arg=None, **kwargs):
                 - optimized: the time it took to execute the optimized model.
 
             At the moment, all of these timings are for the forward pass only.
-            Default: False.
-        enabled (bool, optional): if False, compilation is disabled and you
+            Default: ``False``.
+        enabled (bool, optional): if ``False``, compilation is disabled and you
             will get back your original model.  This is a convenient way to
-            disable tracing without having to delete the annotation. Default: True.
+            disable tracing without having to delete the annotation. Default: ``True``.
 
     Example: Compile as class decorator.
 

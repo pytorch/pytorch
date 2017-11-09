@@ -224,13 +224,13 @@ class RNN(RNNBase):
         hidden_size: The number of features in the hidden state h
         num_layers: Number of recurrent layers.
         nonlinearity: The non-linearity to use ['tanh'|'relu']. Default: 'tanh'
-        bias: If False, then the layer does not use bias weights b_ih and b_hh.
-            Default: True
-        batch_first: If True, then the input and output tensors are provided
+        bias: If ``False``, then the layer does not use bias weights b_ih and b_hh.
+            Default: ``True``
+        batch_first: If ``True``, then the input and output tensors are provided
             as (batch, seq, feature)
         dropout: If non-zero, introduces a dropout layer on the outputs of each
             RNN layer except the last layer
-        bidirectional: If True, becomes a bidirectional RNN. Default: False
+        bidirectional: If ``True``, becomes a bidirectional RNN. Default: ``False``
 
     Inputs: input, h_0
         - **input** (seq_len, batch, input_size): tensor containing the features
@@ -311,13 +311,13 @@ class LSTM(RNNBase):
         input_size: The number of expected features in the input x
         hidden_size: The number of features in the hidden state h
         num_layers: Number of recurrent layers.
-        bias: If False, then the layer does not use bias weights b_ih and b_hh.
-            Default: True
-        batch_first: If True, then the input and output tensors are provided
+        bias: If ``False``, then the layer does not use bias weights b_ih and b_hh.
+            Default: ``True``
+        batch_first: If ``True``, then the input and output tensors are provided
             as (batch, seq, feature)
         dropout: If non-zero, introduces a dropout layer on the outputs of each
             RNN layer except the last layer
-        bidirectional: If True, becomes a bidirectional RNN. Default: False
+        bidirectional: If ``True``, becomes a bidirectional RNN. Default: ``False``
 
     Inputs: input, (h_0, c_0)
         - **input** (seq_len, batch, input_size): tensor containing the features
@@ -388,13 +388,13 @@ class GRU(RNNBase):
         input_size: The number of expected features in the input x
         hidden_size: The number of features in the hidden state h
         num_layers: Number of recurrent layers.
-        bias: If False, then the layer does not use bias weights b_ih and b_hh.
-            Default: True
-        batch_first: If True, then the input and output tensors are provided
+        bias: If ``False``, then the layer does not use bias weights b_ih and b_hh.
+            Default: ``True``
+        batch_first: If ``True``, then the input and output tensors are provided
             as (batch, seq, feature)
         dropout: If non-zero, introduces a dropout layer on the outputs of each
             RNN layer except the last layer
-        bidirectional: If True, becomes a bidirectional RNN. Default: False
+        bidirectional: If ``True``, becomes a bidirectional RNN. Default: ``False``
 
     Inputs: input, h_0
         - **input** (seq_len, batch, input_size): tensor containing the features
@@ -457,8 +457,8 @@ class RNNCell(RNNCellBase):
     Args:
         input_size: The number of expected features in the input x
         hidden_size: The number of features in the hidden state h
-        bias: If False, then the layer does not use bias weights b_ih and b_hh.
-            Default: True
+        bias: If ``False``, then the layer does not use bias weights b_ih and b_hh.
+            Default: ``True``
         nonlinearity: The non-linearity to use ['tanh'|'relu']. Default: 'tanh'
 
     Inputs: input, hidden
@@ -544,7 +544,7 @@ class LSTMCell(RNNCellBase):
         input_size: The number of expected features in the input x
         hidden_size: The number of features in the hidden state h
         bias: If `False`, then the layer does not use bias weights `b_ih` and
-            `b_hh`. Default: True
+            `b_hh`. Default: ``True``
 
     Inputs: input, (h_0, c_0)
         - **input** (batch, input_size): tensor containing input features

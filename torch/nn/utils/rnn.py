@@ -44,7 +44,7 @@ def pack_padded_sequence(input, lengths, batch_first=False):
     Arguments:
         input (Variable): padded batch of variable length sequences.
         lengths (list[int]): list of sequences lengths of each batch element.
-        batch_first (bool, optional): if True, the input is expected in BxTx*
+        batch_first (bool, optional): if ``True``, the input is expected in BxTx*
             format.
 
     Returns:
@@ -89,7 +89,7 @@ def pad_packed_sequence(sequence, batch_first=False, padding_value=0.0):
 
     Arguments:
         sequence (PackedSequence): batch to pad
-        batch_first (bool, optional): if True, the output will be in BxTx*
+        batch_first (bool, optional): if ``True``, the output will be in BxTx*
             format.
         padding_value (float, optional): values for padded elements
 

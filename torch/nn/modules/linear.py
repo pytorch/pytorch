@@ -13,7 +13,7 @@ class Linear(Module):
         in_features: size of each input sample
         out_features: size of each output sample
         bias: If set to False, the layer will not learn an additive bias.
-            Default: True
+            Default: ``True``
 
     Shape:
         - Input: :math:`(N, *, in\_features)` where `*` means any number of
@@ -69,7 +69,7 @@ class Bilinear(Module):
         in2_features: size of each second input sample
         out_features: size of each output sample
         bias: If set to False, the layer will not learn an additive bias.
-            Default: True
+            Default: ``True``
 
     Shape:
         - Input: :math:`(N, in1\_features)`, :math:`(N, in2\_features)`
