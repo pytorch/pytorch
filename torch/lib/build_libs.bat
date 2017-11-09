@@ -25,6 +25,21 @@ IF "%~1"=="--with-cuda" (
   set /a NO_CUDA=1
 )
 
+IF "%CMAKE_GENERATOR%"=="" (
+  set CMAKE_GENERATOR_COMMAND=
+  set MAKE_COMMAND=msbuild INSTALL.vcxproj /p:Configuration=Release
+) ELSE (
+  set CMAKE_GENERATOR_COMMAND=-G %CMAKE_GENERATOR%
+  IF "%CMAKE_GENERATOR%"=="Ninja" (
+    set CC=cl.exe
+    set CXX=cl.exe
+    set MAKE_COMMAND=cmake --build . --target install --config Release -- -j%NUMBER_OF_PROCESSORS% || exit /b 1
+  ) ELSE (
+    set MAKE_COMMAND=msbuild INSTALL.vcxproj /p:Configuration=Release
+  )
+)
+
+
 :read_loop
 if "%1"=="" goto after_loop
 if "%1"=="ATen" (
@@ -48,9 +63,11 @@ xcopy /Y ..\..\aten\src\THCUNN\generic\THCUNN.h .
 goto:eof
 
 :build
+  @setlocal
+  IF NOT "%PREBUILD_COMMAND%"=="" call %PREBUILD_COMMAND%
   mkdir build\%~1
   cd build/%~1
-  cmake ../../%~1 -G "Visual Studio 14 2015 Win64" ^
+  cmake ../../%~1 %CMAKE_GENERATOR_COMMAND% ^
                   -DCMAKE_MODULE_PATH=%BASE_DIR%/cmake/FindCUDA ^
                   -DTorch_FOUND="1" ^
                   -DCMAKE_INSTALL_PREFIX="%INSTALL_DIR%" ^
@@ -76,21 +93,27 @@ goto:eof
                   -Dnanopb_BUILD_GENERATOR=0 ^
                   -DCMAKE_BUILD_TYPE=Release
 
-  msbuild INSTALL.vcxproj /p:Configuration=Release
+  %MAKE_COMMAND%
   cd ../..
+  @endlocal
 
 goto:eof
 
 :build_aten
+  @setlocal
+  IF NOT "%PREBUILD_COMMAND%"=="" call %PREBUILD_COMMAND%
   mkdir build\%~1
   cd build/%~1
-  cmake ../../../../%~1 -G "Visual Studio 14 2015 Win64" ^
+  cmake ../../../../%~1 %CMAKE_GENERATOR_COMMAND% ^
                   -DCMAKE_INSTALL_PREFIX="%INSTALL_DIR%" ^
                   -DNO_CUDA=%NO_CUDA% ^
+                  -DCUDNN_INCLUDE_DIR="%CUDNN_INCLUDE_DIR%" ^
+                  -DCUDNN_LIB_DIR="%CUDNN_LIB_DIR%" ^
                   -DCMAKE_BUILD_TYPE=Release
 
-  msbuild INSTALL.vcxproj /p:Configuration=Release
+  %MAKE_COMMAND%
   cd ../..
+  @endlocal
 
 goto:eof
 
