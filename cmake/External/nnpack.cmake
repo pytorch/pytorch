@@ -32,7 +32,20 @@ if (MSVC)
 endif()
 
 ##############################################################################
-# (2) Android, iOS, Linux, macOS - supported
+# (2) Anything but x86, x86-64, ARM, ARM64 - unsupported
+##############################################################################
+if(CMAKE_SYSTEM_PROCESSOR)
+  if(NOT CMAKE_SYSTEM_PROCESSOR MATCHES "^(i686|x86_64|armv5te|armv7-a|armv7l|aarch64)$")
+    message(WARNING "NNPACK is not supported on ${CMAKE_SYSTEM_PROCESSOR} processors. "
+      "The only supported architectures are x86, x86-64, ARM, and ARM64. "
+      "Turn this warning off by USE_NNPACK=OFF.")
+    set(USE_NNPACK OFF)
+    return()
+  endif()
+endif()
+
+##############################################################################
+# (3) Android, iOS, Linux, macOS - supported
 ##############################################################################
 
 if (ANDROID OR IOS OR ${CMAKE_SYSTEM_NAME} STREQUAL "Linux" OR ${CMAKE_SYSTEM_NAME} STREQUAL "Darwin")
@@ -70,7 +83,7 @@ if (ANDROID OR IOS OR ${CMAKE_SYSTEM_NAME} STREQUAL "Linux" OR ${CMAKE_SYSTEM_NA
 endif()
 
 ##############################################################################
-# (3) Catch-all: not supported.
+# (4) Catch-all: not supported.
 ##############################################################################
 
 message(WARNING "Unknown platform - I don't know how to build NNPACK. "
