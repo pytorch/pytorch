@@ -406,5 +406,20 @@ static inline void SpatialRoIPooling_forward(
 
 }
 
+/*
+[NativeFunction]
+name: asdf
+arg: Tensor a [output]
+arg: int64_t dim=0
+return: Tensor
+variants: method, function
+type_method_definition_level: base
+type_method_definition_dispatch: at::native::asdf
+[/NativeFunction]
+*/
+static inline Tensor asdf(Tensor &a, int64_t dim=0) {
+  return a;
+}
+
 }
 }
