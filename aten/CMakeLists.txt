@@ -339,6 +339,11 @@ IF(LAPACK_FOUND)
   SET(USE_LAPACK 1)
 ENDIF(LAPACK_FOUND)
 
+FIND_PACKAGE(CuDNN)
+IF(CUDNN_FOUND)
+  SET(USE_CUDNN 1)
+ENDIF(CUDNN_FOUND)
+
 #############################################
 
 set(ATen_CPU_SRCS)
