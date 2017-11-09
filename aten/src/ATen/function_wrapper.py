@@ -533,7 +533,7 @@ def create_generic(top_env, declarations):
 
         # ensure we get reference-type formals when appropriate
         def native_translate_formals(argument, option):
-            if option['inplace']:
+            if option['inplace'] or argument.get('output', False):
                 argument['type'] = {'Tensor': 'Tensor &'}.get(argument['type'], argument['type'])
             else:
                 argument['type'] = {'Tensor': 'const Tensor &'}.get(argument['type'], argument['type'])
