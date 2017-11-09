@@ -137,12 +137,18 @@ function build_nccl() {
 # regardless of whether it is inside pytorch or not, so it
 # cannot take any special flags
 # special flags need to be part of the ATen build itself
+#
+# However, we do explicitly pass library paths when setup.py has already
+# detected them (to ensure that we have a consistent view between the
+# PyTorch and ATen builds.)
 function build_aten() {
   mkdir -p build/aten
   cd  build/aten
   ${CMAKE_VERSION} ../../../../aten \
   -DCMAKE_BUILD_TYPE=$([ $DEBUG ] && echo Debug || echo Release) \
   -DNO_CUDA=$((1-$WITH_CUDA)) \
+  -DCUDNN_INCLUDE_DIR=$CUDNN_INCLUDE_DIR \
+  -DCUDNN_LIB_DIR=$CUDNN_LIB_DIR \
   -DATEN_NO_CONTRIB=1 \
   -DCMAKE_INSTALL_PREFIX="$INSTALL_DIR"
   # purpusefully not passing C_FLAGS for the same reason as above
