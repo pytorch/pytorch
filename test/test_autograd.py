@@ -1503,12 +1503,11 @@ class TestAutograd(TestCase):
     def test_cat_empty(self):
         f_args_variable = (Variable(torch.randn(0), requires_grad=True),
                            Variable(torch.randn(S, S), requires_grad=True))
-        torch.cat(f_args_variable)
-        # gradcheck doesn't work on empty input Variables
-        #f_args_tensor = deepcopy(unpack_variables(f_args_variable))
-        #run_functional_checks(self, "test_cat_empty", "cat",
-        #                      lambda a, b : torch.cat((a, b)),
-        #                      True, f_args_variable, f_args_tensor)
+        # gradcheck doesn't work on empty input Variables (hence False passed below)
+        f_args_tensor = deepcopy(unpack_variables(f_args_variable))
+        run_functional_checks(self, "test_cat_empty", "cat",
+                              lambda a, b: torch.cat((a, b)),
+                              False, f_args_variable, f_args_tensor)
 
     def test_variable_traverse(self):
         def get_out_and_unrefed_cycle():
