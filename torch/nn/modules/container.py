@@ -5,15 +5,6 @@ import warnings
 from .module import Module
 
 
-def _addPrefix(s_, prefix):
-    if prefix is None:
-        return s_
-    if len(s_) == 0:
-        return prefix
-    else:
-        return prefix + "." + s_
-
-
 class Container(Module):
 
     def __init__(self, **kwargs):
@@ -124,7 +115,7 @@ class ModuleList(Module):
     def __iadd__(self, modules):
         return self.extend(modules)
 
-    def append(self, module, prefix=None):
+    def append(self, module):
         r"""Appends a given module to the end of the list.
 
         Arguments:
@@ -133,7 +124,7 @@ class ModuleList(Module):
         self.add_module(str(len(self)), module)
         return self
 
-    def extend(self, modules, prefix=None):
+    def extend(self, modules):
         r"""Appends modules from a Python iterable to the end of the list.
 
         Arguments:
@@ -207,7 +198,7 @@ class ParameterList(Module):
         self.register_parameter(str(len(self)), parameter)
         return self
 
-    def extend(self, parameters, prefix=None):
+    def extend(self, parameters):
         """Appends parameters from a Python iterable to the end of the list.
 
         Arguments:
