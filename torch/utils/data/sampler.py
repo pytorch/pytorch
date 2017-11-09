@@ -76,8 +76,8 @@ class WeightedRandomSampler(Sampler):
     Arguments:
         weights (list)   : a list of weights, not necessary summing up to one
         num_samples (int): number of samples to draw
-        replacement (bool): if ``True``, samples are drawn with replacement. 
-            If not, they are drawn without replacement, which means that when a 
+        replacement (bool): if ``True``, samples are drawn with replacement.
+            If not, they are drawn without replacement, which means that when a
             sample index is drawn for a row, it cannot be drawn again for that row.
     """
 
