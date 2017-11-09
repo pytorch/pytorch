@@ -35,9 +35,9 @@ def _worker_loop(dataset, index_queue, data_queue, collate_fn):
     global _use_shared_memory
     _use_shared_memory = True
 
-    # Intialize C side signal handlers because Python signal handler on things
-    # like SIGBUS and SIGSEGV will still be executed in C and likely cause error
-    # again.
+    # Intialize C side signal handlers for SIGBUS and SIGSEGV. Python signal
+    # module's handlers are executed after Python returns from C low-level
+    # handlers, likely when the same fatal signal happened again already.
     # https://docs.python.org/3/library/signal.html Sec. 18.8.1.1
     _set_worker_signal_handlers()
 
