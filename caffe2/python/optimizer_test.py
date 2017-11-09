@@ -20,7 +20,7 @@ from caffe2.proto import caffe2_pb2
 import caffe2.python.optimizer as optimizer
 from caffe2.python.optimizer import (
     build_sgd, build_multi_precision_sgd, build_ftrl, build_adagrad,
-    build_adam, build_yellowfin, add_weight_decay, SgdOptimizer)
+    build_adam, build_yellowfin, build_rms_prop, add_weight_decay, SgdOptimizer)
 from caffe2.python.optimizer_context import UseOptimizer
 from caffe2.python.optimizer_test_util import (
     OptimizerTestBase, LRModificationTestBase
@@ -402,6 +402,23 @@ class TestYellowFin(OptimizerTestBase, TestCase):
                         n_iter,
                         gpu=True
                     )
+
+
+class TestRmsProp(OptimizerTestBase, LRModificationTestBase, TestCase):
+    def build_optimizer(self, model, **kwargs):
+        self._skip_gpu = False
+        return build_rms_prop(
+            model, base_learning_rate=0.1, epsilon=0.1, **kwargs
+        )
+
+    def check_optimizer(self, optimizer):
+        self.assertFalse(optimizer.get_auxiliary_parameters().shared)
+        self.assertTrue(optimizer.get_auxiliary_parameters().local)
+        for param in optimizer.get_auxiliary_parameters().local:
+            workspace.FetchBlob(param)
+
+    def testSparse(self):
+        raise unittest.SkipTest("no sparse support")
 
 
 class TestMultiOptimizers(TestCase):
