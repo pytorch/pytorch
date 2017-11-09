@@ -174,14 +174,6 @@ std::vector<Variable> VariableType::as_variable(TensorList tl) const {
   return variables;
 }
 
-Variable VariableType::as_variable(const Scalar & scalar) const {
-  auto tensor = scalar.toTensor();
-  if (&tensor.type() != baseType) {
-    tensor = tensor.toType(*baseType);
-  }
-  return make_variable(std::move(tensor));
-}
-
 Variable VariableType::maybe_wrap(Tensor data, const Variable & self, bool inplace) const {
   if (inplace) {
     return self;
@@ -194,6 +186,12 @@ static Variable as_view(Variable base, Tensor tensor) {
     base = base.base();
   }
   return make_variable_view(std::move(base), std::move(tensor));
+}
+
+static void ensure_no_aten_scalars(Tensor & data) {
+  if (data.defined() && data.dim() == 0) {
+    data.as_strided_({1}, {1});
+  }
 }
 
 template<typename T>
