@@ -75,7 +75,12 @@ def parse(filename):
             elif in_declaration:
                 ls = line.strip().split(':', 1)
                 key = ls[0].strip()
-                if key == "}":
+                if key == '*/':
+                    in_declaration = False
+                    in_dispatch_table = False
+                    in_decl_parse = True
+                    continue
+                elif key == '}':
                     assert in_dispatch_table
                     in_dispatch_table = False
                     continue
