@@ -1,3 +1,5 @@
+#define __STDC_FORMAT_MACROS
+
 #include <Python.h>
 #include <structmember.h>
 
