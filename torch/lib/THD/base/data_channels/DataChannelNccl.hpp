@@ -210,9 +210,12 @@ private:
   NcclResourcePair _getNcclResourcePair(std::vector<at::Tensor>& input,
                                         THDGroup groupId);
 
-  // Helper function that broadcasts the NCCL unique ID to everyone in the rank
-  void broadcastUniqueNcclId(ncclUniqueId* srcNcclId,
-                             ncclUniqueId* dstNcclId);
+  /**
+   * Helper function that broadcasts the NCCL unique ID to everyone in the rank
+   * NCCLID pointed by ncclId of Rank 0 will be sent to other ranks' NCCID
+   * pointed by ncclId
+   */
+  void broadcastUniqueNcclId(ncclUniqueId* ncclId);
 
   // Helper that checks the input and output tensors
   bool _tensorCheckHelper(const std::vector<at::Tensor>& input,

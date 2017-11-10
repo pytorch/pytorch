@@ -378,7 +378,7 @@ def all_gather(tensor_list, tensor, group=group.WORLD):
     if _backend != "nccl":
         return torch._C._dist_all_gather(tensor_list, tensor, group)
     else:
-        return all_gather_multigpu(tensor_list, list[tensor], group)
+        return all_gather_multigpu([tensor_list], [tensor], group)
 
 
 def gather(tensor, **kwargs):

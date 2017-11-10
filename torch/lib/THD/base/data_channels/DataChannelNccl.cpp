@@ -103,18 +103,17 @@ DataChannelNccl::DataChannelNccl(InitMethod::Config config, int timeout)
 
 
 // Use the socket to broadcast NCCL ID
-void DataChannelNccl::broadcastUniqueNcclId(ncclUniqueId* srcNcclId,
-                                            ncclUniqueId* dstNcclId) {
+void DataChannelNccl::broadcastUniqueNcclId(ncclUniqueId* ncclId) {
   // Send the unique NCCL id to every rank
   if (_rank == 0) {
     for (auto socket : _masterSendingSockets) {
       send_bytes<uint8_t>(socket,
-                          reinterpret_cast<uint8_t*>(srcNcclId),
+                          reinterpret_cast<uint8_t*>(ncclId),
                           NCCL_UNIQUE_ID_BYTES);
     }
   } else {
     recv_bytes<uint8_t>(_slaveSocket,
-                        reinterpret_cast<uint8_t*>(dstNcclId),
+                        reinterpret_cast<uint8_t*>(ncclId),
                         NCCL_UNIQUE_ID_BYTES);
   }
 }
@@ -306,7 +305,7 @@ NcclResourcePair DataChannelNccl::_getNcclResourcePair(
   NCCL_CHECK(ncclGetUniqueId(&ncclId));
 
   // Broadcast so that each process can have a unique NCCL ID
-  broadcastUniqueNcclId(&ncclId, &ncclId);
+  broadcastUniqueNcclId(&ncclId);
 
   // Guard GPU device
   AutoGPU gpuGuard;
