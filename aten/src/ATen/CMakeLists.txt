@@ -155,7 +155,7 @@ IF(NOT NO_CUDA)
   INCLUDE_DIRECTORIES(${ATen_CUDA_INCLUDE})
   INCLUDE_DIRECTORIES("${CUDA_SDK_ROOT_DIR}/common/inc")
   INCLUDE_DIRECTORIES("${CMAKE_CURRENT_SOURCE_DIR}/cuda")
-  SET(native_functions_cuda ${CMAKE_CURRENT_SOURCE_DIR}/cuda/NativeFunctionsCuda.cu)
+  SET(native_functions_cuda ${CMAKE_CURRENT_SOURCE_DIR}/native/cuda/NativeFunctionsCuda.cu)
   SET(all_cpp ${all_cpp} ${ATen_CUDA_SRCS} ${native_functions_cuda})
 endif()
 
