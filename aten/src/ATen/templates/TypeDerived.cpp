@@ -15,7 +15,7 @@
 #include "ATen/WrapDimUtils.h"
 #include "ATen/THLongStorageView.h"
 #include "ATen/UndefinedTensor.h"
-#include "ATen/NativeFunctions.h"
+#include "ATen/native/NativeFunctions.h"
 #include <iostream>
 #include <sstream>
 

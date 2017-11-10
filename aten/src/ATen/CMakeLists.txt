@@ -140,7 +140,7 @@ endif()
 file(READ ${CMAKE_CURRENT_BINARY_DIR}/generated_cpp.txt generated_cpp)
 
 FILE(GLOB_RECURSE all_templates "templates/*")
-SET(native_functions ${CMAKE_CURRENT_SOURCE_DIR}/NativeFunctions.h)
+SET(native_functions ${CMAKE_CURRENT_SOURCE_DIR}/native/NativeFunctions.h)
 
 FILE(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/ATen)
 

@@ -4,7 +4,7 @@
 #include "ATen/Scalar.h"
 #include "ATen/SparseTensorRef.h"
 #include "ATen/ExpandUtils.h"
-#include "ATen/NativeFunctions.h"
+#include "ATen/native/NativeFunctions.h"
 #include "ATen/UndefinedType.h"
 
 #include <iostream>

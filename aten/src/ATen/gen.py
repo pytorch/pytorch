@@ -57,7 +57,7 @@ TENSOR_METHODS_H = CodeTemplate.from_file(TEMPLATE_PATH + "/TensorMethods.h")
 
 FUNCTIONS_H = CodeTemplate.from_file(TEMPLATE_PATH + "/Functions.h")
 
-NATIVE_FUNCTIONS_PATH = options.source_path + "/NativeFunctions.h"
+NATIVE_FUNCTIONS_PATH = options.source_path + "/native/NativeFunctions.h"
 
 generators = {
     'CPUGenerator.h': {
