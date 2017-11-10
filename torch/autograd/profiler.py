@@ -29,6 +29,17 @@ class EventList(list):
         return self.table()
 
     def table(self, sort_by=None):
+        """Prints an EventList as a nicely formatted table.
+
+        Arguments:
+            sort_by (str, optional): Attribute used to sort entries. By default
+                they are printed in the same order as they were registered.
+                Valid keys include: ``cpu_time``, ``cuda_time``, ``cpu_time_total``,
+                ``cuda_time_total``, ``count``.
+
+        Returns:
+            A string containing the table.
+        """
         return build_table(self, sort_by)
 
     def export_chrome_trace(self, path):
@@ -143,6 +154,12 @@ class profile(object):
             return '<unfinished torch.autograd.profile>'
         return str(self.function_events)
 
+    def table(self, sort_by=None):
+        if self.function_events is None:
+            raise RuntimeError("can't export a trace that didn't finish running")
+        return self.function_events.table(sort_by)
+    table.__doc__ = EventList.table.__doc__
+
     def export_chrome_trace(self, path):
         if self.function_events is None:
             raise RuntimeError("can't export a trace that didn't finish running")
@@ -165,13 +182,19 @@ class profile(object):
 class emit_nvtx(object):
     """Context manager that makes every autograd operation emit an NVTX range.
 
-    It is useful when running the program under nvprof. Unfortunately, there's no
-    way to force nvprof to flush the data it collected to disk, so for CUDA profiling
-    one has to use this context manager to annotate nvprof traces, and then use
-    :func:`torch.autograd.profiler.open_nvtx` to analyze the checkpoint.
+    It is useful when running the program under nvprof::
+
+        nvprof --profile-from-start off -o trace_name.prof -- <regular command here>
+
+    Unfortunately, there's no way to force nvprof to flush the data it collected
+    to disk, so for CUDA profiling one has to use this context manager to annotate
+    nvprof traces and wait for the process to exit before inspecting them.
+    Then, either NVIDIA Visual Profiler (nvvp) can be used to visualize the timeline, or
+    :func:`torch.autograd.profiler.load_nvprof` can load the results for inspection
+    e.g. in Python REPL.
 
     .. warning:
-        This context managers should not be called recursively, i.e. at most one
+        This context manager should not be called recursively, i.e. at most one
         instance should be enabled at any given time.
 
     Arguments:
