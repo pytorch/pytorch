@@ -1,4 +1,4 @@
-#include "NativeFunctionsCuda.h"
+#include "ATen/native/NativeFunctions.h"
 
 namespace at {
 namespace native {
