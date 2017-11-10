@@ -141,6 +141,29 @@ Blob* Workspace::CreateLocalBlob(const string& name) {
   return GetBlob(name);
 }
 
+Blob* Workspace::RenameBlob(const string& old_name, const string& new_name) {
+  // We allow renaming only local blobs for API clarity purpose
+  auto it = blob_map_.find(old_name);
+  CAFFE_ENFORCE(
+      it != blob_map_.end(),
+      "Blob ",
+      old_name,
+      " is not in the local blob list");
+
+  // New blob can't be in any parent either, otherwise it will hide a parent
+  // blob
+  CAFFE_ENFORCE(
+      !HasBlob(new_name), "Blob ", new_name, "is already in the workspace");
+
+  // First delete the old record
+  auto value = std::move(it->second);
+  blob_map_.erase(it);
+
+  auto* raw_ptr = value.get();
+  blob_map_[new_name] = std::move(value);
+  return raw_ptr;
+}
+
 bool Workspace::RemoveBlob(const string& name) {
   auto it = blob_map_.find(name);
   if (it != blob_map_.end()) {
