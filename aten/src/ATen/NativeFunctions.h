@@ -388,8 +388,11 @@ arg: int64_t pooledWidth
 arg: double spatialScale
 return: Tensor, Tensor
 variants: function
-type_method_definition_level: base
-type_method_definition_dispatch: at::native::SpatialRoIPooling_forward
+type_method_definition_level: backend
+type_method_definition_dispatch: {
+  - CPU: at::native::SpatialRoIPooling_forward
+  - CUDA: at::native::SpatialRoIPooling_forward_cuda
+}
 [/NativeFunction]
 */
 static inline std::tuple<at::Tensor, at::Tensor> SpatialRoIPooling_forward(
@@ -512,6 +515,13 @@ static inline std::tuple<at::Tensor, at::Tensor> SpatialRoIPooling_forward(
 
 	return std::make_tuple(output, argmaxes);
 }
+
+std::tuple<Tensor, Tensor> SpatialRoIPooling_forward_cuda(
+  const Tensor& input,
+  const Tensor& rois,
+  int64_t pooledHeight,
+  int64_t pooledWidth,
+  double spatialScale);
 
 }
 }
