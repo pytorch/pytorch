@@ -32,11 +32,12 @@ import numpy as np
 
 class SparseFeatureHash(ModelLayer):
 
-    def __init__(self, model, input_record, seed, modulo=None,
-                 name='sparse_feature_hash', **kwargs):
+    def __init__(self, model, input_record, seed=0, modulo=None,
+                 use_hashing=True, name='sparse_feature_hash', **kwargs):
         super(SparseFeatureHash, self).__init__(model, name, input_record, **kwargs)
 
         self.seed = seed
+        self.use_hashing = use_hashing
         if schema.equal_schemas(input_record, IdList):
             self.modulo = modulo or self.extract_hash_size(input_record.items.metadata)
             metadata = schema.Metadata(
@@ -71,6 +72,8 @@ class SparseFeatureHash(ModelLayer):
         else:
             assert False, "Input type must be one of (IdList, IdScoreList)"
 
+        assert self.modulo >= 1, 'Unexpected modulo: {}'.format(self.modulo)
+
     def extract_hash_size(self, metadata):
         if metadata.feature_specs and metadata.feature_specs.desired_hash_size:
             return metadata.feature_specs.desired_hash_size
@@ -81,14 +84,19 @@ class SparseFeatureHash(ModelLayer):
 
     def add_ops(self, net):
         if schema.equal_schemas(self.output_schema, IdList):
-            input_blobs = self.input_record.items.field_blobs()
-            output_blobs = self.output_schema.items.field_blobs()
+            input_blob = self.input_record.items()
+            output_blob = self.output_schema.items()
         elif schema.equal_schemas(self.output_schema, IdScoreList):
-            input_blobs = self.input_record.keys.field_blobs()
-            output_blobs = self.output_schema.keys.field_blobs()
+            input_blob = self.input_record.keys()
+            output_blob = self.output_schema.keys()
         else:
             raise NotImplementedError()
-        net.IndexHash(input_blobs,
-                      output_blobs,
-                      seed=self.seed,
-                      modulo=self.modulo)
+
+        if self.use_hashing:
+            net.IndexHash(
+                input_blob, output_blob, seed=self.seed, modulo=self.modulo
+            )
+        else:
+            net.Mod(
+                input_blob, output_blob, divisor=self.modulo
+            )
