@@ -23,12 +23,12 @@ def parse(filename):
                 declaration['arguments'] = arguments
                 declaration['type_method_definition_dispatch'] = dispatch
                 declaration['type_method_definition_level'] = dispatch_level
-                declarations.append(declaration)
                 type_method_definition_level = declaration.get('type_method_definition_level')
                 if type_method_definition_level != 'base' and type_method_definition_level != 'backend':
                     raise RuntimeError("Native functions currently only support (and must be specified with) "
                                        "\'base\' or \'backend\' type_method_definition_level, got {}"
                                        .format(type_method_definition_level))
+                declarations.append(declaration)
             elif in_declaration:
                 ls = line.strip().split(':', 1)
                 key = ls[0].strip()
