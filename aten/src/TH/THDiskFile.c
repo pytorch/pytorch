@@ -2,6 +2,10 @@
 #include "THDiskFile.h"
 #include "THFilePrivate.h"
 
+#ifndef _WIN32
+#include <sys/types.h>
+#endif
+
 #include <stdint.h>
 #ifndef LLONG_MAX
 #define LLONG_MAX 9223372036854775807LL
