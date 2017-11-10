@@ -4,6 +4,7 @@ if(WIN32)
   cmake_minimum_required(VERSION 3.4)
 else()
   cmake_minimum_required(VERSION 3.0)
+endif(WIN32)
 set(CMAKE_MODULE_PATH
   ${CMAKE_CURRENT_SOURCE_DIR}/cmake
   ${CMAKE_CURRENT_SOURCE_DIR}/cmake/FindCUDA
