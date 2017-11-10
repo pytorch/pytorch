@@ -60,37 +60,44 @@ std::vector<int> getDevicesList(const std::string& deviceSeq) {
 } // namespace
 
 
-// RequestNccl
-DataChannelNccl::RequestNccl::RequestNccl(QueueWorker::Request&& request)
- : _request(std::move(request)) {
-}
-
-
-DataChannelNccl::RequestNccl::~RequestNccl() {}
-
-
-bool DataChannelNccl::RequestNccl::isCompleted() {
-  return _request.isCompleted();
-}
-
-void DataChannelNccl::RequestNccl::wait() {
-  _request.wait();
-}
-
-// End of RequestNccl
-
 // DataChannelNccl
 DataChannelNccl::DataChannelNccl(InitMethod::Config config, int timeout)
   : _rank(config.rank)
   , _numProcesses(config.world_size)
   , _timeout(timeout)
   , _masterListeningSocket(-1)
-{
+  , _slaveSocket(-1) {
+
+  // Establish the socket connections from rank 0 to all others
   if (_rank == 0) {
     _masterListeningSocket = config.master.listen_socket;
+    _masterSendingSockets = std::vector<int>(_numProcesses - 1, -1);
+
+    try {
+      for (rank_type i = 0; i < _numProcesses - 1; ++i) {
+        std::tie(_masterSendingSockets[i],
+                 std::ignore) = accept(_masterListeningSocket, _timeout);
+      }
+    } catch (...) {
+      // Destroy the created sockets
+      _destroySockets();
+      throw std::runtime_error("Rank 0 cannot establish thelistening socket");
+    }
+
   } else {
     _masterAddr = config.worker.master_addr;
     _masterPort = config.worker.master_port;
+
+    try {
+      _slaveSocket = connect(_masterAddr, _masterPort, true, _timeout);
+    } catch (...) {
+      // Destroy the created sockets
+      _destroySockets();
+      std::string errStr = "Rank: " + std::to_string(_rank) + " cannot "
+                           "connect to the master: " + _masterAddr + ":" +
+                           std::to_string(_masterPort);
+      throw std::runtime_error(errStr);
+    }
   }
 }
 
@@ -100,82 +107,82 @@ void DataChannelNccl::broadcastUniqueNcclId(ncclUniqueId* srcNcclId,
                                             ncclUniqueId* dstNcclId) {
   // Send the unique NCCL id to every rank
   if (_rank == 0) {
-    std::vector<int> sockets(_numProcesses - 1);
-    for (rank_type i = 0; i < _numProcesses - 1; ++i) {
-      std::tie(sockets[i], std::ignore) = accept(_masterListeningSocket,
-                                                 _timeout);
-    }
-    for (auto socket : sockets) {
-      ResourceGuard socket_guard([socket]() { ::close(socket); });
+    for (auto socket : _masterSendingSockets) {
       send_bytes<uint8_t>(socket,
                           reinterpret_cast<uint8_t*>(srcNcclId),
                           NCCL_UNIQUE_ID_BYTES);
     }
   } else {
-    int socket;
-    try {
-      socket = connect(_masterAddr, _masterPort, true, _timeout);
-    } catch (...) {
-      std::string errStr = "Rank: " + std::to_string(_rank) + " cannot "
-                           "connect to the master: " + _masterAddr + ":" +
-                           std::to_string(_masterPort);
-      throw std::runtime_error(errStr);
-    }
-    ResourceGuard socket_guard([socket]() { ::close(socket); });
-    recv_bytes<uint8_t>(socket,
+    recv_bytes<uint8_t>(_slaveSocket,
                         reinterpret_cast<uint8_t*>(dstNcclId),
                         NCCL_UNIQUE_ID_BYTES);
   }
 }
 
 
-// Destructor that closes the master's listening socket
+// Destructor will only close all the sockets
 DataChannelNccl::~DataChannelNccl() {
-  // Destroy the master listening socket
+   /**
+    * Note that destructor will be called after cudaruntime being unloaded since
+    * DataChannel is a global variable.
+    */
+  _destroySockets();
+}
+
+
+void DataChannelNccl::_destroySockets() {
+  // Destroying all the socket
   if (_masterListeningSocket != -1) {
     ::close(_masterListeningSocket);
     _masterListeningSocket = -1;
   }
-  /**
-   * Note that destructor will be called after cudaruntime being unloaded since
-   * DataChannel is a global variable.
-   */
+  if (_slaveSocket != -1) {
+    ::close(_slaveSocket);
+    _slaveSocket = -1;
+  }
+  for (size_t i = 0; i < _masterSendingSockets.size(); ++i) {
+    if (_masterSendingSockets[i] != -1) {
+      ::close(_masterSendingSockets[i]);
+      _masterSendingSockets[i] = -1;
+    }
+  }
 }
-
 
 // Destroy the data channel
 void DataChannelNccl::destroy() {
 
   std::unique_lock<std::mutex> channelLock(_mutex);
 
-  // Destroy the master listening socket
-  if (_masterListeningSocket != -1) {
-    ::close(_masterListeningSocket);
-    _masterListeningSocket = -1;
-  }
+  // Destroying all the socket
+  _destroySockets();
 
   // Guard GPU device
   AutoGPU gpuGuard;
 
-  // Destroy the CUDA and NCCL resources
-  for (auto& itemPair : _ncclCommsAndEvents) {
+  /**
+   * Destroy the CUDA and NCCL resources
+   * TODO: creating C++ wrappers for CUDA and NCCL resources to do the
+   *       cleanup automatically
+   */
+  for (auto& itemPair : _groupNcclResources) {
 
-    auto devices = getDevicesList(_groupDevices[itemPair.first]);
+    auto groupId = itemPair.first;
+    auto devices = getDevicesList(_groupDevices[groupId]);
 
     // Destroy the CUDA events
     size_t idx = 0;
-    for (auto& event : *(itemPair.second.second)) {
+    for (auto& event : *(itemPair.second.ncclCudaEvents())) {
       gpuGuard.setDevice(devices[idx++]);
       THCudaCheck(cudaEventSynchronize(event));
       THCudaCheck(cudaEventDestroy(event));
     }
     // Destroy the communicators
-    for (auto& comm : *(itemPair.second.first)) {
+    for (auto& comm : *(itemPair.second.ncclComms())) {
       NCCL_CHECK(ncclCommDestroy(comm));
     }
 
   }
-  _ncclCommsAndEvents.clear();
+  _groupNcclResources.clear();
   _groups.clear();
   _groupDevices.clear();
 }
@@ -186,22 +193,22 @@ void DataChannelNccl::destroyGroup(THDGroup groupId) {
 
   std::unique_lock<std::mutex> channelLock(_mutex);
 
-  if (_ncclCommsAndEvents.find(groupId) != _ncclCommsAndEvents.end()) {
+  if (_groupNcclResources.find(groupId) != _groupNcclResources.end()) {
     // Guard GPU device
     AutoGPU gpuGuard;
     // Destroy the CUDA events
     size_t idx = 0;
-    for (auto& event : *(_ncclCommsAndEvents[groupId].second)) {
+    for (auto& event : *(_groupNcclResources[groupId].ncclCudaEvents())) {
       auto devices = getDevicesList(_groupDevices[groupId]);
       gpuGuard.setDevice(devices[idx++]);
       THCudaCheck(cudaEventSynchronize(event));
       THCudaCheck(cudaEventDestroy(event));
     }
     // Destroy the communicators
-    for (auto& comm : *(_ncclCommsAndEvents[groupId].first)) {
+    for (auto& comm : *(_groupNcclResources[groupId].ncclComms())) {
       NCCL_CHECK(ncclCommDestroy(comm));
     }
-    _ncclCommsAndEvents.erase(groupId);
+    _groupNcclResources.erase(groupId);
   }
   if (_groups.find(groupId) != _groups.end()) {
     _groups.erase(groupId);
@@ -245,8 +252,7 @@ rank_type DataChannelNccl::getNumProcesses() {
 }
 
 
-std::pair<std::vector<ncclComm_t>*, std::vector<cudaEvent_t>*>
-DataChannelNccl::_getNcclCommsAndEvents(
+NcclResourcePair DataChannelNccl::_getNcclResourcePair(
     std::vector<at::Tensor>& input,
     THDGroup groupId) {
 
@@ -275,22 +281,22 @@ DataChannelNccl::_getNcclCommsAndEvents(
     throw std::runtime_error(errMsg);
   }
 
-  if (_ncclCommsAndEvents.find(groupId) != _ncclCommsAndEvents.end()) {
-    return std::make_pair(_ncclCommsAndEvents[groupId].first.get(),
-                          _ncclCommsAndEvents[groupId].second.get());
+  if (_groupNcclResources.find(groupId) != _groupNcclResources.end()) {
+    return std::make_pair(_groupNcclResources[groupId].ncclComms(),
+                          _groupNcclResources[groupId].ncclCudaEvents());
   }
 
   // Add in the device list of the group
   _groupDevices[groupId] = deviceList;
 
-  // NCCL communication world
-  std::unique_ptr<std::vector<ncclComm_t>> comms =
+  // NCCL communicator
+  auto comms =
     std::unique_ptr<std::vector<ncclComm_t>>(new std::vector<ncclComm_t>());
 
   comms->resize(input.size());
 
   // Corresponding CUDA events
-  std::unique_ptr<std::vector<cudaEvent_t>> events =
+  auto events =
     std::unique_ptr<std::vector<cudaEvent_t>>(new std::vector<cudaEvent_t>());
 
   events->resize(input.size());
@@ -323,12 +329,12 @@ DataChannelNccl::_getNcclCommsAndEvents(
   NCCL_CHECK(ncclGroupEnd());
 
   // Move into the hash table
-  _ncclCommsAndEvents.emplace(
-      std::make_pair(groupId, std::make_pair(std::move(comms),
-                                             std::move(events))));
+  _groupNcclResources.emplace(
+      std::make_pair(groupId, NcclResources(std::move(comms),
+                                            std::move(events))));
 
-  return std::make_pair(_ncclCommsAndEvents[groupId].first.get(),
-                        _ncclCommsAndEvents[groupId].second.get());
+  return std::make_pair(_groupNcclResources[groupId].ncclComms(),
+                        _groupNcclResources[groupId].ncclCudaEvents());
 }
 
 
@@ -390,9 +396,10 @@ bool DataChannelNccl::_tensorCheckHelper(
       throw std::runtime_error("Expecting all GPU tensors to be contiguous");
     }
 
-    auto res = usedDevices.insert(input[i].get_device());
+    bool inserted;
+    std::tie(std::ignore, inserted) = usedDevices.insert(input[i].get_device());
     // Device verification, if the insertion didn't take place
-    if (!res.second) {
+    if (!inserted) {
       throw std::runtime_error("Expecting inputs on different GPU devices");
     }
 
@@ -418,9 +425,9 @@ void DataChannelNccl::allReduce(std::vector<at::Tensor>& input,
   }
   _checkGroupIdValid(groupId);
 
-  auto commsAndEvents = _getNcclCommsAndEvents(input, groupId);
-  auto comms = commsAndEvents.first;
-  auto events = commsAndEvents.second;
+  auto ncclResourcePair  = _getNcclResourcePair(input, groupId);
+  auto comms = ncclResourcePair.first;
+  auto events = ncclResourcePair.second;
 
   // Guard GPU device
   AutoGPU gpuGuard;
@@ -453,8 +460,7 @@ void DataChannelNccl::allReduce(at::Tensor& data,
                                 THDReduceOp operation,
                                 THDGroup groupId) {
 
-  std::vector<at::Tensor> dataVec;
-  dataVec.push_back(data);
+  std::vector<at::Tensor> dataVec = {data};
   allReduce(dataVec, dataVec, operation, groupId);
 }
 
@@ -470,9 +476,9 @@ void DataChannelNccl::allGather(std::vector<at::Tensor>& input,
   }
   _checkGroupIdValid(groupId);
 
-  auto commsAndEvents = _getNcclCommsAndEvents(input, groupId);
-  auto comms = commsAndEvents.first;
-  auto events = commsAndEvents.second;
+  auto ncclResourcePair = _getNcclResourcePair(input, groupId);
+  auto comms = ncclResourcePair.first;
+  auto events = ncclResourcePair.second;
 
   // Guard GPU device
   AutoGPU gpuGuard;
@@ -504,8 +510,7 @@ void DataChannelNccl::allGather(std::vector<at::Tensor>& output,
                                 at::Tensor& input,
                                 THDGroup groupId) {
 
-  std::vector<at::Tensor> inputDataVec;
-  inputDataVec.push_back(input);
+  std::vector<at::Tensor> inputDataVec = {input};
   allGather(inputDataVec, output, groupId);
 }
 
@@ -523,9 +528,9 @@ void DataChannelNccl::reduce(std::vector<at::Tensor>& data,
   }
   _checkGroupIdValid(groupId);
 
-  auto commsAndEvents = _getNcclCommsAndEvents(data, groupId);
-  auto comms = commsAndEvents.first;
-  auto events = commsAndEvents.second;
+  auto ncclResourcePair = _getNcclResourcePair(data, groupId);
+  auto comms = ncclResourcePair.first;
+  auto events = ncclResourcePair.second;
 
   // Guard GPU device
   AutoGPU gpuGuard;
@@ -559,8 +564,7 @@ void DataChannelNccl::reduce(at::Tensor& data,
                              rank_type dstRank,
                              THDGroup groupId) {
 
-  std::vector<at::Tensor> dataVec;
-  dataVec.push_back(data);
+  std::vector<at::Tensor> dataVec = {data};
   reduce(dataVec, operation, dstRank, groupId);
 }
 
@@ -576,9 +580,9 @@ void DataChannelNccl::broadcast(std::vector<at::Tensor>& data,
   }
   _checkGroupIdValid(groupId);
 
-  auto commsAndEvents = _getNcclCommsAndEvents(data, groupId);
-  auto comms = commsAndEvents.first;
-  auto events = commsAndEvents.second;
+  auto ncclResourcePair = _getNcclResourcePair(data, groupId);
+  auto comms = ncclResourcePair.first;
+  auto events = ncclResourcePair.second;
 
   // Guard GPU device
   AutoGPU gpuGuard;
@@ -610,8 +614,7 @@ void DataChannelNccl::broadcast(at::Tensor& data,
                                 rank_type srcRank,
                                 THDGroup groupId) {
 
-  std::vector<at::Tensor> dataVec;
-  dataVec.push_back(data);
+  std::vector<at::Tensor> dataVec = {data};
   broadcast(dataVec, srcRank, groupId);
 }
 
@@ -622,7 +625,7 @@ void DataChannelNccl::barrier(THDGroup groupId) {
 
   _checkGroupIdValid(groupId);
 
-  if (_ncclCommsAndEvents.find(groupId) == _ncclCommsAndEvents.end() ||
+  if (_groupNcclResources.find(groupId) == _groupNcclResources.end() ||
       _groupDevices.find(groupId) == _groupDevices.end()) {
     return;
   }
@@ -634,7 +637,7 @@ void DataChannelNccl::barrier(THDGroup groupId) {
 
   int idx = 0;
   // Synchronize on the CUDA events
-  for (auto& event : *(_ncclCommsAndEvents[groupId].second)) {
+  for (auto& event : *(_groupNcclResources[groupId].ncclCudaEvents())) {
     gpuGuard.setDevice(devices[idx++]);
     THCudaCheck(cudaEventSynchronize(event));
   }

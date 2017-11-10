@@ -371,23 +371,24 @@ PyObject* THDPModule_recv(PyObject *_unused, PyObject *args)
 PyObject* THDPModule_allReduceMultiGPU(PyObject *_unused, PyObject *args)
 {
   HANDLE_TH_ERRORS
-  PyObject* sequence = PyTuple_GET_ITEM(args, 0);
-  Py_ssize_t tmp_length;
-  std::size_t length;
   std::vector<at::Tensor> descriptors;
-  std::vector<at::Tensor> raw_descriptors;
+  std::size_t length;
   THDGroup group;
   THDReduceOp op;
+  PyObject* sequence;
 
-  if (PyTuple_GET_SIZE(args) != 3 || !PySequence_Check(sequence)) {
+  if (PyTuple_GET_SIZE(args) != 3) {
+    goto invalid_arguments;
+  }
+  sequence = PyTuple_GET_ITEM(args, 0);
+  if (!PySequence_Check(sequence)) {
     goto invalid_arguments;
   }
 
-  tmp_length = PySequence_Length(sequence);
-  THPUtils_assert(tmp_length >= 0, "couldn't obtain the length of %s",
+  length = static_cast<std::size_t>(PySequence_Length(sequence));
+  THPUtils_assert(length >= 0, "couldn't obtain the length of %s",
                   THPUtils_typename(sequence));
 
-  length = static_cast<std::size_t>(tmp_length);
   descriptors.reserve(length);
 
   for (std::size_t i = 0; i < length; ++i) {
@@ -398,7 +399,6 @@ PyObject* THDPModule_allReduceMultiGPU(PyObject *_unused, PyObject *args)
     descriptors.push_back(
       THDPModule_makeDescriptor(PySequence_ITEM(sequence, i))
     );
-    raw_descriptors.push_back(descriptors.back());
   }
 
   group = _getGroup(PyTuple_GET_ITEM(args, 2));
@@ -406,7 +406,7 @@ PyObject* THDPModule_allReduceMultiGPU(PyObject *_unused, PyObject *args)
 
   {
     AutoNoGIL guard;
-    THDAllReduceMultiGPU(raw_descriptors.data(), length, op, group);
+    THDAllReduceMultiGPU(descriptors.data(), length, op, group);
   }
   Py_RETURN_NONE;
 
@@ -421,25 +421,27 @@ invalid_arguments:
 PyObject* THDPModule_reduceMultiGPU(PyObject *_unused, PyObject *args)
 {
   HANDLE_TH_ERRORS
-  PyObject* sequence = PyTuple_GET_ITEM(args, 0);
-  Py_ssize_t tmp_length;
+  PyObject* sequence;
   std::size_t length;
   std::vector<at::Tensor> descriptors;
-  std::vector<at::Tensor> raw_descriptors;
   THDGroup group;
   THDReduceOp op;
   int dst_rank;
 
-  if (PyTuple_GET_SIZE(args) != 4 || !PySequence_Check(sequence) ||
+  if (PyTuple_GET_SIZE(args) != 4) {
+    goto invalid_arguments;
+  }
+
+  sequence = PyTuple_GET_ITEM(args, 0);
+  if (!PySequence_Check(sequence) ||
       !THPUtils_checkLong(PyTuple_GET_ITEM(args, 1))) {
     goto invalid_arguments;
   }
 
-  tmp_length = PySequence_Length(sequence);
-  THPUtils_assert(tmp_length >= 0, "couldn't obtain the length of %s",
+  length = static_cast<std::size_t>(PySequence_Length(sequence));
+  THPUtils_assert(length >= 0, "couldn't obtain the length of %s",
                   THPUtils_typename(sequence));
 
-  length = static_cast<std::size_t>(tmp_length);
   descriptors.reserve(length);
 
   for (std::size_t i = 0; i < length; ++i) {
@@ -450,7 +452,6 @@ PyObject* THDPModule_reduceMultiGPU(PyObject *_unused, PyObject *args)
     descriptors.push_back(
       THDPModule_makeDescriptor(PySequence_ITEM(sequence, i))
     );
-    raw_descriptors.push_back(descriptors.back());
   }
 
   group = _getGroup(PyTuple_GET_ITEM(args, 3));
@@ -459,7 +460,7 @@ PyObject* THDPModule_reduceMultiGPU(PyObject *_unused, PyObject *args)
 
   {
     AutoNoGIL guard;
-    THDReduceMultiGPU(raw_descriptors.data(), length, op, dst_rank, group);
+    THDReduceMultiGPU(descriptors.data(), length, op, dst_rank, group);
   }
   Py_RETURN_NONE;
 
@@ -475,24 +476,27 @@ invalid_arguments:
 PyObject* THDPModule_broadcastMultiGPU(PyObject *_unused, PyObject *args)
 {
   HANDLE_TH_ERRORS
-  PyObject* sequence = PyTuple_GET_ITEM(args, 0);
-  Py_ssize_t tmp_length;
+  PyObject* sequence;
   std::size_t length;
   std::vector<at::Tensor> descriptors;
-  std::vector<at::Tensor> raw_descriptors;
   THDGroup group;
   int src_rank;
 
-  if (PyTuple_GET_SIZE(args) != 3 || !PySequence_Check(sequence) ||
+  if (PyTuple_GET_SIZE(args) != 3) {
+    goto invalid_arguments;
+  }
+
+  sequence = PyTuple_GET_ITEM(args, 0);
+
+  if (!PySequence_Check(sequence) ||
       !THPUtils_checkLong(PyTuple_GET_ITEM(args, 1))) {
     goto invalid_arguments;
   }
 
-  tmp_length = PySequence_Length(sequence);
-  THPUtils_assert(tmp_length >= 0, "couldn't obtain the length of %s",
+  length = static_cast<std::size_t>(PySequence_Length(sequence));
+  THPUtils_assert(length >= 0, "couldn't obtain the length of %s",
                   THPUtils_typename(sequence));
 
-  length = static_cast<std::size_t>(tmp_length);
   descriptors.reserve(length);
 
   for (std::size_t i = 0; i < length; ++i) {
@@ -503,7 +507,6 @@ PyObject* THDPModule_broadcastMultiGPU(PyObject *_unused, PyObject *args)
     descriptors.push_back(
       THDPModule_makeDescriptor(PySequence_ITEM(sequence, i))
     );
-    raw_descriptors.push_back(descriptors.back());
   }
 
   group = _getGroup(PyTuple_GET_ITEM(args, 2));
@@ -511,7 +514,7 @@ PyObject* THDPModule_broadcastMultiGPU(PyObject *_unused, PyObject *args)
 
   {
     AutoNoGIL guard;
-    THDBroadcastMultiGPU(raw_descriptors.data(), length, src_rank, group);
+    THDBroadcastMultiGPU(descriptors.data(), length, src_rank, group);
   }
   Py_RETURN_NONE;
 
@@ -526,38 +529,35 @@ invalid_arguments:
 PyObject* THDPModule_allGatherMultiGPU(PyObject *_unused, PyObject *args)
 {
   HANDLE_TH_ERRORS
-  PyObject* sequence_one = PyTuple_GET_ITEM(args, 0);
-  PyObject* sequence_two = PyTuple_GET_ITEM(args, 1);
+  PyObject* sequence_one;
+  PyObject* sequence_two;
 
-  Py_ssize_t tmp_length_one;
-  Py_ssize_t tmp_length_two;
-
-  size_t length_one;
-  size_t length_two;
+  std::size_t length_one;
+  std::size_t length_two;
 
   std::vector<at::Tensor> output_descriptors;
-  std::vector<at::Tensor> output_raw_descriptors;
-
   std::vector<at::Tensor> input_descriptors;
-  std::vector<at::Tensor> input_raw_descriptors;
 
   THDGroup group;
 
-  if (PyTuple_GET_SIZE(args) != 3 || !PySequence_Check(sequence_one) ||
-        !PySequence_Check(sequence_two)) {
+  if (PyTuple_GET_SIZE(args) != 3) {
     goto invalid_arguments;
   }
 
-  tmp_length_one = PySequence_Length(sequence_one);
-  THPUtils_assert(tmp_length_one >= 0, "couldn't obtain the length of %s",
+  sequence_one = PyTuple_GET_ITEM(args, 0);
+  sequence_two = PyTuple_GET_ITEM(args, 1);
+
+  if (!PySequence_Check(sequence_one) || !PySequence_Check(sequence_two)) {
+    goto invalid_arguments;
+  }
+
+  length_one = static_cast<std::size_t>(PySequence_Length(sequence_one));
+  THPUtils_assert(length_one >= 0, "couldn't obtain the length of %s",
                   THPUtils_typename(sequence_one));
 
-  tmp_length_two = PySequence_Length(sequence_two);
-  THPUtils_assert(tmp_length_two >= 0, "couldn't obtain the length of %s",
+  length_two = static_cast<std::size_t>(PySequence_Length(sequence_two));
+  THPUtils_assert(length_two >= 0, "couldn't obtain the length of %s",
                   THPUtils_typename(sequence_two));
-
-  length_one = static_cast<size_t>(tmp_length_one);
-  length_two = static_cast<size_t>(tmp_length_two);
 
   if (length_one != length_two) {
     goto invalid_arguments;
@@ -576,21 +576,19 @@ PyObject* THDPModule_allGatherMultiGPU(PyObject *_unused, PyObject *args)
     input_descriptors.push_back(
       THDPModule_makeDescriptor(PySequence_ITEM(sequence_two, i))
     );
-    input_raw_descriptors.push_back(input_descriptors.back());
 
     output_descriptors.push_back(
       THDPModule_makeDescriptor(PySequence_ITEM(sequence_one, i))
     );
-    output_raw_descriptors.push_back(output_descriptors.back());
   }
 
   group = _getGroup(PyTuple_GET_ITEM(args, 2));
 
   {
     AutoNoGIL guard;
-    THDAllGatherMultiGPU(output_raw_descriptors.data(),
+    THDAllGatherMultiGPU(output_descriptors.data(),
                          length_one,
-                         input_raw_descriptors.data(),
+                         input_descriptors.data(),
                          length_two,
                          group);
   }

@@ -4,6 +4,7 @@ data across multi-machine networks. It supports a few different backends
 and initialization methods.
 """
 import torch
+import atexit
 import warnings
 from torch._utils import _flatten_dense_tensors, _unflatten_dense_tensors
 
@@ -22,12 +23,21 @@ def is_available():
     return torch._C._has_distributed()
 
 
+def destroy_process_group():
+    """
+    Destroy the initialized distributed package
+    """
+    global _backend
+    _backend = ""
+    return torch._C._dist_destroy_process_group()
+
+
 def init_process_group(backend, init_method='env://', **kwargs):
     """Initializes the distributed package.
 
     Arguments:
         backend (str): Name of the backend to use. Depending on build-time configuration
-            valid values include: ``tcp``, ``mpi``, ``gloo`` and ``nccl``
+            valid values include: ``tcp``, ``mpi``, and ``gloo```
         init_method (str, optional): URL specifying how to initialize the package.
         world_size (int, optional): Number of processes participating in the job.
         rank (int, optional): Rank of the current process.
@@ -36,7 +46,6 @@ def init_process_group(backend, init_method='env://', **kwargs):
     To enable ``backend == mpi``, PyTorch needs to built from source on a system that
     supports MPI.
 
-    "nccl" is currently experimental only
     """
     world_size = kwargs.pop('world_size', -1)
     group_name = kwargs.pop('group_name', '')
@@ -57,15 +66,8 @@ def init_process_group(backend, init_method='env://', **kwargs):
 
     global _backend
     _backend = backend
-
-
-def destroy_process_group():
-    """
-    Destroy the initialized distributed package
-    """
-    global _backend
-    _backend = ""
-    return torch._C._dist_destroy_process_group()
+    if backend == "nccl":
+        atexit.register(destroy_process_group)
 
 
 def init_master_worker(backend, init_method='env://', **kwargs):
@@ -219,8 +221,6 @@ def broadcast_multigpu(tensor_list, src, group=group.WORLD):
     """
     assert torch.distributed._initialized == _INITIALIZED_PG, \
         "collective only supported in process-group mode"
-    assert torch.distributed._backend == "nccl", \
-        "Multi GPU collectives only supported in nccl backend"
     return torch._C._dist_broadcast_multigpu(tensor_list, src, group)
 
 
@@ -264,8 +264,6 @@ def all_reduce_multigpu(tensor_list, op=reduce_op.SUM, group=group.WORLD):
     """
     assert torch.distributed._initialized == _INITIALIZED_PG, \
         "collective only supported in process-group mode"
-    assert torch.distributed._backend == "nccl", \
-        "Multi GPU collectives only supported in nccl backend"
     return torch._C._dist_all_reduce_multigpu(tensor_list, op, group)
 
 
@@ -299,7 +297,7 @@ def reduce_multigpu(tensor_list, dst, op=reduce_op.SUM, group=group.WORLD):
 
     Arguments:
         tensor_list (List[Tensor]): Input and output GPU tensors of the
-        collective . The function operates in-place.
+            collective . The function operates in-place.
         dst (int): Destination rank
         op (optional): One of the values from ``torch.distributed.reduce_op``
             enum.  Specifies an operation used for element-wise reductions.
@@ -307,8 +305,6 @@ def reduce_multigpu(tensor_list, dst, op=reduce_op.SUM, group=group.WORLD):
     """
     assert torch.distributed._initialized == _INITIALIZED_PG, \
         "collective only supported in process-group mode"
-    assert torch.distributed._backend == "nccl", \
-        "Multi GPU collectives only supported in nccl backend"
     return torch._C._dist_reduce_multigpu(tensor_list, dst, op, group)
 
 
@@ -349,8 +345,6 @@ def all_gather_multigpu(output_tensor_lists,
     """
     assert torch.distributed._initialized == _INITIALIZED_PG, \
         "collective only supported in process-group mode"
-    assert torch.distributed._backend == "nccl", \
-        "Multi GPU collectives only supported in nccl backend"
 
     flatten_tensor_list = []
     for output_tensor_list in output_tensor_lists:

@@ -26,19 +26,53 @@
 
 namespace thd {
 
+// Type aliasing
+using NcclResourcePair =
+  std::pair<std::vector<ncclComm_t>*, std::vector<cudaEvent_t>*>;
+
 struct DataChannelNccl : DataChannel {
-  struct RequestNccl : DataChannel::Request {
 
-    RequestNccl(QueueWorker::Request&& request);
-    virtual ~RequestNccl();
+  // Nothing to implement
+  struct RequestNccl : DataChannel::Request {};
 
-    virtual bool isCompleted() override;
-    virtual void wait() override;
+  // Wrapper on the pair of NCCL resources
+  class NcclResources {
+
+  public:
+
+    NcclResources() = default;
+    NcclResources(std::unique_ptr<std::vector<ncclComm_t>>&& ncclComm,
+                  std::unique_ptr<std::vector<cudaEvent_t>>&& event):
+
+      _commEventPair(std::pair<std::unique_ptr<std::vector<ncclComm_t>>,
+                               std::unique_ptr<std::vector<cudaEvent_t>>>
+                               (std::move(ncclComm), std::move(event))) {}
+    // Delete copy and assignment ctors
+    NcclResources(const NcclResources&) = delete;
+    NcclResources& operator=(const NcclResources&) = delete;
+
+    // Move ctors by default
+    NcclResources(NcclResources&&) = default;
+    NcclResources& operator=(NcclResources&&) = default;
+
+    // Nccl Communicator Getter
+    std::vector<ncclComm_t>* ncclComms() {
+      return _commEventPair.first.get();
+    }
+
+    // Nccl CUDA event Getter
+    std::vector<cudaEvent_t>* ncclCudaEvents() {
+      return _commEventPair.second.get();
+    }
 
   private:
-    QueueWorker::Request _request;
+
+    std::pair<std::unique_ptr<std::vector<ncclComm_t>>,
+              std::unique_ptr<std::vector<cudaEvent_t>>> _commEventPair;
   };
 
+
+  // Constructor
   DataChannelNccl(InitMethod::Config config, int timeout = -1);
   virtual ~DataChannelNccl();
 
@@ -120,6 +154,7 @@ private:
   rank_type _rank;
   // Number of processes in network
   rank_type _numProcesses;
+
   // Accept waiting timeout in milliseconds, optional
   int _timeout;
   // Master's address
@@ -128,34 +163,52 @@ private:
   port_type _masterPort;
   // Socket on which the master is listening
   int _masterListeningSocket;
+  // Sockets on which the master is sending to each slave
+  std::vector<int> _masterSendingSockets;
+  // Slave socket
+  int _slaveSocket;
+
   // Number of GPUs on each node
   int _numGPUs;
   // Mutex for Nccl Data Channel
   std::mutex _mutex;
 
   /**
-   * GPU device ID list for each group, each group should only have one device
-   * list be associated with
+   * The GPU devices each group have used. The GPU devices are stored in a
+   * device sequence.
+   *
+   * e.g. If the group only uses device 0, then the value of
+   *      the used device string stored (value of the hashmap) would be "0".
+   *
+   *      If the group uses device 0 - 7 and the each tensor of the
+   *      input tensor list is on device, 0, 1, 2, 3, 4, 5, 6, 7 separately,
+   *      then the value of the used device string stored would be
+   *      "0,1,2,3,4,5,6,7"
+   *
+   *      If the group uses device 0 - 7 and the each tensor of the
+   *      input tensor list is on device, 0, 4, 5, 6, 7, 1, 2, 3 separately,
+   *      then the value of the used device string  stored would be
+   *      "0,4,5,6,7,1,2,3"
+   *
+   *      Note that the order of the device for the tensor list matters and
+   *      each group can only be associated with one used device string
    */
   std::unordered_map<THDGroup, std::string> _groupDevices;
+
   /**
-   * Communicator for each THDGroup
-   * Cuda Events for all GPUs for NCCL operations
-   * Each communicator vector will be operating on a different set of
-   * CUDA events
+   * NCCL resources for for each THDGroup including:
+   * NCCL communicator for the current group
+   * Cuda Events for all GPUs for NCCL operations of the current group
    */
-  std::unordered_map<THDGroup,
-                     std::pair<std::unique_ptr<std::vector<ncclComm_t>>,
-                               std::unique_ptr<std::vector<cudaEvent_t>>>>
-                    _ncclCommsAndEvents;
+  std::unordered_map<THDGroup, NcclResources> _groupNcclResources;
 
   // Existing groups
   std::unordered_map<THDGroup, DataChannel::Group> _groups;
 
+
   // Helper function that gets the NCCL communicator
-  std::pair<std::vector<ncclComm_t>*, std::vector<cudaEvent_t>*>
-    _getNcclCommsAndEvents(std::vector<at::Tensor>& input,
-                           THDGroup groupId);
+  NcclResourcePair _getNcclResourcePair(std::vector<at::Tensor>& input,
+                                        THDGroup groupId);
 
   // Helper function that broadcasts the NCCL unique ID to everyone in the rank
   void broadcastUniqueNcclId(ncclUniqueId* srcNcclId,
@@ -168,6 +221,9 @@ private:
 
   // Group validity checker
   void _checkGroupIdValid(THDGroup groupId);
+
+  // Helper fucntion that destroy all the open sockets
+  void _destroySockets();
 };
 
 } // namespace thd

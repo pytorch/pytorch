@@ -74,6 +74,11 @@ struct DataChannel {
   virtual ~DataChannel() {};
 
   virtual bool init() = 0;
+
+  /**
+   * This is required for NCCL backend, since the destroy cannot be done before
+   * CUDA is unloaded since DataChannel is a static object.
+   */
   virtual void destroy() = 0;
 
   virtual rank_type getRank() = 0;
