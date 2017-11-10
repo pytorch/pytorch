@@ -4,6 +4,11 @@ def python_num(s):
     except Exception:
         return float(s)
 
+RETURN_MAP = {
+  'std::vector<Tensor>': 'TensorList',
+  'Tensor &': 'Tensor',
+  'std::tuple<Tensor, Tensor>': 'Tensor, Tensor'
+}
 
 def parse(filename):
     with open(filename, 'r') as file:
@@ -27,7 +32,10 @@ def parse(filename):
                 if ';' in line:
                     decl_parse += line.split(';')[0]
                     in_decl_parse = False
-                    declaration['name'] = decl_parse.split('(')[0].split(' ')[-1]
+                    return_and_name = decl_parse.split('(')[0]
+                    declaration['name'] = return_and_name.split(' ')[-1]
+                    return_type_cpp = return_and_name.rsplit(maxsplit=1)[0]
+                    declaration['return'] = RETURN_MAP.get(return_type_cpp, return_type_cpp)
                     declaration['arguments'] = arguments
                     declaration['type_method_definition_dispatch'] = dispatch
                     declaration['type_method_definition_level'] = dispatch_level
@@ -37,6 +45,8 @@ def parse(filename):
                                            "\'base\' or \'backend\' type_method_definition_level, got {}"
                                            .format(type_method_definition_level))
                     declarations.append(declaration)
+                elif line == '*/\n':
+                    pass
                 else:
                     decl_parse += line
             elif in_declaration:
