@@ -490,7 +490,7 @@ static inline std::tuple<at::Tensor, at::Tensor> SpatialRoIPooling_forward(
 
 					for (auto th = tileHStart; th < tileHEnd; ++th) {
 						for (auto tw = tileWStart; tw < tileWEnd; ++tw) {
-							auto index = (th * inputHeight) + tw;
+							auto index = (th * inputWidth) + tw;
 							if (rawInputBatch[index] > rawOutput[poolIndex]) {
 								rawOutput[poolIndex] = rawInputBatch[index];
 								// TODO: make optional for test
