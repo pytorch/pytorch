@@ -119,6 +119,8 @@ std::tuple<Tensor, Tensor> SpatialRoIPooling_forward_cuda(
   AT_ASSERT(input.is_contiguous(), "input must be contiguous");
   AT_ASSERT(rois.is_contiguous(), "rois must be contiguous");
 
+  cudaStream_t str = globalContext().getCurrentCUDAStream();
+
   return std::make_tuple(output, argmaxes);
 }
 
