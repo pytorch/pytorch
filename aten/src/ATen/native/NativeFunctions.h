@@ -1,8 +1,6 @@
 #pragma once
 
 #include "ATen/ATen.h"
-#include "ATen/WrapDimUtils.h"
-#include "ATen/ExpandUtils.h"
 #include <vector>
 
 /**
