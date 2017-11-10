@@ -60,6 +60,13 @@ message TensorProto {
     required int64 end = 2;
   }
   optional Segment segment = 11;
+  // Optionally, a TensorProto can contain a custom type beyond the above
+  // mentioned ones. In this case, each item of the tensor is going to be stored
+  // as a serialized string in the repeated string field. During deserialization
+  // BlobDeserializer is called with the type name specified here. Note that
+  // this is not a performant path and one is strongly encouraged to use POD
+  // types if possible.
+  optional string custom_data_type = 12;
 }
 
 message QTensorProto {

@@ -41,12 +41,51 @@ CAFFE2_DECLARE_bool(caffe2_serialize_fp16_as_bytes);
 namespace caffe2 {
 using namespace ::caffe2::db;
 namespace {
-class BlobTestFoo {};
+class BlobTestFoo {
+ public:
+  int32_t val;
+};
 class BlobTestBar {};
 }
 
 CAFFE_KNOWN_TYPE(BlobTestFoo);
 CAFFE_KNOWN_TYPE(BlobTestBar);
+
+class BlobTestFooSerializer : public BlobSerializerBase {
+ public:
+  BlobTestFooSerializer() {}
+  ~BlobTestFooSerializer() {}
+  /**
+   * Serializes a Blob. Note that this blob has to contain Tensor<Context>,
+   * otherwise this function produces a fatal error.
+   */
+  void Serialize(
+      const Blob& blob,
+      const string& name,
+      SerializationAcceptor acceptor) override {
+    CAFFE_ENFORCE(blob.IsType<BlobTestFoo>());
+
+    BlobProto blob_proto;
+    blob_proto.set_name(name);
+    blob_proto.set_type("BlobTestFoo");
+    // For simplicity we will just serialize the 4-byte content as a string.
+    blob_proto.set_content(std::string(
+        reinterpret_cast<const char*>(&(blob.Get<BlobTestFoo>().val)),
+        sizeof(int32_t)));
+    acceptor(name, blob_proto.SerializeAsString());
+  }
+};
+
+class BlobTestFooDeserializer : public BlobDeserializerBase {
+ public:
+  void Deserialize(const BlobProto& proto, Blob* blob) override {
+    blob->GetMutable<BlobTestFoo>()->val =
+        reinterpret_cast<const int32_t*>(proto.content().c_str())[0];
+  }
+};
+
+REGISTER_BLOB_SERIALIZER((TypeMeta::Id<BlobTestFoo>()), BlobTestFooSerializer);
+REGISTER_BLOB_DESERIALIZER(BlobTestFoo, BlobTestFooDeserializer);
 
 namespace {
 
@@ -590,6 +629,32 @@ TEST_SERIALIZATION_WITH_TYPE(uint8_t, int32_data)
 TEST_SERIALIZATION_WITH_TYPE(uint16_t, int32_data)
 TEST_SERIALIZATION_WITH_TYPE(int64_t, int64_data)
 
+TEST(TensorTest, TensorSerialization_CustomType) {
+  Blob blob;
+  TensorCPU* tensor = blob.GetMutable<TensorCPU>();
+  tensor->Resize(2, 3);
+  for (int i = 0; i < 6; ++i) {
+    tensor->mutable_data<BlobTestFoo>()[i].val = i;
+  }
+  string serialized = blob.Serialize("test");
+  BlobProto proto;
+  CHECK(proto.ParseFromString(serialized));
+  EXPECT_EQ(proto.name(), "test");
+  EXPECT_EQ(proto.type(), "Tensor");
+  Blob new_blob;
+  EXPECT_NO_THROW(new_blob.Deserialize(serialized));
+  EXPECT_TRUE(new_blob.IsType<TensorCPU>());
+  const TensorCPU& new_tensor = blob.Get<TensorCPU>();
+  EXPECT_EQ(new_tensor.ndim(), 2);
+  EXPECT_EQ(new_tensor.dim(0), 2);
+  EXPECT_EQ(new_tensor.dim(1), 3);
+  for (int i = 0; i < 6; ++i) {
+    EXPECT_EQ(
+        new_tensor.data<BlobTestFoo>()[i].val,
+        tensor->data<BlobTestFoo>()[i].val);
+  }
+}
+
 TEST(TensorTest, float16) {
   const TIndex kSize = 3000000;
   Blob blob;
@@ -811,6 +876,7 @@ TYPED_TEST(TypedTensorTest, BigTensorSerialization) {
     }
   }
 }
+
 struct DummyType {
   /* This struct is used to test serialization and deserialization of huge
    * blobs, that are not tensors.

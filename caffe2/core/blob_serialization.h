@@ -416,10 +416,16 @@ void TensorSerializer<Context>::Serialize(
         proto.mutable_double_data(),
         &this->context_);
     break;
-  case TensorProto_DataType_UNDEFINED:
-    LOG(FATAL) << "TensorSerializer does not have a serialization "
-                  "implementation for " << input.meta().name();
-    break;
+  case TensorProto_DataType_UNDEFINED: {
+    proto.mutable_string_data()->Reserve(chunkSize);
+    Blob temp_blob;
+    const char* raw_data = static_cast<const char*>(input.raw_data());
+    for (int i = chunkBegin; i < chunkBegin + chunkSize; ++i) {
+      temp_blob.ShareExternal(
+          const_cast<char*>(raw_data + i * input.itemsize()), input.meta());
+      proto.add_string_data(temp_blob.Serialize(""));
+    }
+  } break;
     // Note: we intentially do not provide "default:" so if any new data types
     // are added, the compiler should warn the user to add the case here.
   }
@@ -572,8 +578,21 @@ void TensorDeserializer<Context>::Deserialize(
           tensor->template mutable_data<double>() + chunkBegin,
           &context);
       break;
-    case TensorProto_DataType_UNDEFINED:
-      CAFFE_THROW("Cannot deserialize from a TensorProto UNDEFINED data type.");
+    case TensorProto_DataType_UNDEFINED: {
+      Blob temp_blob;
+      void* raw_ptr = nullptr;
+      for (int i = 0; i < chunkSize; ++i) {
+        temp_blob.Deserialize(proto.string_data(i));
+        if (i == 0) {
+          raw_ptr = tensor->template raw_mutable_data(temp_blob.meta());
+        }
+        temp_blob.meta().copy()(
+            temp_blob.GetRaw(),
+            static_cast<char*>(raw_ptr) +
+                (i + chunkBegin) * temp_blob.meta().itemsize(),
+            1);
+      }
+    }
   }
   context.FinishDeviceComputation();
 }
