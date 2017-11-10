@@ -120,8 +120,13 @@ class NetBase : public Observable<NetBase> {
     return name_;
   }
 
-  inline const std::shared_ptr<const NetDef> debug_def() const {
-    return net_def_;
+  inline const NetDef& debug_def() const {
+    CAFFE_ENFORCE(has_debug_def(), "net_def was null!");
+    return *net_def_;
+  }
+
+  inline bool has_debug_def() const {
+    return net_def_ != nullptr;
   }
 
  protected:
