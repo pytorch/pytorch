@@ -140,13 +140,14 @@ struct WorkspaceIdInjector {
   void InjectWorkspaceId(Workspace* workspace) {
     Blob* node_id_blob = workspace->GetBlob(NODE_ID);
     if (node_id_blob) {
-      int node_id =
-          node_id_blob->template Get<TensorCPU>().template data<int32_t>()[0];
+      TensorCPU node_id_tensor = node_id_blob->template Get<TensorCPU>();
+      int node_id = node_id_tensor.template data<int32_t>()[0];
       int64_t global_ws_id = (seq_++) + (static_cast<int64_t>(node_id) << 32);
       Blob* global_ws_id_blob = workspace->CreateLocalBlob(GLOBAL_WORKSPACE_ID);
-      global_ws_id_blob->template GetMutable<TensorCPU>()->template Resize();
-      global_ws_id_blob->template GetMutable<TensorCPU>()
-          ->template mutable_data<int64_t>()[0] = global_ws_id;
+      TensorCPU* global_ws_id_tensor =
+          global_ws_id_blob->template GetMutable<TensorCPU>();
+      global_ws_id_tensor->Resize();
+      global_ws_id_tensor->template mutable_data<int64_t>()[0] = global_ws_id;
       VLOG(1) << "Adding " << GLOBAL_WORKSPACE_ID << " = " << global_ws_id;
     }
   }
