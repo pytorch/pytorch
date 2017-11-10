@@ -33,9 +33,54 @@ __global__ void SpatialRoIPooling_forward_kernel(
     const T *rois_offset = rois + (proposal * 5);
     int n = rois_offset[0];
     int startWidth = llrintf(rois_offset[1] * spatialScale);
-    int startWHeight = llrintf(rois_offset[2] * spatialScale);
+    int startHeight = llrintf(rois_offset[2] * spatialScale);
     int endWidth = llrintf(rois_offset[3] * spatialScale);
     int endHeight = llrintf(rois_offset[4] * spatialScale);
+
+    // TODO: fix malformed RoIs to be 1x1
+
+    int roiHeight = endHeight - startHeight;
+    int roiWidth = endWidth - startWidth;
+
+    // Calculate size of tile based on the size of this particular RoI and the
+    // output size
+    T tileHeight = static_cast<T>(roiHeight) / static_cast<T>(pooledHeight);
+    T tileWidth = static_cast<T>(roiWidth) / static_cast<T>(pooledWidth);
+
+    // Calculate offset into the pooled region
+    int tileHStart = static_cast<int>(floorf(static_cast<T>(ph) * tileHeight));
+    int tileWStart = static_cast<int>(floorf(static_cast<T>(pw) * tileWidth));
+    int tileHEnd = static_cast<int>(ceilf(static_cast<T>(ph + 1) * tileHeight));
+    int tileWEnd = static_cast<int>(ceilf(static_cast<T>(pw + 1) * tileWidth));
+
+    // Calculate offset into the image itself, based on RoI + pooled offsets,
+    // and ensure it falls within image boundaries
+    tileHStart = std::min(std::max(tileHStart + startHeight, 0), inputHeight);
+    tileWStart = std::min(std::max(tileWStart + startWidth, 0), inputWidth);
+    tileHEnd = std::min(std::max(tileHEnd + startHeight, 0), inputHeight);
+    tileWEnd = std::min(std::max(tileWEnd + startWidth, 0), inputWidth);
+
+    // If our pooling region is empty, we set the output to 0, otherwise to
+    // the min float so we can calculate the max properly
+    bool isEmpty = (tileHStart >= tileHEnd) || (tileWStart >= tileWEnd);
+    T max = isEmpty ? 0 : std::numeric_limits<T>::min();
+    // If nothing is pooled, argmax = -1 causes nothing to be backprop'd
+    int maxIdx = -1;
+
+    const T *inputOffset = input + ((n * inputChannels + ch) * inputHeight * inputWidth);
+    for (int th = tileHStart; th < tileHEnd; ++th) {
+      for (int tw = tileWStart; tw < tileWEnd; ++tw) {
+        int index = (th * inputWidth) + tw;
+	if (inputOffset[index] > max) {
+          max = inputOffset[index];
+	  maxIdx = index;
+	}
+      }
+    }
+    output[linearIndex] = max;
+
+    // TODO optional argmax
+    argmaxes[linearIndex] = maxIdx;
   }
 }
 
