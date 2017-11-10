@@ -1,7 +1,10 @@
 #include "THMemoryFile.h"
 #include "THFilePrivate.h"
 #include "stdint.h"
+
+#ifndef _WIN32
 #include <sys/types.h>
+#endif
 
 typedef struct THMemoryFile__
 {
