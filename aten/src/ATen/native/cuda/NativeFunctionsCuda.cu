@@ -1,7 +1,16 @@
 #include "ATen/native/NativeFunctions.h"
+#include <cfloat>
 
 namespace at {
 namespace native {
+
+__host__ __device__ __forceinline__ float fmin(float a, float b) {
+  return a > b ? b : a;
+}
+
+__host__ __device__ __forceinline__ float fmax(float a, float b) {
+  return a > b ? a : b;
+}
 
 template <typename T>
 __global__ void SpatialRoIPooling_forward_kernel(
@@ -55,15 +64,15 @@ __global__ void SpatialRoIPooling_forward_kernel(
 
     // Calculate offset into the image itself, based on RoI + pooled offsets,
     // and ensure it falls within image boundaries
-    tileHStart = std::min(std::max(tileHStart + startHeight, 0), inputHeight);
-    tileWStart = std::min(std::max(tileWStart + startWidth, 0), inputWidth);
-    tileHEnd = std::min(std::max(tileHEnd + startHeight, 0), inputHeight);
-    tileWEnd = std::min(std::max(tileWEnd + startWidth, 0), inputWidth);
+    tileHStart = fmin(fmax(tileHStart + startHeight, 0), inputHeight);
+    tileWStart = fmin(fmax(tileWStart + startWidth, 0), inputWidth);
+    tileHEnd = fmin(fmax(tileHEnd + startHeight, 0), inputHeight);
+    tileWEnd = fmin(fmax(tileWEnd + startWidth, 0), inputWidth);
 
     // If our pooling region is empty, we set the output to 0, otherwise to
     // the min float so we can calculate the max properly
     bool isEmpty = (tileHStart >= tileHEnd) || (tileWStart >= tileWEnd);
-    T max = isEmpty ? 0 : std::numeric_limits<T>::min();
+    T max = isEmpty ? 0 : FLT_MIN;
     // If nothing is pooled, argmax = -1 causes nothing to be backprop'd
     int maxIdx = -1;
 
@@ -119,7 +128,13 @@ std::tuple<Tensor, Tensor> SpatialRoIPooling_forward_cuda(
   AT_ASSERT(input.is_contiguous(), "input must be contiguous");
   AT_ASSERT(rois.is_contiguous(), "rois must be contiguous");
 
-  cudaStream_t str = globalContext().getCurrentCUDAStream();
+  dim3 block(512);
+  dim3 grid((output.numel() + 512 - 1) / 512);
+  SpatialRoIPooling_forward_kernel<<<grid, block, 0, globalContext().getCurrentCUDAStream()>>>(
+    output.numel(), input.data<float>(), rois.data<float>(), static_cast<float>(spatialScale), inputChannels,
+    inputHeight, inputWidth, pooledHeight, pooledWidth, output.data<float>(), argmaxes.data<int>());
+  AT_ASSERT(cudaGetLastError() == cudaSuccess, "SpatialRoIPooling_forward_kernel failed");
+
 
   return std::make_tuple(output, argmaxes);
 }
