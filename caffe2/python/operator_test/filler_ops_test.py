@@ -100,10 +100,11 @@ class TestFillerOperator(hu.HypothesisTestCase):
     @given(
         **hu.gcs
     )
-    def test_uniform_fill_large_blob(self, gc, dc):
+    def test_uniform_fill_using_arg(self, gc, dc):
         net = core.Net('test_net')
-        # we only have one test case for speed, otherwise it can be too slow
-        shape = [2**30, 5]
+        shape = [2**3, 5]
+        # uncomment this to test filling large blob
+        # shape = [2**30, 5]
         min_v = -100
         max_v = 100
         output_blob = net.UniformIntFill(
