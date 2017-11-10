@@ -719,7 +719,7 @@ DEFINE_BROADCAST_BINARY_FUNCTION(Div, /)
 
 #define CAFFE2_SPECIALIZED_SET(T)                                             \
   template <>                                                                 \
-  void Set<T, CPUContext>(const TIndex N, const T alpha, T* Y, CPUContext*) { \
+  void Set<T, CPUContext>(const size_t N, const T alpha, T* Y, CPUContext*) { \
     if (alpha == (T)0) {                                                      \
       memset(Y, 0, N * sizeof(T));                                            \
     } else {                                                                  \
@@ -807,20 +807,26 @@ CAFFE2_SPECIALIZED_CPU_ADD_STRIPED_BATCH(float);
 
 template <>
 void RandUniform<float, CPUContext>(
-    const int n, const float a, const float b, float* r,
+    const size_t n,
+    const float a,
+    const float b,
+    float* r,
     CPUContext* context) {
   std::uniform_real_distribution<float> distribution(a, b);
-  for (int i = 0; i < n; ++i) {
+  for (auto i = 0; i < n; ++i) {
     r[i] = distribution(context->RandGenerator());
   }
 }
 
 template <>
 void RandUniform<int, CPUContext>(
-    const int n, const int a, const int b, int* r,
+    const size_t n,
+    const int a,
+    const int b,
+    int* r,
     CPUContext* context) {
   std::uniform_int_distribution<int> distribution(a, b);
-  for (int i = 0; i < n; ++i) {
+  for (auto i = 0; i < n; ++i) {
     r[i] = distribution(context->RandGenerator());
   }
 }
@@ -859,10 +865,13 @@ CAFFE2_SPECIALIZED_RAND_UNIFORM_UNIQUE(int64_t);
 
 template <>
 void RandGaussian<float, CPUContext>(
-    const int n, const float mean, const float std, float* r,
+    const size_t n,
+    const float mean,
+    const float std,
+    float* r,
     CPUContext* context) {
   std::normal_distribution<float> distribution(mean, std);
-  for (int i = 0; i < n; ++i) {
+  for (auto i = 0; i < n; ++i) {
     r[i] = distribution(context->RandGenerator());
   }
 }
