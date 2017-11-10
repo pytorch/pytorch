@@ -58,6 +58,8 @@ def parse(filename):
                     return_type_cpp = return_and_name.rsplit(maxsplit=1)[0]
                     declaration['return'] = CPP_TO_ATEN_TYPE_MAP.get(return_type_cpp, return_type_cpp)
                     declaration['arguments'] = parse_arguments(arguments)
+                    if dispatch is None:
+                        dispatch = 'at::native::' + declaration['name']
                     declaration['type_method_definition_dispatch'] = dispatch
                     if dispatch_level is None:
                         dispatch_level = 'backend' if isinstance(dispatch, dict) else 'base'

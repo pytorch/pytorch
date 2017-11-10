@@ -49,86 +49,71 @@ static inline Tensor expand_as(const Tensor &self, const Tensor &other) {
 
 /*
 [NativeFunction]
-type_method_definition_dispatch: at::native::split
-[/NativeFunction]
 */
 std::vector<Tensor> split(const Tensor& self, int64_t split_size, int64_t dim=0);
 
 /*
 [NativeFunction]
-type_method_definition_dispatch: at::native::chunk
 */
 std::vector<Tensor> chunk(const Tensor& self, int64_t chunks, int64_t dim=0);
 
 /*
 [NativeFunction]
-type_method_definition_dispatch: at::native::size
 */
 int64_t size(const Tensor& self, int64_t dim);
 
 /*
 [NativeFunction]
-type_method_definition_dispatch: at::native::stride
 */
 int64_t stride(const Tensor& self, int64_t dim);
 
 /*
 [NativeFunction]
-type_method_definition_dispatch: at::native::is_same_size
 */
 bool is_same_size(const Tensor& self, const Tensor& other);
 
 /*
 [NativeFunction]
-type_method_definition_dispatch: at::native::permute
 */
 Tensor permute(const Tensor& self, IntList dims);
 
 /*
 [NativeFunction]
-type_method_definition_dispatch: at::native::expand
 */
 Tensor expand(const Tensor& self, IntList size);
 
 /*
 [NativeFunction]
-type_method_definition_dispatch: at::native::squeeze
 */
 Tensor squeeze(const Tensor& self);
 
 /*
 [NativeFunction]
-type_method_definition_dispatch: at::native::squeeze
 */
 Tensor squeeze(const Tensor& self, int64_t dim);
 
 /*
 [NativeFunction]
-type_method_definition_dispatch: at::native::squeeze_
 */
 Tensor & squeeze_(Tensor& self);
 /*
 [NativeFunction]
-type_method_definition_dispatch: at::native::squeeze_
 */
 Tensor & squeeze_(Tensor& self, int64_t dim);
 
 /*
 [NativeFunction]
-type_method_definition_dispatch: at::native::unsqueeze
 */
 Tensor unsqueeze(const Tensor& self, int64_t dim);
 
 /*
 [NativeFunction]
-type_method_definition_dispatch: at::native::unsqueeze_
 */
 Tensor & unsqueeze_(Tensor& self, int64_t dim);
 
 /*
 [NativeFunction]
 variants: function
-type_method_definition_dispatch: at::native::stack
 */
 Tensor stack(TensorList tensors, int64_t dim=0);
 
