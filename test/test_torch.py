@@ -71,6 +71,34 @@ class TestTorch(TestCase):
                     res2[i, j] = v1[i] * v2[j]
             self.assertEqual(res1, res2)
 
+    def test_addr(self):
+        types = {
+            'torch.DoubleTensor': 1e-8,
+            'torch.FloatTensor': 1e-4,
+        }
+
+        def run_test(m, v1, v2, m_transform=lambda x: x):
+            m = m_transform(m.clone())
+            ref = m.clone()
+            torch.addr(m, v1, v2, out=m)
+            for i in range(m.size(0)):
+                for j in range(m.size(1)):
+                    ref[i, j] += v1[i] * v2[j]
+            self.assertEqual(m, ref)
+
+        for tname, _prec in types.items():
+            for h, w in [(100, 110), (1, 20), (200, 2)]:
+                m = torch.randn(h, w).type(tname)
+                v1 = torch.randn(h).type(tname)
+                v2 = torch.randn(w).type(tname)
+                run_test(m, v1, v2)
+                # test transpose
+                run_test(m, v2, v1, lambda x: x.transpose(0, 1))
+                # test 0 strided
+                v1 = torch.randn(1).type(tname).expand(h)
+                run_test(m, v1, v2)
+                run_test(m, v2, v1, lambda x: x.transpose(0, 1))
+
     def test_addmv(self):
         types = {
             'torch.DoubleTensor': 1e-8,
