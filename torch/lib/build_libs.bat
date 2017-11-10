@@ -64,7 +64,7 @@ goto:eof
 
 :build
   @setlocal
-  IF NOT "%PREBUILD_COMMAND%"=="" call %PREBUILD_COMMAND%
+  IF NOT "%PREBUILD_COMMAND%"=="" call "%PREBUILD_COMMAND%" %PREBUILD_COMMAND_ARGS%
   mkdir build\%~1
   cd build/%~1
   cmake ../../%~1 %CMAKE_GENERATOR_COMMAND% ^
@@ -102,7 +102,7 @@ goto:eof
 
 :build_aten
   @setlocal
-  IF NOT "%PREBUILD_COMMAND%"=="" call %PREBUILD_COMMAND%
+  IF NOT "%PREBUILD_COMMAND%"=="" call "%PREBUILD_COMMAND%" %PREBUILD_COMMAND_ARGS%
   mkdir build\%~1
   cd build/%~1
   cmake ../../../../%~1 %CMAKE_GENERATOR_COMMAND% ^
