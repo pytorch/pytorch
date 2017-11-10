@@ -148,7 +148,7 @@ void THNN_(VolumetricAveragePooling_updateOutput)(
     inputHeight = THCTensor_(size)(state, input, 2);
     inputWidth  = THCTensor_(size)(state, input, 3);
   }
-  else if (THCTensor_(nDimension)(state, input) == 5)
+  else /* 5D */
   {
     /* sizes */
     batchSize   = THCTensor_(size)(state, input, 0);
