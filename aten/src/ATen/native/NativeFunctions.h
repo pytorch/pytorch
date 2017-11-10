@@ -55,7 +55,6 @@ arg: int64_t split_size
 arg: int64_t dim=0
 return: TensorList
 variants: method, function
-type_method_definition_level: base
 type_method_definition_dispatch: at::native::split
 [/NativeFunction]
 */
@@ -69,7 +68,6 @@ arg: int64_t chunks
 arg: int64_t dim=0
 return: TensorList
 variants: method, function
-type_method_definition_level: base
 type_method_definition_dispatch: at::native::chunk
 [/NativeFunction]
 */
@@ -82,7 +80,6 @@ arg: Tensor self
 arg: int64_t dim
 return: int64_t
 variants: method, function
-type_method_definition_level: base
 type_method_definition_dispatch: at::native::size
 [/NativeFunction]
 */
@@ -95,7 +92,6 @@ arg: Tensor self
 arg: int64_t dim
 return: int64_t
 variants: method, function
-type_method_definition_level: base
 type_method_definition_dispatch: at::native::stride
 [/NativeFunction]
 */
@@ -108,7 +104,6 @@ arg: Tensor self
 arg: Tensor other
 return: bool
 variants: method, function
-type_method_definition_level: base
 type_method_definition_dispatch: at::native::is_same_size
 [/NativeFunction]
 */
@@ -121,7 +116,6 @@ arg: Tensor self
 arg: IntList dims
 return: Tensor
 variants: method, function
-type_method_definition_level: base
 type_method_definition_dispatch: at::native::permute
 [/NativeFunction]
 */
@@ -134,7 +128,6 @@ arg: Tensor self
 arg: IntList size
 return: Tensor
 variants: method, function
-type_method_definition_level: base
 type_method_definition_dispatch: at::native::expand
 [/NativeFunction]
 */
@@ -146,7 +139,6 @@ name: squeeze
 arg: Tensor self
 return: Tensor
 variants: method, function
-type_method_definition_level: base
 type_method_definition_dispatch: at::native::squeeze
 [/NativeFunction]
 */
@@ -159,7 +151,6 @@ arg: Tensor self
 arg: int64_t dim
 return: Tensor
 variants: method, function
-type_method_definition_level: base
 type_method_definition_dispatch: at::native::squeeze
 [/NativeFunction]
 */
@@ -171,7 +162,6 @@ name: squeeze_
 arg: Tensor self
 return: Tensor
 variants: method, function
-type_method_definition_level: base
 type_method_definition_dispatch: at::native::squeeze_
 [/NativeFunction]
 */
@@ -183,7 +173,6 @@ arg: Tensor self
 arg: int64_t dim
 return: Tensor
 variants: method, function
-type_method_definition_level: base
 type_method_definition_dispatch: at::native::squeeze_
 [/NativeFunction]
 */
@@ -196,7 +185,6 @@ arg: Tensor self
 arg: int64_t dim
 return: Tensor
 variants: method, function
-type_method_definition_level: base
 type_method_definition_dispatch: at::native::unsqueeze
 [/NativeFunction]
 */
@@ -209,7 +197,6 @@ arg: Tensor self
 arg: int64_t dim
 return: Tensor
 variants: method, function
-type_method_definition_level: base
 type_method_definition_dispatch: at::native::unsqueeze_
 [/NativeFunction]
 */
@@ -222,7 +209,6 @@ arg: TensorList tensors
 arg: int64_t dim=0
 return: Tensor
 variants: function
-type_method_definition_level: base
 type_method_definition_dispatch: at::native::stack
 [/NativeFunction]
 */

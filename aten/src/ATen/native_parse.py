@@ -14,6 +14,7 @@ def parse(filename):
             if '[NativeFunction]' in line:
                 in_declaration = True
                 arguments = []
+                dispatch_level = 'base'
                 dispatch = None
                 declaration = {'mode': 'native'}
             elif '[/NativeFunction]' in line:
@@ -21,6 +22,7 @@ def parse(filename):
                 in_dispatch_table = False
                 declaration['arguments'] = arguments
                 declaration['type_method_definition_dispatch'] = dispatch
+                declaration['type_method_definition_level'] = dispatch_level
                 declarations.append(declaration)
                 type_method_definition_level = declaration.get('type_method_definition_level')
                 if type_method_definition_level != 'base' and type_method_definition_level != 'backend':
@@ -57,6 +59,8 @@ def parse(filename):
                     arguments.append(argument_dict)
                 elif key == 'variants':
                     declaration[key] = [x.strip() for x in value.split(',')]
+                elif key == 'type_method_definition_level':
+                    dispatch_level = value
                 elif key == 'type_method_definition_dispatch':
                     if value == '{':
                         dispatch = {}
