@@ -231,7 +231,7 @@ type_method_definition_dispatch: {
 }
 [/NativeFunction]
 */
-std::tuple<at::Tensor, at::Tensor> SpatialRoIPooling_forward(
+std::tuple<Tensor, Tensor> SpatialRoIPooling_forward(
   const Tensor& input,
   const Tensor& rois,
   int64_t pooledHeight,
