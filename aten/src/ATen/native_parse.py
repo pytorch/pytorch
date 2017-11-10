@@ -40,7 +40,7 @@ def parse(filename):
             if '[NativeFunction]' in line:
                 in_declaration = True
                 arguments = []
-                dispatch_level = 'base'
+                dispatch_level = None
                 dispatch = None
                 decl_parse = ''
                 declaration = {'mode': 'native'}
@@ -59,6 +59,8 @@ def parse(filename):
                     declaration['return'] = CPP_TO_ATEN_TYPE_MAP.get(return_type_cpp, return_type_cpp)
                     declaration['arguments'] = parse_arguments(arguments)
                     declaration['type_method_definition_dispatch'] = dispatch
+                    if dispatch_level is None:
+                        dispatch_level = 'backend' if isinstance(dispatch, dict) else 'base'
                     declaration['type_method_definition_level'] = dispatch_level
                     if declaration.get('variants', None) is None:
                         declaration['variants'] = ['method', 'function']

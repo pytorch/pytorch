@@ -121,7 +121,6 @@ Tensor unsqueeze(const Tensor& self, int64_t dim);
 
 /*
 [NativeFunction]
-variants: method, function
 type_method_definition_dispatch: at::native::unsqueeze_
 */
 Tensor & unsqueeze_(Tensor& self, int64_t dim);
@@ -136,7 +135,6 @@ Tensor stack(TensorList tensors, int64_t dim=0);
 /*
 [NativeFunction]
 variants: function
-type_method_definition_level: backend
 type_method_definition_dispatch: {
   - CPU: at::native::SpatialRoIPooling_forward
   - CUDA: at::native::SpatialRoIPooling_forward_cuda
@@ -159,7 +157,6 @@ std::tuple<Tensor, Tensor> SpatialRoIPooling_forward_cuda(
 /*
 [NativeFunction]
 variants: function
-type_method_definition_level: backend
 type_method_definition_dispatch: {
   - CPU: at::native::SpatialRoIPooling_backward
   - CUDA: at::native::SpatialRoIPooling_backward_cuda
