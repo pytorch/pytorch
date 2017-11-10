@@ -128,7 +128,8 @@ Node* recordTrace(std::string op, // TODO: make this a Symbol
   auto state_lock = state->lock();
 
   Node *n = graph->create(stringToSymbol(op));
-  n->setDebugName(getPythonInterpreterStackTrace());
+  auto sl = std::make_shared<SourceLocation>(getPythonInterpreterStackTrace());
+  n->setSourceLocation(sl);
 
   for (Variable input : inputs) {
     n->addInput(getValueTrace(state, input));
