@@ -10,25 +10,35 @@ def parse(filename):
         declarations = []
         in_declaration = False
         in_dispatch_table = False
+        in_decl_parse = False
         for line in file.readlines():
             if '[NativeFunction]' in line:
                 in_declaration = True
                 arguments = []
                 dispatch_level = 'base'
                 dispatch = None
+                decl_parse = ''
                 declaration = {'mode': 'native'}
             elif '[/NativeFunction]' in line:
                 in_declaration = False
                 in_dispatch_table = False
-                declaration['arguments'] = arguments
-                declaration['type_method_definition_dispatch'] = dispatch
-                declaration['type_method_definition_level'] = dispatch_level
-                type_method_definition_level = declaration.get('type_method_definition_level')
-                if type_method_definition_level != 'base' and type_method_definition_level != 'backend':
-                    raise RuntimeError("Native functions currently only support (and must be specified with) "
-                                       "\'base\' or \'backend\' type_method_definition_level, got {}"
-                                       .format(type_method_definition_level))
-                declarations.append(declaration)
+                in_decl_parse = True
+            elif in_decl_parse:
+                if ';' in line:
+                    decl_parse += line.split(';')[0]
+                    in_decl_parse = False
+                    declaration['name'] = decl_parse.split('(')[0].split(' ')[-1]
+                    declaration['arguments'] = arguments
+                    declaration['type_method_definition_dispatch'] = dispatch
+                    declaration['type_method_definition_level'] = dispatch_level
+                    type_method_definition_level = declaration.get('type_method_definition_level')
+                    if type_method_definition_level != 'base' and type_method_definition_level != 'backend':
+                        raise RuntimeError("Native functions currently only support (and must be specified with) "
+                                           "\'base\' or \'backend\' type_method_definition_level, got {}"
+                                           .format(type_method_definition_level))
+                    declarations.append(declaration)
+                else:
+                    decl_parse += line
             elif in_declaration:
                 ls = line.strip().split(':', 1)
                 key = ls[0].strip()
