@@ -232,11 +232,11 @@ type_method_definition_dispatch: {
 [/NativeFunction]
 */
 std::tuple<at::Tensor, at::Tensor> SpatialRoIPooling_forward(
-	const Tensor& input,
-	const Tensor& rois,
-	int64_t pooledHeight,
-	int64_t pooledWidth,
-	double spatialScale);
+  const Tensor& input,
+  const Tensor& rois,
+  int64_t pooledHeight,
+  int64_t pooledWidth,
+  double spatialScale);
 
 std::tuple<Tensor, Tensor> SpatialRoIPooling_forward_cuda(
   const Tensor& input,
