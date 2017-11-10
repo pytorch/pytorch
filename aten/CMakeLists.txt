@@ -26,11 +26,8 @@ if("${isSystemDir}" STREQUAL "-1")
 endif()
 
 IF(NOT MSVC)
-  # C++11
-  set(CMAKE_CXX_FLAGS "--std=c++11 ${CMAKE_CXX_FLAGS}")
-
+  set(CMAKE_CXX_FLAGS "--std=c++11 -Wall -Wno-vla -fexceptions ${CMAKE_CXX_FLAGS}")
   set(CMAKE_C_FLAGS "-fexceptions ${CMAKE_C_FLAGS}")
-  set(CMAKE_CXX_FLAGS "-fexceptions ${CMAKE_CXX_FLAGS}")
 ENDIF(NOT MSVC)
 
 
@@ -352,8 +349,6 @@ SET(ATEN_INSTALL_BIN_SUBDIR "bin" CACHE PATH "ATen install binary subdirectory")
 SET(ATEN_INSTALL_LIB_SUBDIR "lib" CACHE PATH "ATen install library subdirectory")
 SET(ATEN_INSTALL_INCLUDE_SUBDIR "include" CACHE PATH "ATen install include subdirectory")
 
-
-set(Torch_FOUND 1)
 add_definitions(-DTH_INDEX_BASE=0)
 set(TH_LINK_STYLE STATIC)
 add_subdirectory(src/TH)
@@ -376,7 +371,10 @@ add_subdirectory(src/THS)
 
 if(NO_CUDA)
   message("disabling CUDA because NO_CUDA is set")
+  SET(CUDA_FLAG -n)
 else()
+  ADD_DEFINITIONS(-DAT_CUDA_ENABLED)
+  INCLUDE_DIRECTORIES(${CUDA_INCLUDE_DIRS})
   find_package(CUDA 5.5 REQUIRED)
   add_subdirectory(src/THC)
   add_subdirectory(src/THCUNN)
