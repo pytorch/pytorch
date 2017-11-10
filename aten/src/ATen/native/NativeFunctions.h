@@ -261,5 +261,42 @@ std::tuple<Tensor, Tensor> SpatialRoIPooling_forward_cuda(
   int64_t pooledWidth,
   double spatialScale);
 
+/*
+[NativeFunction]
+name: SpatialRoIPooling_backward
+arg: Tensor input
+arg: Tensor rois
+arg: int64_t pooledHeight
+arg: int64_t pooledWidth
+arg: double spatialScale
+arg: Tensor gradOutput
+arg: Tensor argmaxes
+return: Tensor
+variants: function
+type_method_definition_level: backend
+type_method_definition_dispatch: {
+  - CPU: at::native::SpatialRoIPooling_backward
+  - CUDA: at::native::SpatialRoIPooling_backward_cuda
+}
+[/NativeFunction]
+*/
+Tensor SpatialRoIPooling_backward(
+  const Tensor& input,
+  const Tensor& rois,
+  int64_t pooledHeight,
+  int64_t pooledWidth,
+  double spatialScale,
+  const Tensor& gradOutput,
+  const Tensor& argmaxes);
+
+Tensor SpatialRoIPooling_backward_cuda(
+  const Tensor& input,
+  const Tensor& rois,
+  int64_t pooledHeight,
+  int64_t pooledWidth,
+  double spatialScale,
+  const Tensor& gradOutput,
+  const Tensor& argmaxes);
+
 }
 }

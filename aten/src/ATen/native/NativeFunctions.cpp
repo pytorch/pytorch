@@ -303,5 +303,16 @@ std::tuple<at::Tensor, at::Tensor> SpatialRoIPooling_forward(
 	return std::make_tuple(output, argmaxes);
 }
 
+Tensor SpatialRoIPooling_backward(
+  const Tensor& input,
+  const Tensor& rois,
+  int64_t pooledHeight,
+  int64_t pooledWidth,
+  double spatialScale,
+  const Tensor& gradOutput,
+  const Tensor& argmaxes) {
+  throw std::runtime_error("not implemented");
+}
+
 }
 }

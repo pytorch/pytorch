@@ -177,5 +177,34 @@ __global__ void SpatialRoIPooling_backward_kernel(
   }
 }
 
+Tensor SpatialRoIPooling_backward_cuda(
+  const Tensor& input,
+  const Tensor& rois,
+  int64_t pooledHeight,
+  int64_t pooledWidth,
+  double spatialScale,
+  const Tensor& gradOutput,
+  const Tensor& argmaxes)
+{
+  // TODO: assertions?
+
+  auto proposals = rois.size(0);
+  auto inputChannels = input.size(1);
+  auto inputHeight = input.size(2);
+  auto inputWidth = input.size(3);
+
+  auto gradInput = input.type().tensor(input.sizes());
+
+  dim3 block(512);
+  dim3 grid((gradInput.numel() + 512 - 1) / 512);
+  SpatialRoIPooling_backward_kernel<<<grid, block, 0, globalContext().getCurrentCUDAStream()>>>(
+    gradOutput.numel(), gradOutput.data<float>(), argmaxes.data<int>(), proposals,
+    static_cast<float>(spatialScale), inputChannels, inputHeight, inputWidth,
+    pooledHeight, pooledWidth, gradInput.data<float>(), rois.data<float>());
+  AT_ASSERT(cudaGetLastError() == cudaSuccess, "SpatialRoIPooling_forward_kernel failed");
+
+  return gradInput;
+}
+
 } // at::native
 } // at
