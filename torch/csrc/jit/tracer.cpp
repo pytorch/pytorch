@@ -8,7 +8,6 @@
 #include "torch/csrc/utils/auto_gil.h"
 #include "torch/csrc/utils/python_strings.h"
 
-#include <Python.h>
 #include <frameobject.h>
 #include <patchlevel.h>
 

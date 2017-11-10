@@ -531,6 +531,7 @@ protected:
   virtual void cloneFrom(Node * s) {
     if (s->hasType()) setType(s->type());
     setDebugName(s->debugName());
+    setSourceLocation(s->getSourceLocation());
     copyAttributes(*s);
   }
 };
