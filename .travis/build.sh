@@ -38,6 +38,7 @@ fi
 if [ "$BUILD_TESTS" = 'false' ]; then
     CMAKE_ARGS+=('-DBUILD_TEST=OFF')
 fi
+CMAKE_ARGS+=$(python $ROOT_DIR/scripts/get_python_cmake_flags.py)
 cmake .. ${CMAKE_ARGS[*]}
 
 # Build
