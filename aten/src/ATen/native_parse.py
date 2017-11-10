@@ -4,11 +4,31 @@ def python_num(s):
     except Exception:
         return float(s)
 
-RETURN_MAP = {
+CPP_TO_ATEN_TYPE_MAP = {
   'std::vector<Tensor>': 'TensorList',
-  'Tensor &': 'Tensor',
-  'std::tuple<Tensor, Tensor>': 'Tensor, Tensor'
+  'std::tuple<Tensor, Tensor>': 'Tensor, Tensor',
+  'const Tensor&': 'Tensor',
+  'Tensor&': 'Tensor',
 }
+
+def parse_arguments(args):
+    arguments = []
+
+    for arg in args.split(','):
+        arg = arg.strip()
+        t, name = arg.rsplit(' ', 1)
+        default = None
+
+        if '=' in name:
+            ns = name.split('=', 1)
+            name, default = ns[0], python_num(ns[1])
+
+        argument_dict = {'type': CPP_TO_ATEN_TYPE_MAP.get(t, t), 'name': name}
+        if default is not None:
+            argument_dict['default'] = default
+
+        arguments.append(argument_dict)
+    return arguments
 
 def parse(filename):
     with open(filename, 'r') as file:
@@ -32,11 +52,12 @@ def parse(filename):
                 if ';' in line:
                     decl_parse += line.split(';')[0]
                     in_decl_parse = False
-                    return_and_name = decl_parse.split('(')[0]
+                    return_and_name, arguments = decl_parse.split('(')
+                    arguments = arguments.split(')')[0]
                     declaration['name'] = return_and_name.split(' ')[-1]
                     return_type_cpp = return_and_name.rsplit(maxsplit=1)[0]
-                    declaration['return'] = RETURN_MAP.get(return_type_cpp, return_type_cpp)
-                    declaration['arguments'] = arguments
+                    declaration['return'] = CPP_TO_ATEN_TYPE_MAP.get(return_type_cpp, return_type_cpp)
+                    declaration['arguments'] = parse_arguments(arguments)
                     declaration['type_method_definition_dispatch'] = dispatch
                     declaration['type_method_definition_level'] = dispatch_level
                     type_method_definition_level = declaration.get('type_method_definition_level')
@@ -58,26 +79,7 @@ def parse(filename):
                     continue
 
                 value = ls[1].strip()
-                if key == 'arg':
-                    t, name = value.split(' ', 1)
-                    default = None
-                    output_arg = '[output]' in name
-
-                    if output_arg:
-                        name, _ = name.split(' ', 1)
-
-                    if '=' in name:
-                        ns = name.split('=', 1)
-                        name, default = ns[0], python_num(ns[1])
-
-                    argument_dict = {'type': t, 'name': name}
-                    if default is not None:
-                        argument_dict['default'] = default
-                    if output_arg:
-                        argument_dict['output'] = True
-
-                    arguments.append(argument_dict)
-                elif key == 'variants':
+                if key == 'variants':
                     declaration[key] = [x.strip() for x in value.split(',')]
                 elif key == 'type_method_definition_level':
                     dispatch_level = value
