@@ -862,14 +862,17 @@ __global__ void SetKernel(const int N, const T alpha, T* Y) {
     Y[i] = alpha;
   }
 }
-}  // namespace
+} // namespace
 
-#define CAFFE2_SPECIALIZED_CUDA_SET(T)                                         \
-  template <>                                                                  \
-  void Set<T, CUDAContext>(const TIndex N, const T alpha, T *Y,                \
-                              CUDAContext* context) {                          \
-    SetKernel<<<CAFFE_GET_BLOCKS(N), CAFFE_CUDA_NUM_THREADS,                   \
-                0, context->cuda_stream()>>>(N, alpha, Y);                     \
+#define CAFFE2_SPECIALIZED_CUDA_SET(T)                             \
+  template <>                                                      \
+  void Set<T, CUDAContext>(                                        \
+      const size_t N, const T alpha, T* Y, CUDAContext* context) { \
+    SetKernel<<<                                                   \
+        CAFFE_GET_BLOCKS(N),                                       \
+        CAFFE_CUDA_NUM_THREADS,                                    \
+        0,                                                         \
+        context->cuda_stream()>>>(N, alpha, Y);                    \
   }
 
 CAFFE2_SPECIALIZED_CUDA_SET(float);
@@ -888,56 +891,74 @@ CAFFE2_SPECIALIZED_CUDA_SET(uint16_t);
 namespace {
 template <typename T>
 __global__ void
-UniformShift(const int N, const float min, const float max, T* x) {
+UniformShift(const size_t N, const float min, const float max, T* x) {
   float scale = max - min;
   CUDA_1D_KERNEL_LOOP(i, N) {
     x[i] = convert::To<float, T>(convert::To<T, float>(x[i]) * scale + min);
   }
 }
 
-__global__ void UniformIntFit(const int N, const int min, const int max,
-                              unsigned int* x) {
+__global__ void
+UniformIntFit(const size_t N, const int min, const int max, unsigned int* x) {
   int* x_int = reinterpret_cast<int*>(x);
   int range = (max - min + 1);
   CUDA_1D_KERNEL_LOOP(i, N) {
     x_int[i] = min + static_cast<int>(x[i] % range);
   }
 }
-}  // namespace
+} // namespace
 
 template <>
 void RandUniform<float, CUDAContext>(
-    const int n, const float min, const float max, float* r,
+    const size_t n,
+    const float min,
+    const float max,
+    float* r,
     CUDAContext* context) {
   CURAND_ENFORCE(curandGenerateUniform(context->curand_generator(), r, n));
-  UniformShift<float><<<CAFFE_GET_BLOCKS(n), CAFFE_CUDA_NUM_THREADS,
-                        0, context->cuda_stream()>>>(n, min, max, r);
+  UniformShift<float>
+      <<<CAFFE_GET_BLOCKS(n),
+         CAFFE_CUDA_NUM_THREADS,
+         0,
+         context->cuda_stream()>>>(n, min, max, r);
 }
 
 template <>
 void RandUniform<double, CUDAContext>(
-    const int n, const double min, const double max, double* r,
+    const size_t n,
+    const double min,
+    const double max,
+    double* r,
     CUDAContext* context) {
   CURAND_ENFORCE(
       curandGenerateUniformDouble(context->curand_generator(), r, n));
-  UniformShift<double><<<CAFFE_GET_BLOCKS(n), CAFFE_CUDA_NUM_THREADS,
-                         0, context->cuda_stream()>>>(n, min, max, r);
+  UniformShift<double>
+      <<<CAFFE_GET_BLOCKS(n),
+         CAFFE_CUDA_NUM_THREADS,
+         0,
+         context->cuda_stream()>>>(n, min, max, r);
 }
 
 template <>
 void RandUniform<int, CUDAContext>(
-    const int n, const int min, const int max, int* r,
+    const size_t n,
+    const int min,
+    const int max,
+    int* r,
     CUDAContext* context) {
   CURAND_ENFORCE(curandGenerate(
       context->curand_generator(), reinterpret_cast<unsigned int*>(r), n));
-  UniformIntFit<<<CAFFE_GET_BLOCKS(n), CAFFE_CUDA_NUM_THREADS,
-                  0, context->cuda_stream()>>>(
+  UniformIntFit<<<
+      CAFFE_GET_BLOCKS(n),
+      CAFFE_CUDA_NUM_THREADS,
+      0,
+      context->cuda_stream()>>>(
       n, min, max, reinterpret_cast<unsigned int*>(r));
 }
 
 template <typename T>
-int HandleOddLengthRandGaussian(
-    const int n,
+size_t HandleOddLengthRandGaussian(
+    const size_t n,
     const T mean,
     const T std,
     T* r,
@@ -954,12 +975,15 @@ int HandleOddLengthRandGaussian(
 
 template <>
 void RandGaussian<float, CUDAContext>(
-    const int n, const float mean, const float std, float* r,
+    const size_t n,
+    const float mean,
+    const float std,
+    float* r,
     CUDAContext* context) {
   // If n is odd, we add a random Gaussian value at the end manually
   // and generate n-1 random values using curandGenerateNormal.
   // curandGenerateNormal requires n to be even.
-  const int even_n =
+  const size_t even_n =
       HandleOddLengthRandGaussian<float>(n, mean, std, r, context);
   CURAND_ENFORCE(
       curandGenerateNormal(context->curand_generator(), r, even_n, mean, std));
@@ -967,17 +991,23 @@ void RandGaussian<float, CUDAContext>(
 
 template <>
 void RandGaussian<double, CUDAContext>(
-    const int n, const double mean, const double std, double* r,
+    const size_t n,
+    const double mean,
+    const double std,
+    double* r,
     CUDAContext* context) {
-  const int even_n =
+  const size_t even_n =
       HandleOddLengthRandGaussian<double>(n, mean, std, r, context);
   CURAND_ENFORCE(curandGenerateNormalDouble(
       context->curand_generator(), r, even_n, mean, std));
 }
 
-template<>
+template <>
 void Dot<float, CUDAContext>(
-    const int n, const float* a, const float* b, float* y,
+    const int n,
+    const float* a,
+    const float* b,
+    float* y,
     CUDAContext* context) {
   float result;
   CUBLAS_ENFORCE(cublasSdot(context->cublas_handle(), n, a, 1, b, 1, &result));

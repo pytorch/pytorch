@@ -257,9 +257,8 @@ const char* curandGetErrorString(curandStatus_t error);
         << ::caffe2::curandGetErrorString(status); \
   } while (0)
 
-#define CUDA_1D_KERNEL_LOOP(i, n)                                              \
-  for (int i = blockIdx.x * blockDim.x + threadIdx.x;                          \
-       i < (n);                                                                \
+#define CUDA_1D_KERNEL_LOOP(i, n)                                 \
+  for (size_t i = blockIdx.x * blockDim.x + threadIdx.x; i < (n); \
        i += blockDim.x * gridDim.x)
 
 // CUDA_KERNEL_ASSERT is a macro that wraps an assert() call inside cuda
