@@ -39,12 +39,12 @@ __global__ void SpatialRoIPooling_forward_kernel(
     int proposal = linearIndex / pooledWidth / pooledHeight / inputChannels;
 
     // Get particular proposal data
-    const T *rois_offset = rois + (proposal * 5);
-    int n = rois_offset[0];
-    int startWidth = llrintf(rois_offset[1] * spatialScale);
-    int startHeight = llrintf(rois_offset[2] * spatialScale);
-    int endWidth = llrintf(rois_offset[3] * spatialScale);
-    int endHeight = llrintf(rois_offset[4] * spatialScale);
+    const T *roisOffset = rois + (proposal * 5);
+    int n = roisOffset[0];
+    int startWidth = llrintf(roisOffset[1] * spatialScale);
+    int startHeight = llrintf(roisOffset[2] * spatialScale);
+    int endWidth = llrintf(roisOffset[3] * spatialScale);
+    int endHeight = llrintf(roisOffset[4] * spatialScale);
 
     // TODO: fix malformed RoIs to be 1x1
 
@@ -135,8 +135,46 @@ std::tuple<Tensor, Tensor> SpatialRoIPooling_forward_cuda(
     inputHeight, inputWidth, pooledHeight, pooledWidth, output.data<float>(), argmaxes.data<int>());
   AT_ASSERT(cudaGetLastError() == cudaSuccess, "SpatialRoIPooling_forward_kernel failed");
 
-
   return std::make_tuple(output, argmaxes);
+}
+
+template <typename T>
+__global__ void SpatialRoIPooling_backward_kernel(
+  const int outputElements,
+  const T *gradOutput,
+  const int *argmaxes,
+  const int proposals,
+  const T spatialScale,
+  const int inputChannels,
+  const int inputHeight,
+  const int inputWidth,
+  const int pooledHeight,
+  const int pooledWidth,
+  T *gradInput,
+  const T *rois)
+{
+  for (int linearIndex = blockIdx.x * blockDim.x + threadIdx.x;
+       linearIndex < outputElements;
+       linearIndex += blockDim.x * gridDim.x)
+  {
+    int pw = linearIndex % pooledWidth;
+    int ph = (linearIndex / pooledWidth) / pooledHeight;
+    int ch = (linearIndex / pooledWidth / pooledHeight) % inputChannels;
+    int proposal = linearIndex / pooledWidth / pooledHeight / inputChannels;
+
+    const T *roisOffset = rois + (proposal * 5);
+    int n = roisOffset[0];
+    int gradInputOffset = (n * inputChannels + ch) * inputHeight * inputWidth;
+    int gradOutputOffset = (n * inputChannels + ch) * pooledHeight * pooledWidth;
+    const T* gradOutputShifted = gradOutput + gradOutputOffset;
+    T *gradInputShifted = gradInput + gradInputOffset;
+    const int *argmaxesShifted = argmaxes + gradOutputOffset;
+
+    int argmax = argmaxesShifted[ph * pooledWidth + pw];
+    if (argmax != -1) {
+      atomicAdd(gradInputShifted + argmax, gradOutputShifted[ph * pooledWidth + pw]);
+    }
+  }
 }
 
 } // at::native
