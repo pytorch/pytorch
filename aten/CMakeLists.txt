@@ -1,4 +1,10 @@
-cmake_minimum_required(VERSION 3.0)
+if(WIN32)
+  # To enable CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS to automatically
+  # add export decorators for all classes, structs and functions
+  cmake_minimum_required(VERSION 3.4)
+else(WIN32)
+  cmake_minimum_required(VERSION 3.0)
+endif(WIN32)
 set(CMAKE_MODULE_PATH
   ${CMAKE_CURRENT_SOURCE_DIR}/cmake
   ${CMAKE_CURRENT_SOURCE_DIR}/cmake/FindCUDA
