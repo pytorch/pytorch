@@ -276,10 +276,11 @@ class RNNDescriptor(object):
                 CUDNN_RNN_ALGO_STANDARD,
                 datatype
             ))
-        if version() >= 7000 and int(cuda[0]) >= 9:
-            lib.cudnnSetRNNMatrixMathType(self, CUDNN_DEFAULT_MATH)
-            if datatype == CUDNN_DATA_HALF:
-                lib.cudnnSetRNNMatrixMathType(self, CUDNN_TENSOR_OP_MATH)
+            if version() >= 7000 and int(cuda[0]) >= 9 and (
+                    torch.cuda.get_device_capability(torch.cuda.current_device())[0] >= 7):
+                lib.cudnnSetRNNMatrixMathType(self, CUDNN_DEFAULT_MATH)
+                if datatype == CUDNN_DATA_HALF:
+                    lib.cudnnSetRNNMatrixMathType(self, CUDNN_TENSOR_OP_MATH)
         else:
             check_error(lib.cudnnSetRNNDescriptor(
                 self,
