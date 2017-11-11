@@ -5,6 +5,8 @@
 
 #include "torch/csrc/jit/interned_strings.h"
 #include "torch/csrc/jit/passes/common_subexpression_elimination.h"
+#include "torch/csrc/utils/functional.h"
+#include "torch/csrc/utils/hash.h"
 
 namespace torch { namespace jit {
 
@@ -68,21 +70,12 @@ bool attributesEqualCSE(const Node* lhs, const Node* rhs) {
   return true;
 }
 
-// Later, if someone wants to reuse this, it can be moved to some header files.
-inline void hash_combine(size_t& seed, size_t value) {
-  seed ^= value + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-}
-
 struct HashNodeCSE {
   size_t operator()(const Node* k) const {
     JIT_ASSERT(k != nullptr);
-    size_t seed = 0;
-    hash_combine(seed, k->kind());
-    hash_combine(seed, k->stage());
-    for (auto i : k->inputs()) {
-      hash_combine(seed, i->unique());
-    }
-    return seed;
+    return get_hash(k->kind(),
+                    k->stage(),
+                    fmap(k->inputs(), [](const Node *n) { return n->unique(); }));
   }
 };
 
