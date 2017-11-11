@@ -234,7 +234,8 @@ class StdDevExportedStat : public ExportedStat {
         sumoffset_(gn, n + "/sumoffset") {}
 
   int64_t increment(int64_t value = 1) {
-    int64_t offset_value = first_.compare_exchange_strong(const_min_, value);
+    first_.compare_exchange_strong(const_min_, value);
+    int64_t offset_value = first_.load();
     int64_t orig_value = value;
     value -= offset_value;
     count_.increment();
