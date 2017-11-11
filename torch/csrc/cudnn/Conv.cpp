@@ -533,34 +533,30 @@ static void check_args(
 
 static void check_input_size(THVoidTensor* input, THVoidTensor* weight, int groups)
 {
-  if (input->nDimension > 5){
+  if (input->nDimension > 5) {
     throw std::runtime_error("input has more than 5 dimensions");
   }
 
-  if (input->size[1]/groups != weight->size[1]){
+  // NOTE: input is output for transposed conv
+  if (input->size[1] != weight->size[1] * groups) {
     std::stringstream ss;
-    ss << "Need input.size[1] == " << weight->size[1] * groups << " but got " << input->size[1] << " instead.";
+    ss << "Need input.size(1) == " << weight->size[1] * groups << " but got "
+       << input->size[1] << " instead.";
     throw std::runtime_error(ss.str());
   }
-
 }
 
 static void check_bias_size(
     THVoidTensor* bias, THVoidTensor* weight, int groups, bool transposed)
 {
-  if (bias != nullptr){
-    if (transposed){
-      if (bias->size[0]/groups != weight->size[1]){
-        std::stringstream ss;
-        ss << "Need bias.size[0] == " << weight->size[1]*groups << " but instead it is " << bias->size[0];
-        throw std::runtime_error(ss.str());
-      }
-    }
-    else if (bias->size[0] != weight->size[0]){
-      std::stringstream ss;
-      ss << "Need bias.size[0] == " << weight->size[0] << " but instead it is " << bias->size[0];
-      throw std::runtime_error(ss.str());
-    }
+  if (bias == nullptr) return;
+
+  auto weight_size = transposed ? weight->size[1] * groups : weight->size[0];
+  if (bias->size[0] != weight_size) {
+    std::stringstream ss;
+    ss << "Need bias.size(0) == " << weight_size
+       << " but instead it is " << bias->size[0];
+    throw std::runtime_error(ss.str());
   }
 }
 
