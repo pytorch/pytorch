@@ -1,6 +1,7 @@
 from bisect import bisect_right
 from .optimizer import Optimizer
-
+from ..autograd import Variable
+from .. import is_tensor
 
 class _LRScheduler(object):
     def __init__(self, optimizer, last_epoch=-1):
@@ -254,8 +255,12 @@ class ReduceLROnPlateau(object):
         if epoch is None:
             epoch = self.last_epoch = self.last_epoch + 1
         self.last_epoch = epoch
-
-        if self.is_better(current, self.best):
+        
+        current_is_better = self.is_better(current, self.best)
+        if isinstance(metrics,Variable) or is_tensor(metrics):
+            current_is_better = current_is_better.any()
+            
+        if current_is_better:
             self.best = current
             self.num_bad_epochs = 0
         else:
