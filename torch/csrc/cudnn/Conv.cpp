@@ -160,7 +160,7 @@ cudnnStatus_t getWorkspaceSize(
 
 template<typename algo_t>
 size_t getMaxWorkspaceSize(
-    cudnnHandle_t handle, const Convolution& conv, algo_t *algo, int n_algo,
+    cudnnHandle_t handle, const Convolution& conv, const algo_t *algo, int n_algo,
     THCState* state)
 {
     size_t max_ws_size = 0;
@@ -195,17 +195,17 @@ perf_t getBestAlgorithm(perf_t *perfResults, bool deterministic, int n_algo) {
 
 template<>
 struct algorithm_search<cudnnConvolutionFwdAlgo_t> {
-  static constexpr auto DEFAULT_ALGO = CUDNN_CONVOLUTION_FWD_ALGO_IMPLICIT_PRECOMP_GEMM;
-  static BenchmarkCache<cudnnConvolutionFwdAlgo_t>& cache() {
-    return fwd_algos;
-  }
+  using perf_t = cudnnConvolutionFwdAlgoPerf_t;
+  using algo_t = cudnnConvolutionFwdAlgo_t;
 
-  static cudnnConvolutionFwdAlgoPerf_t findAlgorithm(
+  static constexpr auto DEFAULT_ALGO = CUDNN_CONVOLUTION_FWD_ALGO_IMPLICIT_PRECOMP_GEMM;
+  static BenchmarkCache<algo_t>& cache() { return fwd_algos; }
+
+  static perf_t findAlgorithm(
       THCState* state, cudnnHandle_t handle, const Convolution& conv,
       void* in, void* out, void* wght, bool deterministic)
   {
-    int algoCount;
-    cudnnConvolutionFwdAlgo_t algo[] = {
+    static const algo_t algos[] = {
          CUDNN_CONVOLUTION_FWD_ALGO_GEMM,
          CUDNN_CONVOLUTION_FWD_ALGO_FFT,
          CUDNN_CONVOLUTION_FWD_ALGO_FFT_TILING,
@@ -215,10 +215,12 @@ struct algorithm_search<cudnnConvolutionFwdAlgo_t> {
          CUDNN_CONVOLUTION_FWD_ALGO_WINOGRAD,
          CUDNN_CONVOLUTION_FWD_ALGO_WINOGRAD_NONFUSED,
     };
-    int n_algo = sizeof(algo)/sizeof(algo[0]);
-    std::unique_ptr<cudnnConvolutionFwdAlgoPerf_t[]> perfResults (new cudnnConvolutionFwdAlgoPerf_t[n_algo]);
-    size_t max_ws_size = getMaxWorkspaceSize<cudnnConvolutionFwdAlgo_t>(
-        handle, conv, algo, n_algo, state);
+    static constexpr int num_algos = CUDNN_CONVOLUTION_FWD_ALGO_COUNT;
+    static_assert(sizeof(algos) / sizeof(algos[0]) == num_algos,
+                  "Missing cuDNN convolution forward algorithms");
+    int perf_count;
+    std::unique_ptr<perf_t[]> perf_results(new perf_t[num_algos]);
+    size_t max_ws_size = getMaxWorkspaceSize(handle, conv, algos, num_algos, state);
     Workspace ws(state, max_ws_size);
     CHECK(cudnnFindConvolutionForwardAlgorithmEx(
         handle,
@@ -229,16 +231,16 @@ struct algorithm_search<cudnnConvolutionFwdAlgo_t> {
         conv.cdesc.desc,
         conv.odesc.desc,
         out,
-        n_algo,
-        &algoCount,
-        perfResults.get(),
+        num_algos,
+        &perf_count,
+        perf_results.get(),
         ws.data,
         ws.size));
-    return getBestAlgorithm<cudnnConvolutionFwdAlgoPerf_t>(perfResults.get(), deterministic, algoCount);
+    return getBestAlgorithm(perf_results.get(), deterministic, perf_count);
   }
 
   static void getAlgorithm(
-    cudnnHandle_t handle, const Convolution& conv, cudnnConvolutionFwdAlgo_t* algo)
+    cudnnHandle_t handle, const Convolution& conv, algo_t* algo)
   {
     cudnnConvolutionFwdPreference_t pref = CUDNN_CONVOLUTION_FWD_PREFER_FASTEST;
     CHECK(cudnnGetConvolutionForwardAlgorithm(
@@ -254,7 +256,7 @@ struct algorithm_search<cudnnConvolutionFwdAlgo_t> {
 
   static void getWorkspaceSize(
     cudnnHandle_t handle, const Convolution& conv,
-    cudnnConvolutionFwdAlgo_t algo, size_t* workspaceSize)
+    algo_t algo, size_t* workspaceSize)
   {
     CHECK(cudnnGetConvolutionForwardWorkspaceSize(
         handle,
@@ -269,19 +271,17 @@ struct algorithm_search<cudnnConvolutionFwdAlgo_t> {
 
 template<>
 struct algorithm_search<cudnnConvolutionBwdDataAlgo_t> {
+  using perf_t = cudnnConvolutionBwdDataAlgoPerf_t;
+  using algo_t = cudnnConvolutionBwdDataAlgo_t;
+
   static constexpr auto DEFAULT_ALGO = CUDNN_CONVOLUTION_BWD_DATA_ALGO_1;
+  static BenchmarkCache<algo_t>& cache() { return bwd_data_algos; }
 
-  static BenchmarkCache<cudnnConvolutionBwdDataAlgo_t>& cache()
-  {
-    return bwd_data_algos;
-  }
-
-  static cudnnConvolutionBwdDataAlgoPerf_t findAlgorithm(
+  static perf_t findAlgorithm(
       THCState* state,cudnnHandle_t handle, const Convolution& conv, void* in,
       void* out, void* wght, bool deterministic)
   {
-    int algoCount;
-    cudnnConvolutionBwdDataAlgo_t algo[] = {
+    static const algo_t algos[] = {
         CUDNN_CONVOLUTION_BWD_DATA_ALGO_0,
         CUDNN_CONVOLUTION_BWD_DATA_ALGO_1,
         CUDNN_CONVOLUTION_BWD_DATA_ALGO_FFT,
@@ -289,10 +289,12 @@ struct algorithm_search<cudnnConvolutionBwdDataAlgo_t> {
         CUDNN_CONVOLUTION_BWD_DATA_ALGO_WINOGRAD,
         CUDNN_CONVOLUTION_BWD_DATA_ALGO_WINOGRAD_NONFUSED
     };
-    int n_algo = sizeof(algo)/sizeof(algo[0]);
-    std::unique_ptr<cudnnConvolutionBwdDataAlgoPerf_t[]> perfResults (new cudnnConvolutionBwdDataAlgoPerf_t[n_algo]);
-    size_t max_ws_size = getMaxWorkspaceSize<cudnnConvolutionBwdDataAlgo_t>(
-        handle, conv, algo, n_algo, state);
+    static constexpr int num_algos = CUDNN_CONVOLUTION_BWD_DATA_ALGO_COUNT;
+    static_assert(sizeof(algos) / sizeof(algos[0]) == num_algos,
+                  "Missing cuDNN convolution backward data algorithms.");
+    int perf_count;
+    std::unique_ptr<perf_t[]> perf_results(new perf_t[num_algos]);
+    size_t max_ws_size = getMaxWorkspaceSize(handle, conv, algos, num_algos, state);
     Workspace ws(state, max_ws_size);
     CHECK(cudnnFindConvolutionBackwardDataAlgorithmEx(
         handle,
@@ -303,15 +305,15 @@ struct algorithm_search<cudnnConvolutionBwdDataAlgo_t> {
         conv.cdesc.desc,
         conv.idesc.desc,
         in,
-        n_algo,
-        &algoCount,
-        perfResults.get(),
+        num_algos,
+        &perf_count,
+        perf_results.get(),
         ws.data,
         ws.size));
-    return getBestAlgorithm<cudnnConvolutionBwdDataAlgoPerf_t>(perfResults.get(), deterministic, algoCount);
+    return getBestAlgorithm(perf_results.get(), deterministic, perf_count);
   }
 
-  static void getAlgorithm(cudnnHandle_t handle, const Convolution& conv, cudnnConvolutionBwdDataAlgo_t* algo) {
+  static void getAlgorithm(cudnnHandle_t handle, const Convolution& conv, algo_t* algo) {
     CHECK(cudnnGetConvolutionBackwardDataAlgorithm(
         handle,
         conv.wdesc.desc,
@@ -325,7 +327,7 @@ struct algorithm_search<cudnnConvolutionBwdDataAlgo_t> {
 
   static void getWorkspaceSize(
     cudnnHandle_t handle, const Convolution& conv,
-    cudnnConvolutionBwdDataAlgo_t algo, size_t* workspaceSize)
+    algo_t algo, size_t* workspaceSize)
   {
     CHECK(cudnnGetConvolutionBackwardDataWorkspaceSize(
         handle,
@@ -333,26 +335,24 @@ struct algorithm_search<cudnnConvolutionBwdDataAlgo_t> {
         conv.odesc.desc,
         conv.cdesc.desc,
         conv.idesc.desc,
-         algo,
+        algo,
         workspaceSize));
   }
 };
 
 template<>
 struct algorithm_search<cudnnConvolutionBwdFilterAlgo_t> {
+  using perf_t = cudnnConvolutionBwdFilterAlgoPerf_t;
+  using algo_t = cudnnConvolutionBwdFilterAlgo_t;
+
   static constexpr auto DEFAULT_ALGO = CUDNN_CONVOLUTION_BWD_FILTER_ALGO_1;
+  static BenchmarkCache<algo_t>& cache() { return bwd_filter_algos; }
 
-  static BenchmarkCache<cudnnConvolutionBwdFilterAlgo_t>& cache()
-  {
-    return bwd_filter_algos;
-  }
-
-  static cudnnConvolutionBwdFilterAlgoPerf_t findAlgorithm(
+  static perf_t findAlgorithm(
         THCState* state, cudnnHandle_t handle, const Convolution& conv,
         void* in, void* out, void* wght, bool deterministic)
   {
-    int algoCount;
-    cudnnConvolutionBwdFilterAlgo_t algo[] = {
+    static const algo_t algos[] = {
         CUDNN_CONVOLUTION_BWD_FILTER_ALGO_0,
         CUDNN_CONVOLUTION_BWD_FILTER_ALGO_1,
         CUDNN_CONVOLUTION_BWD_FILTER_ALGO_FFT,
@@ -362,12 +362,14 @@ struct algorithm_search<cudnnConvolutionBwdFilterAlgo_t> {
         CUDNN_CONVOLUTION_BWD_FILTER_ALGO_FFT_TILING,
 #endif
     };
-    int n_algo = sizeof(algo)/sizeof(algo[0]);
-    std::unique_ptr<cudnnConvolutionBwdFilterAlgoPerf_t[]> perfResults (new cudnnConvolutionBwdFilterAlgoPerf_t[n_algo]);
-    size_t max_ws_size = getMaxWorkspaceSize<cudnnConvolutionBwdFilterAlgo_t>(
-        handle, conv, algo, n_algo, state);
+    // NOTE: - 1 because ALGO_WINOGRAD is not implemented
+    static constexpr int num_algos = CUDNN_CONVOLUTION_BWD_FILTER_ALGO_COUNT - 1;
+    static_assert(sizeof(algos) / sizeof(algos[0]) == num_algos,
+                  "Missing cuDNN convolution backward filter algorithms.");
+    std::unique_ptr<perf_t[]> perf_results(new perf_t[num_algos]);
+    size_t max_ws_size = getMaxWorkspaceSize<algo_t>(handle, conv, algos, num_algos, state);
     Workspace ws(state, max_ws_size);
-
+    int perf_count;
     CHECK(cudnnFindConvolutionBackwardFilterAlgorithmEx(
         handle,
         conv.idesc.desc,
@@ -377,16 +379,16 @@ struct algorithm_search<cudnnConvolutionBwdFilterAlgo_t> {
         conv.cdesc.desc,
         conv.wdesc.desc,
         wght,
-        n_algo,
-        &algoCount,
-        perfResults.get(),
+        num_algos,
+        &perf_count,
+        perf_results.get(),
         ws.data,
         ws.size));
-    return getBestAlgorithm<cudnnConvolutionBwdFilterAlgoPerf_t>(perfResults.get(), deterministic, algoCount);
+    return getBestAlgorithm<perf_t>(perf_results.get(), deterministic, perf_count);
   }
 
   static void getAlgorithm(
-      cudnnHandle_t handle, const Convolution& conv, cudnnConvolutionBwdFilterAlgo_t* algo)
+      cudnnHandle_t handle, const Convolution& conv, algo_t* algo)
   {
     CHECK(cudnnGetConvolutionBackwardFilterAlgorithm(
         handle,
@@ -402,7 +404,7 @@ struct algorithm_search<cudnnConvolutionBwdFilterAlgo_t> {
 
   static void getWorkspaceSize(
       cudnnHandle_t handle, const Convolution& conv,
-      cudnnConvolutionBwdFilterAlgo_t algo, size_t* workspaceSize)
+      algo_t algo, size_t* workspaceSize)
   {
     CHECK(cudnnGetConvolutionBackwardFilterWorkspaceSize(
         handle,
