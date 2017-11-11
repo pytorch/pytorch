@@ -174,14 +174,6 @@ std::vector<Variable> VariableType::as_variable(TensorList tl) const {
   return variables;
 }
 
-Variable VariableType::as_variable(const Scalar & scalar) const {
-  auto tensor = scalar.toTensor();
-  if (&tensor.type() != baseType) {
-    tensor = tensor.toType(*baseType);
-  }
-  return make_variable(std::move(tensor));
-}
-
 Variable VariableType::maybe_wrap(Tensor data, const Variable & self, bool inplace) const {
   if (inplace) {
     return self;
@@ -194,6 +186,12 @@ static Variable as_view(Variable base, Tensor tensor) {
     base = base.base();
   }
   return make_variable_view(std::move(base), std::move(tensor));
+}
+
+static void ensure_no_aten_scalars(Tensor & data) {
+  if (data.defined() && data.dim() == 0) {
+    data.as_strided_({1}, {1});
+  }
 }
 
 template<typename T>
@@ -258,22 +256,22 @@ static void check_inplace(const Tensor& tensor) {
   }
 }
 
-static void set_flags(Variable& var, VarFlags flags, std::shared_ptr<Function> grad_fn, bool inplace=false) {
+static void set_flags(Variable& var, VarFlags flags, std::shared_ptr<Function> grad_fn, bool inplace=false, int output_nr = 0) {
   if (grad_fn) {
     grad_fn->num_inputs = 1;
   }
   if (inplace) {
-    var.rebase_history(flags, 0, std::move(grad_fn));
+    var.rebase_history(flags, output_nr, std::move(grad_fn));
   } else {
     // TODO: combine this code path with the Variable construction
     var.get()->requires_grad = flags.requires_grad;
     var.get()->is_volatile = flags.is_volatile;
-    var.get()->output_nr = 0;
+    var.get()->output_nr = output_nr;
     var.get()->_grad_fn = std::move(grad_fn);
   }
 }
 
-static void set_flags(std::vector<Variable> &vl, VarFlags flags, std::shared_ptr<Function> grad_fn) {
+static void set_flags(at::ArrayRef<Variable> vl, VarFlags flags, std::shared_ptr<Function> grad_fn) {
   if (grad_fn) {
     grad_fn->num_inputs = vl.size();
   }

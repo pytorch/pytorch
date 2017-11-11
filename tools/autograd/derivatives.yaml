@@ -2,8 +2,7 @@
 #
 # Each entry consists of:
 #   - A 'name', which specifies the ATen name of the function you
-#     are defining derivatives for, and a C-style argument
-#     specification.
+#     are defining derivatives for, and an argument specification.
 #   - One or more gradients entries, mapping a differentiable input
 #     names to a formula specifying how to compute its gradient.
 #     Note that a single gradient entry can specify the gradient
@@ -20,13 +19,10 @@
 #   - Any of the input arguments, tensor or non-tensor
 #   - 'output', representing the result of evaluating the forward
 #     expression
-#   - 'output_mask', a std::array<bool, n> (where n is the number
+#   - 'grad_input_mask', a std::array<bool, n> (where n is the number
 #     of differentiable inputs), specifying which inputs actually
 #     require gradient.  (This is only available when multiple
 #     derivatives are being computed by a single formula.)
-#     For double backwards, this is called 'grad_mask' (reserving
-#     'output_mask' to refer to the output_mask input of the
-#     backwards.)
 #
 # If you need a complex expression, e.g., with local variables,
 # write a _backward function in tools/autograd/templates/Function.cpp
@@ -39,6 +35,12 @@
 # derivative formula for every input, including inputs named things
 # like 'grad_output', and (2) the gradient to multiply with is always
 # called 'grad' (even though it really is a grad-grad).
+#
+# LOOKING FOR AN THNN DEFINITION?  These are implicitly defined by
+# preprocess_nn_functions, because THNN functions follow a specific
+# convention; thus, you don't have to explicitly write it down in
+# derivatives.yaml (in fact, you MUST NOT write it down, because then
+# you'll have two derivative definitions!)
 #
 # NB: There are a number of gradient definitions in here which are bogus
 # (implemented using zeros_like).  These gradients are (hopefully) not
@@ -53,39 +55,39 @@
 - name: acos(Tensor self)
   self: grad * -((-self * self + 1).sqrt().reciprocal())
 
-- name: add(Tensor self, Scalar other, *, Scalar alpha=1)
+- name: add(Tensor self, Scalar other, *, Scalar alpha)
   self: grad
 
-- name: add(Tensor self, Tensor other, *, Scalar alpha=1)
+- name: add(Tensor self, Tensor other, *, Scalar alpha)
   self: grad
   other: maybe_multiply(grad, alpha)
 
-- name: addbmm(Tensor self, Tensor batch1, Tensor batch2, *, Scalar beta=1, Scalar alpha=1)
+- name: addbmm(Tensor self, Tensor batch1, Tensor batch2, *, Scalar beta, Scalar alpha)
   self: maybe_multiply(grad, beta)
   batch1: grad.unsqueeze(0).expand({ batch1.size(0), batch1.size(1), batch2.size(2) }).bmm(batch2.transpose(1, 2)) * alpha
   batch2: batch1.transpose(1, 2).bmm(grad.unsqueeze(0).expand({ batch1.size(0), batch1.size(1), batch2.size(2) })) * alpha
 
-- name: addcdiv(Tensor self, Tensor tensor1, Tensor tensor2, *, Scalar value=1)
+- name: addcdiv(Tensor self, Tensor tensor1, Tensor tensor2, *, Scalar value)
   self: grad
   tensor1: grad * value / tensor2
   tensor2: -grad * value * tensor1 / (tensor2 * tensor2)
 
-- name: addcmul(Tensor self, Tensor tensor1, Tensor tensor2, *, Scalar value=1)
+- name: addcmul(Tensor self, Tensor tensor1, Tensor tensor2, *, Scalar value)
   self: grad
   tensor1: grad * tensor2 * value
   tensor2: grad * tensor1 * value
 
-- name: addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1)
+- name: addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta, Scalar alpha)
   self: maybe_multiply(grad, beta)
   mat1: mm_mat1_backward(grad, mat2, mat1.sizes(), mat1.strides(), alpha)
   mat2: mm_mat2_backward(grad, mat1, mat2.sizes(), mat2.strides(), alpha)
 
-- name: addmv(Tensor self, Tensor mat, Tensor vec, *, Scalar beta=1, Scalar alpha=1)
+- name: addmv(Tensor self, Tensor mat, Tensor vec, *, Scalar beta, Scalar alpha)
   self: maybe_multiply(grad, beta)
   mat: grad.ger(vec) * alpha
   vec: mat.t().mv(grad) * alpha
 
-- name: addr(Tensor self, Tensor vec1, Tensor vec2, *, Scalar beta=1, Scalar alpha=1)
+- name: addr(Tensor self, Tensor vec1, Tensor vec2, *, Scalar beta, Scalar alpha)
   self: maybe_multiply(grad, beta)
   vec1: grad.mv(vec2) * alpha
   vec2: grad.t().mv(vec1) * alpha
@@ -106,9 +108,9 @@
   self: grad * (self * self + 1).reciprocal()
 
 - name: atan2(Tensor self, Tensor other)
-  self, other: atan2_backward(grad, self, other, output_mask)
+  self, other: atan2_backward(grad, self, other, grad_input_mask)
 
-- name: baddbmm(Tensor self, Tensor batch1, Tensor batch2, *, Scalar beta=1, Scalar alpha=1)
+- name: baddbmm(Tensor self, Tensor batch1, Tensor batch2, *, Scalar beta, Scalar alpha)
   self: maybe_multiply(grad, beta)
   batch1: grad.bmm(batch2.transpose(1, 2)) * alpha
   batch2: batch1.transpose(1, 2).bmm(grad) * alpha
@@ -123,7 +125,7 @@
 - name: btrisolve(Tensor self, Tensor LU_data, Tensor LU_pivots)
   self: not_implemented("btrisolve")
 
-- name: cat(TensorList tensors, int64_t dim=0)
+- name: cat(TensorList tensors, int64_t dim)
   tensors: cat_tensors_backward(grad, to_arg_sizes(tensors, dim), dim)
 
 - name: cauchy  # TODO: reinforce
@@ -140,7 +142,7 @@
 - name: cosh(Tensor self)
   self: grad * self.sinh()
 
-- name: cross(Tensor self, Tensor other, int64_t dim=-1)
+- name: cross(Tensor self, Tensor other, int64_t dim)
   self: other.cross(grad, dim)
   other: grad.cross(self, dim)
 
@@ -151,10 +153,10 @@
 
 - name: data_ptr  # fallthrough
 
-- name: diag(Tensor self, int64_t diagonal=0)
+- name: diag(Tensor self, int64_t diagonal)
   self: grad.diag(diagonal)
 
-- name: dist(Tensor self, Tensor other, Scalar p=2)
+- name: dist(Tensor self, Tensor other, Scalar p)
   self: norm_backward(grad, self - other, p, result)
   other: -norm_backward(grad, self - other, p, result)
 
@@ -225,7 +227,7 @@
   self: not_implemented("gels")
   A: not_implemented("gels")
 
-- name: geometric(Tensor self, double p, Generator Generator)
+- name: geometric(Tensor self, double p, Generator generator)
   self: zeros_like(grad)
 
 - name: geqrf(Tensor self)
@@ -392,10 +394,10 @@
 - name: nonzero(Tensor self)
   self: zeros_like(grad)
 
-- name: norm(Tensor self, Scalar p=2)
+- name: norm(Tensor self, Scalar p)
   self: norm_backward(grad, self, p, result)
 
-- name: norm(Tensor self, Scalar p, int64_t dim, bool keepdim=False)
+- name: norm(Tensor self, Scalar p, int64_t dim, bool keepdim)
   self: norm_backward(grad, self, p, destination, dim, keepdim)
 
 - name: numel  # fallthrough
@@ -500,7 +502,7 @@
 - name: sort(Tensor self, int64_t dim, bool descending)
   self: select_backward(grad, dim, indices, self.sizes(), true)
 
-- name: split(Tensor self, int64_t split_size, int64_t dim=0)
+- name: split(Tensor self, int64_t split_size, int64_t dim)
   self: split_backward(grads, split_size, dim, self.sizes(), self.type())
 
 - name: sqrt(Tensor self)
@@ -528,7 +530,7 @@
 - name: sum(Tensor self)
   self: grad.expand(self.sizes())
 
-- name: sum(Tensor self, int64_t dim, bool keepdim=False)
+- name: sum(Tensor self, int64_t dim, bool keepdim)
   self: sum_backward(grad, self.sizes(), dim, keepdim)
 
 - name: svd(Tensor self, bool some)
@@ -560,10 +562,10 @@
 - name: transpose(Tensor self, int64_t dim0, int64_t dim1)
   self: grad.transpose(dim0, dim1)
 
-- name: tril(Tensor self, int64_t diagonal=0)
+- name: tril(Tensor self, int64_t diagonal)
   self: grad.tril(diagonal)
 
-- name: triu(Tensor self, int64_t diagonal=0)
+- name: triu(Tensor self, int64_t diagonal)
   self: grad.triu(diagonal)
 
 - name: trtrs(Tensor self, Tensor A, bool upper, bool transpose, bool unitriangular)
@@ -656,10 +658,8 @@
   grad_output: nll_loss2d(grad, target, weight, size_average, ignore_index, reduce)
   input: zeros_like(grad)
 
-- name: prelu_backward(Tensor grad_output, Tensor input, Tensor weight, std::array<bool, 2> output_mask)
-  grad_output: zeros_like(grad_output)
-  input: zeros_like(input)
-  weight: zeros_like(weight)
+- name: prelu_backward(Tensor grad_output, Tensor input, Tensor weight, std::array<bool,2> output_mask)
+  grad_output, input, weight: prelu_double_backward(grads[0], grads[1], grad_output, input, weight, grad_input_mask)
 
 - name: rrelu_backward(Tensor grad_output, Tensor input, Scalar lower, Scalar upper, bool training, bool inplace, Tensor noise)
   grad_output: rrelu_backward(grad, input, lower, upper, training, false, noise)

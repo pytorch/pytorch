@@ -1,10 +1,17 @@
-cmake_minimum_required(VERSION 3.0)
+if(WIN32)
+  # To enable CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS to automatically
+  # add export decorators for all classes, structs and functions
+  cmake_minimum_required(VERSION 3.4)
+else(WIN32)
+  cmake_minimum_required(VERSION 3.0)
+endif(WIN32)
 set(CMAKE_MODULE_PATH
   ${CMAKE_CURRENT_SOURCE_DIR}/cmake
   ${CMAKE_CURRENT_SOURCE_DIR}/cmake/FindCUDA
   /usr/lib/x86_64-linux-gnu/
   ${CMAKE_CURRENT_SOURCE_DIR}/src/TH/cmake
   ${CMAKE_MODULE_PATH})
+SET(CMAKE_LIBRARY_PATH /usr/lib/x86_64-linux-gnu/ ${CMAKE_LIBRARY_PATH})
 project(ATen)
 
 cmake_policy(SET CMP0012 NEW)
@@ -319,20 +326,13 @@ MACRO(Install_Required_Library ln)
       DESTINATION "${TH_INSTALL_BIN_SUBDIR}")
 ENDMACRO(Install_Required_Library libname)
 
-IF (BLAS_FOUND AND BLAS_INSTALL_LIBRARIES)
-  IF (BLAS_goto2_LIBRARY)
-    Install_Required_Library(${BLAS_goto2_LIBRARY})
-    Install_Required_Library("${libpath}/libgfortran")
-    Install_Required_Library("${libpath}/libquadmath")
-    Install_Required_Library("${libpath}/libgcc")
+FIND_PACKAGE(BLAS)
+IF(BLAS_FOUND)
+  SET(USE_BLAS 1)
+  IF(BLAS_INFO STREQUAL "mkl")
+    ADD_DEFINITIONS(-DTH_BLAS_MKL)
   ENDIF()
-  IF (BLAS_openblas_LIBRARY)
-    Install_Required_Library(${BLAS_openblas_LIBRARY})
-    Install_Required_Library("${libpath}/libquadmath")
-    Install_Required_Library("${libpath}/libgfortran")
-    Install_Required_Library("${libpath}/libgcc")
-  ENDIF()
-ENDIF()
+ENDIF(BLAS_FOUND)
 
 FIND_PACKAGE(LAPACK)
 IF(LAPACK_FOUND)

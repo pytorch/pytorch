@@ -206,20 +206,30 @@ class Variable(_C._VariableBase):
         return handle
 
     def reinforce(self, reward):
-        """Registers a reward obtained as a result of a stochastic process.
+        def trim(str):
+            return '\n'.join([line.strip() for line in str.split('\n')])
 
-        Differentiating stochastic nodes requires providing them with reward
-        value. If your graph contains any stochastic operations, you should
-        call this function on their outputs. Otherwise an error will be raised.
+        raise RuntimeError(trim(r"""reinforce() was removed.
+            Use torch.distributions instead.
+            See http://pytorch.org/docs/master/distributions.html
 
-        Parameters:
-            reward(Tensor): Tensor with per-element rewards. It has to match
-                the device location and shape of Variable's data.
-        """
-        if not isinstance(self.grad_fn, StochasticFunction):
-            raise RuntimeError("reinforce() can be only called on outputs "
-                               "of stochastic functions")
-        self.grad_fn._reinforce(reward)
+            Instead of:
+
+            probs = policy_network(state)
+            action = probs.multinomial()
+            next_state, reward = env.step(action)
+            action.reinforce(reward)
+            action.backward()
+
+            Use:
+
+            probs = policy_network(state)
+            m = torch.distributions.Multinomial(probs)
+            action = m.sample()
+            next_state, reward = env.step(action)
+            loss = -m.log_prob(action) * reward
+            loss.backward()
+        """))
 
     detach = _add_docstr(_C._VariableBase.detach, r"""
     Returns a new Variable, detached from the current graph.

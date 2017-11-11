@@ -29,7 +29,7 @@ IF "%CMAKE_GENERATOR%"=="" (
   set CMAKE_GENERATOR_COMMAND=
   set MAKE_COMMAND=msbuild INSTALL.vcxproj /p:Configuration=Release
 ) ELSE (
-  set CMAKE_GENERATOR_COMMAND=-G %CMAKE_GENERATOR%
+  set CMAKE_GENERATOR_COMMAND=-G "%CMAKE_GENERATOR%"
   IF "%CMAKE_GENERATOR%"=="Ninja" (
     set CC=cl.exe
     set CXX=cl.exe
@@ -64,7 +64,7 @@ goto:eof
 
 :build
   @setlocal
-  IF NOT "%PREBUILD_COMMAND%"=="" call %PREBUILD_COMMAND%
+  IF NOT "%PREBUILD_COMMAND%"=="" call "%PREBUILD_COMMAND%" %PREBUILD_COMMAND_ARGS%
   mkdir build\%~1
   cd build/%~1
   cmake ../../%~1 %CMAKE_GENERATOR_COMMAND% ^
@@ -91,6 +91,7 @@ goto:eof
                   -DTHCUNN_SO_VERSION=1 ^
                   -DNO_CUDA=%NO_CUDA% ^
                   -Dnanopb_BUILD_GENERATOR=0 ^
+                  -DCMAKE_WINDOWS_EXPORT_ALL_SYMBOLS=TRUE ^
                   -DCMAKE_BUILD_TYPE=Release
 
   %MAKE_COMMAND%
@@ -101,7 +102,7 @@ goto:eof
 
 :build_aten
   @setlocal
-  IF NOT "%PREBUILD_COMMAND%"=="" call %PREBUILD_COMMAND%
+  IF NOT "%PREBUILD_COMMAND%"=="" call "%PREBUILD_COMMAND%" %PREBUILD_COMMAND_ARGS%
   mkdir build\%~1
   cd build/%~1
   cmake ../../../../%~1 %CMAKE_GENERATOR_COMMAND% ^
@@ -109,6 +110,7 @@ goto:eof
                   -DNO_CUDA=%NO_CUDA% ^
                   -DCUDNN_INCLUDE_DIR="%CUDNN_INCLUDE_DIR%" ^
                   -DCUDNN_LIB_DIR="%CUDNN_LIB_DIR%" ^
+                  -DCMAKE_WINDOWS_EXPORT_ALL_SYMBOLS=TRUE ^
                   -DCMAKE_BUILD_TYPE=Release
 
   %MAKE_COMMAND%

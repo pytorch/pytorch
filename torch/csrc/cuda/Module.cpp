@@ -133,6 +133,19 @@ PyObject * THCPModule_getDeviceName_wrap(PyObject *self, PyObject *arg)
   END_HANDLE_TH_ERRORS
 }
 
+PyObject * THCPModule_getDeviceCapability_wrap(PyObject *self, PyObject *arg)
+{
+  HANDLE_TH_ERRORS
+  THPUtils_assert(THPUtils_checkLong(arg), "invalid argument to getDeviceCapability");
+  long device = THPUtils_unpackLong(arg);
+
+  cudaDeviceProp prop;
+  THCudaCheck(cudaGetDeviceProperties(&prop, device));
+  return Py_BuildValue("(ii)", prop.major, prop.minor);
+  END_HANDLE_TH_ERRORS
+}
+
+
 PyObject * THCPModule_getCurrentStream_wrap(PyObject *self)
 {
   HANDLE_TH_ERRORS
@@ -172,6 +185,11 @@ PyObject * THCPModule_getDriverVersion(PyObject *self)
     return NULL;
   }
   return PyLong_FromLong((int64_t) driverVersion);
+}
+
+PyObject * THCPModule_getCompiledVersion(PyObject *self)
+{
+  return PyLong_FromLong((long) CUDA_VERSION);
 }
 
 PyObject * THCPModule_getRNGState(PyObject *_unused)
@@ -378,11 +396,13 @@ static struct PyMethodDef _THCPModule_methods[] = {
   {"_cuda_getDevice",   (PyCFunction)THCPModule_getDevice_wrap,   METH_NOARGS,  NULL},
   {"_cuda_getDeviceCount", (PyCFunction)THCPModule_getDeviceCount_wrap, METH_NOARGS, NULL},
   {"_cuda_getDeviceName", (PyCFunction)THCPModule_getDeviceName_wrap, METH_O,   NULL},
+  {"_cuda_getDeviceCapability", (PyCFunction)THCPModule_getDeviceCapability_wrap, METH_O,   NULL},
   {"_cuda_getCurrentStream", (PyCFunction)THCPModule_getCurrentStream_wrap, METH_NOARGS, NULL},
   {"_cuda_getCurrentBlasHandle", (PyCFunction)THCPModule_getCurrentBlasHandle_wrap, METH_NOARGS, NULL},
   {"_cuda_setStream",    (PyCFunction)THCPModule_setStream_wrap,  METH_O, NULL},
   {"_cuda_isDriverSufficient", (PyCFunction)THCPModule_isDriverSufficient, METH_NOARGS, NULL},
   {"_cuda_getDriverVersion", (PyCFunction)THCPModule_getDriverVersion, METH_NOARGS, NULL},
+  {"_cuda_getCompiledVersion", (PyCFunction)THCPModule_getCompiledVersion, METH_NOARGS, NULL},
   {"_cuda_getRNGState", (PyCFunction)THCPModule_getRNGState,      METH_NOARGS,  NULL},
   {"_cuda_setRNGState", (PyCFunction)THCPModule_setRNGState,      METH_O,       NULL},
   {"_cuda_emptyCache", (PyCFunction) THCPModule_emptyCache,       METH_NOARGS,  NULL},

@@ -1,5 +1,6 @@
 from optparse import OptionParser
 import yaml
+from collections import OrderedDict
 
 import cwrap_parser
 import nn_parse
@@ -112,12 +113,18 @@ def write(filename, s):
         f.write(s)
 
 
+def dict_representer(dumper, data):
+    return dumper.represent_dict(data.items())
+
+
 def format_yaml(data):
     if options.output_dependencies:
         # yaml formatting is slow so don't do it if we will ditch it.
         return ""
     noalias_dumper = yaml.dumper.SafeDumper
     noalias_dumper.ignore_aliases = lambda self, data: True
+    # Support serializing OrderedDict
+    noalias_dumper.add_representer(OrderedDict, dict_representer)
     return yaml.dump(data, default_flow_style=False, Dumper=noalias_dumper)
 
 
