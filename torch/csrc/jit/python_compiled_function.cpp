@@ -118,8 +118,8 @@ struct CompiledFunction {
 
       // Flatten outputs and update fields
       auto out_info = flatten(out);
-      if (out_desc_.empty()) {
-        out_desc_ = out_info.desc;
+      if (out_desc_.structure.empty()) {
+        out_desc_ = std::move(out_info.desc);
       } else {
         // TODO: assert matches but only in debug mode
       }
@@ -131,12 +131,12 @@ struct CompiledFunction {
     }
 
     CompiledFunction& fn_;
-    std::string out_desc_;
-    bool is_ready_ = false;
+    IODescriptor out_desc_;
     std::shared_ptr<AutogradClosureFactory> closure_;
     jit::Code code_;
     std::vector<std::shared_ptr<TracingState>> traces_;
     bool is_volatile_;
+    bool is_ready_ = false;
   };
 
   TraceForKey& getTrace(ParsedArgs& args) {
@@ -204,7 +204,7 @@ struct CompiledFunction {
   std::atomic<uint64_t> misses_;
   THPObjectPtr function_;
   std::string name_;
-  std::unordered_map<std::string, TraceForKey> ktraces_;
+  std::unordered_map<IODescriptor, TraceForKey, torch::hash<IODescriptor>> ktraces_;
 };
 
 
@@ -219,7 +219,7 @@ void initCompilerMixin(PyObject *module) {
       return fn.hasTraceFor(args, parameters);
     })
     .def("clear_cache", [](CompiledFunction& fn) {
-        fn.clearCache();
+      fn.clearCache();
     })
     .def_property_readonly("hits", [](CompiledFunction& fn) {
       return fn.hits_.load();

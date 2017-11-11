@@ -75,7 +75,7 @@ struct HashNodeCSE {
     JIT_ASSERT(k != nullptr);
     return get_hash(k->kind(),
                     k->stage(),
-                    fmap(k->inputs(), [](const Node *n) { return n->unique(); }));
+                    fmap(k->inputs(), [](const Value *v) { return v->unique(); }));
   }
 };
 
