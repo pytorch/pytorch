@@ -14,6 +14,7 @@ if sys.version_info[0] == 2:
     import cPickle as pickle
 else:
     import pickle
+    import pathlib
 
 DEFAULT_PROTOCOL = 2
 
@@ -106,7 +107,9 @@ def _with_file_like(f, mode, body):
     it in 'mode' if it is a string filename.
     """
     new_fd = False
-    if isinstance(f, str) or (sys.version_info[0] == 2 and isinstance(f, unicode)):
+    if isinstance(f, str) or \
+            (sys.version_info[0] == 2 and isinstance(f, unicode)) or \
+            (sys.version_info[0] == 3 and isinstance(f, pathlib.Path)):
         new_fd = True
         f = open(f, mode)
     try:
@@ -249,7 +252,9 @@ def load(f, map_location=None, pickle_module=pickle):
 
     """
     new_fd = False
-    if isinstance(f, str) or (sys.version_info[0] == 2 and isinstance(f, unicode)):
+    if isinstance(f, str) or \
+            (sys.version_info[0] == 2 and isinstance(f, unicode)) or \
+            (sys.version_info[0] == 3 and isinstance(f, pathlib.Path)):
         new_fd = True
         f = open(f, 'rb')
     try:
