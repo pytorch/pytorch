@@ -6,10 +6,19 @@ def python_num(s):
 
 CPP_TO_ATEN_TYPE_MAP = {
   'std::vector<Tensor>': 'TensorList',
-  'std::tuple<Tensor, Tensor>': 'Tensor, Tensor',
-  'const Tensor&': 'Tensor',
-  'Tensor&': 'Tensor',
 }
+
+def to_aten_type(typ):
+    # split tuples into constituents
+    if 'std::tuple<' in typ:
+        template = typ.split('std::tuple<', 1)[1].rsplit('>', 1)[0]
+        type_list = template.split(',')
+    else:
+        type_list = [typ]
+    # remove const/references
+    type_list = [t.replace('const ', '').replace('&', '').strip() for t in type_list]
+    type_list = [CPP_TO_ATEN_TYPE_MAP.get(t, t) for t in type_list]
+    return ','.join(type_list)
 
 def parse_arguments(args):
     arguments = []
@@ -23,7 +32,7 @@ def parse_arguments(args):
             ns = name.split('=', 1)
             name, default = ns[0], python_num(ns[1])
 
-        argument_dict = {'type': CPP_TO_ATEN_TYPE_MAP.get(t, t), 'name': name}
+        argument_dict = {'type': to_aten_type(t), 'name': name}
         if default is not None:
             argument_dict['default'] = default
 
@@ -61,7 +70,7 @@ def parse(filename):
                     arguments = arguments.split(')')[0]
                     declaration['name'] = return_and_name.split(' ')[-1]
                     return_type_cpp = return_and_name.rsplit(maxsplit=1)[0]
-                    declaration['return'] = CPP_TO_ATEN_TYPE_MAP.get(return_type_cpp, return_type_cpp)
+                    declaration['return'] = to_aten_type(return_type_cpp)
                     declaration['arguments'] = parse_arguments(arguments)
                     if dispatch is None:
                         dispatch = 'at::native::' + declaration['name']
