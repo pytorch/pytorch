@@ -49,8 +49,9 @@ void initJITBindings(PyObject *module) {
    .def("_jit_pass_peephole", graph_pass<PeepholeOptimize>)
    .def("_jit_pass_lint", graph_pass<LintGraph>)
    .def("_jit_run_cpp_tests", runJITCPPTests)
-   .def("_jit_flatten", python::flatten)
-   .def("_jit_unflatten", python::unflatten);
+   .def("_jit_flatten", [](py::handle& obj) {
+     return python::flatten(obj).vars;
+   });
 
   initPythonIRBindings(module);
   initPythonTracerBindings(module);
