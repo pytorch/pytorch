@@ -86,6 +86,9 @@ void ToONNX(std::shared_ptr<tracer::TracingState>& state) {
         if (!outputs[i]->hasType()) {
           outputs[i]->setType(old->typeOption());
         }
+        // Copy over source location information to all nodes created by
+        // the symbolic
+        outputs[i]->setSourceLocation(node->getSourceLocation());
         env[old] = outputs[i];
       } else {
         // Null output means that the ONNX op doesn't have outputs corresponding
@@ -140,14 +143,8 @@ void ToONNX(std::shared_ptr<tracer::TracingState>& state) {
       node_list outputs;
       if (py::isinstance<Node>(raw_output)) {
         outputs = node_list{py::cast<Node*>(raw_output)};
-        outputs[0]->setDebugName(n->debugName());
-        outputs[0]->setSourceLocation(n->getSourceLocation());
       } else {
         outputs = py::cast<std::vector<Node*>>(raw_output);
-        for (Node* node : outputs) {
-          node->setDebugName(n->debugName());
-          node->setSourceLocation(n->getSourceLocation());
-        }
       }
 
       setOutputs(symbolToString(n->kind()), n, outputs);

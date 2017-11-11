@@ -65,7 +65,7 @@ struct Param;
 // node in the trace.
 struct SourceLocation {
   SourceLocation(std::string python_traceback)
-  : python_traceback(python_traceback) {}
+  : python_traceback(std::move(python_traceback)) {}
   std::string python_traceback;
 };
 

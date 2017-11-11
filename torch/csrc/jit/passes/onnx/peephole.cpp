@@ -22,9 +22,9 @@ bool isBroadcasting(Node *node) {
 // When iterating over the dimension sizes, starting at the trailing dimension,
 // the dimension sizes must either be equal, or one of them does not exist.
 //
-// Note that this is NOT equivalent to numpy broadcasting semantics, and do
-// not represent that generalized broadcasting that Pytorch implements in
-// general. Rather, this is Caffe2-style broadcasting.
+//  equivalently:
+//
+// Test that 'from' is a suffix of 'to'.
 bool fusibleExpandTo(at::IntList from, at::IntList to) {
   auto f = from.rbegin();
   auto t = to.rbegin();
