@@ -15,13 +15,23 @@
     }   \
   } while(0)
 
+#undef MIN
+#define MIN(a,b) ( ((a)<(b)) ? (a) : (b) )
+#undef MAX
+#define MAX(a,b) ( ((a)>(b)) ? (a) : (b) )
+#define CLIP_COORDINATES(in, out, clip_limit) out = MIN((clip_limit-1), MAX(in, 0))
+
+const int MODE_BORDER = 1;
+
+
 template <typename Dtype>
 __launch_bounds__(1024)
 __global__ void SpatialGridSamplerBilinear_updateOutput_kernel(
     const int nthreads,
     THCDeviceTensor<Dtype, 4> input,
     THCDeviceTensor<Dtype, 4> grid,
-    THCDeviceTensor<Dtype, 4> output) {
+    THCDeviceTensor<Dtype, 4> output,
+    const int padding_mode) {
 
   int N = input.getSize(0);
   int C = input.getSize(1);
@@ -62,6 +72,18 @@ __global__ void SpatialGridSamplerBilinear_updateOutput_kernel(
     Dtype se = (ix    - ix_nw) * (iy    - iy_nw);
 
     // calculate bilinear weighted pixel value and set output pixel
+    if (padding_mode==MODE_BORDER){
+      // clip coordinates to image borders
+      CLIP_COORDINATES(ix_nw, ix_nw, IW);
+      CLIP_COORDINATES(iy_nw, iy_nw, IH);
+      CLIP_COORDINATES(ix_ne, ix_ne, IW);
+      CLIP_COORDINATES(iy_ne, iy_ne, IH);
+      CLIP_COORDINATES(ix_sw, ix_sw, IW);
+      CLIP_COORDINATES(iy_sw, iy_sw, IH);
+      CLIP_COORDINATES(ix_se, ix_se, IW);
+      CLIP_COORDINATES(iy_se, iy_se, IH);
+    }
+
     Dtype out_val;
     for (c = 0; c < C; ++c) {
       out_val = ScalarConvert<int,Dtype>::to(0);
@@ -88,7 +110,8 @@ __global__ void SpatialGridSamplerBilinear_updateGradInput_kernel(
     const int nthreads,
     THCDeviceTensor<Dtype, 4> input, THCDeviceTensor<Dtype, 4> gradInput,
     THCDeviceTensor<Dtype, 4> grid, THCDeviceTensor<Dtype, 4> gradGrid,
-    THCDeviceTensor<Dtype, 4> gradOutput) {
+    THCDeviceTensor<Dtype, 4> gradOutput,
+    const int padding_mode) {
 
   int N = input.getSize(0);
   int C = input.getSize(1);
@@ -135,31 +158,56 @@ __global__ void SpatialGridSamplerBilinear_updateGradInput_kernel(
     Dtype ne_val;
     Dtype sw_val;
     Dtype se_val;
+    
+    int ix_nw_cl, iy_nw_cl, ix_ne_cl, iy_ne_cl, ix_sw_cl, iy_sw_cl, ix_se_cl, iy_se_cl;
+
+    if (padding_mode==MODE_BORDER){
+      // get clipped NE, NW, SE, SW pixel values from (x, y)
+      CLIP_COORDINATES(ix_nw, ix_nw_cl, IW);
+      CLIP_COORDINATES(iy_nw, iy_nw_cl, IH);
+      CLIP_COORDINATES(ix_ne, ix_ne_cl, IW);
+      CLIP_COORDINATES(iy_ne, iy_ne_cl, IH);
+      CLIP_COORDINATES(ix_sw, ix_sw_cl, IW);
+      CLIP_COORDINATES(iy_sw, iy_sw_cl, IH);
+      CLIP_COORDINATES(ix_se, ix_se_cl, IW);
+      CLIP_COORDINATES(iy_se, iy_se_cl, IH);
+    }
+    else {
+      ix_nw_cl = ix_nw;
+      iy_nw_cl = iy_nw;
+      ix_ne_cl = ix_ne;
+      iy_ne_cl = iy_ne;
+      ix_sw_cl = ix_sw;
+      iy_sw_cl = iy_sw;
+      ix_se_cl = ix_se;
+      iy_se_cl = iy_se;
+    }
+
     for (int c = 0; c < C; ++c) {
       gradout = gradOutput[n][c][h][w];
 
       // calculate and set gradInput
-      SAFE_ADD(gradInput, ix_nw, iy_nw, n, c, IH, IW, nw * gradout);
-      SAFE_ADD(gradInput, ix_ne, iy_ne, n, c, IH, IW, ne * gradout);
-      SAFE_ADD(gradInput, ix_sw, iy_sw, n, c, IH, IW, sw * gradout);
-      SAFE_ADD(gradInput, ix_se, iy_se, n, c, IH, IW, se * gradout);
+      SAFE_ADD(gradInput, ix_nw_cl, iy_nw_cl, n, c, IH, IW, nw * gradout);
+      SAFE_ADD(gradInput, ix_ne_cl, iy_ne_cl, n, c, IH, IW, ne * gradout);
+      SAFE_ADD(gradInput, ix_sw_cl, iy_sw_cl, n, c, IH, IW, sw * gradout);
+      SAFE_ADD(gradInput, ix_se_cl, iy_se_cl, n, c, IH, IW, se * gradout);
 
       // calculate gradGrid
       nw_val = ScalarConvert<int,Dtype>::to(0);
-      if (WITHIN_BOUNDS(ix_nw, iy_nw, IH, IW)) {
-        nw_val = input[n][c][iy_nw][ix_nw];
+      if (WITHIN_BOUNDS(ix_nw_cl, iy_nw_cl, IH, IW)) {
+        nw_val = input[n][c][iy_nw_cl][ix_nw_cl];
       }
       ne_val = ScalarConvert<int,Dtype>::to(0);
-      if (WITHIN_BOUNDS(ix_ne, iy_ne, IH, IW)) {
-        ne_val = input[n][c][iy_ne][ix_ne];
+      if (WITHIN_BOUNDS(ix_ne_cl, iy_ne_cl, IH, IW)) {
+        ne_val = input[n][c][iy_ne_cl][ix_ne_cl];
       }
       sw_val = ScalarConvert<int,Dtype>::to(0);
-      if (WITHIN_BOUNDS(ix_sw, iy_sw, IH, IW)) {
-        sw_val = input[n][c][iy_sw][ix_sw];
+      if (WITHIN_BOUNDS(ix_sw_cl, iy_sw_cl, IH, IW)) {
+        sw_val = input[n][c][iy_sw_cl][ix_sw_cl];
       }
       se_val = ScalarConvert<int,Dtype>::to(0);
-      if (WITHIN_BOUNDS(ix_se, iy_se, IH, IW)) {
-        se_val = input[n][c][iy_se][ix_se];
+      if (WITHIN_BOUNDS(ix_se_cl, iy_se_cl, IH, IW)) {
+        se_val = input[n][c][iy_se_cl][ix_se_cl];
       }
 
       gix += ScalarConvert<int,Dtype>::to(-1)*(nw_val * (iy_se - iy) * gradout);
@@ -185,6 +233,9 @@ __global__ void SpatialGridSamplerBilinear_updateGradInput_kernel(
   }
 }
 
+#undef MIN
+#undef MAX
+#undef CLIP_COORDINATES
 #undef WITHIN_BOUNDS
 #undef SAFE_ADD
 

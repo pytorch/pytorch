@@ -1223,16 +1223,18 @@ TH_API void THNN_(SpatialUpSamplingBilinear_updateGradInput)(
           int outputWidth);
 
 TH_API void THNN_(SpatialGridSamplerBilinear_updateOutput)(
-	  THNNState *state,
-	  THTensor *input,
-	  THTensor *grid,
-	  THTensor *output);
+          THNNState *state,
+          THTensor *input,
+          THTensor *grid,
+          THTensor *output,
+          int padding_mode);
 
 TH_API void THNN_(SpatialGridSamplerBilinear_updateGradInput)(
-	  THNNState *state,
-	  THTensor *input, THTensor *gradInput,
-	  THTensor *grid, THTensor *gradGrid,
-	  THTensor *gradOutput);
+          THNNState *state,
+          THTensor *input, THTensor *gradInput,
+          THTensor *grid, THTensor *gradGrid,
+          THTensor *gradOutput,
+          int padding_mode);
 
 TH_API void THNN_(unfolded_acc)(
           THTensor *finput,
@@ -1634,7 +1636,7 @@ TH_API void THNN_(VolumetricUpSamplingTrilinear_updateOutput)(
           THNNState *state,
           THTensor *input,
           THTensor *output,
-	  int outputDepth,
+          int outputDepth,
           int outputHeight,
           int outputWidth);
 TH_API void THNN_(VolumetricUpSamplingTrilinear_updateGradInput)(
