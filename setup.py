@@ -592,7 +592,7 @@ extensions.append(THNN)
 
 if WITH_CUDA:
     thnvrtc_link_flags = extra_link_args + [make_relative_rpath('lib')]
-    if IS_LINUX:
+    if platform.system() == 'Linux':
         thnvrtc_link_flags = thnvrtc_link_flags + ['-Wl,--no-as-needed']
     # these have to be specified as -lcuda in link_flags because they
     # have to come right after the `no-as-needed` option
