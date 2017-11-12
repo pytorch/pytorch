@@ -1025,13 +1025,15 @@ TH_API void THNN_(SpatialGridSamplerBilinear_updateOutput)(
                   THCState *state,
                   THCTensor *input,
                   THCTensor *grid,
-                  THCTensor *output);
+                  THCTensor *output,
+                  int padding_mode);
 
 TH_API void THNN_(SpatialGridSamplerBilinear_updateGradInput)(
                   THCState *state,
                   THCTensor *input, THCTensor *gradInput,
                   THCTensor *grid, THCTensor *gradGrid,
-                  THCTensor *gradOutput);
+                  THCTensor *gradOutput,
+                  int padding_mode);
 
 TH_API void THNN_(RReLU_updateOutput)(
                   THCState *state,
