@@ -138,8 +138,8 @@ struct WorkspaceIdInjector {
   static const string GLOBAL_WORKSPACE_ID;
 
   void InjectWorkspaceId(Workspace* workspace) {
-    Blob* node_id_blob = workspace->GetBlob(NODE_ID);
-    if (node_id_blob) {
+    if (workspace->HasBlob(NODE_ID)) {
+      Blob* node_id_blob = workspace->GetBlob(NODE_ID);
       TensorCPU node_id_tensor = node_id_blob->template Get<TensorCPU>();
       int node_id = node_id_tensor.template data<int32_t>()[0];
       int64_t global_ws_id = (seq_++) + (static_cast<int64_t>(node_id) << 32);
