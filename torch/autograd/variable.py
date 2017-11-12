@@ -124,7 +124,7 @@ class Variable(_C._VariableBase):
             return self.data.__bool__()
         raise RuntimeError("bool value of Variable containing " +
                            torch.typename(self.data) +
-                           " with more than one object is ambiguous")
+                           " with more than one value is ambiguous")
 
     __nonzero__ = __bool__
 
