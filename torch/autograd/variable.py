@@ -120,10 +120,11 @@ class Variable(_C._VariableBase):
         return 'Variable containing:' + self.data.__repr__()
 
     def __bool__(self):
-        if self.data.numel() == 0:
-            return False
-        raise RuntimeError("bool value of Variable objects containing non-empty " +
-                           torch.typename(self.data) + " is ambiguous")
+        if self.data.numel() <= 1:
+            return self.data.__bool__()
+        raise RuntimeError("bool value of Variable containing " +
+                           torch.typename(self.data) +
+                           " with more than one value is ambiguous")
 
     __nonzero__ = __bool__
 
