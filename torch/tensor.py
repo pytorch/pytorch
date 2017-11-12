@@ -151,7 +151,7 @@ class _TensorBase(object):
         elif self.numel() == 1:
             return torch.squeeze(self)[0] != 0
         raise RuntimeError("bool value of " + torch.typename(self) +
-                           " containing more than one object is ambiguous")
+                           " containing more than one value is ambiguous")
 
     __nonzero__ = __bool__
 
