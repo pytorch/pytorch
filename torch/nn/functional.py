@@ -1420,7 +1420,7 @@ def upsample_bilinear(input, size=None, scale_factor=None):
     return upsample(input, size, scale_factor, mode='bilinear')
 
 
-def grid_sample(input, grid, mode='bilinear'):
+def grid_sample(input, grid, mode='bilinear', padding_mode='zeros'):
     r"""Given an :attr:`input` and a flow-field :attr:`grid`, computes the
     `output` using input pixel locations from the grid.
 
@@ -1437,20 +1437,24 @@ def grid_sample(input, grid, mode='bilinear'):
                  values: x: 1, y: 1 is the right-bottom pixel of the input
 
     If :attr:`grid` has values outside the range of `[-1, 1]`, those locations
-    are ignored (i.e. 0 is used as a contribution to the bilinear interpolation)
+    are handled as defined by `padding_mode`. Options are `zeros` or `border`,
+    defining those locations to use 0 or image border values as contribution
+    to the bilinear interpolation.
 
     .. Note:: This function is used in building Spatial Transformer Networks
 
     Args:
         input (Variable): input batch of images (N x C x IH x IW)
         grid (Variable): flow-field of size (N x OH x OW x 2)
+        padding_mode (str): padding mode for outside grid values
+            'zeros' | 'border'. Default: 'zeros'
 
     Returns:
         output (Variable): output Tensor
 
     """
     batch_size, channels, in_height, in_width = input.size()
-    return GridSampler.apply(input, grid)
+    return GridSampler.apply(input, grid, padding_mode)
 
 
 def affine_grid(theta, size):
