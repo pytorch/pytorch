@@ -663,7 +663,10 @@ if WITH_CUDA:
         thnvrtc_link_flags = thnvrtc_link_flags + ['-Wl,--no-as-needed']
     # these have to be specified as -lcuda in link_flags because they
     # have to come right after the `no-as-needed` option
-    thnvrtc_link_flags += ['-lcuda', '-lnvrtc']
+    if IS_WINDOWS:
+        thnvrtc_link_flags += ['cuda.lib', 'nvrtc.lib']
+    else:
+        thnvrtc_link_flags += ['-lcuda', '-lnvrtc']
     THNVRTC = Extension("torch._nvrtc",
                         sources=['torch/csrc/nvrtc.cpp'],
                         language='c++',
@@ -685,7 +688,7 @@ if WITH_CUDA:
                        )
     extensions.append(THCUNN)
 
-version = '0.2.0'
+version = '0.4.0a0'
 if os.getenv('PYTORCH_BUILD_VERSION'):
     assert os.getenv('PYTORCH_BUILD_NUMBER') is not None
     version = os.getenv('PYTORCH_BUILD_VERSION') \

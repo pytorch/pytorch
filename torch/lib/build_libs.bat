@@ -91,7 +91,6 @@ goto:eof
                   -DTHCUNN_SO_VERSION=1 ^
                   -DNO_CUDA=%NO_CUDA% ^
                   -Dnanopb_BUILD_GENERATOR=0 ^
-                  -DCMAKE_WINDOWS_EXPORT_ALL_SYMBOLS=TRUE ^
                   -DCMAKE_BUILD_TYPE=Release
 
   %MAKE_COMMAND%
@@ -110,7 +109,6 @@ goto:eof
                   -DNO_CUDA=%NO_CUDA% ^
                   -DCUDNN_INCLUDE_DIR="%CUDNN_INCLUDE_DIR%" ^
                   -DCUDNN_LIB_DIR="%CUDNN_LIB_DIR%" ^
-                  -DCMAKE_WINDOWS_EXPORT_ALL_SYMBOLS=TRUE ^
                   -DCMAKE_BUILD_TYPE=Release
 
   %MAKE_COMMAND%
