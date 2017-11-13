@@ -86,7 +86,7 @@ struct CompiledFusionFunction {
   ~CompiledFusionFunction();
 
   // expects outputs to be pre-allocated
-  void launch_out(at::ArrayRef<at::Tensor> inputs, at::ArrayRef<at::Tensor> outputs);
+  void launch_with_tensors(at::ArrayRef<at::Tensor> inputs, at::ArrayRef<at::Tensor> outputs);
 
   // creates new tensors for outputs
   void launch(at::ArrayRef<at::Tensor> inputs, std::vector<at::Tensor> & outputs);

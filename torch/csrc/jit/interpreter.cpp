@@ -7,9 +7,8 @@
 
 namespace torch { namespace jit {
 
-using InputList = const std::vector<at::Tensor> &;
-using OutputList = std::vector<at::Tensor>&;
-using Callback = std::function<void(InputList, OutputList)>;
+using tensor_list = std::vector<at::Tensor>;
+using Callback = std::function<void(const tensor_list &, tensor_list &)>;
 // Returns a function implementing functionality of a given node,
 // or nullptr if it's a no-op for autograd.
 Callback getCallback(Node *node) {
@@ -22,7 +21,7 @@ Callback getCallback(Node *node) {
   IR_ELSEIF(FusionGroup)
 #ifdef WITH_CUDA
     auto fusion_fn = sharedFusionCompiler().getOrCompile(*value->g(kSubgraph));
-    return [fusion_fn](InputList inputs, OutputList outputs) {
+    return [fusion_fn](const tensor_list & inputs, tensor_list & outputs) {
       fusion_fn->launch(inputs, outputs);
     };
 #else
@@ -30,11 +29,11 @@ Callback getCallback(Node *node) {
 #endif
   IR_ELSEIF(Constant)
     auto t = value->t(kvalue);
-    return [t](InputList inputs, OutputList outputs) {
+    return [t](const tensor_list & inputs, tensor_list & outputs) {
       outputs.push_back(t);
     };
   IR_ELSEIF(Undefined)
-    return [](InputList inputs, OutputList outputs) {
+    return [](const tensor_list & inputs, tensor_list & outputs) {
       outputs.push_back(at::Tensor());
     };
   IR_ELSE()
@@ -46,8 +45,8 @@ Callback getCallback(Node *node) {
 // We need some lists for inputs and outputs. To keep all the memory
 // contiguous we allocate a single vector and use offsets into the vector
 // which are stored in the RegList struct
-// start is an offset into int_data of Function if this list is integers
-// and bool_data of Function if this list is booleans (only free_flags)
+// start is an offset into int_data of Code if this list is integers
+// and bool_data of Code if this list is booleans (only free_flags)
 struct RegList {
   int start;
   int size;
@@ -74,8 +73,8 @@ struct Stage {
 };
 
 // pre-processing that happens once per graph
-struct FunctionImpl {
-  FunctionImpl(std::shared_ptr<Graph> & graph)
+struct CodeImpl {
+  CodeImpl(std::shared_ptr<Graph> & graph)
   : graph(graph) {
     int64_t cur_stage = -1;
     size_t input_pos = 0;
@@ -99,6 +98,9 @@ struct FunctionImpl {
       }
       inst.callback = getCallback(node);
     }
+    // it is possible that the final stages have no instructions in them
+    // and are just identity functions. We call insertStagesTo here
+    // to force all these empty stages to be generated if they exist
     insertStagesTo(cur_stage, graph->stage(), input_pos, output_pos);
 
     // step 2: the last time we use a register  we want to mark its free_flag
@@ -178,7 +180,7 @@ struct FunctionImpl {
   std::shared_ptr<Graph> graph;
   std::unordered_map<size_t, int> unique_to_reg; // map from unique of nodes to register in register table
 
-  friend struct Interpreter;
+  friend struct InterpreterState;
   std::vector<Stage> stages;
   int register_size = 0;
 
@@ -188,9 +190,9 @@ struct FunctionImpl {
   std::vector<bool> bool_data;
 };
 
-// Interpreter state that is held across stages and used to compute a Function
-struct InterpreterImpl {
-  InterpreterImpl(const Function & function_)
+// InterpreterState state that is held across stages and used to compute a Code
+struct InterpreterStateImpl {
+  InterpreterStateImpl(const Code & function_)
   : function(function_.pImpl),
     int_data(function->int_data.data()),
     bool_data(function->bool_data),
@@ -245,7 +247,7 @@ struct InterpreterImpl {
     }
   }
   size_t current_stage = 0;
-  std::shared_ptr<FunctionImpl> function; // keep function alive
+  std::shared_ptr<CodeImpl> function; // keep function alive
   // these are just copies of function to prevent indirections in intepreter
   int * int_data;
   const std::vector<bool> & bool_data;
@@ -269,20 +271,20 @@ struct InterpreterImpl {
   std::vector<at::Tensor> output_buffer;
 };
 
-Function::Function(std::shared_ptr<Graph> & graph)
-: pImpl(new FunctionImpl(graph)) {}
-Function::~Function() {}
-Interpreter::Interpreter(const Function & function)
-: pImpl(new InterpreterImpl(function)) {}
-Interpreter::~Interpreter() {}
-void Interpreter::runOneStage(
+Code::Code(std::shared_ptr<Graph> & graph)
+: pImpl(new CodeImpl(graph)) {}
+Code::~Code() {}
+InterpreterState::InterpreterState(const Code & function)
+: pImpl(new InterpreterStateImpl(function)) {}
+InterpreterState::~InterpreterState() {}
+void InterpreterState::runOneStage(
   const std::vector<at::Tensor> & inputs,
   std::vector<at::Tensor> & outputs) {
     return pImpl->runOneStage(inputs, outputs);
 }
-Interpreter Interpreter::clone() const {
-  return Interpreter(new InterpreterImpl(*pImpl));
+InterpreterState InterpreterState::clone() const {
+  return InterpreterState(new InterpreterStateImpl(*pImpl));
 }
-Interpreter::Interpreter(InterpreterImpl * pImpl) : pImpl(pImpl) {}
+InterpreterState::InterpreterState(InterpreterStateImpl * pImpl) : pImpl(pImpl) {}
 
 }}

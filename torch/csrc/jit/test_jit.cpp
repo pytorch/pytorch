@@ -398,9 +398,9 @@ void interpTest() {
     auto w_hh  = t_def(at::CUDA(at::kFloat).randn({4 * hidden_size, hidden_size}));
 
     auto lstm_g = build_lstm();
-    Function  lstm_function(lstm_g);
+    Code  lstm_function(lstm_g);
     std::vector<at::Tensor> outputs;
-    Interpreter lstm_interp(lstm_function);
+    InterpreterState lstm_interp(lstm_function);
     lstm_interp.runOneStage({input[0], hx, cx, w_ih, w_hh}, outputs);
     std::tie(hx, cx) = lstm(input[0], hx, cx, w_ih, w_hh);
 
@@ -424,9 +424,9 @@ void interpStageTest() {
 
 
     auto lstm_g = build_lstm_stages();
-    Function  lstm_function(lstm_g);
+    Code lstm_function(lstm_g);
     std::vector<at::Tensor> outputs;
-    Interpreter lstm_interp(lstm_function);
+    InterpreterState lstm_interp(lstm_function);
     lstm_interp.runOneStage({input[0], hx, cx, w_ih, w_hh}, outputs);
     auto cy0 = outputs[0];
     lstm_interp.runOneStage({cx1}, outputs);

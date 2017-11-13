@@ -86,7 +86,7 @@ struct CompiledFunction {
         FuseGraph(complete_trace->graph);
       }
       try {
-        function_ = jit::Function(complete_trace->graph);
+        code_ = jit::Code(complete_trace->graph);
       } catch(const jit::NotImplementedException & ex) {
         closure_ = std::make_shared<AutogradClosureFactory>(complete_trace.get());
       }
@@ -101,7 +101,7 @@ struct CompiledFunction {
         auto fn = closure_->construct();
         return (*fn)(in_vars);
       } else {
-        InterpreterAutogradFunction interp(function_);
+        InterpreterAutogradFunction interp(code_);
         interp.willReleaseVariables(); // forward pass is never reused, so it is safe to release anything it can
         return interp.apply(in_vars);
       }
@@ -134,7 +134,7 @@ struct CompiledFunction {
     std::string out_desc_;
     bool is_ready_ = false;
     std::shared_ptr<AutogradClosureFactory> closure_;
-    jit::Function function_;
+    jit::Code code_;
     std::vector<std::shared_ptr<TracingState>> traces_;
     bool is_volatile_;
   };

@@ -119,7 +119,7 @@ struct EmitNull : public Function {
 struct LambdaFunction : public Function {
   LambdaFunction(const jit::TensorOp& op)
     : LambdaFunction(op.num_inputs, nullptr) {
-    auto real_op = op.op;
+    auto & real_op = op.op;
     this->fn_ = [real_op](const variable_list& inputs) -> variable_list {
       std::vector<at::Tensor> tinputs(inputs.begin(), inputs.end());
       std::vector<at::Tensor> toutputs;
