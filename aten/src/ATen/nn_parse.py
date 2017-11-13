@@ -113,6 +113,7 @@ DIMENSION_OFFSET = {
 }
 
 SUBSTITUTIONS = {
+    'input': 'self',
     'weights': 'weight',
     'train': 'training',
     'val': 'value',
@@ -137,7 +138,7 @@ def camel_to_snake(name):
     return re.sub('([a-z0-9])([A-Z])', r'\1_\2', s1).lower()
 
 
-def get_thnn_args(thnn_function, params):
+def get_thnn_args(thnn_function, params, inplace):
     params_by_name = {p['name']: p for p in params}
     dimensionality = get_dimensionality(thnn_function.name)
 
@@ -172,7 +173,7 @@ def get_thnn_args(thnn_function, params):
         elif name == 'scale':
             thnn_args.append({'type': 'EXPRESSION', 'name': '1'})
         elif name == 'inplace':
-            thnn_args.append({'type': 'EXPRESSION', 'name': 'false'})
+            thnn_args.append({'type': 'EXPRESSION', 'name': str(inplace).lower()})
         else:
             raise RuntimeError("{}: can't find binding for '{}'"
                                .format(thnn_function.name, name))
@@ -227,23 +228,27 @@ def function_info(name, arguments, cimpls, buffers, backends):
     }
 
 
-def base_declaration(func, thnn_function, backends):
+def base_declaration(func, thnn_function, backends, inplace=False):
     """Creates the NN function without any buffers in it's signature"""
     name, params = re.match(NAME_PARAM_REGEX, func['name']).groups()
+    if inplace:
+        name += '_'
     params = params.split(', ')
     arguments = [argument_to_declaration(a, func) for a in params]
     arguments += output_arguments(thnn_function)
     buffers = [argument_to_declaration('Tensor ' + buf)
                for buf in func.get('buffers', [])]
 
-    thnn_args = get_thnn_args(thnn_function, arguments + buffers)
+    thnn_args = get_thnn_args(thnn_function, arguments + buffers, inplace)
     cimpl = {'cname': thnn_function.name, 'arguments': thnn_args}
 
     return function_info(name, arguments, [cimpl], buffers, backends)
 
 
-def forward_declaration(base, thnn_function):
+def forward_declaration(base, thnn_function, inplace=False):
     name = '{}_forward'.format(base['name'])
+    if inplace:
+        name += '_'
 
     arguments = [copy.deepcopy(arg) for arg in base['arguments']
                  if not arg.get('output')]
@@ -251,7 +256,7 @@ def forward_declaration(base, thnn_function):
     arguments += base['buffers']
     arguments += output_arguments(thnn_function)
 
-    thnn_args = get_thnn_args(thnn_function, arguments)
+    thnn_args = get_thnn_args(thnn_function, arguments, inplace)
     arguments = remove_unused_args(arguments, thnn_args)
     cimpl = {'cname': thnn_function.name, 'arguments': thnn_args}
 
@@ -293,7 +298,7 @@ def backward_declaration(base, thnn_functions):
             if arg.get('output', False):
                 initialize_output_arg(arg)
 
-    thnn_args = [get_thnn_args(f, arguments) for f in thnn_functions]
+    thnn_args = [get_thnn_args(f, arguments, False) for f in thnn_functions]
     arguments = remove_unused_args(arguments, unique_args(thnn_args))
     cimpls = []
 
@@ -354,9 +359,12 @@ def run(paths):
                     bwd_functions.append(header_functions[cname + suffix])
 
             base = base_declaration(func, fwd_function, backends)
-
             declarations.append(base)
             declarations.append(forward_declaration(base, fwd_function))
             declarations.append(backward_declaration(base, bwd_functions))
+
+            if func.get('has_inplace', False):
+                declarations.append(base_declaration(func, fwd_function, backends, True))
+                declarations.append(forward_declaration(base, fwd_function, True))
 
     return declarations

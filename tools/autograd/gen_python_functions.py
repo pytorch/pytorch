@@ -59,6 +59,7 @@ def create_python_bindings(
 
     unpack_methods = {
         'const Tensor &': 'tensor',
+        'Tensor &': 'tensor',
         'Generator *': 'generator',
         'Storage &': 'storage',
         'int64_t': 'toInt64',
@@ -99,7 +100,10 @@ def create_python_bindings(
             unpack = unpack_methods.get(typename, typename.lower())
             actuals.append('r.{}({})'.format(unpack, arg_idx))
             dispatch_type = typename
-            dispatch_type = 'const Tensor &' if dispatch_type == 'Tensor' else dispatch_type
+            if dispatch_type == 'Tensor':
+                dispatch_type = 'const Tensor &'
+            elif dispatch_type == 'Tensor &':
+                dispatch_type = 'Tensor'
             formal_args.append('{} {}'.format(dispatch_type, arg['name']))
             arg_idx += 1
 
@@ -142,6 +146,9 @@ def create_python_bindings(
             if is_method:
                 prototype = prototype.replace('Tensor self, ', '')
                 prototype = prototype.replace('Tensor self', '')
+            if not is_class:
+                # Use 'input' instead of 'self' for NN functions
+                prototype = prototype.replace('Tensor self', 'Tensor input')
             if 'deprecated' in o:
                 prototype += '|deprecated'
             env['prototypes'].append('"{}",'.format(prototype))

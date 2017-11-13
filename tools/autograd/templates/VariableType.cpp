@@ -174,13 +174,6 @@ std::vector<Variable> VariableType::as_variable(TensorList tl) const {
   return variables;
 }
 
-Variable VariableType::maybe_wrap(Tensor data, const Variable & self, bool inplace) const {
-  if (inplace) {
-    return self;
-  }
-  return as_variable(data);
-}
-
 static Variable as_view(Variable base, Tensor tensor) {
   if (base.is_view()) {
     base = base.base();
