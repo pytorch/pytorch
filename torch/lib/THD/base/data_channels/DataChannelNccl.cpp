@@ -619,27 +619,7 @@ void DataChannelNccl::broadcast(at::Tensor& data,
 
 
 void DataChannelNccl::barrier(THDGroup groupId) {
-
-  std::unique_lock<std::mutex> channelLock(_mutex);
-
-  _checkGroupIdValid(groupId);
-
-  if (_groupNcclResources.find(groupId) == _groupNcclResources.end() ||
-      _groupDevices.find(groupId) == _groupDevices.end()) {
-    return;
-  }
-
-  auto devices = getDevicesList(_groupDevices[groupId]);
-
-  // Guard GPU device
-  AutoGPU gpuGuard;
-
-  int idx = 0;
-  // Synchronize on the CUDA events
-  for (auto& event : *(_groupNcclResources[groupId].ncclCudaEvents())) {
-    gpuGuard.setDevice(devices[idx++]);
-    THCudaCheck(cudaEventSynchronize(event));
-  }
+  throw std::runtime_error("DataChannelNccl does not support barrier");
 }
 
 

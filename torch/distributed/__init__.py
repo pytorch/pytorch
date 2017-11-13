@@ -67,6 +67,14 @@ def init_process_group(backend, init_method='env://', **kwargs):
     global _backend
     _backend = backend
     if backend == "nccl":
+        warnings.warn("""
+        ================================================================================
+                                            WARNING
+        ================================================================================
+        NCCL backend is still experimental. The APIs will change without
+        notice and we're can't guarantee full correctness and expected performance yet.
+        We'll announce it once it's ready.
+        """)
         atexit.register(destroy_process_group)
 
 
@@ -221,6 +229,16 @@ def broadcast_multigpu(tensor_list, src, group=group.WORLD):
     """
     assert torch.distributed._initialized == _INITIALIZED_PG, \
         "collective only supported in process-group mode"
+
+    warnings.warn("""
+    ================================================================================
+                                        WARNING
+    ================================================================================
+    broadcast_multigpu is still experimental. The API will change without
+    notice and we're can't guarantee full correctness and expected performance yet.
+    We'll announce it once it's ready.
+    """)
+
     return torch._C._dist_broadcast_multigpu(tensor_list, src, group)
 
 
@@ -264,6 +282,16 @@ def all_reduce_multigpu(tensor_list, op=reduce_op.SUM, group=group.WORLD):
     """
     assert torch.distributed._initialized == _INITIALIZED_PG, \
         "collective only supported in process-group mode"
+
+    warnings.warn("""
+    ================================================================================
+                                        WARNING
+    ================================================================================
+    all_reduce_multigpu is still experimental. The API will change without
+    notice and we're can't guarantee full correctness and expected performance yet.
+    We'll announce it once it's ready.
+    """)
+
     return torch._C._dist_all_reduce_multigpu(tensor_list, op, group)
 
 
@@ -305,6 +333,16 @@ def reduce_multigpu(tensor_list, dst, op=reduce_op.SUM, group=group.WORLD):
     """
     assert torch.distributed._initialized == _INITIALIZED_PG, \
         "collective only supported in process-group mode"
+
+    warnings.warn("""
+    ================================================================================
+                                        WARNING
+    ================================================================================
+    reduce__multigpu is still experimental. The API will change without
+    notice and we're can't guarantee full correctness and expected performance yet.
+    We'll announce it once it's ready.
+    """)
+
     return torch._C._dist_reduce_multigpu(tensor_list, dst, op, group)
 
 
@@ -345,6 +383,15 @@ def all_gather_multigpu(output_tensor_lists,
     """
     assert torch.distributed._initialized == _INITIALIZED_PG, \
         "collective only supported in process-group mode"
+
+    warnings.warn("""
+    ================================================================================
+                                        WARNING
+    ================================================================================
+    all_gather_multigpu is still experimental. The API will change without
+    notice and we're can't guarantee full correctness and expected performance yet.
+    We'll announce it once it's ready.
+    """)
 
     flatten_tensor_list = []
     for output_tensor_list in output_tensor_lists:

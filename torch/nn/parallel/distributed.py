@@ -100,7 +100,6 @@ class DistributedDataParallel(Module):
             grp = dist.new_group()
             for p in self.module.state_dict().values():
                 dist.broadcast(p, 0, grp)
-            dist.barrier(grp)
             dist.destroy_group(grp)
             self.bcast_grp = dist.new_group()
             self.reduce_grp = set()
@@ -193,7 +192,7 @@ class DistributedDataParallel(Module):
         for module in self._module_copies[1:]:
             module.train(mode)
 
-    def recreate_groups(self):
+    def _recreate_groups(self):
         """ Function that is only supposed to use with NCCL backend.
         Currently experimental only
         """
