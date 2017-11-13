@@ -6,15 +6,15 @@
 namespace at {
 namespace native {
 
-Tensor type_as(const Tensor &self, const Tensor &other) {
+Tensor type_as(const Tensor& self, const Tensor& other) {
   return self.toType(other.type());;
 }
 
-Tensor expand_as(const Tensor &self, const Tensor &other) {
+Tensor expand_as(const Tensor& self, const Tensor& other) {
   return self.expand(other.sizes());
 }
 
-std::vector<Tensor> split(const Tensor &self, int64_t split_size, int64_t dim) {
+std::vector<Tensor> split(const Tensor& self, int64_t split_size, int64_t dim) {
   int64_t dim_size = self.size(dim);
   int64_t num_splits = (dim_size + split_size - 1) / split_size;
   std::vector<Tensor> splits(num_splits);
@@ -27,29 +27,29 @@ std::vector<Tensor> split(const Tensor &self, int64_t split_size, int64_t dim) {
   return splits;
 }
 
-std::vector<Tensor> chunk(const Tensor &self, int64_t chunks, int64_t dim) {
+std::vector<Tensor> chunk(const Tensor& self, int64_t chunks, int64_t dim) {
   int64_t split_size = (self.size(dim) + chunks - 1) / chunks;
   // ensure this is dispatched through Tensor/Type, rather than the native function directly.
   return self.split(split_size, dim);
 }
 
-int64_t size(const Tensor &self, int64_t dim) {
+int64_t size(const Tensor& self, int64_t dim) {
   dim = maybe_wrap_dim(dim, self.dim());
   // wrap_dim guarantees bounds are correct.
   return self.sizes()[dim];
 }
 
-int64_t stride(const Tensor &self, int64_t dim) {
+int64_t stride(const Tensor& self, int64_t dim) {
   dim = maybe_wrap_dim(dim, self.dim());
   // wrap_dim guarantees bounds are correct.
   return self.strides()[dim];
 }
 
-bool is_same_size(const Tensor &self, const Tensor &other) {
+bool is_same_size(const Tensor& self, const Tensor& other) {
   return self.sizes().equals(other.sizes());
 }
 
-Tensor permute(const Tensor & self, IntList dims) {
+Tensor permute(const Tensor& self, IntList dims) {
   auto nDims = self.dim();
   if (dims.size() != (size_t)nDims) {
     runtime_error("number of dims don't match in permute");
@@ -71,7 +71,7 @@ Tensor permute(const Tensor & self, IntList dims) {
   return self.as_strided(newSizes, newStrides);
 }
 
-Tensor expand(const Tensor &self, IntList size) {
+Tensor expand(const Tensor& self, IntList size) {
   if (size.size() < (size_t)self.dim()) {
     std::ostringstream ss;
     ss << "expand(" << self.type() << "{" << self.sizes() << "}, size=" << size
@@ -104,7 +104,7 @@ inferSqueezeGeometry(const Tensor &tensor) {
 }
 
 std::tuple<std::vector<int64_t>, std::vector<int64_t> >
-inferSqueezeGeometry(const Tensor &tensor, int64_t dim) {
+inferSqueezeGeometry(const Tensor& tensor, int64_t dim) {
   std::vector<int64_t> sizes;
   std::vector<int64_t> strides;
 
@@ -118,7 +118,7 @@ inferSqueezeGeometry(const Tensor &tensor, int64_t dim) {
 }
 
 std::tuple<std::vector<int64_t>, std::vector<int64_t> >
-inferUnsqueezeGeometry(const Tensor &tensor, int64_t dim) {
+inferUnsqueezeGeometry(const Tensor& tensor, int64_t dim) {
   if (tensor.numel() == 0) {
     throw std::runtime_error("cannot unsqueeze empty tensor");
   }
@@ -132,12 +132,12 @@ inferUnsqueezeGeometry(const Tensor &tensor, int64_t dim) {
   return std::make_tuple(sizes, strides);
 }
 
-Tensor squeeze(const Tensor & self) {
+Tensor squeeze(const Tensor& self) {
   auto g = inferSqueezeGeometry(self);
   return self.as_strided(std::get<0>(g), std::get<1>(g));
 }
 
-Tensor squeeze(const Tensor & self, int64_t dim) {
+Tensor squeeze(const Tensor& self, int64_t dim) {
   dim = maybe_wrap_dim(dim, self.dim());
 
   if (self.sizes()[dim] != 1) {
@@ -147,12 +147,12 @@ Tensor squeeze(const Tensor & self, int64_t dim) {
   return self.as_strided(std::get<0>(g), std::get<1>(g));
 }
 
-Tensor & squeeze_(Tensor & self) {
+Tensor & squeeze_(Tensor& self) {
   auto g = inferSqueezeGeometry(self);
   return self.as_strided_(std::get<0>(g), std::get<1>(g));
 }
 
-Tensor & squeeze_(Tensor & self, int64_t dim) {
+Tensor & squeeze_(Tensor& self, int64_t dim) {
   dim = maybe_wrap_dim(dim, self.dim());
 
   if (self.sizes()[dim] != 1) {
@@ -162,14 +162,14 @@ Tensor & squeeze_(Tensor & self, int64_t dim) {
   return self.as_strided_(std::get<0>(g), std::get<1>(g));
 }
 
-Tensor unsqueeze(const Tensor & self, int64_t dim) {
+Tensor unsqueeze(const Tensor& self, int64_t dim) {
   dim = maybe_wrap_dim(dim, self.dim() + 1);
 
   auto g = inferUnsqueezeGeometry(self, dim);
   return self.as_strided(std::get<0>(g), std::get<1>(g));
 }
 
-Tensor & unsqueeze_(Tensor & self, int64_t dim) {
+Tensor & unsqueeze_(Tensor& self, int64_t dim) {
   dim = maybe_wrap_dim(dim, self.dim() + 1);
 
   auto g = inferUnsqueezeGeometry(self, dim);

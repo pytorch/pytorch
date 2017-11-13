@@ -29,7 +29,11 @@ def parse_arguments(args):
 
     for arg in args.split(','):
         arg = arg.strip()
-        t, name = arg.rsplit(' ', 1)
+        if '&' in arg:
+            ref_split = arg.rsplit('&', 1)
+            t, name = (ref_split[0] + '&').strip(), ref_split[1].strip()
+        else:
+            t, name = [a.strip() for a in arg.rsplit(' ', 1)]
         default = None
 
         if '=' in name:

@@ -18,10 +18,10 @@ namespace at {
 namespace native {
 
 // [NativeFunction]
-Tensor type_as(const Tensor &self, const Tensor &other);
+Tensor type_as(const Tensor& self, const Tensor& other);
 
 // [NativeFunction]
-Tensor expand_as(const Tensor &self, const Tensor &other);
+Tensor expand_as(const Tensor& self, const Tensor& other);
 
 // [NativeFunction]
 std::vector<Tensor> split(const Tensor& self, int64_t split_size, int64_t dim=0);
