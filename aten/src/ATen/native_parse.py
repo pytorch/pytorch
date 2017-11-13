@@ -8,6 +8,10 @@ CPP_TO_ATEN_TYPE_MAP = {
   'std::vector<Tensor>': 'TensorList',
 }
 
+# change C++ types into ATen types (for output to Declarations.yaml);
+# e.g. std::vector<Tensor> -> TensorList, const/reference modifiers on Tensor
+# go away and are eventually restored to dynamic_type (this can probably be simplified
+# to a single transformation).
 def to_aten_type(typ):
     # split tuples into constituents
     if 'std::tuple<' in typ:
@@ -68,8 +72,7 @@ def parse(filename):
                     in_cpp_native_decl = False
                     return_and_name, arguments = decl_parse.split('(')
                     arguments = arguments.split(')')[0]
-                    declaration['name'] = return_and_name.split(' ')[-1]
-                    return_type_cpp = return_and_name.rsplit(maxsplit=1)[0]
+                    return_type_cpp, declaration['name'] = return_and_name.rsplit(maxsplit=1)
                     declaration['return'] = to_aten_type(return_type_cpp)
                     declaration['arguments'] = parse_arguments(arguments)
                     if dispatch is None:
