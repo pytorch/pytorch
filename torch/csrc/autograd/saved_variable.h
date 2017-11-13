@@ -27,7 +27,6 @@ struct SavedVariable {
 
   SavedVariable(const Variable& variable, Function* saved_for);
 
-
   at::Tensor data;
   // The gradient function associated with this node. If has_grad_fn
   // is false, then this is a leaf node. Note that the grad_fn is not saved if
@@ -41,7 +40,6 @@ struct SavedVariable {
   bool is_volatile;
   int expected_version;
   int output_nr;
-  Variable base;
   std::unique_ptr<jit::tracer::ValueTracingState> tracing_state;
 
   Variable unpack(std::shared_ptr<Function> saved_for=nullptr) const;

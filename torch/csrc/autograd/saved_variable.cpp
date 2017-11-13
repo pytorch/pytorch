@@ -16,16 +16,18 @@ SavedVariable::SavedVariable(const Variable& variable, Function* saved_for)
   is_volatile = variable.is_volatile();
   expected_version = variable.current_version();
   version = variable.get()->version_counter.save();
-  has_grad_fn = variable.grad_fn() != nullptr;
+  has_grad_fn = !variable.is_leaf();
   output_nr = variable.output_nr();
   if (!has_grad_fn) {
     grad_accumulator = variable.grad_accumulator();
   }
-  if (variable.grad_fn().get() != saved_for) {
+  // NOTE: we access the _grad_fn directly when comparing it to "saved_for" to
+  // avoid re-creating the grad_fn for the ouput of an in-place function on a
+  // view. However, if this isn't an output, we actually want to save the
+  // up-to-date grad_fn. TODO: this is awkward and confusing, we should fix
+  // up SavedVariable.
+  if (variable.get()->_grad_fn.get() != saved_for) {
     _grad_fn = variable.grad_fn();
-  }
-  if (variable.is_view()) {
-    base = variable.base();
   }
   if (variable.tracing_state()) {
     tracing_state.reset(new jit::tracer::ValueTracingState(*variable.tracing_state()));
@@ -57,12 +59,10 @@ auto SavedVariable::unpack(std::shared_ptr<Function> saved_for) const -> Variabl
     grad_fn = std::move(saved_for);
   }
 
-  Variable var;
-  if (base.defined()) {
-    var = make_variable_view(base, data, flags, output_nr, std::move(grad_fn));
-  } else {
-    var = make_variable(data, flags, output_nr, std::move(grad_fn));
-  }
+  // NB: saved views are unpacked as normal Variables (not views) even though
+  // they still share the same storage. This works only because we never call
+  // in-place functions on unpacked variables.
+  auto var = make_variable(data, flags, output_nr, std::move(grad_fn));
   var.version_counter() = version;
 
   // If a Variable is a leaf (no grad_fn saved), and it requires_grad, then we
