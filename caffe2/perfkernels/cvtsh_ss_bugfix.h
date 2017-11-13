@@ -16,7 +16,7 @@
 
 #pragma once
 
-#if defined(__APPLE__) && ((__clang_major__ < 8) || ((__clang_major__ == 8) && (__clang_minor__ < 1)))
+#if defined(__apple_build_version__) && ((__clang_major__ < 8) || ((__clang_major__ == 8) && (__clang_minor__ < 1)))
 
 #include <emmintrin.h>
 
