@@ -327,15 +327,27 @@ endif()
 # ---[ CUDA
 if(USE_CUDA)
   include(cmake/Cuda.cmake)
-  # CUDA 8.0 requires GCC 5
   if(HAVE_CUDA)
-    if (CMAKE_C_COMPILER_ID STREQUAL "GNU" AND
-        NOT CMAKE_C_COMPILER_VERSION VERSION_LESS 6.0 AND
-        CUDA_HOST_COMPILER STREQUAL CMAKE_C_COMPILER)
-      message(FATAL_ERROR
-        "CUDA 8.0 is not compatible with GCC version >= 6. "
-        "Use the following option to use another version (for example): \n"
-        "  -DCUDA_HOST_COMPILER=/usr/bin/gcc-5\n")
+    # CUDA 9.0 requires GCC version <= 6
+    if (CUDA_VERSION VERSION_EQUAL 9.0)
+      if (CMAKE_C_COMPILER_ID STREQUAL "GNU" AND
+          NOT CMAKE_C_COMPILER_VERSION VERSION_LESS 7.0 AND
+          CUDA_HOST_COMPILER STREQUAL CMAKE_C_COMPILER)
+        message(FATAL_ERROR
+          "CUDA 9.0 is not compatible with GCC version >= 7. "
+          "Use the following option to use another version (for example): \n"
+          "  -DCUDA_HOST_COMPILER=/usr/bin/gcc-6\n")
+      endif()
+    # CUDA 8.0 requires GCC version <= 5
+    elseif (CUDA_VERSION VERSION_EQUAL 8.0)
+      if (CMAKE_C_COMPILER_ID STREQUAL "GNU" AND
+          NOT CMAKE_C_COMPILER_VERSION VERSION_LESS 6.0 AND
+          CUDA_HOST_COMPILER STREQUAL CMAKE_C_COMPILER)
+        message(FATAL_ERROR
+          "CUDA 8.0 is not compatible with GCC version >= 6. "
+          "Use the following option to use another version (for example): \n"
+          "  -DCUDA_HOST_COMPILER=/usr/bin/gcc-5\n")
+      endif()
     endif()
   endif()
   # ---[ CUDNN
