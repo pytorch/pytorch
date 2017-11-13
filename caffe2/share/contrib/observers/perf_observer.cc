@@ -70,23 +70,21 @@ bool PerfNetObserver::Start() {
 }
 
 bool PerfNetObserver::Stop() {
-  if (logType_ == PerfNetObserver::NET_DELAY) {
-    auto current_run_time = timer_.MilliSeconds();
-    ObserverConfig::getReporter()->printNet(subject_, current_run_time);
-  } else if (logType_ == PerfNetObserver::OPERATOR_DELAY) {
-    auto current_run_time = timer_.MilliSeconds();
+  if (logType_ == PerfNetObserver::NONE) {
+    return true;
+  }
+  auto currentRunTime = timer_.MilliSeconds();
+  std::map<std::string, double> delays;
+  delays.insert({"NET_DELAY", currentRunTime});
+  if (logType_ == PerfNetObserver::OPERATOR_DELAY) {
     const auto& operators = subject_->GetOperators();
-    std::vector<std::pair<std::string, double>> operator_delays;
     for (int idx = 0; idx < operators.size(); ++idx) {
       const auto* op = operators[idx];
       auto name = getObserverName(op, idx);
       double delay = static_cast<const PerfOperatorObserver*>(observerMap_[op])
                          ->getMilliseconds();
-      std::pair<std::string, double> name_delay_pair = {name, delay};
-      operator_delays.push_back(name_delay_pair);
+      delays.insert({name, delay});
     }
-    ObserverConfig::getReporter()->printNetWithOperators(
-        subject_, current_run_time, operator_delays);
     /* clear all operator delay after use so that we don't spent time
        collecting the operator delay info in later runs */
     for (auto* op : operators) {
@@ -94,6 +92,7 @@ bool PerfNetObserver::Stop() {
     }
     observerMap_.clear();
   }
+  ObserverConfig::getReporter()->reportDelay(subject_, delays, "ms");
   return true;
 }
 
