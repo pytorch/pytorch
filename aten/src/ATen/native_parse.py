@@ -5,8 +5,9 @@ def python_num(s):
         return float(s)
 
 CPP_TO_ATEN_TYPE_MAP = {
-  'std::vector<Tensor>': 'TensorList',
+    'std::vector<Tensor>': 'TensorList',
 }
+
 
 # change C++ types into ATen types (for output to Declarations.yaml);
 # e.g. std::vector<Tensor> -> TensorList, const/reference modifiers on Tensor
@@ -23,6 +24,7 @@ def to_aten_type(typ):
     type_list = [t.replace('const ', '').replace('&', '').strip() for t in type_list]
     type_list = [CPP_TO_ATEN_TYPE_MAP.get(t, t) for t in type_list]
     return ','.join(type_list)
+
 
 def parse_arguments(args):
     arguments = []
@@ -46,6 +48,7 @@ def parse_arguments(args):
 
         arguments.append(argument_dict)
     return arguments
+
 
 def parse(filename):
     with open(filename, 'r') as file:
@@ -76,7 +79,7 @@ def parse(filename):
                     in_cpp_native_decl = False
                     return_and_name, arguments = decl_parse.split('(')
                     arguments = arguments.split(')')[0]
-                    return_type_cpp, fn_name  = return_and_name.rsplit(None, 1)
+                    return_type_cpp, fn_name = return_and_name.rsplit(None, 1)
                     if 'name' not in declaration:
                         declaration['name'] = fn_name
                     declaration['return'] = to_aten_type(return_type_cpp)
