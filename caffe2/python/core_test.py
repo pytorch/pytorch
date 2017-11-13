@@ -489,6 +489,31 @@ class TestOpRegistryKey(test_util.TestCase):
         self.assertFalse(core.IsOperatorWithEngine('Relu', 'NOEXIST'))
 
 
+class TestDeviceOption(test_util.TestCase):
+    def test_check_equal_node_name(self):
+        opt1 = core.DeviceOption(0)
+        opt2 = core.DeviceOption(0)
+        self.assertTrue(core.device_option_equal(opt1, opt2))
+        opt2.node_name = 'test'
+        self.assertTrue(core.device_option_equal(opt1, opt2))
+        self.assertFalse(core.device_option_equal(opt1, opt2, ignore_node_name=False))
+        opt1.node_name = 'test'
+        self.assertTrue(core.device_option_equal(opt1, opt2, ignore_node_name=False))
+
+    def test_check_equal_default_value(self):
+        opt1 = caffe2_pb2.DeviceOption()
+        opt2 = caffe2_pb2.DeviceOption()
+        opt1.device_type = 0
+        self.assertTrue(core.device_option_equal(opt1, opt2))
+        opt1.cuda_gpu_id = 5
+        # opt1 still is on CPU, so the options should be equal
+        self.assertTrue(core.device_option_equal(opt1, opt2))
+        opt2.device_type = 0
+        self.assertTrue(core.device_option_equal(opt1, opt2))
+        opt1.device_type = 1
+        self.assertFalse(core.device_option_equal(opt1, opt2))
+
+
 @unittest.skipIf(not workspace.has_gpu_support, 'No GPU support')
 class TestInferDevice(test_util.TestCase):
 
