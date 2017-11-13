@@ -113,6 +113,7 @@ ENDIF()
 
 FILE(GLOB base_h RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} "*.h")
 FILE(GLOB base_cpp RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} "*.cpp")
+FILE(GLOB native_cpp RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} "native/*.cpp")
 
 FILE(GLOB all_python RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} "*.py")
 
@@ -148,7 +149,7 @@ ADD_CUSTOM_COMMAND(OUTPUT ${generated_cpp}
 COMMAND ${GEN_COMMAND}
 DEPENDS ${all_python} ${all_templates} ${native_functions} ${cwrap_files})
 
-SET(all_cpp ${base_cpp} ${generated_cpp} ${ATen_CPU_SRCS})
+SET(all_cpp ${base_cpp} ${native_cpp} ${generated_cpp} ${ATen_CPU_SRCS})
 
 INCLUDE_DIRECTORIES(${ATen_CPU_INCLUDE})
 IF(NOT NO_CUDA)
