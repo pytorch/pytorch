@@ -6,6 +6,14 @@
 namespace at {
 namespace native {
 
+Tensor type_as(const Tensor &self, const Tensor &other) {
+  return self.toType(other.type());;
+}
+
+Tensor expand_as(const Tensor &self, const Tensor &other) {
+  return self.expand(other.sizes());
+}
+
 std::vector<Tensor> split(const Tensor &self, int64_t split_size, int64_t dim) {
   int64_t dim_size = self.size(dim);
   int64_t num_splits = (dim_size + split_size - 1) / split_size;

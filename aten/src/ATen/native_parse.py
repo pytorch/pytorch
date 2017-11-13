@@ -33,25 +33,30 @@ def parse_arguments(args):
 def parse(filename):
     with open(filename, 'r') as file:
         declarations = []
-        in_declaration = False
-        in_dispatch_table = False
-        in_decl_parse = False
+        in_comment_native_decl = False
+        in_cpp_native_decl = False
         for line in file.readlines():
             if '[NativeFunction]' in line:
-                in_declaration = True
                 arguments = []
                 dispatch_level = None
                 dispatch = None
                 decl_parse = ''
                 declaration = {'mode': 'native'}
-            elif '[/NativeFunction]' in line:
-                in_declaration = False
                 in_dispatch_table = False
-                in_decl_parse = True
-            elif in_decl_parse:
+                if '//' == line.strip()[:2] or '*/' in line.split('[NativeFunction]')[1]:
+                    in_comment_native_decl = False
+                    in_cpp_native_decl = True
+                else:
+                    in_comment_native_decl = True
+                    in_cpp_native_decl = False
+            elif '[/NativeFunction]' in line:
+                in_comment_native_decl = False
+                in_dispatch_table = False
+                in_cpp_native_decl = True
+            elif in_cpp_native_decl:
                 if ';' in line:
                     decl_parse += line.split(';')[0]
-                    in_decl_parse = False
+                    in_cpp_native_decl = False
                     return_and_name, arguments = decl_parse.split('(')
                     arguments = arguments.split(')')[0]
                     declaration['name'] = return_and_name.split(' ')[-1]
@@ -76,13 +81,13 @@ def parse(filename):
                     pass
                 else:
                     decl_parse += line
-            elif in_declaration:
+            elif in_comment_native_decl:
                 ls = line.strip().split(':', 1)
                 key = ls[0].strip()
                 if key == '*/':
-                    in_declaration = False
+                    in_comment_native_decl = False
                     in_dispatch_table = False
-                    in_decl_parse = True
+                    in_cpp_native_decl = True
                     continue
                 elif key == '}':
                     assert in_dispatch_table

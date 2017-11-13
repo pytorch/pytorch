@@ -17,98 +17,53 @@
 namespace at {
 namespace native {
 
-/*
-[NativeFunction]
-name: type_as
-arg: Tensor self
-arg: Tensor other
-return: Tensor
-variants: method, function
-type_method_definition_level: base
-type_method_definition_dispatch: at::native::type_as
-[/NativeFunction]
-*/
-static inline Tensor type_as(const Tensor &self, const Tensor &other) {
-  return self.toType(other.type());;
-}
+// [NativeFunction]
+Tensor type_as(const Tensor &self, const Tensor &other);
 
-/*
-[NativeFunction]
-name: expand_as
-arg: Tensor self
-arg: Tensor other
-return: Tensor
-variants: method, function
-type_method_definition_level: base
-type_method_definition_dispatch: at::native::expand_as
-[/NativeFunction]
-*/
-static inline Tensor expand_as(const Tensor &self, const Tensor &other) {
-  return self.expand(other.sizes());
-}
+// [NativeFunction]
+Tensor expand_as(const Tensor &self, const Tensor &other);
 
-/*
-[NativeFunction]
-*/
+// [NativeFunction]
 std::vector<Tensor> split(const Tensor& self, int64_t split_size, int64_t dim=0);
 
-/*
-[NativeFunction]
-*/
+// [NativeFunction]
 std::vector<Tensor> chunk(const Tensor& self, int64_t chunks, int64_t dim=0);
 
-/*
-[NativeFunction]
-*/
+// [NativeFunction]
 int64_t size(const Tensor& self, int64_t dim);
 
-/*
-[NativeFunction]
-*/
+
+// [NativeFunction]
 int64_t stride(const Tensor& self, int64_t dim);
 
-/*
-[NativeFunction]
-*/
+
+// [NativeFunction]
 bool is_same_size(const Tensor& self, const Tensor& other);
 
-/*
-[NativeFunction]
-*/
+// [NativeFunction]
 Tensor permute(const Tensor& self, IntList dims);
 
-/*
-[NativeFunction]
-*/
+
+// [NativeFunction]
 Tensor expand(const Tensor& self, IntList size);
 
-/*
-[NativeFunction]
-*/
+// [NativeFunction]
 Tensor squeeze(const Tensor& self);
 
-/*
-[NativeFunction]
-*/
+// [NativeFunction]
 Tensor squeeze(const Tensor& self, int64_t dim);
 
-/*
-[NativeFunction]
-*/
+// [NativeFunction]
 Tensor & squeeze_(Tensor& self);
-/*
-[NativeFunction]
-*/
+
+
+// [NativeFunction]
 Tensor & squeeze_(Tensor& self, int64_t dim);
 
-/*
-[NativeFunction]
-*/
+// [NativeFunction]
 Tensor unsqueeze(const Tensor& self, int64_t dim);
 
-/*
-[NativeFunction]
-*/
+// [NativeFunction]
 Tensor & unsqueeze_(Tensor& self, int64_t dim);
 
 /*
