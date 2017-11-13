@@ -13,7 +13,7 @@ __host__ __device__ __forceinline__ float fmax(float a, float b) {
 }
 
 template <typename T>
-__global__ void SpatialRoIPooling_forward_kernel(
+__global__ void RoiPooling2d_forward_kernel(
   const int outputElements,
   const T *input,
   const T *rois,
@@ -93,7 +93,7 @@ __global__ void SpatialRoIPooling_forward_kernel(
   }
 }
 
-std::tuple<Tensor, Tensor> SpatialRoIPooling_forward_cuda(
+std::tuple<Tensor, Tensor> RoiPooling2d_forward_cuda(
   const Tensor& input,
   const Tensor& rois,
   int64_t pooledHeight,
@@ -130,16 +130,16 @@ std::tuple<Tensor, Tensor> SpatialRoIPooling_forward_cuda(
 
   dim3 block(512);
   dim3 grid((output.numel() + 512 - 1) / 512);
-  SpatialRoIPooling_forward_kernel<<<grid, block, 0, globalContext().getCurrentCUDAStream()>>>(
+  RoiPooling2d_forward_kernel<<<grid, block, 0, globalContext().getCurrentCUDAStream()>>>(
     output.numel(), input.data<float>(), rois.data<float>(), static_cast<float>(spatialScale), inputChannels,
     inputHeight, inputWidth, pooledHeight, pooledWidth, output.data<float>(), argmaxes.data<int>());
-  AT_ASSERT(cudaGetLastError() == cudaSuccess, "SpatialRoIPooling_forward_kernel failed");
+  AT_ASSERT(cudaGetLastError() == cudaSuccess, "RoiPooling2d_forward_kernel failed");
 
   return std::make_tuple(output, argmaxes);
 }
 
 template <typename T>
-__global__ void SpatialRoIPooling_backward_kernel(
+__global__ void RoiPooling2d_backward_kernel(
   const int outputElements,
   const T *gradOutput,
   const int *argmaxes,
@@ -177,7 +177,7 @@ __global__ void SpatialRoIPooling_backward_kernel(
   }
 }
 
-Tensor SpatialRoIPooling_backward_cuda(
+Tensor RoiPooling2d_backward_cuda(
   const Tensor& input,
   const Tensor& rois,
   int64_t pooledHeight,
@@ -197,11 +197,11 @@ Tensor SpatialRoIPooling_backward_cuda(
 
   dim3 block(512);
   dim3 grid((gradInput.numel() + 512 - 1) / 512);
-  SpatialRoIPooling_backward_kernel<<<grid, block, 0, globalContext().getCurrentCUDAStream()>>>(
+  RoiPooling2d_backward_kernel<<<grid, block, 0, globalContext().getCurrentCUDAStream()>>>(
     gradOutput.numel(), gradOutput.data<float>(), argmaxes.data<int>(), proposals,
     static_cast<float>(spatialScale), inputChannels, inputHeight, inputWidth,
     pooledHeight, pooledWidth, gradInput.data<float>(), rois.data<float>());
-  AT_ASSERT(cudaGetLastError() == cudaSuccess, "SpatialRoIPooling_forward_kernel failed");
+  AT_ASSERT(cudaGetLastError() == cudaSuccess, "RoiPooling2d_forward_kernel failed");
 
   return gradInput;
 }

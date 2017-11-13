@@ -76,18 +76,18 @@ Tensor stack(TensorList tensors, int64_t dim=0);
 [NativeFunction]
 variants: function
 type_method_definition_dispatch: {
-  - CPU: at::native::SpatialRoIPooling_forward
-  - CUDA: at::native::SpatialRoIPooling_forward_cuda
+  - CPU: at::native::RoiPooling2d_forward
+  - CUDA: at::native::RoiPooling2d_forward_cuda
 }
 */
-std::tuple<Tensor, Tensor> SpatialRoIPooling_forward(
+std::tuple<Tensor, Tensor> RoiPooling2d_forward(
   const Tensor& input,
   const Tensor& rois,
   int64_t pooledHeight,
   int64_t pooledWidth,
   double spatialScale);
 
-std::tuple<Tensor, Tensor> SpatialRoIPooling_forward_cuda(
+std::tuple<Tensor, Tensor> RoiPooling2d_forward_cuda(
   const Tensor& input,
   const Tensor& rois,
   int64_t pooledHeight,
@@ -98,11 +98,11 @@ std::tuple<Tensor, Tensor> SpatialRoIPooling_forward_cuda(
 [NativeFunction]
 variants: function
 type_method_definition_dispatch: {
-  - CPU: at::native::SpatialRoIPooling_backward
-  - CUDA: at::native::SpatialRoIPooling_backward_cuda
+  - CPU: at::native::RoiPooling2d_backward
+  - CUDA: at::native::RoiPooling2d_backward_cuda
 }
 */
-Tensor SpatialRoIPooling_backward(
+Tensor RoiPooling2d_backward(
   const Tensor& input,
   const Tensor& rois,
   int64_t pooledHeight,
@@ -111,7 +111,7 @@ Tensor SpatialRoIPooling_backward(
   const Tensor& gradOutput,
   const Tensor& argmaxes);
 
-Tensor SpatialRoIPooling_backward_cuda(
+Tensor RoiPooling2d_backward_cuda(
   const Tensor& input,
   const Tensor& rois,
   int64_t pooledHeight,

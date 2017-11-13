@@ -189,7 +189,7 @@ Tensor stack(TensorList tensors, int64_t dim) {
   return at::cat(inputs, dim);
 }
 
-std::tuple<at::Tensor, at::Tensor> SpatialRoIPooling_forward(
+std::tuple<at::Tensor, at::Tensor> RoiPooling2d_forward(
 	const Tensor& input,
 	const Tensor& rois,
 	int64_t pooledHeight,
@@ -310,7 +310,7 @@ std::tuple<at::Tensor, at::Tensor> SpatialRoIPooling_forward(
   return std::make_tuple(output, argmaxes);
 }
 
-Tensor SpatialRoIPooling_backward(
+Tensor RoiPooling2d_backward(
   const Tensor& input,
   const Tensor& rois,
   int64_t pooledHeight,
