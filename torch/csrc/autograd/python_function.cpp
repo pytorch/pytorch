@@ -482,7 +482,8 @@ static void _save_variables(THPFunction* self, t2var_type &t2var)
           "tensors, but argument %d doesn't satisfy this condition", i);
     }
 
-    self->saved_variables.emplace_back(variable->cdata, cdata_ptr);
+    bool is_output = variable->cdata.grad_fn().get() == cdata_ptr;
+    self->saved_variables.emplace_back(variable->cdata, is_output);
   }
   // Free .to_save
   Py_DECREF(self->to_save);
