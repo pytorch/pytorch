@@ -19,20 +19,37 @@ bool isBroadcasting(Node *node) {
   return broadcasting.count(node->kind());
 }
 
-// When iterating over the dimension sizes, starting at the trailing dimension,
-// the dimension sizes must either be equal, or one of them does not exist.
+// First iterate over the 'from' tensor sizes. Ignore all leading and trailing
+// dimensions that are simply one, since they can be trivially broadcasted.
+// When iterating over the dimension sizes (with reduced 'from' tensor),
+// starting at the trailing dimension, the dimension sizes must either be equal,
+// or one of them does not exist.
 //
-//  equivalently:
-//
-// Test that 'from' is a suffix of 'to'.
+// Note that this is NOT equivalent to numpy broadcasting semantics, and do
+// not represent that generalized broadcasting that Pytorch implements in
+// general. Rather, this is Caffe2-style broadcasting.
 bool fusibleExpandTo(at::IntList from, at::IntList to) {
-  auto f = from.rbegin();
-  auto t = to.rbegin();
-  for (; f != from.rend() && t != to.rend(); f++, t++) {
-    // TODO: if 1->n expansion is supported, adjust this conditional.
-    if (*f != *t) return false;
+  if (from.size() > to.size()) {
+    return false;
   }
-  return f == from.rend();
+  ssize_t from_dim_start = 0, from_dim_end = from.size() - 1;
+  while (from_dim_start < from.size() && from[from_dim_start] == 1) {
+    from_dim_start++;
+  }
+  while (from_dim_end > from_dim_start && from[from_dim_end] == 1) {
+    from_dim_end--;
+  }
+
+  ssize_t f = from_dim_end;
+  ssize_t t = to.size() - 1;
+  for (; f >= from_dim_start && t >= 0; --f, --t) {
+    if (from[f] != to[t]) return false;
+  }
+
+  // In the case that the 'to' tensor has leading ones in the same place that
+  // the 'from' tensor does, f will be less than from_dim_start rather than
+  // strictly equal. E.x.: to := [5, 1, 768] and from := [1, 1, 768]
+  return f <= from_dim_start;
 }
 
 void fuseBroadcast(std::shared_ptr<Graph>& graph) {
