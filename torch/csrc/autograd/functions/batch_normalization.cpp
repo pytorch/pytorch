@@ -164,7 +164,7 @@ auto BatchNormBackward::apply(const variable_list& grad_outputs) -> variable_lis
   // Add saved variables used out of the pure autograd to inputs
   variable_list all_inputs(grad_outputs);
   all_inputs.push_back(input_var);
-  if (weight.get()) {
+  if (weight.defined()) {
     all_inputs.push_back(weight_var);
   }
   auto outputs =  as_tensor_list(std::move(grad_input),

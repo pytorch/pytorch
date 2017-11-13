@@ -70,9 +70,6 @@ struct Tensor : public detail::TensorBase {
     pImpl = nullptr;
     return ret;
   }
-  bool defined() const {
-    return pImpl != nullptr;
-  }
   void swap(Tensor & rhs) {
     TensorImpl * tmp = pImpl;
     pImpl = rhs.pImpl;

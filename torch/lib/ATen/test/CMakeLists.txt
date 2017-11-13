@@ -18,3 +18,6 @@ target_link_libraries(dlconvertor_test ATen)
 
 add_executable(native_test native_test.cpp)
 target_link_libraries(native_test ATen)
+
+add_executable(undefined_tensor_test undefined_tensor_test.cpp)
+target_link_libraries(undefined_tensor_test ATen)

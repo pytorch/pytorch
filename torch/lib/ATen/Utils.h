@@ -2,6 +2,7 @@
 
 #include "ArrayRef.h"
 #include "ATenGeneral.h"
+#include "UndefinedTensor.h"
 #include <algorithm>
 #include <sstream>
 #include <typeinfo>
@@ -14,13 +15,17 @@ namespace at {
 AT_API void runtime_error(const char *format, ...);
 
 template <typename T, typename Base>
-static inline T* checked_cast(Base* expr, const char * name, int pos, bool allowNull) {
-  if(!expr) {
-    if (allowNull) {
-      return (T*) expr;
-    }
-    runtime_error("Expected a Tensor of type %s but found an undefined Tensor for argument #%d '%s'",
-      T::typeString(),pos,name);
+static inline T* checked_cast_storage(Base* expr, const char * name, int pos) {
+  if (typeid(*expr) != typeid(T))
+    runtime_error("Expected object of type %s but found type %s for argument #%d '%s'",
+      T::typeString(),expr->type().toString(),pos,name);
+  return static_cast<T*>(expr);
+}
+
+template <typename T, typename Base>
+inline T* checked_cast_tensor(Base* expr, const char * name, int pos, bool allowNull) {
+  if(allowNull && expr == UndefinedTensor::singleton()) {
+    return nullptr;
   }
   if (typeid(*expr) != typeid(T))
     runtime_error("Expected object of type %s but found type %s for argument #%d '%s'",
@@ -34,11 +39,6 @@ static inline std::vector<TH*> tensor_list_checked_cast(ArrayRef<TBase> tensors,
   std::vector<TH*> casted(tensors.size());
   for (unsigned int i = 0; i < tensors.size(); ++i) {
     auto *expr = tensors[i].pImpl;
-    if (!expr) {
-      runtime_error("Expected a Tensor of type %s but found an undefined Tensor for sequence element %u "
-                    " in sequence argument at position #%d '%s'",
-                    T::typeString(),i,pos,name);
-    }
     auto result = dynamic_cast<T*>(expr);
     if (result) {
       casted[i] = result->tensor;

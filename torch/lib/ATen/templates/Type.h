@@ -56,6 +56,7 @@ static inline void noop_deleter(void*) {}
 
 enum class TypeID {
   ${type_ids}
+  Undefined,
   NumOptions
 };
 
