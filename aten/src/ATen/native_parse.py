@@ -76,7 +76,9 @@ def parse(filename):
                     in_cpp_native_decl = False
                     return_and_name, arguments = decl_parse.split('(')
                     arguments = arguments.split(')')[0]
-                    return_type_cpp, declaration['name'] = return_and_name.rsplit(None, 1)
+                    return_type_cpp, fn_name  = return_and_name.rsplit(None, 1)
+                    if 'name' not in declaration:
+                        declaration['name'] = fn_name
                     declaration['return'] = to_aten_type(return_type_cpp)
                     declaration['arguments'] = parse_arguments(arguments)
                     if dispatch is None:
