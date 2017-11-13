@@ -104,6 +104,16 @@ class Conv1d(_ConvNd):
          `cross-correlation`_, and not a full `cross-correlation`_.
          It is up to the user to add proper padding.
 
+    .. note::
+
+         The configuration when `groups == in_channels` and `out_channels = K * in_channels`
+         where `K` is a positive integer is termed in literature as depthwise convolution.
+
+         In other words, for an input of size :math:`(N, C_{in}, L_{in})`, if you want a
+         depthwise convolution with a depthwise multiplier `K`,
+         then you use the constructor arguments
+         :math:`(in\_channels=C_{in}, out\_channels=C_{in} * K, ..., groups=C_{in})`
+
     Args:
         in_channels (int): Number of channels in the input image
         out_channels (int): Number of channels produced by the convolution
@@ -203,6 +213,16 @@ class Conv2d(_ConvNd):
          and not a full `cross-correlation`_.
          It is up to the user to add proper padding.
 
+    .. note::
+
+         The configuration when `groups == in_channels` and `out_channels = K * in_channels`
+         where `K` is a positive integer is termed in literature as depthwise convolution.
+
+         In other words, for an input of size :math:`(N, C_{in}, H_{in}, W_{in})`, if you want a
+         depthwise convolution with a depthwise multiplier `K`,
+         then you use the constructor arguments
+         :math:`(in\_channels=C_{in}, out\_channels=C_{in} * K, ..., groups=C_{in})`
+
     Args:
         in_channels (int): Number of channels in the input image
         out_channels (int): Number of channels produced by the convolution
@@ -299,6 +319,16 @@ class Conv3d(_ConvNd):
          columns of the input might be lost, because it is a valid `cross-correlation`_,
          and not a full `cross-correlation`_.
          It is up to the user to add proper padding.
+
+    .. note::
+
+         The configuration when `groups == in_channels` and `out_channels = K * in_channels`
+         where `K` is a positive integer is termed in literature as depthwise convolution.
+
+         In other words, for an input of size :math:`(N, C_{in}, D_{in}, H_{in}, W_{in})`, if you want a
+         depthwise convolution with a depthwise multiplier `K`,
+         then you use the constructor arguments
+         :math:`(in\_channels=C_{in}, out\_channels=C_{in} * K, ..., groups=C_{in})`
 
     Args:
         in_channels (int): Number of channels in the input image
