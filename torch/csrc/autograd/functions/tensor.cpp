@@ -149,6 +149,10 @@ auto CopySlices::apply(const variable_list& inputs) -> variable_list {
   check_input_variables("CopySlices", inputs, 1);
   auto& grad = inputs[0];
 
+  if (!fn) {
+    throw std::runtime_error(ERR_BACKWARD_TWICE);
+  }
+
   auto result = grad.type().tensor(base.sizes, base.strides);
   result.copy_(grad);
 
@@ -174,6 +178,10 @@ auto CopySlices::apply(const variable_list& inputs) -> variable_list {
   }
 
   return grad_inputs;
+}
+
+void CopySlices::releaseVariables() {
+  fn = nullptr;
 }
 
 }} // namespace torch::autograd
