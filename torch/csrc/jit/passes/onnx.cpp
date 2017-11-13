@@ -86,6 +86,9 @@ void ToONNX(std::shared_ptr<tracer::TracingState>& state) {
         if (!outputs[i]->hasType()) {
           outputs[i]->setType(old->typeOption());
         }
+        // Copy over source location information to all nodes created by
+        // the symbolic
+        outputs[i]->setSourceLocation(node->getSourceLocation());
         env[old] = outputs[i];
       } else {
         // Null output means that the ONNX op doesn't have outputs corresponding
