@@ -547,6 +547,7 @@ def create_generic(top_env, declarations):
         result = [native_translate_formals(argument, option) for argument in result]
         return result
 
+    # this can return multiple return types in a list, e.g. ['Tensor', 'Tensor']
     def native_get_return_types(option):
         ret = option['return']
         if ret['kind'] != 'type':
