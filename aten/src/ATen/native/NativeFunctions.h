@@ -76,11 +76,11 @@ Tensor stack(TensorList tensors, int64_t dim=0);
 [NativeFunction]
 variants: function
 type_method_definition_dispatch: {
-  - CPU: at::native::RoiPooling2d_forward
+  - CPU: at::native::RoiPooling2d_forward_cpu
   - CUDA: at::native::RoiPooling2d_forward_cuda
 }
 */
-std::tuple<Tensor, Tensor> RoiPooling2d_forward(
+std::tuple<Tensor, Tensor> RoiPooling2d_forward_cpu(
   const Tensor& input,
   const Tensor& rois,
   int64_t pooledHeight,
@@ -98,11 +98,11 @@ std::tuple<Tensor, Tensor> RoiPooling2d_forward_cuda(
 [NativeFunction]
 variants: function
 type_method_definition_dispatch: {
-  - CPU: at::native::RoiPooling2d_backward
+  - CPU: at::native::RoiPooling2d_backward_cpu
   - CUDA: at::native::RoiPooling2d_backward_cuda
 }
 */
-Tensor RoiPooling2d_backward(
+Tensor RoiPooling2d_backward_cpu(
   const Tensor& input,
   const Tensor& rois,
   int64_t pooledHeight,
