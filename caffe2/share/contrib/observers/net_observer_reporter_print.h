@@ -7,10 +7,9 @@ namespace caffe2 {
 class NetObserverReporterPrint : public NetObserverReporter {
  public:
   static const std::string IDENTIFIER;
-  void printNet(NetBase* net, double net_delay);
-  void printNetWithOperators(
+  void reportDelay(
       NetBase* net,
-      double net_delay,
-      std::vector<std::pair<std::string, double>>& operator_delays);
+      std::map<std::string, double>& delays,
+      const char* unit);
 };
 }

@@ -19,19 +19,17 @@ REGISTER_CAFFE2_EARLY_INIT_FUNCTION(
 
 const std::string NetObserverReporterPrint::IDENTIFIER = "Caffe2Observer ";
 
-void NetObserverReporterPrint::printNet(NetBase* net, double net_delay) {
-  LOG(INFO) << IDENTIFIER << "Net Name - " << net->Name() << " :  Net Delay - "
-            << net_delay;
-}
-
-void NetObserverReporterPrint::printNetWithOperators(
+void NetObserverReporterPrint::reportDelay(
     NetBase* net,
-    double net_delay,
-    std::vector<std::pair<std::string, double>>& delays) {
-  LOG(INFO) << IDENTIFIER << "Operators Delay Start";
+    std::map<std::string, double>& delays,
+    const char* unit) {
+  CAFFE_ENFORCE(unit != nullptr, "Unit is null");
+  LOG(INFO) << IDENTIFIER << "Net Name - " << net->Name();
+  LOG(INFO) << IDENTIFIER << "Delay Start";
   for (auto& p : delays) {
-    LOG(INFO) << IDENTIFIER << p.first << " - " << p.second;
+    LOG(INFO) << IDENTIFIER << p.first << " - " << p.second << "\t(" << *unit
+              << ")";
   }
-  LOG(INFO) << IDENTIFIER << "Operators Delay End";
+  LOG(INFO) << IDENTIFIER << "Delay End";
 }
 }
