@@ -57,7 +57,6 @@ def parse(filename):
         in_cpp_native_decl = False
         for line in file.readlines():
             if '[NativeFunction]' in line:
-                arguments = []
                 dispatch_level = None
                 dispatch = None
                 decl_parse = ''
@@ -80,23 +79,23 @@ def parse(filename):
                     return_and_name, arguments = decl_parse.split('(')
                     arguments = arguments.split(')')[0]
                     return_type_cpp, fn_name = return_and_name.rsplit(None, 1)
-                    if 'name' not in declaration:
-                        declaration['name'] = fn_name
-                    declaration['return'] = to_aten_type(return_type_cpp)
+                    declaration['name'] = declaration.get('name', fn_name)
+                    declaration['return'] = declaration.get('return', to_aten_type(return_type_cpp))
+                    declaration['variants'] = declaration.get('variants', ['method', 'function'])
                     declaration['arguments'] = parse_arguments(arguments)
+
                     if dispatch is None:
                         dispatch = 'at::native::' + declaration['name']
                     declaration['type_method_definition_dispatch'] = dispatch
+
                     if dispatch_level is None:
                         dispatch_level = 'backend' if isinstance(dispatch, dict) else 'base'
                     declaration['type_method_definition_level'] = dispatch_level
-                    if declaration.get('variants', None) is None:
-                        declaration['variants'] = ['method', 'function']
-                    type_method_definition_level = declaration.get('type_method_definition_level')
-                    if type_method_definition_level != 'base' and type_method_definition_level != 'backend':
+                    if dispatch_level != 'base' and dispatch_level != 'backend':
                         raise RuntimeError("Native functions currently only support (and must be specified with) "
                                            "\'base\' or \'backend\' type_method_definition_level, got {}"
-                                           .format(type_method_definition_level))
+                                           .format(dispatch_level))
+
                     declarations.append(declaration)
                 elif line == '*/\n':
                     pass
