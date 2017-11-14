@@ -80,8 +80,8 @@ static void codeTemplateTest() {
 }
 
 #ifdef WITH_CUDA
-Node * appendNewNode(NodeKind kind, Graph& graph, ArrayRef<Node*> inputs) {
-  return graph.appendNode(graph.create(kind,inputs));
+Value * appendNewNode(NodeKind kind, Graph& graph, ArrayRef<Value*> inputs) {
+  return graph.appendNode(graph.create(kind,inputs))->output();
 }
 
 static void fusionTests() {
@@ -90,8 +90,8 @@ static void fusionTests() {
 
   auto testSimple = [&] {
     Graph graph;
-    Node * i0 = graph.addInput();
-    Node * i1 = graph.addInput();
+    Value * i0 = graph.addInput();
+    Value * i1 = graph.addInput();
     auto o0 = appendNewNode(kmul,graph,{i0, i1});
     graph.registerOutput(o0);
     auto a = at::CUDA(at::kFloat).rand({3,4});
@@ -109,11 +109,11 @@ static void fusionTests() {
 
     Graph graph;
 
-    Node * i0 = graph.addInput();
-    Node * i1 = graph.addInput();
-    Node * i2 = graph.addInput();
-    Node * i3 = graph.addInput();
-    Node * i4 = graph.addInput();
+    Value * i0 = graph.addInput();
+    Value * i1 = graph.addInput();
+    Value * i2 = graph.addInput();
+    Value * i3 = graph.addInput();
+    Value * i4 = graph.addInput();
 
     auto p22 = appendNewNode(ksigmoid,graph,{i4});
     auto p20 = appendNewNode(ksigmoid,graph,{i3});
@@ -122,7 +122,7 @@ static void fusionTests() {
     auto p14 = appendNewNode(kmul,graph,{p20, i0});
     auto p11 = appendNewNode(kmul,graph,{p22, p18});
     auto o1 = appendNewNode(kadd,graph,{p14, p11});
-    o1->t_(kalpha, at::Scalar(1).toTensor());
+    o1->node()->t_(kalpha, at::Scalar(1).toTensor());
     auto p5 = appendNewNode(ktanh,graph,{o1});
     auto o0 = appendNewNode(kmul,graph,{p16, p5});
 
@@ -179,11 +179,11 @@ static void fusionTests() {
 
   auto testConcat = [&](int dim) {
     Graph graph;
-    Node * i0 = graph.addInput();
-    Node * i1 = graph.addInput();
+    Value * i0 = graph.addInput();
+    Value * i1 = graph.addInput();
     auto o0 = appendNewNode(kmul,graph,{i0, i1});
     graph.registerOutput(o0);
-    graph.registerOutput(appendNewNode(kcat, graph, {i0,o0})->i_(kdim, dim));
+    graph.registerOutput(appendNewNode(kcat, graph, {i0,o0})->node()->i_(kdim, dim)->output());
     auto a = at::CUDA(at::kFloat).rand({3,4,5});
     auto b = at::CUDA(at::kFloat).rand({4,3,5}).transpose(0,1);
     auto o = at::CUDA(at::kFloat).zeros({3,4,5});
@@ -302,31 +302,32 @@ Symbol sym(const char * str) {
   return stringToSymbol(str);
 }
 
-Node * node(Graph& graph, const char * n, ArrayRef<Node*> inputs) {
-  return graph.appendNode(graph.create(sym(n),inputs));
+Value * node(Graph& graph, const char * n, ArrayRef<Value*> inputs) {
+  return graph.appendNode(graph.create(sym(n),inputs))->output();
 }
 
-Node * add(Graph & g, Node * a, Node * b) {
+Value * add(Graph & g, Value * a, Value * b) {
   auto r = node(g, "add", {a,b});
-  r->t_(sym("alpha"), at::Scalar(1).toTensor());
+  r->node()->t_(sym("alpha"), at::Scalar(1).toTensor());
   return r;
 }
 
-std::tuple<Node*, Node*> build_lstm_body(
+std::tuple<Value*, Value*> build_lstm_body(
   Graph & g,
-  Node * input,
-  Node * hx,
-  Node * cx,
-  Node * w_ih,
-  Node * w_hh) {
+  Value * input,
+  Value * hx,
+  Value * cx,
+  Value * w_ih,
+  Value * w_hh) {
     auto gates = add(g, node(g,"mm",{ input, w_ih }), node(g, "mm", {hx, w_hh}));
-    auto chunked_gates = node(g, "chunk", { gates });
-    chunked_gates->i_(sym("chunks"), 4);
-    chunked_gates->i_(sym("dim"), 1);
-    auto ingate = g.appendNode(g.createSelect(chunked_gates, 0));
-    auto forgetgate = g.appendNode(g.createSelect(chunked_gates, 1));
-    auto cellgate = g.appendNode(g.createSelect(chunked_gates, 2));
-    auto outgate = g.appendNode(g.createSelect(chunked_gates, 3));
+    auto chunked_gates = g.appendNode(g.create(sym("chunk"),{ gates }, 4))
+      ->i_(sym("chunks"), 4)
+      ->i_(sym("dim"), 1);
+    auto outputs = chunked_gates->outputs();
+    auto ingate = outputs[0];
+    auto forgetgate = outputs[1];
+    auto cellgate = outputs[2];
+    auto outgate = outputs[3];
     ingate = node(g,"sigmoid",{ingate});
     outgate = node(g,"sigmoid",{outgate});
     cellgate = node(g,"tanh",{cellgate});
@@ -341,14 +342,14 @@ std::tuple<Node*, Node*> build_lstm_body(
 std::shared_ptr<Graph> build_lstm() {
   auto r = std::make_shared<Graph>();
   auto & g = *r;
-  Node * input = g.addInput();
-  Node * hx = g.addInput();
-  Node * cx = g.addInput();
-  Node * w_ih = g.addInput();
-  Node * w_hh = g.addInput();
+  Value * input = g.addInput();
+  Value * hx = g.addInput();
+  Value * cx = g.addInput();
+  Value * w_ih = g.addInput();
+  Value * w_hh = g.addInput();
 
-  Node * hy;
-  Node * cy;
+  Value * hy;
+  Value * cy;
   std::tie(hy,cy) = build_lstm_body(g, input, hx, cx, w_ih, w_hh);
 
   g.registerOutput(hy);
@@ -361,14 +362,14 @@ std::shared_ptr<Graph> build_lstm() {
 std::shared_ptr<Graph> build_lstm_stages() {
   auto r = std::make_shared<Graph>();
   auto & g = *r;
-  Node * input = g.addInput();
-  Node * hx = g.addInput();
-  Node * cx = g.addInput();
-  Node * w_ih = g.addInput();
-  Node * w_hh = g.addInput();
+  Value * input = g.addInput();
+  Value * hx = g.addInput();
+  Value * cx = g.addInput();
+  Value * w_ih = g.addInput();
+  Value * w_hh = g.addInput();
 
-  Node * hy;
-  Node * cy;
+  Value * hy;
+  Value * cy;
   std::tie(hy,cy) = build_lstm_body(g, input, hx, cx, w_ih, w_hh);
 
   // use some stuff from the previous stage as well

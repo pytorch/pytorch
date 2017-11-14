@@ -25,7 +25,7 @@ struct BatchNormForward : public ForwardFunction<>, public BatchNormParams, publ
     : BatchNormParams(std::move(params)) {}
 
   virtual variable_list apply(const variable_list& inputs) override;
-  virtual jit::node_list symbolic(SymbolicContext* ctx, jit::node_list inputs) override;
+  virtual jit::value_list symbolic(SymbolicContext* ctx, jit::value_list inputs) override;
 };
 
 struct BatchNormBackward : public Function, public BatchNormParams {

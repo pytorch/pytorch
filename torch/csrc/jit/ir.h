@@ -40,11 +40,15 @@ namespace torch { namespace jit {
 struct Graph;
 
 // Node is the base class of the IR graph. It represents one computation
-// and dependencies on a list of values. The "prim-ops", so to speak.
+// and dependencies on a list of Values. The "prim-ops", so to speak.
 struct Node;
 
+// A Value represents an input or output to node that is either a
+// Tensor or an opaque Handle object, as determined by type().
+struct Value;
+
 // Each use is represented by this type, see Node::uses()
-// 'user' is the consumer of the node, offset is the index into
+// 'user' is the consumer of the value, offset is the index into
 // 'user's input this where the produces will be found.
 struct Use {
   Use(Node * user, size_t offset)
@@ -55,10 +59,6 @@ struct Use {
 static inline bool operator==(const Use & a, const Use & b) {
   return a.user == b.user && a.offset == b.offset;
 }
-
-// Param represents an input to the Graph, it has no inputs itself.
-// Graph holds a list of parameters.
-struct Param;
 
 // SourceLocation represents source code-level debug information for a node.
 // It contains a Python stack trace that represents the provenance of a given
@@ -72,28 +72,107 @@ struct SourceLocation {
 // the list types are intentionally simple, but we type-def
 // them here so if we need to change them, refactoring will be easier
 using node_list = std::vector<Node*>;
-using param_list = node_list;
+using value_list = std::vector<Value*>;
 using use_list = std::vector<Use>;
 using pyobj_list = std::vector<THPObjectPtr>;
 template<typename T>
 using ArrayRef = at::ArrayRef<T>;
 using NodeKind = Symbol;
 
-inline TypePtr getInitialType(NodeKind kind) {
-  switch(kind) {
-    case kPythonOp:
-    case kCppOp:
-    case kEval:
-    case kFusionGroup:
-      return multiType();
-    default:
-      return nullptr;
+struct Value {
+  TH_DISALLOW_COPY_AND_ASSIGN(Value);
+  Value(Node * node_, size_t offset_);
+private:
+  friend struct Node;
+  Node * node_;
+  size_t offset_;
+  size_t unique_ = 0;          // unique id
+  size_t stage_ = 0;           // 0-forward, 1-backward, 2-double-backward,...
+  use_list uses_;
+  std::string debug_name_;
+  TypePtr type_;
+public:
+  bool hasType() const {
+    return type_ != nullptr;
   }
-}
+  Value* setType(const TypePtr type) {
+    type_ = type;
+    return this;
+  }
+  void inferTypeFrom(const at::Tensor& output) {
+    setType(std::make_shared<TensorType>(output));
+  }
+  Value* setDebugName(const std::string & name) {
+    debug_name_ = name;
+    return this;
+  }
+  const std::string & debugName() const {
+    return debug_name_;
+  }
+  const TypePtr & type() const {
+    JIT_ASSERT(type_ != nullptr);
+    return type_;
+  }
+  const TypePtr & typeOption() const {
+    return type_;
+  }
+  bool isHandle() const {
+    return hasType() && type()->kind() == TypeKind::HandleType;
+  }
+  size_t unique() const {
+    return unique_;
+  }
+  std::string uniqueName() const {
+    if(debug_name_.size() > 0)
+      return debugName() + "_" + std::to_string(unique());
+    return std::to_string(unique());
+  }
+  Value* setStage(size_t s) {
+    stage_ = s;
+    return this;
+  }
+  size_t stage() const {
+    return stage_;
+  }
+  Node* node() {
+    return node_;
+  }
+  size_t offset() {
+    return offset_;
+  }
+  const Node * node() const {
+    return node_;
+  }
+  Graph * owningGraph();
+  const Graph * owningGraph() const;
+  // TODO: make this more const correct
+  const use_list & uses() const {
+    return uses_;
+  }
+
+  // Replaces all uses of this node with 'newValue'.
+  //
+  // Given:   %3 = f(%1, %2)
+  //          %4 = g(%3)
+  //          %5 = h(%3, %3)
+  // Execute: %3.replaceAllUsesWith(%6)
+  // Result:  %3 = f(%1, %2)
+  //          %4 = g(%6)
+  //          %5 = h(%6, %6)
+  void replaceAllUsesWith(Value * newValue);
+
+  Value* copyMetadata(Value * from) {
+    if(from->hasType()) setType(from->type());
+    setDebugName(from->debugName());
+    return this;
+  }
+
+};
 
 struct Node : public Attributes<Node> {
   TH_DISALLOW_COPY_AND_ASSIGN(Node);
   friend struct Graph;
+  friend struct Value;
   friend graph_node_list;
   friend const_graph_node_list;
   friend graph_node_list_iterator;
@@ -116,49 +195,16 @@ private:
   Node* const & prev() const { return next_in_graph[kPrevDirection]; }
 
   const NodeKind kind_;
-  std::vector<Node*> inputs_;
-  use_list uses_;
+  std::vector<Value*> inputs_;
+  std::vector<Value*> outputs_;
   Graph* graph_;
-  size_t unique_ = 0;          // unique id
-  size_t stage_ = 0;           // 0-forward, 1-backward, 2-double-backward,...
-  std::string debug_name_;
   std::shared_ptr<SourceLocation> source_location_;
+  size_t stage_;
 protected:
-  TypePtr type_;
   Node(Graph * graph_, NodeKind kind_); //defined after graph
 public:
   NodeKind kind() const {
     return kind_;
-  }
-  const TypePtr & type() const {
-    JIT_ASSERT(type_ != nullptr);
-    return type_;
-  }
-  const TypePtr & typeOption() const {
-    return type_;
-  }
-  bool hasMultipleOutputs() const {
-    return hasType() && type()->kind() == TypeKind::MultiType;
-  }
-  bool isHandle() const {
-    return hasType() && type()->kind() == TypeKind::HandleType;
-  }
-  bool hasType() const {
-    return type_ != nullptr;
-  }
-  Node* setType(const TypePtr type) {
-    type_ = type;
-    return this;
-  }
-  void inferTypeFrom(const at::Tensor& output) {
-    setType(std::make_shared<TensorType>(output));
-  }
-  Node* setDebugName(const std::string & name) {
-    debug_name_ = name;
-    return this;
-  }
-  const std::string & debugName() const {
-    return debug_name_;
   }
   Node* setSourceLocation(std::shared_ptr<SourceLocation> sl) {
     source_location_ = sl;
@@ -173,20 +219,12 @@ public:
   const Graph * owningGraph() const {
     return graph_;
   }
-  size_t unique() const {
-    return unique_;
-  }
-  std::string uniqueName() const {
-    if(debug_name_.size() > 0)
-      return debugName() + "_" + std::to_string(unique());
-    return std::to_string(unique());
+  size_t stage() const {
+    return stage_;
   }
   Node* setStage(size_t s) {
     stage_ = s;
     return this;
-  }
-  size_t stage() const {
-    return stage_;
   }
   // NB: This returns an ArrayRef; that means that it will
   // get invalidated if you resize inputs (e.g., using addInput)
@@ -194,64 +232,62 @@ public:
   // way to soundly cast to std::vector<const Node*> (an insane
   // implementation of std::vector could make this representationally
   // different.)
-  at::ArrayRef<Node*> inputs() {
+  at::ArrayRef<Value*> inputs() {
     return inputs_;
   }
-  at::ArrayRef<const Node*> inputs() const {
+  at::ArrayRef<const Value*> inputs() const {
     // Vectors are not convertible in const-ness of elements, but
     // raw pointers are.
     return {inputs_.data(), inputs_.size()};
   }
-  // lots of things like select/chunk have a single input, so we have a
+  // NB: This returns an ArrayRef; that means that it will
+  // get invalidated if you resize inputs (e.g., using addInput)
+  // We can't return a std::vector<Node*>& because there's no
+  // way to soundly cast to std::vector<const Node*> (an insane
+  // implementation of std::vector could make this representationally
+  // different.)
+  at::ArrayRef<Value*> outputs() {
+    return outputs_;
+  }
+  at::ArrayRef<const Value*> outputs() const {
+    // Vectors are not convertible in const-ness of elements, but
+    // raw pointers are.
+    return {outputs_.data(), outputs_.size()};
+  }
+  bool hasUses() const {
+    for(auto o : outputs()) {
+      if(o->uses().size() > 0)
+        return true;
+    }
+    return false;
+  }
+  void replaceAllUsesWith(Node * n) {
+    JIT_ASSERT(outputs().size() == n->outputs().size());
+    size_t nOutputs = outputs().size();
+    for(size_t i = 0; i < nOutputs; i++) {
+      outputs()[i]->replaceAllUsesWith(n->outputs()[i]);
+    }
+  }
+  // lots of things like chunk have a single input or singel output, so we have a
   // helper to make accessing it easier
-  Node * input() {
+  Value * input() {
     JIT_ASSERT(inputs_.size() == 1);
     return inputs_.at(0);
   }
-  const Node * input() const {
+  Value * output() {
+    JIT_ASSERT(outputs_.size() == 1);
+    return outputs_.at(0);
+  }
+  const  Value * input() const {
     JIT_ASSERT(inputs_.size() == 1);
     return inputs_.at(0);
   }
   // Access a particular input.  This is a checked index.
-  Node * input(size_t i) {
+  Value * input(size_t i) {
     return inputs_.at(i);
   }
-  const Node * input(size_t i) const {
+  const Value * input(size_t i) const {
     return inputs_.at(i);
-  }
-  // this is a function helps handle
-  // single and multi-return nodes in a consistent way
-  // it also provides a layer of abstraction if we
-  // ever need to change the way we represent multiple outputs
-  //
-  // WARNING: this returns a COPY of the outputs, so editing
-  // this vector isn't going to do anything.
-  std::vector<const Node*> outputs() const {
-    if(!hasMultipleOutputs())
-      return { this };
-    std::vector<const Node*> r;
-    r.reserve(uses().size());
-    for(auto & u : uses())
-      r.push_back(u.user);
-    return r;
-  }
-  std::vector<Node*> outputs() {
-    if(!hasMultipleOutputs())
-      return { this };
-    std::vector<Node*> r;
-    r.reserve(uses().size());
-    for(auto & u : uses())
-      r.push_back(u.user);
-    return r;
-  }
-  // select is used so frequently enought it is reasonable to have a helper
-  // to access the offset.
-  size_t offset() const {
-    return size_t(i(kOffset));
-  }
-  // TODO: make this more const correct
-  const use_list & uses() const {
-    return uses_;
   }
 
   // Graphs
@@ -274,9 +310,8 @@ public:
   // Given:   %3 = f(%1, %2)
   // Execute: %3.addInput(%4)
   // Result:  %3 = f(%1, %2, %4)
-  Node* addInput(Node * node) {
-    JIT_ASSERT(graph_ == node->graph_);
-    assertValidInput(node);
+  Value* addInput(Value * node) {
+    JIT_ASSERT(graph_ == node->owningGraph());
     node->uses_.emplace_back(this, inputs_.size());
     inputs_.push_back(node);
     return node;
@@ -288,10 +323,9 @@ public:
   // Given:   %3 = f(%1, %2)
   // Execute: %3.replaceInput(1, %4)
   // Result:  %3 = f(%1, %4)
-  Node * replaceInput(size_t i, Node * newValue) {
-    JIT_ASSERT(newValue->graph_ == graph_);
-    assertValidInput(newValue);
-    Node * old = dropInput(i);
+  Value * replaceInput(size_t i, Value * newValue) {
+    JIT_ASSERT(newValue->owningGraph() == graph_);
+    Value * old = dropInput(i);
     inputs_[i] = newValue;
     newValue->uses_.emplace_back(this, i);
     return old;
@@ -303,9 +337,9 @@ public:
   // Given:   %3 = f(%1, %2, %1)
   // Execute: %3.replaceInputWith(%1, %4)
   // Result:  %3 = f(%4, %2, %4)
-  void replaceInputWith(Node * from, Node * to) {
-    JIT_ASSERT(from->graph_ == graph_);
-    JIT_ASSERT(to->graph_ == graph_);
+  void replaceInputWith(Value * from, Value * to) {
+    JIT_ASSERT(from->owningGraph() == graph_);
+    JIT_ASSERT(to->owningGraph() == graph_);
     size_t i = 0;
     for(auto input : inputs()) {
       if(input == from)
@@ -314,23 +348,12 @@ public:
     }
   }
 
-  // Replaces all uses of this node with 'newValue'.
-  //
-  // Given:   %3 = f(%1, %2)
-  //          %4 = g(%3)
-  //          %5 = h(%3, %3)
-  // Execute: %3.replaceAllUsesWith(%6)
-  // Result:  %3 = f(%1, %2)
-  //          %4 = g(%6)
-  //          %5 = h(%6, %6)
-  void replaceAllUsesWith(Node * newValue) {
-    JIT_ASSERT(graph_ == newValue->graph_);
-    for(auto u : uses()) {
-      u.user->inputs_[u.offset] = newValue;
-      newValue->uses_.push_back(u);
-    }
-    uses_.clear();
+  Value* addOutput() {
+    outputs_.push_back(new Value(this, outputs_.size()));
+    return outputs_.back();
   }
+
+  void eraseOutput(size_t i);
 
   // Insert unattached 'this' node after 'n' in the topological order.
   // Returns this (for chaining).
@@ -359,7 +382,7 @@ public:
   //          %4 = g(%3)
   //          %5 = h(%1)
   Node* insertAfter(Node * n) {
-    JIT_ASSERT(!inGraphList() && n->inGraphList());
+    JIT_ASSERT(!inGraphList() && n->inGraphList() && n->kind() != kSelect);
     Node * next = n->next();
     n->next() = this;
     this->prev() = n;
@@ -423,11 +446,6 @@ public:
     inputs_.clear();
   }
 
-  // Replaces all uses of this node with a single Select,
-  // and appends it after this in the graph.
-  // New node inherits the type of this.
-  Node* makeMultireturn();
-
   // iterators of the node list starting at this node
   // useful for resuming a search starting at this node
   graph_node_list_iterator iterator();
@@ -437,7 +455,7 @@ public:
 
   // Remove 'this' from the instruction list and deallocate it.
   //
-  // Invariant: 'this' must not have any uses.
+  // Invariant: no outputs of 'this' may have any uses.
   //
   // Given: %2 = f(%1)
   //        %3 = g(%1)
@@ -475,21 +493,10 @@ private:
     return use_it;
   }
 
-  // Enforce the select invariant on inputs
-  void assertValidInput(const Node *node) const {
-    if (kind_ == kSelect) {
-      // You have no excuse for not having accurate type information on
-      // multi-return
-      JIT_ASSERT(node->hasType() && node->type()->kind() == TypeKind::MultiType);
-    } else {
-      JIT_ASSERT(!node->hasType() || node->type()->kind() != TypeKind::MultiType);
-    }
-  }
-
   // remove the use of input i, this sets input i to nullptr, but
   // is only used internally to Node before setting it to a new value
   // or erasing the entry from the list.
-  Node* dropInput(size_t i) {
+  Value* dropInput(size_t i) {
     JIT_ASSERT(i < inputs_.size());
     auto input_node = inputs_[i];
     auto use_it = findUseForInput(i);
@@ -529,8 +536,6 @@ protected:
   // NB: This does NOT clone stages.  You're expected to set the stage correctly
   // if you are going to preserve it.
   virtual void cloneFrom(Node * s) {
-    if (s->hasType()) setType(s->type());
-    setDebugName(s->debugName());
     setSourceLocation(s->getSourceLocation());
     copyAttributes(*s);
   }
@@ -539,14 +544,15 @@ protected:
 struct Graph {
 TH_DISALLOW_COPY_AND_ASSIGN(Graph);
 friend struct Node;
+friend struct Value;
 private:
-  param_list inputs_;
 
   // only used to keep track of allocated nodes
   // actual representation of Graph is done with
   // inputs, outputs, nodes
 
   std::unordered_set<const Node*> all_nodes;
+  std::unordered_set<const Value*> all_values;
   size_t next_unique_;
 
   size_t new_node_stage_;
@@ -556,23 +562,25 @@ private:
   // also used as the beginning/end of the circular node list to avoid
   // having corner cases where the list is empty.
   Node * const output_;
+  Node * const input_;
 
 public:
   Graph()
   : next_unique_(0)
   , new_node_stage_(0)
-  , output_(initOutput(create(kReturn))) {}
+  , output_(initOutput(create(kReturn, 0))), input_(create(kParam, 0)) {}
 
-  at::ArrayRef<Node*> inputs() {
-    return inputs_;
+  at::ArrayRef<Value*> inputs() {
+    return input_->outputs();
   }
-  at::ArrayRef<const Node*> inputs() const {
-    return {inputs_.data(), inputs_.size()};
+  at::ArrayRef<const Value*> inputs() const {
+    const auto & inputs = input_->outputs();
+    return {inputs.data(), inputs.size()};
   }
-  at::ArrayRef<Node*> outputs() {
+  at::ArrayRef<Value*> outputs() {
     return output_->inputs();
   }
-  at::ArrayRef<const Node*> outputs() const {
+  at::ArrayRef<const Value*> outputs() const {
     return static_cast<const Node*>(output_)->inputs();
   }
   graph_node_list nodes() {
@@ -615,16 +623,12 @@ public:
     return output_;
   }
 
-  Node * addInput() {
-    return addInput(create(kParam));
+  Value * addInput() {
+    return input_->addOutput();
   }
-
-  Node * addInput(Node* n) {
-    JIT_ASSERT(n->kind() == kParam);
-    inputs_.push_back(n);
-    return n;
+  void eraseInput(size_t i) {
+    input_->eraseOutput(i);
   }
-
   void advanceStage() {
     new_node_stage_++;
   }
@@ -640,46 +644,24 @@ public:
     return ResourceGuard([prev_stage, this]() { this->new_node_stage_ = prev_stage; });
   }
 
-  void eraseInput(size_t i) {
-    JIT_ASSERT(i < inputs_.size());
-    JIT_ASSERT(inputs_[i]->uses().size() == 0);
-    Node * n = inputs_[i];
-    inputs_.erase(inputs_.begin() + i);
-    freeNode(n);
-  }
-
-  size_t registerOutput(Node * n) {
+  size_t registerOutput(Value * n) {
     output_->addInput(n);
     return outputs().size() - 1;
   }
 
-  Node * create(NodeKind kind) {
+  Node * create(NodeKind kind, size_t num_outputs=1) {
     // NB: Node constructor adds node to all_nodes
-    return new Node(this, kind);
-  }
-
-  Node * create(NodeKind kind, ArrayRef<Node*> inputs) {
-    auto n = new Node(this,kind);
-    for(auto i : inputs)
-      n->addInput(i);
+    auto n = new Node(this, kind);
+    for(size_t i = 0; i < num_outputs; i++)
+      n->addOutput();
     return n;
   }
 
-  // Select nodes are used to handle multiple returns for the ops that actually return
-  // multiple values like PythonOp
-  // By convention, there is a unique select node for each output of an op
-  // so you can iterate over uses of a multi-return op to get all the select nodes.
-  // in this case
-  // number_of_outputs = op.uses().size()
-  // this will change if Tuples ever become first class.
-
-  Node * createSelect(Node * n, int64_t offset) {
-    if(!n->hasType())
-      n->setType(multiType());
-    JIT_ASSERTM(n->hasMultipleOutputs(), "trying to select from a node that doesn't return multiple outputs");
-    auto r = create(kSelect,{n});
-    r->i_(kOffset,offset);
-    return r;
+  Node * create(NodeKind kind, ArrayRef<Value*> inputs, size_t num_outputs=1) {
+    auto n = create(kind, num_outputs);
+    for(auto i : inputs)
+      n->addInput(i);
+    return n;
   }
 
   Node * createUndefined() {
@@ -693,7 +675,7 @@ public:
     return n;
   }
   Node * createFusionGroup() {
-    auto n = create(kFusionGroup);
+    auto n = create(kFusionGroup, 0);
     n->g_(kSubgraph,std::make_shared<Graph>());
     return n;
   }
@@ -701,12 +683,15 @@ public:
   Node * createCppOp(const std::shared_ptr<torch::autograd::Function> & fn);
   // clone n, making a new node in _this_ graph.
   // use node_map to translate inputs of n to inputs of the cloned node
-  Node * createClone(Node * n, std::function<Node*(Node*)> node_map) {
+  Node * createClone(Node * n, std::function<Value*(Value*)> value_map) {
     //n can be from a different graph
     Node * r = n->allocNewInstance(this);
+    for(auto o : n->outputs()) {
+      r->addOutput()->copyMetadata(o);
+    }
     r->cloneFrom(n);
     for(auto i : n->inputs()) {
-      r->addInput(node_map(i));
+      r->addInput(value_map(i));
     }
     return r;
   }
@@ -731,6 +716,8 @@ public:
   ~Graph() {
     for (const Node * n : all_nodes)
       delete n;
+    for (const Value * v : all_values)
+      delete v;
   }
 
   std::string toString() const {
@@ -747,7 +734,7 @@ private:
   Node* initOutput(Node* p) {
     p->next() = p;
     p->prev() = p;
-    p->stage_ = -1; // >= than all stages
+    p->setStage(std::numeric_limits<size_t>::max());
     return p;
   }
 
@@ -757,35 +744,63 @@ private:
     delete *it;
     all_nodes.erase(it);
   }
+  void freeValue(Value * v) {
+    auto it = all_values.find(v);
+    JIT_ASSERT(it != all_values.end());
+    all_values.erase(it);
+  }
 };
+
+inline Value::Value(Node * node_, size_t offset_)
+: node_(node_),
+  offset_(offset_),
+  unique_(node_->graph_->next_unique_++),
+  stage_(node_->graph_->new_node_stage_) {
+  node_->graph_->all_values.emplace(this);
+}
+
+inline Graph * Value::owningGraph() {
+  return node()->owningGraph();
+}
+
+inline const Graph * Value::owningGraph() const {
+  return node()->owningGraph();
+}
+
+inline void Value::replaceAllUsesWith(Value * newValue) {
+  JIT_ASSERT(owningGraph() == newValue->owningGraph());
+  for(auto u : uses()) {
+    u.user->inputs_[u.offset] = newValue;
+    newValue->uses_.push_back(u);
+  }
+  uses_.clear();
+}
 
 inline Node::Node(Graph * graph_, NodeKind kind_) :
   kind_(kind_),
   graph_(graph_),
-  unique_(graph_->next_unique_++),
-  stage_(graph_->new_node_stage_),
-  type_(getInitialType(kind_)) {
+  stage_(graph_->new_node_stage_) {
   graph_->all_nodes.emplace(this);
+}
+
+inline void Node::eraseOutput(size_t i) {
+  JIT_ASSERT(i < outputs_.size());
+  JIT_ASSERT(outputs_[i]->uses().size() == 0);
+  Value * n = outputs_[i];
+  outputs_.erase(outputs_.begin() + i);
+  owningGraph()->freeValue(n);
+  for(size_t j = i; j < outputs_.size(); j++) {
+    outputs_[j]->offset_--;
+  }
 }
 
 inline void Node::destroy() {
   JIT_ASSERT(inGraphList());
-  JIT_ASSERTM(uses().size() == 0, "attempting to erase a Node that still has uses.");
+  while(outputs().size() > 0)
+    eraseOutput(outputs().size() - 1);
   removeAllInputs();
   removeFromList();
   graph_->freeNode(this);
-}
-
-inline Node* Node::makeMultireturn() {
-  JIT_ASSERT(!hasMultipleOutputs());
-  Node *select = graph_->create(kSelect);
-  select->i_(kOffset, 0);
-  select->setType(type_);
-  replaceAllUsesWith(select);
-  select->addInput(this);
-  select->insertAfter(this);
-  setType(multiType());
-  return select;
 }
 
 // Helper macros for constructing switch statements over Node types

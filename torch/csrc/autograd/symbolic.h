@@ -8,7 +8,7 @@ namespace torch { namespace autograd {
 
 struct SymbolicContext {
   jit::Graph* graph;
-  const std::unordered_map<void*, jit::Node*>* buffer_map;
+  const std::unordered_map<void*, jit::Value*>* buffer_map;
   int batch_norm_count = 0;
 };
 
@@ -21,7 +21,7 @@ struct HasSymbolic {
   // Add some nodes to the ONNX protobuf, under the assumption that this node
   // as a whole has the represented inputs and outputs.  Raises a
   // symbolic_unconvertible exception if conversion is not supported.
-  virtual jit::node_list symbolic(SymbolicContext* ctx, jit::node_list inputs) = 0;
+  virtual jit::value_list symbolic(SymbolicContext* ctx, jit::value_list inputs) = 0;
 };
 
 }} // namespace torch::autograd

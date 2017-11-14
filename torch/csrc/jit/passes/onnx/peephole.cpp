@@ -38,7 +38,7 @@ bool fusibleExpandTo(at::IntList from, at::IntList to) {
     return false;
   }
   ssize_t from_dim_start = 0, from_dim_end = from.size() - 1;
-  while (from_dim_start < from.size() && from[from_dim_start] == 1) {
+  while (from_dim_start < (ssize_t) from.size() && from[from_dim_start] == 1) {
     from_dim_start++;
   }
   while (from_dim_end > from_dim_start && from[from_dim_end] == 1) {
@@ -72,7 +72,7 @@ void fuseBroadcast(std::shared_ptr<Graph>& graph) {
     JIT_ASSERT(!n->hasAttribute(kaxis));
 
     auto input_index = n->inputs().size() - 1;
-    auto* expanded_rhs = n->input(input_index);
+    auto* expanded_rhs = n->input(input_index)->node();
 
     // The expanded_rhs input isn't actually an expand, so no fusion available
     if (expanded_rhs->kind() != kExpand) continue;
@@ -87,12 +87,12 @@ void fuseBroadcast(std::shared_ptr<Graph>& graph) {
 
     // Not all broadcasts are supported by ONNX broadcast.
     if (!fusibleExpandTo(unexpanded_rhs->type()->expect<TensorType>()->sizes(), // from
-                         expanded_rhs->type()->expect<TensorType>()->sizes())   // to
+                         expanded_rhs->output()->type()->expect<TensorType>()->sizes())   // to
        ) continue;
 
     n->replaceInput(input_index, unexpanded_rhs);
     n->i_(kbroadcast, 1);
-    if (expanded_rhs->uses().size() == 0) {
+    if (!expanded_rhs->hasUses()) {
       expanded_rhs->destroy();
     }
   }

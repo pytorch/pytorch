@@ -1,8 +1,8 @@
-graph(%1 : Double(1)
-      %2 : Double(1)) {
-  %3 : Double(1) = add[alpha={1}](%1, %2), uses = [%4.i1];
-  %4 : Double(1) = mul(%1, %3), uses = [%5.i0];
-  %5 : Double(1) = tanh(%4), uses = [%6.i0];
-  %6 : Double(1) = sigmoid(%5), uses = [%0.i0];
-  return (%6);
+graph(%0 : Double(1)
+      %1 : Double(1)) {
+  %2 : Double(1) = add[alpha={1}](%0, %1)
+  %3 : Double(1) = mul(%0, %2)
+  %4 : Double(1) = tanh(%3)
+  %5 : Double(1) = sigmoid(%4)
+  return (%5);
 }

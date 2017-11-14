@@ -12,7 +12,6 @@
 namespace torch { namespace jit {
 
 #define TH_FORALL_TYPES(_) \
-_(MultiType) \
 _(TensorType) \
 _(HandleType)
 
@@ -97,18 +96,6 @@ private:
   std::vector<int64_t> strides_;
 };
 
-// Type of multireturn nodes. Note that it doesn't mean that they must always
-// have multiple outputs, but each output will be represented with a select node.
-struct MultiType : public Type {
-  friend struct Type;
-
-  MultiType()
-    : Type(TypeKind::MultiType) {}
-
-public:
-  static const TypeKind Kind = TypeKind::MultiType;
-};
-
 // This value represents an opaque handle to external state.
 // Operators that produce/consume values of this type agree on
 // the format.
@@ -135,11 +122,6 @@ struct HandleType : public Type {
 public:
   static const TypeKind Kind = TypeKind::HandleType;
 };
-
-inline TypePtr multiType() {
-  static TypePtr multiType = std::make_shared<MultiType>();
-  return multiType;
-}
 
 std::ostream& operator<<(std::ostream & out, const Type & t);
 
