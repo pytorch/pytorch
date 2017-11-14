@@ -26,6 +26,7 @@
 #include "caffe2/core/stats.h"
 #include "caffe2/core/transform.h"
 #include "caffe2/mkl/mkl_utils.h"
+#include "caffe2/observers/runcnt_observer.h"
 #include "caffe2/observers/time_observer.h"
 #include "caffe2/utils/cpuid.h"
 #include "caffe2/utils/string_utils.h"
@@ -395,10 +396,16 @@ void addObjectMethods(py::module& m) {
                 cast_ob, "Observer does not implement this function.");
             return cast_ob->average_time();
           })
-      .def("average_time_children", [](ObserverBase<NetBase>* ob) {
-        auto* cast_ob = dynamic_cast_if_rtti<TimeObserver<NetBase>*>(ob);
-        CAFFE_ENFORCE(cast_ob, "Observer does not implement this function.");
-        return cast_ob->average_time_children();
+      .def(
+          "average_time_children",
+          [](ObserverBase<NetBase>* ob) {
+            auto* cast_ob = dynamic_cast_if_rtti<TimeObserver<NetBase>*>(ob);
+            CAFFE_ENFORCE(
+                cast_ob, "Observer does not implement this function.");
+            return cast_ob->average_time_children();
+          })
+      .def("debug_info", [](ObserverBase<NetBase>* ob) {
+        return ob->debugInfo();
       });
 
   py::class_<Blob>(m, "Blob")
@@ -955,8 +962,14 @@ void addGlobalMethods(py::module& m) {
   }
 
         REGISTER_PYTHON_EXPOSED_OBSERVER(TimeObserver);
-
 #undef REGISTER_PYTHON_EXPOSED_OBSERVER
+
+        if (observer_type.compare("RunCountObserver") == 0) {
+          unique_ptr<RunCountNetObserver> net_ob =
+              make_unique<RunCountNetObserver>(net);
+          observer = net->AttachObserver(std::move(net_ob));
+        }
+
         CAFFE_ENFORCE(observer != nullptr);
         return py::cast(observer);
       });

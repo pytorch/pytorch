@@ -18,6 +18,7 @@
 
 #include <map>
 #include <memory>
+#include "caffe2/core/logging.h"
 
 namespace caffe2 {
 
@@ -37,6 +38,15 @@ class ObserverBase {
     return false;
   }
 
+  virtual std::unique_ptr<ObserverBase<T>> clone() {
+    LOG(WARNING) << "clone() is not implemented and nullptr will be returned.";
+    return nullptr;
+  }
+
+  virtual std::string debugInfo() {
+    return "Not implemented.";
+  }
+
   virtual ~ObserverBase() noexcept {};
 
   T* subject() const {
@@ -53,10 +63,12 @@ class ObserverBase {
 template <class T>
 class Observable {
  public:
+  virtual ~Observable(){};
   using Observer = ObserverBase<T>;
 
   /* Returns a reference to the observer after addition. */
   const Observer* AttachObserver(std::unique_ptr<Observer> observer) {
+    CAFFE_ENFORCE(observer, "Couldn't attach a null observer.");
     const Observer* weak_observer = observer.get();
     observers_[weak_observer] = std::move(observer);
     return weak_observer;
@@ -69,7 +81,7 @@ class Observable {
     return strong_observer;
   }
 
-  size_t NumObservers() {
+  virtual size_t NumObservers() {
     return observers_.size();
   }
 
