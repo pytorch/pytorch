@@ -111,6 +111,12 @@ std::shared_ptr<Function>& VariableViewImpl::get_grad_fn() {
         "this view in a differentiable operation. Re-create the view from its "
         "base Variable after the last in-place modification.");
   }
+  if (base.is_volatile() && !is_volatile) {
+    throw std::runtime_error(
+        "is_volatile is False and base.is_volatile is True. Cannot use "
+        "this view in a differentiable operation. Re-create the view from its "
+        "base Variable after the last in-place modification.");
+  }
   auto current_version = version_counter.current_version();
   if (attr_version != current_version) {
     TORCH_ASSERT(output_nr == 0);
@@ -135,9 +141,9 @@ void VariableViewImpl::rebase_history(VarFlags flags, int output_nr, std::shared
   } else {
     TORCH_ASSERTM(!base.requires_grad(), "base.requires_grad does not match view.requires_grad");
   }
-  requires_grad = flags.requires_grad;
-  is_volatile = flags.is_volatile;
-  output_nr = output_nr;
+  this->requires_grad = flags.requires_grad;
+  this->is_volatile = flags.is_volatile;
+  this->output_nr = output_nr;
   base.requires_grad() |= flags.requires_grad;
   base.is_volatile() |= flags.is_volatile;
   if (grad_fn) {

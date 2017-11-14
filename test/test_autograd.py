@@ -1600,6 +1600,16 @@ class TestAutograd(TestCase):
         self.assertTrue(view.volatile)
         self.assertTrue(base.volatile)
 
+    def test_inplace_base_volatile(self):
+        # an in-place operation on a base that makes the base volatile should
+        # trigger a consistency exception if the view is used in a differentiable
+        # op
+        x = Variable(torch.randn(2, 2), requires_grad=True)
+        base = Variable(torch.randn(2, 2))
+        view = base.narrow(0, 0, 1)
+        base.add_(Variable(torch.randn(1, 2), volatile=True))
+        self.assertRaisesRegex(RuntimeError, 'is_volatile', lambda: view + x)
+
     def test_inplace_view_gradcheck(self):
         # gradcheck modifications to views
         a = Variable(torch.randn(4, 4), requires_grad=True)
