@@ -136,25 +136,7 @@ void EliminateCommonSubexpression(std::shared_ptr<Graph>& graph) {
     } else {
       // Subexpression exists, replace the uses of node, and destroy it.
       auto existing = *subit;
-      JIT_ASSERT(existing != node);
-      const use_list & uses = node->uses();
-      const use_list & reuses= existing->uses();
-      if (node->hasMultipleOutputs()) {
-        // For Multi-Output nodes, all its uses should be Select nodes.
-        JIT_ASSERT(uses.size() == reuses.size());
-        // Replace the uses of Select nodes.
-        for (size_t i = 0; i < uses.size(); ++ i) {
-          JIT_ASSERT(uses[i].user->kind() == kSelect);
-          JIT_ASSERT(reuses[i].user->kind() == kSelect);
-          uses[i].user->replaceAllUsesWith(reuses[i].user);
-        }
-        // Destroy Select nodes.
-        while (uses.size() > 0) {
-          uses[0].user->destroy();
-        }
-      } else {
-        node->replaceAllUsesWith(existing);
-      }
+      node->replaceAllUsesWith(existing);
       // Destroy the node.
       it.destroyCurrent();
     }

@@ -1,12 +1,12 @@
-graph(%1 : Float(3, 20)
-      %2 : Float(3, 20)) {
-  %7 : Float(6, 20) = fusion_group_0(%1, %2), uses = [[%0.i0]];
-  return (%7);
+graph(%0 : Float(3, 20)
+      %1 : Float(3, 20)) {
+  %5 : Float(6, 20) = fusion_group_0(%0, %1)
+  return (%5);
 }
-with fusion_group_0 = graph(%4 : Float(3, 20)
-      %5 : Float(3, 20)) {
-  %7 : Float(3, 20) = add[alpha={1}](%4, %5), uses = [%3.i0];
-  %6 : Float(3, 20) = mul(%4, %5), uses = [%3.i1];
-  %3 : Float(6, 20) = cat[dim=0](%7, %6), uses = [%0.i0];
-  return (%3);
+with fusion_group_0 = graph(%3 : Float(3, 20)
+      %4 : Float(3, 20)) {
+  %6 : Float(3, 20) = add[alpha={1}](%3, %4)
+  %5 : Float(3, 20) = mul(%3, %4)
+  %2 : Float(6, 20) = cat[dim=0](%6, %5)
+  return (%2);
 }

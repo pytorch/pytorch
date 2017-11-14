@@ -39,15 +39,20 @@ void initPythonIRBindings(PyObject * module_) {
     .def("create",[](Graph & g, const char * str) {
       return g.create(stringToSymbol(str));
     })
-    .def("create",[](Graph & g, const char * str, const std::vector<Node*> & inputs) {
+    .def("create",[](Graph & g, const char * str, size_t noutputs) {
+      return g.create(stringToSymbol(str), noutputs);
+    })
+    .def("create",[](Graph & g, const char * str, const std::vector<Value*> & inputs) {
       return g.create(stringToSymbol(str),inputs);
     })
-    .GS(createSelect)
+    .def("create",[](Graph & g, const char * str, const std::vector<Value*> & inputs, size_t noutputs) {
+      return g.create(stringToSymbol(str),inputs, noutputs);
+    })
     .GS(createConstant)
     .GS(createFusionGroup)
     .def("createClone",[](Graph & g, Node * n, py::object fn) {
-      return g.createClone(n, [&](Node * e) {
-        return fn(e).cast<Node*>();
+      return g.createClone(n, [&](Value * e) {
+        return fn(e).cast<Value*>();
       });
     })
     .GS(appendNode)
@@ -55,6 +60,41 @@ void initPythonIRBindings(PyObject * module_) {
     .GS(lint)
     ;
     #undef GS
+
+  #define VS(name) \
+    def(#name,&Value :: name)
+  py::class_<Value,std::unique_ptr<Value, py::nodelete>>(m,"Value")
+    .def("__repr__",[](Value & n) {
+      std::stringstream ss;
+      ss << n.uniqueName() << " defined in (" << *n.node() << ")";
+      return ss.str();
+    })
+    .VS(type)
+    .VS(typeOption)
+    .VS(hasType)
+    .VS(setType)
+    .VS(inferTypeFrom)
+    // skip owningGraph because it returns a raw pointer to a otherwise
+    // std::shared_ptr stored graph object, and would cause a double free
+    .VS(debugName)
+    .VS(setDebugName)
+    .VS(unique)
+    .VS(uniqueName)
+    .VS(setStage)
+    .VS(stage)
+    .VS(offset)
+    .VS(uses)
+    .VS(isHandle)
+    .VS(replaceAllUsesWith)
+    .def("node",[](Value &v) { return v.node(); })
+    .def("setTypeAs", [](Value * node, Value * other) {
+      node->setType(other->typeOption());
+      return node;
+    })
+    .VS(copyMetadata)
+    ;
+
+  #undef VS
 
   #define NS(name) \
     def(#name,&Node :: name)
@@ -64,32 +104,19 @@ void initPythonIRBindings(PyObject * module_) {
       ss << n;
       return ss.str();
     })
+    .def("hasMultipleOutputs",[](Node&n) {
+      return n.outputs().size() > 1;
+    })
     .NS(kind)
     .NS(stage)
-    .NS(type)
-    .NS(typeOption)
-    .NS(hasMultipleOutputs)
-    .NS(hasType)
-    .NS(setType)
-    .NS(inferTypeFrom)
-    // skip owningGraph because it returns a raw pointer to a otherwise
-    // std::shared_ptr stored graph object, and would cause a double free
-    .NS(debugName)
-    .NS(setDebugName)
-    .NS(unique)
-    .NS(uniqueName)
     .NS(setStage)
-    .NS(stage)
     .def("inputs",[](Node &n) {
       return py::make_iterator(n.inputs().begin(), n.inputs().end());
     })
-    // NB: outputs on Node returns a COPY.  So we better not make_iterator
-    // on a temporary!
-    .def("outputs",[](Node &n) { return n.outputs(); })
-    .def("input",[](Node &n) { return n.input(); })
-    .def("input",[](Node &n, size_t i) { return n.input(i); })
-    .NS(offset)
-    .NS(uses)
+    .def("outputs",[](Node &n) {
+      return py::make_iterator(n.outputs().begin(), n.outputs().end());
+    })
+    .NS(output)
     .NS(addInput)
     .NS(replaceInput)
     .NS(replaceInputWith)
@@ -101,10 +128,10 @@ void initPythonIRBindings(PyObject * module_) {
     .NS(removeInput)
     .NS(removeAllInputs)
     .NS(destroy)
-    .def("setTypeAs", [](Node * node, Node * other) {
-      node->setType(other->typeOption());
-      return node;
-    })
+    .NS(hasUses)
+    .NS(eraseOutput)
+    .NS(addOutput)
+
 #define AS(name) def(#name,&Attributes<Node> :: name)
     // methods from Attributes
     .AS(copyAttributes)
@@ -177,9 +204,7 @@ void initPythonIRBindings(PyObject * module_) {
     })
     .def("kind",[](Type& t_) {
       Type * t = &t_;
-      TYPE_IF(t,MultiType)
-        return "MultiType";
-      TYPE_ELSEIF(HandleType)
+      TYPE_IF(t, HandleType)
         return "HandleType";
       TYPE_ELSEIF(TensorType)
         return "TensorType";

@@ -85,8 +85,6 @@ struct CodeImpl {
     // step 1: encode all operators and stages into registers and fill in
     // input/output lists
     for(auto node : graph->nodes()) {
-      if(node->kind() == kSelect)
-        continue;
       insertStagesTo(cur_stage, node->stage(), input_pos, output_pos);
       cur_stage = node->stage();
       stages.back().instructions.emplace_back();
@@ -173,7 +171,7 @@ struct CodeImpl {
     list.size++;
   }
 
-  int getOrAllocateRegister(Node * n, bool required = false) {
+  int getOrAllocateRegister(Value * n, bool required = false) {
     size_t u = n->unique();
     if(unique_to_reg.count(u) > 0)
       return unique_to_reg[u];

@@ -356,7 +356,7 @@ class TestJit(TestCase):
         y = InplaceFn.apply(y)
         y = RegularFn.apply(y)
         torch._C._tracer_exit((y,))
-        ops = [n for n in trace.graph().nodes() if n.kind() != 'Select']
+        ops = [n for n in trace.graph().nodes()]
         for op in ops:
             self.assertTrue(op.hasAttribute('inplace'))
         inplace_flags = [False, True, True, False]
@@ -613,17 +613,10 @@ class TestJit(TestCase):
         for node in g.inputs():
             g_to_g2[node] = g2.addInput()
         for node in g.nodes():
-            if node.kind() == "PythonOp":
-                n_ = g2.create(node.pyname(),
-                               [g_to_g2[i] for i in node.inputs()]) \
-                    .setType(node.typeOption()) \
-                    .s_("note", "from_pyop") \
-                    .i_("some_value", len(node.scalar_args()))
-                assert(n_.i("some_value") == len(node.scalar_args()))
-            else:
-                n_ = g2.createClone(node, lambda x: g_to_g2[x])
-
-            g_to_g2[node] = g2.appendNode(n_)
+            n_ = g2.createClone(node, lambda x: g_to_g2[x])
+            g2.appendNode(n_)
+            for o, no in zip(node.outputs(), n_.outputs()):
+                g_to_g2[o] = no
 
         for node in g.outputs():
             g2.registerOutput(g_to_g2[node])

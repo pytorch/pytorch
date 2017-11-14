@@ -157,7 +157,7 @@ struct Function : std::enable_shared_from_this<Function> {
   // need to be implemented :)
   virtual inline std::unique_ptr<saved_variable_list> saved_variables() { return nullptr; }
 
-  static void setUpContextEdge(jit::Node* this_node, int ctx_output_nr,
+  static void setUpContextEdge(jit::Node* this_node,
                                const variable_list& inputs, const variable_list& outputs);
 
   int num_inputs;

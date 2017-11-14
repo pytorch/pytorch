@@ -2,10 +2,9 @@
 
 namespace torch { namespace autograd {
 
-jit::node_list Add::symbolic(SymbolicContext* ctx, jit::node_list inputs) {
+jit::value_list Add::symbolic(SymbolicContext* ctx, jit::value_list inputs) {
   auto & g = ctx->graph;
-  auto node = g->create(jit::kAdd, inputs);
-  g->appendNode(node);
+  auto node = g->appendNode(g->create(jit::kAdd, inputs))->output();
   return {node};
 }
 

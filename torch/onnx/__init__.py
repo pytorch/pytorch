@@ -166,8 +166,8 @@ def _add_attribute(node, key, value):
     return getattr(node, kind + '_')(name, value)
 
 
-def _newNode(g, opname, *args, **kwargs):
-    n = g.create(opname, args)
+def _newNode(g, opname, outputs, *args, **kwargs):
+    n = g.create(opname, args, outputs)
     for k, v in sorted(kwargs.items()):
         _add_attribute(n, k, v)
     return n
@@ -208,16 +208,16 @@ def _graph_op(g, opname, *raw_args, **kwargs):
     kwargs = dict((k, v) for k, v in kwargs.items() if v is not None)
 
     def const_if_tensor(arg):
-        if isinstance(arg, torch._C.Node):
+        if isinstance(arg, torch._C.Value):
             return arg
         else:
             return g.op("Constant", value_z=arg)
 
     args = list(const_if_tensor(arg) for arg in raw_args)
-    n = g.appendNode(_newNode(g, opname, *args, **kwargs))
+    n = g.appendNode(_newNode(g, opname, outputs, *args, **kwargs))
     if outputs == 1:
-        return n
-    return tuple(g.appendNode(g.createSelect(n, i)) for i in _range(outputs))
+        return n.output()
+    return tuple(o for o in n.outputs())
 
 
 # Note [Export inplace]

@@ -63,7 +63,7 @@ struct TracingState : public std::enable_shared_from_this<TracingState> {
   // void* is an unsafe TH.  NON-OWNING, so it might get invalidated.
   // TODO: Perhaps, turn this into an owning reference.  The buffers
   // are persistent, so this won't lead to a leak.
-  std::unordered_map<void*, Node*> buffer_map;
+  std::unordered_map<void*, Value*> buffer_map;
   // A pair of (input_flags, output_flags) for each stage
   std::vector<std::pair<std::vector<VariableFlags>, std::vector<VariableFlags>>> var_flags;
   std::vector<function_list> output_edges;
@@ -85,7 +85,7 @@ struct TracingState : public std::enable_shared_from_this<TracingState> {
 struct ValueTracingStateElem {
   std::weak_ptr<TracingState> state;
   // it's only valid to use this field if !state.exired()
-  Node* trace = nullptr;
+  Value* trace = nullptr;
 
   void reset() {
     state.reset();

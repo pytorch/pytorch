@@ -661,7 +661,7 @@ static void _trace_create(PyObject* op_obj, THPFunction* bw_obj,
   // order.
 
   // See Note [getValueTrace can allocate nodes]
-  std::vector<Node*> value_traces;
+  std::vector<Value*> value_traces;
   value_traces.reserve(input_vars.size());
   for (auto& i : input_vars)
     value_traces.emplace_back(tracer::getValueTrace(tracing_state, i));
@@ -688,7 +688,7 @@ static void _trace_create(PyObject* op_obj, THPFunction* bw_obj,
     // NOTE: normally we don't add Select nodes when there's only a single
     // output, but Python nodes can't be optimized away, so we simplify the
     // code here.
-    Node* sel = graph->appendNode(graph->createSelect(this_expr, i));
+    auto sel = this_expr->addOutput();
     sel->inferTypeFrom(output.data());
     tracer::setValueTrace(tracing_state, output, sel);
   }
@@ -703,7 +703,7 @@ static void _trace_create(PyObject* op_obj, THPFunction* bw_obj,
   // subgraphs AND we don't even materialize the forward function).
   if (!passes_state_transparently) {
     tracer::nontraceableBackwardSubgraph(input_vars, output_vars);
-    Function::setUpContextEdge(this_expr, num_outputs, input_vars, output_vars);
+    Function::setUpContextEdge(this_expr, input_vars, output_vars);
   }
 }
 
