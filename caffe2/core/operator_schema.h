@@ -200,6 +200,20 @@ class OpSchema {
    * @brief Register the Cost inference function.
    */
   OpSchema& CostInferenceFunction(CostInferenceFunctionType&& function);
+
+#ifdef _MSC_VER
+  /**
+   * @brief Register the Cost inference function via a pointer.
+   */
+  inline OpSchema& CostInferenceFunction(
+      struct Cost(*func)(const OperatorDef&, const vector<TensorShape>&)) {
+    // Note: This is here in order to resolve an MSVC compiler issue: it
+    // does not automatically convert a function pointer to a std::function,
+    // and needs an explicit conversion.
+    return CostInferenceFunction(CostInferenceFunctionType(func));
+  }
+#endif // _MSC_VER
+
   bool HasCostInferenceFunction() const {
     return !!cost_inference_function_;
   }

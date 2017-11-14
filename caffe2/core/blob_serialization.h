@@ -584,7 +584,7 @@ void TensorDeserializer<Context>::Deserialize(
       for (int i = 0; i < chunkSize; ++i) {
         temp_blob.Deserialize(proto.string_data(i));
         if (i == 0) {
-          raw_ptr = tensor->template raw_mutable_data(temp_blob.meta());
+          raw_ptr = tensor->raw_mutable_data(temp_blob.meta());
         }
         temp_blob.meta().copy()(
             temp_blob.GetRaw(),
