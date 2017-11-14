@@ -1,7 +1,6 @@
 #include "caffe2/operators/negate_gradient_op.h"
 
 namespace caffe2 {
-namespace {
 
 REGISTER_CPU_OPERATOR(NegateGradient, NegateGradientOp<CPUContext>);
 OPERATOR_SCHEMA(NegateGradient)
@@ -24,5 +23,4 @@ struct GetNegateGradientGradient : public GradientMakerBase {
 
 REGISTER_GRADIENT(NegateGradient, GetNegateGradientGradient);
 
-} // namespace
 } // namespace caffe2
