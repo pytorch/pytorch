@@ -268,10 +268,6 @@ class Variable(_C._VariableBase):
         self.register_hook(retain_grad_hook)
         self.retains_grad = True
 
-    def contiguous(self):
-        self.data = self.data.contiguous()
-        return self
-
     def type(self, t):
         if t != type(self.data):
             return Type.apply(self, t)

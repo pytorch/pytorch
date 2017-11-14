@@ -33,6 +33,25 @@ static PyObject * THPVariable_detach_(PyObject* self, PyObject* args)
   END_HANDLE_TH_ERRORS
 }
 
+static Tensor dispatch_contiguous(const Tensor & self) {
+  AutoNoGIL no_gil;
+  AutoGPU auto_gpu(self);
+  return self.contiguous();
+}
+
+static PyObject * THPVariable_contiguous(PyObject* self, PyObject* args)
+{
+  HANDLE_TH_ERRORS
+  auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
+  // avoids touching the GIL or current device if self is already contiguous
+  if (self_.is_contiguous()) {
+    Py_INCREF(self);
+    return self;
+  }
+  return THPVariable_Wrap(dispatch_contiguous(self_));
+  END_HANDLE_TH_ERRORS
+}
+
 // generated methods start here
 
 ${py_methods}
@@ -50,6 +69,7 @@ PyMethodDef variable_methods[] = {
   {"__truediv__", (PyCFunction)THPVariable_div, METH_VARARGS | METH_KEYWORDS, NULL},
   {"__idiv__", (PyCFunction)THPVariable_div_, METH_VARARGS | METH_KEYWORDS, NULL},
   {"__mod__", (PyCFunction)THPVariable_remainder, METH_VARARGS | METH_KEYWORDS, NULL},
+  {"contiguous", (PyCFunction)THPVariable_contiguous, METH_NOARGS, NULL},
   {"detach", (PyCFunction)THPVariable_detach, METH_NOARGS, NULL},
   {"detach_", (PyCFunction)THPVariable_detach_, METH_NOARGS, NULL},
   ${py_method_defs}
