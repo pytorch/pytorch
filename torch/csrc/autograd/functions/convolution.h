@@ -49,7 +49,7 @@ struct ConvForward : public ForwardFunction<>, public ConvParams, public HasSymb
 
   virtual std::string name() override;
   virtual variable_list apply(const variable_list& inputs) override;
-  virtual jit::node_list symbolic(SymbolicContext* ctx, jit::node_list inputs) override;
+  virtual jit::value_list symbolic(SymbolicContext* ctx, jit::value_list inputs) override;
 
   std::vector<int64_t> output_size(at::Tensor& input, at::Tensor& weight) const;
 };

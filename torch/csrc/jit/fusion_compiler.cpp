@@ -187,7 +187,7 @@ void emitIndexingFor(std::ostream & out, const std::string & tensor, int ndim, b
   }
 }
 
-std::string nodeName(Node * n) {
+std::string valueName(Value * n) {
   return "n" + std::to_string(n->unique());
 }
 
@@ -213,7 +213,7 @@ std::string encodeRHS(Node * n) {
   TemplateEnv env;
   size_t i = 0;
   for(auto in : n->inputs()) {
-    env.s(std::to_string(i++),nodeName(in));
+    env.s(std::to_string(i++),valueName(in));
   }
   // ops like div have a / b or a / 2 with the constant having the attribute other
   // so we add other as an input if it is present
@@ -246,7 +246,7 @@ std::vector<ConcatDesc> emitCompilationUnit(std::ostream & out,
   std::stringstream body;
   std::stringstream tensorOffsets;
   std::vector<std::string> formals;
-  auto emitFormal = [&](Node * n, const TensorDesc & desc) {
+  auto emitFormal = [&](Value * n, const TensorDesc & desc) {
     std::string tensor = "t" + std::to_string(formals.size()); //can't be unique() because Param may be an output
     size_t nDim = desc.nDim();
     emitIndexingFor(tensorOffsets, tensor, nDim,  desc.lastIsContiguous());
@@ -261,19 +261,20 @@ std::vector<ConcatDesc> emitCompilationUnit(std::ostream & out,
       emitFormal(p,agraph.input_desc[i++]);
   }
   std::vector<ConcatDesc> concat_desc;
-  std::vector<Node*> flat_output_nodes;
+  std::vector<Value*> flat_output_nodes;
   {
     size_t i = 0;
     for(auto o : subgraph.outputs()) {
       auto & desc = agraph.output_desc[i++];
-      if(o->kind() != kcat) {
+      if(o->node()->kind() != kcat) {
         emitFormal(o, desc);
         concat_desc.emplace_back();
         flat_output_nodes.push_back(o);
       } else {
-        size_t nInputs = o->inputs().size();
-        concat_desc.emplace_back(desc, nInputs, o->i(kdim));
-        for(auto c : o->inputs()) {
+        auto cat = o->node();
+        size_t nInputs = cat->inputs().size();
+        concat_desc.emplace_back(desc, nInputs, cat->i(kdim));
+        for(auto c : cat->inputs()) {
           emitFormal(c, *concat_desc.back().subtensorDesc);
           flat_output_nodes.push_back(c);
         }
@@ -282,7 +283,7 @@ std::vector<ConcatDesc> emitCompilationUnit(std::ostream & out,
   }
   size_t formal_count = 0;
   for(auto p : subgraph.inputs()) {
-    env.s("node",nodeName(p));
+    env.s("node",valueName(p));
     env.d("formal",formal_count++);
     env.s("access",format("t${formal}.data[t${formal}_offset]",env));
     //TODO: actual type propagation rather than relying on auto..
@@ -291,14 +292,14 @@ std::vector<ConcatDesc> emitCompilationUnit(std::ostream & out,
   for(auto n : subgraph.nodes()) {
     if(n->kind() == kcat)
       continue; // Concat nodes by narrowing the output Tensors before the kernel runs
-    env.s("node",nodeName(n));
+    env.s("node",valueName(n->output()));
     env.s("rhs", encodeRHS(n));
     body << format("auto ${node} = ${rhs};\n",env);
   }
   for(auto o : flat_output_nodes) {
     env.d("formal",formal_count++);
     env.s("access",format("t${formal}.data[t${formal}_offset]",env));
-    env.s("node",nodeName(o));
+    env.s("node",valueName(o));
     body << format("${access} = ${node};\n",env);
   }
   env.s("tensorOffsets",tensorOffsets.str());

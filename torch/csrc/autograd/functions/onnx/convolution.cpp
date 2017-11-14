@@ -15,7 +15,7 @@ namespace torch { namespace autograd {
 // passed here; it's done as an external addition.  This is less efficient
 // but this code should be temporary anyway.
 
-jit::node_list ConvForward::symbolic(SymbolicContext* ctx, jit::node_list inputs) {
+jit::value_list ConvForward::symbolic(SymbolicContext* ctx, jit::value_list inputs) {
   auto & g = ctx->graph;
   // See Note [Caffe2ConvTranspose]
   auto n = g->create(!transposed ? jit::kConv : jit::kConvTranspose,
@@ -32,7 +32,8 @@ jit::node_list ConvForward::symbolic(SymbolicContext* ctx, jit::node_list inputs
 
   // See Note [Caffe2ConvTranspose]
   if(transposed) {
-    n->addInput(g->appendNode(g->createConstant(at::CPU(at::kFloat).zeros({weight_size[1]}))));
+    auto tn = g->appendNode(g->createConstant(at::CPU(at::kFloat).zeros({weight_size[1]})));
+    n->addInput(tn->output());
   }
 
   g->appendNode(n);
@@ -63,15 +64,15 @@ jit::node_list ConvForward::symbolic(SymbolicContext* ctx, jit::node_list inputs
 
   // ignore benchmark/cudnn_enabled
 
-  if (inputs.at(2)->kind() != jit::kUndefined) {
+  if (inputs.at(2)->node()->kind() != jit::kUndefined) {
     // TODO: Set type here based on RETURN type (not available atm)
-    auto a_n = g->create(jit::kAdd, {g->appendNode(g->createSelect(n, 0)), inputs.at(2)});
+    auto a_n = g->create(jit::kAdd, {n->output(), inputs.at(2)});
     a_n->i_(jit::kbroadcast, 1);
     a_n->i_(jit::kaxis, 1);
     g->appendNode(a_n);
-    return {a_n};
+    return {a_n->output()};
   } else {
-    return {n};
+    return {n->output()};
   }
 }
 

@@ -56,7 +56,7 @@ struct TraceEval : autograd::Eval {
     graph->advanceStage();
 
     for (auto & input : inputs) {
-      Node *input_node = graph->addInput();
+      Value *input_node = graph->addInput();
       if (!input.defined()) continue;
       JIT_ASSERT(!detail::getValueState(tracing_state, input, false));
       setValueTrace(tracing_state, input, input_node);
@@ -126,7 +126,7 @@ Node* recordTrace(std::string op, // TODO: make this a Symbol
   // haven't actually specified what the locking contract is, be conservative.
   auto state_lock = state->lock();
 
-  Node *n = graph->create(stringToSymbol(op));
+  Node *n = graph->create(stringToSymbol(op), 0 /* initial outputs */);
   auto sl = std::make_shared<SourceLocation>(getPythonInterpreterStackTrace());
   n->setSourceLocation(sl);
 
@@ -137,18 +137,15 @@ Node* recordTrace(std::string op, // TODO: make this a Symbol
   // NB: Order matters. This must append after inputs but before outputs.
   graph->appendNode(n);
 
-  auto assignOutput = [&state](const Variable & output, Node * value) {
+  auto assignOutput = [&state](const Variable & output, Value * value) {
     if (output.defined()) {
       value->inferTypeFrom(output.data());
       setValueTrace(state, output, value);
     }
   };
-  if(outputs.size() == 1) {
-    assignOutput(outputs[0],n);
-  } else {
-    for(size_t i = 0; i < outputs.size(); i++) {
-      assignOutput(outputs[i], graph->appendNode(graph->createSelect(n, i)));
-    }
+
+  for(size_t i = 0; i < outputs.size(); i++) {
+    assignOutput(outputs[i], n->addOutput());
   }
 
   // Return the n so that attributes can be added.

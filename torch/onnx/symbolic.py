@@ -32,7 +32,7 @@ def _if_scalar_type_as(self, tensor):
     actually need to insert an ONNX cast operator here; just
     fix up the scalar.
     """
-    if isinstance(self, torch._C.Node):
+    if isinstance(self, torch._C.Value):
         return self
     else:
         ty = tensor.type().scalarType().lower()
@@ -41,7 +41,7 @@ def _if_scalar_type_as(self, tensor):
 
 def _broadcast_if_scalar(x):
     """Return kwargs enabling broadcasting if 'x' is a scalar."""
-    if isinstance(x, torch._C.Node):
+    if isinstance(x, torch._C.Value):
         return {}
     else:
         return {"broadcast_i": 1}
@@ -271,3 +271,8 @@ def unfold(g, input, dimension, size, step):
 def elu(g, input, alpha, inplace=False):
     # See Note [Export inplace]
     return g.op("Elu", input, alpha_f=_scalar(alpha))
+
+
+# ignore clone operators that are inserted by PyTorch autograd
+def clone(g, input):
+    return input

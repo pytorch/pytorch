@@ -86,7 +86,7 @@ struct Eval : Function {
   std::shared_ptr<Function> simple_graph;
 
   placeholder_list placeholders;
-  jit::Node* forward_ctx_select = nullptr;
+  jit::Value* forward_ctx_select = nullptr;
   bool traceable = false;
 
 private:

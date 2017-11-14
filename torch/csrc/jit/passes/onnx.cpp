@@ -11,9 +11,7 @@ namespace torch { namespace jit {
 namespace {
 
 bool hasHandleOutput(Node *node) {
-  if(!node->hasMultipleOutputs())
-    return false;
-  Node * last_output = node->outputs().back();
+  auto last_output = node->outputs().back();
   return last_output->typeOption() && last_output->typeOption()->kind() == TypeKind::HandleType;
 }
 
@@ -34,18 +32,18 @@ void ToONNX(std::shared_ptr<tracer::TracingState>& state) {
   }
 
   auto new_graph = std::make_shared<Graph>();
-  std::unordered_map<void*, Node*> new_buffer_map;
+  std::unordered_map<void*, Value*> new_buffer_map;
 
   torch::autograd::SymbolicContext ctx;
   ctx.graph = new_graph.get();
   ctx.buffer_map = &new_buffer_map;
-  std::unordered_map<Node*, Node*> env;
+  std::unordered_map<Value*, Value*> env;
 
   py::object onnx = py::module::import("torch.onnx");
   py::object onnx_symbolic = py::module::import("torch.onnx.symbolic");
 
   // Returns a node that n maps to in the new graph
-  auto envFn = [&env](Node * n) -> Node* {
+  auto envFn = [&env](Value * n) -> Value* {
     auto it = env.find(n);
     JIT_ASSERTM(it != env.end(), "Dangling node reference");
     JIT_ASSERTM(it->second, "Unused node was subsequently used");
@@ -54,9 +52,8 @@ void ToONNX(std::shared_ptr<tracer::TracingState>& state) {
 
   // Initialize context and environment
   for (auto input : state->graph->inputs()) {
-    Node* n = ctx.graph->createClone(input, envFn);
+    auto n = ctx.graph->addInput()->copyMetadata(input);
     n->setStage(input->stage());
-    ctx.graph->addInput(n);
     env[input] = n;
   }
   for (auto kv : state->buffer_map) {
@@ -66,7 +63,7 @@ void ToONNX(std::shared_ptr<tracer::TracingState>& state) {
   // Put the new outputs in our environment map, and copy the type from the
   // input graph if they were not set by the symbolic. This is called only
   // with results of symbolic call (not for nodes that are just cloned).
-  auto setOutputs = [&](const std::string& op_name, Node * node, const node_list & outputs) {
+  auto setOutputs = [&](const std::string& op_name, Node * node, const value_list & outputs) {
     auto old_outputs = node->outputs();
     // Count all outputs, excluding Handles
     bool has_handle = hasHandleOutput(node);
@@ -88,7 +85,7 @@ void ToONNX(std::shared_ptr<tracer::TracingState>& state) {
         }
         // Copy over source location information to all nodes created by
         // the symbolic
-        outputs[i]->setSourceLocation(node->getSourceLocation());
+        outputs[i]->node()->setSourceLocation(node->getSourceLocation());
         env[old] = outputs[i];
       } else {
         // Null output means that the ONNX op doesn't have outputs corresponding
@@ -110,17 +107,11 @@ void ToONNX(std::shared_ptr<tracer::TracingState>& state) {
     }
   };
 
-  // Clone the node (possibly including its Selects) and add it to the new graph
+  // Clone the node and add it to the new graph
   auto cloneNode = [&](Node * node) {
-    auto n_ = ctx.graph->createClone(node, envFn);
-    env[node] = n_;
-    ctx.graph->appendNode(n_);
-    if (node->hasMultipleOutputs()) {
-      for (auto s : node->uses()) {
-        auto new_node = ctx.graph->createClone(s.user, envFn);
-        ctx.graph->appendNode(new_node);
-        env[s.user] = new_node;
-      }
+    auto n_ = ctx.graph->appendNode(ctx.graph->createClone(node, envFn));
+    for(size_t i = 0; i < node->outputs().size(); i++) {
+      env[node->outputs()[i]] = n_->outputs()[i];
     }
   };
 
@@ -140,11 +131,11 @@ void ToONNX(std::shared_ptr<tracer::TracingState>& state) {
       cloneNode(n);
     } else {
       // Cast the outputs back to C++ and put them in the new graph
-      node_list outputs;
-      if (py::isinstance<Node>(raw_output)) {
-        outputs = node_list{py::cast<Node*>(raw_output)};
+      value_list outputs;
+      if (py::isinstance<Value>(raw_output)) {
+        outputs = value_list{py::cast<Value*>(raw_output)};
       } else {
-        outputs = py::cast<std::vector<Node*>>(raw_output);
+        outputs = py::cast<std::vector<Value*>>(raw_output);
       }
 
       setOutputs(symbolToString(n->kind()), n, outputs);
@@ -193,11 +184,11 @@ void ToONNX(std::shared_ptr<tracer::TracingState>& state) {
     }
 
     // Cast the outputs back to C++ and put them in the new graph
-    std::vector<Node*> outputs;
-    if (py::isinstance<Node>(raw_output)) {
-      outputs = node_list{py::cast<Node*>(raw_output)};
+    std::vector<Value*> outputs;
+    if (py::isinstance<Value>(raw_output)) {
+      outputs = value_list{py::cast<Value*>(raw_output)};
     } else {
-      outputs = py::cast<std::vector<Node*>>(raw_output);
+      outputs = py::cast<std::vector<Value*>>(raw_output);
     }
 
     setOutputs(op->name(), op, outputs);
@@ -205,7 +196,7 @@ void ToONNX(std::shared_ptr<tracer::TracingState>& state) {
 
   // Finally, visit all nodes in the graph
   for (auto node : state->graph->nodes()) {
-    if (node->hasMultipleOutputs() && hasUsedHandle(node)) {
+    if (hasUsedHandle(node)) {
       // Nothing we can do here. The handle is used, so we'll need to capture the
       // original state and can't do anything with this op (we don't know what the
       // backward is).
@@ -214,10 +205,7 @@ void ToONNX(std::shared_ptr<tracer::TracingState>& state) {
     }
     // Needed so that symbolic calls create nodes with correct stages.
     auto stage_guard = new_graph->setStageTemporary(node->stage());
-    IR_IF(node, Select)
-      // Selects are translated by multi-return nodes.
-      JIT_ASSERT(env.count(value) > 0);
-    IR_ELSEIFM(CppOp)
+    IR_IFM(node, CppOp)
       if (auto fn = std::dynamic_pointer_cast<autograd::HasSymbolic>(value->fn)) {
         auto outputs = fn->symbolic(&ctx, fmap(node->inputs(), envFn));
         setOutputs(value->name(), node, outputs);

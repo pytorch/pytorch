@@ -399,20 +399,21 @@ struct CrossStageStateDesc {
   //
   // We have pointers to the caret'ed nodes.
   std::vector<Node*> stage_begins;
-  std::vector<std::vector<Node*>> stage_inputs;
-  std::vector<std::vector<Node*>> stage_outputs;
+  std::vector<std::vector<Value*>> stage_inputs;
+  std::vector<std::vector<Value*>> stage_outputs;
   // A set of all Nodes from previous stage that pass anything (both Variables
   // and handles) to current stage.
-  std::vector<std::unordered_set<Node*>> prev_stage_inputs;
+  std::vector<std::unordered_set<Value*>> prev_stage_inputs;
   // A set of all Nodes from this stage, that need their values to be captured
   // for future stages (applies to both Variables and handles).
-  std::vector<std::unordered_set<Node*>> cur_stage_captures;
+  std::vector<std::unordered_set<Value*>> cur_stage_captures;
 };
 
 // Creates a graph for a given stage and stores information necessary to construct
 // an AutogradClosure with it
 struct StageClosure {
   using node_fn_map_type = std::unordered_map<Node*, std::shared_ptr<Function>>;
+  using value_fn_map_type = std::unordered_map<Value*, std::shared_ptr<Function>>;
 
   StageClosure(TracingState *state, const CrossStageStateDesc& xstate, std::size_t stage)
     : var_flags(state->var_flags.at(stage))
@@ -421,7 +422,7 @@ struct StageClosure {
     node_fn_map_type node_map;
     // This map caches PrevStageInputs for a given node, so that you don't
     // create multiple PrevStageInput for the same node.
-    node_fn_map_type prev_stage_input_map;
+     value_fn_map_type prev_stage_input_map;
 
     // Prepare output node and compute an offset within return node inputs where
     // nodes from this stage apear.
@@ -456,14 +457,22 @@ struct StageClosure {
               end = std::next(xstate.stage_begins[stage]->reverseIterator()); it != end; ++it) {
       add_node(*it);
     }
-    for (auto node : xstate.stage_inputs[stage]) {
-      add_node(node);
+
+    value_fn_map_type input_placeholders;
+    // Prepare inputs.
+    for (Value *input : xstate.stage_inputs[stage]) {
+      JIT_ASSERT(input->stage() == stage);
+      auto fn = std::make_shared<InputPlaceholder>();
+      fn->num_inputs = 1;
+      // Initialize function fields
+      fn->is_executable = true;
+      std::vector<std::reference_wrapper<const use_list>> output_uses_refs;
+      output_uses_refs.emplace_back(input->uses());
+      fillNextFunctions(input->owningGraph(), output_uses_refs, fn, node_map, output_offset, stage);
+      roots.emplace_back(fn, 0);
+      input_placeholders[input] = fn;
     }
 
-    // Prepare inputs.
-    for (Node *input : xstate.stage_inputs[stage]) {
-      roots.emplace_back(node_map.at(input), 0);
-    }
     for (auto & entry : prev_stage_input_map) {
       roots.emplace_back(entry.second, 0);
       prev_stage_variables.emplace_back(entry.first->unique());
@@ -473,18 +482,15 @@ struct StageClosure {
 
     // Prepare a list of values / handles to capture
     for (auto captured_node : xstate.cur_stage_captures[stage]) {
-      if (captured_node->kind() == kSelect) {
-        auto & fn = node_map.at(captured_node->input());
-        if (captured_node->type()->kind() == TypeKind::TensorType) {
-          captured_variables.emplace_back(fn.get(), captured_node->i(kOffset), captured_node->unique());
-        } else {
-          JIT_ASSERT(captured_node->type()->kind() == TypeKind::HandleType);
-          captured_handles.emplace(fn.get(), captured_node->unique());
-        }
+      auto & fn = (input_placeholders.count(captured_node) > 0) ?
+        input_placeholders.at(captured_node)
+        : node_map.at(captured_node->node());
+      size_t offset = captured_node->node()->kind() == kParam ? 0 : captured_node->offset();
+      if (captured_node->type()->kind() == TypeKind::TensorType) {
+        captured_variables.emplace_back(fn.get(), offset, captured_node->unique());
       } else {
-        JIT_ASSERT(captured_node->type()->kind() == TypeKind::TensorType);
-        auto & fn = node_map.at(captured_node);
-        captured_variables.emplace_back(fn.get(), 0, captured_node->unique());
+        JIT_ASSERT(captured_node->type()->kind() == TypeKind::HandleType);
+        captured_handles.emplace(fn.get(), captured_node->unique());
       }
     }
 
@@ -526,10 +532,6 @@ struct StageClosure {
 #else
       throw std::runtime_error("don't know how to execute FusionGroups without CUDA");
 #endif
-    IR_ELSEIF(Param)
-      auto fn = std::make_shared<InputPlaceholder>();
-      fn->num_inputs = 1;
-      return fn;
     IR_ELSEIF(Constant)
       auto fn = std::make_shared<torch::autograd::WrapConstant>(value->t(kvalue));
       const_factory->next_functions.emplace_back(fn, 0);
@@ -565,17 +567,14 @@ struct StageClosure {
     auto graph = node->owningGraph();
     // Gather uses of each output
     std::vector<std::reference_wrapper<const use_list>> output_uses_refs;
-    if (node->hasMultipleOutputs()) {
-      // Each use is a single Select node corresponding to an output
-      for (auto& use : node->uses()) {
-        if (use.user->isHandle()) continue;
-        auto& select_uses = use.user->uses();
-        output_uses_refs.emplace_back(select_uses);
-      }
-    } else {
-      output_uses_refs.emplace_back(node->uses());
+    for (auto o : node->outputs()) {
+      if (o->isHandle()) continue;
+      auto& select_uses = o->uses();
+      output_uses_refs.emplace_back(select_uses);
     }
-
+    fillNextFunctions(graph, output_uses_refs, fn, node_map, output_offset, stage);
+  }
+  void fillNextFunctions(Graph * graph, std::vector<std::reference_wrapper<const use_list>> & output_uses_refs, const std::shared_ptr<Function>& fn, node_fn_map_type& node_map, int output_offset, std::size_t stage) {
     // Fill next_functions accordingly to uses of each output
     // There's some fiddling required for fixing the offset of uses for return node, so it's
     // better to keep this logic in a lambda.
@@ -605,7 +604,7 @@ struct StageClosure {
   // Possibly create PrevStageInputs for any uses of nodes from previous
   // stages, and fill in their next_functions with our use.
   void registerPrevStageInputs(Node *node, const std::shared_ptr<Function>& fn,
-                               node_fn_map_type& prev_stage_input_map) {
+                               value_fn_map_type & prev_stage_input_map) {
     const auto& inputs = node->inputs();
     for (std::size_t i = 0; i < inputs.size(); ++i) {
       auto input_node = inputs[i];

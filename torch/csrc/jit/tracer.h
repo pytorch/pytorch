@@ -112,10 +112,10 @@ inline std::shared_ptr<TracingState> getTracingState(const variable_list& vars) 
 // Having finished adding a new 'node' to the graph IR owned by TracingState 'state',
 // 'setValueTrace' associates this node with an output variable, so that further operations
 // involving this variable know which node in the IR to reference.
-inline void setValueTrace(const std::shared_ptr<TracingState>& state, const Variable& var, Node *node) {
+inline void setValueTrace(const std::shared_ptr<TracingState>& state, const Variable& var, Value *value) {
   JIT_ASSERT(var.defined());
   auto vts = detail::getValueState(state, var);
-  vts->trace = node;
+  vts->trace = value;
 }
 
 // Given a variable 'var', return the 'node' which represents the instruction
@@ -132,10 +132,10 @@ inline void setValueTrace(const std::shared_ptr<TracingState>& state, const Vari
 // update on, but subsequently ignores it because the alpha scaling factor is zero.
 // This is one of the cases where a Variable can be created inside of a trace, and
 // if we treat it as a constant, everything will work out.
-inline Node* getValueTrace(const std::shared_ptr<TracingState>& state, const Variable& var, bool mustExist = false) {
+inline Value* getValueTrace(const std::shared_ptr<TracingState>& state, const Variable& var, bool mustExist = false) {
   if (!var.defined()) {
     Node *n = state->graph->createUndefined();
-    return state->graph->appendNode(n);
+    return state->graph->appendNode(n)->output();
   }
   if (mustExist) {
     auto vts = detail::getValueState(state, var, false);
@@ -146,13 +146,13 @@ inline Node* getValueTrace(const std::shared_ptr<TracingState>& state, const Var
   auto vts = detail::getValueState(state, var, true);
   if (vts->trace) return vts->trace;
 
-  Node *constant = state->graph->appendNode(state->graph->createConstant(var.data()));
+  Value *constant = state->graph->appendNode(state->graph->createConstant(var.data()))->output();
   constant->inferTypeFrom(var.data());
   setValueTrace(state, var, constant);
   return constant;
 }
 
-inline Node* getBufferTrace(const std::unordered_map<void*, Node*>& buffer_map, at::Tensor buf) {
+inline Value* getBufferTrace(const std::unordered_map<void*, Value*>& buffer_map, at::Tensor buf) {
   auto it = buffer_map.find(buf.unsafeGetTH(false));
   if (it == buffer_map.end()) {
     throw std::runtime_error("untraced buffer");
@@ -184,7 +184,7 @@ inline std::shared_ptr<TracingState> enter(std::vector<TraceInput>&& trace_input
     if (trace_input.variable.defined()) {
       JIT_ASSERT(!trace_input.buffer.defined());
       auto& input = trace_input.variable;
-      Node *input_node = state->graph->addInput();
+      auto input_node = state->graph->addInput();
       setValueTrace(state, input, input_node);
       input_node->inferTypeFrom(input.data());
       inputs.push_back(input);
@@ -192,7 +192,7 @@ inline std::shared_ptr<TracingState> enter(std::vector<TraceInput>&& trace_input
       JIT_ASSERT(trace_input.buffer.defined());
       // NON-owning reference.  Pointers may be dead!
       auto& buffer = trace_input.buffer;
-      Node* n = state->graph->addInput();
+      auto n = state->graph->addInput();
       state->buffer_map.insert({buffer.unsafeGetTH(false), n});
       n->inferTypeFrom(buffer);
     }
