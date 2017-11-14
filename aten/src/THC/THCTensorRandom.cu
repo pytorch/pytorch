@@ -81,11 +81,21 @@ __host__ void THCRandom_setRNGState(THCState* state, THByteTensor *rng_state)
 // eps near 0, 1-eps will round to 1.
 template <typename T>
 __device__ inline T reverse_bounds(T value) {
-  if (value == ScalarConvert<int, T>::to(1)) {
+  if (THCNumerics<T>::eq(value, ScalarConvert<int, T>::to(1))) {
     return ScalarConvert<int, T>::to(0);
   }
   return value;
 }
+
+
+#ifdef CUDA_HALF_TENSOR
+__device__ inline half half_uniform_scale_and_shift(float x, double a, double b) {
+  half width = ScalarConvert<double, half>::to(b - a);
+  half start = ScalarConvert<double, half>::to(a);
+  half scaled = THCNumerics<half>::mul(reverse_bounds(ScalarConvert<float, half>::to(x)), width);
+  return THCNumerics<half>::add(scaled, start);
+}
+#endif
 
 #define GENERATE_KERNEL1(NAME, T, ARG1, CURAND_T, CURAND_FUNC, TRANSFORM)      \
 __global__ void NAME(curandStateMtgp32 *state, int size, T *result, ARG1)      \
@@ -154,7 +164,7 @@ GENERATE_KERNEL2(generate_cauchy, float, double median, double sigma, float, cur
 GENERATE_KERNEL2(generate_cauchy, double, double median, double sigma, double, curand_uniform_double, (double)(median + sigma * tan(M_PI*(x-0.5))))
 
 #ifdef CUDA_HALF_TENSOR
-GENERATE_KERNEL2(generate_uniform, half, double a, double b, float, curand_uniform, (__float2half_rd(reverse_bounds(x) * (b-a) + a)))
+GENERATE_KERNEL2(generate_uniform, half, double a, double b, float, curand_uniform, (half_uniform_scale_and_shift(x, a, b)))
 GENERATE_KERNEL2(generate_normal, half, double mean, double stdv, float, curand_normal, (ScalarConvert<float, half>::to((x * stdv) + mean)))
 GENERATE_KERNEL1(generate_exponential, half, double lambda, float, curand_uniform, (ScalarConvert<float, half>::to((float)(-1. / lambda * log(x)))))
 GENERATE_KERNEL2(generate_cauchy, half, double median, double sigma, float, curand_uniform, (ScalarConvert<float, half>::to((float)(median + sigma * tan(M_PI*(x-0.5))))))
