@@ -4137,14 +4137,15 @@ class TestTorch(TestCase):
 
     def test_serialization_offset(self):
         a = torch.randn(5, 5)
+        i = 41
         with tempfile.TemporaryFile() as f:
-            i = 41
             pickle.dump(i, f)
             torch.save(a, f)
             f.seek(0)
             j = pickle.load(f)
             b = torch.load(f)
             self.assertTrue(torch.equal(a, b))
+            self.assertEqual(i, j)
 
     def test_half_tensor(self):
         x = torch.randn(5, 5).float()
