@@ -227,18 +227,15 @@ class TracedModule(Module):
         self.nderivs = nderivs
 
     def forward(self, *args):
-        in_vars, _, _ = _flatten((args, list(self.parameters())))
-        return _get_trace(self.inner, args, in_vars, self.nderivs)
-
-
-# Functional version that assumes that all parameters are explicitly
-# specified
-def _get_trace(f, args, in_vars, nderivs=0):
-    trace = torch._C._tracer_enter(in_vars, nderivs)
-    out = f(*args)
-    out_vars, _, _ = _flatten(out)
-    torch._C._tracer_exit(out_vars)
-    return trace, out
+        in_vars, _, _ = _flatten(args)
+        # NOTE: use full state, because we need it for BatchNorm export
+        # This differs from the compiler path, which doesn't support it at the moment.
+        module_state = list(self.state_dict(keep_vars=True).values())
+        trace = torch._C._tracer_enter(in_vars + module_state, self.nderivs)
+        out = self.inner(*args)
+        out_vars, _, _ = _flatten(out)
+        torch._C._tracer_exit(out_vars)
+        return trace, out
 
 
 def _clone_inputs(args):
