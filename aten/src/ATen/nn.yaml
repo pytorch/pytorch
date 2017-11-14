@@ -58,6 +58,8 @@
 
 - name: log_softmax(Tensor input, int64_t dim)
   cname: LogSoftMax
+  wrap_dim:
+    dim: input
 
 - name: prelu(Tensor input, Tensor weight)
   cname: PReLU
@@ -68,6 +70,8 @@
 
 - name: softmax(Tensor input, int64_t dim)
   cname: SoftMax
+  wrap_dim:
+    dim: input
 
 - name: softplus(Tensor input, Scalar beta=1, Scalar threshold=20)
   cname: SoftPlus
