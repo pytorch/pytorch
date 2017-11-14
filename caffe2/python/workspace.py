@@ -50,7 +50,6 @@ SwitchWorkspace = C.switch_workspace
 RootFolder = C.root_folder
 Workspaces = C.workspaces
 BenchmarkNet = C.benchmark_net
-Predictor = C.Predictor
 GetStats = C.get_stats
 
 operator_tracebacks = defaultdict(dict)
@@ -167,6 +166,10 @@ def CreateNet(net, overwrite=False, input_blobs=None):
         GetNetName(net),
         StringifyProto(net), overwrite,
     )
+
+
+def Predictor(init_net, predict_net):
+    return C.Predictor(StringifyProto(init_net), StringifyProto(predict_net))
 
 
 def GetOperatorCost(operator, blobs):
