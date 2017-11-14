@@ -117,6 +117,23 @@ def dict_representer(dumper, data):
     return dumper.represent_dict(data.items())
 
 
+def postprocess_output_declarations(output_declarations):
+    # ensure each return has a name associated with it
+    for decl in output_declarations:
+        has_named_ret = False
+        for n, ret in enumerate(decl['returns']):
+            if 'name' not in ret:
+                assert not has_named_ret
+                if len(decl['returns']) == 1:
+                    ret['name'] = 'result'
+                else:
+                    ret['name'] = 'result' + str(n)
+            else:
+                has_named_ret = True
+
+    return output_declarations
+
+
 def format_yaml(data):
     if options.output_dependencies:
         # yaml formatting is slow so don't do it if we will ditch it.
@@ -252,6 +269,7 @@ for fname, env in generators.items():
 # and modify the declarations to include any information that will all_backends
 # be used by function_wrapper.create_derived
 output_declarations = function_wrapper.create_generic(top_env, declarations)
+output_declarations = postprocess_output_declarations(output_declarations)
 write("Declarations.yaml", format_yaml(output_declarations))
 
 # populated by generate_storage_type_and_tensor

@@ -933,18 +933,6 @@ def load_aten_declarations(path):
 
         declaration['base_name'] = declaration['name']
 
-        # if the return value is missing a name, call it 'output'
-        has_named_ret = False
-        for n, ret in enumerate(declaration['returns']):
-            if 'name' not in ret:
-                assert not has_named_ret
-                if len(declaration['returns']) == 1:
-                    ret['name'] = 'result'
-                else:
-                    ret['name'] = 'result' + str(n)
-            else:
-                has_named_ret = True
-
         # Compute the Python function prototype for argument parsing
         typed_args = []
         positional = True
