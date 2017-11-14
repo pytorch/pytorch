@@ -269,6 +269,10 @@ bool almostEqual(const at::Tensor & a, const at::Tensor & b) {
   return checkRtol(a - b,{a, b});
 }
 
+bool exactlyEqual(const at::Tensor & a, const at::Tensor & b) {
+  return (a - b).abs().max().toCFloat() == 0.f;
+}
+
 std::pair<at::Tensor, at::Tensor>
 lstm(at::Tensor input,
       at::Tensor hx,
@@ -405,8 +409,8 @@ void interpTest() {
     std::tie(hx, cx) = lstm(input[0], hx, cx, w_ih, w_hh);
 
     //std::cout << almostEqual(outputs[0],hx) << "\n";
-    JIT_ASSERT(almostEqual(outputs[0],hx));
-    JIT_ASSERT(almostEqual(outputs[1],cx));
+    JIT_ASSERT(exactlyEqual(outputs[0],hx));
+    JIT_ASSERT(exactlyEqual(outputs[1],cx));
 }
 
 void interpStageTest() {
@@ -438,8 +442,8 @@ void interpStageTest() {
     std::tie(hx, cx) = lstm(input[0], hx, cx1, w_ih, w_hh);
 
     //std::cout << almostEqual(outputs[0],hx) << "\n";
-    JIT_ASSERT(almostEqual(outputs[0],hx));
-    JIT_ASSERT(almostEqual(outputs[1],cx));
+    JIT_ASSERT(exactlyEqual(outputs[0],hx));
+    JIT_ASSERT(exactlyEqual(outputs[1],cx));
 }
 
 void runJITCPPTests() {
