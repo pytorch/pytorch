@@ -95,6 +95,7 @@ def get_numerical_jacobian(fn, input, target, eps=1e-3):
 
 
 def get_analytical_jacobian(input, output):
+    input = contiguous(input)
     jacobian = make_jacobian(input, output.numel())
     jacobian_reentrant = make_jacobian(input, output.numel())
     grad_output = output.data.clone().zero_()
