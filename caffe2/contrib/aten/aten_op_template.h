@@ -81,8 +81,19 @@ private:
   at::Type & typeFor(const Tensor<Context> & ten) {
     return at::getType(backend(), atScalarTypeFor(ten.meta()));
   }
-  at::Tensor tensorWrapping(Tensor<Context> & ten) {
+  at::Tensor tensorWrapping(const Tensor<Context>& ten_) {
+    auto& ten = const_cast<Tensor<Context>&>(ten_);
     return typeFor(ten).tensorFromBlob(ten.raw_mutable_data(), ten.dims());
+  }
+  at::Tensor loadInput(size_t i) {
+    return tensorWrapping(Input(i));
+  }
+  std::vector<at::Tensor> loadInputsAtOffset(size_t s) {
+    std::vector<at::Tensor> results;
+    for (size_t i = s; i < InputSize(); i++) {
+      results.push_back(loadInput(i));
+    }
+    return results;
   }
   at::ScalarType atScalarTypeFor(const TypeMeta & meta) {
     #define DEFINE_IF(ctype,aten_name,_) \
@@ -99,6 +110,13 @@ private:
     std::vector<int64_t> dims(at_sizes.begin(),at_sizes.end());
     dst->Resize(dims);
     dst->ShareExternalPointer(src.data_ptr(), typeMetaFor(src), 0, deleterFor(src));
+  }
+  void assignListStartingAt(
+      size_t offset,
+      const std::vector<at::Tensor>& tensors) {
+    for (size_t i = 0; i < tensors.size(); i++) {
+      assignTo(Output(offset + i), tensors[i]);
+    }
   }
 
   // the AT_FORALL_SCALAR_TYPES macro just gives a 'i' or 'd' argument
@@ -139,7 +157,7 @@ private:
     // and inputs of this operator_def, and look up the implementation key
     // for this variant
     std::stringstream descriptor;
-    descriptor << op << "-" << InputSize();
+    descriptor << op;
     std::vector<std::string> attrs;
     for(size_t i = 0; i < operator_def.arg_size(); i++) {
       auto & attr = operator_def.arg(i);
@@ -150,14 +168,20 @@ private:
     std::sort(attrs.begin(), attrs.end());
     for(auto & a : attrs)
       descriptor << "-" << a;
-    std::string descriptor_s = descriptor.str();
-    if(op_to_key.count(descriptor_s) == 0) {
-      std::stringstream ss;
-      ss << "Attempting to run unknown ATen operator configuration: "
-         << descriptor_s;
-      CAFFE_THROW(ss.str());
+
+    std::string descriptor_sized =
+        descriptor.str() + "-" + caffe2::to_string(InputSize());
+    std::string descriptor_var_args = descriptor.str() + "-*";
+    if (op_to_key.count(descriptor_sized) > 0) {
+      return op_to_key[descriptor_sized];
     }
-    return op_to_key.at(descriptor_s);
+    if (op_to_key.count(descriptor_var_args) > 0) {
+      return op_to_key[descriptor_var_args];
+    }
+    std::stringstream ss;
+    ss << "Attempting to run unknown ATen operator configuration: "
+       << descriptor_sized;
+    CAFFE_THROW(ss.str());
   }
   at::Scalar readScalarAttribute(const std::string & name) {
     if(OperatorBase::HasSingleArgumentOfType<int64_t>(name)) {
@@ -169,12 +193,23 @@ private:
   }
   template<typename T>
   T readAttribute(const std::string & name) {
-    CAFFE_ENFORCE(OperatorBase::HasSingleArgumentOfType<int64_t>(name));
+    CAFFE_ENFORCE(OperatorBase::HasSingleArgumentOfType<T>(name));
     return OperatorBase::GetSingleArgument<T>(name, 0);
   }
   std::vector<int64_t> readIntList(const std::string & name) {
     CAFFE_ENFORCE(OperatorBase::HasArgument(name));
     return OperatorBase::GetRepeatedArgument<int64_t>(name, {});
+  }
+  template <int N>
+  std::array<bool, N> readBoolMask(const std::string& name) {
+    CAFFE_ENFORCE(OperatorBase::HasArgument(name));
+    std::vector<int64_t> ints =
+        OperatorBase::GetRepeatedArgument<int64_t>(name, {});
+    std::array<bool, N> result;
+    for (size_t i = 0; i < N; ++i) {
+      result[i] = ints.at(i);
+    }
+    return result;
   }
   at::ScalarType stringToScalarType(const std::string & name) {
     #define DEFINE_IF(type,aten) \
