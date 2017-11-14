@@ -2,6 +2,7 @@ CMAKE_MINIMUM_REQUIRED(VERSION 2.8 FATAL_ERROR)
 CMAKE_POLICY(VERSION 2.8)
 
 SET(CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake ${CMAKE_MODULE_PATH})
+SET(CMAKE_LIBRARY_PATH /usr/lib/x86_64-linux-gnu/ ${CMAKE_LIBRARY_PATH})
 
 SET(CUDA_ATTACH_VS_BUILD_RULE_TO_CUDA_FILE OFF)
 OPTION(NDEBUG "disable asserts (WARNING: this may result in invalid memory accesses)")
@@ -97,6 +98,7 @@ IF ($ENV{TH_BINARY_BUILD})
   SET(CMAKE_CXX_FLAGS "-static-libstdc++ ${CMAKE_CXX_FLAGS}")
   IF (UNIX AND NOT APPLE)
     # hiding statically linked library symbols, this flag is not available for the linker under MACOSX
+    set (CMAKE_SHARED_LINKER_FLAGS "-Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/../../../tools/pytorch.version")
     SET(CMAKE_CXX_FLAGS "-Wl,--exclude-libs,libstdc++.a ${CMAKE_CXX_FLAGS}")
   ENDIF(UNIX AND NOT APPLE)
 ENDIF()

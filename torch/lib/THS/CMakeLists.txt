@@ -42,6 +42,13 @@ ELSE ()
   SET(CMAKE_C_STANDARD 99)
 ENDIF ()
 
+IF ($ENV{TH_BINARY_BUILD})
+  MESSAGE(STATUS "TH_BINARY_BUILD detected. Enabling special linkage.")
+  IF (UNIX AND NOT APPLE)
+    set (CMAKE_SHARED_LINKER_FLAGS "-Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/../../../tools/pytorch.version")
+  ENDIF(UNIX AND NOT APPLE)
+ENDIF ($ENV{TH_BINARY_BUILD})
+
 SET(hdr
   THS.h
   THSTensor.h

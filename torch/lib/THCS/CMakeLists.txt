@@ -49,6 +49,7 @@ IF ($ENV{TH_BINARY_BUILD})
   IF (UNIX AND NOT APPLE)
     # hiding statically linked library symbols, this flag is not available for the linker under MACOSX
     SET(CMAKE_CXX_FLAGS "-Wl,--exclude-libs,libstdc++.a ${CMAKE_CXX_FLAGS}")
+    set (CMAKE_SHARED_LINKER_FLAGS "-Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/../../../tools/pytorch.version")
   ENDIF(UNIX AND NOT APPLE)
 ENDIF()
 
