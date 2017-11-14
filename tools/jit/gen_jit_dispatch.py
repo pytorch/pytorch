@@ -33,13 +33,13 @@ auto ${name} = ${type_cast}(node->${method}(stringToSymbol("${name}")));\
 """)
 
 CALL_NAMESPACE = CodeTemplate("at::${name}(${args})")
-CALL_METHOD = CodeTemplate("vars[0].${name}(${args})")
+CALL_METHOD = CodeTemplate("inputs[0].${name}(${args})")
 
 CONSTRUCTOR = CodeTemplate("""\
 {"${descriptor}", [](Node *node) {
   ${assignments}
-  return TensorOp([=](const variable_list& vars) -> variable_list {
-    return pack_list(${call});
+  return TensorOp([=](const std::vector<Tensor> & inputs, std::vector<Tensor> & outputs) {
+    pack_list(outputs, ${call});
   }, "${name}", ${num_inputs});
 }},
 """)
@@ -85,16 +85,16 @@ def gen_jit_dispatch(declarations, out):
         if 'namespace' in decl['method_of']:
             if any(arg['simple_type'] == 'TensorList' for arg in arguments):
                 assert sum(map(is_tensor_arg, arguments)) == 1
-                args = ['as_tensor_list(vars)' if is_tensor_arg(arg) else arg['name']
+                args = ['inputs' if is_tensor_arg(arg) else arg['name']
                         for arg in arguments]
             else:
                 tensor_id = iter(count(start=0))
-                args = ['vars[{}]'.format(next(tensor_id)) if is_tensor_arg(arg) else arg['name']
+                args = ['inputs[{}]'.format(next(tensor_id)) if is_tensor_arg(arg) else arg['name']
                         for arg in arguments]
             call = CALL_NAMESPACE.substitute(name=name, args=args)
         else:
             tensor_id = iter(count(start=1))
-            args = ['vars[{}]'.format(next(tensor_id)) if is_tensor_arg(arg) else arg['name']
+            args = ['inputs[{}]'.format(next(tensor_id)) if is_tensor_arg(arg) else arg['name']
                     for arg in arguments[1:]]
             call = CALL_METHOD.substitute(name=name, args=args)
 

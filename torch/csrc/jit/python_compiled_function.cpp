@@ -9,6 +9,8 @@
 #include "torch/csrc/jit/passes/graph_fuser.h"
 #include "torch/csrc/jit/passes/inplace_check.h"
 #include "torch/csrc/jit/python_arg_flatten.h"
+#include "torch/csrc/jit/interpreter.h"
+#include "torch/csrc/jit/interpreter_autograd_function.h"
 
 #include <algorithm>
 #include <functional>
@@ -54,7 +56,7 @@ struct CompiledFunction {
       , is_volatile_(is_volatile) {}
 
     bool ready() {
-      if (closure_) return true;
+      if (is_ready_) return true;
 
       // Remove expired traces
       traces_.erase(std::remove_if(traces_.begin(),
@@ -83,20 +85,30 @@ struct CompiledFunction {
         PeepholeOptimize(complete_trace->graph);
         FuseGraph(complete_trace->graph);
       }
-
-      closure_ = std::make_shared<AutogradClosureFactory>(complete_trace.get());
+      try {
+        code_ = jit::Code(complete_trace->graph);
+      } catch(const jit::NotImplementedException & ex) {
+        closure_ = std::make_shared<AutogradClosureFactory>(complete_trace.get());
+      }
+      is_ready_ = true;
       return true;
     }
 
     variable_list run(const variable_list& in_vars) {
-      JIT_ASSERT(closure_);
+      JIT_ASSERT(is_ready_);
       AutoNoGIL _gil_guard;
-      auto fn = closure_->construct();
-      return (*fn)(in_vars);
+      if(closure_) {
+        auto fn = closure_->construct();
+        return (*fn)(in_vars);
+      } else {
+        InterpreterAutogradFunction interp(code_);
+        interp.willReleaseVariables(); // forward pass is never reused, so it is safe to release anything it can
+        return interp.apply(in_vars);
+      }
     }
 
     PyObject* add_trace(PyObject *args, const variable_list& in_vars) {
-      JIT_ASSERT(!closure_);
+      JIT_ASSERT(!is_ready_);
       // Start tracing
       auto trace = tracer::enter(fmap<TraceInput>(in_vars), is_volatile_ ? 1 : (fn_.nderivs_ + 1));
 
@@ -120,7 +132,9 @@ struct CompiledFunction {
 
     CompiledFunction& fn_;
     std::string out_desc_;
+    bool is_ready_ = false;
     std::shared_ptr<AutogradClosureFactory> closure_;
+    jit::Code code_;
     std::vector<std::shared_ptr<TracingState>> traces_;
     bool is_volatile_;
   };

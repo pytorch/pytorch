@@ -9,6 +9,7 @@
 #include "torch/csrc/jit/attributes.h"
 #include "torch/csrc/jit/interned_strings.h"
 #include <vector>
+#include "torch/csrc/jit/interpreter.h"
 
 namespace torch { namespace jit {
 
@@ -246,7 +247,208 @@ void internedStringsTests () {
 }
 
 
+
+at::Tensor t_use(at::Tensor x) {
+  return x;
+}
+at::Tensor t_def(at::Tensor x) {
+  return x.t();
+}
+
+// given the difference of output vs expected tensor, check whether the
+// difference is within a relative tolerance range. This is a standard way of
+// matching tensor values upto certain precision
+bool checkRtol(const at::Tensor& diff, const std::vector<at::Tensor> inputs) {
+  double maxValue = 0.0;
+  for (auto& tensor : inputs) {
+    maxValue = fmax(tensor.abs().max().toCFloat(), maxValue);
+  }
+  return diff.abs().max().toCFloat() < 2e-6 * maxValue;
+}
+bool almostEqual(const at::Tensor & a, const at::Tensor & b) {
+  return checkRtol(a - b,{a, b});
+}
+
+bool exactlyEqual(const at::Tensor & a, const at::Tensor & b) {
+  return (a - b).abs().max().toCFloat() == 0.f;
+}
+
+std::pair<at::Tensor, at::Tensor>
+lstm(at::Tensor input,
+      at::Tensor hx,
+      at::Tensor cx,
+      at::Tensor w_ih,
+      at::Tensor w_hh) {
+  auto gates = input.mm(t_use(w_ih)) + hx.mm(t_use(w_hh));
+
+  auto chunked_gates = gates.chunk(4, 1);
+  auto ingate     = chunked_gates[0];
+  auto forgetgate = chunked_gates[1];
+  auto cellgate = chunked_gates[2];
+  auto outgate    = chunked_gates[3];
+
+  ingate = ingate.sigmoid();
+  outgate = outgate.sigmoid();
+  cellgate = cellgate.tanh();
+  forgetgate = forgetgate.sigmoid();
+
+  auto cy = (forgetgate * cx) + (ingate * cellgate);
+  auto hy = outgate * cy.tanh();
+
+  return {hy, cy};
+}
+
+Symbol sym(const char * str) {
+  return stringToSymbol(str);
+}
+
+Node * node(Graph& graph, const char * n, ArrayRef<Node*> inputs) {
+  return graph.appendNode(graph.create(sym(n),inputs));
+}
+
+Node * add(Graph & g, Node * a, Node * b) {
+  auto r = node(g, "add", {a,b});
+  r->t_(sym("alpha"), at::Scalar(1).toTensor());
+  return r;
+}
+
+std::tuple<Node*, Node*> build_lstm_body(
+  Graph & g,
+  Node * input,
+  Node * hx,
+  Node * cx,
+  Node * w_ih,
+  Node * w_hh) {
+    auto gates = add(g, node(g,"mm",{ input, w_ih }), node(g, "mm", {hx, w_hh}));
+    auto chunked_gates = node(g, "chunk", { gates });
+    chunked_gates->i_(sym("chunks"), 4);
+    chunked_gates->i_(sym("dim"), 1);
+    auto ingate = g.appendNode(g.createSelect(chunked_gates, 0));
+    auto forgetgate = g.appendNode(g.createSelect(chunked_gates, 1));
+    auto cellgate = g.appendNode(g.createSelect(chunked_gates, 2));
+    auto outgate = g.appendNode(g.createSelect(chunked_gates, 3));
+    ingate = node(g,"sigmoid",{ingate});
+    outgate = node(g,"sigmoid",{outgate});
+    cellgate = node(g,"tanh",{cellgate});
+    forgetgate = node(g,"sigmoid",{forgetgate});
+
+    auto cy = add(g, node(g,"mul", {forgetgate, cx}) , node(g, "mul", {ingate, cellgate}));
+    auto hy = node(g, "mul", {outgate, node(g, "tanh", {cy})});
+
+    return std::make_tuple(hy,cy);
+}
+
+std::shared_ptr<Graph> build_lstm() {
+  auto r = std::make_shared<Graph>();
+  auto & g = *r;
+  Node * input = g.addInput();
+  Node * hx = g.addInput();
+  Node * cx = g.addInput();
+  Node * w_ih = g.addInput();
+  Node * w_hh = g.addInput();
+
+  Node * hy;
+  Node * cy;
+  std::tie(hy,cy) = build_lstm_body(g, input, hx, cx, w_ih, w_hh);
+
+  g.registerOutput(hy);
+  g.registerOutput(cy);
+  g.lint();
+
+  return r;
+}
+
+std::shared_ptr<Graph> build_lstm_stages() {
+  auto r = std::make_shared<Graph>();
+  auto & g = *r;
+  Node * input = g.addInput();
+  Node * hx = g.addInput();
+  Node * cx = g.addInput();
+  Node * w_ih = g.addInput();
+  Node * w_hh = g.addInput();
+
+  Node * hy;
+  Node * cy;
+  std::tie(hy,cy) = build_lstm_body(g, input, hx, cx, w_ih, w_hh);
+
+  // use some stuff from the previous stage as well
+  // as a new input
+  g.advanceStage();
+  hx = hy;
+  g.registerOutput(cy);
+  cx = g.addInput();
+
+  std::tie(hy,cy) = build_lstm_body(g, input, hx, cx, w_ih, w_hh);
+
+  g.registerOutput(hy);
+  g.registerOutput(cy);
+  g.lint();
+
+  return r;
+}
+
+
+void interpTest() {
+    constexpr int batch_size = 4;
+    constexpr int input_size = 256;
+    constexpr int seq_len = 32;
+
+    int hidden_size = 2*input_size;
+
+    auto input = at::CUDA(at::kFloat).randn({seq_len, batch_size, input_size});
+    auto hx    = at::CUDA(at::kFloat).randn({batch_size, hidden_size});
+    auto cx    = at::CUDA(at::kFloat).randn({batch_size, hidden_size});
+    auto w_ih  = t_def(at::CUDA(at::kFloat).randn({4 * hidden_size, input_size}));
+    auto w_hh  = t_def(at::CUDA(at::kFloat).randn({4 * hidden_size, hidden_size}));
+
+    auto lstm_g = build_lstm();
+    Code  lstm_function(lstm_g);
+    std::vector<at::Tensor> outputs;
+    InterpreterState lstm_interp(lstm_function);
+    lstm_interp.runOneStage({input[0], hx, cx, w_ih, w_hh}, outputs);
+    std::tie(hx, cx) = lstm(input[0], hx, cx, w_ih, w_hh);
+
+    //std::cout << almostEqual(outputs[0],hx) << "\n";
+    JIT_ASSERT(exactlyEqual(outputs[0],hx));
+    JIT_ASSERT(exactlyEqual(outputs[1],cx));
+}
+
+void interpStageTest() {
+    constexpr int batch_size = 4;
+    constexpr int input_size = 256;
+    constexpr int seq_len = 32;
+
+    int hidden_size = 2*input_size;
+    auto input = at::CUDA(at::kFloat).randn({seq_len, batch_size, input_size});
+    auto hx    = at::CUDA(at::kFloat).randn({batch_size, hidden_size});
+    auto cx    = at::CUDA(at::kFloat).randn({batch_size, hidden_size});
+    auto cx1 = at::CUDA(at::kFloat).randn({batch_size, hidden_size});
+    auto w_ih  = t_def(at::CUDA(at::kFloat).randn({4 * hidden_size, input_size}));
+    auto w_hh  = t_def(at::CUDA(at::kFloat).randn({4 * hidden_size, hidden_size}));
+
+
+    auto lstm_g = build_lstm_stages();
+    Code lstm_function(lstm_g);
+    std::vector<at::Tensor> outputs;
+    InterpreterState lstm_interp(lstm_function);
+    lstm_interp.runOneStage({input[0], hx, cx, w_ih, w_hh}, outputs);
+    auto cy0 = outputs[0];
+    lstm_interp.runOneStage({cx1}, outputs);
+    at::Tensor ihx = outputs[0];
+    at::Tensor icx = outputs[1];
+
+
+    std::tie(hx, cx) = lstm(input[0], hx, cx, w_ih, w_hh);
+    std::tie(hx, cx) = lstm(input[0], hx, cx1, w_ih, w_hh);
+
+    //std::cout << almostEqual(outputs[0],hx) << "\n";
+    JIT_ASSERT(exactlyEqual(outputs[0],hx));
+    JIT_ASSERT(exactlyEqual(outputs[1],cx));
+}
+
 void runJITCPPTests() {
+  interpTest();
+  interpStageTest();
   codeTemplateTest();
   fusionTests();
   attributesTest();

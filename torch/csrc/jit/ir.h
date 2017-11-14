@@ -854,7 +854,7 @@ struct PythonOp : public Node {
 
   // The Python object which contains the implementation of this function.
   // This is either a class (non-legacy) or an object (legacy).  See
-  // TraceInterpreter for execution semantics.
+  // TraceInterpreterState for execution semantics.
   THPObjectPtr pyobj;
   // The calling convention for the Python function.
   // 's' -- python scalar argument

@@ -419,7 +419,7 @@ void compressContiguous(
 
 } // anonymous namespace
 
-void CompiledFusionFunction::launch(at::ArrayRef<at::Tensor> inputs, at::ArrayRef<at::Tensor> outputs) {
+void CompiledFusionFunction::launch_with_tensors(at::ArrayRef<at::Tensor> inputs, at::ArrayRef<at::Tensor> outputs) {
   AutoGPU gpu_guard(inputs);
   JIT_ASSERT(inputs.size() == input_desc.size());
   JIT_ASSERT(outputs.size() == output_desc.size());
@@ -477,6 +477,16 @@ void CompiledFusionFunction::launch(at::ArrayRef<at::Tensor> inputs, at::ArrayRe
     }
   }
   launch(numel, arguments.data());
+}
+
+void CompiledFusionFunction::launch(at::ArrayRef<at::Tensor> inputs, std::vector<at::Tensor> & outputs) {
+  AutoGPU guard(inputs.back());
+  outputs.clear();
+  outputs.reserve(outputDescriptors().size());
+  for(auto & od : outputDescriptors()) {
+    outputs.push_back(at::CUDA(od.scalar_type).tensor());
+  }
+  launch_with_tensors(inputs, outputs);
 }
 
 void CompiledFusionFunction::launch(uint32_t numel, void ** arguments) {
@@ -539,7 +549,7 @@ void FusionCompiler::debugLaunchGraph(Graph & graph, at::ArrayRef<at::Tensor> in
     agraph.output_desc.emplace_back(i);
   }
   auto func = getOrCompile(agraph);
-  func->launch(inputs, outputs);
+  func->launch_with_tensors(inputs, outputs);
 }
 
 //TODO: thread safety

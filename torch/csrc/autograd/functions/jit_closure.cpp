@@ -118,7 +118,14 @@ struct EmitNull : public Function {
 
 struct LambdaFunction : public Function {
   LambdaFunction(const jit::TensorOp& op)
-    : LambdaFunction(op.num_inputs, op.op) {
+    : LambdaFunction(op.num_inputs, nullptr) {
+    auto & real_op = op.op;
+    this->fn_ = [real_op](const variable_list& inputs) -> variable_list {
+      std::vector<at::Tensor> tinputs(inputs.begin(), inputs.end());
+      std::vector<at::Tensor> toutputs;
+      real_op(tinputs, toutputs);
+      return variable_list(toutputs.begin(), toutputs.end());
+    };
     this->name_ = op.name;
   }
 
@@ -279,10 +286,6 @@ struct FusionGroupFunction : public Function {
       data.push_back(input.data());
     AutoGPU guard(data.back());
     std::vector<at::Tensor> outputs;
-    outputs.reserve(function->outputDescriptors().size());
-    for(auto & od : function->outputDescriptors()) {
-      outputs.push_back(at::CUDA(od.scalar_type).tensor());
-    }
     function->launch(data, outputs);
     return wrap_outputs(inputs, std::move(outputs), [](FunctionFlags f) {
       return std::make_shared<torch::autograd::Error>("FusionGroupFunction is not differentiable", std::move(f));
