@@ -1,159 +1,164 @@
 # Loss functions
 
-- name: binary_cross_entropy(Tensor input, Tensor target, Tensor weight={}, bool size_average=true)
+- name: binary_cross_entropy(Tensor self, Tensor target, Tensor weight={}, bool size_average=true)
   cname: BCECriterion
 
-- name: kl_div(Tensor input, Tensor target, bool size_average=true, bool reduce=true)
+- name: kl_div(Tensor self, Tensor target, bool size_average=true, bool reduce=true)
   cname: DistKLDivCriterion
 
-- name: l1_loss(Tensor input, Tensor target, bool size_average=true, bool reduce=True)
+- name: l1_loss(Tensor self, Tensor target, bool size_average=true, bool reduce=True)
   cname: AbsCriterion
 
-- name: mse_loss(Tensor input, Tensor target, bool size_average=true, bool reduce=true)
+- name: mse_loss(Tensor self, Tensor target, bool size_average=true, bool reduce=true)
   cname: MSECriterion
 
-- name: multi_margin_loss(Tensor input, LongTensor target, Scalar p=1, Scalar margin=1, Tensor weight={}, bool size_average=true)
+- name: multi_margin_loss(Tensor self, LongTensor target, Scalar p=1, Scalar margin=1, Tensor weight={}, bool size_average=true)
   cname: MultiMarginCriterion
 
-- name: multilabel_margin_loss(Tensor input, LongTensor target, bool size_average=true)
+- name: multilabel_margin_loss(Tensor self, LongTensor target, bool size_average=true)
   cname: MultiLabelMarginCriterion
   buffers: [is_target]
 
-- name: nll_loss(Tensor input, LongTensor target, Tensor weight={}, bool size_average=true, int64_t ignore_index=-100, bool reduce=True)
+- name: nll_loss(Tensor self, LongTensor target, Tensor weight={}, bool size_average=true, int64_t ignore_index=-100, bool reduce=True)
   cname: ClassNLLCriterion
   buffers: [total_weight]
 
-- name: nll_loss2d(Tensor input, LongTensor target, Tensor weight={}, bool size_average=true, int64_t ignore_index=-100, bool reduce=True)
+- name: nll_loss2d(Tensor self, LongTensor target, Tensor weight={}, bool size_average=true, int64_t ignore_index=-100, bool reduce=True)
   cname: SpatialClassNLLCriterion
   buffers: [total_weight]
 
-- name: smooth_l1_loss(Tensor input, Tensor target, bool size_average=true, bool reduce=true)
+- name: smooth_l1_loss(Tensor self, Tensor target, bool size_average=true, bool reduce=true)
   cname: SmoothL1Criterion
 
-- name: soft_margin_loss(Tensor input, Tensor target, bool size_average=true)
+- name: soft_margin_loss(Tensor self, Tensor target, bool size_average=true)
   cname: SoftMarginCriterion
 
 # Activation functions
 
-- name: elu(Tensor input, Scalar alpha=1, bool inplace=false)
+- name: elu(Tensor self, Scalar alpha=1)
   cname: ELU
+  has_inplace: True
 
-- name: glu(Tensor input, int64_t dim=-1)
+- name: glu(Tensor self, int64_t dim=-1)
   cname: GatedLinear
   wrap_dim:
-    dim: input
+    dim: self
 
-- name: hardshrink(Tensor input, Scalar lambd=0.5)
+- name: hardshrink(Tensor self, Scalar lambd=0.5)
   cname: HardShrink
 
-- name: hardtanh(Tensor input, Scalar min_val=-1, Scalar max_val=1, bool inplace=false)
+- name: hardtanh(Tensor self, Scalar min_val=-1, Scalar max_val=1)
   cname: HardTanh
+  has_inplace: True
 
-- name: leaky_relu(Tensor input, Scalar negative_slope=0.01, bool inplace=false)
+- name: leaky_relu(Tensor self, Scalar negative_slope=0.01)
   cname: LeakyReLU
+  has_inplace: True
 
-- name: log_sigmoid(Tensor input)
+- name: log_sigmoid(Tensor self)
   cname: LogSigmoid
   buffers: [buffer]
 
-- name: log_softmax(Tensor input, int64_t dim)
+- name: log_softmax(Tensor self, int64_t dim)
   cname: LogSoftMax
   wrap_dim:
-    dim: input
+    dim: self
 
-- name: prelu(Tensor input, Tensor weight)
+- name: prelu(Tensor self, Tensor weight)
   cname: PReLU
 
-- name: rrelu(Tensor input, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=false, bool inplace=false, Generator* generator=nullptr)
+- name: rrelu(Tensor self, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=false, Generator* generator=nullptr)
   cname: RReLU
   buffers: [noise]
+  has_inplace: True
 
-- name: softmax(Tensor input, int64_t dim)
+- name: softmax(Tensor self, int64_t dim)
   cname: SoftMax
   wrap_dim:
-    dim: input
+    dim: self
 
-- name: softplus(Tensor input, Scalar beta=1, Scalar threshold=20)
+- name: softplus(Tensor self, Scalar beta=1, Scalar threshold=20)
   cname: SoftPlus
 
-- name: softshrink(Tensor input, Scalar lambd=0.5)
+- name: softshrink(Tensor self, Scalar lambd=0.5)
   cname: SoftShrink
 
-- name: threshold(Tensor input, Scalar threshold, Scalar value, bool inplace=false)
+- name: threshold(Tensor self, Scalar threshold, Scalar value)
   cname: Threshold
+  has_inplace: True
 
 # Pooling
 
-- name: adaptive_max_pool2d(Tensor input, IntList[2] output_size)
+- name: adaptive_max_pool2d(Tensor self, IntList[2] output_size)
   cname: SpatialAdaptiveMaxPooling
 
-- name: avg_pool2d(Tensor input, IntList[2] kernel_size, IntList[2] stride={}, IntList[2] padding=0, bool ceil_mode=false, bool count_include_pad=false)
+- name: avg_pool2d(Tensor self, IntList[2] kernel_size, IntList[2] stride={}, IntList[2] padding=0, bool ceil_mode=false, bool count_include_pad=false)
   cname: SpatialAveragePooling
   default_init:
     stride: kernel_size
 
-- name: avg_pool3d(Tensor input, IntList[3] kernel_size, IntList[3] stride={}, IntList[3] padding=0, bool ceil_mode=false, bool count_include_pad=false)
+- name: avg_pool3d(Tensor self, IntList[3] kernel_size, IntList[3] stride={}, IntList[3] padding=0, bool ceil_mode=false, bool count_include_pad=false)
   cname: VolumetricAveragePooling
   default_init:
     stride: kernel_size
 
-- name: max_pool2d(Tensor input, IntList[2] kernel_size, IntList[2] stride={}, IntList[2] padding=0, IntList[2] dilation=1, bool ceil_mode=false)
+- name: max_pool2d(Tensor self, IntList[2] kernel_size, IntList[2] stride={}, IntList[2] padding=0, IntList[2] dilation=1, bool ceil_mode=false)
   cname: SpatialDilatedMaxPooling
   default_init:
     stride: kernel_size
 
-- name: max_pool3d(Tensor input, IntList[3] kernel_size, IntList[3] stride={}, IntList[3] padding=0, IntList[2] dilation=1, bool ceil_mode=false)
+- name: max_pool3d(Tensor self, IntList[3] kernel_size, IntList[3] stride={}, IntList[3] padding=0, IntList[2] dilation=1, bool ceil_mode=false)
   cname: VolumetricDilatedMaxPooling
   default_init:
     stride: kernel_size
 
-- name: max_unpool2d(Tensor input, LongTensor indices, IntList[2] output_size)
+- name: max_unpool2d(Tensor self, LongTensor indices, IntList[2] output_size)
   cname: SpatialMaxUnpooling
 
-- name: max_unpool3d(Tensor input, LongTensor indices, IntList[3] output_size, IntList[3] stride, IntList[3] padding)
+- name: max_unpool3d(Tensor self, LongTensor indices, IntList[3] output_size, IntList[3] stride, IntList[3] padding)
   cname: VolumetricMaxUnpooling
 
 # Private functions. These also exist in TH, but we want the backwards functions
 # to implement derivatives.
 
-- name: _sigmoid(Tensor input)
+- name: _sigmoid(Tensor self)
   cname: Sigmoid
 
-- name: _tanh(Tensor input)
+- name: _tanh(Tensor self)
   cname: Tanh
 
 # Batch normalization
 
-- name: batch_norm(Tensor input, Tensor weight, Tensor bias, Tensor running_mean, Tensor running_var, bool training, double momentum, double eps)
+- name: batch_norm(Tensor self, Tensor weight, Tensor bias, Tensor running_mean, Tensor running_var, bool training, double momentum, double eps)
   cname: BatchNormalization
   buffers: [save_mean, save_std]
 
 # Convolutions
 
-- name: conv_transpose2d(Tensor input, Tensor weight, IntList[2] kernel_size, Tensor bias={}, IntList[2] stride=1, IntList[2] padding=0, IntList[2] output_padding=0, IntList[2] dilation=1)
+- name: conv_transpose2d(Tensor self, Tensor weight, IntList[2] kernel_size, Tensor bias={}, IntList[2] stride=1, IntList[2] padding=0, IntList[2] output_padding=0, IntList[2] dilation=1)
   cname: SpatialFullDilatedConvolution
   buffers: [columns, ones]
 
-- name: conv_transpose3d(Tensor input, Tensor weight, Tensor bias={}, IntList[3] stride=1, IntList[3] padding=0, IntList[3] output_padding=0, IntList[3] dilation=1)
+- name: conv_transpose3d(Tensor self, Tensor weight, Tensor bias={}, IntList[3] stride=1, IntList[3] padding=0, IntList[3] output_padding=0, IntList[3] dilation=1)
   cname: VolumetricFullDilatedConvolution
   buffers: [finput, fgrad_input]
 
-- name: conv2d(Tensor input, Tensor weight, IntList[2] kernel_size, Tensor bias={}, IntList[2] stride=1, IntList[2] padding=0)
+- name: conv2d(Tensor self, Tensor weight, IntList[2] kernel_size, Tensor bias={}, IntList[2] stride=1, IntList[2] padding=0)
   cname: SpatialConvolutionMM
   buffers: [finput, fgrad_input]
 
-- name: conv_depthwise2d(Tensor input, Tensor weight, IntList[2] kernel_size, Tensor bias={}, IntList[2] stride=1, IntList[2] padding=0, IntList[2] dilation=1)
+- name: conv_depthwise2d(Tensor self, Tensor weight, IntList[2] kernel_size, Tensor bias={}, IntList[2] stride=1, IntList[2] padding=0, IntList[2] dilation=1)
   cname: SpatialDepthwiseConvolution
   buffers: []
 
-- name: conv3d(Tensor input, Tensor weight, IntList[3] kernel_size, Tensor bias={}, IntList[3] stride=1, IntList[3] padding=0)
+- name: conv3d(Tensor self, Tensor weight, IntList[3] kernel_size, Tensor bias={}, IntList[3] stride=1, IntList[3] padding=0)
   cname: VolumetricConvolutionMM
   buffers: [finput, fgrad_input]
 
-- name: conv_dilated2d(Tensor input, Tensor weight, IntList[2] kernel_size, Tensor bias={}, IntList[2] stride=1, IntList[2] padding=0, IntList[2] dilation=1)
+- name: conv_dilated2d(Tensor self, Tensor weight, IntList[2] kernel_size, Tensor bias={}, IntList[2] stride=1, IntList[2] padding=0, IntList[2] dilation=1)
   cname: SpatialDilatedConvolution
   buffers: [columns, ones]
 
-- name: conv_dilated3d(Tensor input, Tensor weight, IntList[3] kernel_size, Tensor bias={}, IntList[3] stride=1, IntList[3] padding=0, IntList[3] dilation=1)
+- name: conv_dilated3d(Tensor self, Tensor weight, IntList[3] kernel_size, Tensor bias={}, IntList[3] stride=1, IntList[3] padding=0, IntList[3] dilation=1)
   cname: VolumetricDilatedConvolution
   buffers: [columns, ones]

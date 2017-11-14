@@ -565,12 +565,20 @@ def dropout3d(input, p=0.5, training=False, inplace=False):
     return _functions.dropout.FeatureDropout.apply(input, p, training, inplace)
 
 
-threshold = _add_docstr(torch._C._nn.threshold, r"""
-threshold(input, threshold, value, inplace=False) -> Variable
+def threshold(input, threshold, value, inplace=False):
+    """Thresholds each element of the input Tensor.
 
-Thresholds each element of the input Tensor.
+    See :class:`~torch.nn.Threshold` for more details.
+    """
+    if inplace:
+        return torch._C._nn.threshold_(input, threshold, value)
+    return torch._C._nn.threshold(input, threshold, value)
 
-See :class:`~torch.nn.Threshold` for more details.
+
+threshold_ = _add_docstr(torch._C._nn.threshold_, r"""
+threshold_(input, threshold, value) -> Variable
+
+In-place version of :func:`~threshold`.
 """)
 
 
@@ -581,6 +589,11 @@ def relu(input, inplace=False):
     :class:`~torch.nn.ReLU` for more details.
     """
     return threshold(input, 0, 0, inplace)
+
+
+def relu_(input):
+    r"""In-place version of :func:`~relu`."""
+    return threshold_(input, 0, 0)
 
 
 glu = _add_docstr(torch._C._nn.glu, r"""
@@ -601,11 +614,23 @@ Args:
     dim (int): dimension on which to split the input
 """)
 
-hardtanh = _add_docstr(torch._C._nn.hardtanh, r"""
-hardtanh(input, min_val=-1., max_val=1., inplace=False) -> Variable
 
-Applies the HardTanh function element-wise. See :class:`~torch.nn.Hardtanh` for more
-details.
+def hardtanh(input, min_val=-1., max_val=1., inplace=False):
+    r"""
+    hardtanh(input, min_val=-1., max_val=1., inplace=False) -> Variable
+
+    Applies the HardTanh function element-wise. See :class:`~torch.nn.Hardtanh` for more
+    details.
+    """
+    if inplace:
+        return torch._C._nn.hardtanh_(input, min_val, max_val)
+    return torch._C._nn.hardtanh(input, min_val, max_val)
+
+
+hardtanh_ = _add_docstr(torch._C._nn.hardtanh_, r"""
+hardtanh_(input, min_val=-1., max_val=1.) -> Variable
+
+In-place version of :func:`~hardtanh`.
 """)
 
 
@@ -619,13 +644,21 @@ def relu6(input, inplace=False):
     return hardtanh(input, 0, 6, inplace)
 
 
-elu = _add_docstr(torch._C._nn.elu, r"""
-elu(input, alpha=1., inplace=False) -> Variable
+def elu(input, alpha=1., inplace=False):
+    r"""Applies element-wise,
+    :math:`f(x) = max(0,x) + min(0, alpha * (exp(x) - 1))`.
 
-Applies element-wise,
-:math:`f(x) = max(0,x) + min(0, alpha * (exp(x) - 1))`.
+    See :class:`~torch.nn.ELU` for more details.
+    """
+    if inplace:
+        return torch._C._nn.elu_(input, alpha)
+    return torch._C._nn.elu(input, alpha)
 
-See :class:`~torch.nn.ELU` for more details.
+
+elu_ = _add_docstr(torch._C._nn.elu_, r"""
+elu_(input, alpha=1.) -> Variable
+
+In-place verison of :func:`~elu`.
 """)
 
 
@@ -642,13 +675,24 @@ def selu(input, inplace=False):
     return _functions.thnn.SELU.apply(input, inplace)
 
 
-leaky_relu = _add_docstr(torch._C._nn.leaky_relu, r"""
-leaky_relu(input, negative_slope=0.01, inplace=False) -> Variable
+def leaky_relu(input, negative_slope=0.01, inplace=False):
+    r"""
+    leaky_relu(input, negative_slope=0.01, inplace=False) -> Variable
 
-Applies element-wise,
-:math:`f(x) = max(0, x) + {negative\_slope} * min(0, x)`
+    Applies element-wise,
+    :math:`f(x) = max(0, x) + {negative\_slope} * min(0, x)`
 
-See :class:`~torch.nn.LeakyReLU` for more details.
+    See :class:`~torch.nn.LeakyReLU` for more details.
+    """
+    if inplace:
+        return torch._C._nn.leaky_relu_(input, negative_slope)
+    return torch._C._nn.leaky_relu(input, negative_slope)
+
+
+leaky_relu_ = _add_docstr(torch._C._nn.leaky_relu_, r"""
+leaky_relu_(input, negative_slope=0.01) -> Variable
+
+In-place version of :func:`~leaky_relu`.
 """)
 
 
@@ -663,8 +707,20 @@ See :class:`~torch.nn.PReLU` for more details.
 """)
 
 
-rrelu = _add_docstr(torch._C._nn.rrelu, r"""
-rrelu(input, lower=1./8, upper=1./3, training=False, inplace=False) -> Variable
+def rrelu(input, lower=1. / 8, upper=1. / 3, training=False, inplace=False):
+    r"""rrelu(input, lower=1./8, upper=1./3, training=False, inplace=False) -> Variable
+
+    Randomized leaky ReLU.
+    """
+    if inplace:
+        return torch._C._nn.rrelu_(input, lower, upper, training)
+    return torch._C._nn.rrelu(input, lower, upper, training)
+
+
+rrelu_ = _add_docstr(torch._C._nn.rrelu_, r"""
+rrelu_(input, lower=1./8, upper=1./3, training=False) -> Variable
+
+In-place version of :func:`~rrelu`.
 """)
 
 logsigmoid = _add_docstr(torch._C._nn.log_sigmoid, r"""
@@ -681,8 +737,6 @@ hardshrink(input, lambd=0.5) -> Variable
 Applies the hard shrinkage function element-wise
 
 See :class:`~torch.nn.Hardshrink` for more details.
-
-
 """)
 
 

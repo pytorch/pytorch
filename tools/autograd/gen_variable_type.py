@@ -283,11 +283,6 @@ def saved_variables(formula, args):
 def create_derivative(declaration, formula, output_indices, var_names):
     returns = [r for r in declaration['returns'] if r.get('name') != 'self']
     arguments = declaration['arguments']
-    if any(arg['name'] == 'inplace' for arg in arguments):
-        for arg in arguments:
-            if arg['name'] == 'input':
-                returns += [arg]
-        arguments = [arg for arg in arguments if arg['name'] != 'input']
     formula, saved_inputs = saved_variables(formula, arguments)
     formula, saved_outputs = saved_variables(formula, returns)
 
@@ -462,21 +457,28 @@ def preprocess_nn_functions(declarations):
     autograd_functions = []
     for declaration in declarations:
         name = declaration['name']
+        base_name = name[:-1] if declaration['inplace'] else name
         if name == 'batch_norm' or 'conv' in name:
             continue
 
-        fwd_name = name + '_forward'
+        fwd_name = base_name + '_forward'
+        bwd_name = base_name + '_backward'
+
         # NB: This logic means we'll hit the logic below only for
         # backwards, and not double-backwards.
-        if fwd_name not in declarations_by_name:
+        if bwd_name not in declarations_by_name:
             continue
-        declaration['base_name'] = fwd_name
 
-        fwd = declarations_by_name[fwd_name][0]
+        if declaration['inplace']:
+            declaration['base_name'] = fwd_name + '_'
+            declaration['derivative'] = declarations_by_name[base_name][0]['derivative']
+            continue
 
-        input_num = 0
-        bwd_name = name + '_backward'
+        assert len(declarations_by_name[fwd_name]) == 1
         assert len(declarations_by_name[bwd_name]) == 1
+
+        declaration['base_name'] = fwd_name
+        fwd = declarations_by_name[fwd_name][0]
         bwd = declarations_by_name[bwd_name][0]
 
         def actual(arg):
@@ -489,7 +491,7 @@ def preprocess_nn_functions(declarations):
             # as 'output_mask'; thus the substitution here.
             if name == 'output_mask':
                 return 'grad_input_mask'
-            return name if name != 'inplace' else 'false'
+            return name
 
         actuals = [actual(arg) for arg in bwd['arguments']]
         formula = '{}({})'.format(bwd_name, ', '.join(actuals))
@@ -504,10 +506,9 @@ def preprocess_nn_functions(declarations):
         var_names = []
         for ret in bwd['returns']:
             assert ret['name'].startswith('grad_')
-            var_names.append(ret['name'][5:])  # remove grad_ prefix
+            var_names.append(ret['name'][5:].replace('input', 'self'))  # remove grad_ prefix
         output_indices = list(range(len(var_names)))
         derivatives = [create_derivative(fwd, formula, output_indices, var_names)]
-        input_num += len(output_indices)
 
         # find arguments to foo_forward() call which don't exist in foo()
         # these are buffers which have to be saved for the backwards call
@@ -515,7 +516,7 @@ def preprocess_nn_functions(declarations):
         buffers = [arg['name'] for arg in fwd['arguments']
                    if arg['name'] not in args_by_name]
 
-        func = create_autograd_function(name, derivatives, input_num, buffers)
+        func = create_autograd_function(name, derivatives, len(output_indices), buffers)
         declaration['derivative'] = func
         autograd_functions.append(func)
     return autograd_functions
@@ -619,7 +620,7 @@ def create_variable_type(top_env, aten_declarations):
 
     def skip_function(declaration):
         name = declaration['name']
-        return name.endswith('_out') or name.endswith('_forward')
+        return name.endswith('_out') or '_forward' in name
 
     def find_args_with_derivatives(func, tensor_arg_names):
         """Find arguments that have derivative definitions"""
@@ -866,7 +867,6 @@ def create_variable_type(top_env, aten_declarations):
         env['check_inplace'] = ''
         env['version_counter'] = ''
         env['no_zero_dim'] = ''
-        maybe_inplace = any(arg['name'] == 'inplace' for arg in arguments)
         base_call = BASE_CALL.substitute(combined)
         if declaration['inplace']:
             env['check_inplace'] = 'check_inplace(self);'
@@ -875,12 +875,6 @@ def create_variable_type(top_env, aten_declarations):
             env['set_flags'] = SET_FLAGS_INPLACE.substitute(combined, modifies_data=modifies_data)
             if is_view:
                 env['no_zero_dim'] = 'ensure_no_aten_scalars(self);'
-        elif maybe_inplace:
-            assert not is_view, declaration['name']
-            env['check_inplace'] = 'if (inplace) check_inplace(input);'
-            env['version_counter'] = 'if (inplace) increment_version(input);'
-            env['set_flags'] = SET_FLAGS_INPLACE.substitute(combined, modifies_data='inplace')
-            base_call = 'auto ret = maybe_wrap({}, input, inplace)'.format(base_call)
         else:
             env['set_flags'] = SET_FLAGS.substitute(combined)
             if is_view:

@@ -88,6 +88,12 @@ def handle_outputs_taken_as_arguments(options):
         return (arg['type'] in {'THIntegerTensor*', 'THTensor*'} and
                 arg.get('default', '') in {'NULL', 'nullptr'})
 
+    def should_generate_out_variant(option):
+        if 'function' in option['variants']:
+            # don't generate _out variants for in-place functions
+            return re.search('(^__i|[^_]_$)', option['api_name']) is None
+        return False
+
     for option in options:
         for arg in option['arguments']:
             # mark arguments which can be null
@@ -104,7 +110,7 @@ def handle_outputs_taken_as_arguments(options):
             # the original option, which takes arguments for the results,
             # is no longer a method, and has _out added to indicte it takes
             # output arguments
-            if 'function' in option['variants']:
+            if should_generate_out_variant(option):
                 if 'method' in option['variants']:
                     option['variants'].remove('method')
                 option['api_name'] += '_out'
