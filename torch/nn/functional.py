@@ -707,7 +707,7 @@ See :class:`~torch.nn.PReLU` for more details.
 """)
 
 
-def rrelu(input, lower=1./8, upper=1./3, training=False, inplace=False):
+def rrelu(input, lower=1. / 8, upper=1. / 3, training=False, inplace=False):
     r"""rrelu(input, lower=1./8, upper=1./3, training=False, inplace=False) -> Variable
 
     Randomized leaky ReLU.
