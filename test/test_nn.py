@@ -4607,7 +4607,7 @@ new_module_tests = [
         desc='dim'
     ),
     dict(
-        constructor=wrap_functional(F.softmax, dim=1),
+        constructor=wrap_functional(F.softmax, dim=-1),
         input_size=(2, 128),  # trigger the last-dim algo in CUDA
         fullname='softmax_lastdim',
         pickle=False,
@@ -4639,7 +4639,7 @@ new_module_tests = [
         pickle=False,
     ),
     dict(
-        constructor=wrap_functional(F.log_softmax, dim=1),
+        constructor=wrap_functional(F.log_softmax, dim=-1),
         input_size=(2, 128),  # trigger the last-dim algo in CUDA
         fullname='log_softmax_lastdim',
         pickle=False,
