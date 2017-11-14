@@ -1,5 +1,10 @@
 #include "torch/csrc/jit/passes/onnx/peephole.h"
 
+#if defined(_MSC_VER)
+#include <BaseTsd.h>
+typedef SSIZE_T ssize_t;
+#endif
+
 namespace torch { namespace jit {
 
 // Broadcasting operators have the following property:
