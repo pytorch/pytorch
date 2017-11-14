@@ -13,7 +13,7 @@ CPP_TO_ATEN_TYPE_MAP = {
 # e.g. std::vector<Tensor> -> TensorList, const/reference modifiers on Tensor
 # go away and are eventually restored to dynamic_type (this can probably be simplified
 # to a single transformation).
-def to_aten_type(typ):
+def to_aten_types(typ):
     # split tuples into constituents
     if 'std::tuple<' in typ:
         template = typ.split('std::tuple<', 1)[1].rsplit('>', 1)[0]
@@ -23,7 +23,7 @@ def to_aten_type(typ):
     # remove const/references
     type_list = [t.replace('const ', '').replace('&', '').strip() for t in type_list]
     type_list = [CPP_TO_ATEN_TYPE_MAP.get(t, t) for t in type_list]
-    return ','.join(type_list)
+    return type_list
 
 
 def parse_arguments(args):
@@ -42,7 +42,9 @@ def parse_arguments(args):
             ns = name.split('=', 1)
             name, default = ns[0], python_num(ns[1])
 
-        argument_dict = {'type': to_aten_type(t), 'name': name}
+        typ = to_aten_types(t)
+        assert len(typ) == 1
+        argument_dict = {'type': to_aten_types(t)[0], 'name': name}
         if default is not None:
             argument_dict['default'] = default
 
@@ -79,7 +81,7 @@ def parse(filename):
                     arguments = arguments.split(')')[0]
                     return_type_cpp, fn_name = return_and_name.rsplit(None, 1)
                     declaration['name'] = declaration.get('name', fn_name)
-                    declaration['return'] = declaration.get('return', to_aten_type(return_type_cpp))
+                    declaration['return'] = list(declaration.get('return', to_aten_types(return_type_cpp)))
                     declaration['variants'] = declaration.get('variants', ['method', 'function'])
                     declaration['arguments'] = parse_arguments(arguments)
 

@@ -550,12 +550,9 @@ def create_generic(top_env, declarations):
     # this can return multiple return types in a list, e.g. ['Tensor', 'Tensor']
     def native_get_return_types(option):
         ret = option['return']
-        if ret['kind'] != 'type':
-            raise Exception("native functions only support \'type\' return")
 
-        types = [x.strip() for x in ret['type'].split(',')]
         return_types = []
-        for t in types:
+        for t in ret:
             # can't actually return a TensorList (since it's a reference object)
             actual_return_type = {'TensorList': 'std::vector<Tensor>'}.get(t, t)
 
