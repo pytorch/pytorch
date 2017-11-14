@@ -143,20 +143,6 @@ CopySlices::CopySlices(const Variable& base_var, TensorGeometry view_, std::shar
   for (size_t i = 1; i < next_functions.size(); i++) {
     next_functions[i] = fn->next_functions[i];
   }
-
-  // Hook up the wrapped function to point through an AsStridedBackward to
-  // the base's grad_fn. This is necessary for double backwards in-case the
-  // wrapped fn contains a saved output variable.
-  auto asb = std::make_shared<generated::AsStridedBackward>();
-  asb->num_inputs = 1;
-  asb->self_geometry = base;
-  asb->size = view.sizes;
-  asb->stride = view.strides;
-  asb->storage_offset = view.storage_offset;
-  asb->is_executable = true;
-  asb->next_functions = { next_functions[0] };
-
-  fn->next_functions[0] = std::make_pair(std::move(asb), 0);
 }
 
 auto CopySlices::apply(const variable_list& inputs) -> variable_list {
