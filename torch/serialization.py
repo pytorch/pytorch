@@ -389,13 +389,20 @@ def _load(f, map_location, pickle_module):
         else:
             raise RuntimeError("Unknown saved id type: %s" % saved_id[0])
 
-    # try the legacy loader first, which only works if f is a tarfile
+    # on windows this can return invalid values
     try:
-        return legacy_load(f)
-    except tarfile.TarError:
-        pass
+        foffset = int(f.tell())
+    except ValueError as verr:
+        raise RuntimeError("Invalid file offset.")
 
-    f.seek(0)
+    # only if offset is zero we can attempt the legacy tar file loader
+    if foffset == 0:    
+        try:        
+            return legacy_load(f)
+        except tarfile.TarError:
+            # if not a tarfile, reset file offset and proceed
+            f.seek(foffset)
+
     magic_number = pickle_module.load(f)
     if magic_number != MAGIC_NUMBER:
         raise RuntimeError("Invalid magic number; corrupt file?")
