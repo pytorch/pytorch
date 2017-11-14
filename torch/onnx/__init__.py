@@ -75,6 +75,29 @@ def export(model, args, f, export_params=True, verbose=False, training=False):
     _export(model, args, f, export_params, verbose, training)
 
 
+def _optimize_trace(trace):
+    torch._C._jit_pass_peephole(trace)
+    torch._C._jit_pass_lint(trace)
+    torch._C._jit_pass_onnx(trace)
+    torch._C._jit_pass_lint(trace)
+    torch._C._jit_pass_onnx_peephole(trace)
+    torch._C._jit_pass_lint(trace)
+    torch._C._jit_pass_dce(trace)
+    torch._C._jit_pass_lint(trace)
+
+
+def _trace(func, args, return_outs=False):
+    # Special case for common case of passing a single Variable
+    if isinstance(args, torch.autograd.Variable):
+        args = (args, )
+
+    trace, torch_out = torch.jit.trace(func, args)
+    _optimize_trace(trace)
+    if return_outs:
+        return trace, torch_out
+    return trace
+
+
 def _export(model, args, f, export_params=True, verbose=False, training=False):
     # Special case for common case of passing a single Variable
     if isinstance(args, torch.autograd.Variable):
@@ -96,16 +119,7 @@ def _export(model, args, f, export_params=True, verbose=False, training=False):
         raise RuntimeError("state_dict changed after running the tracer; "
                            "something weird is happening in your model!")
 
-    # TODO: write a helper function
-    torch._C._jit_pass_peephole(trace)
-    torch._C._jit_pass_lint(trace)
-    torch._C._jit_pass_onnx(trace)
-    torch._C._jit_pass_lint(trace)
-    torch._C._jit_pass_onnx_peephole(trace)
-    torch._C._jit_pass_lint(trace)
-    torch._C._jit_pass_dce(trace)
-    torch._C._jit_pass_lint(trace)
-
+    _optimize_trace(trace)
     if verbose:
         print(trace)
 
