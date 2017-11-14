@@ -36,7 +36,6 @@ else()
 endif()
 
 
-
 # ---[ BLAS
 set(BLAS "Eigen" CACHE STRING "Selected BLAS library")
 set_property(CACHE BLAS PROPERTY STRINGS "Eigen;ATLAS;OpenBLAS;MKL;vecLib")
@@ -472,4 +471,8 @@ if (USE_ATEN)
   caffe2_include_directories(${PROJECT_BINARY_DIR}/caffe2/contrib/aten/aten/src/ATen)
   caffe2_include_directories(${PROJECT_SOURCE_DIR}/third_party/aten/src)
   caffe2_include_directories(${PROJECT_BINARY_DIR}/caffe2/contrib/aten)
+endif()
+
+if (USE_ZSTD)
+  add_subdirectory(${PROJECT_SOURCE_DIR}/third_party/zstd/build/cmake)
 endif()

@@ -41,6 +41,7 @@ option(USE_ROCKSDB "Use RocksDB" ON)
 option(USE_SNPE "Use Qualcomm's SNPE library" OFF)
 option(USE_THREADS "Use Threads" ON)
 option(USE_ZMQ "Use ZMQ" OFF)
+option(USE_ZSTD "Use ZSTD" OFF)
 
 
 # ---[ CMake scripts + modules
