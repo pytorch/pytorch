@@ -396,8 +396,8 @@ def _load(f, map_location, pickle_module):
         raise RuntimeError("Invalid file offset.")
 
     # only if offset is zero we can attempt the legacy tar file loader
-    if foffset == 0:    
-        try:        
+    if foffset == 0:
+        try:
             return legacy_load(f)
         except tarfile.TarError:
             # if not a tarfile, reset file offset and proceed

@@ -4137,7 +4137,7 @@ class TestTorch(TestCase):
 
     def test_serialization_offset(self):
         a = torch.randn(5, 5)
-        with tempfile.TemporaryFile() as f:            
+        with tempfile.TemporaryFile() as f:
             i = 41
             pickle.dump(i, f)
             torch.save(a, f)
