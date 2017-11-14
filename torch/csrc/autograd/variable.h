@@ -113,9 +113,6 @@ public:
 public:
   std::shared_ptr<Function> get_grad_accumulator();
   virtual std::shared_ptr<Function>& get_grad_fn() { return _grad_fn; }
-  virtual void rebase_grad_fn(std::shared_ptr<Function> grad_fn) {
-    _grad_fn = std::move(grad_fn);
-  }
 
   at::Tensor data;
   Variable grad;
@@ -156,7 +153,7 @@ struct VariableViewImpl : public VariableImpl {
 
   // Called after in-place modifications. Modifies the grad_fn of the base
   // Variable.
-  virtual void rebase_grad_fn(std::shared_ptr<Function> grad_fn) override;
+  void rebase_history(VarFlags flags, int output_nr, std::shared_ptr<Function> grad_fn);
 
   // The base Variable (never a view)
   Variable base;
@@ -227,10 +224,15 @@ inline const std::shared_ptr<Function>& Variable::grad_fn() const {
   return get()->get_grad_fn();
 };
 inline void Variable::rebase_history(VarFlags flags, int output_nr, std::shared_ptr<Function> grad_fn) {
-  get()->requires_grad = flags.requires_grad;
-  get()->is_volatile = flags.is_volatile;
-  get()->output_nr = output_nr;
-  get()->rebase_grad_fn(std::move(grad_fn));
+  if (is_view()) {
+    auto& impl = static_cast<VariableViewImpl&>(*get());
+    impl.rebase_history(flags, output_nr, std::move(grad_fn));
+  } else {
+    get()->requires_grad = flags.requires_grad;
+    get()->is_volatile = flags.is_volatile;
+    get()->output_nr = output_nr;
+    get()->_grad_fn = std::move(grad_fn);
+  }
 }
 inline std::shared_ptr<Function> Variable::grad_accumulator() const {
   return get()->get_grad_accumulator();

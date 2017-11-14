@@ -111,6 +111,12 @@ std::shared_ptr<Function>& VariableViewImpl::get_grad_fn() {
         "this view in a differentiable operation. Re-create the view from its "
         "base Variable after the last in-place modification.");
   }
+  if (base.is_volatile() && !is_volatile) {
+    throw std::runtime_error(
+        "is_volatile is False and base.is_volatile is True. Cannot use "
+        "this view in a differentiable operation. Re-create the view from its "
+        "base Variable after the last in-place modification.");
+  }
   auto current_version = version_counter.current_version();
   if (attr_version != current_version) {
     TORCH_ASSERT(output_nr == 0);
@@ -127,22 +133,26 @@ std::shared_ptr<Function>& VariableViewImpl::get_grad_fn() {
   return _grad_fn;
 }
 
-void VariableViewImpl::rebase_grad_fn(std::shared_ptr<Function> grad_fn) {
+void VariableViewImpl::rebase_history(VarFlags flags, int output_nr, std::shared_ptr<Function> grad_fn) {
   TORCH_ASSERT(output_nr == 0);
-  if (!grad_fn) {
-    TORCH_ASSERTM(!requires_grad, "Can't set null grad_fn on view with requires_grad=True");
+  TORCH_ASSERT(flags.requires_grad == bool(grad_fn));
+  if (grad_fn) {
+    TORCH_ASSERTM(grad_fn->num_inputs == 1, "Functions which modify views in-place must return a single Variable");
+  } else {
+    // TODO: perhaps we should enable this case by setting base.requires_grad=False
+    // and base.grad_fn = nullptr.
     TORCH_ASSERTM(!base.requires_grad(), "base.requires_grad does not match view.requires_grad");
-    return;
   }
-
-  TORCH_ASSERTM(requires_grad, "Can't set grad_fn on view with requires_grad=False");
-  if (grad_fn->num_inputs != 1) {
-    throw std::runtime_error("Functions which modify views in-place must return a single Variable");
+  this->requires_grad = flags.requires_grad;
+  this->is_volatile = flags.is_volatile;
+  this->output_nr = output_nr;
+  base.requires_grad() |= flags.requires_grad;
+  base.is_volatile() |= flags.is_volatile;
+  if (grad_fn) {
+    base.output_nr() = 0;
+    base.get()->_grad_fn = std::make_shared<CopySlices>(
+        base, TensorGeometry(data), std::move(grad_fn));
   }
-  auto copySlices = std::make_shared<CopySlices>(base, TensorGeometry(data), std::move(grad_fn));
-  base.output_nr() = 0;
-  base.get()->_grad_fn = std::move(copySlices);
-  base.requires_grad() = true;
 }
 
 namespace {
