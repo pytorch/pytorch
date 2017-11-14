@@ -186,7 +186,7 @@ inline __host__ __device__ half tanh(half a) {
 
 #if defined(_MSC_VER) && CUDA_VERSION >= 9000
 inline __host__ __device__ half operator+(half a, int b) {
-  return THCNumerics<half>::add(a + ScalarConvert<int, half>::to(b));
+  return THCNumerics<half>::add(a, ScalarConvert<int, half>::to(b));
 }
 
 inline __host__ __device__ double operator+(half a, double b) {
