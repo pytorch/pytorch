@@ -49,14 +49,15 @@ OPERATOR_SCHEMA(Concat)
           : GetDimFromOrderString(
                 helper.GetSingleArgument<string>("order", "NCHW"));
       bool add_axis = helper.GetSingleArgument<int>("add_axis", 0) != 0;
+      const int canonical_axis = canonical_axis_index_(axis, in[0].dims_size());
       CAFFE_ENFORCE_GT(in.size(), 0);
       vector<int> split_shape(1, in.size());
       vector<int> out_shape(in[0].dims().begin(), in[0].dims().end());
       if (add_axis) {
-        out_shape.insert(out_shape.begin() + axis, in.size());
+        out_shape.insert(out_shape.begin() + canonical_axis, in.size());
       } else {
         for (int i = 1; i < in.size(); ++i) {
-          out_shape[axis] += in[i].dims(axis);
+          out_shape[canonical_axis] += in[i].dims(canonical_axis);
         }
       }
       if (def.output_size() == 1) {
