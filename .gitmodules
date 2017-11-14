@@ -49,3 +49,6 @@
 [submodule "third_party/aten"]
 	path = third_party/aten
 	url = https://github.com/zdevito/aten
+[submodule "third_party/zstd"]
+	path = third_party/zstd
+	url = https://github.com/facebook/zstd.git
