@@ -27,7 +27,6 @@ void THNN_(ELU_updateOutput)(
 
 void THNN_(ELU_updateGradInput)(
           THNNState *state,
-          THTensor *input,
           THTensor *gradOutput,
           THTensor *gradInput,
           THTensor *output,
@@ -35,7 +34,7 @@ void THNN_(ELU_updateGradInput)(
           bool inplace)
 {
   real alpha = TH_CONVERT_ACCREAL_TO_REAL(alpha_);
-  THNN_CHECK_NELEMENT(input, gradOutput);
+  THNN_CHECK_NELEMENT(output, gradOutput);
   if(inplace) {
     TH_TENSOR_APPLY2(real, gradOutput, real, output,
       if(*output_data <= 0) {

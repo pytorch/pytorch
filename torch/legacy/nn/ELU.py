@@ -29,7 +29,6 @@ class ELU(Module):
     def updateGradInput(self, input, gradOutput):
         self._backend.ELU_updateGradInput(
             self._backend.library_state,
-            input,
             gradOutput,
             self.gradInput,
             self.output,
