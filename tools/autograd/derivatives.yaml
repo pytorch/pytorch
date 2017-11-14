@@ -602,9 +602,9 @@
   grad_output: avg_pool3d(grad, kernel_size, stride, padding, ceil_mode, count_include_pad)
   input: zeros_like(input)
 
-- name: elu_backward(Tensor grad_output, Tensor input, Scalar alpha, bool inplace, Tensor output)
-  grad_output: elu_backward(grad, input, alpha, inplace, output)
-  input: grad * grad_input * (input < 0).toType(grad.type())
+- name: elu_backward(Tensor grad_output, Scalar alpha, Tensor output)
+  grad_output: elu_backward(grad, alpha, output)
+  output: grad * grad_output * (output < 0).toType(grad.type())
 
 - name: glu_backward(Tensor grad_output, Tensor input, int64_t dim)
   grad_output: glu_double_backward_grad_output(grad, input, dim)
@@ -614,8 +614,8 @@
   grad_output: hardshrink_backward(grad, input, lambd)
   input: zeros_like(grad)
 
-- name: hardtanh_backward(Tensor grad_output, Tensor input, Scalar min_val, Scalar max_val, bool inplace)
-  grad_output: hardtanh_backward(grad, input, min_val, max_val, false)
+- name: hardtanh_backward(Tensor grad_output, Tensor input, Scalar min_val, Scalar max_val)
+  grad_output: hardtanh_backward(grad, input, min_val, max_val)
   input: zeros_like(grad)
 
 - name: kl_div_backward(Tensor grad_output, Tensor input, Tensor target, bool size_average, bool reduce)
@@ -634,8 +634,8 @@
   grad_output: grad - (grad * output.exp()).sum(dim, true)
   input: log_softmax_double_backward(grad, grad_output, dim, output)
 
-- name: leaky_relu_backward(Tensor grad_output, Tensor input, Scalar negative_slope, bool inplace)
-  grad_output: leaky_relu_backward(grad, input, negative_slope, false)
+- name: leaky_relu_backward(Tensor grad_output, Tensor input, Scalar negative_slope)
+  grad_output: leaky_relu_backward(grad, input, negative_slope)
   input: zeros_like(grad)
 
 - name: max_pool2d_backward(Tensor grad_output, Tensor input, IntList kernel_size, IntList stride, IntList padding, IntList dilation, bool ceil_mode, Tensor indices)
@@ -661,8 +661,8 @@
 - name: prelu_backward(Tensor grad_output, Tensor input, Tensor weight, std::array<bool,2> output_mask)
   grad_output, input, weight: prelu_double_backward(grads[0], grads[1], grad_output, input, weight, grad_input_mask)
 
-- name: rrelu_backward(Tensor grad_output, Tensor input, Scalar lower, Scalar upper, bool training, bool inplace, Tensor noise)
-  grad_output: rrelu_backward(grad, input, lower, upper, training, false, noise)
+- name: rrelu_backward(Tensor grad_output, Tensor input, Scalar lower, Scalar upper, bool training, Tensor noise)
+  grad_output: rrelu_backward(grad, input, lower, upper, training, noise)
   input: zeros_like(grad)
 
 - name: smooth_l1_loss_backward(Tensor grad_output, Tensor input, Tensor target, bool size_average, bool reduce)
@@ -684,8 +684,8 @@
   grad_output: softshrink_backward(grad, input, lambd)
   input: zeros_like(grad)
 
-- name: threshold_backward(Tensor grad_output, Tensor input, Scalar threshold, Scalar value, bool inplace)
-  grad_output: threshold_backward(grad, input, threshold, value, false)
+- name: threshold_backward(Tensor grad_output, Tensor input, Scalar threshold, Scalar value)
+  grad_output: threshold_backward(grad, input, threshold, value)
   input: zeros_like(grad)
 
 - name: _sigmoid_backward(Tensor grad_output, Tensor output)

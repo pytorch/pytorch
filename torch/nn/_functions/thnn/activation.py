@@ -111,7 +111,6 @@ class SELU(InplaceFunction):
             backend = type2backend[type(input.data)]
             backend.ELU_updateGradInput(
                 backend.library_state,
-                input.data,
                 grad_output.data.mul(SELU.scale),
                 grad_input.data,
                 output.data.div(SELU.scale),

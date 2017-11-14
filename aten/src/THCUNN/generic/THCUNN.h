@@ -125,7 +125,6 @@ TH_API void THNN_(ELU_updateOutput)(
 
 TH_API void THNN_(ELU_updateGradInput)(
                   THCState *state,
-                  THCTensor *input,
                   THCTensor *gradOutput,
                   THCTensor *gradInput,
                   THCTensor *output,

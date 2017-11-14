@@ -171,6 +171,8 @@ def get_thnn_args(thnn_function, params):
             thnn_args.append(arg_expr(name[0], name[1:]))
         elif name == 'scale':
             thnn_args.append({'type': 'EXPRESSION', 'name': '1'})
+        elif name == 'inplace':
+            thnn_args.append({'type': 'EXPRESSION', 'name': 'false'})
         else:
             raise RuntimeError("{}: can't find binding for '{}'"
                                .format(thnn_function.name, name))
@@ -261,7 +263,8 @@ def backward_declaration(base, thnn_functions):
 
     arguments = []
     arguments.append({'type': 'THTensor*', 'name': 'grad_output'})
-    arguments += [copy.deepcopy(arg) for arg in base['arguments']]
+    arguments += [copy.deepcopy(arg) for arg in base['arguments']
+                  if arg['name'] != 'inplace']
     arguments += base['buffers']
 
     for arg in arguments:
