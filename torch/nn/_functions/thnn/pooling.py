@@ -18,12 +18,13 @@ class MaxPool1d(Function):
         from torch.onnx.symbolic import _unimplemented
         if ceil_mode:
             return _unimplemented("MaxPool1d", "ceil_mode")
+        if set(_single(dilation)) != {1}:
+            return _unimplemented("MaxPool1d", "dilation")
         if stride is None:
             stride = kernel_size
         r = g.op("MaxPool", input,
                  kernel_shape_i=_single(kernel_size),
                  pads_i=_single(padding),
-                 dilations_i=_single(dilation),
                  strides_i=_single(stride))
         return r, None
 
@@ -105,12 +106,13 @@ class MaxPool3d(Function):
         from torch.onnx.symbolic import _unimplemented
         if ceil_mode:
             return _unimplemented("MaxPool3d", "ceil_mode")
+        if set(_triple(dilation)) != {1}:
+            return _unimplemented("MaxPool3d", "dilation")
         if stride is None:
             stride = kernel_size
         r = g.op("MaxPool", input,
                  kernel_shape_i=_triple(kernel_size),
                  pads_i=_triple(padding),
-                 dilations_i=_triple(dilation),
                  strides_i=_triple(stride))
         return r, None
 
