@@ -61,7 +61,12 @@ class RecurrentNetworkExecutorBase {
    * timestep t. On first call, this will initialize the data structures
    * for the given timestep. For subsequent calls, this has no cost.
    */
-  void EnsureTimestepInitialized(int t, Workspace* ws) {
+  void EnsureTimestepInitialized(
+      int t,
+      Workspace* ws,
+      std::map<
+          const ObserverBase<OperatorBase>*,
+          std::unique_ptr<ObserverBase<OperatorBase>>>& observers) {
     if (timestep_ops_template_.size() == 0) {
       CalculateInternalDependencies();
 
@@ -122,6 +127,9 @@ class RecurrentNetworkExecutorBase {
           }
 
           rnn_op.op = CreateOperator(op_copy, ws);
+          for (const auto& observer : observers) {
+            rnn_op.op->AttachObserver(observer.second->clone());
+          }
         } else {
           if (t > max_parallel_timesteps_ && max_parallel_timesteps_ > 0 &&
               workspaces_[t - max_parallel_timesteps_] == ws) {
@@ -129,6 +137,9 @@ class RecurrentNetworkExecutorBase {
                 timestep_ops_[t - max_parallel_timesteps_][rnn_op.order].op;
           } else {
             rnn_op.op = CreateOperator(step_net_def_.op(rnn_op.order), ws);
+            for (const auto& observer : observers) {
+              rnn_op.op->AttachObserver(observer.second->clone());
+            }
           }
         }
         rnn_op.op->DisableEvent();
@@ -140,6 +151,16 @@ class RecurrentNetworkExecutorBase {
 
   void SetMaxParallelTimesteps(int p) {
     max_parallel_timesteps_ = p;
+  }
+
+  size_t NumObserversStepNet() {
+    size_t num = 0;
+    for (auto& ops_at_timestep_t : timestep_ops_) {
+      for (auto& rnn_op : ops_at_timestep_t) {
+        num += rnn_op.op->NumObservers();
+      }
+    }
+    return num;
   }
 
  private:

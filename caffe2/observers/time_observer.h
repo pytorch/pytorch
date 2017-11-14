@@ -53,6 +53,18 @@ class TimeObserver final : public TimeObserverBase<T> {
 };
 
 template <>
+class TimeObserver<OperatorBase> final : public TimeObserverBase<OperatorBase> {
+ public:
+  explicit TimeObserver<OperatorBase>(OperatorBase* subject)
+      : TimeObserverBase<OperatorBase>(subject) {}
+
+  std::unique_ptr<ObserverBase<OperatorBase>> clone() override {
+    return std::unique_ptr<ObserverBase<OperatorBase>>(
+        new TimeObserver<OperatorBase>(this->subject_));
+  }
+};
+
+template <>
 class TimeObserver<NetBase> final : public TimeObserverBase<NetBase> {
  public:
   explicit TimeObserver<NetBase>(NetBase* subject)
