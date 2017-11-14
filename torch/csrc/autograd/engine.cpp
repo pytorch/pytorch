@@ -204,7 +204,9 @@ static variable_list call_function(FunctionTask& task) {
     auto& callback = it_p.first->second;
     if (!callback(&fn, inputs)) return variable_list(fn.next_functions.size());
   }
-
+  if(!task.base->keep_graph) {
+    fn.willReleaseVariables();
+  }
   auto outputs = fn(inputs);
 
   auto& post_callbacks = task.base->post_callbacks;

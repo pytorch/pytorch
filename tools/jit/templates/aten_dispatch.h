@@ -8,7 +8,7 @@
 namespace torch { namespace jit {
 
 struct TensorOp {
-  using op_type = std::function<autograd::variable_list(const autograd::variable_list&)>;
+  using op_type = std::function<void(const std::vector<at::Tensor> &, std::vector<at::Tensor> &)>;
 
   TensorOp(op_type op, std::string name, size_t num_inputs)
     : op(op)

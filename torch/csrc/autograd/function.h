@@ -103,7 +103,10 @@ struct Function : std::enable_shared_from_this<Function> {
 
   // Releases saved variables if the operation won't be reused
   virtual inline void releaseVariables() {}
-
+  // called before a an apply if will release variables is going to be called
+  // allows larger ops like InterpreterAutogradFunction
+  // to incrementally release variables as they run
+  virtual inline void willReleaseVariables() {}
   // Function name for debugging
   virtual std::string name();
 
