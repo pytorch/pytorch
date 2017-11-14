@@ -62,6 +62,8 @@ struct Variable : public at::Tensor {
   inline void rebase_history(VarFlags flags, int output_nr, std::shared_ptr<Function> grad_fn);
 
   std::shared_ptr<Function> grad_accumulator() const;
+  Variable detach() const;
+  void detach_();
 
   inline const std::vector<std::shared_ptr<FunctionPreHook>>& hooks() const;
   inline       std::vector<std::shared_ptr<FunctionPreHook>>& hooks();
@@ -80,9 +82,6 @@ struct Variable : public at::Tensor {
 
   inline const bool& is_volatile() const;
   inline       bool& is_volatile();
-
-  inline Variable detach() const;
-  inline void detach_();
 
   inline bool is_view() const;
   inline Variable& base() const;
@@ -276,21 +275,6 @@ inline const bool& Variable::is_volatile() const {
 }
 inline bool& Variable::is_volatile() {
   return get()->is_volatile;
-}
-
-inline Variable Variable::detach() const {
-  Variable detached = make_variable(data());
-  detached.is_volatile() = is_volatile();
-  detached.version_counter() = version_counter();
-  return std::move(detached);
-}
-inline void Variable::detach_() {
-  if (is_view()) {
-    throw std::runtime_error("Can't detach views in-place. Use detach() instead");
-  }
-  get()->requires_grad = false;
-  output_nr() = 0;
-  get()->_grad_fn = nullptr;
 }
 
 inline bool Variable::is_view()const {

@@ -20,7 +20,7 @@ static PyObject * THPVariable_detach(PyObject* self, PyObject* args)
 {
   HANDLE_TH_ERRORS
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
-  return THPVariable_Wrap(std::move(self_.detach()));
+  return THPVariable_Wrap(self_.detach());
   END_HANDLE_TH_ERRORS
 }
 
