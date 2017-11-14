@@ -14,28 +14,32 @@ EXCLUDE_PATTERN = "bernoulli.*"
 # 1. if broadcasting or without the full list of arguments, add a non-virtual
 #    declaration under Type.h
 TYPE_METHOD_DECLARATION_NON_VIRTUAL = CodeTemplate("""\
-${return_type} ${method_prefix}${api_name}(${formals_with_defaults}) const;
+${return_type} ${api_name}(${formals_with_defaults}) const;
 """)
 # 2. broadcasting functions are implemented in Type.cpp
 TYPE_METHOD_DEFINITION_BROADCAST = CodeTemplate("""\
-${return_type} Type::${method_prefix}${api_name}(${formals}) const {
+${return_type} Type::${api_name}(${formals}) const {
     Tensor ${broadcast_returns};
     std::tie(${broadcast_returns}) = ${broadcast_function}(${broadcast_actuals}, "${api_name}");
     return ${method_prefix_derived}${api_name}(${broadcast_modified_actuals});
 }
 """)
 # 3. add virtual dispatch declaration to Type.h and impl to Type.cpp (this is usually
-#    a default impl because actual implementations are in the derived Types).
+#    a default impl because actual implementations are in the derived Types); method_prefix_derived
+#    is present for providing a base-class definition for a derived-type method with a prefix.
 TYPE_METHOD_DECLARATION = CodeTemplate("""\
-virtual ${return_type} ${method_prefix}${api_name}(${formals_with_defaults}) const;
+virtual ${return_type} ${method_prefix_derived}${api_name}(${formals_with_defaults}) const;
 """)
 TYPE_METHOD_DEFINITION = CodeTemplate("""\
-${return_type} Type::${method_prefix}${api_name}(${formals}) const {
-    throw std::runtime_error(std::string("${api_name} is not implemented for type ") + toString());
+${return_type} Type::${method_prefix_derived}${api_name}(${formals}) const {
+    throw std::runtime_error(std::string("${method_prefix_derived}${api_name} is not implemented for type ") + toString());
 }
 """)
+TYPE_METHOD_DECLARATION_NATIVE = CodeTemplate("""\
+virtual ${return_type} ${api_name}(${formals_with_defaults}) const;
+""")
 TYPE_METHOD_DEFINITION_NATIVE = CodeTemplate("""\
-${return_type} Type::${method_prefix}${api_name}(${formals}) const {
+${return_type} Type::${api_name}(${formals}) const {
     ${return_call} ${native_type_method_dispatch}(${actuals});
 }
 """)
@@ -50,7 +54,7 @@ ${return_type} ${Type}::${method_prefix_derived}${api_name}(${formals}) const {
 }
 """)
 TYPE_DERIVED_DEFINITION_NATIVE = CodeTemplate("""\
-${return_type} ${Type}::${method_prefix}${api_name}(${formals}) const {
+${return_type} ${Type}::${api_name}(${formals}) const {
     ${return_call} ${native_type_method_dispatch}(${actuals});
 }
 """)
@@ -61,7 +65,7 @@ ${return_type} ${api_name}(${method_formals_with_defaults})${const_mark};
 # 7. add non-virtual declaration to Tensor.cpp
 TENSOR_METHOD_DEFINITION = CodeTemplate("""\
 inline ${return_type} Tensor::${api_name}(${method_formals})${const_mark} {
-    return type().${method_prefix}${api_name}(${method_actuals});
+    return type().${api_name}(${method_actuals});
 }
 """)
 # 8. add a method declaration in Functions.h
@@ -80,7 +84,7 @@ static inline ${return_type} ${api_name}(${formals}) {
 # the same name (but different signature) already
 ZERO_DIM_CHECK = CodeTemplate("""\
 if (${check_name}.dim() == 0) {
-    return static_cast<const Type*>(this)->${method_prefix}${api_name}(${zero_dim_actuals});
+    return static_cast<const Type*>(this)->${api_name}(${zero_dim_actuals});
 }""")
 
 ZERO_DIM_ONLY = CodeTemplate("""\
@@ -90,7 +94,7 @@ runtime_error("${api_name} only supports a 0-dimensional ${check_name} tensor, b
 
 SPARSE_CHECK = CodeTemplate("""\
 if(${check_name}.type().isSparse()) {
-    return static_cast<const Type*>(this)->${method_prefix}${api_name}(${sparse_actuals});
+    return static_cast<const Type*>(this)->${api_name}(${sparse_actuals});
 }""")
 
 BUFFER_DEFINITION = CodeTemplate("""\
@@ -442,13 +446,11 @@ def create_generic(top_env, declarations):
         dispatch_tensor = find_dispatch_tensor(formals)
         is_namespace_function = is_function and dispatch_tensor is not None
 
-        # method-only things are prefixed with m_ in Type so that
-        # another function-only variant can exist without the name colliding
-        option['method_prefix'] = 'm_' if is_method and not is_function else ''
-        option['method_prefix_derived'] = option['method_prefix']
+        broadcast_arg = get_broadcast_argument(option)
+        # "s_" for "same size".
+        option['method_prefix_derived'] = '' if broadcast_arg is None else 's_'
         env = nested_dict(option, top_env)
 
-        broadcast_arg = get_broadcast_argument(option)
         if broadcast_arg is None:
             top_env['type_method_declarations'].append(
                 TYPE_METHOD_DECLARATION.substitute(env))
@@ -457,16 +459,10 @@ def create_generic(top_env, declarations):
         else:
             top_env['type_method_declarations'].append(
                 TYPE_METHOD_DECLARATION_NON_VIRTUAL.substitute(env))
-
-            # "s_" for "same size".
-            option['method_prefix_derived'] = 's_' + option['method_prefix']
-            same_size_option = option.copy()
-            same_size_option['method_prefix'] = option['method_prefix_derived']
-            same_size_env = nested_dict(same_size_option, top_env)
             top_env['type_method_declarations'].append(
-                TYPE_METHOD_DECLARATION.substitute(same_size_env))
+                TYPE_METHOD_DECLARATION.substitute(env))
             top_env['type_method_definitions'].append(
-                TYPE_METHOD_DEFINITION.substitute(same_size_env))
+                TYPE_METHOD_DEFINITION.substitute(env))
 
             broadcast_inplace = 'inplace' in broadcast_arg['broadcast']
             broadcast_dims = 'dims:' in broadcast_arg['broadcast']
@@ -502,7 +498,7 @@ def create_generic(top_env, declarations):
 
         output_options.append(OrderedDict([
             ('name', option['api_name']),
-            ('method_prefix', option['method_prefix_derived']),
+            ('method_prefix_derived', option['method_prefix_derived']),
             ('arguments', formals),
             ('method_of', method_of),
             ('mode', option['mode']),
@@ -594,10 +590,7 @@ def create_generic(top_env, declarations):
         dispatch_tensor = find_dispatch_tensor(formals)
         is_namespace_function = is_function and dispatch_tensor is not None
 
-        # method-only things are prefixed with m_ in Type so that
-        # another function-only variant can exist without the name colliding
-        option['method_prefix'] = 'm_' if is_method and not is_function else ''
-        option['method_prefix_derived'] = option['method_prefix']
+        option['method_prefix_derived'] = ''
         env = nested_dict(option, top_env)
 
         broadcast_arg = get_broadcast_argument(option)
@@ -607,7 +600,7 @@ def create_generic(top_env, declarations):
         option['native_type_method_dispatch'] = option['type_method_definition_dispatch']
 
         top_env['type_method_declarations'].append(
-            TYPE_METHOD_DECLARATION.substitute(env))
+            TYPE_METHOD_DECLARATION_NATIVE.substitute(env))
         if isinstance(option['type_method_definition_dispatch'], dict):
             top_env['type_method_definitions'].append(
                 TYPE_METHOD_DEFINITION.substitute(env))
@@ -633,7 +626,7 @@ def create_generic(top_env, declarations):
 
         output_options.append(OrderedDict([
             ('name', option['api_name']),
-            ('method_prefix', option['method_prefix']),
+            ('method_prefix_derived', option['method_prefix_derived']),
             ('arguments', formals),
             ('method_of', method_of),
             ('mode', option['mode']),
