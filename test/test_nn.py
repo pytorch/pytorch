@@ -2778,6 +2778,26 @@ class TestNN(NNTestCase):
 
         self.assertEqual(out1, out2)
 
+    def test_elu_inplace_gradgrad(self):
+        v = Variable(torch.randn(8), requires_grad=True)
+
+        def func(root):
+            x = root.clone()
+            return F.elu(x, inplace=True)
+
+        gradcheck(func, [v])
+        gradgradcheck(func, [v])
+
+    def test_hardtanh_inplace_gradgrad(self):
+        v = Variable(torch.randn(8), requires_grad=True)
+
+        def func(root):
+            x = root.clone()
+            return F.hardtanh(x, inplace=True)
+
+        gradcheck(func, [v])
+        gradgradcheck(func, [v])
+
     def test_batchnorm_raises_error_if_running_mean_is_not_same_size_as_input(self):
         input = Variable(torch.rand(2, 10))
         running_var = torch.rand(10)
