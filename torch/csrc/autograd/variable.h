@@ -62,6 +62,8 @@ struct Variable : public at::Tensor {
   inline void rebase_history(VarFlags flags, int output_nr, std::shared_ptr<Function> grad_fn);
 
   std::shared_ptr<Function> grad_accumulator() const;
+  Variable detach() const;
+  void detach_();
 
   inline const std::vector<std::shared_ptr<FunctionPreHook>>& hooks() const;
   inline       std::vector<std::shared_ptr<FunctionPreHook>>& hooks();

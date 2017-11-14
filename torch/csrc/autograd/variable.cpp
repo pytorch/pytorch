@@ -180,4 +180,21 @@ Type* VariableImpl::getType(const Type& baseType)
   return vt.types[static_cast<int>(baseType.ID())].get();
 }
 
+Variable Variable::detach() const {
+  Variable detached = make_variable(data());
+  detached.is_volatile() = is_volatile();
+  detached.version_counter() = version_counter();
+  return std::move(detached);
+}
+
+void Variable::detach_() {
+  if (is_view()) {
+    throw std::runtime_error("Can't detach views in-place. Use detach() instead");
+  }
+  get()->requires_grad = false;
+  output_nr() = 0;
+  get()->_grad_fn = nullptr;
+}
+
+
 }} // namespace torch::autograd
