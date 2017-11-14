@@ -237,12 +237,13 @@ def softmax(g, input, dim=None):
 def max_pool2d(g, input, kernel_size, stride, padding, dilation, ceil_mode):
     if ceil_mode:
         return _unimplemented("max_pool2d", "ceil_mode")
+    if set(_pair(dilation)) != {1}:
+        return _unimplemented("max_pool2d", "dilation")
     if not stride:
         stride = kernel_size
     r = g.op("MaxPool", input,
              kernel_shape_i=_pair(kernel_size),
              pads_i=_pair(padding),
-             dilations_i=_pair(dilation),
              strides_i=_pair(stride))
     return r, None
 
