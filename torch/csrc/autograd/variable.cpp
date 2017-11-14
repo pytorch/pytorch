@@ -139,6 +139,8 @@ void VariableViewImpl::rebase_history(VarFlags flags, int output_nr, std::shared
   if (grad_fn) {
     TORCH_ASSERTM(grad_fn->num_inputs == 1, "Functions which modify views in-place must return a single Variable");
   } else {
+    // TODO: perhaps we should enable this case by setting base.requires_grad=False
+    // and base.grad_fn = nullptr.
     TORCH_ASSERTM(!base.requires_grad(), "base.requires_grad does not match view.requires_grad");
   }
   this->requires_grad = flags.requires_grad;
