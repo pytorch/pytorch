@@ -184,6 +184,20 @@ inline __host__ __device__ half tanh(half a) {
   return THCNumerics<half>::tanh(a);
 }
 
+#if defined(_MSC_VER) && CUDA_VERSION >= 9000
+inline __host__ __device__ half operator+(half a, int b) {
+  return THCNumerics<half>::add(a, ScalarConvert<int, half>::to(b));
+}
+
+inline __host__ __device__ double operator+(half a, double b) {
+  return ScalarConvert<half, double>::to(a) + b;
+}
+
+inline __host__ __device__ half operator*(half a, bool b) {
+  return THCNumerics<half>::mul(a, ScalarConvert<bool, half>::to(b));
+}
+#endif
+
 // comparison functions
 
 inline __host__ __device__ bool operator<(half a, half b) {
