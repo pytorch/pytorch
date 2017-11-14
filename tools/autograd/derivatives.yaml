@@ -92,6 +92,9 @@
   vec1: grad.mv(vec2) * alpha
   vec2: grad.t().mv(vec1) * alpha
 
+- name: alias(Tensor self)
+  self: grad
+
 - name: all  # fallthrough
 
 - name: any  # fallthrough
