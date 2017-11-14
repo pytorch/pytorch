@@ -607,24 +607,16 @@ def create_generic(top_env, declarations):
         if broadcast_arg is not None:
             raise Exception("broadcasting is not yet supported for native functions, "
                             "but specified for function {}", option['name'])
-
-        def_level = option.get('type_method_definition_level')
-        if def_level != 'base' and def_level != 'backend':
-            raise Exception("\'base\' and \'backend\' are currently the only supported values for "
-                            "type_method_definition_level for native functions, got level \'{}\' for {}"
-                            .format(def_level, option['name']))
         option['native_type_method_dispatch'] = option['type_method_definition_dispatch']
 
         top_env['type_method_declarations'].append(
             TYPE_METHOD_DECLARATION.substitute(env))
-        if def_level == 'base':
-            top_env['type_method_definitions'].append(
-                TYPE_METHOD_DEFINITION_NATIVE.substitute(env))
-        elif def_level == 'backend':
+        if isinstance(option['type_method_definition_dispatch'], dict):
             top_env['type_method_definitions'].append(
                 TYPE_METHOD_DEFINITION.substitute(env))
         else:
-            raise Exception("shouldn't get here")
+            top_env['type_method_definitions'].append(
+                TYPE_METHOD_DEFINITION_NATIVE.substitute(env))
 
         method_of = ['Type']
         if is_method:
@@ -1004,13 +996,7 @@ def create_derived(backend_type_env, declarations):
                 TYPE_DERIVED_DEFINITION.substitute(env))
 
     def process_native(option):
-        def_level = option.get('type_method_definition_level')
-        if def_level != 'base' and def_level != 'backend':
-            raise Exception("\'base\' and \'backend\' are currently the only supported values for "
-                            "type_method_definition_level for native functions, got level {} for {}"
-                            .format(def_level, option['name']))
-
-        if def_level == 'backend':
+        if isinstance(option['type_method_definition_dispatch'], dict):
             pair = (backend_type_env['Backend'],
                     backend_type_env['ScalarName'])
             if pair in option['backend_type_pairs']:

@@ -57,7 +57,6 @@ def parse(filename):
         in_cpp_native_decl = False
         for line in file.readlines():
             if '[NativeFunction]' in line:
-                dispatch_level = None
                 dispatch = None
                 decl_parse = ''
                 declaration = {'mode': 'native'}
@@ -87,15 +86,6 @@ def parse(filename):
                     if dispatch is None:
                         dispatch = 'at::native::' + declaration['name']
                     declaration['type_method_definition_dispatch'] = dispatch
-
-                    if dispatch_level is None:
-                        dispatch_level = 'backend' if isinstance(dispatch, dict) else 'base'
-                    declaration['type_method_definition_level'] = dispatch_level
-                    if dispatch_level != 'base' and dispatch_level != 'backend':
-                        raise RuntimeError("Native functions currently only support (and must be specified with) "
-                                           "\'base\' or \'backend\' type_method_definition_level, got {}"
-                                           .format(dispatch_level))
-
                     declarations.append(declaration)
                 elif line == '*/\n':
                     pass
@@ -117,8 +107,6 @@ def parse(filename):
                 value = ls[1].strip()
                 if key == 'variants':
                     declaration[key] = [x.strip() for x in value.split(',')]
-                elif key == 'type_method_definition_level':
-                    dispatch_level = value
                 elif key == 'type_method_definition_dispatch':
                     if value == '{':
                         dispatch = {}
