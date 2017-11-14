@@ -180,3 +180,8 @@
     - type: Tensor
       name: grad_theta
   variants: function
+
+- func: conv_tbc(Tensor self, Tensor weight, Tensor bias, int64_t pad) -> Tensor
+
+- func: conv_tbc_backward(Tensor self, Tensor input, Tensor weight, Tensor bias, int64_t pad) -> (Tensor, Tensor, Tensor)
+
