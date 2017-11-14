@@ -44,30 +44,31 @@ Callback getCallback(Node *node) {
 
 // We need some lists for inputs and outputs. To keep all the memory
 // contiguous we allocate a single vector and use offsets into the vector
-// which are stored in the RegList struct
-// start is an offset into int_data of Code if this list is integers
-// and bool_data of Code if this list is booleans (only free_flags)
-struct RegList {
+// which are stored in the ListHandle struct
+// start is an offset into int_data of Code for ListHandle<int>
+// and bool_data of Code for ListHandle<bool>
+template<typename T>
+struct ListHandle {
   int start;
   int size;
 };
 
 struct UseList {
   // values to be used
-  RegList values;
+  ListHandle<int> values;
   // boolean flags indicating whether to free the Tensor after this use
-  RegList free_flags;
+  ListHandle<bool> free_flags;
 };
 
 // one instruction plus meta-data
 struct Instruction {
   Callback callback;
   UseList inputs;
-  RegList outputs;
+  ListHandle<int> outputs;
 };
 
 struct Stage {
-  RegList inputs; // inputs to define for the stage
+  ListHandle<int> inputs; // inputs to define for the stage
   UseList outputs; // values consumed by the return
   std::vector<Instruction> instructions;
 };
@@ -88,13 +89,13 @@ struct CodeImpl {
       cur_stage = node->stage();
       stages.back().instructions.emplace_back();
       auto & inst = stages.back().instructions.back();
-      intListBegin(inst.inputs.values);
+      listBegin(inst.inputs.values);
       for(auto input : node->inputs()) {
-        intListInsert(inst.inputs.values, getOrAllocateRegister(input, true));
+        listInsert(inst.inputs.values, getOrAllocateRegister(input, true));
       }
-      intListBegin(inst.outputs);
+      listBegin(inst.outputs);
       for(auto output : node->outputs()) {
-        intListInsert(inst.outputs, getOrAllocateRegister(output));
+        listInsert(inst.outputs, getOrAllocateRegister(output));
       }
       inst.callback = getCallback(node);
     }
@@ -108,10 +109,10 @@ struct CodeImpl {
     // this is done with a backward scan where we mark the first time we see it
     std::unordered_set<int> seen_registers;
     auto scanUses = [&](UseList & u) {
-      boolListBegin(u.free_flags);
+      listBegin(u.free_flags);
       for(int i = 0; i < u.values.size; i++) {
-        int reg = Int(u.values,i);
-        boolListInsert(u.free_flags, seen_registers.count(reg) == 0);
+        int reg = get(u.values,i);
+        listInsert(u.free_flags, seen_registers.count(reg) == 0);
         seen_registers.insert(reg);
       }
     };
@@ -127,7 +128,7 @@ struct CodeImpl {
       cur_stage++;
       stages.emplace_back();
       auto & stage = stages.back();
-      intListBegin(stage.inputs);
+      listBegin(stage.inputs);
       for(;input_pos < graph->inputs().size(); input_pos++) {
         auto input = graph->inputs()[input_pos];
         if((int64_t)input->stage() > cur_stage)
@@ -136,34 +137,36 @@ struct CodeImpl {
         // reference to the tensor data, otherwise we would fail to clean them
         // up since they do not have a last use at which to free them
         int reg = input->uses().size() > 0 ? getOrAllocateRegister(input) : -1;
-        intListInsert(stage.inputs, reg);
+        listInsert(stage.inputs, reg);
       }
-      intListBegin(stage.outputs.values);
+      listBegin(stage.outputs.values);
       for(;output_pos < graph->outputs().size(); output_pos++) {
         auto output = graph->outputs()[output_pos];
         if((int64_t)output->stage() > cur_stage)
           break;
-        intListInsert(stage.outputs.values, getOrAllocateRegister(output));
+        listInsert(stage.outputs.values, getOrAllocateRegister(output));
       }
     }
   }
   // helpers to build/access RegList objects
-  int Int(RegList & list, int i) {
+  int get(ListHandle<int> & list, int i) {
     return int_data[list.start + i];
   }
-  void intListBegin(RegList & list) {
+  void listBegin(ListHandle<int> & list) {
     list.start = int_data.size();
     list.size = 0;
   }
-  void intListInsert(RegList & list, int value) {
+  void listInsert(ListHandle<int> & list, int value) {
+    JIT_ASSERTM(list.start + list.size == (int)int_data.size(), "another list already started");
     int_data.push_back(value);
     list.size++;
   }
-  void boolListBegin(RegList & list) {
+  void listBegin(ListHandle<bool> & list) {
     list.start = bool_data.size();
     list.size = 0;
   }
-  void boolListInsert(RegList & list, int value) {
+  void listInsert(ListHandle<bool> & list, int value) {
+    JIT_ASSERTM(list.start + list.size == (int)bool_data.size(), "another list already started");
     bool_data.push_back(value);
     list.size++;
   }
@@ -206,7 +209,7 @@ struct InterpreterStateImpl {
       auto & stage = function->stages[current_stage++];
       JIT_ASSERT((int)inputs.size() == stage.inputs.size);
       for(int i = 0; i < stage.inputs.size; i++) {
-        int reg = Int(stage.inputs,i);
+        int reg = get(stage.inputs,i);
         if(reg >= 0) { // otherwise this input is dead, and we do not store it to avoid holding the reference
           registers[reg] = inputs[i];
         }
@@ -216,7 +219,7 @@ struct InterpreterStateImpl {
         loadTensorsFromRegisters(inst.inputs, input_buffer);
         inst.callback(input_buffer, output_buffer);
         for(int i = 0; i < inst.outputs.size; i++) {
-          int reg = Int(inst.outputs,i);
+          int reg = get(inst.outputs,i);
           registers[reg] = std::move(output_buffer[i]);
           //std::cout << "registers[" << reg << "] = outputs[" << i << "](" << output_buffer[i].defined() << ")\n";
         }
@@ -226,18 +229,18 @@ struct InterpreterStateImpl {
       outputs.clear();
       loadTensorsFromRegisters(stage.outputs, outputs);
   }
-  int Int(const RegList & list, int i) {
+  int get(const ListHandle<int> & list, int i) {
     return int_data[list.start + i];
   };
-  bool Bool(const RegList & list, int i) {
+  bool get(const ListHandle<bool> & list, int i) {
     return bool_data[list.start + i];
   }
   void loadTensorsFromRegisters(const UseList & uses, std::vector<at::Tensor> & outputs) {
     for(int i = 0; i < uses.values.size; i++) {
-      int reg = Int(uses.values,i);
+      int reg = get(uses.values,i);
       auto & value = registers[reg];
       //std::cout << "inputs[" << i << "] = registers[" << reg << "] (" << value.defined() << ")";
-      if(Bool(uses.free_flags,i)) {
+      if(get(uses.free_flags,i)) {
         //std::cout << " and FREED";
         outputs.push_back(std::move(value));
       } else {
