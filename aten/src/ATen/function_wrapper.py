@@ -32,7 +32,7 @@ virtual ${return_type} ${method_prefix_derived}${api_name}(${formals_with_defaul
 """)
 TYPE_METHOD_DEFINITION = CodeTemplate("""\
 ${return_type} Type::${method_prefix_derived}${api_name}(${formals}) const {
-    throw std::runtime_error(std::string("${method_prefix_derived}${api_name} is not implemented for type ") + toString());
+    runtime_error("${method_prefix_derived}${api_name} is not implemented for type {}", toString());
 }
 """)
 TYPE_METHOD_DECLARATION_NATIVE = CodeTemplate("""\
@@ -40,7 +40,7 @@ virtual ${return_type} ${api_name}(${formals_with_defaults}) const;
 """)
 TYPE_METHOD_DEFINITION_NATIVE = CodeTemplate("""\
 ${return_type} Type::${api_name}(${formals}) const {
-    ${return_call} ${native_type_method_dispatch}(${actuals});
+    ${return_call} at::native::${native_type_method_dispatch}(${actuals});
 }
 """)
 # 4. add virtual override to TypeDerived.h
@@ -55,7 +55,7 @@ ${return_type} ${Type}::${method_prefix_derived}${api_name}(${formals}) const {
 """)
 TYPE_DERIVED_DEFINITION_NATIVE = CodeTemplate("""\
 ${return_type} ${Type}::${api_name}(${formals}) const {
-    ${return_call} ${native_type_method_dispatch}(${actuals});
+    ${return_call} at::native::${native_type_method_dispatch}(${actuals});
 }
 """)
 # 6. add non-virtual declaration to Tensor.h
@@ -77,6 +77,10 @@ FUNCTION_DEFINITION = CodeTemplate("""\
 static inline ${return_type} ${api_name}(${formals}) {
     return ${inferred_type}.${api_name}(${actuals});
 }
+""")
+# 10. add a native declaration for a native function
+NATIVE_DECLARATION = CodeTemplate("""\
+${return_type} ${native_type_method_dispatch}(${formals_with_defaults});
 """)
 
 # We need to cast to the base type because C++ may hide the base class
@@ -597,16 +601,25 @@ def create_generic(top_env, declarations):
         if broadcast_arg is not None:
             raise Exception("broadcasting is not yet supported for native functions, "
                             "but specified for function {}", option['name'])
-        option['native_type_method_dispatch'] = option['type_method_definition_dispatch']
 
         top_env['type_method_declarations'].append(
             TYPE_METHOD_DECLARATION_NATIVE.substitute(env))
         if isinstance(option['type_method_definition_dispatch'], dict):
             top_env['type_method_definitions'].append(
                 TYPE_METHOD_DEFINITION.substitute(env))
+            generated_native_functions = []
+            for _, value in option['type_method_definition_dispatch'].items():
+                if value not in generated_native_functions:
+                    option['native_type_method_dispatch'] = value
+                    top_env['native_function_declarations'].append(
+                        NATIVE_DECLARATION.substitute(env))
+                generated_native_functions.append(value)
         else:
+            option['native_type_method_dispatch'] = option['type_method_definition_dispatch']
             top_env['type_method_definitions'].append(
                 TYPE_METHOD_DEFINITION_NATIVE.substitute(env))
+            top_env['native_function_declarations'].append(
+                NATIVE_DECLARATION.substitute(env))
 
         method_of = ['Type']
         if is_method:

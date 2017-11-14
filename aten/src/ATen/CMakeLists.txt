@@ -141,13 +141,12 @@ endif()
 file(READ ${CMAKE_CURRENT_BINARY_DIR}/generated_cpp.txt generated_cpp)
 
 FILE(GLOB_RECURSE all_templates "templates/*")
-SET(native_functions ${CMAKE_CURRENT_SOURCE_DIR}/native/NativeFunctions.h)
 
 FILE(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/ATen)
 
 ADD_CUSTOM_COMMAND(OUTPUT ${generated_cpp}
 COMMAND ${GEN_COMMAND}
-DEPENDS ${all_python} ${all_templates} ${native_functions} ${cwrap_files})
+DEPENDS ${all_python} ${all_templates} ${cwrap_files})
 
 SET(all_cpp ${base_cpp} ${native_cpp} ${generated_cpp} ${ATen_CPU_SRCS})
 

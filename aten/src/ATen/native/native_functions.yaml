@@ -1,0 +1,46 @@
+# COMMENT HERE
+
+- func: type_as(Tensor self, Tensor other) -> Tensor
+
+- func: expand_as(Tensor self, Tensor other) -> Tensor
+
+- func: split(Tensor self, int64_t split_size, int64_t dim=0) -> TensorList
+
+- func: chunk(Tensor self, int64_t chunks, int64_t dim=0) -> TensorList
+
+- func: size(Tensor self, int64_t dim) -> int64_t
+
+- func: stride(Tensor self, int64_t dim) -> int64_t
+
+- func: is_same_size(Tensor self, Tensor other) -> bool
+
+- func: permute(Tensor self, IntList dims) -> Tensor
+
+- func: expand(Tensor self, IntList size) -> Tensor
+
+- func: squeeze(Tensor self) -> Tensor
+
+- func: squeeze(Tensor self, int64_t dim) -> Tensor
+
+- func: squeeze_(Tensor self) -> Tensor
+
+- func: squeeze_(Tensor self, int64_t dim) -> Tensor
+
+- func: unsqueeze(Tensor self, int64_t dim) -> Tensor
+
+- func: unsqueeze_(Tensor self, int64_t dim) -> Tensor
+
+- func: stack(TensorList tensors, int64_t dim=0) -> Tensor
+  variants: function
+
+- func: RoiPooling2d_forward(Tensor input, Tensor rois, int64_t pooledHeight, int64_t pooledWidth, double spatialScale) -> (Tensor, Tensor)
+  variants: function
+  dispatch:
+    CPU: RoiPooling2d_forward_cpu
+    CUDA: RoiPooling2d_forward_cuda
+
+- func: RoiPooling2d_backward(Tensor input, Tensor rois, int64_t pooledHeight, int64_t pooledWidth, double spatialScale, Tensor gradOutput, Tensor argmaxes) -> Tensor
+  variants: function
+  dispatch:
+    CPU: RoiPooling2d_backward_cpu
+    CUDA: RoiPooling2d_backward_cuda

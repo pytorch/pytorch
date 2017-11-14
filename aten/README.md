@@ -230,7 +230,8 @@ and implementations for all of the tensor methods it supports.  The main
 entry point for the script which does all this work is
 [`src/ATen/gen.py`](src/ATen/gen.py), which ingests
 [`src/ATen/Declarations.cwrap`](src/ATen/Declarations.cwrap),
-[`src/ATen/nn.yaml`](src/ATen/nn.yaml) and the THNN/THCUNN headers and
+[`src/ATen/nn.yaml`](src/ATen/nn.yaml),
+['src/ATen/native/native_functions.yaml](src/ATen/native/native_functions.yaml] and the THNN/THCUNN headers and
 produces all of the headers and wrapping code necessary to generate
 the ATen interface.
 

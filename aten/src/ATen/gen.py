@@ -57,7 +57,7 @@ TENSOR_METHODS_H = CodeTemplate.from_file(TEMPLATE_PATH + "/TensorMethods.h")
 
 FUNCTIONS_H = CodeTemplate.from_file(TEMPLATE_PATH + "/Functions.h")
 
-NATIVE_FUNCTIONS_PATH = options.source_path + "/native/NativeFunctions.h"
+NATIVE_FUNCTIONS_H = CodeTemplate.from_file(TEMPLATE_PATH + "/NativeFunctions.h")
 
 generators = {
     'CPUGenerator.h': {
@@ -101,6 +101,7 @@ top_env = {
     'function_declarations': [],
     'function_definitions': [],
     'type_ids': [],
+    'native_function_declarations': [],
 }
 
 
@@ -252,14 +253,15 @@ def generate_storage_type_and_tensor(backend, density, scalar_type, declarations
 
 
 cwrap_files = [f for f in files if f.endswith('.cwrap')]
-nn_files = [f for f in files if f.endswith('.yaml') or f.endswith('.h')]
+nn_files = [f for f in files if f.endswith('nn.yaml') or f.endswith('.h')]
+native_files = [f for f in files if f.endswith('native_functions.yaml')]
 
 declarations = [d
                 for file in cwrap_files
                 for d in cwrap_parser.parse(file)]
 print(nn_files)
 declarations += nn_parse.run(nn_files)
-declarations += native_parse.parse(NATIVE_FUNCTIONS_PATH)
+declarations += native_parse.run(native_files)
 declarations = preprocess_declarations.run(declarations)
 for fname, env in generators.items():
     write(fname, GENERATOR_DERIVED.substitute(env))
@@ -292,6 +294,7 @@ write('TensorMethods.h', TENSOR_METHODS_H.substitute(top_env))
 write('Functions.h', FUNCTIONS_H.substitute(top_env))
 write('Dispatch.h', dispatch_macros.create(all_types))
 write('Copy.cpp', copy_wrapper.create(all_types))
+write('NativeFunctions.h', NATIVE_FUNCTIONS_H.substitute(top_env))
 
 if options.output_dependencies is not None:
     output_dependencies_file.close()
