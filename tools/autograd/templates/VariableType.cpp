@@ -76,6 +76,12 @@ const char * VariableType::toString() const {
 size_t VariableType::elementSizeInBytes() const {
   return baseType->elementSizeInBytes();
 }
+Type & VariableType::toBackend(Backend b) const {
+  return *VariableImpl::getType(baseType->toBackend(b));
+}
+Type & VariableType::toScalarType(ScalarType s) const {
+  return *VariableImpl::getType(baseType->toScalarType(s));
+}
 TypeID VariableType::ID() const {
   throw std::runtime_error("VariableType::ID() not implemented");
 }
