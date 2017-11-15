@@ -18,7 +18,7 @@ namespace torch { namespace autograd {
 jit::node_list ConvForward::symbolic(SymbolicContext* ctx, jit::node_list inputs) {
   auto & g = ctx->graph;
   // See Note [Caffe2ConvTranspose]
-  auto n = g->create(!transposed ? jit::kConv : jit::kCaffe2ConvTranspose,
+  auto n = g->create(!transposed ? jit::kConv : jit::kConvTranspose,
                                    {inputs.at(0), inputs.at(1)});
 
   // Irritatingly, Caffe2 requires us to specify kernels,
@@ -55,6 +55,8 @@ jit::node_list ConvForward::symbolic(SymbolicContext* ctx, jit::node_list inputs
   n->i_(jit::kgroup,groups);
 
   // Not in ONNX?
+  // TODO: implement it once ConvTranspose in ONNX gets `adj` argument instead
+  // of providing `output_shape`
   for (int p : output_padding) {
     JIT_EXPECTM(p == 0, "output padding is not supported.");
   }
