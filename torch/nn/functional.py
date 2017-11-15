@@ -835,7 +835,7 @@ def softmax(input, dim=None, _stacklevel=3):
     return torch._C._nn.softmax(input, dim)
 
 
-def sample_gumbel(shape, eps=1e-10):
+def sample_gumbel(shape, eps=1e-10, out=None):
     """
     Sample from Gumbel(0, 1)
 
@@ -843,7 +843,7 @@ def sample_gumbel(shape, eps=1e-10):
     https://github.com/ericjang/gumbel-softmax/blob/3c8584924603869e90ca74ac20a6a03d99a91ef9/Categorical%20VAE.ipynb ,
     (MIT license)
     """
-    U = torch.rand(shape).float()
+    U = out.resize_(shape).uniform_() if out is not None else torch.rand(shape)
     return - torch.log(eps - torch.log(U + eps))
 
 
@@ -856,7 +856,7 @@ def gumbel_softmax_sample(logits, tau=1, eps=1e-10):
     (MIT license)
     """
     dims = len(logits.size())
-    gumbel_noise = sample_gumbel(logits.size(), eps=eps)
+    gumbel_noise = sample_gumbel(logits.size(), eps=eps, out=logits.data.new())
     y = logits + Variable(gumbel_noise)
     return softmax(y / tau, dims - 1)
 
@@ -887,7 +887,7 @@ def gumbel_softmax(logits, tau=1, hard=False, eps=1e-10):
         _, k = y_soft.data.max(-1)
         # this bit is based on
         # https://discuss.pytorch.org/t/stop-gradients-for-st-gumbel-softmax/530/5
-        y_hard = torch.FloatTensor(*shape).zero_().scatter_(-1, k.view(-1, 1), 1.0)
+        y_hard = logits.data.new(*shape).zero_().scatter_(-1, k.view(-1, 1), 1.0)
         # this cool bit of code achieves two things:
         # - makes the output value exactly one-hot (since we add then
         #   subtract y_soft value)

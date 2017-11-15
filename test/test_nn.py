@@ -1014,9 +1014,10 @@ class TestNN(NNTestCase):
         res_F = F.embedding(a, embeddings)
         self.assertEqual(res_old, res_F)
 
-    def test_gumbel_softmax_st(self):
-        old_rng_state = torch.get_rng_state()
-        torch.manual_seed(123)
+    def _test_gumbel_softmax_st(self, cuda):
+        th = torch.cuda if cuda else torch
+        old_rng_state = th.get_rng_state()
+        th.manual_seed(42)
         """
         Things we might want to check:
         - if we make various draws, do we get different one-hot values?
@@ -1030,6 +1031,12 @@ class TestNN(NNTestCase):
         logits_softmax = torch.nn.functional.softmax(Variable(logits), 1)
         y_draws = torch.zeros(num_draws, K)
         preds = torch.zeros(num_draws)
+
+        if cuda:
+            logits = logits.cuda()
+            y_draws = y_draws.cuda()
+            preds = preds.cuda()
+
         for draw in range(num_draws):
             logits_var = Variable(logits, requires_grad=True)
             y_draw = torch.nn.functional.gumbel_softmax(
@@ -1038,7 +1045,7 @@ class TestNN(NNTestCase):
             assert y_draw.size() == logits.size()
             # check we have a gradient
             assert y_draw.requires_grad
-            err = y_draw - Variable(torch.FloatTensor([[0, 0.5, 0.3]]))
+            err = y_draw - Variable(logits.new([[0, 0.5, 0.3]]))
             loss = (err * err).sum()
             loss.backward()
             assert logits_var.grad.abs().min().data[0] > 0.001
@@ -1054,7 +1061,14 @@ class TestNN(NNTestCase):
         num_class_one = (preds == 1).int().sum()
         assert num_class_one < num_draws
         assert num_class_one > num_draws / 3
-        torch.set_rng_state(old_rng_state)
+        th.set_rng_state(old_rng_state)
+
+    def test_gumbel_softmax_st(self):
+        self._test_gumbel_softmax_st(False)
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    def test_gumbel_softmax_st_cuda(self):
+        self._test_gumbel_softmax_st(True)
 
     def _test_EmbeddingBag(self, cuda, mode):
         # check a known test example
