@@ -50,7 +50,7 @@ ScalarType VariableType::scalarType() const {
 Backend VariableType::backend() const {
   return baseType->backend();
 }
-bool VariableType::isCuda() const { return baseType->isCuda(); }
+bool VariableType::is_cuda() const { return baseType->is_cuda(); }
 bool VariableType::isSparse() const { return baseType->isSparse(); }
 bool VariableType::isDistributed() const { return baseType->isDistributed(); }
 

@@ -54,7 +54,7 @@ auto BatchNormForward::apply(const variable_list& inputs) -> variable_list {
 
   bool use_cudnn = false;
 #ifdef WITH_CUDNN
-  use_cudnn = (input.type().isCuda()
+  use_cudnn = (input.type().is_cuda()
                && input.type().scalarType() != at::kHalf
                && weight.defined() && bias.defined()
                && input.size(0) <= 131070

@@ -98,7 +98,7 @@ auto ConvParams::view1d_as_2d() -> void {
 
 auto ConvParams::use_cudnn(const at::Tensor& input) const -> bool {
 #ifdef WITH_CUDNN
-  if (!input.type().isCuda() || !cudnn_enabled) {
+  if (!input.type().is_cuda() || !cudnn_enabled) {
     return false;
   }
   if (deterministic && is_dilated()) {
@@ -132,7 +132,7 @@ auto ConvParams::use_nnpack(const at::Tensor& input) const -> bool {
 // a depthwise multiplier)
 auto ConvParams::is_depthwise(
         const at::Tensor& input, const at::Tensor& weight, int groups) const -> bool {
-  return input.type().isCuda() &&
+  return input.type().is_cuda() &&
          !transposed &&
          input.ndimension() == 4 &&
          input.size(1) == groups &&
@@ -541,14 +541,14 @@ auto ConvBackwardBackward::apply(const variable_list& grad_grad_inputs) -> varia
   // Compute ggO = conv(ggI, w) + conv(i, ggW) + ggb
   Variable ggO;
   if (ggI.defined()) {
-    if (weight.type().isCuda()) {
+    if (weight.type().is_cuda()) {
       weight = apply_fn<Contiguous>()(weight);
     }
     ggO = apply_fn<ConvForward>(*this)(ggI, weight, Variable());
   }
 
   if (ggW.defined()) {
-    if (ggW.type().isCuda()) {
+    if (ggW.type().is_cuda()) {
       ggW = apply_fn<Contiguous>()(ggW);
     }
     auto ggW_term = apply_fn<ConvForward>(*this)(input, ggW, Variable());
@@ -596,7 +596,7 @@ auto ConvBackwardBackward::apply(const variable_list& grad_grad_inputs) -> varia
     Variable gWt;
     // Compute conv
     if (groups == 1) {
-      if (gOt.type().isCuda()) {
+      if (gOt.type().is_cuda()) {
         gOt = apply_fn<Contiguous>()(gOt);
       }
 
@@ -612,7 +612,7 @@ auto ConvBackwardBackward::apply(const variable_list& grad_grad_inputs) -> varia
       for (int g = 0; g < groups; ++g) {
         auto ggIt_g = subvariable(ggIt, 0, groups, g);
         auto gOt_g = subvariable(gOt, 0, groups, g);
-        if (gOt_g.type().isCuda()) {
+        if (gOt_g.type().is_cuda()) {
           gOt_g = apply_fn<Contiguous>()(gOt_g);
         }
 
@@ -652,7 +652,7 @@ auto ConvBackwardBackward::apply(const variable_list& grad_grad_inputs) -> varia
     gi_conv_params.transposed = !transposed;
 
     if (transposed) {
-      if (gO.type().isCuda()) {
+      if (gO.type().is_cuda()) {
         gO = apply_fn<Contiguous>()(gO);
       }
       gI = apply_fn<ConvForward>(gi_conv_params)(gO, ggW, Variable());
@@ -704,7 +704,7 @@ auto ConvBackwardBackward::apply(const variable_list& grad_grad_inputs) -> varia
 
       Variable gIt;
       if (groups == 1) {
-        if (gOt.type().isCuda()) {
+        if (gOt.type().is_cuda()) {
           gOt = apply_fn<Contiguous>()(gOt);
         }
 
@@ -714,7 +714,7 @@ auto ConvBackwardBackward::apply(const variable_list& grad_grad_inputs) -> varia
         for (int g = 0; g < groups; ++g) {
           auto ggWt_g = subvariable(ggWt, 1, groups, g);
           auto gOt_g = subvariable(gOt, 0, groups, g);
-          if (gOt_g.type().isCuda()) {
+          if (gOt_g.type().is_cuda()) {
             gOt_g = apply_fn<Contiguous>()(gOt_g);
           }
 
@@ -793,7 +793,7 @@ static at::Tensor compute_output(
               columns, ones);
         }
       }
-    } else if (dim == 5 && (input.type().isCuda() || dilated)) {
+    } else if (dim == 5 && (input.type().is_cuda() || dilated)) {
       return at::conv_dilated3d_forward(
           input, weight, kernel_size, bias,
           stride, padding, dilation,
@@ -886,7 +886,7 @@ static std::tuple<Tensor, Tensor, Tensor> compute_backward(
               columns, ones, output_mask);
         }
       }
-    } else if (dim == 5 && (input.type().isCuda() || dilated)) {
+    } else if (dim == 5 && (input.type().is_cuda() || dilated)) {
         return at::conv_dilated3d_backward(
             grad_output, input, weight, kernel_size,
             stride, padding, dilation,

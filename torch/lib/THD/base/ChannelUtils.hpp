@@ -55,7 +55,7 @@ enum class DeviceType : std::uint8_t {
 };
 
 inline DeviceType getDeviceType(at::Tensor& tensor) {
-    return tensor.type().isCuda() ? DeviceType::CUDA : DeviceType::CPU;
+    return tensor.type().is_cuda() ? DeviceType::CUDA : DeviceType::CPU;
 }
 
 } // namespace thd

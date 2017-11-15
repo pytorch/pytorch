@@ -85,8 +85,8 @@ static void _check_inputs(std::vector<at::Tensor> &inputs, std::vector<at::Tenso
     auto input = inputs[i];
     auto output = outputs[i];
 
-    if (!(input.type().isCuda() && !input.type().isSparse()
-	  && output.type().isCuda()  && !output.type().isSparse())) {
+    if (!(input.type().is_cuda() && !input.type().isSparse()
+	  && output.type().is_cuda()  && !output.type().isSparse())) {
       throw std::runtime_error("input and output elements have to be cuda dense Tensors");
     }
 
