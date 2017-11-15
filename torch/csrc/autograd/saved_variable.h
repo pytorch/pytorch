@@ -8,6 +8,7 @@
 #include "torch/csrc/jit/tracer_state.h"
 #include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/autograd/variable_version.h"
+#include "torch/csrc/utils/tensor_geometry.h"
 #include "torch/csrc/Types.h"
 
 namespace torch { namespace autograd {
@@ -25,8 +26,7 @@ struct SavedVariable {
     , is_volatile(false)
     , expected_version(-1) {}
 
-  SavedVariable(const Variable& variable, Function* saved_for);
-
+  SavedVariable(const Variable& variable, bool is_output);
 
   at::Tensor data;
   // The gradient function associated with this node. If has_grad_fn
@@ -41,7 +41,6 @@ struct SavedVariable {
   bool is_volatile;
   int expected_version;
   int output_nr;
-  Variable base;
   std::unique_ptr<jit::tracer::ValueTracingState> tracing_state;
 
   Variable unpack(std::shared_ptr<Function> saved_for=nullptr) const;

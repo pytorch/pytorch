@@ -100,6 +100,7 @@ struct CopySlices : public Function {
   CopySlices(const Variable& base, TensorGeometry view, std::shared_ptr<Function> fn);
 
   virtual variable_list apply(const variable_list& grads) override;
+  virtual void releaseVariables() override;
 
   TensorGeometry base;
   TensorGeometry view;

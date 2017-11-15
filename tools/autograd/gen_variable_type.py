@@ -653,8 +653,7 @@ def create_variable_type(top_env, aten_declarations):
                     assert not is_output
                 if option['inplace'] and is_output:
                     var = 'self'
-                ptr = 'grad_fn.get()' if is_output else 'nullptr'
-                expr = 'SavedVariable({}, {})'.format(var, ptr)
+                expr = 'SavedVariable({}, {})'.format(var, str(is_output).lower())
             stmts.append('grad_fn->{} = {};'.format(name, expr))
         return stmts
 
