@@ -26,6 +26,7 @@ static std::unordered_map<std::string, ParameterType> type_map = {
 
 FunctionParameter::FunctionParameter(const std::string& fmt, bool keyword_only)
   : optional(false)
+  , allow_none(false)
   , keyword_only(keyword_only)
   , size(0)
   , default_scalar(0)
@@ -68,7 +69,7 @@ FunctionParameter::FunctionParameter(const std::string& fmt, bool keyword_only)
 bool FunctionParameter::check(PyObject* obj) {
   switch (type_) {
     case ParameterType::TENSOR: {
-      return THPVariable_Check(obj) || (optional && obj == Py_None);
+      return THPVariable_Check(obj);
     }
     case ParameterType::SCALAR: return THPUtils_checkDouble(obj);
     case ParameterType::INT64: return THPUtils_checkLong(obj);
@@ -76,9 +77,6 @@ bool FunctionParameter::check(PyObject* obj) {
     case ParameterType::TENSOR_LIST: return PyTuple_Check(obj) || PyList_Check(obj);
     case ParameterType::INT_LIST: {
       if (PyTuple_Check(obj) || PyList_Check(obj)) {
-        return true;
-      }
-      if (optional && obj == Py_None) {
         return true;
       }
       // if a size is specified (e.g. IntList[2]) we also allow passing a single int
@@ -107,11 +105,13 @@ std::string FunctionParameter::type_name() const {
 }
 
 void FunctionParameter::set_default_str(const std::string& str) {
+  if (str == "None") {
+    allow_none = true;
+  }
   if (type_ == ParameterType::TENSOR) {
     if (str != "None") {
       throw std::runtime_error("default value for Tensor must be none, got: " + str);
     }
-    return;
   } else if (type_ == ParameterType::INT64) {
     default_int = atol(str.c_str());
   } else if (type_ == ParameterType::BOOL) {
@@ -119,7 +119,13 @@ void FunctionParameter::set_default_str(const std::string& str) {
   } else if (type_ == ParameterType::DOUBLE) {
     default_double = atof(str.c_str());
   } else if (type_ == ParameterType::SCALAR) {
-    default_scalar = Scalar(atof(str.c_str()));
+    if (str == "None") {
+      // This is a bit awkward, but convenient for clamp which takes Scalars,
+      // but allows None.
+      default_scalar = Scalar(NAN);
+    } else {
+      default_scalar = Scalar(atof(str.c_str()));
+    }
   } else if (type_ == ParameterType::INT_LIST) {
     if (str != "None") {
       default_intlist.assign(size, std::stoi(str));
@@ -316,24 +322,28 @@ bool FunctionSignature::parse(PyObject* args, PyObject* kwargs, PyObject* dst[],
     PyObject* obj = nullptr;
     if (arg_pos < nargs) {
       obj = PyTuple_GET_ITEM(args, arg_pos);
+      if (obj == Py_None && param.allow_none) {
+        dst[i++] = nullptr;
+        arg_pos++;
+        continue;
+      }
       if (param.check(obj)) {
         dst[i++] = obj;
         arg_pos++;
         continue;
-      } else {
-        if (allow_varargs_intlist && arg_pos == 0) {
-          dst[i++] = args;
-          arg_pos += nargs;
-          continue;
-        }
-        if (raise_exception) {
-          // foo(): argument 'other' (position 2) must be str, not int
-          type_error("%s(): argument '%s' (position %d) must be %s, not %s",
-              name.c_str(), param.name.c_str(), arg_pos + 1,
-              param.type_name().c_str(), Py_TYPE(obj)->tp_name);
-        }
-        return false;
       }
+      if (allow_varargs_intlist && arg_pos == 0) {
+        dst[i++] = args;
+        arg_pos += nargs;
+        continue;
+      }
+      if (raise_exception) {
+        // foo(): argument 'other' (position 2) must be str, not int
+        type_error("%s(): argument '%s' (position %d) must be %s, not %s",
+            name.c_str(), param.name.c_str(), arg_pos + 1,
+            param.type_name().c_str(), Py_TYPE(obj)->tp_name);
+      }
+      return false;
     }
 
     obj = kwargs ? PyDict_GetItem(kwargs, param.python_name) : nullptr;

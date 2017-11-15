@@ -1021,6 +1021,8 @@ def gen_variable_type(declarations, out):
         # exclude alias from Python bindings as well at least for now
         if name in ['alias', 'size', 'stride']:
             return False
+        if 'clamp' in name:
+            return False
 
         if name.endswith('_backward'):
             return False
