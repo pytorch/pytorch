@@ -3140,14 +3140,39 @@ Example::
     [torch.FloatTensor of size 2x3]
 """)
 
-# TODO
-# add_docstr(torch._C.orgqr,
-# """
-# """)
+add_docstr(torch._C.orgqr,
+           """
+orgqr(a, tau) -> Tensor
 
-# add_docstr(torch._C.ormqr,
-# """
-# """)
+Computes the orthogal matrix `Q` of a QR factorization, from the `(a, tau)` tuple
+returned by :func:`torch.geqrf`.
+
+This directly calls the underlying LAPACK function `?orgqr`.
+See `?orgqr LAPACK documentation`_ for further details.
+
+Args:
+    a (Tensor): The `a` from :func:`torch.geqrf`.
+    tau (Tensor): The `tau` from `torch.geqrf`.
+
+.. _?orgqr LAPACK documentation:
+    https://software.intel.com/en-us/mkl-developer-reference-c-orgqr
+
+""")
+
+add_docstr(torch._C.ormqr,
+           """
+ormqr(a, tau, mat, left=True, transpose=False) -> (Tensor, Tensor)
+
+Multiplies `mat` by the orthogonal `Q` matrix of the QR factorization
+formed by :func:`torch.geqrf` that is represented by `(a, tau)`.
+
+This directly calls the underlying LAPACK function `?ormqr`.
+See `?ormqr LAPACK documentation`_ for further details.
+
+.. _?ormqr LAPACK documentation:
+    https://software.intel.com/en-us/mkl-developer-reference-c-ormqr
+
+""")
 
 add_docstr(torch._C.potrf,
            """
