@@ -10,7 +10,7 @@ ScalarType UndefinedType::scalarType() const {
 Backend UndefinedType::backend() const {
   return Backend::Undefined;
 }
-bool UndefinedType::isCuda() const { return false; }
+bool UndefinedType::is_cuda() const { return false; }
 bool UndefinedType::isSparse() const { return false; }
 bool UndefinedType::isDistributed() const { return false; }
 

@@ -319,9 +319,9 @@ int THPVariable_set_grad(THPVariable *self, PyObject *other)
   // Make sure the data is ok
   THPUtils_assertRet(-1, other_data.type().ID() == data.type().ID(),
       "assigned grad has data of a different type");
-  THPUtils_assertRet(-1, other_data.type().isCuda() == data.type().isCuda(),
+  THPUtils_assertRet(-1, other_data.type().is_cuda() == data.type().is_cuda(),
       "assigned grad has data located on a different device");
-  if (data.type().isCuda()) {
+  if (data.type().is_cuda()) {
     THPUtils_assertRet(-1, other_data.get_device() == data.get_device(),
         "assigned grad has data located on a different device");
   }

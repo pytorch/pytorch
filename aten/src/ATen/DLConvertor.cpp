@@ -48,7 +48,7 @@ static DLDataType getDLDataType(const Type& type) {
 static DLContext getDLContext(const Type& type, const int64_t& device_id) {
   DLContext ctx;
   ctx.device_id = device_id;
-  if (type.isCuda()) {
+  if (type.is_cuda()) {
     ctx.device_type = DLDeviceType::kDLGPU;
   } else {
     ctx.device_type = DLDeviceType::kDLCPU;
@@ -144,7 +144,7 @@ DLManagedTensor* toDLPack(const Tensor& src) {
   atDLMTensor->tensor.deleter = &deleter;
   atDLMTensor->tensor.dl_tensor.data = src.data_ptr();
   int64_t device_id = 0;
-  if (src.type().isCuda()) {
+  if (src.type().is_cuda()) {
     device_id = src.get_device();
   }
   atDLMTensor->tensor.dl_tensor.ctx = getDLContext(src.type(), device_id);
