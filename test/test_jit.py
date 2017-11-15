@@ -64,10 +64,10 @@ class TestJit(TestCase):
 
     @unittest.skipIf(not torch.cuda.is_available(), "fuser requires CUDA")
     def test_lstm_fusion(self):
-        input = Variable(torch.randn(3, 10).cuda())
-        hx = Variable(torch.randn(3, 20).cuda())
-        cx = Variable(torch.randn(3, 20).cuda())
-        module = nn.LSTMCell(10, 20).cuda()  # Just to allocate weights with correct sizes
+        input = Variable(torch.randn(3, 10).float().cuda())
+        hx = Variable(torch.randn(3, 20).float().cuda())
+        cx = Variable(torch.randn(3, 20).float().cuda())
+        module = nn.LSTMCell(10, 20).float().cuda()  # Just to allocate weights with correct sizes
 
         trace, _ = torch.jit.trace(LSTMCell, (input, (hx, cx)) + tuple(module.parameters()))
         torch._C._jit_pass_lint(trace)
@@ -77,10 +77,10 @@ class TestJit(TestCase):
 
     @unittest.skipIf(not torch.cuda.is_available(), "fuser requires CUDA")
     def test_run_lstm_fusion(self):
-        input = Variable(torch.randn(3, 10).cuda())
-        hx = Variable(torch.randn(3, 20).cuda())
-        cx = Variable(torch.randn(3, 20).cuda())
-        module = nn.LSTMCell(10, 20).cuda()  # Just to allocate weights with correct sizes
+        input = Variable(torch.randn(3, 10).float().cuda())
+        hx = Variable(torch.randn(3, 20).float().cuda())
+        cx = Variable(torch.randn(3, 20).float().cuda())
+        module = nn.LSTMCell(10, 20).float().cuda()  # Just to allocate weights with correct sizes
 
         CompiledLSTMCell = torch.jit.compile(nderivs=0)(LSTMCell)
 
@@ -91,10 +91,10 @@ class TestJit(TestCase):
 
     @unittest.skipIf(not torch.cuda.is_available(), "fuser requires CUDA")
     def test_run_lstm_fusion_concat(self):
-        input = Variable(torch.randn(3, 10).cuda())
-        hx = Variable(torch.randn(3, 20).cuda())
-        cx = Variable(torch.randn(3, 20).cuda())
-        module = nn.LSTMCell(10, 20).cuda()  # Just to allocate weights with correct sizes
+        input = Variable(torch.randn(3, 10).float().cuda())
+        hx = Variable(torch.randn(3, 20).float().cuda())
+        cx = Variable(torch.randn(3, 20).float().cuda())
+        module = nn.LSTMCell(10, 20).float().cuda()  # Just to allocate weights with correct sizes
 
         CompiledLSTMCell = torch.jit.compile(nderivs=0)(LSTMCellC)
 
@@ -105,8 +105,8 @@ class TestJit(TestCase):
 
     @unittest.skipIf(not torch.cuda.is_available(), "fuser requires CUDA")
     def test_concat_fusion(self):
-        hx = Variable(torch.randn(3, 20).cuda())
-        cx = Variable(torch.randn(3, 20).cuda())
+        hx = Variable(torch.randn(3, 20).float().cuda())
+        cx = Variable(torch.randn(3, 20).float().cuda())
 
         def Foo(hx, cx):
             return torch.cat((hx + cx, hx * cx))
@@ -122,8 +122,8 @@ class TestJit(TestCase):
         def f(x, y):
             z1, z2 = (x + y).chunk(2, dim=1)
             return z1 * z2
-        x = Variable(torch.randn(4, 4).cuda())
-        y = Variable(torch.randn(4, 4).cuda())
+        x = Variable(torch.randn(4, 4).float().cuda())
+        y = Variable(torch.randn(4, 4).float().cuda())
         trace, _ = torch.jit.trace(f, (x, y), nderivs=0)
         torch._C._jit_pass_lint(trace)
         self.assertExpected(str(trace), 'raw')
@@ -161,8 +161,8 @@ class TestJit(TestCase):
 
     @unittest.skipIf(not torch.cuda.is_available(), "fuser requires CUDA")
     def test_compile_addc(self):
-        x = Variable(torch.Tensor([0.4]), requires_grad=True).cuda()
-        y = Variable(torch.Tensor([0.7]), requires_grad=True).cuda()
+        x = Variable(torch.Tensor([0.4]), requires_grad=True).float().cuda()
+        y = Variable(torch.Tensor([0.7]), requires_grad=True).float().cuda()
 
         @torch.jit.compile(nderivs=0)
         def doit(x, y):
