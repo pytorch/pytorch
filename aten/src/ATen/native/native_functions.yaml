@@ -17,6 +17,8 @@
 #           backend-specific name to dispatch to, e.g.:
 #           CPU: func_cpu
 #           CUDA: func_cuda
+# template_scalar: if set to True, generates the native function as a templatized function on the scalar
+#                  (C++) type of the underlying function.
 #
 # In addition to the variants generation, these declarations will also generate a C++ function declaration
 # in NativeFunctions.h; it is up to you to write the corresponding definitions in the correct file under /native
@@ -58,6 +60,9 @@
 
 - func: stack(TensorList tensors, int64_t dim=0) -> Tensor
   variants: function
+
+- func: is_signed(Tensor self) -> bool
+  template_scalar: True
 
 - func: RoiPooling2d_forward(Tensor input, Tensor rois, int64_t pooledHeight, int64_t pooledWidth, double spatialScale) -> (Tensor, Tensor)
   variants: function
