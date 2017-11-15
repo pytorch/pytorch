@@ -58,6 +58,12 @@ ${return_type} ${Type}::${api_name}(${formals}) const {
     ${return_call} at::native::${native_type_method_dispatch}(${actuals});
 }
 """)
+TYPE_DERIVED_DEFINITION_NATIVE_TEMPLATE_SCALAR = CodeTemplate("""\
+${return_type} ${Type}::${api_name}(${formals}) const {
+    ${return_call} at::native::${native_type_method_dispatch}<${ScalarType}>(${actuals});
+}
+""")
+
 # 6. add non-virtual declaration to Tensor.h
 TENSOR_METHOD_DECLARATION = CodeTemplate("""\
 ${return_type} ${api_name}(${method_formals_with_defaults})${const_mark};
@@ -81,6 +87,10 @@ static inline ${return_type} ${api_name}(${formals}) {
 # 10. add a native declaration for a native function
 NATIVE_DECLARATION = CodeTemplate("""\
 ${return_type} ${native_type_method_dispatch}(${formals_with_defaults});
+""")
+
+NATIVE_TEMPLATE_SCALAR_DECLARATION = CodeTemplate("""\
+template <typename scalartype> ${return_type} ${native_type_method_dispatch}(${formals_with_defaults});
 """)
 
 # We need to cast to the base type because C++ may hide the base class
@@ -604,22 +614,35 @@ def create_generic(top_env, declarations):
 
         top_env['type_method_declarations'].append(
             TYPE_METHOD_DECLARATION_NATIVE.substitute(env))
-        if isinstance(option['type_method_definition_dispatch'], dict):
+        dispatch = option['type_method_definition_dispatch']
+        template_scalar = option.get('template_scalar')
+        option['native_type_method_dispatch'] = dispatch
+
+        # generate the type method definition; if it has the same dispatch for all types,
+        # implement it in the base Type; otherwise use the standard (throwing)
+        # definition and implement it in the derived types.
+        if isinstance(dispatch, dict) or template_scalar:
             top_env['type_method_definitions'].append(
                 TYPE_METHOD_DEFINITION.substitute(env))
+        else:
+            top_env['type_method_definitions'].append(
+                TYPE_METHOD_DEFINITION_NATIVE.substitute(env))
+
+        def native_decl():
+            return NATIVE_TEMPLATE_SCALAR_DECLARATION if template_scalar else NATIVE_DECLARATION
+
+        # generate the at::native function declarations (i.e. what the user will implement)
+        if isinstance(dispatch, dict):
             generated_native_functions = []
-            for _, value in option['type_method_definition_dispatch'].items():
+            for _, value in dispatch.items():
                 if value not in generated_native_functions:
                     option['native_type_method_dispatch'] = value
                     top_env['native_function_declarations'].append(
-                        NATIVE_DECLARATION.substitute(env))
-                generated_native_functions.append(value)
+                        native_decl().substitute(env))
+                    generated_native_functions.append(value)
         else:
-            option['native_type_method_dispatch'] = option['type_method_definition_dispatch']
-            top_env['type_method_definitions'].append(
-                TYPE_METHOD_DEFINITION_NATIVE.substitute(env))
             top_env['native_function_declarations'].append(
-                NATIVE_DECLARATION.substitute(env))
+                native_decl().substitute(env))
 
         method_of = ['Type']
         if is_method:
@@ -999,20 +1022,32 @@ def create_derived(backend_type_env, declarations):
                 TYPE_DERIVED_DEFINITION.substitute(env))
 
     def process_native(option):
-        if isinstance(option['type_method_definition_dispatch'], dict):
+        dispatch = option['type_method_definition_dispatch']
+        template_scalar = option.get('template_scalar')
+        env = nested_dict(option, backend_type_env)
+
+        if isinstance(dispatch, dict):
             pair = (backend_type_env['Backend'],
                     backend_type_env['ScalarName'])
             if pair in option['backend_type_pairs']:
-                native_dispatch = option['type_method_definition_dispatch'].get(pair[0])
+                native_dispatch = dispatch.get(pair[0])
                 if native_dispatch is None:
                     raise Exception('could not find backend {} in native function dispatch specification {}'
-                                    .format(pair[0], option['type_method_definition_dispatch']))
+                                    .format(pair[0], dispatch))
                 option['native_type_method_dispatch'] = native_dispatch
-                env = nested_dict(option, backend_type_env)
                 type_object_declarations.append(
                     TYPE_DERIVED_DECLARATION.substitute(env))
-                type_object_definitions.append(
-                    TYPE_DERIVED_DEFINITION_NATIVE.substitute(env))
+                if template_scalar:
+                    type_object_definitions.append(
+                        TYPE_DERIVED_DEFINITION_NATIVE_TEMPLATE_SCALAR.substitute(env))
+                else:
+                    type_object_definitions.append(
+                        TYPE_DERIVED_DEFINITION_NATIVE.substitute(env))
+        elif template_scalar:
+            type_object_declarations.append(
+                TYPE_DERIVED_DECLARATION.substitute(env))
+            type_object_definitions.append(
+                TYPE_DERIVED_DEFINITION_NATIVE_TEMPLATE_SCALAR.substitute(env))
 
     for declaration in declarations:
         for option in declaration['options']:
