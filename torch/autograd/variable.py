@@ -50,7 +50,6 @@ class Variable(_C._VariableBase):
         'size',
         'stride',
         'ndimension',
-        'element_size',
         'is_signed',
         'dim',
         'is_cuda',

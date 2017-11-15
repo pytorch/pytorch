@@ -52,6 +52,16 @@ static PyObject * THPVariable_contiguous(PyObject* self, PyObject* args)
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject * THPVariable_element_size(PyObject* self, PyObject* args)
+{
+  HANDLE_TH_ERRORS
+  auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
+  size_t element_size = self_.type().elementSizeInBytes();
+  return THPUtils_packInt64(element_size);
+  END_HANDLE_TH_ERRORS
+}
+
+
 // generated methods start here
 
 ${py_methods}
@@ -73,6 +83,7 @@ PyMethodDef variable_methods[] = {
   {"detach", (PyCFunction)THPVariable_detach, METH_NOARGS, NULL},
   {"detach_", (PyCFunction)THPVariable_detach_, METH_NOARGS, NULL},
   {"nelement", (PyCFunction)THPVariable_numel, METH_NOARGS, NULL},
+  {"element_size", (PyCFunction)THPVariable_element_size, METH_NOARGS, NULL},
   ${py_method_defs}
   {NULL}
 };
