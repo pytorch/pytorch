@@ -30,7 +30,7 @@ Backend ${Type}::backend() const {
   return Backend::${Backend};
 }
 bool ${Type}::is_cuda() const { return backend() == kCUDA || backend() == kSparseCUDA; }
-bool ${Type}::isSparse() const { return backend() == kSparseCPU || backend() == kSparseCUDA; }
+bool ${Type}::is_sparse() const { return backend() == kSparseCPU || backend() == kSparseCUDA; }
 bool ${Type}::isDistributed() const { return false; }
 
 std::unique_ptr<Storage> ${Type}::storage() const {

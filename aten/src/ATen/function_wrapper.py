@@ -97,7 +97,7 @@ runtime_error("${api_name} only supports a 0-dimensional ${check_name} tensor, b
 """)
 
 SPARSE_CHECK = CodeTemplate("""\
-if(${check_name}.type().isSparse()) {
+if(${check_name}.type().is_sparse()) {
     return static_cast<const Type*>(this)->${api_name}(${sparse_actuals});
 }""")
 

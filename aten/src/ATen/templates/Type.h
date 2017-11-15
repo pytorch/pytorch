@@ -56,7 +56,7 @@ struct AT_API Type {
   virtual ScalarType scalarType() const = 0;
   virtual Backend backend() const = 0;
   virtual bool is_cuda() const = 0;
-  virtual bool isSparse() const = 0;
+  virtual bool is_sparse() const = 0;
   virtual bool isDistributed() const = 0;
   static void registerAll(Context * context);
   virtual std::unique_ptr<Storage> storage() const = 0;
