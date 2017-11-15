@@ -1,3 +1,12 @@
+import yaml
+
+try:
+    # use faster C loader if available
+    from yaml import CLoader as Loader
+except ImportError:
+    from yaml import Loader
+
+
 def python_num(s):
     try:
         return int(s)
@@ -5,34 +14,54 @@ def python_num(s):
         return float(s)
 
 
-def parse(filename):
-    with open(filename, 'r') as file:
-        declarations = []
-        in_declaration = False
-        for line in file.readlines():
-            if '[NativeFunction]' in line:
-                in_declaration = True
-                arguments = []
-                declaration = {'mode': 'native'}
-            elif '[/NativeFunction]' in line:
-                in_declaration = False
-                declaration['arguments'] = arguments
-                declarations.append(declaration)
-                if declaration.get('type_method_definition_level') != 'base':
-                    raise RuntimeError("Native functions currently only support (and must be specified with) "
-                                       "\'base\' type_method_definition_level")
-            elif in_declaration:
-                ls = line.strip().split(':', 1)
-                key = ls[0].strip()
-                value = ls[1].strip()
-                if key == 'arg':
-                    t, name = value.split(" ", 1)
-                    if '=' in name:
-                        ns = name.split("=", 1)
-                        name, default = ns[0], python_num(ns[1])
-                        arguments.append({'type': t, 'name': name, 'default': default})
-                    else:
-                        arguments.append({'type': t, 'name': name})
-                else:
-                    declaration[key] = value
-        return declarations
+def sanitize_types(typ):
+    # split tuples into constituent list
+    if typ[0] == '(' and typ[-1] == ')':
+        type_list = [x.strip() for x in typ[1:-1].split(',')]
+    else:
+        type_list = [typ]
+    return type_list
+
+
+def parse_arguments(args):
+    arguments = []
+
+    for arg in args.split(','):
+        t, name = [a.strip() for a in arg.rsplit(' ', 1)]
+        default = None
+
+        if '=' in name:
+            ns = name.split('=', 1)
+            name, default = ns[0], python_num(ns[1])
+
+        typ = sanitize_types(t)
+        assert len(typ) == 1
+        argument_dict = {'type': typ[0], 'name': name}
+        if default is not None:
+            argument_dict['default'] = default
+
+        arguments.append(argument_dict)
+    return arguments
+
+
+def parse_native_yaml(path):
+    with open(path, 'r') as f:
+        return yaml.load(f, Loader=Loader)
+
+
+def run(paths):
+    declarations = []
+    for path in paths:
+        for func in parse_native_yaml(path):
+            declaration = {'mode': 'native'}
+            func_decl, return_type = [x.strip() for x in func['func'].split('->')]
+            fn_name, arguments = func_decl.split('(')
+            arguments = arguments.split(')')[0]
+            declaration['name'] = func.get('name', fn_name)
+            declaration['return'] = list(func.get('return', sanitize_types(return_type)))
+            declaration['variants'] = func.get('variants', ['method', 'function'])
+            declaration['arguments'] = func.get('arguments', parse_arguments(arguments))
+            declaration['type_method_definition_dispatch'] = func.get('dispatch', declaration['name'])
+            declarations.append(declaration)
+
+    return declarations

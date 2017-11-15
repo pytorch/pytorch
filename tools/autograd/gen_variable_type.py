@@ -18,11 +18,11 @@ except ImportError:
 
 
 METHOD_DECLARATION = CodeTemplate("""\
-virtual ${return_type} ${method_prefix}${api_name}(${formals}) const override;
+virtual ${return_type} ${method_prefix_derived}${api_name}(${formals}) const override;
 """)
 
 METHOD_DEFINITION = CodeTemplate("""\
-${return_type} VariableType::${method_prefix}${api_name}(${formals}) const {
+${return_type} VariableType::${method_prefix_derived}${api_name}(${formals}) const {
     ${type_definition_body}
 }
 """)
@@ -31,19 +31,19 @@ METHOD_DEFINITION_NYI = CodeTemplate("""\
 throw std::runtime_error("VariableType::${api_name} NYI");""")
 
 BASE_CALL = CodeTemplate("""\
-baseType->${method_prefix}${base_name}(${unpacked_args})""")
+baseType->${method_prefix_derived}${base_name}(${unpacked_args})""")
 
 METHOD_DEFINITION_FALLTHROUGH = CodeTemplate("""\
 ${unpack_args}
-return baseType->${method_prefix}${api_name}(${unpacked_args});""")
+return baseType->${method_prefix_derived}${api_name}(${unpacked_args});""")
 
 METHOD_DEFINITION_FALLTHROUGH_VARIABLE = CodeTemplate("""\
 ${unpack_args}
-return as_variable(baseType->${method_prefix}${api_name}(${unpacked_args}));""")
+return as_variable(baseType->${method_prefix_derived}${api_name}(${unpacked_args}));""")
 
 METHOD_DEFINITION_FALLTHROUGH_INPLACE = CodeTemplate("""\
 ${unpack_args}
-baseType->${method_prefix}${api_name}(${unpacked_args});
+baseType->${method_prefix_derived}${api_name}(${unpacked_args});
 increment_version(self);
 return self;
 """)
@@ -926,12 +926,6 @@ def load_aten_declarations(path):
         declaration['return_type'] = format_return_type(declaration['returns'])
 
         declaration['base_name'] = declaration['name']
-
-        # if the return value is missing a name, call it 'output'
-        for ret in declaration['returns']:
-            if 'name' not in ret:
-                assert len(declaration['returns']) == 1
-                ret['name'] = 'result'
 
         # Compute the Python function prototype for argument parsing
         typed_args = []

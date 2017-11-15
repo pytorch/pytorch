@@ -113,6 +113,7 @@ ENDIF()
 
 FILE(GLOB base_h RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} "*.h")
 FILE(GLOB base_cpp RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} "*.cpp")
+FILE(GLOB native_cpp RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} "native/*.cpp")
 
 FILE(GLOB all_python RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} "*.py")
 
@@ -140,21 +141,22 @@ endif()
 file(READ ${CMAKE_CURRENT_BINARY_DIR}/generated_cpp.txt generated_cpp)
 
 FILE(GLOB_RECURSE all_templates "templates/*")
-SET(native_functions ${CMAKE_CURRENT_SOURCE_DIR}/NativeFunctions.h)
 
 FILE(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/ATen)
 
 ADD_CUSTOM_COMMAND(OUTPUT ${generated_cpp}
 COMMAND ${GEN_COMMAND}
-DEPENDS ${all_python} ${all_templates} ${native_functions} ${cwrap_files})
+DEPENDS ${all_python} ${all_templates} ${cwrap_files})
 
-SET(all_cpp ${base_cpp} ${generated_cpp} ${ATen_CPU_SRCS})
+SET(all_cpp ${base_cpp} ${native_cpp} ${generated_cpp} ${ATen_CPU_SRCS})
 
 INCLUDE_DIRECTORIES(${ATen_CPU_INCLUDE})
 IF(NOT NO_CUDA)
   INCLUDE_DIRECTORIES(${ATen_CUDA_INCLUDE})
   INCLUDE_DIRECTORIES("${CUDA_SDK_ROOT_DIR}/common/inc")
-  SET(all_cpp ${all_cpp} ${ATen_CUDA_SRCS})
+  INCLUDE_DIRECTORIES("${CMAKE_CURRENT_SOURCE_DIR}/cuda")
+  SET(native_functions_cuda ${CMAKE_CURRENT_SOURCE_DIR}/native/cuda/NativeFunctionsCuda.cu)
+  SET(all_cpp ${all_cpp} ${ATen_CUDA_SRCS} ${native_functions_cuda})
 endif()
 
 filter_list(generated_h generated_cpp "\\.h$")

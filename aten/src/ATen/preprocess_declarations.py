@@ -230,7 +230,8 @@ def run(declarations):
 
         for option in declaration['options']:
             set_mode(option)
-            sanitize_return(option)
+            if option['mode'] != 'native':
+                sanitize_return(option)
             process_types_and_backends(option)
             add_variants(option)
         declaration['options'] = handle_outputs_taken_as_arguments(
