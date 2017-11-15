@@ -3932,7 +3932,7 @@
   options:
     - cname: newWithTensor
       arguments:
-        - THTensor* tensor
+        - THTensor* self
 ]]
 
 [[
