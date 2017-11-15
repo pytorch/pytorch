@@ -52,7 +52,7 @@ Backend VariableType::backend() const {
 }
 bool VariableType::is_cuda() const { return baseType->is_cuda(); }
 bool VariableType::is_sparse() const { return baseType->is_sparse(); }
-bool VariableType::isDistributed() const { return baseType->isDistributed(); }
+bool VariableType::is_distributed() const { return baseType->is_distributed(); }
 
 std::unique_ptr<Storage> VariableType::storage() const {
   return baseType->storage();

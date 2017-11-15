@@ -24,7 +24,7 @@ struct VariableType : public at::Type {
   virtual at::Backend backend() const override;
   virtual bool is_cuda() const override;
   virtual bool is_sparse() const override;
-  virtual bool isDistributed() const override;
+  virtual bool is_distributed() const override;
   virtual std::unique_ptr<at::Storage> storage() const override;
   virtual std::unique_ptr<at::Storage> storage(size_t size) const override;
   virtual std::unique_ptr<at::Storage> storageFromBlob(void * data, int64_t size, const std::function<void(void*)> & deleter) const override;

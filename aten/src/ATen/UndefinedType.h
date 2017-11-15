@@ -18,7 +18,7 @@ struct UndefinedType final : public Type {
   virtual Backend backend() const override;
   virtual bool is_cuda() const override;
   virtual bool is_sparse() const override;
-  virtual bool isDistributed() const override;
+  virtual bool is_distributed() const override;
   virtual std::unique_ptr<Storage> storage() const override;
   virtual std::unique_ptr<Storage> storage(size_t size) const override;
   virtual std::unique_ptr<Storage> storageFromBlob(void * data, int64_t size, const std::function<void(void*)> & deleter) const override;
