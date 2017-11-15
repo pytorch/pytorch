@@ -204,6 +204,17 @@ Tensor unfold_backward(const Tensor & grad, IntList input_sizes, int64_t dim, in
   return grad_input.view(input_sizes);
 }
 
+Tensor var_backward(const Tensor & grad, const Tensor & self, bool unbiased) {
+  return (2.0 / (self.numel() - unbiased)) * grad * (self - self.mean());
+}
+
+Tensor var_backward(Tensor grad, const Tensor & self, int64_t dim, bool unbiased, bool keepdim) {
+  if (!keepdim && self.dim() > 1) {
+    grad = grad.unsqueeze(dim);
+  }
+  return (2.0 / (self.size(dim) - unbiased)) * grad * (self - self.mean(dim, true));
+}
+
 Tensor masked_scatter_backward(const Tensor & grad, const Tensor & mask, IntList sizes) {
   int64_t numel = 1;
   for (auto size : sizes) {
