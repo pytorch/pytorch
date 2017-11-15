@@ -32,7 +32,7 @@ virtual ${return_type} ${method_prefix_derived}${api_name}(${formals_with_defaul
 """)
 TYPE_METHOD_DEFINITION = CodeTemplate("""\
 ${return_type} Type::${method_prefix_derived}${api_name}(${formals}) const {
-    runtime_error("${method_prefix_derived}${api_name} is not implemented for type {}", toString());
+    runtime_error("${method_prefix_derived}${api_name} is not implemented for type %s", toString());
 }
 """)
 TYPE_METHOD_DECLARATION_NATIVE = CodeTemplate("""\
