@@ -3140,14 +3140,39 @@ Example::
     [torch.FloatTensor of size 2x3]
 """)
 
-# TODO
-# add_docstr(torch._C.orgqr,
-# """
-# """)
+add_docstr(torch._C.orgqr,
+           """
+orgqr(a, tau) -> Tensor
 
-# add_docstr(torch._C.ormqr,
-# """
-# """)
+Computes the orthogal matrix `Q` of a QR factorization, from the `(a, tau)` tuple
+returned by :func:`torch.geqrf`.
+
+This directly calls the underlying LAPACK function `?orgqr`.
+See `?orgqr LAPACK documentation`_ for further details.
+
+Args:
+    a (Tensor): The `a` from :func:`torch.geqrf`.
+    tau (Tensor): The `tau` from `torch.geqrf`.
+
+.. _?orgqr LAPACK documentation:
+    https://software.intel.com/en-us/mkl-developer-reference-c-orgqr
+
+""")
+
+add_docstr(torch._C.ormqr,
+           """
+ormqr(a, tau, mat, left=True, transpose=False) -> (Tensor, Tensor)
+
+Multiplies `mat` by the orthogonal `Q` matrix of the QR factorization
+formed by :func:`torch.geqrf` that is represented by `(a, tau)`.
+
+This directly calls the underlying LAPACK function `?ormqr`.
+See `?ormqr LAPACK documentation`_ for further details.
+
+.. _?ormqr LAPACK documentation:
+    https://software.intel.com/en-us/mkl-developer-reference-c-ormqr
+
+""")
 
 add_docstr(torch._C.potrf,
            """
@@ -4723,10 +4748,68 @@ Example::
 
 """)
 
-# TODO
-# add_docstr(torch._C.trtrs,
-# """
-# """)
+add_docstr(torch._C.trtrs,
+           """
+trtrs(b, A, upper=True, transpose=False, unitriangular=False) -> (Tensor, Tensor)
+
+Solves a system of equations with a triangular coefficient matrix `A`
+and multiple right-hand sides `b`.
+
+In particular, solves :math:`AX = b` and assumes `A` is upper-triangular
+with the default keyword arguments.
+
+This method is NOT implemented for CUDA tensors.
+
+Args:
+    A (Tensor): the input triangular coefficient matrix.
+    b (Tensor): multiple right-hand sides. Each column of `b` is a
+        right-hand side for the system of equations.
+    upper (bool, optional): Solves the upper-triangular system
+        of equations if True, lower-triangular if False. Default: True.
+    transpose (bool, optional): If `A` should be transposed before
+        being sent into the solver. Default: False.
+    unitriangular (bool, optional): If `A` is unit triangular.
+        If True, the diagonal elements of `A` are assumed to be
+        1 and not referenced from `A`. Default: False.
+
+Returns:
+    A tuple (X, M) where `M` is a clone of `A` and `X` is the solution to
+    `AX = b` (or whatever variant of the system of equations, depending on
+    the keyword arguments.)
+
+Shape:
+    - A: :math:`(N, N)`
+    - b: :math:`(N, C)`
+    - output[0]: :math:`(N, C)`
+    - output[1]: :math:`(N, N)`
+
+Examples::
+
+    >>> A = torch.randn(2,2).triu()
+    >>> A
+
+    -1.8793  0.1567
+     0.0000 -2.1972
+    [torch.FloatTensor of size 2x2]
+
+    >>> b = torch.randn(2,3)
+    >>> b
+
+     1.8776 -0.0759  1.6590
+    -0.5676  0.4771  0.7477
+    [torch.FloatTensor of size 2x3]
+
+    >>> torch.trtrs(b, A)
+
+    (
+     -0.9775  0.0223 -0.9112
+      0.2583 -0.2172 -0.3403
+     [torch.FloatTensor of size 2x3],
+     -1.8793  0.1567
+      0.0000 -2.1972
+     [torch.FloatTensor of size 2x2])
+
+""")
 
 add_docstr(torch._C.trunc,
            """
