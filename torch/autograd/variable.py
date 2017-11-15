@@ -51,7 +51,6 @@ class Variable(_C._VariableBase):
         'stride',
         'ndimension',
         'dim',
-        'is_cuda',
         'shape'
     }
 
