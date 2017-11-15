@@ -21,7 +21,7 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 from caffe2.python.helpers.arg_scope import get_current_scope
-from caffe2.python import schema
+from caffe2.python import core, schema
 from caffe2.python.layers.layers import (
     get_categorical_limit,
     get_key,
@@ -181,6 +181,20 @@ class SparseLookup(ModelLayer):
             raise "Unsupported version of operator in SparseLookUp " +\
                 "layer: {0}".format(version)
 
+    # compute mean pooling result from sum poolig result
+    # this is hack before distributed trainer support sparselength mean
+    def _mean_pooling_helper(self, net, sum_pooling_output, result_blobs):
+        cast_len = net.Cast(self.input_record.lengths(), 1, to=core.DataType.FLOAT)
+        clip_len = net.Clip(cast_len, 1, min=1.0)
+        inv_len = net.Pow(clip_len, 1, exponent=-1.0)
+        net.StopGradient(inv_len, inv_len)
+        net.Mul(
+            sum_pooling_output + [inv_len],
+            result_blobs,
+            broadcast=1,
+            axis=0
+        )
+
     # deal with sparse features of id_list type
     def _add_ops_id_list(self, net, version):
         assert self.reducer in self._id_list_supported_reducers, (
@@ -191,22 +205,32 @@ class SparseLookup(ModelLayer):
                         self.input_record.items(),
                         self.input_record.lengths()]
 
-            layer_name = 'SparseLengths' + self.reducer
+            if self.reducer == 'Mean':
+                sum_pooling_output = [net.NextScopedBlob('internal_output')]
+            else:
+                sum_pooling_output = self.output_schema.field_blobs()
+
             if version in ['fp32', 'fp16']:
                 # SparseLengths* Ops with engine='fp16' will accept either
                 # fp16 or fp32 embedding matrix and output fp32 pooled embedding
-                net.__getattr__(layer_name)(
+                net.SparseLengthsSum(
                     op_input,
-                    self.output_schema.field_blobs(),
+                    sum_pooling_output,
                     engine='fp16',
                 )
             elif version == 'uint8rowwise':
                 op_input.insert(len(op_input), self.scale_bias)
-                net.__getattr__(layer_name + '8BitsRowwise')(
-                    op_input, self.output_schema.field_blobs())
+                net.SparseLengthsSum8BitsRowwise(
+                    op_input, sum_pooling_output)
             else:
                 raise "Unsupported version of operator in SparseLookUp " +\
                     "layer: {0}".format(version)
+
+            if self.reducer == 'Mean':
+                self._mean_pooling_helper(
+                    net, sum_pooling_output,
+                    self.output_schema.field_blobs()
+                )
 
         elif self.reducer == 'Sqrt':
             sqrt_weight = net.LengthsToWeights(
@@ -254,20 +278,29 @@ class SparseLookup(ModelLayer):
                         self.input_record.keys(),
                         self.input_record.lengths()]
 
-            layer_name = 'SparseLengths' + self.reducer
+            if self.reducer == 'Mean':
+                sum_pooling_output = [net.NextScopedBlob('sum_pooling_output')]
+            else:
+                sum_pooling_output = self.output_schema.field_blobs()
 
             if version in ['fp32', 'fp16']:
-                net.__getattr__(layer_name)(
+                net.SparseLengthsSum(
                     op_input,
-                    self.output_schema.field_blobs(),
+                    sum_pooling_output,
                     engine='fp16',
                 )
             elif version == 'uint8rowwise':
-                net.__getattr__(layer_name + '8BitsRowwise')(
-                    op_input, self.output_schema.field_blobs())
+                net.SparseLengthsSum8BitsRowwise(
+                    op_input, sum_pooling_output)
             else:
                 raise "Unsupported version of operator in SparseLookUp " +\
                     "layer: {0}".format(version)
+
+            if self.reducer == 'Mean':
+                self._mean_pooling_helper(
+                    net, sum_pooling_output,
+                    self.output_schema.field_blobs()
+                )
 
         elif self.reducer == 'PositionWeighted':
             self._sparse_lengths_weighted_reducer(
