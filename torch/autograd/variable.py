@@ -342,26 +342,6 @@ class Variable(_C._VariableBase):
     def cumprod(self, dim):
         return Cumprod.apply(self, dim)
 
-    def var(self, dim=None, keepdim=False, unbiased=True):
-        if dim is None:
-            mean = self.mean().view(*(1 for s in self.size()))
-        else:
-            mean = self.mean(dim, keepdim)
-            # we could just set keepdim to True, but this preserves some fidelity
-            if keepdim is False and self.dim() != 1:
-                mean = mean.unsqueeze(dim)
-        mean_expanded = mean.expand_as(self)
-        zero_centered = self.sub(mean_expanded)
-        if dim is None:
-            var = zero_centered.mul(zero_centered).sum()
-        else:
-            var = zero_centered.mul(zero_centered).sum(dim, keepdim=keepdim)
-        numel = self.numel() if dim is None else self.size(dim)
-        return var.div(numel - int(unbiased))
-
-    def std(self, dim=None, keepdim=False, unbiased=True):
-        return self.var(dim, keepdim, unbiased).sqrt()
-
     def renorm(self, p, dim, maxnorm):
         t = self.transpose(dim, 0)
         flat = t.contiguous().view(self.size(0), -1)
