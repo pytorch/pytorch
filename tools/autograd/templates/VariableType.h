@@ -23,7 +23,7 @@ struct VariableType : public at::Type {
   virtual at::ScalarType scalarType() const override;
   virtual at::Backend backend() const override;
   virtual bool is_cuda() const override;
-  virtual bool isSparse() const override;
+  virtual bool is_sparse() const override;
   virtual bool isDistributed() const override;
   virtual std::unique_ptr<at::Storage> storage() const override;
   virtual std::unique_ptr<at::Storage> storage(size_t size) const override;

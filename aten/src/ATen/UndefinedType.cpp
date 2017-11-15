@@ -11,7 +11,7 @@ Backend UndefinedType::backend() const {
   return Backend::Undefined;
 }
 bool UndefinedType::is_cuda() const { return false; }
-bool UndefinedType::isSparse() const { return false; }
+bool UndefinedType::is_sparse() const { return false; }
 bool UndefinedType::isDistributed() const { return false; }
 
 std::unique_ptr<Storage> UndefinedType::storage() const {
