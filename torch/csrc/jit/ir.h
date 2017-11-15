@@ -84,6 +84,7 @@ struct Value {
   Value(Node * node_, size_t offset_);
 private:
   friend struct Node;
+  friend struct Graph;
   Node * node_;
   size_t offset_;
   size_t unique_ = 0;          // unique id
@@ -137,7 +138,7 @@ public:
   Node* node() {
     return node_;
   }
-  size_t offset() {
+  size_t offset() const {
     return offset_;
   }
   const Node * node() const {
@@ -382,7 +383,7 @@ public:
   //          %4 = g(%3)
   //          %5 = h(%1)
   Node* insertAfter(Node * n) {
-    JIT_ASSERT(!inGraphList() && n->inGraphList() && n->kind() != kSelect);
+    JIT_ASSERT(!inGraphList() && n->inGraphList());
     Node * next = n->next();
     n->next() = this;
     this->prev() = n;

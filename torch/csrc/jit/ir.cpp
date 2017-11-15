@@ -304,7 +304,6 @@ void Node::lint() const {
     for (auto input : inputs_) {
       // WARNING: O(n^2)
       JIT_ASSERT(std::find(ALL_OF(input->uses_), Use(const_cast<Node*>(this), i)) != input->uses_.end());
-      size_t stage_ = stage();
       JIT_ASSERT(stage_ >= input->stage_);
       JIT_ASSERT(graph_->all_nodes.count(this) == 1);
       // Handle invariant
@@ -407,7 +406,10 @@ void Graph::lint() const {
     anticipated_uses[n] = -1;  // we saw the anticipated user!
     auto node_inserted = node_in_scope.insert(n);
     JIT_ASSERT(node_inserted.second);  // insertion took place
+    size_t i = 0;
     for(auto o : n->outputs()) {
+      JIT_ASSERT(o->node() == n);
+      JIT_ASSERT(i++ == o->offset_);
       check_value(o);
     }
     n->lint();
