@@ -670,7 +670,7 @@ public:
   }
   Node * createConstant(const at::Tensor& ref) {
     JIT_ASSERT(ref.defined());
-    AutoGPU guard(ref.type().isCuda() ? ref.get_device() : -1);
+    AutoGPU guard(ref.type().is_cuda() ? ref.get_device() : -1);
     auto n = create(kConstant);
     n->t_(kvalue, ref.clone());
     return n;

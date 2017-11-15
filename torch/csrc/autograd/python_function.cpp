@@ -43,7 +43,7 @@ VariableInfo::VariableInfo(const Variable& var)
   , device(-1)
   , size(var.sizes())
   , requires_grad(var.requires_grad()) {
-  if (var.type().isCuda()) {
+  if (var.type().is_cuda()) {
     device = var.get_device();
   }
 }

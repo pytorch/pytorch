@@ -27,7 +27,7 @@ void InputBuffer::add(size_t pos, Variable var) {
 
 auto InputBuffer::device() const -> int {
   for (auto& pair : buffer) {
-    if (pair.first.defined() && pair.first.type().isCuda()) {
+    if (pair.first.defined() && pair.first.type().is_cuda()) {
       return pair.first.get_device();
     }
   }
