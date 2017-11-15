@@ -668,11 +668,15 @@ if WITH_CUDA:
         thnvrtc_link_flags += ['cuda.lib', 'nvrtc.lib']
     else:
         thnvrtc_link_flags += ['-lcuda', '-lnvrtc']
+    cuda_stub_path = [cuda_lib_path + '/stubs']
+    if IS_DARWIN:
+        # on OSX this is where the CUDA stub is installed according to the manual
+        cuda_stub_path = ["/usr/local/cuda/lib"]
     THNVRTC = Extension("torch._nvrtc",
                         sources=['torch/csrc/nvrtc.cpp'],
                         language='c++',
                         include_dirs=include_dirs,
-                        library_dirs=library_dirs + [cuda_lib_path + '/stubs'],
+                        library_dirs=library_dirs + cuda_stub_path,
                         extra_link_args=thnvrtc_link_flags,
                         )
     extensions.append(THNVRTC)
