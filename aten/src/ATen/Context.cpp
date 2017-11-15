@@ -66,5 +66,10 @@ bool Context::hasCUDA() const {
 #endif
 }
 
+#ifdef AT_CUDA_ENABLED
+cudaStream_t Context::getCurrentCUDAStream() const {
+  return THCState_getCurrentStream(thc_state);
+}
+#endif
 
 }

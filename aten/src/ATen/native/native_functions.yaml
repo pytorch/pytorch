@@ -1,0 +1,72 @@
+# ATen native functions are a mechanism to write ATen methods which only
+# make use of other ATen operations (e.g., it is not necessary to bind into
+# TH/THC code).  These functions are declared in this file and then folded
+# into the ATen code generation process.
+#
+# The simple format is as follows:
+# - func: func_name(ArgType arg0[=default], ArgType arg1[=default], ...) -> ReturnType
+# ArgType(s) are allowed to be simple types understood by ATen
+# (e.g. Tensor, TensorList, IntList, int64_t, double).
+# ReturnType is allowed to be any ArgType or tuple combination of ArgTypes(s), e.g. (Tensor, Tensor)
+# defaults are optional and are only allowed to be numbers (e.g. '0' for int64_t, '5.0' for double)
+#
+# The declarations also support the following attributes:
+# variants: [function, method] by default; controls whether Tensor method or namespace Function is generated
+#           as a result of this declaration.
+# dispatch: equal to the func_name by default; this can be overridden by providing a
+#           backend-specific name to dispatch to, e.g.:
+#           CPU: func_cpu
+#           CUDA: func_cuda
+#
+# In addition to the variants generation, these declarations will also generate a C++ function declaration
+# in NativeFunctions.h; it is up to you to write the corresponding definitions in the correct file under /native
+# (the exact file depends on if you are writing a generic (all backend), or CPU/CUDA specific implementation).
+# Note that these generated C++ function declarations won't match the declaration here because they will
+# undergo the standard ATen C++ transformations, e.g. use of const-ref for non-inplace Tensor arguments.  It is
+# recommended that you copy the generated C++ function declaration to your definition so that the two
+# match.
+
+- func: type_as(Tensor self, Tensor other) -> Tensor
+
+- func: expand_as(Tensor self, Tensor other) -> Tensor
+
+- func: split(Tensor self, int64_t split_size, int64_t dim=0) -> TensorList
+
+- func: chunk(Tensor self, int64_t chunks, int64_t dim=0) -> TensorList
+
+- func: size(Tensor self, int64_t dim) -> int64_t
+
+- func: stride(Tensor self, int64_t dim) -> int64_t
+
+- func: is_same_size(Tensor self, Tensor other) -> bool
+
+- func: permute(Tensor self, IntList dims) -> Tensor
+
+- func: expand(Tensor self, IntList size) -> Tensor
+
+- func: squeeze(Tensor self) -> Tensor
+
+- func: squeeze(Tensor self, int64_t dim) -> Tensor
+
+- func: squeeze_(Tensor self) -> Tensor
+
+- func: squeeze_(Tensor self, int64_t dim) -> Tensor
+
+- func: unsqueeze(Tensor self, int64_t dim) -> Tensor
+
+- func: unsqueeze_(Tensor self, int64_t dim) -> Tensor
+
+- func: stack(TensorList tensors, int64_t dim=0) -> Tensor
+  variants: function
+
+- func: RoiPooling2d_forward(Tensor input, Tensor rois, int64_t pooledHeight, int64_t pooledWidth, double spatialScale) -> (Tensor, Tensor)
+  variants: function
+  dispatch:
+    CPU: RoiPooling2d_forward_cpu
+    CUDA: RoiPooling2d_forward_cuda
+
+- func: RoiPooling2d_backward(Tensor input, Tensor rois, int64_t pooledHeight, int64_t pooledWidth, double spatialScale, Tensor gradOutput, Tensor argmaxes) -> Tensor
+  variants: function
+  dispatch:
+    CPU: RoiPooling2d_backward_cpu
+    CUDA: RoiPooling2d_backward_cuda

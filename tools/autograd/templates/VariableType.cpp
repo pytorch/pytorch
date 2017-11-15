@@ -323,7 +323,7 @@ void VariableType::s_copy(const Tensor & src, Tensor & dst) const {
   set_flags(static_cast<Variable&>(dst), flags, std::move(grad_fn), true);
 }
 
-Tensor & VariableType::m_resize_(Tensor & self, IntList size) const {
+Tensor & VariableType::resize_(Tensor & self, IntList size) const {
   auto& self_ = unpack(self, "self", 0);
   check_inplace(self);
   auto& self_var = static_cast<Variable&>(self);
@@ -333,15 +333,15 @@ Tensor & VariableType::m_resize_(Tensor & self, IntList size) const {
   if (self_var.requires_grad()) {
     at::runtime_error("cannot resize variables which require grad");
   }
-  baseType->m_resize_(self_, size);
+  baseType->resize_(self_, size);
   return self;
 }
 
-Tensor & VariableType::m_resize_as_(Tensor & self, const Tensor & the_template) const {
-  return m_resize_(self, the_template.sizes());
+Tensor & VariableType::resize_as_(Tensor & self, const Tensor & the_template) const {
+  return resize_(self, the_template.sizes());
 }
 
-Tensor VariableType::m_contiguous(const Tensor & self) const {
+Tensor VariableType::contiguous(const Tensor & self) const {
   unpack(self, "self", 0);
   if (self.is_contiguous()) {
     return self;

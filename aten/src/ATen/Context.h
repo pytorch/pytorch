@@ -44,6 +44,9 @@ public:
     });
     return thc_state;
   }
+#ifdef AT_CUDA_ENABLED
+  cudaStream_t getCurrentCUDAStream() const;
+#endif
   ~Context();
   std::unique_ptr<Generator>
     generator_registry[static_cast<int>(Backend::NumOptions)];
