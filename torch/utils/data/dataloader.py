@@ -27,7 +27,7 @@ class ExceptionWrapper(object):
         self.exc_msg = "".join(traceback.format_exception(*exc_info))
 
 
-def _worker_loop(dataset, index_queue, data_queue, collate_fn):
+def _worker_loop(dataset, index_queue, data_queue, collate_fn, collate_fn_kwargs):
     global _use_shared_memory
     _use_shared_memory = True
 
@@ -39,7 +39,8 @@ def _worker_loop(dataset, index_queue, data_queue, collate_fn):
             break
         idx, batch_indices = r
         try:
-            samples = collate_fn([dataset[i] for i in batch_indices])
+            samples = collate_fn([dataset[i] for i in batch_indices],
+                                 **collate_fn_kwargs)
         except Exception:
             data_queue.put((idx, ExceptionWrapper(sys.exc_info())))
         else:
@@ -140,6 +141,7 @@ class DataLoaderIter(object):
     def __init__(self, loader):
         self.dataset = loader.dataset
         self.collate_fn = loader.collate_fn
+        self.collate_fn_kwargs = loader.collate_fn_kwargs
         self.batch_sampler = loader.batch_sampler
         self.num_workers = loader.num_workers
         self.pin_memory = loader.pin_memory
@@ -159,7 +161,8 @@ class DataLoaderIter(object):
             self.workers = [
                 multiprocessing.Process(
                     target=_worker_loop,
-                    args=(self.dataset, self.index_queue, self.data_queue, self.collate_fn))
+                    args=(self.dataset, self.index_queue, self.data_queue,
+                          self.collate_fn, self.collate_fn_kwargs))
                 for _ in range(self.num_workers)]
 
             for w in self.workers:
@@ -185,7 +188,8 @@ class DataLoaderIter(object):
     def __next__(self):
         if self.num_workers == 0:  # same-process loading
             indices = next(self.sample_iter)  # may raise StopIteration
-            batch = self.collate_fn([self.dataset[i] for i in indices])
+            batch = self.collate_fn([self.dataset[i] for i in indices],
+                                    **self.collate_fn_kwargs)
             if self.pin_memory:
                 batch = pin_memory_batch(batch)
             return batch
@@ -270,6 +274,7 @@ class DataLoader(object):
             loading. 0 means that the data will be loaded in the main process
             (default: 0)
         collate_fn (callable, optional): merges a list of samples to form a mini-batch.
+        collate_fn_kwargs (dict, optional): Keyword arguments for custom ``collate_fn.``
         pin_memory (bool, optional): If ``True``, the data loader will copy tensors
             into CUDA pinned memory before returning them.
         drop_last (bool, optional): set to ``True`` to drop the last incomplete batch,
@@ -279,13 +284,18 @@ class DataLoader(object):
     """
 
     def __init__(self, dataset, batch_size=1, shuffle=False, sampler=None, batch_sampler=None,
-                 num_workers=0, collate_fn=default_collate, pin_memory=False, drop_last=False):
+                 num_workers=0, collate_fn=default_collate, collate_fn_kwargs=None,
+                 pin_memory=False, drop_last=False):
         self.dataset = dataset
         self.batch_size = batch_size
         self.num_workers = num_workers
         self.collate_fn = collate_fn
         self.pin_memory = pin_memory
         self.drop_last = drop_last
+
+        if collate_fn.__name__ == 'default_collate' and collate_fn_kwargs:
+            raise ValueError('collate_fn_kwargs can only be provided when '
+                             'a custom collate_fn is given')
 
         if batch_sampler is not None:
             if batch_size > 1 or shuffle or sampler is not None or drop_last:
@@ -294,6 +304,11 @@ class DataLoader(object):
 
         if sampler is not None and shuffle:
             raise ValueError('sampler is mutually exclusive with shuffle')
+
+        if collate_fn_kwargs is not None:
+            self.collate_fn_kwargs = collate_fn_kwargs
+        else:
+            self.collate_fn_kwargs = {}
 
         if batch_sampler is None:
             if sampler is None:
