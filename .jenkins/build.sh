@@ -36,7 +36,7 @@ case "${BUILD_ENVIRONMENT}" in
 esac
 
 # Configure
-cmake .. ${CMAKE_ARGS[*]}
+cmake .. ${CMAKE_ARGS[*]} "$@"
 
 # Build
 if [ "$(uname)" == "Linux" ]; then
