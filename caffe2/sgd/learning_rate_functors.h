@@ -83,15 +83,47 @@ class InvLearningRate : public LearningRateFunctor<T> {
 template <typename T>
 class PolyLearningRate : public LearningRateFunctor<T> {
  public:
-  PolyLearningRate(const T power, const int64_t max_iter) 
+  PolyLearningRate(const T power, const int64_t max_iter)
       : power_(power), max_iter_(max_iter) {}
   T operator()(const int64_t iter) const override {
-    return std::pow(1 - T(iter)/T(max_iter_), power_);
+    return std::pow(1 - T(iter) / T(max_iter_), power_);
   }
   T power_;
   uint64_t max_iter_;
 };
 
-}  // namespace caffe2
+// LinearWarmup: return max(iter/num_iter, 1)
+template <typename T>
+class LinearWarmupLearningRate : public LearningRateFunctor<T> {
+ public:
+  LinearWarmupLearningRate(const T start_multiplier, const int64_t num_iter)
+      : start_multiplier_(start_multiplier), num_iter_(num_iter) {}
+  T operator()(const int64_t iter) const override {
+    if (iter >= num_iter_) {
+      return 1.;
+    }
+    return start_multiplier_ + (1. - start_multiplier_) * T(iter) / T(num_iter_);
+  }
+  T start_multiplier_;
+  uint64_t num_iter_;
+};
 
-#endif  // CAFFE2_SGD_LEARNING_RATE_FUNCTORS_H_
+// ConstantWarmup: return scale when iter < num_iter, and 1 otherwise
+template <typename T>
+class ConstantWarmupLearningRate : public LearningRateFunctor<T> {
+ public:
+  ConstantWarmupLearningRate(const T multiplier, const int64_t num_iter)
+      : multiplier_(multiplier), num_iter_(num_iter) {}
+  T operator()(const int64_t iter) const override {
+    if (iter >= num_iter_) {
+      return 1.;
+    }
+    return T(multiplier_);
+  }
+  T multiplier_;
+  uint64_t num_iter_;
+};
+
+} // namespace caffe2
+
+#endif // CAFFE2_SGD_LEARNING_RATE_FUNCTORS_H_

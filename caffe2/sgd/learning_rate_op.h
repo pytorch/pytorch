@@ -60,6 +60,21 @@ class LearningRateOp final : public Operator<Context> {
       T power = OperatorBase::template GetSingleArgument<float>("power", 0);
       DCHECK_GT(power, 0);
       functor_.reset(new PolyLearningRate<T>(power, max_iter));
+    } else if (policy == "linearWarmup") {
+      T start_multiplier = OperatorBase::template GetSingleArgument<float>(
+          "start_multiplier", 0.);
+      int num_iter =
+          OperatorBase::template GetSingleArgument<int>("num_iter", 0);
+      DCHECK_GT(start_multiplier, 0);
+      functor_.reset(
+          new LinearWarmupLearningRate<T>(start_multiplier, num_iter));
+    } else if (policy == "constantWarmup") {
+      T multiplier =
+          OperatorBase::template GetSingleArgument<float>("multiplier", 0.5);
+      int num_iter =
+          OperatorBase::template GetSingleArgument<int>("num_iter", 0);
+      DCHECK_GT(multiplier, 0);
+      functor_.reset(new ConstantWarmupLearningRate<T>(multiplier, num_iter));
     } else {
       LOG(FATAL) << "Unknown learning rate policy: " << policy;
     }
