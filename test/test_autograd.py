@@ -1701,6 +1701,25 @@ class TestAutograd(TestCase):
         x.sum().backward()
         self.assertEqual(root.grad.data.tolist(), [[1, 2], [1, 1], [1, 1]])
 
+    def test_inplace_view_saved_output(self):
+        # Test an in-place operation on a view in which the in-place op saves
+        # its output. Previously, this created a reference cycle.
+        dealloc = [0]
+
+        class IncrementOnDelete(object):
+            def __del__(self):
+                dealloc[0] += 1
+
+        def test():
+            root = Variable(torch.randn(3, 3), requires_grad=True)
+            copy = root.clone()
+            copy.grad_fn.register_hook(IncrementOnDelete())
+            view = copy.view(9)
+            torch.nn.functional.relu(view, inplace=True)
+
+        test()
+        self.assertEqual(dealloc[0], 1)
+
 
 def index_variable(shape, max_indices):
     if not isinstance(shape, tuple):

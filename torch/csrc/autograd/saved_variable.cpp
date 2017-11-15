@@ -6,7 +6,7 @@ using namespace at;
 
 namespace torch { namespace autograd {
 
-SavedVariable::SavedVariable(const Variable& variable, Function* saved_for)
+SavedVariable::SavedVariable(const Variable& variable, bool is_output)
   : SavedVariable() {
   if (!variable.defined()) {
     return;
@@ -16,16 +16,13 @@ SavedVariable::SavedVariable(const Variable& variable, Function* saved_for)
   is_volatile = variable.is_volatile();
   expected_version = variable.current_version();
   version = variable.get()->version_counter.save();
-  has_grad_fn = variable.grad_fn() != nullptr;
+  has_grad_fn = !variable.is_leaf();
   output_nr = variable.output_nr();
   if (!has_grad_fn) {
     grad_accumulator = variable.grad_accumulator();
   }
-  if (variable.grad_fn().get() != saved_for) {
+  if (!is_output) {
     _grad_fn = variable.grad_fn();
-  }
-  if (variable.is_view()) {
-    base = variable.base();
   }
   if (variable.tracing_state()) {
     tracing_state.reset(new jit::tracer::ValueTracingState(*variable.tracing_state()));
@@ -57,12 +54,10 @@ auto SavedVariable::unpack(std::shared_ptr<Function> saved_for) const -> Variabl
     grad_fn = std::move(saved_for);
   }
 
-  Variable var;
-  if (base.defined()) {
-    var = make_variable_view(base, data, flags, output_nr, std::move(grad_fn));
-  } else {
-    var = make_variable(data, flags, output_nr, std::move(grad_fn));
-  }
+  // NB: saved views are unpacked as normal Variables (not views) even though
+  // they still share the same storage. This works only because we never call
+  // in-place functions on unpacked variables.
+  auto var = make_variable(data, flags, output_nr, std::move(grad_fn));
   var.version_counter() = version;
 
   // If a Variable is a leaf (no grad_fn saved), and it requires_grad, then we

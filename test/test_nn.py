@@ -2686,6 +2686,19 @@ class TestNN(NNTestCase):
         output.backward(output.data)
         self.assertEqual(input.data, input.grad.data)
 
+    def test_elu_inplace_view(self):
+        v = Variable(torch.Tensor([1.0, -1.0, 1.0, -1.0]), requires_grad=True)
+
+        def func(root):
+            x = root.clone()
+            view = x.narrow(0, 1, 2)
+            res = F.elu(view, inplace=True)
+            self.assertIs(res, view)
+            return x
+
+        gradcheck(func, [v])
+        gradgradcheck(func, [v])
+
     def test_relu_inplace_view(self):
         v = Variable(torch.Tensor([1.0, -1.0, 1.0, -1.0]), requires_grad=True)
 
@@ -2696,9 +2709,8 @@ class TestNN(NNTestCase):
             self.assertIs(res, view)
             return x
 
-        go = Variable(torch.randn(v.size()), requires_grad=True)
         gradcheck(func, [v])
-        gradgradcheck(func, [v], [go])
+        gradgradcheck(func, [v])
 
     def test_bce_with_logits_raises_if_target_and_input_are_different_size(self):
         target = Variable(torch.rand(5))

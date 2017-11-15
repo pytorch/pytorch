@@ -3,6 +3,7 @@
 #include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/autograd/functions/basic_ops.h"
 #include "torch/csrc/autograd/functions/utils.h"
+#include "torch/csrc/autograd/generated/Functions.h"
 #include "torch/csrc/utils/auto_gpu.h"
 
 namespace torch { namespace autograd {
@@ -127,9 +128,9 @@ auto Chunk::apply(const variable_list& inputs) -> variable_list {
   });
 }
 
-CopySlices::CopySlices(const Variable& base_var, TensorGeometry view, std::shared_ptr<Function> fn_)
+CopySlices::CopySlices(const Variable& base_var, TensorGeometry view_, std::shared_ptr<Function> fn_)
   : base(base_var)
-  , view(std::move(view))
+  , view(std::move(view_))
   , fn(std::move(fn_))
 {
   is_executable = true;
@@ -139,7 +140,6 @@ CopySlices::CopySlices(const Variable& base_var, TensorGeometry view, std::share
   // to base instead of the view.
   next_functions.resize(fn->next_functions.size());
   next_functions[0] = std::make_pair(base_var.grad_fn(), base_var.output_nr());
-  fn->next_functions[0] = next_functions[0];
   for (size_t i = 1; i < next_functions.size(); i++) {
     next_functions[i] = fn->next_functions[i];
   }
@@ -148,6 +148,10 @@ CopySlices::CopySlices(const Variable& base_var, TensorGeometry view, std::share
 auto CopySlices::apply(const variable_list& inputs) -> variable_list {
   check_input_variables("CopySlices", inputs, 1);
   auto& grad = inputs[0];
+
+  if (!fn) {
+    throw std::runtime_error(ERR_BACKWARD_TWICE);
+  }
 
   auto result = grad.type().tensor(base.sizes, base.strides);
   result.copy_(grad);
@@ -174,6 +178,10 @@ auto CopySlices::apply(const variable_list& inputs) -> variable_list {
   }
 
   return grad_inputs;
+}
+
+void CopySlices::releaseVariables() {
+  fn = nullptr;
 }
 
 }} // namespace torch::autograd
