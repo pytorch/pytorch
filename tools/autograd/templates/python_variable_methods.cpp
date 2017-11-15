@@ -90,6 +90,14 @@ PyObject * THPVariable_clamp_(PyObject* self, PyObject* args, PyObject* kwargs)
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject * THPVariable_dim(PyObject* self, PyObject* args)
+{
+   HANDLE_TH_ERRORS
+   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
+   return THPUtils_packInt64(self_.dim());
+   END_HANDLE_TH_ERRORS
+}
+
 static Tensor dispatch_contiguous(const Tensor & self) {
   AutoNoGIL no_gil;
   AutoGPU auto_gpu(self);
@@ -154,6 +162,8 @@ PyMethodDef variable_methods[] = {
   {"__mod__", (PyCFunction)THPVariable_remainder, METH_VARARGS | METH_KEYWORDS, NULL},
   {"clamp", (PyCFunction)THPVariable_clamp, METH_VARARGS | METH_KEYWORDS, NULL},
   {"clamp_", (PyCFunction)THPVariable_clamp_, METH_VARARGS | METH_KEYWORDS, NULL},
+  {"dim", (PyCFunction)THPVariable_dim, METH_NOARGS, NULL},
+  {"ndimension", (PyCFunction)THPVariable_dim, METH_NOARGS, NULL},
   {"contiguous", (PyCFunction)THPVariable_contiguous, METH_NOARGS, NULL},
   {"detach", (PyCFunction)THPVariable_detach, METH_NOARGS, NULL},
   {"detach_", (PyCFunction)THPVariable_detach_, METH_NOARGS, NULL},
