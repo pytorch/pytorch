@@ -9,7 +9,7 @@ namespace autograd {
 jit::node_list BatchNormForward::symbolic(SymbolicContext* ctx, jit::node_list inputs) {
   auto & g = ctx->graph;
   // X, Scale, Bias
-  auto bn = g->appendNode(g->create(jit::kSpatialBN,{inputs.at(0),inputs.at(1),inputs.at(2)}));
+  auto bn = g->appendNode(g->create(jit::kBatchNormalization, {inputs.at(0),inputs.at(1),inputs.at(2)}));
   bn->addInput(jit::tracer::getBufferTrace(*ctx->buffer_map, running_mean));
   bn->addInput(jit::tracer::getBufferTrace(*ctx->buffer_map, running_var));
   bn->i_(jit::kis_test, !this->training);
