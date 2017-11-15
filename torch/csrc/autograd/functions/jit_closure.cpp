@@ -482,8 +482,8 @@ struct StageClosure {
 
     // Prepare a list of values / handles to capture
     for (auto captured_node : xstate.cur_stage_captures[stage]) {
-      auto & fn = (input_placeholders.count(captured_node) > 0) ?
-        input_placeholders.at(captured_node)
+      auto & fn = (input_placeholders.count(captured_node) > 0)
+        ? input_placeholders.at(captured_node)
         : node_map.at(captured_node->node());
       size_t offset = captured_node->node()->kind() == kParam ? 0 : captured_node->offset();
       if (captured_node->type()->kind() == TypeKind::TensorType) {
