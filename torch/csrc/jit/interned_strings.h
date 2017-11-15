@@ -43,9 +43,8 @@ _(split) \
 _(Offset) \
 _(value) \
 _(Subgraph) \
-_(SpatialBN) \
+_(BatchNormalization) \
 _(Conv) \
-_(Caffe2ConvTranspose) \
 _(ConvTranspose) \
 _(is_test) \
 _(epsilon) \

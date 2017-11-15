@@ -202,7 +202,7 @@ def prelu(g, input, weight):
     return g.op("PRelu", input, weight)
 
 
-def threshold(g, input, threshold, value, inplace):
+def threshold(g, input, threshold, value, inplace=False):
     # See Note [Export inplace]
     if _scalar(threshold) != 0:
         return _unimplemented("threshold", "non-zero threshold")
@@ -211,7 +211,7 @@ def threshold(g, input, threshold, value, inplace):
     return g.op("Relu", input)
 
 
-def leaky_relu(g, input, negative_slope, inplace):
+def leaky_relu(g, input, negative_slope, inplace=False):
     # See Note [Export inplace]
     # TODO: Talk to ONNX about unconditional cast of scalar to float
     return g.op("LeakyRelu", input, alpha_f=_scalar(negative_slope))
@@ -262,6 +262,6 @@ def unfold(g, input, dimension, size, step):
     return g.op("ATen", input, operator_s="unfold", dimension_i=dimension, size_i=size, step_i=step)
 
 
-def elu(g, input, alpha, inplace):
+def elu(g, input, alpha, inplace=False):
     # See Note [Export inplace]
     return g.op("Elu", input, alpha_f=_scalar(alpha))
