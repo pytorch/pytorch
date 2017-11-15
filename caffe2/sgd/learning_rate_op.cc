@@ -36,11 +36,17 @@ more exponential. Learning rate is controlled by the following arguments:
   * `step`: uses `stepsize`, `gamma`
   * `exp`: uses `gamma`
   * `inv`: uses `gamma`, `power`
+  # `linearWarmup`: uses `start_multiplier`, `num_iter`
+  # `constantWarmup`: uses `multiplier`, `num_iter`
 
 #### Optional:
 * `stepsize`: defaults to 0
 * `gamma`: defaults to 0
 * `power`: defaults to 0
+* `num_iter`: defaults to 0
+* `start_multiplier`: defaults to 0
+* `multiplier`: defaults to 0.5
+
 
 Usage:
 train_net.LearningRate(*iterations*, "*label*", base_lr=*float*,
@@ -57,6 +63,15 @@ train_net.LearningRate(200, "LR", base_lr=-0.1,
     .Arg(
         "max_iter",
         "(int, default -1) maximum iterations in this training run")
+    .Arg(
+        "num_iter",
+        "(int, default 0) number of iterations over which to warmup lr")
+    .Arg(
+        "start_multiplier",
+        "(float, default 0) starting multiplier for learning rate")
+    .Arg(
+        "multiplier",
+        "(float, default 0.5) constant multiplier for learning rate")
     .Input(0, "input", "description needed")
     .Output(0, "output", "description needed")
     .DeviceInferenceFunction([](const OperatorDef& def) {
