@@ -11,22 +11,22 @@
 # After the execution of the file, one should be able to find the host protoc
 # binary at build_host_protoc/bin/protoc.
 
+set -e
+
 CAFFE2_ROOT="$( cd "$(dirname -- "$0")"/.. ; pwd -P)"
 BUILD_ROOT=$CAFFE2_ROOT/build_host_protoc
 mkdir -p $BUILD_ROOT/build
-
 cd $BUILD_ROOT/build
-CMAKE=$(which cmake || which /usr/bin/cmake || which /usr/local/bin/cmake)
 
-SHARED="$CAFFE2_ROOT/third_party/protobuf/cmake -DCMAKE_INSTALL_PREFIX=$BUILD_ROOT -Dprotobuf_BUILD_TESTS=OFF "
-OTHER_FLAGS=""
+CMAKE_ARGS=()
+CMAKE_ARGS+=("-DCMAKE_INSTALL_PREFIX=$BUILD_ROOT")
+CMAKE_ARGS+=("-Dprotobuf_BUILD_TESTS=OFF")
 
 while true; do
     case "$1" in
         --other-flags)
             shift;
-            echo "Other flags passed to cmake: $@";
-            OTHER_FLAGS=" $@ ";
+            CMAKE_ARGS+=("$@")
             break ;;
         "")
             break ;;
@@ -36,7 +36,16 @@ while true; do
     esac
 done
 
+# Use ccache if available (this path is where Homebrew installs ccache symlinks)
+if [ "$(uname)" == 'Darwin' ] && [ -d /usr/local/opt/ccache/libexec ]; then
+  CMAKE_ARGS+=("-DCMAKE_C_COMPILER=/usr/local/opt/ccache/libexec/gcc")
+  CMAKE_ARGS+=("-DCMAKE_CXX_COMPILER=/usr/local/opt/ccache/libexec/g++")
+fi
 
-$CMAKE $SHARED $OTHER_FLAGS || exit 1
-make -j 4 || exit 1
-make install || exit 1
+cmake "$CAFFE2_ROOT/third_party/protobuf/cmake" ${CMAKE_ARGS[@]}
+
+if [ "$(uname)" == 'Darwin' ]; then
+  make "-j$(sysctl -n hw.ncpu)" install
+else
+  make "-j$(nproc)" install
+fi

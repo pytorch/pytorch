@@ -26,8 +26,13 @@ cd "$BUILD_ROOT"
 set -x
 cmake .. ${CMAKE_ARGS} "$@" || exit 1
 
-if [ "$(uname)" = 'Darwin' ]; then
-    cmake --build . -- "-j$(sysctl -n hw.ncpu)"
+if [ "$(uname)" == 'Darwin' ]; then
+  # Use ccache if available (this path is where Homebrew installs ccache symlinks)
+  if [ -d /usr/local/opt/ccache/libexec ]; then
+    export PATH="/usr/local/opt/ccache/libexec:$PATH"
+  fi
+
+  cmake --build . -- "-j$(sysctl -n hw.ncpu)"
 else
-    cmake --build . -- "-j$(nproc)"
+  cmake --build . -- "-j$(nproc)"
 fi
