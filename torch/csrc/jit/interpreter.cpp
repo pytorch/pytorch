@@ -1,5 +1,6 @@
 #include "interpreter.h"
 #include "torch/csrc/jit/ir.h"
+#include "torch/csrc/autograd/profiler.h"
 #include "torch/csrc/jit/generated/aten_dispatch.h"
 #ifdef WITH_CUDA
 #include "torch/csrc/jit/fusion_compiler.h"
@@ -22,6 +23,7 @@ Callback getCallback(Node *node) {
 #ifdef WITH_CUDA
     auto fusion_fn = sharedFusionCompiler().getOrCompile(*value->g(kSubgraph));
     return [fusion_fn](const tensor_list & inputs, tensor_list & outputs) {
+      autograd::profiler::RecordFunction record("FusionGroup");
       fusion_fn->launch(inputs, outputs);
     };
 #else

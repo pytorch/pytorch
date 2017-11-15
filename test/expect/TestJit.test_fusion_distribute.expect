@@ -1,16 +1,16 @@
-graph(%1 : Double(4, 4)
-      %2 : Double(4, 4)) {
-  %9 : Double(4!, 2), %10 : Double(4!, 2) = split[split_size=2, dim=1](%1), uses = [[%16.i0], [%16.i2]];
-  %12 : Double(4!, 2), %13 : Double(4!, 2) = split[split_size=2, dim=1](%2), uses = [[%16.i1], [%16.i3]];
-  %17 : Double(4, 2) = fusion_group_0(%9, %12, %10, %13), uses = [[%0.i0]];
+graph(%1 : Float(4, 4)
+      %2 : Float(4, 4)) {
+  %9 : Float(4!, 2), %10 : Float(4!, 2) = split[split_size=2, dim=1](%1), uses = [[%16.i0], [%16.i2]];
+  %12 : Float(4!, 2), %13 : Float(4!, 2) = split[split_size=2, dim=1](%2), uses = [[%16.i1], [%16.i3]];
+  %17 : Float(4, 2) = fusion_group_0(%9, %12, %10, %13), uses = [[%0.i0]];
   return (%17);
 }
-with fusion_group_0 = graph(%4 : Double(4!, 2)
-      %5 : Double(4!, 2)
-      %7 : Double(4!, 2)
-      %8 : Double(4!, 2)) {
-  %9 : Double(4, 2) = add[alpha={1}](%7, %8), uses = [%3.i1];
-  %6 : Double(4, 2) = add[alpha={1}](%4, %5), uses = [%3.i0];
-  %3 : Double(4, 2) = mul(%6, %9), uses = [%0.i0];
+with fusion_group_0 = graph(%4 : Float(4!, 2)
+      %5 : Float(4!, 2)
+      %7 : Float(4!, 2)
+      %8 : Float(4!, 2)) {
+  %9 : Float(4, 2) = add[alpha={1}](%7, %8), uses = [%3.i1];
+  %6 : Float(4, 2) = add[alpha={1}](%4, %5), uses = [%3.i0];
+  %3 : Float(4, 2) = mul(%6, %9), uses = [%0.i0];
   return (%3);
 }

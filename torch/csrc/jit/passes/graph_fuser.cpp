@@ -96,7 +96,7 @@ struct GraphFuser {
       return false;
     }
     if(auto tt = node->type()->cast<TensorType>()) {
-      return tt->scalarType() != at::kFloat;
+      return tt->scalarType() == at::kFloat;
     } else {
       return false;
     }

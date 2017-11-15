@@ -39,6 +39,7 @@ CONSTRUCTOR = CodeTemplate("""\
 {"${descriptor}", [](Node *node) {
   ${assignments}
   return TensorOp([=](const std::vector<Tensor> & inputs, std::vector<Tensor> & outputs) {
+    autograd::profiler::RecordFunction record("${name}");
     pack_list(outputs, ${call});
   }, "${name}", ${num_inputs});
 }},
