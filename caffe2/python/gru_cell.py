@@ -161,5 +161,8 @@ class GRUCell(rnn_cell.RNNCell):
     def get_state_names(self):
         return (self.scope('hidden_t'),)
 
+    def get_output_dim(self):
+        return self.hidden_size
+
 
 GRU = functools.partial(rnn_cell._LSTM, GRUCell)
