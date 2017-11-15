@@ -58,6 +58,7 @@ class BeamSearchForwardOnly(object):
         model,
         eos_token_id,
         go_token_id=seq2seq_util.GO_ID,
+        post_eos_penalty=None,
     ):
         self.beam_size = beam_size
         self.model = model
@@ -67,6 +68,7 @@ class BeamSearchForwardOnly(object):
         )
         self.go_token_id = go_token_id
         self.eos_token_id = eos_token_id
+        self.post_eos_penalty = post_eos_penalty
 
         (
             self.timestep,
@@ -117,6 +119,92 @@ class BeamSearchForwardOnly(object):
         possible_translation_tokens=None,
         go_token_id=None,
     ):
+        ZERO = self.model.param_init_net.ConstantFill(
+            [],
+            'ZERO',
+            shape=[1],
+            value=0,
+            dtype=core.DataType.INT32,
+        )
+        on_initial_step = self.step_model.net.EQ(
+            [ZERO, self.timestep],
+            'on_initial_step',
+        )
+
+        if self.post_eos_penalty is not None:
+            eos_token = self.model.param_init_net.ConstantFill(
+                [],
+                'eos_token',
+                shape=[self.beam_size],
+                value=self.eos_token_id,
+                dtype=core.DataType.INT32,
+            )
+            finished_penalty = self.model.param_init_net.ConstantFill(
+                [],
+                'finished_penalty',
+                shape=[1],
+                value=float(self.post_eos_penalty),
+                dtype=core.DataType.FLOAT,
+            )
+            ZERO_FLOAT = self.model.param_init_net.ConstantFill(
+                [],
+                'ZERO_FLOAT',
+                shape=[1],
+                value=0.0,
+                dtype=core.DataType.FLOAT,
+            )
+            finished_penalty = self.step_model.net.Conditional(
+                [on_initial_step, ZERO_FLOAT, finished_penalty],
+                'possible_finished_penalty',
+            )
+
+            # [beam_size]
+            hypo_t_flat = self.step_model.net.FlattenToVec(
+                self.hypo_t_prev,
+                'hypo_t_flat',
+            )
+            hypo_t_flat_int = self.step_model.net.Cast(
+                hypo_t_flat,
+                'hypo_t_flat_int',
+                to=core.DataType.INT32,
+            )
+
+            tokens_t_flat = self.step_model.net.FlattenToVec(
+                self.tokens_t_prev,
+                'tokens_t_flat',
+            )
+            tokens_t_flat_int = self.step_model.net.Cast(
+                tokens_t_flat,
+                'tokens_t_flat_int',
+                to=core.DataType.INT32,
+            )
+
+            predecessor_tokens = self.step_model.net.Gather(
+                [tokens_t_flat_int, hypo_t_flat_int],
+                'predecessor_tokens',
+            )
+            predecessor_is_eos = self.step_model.net.EQ(
+                [predecessor_tokens, eos_token],
+                'predecessor_is_eos',
+            )
+            predecessor_is_eos_float = self.step_model.net.Cast(
+                predecessor_is_eos,
+                'predecessor_is_eos_float',
+                to=core.DataType.FLOAT,
+            )
+            predecessor_is_eos_penalty = self.step_model.net.Mul(
+                [predecessor_is_eos_float, finished_penalty],
+                'predecessor_is_eos_penalty',
+                broadcast=1,
+            )
+
+            log_probs = self.step_model.net.Add(
+                [log_probs, predecessor_is_eos_penalty],
+                'log_probs_penalized',
+                broadcast=1,
+                axis=0,
+            )
+
         # [beam_size, beam_size]
         best_scores_per_hypo, best_tokens_per_hypo = self.step_model.net.TopK(
             log_probs,
@@ -160,13 +248,6 @@ class BeamSearchForwardOnly(object):
             [output_scores, 'output_scores_old_shape'],
             shape=[-1],
         )
-        ZERO = self.model.param_init_net.ConstantFill(
-            [],
-            'ZERO',
-            shape=[1],
-            value=0,
-            dtype=core.DataType.INT32,
-        )
         MINUS_ONE_INT32 = self.model.param_init_net.ConstantFill(
             [],
             'MINUS_ONE_INT32',
@@ -186,10 +267,6 @@ class BeamSearchForwardOnly(object):
         # is 1 on first step (so we just need beam_size scores),
         # and beam_size subsequently (so we need all beam_size * beam_size
         # scores)
-        on_initial_step = self.step_model.net.EQ(
-            [ZERO, self.timestep],
-            'on_initial_step',
-        )
         slice_end = self.step_model.net.Conditional(
             [on_initial_step, BEAM_SIZE, MINUS_ONE_INT32],
             ['slice_end'],
@@ -310,7 +387,7 @@ class BeamSearchForwardOnly(object):
             [],
             'initial_hypo',
             shape=[1],
-            value=-1.0,
+            value=0.0,
             dtype=core.DataType.FLOAT,
         )
         encoder_inputs_flattened, _ = self.model.net.Reshape(
