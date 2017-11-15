@@ -183,8 +183,8 @@ FALLTHROUGH_FUNCTIONS = {
     '__lshift__', '__or__', '__rshift__', '__xor__',
 }
 VIEW_FUNCTIONS = {
-    'as_strided', 'expand', 'narrow', 'permute', 'select', 'squeeze', 't',
-    'transpose', 'unfold', 'unsqueeze', 'view',
+    'alias', 'as_strided', 'expand', 'narrow', 'permute', 'select', 'squeeze',
+    't', 'transpose', 'unfold', 'unsqueeze', 'view',
 }
 MANUAL_IMPLEMENTATIONS = {
     'contiguous', 'resize_', 'resize_as_'
@@ -1025,7 +1025,8 @@ def gen_variable_type(declarations, out):
             return False
 
         # don't bind size or stride since the python signatures are different
-        if name in ['size', 'stride']:
+        # exclude alias from Python bindings as well at least for now
+        if name in ['alias', 'size', 'stride']:
             return False
 
         if name.endswith('_backward'):
