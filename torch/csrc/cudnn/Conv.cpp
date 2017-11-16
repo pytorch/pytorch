@@ -1,5 +1,6 @@
 #include "Conv.h"
 
+#include "torch/csrc/cuda/cuda_check.h"
 #include "THC/THC.h"
 #include "Exceptions.h"
 #include "Types.h"
@@ -98,7 +99,7 @@ BenchmarkCache<cudnnConvolutionBwdFilterAlgo_t> bwd_filter_algos;
 
 struct Workspace {
   Workspace(THCState* state, size_t size) : state(state), size(size), data(NULL) {
-    CUDA_CHECK(THCudaMalloc(state, &data, size));
+    TORCH_CUDA_CHECK(THCudaMalloc(state, &data, size));
   }
   Workspace(const Workspace&) = delete;
   Workspace(Workspace&&) = default;
@@ -453,7 +454,7 @@ void findAlgorithm(
   cache.insert(conv.params, *algo);
 
   THCDeviceAllocator* allocator = THCCachingAllocator_get();
-  CUDA_CHECK(allocator->emptyCache(allocator->state));
+  TORCH_CUDA_CHECK(allocator->emptyCache(allocator->state));
 }
 
 template<typename algo_t>

@@ -71,7 +71,7 @@ class EventList(list):
                         name=evt.name,
                         ph='s',
                         # +1 microsecond so the arrow is drawn inside cpu block
-                        ts=evt.cpu_interval.start+1,
+                        ts=evt.cpu_interval.start + 1,
                         tid=evt.thread,
                         pid='CPU functions',
                         id=next_id,
@@ -320,6 +320,7 @@ class Interval(object):
     def elapsed_us(self):
         return self.end - self.start
 
+
 # TODO: record TID too
 class FunctionEvent(FormattedTimesMixin):
     """Profiling information about a single function."""
@@ -472,7 +473,7 @@ def parse_nvprof_trace(path):
                             name=strings[row['name']],
                             cpu_start=row['start_time'],
                             cpu_end=row['end_time'],
-                            thread=0)
+                            thread=0)  # TODO: find in sqlite database
         functions.append(evt)
         functions_map[evt.id] = evt
 

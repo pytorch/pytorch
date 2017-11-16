@@ -15,6 +15,7 @@
 #include <forward_list>
 #include <tuple>
 #include "ATen/ATen.h"
+#include "torch/csrc/cuda/cuda_check.h"
 #ifdef WITH_CUDA
 #include <cuda_runtime.h>
 #endif
@@ -40,16 +41,6 @@ enum class EventKind {
   PushRange,
   PopRange
 };
-#ifdef WITH_CUDA
-static void cudaCheck(cudaError_t result, const char * file, int line) {
-  if(result != cudaSuccess) {
-    std::stringstream ss;
-    ss << file << ":" << line << ": " << cudaGetErrorString(result);
-    throw std::runtime_error(ss.str());
-  }
-}
-#define PROFILER_CUDA_CHECK(result) cudaCheck(result,__FILE__,__LINE__);
-#endif
 
 struct Event {
   Event(EventKind kind, std::string name, uint32_t thread_id, bool record_cuda)
@@ -59,8 +50,8 @@ struct Event {
   , cpu_ns_(getTime()) {
 #ifdef WITH_CUDA
     if(record_cuda) {
-      PROFILER_CUDA_CHECK(cudaEventCreate(&event));
-      PROFILER_CUDA_CHECK(cudaEventRecord(event, at::globalContext().getCurrentCUDAStream()));
+      TORCH_CUDA_CHECK(cudaEventCreate(&event));
+      TORCH_CUDA_CHECK(cudaEventRecord(event, at::globalContext().getCurrentCUDAStream()));
     }
 #endif
   }
@@ -86,10 +77,10 @@ struct Event {
     if(!e.has_cuda() || !has_cuda()) {
       throw std::logic_error("Events were not recorded for CUDA");
     }
-    PROFILER_CUDA_CHECK(cudaEventSynchronize(event));
-    PROFILER_CUDA_CHECK(cudaEventSynchronize(e.event));
+    TORCH_CUDA_CHECK(cudaEventSynchronize(event));
+    TORCH_CUDA_CHECK(cudaEventSynchronize(e.event));
     float ms;
-    PROFILER_CUDA_CHECK(cudaEventElapsedTime(&ms, event, e.event));
+    TORCH_CUDA_CHECK(cudaEventElapsedTime(&ms, event, e.event));
     return ms*1000.0;
 #else
     throw std::logic_error("CUDA not enabled");
