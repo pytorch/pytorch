@@ -5,6 +5,8 @@ from .optimizer import Optimizer, required
 class SGDW(Optimizer):
     r"""Implements stochastic gradient descent (optionally with momentum).
 
+    It has been proposed in `Fixing Weight Decay Regularization in Adam`_.
+
     Nesterov momentum is based on the formula from
     `On the importance of initialization and momentum in deep learning`__.
 
@@ -18,7 +20,7 @@ class SGDW(Optimizer):
         nesterov (bool, optional): enables Nesterov momentum (default: False)
 
     Example:
-        >>> optimizer = torch.optim.SGD(model.parameters(), lr=0.1, momentum=0.9)
+        >>> optimizer = torch.optim.SGDW(model.parameters(), lr=0.1, momentum=0.9)
         >>> optimizer.zero_grad()
         >>> loss_fn(model(input), target).backward()
         >>> optimizer.step()
@@ -46,6 +48,10 @@ class SGDW(Optimizer):
              p = p - v
 
         The Nesterov version is analogously modified.
+
+    .. Fixing Weight Decay Regularization in Adam:
+    https://arxiv.org/abs/1711.05101
+
     """
 
     def __init__(self, params, lr=required, momentum=0, dampening=0,
@@ -57,7 +63,7 @@ class SGDW(Optimizer):
         super(SGDW, self).__init__(params, defaults)
 
     def __setstate__(self, state):
-        super(SGD, self).__setstate__(state)
+        super(SGDW, self).__setstate__(state)
         for group in self.param_groups:
             group.setdefault('nesterov', False)
 
@@ -94,6 +100,8 @@ class SGDW(Optimizer):
                         d_p = d_p.add(momentum, buf)
                     else:
                         d_p = buf
+
+		p.data.add_(-group['lr'], d_p)
                 if weight_decay != 0:
                     p.data.add_(-weight_decay, p.data)
 

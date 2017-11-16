@@ -26,6 +26,17 @@
         ]
     },
     {
+        "algorithm": "adamw",
+        "config": [
+            {},
+            {"learningRate": 1e-4},
+            {"learningRate": 1e-4, "beta1": 0.92},
+            {"learningRate": 1e-4, "beta1": 0.92, "beta2": 0.96},
+            {"learningRate": 1e-4, "beta1": 0.92, "beta2": 0.96, "epsilon": 1e-3},
+            {"learningRate": 1e-4, "weightDecay": 0.1}
+        ]
+    },
+    {
         "algorithm": "adamax",
         "config": [
             {},
@@ -91,6 +102,16 @@
     },
     {
         "algorithm": "sgd",
+        "config": [
+            {},
+            {"learningRate": 1e-4},
+            {"learningRate": 1e-4, "momentum": 0.95, "dampening": 0.9},
+            {"learningRate": 1e-4, "nesterov": true, "momentum": 0.95, "dampening": 0},
+            {"weightDecay": 0.2}
+        ]
+    },
+    {
+        "algorithm": "sgdw",
         "config": [
             {},
             {"learningRate": 1e-4},
