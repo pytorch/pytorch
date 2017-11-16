@@ -6,10 +6,16 @@
 namespace torch {
 namespace autograd {
 
-jit::value_list BatchNormForward::symbolic(SymbolicContext* ctx, jit::value_list inputs) {
+jit::value_list BatchNormForward::symbolic(
+    SymbolicContext* ctx,
+    jit::value_list inputs,
+    std::shared_ptr<jit::SourceLocation> sl
+) {
   auto & g = ctx->graph;
   // X, Scale, Bias
-  auto bn = g->appendNode(g->create(jit::kBatchNormalization, {inputs.at(0),inputs.at(1),inputs.at(2)}, 0));
+  auto bn_node = g->create(jit::kBatchNormalization,{inputs.at(0),inputs.at(1),inputs.at(2)}, 0);
+  bn_node->setSourceLocation(sl);
+  auto bn = g->appendNode(bn_node);
   bn->addInput(jit::tracer::getBufferTrace(*ctx->buffer_map, running_mean));
   bn->addInput(jit::tracer::getBufferTrace(*ctx->buffer_map, running_var));
   bn->i_(jit::kis_test, !this->training);
