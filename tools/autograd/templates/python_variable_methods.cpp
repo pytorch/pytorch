@@ -92,17 +92,6 @@ PyObject * THPVariable_clamp_(PyObject* self, PyObject* args, PyObject* kwargs)
   END_HANDLE_TH_ERRORS
 }
 
-static IntList dispatch_size(const Tensor& self) {
-  // avoid releasing GIL/changing device, should be quick
-  // yes, this is called sizes in ATen.
-  return self.sizes();
-}
-
-static int64_t dispatch_size(const Tensor& self, int64_t dim) {
-  // avoid releasing GIL/changing device, should be quick
-  return self.size(dim);
-}
-
 static PyObject * THPVariable_size(PyObject* self, PyObject* args, PyObject* kwargs)
 {
   HANDLE_TH_ERRORS
@@ -114,26 +103,16 @@ static PyObject * THPVariable_size(PyObject* self, PyObject* args, PyObject* kwa
   PyObject* parsed_args[3];
   auto r = parser.parse(args, kwargs, parsed_args);
   if (r.idx == 0) {
-    return wrap(dispatch_size(self_, r.toInt64(0)));
+    return wrap(self_.size(r.toInt64(0)));
   } else if (r.idx == 1) {
+    // Yes, this is called sizes in ATen
+    IntList sizes = self_.sizes();
     // we can't do the normal wrapping here because IntList maps to both
-    // torch.Size and tuple in python
-    IntList sizes = dispatch_size(self_);
-    return THPSize_New(sizes.size(), (int64_t *)sizes.data());
+    // torch.Size and tuple in python.
+    return THPSize_New(sizes.size(), sizes.data());
   }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
-}
-
-static IntList dispatch_stride(const Tensor& self) {
-  // avoid releasing GIL/changing device, should be quick
-  // yes, this is called strides in ATen.
-  return self.strides();
-}
-
-static int64_t dispatch_stride(const Tensor& self, int64_t dim) {
-  // avoid releasing GIL/changing device, should be quick
-  return self.stride(dim);
 }
 
 static PyObject * THPVariable_stride(PyObject* self, PyObject* args, PyObject* kwargs)
@@ -147,11 +126,12 @@ static PyObject * THPVariable_stride(PyObject* self, PyObject* args, PyObject* k
   PyObject* parsed_args[3];
   auto r = parser.parse(args, kwargs, parsed_args);
   if (r.idx == 0) {
-    return wrap(dispatch_stride(self_, r.toInt64(0)));
+    return wrap(self_.stride(r.toInt64(0)));
   } else if (r.idx == 1) {
+    // yes, this is called strides in ATen.
+    IntList strides = self_.strides();
     // we can't do the normal wrapping here because IntList maps to both
     // torch.Size and tuple in python
-    IntList strides = dispatch_stride(self_);
     THPObjectPtr py_stride(PyTuple_New(strides.size()));
     for (size_t i = 0; i != strides.size(); ++i) {
       PyTuple_SET_ITEM(py_stride.get(), i, PyLong_FromLong(strides[i]));
