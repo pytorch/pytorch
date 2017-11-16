@@ -269,10 +269,10 @@ std::tuple<at::Tensor, at::Tensor> RoiPooling2d_forward_cpu(
           auto tileWEnd = static_cast<int64_t>(std::ceil((pw + 1) * tileWidth));
 
           // Add tile offsets to RoI offsets, and clip to input boundaries
-          tileHStart = std::min(std::max(tileHStart + startHeight, 0l), inputHeight);
-          tileWStart = std::min(std::max(tileWStart + startWidth, 0l), inputWidth);
-          tileHEnd = std::min(std::max(tileHEnd + startHeight, 0l), inputHeight);
-          tileWEnd = std::min(std::max(tileWEnd + startWidth, 0l), inputWidth);
+          tileHStart = std::min(std::max<int64_t>(tileHStart + startHeight, 0), inputHeight);
+          tileWStart = std::min(std::max<int64_t>(tileWStart + startWidth, 0), inputWidth);
+          tileHEnd = std::min(std::max<int64_t>(tileHEnd + startHeight, 0), inputHeight);
+          tileWEnd = std::min(std::max<int64_t>(tileWEnd + startWidth, 0), inputWidth);
 
           auto poolIndex = (ph * pooledWidth) + pw;
 
