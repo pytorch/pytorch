@@ -27,6 +27,53 @@ std::vector<Tensor> split(const Tensor& self, int64_t split_size, int64_t dim) {
   return splits;
 }
 
+Tensor slice(const Tensor& self, int64_t start, int64_t end, int64_t step, int64_t dim) {
+  dim = maybe_wrap_dim(dim, self.dim());
+  auto sizes = std::vector<int64_t>(self.sizes());
+  auto strides = std::vector<int64_t>(self.strides());
+  if (step <= 0) {
+    // TODO: support negative strides
+    throw std::runtime_error("slice step must be positive");
+  }
+  if (start < 0) {
+    start += sizes[dim];
+  }
+  if (end < 0) {
+    end += sizes[dim];
+  }
+  if (start < 0) {
+    start = 0;
+  } else if (start >= sizes[dim]) {
+    start = sizes[dim];
+  }
+  if (end < start) {
+    end = start;
+  } else if (end >= sizes[dim]) {
+    end = sizes[dim];
+  }
+  auto storage_offset = self.storage_offset() + start * strides[dim];
+  auto len = end - start;
+  sizes[dim] = (len + step - 1) / step;  // round-up
+  strides[dim] *= step;
+  return self.as_strided(sizes, strides, storage_offset);
+}
+
+Tensor narrow(const Tensor& self, int64_t dim, int64_t start, int64_t length) {
+  dim = maybe_wrap_dim(dim, self.dim());
+  auto cur_size = self.size(dim);
+  if (start < 0 || start >= cur_size) {
+    runtime_error("start out of range");
+  }
+  if (length <= 0 || start > cur_size - length) {
+    runtime_error("length out of range");
+  }
+  return at::native::slice(self, start, start + length, 1, dim);
+}
+
+Tensor select(const Tensor& self, int64_t dim, int64_t index) {
+  return at::native::narrow(self, dim, index, 1).squeeze(dim);
+}
+
 std::vector<Tensor> chunk(const Tensor& self, int64_t chunks, int64_t dim) {
   int64_t split_size = (self.size(dim) + chunks - 1) / chunks;
   // ensure this is dispatched through Tensor/Type, rather than the native function directly.
