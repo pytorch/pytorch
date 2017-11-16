@@ -401,7 +401,7 @@ class UnPackRecordsOp : public Operator<CPUContext> {
             input.size(),
             input.raw_data() /* src */,
             destinations[j] /* dst */
-            );
+        );
 
         destinations[j] =
             (char*)destinations[j] + input.size() * input.itemsize();
@@ -1426,5 +1426,39 @@ REGISTER_BLOB_DESERIALIZER(std::unique_ptr<TreeCursor>, TreeCursorDeserializer);
 
 } // namespace
 
-} // dataset_ops
-} // caffe2
+void SharedTensorVectorPtrSerializer::Serialize(
+    const Blob& blob,
+    const string& name,
+    BlobSerializerBase::SerializationAcceptor acceptor) {
+  /* This is dummy serialize that doesn't save anything. If saving the content
+  is desired in future use case, you can change this serializer. Note: special
+  care need to be taken for the parameter initialization of
+  LastNWindowCollectorOp and ReservoirSamplingOp if this serializer actually
+  saves the content.
+  */
+  CAFFE_ENFORCE(blob.IsType<std::shared_ptr<std::vector<TensorCPU>>>());
+  BlobProto blob_proto;
+  blob_proto.set_name(name);
+  blob_proto.set_type("std::shared_ptr<std::vector<TensorCPU>>");
+  blob_proto.set_content("");
+  acceptor(name, blob_proto.SerializeAsString());
+};
+
+void SharedTensorVectorPtrDeserializer::Deserialize(
+    const BlobProto& /* unused */,
+    Blob* blob) {
+  /* This is dummy deserialize which creates a nullptr
+   */
+  blob->GetMutable<std::shared_ptr<std::vector<TensorCPU>>>();
+}
+
+REGISTER_BLOB_SERIALIZER(
+    (TypeMeta::Id<std::shared_ptr<std::vector<TensorCPU>>>()),
+    SharedTensorVectorPtrSerializer);
+
+REGISTER_BLOB_DESERIALIZER(
+    std::shared_ptr<std::vector<TensorCPU>>,
+    SharedTensorVectorPtrDeserializer);
+
+} // namespace dataset_ops
+} // namespace caffe2

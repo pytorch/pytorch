@@ -79,6 +79,9 @@ class LayerModelHelper(model_helper.ModelHelper):
         self.param_init_net = self.create_init_net('param_init_net')
         self._initialize_params = True
 
+    def clear_output_schema(self):
+        self._output_schema = None
+
     def set_initialize_params(self, initialize_params):
         self._initialize_params = initialize_params
 
