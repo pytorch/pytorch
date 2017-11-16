@@ -252,7 +252,7 @@ inline VariableFlags VariableFlags::of(const Variable& var) {
   return f;
 }
 
-inline bool VariableFlags::verify(const Variable& var) {
+inline bool VariableFlags::verify(const Variable& var) const {
   if (!var.defined()) return was_null;
   return !was_null && requires_grad == var.requires_grad() && is_volatile == var.is_volatile();
 }

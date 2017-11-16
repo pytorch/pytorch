@@ -737,7 +737,6 @@ class TestJit(TestCase):
 
         self.assertEqual(r1, r2)
 
-    @unittest.skip("Broken. Enable once new JIT interpreter is merged")
     def test_mini_wlm(self):
         """Exercise null-edge pruning in the tracer."""
 
@@ -763,6 +762,55 @@ class TestJit(TestCase):
         with self.assertCompiled(model):
             z, _ = model(x, y)
         z.sum().backward()
+
+    # Tracer fails when it receives the same grad variable as multiple input to
+    # traced region. The problem is that it's not immediately obvious how to
+    # assign multiple inputs to this Variable. It might be possible to solve
+    # this using the view mechanism, but this requires some thought.
+    # In general, it should be supported, because the user has no control
+    # over this (and it's quite common, e.g. the sum call below will pass the same
+    # grad variable as both inputs to grad of fn).
+    @unittest.skip("Broken - repeated grads trigger an assertion failure.")
+    def test_repeated_grad(self):
+        @torch.jit.compile
+        def fn(x):
+            return x * x, x + x
+
+        x = Variable(torch.randn(5, 5), requires_grad=True)
+        # This shouldn't raise!
+        sum(fn(x)).sum().backward()
+
+    def test_input_pruning(self):
+        """Check that stage 1 will return only one value"""
+        # One of the inputs doesn't require grad, so it should be pruned
+        @torch.jit.compile
+        def fn(x, y):
+            return x * y, x + y
+
+        x = Variable(torch.randn(5, 5), requires_grad=True)
+        y = Variable(torch.randn(5, 5))
+
+        out = fn(x, y)
+        (out[0] * out[1]).sum().backward()
+        with self.assertCompiled(fn):
+            fn(x, y)
+        self.assertExpected(str(fn.graph_for(x, y)))
+
+    def test_output_pruning(self):
+        """Check that stage 1 will take one value as an argument"""
+        # One of the outputs doesn't require grad, so it should be pruned
+        @torch.jit.compile
+        def fn(x, y):
+            return x * y, y + y
+
+        x = Variable(torch.randn(5, 5), requires_grad=True)
+        y = Variable(torch.randn(5, 5))
+
+        out = fn(x, y)
+        (out[0] * out[1]).sum().backward()
+        with self.assertCompiled(fn):
+            fn(x, y)
+        self.assertExpected(str(fn.graph_for(x, y)))
 
     @skipIfNoTorchVision
     def test_alexnet(self):

@@ -32,6 +32,13 @@ py::object borrow(py::handle x) {
   return py::reinterpret_borrow<py::object>(x);
 }
 
+py::object makePair(py::handle a, py::handle b) {
+  py::tuple result(2);
+  result[0] = borrow(a);
+  result[1] = borrow(b);
+  return result;
+}
+
 } // anonymous namespace
 
 // Lifecycle of a CompiledFunction:
@@ -90,18 +97,37 @@ struct CompiledFunction {
       } catch(const jit::NotImplementedException & ex) {
         closure_ = std::make_shared<AutogradClosureFactory>(complete_trace.get());
       }
+      prepareStageDetails(complete_trace.get());
+      graph_ = complete_trace->graph;
       is_ready_ = true;
       return true;
+    }
+
+    void prepareStageDetails(TracingState *state) {
+      stage_details_.resize(state->graph->stage() + 1);
+      for (std::size_t stage = 0; stage < state->graph->stage() + 1; ++stage) {
+        auto & details = stage_details_[stage];
+        std::tie(details.input_flags, details.output_flags) = std::move(state->var_flags[stage]);
+        if (stage >= 1) {
+          auto & current_outputs = state->output_edges[stage];
+          auto & prev_outputs = state->output_edges[stage - 1];
+          for (auto & output : current_outputs) {
+            auto prev_it = std::find(prev_outputs.begin(), prev_outputs.end(), output);
+            if (prev_it == prev_outputs.end()) continue;
+            details.copied_next_fns.push_back(std::distance(prev_outputs.begin(), prev_it));
+          }
+        }
+      }
     }
 
     variable_list run(const variable_list& in_vars) {
       JIT_ASSERT(is_ready_);
       AutoNoGIL _gil_guard;
-      if(closure_) {
+      if (closure_) {
         auto fn = closure_->construct();
         return (*fn)(in_vars);
       } else {
-        InterpreterAutogradFunction interp(code_);
+        InterpreterAutogradFunction interp(code_, stage_details_);
         interp.willReleaseVariables(); // forward pass is never reused, so it is safe to release anything it can
         return interp.apply(in_vars);
       }
@@ -132,11 +158,14 @@ struct CompiledFunction {
 
     CompiledFunction& fn_;
     IODescriptor out_desc_;
-    std::shared_ptr<AutogradClosureFactory> closure_;
-    jit::Code code_;
     std::vector<std::shared_ptr<TracingState>> traces_;
     bool is_volatile_;
     bool is_ready_ = false;
+
+    std::vector<StageDetails> stage_details_;
+    std::shared_ptr<AutogradClosureFactory> closure_;
+    jit::Code code_;
+    std::shared_ptr<jit::Graph> graph_;
   };
 
   TraceForKey& getTrace(ParsedArgs& args) {
@@ -148,18 +177,11 @@ struct CompiledFunction {
     return it->second;
   }
 
-  py::object makeTuple(py::handle a, py::handle b) {
-    py::tuple result(2);
-    result[0] = borrow(a);
-    result[1] = borrow(b);
-    return result;
-  }
-
   py::object call(py::handle pyargs, py::handle pyparams) {
     if (!enabled_) {
       return steal(PyObject_CallObject(function_.get(), pyargs.ptr()));
     }
-    auto all_pyargs = makeTuple(pyargs, pyparams);
+    auto all_pyargs = makePair(pyargs, pyparams);
     auto args = flatten(all_pyargs);
     auto& ktrace = getTrace(args);
 
@@ -171,15 +193,6 @@ struct CompiledFunction {
       misses_++;
       return steal(ktrace.add_trace(pyargs.ptr(), args.vars));
     }
-  }
-
-  bool hasTraceFor(py::handle pyargs, py::handle pyparams) {
-    auto all_pyargs = makeTuple(pyargs, pyparams);
-    auto args = flatten(all_pyargs);
-    auto it = ktraces_.find(args.desc);
-    if (it == ktraces_.end())
-      return false;
-    return it->second.ready();
   }
 
   void clearCache() {
@@ -207,6 +220,20 @@ struct CompiledFunction {
   std::unordered_map<IODescriptor, TraceForKey, torch::hash<IODescriptor>> ktraces_;
 };
 
+namespace {
+
+CompiledFunction::TraceForKey* getTraceFor(CompiledFunction& fn,
+                                           py::handle pyargs,
+                                           py::handle pyparams) {
+  auto all_pyargs = makePair(pyargs, pyparams);
+  auto args = flatten(all_pyargs);
+  auto it = fn.ktraces_.find(args.desc);
+  if (it == fn.ktraces_.end())
+    return nullptr;
+  return it->second.ready() ? &it->second : nullptr;
+}
+
+} // anonymous namespace
 
 void initCompilerMixin(PyObject *module) {
   auto m = py::handle(module).cast<py::module>();
@@ -216,7 +243,11 @@ void initCompilerMixin(PyObject *module) {
       return fn.call(args, parameters);
     })
     .def("has_trace_for", [](CompiledFunction& fn, py::handle args, py::handle parameters) -> bool {
-      return fn.hasTraceFor(args, parameters);
+      return getTraceFor(fn, args, parameters) != nullptr;
+    })
+    .def("graph_for", [](CompiledFunction& fn, py::handle pyargs, py::handle pyparameters) -> py::object {
+      auto trace = getTraceFor(fn, pyargs, pyparameters);
+      return trace ? py::cast(trace->graph_) : py::none();
     })
     .def("clear_cache", [](CompiledFunction& fn) {
       fn.clearCache();
