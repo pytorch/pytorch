@@ -2,6 +2,7 @@
 #include "ATen/NativeFunctions.h"
 #include "ATen/WrapDimUtils.h"
 #include "ATen/ExpandUtils.h"
+#include "stdint.h"
 
 namespace at {
 namespace native {
@@ -208,8 +209,8 @@ std::tuple<at::Tensor, at::Tensor> RoiPooling2d_forward_cpu(
 
   auto proposals = rois.size(0);
   auto inputChannels = input.size(1);
-  auto inputHeight = input.size(2);
-  auto inputWidth = input.size(3);
+  int64_t inputHeight = input.size(2);
+  int64_t inputWidth = input.size(3);
 
   // Output Tensor is (num_rois, C, pooledHeight, pooledWidth)
   auto output = input.type().tensor({proposals, inputChannels, pooledHeight, pooledWidth});
@@ -269,10 +270,10 @@ std::tuple<at::Tensor, at::Tensor> RoiPooling2d_forward_cpu(
           auto tileWEnd = static_cast<int64_t>(std::ceil((pw + 1) * tileWidth));
 
           // Add tile offsets to RoI offsets, and clip to input boundaries
-          tileHStart = std::min(std::max(tileHStart + startHeight, 0l), inputHeight);
-          tileWStart = std::min(std::max(tileWStart + startWidth, 0l), inputWidth);
-          tileHEnd = std::min(std::max(tileHEnd + startHeight, 0l), inputHeight);
-          tileWEnd = std::min(std::max(tileWEnd + startWidth, 0l), inputWidth);
+          tileHStart = std::min(std::max(tileHStart + startHeight, INT64_C(0)), inputHeight);
+          tileWStart = std::min(std::max(tileWStart + startWidth, INT64_C(0)), inputWidth);
+          tileHEnd = std::min(std::max(tileHEnd + startHeight, INT64_C(0)), inputHeight);
+          tileWEnd = std::min(std::max(tileWEnd + startWidth, INT64_C(0)), inputWidth);
 
           auto poolIndex = (ph * pooledWidth) + pw;
 
