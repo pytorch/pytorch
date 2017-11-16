@@ -160,6 +160,40 @@ class ExponentialLR(_LRScheduler):
                 for base_lr in self.base_lrs]
 
 
+class SGDRCosineLR(_LRScheduler):
+    """Decays learning rate with cosine annealing.
+    .. SGDR: Stochastic Gradient Descent with Warm Restarts.
+    https://arxiv.org/abs/1608.03983
+
+    Reference implementation:
+    https://github.com/gngdb/pytorch-cifar-sgdr
+
+    Args:
+        optimizer (Optimizer): Wrapped optimizer.
+        last_epoch (int): The index of last epoch. Default: -1.
+
+    Example:
+        >>> scheduler = CosineLR(optimizer, period=50, batch_idx=75)
+        >>> for epoch in range(100):
+        >>>     scheduler.step()
+        >>>     train(...)
+        >>>     validate(...)
+    """
+
+    def __init__(self, optimizer, last_epoch=-1):
+        # self.step_size = step_size
+        # self.gamma = gamma
+        super(SGDRCosineLR, self).__init__(optimizer, last_epoch)
+
+    def get_lr(self, period, batch_idx):
+        restart_period = period
+        while batch_idx / restart_period > 1.:
+            batch_idx = batch_idx - restart_period
+            restart_period = restart_period * 2
+        radians = math.pi * (batch_idx / restart_period)
+        return [base_lr * 0.5 * (1. + math.cos(radians)) for base_lr in self.base_lrs]
+
+
 class ReduceLROnPlateau(object):
     """Reduce learning rate when a metric has stopped improving.
     Models often benefit from reducing the learning rate by a factor
