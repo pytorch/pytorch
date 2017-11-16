@@ -41,7 +41,7 @@ class NetBuilder(object):
                 ops.stop_if(ops.LE([c, ops.Const(0)]))
                 ops.Add([c, ops.Const(-1)], [c])
                 with ops.If(ops.GE([c, ops.Const(3)])):
-                    ops.Add([d, ops.Const(10)])
+                    ops.Add([d, ops.Const(10)], [d])
             ops.Print(c, [])
             ops.Print(d, [])
         step = core.to_execution_step(nb)
