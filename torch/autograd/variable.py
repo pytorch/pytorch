@@ -46,9 +46,6 @@ class Variable(_C._VariableBase):
         volatile (bool): Value of the volatile flag. **Keyword only.**
     """
 
-    def __getattr__(self, name):
-        return object.__getattribute__(self, name)
-
     def __getitem__(self, key):
         if torch.is_tensor(key):
             key = Variable(key)  # auto-wrap tensors
