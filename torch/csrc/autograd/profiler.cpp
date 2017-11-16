@@ -3,38 +3,38 @@
 
 namespace torch { namespace autograd { namespace profiler {
 
-bool profiling = false;
-bool using_cuda;
+ProfilerState state = ProfilerState::Disabled;
+uint32_t next_thread_id = 0;
 std::mutex all_event_lists_mutex;
 std::list<std::shared_ptr<RangeEventList>> all_event_lists;
 thread_local std::shared_ptr<RangeEventList> event_list;
+thread_local int32_t thread_id;
 
 void RecordFunction::pushFunctionRange(Function* fn) {
   pushRange(fn->name());
 }
 
-void enableProfiler(bool use_cuda) {
+void enableProfiler(ProfilerState new_state) {
+  TORCH_ASSERT(new_state != ProfilerState::Disabled);
 #ifndef WITH_CUDA
-  if (use_cuda)
-    throw std::runtime_error("Can't use CUDA profiler - PyTorch was compiled without CUDA");
+  if (new_state == ProfilerState::NVTX)
+    throw std::runtime_error("Can't use NVTX profiler - PyTorch was compiled without CUDA");
 #endif
-  if (profiling) {
-    if (use_cuda != using_cuda)
-      throw std::runtime_error("can't change use_cuda flag while profiler is running");
-    return;
+  if (state != ProfilerState::Disabled && new_state != state) {
+      throw std::runtime_error("can't change kind of profiling (e.g. NVTX to CPU) while profiler is running");
   }
-  profiling = true;
-  using_cuda = use_cuda;
+  state = new_state;
   mark("__start_profile");
 }
 
 thread_event_lists disableProfiler() {
-  if (!profiling) {
+  if (state == ProfilerState::Disabled) {
     throw std::runtime_error("can't disable profiler when it's not running");
   }
+  ProfilerState old_state = state;
   mark("__stop_profile");
-  profiling = false;
-  if (using_cuda) {
+  state = ProfilerState::Disabled;
+  if (old_state == ProfilerState::NVTX) {
     return thread_event_lists();
   } else {
     thread_event_lists result;

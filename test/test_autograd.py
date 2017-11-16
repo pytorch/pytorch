@@ -1541,9 +1541,9 @@ class TestAutograd(TestCase):
         names = ['mul', 'add']
         self.assertEqual(len(p.function_events), len(names))
         for info, expected_name in zip(p.function_events, names):
-            self.assertGreater(info.start, last_end)
+            self.assertGreater(info.cpu_interval.start, last_end)
             self.assertEqual(info.name, expected_name)
-            last_end = info.end
+            last_end = info.cpu_interval.end
 
     def test_dir(self):
         x = Variable(torch.randn(10, 10))
