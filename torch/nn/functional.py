@@ -835,7 +835,7 @@ def softmax(input, dim=None, _stacklevel=3):
     return torch._C._nn.softmax(input, dim)
 
 
-def sample_gumbel(shape, eps=1e-10, out=None):
+def _sample_gumbel(shape, eps=1e-10, out=None):
     """
     Sample from Gumbel(0, 1)
 
@@ -847,7 +847,7 @@ def sample_gumbel(shape, eps=1e-10, out=None):
     return - torch.log(eps - torch.log(U + eps))
 
 
-def gumbel_softmax_sample(logits, tau=1, eps=1e-10):
+def _gumbel_softmax_sample(logits, tau=1, eps=1e-10):
     """
     Draw a sample from the Gumbel-Softmax distribution
 
@@ -855,8 +855,8 @@ def gumbel_softmax_sample(logits, tau=1, eps=1e-10):
     https://github.com/ericjang/gumbel-softmax/blob/3c8584924603869e90ca74ac20a6a03d99a91ef9/Categorical%20VAE.ipynb
     (MIT license)
     """
-    dims = len(logits.size())
-    gumbel_noise = sample_gumbel(logits.size(), eps=eps, out=logits.data.new())
+    dims = logits.dim()
+    gumbel_noise = _sample_gumbel(logits.size(), eps=eps, out=logits.data.new())
     y = logits + Variable(gumbel_noise)
     return softmax(y / tau, dims - 1)
 
@@ -882,7 +882,7 @@ def gumbel_softmax(logits, tau=1, hard=False, eps=1e-10):
     """
     shape = logits.size()
     assert len(shape) == 2
-    y_soft = gumbel_softmax_sample(logits, tau=tau, eps=eps)
+    y_soft = _gumbel_softmax_sample(logits, tau=tau, eps=eps)
     if hard:
         _, k = y_soft.data.max(-1)
         # this bit is based on

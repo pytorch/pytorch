@@ -1016,8 +1016,6 @@ class TestNN(NNTestCase):
 
     def _test_gumbel_softmax_st(self, cuda):
         th = torch.cuda if cuda else torch
-        old_rng_state = th.get_rng_state()
-        th.manual_seed(42)
         """
         Things we might want to check:
         - if we make various draws, do we get different one-hot values?
@@ -1037,6 +1035,7 @@ class TestNN(NNTestCase):
             y_draws = y_draws.cuda()
             preds = preds.cuda()
 
+        exceed_limits = 0
         for draw in range(num_draws):
             logits_var = Variable(logits, requires_grad=True)
             y_draw = torch.nn.functional.gumbel_softmax(
@@ -1048,10 +1047,12 @@ class TestNN(NNTestCase):
             err = y_draw - Variable(logits.new([[0, 0.5, 0.3]]))
             loss = (err * err).sum()
             loss.backward()
-            assert logits_var.grad.abs().min().data[0] > 0.001
+            if logits_var.grad.data.std() < 0.01 or logits_var.grad.data.std() > 1.0:
+                exceed_limits += 1
             y_draws[draw] = y_draw.data
             _, pred = y_draw.max(1)
             preds[draw] = pred.data[0]
+        assert exceed_limits / num_draws < 0.05
         # check it's approximately one-hot
         num_ones = (y_draws == 1).int().sum()
         num_zeros = (y_draws == 0).int().sum()
@@ -1061,7 +1062,6 @@ class TestNN(NNTestCase):
         num_class_one = (preds == 1).int().sum()
         assert num_class_one < num_draws
         assert num_class_one > num_draws / 3
-        th.set_rng_state(old_rng_state)
 
     def test_gumbel_softmax_st(self):
         self._test_gumbel_softmax_st(False)
