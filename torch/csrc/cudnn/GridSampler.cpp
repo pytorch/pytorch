@@ -8,70 +8,67 @@ namespace torch { namespace cudnn {
 
 namespace {
 
-void setInputDescriptor(TensorDescriptor& desc, cudnnDataType_t dataType, THVoidTensor* tensor)
+void setInputDescriptor(TensorDescriptor& desc, cudnnDataType_t dataType, const at::Tensor& tensor)
 {
-  CHECK_ARG(tensor->nDimension == 4);
+  CHECK_ARG(tensor.dim() == 4);
   int inputSize[4] = {0};
   int inputStride[4] = {0};
-  for (int i = 0; i < tensor->nDimension; ++i) {
-    inputSize[i] = (int) tensor->size[i];
-    inputStride[i] = (int) tensor->stride[i];
+  for (int i = 0; i < tensor.dim(); ++i) {
+    inputSize[i] = (int) tensor.size(i);
+    inputStride[i] = (int) tensor.stride(i);
   }
   desc.set(dataType, 4, inputSize, inputStride);
 }
 
-void setSamplerDescriptor(SpatialTransformerDescriptor& desc, cudnnDataType_t dataType, THVoidTensor* tensor)
+void setSamplerDescriptor(SpatialTransformerDescriptor& desc, cudnnDataType_t dataType, const at::Tensor& tensor)
 {
-  CHECK_ARG(tensor->nDimension == 4);
+  CHECK_ARG(tensor.dim() == 4);
   int inputSize[4] = {0};
-  for (int i = 0; i < tensor->nDimension; ++i) {
-    inputSize[i] = (int) tensor->size[i];
+  for (int i = 0; i < tensor.dim(); ++i) {
+    inputSize[i] = (int) tensor.size(i);
   }
   desc.set(dataType, 4, inputSize);
 }
 
-void* tensorPointer(cudnnDataType_t dataType, THVoidTensor* tensor)
+void* tensorPointer(cudnnDataType_t dataType, const at::Tensor& tensor)
 {
-  int elementSize = dataSize(dataType);
-  char* ptr = (char*) tensor->storage->data;
-  ptr += elementSize * tensor->storageOffset;
-  return ptr;
+  return tensor.data_ptr();
 }
 
-void checkGridSize(THVoidTensor *grid, THVoidTensor *input)
+void checkGridSize(const at::Tensor& grid, const at::Tensor& input)
 {
   // assert size of grid is n*h*w*2
   // FYI: grid is between [-1, 1], where -1 left most pixel,
   // 1 represents right most pixel (and hence 0 is the center pixel)
   // if grid has values >1 or <-1, those values are ignored
-  THVoidTensor_assertContiguous(grid);
-  CHECK_ARG(grid->nDimension == 4);
-  CHECK_ARG(grid->size[0] == input->size[0]);
-  CHECK_ARG(grid->size[3] == 2);  
+  cudnn_assertContiguous(grid);
+  CHECK_ARG(grid.dim() == 4);
+  CHECK_ARG(grid.size(0) == input.size(0));
+  CHECK_ARG(grid.size(3) == 2);
 }
 
-void checkIOSize(THVoidTensor *input, THVoidTensor *output, THVoidTensor *grid)
+void checkIOSize(const at::Tensor& input, const at::Tensor& output, const at::Tensor& grid)
 {
   // assert input = 4 dim, and input, output are same size
-  CHECK_ARG(input->nDimension == 4);
-  CHECK_ARG(input->nDimension == output->nDimension);
-  CHECK_ARG(input->size[0] == output->size[0]);
-  CHECK_ARG(input->size[1] == output->size[1]);
-  CHECK_ARG(grid->size[1] == output->size[2]);
-  CHECK_ARG(grid->size[2] == output->size[3]);
+  CHECK_ARG(input.dim() == 4);
+  CHECK_ARG(input.dim() == output.dim());
+  CHECK_ARG(input.size(0) == output.size(0));
+  CHECK_ARG(input.size(1) == output.size(1));
+  CHECK_ARG(grid.size(1) == output.size(2));
+  CHECK_ARG(grid.size(2) == output.size(3));
 }
 
 }  // namespace
 
 void cudnn_grid_sampler_forward(
     THCState* state, cudnnHandle_t handle, cudnnDataType_t dataType,
-    THVoidTensor* input, THVoidTensor* grid, THVoidTensor* output)
+    const at::Tensor& input, const at::Tensor& grid, const at::Tensor& output)
 {
   CHECK(cudnnSetStream(handle, THCState_getCurrentStream(state)));
-  assertSameGPU(dataType, input, output, grid);
+  assertSameGPU(input, output, grid);
   checkGridSize(grid, input);
   checkIOSize(input, output, grid);
-  
+
   TensorDescriptor idesc;  // input descriptor
   TensorDescriptor odesc;  // output descriptor
   SpatialTransformerDescriptor desc; // sampler descriptor
@@ -91,12 +88,12 @@ void cudnn_grid_sampler_forward(
 
 void cudnn_grid_sampler_backward(
     THCState* state, cudnnHandle_t handle, cudnnDataType_t dataType,
-    THVoidTensor* input, THVoidTensor* grad_input,
-    THVoidTensor* grid, THVoidTensor* grad_grid,
-    THVoidTensor* grad_output)
+    const at::Tensor& input, const at::Tensor& grad_input,
+    const at::Tensor& grid, const at::Tensor& grad_grid,
+    const at::Tensor& grad_output)
 {
   CHECK(cudnnSetStream(handle, THCState_getCurrentStream(state)));
-  assertSameGPU(dataType, input, grad_output, grad_input, grid, grad_grid);
+  assertSameGPU(input, grad_output, grad_input, grid, grad_grid);
   checkGridSize(grid, input);
   checkGridSize(grad_grid, input);
   checkGridSize(grid, grad_input);

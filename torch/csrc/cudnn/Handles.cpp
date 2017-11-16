@@ -1,9 +1,9 @@
-#include <Python.h>
 #include "Handles.h"
+
+#include "Exceptions.h"
 
 #include <unordered_map>
 #include <mutex>
-#include "Exceptions.h"
 
 namespace torch { namespace cudnn {
 

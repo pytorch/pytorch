@@ -1,5 +1,4 @@
-#ifndef THP_CUDNN_DESCRIPTORS_INC
-#define THP_CUDNN_DESCRIPTORS_INC
+#pragma once
 
 #include "Exceptions.h"
 
@@ -167,5 +166,3 @@ union Constant
 };
 
 }}  // namespace
-
-#endif

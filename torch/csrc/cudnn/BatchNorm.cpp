@@ -8,40 +8,37 @@ namespace torch { namespace cudnn {
 
 namespace {
 
-void setInputDescriptor(TensorDescriptor& desc, cudnnDataType_t dataType, THVoidTensor* tensor)
+void setInputDescriptor(TensorDescriptor& desc, cudnnDataType_t dataType, const at::Tensor& tensor)
 {
-  CHECK_ARG(tensor->nDimension >= 2 && tensor->nDimension <= 5);
+  CHECK_ARG(tensor.dim() >= 2 && tensor.dim() <= 5);
   int inputSize[5] = {0};
   int inputStride[5] = {0};
-  int nDimension = (tensor->nDimension <= 4) ? 4 : tensor->nDimension;
-  for (int i = 0; i < tensor->nDimension; ++i) {
-    inputSize[i] = (int) tensor->size[i];
-    inputStride[i] = (int) tensor->stride[i];
+  int nDimension = (tensor.dim() <= 4) ? 4 : tensor.dim();
+  for (int i = 0; i < tensor.dim(); ++i) {
+    inputSize[i] = (int) tensor.size(i);
+    inputStride[i] = (int) tensor.stride(i);
   }
-  for (int i = tensor->nDimension; i < nDimension; ++i) {
+  for (int i = tensor.dim(); i < nDimension; ++i) {
     inputSize[i] = 1;
     inputStride[i] = 1;
   }
   desc.set(dataType, nDimension, inputSize, inputStride);
 }
 
-void setScaleDescriptor(TensorDescriptor& desc, cudnnDataType_t dataType, THVoidTensor* tensor, int nDim)
+void setScaleDescriptor(TensorDescriptor& desc, cudnnDataType_t dataType, const at::Tensor& tensor, int nDim)
 {
-  CHECK_ARG(tensor->nDimension == 1);
-  CHECK_ARG(tensor->stride[0] == 1);  // scale must be contiguous
-  int size = (int) tensor->size[0];
-  int stride = (int) tensor->stride[0];
+  CHECK_ARG(tensor.dim() == 1);
+  CHECK_ARG(tensor.stride(0) == 1);  // scale must be contiguous
+  int size = (int) tensor.size(0);
+  int stride = (int) tensor.stride(0);
   int inputSize[5] = { 1, size, 1, 1, 1 };
   int inputStride[5] = { size * stride, stride, 1, 1, 1 };
   desc.set(dataType, (nDim <= 4) ? 4 : 5, inputSize, inputStride);
 }
 
-void* tensorPointer(cudnnDataType_t dataType, THVoidTensor* tensor)
+void* tensorPointer(cudnnDataType_t dataType, const at::Tensor& tensor)
 {
-  int elementSize = dataSize(dataType);
-  char* ptr = (char*) tensor->storage->data;
-  ptr += elementSize * tensor->storageOffset;
-  return ptr;
+  return tensor.data_ptr();
 }
 
 cudnnDataType_t scaleDataType(cudnnDataType_t dataType)
@@ -57,16 +54,16 @@ cudnnDataType_t scaleDataType(cudnnDataType_t dataType)
 
 void cudnn_batch_norm_forward(
     THCState* state, cudnnHandle_t handle, cudnnDataType_t dataType,
-    THVoidTensor* input, THVoidTensor* output, THVoidTensor* weight,
-    THVoidTensor* bias, THVoidTensor* running_mean, THVoidTensor* running_var,
-    THVoidTensor* save_mean, THVoidTensor* save_var, bool training,
+    const at::Tensor& input, const at::Tensor& output, const at::Tensor& weight,
+    const at::Tensor& bias, const at::Tensor& running_mean, const at::Tensor& running_var,
+    const at::Tensor& save_mean, const at::Tensor& save_var, bool training,
     double exponential_average_factor, double epsilon)
 {
   CHECK(cudnnSetStream(handle, THCState_getCurrentStream(state)));
-  assertSameGPU(dataType, input, output, weight, bias, running_mean, running_var,
+  assertSameGPU(input, output, weight, bias, running_mean, running_var,
       save_mean, save_var);
   cudnnBatchNormMode_t mode;
-  if (input->nDimension == 2) {
+  if (input.dim() == 2) {
     mode = CUDNN_BATCHNORM_PER_ACTIVATION;
   } else {
     mode = CUDNN_BATCHNORM_SPATIAL;
@@ -81,17 +78,17 @@ void cudnn_batch_norm_forward(
   TensorDescriptor wdesc;  // descriptor for weight, bias, running_mean, etc.
   setInputDescriptor(idesc, dataType, input);
   setInputDescriptor(odesc, dataType, output);
-  setScaleDescriptor(wdesc, scaleDataType(dataType), running_mean, input->nDimension);
+  setScaleDescriptor(wdesc, scaleDataType(dataType), running_mean, input.dim());
 
   Constant one(dataType, 1);
   Constant zero(dataType, 0);
   if (training) {
-    THVoidTensor_assertContiguous(input);
-    THVoidTensor_assertContiguous(bias);
-    THVoidTensor_assertContiguous(running_mean);
-    THVoidTensor_assertContiguous(running_var);
-    THVoidTensor_assertContiguous(save_mean);
-    THVoidTensor_assertContiguous(save_var);
+    cudnn_assertContiguous(input);
+    cudnn_assertContiguous(bias);
+    cudnn_assertContiguous(running_mean);
+    cudnn_assertContiguous(running_var);
+    cudnn_assertContiguous(save_mean);
+    cudnn_assertContiguous(save_var);
     CHECK(cudnnBatchNormalizationForwardTraining(
       handle, mode, &one, &zero,
       idesc.desc, tensorPointer(dataType, input),
@@ -105,10 +102,10 @@ void cudnn_batch_norm_forward(
       tensorPointer(dataType, save_mean),
       tensorPointer(dataType, save_var)));
   } else {
-    THVoidTensor_assertContiguous(input);
-    THVoidTensor_assertContiguous(bias);
-    THVoidTensor_assertContiguous(running_mean);
-    THVoidTensor_assertContiguous(running_var);
+    cudnn_assertContiguous(input);
+    cudnn_assertContiguous(bias);
+    cudnn_assertContiguous(running_mean);
+    cudnn_assertContiguous(running_var);
     CHECK(cudnnBatchNormalizationForwardInference(
       handle, mode, &one, &zero,
       idesc.desc, tensorPointer(dataType, input),
@@ -123,17 +120,17 @@ void cudnn_batch_norm_forward(
 
 void cudnn_batch_norm_backward(
     THCState* state, cudnnHandle_t handle, cudnnDataType_t dataType,
-    THVoidTensor* input, THVoidTensor* grad_output, THVoidTensor* grad_input,
-    THVoidTensor* grad_weight, THVoidTensor* grad_bias, THVoidTensor* weight,
-    THVoidTensor* running_mean, THVoidTensor* running_var,
-    THVoidTensor* save_mean, THVoidTensor* save_var, bool training,
+    const at::Tensor& input, const at::Tensor& grad_output, const at::Tensor& grad_input,
+    const at::Tensor& grad_weight, const at::Tensor& grad_bias, const at::Tensor& weight,
+    const at::Tensor& running_mean, const at::Tensor& running_var,
+    const at::Tensor& save_mean, const at::Tensor& save_var, bool training,
     double epsilon)
 {
   CHECK(cudnnSetStream(handle, THCState_getCurrentStream(state)));
-  assertSameGPU(dataType, input, grad_output, grad_input, grad_weight, grad_bias, weight,
+  assertSameGPU(input, grad_output, grad_input, grad_weight, grad_bias, weight,
       running_mean, running_var, save_mean, save_var);
   cudnnBatchNormMode_t mode;
-  if (input->nDimension == 2) {
+  if (input.dim() == 2) {
     mode = CUDNN_BATCHNORM_PER_ACTIVATION;
   } else {
     mode = CUDNN_BATCHNORM_SPATIAL;
@@ -144,12 +141,12 @@ void cudnn_batch_norm_backward(
 
   }
 
-  THVoidTensor_assertContiguous(input);
-  THVoidTensor_assertContiguous(grad_output);
-  THVoidTensor_assertContiguous(grad_weight);
-  THVoidTensor_assertContiguous(grad_bias);
-  THVoidTensor_assertContiguous(save_mean);
-  THVoidTensor_assertContiguous(save_var);
+  cudnn_assertContiguous(input);
+  cudnn_assertContiguous(grad_output);
+  cudnn_assertContiguous(grad_weight);
+  cudnn_assertContiguous(grad_bias);
+  cudnn_assertContiguous(save_mean);
+  cudnn_assertContiguous(save_var);
 
   TensorDescriptor idesc;  // input descriptor
   TensorDescriptor odesc;  // output descriptor
@@ -158,7 +155,7 @@ void cudnn_batch_norm_backward(
   setInputDescriptor(idesc, dataType, input);
   setInputDescriptor(odesc, dataType, grad_output);
   setInputDescriptor(gdesc, dataType, grad_input);
-  setScaleDescriptor(wdesc, scaleDataType(dataType), weight, input->nDimension);
+  setScaleDescriptor(wdesc, scaleDataType(dataType), weight, input.dim());
 
   Constant one(dataType, 1);
   Constant zero(dataType, 0);

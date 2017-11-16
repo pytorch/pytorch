@@ -5,6 +5,8 @@
 
 #include <Python.h>
 #include "cudnn-wrapper.h"
+#include "DynamicTypes.h"
+#include "../DynamicTypes.h"
 #include "PythonTypes.h"
 #include "Handles.h"
 #include "BatchNorm.h"
