@@ -180,17 +180,17 @@ class SGDRCosineLR(_LRScheduler):
         >>>     validate(...)
     """
 
-    def __init__(self, optimizer, last_epoch=-1):
-        # self.step_size = step_size
-        # self.gamma = gamma
+    def __init__(self, optimizer, T_0=100, T_multi=2, last_epoch=-1):
+        self.T_0 = T_0
+        self.T_multi = T_multi
         super(SGDRCosineLR, self).__init__(optimizer, last_epoch)
 
-    def get_lr(self, period, batch_idx):
-        restart_period = period
-        while batch_idx / restart_period > 1.:
-            batch_idx = batch_idx - restart_period
-            restart_period = restart_period * 2
-        radians = math.pi * (batch_idx / restart_period)
+    def get_lr(self, epoch_idx):
+        restart_period = self.T_0
+        while epoch_idx / restart_period > 1.:
+            epoch_idx = epoch_idx - restart_period
+            restart_period = restart_period * self.T_multi
+        radians = math.pi * (epoch_idx / restart_period)
         return [base_lr * 0.5 * (1. + math.cos(radians)) for base_lr in self.base_lrs]
 
 
