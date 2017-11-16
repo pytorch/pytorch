@@ -64,13 +64,13 @@ class EventList(list):
                     pid='CPU functions',
                     args={},
                 ))
-                if evt.cuda_interval is not None:
+                for name, cuda_interval in evt.kernels:
                     # 's' and 'f' draw Flow arrows from
                     # the CPU launch to the GPU kernel
                     chrome_events.append(dict(
                         name=evt.name,
                         ph='s',
-                        #+1 microsecond so the arrow is drawn inside cpu block
+                        # +1 microsecond so the arrow is drawn inside cpu block
                         ts=evt.cpu_interval.start+1,
                         tid=evt.thread,
                         pid='CPU functions',
@@ -79,9 +79,9 @@ class EventList(list):
                         args={},
                     ))
                     chrome_events.append(dict(
-                        name=evt.name,
+                        name=name,
                         ph='f',
-                        ts=evt.cuda_interval.start,
+                        ts=cuda_interval.start,
                         tid=evt.thread,
                         pid='CUDA functions',
                         id=next_id,
@@ -91,13 +91,13 @@ class EventList(list):
                     chrome_events.append(dict(
                         name=evt.name,
                         ph='X',
-                        ts=evt.cuda_interval.start,
-                        dur=evt.cuda_interval.elapsed_us(),
+                        ts=cuda_interval.start,
+                        dur=cuda_interval.elapsed_us(),
                         tid=evt.thread,
                         pid='CUDA functions',
                         args={},
                     ))
-                    next_id +=1
+                    next_id += 1
 
             json.dump(chrome_events, f)
 
@@ -175,7 +175,9 @@ class profile(object):
         if self.entered:
             raise RuntimeError("autograd profiler traces are not reentrant")
         self.entered = True
-        torch.autograd._enable_profiler(False, self.use_cuda)
+        profiler_kind = torch.autograd.ProfilerState.CUDA if self.use_cuda \
+            else torch.autograd.ProfilerState.CPU
+        torch.autograd._enable_profiler(profiler_kind)
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
@@ -259,7 +261,7 @@ class emit_nvtx(object):
             raise RuntimeError("NVTX annotation context manager is not reentrant")
         self.entered = True
         torch.cuda.synchronize()
-        torch.autograd._enable_profiler(True)
+        torch.autograd._enable_profiler(torch.autograd.ProfilerState.NVTX)
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
@@ -321,20 +323,20 @@ class Interval(object):
 # TODO: record TID too
 class FunctionEvent(FormattedTimesMixin):
     """Profiling information about a single function."""
-    def __init__(self, id, name, cpu_interval, cuda_interval, thread):
+    def __init__(self, id, name, thread, cpu_start, cpu_end):
         self.id = id
         self.name = name
-        self.cpu_interval = cpu_interval
-        self.cuda_interval = cuda_interval
+        self.cpu_interval = Interval(cpu_start, cpu_end)
         self.thread = thread
         self.kernels = []
         self.count = 1
 
+    def append_kernel(self, name, start, end):
+        self.kernels.append((name, Interval(start, end)))
+
     @property
     def cuda_time_total(self):
-        if self.cuda_interval is None:
-            return sum(kinfo[1] for kinfo in self.kernels)
-        return self.cuda_interval.elapsed_us()
+        return sum(kinfo[1].elasped_us() for kinfo in self.kernels)
 
     @property
     def cpu_time_total(self):
@@ -397,9 +399,14 @@ def parse_cpu_trace(thread_records):
     functions = []
     record_stack = []
     string_table = StringTable()
+    # '__start_profile' is not guarenteed to be first, so we must find it here
     for record in itertools.chain(*thread_records):
         if record.name() == '__start_profile':
             start_record = record
+            break
+    assert start_record is not None
+
+    for record in itertools.chain(*thread_records):
         if record.kind() == 'mark':
             continue
         elif record.kind() == 'push':
@@ -407,19 +414,17 @@ def parse_cpu_trace(thread_records):
             next_id += 1
         elif record.kind() == 'pop':
             function_id, start = record_stack.pop()
-            cpu_interval = Interval(
-                start_record.cpu_elapsed_us(start),
-                start_record.cpu_elapsed_us(record))
-            cuda_interval = None
-            if start_record.has_cuda() and record.has_cuda():
-                cuda_interval = Interval(
-                    start_record.cuda_elapsed_us(start),
-                    start_record.cuda_elapsed_us(record))
-            functions.append(FunctionEvent(
-                id=function_id, name=string_table[start.name()],
-                cpu_interval=cpu_interval,
-                cuda_interval=cuda_interval,
-                thread=start.thread_id()))
+            fe = FunctionEvent(
+                id=function_id,
+                name=string_table[start.name()],
+                thread=start.thread_id(),
+                cpu_start=start_record.cpu_elapsed_us(start),
+                cpu_end=start_record.cpu_elapsed_us(record))
+            if start_record.has_cuda():
+                fe.append_kernel(start.name(),
+                                 start_record.cuda_elapsed_us(start),
+                                 start_record.cuda_elapsed_us(record))
+            functions.append(fe)
     functions.sort(key=lambda evt: evt.cpu_interval.start)
     return functions
 
@@ -465,8 +470,8 @@ def parse_nvprof_trace(path):
         unique.see(row['marker_id'])
         evt = FunctionEvent(id=row['marker_id'],
                             name=strings[row['name']],
-                            cpu_interval=Interval(row['start_time'], row['end_time']),
-                            cuda_interval=None,
+                            cpu_start=row['start_time'],
+                            cpu_end=row['end_time'],
                             thread=0)
         functions.append(evt)
         functions_map[evt.id] = evt
@@ -491,7 +496,9 @@ def parse_nvprof_trace(path):
         unique.see(row['marker_id'], row['runtime_id'])
         assert row['cbid'] == 13  # 13 == Launch
         evt = functions_map[row['marker_id']]
-        evt.kernels.append((row['kernel_name'], row['kernel_end'] - row['kernel_start']))
+        evt.append_kernel(row['kernel_name'],
+                          row['kernel_start'],
+                          row['kernel_end'])
 
     functions.sort(key=lambda evt: evt.start)
     return functions

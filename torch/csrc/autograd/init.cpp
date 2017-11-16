@@ -38,17 +38,23 @@ PyObject * THPAutograd_initExtension(PyObject *_unused)
   .def("cpu_elapsed_us",&torch::autograd::profiler::Event::cpu_elapsed_us)
   .def("cuda_elapsed_us",&torch::autograd::profiler::Event::cuda_elapsed_us)
   .def("has_cuda",&torch::autograd::profiler::Event::has_cuda);
+  py::enum_<torch::autograd::profiler::ProfilerState>(m,"ProfilerState")
+  .value("Disabled", torch::autograd::profiler::ProfilerState::Disabled)
+  .value("CPU", torch::autograd::profiler::ProfilerState::CPU)
+  .value("CUDA", torch::autograd::profiler::ProfilerState::CUDA)
+  .value("NVTX", torch::autograd::profiler::ProfilerState::NVTX);
+
   m.def("_enable_profiler", torch::autograd::profiler::enableProfiler);
   m.def("_disable_profiler", torch::autograd::profiler::disableProfiler);
 
   m.def("_push_range", [](const char *name) {
     using namespace torch::autograd::profiler;
-    if (!profiling) return;
+    if (state  == ProfilerState::Disabled) return;
     pushRange(name);
   });
   m.def("_pop_range", []() {
     using namespace torch::autograd::profiler;
-    if (!profiling) return;
+    if (state  == ProfilerState::Disabled) return;
     popRange();
   });
 

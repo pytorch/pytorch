@@ -53,10 +53,10 @@ static void cudaCheck(cudaError_t result, const char * file, int line) {
 
 struct Event {
   Event(EventKind kind, std::string name, uint32_t thread_id, bool record_cuda)
-  : kind_(kind),
-  name_(std::move(name)),
-  thread_id_(thread_id),
-  cpu_ns(getTime()) {
+  : kind_(kind)
+  , name_(std::move(name))
+  , thread_id_(thread_id)
+  , cpu_ns_(getTime()) {
 #ifdef WITH_CUDA
     if(record_cuda) {
       PROFILER_CUDA_CHECK(cudaEventCreate(&event));
@@ -79,7 +79,7 @@ struct Event {
     return thread_id_;
   }
   double cpu_elapsed_us(const Event & e) {
-    return (e.cpu_ns - cpu_ns)/(1000.0);
+    return (e.cpu_ns_ - cpu_ns_)/(1000.0);
   }
   double cuda_elapsed_us(const Event & e) {
 #ifdef WITH_CUDA
@@ -107,7 +107,7 @@ private:
   EventKind kind_;
   std::string name_;
   uint32_t thread_id_;
-  uint64_t cpu_ns;
+  uint64_t cpu_ns_;
 #ifdef WITH_CUDA
   cudaEvent_t event = nullptr;
 #endif
@@ -152,9 +152,14 @@ struct RangeEventList {
   std::forward_list<block_type> blocks;
 };
 
-extern bool profiling;
-extern bool using_nvprof;
-extern bool using_cuda;
+enum class ProfilerState {
+    Disabled,
+    CPU, // CPU-only profiling
+    CUDA, // CPU + CUDA events
+    NVTX,  // only emit NVTX markers
+};
+
+extern ProfilerState state;
 extern uint32_t next_thread_id;
 extern std::mutex all_event_lists_mutex;
 extern std::list<std::shared_ptr<RangeEventList>> all_event_lists;
@@ -173,59 +178,59 @@ inline RangeEventList& getEventList() {
 }
 
 inline void mark(std::string name) {
-  if (using_nvprof) {
+  if (state == ProfilerState::NVTX) {
 #ifdef WITH_CUDA
     nvtxMarkA(name.c_str());
 #else
-    throw std::logic_error("mark called with use_nvprof=True, but compiled without CUDA");
+    throw std::logic_error("mark called with NVTX tracing, but compiled without CUDA");
 #endif
   } else {
-    getEventList().record(EventKind::Mark, std::move(name), thread_id, using_cuda);
+    getEventList().record(EventKind::Mark, std::move(name), thread_id, state == ProfilerState::CUDA);
   }
 }
 
 inline void pushRange(std::string name) {
-  if (using_nvprof) {
+  if (state == ProfilerState::NVTX) {
 #ifdef WITH_CUDA
     nvtxRangePushA(name.c_str());
 #else
-    throw std::logic_error("pushRange called with use_nvprof=True, but compiled without CUDA");
+    throw std::logic_error("pushRange called with NVTX tracing, but compiled without CUDA");
 #endif
   } else {
-    getEventList().record(EventKind::PushRange, std::move(name), thread_id, using_cuda);
+    getEventList().record(EventKind::PushRange, std::move(name), thread_id, state == ProfilerState::CUDA);
   }
 }
 
 inline void popRange() {
-  if (using_nvprof) {
+  if (state == ProfilerState::NVTX) {
 #ifdef WITH_CUDA
     nvtxRangePop();
 #else
-    throw std::logic_error("popRange called with use_nvprof=True, but compiled without CUDA");
+    throw std::logic_error("popRange called with NVTX tracing, but compiled without CUDA");
 #endif
   } else {
-    getEventList().record(EventKind::PopRange, std::string(), thread_id, using_cuda);
+    getEventList().record(EventKind::PopRange, std::string(), thread_id, state == ProfilerState::CUDA);
   }
 }
 
 struct RecordFunction {
   explicit RecordFunction(Function *fn) {
-    if (!profiling) return;
+    if (state == ProfilerState::Disabled) return;
     pushFunctionRange(fn);
   }
 
   explicit RecordFunction(std::string name) {
-    if (!profiling) return;
+    if (state == ProfilerState::Disabled) return;
     pushRange(std::move(name));
   }
 
   explicit RecordFunction(const char *name) {
-    if (!profiling) return;
+    if (state == ProfilerState::Disabled) return;
     pushRange(name);
   }
 
   ~RecordFunction() {
-    if (!profiling) return;
+    if (state == ProfilerState::Disabled) return;
     popRange();
   }
 
@@ -236,7 +241,7 @@ struct RecordFunction {
 using thread_event_lists = std::vector<std::vector<Event>>;
 // NOTE: changing profiler modes is **NOT THREAD SAFE**. You should ensure that
 // there no autograd functions are being executed when these function are used.
-void enableProfiler(bool use_nvprof, bool use_cuda);
+void enableProfiler(ProfilerState state);
 thread_event_lists disableProfiler();
 
 } // namespace profiler
