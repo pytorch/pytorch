@@ -542,7 +542,7 @@ if os.getenv('PYTORCH_BINARY_BUILD') and platform.system() == 'Linux':
     STDCPP_LIB = STDCPP_LIB[:-1]
     if type(STDCPP_LIB) != str:  # python 3
         STDCPP_LIB = STDCPP_LIB.decode(sys.stdout.encoding)
-    main_link_args += [STDCPP_LIB]
+    extra_link_args += [STDCPP_LIB]
     version_script = os.path.abspath("tools/pytorch.version")
     extra_link_args += ['-Wl,--version-script=' + version_script]
 
