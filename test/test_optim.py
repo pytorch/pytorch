@@ -231,6 +231,22 @@ class TestOptim(TestCase):
                 lr=1e-3)
         )
 
+
+    def test_sgdw(self):
+        self._test_basic_cases(
+            lambda weight, bias: optim.SGDW([weight, bias], lr=1e-3)
+        )
+        self._test_basic_cases(
+            lambda weight, bias: optim.SGDW(
+                self._build_params_dict(weight, bias, lr=1e-2),
+                lr=1e-3)
+        )
+        self._test_basic_cases(
+            lambda weight, bias: optim.SGDW(
+                self._build_params_dict_single(weight, bias, lr=1e-2),
+                lr=1e-3)
+        )
+
     def test_sgd_sparse(self):
         self._test_rosenbrock_sparse(
             lambda params: optim.SGD(params, lr=5e-3)
@@ -250,6 +266,16 @@ class TestOptim(TestCase):
         )
         self._test_basic_cases(
             lambda weight, bias: optim.Adam(
+                self._build_params_dict(weight, bias, lr=1e-2),
+                lr=1e-3)
+        )
+
+    def test_adamw(self):
+        self._test_basic_cases(
+            lambda weight, bias: optim.AdamW([weight, bias], lr=1e-3)
+        )
+        self._test_basic_cases(
+            lambda weight, bias: optim.AdamW(
                 self._build_params_dict(weight, bias, lr=1e-2),
                 lr=1e-3)
         )

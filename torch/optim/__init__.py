@@ -8,22 +8,27 @@ future.
 from .adadelta import Adadelta
 from .adagrad import Adagrad
 from .adam import Adam
+from .adamw import AdamW
 from .sparse_adam import SparseAdam
 from .adamax import Adamax
 from .asgd import ASGD
 from .sgd import SGD
+from .sgdw import SGDW
 from .rprop import Rprop
 from .rmsprop import RMSprop
 from .optimizer import Optimizer
 from .lbfgs import LBFGS
 from . import lr_scheduler
 
+
 del adadelta
 del adagrad
 del adam
+del adamw
 del adamax
 del asgd
 del sgd
+del sgdw
 del rprop
 del rmsprop
 del optimizer
