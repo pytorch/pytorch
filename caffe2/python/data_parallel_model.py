@@ -452,7 +452,7 @@ def Parallelize_GPU_BMUF(
                        model_helper_obj.params, non_datapar_params)
 
     model_helper_obj._param_names =\
-        model_helper_obj._device_grouped_blobs.keys()
+        viewkeys(model_helper_obj._device_grouped_blobs)
 
     _AddGradientOperators(
         devices, model_helper_obj, model_helper_obj._losses_by_gpu
@@ -485,7 +485,7 @@ def Parallelize_GPU_BMUF(
             model_parameter_names,
             max_concurrent_distributed_ops
         )
-        for param_name in model_helper_obj._device_grouped_blobs.keys():
+        for param_name in viewkeys(model_helper_obj._device_grouped_blobs):
             param = model_helper_obj._device_grouped_blobs[param_name][master_gpu]
             with core.DeviceScope(master_gpu_opt):
                 model_helper_obj._warmup_broadcast.Copy(param, _g(param))
@@ -863,8 +863,8 @@ def _Broadcast(devices, model, net, param, use_nccl=False):
                 # _device_. Thus we always use root=0, regardless of the
                 # devices used.
                 net.NCCLBroadcast(
-                    model._device_grouped_blobs[param].values(),
-                    model._device_grouped_blobs[param].values(),
+                    viewvalues(model._device_grouped_blobs[param]),
+                    viewvalues(model._device_grouped_blobs[param]),
                     root=0,
                 )
                 return
