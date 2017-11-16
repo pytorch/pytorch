@@ -49,8 +49,6 @@ class Variable(_C._VariableBase):
     _fallthrough_methods = {
         'size',
         'stride',
-        'ndimension',
-        'dim',
         'shape'
     }
 
