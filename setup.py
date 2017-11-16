@@ -542,7 +542,7 @@ if WITH_CUDA:
     cuda_include_path = os.path.join(CUDA_HOME, 'include')
     include_dirs.append(cuda_include_path)
     include_dirs.append(tmp_install_path + "/include/THCUNN")
-    extra_compile_args += ['-DWITH_CUDA']
+    extra_compile_args += ['-DWITH_CUDA', '-DAT_CUDA_ENABLED']
     extra_compile_args += ['-DCUDA_LIB_PATH=' + cuda_lib_path]
     main_libraries += ['cudart', nvtoolext_lib_name]
     main_sources += [

@@ -3,6 +3,7 @@
 #include "torch/csrc/jit/code_template.h"
 #include "torch/csrc/jit/resource_guard.h"
 #include "torch/csrc/utils/disallow_copy.h"
+#include "torch/csrc/cuda/cuda_check.h"
 #include "ATen/ATen.h"
 #include <nvrtc.h>
 #include <cuda.h>
@@ -103,36 +104,6 @@ std::ostream& operator<<(std::ostream & out, const TensorDesc & d) {
   out << "]";
   return out;
 }
-
-// We're using three CUDA APIs, so define a few helpers for error handling
-static void nvrtcCheck(nvrtcResult result,const char * file, int line) {
-  if(result != NVRTC_SUCCESS) {
-    std::stringstream ss;
-    ss << file << ":" << line << ": " << nvrtcGetErrorString(result);
-    throw std::runtime_error(ss.str());
-  }
-}
-#define JIT_NVRTC_CHECK(result) nvrtcCheck(result,__FILE__,__LINE__);
-
-static void cuCheck(CUresult result, const char * file, int line) {
-  if(result != CUDA_SUCCESS) {
-    const char * str;
-    cuGetErrorString(result, &str);
-    std::stringstream ss;
-    ss << file << ":" << line << ": " << str;
-    throw std::runtime_error(ss.str());
-  }
-}
-#define JIT_CU_CHECK(result) cuCheck(result,__FILE__,__LINE__);
-
-static void cudaCheck(cudaError_t result, const char * file, int line) {
-  if(result != cudaSuccess) {
-    std::stringstream ss;
-    ss << file << ":" << line << ": " << cudaGetErrorString(result);
-    throw std::runtime_error(ss.str());
-  }
-}
-#define JIT_CUDA_CHECK(result) cudaCheck(result,__FILE__,__LINE__);
 
 ////////////////////////////////////////////////////////////////////////////////
 // Code generation
@@ -328,14 +299,14 @@ CompiledFusionFunction::CompiledFusionFunction(const std::string & name, Annotat
   : name(name)
   , input_desc(agraph.input_desc)
   , output_desc(agraph.output_desc) {
-  JIT_CUDA_CHECK(cudaGetDevice(&device));
-  JIT_CUDA_CHECK(cudaGetDeviceProperties(&prop, device));
+  TORCH_CUDA_CHECK(cudaGetDevice(&device));
+  TORCH_CUDA_CHECK(cudaGetDeviceProperties(&prop, device));
 
   std::stringstream cu;
   concat_desc = codegen::emitCompilationUnit(cu, name, agraph);
   compilation_unit = cu.str();
   nvrtcProgram program;
-  JIT_NVRTC_CHECK(nvrtcCreateProgram(&program, compilation_unit.c_str(), NULL, 0, nullptr, nullptr));
+  TORCH_NVRTC_CHECK(nvrtcCreateProgram(&program, compilation_unit.c_str(), NULL, 0, nullptr, nullptr));
 
   std::string compute = "--gpu-architecture=compute_" + std::to_string(prop.major) + std::to_string(prop.minor);
   std::vector<const char *> args = {"--std=c++11", compute.c_str()};
@@ -349,25 +320,25 @@ CompiledFusionFunction::CompiledFusionFunction(const std::string & name, Annotat
     throw std::runtime_error(cu.str());
   }
   ResourceGuard holdProgram([&] {
-    JIT_NVRTC_CHECK(nvrtcDestroyProgram(&program));
+    TORCH_NVRTC_CHECK(nvrtcDestroyProgram(&program));
   });
-  JIT_NVRTC_CHECK(result);
+  TORCH_NVRTC_CHECK(result);
 
   size_t ptx_size;
-  JIT_NVRTC_CHECK(nvrtcGetPTXSize(program, &ptx_size));
+  TORCH_NVRTC_CHECK(nvrtcGetPTXSize(program, &ptx_size));
   ptx.resize(ptx_size);
-  JIT_NVRTC_CHECK(nvrtcGetPTX(program, ptx.data()));
+  TORCH_NVRTC_CHECK(nvrtcGetPTX(program, ptx.data()));
 
-  JIT_CU_CHECK(cuModuleLoadData(&module, ptx.data()));
-  JIT_CU_CHECK(cuModuleGetFunction(&function, module, name.c_str()));
+  TORCH_CU_CHECK(cuModuleLoadData(&module, ptx.data()));
+  TORCH_CU_CHECK(cuModuleGetFunction(&function, module, name.c_str()));
 
-  JIT_CU_CHECK(cuOccupancyMaxActiveBlocksPerMultiprocessor(
+  TORCH_CU_CHECK(cuOccupancyMaxActiveBlocksPerMultiprocessor(
     &maxBlocks, function, 128, 0));
   maxBlocks *= prop.multiProcessorCount;
 }
 
 CompiledFusionFunction::~CompiledFusionFunction() {
-  JIT_CU_CHECK(cuModuleUnload(module));
+  TORCH_CU_CHECK(cuModuleUnload(module));
 }
 
 namespace {
@@ -500,7 +471,7 @@ void CompiledFusionFunction::launch(uint32_t numel, void ** arguments) {
   // cudaFree(0) accomplishes this.
   cudaFree(0);
 
-  JIT_CU_CHECK(cuLaunchKernel(
+  TORCH_CU_CHECK(cuLaunchKernel(
     function,
     numBlocks, 1, 1,
     blockSize, 1, 1,
@@ -513,7 +484,7 @@ std::shared_ptr<CompiledFusionFunction> FusionCompiler::getOrCompile(AnnotatedGr
   std::stringstream key;
   key << *agraph.graph << "\n";
   int device;
-  JIT_CUDA_CHECK(cudaGetDevice(&device));
+  TORCH_CUDA_CHECK(cudaGetDevice(&device));
   key << "Device " << device << "\n";
   for(auto & i : agraph.input_desc)
     key << i << "\n";

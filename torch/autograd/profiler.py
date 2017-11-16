@@ -53,16 +53,52 @@ class EventList(list):
         import json
         with open(path, 'w') as f:
             chrome_events = []
+            next_id = 0
             for evt in self:
                 chrome_events.append(dict(
                     name=evt.name,
                     ph='X',
-                    ts=evt.start / 1000,
-                    dur=evt.cpu_time_total / 1000,
-                    tid='Autograd functions',
-                    pid='Autograd functions',
+                    ts=evt.cpu_interval.start,
+                    dur=evt.cpu_interval.elapsed_us(),
+                    tid=evt.thread,
+                    pid='CPU functions',
                     args={},
                 ))
+                for name, cuda_interval in evt.kernels:
+                    # 's' and 'f' draw Flow arrows from
+                    # the CPU launch to the GPU kernel
+                    chrome_events.append(dict(
+                        name=evt.name,
+                        ph='s',
+                        # +1 microsecond so the arrow is drawn inside cpu block
+                        ts=evt.cpu_interval.start + 1,
+                        tid=evt.thread,
+                        pid='CPU functions',
+                        id=next_id,
+                        cat='cpu_to_cuda',
+                        args={},
+                    ))
+                    chrome_events.append(dict(
+                        name=name,
+                        ph='f',
+                        ts=cuda_interval.start,
+                        tid=evt.thread,
+                        pid='CUDA functions',
+                        id=next_id,
+                        cat='cpu_to_cuda',
+                        args={},
+                    ))
+                    chrome_events.append(dict(
+                        name=evt.name,
+                        ph='X',
+                        ts=cuda_interval.start,
+                        dur=cuda_interval.elapsed_us(),
+                        tid=evt.thread,
+                        pid='CUDA functions',
+                        args={},
+                    ))
+                    next_id += 1
+
             json.dump(chrome_events, f)
 
     def key_averages(self):
@@ -97,6 +133,10 @@ class profile(object):
         enabled (bool, optional): Setting this to False makes this context manager a no-op.
             Default: ``True``.
 
+        use_cuda (bool, optional): Enables timing of CUDA events as well using the cudaEvent API.
+            Adds approximately 4us of overhead to each tensor operation.
+            Default: ``False``
+
     .. warning:
         This context managers should not be called recursively, i.e. at most one
         instance should be enabled at any given time.
@@ -121,8 +161,9 @@ class profile(object):
         N5torch8autograd5CloneE                        4.088us          0.000us
     """
 
-    def __init__(self, enabled=True):
+    def __init__(self, enabled=True, use_cuda=False):
         self.enabled = enabled
+        self.use_cuda = use_cuda
         self.function_events = None
         if not self.enabled:
             return
@@ -134,7 +175,9 @@ class profile(object):
         if self.entered:
             raise RuntimeError("autograd profiler traces are not reentrant")
         self.entered = True
-        torch.autograd._enable_profiler(False)
+        profiler_kind = torch.autograd.ProfilerState.CUDA if self.use_cuda \
+            else torch.autograd.ProfilerState.CPU
+        torch.autograd._enable_profiler(profiler_kind)
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
@@ -218,7 +261,7 @@ class emit_nvtx(object):
             raise RuntimeError("NVTX annotation context manager is not reentrant")
         self.entered = True
         torch.cuda.synchronize()
-        torch.autograd._enable_profiler(True)
+        torch.autograd._enable_profiler(torch.autograd.ProfilerState.NVTX)
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
@@ -241,9 +284,9 @@ def load_nvprof(path):
 ################################################################################
 # FunctionEvent
 
-def format_time(time_ns):
+def format_time(time_us):
     """Defines how to format time in FunctionEvent"""
-    return '{:.3f}us'.format(time_ns / 1000)
+    return '{:.3f}us'.format(time_us)
 
 
 def attr_formatter(name):
@@ -269,32 +312,44 @@ class FormattedTimesMixin(object):
         return 0.0 if self.count == 0 else 1.0 * self.cuda_time_total / self.count
 
 
+class Interval(object):
+    def __init__(self, start, end):
+        self.start = start
+        self.end = end
+
+    def elapsed_us(self):
+        return self.end - self.start
+
+
 # TODO: record TID too
 class FunctionEvent(FormattedTimesMixin):
     """Profiling information about a single function."""
-    def __init__(self, id, name, start, end):
+    def __init__(self, id, name, thread, cpu_start, cpu_end):
         self.id = id
         self.name = name
-        self.start = start
-        self.end = end
+        self.cpu_interval = Interval(cpu_start, cpu_end)
+        self.thread = thread
         self.kernels = []
         self.count = 1
 
+    def append_kernel(self, name, start, end):
+        self.kernels.append((name, Interval(start, end)))
+
     @property
     def cuda_time_total(self):
-        return sum(kinfo[1] for kinfo in self.kernels)
+        return sum(kinfo[1].elasped_us() for kinfo in self.kernels)
 
     @property
     def cpu_time_total(self):
-        return self.end - self.start
+        return self.cpu_interval.elapsed_us()
 
     @property
     def key(self):
         return self.name
 
     def __repr__(self):
-        return '<FunctionEvent id={} cpu_time={} cuda_time={} name={}>'.format(
-            self.id, self.cpu_time_str, self.cuda_time_str, self.name)
+        return '<FunctionEvent id={} cpu_time={} cuda_time={} name={} thread={}>'.format(
+            self.id, self.cpu_time_str, self.cuda_time_str, self.name, self.thread)
 
 
 class FunctionEventAvg(FormattedTimesMixin):
@@ -339,37 +394,39 @@ class StringTable(defaultdict):
 ################################################################################
 # CPU checkpoints
 
-Record = namedtuple('Record', ['name', 'timestamp', 'kind'])
-
-
 def parse_cpu_trace(thread_records):
     next_id = 0
-    start_time = None
+    start_record = None
     functions = []
-    function_stack = []
+    record_stack = []
     string_table = StringTable()
-    for r in itertools.chain(*thread_records):
-        record = Record(*r)
-        if record.name == '__start_profile':
-            start_time = record.timestamp
-        if record.kind == 'mark':
+    # '__start_profile' is not guarenteed to be first, so we must find it here
+    for record in itertools.chain(*thread_records):
+        if record.name() == '__start_profile':
+            start_record = record
+            break
+    assert start_record is not None
+
+    for record in itertools.chain(*thread_records):
+        if record.kind() == 'mark':
             continue
-        elif record.kind == 'push':
-            function_stack.append(FunctionEvent(
-                id=next_id, name=string_table[record.name], start=record.timestamp, end=record.timestamp))
+        elif record.kind() == 'push':
+            record_stack.append((next_id, record))
             next_id += 1
-        elif record.kind == 'pop':
-            function_stack[-1].end = record.timestamp
-            functions.append(function_stack.pop())
-
-    # Normalize times
-    if start_time is None:
-        raise RuntimeError('Malformed profile: no start marker')
-    for event in functions:
-        event.start -= start_time
-        event.end -= start_time
-
-    functions.sort(key=lambda evt: evt.start)
+        elif record.kind() == 'pop':
+            function_id, start = record_stack.pop()
+            fe = FunctionEvent(
+                id=function_id,
+                name=string_table[start.name()],
+                thread=start.thread_id(),
+                cpu_start=start_record.cpu_elapsed_us(start),
+                cpu_end=start_record.cpu_elapsed_us(record))
+            if start_record.has_cuda():
+                fe.append_kernel(start.name(),
+                                 start_record.cuda_elapsed_us(start),
+                                 start_record.cuda_elapsed_us(record))
+            functions.append(fe)
+    functions.sort(key=lambda evt: evt.cpu_interval.start)
     return functions
 
 
@@ -414,8 +471,9 @@ def parse_nvprof_trace(path):
         unique.see(row['marker_id'])
         evt = FunctionEvent(id=row['marker_id'],
                             name=strings[row['name']],
-                            start=row['start_time'],
-                            end=row['end_time'])
+                            cpu_start=row['start_time'],
+                            cpu_end=row['end_time'],
+                            thread=0)  # TODO: find in sqlite database
         functions.append(evt)
         functions_map[evt.id] = evt
 
@@ -439,7 +497,9 @@ def parse_nvprof_trace(path):
         unique.see(row['marker_id'], row['runtime_id'])
         assert row['cbid'] == 13  # 13 == Launch
         evt = functions_map[row['marker_id']]
-        evt.kernels.append((row['kernel_name'], row['kernel_end'] - row['kernel_start']))
+        evt.append_kernel(row['kernel_name'],
+                          row['kernel_start'],
+                          row['kernel_end'])
 
     functions.sort(key=lambda evt: evt.start)
     return functions
