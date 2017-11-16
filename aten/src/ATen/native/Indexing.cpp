@@ -41,8 +41,8 @@ static bool isByteTensor(const Tensor & t) {
 static void invalid_mask(const Tensor & self, int64_t idx, const Tensor & mask, int64_t maskIdx) {
   std::stringstream ss;
   ss << "The shape of the mask " << mask.sizes() << " at index " << maskIdx;
-  ss << " does not match the indexed tensor " << self.sizes() << " at index ";
-  ss << idx;
+  ss << " does not match the shape of the indexed tensor " << self.sizes();
+  ss << " at index " << idx;
   throw std::runtime_error(ss.str());
 }
 
@@ -81,6 +81,12 @@ static bool hasContiguousSubspace(TensorList tl) {
   return it == stop.base();
 }
 
+// Transposes the tensor and indices together so that all the non-null indices
+// index the first k dimensions of the tensor. Returns the transposed tensor
+// and the reordered indices. For example:
+//  transposeToFront(tensor, {nullptr, a, nullptr, b})
+// returns
+//  tensor.permute([1, 3, 0, 2]), {a, b, nullptr, nullptr}
 static std::tuple<Tensor, std::vector<Tensor>>
 transposeToFront(Tensor self, TensorList indices) {
   std::vector<int64_t> dims;
@@ -110,6 +116,7 @@ static std::vector<int64_t> computeLinearStride(const Tensor & tensor) {
   return stride;
 }
 
+// Unsqueezes src `before` times at the front and `after` times at the end
 static Tensor unsqueezeN(const Tensor & src, int64_t before, int64_t after) {
   auto srcSizes = src.sizes();
   auto nDim = src.dim();
