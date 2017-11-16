@@ -20,6 +20,8 @@ namespace torch { namespace jit { namespace tracer {
 using torch::autograd::Variable;
 using variable_list = std::vector<Variable>;
 
+std::string getPythonInterpreterStackTrace();
+
 namespace detail {
 
 inline ValueTracingStateElem* getValueState(const std::shared_ptr<TracingState>& state, const Variable& var, bool alloc = true) {

@@ -207,7 +207,7 @@ void ToONNX(std::shared_ptr<tracer::TracingState>& state) {
     auto stage_guard = new_graph->setStageTemporary(node->stage());
     IR_IFM(node, CppOp)
       if (auto fn = std::dynamic_pointer_cast<autograd::HasSymbolic>(value->fn)) {
-        auto outputs = fn->symbolic(&ctx, fmap(node->inputs(), envFn));
+        auto outputs = fn->symbolic(&ctx, fmap(node->inputs(), envFn), node->getSourceLocation());
         setOutputs(value->name(), node, outputs);
       } else {
         cloneNode(node);

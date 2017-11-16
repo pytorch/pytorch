@@ -15,7 +15,11 @@ namespace torch { namespace autograd {
 // passed here; it's done as an external addition.  This is less efficient
 // but this code should be temporary anyway.
 
-jit::value_list ConvForward::symbolic(SymbolicContext* ctx, jit::value_list inputs) {
+jit::value_list ConvForward::symbolic(
+    SymbolicContext* ctx,
+    jit::value_list inputs,
+    std::shared_ptr<jit::SourceLocation> sl
+) {
   auto & g = ctx->graph;
   // See Note [Caffe2ConvTranspose]
   auto n = g->create(!transposed ? jit::kConv : jit::kConvTranspose,
@@ -32,10 +36,12 @@ jit::value_list ConvForward::symbolic(SymbolicContext* ctx, jit::value_list inpu
 
   // See Note [Caffe2ConvTranspose]
   if(transposed) {
-    auto tn = g->appendNode(g->createConstant(at::CPU(at::kFloat).zeros({weight_size[1]})));
-    n->addInput(tn->output());
+    auto const_node = g->createConstant(at::CPU(at::kFloat).zeros({weight_size[1]}));
+    const_node->setSourceLocation(sl);
+    n->addInput(g->appendNode(const_node)->output());
   }
 
+  n->setSourceLocation(sl);
   g->appendNode(n);
 
   std::vector<int64_t> kernel_size(weight_size.begin() + 2, weight_size.end());
@@ -69,6 +75,7 @@ jit::value_list ConvForward::symbolic(SymbolicContext* ctx, jit::value_list inpu
     auto a_n = g->create(jit::kAdd, {n->output(), inputs.at(2)});
     a_n->i_(jit::kbroadcast, 1);
     a_n->i_(jit::kaxis, 1);
+    a_n->setSourceLocation(sl);
     g->appendNode(a_n);
     return {a_n->output()};
   } else {
