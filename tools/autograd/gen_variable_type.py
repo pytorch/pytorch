@@ -458,7 +458,7 @@ def preprocess_nn_functions(declarations):
     for declaration in declarations:
         name = declaration['name']
         base_name = name[:-1] if declaration['inplace'] else name
-        if name == 'batch_norm' or 'conv' in name:
+        if name == 'batch_norm' or 'conv3d' in name:
             continue
 
         fwd_name = base_name + '_forward'
