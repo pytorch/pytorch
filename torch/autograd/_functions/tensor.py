@@ -7,6 +7,8 @@ from ..function import Function, InplaceFunction, once_differentiable, traceable
 from ..variable import Variable
 from .utils import maybe_unexpand
 
+import warnings
+
 
 def _preprocess_adv_index_seq(index):
     result = []
@@ -173,6 +175,10 @@ class CudaTransfer(Function):
 
     @staticmethod
     def forward(ctx, i, device=None, async=False):
+        if not torch.cuda.is_available():
+            warnings.warn('.cuda() called but cuda is not available')
+            return i
+
         ctx.source_device = -1 if not i.is_cuda else i.get_device()
         ctx.source_was_cuda = i.is_cuda
         if device is not None:
@@ -182,6 +188,10 @@ class CudaTransfer(Function):
 
     @staticmethod
     def backward(ctx, grad_output):
+        if not torch.cuda.is_available():
+            warnings.warn('.cuda() called but cuda is not available')
+            return grad_output.cpu(), None, None
+
         if ctx.source_device != -1:
             return grad_output.cuda(ctx.source_device), None, None
         elif ctx.source_was_cuda:

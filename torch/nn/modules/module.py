@@ -7,6 +7,7 @@ from ..parameter import Parameter
 from torch.autograd import Variable
 import torch.utils.hooks as hooks
 
+import warnings
 
 def _addindent(s_, numSpaces):
     s = s_.split('\n')
@@ -213,6 +214,10 @@ class Module(object):
         Returns:
             Module: self
         """
+        if not torch.cuda.is_available():
+            warnings.warn('.cuda() called but cuda is not available')
+            return self
+
         return self._apply(lambda t: t.cuda(device))
 
     def cpu(self):
@@ -221,6 +226,10 @@ class Module(object):
         Returns:
             Module: self
         """
+        if not torch.cuda.is_available():
+            warnings.warn('.cuda() called but cuda is not available')
+            return self
+
         return self._apply(lambda t: t.cpu())
 
     def type(self, dst_type):
