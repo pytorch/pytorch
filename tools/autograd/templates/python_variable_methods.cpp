@@ -153,7 +153,7 @@ static PyObject * THPVariable_stride(PyObject* self, PyObject* args, PyObject* k
     // torch.Size and tuple in python
     IntList strides = dispatch_stride(self_);
     THPObjectPtr py_stride(PyTuple_New(strides.size()));
-    for (int i = 0; i != strides.size(); ++i) {
+    for (size_t i = 0; i != strides.size(); ++i) {
       PyTuple_SET_ITEM(py_stride.get(), i, PyLong_FromLong(strides[i]));
     }
     return py_stride.release();

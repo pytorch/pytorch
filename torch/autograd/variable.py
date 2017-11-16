@@ -46,13 +46,7 @@ class Variable(_C._VariableBase):
         volatile (bool): Value of the volatile flag. **Keyword only.**
     """
 
-    _fallthrough_methods = {
-        'shape'
-    }
-
     def __getattr__(self, name):
-        if name in self._fallthrough_methods:
-            return getattr(self.data, name)
         return object.__getattribute__(self, name)
 
     def __getitem__(self, key):
@@ -434,7 +428,7 @@ class Variable(_C._VariableBase):
     def __dir__(self):
         variable_methods = dir(self.__class__)
         attrs = list(self.__dict__.keys())
-        keys = variable_methods + attrs + list(self._fallthrough_methods)
+        keys = variable_methods + attrs
         return sorted(keys)
 
     class _torch(object):
