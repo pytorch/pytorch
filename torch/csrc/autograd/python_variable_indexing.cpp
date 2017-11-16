@@ -185,6 +185,7 @@ static bool treatSequenceAsTuple(PyObject* index) {
   //  sequences - otherwise we treat it like any other scalar."
   auto n = PySequence_Size(index);
   if (n < 0) {
+    // Negative size indicates a Python error in the PySequence_Size call.
     PyErr_Clear();
     return false;
   }
@@ -251,6 +252,8 @@ PyObject* THPVariable_getitem(PyObject* self, PyObject* index) {
     }
     return wrap(sliced);
   }
+
+  // indexing by tensors ("advanced" indexing)
   return wrap(dispatch_index(sliced, variableIndices));
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -285,6 +288,7 @@ int THPVariable_setitem(PyObject* self, PyObject* index, PyObject* py_value) {
     return 0;
   }
 
+  // indexing by tensors ("advanced" indexing)
   dispatch_index_put_(sliced, variableIndices, value);
   return 0;
   END_HANDLE_TH_ERRORS_RET(-1)
