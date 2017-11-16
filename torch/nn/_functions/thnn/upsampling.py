@@ -6,6 +6,8 @@ from torch._thnn import type2backend
 from . import _all_functions
 from ...modules.utils import _single, _pair, _triple
 
+import warnings
+
 
 def _check_size_scale_factor(size, scale_factor):
     if size is None and scale_factor is None:
@@ -167,6 +169,14 @@ class UpsamplingLinear1dBackward(Function):
 
 
 class UpsamplingNearest2d(Function):
+
+    @staticmethod
+    def symbolic(g, input, size=None, scale_factor=None):
+        if scale_factor is None:
+            scale_factor = 1.0
+        if size is not None and set(size) != set([None]):
+            warnings.warn("ONNX export failed on UpsamplingNearest2d because size is not supported")
+        return g.op("ResizeNearest", input, width_scale_f=scale_factor, height_scale_f=scale_factor)
 
     @staticmethod
     def forward(ctx, input, size=None, scale_factor=None):
