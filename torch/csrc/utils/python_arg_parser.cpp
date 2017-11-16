@@ -320,53 +320,47 @@ bool FunctionSignature::parse(PyObject* args, PyObject* kwargs, PyObject* dst[],
   int i = 0;
   for (auto& param : params) {
     PyObject* obj = nullptr;
+    bool is_kwd = false;
     if (arg_pos < nargs) {
       obj = PyTuple_GET_ITEM(args, arg_pos);
-      if (obj == Py_None && param.allow_none) {
-        dst[i++] = nullptr;
-        arg_pos++;
-        continue;
-      }
-      if (param.check(obj)) {
-        dst[i++] = obj;
-        arg_pos++;
-        continue;
-      }
-      if (allow_varargs_intlist && arg_pos == 0) {
-        dst[i++] = args;
-        arg_pos += nargs;
-        continue;
-      }
-      if (raise_exception) {
-        // foo(): argument 'other' (position 2) must be str, not int
-        type_error("%s(): argument '%s' (position %d) must be %s, not %s",
-            name.c_str(), param.name.c_str(), arg_pos + 1,
-            param.type_name().c_str(), Py_TYPE(obj)->tp_name);
-      }
-      return false;
+    } else if (kwargs) {
+      obj = PyDict_GetItem(kwargs, param.python_name);
+      is_kwd = true;
     }
 
-    obj = kwargs ? PyDict_GetItem(kwargs, param.python_name) : nullptr;
-    if (obj) {
-      remaining_kwargs--;
-      if (!param.check(obj)) {
-        if (raise_exception) {
-          // foo(): argument 'other' must be str, not int
-          type_error("%s(): argument '%s' must be %s, not %s",
-              name.c_str(), param.name.c_str(), param.type_name().c_str(),
-              Py_TYPE(obj)->tp_name);
-        }
-        return false;
-      }
-      dst[i++] = obj;
-    } else if (param.optional) {
+    if ((!obj && param.optional) || (obj == Py_None && param.allow_none)) {
       dst[i++] = nullptr;
-    } else {
+    } else if (!obj) {
       if (raise_exception) {
         // foo() missing 1 required positional argument: "b"
         missing_args(*this, i);
       }
       return false;
+    } else if (param.check(obj)) {
+      dst[i++] = obj;
+    } else if (allow_varargs_intlist && arg_pos == 0 && !is_kwd) {
+      dst[i++] = args;
+      arg_pos = nargs;
+    } else if (raise_exception) {
+      if (is_kwd) {
+        // foo(): argument 'other' must be str, not int
+        type_error("%s(): argument '%s' must be %s, not %s",
+            name.c_str(), param.name.c_str(), param.type_name().c_str(),
+            Py_TYPE(obj)->tp_name);
+      } else {
+        // foo(): argument 'other' (position 2) must be str, not int
+        type_error("%s(): argument '%s' (position %d) must be %s, not %s",
+            name.c_str(), param.name.c_str(), arg_pos + 1,
+            param.type_name().c_str(), Py_TYPE(obj)->tp_name);
+      }
+    } else {
+      return false;
+    }
+
+    if (!is_kwd) {
+      arg_pos++;
+    } else {
+      remaining_kwargs--;
     }
   }
 
