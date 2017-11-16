@@ -41,11 +41,11 @@ PyObject * THPVariable_clamp(PyObject* self, PyObject* args, PyObject* kwargs)
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
   PyObject* parsed_args[2];
   auto r = parser.parse(args, kwargs, parsed_args);
-  if (!r.is_none(0) && !r.is_none(1)) {
+  if (!r.isNone(0) && !r.isNone(1)) {
     return THPVariable_Wrap(dispatch_clamp(self_, r.scalar(0), r.scalar(1)));
-  } else if (!r.is_none(0)) {
+  } else if (!r.isNone(0)) {
     return THPVariable_Wrap(dispatch_clamp_min(self_, r.scalar(0)));
-  } else if (!r.is_none(1)) {
+  } else if (!r.isNone(1)) {
     return THPVariable_Wrap(dispatch_clamp_max(self_, r.scalar(1)));
   } else {
     throw std::runtime_error("At least one of 'min' or 'max' must not be None");
@@ -78,11 +78,11 @@ PyObject * THPVariable_clamp_(PyObject* self, PyObject* args, PyObject* kwargs)
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
   PyObject* parsed_args[2];
   auto r = parser.parse(args, kwargs, parsed_args);
-  if (!r.is_none(0) && !r.is_none(1)) {
+  if (!r.isNone(0) && !r.isNone(1)) {
     return THPVariable_Wrap(dispatch_clamp_(self_, r.scalar(0), r.scalar(1)));
-  } else if (!r.is_none(0)) {
+  } else if (!r.isNone(0)) {
     return THPVariable_Wrap(dispatch_clamp_min_(self_, r.scalar(0)));
-  } else if (!r.is_none(1)) {
+  } else if (!r.isNone(1)) {
     return THPVariable_Wrap(dispatch_clamp_max_(self_, r.scalar(1)));
   } else {
     throw std::runtime_error("At least one of 'min' or 'max' must not be None");

@@ -82,7 +82,7 @@ struct PythonArgs {
   inline int64_t toInt64(int i);
   inline double toDouble(int i);
   inline bool toBool(int i);
-  inline bool is_none(int i);
+  inline bool isNone(int i);
 };
 
 struct FunctionSignature {
@@ -195,7 +195,7 @@ inline bool PythonArgs::toBool(int i) {
   return args[i] == Py_True;
 }
 
-inline bool PythonArgs::is_none(int i) {
+inline bool PythonArgs::isNone(int i) {
   return args[i] == nullptr;
 }
 
