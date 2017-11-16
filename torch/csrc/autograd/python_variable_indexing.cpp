@@ -73,7 +73,10 @@ static Variable applySlice(const Variable& self, int64_t dim, PyObject* slice, b
     }
     return self;
   }
-  // TODO: step
+  if (step != 1) {
+    // TODO: implement step for narrow
+    throw IndexError("only step size 1 is supported");
+  }
   return self.narrow(dim, start, stop - start);
 }
 
@@ -132,10 +135,7 @@ static Variable applySlicing(const Variable& self, PyObject* index, variable_lis
       result = applySlice(result, dim, obj);
       dim++;
     } else if (obj == Py_Ellipsis) {
-      int64_t unspecified_dims = self.dim() - count_specified_dimensions(index);
-      for(; unspecified_dims > 0; unspecified_dims--) {
-        dim++;
-      }
+      dim += self.dim() - count_specified_dimensions(index);
     } else if (obj == Py_None) {
       result = result.unsqueeze(dim);
       dim++;

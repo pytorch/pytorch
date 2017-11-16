@@ -259,12 +259,6 @@ static void check_no_requires_grad(const Tensor& tensor, const char* name) {
   }
 }
 
-static void check_no_requires_grad(TensorList tl, const char* name) {
-  for (auto & tensor : tl) {
-    check_no_requires_grad(tensor, name);
-  }
-}
-
 static function_list compute_next_functions(const std::initializer_list<Tensor>& tensors) {
   return Function::flags(tensors).next_functions;
 }
