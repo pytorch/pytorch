@@ -44,7 +44,10 @@ class ReservoirSamplingOp final : public Operator<Context> {
 
     CAFFE_ENFORCE_GE(input.ndim(), 1);
 
-    bool output_initialized = output->size() > 0;
+    bool output_initialized = output->size() > 0 &&
+        (static_cast<std::shared_ptr<std::vector<TensorCPU>>*>(
+             output->raw_mutable_data(input.meta()))[0] != nullptr);
+
     if (output_initialized) {
       CAFFE_ENFORCE_EQ(output->ndim(), input.ndim());
       for (size_t i = 1; i < input.ndim(); ++i) {
@@ -109,6 +112,9 @@ class ReservoirSamplingOp final : public Operator<Context> {
     auto* num_visited_tensor = Output(NUM_VISITED);
     CAFFE_ENFORCE_EQ(1, num_visited_tensor->size());
     auto* num_visited = num_visited_tensor->template mutable_data<int64_t>();
+    if (!output_initialized) {
+      *num_visited = 0;
+    }
     CAFFE_ENFORCE_GE(*num_visited, 0);
 
     const auto start_num_visited = *num_visited;
@@ -263,5 +269,5 @@ This operator is thread-safe.
     .Output(3, "POS_TO_OBJECT", "(Optional) Same as the input");
 
 SHOULD_NOT_DO_GRADIENT(ReservoirSampling);
-}
-}
+} // namespace
+} // namespace caffe2

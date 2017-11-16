@@ -52,8 +52,9 @@ class LastNWindowCollectorOp : public Operator<Context> {
     const auto& input = Input(DATA);
 
     CAFFE_ENFORCE_GE(input.ndim(), 1);
-
-    bool output_initialized = output->size() > 0;
+    bool output_initialized = output->size() > 0 &&
+        (static_cast<std::shared_ptr<std::vector<TensorCPU>>*>(
+             output->raw_mutable_data(input.meta()))[0] != nullptr);
     if (output_initialized) {
       CAFFE_ENFORCE_EQ(output->ndim(), input.ndim());
       for (size_t i = 1; i < input.ndim(); ++i) {
@@ -68,6 +69,9 @@ class LastNWindowCollectorOp : public Operator<Context> {
       auto* num_visited_tensor = Output(NUM_VISITED);
       CAFFE_ENFORCE_EQ(1, num_visited_tensor->size());
       auto* num_visited = num_visited_tensor->template mutable_data<int64_t>();
+      if (!output_initialized) {
+        *num_visited = 0;
+      }
       CAFFE_ENFORCE_GE(*num_visited, 0);
       *num_visited += num_entries;
     }
@@ -95,6 +99,9 @@ class LastNWindowCollectorOp : public Operator<Context> {
     auto* next = Output(NEXT);
     CAFFE_ENFORCE_EQ(0, next->ndim());
     auto* next_data = next->template mutable_data<int32_t>();
+    if (!output_initialized) {
+      *next_data = 0;
+    }
     CAFFE_ENFORCE_LT(*next_data, output->dim(0));
 
     auto block_size = input.size_from_dim(1);
@@ -189,5 +196,5 @@ This is not thread safe unless a mutex is given.
     .Output(1, "next cursor", "Updated input cursor")
     .Output(2, "NUM_VISITED", "number of records seen so far");
 SHOULD_NOT_DO_GRADIENT(LastNWindowCollector);
-}
-}
+} // namespace
+} // namespace caffe2
