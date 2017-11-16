@@ -53,6 +53,7 @@ class EventList(list):
         import json
         with open(path, 'w') as f:
             chrome_events = []
+            next_id = 0
             for evt in self:
                 chrome_events.append(dict(
                     name=evt.name,
@@ -64,6 +65,29 @@ class EventList(list):
                     args={},
                 ))
                 if evt.cuda_interval is not None:
+                    # 's' and 'f' draw Flow arrows from
+                    # the CPU launch to the GPU kernel
+                    chrome_events.append(dict(
+                        name=evt.name,
+                        ph='s',
+                        #+1 microsecond so the arrow is drawn inside cpu block
+                        ts=evt.cpu_interval.start+1,
+                        tid=evt.thread,
+                        pid='CPU functions',
+                        id=next_id,
+                        cat='cpu_to_cuda',
+                        args={},
+                    ))
+                    chrome_events.append(dict(
+                        name=evt.name,
+                        ph='f',
+                        ts=evt.cuda_interval.start,
+                        tid=evt.thread,
+                        pid='CUDA functions',
+                        id=next_id,
+                        cat='cpu_to_cuda',
+                        args={},
+                    ))
                     chrome_events.append(dict(
                         name=evt.name,
                         ph='X',
@@ -73,6 +97,8 @@ class EventList(list):
                         pid='CUDA functions',
                         args={},
                     ))
+                    next_id +=1
+
             json.dump(chrome_events, f)
 
     def key_averages(self):
