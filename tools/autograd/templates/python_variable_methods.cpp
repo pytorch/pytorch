@@ -9,6 +9,7 @@
 #include "torch/csrc/utils/object_ptr.h"
 #include "torch/csrc/utils/python_arg_parser.h"
 #include "torch/csrc/utils/python_numbers.h"
+#include "torch/csrc/utils/python_tuples.h"
 
 #include "python_variable_methods_dispatch.h"
 
@@ -132,11 +133,7 @@ static PyObject * THPVariable_stride(PyObject* self, PyObject* args, PyObject* k
     IntList strides = self_.strides();
     // we can't do the normal wrapping here because IntList maps to both
     // torch.Size and tuple in python
-    THPObjectPtr py_stride(PyTuple_New(strides.size()));
-    for (size_t i = 0; i != strides.size(); ++i) {
-      PyTuple_SET_ITEM(py_stride.get(), i, PyLong_FromLong(strides[i]));
-    }
-    return py_stride.release();
+    return THPUtils_packInt64Array(strides.size(), strides.data());
   }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS

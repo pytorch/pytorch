@@ -2,6 +2,7 @@
 
 #include <string>
 #include "torch/csrc/utils/python_strings.h"
+#include "torch/csrc/utils/python_tuples.h"
 #include "THP.h"
 
 PyObject* THPSizeClass = NULL;
@@ -17,9 +18,7 @@ PyObject * THPSize_New(int dim, const int64_t *sizes)
   if (!self) {
     return NULL;
   }
-  for (int i = 0; i < dim; ++i) {
-    PyTuple_SET_ITEM(self, i, PyLong_FromLong(sizes[i]));
-  }
+  THPUtils_packInt64Array(self, dim, sizes);
   return self;
 }
 
