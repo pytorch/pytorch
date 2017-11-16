@@ -96,7 +96,11 @@ struct Event {
 #endif
   }
   bool has_cuda() const {
+#ifdef WITH_CUDA
     return event != nullptr;
+#else
+    return false;
+#endif
   }
 
 private:
