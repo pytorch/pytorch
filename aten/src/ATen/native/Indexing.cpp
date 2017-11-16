@@ -33,10 +33,6 @@
 
 namespace at { namespace native {
 
-static bool isByteTensor(const Tensor & t) {
-  return t.defined() && t.type().scalarType() == kByte;
-}
-
 [[noreturn]]
 static void invalid_mask(const Tensor & self, int64_t idx, const Tensor & mask, int64_t maskIdx) {
   std::stringstream ss;
@@ -50,7 +46,7 @@ static std::vector<Tensor> expandByteTensors(const Tensor & self, TensorList ind
   // Expands byte tensors (masks) into the equivalent indexing by LongTensors
   std::vector<Tensor> result;
   for (auto & index : indices) {
-    if (isByteTensor(index)) {
+    if (index.type().scalarType() == kByte) {
       // The sizes of the ByteTensor mask must match the sizes of the
       // corresponding dimensions in self
       for (int64_t j = 0; j < index.dim(); j++) {
@@ -199,7 +195,6 @@ static std::tuple<Tensor, Tensor> makeLinearIndex(Tensor self, TensorList orig) 
 }
 
 Tensor index(const Tensor & self, TensorList indices) {
-  // TODO: check types
   if (indices.size() > (size_t)self.dim()) {
     runtime_error("too many indices for tensor of dimension %d (got %d)",
       (int)self.dim(), (int)indices.size());
@@ -211,7 +206,6 @@ Tensor index(const Tensor & self, TensorList indices) {
 }
 
 Tensor & index_put_(Tensor & self, TensorList indices, const Tensor & value) {
-  // TODO: check types
   if (indices.size() > (size_t)self.dim()) {
     runtime_error("too many indices for tensor of dimension %d (got %d)",
       (int)self.dim(), (int)indices.size());

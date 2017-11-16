@@ -92,7 +92,7 @@ static Variable applySelect(const Variable& self, int64_t dim, int64_t index) {
 static Variable sequenceToVariable(const Type& type, PyObject* seq) {
   PyObject* ctor = THPLongTensorClass;
 #ifdef WITH_CUDA
-  if (type.isCuda()) ctor = THCPLongTensorClass;
+  if (type.is_cuda()) ctor = THCPLongTensorClass;
 #endif
   auto obj = THPObjectPtr(PyObject_CallFunctionObjArgs(ctor, seq, NULL));
   if (!obj) throw python_error();
