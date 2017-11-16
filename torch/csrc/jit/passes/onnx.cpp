@@ -115,6 +115,31 @@ void ToONNX(std::shared_ptr<tracer::TracingState>& state) {
     }
   };
 
+  // Cast output of symbolic() python implementation
+  auto processSymbolicOutput = [&](const std::string& op_name, Node* n, const py::object& raw_output) {
+    if (raw_output.ptr() == Py_None) {
+      cloneNode(n);
+      return;
+    }
+    // Cast the outputs back to C++ and put them in the new graph
+    std::vector<Value*> outputs;
+    try {
+      if (py::isinstance<Value>(raw_output)) {
+        outputs = value_list{py::cast<Value*>(raw_output)};
+      } else {
+        outputs = py::cast<std::vector<Value*>>(raw_output);
+      }
+    } catch (const std::exception& ex) {
+      std::ostringstream ss;
+      ss << "Error casting results of symbolic for " << op_name
+         << ": expected to return list of op nodes, instead received type ''"
+         << py::str(raw_output.get_type()) << "': " << py::str(raw_output);
+      throw std::runtime_error(ss.str());
+    }
+
+    setOutputs(op_name, n, outputs);
+  };
+
   auto callPySymbolicFunction = [&](Node* n) {
     // The idea is delegate as much of the actual argument massaging to
     // Python as possible
@@ -127,19 +152,7 @@ void ToONNX(std::shared_ptr<tracer::TracingState>& state) {
 
     py::object raw_output = onnx.attr("_run_symbolic_function")(ctx.graph, n, py_inputs);
 
-    if (raw_output.ptr() == Py_None) {
-      cloneNode(n);
-    } else {
-      // Cast the outputs back to C++ and put them in the new graph
-      value_list outputs;
-      if (py::isinstance<Value>(raw_output)) {
-        outputs = value_list{py::cast<Value*>(raw_output)};
-      } else {
-        outputs = py::cast<std::vector<Value*>>(raw_output);
-      }
-
-      setOutputs(symbolToString(n->kind()), n, outputs);
-    }
+    processSymbolicOutput(symbolToString(n->kind()), n, raw_output);
   };
 
   auto callPySymbolicMethod = [&](PythonOp* op) {
@@ -178,20 +191,7 @@ void ToONNX(std::shared_ptr<tracer::TracingState>& state) {
     // upon argument mismatch
     py::object raw_output = onnx.attr("_run_symbolic_method")(op->name(), pyobj.attr("symbolic"), py_symbolic_args);
 
-    if (raw_output.ptr() == Py_None) {
-      cloneNode(op);
-      return;
-    }
-
-    // Cast the outputs back to C++ and put them in the new graph
-    std::vector<Value*> outputs;
-    if (py::isinstance<Value>(raw_output)) {
-      outputs = value_list{py::cast<Value*>(raw_output)};
-    } else {
-      outputs = py::cast<std::vector<Value*>>(raw_output);
-    }
-
-    setOutputs(op->name(), op, outputs);
+    processSymbolicOutput(op->name(), op, raw_output);
   };
 
   // Finally, visit all nodes in the graph
