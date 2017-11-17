@@ -128,6 +128,10 @@ def mm(g, self, other):
     return g.op("Gemm", self, other, C, beta_f=0.0, alpha_f=1.0, broadcast_i=True)
 
 
+def bmm(g, self, other):
+    return g.op("MatMul", self, other)
+
+
 def addmm(g, self, mat1, mat2, beta, alpha):
     return g.op("Gemm", mat1, mat2, self, beta_f=_scalar(beta), alpha_f=_scalar(alpha))
 
