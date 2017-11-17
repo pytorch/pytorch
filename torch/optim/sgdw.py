@@ -100,8 +100,7 @@ class SGDW(Optimizer):
                         d_p = d_p.add(momentum, buf)
                     else:
                         d_p = buf
-
-		p.data.add_(-group['lr'], d_p)
+                p.data.add_(-group['lr'], d_p)
                 if weight_decay != 0:
                     p.data.add_(-weight_decay, p.data)
 
