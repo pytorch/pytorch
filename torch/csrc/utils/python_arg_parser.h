@@ -82,6 +82,7 @@ struct PythonArgs {
   inline int64_t toInt64(int i);
   inline double toDouble(int i);
   inline bool toBool(int i);
+  inline bool isNone(int i);
 };
 
 struct FunctionSignature {
@@ -107,6 +108,7 @@ struct FunctionParameter {
 
   ParameterType type_;
   bool optional;
+  bool allow_none;
   bool keyword_only;
   int size;
   std::string name;
@@ -123,7 +125,7 @@ struct FunctionParameter {
 };
 
 inline at::Tensor PythonArgs::tensor(int i) {
-  if (!args[i] || args[i] == Py_None) return at::Tensor();
+  if (!args[i]) return at::Tensor();
   if (!THPVariable_Check(args[i])) {
     type_error("expected Variable as argument %d, but got %s", i, THPUtils_typename(args[i]));
   }
@@ -156,7 +158,7 @@ inline std::vector<at::Tensor> PythonArgs::tensorlist(int i) {
 }
 
 inline std::vector<int64_t> PythonArgs::intlist(int i) {
-  if (!args[i] || args[i] == Py_None) return signature.params[i].default_intlist;
+  if (!args[i]) return signature.params[i].default_intlist;
   PyObject* arg = args[i];
   auto size = signature.params[i].size;
   if (size > 0 && THPUtils_checkLong(arg)) {
@@ -191,6 +193,10 @@ inline double PythonArgs::toDouble(int i) {
 inline bool PythonArgs::toBool(int i) {
   if (!args[i]) return signature.params[i].default_bool;
   return args[i] == Py_True;
+}
+
+inline bool PythonArgs::isNone(int i) {
+  return args[i] == nullptr;
 }
 
 inline at::Generator* PythonArgs::generator(int i) {

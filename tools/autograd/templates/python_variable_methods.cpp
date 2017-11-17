@@ -16,20 +16,77 @@ using namespace torch::autograd::utils;
 
 namespace torch { namespace autograd {
 
-static PyObject * THPVariable_detach(PyObject* self, PyObject* args)
+static Tensor dispatch_clamp(const Tensor & self, Scalar min, Scalar max) {
+  AutoNoGIL no_gil;
+  AutoGPU auto_gpu(self);
+  return self.clamp(min, max);
+}
+static Tensor dispatch_clamp_min(const Tensor & self, Scalar min) {
+  AutoNoGIL no_gil;
+  AutoGPU auto_gpu(self);
+  return self.clamp_min(min);
+}
+static Tensor dispatch_clamp_max(const Tensor & self, Scalar max) {
+  AutoNoGIL no_gil;
+  AutoGPU auto_gpu(self);
+  return self.clamp_max(max);
+}
+
+PyObject * THPVariable_clamp(PyObject* self, PyObject* args, PyObject* kwargs)
 {
   HANDLE_TH_ERRORS
+  static PythonArgParser parser({
+    "clamp(Scalar min=None, Scalar max=None)",
+  });
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
-  return THPVariable_Wrap(self_.detach());
+  PyObject* parsed_args[2];
+  auto r = parser.parse(args, kwargs, parsed_args);
+  if (!r.isNone(0) && !r.isNone(1)) {
+    return THPVariable_Wrap(dispatch_clamp(self_, r.scalar(0), r.scalar(1)));
+  } else if (!r.isNone(0)) {
+    return THPVariable_Wrap(dispatch_clamp_min(self_, r.scalar(0)));
+  } else if (!r.isNone(1)) {
+    return THPVariable_Wrap(dispatch_clamp_max(self_, r.scalar(1)));
+  } else {
+    throw std::runtime_error("At least one of 'min' or 'max' must not be None");
+  }
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject * THPVariable_detach_(PyObject* self, PyObject* args)
+static Tensor & dispatch_clamp_(Tensor & self, Scalar min, Scalar max) {
+  AutoNoGIL no_gil;
+  AutoGPU auto_gpu(self);
+  return self.clamp_(min, max);
+}
+static Tensor & dispatch_clamp_min_(Tensor & self, Scalar min) {
+  AutoNoGIL no_gil;
+  AutoGPU auto_gpu(self);
+  return self.clamp_min_(min);
+}
+static Tensor & dispatch_clamp_max_(Tensor & self, Scalar max) {
+  AutoNoGIL no_gil;
+  AutoGPU auto_gpu(self);
+  return self.clamp_max_(max);
+}
+
+PyObject * THPVariable_clamp_(PyObject* self, PyObject* args, PyObject* kwargs)
 {
   HANDLE_TH_ERRORS
-  reinterpret_cast<THPVariable*>(self)->cdata.detach_();
-  Py_INCREF(self);
-  return self;
+  static PythonArgParser parser({
+    "clamp_(Scalar min=None, Scalar max=None)",
+  });
+  auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
+  PyObject* parsed_args[2];
+  auto r = parser.parse(args, kwargs, parsed_args);
+  if (!r.isNone(0) && !r.isNone(1)) {
+    return THPVariable_Wrap(dispatch_clamp_(self_, r.scalar(0), r.scalar(1)));
+  } else if (!r.isNone(0)) {
+    return THPVariable_Wrap(dispatch_clamp_min_(self_, r.scalar(0)));
+  } else if (!r.isNone(1)) {
+    return THPVariable_Wrap(dispatch_clamp_max_(self_, r.scalar(1)));
+  } else {
+    throw std::runtime_error("At least one of 'min' or 'max' must not be None");
+  }
   END_HANDLE_TH_ERRORS
 }
 
@@ -52,6 +109,23 @@ static PyObject * THPVariable_contiguous(PyObject* self, PyObject* args)
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject * THPVariable_detach(PyObject* self, PyObject* args)
+{
+  HANDLE_TH_ERRORS
+  auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
+  return THPVariable_Wrap(self_.detach());
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject * THPVariable_detach_(PyObject* self, PyObject* args)
+{
+  HANDLE_TH_ERRORS
+  reinterpret_cast<THPVariable*>(self)->cdata.detach_();
+  Py_INCREF(self);
+  return self;
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject * THPVariable_element_size(PyObject* self, PyObject* args)
 {
   HANDLE_TH_ERRORS
@@ -60,7 +134,6 @@ static PyObject * THPVariable_element_size(PyObject* self, PyObject* args)
   return THPUtils_packInt64(element_size);
   END_HANDLE_TH_ERRORS
 }
-
 
 // generated methods start here
 
@@ -79,6 +152,8 @@ PyMethodDef variable_methods[] = {
   {"__truediv__", (PyCFunction)THPVariable_div, METH_VARARGS | METH_KEYWORDS, NULL},
   {"__idiv__", (PyCFunction)THPVariable_div_, METH_VARARGS | METH_KEYWORDS, NULL},
   {"__mod__", (PyCFunction)THPVariable_remainder, METH_VARARGS | METH_KEYWORDS, NULL},
+  {"clamp", (PyCFunction)THPVariable_clamp, METH_VARARGS | METH_KEYWORDS, NULL},
+  {"clamp_", (PyCFunction)THPVariable_clamp_, METH_VARARGS | METH_KEYWORDS, NULL},
   {"contiguous", (PyCFunction)THPVariable_contiguous, METH_NOARGS, NULL},
   {"detach", (PyCFunction)THPVariable_detach, METH_NOARGS, NULL},
   {"detach_", (PyCFunction)THPVariable_detach_, METH_NOARGS, NULL},

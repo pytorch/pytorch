@@ -310,17 +310,6 @@ class Variable(_C._VariableBase):
     def byte(self):
         return self.type(self._get_type('ByteTensor'))
 
-    def clamp(self, min=None, max=None):
-        if min is None and max is None:
-            raise ValueError("clamp requires specifying at least one of "
-                             "min and max arguments")
-        elif min is None and max is not None:
-            return CminConstant.apply(self, max)
-        elif min is not None and max is None:
-            return CmaxConstant.apply(self, min)
-        else:
-            return Clamp.apply(self, min, max)
-
     def prod(self, dim=None, keepdim=None):
         return Prod.apply(self, dim, keepdim)
 

@@ -92,19 +92,6 @@ class Abs(Function):
         return grad_output * i.sign()
 
 
-class Clamp(Function):
-
-    @staticmethod
-    def forward(ctx, i, min_val, max_val):
-        ctx._mask = (i.ge(min_val) * i.le(max_val))
-        return i.clamp(min_val, max_val)
-
-    @staticmethod
-    def backward(ctx, grad_output):
-        mask = Variable(ctx._mask.type_as(grad_output.data))
-        return grad_output * mask, None, None
-
-
 class Sqrt(Function):
 
     @staticmethod
@@ -269,19 +256,6 @@ class Cmax(Function):
         )
 
 
-class CmaxConstant(Function):
-
-    @staticmethod
-    def forward(ctx, i, constant):
-        ctx._mask = i.gt(constant)
-        return i.clamp(min=constant)
-
-    @staticmethod
-    def backward(ctx, grad_output):
-        mask = Variable(ctx._mask.type_as(grad_output.data))
-        return grad_output * mask, None
-
-
 class Cmin(Function):
 
     @staticmethod
@@ -298,19 +272,6 @@ class Cmin(Function):
             maybe_unexpand(grad_output * mask, ctx._a_size),
             maybe_unexpand_or_view(grad_output * Variable(ctx._mask.eq(0).type_as(grad_output.data)), ctx._b_size)
         )
-
-
-class CminConstant(Function):
-
-    @staticmethod
-    def forward(ctx, i, constant):
-        ctx._mask = i.lt(constant)
-        return i.clamp(max=constant)
-
-    @staticmethod
-    def backward(ctx, grad_output):
-        mask = Variable(ctx._mask.type_as(grad_output.data))
-        return grad_output * mask, None
 
 
 class _ConstantGrad(Function):

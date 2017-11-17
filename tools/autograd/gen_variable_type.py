@@ -1019,7 +1019,7 @@ def gen_variable_type(declarations, out):
 
         # don't bind size or stride since the python signatures are different
         # exclude alias from Python bindings as well at least for now
-        if name in ['alias', 'size', 'stride']:
+        if name in ['alias', 'size', 'stride'] or name.startswith('clamp'):
             return False
 
         if name.endswith('_backward'):
