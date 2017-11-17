@@ -90,6 +90,9 @@ struct Tensor : public detail::TensorBase {
   Type & type() const {
     return pImpl->type();
   }
+  std::unique_ptr<Storage> storage() const {
+    return pImpl->storage();
+  }
   inline Tensor toType(const Type & t) const;
   inline Tensor & copy_(const Tensor & src);
   inline Tensor toType(ScalarType t) const;

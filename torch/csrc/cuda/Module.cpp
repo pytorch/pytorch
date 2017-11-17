@@ -25,15 +25,6 @@ THCState *state;
 static bool THCPModule_loadClasses(PyObject *torch_module)
 {
 #define ASSERT_NOT_NULL(ptr) if (!(ptr)) { THPUtils_setError("couldn't load classes"); return false; }
-  ASSERT_NOT_NULL(THCPDoubleStorageClass = PyObject_GetAttrString(torch_module, (char*)"DoubleStorage"));
-  ASSERT_NOT_NULL(THCPFloatStorageClass  = PyObject_GetAttrString(torch_module, (char*)"FloatStorage"));
-  ASSERT_NOT_NULL(THCPHalfStorageClass   = PyObject_GetAttrString(torch_module, (char*)"HalfStorage"));
-  ASSERT_NOT_NULL(THCPLongStorageClass   = PyObject_GetAttrString(torch_module, (char*)"LongStorage"));
-  ASSERT_NOT_NULL(THCPIntStorageClass    = PyObject_GetAttrString(torch_module, (char*)"IntStorage"));
-  ASSERT_NOT_NULL(THCPShortStorageClass  = PyObject_GetAttrString(torch_module, (char*)"ShortStorage"));
-  ASSERT_NOT_NULL(THCPCharStorageClass   = PyObject_GetAttrString(torch_module, (char*)"CharStorage"));
-  ASSERT_NOT_NULL(THCPByteStorageClass   = PyObject_GetAttrString(torch_module, (char*)"ByteStorage"));
-
   if (!THCPDoubleTensor_postInit(torch_module)) return false;
   if (!THCPFloatTensor_postInit(torch_module)) return false;
   if (!THCPHalfTensor_postInit(torch_module)) return false;
@@ -42,6 +33,15 @@ static bool THCPModule_loadClasses(PyObject *torch_module)
   if (!THCPShortTensor_postInit(torch_module)) return false;
   if (!THCPCharTensor_postInit(torch_module)) return false;
   if (!THCPByteTensor_postInit(torch_module)) return false;
+
+  THCPDoubleStorage_postInit(torch_module);
+  THCPFloatStorage_postInit(torch_module);
+  THCPHalfStorage_postInit(torch_module);
+  THCPLongStorage_postInit(torch_module);
+  THCPIntStorage_postInit(torch_module);
+  THCPShortStorage_postInit(torch_module);
+  THCPCharStorage_postInit(torch_module);
+  THCPByteStorage_postInit(torch_module);
 
   return true;
 #undef ASSERT_NOT_NULL

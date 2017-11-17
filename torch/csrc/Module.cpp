@@ -57,14 +57,14 @@ static bool THPModule_loadClasses(PyObject *self)
   if (!THPCharTensor_postInit(torch_module)) return false;
   if (!THPByteTensor_postInit(torch_module)) return false;
 
-  ASSERT_NOT_NULL(THPDoubleStorageClass = PyObject_GetAttrString(torch_module,(char*)"DoubleStorage"));
-  ASSERT_NOT_NULL(THPFloatStorageClass  = PyObject_GetAttrString(torch_module,(char*)"FloatStorage"));
-  ASSERT_NOT_NULL(THPHalfStorageClass   = PyObject_GetAttrString(torch_module,(char*)"HalfStorage"));
-  ASSERT_NOT_NULL(THPLongStorageClass   = PyObject_GetAttrString(torch_module,(char*)"LongStorage"));
-  ASSERT_NOT_NULL(THPIntStorageClass    = PyObject_GetAttrString(torch_module,(char*)"IntStorage"));
-  ASSERT_NOT_NULL(THPShortStorageClass  = PyObject_GetAttrString(torch_module,(char*)"ShortStorage"));
-  ASSERT_NOT_NULL(THPCharStorageClass   = PyObject_GetAttrString(torch_module,(char*)"CharStorage"));
-  ASSERT_NOT_NULL(THPByteStorageClass   = PyObject_GetAttrString(torch_module,(char*)"ByteStorage"));
+  THPDoubleStorage_postInit(torch_module);
+  THPFloatStorage_postInit(torch_module);
+  THPHalfStorage_postInit(torch_module);
+  THPLongStorage_postInit(torch_module);
+  THPIntStorage_postInit(torch_module);
+  THPShortStorage_postInit(torch_module);
+  THPCharStorage_postInit(torch_module);
+  THPByteStorage_postInit(torch_module);
 
   return true;
 #undef ASSERT_NOT_NULL

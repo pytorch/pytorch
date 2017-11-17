@@ -61,6 +61,10 @@ void * VariableImpl::unsafeGetTH(bool retain) {
   return data.unsafeGetTH(retain);
 }
 
+std::unique_ptr<at::Storage> VariableImpl::storage() {
+  return data.storage();
+}
+
 Scalar VariableImpl::localScalar() {
   return data.pImpl->localScalar();
 }
