@@ -4,7 +4,7 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 from distutils.spawn import find_executable
-from distutils import sysconfig
+from distutils import sysconfig, log
 import setuptools
 import setuptools.command.build_py
 import setuptools.command.develop
@@ -12,6 +12,7 @@ import setuptools.command.build_ext
 
 from collections import namedtuple
 import os
+import shlex
 import subprocess
 import sys
 from textwrap import dedent
@@ -92,6 +93,14 @@ class build_ext(setuptools.command.build_ext.build_ext):
             py_exe = sys.executable
             py_inc = sysconfig.get_python_inc()
 
+            if 'CMAKE_ARGS' in os.environ:
+                cmake_args = shlex.split(os.environ['CMAKE_ARGS'])
+                # prevent crossfire with downstream scripts
+                del os.environ['CMAKE_ARGS']
+            else:
+                cmake_args = []
+            log.info('CMAKE_ARGS: {}'.format(cmake_args))
+
             self.compiler.spawn([
                 os.path.join(TOP_DIR, 'scripts', 'build_local.sh'),
                 '-DBUILD_SHARED_LIBS=OFF',
@@ -106,7 +115,7 @@ class build_ext(setuptools.command.build_ext.build_ext):
                 '-BUILD_BENCHMARK=OFF',
                 '-DBUILD_BINARY=OFF',
                 TOP_DIR
-            ])
+            ] + cmake_args)
             # This is assuming build_local.sh will use TOP_DIR/build
             # as the cmake build directory
             self.compiler.spawn([
