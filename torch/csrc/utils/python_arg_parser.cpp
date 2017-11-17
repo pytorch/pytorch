@@ -339,8 +339,11 @@ bool FunctionSignature::parse(PyObject* args, PyObject* kwargs, PyObject* dst[],
     } else if (param.check(obj)) {
       dst[i++] = obj;
     } else if (allow_varargs_intlist && arg_pos == 0 && !is_kwd) {
+      // take all positional arguments as this parameter
+      // e.g. permute(1, 2, 3) -> permute((1, 2, 3))
       dst[i++] = args;
       arg_pos = nargs;
+      continue;
     } else if (raise_exception) {
       if (is_kwd) {
         // foo(): argument 'other' must be str, not int
