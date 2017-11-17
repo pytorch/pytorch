@@ -18,24 +18,18 @@ std::string RunCountNetObserver::debugInfo() {
   return "This operator runs " + caffe2::to_string(cnt_) + " times.";
 }
 
-bool RunCountNetObserver::Start() {
+void RunCountNetObserver::Start() {
   const auto& operators = subject_->GetOperators();
   for (auto* op : operators) {
     op->AttachObserver(caffe2::make_unique<RunCountOperatorObserver>(op, this));
   }
-  return true;
 }
 
-bool RunCountNetObserver::Stop() {
-  return true;
-}
+void RunCountNetObserver::Stop() {}
 
-bool RunCountOperatorObserver::Start() {
+void RunCountOperatorObserver::Start() {
   ++netObserver_->cnt_;
-  return true;
 }
-bool RunCountOperatorObserver::Stop() {
-  return true;
-}
+void RunCountOperatorObserver::Stop() {}
 
 } // namespace caffe2
