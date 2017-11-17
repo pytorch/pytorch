@@ -2,7 +2,7 @@ from common import TestCase, run_tests
 import math
 import torch
 from torch.autograd import Variable, gradcheck
-from torch.distributions import Bernoulli, Multinomial, Normal
+from torch.distributions import Bernoulli, Categorical, Normal
 
 
 class TestDistributions(TestCase):
@@ -47,22 +47,22 @@ class TestDistributions(TestCase):
     def test_multinomial_1d(self):
         p = Variable(torch.Tensor([0.1, 0.2, 0.3]), requires_grad=True)
         # TODO: this should return a 0-dim tensor once we have Scalar support
-        self.assertEqual(Multinomial(p).sample().size(), (1,))
-        self.assertEqual(Multinomial(p).sample_n(1).size(), (1, 1))
-        self._gradcheck_log_prob(Multinomial, (p,))
+        self.assertEqual(Categorical(p).sample().size(), (1,))
+        self.assertEqual(Categorical(p).sample_n(1).size(), (1, 1))
+        self._gradcheck_log_prob(Categorical, (p,))
 
     def test_multinomial_2d(self):
         probabilities = [[0.1, 0.2, 0.3], [0.5, 0.3, 0.2]]
         p = Variable(torch.Tensor(probabilities), requires_grad=True)
-        self.assertEqual(Multinomial(p).sample().size(), (2,))
-        self.assertEqual(Multinomial(p).sample_n(6).size(), (6, 2))
-        self._gradcheck_log_prob(Multinomial, (p,))
+        self.assertEqual(Categorical(p).sample().size(), (2,))
+        self.assertEqual(Categorical(p).sample_n(6).size(), (6, 2))
+        self._gradcheck_log_prob(Categorical, (p,))
 
         def ref_log_prob(idx, val, log_prob):
             sample_prob = p.data[idx][val] / p.data[idx].sum()
             self.assertEqual(log_prob, math.log(sample_prob))
 
-        self._check_log_prob(Multinomial(p), ref_log_prob)
+        self._check_log_prob(Categorical(p), ref_log_prob)
 
     def test_normal(self):
         mean = Variable(torch.randn(5, 5), requires_grad=True)

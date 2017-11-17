@@ -22,7 +22,7 @@ descent, whilst the rule above assumes gradient ascent. With a multinomial
 policy, the code for implementing REINFORCE would be as follows::
 
     probs = policy_network(state)
-    m = Multinomial(probs)
+    m = Categorical(probs)
     action = m.sample()
     next_state, reward = env.step(action)
     loss = -m.log_prob(action) * reward
@@ -33,7 +33,7 @@ from numbers import Number
 import torch
 
 
-__all__ = ['Distribution', 'Bernoulli', 'Multinomial', 'Normal']
+__all__ = ['Distribution', 'Bernoulli', 'Categorical', 'Normal']
 
 
 class Distribution(object):
@@ -101,7 +101,7 @@ class Bernoulli(Distribution):
         return log_pmf.gather(0, value.unsqueeze(0).long()).squeeze(0)
 
 
-class Multinomial(Distribution):
+class Categorical(Distribution):
     r"""
     Creates a multinomial distribution parameterized by `probs`.
 
@@ -116,7 +116,7 @@ class Multinomial(Distribution):
 
     Example::
 
-        >>> m = Multinomial(torch.Tensor([ 0.25, 0.25, 0.25, 0.25 ]))
+        >>> m = Categorical(torch.Tensor([ 0.25, 0.25, 0.25, 0.25 ]))
         >>> m.sample()  # equal probability of 0, 1, 2, 3
          3
         [torch.LongTensor of size 1]
