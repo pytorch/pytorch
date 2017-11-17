@@ -2669,56 +2669,80 @@
 ]]
 [[
   name: clamp
+  cname: clamp
   variants:
     - method
     - function
   return: argument 0
-  options:
-    - cname: clamp
-      arguments:
-      - arg: THTensor* destination
-        output: True
-      - THTensor* self
-      - real min
-      - real max
-    - cname: cmaxValue
-      arguments:
-        - arg: THTensor* result
-          output: True
-        - THTensor* self
-        - arg: real min
-          kwarg_only: True
-    - cname: cminValue
-      arguments:
-        - arg: THTensor* result
-          output: True
-        - THTensor* self
-        - arg: real max
-          kwarg_only: True
+  arguments:
+    - arg: THTensor* destination
+      output: True
+    - THTensor* self
+    - real min
+    - real max
 ]]
 [[
   name: clamp_
   cname: clamp
-  return: self
-  options:
-    - cname: clamp
-      arguments:
-      - THTensor* self
-      - THTensor* self
-      - real min
-      - real max
-    - cname: cmaxValue
-      arguments:
-        - THTensor* self
-        - THTensor* self
-        - arg: real min
-          kwarg_only: True
-    - cname: cminValue
-      arguments:
-        - THTensor* self
-        - THTensor* self
-        - arg: real max
-          kwarg_only: True
+  variants:
+    - method
+    - function
+  return: argument 0
+  arguments:
+    - THTensor* self
+    - THTensor* self
+    - real min
+    - real max
+]]
+[[
+  name: clamp_min
+  cname: cmaxValue
+  variants:
+    - method
+    - function
+  return: argument 0
+  arguments:
+    - arg: THTensor* result
+      output: True
+    - THTensor* self
+    - real min
+]]
+[[
+  name: clamp_min_
+  cname: cmaxValue
+  variants:
+    - method
+    - function
+  return: argument 0
+  arguments:
+    - THTensor* self
+    - THTensor* self
+    - real min
+]]
+[[
+  name: clamp_max
+  cname: cminValue
+  variants:
+    - method
+    - function
+  return: argument 0
+  arguments:
+    - arg: THTensor* result
+      output: True
+    - THTensor* self
+    - real max
+]]
+[[
+  name: clamp_max_
+  cname: cminValue
+  variants:
+    - method
+    - function
+  return: argument 0
+  arguments:
+    - THTensor* self
+    - THTensor* self
+    - real max
 ]]
 [[
   name: dot
