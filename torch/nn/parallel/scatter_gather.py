@@ -16,9 +16,9 @@ def scatter(inputs, target_gpus, dim=0):
         assert not torch.is_tensor(obj), "Tensors not supported in scatter."
         if isinstance(obj, tuple):
             return list(zip(*map(scatter_map, obj)))
-        if isinstance(obj, list):
+        if isinstance(obj, list) and len(obj) > 0:
             return list(map(list, zip(*map(scatter_map, obj))))
-        if isinstance(obj, dict):
+        if isinstance(obj, dict) and len(obj) > 0:
             return list(map(type(obj), zip(*map(scatter_map, obj.items()))))
         return [obj for targets in target_gpus]
 
