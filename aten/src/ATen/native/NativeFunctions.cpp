@@ -71,7 +71,23 @@ Tensor narrow(const Tensor& self, int64_t dim, int64_t start, int64_t length) {
 }
 
 Tensor select(const Tensor& self, int64_t dim, int64_t index) {
-  return at::native::narrow(self, dim, index, 1).squeeze(dim);
+  dim = maybe_wrap_dim(dim, self.dim());
+  auto size = self.size(dim);
+  if (index < -size || index >= size) {
+    std::stringstream ss;
+    ss << "select(): index " << index << " out of range for tensor of size ";
+    ss << self.sizes() << " at dimension " << dim;
+    throw std::runtime_error(ss.str());
+  }
+  if (index < 0) {
+    index += size;
+  }
+  auto sizes = std::vector<int64_t>(self.sizes());
+  auto strides = std::vector<int64_t>(self.strides());
+  auto storage_offset = self.storage_offset() + index * strides[dim];
+  sizes.erase(sizes.begin() + dim);
+  strides.erase(strides.begin() + dim);
+  return self.as_strided(sizes, strides, storage_offset);
 }
 
 std::vector<Tensor> chunk(const Tensor& self, int64_t chunks, int64_t dim) {
