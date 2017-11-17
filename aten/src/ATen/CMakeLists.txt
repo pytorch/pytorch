@@ -157,6 +157,11 @@ IF(NOT NO_CUDA)
   INCLUDE_DIRECTORIES("${CMAKE_CURRENT_SOURCE_DIR}/cuda")
   SET(native_functions_cuda ${CMAKE_CURRENT_SOURCE_DIR}/native/cuda/NativeFunctionsCuda.cu)
   SET(all_cpp ${all_cpp} ${ATen_CUDA_SRCS} ${native_functions_cuda})
+  IF (MSVC)
+    # Some versions of NVCC under Windows is not smart enough to add dependency automatically 
+    SET_PROPERTY(SOURCE ${CMAKE_CURRENT_SOURCE_DIR}/native/cuda/NativeFunctionsCuda.cu 
+      APPEND PROPERTY OBJECT_DEPENDS ATen/NativeFunctions.h)
+  ENDIF(MSVC)
 endif()
 
 filter_list(generated_h generated_cpp "\\.h$")
