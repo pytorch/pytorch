@@ -28,7 +28,9 @@ std::vector<Tensor> split(const Tensor& self, int64_t split_size, int64_t dim) {
 }
 
 Tensor slice(const Tensor& self, int64_t start, int64_t end, int64_t step, int64_t dim) {
-  dim = maybe_wrap_dim(dim, self.dim());
+  int64_t ndim = self.dim();
+  AT_ASSERT(ndim > 0, "slice() cannot be applied to a 0-dim tensor.");
+  dim = maybe_wrap_dim(dim, ndim);
   auto sizes = std::vector<int64_t>(self.sizes());
   auto strides = std::vector<int64_t>(self.strides());
   if (step <= 0) {
@@ -59,7 +61,7 @@ Tensor slice(const Tensor& self, int64_t start, int64_t end, int64_t step, int64
 }
 
 Tensor narrow(const Tensor& self, int64_t dim, int64_t start, int64_t length) {
-  dim = maybe_wrap_dim(dim, self.dim());
+  AT_ASSERT(self.dim() > 0, "narrow() cannot be applied to a 0-dim tensor.");
   auto cur_size = self.size(dim);
   if (start < 0 || start >= cur_size) {
     runtime_error("start out of range");
@@ -71,7 +73,9 @@ Tensor narrow(const Tensor& self, int64_t dim, int64_t start, int64_t length) {
 }
 
 Tensor select(const Tensor& self, int64_t dim, int64_t index) {
-  dim = maybe_wrap_dim(dim, self.dim());
+  int64_t ndim = self.dim();
+  AT_ASSERT(ndim > 0, "select() cannot be applied to a 0-dim tensor.");
+  dim = maybe_wrap_dim(dim, ndim);
   auto size = self.size(dim);
   if (index < -size || index >= size) {
     std::stringstream ss;
