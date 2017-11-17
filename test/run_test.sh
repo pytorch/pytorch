@@ -20,9 +20,6 @@ fi
 
 pushd "$(dirname "$0")"
 
-echo "Running JIT tests"
-$PYCMD test_jit.py $@
-
 echo "Running torch tests"
 $PYCMD test_torch.py $@
 
@@ -44,6 +41,9 @@ $PYCMD test_legacy_nn.py $@
 
 echo "Running optim tests"
 $PYCMD test_optim.py $@
+
+echo "Running JIT tests"
+$PYCMD test_jit.py $@
 
 echo "Running multiprocessing tests"
 $PYCMD test_multiprocessing.py $@
