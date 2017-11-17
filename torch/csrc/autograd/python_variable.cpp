@@ -10,9 +10,9 @@
 #include "torch/csrc/autograd/functions/accumulate_grad.h"
 #include "torch/csrc/cuda/AutoGPU.h"
 #include "torch/csrc/utils/auto_gil.h"
+#include "torch/csrc/utils/python_strings.h"
 #include "torch/csrc/Exceptions.h"
 #include "torch/csrc/autograd/variable.h"
-
 
 using namespace at;
 using namespace torch::autograd;
@@ -141,10 +141,11 @@ PyObject *THPVariable_pynew(PyTypeObject *type, PyObject *args, PyObject *kwds)
   PyObject *grad_fn = NULL;
   char is_volatile = 0;
   char requires_grad = 0;
+  const char* name = NULL;
 
-  const char *accepted_args[] = {"data", "requires_grad", "volatile", "_grad_fn", NULL};
-  if (!PyArg_ParseTupleAndKeywords(args, kwds, "|ObbO", (char**)accepted_args,
-      &data, &requires_grad, &is_volatile, &grad_fn))
+  const char *accepted_args[] = {"data", "requires_grad", "volatile", "_grad_fn", "name", NULL};
+  if (!PyArg_ParseTupleAndKeywords(args, kwds, "|ObbOz", (char**)accepted_args,
+      &data, &requires_grad, &is_volatile, &grad_fn, &name))
     return NULL;
 
   if (grad_fn == Py_None)
@@ -173,6 +174,9 @@ PyObject *THPVariable_pynew(PyTypeObject *type, PyObject *args, PyObject *kwds)
     var = make_variable(torch::createTensor(data), requires_grad, is_volatile);
   }
 
+  if (name)
+    var.name() = std::string(name);
+
   PyObject* self = THPVariable_NewWithVar(type, std::move(var));
   if (self) {
     ((THPVariable*)self)->data = data;
@@ -190,10 +194,11 @@ int THPVariable_pyinit(PyObject *self, PyObject *args, PyObject *kwds)
   PyObject *grad_fn = NULL;
   char is_volatile = 0;
   char requires_grad = 0;
+  const char* name = NULL;
 
-  const char *accepted_args[] = {"data", "requires_grad", "volatile", "_grad_fn", NULL};
-  if (!PyArg_ParseTupleAndKeywords(args, kwds, "|ObbO", (char**)accepted_args,
-      &data, &requires_grad, &is_volatile, &grad_fn))
+  const char *accepted_args[] = {"data", "requires_grad", "volatile", "_grad_fn", "name", NULL};
+  if (!PyArg_ParseTupleAndKeywords(args, kwds, "|ObbOz", (char**)accepted_args,
+      &data, &requires_grad, &is_volatile, &grad_fn, &name))
     return -1;
 
   return 0;
@@ -389,6 +394,13 @@ int THPVariable_set_requires_grad(THPVariable *self, PyObject *obj)
   END_HANDLE_TH_ERRORS_RET(-1)
 }
 
+PyObject *THPVariable_get_name(THPVariable* self)
+{
+  if (self->cdata.name() == "")
+    Py_RETURN_NONE;
+  return THPUtils_packString(self->cdata.name().c_str());
+}
+
 PyObject *THPVariable_get_backwards_hooks(THPVariable *self)
 {
   HANDLE_TH_ERRORS
@@ -440,6 +452,7 @@ static struct PyGetSetDef THPVariable_properties[] = {
   {"output_nr", (getter)THPVariable_get_output_nr, NULL, NULL, NULL},
   {"requires_grad", (getter)THPVariable_get_requires_grad, (setter)THPVariable_set_requires_grad, NULL, NULL},
   {"_backward_hooks", (getter)THPVariable_get_backwards_hooks, (setter)THPVariable_set_backwards_hooks, NULL, NULL},
+  {"name", (getter)THPVariable_get_name, NULL, NULL, NULL},
   {NULL}
 };
 

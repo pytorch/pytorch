@@ -40,7 +40,7 @@ def set_training(model, mode):
             model.train(old_mode)
 
 
-def export(model, args, f, export_params=True, verbose=False, training=False):
+def export(model, args, f, export_params=True, verbose=False, training=False, input_names=None, output_names=None):
     """
     Export a model into ONNX format.  This exporter runs your model
     once in order to get a trace of its execution to be exported; at the
@@ -71,8 +71,12 @@ def export(model, args, f, export_params=True, verbose=False, training=False):
         training (bool, default False): export the model in training mode.  At
             the moment, ONNX is oriented towards exporting models for inference
             only, so you will generally not need to set this to True.
+        input_names(list of strings, default empty list): names to assign to the
+            input nodes of the graph, in order
+        output_names(list of strings, default empty list): names to assign to the
+            output nodes of the graph, in order
     """
-    _export(model, args, f, export_params, verbose, training)
+    _export(model, args, f, export_params, verbose, training, input_names, output_names)
 
 
 def _optimize_trace(trace):
@@ -98,7 +102,7 @@ def _trace(func, args, return_outs=False):
     return trace
 
 
-def _export(model, args, f, export_params=True, verbose=False, training=False):
+def _export(model, args, f, export_params=True, verbose=False, training=False, input_names=None, output_names=None):
     # Special case for common case of passing a single Variable
     if isinstance(args, torch.autograd.Variable):
         args = (args, )
@@ -120,6 +124,9 @@ def _export(model, args, f, export_params=True, verbose=False, training=False):
                            "something weird is happening in your model!")
 
     _optimize_trace(trace)
+
+    _set_input_and_output_names(trace.graph(), input_names, output_names)
+
     if verbose:
         print(trace)
 
@@ -134,6 +141,19 @@ def _export(model, args, f, export_params=True, verbose=False, training=False):
     torch.serialization._with_file_like(f, "wb", lambda f: f.write(proto))
     return torch_out
 
+
+def _set_input_and_output_names(graph, input_names, output_names):
+    def set_names(node_list, name_list, descriptor):
+        if name_list is None:
+            return
+        if len(name_list) != len(node_list):
+            raise RuntimeError(
+                "number of %s names provided (%d) did not match number of %ss (%d)"
+                % (descriptor, len(name_list), descriptor, len(node_list)))
+        for name, node in zip(name_list, node_list):
+            node.setUniqueName(name)
+    set_names(list(graph.inputs()), input_names, 'input')
+    set_names(list(graph.outputs()), output_names, 'output')
 
 attr_pattern = re.compile("^(.+)_([ifstgz])$")
 

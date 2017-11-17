@@ -90,7 +90,7 @@ private:
   size_t unique_ = 0;          // unique id
   size_t stage_ = 0;           // 0-forward, 1-backward, 2-double-backward,...
   use_list uses_;
-  std::string debug_name_;
+  std::string unique_name_;
   TypePtr type_;
 public:
   bool hasType() const {
@@ -102,13 +102,6 @@ public:
   }
   void inferTypeFrom(const at::Tensor& output) {
     setType(std::make_shared<TensorType>(output));
-  }
-  Value* setDebugName(const std::string & name) {
-    debug_name_ = name;
-    return this;
-  }
-  const std::string & debugName() const {
-    return debug_name_;
   }
   const TypePtr & type() const {
     JIT_ASSERT(type_ != nullptr);
@@ -123,9 +116,10 @@ public:
   size_t unique() const {
     return unique_;
   }
+  Value* setUniqueName(const std::string & name);
   std::string uniqueName() const {
-    if(debug_name_.size() > 0)
-      return debugName() + "_" + std::to_string(unique());
+    if (unique_name_ != "")
+      return unique_name_;
     return std::to_string(unique());
   }
   Value* setStage(size_t s) {
@@ -164,7 +158,8 @@ public:
 
   Value* copyMetadata(Value * from) {
     if(from->hasType()) setType(from->type());
-    setDebugName(from->debugName());
+    if (from->unique_name_ != "")
+      setUniqueName(from->uniqueName());
     return this;
   }
 
@@ -556,6 +551,8 @@ private:
   std::unordered_set<const Value*> all_values;
   size_t next_unique_;
 
+  std::unordered_set<std::string> unique_names_;
+
   size_t new_node_stage_;
 
   // holds outputs in a way that can be reflected
@@ -623,9 +620,10 @@ public:
   const Node * return_node() const {
     return output_;
   }
-
-  Value * addInput() {
-    return input_->addOutput();
+  Value * addInput(std::string name="") {
+    Value * v = input_->addOutput();
+    if (name != "") v->setUniqueName(name);
+    return v;
   }
   void eraseInput(size_t i) {
     input_->eraseOutput(i);
@@ -802,6 +800,18 @@ inline void Node::destroy() {
   removeAllInputs();
   removeFromList();
   graph_->freeNode(this);
+}
+
+inline Value* Value::setUniqueName(const std::string & name) {
+  if (name.find_first_not_of("0123456789") == std::string::npos) {
+    throw std::runtime_error("names may not be integers: " + name);
+  }
+  if (node_->graph_->unique_names_.find(name) != node_->graph_->unique_names_.end()) {
+    throw std::runtime_error("name is already in use in this graph: " + name);
+  }
+  node_->graph_->unique_names_.insert(name);
+  unique_name_ = name;
+  return this;
 }
 
 // Helper macros for constructing switch statements over Node types

@@ -186,7 +186,7 @@ inline std::shared_ptr<TracingState> enter(std::vector<TraceInput>&& trace_input
     if (trace_input.variable.defined()) {
       JIT_ASSERT(!trace_input.buffer.defined());
       auto& input = trace_input.variable;
-      auto input_node = state->graph->addInput();
+      auto input_node = state->graph->addInput(input.name());
       setValueTrace(state, input, input_node);
       input_node->inferTypeFrom(input.data());
       inputs.push_back(input);

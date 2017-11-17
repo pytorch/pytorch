@@ -76,10 +76,9 @@ void initPythonIRBindings(PyObject * module_) {
     .VS(inferTypeFrom)
     // skip owningGraph because it returns a raw pointer to a otherwise
     // std::shared_ptr stored graph object, and would cause a double free
-    .VS(debugName)
-    .VS(setDebugName)
     .VS(unique)
     .VS(uniqueName)
+    .VS(setUniqueName)
     .VS(setStage)
     .VS(stage)
     .VS(offset)
