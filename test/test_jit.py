@@ -449,7 +449,10 @@ class TestJit(TestCase):
 
         # Run dead code elimination to remove unused trace nodes
         torch._C._jit_pass_dce(trace)
-        self.assertExpected(str(trace))
+        # This is nondeterministic, see:
+        #   https://github.com/ezyang/pytorch/issues/227
+        # self.assertExpected(str(trace))
+        self.skipTest("output is nondeterministic on Travis/Python 3.5")
 
     def test_backward_opaque(self):
         x = Variable(torch.randn(3, 3), requires_grad=True)
@@ -466,7 +469,10 @@ class TestJit(TestCase):
 
         # Run dead code elimination to remove unused trace nodes
         torch._C._jit_pass_dce(trace)
-        self.assertExpected(str(trace))
+        # This is nondeterministic, see:
+        #   https://github.com/ezyang/pytorch/issues/227
+        # self.assertExpected(str(trace))
+        self.skipTest("output is nondeterministic on Travis/Python 3.5")
 
     def test_backward_closure(self):
         """Check that autograd closures handle multiple stages correctly."""
