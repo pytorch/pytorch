@@ -140,14 +140,14 @@ class CheckpointManager(object):
             is set to True, this will be used as db_name in SaveOp.
         node_name: Name of the node where this checkpoint_manager is used.
         db_type: Type of database to use for storing checkpoint.
-        metadata_writer: An optional writer capable of writing checkpoint info
-            in storage of choice.
+        metadata_handler: An optional object capable of reading/writing
+            checkpoint info in storage of choice.
     """
-    def __init__(self, db_prefix, node_name, db_type, metadata_writer=None):
+    def __init__(self, db_prefix, node_name, db_type, metadata_handler=None):
         self._db_prefix = db_prefix
         self._node_name = node_name
         self._db_type = db_type
-        self._metadata_writer = metadata_writer
+        self._metadata_handler = metadata_handler
         # make sure these blobs are the first in the checkpoint file.
         self._net = core.Net('!!checkpoint_mngr')
         self._blob_names = self._net.AddExternalInput('blob_names')
@@ -286,8 +286,8 @@ class CheckpointManager(object):
         return task
 
     def write_checkpoint_metadata(self, epoch):
-        if self._metadata_writer is not None:
-            self._metadata_writer.write(
+        if self._metadata_handler is not None:
+            self._metadata_handler.write(
                 epoch=epoch,
                 db_type=self._db_type,
                 db_prefix=self._db_prefix,
@@ -295,6 +295,12 @@ class CheckpointManager(object):
                 path_prefix=self._path_prefix,
                 node_names=[self._node_name],
             )
+
+    def get_resume_from_epoch_id(self, user_epoch=None):
+        last_epoch = user_epoch
+        if self._metadata_handler is not None:
+            last_epoch = self._metadata_handler.last_epoch(user_epoch=user_epoch)
+        return last_epoch
 
 
 class MultiNodeCheckpointManager(object):
@@ -307,14 +313,14 @@ class MultiNodeCheckpointManager(object):
         db_prefix: The prefix used to construct full db name. Since `absolute_path`
             is set to True, this will be used as db_name in SaveOp.
         db_type: Type of database to use for storing checkpoint.
-        metadata_writer: An optional writer capable of writing checkpoint info
-            in storage of choice.
+        metadata_handler: An optional object capable of reading/writing
+            checkpoint info in storage of choice.
     """
-    def __init__(self, db_prefix, db_type, metadata_writer=None):
+    def __init__(self, db_prefix, db_type, metadata_handler=None):
         self._node_managers = None
         self._db_prefix = db_prefix
         self._db_type = db_type
-        self._metadata_writer = metadata_writer
+        self._metadata_handler = metadata_handler
 
     def _task_group(self, func, *args, **kw):
         assert self._node_managers is not None, 'init must be called first.'
@@ -418,8 +424,8 @@ class MultiNodeCheckpointManager(object):
         return self._task_group(CheckpointManager.save, epoch)
 
     def write_checkpoint_metadata(self, epoch):
-        if self._metadata_writer is not None:
-            self._metadata_writer.write(
+        if self._metadata_handler is not None:
+            self._metadata_handler.write(
                 epoch=epoch,
                 db_type=self._db_type,
                 db_prefix=self._db_prefix,
@@ -427,6 +433,12 @@ class MultiNodeCheckpointManager(object):
                 path_prefix=self._path_prefix,
                 node_names=self._node_names,
             )
+
+    def get_resume_from_epoch_id(self, user_epoch=None):
+        last_epoch = user_epoch
+        if self._metadata_handler is not None:
+            last_epoch = self._metadata_handler.last_epoch(user_epoch=user_epoch)
+        return last_epoch
 
 
 class UploadTaskGroupBuilder(object):
@@ -489,6 +501,13 @@ class JobRunner(object):
                 LocalHostScheduler, and DistributedSession. It is used to
                 execute one TaskGroup a time.
         """
+        # identify the epoch we must resume from
+        if self.checkpoint_manager:
+            self.resume_from_epoch = self.checkpoint_manager.\
+                get_resume_from_epoch_id(self.resume_from_epoch)
+            if self.resume_from_epoch is not None:
+                logger.info('Resuming from epoch {}'.format(self.resume_from_epoch))
+
         # Initialize all the nodes.
         from_scratch = self.resume_from_epoch is None
         if from_scratch:
