@@ -231,7 +231,6 @@ class TestOptim(TestCase):
                 lr=1e-3)
         )
 
-
     def test_sgdw(self):
         self._test_basic_cases(
             lambda weight, bias: optim.SGDW([weight, bias], lr=1e-3)

@@ -183,7 +183,7 @@ class SGDRCosineLR(_LRScheduler):
     def __init__(self, optimizer, batch_size, train_size, T_0=100, T_multi=2, last_epoch=-1):
         super(SGDRCosineLR, self).__init__(optimizer, last_epoch)
         self.batch_size = batch_size
-        self.train_size= train_size
+        self.train_size = train_size
         self.T_0 = T_0
         self.T_multi = T_multi
         self.base_weight_decays = list(map(lambda group: group['weight_decay'], optimizer.param_groups))
@@ -195,9 +195,10 @@ class SGDRCosineLR(_LRScheduler):
             restart_period = restart_period * self.T_multi
         radians = math.pi * (epoch_idx / restart_period)
         lr_multi = 0.5 * (1. + math.cos(radians))
-        weight_decay_norm_multi = math.sqrt(self.batch_size/(self.train_size*restart_period))
+        weight_decay_norm_multi = math.sqrt(self.batch_size / (self.train_size * restart_period))
         return ([base_lr * lr_multi for base_lr in self.base_lrs],
-                [base_weight_decay * lr_multi * weight_decay_norm_multi for base_weight_decay in self.base_weight_decays])
+                [base_weight_decay * lr_multi * weight_decay_norm_multi 
+                    for base_weight_decay in self.base_weight_decays])
 
     def step(self, epoch=None):
         if epoch is None:
@@ -205,7 +206,8 @@ class SGDRCosineLR(_LRScheduler):
         self.last_epoch = epoch
         for param_group, (lr, weight_decay) in zip(self.optimizer.param_groups, self.get_lr()):
             param_group['lr'] = lr
-            param_group['weight_decay'] = weight_decay  #weight decay multiplier
+            param_group['weight_decay'] = weight_decay # weight decay multiplier
+
 
 class ReduceLROnPlateau(object):
     """Reduce learning rate when a metric has stopped improving.
