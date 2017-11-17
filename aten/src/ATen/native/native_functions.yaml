@@ -42,6 +42,8 @@
 
 - func: is_same_size(Tensor self, Tensor other) -> bool
 
+- func: is_cuda(Tensor self) -> bool
+
 - func: permute(Tensor self, IntList dims) -> Tensor
 
 - func: expand(Tensor self, IntList size) -> Tensor

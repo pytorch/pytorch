@@ -25,6 +25,11 @@ Tensor not_implemented(const char* name) {
       std::string("the derivative for '") + name + "' is not implemented");
 }
 
+Tensor not_differentiable(const char* name) {
+  throw std::runtime_error(
+      std::string("'") + name + "' is not differentiable");
+}
+
 Tensor maybe_multiply(const Tensor & t, const Scalar & s) {
   bool is_one = false;
   if (s.isFloatingPoint()) {

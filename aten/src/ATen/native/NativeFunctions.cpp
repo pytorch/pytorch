@@ -49,6 +49,10 @@ bool is_same_size(const Tensor& self, const Tensor& other) {
   return self.sizes().equals(other.sizes());
 }
 
+bool is_cuda(const Tensor& self) {
+  return self.type().is_cuda();
+}
+
 Tensor permute(const Tensor& self, IntList dims) {
   auto nDims = self.dim();
   if (dims.size() != (size_t)nDims) {
