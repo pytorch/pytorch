@@ -890,8 +890,9 @@ def create_variable_type(top_env, aten_declarations):
         if skip_function(declaration):
             return
 
-        if declaration.get('derivative') is None and declaration['mode'] == 'native':
-            # native functions without a derivative don't need Type implementations
+        if not is_implemented(declaration) and declaration['mode'] == 'native':
+            # native functionsthat aren't implemented don't need Type implementations
+            # because they should dispatch to implemented functions.
             return
 
         env = {}
@@ -1019,7 +1020,8 @@ def gen_variable_type(declarations, out):
 
         # don't bind size or stride since the python signatures are different
         # exclude alias from Python bindings as well at least for now
-        if name in ['alias', 'size', 'stride'] or name.startswith('clamp'):
+        # exclude 'is_cuda' because for historical reasons it is a property.
+        if name in ['alias', 'size', 'stride', 'is_cuda'] or name.startswith('clamp'):
             return False
 
         if name.endswith('_backward'):

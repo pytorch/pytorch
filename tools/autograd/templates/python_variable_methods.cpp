@@ -3,10 +3,13 @@
 #include <Python.h>
 
 #include "torch/csrc/Exceptions.h"
+#include "torch/csrc/Size.h"
 #include "torch/csrc/autograd/python_variable.h"
 #include "torch/csrc/autograd/utils/wrap_outputs.h"
+#include "torch/csrc/utils/object_ptr.h"
 #include "torch/csrc/utils/python_arg_parser.h"
 #include "torch/csrc/utils/python_numbers.h"
+#include "torch/csrc/utils/python_tuples.h"
 
 #include "python_variable_methods_dispatch.h"
 
@@ -90,6 +93,60 @@ PyObject * THPVariable_clamp_(PyObject* self, PyObject* args, PyObject* kwargs)
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject * THPVariable_size(PyObject* self, PyObject* args, PyObject* kwargs)
+{
+  HANDLE_TH_ERRORS
+  static PythonArgParser parser({
+    "size(int64_t dim)",
+    "size()",
+  });
+  auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
+  PyObject* parsed_args[3];
+  auto r = parser.parse(args, kwargs, parsed_args);
+  if (r.idx == 0) {
+    return wrap(self_.size(r.toInt64(0)));
+  } else if (r.idx == 1) {
+    // Yes, this is called sizes in ATen
+    IntList sizes = self_.sizes();
+    // we can't do the normal wrapping here because IntList maps to both
+    // torch.Size and tuple in python.
+    return THPSize_New(sizes.size(), sizes.data());
+  }
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject * THPVariable_stride(PyObject* self, PyObject* args, PyObject* kwargs)
+{
+  HANDLE_TH_ERRORS
+  static PythonArgParser parser({
+    "stride(int64_t dim)",
+    "stride()",
+  });
+  auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
+  PyObject* parsed_args[3];
+  auto r = parser.parse(args, kwargs, parsed_args);
+  if (r.idx == 0) {
+    return wrap(self_.stride(r.toInt64(0)));
+  } else if (r.idx == 1) {
+    // yes, this is called strides in ATen.
+    IntList strides = self_.strides();
+    // we can't do the normal wrapping here because IntList maps to both
+    // torch.Size and tuple in python
+    return THPUtils_packInt64Array(strides.size(), strides.data());
+  }
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject * THPVariable_dim(PyObject* self, PyObject* args)
+{
+   HANDLE_TH_ERRORS
+   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
+   return THPUtils_packInt64(self_.dim());
+   END_HANDLE_TH_ERRORS
+}
+
 static Tensor dispatch_contiguous(const Tensor & self) {
   AutoNoGIL no_gil;
   AutoGPU auto_gpu(self);
@@ -154,11 +211,15 @@ PyMethodDef variable_methods[] = {
   {"__mod__", (PyCFunction)THPVariable_remainder, METH_VARARGS | METH_KEYWORDS, NULL},
   {"clamp", (PyCFunction)THPVariable_clamp, METH_VARARGS | METH_KEYWORDS, NULL},
   {"clamp_", (PyCFunction)THPVariable_clamp_, METH_VARARGS | METH_KEYWORDS, NULL},
+  {"dim", (PyCFunction)THPVariable_dim, METH_NOARGS, NULL},
   {"contiguous", (PyCFunction)THPVariable_contiguous, METH_NOARGS, NULL},
   {"detach", (PyCFunction)THPVariable_detach, METH_NOARGS, NULL},
   {"detach_", (PyCFunction)THPVariable_detach_, METH_NOARGS, NULL},
-  {"nelement", (PyCFunction)THPVariable_numel, METH_NOARGS, NULL},
   {"element_size", (PyCFunction)THPVariable_element_size, METH_NOARGS, NULL},
+  {"ndimension", (PyCFunction)THPVariable_dim, METH_NOARGS, NULL},
+  {"nelement", (PyCFunction)THPVariable_numel, METH_NOARGS, NULL},
+  {"size", (PyCFunction)THPVariable_size, METH_VARARGS | METH_KEYWORDS, NULL},
+  {"stride", (PyCFunction)THPVariable_stride, METH_VARARGS | METH_KEYWORDS, NULL},
   ${py_method_defs}
   {NULL}
 };

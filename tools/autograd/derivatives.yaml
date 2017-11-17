@@ -286,6 +286,8 @@
 
 - name: is_same_size  # fallthrough
 
+- name: is_signed  # fallthrough
+
 - name: is_set_to  # fallthrough
 
 - name: kthvalue(Tensor self, int64_t k, int64_t dim, bool keepdim)
