@@ -228,14 +228,12 @@ class TestJit(TestCase):
         """Different arg configurations should trigger different traces"""
         x = Variable(torch.FloatTensor(4, 4).uniform_())
         x_double = Variable(x.data.double())
-        x_volatile = Variable(x.data.clone(), volatile=True)
         x_grad = Variable(x.data.clone(), requires_grad=True)
         y = Variable(torch.randn(4))
 
         configurations = [
             (x,),
             (x_double,),
-            (x_volatile,),
             (x_grad,),
             (y,),
             ([x, x],),
@@ -703,8 +701,8 @@ class TestJit(TestCase):
                 self.assertEqual(grad_v, expected_grad)
             self.assertEqual(fn.has_trace_for(x, y), rx or ry)
 
-    def test_volatile_fallback(self):
-        """Check that Traceable falls back to num_backwards=0 if given volatile inputs"""
+    def test_no_backprop_fallback(self):
+        """Check that Traceable falls back to num_backwards=0 if in no-backprop mode"""
         x = Variable(torch.randn(2, 2))
         y = Variable(torch.randn(2, 2), requires_grad=True)
 
@@ -714,10 +712,8 @@ class TestJit(TestCase):
 
         out = fn(x, y)
         self.assertFalse(fn.has_trace_for(x, y))
-
-        x.volatile = True
-        self.assertFalse(fn.has_trace_for(x, y))
-        out = fn(x, y)
+        with torch.no_backprop():
+            out = fn(x, y)
         self.assertTrue(fn.has_trace_for(x, y))
         with self.assertCompiled(fn):
             out2 = fn(x, y)

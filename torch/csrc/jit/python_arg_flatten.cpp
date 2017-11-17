@@ -41,7 +41,6 @@ void flatten_rec(PyObject* obj, ParsedArgs& args) {
     args.vars.push_back(var);
     args.desc.metadata.emplace_back(var);
     args.desc.structure.push_back(D::Variable);
-    args.is_volatile |= var.is_volatile();
   } else {
     std::string msg = "Only tuples, lists and Variables supported as JIT inputs, but got ";
     msg += THPUtils_typename(obj);

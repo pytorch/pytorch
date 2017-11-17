@@ -165,7 +165,7 @@ auto CopySlices::apply(const variable_list& inputs) -> variable_list {
 
   // TODO: We clone grad_slice because we modify it below and "fn" might save
   // it for the backward of res. We might be able to avoid the clone() if
-  // grad_slice is volatile.
+  // double-backprop is disabled.
   auto res = (*fn)({ grad_slice.clone() });
 
   variable_list grad_inputs(next_functions.size());

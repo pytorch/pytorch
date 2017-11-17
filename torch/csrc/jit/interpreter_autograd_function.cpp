@@ -105,7 +105,7 @@ autograd::variable_list InterpreterAutogradFunction::apply(
       if (!grad_fn) make_grad_fn();
       result.push_back(autograd::make_variable(toutputs[i], grad_fn));
     } else {
-      result.push_back(autograd::make_variable(toutputs[i], false, flags.is_volatile));
+      result.push_back(autograd::make_variable(toutputs[i], false));
     }
   }
 

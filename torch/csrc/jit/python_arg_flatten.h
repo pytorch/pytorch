@@ -16,23 +16,21 @@ struct IODescriptor {
       : sizes(var.sizes())
       , type(var.type().scalarType())
       , device(var.type().is_cuda() ? var.get_device() : -1)
-      , requires_grad(var.requires_grad())
-      , is_volatile(var.is_volatile()) {}
+      , requires_grad(var.requires_grad()) {}
 
     bool operator==(const VariableMetadata& o) const {
-      return std::tie(  device,   requires_grad,   is_volatile,   type,  sizes) ==
-             std::tie(o.device, o.requires_grad, o.is_volatile, o.type, o.sizes);
+      return std::tie(  device,   requires_grad,   type,  sizes) ==
+             std::tie(o.device, o.requires_grad, o.type, o.sizes);
     }
 
     static std::size_t hash(const VariableMetadata& m) {
-      return get_hash(m.sizes, m.device, m.requires_grad, m.type, m.is_volatile);
+      return get_hash(m.sizes, m.device, m.requires_grad, m.type);
     }
 
     std::vector<int64_t> sizes;
     at::ScalarType type;
     int device;
     bool requires_grad;
-    bool is_volatile;
   };
 
   bool operator==(const IODescriptor& o) const {
@@ -87,8 +85,6 @@ struct ParsedArgs {
   // Metadata describing nesting of objects received from Python and
   // metadata of vars.
   IODescriptor desc;
-  // True iff any of vars is volatile
-  bool is_volatile = false;
 
   void extend(const autograd::variable_list& list) {
     if (list.empty()) return;

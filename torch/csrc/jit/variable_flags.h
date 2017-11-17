@@ -11,7 +11,6 @@ struct VariableFlags {
   bool verify(const autograd::Variable& var) const;
 
   bool requires_grad;
-  bool is_volatile;
   bool was_null;
 };
 

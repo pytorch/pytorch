@@ -28,9 +28,8 @@ inline tensor_list as_tensor_list(Args&& ... args) {
 
 
 /**
- * Wraps the tensor outputs in variables, and if necessary (i.e., none of the
- * inputs are volatile), uses the function ctr and inputs to create a grad_fn
- * for each of them.
+ * Wraps the tensor outputs in variables and creates the grad_fn and sets the
+ * grad_fn if necessary.
  */
 variable_list wrap_outputs(const variable_list& inputs, tensor_list&& outputs,
                            function_constructor ctr);
