@@ -2001,8 +2001,9 @@ class TestTorch(TestCase):
         self.assertEqual(x.slice(0, 4), x)
         # start and stop are clamped to the size of dim
         self.assertEqual(x.slice(0, 5), x)
-        # if start > stop then the result is empty
+        # if start >= stop then the result is empty
         self.assertEqual(x.slice(2, 1), empty)
+        self.assertEqual(x.slice(2, 2), empty)
         # out of bounds is also empty
         self.assertEqual(x.slice(10, 12), empty)
         # additional correctness checks
