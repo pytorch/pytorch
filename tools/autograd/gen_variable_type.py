@@ -890,8 +890,9 @@ def create_variable_type(top_env, aten_declarations):
         if skip_function(declaration):
             return
 
-        if declaration.get('derivative') is None and declaration['mode'] == 'native':
-            # native functions without a derivative don't need Type implementations
+        if not is_implemented(declaration) and declaration['mode'] == 'native':
+            # native functionsthat aren't implemented don't need Type implementations
+            # because they should dispatch to implemented functions.
             return
 
         env = {}
