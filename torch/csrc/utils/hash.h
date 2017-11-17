@@ -1,6 +1,7 @@
 #pragma once
 
 #include <functional>
+#include <vector>
 #include <ATen/ATen.h>
 
 namespace torch {
@@ -53,7 +54,7 @@ auto dispatch_hash(const T& o) -> decltype(std::hash<T>()(o), std::size_t()) {
 }
 
 template<typename T>
-auto dispatch_hash(const T& o) -> decltype((typename std::enable_if<std::is_enum<T>::value, std::size_t>::type){}) {
+typename std::enable_if<std::is_enum<T>::value, std::size_t>::type dispatch_hash(const T& o) {
   return std::hash<int>()(static_cast<int>(o));
 }
 
