@@ -1020,7 +1020,8 @@ def gen_variable_type(declarations, out):
 
         # don't bind size or stride since the python signatures are different
         # exclude alias from Python bindings as well at least for now
-        if name in ['alias', 'size', 'stride'] or name.startswith('clamp'):
+        # exclude 'is_cuda' because for historical reasons it is a property.
+        if name in ['alias', 'size', 'stride', 'is_cuda'] or name.startswith('clamp'):
             return False
 
         if name.endswith('_backward'):
