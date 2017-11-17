@@ -1,5 +1,6 @@
 #pragma once
 
+#include <vector>
 #include <functional>
 #include <vector>
 #include <ATen/ATen.h>
@@ -53,10 +54,17 @@ auto dispatch_hash(const T& o) -> decltype(std::hash<T>()(o), std::size_t()) {
   return std::hash<T>()(o);
 }
 
+#ifdef _MSC_VER
 template<typename T>
 typename std::enable_if<std::is_enum<T>::value, std::size_t>::type dispatch_hash(const T& o) {
   return std::hash<int>()(static_cast<int>(o));
 }
+#else
+template<typename T>
+typename std::enable_if<std::is_enum<T>::value, std::size_t>::type dispatch_hash(const T& o) {
+  return std::hash<int>()(static_cast<int>(o));
+}
+#endif
 
 template<typename T>
 auto dispatch_hash(const T& o) -> decltype(T::hash(o), std::size_t()) {
