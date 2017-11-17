@@ -8,6 +8,7 @@ import torch.cuda
 import tempfile
 import unittest
 import warnings
+import pickle
 from torch.utils.dlpack import from_dlpack, to_dlpack
 from itertools import product, combinations
 from common import TestCase, iter_indices, TEST_NUMPY, run_tests, download_file, skipIfNoLapack, \
@@ -4133,6 +4134,18 @@ class TestTorch(TestCase):
 
             rootview = c[8]
             self.assertEqual(rootview.data_ptr(), c[0].data_ptr())
+
+    def test_serialization_offset(self):
+        a = torch.randn(5, 5)
+        i = 41
+        with tempfile.TemporaryFile() as f:
+            pickle.dump(i, f)
+            torch.save(a, f)
+            f.seek(0)
+            j = pickle.load(f)
+            b = torch.load(f)
+            self.assertTrue(torch.equal(a, b))
+            self.assertEqual(i, j)
 
     def test_half_tensor(self):
         x = torch.randn(5, 5).float()
