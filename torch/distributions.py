@@ -105,7 +105,7 @@ class Bernoulli(Distribution):
 class Categorical(Distribution):
     r"""
     Creates a categorical distribution parameterized by `probs`.
-    
+
     .. note::
         It is equivalent to the distribution that ``multinomial()`` samples from.
 
