@@ -239,14 +239,14 @@ std::ostream& printNode(std::ostream & out, const Node * n, std::vector<const No
       printAttributes(out,n);
     }
   IR_END()
-  out << "(" << n->inputs() << "), uses = [";
+  out << "(" << n->inputs() << ")";
   std::string scopeName = n->scopeName();
   if (scopeName.empty()) {
-    out << "];\n";
+    out << "\n";
   }
   else {
-    out << "], ";
-    out << "scope: " << scopeName << ";\n";
+    out << ", ";
+    out << "scope: " << scopeName << "\n";
   }
   return out;
 }
