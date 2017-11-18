@@ -66,6 +66,15 @@ class RNNBase(Module):
             self._data_ptrs = []
             return
 
+        # If any parameters alias, we fall back to the slower, copying code path. This is
+        # a sufficient check, because overlapping parameter buffers that don't completely
+        # alias would break the assumptions of the uniqueness check in
+        # Module.named_parameters().
+        unique_data_ptrs = set(p.data_ptr() for l in self.all_weights for p in l)
+        if len(unique_data_ptrs) != sum(len(l) for l in self.all_weights):
+            self._data_ptrs = []
+            return
+
         with torch.cuda.device_of(any_param):
             # This is quite ugly, but it allows us to reuse the cuDNN code without larger
             # modifications. It's really a low-level API that doesn't belong in here, but
@@ -98,8 +107,8 @@ class RNNBase(Module):
             fn.w_desc = rnn.init_weight_descriptor(fn, fn.weight_buf)
 
             # Slice off views into weight_buf
-            params = rnn.get_parameters(fn, handle, fn.weight_buf)
             all_weights = [[p.data for p in l] for l in self.all_weights]
+            params = rnn.get_parameters(fn, handle, fn.weight_buf)
 
             # Copy weights and update their storage
             rnn._copyParams(all_weights, params)
