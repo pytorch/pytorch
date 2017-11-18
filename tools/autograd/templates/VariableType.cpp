@@ -315,8 +315,9 @@ void VariableType::s_copy(const Tensor & src, Tensor & dst) const {
     // TODO: handle type conversions
     grad_fn = std::make_shared<CopyBackwards>();
     grad_fn->is_executable = true;
-    grad_fn->next_functions = compute_next_functions({ dst, src });
+    grad_fn->next_functions = compute_next_functions({ src, dst });
     grad_fn->num_inputs = 1;
+    grad_fn->src_type = &src.type();
   }
   baseType->s_copy(src_, dst_);
   increment_version(dst);
