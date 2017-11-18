@@ -18,7 +18,7 @@ taking action :math:`a` in state :math:`s` given policy :math:`\pi^\theta`.
 In practice we would sample an action from the output of a network, apply this
 action in an environment, and then use ``log_prob`` to construct an equivalent
 loss function. Note that we use a negative because optimisers use gradient
-descent, whilst the rule above assumes gradient ascent. With a multinomial
+descent, whilst the rule above assumes gradient ascent. With a categorical
 policy, the code for implementing REINFORCE would be as follows::
 
     probs = policy_network(state)
@@ -103,7 +103,7 @@ class Bernoulli(Distribution):
 
 class Categorical(Distribution):
     r"""
-    Creates a multinomial distribution parameterized by `probs`.
+    Creates a categorical distribution parameterized by `probs`.
 
     Samples are integers from `0 ... K-1` where `K` is probs.size(-1).
 
