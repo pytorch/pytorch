@@ -204,6 +204,7 @@ class Variable(_C._VariableBase):
             Use:
 
             probs = policy_network(state)
+            # NOTE: multinomial has been renamed to categorical in 0.3
             m = torch.distributions.Categorical(probs)
             action = m.sample()
             next_state, reward = env.step(action)
