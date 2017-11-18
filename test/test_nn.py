@@ -3728,6 +3728,13 @@ new_criterion_tests = [
         module_name='PoissonNLLLoss',
         input_size=(2, 3, 4, 5),
         target_fn=lambda: torch.randn(2, 3, 4, 5).floor_().abs_(),
+        desc='non_full_loss',
+    ),
+    dict(
+        module_name='PoissonNLLLoss',
+        constructor_args=(True, False, True, 1e-8, False),
+        input_size=(2, 3, 4, 5),
+        target_fn=lambda: torch.randn(2, 3, 4, 5).floor_().abs_(),
         desc='reduced_loss',
     ),
     dict(
