@@ -22,6 +22,7 @@ descent, whilst the rule above assumes gradient ascent. With a categorical
 policy, the code for implementing REINFORCE would be as follows::
 
     probs = policy_network(state)
+    # NOTE: this is equivalent to what used to be called multinomial
     m = Categorical(probs)
     action = m.sample()
     next_state, reward = env.step(action)
@@ -104,6 +105,9 @@ class Bernoulli(Distribution):
 class Categorical(Distribution):
     r"""
     Creates a categorical distribution parameterized by `probs`.
+    
+    .. note::
+        It is equivalent to the distribution that ``multinomial()`` samples from.
 
     Samples are integers from `0 ... K-1` where `K` is probs.size(-1).
 
