@@ -2276,8 +2276,6 @@ class TestNN(NNTestCase):
 
             with warnings.catch_warnings(record=True) as w:
                 output = rnn(input, hx)
-            self.assertEqual(len(w), 1)
-            self.assertIn('weights are not part of single contiguous chunk of memory', w[0].message.args[0])
             output[0].sum().backward()
 
             opt.step()
