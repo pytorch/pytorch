@@ -94,43 +94,54 @@ class CosineEmbeddingLoss(Function):
 
 class HingeEmbeddingLoss(Function):
     @staticmethod
-    def forward(ctx, input, target, margin, size_average):
+    def forward(ctx, input, target, margin, size_average, reduce):
         ctx.margin = margin
         ctx.size_average = size_average
+        ctx.reduce = reduce
         buffer = input.new()
         buffer.resize_as_(input).copy_(input)
         buffer[torch.eq(target, -1.)] = 0
-        output = buffer.sum()
+        if ctx.reduce:
+            output = buffer.sum()
+        else:
+            output = buffer.clone()
 
         buffer.fill_(ctx.margin).add_(-1, input)
         buffer.clamp_(min=0)
         buffer[torch.eq(target, 1.)] = 0
-        output += buffer.sum()
-
-        if ctx.size_average:
-            output = output / input.nelement()
+        if ctx.reduce:
+            output += buffer.sum()
+            if ctx.size_average:
+                output = output / input.nelement()
+        else:
+            output += buffer
 
         ctx.save_for_backward(input, target)
-        return input.new((output,))
+        if ctx.reduce:
+            return input.new((output,))
+        else:
+            return output.clone()
 
     @staticmethod
     def backward(ctx, grad_output):
         input, target = ctx.saved_variables
-        return (HingeEmbeddingLossBackward.apply(input, target, grad_output, ctx.margin, ctx.size_average),
+        return (HingeEmbeddingLossBackward.apply(input, target, grad_output, ctx.margin, ctx.size_average, ctx.reduce),
                 None, None, None, None)
 
 
 class HingeEmbeddingLossBackward(Function):
     @staticmethod
-    def forward(ctx, input, target, grad_output, margin, size_average):
+    def forward(ctx, input, target, grad_output, margin, size_average, reduce):
         ctx.margin = margin
         ctx.size_average = size_average
+        ctx.reduce = reduce
         ctx.save_for_backward(input, target, grad_output)
         grad_input = input.new().resize_as_(input).copy_(target)
         grad_input[torch.mul(torch.eq(target, -1), torch.gt(input, ctx.margin))] = 0
 
-        if ctx.size_average:
-            grad_input.mul_(1. / input.nelement())
+        if ctx.reduce:
+            if ctx.size_average:
+                grad_input.mul_(1. / input.nelement())
 
         if grad_output[0] != 1:
             grad_input.mul_(grad_output[0])
@@ -140,7 +151,7 @@ class HingeEmbeddingLossBackward(Function):
     @staticmethod
     def backward(ctx, ggI):
         input, target, gO = ctx.saved_variables
-        div_factor = input.nelement() if ctx.size_average else 1
+        div_factor = input.nelement() if ctx.size_average and ctx.reduce else 1
 
         gI = None
 

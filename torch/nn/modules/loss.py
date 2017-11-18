@@ -436,6 +436,7 @@ class HingeEmbeddingLoss(_Loss):
         loss(x, y) = 1/n {
                          { max(0, margin - x_i), if y_i == -1
 
+    `x` and `y` must both be of type (FloatTensor).
     `x` and `y` can be of arbitrary shapes with a total of `n` elements each.
     The sum operation operates over all the elements.
 
@@ -443,15 +444,27 @@ class HingeEmbeddingLoss(_Loss):
     variable `size_average=False`.
 
     The `margin` has a default value of `1`, or can be set in the constructor.
+
+    Args:
+        margin (float): This hyperparameter controls by how much we
+            want the tensor `x`. Default: ``1.0``
+        size_average (bool, optional: By default, the losses are averaged
+            for each minibatch over observations **as well as** over
+            dimensions. However, if ``False`` the losses are instead summed.
+        reduce (bool, optional): By default, the losses are averaged
+            over observations for each minibatch, or summed, depending on
+            size_average. When reduce is ``False``, returns a loss per batch
+            element instead and ignores size_average. Default: ``True``
     """
 
-    def __init__(self, margin=1.0, size_average=True):
-        super(HingeEmbeddingLoss, self).__init__()
+    def __init__(self, margin=1.0, size_average=True, reduce=True):
+        super(HingeEmbeddingLoss, self).__init__(size_average)
         self.margin = margin
-        self.size_average = size_average
+        self.reduce = reduce
 
     def forward(self, input, target):
-        return F.hinge_embedding_loss(input, target, self.margin, self.size_average)
+        return F.hinge_embedding_loss(input, target, self.margin, 
+            self.size_average, self.reduce)
 
 
 class MultiLabelMarginLoss(_Loss):
