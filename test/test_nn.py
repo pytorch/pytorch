@@ -2254,6 +2254,40 @@ class TestNN(NNTestCase):
             weight_data[:] = 4
             self.assertEqual(weight_data, all_vars[4].data)
 
+    @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
+    def test_cudnn_weight_tying(self):
+        rnns = [
+            nn.LSTM(10, 20, batch_first=True, bidirectional=True),
+            nn.GRU(10, 20, batch_first=True, bidirectional=True),
+            nn.RNN(10, 20, batch_first=True, bidirectional=True)
+        ]
+        for rnn in rnns:
+            rnn.bias_ih_l0_reverse = rnn.bias_ih_l0
+            rnn.cuda()
+            input = Variable(torch.randn(5, 4, 10).cuda(), requires_grad=True)
+            hx = Variable(torch.randn(2, 5, 20).cuda(), requires_grad=True)
+            all_vars = [input, hx] + list(rnn.parameters())
+            opt = torch.optim.SGD(rnn.parameters(), lr=0.1)
+            opt.zero_grad()
+            if isinstance(rnn, nn.LSTM):
+                cx = Variable(torch.randn(2, 5, 20).cuda(), requires_grad=True)
+                all_vars[2:2] = [cx]
+                hx = (hx, cx)
+
+            with warnings.catch_warnings(record=True) as w:
+                output = rnn(input, hx)
+            self.assertEqual(len(w), 1)
+            self.assertIn('weights are not part of single contiguous chunk of memory', w[0].message.args[0])
+            output[0].sum().backward()
+
+            opt.step()
+            with warnings.catch_warnings(record=True) as w:
+                output_cuda = rnn(input, hx)
+            rnn.cpu()
+            hx = (hx[0].cpu(), hx[1].cpu()) if isinstance(rnn, nn.LSTM) else hx.cpu()
+            output_cpu = rnn(input.cpu(), hx)
+            self.assertEqual(output_cuda, output_cpu)
+
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
     def test_cuda_rnn_fused(self):
         def copy_rnn(rnn1, rnn2):
