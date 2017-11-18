@@ -204,7 +204,8 @@ class Variable(_C._VariableBase):
             Use:
 
             probs = policy_network(state)
-            m = torch.distributions.Multinomial(probs)
+            # NOTE: categorical is equivalent to what used to be called multinomial
+            m = torch.distributions.Categorical(probs)
             action = m.sample()
             next_state, reward = env.step(action)
             loss = -m.log_prob(action) * reward
@@ -373,7 +374,7 @@ class Variable(_C._VariableBase):
         return self.expand(tensor.size())
 
     def multinomial(self, num_samples=1, replacement=False):
-        return Multinomial.apply(self, num_samples, replacement)
+        return Categorical.apply(self, num_samples, replacement)
 
     def bernoulli(self):
         return Bernoulli.apply(self)

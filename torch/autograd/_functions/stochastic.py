@@ -2,7 +2,7 @@ import torch
 from ..function import Function
 
 
-class Multinomial(Function):
+class Categorical(Function):
     @staticmethod
     def forward(ctx, probs, num_samples, with_replacement):
         samples = probs.multinomial(num_samples, with_replacement)
