@@ -18,11 +18,12 @@ taking action :math:`a` in state :math:`s` given policy :math:`\pi^\theta`.
 In practice we would sample an action from the output of a network, apply this
 action in an environment, and then use ``log_prob`` to construct an equivalent
 loss function. Note that we use a negative because optimisers use gradient
-descent, whilst the rule above assumes gradient ascent. With a multinomial
+descent, whilst the rule above assumes gradient ascent. With a categorical
 policy, the code for implementing REINFORCE would be as follows::
 
     probs = policy_network(state)
-    m = Multinomial(probs)
+    # NOTE: this is equivalent to what used to be called multinomial
+    m = Categorical(probs)
     action = m.sample()
     next_state, reward = env.step(action)
     loss = -m.log_prob(action) * reward
@@ -33,7 +34,7 @@ from numbers import Number
 import torch
 
 
-__all__ = ['Distribution', 'Bernoulli', 'Multinomial', 'Normal']
+__all__ = ['Distribution', 'Bernoulli', 'Categorical', 'Normal']
 
 
 class Distribution(object):
@@ -101,9 +102,12 @@ class Bernoulli(Distribution):
         return log_pmf.gather(0, value.unsqueeze(0).long()).squeeze(0)
 
 
-class Multinomial(Distribution):
+class Categorical(Distribution):
     r"""
-    Creates a multinomial distribution parameterized by `probs`.
+    Creates a categorical distribution parameterized by `probs`.
+    
+    .. note::
+        It is equivalent to the distribution that ``multinomial()`` samples from.
 
     Samples are integers from `0 ... K-1` where `K` is probs.size(-1).
 
@@ -116,7 +120,7 @@ class Multinomial(Distribution):
 
     Example::
 
-        >>> m = Multinomial(torch.Tensor([ 0.25, 0.25, 0.25, 0.25 ]))
+        >>> m = Categorical(torch.Tensor([ 0.25, 0.25, 0.25, 0.25 ]))
         >>> m.sample()  # equal probability of 0, 1, 2, 3
          3
         [torch.LongTensor of size 1]

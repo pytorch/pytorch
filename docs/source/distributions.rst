@@ -19,10 +19,10 @@ Probability distributions - torch.distributions
 .. autoclass:: Bernoulli
     :members:
 
-:hidden:`Multinomial`
+:hidden:`Categorical`
 ~~~~~~~~~~~~~~~~~~~~~~~
 
-.. autoclass:: Multinomial
+.. autoclass:: Categorical
     :members:
 
 :hidden:`Normal`
