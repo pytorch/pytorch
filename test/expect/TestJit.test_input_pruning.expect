@@ -1,0 +1,12 @@
+graph(%0 : Double(5, 5)
+      %1 : Double(5, 5)
+      -------- stage 1 --------
+      %4 : Double(5, 5)
+      %5 : Double(5, 5)) {
+  %2 : Double(5, 5) = mul(%0, %1)
+  %3 : Double(5, 5) = add[alpha={1}](%0, %1)
+  ---------------- stage 1 ----------------
+  %6 : Double(5, 5) = mul(%4, %1)
+  %7 : Double(5, 5) = CppOp[N5torch8autograd3AddE](%6, %5)
+  return (%2, %3, %7);
+}

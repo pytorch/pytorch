@@ -1,36 +1,56 @@
 #pragma once
 
 #include "torch/csrc/jit/interpreter.h"
+#include "torch/csrc/jit/tracer_state.h"
 #include "torch/csrc/autograd/function.h"
+#include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/autograd/functions/utils.h"
 #include "torch/csrc/autograd/functions/basic_ops.h"
+
 namespace torch { namespace jit {
+
+struct StageDetails {
+  std::vector<tracer::VariableFlags> input_flags;
+  std::vector<tracer::VariableFlags> output_flags;
+  std::vector<int> copied_next_fns;
+};
+
 struct InterpreterAutogradFunction : public autograd::Function {
-  InterpreterAutogradFunction(const jit::Code & code)
-  : interp_(code) {}
-  InterpreterAutogradFunction(const InterpreterState & interp_, autograd::FunctionFlags && f)
-  : autograd::Function(std::move(f)), interp_(interp_) {}
+  InterpreterAutogradFunction(const jit::Code & code,
+                              const std::vector<StageDetails>& stage_details)
+    : interp_(code)
+    , stage_details_(stage_details)
+    , stage_(0) {}
+
+  InterpreterAutogradFunction(InterpreterState interp,
+                              const std::vector<StageDetails>& stage_details,
+                              std::size_t stage)
+    : interp_(std::move(interp))
+    , stage_details_(stage_details)
+    , stage_(stage) {}
 
   virtual void willReleaseVariables() override {
-    keep_graph = false;
+    keep_graph_ = false;
   }
-  virtual autograd::variable_list apply(const autograd::variable_list& inputs) override {
-    std::vector<at::Tensor> tinputs;
-    std::vector<at::Tensor> toutputs;
-    for(auto & i : inputs) {
-      tinputs.push_back(i.data());
-    }
-    InterpreterState interp = (keep_graph) ? interp_.clone() : interp_;
-    keep_graph = true;
-    interp.runOneStage(tinputs, toutputs);
-    auto r = autograd::wrap_outputs(inputs, std::move(toutputs), [&](autograd::FunctionFlags f) {
-      return std::make_shared<InterpreterAutogradFunction>(interp, std::move(f));
-    });
-    return r;
-  }
+
+  virtual autograd::variable_list apply(const autograd::variable_list& inputs) override;
+
 private:
-  bool keep_graph = true;
   InterpreterState interp_;
+  const std::vector<StageDetails>& stage_details_;
+  size_t stage_;
+  bool keep_graph_ = true;
+  bool used_ = false;
 };
+
+struct InterpreterFunctionFactory {
+  explicit InterpreterFunctionFactory(tracer::TracingState *state);
+  std::shared_ptr<InterpreterAutogradFunction> construct();
+
+private:
+  jit::Code code_;
+  std::vector<StageDetails> stage_details_;
+};
+
 
 }}

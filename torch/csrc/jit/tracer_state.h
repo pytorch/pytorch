@@ -35,12 +35,15 @@ using function_list = std::vector<std::pair<std::shared_ptr<Function>, int>>;
 
 struct VariableFlags {
   static VariableFlags of(const Variable& var);
-  bool verify(const Variable& var);
+  bool verify(const Variable& var) const;
 
   bool requires_grad;
   bool is_volatile;
   bool was_null;
 };
+
+using io_variable_flags_list =
+  std::vector<std::pair<std::vector<VariableFlags>, std::vector<VariableFlags>>>;
 
 struct TracingState : public std::enable_shared_from_this<TracingState> {
   TracingState(std::size_t num_stages)
@@ -65,7 +68,7 @@ struct TracingState : public std::enable_shared_from_this<TracingState> {
   // are persistent, so this won't lead to a leak.
   std::unordered_map<void*, Value*> buffer_map;
   // A pair of (input_flags, output_flags) for each stage
-  std::vector<std::pair<std::vector<VariableFlags>, std::vector<VariableFlags>>> var_flags;
+  io_variable_flags_list var_flags;
   std::vector<function_list> output_edges;
 
   std::mutex mutex;
