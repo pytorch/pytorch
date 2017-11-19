@@ -93,31 +93,13 @@ struct CompiledFunction {
         FuseGraph(complete_trace->graph);
       }
       try {
-        code_ = jit::Code(complete_trace->graph);
+        factory_ = std::make_shared<InterpreterFunctionFactory>(complete_trace.get());
       } catch(const jit::NotImplementedException & ex) {
         closure_ = std::make_shared<AutogradClosureFactory>(complete_trace.get());
       }
-      prepareStageDetails(complete_trace.get());
       graph_ = complete_trace->graph;
       is_ready_ = true;
       return true;
-    }
-
-    void prepareStageDetails(TracingState *state) {
-      stage_details_.resize(state->graph->stage() + 1);
-      for (std::size_t stage = 0; stage < state->graph->stage() + 1; ++stage) {
-        auto & details = stage_details_[stage];
-        std::tie(details.input_flags, details.output_flags) = std::move(state->var_flags[stage]);
-        if (stage >= 1) {
-          auto & current_outputs = state->output_edges[stage];
-          auto & prev_outputs = state->output_edges[stage - 1];
-          for (auto & output : current_outputs) {
-            auto prev_it = std::find(prev_outputs.begin(), prev_outputs.end(), output);
-            if (prev_it == prev_outputs.end()) continue;
-            details.copied_next_fns.push_back(std::distance(prev_outputs.begin(), prev_it));
-          }
-        }
-      }
     }
 
     variable_list run(const variable_list& in_vars) {
@@ -127,9 +109,9 @@ struct CompiledFunction {
         auto fn = closure_->construct();
         return (*fn)(in_vars);
       } else {
-        InterpreterAutogradFunction interp(code_, stage_details_);
-        interp.willReleaseVariables(); // forward pass is never reused, so it is safe to release anything it can
-        return interp.apply(in_vars);
+        auto fn = factory_->construct();
+        fn->willReleaseVariables(); // forward pass is never reused, so it is safe to release anything it can
+        return fn->apply(in_vars);
       }
     }
 
@@ -162,9 +144,8 @@ struct CompiledFunction {
     bool is_volatile_;
     bool is_ready_ = false;
 
-    std::vector<StageDetails> stage_details_;
     std::shared_ptr<AutogradClosureFactory> closure_;
-    jit::Code code_;
+    std::shared_ptr<InterpreterFunctionFactory> factory_;
     std::shared_ptr<jit::Graph> graph_;
   };
 
