@@ -16,7 +16,8 @@
 namespace torch { namespace autograd {
 
 struct InputBuffer {
-  explicit InputBuffer(size_t size);
+  explicit InputBuffer(size_t size)
+    : buffer(size) {}
   InputBuffer(const InputBuffer& other) = delete;
   InputBuffer(InputBuffer&& other) = default;
 
@@ -29,8 +30,7 @@ struct InputBuffer {
   static std::vector<Variable> variables(InputBuffer&& buffer);
 
 private:
-  // (Variable, version at save)
-  std::vector<std::pair<Variable, int>> buffer;
+  std::vector<Variable> buffer;
 };
 
 }}  // namespace torch::autograd
