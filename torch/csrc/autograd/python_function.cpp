@@ -30,7 +30,6 @@ using namespace torch::jit;
 using at::Tensor;
 
 PyObject *THPFunctionClass = NULL;
-PyObject *THPStochasticFunctionClass = NULL;
 PyObject *THPBatchNormBackwardBackwardFunction = NULL;
 
 #define THPFunction_assert(condition, ...)                                     \
@@ -301,7 +300,6 @@ PyObject *THPFunction_new(PyTypeObject *type, PyObject *args, PyObject *kwargs)
   new (&self->saved_variables) std::vector<SavedVariable>();
   new (&self->is_variable_input) std::vector<bool>();
   self->cdata.num_inputs = -1;
-  self->cdata.is_stochastic = PyObject_IsInstance(obj, THPStochasticFunctionClass);
   return obj;
 }
 

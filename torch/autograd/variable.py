@@ -374,10 +374,10 @@ class Variable(_C._VariableBase):
         return self.expand(tensor.size())
 
     def multinomial(self, num_samples=1, replacement=False):
-        return Categorical.apply(self, num_samples, replacement)
+        return Variable(torch.multinomial(self.data, num_samples, replacement))
 
     def bernoulli(self):
-        return Bernoulli.apply(self)
+        return Variable(torch.bernoulli(self.data))
 
     def __rsub__(self, other):
         return -self + other
@@ -432,7 +432,11 @@ class Variable(_C._VariableBase):
     class _torch(object):
         @staticmethod
         def normal(means, std=1):
-            return Normal.apply(means, std)
+            if isinstance(means, Variable):
+                means = means.data
+            if isinstance(std, Variable):
+                std = std.data
+            return Variable(torch.normal(means, std))
 
 
 for method in dir(Variable):
