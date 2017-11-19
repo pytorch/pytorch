@@ -144,7 +144,7 @@ FILE(GLOB_RECURSE all_templates "templates/*")
 
 FILE(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/ATen)
 
-ADD_CUSTOM_COMMAND(OUTPUT ${generated_cpp} #need changes here
+ADD_CUSTOM_COMMAND(OUTPUT ${generated_cpp}
 COMMAND ${GEN_COMMAND}
 DEPENDS ${all_python} ${all_templates} ${cwrap_files})
 
