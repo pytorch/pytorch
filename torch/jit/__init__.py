@@ -132,6 +132,7 @@ def compile(arg=None, nderivs=1, optimize=True, enabled=True):
                     obj.compiled_fn = compiled_fn
                     obj.forward = lambda *args: compiled_fn(args, list(obj.parameters()))
                     obj.has_trace_for = lambda *args: compiled_fn.has_trace_for(args, list(obj.parameters()))
+                    obj.graph_for = lambda *args: compiled_fn.graph_for(args, list(obj.parameters()))
                     return obj
 
             # NB: It might seem natural to create a subclass here, rather than
