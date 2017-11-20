@@ -37,7 +37,7 @@ TH/THC/THNN/THCUNN are provided (as git subtrees), so the repo is standalone. Yo
 
 # Install pyyaml used by python code generation to read API declarations
 
-# OSX: if you don't have pip
+# macOS: if you don't have pip
 sudo easy_install pip
 # Ubuntu: if you don't have pip
 apt-get -y install python-pip

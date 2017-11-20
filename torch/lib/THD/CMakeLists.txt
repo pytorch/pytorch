@@ -34,7 +34,7 @@ int main() {
 IF(NOT HAS_THREAD_LOCAL)
     MESSAGE(FATAL_ERROR "thread_local not supported. THD requires a compiler"
                         " that supports thread_local. Please upgrade your "
-                        "compiler. If you are on OSX, upgrade to "
+                        "compiler. If you are on macOS, upgrade to "
                         "XCode 8 or newer.")
 ENDIF(NOT HAS_THREAD_LOCAL)
 

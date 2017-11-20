@@ -177,7 +177,7 @@ conda install numpy pyyaml mkl setuptools cmake cffi
 conda install -c soumith magma-cuda80 # or magma-cuda75 if CUDA 7.5
 ```
 
-On OSX
+On macOS
 ```bash
 export CMAKE_PREFIX_PATH=[anaconda root directory]
 conda install numpy pyyaml setuptools cmake cffi
@@ -193,7 +193,7 @@ On Linux
 python setup.py install
 ```
 
-On OSX
+On macOS
 ```bash
 MACOSX_DEPLOYMENT_TARGET=10.9 CC=clang CXX=clang++ python setup.py install
 ```
