@@ -304,7 +304,7 @@ static void tensorSelect(rpc::RPCMessage& raw_message) {
   int dimension = unpackInteger(raw_message);
   int64_t sliceIndex = unpackInteger(raw_message);
   finalize(raw_message);
-  at::select_out(tensor, src, dimension, sliceIndex);
+  tensor = src.select(dimension, sliceIndex);
 }
 
 static void tensorTranspose(rpc::RPCMessage& raw_message) {

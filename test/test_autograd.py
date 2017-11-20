@@ -2095,7 +2095,7 @@ method_tests = [
     ('select', (S, S, S), (1, 2), 'dim', [0]),
     ('select', (S,), (0, 2), '1d'),
     ('narrow', (S, S, S), (1, 2, 2), 'dim', [0]),
-    ('_unnarrow', (S, S, S), (0, 2, M), 'dim', [0]),
+    ('slice', (S, S, S), (1, -1, 2, -2)),
     ('squeeze', (S, 1, S, 1), ()),
     ('squeeze', (S, 1, S, 1), (1,), '1_dim', [0]),
     ('squeeze', (S, 1, S, 1), (2,), 'not_1_dim', [0]),
@@ -2239,8 +2239,7 @@ def exclude_tensor_method(name, test_name):
     exclude_all_tensor_method_by_test_name = {
         'test_clamp_min',
         'test_clamp_max',
-        'test__unnarrow_dim',
-        'test__unnarrow_dim_neg0',
+        'test_slice',
     }
     # there are no out-of-place tensor equivalents for these
     exclude_outplace_tensor_method = {
