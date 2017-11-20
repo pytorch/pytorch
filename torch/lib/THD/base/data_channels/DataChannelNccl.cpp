@@ -209,7 +209,9 @@ void DataChannelNccl::destroyGroup(THDGroup groupId) {
     }
     _groupNcclResources.erase(groupId);
   }
-  if (_groups.find(groupId) != _groups.end()) {
+  // Will keep the default group and only destroy its CUDA resources.
+  if (groupId != THDGroupWORLD &&
+      _groups.find(groupId) != _groups.end()) {
     _groups.erase(groupId);
   }
   if (_groupDevices.find(groupId) != _groupDevices.end()) {
@@ -368,8 +370,8 @@ bool DataChannelNccl::_tensorCheckHelper(
   for (size_t i = 0; i < input.size(); ++i) {
 
     //  Check to make sure it's a GPU dense tensor
-    if (!(input[i].type().isCuda() && !input[i].type().isSparse() &&
-          output[i].type().isCuda()  && !output[i].type().isSparse())) {
+    if (!(input[i].type().is_cuda() && !input[i].type().is_sparse() &&
+          output[i].type().is_cuda()  && !output[i].type().is_sparse())) {
       throw std::runtime_error("Only CUDA dense tensor is supported for NCCL "
                                "collective operations");
     }
