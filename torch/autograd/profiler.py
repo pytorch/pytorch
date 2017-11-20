@@ -314,7 +314,7 @@ def demangle(name):
     try:
         with open(os.devnull, 'w') as devnull:
             return subprocess.check_output(['c++filt', '-n', name], stderr=devnull).rstrip().decode("ascii")
-    except subprocess.CalledProcessError:
+    except (subprocess.CalledProcessError, OSError, FileNotFoundError) as e:
         return name
 
 
