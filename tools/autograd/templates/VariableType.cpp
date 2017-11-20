@@ -312,11 +312,12 @@ void VariableType::s_copy(const Tensor & src, Tensor & dst) const {
   auto flags = compute_flags({ dst, src });
   flags.requires_grad &= isFloatingPoint(dst.type().scalarType());
   if (flags.requires_grad) {
-    // TODO: handle type conversions
+    // TODO: handle device movement
     grad_fn = std::make_shared<CopyBackwards>();
     grad_fn->is_executable = true;
     grad_fn->next_functions = compute_next_functions({ dst, src });
     grad_fn->num_inputs = 1;
+    grad_fn->src_type = &src.type();
   }
   baseType->s_copy(src_, dst_);
   increment_version(dst);

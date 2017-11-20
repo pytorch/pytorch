@@ -15,6 +15,7 @@
 
 using at::Tensor;
 using at::Scalar;
+using at::ScalarType;
 using namespace torch::autograd::utils;
 
 namespace torch { namespace autograd {
@@ -183,6 +184,51 @@ static PyObject * THPVariable_detach_(PyObject* self, PyObject* args)
   END_HANDLE_TH_ERRORS
 }
 
+static Tensor dispatch_to_type(const Tensor & self, ScalarType scalarType) {
+  AutoNoGIL no_gil;
+  AutoGPU auto_gpu(self);
+  return self.toType(scalarType);
+}
+
+static PyObject * THPVariable_to_type(PyObject* self, ScalarType scalarType) {
+  HANDLE_TH_ERRORS
+  auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
+  return THPVariable_Wrap(dispatch_to_type(self_, scalarType));
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject * THPVariable_byte(PyObject* self, PyObject* args) {
+  return THPVariable_to_type(self, ScalarType::Byte);
+}
+
+static PyObject * THPVariable_char(PyObject* self, PyObject* args) {
+  return THPVariable_to_type(self, ScalarType::Char);
+}
+
+static PyObject * THPVariable_double(PyObject* self, PyObject* args) {
+  return THPVariable_to_type(self, ScalarType::Double);
+}
+
+static PyObject * THPVariable_float(PyObject* self, PyObject* args) {
+  return THPVariable_to_type(self, ScalarType::Float);
+}
+
+static PyObject * THPVariable_half(PyObject* self, PyObject* args) {
+  return THPVariable_to_type(self, ScalarType::Half);
+}
+
+static PyObject * THPVariable_int(PyObject* self, PyObject* args) {
+  return THPVariable_to_type(self, ScalarType::Int);
+}
+
+static PyObject * THPVariable_long(PyObject* self, PyObject* args) {
+  return THPVariable_to_type(self, ScalarType::Long);
+}
+
+static PyObject * THPVariable_short(PyObject* self, PyObject* args) {
+  return THPVariable_to_type(self, ScalarType::Short);
+}
+
 static PyObject * THPVariable_element_size(PyObject* self, PyObject* args)
 {
   HANDLE_TH_ERRORS
@@ -209,15 +255,23 @@ PyMethodDef variable_methods[] = {
   {"__truediv__", (PyCFunction)THPVariable_div, METH_VARARGS | METH_KEYWORDS, NULL},
   {"__idiv__", (PyCFunction)THPVariable_div_, METH_VARARGS | METH_KEYWORDS, NULL},
   {"__mod__", (PyCFunction)THPVariable_remainder, METH_VARARGS | METH_KEYWORDS, NULL},
+  {"byte", (PyCFunction)THPVariable_byte, METH_NOARGS, NULL},
+  {"char", (PyCFunction)THPVariable_char, METH_NOARGS, NULL},
   {"clamp", (PyCFunction)THPVariable_clamp, METH_VARARGS | METH_KEYWORDS, NULL},
   {"clamp_", (PyCFunction)THPVariable_clamp_, METH_VARARGS | METH_KEYWORDS, NULL},
   {"dim", (PyCFunction)THPVariable_dim, METH_NOARGS, NULL},
   {"contiguous", (PyCFunction)THPVariable_contiguous, METH_NOARGS, NULL},
   {"detach", (PyCFunction)THPVariable_detach, METH_NOARGS, NULL},
   {"detach_", (PyCFunction)THPVariable_detach_, METH_NOARGS, NULL},
+  {"double", (PyCFunction)THPVariable_double, METH_NOARGS, NULL},
   {"element_size", (PyCFunction)THPVariable_element_size, METH_NOARGS, NULL},
+  {"float", (PyCFunction)THPVariable_float, METH_NOARGS, NULL},
+  {"half", (PyCFunction)THPVariable_half, METH_NOARGS, NULL},
+  {"int", (PyCFunction)THPVariable_int, METH_NOARGS, NULL},
+  {"long", (PyCFunction)THPVariable_long, METH_NOARGS, NULL},
   {"ndimension", (PyCFunction)THPVariable_dim, METH_NOARGS, NULL},
   {"nelement", (PyCFunction)THPVariable_numel, METH_NOARGS, NULL},
+  {"short", (PyCFunction)THPVariable_short, METH_NOARGS, NULL},
   {"size", (PyCFunction)THPVariable_size, METH_VARARGS | METH_KEYWORDS, NULL},
   {"stride", (PyCFunction)THPVariable_stride, METH_VARARGS | METH_KEYWORDS, NULL},
   ${py_method_defs}

@@ -272,30 +272,6 @@ class Variable(_C._VariableBase):
     def cpu(self):
         return self.type(getattr(torch, type(self.data).__name__))
 
-    def double(self):
-        return self.type(self._get_type('DoubleTensor'))
-
-    def float(self):
-        return self.type(self._get_type('FloatTensor'))
-
-    def half(self):
-        return self.type(self._get_type('HalfTensor'))
-
-    def long(self):
-        return self.type(self._get_type('LongTensor'))
-
-    def int(self):
-        return self.type(self._get_type('IntTensor'))
-
-    def short(self):
-        return self.type(self._get_type('ShortTensor'))
-
-    def char(self):
-        return self.type(self._get_type('CharTensor'))
-
-    def byte(self):
-        return self.type(self._get_type('ByteTensor'))
-
     def prod(self, dim=None, keepdim=None):
         return Prod.apply(self, dim, keepdim)
 

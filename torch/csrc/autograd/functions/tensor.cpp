@@ -20,7 +20,7 @@ auto CopyBackwards::apply(const variable_list& grads) -> variable_list {
     grad_inputs[0] = at::zeros_like(grad);
   }
   if (should_compute_output(1)) {
-    grad_inputs[1] = grad;
+    grad_inputs[1] = grad.toType(src_type->scalarType());
   }
   return grad_inputs;
 };
