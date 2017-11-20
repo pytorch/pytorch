@@ -50,6 +50,6 @@ test/data/linear.pt
 *.swp
 *~
 
-# OSX dir files
+# macOS dir files
 .DS_Store
 

@@ -321,7 +321,7 @@ static void *_map_alloc(void* ctx_, ptrdiff_t size)
             close(fd);
             THError("unable to stretch file <%s> to the right size", ctx->filename);
           }
-/* on OS X write returns with errno 45 (Opperation not supported) when used
+/* on macOS write returns with errno 45 (Opperation not supported) when used
  * with a file descriptor obtained via shm_open
  */
 #ifndef __APPLE__
