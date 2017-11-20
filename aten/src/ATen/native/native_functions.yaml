@@ -44,6 +44,12 @@
 
 - func: is_cuda(Tensor self) -> bool
 
+- func: select(Tensor self, int64_t dim, int64_t index) -> Tensor
+
+- func: narrow(Tensor self, int64_t dim, int64_t start, int64_t length) -> Tensor
+
+- func: slice(Tensor self, int64_t start=0, int64_t end=9223372036854775807, int64_t step=1, int64_t dim=0) -> Tensor
+
 - func: permute(Tensor self, IntList dims) -> Tensor
 
 - func: expand(Tensor self, IntList size) -> Tensor

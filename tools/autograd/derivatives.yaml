@@ -389,12 +389,6 @@
   self: grad.ger(vec)
   vec: self.t().mv(grad)
 
-- name: narrow(Tensor self, int64_t dimension, int64_t start, int64_t length)
-  self: grad._unnarrow(dimension, start, self.size(dimension))
-
-- name: _unnarrow(Tensor self, int64_t dimension, int64_t offset, int64_t dimSize)
-  self: grad.narrow(dimension, offset, self.size(dimension))
-
 - name: ne(Tensor self, Scalar other)
   self: zeros_like(self)
 
@@ -496,9 +490,6 @@
 - name: scatter_add(Tensor self, int64_t dim, Tensor index, Tensor src)
   self: grad
   src: grad.gather(dim, index)
-
-- name: select(Tensor self, int64_t dim, int64_t sliceIndex)
-  self: maybe_unsqueeze(grad, dim, self.sizes().size() != 1)._unnarrow(dim, sliceIndex, self.size(dim))
 
 - name: set  # fallthrough
 

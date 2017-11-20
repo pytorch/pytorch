@@ -183,8 +183,8 @@ FALLTHROUGH_FUNCTIONS = {
     '__lshift__', '__or__', '__rshift__', '__xor__',
 }
 VIEW_FUNCTIONS = {
-    'alias', 'as_strided', 'expand', 'narrow', 'permute', 'select', 'squeeze',
-    't', 'transpose', 'unfold', 'unsqueeze', 'view',
+    'alias', 'as_strided', 'expand', 'narrow', 'permute', 'select', 'slice',
+    'squeeze', 't', 'transpose', 'unfold', 'unsqueeze', 'view',
 }
 MANUAL_IMPLEMENTATIONS = {
     'contiguous', 'resize_', 'resize_as_'

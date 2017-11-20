@@ -27,6 +27,73 @@ std::vector<Tensor> split(const Tensor& self, int64_t split_size, int64_t dim) {
   return splits;
 }
 
+Tensor slice(const Tensor& self, int64_t start, int64_t end, int64_t step, int64_t dim) {
+  int64_t ndim = self.dim();
+  AT_ASSERT(ndim > 0, "slice() cannot be applied to a 0-dim tensor.");
+  dim = maybe_wrap_dim(dim, ndim);
+  auto sizes = std::vector<int64_t>(self.sizes());
+  auto strides = std::vector<int64_t>(self.strides());
+  if (step <= 0) {
+    // TODO: support negative strides
+    throw std::runtime_error("slice step must be positive");
+  }
+  if (start < 0) {
+    start += sizes[dim];
+  }
+  if (end < 0) {
+    end += sizes[dim];
+  }
+  if (start < 0) {
+    start = 0;
+  } else if (start >= sizes[dim]) {
+    start = sizes[dim];
+  }
+  if (end < start) {
+    end = start;
+  } else if (end >= sizes[dim]) {
+    end = sizes[dim];
+  }
+  auto storage_offset = self.storage_offset() + start * strides[dim];
+  auto len = end - start;
+  sizes[dim] = (len + step - 1) / step;  // round-up
+  strides[dim] *= step;
+  return self.as_strided(sizes, strides, storage_offset);
+}
+
+Tensor narrow(const Tensor& self, int64_t dim, int64_t start, int64_t length) {
+  AT_ASSERT(self.dim() > 0, "narrow() cannot be applied to a 0-dim tensor.");
+  auto cur_size = self.size(dim);
+  if (start < 0 || start >= cur_size) {
+    runtime_error("start out of range");
+  }
+  if (length <= 0 || start > cur_size - length) {
+    runtime_error("length out of range");
+  }
+  return at::native::slice(self, start, start + length, 1, dim);
+}
+
+Tensor select(const Tensor& self, int64_t dim, int64_t index) {
+  int64_t ndim = self.dim();
+  AT_ASSERT(ndim > 0, "select() cannot be applied to a 0-dim tensor.");
+  dim = maybe_wrap_dim(dim, ndim);
+  auto size = self.size(dim);
+  if (index < -size || index >= size) {
+    std::stringstream ss;
+    ss << "select(): index " << index << " out of range for tensor of size ";
+    ss << self.sizes() << " at dimension " << dim;
+    throw std::runtime_error(ss.str());
+  }
+  if (index < 0) {
+    index += size;
+  }
+  auto sizes = std::vector<int64_t>(self.sizes());
+  auto strides = std::vector<int64_t>(self.strides());
+  auto storage_offset = self.storage_offset() + index * strides[dim];
+  sizes.erase(sizes.begin() + dim);
+  strides.erase(strides.begin() + dim);
+  return self.as_strided(sizes, strides, storage_offset);
+}
+
 std::vector<Tensor> chunk(const Tensor& self, int64_t chunks, int64_t dim) {
   int64_t split_size = (self.size(dim) + chunks - 1) / chunks;
   // ensure this is dispatched through Tensor/Type, rather than the native function directly.
