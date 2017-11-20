@@ -20,6 +20,20 @@ class TestIndexing(TestCase):
         self.assertEqual(v[:, None, None].shape, (5, 1, 1, 7, 3))
         self.assertEqual(v[..., None].shape, (5, 7, 3, 1))
 
+    def test_step(self):
+        v = Variable(torch.arange(10))
+        self.assertEqual(v[::1], v)
+        self.assertEqual(v[::2].data.tolist(), [0, 2, 4, 6, 8])
+        self.assertEqual(v[::3].data.tolist(), [0, 3, 6, 9])
+        self.assertEqual(v[::11].data.tolist(), [0])
+        self.assertEqual(v[1:6:2].data.tolist(), [1, 3, 5])
+
+    def test_step_assignment(self):
+        v = Variable(torch.zeros(4, 4))
+        v[0, 1::2] = Variable(torch.Tensor([3, 4]))
+        self.assertEqual(v[0].data.tolist(), [0, 3, 0, 4])
+        self.assertEqual(v[1:].data.sum(), 0)
+
     def test_byte_mask(self):
         v = Variable(torch.randn(5, 7, 3))
         mask = Variable(torch.ByteTensor([1, 0, 1, 1, 0]))
@@ -243,8 +257,7 @@ class NumpyTests(TestCase):
                     [7, 8, 9]])
 
         self.assertEqual(a[True], a[None])
-        # self.assertEqual(a[False], a[None][0:0])  # TODO: empty tensors
-        self.assertEqual(a[False].dim(), 0)
+        self.assertEqual(a[False], a[None][0:0])
 
     def test_boolean_shape_mismatch(self):
         arr = ones((5, 4, 3))

@@ -67,17 +67,17 @@ static Variable applySlice(const Variable& self, int64_t dim, PyObject* slice, b
   if (THPUtils_parseSlice(slice, length, &start, &stop, &step, &slicelength) < 0) {
     throw python_error();
   }
-  if (start == 0 && stop == length && step == 1) {
-    if (ensure_view) {
-      return at::alias(self);
-    }
+  if (step == 0) {
+    throw IndexError("step cannot be zero");
+  }
+  if (step < 0) {
+    // TODO: implement negative step
+    throw IndexError("negative step not yet supported");
+  }
+  if (!ensure_view && start == 0 && stop == length && step == 1) {
     return self;
   }
-  if (step != 1) {
-    // TODO: implement step for narrow
-    throw IndexError("only step size 1 is supported");
-  }
-  return self.narrow(dim, start, stop - start);
+  return self.slice(start, stop, step, dim);
 }
 
 static Variable applySelect(const Variable& self, int64_t dim, int64_t index) {
