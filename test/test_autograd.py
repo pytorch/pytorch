@@ -1163,6 +1163,16 @@ class TestAutograd(TestCase):
         view = x.narrow(0, 1, 4)
         self.assertRaisesRegex(RuntimeError, 'view', lambda: view.detach_())
 
+    def _test_type_conversion_backward(self, t, ):
+        fvar = Variable(t(torch.randn(5, 5).float()), requires_grad=True)
+        fvar.double().sum().backward()
+        self.assertEqual(fvar.grad, torch.ones_like(fvar))
+        self.assertEqual(type(fvar.grad.data), type(fvar.data))
+        dvar = Variable(t(torch.randn(5, 5).double()), requires_grad=True)
+        dvar.float().sum().backward()
+        self.assertEqual(dvar.grad, torch.ones_like(dvar))
+        self.assertEqual(type(dvar.grad.data), type(dvar.data))
+
     def test_type_conversions(self):
         x = Variable(torch.randn(5, 5))
         self.assertIs(type(x.float().data), torch.FloatTensor)
@@ -1192,6 +1202,10 @@ class TestAutograd(TestCase):
                 if var:
                     y = Variable(y)
                 self.assertIs(type(x.type_as(y).data), t)
+
+        self._test_type_conversion_backward(lambda x: x)
+        if torch.cuda.is_available():
+            self._test_type_conversion_backward(lambda x: x.cuda())
 
     def test_isolated_node(self):
         x = Variable(torch.randn(5, 5), requires_grad=True)

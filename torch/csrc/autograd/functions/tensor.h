@@ -2,6 +2,7 @@
 
 #include <Python.h>
 #include <memory>
+#include "ATen/Type.h"
 
 #include "torch/csrc/autograd/function.h"
 #include "torch/csrc/autograd/variable.h"
@@ -17,6 +18,8 @@ struct Identity : public TraceableFunction {
 
 struct CopyBackwards : public Function {
   virtual variable_list apply(const variable_list& inputs) override;
+
+  at::Type *src_type;
 };
 
 struct Clone : public ForwardFunction<> {
