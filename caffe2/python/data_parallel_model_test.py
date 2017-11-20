@@ -24,10 +24,12 @@ import os
 import shutil
 import tempfile
 import unittest
+from hypothesis import assume, given
+import hypothesis.strategies as st
 
 from caffe2.proto import caffe2_pb2
-from caffe2.python import core, cnn, data_parallel_model, dyndep, optimizer, \
-    rnn_cell, workspace, model_helper, brew
+from caffe2.python import brew, core, cnn, data_parallel_model, dyndep, \
+    model_helper, optimizer, rnn_cell, workspace
 from caffe2.python.test_util import TestCase
 
 
@@ -708,9 +710,8 @@ class SparseDataParallelModelTest(TestCase):
         self._test_equiv_sparse(False)
 
 
-@unittest.skipIf(not workspace.has_gpu_support, "No gpu support.")
 @unittest.skipIf(workspace.NumCudaDevices() < 2, "Need at least 2 GPUs.")
-class ParallelizeGPUBMUFTest(TestCase):
+class ParallelizeBMUFTest(TestCase):
 
     def _run_model(self, gpu_devices):
         '''
@@ -746,42 +747,56 @@ class ParallelizeGPUBMUFTest(TestCase):
             grad = model.param_to_grad[param]
             model.WeightedSum([param, ONE, grad, LR], param)
 
-    def _generate_data(self, gpu_devices):
+    def _generate_data(self, devices, device_type, device_prefix):
         np.random.seed(26)
         # Each run has same input, independent of number of gpus
         batch_size = 64
         for _ in range(0, 10):
             full_data = np.random.rand(batch_size, 16)
             full_labels = np.round(full_data[:, 0])
-            batch_per_device = batch_size // len(gpu_devices)
+            batch_per_device = batch_size // len(devices)
 
-            for (j, g) in enumerate(gpu_devices):
+            for (j, g) in enumerate(devices):
                 st = j * batch_per_device
                 en = st + batch_per_device
                 data = full_data[st:en, :].astype(np.float32)
                 labels = full_labels[st:en].astype(np.float32)
-                with core.DeviceScope(core.DeviceOption(caffe2_pb2.CUDA, g)):
-                    workspace.FeedBlob("gpu_{}/data".format(g), data)
-                    workspace.FeedBlob("gpu_{}/label".format(g), labels)
+                with core.DeviceScope(core.DeviceOption(device_type, g)):
+                    workspace.FeedBlob("{}_{}/data".format(device_prefix, g), data)
+                    workspace.FeedBlob("{}_{}/label".format(device_prefix, g), labels)
 
-    def test_parallelize_gpu_bmuf(self):
+    @given(
+        cpu_device=st.booleans()
+    )
+    def test_parallelize_bmuf(self, cpu_device):
+        assume(cpu_device or workspace.has_gpu_support)
+
+        workspace.ResetWorkspace()
+
         model = cnn.CNNModelHelper(
             order="NHWC",
             name="test"
         )
-        gpu_ids = [0, 1]
+        devices = [0, 1]
 
         def input_builder_fun(model):
             return None
 
-        self._generate_data(gpu_ids)
+        if not cpu_device:
+            device_type = caffe2_pb2.CUDA
+            device_prefix = "gpu"
+        else:
+            device_type = caffe2_pb2.CPU
+            device_prefix = "cpu"
+        self._generate_data(devices, device_type, device_prefix)
 
-        data_parallel_model.Parallelize_GPU_BMUF(
+        data_parallel_model.Parallelize_BMUF(
             model,
             input_builder_fun,
             self._model_build_fun,
             self._param_update_fun,
-            devices=gpu_ids,
+            devices=devices,
+            cpu_device=cpu_device
         )
 
         data_parallel_model.RunInitNet(model)
@@ -790,9 +805,9 @@ class ParallelizeGPUBMUFTest(TestCase):
         self.assertEqual(
             list(viewkeys(model._device_grouped_blobs)), ['fc_w', 'fc_b']
         )
-        self.assertEqual(workspace.FetchBlob('gpu_0/fc_b_v'), 0)
+        self.assertEqual(workspace.FetchBlob('{}_0/fc_b_v'.format(device_prefix)), 0)
         np.testing.assert_equal(
-            workspace.FetchBlob('gpu_0/fc_w_v'),
+            workspace.FetchBlob('{}_0/fc_w_v'.format(device_prefix)),
             np.zeros(16).astype(np.float32).reshape(1, 16)
         )
 
@@ -800,32 +815,32 @@ class ParallelizeGPUBMUFTest(TestCase):
         data_parallel_model.RunNet(model, 1)
 
         # Save iteration momentum and post local update params
-        v_b_ = workspace.FetchBlob('gpu_0/fc_b_v')
-        v_w_ = workspace.FetchBlob('gpu_0/fc_w_v')
+        v_b_ = workspace.FetchBlob('{}_0/fc_b_v'.format(device_prefix))
+        v_w_ = workspace.FetchBlob('{}_0/fc_w_v'.format(device_prefix))
 
         workspace.RunNetOnce(model.net)
 
-        b_0_ = workspace.FetchBlob('gpu_0/fc_b')
-        w_0_ = workspace.FetchBlob('gpu_0/fc_w')
-        b_1_ = workspace.FetchBlob('gpu_1/fc_b')
-        w_1_ = workspace.FetchBlob('gpu_1/fc_w')
+        b_0_ = workspace.FetchBlob('{}_0/fc_b'.format(device_prefix))
+        w_0_ = workspace.FetchBlob('{}_0/fc_w'.format(device_prefix))
+        b_1_ = workspace.FetchBlob('{}_1/fc_b'.format(device_prefix))
+        w_1_ = workspace.FetchBlob('{}_1/fc_w'.format(device_prefix))
 
         # Compute block gradients.
-        b_g_ = workspace.FetchBlob('gpu_0/fc_b_g')
-        w_g_ = workspace.FetchBlob('gpu_0/fc_w_g')
+        b_g_ = workspace.FetchBlob('{}_0/fc_b_g'.format(device_prefix))
+        w_g_ = workspace.FetchBlob('{}_0/fc_w_g'.format(device_prefix))
         workspace.RunNetOnce(model._global_model_param_updates_net)
 
         g_b = (b_0_ + b_1_) / 2 - b_g_
         g_w = (w_0_ + w_1_) / 2 - w_g_
-        v_b = workspace.FetchBlob('gpu_0/fc_b_v')
-        v_w = workspace.FetchBlob('gpu_0/fc_w_v')
+        v_b = workspace.FetchBlob('{}_0/fc_b_v'.format(device_prefix))
+        v_w = workspace.FetchBlob('{}_0/fc_w_v'.format(device_prefix))
 
-        w_g = workspace.FetchBlob('gpu_0/fc_w_g')
-        b_g = workspace.FetchBlob('gpu_0/fc_b_g')
-        w_0 = workspace.FetchBlob('gpu_0/fc_w')
-        b_0 = workspace.FetchBlob('gpu_0/fc_b')
-        w_1 = workspace.FetchBlob('gpu_1/fc_w')
-        b_1 = workspace.FetchBlob('gpu_1/fc_b')
+        w_g = workspace.FetchBlob('{}_0/fc_w_g'.format(device_prefix))
+        b_g = workspace.FetchBlob('{}_0/fc_b_g'.format(device_prefix))
+        w_0 = workspace.FetchBlob('{}_0/fc_w'.format(device_prefix))
+        b_0 = workspace.FetchBlob('{}_0/fc_b'.format(device_prefix))
+        w_1 = workspace.FetchBlob('{}_1/fc_w'.format(device_prefix))
+        b_1 = workspace.FetchBlob('{}_1/fc_b'.format(device_prefix))
 
         # Check momentum update step
         np.testing.assert_equal(v_b, 0.5 * v_b_ + g_b)

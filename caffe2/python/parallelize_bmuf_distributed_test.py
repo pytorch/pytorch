@@ -25,30 +25,40 @@ import tempfile
 import shutil
 import logging
 
-log = logging.getLogger("parallelize_gpu_bmuf_distributed_test")
+from hypothesis import given
+import hypothesis.strategies as st
+
+log = logging.getLogger("parallelize_bmuf_distributed_test")
 log.setLevel(logging.INFO)
 
 
-def bmuf_process(filestore_dir, process_id, shared_results, nesterov=False):
+def bmuf_process(filestore_dir, process_id, shared_results,
+                 cpu_device=False, nesterov=False):
     # We need to import caffe2 in every process to initialize CUDA independently.
-    from caffe2.python import core, cnn, data_parallel_model, workspace, dyndep
+    from caffe2.python import core, cnn, data_parallel_model, dyndep, workspace
     from caffe2.proto import caffe2_pb2
     dyndep.InitOpsLibrary("@/caffe2/caffe2/distributed:file_store_handler_ops")
 
-    if not workspace.has_gpu_support:
-        log.info('No GPU support test is Ignored.')
-        return
-
-    if workspace.NumCudaDevices() < 4:
-        log.info('Not enough GPU support, test IGNORED')
-        return
+    if not cpu_device:
+        if not workspace.has_gpu_support:
+            log.info('No GPU support test is Ignored.')
+            return
+        if workspace.NumCudaDevices() < 4:
+            log.info('Not enough GPU support, test IGNORED')
+            return
 
     model = cnn.CNNModelHelper(
         order="NHWC",
         name="test"
     )
+    if not cpu_device:
+        device_type = caffe2_pb2.CUDA
+        device_prefix = "gpu"
+    else:
+        device_type = caffe2_pb2.CPU
+        device_prefix = "cpu"
 
-    gpu_ids = [0, 1] if process_id == 0 else [2, 3]
+    devices = [0, 1] if process_id == 0 else [2, 3]
 
     def _model_build_fun(model, loss_scale):
         fc = model.FC(
@@ -82,25 +92,25 @@ def bmuf_process(filestore_dir, process_id, shared_results, nesterov=False):
             grad = model.param_to_grad[param]
             model.WeightedSum([param, ONE, grad, LR], param)
 
-    def _generate_data(gpu_devices, process_id):
+    def _generate_data(devices, process_id, device_type, device_prefix):
         np.random.seed(26 + process_id * 10)
         # Each run has same input, independent of number of gpus
         batch_size = 64
         for _ in range(0, 10):
             full_data = np.random.rand(batch_size, 16)
             full_labels = np.round(full_data[:, 0])
-            batch_per_device = batch_size // len(gpu_devices)
+            batch_per_device = batch_size // len(devices)
 
-            for (j, g) in enumerate(gpu_devices):
+            for (j, g) in enumerate(devices):
                 st = j * batch_per_device
                 en = st + batch_per_device
                 data = full_data[st:en, :].astype(np.float32)
                 labels = full_labels[st:en].astype(np.float32)
-                with core.DeviceScope(core.DeviceOption(caffe2_pb2.CUDA, g)):
-                    workspace.FeedBlob("gpu_{}/data".format(g), data)
-                    workspace.FeedBlob("gpu_{}/label".format(g), labels)
+                with core.DeviceScope(core.DeviceOption(device_type, g)):
+                    workspace.FeedBlob("{}_{}/data".format(device_prefix, g), data)
+                    workspace.FeedBlob("{}_{}/label".format(device_prefix, g), labels)
 
-    _generate_data(gpu_ids, process_id)
+    _generate_data(devices, process_id, device_type, device_prefix)
 
     workspace.RunOperatorOnce(
         core.CreateOperator(
@@ -116,26 +126,28 @@ def bmuf_process(filestore_dir, process_id, shared_results, nesterov=False):
         exit_nets=None
     )
 
-    data_parallel_model.Parallelize_GPU_BMUF(
+    data_parallel_model.Parallelize_BMUF(
         model,
         _input_builder_fun,
         _model_build_fun,
         _param_update_fun,
-        devices=gpu_ids,
+        devices=devices,
         rendezvous=rendezvous,
         nesterov=nesterov,
         add_blobs_to_sync=["sync_num"],
+        cpu_device=cpu_device
     )
 
     data_parallel_model.RunInitNet(model)
 
-    def _gpu_pid(gpu_id, pid):
+    def _device_pid(device, pid):
         if pid == 1:
-            return gpu_id + 2
-        return gpu_id
+            return device + 2
+        return device
 
     np.testing.assert_equal(
-        workspace.FetchBlob("gpu_{}/fc_w_v".format(_gpu_pid(0, process_id))),
+        workspace.FetchBlob("{}_{}/fc_w_v".format(
+            device_prefix, _device_pid(0, process_id))),
         np.zeros(16).astype(np.float32).reshape(1, 16)
     )
 
@@ -144,18 +156,24 @@ def bmuf_process(filestore_dir, process_id, shared_results, nesterov=False):
 
     # Save iteration momentum and post local update params
     results = {}
-    v_b_ = workspace.FetchBlob("gpu_{}/fc_b_v".format(_gpu_pid(0, process_id)))
-    v_w_ = workspace.FetchBlob("gpu_{}/fc_w_v".format(_gpu_pid(0, process_id)))
+    v_b_ = workspace.FetchBlob(
+        "{}_{}/fc_b_v".format(device_prefix, _device_pid(0, process_id)))
+    v_w_ = workspace.FetchBlob(
+        "{}_{}/fc_w_v".format(device_prefix, _device_pid(0, process_id)))
 
     results['v_b_'] = v_b_
     results['v_w_'] = v_w_
 
     workspace.RunNetOnce(model.net)
 
-    b_0_ = workspace.FetchBlob("gpu_{}/fc_b".format(_gpu_pid(0, process_id)))
-    w_0_ = workspace.FetchBlob("gpu_{}/fc_w".format(_gpu_pid(0, process_id)))
-    b_1_ = workspace.FetchBlob("gpu_{}/fc_b".format(_gpu_pid(1, process_id)))
-    w_1_ = workspace.FetchBlob("gpu_{}/fc_w".format(_gpu_pid(1, process_id)))
+    b_0_ = workspace.FetchBlob(
+        "{}_{}/fc_b".format(device_prefix, _device_pid(0, process_id)))
+    w_0_ = workspace.FetchBlob(
+        "{}_{}/fc_w".format(device_prefix, _device_pid(0, process_id)))
+    b_1_ = workspace.FetchBlob(
+        "{}_{}/fc_b".format(device_prefix, _device_pid(1, process_id)))
+    w_1_ = workspace.FetchBlob(
+        "{}_{}/fc_w".format(device_prefix, _device_pid(1, process_id)))
 
     results['b_0_'] = b_0_
     results['w_0_'] = w_0_
@@ -165,27 +183,37 @@ def bmuf_process(filestore_dir, process_id, shared_results, nesterov=False):
     # Test sync
     if process_id == 0:
         workspace.FeedBlob(
-            model._device_prefix + "_0/sync_num",
+            device_prefix + "_0/sync_num",
             np.array([2603]).astype(np.float32),
-            device_option=core.DeviceOption(model._device_type, 0))
+            device_option=core.DeviceOption(device_type, 0))
 
     # Compute block gradients.
-    b_g_ = workspace.FetchBlob("gpu_{}/fc_b_g".format(_gpu_pid(0, process_id)))
-    w_g_ = workspace.FetchBlob("gpu_{}/fc_w_g".format(_gpu_pid(0, process_id)))
+    b_g_ = workspace.FetchBlob(
+        "{}_{}/fc_b_g".format(device_prefix, _device_pid(0, process_id)))
+    w_g_ = workspace.FetchBlob(
+        "{}_{}/fc_w_g".format(device_prefix, _device_pid(0, process_id)))
     results['b_g_'] = b_g_
     results['w_g_'] = w_g_
     workspace.RunNetOnce(model._global_model_param_updates_net)
 
     #  g_b = (b_0_ + b_1_) / 2 - b_g_
     #  g_w = (w_0_ + w_1_) / 2 - w_g_
-    v_b = workspace.FetchBlob("gpu_{}/fc_b_v".format(_gpu_pid(0, process_id)))
-    v_w = workspace.FetchBlob("gpu_{}/fc_w_v".format(_gpu_pid(0, process_id)))
-    w_g = workspace.FetchBlob("gpu_{}/fc_w_g".format(_gpu_pid(0, process_id)))
-    b_g = workspace.FetchBlob("gpu_{}/fc_b_g".format(_gpu_pid(0, process_id)))
-    w_0 = workspace.FetchBlob("gpu_{}/fc_w".format(_gpu_pid(0, process_id)))
-    b_0 = workspace.FetchBlob("gpu_{}/fc_b".format(_gpu_pid(0, process_id)))
-    w_1 = workspace.FetchBlob("gpu_{}/fc_w".format(_gpu_pid(1, process_id)))
-    b_1 = workspace.FetchBlob("gpu_{}/fc_b".format(_gpu_pid(1, process_id)))
+    v_b = workspace.FetchBlob(
+        "{}_{}/fc_b_v".format(device_prefix, _device_pid(0, process_id)))
+    v_w = workspace.FetchBlob(
+        "{}_{}/fc_w_v".format(device_prefix, _device_pid(0, process_id)))
+    w_g = workspace.FetchBlob(
+        "{}_{}/fc_w_g".format(device_prefix, _device_pid(0, process_id)))
+    b_g = workspace.FetchBlob(
+        "{}_{}/fc_b_g".format(device_prefix, _device_pid(0, process_id)))
+    w_0 = workspace.FetchBlob(
+        "{}_{}/fc_w".format(device_prefix, _device_pid(0, process_id)))
+    b_0 = workspace.FetchBlob(
+        "{}_{}/fc_b".format(device_prefix, _device_pid(0, process_id)))
+    w_1 = workspace.FetchBlob(
+        "{}_{}/fc_w".format(device_prefix, _device_pid(1, process_id)))
+    b_1 = workspace.FetchBlob(
+        "{}_{}/fc_b".format(device_prefix, _device_pid(1, process_id)))
     results['v_b'] = v_b
     results['v_w'] = v_w
     results['w_g'] = w_g
@@ -196,9 +224,9 @@ def bmuf_process(filestore_dir, process_id, shared_results, nesterov=False):
     results['b_1'] = b_1
 
     # Test add_blobs_to_sync
-    for j in model._devices:
+    for j in devices:
         sync = workspace.FetchBlob(
-            model._device_prefix + "_{}/sync_num".format(j))[0]
+            device_prefix + "_{}/sync_num".format(j))[0]
         results['sync_{}'.format(j)] = sync
 
     shared_results[process_id] = results
@@ -206,20 +234,21 @@ def bmuf_process(filestore_dir, process_id, shared_results, nesterov=False):
 
 class DistributedTest(unittest.TestCase):
 
-    def test_bmuf_distributed(self):
-        self._test_bmuf_distributed()
+    @given(
+        cpu_device=st.booleans(),
+        nesterov=st.booleans()
+    )
+    def test_bmuf_distributed(self, cpu_device, nesterov):
+        self._test_bmuf_distributed(cpu_device=cpu_device, nesterov=nesterov)
 
-    def test_bmuf_distributed_nesterov(self):
-        self._test_bmuf_distributed(nesterov=True)
-
-    def _test_bmuf_distributed(self, nesterov=False):
+    def _test_bmuf_distributed(self, cpu_device=False, nesterov=False):
         processes = []
         filestore_dir = tempfile.mkdtemp()
         results = Manager().dict()
         for idx in range(0, 2):
             process = Process(
                 target=bmuf_process,
-                args=(filestore_dir, idx, results, nesterov)
+                args=(filestore_dir, idx, results, cpu_device, nesterov)
             )
             processes.append(process)
             process.start()
