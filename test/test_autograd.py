@@ -1204,7 +1204,7 @@ class TestAutograd(TestCase):
                 self.assertIs(type(x.type_as(y).data), t)
 
         self._test_type_conversion_backward(lambda x: x)
-        if torch.cuda.is_available:
+        if torch.cuda.is_available():
             self._test_type_conversion_backward(lambda x: x.cuda())
 
     def test_isolated_node(self):
