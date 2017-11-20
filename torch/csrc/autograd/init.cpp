@@ -21,13 +21,10 @@ PyObject * THPAutograd_initExtension(PyObject *_unused)
   THPUtils_assert_PyImport("torch.nn._functions.thnn", thnn_functions);
   THPBatchNormBackwardBackwardFunction = PyObject_GetAttrString(thnn_functions,(char*)"batchnorm_double_backwards_fn");
 
-  THPStochasticFunctionClass = PyMapping_GetItemString(autograd_dict,(char*)"StochasticFunction");
   THPUtils_assert(THPVariableClass, "couldn't find Variable class in "
           "torch.autograd module");
   THPUtils_assert(THPFunctionClass, "couldn't find Function class in "
           "torch.autograd module");
-  THPUtils_assert(THPStochasticFunctionClass, "couldn't find "
-          "StochasticFunction class in torch.autograd module");
 
   auto m = py::handle(autograd_module).cast<py::module>();
 
