@@ -315,7 +315,7 @@ void VariableType::s_copy(const Tensor & src, Tensor & dst) const {
     // TODO: handle device movement
     grad_fn = std::make_shared<CopyBackwards>();
     grad_fn->is_executable = true;
-    grad_fn->next_functions = compute_next_functions({ src, dst });
+    grad_fn->next_functions = compute_next_functions({ dst, src });
     grad_fn->num_inputs = 1;
     grad_fn->src_type = &src.type();
   }
