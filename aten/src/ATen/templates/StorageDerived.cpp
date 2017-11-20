@@ -80,6 +80,13 @@ auto ${Storage}::free() -> ${Storage}& {
   return *this;
 }
 
+void* ${Storage}::unsafeGetTH(bool retain) const {
+  if (retain) {
+    ${THStorage}_retain(${state,} storage);
+  }
+  return storage;
+}
+
 auto ${Storage}::resize(int64_t new_size) -> ${Storage}& {
   ${THStorage}_resize(${state,} storage, new_size);
   return *this;

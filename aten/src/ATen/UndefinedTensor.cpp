@@ -26,6 +26,9 @@ const char * UndefinedTensor::typeString() {
 void * UndefinedTensor::unsafeGetTH(bool retain) {
   runtime_error("unsafeGetTH(bool retain) called on undefined Tensor");
 }
+std::unique_ptr<Storage> UndefinedTensor::storage() {
+  runtime_error("storage() called on undefined Tensor");
+}
 
 IntList UndefinedTensor::strides() const {
   runtime_error("strides() called on undefined Tensor");

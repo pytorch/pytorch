@@ -3956,6 +3956,12 @@ class TestTorch(TestCase):
         self.assertEqual(perm, new)
         self.assertEqual(x.size(), orig)
 
+    def test_storage(self):
+        from torch.autograd import Variable
+        v = Variable(torch.randn(3, 5))
+        self.assertEqual(v.storage()[0], v.data[0][0])
+        self.assertEqual(v.storage()[14], v.data[2][4])
+
     def test_storageview(self):
         s1 = torch.LongStorage((3, 4, 5))
         s2 = torch.LongStorage(s1, 1)

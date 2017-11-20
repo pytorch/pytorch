@@ -18,6 +18,7 @@ struct Storage {
   virtual const void* data() const = 0;
   virtual Storage& retain() = 0;
   virtual Storage& free() = 0;
+  virtual void * unsafeGetTH(bool retain) const = 0;
 
   virtual Storage& resize(int64_t new_size) = 0;
 

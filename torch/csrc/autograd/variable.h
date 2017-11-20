@@ -107,6 +107,7 @@ public:
   virtual at::Scalar localScalar() override;
   virtual void assign_(at::Scalar s) override;
   virtual void * unsafeGetTH(bool retain) override;
+  virtual std::unique_ptr<at::Storage> storage() override;
   static const char * typeString();
 
   // Get the VariableType for a base Tensor type

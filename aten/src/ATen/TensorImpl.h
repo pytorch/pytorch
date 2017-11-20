@@ -1,6 +1,7 @@
 #pragma once
 
 #include <atomic>
+#include <memory>
 #include <iostream>
 
 #include "ATen/ScalarType.h"
@@ -9,6 +10,7 @@ namespace at {
 
 struct Type;
 class Scalar;
+struct Storage;
 
 struct TensorImpl {
   explicit TensorImpl(Type * type)
@@ -23,6 +25,7 @@ struct TensorImpl {
   virtual Scalar localScalar() = 0;
   virtual void assign_(Scalar s) = 0;
   virtual void * unsafeGetTH(bool retain) = 0;
+  virtual std::unique_ptr<Storage> storage() = 0;
   void retain() {
     ++refcount;
   }

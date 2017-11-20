@@ -22,6 +22,7 @@ public:
   virtual const void* data() const override;
   virtual ${Storage}& retain() override;
   virtual ${Storage}& free() override;
+  virtual void * unsafeGetTH(bool retain) const override;
 
   virtual ${Storage}& resize(int64_t new_size) override;
   virtual ${Storage}& fill(Scalar value) override;
