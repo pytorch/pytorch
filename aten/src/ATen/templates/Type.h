@@ -68,6 +68,7 @@ struct AT_API Type {
   virtual std::size_t elementSizeInBytes() const = 0;
   virtual Type & toBackend(Backend b) const;
   virtual Type & toScalarType(ScalarType s) const;
+  Context& get_context() const { return *context; }
 
   // contingious IDs for all types in the system
   // for external dispatch

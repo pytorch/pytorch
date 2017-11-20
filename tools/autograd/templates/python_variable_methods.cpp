@@ -2,6 +2,7 @@
 
 #include <Python.h>
 
+#include "torch/csrc/DynamicTypes.h"
 #include "torch/csrc/Exceptions.h"
 #include "torch/csrc/Size.h"
 #include "torch/csrc/autograd/python_variable.h"
@@ -238,6 +239,14 @@ static PyObject * THPVariable_element_size(PyObject* self, PyObject* args)
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject * THPVariable_storage(PyObject* self, PyObject* arg)
+{
+  HANDLE_TH_ERRORS
+  auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
+  return createPyObject(*self_.storage());
+  END_HANDLE_TH_ERRORS
+}
+
 // generated methods start here
 
 ${py_methods}
@@ -273,6 +282,7 @@ PyMethodDef variable_methods[] = {
   {"nelement", (PyCFunction)THPVariable_numel, METH_NOARGS, NULL},
   {"short", (PyCFunction)THPVariable_short, METH_NOARGS, NULL},
   {"size", (PyCFunction)THPVariable_size, METH_VARARGS | METH_KEYWORDS, NULL},
+  {"storage", (PyCFunction)THPVariable_storage, METH_NOARGS, NULL},
   {"stride", (PyCFunction)THPVariable_stride, METH_VARARGS | METH_KEYWORDS, NULL},
   ${py_method_defs}
   {NULL}

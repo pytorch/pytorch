@@ -388,4 +388,17 @@ bool THPStorage_(init)(PyObject *module)
   return true;
 }
 
+void THPStorage_(postInit)(PyObject *module)
+{
+  THPStorageClass = PyObject_GetAttrString(module,(char*)TH_CONCAT_STRING_2(Real,Storage));
+  if (!THPStorageClass) throw python_error();
+
+  bool is_cuda = false;
+#ifdef THC_GENERIC_FILE
+  is_cuda = true;
+#endif
+  const char *type_name = TH_CONCAT_STRING_2(Real,);
+  torch::registerStoragePyTypeObject((PyTypeObject*)THPStorageClass, type_name, is_cuda, false);
+}
+
 #endif

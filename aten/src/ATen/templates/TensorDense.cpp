@@ -16,3 +16,8 @@ void ${Tensor}::assign_(Scalar s) {
   AT_ASSERT(isScalar(),"assign_() called on Tensor with %d dims",sizes().size());
   ${THTensor}_set1d(${state,}tensor, 0,${to_th_type}(s.to${ScalarName}()));
 }
+std::unique_ptr<Storage> ${Tensor}::storage() {
+  auto storage = ${THTensor}_storage(${state,}tensor);
+  ${THStorage}_retain(${state,}storage);
+  return std::unique_ptr<Storage>(new ${Storage}(&type().get_context(), storage));
+}

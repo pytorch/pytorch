@@ -13,6 +13,7 @@
 #include <libshm.h>
 #include "THP.h"
 #include "copy_utils.h"
+#include "DynamicTypes.h"
 
 #include "generic/Storage.cpp"
 #include <TH/THGenerateAllTypes.h>
