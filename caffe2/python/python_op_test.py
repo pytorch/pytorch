@@ -63,7 +63,9 @@ class PythonOpTest(hu.HypothesisTestCase):
 
     def test_exception(self):
         op = CreatePythonOperator(MainOpFunctionThatThrowsRuntimeError, [], [])
-        with self.assertRaises(RuntimeError):
+        with self.assertRaisesRegexp(
+            RuntimeError, "This is an intentional exception."
+        ):
             workspace.RunOperatorOnce(op)
 
     @given(x=hu.tensor())
