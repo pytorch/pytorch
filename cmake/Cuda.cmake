@@ -16,7 +16,7 @@ set(Caffe2_known_gpu_archs7 "20 21(20) 30 35 50 52") # for CUDA 7.x
 #   caffe_select_nvcc_arch_flags(out_variable)
 function(caffe2_select_nvcc_arch_flags out_variable)
   # List of arch names
-  set(__archs_names "Kepler" "Maxwell" "Pascal" "Volta" "All")
+  set(__archs_names "Kepler" "Maxwell" "Pascal" "Volta" "All" "Manual")
   set(__archs_name_default "All")
 
   # Set CUDA_ARCH_NAME strings (so it will be seen as dropbox in the CMake GUI)
@@ -30,6 +30,17 @@ function(caffe2_select_nvcc_arch_flags out_variable)
     message(FATAL_ERROR "Invalid CUDA_ARCH_NAME, supported values: ${__archs_names}. Got ${CUDA_ARCH_NAME}")
   endif()
 
+  if(${CUDA_ARCH_NAME} STREQUAL "Manual")
+    set(CUDA_ARCH_BIN "" CACHE STRING
+      "Specify GPU architectures to build binaries for (BIN(PTX) format is supported)")
+    set(CUDA_ARCH_PTX "" CACHE STRING
+      "Specify GPU architectures to build PTX intermediate code for")
+    mark_as_advanced(CUDA_ARCH_BIN CUDA_ARCH_PTX)
+  else()
+    unset(CUDA_ARCH_BIN CACHE)
+    unset(CUDA_ARCH_PTX CACHE)
+  endif()
+
   if(${CUDA_ARCH_NAME} STREQUAL "Kepler")
     set(__cuda_arch_bin "30 35")
   elseif(${CUDA_ARCH_NAME} STREQUAL "Maxwell")
@@ -40,13 +51,16 @@ function(caffe2_select_nvcc_arch_flags out_variable)
     set(__cuda_arch_bin "70")
   elseif(${CUDA_ARCH_NAME} STREQUAL "All")
     set(__cuda_arch_bin ${Caffe2_known_gpu_archs})
+  elseif(${CUDA_ARCH_NAME} STREQUAL "Manual")
+    set(__cuda_arch_bin ${CUDA_ARCH_BIN})
+    set(__cuda_arch_ptx ${CUDA_ARCH_PTX})
   else()
     message(FATAL_ERROR "Invalid CUDA_ARCH_NAME")
   endif()
 
   # Remove dots and convert to lists
   string(REGEX REPLACE "\\." "" __cuda_arch_bin "${__cuda_arch_bin}")
-  string(REGEX REPLACE "\\." "" __cuda_arch_ptx "${CUDA_ARCH_PTX}")
+  string(REGEX REPLACE "\\." "" __cuda_arch_ptx "${__cuda_arch_ptx}")
   string(REGEX MATCHALL "[0-9()]+" __cuda_arch_bin "${__cuda_arch_bin}")
   string(REGEX MATCHALL "[0-9]+"   __cuda_arch_ptx "${__cuda_arch_ptx}")
   list(REMOVE_DUPLICATES __cuda_arch_bin)
