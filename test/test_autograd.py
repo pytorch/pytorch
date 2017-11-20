@@ -1206,6 +1206,10 @@ class TestAutograd(TestCase):
         self._test_type_conversion_backward(lambda x: x)
         if torch.cuda.is_available():
             self._test_type_conversion_backward(lambda x: x.cuda())
+            if torch.cuda.device_count() >= 2:
+                # one of these has to be the non-default device
+                self._test_type_conversion_backward(lambda x: x.cuda(0))
+                self._test_type_conversion_backward(lambda x: x.cuda(1))
 
     def test_isolated_node(self):
         x = Variable(torch.randn(5, 5), requires_grad=True)
