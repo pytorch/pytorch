@@ -41,8 +41,8 @@ class Distribution(object):
     r"""
     Distribution is the abstract base class for probability distributions.
     """
-    def __init__(self, reparametrized = False):
-        self.reparametrized = reparametrized
+    def __init__(self, reparameterized = False):
+        self.reparameterized = reparameterized
     
     def sample(self):
         """
@@ -89,8 +89,8 @@ class Bernoulli(Distribution):
 
     def __init__(self, probs):
         self.probs = probs
-        # Bernoulli can't be reparametrized
-        super(Bernoulli, self).__init__(reparametrized=False)
+        # Bernoulli can't be reparameterized
+        super(Bernoulli, self).__init__(reparameterized=False)
 
     def sample(self):
         return torch.bernoulli(self.probs)
@@ -138,8 +138,8 @@ class Categorical(Distribution):
             # TODO: treat higher dimensions as part of the batch
             raise ValueError("probs must be 1D or 2D")
         self.probs = probs
-        # Categorical can't be reparametrized
-        super(Categorical, self).__init__(reparametrized=False)
+        # Categorical can't be reparameterized
+        super(Categorical, self).__init__(reparameterized=False)
 
     def sample(self):
         return torch.multinomial(self.probs, 1, True).squeeze(-1)
@@ -174,16 +174,16 @@ class Normal(Distribution):
     Args:
         mean (float or Tensor or Variable): mean of the distribution
         std (float or Tensor or Variable): standard deviation of the distribution
-        reparametrized (bool): whether to use reparametrization trick
+        reparameterized (bool): whether to use reparameterization trick
     """
 
-    def __init__(self, mean, std, reparametrized = False):
+    def __init__(self, mean, std, reparameterized = False):
         self.mean = mean
         self.std = std
-        super(Normal, self).__init__(reparametrized=reparametrized)
+        super(Normal, self).__init__(reparameterized=reparameterized)
 
     def sample(self):
-        if self.reparametrized:
+        if self.reparameterized:
             eps = torch.normal(torch.zeros_like(self.mean), torch.ones_like(self.std))
             return self.mean + self.std * eps
         else:    
@@ -198,7 +198,7 @@ class Normal(Distribution):
                 return v.expand(n, *v.size())
         expanded_mean = expand(self.mean)
         expanded_std = expand(self.std)
-        if self.reparametrized:
+        if self.reparameterized:
             eps = torch.normal(torch.zeros_like(expanded_mean), torch.ones_like(expanded_std))
             return expanded_mean + expanded_std * eps
         else:
