@@ -15,7 +15,7 @@ setup_environment(){
 
 CAFFE2_ROOT="$( cd "$(dirname -- "$0")"/.. ; pwd -P)"
 echo "Caffe2 codebase root is: $CAFFE2_ROOT"
-BUILD_ROOT=$CAFFE2_ROOT/build
+BUILD_ROOT=${BUILD_ROOT:-"$CAFFE2_ROOT/build"}
 mkdir -p $BUILD_ROOT
 echo "Build Caffe2 Tizen into: $BUILD_ROOT"
 }
@@ -109,7 +109,7 @@ cd $BUILD_ROOT
 # Note: add more dependencies above if you need libraries such as leveldb, lmdb, etc.
 # If you have to disable a specific package due to a package absence
 # from https://git.tizen.org/cgit/, append -Dxxx_xxx=OFF option before executing cmake.
-cmake .. \
+cmake "$CAFFE2_ROOT" \
     -DCMAKE_VERBOSE_MAKEFILE=1 \
     -DUSE_CUDA=OFF \
     -DUSE_OPENCV=OFF \

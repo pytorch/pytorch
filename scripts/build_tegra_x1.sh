@@ -13,7 +13,7 @@
 
 CAFFE2_ROOT="$( cd "$(dirname -- "$0")"/.. ; pwd -P)"
 echo "Caffe2 codebase root is: $CAFFE2_ROOT"
-BUILD_ROOT=$CAFFE2_ROOT/build
+BUILD_ROOT=${BUILD_ROOT:-"$CAFFE2_ROOT/build"}
 mkdir -p $BUILD_ROOT
 echo "Build Caffe2 raspbian into: $BUILD_ROOT"
 
@@ -52,7 +52,7 @@ cd $BUILD_ROOT
 # CUDA_USE_STATIC_CUDA_RUNTIME needs to be set to off so that opencv can be
 # properly used. Otherwise, opencv will complain that opencv_dep_cudart cannot
 # be found.
-cmake .. -DCUDA_USE_STATIC_CUDA_RUNTIME=OFF \
+cmake "$CAFFE2_ROOT" -DCUDA_USE_STATIC_CUDA_RUNTIME=OFF \
     || exit 1
 
 make -j 4 || exit 1
