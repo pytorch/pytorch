@@ -12,11 +12,11 @@ cd build
 # Special cases - run script and exit
 if [ "$BUILD_ANDROID" = 'true' ]; then
     export ANDROID_NDK=/opt/android_ndk
-    sh "${ROOT_DIR}/scripts/build_android.sh"
+    "${ROOT_DIR}/scripts/build_android.sh"
     exit 0
 fi
 if [ "$BUILD_IOS" = 'true' ]; then
-    sh "${ROOT_DIR}/scripts/build_ios.sh" -DCMAKE_OSX_ARCHITECTURES=arm64
+    "${ROOT_DIR}/scripts/build_ios.sh" -DCMAKE_OSX_ARCHITECTURES=arm64
     exit 0
 fi
 

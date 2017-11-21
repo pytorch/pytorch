@@ -2,7 +2,7 @@
 ##############################################################################
 # Example command to build the android target.
 ##############################################################################
-# 
+#
 # This script shows how one can build a Caffe2 binary for the Android platform
 # using android-cmake. A few notes:
 #
@@ -19,58 +19,79 @@
 # (3) The toolchain and the build target platform can be specified with the
 #     cmake arguments below. For more details, check out android-cmake's doc.
 
+set -e
+
 CAFFE2_ROOT="$( cd "$(dirname "$0")"/.. ; pwd -P)"
-echo "Caffe2 codebase root is: $CAFFE2_ROOT"
 
 if [ -z "$ANDROID_NDK" ]; then
-    echo "Did you set ANDROID_NDK variable?"
-    exit 1
+  echo "ANDROID_NDK not set; please set it to the Android NDK directory"
+  exit 1
 fi
 
-if [ -d "$ANDROID_NDK" ]; then
-    echo "Using Android ndk at $ANDROID_NDK"
-else
-    echo "Cannot find ndk: did you install it under $ANDROID_NDK?"
-    exit 1
+if [ ! -d "$ANDROID_NDK" ]; then
+  echo "ANDROID_NDK not a directory; did you install it under $ANDROID_NDK?"
+  exit 1
 fi
-# We are going to build the target into build_android.
-BUILD_ROOT=${BUILD_ROOT:-"$CAFFE2_ROOT/build_android"}
-mkdir -p $BUILD_ROOT
-echo "Build Caffe2 Android into: $BUILD_ROOT"
+
+echo "Bash: $(/bin/bash --version | head -1)"
+echo "Caffe2 path: $CAFFE2_ROOT"
+echo "Using Android NDK at $ANDROID_NDK"
 
 # Build protobuf from third_party so we have a host protoc binary.
 echo "Building protoc"
-$CAFFE2_ROOT/scripts/build_host_protoc.sh || exit 1
+$CAFFE2_ROOT/scripts/build_host_protoc.sh
 
-# Now, actually build the android target.
-echo "Building caffe2"
+# Now, actually build the Android target.
+BUILD_ROOT=${BUILD_ROOT:-"$CAFFE2_ROOT/build_android"}
+mkdir -p $BUILD_ROOT
 cd $BUILD_ROOT
 
+CMAKE_ARGS=()
+
+# Use locally built protoc because we'll build libprotobuf for the
+# target architecture and need an exact version match.
+CMAKE_ARGS+=("-DCAFFE2_CUSTOM_PROTOC_EXECUTABLE=$CAFFE2_ROOT/build_host_protoc/bin/protoc")
+
+# Use android-cmake to build Android project from CMake.
+CMAKE_ARGS+=("-DCMAKE_TOOLCHAIN_FILE=$CAFFE2_ROOT/third_party/android-cmake/android.toolchain.cmake")
+
+# Don't build artifacts we don't need
+CMAKE_ARGS+=("-DBUILD_TEST=OFF")
+CMAKE_ARGS+=("-DBUILD_BINARY=OFF")
+CMAKE_ARGS+=("-DBUILD_PYTHON=OFF")
+CMAKE_ARGS+=("-DBUILD_SHARED_LIBS=OFF")
+
+# Disable unused dependencies
+CMAKE_ARGS+=("-DUSE_CUDA=OFF")
+CMAKE_ARGS+=("-DUSE_OPENCV=OFF")
+CMAKE_ARGS+=("-DUSE_LMDB=OFF")
+CMAKE_ARGS+=("-DUSE_LEVELDB=OFF")
+CMAKE_ARGS+=("-DUSE_MPI=OFF")
+CMAKE_ARGS+=("-DUSE_OPENMP=OFF")
+
+# Only toggle if VERBOSE=1
+if [ "${VERBOSE:-}" == '1' ]; then
+  CMAKE_ARGS+=("-DCMAKE_VERBOSE_MAKEFILE=1")
+fi
+
+# Android specific flags
+CMAKE_ARGS+=("-DANDROID_NDK=$ANDROID_NDK")
+CMAKE_ARGS+=("-DANDROID_ABI=armeabi-v7a with NEON FP16")
+CMAKE_ARGS+=("-DANDROID_NATIVE_API_LEVEL=21")
+
+# Compiler flags
+CMAKE_ARGS+=("-DCMAKE_C_FLAGS=")
+CMAKE_ARGS+=("-DCMAKE_CXX_FLAGS=-s")
+
 cmake "$CAFFE2_ROOT" \
-    -DCMAKE_TOOLCHAIN_FILE=../third_party/android-cmake/android.toolchain.cmake \
     -DCMAKE_INSTALL_PREFIX=../install \
-    -DANDROID_NDK=$ANDROID_NDK \
     -DCMAKE_BUILD_TYPE=Release \
-    -DANDROID_ABI="armeabi-v7a with NEON FP16" \
-    -DANDROID_NATIVE_API_LEVEL=21 \
-    -DUSE_CUDA=OFF \
-    -DBUILD_TEST=OFF \
-    -DUSE_LMDB=OFF \
-    -DUSE_LEVELDB=OFF \
-    -DBUILD_PYTHON=OFF \
-    -DCAFFE2_CUSTOM_PROTOC_EXECUTABLE=$CAFFE2_ROOT/build_host_protoc/bin/protoc \
-    -DCMAKE_VERBOSE_MAKEFILE=1 \
-    -DUSE_MPI=OFF \
-    -DUSE_OPENMP=OFF \
-    -DBUILD_SHARED_LIBS=OFF \
-    -DCMAKE_CXX_FLAGS_RELEASE=-s \
-    -DUSE_OPENCV=OFF \
-    $@ \
-    || exit 1
+    "${CMAKE_ARGS[@]}" \
+    "$@"
 
 # Cross-platform parallel build
-if [ "$(uname)" = 'Darwin' ]; then
-    cmake --build . -- "-j$(sysctl -n hw.ncpu)"
+if [ "$(uname)" == "Darwin" ]; then
+  cmake --build . -- "-j$(sysctl -n hw.ncpu)"
 else
-    cmake --build . -- "-j$(nproc)"
+  cmake --build . -- "-j$(nproc)"
 fi
