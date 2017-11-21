@@ -334,7 +334,7 @@ CompiledFusionFunction::CompiledFusionFunction(const std::string & name, Annotat
   if ((prop.major >= 6 && CUDA_VERSION < 8000) ||
       (prop.major >= 7 && CUDA_VERSION < 9000)) {
     std::stringstream err_string;
-    err_string << "PyTorch compiled with insufficient CUDA version: " 
+    err_string << "In CompiledFusionFunction, PyTorch compiled with insufficient CUDA version: " 
 	       << CUDA_VERSION << " for the current GPU device " << prop.name 
 	       << " with device capability " << prop.major << "." << prop.minor;
     throw std::runtime_error(err_string.str());
