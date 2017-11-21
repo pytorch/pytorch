@@ -62,12 +62,11 @@ class nvtxEventAttributes_t(ctypes.Structure):
                ]
 
     def __init__(self, message, color, version=DEFAULT,
-                 size=, colorType=0xFF00FF00):
+                 size, colorType=0xFF00FF00):
         
         # Set to fields to zero as per NVTX documentation
         for attr_name in [field[0] for field in _fields_]:
             setattr(self, attr_name, 0)
 
         # Now use user-defined values for the fields
-        super(EventAttributes, self).__init__(message, color, version,
-                                              size, int(colorType))
+        super(EventAttributes, self).__init__(version, size, versionint(colorType), color, versionint(msgType), msg)
