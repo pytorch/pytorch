@@ -48,6 +48,15 @@ class NetTestDummyOp final : public OperatorBase {
     return true;
   }
 
+  // Simulate CUDA operator behavior
+  bool HasAsyncPart() const override {
+    return debug_def().device_option().device_type() == CUDA;
+  }
+
+  bool SupportsAsyncScheduling() const override {
+    return debug_def().device_option().device_type() == CUDA;
+  }
+
  protected:
   const bool fail_;
 };
@@ -250,7 +259,7 @@ TEST(NetTest, ChainingForDifferentDevices) {
         }
 )DOC";
   if (HasCudaRuntime()) {
-    checkChainingAndRun(spec, {{0, {0}}, {1, {1, 2}}, {3, {3}}});
+    checkChainingAndRun(spec, {{0, {0, 1, 2}}, {3, {3}}});
   }
 }
 
