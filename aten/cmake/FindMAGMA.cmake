@@ -3,6 +3,11 @@
 # similar to LAPACK for GPU and multicore systems
 # (see http://icl.cs.utk.edu/magma/).
 #
+# This module will look for MAGMA library under /usr/local/magma by
+# default. To use a different installed version of the library set
+# environment variable MAGMA_HOME before running cmake (e.g.
+# MAGMA_HOME=${HOME}/lib/magma instead of default /usr/local/magma)
+#
 # This module sets the following variables:
 #  MAGMA_FOUND - set to true if the MAGMA library is found.
 #  MAGMA_LIBRARIES - list of libraries to link against to use MAGMA
@@ -15,8 +20,13 @@ include(FindPackageHandleStandardArgs)
 SET(MAGMA_LIBRARIES)
 SET(MAGMA_INCLUDE_DIR)
 
-FIND_LIBRARY(MAGMA_LIBRARIES magma /usr/local/magma/lib)
-FIND_PATH(MAGMA_INCLUDE_DIR magma.h /usr/local/magma/include)
+FIND_LIBRARY(MAGMA_LIBRARIES magma 
+  HINTS $ENV{MAGMA_HOME} /usr/local/magma
+  PATH_SUFFIXES lib)
+
+FIND_PATH(MAGMA_INCLUDE_DIR magma.h 
+  HINTS $ENV{MAGMA_HOME} /usr/local/magma
+  PATH_SUFFIXES include)
 
 IF (MAGMA_LIBRARIES)
   SET(MAGMA_FOUND TRUE)
