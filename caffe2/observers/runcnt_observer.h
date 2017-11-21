@@ -16,8 +16,8 @@ class RunCountOperatorObserver final : public ObserverBase<OperatorBase> {
   std::unique_ptr<ObserverBase<OperatorBase>> clone() override;
 
  private:
-  void Start() override;
-  void Stop() override;
+  bool Start() override;
+  bool Stop() override;
 
  private:
   RunCountNetObserver* netObserver_;
@@ -34,8 +34,8 @@ class RunCountNetObserver final : public ObserverBase<NetBase> {
   friend class RunCountOperatorObserver;
 
  private:
-  void Start() override;
-  void Stop() override;
+  bool Start() override;
+  bool Stop() override;
 
  protected:
   std::atomic<int> cnt_;

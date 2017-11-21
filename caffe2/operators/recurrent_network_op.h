@@ -228,7 +228,7 @@ class RecurrentNetworkOp final : public Operator<Context> {
   }
 
   size_t NumObservers() override {
-    size_t num = this->observers_list_.size();
+    size_t num = this->observers_.size();
     if (rnnExecutor_) {
       num += rnnExecutor_->NumObserversStepNet();
     }
@@ -369,7 +369,7 @@ class RecurrentNetworkOp final : public Operator<Context> {
           rnnExecutor_->SetMaxParallelTimesteps(num_workspaces_on_fwd_only);
         }
         rnnExecutor_->EnsureTimestepInitialized(
-            t, currentStepWorkspace.get(), this->observers_list_);
+            t, currentStepWorkspace.get(), this->observers_);
       } else {
         // Use plain Caffe2 nets
         detail::UpdateTimestepBlob(currentStepWorkspace.get(), timestep_, t);
@@ -762,7 +762,7 @@ class RecurrentNetworkGradientOp final : public Operator<Context> {
     for (int32_t t = seqLen - 1; t >= 0; --t) {
       if (rnnExecutor_) {
         rnnExecutor_->EnsureTimestepInitialized(
-            t, stepWorkspaces[t].get(), this->observers_list_);
+            t, stepWorkspaces[t].get(), this->observers_);
       } else {
         auto* stepNet = stepWorkspaces[t].get()->GetNet(stepNetDef_.name());
         if (stepNet == nullptr) {

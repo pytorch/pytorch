@@ -64,8 +64,9 @@ class RecurrentNetworkExecutorBase {
   void EnsureTimestepInitialized(
       int t,
       Workspace* ws,
-      const std::vector<std::unique_ptr<ObserverBase<OperatorBase>>>&
-          observers_list) {
+      std::map<
+          const ObserverBase<OperatorBase>*,
+          std::unique_ptr<ObserverBase<OperatorBase>>>& observers) {
     if (timestep_ops_template_.size() == 0) {
       CalculateInternalDependencies();
 
@@ -126,13 +127,12 @@ class RecurrentNetworkExecutorBase {
           }
 
           rnn_op.op = CreateOperator(op_copy, ws);
-          for (const auto& observer : observers_list) {
+          for (const auto& observer : observers) {
             std::unique_ptr<ObserverBase<OperatorBase>> observer_copy =
-                observer->clone();
+                observer.second->clone();
             CAFFE_ENFORCE(
                 observer_copy,
-                "Observers without clone() implemented cannot be attached "
-                "to RNN using RNNExecutor.");
+                "Observers without clone() implemented cannot be attached to RNN using RNNExecutor.");
             rnn_op.op->AttachObserver(std::move(observer_copy));
           }
         } else {
@@ -142,13 +142,12 @@ class RecurrentNetworkExecutorBase {
                 timestep_ops_[t - max_parallel_timesteps_][rnn_op.order].op;
           } else {
             rnn_op.op = CreateOperator(step_net_def_.op(rnn_op.order), ws);
-            for (const auto& observer : observers_list) {
+            for (const auto& observer : observers) {
               std::unique_ptr<ObserverBase<OperatorBase>> observer_copy =
-                  observer->clone();
+                  observer.second->clone();
               CAFFE_ENFORCE(
                   observer_copy,
-                  "Observers without clone() implemented cannot be attached "
-                  "to RNN using RNNExecutor.");
+                  "Observers without clone() implemented cannot be attached to RNN using RNNExecutor.");
               rnn_op.op->AttachObserver(std::move(observer_copy));
             }
           }
