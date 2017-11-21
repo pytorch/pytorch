@@ -3747,8 +3747,6 @@ def poissonnllloss_no_reduce_test():
         constructor=wrap_functional(
             lambda i: F.poisson_nll_loss(i, t.type_as(i), reduce=False)),
         input_fn=lambda: torch.rand(10, 10),
-        reference_fn=lambda i, _:
-            loss_reference_fns['PoissonNLLLoss'](i, t.data.type_as(i), reduce=False),
         pickle=False)
 
 
