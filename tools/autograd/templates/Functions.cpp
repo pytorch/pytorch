@@ -502,6 +502,42 @@ std::tuple<Tensor, Tensor, Tensor> prelu_double_backward(
   }
 }
 
+// Formula:
+//   d det / d A_ij = \sum_k (\prod_{l neq k} Sigma_l) U_ik V_jk
+// that is, if det != 0
+//   d det / d A = U * (Sigma / det) * V^T
+Tensor _det_with_svd_backward(const std::vector<torch::autograd::Variable> &grads, const Tensor& self,
+          const Tensor& det, const Tensor& u, const Tensor& sigma, const Tensor& v) {
+  auto det_grad = grads[0];
+  // If any gradient is defined on svd, then it must be in a double backward
+  // because the svd results are not exposed to users. That is, it can only come
+  // from auto-differentiating this method:
+  //     dA = _det_with_svd_backward(d det, A, [det, u, s, v]=_det_with_svd(A)),
+  // getting ddu, dds, ddv, and calling this method again to accumulate ddA.
+  for (size_t i = 1; i < 4; i++) {
+    if (grads[i].defined()) {
+      throw std::runtime_error("Double backward through det is not supported.");
+    }
+  }
+  auto size = self.size(0);
+  auto null_dim = size - sigma.nonzero().size(0);
+  if (null_dim >= 2) {
+    // \prod_{l neq k} Sigma_l is zero every where
+    return zeros_like(self);
+  }
+  if (null_dim == 1) {
+    // only last sigma is 0
+    // \prod_{l neq k} Sigma_l is zero at all but last dim
+    // at last dim, it is:
+    auto scale = sigma.narrow(0, 0, size - 1).prod();
+    auto last_u = u.narrow(1, size - 1, 1);
+    auto last_v = v.narrow(1, size - 1, 1);
+    return last_u.mm(last_v.transpose(0, 1)).mul_(scale.mul_(det_grad));
+  }
+  // no zero singular values
+  return u.mm(sigma.pow(-1).mul_(det.mul(det_grad)).diag()).mm(v.transpose(0, 1));
+}
+
 }
 
 ${autograd_function_definitions}

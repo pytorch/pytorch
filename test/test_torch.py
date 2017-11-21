@@ -2471,6 +2471,97 @@ class TestTorch(TestCase):
         self.assertFalse(MII.is_contiguous(), 'MII is contiguous')
         self.assertEqual(MII, MI, 0, 'inverse value in-place')
 
+    @staticmethod
+    def _test_det(self, conv_fn):
+        def reference_det(M):
+            # naive row reduction
+            M = M.clone()
+            l = M.size(0)
+            multiplier = 1
+            for i in range(l):
+                if M[i, 0] != 0:
+                    if i != 0:
+                        M[0], M[i] = M[i], M[0]
+                        multiplier = -1
+                    break
+            else:
+                return 0
+            for i in range(1, l):
+                row = M[i]
+                for j in range(i):
+                    row -= row[j] / M[j, j] * M[j]
+                M[i] = row
+            return M.diag().prod() * multiplier
+
+        # TODO: remove Variable wrapper once Variable and Tensor are the same
+        Variable = torch.autograd.Variable
+
+        eye_det = Variable(conv_fn(torch.eye(5))).det()
+        self.assertEqual(eye_det, eye_det.clone().fill_(1), 1e-8, 'determinant of identity')
+
+        def test(M):
+            M = conv_fn(M)
+            var_M = Variable(M)
+            M_det = var_M.det().data
+
+            self.assertEqual(M_det, M_det.clone().fill_(reference_det(M)), 1e-8, 'determinant')
+            self.assertEqual(M_det, var_M.inverse().det().data.pow_(-1), 1e-8, 'determinant after transpose')
+            self.assertEqual(M_det, var_M.transpose(0, 1).det().data, 1e-8, 'determinant after transpose')
+
+            for x in [0, 2, 4]:
+                for scale in [-2, -0.1, 0, 10]:
+                    target = M_det * scale
+                    # dim 0
+                    M_clone = M.clone()
+                    M_clone[:, x] *= scale
+                    det = Variable(M_clone).det().data
+                    self.assertEqual(target, det, 1e-8, 'determinant after scaling a row')
+                    # dim 1
+                    M_clone = M.clone()
+                    M_clone[x, :] *= scale
+                    det = Variable(M_clone).det().data
+                    self.assertEqual(target, det, 1e-8, 'determinant after scaling a column')
+
+            for x1, x2 in [(0, 3), (4, 1), (3, 2)]:
+                assert x1 != x2, 'x1 and x2 needs to be different for this test'
+                target = M_det.clone().zero_()
+                # dim 0
+                M_clone = M.clone()
+                M_clone[:, x2] = M_clone[:, x1]
+                det = Variable(M_clone).det().data
+                self.assertEqual(target, det, 1e-8, 'determinant when two rows are same')
+                # dim 1
+                M_clone = M.clone()
+                M_clone[x2, :] = M_clone[x1, :]
+                det = Variable(M_clone).det().data
+                self.assertEqual(target, det, 1e-8, 'determinant when two columns are same')
+
+                for scale1, scale2 in [(0.3, -1), (0, 2), (10, 0.1)]:
+                    target = -M_det * scale1 * scale2
+                    # dim 0
+                    M_clone = M.clone()
+                    t = M_clone[:, x1] * scale1
+                    M_clone[:, x1] += M_clone[:, x2] * scale2
+                    M_clone[:, x2] = t
+                    det = Variable(M_clone).det().data
+                    self.assertEqual(target, det, 1e-8, 'determinant after exchanging rows')
+                    # dim 1
+                    M_clone = M.clone()
+                    t = M_clone[x1, :] * scale1
+                    M_clone[x1, :] += M_clone[x2, :] * scale2
+                    M_clone[x2, :] = t
+                    det = Variable(M_clone).det().data
+                    self.assertEqual(target, det, 1e-8, 'determinant after exchanging columns')
+
+        test(torch.randn(5, 5))
+        r = torch.randn(5, 5)
+        test(r.mm(r.transpose(0, 1)))  # symmetric
+        test(torch.randn(5, 5, 5)[:, 2, :])  # non-contiguous
+
+    @skipIfNoLapack
+    def test_det(self):
+        self._test_det(self, lambda x: x)
+
     @unittest.skip("Not implemented yet")
     def test_conv2(self):
         x = torch.rand(math.floor(torch.uniform(50, 100)), math.floor(torch.uniform(50, 100)))

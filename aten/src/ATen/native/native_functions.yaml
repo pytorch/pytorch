@@ -76,6 +76,10 @@
 
 - func: unsqueeze_(Tensor self, int64_t dim) -> Tensor
 
+- func: _det_with_svd(Tensor self) -> (Tensor, Tensor, Tensor, Tensor)
+
+- func: det(Tensor self) -> Tensor
+
 - func: stack(TensorList tensors, int64_t dim=0) -> Tensor
   variants: function
 
