@@ -14,7 +14,7 @@
 set -e
 
 CAFFE2_ROOT="$( cd "$(dirname -- "$0")"/.. ; pwd -P)"
-BUILD_ROOT=$CAFFE2_ROOT/build_host_protoc
+BUILD_ROOT=${BUILD_ROOT:-"$CAFFE2_ROOT/build_host_protoc"}
 mkdir -p $BUILD_ROOT/build
 cd $BUILD_ROOT/build
 

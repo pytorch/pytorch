@@ -9,7 +9,7 @@
 
 CAFFE2_ROOT="$( cd "$(dirname -- "$0")"/.. ; pwd -P)"
 echo "Caffe2 codebase root is: $CAFFE2_ROOT"
-BUILD_ROOT=$CAFFE2_ROOT/build
+BUILD_ROOT=${BUILD_ROOT:-"$CAFFE2_ROOT/build"}
 mkdir -p $BUILD_ROOT
 echo "Build Caffe2 raspbian into: $BUILD_ROOT"
 
@@ -34,7 +34,7 @@ cd $BUILD_ROOT
 
 # Note: you can add more dependencies above if you need libraries such as
 # leveldb, lmdb, etc.
-cmake .. \
+cmake "$CAFFE2_ROOT" \
     -DCMAKE_VERBOSE_MAKEFILE=1 \
     -DCAFFE2_CPU_FLAGS="-mfpu=neon -mfloat-abi=hard" \
     || exit 1

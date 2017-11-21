@@ -21,7 +21,7 @@ if [ -n "${USE_HOST_PROTOC:-}" ]; then
 fi
 
 # We are going to build the target into build.
-BUILD_ROOT="$CAFFE2_ROOT/build"
+BUILD_ROOT=${BUILD_ROOT:-"$CAFFE2_ROOT/build"}
 mkdir -p "$BUILD_ROOT"
 cd "$BUILD_ROOT"
 echo "Building Caffe2 in: $BUILD_ROOT"
@@ -36,7 +36,7 @@ if [ "$(uname)" == 'Darwin' ]; then
 fi
 
 # Now, actually build the target.
-cmake .. \
+cmake "$CAFFE2_ROOT" \
       "${CMAKE_ARGS[@]}" \
       "$@"
 

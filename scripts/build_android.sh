@@ -34,7 +34,7 @@ else
     exit 1
 fi
 # We are going to build the target into build_android.
-BUILD_ROOT=$CAFFE2_ROOT/build_android
+BUILD_ROOT=${BUILD_ROOT:-"$CAFFE2_ROOT/build_android"}
 mkdir -p $BUILD_ROOT
 echo "Build Caffe2 Android into: $BUILD_ROOT"
 
@@ -46,7 +46,7 @@ $CAFFE2_ROOT/scripts/build_host_protoc.sh || exit 1
 echo "Building caffe2"
 cd $BUILD_ROOT
 
-cmake .. \
+cmake "$CAFFE2_ROOT" \
     -DCMAKE_TOOLCHAIN_FILE=../third_party/android-cmake/android.toolchain.cmake \
     -DCMAKE_INSTALL_PREFIX=../install \
     -DANDROID_NDK=$ANDROID_NDK \
