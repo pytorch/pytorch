@@ -12,6 +12,7 @@
 #include "torch/csrc/autograd/python_variable.h"
 #include "torch/csrc/autograd/python_function.h"
 #include "torch/csrc/jit/generated/aten_dispatch.h"
+#include "torch/csrc/jit/variable_flags.h"
 #ifdef WITH_CUDA
 #include "torch/csrc/jit/fusion_compiler.h"
 #endif
@@ -118,10 +119,19 @@ struct LambdaFunction : public Function {
     : LambdaFunction(op.num_inputs, nullptr) {
     auto & real_op = op.op;
     this->fn_ = [real_op](const variable_list& inputs) -> variable_list {
-      std::vector<at::Tensor> tinputs(inputs.begin(), inputs.end());
-      std::vector<at::Tensor> toutputs;
+      refcounted_list tinputs;
+      refcounted_list  toutputs;
+      tinputs.reserve(inputs.size());
+      for(auto & i : inputs) {
+        tinputs.push_back(i.get());
+      }
       real_op(tinputs, toutputs);
-      return variable_list(toutputs.begin(), toutputs.end());
+      variable_list outputs;
+      outputs.reserve(toutputs.size());
+      for(auto & o : toutputs) {
+        outputs.push_back(at::Tensor(static_cast<at::TensorImpl*>(o), false));
+      }
+      return outputs;
     };
     this->name_ = op.name;
   }
@@ -636,7 +646,7 @@ struct StageClosure {
   // Roots for a call to the engine. The list contains function in this order:
   // [ apply input roots | prev stage input roots | constant factory ]
   function_list roots;
-  std::pair<std::vector<VariableFlags>, std::vector<VariableFlags>> var_flags;
+  std::pair<std::vector<jit::VariableFlags>, std::vector<jit::VariableFlags>> var_flags;
 
   // Output node
   std::shared_ptr<Function> output;

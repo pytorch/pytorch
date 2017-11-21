@@ -20,19 +20,53 @@ using operator_constructor = std::function<TensorOp(jit::Node*)>;
 
 namespace {
 
-void pack_list(std::vector<Tensor> & outputs, Tensor v) { outputs.push_back(v); }
-void pack_list(std::vector<Tensor> & outputs, Scalar v) { outputs.push_back(v.toTensor()); }
-void pack_list(std::vector<Tensor> & outputs, const std::vector<Tensor> & t) {
-  outputs.insert(outputs.end(), t.begin(), t.end());
+// a temporary Tensor that does not alter the refcount of impl on
+// acquisition or release, avoids any refcounting in dispatch functions
+struct TensorTemporary : public at::Tensor {
+  explicit TensorTemporary(at::RefCounted * impl)
+  : at::Tensor(static_cast<at::TensorImpl*>(impl), false /* do not retain*/) {}
+  ~TensorTemporary() {
+    detach(); // reset
+  }
+};
+
+// same thing but creates a tensor list, only used rarely (e.g. for cat)
+struct TensorTemporaryList {
+  explicit TensorTemporaryList(const refcounted_list & ts) {
+    tensors.reserve(ts.size());
+    for(auto & t : ts) {
+      tensors.push_back(at::Tensor(static_cast<at::TensorImpl*>(t), false /*do not retain*/));
+    }
+  }
+  operator TensorList() const {
+    return tensors;
+  }
+  ~TensorTemporaryList() {
+    for(auto & t : tensors) {
+      t.detach();
+    }
+  }
+private:
+  std::vector<at::Tensor> tensors;
+};
+
+using refcounted_list = std::vector<at::RefCounted*>;
+void pack_list(refcounted_list & outputs, Tensor v) { outputs.push_back(v.detach()); }
+void pack_list(refcounted_list & outputs, Scalar v) { outputs.push_back(v.toTensor().detach()); }
+void pack_list(refcounted_list & outputs, std::vector<Tensor> && ts) {
+  outputs.reserve(ts.size());
+  for(auto & t : ts) {
+    outputs.push_back(t.detach());
+  }
 }
-void pack_list(std::vector<Tensor> & outputs, std::tuple<Tensor, Tensor> v) {
-  outputs.push_back(std::get<0>(v));
-  outputs.push_back(std::get<1>(v));
+void pack_list(refcounted_list & outputs, std::tuple<Tensor, Tensor> v) {
+  outputs.push_back(std::get<0>(v).detach());
+  outputs.push_back(std::get<1>(v).detach());
 }
-void pack_list(std::vector<Tensor> & outputs, std::tuple<Tensor, Tensor, Tensor> v) {
-  outputs.push_back(std::get<0>(v));
-  outputs.push_back(std::get<1>(v));
-  outputs.push_back(std::get<2>(v));
+void pack_list(refcounted_list & outputs, std::tuple<Tensor, Tensor, Tensor> v) {
+  outputs.push_back(std::get<0>(v).detach());
+  outputs.push_back(std::get<1>(v).detach());
+  outputs.push_back(std::get<2>(v).detach());
 }
 
 // A list of functions taking TensorList arguments (where we can't use

@@ -78,7 +78,7 @@ int main() {
   }
   check(threw);
   {
-    bool isgone = 0;
+    int isgone = 0;
     {
       auto f2 = CPU(kFloat).tensorFromBlob(data, {1,2,3}, [&](void*) {
         isgone++;
@@ -88,7 +88,7 @@ int main() {
     check(isgone == 1);
   }
   {
-    bool isgone = 0;
+    int isgone = 0;
     Tensor a_view;
     {
       auto f2 = CPU(kFloat).tensorFromBlob(data, {1,2,3}, [&](void*) {
@@ -102,7 +102,7 @@ int main() {
   }
 
   if(at::hasCUDA()) {
-    bool isgone = 0;
+    int isgone = 0;
     {
       auto f2 = CUDA(kFloat).tensorFromBlob(nullptr, {1,2,3}, [&](void*) {
         isgone++;

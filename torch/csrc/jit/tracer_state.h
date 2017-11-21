@@ -33,15 +33,6 @@ using function_list = std::vector<std::pair<std::shared_ptr<Function>, int>>;
 // from arising when a variable that participated in a trace outlives the
 // actual trace itself.
 
-struct VariableFlags {
-  static VariableFlags of(const Variable& var);
-  bool verify(const Variable& var) const;
-
-  bool requires_grad;
-  bool is_volatile;
-  bool was_null;
-};
-
 using io_variable_flags_list =
   std::vector<std::pair<std::vector<VariableFlags>, std::vector<VariableFlags>>>;
 

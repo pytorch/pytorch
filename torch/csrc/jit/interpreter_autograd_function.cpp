@@ -1,3 +1,4 @@
+#include "Python.h"
 #include "interpreter_autograd_function.h"
 
 namespace torch { namespace jit {
@@ -94,7 +95,7 @@ InterpreterFunctionFactory::InterpreterFunctionFactory(TracingState *state) {
   }
 }
 
-std::shared_ptr<InterpreterAutogradFunction> InterpreterFunctionFactory::construct() {
+std::shared_ptr<autograd::Function> InterpreterFunctionFactory::construct() {
   return std::make_shared<InterpreterAutogradFunction>(code_, stage_details_);
 }
 
