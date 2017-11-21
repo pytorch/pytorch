@@ -235,7 +235,7 @@ class SparseLookup(ModelLayer):
         elif self.reducer == 'Sqrt':
             sqrt_weight = net.LengthsToWeights(
                 [self.input_record.lengths()],
-                [self.input_record.lengths() + '_sqrt'],
+                [net.NextScopedBlob('lengths_sqrt')],
                 power=0.5,
             )
             self._sparse_lengths_weighted_reducer(
