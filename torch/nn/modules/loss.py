@@ -230,8 +230,8 @@ class PoissonNLLLoss(_Loss):
 
     def forward(self, log_input, target):
         _assert_no_grad(target)
-        return F.poisson_nll_loss(log_input, target, self.log_input, self.full, 
-            self.size_average, self.eps, self.reduce)
+        return F.poisson_nll_loss(log_input, target, self.log_input, self.full,
+                                  self.size_average, self.eps, self.reduce)
 
 
 class KLDivLoss(_Loss):
