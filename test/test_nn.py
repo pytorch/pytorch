@@ -3732,7 +3732,7 @@ new_criterion_tests = [
     ),
     dict(
         module_name='PoissonNLLLoss',
-        constructor_args=(False, True, True, 1e-8, True),
+        constructor_args=(False, True, True),
         input_fn=lambda: torch.randn(2, 3, 4, 5).abs_().add_(0.001),
         target_fn=lambda: torch.randn(2, 3, 4, 5).floor_().abs_(),
         desc='full_loss', # with sterling approx

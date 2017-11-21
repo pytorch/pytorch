@@ -1124,7 +1124,7 @@ def poisson_nll_loss(input, target, log_input=True, full=False, size_average=Tru
             log_input=False. Default: 1e-8
         reduce (bool, optional): By default, the losses are averaged
             over observations for each minibatch, or summed, depending on
-            size_average. When reduce is False, returns a loss per batch
+            size_average. When reduce is ``False``, returns a loss per batch
             element instead and ignores size_average. Default: ``True``
     """
     if log_input:
