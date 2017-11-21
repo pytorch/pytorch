@@ -5,6 +5,12 @@ set -e
 LOCAL_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 ROOT_DIR=$(dirname "$LOCAL_DIR")
 
+# Skip tests in environments where they are not built/applicable
+if [[ "${BUILD_ENVIRONMENT}" == *android ]]; then
+  echo 'Skipping tests'
+  exit 0
+fi
+
 cd "$ROOT_DIR"
 
 export PYTHONPATH="${PYTHONPATH}:/usr/local/caffe2"

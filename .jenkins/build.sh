@@ -5,11 +5,15 @@ set -ex
 LOCAL_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 ROOT_DIR=$(dirname "$LOCAL_DIR")
 
-# Remove potential leftovers from previous build
-rm -rf build install
+# Run build script from scripts if applicable
+if [[ "${BUILD_ENVIRONMENT}" == *android ]]; then
+  export ANDROID_NDK=/opt/ndk
+  ./scripts/build_android.sh "$@"
+  exit 0
+fi
 
 # Run cmake from ./build directory
-mkdir build
+mkdir -p build
 cd build
 
 CMAKE_ARGS=("-DCMAKE_INSTALL_PREFIX=/usr/local/caffe2")
