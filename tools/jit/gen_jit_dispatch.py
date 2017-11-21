@@ -85,7 +85,9 @@ def gen_jit_dispatch(declarations, out):
         # TensorList arguments, and functions that are only available as methods.
         if 'namespace' in decl['method_of']:
             if any(arg['simple_type'] == 'TensorList' for arg in arguments):
-                assert sum(map(is_tensor_arg, arguments)) == 1
+                if sum(map(is_tensor_arg, arguments)) != 1:
+                    # TODO: support this
+                    continue
                 args = ['inputs' if is_tensor_arg(arg) else arg['name']
                         for arg in arguments]
             else:

@@ -1,5 +1,4 @@
-#ifndef THP_EXCEPTIONS_H
-#define THP_EXCEPTIONS_H
+#pragma once
 
 #include <exception>
 #include <stdexcept>
@@ -13,6 +12,10 @@
 
 #define END_HANDLE_TH_ERRORS_RET(retval)                                       \
   } catch (python_error &e) {                                                  \
+    return retval;                                                             \
+  } catch (torch::PyTorchError &e) {                                           \
+    auto msg = torch::processErrorMsg(e.what());                               \
+    PyErr_SetString(e.python_type(), msg.c_str());                             \
     return retval;                                                             \
   } catch (std::exception &e) {                                                \
     auto msg = torch::processErrorMsg(e.what());                               \
@@ -87,7 +90,32 @@ bool THPException_init(PyObject *module);
 #endif
 
 namespace torch {
-THP_CLASS std::string processErrorMsg(std::string str);
-}
 
-#endif
+THP_CLASS std::string processErrorMsg(std::string str);
+
+// Abstract base class for exceptions which translate to specific Python types
+struct PyTorchError : public std::exception {
+  virtual PyObject* python_type() = 0;
+  virtual const char* what() const noexcept override {
+    return msg.c_str();
+  }
+  std::string msg;
+};
+
+// Translates to Python IndexError
+struct IndexError : public PyTorchError {
+  IndexError(const char *format, ...);
+  virtual PyObject* python_type() override {
+    return PyExc_IndexError;
+  }
+};
+
+// Translates to Python TypeError
+struct TypeError : public PyTorchError {
+  TypeError(const char *format, ...);
+  virtual PyObject* python_type() override {
+    return PyExc_TypeError;
+  }
+};
+
+} // namespace torch
