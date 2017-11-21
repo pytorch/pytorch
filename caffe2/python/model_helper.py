@@ -440,6 +440,10 @@ class ModelHelper(object):
         self, unused_blob_in, blob_out, batch_size, db, db_type, **kwargs
     ):
         """TensorProtosDBInput."""
+        assert len(unused_blob_in) == 0, \
+            """You cannot pass reader to model_helper.TensorProtosDBInput.
+               Use model.net.TensorProtosDBInput instead to create the op."""
+
         dbreader_name = "dbreader_" + db
         dbreader = self.param_init_net.CreateDB(
             [], dbreader_name,
