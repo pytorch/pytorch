@@ -16,11 +16,21 @@
 
 #pragma once
 
+// Apple clang was fixed in 8.1
 #if defined(__apple_build_version__) && ((__clang_major__ < 8) || ((__clang_major__ == 8) && (__clang_minor__ < 1)))
+#define __APPLE_NEED_FIX 1
+#endif
+
+// Regular clang was fixed in 3.9
+#if defined(__clang__) && (__clang_major__ < 4) && (__clang__minor__ < 9)
+#define __CLANG_NEED_FIX 1
+#endif
+
+#if __APPLE_NEED_FIX || __CLANG_NEED_FIX
 
 #include <emmintrin.h>
 
-// This version of apple clang has a bug that _cvtsh_ss is not defined, see
+// This version of clang has a bug that _cvtsh_ss is not defined, see
 // https://reviews.llvm.org/D16177
 static __inline float
     __attribute__((__always_inline__, __nodebug__, __target__("f16c")))
@@ -31,7 +41,10 @@ _cvtsh_ss(unsigned short a)
   return r[0];
 }
 
-#endif // defined(__APPLE__) && (__clang_major__ < 8)
+#endif // __APPLE_NEED_FIX || __CLANG_NEED_FIX
+
+#undef __APPLE_NEED_FIX
+#undef __CLANG_NEED_FIX
 
 #ifdef _MSC_VER
 
