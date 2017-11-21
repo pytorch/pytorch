@@ -365,7 +365,7 @@ auto ConvForward::apply(const variable_list& inputs) -> variable_list {
 // For Convolution strategies that don't implicitly handle grad_bias, we add a helper
 // function here to perform it using simple Tensor operators
 static at::Tensor compute_grad_bias(const at::Tensor& grad_output) {
-  // grad_output is in N, C, H, W, we re-shape and reduce over spatial dims and batches 
+  // grad_output is in N, C, H, W, we re-shape and reduce over spatial dims and batches
   return grad_output.contiguous().view({grad_output.size(0), grad_output.size(1), -1}).sum(0).sum(1);
 }
 
@@ -727,6 +727,11 @@ auto ConvBackwardBackward::apply(const variable_list& grad_grad_inputs) -> varia
       gI = apply_fn<Transpose>(0, 1)(gIt);
     }
   }
+
+  if (should_compute_output(0) && !ggO.defined()) ggO = at::zeros_like(gO);
+  if (should_compute_output(1) && !gI.defined()) gI = at::zeros_like(input);
+  if (should_compute_output(2) && !gW.defined()) gW = at::zeros_like(weight);
+
   return {ggO, gI, gW};
 }
 
