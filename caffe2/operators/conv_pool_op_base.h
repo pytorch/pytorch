@@ -284,9 +284,9 @@ class ConvPoolOpBase : public Operator<Context> {
       int /*N*/,
       vector<int>& kernel,
       vector<int>& output_dims,
-      vector<int> dilation,
-      vector<int> stride,
-      vector<int> pads,
+      const vector<int>& dilation,
+      const vector<int>& stride,
+      vector<int>& pads,
       bool& channel_first) {
     channel_first = false; // initialized to suppress compiler warning.
     vector<TIndex> dims;
