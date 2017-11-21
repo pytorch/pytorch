@@ -25,9 +25,6 @@ echo "Running C++ tests.."
 for test in ./test/*; do
   # Skip tests we know are hanging or bad
   case "$(basename "$test")" in
-    net_test)
-      continue
-      ;;
     mkl_utils_test)
       continue
       ;;
