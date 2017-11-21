@@ -245,6 +245,10 @@ module_tests = [
     ),
 ]
 
+def poissonnllloss_reference(input, target, log_input=True, full=False, 
+                             size_average=True, eps=1e-8, reduce=True):
+    pass
+
 
 def kldivloss_reference(input, target, size_average=True, reduce=True):
     safe_target = target * (target > 0).type_as(target)
@@ -320,6 +324,7 @@ def smoothl1loss_reference(input, target, size_average=True, reduce=True):
 
 
 loss_reference_fns = {
+    'PoissonNLLLoss': poissonnllloss_reference,
     'KLDivLoss': kldivloss_reference,
     'NLLLoss': nllloss_reference,
     'NLLLoss2d': nllloss2d_reference,
