@@ -35,34 +35,38 @@ template <class T>
 class DummyObserver final : public ObserverBase<T> {
  public:
   explicit DummyObserver<T>(T* subject_) : ObserverBase<T>(subject_) {}
-  void Start() override;
-  void Stop() override;
+  bool Start() override;
+  bool Stop() override;
 
   ~DummyObserver() {}
 };
 
 template <>
-void DummyObserver<NetBase>::Start() {
+bool DummyObserver<NetBase>::Start() {
   vector<OperatorBase*> operators = subject_->GetOperators();
   for (auto& op : operators) {
     op->AttachObserver(caffe2::make_unique<DummyObserver<OperatorBase>>(op));
   }
   counter.fetch_add(1000);
+  return true;
 }
 
 template <>
-void DummyObserver<OperatorBase>::Start() {
+bool DummyObserver<OperatorBase>::Start() {
   counter.fetch_add(100);
+  return true;
 }
 
 template <>
-void DummyObserver<NetBase>::Stop() {
+bool DummyObserver<NetBase>::Stop() {
   counter.fetch_add(10);
+  return true;
 }
 
 template <>
-void DummyObserver<OperatorBase>::Stop() {
+bool DummyObserver<OperatorBase>::Stop() {
   counter.fetch_add(1);
+  return true;
 }
 
 class ObsTestDummyOp final : public OperatorBase {

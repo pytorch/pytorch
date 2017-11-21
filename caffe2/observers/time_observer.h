@@ -36,8 +36,8 @@ class TimeObserverBase : public ObserverBase<T> {
   }
   ~TimeObserverBase() {}
 
-  void Start() override;
-  void Stop() override;
+  bool Start() override;
+  bool Stop() override;
 
  protected:
   Timer timer_;
@@ -77,7 +77,7 @@ class TimeObserver<NetBase> final : public TimeObserverBase<NetBase> {
     return sum / subject_->GetOperators().size();
   }
 
-  void Start() override {
+  bool Start() override {
     for (auto* op : subject_->GetOperators()) {
       const auto* observer = op->AttachObserver(
           caffe2::make_unique<TimeObserver<OperatorBase>>(op));
@@ -87,6 +87,7 @@ class TimeObserver<NetBase> final : public TimeObserverBase<NetBase> {
     }
     start_time_ = timer_.MilliSeconds();
     ++iterations_;
+    return true;
   }
 
  private:

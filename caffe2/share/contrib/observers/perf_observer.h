@@ -18,8 +18,8 @@ class PerfNetObserver : public NetObserver {
   }
 
  private:
-  void Start() override;
-  void Stop() override;
+  bool Start() override;
+  bool Stop() override;
 
   caffe2::string getObserverName(const OperatorBase* op, int idx) const;
 
@@ -46,8 +46,8 @@ class PerfOperatorObserver : public ObserverBase<OperatorBase> {
   double getMilliseconds() const;
 
  private:
-  void Start() override;
-  void Stop() override;
+  bool Start() override;
+  bool Stop() override;
 
  private:
   // Observer of a net that owns corresponding op. We make sure net is never
