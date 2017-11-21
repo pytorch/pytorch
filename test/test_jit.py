@@ -18,6 +18,14 @@ except ImportError:
 
 skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
 
+RUN_CUDA = torch.cuda.is_available()
+if torch.cuda.is_available():
+    CUDA_VERSION = torch._C._cuda_getCompiledVersion()
+    for d in range(torch.cuda.device_count()):
+        major = torch.cuda.get_device_capability(d)[0]
+        if (CUDA_VERSION < 8000 and major >= 6) or (CUDA_VERSION < 9000 and major >= 7):
+            RUN_CUDA = False
+
 
 def LSTMCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
     hx, cx = hidden
@@ -62,7 +70,7 @@ class TestJit(TestCase):
         torch._C._jit_pass_lint(trace)
         self.assertExpected(str(trace))
 
-    @unittest.skipIf(not torch.cuda.is_available(), "fuser requires CUDA")
+    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     def test_lstm_fusion(self):
         input = Variable(torch.randn(3, 10).float().cuda())
         hx = Variable(torch.randn(3, 20).float().cuda())
@@ -75,7 +83,7 @@ class TestJit(TestCase):
         torch._C._jit_pass_lint(trace)
         self.assertExpected(str(trace))
 
-    @unittest.skipIf(not torch.cuda.is_available(), "fuser requires CUDA")
+    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     def test_run_lstm_fusion(self):
         input = Variable(torch.randn(3, 10).float().cuda())
         hx = Variable(torch.randn(3, 20).float().cuda())
@@ -89,7 +97,7 @@ class TestJit(TestCase):
             z2 = CompiledLSTMCell(input, (hx, cx), *module.parameters())
         self.assertEqual(z, z2)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "fuser requires CUDA")
+    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     def test_run_lstm_fusion_concat(self):
         input = Variable(torch.randn(3, 10).float().cuda())
         hx = Variable(torch.randn(3, 20).float().cuda())
@@ -103,7 +111,7 @@ class TestJit(TestCase):
             z2 = CompiledLSTMCell(input, (hx, cx), *module.parameters())
         self.assertEqual(z, z2)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "fuser requires CUDA")
+    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     def test_concat_fusion(self):
         hx = Variable(torch.randn(3, 20).float().cuda())
         cx = Variable(torch.randn(3, 20).float().cuda())
@@ -117,7 +125,7 @@ class TestJit(TestCase):
         torch._C._jit_pass_lint(trace)
         self.assertExpected(str(trace))
 
-    @unittest.skipIf(not torch.cuda.is_available(), "fuser requires CUDA")
+    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     def test_fusion_distribute(self):
         def f(x, y):
             z1, z2 = (x + y).chunk(2, dim=1)
@@ -203,7 +211,7 @@ class TestJit(TestCase):
         self.assertEqual(z, torch.sigmoid(torch.tanh(x * (x + y))))
         self.assertEqual(z, z2)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "fuser requires CUDA")
+    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     def test_compile_addc(self):
         x = Variable(torch.Tensor([0.4]), requires_grad=True).float().cuda()
         y = Variable(torch.Tensor([0.7]), requires_grad=True).float().cuda()
@@ -677,7 +685,7 @@ class TestJit(TestCase):
         assert(torch.equal(torch.ones([2, 2]), t_node.t("a")))
         self.assertExpected(str(g2))
 
-    @unittest.skipIf(not torch.cuda.is_available(), "cpp tests require CUDA")
+    @unittest.skipIf(not RUN_CUDA, "cpp tests require CUDA")
     def test_cpp(self):
         torch._C._jit_run_cpp_tests()
 
