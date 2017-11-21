@@ -6,6 +6,7 @@ from torch.distributions import Bernoulli, Categorical, Normal
 
 
 class TestDistributions(TestCase):
+
     def _gradcheck_log_prob(self, dist_ctor, ctor_params):
         # performs gradient checks on log_prob
         distribution = dist_ctor(*ctor_params)
@@ -76,10 +77,17 @@ class TestDistributions(TestCase):
         self.assertEqual(Normal(0.2, .6).sample_n(1).size(), (1, 1))
         self.assertEqual(Normal(-0.7, 50.0).sample_n(1).size(), (1, 1))
 
+        self.assertEqual(Normal(mean, std, True).sample().size(), (5, 5))
+        self.assertEqual(Normal(mean, std, True).sample_n(7).size(), (7, 5, 5))
+        self.assertEqual(Normal(mean_1d, std_1d, True).sample_n(1).size(), (1, 1))
+        self.assertEqual(Normal(mean_1d, std_1d, True).sample().size(), (1,))
+        self.assertEqual(Normal(0.2, .6, True).sample_n(1).size(), (1, 1))
+        self.assertEqual(Normal(-0.7, 50.0, True).sample_n(1).size(), (1, 1))
+
         self._gradcheck_log_prob(Normal, (mean, std))
         self._gradcheck_log_prob(Normal, (mean, 1.0))
         self._gradcheck_log_prob(Normal, (0.0, std))
-
+        
         def ref_log_prob(idx, x, log_prob):
             m = mean.data.view(-1)[idx]
             s = std.data.view(-1)[idx]
