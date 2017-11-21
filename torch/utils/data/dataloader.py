@@ -1,9 +1,9 @@
 import torch
 import torch.multiprocessing as multiprocessing
-from torch._C import _set_worker_signal_handlers, \
-    _set_main_signal_handlers_for_workers, \
-    _remove_main_signal_handlers_for_workers
+from torch._C import _set_worker_signal_handlers, _update_worker_pids, \
+    _remove_worker_pids, _error_if_any_worker_fails
 from .sampler import SequentialSampler, RandomSampler, BatchSampler
+import signal
 import collections
 import re
 import sys
@@ -20,6 +20,7 @@ else:
 
 
 _use_shared_memory = False
+_SIGCHLD_handler_set = False
 """Whether to use shared memory in default_collate"""
 
 
@@ -143,6 +144,21 @@ def pin_memory_batch(batch):
     else:
         return batch
 
+def _set_SIGCHLD_handler():
+    global _SIGCHLD_handler_set
+    if _SIGCHLD_handler_set:
+        return
+    previous_handler = signal.getsignal(signal.SIGCHLD)
+    def handler(signum, frame):
+        _error_if_any_worker_fails()
+        if callable(previous_handler):
+            previous_handler(signum, frame)
+    try:
+        signal.signal(signal.SIGCHLD, handler)
+    except ValueError as _:
+        return  # Windows doesn't support this
+    _SIGCHLD_handler_set = True
+
 
 class DataLoaderIter(object):
     "Iterates once over the DataLoader's dataset, as specified by the sampler"
@@ -162,7 +178,7 @@ class DataLoaderIter(object):
             self.index_queue = multiprocessing.SimpleQueue()
             self.worker_result_queue = multiprocessing.SimpleQueue()
             self.batches_outstanding = 0
-            self.handlers_set = False
+            self.worker_pids_set = False
             self.shutdown = False
             self.send_idx = 0
             self.rcvd_idx = 0
@@ -178,10 +194,6 @@ class DataLoaderIter(object):
                 w.daemon = True  # ensure that the worker exits on process exit
                 w.start()
 
-            self.worker_pids = tuple(w.pid for w in self.workers)
-
-            self.handlers_set = _set_main_signal_handlers_for_workers(self.worker_pids)
-
             if self.pin_memory or self.timeout > 0:
                 self.data_queue = queue.Queue()
                 self.worker_manager_thread = threading.Thread(
@@ -191,6 +203,10 @@ class DataLoaderIter(object):
                 self.worker_manager_thread.start()
             else:
                 self.data_queue = self.worker_result_queue
+
+            _update_worker_pids(id(self), tuple(w.pid for w in self.workers))
+            _set_SIGCHLD_handler()
+            self.worker_pids_set = True
 
             # prime the prefetch loop
             for _ in range(2 * self.num_workers):
@@ -222,7 +238,7 @@ class DataLoaderIter(object):
             return self._process_next_batch(batch)
 
         if self.batches_outstanding == 0:
-            self._remove_handers()
+            self._remove_worker_pids_information()
             self._shutdown_workers()
             raise StopIteration
 
@@ -274,18 +290,20 @@ class DataLoaderIter(object):
                 self.data_queue.get()
             for _ in self.workers:
                 self.index_queue.put(None)
-            # if all workers hang, no None is showed to worker_manager_thread,
-            # we put None to let worker_manager_thread exit
+            # if all workers hang, no None is sent to worker_manager_thread, we
+            # put None to let worker_manager_thread exit
+            # empty check prevents put from hanging
             if self.worker_result_queue.empty():
                 self.worker_result_queue.put(None)
 
-    def _remove_handers(self):
-        if self.handlers_set:
-            self.handlers_set = not _remove_main_signal_handlers_for_workers(self.worker_pids)
+    def _remove_worker_pids_information(self):
+        if self.worker_pids_set:
+            _remove_worker_pids(id(self))
+            self.worker_pids_set = False
 
     def __del__(self):
         if self.num_workers > 0:
-            self._remove_handers()
+            self._remove_worker_pids_information()
             self._shutdown_workers()
 
 
