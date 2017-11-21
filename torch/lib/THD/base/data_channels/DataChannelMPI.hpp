@@ -22,8 +22,8 @@ struct DataChannelMPI : DataChannel {
 
   private:
     template<typename T>
-    void steal_buffer(std::shared_ptr<T> ptr);
-    void steal_tensor_buffer(at::Tensor& t);
+    void save_buffer(std::shared_ptr<T> ptr);
+    void save_tensor_buffer(at::Tensor& t);
     MPI_Request& new_request();
 
     std::vector<std::shared_ptr<void>> _buffers;
@@ -63,8 +63,7 @@ struct DataChannelMPI : DataChannel {
   THDGroup newGroup(const std::vector<rank_type>& ranks) override;
 
 private:
-  void _broadcastPack(at::Tensor& data, rank_type src_rank, MPI_Comm comm) const;
-  void _broadcastUnpack(at::Tensor& data, rank_type src_rank, MPI_Comm comm) const;
+  at::Tensor _newLikeFlat(std::vector<at::Tensor>& tensors) const;
 
   rank_type _rank; // Current process' rank
   rank_type _num_processes; // Number of processes in network
