@@ -14,7 +14,7 @@ def scatter(inputs, target_gpus, dim=0):
         if isinstance(obj, Variable):
             return Scatter.apply(target_gpus, None, dim, obj)
         assert not torch.is_tensor(obj), "Tensors not supported in scatter."
-        if isinstance(obj, tuple):
+        if isinstance(obj, tuple) and len(obj) > 0:
             return list(zip(*map(scatter_map, obj)))
         if isinstance(obj, list) and len(obj) > 0:
             return list(map(list, zip(*map(scatter_map, obj))))
