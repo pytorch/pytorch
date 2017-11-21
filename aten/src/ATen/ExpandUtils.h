@@ -93,4 +93,32 @@ inline std::tuple<Tensor> expand_size(const Tensor &to_expand, IntList sizes, co
   return expand_size(to_expand, sizes);
 }
 
+inline std::vector<Tensor> expand_outplace(TensorList to_expand) {
+  // expands a list of Tensors; ignores undefined (null) tensors
+  bool first = true;
+  std::vector<int64_t> sizes;
+  for (size_t i = 0; i < to_expand.size(); ++i) {
+    if (!to_expand[i].defined()) {
+      continue;
+    } else if (first) {
+      sizes = to_expand[i].sizes();
+      first = false;
+    } else {
+      sizes = infer_size(sizes, to_expand[i].sizes());
+    }
+  }
+
+  std::vector<Tensor> result(to_expand.size());
+  for (size_t i = 0; i < to_expand.size(); ++i) {
+    if (!to_expand[i].defined()) {
+      continue;
+    } else if (to_expand[i].sizes().equals(sizes)) {
+      result[i] = to_expand[i];
+    } else {
+      result[i] = to_expand[i].expand(sizes);
+    }
+  }
+  return result;
+}
+
 }

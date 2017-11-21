@@ -671,10 +671,10 @@ def create_variable_type(top_env, aten_declarations):
         else:
             return ''
 
-    def unpack_args(env, option):
+    def unpack_args(env, declaration):
         body = []
         unpacked_args = []
-        for i, arg in enumerate(option['arguments']):
+        for i, arg in enumerate(declaration['arguments']):
             if not requires_unpack(arg):
                 unpacked_args.append(arg['name'])
                 continue
@@ -683,6 +683,9 @@ def create_variable_type(top_env, aten_declarations):
             is_nullable = arg.get('is_nullable', False)
             ref = (not is_nullable) and dynamic_type != 'TensorList'
             suffix = get_suffix(dynamic_type, is_nullable)
+            if dynamic_type == 'TensorList' and declaration['name'] == 'index':
+                # TODO: specify this in Declarations.yaml somehow
+                suffix = '_idxs'
 
             body.append(UNPACK_TENSOR.substitute(
                 arg_name=arg['name'],
@@ -692,8 +695,8 @@ def create_variable_type(top_env, aten_declarations):
             ))
             unpacked_args.append(arg['name'] + '_')
 
-        if option.get('derivative') is not None:
-            for arg in option['derivative'].get('buffers', []):
+        if declaration.get('derivative') is not None:
+            for arg in declaration['derivative'].get('buffers', []):
                 unpacked_args.append(arg + '_')
         env['unpacked_args'] = unpacked_args
         return body
@@ -836,7 +839,7 @@ def create_variable_type(top_env, aten_declarations):
                 env['result'] = CodeTemplate("{ ${outs} }").substitute(outs=diff_outs)
             env['trace_outputs'] = CodeTemplate("{ ${outs} }").substitute(outs=trace_outs)
 
-        if any(arg['simple_type'] in {'Generator', 'Storage'} for arg in arguments):
+        if any(arg['simple_type'] in {'Generator', 'Storage'} for arg in arguments) or declaration['name'] == 'index':
             env['record_trace'] = []
         else:
             env['record_trace'] = emit_record_trace(env, declaration)

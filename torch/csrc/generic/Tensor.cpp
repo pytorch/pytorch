@@ -488,8 +488,9 @@ static PyObject * THPTensor_(pynew)(PyTypeObject *type, PyObject *args, PyObject
         }
         if (!PySequence_Check(sequences[i])) {
           std::string index_str = THPTensor_(indicesToString)(indices, i);
-          THPUtils_setError("an item of time %s at index %s doesn't implement "
-              "a sequence protocol");
+          THPUtils_setError(
+              "an item of type %s at index %s doesn't implement a sequence protocol",
+              THPUtils_typename(sequences[i].get()), index_str.c_str());
           return NULL;
         }
         Py_ssize_t length = PySequence_Length(sequences[i]);

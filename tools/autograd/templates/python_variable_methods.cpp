@@ -168,6 +168,26 @@ static PyObject * THPVariable_contiguous(PyObject* self, PyObject* args)
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject * THPVariable_copy_(PyObject* self, PyObject* args, PyObject* kwargs)
+{
+  HANDLE_TH_ERRORS
+  static PythonArgParser parser({
+    "copy_(Tensor other)"
+  });
+  auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
+  PyObject* parsed_args[1];
+  auto r = parser.parse(args, kwargs, parsed_args);
+  if (r.idx == 0) {
+    Tensor other = r.tensor(0);
+    AutoNoGIL no_gil;
+    AutoGPU gpu(self_);
+    self_.copy_(other);
+  }
+  Py_INCREF(self);
+  return self;
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject * THPVariable_detach(PyObject* self, PyObject* args)
 {
   HANDLE_TH_ERRORS
@@ -270,6 +290,7 @@ PyMethodDef variable_methods[] = {
   {"clamp_", (PyCFunction)THPVariable_clamp_, METH_VARARGS | METH_KEYWORDS, NULL},
   {"dim", (PyCFunction)THPVariable_dim, METH_NOARGS, NULL},
   {"contiguous", (PyCFunction)THPVariable_contiguous, METH_NOARGS, NULL},
+  {"copy_", (PyCFunction)THPVariable_copy_, METH_VARARGS | METH_KEYWORDS, NULL},
   {"detach", (PyCFunction)THPVariable_detach, METH_NOARGS, NULL},
   {"detach_", (PyCFunction)THPVariable_detach_, METH_NOARGS, NULL},
   {"double", (PyCFunction)THPVariable_double, METH_NOARGS, NULL},
