@@ -18,6 +18,7 @@
 
 #include "caffe2/mkl/utils/mkl_operator.h"
 #include "caffe2/operators/cross_entropy_op.h"
+#include "caffe2/operators/dropout_op.h"
 #include "caffe2/operators/elementwise_op.h"
 #include "caffe2/operators/filler_op.h"
 #include "caffe2/operators/load_save_op.h"
@@ -74,5 +75,8 @@ REGISTER_MKL_OPERATOR(
     Sigmoid,
     mkl::MKLFallbackOp<
         UnaryElementwiseOp<TensorTypes<float>, CPUContext, SigmoidCPUFunctor>>);
+REGISTER_MKL_OPERATOR(
+    Dropout,
+    mkl::MKLFallbackOp<DropoutOp<float, CPUContext>, SkipIndices<1>>);
 
 } // namespace caffe2
