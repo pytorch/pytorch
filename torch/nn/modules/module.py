@@ -240,7 +240,7 @@ class Module(object):
         Returns:
             Module: self
         """
-        return self._apply(lambda t: t.float())
+        return self._apply(lambda t: t.float() if not type(t) in torch._integer_tensor_classes else t)
 
     def double(self):
         """Casts all parameters and buffers to double datatype.
@@ -248,7 +248,7 @@ class Module(object):
         Returns:
             Module: self
         """
-        return self._apply(lambda t: t.double())
+        return self._apply(lambda t: t.double() if not type(t) in torch._integer_tensor_classes else t)
 
     def half(self):
         """Casts all parameters and buffers to half datatype.
@@ -256,7 +256,7 @@ class Module(object):
         Returns:
             Module: self
         """
-        return self._apply(lambda t: t.half())
+        return self._apply(lambda t: t.half() if not type(t) in torch._integer_tensor_classes else t)
 
     def register_backward_hook(self, hook):
         """Registers a backward hook on the module.

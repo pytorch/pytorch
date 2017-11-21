@@ -266,6 +266,9 @@ _tensor_classes = {
     CharTensor, ByteTensor, HalfTensor
 }
 
+_integer_tensor_classes = {
+    LongTensor, IntTensor, ShortTensor, CharTensor, ByteTensor
+}
 
 set_default_tensor_type('torch.FloatTensor')
 
