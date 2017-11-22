@@ -16,6 +16,7 @@
 
 #include "caffe2/core/operator.h"
 #include "caffe2/utils/cpu_neon.h"
+#include "caffe2/utils/math.h"
 
 namespace caffe2 {
 

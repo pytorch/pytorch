@@ -22,6 +22,7 @@
 #include "caffe2/core/net.h"
 #include "caffe2/core/operator_gradient.h"
 #include "caffe2/core/tensor.h"
+#include "caffe2/core/types.h"
 #include "caffe2/core/workspace.h"
 
 #include "caffe2/proto/caffe2.pb.h"

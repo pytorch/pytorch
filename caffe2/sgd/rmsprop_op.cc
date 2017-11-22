@@ -16,6 +16,8 @@
 
 #include "rmsprop_op.h"
 
+#include "caffe2/utils/math.h"
+
 namespace caffe2 {
 
 template <>
