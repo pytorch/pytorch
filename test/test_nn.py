@@ -811,12 +811,20 @@ class TestNN(NNTestCase):
         net.l = l
         net.l2 = l
         net.add_module('empty', None)
+        net.register_buffer('indices', torch.LongTensor(1))
         net.float()
         self.assertIsInstance(l.weight.data, torch.FloatTensor)
         self.assertIsInstance(l.bias.data, torch.FloatTensor)
+        self.assertIsInstance(net.indices, torch.LongTensor)
         net.double()
         self.assertIsInstance(l.weight.data, torch.DoubleTensor)
         self.assertIsInstance(l.bias.data, torch.DoubleTensor)
+        self.assertIsInstance(net.indices, torch.LongTensor)
+        if TEST_CUDA:
+            net.float().cuda()
+            self.assertIsInstance(l.weight.data, torch.cuda.FloatTensor)
+            self.assertIsInstance(l.bias.data, torch.cuda.FloatTensor)
+            self.assertIsInstance(net.indices, torch.cuda.LongTensor)
         net.type(torch.FloatTensor)
         self.assertIsInstance(l.weight.data, torch.FloatTensor)
         self.assertIsInstance(l.bias.data, torch.FloatTensor)

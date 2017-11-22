@@ -235,28 +235,28 @@ class Module(object):
         return self._apply(lambda t: t.type(dst_type))
 
     def float(self):
-        """Casts all parameters and buffers to float datatype.
+        """Casts all floating point parameters and buffers to float datatype.
 
         Returns:
             Module: self
         """
-        return self._apply(lambda t: t.float())
+        return self._apply(lambda t: t.float() if not type(t) in torch._integer_tensor_classes else t)
 
     def double(self):
-        """Casts all parameters and buffers to double datatype.
+        """Casts all floating point parameters and buffers to double datatype.
 
         Returns:
             Module: self
         """
-        return self._apply(lambda t: t.double())
+        return self._apply(lambda t: t.double() if not type(t) in torch._integer_tensor_classes else t)
 
     def half(self):
-        """Casts all parameters and buffers to half datatype.
+        """Casts all floating point parameters and buffers to half datatype.
 
         Returns:
             Module: self
         """
-        return self._apply(lambda t: t.half())
+        return self._apply(lambda t: t.half() if not type(t) in torch._integer_tensor_classes else t)
 
     def register_backward_hook(self, hook):
         """Registers a backward hook on the module.
