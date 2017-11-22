@@ -300,3 +300,32 @@ int THRandom_bernoulli(THGenerator *_generator, double p)
   THArgCheck(p >= 0 && p <= 1, 1, "must be >= 0 and <= 1");
   return(uniform_double(_generator) <= p);
 }
+
+TH_API double THRandom_gamma(THGenerator *_generator, double alpha, double beta) {
+  double scale = 1.0 / beta;
+
+  /* Boost alpha for higher acceptance probability. */
+  if(alpha < 1.0) {
+    scale *= pow(1 - uniform_double(_generator), 1.0 / alpha);
+    alpha += 1.0;
+  }
+
+  /* This implements the acceptance-rejection method of Marsaglia and Tsang (2000)
+    doi:10.1145/358407.358414 */
+  const double d = alpha - 1.0 / 3.0;
+  const double c = 1.0 - sqrt(9.0 * d);
+  for(;;) {
+    double x, v;
+    do {
+      x = THRandom_normal(_generator, 0.0, 1.0);
+      v = 1.0 + c * x;
+    } while(v <= 0);
+    v = v * v * v;
+    const double u = 1 - uniform_double(_generator);
+    const double xx = x * x;
+    if(u < 1.0 - 0.0331 * xx * xx)
+      return scale * d * v;
+    if(log(u) < 0.5 * xx + d * (1.0 - v + log(v)))
+      return scale * d * v;
+  }
+}
