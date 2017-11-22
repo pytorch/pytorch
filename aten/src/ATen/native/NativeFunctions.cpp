@@ -120,6 +120,14 @@ bool is_cuda(const Tensor& self) {
   return self.type().is_cuda();
 }
 
+bool is_distributed(const Tensor& self) {
+  return self.type().is_distributed();
+}
+
+bool is_sparse(const Tensor& self) {
+  return self.type().is_sparse();
+}
+
 Tensor permute(const Tensor& self, IntList dims) {
   auto nDims = self.dim();
   if (dims.size() != (size_t)nDims) {

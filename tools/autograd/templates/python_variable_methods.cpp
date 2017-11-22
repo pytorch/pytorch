@@ -209,15 +209,15 @@ static PyObject * THPVariable_detach_(PyObject* self, PyObject* args)
 static Tensor dispatch_to_backend(const Tensor & self, Backend backend) {
   AutoNoGIL no_gil;
   AutoGPU auto_gpu(self);
-  Tensor t = self.toBackend(backend);
-  return t;
+  return self.toBackend(backend);
 }
 
 static PyObject * THPVariable_cpu(PyObject* self, PyObject* args)
 {
    HANDLE_TH_ERRORS
    auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
-   return wrap(dispatch_to_backend(self_, Backend::CPU));
+   auto backend = self_.is_sparse() ? Backend::SparseCPU : Backend::CPU;
+   return wrap(dispatch_to_backend(self_, backend));
    END_HANDLE_TH_ERRORS
 }
 
