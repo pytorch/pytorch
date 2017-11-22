@@ -44,11 +44,19 @@ struct IODescriptor {
     return get_hash(o.structure, o.metadata);
   }
 
+  void extend(const autograd::variable_list& list) {
+    metadata.reserve(metadata.size() + list.size());
+    for (auto & var : list)
+      metadata.emplace_back(var);
+  }
+
   // Description of argument structure. Variables are replaced with
   // different characters, depending on their flags, beginnings and
   // ends of tuples and lists are denoted by a pair of parenthesis
   // of their corresponding kind. They should always be paired.
   // Example desc: (vv[v(v)v])
+  // NOTE: if extend() was ever called then metadata.size() can be
+  // different than the number of 'v's in structure.
   std::string structure;
   std::vector<VariableMetadata> metadata;
 };
@@ -61,6 +69,14 @@ struct ParsedArgs {
   IODescriptor desc;
   // True iff any of vars is volatile
   bool is_volatile = false;
+
+  void extend(const autograd::variable_list& list) {
+    if (list.empty()) return;
+    vars.reserve(vars.size() + list.size());
+    for (auto & var : list)
+      vars.emplace_back(var);
+    desc.extend(list);
+  }
 };
 
 

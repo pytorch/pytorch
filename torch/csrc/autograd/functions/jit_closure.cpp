@@ -386,6 +386,7 @@ struct CrossStageStateDesc {
     for (auto output : graph->outputs())
       stage_outputs[output->stage()].push_back(output);
 
+    JIT_ASSERT(stage_begins.size() == graph->stage() + 2);
     JIT_ASSERT(prev_stage_inputs.front().empty());
     JIT_ASSERT(cur_stage_captures.back().empty());
   }
