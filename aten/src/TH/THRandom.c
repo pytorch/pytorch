@@ -276,32 +276,7 @@ double THRandom_exponential(THGenerator *_generator, double lambda)
   return(-1. / lambda * log(1-uniform_double(_generator)));
 }
 
-double THRandom_cauchy(THGenerator *_generator, double median, double sigma)
-{
-  return(median + sigma * tan(M_PI*(uniform_double(_generator)-0.5)));
-}
-
-/* Faut etre malade pour utiliser ca.
-   M'enfin. */
-double THRandom_logNormal(THGenerator *_generator, double mean, double stdv)
-{
-  THArgCheck(stdv > 0, 2, "standard deviation must be strictly positive");
-  return(exp(THRandom_normal(_generator, mean, stdv)));
-}
-
-int THRandom_geometric(THGenerator *_generator, double p)
-{
-  THArgCheck(p > 0 && p < 1, 1, "must be > 0 and < 1");
-  return((int)(log(1-uniform_double(_generator)) / log(p)) + 1);
-}
-
-int THRandom_bernoulli(THGenerator *_generator, double p)
-{
-  THArgCheck(p >= 0 && p <= 1, 1, "must be >= 0 and <= 1");
-  return(uniform_double(_generator) <= p);
-}
-
-TH_API double THRandom_gamma(THGenerator *_generator, double alpha, double beta) {
+TH_API double THRandom_random_gamma(THGenerator *_generator, double alpha, double beta) {
   double scale = 1.0 / beta;
 
   /* Boost alpha for higher acceptance probability. */
@@ -328,4 +303,29 @@ TH_API double THRandom_gamma(THGenerator *_generator, double alpha, double beta)
     if(log(u) < 0.5 * xx + d * (1.0 - v + log(v)))
       return scale * d * v;
   }
+}
+
+double THRandom_cauchy(THGenerator *_generator, double median, double sigma)
+{
+  return(median + sigma * tan(M_PI*(uniform_double(_generator)-0.5)));
+}
+
+/* Faut etre malade pour utiliser ca.
+   M'enfin. */
+double THRandom_logNormal(THGenerator *_generator, double mean, double stdv)
+{
+  THArgCheck(stdv > 0, 2, "standard deviation must be strictly positive");
+  return(exp(THRandom_normal(_generator, mean, stdv)));
+}
+
+int THRandom_geometric(THGenerator *_generator, double p)
+{
+  THArgCheck(p > 0 && p < 1, 1, "must be > 0 and < 1");
+  return((int)(log(1-uniform_double(_generator)) / log(p)) + 1);
+}
+
+int THRandom_bernoulli(THGenerator *_generator, double p)
+{
+  THArgCheck(p >= 0 && p <= 1, 1, "must be >= 0 and <= 1");
+  return(uniform_double(_generator) <= p);
 }

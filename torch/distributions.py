@@ -191,3 +191,41 @@ class Normal(Distribution):
         var = (self.std ** 2)
         log_std = math.log(self.std) if isinstance(self.std, Number) else self.std.log()
         return -((value - self.mean) ** 2) / (2 * var) - log_std - math.log(math.sqrt(2 * math.pi))
+
+
+class Gamma(Distribution):
+    r"""
+    Creates a Gamma distribution parameterized by shape `alpha` and rate `beta`.
+
+    Example::
+
+        >>> m = Gamma(torch.Tensor([1.0]), torch.Tensor([1.0]))
+        >>> m.sample()  # Gamma distributed with shape alpha=1 and rate beta=1
+         0.1046
+        [torch.FloatTensor of size 1]
+
+    Args:
+        alpha (float or Tensor or Variable): shape parameter of the distribution
+        beta (float or Tensor or Variable): rate = 1 / scale of the distribution
+    """
+
+    def __init__(self, alpha, beta):
+        self.alpha = alpha
+        self.beta = beta
+
+    def sample(self):
+        return torch.random_gamma(self.alpha, self.beta)
+
+    def sample_n(self, n):
+        # cleanly expand float or Tensor or Variable parameters
+        def expand(v):
+            if isinstance(v, Number):
+                return torch.Tensor([v]).expand(n, 1)
+            else:
+                return v.expand(n, *v.size())
+        return torch.random_gamma(expand(self.alpha), expand(self.beta))
+
+    def log_prob(self, value):
+        return (self.alpha * torch.log(self.beta)
+                + (self.alpha - 1) * torch.log(value)
+                - self.beta * value - torch.lgamma(self.alpha))

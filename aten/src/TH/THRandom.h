@@ -65,6 +65,12 @@ TH_API double THRandom_normal(THGenerator *_generator, double mean, double stdv)
 */
 TH_API double THRandom_exponential(THGenerator *_generator, double lambda);
 
+/** Generates a random number from a Gamma distribution.
+    The Gamma density is proportional to $beta^alpha x^{alpha-1} exp(-beta x)$
+    This uses the alpha,beta parameterization where both are positive real numbers.
+*/
+TH_API double THRandom_random_gamma(THGenerator *_generator, double alpha, double beta);
+
 /** Returns a random number from a Cauchy distribution.
     The Cauchy density is $p(x) = sigma/(pi*(sigma^2 + (x-median)^2))$
 */
@@ -84,10 +90,4 @@ TH_API int THRandom_geometric(THGenerator *_generator, double p);
 
 /* Returns true with probability $p$ and false with probability $1-p$ (p > 0). */
 TH_API int THRandom_bernoulli(THGenerator *_generator, double p);
-
-/** Generates a random number from a Gamma distribution.
-    The Gamma density is proportional to $beta^alpha x^{alpha-1} exp(-beta x)$
-    This uses the alpha,beta parameterization where both are positive real numbers.
-*/
-TH_API double THRandom_gamma(THGenerator *_generator, double alpha, double beta);
 #endif

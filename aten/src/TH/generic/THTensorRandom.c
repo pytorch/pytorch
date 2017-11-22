@@ -118,6 +118,10 @@ void THTensor_(logNormal)(THTensor *self, THGenerator *_generator, double mean, 
   TH_TENSOR_APPLY(real, self, *self_data = (real)THRandom_logNormal(_generator, mean, stdv););
 }
 
+void THTensor_(random_gamma)(THTensor *self, THGenerator *_generator, double alpha, double beta)
+{
+  TH_TENSOR_APPLY(real, self, *self_data = (real)THRandom_random_gamma(_generator, alpha, beta););
+}
 
 void THTensor_(multinomialAliasSetup)(THTensor *probs, THLongTensor *J, THTensor *q)
 {
