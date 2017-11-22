@@ -2,7 +2,7 @@ from common import TestCase, run_tests
 import math
 import torch
 from torch.autograd import Variable, gradcheck
-from torch.distributions import Bernoulli, Categorical, Normal
+from torch.distributions import Bernoulli, Categorical, Normal, Gamma
 
 
 class TestDistributions(TestCase):
@@ -88,6 +88,12 @@ class TestDistributions(TestCase):
             self.assertAlmostEqual(log_prob, math.log(expected), places=3)
 
         self._check_log_prob(Normal(mean, std), ref_log_prob)
+
+    def test_gamma(self):
+        alpha = Variable(torch.exp(torch.randn(2, 3)), requires_grad=True)
+        beta = Variable(torch.exp(torch.randn(2, 3)), requires_grad=True)
+        self.assertEqual(Gamma(alpha, beta).sample().size(), (2, 3))
+        self.assertEqual(Gamma(alpha, beta).sample_n(5).size(), (5, 2, 3))
 
 
 if __name__ == '__main__':

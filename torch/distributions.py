@@ -34,7 +34,7 @@ from numbers import Number
 import torch
 
 
-__all__ = ['Distribution', 'Bernoulli', 'Categorical', 'Normal']
+__all__ = ['Distribution', 'Bernoulli', 'Categorical', 'Normal', 'Gamma']
 
 
 class Distribution(object):
