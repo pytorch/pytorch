@@ -820,6 +820,11 @@ class TestNN(NNTestCase):
         self.assertIsInstance(l.weight.data, torch.DoubleTensor)
         self.assertIsInstance(l.bias.data, torch.DoubleTensor)
         self.assertIsInstance(net.indices, torch.LongTensor)
+        if TEST_CUDA:
+            net.float().cuda()
+            self.assertIsInstance(l.weight.data, torch.cuda.FloatTensor)
+            self.assertIsInstance(l.bias.data, torch.cuda.FloatTensor)
+            self.assertIsInstance(net.indices, torch.cuda.LongTensor)
         net.type(torch.FloatTensor)
         self.assertIsInstance(l.weight.data, torch.FloatTensor)
         self.assertIsInstance(l.bias.data, torch.FloatTensor)
@@ -827,13 +832,9 @@ class TestNN(NNTestCase):
         self.assertIsInstance(l.weight.data, torch.DoubleTensor)
         self.assertIsInstance(l.bias.data, torch.DoubleTensor)
         if TEST_CUDA:
-            net.float().cuda()
+            net.type(torch.cuda.FloatTensor)
             self.assertIsInstance(l.weight.data, torch.cuda.FloatTensor)
             self.assertIsInstance(l.bias.data, torch.cuda.FloatTensor)
-            self.assertIsInstance(net.indices, torch.cuda.LongTensor)
-            net.type(torch.cuda.DoubleTensor)
-            self.assertIsInstance(l.weight.data, torch.cuda.DoubleTensor)
-            self.assertIsInstance(l.bias.data, torch.cuda.DoubleTensor)
 
     def test_non_leaf_parameters(self):
         l1 = nn.Linear(10, 10)
