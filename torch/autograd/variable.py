@@ -249,9 +249,6 @@ class Variable(_C._VariableBase):
     def cuda(self, device=None, async=False):
         return CudaTransfer.apply(self, device, async)
 
-    def cpu(self):
-        return self.type(getattr(torch, type(self.data).__name__))
-
     def prod(self, dim=None, keepdim=None):
         return Prod.apply(self, dim, keepdim)
 

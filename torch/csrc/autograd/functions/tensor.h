@@ -20,6 +20,7 @@ struct CopyBackwards : public Function {
   virtual variable_list apply(const variable_list& inputs) override;
 
   at::Type *src_type;
+  int64_t src_device;
 };
 
 struct Clone : public ForwardFunction<> {
