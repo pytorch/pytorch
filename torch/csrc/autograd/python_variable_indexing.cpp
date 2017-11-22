@@ -2,6 +2,7 @@
 
 #include "torch/csrc/DynamicTypes.h"
 #include "torch/csrc/Exceptions.h"
+#include "torch/csrc/THP_export.h"
 #include "torch/csrc/autograd/python_variable.h"
 #include "torch/csrc/autograd/utils/wrap_outputs.h"
 #include "torch/csrc/utils/python_compat.h"
@@ -12,9 +13,9 @@
 using namespace at;
 using namespace torch::autograd::utils;
 
-extern PyObject* THPLongTensorClass;
+THP_API PyObject* THPLongTensorClass;
 #ifdef WITH_CUDA
-extern PyObject* THCPLongTensorClass;
+THP_API PyObject* THCPLongTensorClass;
 #endif
 
 extern bool THPModule_isTensor(PyObject *obj);
