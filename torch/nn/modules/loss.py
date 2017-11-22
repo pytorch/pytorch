@@ -467,7 +467,7 @@ class MultiLabelMarginLoss(_Loss):
 
     `y` and `x` must have the same size.
 
-    The criterion only considers the first non zero `y[j]` targets.
+    The criterion only considers the first non-negative `y[j]` targets.
 
     This allows for different samples to have variable amounts of target classes
     """
