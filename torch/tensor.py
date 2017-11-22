@@ -120,9 +120,6 @@ class _TensorBase(object):
         args = self.__getstate__()
         return (_rebuild_tensor, args)
 
-    def __sizeof__(self):
-        return super(_TensorBase, self).__sizeof__() + self.storage().__sizeof__()
-
     def __getstate__(self):
         return (self.storage(),
                 self.storage_offset(),

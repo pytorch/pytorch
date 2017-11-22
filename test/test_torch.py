@@ -4350,15 +4350,15 @@ class TestTorch(TestCase):
         str(x),
 
     def test_sizeof(self):
-        sizeof_empty = torch.randn(0).__sizeof__()
-        sizeof_10 = torch.randn(10).__sizeof__()
-        sizeof_100 = torch.randn(100).__sizeof__()
+        sizeof_empty = torch.randn(0).storage().__sizeof__()
+        sizeof_10 = torch.randn(10).storage().__sizeof__()
+        sizeof_100 = torch.randn(100).storage().__sizeof__()
         self.assertEqual((sizeof_100 - sizeof_empty) // (sizeof_10 - sizeof_empty), 10)
         self.assertEqual((sizeof_100 - sizeof_empty) % (sizeof_10 - sizeof_empty), 0)
 
-        sizeof_empty = torch.randn(0).type(torch.ByteTensor).__sizeof__()
-        sizeof_10 = torch.randn(10).type(torch.ByteTensor).__sizeof__()
-        sizeof_100 = torch.randn(100).type(torch.ByteTensor).__sizeof__()
+        sizeof_empty = torch.randn(0).type(torch.ByteTensor).storage().__sizeof__()
+        sizeof_10 = torch.randn(10).type(torch.ByteTensor).storage().__sizeof__()
+        sizeof_100 = torch.randn(100).type(torch.ByteTensor).storage().__sizeof__()
         self.assertEqual((sizeof_100 - sizeof_empty) // (sizeof_10 - sizeof_empty), 10)
         self.assertEqual((sizeof_100 - sizeof_empty) % (sizeof_10 - sizeof_empty), 0)
 
