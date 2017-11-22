@@ -241,7 +241,8 @@ class TestInstanceNorm(hu.HypothesisTestCase):
            order=st.sampled_from(['NCHW', 'NHWC']),
            epsilon=st.floats(1e-6, 1e-4),
            seed=st.integers(0, 1000))
-    def test_instance_norm_model_helper_helper(self, N, C, H, W, order, epsilon, seed, is_test):
+    def test_instance_norm_model_helper(
+            self, N, C, H, W, order, epsilon, seed, is_test):
         np.random.seed(seed)
         model = model_helper.ModelHelper(name="test_model")
         brew.instance_norm(
@@ -250,6 +251,7 @@ class TestInstanceNorm(hu.HypothesisTestCase):
             'output',
             C,
             epsilon=epsilon,
+            order=order,
             is_test=is_test)
 
         input_blob = np.random.rand(N, C, H, W).astype(np.float32)
