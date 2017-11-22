@@ -237,15 +237,6 @@ class Variable(_C._VariableBase):
             return Type.apply(self, t)
         return self
 
-    def type_as(self, t):
-        if isinstance(t, Variable):
-            t = t.data
-        return self.type(type(t))
-
-    def _get_type(self, name):
-        module = torch._import_dotted_name(self.data.__module__)
-        return getattr(module, name)
-
     def cuda(self, device=None, async=False):
         return CudaTransfer.apply(self, device, async)
 
