@@ -50,6 +50,9 @@ class LayerModelHelper(model_helper.ModelHelper):
 
     def __init__(self, name, input_feature_schema, trainer_extra_schema,
                  keep_blobs=False):
+        ''' TODO(amalevich): more documnetation on input args
+        '''
+
         super(LayerModelHelper, self).__init__(name=name)
         self._layer_names = set()
         self._layers = []
