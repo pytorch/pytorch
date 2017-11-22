@@ -112,6 +112,19 @@ int64_t stride(const Tensor& self, int64_t dim) {
   return self.strides()[dim];
 }
 
+bool is_nonzero(const Tensor& self) {
+  if (self.numel() != 1) {
+    runtime_error("bool value of Tensor with more than one value is ambiguous");
+  }
+  Scalar localScalar = self.pImpl->localScalar();
+  if (localScalar.isFloatingPoint()) {
+    return localScalar.to<double>() != 0;
+  } else if (localScalar.isIntegral()){
+    return localScalar.to<int64_t>() != 0;
+  }
+  runtime_error("expected non-Tensor backed scalar");
+}
+
 bool is_same_size(const Tensor& self, const Tensor& other) {
   return self.sizes().equals(other.sizes());
 }
