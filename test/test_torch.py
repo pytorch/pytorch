@@ -194,6 +194,24 @@ class TestTorch(TestCase):
     def test_lgamma(self):
         self._testMathByName('lgamma')
 
+    def test_digamma(self):
+        y = torch.Tensor([-10, 0])
+        x = torch.Tensor([-0.1, 3, 999])
+        expected = torch.Tensor([
+            9.24507305005294,
+            0.92278433509846,
+            6.90625419464,
+        ])
+
+        out = torch.digamma(x)
+        self.assertEqual(out, expected, 1e-5)
+
+        out = x.digamma()
+        self.assertEqual(out, expected, 1e-5)
+
+        out = torch.digamma(y)
+        self.assertEqual(out == float('inf'), torch.ByteTensor([1, 1]))
+
     def test_asin(self):
         self._testMath(torch.asin, lambda x: math.asin(x) if abs(x) <= 1 else float('nan'))
 
