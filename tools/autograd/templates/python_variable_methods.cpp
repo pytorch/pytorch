@@ -17,6 +17,7 @@
 using at::Tensor;
 using at::Scalar;
 using at::ScalarType;
+using at::Backend;
 using namespace torch::autograd::utils;
 
 namespace torch { namespace autograd {
@@ -205,6 +206,22 @@ static PyObject * THPVariable_detach_(PyObject* self, PyObject* args)
   END_HANDLE_TH_ERRORS
 }
 
+static Tensor dispatch_to_backend(const Tensor & self, Backend backend) {
+  AutoNoGIL no_gil;
+  AutoGPU auto_gpu(self);
+  Tensor t = self.toBackend(backend);
+  return t;
+}
+
+static PyObject * THPVariable_cpu(PyObject* self, PyObject* args)
+{
+   HANDLE_TH_ERRORS
+   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
+   return wrap(dispatch_to_backend(self_, Backend::CPU));
+   END_HANDLE_TH_ERRORS
+}
+
+
 static Tensor dispatch_to_type(const Tensor & self, ScalarType scalarType) {
   AutoNoGIL no_gil;
   AutoGPU auto_gpu(self);
@@ -288,6 +305,7 @@ PyMethodDef variable_methods[] = {
   {"char", (PyCFunction)THPVariable_char, METH_NOARGS, NULL},
   {"clamp", (PyCFunction)THPVariable_clamp, METH_VARARGS | METH_KEYWORDS, NULL},
   {"clamp_", (PyCFunction)THPVariable_clamp_, METH_VARARGS | METH_KEYWORDS, NULL},
+  {"cpu", (PyCFunction)THPVariable_cpu, METH_NOARGS, NULL},
   {"dim", (PyCFunction)THPVariable_dim, METH_NOARGS, NULL},
   {"contiguous", (PyCFunction)THPVariable_contiguous, METH_NOARGS, NULL},
   {"copy_", (PyCFunction)THPVariable_copy_, METH_VARARGS | METH_KEYWORDS, NULL},
