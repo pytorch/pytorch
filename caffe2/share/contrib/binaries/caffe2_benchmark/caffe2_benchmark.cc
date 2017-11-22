@@ -44,6 +44,11 @@ CAFFE2_DEFINE_string(
     "the input blobs. If multiple input needed, use comma "
     "separated string. Must have the same number of items "
     "as input does.");
+CAFFE2_DEFINE_string(
+    input_type,
+    "",
+    "Input type when specifying the input dimension."
+    "The supported types are float, uint8_t.");
 CAFFE2_DEFINE_int(iter, 10, "The number of iterations to run.");
 CAFFE2_DEFINE_string(net, "", "The given net to benchmark.");
 CAFFE2_DEFINE_string(
@@ -149,7 +154,14 @@ int main(int argc, char** argv) {
         caffe2::TensorCPU* tensor =
             workspace->GetBlob(input_names[i])->GetMutable<caffe2::TensorCPU>();
         tensor->Resize(input_dims);
-        tensor->mutable_data<float>();
+        if (caffe2::FLAGS_input_type == "float") {
+          tensor->mutable_data<float>();
+        } else {
+          CAFFE_ENFORCE(
+              caffe2::FLAGS_input_type == "uint8_t",
+              "Only supported input types are: float, uint8_t");
+          tensor->mutable_data<uint8_t>();
+        }
       }
     } else {
       CAFFE_THROW(
