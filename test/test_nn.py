@@ -1614,6 +1614,60 @@ class TestNN(NNTestCase):
         self.assertEqual(out.get_device(), 0)
         self.assertEqual(out.data, expected_out)
 
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    def test_data_parallel_module_kwargs_only_empty_list(self):
+        class Net(nn.Module):
+            def __init__(self):
+                super(Net, self).__init__()
+                self.l = l
+
+            def forward(self, input):
+                return self.l(input['data'])
+
+        l = nn.Linear(10, 5).float().cuda()
+        i = Variable(torch.randn(20, 10).float().cuda())
+        expected_out = l(i).data
+        n = nn.DataParallel(Net())
+        out = n(input={'data': i, 'unused': []})
+        self.assertEqual(out.get_device(), 0)
+        self.assertEqual(out.data, expected_out)
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    def test_data_parallel_module_kwargs_only_empty_dict(self):
+        class Net(nn.Module):
+            def __init__(self):
+                super(Net, self).__init__()
+                self.l = l
+
+            def forward(self, input):
+                return self.l(input['data'])
+
+        l = nn.Linear(10, 5).float().cuda()
+        i = Variable(torch.randn(20, 10).float().cuda())
+        expected_out = l(i).data
+        n = nn.DataParallel(Net())
+        out = n(input={'data': i, 'unused': {}})
+        self.assertEqual(out.get_device(), 0)
+        self.assertEqual(out.data, expected_out)
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    def test_data_parallel_module_kwargs_only_empty_tuple(self):
+        class Net(nn.Module):
+            def __init__(self):
+                super(Net, self).__init__()
+                self.l = l
+
+            def forward(self, input):
+                return self.l(input['data'])
+
+        l = nn.Linear(10, 5).float().cuda()
+        i = Variable(torch.randn(20, 10).float().cuda())
+        expected_out = l(i).data
+        n = nn.DataParallel(Net())
+        out = n(input={'data': i, 'unused': ()})
+        self.assertEqual(out.get_device(), 0)
+        self.assertEqual(out.data, expected_out)
+
     def test_state_dict(self):
         l = nn.Linear(5, 5)
         block = nn.Module()
