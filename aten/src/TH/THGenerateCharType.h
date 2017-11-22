@@ -6,7 +6,7 @@
 #define ureal uint8_t
 #define accreal int64_t
 #define Real Char
-#define THInf CHAR_MAX
+#define THInf SCHAR_MAX 
 #define TH_CONVERT_REAL_TO_ACCREAL(_val) (accreal)(_val)
 #define TH_CONVERT_ACCREAL_TO_REAL(_val) (real)(_val)
 #define TH_REAL_IS_CHAR
