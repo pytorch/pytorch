@@ -441,8 +441,6 @@ void CopyMatrix(
 template <typename T, class Context>
 void CopyVector(const int N, const T* A, T* B, Context* context);
 
-uint32_t randomNumberSeed();
-
 // Function uses casting from int to unsigned to compare if value of
 // parameter a is greater or equal to zero and lower than value of
 // parameter b. The b parameter is of type signed and is always

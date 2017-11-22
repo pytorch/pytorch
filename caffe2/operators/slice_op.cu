@@ -16,6 +16,7 @@
 
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/operators/slice_op.h"
+#include "caffe2/utils/math.h"
 
 namespace caffe2 {
 namespace {

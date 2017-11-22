@@ -20,10 +20,11 @@
 #include "../core/ImageAllocator.h"
 #include "gl_tiling_utils.h"
 
-#include "caffe2/core/operator.h"
-#include "caffe2/core/timer.h"
 #include <iostream>
 #include <vector>
+#include "caffe2/core/operator.h"
+#include "caffe2/core/timer.h"
+#include "caffe2/utils/math.h"
 
 class GLConcat : public GLFilter {
  public:

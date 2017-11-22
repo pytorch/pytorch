@@ -20,6 +20,7 @@
 
 #include "caffe2/contrib/gloo/common.h"
 #include "caffe2/core/operator.h"
+#include "caffe2/core/types.h"
 
 #include <gloo/algorithm.h>
 #include <gloo/common/error.h>

@@ -17,6 +17,7 @@
 #include "caffe2/core/context.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/core/tensor.h"
+#include "caffe2/core/types.h"
 #include "caffe2/operators/text_file_reader_utils.h"
 #include "caffe2/utils/string_utils.h"
 

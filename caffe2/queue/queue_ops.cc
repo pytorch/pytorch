@@ -16,6 +16,7 @@
 
 #include "queue_ops.h"
 #include <memory>
+#include "caffe2/utils/math.h"
 
 namespace caffe2 {
 

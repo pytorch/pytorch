@@ -35,11 +35,11 @@ namespace caffe2 {
  */
 class MKLContext final {
  public:
-  MKLContext() : random_seed_(math::randomNumberSeed()) {}
+  MKLContext() : random_seed_(RandomNumberSeed()) {}
   explicit MKLContext(const DeviceOption& option)
       : random_seed_(
             option.has_random_seed() ? option.random_seed()
-                                     : math::randomNumberSeed()) {
+                                     : RandomNumberSeed()) {
     CAFFE_ENFORCE_EQ(option.device_type(), MKLDNN);
   }
 

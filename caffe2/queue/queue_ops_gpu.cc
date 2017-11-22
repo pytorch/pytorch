@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+#include "caffe2/utils/math.h"
 #include "queue_ops.h"
 
 #include "caffe2/core/context_gpu.h"
