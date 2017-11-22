@@ -179,8 +179,8 @@ class TestDataLoader(TestCase):
             self.assertTrue(target.is_pinned())
 
     def test_multiple_dataloaders(self):
-        loader1_it = iter(DataLoader(self.dataset, num_workers = 1))
-        loader2_it = iter(DataLoader(self.dataset, num_workers = 2))
+        loader1_it = iter(DataLoader(self.dataset, num_workers=1))
+        loader2_it = iter(DataLoader(self.dataset, num_workers=2))
         next(loader1_it)
         next(loader1_it)
         next(loader2_it)

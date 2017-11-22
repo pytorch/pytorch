@@ -7,7 +7,6 @@ import signal
 import collections
 import re
 import sys
-import signal
 import traceback
 import threading
 from torch._six import string_classes
@@ -144,11 +143,13 @@ def pin_memory_batch(batch):
     else:
         return batch
 
+
 def _set_SIGCHLD_handler():
     global _SIGCHLD_handler_set
     if _SIGCHLD_handler_set:
         return
     previous_handler = signal.getsignal(signal.SIGCHLD)
+
     def handler(signum, frame):
         _error_if_any_worker_fails()
         if callable(previous_handler):
