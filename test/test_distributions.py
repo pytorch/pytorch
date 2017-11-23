@@ -1,8 +1,27 @@
 from common import TestCase, run_tests
 import math
+import numpy as np
+import scipy.stats
 import torch
 from torch.autograd import Variable, gradcheck
 from torch.distributions import Bernoulli, Categorical, Normal, Gamma
+
+
+def _test_univariate_sampler(torch_dist, ref_dist, num_samples=1000, plot=False):
+    # Kolmogorov-Smirnov test of density.
+    torch_samples = torch_dist.sample_n(num_samples).squeeze().cpu().numpy()
+    ref_samples = ref_dist.rvs(num_samples)
+    torch_samples.sort()
+    ref_samples.sort()
+    # TODO(fritzo) Check density statistics.
+    if plot:
+        from matplotlib import pyplot
+        pyplot.plot(torch_samples, ref_samples)
+        pyplot.title(type(torch_dist).__name__)
+        pyplot.xlabel('PyTorch')
+        pyplot.ylabel('Reference')
+        pyplot.tight_layout()
+        pyplot.show()
 
 
 class TestDistributions(TestCase):
@@ -89,11 +108,37 @@ class TestDistributions(TestCase):
 
         self._check_log_prob(Normal(mean, std), ref_log_prob)
 
-    def test_gamma(self):
+    def test_normal_sample(self):
+        for mean in [-1.0, 0.0, 1.0]:
+            for std in [0.1, 1.0, 10.0]:
+                _test_univariate_sampler(Normal(mean, std), scipy.stats.norm(loc=mean, scale=std))
+
+    def test_gamma_shape(self):
         alpha = Variable(torch.exp(torch.randn(2, 3)), requires_grad=True)
         beta = Variable(torch.exp(torch.randn(2, 3)), requires_grad=True)
+        alpha_1d = Variable(torch.exp(torch.randn(1)), requires_grad=True)
+        beta_1d = Variable(torch.exp(torch.randn(1)), requires_grad=True)
         self.assertEqual(Gamma(alpha, beta).sample().size(), (2, 3))
         self.assertEqual(Gamma(alpha, beta).sample_n(5).size(), (5, 2, 3))
+        self.assertEqual(Gamma(alpha_1d, beta_1d).sample_n(1).size(), (1, 1))
+        self.assertEqual(Gamma(alpha_1d, beta_1d).sample().size(), (1,))
+        self.assertEqual(Gamma(0.5, 0.5).sample().size(), (1,))
+        self.assertEqual(Gamma(0.5, 0.5).sample_n(1).size(), (1, 1))
+
+        def ref_log_prob(idx, x, log_prob):
+            a = alpha.data.view(-1)[idx]
+            b = beta.data.view(-1)[idx]
+            expected = scipy.stats.gamma.logpdf(x, a, scale=1 / b)
+            self.assertAlmostEqual(log_prob, expected, places=3)
+
+        self._check_log_prob(Gamma(alpha, beta), ref_log_prob)
+
+    # FIXME this fails due to bad numerics
+    def test_gamma_sample(self):
+        for alpha in [0.1, 1.0, 5.0]:
+            for beta in [0.1, 1.0, 10.0]:
+                _test_univariate_sampler(Gamma(alpha, beta),
+                                         scipy.stats.gamma(alpha, scale=1 / beta))
 
 
 if __name__ == '__main__':

@@ -37,7 +37,7 @@ import torch
 __all__ = ['Distribution', 'Bernoulli', 'Categorical', 'Normal', 'Gamma']
 
 
-def _expand(v, n):
+def _expand_n(v, n):
     r"""
     Cleanly expand float or Tensor or Variable parameters.
     """
@@ -188,7 +188,7 @@ class Normal(Distribution):
         return torch.normal(self.mean, self.std)
 
     def sample_n(self, n):
-        return torch.normal(_expand(self.mean, n), _expand(self.std, n))
+        return torch.normal(_expand_n(self.mean, n), _expand_n(self.std, n))
 
     def log_prob(self, value):
         # compute the variance
@@ -214,6 +214,14 @@ class Gamma(Distribution):
     """
 
     def __init__(self, alpha, beta):
+        if isinstance(alpha, Number):
+            if isinstance(beta, Number):
+                alpha = torch.Tensor([alpha])
+                beta = torch.Tensor([beta])
+            else:
+                alpha = type(beta)(*beta.size()).fill_(alpha)
+        elif isinstance(beta, Number):
+            beta = type(alpha)(*alpha.size()).fill_(beta)
         self.alpha = alpha
         self.beta = beta
 
@@ -221,7 +229,7 @@ class Gamma(Distribution):
         return torch.random_gamma(self.alpha, self.beta)
 
     def sample_n(self, n):
-        return torch.random_gamma(_expand(self.alpha, n), _expand(self.beta, n))
+        return torch.random_gamma(_expand_n(self.alpha, n), _expand_n(self.beta, n))
 
     def log_prob(self, value):
         return (self.alpha * torch.log(self.beta)
