@@ -198,7 +198,7 @@ class SGDRCosineLR(_LRScheduler):
         weight_decay_norm_multi = math.sqrt(self.batch_size / (self.train_size * restart_period))
         return ([base_lr * lr_multi for base_lr in self.base_lrs],
                 [base_weight_decay * lr_multi * weight_decay_norm_multi
-                 for base_weight_decay in self.base_weight_decays])
+                    for base_weight_decay in self.base_weight_decays])
 
     def step(self, epoch=None):
         if epoch is None:
