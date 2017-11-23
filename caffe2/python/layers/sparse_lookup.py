@@ -44,11 +44,12 @@ def get_sparse_lookup_predictor_version(version):
 
 
 class SparseLookup(ModelLayer):
-    _id_list_supported_reducers = ['PositionWeighted', 'LogMeanExp', 'LogSumExp',
-                                   'Max', 'Mean', 'Sum', 'Sqrt', 'None']
+    _id_list_supported_reducers = [
+        'PositionWeighted', 'LogMeanExp', 'LogSumExp', 'Max', 'Mean', 'Sum',
+        'WeightedSum', 'WeightedMean', 'Sqrt', 'None']
 
-    _id_score_list_supported_reducers = ['PositionWeighted', 'Mean', 'Sum',
-                                         'WeightedSum', 'WeightedMean', 'None']
+    _id_score_list_supported_reducers = [
+        'PositionWeighted', 'Mean', 'Sum', 'WeightedSum', 'WeightedMean', 'None']
 
     def __init__(self, model, input_record, inner_shape, reducer,
                  weight_init=None, weight_optim=None,
@@ -200,15 +201,21 @@ class SparseLookup(ModelLayer):
         assert self.reducer in self._id_list_supported_reducers, (
             "Unsupported reducer: {} for ID_LIST".format(self.reducer)
         )
-        if self.reducer in ['Sum', 'Mean']:
+        if self.reducer in ['Sum', 'Mean', 'WeightedSum', 'WeightedMean']:
             op_input = [self.w,
                         self.input_record.items(),
                         self.input_record.lengths()]
 
-            if self.reducer == 'Mean':
+            # For id list features, the behaviors of 'Sum' and
+            # 'WeightedSum' are identical, since we can regard the weight on each
+            # id as 1. Similarly, for 'Mean' and 'WeightedMean'.
+            if self.reducer in ['WeightedMean', 'Mean']:
                 sum_pooling_output = [net.NextScopedBlob('internal_output')]
-            else:
+            elif self.reducer in ['WeightedSum', 'Sum']:
                 sum_pooling_output = self.output_schema.field_blobs()
+            else:
+                raise NotImplementedError(
+                    'Unknown reducer: {}'.format(self.reducer))
 
             if version in ['fp32', 'fp16']:
                 # SparseLengths* Ops with engine='fp16' will accept either
