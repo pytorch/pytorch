@@ -54,6 +54,10 @@ inline PyObject* wrap(int64_t value) {
   return THPUtils_packInt64(value);
 }
 
+inline PyObject* wrap(void* value) {
+  return THPUtils_packInt64(reinterpret_cast<intptr_t>(value));
+}
+
 inline PyObject* wrap(at::Scalar scalar) {
   return wrap(scalar.toTensor());
 }
