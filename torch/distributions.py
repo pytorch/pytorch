@@ -43,25 +43,6 @@ class Distribution(object):
     """
     reparameterized = False
 
-    @staticmethod
-    def non_reparameterized_sampler(func):
-        """
-        This is a simple decorator that wraps all samplers of non-reparameterized
-        distributions. It adds requires_grad argument, throws error if requires_grad
-        is True, else it calls the function it is wrapping. 
-        NOTE: With this decorator, requires_grad must be a named argument.
-        (Distribution.sample(True) will not work)
-        """
-        def wrapper(*args, **kwargs):
-            if 'requires_grad' not in kwargs:
-                kwargs['requires_grad'] = False
-            if not kwargs['requires_grad']:
-                del kwargs['requires_grad']
-                return func(*args, **kwargs)
-            else:
-                raise NotImplementedError("Can't sample from non-reparameterized {} with requires_grad=True".format(args[0].__class__.__name__))
-        return wrapper
-
     def sample(self, requires_grad=False):
         """
         Generates a single sample or single batch of samples if the distribution
@@ -108,12 +89,14 @@ class Bernoulli(Distribution):
     def __init__(self, probs):
         self.probs = probs
 
-    @Distribution.non_reparameterized_sampler
-    def sample(self):
+    def sample(self, requires_grad=False):
+        if requires_grad:
+            raise NotImplementedError("Can't sample from non-reparameterized Bernoulli with requires_grad=True")
         return torch.bernoulli(self.probs)
 
-    @Distribution.non_reparameterized_sampler
-    def sample_n(self, n):
+    def sample_n(self, n, requires_grad=False):
+        if requires_grad:
+            raise NotImplementedError("Can't sample from non-reparameterized Bernoulli with requires_grad=True")
         return torch.bernoulli(self.probs.expand(n, *self.probs.size()))
 
     def log_prob(self, value):
@@ -157,12 +140,14 @@ class Categorical(Distribution):
             raise ValueError("probs must be 1D or 2D")
         self.probs = probs
 
-    @Distribution.non_reparameterized_sampler
-    def sample(self):
+    def sample(self, requires_grad=False):
+        if requires_grad:
+            raise NotImplementedError("Can't sample from non-reparameterized Categorical with requires_grad=True")
         return torch.multinomial(self.probs, 1, True).squeeze(-1)
 
-    @Distribution.non_reparameterized_sampler
-    def sample_n(self, n):
+    def sample_n(self, n, requires_grad=False):
+        if requires_grad:
+            raise NotImplementedError("Can't sample from non-reparameterized Categorical with requires_grad=True")
         if n == 1:
             return self.sample().expand(1, 1)
         else:
