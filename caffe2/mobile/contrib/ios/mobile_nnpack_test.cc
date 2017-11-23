@@ -17,6 +17,7 @@
 #include "caffe2/core/init.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/core/tensor.h"
+#include "caffe2/utils/math.h"
 #include "caffe2/utils/proto_utils.h"
 #include "gtest/gtest.h"
 
@@ -75,7 +76,7 @@ void compare(
   OperatorDef nnpackOpDef;
   nnpackOpDef.set_name("test");
   nnpackOpDef.set_type("Conv");
-  nnpackOpDef.set_engine("NNPACK");
+  nnpackOpDef.set_engine(algorithm == "DEPTHWISE_3x3" ? "DEPTHWISE_3x3" : "NNPACK");
   nnpackOpDef.add_input("X");
   nnpackOpDef.add_input("W");
   nnpackOpDef.add_input("B");
@@ -338,6 +339,14 @@ TEST(MobileNNPACK, Conv_HxWsHxW) {
     int strideH = randInt(1, kernelH - 1);
     int strideW = randInt(1, kernelW - 1);
     runConv(kernelH, kernelW, strideH, strideW);
+  }
+}
+
+TEST(MobileNNPACK, Depthwise3x3Conv) {
+  for (int i = 0; i < kIters; ++i) {
+    int channel = 2;
+    runConv(3, 3, 1, 1, channel, "DEPTHWISE_3x3", channel, channel,
+            randInt(1, 2));
   }
 }
 
