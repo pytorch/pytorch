@@ -214,14 +214,16 @@ class Gamma(Distribution):
     """
 
     def __init__(self, alpha, beta):
-        if isinstance(alpha, Number):
-            if isinstance(beta, Number):
-                alpha = torch.Tensor([alpha])
-                beta = torch.Tensor([beta])
-            else:
-                alpha = type(beta)(*beta.size()).fill_(alpha)
-        elif isinstance(beta, Number):
-            beta = type(alpha)(*alpha.size()).fill_(beta)
+        # TODO handle (Variable, Number) cases
+        alpha_num = isinstance(alpha, Number)
+        beta_num = isinstance(beta, Number)
+        if alpha_num and not beta_num:
+            alpha = beta.new(beta.size()).fill_(alpha)
+        elif not alpha_num and beta_num:
+            beta = alpha.new(alpha.size()).fill_(beta)
+        elif alpha_num and beta_num:
+            alpha, beta = torch.Tensor([alpha]), torch.Tensor([beta])
+        # NB: Nothing to do if both are tensors
         self.alpha = alpha
         self.beta = beta
 

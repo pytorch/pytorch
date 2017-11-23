@@ -1,19 +1,25 @@
 from common import TestCase, run_tests
 import math
-import numpy as np
-import scipy.stats
-import scipy.special
 import torch
+import unittest
+from itertools import product
 from torch.autograd import Variable, gradcheck
 from torch.distributions import Bernoulli, Categorical, Normal, Gamma
+
+TEST_NUMPY = True
+try:
+    import numpy as np
+    import scipy.stats
+    import scipy.special
+except ImportError:
+    TEST_NUMPY = False
 
 
 class TestDistributions(TestCase):
     def _set_rng_seed(self, seed=0):
-        np.random.seed(seed)
         torch.manual_seed(seed)
-        if torch.cuda.is_available():
-            torch.cuda.manual_seed_all(seed)
+        if TEST_NUMPY:
+            np.random.seed(seed)
 
     def _gradcheck_log_prob(self, dist_ctor, ctor_params):
         # performs gradient checks on log_prob
@@ -41,7 +47,7 @@ class TestDistributions(TestCase):
         ref_samples = ref_dist.rvs(num_samples)
         samples = [(x, +1) for x in torch_samples] + [(x, -1) for x in ref_samples]
         samples.sort()
-        samples = np.array(samples)[:,1]
+        samples = np.array(samples)[:, 1]
 
         # Aggragate into bins filled with roughly zero-mean unit-variance RVs.
         num_bins = 10
@@ -119,14 +125,15 @@ class TestDistributions(TestCase):
         self._check_log_prob(Normal(mean, std), ref_log_prob)
 
     # This is a randomized test.
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_normal_sample(self):
         self._set_rng_seed()
-        for mean in [-1.0, 0.0, 1.0]:
-            for std in [0.1, 1.0, 10.0]:
-                self._check_sampler_sampler(Normal(mean, std),
-                                            scipy.stats.norm(loc=mean, scale=std),
-                                            'Normal(mean={}, std={})'.format(mean, std))
+        for mean, std in product([-1.0, 0.0, 1.0], [0.1, 1.0, 10.0]):
+            self._check_sampler_sampler(Normal(mean, std),
+                                        scipy.stats.norm(loc=mean, scale=std),
+                                        'Normal(mean={}, std={})'.format(mean, std))
 
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_gamma_shape(self):
         alpha = Variable(torch.exp(torch.randn(2, 3)), requires_grad=True)
         beta = Variable(torch.exp(torch.randn(2, 3)), requires_grad=True)
@@ -148,13 +155,13 @@ class TestDistributions(TestCase):
         self._check_log_prob(Gamma(alpha, beta), ref_log_prob)
 
     # This is a randomized test.
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_gamma_sample(self):
         self._set_rng_seed()
-        for alpha in [0.1, 1.0, 5.0]:
-            for beta in [0.1, 1.0, 10.0]:
-                self._check_sampler_sampler(Gamma(alpha, beta),
-                                            scipy.stats.gamma(alpha, scale=1 / beta),
-                                            'Gamma(alpha={}, beta={})'.format(alpha, beta))
+        for alpha, beta in product([0.1, 1.0, 5.0], [0.1, 1.0, 10.0]):
+            self._check_sampler_sampler(Gamma(alpha, beta),
+                                        scipy.stats.gamma(alpha, scale=1 / beta),
+                                        'Gamma(alpha={}, beta={})'.format(alpha, beta))
 
 
 if __name__ == '__main__':

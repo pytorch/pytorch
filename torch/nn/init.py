@@ -87,26 +87,6 @@ def normal(tensor, mean=0, std=1):
     return tensor.normal_(mean, std)
 
 
-def random_gamma(tensor, alpha=1, beta=1):
-    """Fills the input Tensor or Variable with values drawn from a Gamma
-    distribution :math:`Gamma(alpha, beta)`.
-
-    Args:
-        tensor: an n-dimensional torch.Tensor or autograd.Variable
-        alpha: the shape parameter of the Gamma distribution
-        beta: the rate = 1 / scale parameter of the Gamma distribution
-
-    Examples:
-        >>> w = torch.Tensor(3, 5)
-        >>> nn.init.random_gamma(w)
-    """
-    if isinstance(tensor, Variable):
-        random_gamma(tensor.data, alpha=alpha, beta=beta)
-        return tensor
-
-    return tensor.random_gamma_(alpha, beta)
-
-
 def constant(tensor, val):
     """Fills the input Tensor or Variable with the value `val`.
 
