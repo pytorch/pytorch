@@ -41,17 +41,35 @@ class Distribution(object):
     r"""
     Distribution is the abstract base class for probability distributions.
     """
-    def __init__(self, reparameterized = False):
-        self.reparameterized = reparameterized
-    
-    def sample(self):
+    reparameterized = False
+
+    @staticmethod
+    def non_reparameterized_sampler(func):
+        """
+        This is a simple decorator that wraps all samplers of non-reparameterized
+        distributions. It adds requires_grad argument, throws error if requires_grad
+        is True, else it calls the function it is wrapping. 
+        NOTE: With this decorator, requires_grad must be a named argument.
+        (Distribution.sample(True) will not work)
+        """
+        def wrapper(*args, **kwargs):
+            if 'requires_grad' not in kwargs:
+                kwargs['requires_grad'] = False
+            if not kwargs['requires_grad']:
+                del kwargs['requires_grad']
+                return func(*args, **kwargs)
+            else:
+                raise NotImplementedError("Can't sample from non-reparameterized {} with requires_grad=True".format(args[0].__class__.__name__))
+        return wrapper
+
+    def sample(self, requires_grad=False):
         """
         Generates a single sample or single batch of samples if the distribution
         parameters are batched.
         """
         raise NotImplementedError
 
-    def sample_n(self, n):
+    def sample_n(self, n, requires_grad=False):
         """
         Generates n samples or n batches of samples if the distribution parameters
         are batched.
@@ -89,12 +107,12 @@ class Bernoulli(Distribution):
 
     def __init__(self, probs):
         self.probs = probs
-        # Bernoulli can't be reparameterized
-        super(Bernoulli, self).__init__(reparameterized=False)
 
+    @Distribution.non_reparameterized_sampler
     def sample(self):
         return torch.bernoulli(self.probs)
 
+    @Distribution.non_reparameterized_sampler
     def sample_n(self, n):
         return torch.bernoulli(self.probs.expand(n, *self.probs.size()))
 
@@ -138,12 +156,12 @@ class Categorical(Distribution):
             # TODO: treat higher dimensions as part of the batch
             raise ValueError("probs must be 1D or 2D")
         self.probs = probs
-        # Categorical can't be reparameterized
-        super(Categorical, self).__init__(reparameterized=False)
 
+    @Distribution.non_reparameterized_sampler
     def sample(self):
         return torch.multinomial(self.probs, 1, True).squeeze(-1)
 
+    @Distribution.non_reparameterized_sampler
     def sample_n(self, n):
         if n == 1:
             return self.sample().expand(1, 1)
@@ -174,22 +192,22 @@ class Normal(Distribution):
     Args:
         mean (float or Tensor or Variable): mean of the distribution
         std (float or Tensor or Variable): standard deviation of the distribution
-        reparameterized (bool): whether to use reparameterization trick
     """
 
-    def __init__(self, mean, std, reparameterized = False):
+    reparameterized = True
+
+    def __init__(self, mean, std):
         self.mean = mean
         self.std = std
-        super(Normal, self).__init__(reparameterized=reparameterized)
 
-    def sample(self):
-        if self.reparameterized:
+    def sample(self, requires_grad=False):
+        if requires_grad:
             eps = torch.normal(torch.zeros_like(self.mean), torch.ones_like(self.std))
             return self.mean + self.std * eps
-        else:    
+        else: 
             return torch.normal(self.mean, self.std)
 
-    def sample_n(self, n):
+    def sample_n(self, n, requires_grad=False):
         # cleanly expand float or Tensor or Variable parameters
         def expand(v):
             if isinstance(v, Number):
@@ -198,7 +216,7 @@ class Normal(Distribution):
                 return v.expand(n, *v.size())
         expanded_mean = expand(self.mean)
         expanded_std = expand(self.std)
-        if self.reparameterized:
+        if requires_grad:
             eps = torch.normal(torch.zeros_like(expanded_mean), torch.ones_like(expanded_std))
             return expanded_mean + expanded_std * eps
         else:

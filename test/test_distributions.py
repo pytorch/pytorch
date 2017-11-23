@@ -33,6 +33,10 @@ class TestDistributions(TestCase):
         self.assertEqual(Bernoulli(r).sample_n(8).size(), (8, 1))
         self.assertEqual(Bernoulli(r).sample().size(), (1,))
         self._gradcheck_log_prob(Bernoulli, (p,))
+        
+        def call_sample_require_grad():
+            return Bernoulli(r).sample(requires_grad=True)
+        self.assertRaises(NotImplementedError, call_sample_require_grad)
 
         def ref_log_prob(idx, val, log_prob):
             prob = p.data[idx]
@@ -50,6 +54,11 @@ class TestDistributions(TestCase):
         # TODO: this should return a 0-dim tensor once we have Scalar support
         self.assertEqual(Categorical(p).sample().size(), (1,))
         self.assertEqual(Categorical(p).sample_n(1).size(), (1, 1))
+        
+        def call_sample_require_grad():
+            return Categorical(p).sample(requires_grad=True)
+        self.assertRaises(NotImplementedError, call_sample_require_grad)
+        
         self._gradcheck_log_prob(Categorical, (p,))
 
     def test_multinomial_2d(self):
@@ -77,12 +86,12 @@ class TestDistributions(TestCase):
         self.assertEqual(Normal(0.2, .6).sample_n(1).size(), (1, 1))
         self.assertEqual(Normal(-0.7, 50.0).sample_n(1).size(), (1, 1))
 
-        self.assertEqual(Normal(mean, std, True).sample().size(), (5, 5))
-        self.assertEqual(Normal(mean, std, True).sample_n(7).size(), (7, 5, 5))
-        self.assertEqual(Normal(mean_1d, std_1d, True).sample_n(1).size(), (1, 1))
-        self.assertEqual(Normal(mean_1d, std_1d, True).sample().size(), (1,))
-        self.assertEqual(Normal(0.2, .6, True).sample_n(1).size(), (1, 1))
-        self.assertEqual(Normal(-0.7, 50.0, True).sample_n(1).size(), (1, 1))
+        self.assertEqual(Normal(mean, std).sample(requires_grad=True).size(), (5, 5))
+        self.assertEqual(Normal(mean, std).sample_n(7,requires_grad=True).size(), (7, 5, 5))
+        self.assertEqual(Normal(mean_1d, std_1d).sample_n(1,requires_grad=True).size(), (1, 1))
+        self.assertEqual(Normal(mean_1d, std_1d,).sample(requires_grad=True).size(), (1,))
+        self.assertEqual(Normal(0.2, .6,).sample_n(1,requires_grad=True).size(), (1, 1))
+        self.assertEqual(Normal(-0.7, 50.0,).sample_n(1,requires_grad=True).size(), (1, 1))
 
         self._gradcheck_log_prob(Normal, (mean, std))
         self._gradcheck_log_prob(Normal, (mean, 1.0))
