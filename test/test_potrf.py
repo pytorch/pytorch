@@ -1,10 +1,7 @@
 import torch
-import numpy as np
 from test_autograd import _make_cov
 from torch.autograd import Variable
 from common import TestCase, run_tests, skipIfNoLapack
-
-from torch.autograd._functions.linalg import Potrf
 
 
 class TestPotrf(TestCase):
@@ -13,8 +10,8 @@ class TestPotrf(TestCase):
         # numerical forward derivative
         dA = Variable(_make_cov(5))
         eps = 1e-6
-        outb = Potrf.apply(A + (eps / 2) * dA, upper)
-        outa = Potrf.apply(A - (eps / 2) * dA, upper)
+        outb = torch.potrf(A + (eps / 2) * dA, upper)
+        outa = torch.potrf(A - (eps / 2) * dA, upper)
         dL = (outb - outa) / eps
 
         return dA, dL
@@ -45,8 +42,9 @@ class TestPotrf(TestCase):
     def test_potrf(self):
         for upper in [True, False]:
             A = Variable(_make_cov(5), requires_grad=True)
-            L = Potrf.apply(A, upper)
+            L = torch.potrf(A, upper)
             self._check_total_variation(A, L, upper)
+
 
 if __name__ == '__main__':
     run_tests()

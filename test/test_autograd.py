@@ -4,21 +4,19 @@ import sys
 import math
 import torch
 import unittest
-import warnings
 import random
 from copy import deepcopy
 from collections import OrderedDict
 from itertools import product
 from operator import mul
 from functools import reduce
-import torch.nn.functional as F
 from torch.autograd.gradcheck import gradgradcheck, gradcheck
 from torch.autograd.function import once_differentiable
 from torch.autograd.profiler import profile
 
 from common import TestCase, run_tests, skipIfNoLapack
-from torch.autograd._functions import *
 from torch.autograd import Variable, Function
+from torch.autograd.function import InplaceFunction
 
 if sys.version_info[0] == 2:
     import cPickle as pickle
