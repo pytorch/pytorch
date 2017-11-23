@@ -103,9 +103,16 @@ class Embedding(Function):
                 SparseTensor = getattr(torch.cuda.sparse, tensor_type)
             else:
                 SparseTensor = getattr(torch.sparse, tensor_type)
+            padding_idx = ctx.padding_idx
+            indices = indices.view(1, -1)
+            grad_output = grad_output.view(-1, ctx._weight_size[1])
+            if padding_idx is not None:
+                nonpadding_indices_indices = (indices.view(-1) != padding_idx).nonzero().view(-1)
+                indices = indices.index_select(1, nonpadding_indices_indices)
+                grad_output = grad_output.index_select(0, nonpadding_indices_indices)
             grad_weight = SparseTensor(
-                indices.view(1, -1),
-                grad_output.view(-1, ctx._weight_size[1]),
+                indices,
+                grad_output,
                 ctx._weight_size,
             )
         return None, grad_weight, None, None, None, None, None
