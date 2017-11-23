@@ -37,6 +37,16 @@ import torch
 __all__ = ['Distribution', 'Bernoulli', 'Categorical', 'Normal', 'Gamma']
 
 
+def _expand(v, n):
+    r"""
+    Cleanly expand float or Tensor or Variable parameters.
+    """
+    if isinstance(v, Number):
+        return torch.Tensor([v]).expand(n, 1)
+    else:
+        return v.expand(n, *v.size())
+
+
 class Distribution(object):
     r"""
     Distribution is the abstract base class for probability distributions.
@@ -178,13 +188,7 @@ class Normal(Distribution):
         return torch.normal(self.mean, self.std)
 
     def sample_n(self, n):
-        # cleanly expand float or Tensor or Variable parameters
-        def expand(v):
-            if isinstance(v, Number):
-                return torch.Tensor([v]).expand(n, 1)
-            else:
-                return v.expand(n, *v.size())
-        return torch.normal(expand(self.mean), expand(self.std))
+        return torch.normal(_expand(self.mean, n), _expand(self.std, n))
 
     def log_prob(self, value):
         # compute the variance
@@ -217,13 +221,7 @@ class Gamma(Distribution):
         return torch.random_gamma(self.alpha, self.beta)
 
     def sample_n(self, n):
-        # cleanly expand float or Tensor or Variable parameters
-        def expand(v):
-            if isinstance(v, Number):
-                return torch.Tensor([v]).expand(n, 1)
-            else:
-                return v.expand(n, *v.size())
-        return torch.random_gamma(expand(self.alpha), expand(self.beta))
+        return torch.random_gamma(_expand(self.alpha, n), _expand(self.beta, n))
 
     def log_prob(self, value):
         return (self.alpha * torch.log(self.beta)

@@ -3807,7 +3807,6 @@
     - floating_point
   backends:
     - CPU
-    - CUDA
   cname: random_gamma
   return: self
   arguments:
