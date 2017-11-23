@@ -46,7 +46,7 @@ CAFFE2_DEFINE_string(
     "as input does.");
 CAFFE2_DEFINE_string(
     input_type,
-    "",
+    "float",
     "Input type when specifying the input dimension."
     "The supported types are float, uint8_t.");
 CAFFE2_DEFINE_int(iter, 10, "The number of iterations to run.");
