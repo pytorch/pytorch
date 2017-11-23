@@ -13,10 +13,10 @@ variable_list wrap_outputs(const variable_list& inputs, tensor_list&& outputs,
   auto flags = Function::flags(inputs);
   variable_list result;
   result.reserve(outputs.size());
-  if (flags.is_volatile) {
+  if (!flags.is_executable) {
     for (auto& output : outputs) {
       if (output.defined()) {
-        result.emplace_back(make_variable(output, false, true));
+        result.emplace_back(make_variable(output, false, flags.is_volatile));
       } else {
         result.emplace_back();
       }

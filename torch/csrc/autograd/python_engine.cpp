@@ -214,8 +214,6 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
       if (allow_unreachable && !grad_fn) continue;
       THPUtils_assert(grad_fn,
           "One of the differentiated Variables appears to not have been used in the graph");
-      THPUtils_assert(grad_fn->is_executable,
-          "One of the differentiated Variables has a non-executable grad_fn. Submit a bug report.");
       auto& fn_info = ctx.output_map[grad_fn];
       fn_info.first.emplace_back(output_nr, i);
       fn_info.second = is_leaf;

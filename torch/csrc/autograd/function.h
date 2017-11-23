@@ -55,7 +55,6 @@ struct Function : std::enable_shared_from_this<Function> {
   Function()
     : num_inputs(0)
     , next_functions()
-    , is_executable(false)
     , pre_hooks()
     , post_hooks()
     , pyobj(nullptr)
@@ -64,7 +63,6 @@ struct Function : std::enable_shared_from_this<Function> {
   Function(FunctionFlags&& flags)
     : num_inputs(0)
     , next_functions(std::move(flags.next_functions))
-    , is_executable(flags.is_executable)
     , pre_hooks()
     , post_hooks()
     , pyobj(nullptr)
@@ -109,8 +107,7 @@ struct Function : std::enable_shared_from_this<Function> {
   virtual std::string name();
 
   inline bool should_compute_output(int i) const {
-    auto& fn = next_functions[i].first;
-    return fn && fn->is_executable;
+    return bool(next_functions[i].first);
   }
 
   inline bool should_compute_any_outputs() const {
@@ -129,7 +126,6 @@ struct Function : std::enable_shared_from_this<Function> {
   }
 
   inline void set_flags(FunctionFlags&& flags) {
-    is_executable = flags.is_executable;
     next_functions = std::move(flags.next_functions);
   }
 
@@ -160,7 +156,6 @@ struct Function : std::enable_shared_from_this<Function> {
 
   int num_inputs;
   function_list next_functions;
-  bool is_executable;
   std::vector<std::shared_ptr<FunctionPreHook>> pre_hooks;
   std::vector<std::shared_ptr<FunctionPostHook>> post_hooks;
 

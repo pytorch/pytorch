@@ -71,15 +71,13 @@ struct ConvBackward : public Function, public ConvParams {
     : Function(std::move(flags))
     , ConvParams(std::move(params))
     , convolution(std::move(convolution)) {
-      if (is_executable) {
-        this->input_ = SavedVariable(input, false);
-        this->weight_ = SavedVariable(weight, false);
-        if (bias.defined()) {
-          this->bias_ = SavedVariable(bias, false);
-        }
-        this->columns = std::move(columns);
-        this->ones = std::move(ones);
+      this->input_ = SavedVariable(input, false);
+      this->weight_ = SavedVariable(weight, false);
+      if (bias.defined()) {
+        this->bias_ = SavedVariable(bias, false);
       }
+      this->columns = std::move(columns);
+      this->ones = std::move(ones);
     }
 
   virtual variable_list apply(const variable_list& gradOutputs) override;
@@ -104,14 +102,12 @@ struct ConvBackwardBackward : public Function, public ConvParams {
       Variable grad_output)
     : Function(std::move(flags))
     , ConvParams(std::move(params)) {
-      if (is_executable) {
-        this->input_ = SavedVariable(input, false);
-        this->weight_ = SavedVariable(weight, false);
-        if (bias.defined()) {
-          this->bias_ = SavedVariable(bias, false);
-        }
-        this->grad_output_ = SavedVariable(grad_output, false);
+      this->input_ = SavedVariable(input, false);
+      this->weight_ = SavedVariable(weight, false);
+      if (bias.defined()) {
+        this->bias_ = SavedVariable(bias, false);
       }
+      this->grad_output_ = SavedVariable(grad_output, false);
     }
 
   virtual variable_list apply(const variable_list& grad_grad_inputs) override;

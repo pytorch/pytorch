@@ -175,6 +175,9 @@ inline Variable make_variable(at::Tensor data, VarFlags flags=DEFAULT_FLAGS,
     // don't expose 0-dim tensors to Variable API.
     data = data.as_strided_({1}, {1});
   }
+  if (!flags.requires_grad) {
+    grad_fn = nullptr;
+  }
   return Variable(new VariableImpl(std::move(data), flags, output_nr, std::move(grad_fn)), false);
 }
 
@@ -189,6 +192,9 @@ inline Variable make_variable_view(Variable base, at::Tensor data, VarFlags flag
   if (data.defined() && data.dim() == 0) {
     // don't expose 0-dim tensors to Variable API.
     data = data.as_strided_({1}, {1});
+  }
+  if (!flags.requires_grad) {
+    grad_fn = nullptr;
   }
   return Variable(new VariableViewImpl(std::move(base), std::move(data), flags, output_nr, std::move(grad_fn)), false);
 }
