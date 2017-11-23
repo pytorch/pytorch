@@ -49,6 +49,16 @@ PY_VARIABLE_METHOD_DEF = CodeTemplate("""\
 UNPACK_SELF = "auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;"
 
 
+# XXX: if you got here because of an assertion failure, it doesn't mean
+# it's enough to just extend the list here. Before you do this, make sure
+# to add an appropriate wrap() overload in torch/csrc/autograd/utils/wrap_outputs.h.
+SUPPORTED_RETURN_TYPES = {
+    'Tensor', 'std::tuple<Tensor,Tensor>',
+    'std::tuple<Tensor,Tensor,Tensor>', 'std::vector<Tensor>',
+    'Scalar', 'bool', 'int64_t', 'void*'
+}
+
+
 def create_python_bindings(
         python_functions, py_methods, py_method_defs, py_method_dispatch,
         is_class):
@@ -81,6 +91,9 @@ def create_python_bindings(
 
     def emit_dispatch(i, function):
         env = {}
+        simple_return_type = function['return_type'].replace(' &', '')
+        assert simple_return_type in SUPPORTED_RETURN_TYPES, \
+            function['name'] + ' returns unsupported type: ' + simple_return_type
 
         actuals = []
         formal_args = []
