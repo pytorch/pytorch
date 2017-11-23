@@ -70,16 +70,13 @@ class AdamW(Optimizer):
                 exp_avg.mul_(beta1).add_(1 - beta1, grad)
                 exp_avg_sq.mul_(beta2).addcmul_(1 - beta2, grad, grad)
 
-                # denom = exp_avg_sq.sqrt().add_(group['eps'])
+                denom = exp_avg_sq.sqrt().add_(group['eps'])
 
                 bias_correction1 = 1 - beta1 ** state['step']
                 bias_correction2 = 1 - beta2 ** state['step']
+                step_size = group['lr'] * math.sqrt(bias_correction2) / bias_correction1
 
-                # step_size = group['lr'] * math.sqrt(bias_correction2) / bias_correction1
-                # p.data.addcdiv_(-step_size, exp_avg, denom)
-
-                denom = exp_avg_sq.div_(bias_correction2).sqrt().add_(group['eps'])
-                p.data.addcdiv_(-group['lr'], exp_avg.div_(bias_correction1), denom)
+                p.data.addcdiv_(-step_size, exp_avg, denom)
 
                 if group['weight_decay'] != 0:
                     p.data.add_(-group['weight_decay'], p.data)
