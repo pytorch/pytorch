@@ -112,8 +112,9 @@ def _gather_padding_ref(start_pad_width, end_pad_width, data, lengths):
 class TestSequenceOps(hu.HypothesisTestCase):
     @given(start_pad_width=st.integers(min_value=1, max_value=2),
            end_pad_width=st.integers(min_value=0, max_value=2),
-           args=_gen_test_add_padding(with_pad_data=True))
-    def test_add_padding(self, start_pad_width, end_pad_width, args):
+           args=_gen_test_add_padding(with_pad_data=True),
+           **hu.gcs)
+    def test_add_padding(self, start_pad_width, end_pad_width, args, gc, dc):
         lengths, data, start_padding, end_padding = args
         start_padding = np.array(start_padding, dtype=np.float32)
         end_padding = np.array(end_padding, dtype=np.float32)
@@ -124,10 +125,10 @@ class TestSequenceOps(hu.HypothesisTestCase):
             padding_width=start_pad_width,
             end_padding_width=end_pad_width)
         self.assertReferenceChecks(
-            hu.cpu_do,
-            op,
-            [data, lengths, start_padding, end_padding],
-            partial(_add_padding_ref, start_pad_width, end_pad_width))
+            device_option=gc,
+            op=op,
+            inputs=[data, lengths, start_padding, end_padding],
+            reference=partial(_add_padding_ref, start_pad_width, end_pad_width))
 
     @given(start_pad_width=st.integers(min_value=1, max_value=2),
            end_pad_width=st.integers(min_value=0, max_value=2),
