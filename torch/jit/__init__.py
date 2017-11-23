@@ -32,7 +32,7 @@ def get_tracing_state(args):
 
 
 @contextlib.contextmanager
-def scope(scope_name, vars):
+def scope(scope_name, *vars):
     tracing_state = get_tracing_state(vars)
     if tracing_state:
         tracing_state.push_scope(scope_name)
