@@ -2,29 +2,19 @@ from common import TestCase, run_tests
 import math
 import numpy as np
 import scipy.stats
+import scipy.special
 import torch
 from torch.autograd import Variable, gradcheck
 from torch.distributions import Bernoulli, Categorical, Normal, Gamma
 
 
-def _test_univariate_sampler(torch_dist, ref_dist, num_samples=1000, plot=False):
-    # Kolmogorov-Smirnov test of density.
-    torch_samples = torch_dist.sample_n(num_samples).squeeze().cpu().numpy()
-    ref_samples = ref_dist.rvs(num_samples)
-    torch_samples.sort()
-    ref_samples.sort()
-    # TODO(fritzo) Check density statistics.
-    if plot:
-        from matplotlib import pyplot
-        pyplot.plot(torch_samples, ref_samples)
-        pyplot.title(type(torch_dist).__name__)
-        pyplot.xlabel('PyTorch')
-        pyplot.ylabel('Reference')
-        pyplot.tight_layout()
-        pyplot.show()
-
-
 class TestDistributions(TestCase):
+    def _set_rng_seed(self, seed=0):
+        np.random.seed(seed)
+        torch.manual_seed(seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(seed)
+
     def _gradcheck_log_prob(self, dist_ctor, ctor_params):
         # performs gradient checks on log_prob
         distribution = dist_ctor(*ctor_params)
@@ -43,6 +33,26 @@ class TestDistributions(TestCase):
         log_probs = dist.log_prob(s)
         for i, (val, log_prob) in enumerate(zip(s.data.view(-1), log_probs.data.view(-1))):
             asset_fn(i, val, log_prob)
+
+    def _check_sampler_sampler(self, torch_dist, ref_dist, message,
+                               num_samples=10000, failure_rate=1e-3):
+        # Checks that the .sample() method matches a reference function.
+        torch_samples = torch_dist.sample_n(num_samples).squeeze().cpu().numpy()
+        ref_samples = ref_dist.rvs(num_samples)
+        samples = [(x, +1) for x in torch_samples] + [(x, -1) for x in ref_samples]
+        samples.sort()
+        samples = np.array(samples)[:,1]
+
+        # Aggragate into bins filled with roughly zero-mean unit-variance RVs.
+        num_bins = 10
+        samples_per_bin = len(samples) / num_bins
+        bins = samples.reshape((num_bins, samples_per_bin)).mean(axis=1)
+        stddev = samples_per_bin ** -0.5
+        threshold = stddev * scipy.special.erfinv(1 - 2 * failure_rate / num_bins)
+        message = '{}.sample() is biased:\n{}'.format(message, bins)
+        for bias in bins:
+            self.assertLess(-threshold, bias, message)
+            self.assertLess(bias, threshold, message)
 
     def test_bernoulli(self):
         p = Variable(torch.Tensor([0.7, 0.2, 0.4]), requires_grad=True)
@@ -108,10 +118,14 @@ class TestDistributions(TestCase):
 
         self._check_log_prob(Normal(mean, std), ref_log_prob)
 
+    # This is a randomized test.
     def test_normal_sample(self):
+        self._set_rng_seed()
         for mean in [-1.0, 0.0, 1.0]:
             for std in [0.1, 1.0, 10.0]:
-                _test_univariate_sampler(Normal(mean, std), scipy.stats.norm(loc=mean, scale=std))
+                self._check_sampler_sampler(Normal(mean, std),
+                                            scipy.stats.norm(loc=mean, scale=std),
+                                            'Normal(mean={}, std={})'.format(mean, std))
 
     def test_gamma_shape(self):
         alpha = Variable(torch.exp(torch.randn(2, 3)), requires_grad=True)
@@ -133,12 +147,14 @@ class TestDistributions(TestCase):
 
         self._check_log_prob(Gamma(alpha, beta), ref_log_prob)
 
-    # FIXME this fails due to bad numerics
+    # This is a randomized test.
     def test_gamma_sample(self):
+        self._set_rng_seed()
         for alpha in [0.1, 1.0, 5.0]:
             for beta in [0.1, 1.0, 10.0]:
-                _test_univariate_sampler(Gamma(alpha, beta),
-                                         scipy.stats.gamma(alpha, scale=1 / beta))
+                self._check_sampler_sampler(Gamma(alpha, beta),
+                                            scipy.stats.gamma(alpha, scale=1 / beta),
+                                            'Gamma(alpha={}, beta={})'.format(alpha, beta))
 
 
 if __name__ == '__main__':

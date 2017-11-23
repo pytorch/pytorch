@@ -288,7 +288,7 @@ TH_API double THRandom_random_gamma(THGenerator *_generator, double alpha, doubl
   /* This implements the acceptance-rejection method of Marsaglia and Tsang (2000)
     doi:10.1145/358407.358414 */
   const double d = alpha - 1.0 / 3.0;
-  const double c = 1.0 - sqrt(9.0 * d);
+  const double c = 1.0 / sqrt(9.0 * d);
   for(;;) {
     double x, v;
     do {
