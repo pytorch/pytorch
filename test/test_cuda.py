@@ -384,12 +384,18 @@ def get_cycles_per_ms():
     return _cycles_per_ms
 
 
-def compare_cpu_gpu(tensor_constructor, arg_constructor, fn, t, precision=1e-5):
+def compare_cpu_gpu(tensor_constructor, arg_constructor, fn, t, precision=1e-5, force_gpu_half=False):
     def tmp(self):
         cpu_tensor = tensor_constructor(t)
-        gpu_tensor = to_gpu(cpu_tensor)
+        type_map = {}
+        if force_gpu_half:
+            type_map = {
+                'torch.FloatTensor': 'torch.cuda.HalfTensor',
+                'torch.DoubleTensor': 'torch.cuda.HalfTensor',
+            }
+        gpu_tensor = to_gpu(cpu_tensor, type_map)
         cpu_args = arg_constructor(t)
-        gpu_args = [to_gpu(arg) for arg in cpu_args]
+        gpu_args = [to_gpu(arg, type_map) for arg in cpu_args]
         cpu_result = getattr(cpu_tensor, fn)(*cpu_args)
         try:
             gpu_result = getattr(gpu_tensor, fn)(*gpu_args)
@@ -1099,7 +1105,15 @@ if HAS_CUDA:
                     test_name += '_' + desc
 
                 assert not hasattr(TestCuda, test_name), "Duplicated test name: " + test_name
-                setattr(TestCuda, test_name, compare_cpu_gpu(constr, arg_constr, name_inner, t, precision))
+                setattr(TestCuda,
+                        test_name,
+                        compare_cpu_gpu(constr, arg_constr, name_inner, t, precision))
+                if t == torch.FloatTensor:
+                    assert not hasattr(TestCuda, test_name + '_gpu_half'), "Duplicated test name: " + test_name
+                    setattr(TestCuda,
+                            test_name + '_gpu_half',
+                            compare_cpu_gpu(constr, arg_constr, name_inner, t,
+                                            precision, force_gpu_half=True))
 
 
 if __name__ == '__main__':
