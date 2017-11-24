@@ -84,6 +84,9 @@ struct CompiledFunction {
       try {
         factory_ = std::make_shared<InterpreterFunctionFactory>(complete_trace.get());
       } catch(const jit::NotImplementedException & ex) {
+        PyErr_WarnEx(PyExc_UserWarning, "hitting an older JIT path that is slower than "
+            "the new one. It's close to being deleted, but the new path needs full support "
+            "for certain edge cases. Please report your use case.", 0);
         closure_ = std::make_shared<AutogradClosureFactory>(complete_trace.get());
       }
       graph_ = complete_trace->graph;
