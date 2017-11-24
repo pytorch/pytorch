@@ -538,25 +538,25 @@ class TestLRScheduler(TestCase):
         self._test(scheduler, targets, epochs)
 
     def test_reduce_lr_on_plateau_with_backtrack(self):
-        filename = './best.pth'
-        self.opt.param_groups[0]['lr'] = 0.5
-        self.opt.param_groups[1]['lr'] = 0.05
-        target1 = [0.5] * 3 + [0.05] * 3 + [0.005] * 3 + [0.0005] * 2
-        target2 = [t * 0.1 for t in target1]
-        targets = [target1, target2]
-        scheduler = ReduceLROnPlateau(optimizer=self.opt, backtrack=True,
-                                      model_to_save=self.net, path_to_save=filename, patience=2)
-        check_weight = self.net.conv1.weight.data.numpy().copy()  # save init
-        scheduler.step(metrics=0)  # this will write best.pth
-        for epoch in range(1, 10):
-            self.net.conv1.weight.data += 1.0
-            scheduler.step(metrics=0)
-            for param_group, target in zip(self.opt.param_groups, targets):
-                self.assertAlmostEqual(target[epoch], param_group['lr'],
-                                       msg='LR is wrong in epoch {}: expected {}, got {}'.format(
-                                           epoch, target[epoch], param_group['lr']), delta=1e-5)
-            # backtrack happens in epoch 3, 6, 9
-            self.assertAlmostEqual(self.net.conv1.weight.data.numpy(), check_weight + epoch % 3, delta=1e-5)
+        with tempfile.NamedTemporaryFile() as f:
+            self.opt.param_groups[0]['lr'] = 0.5
+            self.opt.param_groups[1]['lr'] = 0.05
+            target1 = [0.5] * 3 + [0.05] * 3 + [0.005] * 3 + [0.0005] * 2
+            target2 = [t * 0.1 for t in target1]
+            targets = [target1, target2]
+            scheduler = ReduceLROnPlateau(optimizer=self.opt, backtrack=True,
+                                          model_to_save=self.net, path_to_save=f.name, patience=2)
+            check_weight = self.net.conv1.weight.data.numpy().copy()  # save init
+            scheduler.step(metrics=0)  # this will write best.pth
+            for epoch in range(1, 10):
+                self.net.conv1.weight.data += 1.0
+                scheduler.step(metrics=0)
+                for param_group, target in zip(self.opt.param_groups, targets):
+                    self.assertAlmostEqual(target[epoch], param_group['lr'],
+                                           msg='LR is wrong in epoch {}: expected {}, got {}'.format(
+                                               epoch, target[epoch], param_group['lr']), delta=1e-5)
+                # backtrack happens in epoch 3, 6, 9
+                self.assertAlmostEqual(self.net.conv1.weight.data.numpy(), check_weight + epoch % 3, delta=1e-5)
 
     def _test(self, scheduler, targets, epochs=10):
         for epoch in range(epochs):
