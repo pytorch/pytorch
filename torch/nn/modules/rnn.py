@@ -548,7 +548,7 @@ class LSTMCell(RNNCellBase):
         c' = f * c + i * g \\
         h' = o * \tanh(c') \\
         \end{array}
-        
+
     where :math:`\sigma` is the sigmoid function.
 
     Args:
@@ -629,7 +629,7 @@ class GRUCell(RNNCellBase):
         n = \tanh(W_{in} x + b_{in} + r * (W_{hn} h + b_{hn})) \\
         h' = (1 - z) * n + z * h
         \end{array}
-        
+
     where :math:`\sigma` is the sigmoid function.
 
     Args:
