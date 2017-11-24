@@ -183,3 +183,44 @@ def pad_sequence(sequences, lengths, batch_first=False):
         return torch.stack(out_variable)
     else:
         return torch.stack(out_variable).transpose(0, 1)
+
+
+def pack_sequence(sequences, lengths):
+    r"""Packs a list of variable length Variables
+
+    sequences should be a list of Variables each has size `` Lx* `` where
+    L is length of the sequence and * is any trailing dimension including zero
+    ``pack_sequence`` assumes each Variable is of different length and pack them
+
+    Note:
+        sequences can have any input that has at least one dimension.
+        But ``pack_sequence`` assumes, first dimension has varaible length
+        sequences. You can apply it to pack the labels, and use the output of
+        the RNN with them to compute the loss directly. A Variable can be
+        retrieved from a :class:`PackedSequence` object by accessing
+        its ``.data`` attribute.
+    Ex.
+        >>> a = torch.Tensor([1,2,3])
+        >>> b = torch.Tensor([4,5])
+        >>> c = torch.Tensor([6])
+        >>> pack_sequence([a, b, c], [3, 2, 1])
+        PackedSequence(data=
+         1
+         4
+         6
+         2
+         5
+         3
+        [torch.FloatTensor of size 6]
+        , batch_sizes=[3, 2, 1])
+
+
+    Arguments:
+        sequences (list[Variable]): variable length sequences.
+        lengths (list[int]): list of sequence's lengths of each batch element.
+
+    Returns:
+        a :class:`PackedSequence` object
+    """
+
+    return pack_padded_sequence(pad_sequence(sequences, lengths), lengths)
