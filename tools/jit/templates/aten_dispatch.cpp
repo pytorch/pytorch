@@ -35,6 +35,12 @@ void pack_list(std::vector<Tensor> & outputs, std::tuple<Tensor, Tensor, Tensor>
   outputs.push_back(std::get<2>(v));
 }
 
+// A list of functions taking TensorList arguments (where we can't use
+// the number of inputs to choose an overload).
+std::unordered_set<Symbol> tensor_vararg_fns = {
+  kcat,
+};
+
 template<size_t N>
 std::array<bool, N> as_bool_array(const std::vector<int64_t>& vec) {
   std::array<bool, N> res;
@@ -49,7 +55,11 @@ std::unordered_map<std::string, operator_constructor> constructors = {
 
 std::string getDescriptor(jit::Node* n) {
   std::stringstream s;
-  s << symbolToString(n->kind()) << "-" << n->inputs().size();
+  s << symbolToString(n->kind());
+  if (tensor_vararg_fns.count(n->kind()) == 0)
+    s << "-" << n->inputs().size();
+  else
+    s << "-*";
   std::vector<const char*> attr_names = fmap(n->attributeNames(), &symbolToString);
   std::sort(attr_names.begin(), attr_names.end(), [](const char *a, const char *b) {
     return std::strcmp(a, b) < 0;

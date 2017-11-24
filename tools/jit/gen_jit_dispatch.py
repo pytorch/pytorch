@@ -68,10 +68,11 @@ def gen_jit_dispatch(declarations, out):
         arguments = decl['arguments']
         name = decl['name']
         scalar_args = [arg for arg in arguments if not is_tensor_arg(arg)]
+        has_tensorlist = any(arg['simple_type'] == 'TensorList' for arg in arguments)
 
         # Descriptor is a unique identified for a particular overload of an op
         attr_names = sorted([arg['name'] for arg in scalar_args])
-        num_inputs = len(arguments) - len(scalar_args)
+        num_inputs = len(arguments) - len(scalar_args) if not has_tensorlist else "*"
         descriptor = '-'.join([decl['name'], str(num_inputs)] + attr_names)
 
         # All scalar args need to be assigned, so they can be captured by a lambda
@@ -84,7 +85,7 @@ def gen_jit_dispatch(declarations, out):
         # Generate the actuall ATen call. This gets a bit tricky because of
         # TensorList arguments, and functions that are only available as methods.
         if 'namespace' in decl['method_of']:
-            if any(arg['simple_type'] == 'TensorList' for arg in arguments):
+            if has_tensorlist:
                 if sum(map(is_tensor_arg, arguments)) != 1:
                     # TODO: support this
                     continue
@@ -102,7 +103,11 @@ def gen_jit_dispatch(declarations, out):
             call = CALL_METHOD.substitute(name=name, args=args)
 
         constructor = CONSTRUCTOR.substitute(descriptor=descriptor, name=name, call=call,
-                                             assignments=assignments, num_inputs=num_inputs)
+                                             assignments=assignments,
+                                             # num_inputs is only used in AutogradClosure, which
+                                             # is going to be removed soon anyway. There's no good value
+                                             # we can provide for cat.
+                                             num_inputs=num_inputs if num_inputs != "*" else 0)
         assert descriptor not in ops, descriptor
         ops[descriptor] = constructor
 
