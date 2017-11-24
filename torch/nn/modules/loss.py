@@ -159,6 +159,9 @@ class NLLLoss2d(NLLLoss):
             for each minibatch. However, if the field size_average is set to
             ``False``, the losses are instead summed for each minibatch.
             Ignored when reduce is ``False``. Default: ``True``
+        ignore_index (int, optional): Specifies a target value that is ignored
+            and does not contribute to the input gradient. When size_average
+            is ``True``, the loss is averaged over non-ignored targets.
         reduce (bool, optional): By default, the losses are averaged or summed
             for each minibatch depending on size_average. When reduce is ``False``,
             the loss function returns a loss per batch element instead and
@@ -172,13 +175,14 @@ class NLLLoss2d(NLLLoss):
 
     Examples::
 
-        >>> m = nn.Conv2d(16, 32, (3, 3)).float()
+        >>> N, C = 5, 4
         >>> loss = nn.NLLLoss2d()
         >>> # input is of size N x C x height x width
-        >>> input = autograd.Variable(torch.randn(3, 16, 10, 10))
+        >>> data = Variable(torch.randn(N, 16, 10, 10))
+        >>> m = nn.Conv2d(16, C, (3, 3))
         >>> # each element in target has to have 0 <= value < C
-        >>> target = autograd.Variable(torch.LongTensor(3, 8, 8).random_(0, 4))
-        >>> output = loss(m(input), target)
+        >>> target = Variable(torch.LongTensor(N, 8, 8).random_(0, C))
+        >>> output = loss(m(data), target)
         >>> output.backward()
     """
     pass
