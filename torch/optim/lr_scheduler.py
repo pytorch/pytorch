@@ -282,7 +282,7 @@ class ReduceLROnPlateau(object):
 
     """ Status codes to be returned by ReduceLROnPlateau.step() """
     STATUS_WAITING = "WAITING"
-    STATUS_UPDATED_BEST = "UPDATED_BEST"
+    STATUS_NEW_BEST = "NEW_BEST"
     STATUS_REDUCED_LR = "REDUCED_LR"
 
     def step(self, metrics, epoch=None):
@@ -304,7 +304,7 @@ class ReduceLROnPlateau(object):
                 torch.save(
                     {'model': self.model_to_save.state_dict(), 'optim': self.optimizer.state_dict()},
                     self.path_to_save)
-            return self.STATUS_UPDATED_BEST
+            return self.STATUS_NEW_BEST
         elif self.num_bad_epochs > self.patience:
             self._reduce_lr(epoch)
             self.cooldown_counter = self.cooldown
