@@ -95,7 +95,7 @@ void test_broadcast(std::shared_ptr<thd::DataChannel> data_channel) {
 }
 
 void _test_reduce_helper(std::shared_ptr<thd::DataChannel> data_channel,
-                         THDReduceOp op_type, long init_value, long expected_value) {
+                         THDReduceOp op_type, int64_t init_value, int64_t expected_value) {
   if (data_channel->getRank() == 0) {
     auto int_tensor = buildTensor<int>({1, 2, 3, 4, 5}, init_value);
     data_channel->reduce(*int_tensor, op_type, 0);
@@ -121,7 +121,7 @@ void test_reduce(std::shared_ptr<thd::DataChannel> data_channel, int workers) {
 }
 
 void _test_allReduce_helper(std::shared_ptr<thd::DataChannel> data_channel,
-                            THDReduceOp op_type, long init_value, long expected_value) {
+                            THDReduceOp op_type, int64_t init_value, int64_t expected_value) {
   if (data_channel->getRank() == 0) {
     auto int_tensor = buildTensor<int>({1, 2, 3, 4, 5, 6, 7, 100}, init_value);
     data_channel->allReduce(*int_tensor, op_type, 0);
@@ -201,16 +201,16 @@ void test_allGather(std::shared_ptr<thd::DataChannel> data_channel) {
 void test_barrier(std::shared_ptr<thd::DataChannel> data_channel) {
   for (int i = 0; i < data_channel->getNumProcesses(); ++i) {
     if (data_channel->getRank() == i) {
-      long time_after_barrier = nowInMilliseconds() + BARRIER_WAIT_TIME;
-      auto time_tensor = buildTensor<long>({1}, time_after_barrier);
+      int64_t time_after_barrier = nowInMilliseconds() + BARRIER_WAIT_TIME;
+      auto time_tensor = buildTensor<int64_t>({1}, time_after_barrier);
       data_channel->broadcast(*time_tensor, i);
       std::this_thread::sleep_for(std::chrono::milliseconds(BARRIER_WAIT_TIME + 10));
       data_channel->barrier();
     } else {
-      auto time_tensor = buildTensor<long>({1}, -1);
+      auto time_tensor = buildTensor<int64_t>({1}, -1);
       data_channel->broadcast(*time_tensor, i); // get expected time after barrier
       data_channel->barrier();
-      assert(nowInMilliseconds() >= reinterpret_cast<long*>(time_tensor->data())[0]);
+      assert(nowInMilliseconds() >= reinterpret_cast<int64_t*>(time_tensor->data())[0]);
     }
   }
 }
@@ -447,16 +447,16 @@ void test_barrier_group(std::shared_ptr<thd::DataChannel> data_channel,
   if (contains(group_ranks, data_channel->getRank())) {
     for (int i = 0; i < group_ranks.size(); ++i) {
       if (data_channel->getRank() == group_ranks[i]) {
-        long time_after_barrier = nowInMilliseconds() + BARRIER_WAIT_TIME;
-        auto time_tensor = buildTensor<long>({1}, time_after_barrier);
+        int64_t time_after_barrier = nowInMilliseconds() + BARRIER_WAIT_TIME;
+        auto time_tensor = buildTensor<int64_t>({1}, time_after_barrier);
         data_channel->broadcast(*time_tensor, group_ranks[i], group);
         std::this_thread::sleep_for(std::chrono::milliseconds(BARRIER_WAIT_TIME + 10));
         data_channel->barrier(group);
       } else {
-        auto time_tensor = buildTensor<long>({1}, -1);
+        auto time_tensor = buildTensor<int64_t>({1}, -1);
         data_channel->broadcast(*time_tensor, group_ranks[i], group); // get expected time after barrier
         data_channel->barrier(group);
-        assert(nowInMilliseconds() >= reinterpret_cast<long*>(time_tensor->data())[0]);
+        assert(nowInMilliseconds() >= reinterpret_cast<int64_t*>(time_tensor->data())[0]);
       }
     }
   } else {

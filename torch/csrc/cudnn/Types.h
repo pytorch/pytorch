@@ -1,10 +1,10 @@
 #ifndef THP_CUDNN_TYPES_INC
 #define THP_CUDNN_TYPES_INC
 
-#include <Python.h>
+#include "torch/csrc/utils/python_stub.h"
 #include <cstddef>
 #include <string>
-#include <cudnn.h>
+#include "cudnn-wrapper.h"
 #include "../Types.h"
 #include <ATen/Tensor.h>
 

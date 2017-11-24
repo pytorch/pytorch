@@ -6,12 +6,19 @@ import re
 import shutil
 import sys
 import tempfile
-if sys.version_info[0] == 2:
-    from urlparse import urlparse
-    from urllib2 import urlopen
-else:
-    from urllib.request import urlopen
-    from urllib.parse import urlparse
+
+try:
+    from requests.utils import urlparse
+    import requests.get as urlopen
+    requests_available = True
+except ImportError:
+    requests_available = False
+    if sys.version_info[0] == 2:
+        from urlparse import urlparse  # noqa f811
+        from urllib2 import urlopen  # noqa f811
+    else:
+        from urllib.request import urlopen
+        from urllib.parse import urlparse
 try:
     from tqdm import tqdm
 except ImportError:
@@ -60,11 +67,15 @@ def load_url(url, model_dir=None, map_location=None):
 
 def _download_url_to_file(url, dst, hash_prefix):
     u = urlopen(url)
-    meta = u.info()
-    if hasattr(meta, 'getheaders'):
-        file_size = int(meta.getheaders("Content-Length")[0])
+    if requests_available:
+        file_size = int(u.headers["Content-Length"])
+        u = u.raw
     else:
-        file_size = int(meta.get_all("Content-Length")[0])
+        meta = u.info()
+        if hasattr(meta, 'getheaders'):
+            file_size = int(meta.getheaders("Content-Length")[0])
+        else:
+            file_size = int(meta.get_all("Content-Length")[0])
 
     f = tempfile.NamedTemporaryFile(delete=False)
     try:

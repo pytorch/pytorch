@@ -7,8 +7,6 @@
 #include "master_worker/common/Functions.hpp"
 #include "master_worker/master/Master.hpp"
 
-#include <THPP/Traits.hpp>
-
 #include <cstring>
 
 using namespace thd;
@@ -49,16 +47,16 @@ void THDGenerator_free(THDGenerator *self) {
   delete self;
 }
 
-unsigned long THDRandom_seed(THDGenerator *_generator) {
+uint64_t THDRandom_seed(THDGenerator *_generator) {
   masterCommandChannel->sendMessage(
     packMessage(Functions::generatorSeed, _generator),
     THDState::s_current_worker
   );
 
-  return receiveValueFromWorker<unsigned long>(THDState::s_current_worker);
+  return receiveValueFromWorker<uint64_t>(THDState::s_current_worker);
 }
 
-void THDRandom_manualSeed(THDGenerator *_generator, unsigned long the_seed_) {
+void THDRandom_manualSeed(THDGenerator *_generator, uint64_t the_seed_) {
   masterCommandChannel->sendMessage(
     packMessage(Functions::generatorManualSeed, _generator, the_seed_),
     THDState::s_current_worker

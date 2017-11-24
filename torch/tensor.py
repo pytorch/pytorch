@@ -76,7 +76,7 @@ class _TensorBase(object):
         if self.is_cuda:
             raise TypeError("cannot pin '{0}' only CPU memory can be pinned"
                             .format(self.type()))
-        storage = self.storage()
+        storage = self.contiguous().storage()
         if storage is None:
             storage = (self.storage_type())()
         return type(self)().set_(storage.pin_memory()).view_as(self)
@@ -148,8 +148,10 @@ class _TensorBase(object):
     def __bool__(self):
         if self.numel() == 0:
             return False
-        raise RuntimeError("bool value of non-empty " + torch.typename(self) +
-                           " objects is ambiguous")
+        elif self.numel() == 1:
+            return torch.squeeze(self)[0] != 0
+        raise RuntimeError("bool value of " + torch.typename(self) +
+                           " containing more than one value is ambiguous")
 
     __nonzero__ = __bool__
 
@@ -320,6 +322,9 @@ class _TensorBase(object):
     def __pow__(self, other):
         return self.pow(other)
 
+    def __rpow__(self, other):
+        return torch.pow(other, self)
+
     def __ipow__(self, other):
         return self.pow_(other)
 
@@ -368,10 +373,57 @@ class _TensorBase(object):
     def __hash__(self):
         return id(self)
 
+    def __int__(self):
+        if self.numel() == 1:
+            return int(self[(0,) * self.ndimension()])
+        raise TypeError("only 1-element tensors can be converted "
+                        "to Python scalars")
+
+    def __long__(self):
+        if self.numel() == 1:
+            return long(self[(0,) * self.ndimension()])
+        raise TypeError("only 1-element tensors can be converted "
+                        "to Python scalars")
+
+    def __float__(self):
+        if self.numel() == 1:
+            return float(self[(0,) * self.ndimension()])
+        raise TypeError("only 1-element tensors can be converted "
+                        "to Python scalars")
+
     # provide user guidance when they inavertently call autograd properties on a Tensor
     @property
     def data(self):
         raise RuntimeError('cannot call .data on a torch.Tensor: did you intend to use autograd.Variable?')
+
+    # Numpy array interface, to support `numpy.asarray(tensor) -> ndarray`
+    def __array__(self, dtype=None):
+        if dtype is None:
+            return self.cpu().numpy()
+        else:
+            return self.cpu().numpy().astype(dtype, copy=False)
+
+    # Wrap Numpy array again in a suitable tensor when done, to support e.g.
+    # `numpy.sin(tensor) -> tensor` or `numpy.greater(tensor, 0) -> ByteTensor`
+    def __array_wrap__(self, array):
+        if array.ndim == 0:
+            # TODO: remove this when 0-dimensional tensors are supported
+            if array.dtype.kind == 'b':
+                return bool(array)
+            elif array.dtype.kind in ('i', 'u'):
+                return int(array)
+            elif array.dtype.kind == 'f':
+                return float(array)
+            elif array.dtype.kind == 'c':
+                return complex(array)
+            else:
+                raise RuntimeError('bad scalar {!r}'.format(array))
+        else:
+            if array.dtype == bool:
+                # Workaround, torch has no built-in bool tensor
+                array = array.astype('uint8')
+
+            return torch.from_numpy(array)
 
 
 _TensorBase.type = _type

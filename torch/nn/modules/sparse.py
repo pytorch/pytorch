@@ -1,8 +1,9 @@
 import torch
-from torch.nn.parameter import Parameter
 from torch.autograd import Variable
+from torch.nn.parameter import Parameter
 
 from .module import Module
+from .. import functional as F
 
 
 class Embedding(Module):
@@ -20,6 +21,8 @@ class Embedding(Module):
         norm_type (float, optional): The p of the p-norm to compute for the max_norm option
         scale_grad_by_freq (boolean, optional): if given, this will scale gradients by the frequency of
                                                 the words in the mini-batch.
+        sparse (boolean, optional): if ``True``, gradient w.r.t. weight matrix will be a sparse tensor. See Notes for
+                                    more details regarding sparse gradients.
 
     Attributes:
         weight (Tensor): the learnable weights of the module of shape (num_embeddings, embedding_dim)
@@ -27,6 +30,11 @@ class Embedding(Module):
     Shape:
         - Input: LongTensor `(N, W)`, N = mini-batch, W = number of indices to extract per mini-batch
         - Output: `(N, W, embedding_dim)`
+
+    Notes:
+        Keep in mind that only a limited number of optimizers support
+        sparse gradients: currently it's `optim.SGD` (`cuda` and `cpu`),
+        and `optim.Adagrad` (`cpu`)
 
     Examples::
 
@@ -125,7 +133,6 @@ class EmbeddingBag(Module):
     Args:
         num_embeddings (int): size of the dictionary of embeddings
         embedding_dim (int): the size of each embedding vector
-        padding_idx (int, optional): If given, pads the output with zeros whenever it encounters the index.
         max_norm (float, optional): If given, will renormalize the embeddings to always have a norm lesser than this
         norm_type (float, optional): The p of the p-norm to compute for the max_norm option
         scale_grad_by_freq (boolean, optional): if given, this will scale gradients by the frequency of
@@ -159,19 +166,20 @@ class EmbeddingBag(Module):
                    the input is considered to be of fixed-length sequences
         - Output: `(B, embedding_dim)`
 
-    Examples:
+    Examples::
 
-    >>> # an Embedding module containing 10 tensors of size 3
-    >>> embedding_sum = nn.EmbeddingBag(10, 3, mode='sum')
-    >>> # a batch of 2 samples of 4 indices each
-    >>> input = Variable(torch.LongTensor([1,2,4,5,4,3,2,9]))
-    >>> offsets = Variable(torch.LongTensor([0,4]))
-    >>> embedding_sum(input, offsets)
+        >>> # an Embedding module containing 10 tensors of size 3
+        >>> embedding_sum = nn.EmbeddingBag(10, 3, mode='sum')
+        >>> # a batch of 2 samples of 4 indices each
+        >>> input = Variable(torch.LongTensor([1,2,4,5,4,3,2,9]))
+        >>> offsets = Variable(torch.LongTensor([0,4]))
+        >>> embedding_sum(input, offsets)
 
-    Variable containing:
-    -0.7296 -4.6926  0.3295
-    -0.5186 -0.5631 -0.2792
-    [torch.FloatTensor of size 2x3]
+        Variable containing:
+        -0.7296 -4.6926  0.3295
+        -0.5186 -0.5631 -0.2792
+        [torch.FloatTensor of size 2x3]
+
     """
 
     def __init__(self, num_embeddings, embedding_dim,
@@ -192,26 +200,9 @@ class EmbeddingBag(Module):
         self.weight.data.normal_(0, 1)
 
     def forward(self, input, offsets=None):
-        if input.dim() == 2:
-            if offsets is not None:
-                raise ValueError("if input is 2D, then offsets has to be None"
-                                 ", as input is treated is a mini-batch of"
-                                 " fixed length sequences. However, found "
-                                 "offsets of type {}".format(type(offsets)))
-            else:
-                offsets = Variable(torch.arange(0, input.numel(), input.size(1),
-                                   out=input.data.new().long()))
-                input = input.view(-1)
-        elif input.dim() != 1:
-            raise ValueError("input has to be 1D or 2D Tensor,"
-                             " but got Tensor of dimension {}".format(input.dim()))
-        if offsets is None:
-            raise ValueError("offsets has to be a 1D Tensor but got None")
-
-        return self._backend.EmbeddingBag(
-            self.max_norm, self.norm_type,
-            self.scale_grad_by_freq, mode=self.mode
-        )(self.weight, input, offsets)
+        return F.embedding_bag(self.weight, input, offsets,
+                               self.max_norm, self.norm_type,
+                               self.scale_grad_by_freq, self.mode)
 
     def __repr__(self):
         s = '{name}({num_embeddings}, {embedding_dim}'

@@ -1,4 +1,8 @@
 #include "torch/csrc/autograd/functions/utils.h"
+#include "torch/csrc/utils/functional.h"
+#include "torch/csrc/jit/tracer.h"
+
+#include "torch/csrc/autograd/variable.h"
 
 #include <sstream>
 
@@ -11,16 +15,20 @@ variable_list wrap_outputs(const variable_list& inputs, tensor_list&& outputs,
   result.reserve(outputs.size());
   if (flags.is_volatile) {
     for (auto& output : outputs) {
-     result.emplace_back(Variable::of(output, true));
+      if (output.defined()) {
+        result.emplace_back(make_variable(output, false, true));
+      } else {
+        result.emplace_back();
+      }
     }
   } else {
     auto grad_fn = ctr(std::move(flags));
     for (auto& output : outputs) {
       if (output.defined()) {
-        result.emplace_back(std::make_shared<Variable>(output, grad_fn));
+        result.emplace_back(make_variable(output, grad_fn));
       } else {
         ++grad_fn->num_inputs;
-        result.emplace_back(nullptr);
+        result.emplace_back();
       }
     }
   }
@@ -38,7 +46,7 @@ void check_input_variables(const char* name, const variable_list& inputs, int ar
     throw std::runtime_error(ss.str());
   }
   for (int i = 0; i < required_args; ++i) {
-    if (!inputs[i]) {
+    if (!inputs[i].defined()) {
       std::stringstream ss;
       ss << name << ": expected Variable at argument " << i << " (got None)";
       throw std::runtime_error(ss.str());

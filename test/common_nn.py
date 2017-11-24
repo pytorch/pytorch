@@ -27,6 +27,13 @@ PRECISION = 1e-5
 def get_size_average(m):
     return getattr(m, 'size_average', False) or getattr(m, 'sizeAverage', False)
 
+
+def get_weight(m):
+    result = getattr(m, 'weight', None)
+    if result is not None:
+        return result
+    return getattr(m, 'weights', None)
+
 module_tests = [
     dict(
         module_name='Linear',
@@ -91,6 +98,7 @@ module_tests = [
     ),
     dict(
         module_name='Softmax',
+        constructor_args=(1,),
         input_size=(10, 20),
         reference_fn=lambda i, _: torch.exp(i).div(torch.exp(i).sum(1, True).expand(10, 20)),
     ),
@@ -101,11 +109,13 @@ module_tests = [
     ),
     dict(
         module_name='LogSoftmax',
+        constructor_args=(1,),
         input_size=(10, 20),
         reference_fn=lambda i, _: torch.exp(i).div_(torch.exp(i).sum(1, True).expand(10, 20)).log_(),
     ),
     dict(
         module_name='LogSoftmax',
+        constructor_args=(1,),
         input_size=(1, 3, 10, 20),
         reference_fn=lambda i, _: torch.exp(i).div_(torch.exp(i).sum(1, False)).log_(),
         desc='multiparam',
@@ -220,10 +230,12 @@ module_tests = [
     ),
     dict(
         module_name='Softmin',
+        constructor_args=(1,),
         input_size=(10, 20),
     ),
     dict(
         module_name='Softmin',
+        constructor_args=(1,),
         input_size=(2, 3, 5, 10),
         desc='multidim',
     ),
@@ -233,181 +245,285 @@ module_tests = [
     ),
 ]
 
+
+def kldivloss_reference(input, target, size_average=True, reduce=True):
+    safe_target = target * (target > 0).type_as(target)
+    safe_target_log = (safe_target + (target <= 0).type_as(target)).log()
+    result = safe_target * (safe_target_log - input)
+    if reduce and size_average:
+        return result.mean()
+    elif reduce:
+        return result.sum()
+    return result
+
+
+def nllloss2d_reference(input, target, weight=None, ignore_index=-100,
+                        size_average=True, reduce=True):
+    N, C, H, W = input.size()
+    output = torch.zeros(N, H, W).type_as(input)
+    if isinstance(target, Variable):
+        target = target.data
+
+    if weight is None:
+        weight = torch.ones(C).type_as(input)
+
+    total_weight_data = 0
+    for n in range(0, N):
+        for h in range(0, H):
+            for w in range(0, W):
+                t_nhw = target[n][h][w]
+                norm = 0. if ignore_index == t_nhw else weight[t_nhw]
+                output[n][h][w] = -input[n][t_nhw][h][w] * norm
+                total_weight_data += norm
+
+    if reduce and size_average:
+        return output.sum() / total_weight_data
+    elif reduce:
+        return output.sum()
+    return output
+
+
+def nllloss_reference(input, target, weight=None, ignore_index=-100,
+                      size_average=True, reduce=True):
+    if isinstance(target, Variable):
+        target = target.data
+
+    def nll_loss_helper(input, target, weight, ignore_index):
+        if target is ignore_index:
+            return (0, 0)
+        norm = 1 if weight is None else weight[target]
+        result = -input[target] * norm
+        return (result, norm)
+
+    losses_and_weights = [nll_loss_helper(i, t, weight, ignore_index)
+                          for i, t in zip(input, target)]
+    losses, weights = zip(*losses_and_weights)
+    losses_tensor = torch.Tensor(losses).type_as(input)
+    if reduce and size_average:
+        return sum(losses_tensor) / sum(weights)
+    elif reduce:
+        return sum(losses_tensor)
+    else:
+        return losses_tensor
+
+
+def smoothl1loss_reference(input, target, size_average=True, reduce=True):
+    abs_diff = (input - target).abs()
+    ge_one_mask = (abs_diff >= 1).type_as(abs_diff)
+    lt_one_mask = (abs_diff < 1).type_as(abs_diff)
+    output = ge_one_mask * (abs_diff - 0.5) + lt_one_mask * 0.5 * (abs_diff ** 2)
+    if reduce and size_average:
+        return output.mean()
+    elif reduce:
+        return output.sum()
+    return output
+
+
+loss_reference_fns = {
+    'KLDivLoss': kldivloss_reference,
+    'NLLLoss': nllloss_reference,
+    'NLLLoss2d': nllloss2d_reference,
+    'SmoothL1Loss': smoothl1loss_reference,
+}
+
+
 criterion_tests = [
-    dict(module_name='L1Loss',
-         input_size=(2, 3, 4),
-         target=torch.randn(2, 3, 4),
-         reference_fn=lambda i, t, _: 1. / i.numel() *
-         sum((a - b).abs().sum() for a, b in zip(i, t)),
-         ),
+    dict(
+        module_name='L1Loss',
+        input_size=(2, 3, 4),
+        target_size=(2, 3, 4),
+        reference_fn=lambda i, t, _: 1. / i.numel() *
+        sum((a - b).abs().sum() for a, b in zip(i, t)),
+    ),
     dict(
         module_name='NLLLoss',
-        input=torch.rand(15, 10).log(),
-        target=torch.Tensor(15).uniform_().mul(10).floor().long(),
-        check_no_size_average=True,
+        input_fn=lambda: torch.rand(15, 10).log(),
+        target_fn=lambda: torch.Tensor(15).uniform_().mul(10).floor().long(),
+        reference_fn=lambda i, t, m:
+            nllloss_reference(i, t, size_average=get_size_average(m)),
+        check_no_size_average=True
     ),
     dict(
         module_name='NLLLoss',
         constructor_args=(None, True, 2),
-        input=torch.rand(15, 10).log(),
-        target=torch.Tensor(15).uniform_().mul(10).floor().long(),
+        input_fn=lambda: torch.rand(15, 10).log(),
+        target_fn=lambda: torch.Tensor(15).uniform_().mul(10).floor().long(),
+        reference_fn=lambda i, t, _: nllloss_reference(i, t, ignore_index=2),
         desc='ignore_index'
     ),
     dict(
         module_name='NLLLoss',
-        constructor_args=(torch.rand(10),),
-        input=torch.rand(15, 10).add(1e-2).log(),
-        target=torch.Tensor(15).uniform_().mul(10).floor().long(),
+        constructor_args_fn=lambda: (torch.rand(10),),
+        input_fn=lambda: torch.rand(15, 10).add(1e-2).log(),
+        target_fn=lambda: torch.Tensor(15).uniform_().mul(10).floor().long(),
+        reference_fn=lambda i, t, m:
+            nllloss_reference(i, t, weight=get_weight(m)),
         desc='weights',
     ),
     dict(
         module_name='NLLLoss',
-        constructor_args=(torch.rand(10), True, 2),
-        input=torch.rand(15, 10).add(1e-2).log(),
-        target=torch.Tensor(15).uniform_().mul(10).floor().long(),
+        constructor_args_fn=lambda: (torch.rand(10), True, 2),
+        input_fn=lambda: torch.rand(15, 10).add(1e-2).log(),
+        target_fn=lambda: torch.Tensor(15).uniform_().mul(10).floor().long(),
+        reference_fn=lambda i, t, m:
+            nllloss_reference(i, t, weight=get_weight(m), ignore_index=2),
         desc='weights_ignore_index'
     ),
     dict(
         module_name='NLLLoss',
-        constructor_args=(torch.rand(10), True, -1),
-        input=torch.rand(15, 10).add(1e-2).log(),
-        target=torch.Tensor(15).uniform_().mul(10 + 1).floor().long() - 1,
+        constructor_args_fn=lambda: (torch.rand(10), True, -1),
+        input_fn=lambda: torch.rand(15, 10).add(1e-2).log(),
+        target_fn=lambda: torch.Tensor(15).uniform_().mul(10 + 1).floor().long() - 1,
+        reference_fn=lambda i, t, m:
+            nllloss_reference(i, t, weight=get_weight(m), ignore_index=-1),
         desc='weights_ignore_index_neg'
     ),
     dict(
         module_name='KLDivLoss',
-        input=torch.rand(10, 10).log(),
-        target=torch.rand(10, 10),
+        input_fn=lambda: torch.rand(10, 10).log(),
+        target_fn=lambda: torch.rand(10, 10),
+        reference_fn=lambda i, t, m:
+            kldivloss_reference(i, t, get_size_average(m), reduce=True),
         check_no_size_average=True,
     ),
     dict(
         module_name='MSELoss',
-        input=torch.randn(2, 3, 4, 5),
-        target=torch.randn(2, 3, 4, 5),
+        input_size=(2, 3, 4, 5),
+        target_size=(2, 3, 4, 5),
         reference_fn=lambda i, t, m: (i - t).abs().pow(2).sum() / (i.numel() if get_size_average(m) else 1),
         check_no_size_average=True,
     ),
     dict(
         module_name='BCELoss',
-        input=torch.rand(15, 10).clamp_(1e-2, 1 - 1e-2),
-        target=torch.randn(15, 10).gt(0).double(),
+        input_fn=lambda: torch.rand(15, 10).clamp_(1e-2, 1 - 1e-2),
+        target_fn=lambda: torch.randn(15, 10).gt(0).double(),
         check_gradgrad=False,
     ),
     dict(
         module_name='BCELoss',
-        constructor_args=(torch.rand(10),),
-        input=torch.rand(15, 10).clamp_(1e-2, 1 - 1e-2),
-        target=torch.randn(15, 10).gt(0).double(),
+        constructor_args_fn=lambda: (torch.rand(10),),
+        input_fn=lambda: torch.rand(15, 10).clamp_(1e-2, 1 - 1e-2),
+        target_fn=lambda: torch.randn(15, 10).gt(0).double(),
         desc='weights',
         check_gradgrad=False,
     ),
     dict(
         module_name='CrossEntropyLoss',
-        input=torch.randn(15, 10),
-        target=torch.Tensor(15).uniform_().mul(10).floor().long(),
+        input_size=(15, 10),
+        target_fn=lambda: torch.Tensor(15).uniform_().mul(10).floor().long(),
     ),
     dict(
         module_name='CrossEntropyLoss',
-        constructor_args=(torch.rand(10),),
-        input=torch.randn(15, 10),
-        target=torch.Tensor(15).uniform_().mul(10).floor().long(),
+        constructor_args_fn=lambda: (torch.rand(10),),
+        input_size=(15, 10),
+        target_fn=lambda: torch.Tensor(15).uniform_().mul(10).floor().long(),
         desc='weights',
     ),
     dict(
         module_name='NLLLoss2d',
         input_size=(2, 3, 5, 5),
-        target=torch.rand(2, 5, 5).mul(3).floor().long(),
+        target_fn=lambda: torch.rand(2, 5, 5).mul(3).floor().long(),
+        reference_fn=lambda i, t, m:
+            nllloss2d_reference(i, t, size_average=get_size_average(m)),
+        check_no_size_average=True,
     ),
     dict(
         module_name='NLLLoss2d',
-        constructor_args=(torch.rand(3),),
+        constructor_args_fn=lambda: (torch.rand(3),),
         input_size=(2, 3, 5, 5),
         target=torch.rand(2, 5, 5).mul(3).floor().long(),
+        reference_fn=lambda i, t, m:
+            nllloss2d_reference(i, t, weight=get_weight(m)),
         desc='weights',
     ),
     dict(
         module_name='NLLLoss2d',
-        constructor_args=(None, True, 3),
+        constructor_args=(None, True, 1),
         input_size=(2, 3, 5, 5),
-        target=torch.rand(2, 5, 5).mul(4).floor().long(),
+        target_fn=lambda: torch.rand(2, 5, 5).mul(3).floor().long(),
+        reference_fn=lambda i, t, m:
+            nllloss2d_reference(i, t, ignore_index=1),
         desc='ignore_index',
     ),
     dict(
         module_name='HingeEmbeddingLoss',
-        input=torch.rand(10),
-        target=torch.randn(10).gt(0).double().mul_(2).sub(1),
+        input_size=(10,),
+        target_fn=lambda: torch.randn(10).gt(0).double().mul_(2).sub(1),
     ),
     dict(
         module_name='HingeEmbeddingLoss',
         constructor_args=(0.5,),
-        input=torch.rand(10),
-        target=torch.randn(10).gt(0).double().mul_(2).sub(1),
+        input_size=(10,),
+        target_fn=lambda: torch.randn(10).gt(0).double().mul_(2).sub(1),
         desc='margin',
         check_no_size_average=True,
     ),
     dict(
         module_name='MultiLabelMarginLoss',
         input_size=(5, 10),
-        target=torch.rand(5, 10).mul(10).floor().long(),
+        target_fn=lambda: torch.rand(5, 10).mul(10).floor().long(),
+        check_no_size_average=True,
         check_gradgrad=False,
     ),
     dict(
         module_name='MultiLabelSoftMarginLoss',
         input_size=(5, 10),
-        target=torch.rand(5, 10).mul(2).floor(),
+        target_fn=lambda: torch.rand(5, 10).mul(2).floor(),
         check_gradgrad=False,
     ),
     dict(
         module_name='MultiLabelSoftMarginLoss',
-        constructor_args=(torch.rand(10),),
+        constructor_args_fn=lambda: (torch.rand(10),),
         input_size=(5, 10),
-        target=torch.rand(5, 10).mul(2).floor(),
+        target_fn=lambda: torch.rand(5, 10).mul(2).floor(),
         desc='weights',
         check_gradgrad=False,
     ),
     dict(
         module_name='MultiMarginLoss',
         input_size=(5, 10),
-        target=torch.rand(5).mul(8).floor().long(),
+        target_fn=lambda: torch.rand(5).mul(8).floor().long(),
         check_gradgrad=False,
     ),
     dict(
         module_name='SmoothL1Loss',
         input_size=(5, 10),
-        target=torch.randn(5, 10),
+        target_size=(5, 10),
         check_no_size_average=True,
+        reference_fn=lambda i, t, m:
+            smoothl1loss_reference(i, t, size_average=get_size_average(m)),
     ),
     dict(
         module_name='SoftMarginLoss',
         input_size=(5, 5),
-        target=torch.randn(5, 5).sign(),
+        target_fn=lambda: torch.randn(5, 5).sign(),
         check_no_size_average=True,
     ),
     dict(
         module_name='CosineEmbeddingLoss',
-        input=(torch.rand(15, 10), torch.rand(15, 10)),
-        target=torch.randn(15).sign(),
+        input_fn=lambda: (torch.rand(15, 10), torch.rand(15, 10)),
+        target_fn=lambda: torch.randn(15).sign(),
         check_gradgrad=False,
     ),
     dict(
         module_name='CosineEmbeddingLoss',
         constructor_args=(0.7,),
-        input=(torch.rand(15, 10), torch.rand(15, 10)),
-        target=torch.randn(15).sign(),
+        input_fn=lambda: (torch.rand(15, 10), torch.rand(15, 10)),
+        target_fn=lambda: torch.randn(15).sign(),
         desc='margin',
         check_gradgrad=False,
     ),
     dict(
         module_name='MarginRankingLoss',
-        input=(torch.randn(50).mul(10), torch.randn(50).mul(10)),
-        target=torch.randn(50).sign(),
+        input_fn=lambda: (torch.randn(50).mul(10), torch.randn(50).mul(10)),
+        target_fn=lambda: torch.randn(50).sign(),
         check_no_size_average=True,
     ),
     dict(
         module_name='MarginRankingLoss',
         constructor_args=(2,),
-        input=(torch.randn(50).mul(10), torch.randn(50).mul(10)),
-        target=torch.randn(50).sign(),
+        input_fn=lambda: (torch.randn(50).mul(10), torch.randn(50).mul(10)),
+        target_fn=lambda: torch.randn(50).sign(),
         desc='margin',
         check_no_size_average=True,
     ),
@@ -551,17 +667,22 @@ class NNTestCase(TestCase):
 
 class TestBase(object):
 
-    def __init__(self, constructor, constructor_args=tuple(), input_size=None,
-                 input=None, desc='', reference_fn=None, fullname=None, **kwargs):
-        if input_size is None and input is None:
-            raise RuntimeError("Specify either an input tensor, or it's size!")
-        self.constructor = constructor
-        self.constructor_args = constructor_args
-        self.input = input
-        self.input_size = input_size
+    _required_arg_names = {'constructor_args', 'input'}
+
+    def __init__(self, constructor, desc='', reference_fn=None, fullname=None, **kwargs):
         self.desc = desc
         self.fullname = fullname
+        self.constructor = constructor
         self.reference_fn = reference_fn
+        for name in self._required_arg_names:
+            if name not in kwargs and name + '_fn' not in kwargs and name + '_size' not in kwargs:
+                if name == 'constructor_args':
+                    kwargs['constructor_args'] = tuple()
+                else:
+                    raise ValueError("{}: Specify {} by a value, a function to generate it, or it's size!"
+                                     .format(self.get_name(), name))
+        self._extra_kwargs = kwargs
+        self._arg_cache = {}
 
     def get_name(self):
         if self.fullname is not None:
@@ -572,28 +693,45 @@ class TestBase(object):
             test_name += '_' + self.desc
         return test_name
 
-    def _unpack_input(self, input):
-        if isinstance(input, Variable):
-            return input.data
-        elif torch.is_tensor(input):
-            return input
+    def _unpack(self, value):
+        if isinstance(value, Variable):
+            return value.data
+        elif torch.is_tensor(value):
+            return value
         else:
-            return type(input)(self._unpack_input(i) for i in input)
+            return type(value)(self._unpack(v) for v in value)
+
+    @property
+    def constructor_args(self):
+        return self._get_arg('constructor_args')
+
+    def _get_arg(self, name):
+        assert name in self._required_arg_names
+
+        if name not in self._arg_cache:
+            fn_name = name + '_fn'
+            size_name = name + '_size'
+
+            if name in self._extra_kwargs:
+                self._arg_cache[name] = self._extra_kwargs[name]
+            elif fn_name in self._extra_kwargs:
+                self._arg_cache[name] = self._extra_kwargs[fn_name]()
+            else:
+                assert size_name in self._extra_kwargs
+
+                def map_tensor_sizes(sizes):
+                    if isinstance(sizes, list):
+                        return [map_tensor_sizes(s) for s in sizes]
+                    elif torch.is_tensor(sizes):
+                        return sizes.double()
+                    else:
+                        return torch.randn(*sizes)
+
+                self._arg_cache[name] = map_tensor_sizes(self._extra_kwargs[size_name])
+        return self._arg_cache[name]
 
     def _get_input(self):
-        if self.input is not None:
-            return self.input
-
-        def map_input_sizes(sizes):
-            if isinstance(sizes, list):
-                return [map_input_sizes(s) for s in sizes]
-            elif torch.is_tensor(sizes):
-                return sizes.double()
-            else:
-                return torch.randn(*sizes)
-
-        assert self.input_size is not None
-        return map_input_sizes(self.input_size)
+        return self._get_arg('input')
 
     def __call__(self, test_case):
         raise NotImplementedError
@@ -605,6 +743,7 @@ class ModuleTest(TestBase):
         super(ModuleTest, self).__init__(*args, **kwargs)
         self.jacobian_input = kwargs.get('jacobian_input', True)
         self.should_test_cuda = kwargs.get('test_cuda', True)
+        self.should_test_pickle = kwargs.get('pickle', True)
 
     def __call__(self, test_case):
         module = self.constructor(*self.constructor_args)
@@ -614,19 +753,20 @@ class ModuleTest(TestBase):
             out = test_case._forward(module, input)
             if isinstance(out, Variable):
                 out = out.data
-            ref_input = self._unpack_input(deepcopy(input))
+            ref_input = self._unpack(deepcopy(input))
             expected_out = self.reference_fn(ref_input, test_case._get_parameters(module)[0])
             test_case.assertEqual(out, expected_out)
 
         self.test_noncontig(test_case, module, input)
 
-        # TODO: do this with in-memory files as soon as torch.save will support it
-        with TemporaryFile() as f:
-            test_case._forward(module, input)
-            torch.save(module, f)
-            f.seek(0)
-            module_copy = torch.load(f)
-            test_case.assertEqual(test_case._forward(module, input), test_case._forward(module_copy, input))
+        if self.should_test_pickle:
+            # TODO: do this with in-memory files as soon as torch.save will support it
+            with TemporaryFile() as f:
+                test_case._forward(module, input)
+                torch.save(module, f)
+                f.seek(0)
+                module_copy = torch.load(f)
+                test_case.assertEqual(test_case._forward(module, input), test_case._forward(module_copy, input))
 
         self._do_test(test_case, module, input)
 
@@ -725,13 +865,14 @@ class ModuleTest(TestBase):
 
 class CriterionTest(TestBase):
 
+    _required_arg_names = TestBase._required_arg_names.union({'target'})
+
     def __init__(self, *args, **kwargs):
         super(CriterionTest, self).__init__(*args, **kwargs)
-        self.target = self._get_target(kwargs['target'])
         self.should_test_cuda = kwargs.get('test_cuda', True)
 
-    def _get_target(self, target):
-        return target
+    def _get_target(self):
+        return self._get_arg('target')
 
     def __call__(self, test_case):
         module = self.constructor(*self.constructor_args)
@@ -741,17 +882,16 @@ class CriterionTest(TestBase):
         module.__repr__()
         str(module)
 
+        target = self._get_target()
+
         if self.reference_fn is not None:
-            out = test_case._forward_criterion(module, input, self.target)
-            target = self.target
-            if isinstance(target, Variable):
-                target = target.data
-            expected_out = self.reference_fn(deepcopy(self._unpack_input(input)),
-                                             deepcopy(target), module)
+            out = test_case._forward_criterion(module, input, target)
+            expected_out = self.reference_fn(deepcopy(self._unpack(input)),
+                                             deepcopy(self._unpack(target)), module)
             test_case.assertEqual(out, expected_out)
 
-        test_case.check_criterion_jacobian(module, input, self.target)
-        self._do_extra_tests(test_case, module, input, self.target)
+        test_case.check_criterion_jacobian(module, input, target)
+        self._do_extra_tests(test_case, module, input, target)
 
     def test_cuda(self, test_case):
         if not TEST_CUDA or not self.should_test_cuda:
@@ -763,8 +903,8 @@ class CriterionTest(TestBase):
             }
             gpu_input = to_gpu(cpu_input, type_map=type_map)
 
-            cpu_target = self.target
-            gpu_target = to_gpu(self.target, type_map=type_map)
+            cpu_target = self._get_target()
+            gpu_target = to_gpu(cpu_target, type_map=type_map)
 
             cpu_module = self.constructor(*self.constructor_args)
             gpu_module = self.constructor(*self.constructor_args).float().cuda()

@@ -31,7 +31,7 @@ class SpatialZeroPadding(Module):
             c_input = c_input.narrow(3, 0 - self.pad_l, c_input.size(3) + self.pad_l)
         if self.pad_r < 0:
             c_input = c_input.narrow(3, 0, c_input.size(3) + self.pad_r)
-        # crop outout if necessary
+        # crop output if necessary
         c_output = self.output
         if self.pad_t > 0:
             c_output = c_output.narrow(2, 0 + self.pad_t, c_output.size(2) - self.pad_t)
@@ -60,7 +60,7 @@ class SpatialZeroPadding(Module):
             cg_input = cg_input.narrow(3, 0 - self.pad_l, cg_input.size(3) + self.pad_l)
         if self.pad_r < 0:
             cg_input = cg_input.narrow(3, 0, cg_input.size(3) + self.pad_r)
-        # crop gradOutout if necessary
+        # crop gradOutput if necessary
         cg_output = gradOutput
         if self.pad_t > 0:
             cg_output = cg_output.narrow(2, 0 + self.pad_t, cg_output.size(2) - self.pad_t)
@@ -70,7 +70,7 @@ class SpatialZeroPadding(Module):
             cg_output = cg_output.narrow(3, 0 + self.pad_l, cg_output.size(3) - self.pad_l)
         if self.pad_r > 0:
             cg_output = cg_output.narrow(3, 0, cg_output.size(3) - self.pad_r)
-        # copy gradOuput to gradInput
+        # copy gradOutput to gradInput
         cg_input.copy_(cg_output)
 
         return self.gradInput

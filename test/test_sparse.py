@@ -110,9 +110,15 @@ class TestSparse(TestCase):
         self.assertEqual(i, x._indices())
         self.assertEqual(v, x._values())
         self.assertEqual(x.ndimension(), 3)
-        self.assertEqual(x.coalesce()._nnz(), 10)
+        self.assertEqual(self.safeCoalesce(x)._nnz(), 10)
         for i in range(3):
             self.assertEqual(x.size(i), 100)
+
+        # Make sure that coalesce handles duplicate indices correctly
+        i = self.IndexTensor([[9, 0, 0, 0, 8, 1, 1, 1, 2, 7, 2, 2, 3, 4, 6, 9]])
+        v = self.ValueTensor([[idx**2, idx] for idx in range(i.size(1))])
+        x = self.SparseTensor(i, v, torch.Size([10, 2]))
+        self.assertEqual(self.safeCoalesce(x)._nnz(), 9)
 
         # Make sure we can access empty indices / values
         x = self.SparseTensor()
@@ -545,6 +551,43 @@ class TestSparse(TestCase):
         self._test_sparse_mask_shape([50, 30, 20])
         self._test_sparse_mask_shape([5, 5, 5, 5, 5, 5])
 
+    def _test_zeros(self, shape, out_shape_i, out_shape_v=None):
+        out_shape = out_shape_i + (out_shape_v or [])
+        for nnz in [9, 12]:
+            out, _, _ = self._gen_sparse(len(out_shape_i), nnz, out_shape)
+            torch.zeros(*shape, out=out)
+            self.assertEqual(tuple(out.size()), tuple(shape))
+            self.assertTrue(out._indices().numel() == out._values().numel() == 0)
+            self.assertEqual(out._nnz(), 0)
+            self.assertEqual(out._dimI(), len(shape))
+            self.assertEqual(out._dimV(), 0)
+
+    def test_zeros(self):
+        i_shapes = [2, 3, 4]
+        v_shapes = [3, 4, 5, 6]
+        for i_dim in range(1, len(i_shapes) + 1):
+            for v_dim in range(len(v_shapes) + 1):
+                self._test_zeros([2, 3, 4], i_shapes[:i_dim], v_shapes[:v_dim])
+
+    def _test_zeros_like(self, template_shape_i, template_shape_v=None):
+        template_shape_v = template_shape_v or []
+        template_shape = template_shape_i + template_shape_v
+        for nnz in [9, 12]:
+            t, _, _ = self._gen_sparse(len(template_shape_i), nnz, template_shape)
+            res = torch.zeros_like(t)
+            self.assertEqual(tuple(res.size()), tuple(template_shape))
+            self.assertTrue(res._indices().numel() == res._values().numel() == 0)
+            self.assertEqual(res._nnz(), 0)
+            self.assertEqual(res._dimI(), len(template_shape_i))
+            self.assertEqual(res._dimV(), len(template_shape_v))
+
+    def test_zeros_like(self):
+        i_shapes = [2, 3, 4]
+        v_shapes = [3, 4, 5, 6]
+        for i_dim in range(1, len(i_shapes) + 1):
+            for v_dim in range(len(v_shapes) + 1):
+                self._test_zeros_like(i_shapes[:i_dim], v_shapes[:v_dim])
+
     def _test_sparse_mask_hybrid_fixed(self):
         i = self.IndexTensor([
             [1, 3, 0, 4],
@@ -575,6 +618,15 @@ class TestSparse(TestCase):
         self._test_sparse_mask_shape([50, 30, 20], [2])
         self._test_sparse_mask_shape([5, 5, 5, 5, 5, 5], [2])
 
+    def test_sparse_add_coalesce(self):
+        i = self.IndexTensor([[1, 2, 1]])
+        v = self.ValueTensor([3, 4, 5])
+        x = self.SparseTensor(i, v, torch.Size([3]))
+        y = self.SparseTensor(i, v, torch.Size([3]))
+        z = x + y
+
+        self.assertFalse(z._indices().numel() != 2 and z.is_coalesced())
+
     @cuda_only
     def test_storage_not_null(self):
         x = torch.cuda.sparse.FloatTensor(2)
@@ -597,6 +649,28 @@ class TestSparse(TestCase):
 
         v = self.ValueTensor([5]).cuda(0)
         self.assertRaises(RuntimeError, lambda: self.SparseTensor(i, v, torch.Size([3])))
+
+    def _test_new_device(self, size, device):
+        with torch.cuda.device(device):
+            x = torch.cuda.sparse.DoubleTensor(*size)
+        self.assertEqual(x.get_device(), device)
+        x1 = x.new()
+        x2 = x.new(2, 3)
+        self.assertEqual(x1.get_device(), device)
+        self.assertEqual(x2.get_device(), device)
+
+    @cuda_only
+    def test_new_device_single_gpu(self):
+        self._test_new_device((), 0)
+        self._test_new_device((30, 20), 0)
+        self._test_new_device((30, 20, 10), 0)
+
+    @cuda_only
+    @unittest.skipIf(torch.cuda.device_count() < 2, "only one GPU detected")
+    def test_new_device_multi_gpu(self):
+        self._test_new_device((), 1)
+        self._test_new_device((30, 20), 1)
+        self._test_new_device((30, 20, 10), 1)
 
 
 class TestUncoalescedSparse(TestSparse):

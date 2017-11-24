@@ -2,7 +2,7 @@ from torch.autograd import Variable
 
 
 class Parameter(Variable):
-    """A kind of Variable that is to be considered a module parameter.
+    r"""A kind of Variable that is to be considered a module parameter.
 
     Parameters are :class:`~torch.autograd.Variable` subclasses, that have a
     very special property when used with :class:`Module` s - when they're

@@ -1,0 +1,44 @@
+# Deprecated function signatures. These are exposed in Python, but not included
+# in the error message suggestions.
+
+- name: add(Tensor self, Scalar alpha, Tensor other)
+  aten: add(self, other, alpha)
+
+- name: addbmm(Scalar beta, Tensor self, Scalar alpha, Tensor batch1, Tensor batch2)
+  aten: addbmm(self, batch1, batch2, beta, alpha)
+
+- name: addbmm(Scalar beta, Tensor self, Tensor batch1, Tensor batch2)
+  aten: addbmm(self, batch1, batch2, beta, 1)
+
+- name: addcdiv(Tensor self, Scalar value, Tensor tensor1, Tensor tensor2)
+  aten: addcdiv(self, tensor1, tensor2, value)
+
+- name: addcmul(Tensor self, Scalar value, Tensor tensor1, Tensor tensor2)
+  aten: addcmul(self, tensor1, tensor2, value)
+
+- name: addmm(Scalar beta, Tensor self, Scalar alpha, Tensor mat1, Tensor mat2)
+  aten: addmm(self, mat1, mat2, beta, alpha)
+
+- name: addmm(Scalar beta, Tensor self, Tensor mat1, Tensor mat2)
+  aten: addmm(self, mat1, mat2, beta, 1)
+
+- name: addmv(Scalar beta, Tensor self, Scalar alpha, Tensor mat, Tensor vec)
+  aten: addmv(self, mat, vec, beta, alpha)
+
+- name: addmv(Scalar beta, Tensor self, Tensor mat, Tensor vec)
+  aten: addmv(self, mat, vec, beta, 1)
+
+- name: addr(Scalar beta, Tensor self, Scalar alpha, Tensor vec1, Tensor vec2)
+  aten: addr(self, vec1, vec2, beta, alpha)
+
+- name: addr(Scalar beta, Tensor self, Tensor vec1, Tensor vec2)
+  aten: addr(self, vec1, vec2, beta, 1)
+
+- name: baddbmm(Scalar beta, Tensor self, Scalar alpha, Tensor batch1, Tensor batch2)
+  aten: baddbmm(self, batch1, batch2, beta, alpha)
+
+- name: baddbmm(Scalar beta, Tensor self, Tensor batch1, Tensor batch2)
+  aten: baddbmm(self, batch1, batch2, beta, 1)
+
+- name: sub(Tensor self, Scalar alpha, Tensor other)
+  aten: sub(self, other, alpha)

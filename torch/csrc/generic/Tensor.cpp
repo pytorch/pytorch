@@ -1,14 +1,20 @@
 #ifndef TH_GENERIC_FILE
+
 #define TH_GENERIC_FILE "generic/Tensor.cpp"
 #else
 
 #ifdef WITH_NUMPY
+
+#include "THHalf.h"
 
 #ifdef TH_REAL_IS_DOUBLE
 #define NUMPY_TYPE_ENUM NPY_DOUBLE
 #endif
 #ifdef TH_REAL_IS_FLOAT
 #define NUMPY_TYPE_ENUM NPY_FLOAT
+#endif
+#ifdef TH_REAL_IS_HALF
+#define NUMPY_TYPE_ENUM NPY_HALF
 #endif
 #ifdef TH_REAL_IS_LONG
 #define NUMPY_TYPE_ENUM NPY_INT64
@@ -23,56 +29,95 @@
 #define NUMPY_TYPE_ENUM NPY_UINT8
 #endif
 
-#define COPY_FROM_ARRAY_CPU(ELTYPE, ARRAY, STORAGE, SIZE) \
+
+// COPY_FROM_ARRAY macros for Numpy -> TH assignment
+//
+// ELTYPE = data type of the Python array
+// ARRAY = base pointer of the Python array
+// STORAGE = pointer to a THStorage struct, type THStoragePtr
+// SIZE = size in bytes of the array to copy
+// CONVERSION = function to apply to each array element before assigning, for half<->float conversions
+
+#define COPY_FROM_ARRAY_CPU(ELTYPE, ARRAY, STORAGE, SIZE, CONVERSION)   \
 { \
-  ELTYPE *arrdata = (ELTYPE*)PyArray_DATA(ARRAY);         \
-  real *data = STORAGE->data;                             \
-  for (size_t i=0; i<SIZE; i++) {                         \
-    data[i] = arrdata[i];                                 \
-  }                                                       \
+  ELTYPE *arrdata = (ELTYPE*)PyArray_DATA(ARRAY);                       \
+  real *data = STORAGE->data;                                           \
+  for (size_t i=0; i<SIZE; i++) {                                       \
+    data[i] = CONVERSION(arrdata[i]);                                   \
+  }                                                                     \
 }
 
-#define COPY_FROM_ARRAY_CUDA(ELTYPE, ARRAY, STORAGE, SIZE) \
+#define COPY_FROM_HALF_ARRAY_CPU_HALF(ARRAY, STORAGE, SIZE) \
 { \
-  ELTYPE *arrdata = (ELTYPE*)PyArray_DATA(ARRAY);              \
-  std::unique_ptr<load_real> data_guard(new load_real[SIZE]);  \
-  load_real *data = data_guard.get();                          \
-  for (size_t i=0; i<SIZE; i++) {                              \
-    data[i] = arrdata[i];                                      \
-  }                                                            \
-  THHostStorage *cpu_storage =                                 \
-      THHostStorage_(newWithData)(data_guard.get(), SIZE);     \
-  cpu_storage->flag &= ~TH_STORAGE_FREEMEM;                    \
-  THCStorage_(copyCPU)(LIBRARY_STATE STORAGE, cpu_storage);    \
-  THHostStorage_(free)(cpu_storage);                           \
+  char *arrdata = (char*)PyArray_DATA(ARRAY);               \
+  memcpy(STORAGE->data, arrdata, SIZE * 2);                 \
 }
 
-#define COPY_FROM_ARRAY_CUDA_HALF(ELTYPE, ARRAY, STORAGE, SIZE) \
-{ \
-  ELTYPE *arrdata = (ELTYPE*)PyArray_DATA(ARRAY);                  \
-  std::unique_ptr<load_real> data_guard(new load_real[SIZE]);      \
-  load_real *data = data_guard.get();                              \
-  for (size_t i=0; i<SIZE; i++) {                                  \
-    data[i] = arrdata[i];                                          \
-  }                                                                \
-  THFloatStorage *cpu_storage =                                    \
-      THFloatStorage_newWithData(data_guard.get(), storage_size);  \
-  cpu_storage->flag &= ~TH_STORAGE_FREEMEM;                        \
-  THCudaHalfStorage_copyFloat(LIBRARY_STATE STORAGE, cpu_storage); \
-  THFloatStorage_free(cpu_storage);                                \
-}
-
-#ifdef THC_GENERIC_FILE
 #ifdef THC_REAL_IS_HALF
-#define COPY_FROM_ARRAY COPY_FROM_ARRAY_CUDA_HALF
-#else
-#define COPY_FROM_ARRAY COPY_FROM_ARRAY_CUDA
-#endif
-#else
-#define COPY_FROM_ARRAY COPY_FROM_ARRAY_CPU
-#endif
+#define COPY_FROM_ARRAY_CUDA(ELTYPE, ARRAY, STORAGE, SIZE, CONVERSION)  \
+{ \
+  ELTYPE *arrdata = (ELTYPE*)PyArray_DATA(ARRAY);                       \
+  std::unique_ptr<load_real> data_guard(new load_real[SIZE]);           \
+  load_real *data = data_guard.get();                                   \
+  for (size_t i=0; i<SIZE; i++) {                                       \
+    data[i] = arrdata[i];                                               \
+  }                                                                     \
+  THFloatStorage *cpu_storage =                                         \
+      THFloatStorage_newWithData(data_guard.get(), SIZE);               \
+  cpu_storage->flag &= ~TH_STORAGE_FREEMEM;                             \
+  THCudaHalfStorage_copyFloat(LIBRARY_STATE STORAGE, cpu_storage);      \
+  THFloatStorage_free(cpu_storage);                                     \
+}
 
-#endif
+#else
+#define COPY_FROM_ARRAY_CUDA(ELTYPE, ARRAY, STORAGE, SIZE, CONVERSION)  \
+{ \
+  ELTYPE *arrdata = (ELTYPE*)PyArray_DATA(ARRAY);                       \
+  std::unique_ptr<load_real> data_guard(new load_real[SIZE]);           \
+  load_real *data = data_guard.get();                                   \
+  for (size_t i=0; i<SIZE; i++) {                                       \
+    data[i] = CONVERSION(arrdata[i]);                                   \
+  }                                                                     \
+  THHostStorage *cpu_storage =                                          \
+      THHostStorage_(newWithData)(data_guard.get(), SIZE);              \
+  cpu_storage->flag &= ~TH_STORAGE_FREEMEM;                             \
+  THCStorage_(copyCPU)(LIBRARY_STATE STORAGE, cpu_storage);             \
+  THHostStorage_(free)(cpu_storage);                                    \
+}
+#endif  // THC_REAL_IS_HALF
+
+#define COPY_FROM_HALF_ARRAY_CUDA_HALF(ARRAY, STORAGE, SIZE)            \
+{ \
+  THHalf *arrdata = (THHalf*)PyArray_DATA(ARRAY);                       \
+  THHostStorage *cpu_storage =                                          \
+      THHostStorage_(newWithData)(arrdata, SIZE);                       \
+  cpu_storage->flag &= ~TH_STORAGE_FREEMEM;                             \
+  THCStorage_(copyCPU)(LIBRARY_STATE STORAGE, cpu_storage);             \
+  THHostStorage_(free)(cpu_storage);                                    \
+}
+
+#define IDENTITY(X) (X)
+
+// Fill in the conversions that we know at compile time (as determined by TH[C]_REAL_IS_HALF).
+// We need to keep a COPY_FROM_HALF_ARRAY variant since we know the input type only at runtime.
+#ifdef THC_GENERIC_FILE
+#define COPY_FROM_ARRAY(ELTYPE, ARRAY, STORAGE, SIZE)   COPY_FROM_ARRAY_CUDA(ELTYPE, ARRAY, STORAGE, SIZE, IDENTITY)
+#ifdef THC_REAL_IS_HALF
+#define COPY_FROM_HALF_ARRAY                            COPY_FROM_HALF_ARRAY_CUDA_HALF
+#else
+#define COPY_FROM_HALF_ARRAY(ARRAY, STORAGE, SIZE)      COPY_FROM_ARRAY_CUDA(THHalf, ARRAY, STORAGE, SIZE, TH_half2float)
+#endif  // THC_REAL_IS_HALF
+#else  // THC_GENERIC_FILE
+#ifdef TH_REAL_IS_HALF
+#define COPY_FROM_ARRAY(ELTYPE, ARRAY, STORAGE, SIZE)   COPY_FROM_ARRAY_CPU(ELTYPE, ARRAY, STORAGE, SIZE, TH_float2half)
+#define COPY_FROM_HALF_ARRAY                            COPY_FROM_HALF_ARRAY_CPU_HALF
+#else
+#define COPY_FROM_ARRAY(ELTYPE, ARRAY, STORAGE, SIZE)   COPY_FROM_ARRAY_CPU(ELTYPE, ARRAY, STORAGE, SIZE, IDENTITY)
+#define COPY_FROM_HALF_ARRAY(ARRAY, STORAGE, SIZE)      COPY_FROM_ARRAY_CPU(THHalf, ARRAY, STORAGE, SIZE, TH_half2float)
+#endif  // TH_REAL_IS_HALF
+#endif  // THC_GENERIC_FILE
+
+#endif  // WITH_NUMPY
 
 PyObject *THPTensorClass = NULL;
 THPCopyList THTensor_(copy_functions);
@@ -147,7 +192,7 @@ static void THPTensor_(setInconsistentDepthError)(std::vector<size_t> &sizes,
   THPUtils_setError(error.c_str());
 }
 
-#if defined(NUMPY_TYPE_ENUM) || defined(THC_GENERIC_FILE)
+#if defined(NUMPY_TYPE_ENUM) || (defined(WITH_NUMPY) && defined(THC_GENERIC_FILE))
 
 #ifndef THC_REAL_IS_HALF
 #define load_real real
@@ -166,14 +211,14 @@ THTensor* THPTensor_(fromNumpy)(PyObject *numpy_array) {
     auto ndim = PyArray_NDIM(array);
     size_t storage_size = 1;
     THLongStoragePtr sizes(THLongStorage_newWithSize(ndim));
-    long *sizes_data = sizes->data;
+    int64_t *sizes_data = sizes->data;
     for (int i = 0; i < ndim; ++i) {
       sizes_data[i] = PyArray_DIM(array, i);
     }
 
     THLongStoragePtr strides(THLongStorage_newWithSize(ndim));
-    long *strides_data = strides->data;
-    long elsize = PyArray_ITEMSIZE(array);
+    int64_t *strides_data = strides->data;
+    int64_t elsize = PyArray_ITEMSIZE(array);
     for (int i = 0; i < ndim; ++i) {
       // numpy uses bytes, torch uses elements
       // we have to cast sizeof to long, because otherwise stride gets
@@ -198,6 +243,7 @@ THTensor* THPTensor_(fromNumpy)(PyObject *numpy_array) {
           // See Note [Numpy memory management]
           &THNumpyArrayAllocator,
           new NumpyArrayAllocator(numpy_array)));
+      THStorage_(clearFlag)(storage.get(), TH_STORAGE_RESIZABLE);
       result = THTensor_(newWithStorage)(LIBRARY_STATE storage, 0, sizes, strides);
     }
     else
@@ -205,12 +251,13 @@ THTensor* THPTensor_(fromNumpy)(PyObject *numpy_array) {
     {
       THStoragePtr storage(THStorage_(newWithSize)(LIBRARY_STATE storage_size));
       switch (PyArray_TYPE(array)) {
-        case NPY_DOUBLE: COPY_FROM_ARRAY(double,  array, storage, storage_size); break;
-        case NPY_FLOAT:  COPY_FROM_ARRAY(float,   array, storage, storage_size); break;
-        case NPY_INT64:  COPY_FROM_ARRAY(int64_t, array, storage, storage_size); break;
-        case NPY_INT32:  COPY_FROM_ARRAY(int32_t, array, storage, storage_size); break;
-        case NPY_INT16:  COPY_FROM_ARRAY(int16_t, array, storage, storage_size); break;
-        case NPY_UINT8:  COPY_FROM_ARRAY(uint8_t, array, storage, storage_size); break;
+        case NPY_DOUBLE:      COPY_FROM_ARRAY(double,  array, storage, storage_size); break;
+        case NPY_FLOAT:       COPY_FROM_ARRAY(float,   array, storage, storage_size); break;
+        case NPY_HALF:   COPY_FROM_HALF_ARRAY(         array, storage, storage_size); break;
+        case NPY_INT64:       COPY_FROM_ARRAY(int64_t, array, storage, storage_size); break;
+        case NPY_INT32:       COPY_FROM_ARRAY(int32_t, array, storage, storage_size); break;
+        case NPY_INT16:       COPY_FROM_ARRAY(int16_t, array, storage, storage_size); break;
+        case NPY_UINT8:       COPY_FROM_ARRAY(uint8_t, array, storage, storage_size); break;
       }
       result = THTensor_(newWithStorage)(LIBRARY_STATE storage, 0, sizes, strides);
     }
@@ -236,7 +283,7 @@ static PyObject * THPTensor_(pynew)(PyTypeObject *type, PyObject *args, PyObject
   }
   self->cdata = NULL;
 #ifdef THC_GENERIC_FILE
-  THCPAutoGPU gpu_guard;
+  THCPAutoGPU gpu_guard(args, NULL);
 #endif
 
   // Internally we allow constructing with a keyword only argument cdata
@@ -302,7 +349,7 @@ static PyObject * THPTensor_(pynew)(PyTypeObject *type, PyObject *args, PyObject
     return (PyObject *)self.release();
   }
 
-#if defined(NUMPY_TYPE_ENUM) || defined(THC_GENERIC_FILE)
+#if defined(NUMPY_TYPE_ENUM) || (defined(WITH_NUMPY) && defined(THC_GENERIC_FILE))
   // torch.Tensor(np.ndarray array)
   if (num_args == 1 && PyArray_Check(first_arg)) {
     THPObjectPtr numpy_array(
@@ -315,7 +362,7 @@ static PyObject * THPTensor_(pynew)(PyTypeObject *type, PyObject *args, PyObject
 #endif
 
   // torch.Tensor(Sequence data)
-  if (num_args == 1 && PySequence_Check(first_arg)) {
+  if (num_args == 1 && PySequence_Check(first_arg) && !THPVariable_Check(first_arg)) {
     Py_ssize_t length = PySequence_Length(first_arg);
     THPUtils_assert(length >= 0, "couldn't obtain the length of %s",
         THPUtils_typename(first_arg));
@@ -335,7 +382,7 @@ static PyObject * THPTensor_(pynew)(PyTypeObject *type, PyObject *args, PyObject
           "sequences and there's no way to infer how many dimension should "
           "the tensor have");
       THPUtils_assert(length > 0, "given sequence has an invalid size of "
-          "dimension %ld: %ld", (long)sizes.size(), (long)length);
+          "dimension %" PRId64 ": %" PRId64, (int64_t)sizes.size(), (int64_t)length);
       item = PySequence_GetItem(item, 0);
       if (!item)
         return NULL;
@@ -344,12 +391,12 @@ static PyObject * THPTensor_(pynew)(PyTypeObject *type, PyObject *args, PyObject
     PyErr_Clear();
 
     THLongStoragePtr sizes_storage(THLongStorage_newWithSize(sizes.size()));
-    long *sizes_data = sizes_storage->data;
+    int64_t *sizes_data = sizes_storage->data;
     for (auto size: sizes)
       *sizes_data++ = size;
     THTensorPtr tensor(THTensor_(newWithSize)(LIBRARY_STATE sizes_storage, NULL));
 
-    int ndims = sizes.size();
+    int ndims = (int) sizes.size();
     std::vector<size_t> indices(ndims);
     std::vector<THPObjectPtr> sequences(ndims);
     Py_INCREF(first_arg);
@@ -441,8 +488,9 @@ static PyObject * THPTensor_(pynew)(PyTypeObject *type, PyObject *args, PyObject
         }
         if (!PySequence_Check(sequences[i])) {
           std::string index_str = THPTensor_(indicesToString)(indices, i);
-          THPUtils_setError("an item of time %s at index %s doesn't implement "
-              "a sequence protocol");
+          THPUtils_setError(
+              "an item of type %s at index %s doesn't implement a sequence protocol",
+              THPUtils_typename(sequences[i].get()), index_str.c_str());
           return NULL;
         }
         Py_ssize_t length = PySequence_Length(sequences[i]);
@@ -516,7 +564,7 @@ static PyObject * THPTensor_(pynew)(PyTypeObject *type, PyObject *args, PyObject
 #endif
 
 static bool THPTensor_(_indexOnce)(PyObject *index, int &indexed_dim,
-        THTensorPtr &tresult, THStorage* &sresult, long &storage_offset)
+        THTensorPtr &tresult, THStorage* &sresult, int64_t &storage_offset)
 {
 #ifdef WITH_NUMPY
   static PyArray_Descr *NumpyLongArrDescr = PyArray_DescrFromType(NPY_INT64);
@@ -526,7 +574,7 @@ static bool THPTensor_(_indexOnce)(PyObject *index, int &indexed_dim,
   if(IS_SCALAR(index)) {
     int64_t idx;
     UNPACK_SCALAR(index);
-    long dimsize = THTensor_(size)(LIBRARY_STATE tresult.get(), indexed_dim);
+    int64_t dimsize = THTensor_(size)(LIBRARY_STATE tresult.get(), indexed_dim);
 
     // If the user provided negative idx, convert to positive equivalent
     idx = (idx < 0) ? dimsize + idx : idx;
@@ -587,8 +635,20 @@ static bool THPTensor_(_indexOnce)(PyObject *index, int &indexed_dim,
 
 #ifndef TH_REAL_IS_HALF
 
+static bool THPTensor_(_checkSingleSequenceTriggersAdvancedIndexing)(PyObject *arg) {
+  if (PySequence_Check(arg) && !PyTuple_Check(arg)) {
+    auto fast = THPObjectPtr(PySequence_Fast(arg, NULL));
+    for (Py_ssize_t i = 0; i < PySequence_Fast_GET_SIZE(fast.get()); ++i) {
+      if (!THPUtils_checkLong(PySequence_Fast_GET_ITEM(fast.get(), i)))
+        return false;
+    }
+    return true;
+  }
+  return false;
+}
+
 static bool THPTensor_(_checkBasicIntegerArrayIndexing)(THPTensor *indexed, PyObject *arg) {
-  long ndim = THTensor_(nDimension)(LIBRARY_STATE indexed->cdata);
+  int64_t ndim = THTensor_(nDimension)(LIBRARY_STATE indexed->cdata);
 
   if (PySequence_Check(arg) && PySequence_Size(arg) == ndim) {
     THPObjectPtr fast = THPObjectPtr(PySequence_Fast(arg, NULL));
@@ -606,9 +666,11 @@ static bool THPTensor_(_checkBasicIntegerArrayIndexing)(THPTensor *indexed, PyOb
 static bool THPTensor_(_checkAdvancedIndexing)(THPTensor *indexed, PyObject *arg) {
   // Currently we only support two forms of advanced indexing:
   //
-  // 1. "Basic Integer Array Indexing" the integer-array indexing strategy
+  // 1. Indexing with a single non-tuple sequence, not nested within a sequence,
+  // that is composed only of integer indexers, e.g. x[[0, 1, 4]]
+  // 2. "Basic Integer Array Indexing" the integer-array indexing strategy
   // where we have ndim sequence/LongTensor arguments
-  // 2. Combining Advanced Indexing with ":", or "..." , with the limitation that
+  // 3. Combining Advanced Indexing with ":", or "..." , with the limitation that
   // the advanced indexing dimensions must be adjacent, i.e.:
   //
   // x[:, :, [1,2], [3,4], :] --> valid
@@ -616,15 +678,18 @@ static bool THPTensor_(_checkAdvancedIndexing)(THPTensor *indexed, PyObject *arg
   // x[[1,2], [3,4], ...] --> valid
   // x[:, [1,2], :, [3,4], :] --> not valid
 
-  // Verification, Step #1 -- ndim sequencers
+  // Verification, Step #1 - single non-tuple sequencer
+  if (THPTensor_(_checkSingleSequenceTriggersAdvancedIndexing)(arg)) return true;
+
+  // Verification, Step #2 -- ndim sequencers
   if (THPTensor_(_checkBasicIntegerArrayIndexing)(indexed, arg)) return true;
 
-  // Verification, Step #2 -- at least one sequencer, all the rest are
+  // Verification, Step #3 -- at least one sequencer, all the rest are
   // ':' and/or a single '...', can be less than ndim indexers, all sequencers
   // adjacent
 
-  long ndim = THTensor_(nDimension)(LIBRARY_STATE indexed->cdata);
-  if (PySequence_Check(arg) && PySequence_Size(arg) <= ndim) {
+  int64_t ndim = THTensor_(nDimension)(LIBRARY_STATE indexed->cdata);
+  if (PySequence_Check(arg) && PySequence_Size(arg) <= ndim + 1) {
     THPObjectPtr fast = THPObjectPtr(PySequence_Fast(arg, NULL));
 
     bool sequenceFound = false;
@@ -632,7 +697,17 @@ static bool THPTensor_(_checkAdvancedIndexing)(THPTensor *indexed, PyObject *arg
     bool ellipsisFound = false;
     Py_ssize_t lastSeqDim = -1;
 
+    // Note that we can have ndim + 1 Tensors in the case where we have an ellipsis,
+    // because Python semantics allow it to be "thrown away" so to speak. If this is
+    // the case, we have to shift the dimension we are considering (in the indexed
+    // tensor) by -1 afer encountering the Ellipsis when accessing properties of
+    // the indexed Tensor
+    bool extraIndexer = PySequence_Fast_GET_SIZE(fast.get()) == ndim + 1;
+
     for (Py_ssize_t i = 0; i < PySequence_Fast_GET_SIZE(fast.get()); ++i) {
+      // see explanation above
+      int correspondingTensorDim = i + (extraIndexer && ellipsisFound ? -1 : 0);
+
       PyObject *item = PySequence_Fast_GET_ITEM(fast.get(), i);
       if (THPIndexTensor_Check(item) || PySequence_Check(item)) {
         sequenceFound = true;
@@ -646,7 +721,7 @@ static bool THPTensor_(_checkAdvancedIndexing)(THPTensor *indexed, PyObject *arg
         continue;
       }
       if (PySlice_Check(item)) {
-        long dimSize = THTensor_(size)(LIBRARY_STATE indexed->cdata, i);
+        int64_t dimSize = THTensor_(size)(LIBRARY_STATE indexed->cdata, correspondingTensorDim);
         // Basically verify that the Slice is ':' and did not specify
         // a specific start, end or step
         Py_ssize_t start, end, length, step;
@@ -668,6 +743,11 @@ static bool THPTensor_(_checkAdvancedIndexing)(THPTensor *indexed, PyObject *arg
       }
       nonColonEllipsisFound = true;
       break;
+    }
+
+    // Check if we have ndim+1 indexing objects, that we found an ellipsis
+    if (PySequence_Size(arg) == ndim + 1 && !ellipsisFound) {
+      return false;
     }
 
     return sequenceFound && (!nonColonEllipsisFound);
@@ -737,58 +817,72 @@ static bool THPTensor_(_convertToTensorIndexers)(
   // If they can be broadcasted, we store each of the broadcasted Tensors in the
   // output map, with the dimension of the original tensor as the key.
 
-  // Indexes all indexing Tensors (pre-broadcast) by which dimension they occurred.
-  // Because we rely upon the THPIndexTensor constructor to handle sequence -> tensor
-  // conversions, we store THPTensors rather than THTensors. We use an ordered map
-  // to maintain the order of Tensors via dimension. Because this is limited to
-  // ndim(Tensor), it should always be small + fast.
+  // indexingDims stores the indices containing an advanced index sequence, and indexers
+  // stores the corresponding indexing object, such that the indexer at indexers[i] is
+  // associated with the dm at indexingDims[i]. This is pre-broadcast.  Because we rely
+  // upon the THPIndexTensor constructor to handle sequence -> tensor conversions, we
+  // store THPTensors rather than THTensors.
 
   std::vector<Py_ssize_t> indexingDims;
   std::vector<THPIndexTensor*>indexers;
 
-      // The indexing matches advanced indexing requirements. In the case that
-      // the user has an Ellipsis, and/or less dimensions than are in the
-      // Tensor being indexed, we "fill in" empty Slices to these dimensions
-      // so that the the resulting advanced indexing code still works
-
-
-
-  // The top-level indexer should be a sequence, per the check above
-  THPObjectPtr fast(PySequence_Fast(index, NULL));
-  sequenceLength = PySequence_Fast_GET_SIZE(fast.get());
-  int ellipsisOffset = 0;
-
-  for (Py_ssize_t i = 0; i < sequenceLength; ++i) {
-    PyObject *item = PySequence_Fast_GET_ITEM(fast.get(), i);
-
-    // If this is an ellipsis, the all subsequent advanced indexing
-    // objects "positions" should be shifted, e.g. if we have a 5D Tensor
-    // x, and then x[..., [2, 3]], then the "position" of [2, 3] is 4
-    if (Py_TYPE(item) == &PyEllipsis_Type) {
-      ellipsisOffset = THTensor_(nDimension)(LIBRARY_STATE indexed) - sequenceLength;
-      continue;
+  if (THPTensor_(_checkSingleSequenceTriggersAdvancedIndexing)(index)) {
+    // Handle the special case where we only have a single indexer
+    THPIndexTensor *indexer = (THPIndexTensor *)PyObject_CallFunctionObjArgs(
+        THPIndexTensorClass, index, 0, NULL);
+    if (!indexer) {
+      PyErr_Format(PyExc_IndexError,
+        "When performing advanced indexing the indexing objects must be LongTensors or "
+        "convertible to LongTensors");
+      return false;
     }
+    indexingDims.push_back(0);
+    indexers.push_back(indexer);
+  } else {
+    // The top-level indexer should be a sequence, per the check above
+    THPObjectPtr fast(PySequence_Fast(index, NULL));
+    sequenceLength = PySequence_Fast_GET_SIZE(fast.get());
+    int ellipsisOffset = 0;
 
-    if (!PySlice_Check(item)) {
-      PyObject *obj = PySequence_Fast_GET_ITEM(fast.get(), i);
-      // Returns NULL upon conversion failure
-      THPIndexTensor *indexer = (THPIndexTensor *)PyObject_CallFunctionObjArgs(
-          THPIndexTensorClass, obj, NULL);
-      if (!indexer) {
-        PyErr_Format(PyExc_IndexError,
-            "When performing advanced indexing the indexing objects must be LongTensors or "
-            "convertible to LongTensors. The indexing object at position %d is of type %s "
-            "and cannot be converted", i, THPUtils_typename(obj));
+    for (Py_ssize_t i = 0; i < sequenceLength; ++i) {
+      PyObject *item = PySequence_Fast_GET_ITEM(fast.get(), i);
 
-        // Clean up Indexers
-        for (auto& idx : indexers) {
-          THIndexTensor_(free)(LIBRARY_STATE idx->cdata);
-          Py_DECREF(idx);
+      // If this is an ellipsis, the all subsequent advanced indexing
+      // objects "positions" should be shifted, e.g. if we have a 5D Tensor
+      // x, and then x[..., [2, 3]], then the "position" of [2, 3] is 4,
+      //
+      // BUT ONLY IF, we don't have ndim other indexing objects, in which case
+      // the ellipsis creates a shift of -1 to counterbalance its "emptyness"
+      if (Py_TYPE(item) == &PyEllipsis_Type) {
+        if (sequenceLength != (THTensor_(nDimension)(LIBRARY_STATE indexed) + 1)) {
+          ellipsisOffset = THTensor_(nDimension)(LIBRARY_STATE indexed) - sequenceLength;
+        } else {
+          ellipsisOffset = -1;
         }
-        return false;
+        continue;
       }
-      indexingDims.push_back(i + ellipsisOffset);
-      indexers.push_back(indexer);
+
+      if (!PySlice_Check(item)) {
+        PyObject *obj = PySequence_Fast_GET_ITEM(fast.get(), i);
+        // Returns NULL upon conversion failure
+        THPIndexTensor *indexer = (THPIndexTensor *)PyObject_CallFunctionObjArgs(
+            THPIndexTensorClass, obj, NULL);
+        if (!indexer) {
+          PyErr_Format(PyExc_IndexError,
+              "When performing advanced indexing the indexing objects must be LongTensors or "
+              "convertible to LongTensors. The indexing object at position %zd is of type %s "
+              "and cannot be converted", i, THPUtils_typename(obj));
+
+          // Clean up Indexers
+          for (auto& idx : indexers) {
+            THIndexTensor_(free)(LIBRARY_STATE idx->cdata);
+            Py_DECREF(idx);
+          }
+          return false;
+        }
+        indexingDims.push_back(i + ellipsisOffset);
+        indexers.push_back(indexer);
+      }
     }
   }
 
@@ -826,7 +920,7 @@ static bool THPTensor_(_convertToTensorIndexers)(
     THLongStorage_set(viewer.get(), 0, nElement);
     for (auto& dimBroadcast : broadcasted) {
       Py_ssize_t dim = dimBroadcast.first;
-      long sizeAtDim = THTensor_(size)(LIBRARY_STATE indexed, dim);
+      int64_t sizeAtDim = THTensor_(size)(LIBRARY_STATE indexed, dim);
 
       // Need to make contiguous to view as 1D :/
       THPPointer<THIndexTensor> contig(THIndexTensor_(newContiguous)(LIBRARY_STATE dimBroadcast.second.get()));
@@ -834,7 +928,7 @@ static bool THPTensor_(_convertToTensorIndexers)(
       // View as 1D + get1D makes me sad :(
       THPPointer<THIndexTensor> flat(THIndexTensor_(newView)(LIBRARY_STATE contig.get(), viewer));
       for (ptrdiff_t i = 0; i < THIndexTensor_(nElement)(LIBRARY_STATE flat.get()); ++i) {
-        long indexAtDim = THTensor_fastGet1d(flat.get(), i);
+        int64_t indexAtDim = THTensor_fastGet1d(flat.get(), i);
         if (indexAtDim >= sizeAtDim) {
           PyErr_Format(PyExc_IndexError, "index %lld from broadcast indexer is out of range "
               "for dimension %lld (of size %lld)",
@@ -875,7 +969,7 @@ static bool THPTensor_(_convertToTensorIndexers)(
   return true;
 }
 
-static inline long THPTensor_(_indexToOffset)(
+static inline int64_t THPTensor_(_indexToOffset)(
     THTensorPtr& indexed,
     std::unordered_map<Py_ssize_t, THPPointer<THIndexTensor>>& broadcasted,
     ptrdiff_t index)
@@ -937,12 +1031,12 @@ static inline long THPTensor_(_indexToOffset)(
   //
   // Special care needs to be taken to handle advanced indexers at the beginning, end.
 
-  long offset = 0;
-  for (long i = THTensor_(nDimension)(LIBRARY_STATE indexed) - 1; i >= 0; --i) {
+  int64_t offset = 0;
+  for (int64_t i = THTensor_(nDimension)(LIBRARY_STATE indexed) - 1; i >= 0; --i) {
     // Get size at dimension i, its the size of the indexed Tensor at that dimension if its
     // not an advanced indexing dimension, otherwise its the size of the broadcast Tensor
     ptrdiff_t sizeAtDim, indexAtDim, nextIndex;
-    long strideAtDim = THTensor_(stride)(LIBRARY_STATE indexed, i);
+    int64_t strideAtDim = THTensor_(stride)(LIBRARY_STATE indexed, i);
 
     auto broadcast = broadcasted.find(i);
     if (broadcast != broadcasted.end()) {
@@ -1023,7 +1117,7 @@ static THIndexTensor* THPTensor_(_calculateLinearIndices)(
   // Call GPU kernel for index calculation
   THCudaLongTensor *cudaIndices =
     THCudaLongTensor_newWithSize1d(LIBRARY_STATE indexingElements);
-  long baseOffset = THTensor_(storageOffset)(LIBRARY_STATE indexed);
+  int64_t baseOffset = THTensor_(storageOffset)(LIBRARY_STATE indexed);
 
   // Need to pass broadcast Tensors to API, pass NULL ptr for all empty
   // (i.e. not-advanced indexed) dims
@@ -1041,9 +1135,9 @@ static THIndexTensor* THPTensor_(_calculateLinearIndices)(
   return cudaIndices;
 #else
   THIndexTensor *linearIndices = THIndexTensor_(newWithSize1d)(LIBRARY_STATE indexingElements);
-  long baseOffset = THTensor_(storageOffset)(LIBRARY_STATE indexed);
+  int64_t baseOffset = THTensor_(storageOffset)(LIBRARY_STATE indexed);
   for (ptrdiff_t i = 0; i < indexingElements; ++i) {
-    long linearIdx = THPTensor_(_indexToOffset)(
+    int64_t linearIdx = THPTensor_(_indexToOffset)(
         indexed, flattenedBroadcasters, i);
     THTensor_fastSet1d(linearIndices, i, baseOffset + linearIdx);
   }
@@ -1330,7 +1424,7 @@ static PyObject* THPTensor_(advancedIndexSelect)(THPTensor *self, PyObject *args
 
 // Handles indexing into a Tensor given a tuple, ellipses, sequence, etc. index
 static bool THPTensor_(_index)(THPTensor *self, PyObject *index,
-    THTensorPtr &tresult, THStorage * &sresult, long &storage_offset)
+    THTensorPtr &tresult, THStorage * &sresult, int64_t &storage_offset)
 {
   // As a base case, we create a new Tensor that is a copy of the Tensor
   // we are indexing
@@ -1340,45 +1434,47 @@ static bool THPTensor_(_index)(THPTensor *self, PyObject *index,
   int invalid_indexer_dim = 0;
 
   if(PyTuple_Check(index)) {
-    // num_index_dim is the number of indices in the tuple, num_effective_index
-    // is the number of non-None, non-ellipses indices
-    long num_index_dim = (long)PyTuple_Size(index);
-    long num_effective_index = num_index_dim;
-    long num_tensor_dim = THTensor_(nDimension)(LIBRARY_STATE self->cdata);
-    long ellipsis_idx = -1;
-    for (int i = 0; i < num_index_dim; i++) {
-      PyObject *dimidx = PyTuple_GET_ITEM(index, i);
-      if (dimidx == Py_Ellipsis) {
-        if (ellipsis_idx != -1) throw std::runtime_error("ellipsis can be used at most once");
-        ellipsis_idx = i;
-        num_effective_index--;
+    // num_indexers is the number of indexing objects in the tuple, num_effective_indexers
+    // is the number of non-None, non-ellipses indexing objects
+    int64_t num_indexers = (int64_t)PyTuple_Size(index);
+    int64_t num_effective_indexers = num_indexers;
+    int64_t num_tensor_dim = THTensor_(nDimension)(LIBRARY_STATE self->cdata);
+    int64_t ellipsis_pos = -1;
+    for (int i = 0; i < num_indexers; i++) {
+      PyObject *indexer = PyTuple_GET_ITEM(index, i);
+      if (indexer == Py_Ellipsis) {
+        if (ellipsis_pos != -1) throw std::runtime_error("ellipsis can be used at most once");
+        ellipsis_pos = i;
+        num_effective_indexers--;
       }
-      if (dimidx == Py_None) {
-        num_effective_index--;
+      if (indexer == Py_None) {
+        num_effective_indexers--;
       }
     }
-    if (num_effective_index > num_tensor_dim) {
+    if (num_effective_indexers > num_tensor_dim) {
       PyErr_Format(PyExc_IndexError,
-          "trying to index %ld dimensions of a %ld dimensional tensor",
-          num_effective_index, num_tensor_dim);
+          "trying to index %" PRId64 " dimensions of a %" PRId64 " dimensional tensor",
+          num_effective_indexers, num_tensor_dim);
       return false;
     }
 
     // Loop through the indices and perform the indiviudal indexing at each dim
     bool valid = true;
-    for (int dim = 0; dim < num_index_dim; dim++) {
-      if (dim == ellipsis_idx) {
+    for (int indexTuplePos = 0; indexTuplePos < num_indexers; indexTuplePos++) {
+      if (indexTuplePos == ellipsis_pos) {
         // tresult can be NULL if ellipsis is the last item
-        if (tresult) indexed_dim = tresult->nDimension - (num_index_dim - dim - 1);
+        // Note that the presence of the Ellipsis shifts the "indexed" dim by the number
+        // of dimensions minus the number of effective indexers
+        if (tresult) indexed_dim += (num_tensor_dim - num_effective_indexers);
         continue;
       }
-      PyObject *dimidx = PyTuple_GET_ITEM(index, dim);
-      valid = THPTensor_(_indexOnce)(dimidx, indexed_dim, tresult, sresult, storage_offset);
+      PyObject *indexer = PyTuple_GET_ITEM(index, indexTuplePos);
+      valid = THPTensor_(_indexOnce)(indexer, indexed_dim, tresult, sresult, storage_offset);
       if (!valid) {
         tresult = NULL;
         // overwrite this, so the message mentions the incorrect object
-        index = dimidx;
-        invalid_indexer_dim = dim;
+        index = indexer;
+        invalid_indexer_dim = indexTuplePos;
         break;
       }
     }
@@ -1433,6 +1529,22 @@ static PyObject * THPTensor_(getValue)(THPTensor *self, PyObject *index)
   }
   if (THPIndexTensor_Check(index)) {
     THIndexTensor *index_t = ((THPIndexTensor*)index)->cdata;
+
+    // TH will also throw an error, but its a Runtime Error that is less interpretable
+    // than doing it at this layer
+    if (THIndexTensor_(nDimension)(LIBRARY_STATE index_t) > 1) {
+      PyErr_Format(PyExc_IndexError, "Indexing a Tensor with a "
+#ifndef THC_GENERIC_FILE
+      "torch.LongTensor "
+#else
+      "torch.cuda.LongTensor "
+#endif
+      "triggers index_select semantics, and thus we expect an empty tensor or a vector, "
+      "but the indexing Tensor passed has %lld dimensions",
+      (long long) THIndexTensor_(nDimension)(LIBRARY_STATE index_t));
+      throw python_error();
+    }
+
     THTensorPtr index_result(THTensor_(new)(LIBRARY_STATE_NOARGS));
     THTensor_(indexSelect)(LIBRARY_STATE index_result.get(), self->cdata, 0, index_t);
     return THPTensor_(New)(index_result.release());
@@ -1441,7 +1553,7 @@ static PyObject * THPTensor_(getValue)(THPTensor *self, PyObject *index)
 
   THTensorPtr tresult;
   THStorage *sresult;
-  long storage_offset;
+  int64_t storage_offset;
 
   // Check and see if the indexing object triggers advanced indexing semantics
 #ifndef TH_REAL_IS_HALF
@@ -1502,6 +1614,22 @@ static int THPTensor_(setValue)(THPTensor *self, PyObject *index, PyObject *valu
   }
   if (THPIndexTensor_Check(index)) {
     THIndexTensor *index_t = ((THPIndexTensor*)index)->cdata;
+
+    // TH will also throw an error, but its a Runtime Error that is less interpretable
+    // than doing it at this layer
+    if (THIndexTensor_(nDimension)(LIBRARY_STATE index_t) != 1) {
+      PyErr_Format(PyExc_IndexError, "Setting values by indexing a Tensor with a "
+#ifndef THC_GENERIC_FILE
+      "torch.LongTensor "
+#else
+      "torch.cuda.LongTensor "
+#endif
+      "triggers index_fill or index_copy semantics, and thus we expect a vector, but "
+      "the indexing Tensor passed has %lld dimensions",
+      (long long) THIndexTensor_(nDimension)(LIBRARY_STATE index_t));
+      throw python_error();
+    }
+
     if (THPUtils_(checkReal)(value)) {
       real v = THPUtils_(unpackReal)(value);
       THTensor_(indexFill)(LIBRARY_STATE self->cdata, 0, index_t, v);
@@ -1518,7 +1646,7 @@ static int THPTensor_(setValue)(THPTensor *self, PyObject *index, PyObject *valu
 
   THTensorPtr tresult;
   THStorage *sresult;
-  long storage_offset;
+  int64_t storage_offset;
 
   // Check and see if the indexing object triggers advanced indexing semantics
 #ifndef TH_REAL_IS_HALF

@@ -1,0 +1,46 @@
+graph(%1 : Double(10, 3, 224, 224)
+      %2 : Double(64, 3, 11, 11)
+      %3 : Double(64)
+      %4 : Double(192, 64, 5, 5)
+      %5 : Double(192)
+      %6 : Double(384, 192, 3, 3)
+      %7 : Double(384)
+      %8 : Double(256, 384, 3, 3)
+      %9 : Double(256)
+      %10 : Double(256, 256, 3, 3)
+      %11 : Double(256)
+      %12 : Double(4096, 9216)
+      %13 : Double(4096)
+      %14 : Double(4096, 4096)
+      %15 : Double(4096)
+      %16 : Double(1000, 4096)
+      %17 : Double(1000)) {
+  %19 : Double(10, 64, 55, 55), %20 : Handle = CppOp[ConvForward](%1, %2, %3), uses = [[%21.i0], []];
+  %21 : Double(10, 64, 55, 55) = threshold[threshold={0}, value={0}, inplace=1](%19), uses = [%22.i0];
+  %23 : Double(10, 64, 27, 27), %24 : Long(10, 64, 27, 27) = max_pool2d[kernel_size=[3, 3], stride=[2, 2], padding=[0, 0], dilation=[1, 1], ceil_mode=0](%21), uses = [[%25.i0], []];
+  %26 : Double(10, 192, 27, 27), %27 : Handle = CppOp[ConvForward](%23, %4, %5), uses = [[%28.i0], []];
+  %28 : Double(10, 192, 27, 27) = threshold[threshold={0}, value={0}, inplace=1](%26), uses = [%29.i0];
+  %30 : Double(10, 192, 13, 13), %31 : Long(10, 192, 13, 13) = max_pool2d[kernel_size=[3, 3], stride=[2, 2], padding=[0, 0], dilation=[1, 1], ceil_mode=0](%28), uses = [[%32.i0], []];
+  %33 : Double(10, 384, 13, 13), %34 : Handle = CppOp[ConvForward](%30, %6, %7), uses = [[%35.i0], []];
+  %35 : Double(10, 384, 13, 13) = threshold[threshold={0}, value={0}, inplace=1](%33), uses = [%36.i0];
+  %37 : Double(10, 256, 13, 13), %38 : Handle = CppOp[ConvForward](%35, %8, %9), uses = [[%39.i0], []];
+  %39 : Double(10, 256, 13, 13) = threshold[threshold={0}, value={0}, inplace=1](%37), uses = [%40.i0];
+  %41 : Double(10, 256, 13, 13), %42 : Handle = CppOp[ConvForward](%39, %10, %11), uses = [[%43.i0], []];
+  %43 : Double(10, 256, 13, 13) = threshold[threshold={0}, value={0}, inplace=1](%41), uses = [%44.i0];
+  %45 : Double(10, 256, 6, 6), %46 : Long(10, 256, 6, 6) = max_pool2d[kernel_size=[3, 3], stride=[2, 2], padding=[0, 0], dilation=[1, 1], ceil_mode=0](%43), uses = [[%47.i0], []];
+  %47 : Double(10, 9216) = view[size=[10, 9216]](%45), uses = [%48.i0];
+  %49 : Double(10, 9216), %50 : Handle = ^Dropout(0.5, True, False)(%47), uses = [[%53.i1], []];
+  %51 : Double(9216!, 4096!) = t(%12), uses = [%53.i2];
+  %52 : Double(10!, 4096) = expand[size=[10, 4096]](%13), uses = [%53.i0];
+  %53 : Double(10, 4096) = addmm[beta={1}, alpha={1}](%52, %49, %51), uses = [%54.i0];
+  %54 : Double(10, 4096) = threshold[threshold={0}, value={0}, inplace=1](%53), uses = [%55.i0];
+  %56 : Double(10, 4096), %57 : Handle = ^Dropout(0.5, True, False)(%54), uses = [[%60.i1], []];
+  %58 : Double(4096!, 4096!) = t(%14), uses = [%60.i2];
+  %59 : Double(10!, 4096) = expand[size=[10, 4096]](%15), uses = [%60.i0];
+  %60 : Double(10, 4096) = addmm[beta={1}, alpha={1}](%59, %56, %58), uses = [%61.i0];
+  %61 : Double(10, 4096) = threshold[threshold={0}, value={0}, inplace=1](%60), uses = [%64.i1];
+  %62 : Double(4096!, 1000!) = t(%16), uses = [%64.i2];
+  %63 : Double(10!, 1000) = expand[size=[10, 1000]](%17), uses = [%64.i0];
+  %64 : Double(10, 1000) = addmm[beta={1}, alpha={1}](%63, %61, %62), uses = [%0.i0];
+  return (%64);
+}

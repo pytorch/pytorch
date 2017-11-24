@@ -15,6 +15,7 @@ We are in an early-release beta. Expect some adventures and rough edges.
   - [Binaries](#binaries)
   - [From Source](#from-source)
   - [Docker Image](#docker-image)
+  - [Previous Versions](#previous-versions)
 - [Getting Started](#getting-started)
 - [Communication](#communication)
 - [Releases and Contributing](#releases-and-contributing)
@@ -89,7 +90,7 @@ Changing the way the network behaves means that one has to start from scratch.
 With PyTorch, we use a technique called reverse-mode auto-differentiation, which allows you to
 change the way your network behaves arbitrarily with zero lag or overhead. Our inspiration comes
 from several research papers on this topic, as well as current and past work such as
-[autograd](https://github.com/twitter/torch-autograd),
+[torch-autograd](https://github.com/twitter/torch-autograd),
 [autograd](https://github.com/HIPS/autograd),
 [Chainer](http://chainer.org), etc.
 
@@ -120,7 +121,7 @@ We hope you never spend hours debugging your code because of bad stack traces or
 PyTorch has minimal framework overhead. We integrate acceleration libraries
 such as Intel MKL and NVIDIA (cuDNN, NCCL) to maximize speed.
 At the core, its CPU and GPU Tensor and neural network backends
-(TH, THC, THNN, THCUNN) are written as independent libraries with a C99 API.  
+(TH, THC, THNN, THCUNN) are written as independent libraries with a C99 API.
 They are mature and have been tested for years.
 
 Hence, PyTorch is quite fast – whether you run small or large neural networks.
@@ -159,7 +160,7 @@ Once you have [Anaconda](https://www.continuum.io/downloads) installed, here are
 
 If you want to compile with CUDA support, install
 - [NVIDIA CUDA](https://developer.nvidia.com/cuda-downloads) 7.5 or above
-- [NVIDIA cuDNN](https://developer.nvidia.com/cudnn) v5.x or above
+- [NVIDIA cuDNN](https://developer.nvidia.com/cudnn) v6.x or above
 
 If you want to disable CUDA support, export environment variable `NO_CUDA=1`.
 
@@ -170,16 +171,20 @@ On Linux
 export CMAKE_PREFIX_PATH="$(dirname $(which conda))/../" # [anaconda root directory]
 
 # Install basic dependencies
-conda install numpy pyyaml mkl setuptools cmake gcc cffi
+conda install numpy pyyaml mkl setuptools cmake cffi
 
 # Add LAPACK support for the GPU
 conda install -c soumith magma-cuda80 # or magma-cuda75 if CUDA 7.5
 ```
 
-On OSX
+On macOS
 ```bash
 export CMAKE_PREFIX_PATH=[anaconda root directory]
 conda install numpy pyyaml setuptools cmake cffi
+```
+#### Get the PyTorch source
+```bash
+git clone --recursive https://github.com/pytorch/pytorch
 ```
 
 #### Install PyTorch
@@ -188,7 +193,7 @@ On Linux
 python setup.py install
 ```
 
-On OSX
+On macOS
 ```bash
 MACOSX_DEPLOYMENT_TARGET=10.9 CC=clang CXX=clang++ python setup.py install
 ```
@@ -199,6 +204,12 @@ Dockerfile is supplied to build images with cuda support and cudnn v6. Build as 
 ```
 docker build -t pytorch .
 ```
+
+Dockerfile to build with cuda 9 and cudnn v7 (with Volta support) is in tools/docker, the build command is
+
+```
+docker build -t pytorch_cuda9 -f tools/docker/Dockerfile9 .
+```
 Alternatively, if you want to use a runtime image, you can use the pre-built one from Docker Hub and run with nvidia-docker:
 ```
 nvidia-docker run --rm -ti --ipc=host pytorch/pytorch:latest
@@ -207,13 +218,18 @@ Please note that PyTorch uses shared memory to share data between processes, so 
 for multithreaded data loaders) the default shared memory segment size that container runs with is not enough, and you
 should increase shared memory size either with `--ipc=host` or `--shm-size` command line options to `nvidia-docker run`.
 
+### Previous Versions
+
+Installation instructions and binaries for previous PyTorch versions may be found
+on [our website](http://pytorch.org/previous-versions/).
+
 
 ## Getting Started
 
 Three pointers to get you started:
 - [Tutorials: get you started with understanding and using PyTorch](http://pytorch.org/tutorials/)
 - [Examples: easy to understand pytorch code across all domains](https://github.com/pytorch/examples)
-- The API Reference: [http://pytorch.org/docs/](http://pytorch.org/docs/)
+- [The API Reference](http://pytorch.org/docs/)
 
 ## Communication
 * forums: discuss implementations, research, etc. http://discuss.pytorch.org

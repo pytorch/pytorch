@@ -16,6 +16,8 @@ from torch.utils.trainer import Trainer
 from torch.utils.trainer.plugins import *
 from torch.utils.trainer.plugins.plugin import Plugin
 from torch.utils.serialization import load_lua
+from torch.autograd._functions.utils import prepare_onnx_paddings
+from torch.autograd._functions.utils import check_onnx_broadcast
 
 HAS_CUDA = torch.cuda.is_available()
 
@@ -340,7 +342,8 @@ class TestLuaReader(TestCase):
             path = download_file('https://download.pytorch.org/test_data/legacy_modules.t7')
         except unittest.SkipTest:
             return
-        tests = load_lua(path)
+        long_size = 8 if sys.platform == 'win32' else None
+        tests = load_lua(path, long_size=long_size)
         for name, test in tests['modules'].items():
             test_name = 'test_' + name.replace('nn.', '')
             setattr(cls, test_name, cls._module_test(name, test))
@@ -377,6 +380,66 @@ class TestLuaReader(TestCase):
 
     def _transform_MultiMarginCriterion(self, input, target):
         return input, target.sub(1)
+
+
+class TestONNXUtils(TestCase):
+    def test_prepare_onnx_paddings(self):
+        sizes = [2, 3, 4]
+        pad = [1, 2, 3, 4]
+        paddings = prepare_onnx_paddings(len(sizes), pad)
+        self.assertEqual(paddings, [0, 0, 3, 4, 1, 2])
+
+    def test_check_onnx_broadcast(self):
+
+        def try_check_onnx_broadcast(dims1, dims2, expect_broadcast, expect_fail):
+            broadcast = True
+            fail = False
+            try:
+                broadcast = check_onnx_broadcast(dims1, dims2)
+            except ValueError:
+                fail = True
+            self.assertEqual(broadcast, expect_broadcast)
+            self.assertEqual(fail, expect_fail)
+
+        # Case 1, check the case when len(dims1) < len(dims2) and numel(dims2) > 1
+        dims1 = [3, 4]
+        dims2 = [2, 3, 4]
+        try_check_onnx_broadcast(dims1, dims2, True, True)
+
+        # Case 2, check the case when len(dims1) < len(dims2) and numel(dims2) == 1
+        dims1 = [3, 4]
+        dims2 = [1, 1, 1]
+        try_check_onnx_broadcast(dims1, dims2, True, False)
+
+        # Case 3, check the case when len(dims1) > len(dims2) and numel(dims2) == 1
+        dims1 = [1, 1]
+        dims2 = [1]
+        try_check_onnx_broadcast(dims1, dims2, True, False)
+
+        # Case 4, check the case when len(dims1) > len(dims2) and dims1[x:] == dims2
+        dims1 = [2, 3, 4]
+        dims2 = [3, 4]
+        try_check_onnx_broadcast(dims1, dims2, True, False)
+
+        # Case 5, check the case when len(dims1) > len(dims2), but dims1[x:] != dims2
+        dims1 = [2, 3, 4]
+        dims2 = [1, 4]
+        try_check_onnx_broadcast(dims1, dims2, True, True)
+
+        # Case 6, check the equal case, no broadcast
+        dims1 = [3, 4]
+        dims2 = [3, 4]
+        try_check_onnx_broadcast(dims1, dims2, False, False)
+
+        # Case 7, check the case when len(dims1) == len(dims2), but dims1 != dims2
+        dims1 = [3, 4]
+        dims2 = [1, 4]
+        try_check_onnx_broadcast(dims1, dims2, True, True)
+
+        # Case 8, check the case when len(dims1) == len(dims2) and numel(s2) == 1
+        dims1 = [3, 4]
+        dims2 = [1, 1]
+        try_check_onnx_broadcast(dims1, dims2, True, False)
 
 
 TestLuaReader.init()

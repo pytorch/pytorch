@@ -150,6 +150,20 @@ addr_(beta=1, alpha=1, vec1, vec2) -> Tensor
 In-place version of :meth:`~Tensor.addr`
 """)
 
+add_docstr_all('all',
+               """
+all() -> bool
+
+Returns True if all elements in the tensor are non-zero, False otherwise.
+""")
+
+add_docstr_all('any',
+               """
+any() -> bool
+
+Returns True if any elements in the tensor are non-zero, False otherwise.
+""")
+
 add_docstr_all('apply_',
                """
 apply_(callable) -> Tensor
@@ -308,10 +322,10 @@ It may be of a different data type or reside on a different device.
 
 Args:
     src (Tensor): Source tensor to copy
-    async (bool): If True and this copy is between CPU and GPU, then the copy
+    async (bool): If ``True`` and this copy is between CPU and GPU, then the copy
         may occur asynchronously with respect to the host. For other
         copies, this argument has no effect.
-    broadcast (bool): If True, :attr:`src` will be broadcast to the shape of
+    broadcast (bool): If ``True``, :attr:`src` will be broadcast to the shape of
         the underlying tensor.
 """)
 
@@ -452,6 +466,20 @@ add_docstr_all('equal',
 equal(other) -> bool
 
 See :func:`torch.equal`
+""")
+
+add_docstr_all('erf',
+               """
+erf() -> Tensor
+
+See :func:`torch.erf`
+""")
+
+add_docstr_all('erfinv',
+               """
+erfinv() -> Tensor
+
+See :func:`torch.erfinv`
 """)
 
 add_docstr_all('exp',
@@ -1104,6 +1132,33 @@ pstrf(upper=True, tol=-1) -> (Tensor, IntTensor)
 See :func:`torch.pstrf`
 """)
 
+add_docstr_all('put_',
+               """
+put_(indices, tensor, accumulate=False) -> Tensor
+
+Copies the elements from :attr:`tensor` into the positions specified by
+indices. For the puropose of indexing, the ``self`` tensor is treated as if it
+were a 1D tensor.
+
+If :attr:`accumulate` is ``True``, the elements in :attr:`tensor` are added to
+:attr:`self`. If accumulate is ``False``, the behavior is undefined if indices
+contains duplicate elements.
+
+Args:
+    indices (LongTensor): the indices into self
+    tensor (Tensor): Tensor containing values to copy
+    accumulate (bool): True to accumulate into self
+
+Example::
+
+    >>> src = torch.Tensor([[4, 3, 5],
+    ...                     [6, 7, 8]])
+    >>> src.put_(torch.LongTensor([1, 3]), torch.Tensor([9, 10]))
+      4   9   5
+     10   7   8
+    [torch.FloatTensor of size 2x3]
+""")
+
 add_docstr_all('qr',
                """
 qr() -> (Tensor, Tensor)
@@ -1116,8 +1171,10 @@ add_docstr_all('random_',
 random_(from=0, to=None, *, generator=None)
 
 Fills this tensor with numbers sampled from the discrete uniform distribution
-over [from, to - 1]. If not specified, the values are only bounded by this
-tensor's data type.
+over [from, to - 1]. If not specified, the values are usually only bounded by
+this tensor's data type. However, for floating point types, if unspecified,
+range will be [0, 2^mantissa] to ensure that every value is representable.
+For example, `torch.DoubleTensor(1).random_()` will be uniform in [0, 2^53].
 """)
 
 add_docstr_all('reciprocal',
@@ -1437,9 +1494,24 @@ Example:
 
 add_docstr_all('stride',
                """
-stride() -> tuple
+stride(dim) -> tuple or int
 
 Returns the stride of the tensor.
+Stride is the jump necessary to go from one element to the next one in the specified dimension dim.
+Tuple is returned when no Argument is passed. So we get stride in all dimensions.
+Integer value is returned when we desire stride in particular dimension.
+
+Args:
+    dim (int): The desired dimension in which stride is required.
+
+Example:
+    >>> x = torch.Tensor([[1, 2, 3, 4, 5], [6, 7, 8, 9, 10]])
+    >>> x.stride()
+    (5, 1)
+    >>>x.stride(0)
+    5
+    >>> x.stride(-1)
+    1
 """)
 
 add_docstr_all('sub',
@@ -1498,11 +1570,11 @@ t_() -> Tensor
 In-place version of :meth:`~Tensor.t`
 """)
 
-add_docstr_all('tan',
+add_docstr_all('take',
                """
-tan() -> Tensor
+take(indices) -> Tensor
 
-See :func:`torch.tan`
+See :func:`torch.take`
 """)
 
 add_docstr_all('tan_',

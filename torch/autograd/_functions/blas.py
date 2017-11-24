@@ -1,7 +1,7 @@
 import torch
 
 from ..function import Function, InplaceFunction
-from .utils import maybe_unexpand
+from .utils import maybe_unexpand, check_onnx_broadcast
 
 
 # TODO: no need to save all args if the grad w.r.t. some of them is not needed
@@ -11,49 +11,6 @@ def _get_output(ctx, arg, inplace=False):
         return arg
     else:
         return arg.new().resize_as_(arg)
-
-
-class Addmm(InplaceFunction):
-
-    @staticmethod
-    def forward(ctx, add_matrix, matrix1, matrix2, alpha=1, beta=1, inplace=False):
-        ctx.alpha = alpha
-        ctx.beta = beta
-        ctx.add_matrix_size = add_matrix.size()
-        ctx.save_for_backward(matrix1, matrix2)
-        output = _get_output(ctx, add_matrix, inplace=inplace)
-        return torch.addmm(alpha, add_matrix, beta,
-                           matrix1, matrix2, out=output)
-
-    @staticmethod
-    def backward(ctx, grad_output):
-        matrix1, matrix2 = ctx.saved_variables
-        grad_add_matrix = grad_matrix1 = grad_matrix2 = None
-
-        if ctx.needs_input_grad[0]:
-            grad_add_matrix = maybe_unexpand(grad_output, ctx.add_matrix_size)
-            if ctx.alpha != 1:
-                grad_add_matrix = grad_add_matrix.mul(ctx.alpha)
-
-        if ctx.needs_input_grad[1]:
-            if matrix1.stride() == (1, matrix1.size(0)):
-                # column major gradient if input is column major
-                grad_matrix1 = torch.mm(matrix2, grad_output.t()).t()
-            else:
-                grad_matrix1 = torch.mm(grad_output, matrix2.t())
-            if ctx.beta != 1:
-                grad_matrix1 *= ctx.beta
-
-        if ctx.needs_input_grad[2]:
-            if matrix2.stride() == (1, matrix2.size(0)):
-                # column major gradient if input is column major
-                grad_matrix2 = torch.mm(grad_output.t(), matrix1).t()
-            else:
-                grad_matrix2 = torch.mm(matrix1.t(), grad_output)
-            if ctx.beta != 1:
-                grad_matrix2 *= ctx.beta
-
-        return grad_add_matrix, grad_matrix1, grad_matrix2, None, None, None
 
 
 class Addbmm(InplaceFunction):

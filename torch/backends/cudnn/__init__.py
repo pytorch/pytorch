@@ -1,7 +1,11 @@
+import os
 import ctypes
 import sys
 import torch
 import warnings
+from torch.version import cuda
+from contextlib import contextmanager
+from subprocess import Popen, PIPE
 
 enabled = True  # set to False to globally disable cuDNN
 
@@ -10,10 +14,28 @@ __cudnn_version = None
 # TODO: dynamic version checks via cudnnGetVersion
 
 
+def find_cudnn_windows_lib():
+    proc = Popen(['where', 'cudnn64*.dll'], stdout=PIPE, stderr=PIPE)
+    out, err = proc.communicate()
+    out = out.decode().strip()
+    if len(out) > 0:
+        if out.find('\r\n') != -1:
+            out = out.split('\r\n')[0]
+        cudnn_lib_name = os.path.basename(out)
+        cudnn_lib = os.path.splitext(cudnn_lib_name)[0]
+        cudnn_lib = str(cudnn_lib)
+        return ctypes.cdll.LoadLibrary(cudnn_lib)
+    else:
+        return None
+
+
 def _libcudnn():
     global lib, __cudnn_version
     if lib is None:
-        lib = ctypes.cdll.LoadLibrary(None)
+        if sys.platform == "win32":
+            lib = find_cudnn_windows_lib()
+        else:
+            lib = ctypes.cdll.LoadLibrary(None)
         if hasattr(lib, 'cudnnGetErrorString'):
             lib.cudnnGetErrorString.restype = ctypes.c_char_p
             __cudnn_version = lib.cudnnGetVersion()
@@ -58,6 +80,7 @@ def is_acceptable(tensor):
 
 _handles = {}
 
+deterministic = False
 benchmark = False
 verbose = False
 
@@ -79,6 +102,26 @@ CUDNN_SKIP_INPUT = 1
 CUDNN_RNN_ALGO_STANDARD = 0
 CUDNN_RNN_ALGO_PERSIST_STATIC = 1
 CUDNN_RNN_ALGO_PERSIST_DYNAMIC = 2
+
+CUDNN_DEFAULT_MATH = 0
+CUDNN_TENSOR_OP_MATH = 1
+
+
+def set_flags(_enabled, _benchmark, _deterministic, _verbose):
+    global enabled, benchmark, deterministic, verbose
+    orig_flags = enabled, benchmark, deterministic, verbose
+    enabled, benchmark, deterministic, verbose = _enabled, _benchmark, _deterministic, _verbose
+    return orig_flags
+
+
+@contextmanager
+def flags(enabled=False, benchmark=False, deterministic=False, verbose=False):
+    orig_flags = set_flags(enabled, benchmark, deterministic, verbose)
+    try:
+        yield
+    finally:
+        # recover the previous values
+        set_flags(orig_flags[0], orig_flags[1], orig_flags[2], orig_flags[3])
 
 
 class CuDNNHandle:
@@ -234,6 +277,11 @@ class RNNDescriptor(object):
                 CUDNN_RNN_ALGO_STANDARD,
                 datatype
             ))
+            if version() >= 7000 and int(cuda[0]) >= 9 and (
+                    torch.cuda.get_device_capability(torch.cuda.current_device())[0] >= 7):
+                lib.cudnnSetRNNMatrixMathType(self, CUDNN_DEFAULT_MATH)
+                if datatype == CUDNN_DATA_HALF:
+                    lib.cudnnSetRNNMatrixMathType(self, CUDNN_TENSOR_OP_MATH)
         else:
             check_error(lib.cudnnSetRNNDescriptor(
                 self,

@@ -19,11 +19,15 @@ cd "$(dirname "$0")/../.."
 BASE_DIR=$(pwd)
 cd torch/lib
 INSTALL_DIR="$(pwd)/tmp_install"
+CMAKE_VERSION=${CMAKE_VERSION:="cmake"}
 C_FLAGS=" -DTH_INDEX_BASE=0 -I$INSTALL_DIR/include \
   -I$INSTALL_DIR/include/TH -I$INSTALL_DIR/include/THC \
   -I$INSTALL_DIR/include/THS -I$INSTALL_DIR/include/THCS \
-  -I$INSTALL_DIR/include/THPP -I$INSTALL_DIR/include/THNN \
-  -I$INSTALL_DIR/include/THCUNN"
+  -I$INSTALL_DIR/include/THNN -I$INSTALL_DIR/include/THCUNN"
+# Workaround OpenMPI build failure
+# ImportError: /build/pytorch-0.2.0/.pybuild/pythonX.Y_3.6/build/torch/_C.cpython-36m-x86_64-linux-gnu.so: undefined symbol: _ZN3MPI8Datatype4FreeEv
+# https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=686926
+C_FLAGS="${C_FLAGS} -DOMPI_SKIP_MPICXX=1"
 LDFLAGS="-L$INSTALL_DIR/lib "
 LD_POSTFIX=".so.1"
 LD_POSTFIX_UNVERSIONED=".so"
@@ -36,8 +40,19 @@ else
 fi
 CPP_FLAGS=" -std=c++11 "
 GLOO_FLAGS=""
+NCCL_ROOT_DIR=${NCCL_ROOT_DIR:-$INSTALL_DIR}
 if [[ $WITH_CUDA -eq 1 ]]; then
-    GLOO_FLAGS="-DUSE_CUDA=1 -DNCCL_ROOT_DIR=$INSTALL_DIR"
+    GLOO_FLAGS="-DUSE_CUDA=1 -DNCCL_ROOT_DIR=$NCCL_ROOT_DIR"
+fi
+CWRAP_FILES="\
+$BASE_DIR/torch/lib/ATen/Declarations.cwrap;\
+$BASE_DIR/torch/lib/ATen/Local.cwrap;\
+$BASE_DIR/torch/lib/THNN/generic/THNN.h;\
+$BASE_DIR/torch/lib/THCUNN/generic/THCUNN.h;\
+$BASE_DIR/torch/lib/ATen/nn.yaml"
+CUDA_NVCC_FLAGS=$C_FLAGS
+if [[ $CUDA_DEBUG -eq 1 ]]; then
+  CUDA_NVCC_FLAGS="$CUDA_NVCC_FLAGS -g -G"
 fi
 
 # Used to build an individual library, e.g. build TH
@@ -49,20 +64,23 @@ function build() {
   BUILD_C_FLAGS=''
   case $1 in
       THCS | THCUNN ) BUILD_C_FLAGS=$C_FLAGS;;
+      nanopb ) BUILD_C_FLAGS=$C_FLAGS" -fPIC -fexceptions";;
       *) BUILD_C_FLAGS=$C_FLAGS" -fexceptions";;
   esac
-  cmake ../../$1 -DCMAKE_MODULE_PATH="$BASE_DIR/cmake/FindCUDA" \
+  ${CMAKE_VERSION} ../../$1 -DCMAKE_MODULE_PATH="$BASE_DIR/cmake/FindCUDA" \
               -DTorch_FOUND="1" \
               -DCMAKE_INSTALL_PREFIX="$INSTALL_DIR" \
               -DCMAKE_C_FLAGS="$BUILD_C_FLAGS" \
               -DCMAKE_CXX_FLAGS="$BUILD_C_FLAGS $CPP_FLAGS" \
               -DCMAKE_EXE_LINKER_FLAGS="$LDFLAGS" \
               -DCMAKE_SHARED_LINKER_FLAGS="$LDFLAGS" \
-              -DCUDA_NVCC_FLAGS="$C_FLAGS" \
+              -DCMAKE_INSTALL_LIBDIR="$INSTALL_DIR/lib" \
+              -DCUDA_NVCC_FLAGS="$CUDA_NVCC_FLAGS" \
+              -DCMAKE_PREFIX_PATH="$INSTALL_DIR" \
+              -Dcwrap_files="$CWRAP_FILES" \
               -DTH_INCLUDE_PATH="$INSTALL_DIR/include" \
               -DTH_LIB_PATH="$INSTALL_DIR/lib" \
               -DTH_LIBRARIES="$INSTALL_DIR/lib/libTH$LD_POSTFIX" \
-              -DTHPP_LIBRARIES="$INSTALL_DIR/lib/libTHPP$LD_POSTFIX" \
               -DATEN_LIBRARIES="$INSTALL_DIR/lib/libATen$LD_POSTFIX" \
               -DTHNN_LIBRARIES="$INSTALL_DIR/lib/libTHNN$LD_POSTFIX" \
               -DTHCUNN_LIBRARIES="$INSTALL_DIR/lib/libTHCUNN$LD_POSTFIX" \
@@ -75,8 +93,11 @@ function build() {
               -DTHCUNN_SO_VERSION=1 \
               -DTHD_SO_VERSION=1 \
               -DNO_CUDA=$((1-$WITH_CUDA)) \
+              -DNCCL_EXTERNAL=1 \
+              -Dnanopb_BUILD_GENERATOR=0 \
+              -DCMAKE_DEBUG_POSTFIX="" \
               -DCMAKE_BUILD_TYPE=$([ $DEBUG ] && echo Debug || echo Release) \
-              $2
+              ${@:2}
   make install -j$(getconf _NPROCESSORS_ONLN)
   cd ../..
 
@@ -98,17 +119,41 @@ function build() {
 function build_nccl() {
    mkdir -p build/nccl
    cd build/nccl
-   cmake ../../nccl -DCMAKE_MODULE_PATH="$BASE_DIR/cmake/FindCUDA" \
+   ${CMAKE_VERSION} ../../nccl -DCMAKE_MODULE_PATH="$BASE_DIR/cmake/FindCUDA" \
                -DCMAKE_BUILD_TYPE=Release \
                -DCMAKE_INSTALL_PREFIX="$INSTALL_DIR" \
                -DCMAKE_C_FLAGS="$C_FLAGS" \
                -DCMAKE_CXX_FLAGS="$C_FLAGS $CPP_FLAGS"
    make install
+   mkdir -p ${INSTALL_DIR}/lib
    cp "lib/libnccl.so.1" "${INSTALL_DIR}/lib/libnccl.so.1"
    if [ ! -f "${INSTALL_DIR}/lib/libnccl.so" ]; then
      ln -s "${INSTALL_DIR}/lib/libnccl.so.1" "${INSTALL_DIR}/lib/libnccl.so"
    fi
    cd ../..
+}
+
+# purpusefully not using build() because we need ATen to build the same
+# regardless of whether it is inside pytorch or not, so it
+# cannot take any special flags
+# special flags need to be part of the ATen build itself
+#
+# However, we do explicitly pass library paths when setup.py has already
+# detected them (to ensure that we have a consistent view between the
+# PyTorch and ATen builds.)
+function build_aten() {
+  mkdir -p build/aten
+  cd  build/aten
+  ${CMAKE_VERSION} ../../../../aten \
+  -DCMAKE_BUILD_TYPE=$([ $DEBUG ] && echo Debug || echo Release) \
+  -DNO_CUDA=$((1-$WITH_CUDA)) \
+  -DCUDNN_INCLUDE_DIR=$CUDNN_INCLUDE_DIR \
+  -DCUDNN_LIB_DIR=$CUDNN_LIB_DIR \
+  -DATEN_NO_CONTRIB=1 \
+  -DCMAKE_INSTALL_PREFIX="$INSTALL_DIR"
+  # purpusefully not passing C_FLAGS for the same reason as above
+  make -j$(getconf _NPROCESSORS_ONLN) install
+  cd ../..
 }
 
 # In the torch/lib directory, create an installation directory
@@ -120,6 +165,8 @@ for arg in "$@"; do
         build_nccl
     elif [[ "$arg" == "gloo" ]]; then
         build gloo $GLOO_FLAGS
+    elif [[ "$arg" == "ATen" ]]; then
+        build_aten
     else
         build $arg
     fi
@@ -127,9 +174,14 @@ done
 
 # If all the builds succeed we copy the libraries, headers,
 # binaries to torch/lib
+rm -rf $INSTALL_DIR/lib/cmake
+rm -rf $INSTALL_DIR/lib/python
 cp $INSTALL_DIR/lib/* .
-cp THNN/generic/THNN.h .
-cp THCUNN/generic/THCUNN.h .
+if [ -d "$INSTALL_DIR/lib64/" ]; then
+    cp $INSTALL_DIR/lib64/* .
+fi
+cp ../../aten/src/THNN/generic/THNN.h .
+cp ../../aten/src/THCUNN/generic/THCUNN.h .
 cp -r $INSTALL_DIR/include .
 if [ -d "$INSTALL_DIR/bin/" ]; then
     cp $INSTALL_DIR/bin/* .

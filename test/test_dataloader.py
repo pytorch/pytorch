@@ -4,6 +4,7 @@ import torch
 import traceback
 import unittest
 from torch.utils.data import Dataset, TensorDataset, DataLoader, ConcatDataset
+from torch.utils.data.dataloader import default_collate
 from common import TestCase, run_tests, TEST_NUMPY
 from common_nn import TEST_CUDA
 
@@ -61,6 +62,16 @@ class TestConcatDataset(TestCase):
         with self.assertRaises(IndexError):
             # this one goes to 11
             result[11]
+
+    def test_add_dataset(self):
+        d1 = TensorDataset(torch.rand(7, 3, 28, 28), torch.rand(7))
+        d2 = TensorDataset(torch.rand(7, 3, 28, 28), torch.rand(7))
+        d3 = TensorDataset(torch.rand(7, 3, 28, 28), torch.rand(7))
+        result = d1 + d2 + d3
+        self.assertEqual(21, len(result))
+        self.assertEqual(0, (d1[0][0] - result[0][0]).abs().sum())
+        self.assertEqual(0, (d2[0][0] - result[7][0]).abs().sum())
+        self.assertEqual(0, (d3[0][0] - result[14][0]).abs().sum())
 
 
 class ErrorDataset(Dataset):
@@ -265,6 +276,23 @@ class TestDataLoader(TestCase):
             loader = DataLoader(dset, batch_size=2)
             batch = next(iter(loader))
             self.assertIsInstance(batch, tt)
+
+    @unittest.skipIf(not TEST_NUMPY, "numpy unavailable")
+    def test_default_colate_bad_numpy_types(self):
+        import numpy as np
+
+        # Should be a no-op
+        arr = np.array(['a', 'b', 'c'])
+        default_collate(arr)
+
+        arr = np.array([[['a', 'b', 'c']]])
+        self.assertRaises(TypeError, lambda: default_collate(arr))
+
+        arr = np.array([object(), object(), object()])
+        self.assertRaises(TypeError, lambda: default_collate(arr))
+
+        arr = np.array([[[object(), object(), object()]]])
+        self.assertRaises(TypeError, lambda: default_collate(arr))
 
 
 class StringDataset(Dataset):

@@ -18,6 +18,25 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
+import itertools
+import sys
+
+
+PY2 = sys.version_info[0] == 2
+PY3 = sys.version_info[0] == 3
+
+
+if PY2:
+    string_classes = basestring
+else:
+    string_classes = (str, bytes)
+
+
+if PY2:
+    int_classes = (int, long)
+else:
+    int_classes = int
+
 
 def with_metaclass(meta, *bases):
     """Create a base class with a metaclass."""
@@ -29,3 +48,50 @@ def with_metaclass(meta, *bases):
         def __new__(cls, name, this_bases, d):
             return meta(name, bases, d)
     return type.__new__(metaclass, 'temporary_class', (), {})
+
+
+# A portable way of referring to the generator version of map
+# in both Python 2 and Python 3.
+# TODO: Move this into an appropriate utility library.
+if hasattr(itertools, 'imap'):
+    imap = itertools.imap
+else:
+    imap = map
+
+
+if PY3:
+    import builtins
+    exec_ = getattr(builtins, "exec")
+else:
+    def exec_(_code_, _globs_=None, _locs_=None):
+        """Execute code in a namespace."""
+        if _globs_ is None:
+            frame = sys._getframe(1)
+            _globs_ = frame.f_globals
+            if _locs_ is None:
+                _locs_ = frame.f_locals
+            del frame
+        elif _locs_ is None:
+            _locs_ = _globs_
+        exec("""exec _code_ in _globs_, _locs_""")
+
+
+if sys.version_info[:2] == (3, 2):
+    exec_("""def raise_from(value, from_value):
+    try:
+        if from_value is None:
+            raise value
+        raise value from from_value
+    finally:
+        value = None
+""")
+elif sys.version_info[:2] > (3, 2):
+    exec_("""def raise_from(value, from_value):
+    try:
+        raise value from from_value
+    finally:
+        value = None
+""")
+else:
+    def raise_from(value, from_value):
+        raise value

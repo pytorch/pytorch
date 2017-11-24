@@ -11,12 +11,13 @@ from .loss import L1Loss, NLLLoss, KLDivLoss, MSELoss, BCELoss, BCEWithLogitsLos
     SmoothL1Loss, SoftMarginLoss, CrossEntropyLoss, TripletMarginLoss, PoissonNLLLoss
 from .container import Container, Sequential, ModuleList, ParameterList
 from .pooling import AvgPool1d, AvgPool2d, AvgPool3d, MaxPool1d, MaxPool2d, MaxPool3d, \
-    MaxUnpool1d, MaxUnpool2d, MaxUnpool3d, FractionalMaxPool2d, LPPool2d, AdaptiveMaxPool1d, \
-    AdaptiveMaxPool2d, AdaptiveAvgPool1d, AdaptiveAvgPool2d
+    MaxUnpool1d, MaxUnpool2d, MaxUnpool3d, FractionalMaxPool2d, LPPool1d, LPPool2d, AdaptiveMaxPool1d, \
+    AdaptiveMaxPool2d, AdaptiveMaxPool3d, AdaptiveAvgPool1d, AdaptiveAvgPool2d, AdaptiveAvgPool3d
 from .batchnorm import BatchNorm1d, BatchNorm2d, BatchNorm3d
 from .instancenorm import InstanceNorm1d, InstanceNorm2d, InstanceNorm3d
 from .dropout import Dropout, Dropout2d, Dropout3d, AlphaDropout
-from .padding import ReflectionPad2d, ReplicationPad2d, ReplicationPad3d, ZeroPad2d, ConstantPad2d
+from .padding import ReflectionPad1d, ReflectionPad2d, ReplicationPad1d, ReplicationPad2d, \
+    ReplicationPad3d, ZeroPad2d, ConstantPad1d, ConstantPad2d, ConstantPad3d
 from .normalization import CrossMapLRN2d
 from .sparse import Embedding, EmbeddingBag
 from .rnn import RNNBase, RNN, LSTM, GRU, \
@@ -37,11 +38,12 @@ __all__ = [
     'SoftMarginLoss', 'CrossEntropyLoss', 'Container', 'Sequential', 'ModuleList',
     'ParameterList', 'AvgPool1d', 'AvgPool2d', 'AvgPool3d', 'MaxPool1d', 'MaxPool2d',
     'MaxPool3d', 'MaxUnpool1d', 'MaxUnpool2d', 'MaxUnpool3d', 'FractionalMaxPool2d',
-    'LPPool2d', 'BatchNorm1d', 'BatchNorm2d', 'BatchNorm3d', 'InstanceNorm1d', 'InstanceNorm2d',
-    'InstanceNorm3d', 'Dropout', 'Dropout2d', 'Dropout3d', 'AlphaDropout', 'ReflectionPad2d',
-    'ReplicationPad2d', 'ReplicationPad3d', 'CrossMapLRN2d',
+    'LPPool1d', 'LPPool2d', 'BatchNorm1d', 'BatchNorm2d', 'BatchNorm3d', 'InstanceNorm1d', 'InstanceNorm2d',
+    'InstanceNorm3d', 'Dropout', 'Dropout2d', 'Dropout3d', 'AlphaDropout', 'ReflectionPad1d',
+    'ReflectionPad2d', 'ReplicationPad2d', 'ReplicationPad1d', 'ReplicationPad3d', 'CrossMapLRN2d',
     'Embedding', 'EmbeddingBag', 'RNNBase', 'RNN', 'LSTM', 'GRU', 'RNNCell', 'LSTMCell', 'GRUCell',
     'PixelShuffle', 'Upsample', 'UpsamplingNearest2d', 'UpsamplingBilinear2d', 'PairwiseDistance',
-    'AdaptiveMaxPool1d', 'AdaptiveMaxPool2d', 'AdaptiveAvgPool1d', 'AdaptiveAvgPool2d',
-    'TripletMarginLoss', 'ZeroPad2d', 'ConstantPad2d', 'Bilinear', 'CosineSimilarity',
+    'AdaptiveMaxPool1d', 'AdaptiveMaxPool2d', 'AdaptiveMaxPool3d', 'AdaptiveAvgPool1d', 'AdaptiveAvgPool2d',
+    'AdaptiveAvgPool3d', 'TripletMarginLoss', 'ZeroPad2d', 'ConstantPad1d', 'ConstantPad2d',
+    'ConstantPad3d', 'Bilinear', 'CosineSimilarity',
 ]

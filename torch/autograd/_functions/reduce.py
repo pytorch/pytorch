@@ -109,36 +109,6 @@ class Prod(Function):
             return grad_input, None, None
 
 
-class Mean(Function):
-
-    @staticmethod
-    def forward(ctx, input, dim=None, keepdim=None):
-        ctx.dim = dim
-        ctx.keepdim = False if keepdim is None else keepdim
-        ctx.input_size = input.size()
-        if dim is None:
-            return input.new((input.mean(),))
-        else:
-            if keepdim is not None:
-                return input.mean(dim, keepdim=keepdim)
-            else:
-                return input.mean(dim)
-
-    @staticmethod
-    def backward(ctx, grad_output):
-        if ctx.dim is None:
-            grad_input_val = grad_output / reduce(lambda x, y: x * y, ctx.input_size, 1)
-            return grad_input_val.expand(ctx.input_size), None, None
-        else:
-            if ctx.keepdim is False and len(ctx.input_size) != 1:
-                grad_output = grad_output.unsqueeze(ctx.dim)
-
-            repeats = [1 for _ in ctx.input_size]
-            dim_size = ctx.input_size[ctx.dim]
-            repeats[ctx.dim] = dim_size
-            return grad_output.repeat(*repeats).div_(dim_size), None, None
-
-
 class _SelectionFunction(Function):
     has_all_reduce = True
     # additional_args is prepended before dim when calling the tensor
@@ -226,43 +196,34 @@ class Norm(Function):
         ctx.keepdim = False if keepdim is None else keepdim
 
         if dim is None:
-            ctx.norm = input.norm(p)
-            ctx.save_for_backward(input)
-            return input.new((ctx.norm,))
+            norm = input.norm(p)
+            output = input.new((norm,))
         else:
             if keepdim is not None:
                 output = input.norm(p, dim, keepdim=keepdim)
             else:
                 output = input.norm(p, dim)
-            ctx.save_for_backward(input, output)
-            return output
+        ctx.save_for_backward(input, output)
+        return output
 
     @staticmethod
     def backward(ctx, grad_output):
-        if ctx.dim is None:
-            input, = ctx.saved_variables
-            if ctx.p == 2:
-                scale_v = (grad_output / ctx.norm).expand_as(input)
-                return input.mul(scale_v), None, None, None
-            else:
-                pow = input.abs().pow(ctx.p - 2)
-                scale_v = (grad_output / ctx.norm ** (ctx.p - 1)).expand_as(input)
-                return input.mul(pow).mul(scale_v), None, None, None
+        input, output = ctx.saved_variables
+        if ctx.dim is not None and ctx.keepdim is False and input.dim() != 1:
+            grad_output = grad_output.unsqueeze(ctx.dim)
+            output = output.unsqueeze(ctx.dim)
+
+        if ctx.p == 2:
+            grad_input = input.mul(grad_output).div(output)
         else:
-            input, output = ctx.saved_variables
+            input_pow = input.abs().pow(ctx.p - 2)
+            output_pow = output.pow(ctx.p - 1)
+            grad_input = input.mul(input_pow).mul(grad_output).div(output_pow)
 
-            if ctx.keepdim is False and input.dim() != 1:
-                grad_output = grad_output.unsqueeze(ctx.dim)
-                output = output.unsqueeze(ctx.dim)
+        # Special case at 0 where we return a subgradient containing 0
+        grad_input.masked_fill_(output == 0, 0)
 
-            big_grad_output = grad_output.expand_as(input)
-            if ctx.p == 2:
-                big_output = output.expand_as(input)
-                return input.mul(big_grad_output).div(big_output), None, None, None
-            else:
-                pow = input.abs().pow(ctx.p - 2)
-                big_output = output.pow(ctx.p - 1).expand_as(input)
-                return input.mul(pow).mul(big_grad_output).div(big_output), None, None, None
+        return grad_input, None, None, None
 
 
 # TODO: renorm

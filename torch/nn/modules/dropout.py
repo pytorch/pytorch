@@ -18,7 +18,7 @@ class Dropout(Module):
 
     Args:
         p: probability of an element to be zeroed. Default: 0.5
-        inplace: If set to True, will do this operation in-place. Default: false
+        inplace: If set to ``True``, will do this operation in-place. Default: ``False``
 
     Shape:
         - Input: `Any`. Input can be of any shape
@@ -47,8 +47,8 @@ class Dropout(Module):
 
     def __repr__(self):
         inplace_str = ', inplace' if self.inplace else ''
-        return self.__class__.__name__ + ' (' \
-            + 'p = ' + str(self.p) \
+        return self.__class__.__name__ + '(' \
+            + 'p=' + str(self.p) \
             + inplace_str + ')'
 
 
@@ -70,7 +70,7 @@ class Dropout2d(Module):
 
     Args:
         p (float, optional): probability of an element to be zeroed.
-        inplace (bool, optional): If set to True, will do this operation
+        inplace (bool, optional): If set to ``True``, will do this operation
             in-place
 
     Shape:
@@ -100,7 +100,7 @@ class Dropout2d(Module):
 
     def __repr__(self):
         inplace_str = ', inplace' if self.inplace else ''
-        return self.__class__.__name__ + ' (' \
+        return self.__class__.__name__ + '(' \
             + 'p=' + str(self.p) \
             + inplace_str + ')'
 
@@ -123,7 +123,7 @@ class Dropout3d(Module):
 
     Args:
         p (float, optional): probability of an element to be zeroed.
-        inplace (bool, optional): If set to True, will do this operation
+        inplace (bool, optional): If set to ``True``, will do this operation
             in-place
 
     Shape:
@@ -153,7 +153,7 @@ class Dropout3d(Module):
 
     def __repr__(self):
         inplace_str = ', inplace' if self.inplace else ''
-        return self.__class__.__name__ + ' (' \
+        return self.__class__.__name__ + '(' \
             + 'p=' + str(self.p) \
             + inplace_str + ')'
 
@@ -205,5 +205,5 @@ class AlphaDropout(Module):
         return F.alpha_dropout(input, self.p, self.training)
 
     def __repr__(self):
-        return self.__class__.__name__ + ' (' \
-            + 'p = ' + str(self.p) + ')'
+        return self.__class__.__name__ + '(' \
+            + 'p=' + str(self.p) + ')'

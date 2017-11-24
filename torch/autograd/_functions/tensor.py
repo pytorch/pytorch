@@ -1,130 +1,19 @@
 from functools import reduce
 import torch
-from torch._utils import _accumulate
 
-from ..function import Function, InplaceFunction, once_differentiable
+from ..function import Function, InplaceFunction
 from ..variable import Variable
-from .utils import maybe_unexpand
 
 
-class Index(Function):
-
-    @staticmethod
-    def forward(ctx, i, index):
-        ctx.input_size = i.size()
-        ctx.index = index
-        result = i.index(ctx.index)
-        ctx.advanced_indexing = i._check_advanced_indexing(index)
-        if not ctx.advanced_indexing:
-            ctx.mark_shared_storage((i, result))
-        return result
-
-    @staticmethod
-    def backward(ctx, grad_output):
-        grad_input = grad_output.data.new(ctx.input_size).zero_()
-        grad_input = Variable(grad_input)
-        if ctx.advanced_indexing:
-            grad_input._advanced_index_add(ctx.index, grad_output)
+def _preprocess_adv_index_seq(index):
+    result = []
+    for indexer in index:
+        if isinstance(indexer, Variable):
+            assert not indexer.requires_grad
+            result.append(indexer.data)
         else:
-            grad_input[ctx.index] = grad_output
-        return grad_input, None
-
-
-class SetItem(InplaceFunction):
-
-    @staticmethod
-    def forward(ctx, i, index, value):
-        assert not isinstance(index, Variable)
-        ctx.mark_dirty(i)
-        ctx.index = index
-        ctx.tensor_value = torch.is_tensor(value)
-        if ctx.tensor_value:
-            ctx.value_size = value.size()
-        i._set_index(ctx.index, value)
-        return i
-
-    @staticmethod
-    def backward(ctx, grad_output):
-        grad_input = grad_output.clone()
-        grad_input[ctx.index] = 0
-        grad_value = None
-        if ctx.tensor_value:
-            grad_value = grad_output[ctx.index].contiguous().view(ctx.value_size)
-        return grad_input, None, grad_value
-
-
-# TODO: how to do NoGrad in new style
-class NoGrad(Function):
-
-    def forward(self, i):
-        result = i.new(i)
-        self.mark_non_differentiable(result)
-        self.mark_shared_storage((i, result))
-        return result
-
-    def backward(self, grad_output):
-        assert False, "backward of NoGrad should never be called"
-
-    def _do_forward(self, *args, **kwargs):
-        result = super(NoGrad, self)._do_forward(*args, **kwargs)
-        self.requires_grad = False
-        return result
-
-    __call__ = _do_forward
-
-
-class Transpose(Function):
-
-    @staticmethod
-    def forward(ctx, i, dim1, dim2):
-        result = i.transpose(dim1, dim2)
-        ctx.dims = (dim1, dim2)
-        ctx.mark_shared_storage((i, result))
-        return result
-
-    @staticmethod
-    def backward(ctx, grad_output):
-        return grad_output.transpose(*ctx.dims), None, None
-
-
-class View(Function):
-
-    @staticmethod
-    def forward(ctx, i, sizes):
-        ctx.new_sizes = sizes
-        ctx.old_size = i.size()
-        result = i.view(*sizes)
-        ctx.mark_shared_storage((i, result))
-        return result
-
-    @staticmethod
-    def backward(ctx, grad_output):
-        return grad_output.contiguous().view(ctx.old_size), None
-
-
-class Expand(Function):
-
-    @staticmethod
-    # NOTE: new_size can be a tuple of any arguments that expand accepts, including a single-element
-    # tuple containing torch.Size or a list
-    def forward(ctx, i, new_size):
-        result = i.expand(*new_size)
-        ctx.num_unsqueezed = result.dim() - i.dim()
-        ctx.expanded_dims = [dim for dim, (expanded, original)
-                             in enumerate(zip(result.size()[ctx.num_unsqueezed:], i.size()))
-                             if expanded != original]
-
-        ctx.mark_shared_storage((i, result))
-        return result
-
-    @staticmethod
-    def backward(ctx, grad_output):
-        grad_input = grad_output
-        for i in range(ctx.num_unsqueezed):
-            grad_input = grad_input.sum(0)
-        for dim in ctx.expanded_dims:
-            grad_input = grad_input.sum(dim, True)
-        return grad_input, None
+            result.append(indexer)
+    return result
 
 
 class Type(Function):
@@ -132,21 +21,26 @@ class Type(Function):
     @staticmethod
     def forward(ctx, i, dest_type):
         ctx.input_type = type(i)
+        ctx.input_device = -1 if not i.is_cuda else i.get_device()
         return i.type(dest_type)
 
     @staticmethod
     def backward(ctx, grad_output):
-        return grad_output.type(ctx.input_type), None
+        if ctx.input_device == -1:
+            return grad_output.type(ctx.input_type), None
+        else:
+            with torch.cuda.device(ctx.input_device):
+                return grad_output.type(ctx.input_type), None
 
 
 class CudaTransfer(Function):
 
     @staticmethod
-    def forward(ctx, i, device_id=None, async=False):
+    def forward(ctx, i, device=None, async=False):
         ctx.source_device = -1 if not i.is_cuda else i.get_device()
         ctx.source_was_cuda = i.is_cuda
-        if device_id is not None:
-            return i.cuda(device_id, async=async)
+        if device is not None:
+            return i.cuda(device, async=async)
         else:
             return i.cuda(async=async)
 
@@ -158,22 +52,6 @@ class CudaTransfer(Function):
             return grad_output, None, None
         else:
             return grad_output.cpu(), None, None
-
-
-class Permute(Function):
-
-    @staticmethod
-    def forward(ctx, input, dim_indices):
-        ctx.rev_dim_indices = [None for _ in range(len(dim_indices))]
-        for i, dim_idx in enumerate(dim_indices):
-            ctx.rev_dim_indices[dim_idx] = i
-        result = input.permute(*dim_indices)
-        ctx.mark_shared_storage((input, result))
-        return result
-
-    @staticmethod
-    def backward(ctx, grad_output):
-        return grad_output.permute(*ctx.rev_dim_indices), None
 
 
 class IndexAdd(InplaceFunction):
@@ -202,30 +80,6 @@ class IndexAdd(InplaceFunction):
             grad_tensor2 = grad_output.index_select(ctx.dim, index)
 
         return grad_tensor1, None, None, grad_tensor2, None
-
-
-class AdvancedIndexAdd(InplaceFunction):
-
-    @staticmethod
-    def forward(ctx, tensor1, adv_index, tensor2):
-        assert not ctx.needs_input_grad[1]
-        if ctx.needs_input_grad[2]:
-            ctx.adv_index = adv_index
-        ctx.mark_dirty(tensor1)
-        ctx.tensor2_size = tensor2.size()
-        return tensor1._advanced_index_add(adv_index, tensor2)
-
-    @staticmethod
-    @once_differentiable
-    def backward(ctx, grad_output):
-        grad_tensor1 = grad_tensor2 = None
-
-        if ctx.needs_input_grad[0]:
-            grad_tensor1 = grad_output
-
-        if ctx.needs_input_grad[2]:
-            grad_tensor2 = grad_output._advanced_index_select(ctx.adv_index).contiguous().view(ctx.tensor2_size)
-        return grad_tensor1, None, grad_tensor2
 
 
 class IndexCopy(InplaceFunction):
@@ -283,45 +137,6 @@ class IndexFill(InplaceFunction):
         return grad_tensor, None, None, None, None
 
 
-class IndexSelect(Function):
-
-    @staticmethod
-    def forward(ctx, tensor, dim, index):
-        ctx.dim = dim
-        assert not ctx.needs_input_grad[2]
-
-        if ctx.needs_input_grad[0]:
-            ctx.save_for_backward(index)
-            ctx.input_size = tensor.size()
-
-        return tensor.index_select(dim, index)
-
-    @staticmethod
-    def backward(ctx, grad_output):
-        grad_tensor = None
-
-        if ctx.needs_input_grad[0]:
-            index, = ctx.saved_variables
-            grad_tensor = Variable(grad_output.data.new(*ctx.input_size).zero_())
-            grad_tensor = grad_tensor.index_add(ctx.dim, index, grad_output)
-
-        return grad_tensor, None, None
-
-
-class Concat(Function):
-
-    @staticmethod
-    def forward(ctx, dim, *inputs):
-        ctx.dim = dim
-        ctx.input_sizes = [i.size(dim) for i in inputs]
-        return torch.cat(inputs, dim)
-
-    @staticmethod
-    def backward(ctx, grad_output):
-        return (None,) + tuple(grad_output.narrow(ctx.dim, end - size, size) for size, end
-                               in zip(ctx.input_sizes, _accumulate(ctx.input_sizes)))
-
-
 # TODO: deprecate this
 class Resize(Function):
 
@@ -361,32 +176,6 @@ class Clone(Function):
         return grad_output
 
 
-class Squeeze(InplaceFunction):
-
-    @staticmethod
-    def forward(ctx, input, dim=None, inplace=False):
-        ctx.dim = dim
-        ctx.input_size = input.size()
-        if inplace:
-            ctx.mark_dirty(input)
-            if dim is not None:
-                return input.squeeze_(dim)
-            else:
-                return input.squeeze_()
-        else:
-            if dim is not None:
-                result = input.squeeze(dim)
-            else:
-                result = input.squeeze()
-
-            ctx.mark_shared_storage((input, result))
-            return result
-
-    @staticmethod
-    def backward(ctx, grad_output):
-        return grad_output.contiguous().view(ctx.input_size), None, None
-
-
 class Unsqueeze(Function):
 
     @staticmethod
@@ -399,91 +188,6 @@ class Unsqueeze(Function):
     @staticmethod
     def backward(ctx, grad_output):
         return grad_output.squeeze(ctx.dim), None
-
-
-class MaskedScatter(InplaceFunction):
-
-    @staticmethod
-    def forward(ctx, tensor1, mask, tensor2, inplace=False):
-        assert not ctx.needs_input_grad[1], "MaskedScatter can't differentiate the mask"
-        ctx.tensor1_size = tensor1.size()
-        ctx.tensor2_size = tensor2.size()
-        if not inplace:
-            tensor1 = tensor1.clone()
-        else:
-            ctx.mark_dirty(tensor1)
-        ctx.save_for_backward(mask)
-        return tensor1.masked_scatter_(mask, tensor2)
-
-    @staticmethod
-    def backward(ctx, grad_output):
-        mask, = ctx.saved_variables
-        grad_tensor1 = grad_tensor2 = None
-        if ctx.needs_input_grad[0]:
-            grad_tensor1 = maybe_unexpand(grad_output.clone().masked_fill_(mask, 0), ctx.tensor1_size)
-        if ctx.needs_input_grad[2]:
-            grad_tensor2 = Variable(grad_output.data.new(ctx.tensor2_size).zero_())
-            mask_selected = grad_output.masked_select(mask)
-            diff_nelem = grad_tensor2.nelement() - mask_selected.nelement()
-            if diff_nelem > 0:
-                # because mask_selected returns a 1-d tensor with size of masked elements that are 1,
-                # we need to fill out the rest with zeros then reshape back to tensor2's size.
-                zeros_fillin = Variable(grad_output.data.new(diff_nelem).zero_())
-                mask_selected = torch.cat((mask_selected, zeros_fillin), 0)
-
-            mask_selected = mask_selected.view(ctx.tensor2_size)
-            grad_tensor2 = maybe_unexpand(mask_selected, ctx.tensor2_size)
-        return grad_tensor1, None, grad_tensor2, None
-
-
-class MaskedFill(InplaceFunction):
-
-    @staticmethod
-    def forward(ctx, tensor, mask, value, inplace=False):
-        assert not ctx.needs_input_grad[1], "MaskedFill can't differentiate the mask"
-        ctx.tensor_size = tensor.size()
-        if not inplace:
-            tensor = tensor.clone()
-        else:
-            ctx.mark_dirty(tensor)
-        ctx.save_for_backward(mask)
-        return tensor.masked_fill_(mask, value)
-
-    @staticmethod
-    def backward(ctx, grad_output):
-        mask, = ctx.saved_variables
-        grad_tensor = None
-        if ctx.needs_input_grad[0]:
-            grad_tensor = maybe_unexpand(grad_output.clone().masked_fill_(mask, 0), ctx.tensor_size)
-        return grad_tensor, None, None, None
-
-
-class MaskedSelect(Function):
-
-    @staticmethod
-    def forward(ctx, tensor, mask):
-        assert not ctx.needs_input_grad[1], "MaskedSelect can't differentiate the mask"
-        ctx.input_size = tensor.size()
-        ctx.save_for_backward(mask)
-        return tensor.masked_select(mask)
-
-    @staticmethod
-    def backward(ctx, grad_output):
-        mask, = ctx.saved_variables
-        grad_tensor = None
-        if ctx.needs_input_grad[0]:
-            # determine the actual broadcasted sizes used
-            try:
-                new_size = torch._C._infer_size(ctx.input_size, mask.size())
-            except RuntimeError:
-                new_size = None
-
-            # we need to potentially expand grad_tensor, since it is passed to Variable.masked_scatter, which
-            # eventually is in-place (so can't rely on automatically broadcasting)
-            grad_tensor = Variable(grad_output.data.new(new_size if new_size is not None else ctx.input_size).zero_())
-            grad_tensor = grad_tensor.masked_scatter(mask, grad_output)
-            grad_tensor = maybe_unexpand(grad_tensor, ctx.input_size)
-        return grad_tensor, None
 
 
 class _MultiSelectionFunction(Function):
@@ -532,21 +236,6 @@ class Topk(_MultiSelectionFunction):
         args = (k, ctx.dim, largest, sort)
         ctx.num_flags = 5
         return _MultiSelectionFunction.forward(ctx, input, dim, return_indices, args)
-
-
-class Chunk(Function):
-
-    @staticmethod
-    def forward(ctx, i, num_chunks, dim=0):
-        ctx.dim = dim
-        result = i.chunk(num_chunks, dim)
-        ctx.mark_shared_storage(*((i, chunk) for chunk in result))
-        return result
-
-    @staticmethod
-    def backward(ctx, *grad_output):
-        grad_input = torch.cat(grad_output, ctx.dim)
-        return grad_input, None, None
 
 
 class Gather(Function):

@@ -13,12 +13,32 @@ import platform
 import ctypes
 import os
 import torch
+import traceback
+import warnings
+from torch._six import raise_from
+from subprocess import Popen, PIPE
 from multiprocessing.util import register_after_fork as _register_after_fork
 
 _initialized = False
+_queued_calls = []  # don't invoke these until initialization occurs
 _in_bad_fork = False  # this global is also used in torch.manual_seed
 _original_pid = False
 _cudart = None
+
+
+def find_cuda_windows_lib():
+    proc = Popen(['where', 'cudart64*.dll'], stdout=PIPE, stderr=PIPE)
+    out, err = proc.communicate()
+    out = out.decode().strip()
+    if len(out) > 0:
+        if out.find('\r\n') != -1:
+            out = out.split('\r\n')[0]
+        cuda_lib_name = os.path.basename(out)
+        cuda_lib = os.path.splitext(cuda_lib_name)[0]
+        cuda_lib = str(cuda_lib)
+        return ctypes.cdll.LoadLibrary(cuda_lib)
+    else:
+        return None
 
 
 def is_available():
@@ -35,7 +55,10 @@ def _sleep(cycles):
 
 def _load_cudart():
     # First check the main program for CUDA symbols
-    lib = ctypes.cdll.LoadLibrary(None)
+    if platform.system() == 'Windows':
+        lib = find_cuda_windows_lib()
+    else:
+        lib = ctypes.cdll.LoadLibrary(None)
     if hasattr(lib, 'cudaGetErrorName'):
         return lib
 
@@ -62,13 +85,45 @@ http://www.nvidia.com/Download/index.aspx""")
 The NVIDIA driver on your system is too old (found version {}).
 Please update your GPU driver by downloading and installing a new
 version from the URL: http://www.nvidia.com/Download/index.aspx
-Alternatively, go to: https://pytorch.org/binaries to install
+Alternatively, go to: http://pytorch.org to install
 a PyTorch version that has been compiled with your version
 of the CUDA driver.""".format(str(torch._C._cuda_getDriverVersion())))
 
 
+def _check_capability():
+    error_str = """
+    Found GPU%d %s which requires CUDA_VERSION >= %d for
+     optimal performance and fast startup time, but your PyTorch was compiled
+     with CUDA_VERSION %d. Please install the correct PyTorch binary
+     using instructions from http://pytorch.org
+    """
+
+    CUDA_VERSION = torch._C._cuda_getCompiledVersion()
+    for d in range(device_count()):
+        major = get_device_capability(d)[0]
+        name = get_device_name(d)
+        if CUDA_VERSION < 8000 and major >= 6:
+            warnings.warn(error_str % (d, name, 8000, CUDA_VERSION))
+        elif CUDA_VERSION < 9000 and major >= 7:
+            warnings.warn(error_str % (d, name, 8000, CUDA_VERSION))
+
+
+def _lazy_call(callable):
+    if _initialized:
+        callable()
+    else:
+        # Don't store the actual traceback to avoid memory cycle
+        _queued_calls.append((callable, traceback.format_stack()))
+
+_lazy_call(_check_capability)
+
+
+class DeferredCudaCallError(Exception):
+    pass
+
+
 def _lazy_init():
-    global _initialized, _cudart, _original_pid
+    global _initialized, _cudart, _original_pid, _queued_calls
     if _initialized:
         return
     if _in_bad_fork:
@@ -89,6 +144,15 @@ def _lazy_init():
     _cudart.cudaGetErrorString.restype = ctypes.c_char_p
     _original_pid = os.getpid()
     _initialized = True
+    # Important to do this after _initialized, since some queued calls
+    # may themselves call _lazy_init()
+    for queued_call, orig_traceback in _queued_calls:
+        try:
+            queued_call()
+        except Exception as e:
+            msg = ("CUDA call failed lazily at initialization with error: {}\n\n"
+                   "CUDA call was originally invoked at:\n\n{}").format(str(e), orig_traceback)
+            raise_from(DeferredCudaCallError(msg), e)
 
 
 def _after_fork(arg):
@@ -105,6 +169,22 @@ _register_after_fork(_after_fork, _after_fork)
 def cudart():
     _lazy_init()
     return _cudart
+
+
+class cudaStatus(object):
+    SUCCESS = 0
+    ERROR_NOT_READY = 34
+
+
+class CudaError(RuntimeError):
+    def __init__(self, code):
+        msg = cudart().cudaGetErrorString(code).decode('utf-8')
+        super(CudaError, self).__init__('{0} ({1})'.format(msg, code))
+
+
+def check_error(res):
+    if res != cudaStatus.SUCCESS:
+        raise CudaError(res)
 
 
 class device(object):
@@ -173,6 +253,19 @@ def get_device_name(device):
         return torch._C._cuda_getDeviceName(device)
 
 
+def get_device_capability(device):
+    """Gets the cuda capability of a device.
+
+    Arguments:
+        device (int): device for which to return the name. This function is a
+            no-op if this argument is negative.
+    Returns:
+        tuple(int, int): the major and minor cuda capability of the device
+    """
+    if device >= 0:
+        return torch._C._cuda_getDeviceCapability(device)
+
+
 @contextlib.contextmanager
 def stream(stream):
     """Context-manager that selects a given stream.
@@ -225,6 +318,13 @@ def current_stream():
 def current_blas_handle():
     """Returns cublasHandle_t pointer to current cuBLAS handle"""
     return torch._C._cuda_getCurrentBlasHandle()
+
+
+def empty_cache():
+    """Releases all unoccupied cached memory currently held by the caching
+    allocator so that those can be used in other GPU application and visible in
+    `nvidia-smi`."""
+    return torch._C._cuda_emptyCache()
 
 
 def _host_allocator():
@@ -422,6 +522,13 @@ torch._tensor_classes.add(CharTensor)
 torch._tensor_classes.add(ByteTensor)
 torch._tensor_classes.add(HalfTensor)
 
+torch._integer_tensor_classes.add(LongTensor)
+torch._integer_tensor_classes.add(IntTensor)
+torch._integer_tensor_classes.add(ShortTensor)
+torch._integer_tensor_classes.add(CharTensor)
+torch._integer_tensor_classes.add(ByteTensor)
+
 from . import sparse
+from . import profiler
 from . import nvtx
 from .streams import Stream, Event

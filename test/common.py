@@ -1,5 +1,6 @@
 import sys
 import os
+import re
 import argparse
 import unittest
 import warnings
@@ -7,37 +8,29 @@ import contextlib
 from functools import wraps
 from itertools import product
 from copy import deepcopy
+import __main__
+import errno
 
 import torch
 import torch.cuda
 from torch.autograd import Variable
+from torch._six import string_classes
 
 
 torch.set_default_tensor_type('torch.DoubleTensor')
 
-SEED = 0
-SEED_SET = 0
-
-
-def parse_set_seed_once():
-    global SEED
-    global SEED_SET
-    parser = argparse.ArgumentParser(add_help=False)
-    parser.add_argument('--seed', type=int, default=123)
-    args, remaining = parser.parse_known_args()
-    if SEED_SET == 0:
-        torch.manual_seed(args.seed)
-        if torch.cuda.is_available():
-            torch.cuda.manual_seed_all(args.seed)
-        SEED = args.seed
-        SEED_SET = 1
-    remaining = [sys.argv[0]] + remaining
-    return remaining
+# set seed one time
+parser = argparse.ArgumentParser(add_help=False)
+parser.add_argument('--seed', type=int, default=123)
+parser.add_argument('--accept', action='store_true')
+args, remaining = parser.parse_known_args()
+SEED = args.seed
+ACCEPT = args.accept
+UNITTEST_ARGS = [sys.argv[0]] + remaining
 
 
 def run_tests():
-    remaining = parse_set_seed_once()
-    unittest.main(argv=remaining)
+    unittest.main(argv=UNITTEST_ARGS)
 
 
 TEST_NUMPY = True
@@ -124,12 +117,13 @@ def is_iterable(obj):
     try:
         iter(obj)
         return True
-    except:
+    except TypeError:
         return False
 
 
 class TestCase(unittest.TestCase):
     precision = 1e-5
+    maxDiff = None
 
     def setUp(self):
         torch.manual_seed(SEED)
@@ -177,6 +171,9 @@ class TestCase(unittest.TestCase):
         return x, y
 
     def assertEqual(self, x, y, prec=None, message=''):
+        if isinstance(prec, str) and message == '':
+            message = prec
+            prec = None
         if prec is None:
             prec = self.precision
 
@@ -205,7 +202,7 @@ class TestCase(unittest.TestCase):
                 assertTensorsEqual(x._values(), y._values())
             else:
                 assertTensorsEqual(x, y)
-        elif type(x) == str and type(y) == str:
+        elif isinstance(x, string_classes) and isinstance(y, string_classes):
             super(TestCase, self).assertEqual(x, y)
         elif type(x) == set and type(y) == set:
             super(TestCase, self).assertEqual(x, y)
@@ -217,7 +214,7 @@ class TestCase(unittest.TestCase):
             try:
                 self.assertLessEqual(abs(x - y), prec, message)
                 return
-            except:
+            except (TypeError, AssertionError):
                 pass
             super(TestCase, self).assertEqual(x, y, message)
 
@@ -249,7 +246,7 @@ class TestCase(unittest.TestCase):
             try:
                 self.assertGreaterEqual(abs(x - y), prec, message)
                 return
-            except:
+            except (TypeError, AssertionError):
                 pass
             super(TestCase, self).assertNotEqual(x, y, message)
 
@@ -258,6 +255,88 @@ class TestCase(unittest.TestCase):
             if id(obj) == id(elem):
                 return
         raise AssertionError("object not found in iterable")
+
+    # TODO: Support context manager interface
+    # NB: The kwargs forwarding to callable robs the 'subname' parameter.
+    # If you need it, manually apply your callable in a lambda instead.
+    def assertExpectedRaises(self, exc_type, callable, *args, **kwargs):
+        subname = None
+        if 'subname' in kwargs:
+            subname = kwargs['subname']
+            del kwargs['subname']
+        try:
+            callable(*args, **kwargs)
+        except exc_type as e:
+            self.assertExpected(str(e), subname)
+            return
+        # Don't put this in the try block; the AssertionError will catch it
+        self.fail(msg="Did not raise when expected to")
+
+    def assertExpected(self, s, subname=None):
+        """
+        Test that a string matches the recorded contents of a file
+        derived from the name of this test and subname.  This file
+        is placed in the 'expect' directory in the same directory
+        as the test script. You can automatically update the recorded test
+        output using --accept.
+
+        If you call this multiple times in a single function, you must
+        give a unique subname each time.
+        """
+        if not (isinstance(s, str) or (sys.version_info[0] == 2 and isinstance(s, unicode))):
+            raise TypeError("assertExpected is strings only")
+
+        def remove_prefix(text, prefix):
+            if text.startswith(prefix):
+                return text[len(prefix):]
+            return text
+        munged_id = remove_prefix(self.id(), "__main__.")
+        # NB: we take __file__ from __main__, so we place the expect directory
+        # where the test script lives, NOT where test/common.py lives.  This
+        # doesn't matter in PyTorch where all test scripts are in the same
+        # directory as test/common.py, but it matters in onnx-pytorch
+        expected_file = os.path.join(os.path.dirname(os.path.realpath(__main__.__file__)),
+                                     "expect",
+                                     munged_id)
+        if subname:
+            expected_file += "-" + subname
+        expected_file += ".expect"
+        expected = None
+
+        def accept_output(update_type):
+            print("Accepting {} for {}:\n\n{}".format(update_type, munged_id, s))
+            with open(expected_file, 'w') as f:
+                f.write(s)
+
+        try:
+            with open(expected_file) as f:
+                expected = f.read()
+        except IOError as e:
+            if e.errno != errno.ENOENT:
+                raise
+            elif ACCEPT:
+                return accept_output("output")
+            else:
+                raise RuntimeError(
+                    ("I got this output for {}:\n\n{}\n\n"
+                     "No expect file exists; to accept the current output, run:\n"
+                     "python {} {} --accept").format(munged_id, s, __main__.__file__, munged_id))
+
+        # a hack for JIT tests
+        if sys.platform == 'win32':
+            expected = re.sub(r'CppOp\[(.+?)\]', 'CppOp[]', expected)
+            s = re.sub(r'CppOp\[(.+?)\]', 'CppOp[]', s)
+
+        if ACCEPT:
+            if expected != s:
+                return accept_output("updated output")
+        else:
+            if hasattr(self, "assertMultiLineEqual"):
+                # Python 2.7 only
+                # NB: Python considers lhs "old" and rhs "new".
+                self.assertMultiLineEqual(expected, s)
+            else:
+                self.assertEqual(s, expected)
 
     if sys.version_info < (3, 2):
         # assertRaisesRegexp renamed assertRaisesRegex in 3.2

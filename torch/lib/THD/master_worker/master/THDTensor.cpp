@@ -1,3 +1,5 @@
+#define __STDC_FORMAT_MACROS
+
 #include "THDTensor.h"
 #include "State.hpp"
 #include "Utils.hpp"
@@ -6,10 +8,9 @@
 #include "master_worker/master/Master.hpp"
 #include "process_group/General.hpp"
 
-#include <THPP/Traits.hpp>
-
 #include <cstring>
 #include <memory>
+#include <inttypes.h>
 
 #include "master_worker/master/generic/THDTensorMeta.cpp"
 #include "TH/THGenerateAllTypes.h"

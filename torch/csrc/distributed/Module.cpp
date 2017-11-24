@@ -6,6 +6,7 @@
 
 #include "torch/csrc/utils/python_strings.h"
 #include "THDP.h"
+#include "torch/csrc/PythonTypes.h"
 
 #ifdef WITH_CUDA
 #include "torch/csrc/cuda/Stream.h"
@@ -180,7 +181,7 @@ extern PyObject* THCPCharTensorClass;
 extern PyObject* THCPByteTensorClass;
 #endif
 
-THDTensorDescriptor* THDPModule_makeDescriptor(PyObject *obj)
+THDTensorDescriptor THDPModule_makeDescriptor(PyObject *obj)
 {
   PyObject *type = (PyObject*)Py_TYPE(obj);
 #define REGISTER_TH_DESCRIPTOR(TYPE)                                           \
@@ -248,7 +249,7 @@ PyObject* THDPModule_isend(PyObject *_unused, PyObject *args)
     return NULL;
   }
 
-  THDPTensorDesc desc {THDPModule_makeDescriptor(PyTuple_GET_ITEM(args, 0))};
+  auto desc = THDPModule_makeDescriptor(PyTuple_GET_ITEM(args, 0));
   int dst_rank = THPUtils_unpackLong(PyTuple_GET_ITEM(args, 1));
   THDRequest* req;
   {
@@ -268,7 +269,7 @@ PyObject* THDPModule_irecv(PyObject *_unused, PyObject *args)
     return NULL;
   }
 
-  THDPTensorDesc desc {THDPModule_makeDescriptor(PyTuple_GET_ITEM(args, 0))};
+  auto desc = THDPModule_makeDescriptor(PyTuple_GET_ITEM(args, 0));
   int src_rank = THPUtils_unpackLong(PyTuple_GET_ITEM(args, 1));
   THDRequest* req;
   {
@@ -288,7 +289,7 @@ PyObject* THDPModule_send(PyObject *_unused, PyObject *args)
     return NULL;
   }
 
-  THDPTensorDesc desc {THDPModule_makeDescriptor(PyTuple_GET_ITEM(args, 0))};
+  auto desc = THDPModule_makeDescriptor(PyTuple_GET_ITEM(args, 0));
   int dst_rank = THPUtils_unpackLong(PyTuple_GET_ITEM(args, 1));
   {
     AutoNoGIL guard;
@@ -306,12 +307,13 @@ PyObject* THDPModule_recvAnySource(PyObject *_unused, PyObject *_tensor)
     return NULL;
   }
 
-  THDPTensorDesc desc {THDPModule_makeDescriptor(_tensor)};
+  auto desc = THDPModule_makeDescriptor(_tensor);
+  int sender;
   {
     AutoNoGIL guard;
-    THDRecvAnySource(desc);
+    sender = THDRecvAnySource(desc);
   }
-  Py_RETURN_NONE;
+  return PyInt_FromLong(sender);
   END_HANDLE_TH_ERRORS
 }
 
@@ -324,13 +326,15 @@ PyObject* THDPModule_recv(PyObject *_unused, PyObject *args)
     return NULL;
   }
 
-  THDPTensorDesc desc {THDPModule_makeDescriptor(PyTuple_GET_ITEM(args, 0))};
+  auto desc = THDPModule_makeDescriptor(PyTuple_GET_ITEM(args, 0));
   int src_rank = THPUtils_unpackLong(PyTuple_GET_ITEM(args, 1));
   {
     AutoNoGIL guard;
     THDRecv(desc, src_rank);
   }
-  Py_RETURN_NONE;
+  // Return sender rank
+  Py_INCREF(PyTuple_GET_ITEM(args, 1));
+  return PyTuple_GET_ITEM(args, 1);
   END_HANDLE_TH_ERRORS
 }
 
@@ -344,7 +348,7 @@ PyObject* THDPModule_allReduce(PyObject *_unused, PyObject *args)
 
   THDGroup group = _getGroup(PyTuple_GET_ITEM(args, 2));
   THDReduceOp op = _getReduceOp(PyTuple_GET_ITEM(args, 1));
-  THDPTensorDesc desc {THDPModule_makeDescriptor(PyTuple_GET_ITEM(args, 0))};
+  auto desc = THDPModule_makeDescriptor(PyTuple_GET_ITEM(args, 0));
   {
     AutoNoGIL guard;
     THDAllReduce(desc, op, group);
@@ -365,7 +369,7 @@ PyObject* THDPModule_reduce(PyObject *_unused, PyObject *args)
 
   THDGroup group = _getGroup(PyTuple_GET_ITEM(args, 3));
   THDReduceOp op = _getReduceOp(PyTuple_GET_ITEM(args, 2));
-  THDPTensorDesc desc {THDPModule_makeDescriptor(PyTuple_GET_ITEM(args, 0))};
+  auto desc = THDPModule_makeDescriptor(PyTuple_GET_ITEM(args, 0));
   int dst_rank = THPUtils_unpackLong(PyTuple_GET_ITEM(args, 1));
   {
     AutoNoGIL guard;
@@ -386,7 +390,7 @@ PyObject* THDPModule_broadcast(PyObject *_unused, PyObject *args)
   }
 
   THDGroup group = _getGroup(PyTuple_GET_ITEM(args, 2));
-  THDPTensorDesc desc {THDPModule_makeDescriptor(PyTuple_GET_ITEM(args, 0))};
+  auto desc = THDPModule_makeDescriptor(PyTuple_GET_ITEM(args, 0));
   int src_rank = THPUtils_unpackLong(PyTuple_GET_ITEM(args, 1));
   {
     AutoNoGIL guard;
@@ -402,10 +406,10 @@ PyObject* THDPModule_allGather(PyObject *_unused, PyObject *args)
   PyObject* sequence = PyTuple_GET_ITEM(args, 0);
   Py_ssize_t tmp_length;
   std::size_t length;
-  std::vector<THDPTensorDesc> descriptors;
-  std::vector<THDTensorDescriptor*> raw_descriptors;
+  std::vector<at::Tensor> descriptors;
+  std::vector<at::Tensor> raw_descriptors;
   THDGroup group;
-  THDPTensorDesc desc;
+  at::Tensor desc;
 
   if (PyTuple_GET_SIZE(args) != 3 || !PySequence_Check(sequence) ||
         !THPModule_isTensor(PyTuple_GET_ITEM(args, 1))) {
@@ -423,13 +427,13 @@ PyObject* THDPModule_allGather(PyObject *_unused, PyObject *args)
       goto invalid_arguments;
 
     descriptors.push_back(
-      THDPTensorDesc(THDPModule_makeDescriptor(PySequence_ITEM(sequence, i)))
+      THDPModule_makeDescriptor(PySequence_ITEM(sequence, i))
     );
     raw_descriptors.push_back(descriptors.back());
   }
 
   group = _getGroup(PyTuple_GET_ITEM(args, 2));
-  desc = THDPTensorDesc(THDPModule_makeDescriptor(PyTuple_GET_ITEM(args, 1)));
+  desc = THDPModule_makeDescriptor(PyTuple_GET_ITEM(args, 1));
   {
     AutoNoGIL guard;
     THDAllGather(raw_descriptors.data(), length, desc, group);
@@ -453,7 +457,7 @@ PyObject* THDPModule_gatherSend(PyObject *_unused, PyObject *args)
   }
 
   THDGroup group = _getGroup(PyTuple_GET_ITEM(args, 2));
-  THDPTensorDesc desc { THDPModule_makeDescriptor(PyTuple_GET_ITEM(args, 0))};
+  auto desc = THDPModule_makeDescriptor(PyTuple_GET_ITEM(args, 0));
   int dst_rank = THPUtils_unpackLong(PyTuple_GET_ITEM(args, 1));
   {
     AutoNoGIL guard;
@@ -469,10 +473,10 @@ PyObject* THDPModule_gatherRecv(PyObject *_unused, PyObject *args)
   PyObject* sequence = PyTuple_GET_ITEM(args, 0);
   Py_ssize_t tmp_length;
   std::size_t length;
-  std::vector<THDPTensorDesc> descriptors;
-  std::vector<THDTensorDescriptor*> raw_descriptors;
+  std::vector<at::Tensor> descriptors;
+  std::vector<at::Tensor> raw_descriptors;
   THDGroup group;
-  THDPTensorDesc desc;
+  at::Tensor desc;
 
   if (PyTuple_GET_SIZE(args) != 3 || !PySequence_Check(sequence) ||
         !THPModule_isTensor(PyTuple_GET_ITEM(args, 1))) {
@@ -490,12 +494,12 @@ PyObject* THDPModule_gatherRecv(PyObject *_unused, PyObject *args)
       goto invalid_arguments;
 
     descriptors.push_back(
-      THDPTensorDesc(THDPModule_makeDescriptor(PySequence_ITEM(sequence, i)))
+      THDPModule_makeDescriptor(PySequence_ITEM(sequence, i))
     );
     raw_descriptors.push_back(descriptors.back());
   }
 
-  desc = THDPTensorDesc(THDPModule_makeDescriptor(PyTuple_GET_ITEM(args, 1)));
+  desc = THDPModule_makeDescriptor(PyTuple_GET_ITEM(args, 1));
   group = _getGroup(PyTuple_GET_ITEM(args, 2));
   {
     AutoNoGIL guard;
@@ -516,10 +520,10 @@ PyObject* THDPModule_scatterSend(PyObject *_unused, PyObject *args)
   PyObject* sequence = PyTuple_GET_ITEM(args, 0);
   Py_ssize_t tmp_length;
   std::size_t length;
-  std::vector<THDPTensorDesc> descriptors;
-  std::vector<THDTensorDescriptor*> raw_descriptors;
+  std::vector<at::Tensor> descriptors;
+  std::vector<at::Tensor> raw_descriptors;
   THDGroup group;
-  THDPTensorDesc desc;
+  at::Tensor desc;
 
   if (PyTuple_GET_SIZE(args) != 3 || !PySequence_Check(sequence) ||
         !THPModule_isTensor(PyTuple_GET_ITEM(args, 1))) {
@@ -537,12 +541,12 @@ PyObject* THDPModule_scatterSend(PyObject *_unused, PyObject *args)
       goto invalid_arguments;
 
     descriptors.push_back(
-      THDPTensorDesc(THDPModule_makeDescriptor(PySequence_ITEM(sequence, i)))
+      THDPModule_makeDescriptor(PySequence_ITEM(sequence, i))
     );
     raw_descriptors.push_back(descriptors.back());
   }
 
-  desc = THDPTensorDesc(THDPModule_makeDescriptor(PyTuple_GET_ITEM(args, 1)));
+  desc = THDPModule_makeDescriptor(PyTuple_GET_ITEM(args, 1));
   group = _getGroup(PyTuple_GET_ITEM(args, 2));
   {
     AutoNoGIL guard;
@@ -568,7 +572,7 @@ PyObject* THDPModule_scatterRecv(PyObject *_unused, PyObject *args)
   }
 
   THDGroup group = _getGroup(PyTuple_GET_ITEM(args, 2));
-  THDPTensorDesc desc {THDPModule_makeDescriptor(PyTuple_GET_ITEM(args, 0))};
+  auto desc = THDPModule_makeDescriptor(PyTuple_GET_ITEM(args, 0));
   int src_rank = THPUtils_unpackLong(PyTuple_GET_ITEM(args, 1));
   {
     AutoNoGIL guard;

@@ -1,22 +1,6 @@
 import ctypes
 import torch
-from . import cudart
-
-
-SUCCESS = 0
-ERROR_NOT_READY = 34
-
-
-class CudaError(RuntimeError):
-
-    def __init__(self, code):
-        msg = cudart().cudaGetErrorString(code).decode('utf-8')
-        super(CudaError, self).__init__('{0} ({1})'.format(msg, code))
-
-
-def check_error(res):
-    if res != SUCCESS:
-        raise CudaError(res)
+from . import cudart, check_error, cudaStatus
 
 
 class Stream(torch._C._CudaStreamBase):
@@ -73,7 +57,7 @@ class Stream(torch._C._CudaStreamBase):
             A boolean indicating if all kernels in this stream are completed.
         """
         res = cudart().cudaStreamQuery(self)
-        if res == ERROR_NOT_READY:
+        if res == cudaStatus.ERROR_NOT_READY:
             return False
         check_error(res)
         return True
@@ -123,10 +107,10 @@ class Event(object):
 
     Arguments:
         enable_timing (bool): indicates if the event should measure time
-            (default: False)
-        blocking (bool): if true, :meth:`wait` will be blocking (default: False)
-        interprocess (bool): if true, the event can be shared between processes
-            (default: False)
+            (default: ``False``)
+        blocking (bool): if ``True``, :meth:`wait` will be blocking (default: ``False``)
+        interprocess (bool): if ``True``, the event can be shared between processes
+            (default: ``False``)
     """
 
     DEFAULT = 0x0
@@ -176,7 +160,7 @@ class Event(object):
             A boolean indicating if the event has been recorded.
         """
         res = cudart().cudaEventQuery(self)
-        if res == ERROR_NOT_READY:
+        if res == cudaStatus.ERROR_NOT_READY:
             return False
         check_error(res)
         return True

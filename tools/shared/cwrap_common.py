@@ -1,1 +1,1 @@
-../../torch/lib/ATen/common_with_cwrap.py
+../../aten/src/ATen/common_with_cwrap.py

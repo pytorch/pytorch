@@ -5,22 +5,26 @@ from torch._thnn import type2backend
 from .thnn.auto import function_by_name
 import torch.backends.cudnn as cudnn
 
+MODE_ZEROS = 0
+MODE_BORDER = 1
+
 
 class GridSampler(Function):
 
     @staticmethod
-    def _enforce_cudnn(input):
-        if not cudnn.enabled:
-            raise RuntimeError("GridSampler needs CuDNN for processing CUDA inputs,"
-                               " but CuDNN is not enabled")
-        assert cudnn.is_acceptable(input)
-
-    @staticmethod
-    def forward(ctx, input, grid):
+    def forward(ctx, input, grid, padding_mode='zeros'):
         ctx.save_for_backward(input, grid)
+
+        if padding_mode == 'zeros':
+            ctx.padding_mode = MODE_ZEROS
+        elif padding_mode == 'border':
+            ctx.padding_mode = MODE_BORDER
+        else:
+            raise ValueError("padding_mode needs to be 'zeros' or 'border', but got {}"
+                             .format(padding_mode))
+
         grid_sz = grid.size()
-        if input.is_cuda:
-            GridSampler._enforce_cudnn(input)
+        if cudnn.is_acceptable(input) and padding_mode == 'zeros':
             output = input.new(grid_sz[0], input.size(1), grid_sz[1], grid_sz[2])
             grid = grid.contiguous()
             if 0 in input.stride():
@@ -29,20 +33,26 @@ class GridSampler(Function):
         else:
             backend = type2backend[type(input)]
             output = input.new(grid_sz[0], input.size(1), grid_sz[1], grid_sz[2])
-            backend.SpatialGridSamplerBilinear_updateOutput(backend.library_state, input, grid, output)
+            backend.SpatialGridSamplerBilinear_updateOutput(
+                backend.library_state, input, grid, output, ctx.padding_mode)
         return output
 
     @staticmethod
     @once_differentiable
     def backward(ctx, grad_output):
         input, grid = ctx.saved_tensors
-        if input.is_cuda:
-            GridSampler._enforce_cudnn(input)
+        padding_mode = ctx.padding_mode
+
+        if cudnn.is_acceptable(input) and padding_mode == 'zeros':
             grad_input = input.new(input.size())
             grad_grid = grid.new(grid.size())
             grid = grid.contiguous()
             if 0 in input.stride():
                 input = input.contiguous()
+            # Sometimes grad_output is a scalar (like 1) expanded as a tensor.
+            # cudnn requires a tensor that has non-zero strides.
+            if 0 in grad_output.stride():
+                grad_output = grad_output.contiguous()
             torch._C._cudnn_grid_sampler_backward(input, grad_input,
                                                   grid, grad_grid,
                                                   grad_output)
@@ -52,8 +62,8 @@ class GridSampler(Function):
             grad_grid = grid.new(grid.size())
             backend.SpatialGridSamplerBilinear_updateGradInput(
                 backend.library_state, input, grad_input,
-                grid, grad_grid, grad_output)
-        return grad_input, grad_grid
+                grid, grad_grid, grad_output, padding_mode)
+        return grad_input, grad_grid, None
 
 
 class AffineGridGenerator(Function):

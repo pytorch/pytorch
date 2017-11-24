@@ -2,15 +2,17 @@ import torch
 import torch.multiprocessing as multiprocessing
 from .sampler import SequentialSampler, RandomSampler, BatchSampler
 import collections
+import re
 import sys
 import traceback
 import threading
+from torch._six import string_classes
+
+
 if sys.version_info[0] == 2:
     import Queue as queue
-    string_classes = basestring
 else:
     import queue
-    string_classes = (str, bytes)
 
 
 _use_shared_memory = False
@@ -48,7 +50,7 @@ def _pin_memory_loop(in_queue, out_queue, done_event):
     while True:
         try:
             r = in_queue.get()
-        except:
+        except Exception:
             if done_event.is_set():
                 return
             raise
@@ -80,6 +82,9 @@ numpy_type_map = {
 
 def default_collate(batch):
     "Puts each data field into a tensor with outer dimension batch size"
+
+    error_msg = "batch must contain tensors, numbers, dicts or lists; found {}"
+    elem_type = type(batch[0])
     if torch.is_tensor(batch[0]):
         out = None
         if _use_shared_memory:
@@ -89,9 +94,14 @@ def default_collate(batch):
             storage = batch[0].storage()._new_shared(numel)
             out = batch[0].new(storage)
         return torch.stack(batch, 0, out=out)
-    elif type(batch[0]).__module__ == 'numpy':
+    elif elem_type.__module__ == 'numpy' and elem_type.__name__ != 'str_' \
+            and elem_type.__name__ != 'string_':
         elem = batch[0]
-        if type(elem).__name__ == 'ndarray':
+        if elem_type.__name__ == 'ndarray':
+            # array of string classes and object
+            if re.search('[SaUO]', elem.dtype.str) is not None:
+                raise TypeError(error_msg.format(elem.dtype))
+
             return torch.stack([torch.from_numpy(b) for b in batch], 0)
         if elem.shape == ():  # scalars
             py_type = float if elem.dtype.name.startswith('float') else int
@@ -108,8 +118,7 @@ def default_collate(batch):
         transposed = zip(*batch)
         return [default_collate(samples) for samples in transposed]
 
-    raise TypeError(("batch must contain tensors, numbers, dicts or lists; found {}"
-                     .format(type(batch[0]))))
+    raise TypeError((error_msg.format(type(batch[0]))))
 
 
 def pin_memory_batch(batch):
@@ -264,7 +273,7 @@ class DataLoader(object):
         pin_memory (bool, optional): If ``True``, the data loader will copy tensors
             into CUDA pinned memory before returning them.
         drop_last (bool, optional): set to ``True`` to drop the last incomplete batch,
-            if the dataset size is not divisible by the batch size. If False and
+            if the dataset size is not divisible by the batch size. If ``False`` and
             the size of dataset is not divisible by the batch size, then the last batch
             will be smaller. (default: False)
     """

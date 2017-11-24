@@ -13,7 +13,7 @@ class Linear(Module):
         in_features: size of each input sample
         out_features: size of each output sample
         bias: If set to False, the layer will not learn an additive bias.
-            Default: True
+            Default: ``True``
 
     Shape:
         - Input: :math:`(N, *, in\_features)` where `*` means any number of
@@ -55,9 +55,9 @@ class Linear(Module):
         return F.linear(input, self.weight, self.bias)
 
     def __repr__(self):
-        return self.__class__.__name__ + ' (' \
-            + str(self.in_features) + ' -> ' \
-            + str(self.out_features) + ')'
+        return self.__class__.__name__ + '(' \
+            + 'in_features=' + str(self.in_features) \
+            + ', out_features=' + str(self.out_features) + ')'
 
 
 class Bilinear(Module):
@@ -69,7 +69,7 @@ class Bilinear(Module):
         in2_features: size of each second input sample
         out_features: size of each output sample
         bias: If set to False, the layer will not learn an additive bias.
-            Default: True
+            Default: ``True``
 
     Shape:
         - Input: :math:`(N, in1\_features)`, :math:`(N, in2\_features)`
@@ -84,7 +84,7 @@ class Bilinear(Module):
 
         >>> m = nn.Bilinear(20, 30, 40)
         >>> input1 = autograd.Variable(torch.randn(128, 20))
-        >>> input1 = autograd.Variable(torch.randn(128, 30))
+        >>> input2 = autograd.Variable(torch.randn(128, 30))
         >>> output = m(input1, input2)
         >>> print(output.size())
     """
@@ -112,7 +112,7 @@ class Bilinear(Module):
         return F.bilinear(input1, input2, self.weight, self.bias)
 
     def __repr__(self):
-        return self.__class__.__name__ + ' (' \
+        return self.__class__.__name__ + '(' \
             + 'in1_features=' + str(self.in1_features) \
             + ', in2_features=' + str(self.in2_features) \
             + ', out_features=' + str(self.out_features) + ')'

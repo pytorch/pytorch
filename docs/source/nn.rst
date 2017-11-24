@@ -162,6 +162,12 @@ Pooling Layers
 .. autoclass:: AdaptiveMaxPool2d
     :members:
 
+:hidden:`AdaptiveMaxPool3d`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: AdaptiveMaxPool3d
+    :members:
+
 :hidden:`AdaptiveAvgPool1d`
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -172,6 +178,12 @@ Pooling Layers
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autoclass:: AdaptiveAvgPool2d
+    :members:
+
+:hidden:`AdaptiveAvgPool3d`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: AdaptiveAvgPool3d
     :members:
 
 
@@ -314,6 +326,12 @@ Non-linear Activations
 .. autoclass:: Softmax
     :members:
 
+:hidden:`Softmax2d`
+~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: Softmax2d
+    :members:
+
 :hidden:`LogSoftmax`
 ~~~~~~~~~~~~~~~~~~~~
 
@@ -408,6 +426,11 @@ Linear layers
 .. autoclass:: Linear
     :members:
 
+:hidden:`Bilinear`
+~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: Bilinear
+    :members:
 
 Dropout layers
 ----------------------------------
@@ -764,6 +787,11 @@ Pooling functions
 
 .. autofunction:: adaptive_max_pool2d
 
+:hidden:`adaptive_max_pool3d`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: adaptive_max_pool3d
+
 :hidden:`adaptive_avg_pool1d`
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -774,6 +802,11 @@ Pooling functions
 
 .. autofunction:: adaptive_avg_pool2d
 
+:hidden:`adaptive_avg_pool3d`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: adaptive_avg_pool3d
+
 
 Non-linear activation functions
 -------------------------------
@@ -782,17 +815,20 @@ Non-linear activation functions
 ~~~~~~~~~~~~~~~~~~~
 
 .. autofunction:: threshold
+.. autofunction:: threshold_
 
 
 :hidden:`relu`
 ~~~~~~~~~~~~~~
 
 .. autofunction:: relu
+.. autofunction:: relu_
 
 :hidden:`hardtanh`
 ~~~~~~~~~~~~~~~~~~
 
 .. autofunction:: hardtanh
+.. autofunction:: hardtanh_
 
 :hidden:`relu6`
 ~~~~~~~~~~~~~~~
@@ -803,6 +839,7 @@ Non-linear activation functions
 ~~~~~~~~~~~~~
 
 .. autofunction:: elu
+.. autofunction:: elu_
 
 :hidden:`selu`
 ~~~~~~~~~~~~~~
@@ -813,6 +850,7 @@ Non-linear activation functions
 ~~~~~~~~~~~~~~~~~~~~
 
 .. autofunction:: leaky_relu
+.. autofunction:: leaky_relu_
 
 :hidden:`prelu`
 ~~~~~~~~~~~~~~~
@@ -823,6 +861,12 @@ Non-linear activation functions
 ~~~~~~~~~~~~~~~
 
 .. autofunction:: rrelu
+.. autofunction:: rrelu_
+
+:hidden:`glu`
+~~~~~~~~~~~~~~~
+
+.. autofunction:: glu
 
 :hidden:`logsigmoid`
 ~~~~~~~~~~~~~~~~~~~~

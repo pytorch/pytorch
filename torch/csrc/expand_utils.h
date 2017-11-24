@@ -48,8 +48,8 @@ void expand3(LIBRARY_STATE_TYPE TensorType1 *r1, TensorType2 *r2, TensorType3 *r
     throw std::runtime_error(std::string("can't expand empty tensor ").append(e3_name));
   }
 
-  long *e_sizes[3];
-  long e_dims[3];
+  int64_t *e_sizes[3];
+  int64_t e_dims[3];
 
   e_sizes[ 0 ] = e1->size;
   e_sizes[ 1 ] = e2->size;

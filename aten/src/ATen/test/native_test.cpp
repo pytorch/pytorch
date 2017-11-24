@@ -1,0 +1,79 @@
+#include "ATen/ATen.h"
+#include "test_assert.h"
+
+using namespace at;
+
+void assertEqualTensorList(TensorList t1, TensorList t2) {
+  ASSERT(t1.size() == t2.size());
+  for (size_t i = 0; i < t1.size(); ++i) {
+    ASSERT(t1[ i ].equal(t2[ i ]));
+  }
+}
+
+int main() {
+  Type & T = CPU(kFloat);
+
+  auto t = T.randn({3, 3});
+  // split
+  {
+    // test method, type, namespace give same result
+    auto splitMethod = t.split(1, 0);
+    auto splitType = T.split(t, 1, 0);
+    auto splitNs = at::split(t, 1, 0);
+    assertEqualTensorList(splitMethod, splitType);
+    assertEqualTensorList(splitMethod, splitNs);
+
+    // test rebuilding with cat
+    ASSERT(at::cat(splitMethod, 0).equal(t));
+  }
+
+  {
+    // test method, type, namespace give same result
+    auto chunkMethod = t.chunk(3, 0);
+    auto chunkType = T.chunk(t, 3, 0);
+    auto chunkNs = at::chunk(t, 3, 0);
+    assertEqualTensorList(chunkMethod, chunkType);
+    assertEqualTensorList(chunkMethod, chunkNs);
+
+    // test rebuilding with cat
+    ASSERT(at::cat(chunkMethod, 0).equal(t));
+  }
+
+  // stack
+  {
+    auto x = T.rand({2, 3, 4});
+    auto y = T.rand({2, 3, 4});
+    auto z = T.rand({2, 3, 4});
+    for (int64_t dim = 0; dim < 4; ++dim) {
+      auto res = at::stack({x, y, z}, dim);
+      auto res_neg = at::stack({x, y, z}, dim - 4);
+      std::vector<int64_t> expected_size;
+      expected_size.insert(expected_size.end(), x.sizes().begin(), x.sizes().begin() + dim);
+      expected_size.insert(expected_size.end(), 3);
+      expected_size.insert(expected_size.end(), x.sizes().begin() + dim, x.sizes().end());
+
+      ASSERT(res.equal(res_neg));
+      ASSERT(res.sizes().equals(expected_size));
+      ASSERT(res.select(dim, 0).equal(x));
+      ASSERT(res.select(dim, 1).equal(y));
+      ASSERT(res.select(dim, 2).equal(z));
+    }
+  }
+
+  // size / stride
+  {
+    auto scalar = T.randn({});
+    ASSERT_THROWS(scalar.size(0), "dimension specified as 0 but tensor has no dimensions");
+    ASSERT_THROWS(scalar.size(-1), "dimension specified as -1 but tensor has no dimensions");
+    ASSERT_THROWS(scalar.stride(0), "dimension specified as 0 but tensor has no dimensions");
+    ASSERT_THROWS(scalar.stride(-1), "dimension specified as -1 but tensor has no dimensions");
+
+    auto empty = T.randn({0});
+    ASSERT(empty.size(0) == 0);
+    ASSERT(empty.size(-1) == 0);
+    ASSERT(empty.stride(0) == 1);
+    ASSERT(empty.stride(-1) == 1);
+  }
+
+  return 0;
+}

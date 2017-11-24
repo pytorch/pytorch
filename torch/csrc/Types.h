@@ -1,8 +1,11 @@
 #ifndef THP_TYPES_INC
 #define THP_TYPES_INC
 
-#include <Python.h>
 #include <cstddef>
+
+#ifndef INT64_MAX
+#include "stdint.h"
+#endif
 
 template <typename T> struct THPTypeInfo {};
 
@@ -21,21 +24,14 @@ typedef struct THVoidStorage
 
 typedef struct THVoidTensor
 {
-   long *size;
-   long *stride;
+   int64_t *size;
+   int64_t *stride;
    int nDimension;
    THVoidStorage *storage;
    ptrdiff_t storageOffset;
    int refcount;
    char flag;
 } THVoidTensor;
-
-struct THPVoidTensor {
-  PyObject_HEAD
-  THVoidTensor *cdata;
-  char device_type;
-  char data_type;
-};
 
 }  // namespace torch
 

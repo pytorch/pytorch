@@ -50,6 +50,7 @@ PyObject * THPTensor_(newWithMetadataFile)(PyObject *_null, PyObject *args)
   name: THPTensor_(toNumpy)
   python_name: numpy
   only_register: True
+  cpu_half: True
 ]]
 // Adapted from fblualib
 PyObject * THPTensor_(toNumpy)(THPTensor *self, PyObject *args) {
@@ -69,6 +70,8 @@ PyObject * THPTensor_(toNumpy)(THPTensor *self, PyObject *args) {
   npy_intp* sizes_ptr;
   std::unique_ptr<npy_intp[]> sizes;
   std::unique_ptr<npy_intp[]> strides;
+
+  THPUtils_assert(PyTuple_Size(args) == 0, "numpy() takes no positional arguments");
 
   // Numpy and Torch disagree on empty tensors. In Torch, an empty tensor
   // is a tensor with zero dimensions. In Numpy, a tensor with zero dimensions

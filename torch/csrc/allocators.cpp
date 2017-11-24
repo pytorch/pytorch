@@ -1,6 +1,7 @@
 #include <Python.h>
 
 #include "THP.h"
+#include "torch/csrc/utils/auto_gil.h"
 
 // Adapted from fblualib
 void* ObjectPtrAllocator::malloc(ptrdiff_t size) {
@@ -13,16 +14,20 @@ void* ObjectPtrAllocator::realloc(void* ptr, ptrdiff_t size) {
 }
 
 void ObjectPtrAllocator::free(void* ptr) {
-  object = nullptr;
+  {
+    AutoGIL gil;
+    object = nullptr;
+  }
   allocator->free(allocatorContext, ptr);
   delete this;
 }
 
 void StorageWeakRefAllocator::free(void* ptr) {
-  PyGILState_STATE gstate = PyGILState_Ensure();
-  PyObject_SetAttrString(object.get(), "cdata", Py_None);
-  object = nullptr;
-  PyGILState_Release(gstate);
+  {
+    AutoGIL gil;
+    PyObject_SetAttrString(object.get(), "cdata", Py_None);
+    object = nullptr;
+  }
   allocator->free(allocatorContext, ptr);
   delete this;
 }
@@ -52,15 +57,7 @@ void StorageWeakRefAllocator::free(void* ptr) {
 
 // See Note [Numpy memory management]
 void* NumpyArrayAllocator::realloc(void* ptr, ptrdiff_t size) {
-  PyArrayObject *array_ptr = (PyArrayObject*)object.get();
-  if (array_ptr && ptr == PyArray_DATA(array_ptr)) {
-    void* newPtr = this->malloc(size);
-    memcpy(newPtr, ptr, std::min((size_t) size, (size_t) PyArray_NBYTES(array_ptr)));
-    // Whee! We're done!
-    object = nullptr;
-    return newPtr;
-  }
-  return allocator->realloc(allocatorContext, ptr, size);
+  throw std::logic_error("NumpyArrayAllocator::realloc() not supported");
 }
 
 // See Note [Numpy memory management]
@@ -68,7 +65,10 @@ void NumpyArrayAllocator::free(void* ptr) {
   PyArrayObject *array_ptr = (PyArrayObject*)object.get();
   if (!array_ptr || ptr != PyArray_DATA(array_ptr))
     throw std::logic_error("invalid call to NumpyArrayAllocator::free()");
-  object = nullptr;
+  {
+    AutoGIL gil;
+    object = nullptr;
+  }
   delete this;
 }
 #endif
@@ -116,10 +116,11 @@ cudaError_t CudaStorageWeakRefAllocator::malloc(void** ptr, size_t size, cudaStr
 }
 
 cudaError_t CudaStorageWeakRefAllocator::free(void* ptr) {
-  PyGILState_STATE gstate = PyGILState_Ensure();
-  PyObject_SetAttrString(object.get(), "cdata", Py_None);
-  object = nullptr;
-  PyGILState_Release(gstate);
+  {
+    AutoGIL gil;
+    PyObject_SetAttrString(object.get(), "cdata", Py_None);
+    object = nullptr;
+  }
   cudaError_t err = allocator->free(allocatorContext, ptr);
   delete this;
   return err;

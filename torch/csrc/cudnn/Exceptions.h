@@ -1,13 +1,13 @@
 #ifndef THP_CUDNN_EXCEPTIONS_INC
 #define THP_CUDNN_EXCEPTIONS_INC
 
+#include "Types.h"
+
 #include <THC/THC.h>
-#include <cudnn.h>
+#include "cudnn-wrapper.h"
 #include <string>
 #include <stdexcept>
 #include <sstream>
-
-#include "Types.h"
 
 #define CHECK_ARG(cond) _CHECK_ARG(cond, #cond, __FILE__, __LINE__)
 
@@ -35,6 +35,20 @@ void assertSameGPU(cudnnDataType_t dataType, T* ... tensors) {
   if (!is_same) {
     throw std::runtime_error("tensors are on different GPUs");
   }
+}
+
+inline int assertSameGPU(const at::Tensor& t) {
+  return t.get_device();
+}
+
+template<typename ...T>
+int assertSameGPU(const at::Tensor& t, T& ... tensors) {
+  static_assert(std::is_same<at::Tensor, typename std::common_type<T...>::type>::value,
+      "all arguments to assertSameGPU have to be at::Tensor&");
+  auto t_device = t.get_device();
+  if (t_device != assertSameGPU(tensors...))
+    throw std::runtime_error("tensors are on different GPUs");
+  return t_device;
 }
 
 class cudnn_exception : public std::runtime_error {

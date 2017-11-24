@@ -188,9 +188,9 @@ class ReduceLROnPlateau(object):
             is updated. Default: None.
         path_to_save (str): Directory to save the best model and state.
             When model_to_save is None, this parameter would be ignored.
-            Default: './best.pth'.
-        verbose (bool): If True, prints a message to stdout for
-            each update. Default: False.
+            Default: ``'./best.pth'``.
+        verbose (bool): If ``True``, prints a message to stdout for
+            each update. Default: ``False``.
         threshold (float): Threshold for measuring the new optimum,
             to only focus on significant changes. Default: 1e-4.
         threshold_mode (str): One of `rel`, `abs`. In `rel` mode,

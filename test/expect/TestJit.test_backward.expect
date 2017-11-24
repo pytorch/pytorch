@@ -1,0 +1,23 @@
+graph(%0 : Double(2, 2)
+      %1 : Double(2, 2)
+      -------- stage 1 --------
+      %4 : Double(2, 2)
+      -------- stage 2 --------
+      %8 : Double(2, 2!)
+      %9 : Double(2, 2)) {
+  %2 : Double(2, 2) = mul[other={2}](%1)
+  %3 : Double(2, 2) = mul(%2, %0)
+  ---------------- stage 1 ----------------
+  %5 : Double(2, 2) = mul(%4, %0)
+  %6 : Double(2, 2) = mul(%4, %2)
+  %7 : Double(2, 2) = mul[other={2}](%5)
+  ---------------- stage 2 ----------------
+  %10 : Double(2, 2) = mul(%8, %2)
+  %11 : Double(2, 2) = mul(%8, %4)
+  %12 : Double(2, 2) = mul[other={2}](%9)
+  %13 : Double(2, 2) = mul[other={2}](%11)
+  %14 : Double(2, 2) = mul(%12, %0)
+  %15 : Double(2, 2) = mul(%12, %4)
+  %16 : Double(2, 2) = CppOp[N5torch8autograd3AddE](%10, %14)
+  return (%3, %6, %7, %16, %15, %13);
+}

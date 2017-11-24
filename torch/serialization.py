@@ -14,6 +14,7 @@ if sys.version_info[0] == 2:
     import cPickle as pickle
 else:
     import pickle
+    import pathlib
 
 DEFAULT_PROTOCOL = 2
 
@@ -63,8 +64,8 @@ def _cpu_deserialize(obj, location):
 
 def _cuda_deserialize(obj, location):
     if location.startswith('cuda'):
-        device_id = max(int(location[5:]), 0)
-        return obj.cuda(device_id)
+        device = max(int(location[5:]), 0)
+        return obj.cuda(device)
 
 
 register_package(10, _cpu_tag, _cpu_deserialize)
@@ -100,6 +101,24 @@ def storage_to_tensor_type(storage):
     return getattr(module, storage_type.__name__.replace('Storage', 'Tensor'))
 
 
+def _with_file_like(f, mode, body):
+    """
+    Executes a body function with a file object for f, opening
+    it in 'mode' if it is a string filename.
+    """
+    new_fd = False
+    if isinstance(f, str) or \
+            (sys.version_info[0] == 2 and isinstance(f, unicode)) or \
+            (sys.version_info[0] == 3 and isinstance(f, pathlib.Path)):
+        new_fd = True
+        f = open(f, mode)
+    try:
+        return body(f)
+    finally:
+        if new_fd:
+            f.close()
+
+
 def save(obj, f, pickle_module=pickle, pickle_protocol=DEFAULT_PROTOCOL):
     """Saves an object to a disk file.
 
@@ -112,15 +131,7 @@ def save(obj, f, pickle_module=pickle, pickle_protocol=DEFAULT_PROTOCOL):
         pickle_module: module used for pickling metadata and objects
         pickle_protocol: can be specified to override the default protocol
     """
-    new_fd = False
-    if isinstance(f, str) or (sys.version_info[0] == 2 and isinstance(f, unicode)):
-        new_fd = True
-        f = open(f, "wb")
-    try:
-        return _save(obj, f, pickle_module, pickle_protocol)
-    finally:
-        if new_fd:
-            f.close()
+    return _with_file_like(f, "wb", lambda f: _save(obj, f, pickle_module, pickle_protocol))
 
 
 def _save(obj, f, pickle_module, pickle_protocol):
@@ -142,7 +153,7 @@ def _save(obj, f, pickle_module, pickle_protocol):
             try:
                 source_file = inspect.getsourcefile(obj)
                 source = inspect.getsource(obj)
-            except:  # saving the source is optional, so we can ignore any errors
+            except Exception:  # saving the source is optional, so we can ignore any errors
                 warnings.warn("Couldn't retrieve source code for container of "
                               "type " + obj.__name__ + ". It won't be checked "
                               "for correctness upon loading.")
@@ -195,17 +206,31 @@ def _save(obj, f, pickle_module, pickle_protocol):
 def load(f, map_location=None, pickle_module=pickle):
     """Loads an object saved with :func:`torch.save` from a file.
 
-    torch.load can dynamically remap storages to be loaded on a different device
-    using the map_location argument. If it's a callable, it will be called with
-    two arguments: storage and location tag. It's expected to either return a
-    storage that's been moved to a different location, or None (and the location
-    will be resolved using the default method). If this argument is a dict it's
-    expected to be a mapping from location tags used in a file, to location
-    tags of the current system.
+    torch.load uses Python's unpickling facilities but treats storages,
+    which underlie tensors, specially. They are first deserialized on the
+    CPU and are then moved to the device they were saved from. If this fails
+    (e.g. because the run time system doesn't have certain devices), an exception
+    is raised. However, storages can be dynamically remapped to an alternative
+    set of devices using the map_location argument.
 
-    By default the location tags are 'cpu' for host tensors and 'cuda:device_id'
-    (e.g. 'cuda:2') for cuda tensors. User extensions can register their own
-    tagging and deserialization methods using register_package.
+    If map_location is a callable, it will be called once for each serialized
+    storage with two arguments: storage and location. The storage argument
+    will be the initial deserialization of the storage, residing on the CPU.
+    Each serialized storage has a location tag associated with it which
+    identifies the device it was saved from, and this tag is the second
+    argument passed to map_location. The builtin location tags are 'cpu' for
+    CPU tensors and 'cuda:device_id' (e.g. 'cuda:2') for CUDA tensors.
+    map_location should return either None or a storage. If map_location returns
+    a storage, it will be used as the final deserialized object, already moved to
+    the right device. Otherwise, torch.load will fall back to the default behavior,
+    as if map_location wasn't specified.
+
+    If map_location is a dict, it will be used to remap location tags
+    appearing in the file (keys), to ones that specify where to put the
+    storages (values).
+
+    User extensions can register their own location tags and tagging and
+    deserialization methods using register_package.
 
     Args:
         f: a file-like object (has to implement fileno that returns a file
@@ -220,11 +245,16 @@ def load(f, map_location=None, pickle_module=pickle):
         >>> torch.load('tensors.pt')
         # Load all tensors onto the CPU
         >>> torch.load('tensors.pt', map_location=lambda storage, loc: storage)
+        # Load all tensors onto GPU 1
+        >>> torch.load('tensors.pt', map_location=lambda storage, loc: storage.cuda(1))
         # Map tensors from GPU 1 to GPU 0
         >>> torch.load('tensors.pt', map_location={'cuda:1':'cuda:0'})
+
     """
     new_fd = False
-    if isinstance(f, str) or (sys.version_info[0] == 2 and isinstance(f, unicode)):
+    if isinstance(f, str) or \
+            (sys.version_info[0] == 2 and isinstance(f, unicode)) or \
+            (sys.version_info[0] == 3 and isinstance(f, pathlib.Path)):
         new_fd = True
         f = open(f, 'rb')
     try:
@@ -359,13 +389,15 @@ def _load(f, map_location, pickle_module):
         else:
             raise RuntimeError("Unknown saved id type: %s" % saved_id[0])
 
-    # try the legacy loader first, which only works if f is a tarfile
-    try:
-        return legacy_load(f)
-    except tarfile.TarError:
-        pass
+    foffset = f.tell()
+    if foffset == 0:
+        # only if offset is zero we can attempt the legacy tar file loader
+        try:
+            return legacy_load(f)
+        except tarfile.TarError:
+            # if not a tarfile, reset file offset and proceed
+            f.seek(foffset)
 
-    f.seek(0)
     magic_number = pickle_module.load(f)
     if magic_number != MAGIC_NUMBER:
         raise RuntimeError("Invalid magic number; corrupt file?")

@@ -66,16 +66,16 @@ inline T unpackScalar(RPCMessage& raw_message) {
 
 ////////////////////////////////////////////////////////////////////////////////
 
-static_assert(sizeof(thpp::Type) == sizeof(char), "thpp::Type has to be of the "
+static_assert(sizeof(RPCType) == sizeof(char), "RPCType has to be of the "
     "same size as char");
-thpp::Type unpackType(RPCMessage& raw_message) {
-  char _type = *raw_message.read(sizeof(thpp::Type));
-  return static_cast<thpp::Type>(_type);
+RPCType unpackType(RPCMessage& raw_message) {
+  char _type = *raw_message.read(sizeof(RPCType));
+  return static_cast<RPCType>(_type);
 }
 
-thpp::Type peekType(RPCMessage& raw_message) {
+RPCType peekType(RPCMessage& raw_message) {
   char _type = *raw_message.data();
-  return static_cast<thpp::Type>(_type);
+  return static_cast<RPCType>(_type);
 }
 
 function_id_type unpackFunctionId(RPCMessage& raw_message) {
@@ -83,67 +83,67 @@ function_id_type unpackFunctionId(RPCMessage& raw_message) {
 }
 
 double unpackFloat(RPCMessage& raw_message) {
-  thpp::Type type = unpackType(raw_message);
-  if (type == thpp::Type::DOUBLE)
+  RPCType type = unpackType(raw_message);
+  if (type == RPCType::DOUBLE)
     return unpackScalar<double>(raw_message);
-  else if (type == thpp::Type::FLOAT)
+  else if (type == RPCType::FLOAT)
     return unpackScalar<float>(raw_message);
 
   throw std::invalid_argument("wrong real type in the raw message");
 }
 
-long long unpackInteger(RPCMessage& raw_message) {
-  thpp::Type type = unpackType(raw_message);
-  if (type == thpp::Type::CHAR)
-    return unpackScalar<char>(raw_message);
-  else if (type == thpp::Type::SHORT)
-    return unpackScalar<short>(raw_message);
-  else if (type == thpp::Type::INT)
-    return unpackScalar<int>(raw_message);
-  else if (type == thpp::Type::LONG)
-    return unpackScalar<long>(raw_message);
-  else if (type == thpp::Type::LONG_LONG)
-    return unpackScalar<long long>(raw_message);
+int64_t unpackInteger(RPCMessage& raw_message) {
+  RPCType type = unpackType(raw_message);
+  if (type == RPCType::CHAR)
+    return unpackScalar<int8_t>(raw_message);
+  else if (type == RPCType::SHORT)
+    return unpackScalar<int16_t>(raw_message);
+  else if (type == RPCType::INT)
+    return unpackScalar<int32_t>(raw_message);
+  else if (type == RPCType::LONG)
+    return unpackScalar<int64_t>(raw_message);
+  else if (type == RPCType::LONG_LONG)
+    return unpackScalar<int64_t>(raw_message);
 
   throw std::invalid_argument(std::string("wrong integer type in the raw message (") +
           std::to_string(static_cast<char>(type)) + ")");
 }
 
 object_id_type unpackTensor(RPCMessage& raw_message) {
-  thpp::Type type = unpackType(raw_message);
-  if (type == thpp::Type::TENSOR)
+  RPCType type = unpackType(raw_message);
+  if (type == RPCType::TENSOR)
     return unpackScalar<object_id_type>(raw_message);
   throw std::invalid_argument("expected tensor in the raw message");
 }
 
 object_id_type unpackStorage(RPCMessage& raw_message) {
-  thpp::Type type = unpackType(raw_message);
-  if (type == thpp::Type::STORAGE)
+  RPCType type = unpackType(raw_message);
+  if (type == RPCType::STORAGE)
     return unpackScalar<object_id_type>(raw_message);
   throw std::invalid_argument("expected storage in the raw message");
 }
 
 object_id_type unpackGenerator(RPCMessage& raw_message) {
-  thpp::Type type = unpackType(raw_message);
-  if (type == thpp::Type::GENERATOR) {
+  RPCType type = unpackType(raw_message);
+  if (type == RPCType::GENERATOR) {
     return unpackScalar<object_id_type>(raw_message);
   }
   throw std::invalid_argument("expected generator in the raw message");
 }
 
 THLongStorage* unpackTHLongStorage(RPCMessage& raw_message) {
-  thpp::Type type = unpackType(raw_message);
-  if (type != thpp::Type::LONG_STORAGE)
+  RPCType type = unpackType(raw_message);
+  if (type != RPCType::LONG_STORAGE)
     throw std::invalid_argument("expected THLongStorage in the raw message");
   char is_null = unpackScalar<char>(raw_message);
   if (is_null) return NULL;
   ptrdiff_t size = unpackScalar<ptrdiff_t>(raw_message);
   THLongStorage* storage = THLongStorage_newWithSize(size);
-  long* data = storage->data;
+  int64_t* data = storage->data;
 
   try {
     for (int i = 0; i < size; i++) {
-      data[i] = unpackScalar<long>(raw_message);
+      data[i] = unpackScalar<int64_t>(raw_message);
     }
   } catch (std::exception& e) {
     THLongStorage_free(storage);

@@ -1,0 +1,15 @@
+#pragma once
+
+#include "ATen/ATen.h"
+#include <tuple>
+#include <vector>
+
+namespace at {
+namespace native {
+
+${native_function_declarations}
+
+}
+}
+
+#include "ATen/native/NativeFunctions-inl.h"

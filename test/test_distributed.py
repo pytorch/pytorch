@@ -173,8 +173,9 @@ class _DistTestBase(object):
             if src == rank:
                 continue
             tensor = _build_tensor(10, value=-1)
-            dist.recv(tensor)
-            recv_ranks.add(tensor.resize_(1)[0])
+            sender = dist.recv(tensor)
+            self.assertTrue(tensor.eq(sender).all())
+            recv_ranks.add(sender)
 
         self.assertEqual(len(recv_ranks), dist.get_world_size() - 1)
         self._barrier()
@@ -497,7 +498,7 @@ if BACKEND == 'tcp' or BACKEND == 'gloo':
     class TestTCPOrGloo(TestCase, _DistTestBase):
 
         MANAGER_PROCESS_RANK = -1
-        JOIN_TIMEOUT = 5
+        JOIN_TIMEOUT = 10
 
         @staticmethod
         def manager_join(fn):

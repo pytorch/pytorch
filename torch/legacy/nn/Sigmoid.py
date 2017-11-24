@@ -15,7 +15,6 @@ class Sigmoid(Module):
     def updateGradInput(self, input, gradOutput):
         self._backend.Sigmoid_updateGradInput(
             self._backend.library_state,
-            input,
             gradOutput,
             self.gradInput,
             self.output

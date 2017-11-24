@@ -1244,7 +1244,7 @@ Computes the eigenvalues and eigenvectors of a real square matrix.
 Args:
     a (Tensor): A square matrix for which the eigenvalues and eigenvectors will
                 be computed
-    eigenvectors (bool): `True` to compute both eigenvalues and eigenvectors.
+    eigenvectors (bool): ``True`` to compute both eigenvalues and eigenvectors.
                          Otherwise, only eigenvalues will be computed.
     out (tuple, optional): Output tensors
 
@@ -1287,12 +1287,36 @@ add_docstr(torch._C.equal,
            """
 equal(tensor1, tensor2) -> bool
 
-True if two tensors have the same size and elements, False otherwise.
+``True`` if two tensors have the same size and elements, ``False`` otherwise.
 
 Example::
 
     >>> torch.equal(torch.Tensor([1, 2]), torch.Tensor([1, 2]))
     True
+""")
+
+add_docstr(torch._C.erf,
+           """
+erf(tensor, out=None) -> Tensor
+
+Computes the error function of each element.
+
+Example::
+
+    >>> torch.erf(torch.Tensor([0, -1., 10.]))
+    torch.FloatTensor([0., -0.8427, 1.])
+""")
+
+add_docstr(torch._C.erfinv,
+           """
+erfinv(tensor, out=None) -> Tensor
+
+Computes the inverse error function of each element.
+
+Example::
+
+    >>> torch.erfinv(torch.Tensor([0, 0.5., -1.]))
+    torch.FloatTensor([0., 0.4769, -inf])
 """)
 
 add_docstr(torch._C.exp,
@@ -1819,7 +1843,7 @@ If :attr:`dim` is not given, the last dimension of the `input` is chosen.
 A tuple of `(values, indices)` is returned, where the `indices` is the indices
 of the kth-smallest element in the original `input` Tensor in dimension `dim`.
 
-If :attr:`keepdim` is true, both the :attr:`values` and :attr:`indices` Tensors
+If :attr:`keepdim` is ``True``, both the :attr:`values` and :attr:`indices` Tensors
 are the same size as :attr:`input`, except in the dimension :attr:`dim` where
 they are of size 1. Otherwise, :attr:`dim` is squeezed
 (see :func:`torch.squeeze`), resulting in both the :attr:`values` and
@@ -2206,7 +2230,7 @@ Returns the maximum value of each row of the :attr:`input` Tensor in the given
 dimension :attr:`dim`. The second return value is the index location of each
 maximum value found (argmax).
 
-If :attr:`keepdim` is true, the output Tensors are of the same size
+If :attr:`keepdim` is ``True``, the output Tensors are of the same size
 as :attr:`input` except in the dimension :attr:`dim` where they are of size 1.
 Otherwise, :attr:`dim` is squeezed (see :func:`torch.squeeze`), resulting
 in the output Tensors having 1 fewer dimension than :attr:`input`.
@@ -2317,7 +2341,7 @@ Example::
 Returns the mean value of each row of the :attr:`input` Tensor in the given
 dimension :attr:`dim`.
 
-If :attr:`keepdim` is true, the output Tensor is of the same size
+If :attr:`keepdim` is ``True``, the output Tensor is of the same size
 as :attr:`input` except in the dimension :attr:`dim` where it is of size 1.
 Otherwise, :attr:`dim` is squeezed (see :func:`torch.squeeze`), resulting in the
 output Tensor having 1 fewer dimension.
@@ -2375,7 +2399,7 @@ Example::
      0.4729 -0.2266 -0.2085
     [torch.FloatTensor of size 1x3]
 
-    >>> torch.max(a)
+    >>> torch.median(a)
     -0.2085
 
 
@@ -2387,7 +2411,7 @@ as a `LongTensor`.
 
 By default, :attr:`dim` is the last dimension of the :attr:`input` Tensor.
 
-If :attr:`keepdim` is true, the output Tensors are of the same size
+If :attr:`keepdim` is ``True``, the output Tensors are of the same size
 as :attr:`input` except in the dimension :attr:`dim` where they are of size 1.
 Otherwise, :attr:`dim` is squeezed (see :func:`torch.squeeze`), resulting in
 the outputs Tensor having 1 fewer dimension than :attr:`input`.
@@ -2462,7 +2486,7 @@ Returns the minimum value of each row of the :attr:`input` Tensor in the given
 dimension :attr:`dim`. The second return value is the index location of each
 minimum value found (argmin).
 
-If :attr:`keepdim` is true, the output Tensors are of the same size as
+If :attr:`keepdim` is ``True``, the output Tensors are of the same size as
 :attr:`input` except in the dimension :attr:`dim` where they are of size 1.
 Otherwise, :attr:`dim` is squeezed (see :func:`torch.squeeze`), resulting in
 the output Tensors having 1 fewer dimension than :attr:`input`.
@@ -2584,7 +2608,7 @@ as a `LongTensor`.
 
 By default, :attr:`dim` is the last dimension of the :attr:`input` Tensor.
 
-If :attr:`keepdim` is true, the output Tensors are of the same size as
+If :attr:`keepdim` is ``True``, the output Tensors are of the same size as
 :attr:`input` except in the dimension :attr:`dim` where they are of size 1.
 Otherwise, :attr:`dim` is squeezed (see :func:`torch.squeeze`), resulting
 in the output Tensors having 1 fewer dimension than :attr:`input`.
@@ -2732,7 +2756,7 @@ If :attr:`input` is a vector, :attr:`out` is a vector of size `num_samples`.
 If :attr:`input` is a matrix with `m` rows, :attr:`out` is an matrix of shape
 `m \u00D7 n`.
 
-If replacement is `True`, samples are drawn with replacement.
+If replacement is ``True``, samples are drawn with replacement.
 
 If not, they are drawn without replacement, which means that when a
 sample index is drawn for a row, it cannot be drawn again for that row.
@@ -2921,7 +2945,7 @@ Example::
 Returns the p-norm of each row of the :attr:`input` Tensor in the given
 dimension :attr:`dim`.
 
-If :attr:`keepdim` is true, the output Tensor is of the same size as
+If :attr:`keepdim` is ``True``, the output Tensor is of the same size as
 :attr:`input` except in the dimension :attr:`dim` where it is of size 1.
 Otherwise, :attr:`dim` is squeezed (see :func:`torch.squeeze`), resulting
 in the output Tensor having 1 fewer dimension than :attr:`input`.
@@ -3116,14 +3140,39 @@ Example::
     [torch.FloatTensor of size 2x3]
 """)
 
-# TODO
-# add_docstr(torch._C.orgqr,
-# """
-# """)
+add_docstr(torch._C.orgqr,
+           """
+orgqr(a, tau) -> Tensor
 
-# add_docstr(torch._C.ormqr,
-# """
-# """)
+Computes the orthogal matrix `Q` of a QR factorization, from the `(a, tau)` tuple
+returned by :func:`torch.geqrf`.
+
+This directly calls the underlying LAPACK function `?orgqr`.
+See `?orgqr LAPACK documentation`_ for further details.
+
+Args:
+    a (Tensor): The `a` from :func:`torch.geqrf`.
+    tau (Tensor): The `tau` from `torch.geqrf`.
+
+.. _?orgqr LAPACK documentation:
+    https://software.intel.com/en-us/mkl-developer-reference-c-orgqr
+
+""")
+
+add_docstr(torch._C.ormqr,
+           """
+ormqr(a, tau, mat, left=True, transpose=False) -> (Tensor, Tensor)
+
+Multiplies `mat` by the orthogonal `Q` matrix of the QR factorization
+formed by :func:`torch.geqrf` that is represented by `(a, tau)`.
+
+This directly calls the underlying LAPACK function `?ormqr`.
+See `?ormqr LAPACK documentation`_ for further details.
+
+.. _?ormqr LAPACK documentation:
+    https://software.intel.com/en-us/mkl-developer-reference-c-ormqr
+
+""")
 
 add_docstr(torch._C.potrf,
            """
@@ -3132,9 +3181,9 @@ potrf(a, upper, out=None)
 
 Computes the Cholesky decomposition of a positive semidefinite
 matrix :attr:`a`: returns matrix `u`
-If `upper` is True or not provided, `u` is upper triangular
+If `upper` is ``True`` or not provided, `u` is upper triangular
 such that :math:`a = u^T u`.
-If `upper` is False, `u` is lower triangular
+If `upper` is ``False``, `u` is lower triangular
 such that :math:`a = u u^T`.
 
 Args:
@@ -3177,9 +3226,9 @@ potri(u, upper, out=None)
 
 Computes the inverse of a positive semidefinite matrix given its
 Cholesky factor :attr:`u`: returns matrix `inv`
-If `upper` is True or not provided, `u` is upper triangular
+If `upper` is ``True`` or not provided, `u` is upper triangular
 such that :math:`inv = (u^T u)^{-1}`.
-If `upper` is False, `u` is lower triangular
+If `upper` is ``False``, `u` is lower triangular
 such that :math:`inv = (u u^T)^{-1}`.
 
 Args:
@@ -3224,9 +3273,9 @@ potrs(b, u, upper, out=None)
 Solves a linear system of equations with a positive semidefinite
 matrix to be inverted given its given a Cholesky factor
 matrix :attr:`u`: returns matrix `c`
-If `upper` is True or not provided, `u` is and upper triangular
+If `upper` is ``True`` or not provided, `u` is and upper triangular
 such that :math:`c = (u^T u)^{-1} b`.
-If `upper` is False, `u` is and lower triangular
+If `upper` is ``False``, `u` is and lower triangular
 such that :math:`c = (u u^T)^{-1} b`.
 
 .. note:: `b` is always a 2D `Tensor`, use `b.unsqueeze(1)` to convert a vector.
@@ -3400,7 +3449,7 @@ Example::
 Returns the product of each row of the :attr:`input` Tensor in the given
 dimension :attr:`dim`.
 
-If :attr:`keepdim` is true, the output Tensor is of the same size as
+If :attr:`keepdim` is ``True``, the output Tensor is of the same size as
 :attr:`input` except in the dimension :attr:`dim` where it is of size 1.
 Otherwise, :attr:`dim` is squeezed (see :func:`torch.squeeze`), resulting
 in the output Tensor having 1 fewer dimension than :attr:`input`.
@@ -3439,9 +3488,9 @@ pstrf(a, upper, out=None)
 
 Computes the pivoted Cholesky decomposition of a positive semidefinite
 matrix :attr:`a`: returns matrices `u` and `piv`.
-If `upper` is True or not provided, `u` is and upper triangular
+If `upper` is ``True`` or not provided, `u` is and upper triangular
 such that :math:`a = p^T u^T u p`, with `p` the permutation given by `piv`.
-If `upper` is False, `u` is and lower triangular
+If `upper` is ``False``, `u` is and lower triangular
 such that :math:`a = p^T u u^T p`.
 
 Args:
@@ -3667,7 +3716,7 @@ Example::
 
 add_docstr(torch._C.arange,
            """
-arange(start, end, step=1, out=None) -> Tensor
+arange(start=0, end, step=1, out=None) -> Tensor
 
 Returns a 1D Tensor of size :math:`floor((end - start) / step)` with values
 from the interval ``[start, end)`` taken with step :attr:`step` starting
@@ -3680,6 +3729,15 @@ Args:
     out (Tensor, optional): The result `Tensor`
 
 Example::
+
+    >>> torch.arange(5)
+
+     0
+     1
+     2
+     3
+     4
+    [torch.FloatTensor of size 5]
 
     >>> torch.arange(1, 4)
 
@@ -3965,7 +4023,7 @@ in ascending order by value.
 
 If :attr:`dim` is not given, the last dimension of the `input` is chosen.
 
-If :attr:`descending` is `True` then the elements are sorted in descending
+If :attr:`descending` is ``True`` then the elements are sorted in descending
 order by value.
 
 A tuple of (sorted_tensor, sorted_indices) is returned, where the
@@ -4093,7 +4151,7 @@ add_docstr(torch._C.std,
 
 Returns the standard-deviation of all elements in the :attr:`input` Tensor.
 
-If :attr:`unbiased` is false, then the standard-deviation will be calculated via
+If :attr:`unbiased` is ``False``, then the standard-deviation will be calculated via
 the biased estimator. Otherwise, Bessel's correction will be used.
 
 Args:
@@ -4117,12 +4175,12 @@ Example::
 Returns the standard-deviation of each row of the :attr:`input` Tensor in the
 given dimension :attr:`dim`.
 
-If :attr:`keepdim` is true, the output Tensor is of the same size as
+If :attr:`keepdim` is ``True``, the output Tensor is of the same size as
 :attr:`input` except in the dimension :attr:`dim` where it is of size 1.
 Otherwise, :attr:`dim` is squeezed (see :func:`torch.squeeze`), resulting
 in the output Tensor having 1 fewer dimension than :attr:`input`.
 
-If :attr:`unbiased` is false, then the standard-deviation will be calculated via
+If :attr:`unbiased` is ``False``, then the standard-deviation will be calculated via
 the biased estimator. Otherwise, Bessel's correction will be used.
 
 Args:
@@ -4179,7 +4237,7 @@ Example::
 Returns the sum of each row of the :attr:`input` Tensor in the given
 dimension :attr:`dim`.
 
-If :attr:`keepdim` is true, the output Tensor is of the same size
+If :attr:`keepdim` is ``True``, the output Tensor is of the same size
 as :attr:`input` except in the dimension :attr:`dim` where it is of size 1.
 Otherwise, :attr:`dim` is squeezed (see :func:`torch.squeeze`), resulting in
 the output Tensor having 1 fewer dimension than :attr:`input`.
@@ -4301,13 +4359,13 @@ such that `input = V diag(e) V'`
 The boolean argument :attr:`eigenvectors` defines computation of
 eigenvectors or eigenvalues only.
 
-If it is `False`, only eigenvalues are computed. If it is `True`,
+If it is ``False``, only eigenvalues are computed. If it is ``True``,
 both eigenvalues and eigenvectors are computed.
 
 Since the input matrix `input` is supposed to be symmetric,
 only the upper triangular portion is used by default.
 
-If :attr:`upper` is `False`, then lower triangular portion is used.
+If :attr:`upper` is ``False``, then lower triangular portion is used.
 
 Note: Irrespective of the original strides, the returned matrix `V` will
 be transposed, i.e. with strides `(1, m)` instead of `(m, 1)`.
@@ -4381,6 +4439,28 @@ Example::
 
 """)
 
+add_docstr(torch._C.take, """\
+take(input, indices) -> Tensor
+
+Returns a new `Tensor` with the elements of :attr:`input` at the given indices.
+The input tensor is treated as if it were viewed as a 1D tensor. The result
+takes the same shape as the indices.
+
+Args:
+    input (Tensor): the input `Tensor`
+    indices (LongTensor): the indices into `Tensor`
+
+Example::
+
+    >>> src = torch.Tensor([[4, 3, 5],
+    ...                     [6, 7, 8]])
+    >>> torch.take(src, torch.LongTensor([0, 2, 5]))
+     4
+     5
+     8
+    [torch.FloatTensor of size 3]
+""")
+
 add_docstr(torch._C.tan,
            """
 tan(input, out=None) -> Tensor
@@ -4447,12 +4527,12 @@ a given dimension.
 
 If :attr:`dim` is not given, the last dimension of the `input` is chosen.
 
-If :attr:`largest` is `False` then the `k` smallest elements are returned.
+If :attr:`largest` is ``False`` then the `k` smallest elements are returned.
 
 A tuple of `(values, indices)` is returned, where the `indices` are the indices
 of the elements in the original `input` Tensor.
 
-The boolean option :attr:`sorted` if `True`, will make sure that the returned
+The boolean option :attr:`sorted` if ``True``, will make sure that the returned
 `k` elements are themselves sorted
 
 Args:
@@ -4562,7 +4642,7 @@ Example::
 
 add_docstr(torch._C.tril,
            """
-tril(input, k=0, out=None) -> Tensor
+tril(input, diagonal=0, out=None) -> Tensor
 
 Returns the lower triangular part of the matrix (2D Tensor) :attr:`input`,
 the other elements of the result Tensor :attr:`out` are set to 0.
@@ -4570,15 +4650,15 @@ the other elements of the result Tensor :attr:`out` are set to 0.
 The lower triangular part of the matrix is defined as the elements on and
 below the diagonal.
 
-The argument :attr:`k` controls which diagonal to consider.
+The argument :attr:`diagonal` controls which diagonal to consider.
 
-- :attr:`k` = 0, is the main diagonal.
-- :attr:`k` > 0, is above the main diagonal.
-- :attr:`k` < 0, is below the main diagonal.
+- :attr:`diagonal` = 0, is the main diagonal.
+- :attr:`diagonal` > 0, is above the main diagonal.
+- :attr:`diagonal` < 0, is below the main diagonal.
 
 Args:
     input (Tensor): the input `Tensor`
-    k (int, optional): the diagonal to consider
+    diagonal (int, optional): the diagonal to consider
     out (Tensor, optional): The result `Tensor`
 
 Example::
@@ -4598,14 +4678,14 @@ Example::
      1.2469  0.0064 -1.6250
     [torch.FloatTensor of size 3x3]
 
-    >>> torch.tril(a, k=1)
+    >>> torch.tril(a, diagonal=1)
 
      1.3225  1.7304  0.0000
     -0.3052 -0.3111 -0.1809
      1.2469  0.0064 -1.6250
     [torch.FloatTensor of size 3x3]
 
-    >>> torch.tril(a, k=-1)
+    >>> torch.tril(a, diagonal=-1)
 
      0.0000  0.0000  0.0000
     -0.3052  0.0000  0.0000
@@ -4616,7 +4696,7 @@ Example::
 
 add_docstr(torch._C.triu,
            """
-triu(input, k=0, out=None) -> Tensor
+triu(input, diagonal=0, out=None) -> Tensor
 
 Returns the upper triangular part of the matrix (2D Tensor) :attr:`input`,
 the other elements of the result Tensor :attr:`out` are set to 0.
@@ -4624,15 +4704,15 @@ the other elements of the result Tensor :attr:`out` are set to 0.
 The upper triangular part of the matrix is defined as the elements on and
 above the diagonal.
 
-The argument :attr:`k` controls which diagonal to consider.
+The argument :attr:`diagonal` controls which diagonal to consider.
 
-- :attr:`k` = 0, is the main diagonal.
-- :attr:`k` > 0, is above the main diagonal.
-- :attr:`k` < 0, is below the main diagonal.
+- :attr:`diagonal` = 0, is the main diagonal.
+- :attr:`diagonal` > 0, is above the main diagonal.
+- :attr:`diagonal` < 0, is below the main diagonal.
 
 Args:
     input (Tensor): the input `Tensor`
-    k (int, optional): the diagonal to consider
+    diagonal (int, optional): the diagonal to consider
     out (Tensor, optional): The result `Tensor`
 
 Example::
@@ -4652,14 +4732,14 @@ Example::
      0.0000  0.0000 -1.6250
     [torch.FloatTensor of size 3x3]
 
-    >>> torch.triu(a, k=1)
+    >>> torch.triu(a, diagonal=1)
 
      0.0000  1.7304  1.4573
      0.0000  0.0000 -0.1809
      0.0000  0.0000  0.0000
     [torch.FloatTensor of size 3x3]
 
-    >>> torch.triu(a, k=-1)
+    >>> torch.triu(a, diagonal=-1)
 
      1.3225  1.7304  1.4573
     -0.3052 -0.3111 -0.1809
@@ -4668,10 +4748,68 @@ Example::
 
 """)
 
-# TODO
-# add_docstr(torch._C.trtrs,
-# """
-# """)
+add_docstr(torch._C.trtrs,
+           """
+trtrs(b, A, upper=True, transpose=False, unitriangular=False) -> (Tensor, Tensor)
+
+Solves a system of equations with a triangular coefficient matrix `A`
+and multiple right-hand sides `b`.
+
+In particular, solves :math:`AX = b` and assumes `A` is upper-triangular
+with the default keyword arguments.
+
+This method is NOT implemented for CUDA tensors.
+
+Args:
+    A (Tensor): the input triangular coefficient matrix.
+    b (Tensor): multiple right-hand sides. Each column of `b` is a
+        right-hand side for the system of equations.
+    upper (bool, optional): Solves the upper-triangular system
+        of equations if True, lower-triangular if False. Default: True.
+    transpose (bool, optional): If `A` should be transposed before
+        being sent into the solver. Default: False.
+    unitriangular (bool, optional): If `A` is unit triangular.
+        If True, the diagonal elements of `A` are assumed to be
+        1 and not referenced from `A`. Default: False.
+
+Returns:
+    A tuple (X, M) where `M` is a clone of `A` and `X` is the solution to
+    `AX = b` (or whatever variant of the system of equations, depending on
+    the keyword arguments.)
+
+Shape:
+    - A: :math:`(N, N)`
+    - b: :math:`(N, C)`
+    - output[0]: :math:`(N, C)`
+    - output[1]: :math:`(N, N)`
+
+Examples::
+
+    >>> A = torch.randn(2,2).triu()
+    >>> A
+
+    -1.8793  0.1567
+     0.0000 -2.1972
+    [torch.FloatTensor of size 2x2]
+
+    >>> b = torch.randn(2,3)
+    >>> b
+
+     1.8776 -0.0759  1.6590
+    -0.5676  0.4771  0.7477
+    [torch.FloatTensor of size 2x3]
+
+    >>> torch.trtrs(b, A)
+
+    (
+     -0.9775  0.0223 -0.9112
+      0.2583 -0.2172 -0.3403
+     [torch.FloatTensor of size 2x3],
+     -1.8793  0.1567
+      0.0000 -2.1972
+     [torch.FloatTensor of size 2x2])
+
+""")
 
 add_docstr(torch._C.trunc,
            """
@@ -4741,7 +4879,7 @@ add_docstr(torch._C.var,
 
 Returns the variance of all elements in the :attr:`input` Tensor.
 
-If :attr:`unbiased` is false, then the variance will be calculated via the
+If :attr:`unbiased` is ``False``, then the variance will be calculated via the
 biased estimator. Otherwise, Bessel's correction will be used.
 
 Args:
@@ -4765,12 +4903,12 @@ Example::
 Returns the variance of each row of the :attr:`input` Tensor in the given
 dimension :attr:`dim`.
 
-If :attr:`keepdim` is true, the output Tensors are of the same size
+If :attr:`keepdim` is ``True``, the output Tensors are of the same size
 as :attr:`input` except in the dimension :attr:`dim` where they are of size 1.
 Otherwise, :attr:`dim` is squeezed (see :func:`torch.squeeze`), resulting in
 the outputs Tensor having 1 fewer dimension than :attr:`input`.
 
-If :attr:`unbiased` is false, then the variance will be calculated via the
+If :attr:`unbiased` is ``False``, then the variance will be calculated via the
 biased estimator. Otherwise, Bessel's correction will be used.
 
 Args:

@@ -7,7 +7,7 @@ PackedSequence_ = namedtuple('PackedSequence', ['data', 'batch_sizes'])
 
 
 class PackedSequence(PackedSequence_):
-    """Holds the data and list of batch_sizes of a packed sequence.
+    r"""Holds the data and list of batch_sizes of a packed sequence.
 
     All RNN modules accept packed sequences as inputs.
 
@@ -24,7 +24,7 @@ class PackedSequence(PackedSequence_):
 
 
 def pack_padded_sequence(input, lengths, batch_first=False):
-    """Packs a Variable containing padded sequences of variable length.
+    r"""Packs a Variable containing padded sequences of variable length.
 
     Input can be of size ``TxBx*`` where T is the length of the longest sequence
     (equal to ``lengths[0]``), B is the batch size, and * is any number of
@@ -44,7 +44,7 @@ def pack_padded_sequence(input, lengths, batch_first=False):
     Arguments:
         input (Variable): padded batch of variable length sequences.
         lengths (list[int]): list of sequences lengths of each batch element.
-        batch_first (bool, optional): if True, the input is expected in BxTx*
+        batch_first (bool, optional): if ``True``, the input is expected in BxTx*
             format.
 
     Returns:
@@ -59,33 +59,25 @@ def pack_padded_sequence(input, lengths, batch_first=False):
     steps = []
     batch_sizes = []
     lengths_iter = reversed(lengths)
-    current_length = next(lengths_iter)
     batch_size = input.size(1)
     if len(lengths) != batch_size:
         raise ValueError("lengths array has incorrect size")
 
-    for step, step_value in enumerate(input, 1):
-        steps.append(step_value[:batch_size])
-        batch_sizes.append(batch_size)
+    prev_l = 0
+    for i, l in enumerate(lengths_iter):
+        if l > prev_l:
+            c_batch_size = batch_size - i
+            steps.append(input[prev_l:l, :c_batch_size].contiguous().view(-1, *input.size()[2:]))
+            batch_sizes.extend([c_batch_size] * (l - prev_l))
+            prev_l = l
+        elif prev_l > l:  # remember that new_length is the preceding length in the array
+            raise ValueError("lengths array has to be sorted in decreasing order")
 
-        while step == current_length:
-            try:
-                new_length = next(lengths_iter)
-            except StopIteration:
-                current_length = None
-                break
-
-            if current_length > new_length:  # remember that new_length is the preceding length in the array
-                raise ValueError("lengths array has to be sorted in decreasing order")
-            batch_size -= 1
-            current_length = new_length
-        if current_length is None:
-            break
     return PackedSequence(torch.cat(steps), batch_sizes)
 
 
-def pad_packed_sequence(sequence, batch_first=False):
-    """Pads a packed batch of variable length sequences.
+def pad_packed_sequence(sequence, batch_first=False, padding_value=0.0):
+    r"""Pads a packed batch of variable length sequences.
 
     It is an inverse operation to :func:`pack_padded_sequence`.
 
@@ -97,8 +89,9 @@ def pad_packed_sequence(sequence, batch_first=False):
 
     Arguments:
         sequence (PackedSequence): batch to pad
-        batch_first (bool, optional): if True, the output will be in BxTx*
+        batch_first (bool, optional): if ``True``, the output will be in BxTx*
             format.
+        padding_value (float, optional): values for padded elements
 
     Returns:
         Tuple of Variable containing the padded sequence, and a list of lengths
@@ -106,21 +99,25 @@ def pad_packed_sequence(sequence, batch_first=False):
     """
     var_data, batch_sizes = sequence
     max_batch_size = batch_sizes[0]
-    output = var_data.data.new(len(batch_sizes), max_batch_size, *var_data.size()[1:]).zero_()
+    output = var_data.data.new(len(batch_sizes), max_batch_size, *var_data.size()[1:]).fill_(padding_value)
     output = Variable(output)
 
     lengths = []
     data_offset = 0
     prev_batch_size = batch_sizes[0]
-    for i, batch_size in enumerate(batch_sizes):
-        output[i, :batch_size] = var_data[data_offset:data_offset + batch_size]
-        data_offset += batch_size
-
+    prev_i = 0
+    for i, batch_size in enumerate(batch_sizes + [0]):
+        if batch_size != prev_batch_size:
+            l = prev_batch_size * (i - prev_i)
+            tmp = var_data[data_offset:data_offset + l]
+            output[prev_i:i, :prev_batch_size] = tmp.view(i - prev_i, prev_batch_size, *tmp.size()[1:])
+            data_offset += l
+            prev_i = i
         dec = prev_batch_size - batch_size
         if dec > 0:
             lengths.extend((i,) * dec)
         prev_batch_size = batch_size
-    lengths.extend((i + 1,) * batch_size)
+
     lengths.reverse()
 
     if batch_first:

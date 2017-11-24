@@ -1,7 +1,10 @@
+import torch
+import math
+
 from itertools import repeat
 
 from ..._thnn import type2backend
-from ..function import Function, InplaceFunction
+from ..function import Function, InplaceFunction, traceable
 from ..variable import Variable
 from .utils import maybe_unexpand, maybe_unexpand_or_view
 
@@ -50,56 +53,6 @@ class Log1p(Function):
         return grad_output.div(i.add(1))
 
 
-class Tanh(InplaceFunction):
-
-    @staticmethod
-    def forward(ctx, i, inplace=False):
-        if inplace:
-            ctx.mark_dirty(i)
-            result = i.tanh_()
-        else:
-            result = i.tanh()
-        ctx.save_for_backward(result)
-        return result
-
-    @staticmethod
-    def backward(ctx, grad_output):
-        result, = ctx.saved_variables
-        if grad_output.volatile:
-            grad_input = Variable(grad_output.data.new(grad_output.size()), volatile=True)
-            backend = type2backend[type(result.data)]
-            backend.Tanh_updateGradInput(backend.library_state, None, grad_output.data,
-                                         grad_input.data, result.data)
-        else:
-            grad_input = grad_output * (1 - result * result)
-        return grad_input, None
-
-
-class Sigmoid(InplaceFunction):
-
-    @staticmethod
-    def forward(ctx, i, inplace=False):
-        if inplace:
-            ctx.mark_dirty(i)
-            result = i.sigmoid_()
-        else:
-            result = i.sigmoid()
-        ctx.save_for_backward(result)
-        return result
-
-    @staticmethod
-    def backward(ctx, grad_output):
-        result, = ctx.saved_variables
-        if grad_output.volatile:
-            grad_input = Variable(grad_output.data.new(grad_output.size()), volatile=True)
-            backend = type2backend[type(result.data)]
-            backend.Sigmoid_updateGradInput(backend.library_state, None, grad_output.data,
-                                            grad_input.data, result.data)
-        else:
-            grad_input = grad_output * ((1 - result) * result)
-        return grad_input, None
-
-
 class Sinh(Function):
 
     @staticmethod
@@ -137,19 +90,6 @@ class Abs(Function):
     def backward(ctx, grad_output):
         i, = ctx.saved_variables
         return grad_output * i.sign()
-
-
-class Clamp(Function):
-
-    @staticmethod
-    def forward(ctx, i, min_val, max_val):
-        ctx._mask = (i.ge(min_val) * i.le(max_val))
-        return i.clamp(min_val, max_val)
-
-    @staticmethod
-    def backward(ctx, grad_output):
-        mask = Variable(ctx._mask.type_as(grad_output.data))
-        return grad_output * mask, None, None
 
 
 class Sqrt(Function):
@@ -257,6 +197,32 @@ class Atan2(Function):
         return grad_output * x.mul(denominator), grad_output * y.neg().mul(denominator)
 
 
+class Erf(Function):
+
+    @staticmethod
+    def forward(ctx, i):
+        ctx.save_for_backward(i)
+        return i.erf()
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        i, = ctx.saved_variables
+        return 2. / math.sqrt(math.pi) * torch.exp(-(i ** 2)) * grad_output
+
+
+class ErfInv(Function):
+
+    @staticmethod
+    def forward(ctx, i):
+        ctx.save_for_backward(i)
+        return i.erfinv()
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        i, = ctx.saved_variables
+        return 0.5 * math.sqrt(math.pi) * torch.exp(i.erfinv() ** 2) * grad_output
+
+
 # TODO: make inplace and update grad formulas
 class Reciprocal(Function):
 
@@ -290,19 +256,6 @@ class Cmax(Function):
         )
 
 
-class CmaxConstant(Function):
-
-    @staticmethod
-    def forward(ctx, i, constant):
-        ctx._mask = i.gt(constant)
-        return i.clamp(min=constant)
-
-    @staticmethod
-    def backward(ctx, grad_output):
-        mask = Variable(ctx._mask.type_as(grad_output.data))
-        return grad_output * mask, None
-
-
 class Cmin(Function):
 
     @staticmethod
@@ -319,19 +272,6 @@ class Cmin(Function):
             maybe_unexpand(grad_output * mask, ctx._a_size),
             maybe_unexpand_or_view(grad_output * Variable(ctx._mask.eq(0).type_as(grad_output.data)), ctx._b_size)
         )
-
-
-class CminConstant(Function):
-
-    @staticmethod
-    def forward(ctx, i, constant):
-        ctx._mask = i.lt(constant)
-        return i.clamp(max=constant)
-
-    @staticmethod
-    def backward(ctx, grad_output):
-        mask = Variable(ctx._mask.type_as(grad_output.data))
-        return grad_output * mask, None
 
 
 class _ConstantGrad(Function):

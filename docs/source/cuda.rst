@@ -6,6 +6,17 @@ torch.cuda
 .. automodule:: torch.cuda
    :members:
 
+Random Number Generator
+-------------------------
+.. autofunction:: get_rng_state
+.. autofunction:: set_rng_state
+.. autofunction:: manual_seed
+.. autofunction:: manual_seed_all
+.. autofunction:: seed
+.. autofunction:: seed_all
+.. autofunction:: initial_seed
+
+
 Communication collectives
 -------------------------
 
@@ -25,6 +36,10 @@ Streams and events
 
 .. autoclass:: Event
    :members:
+
+Memory management
+-----------------
+.. autofunction:: empty_cache
 
 NVIDIA Tools Extension (NVTX)
 -----------------------------
