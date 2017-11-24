@@ -1,6 +1,5 @@
 import torch
 from functools import reduce
-from operator import mul
 
 
 def maybe_view(variable, size, check_same_size=True):

@@ -4,21 +4,19 @@ import sys
 import math
 import torch
 import unittest
-import warnings
 import random
 from copy import deepcopy
 from collections import OrderedDict
 from itertools import product
 from operator import mul
 from functools import reduce
-import torch.nn.functional as F
 from torch.autograd.gradcheck import gradgradcheck, gradcheck
 from torch.autograd.function import once_differentiable
 from torch.autograd.profiler import profile
 
 from common import TestCase, run_tests, skipIfNoLapack
-from torch.autograd._functions import *
 from torch.autograd import Variable, Function
+from torch.autograd.function import InplaceFunction
 
 if sys.version_info[0] == 2:
     import cPickle as pickle
@@ -1570,6 +1568,43 @@ class TestAutograd(TestCase):
 
         for key in keys:
             self.assertTrue(hasattr(x, key))
+
+    @skipIfNoLapack
+    def test_potrf_gradient(self):
+        def _calc_deriv_numeric(A, L, upper):
+            # numerical forward derivative
+            dA = Variable(_make_cov(5))
+            eps = 1e-6
+            outb = torch.potrf(A + (eps / 2) * dA, upper)
+            outa = torch.potrf(A - (eps / 2) * dA, upper)
+            dL = (outb - outa) / eps
+
+            return dA, dL
+
+        def _calc_deriv_sym(A, L, upper):
+            # reverse mode
+            Lbar = Variable(torch.rand(5, 5).tril())
+            if upper:
+                Lbar = Lbar.t()
+            L.backward(Lbar)
+            Abar = A.grad
+
+            return Abar, Lbar
+
+        def _check_total_variation(A, L, upper):
+            dA, dL = _calc_deriv_numeric(A, L, upper)
+            Abar, Lbar = _calc_deriv_sym(A, L, upper)
+
+            # compare df = Tr(dA^T Abar) = Tr(dL^T Lbar)
+            df1 = (dL * Lbar).sum()
+            df2 = (dA * Abar).sum()
+
+            self.assertEqual(df1, df2, prec=1e-3)
+
+        for upper in [True, False]:
+            A = Variable(_make_cov(5), requires_grad=True)
+            L = torch.potrf(A, upper)
+            _check_total_variation(A, L, upper)
 
     def test_as_strided(self):
         x = Variable(torch.arange(0, 25).view(5, 5), requires_grad=True)
