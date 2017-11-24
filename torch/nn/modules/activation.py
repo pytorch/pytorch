@@ -184,7 +184,7 @@ class ReLU6(Hardtanh):
 
 
 class Sigmoid(Module):
-    r"""Applies the element-wise function :math:`f(x) = 1 / ( 1 + exp(-x))`
+    r"""Applies the element-wise function :math:`f(x) = \frac{1}{1 + \exp(-x)}`
 
     Shape:
         - Input: :math:`(N, *)` where `*` means, any number of additional
@@ -208,7 +208,7 @@ class Sigmoid(Module):
 
 class Tanh(Module):
     r"""Applies element-wise,
-    :math:`f(x) = (exp(x) - exp(-x)) / (exp(x) + exp(-x))`
+    :math:`f(x) = \frac{\exp(x) - \exp(-x)} {\exp(x) + \exp(-x)}`
 
     Shape:
         - Input: :math:`(N, *)` where `*` means, any number of additional
@@ -232,7 +232,7 @@ class Tanh(Module):
 
 class ELU(Module):
     r"""Applies element-wise,
-    :math:`f(x) = max(0,x) + min(0, alpha * (exp(x) - 1))`
+    :math:`f(x) = max(0,x) + min(0, alpha * (\exp(x) - 1))`
 
     Args:
         alpha: the alpha value for the ELU formulation. Default: 1.0
@@ -373,7 +373,7 @@ class Hardshrink(Module):
 
 class LeakyReLU(Module):
     r"""Applies element-wise,
-    :math:`f(x) = max(0, x) + {negative\_slope} * min(0, x)`
+    :math:`f(x) = \max(0, x) + \text{negative\_slope} * \min(0, x)`
 
     Args:
         negative_slope: Controls the angle of the negative slope. Default: 1e-2
@@ -408,7 +408,7 @@ class LeakyReLU(Module):
 
 
 class LogSigmoid(Module):
-    r"""Applies element-wise :math:`LogSigmoid(x) = log( 1 / (1 + exp(-x_i)))`
+    r"""Applies element-wise :math:`LogSigmoid(x) = \log\left(\frac{ 1 }{ 1 + \exp(-x_i)}\right)`
 
     Shape:
         - Input: :math:`(N, *)` where `*` means, any number of additional
@@ -431,7 +431,7 @@ class LogSigmoid(Module):
 
 
 class Softplus(Module):
-    r"""Applies element-wise :math:`f(x) = 1/beta * log(1 + exp(beta * x_i))`
+    r"""Applies element-wise :math:`f(x) = \frac{1}{\text{beta}} * \log(1 + \exp(\text{beta} * x_i))`
 
     SoftPlus is a smooth approximation to the ReLU function and can be used
     to constrain the output of a machine to always be positive.
@@ -548,7 +548,7 @@ class PReLU(Module):
 
 
 class Softsign(Module):
-    r"""Applies element-wise, the function :math:`f(x) = x / (1 + |x|)`
+    r"""Applies element-wise, the function :math:`f(x) = \frac{x}{ 1 + |x|}`
 
     Shape:
         - Input: :math:`(N, *)` where `*` means, any number of additional
@@ -715,7 +715,7 @@ class LogSoftmax(Module):
     r"""Applies the Log(Softmax(x)) function to an n-dimensional input Tensor.
     The LogSoftmax formulation can be simplified as
 
-    :math:`f_i(x) = log(exp(x_i) / sum_j exp(x_j) )`
+    :math:`f_i(x) = \log\left(\frac{\exp(x_i) }{ \sum_j \exp(x_j)} \right)`
 
     Shape:
         - Input: any shape
