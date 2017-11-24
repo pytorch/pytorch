@@ -1,6 +1,7 @@
 import difflib
 import inspect
 import os
+import platform
 import shutil
 import struct
 import sys
@@ -111,7 +112,17 @@ def _with_file_like(f, mode, body):
             (sys.version_info[0] == 2 and isinstance(f, unicode)) or \
             (sys.version_info[0] == 3 and isinstance(f, pathlib.Path)):
         new_fd = True
-        f = open(f, mode)
+        # if it is a temp file, you need to append FILE_SHARE_DELETE flag to open this file
+        windows_temp = platform.system() == 'Windows' and os.path.dirname(f).upper() == tempfile.gettempdir().upper()
+        if windows_temp:
+            from ._os_win import os_open
+
+            def temp_opener(name, flag):
+                return os_open(name, flag | os.O_TEMPORARY)
+
+            f = open(f, mode, opener=temp_opener)
+        else:
+            f = open(f, mode)
     try:
         return body(f)
     finally:
@@ -256,7 +267,17 @@ def load(f, map_location=None, pickle_module=pickle):
             (sys.version_info[0] == 2 and isinstance(f, unicode)) or \
             (sys.version_info[0] == 3 and isinstance(f, pathlib.Path)):
         new_fd = True
-        f = open(f, 'rb')
+        # if it is a temp file, you need to append FILE_SHARE_DELETE flag to open this file
+        windows_temp = platform.system() == 'Windows' and os.path.dirname(f).upper() == tempfile.gettempdir().upper()
+        if windows_temp:
+            from ._os_win import os_open
+
+            def temp_opener(name, flag):
+                return os_open(name, flag | os.O_TEMPORARY)
+
+            f = open(f, 'rb', opener=temp_opener)
+        else:
+            f = open(f, 'rb')
     try:
         return _load(f, map_location, pickle_module)
     finally:

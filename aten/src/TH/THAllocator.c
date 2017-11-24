@@ -193,7 +193,7 @@ static void *_map_alloc(void* ctx_, ptrdiff_t size)
     /* FILE_FLAG_RANDOM_ACCESS ? */
     if(ctx->flags)
     {
-      hfile = CreateFileA(ctx->filename, GENERIC_READ|GENERIC_WRITE, FILE_SHARE_WRITE|FILE_SHARE_READ, 0, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, 0);
+      hfile = CreateFileA(ctx->filename, GENERIC_READ|GENERIC_WRITE, FILE_SHARE_WRITE|FILE_SHARE_READ|FILE_SHARE_DELETE, 0, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, 0);
       if (hfile == INVALID_HANDLE_VALUE)
         THError("could not open file <%s> in read-write mode; error code: <%d>", ctx->filename, GetLastError());
     }
