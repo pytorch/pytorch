@@ -2164,6 +2164,43 @@ class TestNN(NNTestCase):
         self.assertRaises(ValueError, lambda: F.dropout(v, -0.1))
         self.assertRaises(ValueError, lambda: F.dropout(v, 1.1))
 
+    def test_pad_sequence(self):
+        def pad(tensor, length):
+            return torch.cat([tensor, tensor.new(length - tensor.size(0), *tensor.size()[1:]).zero_()])
+        # single dimensional
+        a = torch.Tensor([1,2,3])
+        b = torch.Tensor([4,5])
+        c = torch.Tensor([6])
+        
+        # batch_first = true
+        expected = torch.Tensor([[1, 2, 3], [4, 5, 0], [6, 0, 0]])
+        padded = rnn_utils.pad_sequence([a, b, c], [3, 2, 1], True)
+        self.assertEqual(padded, expected)
+
+        # batch_first = false
+        padded = rnn_utils.pad_sequence([a, b, c], [3, 2, 1])
+        self.assertEqual(padded, expected.transpose(0, 1))
+
+        # more dimensional
+        sequences = []
+        lengths = []
+        maxlen = 9
+        for i in reversed(range(maxlen + 1)[1:]):
+            seq_len = i * i
+            lengths.append(seq_len)
+            sequences.append(torch.rand(seq_len, 400))
+        expected = []
+        for seq in sequences:
+            expected.append(pad(seq, maxlen * maxlen))
+        # batch first = true
+        expected = torch.stack(expected)
+        padded = rnn_utils.pad_sequence(sequences, lengths, True)
+        self.assertEqual(padded, expected)
+
+        # batch first = false
+        padded = rnn_utils.pad_sequence(sequences, lengths)
+        self.assertEqual(padded, expected.transpose(0, 1))
+
     def test_pack_padded_sequence(self):
         def pad(tensor, length):
             return torch.cat([tensor, tensor.new(length - tensor.size(0), *tensor.size()[1:]).zero_()])
