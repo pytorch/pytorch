@@ -305,7 +305,7 @@ class LSTM(RNNBase):
     state at time `t`, :math:`x_t` is the hidden state of the previous layer at
     time `t` or :math:`input_t` for the first layer, and :math:`i_t`,
     :math:`f_t`, :math:`g_t`, :math:`o_t` are the input, forget, cell,
-    and out gates, respectively.
+    and out gates, respectively. :math:`\sigma` is the sigmoid function.
 
     Args:
         input_size: The number of expected features in the input x
@@ -382,7 +382,7 @@ class GRU(RNNBase):
     where :math:`h_t` is the hidden state at time `t`, :math:`x_t` is the hidden
     state of the previous layer at time `t` or :math:`input_t` for the first
     layer, and :math:`r_t`, :math:`z_t`, :math:`n_t` are the reset, input,
-    and new gates, respectively.
+    and new gates, respectively. :math:`\sigma` is the sigmoid function.
 
     Args:
         input_size: The number of expected features in the input x
@@ -539,6 +539,8 @@ class LSTMCell(RNNCellBase):
         c' = f * c + i * g \\
         h' = o * \tanh(c') \\
         \end{array}
+        
+    where :math:`\sigma` is the sigmoid function.
 
     Args:
         input_size: The number of expected features in the input x
@@ -618,6 +620,8 @@ class GRUCell(RNNCellBase):
         n = \tanh(W_{in} x + b_{in} + r * (W_{hn} h + b_{hn})) \\
         h' = (1 - z) * n + z * h
         \end{array}
+        
+    where :math:`\sigma` is the sigmoid function.
 
     Args:
         input_size: The number of expected features in the input x
