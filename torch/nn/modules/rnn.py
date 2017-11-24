@@ -302,10 +302,10 @@ class LSTM(RNNBase):
     .. math::
 
             \begin{array}{ll}
-            i_t = \mathrm{sigmoid}(W_{ii} x_t + b_{ii} + W_{hi} h_{(t-1)} + b_{hi}) \\
-            f_t = \mathrm{sigmoid}(W_{if} x_t + b_{if} + W_{hf} h_{(t-1)} + b_{hf}) \\
+            i_t = \sigma(W_{ii} x_t + b_{ii} + W_{hi} h_{(t-1)} + b_{hi}) \\
+            f_t = \sigma(W_{if} x_t + b_{if} + W_{hf} h_{(t-1)} + b_{hf}) \\
             g_t = \tanh(W_{ig} x_t + b_{ig} + W_{hc} h_{(t-1)} + b_{hg}) \\
-            o_t = \mathrm{sigmoid}(W_{io} x_t + b_{io} + W_{ho} h_{(t-1)} + b_{ho}) \\
+            o_t = \sigma(W_{io} x_t + b_{io} + W_{ho} h_{(t-1)} + b_{ho}) \\
             c_t = f_t * c_{(t-1)} + i_t * g_t \\
             h_t = o_t * \tanh(c_t)
             \end{array}
@@ -314,7 +314,7 @@ class LSTM(RNNBase):
     state at time `t`, :math:`x_t` is the hidden state of the previous layer at
     time `t` or :math:`input_t` for the first layer, and :math:`i_t`,
     :math:`f_t`, :math:`g_t`, :math:`o_t` are the input, forget, cell,
-    and out gates, respectively.
+    and out gates, respectively. :math:`\sigma` is the sigmoid function.
 
     Args:
         input_size: The number of expected features in the input x
@@ -382,8 +382,8 @@ class GRU(RNNBase):
     .. math::
 
             \begin{array}{ll}
-            r_t = \mathrm{sigmoid}(W_{ir} x_t + b_{ir} + W_{hr} h_{(t-1)} + b_{hr}) \\
-            z_t = \mathrm{sigmoid}(W_{iz} x_t + b_{iz} + W_{hz} h_{(t-1)} + b_{hz}) \\
+            r_t = \sigma(W_{ir} x_t + b_{ir} + W_{hr} h_{(t-1)} + b_{hr}) \\
+            z_t = \sigma(W_{iz} x_t + b_{iz} + W_{hz} h_{(t-1)} + b_{hz}) \\
             n_t = \tanh(W_{in} x_t + b_{in} + r_t * (W_{hn} h_{(t-1)}+ b_{hn})) \\
             h_t = (1 - z_t) * n_t + z_t * h_{(t-1)} \\
             \end{array}
@@ -391,7 +391,7 @@ class GRU(RNNBase):
     where :math:`h_t` is the hidden state at time `t`, :math:`x_t` is the hidden
     state of the previous layer at time `t` or :math:`input_t` for the first
     layer, and :math:`r_t`, :math:`z_t`, :math:`n_t` are the reset, input,
-    and new gates, respectively.
+    and new gates, respectively. :math:`\sigma` is the sigmoid function.
 
     Args:
         input_size: The number of expected features in the input x
@@ -541,13 +541,15 @@ class LSTMCell(RNNCellBase):
     .. math::
 
         \begin{array}{ll}
-        i = \mathrm{sigmoid}(W_{ii} x + b_{ii} + W_{hi} h + b_{hi}) \\
-        f = \mathrm{sigmoid}(W_{if} x + b_{if} + W_{hf} h + b_{hf}) \\
+        i = \sigma(W_{ii} x + b_{ii} + W_{hi} h + b_{hi}) \\
+        f = \sigma(W_{if} x + b_{if} + W_{hf} h + b_{hf}) \\
         g = \tanh(W_{ig} x + b_{ig} + W_{hc} h + b_{hg}) \\
-        o = \mathrm{sigmoid}(W_{io} x + b_{io} + W_{ho} h + b_{ho}) \\
+        o = \sigma(W_{io} x + b_{io} + W_{ho} h + b_{ho}) \\
         c' = f * c + i * g \\
         h' = o * \tanh(c') \\
         \end{array}
+        
+    where :math:`\sigma` is the sigmoid function.
 
     Args:
         input_size: The number of expected features in the input x
@@ -622,11 +624,13 @@ class GRUCell(RNNCellBase):
     .. math::
 
         \begin{array}{ll}
-        r = \mathrm{sigmoid}(W_{ir} x + b_{ir} + W_{hr} h + b_{hr}) \\
-        z = \mathrm{sigmoid}(W_{iz} x + b_{iz} + W_{hz} h + b_{hz}) \\
+        r = \sigma(W_{ir} x + b_{ir} + W_{hr} h + b_{hr}) \\
+        z = \sigma(W_{iz} x + b_{iz} + W_{hz} h + b_{hz}) \\
         n = \tanh(W_{in} x + b_{in} + r * (W_{hn} h + b_{hn})) \\
         h' = (1 - z) * n + z * h
         \end{array}
+        
+    where :math:`\sigma` is the sigmoid function.
 
     Args:
         input_size: The number of expected features in the input x
