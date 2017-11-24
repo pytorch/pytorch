@@ -1,3 +1,4 @@
+#include "Python.h"
 #include "accumulate_grad.h"
 
 #include "torch/csrc/autograd/variable.h"
@@ -48,7 +49,7 @@ auto AccumulateGrad::apply(const variable_list& grads) -> variable_list {
     // a thing never promised and documented, but used in some hacks seen
     // on the internet.
     AutoGPU guard(grad);
-    if (grad.type().isSparse() && !new_grad.type().isSparse()) {
+    if (grad.type().is_sparse() && !new_grad.type().is_sparse()) {
       grad.data() = new_grad.data() + grad.data();
     } else {
       grad.data() += new_grad.data();

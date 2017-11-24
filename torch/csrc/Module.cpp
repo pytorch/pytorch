@@ -1,6 +1,9 @@
 #include <Python.h>
 #include <sys/types.h>
+
+#ifndef _MSC_VER
 #include <sys/socket.h>
+#endif
 
 #include <stdbool.h>
 #include <unordered_map>
@@ -54,14 +57,14 @@ static bool THPModule_loadClasses(PyObject *self)
   if (!THPCharTensor_postInit(torch_module)) return false;
   if (!THPByteTensor_postInit(torch_module)) return false;
 
-  ASSERT_NOT_NULL(THPDoubleStorageClass = PyObject_GetAttrString(torch_module,(char*)"DoubleStorage"));
-  ASSERT_NOT_NULL(THPFloatStorageClass  = PyObject_GetAttrString(torch_module,(char*)"FloatStorage"));
-  ASSERT_NOT_NULL(THPHalfStorageClass   = PyObject_GetAttrString(torch_module,(char*)"HalfStorage"));
-  ASSERT_NOT_NULL(THPLongStorageClass   = PyObject_GetAttrString(torch_module,(char*)"LongStorage"));
-  ASSERT_NOT_NULL(THPIntStorageClass    = PyObject_GetAttrString(torch_module,(char*)"IntStorage"));
-  ASSERT_NOT_NULL(THPShortStorageClass  = PyObject_GetAttrString(torch_module,(char*)"ShortStorage"));
-  ASSERT_NOT_NULL(THPCharStorageClass   = PyObject_GetAttrString(torch_module,(char*)"CharStorage"));
-  ASSERT_NOT_NULL(THPByteStorageClass   = PyObject_GetAttrString(torch_module,(char*)"ByteStorage"));
+  THPDoubleStorage_postInit(torch_module);
+  THPFloatStorage_postInit(torch_module);
+  THPHalfStorage_postInit(torch_module);
+  THPLongStorage_postInit(torch_module);
+  THPIntStorage_postInit(torch_module);
+  THPShortStorage_postInit(torch_module);
+  THPCharStorage_postInit(torch_module);
+  THPByteStorage_postInit(torch_module);
 
   return true;
 #undef ASSERT_NOT_NULL
@@ -172,6 +175,8 @@ PyObject * THPModule_fromNumpy(PyObject *_unused, PyObject *array)
     return PyObject_CallFunctionObjArgs(THPDoubleTensorClass, array, NULL);
   } else if (type == NPY_FLOAT) {
     return PyObject_CallFunctionObjArgs(THPFloatTensorClass, array, NULL);
+  } else if (type == NPY_HALF) {
+    return PyObject_CallFunctionObjArgs(THPHalfTensorClass, array, NULL);
   } else if (type == NPY_INT64) {
     return PyObject_CallFunctionObjArgs(THPLongTensorClass, array, NULL);
   } else if (type == NPY_INT32) {
@@ -182,7 +187,7 @@ PyObject * THPModule_fromNumpy(PyObject *_unused, PyObject *array)
     return PyObject_CallFunctionObjArgs(THPByteTensorClass, array, NULL);
   }
   THPUtils_setError("can't convert a given np.ndarray to a tensor - it has an "
-      "invalid type. The only supported types are: double, float, int64, "
+      "invalid type. The only supported types are: double, float, float16, int64, "
       "int32, and uint8.");
   return NULL;
 #endif
@@ -193,7 +198,7 @@ PyObject * THPModule_fromNumpy(PyObject *_unused, PyObject *array)
  **/
 
 static PyObject * findTensor(PyObject *args, PyObject *kwargs) {
-  for (int i = 0; i < PyTuple_Size(args); i++) {
+  for (Py_ssize_t i = 0; i < PyTuple_Size(args); i++) {
     PyObject *item = PyTuple_GET_ITEM(args, i);
     if (THPModule_isTensor(item) || THPVariable_Check(item)) {
       return item;
@@ -491,7 +496,7 @@ PyObject *THPModule_addDocStr(PyObject *_unused, PyObject *args)
 PyObject *THPModule_inferSize(PyObject *_unused, PyObject *args)
 {
   HANDLE_TH_ERRORS
-  Py_ssize_t num_args = args ? PyTuple_Size(args) : 0;
+  Py_ssize_t num_args = args ? (Py_ssize_t) PyTuple_Size(args) : 0;
   THPUtils_assert(num_args == 2, "expected exactly 2 arguments");
   PyObject *arg1 = PyTuple_GET_ITEM(args, 0);
   THPUtils_assert(THPSize_Check(arg1), "expected a torch.Size as argument 1");

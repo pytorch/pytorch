@@ -40,7 +40,7 @@ def set_training(model, mode):
             model.train(old_mode)
 
 
-def export(model, args, f, export_params=True, verbose=False, training=False):
+def export(model, args, f, export_params=True, verbose=False, training=False, input_names=None, output_names=None):
     """
     Export a model into ONNX format.  This exporter runs your model
     once in order to get a trace of its execution to be exported; at the
@@ -71,11 +71,38 @@ def export(model, args, f, export_params=True, verbose=False, training=False):
         training (bool, default False): export the model in training mode.  At
             the moment, ONNX is oriented towards exporting models for inference
             only, so you will generally not need to set this to True.
+        input_names(list of strings, default empty list): names to assign to the
+            input nodes of the graph, in order
+        output_names(list of strings, default empty list): names to assign to the
+            output nodes of the graph, in order
     """
-    _export(model, args, f, export_params, verbose, training)
+    _export(model, args, f, export_params, verbose, training, input_names, output_names)
 
 
-def _export(model, args, f, export_params=True, verbose=False, training=False):
+def _optimize_trace(trace):
+    torch._C._jit_pass_peephole(trace)
+    torch._C._jit_pass_lint(trace)
+    torch._C._jit_pass_onnx(trace)
+    torch._C._jit_pass_lint(trace)
+    torch._C._jit_pass_onnx_peephole(trace)
+    torch._C._jit_pass_lint(trace)
+    torch._C._jit_pass_dce(trace)
+    torch._C._jit_pass_lint(trace)
+
+
+def _trace(func, args, return_outs=False):
+    # Special case for common case of passing a single Variable
+    if isinstance(args, torch.autograd.Variable):
+        args = (args, )
+
+    trace, torch_out = torch.jit.trace(func, args)
+    _optimize_trace(trace)
+    if return_outs:
+        return trace, torch_out
+    return trace
+
+
+def _export(model, args, f, export_params=True, verbose=False, training=False, input_names=None, output_names=None):
     # Special case for common case of passing a single Variable
     if isinstance(args, torch.autograd.Variable):
         args = (args, )
@@ -96,15 +123,9 @@ def _export(model, args, f, export_params=True, verbose=False, training=False):
         raise RuntimeError("state_dict changed after running the tracer; "
                            "something weird is happening in your model!")
 
-    # TODO: write a helper function
-    torch._C._jit_pass_peephole(trace)
-    torch._C._jit_pass_lint(trace)
-    torch._C._jit_pass_onnx(trace)
-    torch._C._jit_pass_lint(trace)
-    torch._C._jit_pass_onnx_peephole(trace)
-    torch._C._jit_pass_lint(trace)
-    torch._C._jit_pass_dce(trace)
-    torch._C._jit_pass_lint(trace)
+    _optimize_trace(trace)
+
+    _set_input_and_output_names(trace.graph(), input_names, output_names)
 
     if verbose:
         print(trace)
@@ -120,6 +141,19 @@ def _export(model, args, f, export_params=True, verbose=False, training=False):
     torch.serialization._with_file_like(f, "wb", lambda f: f.write(proto))
     return torch_out
 
+
+def _set_input_and_output_names(graph, input_names, output_names):
+    def set_names(node_list, name_list, descriptor):
+        if name_list is None:
+            return
+        if len(name_list) != len(node_list):
+            raise RuntimeError(
+                "number of %s names provided (%d) did not match number of %ss (%d)"
+                % (descriptor, len(name_list), descriptor, len(node_list)))
+        for name, node in zip(name_list, node_list):
+            node.setUniqueName(name)
+    set_names(list(graph.inputs()), input_names, 'input')
+    set_names(list(graph.outputs()), output_names, 'output')
 
 attr_pattern = re.compile("^(.+)_([ifstgz])$")
 
@@ -152,8 +186,8 @@ def _add_attribute(node, key, value):
     return getattr(node, kind + '_')(name, value)
 
 
-def _newNode(g, opname, *args, **kwargs):
-    n = g.create(opname, args)
+def _newNode(g, opname, outputs, *args, **kwargs):
+    n = g.create(opname, args, outputs)
     for k, v in sorted(kwargs.items()):
         _add_attribute(n, k, v)
     return n
@@ -194,16 +228,16 @@ def _graph_op(g, opname, *raw_args, **kwargs):
     kwargs = dict((k, v) for k, v in kwargs.items() if v is not None)
 
     def const_if_tensor(arg):
-        if isinstance(arg, torch._C.Node):
+        if isinstance(arg, torch._C.Value):
             return arg
         else:
             return g.op("Constant", value_z=arg)
 
     args = list(const_if_tensor(arg) for arg in raw_args)
-    n = g.appendNode(_newNode(g, opname, *args, **kwargs))
+    n = g.appendNode(_newNode(g, opname, outputs, *args, **kwargs))
     if outputs == 1:
-        return n
-    return tuple(g.appendNode(g.createSelect(n, i)) for i in _range(outputs))
+        return n.output()
+    return tuple(o for o in n.outputs())
 
 
 # Note [Export inplace]

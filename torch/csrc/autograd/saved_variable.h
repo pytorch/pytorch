@@ -8,6 +8,7 @@
 #include "torch/csrc/jit/tracer_state.h"
 #include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/autograd/variable_version.h"
+#include "torch/csrc/utils/tensor_geometry.h"
 #include "torch/csrc/Types.h"
 
 namespace torch { namespace autograd {
@@ -25,8 +26,7 @@ struct SavedVariable {
     , is_volatile(false)
     , expected_version(-1) {}
 
-  SavedVariable(const Variable& variable, Function* saved_for);
-
+  SavedVariable(const Variable& variable, bool is_output);
 
   at::Tensor data;
   // The gradient function associated with this node. If has_grad_fn
@@ -34,7 +34,7 @@ struct SavedVariable {
   // it would create a circular reference. In that case, the grad_fn must be
   // passed in to the unpack function when reconstructing the Variable.
   bool has_grad_fn;
-  std::shared_ptr<Function> grad_fn;
+  std::shared_ptr<Function> _grad_fn;
   std::weak_ptr<Function> grad_accumulator;
   SavedVersion version;
   bool requires_grad;

@@ -37,6 +37,10 @@ Streams and events
 .. autoclass:: Event
    :members:
 
+Memory management
+-----------------
+.. autofunction:: empty_cache
+
 NVIDIA Tools Extension (NVTX)
 -----------------------------
 

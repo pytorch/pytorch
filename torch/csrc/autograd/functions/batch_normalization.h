@@ -25,7 +25,11 @@ struct BatchNormForward : public ForwardFunction<>, public BatchNormParams, publ
     : BatchNormParams(std::move(params)) {}
 
   virtual variable_list apply(const variable_list& inputs) override;
-  virtual jit::node_list symbolic(SymbolicContext* ctx, jit::node_list inputs) override;
+  virtual jit::value_list symbolic(
+      SymbolicContext* ctx,
+      jit::value_list inputs,
+      std::shared_ptr<jit::SourceLocation> sl
+    ) override;
 };
 
 struct BatchNormBackward : public Function, public BatchNormParams {
@@ -42,9 +46,9 @@ struct BatchNormBackward : public Function, public BatchNormParams {
       if (is_executable) {
         this->save_mean = std::move(save_mean);
         this->save_std = std::move(save_std);
-        this->input = SavedVariable(input, this);
-        this->weight = SavedVariable(weight, this);
-        this->bias = SavedVariable(bias, this);
+        this->input = SavedVariable(input, false);
+        this->weight = SavedVariable(weight, false);
+        this->bias = SavedVariable(bias, false);
       }
     }
 
@@ -73,9 +77,9 @@ struct BatchNormBackwardBackward : public Function, public BatchNormParams {
       if (is_executable) {
         this->save_mean = std::move(save_mean);
         this->save_std = std::move(save_std);
-        this->input = SavedVariable(input, this);
-        this->weight = SavedVariable(weight, this);
-        this->grad_output = SavedVariable(grad_output, this);
+        this->input = SavedVariable(input, false);
+        this->weight = SavedVariable(weight, false);
+        this->grad_output = SavedVariable(grad_output, false);
       }
     }
 

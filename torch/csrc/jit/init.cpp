@@ -2,7 +2,9 @@
 
 #include "torch/csrc/jit/python_tracer.h"
 #include "torch/csrc/jit/python_ir.h"
+#include "torch/csrc/jit/python_arg_flatten.h"
 #include "torch/csrc/jit/export.h"
+#include "torch/csrc/jit/python_compiled_function.h"
 #include "torch/csrc/jit/passes/graph_fuser.h"
 #include "torch/csrc/jit/passes/onnx.h"
 #include "torch/csrc/jit/passes/dead_code_elimination.h"
@@ -46,10 +48,14 @@ void initJITBindings(PyObject *module) {
    .def("_jit_pass_cse", graph_pass<EliminateCommonSubexpression>)
    .def("_jit_pass_peephole", graph_pass<PeepholeOptimize>)
    .def("_jit_pass_lint", graph_pass<LintGraph>)
-   .def("_jit_run_cpp_tests", runJITCPPTests);
+   .def("_jit_run_cpp_tests", runJITCPPTests)
+   .def("_jit_flatten", [](py::handle& obj) {
+     return python::flatten(obj).vars;
+   });
 
   initPythonIRBindings(module);
   initPythonTracerBindings(module);
+  python::initCompilerMixin(module);
 }
 
 }}

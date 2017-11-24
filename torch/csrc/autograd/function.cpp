@@ -1,3 +1,4 @@
+#include "Python.h"
 #include "function.h"
 
 #include <string>
@@ -66,6 +67,9 @@ variable_list Function::tracedApply(variable_list inputs) {
   // Insert a CppOp in the trace.
   auto& graph = state->graph;
   auto* this_node = graph->createCppOp(getSharedPtr());
+  this_node->setSourceLocation(std::make_shared<SourceLocation>(
+        jit::tracer::getPythonInterpreterStackTrace()
+  ));
   for (auto& input: inputs) {
     this_node->addInput(tracer::getValueTrace(state, input));
   }
@@ -80,7 +84,7 @@ variable_list Function::tracedApply(variable_list inputs) {
   int num_outputs = outputs.size();
   for (int i = 0; i < num_outputs; ++i) {
     auto& output = outputs[i];
-    Node* sel = graph->appendNode(graph->createSelect(this_node, i));
+    auto sel = this_node->addOutput();
     // TODO: At the moment, C++ does not track shared storage.  It
     // should.  Update this when that happens.
     if (output.defined()) {
@@ -110,15 +114,14 @@ variable_list Function::tracedApply(variable_list inputs) {
     }
     bool has_backwards_eval = !should_trace_backward || this_eval;
     if (has_backwards_eval)
-      setUpContextEdge(this_node, num_outputs, inputs, outputs);
+      setUpContextEdge(this_node, inputs, outputs);
   }
   return outputs;
 }
 
-void Function::setUpContextEdge(jit::Node* node, int ctx_output_nr,
+void Function::setUpContextEdge(jit::Node* node,
                                 const variable_list& inputs, const variable_list& outputs) {
-  jit::Graph* graph = node->owningGraph();
-  jit::Node* ctx_select = graph->appendNode(graph->createSelect(node, ctx_output_nr));
+  auto ctx_select = node->addOutput();
   ctx_select->setType(std::make_shared<jit::HandleType>());
   auto backward_eval = Eval::getBackwardEval(inputs, outputs);
   if (backward_eval)

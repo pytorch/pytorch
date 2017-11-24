@@ -2,7 +2,7 @@
 
 #include "torch/csrc/jit/python_tracer.h"
 #include "torch/csrc/jit/tracer.h"
-#include "torch/csrc/jit/assert.h"
+#include "torch/csrc/assertions.h"
 #include "torch/csrc/jit/export.h"
 #include "torch/csrc/jit/pybind.h"
 #include "torch/csrc/utils/python_strings.h"

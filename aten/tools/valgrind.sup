@@ -1,0 +1,11 @@
+{
+   <startup>
+   Memcheck:Cond
+   fun:index
+   fun:expand_dynamic_string_token
+   fun:_dl_map_object
+   fun:map_doit
+   fun:_dl_catch_error
+   fun:handle_ld_preload
+   ...
+}

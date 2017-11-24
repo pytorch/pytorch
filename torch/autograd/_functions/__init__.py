@@ -4,6 +4,5 @@ from .pointwise import *
 from .reduce import *
 from .linalg import *
 from .blas import *
-from .stochastic import *
 from .compare import *
 from .initializers import *

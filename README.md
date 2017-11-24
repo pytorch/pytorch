@@ -15,6 +15,7 @@ We are in an early-release beta. Expect some adventures and rough edges.
   - [Binaries](#binaries)
   - [From Source](#from-source)
   - [Docker Image](#docker-image)
+  - [Previous Versions](#previous-versions)
 - [Getting Started](#getting-started)
 - [Communication](#communication)
 - [Releases and Contributing](#releases-and-contributing)
@@ -176,7 +177,7 @@ conda install numpy pyyaml mkl setuptools cmake cffi
 conda install -c soumith magma-cuda80 # or magma-cuda75 if CUDA 7.5
 ```
 
-On OSX
+On macOS
 ```bash
 export CMAKE_PREFIX_PATH=[anaconda root directory]
 conda install numpy pyyaml setuptools cmake cffi
@@ -192,7 +193,7 @@ On Linux
 python setup.py install
 ```
 
-On OSX
+On macOS
 ```bash
 MACOSX_DEPLOYMENT_TARGET=10.9 CC=clang CXX=clang++ python setup.py install
 ```
@@ -203,6 +204,12 @@ Dockerfile is supplied to build images with cuda support and cudnn v6. Build as 
 ```
 docker build -t pytorch .
 ```
+
+Dockerfile to build with cuda 9 and cudnn v7 (with Volta support) is in tools/docker, the build command is
+
+```
+docker build -t pytorch_cuda9 -f tools/docker/Dockerfile9 .
+```
 Alternatively, if you want to use a runtime image, you can use the pre-built one from Docker Hub and run with nvidia-docker:
 ```
 nvidia-docker run --rm -ti --ipc=host pytorch/pytorch:latest
@@ -210,6 +217,11 @@ nvidia-docker run --rm -ti --ipc=host pytorch/pytorch:latest
 Please note that PyTorch uses shared memory to share data between processes, so if torch multiprocessing is used (e.g.
 for multithreaded data loaders) the default shared memory segment size that container runs with is not enough, and you
 should increase shared memory size either with `--ipc=host` or `--shm-size` command line options to `nvidia-docker run`.
+
+### Previous Versions
+
+Installation instructions and binaries for previous PyTorch versions may be found
+on [our website](http://pytorch.org/previous-versions/).
 
 
 ## Getting Started

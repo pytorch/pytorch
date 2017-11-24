@@ -129,6 +129,12 @@ torch._tensor_classes.add(ShortTensor)
 torch._tensor_classes.add(CharTensor)
 torch._tensor_classes.add(ByteTensor)
 
+torch._integer_tensor_classes.add(LongTensor)
+torch._integer_tensor_classes.add(IntTensor)
+torch._integer_tensor_classes.add(ShortTensor)
+torch._integer_tensor_classes.add(CharTensor)
+torch._integer_tensor_classes.add(ByteTensor)
+
 _type_names = ['Double', 'Float', 'Long', 'Int', 'Short', 'Char', 'Byte']
 _locals = locals()
 _tensors = [_locals[t + 'Tensor'] for t in _type_names]

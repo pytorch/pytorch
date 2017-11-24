@@ -22,9 +22,9 @@ struct VariableType : public at::Type {
   VariableType(Context* context, at::Type* baseType);
   virtual at::ScalarType scalarType() const override;
   virtual at::Backend backend() const override;
-  virtual bool isCuda() const override;
-  virtual bool isSparse() const override;
-  virtual bool isDistributed() const override;
+  virtual bool is_cuda() const override;
+  virtual bool is_sparse() const override;
+  virtual bool is_distributed() const override;
   virtual std::unique_ptr<at::Storage> storage() const override;
   virtual std::unique_ptr<at::Storage> storage(size_t size) const override;
   virtual std::unique_ptr<at::Storage> storageFromBlob(void * data, int64_t size, const std::function<void(void*)> & deleter) const override;
@@ -32,6 +32,8 @@ struct VariableType : public at::Type {
   virtual const char * toString() const override;
   virtual at::TypeID ID() const override;
   virtual size_t elementSizeInBytes() const override;
+  virtual at::Type & toBackend(at::Backend b) const override;
+  virtual at::Type & toScalarType(at::ScalarType s) const override;
   static const char * typeString();
   at::Tensor unsafeTensorFromTH(void * th_pointer, bool retain) const override;
 
@@ -46,13 +48,14 @@ private:
   at::Tensor & unpack_byte(const Tensor & t, const char * name, int pos) const;
   at::Tensor & unpack_any(const Tensor & t, const char * name, int pos) const;
   at::Tensor unpack_opt(const Tensor & t, const char * name, int pos) const;
-  std::vector<at::Tensor> unpack(const at::TensorList &tl, const char *name, int pos) const;
+  std::vector<at::Tensor> unpack(at::TensorList tl, const char *name, int pos) const;
+  std::vector<at::Tensor> unpack_idxs(at::TensorList tl, const char *name, int pos) const;
 
-  Variable as_variable(const Scalar & scalar) const;
   Variable as_variable(Tensor tensor) const;
   std::tuple<Variable, Variable> as_variable(std::tuple<Tensor, Tensor> tensor) const;
   std::tuple<Variable, Variable, Variable> as_variable(std::tuple<Tensor, Tensor, Tensor> tensor) const;
   std::vector<Variable> as_variable(TensorList tensor) const;
+  Variable maybe_wrap(Tensor data, const Variable & self, bool inplace) const;
 
 private:
   at::Type* baseType;

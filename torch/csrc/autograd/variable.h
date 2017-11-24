@@ -9,6 +9,7 @@
 #include <functional>
 #include <ATen/ATen.h>
 
+#include "torch/csrc/assertions.h"
 #include "torch/csrc/jit/ir.h"
 #include "torch/csrc/jit/tracer_state.h"
 #include "torch/csrc/autograd/function_hook.h"
@@ -20,6 +21,17 @@ namespace torch { namespace autograd {
 
 using at::Tensor;
 struct VariableImpl;
+
+// TODO: fix name conflict with jit VariableFlags
+struct VarFlags {
+  constexpr VarFlags(bool requires_grad, bool is_volatile)
+    : requires_grad(requires_grad), is_volatile(is_volatile) {}
+  VarFlags() : VarFlags(false, false) {}
+  bool requires_grad;
+  bool is_volatile;
+};
+
+constexpr VarFlags DEFAULT_FLAGS = {false, false};
 
 struct Variable : public at::Tensor {
   inline Variable(VariableImpl * self, bool retain);
@@ -42,10 +54,16 @@ struct Variable : public at::Tensor {
   inline const Variable & grad() const;
   inline       Variable & grad();
 
+  inline bool is_leaf() const;
+
   inline const std::shared_ptr<Function>& grad_fn() const;
-  inline       std::shared_ptr<Function>& grad_fn();
+
+  // Updates the flags and grad_fn of an existing Variable. Called after in-place modifications.
+  inline void rebase_history(VarFlags flags, int output_nr, std::shared_ptr<Function> grad_fn);
 
   std::shared_ptr<Function> grad_accumulator() const;
+  Variable detach() const;
+  void detach_();
 
   inline const std::vector<std::shared_ptr<FunctionPreHook>>& hooks() const;
   inline       std::vector<std::shared_ptr<FunctionPreHook>>& hooks();
@@ -65,6 +83,12 @@ struct Variable : public at::Tensor {
   inline const bool& is_volatile() const;
   inline       bool& is_volatile();
 
+  inline bool is_view() const;
+  inline Variable& base() const;
+
+  inline const std::string& name() const;
+  inline       std::string& name();
+
   inline Variable & operator=(Variable && rhs) &;
   inline Variable & operator=(const Variable & rhs) &;
   inline Variable & operator=(Tensor && rhs) &;
@@ -73,9 +97,8 @@ struct Variable : public at::Tensor {
 
 struct VariableImpl : public at::TensorImpl {
 public:
-  explicit VariableImpl(at::Tensor data);
-  VariableImpl(at::Tensor data, std::shared_ptr<Function> grad_fn);
-  VariableImpl(at::Tensor data, bool requires_grad, bool is_volatile=false);
+  VariableImpl(at::Tensor data, VarFlags flags=DEFAULT_FLAGS, int output_nr=0,
+               std::shared_ptr<Function> grad_fn=nullptr);
   virtual ~VariableImpl();
   virtual const char * toString() const override;
   virtual at::IntList sizes() const override;
@@ -84,6 +107,7 @@ public:
   virtual at::Scalar localScalar() override;
   virtual void assign_(at::Scalar s) override;
   virtual void * unsafeGetTH(bool retain) override;
+  virtual std::unique_ptr<at::Storage> storage() override;
   static const char * typeString();
 
   // Get the VariableType for a base Tensor type
@@ -92,16 +116,20 @@ public:
 
 public:
   std::shared_ptr<Function> get_grad_accumulator();
+  virtual std::shared_ptr<Function>& get_grad_fn() { return _grad_fn; }
 
   at::Tensor data;
   Variable grad;
-  std::shared_ptr<Function> grad_fn;
+  std::shared_ptr<Function> _grad_fn;
   VariableVersion version_counter;
   std::vector<std::shared_ptr<FunctionPreHook>> hooks;
   std::weak_ptr<Function> grad_accumulator;
-  std::mutex grad_accumulator_lock;
+  // Mutex to ensure that concurrent read operations that modify internal state
+  // are still thread-safe. Used by get_grad_fn and get_grad_accumulator.
+  std::mutex mutex;
   bool requires_grad;
   bool is_volatile;
+  bool is_view;
   // The "output number" of this variable; e.g., if this variable
   // was the second output of a function, then output_nr == 1.
   // We use this to make sure we can setup the backwards trace
@@ -109,21 +137,60 @@ public:
   int output_nr;
   PyObject *pyobj;  // weak reference
 
+  std::string name;
+
   // For use in torch::jit::tracer
   auto_unique_ptr<jit::tracer::ValueTracingState> tracing_state;
   friend struct VariableType;
 };
 
-inline Variable make_variable(at::Tensor data) {
-  return Variable(new VariableImpl(std::move(data)), false);
+// A Variable that is a view on another Variable. The base and view share the
+// same version_counter. The _grad_fn field of the Variable may become stale
+// due to in-place modifications of the shared data. Accesses should go through
+// get_grad_fn(). All other fields are always valid.
+struct VariableViewImpl : public VariableImpl {
+  VariableViewImpl(Variable base, at::Tensor data, VarFlags flags, int output_nr,
+                   std::shared_ptr<Function> grad_fn);
+
+  // Gets the up-to-date grad_fn. If the shared data or base was modified, we
+  // re-create the grad_fn to express the up-to-date view relationship between
+  // this and the base Variable.
+  virtual std::shared_ptr<Function>& get_grad_fn() override;
+
+  // Called after in-place modifications. Modifies the grad_fn of the base
+  // Variable.
+  void rebase_history(VarFlags flags, int output_nr, std::shared_ptr<Function> grad_fn);
+
+  // The base Variable (never a view)
+  Variable base;
+
+  // The value of the version_counter at the time grad_fn was created. The
+  // _grad_fn field is stale if attr_version != version_counter.current_version()
+  int attr_version;
+};
+
+inline Variable make_variable(at::Tensor data, VarFlags flags=DEFAULT_FLAGS,
+                              int output_nr=0, std::shared_ptr<Function> grad_fn=nullptr) {
+  if (data.defined() && data.dim() == 0) {
+    // don't expose 0-dim tensors to Variable API.
+    data = data.as_strided_({1}, {1});
+  }
+  return Variable(new VariableImpl(std::move(data), flags, output_nr, std::move(grad_fn)), false);
 }
 
-inline Variable make_variable(at::Tensor data, std::shared_ptr<Function> grad_fn) {
-  return Variable(new VariableImpl(std::move(data), std::move(grad_fn)), false);
-}
+Variable make_variable(at::Tensor data, std::shared_ptr<Function> grad_fn);
 
 inline Variable make_variable(at::Tensor data, bool requires_grad, bool is_volatile=false) {
-  return Variable(new VariableImpl(std::move(data), requires_grad, is_volatile), false);
+  return make_variable(std::move(data), VarFlags(requires_grad, is_volatile));
+}
+
+inline Variable make_variable_view(Variable base, at::Tensor data, VarFlags flags=DEFAULT_FLAGS,
+                                   int output_nr=0, std::shared_ptr<Function> grad_fn=nullptr) {
+  if (data.defined() && data.dim() == 0) {
+    // don't expose 0-dim tensors to Variable API.
+    data = data.as_strided_({1}, {1});
+  }
+  return Variable(new VariableViewImpl(std::move(base), std::move(data), flags, output_nr, std::move(grad_fn)), false);
 }
 
 
@@ -155,12 +222,24 @@ inline Variable & Variable::grad() {
   return get()->grad;
 }
 
+inline bool Variable::is_leaf() const {
+  return get()->_grad_fn == nullptr;
+}
+
 inline const std::shared_ptr<Function>& Variable::grad_fn() const {
-  return get()->grad_fn;
+  return get()->get_grad_fn();
 };
-inline std::shared_ptr<Function>& Variable::grad_fn() {
-  return get()->grad_fn;
-};
+inline void Variable::rebase_history(VarFlags flags, int output_nr, std::shared_ptr<Function> grad_fn) {
+  if (is_view()) {
+    auto& impl = static_cast<VariableViewImpl&>(*get());
+    impl.rebase_history(flags, output_nr, std::move(grad_fn));
+  } else {
+    get()->requires_grad = flags.requires_grad;
+    get()->is_volatile = flags.is_volatile;
+    get()->output_nr = output_nr;
+    get()->_grad_fn = std::move(grad_fn);
+  }
+}
 inline std::shared_ptr<Function> Variable::grad_accumulator() const {
   return get()->get_grad_accumulator();
 };
@@ -199,11 +278,28 @@ inline bool& Variable::requires_grad() {
   return get()->requires_grad;
 }
 
+inline const std::string& Variable::name() const {
+  return get()->name;
+}
+inline std::string& Variable::name() {
+  return get()->name;
+}
+
 inline const bool& Variable::is_volatile() const {
   return get()->is_volatile;
 }
 inline bool& Variable::is_volatile() {
   return get()->is_volatile;
+}
+
+inline bool Variable::is_view()const {
+  return get()->is_view;
+}
+inline Variable& Variable::base() const {
+  if (is_view()) {
+    return static_cast<VariableViewImpl&>(*get()).base;
+  }
+  throw std::runtime_error("Can't get base of non-view");
 }
 
 inline Variable & Variable::operator=(Variable && rhs) & {

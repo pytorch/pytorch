@@ -2,6 +2,7 @@
 
 #include <string>
 #include "torch/csrc/utils/python_strings.h"
+#include "torch/csrc/utils/python_tuples.h"
 #include "THP.h"
 
 PyObject* THPSizeClass = NULL;
@@ -10,16 +11,14 @@ struct THPSize {
   PyTupleObject tuple;
 };
 
-PyObject * THPSize_New(int dim, int64_t *sizes)
+PyObject * THPSize_New(int dim, const int64_t *sizes)
 {
   PyTypeObject* type = (PyTypeObject*)THPSizeClass;
   PyObject* self = type->tp_alloc(type, dim);
   if (!self) {
     return NULL;
   }
-  for (int i = 0; i < dim; ++i) {
-    PyTuple_SET_ITEM(self, i, PyLong_FromLong(sizes[i]));
-  }
+  THPUtils_packInt64Array(self, dim, sizes);
   return self;
 }
 
@@ -64,12 +63,16 @@ static PyObject* wrap_tuple_fn(Args ... args)
   return result.release();
 }
 
-static auto sq_concat = PyTuple_Type.tp_as_sequence->sq_concat;
-static auto sq_repeat = PyTuple_Type.tp_as_sequence->sq_repeat;
-#if PY_MAJOR_VERSION == 2
-static auto sq_slice = PyTuple_Type.tp_as_sequence->sq_slice;
-#endif
-static auto mp_subscript = PyTuple_Type.tp_as_mapping->mp_subscript;
+// We use an anonymous namespace instead of static to work around
+// (what @peterjc123 think is) a bug in Visual Studio
+namespace {
+  auto sq_concat = PyTuple_Type.tp_as_sequence->sq_concat;
+  auto sq_repeat = PyTuple_Type.tp_as_sequence->sq_repeat;
+  #if PY_MAJOR_VERSION == 2
+  auto sq_slice = PyTuple_Type.tp_as_sequence->sq_slice;
+  #endif
+  binaryfunc mp_subscript = PyTuple_Type.tp_as_mapping->mp_subscript;
+}
 
 
 static PySequenceMethods THPSize_as_sequence = {

@@ -62,6 +62,11 @@ class Sequential(Module):
     def __len__(self):
         return len(self._modules)
 
+    def __dir__(self):
+        keys = super(Sequential, self).__dir__()
+        keys = [key for key in keys if not key.isdigit()]
+        return keys
+
     def forward(self, input):
         for module in self._modules.values():
             input = module(input)
@@ -114,6 +119,11 @@ class ModuleList(Module):
 
     def __iadd__(self, modules):
         return self.extend(modules)
+
+    def __dir__(self):
+        keys = super(ModuleList, self).__dir__()
+        keys = [key for key in keys if not key.isdigit()]
+        return keys
 
     def append(self, module):
         r"""Appends a given module at the end of the list.
@@ -185,6 +195,11 @@ class ParameterList(Module):
 
     def __iadd__(self, parameters):
         return self.extend(parameters)
+
+    def __dir__(self):
+        keys = super(ParameterList, self).__dir__()
+        keys = [key for key in keys if not key.isdigit()]
+        return keys
 
     def append(self, parameter):
         """Appends a given parameter at the end of the list.

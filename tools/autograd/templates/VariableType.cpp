@@ -1,3 +1,4 @@
+#include "Python.h"
 #include "VariableType.h"
 
 // ${generated_comment}
@@ -49,9 +50,9 @@ ScalarType VariableType::scalarType() const {
 Backend VariableType::backend() const {
   return baseType->backend();
 }
-bool VariableType::isCuda() const { return baseType->isCuda(); }
-bool VariableType::isSparse() const { return baseType->isSparse(); }
-bool VariableType::isDistributed() const { return baseType->isDistributed(); }
+bool VariableType::is_cuda() const { return baseType->is_cuda(); }
+bool VariableType::is_sparse() const { return baseType->is_sparse(); }
+bool VariableType::is_distributed() const { return baseType->is_distributed(); }
 
 std::unique_ptr<Storage> VariableType::storage() const {
   return baseType->storage();
@@ -74,6 +75,12 @@ const char * VariableType::toString() const {
 }
 size_t VariableType::elementSizeInBytes() const {
   return baseType->elementSizeInBytes();
+}
+Type & VariableType::toBackend(Backend b) const {
+  return *VariableImpl::getType(baseType->toBackend(b));
+}
+Type & VariableType::toScalarType(ScalarType s) const {
+  return *VariableImpl::getType(baseType->toScalarType(s));
 }
 TypeID VariableType::ID() const {
   throw std::runtime_error("VariableType::ID() not implemented");
@@ -115,7 +122,8 @@ Tensor & VariableType::unpack_any(const Tensor & t, const char * name, int pos) 
         pos, name);
   }
   auto scalarType = t.type().scalarType();
-  auto& type = *VariableImpl::getType(baseType->toScalarType(scalarType));
+  auto backend = t.type().backend();
+  auto& type = *VariableImpl::getType(baseType->toScalarType(scalarType).toBackend(backend));
   return checked_cast(type, t, name, pos).data();
 }
 
@@ -126,7 +134,7 @@ Tensor VariableType::unpack_opt(const Tensor & t, const char * name, int pos) co
   return unpack(t, name, pos);
 }
 
-std::vector<at::Tensor> VariableType::unpack(const at::TensorList &tl, const char *name, int pos) const {
+std::vector<at::Tensor> VariableType::unpack(at::TensorList tl, const char *name, int pos) const {
   std::vector<at::Tensor> ret(tl.size());
   for (size_t i = 0; i < tl.size(); ++i) {
     const auto &t = tl[i];
@@ -136,11 +144,31 @@ std::vector<at::Tensor> VariableType::unpack(const at::TensorList &tl, const cha
                     toString(), i, pos, name);
     }
     if (&t.type() == this) {
-      ret[i] = static_cast<VariableImpl*>(t.pImpl)->data;
+      ret[i] = static_cast<const Variable&>(t).data();
     } else {
       runtime_error("Expected object of type %s but found type %s at position #%d "
                     "for iterable argument #%d '%s'",
                     toString(),t.type().toString(), i, pos, name);
+    }
+  }
+  return ret;
+}
+
+std::vector<at::Tensor> VariableType::unpack_idxs(at::TensorList tl, const char *name, int pos) const {
+  auto& longType = *VariableImpl::getType(baseType->toScalarType(kLong));
+  auto& byteType = *VariableImpl::getType(baseType->toScalarType(kByte));
+  std::vector<at::Tensor> ret(tl.size());
+  for (size_t i = 0; i < tl.size(); ++i) {
+    const auto &t = tl[i];
+    if (!t.defined()) {
+      continue;
+    } else if (!(t.type() == longType || t.type() == byteType)) {
+      runtime_error("Expected object of type %s or %s but found type %s at position #%d "
+                    "for iterable argument #%d '%s'",
+                    longType.toString(), byteType.toString(), t.type().toString(),
+                    i, pos, name);
+    } else  {
+      ret[i] = static_cast<const Variable&>(t).data();
     }
   }
   return ret;
@@ -173,22 +201,22 @@ std::vector<Variable> VariableType::as_variable(TensorList tl) const {
   return variables;
 }
 
-Variable VariableType::as_variable(const Scalar & scalar) const {
-  auto tensor = scalar.toTensor();
-  if (&tensor.type() != baseType) {
-    tensor = tensor.toType(*baseType);
+static Variable as_view(Variable base, Tensor tensor) {
+  if (base.is_view()) {
+    base = base.base();
   }
-  return make_variable(std::move(tensor));
+  return make_variable_view(std::move(base), std::move(tensor));
 }
 
-struct VariableFlags {
-  bool requires_grad;
-  bool is_volatile;
-};
+static void ensure_no_aten_scalars(Tensor & data) {
+  if (data.defined() && data.dim() == 0) {
+    data.as_strided_({1}, {1});
+  }
+}
 
 template<typename T>
-static VariableFlags compute_flags_tmpl(T tensors) {
-  VariableFlags flags = {false, false};
+static VarFlags compute_flags_tmpl(T tensors) {
+  VarFlags flags = {false, false};
   for (const Tensor& tensor : tensors) {
     auto& var = static_cast<const Variable&>(tensor);
     if (var.defined()) {
@@ -214,11 +242,11 @@ static variable_list cast_tensor_list(const TensorList& tensors) {
   return variable_list(tensors.begin(), tensors.end());
 }
 
-static VariableFlags compute_flags(const TensorRefList& tensors) {
+static VarFlags compute_flags(const TensorRefList& tensors) {
   return compute_flags_tmpl(tensors);
 }
 
-static VariableFlags compute_flags(TensorList tensors) {
+static VarFlags compute_flags(TensorList tensors) {
   return compute_flags_tmpl(tensors);
 }
 
@@ -246,27 +274,35 @@ static void check_inplace(const Tensor& tensor) {
     at::runtime_error(
       "a leaf Variable that requires grad has been used in an in-place operation.");
   }
-  auto live_refs = var.version_counter().live_refs();
-  if (live_refs > 1) {
-    at::runtime_error(
-      "in-place operations can be only used on variables that don't share "
-      "storage with any other variables, but detected that there are %d objects "
-      "sharing it", live_refs);
-  }
 }
 
-static void set_flags(Variable& var, VariableFlags flags, std::shared_ptr<Function> grad_fn) {
-  var.requires_grad() = flags.requires_grad;
-  var.is_volatile() = flags.is_volatile;
+static void set_flags(Variable& var, VarFlags flags, std::shared_ptr<Function> grad_fn, bool inplace=false, int output_nr = 0) {
   if (grad_fn) {
-    var.output_nr() = grad_fn->num_inputs++;
-    var.grad_fn() = std::move(grad_fn);
+    grad_fn->num_inputs = 1;
+  }
+  if (inplace) {
+    var.rebase_history(flags, output_nr, std::move(grad_fn));
+  } else {
+    // TODO: combine this code path with the Variable construction
+    var.get()->requires_grad = flags.requires_grad;
+    var.get()->is_volatile = flags.is_volatile;
+    var.get()->output_nr = output_nr;
+    var.get()->_grad_fn = std::move(grad_fn);
   }
 }
 
-static void set_flags(std::vector<Variable> &vl, VariableFlags flags, std::shared_ptr<Function> grad_fn) {
-  for (auto& v : vl) {
-    set_flags(v, flags, grad_fn);
+static void set_flags(at::ArrayRef<Variable> vl, VarFlags flags, std::shared_ptr<Function> grad_fn) {
+  if (grad_fn) {
+    grad_fn->num_inputs = vl.size();
+  }
+  int64_t output_nr = 0;
+  for (auto& var : vl) {
+    // TODO: combine this with the Variable construction
+    var.get()->requires_grad = flags.requires_grad;
+    var.get()->is_volatile = flags.is_volatile;
+    var.get()->output_nr = output_nr;
+    var.get()->_grad_fn = grad_fn;
+    output_nr++;
   }
 }
 
@@ -283,14 +319,6 @@ static void increment_version(const Tensor & t) {
   var.version_counter().increment();
 }
 
-static void take_version_counter(Tensor & dst, const Tensor & src) {
-  // replaces the version counter in dst with the one in src
-  // call when dst is a view of src
-  auto& src_var = static_cast<const Variable&>(src);
-  auto& dst_var = static_cast<Variable&>(dst);
-  dst_var.version_counter() = src_var.version_counter();
-}
-
 static bool isFloatingPoint(ScalarType s) {
   return s == kFloat || s == kDouble || s == kHalf;
 }
@@ -301,21 +329,24 @@ void VariableType::s_copy(const Tensor & src, Tensor & dst) const {
   auto& src_ = unpack_any(src, "src", 0);
   auto& dst_ = unpack(dst, "dst", 1);
   check_inplace(dst);
-  std::shared_ptr<Identity> grad_fn;
-  auto flags = compute_flags({ src });
+  std::shared_ptr<CopyBackwards> grad_fn;
+  auto flags = compute_flags({ dst, src });
   flags.requires_grad &= isFloatingPoint(dst.type().scalarType());
   if (flags.requires_grad) {
-    // TODO: handle type conversions
-    grad_fn = std::make_shared<Identity>();
+    // TODO: handle device movement
+    grad_fn = std::make_shared<CopyBackwards>();
     grad_fn->is_executable = true;
-    grad_fn->next_functions = compute_next_functions({ src });
+    grad_fn->next_functions = compute_next_functions({ dst, src });
+    grad_fn->num_inputs = 1;
+    grad_fn->src_type = &src.type();
+    grad_fn->src_device = src.is_cuda() ? src.get_device() : -1;
   }
   baseType->s_copy(src_, dst_);
   increment_version(dst);
-  set_flags(static_cast<Variable&>(dst), flags, std::move(grad_fn));
+  set_flags(static_cast<Variable&>(dst), flags, std::move(grad_fn), true);
 }
 
-Tensor & VariableType::m_resize_(Tensor & self, IntList size) const {
+Tensor & VariableType::resize_(Tensor & self, IntList size) const {
   auto& self_ = unpack(self, "self", 0);
   check_inplace(self);
   auto& self_var = static_cast<Variable&>(self);
@@ -325,15 +356,15 @@ Tensor & VariableType::m_resize_(Tensor & self, IntList size) const {
   if (self_var.requires_grad()) {
     at::runtime_error("cannot resize variables which require grad");
   }
-  baseType->m_resize_(self_, size);
+  baseType->resize_(self_, size);
   return self;
 }
 
-Tensor & VariableType::m_resize_as_(Tensor & self, const Tensor & the_template) const {
-  return m_resize_(self, the_template.sizes());
+Tensor & VariableType::resize_as_(Tensor & self, const Tensor & the_template) const {
+  return resize_(self, the_template.sizes());
 }
 
-Tensor VariableType::m_contiguous(const Tensor & self) const {
+Tensor VariableType::contiguous(const Tensor & self) const {
   unpack(self, "self", 0);
   if (self.is_contiguous()) {
     return self;

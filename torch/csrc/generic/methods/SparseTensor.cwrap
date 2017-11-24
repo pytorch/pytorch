@@ -59,7 +59,7 @@ PyObject * THSPTensor_(new)(THPTensor *self, PyObject *args, PyObject *kwargs)
   name: nDimension
   sparse: yes
   python_name: ndimension
-  return: long
+  return: int64_t
   arguments:
   - THSTensor* self
 ]]
@@ -75,7 +75,7 @@ PyObject * THSPTensor_(new)(THPTensor *self, PyObject *args, PyObject *kwargs)
   name: nnz
   python_name: _nnz
   sparse: yes
-  return: long
+  return: int64_t
   arguments:
   - THSTensor* self
 ]]
@@ -172,8 +172,8 @@ PyObject * THSPTensor_(new)(THPTensor *self, PyObject *args, PyObject *kwargs)
   return: THSTensor*
   arguments:
   - THSTensor* self
-  - long dim0
-  - long dim1
+  - int64_t dim0
+  - int64_t dim1
 ]]
 
 [[
@@ -183,8 +183,8 @@ PyObject * THSPTensor_(new)(THPTensor *self, PyObject *args, PyObject *kwargs)
   return: argument 0
   arguments:
   - THSTensor* self
-  - long dim0
-  - long dim1
+  - int64_t dim0
+  - int64_t dim1
 ]]
 
 [[
@@ -196,8 +196,8 @@ PyObject * THSPTensor_(new)(THPTensor *self, PyObject *args, PyObject *kwargs)
   cname: newTranspose
   return: THSTensor*
   before_call: |
-    long nDimI = ((THSPTensor*)${arg0})->cdata->nDimensionI;
-    long nDimV = ((THSPTensor*)${arg0})->cdata->nDimensionV;
+    int64_t nDimI = ((THSPTensor*)${arg0})->cdata->nDimensionI;
+    int64_t nDimV = ((THSPTensor*)${arg0})->cdata->nDimensionV;
     THPUtils_assert(nDimI == 2 && nDimV == 0, "t() expects a 2D sparse tensor, but self is %ldD indices and %ldD values", nDimI, nDimV);
   arguments:
     - THSTensor* self
@@ -211,8 +211,8 @@ PyObject * THSPTensor_(new)(THPTensor *self, PyObject *args, PyObject *kwargs)
   cname: transpose
   return: self
   before_call: |
-    long nDimI = ((THSPTensor*)${arg0})->cdata->nDimensionI;
-    long nDimV = ((THSPTensor*)${arg0})->cdata->nDimensionV;
+    int64_t nDimI = ((THSPTensor*)${arg0})->cdata->nDimensionI;
+    int64_t nDimV = ((THSPTensor*)${arg0})->cdata->nDimensionV;
     THPUtils_assert(nDimI == 2 && nDimV == 0, "t_() expects a 2D sparse tensor, but self is %ldD indices and %ldD values", nDimI, nDimV);
   arguments:
     - THSTensor* self
@@ -522,7 +522,7 @@ PyObject * THSPTensor_(new)(THPTensor *self, PyObject *args, PyObject *kwargs)
   python_name: get_device
   backends:
     - CUDA
-  return: long
+  return: int64_t
   arguments:
     - THSTensor* self
 ]]

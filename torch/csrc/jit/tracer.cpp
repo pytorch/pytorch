@@ -1,11 +1,37 @@
+#include "Python.h"
 #include "torch/csrc/jit/tracer.h"
 
 #include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/autograd/function.h"
 #include "torch/csrc/autograd/python_engine.h"
 #include "torch/csrc/autograd/functions/special.h"
+#include "torch/csrc/utils/auto_gil.h"
+#include "torch/csrc/utils/python_strings.h"
+
+#include <frameobject.h>
+#include <patchlevel.h>
 
 namespace torch { namespace jit { namespace tracer {
+
+// Python interpreter retrieval routine adapted from
+// https://stackoverflow.com/a/8706144
+std::string getPythonInterpreterStackTrace() {
+  std::stringstream stack_trace;
+  AutoGIL gil;
+  PyThreadState *tstate = PyThreadState_GET();
+  if (NULL != tstate && NULL != tstate->frame) {
+    PyFrameObject *frame = tstate->frame;
+
+    while (NULL != frame) {
+      int line = PyCode_Addr2Line(frame->f_code, frame->f_lasti);
+      std::string filename = THPUtils_unpackString(frame->f_code->co_filename);
+      std::string funcname = THPUtils_unpackString(frame->f_code->co_name);
+      stack_trace << filename << "(" << line << "): " << funcname << "\n";
+      frame = frame->f_back;
+    }
+  }
+  return stack_trace.str();
+}
 
 namespace {
 
@@ -50,7 +76,7 @@ struct TraceEval : autograd::Eval {
     graph->advanceStage();
 
     for (auto & input : inputs) {
-      Node *input_node = graph->addInput();
+      Value *input_node = graph->addInput();
       if (!input.defined()) continue;
       JIT_ASSERT(!detail::getValueState(tracing_state, input, false));
       setValueTrace(tracing_state, input, input_node);
@@ -98,7 +124,10 @@ Node* recordTrace(std::string op, // TODO: make this a Symbol
   // haven't actually specified what the locking contract is, be conservative.
   auto state_lock = state->lock();
 
-  Node *n = graph->create(stringToSymbol(op));
+  Node *n = graph->create(stringToSymbol(op), 0 /* initial outputs */);
+  auto sl = std::make_shared<SourceLocation>(getPythonInterpreterStackTrace());
+  n->setSourceLocation(sl);
+
   for (Variable input : inputs) {
     n->addInput(getValueTrace(state, input));
   }
@@ -106,18 +135,15 @@ Node* recordTrace(std::string op, // TODO: make this a Symbol
   // NB: Order matters. This must append after inputs but before outputs.
   graph->appendNode(n);
 
-  auto assignOutput = [&state](const Variable & output, Node * value) {
+  auto assignOutput = [&state](const Variable & output, Value * value) {
     if (output.defined()) {
       value->inferTypeFrom(output.data());
       setValueTrace(state, output, value);
     }
   };
-  if(outputs.size() == 1) {
-    assignOutput(outputs[0],n);
-  } else {
-    for(size_t i = 0; i < outputs.size(); i++) {
-      assignOutput(outputs[i], graph->appendNode(graph->createSelect(n, i)));
-    }
+
+  for(size_t i = 0; i < outputs.size(); i++) {
+    assignOutput(outputs[i], n->addOutput());
   }
 
   // Return the n so that attributes can be added.

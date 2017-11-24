@@ -4,11 +4,12 @@
 #include "torch/csrc/jit/fusion_compiler.h"
 #endif
 #include "torch/csrc/jit/code_template.h"
-#include "torch/csrc/jit/assert.h"
+#include "torch/csrc/assertions.h"
 #include "torch/csrc/jit/ir.h"
 #include "torch/csrc/jit/attributes.h"
 #include "torch/csrc/jit/interned_strings.h"
 #include <vector>
+#include "torch/csrc/jit/interpreter.h"
 
 namespace torch { namespace jit {
 
@@ -79,8 +80,8 @@ static void codeTemplateTest() {
 }
 
 #ifdef WITH_CUDA
-Node * appendNewNode(NodeKind kind, Graph& graph, ArrayRef<Node*> inputs) {
-  return graph.appendNode(graph.create(kind,inputs));
+Value * appendNewNode(NodeKind kind, Graph& graph, ArrayRef<Value*> inputs) {
+  return graph.appendNode(graph.create(kind,inputs))->output();
 }
 
 static void fusionTests() {
@@ -89,8 +90,8 @@ static void fusionTests() {
 
   auto testSimple = [&] {
     Graph graph;
-    Node * i0 = graph.addInput();
-    Node * i1 = graph.addInput();
+    Value * i0 = graph.addInput();
+    Value * i1 = graph.addInput();
     auto o0 = appendNewNode(kmul,graph,{i0, i1});
     graph.registerOutput(o0);
     auto a = at::CUDA(at::kFloat).rand({3,4});
@@ -98,7 +99,7 @@ static void fusionTests() {
     auto o = at::CUDA(at::kFloat).zeros({3,4});
     comp.debugLaunchGraph(graph, {a,b}, {o});
     auto o2 = a*b;
-    float max_diff = (o2 - o).abs().max().toDouble();
+    float max_diff = (o2 - o).abs().max().toCDouble();
     //std::cout << "max diff: " << max_diff << "\n";
     JIT_ASSERT(max_diff == 0);
   };
@@ -108,11 +109,11 @@ static void fusionTests() {
 
     Graph graph;
 
-    Node * i0 = graph.addInput();
-    Node * i1 = graph.addInput();
-    Node * i2 = graph.addInput();
-    Node * i3 = graph.addInput();
-    Node * i4 = graph.addInput();
+    Value * i0 = graph.addInput();
+    Value * i1 = graph.addInput();
+    Value * i2 = graph.addInput();
+    Value * i3 = graph.addInput();
+    Value * i4 = graph.addInput();
 
     auto p22 = appendNewNode(ksigmoid,graph,{i4});
     auto p20 = appendNewNode(ksigmoid,graph,{i3});
@@ -121,6 +122,7 @@ static void fusionTests() {
     auto p14 = appendNewNode(kmul,graph,{p20, i0});
     auto p11 = appendNewNode(kmul,graph,{p22, p18});
     auto o1 = appendNewNode(kadd,graph,{p14, p11});
+    o1->node()->t_(kalpha, at::Scalar(1).toTensor());
     auto p5 = appendNewNode(ktanh,graph,{o1});
     auto o0 = appendNewNode(kmul,graph,{p16, p5});
 
@@ -160,7 +162,7 @@ static void fusionTests() {
     //auto out0 = inputs[0]*inputs[1];
     comp.debugLaunchGraph(graph, inputs, outputs);
     JIT_ASSERT(out0.is_same_size(outputs.front()));
-    float max_diff = (outputs.front() - out0).abs().max().toDouble();
+    float max_diff = (outputs.front() - out0).abs().max().toCDouble();
     JIT_ASSERT(max_diff < 1e-6);
 
   };
@@ -177,11 +179,11 @@ static void fusionTests() {
 
   auto testConcat = [&](int dim) {
     Graph graph;
-    Node * i0 = graph.addInput();
-    Node * i1 = graph.addInput();
+    Value * i0 = graph.addInput();
+    Value * i1 = graph.addInput();
     auto o0 = appendNewNode(kmul,graph,{i0, i1});
     graph.registerOutput(o0);
-    graph.registerOutput(appendNewNode(kcat, graph, {i0,o0})->i_(kdim, dim));
+    graph.registerOutput(appendNewNode(kcat, graph, {i0,o0})->node()->i_(kdim, dim)->output());
     auto a = at::CUDA(at::kFloat).rand({3,4,5});
     auto b = at::CUDA(at::kFloat).rand({4,3,5}).transpose(0,1);
     auto o = at::CUDA(at::kFloat).zeros({3,4,5});
@@ -191,9 +193,9 @@ static void fusionTests() {
     auto o2 = at::CUDA(at::kFloat).zeros(o2_r.sizes());
     comp.debugLaunchGraph(graph, {a,b}, {o, o2});
 
-    float max_diff = (o_r - o).abs().max().toDouble();
+    float max_diff = (o_r - o).abs().max().toCDouble();
     JIT_ASSERT(max_diff == 0);
-    float max_diff2 = (o2_r - o2).abs().max().toDouble();
+    float max_diff2 = (o2_r - o2).abs().max().toCDouble();
     JIT_ASSERT(max_diff2 == 0);
   };
   testConcat(0);
@@ -245,7 +247,209 @@ void internedStringsTests () {
 }
 
 
+
+at::Tensor t_use(at::Tensor x) {
+  return x;
+}
+at::Tensor t_def(at::Tensor x) {
+  return x.t();
+}
+
+// given the difference of output vs expected tensor, check whether the
+// difference is within a relative tolerance range. This is a standard way of
+// matching tensor values upto certain precision
+bool checkRtol(const at::Tensor& diff, const std::vector<at::Tensor> inputs) {
+  double maxValue = 0.0;
+  for (auto& tensor : inputs) {
+    maxValue = fmax(tensor.abs().max().toCFloat(), maxValue);
+  }
+  return diff.abs().max().toCFloat() < 2e-6 * maxValue;
+}
+bool almostEqual(const at::Tensor & a, const at::Tensor & b) {
+  return checkRtol(a - b,{a, b});
+}
+
+bool exactlyEqual(const at::Tensor & a, const at::Tensor & b) {
+  return (a - b).abs().max().toCFloat() == 0.f;
+}
+
+std::pair<at::Tensor, at::Tensor>
+lstm(at::Tensor input,
+      at::Tensor hx,
+      at::Tensor cx,
+      at::Tensor w_ih,
+      at::Tensor w_hh) {
+  auto gates = input.mm(t_use(w_ih)) + hx.mm(t_use(w_hh));
+
+  auto chunked_gates = gates.chunk(4, 1);
+  auto ingate     = chunked_gates[0];
+  auto forgetgate = chunked_gates[1];
+  auto cellgate = chunked_gates[2];
+  auto outgate    = chunked_gates[3];
+
+  ingate = ingate.sigmoid();
+  outgate = outgate.sigmoid();
+  cellgate = cellgate.tanh();
+  forgetgate = forgetgate.sigmoid();
+
+  auto cy = (forgetgate * cx) + (ingate * cellgate);
+  auto hy = outgate * cy.tanh();
+
+  return {hy, cy};
+}
+
+Symbol sym(const char * str) {
+  return stringToSymbol(str);
+}
+
+Value * node(Graph& graph, const char * n, ArrayRef<Value*> inputs) {
+  return graph.appendNode(graph.create(sym(n),inputs))->output();
+}
+
+Value * add(Graph & g, Value * a, Value * b) {
+  auto r = node(g, "add", {a,b});
+  r->node()->t_(sym("alpha"), at::Scalar(1).toTensor());
+  return r;
+}
+
+std::tuple<Value*, Value*> build_lstm_body(
+  Graph & g,
+  Value * input,
+  Value * hx,
+  Value * cx,
+  Value * w_ih,
+  Value * w_hh) {
+    auto gates = add(g, node(g,"mm",{ input, w_ih }), node(g, "mm", {hx, w_hh}));
+    auto chunked_gates = g.appendNode(g.create(sym("chunk"),{ gates }, 4))
+      ->i_(sym("chunks"), 4)
+      ->i_(sym("dim"), 1);
+    auto outputs = chunked_gates->outputs();
+    auto ingate = outputs[0];
+    auto forgetgate = outputs[1];
+    auto cellgate = outputs[2];
+    auto outgate = outputs[3];
+    ingate = node(g,"sigmoid",{ingate});
+    outgate = node(g,"sigmoid",{outgate});
+    cellgate = node(g,"tanh",{cellgate});
+    forgetgate = node(g,"sigmoid",{forgetgate});
+
+    auto cy = add(g, node(g,"mul", {forgetgate, cx}) , node(g, "mul", {ingate, cellgate}));
+    auto hy = node(g, "mul", {outgate, node(g, "tanh", {cy})});
+
+    return std::make_tuple(hy,cy);
+}
+
+std::shared_ptr<Graph> build_lstm() {
+  auto r = std::make_shared<Graph>();
+  auto & g = *r;
+  Value * input = g.addInput();
+  Value * hx = g.addInput();
+  Value * cx = g.addInput();
+  Value * w_ih = g.addInput();
+  Value * w_hh = g.addInput();
+
+  Value * hy;
+  Value * cy;
+  std::tie(hy,cy) = build_lstm_body(g, input, hx, cx, w_ih, w_hh);
+
+  g.registerOutput(hy);
+  g.registerOutput(cy);
+  g.lint();
+
+  return r;
+}
+
+std::shared_ptr<Graph> build_lstm_stages() {
+  auto r = std::make_shared<Graph>();
+  auto & g = *r;
+  Value * input = g.addInput();
+  Value * hx = g.addInput();
+  Value * cx = g.addInput();
+  Value * w_ih = g.addInput();
+  Value * w_hh = g.addInput();
+
+  Value * hy;
+  Value * cy;
+  std::tie(hy,cy) = build_lstm_body(g, input, hx, cx, w_ih, w_hh);
+
+  // use some stuff from the previous stage as well
+  // as a new input
+  g.advanceStage();
+  hx = hy;
+  g.registerOutput(cy);
+  cx = g.addInput();
+
+  std::tie(hy,cy) = build_lstm_body(g, input, hx, cx, w_ih, w_hh);
+
+  g.registerOutput(hy);
+  g.registerOutput(cy);
+  g.lint();
+
+  return r;
+}
+
+
+void interpTest() {
+    constexpr int batch_size = 4;
+    constexpr int input_size = 256;
+    constexpr int seq_len = 32;
+
+    int hidden_size = 2*input_size;
+
+    auto input = at::CUDA(at::kFloat).randn({seq_len, batch_size, input_size});
+    auto hx    = at::CUDA(at::kFloat).randn({batch_size, hidden_size});
+    auto cx    = at::CUDA(at::kFloat).randn({batch_size, hidden_size});
+    auto w_ih  = t_def(at::CUDA(at::kFloat).randn({4 * hidden_size, input_size}));
+    auto w_hh  = t_def(at::CUDA(at::kFloat).randn({4 * hidden_size, hidden_size}));
+
+    auto lstm_g = build_lstm();
+    Code  lstm_function(lstm_g);
+    std::vector<at::Tensor> outputs;
+    InterpreterState lstm_interp(lstm_function);
+    lstm_interp.runOneStage({input[0], hx, cx, w_ih, w_hh}, outputs);
+    std::tie(hx, cx) = lstm(input[0], hx, cx, w_ih, w_hh);
+
+    //std::cout << almostEqual(outputs[0],hx) << "\n";
+    JIT_ASSERT(exactlyEqual(outputs[0],hx));
+    JIT_ASSERT(exactlyEqual(outputs[1],cx));
+}
+
+void interpStageTest() {
+    constexpr int batch_size = 4;
+    constexpr int input_size = 256;
+    constexpr int seq_len = 32;
+
+    int hidden_size = 2*input_size;
+    auto input = at::CUDA(at::kFloat).randn({seq_len, batch_size, input_size});
+    auto hx    = at::CUDA(at::kFloat).randn({batch_size, hidden_size});
+    auto cx    = at::CUDA(at::kFloat).randn({batch_size, hidden_size});
+    auto cx1 = at::CUDA(at::kFloat).randn({batch_size, hidden_size});
+    auto w_ih  = t_def(at::CUDA(at::kFloat).randn({4 * hidden_size, input_size}));
+    auto w_hh  = t_def(at::CUDA(at::kFloat).randn({4 * hidden_size, hidden_size}));
+
+
+    auto lstm_g = build_lstm_stages();
+    Code lstm_function(lstm_g);
+    std::vector<at::Tensor> outputs;
+    InterpreterState lstm_interp(lstm_function);
+    lstm_interp.runOneStage({input[0], hx, cx, w_ih, w_hh}, outputs);
+    auto cy0 = outputs[0];
+    lstm_interp.runOneStage({cx1}, outputs);
+    at::Tensor ihx = outputs[0];
+    at::Tensor icx = outputs[1];
+
+
+    std::tie(hx, cx) = lstm(input[0], hx, cx, w_ih, w_hh);
+    std::tie(hx, cx) = lstm(input[0], hx, cx1, w_ih, w_hh);
+
+    //std::cout << almostEqual(outputs[0],hx) << "\n";
+    JIT_ASSERT(exactlyEqual(outputs[0],hx));
+    JIT_ASSERT(exactlyEqual(outputs[1],cx));
+}
+
 void runJITCPPTests() {
+  interpTest();
+  interpStageTest();
   codeTemplateTest();
   fusionTests();
   attributesTest();

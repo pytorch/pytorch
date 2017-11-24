@@ -66,6 +66,15 @@ class RNNBase(Module):
             self._data_ptrs = []
             return
 
+        # If any parameters alias, we fall back to the slower, copying code path. This is
+        # a sufficient check, because overlapping parameter buffers that don't completely
+        # alias would break the assumptions of the uniqueness check in
+        # Module.named_parameters().
+        unique_data_ptrs = set(p.data_ptr() for l in self.all_weights for p in l)
+        if len(unique_data_ptrs) != sum(len(l) for l in self.all_weights):
+            self._data_ptrs = []
+            return
+
         with torch.cuda.device_of(any_param):
             # This is quite ugly, but it allows us to reuse the cuDNN code without larger
             # modifications. It's really a low-level API that doesn't belong in here, but
@@ -98,8 +107,8 @@ class RNNBase(Module):
             fn.w_desc = rnn.init_weight_descriptor(fn, fn.weight_buf)
 
             # Slice off views into weight_buf
-            params = rnn.get_parameters(fn, handle, fn.weight_buf)
             all_weights = [[p.data for p in l] for l in self.all_weights]
+            params = rnn.get_parameters(fn, handle, fn.weight_buf)
 
             # Copy weights and update their storage
             rnn._copyParams(all_weights, params)
@@ -224,13 +233,13 @@ class RNN(RNNBase):
         hidden_size: The number of features in the hidden state h
         num_layers: Number of recurrent layers.
         nonlinearity: The non-linearity to use ['tanh'|'relu']. Default: 'tanh'
-        bias: If False, then the layer does not use bias weights b_ih and b_hh.
-            Default: True
-        batch_first: If True, then the input and output tensors are provided
+        bias: If ``False``, then the layer does not use bias weights b_ih and b_hh.
+            Default: ``True``
+        batch_first: If ``True``, then the input and output tensors are provided
             as (batch, seq, feature)
         dropout: If non-zero, introduces a dropout layer on the outputs of each
             RNN layer except the last layer
-        bidirectional: If True, becomes a bidirectional RNN. Default: False
+        bidirectional: If ``True``, becomes a bidirectional RNN. Default: ``False``
 
     Inputs: input, h_0
         - **input** (seq_len, batch, input_size): tensor containing the features
@@ -311,13 +320,13 @@ class LSTM(RNNBase):
         input_size: The number of expected features in the input x
         hidden_size: The number of features in the hidden state h
         num_layers: Number of recurrent layers.
-        bias: If False, then the layer does not use bias weights b_ih and b_hh.
-            Default: True
-        batch_first: If True, then the input and output tensors are provided
+        bias: If ``False``, then the layer does not use bias weights b_ih and b_hh.
+            Default: ``True``
+        batch_first: If ``True``, then the input and output tensors are provided
             as (batch, seq, feature)
         dropout: If non-zero, introduces a dropout layer on the outputs of each
             RNN layer except the last layer
-        bidirectional: If True, becomes a bidirectional RNN. Default: False
+        bidirectional: If ``True``, becomes a bidirectional RNN. Default: ``False``
 
     Inputs: input, (h_0, c_0)
         - **input** (seq_len, batch, input_size): tensor containing the features
@@ -388,13 +397,13 @@ class GRU(RNNBase):
         input_size: The number of expected features in the input x
         hidden_size: The number of features in the hidden state h
         num_layers: Number of recurrent layers.
-        bias: If False, then the layer does not use bias weights b_ih and b_hh.
-            Default: True
-        batch_first: If True, then the input and output tensors are provided
+        bias: If ``False``, then the layer does not use bias weights b_ih and b_hh.
+            Default: ``True``
+        batch_first: If ``True``, then the input and output tensors are provided
             as (batch, seq, feature)
         dropout: If non-zero, introduces a dropout layer on the outputs of each
             RNN layer except the last layer
-        bidirectional: If True, becomes a bidirectional RNN. Default: False
+        bidirectional: If ``True``, becomes a bidirectional RNN. Default: ``False``
 
     Inputs: input, h_0
         - **input** (seq_len, batch, input_size): tensor containing the features
@@ -457,8 +466,8 @@ class RNNCell(RNNCellBase):
     Args:
         input_size: The number of expected features in the input x
         hidden_size: The number of features in the hidden state h
-        bias: If False, then the layer does not use bias weights b_ih and b_hh.
-            Default: True
+        bias: If ``False``, then the layer does not use bias weights b_ih and b_hh.
+            Default: ``True``
         nonlinearity: The non-linearity to use ['tanh'|'relu']. Default: 'tanh'
 
     Inputs: input, hidden
@@ -544,7 +553,7 @@ class LSTMCell(RNNCellBase):
         input_size: The number of expected features in the input x
         hidden_size: The number of features in the hidden state h
         bias: If `False`, then the layer does not use bias weights `b_ih` and
-            `b_hh`. Default: True
+            `b_hh`. Default: ``True``
 
     Inputs: input, (h_0, c_0)
         - **input** (batch, input_size): tensor containing input features

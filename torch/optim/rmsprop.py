@@ -1,3 +1,4 @@
+import torch
 from .optimizer import Optimizer
 
 
@@ -18,7 +19,7 @@ class RMSprop(Optimizer):
         alpha (float, optional): smoothing constant (default: 0.99)
         eps (float, optional): term added to the denominator to improve
             numerical stability (default: 1e-8)
-        centered (bool, optional) : if True, compute the centered RMSProp,
+        centered (bool, optional) : if ``True``, compute the centered RMSProp,
             the gradient is normalized by an estimation of its variance
         weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
 
@@ -50,16 +51,18 @@ class RMSprop(Optimizer):
                 if p.grad is None:
                     continue
                 grad = p.grad.data
+                if grad.is_sparse:
+                    raise RuntimeError('RMSprop does not support sparse gradients')
                 state = self.state[p]
 
                 # State initialization
                 if len(state) == 0:
                     state['step'] = 0
-                    state['square_avg'] = grad.new().resize_as_(grad).zero_()
+                    state['square_avg'] = torch.zeros_like(p.data)
                     if group['momentum'] > 0:
-                        state['momentum_buffer'] = grad.new().resize_as_(grad).zero_()
+                        state['momentum_buffer'] = torch.zeros_like(p.data)
                     if group['centered']:
-                        state['grad_avg'] = grad.new().resize_as_(grad).zero_()
+                        state['grad_avg'] = torch.zeros_like(p.data)
 
                 square_avg = state['square_avg']
                 alpha = group['alpha']

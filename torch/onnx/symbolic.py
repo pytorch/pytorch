@@ -32,7 +32,7 @@ def _if_scalar_type_as(self, tensor):
     actually need to insert an ONNX cast operator here; just
     fix up the scalar.
     """
-    if isinstance(self, torch._C.Node):
+    if isinstance(self, torch._C.Value):
         return self
     else:
         ty = tensor.type().scalarType().lower()
@@ -41,7 +41,7 @@ def _if_scalar_type_as(self, tensor):
 
 def _broadcast_if_scalar(x):
     """Return kwargs enabling broadcasting if 'x' is a scalar."""
-    if isinstance(x, torch._C.Node):
+    if isinstance(x, torch._C.Value):
         return {}
     else:
         return {"broadcast_i": 1}
@@ -128,6 +128,10 @@ def mm(g, self, other):
     return g.op("Gemm", self, other, C, beta_f=0.0, alpha_f=1.0, broadcast_i=True)
 
 
+def bmm(g, self, other):
+    return g.op("MatMul", self, other)
+
+
 def addmm(g, self, mat1, mat2, beta, alpha):
     return g.op("Gemm", mat1, mat2, self, beta_f=_scalar(beta), alpha_f=_scalar(alpha))
 
@@ -171,6 +175,12 @@ def transpose(g, self, dim0, dim1):
     return g.op("Transpose", self, perm_i=axes)
 
 
+def permute(g, self, dims):
+    if dims == list(range(0, len(dims))):
+        return self
+    return g.op("Transpose", self, perm_i=dims)
+
+
 def view(g, self, size):
     return g.op("Reshape", self, shape_i=size)
 
@@ -202,7 +212,7 @@ def prelu(g, input, weight):
     return g.op("PRelu", input, weight)
 
 
-def threshold(g, input, threshold, value, inplace):
+def threshold(g, input, threshold, value, inplace=False):
     # See Note [Export inplace]
     if _scalar(threshold) != 0:
         return _unimplemented("threshold", "non-zero threshold")
@@ -211,7 +221,7 @@ def threshold(g, input, threshold, value, inplace):
     return g.op("Relu", input)
 
 
-def leaky_relu(g, input, negative_slope, inplace):
+def leaky_relu(g, input, negative_slope, inplace=False):
     # See Note [Export inplace]
     # TODO: Talk to ONNX about unconditional cast of scalar to float
     return g.op("LeakyRelu", input, alpha_f=_scalar(negative_slope))
@@ -231,12 +241,13 @@ def softmax(g, input, dim=None):
 def max_pool2d(g, input, kernel_size, stride, padding, dilation, ceil_mode):
     if ceil_mode:
         return _unimplemented("max_pool2d", "ceil_mode")
+    if set(_pair(dilation)) != {1}:
+        return _unimplemented("max_pool2d", "dilation")
     if not stride:
         stride = kernel_size
     r = g.op("MaxPool", input,
              kernel_shape_i=_pair(kernel_size),
              pads_i=_pair(padding),
-             dilations_i=_pair(dilation),
              strides_i=_pair(stride))
     return r, None
 
@@ -259,3 +270,13 @@ def log_softmax(g, input, dim=None):
 
 def unfold(g, input, dimension, size, step):
     return g.op("ATen", input, operator_s="unfold", dimension_i=dimension, size_i=size, step_i=step)
+
+
+def elu(g, input, alpha, inplace=False):
+    # See Note [Export inplace]
+    return g.op("Elu", input, alpha_f=_scalar(alpha))
+
+
+# ignore clone operators that are inserted by PyTorch autograd
+def clone(g, input):
+    return input

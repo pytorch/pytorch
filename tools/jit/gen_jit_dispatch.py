@@ -17,13 +17,13 @@ ATTR_METHOD_MAP = {
     'Scalar': 't',
     'bool': 'i',
     'double': 'f',
-    'std::array<bool, 2>': 'is',
-    'std::array<bool, 3>': 'is',
+    'std::array<bool,2>': 'is',
+    'std::array<bool,3>': 'is',
 }
 
 TYPE_CASTS = {
-    'std::array<bool, 2>': 'as_bool_array<2>',
-    'std::array<bool, 3>': 'as_bool_array<3>',
+    'std::array<bool,2>': 'as_bool_array<2>',
+    'std::array<bool,3>': 'as_bool_array<3>',
     'Scalar': 'Scalar',
     'IntList': 'std::vector<int64_t>',
 }
@@ -33,13 +33,14 @@ auto ${name} = ${type_cast}(node->${method}(stringToSymbol("${name}")));\
 """)
 
 CALL_NAMESPACE = CodeTemplate("at::${name}(${args})")
-CALL_METHOD = CodeTemplate("vars[0].${name}(${args})")
+CALL_METHOD = CodeTemplate("inputs[0].${name}(${args})")
 
 CONSTRUCTOR = CodeTemplate("""\
 {"${descriptor}", [](Node *node) {
   ${assignments}
-  return TensorOp([=](const variable_list& vars) -> variable_list {
-    return pack_list(${call});
+  return TensorOp([=](const std::vector<Tensor> & inputs, std::vector<Tensor> & outputs) {
+    autograd::profiler::RecordFunction record("${name}");
+    pack_list(outputs, ${call});
   }, "${name}", ${num_inputs});
 }},
 """)
@@ -84,17 +85,19 @@ def gen_jit_dispatch(declarations, out):
         # TensorList arguments, and functions that are only available as methods.
         if 'namespace' in decl['method_of']:
             if any(arg['simple_type'] == 'TensorList' for arg in arguments):
-                assert sum(map(is_tensor_arg, arguments)) == 1
-                args = ['as_tensor_list(vars)' if is_tensor_arg(arg) else arg['name']
+                if sum(map(is_tensor_arg, arguments)) != 1:
+                    # TODO: support this
+                    continue
+                args = ['inputs' if is_tensor_arg(arg) else arg['name']
                         for arg in arguments]
             else:
                 tensor_id = iter(count(start=0))
-                args = ['vars[{}]'.format(next(tensor_id)) if is_tensor_arg(arg) else arg['name']
+                args = ['inputs[{}]'.format(next(tensor_id)) if is_tensor_arg(arg) else arg['name']
                         for arg in arguments]
             call = CALL_NAMESPACE.substitute(name=name, args=args)
         else:
             tensor_id = iter(count(start=1))
-            args = ['vars[{}]'.format(next(tensor_id)) if is_tensor_arg(arg) else arg['name']
+            args = ['inputs[{}]'.format(next(tensor_id)) if is_tensor_arg(arg) else arg['name']
                     for arg in arguments[1:]]
             call = CALL_METHOD.substitute(name=name, args=args)
 

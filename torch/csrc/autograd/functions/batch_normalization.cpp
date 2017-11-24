@@ -19,7 +19,7 @@ extern THCState* state;
 #endif
 
 namespace {
-    void check_dims_match_num_input_features(const std::string& arg_name, long expected, long actual){
+    void check_dims_match_num_input_features(const std::string& arg_name, int64_t expected, int64_t actual){
       if (actual != expected){
         std::stringstream ss;
         ss << arg_name << " should contain " << expected << " elements not " << actual ;
@@ -54,7 +54,7 @@ auto BatchNormForward::apply(const variable_list& inputs) -> variable_list {
 
   bool use_cudnn = false;
 #ifdef WITH_CUDNN
-  use_cudnn = (input.type().isCuda()
+  use_cudnn = (input.type().is_cuda()
                && input.type().scalarType() != at::kHalf
                && weight.defined() && bias.defined()
                && input.size(0) <= 131070
@@ -164,7 +164,7 @@ auto BatchNormBackward::apply(const variable_list& grad_outputs) -> variable_lis
   // Add saved variables used out of the pure autograd to inputs
   variable_list all_inputs(grad_outputs);
   all_inputs.push_back(input_var);
-  if (weight.get()) {
+  if (weight.defined()) {
     all_inputs.push_back(weight_var);
   }
   auto outputs =  as_tensor_list(std::move(grad_input),

@@ -21,7 +21,7 @@ namespace torch { namespace jit {
 
 namespace {
 
-std::string node_name(Node* n) {
+std::string value_name(Value* n) {
   return n->uniqueName();
 }
 
@@ -65,7 +65,7 @@ void encodeTensor(onnx::TensorProto * p, const at::Tensor & tensor) {
       at_type = at::kLong;
       break;
     default:
-      jit::barf("unexpected tensor scalar type");
+      torch::barf("unexpected tensor scalar type");
       break;
   }
   p->set_data_type(onnx_type);
@@ -79,40 +79,50 @@ void addAttribute(onnx::NodeProto * n_p, jit::Node * n, jit::Symbol name) {
   switch(n->kindOf(name)) {
     case AttributeKind::f:
       attr->set_f(n->f(name));
+      attr->set_type(onnx::aFLOAT);
       break;
     case AttributeKind::fs:
+      attr->set_type(onnx::aFLOATS);
       for(auto & v : n->fs(name))
         attr->add_floats(v);
       break;
     case AttributeKind::i:
+      attr->set_type(onnx::aINT);
       attr->set_i(n->i(name));
       break;
     case AttributeKind::is:
+      attr->set_type(onnx::aINTS);
       for(auto & v : n->is(name))
         attr->add_ints(v);
       break;
     case AttributeKind::s:
+      attr->set_type(onnx::aSTRING);
       attr->set_s(n->s(name));
       break;
     case AttributeKind::ss:
+      attr->set_type(onnx::aSTRINGS);
       for(auto & v : n->ss(name))
         attr->add_strings(v);
       break;
     case AttributeKind::t: {
+      attr->set_type(onnx::aTENSOR);
       auto t = attr->mutable_t();
       encodeTensor(t, n->t(name));
     } break;
     case AttributeKind::ts:
+      attr->set_type(onnx::aTENSORS);
       for(auto & v : n->ts(name)) {
         auto t = attr->add_tensors();
         encodeTensor(t, v);
       }
       break;
     case AttributeKind::g: {
+      attr->set_type(onnx::aGRAPH);
       auto g = attr->mutable_g();
       encodeGraph(g, n->g(name), {});
     } break;
     case AttributeKind::gs:
+      attr->set_type(onnx::aGRAPHS);
       for(auto & v : n->gs(name)) {
         auto g = attr->add_graphs();
         encodeGraph(g, v, {});
@@ -121,7 +131,7 @@ void addAttribute(onnx::NodeProto * n_p, jit::Node * n, jit::Symbol name) {
   }
 }
 
-void encodeTypeProtoTensorType(onnx::TypeProtoTensorTypeProto* tensor_type, Node* n) {
+void encodeTypeProtoTensorType(onnx::TypeProtoTensorTypeProto* tensor_type, Value* n) {
   onnx::TypeProtoTensorShapeProto* shape = tensor_type->mutable_shape();
   JIT_ASSERT(n->hasType());
   TensorType* node_type = n->type()->expect<TensorType>();
@@ -154,14 +164,14 @@ void encodeTypeProtoTensorType(onnx::TypeProtoTensorTypeProto* tensor_type, Node
       onnx_type = onnx::kINT64;
       break;
     default:
-      jit::barf("unexpected tensor scalar type");
+      torch::barf("unexpected tensor scalar type");
       break;
   }
   tensor_type->set_data_type(onnx_type);
 }
 
-void encodeValueInfo(onnx::ValueInfoProto* v, Node* n) {
-  v->set_name(node_name(n));
+void encodeValueInfo(onnx::ValueInfoProto* v, Value* n) {
+  v->set_name(value_name(n));
   onnx::TypeProto* t = v->mutable_type();
   onnx::TypeProtoTensorTypeProto* tensor_type = t->mutable_tensor_type();
   encodeTypeProtoTensorType(tensor_type, n);
@@ -180,22 +190,20 @@ void encodeGraph(onnx::GraphProto * p_g, const std::shared_ptr<Graph> & g, const
     encodeValueInfo(v, output);
   }
   for (auto node : g->nodes()) {
-    if (node->kind() == kSelect) {
-      // No select nodes in ONNX: instead we make use
-      // of the select invariant
-      continue;
-    }
-    if (node->kind() == kUndefined && node->uses().empty()) {
+    if (node->kind() == kUndefined && !node->hasUses()) {
       // Undefined nodes never show up in ONNX; they're just a tool
       // to help symbolics do the right thing.
       continue;
     }
     auto p_n = p_g->add_node();
+    if (node->getSourceLocation()) {
+      p_n->set_doc_string(node->getSourceLocation()->python_traceback);
+    }
     for(auto input : node->inputs()) {
-      p_n->add_input(node_name(input));
+      p_n->add_input(value_name(input));
     }
     for(auto output : node->outputs()) {
-      p_n->add_output(node_name(output));
+      p_n->add_output(value_name(output));
     }
     p_n->set_op_type(symbolToString(node->kind()));
     for(auto attr_name : node->attributeNames()) {

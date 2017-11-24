@@ -49,7 +49,11 @@ struct ConvForward : public ForwardFunction<>, public ConvParams, public HasSymb
 
   virtual std::string name() override;
   virtual variable_list apply(const variable_list& inputs) override;
-  virtual jit::node_list symbolic(SymbolicContext* ctx, jit::node_list inputs) override;
+  virtual jit::value_list symbolic(
+      SymbolicContext* ctx,
+      jit::value_list inputs,
+      std::shared_ptr<jit::SourceLocation> sl
+  ) override;
 
   std::vector<int64_t> output_size(at::Tensor& input, at::Tensor& weight) const;
 };
@@ -68,10 +72,10 @@ struct ConvBackward : public Function, public ConvParams {
     , ConvParams(std::move(params))
     , convolution(std::move(convolution)) {
       if (is_executable) {
-        this->input_ = SavedVariable(input, this);
-        this->weight_ = SavedVariable(weight, this);
+        this->input_ = SavedVariable(input, false);
+        this->weight_ = SavedVariable(weight, false);
         if (bias.defined()) {
-          this->bias_ = SavedVariable(bias, this);
+          this->bias_ = SavedVariable(bias, false);
         }
         this->columns = std::move(columns);
         this->ones = std::move(ones);
@@ -101,12 +105,12 @@ struct ConvBackwardBackward : public Function, public ConvParams {
     : Function(std::move(flags))
     , ConvParams(std::move(params)) {
       if (is_executable) {
-        this->input_ = SavedVariable(input, this);
-        this->weight_ = SavedVariable(weight, this);
+        this->input_ = SavedVariable(input, false);
+        this->weight_ = SavedVariable(weight, false);
         if (bias.defined()) {
-          this->bias_ = SavedVariable(bias, this);
+          this->bias_ = SavedVariable(bias, false);
         }
-        this->grad_output_ = SavedVariable(grad_output, this);
+        this->grad_output_ = SavedVariable(grad_output, false);
       }
     }
 
