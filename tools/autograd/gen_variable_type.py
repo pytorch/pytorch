@@ -115,8 +115,8 @@ ${base_impl_call}
 ${no_zero_dim}
 ${version_counter}
 ${set_flags}
-${save_outputs}
 ${record_trace}
+${save_outputs}
 return ${return_value};
 """)
 
