@@ -1,4 +1,6 @@
 from collections import namedtuple
+import copy
+
 import torch
 from torch.autograd import Variable
 
@@ -123,3 +125,61 @@ def pad_packed_sequence(sequence, batch_first=False, padding_value=0.0):
     if batch_first:
         output = output.transpose(0, 1)
     return output, lengths
+
+
+def pad_sequence(sequences, lengths, batch_first=False):
+    r"""Pad a list of variable length Variables with zero
+
+    The ``pad_sequence`` pads the list of Variables on zeroth dimension and
+    stack all the sequences on zeroth dimension. For example, if the input is
+    list of sequences with size `` Lx*`` and if batch_first is False, the
+    output will be of size `` TxBx* `` and if batch_first is True,
+    output will be of size ``BxTx* ``.
+
+    B is batch size
+    T is length longest sequence
+    L is length of the sequence
+    * is any trailing dimension including zero
+
+    >>> from torch.nn.utils.rnn import pad_sequence
+    >>> a = torch.ones(25, 300)
+    >>> b = torch.ones(15, 300)
+    >>> c = torch.ones(22, 300)
+    >>> pad_sequence([a, b, c], [25, 15, 22]).size()
+    torch.Size([25, 3, 300])
+
+    Note:
+        This function returns a Variable of size LxBx* or BxLx* where L is the
+        length of longest sequence (lengths[0])
+
+    Arguments:
+        sequences (list(Variable)): list of variable length sequences.
+        lengths (list[int]): list of sequences lengths of each batch element.
+        batch_first (bool, optional): if True, the input is expected in Bx*x*
+            format.
+
+    Returns:
+        a Variable of size ``seq_len x len(sequences) x * `` if batch_first = False
+        a Variable of size ``len(sequences) x seq_len x * `` otherwise
+    """
+
+    if len(lengths) != len(sequences):
+        raise ValueError("number of elements in lengths and sequences didn't match")
+
+    long_seq_index = lengths.index(max(lengths))
+
+    # if not popped, iteration with longest sentence creates a no dimensional tensor
+    lenth_arr = copy.copy(lengths)  # making new copy
+    sequence_arr = copy.deepcopy(sequences)
+    longest = sequence_arr.pop(long_seq_index)
+    max_len = lenth_arr.pop(long_seq_index)
+    out_variable = []
+    for variable, length in zip(sequence_arr, lenth_arr):
+        padding_shape = [max_len - length] + list(variable.size()[1:])
+        out_variable.append(torch.cat((variable, variable.new(*padding_shape).zero_())))
+    # inserting the longest sentence back to its position
+    out_variable = out_variable[:long_seq_index] + [longest] + out_variable[long_seq_index:]
+    if batch_first:
+        return torch.stack(out_variable)
+    else:
+        return torch.stack(out_variable).transpose(0, 1)
