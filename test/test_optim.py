@@ -1,4 +1,5 @@
 import unittest
+import tempfile
 import functools
 from copy import deepcopy
 import torch
