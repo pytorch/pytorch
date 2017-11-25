@@ -18,6 +18,7 @@ def split(tensor, split_size_or_sections, dim=0):
     If ``split_size_or_sections`` is a list, then ``tensor`` will be split
     into ``len(split_size_or_sections)`` chunks with sizes in ``dim`` according
     to ``split_size_or_sections``.
+
     Arguments:
         tensor (Tensor): tensor to split.
         split_size_or_sections (int) or (list(int)): size of a single chunk or
@@ -29,7 +30,6 @@ def split(tensor, split_size_or_sections, dim=0):
     dim_size = tensor.size(dim)
 
     splits = torch.IntTensor([split_size_or_sections])
-
     if splits.dim() == 1:
         split_size = split_size_or_sections
         num_splits = (dim_size + split_size - 1) // split_size
