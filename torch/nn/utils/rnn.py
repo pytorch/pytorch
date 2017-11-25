@@ -1,5 +1,4 @@
 from collections import namedtuple
-import copy
 
 import torch
 from torch.autograd import Variable
@@ -166,20 +165,20 @@ def pad_sequence(sequences, lengths, batch_first=False):
     if len(lengths) != len(sequences):
         raise ValueError("number of elements in lengths and sequences didn't match")
 
-    long_seq_index = lengths.index(max(lengths))
-
     # if not popped, iteration with longest sentence creates a no dimensional tensor
-    lenth_arr = copy.copy(lengths)  # making new copy
-    sequence_arr = copy.deepcopy(sequences)
-    longest = sequence_arr.pop(long_seq_index)
-    max_len = lenth_arr.pop(long_seq_index)
     out_variable = []
-    for variable, length in zip(sequence_arr, lenth_arr):
-        padding_shape = [max_len - length] + list(variable.size()[1:])
-        filler_variable = Variable(torch.Tensor(*padding_shape).type_as(variable.data).zero_())
-        out_variable.append(torch.cat((variable, filler_variable)))
-    # inserting the longest sentence back to its position
-    out_variable = out_variable[:long_seq_index] + [longest] + out_variable[long_seq_index:]
+    max_len = lengths[0]
+    prev_l = lengths[0]
+    for variable, length in zip(sequences, lengths):
+        if length < max_len:
+            if prev_l < length:
+                raise ValueError("lengths array has to be sorted in decreasing order")
+            prev_l = length
+            padding_shape = [lengths[0] - length] + list(variable.size()[1:])
+            filler = Variable(torch.Tensor(*padding_shape).type_as(variable.data).zero_())
+            out_variable.append(torch.cat((variable, filler)))
+        else:
+            out_variable.append(variable)
     if batch_first:
         return torch.stack(out_variable)
     else:
