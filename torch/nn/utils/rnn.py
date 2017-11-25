@@ -159,8 +159,9 @@ def pad_sequence(sequences, lengths, batch_first=False):
             format.
 
     Returns:
-        a Variable of size ``seq_len x len(sequences) x * `` if batch_first = False
-        a Variable of size ``len(sequences) x seq_len x * `` otherwise
+        Variable of size ``seq_len x len(sequences) x * ``
+            if batch_first = False
+        Variable of size ``len(sequences) x seq_len x * `` otherwise
     """
 
     if len(lengths) != len(sequences):

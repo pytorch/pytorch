@@ -2166,12 +2166,14 @@ class TestNN(NNTestCase):
 
     def test_pad_sequence(self):
         def pad(tensor, length):
-            return torch.cat([tensor.data, tensor.data.new(length - tensor.size(0), *tensor.size()[1:]).zero_()])
+            return torch.cat(
+                [tensor.data, tensor.data.new(
+                    length - tensor.size(0), *tensor.size()[1:]).zero_()])
         # single dimensional
-        a = Variable(torch.Tensor([1,2,3]))
-        b = Variable(torch.Tensor([4,5]))
+        a = Variable(torch.Tensor([1, 2, 3]))
+        b = Variable(torch.Tensor([4, 5]))
         c = Variable(torch.Tensor([6]))
-        
+
         # batch_first = true
         expected = Variable(torch.Tensor([[1, 2, 3], [4, 5, 0], [6, 0, 0]]))
         padded = rnn_utils.pad_sequence([a, b, c], [3, 2, 1], True)
@@ -2202,12 +2204,13 @@ class TestNN(NNTestCase):
         self.assertEqual(padded, expected.transpose(0, 1))
 
         # unsorted sequences should raise exception
-        self.assertRaises(ValueError, lambda: rnn_utils.pad_sequence([b, a, c], [2, 3, 1]))
+        self.assertRaises(
+            ValueError, lambda: rnn_utils.pad_sequence([b, a, c], [2, 3, 1]))
 
     def test_pack_sequence(self):
         # single dimensional
-        a = Variable(torch.Tensor([1,2,3]))
-        b = Variable(torch.Tensor([4,5]))
+        a = Variable(torch.Tensor([1, 2, 3]))
+        b = Variable(torch.Tensor([4, 5]))
         c = Variable(torch.Tensor([6]))
         packed = rnn_utils.pack_sequence([a, b, c], [3, 2, 1])
         expected = torch.Tensor([1, 4, 6, 2, 5, 3])
@@ -2223,7 +2226,7 @@ class TestNN(NNTestCase):
             seq_len = i * i
             lengths.append(seq_len)
             sequences.append(Variable(torch.rand(seq_len, 400)))
-        
+
         # compatibility with other utilities
         batch_first = True
         padded = rnn_utils.pad_sequence(sequences, lengths, batch_first)
