@@ -469,7 +469,6 @@ main_sources = [
     "torch/csrc/autograd/python_variable_indexing.cpp",
     "torch/csrc/autograd/python_engine.cpp",
     "torch/csrc/autograd/python_hook.cpp",
-    "torch/csrc/autograd/functions/jit_closure.cpp",
     "torch/csrc/autograd/generated/VariableType.cpp",
     "torch/csrc/autograd/generated/Functions.cpp",
     "torch/csrc/autograd/generated/python_variable_methods.cpp",

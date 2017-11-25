@@ -2,7 +2,6 @@
 
 #include "torch/csrc/jit/pybind.h"
 #include "torch/csrc/autograd/variable.h"
-#include "torch/csrc/autograd/functions/jit_closure.h"
 #include "torch/csrc/jit/tracer.h"
 #include "torch/csrc/jit/passes/dead_code_elimination.h"
 #include "torch/csrc/jit/passes/peephole.h"
@@ -81,14 +80,7 @@ struct CompiledFunction {
         PeepholeOptimize(complete_trace->graph);
         FuseGraph(complete_trace->graph);
       }
-      try {
-        factory_ = std::make_shared<InterpreterFunctionFactory>(complete_trace.get());
-      } catch(const jit::NotImplementedException & ex) {
-        PyErr_WarnEx(PyExc_UserWarning, "hitting an older JIT path that is slower than "
-            "the new one. It's close to being deleted, but the new path needs full support "
-            "for certain edge cases. Please report your use case.", 0);
-        closure_ = std::make_shared<AutogradClosureFactory>(complete_trace.get());
-      }
+      factory_ = std::make_shared<InterpreterFunctionFactory>(complete_trace.get());
       graph_ = complete_trace->graph;
       is_ready_ = true;
       return true;
@@ -97,14 +89,9 @@ struct CompiledFunction {
     variable_list run(variable_list inputs) {
       JIT_ASSERT(is_ready_);
       AutoNoGIL _gil_guard;
-      if (closure_) {
-        auto fn = closure_->construct();
-        return (*fn)(inputs);
-      } else {
-        auto fn = factory_->construct();
-        fn->willReleaseVariables(); // forward pass is never reused, so it is safe to release anything it can
-        return fn->apply(inputs);
-      }
+      auto fn = factory_->construct();
+      fn->willReleaseVariables(); // forward pass is never reused, so it is safe to release anything it can
+      return fn->apply(inputs);
     }
 
     PyObject* add_trace(PyObject *args, variable_list inputs) {
@@ -136,7 +123,6 @@ struct CompiledFunction {
     bool is_volatile_;
     bool is_ready_ = false;
 
-    std::shared_ptr<AutogradClosureFactory> closure_;
     std::shared_ptr<InterpreterFunctionFactory> factory_;
     std::shared_ptr<jit::Graph> graph_;
   };
