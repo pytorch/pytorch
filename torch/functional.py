@@ -14,10 +14,7 @@ def split(tensor, split_size_or_sections, dim=0):
     If ``split_size_or_sections`` is an integer type, then ``tensor`` will be
     split into equally sized chunks (if possible).
     Last chunk will be smaller if the tensor size along a given dimension
-    is not divisible by :attr`split_size`.
-    If ``split_size_or_sections`` is a list, then ``tensor`` will be split
-    into ``len(split_size_or_sections)`` chunks with sizes in ``dim`` according
-    to ``split_size_or_sections``.
+    is not divisible by ``split_size``.
 
     Arguments:
         tensor (Tensor): tensor to split.
