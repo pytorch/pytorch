@@ -133,7 +133,8 @@ def pad_sequence(sequences, lengths, batch_first=False):
     stack all the sequences on zeroth dimension. For example, if the input is
     list of sequences with size `` Lx*`` and if batch_first is False, the
     output will be of size `` TxBx* `` and if batch_first is True,
-    output will be of size ``BxTx* ``.
+    output will be of size ``BxTx* ``. The ``pad_sequence`` accepts list of
+    sequences and its lengths which should be sorted in decreasing order
 
     B is batch size
     T is length longest sequence
@@ -165,14 +166,15 @@ def pad_sequence(sequences, lengths, batch_first=False):
     if len(lengths) != len(sequences):
         raise ValueError("number of elements in lengths and sequences didn't match")
 
-    # if not popped, iteration with longest sentence creates a no dimensional tensor
     out_variable = []
     max_len = lengths[0]
     prev_l = lengths[0]
     for variable, length in zip(sequences, lengths):
-        if length < max_len:
-            if prev_l < length:
+        # temperory sort check, will be removed when we handle sorting internally
+        if prev_l < length:
                 raise ValueError("lengths array has to be sorted in decreasing order")
+        prev_l = length
+        if length < max_len:
             prev_l = length
             padding_shape = [lengths[0] - length] + list(variable.size()[1:])
             filler = Variable(torch.Tensor(*padding_shape).type_as(variable.data).zero_())

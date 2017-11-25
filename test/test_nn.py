@@ -2201,6 +2201,9 @@ class TestNN(NNTestCase):
         padded = rnn_utils.pad_sequence(sequences, lengths)
         self.assertEqual(padded, expected.transpose(0, 1))
 
+        # unsorted sequences should raise exception
+        self.assertRaises(ValueError, lambda: rnn_utils.pad_sequence([b, a, c], [2, 3, 1]))
+
     def test_pack_sequence(self):
         # single dimensional
         a = Variable(torch.Tensor([1,2,3]))
