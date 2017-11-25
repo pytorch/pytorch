@@ -142,9 +142,9 @@ def pad_sequence(sequences, lengths, batch_first=False):
     * is any trailing dimension including zero
 
     >>> from torch.nn.utils.rnn import pad_sequence
-    >>> a = torch.ones(25, 300)
-    >>> b = torch.ones(15, 300)
-    >>> c = torch.ones(22, 300)
+    >>> a = Variable(torch.ones(25, 300))
+    >>> b = Variable(torch.ones(15, 300))
+    >>> c = Variable(torch.ones(22, 300))
     >>> pad_sequence([a, b, c], [25, 15, 22]).size()
     torch.Size([25, 3, 300])
 
@@ -176,7 +176,8 @@ def pad_sequence(sequences, lengths, batch_first=False):
     out_variable = []
     for variable, length in zip(sequence_arr, lenth_arr):
         padding_shape = [max_len - length] + list(variable.size()[1:])
-        out_variable.append(torch.cat((variable, variable.new(*padding_shape).zero_())))
+        filler_variable = Variable(torch.Tensor(*padding_shape).type_as(variable.data).zero_())
+        out_variable.append(torch.cat((variable, filler_variable)))
     # inserting the longest sentence back to its position
     out_variable = out_variable[:long_seq_index] + [longest] + out_variable[long_seq_index:]
     if batch_first:
@@ -200,9 +201,9 @@ def pack_sequence(sequences, lengths):
         retrieved from a :class:`PackedSequence` object by accessing
         its ``.data`` attribute.
     Ex.
-        >>> a = torch.Tensor([1,2,3])
-        >>> b = torch.Tensor([4,5])
-        >>> c = torch.Tensor([6])
+        >>> a = Variable(torch.Tensor([1,2,3]))
+        >>> b = Variable(torch.Tensor([4,5]))
+        >>> c = Variable(torch.Tensor([6]))
         >>> pack_sequence([a, b, c], [3, 2, 1])
         PackedSequence(data=
          1
