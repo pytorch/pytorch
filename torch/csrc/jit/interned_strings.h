@@ -133,4 +133,8 @@ enum BuiltinSymbol {
 const char * symbolToString(Symbol s);
 Symbol stringToSymbol(const std::string & s);
 
+inline Symbol operator "" _sym(const char * s, unsigned long) {
+  return stringToSymbol(s);
+}
+
 }}
