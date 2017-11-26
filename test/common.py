@@ -19,7 +19,6 @@ from torch._six import string_classes
 
 torch.set_default_tensor_type('torch.DoubleTensor')
 
-# set seed one time
 parser = argparse.ArgumentParser(add_help=False)
 parser.add_argument('--seed', type=int, default=123)
 parser.add_argument('--accept', action='store_true')
@@ -27,6 +26,7 @@ args, remaining = parser.parse_known_args()
 SEED = args.seed
 ACCEPT = args.accept
 UNITTEST_ARGS = [sys.argv[0]] + remaining
+torch.manual_seed(SEED)
 
 
 def run_tests():
@@ -127,8 +127,6 @@ class TestCase(unittest.TestCase):
 
     def setUp(self):
         torch.manual_seed(SEED)
-        if torch.cuda.is_available():
-            torch.cuda.manual_seed_all(SEED)
 
     def assertTensorsSlowEqual(self, x, y, prec=None, message=''):
         max_err = 0
