@@ -98,7 +98,7 @@ Variable & VariableType::checked_cast(const Type & type, const Tensor & t, const
     runtime_error("Expected a Tensor of type %s but found an undefined Tensor for argument #%d '%s'",
         type.toString(), pos, name);
   }
-  if (&t.type() != &type) {
+  if (&t.type() != &type && &t.type() != &type.toBackend(toSparse(t.type().backend()))) {
     runtime_error("Expected object of type %s but found type %s for argument #%d '%s'",
         type.toString(), t.type().toString(), pos, name);
   }
