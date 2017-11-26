@@ -48,6 +48,10 @@
 
 - func: is_cuda(Tensor self) -> bool
 
+- func: is_distributed(Tensor self) -> bool
+
+- func: is_sparse(Tensor self) -> bool
+
 - func: select(Tensor self, int64_t dim, int64_t index) -> Tensor
 
 - func: narrow(Tensor self, int64_t dim, int64_t start, int64_t length) -> Tensor
