@@ -7,7 +7,7 @@ class ConstantPadNd(Function):
     @staticmethod
     def symbolic(g, input, pad, value=0):
         paddings = prepare_onnx_paddings(len(input.type().sizes()), pad)
-        return g.op("Pad", input, paddings_i=paddings, mode_s="constant", value_f=value)
+        return g.op("Pad", input, pads_i=paddings, mode_s="constant", value_f=value)
 
     @staticmethod
     def forward(ctx, input, pad, value=0):
