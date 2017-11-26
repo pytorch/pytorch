@@ -16,7 +16,7 @@ class PackedSequence(PackedSequence_):
         to be instantiated by functions like :func:`pack_padded_sequence`.
 
         Batch sizes represent the number elements at each sequence step in
-        the batch, not the varying sequence lengths passed to 
+        the batch, not the varying sequence lengths passed to
         :func:`pack_padded_sequence`.  For instance, given data  ``abc`` and `d`
         the ``PackedSequence`` would be ``adbc`` with ``batch_sizes=[2,1,1]``.
 
