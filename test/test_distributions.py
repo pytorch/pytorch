@@ -85,9 +85,31 @@ class TestDistributions(TestCase):
         self.assertEqual(Normal(mean_1d, std_1d).sample().size(), (1,))
         self.assertEqual(Normal(0.2, .6).sample_n(1).size(), (1, 1))
         self.assertEqual(Normal(-0.7, 50.0).sample_n(1).size(), (1, 1))
-
-        self.assertEqual(Normal(mean, std).sample(requires_grad=True).size(), (5, 5))
-        self.assertEqual(Normal(mean, std).sample_n(7,requires_grad=True).size(), (7, 5, 5))
+        
+        #test for reparametrized sample
+        state= torch.get_rng_state()
+        eps = torch.normal(torch.zeros_like(mean), torch.ones_like(std))
+        torch.set_rng_state(state)
+        z= Normal(mean, std).sample(requires_grad=True)
+        z.backward(torch.ones_like(z))
+        self.assertEqual(mean.grad, torch.ones_like(mean))
+        self.assertEqual(std.grad, eps)
+        mean.grad.zero_()
+        std.grad.zero_()
+        self.assertEqual(z.size(), (5, 5))
+        
+        #test for reparametrized sample_n
+        state= torch.get_rng_state()
+        z= Normal(mean, std).sample_n(7,requires_grad=True)
+        torch.set_rng_state(state)
+        eps = torch.normal(torch.zeros_like(z), torch.ones_like(z)).sum(dim=0)
+        z.backward(torch.ones_like(z))
+        self.assertEqual(mean.grad, torch.ones_like(z).sum(dim=0))
+        self.assertEqual(std.grad, eps)
+        mean.grad.zero_()
+        std.grad.zero_()        
+        self.assertEqual(z.size(), (7, 5, 5))
+        
         self.assertEqual(Normal(mean_1d, std_1d).sample_n(1,requires_grad=True).size(), (1, 1))
         self.assertEqual(Normal(mean_1d, std_1d,).sample(requires_grad=True).size(), (1,))
         self.assertEqual(Normal(0.2, .6,).sample_n(1,requires_grad=True).size(), (1, 1))
