@@ -108,12 +108,7 @@ void THTensor_(exponential)(THTensor *self, THGenerator *_generator, double lamb
   TH_TENSOR_APPLY(real, self, *self_data = (real)THRandom_exponential(_generator, lambda););
 }
 
-void THTensor_(standard_gamma)(THTensor *self, THGenerator *_generator, double alpha)
-{
-  TH_TENSOR_APPLY(real, self, *self_data = (real)THRandom_standard_gamma(_generator, alpha););
-}
-
-void THTensor_(standard_gamma_alpha)(THTensor *self, THGenerator *gen, THTensor *alpha)
+void THTensor_(standard_gamma)(THTensor *self, THGenerator *gen, THTensor *alpha)
 {
   THTensor_(resizeAs)(self, alpha);
   TH_TENSOR_APPLY2(real, self, real, alpha, *self_data = THRandom_standard_gamma(gen, *alpha_data););

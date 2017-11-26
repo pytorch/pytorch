@@ -3802,22 +3802,6 @@
       default: 1
 ]]
 [[
-  name: standard_gamma_
-  types:
-    - floating_point
-  backends:
-    - CPU
-  cname: standard_gamma
-  return: self
-  arguments:
-    - THTensor* self
-    - arg: THGenerator* generator
-      default: THPDefaultGenerator->cdata
-      kwarg_only: True
-    - arg: double alpha
-      default: 1
-]]
-[[
   name: rand
   types:
     - floating_point

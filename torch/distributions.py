@@ -32,6 +32,7 @@ policy, the code for implementing REINFORCE would be as follows::
 import math
 from numbers import Number
 import torch
+from torch.autograd import Variable
 
 
 __all__ = ['Distribution', 'Bernoulli', 'Categorical', 'Normal', 'Gamma']
@@ -197,6 +198,12 @@ class Normal(Distribution):
         return -((value - self.mean) ** 2) / (2 * var) - log_std - math.log(math.sqrt(2 * math.pi))
 
 
+def _standard_gamma(alpha):
+    if not isinstance(alpha, Variable):
+        return torch._C._standard_gamma(alpha)
+    return Variable(torch._C._standard_gamma(alpha.data))
+
+
 class Gamma(Distribution):
     r"""
     Creates a Gamma distribution parameterized by shape `alpha` and rate `beta`.
@@ -228,10 +235,10 @@ class Gamma(Distribution):
         self.beta = beta
 
     def sample(self):
-        return torch.standard_gamma(self.alpha) / self.beta
+        return _standard_gamma(self.alpha) / self.beta
 
     def sample_n(self, n):
-        return torch.standard_gamma(_expand_n(self.alpha, n)) / self.beta
+        return _standard_gamma(_expand_n(self.alpha, n)) / self.beta
 
     def log_prob(self, value):
         return (self.alpha * torch.log(self.beta)

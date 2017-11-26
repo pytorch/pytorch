@@ -385,20 +385,11 @@ class Variable(_C._VariableBase):
     class _torch(object):
         @staticmethod
         def normal(means, std=1):
-            # TODO(fritzo) Make this reparameterized.
             if isinstance(means, Variable):
                 means = means.data
             if isinstance(std, Variable):
                 std = std.data
             return Variable(torch.normal(means, std))
-
-        @staticmethod
-        def standard_gamma(alpha):
-            if isinstance(alpha, Variable):
-                # TODO(fritzo) Make this reparameterized.
-                alpha = alpha.data
-            return Variable(torch.standard_gamma(alpha))
-
 
 for method in dir(Variable):
     # This will also wrap some methods that normally aren't part of the

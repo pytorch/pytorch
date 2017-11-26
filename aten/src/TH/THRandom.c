@@ -279,23 +279,23 @@ double THRandom_exponential(THGenerator *_generator, double lambda)
 double THRandom_standard_gamma(THGenerator *_generator, double alpha) {
   double scale = 1.0;
 
-  /* Boost alpha for higher acceptance probability. */
+  // Boost alpha for higher acceptance probability.
   if(alpha < 1.0) {
     scale *= pow(1 - uniform_double(_generator), 1.0 / alpha);
     alpha += 1.0;
   }
 
-  /* This implements the acceptance-rejection method of Marsaglia and Tsang (2000)
-    doi:10.1145/358407.358414 */
+  // This implements the acceptance-rejection method of Marsaglia and Tsang (2000)
+  // doi:10.1145/358407.358414
   const double d = alpha - 1.0 / 3.0;
   const double c = 1.0 / sqrt(9.0 * d);
   for(;;) {
-    double x, v;
+    double x, y;
     do {
       x = THRandom_normal(_generator, 0.0, 1.0);
-      v = 1.0 + c * x;
-    } while(v <= 0);
-    v = v * v * v;
+      y = 1.0 + c * x;
+    } while(y <= 0);
+    const double v = y * y * y;
     const double u = 1 - uniform_double(_generator);
     const double xx = x * x;
     if(u < 1.0 - 0.0331 * xx * xx)
