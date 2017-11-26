@@ -261,12 +261,14 @@ def _nested_map(condition, fn):
         elif isinstance(obj, (list, tuple)):
             return type(obj)(_map(x) for x in obj)
         else:
-            raise ValueError("NestedIOFunction doesn't know how to process "
-                             "an input object of type " + torch.typename(obj))
+            raise ValueError("Auto nesting doesn't know how to process "
+                             "an input object of type " + torch.typename(obj) +
+                             ". You should be only passing lists or tuples " +
+                             "of Variables")
     return _map
 
 
-def _iter_filter(condition):
+def _iter_filter(condition, skip_unknown=False):
     def _iter(obj):
         if condition(obj):
             yield obj
@@ -276,9 +278,11 @@ def _iter_filter(condition):
             for o in obj:
                 for var in _iter(o):
                     yield var
-        else:
-            raise ValueError("NestedIOFunction doesn't know how to process "
-                             "an input object of type " + torch.typename(obj))
+        elif not skip_unknown:
+            raise ValueError("Auto nesting doesn't know how to process "
+                             "an input object of type " + torch.typename(obj) +
+                             ". You should be only passing lists or tuples " +
+                             "of Variables")
     return _iter
 
 
@@ -309,12 +313,16 @@ def _to_proto(obj):
             type_ = type(obj)
             return type_(helper(o) for o in obj)
         else:
-            raise ValueError("NestedIOFunction doesn't know how to process "
-                             "an input object of type " + torch.typename(obj))
+            raise ValueError("Auto nesting doesn't know how to process "
+                             "an input object of type " + torch.typename(obj) +
+                             ". You should be only passing lists or tuples " +
+                             "of Variables")
     return helper(obj)
 
 
 _iter_variables = _iter_filter(lambda o: isinstance(o, torch.autograd.Variable))
+_iter_variables_permissive = _iter_filter(lambda o: isinstance(o, torch.autograd.Variable), skip_unknown=True)
+_iter_jit_values = _iter_filter(lambda o: isinstance(o, torch._C.Value))
 _iter_tensors = _iter_filter(torch.is_tensor)
 _iter_None_tensors = _iter_filter(lambda o: o is None or torch.is_tensor(o))
 _map_variable_tensor = _nested_map(lambda o: isinstance(o, torch.autograd.Variable), lambda o: o.data)
@@ -372,3 +380,68 @@ class NestedIOFunction(Function):
 
     def backward_extended(self, *grad_output):
         raise NotImplementedError
+
+
+def symbolic_override(symbolic_fn):
+    """
+    Decorator to override ONNX export of the a given Python function with
+    specified subgraph.
+
+    Effectively allows to attach symbolic() implementation to an arbitrary
+    python function. Requirements to the decorated function:
+     - being non-member function
+     - positional inputs are Variables/Tensors or (nested) lists or tuples of
+       them (similar requirement to NestedIOFunction)
+     - outputs are similarly Variables/Tensors or (nested) lists or tuples of
+       them
+     - keyword arguments are of non-tensor type
+     - note, that function does NOT have to be autograd.Function
+
+    Example usage:
+
+    ```
+    def symb(g, x, y):
+        return g.op('Sum', x, y[0], y[1])
+
+    @symbolic_override(symb)
+    def foo(x, y):
+        return x + y[0] + y[1]
+    ```
+    """
+
+    def wrapper_maker(fn):
+
+        @functools.wraps(fn)
+        def wrapper(*args, **kwargs):
+            output = fn(*args, **kwargs)
+            flat_args = tuple(_iter_variables(args))
+            if not any(map(_C._jit_is_tracing, flat_args)):
+                return output
+            flat_output_tensors = tuple(
+                v.data for v in _iter_variables(output))
+            assert len(list(_iter_variables_permissive(
+                        list(kwargs.values())))) == 0, \
+                "Passing Variable through kwargs is not supported"
+
+            class ExportProxy(Function):
+                @staticmethod
+                def symbolic(g, *flat_args):
+                    symbolic_args = _unflatten(flat_args, args)
+                    symbolic_output = symbolic_fn(g, *symbolic_args, **kwargs)
+                    return tuple(_iter_jit_values(symbolic_output))
+
+                @staticmethod
+                def forward(ctx, *unused_args):
+                    return flat_output_tensors
+
+                @staticmethod
+                def backward(ctx, *unused_args, **unused_kwargs):
+                    raise RuntimeError(
+                        "symbolic_override is meant for inference export only")
+
+            flat_proxy_output = ExportProxy.apply(*flat_args)
+            return _unflatten(flat_proxy_output, output)
+
+        return wrapper
+
+    return wrapper_maker

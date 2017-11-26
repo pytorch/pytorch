@@ -84,6 +84,11 @@ def export(model, args, f, export_params=True, verbose=False, training=False,
 
 
 def _optimize_trace(trace, aten):
+    # run dce first to eliminate dead parts of the graph that might have been
+    # left behind by things like symbolic_override
+    torch._C._jit_pass_dce(trace)
+    torch._C._jit_pass_lint(trace)
+
     torch._C._jit_pass_peephole(trace)
     torch._C._jit_pass_lint(trace)
     torch._C._jit_pass_onnx(trace, aten)
