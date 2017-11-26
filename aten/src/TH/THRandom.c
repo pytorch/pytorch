@@ -276,7 +276,7 @@ double THRandom_exponential(THGenerator *_generator, double lambda)
   return(-1. / lambda * log(1-uniform_double(_generator)));
 }
 
-TH_API double THRandom_standard_gamma(THGenerator *_generator, double alpha) {
+double THRandom_standard_gamma(THGenerator *_generator, double alpha) {
   double scale = 1.0;
 
   /* Boost alpha for higher acceptance probability. */
