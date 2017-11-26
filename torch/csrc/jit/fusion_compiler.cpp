@@ -77,6 +77,9 @@ std::unordered_map<NodeKind, std::string> simple_map_ops = {
   {klerp, "${0} + ${weight}*(${1} - ${0})"},
   {kclamp, "min(max(${0},${min}),${max})"},
 
+  // simple derivatives
+  {"_sigmoid_backward"_sym, "${0} * ${1} * (1.f - ${1})"},
+  {"_tanh_backward"_sym,    "${0} * (1.f - ${1} * ${1})"},
 };
 
 std::vector<bool> TensorDesc::findContiguous(
@@ -305,8 +308,8 @@ CompiledFusionFunction::CompiledFusionFunction(const std::string & name, Annotat
   if ((prop.major >= 6 && CUDA_VERSION < 8000) ||
       (prop.major >= 7 && CUDA_VERSION < 9000)) {
     std::stringstream err_string;
-    err_string << "In CompiledFusionFunction, PyTorch compiled with insufficient CUDA version: " 
-	       << CUDA_VERSION << " for the current GPU device " << prop.name 
+    err_string << "In CompiledFusionFunction, PyTorch compiled with insufficient CUDA version: "
+	       << CUDA_VERSION << " for the current GPU device " << prop.name
 	       << " with device capability " << prop.major << "." << prop.minor;
     throw std::runtime_error(err_string.str());
   }
