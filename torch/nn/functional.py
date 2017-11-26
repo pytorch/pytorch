@@ -1267,7 +1267,7 @@ def binary_cross_entropy_with_logits(input, target, weight=None, size_average=Tr
         return loss.sum()
 
 
-def _poinwise_loss(lambd, lambd_optimized, input, target, size_average=True, reduce=True):
+def _pointwise_loss(lambd, lambd_optimized, input, target, size_average=True, reduce=True):
     if target.requires_grad:
         d = lambd(input, target)
         if not reduce:
@@ -1287,7 +1287,6 @@ See :class:`~torch.nn.SmoothL1Loss` for details.
 """)
 
 
-
 def l1_loss(input, target, size_average=True, reduce=True):
     """
     l1_loss(input, target, size_average=True, reduce=True) -> Variable
@@ -1296,7 +1295,7 @@ def l1_loss(input, target, size_average=True, reduce=True):
 
     See :class:`~torch.nn.L1Loss` for details.
     """
-    return _poinwise_loss(lambda a, b: torch.abs(a - b), torch._C._nn.l1_loss,
+    return _pointwise_loss(lambda a, b: torch.abs(a - b), torch._C._nn.l1_loss,
                           input, target, size_average, reduce)
 
 
@@ -1308,7 +1307,7 @@ def mse_loss(input, target, size_average=True, reduce=True):
 
     See :class:`~torch.nn.MSELoss` for details.
     """
-    return _poinwise_loss(lambda a, b: (a - b) ** 2, torch._C._nn.mse_loss,
+    return _pointwise_loss(lambda a, b: (a - b) ** 2, torch._C._nn.mse_loss,
                           input, target, size_average, reduce)
 
 
