@@ -228,10 +228,10 @@ class Gamma(Distribution):
         self.beta = beta
 
     def sample(self):
-        return torch.random_gamma(self.alpha, self.beta)
+        return torch.standard_gamma(self.alpha) / self.beta
 
     def sample_n(self, n):
-        return torch.random_gamma(_expand_n(self.alpha, n), _expand_n(self.beta, n))
+        return torch.standard_gamma(_expand_n(self.alpha, n)) / self.beta
 
     def log_prob(self, value):
         return (self.alpha * torch.log(self.beta)

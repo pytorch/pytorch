@@ -108,27 +108,15 @@ void THTensor_(exponential)(THTensor *self, THGenerator *_generator, double lamb
   TH_TENSOR_APPLY(real, self, *self_data = (real)THRandom_exponential(_generator, lambda););
 }
 
-void THTensor_(random_gamma)(THTensor *self, THGenerator *_generator, double alpha, double beta)
+void THTensor_(standard_gamma)(THTensor *self, THGenerator *_generator, double alpha)
 {
-  TH_TENSOR_APPLY(real, self, *self_data = (real)THRandom_random_gamma(_generator, alpha, beta););
+  TH_TENSOR_APPLY(real, self, *self_data = (real)THRandom_standard_gamma(_generator, alpha););
 }
 
-void THTensor_(random_gamma_alpha)(THTensor *self, THGenerator *gen, THTensor *alpha, double beta)
+void THTensor_(standard_gamma_alpha)(THTensor *self, THGenerator *gen, THTensor *alpha)
 {
   THTensor_(resizeAs)(self, alpha);
-  TH_TENSOR_APPLY2(real, self, real, alpha, *self_data = THRandom_random_gamma(gen, *alpha_data, beta););
-}
-
-void THTensor_(random_gamma_beta)(THTensor *self, THGenerator *gen, double alpha, THTensor *beta)
-{
-  THTensor_(resizeAs)(self, beta);
-  TH_TENSOR_APPLY2(real, self, real, beta, *self_data = THRandom_random_gamma(gen, alpha, *beta_data););
-}
-
-void THTensor_(random_gamma_alpha_beta)(THTensor *self, THGenerator *gen, THTensor *alpha, THTensor *beta)
-{
-  THTensor_(resizeAs)(self, alpha);
-  TH_TENSOR_APPLY3(real, self, real, alpha, real, beta, *self_data = THRandom_random_gamma(gen, *alpha_data, *beta_data););
+  TH_TENSOR_APPLY2(real, self, real, alpha, *self_data = THRandom_standard_gamma(gen, *alpha_data););
 }
 
 void THTensor_(cauchy)(THTensor *self, THGenerator *_generator, double median, double sigma)

@@ -211,7 +211,7 @@
 ]]
 
 [[
-  name: random_gamma
+  name: standard_gamma
   types:
     - floating_point
   backends:
@@ -220,7 +220,7 @@
   variants:
     - function
   options:
-    - cname: random_gamma_alpha
+    - cname: standard_gamma_alpha
       arguments:
         - arg: THTensor* output
           output: True
@@ -228,36 +228,15 @@
           default: THPDefaultGenerator->cdata
           kwarg_only: True
         - THTensor* alpha
-        - arg: double beta
-          default: 1
-    - cname: random_gamma_beta
-      arguments:
-        - arg: THTensor* output
-          output: True
-        - arg: THGenerator* generator
-          default: THPDefaultGenerator->cdata
-          kwarg_only: True
-        - arg: double alpha
-          default: 0
-        - THTensor* beta
-    - cname: random_gamma_alpha_beta
-      arguments:
-        - arg: THTensor* output
-          output: True
-        - arg: THGenerator* generator
-          default: THPDefaultGenerator->cdata
-          kwarg_only: True
-        - THTensor* alpha
-        - THTensor* beta
 ]]
 
 [[
-  name: random_gamma_
+  name: standard_gamma_
   types:
     - floating_point
   backends:
     - CPU
-  cname: random_gamma
+  cname: standard_gamma
   return: self
   arguments:
     - THTensor* self
@@ -265,8 +244,6 @@
       default: THPDefaultGenerator->cdata
       kwarg_only: True
     - arg: double alpha
-      default: 1
-    - arg: double beta
       default: 1
 ]]
 

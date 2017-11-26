@@ -393,13 +393,11 @@ class Variable(_C._VariableBase):
             return Variable(torch.normal(means, std))
 
         @staticmethod
-        def random_gamma(alpha, beta=1):
-            # TODO(fritzo) Make this reparameterized.
+        def standard_gamma(alpha):
             if isinstance(alpha, Variable):
+                # TODO(fritzo) Make this reparameterized.
                 alpha = alpha.data
-            if isinstance(beta, Variable):
-                beta = beta.data
-            return Variable(torch.random_gamma(alpha, beta))
+            return Variable(torch.standard_gamma(alpha))
 
 
 for method in dir(Variable):
