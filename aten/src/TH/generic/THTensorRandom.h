@@ -18,6 +18,7 @@ TH_API void THTensor_(normal_stddevs)(THTensor *self, THGenerator *gen, double m
 TH_API void THTensor_(normal_means_stddevs)(THTensor *self, THGenerator *gen, THTensor *means, THTensor *stddevs);
 TH_API void THTensor_(exponential)(THTensor *self, THGenerator *_generator, double lambda);
 TH_API void THTensor_(standard_gamma)(THTensor *self, THGenerator *_generator, THTensor *alpha);
+TH_API void THTensor_(standard_gamma_grad)(THTensor *self, THTensor *x, THTensor *alpha);
 TH_API void THTensor_(cauchy)(THTensor *self, THGenerator *_generator, double median, double sigma);
 TH_API void THTensor_(logNormal)(THTensor *self, THGenerator *_generator, double mean, double stdv);
 TH_API void THTensor_(multinomial)(THLongTensor *self, THGenerator *_generator, THTensor *prob_dist, int n_sample, int with_replacement);
