@@ -468,8 +468,8 @@ struct InterpreterStateImpl {
     for(int i = 0; i < uses.values.size; i++) {
       int reg = get(uses.values,i);
       bool andFree = get(uses.free_flags,i);
-      //std::cout << "inputs[" << i << "] = registers[" << reg << "] (" << value.defined() << ")";
       outputs.push_back(registers.load(reg, andFree));
+      // std::cout << "outputs[" << i << "] = registers[" << reg << "];\n" << outputs.back() << "\n\n";
     }
   }
   size_t current_stage = 0;
