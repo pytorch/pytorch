@@ -78,7 +78,9 @@ class Conv1d(_ConvNd):
                        + \sum_{{k}=0}^{C_{in}-1} weight(C_{out_j}, k)  \star input(N_i, k)
         \end{array}
 
-    where :math:`\star` is the valid `cross-correlation`_ operator
+    where :math:`\star` is the valid `cross-correlation`_ operator,
+    :math:`N` is a batch size, :math:`C` denotes a number of channels,
+    :math:`L` is a length of signal sequence.
 
     | :attr:`stride` controls the stride for the cross-correlation, a single
       number or a tuple.
@@ -181,7 +183,10 @@ class Conv2d(_ConvNd):
                        + \sum_{{k}=0}^{C_{in}-1} weight(C_{out_j}, k)  \star input(N_i, k)
         \end{array}
 
-    where :math:`\star` is the valid 2D `cross-correlation`_ operator
+    where :math:`\star` is the valid 2D `cross-correlation`_ operator,
+    :math:`N` is a batch size, :math:`C` denotes a number of channels,
+    :math:`H` is a height of input planes in pixels, and :math:`W` is
+    width in pixels.
 
     | :attr:`stride` controls the stride for the cross-correlation, a single
       number or a tuple.
