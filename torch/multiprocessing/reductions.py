@@ -35,6 +35,24 @@ def reduce_event(event):
     return (rebuild_event, (event.ipc_handle(),))
 
 
+def rebuild_sparse_tensor(cls, indices_metadata, values_metadata, size):
+    '''
+    indices_metadata and values_metadata are each 2-tuples where the first
+    element is a rebuild function and the second element is the arguments to
+    the rebuild function.
+    '''
+    rebuilt_indices = indices_metadata[0](*indices_metadata[1])
+    rebuilt_values = values_metadata[0](*values_metadata[1])
+    return cls(rebuilt_indices, rebuilt_values, size)
+
+
+def reduce_sparse_tensor(tensor):
+    indices_metadata = reduce_tensor(tensor._indices())
+    values_metadata = reduce_tensor(tensor._values())
+    return (rebuild_sparse_tensor,
+            (type(tensor), indices_metadata, values_metadata, tensor.size()))
+
+
 def rebuild_tensor(cls, storage, metadata):
     storage_offset, size, stride = metadata
     new_tensor = cls()
@@ -43,6 +61,9 @@ def rebuild_tensor(cls, storage, metadata):
 
 
 def reduce_tensor(tensor):
+    if tensor.is_sparse:
+        return reduce_sparse_tensor(tensor)
+
     metadata = (tensor.storage_offset(), tensor.size(), tensor.stride())
     storage = tensor.storage()
     return (rebuild_tensor, (type(tensor), storage, metadata))

@@ -294,6 +294,26 @@ class TestDataLoader(TestCase):
         arr = np.array([[[object(), object(), object()]]])
         self.assertRaises(TypeError, lambda: default_collate(arr))
 
+    def test_sparse_tensor_loading(self):
+        i0 = torch.LongTensor([[0, 1, 1], [2, 0, 2]])
+        v0 = torch.FloatTensor([3, 4, 5])
+        sparse_tensor0 = torch.sparse.FloatTensor(i0, v0, torch.Size([2, 3]))
+
+        i1 = torch.LongTensor([[1, 0, 1], [2, 0, 0]])
+        v1 = torch.FloatTensor([3.1415, -1, 42])
+        sparse_tensor1 = torch.sparse.FloatTensor(i1, v1, torch.Size([2, 3]))
+
+        dataset = [sparse_tensor0, sparse_tensor1]
+
+        def collate_fn(batch):
+            return batch[0]
+
+        loader = DataLoader(dataset, batch_size=1, num_workers=2, collate_fn=collate_fn)
+        loaded_tensors = list(loader)
+
+        self.assertEqual(loaded_tensors[0], sparse_tensor0)
+        self.assertEqual(loaded_tensors[1], sparse_tensor1)
+
 
 class StringDataset(Dataset):
     def __init__(self):
