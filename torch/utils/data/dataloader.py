@@ -19,7 +19,6 @@ else:
 
 
 _use_shared_memory = False
-_SIGCHLD_handler_set = False
 """Whether to use shared memory in default_collate"""
 
 
@@ -45,7 +44,6 @@ def _worker_loop(dataset, index_queue, data_queue, collate_fn):
     while True:
         r = index_queue.get()
         if r is None:
-            data_queue.put(None)
             break
         idx, batch_indices = r
         try:
@@ -144,20 +142,29 @@ def pin_memory_batch(batch):
         return batch
 
 
+_SIGCHLD_handler_set = False
+"""Whether SIGCHLD handler is set for DataLoader worker failures. Only one
+handler needs to be set for all DataLoaders in a process."""
+
+
 def _set_SIGCHLD_handler():
+    if sys.platform == 'win32':  # Windows doesn't support SIGCHLD handler
+        return
     global _SIGCHLD_handler_set
     if _SIGCHLD_handler_set:
         return
     previous_handler = signal.getsignal(signal.SIGCHLD)
+    if not callable(previous_handler):
+        previous_handler = None
 
     def handler(signum, frame):
+        # This following call uses `waitid` with WNOHANG from C side. Therefore,
+        # Python can still get and update the process status successfully.
         _error_if_any_worker_fails()
-        if callable(previous_handler):
+        if previous_handler is not None:
             previous_handler(signum, frame)
-    try:
-        signal.signal(signal.SIGCHLD, handler)
-    except ValueError as _:
-        return  # Windows doesn't support this
+
+    signal.signal(signal.SIGCHLD, handler)
     _SIGCHLD_handler_set = True
 
 
@@ -239,7 +246,6 @@ class DataLoaderIter(object):
             return self._process_next_batch(batch)
 
         if self.batches_outstanding == 0:
-            self._remove_worker_pids_information()
             self._shutdown_workers()
             raise StopIteration
 
@@ -287,24 +293,19 @@ class DataLoaderIter(object):
             self.shutdown = True
             self.done_event.set()
             # if worker_manager_thread is waiting to put
-            if not self.data_queue.empty():
+            while not self.data_queue.empty():
                 self.data_queue.get()
             for _ in self.workers:
                 self.index_queue.put(None)
-            # if all workers hang, no None is sent to worker_manager_thread, we
-            # put None to let worker_manager_thread exit
-            # empty check prevents put from hanging
-            if self.worker_result_queue.empty():
-                self.worker_result_queue.put(None)
-
-    def _remove_worker_pids_information(self):
+            # done_event should be sufficient to exit worker_manager_thread, but
+            # be safe here and put another None
+            self.worker_result_queue.put(None)
         if self.worker_pids_set:
             _remove_worker_pids(id(self))
             self.worker_pids_set = False
 
     def __del__(self):
         if self.num_workers > 0:
-            self._remove_worker_pids_information()
             self._shutdown_workers()
 
 

@@ -72,14 +72,25 @@ PyObject *THPModule_errorIfAnyWorkerFails(PyObject *module) {
       pid = *pid_it;
       // Use waitid rather than waitpid so that we can set NOWAIT, and that Python
       // and other handlers can get whatever info they want about the child.
+      infop.si_pid = 0;
       error = waitid(P_PID, pid, &infop, WEXITED|WNOHANG|WNOWAIT);
-      if (error < 0)  // ignore errors
+      // ignore errors and case with no waitable child
+      if (error < 0 || infop.si_pid == 0)
         continue;
-      if ((infop.si_code == CLD_EXITED && infop.si_status != 0) ||  // exit with error
-          (infop.si_code == CLD_KILLED) ||
-          (infop.si_code == CLD_DUMPED)) {
+      if (infop.si_code == CLD_EXITED && infop.si_status != 0) {  // exit with error
         std::ostringstream oss;
-        oss << "DataLoader worker (pid " << pid << ") exited unexpectedly.";
+        oss << "DataLoader worker (pid " << pid << ") exited unexpectedly "
+            << "with exit code " << infop.si_status << ".";
+        // This is necessary. Otherwise, the runtime error will kill the other
+        // workers, and trigger this again.
+        pid_set.clear();
+        throw std::runtime_error(oss.str());
+      }  else if (infop.si_code == CLD_KILLED || infop.si_code == CLD_DUMPED) {  // killed by signal
+        std::ostringstream oss;
+        oss << "DataLoader worker (pid " << pid << ") is killed by signal: "
+            << strsignal(infop.si_status) << ".";
+        // This is necessary. Otherwise, the runtime error will kill the other
+        // workers, and trigger this again.
         pid_set.clear();
         throw std::runtime_error(oss.str());
       }
