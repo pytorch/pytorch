@@ -338,8 +338,6 @@ PyMethodDef variable_methods[] = {
   {"__float__", (PyCFunction)THPVariable_float_scalar, METH_NOARGS, NULL},
   {"__int__", (PyCFunction)THPVariable_integral_scalar, METH_NOARGS, NULL},
   {"__long__", (PyCFunction)THPVariable_integral_scalar, METH_NOARGS, NULL},
-  {"__int__", (PyCFunction)THPVariable_long_scalar, METH_NOARGS, NULL},
-  {"__long__", (PyCFunction)THPVariable_long_scalar, METH_NOARGS, NULL},
   {"__nonzero__", (PyCFunction)THPVariable_is_nonzero, METH_NOARGS, NULL},
   {"byte", (PyCFunction)THPVariable_byte, METH_NOARGS, NULL},
   {"char", (PyCFunction)THPVariable_char, METH_NOARGS, NULL},
