@@ -56,15 +56,14 @@ def maybe_unexpand_or_view(variable, old_size):
 #          The order is dim_n_begin, dim_n_end, dim_n-1_begin, dim_n-1_end, ...
 def prepare_onnx_paddings(dim, pad):
     assert isinstance(dim, int)
-    # The order of paddings is dim_0_begin, dim_0_end, dim_1_begin, ... , dim_n_end.
+    # The desired order of paddings is
+    # dim_0_begin, dim_1_begin, ... , dim_0_end, ..., dim_n_end.
     # n is the dimension of input.
     assert len(pad) <= dim * 2
-    paddings = []
-    # pad is guaranteed to have even elements.
-    for i, j in zip(pad[0::2], pad[1::2]):
-        paddings = [i, j] + paddings
-    while len(paddings) < 2 * dim:
-        paddings = [0, 0] + paddings
+    # assume zero-dimensions in the beginning
+    paddings = list(pad[:]) + [0] * (dim * 2 - len(pad))
+    # reverse order and collate first beginnings and then ends
+    paddings = paddings[-2::-2] + paddings[-1::-2]
     assert len(paddings) == dim * 2
     return paddings
 
