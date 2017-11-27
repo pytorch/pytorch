@@ -557,12 +557,12 @@ PyObject *THPModule_toDLPack(PyObject *_unused, PyObject *data)
   THPUtils_assert(THPModule_isTensor(data), "data must be a Tensor");
   auto atTensor = torch::createTensor(data);
   DLManagedTensor* dlMTensor = at::toDLPack(atTensor);
-  return PyCapsule_New(dlMTensor, "dltensor", NULL);
+  return PyCapsule_New(dlMTensor, "DLManagedTensor", NULL);
 }
 
 PyObject *THPModule_fromDLPack(PyObject *_unused, PyObject *data)
 {
-  DLManagedTensor * dlMTensor = (DLManagedTensor *)PyCapsule_GetPointer(data, "dltensor");
+  DLManagedTensor * dlMTensor = (DLManagedTensor *)PyCapsule_GetPointer(data, "DLManagedTensor");
   THPUtils_assert(dlMTensor, "from_dlpack received an invalid capsule. "
     "Note that DLTensor capsules can be consumed only once, "
     "so you might have already constructed a tensor from it once.")

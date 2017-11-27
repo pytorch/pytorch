@@ -213,6 +213,7 @@ void attributesTest() {
   auto two = kReturn;
   auto three = kConstant;
   auto four = kSlice;
+  (void) four; // silence assert warning, TODO: switch to JIT_ASSERT when these tests are enabled again
   Attr attr;
   attr.f_(one,3.4)->i_(two,5)->s_(three,"what");
   JIT_ASSERT(attr.f(one) == 3.4);
