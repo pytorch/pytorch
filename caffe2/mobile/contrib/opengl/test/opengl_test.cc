@@ -29,6 +29,7 @@
 #include "caffe2/core/operator.h"
 #include "caffe2/core/timer.h"
 #include "caffe2/core/workspace.h"
+#include "caffe2/utils/math.h"
 #include "caffe2/utils/proto_utils.h"
 
 #ifdef CAFFE2_USE_MPSCNN

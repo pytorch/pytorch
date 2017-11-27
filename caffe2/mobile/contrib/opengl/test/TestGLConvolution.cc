@@ -18,6 +18,7 @@
 #include "caffe2/core/operator.h"
 #include "caffe2/core/timer.h"
 #include "caffe2/core/workspace.h"
+#include "caffe2/utils/math.h"
 
 #include "../core/GL.h"
 #include "../core/GLLogging.h"
