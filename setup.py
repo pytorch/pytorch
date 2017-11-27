@@ -20,9 +20,9 @@ from textwrap import dedent
 TOP_DIR = os.path.realpath(os.path.dirname(__file__))
 SRC_DIR = os.path.join(TOP_DIR, 'caffe2')
 
-install_requires = set()
-setup_requires = set()
-test_requires = set()
+install_requires = []
+setup_requires = []
+tests_require = []
 
 ################################################################################
 # Pre Check
@@ -158,7 +158,7 @@ ext_modules = [setuptools.Extension(str('caffe2-ext'), [])]
 
 packages = []
 
-install_requires.update(['protobuf',
+install_requires.extend(['protobuf',
                          'numpy',
                          'flask',
                          'future',
@@ -180,8 +180,8 @@ install_requires.update(['protobuf',
 # Test
 ################################################################################
 
-setup_requires.add('pytest-runner')
-test_requires.update(['pytest-cov', 'hypothesis'])
+setup_requires.append('pytest-runner')
+tests_require.extend(['pytest-cov', 'hypothesis'])
 
 ################################################################################
 # Final
@@ -196,7 +196,7 @@ setuptools.setup(
     packages=packages,
     install_requires=install_requires,
     setup_requires=setup_requires,
-    tests_require=test_requires,
+    tests_require=tests_require,
     author='jiayq',
     author_email='jiayq@fb.com',
     url='https://caffe2.ai',
