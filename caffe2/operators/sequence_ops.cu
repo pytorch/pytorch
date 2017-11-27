@@ -30,6 +30,7 @@ __global__ void AddPaddingKernel(
     const T* in,
     int block_size,
     int lengths_size,
+    int outer_size,
     const int32_t* lengths_prefix_sum,
     const T* padding_start_ptr,
     int start_padding_width_blocks,
@@ -43,9 +44,18 @@ __global__ void AddPaddingKernel(
   int out_start_idx = element_idx == 0
       ? 0
       : lengths_prefix_sum[element_idx - 1] + prior_padding;
-  int len_blocks = lengths_prefix_sum[element_idx] -
-      (element_idx == 0 ? 0 : lengths_prefix_sum[element_idx - 1]);
-  int in_start_idx = lengths_prefix_sum[element_idx] - len_blocks;
+  int len_blocks;
+  int in_start_idx;
+  if (lengths_prefix_sum) {
+    len_blocks = lengths_prefix_sum[element_idx] -
+        (element_idx == 0 ? 0 : lengths_prefix_sum[element_idx - 1]);
+    in_start_idx = lengths_prefix_sum[element_idx] - len_blocks;
+  } else {
+    // Only one element, use the outer size
+    CUDA_KERNEL_ASSERT(lengths_size == 1);
+    len_blocks = outer_size;
+    in_start_idx = 0;
+  }
 
   out_start_idx *= block_size;
   in_start_idx *= block_size;
@@ -73,7 +83,7 @@ __global__ void AddPaddingKernel(
   }
 
   // update the lengths
-  if (threadIdx.x == 0) {
+  if (threadIdx.x == 0 && lengths_out != nullptr) {
     lengths_out[element_idx] =
         len_blocks + start_padding_width_blocks + end_padding_width_blocks;
   }
@@ -122,7 +132,7 @@ bool AddPaddingOp<CUDAContext>::DoRunWithType() {
       in.dims().begin() + 1, in.dims().end(), 1, std::multiplies<TIndex>());
 
   // if no lengths is provided, assume it is a single full-span entry
-  const int32_t* lengths_ptr = &outer_size;
+  const int32_t* lengths_ptr = nullptr;
   int32_t lengths_size = 1;
   if (InputSize() > 1) {
     const auto& lengths = Input(1);
@@ -158,21 +168,25 @@ bool AddPaddingOp<CUDAContext>::DoRunWithType() {
   const auto* in_ptr = in.template data<T>();
   auto* out_ptr = out->template mutable_data<T>();
 
-  if (OutputSize() == 1) {
-    return true;
+  // Step 1: compute prefix sum over the lengths -- unless
+  // there were no lengths given, i.e there is only one segment
+  const int32_t* lengths_prefix_sum_ptr = nullptr;
+  if (lengths_ptr != nullptr) {
+    lengths_prefix_sum(
+        lengths_ptr,
+        lengths_size,
+        &lengths_prefix_sum_buffer_,
+        &lengths_prefix_sum_,
+        &context_);
+    lengths_prefix_sum_ptr = lengths_prefix_sum_.data<int32_t>();
   }
 
-  // Step 1: compute prefix sum over the lengths
-  lengths_prefix_sum(
-      lengths_ptr,
-      lengths_size,
-      &lengths_prefix_sum_buffer_,
-      &lengths_prefix_sum_,
-      &context_);
-
-  auto* lengths_out = Output(1);
-  lengths_out->Resize(lengths_size);
-  auto* lengths_out_ptr = lengths_out->mutable_data<int32_t>();
+  int32_t* lengths_out_ptr = nullptr;
+  if (OutputSize() > 1) {
+    auto* lengths_out = Output(1);
+    lengths_out->Resize(lengths_size);
+    lengths_out_ptr = lengths_out->mutable_data<int32_t>();
+  }
 
   if (lengths_size == 0) {
     return true;
@@ -184,7 +198,8 @@ bool AddPaddingOp<CUDAContext>::DoRunWithType() {
           in_ptr,
           block_size,
           lengths_size,
-          lengths_prefix_sum_.data<int32_t>(),
+          outer_size,
+          lengths_prefix_sum_ptr,
           padding_start_ptr,
           startPaddingWidth_,
           padding_end_ptr,

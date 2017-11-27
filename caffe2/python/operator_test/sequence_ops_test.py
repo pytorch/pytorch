@@ -53,7 +53,7 @@ def _gen_test_add_padding(with_pad_data=True,
 
 
 def _add_padding_ref(
-        start_pad_width, end_pad_width,
+        start_pad_width, end_pad_width, ret_lengths,
         data, lengths, start_padding=None, end_padding=None):
     if start_padding is None:
         start_padding = np.zeros(data.shape[1:], dtype=data.dtype)
@@ -73,7 +73,10 @@ def _add_padding_ref(
         out[out_ptr:(out_ptr + end_pad_width)] = end_padding
         out_ptr += end_pad_width
     lengths_out = lengths + (start_pad_width + end_pad_width)
-    return (out, lengths_out)
+    if ret_lengths:
+        return (out, lengths_out)
+    else:
+        return (out, )
 
 
 def _remove_padding_ref(start_pad_width, end_pad_width, data, lengths):
@@ -113,27 +116,35 @@ class TestSequenceOps(hu.HypothesisTestCase):
     @given(start_pad_width=st.integers(min_value=1, max_value=2),
            end_pad_width=st.integers(min_value=0, max_value=2),
            args=_gen_test_add_padding(with_pad_data=True),
+           ret_lengths=st.booleans(),
            **hu.gcs)
-    def test_add_padding(self, start_pad_width, end_pad_width, args, gc, dc):
+    def test_add_padding(
+        self, start_pad_width, end_pad_width, args, ret_lengths, gc, dc
+    ):
         lengths, data, start_padding, end_padding = args
         start_padding = np.array(start_padding, dtype=np.float32)
         end_padding = np.array(end_padding, dtype=np.float32)
+        outputs = ['output', 'lengths_out'] if ret_lengths else ['output']
         op = core.CreateOperator(
-            'AddPadding',
-            ['data', 'lengths', 'start_padding', 'end_padding'],
-            ['output', 'lengths_out'],
+            'AddPadding', ['data', 'lengths', 'start_padding', 'end_padding'],
+            outputs,
             padding_width=start_pad_width,
-            end_padding_width=end_pad_width)
+            end_padding_width=end_pad_width
+        )
         self.assertReferenceChecks(
             device_option=gc,
             op=op,
             inputs=[data, lengths, start_padding, end_padding],
-            reference=partial(_add_padding_ref, start_pad_width, end_pad_width))
+            reference=partial(
+                _add_padding_ref, start_pad_width, end_pad_width, ret_lengths
+            )
+        )
 
     @given(start_pad_width=st.integers(min_value=1, max_value=2),
            end_pad_width=st.integers(min_value=0, max_value=2),
-           args=_gen_test_add_padding(with_pad_data=False))
-    def test_add_zero_padding(self, start_pad_width, end_pad_width, args):
+           args=_gen_test_add_padding(with_pad_data=False),
+           **hu.gcs)
+    def test_add_zero_padding(self, start_pad_width, end_pad_width, args, gc, dc):
         lengths, data = args
         op = core.CreateOperator(
             'AddPadding',
@@ -142,15 +153,16 @@ class TestSequenceOps(hu.HypothesisTestCase):
             padding_width=start_pad_width,
             end_padding_width=end_pad_width)
         self.assertReferenceChecks(
-            hu.cpu_do,
+            gc,
             op,
             [data, lengths],
-            partial(_add_padding_ref, start_pad_width, end_pad_width))
+            partial(_add_padding_ref, start_pad_width, end_pad_width, True))
 
     @given(start_pad_width=st.integers(min_value=1, max_value=2),
            end_pad_width=st.integers(min_value=0, max_value=2),
-           data=hu.tensor(min_dim=1, max_dim=3))
-    def test_add_padding_no_length(self, start_pad_width, end_pad_width, data):
+           data=hu.tensor(min_dim=1, max_dim=3),
+           **hu.gcs)
+    def test_add_padding_no_length(self, start_pad_width, end_pad_width, data, gc, dc):
         op = core.CreateOperator(
             'AddPadding',
             ['data'],
@@ -158,11 +170,11 @@ class TestSequenceOps(hu.HypothesisTestCase):
             padding_width=start_pad_width,
             end_padding_width=end_pad_width)
         self.assertReferenceChecks(
-            hu.cpu_do,
+            gc,
             op,
             [data],
             partial(
-                _add_padding_ref, start_pad_width, end_pad_width,
+                _add_padding_ref, start_pad_width, end_pad_width, True,
                 lengths=np.array([data.shape[0]])))
 
     @given(start_pad_width=st.integers(min_value=1, max_value=2),
@@ -188,7 +200,7 @@ class TestSequenceOps(hu.HypothesisTestCase):
     def test_gather_padding(self, start_pad_width, end_pad_width, args):
         lengths, data, start_padding, end_padding = args
         padded_data, padded_lengths = _add_padding_ref(
-            start_pad_width, end_pad_width, data,
+            start_pad_width, end_pad_width, True, data,
             lengths, start_padding, end_padding)
         op = core.CreateOperator(
             'GatherPadding',
