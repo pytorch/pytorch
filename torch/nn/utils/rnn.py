@@ -150,7 +150,9 @@ def pad_sequence(sequences, lengths, batch_first=False):
 
     Note:
         This function returns a Variable of size TxBx* or BxTx* where T is the
-        length of longest sequence (lengths[0])
+            length of longest sequence (lengths[0])
+        Function assumes trailing dimensions and type of all the Variables
+            in sequences are same
 
     Arguments:
         sequences (list[Variable]): list of variable length sequences.
@@ -166,26 +168,43 @@ def pad_sequence(sequences, lengths, batch_first=False):
     if len(lengths) != len(sequences):
         raise ValueError("number of elements in lengths and sequences didn't match")
 
-    out_variable = []
+    # assuming trailing dimensions and type of all the Variables
+    # in sequences are same and fetching those from sequences[0]
     max_len = lengths[0]
-    prev_l = lengths[0]
-    for variable, length in zip(sequences, lengths):
-        # temperory sort check, can be removed when we handle sorting internally
-        if prev_l < length:
-                raise ValueError("lengths array has to be sorted in decreasing order")
-        prev_l = length
-        if length < max_len:
-            prev_l = length
-            padding_shape = [lengths[0] - length] + list(variable.size()[1:])
-            filler = Variable(torch.Tensor(*padding_shape).type_as(variable.data).zero_())
-            out_variable.append(torch.cat((variable, filler)))
-        else:
-            out_variable.append(variable)
-    # return torch.stack(out_variable, 0 if batch_first else 1)
+    trailing_dims = list(sequences[0].size())[1:]
+    prev_l = max_len
     if batch_first:
-        return torch.stack(out_variable)
+        out_dims = [len(sequences), max_len] + trailing_dims
+        out_variable = Variable(sequences[0].data.new(*out_dims).zero_())
+        for i, variable, length in zip(range(len(lengths)), sequences, lengths):
+            # temperory sort check, can be removed when we handle sorting internally
+            if prev_l < length:
+                    raise ValueError("lengths array has to be sorted in decreasing order")
+            prev_l = length
+            if length < max_len:
+                prev_l = length
+                padding_dims = [lengths[0] - length] + trailing_dims
+                filler = Variable(variable.data.new(*padding_dims).zero_())
+                out_variable[i] = torch.cat((variable, filler))
+            else:
+                out_variable[i] = variable
     else:
-        return torch.stack(out_variable).transpose(0, 1)
+        # repeating the same logic but with T as first dimension
+        out_dims = [max_len, len(sequences)] + trailing_dims
+        out_variable = Variable(sequences[0].data.new(*out_dims).zero_())
+        for i, variable, length in zip(range(len(lengths)), sequences, lengths):
+            # temperory sort check, can be removed when we handle sorting internally
+            if prev_l < length:
+                    raise ValueError("lengths array has to be sorted in decreasing order")
+            prev_l = length
+            if length < max_len:
+                prev_l = length
+                padding_dims = [lengths[0] - length] + trailing_dims
+                filler = Variable(variable.data.new(*padding_dims).zero_())
+                out_variable[:, i] = torch.cat((variable, filler))
+            else:
+                out_variable[:, i] = variable
+    return out_variable
 
 
 def pack_sequence(sequences, lengths):
