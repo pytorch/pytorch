@@ -23,7 +23,7 @@ namespace {
 // a temporary Tensor that does not alter the refcount of impl on
 // acquisition or release, avoids any refcounting in dispatch functions
 struct TensorTemporary : public at::Tensor {
-  explicit TensorTemporary(at::RefCounted * impl)
+  explicit TensorTemporary(at::Retainable * impl)
   : at::Tensor(static_cast<at::TensorImpl*>(impl), false /* do not retain*/) {}
   ~TensorTemporary() {
     detach(); // reset
@@ -33,7 +33,7 @@ struct TensorTemporary : public at::Tensor {
 // same list of Tensors that does not alter the refcount on acquisition or
 // release of the refcount temporaries, only used rarely (e.g. for cat)
 struct TensorTemporaryList {
-  explicit TensorTemporaryList(const list_of_refcounted & ts) {
+  explicit TensorTemporaryList(const list_of_retainable & ts) {
     tensors.reserve(ts.size());
     for(auto & t : ts) {
       tensors.push_back(at::Tensor(static_cast<at::TensorImpl*>(t), false /*do not retain*/));
@@ -58,26 +58,26 @@ private:
   std::vector<at::Tensor> tensors;
 };
 
-using list_of_refcounted = std::vector<at::RefCounted*>;
+using list_of_retainable = std::vector<at::Retainable*>;
 
 // pack list takes the return values of aten functions and puts them into a
 // refcounted list. Each pack_list variant takes a Tensor by value, ensuring
 // it has a owning reference and then that reference is stolen ad added to the
-// list_of_refcounted output list.
+// list_of_retainable output list.
 // pack_list never operates on tensor temporaries.
-void pack_list(list_of_refcounted & outputs, Tensor v) { outputs.push_back(v.detach()); }
-void pack_list(list_of_refcounted & outputs, Scalar v) { outputs.push_back(v.toTensor().detach()); }
-void pack_list(list_of_refcounted & outputs, std::vector<Tensor> && ts) {
+void pack_list(list_of_retainable & outputs, Tensor v) { outputs.push_back(v.detach()); }
+void pack_list(list_of_retainable & outputs, Scalar v) { outputs.push_back(v.toTensor().detach()); }
+void pack_list(list_of_retainable & outputs, std::vector<Tensor> && ts) {
   outputs.reserve(ts.size());
   for(auto & t : ts) {
     outputs.push_back(t.detach());
   }
 }
-void pack_list(list_of_refcounted & outputs, std::tuple<Tensor, Tensor> v) {
+void pack_list(list_of_retainable & outputs, std::tuple<Tensor, Tensor> v) {
   outputs.push_back(std::get<0>(v).detach());
   outputs.push_back(std::get<1>(v).detach());
 }
-void pack_list(list_of_refcounted & outputs, std::tuple<Tensor, Tensor, Tensor> v) {
+void pack_list(list_of_retainable & outputs, std::tuple<Tensor, Tensor, Tensor> v) {
   outputs.push_back(std::get<0>(v).detach());
   outputs.push_back(std::get<1>(v).detach());
   outputs.push_back(std::get<2>(v).detach());

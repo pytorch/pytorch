@@ -32,12 +32,12 @@ struct DummyFunction : autograd::Function {
   }
 };
 
-struct Handle : at::RefCounted {
+struct Handle : at::Retainable {
   std::shared_ptr<DummyFunction> forward_inputs;
   autograd::function_list forward_outputs;
 };
 
-at::Tensor unsafeTensorBorrow(at::RefCounted * rc) {
+at::Tensor unsafeTensorBorrow(at::Retainable * rc) {
   return at::Tensor(static_cast<at::TensorImpl*>(rc), true);
 }
 
@@ -54,7 +54,7 @@ struct HandleBuilder {
       handle->forward_inputs = std::make_shared<DummyFunction>();
     }
   }
-  autograd::Variable addInput(at::RefCounted* input, const VariableFlags & flags_) {
+  autograd::Variable addInput(at::Retainable* input, const VariableFlags & flags_) {
     // TODO: handle volatile correctly
     if(handle && flags_.requires_grad) {
       autograd::VarFlags flags = {true, false};
@@ -68,14 +68,14 @@ struct HandleBuilder {
       return autograd::make_variable(unsafeTensorBorrow(input), flags);
     }
   }
-  at::RefCounted* addOutput(const autograd::Variable & output) {
+  at::Retainable* addOutput(const autograd::Variable & output) {
     if(handle) {
       handle->forward_outputs.emplace_back(output.grad_fn(),output.output_nr());
     }
     at::Tensor tensor = output.data();
     return tensor.detach();
   }
-  void writeTo(list_of_refcounted & outputs) {
+  void writeTo(list_of_retainable & outputs) {
     // note: no if(handle) guard
     // because an unused handle is still produced as an output
     outputs.push_back(handle);
@@ -94,7 +94,7 @@ bool hasHandleOutput(Node * n) {
 Operation createPythonCallback(PythonOp* op) {
   py::object func = py::handle(op->pyobj.get()).attr("apply");
   bool has_handle = hasHandleOutput(op);
-  return [=](const list_of_refcounted & inputs, list_of_refcounted & outputs) {
+  return [=](const list_of_retainable & inputs, list_of_retainable & outputs) {
     AutoGIL gil;
     py::tuple py_inputs(op->cconv.size());
     size_t i = 0;
@@ -134,7 +134,7 @@ Operation createPythonCallback(PythonOp* op) {
 Operation createCppCallback(CppOp* op) {
   std::shared_ptr<autograd::Function> func = op->fn;
   bool has_handle = hasHandleOutput(op);
-  return [=](const list_of_refcounted & inputs, list_of_refcounted & outputs) {
+  return [=](const list_of_retainable & inputs, list_of_retainable & outputs) {
     HandleBuilder builder(has_handle);
     autograd::variable_list v_inputs;
     for(size_t i = 0; i < inputs.size(); i++) {
@@ -150,8 +150,8 @@ Operation createCppCallback(CppOp* op) {
 
 Operation createEvalCallback(CppOp * op) {
   bool has_handle_output = hasHandleOutput(op);
-  return [=](const list_of_refcounted & inputs,
-             list_of_refcounted & outputs) {
+  return [=](const list_of_retainable & inputs,
+             list_of_retainable & outputs) {
     Handle * handle_in = dynamic_cast<Handle*>(inputs.back());
     JIT_ASSERT(handle_in);
     HandleBuilder builder(has_handle_output);
@@ -191,7 +191,7 @@ Operation getOperation(jit::Node *node) {
   IR_ELSEIF(FusionGroup)
 #ifdef WITH_CUDA
     auto fusion_fn = sharedFusionCompiler().getOrCompile(*value->g(kSubgraph));
-    return [fusion_fn](const list_of_refcounted & inputs, list_of_refcounted & outputs) {
+    return [fusion_fn](const list_of_retainable & inputs, list_of_retainable & outputs) {
       autograd::profiler::RecordFunction record("FusionGroup");
       tensor_list tinputs, toutputs;
       tinputs.reserve(inputs.size());
@@ -208,11 +208,11 @@ Operation getOperation(jit::Node *node) {
 #endif
   IR_ELSEIF(Constant)
     auto t = value->t(kvalue);
-    return [t](const list_of_refcounted & inputs, list_of_refcounted & outputs) {
+    return [t](const list_of_retainable & inputs, list_of_retainable & outputs) {
       outputs.push_back(at::Tensor(t).detach());
     };
   IR_ELSEIF(Undefined)
-    return [](const list_of_refcounted & inputs, list_of_refcounted & outputs) {
+    return [](const list_of_retainable & inputs, list_of_retainable & outputs) {
       outputs.push_back(at::Tensor().detach());
     };
   IR_ELSE()
@@ -394,11 +394,11 @@ struct Registers {
         r->release();
     }
   }
-  at::RefCounted*& operator[](size_t i) {
+  at::Retainable*& operator[](size_t i) {
     return registers[i];
   }
   //guarenteed to be non-null
-  at::RefCounted* release(size_t i) {
+  at::Retainable* release(size_t i) {
     auto & v = registers[i];
     if(isValid(v)) {
       v->release();
@@ -420,10 +420,10 @@ struct Registers {
     }
   }
 private:
-  bool isValid(at::RefCounted * r) {
+  bool isValid(at::Retainable * r) {
     return r != nullptr && r != at::UndefinedTensor::singleton();
   }
-  list_of_refcounted registers;
+  list_of_retainable registers;
 };
 
 // InterpreterState state that is held across stages and used to compute a Code
@@ -507,9 +507,9 @@ struct InterpreterStateImpl {
   Registers registers;
 
   // single buffer for input calls to ATen functions, so that we do not reallocate
-  std::vector<at::RefCounted*> input_buffer;
+  std::vector<at::Retainable*> input_buffer;
   // also to prevent allocations
-  std::vector<at::RefCounted*> output_buffer;
+  std::vector<at::Retainable*> output_buffer;
 };
 
 Code::Code(std::shared_ptr<Graph> & graph)

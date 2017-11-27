@@ -10,8 +10,8 @@ namespace at {
 
 // base class for refcounted things, allows for collects of generic
 // refcounted objects that include tensors
-struct RefCounted {
-  RefCounted(): refcount(1) {}
+struct Retainable {
+  Retainable(): refcount(1) {}
   void retain() {
     ++refcount;
   }
@@ -23,7 +23,7 @@ struct RefCounted {
   int use_count() const {
     return refcount.load();
   }
-  virtual ~RefCounted() {}
+  virtual ~Retainable() {}
 private:
   std::atomic<int> refcount;
 };
@@ -32,7 +32,7 @@ struct Type;
 class Scalar;
 struct Storage;
 
-struct TensorImpl : public RefCounted {
+struct TensorImpl : public Retainable {
   explicit TensorImpl(Type * type)
   : is_scalar(false), type_(type) {}
   Type & type() const {
