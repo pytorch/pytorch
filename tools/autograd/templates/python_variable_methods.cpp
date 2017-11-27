@@ -231,9 +231,7 @@ static PyObject * THPVariable_integral_scalar(PyObject* self, PyObject* args) {
   if (isFloatingType(self_.type().scalarType())) {
     // we can't dispatch to toCLong here because we want to avoid ATen overflow checks;
     // the python integral type (long in python2) can't overflow.
-    AutoGPU auto_gpu(self_);
-    Scalar localScalar = self_.get()->localScalar();
-    return THPUtils_packDoubleAsInt(localScalar.toDouble());
+    return THPUtils_packDoubleAsInt(dispatch_to_CDouble(self_));
   } else {
     return wrap(dispatch_to_CLong(self_));
   }
