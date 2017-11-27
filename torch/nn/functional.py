@@ -1296,7 +1296,7 @@ def l1_loss(input, target, size_average=True, reduce=True):
     See :class:`~torch.nn.L1Loss` for details.
     """
     return _pointwise_loss(lambda a, b: torch.abs(a - b), torch._C._nn.l1_loss,
-                          input, target, size_average, reduce)
+                           input, target, size_average, reduce)
 
 
 def mse_loss(input, target, size_average=True, reduce=True):
@@ -1308,7 +1308,7 @@ def mse_loss(input, target, size_average=True, reduce=True):
     See :class:`~torch.nn.MSELoss` for details.
     """
     return _pointwise_loss(lambda a, b: (a - b) ** 2, torch._C._nn.mse_loss,
-                          input, target, size_average, reduce)
+                           input, target, size_average, reduce)
 
 
 def margin_ranking_loss(input1, input2, target, margin=0, size_average=True):
