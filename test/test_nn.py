@@ -3819,7 +3819,7 @@ def bceloss_no_reduce_test():
         fullname='BCELoss_no_reduce',
         constructor=wrap_functional(
             lambda i: F.binary_cross_entropy(i, Variable(t.type_as(i.data)), reduce=False)),
-        input_fn=lambda: torch.rand(15, 10).clamp_(1e-2, 1 - 1e-2),
+        input_fn=lambda: torch.rand(15, 10).clamp_(2e-2, 1 - 2e-2),
         reference_fn=lambda i, m: -(t * i.log() + (1 - t) * (1 - i).log()),
         check_gradgrad=False,
         pickle=False)
@@ -3827,13 +3827,13 @@ def bceloss_no_reduce_test():
 
 def bceloss_weights_no_reduce_test():
     t = torch.randn(15, 10).gt(0).double()
-    weights = torch.randn(10)
+    weights = torch.rand(10)
     return dict(
         fullname='BCELoss_weights_no_reduce',
         constructor=wrap_functional(
             lambda i: F.binary_cross_entropy(i, Variable(t.type_as(i.data)),
                                              weight=weights.type_as(i.data), reduce=False)),
-        input_fn=lambda: torch.rand(15, 10).clamp_(1e-2, 1 - 1e-2),
+        input_fn=lambda: torch.rand(15, 10).clamp_(2e-2, 1 - 2e-2),
         reference_fn=lambda i, m: -(t * i.log() + (1 - t) * (1 - i).log()) * weights,
         check_gradgrad=False,
         pickle=False)
