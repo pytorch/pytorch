@@ -394,8 +394,6 @@ __host__ void THCTensor_varOuterDim(THCState *state, TensorTypeK *tgt, TensorTyp
 template<typename Real, typename Accreal, bool flag, bool apply_sqrt>
 __global__ void THCTensor_kernel_varInnermostDim(Real *tgt, Real *src_, unsigned num_rows, unsigned row_size)
 {
-  __shared__ Accreal mean[32];
-
   /*
    * Each block computes the var/std of blockDim.y (32) rows at once.
    * One can visualize the computation as a 16 (x) by 32 (y) grid.
@@ -448,13 +446,17 @@ __global__ void THCTensor_kernel_varInnermostDim(Real *tgt, Real *src_, unsigned
      */
     for (unsigned s = 8; s >= 1; s >>= 1) {
       local_sum = THCNumerics<Accreal>::add(local_sum, 
-          WARP_SHFL_DOWN((row < num_rows) ? local_sum : acc_zero, s));
+          WARP_SHFL_DOWN((row < num_rows) ? local_sum : acc_zero, s, 16));
     }
+
+    Accreal true_mean = acc_zero;
     if (row < num_rows && threadIdx.x == 0) {
       // This is the true mean of the entire input row. There are 32 true means.
-      mean[threadIdx.y] = THCNumerics<Accreal>::div(local_sum, ScalarConvert<int, Accreal>::to(row_size));
+      true_mean = THCNumerics<Accreal>::div(local_sum, ScalarConvert<int, Accreal>::to(row_size));
     }
-    __syncthreads();
+
+    // Broadcast the true mean from lane 0 (of 16) to the rest.
+    true_mean = WARP_SHFL(true_mean, 0, 16);
 
     /*
      * Adjust each local_M2 according to the following:
@@ -463,7 +465,7 @@ __global__ void THCTensor_kernel_varInnermostDim(Real *tgt, Real *src_, unsigned
      */
     Accreal adjusted_M2 = acc_zero;
     if (row < num_rows) {
-      Accreal mean_diff = THCNumerics<Accreal>::sub(mean[threadIdx.y], local_mean);
+      Accreal mean_diff = THCNumerics<Accreal>::sub(true_mean, local_mean);
       adjusted_M2 = THCNumerics<Accreal>::add(
           local_M2,
           THCNumerics<Accreal>::mul(
@@ -478,7 +480,7 @@ __global__ void THCTensor_kernel_varInnermostDim(Real *tgt, Real *src_, unsigned
      */
     for (unsigned s = 8; s >= 1; s >>= 1) {
       adjusted_M2 = THCNumerics<Accreal>::add(adjusted_M2, 
-          WARP_SHFL_DOWN((row < num_rows) ? adjusted_M2 : acc_zero, s));
+          WARP_SHFL_DOWN((row < num_rows) ? adjusted_M2 : acc_zero, s, 16));
     }
 
     if (row < num_rows && threadIdx.x == 0) {
