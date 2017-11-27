@@ -8,7 +8,6 @@
 #include "torch/csrc/jit/tracer_state.h"
 #include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/autograd/variable_version.h"
-#include "torch/csrc/utils/tensor_geometry.h"
 #include "torch/csrc/Types.h"
 
 namespace torch { namespace autograd {

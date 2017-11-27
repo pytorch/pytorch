@@ -1,23 +1,15 @@
-#ifndef THP_CUDNN_AFFINE_GRID_GENERATOR_INC
-#define THP_CUDNN_AFFINE_GRID_GENERATOR_INC
+#pragma once
 
-#include "../Types.h"
-#include "THC/THC.h"
+#include <ATen/ATen.h>
 
-#include "cudnn-wrapper.h"
+namespace at { namespace native {
 
-namespace torch { namespace cudnn {
+Tensor cudnn_affine_grid_generator_forward(
+    const Tensor& theta,
+    int64_t N, int64_t C, int64_t H, int64_t W);
 
-void cudnn_affine_grid_generator_forward(
-    THCState* state, cudnnHandle_t handle, cudnnDataType_t dataType,
-    THVoidTensor* theta, THVoidTensor* grid,
-    int N, int C, int H, int W);
-
-void cudnn_affine_grid_generator_backward(
-    THCState* state, cudnnHandle_t handle, cudnnDataType_t dataType,
-    THVoidTensor* grad_theta, THVoidTensor* grad_grid,
-    int N, int C, int H, int W);
+Tensor cudnn_affine_grid_generator_backward(
+    const Tensor& grad_theta,
+    int64_t N, int64_t C, int64_t H, int64_t W);
 
 }}
-
-#endif

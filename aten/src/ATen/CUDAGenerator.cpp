@@ -1,4 +1,6 @@
-#ifdef AT_CUDA_ENABLED
+#include "ATen/Config.h"
+
+#if AT_CUDA_ENABLED()
 
 #include "ATen/CUDAGenerator.h"
 #include "ATen/Context.h"
