@@ -136,32 +136,31 @@ def pad_sequence(sequences, lengths, batch_first=False):
     output will be of size ``BxTx* ``. The ``pad_sequence`` accepts list of
     sequences and its lengths which should be sorted in decreasing order
 
-    B is batch size
+    B is batch size - Number of elements in ``sequences``
     T is length longest sequence
     L is length of the sequence
-    * is any trailing dimension including zero
+    * is any number of trailing dimensions, including none
 
     >>> from torch.nn.utils.rnn import pad_sequence
     >>> a = Variable(torch.ones(25, 300))
-    >>> b = Variable(torch.ones(15, 300))
-    >>> c = Variable(torch.ones(22, 300))
-    >>> pad_sequence([a, b, c], [25, 15, 22]).size()
+    >>> b = Variable(torch.ones(22, 300))
+    >>> c = Variable(torch.ones(15, 300))
+    >>> pad_sequence([a, b, c], [25, 22, 15]).size()
     torch.Size([25, 3, 300])
 
     Note:
-        This function returns a Variable of size LxBx* or BxLx* where L is the
+        This function returns a Variable of size TxBx* or BxTx* where T is the
         length of longest sequence (lengths[0])
 
     Arguments:
-        sequences (list(Variable)): list of variable length sequences.
+        sequences (list[Variable]): list of variable length sequences.
         lengths (list[int]): list of sequences lengths of each batch element.
         batch_first (bool, optional): if True, the input is expected in Bx*x*
             format.
 
     Returns:
-        Variable of size ``seq_len x len(sequences) x * ``
-            if batch_first = False
-        Variable of size ``len(sequences) x seq_len x * `` otherwise
+        Variable of size ``T x B x * `` if batch_first = False
+        Variable of size ``B x T x * `` otherwise
     """
 
     if len(lengths) != len(sequences):
@@ -171,7 +170,7 @@ def pad_sequence(sequences, lengths, batch_first=False):
     max_len = lengths[0]
     prev_l = lengths[0]
     for variable, length in zip(sequences, lengths):
-        # temperory sort check, will be removed when we handle sorting internally
+        # temperory sort check, can be removed when we handle sorting internally
         if prev_l < length:
                 raise ValueError("lengths array has to be sorted in decreasing order")
         prev_l = length
@@ -182,6 +181,7 @@ def pad_sequence(sequences, lengths, batch_first=False):
             out_variable.append(torch.cat((variable, filler)))
         else:
             out_variable.append(variable)
+    # return torch.stack(out_variable, 0 if batch_first else 1)
     if batch_first:
         return torch.stack(out_variable)
     else:
@@ -203,6 +203,7 @@ def pack_sequence(sequences, lengths):
         retrieved from a :class:`PackedSequence` object by accessing
         its ``.data`` attribute.
     Ex.
+        >>> from torch.nn.utils.rnn import pack_sequence
         >>> a = Variable(torch.Tensor([1,2,3]))
         >>> b = Variable(torch.Tensor([4,5]))
         >>> c = Variable(torch.Tensor([6]))
