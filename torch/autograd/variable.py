@@ -237,6 +237,11 @@ class Variable(_C._VariableBase):
             return Type.apply(self, t)
         return self
 
+    def type_as(self, other):
+        if torch.is_tensor(other):
+            other = Variable(other)
+        return super(Variable, self).type_as(other)
+
     def cuda(self, device=None, async=False):
         return CudaTransfer.apply(self, device, async)
 

@@ -7,7 +7,7 @@ namespace at {
 namespace native {
 
 Tensor type_as(const Tensor& self, const Tensor& other) {
-  return self.toType(other.type());;
+  return self.toType(other.type());
 }
 
 Tensor expand_as(const Tensor& self, const Tensor& other) {
