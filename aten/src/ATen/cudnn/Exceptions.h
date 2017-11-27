@@ -1,55 +1,13 @@
-#ifndef THP_CUDNN_EXCEPTIONS_INC
-#define THP_CUDNN_EXCEPTIONS_INC
+#pragma once
 
-#include "Types.h"
-
-#include <THC/THC.h>
 #include "cudnn-wrapper.h"
 #include <string>
 #include <stdexcept>
 #include <sstream>
 
-#define CHECK_ARG(cond) _CHECK_ARG(cond, #cond, __FILE__, __LINE__)
+struct THCState;
 
-extern THCState* state;
-
-namespace torch { namespace cudnn {
-
-template<typename ...T>
-void assertSameGPU(cudnnDataType_t dataType, T* ... tensors) {
-  static_assert(std::is_same<THVoidTensor, typename std::common_type<T...>::type>::value,
-      "all arguments to assertSameGPU have to be THVoidTensor*");
-  int is_same;
-  if (dataType == CUDNN_DATA_FLOAT) {
-    is_same = THCudaTensor_checkGPU(state, sizeof...(T),
-        reinterpret_cast<THCudaTensor*>(tensors)...);
-  } else if (dataType == CUDNN_DATA_HALF) {
-    is_same = THCudaHalfTensor_checkGPU(state, sizeof...(T),
-        reinterpret_cast<THCudaHalfTensor*>(tensors)...);
-  } else if (dataType == CUDNN_DATA_DOUBLE) {
-    is_same = THCudaDoubleTensor_checkGPU(state, sizeof...(T),
-        reinterpret_cast<THCudaDoubleTensor*>(tensors)...);
-  } else {
-    throw std::runtime_error("unknown cuDNN data type");
-  }
-  if (!is_same) {
-    throw std::runtime_error("tensors are on different GPUs");
-  }
-}
-
-inline int assertSameGPU(const at::Tensor& t) {
-  return t.get_device();
-}
-
-template<typename ...T>
-int assertSameGPU(const at::Tensor& t, T& ... tensors) {
-  static_assert(std::is_same<at::Tensor, typename std::common_type<T...>::type>::value,
-      "all arguments to assertSameGPU have to be at::Tensor&");
-  auto t_device = t.get_device();
-  if (t_device != assertSameGPU(tensors...))
-    throw std::runtime_error("tensors are on different GPUs");
-  return t_device;
-}
+namespace at { namespace native {
 
 class cudnn_exception : public std::runtime_error {
 public:
@@ -62,7 +20,7 @@ public:
       , status(status) {}
 };
 
-inline void CHECK(cudnnStatus_t status)
+inline void CUDNN_CHECK(cudnnStatus_t status)
 {
   if (status != CUDNN_STATUS_SUCCESS) {
     if (status == CUDNN_STATUS_NOT_SUPPORTED) {
@@ -75,21 +33,11 @@ inline void CHECK(cudnnStatus_t status)
 
 inline void CUDA_CHECK(cudaError_t error)
 {
-  if (error) {
+  if (error != cudaSuccess) {
     std::string msg("CUDA error: ");
     msg += cudaGetErrorString(error);
     throw std::runtime_error(msg);
   }
 }
 
-inline void _CHECK_ARG(bool cond, const char* code, const char* f, int line) {
-  if (!cond) {
-    std::stringstream ss;
-    ss << "CHECK_ARG(" << code << ") failed at " << f << ":" << line;
-    throw std::runtime_error(ss.str());
-  }
-}
-
-}}  // namespace torch::cudnn
-
-#endif
+}}  // namespace at::cudnn

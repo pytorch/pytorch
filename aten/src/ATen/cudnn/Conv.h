@@ -1,89 +1,67 @@
-#ifndef THP_CUDNN_CONV_INC
-#define THP_CUDNN_CONV_INC
-
-#include "../Types.h"
-#include "THC/THC.h"
+#pragma once
 
 #include "Descriptors.h"
+
+#include <ATen/ScalarType.h>
 
 #include "cudnn-wrapper.h"
 #include <vector>
 
-namespace torch { namespace cudnn {
+namespace at { namespace native {
 
-struct ConvolutionParams
-{
-  cudnnDataType_t dataType;
-  int input_size[5];
-  int input_stride[5];
-  int weight_size[5];
-  int pad[3];
-  int stride[3];
-  int dilation[3];
-  int groups;
-};
+// API overview:
+// - We provide seperate functions for transposed convolution and
+//   backwards convolution, even though they are algorithmically
+//   the same.  This is because there are different conventions
+//   for resolving the ambiguity in output sizing (due to the
+//   floor in the convolution formula).  With backwards, it is
+//   generally assumed that the desired output size is known;
+//   with transposed convolution, the ambiguity is instead resolved
+//   using an extra output_padding parameter.
+// - The convention for desired output size is that it always
+//   comes first in the argument list, before even the tensor arguments.
+// - The convention for output_padding is that it always comes after
+//   padding, when the function accepts it.
+// - It's not necessary to provide a backward transposed convolution
+//   distinct from forward convolution, as there is no ambiguity
+//   to resolve here.
 
-struct Convolution
-{
-  ConvolutionParams params;
-  TensorDescriptor idesc;
-  TensorDescriptor odesc;
-  TensorDescriptor odesc_bias;
-  TensorDescriptor bdesc;
-  FilterDescriptor wdesc;
-  ConvolutionDescriptor cdesc;
-  int groups;
-  bool transposed;
+at::Tensor cudnn_convolution_forward(
+    const at::Tensor& input, const at::Tensor& weight,
+    IntList padding, IntList stride, IntList dilation,
+    int64_t groups, bool benchmark, bool deterministic);
 
-  // WARNING: if transposed == true, then idesc and odesc are swapped!
-  // WARNING2: WARNING does not apply to odesc_bias :)
-  // This allows for reusing the function code (with a small exception in
-  // backward_filter)
+at::Tensor cudnn_convolution_full_forward(
+    const at::Tensor& input, const at::Tensor& weight, const at::Tensor& bias,
+    IntList padding, IntList stride, IntList dilation,
+    int64_t groups, bool benchmark, bool deterministic);
 
-  Convolution(
-      cudnnDataType_t dataType, THVoidTensor* input, THVoidTensor* weight,
-      THVoidTensor* bias, THVoidTensor* output, std::vector<int> pad,
-      std::vector<int> stride, std::vector<int> dilation, int groups,
-      bool transposed);
-};
+at::Tensor cudnn_convolution_backward(
+    IntList input_size, const at::Tensor& grad_output, const at::Tensor& weight,
+    IntList padding, IntList stride, IntList dilation, int64_t groups,
+    bool benchmark, bool deterministic);
 
-void cudnn_convolution_forward(
-    THCState* state, cudnnHandle_t handle, cudnnDataType_t dataType,
-    THVoidTensor* input, THVoidTensor* weight, THVoidTensor* output,
-    Convolution* info, bool benchmark, bool deterministic);
+at::Tensor cudnn_convolution_transpose_full_forward(
+    const at::Tensor& input, const at::Tensor& weight, const at::Tensor& bias,
+    IntList padding, IntList output_padding, IntList stride, IntList dilation,
+    int64_t groups, bool benchmark, bool deterministic);
 
-void cudnn_convolution_add_bias(
-    THCState* state, cudnnHandle_t handle, cudnnDataType_t dataType,
-    THVoidTensor* bias, THVoidTensor* output, Convolution* info);
+at::Tensor cudnn_convolution_transpose_backward(
+    const at::Tensor& grad_output, const at::Tensor& weight,
+    IntList padding, IntList stride, IntList dilation,
+    int64_t groups, bool benchmark, bool deterministic);
 
-void cudnn_convolution_backward_data(
-    THCState* state, cudnnHandle_t handle, cudnnDataType_t dataType,
-    THVoidTensor* gradOutput, THVoidTensor* gradInput, THVoidTensor* weight,
-    Convolution* info, bool benchmark, bool deterministic);
+at::Tensor cudnn_convolution_backward_weight(
+    IntList weight_size, const at::Tensor& grad_output, const at::Tensor& input,
+    IntList padding, IntList stride, IntList dilation, int64_t groups,
+    bool benchmark, bool deterministic);
 
-void cudnn_convolution_backward_filter(
-    THCState* state, cudnnHandle_t handle, cudnnDataType_t dataType,
-    THVoidTensor* gradOutput, THVoidTensor* input, THVoidTensor* gradWeight,
-    Convolution* info, bool benchmark, bool deterministic);
+at::Tensor cudnn_convolution_transpose_backward_weight(
+    IntList weight_size, const at::Tensor& grad_output, const at::Tensor& input,
+    IntList padding, IntList stride, IntList dilation, int64_t groups,
+    bool benchmark, bool deterministic);
 
-void cudnn_convolution_backward_bias(
-    THCState* state, cudnnHandle_t handle, cudnnDataType_t dataType,
-    THVoidTensor* gradOutput, THVoidTensor* gradBias, Convolution* info);
+at::Tensor cudnn_convolution_backward_bias(
+    const at::Tensor& grad_output);
 
-// Helpers that allow to queue initialization, conv kernel and bias addition
-// without reacquiring GIL in between.
-Convolution* cudnn_convolution_full_forward(
-    THCState* state, cudnnHandle_t handle, cudnnDataType_t dataType,
-    THVoidTensor* input, THVoidTensor* weight, THVoidTensor* bias,
-    THVoidTensor* output, std::vector<int> pad, std::vector<int> stride,
-    std::vector<int> dilation, int groups, bool benchmark, bool deterministic);
-
-Convolution* cudnn_convolution_transpose_full_forward(
-    THCState* state, cudnnHandle_t handle, cudnnDataType_t dataType,
-    THVoidTensor* input, THVoidTensor* weight, THVoidTensor* bias,
-    THVoidTensor* output, std::vector<int> pad, std::vector<int> stride,
-    std::vector<int> dilation, int groups, bool benchmark, bool deterministic);
-
-}}  // namespace torch::cudnn
-
-#endif
+}}  // namespace at::cudnn

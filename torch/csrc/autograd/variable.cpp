@@ -198,7 +198,7 @@ Variable Variable::detach() const {
   Variable detached = make_variable(data());
   detached.is_volatile() = is_volatile();
   detached.version_counter() = version_counter();
-  return std::move(detached);
+  return detached;
 }
 
 void Variable::detach_() {

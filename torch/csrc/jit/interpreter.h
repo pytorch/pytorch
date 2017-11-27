@@ -30,7 +30,7 @@ struct Code {
   }
 private:
   std::shared_ptr<CodeImpl> pImpl;
-  friend class InterpreterStateImpl;
+  friend struct InterpreterStateImpl;
 };
 
 struct InterpreterState {

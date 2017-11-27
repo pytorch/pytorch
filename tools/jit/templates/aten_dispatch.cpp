@@ -21,7 +21,6 @@ using operator_constructor = std::function<TensorOp(jit::Node*)>;
 namespace {
 
 void pack_list(std::vector<Tensor> & outputs, Tensor v) { outputs.push_back(v); }
-void pack_list(std::vector<Tensor> & outputs, Scalar v) { outputs.push_back(v.toTensor()); }
 void pack_list(std::vector<Tensor> & outputs, const std::vector<Tensor> & t) {
   outputs.insert(outputs.end(), t.begin(), t.end());
 }

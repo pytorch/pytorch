@@ -11,14 +11,6 @@
 #include "torch/csrc/autograd/symbolic.h"
 #include "torch/csrc/autograd/saved_variable.h"
 
-#ifdef WITH_CUDNN
-#include "torch/csrc/cudnn/Conv.h"
-#else
-namespace torch { namespace cudnn {
-struct Convolution {};
-}}
-#endif
-
 namespace torch { namespace autograd {
 
 struct ConvParams {
@@ -66,11 +58,9 @@ struct ConvBackward : public Function, public ConvParams {
       Variable weight,
       Variable bias,
       tensor_list columns,
-      tensor_list ones,
-      std::unique_ptr<torch::cudnn::Convolution> convolution)
+      tensor_list ones)
     : Function(std::move(flags))
-    , ConvParams(std::move(params))
-    , convolution(std::move(convolution)) {
+    , ConvParams(std::move(params)) {
       this->input_ = SavedVariable(input, false);
       this->weight_ = SavedVariable(weight, false);
       if (bias.defined()) {
@@ -89,7 +79,6 @@ struct ConvBackward : public Function, public ConvParams {
   SavedVariable bias_;
   tensor_list columns;
   tensor_list ones;
-  std::unique_ptr<torch::cudnn::Convolution> convolution;
 };
 
 struct ConvBackwardBackward : public Function, public ConvParams {

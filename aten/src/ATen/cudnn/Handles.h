@@ -1,12 +1,9 @@
-#ifndef THP_CUDNN_HANDLE_INC
-#define THP_CUDNN_HANDLE_INC
+#pragma once
 
 #include "cudnn-wrapper.h"
 
-namespace torch { namespace cudnn {
+namespace at { namespace native {
 
 cudnnHandle_t getCudnnHandle();
 
 }} // namespace
-
-#endif

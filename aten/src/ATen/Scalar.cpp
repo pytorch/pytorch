@@ -1,3 +1,5 @@
+#include "ATen/Config.h"
+
 #include "ATen/Scalar.h"
 
 #include <TH/TH.h>
@@ -44,7 +46,7 @@ template<> bool overflows<Half, int64_t>(int64_t f) {
 }
 
 
-#ifdef AT_CUDA_ENABLED
+#if AT_CUDA_ENABLED()
 template<> half convert(double d) {
 
 #if CUDA_VERSION < 9000
