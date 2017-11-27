@@ -38,8 +38,8 @@ CALL_METHOD = CodeTemplate("TensorTemporary(inputs[0]).${name}(${args})")
 CONSTRUCTOR = CodeTemplate("""\
 {"${descriptor}", [](Node *node) {
   ${assignments}
-  return TensorOp([=](const refcounted_list & inputs,
-                      refcounted_list & outputs) {
+  return TensorOp([=](const list_of_refcounted & inputs,
+                      list_of_refcounted & outputs) {
     autograd::profiler::RecordFunction record("${name}");
     pack_list(outputs, ${call});
   }, "${name}", ${num_inputs});

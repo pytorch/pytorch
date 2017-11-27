@@ -3,8 +3,7 @@
 #include "torch/csrc/jit/ir.h"
 #include "torch/csrc/autograd/profiler.h"
 #include "torch/csrc/jit/generated/aten_dispatch.h"
-#include "Python.h"
-#include "pybind11/pybind11.h"
+#include "torch/csrc/jit/pybind.h"
 #include "torch/csrc/utils/auto_gil.h"
 #include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/autograd/python_variable.h"
@@ -18,6 +17,11 @@ namespace py = pybind11;
 
 namespace torch { namespace jit {
 
+// Dummy function is the last function that the autograd engine calls
+// when evaluating Eval nodes. Its input tensors are the outputs that the
+// Eval node needs to produce.
+// We interscept these values using an Autograd callback. So the function itself
+// never runs.
 struct DummyFunction : autograd::Function {
   DummyFunction() {
     num_inputs = 0;
@@ -37,6 +41,12 @@ at::Tensor unsafeTensorBorrow(at::RefCounted * rc) {
   return at::Tensor(static_cast<at::TensorImpl*>(rc), true);
 }
 
+// HandleBuilder is used to construct the correct Autograd Handle objects
+// for use in a future stage.
+// It used even when the future stage does not require a handle since
+// it also performs the conversions between Tensor and Variable, which
+// behave differently depending on whether a future handle needs to be
+// created.
 struct HandleBuilder {
   HandleBuilder(bool requires_handle) {
     if(requires_handle) {
@@ -45,8 +55,9 @@ struct HandleBuilder {
     }
   }
   autograd::Variable addInput(at::RefCounted* input, const VariableFlags & flags_) {
+    // TODO: handle volatile correctly
     if(handle && flags_.requires_grad) {
-      autograd::VarFlags flags = {flags_.requires_grad, flags_.is_volatile};
+      autograd::VarFlags flags = {true, false};
       return autograd::make_variable(
         unsafeTensorBorrow(input),
         flags,
@@ -64,7 +75,7 @@ struct HandleBuilder {
     at::Tensor tensor = output.data();
     return tensor.detach();
   }
-  void writeTo(refcounted_list & outputs) {
+  void writeTo(list_of_refcounted & outputs) {
     // note: no if(handle) guard
     // because an unused handle is still produced as an output
     outputs.push_back(handle);
@@ -83,7 +94,7 @@ bool hasHandleOutput(Node * n) {
 Operation createPythonCallback(PythonOp* op) {
   py::object func = py::handle(op->pyobj.get()).attr("apply");
   bool has_handle = hasHandleOutput(op);
-  return [=](const refcounted_list & inputs, refcounted_list & outputs) {
+  return [=](const list_of_refcounted & inputs, list_of_refcounted & outputs) {
     AutoGIL gil;
     py::tuple py_inputs(op->cconv.size());
     size_t i = 0;
@@ -123,7 +134,7 @@ Operation createPythonCallback(PythonOp* op) {
 Operation createCppCallback(CppOp* op) {
   std::shared_ptr<autograd::Function> func = op->fn;
   bool has_handle = hasHandleOutput(op);
-  return [=](const refcounted_list & inputs, refcounted_list & outputs) {
+  return [=](const list_of_refcounted & inputs, list_of_refcounted & outputs) {
     HandleBuilder builder(has_handle);
     autograd::variable_list v_inputs;
     for(size_t i = 0; i < inputs.size(); i++) {
@@ -139,8 +150,8 @@ Operation createCppCallback(CppOp* op) {
 
 Operation createEvalCallback(CppOp * op) {
   bool has_handle_output = hasHandleOutput(op);
-  return [=](const refcounted_list & inputs,
-             refcounted_list & outputs) {
+  return [=](const list_of_refcounted & inputs,
+             list_of_refcounted & outputs) {
     Handle * handle_in = dynamic_cast<Handle*>(inputs.back());
     JIT_ASSERT(handle_in);
     HandleBuilder builder(has_handle_output);
@@ -156,11 +167,11 @@ Operation createEvalCallback(CppOp * op) {
       }
       return false; // stop output and do not run DummyFunction
     });
-    // node handle_in->use_count() == 1 means that we are guarenteed that we have the only
-    // only copy of the backward pass, but it is not clear that it is safe even in that case
-    // if use_count() > 1 then it is possible it drops to 1 during this execute,
-    // however, that is safe if conservative since it will get freed when the handles die.
-    engine.execute(handle_in->forward_outputs, v_inputs, handle_in->use_count() > 1, callbacks);
+    // note: node handle_in->use_count() == 1 means that we are guarenteed that we have the only
+    // only copy of the handle. This might make it seems like we can pass keep_graph=False.
+    // However, it is possible for 'copied_next_fns' to grab functions used by _other_ handles,
+    // so it is not to dispose of the graph.
+    engine.execute(handle_in->forward_outputs, v_inputs, true, callbacks);
     builder.writeTo(outputs);
   };
 }
@@ -180,7 +191,7 @@ Operation getOperation(jit::Node *node) {
   IR_ELSEIF(FusionGroup)
 #ifdef WITH_CUDA
     auto fusion_fn = sharedFusionCompiler().getOrCompile(*value->g(kSubgraph));
-    return [fusion_fn](const refcounted_list & inputs, refcounted_list & outputs) {
+    return [fusion_fn](const list_of_refcounted & inputs, list_of_refcounted & outputs) {
       autograd::profiler::RecordFunction record("FusionGroup");
       tensor_list tinputs, toutputs;
       tinputs.reserve(inputs.size());
@@ -197,11 +208,11 @@ Operation getOperation(jit::Node *node) {
 #endif
   IR_ELSEIF(Constant)
     auto t = value->t(kvalue);
-    return [t](const refcounted_list & inputs, refcounted_list & outputs) {
+    return [t](const list_of_refcounted & inputs, list_of_refcounted & outputs) {
       outputs.push_back(at::Tensor(t).detach());
     };
   IR_ELSEIF(Undefined)
-    return [](const refcounted_list & inputs, refcounted_list & outputs) {
+    return [](const list_of_refcounted & inputs, list_of_refcounted & outputs) {
       outputs.push_back(at::Tensor().detach());
     };
   IR_ELSE()
@@ -275,7 +286,6 @@ struct CodeImpl {
     // so we clean it up
     // this is done with a backward scan where we mark the first time we see it
     std::unordered_set<int> seen_registers;
-    std::unordered_set<int> seen_handles;
     auto scanUses = [&](UseList & u) {
       listBegin(u.free_flags);
       for(int i = 0; i < u.values.size; i++) {
@@ -349,6 +359,11 @@ struct CodeImpl {
     return r;
   }
 
+  // We MUST hold onto graph here because some Operators stored in the
+  // instruction lists have dependencies on meta-data stored in the graph
+  // that would be dead otherwise.
+  // It is also very useful for debugging interpreter problems to
+  // keep this around.
   std::shared_ptr<Graph> graph;
   std::unordered_map<size_t, int> unique_to_reg; // map from unique of nodes to register in register table
 
@@ -408,7 +423,7 @@ private:
   bool isValid(at::RefCounted * r) {
     return r != nullptr && r != at::UndefinedTensor::singleton();
   }
-  refcounted_list registers;
+  list_of_refcounted registers;
 };
 
 // InterpreterState state that is held across stages and used to compute a Code

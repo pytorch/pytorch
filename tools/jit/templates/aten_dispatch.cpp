@@ -30,18 +30,26 @@ struct TensorTemporary : public at::Tensor {
   }
 };
 
-// same thing but creates a tensor list, only used rarely (e.g. for cat)
+// same list of Tensors that does not alter the refcount on acquisition or
+// release of the refcount temporaries, only used rarely (e.g. for cat)
 struct TensorTemporaryList {
-  explicit TensorTemporaryList(const refcounted_list & ts) {
+  explicit TensorTemporaryList(const list_of_refcounted & ts) {
     tensors.reserve(ts.size());
     for(auto & t : ts) {
       tensors.push_back(at::Tensor(static_cast<at::TensorImpl*>(t), false /*do not retain*/));
     }
   }
+  // TensorTemporaryList only exposes a TensorList,
+  // not its underlying std::vector<at::Tensor>.
+  // This ArrayRef has the desired semantics: if you get out an at::Tensor from it,
+  // the refcount is bumped;
+  // if you take a reference, it is only guaranteed to stay live as long as the ArrayRef is live,
   operator TensorList() const {
     return tensors;
   }
   ~TensorTemporaryList() {
+    // we didnt retain the tensors when we created the list
+    // so make sure we don't release them when we free it
     for(auto & t : tensors) {
       t.detach();
     }
@@ -50,20 +58,26 @@ private:
   std::vector<at::Tensor> tensors;
 };
 
-using refcounted_list = std::vector<at::RefCounted*>;
-void pack_list(refcounted_list & outputs, Tensor v) { outputs.push_back(v.detach()); }
-void pack_list(refcounted_list & outputs, Scalar v) { outputs.push_back(v.toTensor().detach()); }
-void pack_list(refcounted_list & outputs, std::vector<Tensor> && ts) {
+using list_of_refcounted = std::vector<at::RefCounted*>;
+
+// pack list takes the return values of aten functions and puts them into a
+// refcounted list. Each pack_list variant takes a Tensor by value, ensuring
+// it has a owning reference and then that reference is stolen ad added to the
+// list_of_refcounted output list.
+// pack_list never operates on tensor temporaries.
+void pack_list(list_of_refcounted & outputs, Tensor v) { outputs.push_back(v.detach()); }
+void pack_list(list_of_refcounted & outputs, Scalar v) { outputs.push_back(v.toTensor().detach()); }
+void pack_list(list_of_refcounted & outputs, std::vector<Tensor> && ts) {
   outputs.reserve(ts.size());
   for(auto & t : ts) {
     outputs.push_back(t.detach());
   }
 }
-void pack_list(refcounted_list & outputs, std::tuple<Tensor, Tensor> v) {
+void pack_list(list_of_refcounted & outputs, std::tuple<Tensor, Tensor> v) {
   outputs.push_back(std::get<0>(v).detach());
   outputs.push_back(std::get<1>(v).detach());
 }
-void pack_list(refcounted_list & outputs, std::tuple<Tensor, Tensor, Tensor> v) {
+void pack_list(list_of_refcounted & outputs, std::tuple<Tensor, Tensor, Tensor> v) {
   outputs.push_back(std::get<0>(v).detach());
   outputs.push_back(std::get<1>(v).detach());
   outputs.push_back(std::get<2>(v).detach());
