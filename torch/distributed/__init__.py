@@ -67,11 +67,6 @@ def init_process_group(backend, init_method='env://', **kwargs):
     global _initialized
     if _initialized:
         raise RuntimeError("trying to initialize torch.distributed twice!")
-    torch._C._dist_init_process_group(backend, init_method, world_size,
-                                      group_name, rank)
-    _initialized = _INITIALIZED_PG
-    if not torch._C._dist_init_extension(False, reduce_op, group):
-        raise RuntimeError("distributed module initialization failed")
 
     # Checking and assigning the distributed backend
     global _backend
@@ -85,7 +80,11 @@ def init_process_group(backend, init_method='env://', **kwargs):
     elif backend == "nccl":
         _backend = dist_backend.NCCL
     else:
-        raise RuntimeError("Invalid distributed backend name detected")
+        raise RuntimeError("Invalid distributed backend name: " + backend)
+
+    torch._C._dist_init_process_group(backend, init_method, world_size,
+                                      group_name, rank)
+    _initialized = _INITIALIZED_PG
 
     if _backend == dist_backend.NCCL:
         warnings.warn("""
@@ -97,6 +96,9 @@ def init_process_group(backend, init_method='env://', **kwargs):
         We'll announce it once it's ready.
         """)
         atexit.register(destroy_process_group)
+
+    if not torch._C._dist_init_extension(False, reduce_op, group):
+        raise RuntimeError("distributed module initialization failed")
 
 
 def init_master_worker(backend, init_method='env://', **kwargs):
