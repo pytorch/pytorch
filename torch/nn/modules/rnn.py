@@ -148,12 +148,18 @@ class RNNBase(Module):
         num_directions = 2 if self.bidirectional else 1
         expected_hidden_size = (self.num_layers * num_directions,
                                 mini_batch, self.hidden_size)
+
+        def check_hidden_size(hx, expected_hidden_size, msg='Expected hidden size {}, got {}'):
+            if tuple(hx.size()) != expected_hidden_size:
+                raise RuntimeError(msg.format(expected_hidden_size, tuple(hx.size())))
+
         if self.mode == 'LSTM':
-            hidden = hidden[0]
-        if tuple(hidden.size()) != expected_hidden_size:
-            raise RuntimeError(
-                'Expected hidden size {}, got {}'.format(
-                    expected_hidden_size, tuple(hidden.size())))
+            check_hidden_size(hidden[0], expected_hidden_size,
+                              'Expected hidden[0] size {}, got {}')
+            check_hidden_size(hidden[1], expected_hidden_size,
+                              'Expected hidden[1] size {}, got {}')
+        else:
+            check_hidden_size(hidden, expected_hidden_size)
 
     def forward(self, input, hx=None):
         is_packed = isinstance(input, PackedSequence)
