@@ -32,25 +32,33 @@ struct DummyFunction : autograd::Function {
   }
 };
 
-struct Handle : at::Retainable {
+// An AutogradHandle holds the information needed to run an Autograd backward pass
+// after running a forward operator (such as PythonOp, CppOp, or for double-backwards another Eval Op)
+// The EvalOperation uses AutogradHandle to perform this operation.
+struct AutogradHandle : at::Retainable {
+
+  // The inputs of DummyFunction are the gradients of the forward passes
+  // inputs, and the _outputs_ of the run of the Autograd engine computing backward.
+  // there is one entry in this list for each forward input that requires
+  // gradients
   std::shared_ptr<DummyFunction> forward_inputs;
+
+  // there is one entry in this list for each output of the forward pass
+  // that represents the location in the backwaard pass where the gradient
+  // of this output should be inserted at the beginning of the backward pass
   autograd::function_list forward_outputs;
 };
 
-at::Tensor unsafeTensorBorrow(at::Retainable * rc) {
-  return at::Tensor(static_cast<at::TensorImpl*>(rc), true);
-}
-
 // HandleBuilder is used to construct the correct Autograd Handle objects
 // for use in a future stage.
-// It used even when the future stage does not require a handle since
+// It is used even when the future stage does not require a handle since
 // it also performs the conversions between Tensor and Variable, which
 // behave differently depending on whether a future handle needs to be
 // created.
 struct HandleBuilder {
   HandleBuilder(bool requires_handle) {
     if(requires_handle) {
-      handle = new Handle();
+      handle = new AutogradHandle();
       handle->forward_inputs = std::make_shared<DummyFunction>();
     }
   }
@@ -59,13 +67,13 @@ struct HandleBuilder {
     if(handle && flags_.requires_grad) {
       autograd::VarFlags flags = {true, false};
       return autograd::make_variable(
-        unsafeTensorBorrow(input),
+        unsafeToTensorShare(input),
         flags,
         handle->forward_inputs->num_inputs++,
         handle->forward_inputs);
     } else {
       autograd::VarFlags flags = {false, false};
-      return autograd::make_variable(unsafeTensorBorrow(input), flags);
+      return autograd::make_variable(unsafeToTensorShare(input), flags);
     }
   }
   at::Retainable* addOutput(const autograd::Variable & output) {
@@ -73,15 +81,17 @@ struct HandleBuilder {
       handle->forward_outputs.emplace_back(output.grad_fn(),output.output_nr());
     }
     at::Tensor tensor = output.data();
-    return tensor.detach();
+    return toRetainableShare(output.data());
   }
   void writeTo(list_of_retainable & outputs) {
     // note: no if(handle) guard
     // because an unused handle is still produced as an output
+    // outputs takes ownership of handle
     outputs.push_back(handle);
+    handle = nullptr;
   }
 private:
-  Handle* handle = nullptr;
+  AutogradHandle* handle = nullptr;
 };
 
 bool hasHandleOutput(Node * n) {
@@ -91,7 +101,7 @@ bool hasHandleOutput(Node * n) {
   return last->isHandle() && last->uses().size() > 0; // don't bother creating a handle if it is never used
 }
 
-Operation createPythonCallback(PythonOp* op) {
+Operation createPythonOperation(PythonOp* op) {
   py::object func = py::handle(op->pyobj.get()).attr("apply");
   bool has_handle = hasHandleOutput(op);
   return [=](const list_of_retainable & inputs, list_of_retainable & outputs) {
@@ -131,7 +141,7 @@ Operation createPythonCallback(PythonOp* op) {
   };
 }
 
-Operation createCppCallback(CppOp* op) {
+Operation createCppOperation(CppOp* op) {
   std::shared_ptr<autograd::Function> func = op->fn;
   bool has_handle = hasHandleOutput(op);
   return [=](const list_of_retainable & inputs, list_of_retainable & outputs) {
@@ -148,11 +158,11 @@ Operation createCppCallback(CppOp* op) {
   };
 }
 
-Operation createEvalCallback(CppOp * op) {
+Operation createEvalOperation(CppOp * op) {
   bool has_handle_output = hasHandleOutput(op);
   return [=](const list_of_retainable & inputs,
              list_of_retainable & outputs) {
-    Handle * handle_in = dynamic_cast<Handle*>(inputs.back());
+    AutogradHandle * handle_in = dynamic_cast<AutogradHandle*>(inputs.back());
     JIT_ASSERT(handle_in);
     HandleBuilder builder(has_handle_output);
     auto& engine = autograd::python::PythonEngine::getDefaultEngine();
@@ -181,12 +191,12 @@ using tensor_list = std::vector<at::Tensor>;
 // or nullptr if it's a no-op for autograd.
 Operation getOperation(jit::Node *node) {
   IR_IFM(node, PythonOp)
-    return createPythonCallback(value);
+    return createPythonOperation(value);
   IR_ELSEIFM(CppOp)
     if(dynamic_cast<autograd::Eval*>(value->fn.get())) {
-      return createEvalCallback(value);
+      return createEvalOperation(value);
     } else {
-      return createCppCallback(value);
+      return createCppOperation(value);
     }
   IR_ELSEIF(FusionGroup)
 #ifdef WITH_CUDA
@@ -196,11 +206,11 @@ Operation getOperation(jit::Node *node) {
       tensor_list tinputs, toutputs;
       tinputs.reserve(inputs.size());
       for(auto & i : inputs) {
-        tinputs.push_back(unsafeTensorBorrow(i));
+        tinputs.push_back(unsafeToTensorShare(i));
       }
       fusion_fn->launch(tinputs, toutputs);
-      for(auto  & o : toutputs) {
-        outputs.push_back(o.detach());
+      for(auto & o : toutputs) {
+        outputs.push_back(toRetainableSteal(std::move(o)));
       }
     };
 #else
@@ -209,11 +219,11 @@ Operation getOperation(jit::Node *node) {
   IR_ELSEIF(Constant)
     auto t = value->t(kvalue);
     return [t](const list_of_retainable & inputs, list_of_retainable & outputs) {
-      outputs.push_back(at::Tensor(t).detach());
+      outputs.push_back(toRetainableShare(t));
     };
   IR_ELSEIF(Undefined)
     return [](const list_of_retainable & inputs, list_of_retainable & outputs) {
-      outputs.push_back(at::Tensor().detach());
+      outputs.push_back(toRetainableSteal(at::Tensor()));
     };
   IR_ELSE()
     return getTensorOp(node).op;
@@ -377,46 +387,47 @@ struct CodeImpl {
   std::vector<bool> bool_data;
 };
 
-
-struct Registers {
-  Registers(size_t size)
+// Since the interpreter works directly with at::Retainable* objects,
+// this struct is responsible for maintaining their ownership correctly.
+// each non-null/non-undefined entry has a +1 reference count
+// that gets released when this list is destructed or a call to release() is made
+struct OwnedRetainables {
+  OwnedRetainables(size_t size)
   : registers(size) {}
-  Registers(const Registers & rhs)
+  OwnedRetainables(const OwnedRetainables & rhs)
   : registers(rhs.registers) {
     for(auto & r : registers) {
       if(isValid(r))
         r->retain();
     }
   }
-  ~Registers() {
+  ~OwnedRetainables() {
     for(auto & r : registers) {
       if(isValid(r))
         r->release();
     }
   }
-  at::Retainable*& operator[](size_t i) {
+  at::Retainable* operator[](size_t i) {
     return registers[i];
   }
-  //guarenteed to be non-null
-  at::Retainable* release(size_t i) {
-    auto & v = registers[i];
-    if(isValid(v)) {
-      v->release();
-      v = nullptr;
-    }
+
+  // take ownership of 'v'
+  void takeOwnership(size_t i, at::Retainable* && v) {
+    JIT_ASSERT(registers[i] == nullptr);
+    registers[i] = v;
+    v = nullptr;
+  }
+  // return ownership of registers[i] to caller
+  at::Retainable* detachOwnership(size_t i) {
+    auto v = registers[i];
+    registers[i] = nullptr;
     return v;
   }
-  void save(size_t i, const at::Tensor & t) {
-    registers[i] = at::Tensor(t).detach();
-  }
-  at::Tensor load(size_t i, bool andFree) {
-    auto & v = registers[i];
-    if(andFree) {
-      auto r = at::Tensor(static_cast<at::TensorImpl*>(v), false);
-      v = nullptr;
-      return r;
-    } else {
-      return at::Tensor(static_cast<at::TensorImpl*>(v), true);
+  // release registers[i] and reset it to nullptr
+  void reset(size_t i) {
+    auto r = detachOwnership(i);
+    if(isValid(r)) {
+      r->release();
     }
   }
 private:
@@ -444,27 +455,27 @@ struct InterpreterStateImpl {
       for(int i = 0; i < stage.inputs.size; i++) {
         int reg = get(stage.inputs,i);
         if(reg >= 0) { // otherwise this input is dead, and we do not store it to avoid holding the reference
-          registers.save(reg, inputs[i]);
+          registers.takeOwnership(reg, toRetainableShare(inputs[i]));
         }
-        //std::cout << "registers[" << reg << "] = inputs[" << i << "](" << registers[reg] << ")\n";
+        // std::cout << "registers[" << reg << "] = inputs[" << i << "](" << registers[reg] << ")\n";
       }
       for(auto & inst : stage.instructions) {
         auto & inputs = inst.inputs.values;
         for(int i = 0; i < inputs.size; i++) {
           int reg = get(inputs,i);
           input_buffer.push_back(registers[reg]);
-          //std::cout << "inputs[" << i << "] = registers[" << reg << "](" << registers[reg] << ")\n";
+          // std::cout << "inputs[" << i << "] = registers[" << reg << "](" << registers[reg] << ")\n";
         }
         inst.callback(input_buffer, output_buffer);
         for(int i = 0; i < inst.outputs.size; i++) {
           int reg = get(inst.outputs,i);
-          registers[reg] = output_buffer[i];
-          //std::cout << "registers[" << reg << "] = outputs[" << i << "](" << registers[reg] << ")\n";
+          registers.takeOwnership(reg, std::move(output_buffer[i]));
+          // std::cout << "registers[" << reg << "] = outputs[" << i << "](" << registers[reg] << ")\n";
         }
         auto & frees = inst.inputs.free_flags;
         for(int i = 0; i < frees.size; i++) {
           if(get(frees,i)) {
-            registers.release(get(inputs,i));
+            registers.reset(get(inputs,i));
           }
         }
         output_buffer.clear();
@@ -482,9 +493,13 @@ struct InterpreterStateImpl {
   void loadTensorsFromRegisters(const UseList & uses, std::vector<at::Tensor> & outputs) {
     for(int i = 0; i < uses.values.size; i++) {
       int reg = get(uses.values,i);
-      bool andFree = get(uses.free_flags,i);
-      outputs.push_back(registers.load(reg, andFree));
-      // std::cout << "outputs[" << i << "] = registers[" << reg << "];\n" << outputs.back() << "\n\n";
+      // std::cout << "outputs[" << i << "] = registers[" << reg << "];\n" << registers[reg] << "\n\n";
+      if(get(uses.free_flags,i)) {
+        outputs.push_back(unsafeToTensorSteal(registers.detachOwnership(reg)));
+      } else {
+        outputs.push_back(unsafeToTensorShare(registers[reg]));
+      }
+
     }
   }
   size_t current_stage = 0;
@@ -504,7 +519,7 @@ struct InterpreterStateImpl {
   // in the case where it is true, then the interpreter and this array get copied
   // if this every becomes a bottleneck then we _should_ consider minimizing the
   // total number or register
-  Registers registers;
+  OwnedRetainables registers;
 
   // single buffer for input calls to ATen functions, so that we do not reallocate
   std::vector<at::Retainable*> input_buffer;

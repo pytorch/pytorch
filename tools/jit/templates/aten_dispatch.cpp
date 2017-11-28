@@ -65,22 +65,24 @@ using list_of_retainable = std::vector<at::Retainable*>;
 // it has a owning reference and then that reference is stolen ad added to the
 // list_of_retainable output list.
 // pack_list never operates on tensor temporaries.
-void pack_list(list_of_retainable & outputs, Tensor v) { outputs.push_back(v.detach()); }
-void pack_list(list_of_retainable & outputs, Scalar v) { outputs.push_back(v.toTensor().detach()); }
+void pack_list(list_of_retainable & outputs, Tensor v) { outputs.push_back(toRetainableSteal(std::move(v))); }
+void pack_list(list_of_retainable & outputs, Scalar v) {
+  outputs.push_back(toRetainableSteal(v.toTensor()));
+}
 void pack_list(list_of_retainable & outputs, std::vector<Tensor> && ts) {
   outputs.reserve(ts.size());
   for(auto & t : ts) {
-    outputs.push_back(t.detach());
+    outputs.push_back(toRetainableSteal(std::move(t)));
   }
 }
 void pack_list(list_of_retainable & outputs, std::tuple<Tensor, Tensor> v) {
-  outputs.push_back(std::get<0>(v).detach());
-  outputs.push_back(std::get<1>(v).detach());
+  outputs.push_back(toRetainableSteal(std::move(std::get<0>(v))));
+  outputs.push_back(toRetainableSteal(std::move(std::get<1>(v))));
 }
 void pack_list(list_of_retainable & outputs, std::tuple<Tensor, Tensor, Tensor> v) {
-  outputs.push_back(std::get<0>(v).detach());
-  outputs.push_back(std::get<1>(v).detach());
-  outputs.push_back(std::get<2>(v).detach());
+  outputs.push_back(toRetainableSteal(std::move(std::get<0>(v))));
+  outputs.push_back(toRetainableSteal(std::move(std::get<1>(v))));
+  outputs.push_back(toRetainableSteal(std::move(std::get<2>(v))));
 }
 
 // A list of functions taking TensorList arguments (where we can't use
