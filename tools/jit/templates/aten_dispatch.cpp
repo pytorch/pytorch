@@ -22,12 +22,18 @@ namespace {
 
 // a temporary Tensor that does not alter the refcount of impl on
 // acquisition or release, avoids any refcounting in dispatch functions
-struct TensorTemporary : public at::Tensor {
+struct TensorTemporary {
   explicit TensorTemporary(at::Retainable * impl)
-  : at::Tensor(static_cast<at::TensorImpl*>(impl), false /* do not retain*/) {}
-  ~TensorTemporary() {
-    detach(); // reset
+  : temp(static_cast<at::TensorImpl*>(impl), false /* do not retain*/) {}
+  const at::Tensor & value() {
+    return temp;
   }
+  ~TensorTemporary() {
+    // don't reduce the refcount on deletion
+    temp.detach();
+  }
+private:
+  at::Tensor temp;
 };
 
 // same list of Tensors that does not alter the refcount on acquisition or

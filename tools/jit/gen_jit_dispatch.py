@@ -33,7 +33,7 @@ auto ${name} = ${type_cast}(node->${method}(stringToSymbol("${name}")));\
 """)
 
 CALL_NAMESPACE = CodeTemplate("at::${name}(${args})")
-CALL_METHOD = CodeTemplate("TensorTemporary(inputs[0]).${name}(${args})")
+CALL_METHOD = CodeTemplate("TensorTemporary(inputs[0]).value().${name}(${args})")
 
 CONSTRUCTOR = CodeTemplate("""\
 {"${descriptor}", [](Node *node) {
@@ -94,12 +94,12 @@ def gen_jit_dispatch(declarations, out):
                         for arg in arguments]
             else:
                 tensor_id = iter(count(start=0))
-                args = ['TensorTemporary(inputs[{}])'.format(next(tensor_id)) if is_tensor_arg(arg) else arg['name']
+                args = ['TensorTemporary(inputs[{}]).value()'.format(next(tensor_id)) if is_tensor_arg(arg) else arg['name']
                         for arg in arguments]
             call = CALL_NAMESPACE.substitute(name=name, args=args)
         else:
             tensor_id = iter(count(start=1))
-            args = ['TensorTemporary(inputs[{}])'.format(next(tensor_id)) if is_tensor_arg(arg) else arg['name']
+            args = ['TensorTemporary(inputs[{}]).value()'.format(next(tensor_id)) if is_tensor_arg(arg) else arg['name']
                     for arg in arguments[1:]]
             call = CALL_METHOD.substitute(name=name, args=args)
 
