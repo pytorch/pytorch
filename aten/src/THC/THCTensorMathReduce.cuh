@@ -438,25 +438,15 @@ __global__ void THCTensor_kernel_varInnermostDim(Real *tgt, Real *src_, unsigned
 
     /*
      * We are reducing across each row of 16 threads to find the true sum of the
-     * entire input row.
-     *
-     * This is done in a warp shuffle: each warp has 2 rows of 16 threads for a
-     * total of 32 threads. The warp will accumulate the sums of each row of 
-     * 16 threads in the first thread of the row (with threadIdx.x == 0)
+     * entire input row. The warp shfl xor loop ultimately gives each thread the 
+     * true sum.
      */
-    for (unsigned s = 8; s >= 1; s >>= 1) {
+    for (unsigned lane_mask = 8; lane_mask > 0; lane_mask >>= 1) {
       local_sum = THCNumerics<Accreal>::add(local_sum, 
-          WARP_SHFL_DOWN((row < num_rows) ? local_sum : acc_zero, s, 16));
+          WARP_SHFL_XOR((row < num_rows) ? local_sum : acc_zero, lane_mask, 16));
     }
-
-    Accreal true_mean = acc_zero;
-    if (row < num_rows && threadIdx.x == 0) {
-      // This is the true mean of the entire input row. There are 32 true means.
-      true_mean = THCNumerics<Accreal>::div(local_sum, ScalarConvert<int, Accreal>::to(row_size));
-    }
-
-    // Broadcast the true mean from lane 0 (of 16) to the rest.
-    true_mean = WARP_SHFL(true_mean, 0, 16);
+    Accreal true_mean = THCNumerics<Accreal>::div(local_sum, 
+        ScalarConvert<int, Accreal>::to(row_size));
 
     /*
      * Adjust each local_M2 according to the following:
