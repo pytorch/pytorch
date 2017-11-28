@@ -7,17 +7,6 @@ IF(POLICY CMP0026)
  CMAKE_POLICY(SET CMP0026 OLD)
 ENDIF()
 
-if(${CMAKE_VERSION} VERSION_LESS "2.8.12")
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11")
-else(${CMAKE_VERSION} VERSION_LESS "2.8.12")
-  if(${CMAKE_VERSION} VERSION_LESS "3.1")
-    add_compile_options(-std=c++11) # CMake 2.8.12 to 3.1
-  endif(${CMAKE_VERSION} VERSION_LESS "3.1")
-endif(${CMAKE_VERSION} VERSION_LESS "2.8.12")
-
-IF(NOT MSVC)
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wno-vla")
-ENDIF(NOT MSVC)
 
 ########################
 # SET_SOURCE_FILES_PROPERTIES must be in the same CMakeLists.txt file as the target that includes the file
@@ -81,9 +70,6 @@ function(filter_list output input)
     set(${output} ${result} PARENT_SCOPE)
 endfunction()
 
-IF(NOT Torch_FOUND)
-  FIND_PACKAGE(Torch REQUIRED)
-ENDIF()
 
 IF ($ENV{TH_BINARY_BUILD})
   MESSAGE(STATUS "TH_BINARY_BUILD detected. Statically linking libstdc++")
@@ -92,15 +78,6 @@ IF ($ENV{TH_BINARY_BUILD})
     # hiding statically linked library symbols, this flag is not available for the linker under macOS
     SET(CMAKE_CXX_FLAGS "-Wl,--exclude-libs,libstdc++.a ${CMAKE_CXX_FLAGS}")
   ENDIF(UNIX AND NOT APPLE)
-ENDIF()
-
-IF(NO_CUDA)
-  MESSAGE(STATUS "ignoring CUDA")
-  SET(CUDA_FLAG -n)
-ELSE()
-  FIND_PACKAGE(CUDA 5.5 REQUIRED)
-  ADD_DEFINITIONS(-DAT_CUDA_ENABLED)
-  INCLUDE_DIRECTORIES(${CUDA_INCLUDE_DIRS})
 ENDIF()
 
 # Can be compiled standalone
