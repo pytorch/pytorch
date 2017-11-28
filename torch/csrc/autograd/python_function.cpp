@@ -553,6 +553,7 @@ static void _mark_non_differentiable(THPFunction *self, t2var_type &t2var)
           "outputs");
     }
     var->cdata.requires_grad() = false;
+    var->cdata.get()->_grad_fn = nullptr;
   }
   Py_DECREF(self->non_differentiable);
   self->non_differentiable = NULL;
