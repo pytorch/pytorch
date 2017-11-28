@@ -85,7 +85,7 @@ def init_process_group(backend, init_method='env://', **kwargs):
     elif backend == "nccl":
         _backend = dist_backend.NCCL
     else:
-        raise RuntimeError("Invalid distributed backend name detected")
+        raise RuntimeError("Invalid distributed backend name: " + backend)
 
     if _backend == dist_backend.NCCL:
         warnings.warn("""

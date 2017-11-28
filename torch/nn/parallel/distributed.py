@@ -22,7 +22,7 @@ else:
 
 
 class DistributedDataParallel(Module):
-    """Implements distributed data parallelism at the module level.
+    r"""Implements distributed data parallelism at the module level.
 
     This container parallelizes the application of the given module by
     splitting the input across the specified devices by chunking in the batch
