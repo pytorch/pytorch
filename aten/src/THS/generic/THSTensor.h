@@ -13,7 +13,9 @@ typedef struct THSTensor
     // as buffer, so we keep track of both
     THLongTensor *indices;
     THTensor *values;
-    // Math operations can only be performed on ordered sparse tensors
+    // A sparse tensor is 'coalesced' if every index occurs at most once in
+    // the indices tensor, and the indices are in sorted order.
+    // Most math operations can only be performed on ordered sparse tensors
     int coalesced;
     int refcount;
 
