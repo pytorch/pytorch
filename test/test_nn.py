@@ -4842,8 +4842,8 @@ new_module_tests = [
     ),
     dict(
         module_name='IndexedConv',
-        constructor_args=(1, 1, (10 * torch.rand(10, 3)).type(torch.LongTensor)),
-        input_size=(1, 1, 10),
+        constructor_args=(2, 2, (10 * torch.rand(10, 3)).type(torch.LongTensor)),
+        input_size=(1, 2, 10),
         check_gradgrad=False,
     ),
     dict(
