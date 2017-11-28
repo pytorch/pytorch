@@ -42,6 +42,18 @@ static void invalid_mask(const Tensor & self, int64_t idx, const Tensor & mask, 
   throw std::runtime_error(ss.str());
 }
 
+static void checkIndexTensorTypes(TensorList indices) {
+  for (auto& tensor : indices) {
+    if (tensor.defined()) {
+      auto& type = tensor.type();
+      auto scalarType = type.scalarType();
+      if (scalarType != kLong && scalarType != kByte) {
+        throw std::runtime_error("tensors used as indices must be long or byte tensors");
+      }
+    }
+  }
+}
+
 static std::vector<Tensor> expandByteTensors(const Tensor & self, TensorList indices) {
   // Expands byte tensors (masks) into the equivalent indexing by LongTensors
   std::vector<Tensor> result;
@@ -57,8 +69,15 @@ static std::vector<Tensor> expandByteTensors(const Tensor & self, TensorList ind
       }
       // Replace with nonzeros
       auto nonzero = index.nonzero();
-      for (int64_t j = 0; j < nonzero.size(1); j++) {
-        result.emplace_back(nonzero.select(1, j));
+      auto is_empty = nonzero.numel() == 0;
+      for (int64_t j = 0; j < index.dim(); j++) {
+        if (is_empty) {
+          // We can't call select on an empty tensor so we just create an empty
+          // tensor.
+          result.emplace_back(nonzero.type().tensor());
+        } else {
+          result.emplace_back(nonzero.select(1, j));
+        }
       }
     } else {
       result.emplace_back(index);
@@ -100,7 +119,7 @@ transposeToFront(Tensor self, TensorList indices) {
       transposedIndices.emplace_back();
     }
   }
-  return std::make_tuple<>(self.permute(dims), std::move(transposedIndices));
+  return std::make_tuple(self.permute(dims), std::move(transposedIndices));
 }
 
 static std::vector<int64_t> computeLinearStride(const Tensor & tensor) {
@@ -176,9 +195,22 @@ static Tensor computeLinearIndex(const Tensor & src, TensorList indices) {
   return linearIndex;
 }
 
+static bool hasEmptyTensor(TensorList tensors) {
+  for (auto& tensor : tensors) {
+    if (tensor.defined() && tensor.numel() == 0) {
+      return true;
+    }
+  }
+  return false;
+}
+
 static std::tuple<Tensor, Tensor> makeLinearIndex(Tensor self, TensorList orig) {
+  checkIndexTensorTypes(orig);
   // first expand ByteTensor (boolean masks) into 1 or more LongTensors
   auto indices = expandByteTensors(self, orig);
+  if (hasEmptyTensor(indices)) {
+    return std::make_tuple(self, self.type().toScalarType(kLong).tensor());
+  }
   // next broadcast all index tensors together
   indices = expand_outplace(indices);
   // add missing null Tensors so that it matches self.dim()
@@ -191,7 +223,7 @@ static std::tuple<Tensor, Tensor> makeLinearIndex(Tensor self, TensorList orig) 
     std::tie(self, indices) = transposeToFront(self, indices);
   }
   auto linearIndex = computeLinearIndex(self, indices);
-  return std::make_tuple<>(self, linearIndex);
+  return std::make_tuple(self, linearIndex);
 }
 
 Tensor index(const Tensor & self, TensorList indices) {
