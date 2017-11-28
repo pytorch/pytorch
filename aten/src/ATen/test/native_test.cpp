@@ -6,7 +6,7 @@ using namespace at;
 void assertEqualTensorList(TensorList t1, TensorList t2) {
   ASSERT(t1.size() == t2.size());
   for (size_t i = 0; i < t1.size(); ++i) {
-    ASSERT(t1[ i ].equal(t2[ i ]));
+    ASSERT_EQUAL(t1[ i ], t2[ i ]);
   }
 }
 
@@ -24,7 +24,7 @@ int main() {
     assertEqualTensorList(splitMethod, splitNs);
 
     // test rebuilding with cat
-    ASSERT(at::cat(splitMethod, 0).equal(t));
+    ASSERT_EQUAL(at::cat(splitMethod, 0), t);
   }
 
   {
@@ -36,7 +36,7 @@ int main() {
     assertEqualTensorList(chunkMethod, chunkNs);
 
     // test rebuilding with cat
-    ASSERT(at::cat(chunkMethod, 0).equal(t));
+    ASSERT_EQUAL(at::cat(chunkMethod, 0), t);
   }
 
   // stack
@@ -52,11 +52,11 @@ int main() {
       expected_size.insert(expected_size.end(), 3);
       expected_size.insert(expected_size.end(), x.sizes().begin() + dim, x.sizes().end());
 
-      ASSERT(res.equal(res_neg));
+      ASSERT_EQUAL(res, res_neg);
       ASSERT(res.sizes().equals(expected_size));
-      ASSERT(res.select(dim, 0).equal(x));
-      ASSERT(res.select(dim, 1).equal(y));
-      ASSERT(res.select(dim, 2).equal(z));
+      ASSERT_EQUAL(res.select(dim, 0), x);
+      ASSERT_EQUAL(res.select(dim, 1), y);
+      ASSERT_EQUAL(res.select(dim, 2), z);
     }
   }
 
@@ -73,6 +73,55 @@ int main() {
     ASSERT(empty.size(-1) == 0);
     ASSERT(empty.stride(0) == 1);
     ASSERT(empty.stride(-1) == 1);
+  }
+
+  // matmul
+  {
+    auto scalar = T.randn({});
+    auto d1 = T.randn({3});
+    auto d2 = T.randn({2, 3});
+
+    // 0-d
+    ASSERT_THROWS(scalar.matmul(d2), "both arguments to matmul need to be at least 1D");
+    ASSERT_THROWS(d2.matmul(scalar), "both arguments to matmul need to be at least 1D");
+
+    // 1-d
+    ASSERT_ALLCLOSE(d1.matmul(d1), d1.dot(d1));
+    ASSERT_ALLCLOSE(d2.matmul(d1), d2.mv(d1));
+    auto d1o = T.randn({2});
+    ASSERT_ALLCLOSE(d1o.matmul(d2), d1o.unsqueeze(0).mm(d2).squeeze(0));
+
+    // 2-d
+    auto d2o = T.randn({3, 5});
+    ASSERT_ALLCLOSE(d2.matmul(d2o), d2.mm(d2o));
+
+    // > 2-d, 1-d
+    auto d3 = T.randn({5, 2, 3});
+    ASSERT_ALLCLOSE(d3.matmul(d1), d3.bmm(d1.view({1, 3, 1}).expand({5, 3, 1})).view({5, 2}));
+    ASSERT_ALLCLOSE(d1o.matmul(d3), d1o.expand({5, 1, 2}).bmm(d3).view({5, 3}));
+
+    auto d5 = T.randn({3, 2, 4, 2, 3});
+    ASSERT_ALLCLOSE(d5.matmul(d1), d5.view({24, 2, 3}).bmm(d1.view({1, 3, 1}).expand({24, 3, 1})).view({3, 2, 4, 2}));
+    ASSERT_ALLCLOSE(d1o.matmul(d5), d1o.expand({24, 1, 2}).bmm(d5.view({24, 2, 3})).view({3, 2, 4, 3}));
+
+    // > 2-d, 2-d
+    d2 = T.randn({3, 4});
+    d2o = T.randn({4, 2});
+    ASSERT_ALLCLOSE(d3.matmul(d2), d3.bmm(d2.expand({5, 3, 4})));
+    ASSERT_ALLCLOSE(d2o.matmul(d3), d2o.expand({5, 4, 2}).bmm(d3));
+
+    ASSERT_ALLCLOSE(d5.matmul(d2), d5.view({24, 2, 3}).bmm(d2.expand({24, 3, 4})).view({3, 2, 4, 2, 4}));
+    ASSERT_ALLCLOSE(d2o.matmul(d5), d2o.expand({24, 4, 2}).bmm(d5.view({24, 2, 3})).view({3, 2, 4, 4, 3}));
+
+    // > 2-d, > 2-d
+    auto d5o = T.randn({2, 1, 2, 4, 3, 2});
+    auto d5_bmm_view = d5.expand({2, 3, 2, 4, 2, 3}).contiguous().view({48, 2, 3});
+    auto d5o_bmm_view = d5o.expand({2, 3, 2, 4, 3, 2}).contiguous().view({48, 3, 2});
+    ASSERT_ALLCLOSE(d5.matmul(d5o), d5_bmm_view.bmm(d5o_bmm_view).view({2, 3, 2, 4, 2, 2}));
+
+    // non-expandable case
+    auto d5wrong = T.randn({2, 4, 2, 4, 3, 2});
+    ASSERT_THROWS(d5.matmul(d5wrong), "must match the size");
   }
 
   return 0;
