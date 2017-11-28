@@ -133,7 +133,8 @@ class TestOptim(TestCase):
 
         def fn_base(optimizer, weight, bias):
             optimizer.zero_grad()
-            loss = (weight.mv(input) + bias).pow(2).sum()
+            i = input_cuda if weight.is_cuda else input
+            loss = (weight.mv(i) + bias).pow(2).sum()
             loss.backward()
             return loss
 
@@ -160,6 +161,29 @@ class TestOptim(TestCase):
             self.assertEqual(bias, bias_c)
         # Make sure state dict wasn't modified
         self.assertEqual(state_dict, state_dict_c)
+
+        # Check that state dict can be loaded even when we cast parameters
+        # to a different type and move to a different device.
+        if not torch.cuda.is_available():
+            return
+
+        input_cuda = Variable(input.data.float().cuda())
+        weight_cuda = Variable(weight.data.float().cuda(), requires_grad=True)
+        bias_cuda = Variable(bias.data.float().cuda(), requires_grad=True)
+        optimizer_cuda = constructor(weight_cuda, bias_cuda)
+        fn_cuda = functools.partial(fn_base, optimizer_cuda, weight_cuda, bias_cuda)
+
+        state_dict = deepcopy(optimizer.state_dict())
+        state_dict_c = deepcopy(optimizer.state_dict())
+        optimizer_cuda.load_state_dict(state_dict_c)
+        # Make sure state dict wasn't modified
+        self.assertEqual(state_dict, state_dict_c)
+
+        for i in range(20):
+            optimizer.step(fn)
+            optimizer_cuda.step(fn_cuda)
+            self.assertEqual(weight, weight_cuda)
+            self.assertEqual(bias, bias_cuda)
 
     def _test_basic_cases(self, constructor, ignore_multidevice=False):
         self._test_state_dict(
