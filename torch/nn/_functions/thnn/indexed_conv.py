@@ -9,9 +9,11 @@ class IndexedConv(Function):
     @staticmethod
     def forward(ctx, input, indices, weight, bias):
 
-        input = input.contiguous()
-
         ctx._backend = type2backend[type(input)]
+
+        ctx.save_for_backward(input, weight, bias)
+
+        input = input.contiguous()
 
         ctx.indices = indices
 
@@ -23,8 +25,6 @@ class IndexedConv(Function):
                                                      input, output,
                                                      weight, bias,
                                                      indices, columns, ones)
-
-        ctx.save_for_backward(input, weight, bias)
 
         return output
 
