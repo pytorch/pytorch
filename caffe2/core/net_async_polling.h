@@ -66,6 +66,7 @@ class AsyncPollingNet : public NetBase {
   int stream(int task_id);
   std::shared_ptr<TaskThreadPool> pool(const DeviceOption& device_option);
   bool canRunDependency(int parent_task_id, int child_task_id);
+  bool isStreamFree(int task_id, int stream_id) const;
 
   // Operator/task graph
   std::vector<OperatorBase*> operators_;

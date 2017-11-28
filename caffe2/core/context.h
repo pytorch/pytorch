@@ -161,6 +161,12 @@ class CPUContext final {
     return false;
   }
 
+  // CPU streams are not implemented and are silently ignored by CPU ops,
+  // return true to signal executor to schedule a CPU op
+  static bool IsStreamFree(const DeviceOption& /* unused */, int /* unused */) {
+    return true;
+  }
+
  protected:
   // TODO(jiayq): instead of hard-coding a generator, make it more flexible.
   int random_seed_{1701};
