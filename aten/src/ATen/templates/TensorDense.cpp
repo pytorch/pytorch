@@ -9,8 +9,9 @@ IntList ${Tensor}::strides() const {
   }
 }
 Scalar ${Tensor}::localScalar() {
-  AT_ASSERT(isScalar(),"localScalar() called on Tensor with %d dims",sizes().size());
-  return Scalar(${to_at_type}(${THTensor}_get1d(${state,}tensor, 0)));
+  int64_t numel = ${THTensor}_nElement(${state,}tensor);
+  AT_ASSERT(numel == 1,"localScalar() called on Tensor with %" PRId64 " elements",numel);
+  return Scalar(${to_at_type}(${THStorage}_get(${state,}tensor->storage, tensor->storageOffset)));
 }
 void ${Tensor}::assign_(Scalar s) {
   AT_ASSERT(isScalar(),"assign_() called on Tensor with %d dims",sizes().size());
