@@ -14,6 +14,7 @@ void RecordFunction::pushFunctionRange(Function* fn) {
   pushRange(fn->name());
 }
 
+#ifdef WITH_CUDA
 static void onEachDevice(std::function<void(int)> op) {
   AutoGPU gpu_guard;
   int count;
@@ -23,6 +24,7 @@ static void onEachDevice(std::function<void(int)> op) {
     op(i);
   }
 }
+#endif
 
 void enableProfiler(ProfilerState new_state) {
   TORCH_ASSERT(new_state != ProfilerState::Disabled);

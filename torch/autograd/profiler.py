@@ -418,7 +418,6 @@ def parse_cpu_trace(thread_records):
         cuda_time_0 = cuda_records[cuda_record.device()]
         return cuda_time_0.cuda_elapsed_us(cuda_record) + start_record.cpu_elapsed_us(cuda_time_0)
 
-
     # '__start_profile' is not guarenteed to be first, so we must find it here
     for record in itertools.chain(*thread_records):
         if record.name() == '__start_profile':
