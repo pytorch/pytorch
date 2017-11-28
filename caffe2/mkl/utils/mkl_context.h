@@ -106,6 +106,10 @@ class MKLContext final {
     return false;
   }
 
+  static bool IsStreamFree(const DeviceOption& /* unused */, int /* unused */) {
+    return true;
+  }
+
  protected:
   // TODO(jiayq): instead of hard-coding a generator, make it more flexible.
   int random_seed_{1701};

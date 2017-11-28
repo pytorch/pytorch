@@ -253,6 +253,11 @@ class CUDAContext final {
     return true;
   }
 
+  static bool IsStreamFree(const DeviceOption& option, int stream_id) {
+    auto stream = CUDAContext::cuda_stream(option.cuda_gpu_id(), stream_id);
+    return cudaStreamQuery(stream) == cudaSuccess;
+  }
+
  protected:
   static void Delete(void* data);
   void set_stream_id(int stream_id) {

@@ -26,6 +26,11 @@ CAFFE2_DEFINE_int(
 
 CAFFE2_DECLARE_bool(caffe2_dag_net_collect_stats);
 
+CAFFE2_DEFINE_bool(
+    caffe2_net_async_check_stream_status,
+    true,
+    "Select next non-busy stream");
+
 namespace caffe2 {
 
 AsyncPollingNet::AsyncPollingNet(
@@ -118,8 +123,11 @@ int AsyncPollingNet::stream(int task_id) {
     if (gpu_id >= stream_rr_counters_.size()) {
       stream_rr_counters_.resize(gpu_id + 1, 0);
     }
-    stream_id = stream_rr_counters_[gpu_id]++;
-    stream_rr_counters_[gpu_id] %= FLAGS_caffe2_streams_per_gpu;
+    do {
+      stream_id = stream_rr_counters_[gpu_id]++;
+      stream_rr_counters_[gpu_id] %= FLAGS_caffe2_streams_per_gpu;
+    } while (FLAGS_caffe2_net_async_check_stream_status &&
+             !isStreamFree(task_id, stream_id));
   }
   return stream_id;
 }
@@ -287,6 +295,12 @@ EventStatus AsyncPollingNet::query(int task_id) const {
   } else {
     return event(task_id).Query();
   }
+}
+
+bool AsyncPollingNet::isStreamFree(int task_id, int stream_id) const {
+  auto& task = chains_[task_id];
+  auto& last_task_op = operators_[task.back()];
+  return last_task_op->IsStreamFree(stream_id);
 }
 
 const std::vector<int>& AsyncPollingNet::children(int task_id) const {
