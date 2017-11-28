@@ -387,7 +387,7 @@ class TestONNXUtils(TestCase):
         sizes = [2, 3, 4]
         pad = [1, 2, 3, 4]
         paddings = prepare_onnx_paddings(len(sizes), pad)
-        self.assertEqual(paddings, [0, 0, 3, 4, 1, 2])
+        self.assertEqual(paddings, [0, 3, 1, 0, 4, 2])
 
     def test_check_onnx_broadcast(self):
 
