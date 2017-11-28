@@ -128,6 +128,33 @@ class RNNBase(Module):
         for weight in self.parameters():
             weight.data.uniform_(-stdv, stdv)
 
+    def check_forward_args(self, input, hidden, batch_sizes):
+        is_input_packed = batch_sizes is not None
+        expected_input_dim = 2 if is_input_packed else 3
+        if input.dim() != expected_input_dim:
+            raise RuntimeError(
+                'input must have {} dimensions, got {}'.format(
+                    expected_input_dim, input.dim()))
+        if self.input_size != input.size(-1):
+            raise RuntimeError(
+                'input.size(-1) must be equal to input_size. Expected {}, got {}'.format(
+                    fn.input_size, input.size(-1)))
+
+        if is_input_packed:
+            mini_batch = batch_sizes[0]
+        else:
+            mini_batch = input.size(0) if self.batch_first else input.size(1)
+
+        num_directions = 2 if self.bidirectional else 1
+        expected_hidden_size = (self.num_layers * num_directions,
+                                mini_batch, self.hidden_size)
+        if self.mode == 'LSTM':
+            hidden = hidden[0]
+        if tuple(hidden.size()) != expected_hidden_size:
+            raise RuntimeError(
+                'Expected hidden size {}, got {}'.format(
+                    expected_hidden_size, tuple(hidden.size())))
+
     def forward(self, input, hx=None):
         is_packed = isinstance(input, PackedSequence)
         if is_packed:
@@ -153,6 +180,8 @@ class RNNBase(Module):
             flat_weight = first_data.new().set_(first_data.storage(), 0, torch.Size([self._param_buf_size]))
         else:
             flat_weight = None
+
+        self.check_forward_args(input, hx, batch_sizes)
         func = self._backend.RNN(
             self.mode,
             self.input_size,
