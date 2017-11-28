@@ -69,7 +69,8 @@ void encodeTensor(onnx::TensorProto * p, const at::Tensor & tensor) {
       break;
   }
   p->set_data_type(onnx_type);
-  at::Tensor cont = tensor.toType(at::CPU(at_type)).contiguous();
+  // CPU's HalfTensor doesn't have contiguous(), so first calling contiguous()
+  at::Tensor cont = tensor.contiguous().toType(at::CPU(at_type));
   p->set_raw_data(cont);
 }
 
