@@ -14,6 +14,18 @@ void RecordFunction::pushFunctionRange(Function* fn) {
   pushRange(fn->name());
 }
 
+#ifdef WITH_CUDA
+static void onEachDevice(std::function<void(int)> op) {
+  AutoGPU gpu_guard;
+  int count;
+  TORCH_CUDA_CHECK(cudaGetDeviceCount(&count));
+  for(int i = 0; i < count; i++) {
+    gpu_guard.setDevice(i);
+    op(i);
+  }
+}
+#endif
+
 void enableProfiler(ProfilerState new_state) {
   TORCH_ASSERT(new_state != ProfilerState::Disabled);
 #ifndef WITH_CUDA
@@ -24,7 +36,27 @@ void enableProfiler(ProfilerState new_state) {
       throw std::runtime_error("can't change kind of profiling (e.g. NVTX to CPU) while profiler is running");
   }
   state = new_state;
-  mark("__start_profile");
+
+#ifdef WITH_CUDA
+  if(state == ProfilerState::CUDA) {
+    // event recording appears to have some startup overhead, so we need to
+    // to generate some dummy events first before recording syncrhonization events
+    for(int i = 0; i < 5; i++) {
+      onEachDevice([](int d) {
+          mark("__cuda_startup");
+          cudaDeviceSynchronize();
+      });
+    }
+
+    // cuda events must be on the same device, so we need a start event recorded
+    // for each gpu. we then use this event to synchronize time on the GPU
+    // with the CPU clock.
+    onEachDevice([](int d) {
+        mark("__cuda_start_event");
+    });
+  }
+#endif
+  mark("__start_profile", false);
 }
 
 thread_event_lists disableProfiler() {

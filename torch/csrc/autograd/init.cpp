@@ -32,6 +32,7 @@ PyObject * THPAutograd_initExtension(PyObject *_unused)
   .def("kind",&torch::autograd::profiler::Event::kind)
   .def("name",&torch::autograd::profiler::Event::name)
   .def("thread_id",&torch::autograd::profiler::Event::thread_id)
+  .def("device",&torch::autograd::profiler::Event::device)
   .def("cpu_elapsed_us",&torch::autograd::profiler::Event::cpu_elapsed_us)
   .def("cuda_elapsed_us",&torch::autograd::profiler::Event::cuda_elapsed_us)
   .def("has_cuda",&torch::autograd::profiler::Event::has_cuda);
