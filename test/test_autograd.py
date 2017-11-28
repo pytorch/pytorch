@@ -1195,11 +1195,20 @@ class TestAutograd(TestCase):
                 self.assertIs(y.long().data.get_device(), 1)
 
         for t in [torch.DoubleTensor, torch.FloatTensor, torch.IntTensor, torch.ByteTensor]:
-            for var in (True, False):
+            for y_var in (True, False):
                 y = torch.randn(5, 5).type(t)
-                if var:
-                    y = Variable(y)
+                y = Variable(y) if y_var else y
+                self.assertIs(type(x.type(t).data), t)
                 self.assertIs(type(x.type_as(y).data), t)
+                if torch.cuda.is_available():
+                    for x_cuda in (True, False):
+                        for y_cuda in (True, False):
+                            x_c = x.cuda() if x_cuda else x
+                            y_c = y.cuda() if y_cuda else y
+                            y_type = type(y_c.data) if y_var else type(y_c)
+                            y_typestr = ('torch.cuda.' if y_cuda else 'torch.') + y_type.__name__
+                            self.assertIs(y_type, type(x_c.type(y_typestr).data))
+                            self.assertIs(type(y_c.data) if y_var else type(y_c), type(x_c.type_as(y_c).data))
 
         self._test_type_conversion_backward(lambda x: x)
         if torch.cuda.is_available():
