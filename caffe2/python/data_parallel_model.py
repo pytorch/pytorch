@@ -909,8 +909,8 @@ def _Broadcast(devices, model, net, param, use_nccl=False):
                 # _device_. Thus we always use root=0, regardless of the
                 # devices used.
                 net.NCCLBroadcast(
-                    viewvalues(model._device_grouped_blobs[param]),
-                    viewvalues(model._device_grouped_blobs[param]),
+                    list(viewvalues(model._device_grouped_blobs[param])),
+                    list(viewvalues(model._device_grouped_blobs[param])),
                     root=0,
                 )
                 return
