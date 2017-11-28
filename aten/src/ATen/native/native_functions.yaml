@@ -44,6 +44,8 @@
 
 - func: index_put_(Tensor self, TensorList indices, Tensor values) -> Tensor
 
+- func: is_nonzero(Tensor self) -> bool
+
 - func: is_same_size(Tensor self, Tensor other) -> bool
 
 - func: is_cuda(Tensor self) -> bool

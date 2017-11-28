@@ -1218,6 +1218,65 @@ class TestAutograd(TestCase):
                 self._test_type_conversion_backward(lambda x: x.cuda(0))
                 self._test_type_conversion_backward(lambda x: x.cuda(1))
 
+    def _test_scalar_conversions(self, t, integral_conv):
+        # integral -> integral
+        l = Variable(t(torch.zeros(1, 1, 1).long()))
+        scalar = -12345
+        l[0] = scalar
+        self.assertEqual(integral_conv(l), scalar)
+
+        # floating point -> floating point
+        f = Variable(t(torch.randn(1, 1)))
+        scalar = -12345.1
+        f[0] = scalar
+        self.assertEqual(float(f), scalar)
+        f[0] = float('nan')
+        self.assertTrue(math.isnan(float(f)))
+        f[0] = float('inf')
+        self.assertEqual(float(f), float('inf'))
+        f[0] = float('-inf')
+        self.assertEqual(float(f), float('-inf'))
+
+        # integral -> floating point
+        # check we can convert something that loses precision
+        scalar = 1234567890123456789
+        self.assertNotEqual(scalar, integral_conv(float(scalar)))
+        l[0] = scalar
+        self.assertEqual(float(l), float(scalar))
+
+        # floating point -> integral
+        f[0] = float('nan')
+        self.assertRaises(ValueError, lambda: integral_conv(f[0]))
+        f[0] = float('inf')
+        self.assertRaises(OverflowError, lambda: integral_conv(f[0]))
+        f[0] = float('-inf')
+        self.assertRaises(OverflowError, lambda: integral_conv(f[0]))
+        f[0] = sys.float_info.max
+        self.assertEqual(integral_conv(f), sys.float_info.max)
+
+        # bool, nonzero
+        def test_nonzero(tensor, value, expected):
+            tensor[0] = value
+            self.assertEqual(expected, bool(tensor))
+            self.assertEqual(expected, True if tensor else False)
+
+        test_nonzero(l, 0, False)
+        test_nonzero(l, -2, True)
+        test_nonzero(f, 0.0, False)
+        test_nonzero(f, sys.float_info.min, True)
+        test_nonzero(f, float('nan'), bool(float('nan')))
+        test_nonzero(f, float('inf'), bool(float('inf')))
+        test_nonzero(f, float('-inf'), bool(float('-inf')))
+
+    def test_scalar_conversions(self):
+        self._test_scalar_conversions(lambda x: x, lambda x: int(x))
+        if sys.version_info[0] == 2:
+            self._test_scalar_conversions(lambda x: x, lambda x: long(x))
+        if torch.cuda.is_available():
+            self._test_scalar_conversions(lambda x: x.cuda(), lambda x: int(x))
+            if sys.version_info[0] == 2:
+                self._test_scalar_conversions(lambda x: x.cuda(), lambda x: long(x))
+
     def test_isolated_node(self):
         x = Variable(torch.randn(5, 5), requires_grad=True)
         y = Variable(torch.randn(5, 5), requires_grad=True)

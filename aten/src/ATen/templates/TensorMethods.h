@@ -47,7 +47,7 @@ AT_FORALL_SCALAR_TYPES(DEFINE_CAST)
 #undef DEFINE_CAST
 
 #define DEFINE_TO_C_TYPE(T,name,_) \
-inline T Tensor::toC##name () const { return Scalar(*this).to##name (); }
+inline T Tensor::toC##name () const { return pImpl->localScalar().to##name (); }
 
 AT_FORALL_SCALAR_TYPES(DEFINE_TO_C_TYPE)
 #undef DEFINE_TO_C_TYPE

@@ -206,6 +206,38 @@ static PyObject * THPVariable_detach_(PyObject* self, PyObject* args)
   END_HANDLE_TH_ERRORS
 }
 
+static double dispatch_to_CDouble(const Tensor & self) {
+  AutoNoGIL no_gil;
+  AutoGPU auto_gpu(self);
+  return self.toCDouble();
+}
+
+static int64_t dispatch_to_CLong(const Tensor & self) {
+  AutoNoGIL no_gil;
+  AutoGPU auto_gpu(self);
+  return self.toCLong();
+}
+
+static PyObject * THPVariable_float_scalar(PyObject* self, PyObject* args) {
+  HANDLE_TH_ERRORS
+  auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
+  return wrap(dispatch_to_CDouble(self_));
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject * THPVariable_integral_scalar(PyObject* self, PyObject* args) {
+  HANDLE_TH_ERRORS
+  auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
+  if (isFloatingType(self_.type().scalarType())) {
+    // we can't dispatch to toCLong here because we want to avoid ATen overflow checks;
+    // the python integral type (long in python2) can't overflow.
+    return THPUtils_packDoubleAsInt(dispatch_to_CDouble(self_));
+  } else {
+    return wrap(dispatch_to_CLong(self_));
+  }
+  END_HANDLE_TH_ERRORS
+}
+
 static Tensor dispatch_to_backend(const Tensor & self, Backend backend) {
   AutoNoGIL no_gil;
   AutoGPU auto_gpu(self);
@@ -220,7 +252,6 @@ static PyObject * THPVariable_cpu(PyObject* self, PyObject* args)
    return wrap(dispatch_to_backend(self_, backend));
    END_HANDLE_TH_ERRORS
 }
-
 
 static Tensor dispatch_to_type(const Tensor & self, ScalarType scalarType) {
   AutoNoGIL no_gil;
@@ -301,6 +332,11 @@ PyMethodDef variable_methods[] = {
   {"__truediv__", (PyCFunction)THPVariable_div, METH_VARARGS | METH_KEYWORDS, NULL},
   {"__idiv__", (PyCFunction)THPVariable_div_, METH_VARARGS | METH_KEYWORDS, NULL},
   {"__mod__", (PyCFunction)THPVariable_remainder, METH_VARARGS | METH_KEYWORDS, NULL},
+  {"__bool__", (PyCFunction)THPVariable_is_nonzero, METH_NOARGS, NULL},
+  {"__float__", (PyCFunction)THPVariable_float_scalar, METH_NOARGS, NULL},
+  {"__int__", (PyCFunction)THPVariable_integral_scalar, METH_NOARGS, NULL},
+  {"__long__", (PyCFunction)THPVariable_integral_scalar, METH_NOARGS, NULL},
+  {"__nonzero__", (PyCFunction)THPVariable_is_nonzero, METH_NOARGS, NULL},
   {"byte", (PyCFunction)THPVariable_byte, METH_NOARGS, NULL},
   {"char", (PyCFunction)THPVariable_char, METH_NOARGS, NULL},
   {"clamp", (PyCFunction)THPVariable_clamp, METH_VARARGS | METH_KEYWORDS, NULL},
