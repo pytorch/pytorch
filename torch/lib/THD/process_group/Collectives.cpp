@@ -19,7 +19,7 @@ void THDAllReduceMultiGPU(THDTensorDescriptor* data,
                           THDReduceOp operation,
                           THDGroup group) {
   std::vector<at::Tensor> dataVec(data, data + len);
-  dataChannel->allReduce(dataVec, dataVec, operation, group);
+  dataChannel->allReduce(dataVec, operation, group);
 }
 
 
@@ -80,7 +80,7 @@ void THDAllGatherMultiGPU(THDTensorDescriptor* output,
                           THDGroup group) {
   std::vector<at::Tensor> outputVec(output, output + outputLen);
   std::vector<at::Tensor> inputVec(input, input + inputLen);
-  dataChannel->allGather(inputVec, outputVec, group);
+  dataChannel->allGather(outputVec, inputVec, group);
 }
 
 void THDAllGather(THDTensorDescriptor* output, size_t len,

@@ -97,10 +97,11 @@ class DistributedDataParallel(Module):
         for p in self.module.state_dict().values():
             dist.broadcast(p, 0)
 
-        # Destroy the default group's NCCL communicator cache, which will be
-        # recreated at the later call
-        if dist._backend == "nccl":
-            dist.destroy_group()
+        # Clear NCCL communicator and CUDA event cache of the default group ID,
+        # These cache will be recreated at the later call. This is currently a
+        # work-around for a potential NCCL deadlock.
+        if dist._backend == dist.dist_backend.NCCL:
+            dist._clear_group_cache()
 
         if len(device_ids) > 1:
             # TODO: we don't need to replicate params in here. they're always going to
@@ -129,7 +130,7 @@ class DistributedDataParallel(Module):
         MB = 1024 * 1024
         self.broadcast_bucket_size = 10 * MB  # used for param sync before forward
         # Currently NCCL backend only supports single reduction thread/bucket
-        if dist._backend == "nccl":
+        if dist._backend == dist.dist_backend.NCCL:
             bucket_bytes_cap = float('inf')
         else:
             bucket_bytes_cap = 1 * MB
@@ -181,10 +182,11 @@ class DistributedDataParallel(Module):
         return gather(outputs, output_device, dim=self.dim)
 
     def train(self, mode=True):
-        # Destroy the default group's NCCL communicator cache, which will be
-        # recreated at the later call
-        if dist._backend == "nccl":
-            dist.destroy_group()
+        # Clear NCCL communicator and CUDA event cache of the default group ID,
+        # These cache will be recreated at the later call. This is currently a
+        # work-around for a potential NCCL deadlock.
+        if dist._backend == dist.dist_backend.NCCL:
+            dist._clear_group_cache()
         super(DistributedDataParallel, self).train(mode)
         for module in self._module_copies[1:]:
             module.train(mode)
@@ -294,7 +296,7 @@ class DistributedDataParallel(Module):
             # We only use the first device for distributed reductions
             dist._register_stream(reduction_streams[0])
 
-            if dist._backend == "nccl":
+            if dist._backend == dist.dist_backend.NCCL:
                 group_id = dist.group.WORLD
             else:
                 group_id = dist.new_group()

@@ -508,8 +508,7 @@ THDGroup DataChannelMPI::newGroup(const std::vector<rank_type>& ranks) {
   return new_group_id;
 }
 
-void DataChannelMPI::allReduce(std::vector<at::Tensor>& input,
-                               std::vector<at::Tensor>& output,
+void DataChannelMPI::allReduce(std::vector<at::Tensor>& data,
                                THDReduceOp operation,
                                THDGroup groupId) {
 
@@ -518,8 +517,8 @@ void DataChannelMPI::allReduce(std::vector<at::Tensor>& input,
 }
 
 
-void DataChannelMPI::allGather(std::vector<at::Tensor>& input,
-                               std::vector<at::Tensor>& output,
+void DataChannelMPI::allGather(std::vector<at::Tensor>& output,
+                               std::vector<at::Tensor>& input,
                                THDGroup groupId) {
 
   throw std::runtime_error("DataChannelMPI does not support mult-GPU cross "
@@ -546,8 +545,9 @@ void DataChannelMPI::broadcast(std::vector<at::Tensor>& data,
 }
 
 
-void DataChannelMPI::destroyGroup(THDGroup group_id) {
-  throw std::runtime_error("DataChannelMPI does not support destroy group");
+void DataChannelMPI::clearGroupCache(THDGroup group_id) {
+  throw std::runtime_error("DataChannelMPI does not support clear "
+                           "group cache");
 }
 
 } // namespace thd

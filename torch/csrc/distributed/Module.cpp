@@ -252,10 +252,10 @@ static THDGroup _getGroup(PyObject *obj)
   return it->second;
 }
 
-PyObject* THDPModule_destroyGroup(PyObject *_unused, PyObject *args) {
+PyObject* THDPModule_clearGroupCache(PyObject *_unused, PyObject *args) {
   HANDLE_TH_ERRORS
   if (PyTuple_GET_SIZE(args) != 1) {
-    THPUtils_invalidArguments(args, NULL, "destroy_group", 1, "(group gr)");
+    THPUtils_invalidArguments(args, NULL, "clear_group_cache", 1, "(group gr)");
     return NULL;
   }
 
@@ -263,7 +263,7 @@ PyObject* THDPModule_destroyGroup(PyObject *_unused, PyObject *args) {
 
   {
     AutoNoGIL nogil;
-    THDGroupDestroy(group);
+    THDClearGroupCache(group);
   }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -372,6 +372,7 @@ PyObject* THDPModule_allReduceMultiGPU(PyObject *_unused, PyObject *args)
 {
   HANDLE_TH_ERRORS
   std::vector<at::Tensor> descriptors;
+  Py_ssize_t tmp_length;
   std::size_t length;
   THDGroup group;
   THDReduceOp op;
@@ -385,9 +386,11 @@ PyObject* THDPModule_allReduceMultiGPU(PyObject *_unused, PyObject *args)
     goto invalid_arguments;
   }
 
-  length = static_cast<std::size_t>(PySequence_Length(sequence));
-  THPUtils_assert(length >= 0, "couldn't obtain the length of %s",
+  tmp_length = PySequence_Fast_GET_SIZE(sequence);
+  THPUtils_assert(tmp_length >= 0, "couldn't obtain the length of %s",
                   THPUtils_typename(sequence));
+
+  length = static_cast<std::size_t>(tmp_length);
 
   descriptors.reserve(length);
 
@@ -422,6 +425,7 @@ PyObject* THDPModule_reduceMultiGPU(PyObject *_unused, PyObject *args)
 {
   HANDLE_TH_ERRORS
   PyObject* sequence;
+  Py_ssize_t tmp_length;
   std::size_t length;
   std::vector<at::Tensor> descriptors;
   THDGroup group;
@@ -438,9 +442,10 @@ PyObject* THDPModule_reduceMultiGPU(PyObject *_unused, PyObject *args)
     goto invalid_arguments;
   }
 
-  length = static_cast<std::size_t>(PySequence_Length(sequence));
-  THPUtils_assert(length >= 0, "couldn't obtain the length of %s",
+  tmp_length = PySequence_Fast_GET_SIZE(sequence);
+  THPUtils_assert(tmp_length >= 0, "couldn't obtain the length of %s",
                   THPUtils_typename(sequence));
+  length = static_cast<std::size_t>(tmp_length);
 
   descriptors.reserve(length);
 
@@ -477,6 +482,7 @@ PyObject* THDPModule_broadcastMultiGPU(PyObject *_unused, PyObject *args)
 {
   HANDLE_TH_ERRORS
   PyObject* sequence;
+  Py_ssize_t tmp_length;
   std::size_t length;
   std::vector<at::Tensor> descriptors;
   THDGroup group;
@@ -493,9 +499,10 @@ PyObject* THDPModule_broadcastMultiGPU(PyObject *_unused, PyObject *args)
     goto invalid_arguments;
   }
 
-  length = static_cast<std::size_t>(PySequence_Length(sequence));
-  THPUtils_assert(length >= 0, "couldn't obtain the length of %s",
+  tmp_length = PySequence_Fast_GET_SIZE(sequence);
+  THPUtils_assert(tmp_length >= 0, "couldn't obtain the length of %s",
                   THPUtils_typename(sequence));
+  length = static_cast<std::size_t>(tmp_length);
 
   descriptors.reserve(length);
 
@@ -532,6 +539,9 @@ PyObject* THDPModule_allGatherMultiGPU(PyObject *_unused, PyObject *args)
   PyObject* sequence_one;
   PyObject* sequence_two;
 
+  Py_ssize_t tmp_length_one;
+  Py_ssize_t tmp_length_two;
+
   std::size_t length_one;
   std::size_t length_two;
 
@@ -551,13 +561,15 @@ PyObject* THDPModule_allGatherMultiGPU(PyObject *_unused, PyObject *args)
     goto invalid_arguments;
   }
 
-  length_one = static_cast<std::size_t>(PySequence_Length(sequence_one));
-  THPUtils_assert(length_one >= 0, "couldn't obtain the length of %s",
+  tmp_length_one = PySequence_Fast_GET_SIZE(sequence_one);
+  THPUtils_assert(tmp_length_one >= 0, "couldn't obtain the length of %s",
                   THPUtils_typename(sequence_one));
+  length_one = static_cast<std::size_t>(tmp_length_one);
 
-  length_two = static_cast<std::size_t>(PySequence_Length(sequence_two));
-  THPUtils_assert(length_two >= 0, "couldn't obtain the length of %s",
+  tmp_length_two = PySequence_Fast_GET_SIZE(sequence_two);
+  THPUtils_assert(tmp_length_two >= 0, "couldn't obtain the length of %s",
                   THPUtils_typename(sequence_two));
+  length_two = static_cast<std::size_t>(tmp_length_two);
 
   if (length_one != length_two) {
     goto invalid_arguments;
@@ -971,7 +983,7 @@ static struct PyMethodDef _THDPModule_methods[] = {
   {"_dist_init_extension", (PyCFunction)THDPModule_initExtension, METH_VARARGS, NULL},
   {"_dist_init_process_group", (PyCFunction)THDPModule_initProcessGroup, METH_VARARGS, NULL},
   {"_dist_destroy_process_group", (PyCFunction)THDPModule_destroyProcessGroup, METH_NOARGS, NULL},
-  {"_dist_destroy_group", (PyCFunction)THDPModule_destroyGroup, METH_VARARGS, NULL},
+  {"_dist_clear_group_cache", (PyCFunction)THDPModule_clearGroupCache, METH_VARARGS, NULL},
   {"_dist_init_master_worker", (PyCFunction)THDPModule_initMasterWorker, METH_VARARGS, NULL},
 #ifdef WITH_CUDA
   {"_dist_register_stream", (PyCFunction)THDPModule_registerStream, METH_O, NULL},

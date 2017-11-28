@@ -8,10 +8,19 @@ import atexit
 import warnings
 from torch._utils import _flatten_dense_tensors, _unflatten_dense_tensors
 
+
+class dist_backend:
+    UNDEFINED = -1
+    TCP = 0
+    MPI = 1
+    GLOO = 2
+    NCCL = 3
+
+
 _INITIALIZED_PG = 1
 _INITIALIZED_MW = 2
 _initialized = 0
-_backend = ""
+_backend = dist_backend.UNDEFINED
 _scope = locals()
 
 
@@ -28,7 +37,7 @@ def destroy_process_group():
     Destroy the initialized distributed package
     """
     global _backend
-    _backend = ""
+    _backend = dist_backend.UNDEFINED
     return torch._C._dist_destroy_process_group()
 
 
@@ -37,7 +46,7 @@ def init_process_group(backend, init_method='env://', **kwargs):
 
     Arguments:
         backend (str): Name of the backend to use. Depending on build-time configuration
-            valid values include: ``tcp``, ``mpi``, and ``gloo```
+            valid values include: ``tcp``, ``mpi`` and ``gloo``.
         init_method (str, optional): URL specifying how to initialize the package.
         world_size (int, optional): Number of processes participating in the job.
         rank (int, optional): Rank of the current process.
@@ -64,9 +73,21 @@ def init_process_group(backend, init_method='env://', **kwargs):
     if not torch._C._dist_init_extension(False, reduce_op, group):
         raise RuntimeError("distributed module initialization failed")
 
+    # Checking and assigning the distributed backend
     global _backend
-    _backend = backend
-    if backend == "nccl":
+
+    if backend == "tcp":
+        _backend = dist_backend.TCP
+    elif backend == "mpi":
+        _backend = dist_backend.MPI
+    elif backend == "gloo":
+        _backend = dist_backend.GLOO
+    elif backend == "nccl":
+        _backend = dist_backend.NCCL
+    else:
+        raise RuntimeError("Invalid distributed backend name detected")
+
+    if _backend == dist_backend.NCCL:
         warnings.warn("""
         ================================================================================
                                             WARNING
@@ -422,7 +443,7 @@ def all_gather(tensor_list, tensor, group=group.WORLD):
     """
     assert torch.distributed._initialized == _INITIALIZED_PG, \
         "collective only supported in process-group mode"
-    if _backend != "nccl":
+    if _backend != dist_backend.NCCL:
         return torch._C._dist_all_gather(tensor_list, tensor, group)
     else:
         return all_gather_multigpu([tensor_list], [tensor], group)
@@ -523,18 +544,17 @@ def new_group(ranks=None):
     return torch._C._dist_new_group(ranks)
 
 
-def destroy_group(group=group.WORLD):
-    """Destroy a created distributed group
-
-    This function will clean up all underlying communication resources such as
-    communicators etc.
+def _clear_group_cache(group=group.WORLD):
+    """Clear the created distributed group's cached resource
 
     Only nccl backend is currently supported
+
+    Cached resource includes NCCL communicators and CUDA events
 
     Arguments:
         group (optional): Group of the collective.
     """
-    return torch._C._dist_destroy_group(group)
+    return torch._C._dist_clear_group_cache(group)
 
 
 def _register_stream(stream):

@@ -790,8 +790,7 @@ void DataChannelTCP::_reduce(at::Tensor& result, at::Tensor& data,
   }
 }
 
-void DataChannelTCP::allReduce(std::vector<at::Tensor>& input,
-                               std::vector<at::Tensor>& output,
+void DataChannelTCP::allReduce(std::vector<at::Tensor>& data,
                                THDReduceOp operation,
                                THDGroup groupId) {
 
@@ -800,8 +799,8 @@ void DataChannelTCP::allReduce(std::vector<at::Tensor>& input,
 }
 
 
-void DataChannelTCP::allGather(std::vector<at::Tensor>& input,
-                               std::vector<at::Tensor>& output,
+void DataChannelTCP::allGather(std::vector<at::Tensor>& output,
+                               std::vector<at::Tensor>& input,
                                THDGroup groupId) {
 
   throw std::runtime_error("DataChannelTCP does not support mult-GPU cross "
@@ -828,8 +827,9 @@ void DataChannelTCP::broadcast(std::vector<at::Tensor>& data,
 }
 
 
-void DataChannelTCP::destroyGroup(THDGroup group_id) {
-  throw std::runtime_error("DataChannelTCP does not support destroy group");
+void DataChannelTCP::clearGroupCache(THDGroup group_id) {
+  throw std::runtime_error("DataChannelTCP does not support clear "
+                           "group cache");
 }
 
 

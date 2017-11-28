@@ -82,8 +82,7 @@ struct DataChannelNccl : DataChannel {
   rank_type getRank() override;
   rank_type getNumProcesses() override;
 
-  void allReduce(std::vector<at::Tensor>& input,
-                 std::vector<at::Tensor>& output,
+  void allReduce(std::vector<at::Tensor>& data,
                  THDReduceOp operation,
                  THDGroup = THDGroupWORLD) override;
 
@@ -91,8 +90,8 @@ struct DataChannelNccl : DataChannel {
                  THDReduceOp operation,
                  THDGroup groupId = THDGroupWORLD) override;
 
-  void allGather(std::vector<at::Tensor>& input,
-                 std::vector<at::Tensor>& output,
+  void allGather(std::vector<at::Tensor>& output,
+                 std::vector<at::Tensor>& input,
                  THDGroup groupId = THDGroupWORLD) override;
 
   void allGather(std::vector<at::Tensor>& output,
@@ -121,7 +120,7 @@ struct DataChannelNccl : DataChannel {
 
   THDGroup newGroup(const std::vector<rank_type>& ranks) override;
 
-  void destroyGroup(THDGroup groupId = THDGroupWORLD) override;
+  void clearGroupCache(THDGroup groupId = THDGroupWORLD) override;
 
   // Not supported functions
   void gather(std::vector<at::Tensor>& output,
@@ -163,9 +162,17 @@ private:
   port_type _masterPort;
   // Socket on which the master is listening
   int _masterListeningSocket;
-  // Sockets on which the master is sending to each slave
+  /**
+   * Sockets on which the master is sending to each slave
+   * Note that the sockets in the vector can be in arbitrary order and
+   * are not sorted by ranks
+   */
   std::vector<int> _masterSendingSockets;
-  // Slave socket
+  /**
+   * Slave socket, which is used for all other slave ranks other than the master
+   * rank (rank 0) to receive rank 0's broadcasted Unique NCCL ID
+   * that is used for building the NCCL communicator
+   */
   int _slaveSocket;
 
   // Number of GPUs on each node
@@ -222,10 +229,13 @@ private:
                           const std::vector<at::Tensor>& output,
                           size_t outputOverInput = 1);
 
+  // Helper that destroys a group's NCCL resources
+  void _destroyNcclResources(THDGroup groupId);
+
   // Group validity checker
   void _checkGroupIdValid(THDGroup groupId);
 
-  // Helper fucntion that destroy all the open sockets
+  // Helper fucntion that destroys all the open sockets
   void _destroySockets();
 };
 

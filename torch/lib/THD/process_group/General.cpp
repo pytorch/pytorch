@@ -26,10 +26,10 @@ void THDProcessGroupDestroy() {
   END_HANDLE_EXCEPTIONS
 }
 
-void THDGroupDestroy(THDGroup group) {
+void THDClearGroupCache(THDGroup group) {
   HANDLE_EXCEPTIONS
   if (dataChannel) {
-    dataChannel->destroyGroup(group);
+    dataChannel->clearGroupCache(group);
   }
   END_HANDLE_EXCEPTIONS
 }

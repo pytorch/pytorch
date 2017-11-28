@@ -38,10 +38,11 @@ std::unordered_map<at::ScalarType, ncclDataType_t> ncclDatatype = {
 
 // Helper function that gets the data type and issues error if not supported
 static ncclDataType_t _getNcclDataType(at::ScalarType type) {
-  if (ncclDatatype.find(type) == ncclDatatype.end()) {
-    throw std::runtime_error("Unsupported data type for NCCL");
+  try {
+    return ncclDatatype.at(type);
+  } catch (std::out_of_range& e) {
+    throw std::runtime_error("Unsupported data type for NCCL backend");
   }
-  return ncclDatatype[type];
 }
 
 
@@ -164,41 +165,27 @@ void DataChannelNccl::destroy() {
    *       cleanup automatically
    */
   for (auto& itemPair : _groupNcclResources) {
-
     auto groupId = itemPair.first;
-    auto devices = getDevicesList(_groupDevices[groupId]);
-
-    // Destroy the CUDA events
-    size_t idx = 0;
-    for (auto& event : *(itemPair.second.ncclCudaEvents())) {
-      gpuGuard.setDevice(devices[idx++]);
-      THCudaCheck(cudaEventSynchronize(event));
-      THCudaCheck(cudaEventDestroy(event));
-    }
-    // Destroy the communicators
-    for (auto& comm : *(itemPair.second.ncclComms())) {
-      NCCL_CHECK(ncclCommDestroy(comm));
-    }
-
+    _destroyNcclResources(groupId);
   }
+
   _groupNcclResources.clear();
-  _groups.clear();
   _groupDevices.clear();
+
+  _groups.clear();
 }
 
 
-// Destroy the resource for a single thread group
-void DataChannelNccl::destroyGroup(THDGroup groupId) {
-
-  std::unique_lock<std::mutex> channelLock(_mutex);
-
+// Helper function that destroys the CUDA event and NCCL communicator
+void DataChannelNccl::_destroyNcclResources(THDGroup groupId) {
   if (_groupNcclResources.find(groupId) != _groupNcclResources.end()) {
+    // Devices used for this group ID
+    auto devices = getDevicesList(_groupDevices[groupId]);
     // Guard GPU device
     AutoGPU gpuGuard;
     // Destroy the CUDA events
     size_t idx = 0;
     for (auto& event : *(_groupNcclResources[groupId].ncclCudaEvents())) {
-      auto devices = getDevicesList(_groupDevices[groupId]);
       gpuGuard.setDevice(devices[idx++]);
       THCudaCheck(cudaEventSynchronize(event));
       THCudaCheck(cudaEventDestroy(event));
@@ -207,16 +194,19 @@ void DataChannelNccl::destroyGroup(THDGroup groupId) {
     for (auto& comm : *(_groupNcclResources[groupId].ncclComms())) {
       NCCL_CHECK(ncclCommDestroy(comm));
     }
-    _groupNcclResources.erase(groupId);
   }
-  // Will keep the default group and only destroy its CUDA resources.
-  if (groupId != THDGroupWORLD &&
-      _groups.find(groupId) != _groups.end()) {
-    _groups.erase(groupId);
-  }
-  if (_groupDevices.find(groupId) != _groupDevices.end()) {
-    _groupDevices.erase(groupId);
-  }
+}
+
+
+// Destroy the cached NCCL resource associated with a given group
+void DataChannelNccl::clearGroupCache(THDGroup groupId) {
+
+  std::unique_lock<std::mutex> channelLock(_mutex);
+
+  _destroyNcclResources(groupId);
+
+  _groupNcclResources.erase(groupId);
+  _groupDevices.erase(groupId);
 }
 
 
@@ -414,19 +404,18 @@ bool DataChannelNccl::_tensorCheckHelper(
 }
 
 
-void DataChannelNccl::allReduce(std::vector<at::Tensor>& input,
-                                std::vector<at::Tensor>& output,
+void DataChannelNccl::allReduce(std::vector<at::Tensor>& data,
                                 THDReduceOp operation,
                                 THDGroup groupId) {
 
   std::unique_lock<std::mutex> channelLock(_mutex);
   // Check the tensor vector for consistency
-  if (!_tensorCheckHelper(input, output)) {
+  if (!_tensorCheckHelper(data, data)) {
     return;
   }
   _checkGroupIdValid(groupId);
 
-  auto ncclResourcePair  = _getNcclResourcePair(input, groupId);
+  auto ncclResourcePair  = _getNcclResourcePair(data, groupId);
   auto comms = ncclResourcePair.first;
   auto events = ncclResourcePair.second;
 
@@ -437,15 +426,15 @@ void DataChannelNccl::allReduce(std::vector<at::Tensor>& input,
       *(THCCachingAllocator_getCudaFreeMutex()));
 
   NCCL_CHECK(ncclGroupStart());
-  for (size_t i = 0; i < input.size(); ++i) {
+  for (size_t i = 0; i < data.size(); ++i) {
 
-    gpuGuard.setDevice(input[i].get_device());
+    gpuGuard.setDevice(data[i].get_device());
     auto stream = THCState_getCurrentStream(THDGetCudaState());
 
-    NCCL_CHECK(ncclAllReduce(input[i].data_ptr(),
-                             output[i].data_ptr(),
-                             input[i].numel(),
-                             _getNcclDataType(input[i].type().scalarType()),
+    NCCL_CHECK(ncclAllReduce(data[i].data_ptr(),
+                             data[i].data_ptr(),
+                             data[i].numel(),
+                             _getNcclDataType(data[i].type().scalarType()),
                              ncclOp[operation],
                              (*comms)[i],
                              stream));
@@ -462,12 +451,12 @@ void DataChannelNccl::allReduce(at::Tensor& data,
                                 THDGroup groupId) {
 
   std::vector<at::Tensor> dataVec = {data};
-  allReduce(dataVec, dataVec, operation, groupId);
+  allReduce(dataVec, operation, groupId);
 }
 
 
-void DataChannelNccl::allGather(std::vector<at::Tensor>& input,
-                                std::vector<at::Tensor>& output,
+void DataChannelNccl::allGather(std::vector<at::Tensor>& output,
+                                std::vector<at::Tensor>& input,
                                 THDGroup groupId) {
 
   std::unique_lock<std::mutex> channelLock(_mutex);
@@ -512,7 +501,7 @@ void DataChannelNccl::allGather(std::vector<at::Tensor>& output,
                                 THDGroup groupId) {
 
   std::vector<at::Tensor> inputDataVec = {input};
-  allGather(inputDataVec, output, groupId);
+  allGather(output, inputDataVec, groupId);
 }
 
 

@@ -268,8 +268,7 @@ auto DataChannelGloo::ireceive(at::Tensor& data, rank_type src_rank) -> RequestG
 }
 
 
-void DataChannelGloo::allReduce(std::vector<at::Tensor>& input,
-                                std::vector<at::Tensor>& output,
+void DataChannelGloo::allReduce(std::vector<at::Tensor>& data,
                                 THDReduceOp operation,
                                 THDGroup groupId) {
 
@@ -278,8 +277,8 @@ void DataChannelGloo::allReduce(std::vector<at::Tensor>& input,
 }
 
 
-void DataChannelGloo::allGather(std::vector<at::Tensor>& input,
-                                std::vector<at::Tensor>& output,
+void DataChannelGloo::allGather(std::vector<at::Tensor>& output,
+                                std::vector<at::Tensor>& input,
                                 THDGroup groupId) {
 
   throw std::runtime_error("DataChannelGloo does not support mult-GPU cross "
@@ -306,8 +305,9 @@ void DataChannelGloo::broadcast(std::vector<at::Tensor>& data,
 }
 
 
-void DataChannelGloo::destroyGroup(THDGroup group_id) {
-  throw std::runtime_error("DataChannelGloo does not support destroy group");
+void DataChannelGloo::clearGroupCache(THDGroup group_id) {
+  throw std::runtime_error("DataChannelGloo does not support clear "
+                           "group cache");
 }
 
 

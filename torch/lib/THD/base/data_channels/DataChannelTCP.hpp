@@ -36,8 +36,8 @@ struct DataChannelTCP : DataChannel {
   rank_type getRank() override;
   rank_type getNumProcesses() override;
 
-  void allGather(std::vector<at::Tensor>& input,
-                 std::vector<at::Tensor>& output,
+  void allGather(std::vector<at::Tensor>& output,
+                 std::vector<at::Tensor>& input,
                  THDGroup group_id = THDGroupWORLD) override;
   void allGather(std::vector<at::Tensor>& output, at::Tensor& input,
                  THDGroup group_id = THDGroupWORLD) override;
@@ -45,8 +45,7 @@ struct DataChannelTCP : DataChannel {
               rank_type dst_rank, THDGroup group_id = THDGroupWORLD) override;
   void scatter(std::vector<at::Tensor>& input, at::Tensor& output,
                rank_type src_rank, THDGroup group_id = THDGroupWORLD) override;
-  void allReduce(std::vector<at::Tensor>& input,
-                 std::vector<at::Tensor>& output,
+  void allReduce(std::vector<at::Tensor>& data,
                  THDReduceOp operation,
                  THDGroup group_id = THDGroupWORLD) override;
   void allReduce(at::Tensor& data, THDReduceOp operation,
@@ -73,7 +72,7 @@ struct DataChannelTCP : DataChannel {
   void barrier(THDGroup group_id = THDGroupWORLD) override;
 
   THDGroup newGroup(const std::vector<rank_type>& ranks) override;
-  void destroyGroup(THDGroup group_id = THDGroupWORLD) override;
+  void clearGroupCache(THDGroup group_id = THDGroupWORLD) override;
 
 private:
   using req_ptr = std::unique_ptr<RequestTCP>;
