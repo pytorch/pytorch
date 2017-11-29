@@ -28,6 +28,7 @@
 #include "THP.h"
 
 #include "ModuleSparse.cpp"
+#include "DataLoader.cpp"
 
 PyObject* module;
 PyObject* tensor_classes;
@@ -797,6 +798,7 @@ static PyObject* initModule() {
 #define ASSERT_TRUE(cmd) if (!(cmd)) return NULL
 
   THPUtils_addPyMethodDefs(methods, TorchMethods);
+  THPUtils_addPyMethodDefs(methods, DataLoaderMethods);
 #ifdef WITH_CUDA
   THPUtils_addPyMethodDefs(methods, THCPModule_methods());
 #endif
