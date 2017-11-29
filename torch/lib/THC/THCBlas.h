@@ -8,7 +8,7 @@
 THC_API float THCudaBlas_Sdot(THCState *state, int64_t n, float *x, int64_t incx, float *y, int64_t incy);
 THC_API double THCudaBlas_Ddot(THCState *state, int64_t n, double *x, int64_t incx, double *y, int64_t incy);
 #ifdef CUDA_HALF_TENSOR
-THC_API float THCudaBlas_Hdot(THCState *state, int64_t n, half *x, int64_t incx, half *y, int64_t incy);
+THC_API half THCudaBlas_Hdot(THCState *state, int64_t n, half *x, int64_t incx, half *y, int64_t incy);
 #endif
 
 /* Level 2 */
@@ -36,7 +36,7 @@ THC_API void THCudaBlas_SgemmStridedBatched(THCState *state, char transa, char t
                                      float alpha, const float *a, int64_t lda, int64_t strideA, const float *b, int64_t ldb, int64_t strideB,
                                      float beta, float *c, int64_t ldc, int64_t strideC, int64_t batchCount);
 THC_API void THCudaBlas_DgemmStridedBatched(THCState *state, char transa, char transb, int64_t m, int64_t n, int64_t k,
-                                     double alpha, const double *a, int64_t lda, int64_t strideA, const double *b, int64_t ldb, int64_t strideB, 
+                                     double alpha, const double *a, int64_t lda, int64_t strideA, const double *b, int64_t ldb, int64_t strideB,
                                      double beta, double *c, int64_t ldc, int64_t strideC, int64_t batchCount);
 #endif
 /* Inverse */

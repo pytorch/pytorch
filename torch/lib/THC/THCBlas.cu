@@ -49,7 +49,7 @@ double THCudaBlas_Ddot(THCState *state, int64_t n, double *x, int64_t incx, doub
 }
 
 #ifdef CUDA_HALF_TENSOR
-float THCudaBlas_Hdot(THCState *state, int64_t n, half *x, int64_t incx, half *y, int64_t incy)
+half THCudaBlas_Hdot(THCState *state, int64_t n, half *x, int64_t incx, half *y, int64_t incy)
 {
 #if CUDA_VERSION >= 8000
   if (n == 1) {
@@ -58,22 +58,23 @@ float THCudaBlas_Hdot(THCState *state, int64_t n, half *x, int64_t incx, half *y
   }
 
   if ((n <= INT_MAX) && (incx <= INT_MAX) && (incy <= INT_MAX)) {
-    int i_n = (int)n;
-    int i_incx = (int)incx;
-    int i_incy = (int)incy;
-    float result;
+    half result;
     cublasHandle_t handle = THCState_getCurrentBlasHandle(state);
     cublasSetStream(handle, THCState_getCurrentStream(state));
-    THCublasCheck(cublasDotEx(handle, i_n, x, CUDA_R_16F, i_incx, y, CUDA_R_16F, i_incy, &result, CUDA_R_32F, CUDA_R_32F));
+    THCublasCheck(cublasDotEx(handle, n,
+                              x, CUDA_R_16F, incx,
+                              y, CUDA_R_16F, incy,
+                              &result, CUDA_R_16F,
+                              CUDA_R_32F));
     return result;
-}
+  }
 
   THError("Cublas_Hdot only supports n, incx and incy "
           "up to signed integer limits: %d", INT_MAX);
-  return 0;
+  return THC_float2half(0);
 #else
   THError("Cublas_Hdot requires CUDA 8.0+");
-  return 0;
+  return THC_half2float(0);
 #endif
 }
 #endif
@@ -360,7 +361,7 @@ void THCudaBlas_SgemmStridedBatched(THCState *state, char transa, char transb, i
                              float beta, float *c, int64_t ldc, int64_t strideC, int64_t batchCount)
 {
   if( (m >= INT_MAX) || (n >= INT_MAX) || (k >= INT_MAX) || (lda >= INT_MAX)  || (ldb >= INT_MAX) || (ldc >= INT_MAX) || (batchCount >= INT_MAX) )
-        
+
   {
     THError("Cublas_SgemmStridedBatched only supports m, n, k, lda, ldb, ldc, batchCount"
             "with the bound [val] <= %d", INT_MAX);
@@ -420,7 +421,7 @@ void THCudaBlas_DgemmStridedBatched(THCState *state, char transa, char transb, i
   cublasSetStream(handle, THCState_getCurrentStream(state));
   THCublasCheck(cublasDgemmStridedBatched(handle,
                                    opa, opb, (int)m, (int)n, (int)k,
-                                   &alpha, a, (int)lda, strideA, b, (int)ldb, strideB, &beta, c, (int)ldc, strideC, 
+                                   &alpha, a, (int)lda, strideA, b, (int)ldb, strideB, &beta, c, (int)ldc, strideC,
                                    (int)batchCount));
 }
 #endif
