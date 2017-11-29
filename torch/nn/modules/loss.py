@@ -249,7 +249,7 @@ class KLDivLoss(_Loss):
 
     The loss can be described as:
 
-    .. math:: loss(x, target) = 1/n \sum(target_i * (log(target_i) - x_i))
+    .. math:: loss(x, target) = 1/n \sum(target_i * (log(target_i) - log(x_i)))
 
     By default, the losses are averaged for each minibatch over observations
     **as well as** over dimensions. However, if the field
