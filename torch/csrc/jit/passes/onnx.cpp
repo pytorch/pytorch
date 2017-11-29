@@ -31,8 +31,7 @@ void ToONNX(std::shared_ptr<tracer::TracingState>& state) {
     throw std::logic_error("ToONNX: tracing state is expired");
   }
 
-  auto new_graph = std::make_shared<Graph>();
-  new_graph->setCurrentScope(state->get_current_scope());
+  auto new_graph = std::make_shared<Graph>(state->graph->scope_root());
   std::unordered_map<void*, Value*> new_buffer_map;
 
   torch::autograd::SymbolicContext ctx;

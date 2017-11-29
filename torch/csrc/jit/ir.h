@@ -96,9 +96,9 @@ public:
     children_.insert(std::unique_ptr<Scope>(newScope));
     return newScope;
   }
-  Scope* pop() {
+  Scope* parent() {
     if (parent_ == NULL) {
-      throw std::runtime_error("Cannot pop from Scope with no parent");
+      throw std::runtime_error("Cannot get parent from Scope with no parent");
     }
     return parent_;
   }
@@ -632,6 +632,7 @@ private:
 
   size_t new_node_stage_;
 
+  std::shared_ptr<Scope> scope_root_;
   Scope * current_scope_;
 
   // holds outputs in a way that can be reflected
@@ -645,7 +646,15 @@ public:
   Graph()
   : next_unique_(0)
   , new_node_stage_(0)
-  , current_scope_(NULL)
+  , scope_root_(std::make_shared<Scope>())
+  , current_scope_(scope_root_.get())
+  , output_(initOutput(create(kReturn, 0))), input_(create(kParam, 0)) {}
+
+  Graph(std::shared_ptr<Scope> scope_root)
+  : next_unique_(0)
+  , new_node_stage_(0)
+  , scope_root_(scope_root)
+  , current_scope_(scope_root_.get())
   , output_(initOutput(create(kReturn, 0))), input_(create(kParam, 0)) {}
 
   at::ArrayRef<Value*> inputs() {
@@ -700,8 +709,17 @@ public:
   const Node * return_node() const {
     return output_;
   }
-  void setCurrentScope(Scope * scope) {
-    current_scope_ = scope;
+  void push_scope(const std::string& scope_name) {
+    current_scope_ = current_scope_->push(stringToSymbol(scope_name));
+  }
+  void pop_scope() {
+    current_scope_ = current_scope_->parent();
+  }
+  Scope * current_scope() {
+    return current_scope_;
+  }
+  std::shared_ptr<Scope> scope_root() {
+    return scope_root_;
   }
   Value * addInput(std::string name="") {
     Value * v = input_->addOutput();
@@ -758,8 +776,7 @@ public:
   }
   Node * createFusionGroup() {
     auto n = create(kFusionGroup, 0);
-    auto subgraph = std::make_shared<Graph>();
-    subgraph->setCurrentScope(current_scope_);
+    auto subgraph = std::make_shared<Graph>(scope_root_);
     n->g_(kSubgraph, subgraph);
     return n;
   }

@@ -319,23 +319,23 @@ class Module(object):
         self._forward_hooks[handle.id] = hook
         return handle
 
-    def tracing_name(self, tracing_state):
+    def _tracing_name(self, tracing_state):
         if not tracing_state._traced_module_stack:
             return None
         module = tracing_state._traced_module_stack[-1]
         for name, child in module.named_children():
-            if child == self:
+            if child is self:
                 return name
         return None
 
-    def slow_forward(self, *input, **kwargs):
+    def _slow_forward(self, *input, **kwargs):
         input_vars = tuple(torch.autograd.function._iter_variables(input))
         tracing_state = torch.jit.get_tracing_state(input_vars)
         if not tracing_state:
             return self.forward(*input, **kwargs)
         if not hasattr(tracing_state, '_traced_module_stack'):
             tracing_state._traced_module_stack = []
-        name = self.tracing_name(tracing_state)
+        name = self._tracing_name(tracing_state)
         if name:
             tracing_state.push_scope('%s[%s]' % (self.__class__.__name__, name))
         else:
@@ -352,7 +352,7 @@ class Module(object):
         for hook in self._forward_pre_hooks.values():
             hook(self, input)
         if torch.jit._tracing:
-            result = self.slow_forward(*input, **kwargs)
+            result = self._slow_forward(*input, **kwargs)
         else:
             result = self.forward(*input, **kwargs)
         for hook in self._forward_hooks.values():
