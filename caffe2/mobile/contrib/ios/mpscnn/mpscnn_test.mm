@@ -1969,110 +1969,113 @@ void testMPSCNN() {
   {
     for (const auto scale : std::vector<float>{1.0, 2.0, 0.0625}) {
       for (const auto pool : std::vector<size_t>{1, 3, 7}) {
+        for (const auto sampling_ratio : std::vector<size_t>{0, 1, 2, 3}) {
+          LOG(INFO) << "MPSCNNRoIWarp Test - sampling_ratio:" << sampling_ratio
+                    << "- pool: " << pool << " - scale: " << scale;
+          Workspace ws;
+          {
+            auto* t = ws.CreateBlob("X_cpu")->GetMutable<TensorCPU>();
+            t->Resize(1, 8, 40, 40);
+            CPUContext ctx;
+            math::RandGaussian<float, CPUContext>(
+                t->size(), 4, 2, t->mutable_data<float>(), &ctx);
+          }
+          {
+            // Use the batch-first encoding (n, [bbox])
+            auto* t = ws.CreateBlob("R")->GetMutable<TensorCPU>();
+            t->Resize(6, 5);
+            for (auto i = 0; i < t->dim32(0); ++i) {
+              t->mutable_data<float>()[5 * i + 0] = 0; // batch
+              t->mutable_data<float>()[5 * i + 1] = (i % 4 + 1) * 1.0 / scale;
+              t->mutable_data<float>()[5 * i + 2] = (i % 5 + 1) * 1.0 / scale;
+              t->mutable_data<float>()[5 * i + 3] = (i % 3 + 7) * 1.0 / scale;
+              t->mutable_data<float>()[5 * i + 4] = (i % 4 + 7) * 1.0 / scale;
+            }
+          }
 
-        LOG(INFO) << "MPSCNNRoIWarp Test";
-        Workspace ws;
-        {
-          auto* t = ws.CreateBlob("X_cpu")->GetMutable<TensorCPU>();
-          t->Resize(1, 8, 40, 40);
-          CPUContext ctx;
-          math::RandGaussian<float, CPUContext>(t->size(), 4, 2, t->mutable_data<float>(), &ctx);
-        }
-        {
-          // Use the batch-first encoding (n, [bbox])
-          auto* t = ws.CreateBlob("R")->GetMutable<TensorCPU>();
-          t->Resize(6, 5);
-          for (auto i = 0; i < t->dim32(0); ++i) {
-            t->mutable_data<float>()[5 * i + 0] = 0; // batch
-            t->mutable_data<float>()[5 * i + 1] = (i % 4 + 1) * 1.0 / scale;
-            t->mutable_data<float>()[5 * i + 2] = (i % 5 + 1) * 1.0 / scale;
-            t->mutable_data<float>()[5 * i + 3] = (i % 3 + 7) * 1.0 / scale;
-            t->mutable_data<float>()[5 * i + 4] = (i % 4 + 7) * 1.0 / scale;
+          NetDef netdef;
+          {
+            auto& op = *(netdef.add_op());
+            op.set_type("CopyToMPSCNN");
+            op.add_input("X_cpu");
+            op.add_output("X_mtl");
           }
-        }
 
-        NetDef netdef;
-        {
-          auto& op = *(netdef.add_op());
-          op.set_type("CopyToMPSCNN");
-          op.add_input("X_cpu");
-          op.add_output("X_mtl");
-        }
+          {
+            auto& op = *(netdef.add_op());
+            op.set_type("MPSCNNRoIWarp");
+            op.add_input("X_mtl");
+            op.add_input("R");
+            {
+              auto& arg = *(op.add_arg());
+              arg.set_name("sampling_ratio");
+              arg.set_i(sampling_ratio);
+            }
+            {
+              auto& arg = *(op.add_arg());
+              arg.set_name("pooled_h");
+              arg.set_i(pool);
+            }
+            {
+              auto& arg = *(op.add_arg());
+              arg.set_name("pooled_w");
+              arg.set_i(pool);
+            }
+            {
+              auto& arg = *(op.add_arg());
+              arg.set_name("spatial_scale");
+              arg.set_f(scale);
+            }
+            op.add_output("Y_mtl");
+          }
 
-        {
-          auto& op = *(netdef.add_op());
-          op.set_type("MPSCNNRoIWarp");
-          op.add_input("X_mtl");
-          op.add_input("R");
           {
-            auto& arg = *(op.add_arg());
-            arg.set_name("sampling_ratio");
-            arg.set_i(1);
+            auto& op = *(netdef.add_op());
+            op.set_type("CopyFromMPSCNN");
+            op.add_input("Y_mtl");
+            op.add_output("Y_cpu");
           }
-          {
-            auto& arg = *(op.add_arg());
-            arg.set_name("pooled_h");
-            arg.set_i(pool);
-          }
-          {
-            auto& arg = *(op.add_arg());
-            arg.set_name("pooled_w");
-            arg.set_i(pool);
-          }
-          {
-            auto& arg = *(op.add_arg());
-            arg.set_name("spatial_scale");
-            arg.set_f(scale);
-          }
-          op.add_output("Y_mtl");
-        }
 
-        {
-          auto& op = *(netdef.add_op());
-          op.set_type("CopyFromMPSCNN");
-          op.add_input("Y_mtl");
-          op.add_output("Y_cpu");
-        }
+          {
+            auto& op = *(netdef.add_op());
+            op.set_type("RoIWarp");
+            op.add_input("X_cpu");
+            op.add_input("R");
+            {
+              auto& arg = *(op.add_arg());
+              arg.set_name("sampling_ratio");
+              arg.set_i(sampling_ratio);
+            }
+            {
+              auto& arg = *(op.add_arg());
+              arg.set_name("pooled_h");
+              arg.set_i(pool);
+            }
+            {
+              auto& arg = *(op.add_arg());
+              arg.set_name("pooled_w");
+              arg.set_i(pool);
+            }
+            {
+              auto& arg = *(op.add_arg());
+              arg.set_name("spatial_scale");
+              arg.set_f(scale);
+            }
+            op.add_output("Y_ref");
+          }
 
-        {
-          auto& op = *(netdef.add_op());
-          op.set_type("RoIWarp");
-          op.add_input("X_cpu");
-          op.add_input("R");
-          {
-            auto& arg = *(op.add_arg());
-            arg.set_name("sampling_ratio");
-            arg.set_i(1);
-          }
-          {
-            auto& arg = *(op.add_arg());
-            arg.set_name("pooled_h");
-            arg.set_i(pool);
-          }
-          {
-            auto& arg = *(op.add_arg());
-            arg.set_name("pooled_w");
-            arg.set_i(pool);
-          }
-          {
-            auto& arg = *(op.add_arg());
-            arg.set_name("spatial_scale");
-            arg.set_f(scale);
-          }
-          op.add_output("Y_ref");
-        }
+          ws.RunNetOnce(netdef);
+          const auto& t1 = ws.GetBlob("Y_ref")->Get<TensorCPU>();
+          const auto& t2 = ws.GetBlob("Y_cpu")->Get<TensorCPU>();
 
-        ws.RunNetOnce(netdef);
-        const auto& t1 = ws.GetBlob("Y_ref")->Get<TensorCPU>();
-        const auto& t2 = ws.GetBlob("Y_cpu")->Get<TensorCPU>();
-
-        CAFFE_ENFORCE_EQ(t1.dims(), t2.dims());
-        LOG(INFO) << t1.dims();
-        for (auto i = 0; i < t1.size(); ++i) {
-          // FP16 <-> FP32 round trip, accumulation, etc.
-          const float t1_i = t1.data<float>()[i];
-          const float t2_i = t2.data<float>()[i];
-          CHECK_NEAR(t1_i, t2_i, 0.1);
+          CAFFE_ENFORCE_EQ(t1.dims(), t2.dims());
+          LOG(INFO) << t1.dims();
+          for (auto i = 0; i < t1.size(); ++i) {
+            // FP16 <-> FP32 round trip, accumulation, etc.
+            const float t1_i = t1.data<float>()[i];
+            const float t2_i = t2.data<float>()[i];
+            CHECK_NEAR(t1_i, t2_i, 0.1);
+          }
         }
       }
     }

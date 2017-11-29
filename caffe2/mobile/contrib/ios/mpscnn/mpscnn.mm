@@ -1599,9 +1599,7 @@ class MPSCNNRoIWarpOp final : public Operator<CPUContext> {
     VLOG(1) << "spatial_scale: " << spatial_scale_;
     VLOG(1) << "pooled_h: " << pooled_height_;
     VLOG(1) << "pooled_w: " << pooled_width_;
-    VLOG(1) << "sampling_ration: " << sampling_ratio_;
-    // Skip some conditionals in the kernel.
-    CAFFE_ENFORCE_GE(sampling_ratio_, 1);
+    VLOG(1) << "sampling_ratio: " << sampling_ratio_;
   }
 
   bool RunOnDevice() override {

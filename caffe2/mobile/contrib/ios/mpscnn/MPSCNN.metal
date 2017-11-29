@@ -883,10 +883,10 @@ kernel void roi_warp(texture2d_array<half, access::sample> in[[texture(0)]],
 
   const RoIT bin_size_h = static_cast<RoIT>(roi_height) / static_cast<RoIT>(out.get_height());
   const RoIT bin_size_w = static_cast<RoIT>(roi_width) / static_cast<RoIT>(out.get_width());
-  const ushort roi_bin_grid_h = sampling_ratio;
-  const ushort roi_bin_grid_w = sampling_ratio;
-  const ushort iy_upper = sampling_ratio;
-  const ushort ix_upper = sampling_ratio;
+  const ushort roi_bin_grid_h = sampling_ratio > 0 ? sampling_ratio : ceil(roi_height / static_cast<RoIT>(out.get_height()));
+  const ushort roi_bin_grid_w = sampling_ratio > 0 ? sampling_ratio : ceil(roi_width / static_cast<RoIT>(out.get_width()));
+  const ushort iy_upper = (sampling_ratio > 0) ? roi_bin_grid_h : (roi_bin_grid_h + 1);
+  const ushort ix_upper = (sampling_ratio > 0) ? roi_bin_grid_w : (roi_bin_grid_w + 1);
 
   const RoIT count = iy_upper * ix_upper;
 
