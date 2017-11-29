@@ -176,6 +176,19 @@ struct TimerGetAndEndOp : public Operator<CPUContext> {
   }
 };
 
+struct TimerGetOp : public Operator<CPUContext> {
+  TimerGetOp(const OperatorDef& operator_def, Workspace* ws)
+      : Operator(operator_def, ws) {}
+
+  bool RunOnDevice() override {
+    int64_t nanos = OperatorBase::Input<TimerInstance*>(0)->get_ns();
+    auto* res = OperatorBase::Output<TensorCPU>(0);
+    res->Resize();
+    res->template mutable_data<int64_t>()[0] = nanos;
+    return true;
+  }
+};
+
 struct CpuUtilizationReportOp : public Operator<CPUContext> {
   CpuUtilizationReportOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator(operator_def, ws),
@@ -205,6 +218,7 @@ REGISTER_CPU_OPERATOR(StatRegistryExport, StatRegistryExportOp);
 REGISTER_CPU_OPERATOR(TimerBegin, TimerBeginOp);
 REGISTER_CPU_OPERATOR(TimerEnd, TimerEndOp);
 REGISTER_CPU_OPERATOR(TimerGetAndEnd, TimerGetAndEndOp);
+REGISTER_CPU_OPERATOR(TimerGet, TimerGetOp);
 REGISTER_CPU_OPERATOR(CpuUtilizationReport, CpuUtilizationReportOp);
 
 OPERATOR_SCHEMA(StatRegistryCreate)
@@ -267,6 +281,13 @@ OPERATOR_SCHEMA(TimerGetAndEnd)
     .NumOutputs(1)
     .SetDoc(R"DOC(Queries the current time of a timer in nanos, stops the timer
             publishing a CAFFE_EVENT)DOC")
+    .Input(0, "timer", "Pointer to timer, obtained from TimerBegin.")
+    .Output(0, "nanos", "nanoseconds in int64");
+
+OPERATOR_SCHEMA(TimerGet)
+    .NumInputs(1)
+    .NumOutputs(1)
+    .SetDoc(R"DOC(Queries the current time of a timer in nanos)DOC")
     .Input(0, "timer", "Pointer to timer, obtained from TimerBegin.")
     .Output(0, "nanos", "nanoseconds in int64");
 
