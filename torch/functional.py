@@ -248,7 +248,13 @@ def matmul(tensor1, tensor2, out=None):
 
 
 def det(var):
-    """Calculates determinant of a 2D square Variable
+    """Calculates determinant of a 2D square Variable.
+
+    .. note::
+        Backward through `det` internally uses SVD results. So double backward
+        through `det` will need to backward through :meth:`~Tensor.svd`. This
+        can be unstable in certain cases. Please see :meth:`~torch.svd` for
+        details.
 
     Arguments:
         var (Variable): The input 2D square Variable.

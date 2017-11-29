@@ -286,7 +286,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> _det_with_svd(const Tensor& self) {
   // check symmetric
   bool symmetric = self.equal(self.transpose(0, 1));
 
-  auto svd = self.svd(false);
+  auto svd = self.svd(true);
   auto sigma = std::get<1>(svd);
   auto u = std::get<0>(svd);
   auto v = std::get<2>(svd);

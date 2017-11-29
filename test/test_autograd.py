@@ -1915,6 +1915,13 @@ def random_symmetric_matrix(l):
     return A.mm(A.transpose(0, 1))
 
 
+def random_fullrank_matrix_distinct_singular_value(l):
+    A = torch.randn(l, l)
+    u, _, v = A.svd()
+    s = torch.arange(1, l + 1).mul_(1.0 / (l + 1))
+    return u.mm(torch.diag(s)).mm(v.transpose(0, 1))
+
+
 class dont_convert(tuple):
     pass
 
@@ -2187,6 +2194,8 @@ method_tests = [
     ('det', lambda: random_square_matrix_of_rank(S, S - 2), (), 'dim2_null', (), [skipIfNoLapack]),
     ('det', lambda: random_square_matrix_of_rank(S, 1), (), 'rank1', (), [skipIfNoLapack]),
     ('det', lambda: random_square_matrix_of_rank(S, 2), (), 'rank2', (), [skipIfNoLapack]),
+    ('det', lambda: random_fullrank_matrix_distinct_singular_value(S), (), 'distinct_postive_s', (), [skipIfNoLapack]),
+    ('svd', lambda: random_fullrank_matrix_distinct_singular_value(S), (), '', (), [skipIfNoLapack]),
     ('gesv', (S, S), ((S, S),), '', (), [skipIfNoLapack]),
     ('potrf', _make_cov(S), (True,), '', (), [skipIfNoLapack]),
     ('eq', (S, S, S), ((S, S, S),)),
@@ -2363,7 +2372,17 @@ EXCLUDE_GRADCHECK = {
     'potrf'
 }
 EXCLUDE_GRADGRADCHECK = {
-    'det'
+    'svd'
+}
+EXCLUDE_GRADGRADCHECK_BY_TEST_NAME = {
+    # Some of the following det ones pass because random matrix has full rank
+    # with high probability. But we can't rely on this. So only test gradgrad on
+    # test_det_distinct_postive_s.
+    'test_det',
+    'test_det_symmetric',
+    'test_det_dim2_null',
+    'test_det_rank1',
+    'test_det_rank2'
 }
 
 
@@ -2417,10 +2436,10 @@ def gradgradcheck_method_precision_override(test_name):
     return override
 
 
-def run_grad_and_gradgrad_checks(test_case, test_name, apply_method, output_variable,
+def run_grad_and_gradgrad_checks(test_case, name, test_name, apply_method, output_variable,
                                  input_variables, run_gradgradcheck=True):
     test_case.assertTrue(gradcheck(apply_method, input_variables, eps=1e-6, atol=PRECISION))
-    if not run_gradgradcheck:
+    if name in EXCLUDE_GRADGRADCHECK or test_name in EXCLUDE_GRADGRADCHECK_BY_TEST_NAME:
         return
     grad_y = generate_gradoutput(output_variable, non_contiguous=True)
     gradgradcheck_precision_override = gradgradcheck_method_precision_override(test_name)
@@ -2442,7 +2461,7 @@ def run_functional_checks(test_case, test_name, name, apply_fn, run_grad_checks,
         test_case.assertEqual(unpack_variables(output_variable), output_tensor)
 
     if run_grad_checks:
-        run_grad_and_gradgrad_checks(test_case, test_name, apply_fn,
+        run_grad_and_gradgrad_checks(test_case, name, test_name, apply_fn,
                                      output_variable, f_args_variable)
 
     self_variable = f_args_variable[0]
@@ -2486,10 +2505,9 @@ for test in method_tests:
                     # TODO: check that both have changed after adding all inplace ops
 
                 if not is_inplace and name not in EXCLUDE_GRADCHECK:
-                    run_grad_and_gradgrad_checks(self, test_name,
+                    run_grad_and_gradgrad_checks(self, name, test_name,
                                                  lambda *inputs: getattr(inputs[0], name)(*inputs[1:]),
-                                                 output_variable, (self_variable,) + args_variable,
-                                                 name not in EXCLUDE_GRADGRADCHECK)
+                                                 output_variable, (self_variable,) + args_variable)
 
                 # functional interface tests
                 if hasattr(torch, name) and name not in EXCLUDE_FUNCTIONAL:

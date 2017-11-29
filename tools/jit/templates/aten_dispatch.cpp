@@ -90,7 +90,7 @@ void pack_list(list_of_retainable & outputs, std::tuple<Tensor, Tensor, Tensor> 
   outputs.push_back(toRetainableSteal(std::move(std::get<1>(v))));
   outputs.push_back(toRetainableSteal(std::move(std::get<2>(v))));
 }
-void pack_list(std::vector<Tensor> & outputs, std::tuple<Tensor, Tensor, Tensor, Tensor> v) {
+void pack_list(list_of_retainable & outputs, std::tuple<Tensor, Tensor, Tensor, Tensor> v) {
   outputs.push_back(toRetainableSteal(std::move(std::get<0>(v))));
   outputs.push_back(toRetainableSteal(std::move(std::get<1>(v))));
   outputs.push_back(toRetainableSteal(std::move(std::get<2>(v))));

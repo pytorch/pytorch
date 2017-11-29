@@ -553,7 +553,7 @@
   self: sum_backward(grad, self.sizes(), dim, keepdim)
 
 - name: svd(Tensor self, bool some)
-  self: not_implemented("svd")
+  self: svd_backward(grads, self, some, res1, res2, res3)
 
 - name: symeig(Tensor self, bool eigenvectors, bool upper)
   self: not_implemented("symeig")
