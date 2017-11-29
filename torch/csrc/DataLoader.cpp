@@ -21,12 +21,15 @@
 
 // Critical signal handlers should be registered on worker processes before
 // doing work.
+// The handler will raise default handler so that the kill information will be
+// retrieved from main process.
 // Python handle is _set_worker_signal_handlers().
 #define SIGNAL_HANDLER(SIGNAL, HANDLER_NAME, ERROR_MSG)                       \
 static void HANDLER_NAME(int sig, siginfo_t *info, void *ctx)                 \
 {                                                                             \
-    write(STDERR_FILENO, ERROR_MSG, sizeof(ERROR_MSG) / sizeof(char));        \
-    _exit(EXIT_FAILURE);                                                      \
+  write(STDERR_FILENO, ERROR_MSG, sizeof(ERROR_MSG) / sizeof(char));          \
+  signal(SIGNAL, SIG_DFL);                                                    \
+  raise(SIGNAL);                                                              \
 }
 
 // signal(2) is really not portable. So use sigaction.
@@ -61,14 +64,14 @@ static std::map<int64_t, std::set<pid_t>> worker_pids = {};
 PyObject *THPModule_errorIfAnyWorkerFails(PyObject *module) {
   HANDLE_TH_ERRORS
   int error;
-  std::set<pid_t> pid_set;
+  std::set<pid_t> *pid_set;
   pid_t pid;
   siginfo_t infop;
 
   // Only check the pids we care about
   for (auto it = worker_pids.begin(); it != worker_pids.end(); ++it) {
-    pid_set = it->second;
-    for (auto pid_it = pid_set.begin(); pid_it != pid_set.end(); ++pid_it) {
+    pid_set = &(it->second);
+    for (auto pid_it = pid_set->begin(); pid_it != pid_set->end(); ++pid_it) {
       pid = *pid_it;
       // Use waitid rather than waitpid so that we can set NOWAIT, and that Python
       // and other handlers can get whatever info they want about the child.
@@ -83,7 +86,7 @@ PyObject *THPModule_errorIfAnyWorkerFails(PyObject *module) {
             << "with exit code " << infop.si_status << ".";
         // This is necessary. Otherwise, the runtime error will kill the other
         // workers, and trigger this again.
-        pid_set.clear();
+        pid_set->clear();
         throw std::runtime_error(oss.str());
       }  else if (infop.si_code == CLD_KILLED || infop.si_code == CLD_DUMPED) {  // killed by signal
         std::ostringstream oss;
@@ -91,7 +94,7 @@ PyObject *THPModule_errorIfAnyWorkerFails(PyObject *module) {
             << strsignal(infop.si_status) << ".";
         // This is necessary. Otherwise, the runtime error will kill the other
         // workers, and trigger this again.
-        pid_set.clear();
+        pid_set->clear();
         throw std::runtime_error(oss.str());
       }
     }
