@@ -574,7 +574,7 @@ class WeightedSumReducerGradient : public BaseReducerGradient {
  public:
   // which of the original inputs are required for gradient computation
   static constexpr std::array<int, 1> originalInputs() {
-    return {1};
+    return {{1}};
   }
 
   static int numAuxInputsWithGrads(const OperatorDef& def) {
