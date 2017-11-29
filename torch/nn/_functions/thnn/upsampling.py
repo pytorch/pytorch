@@ -175,8 +175,10 @@ class UpsamplingNearest2d(Function):
         if scale_factor is None:
             scale_factor = 1.0
         if size is not None and set(size) != set([None]):
-            warnings.warn("ONNX export failed on UpsamplingNearest2d because size is not supported")
-        return g.op("ResizeNearest", input, width_scale_f=scale_factor, height_scale_f=scale_factor)
+            from torch.onnx.symbolic import _unimplemented
+            return _unimplemented("UpsamplingNearest2d", "size")
+        return g.op("Upsample", input, width_scale_f=scale_factor,
+                    height_scale_f=scale_factor, mode_s="nearest")
 
     @staticmethod
     def forward(ctx, input, size=None, scale_factor=None):
