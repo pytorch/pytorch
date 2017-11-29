@@ -478,7 +478,7 @@ bool HuffmanTreeHierarchyOp<T, Context>::RunOnDevice() {
   };
 
   // Merge two nodes and insert the results in the queue.
-  auto merge_nodes = [&nodes, &current_node_index](
+  auto merge_nodes = [&nodes](
       const std::pair<int, Node>& node_l, const std::pair<int, Node>& node_r) {
     Node node(-1, node_l.second.count + node_r.second.count);
     node.left_ch_index = node_l.first;
