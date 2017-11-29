@@ -130,13 +130,12 @@ class ModuleList(Module):
         Arguments:
             modules (iterable): iterable of modules to append
         """
-        if not isinstance(modules, Iterable) or isinstance(modules, str):
-            raise TypeError("ModuleList.extend should be called with a "
-                            "non-string iterable, but got " +
-                            type(modules).__name__)
+        if not isinstance(modules, Iterable):
+            raise TypeError("ModuleList.extend should be called with an "
+                            "iterable, but got " + type(modules).__name__)
         offset = len(self)
         for i, module in enumerate(modules):
-            self.add_module(str(len(self)), module)
+            self.add_module(str(offset + i), module)
         return self
 
 
@@ -202,7 +201,7 @@ class ParameterList(Module):
         Arguments:
             parameters (iterable): iterable of parameters to append
         """
-        if not isinstance(parameters, Iterable) or isinstance(parameters, str):
+        if not isinstance(parameters, Iterable):
             raise TypeError("ParameterList.extend should be called with an "
                             "iterable, but got " + type(parameters).__name__)
         offset = len(self)
