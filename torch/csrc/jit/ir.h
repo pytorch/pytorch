@@ -71,12 +71,12 @@ struct SourceLocation {
 };
 
 // Scope is a node of a trie that represents the tree of nested scopes.
-// Individual scopes are pushed and popped from TracingState, which holds a
+// Individual scopes are pushed and popped from Graph, which holds a
 // pointer to the current scope. Each Node in Graph holds a pointer
 // to the scope that was current when the node was created.
 // The trie never needs to shrink, it only grows until it is disposed
-// of when TracingState is deallocated. Hence, pointers to scopes held by nodes
-// will always be valid as long as TracingState is alive.
+// of when Graph is deallocated. Hence, pointers to scopes held by nodes
+// will always be valid as long as Graph is alive.
 struct Scope {
 private:
   Scope* parent_;
