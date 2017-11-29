@@ -37,7 +37,6 @@ autograd::variable_list InterpreterAutogradFunction::apply(
   auto make_grad_fn = [&]() {
     grad_fn = std::make_shared<InterpreterAutogradFunction>(
         std::move(interp), stage_details_, stage_ + 1);
-    grad_fn->is_executable = true;
 
     // Running this next stage is actually not valid (nderiv is too low)
     // but we don't know if the user will ever ask for it so we don't error out here.

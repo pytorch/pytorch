@@ -96,7 +96,7 @@ def gen_jit_dispatch(declarations, out):
                 tensor_id = iter(count(start=0))
                 args = ['TensorTemporary(inputs[{}]).value()'.format(
                     next(tensor_id)) if is_tensor_arg(arg) else arg['name']
-                        for arg in arguments]
+                    for arg in arguments]
             call = CALL_NAMESPACE.substitute(name=name, args=args)
         else:
             tensor_id = iter(count(start=1))

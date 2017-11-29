@@ -25,7 +25,6 @@ namespace torch { namespace jit {
 struct DummyFunction : autograd::Function {
   DummyFunction() {
     num_inputs = 0;
-    is_executable = true;
   }
   virtual autograd::variable_list apply(const autograd::variable_list& inputs) override {
     throw std::logic_error("DummyFunction::apply() called, but it should be blocked by a callback returning false");
@@ -150,7 +149,7 @@ Operation createCppOperation(CppOp* op) {
     for(size_t i = 0; i < inputs.size(); i++) {
       v_inputs.push_back(builder.addInput(inputs[i], op->var_flags[i]));
     }
-    autograd::variable_list v_outputs = func->apply(v_inputs);
+    autograd::variable_list v_outputs = (*func)(v_inputs);
     for(auto & output : v_outputs) {
       outputs.push_back(builder.addOutput(output));
     }
@@ -178,9 +177,10 @@ Operation createEvalOperation(CppOp * op) {
       return false; // stop output and do not run DummyFunction
     });
     // note: node handle_in->use_count() == 1 means that we are guarenteed that we have the only
-    // only copy of the handle. This might make it seems like we can pass keep_graph=False.
+    // only copy of the handle. This might make it seem it is ok to pass keep_graph=False.
     // However, it is possible for 'copied_next_fns' to grab functions used by _other_ handles,
-    // so it is not to dispose of the graph.
+    // and these functions will be executed in this run. Since these other handles
+    // may still be alive, it is not safe to release the graph
     engine.execute(handle_in->forward_outputs, v_inputs, true, callbacks);
     builder.writeTo(outputs);
   };
@@ -522,9 +522,9 @@ struct InterpreterStateImpl {
   OwnedRetainables registers;
 
   // single buffer for input calls to ATen functions, so that we do not reallocate
-  std::vector<at::Retainable*> input_buffer;
+  list_of_retainable input_buffer;
   // also to prevent allocations
-  std::vector<at::Retainable*> output_buffer;
+  list_of_retainable output_buffer;
 };
 
 Code::Code(std::shared_ptr<Graph> & graph)
