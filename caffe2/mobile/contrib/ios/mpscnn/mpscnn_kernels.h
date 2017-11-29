@@ -880,47 +880,47 @@ kernel void roi_warp(texture2d_array<half, access::sample> in[[texture(0)]],
                      texture2d_array<half, access::write> out[[texture(1)]],
                      constant half4* rois[[buffer(0)]],
                      ushort3 gid[[thread_position_in_grid]]) {
-    constexpr sampler s2(coord::pixel, address::clamp_to_edge, filter::linear);
-    
-    const half spatial_scale = half(ushort_arg_0) / 10000;
-    const ushort sampling_ratio = ushort_arg_1;
-    const ushort C = ushort_arg_2;
-    const ushort pw = gid.x;
-    const ushort ph = gid.y;
-    const ushort n = gid.z / divRoundUp(C, 4);
-    const ushort c = gid.z % divRoundUp(C, 4);
-    
-    const RoIT4 roi_scaled = rois[n] * spatial_scale;
-    const RoIT roi_start_w = roi_scaled[0];
-    const RoIT roi_start_h = roi_scaled[1];
-    const RoIT roi_end_w = roi_scaled[2];
-    const RoIT roi_end_h = roi_scaled[3];
-    
-    // Force malformed ROIs to be 1x1
-    const RoIT roi_width = max(roi_end_w - roi_start_w, (RoIT)1.);
-    const RoIT roi_height = max(roi_end_h - roi_start_h, (RoIT)1.);
-    
-    const RoIT bin_size_h = static_cast<RoIT>(roi_height) / static_cast<RoIT>(out.get_height());
-    const RoIT bin_size_w = static_cast<RoIT>(roi_width) / static_cast<RoIT>(out.get_width());
-    const ushort roi_bin_grid_h = sampling_ratio;
-    const ushort roi_bin_grid_w = sampling_ratio;
-    const ushort iy_upper = sampling_ratio;
-    const ushort ix_upper = sampling_ratio;
-    
-    const RoIT count = iy_upper * ix_upper;
-    
-    RoIT4 output_val = 0.0;
-    for (int iy = 0; iy < iy_upper; iy++) {
-        for (int ix = 0; ix < ix_upper; ix++) {
-            const RoIT y =
-            roi_start_h + ph * bin_size_h + iy * bin_size_h / static_cast<RoIT>(roi_bin_grid_h);
-            const RoIT x =
-            roi_start_w + pw * bin_size_w + ix * bin_size_w / static_cast<RoIT>(roi_bin_grid_w);
-            output_val += in.sample(s2, float2(x + 0.5, y + 0.5), c);
-        }
+  constexpr sampler s2(coord::pixel, address::clamp_to_edge, filter::linear);
+
+  const half spatial_scale = half(ushort_arg_0) / 10000;
+  const ushort sampling_ratio = ushort_arg_1;
+  const ushort C = ushort_arg_2;
+  const ushort pw = gid.x;
+  const ushort ph = gid.y;
+  const ushort n = gid.z / divRoundUp(C, 4);
+  const ushort c = gid.z % divRoundUp(C, 4);
+
+  const RoIT4 roi_scaled = rois[n] * spatial_scale;
+  const RoIT roi_start_w = roi_scaled[0];
+  const RoIT roi_start_h = roi_scaled[1];
+  const RoIT roi_end_w = roi_scaled[2];
+  const RoIT roi_end_h = roi_scaled[3];
+
+  // Force malformed ROIs to be 1x1
+  const RoIT roi_width = max(roi_end_w - roi_start_w, (RoIT)1.);
+  const RoIT roi_height = max(roi_end_h - roi_start_h, (RoIT)1.);
+
+  const RoIT bin_size_h = static_cast<RoIT>(roi_height) / static_cast<RoIT>(out.get_height());
+  const RoIT bin_size_w = static_cast<RoIT>(roi_width) / static_cast<RoIT>(out.get_width());
+  const ushort roi_bin_grid_h = sampling_ratio > 0 ? sampling_ratio : ceil(roi_height / static_cast<RoIT>(out.get_height()));
+  const ushort roi_bin_grid_w = sampling_ratio > 0 ? sampling_ratio : ceil(roi_width / static_cast<RoIT>(out.get_width()));
+  const ushort iy_upper = (sampling_ratio > 0) ? roi_bin_grid_h : (roi_bin_grid_h + 1);
+  const ushort ix_upper = (sampling_ratio > 0) ? roi_bin_grid_w : (roi_bin_grid_w + 1);
+
+  const RoIT count = iy_upper * ix_upper;
+
+  RoIT4 output_val = 0.0;
+  for (int iy = 0; iy < iy_upper; iy++) {
+    for (int ix = 0; ix < ix_upper; ix++) {
+      const RoIT y =
+          roi_start_h + ph * bin_size_h + iy * bin_size_h / static_cast<RoIT>(roi_bin_grid_h);
+      const RoIT x =
+          roi_start_w + pw * bin_size_w + ix * bin_size_w / static_cast<RoIT>(roi_bin_grid_w);
+      output_val += in.sample(s2, float2(x + 0.5, y + 0.5), c);
     }
-    output_val /= count;
-    out.write(static_cast<half4>(output_val), ushort2(gid.x, gid.y), gid.z);
+  }
+  output_val /= count;
+  out.write(static_cast<half4>(output_val), ushort2(gid.x, gid.y), gid.z);
 }
 
 kernel void resize_nearest(texture2d_array<half, access::sample> in[[texture(0)]],
