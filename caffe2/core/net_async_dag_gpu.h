@@ -44,6 +44,10 @@ class AsyncDAGNet : public DAGNetBase {
   // Tracks whether a given op has had an event recorded in each
   // RunAt() iteration.
   std::vector<int32_t> eventRecorded_;
+
+  int stream(const DeviceOption& device_option);
+  static thread_local std::vector<int> stream_counters_;
+
   DISABLE_COPY_AND_ASSIGN(AsyncDAGNet);
 };
 

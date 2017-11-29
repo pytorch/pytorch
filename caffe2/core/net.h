@@ -62,9 +62,6 @@ class NetBase : public Observable<NetBase> {
     // by default just wait till all events are finished
     for (const auto& event : events_) {
       event->Finish();
-      if (event->Query() != EventStatus::EVENT_SUCCESS) {
-        CAFFE_THROW(event->ErrorMessage());
-      }
     }
   }
 

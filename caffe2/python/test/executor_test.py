@@ -17,8 +17,9 @@ import hypothesis.strategies as st
 import unittest
 
 
-EXECUTORS = ["async_polling", "dag", "async_dag"]
+EXECUTORS = ["async_scheduling", "async_polling", "dag", "async_dag"]
 ITERATIONS = 2
+
 
 class ExecutorCPUConvNetTest(ExecutorTestBase):
     @given(executor=st.sampled_from(EXECUTORS),
