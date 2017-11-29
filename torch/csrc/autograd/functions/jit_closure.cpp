@@ -24,7 +24,6 @@ using namespace torch::jit::tracer;
 // in next_functions per output).
 struct Replicate : public Function {
   Replicate() {
-    is_executable = true;
     num_inputs = 1;
   }
 
@@ -85,7 +84,6 @@ struct EvalPlaceholder : public Placeholder {};
 // Used for the graph output. Execution should be stopped by a callback before apply().
 struct Output : public Function {
   Output(int ninputs) {
-    is_executable = true;
     num_inputs = ninputs;
   }
 
@@ -107,7 +105,6 @@ struct SimpleEval : public Function {
 
 struct EmitNull : public Function {
   EmitNull() {
-    is_executable = true;
     num_inputs = 0;
   }
 
@@ -131,7 +128,6 @@ struct LambdaFunction : public Function {
 
   LambdaFunction(int num_inputs, std::function<variable_list(const variable_list&)> fn)
     : fn_(fn) {
-    this->is_executable = true;
     this->num_inputs = num_inputs;
   }
 
@@ -246,7 +242,6 @@ struct PythonCall : public Function {
 struct WrapConstant : public Function {
   WrapConstant(at::Tensor value)
     : value(std::move(value)) {
-    is_executable = true;
     num_inputs = 1;
   }
 
@@ -263,7 +258,6 @@ struct WrapConstant : public Function {
 // See Note [Handling nullary functions in the autograd engine]
 struct ConstantFactory : public Function {
   ConstantFactory() {
-    is_executable = true;
     num_inputs = 1;
   }
 
@@ -444,7 +438,6 @@ struct StageClosure {
       if (!fn) return; // This node is a no-op
 
       // Initialize function fields
-      fn->is_executable = true;
       if (fn->num_inputs == 0) {
         fn->num_inputs = node->inputs().size();
       }
@@ -466,7 +459,6 @@ struct StageClosure {
       auto fn = std::make_shared<InputPlaceholder>();
       fn->num_inputs = 1;
       // Initialize function fields
-      fn->is_executable = true;
       std::vector<std::reference_wrapper<const use_list>> output_uses_refs;
       output_uses_refs.emplace_back(input->uses());
       fillNextFunctions(input->owningGraph(), output_uses_refs, fn, node_map, output_offset, stage);
@@ -793,7 +785,6 @@ variable_list AutogradClosure::apply(const variable_list& inputs) {
     // didn't require grad, copied function can), and is always valid because we assert
     // that flags are the same as when we compiled the closure (and the tracing Eval
     // was run, so it must have been executable).
-    bw_fn->is_executable = true;
     return bw_fn;
   };
 

@@ -53,7 +53,6 @@ autograd::variable_list InterpreterAutogradFunction::apply(
         input.grad_fn() ? input.grad_fn() : input.grad_accumulator(),
         input.output_nr());
     }
-    grad_fn->is_executable = true;
   };
 
   // Wrap the outputs

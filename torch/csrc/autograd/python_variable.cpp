@@ -390,9 +390,6 @@ int THPVariable_set_requires_grad(THPVariable *self, PyObject *obj)
     return -1;
   }
   var.requires_grad() = (obj == Py_True);
-  if (auto grad_accumulator = var.get()->grad_accumulator.lock()) {
-    grad_accumulator->is_executable = var.requires_grad();
-  }
   return 0;
   END_HANDLE_TH_ERRORS_RET(-1)
 }

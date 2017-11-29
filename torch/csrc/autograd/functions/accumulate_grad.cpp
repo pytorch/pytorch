@@ -14,7 +14,6 @@ namespace torch { namespace autograd {
 AccumulateGrad::AccumulateGrad(Variable variable_)
    : variable(std::move(variable_)) {
   num_inputs = 1;
-  is_executable = 1;
 }
 
 auto AccumulateGrad::apply(const variable_list& grads) -> variable_list {

@@ -107,7 +107,6 @@ std::shared_ptr<${op}> grad_fn;
 auto flags = compute_flags({ ${args_with_derivatives} });
 if (flags.requires_grad) {
   grad_fn = std::make_shared<${op}>(${op_ctor});
-  grad_fn->is_executable = true;
   grad_fn->next_functions = compute_next_functions({ ${args_with_derivatives} });
   ${save_inputs}
 }

@@ -356,14 +356,13 @@ static void _mark_dirty(THPFunction *self, t2var_type &t2var,
 static void _wrap_outputs(THPFunction *self, t2var_type &t2var,
     std::unordered_set<PyObject *> &dirty_inputs,
     const t2var_type &shared_pairs,
-    PyObject *raw_output, PyObject *outputs, bool is_volatile)
+    PyObject *raw_output, PyObject *outputs, bool is_executable, bool is_volatile)
 {
-  bool is_executable = self->cdata.is_executable;
   TORCH_ASSERT(!is_volatile || !is_executable);
   auto cdata = is_executable ? THPFunction_asFunction(self) : nullptr;
   auto flags = VarFlags(is_executable, is_volatile);
   Py_ssize_t num_outputs = PyTuple_GET_SIZE(raw_output);
-  if (self->cdata.is_executable) {
+  if (is_executable) {
     self->output_info.clear();
     self->output_info.reserve(num_outputs);
   }
@@ -438,7 +437,7 @@ static void _wrap_outputs(THPFunction *self, t2var_type &t2var,
       output2var[output] = output_var;
     }
 
-    if (self->cdata.is_executable) {
+    if (is_executable) {
       self->output_info.emplace_back(output_var->cdata);
     }
     PyTuple_SET_ITEM(outputs, i, (PyObject*)output_var);
@@ -554,6 +553,7 @@ static void _mark_non_differentiable(THPFunction *self, t2var_type &t2var)
           "outputs");
     }
     var->cdata.requires_grad() = false;
+    var->cdata.get()->_grad_fn = nullptr;
   }
   Py_DECREF(self->non_differentiable);
   self->non_differentiable = NULL;
@@ -706,7 +706,9 @@ static void _trace_create(PyObject* op_obj, THPFunction* bw_obj,
   }
 }
 
-PyObject* process_outputs(PyObject *op_obj, THPFunction* grad_fn, const UnpackedInput& unpacked, PyObject *inputs, THPObjectPtr&& raw_output, bool is_volatile) {
+PyObject* process_outputs(PyObject *op_obj, THPFunction* grad_fn, const UnpackedInput& unpacked,
+                          PyObject *inputs, THPObjectPtr&& raw_output, bool is_executable,
+                          bool is_volatile) {
   bool unpack_output = ensure_tuple(raw_output);
 
   auto num_outputs = PyTuple_GET_SIZE(raw_output.get());
@@ -717,7 +719,7 @@ PyObject* process_outputs(PyObject *op_obj, THPFunction* grad_fn, const Unpacked
   grad_fn->cdata.num_inputs = num_outputs;
 
   // Record type, device, and size information about inputs
-  if (grad_fn->cdata.is_executable) {
+  if (is_executable) {
     grad_fn->input_info.clear();
     grad_fn->input_info.reserve(unpacked.input_vars.size());
     for (auto& var : unpacked.input_vars) {
@@ -737,11 +739,11 @@ PyObject* process_outputs(PyObject *op_obj, THPFunction* grad_fn, const Unpacked
   _mark_dirty(grad_fn, t2var, dirty_inputs);
   _wrap_outputs(grad_fn, t2var, dirty_inputs,
       _parse_shared_pairs(grad_fn, t2var),
-      raw_output, outputs, is_volatile);
+      raw_output, outputs, is_executable, is_volatile);
   // Free shared_pairs
   Py_CLEAR(grad_fn->shared_pairs);
   // At this point, t2var contains output tensors as well
-  if (grad_fn->cdata.is_executable) {
+  if (is_executable) {
     _mark_non_differentiable(grad_fn, t2var);
   }
   // NOTE: _trace_create has to run before _save_variables, because we need
@@ -750,7 +752,7 @@ PyObject* process_outputs(PyObject *op_obj, THPFunction* grad_fn, const Unpacked
   // it might be wraping backwards in Evals, and _mark_non_differentiable uses
   // grad_fn pointer equality for error checking.
   _trace_create(op_obj, grad_fn, inputs, outputs, unpacked.input_vars, is_inplace);
-  if (grad_fn->cdata.is_executable) {
+  if (is_executable) {
     _save_variables(grad_fn, t2var);
   } else {
     // Remove unnecessary attributes
@@ -779,6 +781,7 @@ PyObject *THPFunction_do_forward(THPFunction *self, PyObject *_inputs)
   auto info_pair = unpack_input<true>(_inputs);
   auto& unpacked_input = info_pair.first;
   auto& input_info = info_pair.second;
+  bool is_executable = input_info.flags.is_executable;
   bool is_volatile = input_info.flags.is_volatile;
   self->cdata.set_flags(std::move(input_info.flags));
   self->needs_input_grad = input_info.needs_input_grad.release();
@@ -789,7 +792,8 @@ PyObject *THPFunction_do_forward(THPFunction *self, PyObject *_inputs)
   THPObjectPtr raw_output(PyObject_CallObject(forward_fn, unpacked_input.tensor_input));
   if (!raw_output) return NULL;
 
-  return process_outputs(nullptr, self, unpacked_input, _inputs, std::move(raw_output), is_volatile);
+  return process_outputs(nullptr, self, unpacked_input, _inputs, std::move(raw_output),
+                         is_executable, is_volatile);
   END_HANDLE_TH_ERRORS
 }
 
@@ -810,6 +814,7 @@ PyObject *THPFunction_apply(PyObject *cls, PyObject *inputs)
   InputFlags& input_info = info_pair.second;
 
   // Initialize backward function (and ctx)
+  bool is_executable = input_info.flags.is_executable;
   bool is_volatile = input_info.flags.is_volatile;
   ctx->cdata.set_flags(std::move(input_info.flags));
   ctx->needs_input_grad = input_info.needs_input_grad.release();
@@ -831,10 +836,8 @@ PyObject *THPFunction_apply(PyObject *cls, PyObject *inputs)
   THPObjectPtr tensor_outputs(PyObject_CallObject(forward_fn, ctx_tensor_input));
   if (!tensor_outputs) return NULL;
 
-  THPObjectPtr outputs {process_outputs(cls, ctx, unpacked_input, inputs,
-                                        std::move(tensor_outputs), is_volatile)};
-
-  return outputs.release();
+  return process_outputs(cls, ctx, unpacked_input, inputs, std::move(tensor_outputs),
+                         is_executable, is_volatile);
   END_HANDLE_TH_ERRORS
 }
 
@@ -1062,14 +1065,8 @@ PyObject* getImplMember(PyObject* obj, void* _unused) {
   return Convert(self->cdata.*ptr);
 }
 
-int setRequiresGrad(PyObject* obj, PyObject* value, void* _unused) {
-  auto self = (THPFunction*)obj;
-  if (!PyBool_Check(value)) {
-    PyErr_Format(PyExc_TypeError, "'is_executable' must be a bool");
-    return -1;
-  }
-  self->cdata.is_executable = (value == Py_True);
-  return 0;
+PyObject* getRequiresGrad(PyObject* obj, void* _unused) {
+  Py_RETURN_TRUE;
 }
 
 }
@@ -1083,7 +1080,7 @@ static struct PyGetSetDef THPFunction_properties[] = {
   {"non_differentiable", &getObject<&THPFunction::non_differentiable>, &setObject<&THPFunction::non_differentiable>, NULL, NULL},
   {"dirty_tensors", &getObject<&THPFunction::dirty_tensors>, &setObject<&THPFunction::dirty_tensors>, NULL, NULL},
   {"needs_input_grad", &getObject<&THPFunction::needs_input_grad>, NULL, NULL, NULL},
-  {"requires_grad", &getImplMember<bool, &Function::is_executable, PyBool_FromLong>, &setRequiresGrad, NULL, NULL},
+  {"requires_grad", getRequiresGrad, NULL, NULL, NULL},
   {"_is_tracing", &getMember<char, &THPFunction::is_traced, PyBool_FromLong>, NULL, NULL, NULL},
   {NULL}
 };

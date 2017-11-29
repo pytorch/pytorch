@@ -43,13 +43,11 @@ struct BatchNormBackward : public Function, public BatchNormParams {
       Variable bias)
     : Function(std::move(flags))
     , BatchNormParams(std::move(params)) {
-      if (is_executable) {
-        this->save_mean = std::move(save_mean);
-        this->save_std = std::move(save_std);
-        this->input = SavedVariable(input, false);
-        this->weight = SavedVariable(weight, false);
-        this->bias = SavedVariable(bias, false);
-      }
+      this->save_mean = std::move(save_mean);
+      this->save_std = std::move(save_std);
+      this->input = SavedVariable(input, false);
+      this->weight = SavedVariable(weight, false);
+      this->bias = SavedVariable(bias, false);
     }
 
   virtual variable_list apply(const variable_list& gradOutputs) override;
@@ -74,13 +72,11 @@ struct BatchNormBackwardBackward : public Function, public BatchNormParams {
       Variable grad_output)
     : Function(std::move(flags))
     , BatchNormParams(std::move(params)) {
-      if (is_executable) {
-        this->save_mean = std::move(save_mean);
-        this->save_std = std::move(save_std);
-        this->input = SavedVariable(input, false);
-        this->weight = SavedVariable(weight, false);
-        this->grad_output = SavedVariable(grad_output, false);
-      }
+      this->save_mean = std::move(save_mean);
+      this->save_std = std::move(save_std);
+      this->input = SavedVariable(input, false);
+      this->weight = SavedVariable(weight, false);
+      this->grad_output = SavedVariable(grad_output, false);
     }
 
   virtual variable_list apply(const variable_list& grad_grad_inputs) override;
