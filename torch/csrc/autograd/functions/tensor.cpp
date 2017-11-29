@@ -129,7 +129,7 @@ auto Chunk::apply(const variable_list& inputs) -> variable_list {
   });
 }
 
-CopySlices::CopySlices(const Variable& base_var, TensorGeometry view_, std::shared_ptr<Function> fn_)
+CopySlices::CopySlices(const Variable& base_var, at::TensorGeometry view_, std::shared_ptr<Function> fn_)
   : base(base_var)
   , view(std::move(view_))
   , fn(std::move(fn_))
@@ -153,11 +153,11 @@ auto CopySlices::apply(const variable_list& inputs) -> variable_list {
     throw std::runtime_error(ERR_BACKWARD_TWICE);
   }
 
-  auto result = grad.type().tensor(base.sizes, base.strides);
+  auto result = grad.type().tensor(base.sizes(), base.strides());
   result.copy_(grad);
 
-  auto offset = view.storage_offset - base.storage_offset;
-  auto grad_slice = result.as_strided(view.sizes, view.strides, offset);
+  auto offset = view.storage_offset() - base.storage_offset();
+  auto grad_slice = result.as_strided(view.sizes(), view.strides(), offset);
 
   // TODO: We clone grad_slice because we modify it below and "fn" might save
   // it for the backward of res. We might be able to avoid the clone() if

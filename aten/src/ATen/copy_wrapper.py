@@ -1,8 +1,10 @@
 from code_template import CodeTemplate
 
 FILE = CodeTemplate("""\
+#include "ATen/Config.h"
+
 #include "TH/TH.h"
-#ifdef AT_CUDA_ENABLED
+#if AT_CUDA_ENABLED()
 #undef THNN_
 #include "THC/THC.h"
 #endif

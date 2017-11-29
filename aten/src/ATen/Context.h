@@ -44,15 +44,22 @@ public:
     });
     return thc_state;
   }
-#ifdef AT_CUDA_ENABLED
+#if AT_CUDA_ENABLED()
   cudaStream_t getCurrentCUDAStream() const;
 #endif
+  // NB: This method is *purely* whether or not a user requested
+  // that CuDNN was enabled, it doesn't actually say anything about
+  // whether or not CuDNN is actually usable.  Use cudnn_is_acceptable
+  // to test this instead
+  bool userEnabledCuDNN() const;
+  void setUserEnabledCuDNN(bool e);
   ~Context();
   std::unique_ptr<Generator>
     generator_registry[static_cast<int>(Backend::NumOptions)];
   std::unique_ptr<Type> type_registry
     [static_cast<int>(Backend::NumOptions)]
     [static_cast<int>(ScalarType::NumOptions)];
+  // TODO: Consider making this private
   THCState * thc_state;
 private:
   void initCUDAIfNeeded(Backend p) {
@@ -61,6 +68,7 @@ private:
   }
   void doInitCUDA();
   std::once_flag thc_init;
+  bool enabled_cudnn = true;
 };
 
 AT_API Context & globalContext();

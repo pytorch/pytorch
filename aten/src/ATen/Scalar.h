@@ -1,5 +1,7 @@
 #pragma once
 
+#include "ATen/Config.h"
+
 #include <assert.h>
 #include <stdint.h>
 #include <stdexcept>
@@ -35,7 +37,7 @@ public:
 
   AT_FORALL_SCALAR_TYPES(DEFINE_IMPLICIT_CTOR)
 
-#ifdef AT_CUDA_ENABLED
+#if AT_CUDA_ENABLED()
   Scalar(half vv)
   : tag(Tag::HAS_d) {
 #if CUDA_VERSION < 9000

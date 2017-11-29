@@ -1,18 +1,21 @@
-#include <Python.h>
 #include "Handles.h"
+
+#include "Exceptions.h"
 
 #include <unordered_map>
 #include <mutex>
-#include "Exceptions.h"
 
-namespace torch { namespace cudnn {
+// TODO: Get rid of the mutex, and just initialize these
+// handles in at::Context along with lazy CUDA initialization
+
+namespace at { namespace native {
 
 namespace {
 
 struct Handle {
   cudnnHandle_t handle;
   Handle() : handle(NULL) {
-    CHECK(cudnnCreate(&handle));
+    CUDNN_CHECK(cudnnCreate(&handle));
   }
   ~Handle() {
     if (handle) {
@@ -36,4 +39,4 @@ cudnnHandle_t getCudnnHandle()
   return handles[device].handle;
 }
 
-}} // namespace torch::cudnn
+}} // namespace at::cudnn

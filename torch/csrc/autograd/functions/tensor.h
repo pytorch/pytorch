@@ -6,7 +6,8 @@
 
 #include "torch/csrc/autograd/function.h"
 #include "torch/csrc/autograd/variable.h"
-#include "torch/csrc/utils/tensor_geometry.h"
+
+#include <ATen/TensorGeometry.h>
 
 namespace torch { namespace autograd {
 
@@ -101,13 +102,13 @@ private:
 // grad[idx] is defined by the relative sizes, strides, and offset of base and
 // view.
 struct CopySlices : public Function {
-  CopySlices(const Variable& base, TensorGeometry view, std::shared_ptr<Function> fn);
+  CopySlices(const Variable& base, at::TensorGeometry view, std::shared_ptr<Function> fn);
 
   virtual variable_list apply(const variable_list& grads) override;
   virtual void releaseVariables() override;
 
-  TensorGeometry base;
-  TensorGeometry view;
+  at::TensorGeometry base;
+  at::TensorGeometry view;
   std::shared_ptr<Function> fn;
 };
 

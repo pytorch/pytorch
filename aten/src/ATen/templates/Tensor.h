@@ -1,5 +1,7 @@
 #pragma once
 
+#include "ATen/Config.h"
+
 #include "ATen/Generator.h"
 #include "ATen/Scalar.h"
 #include "ATen/ScalarType.h"

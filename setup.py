@@ -257,7 +257,6 @@ class build_ext(setuptools.command.build_ext.build_ext):
         from tools.cwrap.plugins.AutoGPU import AutoGPU
         from tools.cwrap.plugins.BoolOption import BoolOption
         from tools.cwrap.plugins.KwargsPlugin import KwargsPlugin
-        from tools.cwrap.plugins.NullableArguments import NullableArguments
 
         from tools.cwrap.plugins.CuDNNPlugin import CuDNNPlugin
         from tools.cwrap.plugins.WrapDim import WrapDim
@@ -273,9 +272,6 @@ class build_ext(setuptools.command.build_ext.build_ext):
             ProcessorSpecificPlugin(), BoolOption(), thp_plugin,
             AutoGPU(condition='IS_CUDA'), ArgcountSortPlugin(), KwargsPlugin(),
             AssertNDim(), WrapDim(), Broadcast()
-        ])
-        cwrap('torch/csrc/cudnn/cuDNN.cwrap', plugins=[
-            CuDNNPlugin(), NullableArguments()
         ])
         # Build ATen based Variable classes
         autograd_gen_dir = 'torch/csrc/autograd/generated'
@@ -430,7 +426,6 @@ main_sources = [
     "torch/csrc/utils/invalid_arguments.cpp",
     "torch/csrc/utils/object_ptr.cpp",
     "torch/csrc/utils/python_arg_parser.cpp",
-    "torch/csrc/utils/tensor_geometry.cpp",
     "torch/csrc/utils/tuple_parser.cpp",
     "torch/csrc/allocators.cpp",
     "torch/csrc/serialization.cpp",
@@ -544,7 +539,7 @@ if WITH_CUDA:
     cuda_include_path = os.path.join(CUDA_HOME, 'include')
     include_dirs.append(cuda_include_path)
     include_dirs.append(tmp_install_path + "/include/THCUNN")
-    extra_compile_args += ['-DWITH_CUDA', '-DAT_CUDA_ENABLED']
+    extra_compile_args += ['-DWITH_CUDA']
     extra_compile_args += ['-DCUDA_LIB_PATH=' + cuda_lib_path]
     main_libraries += ['cudart', nvtoolext_lib_name]
     main_sources += [
@@ -576,15 +571,6 @@ if WITH_CUDNN:
     include_dirs.insert(0, CUDNN_INCLUDE_DIR)
     if not IS_WINDOWS:
         extra_link_args.insert(0, '-Wl,-rpath,' + CUDNN_LIB_DIR)
-    main_sources += [
-        "torch/csrc/cudnn/BatchNorm.cpp",
-        "torch/csrc/cudnn/Conv.cpp",
-        "torch/csrc/cudnn/cuDNN.cpp",
-        "torch/csrc/cudnn/GridSampler.cpp",
-        "torch/csrc/cudnn/AffineGridGenerator.cpp",
-        "torch/csrc/cudnn/Types.cpp",
-        "torch/csrc/cudnn/Handles.cpp",
-    ]
     extra_compile_args += ['-DWITH_CUDNN']
 
 if WITH_NNPACK:
