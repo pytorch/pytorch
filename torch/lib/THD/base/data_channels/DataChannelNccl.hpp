@@ -181,8 +181,9 @@ private:
   std::mutex _mutex;
 
   /**
-   * The GPU devices each group have used. The GPU devices are stored in a
-   * device sequence.
+   * The GPU devices each group is currently using.
+   * The GPU devices are stored in a device sequence and the cache NCCL
+   * communicator is associated with this GPU device sequence
    *
    * e.g. If the group only uses device 0, then the value of
    *      the used device string stored (value of the hashmap) would be "0".
@@ -194,11 +195,17 @@ private:
    *
    *      If the group uses device 0 - 7 and the each tensor of the
    *      input tensor list is on device, 0, 4, 5, 6, 7, 1, 2, 3 separately,
-   *      then the value of the used device string  stored would be
+   *      then the value of the used device string stored would be
    *      "0,4,5,6,7,1,2,3"
    *
-   *      Note that the order of the device for the tensor list matters and
-   *      each group can only be associated with one used device string
+   *      Note that the order of the device for the tensor list matters.
+   *
+   *      Also note that each group only caches a single NCCL communicator
+   *      associated with the current "used device string".
+   *
+   *      If a new device string appears, the previous
+   *      cached communicator will be destroyed and a new one with the new
+   *      device string will be built
    */
   std::unordered_map<THDGroup, std::string> _groupDevices;
 

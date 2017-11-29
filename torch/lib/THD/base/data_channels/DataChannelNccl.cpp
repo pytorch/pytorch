@@ -263,13 +263,16 @@ NcclResourcePair DataChannelNccl::_getNcclResourcePair(
 
   if (_groupDevices.find(groupId) != _groupDevices.end() &&
       deviceList != _groupDevices[groupId]) {
-    std::string errMsg;
-    errMsg = "The current group: " + std::to_string(groupId) +
-            " has already got a GPU device list: " + _groupDevices[groupId]
-            + " associated with. Each group should only be associated with a "
-            + "given device list. Please create a new group for your provided "
-            + "device list: " + deviceList;
-    throw std::runtime_error(errMsg);
+    /**
+     * If a new device list from a different call is detected, we will clear
+     * the old NCCL communicator cache (that is associated with the current
+     * device list cached) first and remove the old NCCL resource and
+     * the old device list from the hashmap. The following call will detect the
+     * cache miss and rebuild the cache
+     */
+    _destroyNcclResources(groupId);
+    _groupNcclResources.erase(groupId);
+    _groupDevices.erase(groupId);
   }
 
   if (_groupNcclResources.find(groupId) != _groupNcclResources.end()) {
