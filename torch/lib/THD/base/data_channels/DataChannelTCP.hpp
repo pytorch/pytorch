@@ -31,20 +31,34 @@ struct DataChannelTCP : DataChannel {
   virtual ~DataChannelTCP();
 
   bool init() override;
+  void destroy() override;
 
   rank_type getRank() override;
   rank_type getNumProcesses() override;
 
+  void allGather(std::vector<at::Tensor>& output,
+                 std::vector<at::Tensor>& input,
+                 THDGroup group_id = THDGroupWORLD) override;
   void allGather(std::vector<at::Tensor>& output, at::Tensor& input,
                  THDGroup group_id = THDGroupWORLD) override;
   void gather(std::vector<at::Tensor>& output, at::Tensor& input,
               rank_type dst_rank, THDGroup group_id = THDGroupWORLD) override;
   void scatter(std::vector<at::Tensor>& input, at::Tensor& output,
                rank_type src_rank, THDGroup group_id = THDGroupWORLD) override;
+  void allReduce(std::vector<at::Tensor>& data,
+                 THDReduceOp operation,
+                 THDGroup group_id = THDGroupWORLD) override;
   void allReduce(at::Tensor& data, THDReduceOp operation,
                  THDGroup group_id = THDGroupWORLD) override;
+  void reduce(std::vector<at::Tensor>& data,
+              THDReduceOp operation,
+              rank_type dstRank,
+              THDGroup group_id = THDGroupWORLD) override;
   void reduce(at::Tensor& data, THDReduceOp operation, rank_type dst_rank,
               THDGroup group_id = THDGroupWORLD) override;
+  void broadcast(std::vector<at::Tensor>& data,
+                 rank_type srcRank,
+                 THDGroup group_id = THDGroupWORLD) override;
   void broadcast(at::Tensor& data, rank_type src_id,
                  THDGroup group_id = THDGroupWORLD) override;
   void send(Scalar& data, rank_type dst_id) override;
@@ -58,6 +72,7 @@ struct DataChannelTCP : DataChannel {
   void barrier(THDGroup group_id = THDGroupWORLD) override;
 
   THDGroup newGroup(const std::vector<rank_type>& ranks) override;
+  void clearGroupCache(THDGroup group_id = THDGroupWORLD) override;
 
 private:
   using req_ptr = std::unique_ptr<RequestTCP>;
@@ -96,6 +111,7 @@ private:
 
   // Workers
   QueueWorker _send_worker, _receive_worker;
+
 };
 
 } // namespace thd

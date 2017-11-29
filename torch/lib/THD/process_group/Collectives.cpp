@@ -14,13 +14,39 @@ int THDGetNumProcesses() {
   return static_cast<int>(dataChannel->getNumProcesses());
 }
 
+void THDAllReduceMultiGPU(THDTensorDescriptor* data,
+                          size_t len,
+                          THDReduceOp operation,
+                          THDGroup group) {
+  std::vector<at::Tensor> dataVec(data, data + len);
+  dataChannel->allReduce(dataVec, operation, group);
+}
+
+
 void THDAllReduce(THDTensorDescriptor& desc, THDReduceOp operation, THDGroup group) {
   dataChannel->allReduce(desc, operation, group);
+}
+
+void THDReduceMultiGPU(THDTensorDescriptor* desc,
+                       size_t len,
+                       THDReduceOp operation,
+                       int dst_rank,
+                       THDGroup group) {
+  std::vector<at::Tensor> dataVec(desc, desc + len);
+  dataChannel->reduce(dataVec, operation, convertToRank(dst_rank), group);
 }
 
 void THDReduce(THDTensorDescriptor& desc, THDReduceOp operation,
                int dst_rank, THDGroup group) {
   dataChannel->reduce(desc, operation, convertToRank(dst_rank), group);
+}
+
+void THDBroadcastMultiGPU(THDTensorDescriptor* desc,
+                          size_t len,
+                          int src_rank,
+                          THDGroup group) {
+  std::vector<at::Tensor> dataVec(desc, desc + len);
+  dataChannel->broadcast(dataVec, convertToRank(src_rank), group);
 }
 
 void THDBroadcast(THDTensorDescriptor& desc, int src_rank, THDGroup group) {
@@ -45,6 +71,16 @@ int THDRecvAnySource(THDTensorDescriptor& desc) {
 
 void THDRecv(THDTensorDescriptor& desc, int src_rank) {
   dataChannel->receive(desc, convertToRank(src_rank));
+}
+
+void THDAllGatherMultiGPU(THDTensorDescriptor* output,
+                          size_t outputLen,
+                          THDTensorDescriptor* input,
+                          size_t inputLen,
+                          THDGroup group) {
+  std::vector<at::Tensor> outputVec(output, output + outputLen);
+  std::vector<at::Tensor> inputVec(input, input + inputLen);
+  dataChannel->allGather(outputVec, inputVec, group);
 }
 
 void THDAllGather(THDTensorDescriptor* output, size_t len,
