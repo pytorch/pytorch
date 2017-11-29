@@ -71,7 +71,8 @@ struct TensorDescriptor
   // broadcasting size 1 dimensions.
   void set(const at::Tensor &t, int64_t pad = 0);
 
-  explicit TensorDescriptor(const at::Tensor &t, int64_t pad = 0) : TensorDescriptor() {
+  explicit TensorDescriptor(const at::Tensor &t, int64_t pad = 0) : desc(nullptr) {
+    CUDNN_CHECK(cudnnCreateTensorDescriptor(&desc));
     set(t, pad);
   }
 
