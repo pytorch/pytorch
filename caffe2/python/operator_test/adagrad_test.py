@@ -21,7 +21,8 @@ from __future__ import unicode_literals
 import functools
 
 import hypothesis
-from hypothesis import given, assume, strategies as st
+from hypothesis import assume, given, settings, HealthCheck
+import hypothesis.strategies as st
 from caffe2.proto import caffe2_pb2
 from caffe2.python import workspace
 import numpy as np
@@ -79,6 +80,10 @@ class TestAdagrad(hu.HypothesisTestCase):
             [param, momentum, grad, lr],
             functools.partial(self.ref_adagrad, epsilon=epsilon))
 
+    # Suppress filter_too_much health check.
+    # Reproduce by commenting @settings and uncommenting @seed.
+    # @seed(302934307671667531413257853548643485645)
+    @settings(suppress_health_check=[HealthCheck.filter_too_much])
     @given(inputs=hu.tensors(n=3),
            lr=st.floats(min_value=0.01, max_value=0.99,
                         allow_nan=False, allow_infinity=False),
