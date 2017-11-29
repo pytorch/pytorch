@@ -21,6 +21,8 @@ from tools.setup_helpers.nnpack import WITH_NNPACK, NNPACK_LIB_PATHS, \
     NNPACK_INCLUDE_DIRS
 from tools.setup_helpers.nvtoolext import NVTOOLEXT_HOME
 from tools.setup_helpers.split_types import split_types
+from tools.setup_helpers.generate_code import generate_code
+from tools.setup_helpers.ninja_builder import NinjaBuilder, ninja_build_ext
 
 DEBUG = check_env_flag('DEBUG')
 
@@ -31,6 +33,52 @@ IS_LINUX = (platform.system() == 'Linux')
 WITH_DISTRIBUTED = not check_env_flag('NO_DISTRIBUTED') and not IS_WINDOWS
 WITH_DISTRIBUTED_MW = WITH_DISTRIBUTED and check_env_flag('WITH_DISTRIBUTED_MW')
 
+try:
+    import ninja
+    WITH_NINJA = True
+except ImportError:
+    WITH_NINJA = False
+
+if not WITH_NINJA:
+    ################################################################################
+    # Monkey-patch setuptools to compile in parallel
+    ################################################################################
+
+    def parallelCCompile(self, sources, output_dir=None, macros=None,
+                         include_dirs=None, debug=0, extra_preargs=None,
+                         extra_postargs=None, depends=None):
+        # those lines are copied from distutils.ccompiler.CCompiler directly
+        macros, objects, extra_postargs, pp_opts, build = self._setup_compile(
+            output_dir, macros, include_dirs, sources, depends, extra_postargs)
+        cc_args = self._get_cc_args(pp_opts, debug, extra_preargs)
+
+        # compile using a thread pool
+        import multiprocessing.pool
+
+        def _single_compile(obj):
+            src, ext = build[obj]
+            self._compile(obj, src, ext, cc_args, extra_postargs, pp_opts)
+        num_jobs = multiprocessing.cpu_count()
+        max_jobs = os.getenv("MAX_JOBS")
+        if max_jobs is not None:
+            num_jobs = min(num_jobs, int(max_jobs))
+        multiprocessing.pool.ThreadPool(num_jobs).map(_single_compile, objects)
+
+        return objects
+    distutils.ccompiler.CCompiler.compile = parallelCCompile
+
+original_link = distutils.unixccompiler.UnixCCompiler.link
+
+
+def patched_link(self, *args, **kwargs):
+    _cxx = self.compiler_cxx
+    self.compiler_cxx = None
+    result = original_link(self, *args, **kwargs)
+    self.compiler_cxx = _cxx
+    return result
+
+
+distutils.unixccompiler.UnixCCompiler.link = patched_link
 
 ################################################################################
 # Workaround setuptools -Wstrict-prototypes warnings
@@ -43,46 +91,6 @@ for key, value in cfg_vars.items():
         cfg_vars[key] = value.replace("-Wstrict-prototypes", "")
 
 ################################################################################
-# Monkey-patch setuptools to compile in parallel
-################################################################################
-original_link = distutils.unixccompiler.UnixCCompiler.link
-
-
-def parallelCCompile(self, sources, output_dir=None, macros=None,
-                     include_dirs=None, debug=0, extra_preargs=None,
-                     extra_postargs=None, depends=None):
-    # those lines are copied from distutils.ccompiler.CCompiler directly
-    macros, objects, extra_postargs, pp_opts, build = self._setup_compile(
-        output_dir, macros, include_dirs, sources, depends, extra_postargs)
-    cc_args = self._get_cc_args(pp_opts, debug, extra_preargs)
-
-    # compile using a thread pool
-    import multiprocessing.pool
-
-    def _single_compile(obj):
-        src, ext = build[obj]
-        self._compile(obj, src, ext, cc_args, extra_postargs, pp_opts)
-    num_jobs = multiprocessing.cpu_count()
-    max_jobs = os.getenv("MAX_JOBS")
-    if max_jobs is not None:
-        num_jobs = min(num_jobs, int(max_jobs))
-    multiprocessing.pool.ThreadPool(num_jobs).map(_single_compile, objects)
-
-    return objects
-
-
-def patched_link(self, *args, **kwargs):
-    _cxx = self.compiler_cxx
-    self.compiler_cxx = None
-    result = original_link(self, *args, **kwargs)
-    self.compiler_cxx = _cxx
-    return result
-
-
-distutils.ccompiler.CCompiler.compile = parallelCCompile
-distutils.unixccompiler.UnixCCompiler.link = patched_link
-
-################################################################################
 # Custom build commands
 ################################################################################
 
@@ -90,6 +98,12 @@ dep_libs = [
     'nccl', 'ATen',
     'libshm', 'libshm_windows', 'gloo', 'THD', 'nanopb',
 ]
+
+
+# global ninja file for building generated code stuff
+ninja_global = None
+if WITH_NINJA:
+    ninja_global = NinjaBuilder('global')
 
 
 def build_libs(libs):
@@ -214,7 +228,11 @@ def monkey_patch_THD_link_flags():
     C.extra_link_args += thd_deps
 
 
-class build_ext(setuptools.command.build_ext.build_ext):
+build_ext_parent = ninja_build_ext if WITH_NINJA \
+    else setuptools.command.build_ext.build_ext
+
+
+class build_ext(build_ext_parent):
 
     def run(self):
 
@@ -250,45 +268,8 @@ class build_ext(setuptools.command.build_ext.build_ext):
             print('-- Detected NNPACK at ' + nnpack_dir)
         else:
             print('-- Not using NNPACK')
-        # cwrap depends on pyyaml, so we can't import it earlier
-        from tools.cwrap import cwrap
-        from tools.cwrap.plugins.THPPlugin import THPPlugin
-        from tools.cwrap.plugins.ArgcountSortPlugin import ArgcountSortPlugin
-        from tools.cwrap.plugins.AutoGPU import AutoGPU
-        from tools.cwrap.plugins.BoolOption import BoolOption
-        from tools.cwrap.plugins.KwargsPlugin import KwargsPlugin
-        from tools.cwrap.plugins.NullableArguments import NullableArguments
 
-        from tools.cwrap.plugins.CuDNNPlugin import CuDNNPlugin
-        from tools.cwrap.plugins.WrapDim import WrapDim
-        from tools.cwrap.plugins.AssertNDim import AssertNDim
-
-        from tools.cwrap.plugins.Broadcast import Broadcast
-        from tools.cwrap.plugins.ProcessorSpecificPlugin import ProcessorSpecificPlugin
-        from tools.autograd.gen_variable_type import gen_variable_type
-        from tools.jit.gen_jit_dispatch import gen_jit_dispatch
-        thp_plugin = THPPlugin()
-
-        cwrap('torch/csrc/generic/TensorMethods.cwrap', plugins=[
-            ProcessorSpecificPlugin(), BoolOption(), thp_plugin,
-            AutoGPU(condition='IS_CUDA'), ArgcountSortPlugin(), KwargsPlugin(),
-            AssertNDim(), WrapDim(), Broadcast()
-        ])
-        cwrap('torch/csrc/cudnn/cuDNN.cwrap', plugins=[
-            CuDNNPlugin(), NullableArguments()
-        ])
-        # Build ATen based Variable classes
-        autograd_gen_dir = 'torch/csrc/autograd/generated'
-        jit_gen_dir = 'torch/csrc/jit/generated'
-        for d in (autograd_gen_dir, jit_gen_dir):
-            if not os.path.exists(d):
-                os.mkdir(d)
-        gen_variable_type(
-            'torch/lib/tmp_install/share/ATen/Declarations.yaml',
-            autograd_gen_dir)
-        gen_jit_dispatch(
-            'torch/lib/tmp_install/share/ATen/Declarations.yaml',
-            jit_gen_dir)
+        generate_code(ninja_global)
 
         if IS_WINDOWS:
             build_temp = self.build_temp
@@ -308,6 +289,10 @@ class build_ext(setuptools.command.build_ext.build_ext):
                 if os.path.exists("torch/csrc/generated/AutoGPU_cpu_win.cpp"):
                     os.remove("torch/csrc/generated/AutoGPU_cpu_win.cpp")
                 shutil.copyfile("torch/csrc/cuda/AutoGPU.h", "torch/csrc/generated/AutoGPU_cpu_win.cpp")
+        if WITH_NINJA:
+            # before we start the normal build make sure all generated code
+            # gets built
+            ninja_global.run()
 
         # It's an old-style class in Python 2.7...
         setuptools.command.build_ext.build_ext.run(self)
@@ -488,7 +473,7 @@ main_sources = [
     "torch/csrc/onnx/onnx.pb.cpp",
     "torch/csrc/onnx/onnx.cpp",
 ]
-main_sources += split_types("torch/csrc/Tensor.cpp")
+main_sources += split_types("torch/csrc/Tensor.cpp", ninja_global)
 
 try:
     import numpy as np
@@ -557,7 +542,7 @@ if WITH_CUDA:
         "torch/csrc/cuda/serialization.cpp",
         "torch/csrc/jit/fusion_compiler.cpp",
     ]
-    main_sources += split_types("torch/csrc/cuda/Tensor.cpp")
+    main_sources += split_types("torch/csrc/cuda/Tensor.cpp", ninja_global)
 
 if WITH_NCCL:
     if WITH_SYSTEM_NCCL:
