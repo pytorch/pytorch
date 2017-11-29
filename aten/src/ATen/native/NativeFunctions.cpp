@@ -283,7 +283,7 @@ Tensor stack(TensorList tensors, int64_t dim) {
   return at::cat(inputs, dim);
 }
 
-Tensor maybeSqueeze(const Tensor & tensor, int64_t dim_tensor1, int64_t dim_tensor2) {
+static Tensor maybeSqueeze(const Tensor & tensor, int64_t dim_tensor1, int64_t dim_tensor2) {
   if (dim_tensor1 == 1) {
     return tensor.squeeze(-2);
   } else if (dim_tensor2 == 1) {
