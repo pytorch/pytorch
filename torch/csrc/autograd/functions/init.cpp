@@ -4,7 +4,7 @@
 #include "basic_ops.h"
 #include "tensor.h"
 #include "special.h"
-#include "jit_closure.h"
+#include "torch/csrc/jit/interpreter_autograd_function.h"
 #include "torch/csrc/autograd/functions/pybind.h"
 #include "torch/csrc/autograd/python_cpp_function.h"
 #include "torch/csrc/autograd/generated/python_functions.h"
@@ -294,8 +294,8 @@ bool THPAutograd_initFunctions(PyObject* _unused)
   static PyTypeObject EvalClass;
   addClass<Eval, NoCtor>(module, EvalClass, "Eval");
 
-  static PyTypeObject AutogradClosureClass;
-  addClass<AutogradClosure, NoCtor>(module, AutogradClosureClass, "AutogradClosure");
+  static PyTypeObject InterpreterAutogradClass;
+  addClass<torch::jit::InterpreterAutogradFunction, NoCtor>(module, InterpreterAutogradClass, "InterpreterAutogradFunction");
 
   static PyTypeObject CopyBackwardsClass;
   addClass<CopyBackwards, NoCtor>(module, CopyBackwardsClass, "CopyBackwards");
@@ -315,12 +315,12 @@ namespace torch { namespace autograd {
 
 void initAutogradClosureBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
-  py::class_<AutogradClosureFactory,std::shared_ptr<AutogradClosureFactory>>(m, "AutogradClosureFactory")
-    .def("__call__", &AutogradClosureFactory::construct)
+  py::class_<jit::InterpreterFunctionFactory,std::shared_ptr<jit::InterpreterFunctionFactory>>(m, "InterpreterFunctionFactory")
+    .def("__call__", &jit::InterpreterFunctionFactory::construct)
     ;
 
-  m.def("_jit_createAutogradClosure", [](jit::tracer::TracingState* tracing_state) {
-    return std::make_shared<AutogradClosureFactory>(tracing_state);
+  m.def("_jit_createInterpreterFactory", [](jit::tracer::TracingState* tracing_state) {
+    return std::make_shared<jit::InterpreterFunctionFactory>(tracing_state);
   });
 }
 

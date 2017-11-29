@@ -66,7 +66,11 @@ variable_list Function::tracedApply(variable_list inputs) {
 
   // Insert a CppOp in the trace.
   auto& graph = state->graph;
-  auto* this_node = graph->createCppOp(getSharedPtr());
+  std::vector<VariableFlags> var_flags;
+  for(auto & input: inputs) {
+    var_flags.push_back(VariableFlags::of(input));
+  }
+  auto* this_node = graph->createCppOp(getSharedPtr(), std::move(var_flags));
   this_node->setSourceLocation(std::make_shared<SourceLocation>(
         jit::tracer::getPythonInterpreterStackTrace()
   ));

@@ -1,3 +1,4 @@
+#include "Python.h"
 #include "interpreter_autograd_function.h"
 
 namespace torch { namespace jit {
@@ -36,6 +37,14 @@ autograd::variable_list InterpreterAutogradFunction::apply(
   auto make_grad_fn = [&]() {
     grad_fn = std::make_shared<InterpreterAutogradFunction>(
         std::move(interp), stage_details_, stage_ + 1);
+
+    // Running this next stage is actually not valid (nderiv is too low)
+    // but we don't know if the user will ever ask for it so we don't error out here.
+    // Instead we have to return early because we rely on stage_details_[stage+1] in the
+    // remaining code
+    if(stage_ + 1 == stage_details_.size())
+      return;
+
     // Patch next_functions to include prevous stage next_functions
     // This is needed because stage N is really a derivative of
     // all stages from 1 to N-1. If a part of stage x graph is
@@ -43,7 +52,7 @@ autograd::variable_list InterpreterAutogradFunction::apply(
     // and so we need to copy next_fns because those Variables
     // aren't real inputs to that stage, so that's the only place
     // where we can get them.
-    for (auto copied_idx : details.copied_next_fns) {
+    for (auto copied_idx : stage_details_[stage_ + 1].copied_next_fns) {
       grad_fn->next_functions.push_back(next_functions[copied_idx]);
     }
     // Add grad_fns corresponding to inputs
@@ -94,7 +103,7 @@ InterpreterFunctionFactory::InterpreterFunctionFactory(TracingState *state) {
   }
 }
 
-std::shared_ptr<InterpreterAutogradFunction> InterpreterFunctionFactory::construct() {
+std::shared_ptr<autograd::Function> InterpreterFunctionFactory::construct() {
   return std::make_shared<InterpreterAutogradFunction>(code_, stage_details_);
 }
 
