@@ -1,8 +1,11 @@
 import math
 import sys
+import ctypes
 import torch
+import time
 import traceback
 import unittest
+from torch import multiprocessing
 from torch.utils.data import Dataset, TensorDataset, DataLoader, ConcatDataset
 from torch.utils.data.dataloader import default_collate
 from common import TestCase, run_tests, TEST_NUMPY
@@ -83,6 +86,32 @@ class ErrorDataset(Dataset):
         return self.size
 
 
+class SegfaultDataset(Dataset):
+
+    def __init__(self, size):
+        self.size = size
+
+    def __getitem__(self, idx):
+        return ctypes.string_at(0)
+
+    def __len__(self):
+        return self.size
+
+
+class SleepDataset(Dataset):
+
+    def __init__(self, size, sleep_sec):
+        self.size = size
+        self.sleep_sec = sleep_sec
+
+    def __getitem__(self, idx):
+        time.sleep(self.sleep_sec)
+        return idx
+
+    def __len__(self):
+        return self.size
+
+
 class TestDataLoader(TestCase):
 
     def setUp(self):
@@ -148,6 +177,48 @@ class TestDataLoader(TestCase):
         for input, target in loader:
             self.assertTrue(input.is_pinned())
             self.assertTrue(target.is_pinned())
+
+    def test_multiple_dataloaders(self):
+        loader1_it = iter(DataLoader(self.dataset, num_workers=1))
+        loader2_it = iter(DataLoader(self.dataset, num_workers=2))
+        next(loader1_it)
+        next(loader1_it)
+        next(loader2_it)
+        next(loader2_it)
+        next(loader1_it)
+        next(loader2_it)
+
+    def test_segfault(self):
+        def _test_segfault():
+            sys.stderr.close()
+            dataset = SegfaultDataset(10)
+            dataloader = DataLoader(dataset, batch_size=2, num_workers=2)
+            _ = next(iter(dataloader))
+
+        p = multiprocessing.Process(target=_test_segfault)
+        p.start()
+        p.join(1.0)
+        try:
+            self.assertFalse(p.is_alive())
+            self.assertNotEqual(p.exitcode, 0)
+        finally:
+            p.terminate()
+
+    def test_timeout(self):
+        def _test_timeout():
+            sys.stderr.close()
+            dataset = SleepDataset(10, 10)
+            dataloader = DataLoader(dataset, batch_size=2, num_workers=2, timeout=1)
+            _ = next(iter(dataloader))
+
+        p = multiprocessing.Process(target=_test_timeout)
+        p.start()
+        p.join(3.0)
+        try:
+            self.assertFalse(p.is_alive())
+            self.assertNotEqual(p.exitcode, 0)
+        finally:
+            p.terminate()
 
     def test_shuffle(self):
         self._test_shuffle(DataLoader(self.dataset, shuffle=True))
@@ -224,7 +295,7 @@ class TestDataLoader(TestCase):
         "check that workers exit even if the iterator is not exhausted"
         loader = iter(DataLoader(self.dataset, batch_size=2, num_workers=4, pin_memory=True))
         workers = loader.workers
-        pin_thread = loader.pin_thread
+        worker_manager_thread = loader.worker_manager_thread
         for i, sample in enumerate(loader):
             if i == 3:
                 break
@@ -233,8 +304,8 @@ class TestDataLoader(TestCase):
             w.join(1.0)  # timeout of one second
             self.assertFalse(w.is_alive(), 'subprocess not terminated')
             self.assertEqual(w.exitcode, 0)
-        pin_thread.join(1.0)
-        self.assertFalse(pin_thread.is_alive())
+        worker_manager_thread.join(1.0)
+        self.assertFalse(worker_manager_thread.is_alive())
 
     def test_len(self):
         def check_len(dl, expected):
