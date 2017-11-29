@@ -176,7 +176,7 @@ deprecated_path = os.path.join(os.path.dirname(__file__), 'deprecated.yaml')
 FALLTHROUGH_RETURN_TYPES = {'int64_t', 'void*', 'bool', 'IntList'}
 FALLTHROUGH_FUNCTIONS = {
     'arange', 'eye', 'linspace', 'logspace', 'tensor', 'ones', 'ones_like',
-    'rand', 'randn', 'randperm', 'range', 'tensor', 'uniform', 'zeros',
+    'rand', 'randn', 'randperm', 'range', 'tensor', 'zeros',
     'zeros_like', 'set_',
     # these are only implemented on integral types
     '__and__', '__iand__', '__ilshift__', '__ior__', '__irshift__', '__ixor__',

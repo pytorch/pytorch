@@ -201,7 +201,7 @@ inline bool PythonArgs::isNone(int i) {
 
 inline at::Generator* PythonArgs::generator(int i) {
   if (!args[i]) return nullptr;
-  throw std::runtime_error("PythonArgs::generator not implemented");
+  throw std::runtime_error("PythonArgs::generator not implemented (only None allowed)");
 }
 
 inline at::Storage& PythonArgs::storage(int i) {
