@@ -134,7 +134,7 @@ void ToONNX(std::shared_ptr<tracer::TracingState>& state) {
     std::vector<Node*> outputs;
     try {
       if (py::isinstance<Node>(raw_output)) {
-        outputs = value_list{py::cast<Node*>(raw_output)};
+        outputs = node_list{py::cast<Node*>(raw_output)};
       } else {
         outputs = py::cast<std::vector<Node*>>(raw_output);
       }
