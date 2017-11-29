@@ -20,35 +20,31 @@
 namespace caffe2 {
 
 template <>
-bool TimeObserverBase<NetBase>::Start() {
+void TimeObserverBase<NetBase>::Start() {
   CAFFE_THROW(
       "This function is overridden by TimeObserver<NetBase>.\
               If it was called there is an issue with compilation.");
-  return false;
 }
 
 template <>
-bool TimeObserverBase<NetBase>::Stop() {
+void TimeObserverBase<NetBase>::Stop() {
   double current_run = timer_.MilliSeconds() - start_time_;
   total_time_ += current_run;
   VLOG(1) << "This net iteration took " << current_run << " ms to complete.\n";
-  return true;
 }
 
 template <>
-bool TimeObserverBase<OperatorBase>::Start() {
+void TimeObserverBase<OperatorBase>::Start() {
   start_time_ = timer_.MilliSeconds();
   ++iterations_;
-  return true;
 }
 
 template <>
-bool TimeObserverBase<OperatorBase>::Stop() {
+void TimeObserverBase<OperatorBase>::Stop() {
   double current_run = timer_.MilliSeconds() - start_time_;
   total_time_ += current_run;
   VLOG(1) << "This operator iteration took " << current_run
           << " ms to complete.\n";
-  return true;
 }
 
 } // namespace caffe2

@@ -81,9 +81,8 @@ class RecurrentNetworkExecutorBase {
   void EnsureTimestepInitialized(
       int t,
       Workspace* ws,
-      std::map<
-          const ObserverBase<OperatorBase>*,
-          std::unique_ptr<ObserverBase<OperatorBase>>>& observers) {
+      const std::vector<std::unique_ptr<ObserverBase<OperatorBase>>>&
+          observers_list) {
     if (timestep_ops_template_.size() == 0) {
       // Firsrt invocation -- compute dependencies
       CalculateInternalDependencies();
@@ -151,12 +150,13 @@ class RecurrentNetworkExecutorBase {
           }
 
           rnn_op.op = CreateOperator(op_copy, ws);
-          for (const auto& observer : observers) {
+          for (const auto& observer : observers_list) {
             std::unique_ptr<ObserverBase<OperatorBase>> observer_copy =
-                observer.second->clone();
+                observer->clone();
             CAFFE_ENFORCE(
                 observer_copy,
-                "Observers without clone() implemented cannot be attached to RNN using RNNExecutor.");
+                "Observers without clone() implemented cannot be attached "
+                "to RNN using RNNExecutor.");
             rnn_op.op->AttachObserver(std::move(observer_copy));
           }
         } else {
@@ -170,12 +170,13 @@ class RecurrentNetworkExecutorBase {
             // Otherwise, we need to create a brand new op with the workspace
             // owned by this timestep.
             rnn_op.op = CreateOperator(step_net_def_.op(rnn_op.order), ws);
-            for (const auto& observer : observers) {
+            for (const auto& observer : observers_list) {
               std::unique_ptr<ObserverBase<OperatorBase>> observer_copy =
-                  observer.second->clone();
+                  observer->clone();
               CAFFE_ENFORCE(
                   observer_copy,
-                  "Observers without clone() implemented cannot be attached to RNN using RNNExecutor.");
+                  "Observers without clone() implemented cannot be attached "
+                  "to RNN using RNNExecutor.");
               rnn_op.op->AttachObserver(std::move(observer_copy));
             }
           }
