@@ -134,7 +134,6 @@ CopySlices::CopySlices(const Variable& base_var, TensorGeometry view_, std::shar
   , view(std::move(view_))
   , fn(std::move(fn_))
 {
-  is_executable = true;
   num_inputs = 1;
 
   // Take the next_functions of fn as our own, except for index 0 which goes
