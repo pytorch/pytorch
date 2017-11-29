@@ -115,7 +115,7 @@ std::function<bool(int64_t)> getContinuationTest(
 };
 
 // if the blob doesn't exist or is not initiaized, return false
-inline const bool getShouldStop(const Blob* b) {
+inline bool getShouldStop(const Blob* b) {
   if (!b || !b->meta().id()) { // not exist or uninitialized
     return false;
   }
