@@ -27,7 +27,7 @@
 
 namespace caffe2 {
 
-struct ThreadPool;
+class ThreadPool;
 
 } // namespace caffe2
 
