@@ -142,13 +142,19 @@ class Event {
   // If parent op is in another state (initialized or failed) then scheduling
   // is not possible
   bool CanSchedule(const Event& child_event, bool supports_async) const {
-    int child_type = child_event.GetType();
-    auto status = Query();
-    if (status == EventStatus::EVENT_SUCCESS) {
+    return CanSchedule(type_, Query(), child_event.GetType(), supports_async);
+  }
+
+  static bool CanSchedule(
+      int parent_type,
+      EventStatus parent_status,
+      int child_type,
+      bool child_supports_async) {
+    if (parent_status == EventStatus::EVENT_SUCCESS) {
       return true;
     }
-    if (status == EventStatus::EVENT_SCHEDULED) {
-      return (type_ == child_type) && supports_async;
+    if (parent_status == EventStatus::EVENT_SCHEDULED) {
+      return (parent_type == child_type) && child_supports_async;
     }
     return false;
   }
