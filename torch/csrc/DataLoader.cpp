@@ -28,8 +28,14 @@
 static void HANDLER_NAME(int sig, siginfo_t *info, void *ctx)                 \
 {                                                                             \
   write(STDERR_FILENO, ERROR_MSG, sizeof(ERROR_MSG) / sizeof(char));          \
-  signal(SIGNAL, SIG_DFL);                                                    \
-  raise(SIGNAL);                                                              \
+  struct sigaction sa;                                                        \
+  sa.sa_handler = SIG_DFL;                                                    \
+  sa.sa_flags = 0;                                                            \
+  if (sigemptyset(&sa.sa_mask) != 0 || sigaction(SIGNAL, &sa, NULL) != 0) {   \
+    _exit(EXIT_FAILURE);                                                      \
+  } else {                                                                    \
+    raise(SIGNAL);                                                            \
+  }                                                                           \
 }
 
 // signal(2) is really not portable. So use sigaction.
@@ -38,9 +44,8 @@ static void setSignalHandler(int signal, void(*handler)(int, siginfo_t *, void *
 {
   struct sigaction sa;
   sa.sa_sigaction = handler;
-  sa.sa_flags = SA_RESTART|SA_SIGINFO|SA_NOCLDSTOP;
-  sigemptyset(&sa.sa_mask);
-  if (sigaction(signal, &sa, old_sa_ptr) != 0) {
+  sa.sa_flags = SA_RESTART|SA_SIGINFO|SA_NOCLDSTOP|SA_NODEFER;
+  if (sigemptyset(&sa.sa_mask) != 0 || sigaction(signal, &sa, old_sa_ptr) != 0) {
     std::ostringstream oss;
     oss << "An error occurred while setting handler for " << strsignal(signal) << ".";
     throw std::runtime_error(oss.str());
