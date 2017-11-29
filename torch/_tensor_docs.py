@@ -1283,13 +1283,27 @@ add_docstr_all('scatter_',
                """
 scatter_(dim, index, src) -> Tensor
 
-Writes all values from the Tensor :attr:`src` into self at the indices specified
-in the :attr:`index` Tensor. The indices are specified with respect to the
-given dimension, dim, in the manner described in :meth:`~Tensor.gather`.
+Writes all values from the Tensor :attr:`src` into `self` at the indices
+specified in the :attr:`index` Tensor. For each value in :attr:`src`, its output index
+is specified by its index in :attr:`src` for dimension != :attr:`dim` and by the
+corresponding value in :attr:`index` for dimension = :attr:`dim`.
 
-Note that, as for gather, the values of index must be between `0` and
-`(self.size(dim) -1)` inclusive and all values in a row along the specified
-dimension must be unique.
+For a 3-D tensor, `self` is updated as::
+
+    self[index[i][j][k]][j][k] = src[i][j][k]  # if dim == 0
+    self[i][index[i][j][k]][k] = src[i][j][k]  # if dim == 1
+    self[i][j][index[i][j][k]] = src[i][j][k]  # if dim == 2
+
+This is the reverse operation of the manner described in :meth:`~Tensor.gather`.
+
+:attr:`self`, :attr:`index` and :attr:`src` should have same number of
+dimensions. It is also required that `index->size[d] <= src->size[d]` for all
+dimension `d`, and that `index->size[d] <= real->size[d]` for all dimensions
+`d != dim`.
+
+Moreover, as for :meth:`~Tensor.gather`, the values of :attr:`index` must be
+between `0` and `(self.size(dim) -1)` inclusive, and all values in a row along
+the specified dimension :attr:`dim` must be unique.
 
 Args:
     input (Tensor): The source tensor
