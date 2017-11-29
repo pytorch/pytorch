@@ -768,9 +768,6 @@ class TestNN(NNTestCase):
         module_list = nn.ModuleList()
         module_list.extend(s.modules())
         check()
-        module_list = nn.ModuleList()
-        module_list.extend(s.named_modules())
-        check()
 
     def test_ParameterList(self):
         def make_param():
@@ -824,9 +821,6 @@ class TestNN(NNTestCase):
         parameters = list(s.parameters())
         param_list = nn.ParameterList()
         param_list.extend(s.parameters())
-        check()
-        param_list = nn.ParameterList()
-        param_list.extend(s.named_parameters())
         check()
 
     def test_add_module(self):

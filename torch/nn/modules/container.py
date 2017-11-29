@@ -136,8 +136,6 @@ class ModuleList(Module):
                             type(modules).__name__)
         offset = len(self)
         for i, module in enumerate(modules):
-            if isinstance(module, tuple):
-                _, module = module
             self.add_module(str(len(self)), module)
         return self
 
@@ -209,8 +207,6 @@ class ParameterList(Module):
                             "iterable, but got " + type(parameters).__name__)
         offset = len(self)
         for i, param in enumerate(parameters):
-            if isinstance(param, tuple):
-                _, param = param
             self.register_parameter(str(offset + i), param)
         return self
 
