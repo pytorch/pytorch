@@ -309,7 +309,7 @@ class TestJit(TestCase):
         x_grad = x.grad.data.clone()
         x.grad.data.zero_()
 
-        function = torch._C._jit_createAutogradClosure(trace)
+        function = torch._C._jit_createInterpreterFactory(trace)
         torch._C._jit_pass_lint(trace)
         z2, w2 = function()(x, y)
         (z2 * w2).backward()
@@ -338,7 +338,7 @@ class TestJit(TestCase):
         z = x.matmul(y)
 
         torch._C._tracer_exit((z,))
-        function = torch._C._jit_createAutogradClosure(trace)
+        function = torch._C._jit_createInterpreterFactory(trace)
 
         z2 = function()(x)
         self.assertEqual(z, z2)

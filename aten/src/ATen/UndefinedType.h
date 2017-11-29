@@ -25,8 +25,8 @@ struct UndefinedType final : public Type {
   virtual std::unique_ptr<Generator> generator() const override;
   virtual const char * toString() const override;
   virtual std::size_t elementSizeInBytes() const override;
-  virtual Type & toBackend(Backend b) const;
-  virtual Type & toScalarType(ScalarType s) const;
+  virtual Type & toBackend(Backend b) const override;
+  virtual Type & toScalarType(ScalarType s) const override;
   virtual TypeID ID() const override;
   static const char * typeString();
   Tensor unsafeTensorFromTH(void * th_pointer, bool retain) const override;

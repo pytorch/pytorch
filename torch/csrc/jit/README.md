@@ -28,7 +28,7 @@ A well-known function is usually implemented in several parts:
   operator.
 
 * There is a runtime interpretation of the operator in
-  `torch/csrc/autograd/functions/jit_closure.cpp`, which specifies how we
+  `torch/csrc/autograd/functions/interpreter.cpp`, which specifies how we
   actually interpret programs that contain such an operator.
 
 So, whence the specifications!  For the most part, we are following
@@ -74,4 +74,3 @@ other well-known functions which are specific to PyTorch.
       IR) which specifies how to execute the operation.)</dd>
     </dl>
   * **output**: 1 - ∞ (same as outputs of autograd closure)
-

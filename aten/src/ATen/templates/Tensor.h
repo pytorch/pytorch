@@ -37,6 +37,7 @@ struct Tensor : public detail::TensorBase {
   Tensor(const Tensor & rhs) = default;
   Tensor(Tensor && rhs) noexcept = default;
 
+  // reimplemented from TensorBase so the return type is Tensor rather than TensorBase
   Tensor & operator=(Tensor && rhs) & {
     rhs.swap(*this);
     return *this;
@@ -48,33 +49,12 @@ struct Tensor : public detail::TensorBase {
       Tensor(rhs).swap(*this);
       return *this;
   }
+  
   Tensor & operator=(Tensor const & rhs) && {
     return assign_(rhs);
   }
   Tensor & operator=(Scalar v) &&;
   Tensor & assign_(Scalar v);
-  void reset() {
-    Tensor().swap(*this);
-  }
-  void reset(TensorImpl * rhs) {
-    Tensor(rhs, true).swap(*this);
-  }
-  void reset(TensorImpl * rhs, bool retain) {
-    Tensor(rhs, retain).swap(*this );
-  }
-  TensorImpl * get() const {
-    return pImpl;
-  }
-  TensorImpl * detach() {
-    TensorImpl * ret = pImpl;
-    pImpl = nullptr;
-    return ret;
-  }
-  void swap(Tensor & rhs) {
-    TensorImpl * tmp = pImpl;
-    pImpl = rhs.pImpl;
-    rhs.pImpl = tmp;
-  }
   const char * toString() const {
     return pImpl->toString();
   }
