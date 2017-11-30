@@ -254,9 +254,6 @@ class Variable(_C._VariableBase):
         flat_out = flat.mul(norms.expand_as(flat))
         return flat_out.view(t.size()).transpose(dim, 0)
 
-    def matmul(self, other):
-        return torch.matmul(self, other)
-
     def resize(self, *sizes):
         return Resize.apply(self, sizes)
 
@@ -309,11 +306,6 @@ class Variable(_C._VariableBase):
 
     def __rsub__(self, other):
         return -self + other
-
-    def __matmul__(self, other):
-        if not isinstance(other, Variable):
-            return NotImplemented
-        return self.matmul(other)
 
     def __rdiv__(self, other):
         return self.reciprocal() * other

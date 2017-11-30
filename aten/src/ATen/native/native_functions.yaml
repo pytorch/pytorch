@@ -79,8 +79,12 @@
 - func: stack(TensorList tensors, int64_t dim=0) -> Tensor
   variants: function
 
+- func: allclose(Tensor self, Tensor other, double rtol=1e-5, double atol=1e-8) -> bool
+
 - func: is_signed(Tensor self) -> bool
   template_scalar: True
+
+- func: matmul(Tensor self, Tensor other) -> Tensor
 
 - func: RoiPooling2d_forward(Tensor input, Tensor rois, int64_t pooledHeight, int64_t pooledWidth, double spatialScale) -> (Tensor, Tensor)
   variants: function
