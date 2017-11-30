@@ -24,6 +24,7 @@
 #include "caffe2/core/logging.h"
 #include "caffe2/core/operator_schema.h"
 #include "caffe2/core/workspace.h"
+#include "caffe2/utils/math.h"
 #include "caffe2/utils/proto_utils.h"
 
 namespace caffe2 {
@@ -1629,7 +1630,7 @@ void testMPSCNN() {
       // FP16 <-> FP32 round trip, accumulation, etc.
       const float t1_i = t1.data<float>()[i];
       const float t2_i = t2.data<float>()[i];
-      CHECK_NEAR(t1_i, t2_i, 0.01);
+      CHECK_NEAR(t1_i, t2_i, 0.02);
     }
   }
 
@@ -2606,6 +2607,93 @@ void testMPSCNN() {
             t->Resize(batchSize, array ? (i + 1) * 4 : 4, 10, 10);
             CPUContext ctx;
             math::RandGaussian<float, CPUContext>(t->size(), 0, 1, t->mutable_data<float>(), &ctx);
+          }
+
+          NetDef netdef;
+          {
+            auto& op = *(netdef.add_op());
+            op.set_type("CopyToMPSCNN");
+            for (auto i = 0; i < numInputs; ++i) {
+              op.add_input(cpu(i));
+              op.add_output(mtl(i));
+            }
+          }
+
+          {
+            auto& op = *(netdef.add_op());
+            op.set_type("MPSCNNConcat");
+            for (auto i = 0; i < numInputs; ++i) {
+              op.add_input(mtl(i));
+            }
+            {
+              auto& arg = *(op.add_arg());
+              arg.set_name("order");
+              arg.set_s("NCHW");
+            }
+            op.add_output("Y_mtl");
+            op.add_output("Y_mtl_mask");
+          }
+
+          {
+            auto& op = *(netdef.add_op());
+            op.set_type("CopyFromMPSCNN");
+            op.add_input("Y_mtl");
+            op.add_output("Y_cpu");
+          }
+
+          {
+            auto& op = *(netdef.add_op());
+            op.set_type("Concat");
+            for (auto i = 0; i < numInputs; ++i) {
+              op.add_input(cpu(i));
+            }
+            {
+              auto& arg = *(op.add_arg());
+              arg.set_name("order");
+              arg.set_s("NCHW");
+            }
+
+            op.add_output("Y_ref");
+            op.add_output("Y_ref_mask");
+          }
+
+          ws.RunNetOnce(netdef);
+          const auto& t1 = ws.GetBlob("Y_ref")->Get<TensorCPU>();
+
+          const auto& t2 = ws.GetBlob("Y_cpu")->Get<TensorCPU>();
+          CAFFE_ENFORCE_EQ(t1.dims(), t2.dims());
+          LOG(INFO) << t1.dims();
+          for (auto i = 0; i < t1.size(); ++i) {
+            // FP16 <-> FP32 round trip, accumulation, etc.
+            const float t1_i = t1.data<float>()[i];
+            const float t2_i = t2.data<float>()[i];
+            CHECK_NEAR(t1_i, t2_i, 0.1);
+          }
+        }
+      }
+    }
+  }
+
+  {
+    for (const auto channelCount : std::vector<size_t>{1, 2, 3, 4}) {
+      for (auto numInputs = 2; numInputs <= 4; numInputs++) {
+        for (const auto batchSize : std::vector<size_t>{1, 2}) {
+          auto mtl = [&](size_t i) {
+            return std::string("X_mtl_") + std::to_string(i);
+          };
+          auto cpu = [&](size_t i) {
+            return std::string("X_cpu_") + std::to_string(i);
+          };
+
+          LOG(INFO) << "MPSCNNConcat(edge case) Test" << channelCount << ", "
+                    << numInputs << ", " << batchSize;
+          Workspace ws;
+          for (auto i = 0; i < numInputs; ++i) {
+            auto* t = ws.CreateBlob(cpu(i))->GetMutable<TensorCPU>();
+            t->Resize(batchSize, channelCount, 9, 17);
+            CPUContext ctx;
+            math::RandGaussian<float, CPUContext>(
+                t->size(), 0, 1, t->mutable_data<float>(), &ctx);
           }
 
           NetDef netdef;
