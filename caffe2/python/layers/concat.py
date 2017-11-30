@@ -48,13 +48,12 @@ class Concat(ModelLayer):
                 format(field_name, field_type)
             # Assume that first dimension is batch, so actual axis in shape is
             # axis - 1
-            assert len(field_type.field_type().shape) >= axis,\
+            shape = list(field_type.field_type().shape)
+            if add_axis:
+                shape.insert(axis - 1, 1)
+            assert len(shape) >= axis,\
                 "Concat expects that limited dimensions of the input tensor"
-            shapes.append(list(field_type.field_type().shape))
-
-        if add_axis:
-            for i in range(len(shapes)):
-                shapes[i].insert(axis - 1, 1)
+            shapes.append(shape)
 
         if axis == 0:
             self.output_schema = schema.from_blob_list(
