@@ -48,81 +48,15 @@ class PackSegmentsOp final : public Operator<Context> {
     }
   }
 
-  bool RunOnDevice() override {
+  bool RunOnDevice() {
     return DispatchHelper<TensorTypes<int, long>>::call(this, Input(LENGTHS));
   }
 
   template <typename T>
-  bool DoRunWithType() {
-    const auto& data = Input(DATA);
-    const auto& lengths = Input(LENGTHS);
-    auto* output = Output(0);
-    Tensor<Context>* presence_mask = nullptr;
-    if (return_presence_mask_) {
-      presence_mask = Output(1);
-    }
+  bool DoRunWithType();
 
-    CAFFE_ENFORCE(data.ndim() >= 1, "DATA should be at least 1-D");
-    CAFFE_ENFORCE(lengths.ndim() == 1, "LENGTH should be 1-D");
-
-    // Find the length of the longest sequence.
-    const T* l = lengths.template data<T>();
-    T max_length = 0;
-    for (T i = 0; i < lengths.dim(0); ++i) {
-      max_length = std::max(max_length, l[i]);
-    }
-
-    auto shape = data.dims(); // Shape of output is batch_size x max_len x ...
-    shape[0] = max_length;
-    shape.insert(shape.begin(), lengths.size());
-    output->Resize(shape);
-
-    // create output tensor
-    auto* out = static_cast<char*>(output->raw_mutable_data(data.meta()));
-
-    bool* presence_mask_data = nullptr;
-    if (return_presence_mask_) {
-      // Shape of presence is batch_size x max_len
-      std::vector<caffe2::TIndex> presence_shape{lengths.size(), max_length};
-      presence_mask->Resize(presence_shape);
-      presence_mask_data = presence_mask->template mutable_data<bool>();
-    }
-
-    if (!data.dim(0)) {
-      // Return empty output (with the proper shape)
-      return true;
-    }
-
-    // Do padding
-    if (output->template IsType<float>()) {
-      math::Set<float, Context>(
-          output->size(),
-          padding_,
-          output->template mutable_data<float>(),
-          &context_);
-    }
-    if (return_presence_mask_) {
-      memset(presence_mask_data, (int)false, presence_mask->size());
-    }
-
-    int block_size = data.size() / data.dim(0);
-    int block_bytesize = data.nbytes() / data.dim(0);
-    const auto* d = static_cast<const char*>(data.raw_data());
-    int start = 0;
-    for (int i = 0; i < lengths.dim(0); ++i) {
-      context_.template CopyItems<Context, Context>(
-          data.meta(),
-          l[i] * block_size,
-          d + block_bytesize * start,
-          out + block_bytesize * max_length * i);
-      if (return_presence_mask_) {
-        memset(presence_mask_data + max_length * i, (int)true, l[i]);
-      }
-      start += l[i];
-    }
-
-    return true;
-  }
+  template <typename T, typename Data_T>
+  bool DoRunWithType2();
 
   INPUT_TAGS(LENGTHS, DATA);
 
@@ -130,6 +64,13 @@ class PackSegmentsOp final : public Operator<Context> {
   bool pad_minf_;
   float padding_;
   bool return_presence_mask_;
+
+  // Scratch space required by the CUDA version
+  Tensor<Context> lengths_prefix_sum_buffer_;
+  Tensor<Context> lengths_prefix_sum_;
+  Tensor<Context> dev_max_length_buffer_;
+  Tensor<Context> dev_max_length_;
+  Tensor<CPUContext> host_max_length_;
 };
 
 template <class Context>
