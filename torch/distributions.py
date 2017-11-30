@@ -288,14 +288,17 @@ class Dirichlet(Distribution):
 
     def sample(self):
         probs = _standard_gamma(self.alpha)
-        return probs / probs.sum(-1)
+        if probs.dim() == 1:
+            return probs / probs.sum()
+        else:
+            return probs / probs.sum(-1).unsqueeze(-1)
 
     def sample_n(self, n):
         probs = _standard_gamma(_expand_n(self.alpha, n))
-        return probs / probs.sum(-1)
+        return probs / probs.sum(-1).unsqueeze(-1)
 
     def log_prob(self, value):
-        return (torch.log(value) * (self.alpha - 1.0)
+        return ((torch.log(value) * (self.alpha - 1.0)).sum(-1)
                 + torch.lgamma(self.alpha.sum(-1))
                 - torch.lgamma(self.alpha).sum(-1))
 

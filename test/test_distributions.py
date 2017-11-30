@@ -4,7 +4,7 @@ import torch
 import unittest
 from itertools import product
 from torch.autograd import Variable, gradcheck
-from torch.distributions import Bernoulli, Categorical, Normal, Gamma
+from torch.distributions import Bernoulli, Beta, Categorical, Dirichlet, Gamma, Normal
 
 TEST_NUMPY = True
 try:
@@ -40,7 +40,7 @@ class TestDistributions(TestCase):
         for i, (val, log_prob) in enumerate(zip(s.data.view(-1), log_probs.data.view(-1))):
             asset_fn(i, val, log_prob)
 
-    def _check_sampler_sampler(self, torch_dist, ref_dist, message,
+    def _check_sampler_sampler(self, torch_dist, ref_dist, message, multivariate=False,
                                num_samples=10000, failure_rate=1e-3):
         # Checks that the .sample() method matches a reference function.
         torch_samples = torch_dist.sample_n(num_samples).squeeze()
@@ -48,6 +48,12 @@ class TestDistributions(TestCase):
             torch_samples = torch_samples.data
         torch_samples = torch_samples.cpu().numpy()
         ref_samples = ref_dist.rvs(num_samples)
+        if multivariate:
+            # Project onto a random axis.
+            axis = np.random.normal(size=torch_samples.shape[-1])
+            axis /= np.linalg.norm(axis)
+            torch_samples = np.dot(torch_samples, axis)
+            ref_samples = np.dot(ref_samples, axis)
         samples = [(x, +1) for x in torch_samples] + [(x, -1) for x in ref_samples]
         samples.sort()
         samples = np.array(samples)[:, 1]
@@ -194,6 +200,35 @@ class TestDistributions(TestCase):
                                        'actual {}'.format(actual_grad),
                                        'rel error {}'.format(rel_error),
                                        'max error {}'.format(rel_error.max())]))
+
+    def test_dirichlet_shape(self):
+        alpha = Variable(torch.exp(torch.randn(2, 3)), requires_grad=True)
+        alpha_1d = Variable(torch.exp(torch.randn(4)), requires_grad=True)
+        self.assertEqual(Dirichlet(alpha).sample().size(), (2, 3))
+        self.assertEqual(Dirichlet(alpha).sample_n(5).size(), (5, 2, 3))
+        self.assertEqual(Dirichlet(alpha_1d).sample().size(), (4,))
+        self.assertEqual(Dirichlet(alpha_1d).sample_n(1).size(), (1, 4))
+
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    def test_dirichlet_log_prob(self):
+        num_samples = 10
+        alpha = torch.exp(torch.randn(5))
+        dist = Dirichlet(alpha)
+        x = dist.sample_n(num_samples)
+        actual_log_prob = dist.log_prob(x)
+        for i in range(num_samples):
+            expected_log_prob = scipy.stats.dirichlet.logpdf(x[i].numpy(), alpha.numpy())
+            self.assertAlmostEqual(actual_log_prob[i], expected_log_prob, places=3)
+
+    # This is a randomized test.
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    def test_dirichlet_sample(self):
+        self._set_rng_seed()
+        alpha = torch.exp(torch.randn(3))
+        self._check_sampler_sampler(Dirichlet(alpha),
+                                    scipy.stats.dirichlet(alpha.numpy()),
+                                    'Dirichlet(alpha={})'.format(list(alpha)),
+                                    multivariate=True)
 
 
 if __name__ == '__main__':
