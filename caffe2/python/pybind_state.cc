@@ -19,6 +19,7 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
+#include "caffe2/contrib/script/compiler.h"
 #include "caffe2/core/asan.h"
 #include "caffe2/core/db.h"
 #include "caffe2/core/operator.h"
@@ -719,6 +720,17 @@ void addObjectMethods(py::module& m) {
                   TensorFetcher<CPUContext>().FetchTensor(*t, true).obj);
             }
             return pyout;
+          });
+
+  py::class_<script::CompilationUnit>(m, "CompilationUnit")
+      .def(py::init<>())
+      .def("define", &script::CompilationUnit::define)
+      .def(
+          "create_net",
+          [](script::CompilationUnit* self, const std::string& name) {
+            auto net = self->createNet(gWorkspace, name);
+            CAFFE_ENFORCE(net);
+            return net;
           });
 }
 
