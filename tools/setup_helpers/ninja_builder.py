@@ -14,9 +14,9 @@ class NinjaBuilder(object):
         import ninja
         if not os.path.exists(BUILD_DIR):
             os.mkdir(BUILD_DIR)
+        self.ninja_program = os.path.join(ninja.BIN_DIR, 'ninja')
         self.name = name
         self.filename = os.path.join(BUILD_DIR, 'build.{}.ninja'.format(name))
-        print('Ninja build file at {}'.format(self.filename))
         self.writer = ninja.Writer(open(self.filename, 'w'))
         self.writer.rule('do_cmd', '$cmd')
         self.writer.rule('compile', '$cmd')
@@ -25,10 +25,11 @@ class NinjaBuilder(object):
     def run(self):
         import ninja
         self.writer.close()
-        subprocess.check_call(['ninja', '-f', self.filename])
+        subprocess.check_call([self.ninja_program, '-f', self.filename])
         compile_db_path = os.path.join(BUILD_DIR, '{}_compile_commands.json'.format(self.name))
         with open(compile_db_path, 'w') as compile_db:
-            subprocess.check_call(['ninja', '-f', self.filename, '-t', 'compdb', 'compile'], stdout=compile_db)
+            subprocess.check_call([self.ninja_program, '-f', self.filename,
+                                   '-t', 'compdb', 'compile'], stdout=compile_db)
 
         # weird build logic in build develop causes some things to be run
         # twice so make sure even after we run the command we still
