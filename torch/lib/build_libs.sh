@@ -16,19 +16,20 @@ if [[ "$1" == "--with-cuda" ]]; then
 fi
 
 cd "$(dirname "$0")/../.."
-BASE_DIR=$(pwd)
+PWD=`printf "%q\n" "$(pwd)"`
+BASE_DIR="$PWD"
 cd torch/lib
-INSTALL_DIR="$(pwd)/tmp_install"
+INSTALL_DIR="$PWD/tmp_install"
 CMAKE_VERSION=${CMAKE_VERSION:="cmake"}
-C_FLAGS=" -DTH_INDEX_BASE=0 -I$INSTALL_DIR/include \
-  -I$INSTALL_DIR/include/TH -I$INSTALL_DIR/include/THC \
-  -I$INSTALL_DIR/include/THS -I$INSTALL_DIR/include/THCS \
-  -I$INSTALL_DIR/include/THNN -I$INSTALL_DIR/include/THCUNN"
+C_FLAGS=" -DTH_INDEX_BASE=0 -I\"$INSTALL_DIR/include\" \
+  -I\"$INSTALL_DIR/include/TH\" -I\"$INSTALL_DIR/include/THC\" \
+  -I\"$INSTALL_DIR/include/THS\" -I\"$INSTALL_DIR/include/THCS\" \
+  -I\"$INSTALL_DIR/include/THNN\" -I\"$INSTALL_DIR/include/THCUNN\""
 # Workaround OpenMPI build failure
 # ImportError: /build/pytorch-0.2.0/.pybuild/pythonX.Y_3.6/build/torch/_C.cpython-36m-x86_64-linux-gnu.so: undefined symbol: _ZN3MPI8Datatype4FreeEv
 # https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=686926
 C_FLAGS="${C_FLAGS} -DOMPI_SKIP_MPICXX=1"
-LDFLAGS="-L$INSTALL_DIR/lib "
+LDFLAGS="-L\"$INSTALL_DIR/lib\" "
 LD_POSTFIX=".so.1"
 LD_POSTFIX_UNVERSIONED=".so"
 if [[ $(uname) == 'Darwin' ]]; then
@@ -174,17 +175,17 @@ done
 
 # If all the builds succeed we copy the libraries, headers,
 # binaries to torch/lib
-rm -rf $INSTALL_DIR/lib/cmake
-rm -rf $INSTALL_DIR/lib/python
-cp $INSTALL_DIR/lib/* .
+rm -rf "$INSTALL_DIR/lib/cmake"
+rm -rf "$INSTALL_DIR/lib/python"
+cp "$INSTALL_DIR/lib"/* .
 if [ -d "$INSTALL_DIR/lib64/" ]; then
-    cp $INSTALL_DIR/lib64/* .
+    cp "$INSTALL_DIR/lib64"/* .
 fi
 cp ../../aten/src/THNN/generic/THNN.h .
 cp ../../aten/src/THCUNN/generic/THCUNN.h .
-cp -r $INSTALL_DIR/include .
+cp -r "$INSTALL_DIR/include" .
 if [ -d "$INSTALL_DIR/bin/" ]; then
-    cp $INSTALL_DIR/bin/* .
+    cp "$INSTALL_DIR/bin/"/* .
 fi
 
 # this is for binary builds
@@ -192,5 +193,5 @@ if [[ $PYTORCH_BINARY_BUILD && $PYTORCH_SO_DEPS ]]
 then
     echo "Copying over dependency libraries $PYTORCH_SO_DEPS"
     # copy over dependency libraries into the current dir
-    cp $PYTORCH_SO_DEPS .
+    cp "$PYTORCH_SO_DEPS" .
 fi
