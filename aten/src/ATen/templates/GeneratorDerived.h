@@ -15,6 +15,7 @@ struct ${name}Generator : public Generator {
   virtual ${name}Generator& free() override;
 
   virtual uint64_t seed() override;
+  virtual uint64_t initialSeed() override;
   virtual ${name}Generator& manualSeed(uint64_t seed) override;
   virtual void * unsafeGetTH() override;
 

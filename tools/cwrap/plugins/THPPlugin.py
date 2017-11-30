@@ -32,7 +32,7 @@ class THPPlugin(CWrapPlugin):
 
         'THLongStorage*': Template('((THPLongStorage*)$arg)->cdata'),
         'THStorage*': Template('((THPStorage*)$arg)->cdata'),
-        'THGenerator*': Template('((THPGenerator*)$arg)->cdata'),
+        'THGenerator*': Template('THPGenerator_TH_CData($arg)'),
         'THSize*': Template('__size.get()'),
         'THStride*': Template('__stride.get()'),
         'void*': Template('THPUtils_unpackLong($arg)'),

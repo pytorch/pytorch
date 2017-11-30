@@ -923,7 +923,7 @@ static PyObject* initModule() {
 
   auto& defaultGenerator = at::globalContext().defaultGenerator(at::kCPU);
   THPDefaultGenerator = (THPGenerator*)THPGenerator_NewWithGenerator(
-    (THGenerator*)defaultGenerator.unsafeGetTH());
+    defaultGenerator);
   ASSERT_TRUE(PyModule_AddObject(module, "default_generator", (PyObject*)THPDefaultGenerator) == 0);
 
 #ifdef WITH_NUMPY
