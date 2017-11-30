@@ -26,7 +26,7 @@ import time
 import os
 
 from caffe2.python import core, workspace, experiment_util, data_parallel_model
-from caffe2.python import dyndep, optimizer
+from caffe2.python import data_parallel_model_utils, dyndep, optimizer
 from caffe2.python import timeout_guard, model_helper, brew
 from caffe2.proto import caffe2_pb2
 
@@ -438,10 +438,22 @@ def Train(args):
         post_sync_builder_fun=add_post_sync_ops,
         devices=gpus,
         rendezvous=rendezvous,
-        optimize_gradient_memory=True,
+        optimize_gradient_memory=False,
         cpu_device=args.use_cpu,
         shared_model=args.use_cpu,
     )
+
+    if args.model_parallel:
+        # Shift half of the activations to another GPU
+        assert workspace.NumCudaDevices() >= 2 * args.num_gpus
+        activations = data_parallel_model_utils.GetActivationBlobs(train_model)
+        data_parallel_model_utils.ShiftActivationDevices(
+            train_model,
+            activations=activations[len(activations) // 2:],
+            shifts={g: args.num_gpus + g for g in range(args.num_gpus)},
+        )
+
+    data_parallel_model.OptimizeGradientMemory(train_model, {}, set(), False)
 
     workspace.RunNetOnce(train_model.param_init_net)
     workspace.CreateNet(train_model.net)
@@ -552,6 +564,8 @@ def main():
                         help="Comma separated list of GPU devices to use")
     parser.add_argument("--num_gpus", type=int, default=1,
                         help="Number of GPU devices (instead of --gpus)")
+    parser.add_argument("--model_parallel", type=bool, default=False,
+                        help="Split model over 2 x num_gpus")
     parser.add_argument("--num_channels", type=int, default=3,
                         help="Number of color channels")
     parser.add_argument("--image_size", type=int, default=227,
