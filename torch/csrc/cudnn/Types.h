@@ -11,6 +11,7 @@
 namespace torch { namespace cudnn {
 
 PyObject * getTensorClass(PyObject *args);
+PyObject * getAccumTensorClass(PyObject * args);
 cudnnDataType_t getCudnnDataType(PyObject *tensorClass);
 cudnnDataType_t getCudnnDataType(const at::Tensor& tensor);
 void _THVoidTensor_assertContiguous(THVoidTensor *tensor, const std::string& name);

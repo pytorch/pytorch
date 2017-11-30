@@ -9,7 +9,8 @@ class CuDNNPlugin(CWrapPlugin):
 
     TYPE_UNPACK = {
         'THTensor*': Template('((THPVoidTensor*)$arg)->cdata'),
-        'int': Template('((int) THPUtils_unpackLong($arg))'),
+        'THAccumTensor*': Template('((THPVoidTensor*)$arg)->cdata'),
+        'int': Template('THPUtils_unpackLong($arg)'),
         'std::vector<int>': Template('THPUtils_unpackIntTuple($arg)'),
         'cudnnDataType_t': Template('$arg'),
         'cudnnHandle_t': Template('$arg'),
@@ -20,11 +21,13 @@ class CuDNNPlugin(CWrapPlugin):
 
     INPUT_ARGUMENT_MAP = {
         'THTensor*': 'THVoidTensor*',
+        'THAccumTensor*': 'THVoidTensor*',
     }
 
     TYPE_CHECK = {
         'Convolution*': Template('THPWrapper_check($arg)'),
         'THTensor*': Template('(PyObject*)Py_TYPE($arg) == tensorClass'),
+        'THAccumTensor*': Template('(PyObject*)Py_TYPE($arg) == accumTensorClass'),
         'int': Template('THPUtils_checkLong($arg)'),
         'std::vector<int>': Template('THPUtils_checkIntTuple($arg)'),
         'bool': Template('PyBool_Check($arg)'),
@@ -55,6 +58,7 @@ static PyObject * $name(PyObject *self, PyObject *args, PyObject *kwargs)
     int __dictcount = kwargs ? (int) PyDict_Size(kwargs) : 0;
     int __argcount = __tuplecount + __dictcount;
     PyObject* tensorClass = getTensorClass(args);
+    PyObject* accumTensorClass = getAccumTensorClass(args);
     THCPAutoGPU __autogpu_guard = THCPAutoGPU(args);
 
     $options
@@ -70,6 +74,7 @@ static PyObject * $name(PyObject *self, PyObject *args, PyObject *kwargs)
 
     TYPE_NAMES = {
         'THTensor*': '" THPTensorStr "',
+        'THTAccumTensor*': '" THPTensorStr "',
         'long': 'int',
         'bool': 'bool',
         'int': 'int',

@@ -45,6 +45,22 @@ PyObject * getTensorClass(PyObject *args)
   return NULL;
 }
 
+PyObject * getAccumTensorClass(PyObject *args)
+{
+  for (int i = 0; i < PyTuple_Size(args); i++) {
+    PyObject *item = PyTuple_GET_ITEM(args, i);
+    if (THPModule_isTensor(item)) {      
+      PyObject * tensorClass = (PyObject*)Py_TYPE(item);
+      if (tensorClass == THCPHalfTensorClass) 
+        return THCPFloatTensorClass;
+      else
+        return tensorClass;
+    }
+  }
+  return NULL;
+}
+
+
 void _THVoidTensor_assertContiguous(THVoidTensor *tensor, const std::string& name)
 {
   static const std::string error_str = "cuDNN requires contiguous ";
