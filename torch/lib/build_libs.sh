@@ -98,7 +98,8 @@ function build() {
               -Dnanopb_BUILD_GENERATOR=0 \
               -DCMAKE_DEBUG_POSTFIX="" \
               -DCMAKE_BUILD_TYPE=$([ $DEBUG ] && echo Debug || echo Release) \
-              ${@:2}
+              ${@:2} \
+              -DCMAKE_EXPORT_COMPILE_COMMANDS=1
   make install -j$(getconf _NPROCESSORS_ONLN)
   cd ../..
 
@@ -151,7 +152,8 @@ function build_aten() {
   -DCUDNN_INCLUDE_DIR=$CUDNN_INCLUDE_DIR \
   -DCUDNN_LIB_DIR=$CUDNN_LIB_DIR \
   -DATEN_NO_CONTRIB=1 \
-  -DCMAKE_INSTALL_PREFIX="$INSTALL_DIR"
+  -DCMAKE_INSTALL_PREFIX="$INSTALL_DIR" \
+  -DCMAKE_EXPORT_COMPILE_COMMANDS=1
   # purpusefully not passing C_FLAGS for the same reason as above
   make -j$(getconf _NPROCESSORS_ONLN) install
   cd ../..

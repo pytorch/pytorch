@@ -2,6 +2,9 @@ import os
 import setuptools
 import distutils
 from contextlib import contextmanager
+import subprocess
+
+BUILD_DIR = 'build'
 
 
 # on the fly create a ninja file in build/ and then
@@ -9,19 +12,24 @@ from contextlib import contextmanager
 class NinjaBuilder(object):
     def __init__(self, name):
         import ninja
-        build_dir = 'build'
-        if not os.path.exists(build_dir):
-            os.mkdir(build_dir)
+        if not os.path.exists(BUILD_DIR):
+            os.mkdir(BUILD_DIR)
         self.name = name
-        self.filename = os.path.join(build_dir, 'build.{}.ninja'.format(name))
+        self.filename = os.path.join(BUILD_DIR, 'build.{}.ninja'.format(name))
         print('Ninja build file at {}'.format(self.filename))
         self.writer = ninja.Writer(open(self.filename, 'w'))
         self.writer.rule('do_cmd', '$cmd')
+        self.writer.rule('compile', '$cmd')
+        self.compdb_targets = []
 
     def run(self):
         import ninja
         self.writer.close()
-        assert(0 == ninja._program('ninja', ['-f', self.filename]))
+        subprocess.check_call(['ninja', '-f', self.filename])
+        compile_db_path = os.path.join(BUILD_DIR, '{}_compile_commands.json'.format(self.name))
+        with open(compile_db_path, 'w') as compile_db:
+            subprocess.check_call(['ninja', '-f', self.filename, '-t', 'compdb', 'compile'], stdout=compile_db)
+
         # weird build logic in build develop causes some things to be run
         # twice so make sure even after we run the command we still
         # reset this to a valid state
@@ -40,8 +48,10 @@ class ninja_build_ext(setuptools.command.build_ext.build_ext):
         def patch(obj, attr_name, val):
             orig_val = getattr(obj, attr_name)
             setattr(obj, attr_name, val)
-            yield
-            setattr(obj, attr_name, orig_val)
+            try:
+                yield
+            finally:
+                setattr(obj, attr_name, orig_val)
 
         orig_compile = distutils.unixccompiler.UnixCCompiler._compile
         orig_link = distutils.unixccompiler.UnixCCompiler.link
@@ -51,7 +61,7 @@ class ninja_build_ext(setuptools.command.build_ext.build_ext):
 
             def spawn(cmd):
                 builder.writer.build(
-                    [obj], 'do_cmd', [src],
+                    [obj], 'compile', [src],
                     variables={
                         'cmd': cmd,
                         'depfile': depfile,
