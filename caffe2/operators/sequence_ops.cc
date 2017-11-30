@@ -300,7 +300,7 @@ REGISTER_CPU_OPERATOR(RemovePadding, RemovePaddingOp<CPUContext>);
 REGISTER_CPU_OPERATOR(GatherPadding, GatherPaddingOp<CPUContext>);
 REGISTER_CPU_OPERATOR(PadEmptySamples, PadEmptySamplesOp<CPUContext>);
 
-struct GetAddPadingGradient : public GradientMakerBase {
+struct GetAddPaddingGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;
   vector<OperatorDef> GetGradientDefs() override {
     // whether to provide lengths as input to gradient
@@ -327,7 +327,7 @@ struct GetAddPadingGradient : public GradientMakerBase {
     return ops;
   }
 };
-REGISTER_GRADIENT(AddPadding, GetAddPadingGradient);
+REGISTER_GRADIENT(AddPadding, GetAddPaddingGradient);
 
 struct GetRemovePaddingGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;
