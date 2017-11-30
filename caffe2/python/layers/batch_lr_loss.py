@@ -38,13 +38,20 @@ class BatchLRLoss(ModelLayer):
 
         self.average_loss = average_loss
 
-        assert schema.is_schema_subset(
+        assert (schema.is_schema_subset(
             schema.Struct(
                 ('label', schema.Scalar()),
                 ('prediction', schema.Scalar())
             ),
             input_record
-        )
+        ) or schema.is_schema_subset(
+            schema.Struct(
+                ('label', schema.Scalar()),
+                ('logit', schema.Scalar())
+            ),
+            input_record
+        ))
+
         self.tags.update([Tags.EXCLUDE_FROM_PREDICTION])
 
         self.output_schema = schema.Scalar(
@@ -52,24 +59,44 @@ class BatchLRLoss(ModelLayer):
             self.get_next_blob_reference('output')
         )
 
-    # This should be a bit more complicated than it is right now
     def add_ops(self, net):
-        class_probabilities = net.MakeTwoClass(
-            self.input_record.prediction.field_blobs(),
-            net.NextScopedBlob('two_class_predictions')
-        )
-        label = self.input_record.label.field_blobs()
-        if self.input_record.label.field_type().base != np.int32:
+        # numerically stable log-softmax with crossentropy
+        if schema.is_schema_subset(
+            schema.Struct(
+                ('label', schema.Scalar()),
+                ('logit', schema.Scalar())
+            ), self.input_record
+        ):
+            label = self.input_record.label()
+            # mandatory cast to float32
+            # self.input_record.label.field_type().base is np.float32 but
+            # label type is actually int
+            label = net.Cast(
+                label,
+                net.NextScopedBlob('label_float32'),
+                to=core.DataType.FLOAT)
+            label = net.ExpandDims(label, net.NextScopedBlob('expanded_label'),
+                                    dims=[1])
+            xent = net.SigmoidCrossEntropyWithLogits(
+                [self.input_record.logit(), label],
+                net.NextScopedBlob('cross_entropy'),
+            )
+        # TODO(T23937449): Change all the use cases of BatchLRLoss to the
+        # numerically stable version
+        else:
+            class_probabilities = net.MakeTwoClass(
+                self.input_record.prediction.field_blobs(),
+                net.NextScopedBlob('two_class_predictions')
+            )
+            label = self.input_record.label.field_blobs()
             label = [net.Cast(
                 label,
                 net.NextScopedBlob('int32_label'),
                 to=core.DataType.INT32)]
-            # LabelCrossEntropyGraidentOp does not output gradient for the label
-
-        xent = net.LabelCrossEntropy(
-            [class_probabilities] + label,
-            net.NextScopedBlob('cross_entropy'),
-        )
+            xent = net.LabelCrossEntropy(
+                [class_probabilities] + label,
+                net.NextScopedBlob('cross_entropy'),
+            )
         if 'weight' in self.input_record.fields:
             weight_blob = self.input_record.weight()
             if self.input_record.weight.field_type().base != np.float32:
