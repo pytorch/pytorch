@@ -335,11 +335,11 @@ class Beta(Distribution):
         self.beta = beta
 
     def sample(self):
-        heads = _standard_gamma(self.alpha, n)
-        tails = _standard_gamma(self.beta, n)
+        heads = _standard_gamma(self.alpha)
+        tails = _standard_gamma(self.beta)
         return heads / (heads + tails)
 
-    def sample_n(self):
+    def sample_n(self, n):
         heads = _standard_gamma(_expand_n(self.alpha, n))
         tails = _standard_gamma(_expand_n(self.beta, n))
         return heads / (heads + tails)

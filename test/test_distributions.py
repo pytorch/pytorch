@@ -230,6 +230,38 @@ class TestDistributions(TestCase):
                                     'Dirichlet(alpha={})'.format(list(alpha)),
                                     multivariate=True)
 
+    def test_beta_shape(self):
+        alpha = Variable(torch.exp(torch.randn(2, 3)), requires_grad=True)
+        beta = Variable(torch.exp(torch.randn(2, 3)), requires_grad=True)
+        alpha_1d = Variable(torch.exp(torch.randn(4)), requires_grad=True)
+        beta_1d = Variable(torch.exp(torch.randn(4)), requires_grad=True)
+        self.assertEqual(Beta(alpha, beta).sample().size(), (2, 3))
+        self.assertEqual(Beta(alpha, beta).sample_n(5).size(), (5, 2, 3))
+        self.assertEqual(Beta(alpha_1d, beta_1d).sample().size(), (4,))
+        self.assertEqual(Beta(alpha_1d, beta_1d).sample_n(1).size(), (1, 4))
+        self.assertEqual(Beta(0.1, 0.3).sample().size(), (1,))
+        self.assertEqual(Beta(0.1, 0.3).sample_n(5).size(), (5, 1))
+
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    def test_beta_log_prob(self):
+        for _ in range(100):
+            alpha = np.exp(np.random.normal())
+            beta = np.exp(np.random.normal())
+            dist = Beta(alpha, beta)
+            x = dist.sample()
+            actual_log_prob = dist.log_prob(x).sum()
+            expected_log_prob = scipy.stats.beta.logpdf(x, alpha, beta)
+            self.assertAlmostEqual(actual_log_prob, expected_log_prob, places=3)
+
+    # This is a randomized test.
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    def test_beta_sample(self):
+        self._set_rng_seed(1)
+        for alpha, beta in product([0.1, 1.0, 10.0], [0.1, 1.0, 10.0]):
+            self._check_sampler_sampler(Beta(alpha, beta),
+                                        scipy.stats.beta(alpha, beta),
+                                        'Beta(alpha={}, beta={})'.format(alpha, beta))
+
 
 if __name__ == '__main__':
     run_tests()
