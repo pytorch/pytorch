@@ -36,3 +36,11 @@ try {                                                               \
 } catch(std::runtime_error &e) {                                    \
   ASSERT(std::string(e.what()).find(message) != std::string::npos); \
 }
+
+#define ASSERT_EQUAL(t1, t2) \
+  ASSERT(t1.equal(t2));
+
+// allclose broadcasts, so check same size before allclose.
+#define ASSERT_ALLCLOSE(t1, t2)   \
+  ASSERT(t1.is_same_size(t2));    \
+  ASSERT(t1.allclose(t2));

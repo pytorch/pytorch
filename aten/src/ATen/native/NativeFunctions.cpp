@@ -2,6 +2,8 @@
 #include "ATen/NativeFunctions.h"
 #include "ATen/WrapDimUtils.h"
 #include "ATen/ExpandUtils.h"
+#include <functional>
+#include <numeric>
 
 namespace at {
 namespace native {
@@ -279,6 +281,119 @@ Tensor stack(TensorList tensors, int64_t dim) {
     inputs[i] = tensors[i].unsqueeze(dim);
   }
   return at::cat(inputs, dim);
+}
+
+static Tensor maybeSqueeze(const Tensor & tensor, int64_t dim_tensor1, int64_t dim_tensor2) {
+  if (dim_tensor1 == 1) {
+    return tensor.squeeze(-2);
+  } else if (dim_tensor2 == 1) {
+    return tensor.squeeze(-1);
+  } else {
+    return tensor;
+  }
+}
+
+/*
+Matrix product of two Tensors.
+The behavior depends on the dimensionality of the Tensors as follows:
+- If both Tensors are 1-dimensional, the dot product (scalar) is returned.
+- If both arguments are 2-dimensional, the matrix-matrix product is returned.
+- If the first argument is 1-dimensional and the second argument is 2-dimensional,
+  a 1 is prepended to its dimension for the purpose of the matrix multiply.
+  After the matrix multiply, the prepended dimension is removed.
+- If the first argument is 2-dimensional and the second argument is 1-dimensional,
+  the matrix-vector product is returned.
+- If both arguments are at least 1-dimensional and at least one argument is
+  N-dimensional (where N > 2), then a batched matrix multiply is returned.  If the first
+  argument is 1-dimensional, a 1 is prepended to its dimension for the purpose of the
+  batched matrix multiply and removed after.  If the second argument is 1-dimensional, a
+  1 is appended to its dimension for the purpose of the batched matrix multiple and removed after.
+  The non-matrix (i.e. batch) dimensions are broadcasted (and thus
+  must be broadcastable).  For example, if tensor1 is a (j x 1 x n x m) Tensor
+  and tensor2 is a (k x m x p) Tensor, the returned tensor will be an (j x k x n x p) Tensor.
+*/
+Tensor matmul(const Tensor & tensor1, const Tensor & tensor2) {
+  auto dim_tensor1 = tensor1.dim();
+  auto dim_tensor2 = tensor2.dim();
+
+  if (dim_tensor1 == 1 && dim_tensor2 == 1) {
+    return tensor1.dot(tensor2);
+  } else if (dim_tensor1 == 2 && dim_tensor2 == 1) {
+    return tensor1.mv(tensor2);
+  } else if (dim_tensor1 == 1 && dim_tensor2 == 2) {
+    return tensor1.unsqueeze(0).mm(tensor2).squeeze_(0);
+  } else if (dim_tensor1 == 2 && dim_tensor2 == 2) {
+    return tensor1.mm(tensor2);
+  } else if (dim_tensor1 >= 3 && (dim_tensor2 == 1 || dim_tensor2 == 2)) {
+    // optimization: use mm instead of bmm by folding tensor1's batch into
+    // its leading matrix dimension.
+
+    Tensor t2 = dim_tensor2 == 1 ? tensor2.unsqueeze(-1) : tensor2;
+    auto size1 = tensor1.sizes();
+    auto size2 = t2.sizes();
+    std::vector<int64_t> output_size;
+    output_size.insert(output_size.end(), size1.begin(), size1.end() - 1);
+    output_size.insert(output_size.end(), size2.end() - 1, size2.end());
+
+    // fold the batch into the first dimension
+    Tensor t1 = tensor1.contiguous().view({-1, size1[size1.size() - 1]});
+
+    auto output = t1.mm(t2).view(output_size);
+    if (dim_tensor2 == 1) {
+      output = output.squeeze(-1);
+    }
+    return output;
+  } else if ((dim_tensor1 >= 1 && dim_tensor2 >= 1) && (dim_tensor1 >= 3 || dim_tensor2 >= 3)) {
+    // We are multiplying b1 x n x m1 by x2 x m2 x p (where b1 can be a list);
+    // we track m1 vs m2 separately even though they must match for nicer error messages
+    int64_t n = dim_tensor1 > 1 ? tensor1.size(-2) : 1;
+    int64_t m1 = tensor1.size(-1);
+    IntList batch_tensor1(tensor1.sizes().data(), std::max<int64_t>(dim_tensor1 - 2, 0));
+    int64_t m2 = dim_tensor2 > 1 ? tensor2.size(-2) : 1;
+    int64_t p = tensor2.size(-1);
+    IntList batch_tensor2(tensor2.sizes().data(), std::max<int64_t>(dim_tensor2 - 2, 0));
+
+    // expand the batch portion (i.e. cut off matrix dimensions and expand rest)
+    std::vector<int64_t> expand_batch_portion = infer_size(batch_tensor1, batch_tensor2);
+
+    std::vector<int64_t> tensor1_expand_size(expand_batch_portion);
+    tensor1_expand_size.insert(tensor1_expand_size.end(), {n, m1});
+
+    std::vector<int64_t> tensor2_expand_size(expand_batch_portion);
+    tensor2_expand_size.insert(tensor2_expand_size.end(), {m2, p});
+
+    int expand_batch_product = std::accumulate(expand_batch_portion.begin(), expand_batch_portion.end(),
+                                               1, std::multiplies<int64_t>());
+
+    std::vector<int64_t> tensor1_bmm_view({expand_batch_product});
+    tensor1_bmm_view.insert(tensor1_bmm_view.end(), {n, m1});
+
+    std::vector<int64_t> tensor2_bmm_view({expand_batch_product});
+    tensor2_bmm_view.insert(tensor2_bmm_view.end(), {m2, p});
+
+    // flatten expanded batches
+    Tensor tensor1_expanded = tensor1.expand(tensor1_expand_size).contiguous().view(tensor1_bmm_view);
+    Tensor tensor2_expanded = tensor2.expand(tensor2_expand_size).contiguous().view(tensor2_bmm_view);
+
+    Tensor output = tensor1_expanded.bmm(tensor2_expanded);
+
+    // reshape batches back into result
+    std::vector<int64_t> total_expansion(expand_batch_portion);
+    total_expansion.insert(total_expansion.end(), {n, p});
+    return maybeSqueeze(output.view(total_expansion), dim_tensor1, dim_tensor2);
+  }
+
+  runtime_error("both arguments to matmul need to be at least 1D, but they are %dD and %dD",
+                dim_tensor1, dim_tensor2);
+
+}
+
+bool allclose(const Tensor& self, const Tensor& other, double rtol, double atol) {
+  if (!self.sub(other).abs().le(other.abs().mul(rtol).add(atol)).all()) {
+    return false;
+  }
+
+  return true;
 }
 
 std::tuple<at::Tensor, at::Tensor> RoiPooling2d_forward_cpu(
