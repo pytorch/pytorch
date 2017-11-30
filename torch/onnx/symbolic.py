@@ -1,6 +1,6 @@
 import torch
 from torch.autograd._functions.utils import check_onnx_broadcast  # TODO: move me
-from torch.nn.modules.utils import _pair
+from torch.nn.modules.utils import _pair, _triple
 import warnings
 
 # EDITING THIS FILE? READ THIS FIRST!
@@ -229,20 +229,17 @@ def squeeze(g, self, dim=None):
     return g.op("Squeeze", self, axes_i=dims)
 
 
-# NB: This appears to be dead at the moment
-def prelu(g, input, weight):
-    if all(s == 1 for s in weight.type().sizes()):
-        return _unimplemented("prelu", "single weight shared among input channels")
-    return g.op("PRelu", input, weight)
+def prelu(g, self, weight):
+    return g.op("PRelu", self, weight)
 
 
-def threshold(g, input, threshold, value, inplace=False):
+def threshold(g, self, threshold, value):
     # See Note [Export inplace]
     if _scalar(threshold) != 0:
         return _unimplemented("threshold", "non-zero threshold")
     if _scalar(value) != 0:
         return _unimplemented("threshold", "non-zero value")
-    return g.op("Relu", input)
+    return g.op("Relu", self)
 
 
 def leaky_relu(g, input, negative_slope, inplace=False):
@@ -260,6 +257,12 @@ def glu(g, input, dim):
 
 def softmax(g, input, dim=None):
     return g.op('Softmax', input, axis_i=dim)
+
+
+def softplus(g, self, beta, threshold):
+    if beta != 1:
+        return _unimplemented("beta", "has to be 1")
+    return g.op('Softplus', self)
 
 
 def max_pool2d(g, input, kernel_size, stride, padding, dilation, ceil_mode):
@@ -288,6 +291,18 @@ def avg_pool2d(g, input, kernel_size, stride, padding, ceil_mode, count_include_
                 pads_i=_pair(padding))
 
 
+def avg_pool3d(g, input, kernel_size, stride, padding, ceil_mode, count_include_pad):
+    if ceil_mode:
+        return _unimplemented("avg_pool3d", "ceil_mode")
+    if not stride:
+        stride = kernel_size
+    # TODO: What about count_include_pad?!
+    return g.op("AveragePool", input,
+                kernel_shape_i=_triple(kernel_size),
+                strides_i=_triple(stride),
+                pads_i=_triple(padding))
+
+
 def log_softmax(g, input, dim=None):
     return g.op("Log", g.op('Softmax', input, axis_i=dim).setTypeAs(input))
 
@@ -299,3 +314,16 @@ def unfold(g, input, dimension, size, step):
 def elu(g, input, alpha, inplace=False):
     # See Note [Export inplace]
     return g.op("Elu", input, alpha_f=_scalar(alpha))
+
+
+# ignore clone operators that are inserted by PyTorch autograd
+def clone(g, input):
+    return input
+
+
+def abs(g, self):
+    return g.op("Abs", self)
+
+
+def pow(g, self, exponent):
+    return g.op("Pow", self, exponent)

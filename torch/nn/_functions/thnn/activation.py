@@ -189,6 +189,10 @@ class SELU(InplaceFunction):
     scale = 1.0507009873554804934193349852946
 
     @staticmethod
+    def symbolic(g, input, inplace):
+        return g.op("Selu", input)
+
+    @staticmethod
     def forward(ctx, input, inplace):
         backend = type2backend[type(input)]
         if inplace:
