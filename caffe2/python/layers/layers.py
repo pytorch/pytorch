@@ -155,15 +155,18 @@ class LayerParameter(object):
             "initializer expects an operator, got type: {}".format(type(op))
         self._initializer = op
         if op is not None:
-            shape = self._infer_shape_from_initializer()
-            assert self.shape is None or self.shape == shape, \
-                "inconsistent shape for layer parameter:"\
-                " {}, expect: {}, but got {}".format(self, self.shape, shape)
-            self._shape = shape
+            self.shape = self._infer_shape_from_initializer()
 
     @property
     def shape(self):
         return self._shape
+
+    @shape.setter
+    def shape(self, shape):
+        assert self.shape is None or self.shape == shape, \
+            "inconsistent shape for layer parameter:"\
+            " {}, expect: {}, but got {}".format(self, self.shape, shape)
+        self._shape = shape
 
     def _infer_shape_from_initializer(self):
         for arg in self.initializer.arg:
@@ -176,7 +179,10 @@ class LayerParameter(object):
                 shape_blob = net.NextScopedBlob(self.parameter + "_shape")
                 net.Shape([self.parameter], shape_blob)
                 workspace.RunNetOnce(net)
-                return workspace.FetchBlob(shape_blob).tolist()
+                shape = workspace.FetchBlob(shape_blob).tolist()
+                # ResetWorkspace to save memory
+                workspace.ResetWorkspace()
+                return shape
             except RuntimeError:
                 logger.warning(
                     "Cannot infer the shape of blob {} from operator {}".format(
