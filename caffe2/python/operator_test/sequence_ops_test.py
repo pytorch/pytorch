@@ -179,8 +179,9 @@ class TestSequenceOps(hu.HypothesisTestCase):
 
     @given(start_pad_width=st.integers(min_value=1, max_value=2),
            end_pad_width=st.integers(min_value=0, max_value=2),
-           args=_gen_test_add_padding(with_pad_data=False, is_remove=True))
-    def test_remove_padding(self, start_pad_width, end_pad_width, args):
+           args=_gen_test_add_padding(with_pad_data=False, is_remove=True),
+           **hu.gcs)
+    def test_remove_padding(self, start_pad_width, end_pad_width, args, gc, dc):
         lengths, data = args
         op = core.CreateOperator(
             'RemovePadding',
@@ -189,10 +190,10 @@ class TestSequenceOps(hu.HypothesisTestCase):
             padding_width=start_pad_width,
             end_padding_width=end_pad_width)
         self.assertReferenceChecks(
-            hu.cpu_do,
-            op,
-            [data, lengths],
-            partial(_remove_padding_ref, start_pad_width, end_pad_width))
+            device_option=gc,
+            op=op,
+            inputs=[data, lengths],
+            reference=partial(_remove_padding_ref, start_pad_width, end_pad_width))
 
     @given(start_pad_width=st.integers(min_value=1, max_value=2),
            end_pad_width=st.integers(min_value=0, max_value=2),

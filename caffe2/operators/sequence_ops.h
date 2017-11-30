@@ -92,6 +92,10 @@ class RemovePaddingOp final : public Operator<Context> {
  private:
   int startPaddingWidth_;
   int endPaddingWidth_;
+
+  // Scratch space required by the CUDA version
+  Tensor<Context> lengths_prefix_sum_buffer_;
+  Tensor<Context> lengths_prefix_sum_;
 };
 
 template <class Context>
