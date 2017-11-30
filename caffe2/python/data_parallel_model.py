@@ -830,7 +830,7 @@ def FinalizeAfterCheckpoint(model, blobs=None):
         if blobs is None:
             (_, uniq_blob_names) = _ComputeBlobsToSync(model)
         else:
-            uniq_blob_names = [stripParamName(p) for p in blobs]
+            uniq_blob_names = [stripBlobName(p) for p in blobs]
 
         # Synchronize to the blob lookup map, as the provided
         # blobs might have non-parameters, such as momemtum blobs.
@@ -1189,7 +1189,7 @@ def _RemapParameterBlobsForSharedModel(model, all_params):
             # Remap inputs to point to the master param
             for j, inp in enumerate(op.input):
                 if inp in all_params and inp not in master_params:
-                    op.input[j] = master_prefix + stripParamName(inp)
+                    op.input[j] = master_prefix + stripBlobName(inp)
             ops.append(op)
         del net.Proto().op[:]
         net.Proto().op.extend(ops)
@@ -1439,10 +1439,10 @@ def _GetReverseOrderedGrads(model):
 
 
 # A helper function to extract a parameter's name
-def stripParamName(param):
+def stripBlobName(param):
     # Format is "a/b/c/d" -> "b/c/d"
     if isinstance(param, core.GradientSlice):
-        return stripParamName(param.indices) + ":" + stripParamName(param.values)
+        return stripBlobName(param.indices) + ":" + stripBlobName(param.values)
     else:
         name = str(param)
     return name[name.index(scope._NAMESCOPE_SEPARATOR) + 1:]
@@ -1535,7 +1535,7 @@ def _GroupByDevice(model, devices, params, non_data_params):
             isinstance(p, core.GradientSlice), \
             "Param {} is not BlobReference or GradientSlice".format(p)
 
-        name = stripParamName(p)
+        name = stripBlobName(p)
         gpuid = devices[i // num_params_per_device]
 
         if isinstance(p, core.BlobReference):
@@ -1591,7 +1591,7 @@ def _ComputeBlobsToSync(model):
     # We don't sync params if the model is shared
     if model._shared_model:
         blobs_to_sync = [str(p) for p in model.GetComputedParams('')]
-        sync_names = [stripParamName(p) for p in blobs_to_sync]
+        sync_names = [stripBlobName(p) for p in blobs_to_sync]
     else:
         blobs_to_sync = []
 
@@ -1600,7 +1600,7 @@ def _ComputeBlobsToSync(model):
                 o for o in op.output
                 if o.startswith("{}_".format(model._device_prefix))
             ]
-            sync_names.update([stripParamName(o) for o in dp_outputs])
+            sync_names.update([stripBlobName(o) for o in dp_outputs])
             blobs_to_sync.extend(dp_outputs)
 
         # Sanity check

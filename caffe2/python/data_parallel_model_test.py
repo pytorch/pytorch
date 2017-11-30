@@ -29,7 +29,7 @@ import hypothesis.strategies as st
 
 from caffe2.proto import caffe2_pb2
 from caffe2.python import brew, core, cnn, data_parallel_model, dyndep, \
-    model_helper, optimizer, rnn_cell, workspace
+    model_helper, optimizer, rnn_cell, workspace, data_parallel_model_utils
 from caffe2.python.test_util import TestCase
 
 
@@ -1049,6 +1049,66 @@ class SparseDataParallelModelTestWithSharedIndices(TestCase):
 
         if workspace.NumCudaDevices() >= 8:
             self.run_model(V, list(range(8)))
+
+
+@unittest.skipIf(not workspace.has_gpu_support, "No gpu support.")
+class DeviceShiftTest(TestCase):
+
+    def create_model(self):
+        def input_builder_fun(model):
+            model.param_init_net.UniformFill([], ["data"], shape=[32, 8])
+
+        def model_build_fun(model, loss_scale):
+            fc1 = brew.fc(model, "data", "fc1", dim_in=8, dim_out=8)
+            fc2 = brew.fc(model, fc1, "fc2", dim_in=8, dim_out=8)
+            fc3 = brew.fc(model, fc2, "fc3", dim_in=8, dim_out=8)
+            fc4 = brew.fc(model, fc3, "fc4", dim_in=8, dim_out=8)
+            fc5 = brew.fc(model, fc4, "fc5", dim_in=8, dim_out=8)
+            loss = model.net.SumElements([fc5], ["loss"])
+            return [loss]
+
+        def add_optimizer(model):
+            return optimizer.build_sgd(model, 0.1, policy="fixed")
+
+        model = model_helper.ModelHelper()
+        data_parallel_model.Parallelize(
+            model,
+            input_builder_fun=input_builder_fun,
+            forward_pass_builder_fun=model_build_fun,
+            optimizer_builder_fun=add_optimizer,
+            devices=[0, 1, 2, 3],
+        )
+        return model
+
+    def test_activation_blobs(self):
+        model = self.create_model()
+        activations = data_parallel_model_utils.GetActivationBlobs(model)
+        self.assertEqual(activations, ["fc1", "fc2", "fc3", "fc4", "fc5", "loss"])
+
+    def test_shift_gpu(self):
+        model = self.create_model()
+        data_parallel_model_utils.ShiftActivationDevices(
+            model,
+            activations=["fc4", "fc5"],
+            shifts={0: 4, 1: 4, 2: 5, 3: 5},
+        )
+        for op in model.param_init_net.Proto().op:
+            for outp in op.output:
+                prefix = outp.split("/")[0]
+                if outp.split("/")[-1] in set(['fc4_w', 'fc5_w', 'fc4_b', 'fc5_b']):
+                    if prefix == 'gpu_0' or prefix == 'gpu_1':
+                        self.assertEqual(op.device_option.cuda_gpu_id, 4)
+                    else:
+                        self.assertEqual(op.device_option.cuda_gpu_id, 5)
+                if outp.split("/")[-1] in set(['fc1_w', 'fc2_w', 'fc3_b', 'fc3_w']):
+                    gpu_id = int(prefix.split("_")[-1])
+                    self.assertEqual(gpu_id, op.device_option.cuda_gpu_id)
+
+        # Test that we can run the net
+        if workspace.NumCudaDevices() >= 6:
+            workspace.RunNetOnce(model.param_init_net)
+            workspace.CreateNet(model.net)
+            workspace.RunNet(model.net.Proto().name)
 
 
 if __name__ == "__main__":
