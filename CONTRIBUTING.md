@@ -141,10 +141,29 @@ NO_CUDA=1 DEBUG=1 python setup.py build develop
 
 Make sure you continue to pass these flags on subsequent builds.
 
+### Code completion and IDE support
+
+When using `python setup.py develop`, PyTorch will generate 
+a `compile_commands.json` file that can be used by many editors
+to provide command completion and error highlighting for PyTorch's
+C++ code. You need to `pip install ninja` to generate accurate
+information for the code in `torch/csrc`. More information at:
+- https://sarcasm.github.io/notes/dev/compilation-database.html
+
 ### Make no-op build fast.
 
+#### Use Ninja
 Python `setuptools` is pretty dumb, and always rebuilds every C file in a
-project. Using ccache in a situation like this is a real time-saver. However, by
+project.  If you install the ninja build system with `pip install ninja`, 
+then PyTorch will use it to track dependencies correctly.
+
+#### Use CCache
+
+Even when dependencies are tracked with file modification, 
+there are many situations where files get rebuilt when a previous
+compilation was exactly the same.
+
+Using ccache in a situation like this is a real time-saver. However, by
 default, ccache does not properly support CUDA stuff, so here are the
 instructions for installing a custom `ccache` fork that has CUDA support:
 
