@@ -264,3 +264,87 @@ class Gamma(Distribution):
         return (self.alpha * torch.log(self.beta)
                 + (self.alpha - 1) * torch.log(value)
                 - self.beta * value - torch.lgamma(self.alpha))
+
+
+class Dirichlet(Distribution):
+    r"""
+    Creates a Dirichlet distribution parameterized by concentration `alpha`.
+
+    Example::
+
+        >>> m = Dirichlet(torch.Tensor([0.5, 0.5]))
+        >>> m.sample()  # Dirichlet distributed with concentrarion alpha
+         0.1046
+         0.8954
+        [torch.FloatTensor of size 2]
+
+    Args:
+        alpha (Tensor or Variable): concentration parameter of the distribution
+    """
+    reparameterized = True
+
+    def __init__(self, alpha):
+        self.alpha = alpha
+
+    def sample(self):
+        probs = _standard_gamma(self.alpha)
+        return probs / probs.sum(-1)
+
+    def sample_n(self, n):
+        probs = _standard_gamma(_expand_n(self.alpha, n))
+        return probs / probs.sum(-1)
+
+    def log_prob(self, value):
+        return (torch.log(value) * (self.alpha - 1.0)
+                + torch.lgamma(self.alpha.sum(-1))
+                - torch.lgamma(self.alpha).sum(-1))
+
+
+class Beta(Distribution):
+    r"""
+    Creates a Beta distribution parameterized by concentration `alpha` and `beta`.
+
+    Example::
+
+        >>> m = Beta(torch.Tensor([0.5]), torch.Tensor([0.5]))
+        >>> m.sample()  # Beta distributed with concentrarion alpha
+         0.1046
+        [torch.FloatTensor of size 2]
+
+    Args:
+        alpha (Tensor or Variable): concentration parameter of the distribution
+    """
+    reparameterized = True
+
+    def __init__(self, alpha, beta):
+        alpha_num = isinstance(alpha, Number)
+        beta_num = isinstance(beta, Number)
+        if alpha_num and not beta_num:
+            alpha = beta.new(beta.size()).fill_(alpha)
+        elif not alpha_num and beta_num:
+            beta = alpha.new(alpha.size()).fill_(beta)
+        elif alpha_num and beta_num:
+            alpha, beta = torch.Tensor([alpha]), torch.Tensor([beta])
+        elif alpha.size() != beta.size():
+            raise ValueError('Expected alpha.size() == beta.size(), actual {} vs {}'.format(
+                alpha.size(), beta.size()))
+        self.alpha = alpha
+        self.beta = beta
+
+    def sample(self):
+        heads = _standard_gamma(self.alpha, n)
+        tails = _standard_gamma(self.beta, n)
+        return heads / (heads + tails)
+
+    def sample_n(self):
+        heads = _standard_gamma(_expand_n(self.alpha, n))
+        tails = _standard_gamma(_expand_n(self.beta, n))
+        return heads / (heads + tails)
+
+    def log_prob(self, value):
+        heads = value
+        tails = 1.0 - value
+        return (torch.log(heads) * (self.alpha - 1.0)
+                + torch.log(tails) * (self.beta - 1.0)
+                + torch.lgamma(self.alpha + self.beta)
+                - torch.lgamma(self.alpha) - torch.lgamma(self.beta))
