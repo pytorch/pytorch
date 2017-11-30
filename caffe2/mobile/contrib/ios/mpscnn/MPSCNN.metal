@@ -739,31 +739,34 @@ constant bool has_in1_array = (has_in1_arg && !has_in1_tex);
 constant bool has_in2_array = (has_in2_arg && !has_in2_tex);
 constant bool has_in3_array = (has_in3_arg && !has_in3_tex);
 
+constant bool concat_has_out_tex = (ushort_arg_4 <= 4 && ushort_arg_5 <= 1);
+constant bool concat_has_out_array = !concat_has_out_tex;
+
 inline ushort idx_3(ushort z, ushort C0, ushort C1, ushort C2, ushort C3) {
-  if (z < C0 / 4) {
+  if (z < C0) {
     return 0;
   }
-  if (z < (C0 + C1) / 4) {
+  if (z < (C0 + C1)) {
     return 1;
   }
-  if (z < (C0 + C1 + C2) / 4) {
+  if (z < (C0 + C1 + C2)) {
     return 2;
   }
   return 3;
 }
 
 inline ushort idx_2(ushort z, ushort C0, ushort C1, ushort C2) {
-  if (z < C0 / 4) {
+  if (z < C0) {
     return 0;
   }
-  if (z < (C0 + C1) / 4) {
+  if (z < (C0 + C1)) {
     return 1;
   }
   return 2;
 }
 
 inline ushort idx_1(ushort z, ushort C0, ushort C1) {
-  if (z < C0 / 4) {
+  if (z < C0) {
     return 0;
   } else {
     return 1;
@@ -773,23 +776,32 @@ inline ushort idx_1(ushort z, ushort C0, ushort C1) {
 inline ushort idx_0(ushort z, ushort C0) { return 0; }
 
 // in a texture_array with size C, find the offset for image N at plane c.
-inline constexpr ushort z_off(ushort n, ushort c, ushort C) { return n * divRoundUp(C, 4) + c; }
+inline constexpr ushort z_off(ushort n, ushort c, ushort C) { return n * divRoundUp(C, 4) + c / 4; }
 
 kernel void concat(
-    texture2d<half, access::read> in0[[ texture(0), function_constant(has_in0_tex) ]],
-    texture2d<half, access::read> in1[[ texture(1), function_constant(has_in1_tex) ]],
-    texture2d<half, access::read> in2[[ texture(2), function_constant(has_in2_tex) ]],
-    texture2d<half, access::read> in3[[ texture(3), function_constant(has_in3_tex) ]],
-    texture2d_array<half, access::read> ina0[[ texture(0), function_constant(has_in0_array) ]],
-    texture2d_array<half, access::read> ina1[[ texture(1), function_constant(has_in1_array) ]],
-    texture2d_array<half, access::read> ina2[[ texture(2), function_constant(has_in2_array) ]],
-    texture2d_array<half, access::read> ina3[[ texture(3), function_constant(has_in3_array) ]],
-    texture2d_array<half, access::write> out[[texture(5)]],
-    ushort3 gid[[thread_position_in_grid]]) {
-  if (gid.x >= out.get_width() || gid.y >= out.get_height()) {
-    return;
+                   texture2d<half, access::read> in0[[ texture(0), function_constant(has_in0_tex) ]],
+                   texture2d<half, access::read> in1[[ texture(1), function_constant(has_in1_tex) ]],
+                   texture2d<half, access::read> in2[[ texture(2), function_constant(has_in2_tex) ]],
+                   texture2d<half, access::read> in3[[ texture(3), function_constant(has_in3_tex) ]],
+                   texture2d_array<half, access::read> ina0[[ texture(0), function_constant(has_in0_array) ]],
+                   texture2d_array<half, access::read> ina1[[ texture(1), function_constant(has_in1_array) ]],
+                   texture2d_array<half, access::read> ina2[[ texture(2), function_constant(has_in2_array) ]],
+                   texture2d_array<half, access::read> ina3[[ texture(3), function_constant(has_in3_array) ]],
+                   texture2d<half, access::write> out[[texture(5),
+                                                       function_constant(concat_has_out_tex) ]],
+                   texture2d_array<half, access::write> outa[[texture(5),
+                                                              function_constant(concat_has_out_array) ]],
+                   ushort3 gid[[thread_position_in_grid]]) {
+  if (concat_has_out_tex) {
+    if (gid.x >= out.get_width() || gid.y >= out.get_height()) {
+      return;
+    }
+  } else {
+    if (gid.x >= outa.get_width() || gid.y >= outa.get_height()) {
+      return;
+    }
   }
-
+  
   const ushort C0 = ushort_arg_0;
   const ushort C1 = ushort_arg_1;
   const ushort C2 = ushort_arg_2;
@@ -797,62 +809,143 @@ kernel void concat(
   const ushort C = C0 + C1 + C2 + C3;
   const ushort n = gid.z / divRoundUp(C, 4);
   const ushort c = gid.z - n * divRoundUp(C, 4);
-
-  ushort idx = 0;
-  if (has_in3_arg) {
-    idx = idx_3(c, C0, C1, C2, C3);
-  } else if (has_in2_arg) {
-    idx = idx_2(c, C0, C1, C2);
-  } else if (has_in1_arg) {
-    idx = idx_1(c, C0, C1);
-  } else if (has_in0_arg) {
-    idx = idx_0(c, C0);
-  } else {
-    // never reached.
-    idx = 0;
-  }
-
+  // Fill channel 4*c to 4*(c+1) of nth image of output
+  
   ushort2 gid_ = ushort2(gid.x, gid.y);
   half4 value;
-  switch (idx) {
-  case 0: {
-    if (has_in0_tex) {
-      value = in0.read(gid_);
+  
+  for (int off = 0; off < 4; ++off) {
+    ushort cur_channel = c * 4 + off;
+    ushort cur_idx = 0;
+    if (cur_channel >= C) {
+      break;
     }
-    if (has_in0_array) {
-      value = ina0.read(gid_, z_off(n, c, C0));
+    if (has_in3_arg) {
+      cur_idx = idx_3(cur_channel, C0, C1, C2, C3);
+    } else if (has_in2_arg) {
+      cur_idx = idx_2(cur_channel, C0, C1, C2);
+    } else if (has_in1_arg) {
+      cur_idx = idx_1(cur_channel, C0, C1);
+    } else if (has_in0_arg) {
+      cur_idx = idx_0(cur_channel, C0);
+    } else {
+      // never reached.
+      cur_idx = 0;
     }
-    break;
+    ushort src_off = 0;
+    switch (cur_idx) {
+      case 0:
+        src_off = cur_channel % 4;
+        break;
+      case 1:
+        src_off = (cur_channel - C0) % 4;
+        break;
+      case 2:
+        src_off = (cur_channel - (C0 + C1)) % 4;
+        break;
+      case 3:
+        src_off = (cur_channel - (C0 + C1 + C2)) % 4;
+        break;
+    }
+    // try to see if we can only issue one read op for the 4 values
+    bool fast_path = false;
+    if (off == 0 && src_off == 0 && (cur_channel + 3) < C) {
+      ushort last_idx = 0;
+      if (has_in3_arg) {
+        last_idx = idx_3(cur_channel + 3, C0, C1, C2, C3);
+      } else if (has_in2_arg) {
+        last_idx = idx_2(cur_channel + 3, C0, C1, C2);
+      } else if (has_in1_arg) {
+        last_idx = idx_1(cur_channel + 3, C0, C1);
+      } else if (has_in0_arg) {
+        last_idx = idx_0(cur_channel + 3, C0);
+      } else {
+        // never reached.
+        last_idx = 0;
+      }
+      if (cur_idx == last_idx) {
+        fast_path = true;
+      }
+    }
+    switch (cur_idx) {
+      case 0: {
+        if (has_in0_tex) {
+          if (fast_path) {
+            value = in0.read(gid_);
+          } else {
+            value[off] = in0.read(gid_)[src_off];
+          }
+        }
+        if (has_in0_array) {
+          if (fast_path) {
+            value = ina0.read(gid_, z_off(n, cur_channel, C0));
+          } else {
+            value[off] = ina0.read(gid_, z_off(n, cur_channel, C0))[src_off];
+          }
+        }
+        break;
+      }
+      case 1: {
+        if (has_in1_tex) {
+          if (fast_path) {
+            value = in1.read(gid_);
+          } else {
+            value[off] = in1.read(gid_)[src_off];
+          }
+        }
+        if (has_in1_array) {
+          if (fast_path) {
+            value = ina1.read(gid_, z_off(n, cur_channel - C0, C1));
+          } else {
+            value[off] = ina1.read(gid_, z_off(n, cur_channel - C0, C1))[src_off];
+          }
+        }
+        break;
+      }
+      case 2: {
+        if (has_in2_tex) {
+          if (fast_path) {
+            value = in2.read(gid_);
+          } else {
+            value[off] = in2.read(gid_)[src_off];
+          }
+        }
+        if (has_in2_array) {
+          if (fast_path) {
+            value = ina2.read(gid_, z_off(n, cur_channel - (C0 + C1), C2));
+          } else {
+            value[off] = ina2.read(gid_, z_off(n, cur_channel - (C0 + C1), C2))[src_off];
+          }
+        }
+        break;
+      }
+      case 3: {
+        if (has_in3_tex) {
+          if (fast_path) {
+            value = in3.read(gid_);
+          } else {
+            value[off] = in3.read(gid_)[src_off];
+          }
+        }
+        if (has_in3_array) {
+          if (fast_path) {
+            value = ina3.read(gid_, z_off(n, cur_channel - (C0 + C1 + C2), C3));
+          } else {
+            value[off] = ina3.read(gid_, z_off(n, cur_channel - (C0 + C1 + C2), C3))[src_off];
+          }
+        }
+        break;
+      }
+    }
+    if (fast_path) {
+      break;
+    }
   }
-  case 1: {
-    if (has_in1_tex) {
-      value = in1.read(gid_);
-    }
-    if (has_in1_array) {
-      value = ina1.read(gid_, z_off(n, c - (C0) / 4, C1));
-    }
-    break;
+  if (concat_has_out_tex) {
+    out.write(value, gid_, gid.z);
+  } else {
+    outa.write(value, gid_, gid.z);
   }
-  case 2: {
-    if (has_in2_tex) {
-      value = in2.read(gid_);
-    }
-    if (has_in2_array) {
-      value = ina2.read(gid_, z_off(n, c - (C0 + C1) / 4, C2));
-    }
-    break;
-  }
-  case 3: {
-    if (has_in3_tex) {
-      value = in3.read(gid_);
-    }
-    if (has_in3_array) {
-      value = ina3.read(gid_, z_off(n, c - (C0 + C1 + C2) / 4, C3));
-    }
-    break;
-  }
-  }
-  out.write(value, gid_, gid.z);
 }
 
 using RoIT = half;

@@ -2037,18 +2037,19 @@ class MPSCNNConcatOp final : public Operator<CPUContext> {
     auto cb = [&](size_t i) { return Wrapper(i).getCommandBuffer(); };
     auto X = [&](size_t i) { return Wrapper(i).getImage(); };
 
-    // C0, C1, C2, C3, N
-    std::vector<ushort> channels = {{0, 0, 0, 0, ushort(X(0).numberOfImages)}};
+    // C0, C1, C2, C3, C, N
+    std::vector<ushort> channels = {
+        {0, 0, 0, 0, 0, ushort(X(0).numberOfImages)}};
     size_t channelCount = 0;
     for (auto i = 0; i < Inputs().size(); ++i) {
       // this does not hold for non-temp images inputs
       CAFFE_ENFORCE_EQ(cb(0), cb(i));
       CAFFE_ENFORCE_EQ(X(0).height, X(i).height);
       CAFFE_ENFORCE_EQ(X(0).width, X(i).width);
-      CAFFE_ENFORCE_EQ(X(i).featureChannels % 4, 0);
       channels[i] = X(i).featureChannels;
       channelCount += X(i).featureChannels;
     }
+    channels[4] = channelCount;
 
     auto wrapper0 = Inputs()[0]->template Get<MPSImageWrapper>();
     auto outputWrapper = MPSImageWrapper(
