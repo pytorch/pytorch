@@ -248,6 +248,7 @@ class RNN(RNNBase):
           for details.
         - **h_0** (num_layers * num_directions, batch, hidden_size): tensor
           containing the initial hidden state for each element in the batch.
+          Defaults to zero if not provided.
 
     Outputs: output, h_n
         - **output** (seq_len, batch, hidden_size * num_directions): tensor
@@ -338,6 +339,8 @@ class LSTM(RNNBase):
         - **c_0** (num_layers \* num_directions, batch, hidden_size): tensor
           containing the initial cell state for each element in the batch.
 
+          If (h_0, c_0) is not provided, both **h_0** and **c_0** default to zero.
+
 
     Outputs: output, (h_n, c_n)
         - **output** (seq_len, batch, hidden_size * num_directions): tensor
@@ -412,6 +415,7 @@ class GRU(RNNBase):
           for details.
         - **h_0** (num_layers * num_directions, batch, hidden_size): tensor
           containing the initial hidden state for each element in the batch.
+          Defaults to zero if not provided.
 
     Outputs: output, h_n
         - **output** (seq_len, batch, hidden_size * num_directions): tensor
