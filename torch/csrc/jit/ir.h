@@ -81,7 +81,7 @@ struct Scope {
 private:
   Scope* parent_;
   Symbol name_;
-  std::unordered_set<std::unique_ptr<Scope> > children_;
+  std::vector<std::unique_ptr<Scope> > children_;
 public:
   Scope() {
     name_ = stringToSymbol("");
@@ -93,7 +93,7 @@ public:
   }
   Scope* push(Symbol name) {
     Scope* newScope = new Scope(this, name);
-    children_.insert(std::unique_ptr<Scope>(newScope));
+    children_.push_back(std::unique_ptr<Scope>(newScope));
     return newScope;
   }
   Scope* parent() {
@@ -643,12 +643,6 @@ private:
   Node * const input_;
 
 public:
-  Graph()
-  : next_unique_(0)
-  , new_node_stage_(0)
-  , scope_root_(std::make_shared<Scope>())
-  , current_scope_(scope_root_.get())
-  , output_(initOutput(create(kReturn, 0))), input_(create(kParam, 0)) {}
 
   Graph(std::shared_ptr<Scope> scope_root)
   : next_unique_(0)
@@ -656,6 +650,9 @@ public:
   , scope_root_(scope_root)
   , current_scope_(scope_root_.get())
   , output_(initOutput(create(kReturn, 0))), input_(create(kParam, 0)) {}
+
+  Graph()
+  : Graph( std::make_shared<Scope>()) {}
 
   at::ArrayRef<Value*> inputs() {
     return input_->outputs();
