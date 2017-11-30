@@ -22,7 +22,9 @@ from caffe2.python import core, workspace
 import caffe2.python.hypothesis_test_util as hu
 
 from hypothesis import given
+from hypothesis import strategies as st
 import numpy as np
+import time
 
 
 class TestTensorPackOps(hu.HypothesisTestCase):
@@ -62,37 +64,61 @@ class TestTensorPackOps(hu.HypothesisTestCase):
 
         return pack_segments_ref
 
-    @given(**hu.gcs)
-    def test_pack_ops(self, gc, dc):
-        lengths = np.array([1, 2, 3], dtype=np.int32)
-        data = np.array([
-            [1.0, 1.0],
-            [2.0, 2.0],
-            [2.0, 2.0],
-            [3.0, 3.0],
-            [3.0, 3.0],
-            [3.0, 3.0]], dtype=np.float32)
+    @given(
+        num_seq=st.integers(10, 1500),
+        cell_size=st.integers(1, 100),
+        **hu.gcs
+    )
+    def test_pack_ops(self, num_seq, cell_size, gc, dc):
+        # create data
+        lengths = np.arange(num_seq, dtype=np.int32) + 1
+        num_cell = np.sum(lengths)
+        data = np.zeros(num_cell * cell_size, dtype=np.float32)
+        left = np.cumsum(np.arange(num_seq) * cell_size)
+        right = np.cumsum(lengths * cell_size)
+        for i in range(num_seq):
+            data[left[i]:right[i]] = i + 1.0
+        data.resize(num_cell, cell_size)
+        print("\nnum seq:{},    num cell: {},   cell size:{}\n".format(
+            num_seq, num_cell, cell_size)
+            + "=" * 60
+        )
+        # run test
         op = core.CreateOperator(
             'PackSegments', ['l', 'd'], ['t'])
-        print(gc, dc)
-
         workspace.FeedBlob('l', lengths)
         workspace.FeedBlob('d', data)
-        inputs = [lengths, data]
+
+        start = time.time()
         self.assertReferenceChecks(
             device_option=gc,
             op=op,
-            inputs=inputs,
+            inputs=[lengths, data],
             reference=self.pack_segments_ref(),
         )
-        workspace.FeedBlob('l', lengths)
-        workspace.FeedBlob('d', data)
+        end = time.time()
+        print("{} used time: {}".format(gc, end - start).replace('\n', ' '))
 
+        with core.DeviceScope(gc):
+            workspace.FeedBlob('l', lengths)
+            workspace.FeedBlob('d', data)
         workspace.RunOperatorOnce(core.CreateOperator(
-            'PackSegments', ['l', 'd'], ['t']))
+            'PackSegments',
+            ['l', 'd'],
+            ['t'],
+            device_option=gc))
         workspace.RunOperatorOnce(core.CreateOperator(
-            'UnpackSegments', ['l', 't'], ['newd']))
+            'UnpackSegments',
+            ['l', 't'],
+            ['newd'],
+            device_option=gc))
         assert((workspace.FetchBlob('newd') == workspace.FetchBlob('d')).all())
+
+    @given(
+        **hu.gcs_cpu_only
+    )
+    def test_pack_ops_str(self, gc, dc):
+        # GPU does not support string. Test CPU implementation only.
         workspace.FeedBlob('l', np.array([1, 2, 3], dtype=np.int64))
         strs = np.array([
             ["a", "a"],
@@ -104,9 +130,15 @@ class TestTensorPackOps(hu.HypothesisTestCase):
             dtype='|S')
         workspace.FeedBlob('d', strs)
         workspace.RunOperatorOnce(core.CreateOperator(
-            'PackSegments', ['l', 'd'], ['t']))
+            'PackSegments',
+            ['l', 'd'],
+            ['t'],
+            device_option=gc))
         workspace.RunOperatorOnce(core.CreateOperator(
-            'UnpackSegments', ['l', 't'], ['newd']))
+            'UnpackSegments',
+            ['l', 't'],
+            ['newd'],
+            device_option=gc))
         assert((workspace.FetchBlob('newd') == workspace.FetchBlob('d')).all())
 
     def test_pad_minf(self):
@@ -134,7 +166,7 @@ class TestTensorPackOps(hu.HypothesisTestCase):
         exponentiated = workspace.FetchBlob('r')
         assert(exponentiated[0, -1, 0] == 0.0)
 
-    @given(**hu.gcs)
+    @given(**hu.gcs_cpu_only)
     def test_presence_mask(self, gc, dc):
         lengths = np.array([1, 2, 3], dtype=np.int32)
         data = np.array(
@@ -161,8 +193,6 @@ class TestTensorPackOps(hu.HypothesisTestCase):
         op = core.CreateOperator(
             'PackSegments', ['l', 'd'], ['t', 'p'], return_presence_mask=True
         )
-        workspace.FeedBlob('l', lengths)
-        workspace.FeedBlob('d', data)
         workspace.RunOperatorOnce(op)
 
         output = workspace.FetchBlob('t')
@@ -177,8 +207,7 @@ class TestTensorPackOps(hu.HypothesisTestCase):
         self.assertEqual(presence_mask.shape, expected_presence_mask.shape)
         np.testing.assert_array_equal(presence_mask, expected_presence_mask)
 
-    @given(**hu.gcs)
-    def test_presence_mask_empty(self, gc, dc):
+    def test_presence_mask_empty(self):
         lengths = np.array([], dtype=np.int32)
         data = np.array([], dtype=np.float32)
 
