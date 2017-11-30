@@ -14,7 +14,15 @@ class _TensorBase(object):
     # CUDA case, which handles constructing the tensor on the same GPU
     # as this tensor.
     def new(self, *args, **kwargs):
-        """Constructs a new tensor of the same data type."""
+        """Constructs a new tensor of the same data type.
+
+        Any valid argument combination to the Tensor constructor is accepted by
+        this method, including sizes, :class:`torch.Storage`, numpy ndarray,
+        Python Sequence, etc. See :class:`torch.Tensor` for more details.
+
+        .. note:: For CUDA tensors, this method will create new tensor on the
+                  same device as this tensor.
+        """
         return self.__class__(*args, **kwargs)
 
     def type_as(self, tensor):
