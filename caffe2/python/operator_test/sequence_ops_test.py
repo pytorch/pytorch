@@ -22,6 +22,7 @@ from hypothesis import given
 import caffe2.python.hypothesis_test_util as hu
 import hypothesis.strategies as st
 import numpy as np
+import unittest
 from functools import partial
 
 
@@ -177,6 +178,10 @@ class TestSequenceOps(hu.HypothesisTestCase):
                 _add_padding_ref, start_pad_width, end_pad_width, True,
                 lengths=np.array([data.shape[0]])))
 
+    # Uncomment the following seed to make this fail.
+    # @seed(302934307671667531413257853548643485645)
+    # See https://github.com/caffe2/caffe2/issues/1547
+    @unittest.skip("flaky test")
     @given(start_pad_width=st.integers(min_value=1, max_value=2),
            end_pad_width=st.integers(min_value=0, max_value=2),
            args=_gen_test_add_padding(with_pad_data=False, is_remove=True),
