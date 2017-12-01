@@ -1265,7 +1265,8 @@ Computes the eigenvalues and eigenvectors of a real square matrix.
 
 Args:
     a (Tensor): the square matrix for which the eigenvalues and eigenvectors will be computed
-    eigenvectors (bool): ``True`` to compute both eigenvalues and eigenvectors; otherwise, only eigenvalues will be computed
+    eigenvectors (bool): ``True`` to compute both eigenvalues and eigenvectors;
+        otherwise, only eigenvalues will be computed
     out (tuple, optional): the output tensors
 
 Returns:
@@ -1290,7 +1291,7 @@ Args:
     out (Tensor, optional): the output tensor. Must be a `ByteTensor` or the same type as `input`.
 
 Returns:
-    Tensor: A ``torch.ByteTensor`` containing a 1 at each location where the tensors are equal and a 0 at every other location
+    Tensor: A ``torch.ByteTensor`` containing a 1 at each location where comparison is true
 
 Example::
 
@@ -4048,7 +4049,8 @@ Args:
     input (Tensor): the input tensor
     dim (int, optional): the dimension to sort along
     descending (bool, optional): controls the sorting order (ascending or descending)
-    out (tuple, optional): the output tuple of (`Tensor`, `LongTensor`) that can be optionally given to be used as output buffers
+    out (tuple, optional): the output tuple of (`Tensor`, `LongTensor`) that can
+        be optionally given to be used as output buffers
 
 Example::
 
@@ -4568,7 +4570,8 @@ Args:
            smallest elements
     sorted (bool, optional): controls whether to return the elements
            in sorted order
-    out (tuple, optional): the output tuple of (Tensor, LongTensor) that can be optionally given to be used as output buffers
+    out (tuple, optional): the output tuple of (Tensor, LongTensor) that can be
+        optionally given to be used as output buffers
 
 Example::
 
