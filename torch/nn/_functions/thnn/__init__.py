@@ -7,4 +7,3 @@ from .pooling import *
 from .sparse import *
 from .upsampling import *
 from .rnnFusedPointwise import *
-from .batchnorm_double_backwards import batchnorm_double_backwards_fn
