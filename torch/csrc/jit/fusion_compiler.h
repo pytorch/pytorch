@@ -119,6 +119,11 @@ protected:
   std::vector<ConcatDesc> concat_desc;
 };
 
+struct FusionCompilerConfig {
+  std::string cxx = "g++"; // compiler location
+  bool debug = false; // emit debugging information about fusions
+};
+
 // caching compiler
 struct FusionCompiler {
   TH_DISALLOW_COPY_AND_ASSIGN(FusionCompiler);
@@ -129,16 +134,21 @@ struct FusionCompiler {
   // uses type annotations in fusion_group to create Annotated graph
   std::shared_ptr<CompiledFusionFunction> getOrCompile(Node * fusion_group);
 
+  // uses inputs/outputs as examples to infer continuity, does not run the graph
+  std::shared_ptr<CompiledFusionFunction> getOrCompile(Graph & graph,
+                                                       bool is_cuda,
+                                                       at::ArrayRef<at::Tensor> inputs,
+                                                       at::ArrayRef<at::Tensor> outputs);
   // debugging function that lets you do everything from compilation to execution
   // in one step.
   // this should not be used in the hot path of execution because it has to serialize
   // the graph each time
   void debugLaunchGraph(Graph & graph, bool is_cuda, at::ArrayRef<at::Tensor> inputs, at::ArrayRef<at::Tensor> outputs);
   bool canCompileOnCPU() const {
-    return cxx.size() > 0;
+    return config_.cxx.size() > 0;
   }
 private:
-  std::string cxx; // compiler location
+  FusionCompilerConfig config_;
   std::unordered_map<std::string, std::shared_ptr<CompiledFusionFunction>> cache;
 };
 
