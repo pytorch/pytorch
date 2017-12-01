@@ -2,8 +2,6 @@
 #include <torch/csrc/jit/ir.h>
 #include "torch/csrc/utils/disallow_copy.h"
 #include "ATen/ATen.h"
-#include <cuda.h>
-#include <cuda_runtime.h>
 #include <string>
 #include <algorithm>
 #include <unordered_map>
@@ -53,7 +51,10 @@ private:
 // it will be replaced when the needed TensorDesc information is encoded
 // directly in the information in the IR (e.g. in the Type object)
 struct AnnotatedGraph {
-  Graph* graph;
+  AnnotatedGraph(Graph & graph, bool is_cuda)
+  : graph(&graph), is_cuda(is_cuda) {}
+  Graph* graph = nullptr;
+  bool is_cuda = false;
   std::vector<TensorDesc> input_desc;
   std::vector<TensorDesc> output_desc;
 };
@@ -83,7 +84,7 @@ struct CompiledFusionFunction {
   TH_DISALLOW_COPY_AND_ASSIGN(CompiledFusionFunction);
 
   CompiledFusionFunction(const std::string & name, AnnotatedGraph & agraph);
-  ~CompiledFusionFunction();
+  virtual ~CompiledFusionFunction() {}
 
   // expects outputs to be pre-allocated
   void launch_with_tensors(at::ArrayRef<at::Tensor> inputs, at::ArrayRef<at::Tensor> outputs);
@@ -93,22 +94,22 @@ struct CompiledFusionFunction {
   const std::vector<TensorDesc> & outputDescriptors() const {
     return output_desc;
   }
-private:
-  void launch(uint32_t numel, void ** arguments);
+protected:
+  virtual at::Backend backend() const = 0;
+
+  // arguments is a list of pointers to the arguments for the compiled CUDA/CPU
+  // code.
+  // The format of arguments is suitable for directly passing to a call to
+  // cuLaunchKernel as the kernel arguments.
+  // Currently the first argument is a pointer to numel (for passing to
+  // CUDA code), and the remainder are pointers to the TensorInfo<T> structs
+  // that compiled code uses to load Tensor data.
+  // launch_with_tensors handles packing at::Tensors into this arguments array.
+  // CPU code uses the same convension so that launch_with_tensors can be shared.
+  virtual void launch_raw(uint32_t numel, void ** arguments) = 0;
   std::string name;
   // We keep these around for debugging
   std::string compilation_unit;
-  std::vector<char> ptx;
-  CUmodule module;
-  CUfunction function;
-
-  // we record prop/device so if they are availiable for launch heuristics
-  // querying at launch is too slow for device properties.
-  int device;
-  cudaDeviceProp prop;
-  int blockSize = 128;
-  int maxBlocks;
-
   std::vector<TensorDesc> input_desc;
   std::vector<TensorDesc> output_desc;
 
@@ -125,14 +126,14 @@ struct FusionCompiler {
 
   // ignores types in graph, and uses specific contiguity annotations
   std::shared_ptr<CompiledFusionFunction> getOrCompile(AnnotatedGraph & agraph);
-  // uses type annotations in graph to create Annotated graph
-  std::shared_ptr<CompiledFusionFunction> getOrCompile(Graph & graph);
+  // uses type annotations in fusion_group to create Annotated graph
+  std::shared_ptr<CompiledFusionFunction> getOrCompile(Node * fusion_group);
 
   // debugging function that lets you do everything from compilation to execution
   // in one step.
   // this should not be used in the hot path of execution because it has to serialize
   // the graph each time
-  void debugLaunchGraph(Graph & graph, at::ArrayRef<at::Tensor> inputs, at::ArrayRef<at::Tensor> outputs);
+  void debugLaunchGraph(Graph & graph, bool is_cuda, at::ArrayRef<at::Tensor> inputs, at::ArrayRef<at::Tensor> outputs);
 private:
   std::unordered_map<std::string, std::shared_ptr<CompiledFusionFunction>> cache;
 };

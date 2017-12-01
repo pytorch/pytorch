@@ -770,10 +770,10 @@ public:
     n->t_(kvalue, ref.clone());
     return n;
   }
-  Node * createFusionGroup() {
+  Node * createFusionGroup(bool is_cuda) {
     auto n = create(kFusionGroup, 0);
-    auto subgraph = std::make_shared<Graph>(scope_root_);
-    n->g_(kSubgraph, subgraph);
+    n->g_(kSubgraph,std::make_shared<Graph>(scope_root_));
+    n->i_(kis_cuda, is_cuda);
     return n;
   }
   Node * createPythonOp(THPObjectPtr&& pyobj, const std::string & cconv, bool is_legacy, std::vector<VariableFlags> && var_flags, pyobj_list&& scalar_args);
