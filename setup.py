@@ -224,6 +224,10 @@ class develop(setuptools.command.develop.develop):
                         for entry in load(f)]
         with open('compile_commands.json', 'w') as f:
             json.dump(all_commands, f, indent=2)
+        if not WITH_NINJA:
+            print("WARNING: 'develop' is not building C++ code incrementally")
+            print("because ninja is not installed. Run this to enable it:")
+            print(" > pip install ninja")
 
 
 def monkey_patch_THD_link_flags():
