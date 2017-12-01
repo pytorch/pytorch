@@ -16,16 +16,19 @@
 #     we are going to left-multiply.  When the forward returns multiple
 #     outputs, 'grad' always refers to the first output; you can refer
 #     to other outputs using 'grads'
-#   - Any of the input arguments, tensor or non-tensor
-#   - 'output', representing the result of evaluating the forward
-#     expression
+#   - Any of the input arguments, tensor or non-tensor, including
+#     argument names tha only appear in Declarations.cwrap, e.g. 'output'.
+#   - 'result', representing the result of evaluating the forward
+#     expression for ATen native function decalarations. If the forward
+#     expression outputs a tuple, use 'resultX' instead to access the
+#     X-th entry
 #   - 'grad_input_mask', a std::array<bool, n> (where n is the number
 #     of differentiable inputs), specifying which inputs actually
 #     require gradient.  (This is only available when multiple
 #     derivatives are being computed by a single formula.)
 #
 # If you need a complex expression, e.g., with local variables,
-# write a _backward function in tools/autograd/templates/Function.cpp
+# write a _backward function in tools/autograd/templates/Functions.cpp
 # and invoke it from here.  By the way, go read
 # https://github.com/zdevito/ATen/issues/163; this describes an
 # important hazard that occurs when porting backwards from Python to C++
@@ -164,6 +167,9 @@
   self: cumsum_backward(grad, dim)
 
 - name: data_ptr  # fallthrough
+
+- name: _det_with_svd(Tensor self)
+  self: _det_with_svd_backward(grads, self, result0, result1, result2, result3)
 
 - name: diag(Tensor self, int64_t diagonal)
   self: grad.diag(diagonal)
@@ -443,7 +449,8 @@
 # TODO: complicated
 # - name: prod(Tensor self, int64_t dim, bool keepdim)
 
-# - name: prod(Tensor self)
+- name: prod(Tensor self)
+  self: not_implemented("prod")
 
 - name: pstrf(Tensor self, bool upper, Scalar tol)
   self: not_implemented("pstrf")
@@ -546,7 +553,7 @@
   self: sum_backward(grad, self.sizes(), dim, keepdim)
 
 - name: svd(Tensor self, bool some)
-  self: not_implemented("svd")
+  self: svd_backward(grads, self, some, res1, res2, res3)
 
 - name: symeig(Tensor self, bool eigenvectors, bool upper)
   self: not_implemented("symeig")

@@ -54,7 +54,9 @@ UNPACK_SELF = "auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;"
 # to add an appropriate wrap() overload in torch/csrc/autograd/utils/wrap_outputs.h.
 SUPPORTED_RETURN_TYPES = {
     'Tensor', 'std::tuple<Tensor,Tensor>',
-    'std::tuple<Tensor,Tensor,Tensor>', 'std::vector<Tensor>',
+    'std::tuple<Tensor,Tensor,Tensor>',
+    'std::tuple<Tensor,Tensor,Tensor,Tensor>',
+    'std::vector<Tensor>',
     'Scalar', 'bool', 'int64_t', 'void*'
 }
 

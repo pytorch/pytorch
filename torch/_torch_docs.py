@@ -4276,17 +4276,28 @@ svd(input, some=True, out=None) -> (Tensor, Tensor, Tensor)
 `U, S, V = torch.svd(A)` returns the singular value decomposition of a
 real matrix `A` of size `(n x m)` such that :math:`A = USV'*`.
 
-`U` is of shape `n x n`
+`U` is of shape `n x min(n, m)`
 
-`S` is of shape `n x m`
+`S` is a diagonal square matrix of shape `min(n, m) x min(n, m)`, represented as
+a vector of shape `(min(n, m),)` containing its diagonal entries.
 
-`V` is of shape `m x m`.
+`V` is of shape `m x min(n, m)`.
 
 :attr:`some` represents the number of singular values to be computed.
 If `some=True`, it computes some and `some=False` computes all.
 
 .. note:: Irrespective of the original strides, the returned matrix `U`
           will be transposed, i.e. with strides `(1, n)` instead of `(n, 1)`.
+
+.. note:: Extra care needs to be taken when backward through `U` and `V`
+          outputs. Such operation is really only stable when :attr:`input` is
+          full rank with all distinct singular values. Otherwise, `NaN` can
+          appear as the gradients are not properly defined. Also, when
+          :attr:`some` = `False`, the gradients on `U[:, min(n, m):]` and
+          `V[:, min(n, m):]` will be ignored as those vectors can be arbitrary
+          bases of the subspaces.
+
+.. note:: Double backward through :meth:`~torch.svd` is not supported currently.
 
 Args:
     input (Tensor): the input 2D Tensor

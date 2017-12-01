@@ -193,6 +193,15 @@ VariableType::as_variable(std::tuple<Tensor, Tensor, Tensor> tensors) const {
       make_variable(std::move(std::get<2>(tensors))));
 }
 
+std::tuple<Variable, Variable, Variable, Variable>
+VariableType::as_variable(std::tuple<Tensor, Tensor, Tensor, Tensor> tensors) const {
+  return std::make_tuple<>(
+      make_variable(std::move(std::get<0>(tensors))),
+      make_variable(std::move(std::get<1>(tensors))),
+      make_variable(std::move(std::get<2>(tensors))),
+      make_variable(std::move(std::get<3>(tensors))));
+}
+
 std::vector<Variable> VariableType::as_variable(TensorList tl) const {
   std::vector<Variable> variables;
   for (auto& t : tl) {
