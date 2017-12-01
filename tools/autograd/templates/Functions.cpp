@@ -596,6 +596,38 @@ Tensor _det_with_svd_backward(const std::vector<torch::autograd::Variable> &grad
   return svd_term + u.mm(sigma.pow(-1).mul_(det.mul(det_grad)).diag()).mm(v.transpose(0, 1));
 }
 
+// Reference:
+// https://people.maths.ox.ac.uk/gilesm/files/NA-08-01.pdf
+// Sec. 2.3.1 Matrix inverse product
+std::tuple<Tensor, Tensor> trtrs_backward(
+    const Tensor & grad_x, const Tensor & grad_m,
+    const Tensor & b, const Tensor & a, const Tensor & x,
+    const bool upper, const bool transpose, const bool unitriangular,
+    std::array<bool, 2> output_mask) {
+  Tensor grad_b, grad_a;
+  if (grad_x.defined()) {
+    grad_b = std::get<0>(grad_x.trtrs(a, upper, !transpose, unitriangular));
+    if (output_mask[1]) {
+      grad_a = transpose ? -x.mm(grad_b.t()) : -grad_b.mm(x.t());
+      if (upper) {
+        grad_a = grad_a.triu((int) unitriangular);
+      } else {
+        grad_a = grad_a.tril(-((int) unitriangular));
+      }
+    }
+  }
+  if (!grad_a.defined()) {
+    grad_a = a.type().zeros({1}).expand_as(a);
+  }
+  if (!grad_b.defined()) {
+    grad_b = b.type().zeros({1}).expand_as(b);
+  }
+  if (output_mask[1] && grad_m.defined()) {
+    grad_a = grad_a.add(grad_m);
+  }
+  return std::tuple<Tensor, Tensor>{grad_b, grad_a};
+}
+
 }
 
 ${autograd_function_definitions}

@@ -1584,6 +1584,22 @@ class TestAutograd(TestCase):
                               lambda a, b, c, dim: torch.cat((a, b, c), dim),
                               True, f_args_variable, f_args_tensor)
 
+    @skipIfNoLapack
+    def test_trtrs(self):
+        def _test_with_size(N, C):
+            A = Variable(torch.rand(N, N), requires_grad=True)
+            b = Variable(torch.rand(N, C), requires_grad=True)
+
+            for upper, transpose, unitriangular in product((True, False), repeat=3):
+                def func(A, b):
+                    return torch.trtrs(b, A, upper, transpose, unitriangular)
+
+                gradcheck(func, [A, b])
+                gradgradcheck(func, [A, b])
+
+        _test_with_size(S, S + 1)
+        _test_with_size(S, S - 1)
+
     def test_variable_traverse(self):
         def get_out_and_unrefed_cycle():
             inp = Variable(torch.randn(10), requires_grad=True)
