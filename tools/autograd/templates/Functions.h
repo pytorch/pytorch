@@ -31,6 +31,20 @@ private:
   Type* type;
 };
 
+std::tuple<Tensor, Tensor, Tensor> batchnorm_double_backward(
+    const Tensor & input,
+    const Tensor & gamma,
+    const Tensor & ggI,
+    const Tensor & ggG,
+    const Tensor & ggB,
+    const Tensor & gO,
+    double eps,
+    const Tensor & save_mean, // not Variable
+    const Tensor & save_std, // not Variable
+    const Tensor & running_mean, // not Variable
+    const Tensor & running_var, // not Variable
+    bool training);
+
 ${autograd_function_declarations}
 
 }}} // namespace torch::autograd::generated

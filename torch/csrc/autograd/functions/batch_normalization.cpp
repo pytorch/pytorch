@@ -5,6 +5,7 @@
 #include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/autograd/functions/utils.h"
 #include "torch/csrc/autograd/functions/basic_ops.h"
+#include "torch/csrc/autograd/generated/Functions.h"
 #include "torch/csrc/utils/auto_gil.h"
 #include "torch/csrc/utils/auto_gpu.h"
 #include "torch/csrc/DynamicTypes.h"
@@ -181,43 +182,13 @@ auto BatchNormBackwardBackward::apply(const variable_list& grad_grad_inputs) -> 
   auto weight_var = weight.unpack();
   auto gO_var = grad_output.unpack();
 
-  auto input = input_var.data();
-  AutoGIL gil;
+  auto r = torch::autograd::generated::batchnorm_double_backward(input_var, weight_var, ggI, ggW, ggb, gO_var, eps, save_mean, save_std, running_mean, running_var, training);
 
-  THPObjectPtr input_pvar(THPVariable_Wrap(input_var));
-  THPObjectPtr weight_pvar(THPVariable_Wrap(weight_var));
-
-  THPObjectPtr ggi_pvar(THPVariable_Wrap(ggI));
-  THPObjectPtr ggW_pvar(THPVariable_Wrap(ggW));
-  THPObjectPtr ggb_pvar(THPVariable_Wrap(ggb));
-  THPObjectPtr gO_pvar(THPVariable_Wrap(gO_var));
-  THPObjectPtr eps_py(PyFloat_FromDouble(eps));
-  THPObjectPtr save_mean_py(createPyObject(save_mean));
-  THPObjectPtr save_std_py(createPyObject(save_std));
-  THPObjectPtr running_mean_py(createPyObject(running_mean));
-  THPObjectPtr running_var_py(createPyObject(running_var));
-  PyObject *training_pyo = training ? Py_True : Py_False;
-
-  THPObjectPtr args(PyTuple_Pack(12, input_pvar.get(), weight_pvar.get(),
-                                 ggi_pvar.get(), ggW_pvar.get(), ggb_pvar.get(),
-                                 gO_pvar.get(), eps_py.get(),
-                                 save_mean_py.get(), save_std_py.get(),
-                                 running_mean_py.get(), running_var_py.get(),
-                                 training_pyo));
-  THPObjectPtr r(PyObject_CallObject(THPBatchNormBackwardBackwardFunction, args.get()));
-  if (!r) throw python_error();
-  if (!PyTuple_Check(r.get())) {
-    throw std::runtime_error("expected PyTuple return from BatchNormBackwardBackward");
-  }
-
-  auto gI_var = getReturnTupleVar(r, 0);
-  auto gG_var = getReturnTupleVar(r, 1);
-  auto ggO_var = getReturnTupleVar(r, 2);
-
+  // TODO: what a curious reordering
   if (weight_var.defined()) {
-    return {ggO_var, gI_var, gG_var};
+    return {std::get<2>(r), std::get<0>(r), std::get<1>(r)};
   } else {
-    return {ggO_var, gI_var};
+    return {std::get<2>(r), std::get<0>(r)};
   }
 };
 
