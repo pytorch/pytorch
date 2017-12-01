@@ -168,31 +168,76 @@ def spatial_bn(model, blob_in, blob_out, dim_in,
         return blob_outputs[0]
 
 
-def layer_norm(model, blob_in, blob_out, **kwargs):
-    def init_scalar_blob(value, suffix):
-        return model.param_init_net.ConstantFill(
-            [], blob_out + "_" + suffix, shape=[1], value=value)
+def layer_norm(
+    model,
+    blob_in,
+    blob_out,
+    dim_in,
+    axis=1,
+    epsilon=1e-4,
+    initial_scale=1.0,
+    initial_bias=0.0,
+):
+    '''
+    Layer normalizes the input, cf. https://arxiv.org/pdf/1607.06450.pdf.
 
-    scale, bias = init_scalar_blob(1.0, "s"), init_scalar_blob(0.0, "b")
+    Args:
+        blob_in: The input blob to layer normalize.
+        blob_out: The layer normalized output blob.
+        dim_in: The dimension of the scale and bias. For example, if blob_in is
+            a 2D design matrix and axis is 1, this would be the number of
+            columns.
+        axis: (optional) The axis to normalize. Typically the feature axis.
+            Defaults to 1.
+        epsilon: (optional) A small value used for numerical stability in
+            calculation. Defaults to 1e-4.
+        initial_scale: (optional) The initial value for the learned scale
+            parameter. Defaults to 1.0
+        initial_bias: (optional) The initial value for the learned bias
+            parameter of the layerwise standard deviation. Defaults to 0.0.
 
-    model.AddParameter(scale, ParameterTags.WEIGHT)
-    model.AddParameter(bias, ParameterTags.BIAS)
+    Returns:
+        A 3-tuple consisting of:
+            - The layer normalized input blob.
+            - The mean of the input blob across the given axis.
+            - The standard deviation of the input blob acress the given axis.
+    '''
 
+    # The LayerNorm operator only performs the layerwise z-shift, without
+    # scaling and shifting by the learned scale and bias parameters. We have
+    # to do that separately below.
     normalized, mean, stdev = model.net.LayerNorm(
         [blob_in],
         [blob_out, blob_out + "_mean", blob_out + "_stdev"],
-        **kwargs
+        axis=axis,
+        epsilon=epsilon,
     )
 
-    weighted = model.net.Mul(
+    # The learned multiplicative scale or "gain".
+    scale = model.create_param(
+        param_name='{}_scale'.format(blob_out),
+        shape=dim_in,
+        initializer=initializers.Initializer('ConstantFill', value=initial_scale),
+        tags=ParameterTags.WEIGHT
+    )
+
+    # The learned additive bias or "shift".
+    bias = model.create_param(
+        param_name='{}_bias'.format(blob_out),
+        shape=dim_in,
+        initializer=initializers.Initializer('ConstantFill', value=initial_bias),
+        tags=ParameterTags.BIAS
+    )
+
+    scaled = model.net.Mul(
         [normalized, scale],
-        [blob_out + "_weighted"],
+        ['{}_scaled'.format(blob_out)],
         broadcast=1,
     )
 
-    biased = model.net.Mul(
-        [weighted, bias],
-        [blob_out + "_biased"],
+    biased = model.net.Add(
+        [scaled, bias],
+        ['{}_biased'.format(blob_out)],
         broadcast=1,
     )
 

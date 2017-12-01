@@ -18,10 +18,8 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
-from caffe2.python import brew, core, workspace
-from functools import reduce
+from caffe2.python import brew, core
 from hypothesis import given
-from operator import mul
 import caffe2.python.hypothesis_test_util as hu
 import numpy as np
 
@@ -44,11 +42,11 @@ class TestLayerNormOp(hu.HypothesisTestCase):
         )
 
         def layer_norm_ref(X):
-            left = reduce(mul, X.shape[:axis], 1)
+            left = int(np.prod(X.shape[:axis]))
             reshaped = np.reshape(X, [left, -1])
             mean = np.mean(reshaped, axis=1).reshape([left, 1])
             stdev = np.sqrt(
-                np.mean(np.power(reshaped, 2), axis=1).reshape([left, 1]) -
+                np.mean(np.square(reshaped), axis=1).reshape([left, 1]) -
                 np.power(mean, 2) + epsilon
             )
             norm = (reshaped - mean) / (stdev)
@@ -61,8 +59,8 @@ class TestLayerNormOp(hu.HypothesisTestCase):
         gout = norm
 
         def layer_norm_grad_ref(gout_full, norm, mean_full, stdev_full, X_full):
-            left = reduce(mul, X_full.shape[:axis], 1)
-            right = reduce(mul, X_full.shape[axis:], 1)
+            left = int(np.prod(X_full.shape[:axis]))
+            right = int(np.prod(X_full.shape[axis:]))
             X = np.reshape(X_full, [left, right])
             stdev = np.reshape(stdev_full, [left, 1])
             mean = np.reshape(mean_full, [left, 1])
@@ -115,7 +113,7 @@ class TestLayerNormOp(hu.HypothesisTestCase):
         )
 
         def layer_norm_ref(X):
-            left = reduce(mul, X.shape[:axis], 1)
+            left = int(np.prod(X.shape[:axis]))
             reshaped = np.reshape(X, [left, -1])
             mean = np.mean(reshaped, axis=1).reshape([left, 1])
             stdev = np.sqrt(
@@ -147,18 +145,20 @@ class TestLayerNormOp(hu.HypothesisTestCase):
         if len(X.shape) == 1:
             X = np.expand_dims(X, axis=0)
         axis = np.random.randint(0, len(X.shape))
-        epsilon = 1e-4
+        scale_dim = [1] * np.ndim(X)
+        scale_dim[axis] = X.shape[axis]
 
-        workspace.FeedBlob('X', X)
+        self.ws.create_blob('input').feed(X)
 
         model = ModelHelper(name='test_layer_norm_brew_wrapper')
         brew.layer_norm(
             model,
-            'X',
-            'Y',
+            'input',
+            'output',
+            dim_in=scale_dim,
             axis=axis,
-            epsilon=epsilon,
+            epsilon=1e-4,
         )
 
-        workspace.RunNetOnce(model.param_init_net)
-        workspace.RunNetOnce(model.net)
+        self.ws.create_net(model.param_init_net).run()
+        self.ws.create_net(model.net).run()
