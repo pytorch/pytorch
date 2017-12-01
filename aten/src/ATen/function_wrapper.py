@@ -562,7 +562,14 @@ def create_generic(top_env, declarations):
         ret = option['return']
 
         return_types = []
-        for t in ret:
+        for t_raw in ret:
+            if isinstance(t_raw, string_type):
+                t = t_raw
+                name = None
+            else:
+                t = t_raw['type']
+                name = t_raw['name']
+
             # can't actually return a TensorList (since it's a reference object)
             actual_return_type = {'TensorList': 'std::vector<Tensor>'}.get(t, t)
 
@@ -570,10 +577,13 @@ def create_generic(top_env, declarations):
                 # follow normal ATen convention of returning Tensor & for inplace functions.
                 actual_return_type = 'Tensor &'
 
-            return_types.append({
+            rtype = {
                 'type': actual_return_type,
                 'dynamic_type': t,
-            })
+            }
+            if name is not None:
+                rtype['name'] = name
+            return_types.append(rtype)
 
         return return_types
 

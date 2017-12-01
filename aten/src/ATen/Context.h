@@ -44,7 +44,7 @@ public:
     });
     return thc_state;
   }
-#ifdef AT_CUDA_ENABLED
+#if AT_CUDA_ENABLED()
   cudaStream_t getCurrentCUDAStream() const;
 #endif
   ~Context();
@@ -53,6 +53,7 @@ public:
   std::unique_ptr<Type> type_registry
     [static_cast<int>(Backend::NumOptions)]
     [static_cast<int>(ScalarType::NumOptions)];
+  // TODO: Consider making this private
   THCState * thc_state;
 private:
   void initCUDAIfNeeded(Backend p) {

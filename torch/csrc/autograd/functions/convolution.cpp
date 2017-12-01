@@ -8,21 +8,23 @@
 #include "torch/csrc/autograd/functions/tensor.h"
 #include "torch/csrc/utils/auto_gpu.h"
 
-#include <ATen/ATen.h>
-
+#ifdef WITH_CUDA
+#include "THC/THC.h"
 #ifdef WITH_CUDNN
-#include "torch/csrc/cudnn/Conv.h"
-#include "torch/csrc/cudnn/Handles.h"
-#include "torch/csrc/cudnn/Types.h"
-extern THCState* state;
-using namespace torch::cudnn;
+#include <ATen/cudnn/cudnn-wrapper.h>
 #endif
+#endif
+
+#include <ATen/ATen.h>
 
 #ifdef WITH_NNPACK
 #include "torch/csrc/nnpack/NNPACK.h"
 #endif
 
-using torch::cudnn::Convolution;
+#ifdef WITH_CUDA
+extern THCState* state;
+#endif
+
 using at::Tensor;
 using tensor_pair = std::pair<at::Tensor, at::Tensor>;
 
@@ -286,7 +288,6 @@ auto ConvForward::apply(const variable_list& inputs) -> variable_list {
   auto output = input.type().tensor();
   tensor_list columns(groups);
   tensor_list ones(groups);
-  std::unique_ptr<Convolution> convolution;
 
   if (is_depthwise(input, weight, groups)) {
       /* output.resize_(output_size(input, weight)); */
@@ -310,20 +311,14 @@ auto ConvForward::apply(const variable_list& inputs) -> variable_list {
       throw std::runtime_error(ss.str());
     }
 
-    output = input.type().tensor();
-    output.resize_(output_size(input, weight));
     if (transposed) {
-      convolution.reset(cudnn_convolution_transpose_full_forward(
-          state, torch::cudnn::getCudnnHandle(), torch::cudnn::getCudnnDataType(input),
-          (THVoidTensor*)input.unsafeGetTH(false), (THVoidTensor*)weight.unsafeGetTH(false),
-          bias.defined() ? (THVoidTensor*)bias.unsafeGetTH(false) : nullptr, (THVoidTensor*)output.unsafeGetTH(false),
-          padding, stride, dilation, groups, benchmark, deterministic));
+      output = at::cudnn_convolution_transpose_full_forward(
+          input, weight, bias,
+          vecToInt64(padding), vecToInt64(output_padding), vecToInt64(stride), vecToInt64(dilation), groups, benchmark, deterministic);
     } else {
-      convolution.reset(cudnn_convolution_full_forward(
-          state, torch::cudnn::getCudnnHandle(), torch::cudnn::getCudnnDataType(input),
-          (THVoidTensor*)input.unsafeGetTH(false), (THVoidTensor*)weight.unsafeGetTH(false),
-          bias.defined() ? (THVoidTensor*)bias.unsafeGetTH(false) : nullptr, (THVoidTensor*)output.unsafeGetTH(false),
-          padding, stride, dilation, groups, benchmark, deterministic));
+      output = at::cudnn_convolution_full_forward(
+          input, weight, bias,
+          vecToInt64(padding), vecToInt64(stride), vecToInt64(dilation), groups, benchmark, deterministic);
     }
 #endif
   } else {
@@ -358,7 +353,7 @@ auto ConvForward::apply(const variable_list& inputs) -> variable_list {
     return std::make_shared<ConvBackward>(
         f, *this,
         inputs[0], inputs[1], inputs[2],
-        std::move(columns), std::move(ones), std::move(convolution));
+        std::move(columns), std::move(ones));
   });
 };
 
@@ -430,37 +425,33 @@ auto ConvBackward::apply(const variable_list& grad_outputs) -> variable_list {
     } else if (use_cudnn) {
 #ifdef WITH_CUDNN
     if (output_mask[0]) {
-      grad_input = input.type().tensor();
-      grad_input.resize_as_(input);
       if (transposed) {
-        // ConvTranspose uses the same kernels as regular convolution
-        // but swaps forward and backward calls
-        cudnn_convolution_forward(
-            state, torch::cudnn::getCudnnHandle(), torch::cudnn::getCudnnDataType(input),
-            (THVoidTensor*)grad_output.unsafeGetTH(false), (THVoidTensor*)weight.unsafeGetTH(false), (THVoidTensor*)grad_input.unsafeGetTH(false),
-            convolution.get(), benchmark, deterministic);
+        grad_input = at::cudnn_convolution_transpose_backward(
+            grad_output, weight,
+            vecToInt64(padding), vecToInt64(stride), vecToInt64(dilation), groups,
+            benchmark, deterministic);
       } else {
-        cudnn_convolution_backward_data(
-            state, torch::cudnn::getCudnnHandle(), torch::cudnn::getCudnnDataType(input),
-            (THVoidTensor*)grad_output.unsafeGetTH(false), (THVoidTensor*)grad_input.unsafeGetTH(false), (THVoidTensor*)weight.unsafeGetTH(false),
-            convolution.get(), benchmark, deterministic);
+        grad_input = at::cudnn_convolution_backward(
+            input.sizes(), grad_output, weight,
+            vecToInt64(padding), vecToInt64(stride), vecToInt64(dilation), groups,
+            benchmark, deterministic);
       }
     }
     if (output_mask[1] || output_mask[2]) {
-      grad_weight = weight.type().tensor();
-      grad_weight.resize_as_(weight);
-      cudnn_convolution_backward_filter(
-          state, torch::cudnn::getCudnnHandle(), torch::cudnn::getCudnnDataType(input),
-          (THVoidTensor*)grad_output.unsafeGetTH(false), (THVoidTensor*)input.unsafeGetTH(false), (THVoidTensor*)grad_weight.unsafeGetTH(false),
-          convolution.get(), benchmark, deterministic);
+      if (transposed) {
+        grad_weight = at::cudnn_convolution_transpose_backward_weight(
+            weight.sizes(), grad_output, input,
+            vecToInt64(padding), vecToInt64(stride), vecToInt64(dilation), groups,
+            benchmark, deterministic);
+      } else {
+        grad_weight = at::cudnn_convolution_backward_weight(
+            weight.sizes(), grad_output, input,
+            vecToInt64(padding), vecToInt64(stride), vecToInt64(dilation), groups,
+            benchmark, deterministic);
+      }
 
       if (output_mask[2]) {
-        grad_bias = bias.type().tensor();
-        grad_bias.resize_as_(bias);
-        cudnn_convolution_backward_bias(
-            state, torch::cudnn::getCudnnHandle(), torch::cudnn::getCudnnDataType(input),
-            (THVoidTensor*)grad_output.unsafeGetTH(false), (THVoidTensor*)grad_bias.unsafeGetTH(false),
-            convolution.get());
+        grad_bias = at::cudnn_convolution_backward_bias(grad_output);
       }
     }
 #endif
@@ -679,6 +670,7 @@ auto ConvBackwardBackward::apply(const variable_list& grad_grad_inputs) -> varia
       auto gOt = apply_fn<Transpose>(0, 1)(gO);
 
       // calculate output_padding
+      // TODO: figure out why this needs to be computed...
       auto kernel_size = weight.sizes().slice(2);
       auto input_shape = input.sizes().slice(2);
       auto grad_output_shape = gO.sizes().slice(2);
