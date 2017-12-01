@@ -134,6 +134,13 @@ IF(NOT NO_CUDA)
   INCLUDE_DIRECTORIES("${CMAKE_CURRENT_SOURCE_DIR}/cuda")
   SET(native_functions_cuda ${CMAKE_CURRENT_SOURCE_DIR}/native/cuda/NativeFunctionsCuda.cu)
   SET(all_cpp ${all_cpp} ${ATen_CUDA_SRCS} ${native_functions_cuda})
+  IF(MSVC)
+    # due to a CMake dependency bug in CUDA, we have to generate the template files first
+    EXECUTE_PROCESS(
+      COMMAND ${GEN_COMMAND}
+      RESULT_VARIABLE RETURN_VALUE
+    )
+  ENDIF(MSVC)
 endif()
 
 filter_list(generated_h generated_cpp "\\.h$")
