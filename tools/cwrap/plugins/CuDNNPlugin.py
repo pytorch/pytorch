@@ -8,7 +8,7 @@ from itertools import product
 class CuDNNPlugin(CWrapPlugin):
 
     TYPE_UNPACK = {
-        'THTensor*': Template('((THPVoidTensor*)$arg)->cdata'),
+        'THTensor*': Template('createTensor($arg)'),
         'int': Template('((int) THPUtils_unpackLong($arg))'),
         'std::vector<int>': Template('THPUtils_unpackIntTuple($arg)'),
         'cudnnDataType_t': Template('$arg'),
@@ -19,7 +19,7 @@ class CuDNNPlugin(CWrapPlugin):
     }
 
     INPUT_ARGUMENT_MAP = {
-        'THTensor*': 'THVoidTensor*',
+        'THTensor*': 'const at::Tensor&',
     }
 
     TYPE_CHECK = {
