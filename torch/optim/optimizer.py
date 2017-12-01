@@ -137,11 +137,8 @@ class Optimizer(object):
         for group in self.param_groups:
             for p in group['params']:
                 if p.grad is not None:
-                    if p.grad.volatile:
-                        p.grad.data.zero_()
-                    else:
-                        data = p.grad.data
-                        p.grad = Variable(data.new().resize_as_(data).zero_())
+                    p.grad.detach_()
+                    p.grad.zero_()
 
     def step(self, closure):
         """Performs a single optimization step (parameter update).

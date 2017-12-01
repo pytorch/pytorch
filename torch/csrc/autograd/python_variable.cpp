@@ -296,37 +296,33 @@ PyObject *THPVariable_get_grad(THPVariable *self)
   END_HANDLE_TH_ERRORS
 }
 
-int THPVariable_set_grad(THPVariable *self, PyObject *other)
+int THPVariable_set_grad(THPVariable *self, PyObject *py_grad)
 {
   HANDLE_TH_ERRORS
   auto& var = self->cdata;
-  if (other == Py_None) {
+  if (py_grad == Py_None) {
     var.grad().reset();
     return 0;
   }
 
-  THPUtils_assertRet(-1, THPVariable_Check(other),
-      "expected Variable or None (got %s)", THPUtils_typename(other));
-  THPUtils_assertRet(-1, self != (THPVariable*)other,
+  THPUtils_assertRet(-1, THPVariable_Check(py_grad),
+      "expected Variable or None (got %s)", THPUtils_typename(py_grad));
+  THPUtils_assertRet(-1, self != (THPVariable*)py_grad,
       "can't assign Variable as its own grad");
 
-  auto& data = var.data();
-  auto& other_var = ((THPVariable*)other)->cdata;
-  auto& other_data = other_var.data();
+  auto& grad = ((THPVariable*)py_grad)->cdata;
+  auto& sparseType = var.type().toBackend(var.is_cuda() ? kSparseCUDA : kSparseCPU);
 
-  // Make sure the data is ok
-  THPUtils_assertRet(-1, other_data.type().ID() == data.type().ID(),
+  THPUtils_assertRet(-1, grad.type() == var.type() || grad.type() == sparseType,
       "assigned grad has data of a different type");
-  THPUtils_assertRet(-1, other_data.type().is_cuda() == data.type().is_cuda(),
-      "assigned grad has data located on a different device");
-  if (data.type().is_cuda()) {
-    THPUtils_assertRet(-1, other_data.get_device() == data.get_device(),
+  if (var.type().is_cuda()) {
+    THPUtils_assertRet(-1, grad.get_device() == var.get_device(),
         "assigned grad has data located on a different device");
   }
-  THPUtils_assertRet(-1, other_data.sizes().vec() == data.sizes().vec(),
+  THPUtils_assertRet(-1, grad.sizes().equals(var.sizes()),
       "assigned grad has data of a different size");
 
-  var.grad() = other_var;
+  var.grad() = grad;
   return 0;
   END_HANDLE_TH_ERRORS_RET(-1)
 }
