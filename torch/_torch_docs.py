@@ -4104,18 +4104,18 @@ Example::
 """)
 
 add_docstr(torch._C.squeeze,
-           """
+           r"""
 squeeze(input, dim=None, out=None)
 
 Returns a `Tensor` with all the dimensions of :attr:`input` of size `1` removed.
 
-If `input` is of shape: :math:`(A x 1 x B x C x 1 x D)` then the `out` Tensor
-will be of shape: :math:`(A x B x C x D)`
+If `input` is of shape: :math:`(A \times 1 \times B \times C \times 1 \times D)` then the `out` Tensor
+will be of shape: :math:`(A \times B \times C \times D)`
 
 When :attr:`dim` is given, a squeeze operation is done only in the given
-dimension. If `input` is of shape: :math:`(A x 1 x B)`, `squeeze(input, 0)`
+dimension. If `input` is of shape: :math:`(A \times 1 \times B)`, `squeeze(input, 0)`
 leaves the Tensor unchanged, but `squeeze(input, 1)` will squeeze the tensor
-to the shape :math:`(A x B)`.
+to the shape :math:`(A \times B)`.
 
 .. note:: As an exception to the above, a 1-dimensional tensor of size 1 will
           not have its dimensions changed.
