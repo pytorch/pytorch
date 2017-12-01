@@ -9,9 +9,7 @@
 #include "torch/csrc/autograd/python_variable.h"
 #include "torch/csrc/autograd/python_engine.h"
 #include "torch/csrc/autograd/functions/special.h"
-#ifdef WITH_CUDA
 #include "torch/csrc/jit/fusion_compiler.h"
-#endif
 
 namespace py = pybind11;
 
@@ -199,8 +197,7 @@ Operation getOperation(jit::Node *node) {
       return createCppOperation(value);
     }
   IR_ELSEIF(FusionGroup)
-#ifdef WITH_CUDA
-    auto fusion_fn = sharedFusionCompiler().getOrCompile(*value->g(kSubgraph));
+    auto fusion_fn = sharedFusionCompiler().getOrCompile(value);
     return [fusion_fn](const list_of_retainable & inputs, list_of_retainable & outputs) {
       autograd::profiler::RecordFunction record("FusionGroup");
       tensor_list tinputs, toutputs;
@@ -213,9 +210,6 @@ Operation getOperation(jit::Node *node) {
         outputs.push_back(toRetainableSteal(std::move(o)));
       }
     };
-#else
-    throw std::runtime_error("don't know how to execute FusionGroups without CUDA");
-#endif
   IR_ELSEIF(Constant)
     auto t = value->t(kvalue);
     return [t](const list_of_retainable & inputs, list_of_retainable & outputs) {

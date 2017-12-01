@@ -99,12 +99,20 @@ class TestJit(TestCase):
         torch._C._jit_pass_lint(trace)
         self.assertExpected(str(trace))
 
-    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
-    def test_run_lstm_fusion(self):
-        input = Variable(torch.randn(3, 10).float().cuda())
-        hx = Variable(torch.randn(3, 20).float().cuda())
-        cx = Variable(torch.randn(3, 20).float().cuda())
-        module = nn.LSTMCell(10, 20).float().cuda()  # Just to allocate weights with correct sizes
+    def run_lstm_fusion(self, use_cuda):
+        def to_type(x):
+            x = x.float()
+            if use_cuda:
+                x = x.cuda()
+            return x
+
+        def rand_v(a, b):
+            return Variable(to_type(torch.randn(a, b)))
+
+        input = rand_v(3, 10)
+        hx = rand_v(3, 20)
+        cx = rand_v(3, 20)
+        module = to_type(nn.LSTMCell(10, 20))  # Just to allocate weights with correct sizes
 
         CompiledLSTMCell = torch.jit.compile(nderivs=0)(LSTMCell)
 
@@ -112,6 +120,13 @@ class TestJit(TestCase):
         with self.assertCompiled(CompiledLSTMCell):
             z2 = CompiledLSTMCell(input, (hx, cx), *module.parameters())
         self.assertEqual(z, z2)
+
+    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    def test_run_lstm_fusion_cuda(self):
+        self.run_lstm_fusion(True)
+
+    def test_run_lstm_fusion_cpu(self):
+        self.run_lstm_fusion(False)
 
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     def test_run_lstm_fusion_concat(self):

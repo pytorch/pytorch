@@ -89,6 +89,9 @@ struct GraphFuser {
   : graph(graph) {}
 
   bool isCuda(Node * node) {
+    if(node->kind() == kFusionGroup) {
+      return node->i(kis_cuda);
+    }
     return node->output()->type()->expect<TensorType>()->device() != -1;
   }
   // TODO: the fusion compiler has a lot of float-specific codegen
@@ -118,7 +121,7 @@ struct GraphFuser {
   }
   bool isFusable(Node * node) {
     if (node->kind() == kFusionGroup) return true;
-    return isSimpleMap(node) && allFloatIO(node) && isCuda(node);
+    return isSimpleMap(node) && allFloatIO(node);
   }
 
   // Can this node produce an _output_ of a fusion group?
@@ -128,7 +131,7 @@ struct GraphFuser {
   bool isFusableAsExitNode(Node * node) {
     if(isFusable(node))
       return true;
-    if(node->kind() != kcat || !isCuda(node))
+    if(node->kind() != kcat)
       return false;
 
     // this concat fusion only works when all the inputs are the same size
@@ -168,7 +171,9 @@ struct GraphFuser {
     // if the consumer allInputsAreThisProducer(consumer,producer)
     // we can move the consumer up into the producer.
     // but this requires better handling of merging fusion groups so it is not done now
-    return isFusable(producer->node()) && allUsersAreThisConsumerOrOccurAfterIt(consumer, producer);
+    return isFusable(producer->node()) &&
+      allUsersAreThisConsumerOrOccurAfterIt(consumer, producer) &&
+      isCuda(consumer) == isCuda(producer->node());
   }
 
   // insert a producer node into a consuming fusion group.
@@ -276,7 +281,7 @@ struct GraphFuser {
   // turn consumer node n into a fusion group with just n inside
   // to prepare for fusion and replace uses of n with the new group
   Node * createSingletonFusionGroup(Node * n) {
-    auto group = graph->createFusionGroup();
+    auto group = graph->createFusionGroup(isCuda(n));
     // propogate position information for the new node so we can always
     // have a valid mapping
     topological_index[group] = topological_index[n];
