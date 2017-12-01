@@ -43,9 +43,20 @@ bool PackSegmentsOp<CPUContext>::DoRunWithType2() {
   // Find the length of the longest sequence.
   const T* l = lengths.template data<T>();
   T max_length = 0;
+  T total_length = 0;
   for (T i = 0; i < lengths.dim(0); ++i) {
     max_length = std::max(max_length, l[i]);
+    total_length += l[i];
   }
+
+  // Total lengths must be the same as data.dims(0)
+  CAFFE_ENFORCE_EQ(
+      data.dim(0),
+      total_length,
+      " PackSegments requires that the sum of the lengths ",
+      total_length,
+      " is equal to the first data dimension ",
+      data.dim(0));
 
   auto shape = data.dims(); // Shape of output is batch_size x max_len x ...
   shape[0] = max_length;
