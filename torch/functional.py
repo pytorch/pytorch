@@ -9,7 +9,7 @@ __all__ = [
 
 
 def split(tensor, split_size, dim=0):
-    """Splits the tensor into chunks all of a certain size (if possible).
+    """Splits the tensor into chunks all of size :attr:`split_size` (if possible).
 
     Last chunk will be smaller if the tensor size along a given dimension
     is not divisible by :attr`split_size`.
