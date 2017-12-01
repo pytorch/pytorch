@@ -351,7 +351,7 @@ trns[idx] = 0.0h;                                                      \
     CHW_TO_CHWP4(3, n, c * 4 + 3, gid.y, gid.x);
 #undef CHW_TO_CHWP4
     
-    out.write(trns, ushort2(gid.x, gid.y), gid.z);
+    out.write(trns, gid.xy, gid.z);
 }
 
 kernel void copy_nchw_to_metal_nonarray(constant float* in[[buffer(0)]],
@@ -382,7 +382,7 @@ trns[idx] = 0.0h;                                     \
     CHW_TO_CHWP4(3, 3, gid.y, gid.x);
 #undef CHW_TO_CHWP4
     
-    out.write(trns, ushort2(gid.x, gid.y));
+    out.write(trns, gid.xy);
 }
 
 kernel void copy_metal_to_nchw(texture2d_array<half, access::read> in[[texture(0)]],
@@ -398,7 +398,7 @@ kernel void copy_metal_to_nchw(texture2d_array<half, access::read> in[[texture(0
     const ushort n = gid.z / divRoundUp(C, 4);
     const ushort c = gid.z - n * divRoundUp(C, 4);
     
-    half4 cs = in.read(ushort2(gid.x, gid.y), gid.z);
+    half4 cs = in.read(gid.xy, gid.z);
     
 #define CHWP4_TO_CHW(idx, n, c_, h, w)                                    \
 if ((c_) < C) {                                                         \
@@ -423,7 +423,7 @@ kernel void copy_metal_to_nchw_nonarray(texture2d<half, access::read> in[[textur
         return;
     }
     
-    half4 cs = in.read(ushort2(gid.x, gid.y));
+    half4 cs = in.read(gid.xy);
     
 #define CHWP4_TO_CHW(idx, c, h, w)                       \
 if ((c) < C) {                                         \
@@ -451,7 +451,7 @@ kernel void convtranspose_upscale(texture2d_array<half, access::read> in[[textur
     if (gid.x >= out.get_width() || gid.y >= out.get_height()) {
         return;
     }
-    const ushort2 gid_ = ushort2(gid.x, gid.y);
+    const ushort2 gid_ = gid.xy;
     if (gid.x < kernel_ - 1 - pad || gid.y < kernel_ - 1 - pad) {
         out.write(zero, gid_, gid.z);
         return;
@@ -547,10 +547,10 @@ kernel void col2im(
         }
     }
     if (has_out_arr) {
-        outa.write(static_cast<half4>(val), ushort2(gid.x, gid.y), gid.z);
+        outa.write(static_cast<half4>(val), gid.xy, gid.z);
     }
     if (has_out_tex) {
-        out.write(static_cast<half4>(val), ushort2(gid.x, gid.y));
+        out.write(static_cast<half4>(val), gid.xy);
     }
 }
 
@@ -650,7 +650,7 @@ kernel void reflection_padding(texture2d_array<half, access::read> in[[texture(0
     
     ushort2 inid(w, h);
     
-    out.write(in.read(inid, gid.z), ushort2(gid.x, gid.y), gid.z);
+    out.write(in.read(inid, gid.z), gid.xy, gid.z);
 }
 
 kernel void bilinear_upsample(texture2d<half, access::sample> in[[texture(0)]],
@@ -687,7 +687,7 @@ kernel void elementwise_mul(texture2d<half, access::read> in0[[texture(0), funct
     }
     idx = gid.y * outa.get_width() + gid.x;
   }
-  ushort2 gid_ = ushort2(gid.x, gid.y);
+  ushort2 gid_ = gid.xy;
   if (in0_is_tex) {
     out.write(in0.read(gid_) * in1[idx % last_dim], gid_);
   } else {
@@ -714,7 +714,7 @@ kernel void elementwise_sub(texture2d<half, access::read> in0[[texture(0), funct
     }
     idx = gid.y * outa.get_width() + gid.x;
   }
-  ushort2 gid_ = ushort2(gid.x, gid.y);
+  ushort2 gid_ = gid.xy;
   if (in0_is_tex) {
     out.write(in0.read(gid_) - in1[idx % last_dim], gid_);
   } else {
@@ -739,7 +739,7 @@ kernel void elementwise_add(texture2d_array<half, access::read> in0[[texture(0)]
     if (gid.x >= out.get_width() || gid.y >= out.get_height()) {
         return;
     }
-    ushort2 gid_ = ushort2(gid.x, gid.y);
+    ushort2 gid_ = gid.xy;
     out.write(in0.read(gid_, gid.z) + in1.read(gid_, gid.z), gid_, gid.z);
 }
 
@@ -1013,7 +1013,7 @@ kernel void roi_warp(texture2d_array<half, access::sample> in[[texture(0)]],
     }
   }
   output_val /= count;
-  out.write(static_cast<half4>(output_val), ushort2(gid.x, gid.y), gid.z);
+  out.write(static_cast<half4>(output_val), gid.xy, gid.z);
 }
 
 kernel void resize_nearest(texture2d_array<half, access::sample> in[[texture(0)]],
@@ -1029,7 +1029,7 @@ kernel void resize_nearest(texture2d_array<half, access::sample> in[[texture(0)]
     constexpr sampler s(coord::pixel, address::clamp_to_edge, filter::nearest);
     const int in_y = (int)(gid.y / height_scale);
     const int in_x = (int)(gid.x / width_scale);
-    out.write(in.sample(s, float2(in_x, in_y), gid.z), ushort2(gid.x, gid.y), gid.z);
+    out.write(in.sample(s, float2(in_x, in_y), gid.z), gid.xy, gid.z);
 }
 
 kernel void resize_nearest_nonarray(texture2d<half, access::sample> in[[texture(0)]],
@@ -1045,7 +1045,7 @@ kernel void resize_nearest_nonarray(texture2d<half, access::sample> in[[texture(
     constexpr sampler s(coord::pixel, address::clamp_to_edge, filter::nearest);
     const int in_y = (int)(gid.y / height_scale);
     const int in_x = (int)(gid.x / width_scale);
-    out.write(in.sample(s, float2(in_x, in_y)), ushort2(gid.x, gid.y));
+    out.write(in.sample(s, float2(in_x, in_y)), gid.xy);
 }
 
 kernel void nms(device uint* mask[[buffer(0)]],
