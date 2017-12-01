@@ -188,6 +188,8 @@ class GetLambdaRankNdcgGradient : public GradientMakerBase {
   }
 };
 
+REGISTER_GRADIENT(LambdaRankNdcg, GetLambdaRankNdcgGradient);
+
 } // namespace
 
 } // namespace caffe2
