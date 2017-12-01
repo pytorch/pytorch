@@ -3504,6 +3504,7 @@
     - Double
   backends:
     - CPU
+    - CUDA
   variants:
     - method
     - function

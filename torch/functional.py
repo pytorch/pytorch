@@ -4,7 +4,7 @@ from operator import mul
 from functools import reduce
 
 __all__ = [
-    'split', 'chunk', 'stack', 'unbind', 'btriunpack', 'matmul',
+    'split', 'chunk', 'stack', 'unbind', 'btriunpack', 'matmul', 'det',
 ]
 
 
@@ -245,3 +245,20 @@ def matmul(tensor1, tensor2, out=None):
 
     raise ValueError("both arguments to __matmul__ need to be at least 1D, "
                      "but they are {}D and {}D".format(dim_tensor1, dim_tensor2))
+
+
+def det(var):
+    """Calculates determinant of a 2D square Variable.
+
+    .. note::
+        Backward through `det` internally uses SVD results. So double backward
+        through `det` will need to backward through :meth:`~Tensor.svd`. This
+        can be unstable in certain cases. Please see :meth:`~torch.svd` for
+        details.
+
+    Arguments:
+        var (Variable): The input 2D square Variable.
+    """
+    if torch.is_tensor(var):
+        raise ValueError("det is currently only supported on Variable")
+    return var.det()

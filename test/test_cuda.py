@@ -316,7 +316,8 @@ tests = [
     ('qr', small_2d_lapack_fat, lambda t: [], 'fat', float_types),
     ('qr', large_2d_lapack, lambda t: [], 'big', float_types),
     ('inverse', new_t(20, 20), lambda t: [], None, float_types),
-
+    ('geqrf', new_t(20, 20), lambda t: [], None, float_types),
+    # TODO: add det to here once Variable and Tensor are the same thing
 ]
 
 # TODO: random functions, cat, gather, scatter, index*, masked*,
@@ -937,6 +938,10 @@ class TestCuda(TestCase):
     @staticmethod
     def _select_broadcastable_dims(dims_full=None):
         return TestTorch._select_broadcastable_dims(dims_full)
+
+    @unittest.skipIf(not HAS_MAGMA, "no MAGMA library detected")
+    def test_det(self):
+        TestTorch._test_det(self, lambda t: t.cuda())
 
     def test_broadcast(self):
         TestTorch._test_broadcast(self, lambda t: t.cuda())
