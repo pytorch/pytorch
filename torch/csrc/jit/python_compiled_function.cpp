@@ -2,7 +2,6 @@
 
 #include "torch/csrc/jit/pybind.h"
 #include "torch/csrc/autograd/variable.h"
-#include "torch/csrc/autograd/functions/jit_closure.h"
 #include "torch/csrc/jit/tracer.h"
 #include "torch/csrc/jit/passes/dead_code_elimination.h"
 #include "torch/csrc/jit/passes/peephole.h"
@@ -26,17 +25,6 @@ namespace {
 // pybind casts are really verobse...
 py::object steal(py::handle x) {
   return py::reinterpret_steal<py::object>(x);
-}
-
-py::object borrow(py::handle x) {
-  return py::reinterpret_borrow<py::object>(x);
-}
-
-py::object makePair(py::handle a, py::handle b) {
-  py::tuple result(2);
-  result[0] = borrow(a);
-  result[1] = borrow(b);
-  return result;
 }
 
 } // anonymous namespace
@@ -92,33 +80,24 @@ struct CompiledFunction {
         PeepholeOptimize(complete_trace->graph);
         FuseGraph(complete_trace->graph);
       }
-      try {
-        factory_ = std::make_shared<InterpreterFunctionFactory>(complete_trace.get());
-      } catch(const jit::NotImplementedException & ex) {
-        closure_ = std::make_shared<AutogradClosureFactory>(complete_trace.get());
-      }
+      factory_ = std::make_shared<InterpreterFunctionFactory>(complete_trace.get());
       graph_ = complete_trace->graph;
       is_ready_ = true;
       return true;
     }
 
-    variable_list run(const variable_list& in_vars) {
+    variable_list run(variable_list inputs) {
       JIT_ASSERT(is_ready_);
       AutoNoGIL _gil_guard;
-      if (closure_) {
-        auto fn = closure_->construct();
-        return (*fn)(in_vars);
-      } else {
-        auto fn = factory_->construct();
-        fn->willReleaseVariables(); // forward pass is never reused, so it is safe to release anything it can
-        return fn->apply(in_vars);
-      }
+      auto fn = factory_->construct();
+      fn->willReleaseVariables(); // forward pass is never reused, so it is safe to release anything it can
+      return fn->apply(inputs);
     }
 
-    PyObject* add_trace(PyObject *args, const variable_list& in_vars) {
+    PyObject* add_trace(PyObject *args, variable_list inputs) {
       JIT_ASSERT(!is_ready_);
       // Start tracing
-      auto trace = tracer::enter(fmap<TraceInput>(in_vars), is_volatile_ ? 1 : (fn_.nderivs_ + 1));
+      auto trace = tracer::enter(fmap<TraceInput>(inputs), is_volatile_ ? 1 : (fn_.nderivs_ + 1));
 
       // Call back into Python function
       auto out = PyObject_CallObject(fn_.function_.get(), args);
@@ -144,7 +123,6 @@ struct CompiledFunction {
     bool is_volatile_;
     bool is_ready_ = false;
 
-    std::shared_ptr<AutogradClosureFactory> closure_;
     std::shared_ptr<InterpreterFunctionFactory> factory_;
     std::shared_ptr<jit::Graph> graph_;
   };
@@ -158,21 +136,27 @@ struct CompiledFunction {
     return it->second;
   }
 
-  py::object call(py::handle pyargs, py::handle pyparams) {
+  ParsedArgs flattenArgs(py::handle pyargs) {
+    auto args = flatten(pyargs);
+    // We need to take captured_var types into account when choosing the trace
+    args.extend(captured_vars_);
+    return args;
+  }
+
+  py::object call(py::handle pyargs) {
     if (!enabled_) {
       return steal(PyObject_CallObject(function_.get(), pyargs.ptr()));
     }
-    auto all_pyargs = makePair(pyargs, pyparams);
-    auto args = flatten(all_pyargs);
+    auto args = flattenArgs(pyargs);
     auto& ktrace = getTrace(args);
 
     variable_list out_vars;
     if (ktrace.ready()) {
       hits_++;
-      return steal(unflatten(ktrace.run(args.vars), ktrace.out_desc_));
+      return steal(unflatten(ktrace.run(std::move(args.vars)), ktrace.out_desc_));
     } else {
       misses_++;
-      return steal(ktrace.add_trace(pyargs.ptr(), args.vars));
+      return steal(ktrace.add_trace(pyargs.ptr(), std::move(args.vars)));
     }
   }
 
@@ -180,15 +164,16 @@ struct CompiledFunction {
     ktraces_.clear();
   }
 
-  CompiledFunction(int nderivs, bool optimize, py::object function,
+  CompiledFunction(int nderivs, bool optimize, bool enabled, py::object function,
                    std::string name)
     : nderivs_(nderivs)
     , optimize_(optimize)
-    , enabled_(true)
+    , enabled_(enabled)
     , hits_(0)
     , misses_(0)
     , function_(function.release().ptr())
     , name_(std::move(name))
+    , captured_vars_()
     , ktraces_() {}
 
   int nderivs_;
@@ -198,16 +183,15 @@ struct CompiledFunction {
   std::atomic<uint64_t> misses_;
   THPObjectPtr function_;
   std::string name_;
+  variable_list captured_vars_;
   std::unordered_map<IODescriptor, TraceForKey, torch::hash<IODescriptor>> ktraces_;
 };
 
 namespace {
 
 CompiledFunction::TraceForKey* getTraceFor(CompiledFunction& fn,
-                                           py::handle pyargs,
-                                           py::handle pyparams) {
-  auto all_pyargs = makePair(pyargs, pyparams);
-  auto args = flatten(all_pyargs);
+                                           py::handle pyargs) {
+  auto args = fn.flattenArgs(pyargs);
   auto it = fn.ktraces_.find(args.desc);
   if (it == fn.ktraces_.end())
     return nullptr;
@@ -218,20 +202,23 @@ CompiledFunction::TraceForKey* getTraceFor(CompiledFunction& fn,
 
 void initCompilerMixin(PyObject *module) {
   auto m = py::handle(module).cast<py::module>();
-  py::class_<CompiledFunction>(m, "CompiledFunction")
-    .def(py::init<int, bool, py::object, std::string>())
-    .def("__call__", [](CompiledFunction& fn, py::handle args, py::handle parameters) -> py::object {
-      return fn.call(args, parameters);
+  py::class_<CompiledFunction>(m, "CompiledFunction", py::dynamic_attr())
+    .def(py::init<int, bool, bool, py::object, std::string>())
+    .def("__call__", [](CompiledFunction& fn, py::args args) -> py::object {
+      return fn.call(args);
     })
-    .def("has_trace_for", [](CompiledFunction& fn, py::handle args, py::handle parameters) -> bool {
-      return getTraceFor(fn, args, parameters) != nullptr;
+    .def("has_trace_for", [](CompiledFunction& fn, py::args args) -> bool {
+      return getTraceFor(fn, args) != nullptr;
     })
-    .def("graph_for", [](CompiledFunction& fn, py::handle pyargs, py::handle pyparameters) -> py::object {
-      auto trace = getTraceFor(fn, pyargs, pyparameters);
+    .def("graph_for", [](CompiledFunction& fn, py::args args) -> py::object {
+      auto trace = getTraceFor(fn, args);
       return trace ? py::cast(trace->graph_) : py::none();
     })
     .def("clear_cache", [](CompiledFunction& fn) {
       fn.clearCache();
+    })
+    .def("set_captured_vars", [](CompiledFunction& fn, variable_list vars) {
+      fn.captured_vars_ = std::move(vars);
     })
     .def_property_readonly("hits", [](CompiledFunction& fn) {
       return fn.hits_.load();

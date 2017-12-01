@@ -53,7 +53,7 @@ exporter to print out a human-readable representation of the network::
 You can also verify the protobuf using the `onnx <https://github.com/onnx/onnx/>`_ library.
 You can install ``onnx`` with conda::
 
-    conda install -c ezyang onnx
+    conda install -c conda-forge onnx
 
 Then, you can run::
 
@@ -75,10 +75,8 @@ To run the exported script with `caffe2 <https://caffe2.ai/>`_, you will need th
 
 2. You'll need `onnx-caffe2 <https://github.com/onnx/onnx-caffe2>`_, a
    pure-Python library which provides a Caffe2 backend for ONNX.  You can install ``onnx-caffe2``
-   with conda or pip::
+   with pip::
 
-      conda install -c ezyang onnx-caffe2
-      # OR
       pip install onnx-caffe2
 
 Once these are installed, you can use the backend for Caffe2::
@@ -122,34 +120,48 @@ Limitations
 Supported operators
 -------------------
 
-In this tech preview, only the following operators are supported:
+The following operators are supported:
 
-* Add (inplace is discarded)
-* Sub (inplace is discarded)
-* Mul (inplace is discarded)
-* Negate (inplace is discarded)
-* Addmm (inplace is discarded, alpha and beta must be 1)
-* Tanh (inplace is discarded)
-* Sigmoid (inplace is discarded)
-* Transpose
-* View
-* Permute
-* Concat
-* Squeeze (inplace is discarded)
+* add (nonzero alpha not supported)
+* sub (nonzero alpha not supported)
+* mul
+* div
+* cat
+* mm
+* addmm
+* neg
+* tanh
+* sigmoid
+* mean
+* t
+* expand (only when used before a broadcasting ONNX operator; e.g., add)
+* transpose
+* view
+* split
+* squeeze
+* prelu (single weight shared among input channels not supported)
+* threshold (non-zero threshold/non-zero value not supported)
+* leaky_relu
+* glu
+* softmax
+* avg_pool2d (ceil_mode not supported)
+* log_softmax
+* unfold (experimental support with ATen-Caffe2 integration)
+* elu
+* Conv
 * BatchNorm
-* Convolution
-* Embedding (only optional argument that is supported is ``padding_idx``)
-* Slice (only integer indexing is supported)
-* Dropout (inplace is discarded)
-* Relu (inplace is discarded)
-* PReLU (inplace is discarded, sharing a single weight among all channels is not supported)
-* LeakyRelu (inplace is discarded)
-* MaxPool1d (ceil_mode must be False)
-* MaxPool2d (ceil_mode must be False)
-* AvgPool2d (ceil_mode must be False)
+* MaxPool1d (ceil_mode not supported)
+* MaxPool2d (ceil_mode not supported)
+* MaxPool3d (ceil_mode not supported)
+* Embedding (no optional arguments supported)
+* RNN
+* ConstantPadNd
+* Dropout
+* FeatureDropout (training mode not supported)
+* Index (constant integer and tuple indices supported)
+* Negate
 
-We plan on expanding support to more operators; RNNs are high on our priority
-list.  The operator set above is sufficient to export the following models:
+The operator set above is sufficient to export the following models:
 
 * AlexNet
 * DCGAN

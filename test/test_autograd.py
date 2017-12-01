@@ -4,21 +4,19 @@ import sys
 import math
 import torch
 import unittest
-import warnings
 import random
 from copy import deepcopy
 from collections import OrderedDict
 from itertools import product
 from operator import mul
 from functools import reduce
-import torch.nn.functional as F
 from torch.autograd.gradcheck import gradgradcheck, gradcheck
 from torch.autograd.function import once_differentiable
 from torch.autograd.profiler import profile
 
 from common import TestCase, run_tests, skipIfNoLapack
-from torch.autograd._functions import *
 from torch.autograd import Variable, Function
+from torch.autograd.function import InplaceFunction
 
 if sys.version_info[0] == 2:
     import cPickle as pickle
@@ -1197,15 +1195,87 @@ class TestAutograd(TestCase):
                 self.assertIs(y.long().data.get_device(), 1)
 
         for t in [torch.DoubleTensor, torch.FloatTensor, torch.IntTensor, torch.ByteTensor]:
-            for var in (True, False):
+            for y_var in (True, False):
                 y = torch.randn(5, 5).type(t)
-                if var:
-                    y = Variable(y)
+                y = Variable(y) if y_var else y
+                self.assertIs(type(x.type(t).data), t)
                 self.assertIs(type(x.type_as(y).data), t)
+                if torch.cuda.is_available():
+                    for x_cuda in (True, False):
+                        for y_cuda in (True, False):
+                            x_c = x.cuda() if x_cuda else x
+                            y_c = y.cuda() if y_cuda else y
+                            y_type = type(y_c.data) if y_var else type(y_c)
+                            y_typestr = ('torch.cuda.' if y_cuda else 'torch.') + y_type.__name__
+                            self.assertIs(y_type, type(x_c.type(y_typestr).data))
+                            self.assertIs(type(y_c.data) if y_var else type(y_c), type(x_c.type_as(y_c).data))
 
         self._test_type_conversion_backward(lambda x: x)
         if torch.cuda.is_available():
             self._test_type_conversion_backward(lambda x: x.cuda())
+            if torch.cuda.device_count() >= 2:
+                # one of these has to be the non-default device
+                self._test_type_conversion_backward(lambda x: x.cuda(0))
+                self._test_type_conversion_backward(lambda x: x.cuda(1))
+
+    def _test_scalar_conversions(self, t, integral_conv):
+        # integral -> integral
+        l = Variable(t(torch.zeros(1, 1, 1).long()))
+        scalar = -12345
+        l[0] = scalar
+        self.assertEqual(integral_conv(l), scalar)
+
+        # floating point -> floating point
+        f = Variable(t(torch.randn(1, 1)))
+        scalar = -12345.1
+        f[0] = scalar
+        self.assertEqual(float(f), scalar)
+        f[0] = float('nan')
+        self.assertTrue(math.isnan(float(f)))
+        f[0] = float('inf')
+        self.assertEqual(float(f), float('inf'))
+        f[0] = float('-inf')
+        self.assertEqual(float(f), float('-inf'))
+
+        # integral -> floating point
+        # check we can convert something that loses precision
+        scalar = 1234567890123456789
+        self.assertNotEqual(scalar, integral_conv(float(scalar)))
+        l[0] = scalar
+        self.assertEqual(float(l), float(scalar))
+
+        # floating point -> integral
+        f[0] = float('nan')
+        self.assertRaises(ValueError, lambda: integral_conv(f[0]))
+        f[0] = float('inf')
+        self.assertRaises(OverflowError, lambda: integral_conv(f[0]))
+        f[0] = float('-inf')
+        self.assertRaises(OverflowError, lambda: integral_conv(f[0]))
+        f[0] = sys.float_info.max
+        self.assertEqual(integral_conv(f), sys.float_info.max)
+
+        # bool, nonzero
+        def test_nonzero(tensor, value, expected):
+            tensor[0] = value
+            self.assertEqual(expected, bool(tensor))
+            self.assertEqual(expected, True if tensor else False)
+
+        test_nonzero(l, 0, False)
+        test_nonzero(l, -2, True)
+        test_nonzero(f, 0.0, False)
+        test_nonzero(f, sys.float_info.min, True)
+        test_nonzero(f, float('nan'), bool(float('nan')))
+        test_nonzero(f, float('inf'), bool(float('inf')))
+        test_nonzero(f, float('-inf'), bool(float('-inf')))
+
+    def test_scalar_conversions(self):
+        self._test_scalar_conversions(lambda x: x, lambda x: int(x))
+        if sys.version_info[0] == 2:
+            self._test_scalar_conversions(lambda x: x, lambda x: long(x))
+        if torch.cuda.is_available():
+            self._test_scalar_conversions(lambda x: x.cuda(), lambda x: int(x))
+            if sys.version_info[0] == 2:
+                self._test_scalar_conversions(lambda x: x.cuda(), lambda x: long(x))
 
     def test_isolated_node(self):
         x = Variable(torch.randn(5, 5), requires_grad=True)
@@ -1567,6 +1637,43 @@ class TestAutograd(TestCase):
         for key in keys:
             self.assertTrue(hasattr(x, key))
 
+    @skipIfNoLapack
+    def test_potrf_gradient(self):
+        def _calc_deriv_numeric(A, L, upper):
+            # numerical forward derivative
+            dA = Variable(_make_cov(5))
+            eps = 1e-6
+            outb = torch.potrf(A + (eps / 2) * dA, upper)
+            outa = torch.potrf(A - (eps / 2) * dA, upper)
+            dL = (outb - outa) / eps
+
+            return dA, dL
+
+        def _calc_deriv_sym(A, L, upper):
+            # reverse mode
+            Lbar = Variable(torch.rand(5, 5).tril())
+            if upper:
+                Lbar = Lbar.t()
+            L.backward(Lbar)
+            Abar = A.grad
+
+            return Abar, Lbar
+
+        def _check_total_variation(A, L, upper):
+            dA, dL = _calc_deriv_numeric(A, L, upper)
+            Abar, Lbar = _calc_deriv_sym(A, L, upper)
+
+            # compare df = Tr(dA^T Abar) = Tr(dL^T Lbar)
+            df1 = (dL * Lbar).sum()
+            df2 = (dA * Abar).sum()
+
+            self.assertEqual(df1, df2, prec=1e-3)
+
+        for upper in [True, False]:
+            A = Variable(_make_cov(5), requires_grad=True)
+            L = torch.potrf(A, upper)
+            _check_total_variation(A, L, upper)
+
     def test_as_strided(self):
         x = Variable(torch.arange(0, 25).view(5, 5), requires_grad=True)
 
@@ -1791,6 +1898,30 @@ def _make_cov(S):
     return torch.mm(L, L.t())
 
 
+def random_square_matrix_of_rank(l, rank):
+    assert rank <= l
+    A = torch.randn(l, l)
+    u, s, v = A.svd()
+    for i in range(l):
+        if i >= rank:
+            s[i] = 0
+        elif s[i] == 0:
+            s[i] = 1
+    return u.mm(torch.diag(s)).mm(v.transpose(0, 1))
+
+
+def random_symmetric_matrix(l):
+    A = torch.randn(l, l)
+    return A.mm(A.transpose(0, 1))
+
+
+def random_fullrank_matrix_distinct_singular_value(l):
+    A = torch.randn(l, l)
+    u, _, v = A.svd()
+    s = torch.arange(1, l + 1).mul_(1.0 / (l + 1))
+    return u.mm(torch.diag(s)).mm(v.transpose(0, 1))
+
+
 class dont_convert(tuple):
     pass
 
@@ -1798,7 +1929,6 @@ class dont_convert(tuple):
 L = 20
 M = 10
 S = 5
-
 
 # (name, size, args...)
 method_tests = [
@@ -2059,6 +2189,13 @@ method_tests = [
     ('index_copy', (S, S), (0, index_perm_variable(2, S), (2, S)), 'dim', [0]),
     ('index_fill', (S, S), (0, index_variable(2, S), 2), 'dim', [0]),
     ('inverse', (S, S), (), '', (), [skipIfNoLapack]),
+    ('det', (S, S), (), '', (), [skipIfNoLapack]),
+    ('det', lambda: random_symmetric_matrix(S), (), 'symmetric', (), [skipIfNoLapack]),
+    ('det', lambda: random_square_matrix_of_rank(S, S - 2), (), 'dim2_null', (), [skipIfNoLapack]),
+    ('det', lambda: random_square_matrix_of_rank(S, 1), (), 'rank1', (), [skipIfNoLapack]),
+    ('det', lambda: random_square_matrix_of_rank(S, 2), (), 'rank2', (), [skipIfNoLapack]),
+    ('det', lambda: random_fullrank_matrix_distinct_singular_value(S), (), 'distinct_postive_s', (), [skipIfNoLapack]),
+    ('svd', lambda: random_fullrank_matrix_distinct_singular_value(S), (), '', (), [skipIfNoLapack]),
     ('gesv', (S, S), ((S, S),), '', (), [skipIfNoLapack]),
     ('potrf', _make_cov(S), (True,), '', (), [skipIfNoLapack]),
     ('eq', (S, S, S), ((S, S, S),)),
@@ -2196,6 +2333,8 @@ def create_input(call_args, requires_grad=True, non_contiguous=False):
                 return Variable(maybe_non_contig(arg), requires_grad=requires_grad)
         elif isinstance(arg, Variable) and non_contiguous:
             return Variable(maybe_non_contig(arg.data), requires_grad=arg.requires_grad)
+        elif callable(arg):
+            return map_arg(arg())
         else:
             return arg
     return tuple(map_arg(arg) for arg in call_args)
@@ -2232,6 +2371,19 @@ EXCLUDE_FUNCTIONAL = {
 EXCLUDE_GRADCHECK = {
     'potrf'
 }
+EXCLUDE_GRADGRADCHECK = {
+    'svd'
+}
+EXCLUDE_GRADGRADCHECK_BY_TEST_NAME = {
+    # Some of the following det ones pass because random matrix has full rank
+    # with high probability. But we can't rely on this. So only test gradgrad on
+    # test_det_distinct_postive_s.
+    'test_det',
+    'test_det_symmetric',
+    'test_det_dim2_null',
+    'test_det_rank1',
+    'test_det_rank2'
+}
 
 
 def exclude_tensor_method(name, test_name):
@@ -2252,6 +2404,7 @@ def exclude_tensor_method(name, test_name):
         'resize_as',
         'scatter',
         'scatter_add',
+        'det',
     }
     if test_name in exclude_all_tensor_method_by_test_name:
         return True
@@ -2283,9 +2436,11 @@ def gradgradcheck_method_precision_override(test_name):
     return override
 
 
-def run_grad_and_gradgrad_checks(test_case, test_name, apply_method, output_variable, input_variables):
+def run_grad_and_gradgrad_checks(test_case, name, test_name, apply_method, output_variable,
+                                 input_variables, run_gradgradcheck=True):
     test_case.assertTrue(gradcheck(apply_method, input_variables, eps=1e-6, atol=PRECISION))
-
+    if name in EXCLUDE_GRADGRADCHECK or test_name in EXCLUDE_GRADGRADCHECK_BY_TEST_NAME:
+        return
     grad_y = generate_gradoutput(output_variable, non_contiguous=True)
     gradgradcheck_precision_override = gradgradcheck_method_precision_override(test_name)
     if gradgradcheck_precision_override is not None:
@@ -2293,7 +2448,7 @@ def run_grad_and_gradgrad_checks(test_case, test_name, apply_method, output_vari
         rtol = gradgradcheck_precision_override['rtol']
         test_case.assertTrue(gradgradcheck(apply_method, input_variables, grad_y, atol=atol, rtol=rtol))
     else:
-        test_case.assertTrue(gradgradcheck(apply_method, input_variables, grad_y,))
+        test_case.assertTrue(gradgradcheck(apply_method, input_variables, grad_y))
 
 
 def run_functional_checks(test_case, test_name, name, apply_fn, run_grad_checks,
@@ -2306,7 +2461,7 @@ def run_functional_checks(test_case, test_name, name, apply_fn, run_grad_checks,
         test_case.assertEqual(unpack_variables(output_variable), output_tensor)
 
     if run_grad_checks:
-        run_grad_and_gradgrad_checks(test_case, test_name, apply_fn,
+        run_grad_and_gradgrad_checks(test_case, name, test_name, apply_fn,
                                      output_variable, f_args_variable)
 
     self_variable = f_args_variable[0]
@@ -2350,7 +2505,7 @@ for test in method_tests:
                     # TODO: check that both have changed after adding all inplace ops
 
                 if not is_inplace and name not in EXCLUDE_GRADCHECK:
-                    run_grad_and_gradgrad_checks(self, test_name,
+                    run_grad_and_gradgrad_checks(self, name, test_name,
                                                  lambda *inputs: getattr(inputs[0], name)(*inputs[1:]),
                                                  output_variable, (self_variable,) + args_variable)
 

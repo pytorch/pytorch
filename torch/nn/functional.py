@@ -11,7 +11,7 @@ from . import _functions
 from .modules import utils
 from ._functions.linear import Bilinear
 from ._functions.padding import ConstantPadNd
-from ._functions.vision import GridSampler, AffineGridGenerator
+from ._functions import vision
 from torch.autograd import Variable
 from .modules.utils import _single, _pair, _triple
 
@@ -1267,6 +1267,16 @@ def binary_cross_entropy_with_logits(input, target, weight=None, size_average=Tr
         return loss.sum()
 
 
+def _pointwise_loss(lambd, lambd_optimized, input, target, size_average=True, reduce=True):
+    if target.requires_grad:
+        d = lambd(input, target)
+        if not reduce:
+            return d
+        return torch.mean(d) if size_average else torch.sum(d)
+    else:
+        return lambd_optimized(input, target, size_average, reduce)
+
+
 smooth_l1_loss = _add_docstr(torch._C._nn.smooth_l1_loss, r"""
 smooth_l1_loss(input, target, size_average=True) -> Variable
 
@@ -1276,21 +1286,29 @@ element-wise error falls below 1 and an L1 term otherwise.
 See :class:`~torch.nn.SmoothL1Loss` for details.
 """)
 
-l1_loss = _add_docstr(torch._C._nn.l1_loss, r"""
-l1_loss(input, target, size_average=True, reduce=True) -> Variable
 
-Function that takes the mean element-wise absolute value difference.
+def l1_loss(input, target, size_average=True, reduce=True):
+    """
+    l1_loss(input, target, size_average=True, reduce=True) -> Variable
 
-See :class:`~torch.nn.L1Loss` for details.
-""")
+    Function that takes the mean element-wise absolute value difference.
 
-mse_loss = _add_docstr(torch._C._nn.mse_loss, r"""
-mse_loss(input, target, size_average=True, reduce=True) -> Variable
+    See :class:`~torch.nn.L1Loss` for details.
+    """
+    return _pointwise_loss(lambda a, b: torch.abs(a - b), torch._C._nn.l1_loss,
+                           input, target, size_average, reduce)
 
-Measures the element-wise mean squared error.
 
-See :class:`~torch.nn.MSELoss` for details.
-""")
+def mse_loss(input, target, size_average=True, reduce=True):
+    """
+    mse_loss(input, target, size_average=True, reduce=True) -> Variable
+
+    Measures the element-wise mean squared error.
+
+    See :class:`~torch.nn.MSELoss` for details.
+    """
+    return _pointwise_loss(lambda a, b: (a - b) ** 2, torch._C._nn.mse_loss,
+                           input, target, size_average, reduce)
 
 
 def margin_ranking_loss(input1, input2, target, margin=0, size_average=True):
@@ -1508,7 +1526,7 @@ def grid_sample(input, grid, mode='bilinear', padding_mode='zeros'):
 
     """
     batch_size, channels, in_height, in_width = input.size()
-    return GridSampler.apply(input, grid, padding_mode)
+    return vision.grid_sampler(input, grid, padding_mode)
 
 
 def affine_grid(theta, size):
@@ -1524,7 +1542,7 @@ def affine_grid(theta, size):
     Returns:
         output (Variable): output Tensor of size (N x H x W x 2)
     """
-    return AffineGridGenerator.apply(theta, size)
+    return vision.affine_grid_generator(theta, size)
 
 
 def pad(input, pad, mode='constant', value=0):

@@ -24,6 +24,7 @@
 #include "torch/csrc/jit/resource_guard.h"
 #include "torch/csrc/jit/type.h"
 #include "torch/csrc/jit/graph_node_list.h"
+#include "torch/csrc/jit/variable_flags.h"
 
 namespace torch { namespace autograd {
 
@@ -678,8 +679,8 @@ public:
     n->g_(kSubgraph,std::make_shared<Graph>());
     return n;
   }
-  Node * createPythonOp(THPObjectPtr&& pyobj, const std::string & cconv, bool is_legacy, pyobj_list&& scalar_args);
-  Node * createCppOp(const std::shared_ptr<torch::autograd::Function> & fn);
+  Node * createPythonOp(THPObjectPtr&& pyobj, const std::string & cconv, bool is_legacy, std::vector<VariableFlags> && var_flags, pyobj_list&& scalar_args);
+  Node * createCppOp(const std::shared_ptr<torch::autograd::Function> & fn, std::vector<VariableFlags> && var_flags);
   // clone n, making a new node in _this_ graph.
   // use node_map to translate inputs of n to inputs of the cloned node
   Node * createClone(Node * n, std::function<Value*(Value*)> value_map) {
@@ -865,10 +866,11 @@ struct PythonOp : public Node {
   static const NodeKind Kind = kPythonOp;
   PythonOp(Graph * graph)
   : Node(graph,kPythonOp) {}
-  PythonOp* init(THPObjectPtr&& pyobj, const std::string & cconv, bool is_legacy, pyobj_list&& scalar_args) {
+  PythonOp* init(THPObjectPtr&& pyobj, const std::string & cconv, bool is_legacy, std::vector<VariableFlags> && var_flags, pyobj_list&& scalar_args) {
     this->pyobj = std::move(pyobj);
     this->scalar_args = std::move(scalar_args);
     this->cconv = cconv;
+    this->var_flags = std::move(var_flags);
     this->is_legacy = is_legacy;
     return this;
   }
@@ -890,12 +892,13 @@ struct PythonOp : public Node {
   // Scalar arguments to the Python function.  Not necessarily passed to
   // the function in this order; see cconv for the correct order.
   std::vector<THPObjectPtr> scalar_args;
+  std::vector<VariableFlags> var_flags;
   std::string name() const;
   virtual void cloneFrom(Node * other_) override;
 };
-inline Node * Graph::createPythonOp(THPObjectPtr&& pyobj, const std::string & cconv, bool is_legacy, pyobj_list&& scalar_args) {
+inline Node * Graph::createPythonOp(THPObjectPtr&& pyobj, const std::string & cconv, bool is_legacy, std::vector<VariableFlags> && var_flags, pyobj_list&& scalar_args) {
   auto op = new PythonOp(this);
-  return op->init(std::move(pyobj),cconv,is_legacy,std::move(scalar_args));
+  return op->init(std::move(pyobj),cconv,is_legacy,std::move(var_flags), std::move(scalar_args));
 }
 
 // A Cpp operator is an operator which dispatches directly to an autograd function.
@@ -905,10 +908,12 @@ struct CppOp : public Node {
   CppOp(Graph * g)
   : Node(g,kCppOp) {}
   std::shared_ptr<torch::autograd::Function> fn;
+  std::vector<VariableFlags> var_flags;
   std::string name() const;
-  CppOp* init(std::shared_ptr<torch::autograd::Function> fn) {
+  CppOp* init(std::shared_ptr<torch::autograd::Function> fn, std::vector<VariableFlags> && var_flags) {
     JIT_ASSERT(fn);
     this->fn = std::move(fn);
+    this->var_flags = std::move(var_flags);
     return this;
   }
   virtual Node * allocNewInstance(Graph * g) override {
@@ -918,11 +923,12 @@ struct CppOp : public Node {
     Node::cloneFrom(other_);
     auto other = other_->cast<CppOp>();
     this->fn = other->fn;
+    this->var_flags = other->var_flags;
   }
 };
-inline Node * Graph::createCppOp(const std::shared_ptr<torch::autograd::Function> & fn) {
+inline Node * Graph::createCppOp(const std::shared_ptr<torch::autograd::Function> & fn, std::vector<VariableFlags> && var_flags) {
   auto op = new CppOp(this);
-  return op->init(fn);
+  return op->init(fn, std::move(var_flags));
 }
 
 inline graph_node_list_iterator Node::iterator() {

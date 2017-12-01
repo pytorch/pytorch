@@ -254,7 +254,7 @@ def generate_storage_type_and_tensor(backend, density, scalar_type, declarations
 
 cwrap_files = [f for f in files if f.endswith('.cwrap')]
 nn_files = [f for f in files if f.endswith('nn.yaml') or f.endswith('.h')]
-native_files = [f for f in files if f.endswith('native_functions.yaml')]
+native_files = [f for f in files if f.endswith('native_functions.yaml') or f.endswith('cuDNN.yaml')]
 
 declarations = [d
                 for file in cwrap_files

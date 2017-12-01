@@ -19,7 +19,6 @@ from torch._six import string_classes
 
 torch.set_default_tensor_type('torch.DoubleTensor')
 
-# set seed one time
 parser = argparse.ArgumentParser(add_help=False)
 parser.add_argument('--seed', type=int, default=123)
 parser.add_argument('--accept', action='store_true')
@@ -27,6 +26,7 @@ args, remaining = parser.parse_known_args()
 SEED = args.seed
 ACCEPT = args.accept
 UNITTEST_ARGS = [sys.argv[0]] + remaining
+torch.manual_seed(SEED)
 
 
 def run_tests():
@@ -127,8 +127,6 @@ class TestCase(unittest.TestCase):
 
     def setUp(self):
         torch.manual_seed(SEED)
-        if torch.cuda.is_available():
-            torch.cuda.manual_seed_all(SEED)
 
     def assertTensorsSlowEqual(self, x, y, prec=None, message=''):
         max_err = 0
@@ -137,8 +135,21 @@ class TestCase(unittest.TestCase):
             max_err = max(max_err, abs(x[index] - y[index]))
         self.assertLessEqual(max_err, prec, message)
 
+    def safeToDense(self, t):
+        r = self.safeCoalesce(t)
+        return r.to_dense()
+
     def safeCoalesce(self, t):
         tc = t.coalesce()
+        self.assertEqual(tc.to_dense(), t.to_dense())
+        self.assertTrue(tc.is_coalesced())
+
+        # Our code below doesn't work when nnz is 0, because
+        # then it's a 0D tensor, not a 2D tensor.
+        if t._nnz() == 0:
+            self.assertEqual(t._indices(), tc._indices())
+            self.assertEqual(t._values(), tc._values())
+            return tc
 
         value_map = {}
         for idx, val in zip(t._indices().t(), t._values()):
@@ -160,6 +171,10 @@ class TestCase(unittest.TestCase):
 
         self.assertEqual(tc._indices(), tg._indices())
         self.assertEqual(tc._values(), tg._values())
+
+        if t.is_coalesced():
+            self.assertEqual(tc._indices(), t._indices())
+            self.assertEqual(tc._values(), t._values())
 
         return tg
 

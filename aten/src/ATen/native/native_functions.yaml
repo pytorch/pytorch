@@ -44,9 +44,15 @@
 
 - func: index_put_(Tensor self, TensorList indices, Tensor values) -> Tensor
 
+- func: is_nonzero(Tensor self) -> bool
+
 - func: is_same_size(Tensor self, Tensor other) -> bool
 
 - func: is_cuda(Tensor self) -> bool
+
+- func: is_distributed(Tensor self) -> bool
+
+- func: is_sparse(Tensor self) -> bool
 
 - func: select(Tensor self, int64_t dim, int64_t index) -> Tensor
 
@@ -70,11 +76,19 @@
 
 - func: unsqueeze_(Tensor self, int64_t dim) -> Tensor
 
+- func: _det_with_svd(Tensor self) -> (Tensor, Tensor, Tensor, Tensor)
+
+- func: det(Tensor self) -> Tensor
+
 - func: stack(TensorList tensors, int64_t dim=0) -> Tensor
   variants: function
 
+- func: allclose(Tensor self, Tensor other, double rtol=1e-5, double atol=1e-8) -> bool
+
 - func: is_signed(Tensor self) -> bool
   template_scalar: True
+
+- func: matmul(Tensor self, Tensor other) -> Tensor
 
 - func: RoiPooling2d_forward(Tensor input, Tensor rois, int64_t pooledHeight, int64_t pooledWidth, double spatialScale) -> (Tensor, Tensor)
   variants: function

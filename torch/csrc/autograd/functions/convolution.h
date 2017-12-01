@@ -11,14 +11,6 @@
 #include "torch/csrc/autograd/symbolic.h"
 #include "torch/csrc/autograd/saved_variable.h"
 
-#ifdef WITH_CUDNN
-#include "torch/csrc/cudnn/Conv.h"
-#else
-namespace torch { namespace cudnn {
-struct Convolution {};
-}}
-#endif
-
 namespace torch { namespace autograd {
 
 struct ConvParams {
@@ -66,20 +58,16 @@ struct ConvBackward : public Function, public ConvParams {
       Variable weight,
       Variable bias,
       tensor_list columns,
-      tensor_list ones,
-      std::unique_ptr<torch::cudnn::Convolution> convolution)
+      tensor_list ones)
     : Function(std::move(flags))
-    , ConvParams(std::move(params))
-    , convolution(std::move(convolution)) {
-      if (is_executable) {
-        this->input_ = SavedVariable(input, false);
-        this->weight_ = SavedVariable(weight, false);
-        if (bias.defined()) {
-          this->bias_ = SavedVariable(bias, false);
-        }
-        this->columns = std::move(columns);
-        this->ones = std::move(ones);
+    , ConvParams(std::move(params)) {
+      this->input_ = SavedVariable(input, false);
+      this->weight_ = SavedVariable(weight, false);
+      if (bias.defined()) {
+        this->bias_ = SavedVariable(bias, false);
       }
+      this->columns = std::move(columns);
+      this->ones = std::move(ones);
     }
 
   virtual variable_list apply(const variable_list& gradOutputs) override;
@@ -91,7 +79,6 @@ struct ConvBackward : public Function, public ConvParams {
   SavedVariable bias_;
   tensor_list columns;
   tensor_list ones;
-  std::unique_ptr<torch::cudnn::Convolution> convolution;
 };
 
 struct ConvBackwardBackward : public Function, public ConvParams {
@@ -104,14 +91,12 @@ struct ConvBackwardBackward : public Function, public ConvParams {
       Variable grad_output)
     : Function(std::move(flags))
     , ConvParams(std::move(params)) {
-      if (is_executable) {
-        this->input_ = SavedVariable(input, false);
-        this->weight_ = SavedVariable(weight, false);
-        if (bias.defined()) {
-          this->bias_ = SavedVariable(bias, false);
-        }
-        this->grad_output_ = SavedVariable(grad_output, false);
+      this->input_ = SavedVariable(input, false);
+      this->weight_ = SavedVariable(weight, false);
+      if (bias.defined()) {
+        this->bias_ = SavedVariable(bias, false);
       }
+      this->grad_output_ = SavedVariable(grad_output, false);
     }
 
   virtual variable_list apply(const variable_list& grad_grad_inputs) override;

@@ -54,11 +54,16 @@ def run(paths):
     for path in paths:
         for func in parse_native_yaml(path):
             declaration = {'mode': 'native'}
-            func_decl, return_type = [x.strip() for x in func['func'].split('->')]
+            if '->' in func['func']:
+                func_decl, return_type = [x.strip() for x in func['func'].split('->')]
+                return_type = sanitize_types(return_type)
+            else:
+                func_decl = func['func']
+                return_type = None
             fn_name, arguments = func_decl.split('(')
             arguments = arguments.split(')')[0]
             declaration['name'] = func.get('name', fn_name)
-            declaration['return'] = list(func.get('return', sanitize_types(return_type)))
+            declaration['return'] = list(func.get('return', return_type))
             declaration['variants'] = func.get('variants', ['method', 'function'])
             declaration['template_scalar'] = func.get('template_scalar')
             declaration['arguments'] = func.get('arguments', parse_arguments(arguments))

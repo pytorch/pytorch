@@ -4104,18 +4104,18 @@ Example::
 """)
 
 add_docstr(torch._C.squeeze,
-           """
+           r"""
 squeeze(input, dim=None, out=None)
 
 Returns a `Tensor` with all the dimensions of :attr:`input` of size `1` removed.
 
-If `input` is of shape: :math:`(A x 1 x B x C x 1 x D)` then the `out` Tensor
-will be of shape: :math:`(A x B x C x D)`
+If `input` is of shape: :math:`(A \times 1 \times B \times C \times 1 \times D)` then the `out` Tensor
+will be of shape: :math:`(A \times B \times C \times D)`
 
 When :attr:`dim` is given, a squeeze operation is done only in the given
-dimension. If `input` is of shape: :math:`(A x 1 x B)`, `squeeze(input, 0)`
+dimension. If `input` is of shape: :math:`(A \times 1 \times B)`, `squeeze(input, 0)`
 leaves the Tensor unchanged, but `squeeze(input, 1)` will squeeze the tensor
-to the shape :math:`(A x B)`.
+to the shape :math:`(A \times B)`.
 
 .. note:: As an exception to the above, a 1-dimensional tensor of size 1 will
           not have its dimensions changed.
@@ -4276,17 +4276,28 @@ svd(input, some=True, out=None) -> (Tensor, Tensor, Tensor)
 `U, S, V = torch.svd(A)` returns the singular value decomposition of a
 real matrix `A` of size `(n x m)` such that :math:`A = USV'*`.
 
-`U` is of shape `n x n`
+`U` is of shape `n x min(n, m)`
 
-`S` is of shape `n x m`
+`S` is a diagonal square matrix of shape `min(n, m) x min(n, m)`, represented as
+a vector of shape `(min(n, m),)` containing its diagonal entries.
 
-`V` is of shape `m x m`.
+`V` is of shape `m x min(n, m)`.
 
 :attr:`some` represents the number of singular values to be computed.
 If `some=True`, it computes some and `some=False` computes all.
 
 .. note:: Irrespective of the original strides, the returned matrix `U`
           will be transposed, i.e. with strides `(1, n)` instead of `(n, 1)`.
+
+.. note:: Extra care needs to be taken when backward through `U` and `V`
+          outputs. Such operation is really only stable when :attr:`input` is
+          full rank with all distinct singular values. Otherwise, `NaN` can
+          appear as the gradients are not properly defined. Also, when
+          :attr:`some` = `False`, the gradients on `U[:, min(n, m):]` and
+          `V[:, min(n, m):]` will be ignored as those vectors can be arbitrary
+          bases of the subspaces.
+
+.. note:: Double backward through :meth:`~torch.svd` is not supported currently.
 
 Args:
     input (Tensor): the input 2D Tensor

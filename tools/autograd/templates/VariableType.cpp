@@ -122,7 +122,8 @@ Tensor & VariableType::unpack_any(const Tensor & t, const char * name, int pos) 
         pos, name);
   }
   auto scalarType = t.type().scalarType();
-  auto& type = *VariableImpl::getType(baseType->toScalarType(scalarType));
+  auto backend = t.type().backend();
+  auto& type = *VariableImpl::getType(baseType->toScalarType(scalarType).toBackend(backend));
   return checked_cast(type, t, name, pos).data();
 }
 
@@ -190,6 +191,15 @@ VariableType::as_variable(std::tuple<Tensor, Tensor, Tensor> tensors) const {
       make_variable(std::move(std::get<0>(tensors))),
       make_variable(std::move(std::get<1>(tensors))),
       make_variable(std::move(std::get<2>(tensors))));
+}
+
+std::tuple<Variable, Variable, Variable, Variable>
+VariableType::as_variable(std::tuple<Tensor, Tensor, Tensor, Tensor> tensors) const {
+  return std::make_tuple<>(
+      make_variable(std::move(std::get<0>(tensors))),
+      make_variable(std::move(std::get<1>(tensors))),
+      make_variable(std::move(std::get<2>(tensors))),
+      make_variable(std::move(std::get<3>(tensors))));
 }
 
 std::vector<Variable> VariableType::as_variable(TensorList tl) const {
@@ -334,10 +344,10 @@ void VariableType::s_copy(const Tensor & src, Tensor & dst) const {
   if (flags.requires_grad) {
     // TODO: handle device movement
     grad_fn = std::make_shared<CopyBackwards>();
-    grad_fn->is_executable = true;
     grad_fn->next_functions = compute_next_functions({ dst, src });
     grad_fn->num_inputs = 1;
     grad_fn->src_type = &src.type();
+    grad_fn->src_device = src.is_cuda() ? src.get_device() : -1;
   }
   baseType->s_copy(src_, dst_);
   increment_version(dst);

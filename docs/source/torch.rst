@@ -188,6 +188,7 @@ BLAS and LAPACK Operations
 .. autofunction:: ger
 .. autofunction:: gesv
 .. autofunction:: inverse
+.. autofunction:: det
 .. autofunction:: matmul
 .. autofunction:: mm
 .. autofunction:: mv

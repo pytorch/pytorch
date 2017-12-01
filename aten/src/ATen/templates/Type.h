@@ -1,5 +1,7 @@
 #pragma once
 
+#include "ATen/Config.h"
+
 #include <memory>
 #include <limits>
 #include <functional>

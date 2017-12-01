@@ -10,8 +10,8 @@
 namespace torch { namespace jit {
 
 struct StageDetails {
-  std::vector<tracer::VariableFlags> input_flags;
-  std::vector<tracer::VariableFlags> output_flags;
+  std::vector<VariableFlags> input_flags;
+  std::vector<VariableFlags> output_flags;
   std::vector<int> copied_next_fns;
 };
 
@@ -45,7 +45,7 @@ private:
 
 struct InterpreterFunctionFactory {
   explicit InterpreterFunctionFactory(tracer::TracingState *state);
-  std::shared_ptr<InterpreterAutogradFunction> construct();
+  std::shared_ptr<autograd::Function> construct();
 
 private:
   jit::Code code_;

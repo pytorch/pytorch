@@ -40,6 +40,9 @@ class TestIndexing(TestCase):
         self.assertEqual(v[mask].shape, (3, 7, 3))
         self.assertEqual(v[mask], torch.stack([v[0], v[2], v[3]]))
 
+        v = Variable(torch.Tensor([1]))
+        self.assertEqual(v[v == 0], Variable(torch.Tensor()))
+
     def test_multiple_byte_mask(self):
         v = Variable(torch.randn(5, 7, 3))
         # note: these broadcast together and are transposed to the first dim
@@ -74,6 +77,11 @@ class TestIndexing(TestCase):
         columns = Variable(torch.LongTensor([0, 2]))
         result = x[rows[:, None], columns]
         self.assertEqual(result.data.tolist(), [[0, 2], [9, 11]])
+
+    def test_empty_index(self):
+        x = Variable(torch.arange(0, 12).view(4, 3))
+        idx = Variable(torch.LongTensor())
+        self.assertEqual(x[idx].numel(), 0)
 
     def test_basic_advanced_combined(self):
         # From the NumPy indexing example
@@ -200,7 +208,6 @@ class NumpyTests(TestCase):
         self.assertEqual(a[()], a)
         self.assertEqual(a[()].data_ptr(), a.data_ptr())
 
-    # @unittest.skip('failing')
     def test_empty_fancy_index(self):
         # Empty list index creates an empty array
         a = tensor([1, 2, 3])

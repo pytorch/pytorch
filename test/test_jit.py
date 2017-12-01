@@ -51,8 +51,7 @@ class TestJit(TestCase):
     maxDiff = None
 
     @contextmanager
-    def assertCompiled(self, fn):
-        compiled_fn = fn.compiled_fn
+    def assertCompiled(self, compiled_fn):
         self.assertIsInstance(compiled_fn, torch._C.CompiledFunction)
         hits, misses = compiled_fn.hits, compiled_fn.misses
         yield
@@ -182,6 +181,7 @@ class TestJit(TestCase):
             self.assertTrue(fn.has_trace_for(*config))
             for unk_config in configurations[i + 1:]:
                 self.assertFalse(fn.has_trace_for(*unk_config))
+        self.assertEqual(fn.hits, 0)
 
     def test_cse(self):
         x = Variable(torch.Tensor([0.4, 0.3]), requires_grad=True)
@@ -309,7 +309,7 @@ class TestJit(TestCase):
         x_grad = x.grad.data.clone()
         x.grad.data.zero_()
 
-        function = torch._C._jit_createAutogradClosure(trace)
+        function = torch._C._jit_createInterpreterFactory(trace)
         torch._C._jit_pass_lint(trace)
         z2, w2 = function()(x, y)
         (z2 * w2).backward()
@@ -338,7 +338,7 @@ class TestJit(TestCase):
         z = x.matmul(y)
 
         torch._C._tracer_exit((z,))
-        function = torch._C._jit_createAutogradClosure(trace)
+        function = torch._C._jit_createInterpreterFactory(trace)
 
         z2 = function()(x)
         self.assertEqual(z, z2)
@@ -766,10 +766,39 @@ class TestJit(TestCase):
 
         z, _ = model(x, y)
         z.sum().backward()
+        self.assertTrue(model.has_trace_for(x, y))
 
         with self.assertCompiled(model):
             z, _ = model(x, y)
         z.sum().backward()
+
+    def test_module_cast(self):
+        """Compiled modules can be casted to other data types"""
+        @torch.jit.compile(nderivs=0)
+        class Adder(nn.Module):
+            def __init__(self):
+                super(Adder, self).__init__()
+                self.y = nn.Parameter(torch.randn(2, 2))
+
+            def forward(self, x):
+                return x + self.y
+
+        x = Variable(torch.randn(2, 2).float())
+        # Wrap it in a sequential to make sure it works for submodules
+        a = nn.Sequential(Adder()).float()
+
+        def check_type(caster):
+            caster(a)
+            a(caster(x))
+            with self.assertCompiled(a[0]):
+                a(caster(x))
+
+        check_type(lambda x: x)
+        check_type(lambda x: x.double())
+        if torch.cuda.is_available():
+            check_type(lambda x: x.float().cuda())
+            check_type(lambda x: x.double().cuda())
+        self.assertEqual(a[0].hits, 4 if torch.cuda.is_available() else 2)
 
     # Tracer fails when it receives the same grad variable as multiple input to
     # traced region. The problem is that it's not immediately obvious how to

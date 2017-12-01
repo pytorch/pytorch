@@ -94,9 +94,13 @@ DataChannelTCP::DataChannelTCP(InitMethod::Config config, int timeout)
 }
 
 
-DataChannelTCP::~DataChannelTCP()
-{
-  if (_socket != -1)
+DataChannelTCP::~DataChannelTCP() {
+  destroy();
+}
+
+
+void DataChannelTCP::destroy() {
+ if (_socket != -1)
     ::close(_socket);
 
   for (const auto& process : _processes) {
@@ -785,5 +789,48 @@ void DataChannelTCP::_reduce(at::Tensor& result, at::Tensor& data,
     throw std::logic_error("unsupported reduce operation");
   }
 }
+
+void DataChannelTCP::allReduce(std::vector<at::Tensor>& data,
+                               THDReduceOp operation,
+                               THDGroup groupId) {
+
+  throw std::runtime_error("DataChannelTCP does not support mult-GPU cross "
+                           "node allreduce");
+}
+
+
+void DataChannelTCP::allGather(std::vector<at::Tensor>& output,
+                               std::vector<at::Tensor>& input,
+                               THDGroup groupId) {
+
+  throw std::runtime_error("DataChannelTCP does not support mult-GPU cross "
+                           "node allgather");
+}
+
+
+void DataChannelTCP::reduce(std::vector<at::Tensor>& data,
+                            THDReduceOp operation,
+                            rank_type dstRank,
+                            THDGroup groupId) {
+
+  throw std::runtime_error("DataChannelTCP does not support mult-GPU cross "
+                           "node reduce");
+}
+
+
+void DataChannelTCP::broadcast(std::vector<at::Tensor>& data,
+                               rank_type srcRank,
+                               THDGroup groupId) {
+
+  throw std::runtime_error("DataChannelTCP does not support mult-GPU cross "
+                           "node broadcast");
+}
+
+
+void DataChannelTCP::clearGroupCache(THDGroup group_id) {
+  throw std::runtime_error("DataChannelTCP does not support clear "
+                           "group cache");
+}
+
 
 } // namespace thd

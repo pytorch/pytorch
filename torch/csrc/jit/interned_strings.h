@@ -74,6 +74,8 @@ _(shape) \
 _(axes) \
 _(group) \
 _(inplace) \
+_(transA) \
+_(transB) \
 _(other) \
 _(__and__) \
 _(__lshift__) \
@@ -132,5 +134,9 @@ enum BuiltinSymbol {
 
 const char * symbolToString(Symbol s);
 Symbol stringToSymbol(const std::string & s);
+
+inline Symbol operator "" _sym(const char * s, size_t) {
+  return stringToSymbol(s);
+}
 
 }}

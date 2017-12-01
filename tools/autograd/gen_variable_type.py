@@ -3,6 +3,7 @@ import copy
 import os
 import re
 import yaml
+import warnings
 from collections import defaultdict
 from tools.shared.module_loader import import_module
 from .nested_dict import nested_dict
@@ -107,7 +108,6 @@ std::shared_ptr<${op}> grad_fn;
 auto flags = compute_flags({ ${args_with_derivatives} });
 if (flags.requires_grad) {
   grad_fn = std::make_shared<${op}>(${op_ctor});
-  grad_fn->is_executable = true;
   grad_fn->next_functions = compute_next_functions({ ${args_with_derivatives} });
   ${save_inputs}
 }
@@ -115,8 +115,8 @@ ${base_impl_call}
 ${no_zero_dim}
 ${version_counter}
 ${set_flags}
-${save_outputs}
 ${record_trace}
+${save_outputs}
 return ${return_value};
 """)
 
@@ -371,7 +371,8 @@ def load_derivatives(path, declarations_by_signature):
 
         declarations = declarations_by_signature[signature]
         if len(declarations) == 0:
-            raise RuntimeError('no ATen declaration found for: {}'.format(signature))
+            warnings.warn('no ATen declaration found for: {}'.format(signature))
+            continue
         canonical = canonical_declaration(declarations, defn_name)
 
         # TODO: Check the types line up
@@ -628,7 +629,7 @@ def create_variable_type(top_env, aten_declarations):
         differentiable = [arg for arg in tensor_arg_names if arg in names]
         if len(differentiable) != len(names):
             missing = names - set(differentiable)
-            raise RuntimeError('Missing arguments for derivatives: {}'.format(missing))
+            raise RuntimeError('Missing arguments for derivatives: {} in {}'.format(missing, func['name']))
         return differentiable
 
     def save_variables(option, saved_variables, is_output):

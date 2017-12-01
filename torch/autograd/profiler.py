@@ -64,14 +64,13 @@ class EventList(list):
                     pid='CPU functions',
                     args={},
                 ))
-                for name, cuda_interval in evt.kernels:
+                for k in evt.kernels:
                     # 's' and 'f' draw Flow arrows from
                     # the CPU launch to the GPU kernel
                     chrome_events.append(dict(
                         name=evt.name,
                         ph='s',
-                        # +1 microsecond so the arrow is drawn inside cpu block
-                        ts=evt.cpu_interval.start + 1,
+                        ts=evt.cpu_interval.start,
                         tid=evt.thread,
                         pid='CPU functions',
                         id=next_id,
@@ -79,21 +78,21 @@ class EventList(list):
                         args={},
                     ))
                     chrome_events.append(dict(
-                        name=name,
+                        name=k.name,
                         ph='f',
-                        ts=cuda_interval.start,
-                        tid=evt.thread,
+                        ts=k.interval.start,
+                        tid=k.device,
                         pid='CUDA functions',
                         id=next_id,
                         cat='cpu_to_cuda',
                         args={},
                     ))
                     chrome_events.append(dict(
-                        name=evt.name,
+                        name=k.name,
                         ph='X',
-                        ts=cuda_interval.start,
-                        dur=cuda_interval.elapsed_us(),
-                        tid=evt.thread,
+                        ts=k.interval.start,
+                        dur=k.interval.elapsed_us(),
+                        tid=k.device,
                         pid='CUDA functions',
                         args={},
                     ))
@@ -321,6 +320,13 @@ class Interval(object):
         return self.end - self.start
 
 
+class Kernel(object):
+    def __init__(self, name, device, interval):
+        self.name = name
+        self.device = device
+        self.interval = interval
+
+
 # TODO: record TID too
 class FunctionEvent(FormattedTimesMixin):
     """Profiling information about a single function."""
@@ -332,12 +338,12 @@ class FunctionEvent(FormattedTimesMixin):
         self.kernels = []
         self.count = 1
 
-    def append_kernel(self, name, start, end):
-        self.kernels.append((name, Interval(start, end)))
+    def append_kernel(self, name, device, start, end):
+        self.kernels.append(Kernel(name, device, Interval(start, end)))
 
     @property
     def cuda_time_total(self):
-        return sum(kinfo[1].elapsed_us() for kinfo in self.kernels)
+        return sum(kinfo.interval.elapsed_us() for kinfo in self.kernels)
 
     @property
     def cpu_time_total(self):
@@ -397,14 +403,28 @@ class StringTable(defaultdict):
 def parse_cpu_trace(thread_records):
     next_id = 0
     start_record = None
+    cuda_records = {}
     functions = []
     record_stack = []
     string_table = StringTable()
+
+    # cuda start events and the overall profiler start event don't happen
+    # at exactly the same time because we need to record an event on each device
+    # and each record takes ~4us. So we adjust here by the difference
+    # adding the difference in CPU time between the profiler start event
+    # and the CPU time of the cuda start event for the device
+    def adjusted_time(cuda_record):
+        assert cuda_record.device() != -1
+        cuda_time_0 = cuda_records[cuda_record.device()]
+        return cuda_time_0.cuda_elapsed_us(cuda_record) + start_record.cpu_elapsed_us(cuda_time_0)
+
     # '__start_profile' is not guarenteed to be first, so we must find it here
     for record in itertools.chain(*thread_records):
         if record.name() == '__start_profile':
             start_record = record
-            break
+        elif record.name() == '__cuda_start_event':
+            assert record.device() != -1
+            cuda_records[record.device()] = record
     assert start_record is not None
 
     for record in itertools.chain(*thread_records):
@@ -421,11 +441,15 @@ def parse_cpu_trace(thread_records):
                 thread=start.thread_id(),
                 cpu_start=start_record.cpu_elapsed_us(start),
                 cpu_end=start_record.cpu_elapsed_us(record))
-            if start_record.has_cuda():
+            if start.has_cuda():
+                cuda_start = adjusted_time(start)
+                cuda_end = adjusted_time(record)
                 fe.append_kernel(start.name(),
-                                 start_record.cuda_elapsed_us(start),
-                                 start_record.cuda_elapsed_us(record))
+                                 start.device(),
+                                 cuda_start,
+                                 cuda_end)
             functions.append(fe)
+
     functions.sort(key=lambda evt: evt.cpu_interval.start)
     return functions
 
@@ -498,6 +522,7 @@ def parse_nvprof_trace(path):
         assert row['cbid'] == 13  # 13 == Launch
         evt = functions_map[row['marker_id']]
         evt.append_kernel(row['kernel_name'],
+                          0,
                           row['kernel_start'],
                           row['kernel_end'])
 

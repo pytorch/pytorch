@@ -2555,6 +2555,7 @@ static const char *R = &__R;
     - Double
   backends:
     - CPU
+    - CUDA
   variants:
     - method
     - function

@@ -78,24 +78,6 @@ class Variable(_C._VariableBase):
     def __repr__(self):
         return 'Variable containing:' + self.data.__repr__()
 
-    def __bool__(self):
-        if self.data.numel() <= 1:
-            return self.data.__bool__()
-        raise RuntimeError("bool value of Variable containing " +
-                           torch.typename(self.data) +
-                           " with more than one value is ambiguous")
-
-    __nonzero__ = __bool__
-
-    def __int__(self):
-        return int(self.data)
-
-    def __long__(self):
-        return long(self.data)
-
-    def __float__(self):
-        return float(self.data)
-
     def backward(self, gradient=None, retain_graph=None, create_graph=None, retain_variables=None):
         """Computes the gradient of current variable w.r.t. graph leaves.
 
@@ -237,20 +219,13 @@ class Variable(_C._VariableBase):
             return Type.apply(self, t)
         return self
 
-    def type_as(self, t):
-        if isinstance(t, Variable):
-            t = t.data
-        return self.type(type(t))
-
-    def _get_type(self, name):
-        module = torch._import_dotted_name(self.data.__module__)
-        return getattr(module, name)
+    def type_as(self, other):
+        if torch.is_tensor(other):
+            other = Variable(other)
+        return super(Variable, self).type_as(other)
 
     def cuda(self, device=None, async=False):
         return CudaTransfer.apply(self, device, async)
-
-    def cpu(self):
-        return self.type(getattr(torch, type(self.data).__name__))
 
     def prod(self, dim=None, keepdim=None):
         return Prod.apply(self, dim, keepdim)
@@ -278,9 +253,6 @@ class Variable(_C._VariableBase):
         norms = norms.clamp(max=maxnorm).div(norms.add(1e-7))
         flat_out = flat.mul(norms.expand_as(flat))
         return flat_out.view(t.size()).transpose(dim, 0)
-
-    def matmul(self, other):
-        return torch.matmul(self, other)
 
     def resize(self, *sizes):
         return Resize.apply(self, sizes)
@@ -334,11 +306,6 @@ class Variable(_C._VariableBase):
 
     def __rsub__(self, other):
         return -self + other
-
-    def __matmul__(self, other):
-        if not isinstance(other, Variable):
-            return NotImplemented
-        return self.matmul(other)
 
     def __rdiv__(self, other):
         return self.reciprocal() * other
