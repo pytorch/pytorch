@@ -222,6 +222,50 @@ class TestTensorPackOps(hu.HypothesisTestCase):
         expected_output_shape = (0, 0)
         self.assertEquals(output.shape, expected_output_shape)
 
+    @given(**hu.gcs_cpu_only)
+    def test_out_of_bounds(self, gc, dc):
+        # Copy pasted from test_pack_ops but with 3 changed to 4
+        lengths = np.array([1, 2, 4], dtype=np.int32)
+        data = np.array([
+            [1.0, 1.0],
+            [2.0, 2.0],
+            [2.0, 2.0],
+            [3.0, 3.0],
+            [3.0, 3.0],
+            [3.0, 3.0]], dtype=np.float32)
+        op = core.CreateOperator(
+            'PackSegments', ['l', 'd'], ['t'])
+
+        inputs = [lengths, data]
+        self.assertRunOpRaises(
+            device_option=gc,
+            op=op,
+            inputs=inputs,
+            exception=RuntimeError
+        )
+
+    @given(**hu.gcs_cpu_only)
+    def test_under_bounds(self, gc, dc):
+        # Copy pasted from test_pack_ops but with 3 changed to 2
+        lengths = np.array([1, 2, 2], dtype=np.int32)
+        data = np.array([
+            [1.0, 1.0],
+            [2.0, 2.0],
+            [2.0, 2.0],
+            [3.0, 3.0],
+            [3.0, 3.0],
+            [3.0, 3.0]], dtype=np.float32)
+        op = core.CreateOperator(
+            'PackSegments', ['l', 'd'], ['t'])
+
+        inputs = [lengths, data]
+        self.assertRunOpRaises(
+            device_option=gc,
+            op=op,
+            inputs=inputs,
+            exception=RuntimeError
+        )
+
 
 if __name__ == "__main__":
     import unittest
