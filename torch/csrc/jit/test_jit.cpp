@@ -1,8 +1,6 @@
 #include <Python.h>
 #include <iostream>
-#ifdef WITH_CUDA
 #include "torch/csrc/jit/fusion_compiler.h"
-#endif
 #include "torch/csrc/jit/code_template.h"
 #include "torch/csrc/assertions.h"
 #include "torch/csrc/jit/ir.h"
@@ -12,6 +10,79 @@
 #include "torch/csrc/jit/interpreter.h"
 
 namespace torch { namespace jit {
+
+// help build Graphs for tests
+struct Var {
+  Var() : v(nullptr) {}
+  Var(Value * v) : v(v) {}
+  static Var Input(Graph & g, std::string name = "") {
+    return g.addInput(name);
+  }
+  void addAsOutput() {
+    v->owningGraph()->registerOutput(v);
+  }
+  static Var cat(ArrayRef<Var> inputs, int32_t dim) {
+    Node* n;
+    auto r = create(kcat, inputs, 1, &n)[0];
+    n->i_(kdim, dim);
+    return r;
+  }
+
+  static std::vector<Var> create(Symbol kind, ArrayRef<Var> inputs,
+                                 int num_outputs = 1,
+                                 Node** created_node = nullptr,
+                                 Graph * g = nullptr) {
+      if(g == nullptr) {
+        g = inputs.at(0).value()->owningGraph();
+      }
+      Node * n = g->appendNode(g->create(kind, num_outputs));
+      for(auto i : inputs) {
+        n->addInput(i.value());
+      }
+      if(created_node) {
+        *created_node = n;
+      }
+      std::vector<Var> out;
+      for(auto v : n->outputs()) {
+        out.emplace_back(v);
+      }
+      return out;
+  }
+  Var operator*(Var rhs) {
+    return create(kmul, {*this, rhs})[0];
+  }
+  Var operator+(Var rhs) {
+    Node * n;
+    auto r = create(kadd, {*this, rhs}, 1, &n)[0];
+    n->t_(kalpha, at::Scalar(1).toTensor());
+    return r;
+  }
+
+  Var mm(Var rhs) {
+    return create(s("mm"), {*this, rhs})[0];
+  }
+  Var sigmoid() {
+    return create(ksigmoid, {*this})[0];
+  }
+  Var tanh() {
+    return create(ktanh, {*this})[0];
+  }
+  std::vector<Var> chunk(int32_t chunks, uint32_t dim) {
+    Node * n;
+    auto r = create(s("chunk"), { *this }, chunks, &n);
+    n->i_(s("chunks"), chunks)
+    ->i_(s("dim"), dim);
+    return r;
+  }
+  Value * value() const {
+    return v;
+  }
+private:
+  static Symbol s(const char * s_) {
+    return stringToSymbol(s_);
+  }
+  Value * v;
+};
 
 template<typename T>
 static std::ostream & operator<<(std::ostream & out, const std::vector<T> & list) {
@@ -79,21 +150,20 @@ static void codeTemplateTest() {
   }
 }
 
-#ifdef WITH_CUDA
 Value * appendNewNode(NodeKind kind, Graph& graph, ArrayRef<Value*> inputs) {
   return graph.appendNode(graph.create(kind,inputs))->output();
 }
 
+
 static void fusionTests() {
   FusionCompiler comp;
-  cudaFree(0);
 
   auto testSimple = [&] {
     Graph graph;
-    Value * i0 = graph.addInput();
-    Value * i1 = graph.addInput();
-    auto o0 = appendNewNode(kmul,graph,{i0, i1});
-    graph.registerOutput(o0);
+    Var i0 = Var::Input(graph);
+    Var i1 = Var::Input(graph);
+    auto o0 = i0 * i1;
+    o0.addAsOutput();
     auto a = at::CUDA(at::kFloat).rand({3,4});
     auto b = at::CUDA(at::kFloat).rand({4,3}).transpose(0,1);
     auto o = at::CUDA(at::kFloat).zeros({3,4});
@@ -109,25 +179,23 @@ static void fusionTests() {
 
     Graph graph;
 
-    Value * i0 = graph.addInput();
-    Value * i1 = graph.addInput();
-    Value * i2 = graph.addInput();
-    Value * i3 = graph.addInput();
-    Value * i4 = graph.addInput();
+    Var i0 = Var::Input(graph);
+    Var i1 = Var::Input(graph);
+    Var i2 = Var::Input(graph);
+    Var i3 = Var::Input(graph);
+    Var i4 = Var::Input(graph);
 
-    auto p22 = appendNewNode(ksigmoid,graph,{i4});
-    auto p20 = appendNewNode(ksigmoid,graph,{i3});
-    auto p18 = appendNewNode(ktanh,graph,{i2});
-    auto p16 = appendNewNode(ksigmoid,graph,{i1});
-    auto p14 = appendNewNode(kmul,graph,{p20, i0});
-    auto p11 = appendNewNode(kmul,graph,{p22, p18});
-    auto o1 = appendNewNode(kadd,graph,{p14, p11});
-    o1->node()->t_(kalpha, at::Scalar(1).toTensor());
-    auto p5 = appendNewNode(ktanh,graph,{o1});
-    auto o0 = appendNewNode(kmul,graph,{p16, p5});
-
-    graph.registerOutput(o0);
-    graph.registerOutput(o1);
+    auto p22 =  i4.sigmoid();
+    auto p20 = i3.sigmoid();
+    auto p18 = i2.tanh();
+    auto p16 = i1.sigmoid();
+    auto p14 = p20 * i0;
+    auto p11 = p22 * p18;
+    auto o1 = p14 + p11;
+    auto p5 = o1.tanh();
+    auto o0 = p16 * p5;
+    o0.addAsOutput();
+    o1.addAsOutput();
 
     graph.lint();
 
@@ -179,11 +247,12 @@ static void fusionTests() {
 
   auto testConcat = [&](int dim) {
     Graph graph;
-    Value * i0 = graph.addInput();
-    Value * i1 = graph.addInput();
-    auto o0 = appendNewNode(kmul,graph,{i0, i1});
-    graph.registerOutput(o0);
-    graph.registerOutput(appendNewNode(kcat, graph, {i0,o0})->node()->i_(kdim, dim)->output());
+    Var i0 = Var::Input(graph);
+    Var i1 = Var::Input(graph);
+    auto o0 = i0 * i1;
+    o0.addAsOutput();
+    Var::cat({i0, o0}, dim).addAsOutput();
+
     auto a = at::CUDA(at::kFloat).rand({3,4,5});
     auto b = at::CUDA(at::kFloat).rand({4,3,5}).transpose(0,1);
     auto o = at::CUDA(at::kFloat).zeros({3,4,5});
@@ -203,9 +272,6 @@ static void fusionTests() {
   testConcat(2);
 }
 
-#else //WITH_CUDA
-void fusionTests() {}
-#endif
 struct Attr : public Attributes<Attr> {
 };
 void attributesTest() {
@@ -298,43 +364,26 @@ lstm(at::Tensor input,
   return {hy, cy};
 }
 
-Symbol sym(const char * str) {
-  return stringToSymbol(str);
-}
-
-Value * node(Graph& graph, const char * n, ArrayRef<Value*> inputs) {
-  return graph.appendNode(graph.create(sym(n),inputs))->output();
-}
-
-Value * add(Graph & g, Value * a, Value * b) {
-  auto r = node(g, "add", {a,b});
-  r->node()->t_(sym("alpha"), at::Scalar(1).toTensor());
-  return r;
-}
-
-std::tuple<Value*, Value*> build_lstm_body(
+std::tuple<Var, Var> build_lstm_body(
   Graph & g,
-  Value * input,
-  Value * hx,
-  Value * cx,
-  Value * w_ih,
-  Value * w_hh) {
-    auto gates = add(g, node(g,"mm",{ input, w_ih }), node(g, "mm", {hx, w_hh}));
-    auto chunked_gates = g.appendNode(g.create(sym("chunk"),{ gates }, 4))
-      ->i_(sym("chunks"), 4)
-      ->i_(sym("dim"), 1);
-    auto outputs = chunked_gates->outputs();
+  Var input,
+  Var hx,
+  Var cx,
+  Var w_ih,
+  Var w_hh) {
+    auto gates =  input.mm(w_ih) + hx.mm(w_hh);
+    auto outputs = gates.chunk(4, 1);
     auto ingate = outputs[0];
     auto forgetgate = outputs[1];
     auto cellgate = outputs[2];
     auto outgate = outputs[3];
-    ingate = node(g,"sigmoid",{ingate});
-    outgate = node(g,"sigmoid",{outgate});
-    cellgate = node(g,"tanh",{cellgate});
-    forgetgate = node(g,"sigmoid",{forgetgate});
+    ingate = ingate.sigmoid();
+    outgate = outgate.sigmoid();
+    cellgate = cellgate.tanh();
+    forgetgate = forgetgate.sigmoid();
 
-    auto cy = add(g, node(g,"mul", {forgetgate, cx}) , node(g, "mul", {ingate, cellgate}));
-    auto hy = node(g, "mul", {outgate, node(g, "tanh", {cy})});
+    auto cy = forgetgate*cx + ingate*cellgate;
+    auto hy = outgate*cy.tanh();
 
     return std::make_tuple(hy,cy);
 }
@@ -348,12 +397,12 @@ std::shared_ptr<Graph> build_lstm() {
   Value * w_ih = g.addInput();
   Value * w_hh = g.addInput();
 
-  Value * hy;
-  Value * cy;
+  Var hy;
+  Var cy;
   std::tie(hy,cy) = build_lstm_body(g, input, hx, cx, w_ih, w_hh);
 
-  g.registerOutput(hy);
-  g.registerOutput(cy);
+  hy.addAsOutput();
+  cy.addAsOutput();
   g.lint();
 
   return r;
@@ -362,27 +411,27 @@ std::shared_ptr<Graph> build_lstm() {
 std::shared_ptr<Graph> build_lstm_stages() {
   auto r = std::make_shared<Graph>();
   auto & g = *r;
-  Value * input = g.addInput();
-  Value * hx = g.addInput();
-  Value * cx = g.addInput();
-  Value * w_ih = g.addInput();
-  Value * w_hh = g.addInput();
+  Var input = g.addInput();
+  Var hx = g.addInput();
+  Var cx = g.addInput();
+  Var w_ih = g.addInput();
+  Var w_hh = g.addInput();
 
-  Value * hy;
-  Value * cy;
+  Var hy;
+  Var cy;
   std::tie(hy,cy) = build_lstm_body(g, input, hx, cx, w_ih, w_hh);
 
   // use some stuff from the previous stage as well
   // as a new input
   g.advanceStage();
   hx = hy;
-  g.registerOutput(cy);
+  cy.addAsOutput();
   cx = g.addInput();
 
   std::tie(hy,cy) = build_lstm_body(g, input, hx, cx, w_ih, w_hh);
 
-  g.registerOutput(hy);
-  g.registerOutput(cy);
+  hy.addAsOutput();
+  cy.addAsOutput();
   g.lint();
 
   return r;

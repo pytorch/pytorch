@@ -201,7 +201,7 @@ std::string valueName(Value * n) {
   auto s =  at::Scalar(t);
   return (s.isIntegral()) ?
     std::to_string(s.toLong()) :
-    std::to_string(s.toDouble());
+    (std::to_string(s.toDouble()) + "f");
 }
 
 const char * scalarTypeName(at::ScalarType type) {
@@ -558,10 +558,15 @@ protected:
 struct TempFile {
   TH_DISALLOW_COPY_AND_ASSIGN(TempFile);
   TempFile(const std::string & t, int suffix) {
+    // mkstemps edits its first argument in places
+    // so we make a copy of the string here, including null terminator
     std::vector<char> tt(t.c_str(), t.c_str() + t.size() + 1);
     int fd = mkstemps(tt.data(), suffix);
     JIT_ASSERT(fd != -1);
     file_ = fdopen(fd, "r+");
+
+    // - 1 becuase tt.size() includes the null terminator,
+    // but std::string does not expect one
     name_ = std::string(tt.begin(), tt.end() - 1);
   }
   const std::string & name() const {
@@ -623,9 +628,9 @@ static const std::string cpp_template = "/tmp/pytorch_fuserXXXXXX.cpp";
 static const std::string compile_string =
   "\"${cxx}\" -O3 -g -march=native -std=c++11 -fPIC -shared \"${cpp_file}\" -o \"${so_file}\"";
 
-static void runCompiler(const std::string & cxx, const std::string & cpp_file, const std::string & so_file) {
+static void runCompiler(FusionCompilerConfig & config, const std::string & cpp_file, const std::string & so_file) {
   TemplateEnv env;
-  env.s("cxx", cxx);
+  env.s("cxx", config.cxx);
   env.s("cpp_file",cpp_file);
   env.s("so_file",so_file);
   std::string result = format(compile_string,env);
@@ -633,8 +638,19 @@ static void runCompiler(const std::string & cxx, const std::string & cpp_file, c
   JIT_ASSERT(r == 0);
 }
 
+
+static const std::string disas_string =
+  "objdump -M  intel -d \"${so_file}\"";
+static void disas(const std::string & so_file) {
+  TemplateEnv env;
+  env.s("so_file", so_file);
+  std::string cmd = format(disas_string, env);
+  int r = system(cmd.c_str());
+  JIT_ASSERT(r == 0);
+}
+
 struct CPUFusionFunction : public CompiledFusionFunction {
-  CPUFusionFunction(const std::string & name, AnnotatedGraph & agraph, const std::string & cxx)
+  CPUFusionFunction(const std::string & name, AnnotatedGraph & agraph, FusionCompilerConfig & config)
   : CompiledFusionFunction(name, agraph) {
     TempFile so_file(so_template, 3);
     TempFile cpp_file(cpp_template, 4);
@@ -644,7 +660,11 @@ struct CPUFusionFunction : public CompiledFusionFunction {
     compilation_unit = cu.str();
     cpp_file.write(compilation_unit);
     cpp_file.sync();
-    runCompiler(cxx, cpp_file.name(), so_file.name());
+    runCompiler(config, cpp_file.name(), so_file.name());
+    if(config.debug) {
+      std::cout << compilation_unit << "\n";
+      disas(so_file.name());
+    }
     so_lib.reset(new DynamicLibrary(so_file.name().c_str()));
     kernel = reinterpret_cast<void(*)(uint32_t, void**)>(so_lib->sym(name.c_str()));
   }
@@ -690,7 +710,7 @@ std::shared_ptr<CompiledFusionFunction> FusionCompiler::getOrCompile(AnnotatedGr
 #endif
     } else {
       JIT_ASSERT(canCompileOnCPU());
-      raw_func = new CPUFusionFunction(name, agraph, cxx);
+      raw_func = new CPUFusionFunction(name, agraph, config_);
     }
     it = cache.emplace(key_, std::shared_ptr<CompiledFusionFunction>(raw_func)).first;
   }
@@ -711,15 +731,23 @@ std::shared_ptr<CompiledFusionFunction> FusionCompiler::getOrCompile(Node* fusio
   return getOrCompile(agraph);
 }
 
-void FusionCompiler::debugLaunchGraph(Graph & graph, bool is_cuda, at::ArrayRef<at::Tensor> inputs, at::ArrayRef<at::Tensor> outputs) {
+
+std::shared_ptr<CompiledFusionFunction> FusionCompiler::getOrCompile(Graph & graph,
+                                                     bool is_cuda,
+                                                     at::ArrayRef<at::Tensor> inputs,
+                                                     at::ArrayRef<at::Tensor> outputs) {
   AnnotatedGraph agraph(graph, is_cuda);
   for(auto & i : inputs) {
-    agraph.input_desc.emplace_back(i);
+   agraph.input_desc.emplace_back(i);
   }
   for(auto & i : outputs) {
-    agraph.output_desc.emplace_back(i);
+   agraph.output_desc.emplace_back(i);
   }
-  auto func = getOrCompile(agraph);
+  return getOrCompile(agraph);
+}
+
+void FusionCompiler::debugLaunchGraph(Graph & graph, bool is_cuda, at::ArrayRef<at::Tensor> inputs, at::ArrayRef<at::Tensor> outputs) {
+  auto func = getOrCompile(graph, is_cuda, inputs, outputs);
   func->launch_with_tensors(inputs, outputs);
 }
 
@@ -736,13 +764,13 @@ static bool programExists(const std::string & program) {
 FusionCompiler::FusionCompiler() {
   const char * cxx_env = getenv("CXX");
   if(cxx_env != nullptr) {
-    cxx = cxx_env;
-  } else {
-    cxx = "g++";
+    config_.cxx = cxx_env;
   }
-  if(!programExists(cxx)) {
-    cxx = "";
+  if(!programExists(config_.cxx)) {
+    config_.cxx = "";
   }
+  const char * debug_env = getenv("PYTORCH_FUSION_DEBUG");
+  config_.debug = debug_env && atoi(debug_env) != 0;
 }
 
 //TODO: thread safety
