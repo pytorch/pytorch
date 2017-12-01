@@ -1,5 +1,7 @@
 .. currentmodule:: torch
 
+.. _tensor-doc:
+
 torch.Tensor
 ===================================
 

@@ -9,15 +9,15 @@ __all__ = [
 
 
 def split(tensor, split_size, dim=0):
-    """Splits the tensor into equally sized chunks (if possible).
+    """Splits the tensor into chunks all of size :attr:`split_size` (if possible).
 
     Last chunk will be smaller if the tensor size along a given dimension
-    is not divisible by ``split_size``.
+    is not divisible by :attr`split_size`.
 
     Arguments:
-        tensor (Tensor): tensor to split.
-        split_size (int): size of a single chunk.
-        dim (int): dimension along which to split the tensor.
+        tensor (Tensor): the tensor to split
+        split_size (int): size of a single chunk
+        dim (int): dimension along which to split the tensor
     """
     if dim < 0:
         dim += tensor.dim()
@@ -32,12 +32,12 @@ def split(tensor, split_size, dim=0):
 
 
 def chunk(tensor, chunks, dim=0):
-    """Splits a tensor into a number of chunks along a given dimension.
+    """Splits a tensor into a specific number of chunks.
 
     Arguments:
-        tensor (Tensor): tensor to split.
-        chunks (int): number of chunks to return.
-        dim (int): dimension along which to split the tensor.
+        tensor (Tensor): the tensor to split
+        chunks (int): number of chunks to return
+        dim (int): dimension along which to split the tensor
     """
     if dim < 0:
         dim += tensor.dim()
@@ -51,9 +51,9 @@ def stack(sequence, dim=0, out=None):
     All tensors need to be of the same size.
 
     Arguments:
-        sequence (Sequence): sequence of tensors to concatenate.
+        sequence (Sequence): sequence of tensors to concatenate
         dim (int): dimension to insert. Has to be between 0 and the number
-            of dimensions of concatenated tensors (inclusive).
+            of dimensions of concatenated tensors (inclusive)
     """
     if len(sequence) == 0:
         raise ValueError("stack expects a non-empty sequence of tensors")
@@ -72,8 +72,8 @@ def unbind(tensor, dim=0):
     Returns a tuple of all slices along a given dimension, already without it.
 
     Arguments:
-        tensor (Tensor): tensor to unbind.
-        dim (int): dimension to remove.
+        tensor (Tensor): the tensor to unbind
+        dim (int): dimension to remove
     """
     return tuple(tensor.select(dim, i) for i in _range(tensor.size(dim)))
 
@@ -87,10 +87,10 @@ def btriunpack(LU_data, LU_pivots, unpack_data=True, unpack_pivots=True):
       2: The U tensor.
 
     Arguments:
-        LU_data (Tensor): The packed LU factorization data.
-        LU_pivots (Tensor): The packed LU factorization pivots.
-        unpack_data (bool): Flag indicating if the data should be unpacked.
-        unpack_pivots (bool): Flag indicating if the pivots should be unpacked.
+        LU_data (Tensor): the packed LU factorization data
+        LU_pivots (Tensor): the packed LU factorization pivots
+        unpack_data (bool): flag indicating if the data should be unpacked
+        unpack_pivots (bool): tlag indicating if the pivots should be unpacked
     """
 
     nBatch, sz, _ = LU_data.size()
@@ -122,7 +122,7 @@ def btriunpack(LU_data, LU_pivots, unpack_data=True, unpack_pivots=True):
 
 
 def matmul(tensor1, tensor2, out=None):
-    """Matrix product of two tensors.
+    r"""Matrix product of two tensors.
 
     The behavior depends on the dimensionality of the tensors as follows:
 
@@ -139,17 +139,18 @@ def matmul(tensor1, tensor2, out=None):
       batched matrix multiply and removed after.  If the second argument is 1-dimensional, a
       1 is appended to its dimension for the purpose of the batched matrix multiple and removed after.
       The non-matrix (i.e. batch) dimensions are :ref:`broadcasted <broadcasting-semantics>` (and thus
-      must be broadcastable).  For example, if :attr:`tensor1` is a `j x 1 x n x m` Tensor
-      and :attr:`tensor2` is a `k x m x p` Tensor, :attr:`out` will be an `j x k x n x p` Tensor.
+      must be broadcastable).  For example, if :attr:`tensor1` is a
+      :math:`(j \times 1 \times n \times m)` tensor and :attr:`tensor2` is a :math:`(k \times m \times p)`
+      tensor, :attr:`out` will be an :math:`(j \times k \times n \times p)` tensor.
 
     .. note::
 
         The 1-dimensional dot product version of this function does not support an :attr:`out` parameter.
 
     Arguments:
-        tensor1 (Tensor): First tensor to be multiplied
-        tensor2 (Tensor): Second tensor to be multiplied
-        out (Tensor, optional): Output tensor
+        tensor1 (Tensor): the first tensor to be multiplied
+        tensor2 (Tensor): the second tensor to be multiplied
+        out (Tensor, optional): the output tensor
     """
     dim_tensor1 = tensor1.dim()
     dim_tensor2 = tensor2.dim()
