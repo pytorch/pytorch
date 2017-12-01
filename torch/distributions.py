@@ -230,8 +230,9 @@ class Gamma(Distribution):
             beta = alpha.new(alpha.size()).fill_(beta)
         elif alpha_num and beta_num:
             alpha, beta = torch.Tensor([alpha]), torch.Tensor([beta])
-        else:
-            alpha = alpha.expand_as(beta)
+        elif alpha.size() != beta.size():
+            raise ValueError('Expected alpha.size() == beta.size(), actual {} vs {}'.format(
+                alpha.size(), beta.size()))
         self.alpha = alpha
         self.beta = beta
 
