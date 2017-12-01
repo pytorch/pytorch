@@ -14,11 +14,12 @@ class _TensorBase(object):
     # CUDA case, which handles constructing the tensor on the same GPU
     # as this tensor.
     def new(self, *args, **kwargs):
-        """Constructs a new tensor of the same data type.
+        r"""Constructs a new tensor of the same data type as :attr:`self` tensor.
 
-        Any valid argument combination to the Tensor constructor is accepted by
-        this method, including sizes, :class:`torch.Storage`, numpy ndarray,
-        Python Sequence, etc. See :class:`torch.Tensor` for more details.
+        Any valid argument combination to the tensor constructor is accepted by
+        this method, including sizes, :class:`torch.Storage`, NumPy ndarray,
+        Python Sequence, etc. See :ref:`torch.Tensor <tensor-doc>` for more
+        details.
 
         .. note:: For CUDA tensors, this method will create new tensor on the
                   same device as this tensor.
@@ -26,61 +27,62 @@ class _TensorBase(object):
         return self.__class__(*args, **kwargs)
 
     def type_as(self, tensor):
-        """Returns this tensor cast to the type of the given tensor.
+        r"""Returns this :attr:`self` tensor cast to the type of the given
+        tensor.
 
-        This is a no-op if the tensor is already of the correct type. This is
-        equivalent to::
+        This is a no-op if the :attr:`self` tensor is already of the correct
+        type. This is equivalent to::
 
             self.type(tensor.type())
 
         Params:
-            tensor (Tensor): the tensor which has the desired type
+            tensor (Tensor): the tensor with the desired type
         """
         return self.type(tensor.type())
 
     def cpu(self):
-        """Returns a CPU copy of this tensor if it's not already on the CPU"""
+        r"""Returns a CPU copy of this tensor if it's not already on the CPU"""
         return self.type(getattr(torch, self.__class__.__name__))
 
     def double(self):
-        """Casts this tensor to double type"""
+        r"""Casts this tensor to double type"""
         return self.type(type(self).__module__ + '.DoubleTensor')
 
     def float(self):
-        """Casts this tensor to float type"""
+        r"""Casts this tensor to float type"""
         return self.type(type(self).__module__ + '.FloatTensor')
 
     def half(self):
-        """Casts this tensor to half-precision float type"""
+        r"""Casts this tensor to half-precision float type"""
         return self.type(type(self).__module__ + '.HalfTensor')
 
     def long(self):
-        """Casts this tensor to long type"""
+        r"""Casts this tensor to long type"""
         return self.type(type(self).__module__ + '.LongTensor')
 
     def int(self):
-        """Casts this tensor to int type"""
+        r"""Casts this tensor to int type"""
         return self.type(type(self).__module__ + '.IntTensor')
 
     def short(self):
-        """Casts this tensor to short type"""
+        r"""Casts this tensor to short type"""
         return self.type(type(self).__module__ + '.ShortTensor')
 
     def char(self):
-        """Casts this tensor to char type"""
+        r"""Casts this tensor to char type"""
         return self.type(type(self).__module__ + '.CharTensor')
 
     def byte(self):
-        """Casts this tensor to byte type"""
+        r"""Casts this tensor to byte type"""
         return self.type(type(self).__module__ + '.ByteTensor')
 
     def is_pinned(self):
-        """Returns true if this tensor resides in pinned memory"""
+        r"""Returns true if this tensor resides in pinned memory"""
         storage = self.storage()
         return storage.is_pinned() if storage else False
 
     def pin_memory(self):
-        """Copies the tensor to pinned memory, if it's not already pinned."""
+        r"""Copies the tensor to pinned memory, if it's not already pinned."""
         if self.is_cuda:
             raise TypeError("cannot pin '{0}' only CPU memory can be pinned"
                             .format(self.type()))
@@ -90,7 +92,7 @@ class _TensorBase(object):
         return type(self)().set_(storage.pin_memory()).view_as(self)
 
     def share_memory_(self):
-        """Moves the underlying storage to shared memory.
+        r"""Moves the underlying storage to shared memory.
 
         This is a no-op if the underlying storage is already in shared memory
         and for CUDA tensors. Tensors in shared memory cannot be resized.
@@ -99,7 +101,7 @@ class _TensorBase(object):
         return self
 
     def is_shared(self):
-        """Checks if tensor is in shared memory.
+        r"""Checks if tensor is in shared memory.
 
         This is always ``True`` for CUDA tensors.
         """
@@ -107,9 +109,10 @@ class _TensorBase(object):
 
     @property
     def shape(self):
-        """Alias for .size()
+        r"""Alias for .size()
 
-        Returns a torch.Size object, containing the dimensions of the tensor
+        Returns a torch.Size object, containing the dimensions of the
+        :attr:`self` Tensor.
         """
         return self.size()
 
@@ -170,27 +173,27 @@ class _TensorBase(object):
             return iter([])
 
     def split(self, split_size, dim=0):
-        """Splits this tensor into a tuple of tensors.
+        r"""Splits this tensor into tensor chunks of :attr:`split_size` size.
 
         See :func:`torch.split`.
         """
         return torch.split(self, split_size, dim)
 
     def chunk(self, n_chunks, dim=0):
-        """Splits this tensor into a tuple of tensors.
+        r"""Splits this tensor into a certain number of tensor chunks.
 
         See :func:`torch.chunk`.
         """
         return torch.chunk(self, n_chunks, dim)
 
     def matmul(self, other):
-        """Matrix product of two tensors.
+        r"""Matrix product of two tensors.
 
         See :func:`torch.matmul`."""
         return torch.matmul(self, other)
 
     def tolist(self):
-        """Returns a nested list represenation of this tensor."""
+        r"""Returns a nested list represenation of this tensor."""
         dim = self.dim()
         if dim == 1:
             return [v for v in self]
@@ -199,7 +202,7 @@ class _TensorBase(object):
         return []
 
     def view_as(self, tensor):
-        """Returns this tensor viewed as the size as the specified tensor.
+        r"""Returns this tensor viewed as the size as the specified tensor.
 
         This is equivalent to::
 
@@ -208,7 +211,7 @@ class _TensorBase(object):
         return self.view(tensor.size())
 
     def permute(self, *dims):
-        """Permute the dimensions of this tensor.
+        r"""Permute the dimensions of this tensor.
 
         Args:
             *dims (int...): The desired ordering of dimensions
@@ -237,7 +240,7 @@ class _TensorBase(object):
         return tensor
 
     def expand_as(self, tensor):
-        """Expands this tensor to the size of the specified tensor.
+        r"""Expands this tensor to the size of the specified tensor.
 
         This is equivalent to::
 
@@ -246,7 +249,7 @@ class _TensorBase(object):
         return self.expand(tensor.size())
 
     def repeat(self, *sizes):
-        """Repeats this tensor along the specified dimensions.
+        r"""Repeats this tensor along the specified dimensions.
 
         Unlike :meth:`expand`, this function copies the tensor's data.
 
