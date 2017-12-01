@@ -277,7 +277,7 @@ std::ostream& operator<<(std::ostream& output, const NetDef& n) {
           name,                                                               \
           "cannot be represented correctly in a target type");                \
     }                                                                         \
-    return value;                                                             \
+    return static_cast<T>(value);                                             \
   }                                                                           \
   template <>                                                                 \
   bool ArgumentHelper::HasSingleArgumentOfType<T>(const string& name) const { \
@@ -322,7 +322,7 @@ INSTANTIATE_GET_SINGLE_ARGUMENT(NetDef, n, false)
             name,                                                      \
             "cannot be represented correctly in a target type");       \
       }                                                                \
-      values.push_back(v);                                             \
+      values.push_back(static_cast<T>(v));                             \
     }                                                                  \
     return values;                                                     \
   }
