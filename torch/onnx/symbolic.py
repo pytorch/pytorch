@@ -206,6 +206,8 @@ def permute(g, self, dims):
 
 
 def view(g, self, size):
+    if self.type().sizes()[0] == size[0]:
+        return g.op("Flatten", self, axis_i=1)
     return g.op("Reshape", self, shape_i=size)
 
 
@@ -327,3 +329,23 @@ def abs(g, self):
 
 def pow(g, self, exponent):
     return g.op("Pow", self, exponent)
+
+
+def clamp(g, self, min, max):
+    return g.op("Clip", self, min_f=min, max_f=max)
+
+
+def max(g, self, other):
+    return g.op("Max", self, other)
+
+
+def min(g, self, other):
+    return g.op("Min", self, other)
+
+
+def eq(g, self, other):
+    return g.op("Equal", self, other)
+
+
+def exp(g, self):
+    return g.op("Exp", self)
