@@ -14,11 +14,12 @@ class _TensorBase(object):
     # CUDA case, which handles constructing the tensor on the same GPU
     # as this tensor.
     def new(self, *args, **kwargs):
-        """Constructs a new tensor of the same data type.
+        """Constructs a new tensor of the same data type as :attr:`self` tensor.
 
-        Any valid argument combination to the Tensor constructor is accepted by
-        this method, including sizes, :class:`torch.Storage`, numpy ndarray,
-        Python Sequence, etc. See :class:`torch.Tensor` for more details.
+        Any valid argument combination to the tensor constructor is accepted by
+        this method, including sizes, :class:`torch.Storage`, NumPy ndarray,
+        Python Sequence, etc. See :ref:`torch.Tensor <tensor-doc>` for more
+        details.
 
         .. note:: For CUDA tensors, this method will create new tensor on the
                   same device as this tensor.
@@ -26,15 +27,16 @@ class _TensorBase(object):
         return self.__class__(*args, **kwargs)
 
     def type_as(self, tensor):
-        """Returns this tensor cast to the type of the given tensor.
+        """Returns this :attr:`self` tensor cast to the type of the given
+        tensor.
 
-        This is a no-op if the tensor is already of the correct type. This is
-        equivalent to::
+        This is a no-op if the :attr:`self` tensor is already of the correct
+        type. This is equivalent to::
 
             self.type(tensor.type())
 
         Params:
-            tensor (Tensor): the tensor which has the desired type
+            tensor (Tensor): the tensor with the desired type
         """
         return self.type(tensor.type())
 
@@ -109,7 +111,8 @@ class _TensorBase(object):
     def shape(self):
         """Alias for .size()
 
-        Returns a torch.Size object, containing the dimensions of the tensor
+        Returns a torch.Size object, containing the dimensions of the
+        :attr:`self` Tensor.
         """
         return self.size()
 
@@ -170,14 +173,14 @@ class _TensorBase(object):
             return iter([])
 
     def split(self, split_size, dim=0):
-        """Splits this tensor into a tuple of tensors.
+        """Splits this tensor into tensor chunks of :attr:`split_size` size.
 
         See :func:`torch.split`.
         """
         return torch.split(self, split_size, dim)
 
     def chunk(self, n_chunks, dim=0):
-        """Splits this tensor into a tuple of tensors.
+        """Splits this tensor into a certain number of tensor chunks.
 
         See :func:`torch.chunk`.
         """
