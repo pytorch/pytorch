@@ -14,8 +14,7 @@ class Embedding(Function):
         if max_norm is not None:
             raise ValueError('Right now, re-norm is not supported.')
 
-        output = g.appendNode(g.create("Gather", [weight, indices]))
-        return output
+        return g.op("Gather", weight, indices)
 
     @staticmethod
     def _renorm(ctx, indices, weight, max_norm, norm_type):

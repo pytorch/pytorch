@@ -69,7 +69,8 @@ void encodeTensor(onnx::TensorProto * p, const at::Tensor & tensor) {
       break;
   }
   p->set_data_type(onnx_type);
-  at::Tensor cont = tensor.toType(at::CPU(at_type)).contiguous();
+  // CPU's HalfTensor doesn't have contiguous(), so first calling contiguous()
+  at::Tensor cont = tensor.contiguous().toType(at::CPU(at_type));
   p->set_raw_data(cont);
 }
 
@@ -79,40 +80,50 @@ void addAttribute(onnx::NodeProto * n_p, jit::Node * n, jit::Symbol name) {
   switch(n->kindOf(name)) {
     case AttributeKind::f:
       attr->set_f(n->f(name));
+      attr->set_type(onnx::aFLOAT);
       break;
     case AttributeKind::fs:
+      attr->set_type(onnx::aFLOATS);
       for(auto & v : n->fs(name))
         attr->add_floats(v);
       break;
     case AttributeKind::i:
+      attr->set_type(onnx::aINT);
       attr->set_i(n->i(name));
       break;
     case AttributeKind::is:
+      attr->set_type(onnx::aINTS);
       for(auto & v : n->is(name))
         attr->add_ints(v);
       break;
     case AttributeKind::s:
+      attr->set_type(onnx::aSTRING);
       attr->set_s(n->s(name));
       break;
     case AttributeKind::ss:
+      attr->set_type(onnx::aSTRINGS);
       for(auto & v : n->ss(name))
         attr->add_strings(v);
       break;
     case AttributeKind::t: {
+      attr->set_type(onnx::aTENSOR);
       auto t = attr->mutable_t();
       encodeTensor(t, n->t(name));
     } break;
     case AttributeKind::ts:
+      attr->set_type(onnx::aTENSORS);
       for(auto & v : n->ts(name)) {
         auto t = attr->add_tensors();
         encodeTensor(t, v);
       }
       break;
     case AttributeKind::g: {
+      attr->set_type(onnx::aGRAPH);
       auto g = attr->mutable_g();
       encodeGraph(g, n->g(name), {});
     } break;
     case AttributeKind::gs:
+      attr->set_type(onnx::aGRAPHS);
       for(auto & v : n->gs(name)) {
         auto g = attr->add_graphs();
         encodeGraph(g, v, {});
@@ -191,6 +202,9 @@ void encodeGraph(onnx::GraphProto * p_g, const std::shared_ptr<Graph> & g, const
       continue;
     }
     auto p_n = p_g->add_node();
+    if (node->getSourceLocation()) {
+      p_n->set_doc_string(node->getSourceLocation()->python_traceback);
+    }
     for(auto input : node->inputs()) {
       p_n->add_input(node_name(input));
     }
@@ -256,11 +270,18 @@ void validateGraph(const std::shared_ptr<Graph>& graph) {
 }
 
 std::string ExportGraph(const std::shared_ptr<Graph>& graph,
-                        const std::vector<at::Tensor> & initializers) {
+                        const std::vector<at::Tensor> & initializers,
+                        int64_t onnx_opset_version) {
 
   validateGraph(graph);
 
   onnx::ModelProto model_proto;
+  model_proto.set_producer_name("pytorch");
+  model_proto.set_producer_version("0.3");
+  auto* imp = model_proto.add_opset_import();
+  // This is the version of ONNX operator set we are targeting
+  imp->set_version(onnx_opset_version);
+
   // Set up nanopb callbacks and compute the amount of space needed to store
   // the resulting protobuf
   encodeModel(&model_proto, graph, initializers);

@@ -60,6 +60,15 @@ static inline bool operator==(const Use & a, const Use & b) {
 // Graph holds a list of parameters.
 struct Param;
 
+// SourceLocation represents source code-level debug information for a node.
+// It contains a Python stack trace that represents the provenance of a given
+// node in the trace.
+struct SourceLocation {
+  SourceLocation(std::string python_traceback)
+  : python_traceback(std::move(python_traceback)) {}
+  std::string python_traceback;
+};
+
 // the list types are intentionally simple, but we type-def
 // them here so if we need to change them, refactoring will be easier
 using node_list = std::vector<Node*>;
@@ -113,6 +122,7 @@ private:
   size_t unique_ = 0;          // unique id
   size_t stage_ = 0;           // 0-forward, 1-backward, 2-double-backward,...
   std::string debug_name_;
+  std::shared_ptr<SourceLocation> source_location_;
 protected:
   TypePtr type_;
   Node(Graph * graph_, NodeKind kind_); //defined after graph
@@ -149,6 +159,13 @@ public:
   }
   const std::string & debugName() const {
     return debug_name_;
+  }
+  Node* setSourceLocation(std::shared_ptr<SourceLocation> sl) {
+    source_location_ = sl;
+    return this;
+  }
+  std::shared_ptr<SourceLocation> getSourceLocation() const {
+    return source_location_;
   }
   Graph * owningGraph() {
     return graph_;
@@ -514,6 +531,7 @@ protected:
   virtual void cloneFrom(Node * s) {
     if (s->hasType()) setType(s->type());
     setDebugName(s->debugName());
+    setSourceLocation(s->getSourceLocation());
     copyAttributes(*s);
   }
 };

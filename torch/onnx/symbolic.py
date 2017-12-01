@@ -52,6 +52,30 @@ def _unimplemented(op, msg):
 
 
 # ---------------------------------------------------------------------
+# ONNX operator version
+# ---------------------------------------------------------------------
+
+# READ ME BEFORE EDITING _onnx_opset_version:
+#
+# The variable below controls which ONNX operator set version we are
+# targeting.   THIS VARIABLE HAS SEMANTIC EFFECT!  Say a breaking
+# change occurred in version 8.  As long as this variable < 8, you can
+# export models targeting the old behavior.  However, if you bump
+# this variable to 8 or later, the breaking change will take into effect:
+# you MUST adjust any symbolic affected by breaking changes.  The ONNX
+# spec publishes a *comprehensive* list of BC-breaking changes for every
+# operator revision at:
+#
+#   https://github.com/onnx/onnx/blob/master/docs/Changelog.md
+#
+# Please be sure to go through and check all of our implementations here before
+# increasing this number.  This includes symbolic definitions NOT in this
+# file, so grep for "OpName" (with quotes)
+
+_onnx_opset_version = 2
+
+
+# ---------------------------------------------------------------------
 # Symbolic definitions
 # ---------------------------------------------------------------------
 
@@ -128,6 +152,10 @@ def mm(g, self, other):
     return g.op("Gemm", self, other, C, beta_f=0.0, alpha_f=1.0, broadcast_i=True)
 
 
+def bmm(g, self, other):
+    return g.op("MatMul", self, other)
+
+
 def addmm(g, self, mat1, mat2, beta, alpha):
     return g.op("Gemm", mat1, mat2, self, beta_f=_scalar(beta), alpha_f=_scalar(alpha))
 
@@ -171,6 +199,12 @@ def transpose(g, self, dim0, dim1):
     return g.op("Transpose", self, perm_i=axes)
 
 
+def permute(g, self, dims):
+    if dims == list(range(0, len(dims))):
+        return self
+    return g.op("Transpose", self, perm_i=dims)
+
+
 def view(g, self, size):
     return g.op("Reshape", self, shape_i=size)
 
@@ -202,7 +236,7 @@ def prelu(g, input, weight):
     return g.op("PRelu", input, weight)
 
 
-def threshold(g, input, threshold, value, inplace):
+def threshold(g, input, threshold, value, inplace=False):
     # See Note [Export inplace]
     if _scalar(threshold) != 0:
         return _unimplemented("threshold", "non-zero threshold")
@@ -211,7 +245,7 @@ def threshold(g, input, threshold, value, inplace):
     return g.op("Relu", input)
 
 
-def leaky_relu(g, input, negative_slope, inplace):
+def leaky_relu(g, input, negative_slope, inplace=False):
     # See Note [Export inplace]
     # TODO: Talk to ONNX about unconditional cast of scalar to float
     return g.op("LeakyRelu", input, alpha_f=_scalar(negative_slope))
@@ -231,12 +265,13 @@ def softmax(g, input, dim=None):
 def max_pool2d(g, input, kernel_size, stride, padding, dilation, ceil_mode):
     if ceil_mode:
         return _unimplemented("max_pool2d", "ceil_mode")
+    if set(_pair(dilation)) != {1}:
+        return _unimplemented("max_pool2d", "dilation")
     if not stride:
         stride = kernel_size
     r = g.op("MaxPool", input,
              kernel_shape_i=_pair(kernel_size),
              pads_i=_pair(padding),
-             dilations_i=_pair(dilation),
              strides_i=_pair(stride))
     return r, None
 
@@ -261,6 +296,6 @@ def unfold(g, input, dimension, size, step):
     return g.op("ATen", input, operator_s="unfold", dimension_i=dimension, size_i=size, step_i=step)
 
 
-def elu(g, input, alpha, inplace):
+def elu(g, input, alpha, inplace=False):
     # See Note [Export inplace]
     return g.op("Elu", input, alpha_f=_scalar(alpha))
