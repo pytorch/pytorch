@@ -359,8 +359,9 @@ double THRandom_dirichlet_grad(double x, double alpha, double total) {
   // Use a Laplace approximation when alpha and (total - alpha) are both large.
   if (alpha > 30 && (total - alpha) > 30) {
     const double beta = total - alpha;
-    const double y = 1.0 - x;
-    return x * y * (1.0 / alpha + 0.5 / total * log(alpha * y / (beta * x)));
+    const double logit = x / (1.0 - x);
+    const double Logit = alpha / beta;
+    return x * (1 - x) * (1.0 / alpha - log(logit / Logit) / (2 * Logit * total));
   }
 
   // Use an exp(polynomial) correction to an analytic baseline.
