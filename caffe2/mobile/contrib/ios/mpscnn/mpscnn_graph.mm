@@ -14,7 +14,6 @@
  * limitations under the License.
  */
 
-
 #include "caffe2/core/operator.h"
 #include "mpscnn.h"
 #include "mpscnn_context.h"
@@ -31,7 +30,10 @@ struct Analysis {
     BlobVersions outVersions;
   };
   std::vector<SSA> ssa;
-  std::unordered_map<std::string, std::unordered_map<size_t, std::vector<size_t>>> inUsages;
+  std::unordered_map<
+      std::string,
+      std::unordered_map<size_t, std::vector<size_t>>>
+      inUsages;
 };
 
 Analysis analyzeNet(const NetDef& net) {
@@ -62,10 +64,10 @@ Analysis analyzeNet(const NetDef& net) {
 
 NetDef insertInputOutputCopyOps(const NetDef& def) {
   // Do some validation of the outputs. For this version, we require:
-  // - a single input (first element of external_input()) is consumed by the NetDef
-  // - a single output (first element of external_output()) is produced by the NetDef.
-  // - the input is consumed by def.op(0), and this is the only consumer.
-  // - the output is produced by def.op(-1).
+  // - a single input (first element of external_input()) is consumed by the
+  // NetDef - a single output (first element of external_output()) is produced
+  // by the NetDef. - the input is consumed by def.op(0), and this is the only
+  // consumer. - the output is produced by def.op(-1).
   CAFFE_ENFORCE_GE(def.external_input_size(), 1);
   CAFFE_ENFORCE_GE(def.external_output_size(), 1);
   auto analysis = analyzeNet(def);
@@ -74,14 +76,17 @@ NetDef insertInputOutputCopyOps(const NetDef& def) {
   const auto& inputBlob = def.external_input(0);
   // Enforce that the input blob has a single usage - in the first operator.
   CAFFE_ENFORCE(analysis.inUsages[inputBlob][0] == (std::vector<size_t>{0}));
-  // Enforce that the external_output(0) blob is produced by the last operator in this sequence.
+  // Enforce that the external_output(0) blob is produced by the last operator
+  // in this sequence.
   const auto& outputBlob = def.external_output(0);
-  CAFFE_ENFORCE(analysis.ssa.back().outVersions.find(outputBlob) !=
-                analysis.ssa.back().outVersions.end());
+  CAFFE_ENFORCE(
+      analysis.ssa.back().outVersions.find(outputBlob) !=
+      analysis.ssa.back().outVersions.end());
   const auto& outputBlobVersion = analysis.ssa.back().outVersions[outputBlob];
   // This should hold true by definition of the SSA analysis.
-  CAFFE_ENFORCE(analysis.inUsages[outputBlob].find(outputBlobVersion) ==
-                analysis.inUsages[outputBlob].end());
+  CAFFE_ENFORCE(
+      analysis.inUsages[outputBlob].find(outputBlobVersion) ==
+      analysis.inUsages[outputBlob].end());
   NetDef mdef;
   mdef.CopyFrom(def);
   mdef.clear_op();
@@ -115,17 +120,19 @@ NetDef insertInputOutputCopyOps(const NetDef& def) {
   return mdef;
 }
 
-bool nextIsOnlyUserOfCurrent(const Analysis& analysis,
-                             size_t currentIdx,
-                             const OperatorDef& currentOp,
-                             const OperatorDef& nextOp) {
+bool nextIsOnlyUserOfCurrent(
+    const Analysis& analysis,
+    size_t currentIdx,
+    const OperatorDef& currentOp,
+    const OperatorDef& nextOp) {
   CAFFE_ENFORCE_EQ(currentOp.output_size(), 1);
   CAFFE_ENFORCE_GE(nextOp.input_size(), 1);
   CAFFE_ENFORCE_EQ(currentOp.output(0), nextOp.input(0));
   const auto outputName = currentOp.output(0);
   // Find the version of the output name we are currently looking at.
   // This is guaranteed to exist by SSA analysis.
-  const auto currentOutputVersion = analysis.ssa.at(currentIdx).outVersions.at(outputName);
+  const auto currentOutputVersion =
+      analysis.ssa.at(currentIdx).outVersions.at(outputName);
   VLOG(2) << "Blob: " << outputName << ", idx: " << currentOutputVersion;
   // Find the usages of this in the SSA analysis.
 
@@ -139,21 +146,24 @@ bool nextIsOnlyUserOfCurrent(const Analysis& analysis,
       analysis.inUsages.at(outputName).end()) {
     return false;
   }
-  const auto currentOutputUsages = analysis.inUsages.at(outputName).at(currentOutputVersion);
+  const auto currentOutputUsages =
+      analysis.inUsages.at(outputName).at(currentOutputVersion);
   VLOG(2) << "Blob: " << outputName << ", idx: " << currentOutputVersion
-            << ", usages[0]: " << currentOutputUsages[0];
+          << ", usages[0]: " << currentOutputUsages[0];
 
   return currentOutputUsages == std::vector<size_t>{currentIdx + 1};
 }
-bool tryFuseAdjacentOps(const Analysis& analysis,
-                        size_t currentIdx,
-                        const OperatorDef& currentOp,
-                        const OperatorDef& nextOp,
-                        OperatorDef* fusedOp) {
+bool tryFuseAdjacentOps(
+    const Analysis& analysis,
+    size_t currentIdx,
+    const OperatorDef& currentOp,
+    const OperatorDef& nextOp,
+    OperatorDef* fusedOp) {
   // Check for possible invalid opportunities.
-  // Must be identical outputs, with either in-place usage for nextOp, *or* the only use of the
-  // output of currentOp is the consumption by nextOp.
-  if (currentOp.output_size() != 1 || !nextOp.input_size() || nextOp.output_size() != 1) {
+  // Must be identical outputs, with either in-place usage for nextOp, *or* the
+  // only use of the output of currentOp is the consumption by nextOp.
+  if (currentOp.output_size() != 1 || !nextOp.input_size() ||
+      nextOp.output_size() != 1) {
     return false;
   }
 
@@ -166,22 +176,24 @@ bool tryFuseAdjacentOps(const Analysis& analysis,
   }
 
   // Can we autogenerate this at registration time instead?
-  static const std::map<std::pair<std::string, std::string>, std::string> fusionOpportunities = {{
-      {{"MPSCNNConv", "MPSCNNRelu"}, "MPSCNNConvRelu"},
-      {{"MPSCNNConv", "MPSCNNSigmoid"}, "MPSCNNConvSigmoid"},
-      {{"MPSCNNFC", "MPSCNNRelu"}, "MPSCNNFCRelu"},
-      {{"MPSCNNInstanceNorm", "MPSCNNPRelu"}, "MPSCNNInstanceNormPRelu"},
-  }};
+  static const std::map<std::pair<std::string, std::string>, std::string>
+      fusionOpportunities = {{
+          {{"MPSCNNConv", "MPSCNNRelu"}, "MPSCNNConvRelu"},
+          {{"MPSCNNConv", "MPSCNNSigmoid"}, "MPSCNNConvSigmoid"},
+          {{"MPSCNNFC", "MPSCNNRelu"}, "MPSCNNFCRelu"},
+          {{"MPSCNNInstanceNorm", "MPSCNNPRelu"}, "MPSCNNInstanceNormPRelu"},
+      }};
   auto it = fusionOpportunities.find({currentOp.type(), nextOp.type()});
   if (it == fusionOpportunities.end()) {
     return false;
   }
   // MPSCNNConvRelu and MPSCNNConvSigmoid cannot be in-place
-  if (currentOp.type() == "MPSCNNConv" && currentOp.input(0) == nextOp.output(0)) {
+  if (currentOp.type() == "MPSCNNConv" &&
+      currentOp.input(0) == nextOp.output(0)) {
     return false;
   }
-  LOG(INFO) << "Found a fusion between adjacent ops: (" << currentOp.type() << ", " << nextOp.type()
-            << ") -> " << it->second;
+  LOG(INFO) << "Found a fusion between adjacent ops: (" << currentOp.type()
+            << ", " << nextOp.type() << ") -> " << it->second;
   fusedOp->CopyFrom(currentOp);
   fusedOp->set_type(it->second);
   for (auto i = 1; i < nextOp.input_size(); ++i) {
@@ -233,7 +245,8 @@ NetDef rewriteForMetal(const NetDef& def) {
   mdef.CopyFrom(def);
 
   const auto& opKeyList = CPUOperatorRegistry()->Keys();
-  const auto& opKeySet = std::set<std::string>(opKeyList.begin(), opKeyList.end());
+  const auto& opKeySet =
+      std::set<std::string>(opKeyList.begin(), opKeyList.end());
   for (auto i = 0; i < mdef.op_size(); ++i) {
     auto* op = mdef.mutable_op(i);
     const auto mpscnnOp = std::string("MPSCNN") + op->type();
@@ -248,12 +261,15 @@ NetDef rewriteForMetal(const NetDef& def) {
       "CopyFromMPSCNN", "MPSCNNBRGNCHWCToPackedInt8BGRAStylizerDeprocess"};
 
   if (mpscnnInputOps.find(mdef.op(0).type()) == mpscnnInputOps.end() &&
-      mpscnnOutputOps.find(mdef.op(mdef.op_size() - 1).type()) == mpscnnOutputOps.end()) {
+      mpscnnOutputOps.find(mdef.op(mdef.op_size() - 1).type()) ==
+          mpscnnOutputOps.end()) {
     mdef = insertInputOutputCopyOps(mdef);
   }
   CAFFE_ENFORCE_GE(mdef.op_size(), 2);
   CAFFE_ENFORCE(mpscnnInputOps.find(mdef.op(0).type()) != mpscnnInputOps.end());
-  CAFFE_ENFORCE(mpscnnOutputOps.find(mdef.op(mdef.op_size() - 1).type()) != mpscnnOutputOps.end());
+  CAFFE_ENFORCE(
+      mpscnnOutputOps.find(mdef.op(mdef.op_size() - 1).type()) !=
+      mpscnnOutputOps.end());
   return mdef;
 }
 
@@ -264,9 +280,8 @@ void dumpDef(const NetDef& d) {
 }
 
 NetDef annotateDefWithReadCounts(const NetDef& net) {
-  // Now we have usage versions, we want to compute, for each blob version, the number of usages of
-  // each blob version.
-  // ReadCount
+  // Now we have usage versions, we want to compute, for each blob version, the
+  // number of usages of each blob version. ReadCount
   auto analysis = analyzeNet(net);
   using ReadCount = std::unordered_map<std::string, size_t>;
   std::vector<ReadCount> readCounts;
@@ -301,25 +316,26 @@ NetDef annotateDefWithReadCounts(const NetDef& net) {
   return annotatedNet;
 }
 
-bool tryConvertToMPSCNN(const NetDef& initNet, const NetDef& predictNet, NetDef* metalPredictNet) {
-// iOS 10.0 and above.
-#define SYSTEM_VERSION_GREATER_THAN_OR_EQUAL_TO(v)                                 \
-  ([[[UIDevice currentDevice] systemVersion] compare:v options:NSNumericSearch] != \
-   NSOrderedAscending)
-#define SYSTEM_VERSION_EQUAL_TO(v) \
-  ([[[UIDevice currentDevice] systemVersion] compare:v options:NSNumericSearch] == NSOrderedSame)
+bool tryConvertToMPSCNN(
+    const NetDef& initNet,
+    const NetDef& predictNet,
+    NetDef* metalPredictNet) {
+  // iOS 10.0 and above.
 
+#define SYSTEM_VERSION_GREATER_THAN_OR_EQUAL_TO(v) \
+  ([[[UIDevice currentDevice] systemVersion]       \
+       compare:v                                   \
+       options:NSNumericSearch] != NSOrderedAscending)
   if (!SYSTEM_VERSION_GREATER_THAN_OR_EQUAL_TO(@"10.2")) {
     LOG(ERROR) << "MPSCNN is unstable for ios version under 10.2.";
     return false;
   }
-
 #undef SYSTEM_VERSION_GREATER_THAN_OR_EQUAL_TO
-#undef SYSTEM_VERSION_EQUAL_TO
-
-  // The iOS GPU Family 3 v2 feature set. Introduced with the Apple A9 GPU and iOS 10.0.
-  // Don't instantiate the MPSCNNContext, as that compiles the kernel source.
-  if (![MTLCreateSystemDefaultDevice() supportsFeatureSet:MTLFeatureSet_iOS_GPUFamily3_v2]) {
+  // The iOS GPU Family 3 v2 feature set. Introduced with the Apple A9 GPU and
+  // iOS 10.0. Don't instantiate the MPSCNNContext, as that compiles the kernel
+  // source.
+  if (![MTLCreateSystemDefaultDevice()
+          supportsFeatureSet:MTLFeatureSet_iOS_GPUFamily3_v2]) {
     LOG(ERROR) << "The iOS GPU is less than an A9, so MPSCNN is not available";
     return false;
   }
@@ -336,11 +352,13 @@ bool tryConvertToMPSCNN(const NetDef& initNet, const NetDef& predictNet, NetDef*
     LOG(INFO) << "MPSCNN is successfully enabled";
     return true;
   } catch (const std::exception& e) {
-    LOG(ERROR) << "Caught exception trying to convert NetDef to MPSCNN: " << e.what();
+    LOG(ERROR) << "Caught exception trying to convert NetDef to MPSCNN: "
+               << e.what();
     return false;
   }
 }
 
-void mpscnnRecordExecutionFinish() { [getMPSCNNContext().commandQueue insertDebugCaptureBoundary]; }
-
+void mpscnnRecordExecutionFinish() {
+  [getMPSCNNContext().commandQueue insertDebugCaptureBoundary];
+}
 }

@@ -31,36 +31,94 @@
 
 #import <Metal/Metal.h>
 #import <MetalPerformanceShaders/MetalPerformanceShaders.h>
+#import <UIKit/UIDevice.h>
+
+#define SYSTEM_VERSION_GREATER_THAN_OR_EQUAL_TO(v) \
+  ([[[UIDevice currentDevice] systemVersion]       \
+       compare:v                                   \
+       options:NSNumericSearch] != NSOrderedAscending)
+
+// Only compiles against Base SDK iOS 11.0 or greater
+@interface ConvTransposeDataSource : NSObject<MPSCNNConvolutionDataSource>
+@property float* weights_;
+@property float* bias_;
+@property MPSCNNConvolutionDescriptor* desc_;
+@end
+
+@implementation ConvTransposeDataSource
+- (id)initWithWeight:(float*)weights
+                bias:(float*)bias
+                desc:(MPSCNNConvolutionDescriptor*)desc {
+  self = [super init];
+  self.weights_ = weights;
+  self.bias_ = bias;
+  self.desc_ = desc;
+  return self;
+}
+- (float*)biasTerms {
+  return self.bias_;
+}
+
+- (MPSDataType)dataType {
+  return MPSDataTypeFloat32;
+}
+- (MPSCNNConvolutionDescriptor*)descriptor {
+  return self.desc_;
+}
+- (NSString*)label {
+  return nullptr;
+}
+- (BOOL)load {
+  return true;
+}
+- (float*)lookupTableForUInt8Kernel {
+  return nullptr;
+}
+- (void)purge {
+  return;
+}
+- (vector_float2*)rangesForUInt8Kernel {
+  return nullptr;
+}
+- (void*)weights {
+  return self.weights_;
+}
+@end
 
 namespace caffe2 {
 
 namespace {
-auto divRoundUp(uint x, uint y) -> uint { return (x + y - 1) / y; }
+auto divRoundUp(uint x, uint y) -> uint {
+  return (x + y - 1) / y;
+}
 
-MPSTemporaryImage* createTemporaryImage(const OperatorBase* op,
-                                        id<MTLCommandBuffer> commandBuffer,
-                                        int n,
-                                        int height,
-                                        int width,
-                                        int channels,
-                                        size_t output_idx = 0) {
-
+MPSTemporaryImage* createTemporaryImage(
+    const OperatorBase* op,
+    id<MTLCommandBuffer> commandBuffer,
+    int n,
+    int height,
+    int width,
+    int channels,
+    size_t output_idx = 0) {
   auto* image = [MPSTemporaryImage
       temporaryImageWithCommandBuffer:commandBuffer
                       imageDescriptor:
                           [MPSImageDescriptor
-                              imageDescriptorWithChannelFormat:MPSImageFeatureChannelFormatFloat16
+                              imageDescriptorWithChannelFormat:
+                                  MPSImageFeatureChannelFormatFloat16
                                                          width:width
                                                         height:height
                                                featureChannels:channels
                                                 numberOfImages:n
-                                                         usage:MTLTextureUsageShaderRead |
-                                                               MTLTextureUsageShaderWrite]];
-  // We'll try to look at the per-output_idx read-count argument, otherwise, we'll use the
-  // operator-global default.
+                                                         usage:
+                                                             MTLTextureUsageShaderRead |
+                                                         MTLTextureUsageShaderWrite]];
+  // We'll try to look at the per-output_idx read-count argument, otherwise,
+  // we'll use the operator-global default.
   const auto& readCounts = op->GetRepeatedArgument<int>(kMPSCNNReadCountArg);
-  const auto readCount = readCounts.size() ? readCounts.at(output_idx)
-                                           : op->GetSingleArgument<int>(kMPSCNNReadCountArg, 1);
+  const auto readCount = readCounts.size()
+      ? readCounts.at(output_idx)
+      : op->GetSingleArgument<int>(kMPSCNNReadCountArg, 1);
   CAFFE_ENFORCE_GE(readCount, 1);
   image.readCount = readCount;
   return image;
@@ -69,51 +127,58 @@ MPSTemporaryImage* createTemporaryImage(const OperatorBase* op,
 MPSImage* createStaticImage(int n, int height, int width, int channels) {
   return [[MPSImage alloc]
        initWithDevice:getMPSCNNContext().device
-      imageDescriptor:[MPSImageDescriptor
-                          imageDescriptorWithChannelFormat:MPSImageFeatureChannelFormatFloat16
-                                                     width:width
-                                                    height:height
-                                           featureChannels:channels
-                                            numberOfImages:n
-                                                     usage:MTLTextureUsageShaderRead |
-                                                           MTLTextureUsageShaderWrite]];
+      imageDescriptor:
+          [MPSImageDescriptor
+              imageDescriptorWithChannelFormat:
+                  MPSImageFeatureChannelFormatFloat16
+                                         width:width
+                                        height:height
+                               featureChannels:channels
+                                numberOfImages:n
+                                         usage:MTLTextureUsageShaderRead |
+                                         MTLTextureUsageShaderWrite]];
 }
 
 class MPSImageWrapper {
  public:
   MPSImageWrapper() {}
-  MPSImageWrapper(const OperatorBase* op,
-                  MPSImageWrapper* parent,
-                  int n,
-                  int height,
-                  int width,
-                  int channels,
-                  size_t output_idx = 0) {
-    /* If the parent wrapper contains a temporary image, we need to pass on the command buffer
-     * because the temporary images are attached to the command buffer, we will need to use
-     * the same command buffer in order to use the temporary image. We don't want to synchronize
-     * the parent wrapper because it is still in use.
-     * If the parent wrapper contains a static image, we should create a new command buffer
-     * because we use static image so it can survive synchronization(commit of the command buffer),
-     * which means if we pass on the command buffer the command buffer will be commited in multiple
-     * places in the graph. Also since we don't pass on parent's command buffer,we need to
-     * synchronize(commit) it since it won't be used in the future.
+  MPSImageWrapper(
+      const OperatorBase* op,
+      MPSImageWrapper* parent,
+      int n,
+      int height,
+      int width,
+      int channels,
+      size_t output_idx = 0) {
+    /* If the parent wrapper contains a temporary image, we need to pass on the
+     * command buffer because the temporary images are attached to the command
+     * buffer, we will need to use the same command buffer in order to use the
+     * temporary image. We don't want to synchronize the parent wrapper because
+     * it is still in use. If the parent wrapper contains a static image, we
+     * should create a new command buffer because we use static image so it can
+     * survive synchronization(commit of the command buffer), which means if we
+     * pass on the command buffer the command buffer will be commited in
+     * multiple places in the graph. Also since we don't pass on parent's
+     * command buffer,we need to synchronize(commit) it since it won't be used
+     * in the future.
      */
     bool passOnCb = parent != nullptr && parent->isTemporaryImage_;
-    commandBuffer_ =
-        passOnCb ? parent->commandBuffer_ : [getMPSCNNContext().commandQueue commandBuffer];
+    commandBuffer_ = passOnCb ? parent->commandBuffer_
+                              : [getMPSCNNContext().commandQueue commandBuffer];
 
     bool commitInputCb = parent != nullptr && !parent->isTemporaryImage_;
     if (commitInputCb) {
       parent->synchronize();
     }
 
-    const auto& isTemporaryImages = op->GetRepeatedArgument<int>(kMPSCNNOutputIsTempImageArg);
+    const auto& isTemporaryImages =
+        op->GetRepeatedArgument<int>(kMPSCNNOutputIsTempImageArg);
     isTemporaryImage_ = isTemporaryImages.size()
-                            ? isTemporaryImages.at(output_idx)
-                            : op->GetSingleArgument<int>(kMPSCNNOutputIsTempImageArg, 1);
+        ? isTemporaryImages.at(output_idx)
+        : op->GetSingleArgument<int>(kMPSCNNOutputIsTempImageArg, 1);
     if (isTemporaryImage_) {
-      image_ = createTemporaryImage(op, commandBuffer_, n, height, width, channels, output_idx);
+      image_ = createTemporaryImage(
+          op, commandBuffer_, n, height, width, channels, output_idx);
     } else {
       image_ = createStaticImage(n, height, width, channels);
     }
@@ -126,9 +191,13 @@ class MPSImageWrapper {
     }
   }
 
-  MPSImage* getImage() const { return image_; }
+  MPSImage* getImage() const {
+    return image_;
+  }
 
-  id<MTLCommandBuffer> getCommandBuffer() const { return commandBuffer_; }
+  id<MTLCommandBuffer> getCommandBuffer() const {
+    return commandBuffer_;
+  }
 
   void synchronize() {
     // commit the command buffer if it is notEnqueued
@@ -145,7 +214,8 @@ class MPSImageWrapper {
   void copyToOutputBlob(Blob* output) {
     output->GetMutable<MPSImageWrapper>()->image_ = image_;
     output->GetMutable<MPSImageWrapper>()->commandBuffer_ = commandBuffer_;
-    output->GetMutable<MPSImageWrapper>()->isTemporaryImage_ = isTemporaryImage_;
+    output->GetMutable<MPSImageWrapper>()->isTemporaryImage_ =
+        isTemporaryImage_;
   }
 
  private:
@@ -154,7 +224,8 @@ class MPSImageWrapper {
   bool isTemporaryImage_ = true;
 };
 
-NSString* kernelFor(const MPSImage* X, NSString* arrayKernel, NSString* nonArrayKernel) {
+NSString*
+kernelFor(const MPSImage* X, NSString* arrayKernel, NSString* nonArrayKernel) {
   if (X.featureChannels > 4) {
     return arrayKernel;
   }
@@ -169,20 +240,29 @@ struct LaunchParams {
   MTLSize threadgroupsPerGrid;
 };
 
-LaunchParams spatialPointwiseKernelLaunchParams(id<MTLComputePipelineState> pipeline,
-                                                const MPSImage* im) {
-  const auto maxThreadsPerThreadgroup = [pipeline maxTotalThreadsPerThreadgroup];
+LaunchParams spatialPointwiseKernelLaunchParams(
+    id<MTLComputePipelineState> pipeline,
+    const MPSImage* im) {
+  const auto maxThreadsPerThreadgroup =
+      [pipeline maxTotalThreadsPerThreadgroup];
   const auto threadExecutionWidth = [pipeline threadExecutionWidth];
   const auto threadsPerThreadgroup = MTLSizeMake(
-      8 /* threadExecutionWidth */, 4 /* maxThreadsPerThreadgroup / threadExecutionWidth */, 1);
-  const auto threadgroupsPerGrid =
-      MTLSizeMake(divRoundUp(im.width, threadsPerThreadgroup.width),
-                  divRoundUp(im.height, threadsPerThreadgroup.height),
-                  im.numberOfImages * divRoundUp(im.featureChannels, 4));
+      8 /* threadExecutionWidth */,
+      4 /* maxThreadsPerThreadgroup / threadExecutionWidth */,
+      1);
+  const auto threadgroupsPerGrid = MTLSizeMake(
+      divRoundUp(im.width, threadsPerThreadgroup.width),
+      divRoundUp(im.height, threadsPerThreadgroup.height),
+      im.numberOfImages * divRoundUp(im.featureChannels, 4));
   return {threadsPerThreadgroup, threadgroupsPerGrid};
 };
 
-void computeOutputHW(ConvPoolOpBase<CPUContext>* op, int H, int W, int* OH, int* OW) {
+void computeOutputHW(
+    ConvPoolOpBase<CPUContext>* op,
+    int H,
+    int W,
+    int* OH,
+    int* OW) {
   Tensor<CPUContext> input, output;
   input.Resize(1, 1, H, W);
   op->SetOutputSize<CPUContext>(input, &output, 1);
@@ -192,14 +272,12 @@ void computeOutputHW(ConvPoolOpBase<CPUContext>* op, int H, int W, int* OH, int*
 }
 
 constexpr int computeMPSAlignOffset(int kernel, int pad) {
-  // To set the offset, we can just match the top-left pixel (in the input image, with negative
-  // values for padding)
-  // that we look at.
-  // For 3x3s1p1, we look at the (-1, -1) pixel in the original impl.
-  // For 3x3s1p0, we look at (0, 0) pixel.
-  // For 3x3s1p2, look at (-2, -2)
-  // MPSCNN always looks at (-floor(kernel_size - 1 / 2), -floor(kernel_size - 1 / 2))
-  // Thus, we just need to match this up.
+  // To set the offset, we can just match the top-left pixel (in the input
+  // image, with negative values for padding) that we look at. For 3x3s1p1, we
+  // look at the (-1, -1) pixel in the original impl. For 3x3s1p0, we look at
+  // (0, 0) pixel. For 3x3s1p2, look at (-2, -2) MPSCNN always looks at
+  // (-floor(kernel_size - 1 / 2), -floor(kernel_size - 1 / 2)) Thus, we just
+  // need to match this up.
 
   // For 3x3s1p1, offset should be (0, 0)
   // For 3x3s1p0, offset should be (1, 1)
@@ -211,7 +289,9 @@ constexpr int computeMPSAlignOffset(int kernel, int pad) {
 
 // Compute the 1-d index of a n-dimensional contiguous row-major tensor for
 //     a given n-dimensional index 'index'
-size_t ComputeStartIndex(const TensorCPU& tensor, const std::vector<int>& index) {
+size_t ComputeStartIndex(
+    const TensorCPU& tensor,
+    const std::vector<int>& index) {
   DCHECK_EQ(index.size(), tensor.ndim());
 
   size_t ret = 0;
@@ -224,7 +304,9 @@ size_t ComputeStartIndex(const TensorCPU& tensor, const std::vector<int>& index)
 
 // Get a sub tensor view from 'tensor' using data pointer from 'tensor'
 template <class T>
-utils::ConstTensorView<T> GetSubTensorView(const TensorCPU& tensor, int dim0_start_index) {
+utils::ConstTensorView<T> GetSubTensorView(
+    const TensorCPU& tensor,
+    int dim0_start_index) {
   DCHECK_EQ(tensor.meta().itemsize(), sizeof(T));
 
   if (tensor.size() == 0) {
@@ -271,20 +353,28 @@ class CopyToMPSCNNOp final : public Operator<CPUContext> {
       memcpy([inputBuffers_[i] contents], X.raw_data(), X.nbytes());
       VLOG(2) << "CopyToMPSCNNOp input copy took: " << copyT.MilliSeconds();
       if (i == 0) {
-        wrappers[i] = MPSImageWrapper(this, nullptr, n, height, width, channels, i);
+        wrappers[i] =
+            MPSImageWrapper(this, nullptr, n, height, width, channels, i);
       } else {
-        wrappers[i] = MPSImageWrapper(this, &wrappers[0], n, height, width, channels, i);
+        wrappers[i] =
+            MPSImageWrapper(this, &wrappers[0], n, height, width, channels, i);
       }
       auto commandBuffer = wrappers[i].getCommandBuffer();
       MPSImage* output = wrappers[i].getImage();
-      id<MTLComputeCommandEncoder> encoder = [commandBuffer computeCommandEncoder];
-      id<MTLComputePipelineState> state = getMPSCNNContext().getSpecializedPipelineState(
-          kernelFor(output, @"copy_nchw_to_metal", @"copy_nchw_to_metal_nonarray"),
-          {{ushort(channels), ushort(height), ushort(width)}});
+      id<MTLComputeCommandEncoder> encoder =
+          [commandBuffer computeCommandEncoder];
+      id<MTLComputePipelineState> state =
+          getMPSCNNContext().getSpecializedPipelineState(
+              kernelFor(
+                  output,
+                  @"copy_nchw_to_metal",
+                  @"copy_nchw_to_metal_nonarray"),
+              {{ushort(channels), ushort(height), ushort(width)}});
       [encoder setComputePipelineState:state];
       [encoder setBuffer:inputBuffers_[i] offset:0 atIndex:0];
       [encoder setTexture:[output texture] atIndex:0];
-      const auto& launchParams = spatialPointwiseKernelLaunchParams(state, output);
+      const auto& launchParams =
+          spatialPointwiseKernelLaunchParams(state, output);
       [encoder dispatchThreadgroups:launchParams.threadgroupsPerGrid
               threadsPerThreadgroup:launchParams.threadsPerThreadgroup];
       [encoder endEncoding];
@@ -299,7 +389,10 @@ class CopyToMPSCNNOp final : public Operator<CPUContext> {
 };
 
 REGISTER_CPU_OPERATOR(CopyToMPSCNN, CopyToMPSCNNOp);
-OPERATOR_SCHEMA(CopyToMPSCNN).NumInputs(1, INT_MAX).NumOutputs(1, INT_MAX).SameNumberOfOutput();
+OPERATOR_SCHEMA(CopyToMPSCNN)
+    .NumInputs(1, INT_MAX)
+    .NumOutputs(1, INT_MAX)
+    .SameNumberOfOutput();
 
 auto mpsImageSize = [](MPSImage* X) {
   return X.featureChannels * X.height * X.width * X.numberOfImages;
@@ -312,7 +405,9 @@ class CopyFromMPSCNNOp final : public Operator<CPUContext> {
 
   bool RunOnDevice() override {
     caffe2::Timer t;
-    auto Wrapper = [&](size_t i) { return Inputs()[i]->template Get<MPSImageWrapper>(); };
+    auto Wrapper = [&](size_t i) {
+      return Inputs()[i]->template Get<MPSImageWrapper>();
+    };
     auto cb = [&](size_t i) { return Wrapper(i).getCommandBuffer(); };
     auto X = [&](size_t i) { return Wrapper(i).getImage(); };
 
@@ -321,15 +416,20 @@ class CopyFromMPSCNNOp final : public Operator<CPUContext> {
     for (auto i = 0; i < Inputs().size(); ++i) {
       CAFFE_ENFORCE_EQ(cb0, cb(i));
       MPSImage* Xi = X(i);
-      if (!outputBuffers_[i] || outputBuffers_[i].length != mpsImageSize(Xi) * sizeof(float)) {
-        outputBuffers_[i] =
-            [getMPSCNNContext().device newBufferWithLength:mpsImageSize(Xi) * sizeof(float)
-                                                   options:MTLResourceOptionCPUCacheModeDefault];
+      if (!outputBuffers_[i] ||
+          outputBuffers_[i].length != mpsImageSize(Xi) * sizeof(float)) {
+        outputBuffers_[i] = [getMPSCNNContext().device
+            newBufferWithLength:mpsImageSize(Xi) * sizeof(float)
+                        options:MTLResourceOptionCPUCacheModeDefault];
       }
       id<MTLComputeCommandEncoder> encoder = [cb0 computeCommandEncoder];
-      id<MTLComputePipelineState> state = getMPSCNNContext().getSpecializedPipelineState(
-          kernelFor(Xi, @"copy_metal_to_nchw", @"copy_metal_to_nchw_nonarray"),
-          {{ushort(Xi.featureChannels), ushort(Xi.height), ushort(Xi.width)}});
+      id<MTLComputePipelineState> state =
+          getMPSCNNContext().getSpecializedPipelineState(
+              kernelFor(
+                  Xi, @"copy_metal_to_nchw", @"copy_metal_to_nchw_nonarray"),
+              {{ushort(Xi.featureChannels),
+                ushort(Xi.height),
+                ushort(Xi.width)}});
 
       [encoder setComputePipelineState:state];
       [encoder setBuffer:outputBuffers_[i] offset:0 atIndex:0];
@@ -347,11 +447,14 @@ class CopyFromMPSCNNOp final : public Operator<CPUContext> {
     for (auto i = 0; i < Inputs().size(); ++i) {
       caffe2::Timer copyOutT;
       MPSImage* Xi = X(i);
-      Output(i)->Resize(Xi.numberOfImages, Xi.featureChannels, Xi.height, Xi.width);
+      Output(i)->Resize(
+          Xi.numberOfImages, Xi.featureChannels, Xi.height, Xi.width);
       Output(i)->mutable_data<float>();
       CAFFE_ENFORCE_EQ(outputBuffers_[i].length, Output(i)->nbytes());
       memcpy(
-          Output(i)->mutable_data<float>(), [outputBuffers_[i] contents], outputBuffers_[i].length);
+          Output(i)->mutable_data<float>(),
+          [outputBuffers_[i] contents],
+          outputBuffers_[i].length);
       VLOG(2) << "CopyFromMPSCNNOp memcpy took: " << copyOutT.MilliSeconds();
     }
     VLOG(2) << "CopyFromMPSCNNOp took: " << t.MilliSeconds();
@@ -363,12 +466,17 @@ class CopyFromMPSCNNOp final : public Operator<CPUContext> {
 };
 
 REGISTER_CPU_OPERATOR(CopyFromMPSCNN, CopyFromMPSCNNOp);
-OPERATOR_SCHEMA(CopyFromMPSCNN).NumInputs(1, INT_MAX).NumOutputs(1, INT_MAX).SameNumberOfOutput();
+OPERATOR_SCHEMA(CopyFromMPSCNN)
+    .NumInputs(1, INT_MAX)
+    .NumOutputs(1, INT_MAX)
+    .SameNumberOfOutput();
 
-class MPSCNNPackedInt8BGRANHWCToNCHWCStylizerPreprocessOp final : public Operator<CPUContext> {
+class MPSCNNPackedInt8BGRANHWCToNCHWCStylizerPreprocessOp final
+    : public Operator<CPUContext> {
  public:
-  MPSCNNPackedInt8BGRANHWCToNCHWCStylizerPreprocessOp(const OperatorDef& operator_def,
-                                                      Workspace* ws)
+  MPSCNNPackedInt8BGRANHWCToNCHWCStylizerPreprocessOp(
+      const OperatorDef& operator_def,
+      Workspace* ws)
       : Operator<CPUContext>(operator_def, ws), ws_(ws) {}
 
   bool RunOnDevice() override {
@@ -384,11 +492,12 @@ class MPSCNNPackedInt8BGRANHWCToNCHWCStylizerPreprocessOp final : public Operato
     caffe2::Timer t;
 
     auto* noiseBlob = ws_->CreateBlob("__CAFFE2_STYLIZER_NOISE__");
-    ushort noiseSize =
-        OperatorBase::GetSingleArgument<int>("noise_size", 491 /* prime to avoid artifacts */);
+    ushort noiseSize = OperatorBase::GetSingleArgument<int>(
+        "noise_size", 491 /* prime to avoid artifacts */);
     // Treaded as half4 in the kernel, so need half4 here.
     noiseSize = divRoundUp(noiseSize, 4) * 4;
-    if (!noiseBlob->IsType<TensorCPU>() || noiseBlob->Get<TensorCPU>().size() != noiseSize) {
+    if (!noiseBlob->IsType<TensorCPU>() ||
+        noiseBlob->Get<TensorCPU>().size() != noiseSize) {
       VLOG(2) << "Initializing stylizer with noise: " << noiseSize;
       caffe2::Timer rt;
       // Initialize random noise on first use.
@@ -441,9 +550,11 @@ class MPSCNNPackedInt8BGRANHWCToNCHWCStylizerPreprocessOp final : public Operato
     auto commandBuffer = outputWrapper.getCommandBuffer();
     MPSImage* output = outputWrapper.getImage();
 
-    id<MTLComputeCommandEncoder> encoder = [commandBuffer computeCommandEncoder];
+    id<MTLComputeCommandEncoder> encoder =
+        [commandBuffer computeCommandEncoder];
     id<MTLComputePipelineState> state =
-        getMPSCNNContext().getSpecializedPipelineState(@"preprocess_stylizer", {noiseSize});
+        getMPSCNNContext().getSpecializedPipelineState(
+            @"preprocess_stylizer", {noiseSize});
 
     [encoder setComputePipelineState:state];
     [encoder setBuffer:inputBuffer_ offset:0 atIndex:0];
@@ -451,7 +562,8 @@ class MPSCNNPackedInt8BGRANHWCToNCHWCStylizerPreprocessOp final : public Operato
     [encoder setBuffer:noiseBuffer_ offset:0 atIndex:2];
 
     [encoder setTexture:[output texture] atIndex:0];
-    const auto& launchParams = spatialPointwiseKernelLaunchParams(state, output);
+    const auto& launchParams =
+        spatialPointwiseKernelLaunchParams(state, output);
     [encoder dispatchThreadgroups:launchParams.threadgroupsPerGrid
             threadsPerThreadgroup:launchParams.threadsPerThreadgroup];
     [encoder endEncoding];
@@ -468,13 +580,19 @@ class MPSCNNPackedInt8BGRANHWCToNCHWCStylizerPreprocessOp final : public Operato
   id<MTLBuffer> meanBuffer_{nullptr};
 };
 
-REGISTER_CPU_OPERATOR(MPSCNNPackedInt8BGRANHWCToNCHWCStylizerPreprocess,
-                      MPSCNNPackedInt8BGRANHWCToNCHWCStylizerPreprocessOp);
-OPERATOR_SCHEMA(MPSCNNPackedInt8BGRANHWCToNCHWCStylizerPreprocess).NumInputs(2).NumOutputs(1);
+REGISTER_CPU_OPERATOR(
+    MPSCNNPackedInt8BGRANHWCToNCHWCStylizerPreprocess,
+    MPSCNNPackedInt8BGRANHWCToNCHWCStylizerPreprocessOp);
+OPERATOR_SCHEMA(MPSCNNPackedInt8BGRANHWCToNCHWCStylizerPreprocess)
+    .NumInputs(2)
+    .NumOutputs(1);
 
-class MPSCNNBRGNCHWCToPackedInt8BGRAStylizerDeprocessOp final : public Operator<CPUContext> {
+class MPSCNNBRGNCHWCToPackedInt8BGRAStylizerDeprocessOp final
+    : public Operator<CPUContext> {
  public:
-  MPSCNNBRGNCHWCToPackedInt8BGRAStylizerDeprocessOp(const OperatorDef& operator_def, Workspace* ws)
+  MPSCNNBRGNCHWCToPackedInt8BGRAStylizerDeprocessOp(
+      const OperatorDef& operator_def,
+      Workspace* ws)
       : Operator<CPUContext>(operator_def, ws) {}
 
   bool RunOnDevice() override {
@@ -492,9 +610,9 @@ class MPSCNNBRGNCHWCToPackedInt8BGRAStylizerDeprocessOp final : public Operator<
     if (!outputBuffer_ || outputBuffer_.length != X.height * X.width * 4) {
       caffe2::Timer pt;
 
-      outputBuffer_ =
-          [getMPSCNNContext().device newBufferWithLength:X.height * X.width * 4
-                                                 options:MTLResourceOptionCPUCacheModeDefault];
+      outputBuffer_ = [getMPSCNNContext().device
+          newBufferWithLength:X.height * X.width * 4
+                      options:MTLResourceOptionCPUCacheModeDefault];
       meanBuffer_ = [getMPSCNNContext().device
           newBufferWithLength:4 * 2 // (3/4 half-floats).
                       options:MTLResourceOptionCPUCacheModeWriteCombined];
@@ -504,8 +622,10 @@ class MPSCNNBRGNCHWCToPackedInt8BGRAStylizerDeprocessOp final : public Operator<
       }
       VLOG(2) << "Deprocess copy took: " << pt.MilliSeconds();
     }
-    id<MTLComputeCommandEncoder> encoder = [commandBuffer computeCommandEncoder];
-    id<MTLComputePipelineState> state = getMPSCNNContext().getPipelineState(@"deprocess_stylizer");
+    id<MTLComputeCommandEncoder> encoder =
+        [commandBuffer computeCommandEncoder];
+    id<MTLComputePipelineState> state =
+        getMPSCNNContext().getPipelineState(@"deprocess_stylizer");
 
     CAFFE_ENFORCE_EQ(outputBuffer_.length, X.height * X.width * 4);
     [encoder setComputePipelineState:state];
@@ -524,7 +644,10 @@ class MPSCNNBRGNCHWCToPackedInt8BGRAStylizerDeprocessOp final : public Operator<
     Output(0)->Resize(1, X.height, X.width, 4);
     {
       caffe2::Timer ct;
-      memcpy(Output(0)->mutable_data<uint8_t>(), [outputBuffer_ contents], [outputBuffer_ length]);
+      memcpy(
+          Output(0)->mutable_data<uint8_t>(),
+          [outputBuffer_ contents],
+          [outputBuffer_ length]);
       VLOG(2) << "Deprocess copy: " << t.MilliSeconds();
     }
     CAFFE_ENFORCE_EQ(Output(0)->nbytes(), [outputBuffer_ length]);
@@ -538,9 +661,12 @@ class MPSCNNBRGNCHWCToPackedInt8BGRAStylizerDeprocessOp final : public Operator<
   id<MTLBuffer> meanBuffer_{nullptr};
 };
 
-REGISTER_CPU_OPERATOR(MPSCNNBRGNCHWCToPackedInt8BGRAStylizerDeprocess,
-                      MPSCNNBRGNCHWCToPackedInt8BGRAStylizerDeprocessOp);
-OPERATOR_SCHEMA(MPSCNNBRGNCHWCToPackedInt8BGRAStylizerDeprocess).NumInputs(2).NumOutputs(1);
+REGISTER_CPU_OPERATOR(
+    MPSCNNBRGNCHWCToPackedInt8BGRAStylizerDeprocess,
+    MPSCNNBRGNCHWCToPackedInt8BGRAStylizerDeprocessOp);
+OPERATOR_SCHEMA(MPSCNNBRGNCHWCToPackedInt8BGRAStylizerDeprocess)
+    .NumInputs(2)
+    .NumOutputs(1);
 
 template <typename Neuron>
 class MPSCNNNeuronOp final : public Operator<CPUContext> {
@@ -554,7 +680,12 @@ class MPSCNNNeuronOp final : public Operator<CPUContext> {
     MPSImage* X = inputWrapper.getImage();
 
     auto outputWrapper = MPSImageWrapper(
-        this, &inputWrapper, X.numberOfImages, X.height, X.width, X.featureChannels);
+        this,
+        &inputWrapper,
+        X.numberOfImages,
+        X.height,
+        X.width,
+        X.featureChannels);
     auto commandBuffer = outputWrapper.getCommandBuffer();
     MPSImage* output = outputWrapper.getImage();
     CAFFE_ENFORCE_EQ(output.width, X.width);
@@ -564,7 +695,9 @@ class MPSCNNNeuronOp final : public Operator<CPUContext> {
     if (!neuron_) {
       neuron_ = Neuron::t();
     }
-    [neuron_ encodeToCommandBuffer:commandBuffer sourceImage:X destinationImage:output];
+    [neuron_ encodeToCommandBuffer:commandBuffer
+                       sourceImage:X
+                  destinationImage:output];
     outputWrapper.copyToOutputBlob(Outputs()[0]);
 
     VLOG(2) << "ElementwiseAdd took: " << t.MilliSeconds();
@@ -579,21 +712,25 @@ class MPSCNNNeuronOp final : public Operator<CPUContext> {
 
 struct SigmoidNeuronInit {
   static MPSCNNNeuron* t() {
-    return [[MPSCNNNeuronSigmoid alloc] initWithDevice:getMPSCNNContext().device];
+    return
+        [[MPSCNNNeuronSigmoid alloc] initWithDevice:getMPSCNNContext().device];
   }
 };
 INIT_NEURON_OP(Sigmoid);
 
 struct ReluNeuronInit {
   static MPSCNNNeuron* t() {
-    return [[MPSCNNNeuronReLU alloc] initWithDevice:getMPSCNNContext().device a:0];
+    return
+        [[MPSCNNNeuronReLU alloc] initWithDevice:getMPSCNNContext().device a:0];
   }
 };
 INIT_NEURON_OP(Relu);
 
 struct TanhNeuronInit {
   static MPSCNNNeuron* t() {
-    return [[MPSCNNNeuronTanH alloc] initWithDevice:getMPSCNNContext().device a:1 b:1];
+    return [[MPSCNNNeuronTanH alloc] initWithDevice:getMPSCNNContext().device
+                                                  a:1
+                                                  b:1];
   }
 };
 INIT_NEURON_OP(Tanh);
@@ -605,8 +742,11 @@ class MPSCNNConvOp final : public ConvPoolOpBase<CPUContext> {
  public:
   MPSCNNConvOp(const OperatorDef& operator_def, Workspace* ws)
       : ConvPoolOpBase<CPUContext>(operator_def, ws) {
-    OPERATOR_NEEDS_FEATURE(this->order_ == StorageOrder::NCHW, "Metal only supports NCHW order.");
-    OPERATOR_NEEDS_FEATURE(kernel_h() == kernel_w(), "Metal only supports equal kernel dimension.");
+    OPERATOR_NEEDS_FEATURE(
+        this->order_ == StorageOrder::NCHW, "Metal only supports NCHW order.");
+    OPERATOR_NEEDS_FEATURE(
+        kernel_h() == kernel_w(),
+        "Metal only supports equal kernel dimension.");
   }
 
   bool RunOnDeviceWithOrderNCHW() override {
@@ -648,21 +788,22 @@ class MPSCNNConvOp final : public ConvPoolOpBase<CPUContext> {
           }
         }
       }
-      MPSCNNConvolutionDescriptor* desc =
-          [MPSCNNConvolutionDescriptor cnnConvolutionDescriptorWithKernelWidth:kW
-                                                                  kernelHeight:kH
-                                                          inputFeatureChannels:C
-                                                         outputFeatureChannels:M
-                                                                  neuronFilter:Neuron::t()];
+      MPSCNNConvolutionDescriptor* desc = [MPSCNNConvolutionDescriptor
+          cnnConvolutionDescriptorWithKernelWidth:kW
+                                     kernelHeight:kH
+                             inputFeatureChannels:C
+                            outputFeatureChannels:M
+                                     neuronFilter:Neuron::t()];
       desc.strideInPixelsX = stride_w();
       desc.strideInPixelsY = stride_h();
       desc.groups = this->group_;
 
-      conv_ = [[MPSCNNConvolution alloc] initWithDevice:getMPSCNNContext().device
-                                  convolutionDescriptor:desc
-                                          kernelWeights:refilter.data()
-                                              biasTerms:bias.template data<float>()
-                                                  flags:MPSCNNConvolutionFlagsNone];
+      conv_ =
+          [[MPSCNNConvolution alloc] initWithDevice:getMPSCNNContext().device
+                              convolutionDescriptor:desc
+                                      kernelWeights:refilter.data()
+                                          biasTerms:bias.template data<float>()
+                                              flags:MPSCNNConvolutionFlagsNone];
       [conv_ setEdgeMode:MPSImageEdgeModeZero];
 
       MPSOffset offset;
@@ -690,12 +831,19 @@ class MPSCNNConvOp final : public ConvPoolOpBase<CPUContext> {
     VLOG(2) << "Output width:" << output_width;
     VLOG(2) << "Output channels:" << output_channels;
     auto outputWrapper = MPSImageWrapper(
-        this, &inputWrapper, X.numberOfImages, output_height, output_width, output_channels);
+        this,
+        &inputWrapper,
+        X.numberOfImages,
+        output_height,
+        output_width,
+        output_channels);
     auto commandBuffer = outputWrapper.getCommandBuffer();
     MPSImage* output = outputWrapper.getImage();
     CAFFE_ENFORCE_EQ(output.height, output_height);
     CAFFE_ENFORCE_EQ(output.width, output_width);
-    [conv_ encodeToCommandBuffer:commandBuffer sourceImage:X destinationImage:output];
+    [conv_ encodeToCommandBuffer:commandBuffer
+                     sourceImage:X
+                destinationImage:output];
     outputWrapper.copyToOutputBlob(Outputs()[0]);
 
     VLOG(2) << "MPSCNNConv took: " << t.MilliSeconds();
@@ -711,14 +859,17 @@ class MPSCNNConvOp final : public ConvPoolOpBase<CPUContext> {
 
 // No-op init
 struct EmptyNeuronInit {
-  static MPSCNNNeuron* t() { return nil; }
+  static MPSCNNNeuron* t() {
+    return nil;
+  }
 };
 
 // We can allow the input weights/bias and output to alias each other,
 // for example when doing a Conv + out-of-place ReLU, then fusing.
-#define INIT_CONV_NEURON_OP(name, neuron)            \
-  REGISTER_CPU_OPERATOR(name, MPSCNNConvOp<neuron>); \
-  OPERATOR_SCHEMA(name).NumInputs(3).NumOutputs(1).AllowInplace({{1, 0}, {2, 0}});
+#define INIT_CONV_NEURON_OP(name, neuron)                        \
+  REGISTER_CPU_OPERATOR(name, MPSCNNConvOp<neuron>);             \
+  OPERATOR_SCHEMA(name).NumInputs(3).NumOutputs(1).AllowInplace( \
+      {{1, 0}, {2, 0}});
 
 INIT_CONV_NEURON_OP(MPSCNNConv, EmptyNeuronInit);
 INIT_CONV_NEURON_OP(MPSCNNConvRelu, ReluNeuronInit);
@@ -730,10 +881,12 @@ class MPSCNNPadImageOp final : public ConvPoolOpBase<CPUContext> {
  public:
   MPSCNNPadImageOp(const OperatorDef& operator_def, Workspace* ws)
       : ConvPoolOpBase<CPUContext>(operator_def, ws) {
-    OPERATOR_NEEDS_FEATURE(this->order_ == StorageOrder::NCHW, "Metal only supports NCHW order.");
+    OPERATOR_NEEDS_FEATURE(
+        this->order_ == StorageOrder::NCHW, "Metal only supports NCHW order.");
 
-    OPERATOR_NEEDS_FEATURE(OperatorBase::GetSingleArgument<string>("mode", "") == "reflect",
-                           "Metal only supports reflection");
+    OPERATOR_NEEDS_FEATURE(
+        OperatorBase::GetSingleArgument<string>("mode", "") == "reflect",
+        "Metal only supports reflection");
     kernel_[0] = kernel_[1] = 1;
   }
 
@@ -750,18 +903,26 @@ class MPSCNNPadImageOp final : public ConvPoolOpBase<CPUContext> {
     VLOG(1) << "Output width:" << output_width;
     VLOG(2) << "Output channels:" << X.featureChannels;
     auto outputWrapper = MPSImageWrapper(
-        this, &inputWrapper, X.numberOfImages, output_height, output_width, X.featureChannels);
+        this,
+        &inputWrapper,
+        X.numberOfImages,
+        output_height,
+        output_width,
+        X.featureChannels);
     auto commandBuffer = outputWrapper.getCommandBuffer();
     MPSImage* output = outputWrapper.getImage();
     CAFFE_ENFORCE_EQ(output.height, output_height);
     CAFFE_ENFORCE_EQ(output.width, output_width);
-    id<MTLComputeCommandEncoder> encoder = [commandBuffer computeCommandEncoder];
-    id<MTLComputePipelineState> state = getMPSCNNContext().getPipelineState(
-        kernelFor(output, @"reflection_padding", @"reflection_padding_nonarray"));
+    id<MTLComputeCommandEncoder> encoder =
+        [commandBuffer computeCommandEncoder];
+    id<MTLComputePipelineState> state =
+        getMPSCNNContext().getPipelineState(kernelFor(
+            output, @"reflection_padding", @"reflection_padding_nonarray"));
     [encoder setComputePipelineState:state];
     [encoder setTexture:[X texture] atIndex:0];
     [encoder setTexture:[output texture] atIndex:1];
-    const auto& launchParams = spatialPointwiseKernelLaunchParams(state, output);
+    const auto& launchParams =
+        spatialPointwiseKernelLaunchParams(state, output);
     [encoder dispatchThreadgroups:launchParams.threadgroupsPerGrid
             threadsPerThreadgroup:launchParams.threadsPerThreadgroup];
     [encoder endEncoding];
@@ -807,11 +968,17 @@ class MPSCNNMulOp final : public Operator<CPUContext> {
                    options:MTLResourceOptionCPUCacheModeDefault];
 
     auto outputWrapper = MPSImageWrapper(
-        this, &wrapper0, X0.numberOfImages, X0.height, X0.width, X0.featureChannels);
+        this,
+        &wrapper0,
+        X0.numberOfImages,
+        X0.height,
+        X0.width,
+        X0.featureChannels);
     auto commandBuffer = outputWrapper.getCommandBuffer();
     MPSImage* output = outputWrapper.getImage();
 
-    id<MTLComputeCommandEncoder> encoder = [commandBuffer computeCommandEncoder];
+    id<MTLComputeCommandEncoder> encoder =
+        [commandBuffer computeCommandEncoder];
     id<MTLComputePipelineState> state =
         getMPSCNNContext().getSpecializedPipelineState(
             @"elementwise_mul",
@@ -823,7 +990,8 @@ class MPSCNNMulOp final : public Operator<CPUContext> {
     [encoder setTexture:[X0 texture] atIndex:0];
     [encoder setBuffer:X1_ offset:0 atIndex:1];
     [encoder setTexture:[output texture] atIndex:2];
-    const auto& launchParams = spatialPointwiseKernelLaunchParams(state, output);
+    const auto& launchParams =
+        spatialPointwiseKernelLaunchParams(state, output);
     [encoder dispatchThreadgroups:launchParams.threadgroupsPerGrid
             threadsPerThreadgroup:launchParams.threadsPerThreadgroup];
     [encoder endEncoding];
@@ -920,13 +1088,19 @@ class MPSCNNAddOp final : public Operator<CPUContext> {
     CAFFE_ENFORCE_EQ(wrapper0.getCommandBuffer(), wrapper1.getCommandBuffer());
 
     auto outputWrapper = MPSImageWrapper(
-        this, &wrapper0, X0.numberOfImages, X0.height, X0.width, X0.featureChannels);
+        this,
+        &wrapper0,
+        X0.numberOfImages,
+        X0.height,
+        X0.width,
+        X0.featureChannels);
     auto commandBuffer = outputWrapper.getCommandBuffer();
     MPSImage* output = outputWrapper.getImage();
     CAFFE_ENFORCE_EQ(X1.width, X0.width);
     CAFFE_ENFORCE_EQ(X1.height, X0.height);
     CAFFE_ENFORCE_EQ(X1.featureChannels, X0.featureChannels);
-    id<MTLComputeCommandEncoder> encoder = [commandBuffer computeCommandEncoder];
+    id<MTLComputeCommandEncoder> encoder =
+        [commandBuffer computeCommandEncoder];
     id<MTLComputePipelineState> state = getMPSCNNContext().getPipelineState(
         kernelFor(X0, @"elementwise_add", @"elementwise_add_nonarray"));
 
@@ -934,7 +1108,8 @@ class MPSCNNAddOp final : public Operator<CPUContext> {
     [encoder setTexture:[X0 texture] atIndex:0];
     [encoder setTexture:[X1 texture] atIndex:1];
     [encoder setTexture:[output texture] atIndex:2];
-    const auto& launchParams = spatialPointwiseKernelLaunchParams(state, output);
+    const auto& launchParams =
+        spatialPointwiseKernelLaunchParams(state, output);
     [encoder dispatchThreadgroups:launchParams.threadgroupsPerGrid
             threadsPerThreadgroup:launchParams.threadsPerThreadgroup];
     [encoder endEncoding];
@@ -948,15 +1123,19 @@ class MPSCNNAddOp final : public Operator<CPUContext> {
 };
 
 REGISTER_CPU_OPERATOR(MPSCNNAdd, MPSCNNAddOp);
-// Not really in-place per-se, but semantically is valid and preserves compatibility.
+// Not really in-place per-se, but semantically is valid and preserves
+// compatibility.
 OPERATOR_SCHEMA(MPSCNNAdd).NumInputs(2).NumOutputs(1).AllowInplace({{0, 0}});
 
 class MPSCNNAveragePoolOp final : public ConvPoolOpBase<CPUContext> {
  public:
   MPSCNNAveragePoolOp(const OperatorDef& operator_def, Workspace* ws)
       : ConvPoolOpBase<CPUContext>(operator_def, ws) {
-    OPERATOR_NEEDS_FEATURE(this->order_ == StorageOrder::NCHW, "Metal only supports NCHW order.");
-    OPERATOR_NEEDS_FEATURE(kernel_h() == kernel_w(), "Metal only supports equal kernel dimension.");
+    OPERATOR_NEEDS_FEATURE(
+        this->order_ == StorageOrder::NCHW, "Metal only supports NCHW order.");
+    OPERATOR_NEEDS_FEATURE(
+        kernel_h() == kernel_w(),
+        "Metal only supports equal kernel dimension.");
   }
 
   bool RunOnDeviceWithOrderNCHW() override {
@@ -967,11 +1146,12 @@ class MPSCNNAveragePoolOp final : public ConvPoolOpBase<CPUContext> {
     if (!pool_ || this->global_pooling_) {
       caffe2::Timer consT;
       this->ComputePads({(int)X.height, (int)X.width});
-      pool_ = [[MPSCNNPoolingAverage alloc] initWithDevice:getMPSCNNContext().device
-                                               kernelWidth:kernel_w()
-                                              kernelHeight:kernel_h()
-                                           strideInPixelsX:stride_w()
-                                           strideInPixelsY:stride_h()];
+      pool_ =
+          [[MPSCNNPoolingAverage alloc] initWithDevice:getMPSCNNContext().device
+                                           kernelWidth:kernel_w()
+                                          kernelHeight:kernel_h()
+                                       strideInPixelsX:stride_w()
+                                       strideInPixelsY:stride_h()];
 
       [pool_ setEdgeMode:MPSImageEdgeModeClamp];
       MPSOffset offset;
@@ -992,12 +1172,19 @@ class MPSCNNAveragePoolOp final : public ConvPoolOpBase<CPUContext> {
     VLOG(2) << "Output width:" << output_width;
     VLOG(2) << "Output channels:" << X.featureChannels;
     auto outputWrapper = MPSImageWrapper(
-        this, &inputWrapper, X.numberOfImages, output_height, output_width, X.featureChannels);
+        this,
+        &inputWrapper,
+        X.numberOfImages,
+        output_height,
+        output_width,
+        X.featureChannels);
     auto commandBuffer = outputWrapper.getCommandBuffer();
     MPSImage* output = outputWrapper.getImage();
     CAFFE_ENFORCE_EQ(output.height, output_height);
     CAFFE_ENFORCE_EQ(output.width, output_width);
-    [pool_ encodeToCommandBuffer:commandBuffer sourceImage:X destinationImage:output];
+    [pool_ encodeToCommandBuffer:commandBuffer
+                     sourceImage:X
+                destinationImage:output];
     outputWrapper.copyToOutputBlob(Outputs()[0]);
 
     VLOG(2) << "MPSCNNAveragePool took: " << t.MilliSeconds();
@@ -1014,8 +1201,11 @@ class MPSCNNMaxPoolOp final : public ConvPoolOpBase<CPUContext> {
  public:
   MPSCNNMaxPoolOp(const OperatorDef& operator_def, Workspace* ws)
       : ConvPoolOpBase<CPUContext>(operator_def, ws) {
-    OPERATOR_NEEDS_FEATURE(this->order_ == StorageOrder::NCHW, "Metal only supports NCHW order.");
-    OPERATOR_NEEDS_FEATURE(kernel_h() == kernel_w(), "Metal only supports equal kernel dimension.");
+    OPERATOR_NEEDS_FEATURE(
+        this->order_ == StorageOrder::NCHW, "Metal only supports NCHW order.");
+    OPERATOR_NEEDS_FEATURE(
+        kernel_h() == kernel_w(),
+        "Metal only supports equal kernel dimension.");
   }
 
   bool RunOnDeviceWithOrderNCHW() override {
@@ -1052,12 +1242,19 @@ class MPSCNNMaxPoolOp final : public ConvPoolOpBase<CPUContext> {
     VLOG(2) << "Output width:" << output_width;
     VLOG(2) << "Output channels:" << X.featureChannels;
     auto outputWrapper = MPSImageWrapper(
-        this, &inputWrapper, X.numberOfImages, output_height, output_width, X.featureChannels);
+        this,
+        &inputWrapper,
+        X.numberOfImages,
+        output_height,
+        output_width,
+        X.featureChannels);
     auto commandBuffer = outputWrapper.getCommandBuffer();
     MPSImage* output = outputWrapper.getImage();
     CAFFE_ENFORCE_EQ(output.height, output_height);
     CAFFE_ENFORCE_EQ(output.width, output_width);
-    [pool_ encodeToCommandBuffer:commandBuffer sourceImage:X destinationImage:output];
+    [pool_ encodeToCommandBuffer:commandBuffer
+                     sourceImage:X
+                destinationImage:output];
     outputWrapper.copyToOutputBlob(Outputs()[0]);
 
     VLOG(2) << "MPSCNNMaxPool took: " << t.MilliSeconds();
@@ -1082,13 +1279,21 @@ class MPSCNNSoftmaxOp final : public Operator<CPUContext> {
     CAFFE_ENFORCE_EQ(X.height, 1);
     CAFFE_ENFORCE_EQ(X.width, 1);
     if (!softmax_) {
-      softmax_ = [[MPSCNNSoftMax alloc] initWithDevice:getMPSCNNContext().device];
+      softmax_ =
+          [[MPSCNNSoftMax alloc] initWithDevice:getMPSCNNContext().device];
     }
     auto outputWrapper = MPSImageWrapper(
-        this, &inputWrapper, X.numberOfImages, X.height, X.width, X.featureChannels);
+        this,
+        &inputWrapper,
+        X.numberOfImages,
+        X.height,
+        X.width,
+        X.featureChannels);
     auto commandBuffer = outputWrapper.getCommandBuffer();
     MPSImage* output = outputWrapper.getImage();
-    [softmax_ encodeToCommandBuffer:commandBuffer sourceImage:X destinationImage:output];
+    [softmax_ encodeToCommandBuffer:commandBuffer
+                        sourceImage:X
+                   destinationImage:output];
     outputWrapper.copyToOutputBlob(Outputs()[0]);
     VLOG(2) << "MPSCNNSoftmax took: " << t.MilliSeconds();
     return true;
@@ -1136,22 +1341,23 @@ class MPSCNNFullyConnectedOp final : public Operator<CPUContext> {
         }
       }
 
-      MPSCNNConvolutionDescriptor* desc =
-          [MPSCNNConvolutionDescriptor cnnConvolutionDescriptorWithKernelWidth:X.width
-                                                                  kernelHeight:X.height
-                                                          inputFeatureChannels:input_channels
-                                                         outputFeatureChannels:output_channels
-                                                                  neuronFilter:Neuron::t()];
-      fc_ = [[MPSCNNConvolution alloc] initWithDevice:getMPSCNNContext().device
-                                convolutionDescriptor:desc
-                                        kernelWeights:refilter.data()
-                                            biasTerms:b.template data<float>()
-                                                flags:MPSCNNConvolutionFlagsNone];
+      MPSCNNConvolutionDescriptor* desc = [MPSCNNConvolutionDescriptor
+          cnnConvolutionDescriptorWithKernelWidth:X.width
+                                     kernelHeight:X.height
+                             inputFeatureChannels:input_channels
+                            outputFeatureChannels:output_channels
+                                     neuronFilter:Neuron::t()];
+      fc_ =
+          [[MPSCNNConvolution alloc] initWithDevice:getMPSCNNContext().device
+                              convolutionDescriptor:desc
+                                      kernelWeights:refilter.data()
+                                          biasTerms:b.template data<float>()
+                                              flags:MPSCNNConvolutionFlagsNone];
     }
-    // Note that X.numberOfImages can change between calls, but X.height and X.width are static by
-    // definition.
-    VLOG(2) << "MPSCNNFC: " << X.numberOfImages << ", " << X.width << ", " << X.height << ", "
-            << X.featureChannels << ", " << output_channels;
+    // Note that X.numberOfImages can change between calls, but X.height and
+    // X.width are static by definition.
+    VLOG(2) << "MPSCNNFC: " << X.numberOfImages << ", " << X.width << ", "
+            << X.height << ", " << X.featureChannels << ", " << output_channels;
 
     [fc_ setClipRect:MTLRegionMake3D(0, 0, 0, 1, 1, X.numberOfImages)];
     MPSOffset off;
@@ -1159,11 +1365,13 @@ class MPSCNNFullyConnectedOp final : public Operator<CPUContext> {
     off.y = X.height / 2;
     off.z = 0;
     [fc_ setOffset:off];
-    auto outputWrapper =
-        MPSImageWrapper(this, &inputWrapper, X.numberOfImages, 1, 1, output_channels);
+    auto outputWrapper = MPSImageWrapper(
+        this, &inputWrapper, X.numberOfImages, 1, 1, output_channels);
     auto commandBuffer = outputWrapper.getCommandBuffer();
     MPSImage* output = outputWrapper.getImage();
-    [fc_ encodeToCommandBuffer:commandBuffer sourceImage:X destinationImage:output];
+    [fc_ encodeToCommandBuffer:commandBuffer
+                   sourceImage:X
+              destinationImage:output];
     outputWrapper.copyToOutputBlob(Outputs()[0]);
     VLOG(2) << "MPSCNNFC took: " << t.MilliSeconds();
     return true;
@@ -1195,14 +1403,19 @@ class MPSCNNDropoutOp final : public Operator<CPUContext> {
 
 REGISTER_CPU_OPERATOR(MPSCNNDropout, MPSCNNDropoutOp);
 // Never use the second output (the mask).
-OPERATOR_SCHEMA(MPSCNNDropout).NumInputs(1).NumOutputs(1, 2).AllowInplace({{0, 0}});
+OPERATOR_SCHEMA(MPSCNNDropout)
+    .NumInputs(1)
+    .NumOutputs(1, 2)
+    .AllowInplace({{0, 0}});
 
 class MPSCNNConvTransposeOp final : public ConvTransposeUnpoolBase<CPUContext> {
  public:
   MPSCNNConvTransposeOp(const OperatorDef& operator_def, Workspace* ws)
       : ConvTransposeUnpoolBase<CPUContext>(operator_def, ws) {
-    OPERATOR_NEEDS_FEATURE(this->order_ == StorageOrder::NCHW, "Metal only supports NCHW order.");
-    CAFFE_ENFORCE_EQ(kernel_w(), kernel_h(), "Metal only supports equal kernel dimensions");
+    OPERATOR_NEEDS_FEATURE(
+        this->order_ == StorageOrder::NCHW, "Metal only supports NCHW order.");
+    CAFFE_ENFORCE_EQ(
+        kernel_w(), kernel_h(), "Metal only supports equal kernel dimensions");
   }
 
   bool RunOnDeviceWithOrderNCHW() override {
@@ -1226,31 +1439,52 @@ class MPSCNNConvTransposeOp final : public ConvTransposeUnpoolBase<CPUContext> {
     const auto kH = kernel_h();
     const auto kW = kernel_w();
 
-    int output_height = (X.height - 1) * stride_h() + kH - pad_b() - pad_t() + adj_h();
-    int output_width = (X.width - 1) * stride_w() + kW - pad_l() - pad_r() + adj_w();
+    int output_height =
+        (X.height - 1) * stride_h() + kH - pad_b() - pad_t() + adj_h();
+    int output_width =
+        (X.width - 1) * stride_w() + kW - pad_l() - pad_r() + adj_w();
 
     VLOG(2) << "Output height: " << output_height;
     VLOG(2) << "Output width:" << output_width;
     VLOG(2) << "Output channels:" << output_channels;
 
     auto outputWrapper = MPSImageWrapper(
-        this, &inputWrapper, X.numberOfImages, output_height, output_width, output_channels);
+        this,
+        &inputWrapper,
+        X.numberOfImages,
+        output_height,
+        output_width,
+        output_channels);
     auto commandBuffer = outputWrapper.getCommandBuffer();
 
-    if (!conv_) {
+    bool runtimeAtLeastIOS11 = SYSTEM_VERSION_GREATER_THAN_OR_EQUAL_TO(@"11.0");
+    // initialization
+    if (!conv_trans_ && !conv_) {
       caffe2::Timer consT;
       std::vector<float> refilter(kH * kW * output_channels * input_channels);
       refilter.assign(kH * kW * output_channels * input_channels, 0.0f);
       DCHECK_EQ(refilter.size(), filter.size());
       auto* filter_ = filter.template data<float>();
+      // For iOS11+ Reformat weights from WT[IC][OC][kH][kW] to
+      // W[OC][kH][kW][IC]; For previous versions, reformat weights
+      // to W[kH][kW][OC][IC]
+      // Also rotate the weight matrix spatially by 180 degrees
       for (auto oc = 0; oc < output_channels; ++oc) {
         for (auto ic = 0; ic < input_channels; ++ic) {
           for (auto kh = 0; kh < kH; ++kh) {
             for (auto kw = 0; kw < kW; ++kw) {
-              const auto inputIdx = ic * output_channels * kH * kW + oc * kH * kW + kh * kW + kw;
-              const auto outputIdx = kh * kW * output_channels * input_channels +
-                                     kw * output_channels * input_channels + oc * input_channels +
-                                     ic;
+              const auto inputIdx =
+                  ic * output_channels * kH * kW + oc * kH * kW + kh * kW + kw;
+              int outputIdx;
+              if (runtimeAtLeastIOS11) {
+                outputIdx = oc * kH * kW * input_channels +
+                    (kH - 1 - kh) * kW * input_channels +
+                    (kW - 1 - kw) * input_channels + ic;
+              } else {
+                outputIdx = kh * kW * output_channels * input_channels +
+                    kw * output_channels * input_channels +
+                    oc * input_channels + ic;
+              }
               DCHECK_LT(inputIdx, filter.size());
               DCHECK_LT(outputIdx, filter.size());
               refilter[outputIdx] = filter_[inputIdx];
@@ -1258,97 +1492,150 @@ class MPSCNNConvTransposeOp final : public ConvTransposeUnpoolBase<CPUContext> {
           }
         }
       }
-      MPSCNNConvolutionDescriptor* desc = [MPSCNNConvolutionDescriptor
-          cnnConvolutionDescriptorWithKernelWidth:1
-                                     kernelHeight:1
-                             inputFeatureChannels:input_channels
-                            outputFeatureChannels:output_channels * kH * kW
-                                     neuronFilter:nil];
       DCHECK_EQ(filter.size(), input_channels * output_channels * kH * kW);
-      // We need to zero-fill the bias here.
-      std::vector<float> fakeBias;
-      fakeBias.assign(output_channels * kH * kW, 0);
+      // initialize data structures
+      if (runtimeAtLeastIOS11) {
+        MPSCNNConvolutionDescriptor* desc = [MPSCNNConvolutionDescriptor
+            cnnConvolutionDescriptorWithKernelWidth:kW
+                                       kernelHeight:kH
+                               inputFeatureChannels:input_channels
+                              outputFeatureChannels:output_channels];
+        desc.strideInPixelsX = this->stride_w();
+        desc.strideInPixelsY = this->stride_h();
+        desc.groups = 1;
+        auto data_source_ = [[ConvTransposeDataSource alloc]
+            initWithWeight:refilter.data()
+                      bias:const_cast<float*>(bias.data<float>())
+                      desc:desc];
 
-      desc.strideInPixelsX = 1;
-      desc.strideInPixelsY = 1;
-      conv_ = [[MPSCNNConvolution alloc] initWithDevice:getMPSCNNContext().device
-                                  convolutionDescriptor:desc
-                                          kernelWeights:refilter.data()
-                                              biasTerms:fakeBias.data() /* TODO: fix */
-                                                  flags:MPSCNNConvolutionFlagsNone];
-      [conv_ setEdgeMode:MPSImageEdgeModeZero];
-      MPSOffset offset;
-      offset.x = 0;
-      offset.y = 0;
-      offset.z = 0;
-      [conv_ setOffset:offset];
+        conv_trans_ = [[MPSCNNConvolutionTranspose alloc]
+            initWithDevice:getMPSCNNContext().device
+                   weights:data_source_];
+        MPSOffset offset;
+        offset.x = 0;
+        offset.y = 0;
+        offset.z = 0;
+        [conv_trans_ setOffset:offset];
+        // kernel offset + padding offset
+        conv_trans_.kernelOffsetX = kW / 2 - kW + 1 + this->pad_l();
+        conv_trans_.kernelOffsetY = kH / 2 - kH + 1 + this->pad_t();
+        VLOG(2) << "MPSCNNConvTranspose ConvDesc took: "
+                << consT.MilliSeconds();
+      } else {
+        MPSCNNConvolutionDescriptor* desc = [MPSCNNConvolutionDescriptor
+            cnnConvolutionDescriptorWithKernelWidth:1
+                                       kernelHeight:1
+                               inputFeatureChannels:input_channels
+                              outputFeatureChannels:output_channels * kH * kW
+                                       neuronFilter:nil];
+        // We need to zero-fill the bias here.
+        std::vector<float> fakeBias;
+        fakeBias.assign(output_channels * kH * kW, 0);
 
-      const auto biasBytes = divRoundUp(bias.size(), 4) * 4 * 2;
-      biasBuffer_ =
-          [getMPSCNNContext().device newBufferWithLength:biasBytes
-                                                 options:MTLResourceOptionCPUCacheModeDefault];
-      for (auto i = 0; i < bias.size(); ++i) {
-        ((float16_t*)[biasBuffer_ contents])[i] = bias.data<float>()[i];
+        desc.strideInPixelsX = 1;
+        desc.strideInPixelsY = 1;
+        conv_ = [[MPSCNNConvolution alloc]
+                   initWithDevice:getMPSCNNContext().device
+            convolutionDescriptor:desc
+                    kernelWeights:refilter.data()
+                        biasTerms:fakeBias.data() /* TODO: fix */
+                            flags:MPSCNNConvolutionFlagsNone];
+        [conv_ setEdgeMode:MPSImageEdgeModeZero];
+        MPSOffset offset;
+        offset.x = 0;
+        offset.y = 0;
+        offset.z = 0;
+        [conv_ setOffset:offset];
+
+        const auto biasBytes = divRoundUp(bias.size(), 4) * 4 * 2;
+        biasBuffer_ = [getMPSCNNContext().device
+            newBufferWithLength:biasBytes
+                        options:MTLResourceOptionCPUCacheModeDefault];
+        for (auto i = 0; i < bias.size(); ++i) {
+          ((float16_t*)[biasBuffer_ contents])[i] = bias.data<float>()[i];
+        }
+
+        VLOG(2) << "MPSCNNConvTranspose ConvDesc took: "
+                << consT.MilliSeconds();
+      } // data structure initialization
+    } // initialization
+    CAFFE_ENFORCE((conv_trans_ && !conv_) || (!conv_trans_ && conv_));
+
+    // run the computation
+    if (conv_trans_) {
+      MPSImage* output = outputWrapper.getImage();
+      X = inputWrapper.getImage();
+      CAFFE_ENFORCE_EQ(conv_trans_.groups, 1);
+      [conv_trans_ encodeToCommandBuffer:commandBuffer
+                             sourceImage:X
+                        destinationImage:output];
+    } else {
+      CAFFE_ENFORCE_EQ(conv_.strideInPixelsY, 1);
+      CAFFE_ENFORCE_EQ(conv_.strideInPixelsX, 1);
+      CAFFE_ENFORCE_EQ(conv_.groups, 1);
+      CAFFE_ENFORCE_EQ(conv_.inputFeatureChannels, input_channels);
+      CAFFE_ENFORCE_EQ(conv_.outputFeatureChannels, output_channels * kH * kW);
+      CAFFE_ENFORCE_EQ(conv_.kernelWidth, 1);
+      CAFFE_ENFORCE_EQ(conv_.kernelHeight, 1);
+      if (divRoundUp(X.numberOfImages * output_channels * kH * kW, 4) >
+          kMetalMaxTextureArrLength) {
+        LOG(INFO) << "ConvTranspose " << X.numberOfImages << " "
+                  << output_channels << " " << kH << " " << kW;
+        LOG(ERROR)
+            << "arrayLength exceeds the maximum allowed length in texture";
+        inputWrapper.cleanup();
+        outputWrapper.cleanup();
+        return false;
       }
+      VLOG(2) << "ConvTranspose:" << output_channels << " " << kH << " " << kW
+              << " " << X.numberOfImages;
 
-      VLOG(2) << "MPSCNNConvTranspose ConvDesc took: " << consT.MilliSeconds();
+      auto gemmed = createTemporaryImage(
+          this,
+          commandBuffer,
+          X.numberOfImages,
+          X.height,
+          X.width,
+          output_channels * kH * kW);
+      {
+        caffe2::Timer gt;
+        [conv_ encodeToCommandBuffer:commandBuffer
+                         sourceImage:X
+                    destinationImage:gemmed];
+        VLOG(2) << "MPSCNNConvTranspose GEMM took: " << gt.MilliSeconds();
+      }
+      MPSImage* output = outputWrapper.getImage();
+
+      {
+        caffe2::Timer cit;
+        id<MTLComputePipelineState> state =
+            getMPSCNNContext().getSpecializedPipelineState(
+                @"col2im",
+                {{ushort(kernel_h()),
+                  ushort(kernel_w()),
+                  ushort(stride_h()),
+                  ushort(stride_w()),
+                  ushort(pad_l()),
+                  ushort(pad_t()),
+                  ushort(output.featureChannels),
+                  ushort(output.numberOfImages),
+                  ushort(gemmed.height),
+                  ushort(gemmed.width)}});
+        id<MTLComputeCommandEncoder> encoder =
+            [commandBuffer computeCommandEncoder];
+        [encoder setComputePipelineState:state];
+        [encoder setTexture:[gemmed texture] atIndex:0];
+        [encoder setTexture:[output texture] atIndex:1];
+        [encoder setBuffer:biasBuffer_ offset:0 atIndex:0];
+        const auto& launchParams =
+            spatialPointwiseKernelLaunchParams(state, output);
+        [encoder dispatchThreadgroups:launchParams.threadgroupsPerGrid
+                threadsPerThreadgroup:launchParams.threadsPerThreadgroup];
+        [encoder endEncoding];
+        gemmed.readCount -= 1;
+        VLOG(2) << "MPSCNNConvTranspose upscaling took: " << cit.MilliSeconds();
+      }
     }
-
-    CAFFE_ENFORCE_EQ(conv_.strideInPixelsY, 1);
-    CAFFE_ENFORCE_EQ(conv_.strideInPixelsX, 1);
-    CAFFE_ENFORCE_EQ(conv_.groups, 1);
-    CAFFE_ENFORCE_EQ(conv_.inputFeatureChannels, input_channels);
-    CAFFE_ENFORCE_EQ(conv_.outputFeatureChannels, output_channels * kH * kW);
-    CAFFE_ENFORCE_EQ(conv_.kernelWidth, 1);
-    CAFFE_ENFORCE_EQ(conv_.kernelHeight, 1);
-    if (divRoundUp(X.numberOfImages * output_channels * kH * kW, 4) >
-        kMetalMaxTextureArrLength) {
-      LOG(INFO) << "ConvTranspose " << X.numberOfImages << " " << output_channels << " " << kH
-                << " " << kW;
-      LOG(ERROR) << "arrayLength exceeds the maximum allowed length in texture";
-      inputWrapper.cleanup();
-      outputWrapper.cleanup();
-      return false;
-    }
-    VLOG(2) << "ConvTranspose:" << output_channels << " " << kH << " " << kW << " "
-            << X.numberOfImages;
-
-    auto gemmed = createTemporaryImage(
-        this, commandBuffer, X.numberOfImages, X.height, X.width, output_channels * kH * kW);
-    {
-      caffe2::Timer gt;
-      [conv_ encodeToCommandBuffer:commandBuffer sourceImage:X destinationImage:gemmed];
-      VLOG(2) << "MPSCNNConvTranspose GEMM took: " << gt.MilliSeconds();
-    }
-    MPSImage* output = outputWrapper.getImage();
-
-    {
-      caffe2::Timer cit;
-      id<MTLComputePipelineState> state =
-          getMPSCNNContext().getSpecializedPipelineState(@"col2im",
-                                                         {{ushort(kernel_h()),
-                                                           ushort(kernel_w()),
-                                                           ushort(stride_h()),
-                                                           ushort(stride_w()),
-                                                           ushort(pad_l()),
-                                                           ushort(pad_t()),
-                                                           ushort(output.featureChannels),
-                                                           ushort(output.numberOfImages),
-                                                           ushort(gemmed.height),
-                                                           ushort(gemmed.width)}});
-      id<MTLComputeCommandEncoder> encoder = [commandBuffer computeCommandEncoder];
-      [encoder setComputePipelineState:state];
-      [encoder setTexture:[gemmed texture] atIndex:0];
-      [encoder setTexture:[output texture] atIndex:1];
-      [encoder setBuffer:biasBuffer_ offset:0 atIndex:0];
-      const auto& launchParams = spatialPointwiseKernelLaunchParams(state, output);
-      [encoder dispatchThreadgroups:launchParams.threadgroupsPerGrid
-              threadsPerThreadgroup:launchParams.threadsPerThreadgroup];
-      [encoder endEncoding];
-      gemmed.readCount -= 1;
-      VLOG(2) << "MPSCNNConvTranspose upscaling took: " << cit.MilliSeconds();
-    }
-
     outputWrapper.copyToOutputBlob(Outputs()[0]);
     VLOG(2) << "MPSCNNConvTranspose took: " << t.MilliSeconds();
     return true;
@@ -1357,6 +1644,7 @@ class MPSCNNConvTransposeOp final : public ConvTransposeUnpoolBase<CPUContext> {
   // Input: X, W, b
   // Output: Y
   INPUT_TAGS(INPUT, FILTER, BIAS);
+  MPSCNNConvolutionTranspose* conv_trans_{nullptr};
   id<MTLBuffer> biasBuffer_;
   MPSCNNConvolution* conv_{nullptr};
 };
@@ -1394,41 +1682,52 @@ class MPSCNNInstanceNormOp final : public Operator<CPUContext> {
       caffe2::Timer cvt;
       // Round-up to nearest multiple of 4,
       // so accesses to X[i * 4 + 3]  in kernel is valid.
-      scaleBuffer_ =
-          [getMPSCNNContext().device newBufferWithLength:scaleBytes
-                                                 options:MTLResourceOptionCPUCacheModeDefault];
-      biasBuffer_ =
-          [getMPSCNNContext().device newBufferWithLength:scaleBytes
-                                                 options:MTLResourceOptionCPUCacheModeDefault];
+      scaleBuffer_ = [getMPSCNNContext().device
+          newBufferWithLength:scaleBytes
+                      options:MTLResourceOptionCPUCacheModeDefault];
+      biasBuffer_ = [getMPSCNNContext().device
+          newBufferWithLength:scaleBytes
+                      options:MTLResourceOptionCPUCacheModeDefault];
       for (auto i = 0; i < scale.size(); ++i) {
-        ((float16_t*)[scaleBuffer_ contents])[i] = scale.template data<float>()[i];
+        ((float16_t*)[scaleBuffer_ contents])[i] =
+            scale.template data<float>()[i];
       }
       for (auto i = 0; i < bias.size(); ++i) {
-        ((float16_t*)[biasBuffer_ contents])[i] = bias.template data<float>()[i];
+        ((float16_t*)[biasBuffer_ contents])[i] =
+            bias.template data<float>()[i];
       }
       if (fusionTy == InstanceNormFusionTy::PRELU) {
         const auto& preluWeight = Input(3);
-        preluWeightBuffer_ =
-            [getMPSCNNContext().device newBufferWithLength:divRoundUp(preluWeight.size(), 4) * 4 * 2
-                                                   options:MTLResourceOptionCPUCacheModeDefault];
+        preluWeightBuffer_ = [getMPSCNNContext().device
+            newBufferWithLength:divRoundUp(preluWeight.size(), 4) * 4 * 2
+                        options:MTLResourceOptionCPUCacheModeDefault];
         for (auto i = 0; i < preluWeight.size(); ++i) {
-          ((float16_t*)[preluWeightBuffer_ contents])[i] = preluWeight.template data<float>()[i];
+          ((float16_t*)[preluWeightBuffer_ contents])[i] =
+              preluWeight.template data<float>()[i];
         }
       }
       VLOG(2) << "Buffer setup took: " << cvt.MilliSeconds();
     }
 
     auto outputWrapper = MPSImageWrapper(
-        this, &inputWrapper, X.numberOfImages, X.height, X.width, X.featureChannels);
+        this,
+        &inputWrapper,
+        X.numberOfImages,
+        X.height,
+        X.width,
+        X.featureChannels);
     auto commandBuffer = inputWrapper.getCommandBuffer();
     MPSImage* output = outputWrapper.getImage();
 
     caffe2::Timer t;
-    id<MTLComputeCommandEncoder> encoder = [commandBuffer computeCommandEncoder];
-    id<MTLComputePipelineState> state = getMPSCNNContext().getSpecializedPipelineState(
-        kernelFor(X, @"instance_norm", @"instance_norm_nonarray"),
-        {{ushort(X.featureChannels),
-          fusionTy == InstanceNormFusionTy::PRELU ? ushort(Input(3).size()) : ushort(0)}});
+    id<MTLComputeCommandEncoder> encoder =
+        [commandBuffer computeCommandEncoder];
+    id<MTLComputePipelineState> state =
+        getMPSCNNContext().getSpecializedPipelineState(
+            kernelFor(X, @"instance_norm", @"instance_norm_nonarray"),
+            {{ushort(X.featureChannels),
+              fusionTy == InstanceNormFusionTy::PRELU ? ushort(Input(3).size())
+                                                      : ushort(0)}});
 
     [encoder setComputePipelineState:state];
     [encoder setBuffer:scaleBuffer_ offset:0 atIndex:0];
@@ -1438,9 +1737,12 @@ class MPSCNNInstanceNormOp final : public Operator<CPUContext> {
     if (fusionTy == InstanceNormFusionTy::PRELU) {
       [encoder setBuffer:preluWeightBuffer_ offset:0 atIndex:2];
     }
-    [encoder
-         dispatchThreadgroups:MTLSizeMake(1, 1, X.numberOfImages * divRoundUp(X.featureChannels, 4))
-        threadsPerThreadgroup:MTLSizeMake(16, 16, 1)];
+    [encoder dispatchThreadgroups:MTLSizeMake(
+                                      1,
+                                      1,
+                                      X.numberOfImages *
+                                          divRoundUp(X.featureChannels, 4))
+            threadsPerThreadgroup:MTLSizeMake(16, 16, 1)];
     [encoder endEncoding];
     inputWrapper.markRead();
     VLOG(2) << "InstanceNorm took: " << t.MilliSeconds();
@@ -1455,9 +1757,13 @@ class MPSCNNInstanceNormOp final : public Operator<CPUContext> {
   id<MTLBuffer> preluWeightBuffer_;
 };
 
-REGISTER_CPU_OPERATOR(MPSCNNInstanceNorm, MPSCNNInstanceNormOp<InstanceNormFusionTy::NONE>);
+REGISTER_CPU_OPERATOR(
+    MPSCNNInstanceNorm,
+    MPSCNNInstanceNormOp<InstanceNormFusionTy::NONE>);
 OPERATOR_SCHEMA(MPSCNNInstanceNorm).NumInputs(3).NumOutputs(1);
-REGISTER_CPU_OPERATOR(MPSCNNInstanceNormPRelu, MPSCNNInstanceNormOp<InstanceNormFusionTy::PRELU>);
+REGISTER_CPU_OPERATOR(
+    MPSCNNInstanceNormPRelu,
+    MPSCNNInstanceNormOp<InstanceNormFusionTy::PRELU>);
 OPERATOR_SCHEMA(MPSCNNInstanceNormPRelu).NumInputs(4).NumOutputs(1);
 
 class MPSCNNNormalizePlanarYUVOp final : public Operator<CPUContext> {
@@ -1477,38 +1783,49 @@ class MPSCNNNormalizePlanarYUVOp final : public Operator<CPUContext> {
     if (!scaleBuffer_ || !shiftBuffer_ || scaleBuffer_.length != scaleBytes ||
         shiftBuffer_.length != scaleBytes) {
       caffe2::Timer cvt;
-      scaleBuffer_ =
-          [getMPSCNNContext().device newBufferWithLength:scaleBytes
-                                                 options:MTLResourceOptionCPUCacheModeDefault];
-      shiftBuffer_ =
-          [getMPSCNNContext().device newBufferWithLength:scaleBytes
-                                                 options:MTLResourceOptionCPUCacheModeDefault];
+      scaleBuffer_ = [getMPSCNNContext().device
+          newBufferWithLength:scaleBytes
+                      options:MTLResourceOptionCPUCacheModeDefault];
+      shiftBuffer_ = [getMPSCNNContext().device
+          newBufferWithLength:scaleBytes
+                      options:MTLResourceOptionCPUCacheModeDefault];
       // op computes (X - mean) / std = X * 1/std + (-mean/std)
       // Thus set scale = 1.0/std, shift = (-mean/std)
       for (auto i = 0; i < mean.size(); ++i) {
-        ((float16_t*)[scaleBuffer_ contents])[i] = 1.0 / double(std.template data<float>()[i]);
+        ((float16_t*)[scaleBuffer_ contents])[i] =
+            1.0 / double(std.template data<float>()[i]);
         ((float16_t*)[shiftBuffer_ contents])[i] =
-            double(-mean.template data<float>()[i]) / double(std.template data<float>()[i]);
+            double(-mean.template data<float>()[i]) /
+            double(std.template data<float>()[i]);
       }
       VLOG(2) << "Buffer setup took: " << cvt.MilliSeconds();
     }
 
     auto outputWrapper = MPSImageWrapper(
-        this, &inputWrapper, X.numberOfImages, X.height, X.width, X.featureChannels);
+        this,
+        &inputWrapper,
+        X.numberOfImages,
+        X.height,
+        X.width,
+        X.featureChannels);
     auto commandBuffer = inputWrapper.getCommandBuffer();
     MPSImage* output = outputWrapper.getImage();
 
     caffe2::Timer t;
-    id<MTLComputeCommandEncoder> encoder = [commandBuffer computeCommandEncoder];
-    id<MTLComputePipelineState> state = getMPSCNNContext().getSpecializedPipelineState(
-        kernelFor(X, @"affine", @"affine_nonarray"), {ushort(X.featureChannels)});
+    id<MTLComputeCommandEncoder> encoder =
+        [commandBuffer computeCommandEncoder];
+    id<MTLComputePipelineState> state =
+        getMPSCNNContext().getSpecializedPipelineState(
+            kernelFor(X, @"affine", @"affine_nonarray"),
+            {ushort(X.featureChannels)});
 
     [encoder setComputePipelineState:state];
     [encoder setBuffer:scaleBuffer_ offset:0 atIndex:0];
     [encoder setBuffer:shiftBuffer_ offset:0 atIndex:1];
     [encoder setTexture:[X texture] atIndex:0];
     [encoder setTexture:[output texture] atIndex:1];
-    const auto& launchParams = spatialPointwiseKernelLaunchParams(state, output);
+    const auto& launchParams =
+        spatialPointwiseKernelLaunchParams(state, output);
     [encoder dispatchThreadgroups:launchParams.threadgroupsPerGrid
             threadsPerThreadgroup:launchParams.threadsPerThreadgroup];
     [encoder endEncoding];
@@ -1540,9 +1857,9 @@ class MPSCNNPReluOp final : public Operator<CPUContext> {
     const auto scaleBytes = divRoundUp(scale.size(), 4) * 4 * 2;
     if (!scaleBuffer_ || scaleBuffer_.length != scaleBytes) {
       caffe2::Timer cvt;
-      scaleBuffer_ =
-          [getMPSCNNContext().device newBufferWithLength:scaleBytes
-                                                 options:MTLResourceOptionCPUCacheModeDefault];
+      scaleBuffer_ = [getMPSCNNContext().device
+          newBufferWithLength:scaleBytes
+                      options:MTLResourceOptionCPUCacheModeDefault];
       for (auto i = 0; i < scale.size(); ++i) {
         ((float16_t*)[scaleBuffer_ contents])[i] = scale.data<float>()[i];
       }
@@ -1550,21 +1867,29 @@ class MPSCNNPReluOp final : public Operator<CPUContext> {
     }
 
     auto outputWrapper = MPSImageWrapper(
-        this, &inputWrapper, X.numberOfImages, X.height, X.width, X.featureChannels);
+        this,
+        &inputWrapper,
+        X.numberOfImages,
+        X.height,
+        X.width,
+        X.featureChannels);
     auto commandBuffer = inputWrapper.getCommandBuffer();
     MPSImage* output = outputWrapper.getImage();
     caffe2::Timer t;
-    id<MTLComputeCommandEncoder> encoder = [commandBuffer computeCommandEncoder];
-    id<MTLComputePipelineState> state = getMPSCNNContext().getSpecializedPipelineState(
-        kernelFor(X, @"prelu_nonshared", @"prelu_nonshared_nonarray"),
-        {{ushort(X.featureChannels), ushort(scale.size())}});
+    id<MTLComputeCommandEncoder> encoder =
+        [commandBuffer computeCommandEncoder];
+    id<MTLComputePipelineState> state =
+        getMPSCNNContext().getSpecializedPipelineState(
+            kernelFor(X, @"prelu_nonshared", @"prelu_nonshared_nonarray"),
+            {{ushort(X.featureChannels), ushort(scale.size())}});
 
     [encoder setComputePipelineState:state];
     [encoder setBuffer:scaleBuffer_ offset:0 atIndex:0];
     [encoder setTexture:[X texture] atIndex:0];
     [encoder setTexture:[output texture] atIndex:1];
 
-    const auto& launchParams = spatialPointwiseKernelLaunchParams(state, output);
+    const auto& launchParams =
+        spatialPointwiseKernelLaunchParams(state, output);
     [encoder dispatchThreadgroups:launchParams.threadgroupsPerGrid
             threadsPerThreadgroup:launchParams.threadsPerThreadgroup];
     [encoder endEncoding];
@@ -1580,18 +1905,20 @@ class MPSCNNPReluOp final : public Operator<CPUContext> {
 };
 
 REGISTER_CPU_OPERATOR(MPSCNNPRelu, MPSCNNPReluOp);
-// Allow in-place isn't *really* valid here, since nothing is in-place for Metal texture arrays,
-// but requires re-export.
+// Allow in-place isn't *really* valid here, since nothing is in-place for Metal
+// texture arrays, but requires re-export.
 OPERATOR_SCHEMA(MPSCNNPRelu).NumInputs(2).NumOutputs(1).AllowInplace({{0, 0}});
 
 class MPSCNNRoIWarpOp final : public Operator<CPUContext> {
  public:
   MPSCNNRoIWarpOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<CPUContext>(operator_def, ws),
-        spatial_scale_(OperatorBase::GetSingleArgument<float>("spatial_scale", 1.)),
+        spatial_scale_(
+            OperatorBase::GetSingleArgument<float>("spatial_scale", 1.)),
         pooled_height_(OperatorBase::GetSingleArgument<int>("pooled_h", 1)),
         pooled_width_(OperatorBase::GetSingleArgument<int>("pooled_w", 1)),
-        sampling_ratio_(OperatorBase::GetSingleArgument<int>("sampling_ratio", -1)) {
+        sampling_ratio_(
+            OperatorBase::GetSingleArgument<int>("sampling_ratio", -1)) {
     CAFFE_ENFORCE_GT(spatial_scale_, 0);
     CAFFE_ENFORCE_GT(pooled_height_, 0);
     CAFFE_ENFORCE_GT(pooled_width_, 0);
@@ -1613,9 +1940,9 @@ class MPSCNNRoIWarpOp final : public Operator<CPUContext> {
     const auto roiBytes = R.dim32(0) * 4 * sizeof(float16_t);
     if (!roiBuffer_ || roiBuffer_.length != roiBytes) {
       caffe2::Timer cvt;
-      roiBuffer_ =
-          [getMPSCNNContext().device newBufferWithLength:roiBytes
-                                                 options:MTLResourceOptionCPUCacheModeDefault];
+      roiBuffer_ = [getMPSCNNContext().device
+          newBufferWithLength:roiBytes
+                      options:MTLResourceOptionCPUCacheModeDefault];
     }
     float16_t* roiBuffer = (float16_t*)[roiBuffer_ contents];
     // Help compiler generate vcvt?
@@ -1633,10 +1960,10 @@ class MPSCNNRoIWarpOp final : public Operator<CPUContext> {
       roiBuffer[i * 4 + 3] = R.data<float>()[i * Rdim + off + 3];
     }
     auto featureChannels = X.featureChannels;
-    VLOG(1) << "RoIWarp input size:" << X.numberOfImages << " " << featureChannels << " "
-            << X.height << " " << X.width;
-    VLOG(1) << "RoIWarp output size:" << R.dim32(0) << " " << featureChannels << " "
-            << pooled_width_ << " " << pooled_height_;
+    VLOG(1) << "RoIWarp input size:" << X.numberOfImages << " "
+            << featureChannels << " " << X.height << " " << X.width;
+    VLOG(1) << "RoIWarp output size:" << R.dim32(0) << " " << featureChannels
+            << " " << pooled_width_ << " " << pooled_height_;
     if (R.dim32(0) <= 0) {
       LOG(ERROR) << "number of RoIs <= 0 in RoIWarp " << R.dim32(0);
       inputWrapper.cleanup();
@@ -1650,29 +1977,41 @@ class MPSCNNRoIWarpOp final : public Operator<CPUContext> {
       return false;
     }
     auto outputWrapper = MPSImageWrapper(
-        this, &inputWrapper, R.dim32(0), pooled_height_, pooled_width_, featureChannels);
+        this,
+        &inputWrapper,
+        R.dim32(0),
+        pooled_height_,
+        pooled_width_,
+        featureChannels);
     auto commandBuffer = outputWrapper.getCommandBuffer();
     MPSImage* output = outputWrapper.getImage();
-    VLOG(1) << "output: " << output.numberOfImages << ", " << output.featureChannels << ", "
-            << output.height << ", " << output.width;
-    id<MTLComputeCommandEncoder> encoder = [commandBuffer computeCommandEncoder];
-    id<MTLComputePipelineState> state = getMPSCNNContext().getSpecializedPipelineState(
-        kernelFor(output, @"roi_warp", @"roi_warp_nonarray"),
-        {{ushort(spatial_scale_ * 10000), ushort(sampling_ratio_), ushort(featureChannels)}});
+    VLOG(1) << "output: " << output.numberOfImages << ", "
+            << output.featureChannels << ", " << output.height << ", "
+            << output.width;
+    id<MTLComputeCommandEncoder> encoder =
+        [commandBuffer computeCommandEncoder];
+    id<MTLComputePipelineState> state =
+        getMPSCNNContext().getSpecializedPipelineState(
+            kernelFor(output, @"roi_warp", @"roi_warp_nonarray"),
+            {{ushort(spatial_scale_ * 10000),
+              ushort(sampling_ratio_),
+              ushort(featureChannels)}});
 
     [encoder setComputePipelineState:state];
     [encoder setBuffer:roiBuffer_ offset:0 atIndex:0];
     [encoder setTexture:[X texture] atIndex:0];
     [encoder setTexture:[output texture] atIndex:1];
 
-    const auto& launchParams = spatialPointwiseKernelLaunchParams(state, output);
+    const auto& launchParams =
+        spatialPointwiseKernelLaunchParams(state, output);
     [encoder dispatchThreadgroups:launchParams.threadgroupsPerGrid
             threadsPerThreadgroup:launchParams.threadsPerThreadgroup];
     [encoder endEncoding];
     inputWrapper.markRead();
     VLOG(2) << "RoIWarp took: " << t.MilliSeconds();
-    VLOG(1) << "ROIWarp size: " << output.numberOfImages << ", " << output.featureChannels << ", "
-            << output.height << ", " << output.width;
+    VLOG(1) << "ROIWarp size: " << output.numberOfImages << ", "
+            << output.featureChannels << ", " << output.height << ", "
+            << output.width;
     outputWrapper.copyToOutputBlob(Outputs()[0]);
 
     return true;
@@ -1694,45 +2033,51 @@ class MPSCNNGenerateProposalsCPPOp final : public Operator<CPUContext> {
  public:
   MPSCNNGenerateProposalsCPPOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<CPUContext>(operator_def, ws),
-        spatial_scale_(OperatorBase::GetSingleArgument<float>("spatial_scale", 1.0 / 16)),
+        spatial_scale_(
+            OperatorBase::GetSingleArgument<float>("spatial_scale", 1.0 / 16)),
         feat_stride_(1.0 / spatial_scale_),
-        rpn_pre_nms_topN_(OperatorBase::GetSingleArgument<int>("pre_nms_topN", 6000)),
-        rpn_post_nms_topN_(OperatorBase::GetSingleArgument<int>("post_nms_topN", 300)),
-        rpn_nms_thresh_(OperatorBase::GetSingleArgument<float>("nms_thresh", 0.7f)),
+        rpn_pre_nms_topN_(
+            OperatorBase::GetSingleArgument<int>("pre_nms_topN", 6000)),
+        rpn_post_nms_topN_(
+            OperatorBase::GetSingleArgument<int>("post_nms_topN", 300)),
+        rpn_nms_thresh_(
+            OperatorBase::GetSingleArgument<float>("nms_thresh", 0.7f)),
         rpn_min_size_(OperatorBase::GetSingleArgument<float>("min_size", 16)) {}
 
   template <class Derived1, class Derived2>
-  std::vector<int> nms_metal(const Eigen::ArrayBase<Derived1>& proposals, // EArrXXf
-                             const Eigen::ArrayBase<Derived2>& scores, // EArrXf
-                             const std::vector<int>& sorted_indices,
-                             float thresh) const {
+  std::vector<int> nms_metal(
+      const Eigen::ArrayBase<Derived1>& proposals, // EArrXXf
+      const Eigen::ArrayBase<Derived2>& scores, // EArrXf
+      const std::vector<int>& sorted_indices,
+      float thresh) const {
     CAFFE_ENFORCE_EQ(proposals.rows(), scores.rows());
     CAFFE_ENFORCE_EQ(proposals.cols(), 4);
     CAFFE_ENFORCE_EQ(scores.cols(), 1);
     CAFFE_ENFORCE_LE(sorted_indices.size(), proposals.rows());
 
     std::vector<float> proposals_cpu(proposals.size());
-    Eigen::Map<ERArrXXf>(&proposals_cpu[0], proposals.rows(), proposals.cols()) = proposals;
+    Eigen::Map<ERArrXXf>(
+        &proposals_cpu[0], proposals.rows(), proposals.cols()) = proposals;
 
     int box_num = sorted_indices.size();
     int col_blocks = divRoundUp(box_num, maxThreadsPerThreadgroup);
     auto pre_nms_size = box_num;
-    auto preNmsProposalsBuffer_ =
-        [getMPSCNNContext().device newBufferWithBytes:proposals_cpu.data()
-                                               length:proposals.size() * sizeof(float)
-                                              options:MTLResourceOptionCPUCacheModeDefault];
-    auto sortedIndicesBuffer_ =
-        [getMPSCNNContext().device newBufferWithBytes:sorted_indices.data()
-                                               length:pre_nms_size * sizeof(int)
-                                              options:MTLResourceOptionCPUCacheModeDefault];
+    auto preNmsProposalsBuffer_ = [getMPSCNNContext().device
+        newBufferWithBytes:proposals_cpu.data()
+                    length:proposals.size() * sizeof(float)
+                   options:MTLResourceOptionCPUCacheModeDefault];
+    auto sortedIndicesBuffer_ = [getMPSCNNContext().device
+        newBufferWithBytes:sorted_indices.data()
+                    length:pre_nms_size * sizeof(int)
+                   options:MTLResourceOptionCPUCacheModeDefault];
 
     int pose_nms_size = fmin(rpn_post_nms_topN_, pre_nms_size);
     // round pose_nms_size up to the next power of 2
     int batch_size = pow(2, ceil(log(pose_nms_size) / log(2)));
 
-    auto maskBuffer_ =
-        [getMPSCNNContext().device newBufferWithLength:batch_size * col_blocks * sizeof(uint32_t)
-                                               options:MTLResourceOptionCPUCacheModeDefault];
+    auto maskBuffer_ = [getMPSCNNContext().device
+        newBufferWithLength:batch_size * col_blocks * sizeof(uint32_t)
+                    options:MTLResourceOptionCPUCacheModeDefault];
     std::vector<uint32_t> masks(batch_size * col_blocks);
 
     std::vector<int> keep(pose_nms_size);
@@ -1743,28 +2088,32 @@ class MPSCNNGenerateProposalsCPPOp final : public Operator<CPUContext> {
     for (int offset = 0; !terminate && offset < box_num; offset += batch_size) {
       auto commandBuffer = [getMPSCNNContext().commandQueue commandBuffer];
       auto encoder = [commandBuffer computeCommandEncoder];
-      auto state = getMPSCNNContext().getSpecializedPipelineState(@"nms",
-                                                                  {{ushort(batch_size),
-                                                                    maxThreadsPerThreadgroup,
-                                                                    ushort(rpn_nms_thresh_ * 10000),
-                                                                    ushort(offset)}});
+      auto state = getMPSCNNContext().getSpecializedPipelineState(
+          @"nms",
+          {{ushort(batch_size),
+            maxThreadsPerThreadgroup,
+            ushort(rpn_nms_thresh_ * 10000),
+            ushort(offset)}});
       [encoder setComputePipelineState:state];
       [encoder setBuffer:maskBuffer_ offset:0 atIndex:0];
       [encoder setBuffer:preNmsProposalsBuffer_ offset:0 atIndex:1];
       [encoder setBuffer:sortedIndicesBuffer_ offset:0 atIndex:2];
-      const auto threadsPerThreadgroup = MTLSizeMake(maxThreadsPerThreadgroup, 1, 1);
-      const auto threadgroupsPerGrid = MTLSizeMake(divRoundUp(batch_size, maxThreadsPerThreadgroup),
-                                                   divRoundUp(box_num, maxThreadsPerThreadgroup),
-                                                   1);
+      const auto threadsPerThreadgroup =
+          MTLSizeMake(maxThreadsPerThreadgroup, 1, 1);
+      const auto threadgroupsPerGrid = MTLSizeMake(
+          divRoundUp(batch_size, maxThreadsPerThreadgroup),
+          divRoundUp(box_num, maxThreadsPerThreadgroup),
+          1);
       [encoder dispatchThreadgroups:threadgroupsPerGrid
               threadsPerThreadgroup:threadsPerThreadgroup];
       [encoder endEncoding];
       [commandBuffer commit];
       [commandBuffer waitUntilCompleted];
       uint32_t* maskBufferPointer = (uint32_t*)[maskBuffer_ contents];
-      std::copy(maskBufferPointer,
-                maskBufferPointer + (maskBuffer_.length / sizeof(uint32_t)),
-                masks.begin());
+      std::copy(
+          maskBufferPointer,
+          maskBufferPointer + (maskBuffer_.length / sizeof(uint32_t)),
+          masks.begin());
 
       for (int i = offset; i < fmin(offset + batch_size, box_num); ++i) {
         int nblock = i / maxThreadsPerThreadgroup;
@@ -1785,12 +2134,13 @@ class MPSCNNGenerateProposalsCPPOp final : public Operator<CPUContext> {
     keep.resize(num_to_keep);
     return keep;
   }
-  void ProposalsForOneImage(const Eigen::Array3f& im_info,
-                            const Eigen::Map<const ERMatXf>& all_anchors,
-                            const utils::ConstTensorView<float>& bbox_deltas_tensor,
-                            const utils::ConstTensorView<float>& scores_tensor,
-                            ERArrXXf* out_boxes,
-                            EArrXf* out_probs) const {
+  void ProposalsForOneImage(
+      const Eigen::Array3f& im_info,
+      const Eigen::Map<const ERMatXf>& all_anchors,
+      const utils::ConstTensorView<float>& bbox_deltas_tensor,
+      const utils::ConstTensorView<float>& scores_tensor,
+      ERArrXXf* out_boxes,
+      EArrXf* out_probs) const {
     const auto& pre_nms_topN = rpn_pre_nms_topN_;
     const auto& post_nms_topN = rpn_post_nms_topN_;
     const auto& nms_thresh = rpn_nms_thresh_;
@@ -1811,7 +2161,8 @@ class MPSCNNGenerateProposalsCPPOp final : public Operator<CPUContext> {
     //  bbox_deltas = bbox_deltas.transpose((1, 2, 0)).reshape((-1, 4))
     ERArrXXf bbox_deltas(H * W * A, 4);
     Eigen::Map<ERMatXf>(bbox_deltas.data(), H * W, 4 * A) =
-        Eigen::Map<const ERMatXf>(bbox_deltas_tensor.data(), A * 4, H * W).transpose();
+        Eigen::Map<const ERMatXf>(bbox_deltas_tensor.data(), A * 4, H * W)
+            .transpose();
     CAFFE_ENFORCE_EQ(bbox_deltas.rows(), all_anchors.rows());
 
     // - scores are (A, H, W) format from conv output
@@ -1876,21 +2227,26 @@ class MPSCNNGenerateProposalsCPPOp final : public Operator<CPUContext> {
     const auto K = height * width;
 
     // bbox_deltas: (num_images, A * 4, H, W)
-    CAFFE_ENFORCE_EQ(bbox_deltas.dims(), (vector<TIndex>{num_images, 4 * A, height, width}));
+    CAFFE_ENFORCE_EQ(
+        bbox_deltas.dims(), (vector<TIndex>{num_images, 4 * A, height, width}));
 
     // im_info_tensor: (num_images, 3), format [height, width, scale; ...]
     CAFFE_ENFORCE_EQ(im_info_tensor.dims(), (vector<TIndex>{num_images, 3}));
-    CAFFE_ENFORCE(im_info_tensor.template IsType<float>(), im_info_tensor.meta().name());
+    CAFFE_ENFORCE(
+        im_info_tensor.template IsType<float>(), im_info_tensor.meta().name());
 
     // anchors: (A, 4)
     CAFFE_ENFORCE_EQ(anchors.dims(), (vector<TIndex>{A, 4}));
     CAFFE_ENFORCE(anchors.template IsType<float>(), anchors.meta().name());
     // Broadcast the anchors to all pixels
-    auto all_anchors_vec = utils::ComputeAllAnchors(anchors, height, width, feat_stride_);
+    auto all_anchors_vec =
+        utils::ComputeAllAnchors(anchors, height, width, feat_stride_);
     Eigen::Map<const ERMatXf> all_anchors(all_anchors_vec.data(), K * A, 4);
 
     Eigen::Map<const ERArrXXf> im_info(
-        im_info_tensor.data<float>(), im_info_tensor.dim(0), im_info_tensor.dim(1));
+        im_info_tensor.data<float>(),
+        im_info_tensor.dim(0),
+        im_info_tensor.dim(1));
 
     const int roi_col_count = 5;
     out_rois->Resize(0, roi_col_count);
@@ -1905,7 +2261,12 @@ class MPSCNNGenerateProposalsCPPOp final : public Operator<CPUContext> {
       ERArrXXf im_i_boxes;
       EArrXf im_i_probs;
       ProposalsForOneImage(
-          cur_im_info, all_anchors, cur_bbox_deltas, cur_scores, &im_i_boxes, &im_i_probs);
+          cur_im_info,
+          all_anchors,
+          cur_bbox_deltas,
+          cur_scores,
+          &im_i_boxes,
+          &im_i_probs);
 
       int csz = im_i_boxes.rows();
       int cur_start_idx = out_rois->dim(0);
@@ -1915,12 +2276,16 @@ class MPSCNNGenerateProposalsCPPOp final : public Operator<CPUContext> {
 
       // write rois
       Eigen::Map<ERArrXXf> cur_rois(
-          out_rois->mutable_data<float>() + cur_start_idx * roi_col_count, csz, 5);
+          out_rois->mutable_data<float>() + cur_start_idx * roi_col_count,
+          csz,
+          5);
       cur_rois.col(0).setConstant(i);
       cur_rois.block(0, 1, csz, 4) = im_i_boxes;
 
       // write rois_probs
-      Eigen::Map<EArrXf>(out_rois_probs->mutable_data<float>() + cur_start_idx, csz) = im_i_probs;
+      Eigen::Map<EArrXf>(
+          out_rois_probs->mutable_data<float>() + cur_start_idx, csz) =
+          im_i_probs;
     }
 
     return true;
@@ -1970,12 +2335,12 @@ class MPSCNNSpatialBNOp final : public SpatialBNOp<CPUContext> {
     const auto scaleBytes = divRoundUp(scale.size(), 4) * 4 * 2;
     if (!scaleBuffer_ || scaleBuffer_.length != scaleBytes) {
       caffe2::Timer cvt;
-      scaleBuffer_ =
-          [getMPSCNNContext().device newBufferWithLength:scaleBytes
-                                                 options:MTLResourceOptionCPUCacheModeDefault];
-      shiftBuffer_ =
-          [getMPSCNNContext().device newBufferWithLength:scaleBytes
-                                                 options:MTLResourceOptionCPUCacheModeDefault];
+      scaleBuffer_ = [getMPSCNNContext().device
+          newBufferWithLength:scaleBytes
+                      options:MTLResourceOptionCPUCacheModeDefault];
+      shiftBuffer_ = [getMPSCNNContext().device
+          newBufferWithLength:scaleBytes
+                      options:MTLResourceOptionCPUCacheModeDefault];
       for (auto i = 0; i < scale.size(); ++i) {
         // We can fuse the output computation as follows:
         //   ((x - est_mean) * (inv_var) * scale + bias
@@ -1983,21 +2348,30 @@ class MPSCNNSpatialBNOp final : public SpatialBNOp<CPUContext> {
         //   (x * inv_var * scale) + (bias - est_mean * inv_var * scale)
 
         const auto inv_std = 1.0 / std::sqrt(var.data<float>()[i] + epsilon_);
-        ((float16_t*)[scaleBuffer_ contents])[i] = scale.data<float>()[i] * inv_std;
-        ((float16_t*)[shiftBuffer_ contents])[i] =
-            bias.data<float>()[i] - mean.data<float>()[i] * inv_std * scale.data<float>()[i];
+        ((float16_t*)[scaleBuffer_ contents])[i] =
+            scale.data<float>()[i] * inv_std;
+        ((float16_t*)[shiftBuffer_ contents])[i] = bias.data<float>()[i] -
+            mean.data<float>()[i] * inv_std * scale.data<float>()[i];
       }
       VLOG(2) << "Buffer setup took: " << cvt.MilliSeconds();
     }
 
     auto outputWrapper = MPSImageWrapper(
-        this, &inputWrapper, X.numberOfImages, X.height, X.width, X.featureChannels);
+        this,
+        &inputWrapper,
+        X.numberOfImages,
+        X.height,
+        X.width,
+        X.featureChannels);
     auto commandBuffer = outputWrapper.getCommandBuffer();
     MPSImage* output = outputWrapper.getImage();
     caffe2::Timer t;
-    id<MTLComputeCommandEncoder> encoder = [commandBuffer computeCommandEncoder];
-    id<MTLComputePipelineState> state = getMPSCNNContext().getSpecializedPipelineState(
-        kernelFor(output, @"affine", @"affine_nonarray"), {ushort(X.featureChannels)});
+    id<MTLComputeCommandEncoder> encoder =
+        [commandBuffer computeCommandEncoder];
+    id<MTLComputePipelineState> state =
+        getMPSCNNContext().getSpecializedPipelineState(
+            kernelFor(output, @"affine", @"affine_nonarray"),
+            {ushort(X.featureChannels)});
 
     [encoder setComputePipelineState:state];
     [encoder setBuffer:scaleBuffer_ offset:0 atIndex:0];
@@ -2005,7 +2379,8 @@ class MPSCNNSpatialBNOp final : public SpatialBNOp<CPUContext> {
     [encoder setTexture:[X texture] atIndex:0];
     [encoder setTexture:[output texture] atIndex:1];
 
-    const auto& launchParams = spatialPointwiseKernelLaunchParams(state, output);
+    const auto& launchParams =
+        spatialPointwiseKernelLaunchParams(state, output);
     [encoder dispatchThreadgroups:launchParams.threadgroupsPerGrid
             threadsPerThreadgroup:launchParams.threadsPerThreadgroup];
     [encoder endEncoding];
@@ -2029,11 +2404,14 @@ class MPSCNNConcatOp final : public Operator<CPUContext> {
   MPSCNNConcatOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<CPUContext>(operator_def, ws) {
     // Only handle three inputs for now.
-    OPERATOR_NEEDS_FEATURE(Inputs().size() <= 4, "MPSCNNConcat only handles up to four inputs");
+    OPERATOR_NEEDS_FEATURE(
+        Inputs().size() <= 4, "MPSCNNConcat only handles up to four inputs");
   }
 
   bool RunOnDevice() override {
-    auto Wrapper = [&](size_t i) { return Inputs()[i]->template Get<MPSImageWrapper>(); };
+    auto Wrapper = [&](size_t i) {
+      return Inputs()[i]->template Get<MPSImageWrapper>();
+    };
     auto cb = [&](size_t i) { return Wrapper(i).getCommandBuffer(); };
     auto X = [&](size_t i) { return Wrapper(i).getImage(); };
 
@@ -2053,11 +2431,17 @@ class MPSCNNConcatOp final : public Operator<CPUContext> {
 
     auto wrapper0 = Inputs()[0]->template Get<MPSImageWrapper>();
     auto outputWrapper = MPSImageWrapper(
-        this, &wrapper0, X(0).numberOfImages, X(0).height, X(0).width, channelCount);
+        this,
+        &wrapper0,
+        X(0).numberOfImages,
+        X(0).height,
+        X(0).width,
+        channelCount);
     auto commandBuffer = outputWrapper.getCommandBuffer();
     MPSImage* output = outputWrapper.getImage();
     caffe2::Timer t;
-    id<MTLComputeCommandEncoder> encoder = [commandBuffer computeCommandEncoder];
+    id<MTLComputeCommandEncoder> encoder =
+        [commandBuffer computeCommandEncoder];
     id<MTLComputePipelineState> state =
         getMPSCNNContext().getSpecializedPipelineState(@"concat", channels);
 
@@ -2066,7 +2450,8 @@ class MPSCNNConcatOp final : public Operator<CPUContext> {
       [encoder setTexture:[X(i) texture] atIndex:i];
     }
     [encoder setTexture:[output texture] atIndex:5];
-    const auto& launchParams = spatialPointwiseKernelLaunchParams(state, output);
+    const auto& launchParams =
+        spatialPointwiseKernelLaunchParams(state, output);
     [encoder dispatchThreadgroups:launchParams.threadgroupsPerGrid
             threadsPerThreadgroup:launchParams.threadsPerThreadgroup];
     [encoder endEncoding];
@@ -2093,7 +2478,8 @@ class MPSCNNResizeNearestOp final : public Operator<CPUContext> {
     CAFFE_ENFORCE_GT(width_scale_, 0);
     CAFFE_ENFORCE_GT(height_scale_, 0);
 
-    // due to the way we pass these parameters, we don't support the scale to be larger than 6.5
+    // due to the way we pass these parameters, we don't support the scale to be
+    // larger than 6.5
     CAFFE_ENFORCE_LE(width_scale_, 6.5);
     CAFFE_ENFORCE_LE(height_scale_, 6.5);
   }
@@ -2102,10 +2488,12 @@ class MPSCNNResizeNearestOp final : public Operator<CPUContext> {
     auto inputWrapper = Inputs()[0]->Get<MPSImageWrapper>();
     const MPSImage* X = inputWrapper.getImage();
 
-    const int N = X.numberOfImages, C = X.featureChannels, H = X.height, W = X.width;
+    const int N = X.numberOfImages, C = X.featureChannels, H = X.height,
+              W = X.width;
     int output_width = W * width_scale_;
     int output_height = H * height_scale_;
-    auto outputWrapper = MPSImageWrapper(this, &inputWrapper, N, output_height, output_width, C);
+    auto outputWrapper =
+        MPSImageWrapper(this, &inputWrapper, N, output_height, output_width, C);
     auto commandBuffer = inputWrapper.getCommandBuffer();
     MPSImage* output = outputWrapper.getImage();
 
