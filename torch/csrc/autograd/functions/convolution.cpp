@@ -731,8 +731,14 @@ auto ConvBackwardBackward::apply(const variable_list& grad_grad_inputs) -> varia
   if (should_compute_output(0) && !ggO.defined()) ggO = at::zeros_like(gO);
   if (should_compute_output(1) && !gI.defined()) gI = at::zeros_like(input);
   if (should_compute_output(2) && !gW.defined()) gW = at::zeros_like(weight);
-
-  return {ggO, gI, gW};
+  bool is_volatile = std::any_of(grad_grad_inputs.begin(), grad_grad_inputs.end(), [](const Variable& v){
+    return v.defined() && v.is_volatile();
+  });
+  auto results = variable_list({ggO, gI, gW});
+  for (auto& result : results) {
+    result.is_volatile() |= is_volatile;
+  }
+  return results;
 }
 
 auto ConvBackwardBackward::releaseVariables() -> void {
