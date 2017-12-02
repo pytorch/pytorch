@@ -124,7 +124,6 @@ __global__ void RemovePaddingKernel(
 
   int len = len_blocks * block_size;
   int start_padding_width = start_padding_width_blocks * block_size;
-  int end_padding_width = end_padding_width_blocks * block_size;
 
   // payload
   T* out_ptr = out + out_start_idx;
