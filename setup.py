@@ -81,8 +81,8 @@ distutils.unixccompiler.UnixCCompiler.link = patched_link
 ################################################################################
 
 dep_libs = [
-    'TH', 'THS', 'THNN', 'THC', 'THCS', 'THCUNN', 'nccl', 'libshm',
-    'ATen', 'gloo', 'THD', 'nanopb',
+    'TH', 'THS', 'THNN', 'THC', 'THCS', 'THCUNN', 'nccl', 'ATen', 'libshm',
+    'gloo', 'THD', 'nanopb',
 ]
 
 
@@ -121,7 +121,7 @@ class build_deps(Command):
             libs += ['THC', 'THCS', 'THCUNN']
         if WITH_NCCL and not WITH_SYSTEM_NCCL:
             libs += ['nccl']
-        libs += ['libshm', 'ATen', 'nanopb']
+        libs += ['ATen', 'libshm', 'nanopb']
         if WITH_DISTRIBUTED:
             if sys.platform.startswith('linux'):
                 libs += ['gloo']
@@ -183,13 +183,13 @@ class develop(setuptools.command.develop.develop):
         setuptools.command.develop.develop.run(self)
 
 
-def monkey_patch_THD_link_flags():
+def monkey_patch_link_flags(name):
     '''
     THD's dynamic link deps are not determined until after build_deps is run
     So, we need to monkey-patch them in later
     '''
     # read tmp_install_path/THD_deps.txt for THD's dynamic linkage deps
-    with open(tmp_install_path + '/THD_deps.txt', 'r') as f:
+    with open(tmp_install_path + '/' + name + '_deps.txt', 'r') as f:
         thd_deps_ = f.read()
     thd_deps = []
     # remove empty lines
@@ -225,7 +225,7 @@ class build_ext(setuptools.command.build_ext.build_ext):
             print('-- Not using NCCL')
         if WITH_DISTRIBUTED:
             print('-- Building with distributed package ')
-            monkey_patch_THD_link_flags()
+            monkey_patch_link_flags("THD")
         else:
             print('-- Building without distributed package')
 
@@ -352,22 +352,10 @@ include_dirs += [
 library_dirs.append(lib_path)
 
 # we specify exact lib names to avoid conflict with lua-torch installs
-TH_LIB = os.path.join(lib_path, 'libTH.so.1')
-THS_LIB = os.path.join(lib_path, 'libTHS.so.1')
-THC_LIB = os.path.join(lib_path, 'libTHC.so.1')
-THCS_LIB = os.path.join(lib_path, 'libTHCS.so.1')
-THNN_LIB = os.path.join(lib_path, 'libTHNN.so.1')
-THCUNN_LIB = os.path.join(lib_path, 'libTHCUNN.so.1')
-ATEN_LIB = os.path.join(lib_path, 'libATen.so.1')
 THD_LIB = os.path.join(lib_path, 'libTHD.a')
+ATEN_LIB = os.path.join(lib_path, 'libATen.so.1')
 NCCL_LIB = os.path.join(lib_path, 'libnccl.so.1')
 if platform.system() == 'Darwin':
-    TH_LIB = os.path.join(lib_path, 'libTH.1.dylib')
-    THS_LIB = os.path.join(lib_path, 'libTHS.1.dylib')
-    THC_LIB = os.path.join(lib_path, 'libTHC.1.dylib')
-    THCS_LIB = os.path.join(lib_path, 'libTHCS.1.dylib')
-    THNN_LIB = os.path.join(lib_path, 'libTHNN.1.dylib')
-    THCUNN_LIB = os.path.join(lib_path, 'libTHCUNN.1.dylib')
     ATEN_LIB = os.path.join(lib_path, 'libATen.1.dylib')
     NCCL_LIB = os.path.join(lib_path, 'libnccl.1.dylib')
 
@@ -376,7 +364,7 @@ NANOPB_STATIC_LIB = os.path.join(lib_path, 'libprotobuf-nanopb.a')
 
 main_compile_args = ['-D_THP_CORE']
 main_libraries = ['shm']
-main_link_args = [TH_LIB, THS_LIB, THNN_LIB, ATEN_LIB, NANOPB_STATIC_LIB]
+main_link_args = [ATEN_LIB, NANOPB_STATIC_LIB]
 main_sources = [
     "torch/csrc/PtrWrapper.cpp",
     "torch/csrc/Module.cpp",
@@ -481,7 +469,6 @@ if WITH_CUDA:
     extra_compile_args += ['-DWITH_CUDA']
     extra_compile_args += ['-DCUDA_LIB_PATH=' + cuda_lib_path]
     main_libraries += ['cudart', 'nvToolsExt']
-    main_link_args += [THC_LIB, THCS_LIB, THCUNN_LIB]
     main_sources += [
         "torch/csrc/cuda/Module.cpp",
         "torch/csrc/cuda/Storage.cpp",
@@ -535,14 +522,7 @@ if DEBUG:
 
 if os.getenv('PYTORCH_BINARY_BUILD') and platform.system() == 'Linux':
     print('PYTORCH_BINARY_BUILD found. Static linking libstdc++ on Linux')
-    # get path of libstdc++ and link manually.
-    # for reasons unknown, -static-libstdc++ doesn't fully link some symbols
-    CXXNAME = os.getenv('CXX', 'g++')
-    STDCPP_LIB = subprocess.check_output([CXXNAME, '-print-file-name=libstdc++.a'])
-    STDCPP_LIB = STDCPP_LIB[:-1]
-    if type(STDCPP_LIB) != str:  # python 3
-        STDCPP_LIB = STDCPP_LIB.decode(sys.stdout.encoding)
-    extra_link_args += [STDCPP_LIB]
+    extra_link_args += ["-static-libstdc++"]
     version_script = os.path.abspath("tools/pytorch.version")
     extra_link_args += ['-Wl,--version-script=' + version_script]
 
@@ -583,8 +563,7 @@ THNN = Extension("torch._thnn._THNN",
                  extra_compile_args=extra_compile_args,
                  include_dirs=include_dirs,
                  extra_link_args=extra_link_args + [
-                     TH_LIB,
-                     THNN_LIB,
+                     ATEN_LIB,
                      make_relative_rpath('../lib'),
                  ]
                  )
@@ -612,9 +591,7 @@ if WITH_CUDA:
                        extra_compile_args=extra_compile_args,
                        include_dirs=include_dirs,
                        extra_link_args=extra_link_args + [
-                           TH_LIB,
-                           THC_LIB,
-                           THCUNN_LIB,
+                           ATEN_LIB,
                            make_relative_rpath('../lib'),
                        ]
                        )

@@ -26,6 +26,8 @@ IF(NOT THS_LIBRARIES)
 ENDIF(NOT THS_LIBRARIES)
 MESSAGE(STATUS "THS_LIBRARIES: ${THS_LIBRARIES}")
 
+LIST(APPEND CUDA_NVCC_FLAGS "-Xcompiler -fPIC")
+
 if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
   if(CMAKE_CXX_COMPILER_VERSION VERSION_GREATER "4.9")
     if(CUDA_VERSION VERSION_LESS "8.0")
@@ -43,39 +45,8 @@ if(NOT CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
   SET(CMAKE_CXX_STANDARD 11)
 endif()
 
-IF ($ENV{TH_BINARY_BUILD})
-  MESSAGE(STATUS "TH_BINARY_BUILD detected. Statically linking libstdc++")
-  SET(CMAKE_CXX_FLAGS "-static-libstdc++ ${CMAKE_CXX_FLAGS}")
-  IF (UNIX AND NOT APPLE)
-    # hiding statically linked library symbols, this flag is not available for the linker under MACOSX
-    SET(CMAKE_CXX_FLAGS "-Wl,--exclude-libs,libstdc++.a ${CMAKE_CXX_FLAGS}")
-    set (CMAKE_SHARED_LINKER_FLAGS "-Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/../../../tools/pytorch.version")
-  ENDIF(UNIX AND NOT APPLE)
-ENDIF()
-
 INCLUDE_DIRECTORIES(${CUDA_INCLUDE_DIRS})
 INCLUDE_DIRECTORIES("${CUDA_SDK_ROOT_DIR}/common/inc")
-
-IF(APPLE)
-  IF(${CUDA_VERSION} LESS 6.0)
-    # work around for mac os x bug:
-    # http://stackoverflow.com/questions/16286588/cuda-5-0-cmake-and-make-failing-on-osx-10-8-3
-    if (NOT DEFINED CUDA_HOST_COMPILER AND CMAKE_C_COMPILER_ID STREQUAL "Clang" AND EXISTS /usr/bin/gcc)
-      set(CUDA_HOST_COMPILER /usr/bin/gcc CACHE FILEPATH "Host side compiler used by NVCC")
-      message(STATUS "Setting CMAKE_HOST_COMPILER to /usr/bin/gcc instead of ${CMAKE_C_COMPILER}.")
-    endif()
-
-    # bug on Apple
-    LINK_DIRECTORIES("/usr/local/cuda/lib/")
-  ELSEIF(${CUDA_VERSION} LESS 7.0)
-    SET(CUDA_HOST_COMPILER clang)
-    LIST(APPEND CUDA_NVCC_FLAGS "-Xcompiler -stdlib=libstdc++ -Xlinker -stdlib=libstdc++")
-    IF("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
-      set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -stdlib=libstdc++")
-    ENDIF()
-  ENDIF()
-  # CUDA 7 supports clang and libc++ so no need to change anything
-ENDIF(APPLE)
 
 # Detect CUDA architecture and get best NVCC flags
 IF(NOT COMMAND CUDA_SELECT_NVCC_ARCH_FLAGS)
@@ -133,17 +104,8 @@ ENDIF(CUDA_HAS_FP16 OR NOT ${CUDA_VERSION} LESS 7.5)
 
 MESSAGE(STATUS "CUDA_NVCC_FLAGS: ${CUDA_NVCC_FLAGS}")
 
-CUDA_ADD_LIBRARY(THCS SHARED ${src} ${src-cuda})
-CUDA_ADD_CUBLAS_TO_TARGET(THCS)
-TARGET_LINK_LIBRARIES(THCS ${TH_LIBRARIES} ${THC_LIBRARIES} ${THS_LIBRARIES} ${CUDA_cusparse_LIBRARY})
-
-IF(NOT THCS_SO_VERSION)
-  SET(THCS_SO_VERSION 1)
-ENDIF(NOT THCS_SO_VERSION)
-MESSAGE(STATUS "THCS_SO_VERSION: ${THCS_SO_VERSION}")
-SET_TARGET_PROPERTIES(THCS PROPERTIES
-  VERSION   ${THCS_SO_VERSION}
-  SOVERSION ${THCS_SO_VERSION})
+CUDA_ADD_LIBRARY(THCS STATIC ${src} ${src-cuda})
+SET_TARGET_PROPERTIES(THCS PROPERTIES COMPILE_FLAGS "-fPIC")
 
 INSTALL(TARGETS THCS
           RUNTIME DESTINATION "${THCS_INSTALL_BIN_SUBDIR}"
