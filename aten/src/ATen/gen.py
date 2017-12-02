@@ -71,7 +71,6 @@ class FileManager(object):
                             "never written: {}".format(self.filenames))
 
 
-
 TEMPLATE_PATH = options.source_path + "/templates"
 GENERATOR_DERIVED = CodeTemplate.from_file(
     TEMPLATE_PATH + "/GeneratorDerived.h")
@@ -309,7 +308,7 @@ def declare_outputs():
         file_manager.will_write(fname)
     for backend, density, scalar_types in iterate_types():
         scalar_name = scalar_types[0]
-        full_backend = "Sparse"+backend if density == "Sparse" else backend
+        full_backend = "Sparse" + backend if density == "Sparse" else backend
         for kind in ["Storage", "Type", "Tensor"]:
             if kind == 'Storage' and density == "Sparse":
                 continue
@@ -331,7 +330,6 @@ def generate_outputs():
     declarations = preprocess_declarations.run(declarations)
     for fname, env in generators.items():
         file_manager.write(fname, GENERATOR_DERIVED.substitute(env))
-
 
     # note: this will fill in top_env['type/tensor_method_declarations/definitions']
     # and modify the declarations to include any information that will all_backends
