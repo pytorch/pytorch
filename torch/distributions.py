@@ -266,6 +266,35 @@ class Gamma(Distribution):
                 - self.beta * value - torch.lgamma(self.alpha))
 
 
+def _dirichlet_sample_nograd(alpha):
+    gammas = _standard_gamma(alpha)
+    return gammas / gammas.sum(-1, True)
+
+
+class _Dirichlet(Function):
+    @staticmethod
+    def forward(ctx, alpha):
+        x = _dirichlet_sample_nograd(alpha)
+        ctx.save_for_backward(x, alpha)
+        return x
+
+    @staticmethod
+    @once_differentiable
+    def backward(ctx, grad_output):
+        x, alpha = ctx.saved_tensors
+        total = alpha.sum(-1, True).expand_as(alpha)
+        grad = torch._C._dirichlet_grad(x, alpha, total)
+        return grad_output * grad
+
+
+def _dirichlet_sample(alpha):
+    if not isinstance(alpha, Variable):
+        return _dirichlet_sample_nograd(alpha)
+    if not alpha.requires_grad:
+        return Variable(_dirichlet_sample_nograd(alpha.data))
+    return _StandardGamma.apply(alpha)
+
+
 class Dirichlet(Distribution):
     r"""
     Creates a Dirichlet distribution parameterized by concentration `alpha`.
@@ -287,15 +316,10 @@ class Dirichlet(Distribution):
         self.alpha = alpha
 
     def sample(self):
-        probs = _standard_gamma(self.alpha)
-        if probs.dim() == 1:
-            return probs / probs.sum()
-        else:
-            return probs / probs.sum(-1).unsqueeze(-1)
+        return _dirichlet_sample(self.alpha)
 
     def sample_n(self, n):
-        probs = _standard_gamma(_expand_n(self.alpha, n))
-        return probs / probs.sum(-1).unsqueeze(-1)
+        return _dirichlet_sample(_expand_n(self.alpha, n))
 
     def log_prob(self, value):
         return ((torch.log(value) * (self.alpha - 1.0)).sum(-1)
@@ -317,37 +341,33 @@ class Beta(Distribution):
     Args:
         alpha (Tensor or Variable): concentration parameter of the distribution
     """
-    reparameterized = True
+    reparameterized = Dirichlet.reparameterized
 
     def __init__(self, alpha, beta):
         alpha_num = isinstance(alpha, Number)
         beta_num = isinstance(beta, Number)
-        if alpha_num and not beta_num:
-            alpha = beta.new(beta.size()).fill_(alpha)
-        elif not alpha_num and beta_num:
-            beta = alpha.new(alpha.size()).fill_(beta)
-        elif alpha_num and beta_num:
-            alpha, beta = torch.Tensor([alpha]), torch.Tensor([beta])
-        elif alpha.size() != beta.size():
-            raise ValueError('Expected alpha.size() == beta.size(), actual {} vs {}'.format(
-                alpha.size(), beta.size()))
-        self.alpha = alpha
-        self.beta = beta
+        if alpha_num and beta_num:
+            alpha_beta = torch.Tensor([alpha, beta])
+        else:
+            if alpha_num and not beta_num:
+                alpha = beta.new(beta.size()).fill_(alpha)
+            elif not alpha_num and beta_num:
+                beta = alpha.new(alpha.size()).fill_(beta)
+            elif alpha.size() != beta.size():
+                raise ValueError('Expected alpha.size() == beta.size(), actual {} vs {}'.format(
+                    alpha.size(), beta.size()))
+            alpha_beta = torch.stack([alpha, beta], -1)
+        self.dirichlet = Dirichlet(alpha_beta)
 
     def sample(self):
-        heads = _standard_gamma(self.alpha)
-        tails = _standard_gamma(self.beta)
-        return heads / (heads + tails)
+        return self.dirichlet.sample().select(-1, 0)
 
     def sample_n(self, n):
-        heads = _standard_gamma(_expand_n(self.alpha, n))
-        tails = _standard_gamma(_expand_n(self.beta, n))
-        return heads / (heads + tails)
+        return self.dirichlet.sample_n(n).select(-1, 0)
 
     def log_prob(self, value):
-        heads = value
-        tails = 1.0 - value
-        return (torch.log(heads) * (self.alpha - 1.0)
-                + torch.log(tails) * (self.beta - 1.0)
-                + torch.lgamma(self.alpha + self.beta)
-                - torch.lgamma(self.alpha) - torch.lgamma(self.beta))
+        if isinstance(value, Number):
+            heads_tails = torch.Tensor([value, 1.0 - value])
+        else:
+            heads_tails = torch.stack([value, 1.0 - value])
+        return self.dirichlet.log_prob(heads_tails)

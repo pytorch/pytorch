@@ -2,6 +2,22 @@
 #define TH_GENERIC_FILE "generic/THTensorRandom.c"
 #else
 
+#ifdef _OPENMP
+#include <omp.h>
+#endif
+
+#define TH_OMP_OVERHEAD_THRESHOLD 100000
+
+#define TH_CHECK_SAME_SIZE(TENSOR1, TENSOR2) \
+{ \
+  if(!THTensor_(isSameSizeAs)(TENSOR1, TENSOR2)) { \
+    THDescBuff T1buff = _THSizeDesc(TENSOR1->size, TENSOR1->nDimension); \
+    THDescBuff T2buff = _THSizeDesc(TENSOR2->size, TENSOR2->nDimension); \
+    THError("inconsistent tensor size, expected %s %s and %s %s to have the same size", \
+            #TENSOR1, T1buff.str, #TENSOR2, T2buff.str); \
+  } \
+}
+
 void THTensor_(random)(THTensor *self, THGenerator *_generator)
 {
 
@@ -122,6 +138,30 @@ void THTensor_(standard_gamma_grad)(THTensor *self, THTensor *x, THTensor *alpha
   TH_TENSOR_APPLY3(real, self, real, x, real, alpha, {
     *self_data = (real)THRandom_standard_gamma_grad(*x_data, *alpha_data);
   });
+}
+
+void THTensor_(dirichlet_grad)(THTensor *self, THTensor *x, THTensor *alpha, THTensor *total)
+{
+  x = THTensor_(newContiguous)(x);
+  alpha = THTensor_(newContiguous)(alpha);
+  total = THTensor_(newContiguous)(total);
+  THTensor_(resizeAs)(self, x);
+  THTensor* grad = THTensor_(newContiguous)(self);
+  TH_CHECK_SAME_SIZE(alpha, x);
+  TH_CHECK_SAME_SIZE(total, x);
+
+  real*const grad_data = THTensor_(data)(grad);
+  real*const x_data = THTensor_(data)(x);
+  real*const alpha_data = THTensor_(data)(alpha);
+  real*const total_data = THTensor_(data)(total);
+  const int64_t numel = THTensor_(nElement)(x);
+  int64_t i;
+  #pragma omp parallel for if(numel > TH_OMP_OVERHEAD_THRESHOLD) private(i)
+  for(i = 0; i < numel; ++i) {
+    grad_data[i] = (real)THRandom_dirichlet_grad(x_data[i], alpha_data[i], total_data[i]);
+  }
+
+  THTensor_(freeCopyTo)(grad, self);
 }
 
 void THTensor_(cauchy)(THTensor *self, THGenerator *_generator, double median, double sigma)

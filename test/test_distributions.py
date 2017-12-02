@@ -239,8 +239,8 @@ class TestDistributions(TestCase):
         self.assertEqual(Beta(alpha, beta).sample_n(5).size(), (5, 2, 3))
         self.assertEqual(Beta(alpha_1d, beta_1d).sample().size(), (4,))
         self.assertEqual(Beta(alpha_1d, beta_1d).sample_n(1).size(), (1, 4))
-        self.assertEqual(Beta(0.1, 0.3).sample().size(), (1,))
-        self.assertEqual(Beta(0.1, 0.3).sample_n(5).size(), (5, 1))
+        self.assertIsInstance(Beta(0.1, 0.3).sample(), float)
+        self.assertEqual(Beta(0.1, 0.3).sample_n(5).size(), (5,))
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_beta_log_prob(self):

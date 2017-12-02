@@ -76,6 +76,12 @@ TH_API double THRandom_standard_gamma(THGenerator *_generator, double alpha);
 */
 TH_API double THRandom_standard_gamma_grad(double x, double alpha);
 
+/** Computes a reparameterized gradient of a sample x from a Dirichlet
+    distribution wrt the concentration parameter alpha.
+    total is the sum of all concentration parameters, so total > alpha.
+*/
+TH_API double THRandom_dirichlet_grad(double x, double alpha, double total);
+
 /** Returns a random number from a Cauchy distribution.
     The Cauchy density is $p(x) = sigma/(pi*(sigma^2 + (x-median)^2))$
 */

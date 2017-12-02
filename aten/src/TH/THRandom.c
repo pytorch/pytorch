@@ -341,6 +341,54 @@ double THRandom_standard_gamma_grad(double x, double alpha) {
     return exp(p / q);
 }
 
+double THRandom_dirichlet_grad(double x, double alpha, double total) {
+  // Use asymptotic approximation for x close to 0.
+  if (x * (1.0 + total) < 0.05) {
+    const double digamma_alpha = (lgamma(alpha * 1.01) - lgamma(alpha * 0.99)) * 50.0;
+    const double digamma_total = (lgamma(total * 1.01) - lgamma(total * 0.99)) * 50.0;
+    return x / alpha * (1.0 / alpha + digamma_alpha - log(x) - digamma_total);
+  }
+
+  // Use asymptotic approximation for x close to 1.
+  if (0.95 < x) {
+    const double digamma_alpha = (lgamma(alpha * 1.01) - lgamma(alpha * 0.99)) * 50.0;
+    const double digamma_total = (lgamma(total * 1.01) - lgamma(total * 0.99)) * 50.0;
+    return (x - 1.0) / (total - alpha) * (digamma_alpha - digamma_total);
+  }
+
+  // Use an exp(polynomial) correction to an analytic baseline.
+  static const double coef[3][4][4] = {{
+      {6.1005629e-07, -1.828725e-05, 8.336207e-05, -0.00013673508},
+      {2.9852867e-05, -0.00042035574, 0.0015678144, -0.00075049233},
+      {0.00037185454, -0.0030557711, 0.0073571204, 0.0044746167},
+      {0.001222753, -0.0080685876, 0.0023161296, 0.02482034},
+    }, {
+      {-5.8175783e-06, -3.3067501e-05, -4.9583241e-06, -0.00044078781},
+      {-7.0025411e-05, -0.00037069095, 0.0032234223, -0.0015571681},
+      {8.1696149e-05, -0.002253385, 0.028706442, 0.026495855},
+      {0.0023843477, -0.017397985, -0.068918245, -0.15583181},
+    }, {
+      {-5.9379457e-06, -0.00015891386, -0.00051603265, 0.0015859497},
+      {-2.7948343e-05, -0.00025354123, -0.00064650359, 0.032538675},
+      {-0.00081035771, 0.011518014, 0.05311176, -0.79071667},
+      {-0.0079990458, 0.036110198, -0.66509688, -0.61943834},
+  }};
+  const double u = log(x / (1.0 - x));
+  const double a = log(alpha);
+  const double b = log(total);
+  const double us[3] = {1.0, u, u * u};
+  const double as[4] = {1.0, a, a * a, a * a * a};
+  const double bs[4] = {1.0, b, b * b, b * b * b};
+  double poly = 0.0;
+  for (int i = 0; i < 3; ++i)
+    for (int j = 0; j < 4; ++j)
+      for (int k = 0; k < 4; ++k)
+        poly += coef[i][j][k] * us[i] * as[j] * bs[k];
+
+  const double baseline = cosh(0.5 * u);
+  return exp(poly) / (baseline * baseline);
+}
+
 double THRandom_cauchy(THGenerator *_generator, double median, double sigma)
 {
   return(median + sigma * tan(M_PI*(uniform_double(_generator)-0.5)));
