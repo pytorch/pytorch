@@ -155,7 +155,7 @@ class TestLayerNormOp(hu.HypothesisTestCase):
             model,
             'input',
             'output',
-            dim_in=scale_dim,
+            dim_in=X.shape[axis],
             axis=axis,
             epsilon=1e-4,
         )
