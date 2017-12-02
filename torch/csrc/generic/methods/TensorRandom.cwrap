@@ -211,6 +211,26 @@
 ]]
 
 [[
+  name: standard_gamma
+  types:
+    - floating_point
+  backends:
+    - CPU
+  return: argument 0
+  variants:
+    - function
+  options:
+    - cname: standard_gamma
+      arguments:
+        - arg: THTensor* output
+          output: True
+        - arg: THGenerator* generator
+          default: THPDefaultGenerator->cdata
+          kwarg_only: True
+        - THTensor* alpha
+]]
+
+[[
   name: rand
   types:
     - floating_point

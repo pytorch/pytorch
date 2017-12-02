@@ -32,9 +32,20 @@ policy, the code for implementing REINFORCE would be as follows::
 import math
 from numbers import Number
 import torch
+from torch.autograd import Variable
 
 
-__all__ = ['Distribution', 'Bernoulli', 'Categorical', 'Normal']
+__all__ = ['Distribution', 'Bernoulli', 'Categorical', 'Normal', 'Gamma']
+
+
+def _expand_n(v, n):
+    r"""
+    Cleanly expand float or Tensor or Variable parameters.
+    """
+    if isinstance(v, Number):
+        return torch.Tensor([v]).expand(n, 1)
+    else:
+        return v.expand(n, *v.size())
 
 
 class Distribution(object):
@@ -178,16 +189,60 @@ class Normal(Distribution):
         return torch.normal(self.mean, self.std)
 
     def sample_n(self, n):
-        # cleanly expand float or Tensor or Variable parameters
-        def expand(v):
-            if isinstance(v, Number):
-                return torch.Tensor([v]).expand(n, 1)
-            else:
-                return v.expand(n, *v.size())
-        return torch.normal(expand(self.mean), expand(self.std))
+        return torch.normal(_expand_n(self.mean, n), _expand_n(self.std, n))
 
     def log_prob(self, value):
         # compute the variance
         var = (self.std ** 2)
         log_std = math.log(self.std) if isinstance(self.std, Number) else self.std.log()
         return -((value - self.mean) ** 2) / (2 * var) - log_std - math.log(math.sqrt(2 * math.pi))
+
+
+def _standard_gamma(alpha):
+    if not isinstance(alpha, Variable):
+        return torch._C._standard_gamma(alpha)
+    return Variable(torch._C._standard_gamma(alpha.data))
+
+
+class Gamma(Distribution):
+    r"""
+    Creates a Gamma distribution parameterized by shape `alpha` and rate `beta`.
+
+    Example::
+
+        >>> m = Gamma(torch.Tensor([1.0]), torch.Tensor([1.0]))
+        >>> m.sample()  # Gamma distributed with shape alpha=1 and rate beta=1
+         0.1046
+        [torch.FloatTensor of size 1]
+
+    Args:
+        alpha (float or Tensor or Variable): shape parameter of the distribution
+        beta (float or Tensor or Variable): rate = 1 / scale of the distribution
+    """
+
+    def __init__(self, alpha, beta):
+        # TODO handle (Variable, Number) cases
+        alpha_num = isinstance(alpha, Number)
+        beta_num = isinstance(beta, Number)
+        if alpha_num and not beta_num:
+            alpha = beta.new(beta.size()).fill_(alpha)
+        elif not alpha_num and beta_num:
+            beta = alpha.new(alpha.size()).fill_(beta)
+        elif alpha_num and beta_num:
+            alpha, beta = torch.Tensor([alpha]), torch.Tensor([beta])
+        elif alpha.size() != beta.size():
+            raise ValueError('Expected alpha.size() == beta.size(), actual {} vs {}'.format(
+                alpha.size(), beta.size()))
+        self.alpha = alpha
+        self.beta = beta
+
+    def sample(self):
+        return _standard_gamma(self.alpha) / self.beta
+
+    def sample_n(self, n):
+        return _standard_gamma(_expand_n(self.alpha, n)) / self.beta
+
+    def log_prob(self, value):
+        return (self.alpha * torch.log(self.beta)
+                + (self.alpha - 1) * torch.log(value)
+                - self.beta * value - torch.lgamma(self.alpha))
