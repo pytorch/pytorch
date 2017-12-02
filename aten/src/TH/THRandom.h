@@ -65,7 +65,7 @@ TH_API double THRandom_normal(THGenerator *_generator, double mean, double stdv)
 */
 TH_API double THRandom_exponential(THGenerator *_generator, double lambda);
 
-/** Generates a random number from the standard Gamma distribution.
+/** Generates a random number from a standard Gamma distribution.
     The Gamma density is proportional to $x^{alpha-1} exp(-x)$
     The shape parameter alpha (a.k.a. k) is a positive real number.
 */
