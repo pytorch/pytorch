@@ -131,6 +131,14 @@ ADD_CUSTOM_COMMAND(OUTPUT ${generated_cpp}
 COMMAND ${GEN_COMMAND}
 DEPENDS ${all_python} ${all_templates} ${cwrap_files})
 
+# Generated headers used from a cuda (.cu) file are
+# not tracked correctly in cmake . We make the libATen.so depend explicitly
+# on building the generated aten files to workaround.
+ADD_CUSTOM_TARGET(aten_files_are_generated
+  DEPENDS ${generated_cpp}
+)
+
+
 SET(all_cpp ${base_cpp} ${native_cpp} ${generated_cpp} ${ATen_CPU_SRCS})
 
 INCLUDE_DIRECTORIES(${ATen_CPU_INCLUDE})
@@ -158,6 +166,7 @@ IF(CUDA_FOUND)
 ELSE()
   ADD_LIBRARY(ATen ${AT_LINK_STYLE} ${all_cpp})
 ENDIF()
+ADD_DEPENDENCIES(ATen aten_files_are_generated)
 
 SET_TARGET_PROPERTIES(ATen PROPERTIES VERSION 1 SOVERSION 1)
 
