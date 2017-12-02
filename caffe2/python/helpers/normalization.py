@@ -216,29 +216,37 @@ def layer_norm(
     # The learned multiplicative scale or "gain".
     scale = model.create_param(
         param_name='{}_scale'.format(blob_out),
-        shape=dim_in,
-        initializer=initializers.Initializer('ConstantFill', value=initial_scale),
-        tags=ParameterTags.WEIGHT
+        shape=[dim_in],
+        initializer=initializers.Initializer(
+            'ConstantFill',
+            value=initial_scale,
+        ),
+        tags=ParameterTags.WEIGHT,
     )
 
     # The learned additive bias or "shift".
     bias = model.create_param(
         param_name='{}_bias'.format(blob_out),
-        shape=dim_in,
-        initializer=initializers.Initializer('ConstantFill', value=initial_bias),
-        tags=ParameterTags.BIAS
+        shape=[dim_in],
+        initializer=initializers.Initializer(
+            'ConstantFill',
+            value=initial_bias,
+        ),
+        tags=ParameterTags.BIAS,
     )
 
     scaled = model.net.Mul(
         [normalized, scale],
         ['{}_scaled'.format(blob_out)],
         broadcast=1,
+        axis=axis,
     )
 
     biased = model.net.Add(
         [scaled, bias],
         ['{}_biased'.format(blob_out)],
         broadcast=1,
+        axis=axis,
     )
 
     return biased, mean, stdev
