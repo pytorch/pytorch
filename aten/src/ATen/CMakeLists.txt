@@ -114,7 +114,8 @@ SET(GEN_COMMAND
 )
 
 EXECUTE_PROCESS(
-    COMMAND ${GEN_COMMAND} --output-dependencies ${CMAKE_CURRENT_BINARY_DIR}/generated_cpp.txt
+    COMMAND ${GEN_COMMAND}
+      --output-dependencies ${CMAKE_CURRENT_BINARY_DIR}/generated_cpp.txt
     RESULT_VARIABLE RETURN_VALUE
 )
 if (NOT RETURN_VALUE EQUAL 0)
