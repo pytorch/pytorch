@@ -39,7 +39,11 @@ return baseType->${method_prefix}${api_name}(${unpacked_args});""")
 
 METHOD_DEFINITION_FALLTHROUGH_VARIABLE = CodeTemplate("""\
 ${unpack_args}
-return as_variable(baseType->${method_prefix}${api_name}(${unpacked_args}));""")
+auto flags = compute_flags({ ${args_with_derivatives} });
+auto var = as_variable(baseType->${method_prefix}${api_name}(${unpacked_args}));
+var.is_volatile() = flags.is_volatile;
+return var;
+""")
 
 METHOD_DEFINITION_FALLTHROUGH_INPLACE = CodeTemplate("""\
 ${unpack_args}
@@ -683,11 +687,6 @@ def create_variable_type(top_env, aten_declarations):
         if declaration['return_type'] in FALLTHROUGH_RETURN_TYPES:
             body.extend(METHOD_DEFINITION_FALLTHROUGH.substitute(combined).split('\n'))
             return body
-        elif declaration['name'] in FALLTHROUGH_FUNCTIONS:
-            tmpl = (METHOD_DEFINITION_FALLTHROUGH_INPLACE if declaration['inplace']
-                    else METHOD_DEFINITION_FALLTHROUGH_VARIABLE)
-            body.extend(tmpl.substitute(combined).split('\n'))
-            return body
 
         arguments = declaration['arguments']
         tensor_args = [arg for arg in arguments if arg['simple_type'] in {'Tensor', 'TensorList'}]
@@ -752,6 +751,12 @@ def create_variable_type(top_env, aten_declarations):
             env['version_counter'] = 'if (inplace) increment_version(input);'
         elif is_view:
             env['version_counter'] = 'take_version_counter(ret, self);'
+
+        if declaration['name'] in FALLTHROUGH_FUNCTIONS:
+            tmpl = (METHOD_DEFINITION_FALLTHROUGH_INPLACE if declaration['inplace']
+                    else METHOD_DEFINITION_FALLTHROUGH_VARIABLE)
+            body.extend(tmpl.substitute(combined).split('\n'))
+            return body
 
         base_call = BASE_CALL.substitute(combined)
         if not declaration['inplace']:
