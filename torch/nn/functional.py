@@ -768,7 +768,7 @@ softplus(input, beta=1, threshold=20) -> Variable
 def _get_softmax_dim(name, ndim, stacklevel):
     warnings.warn("Implicit dimension choice for " + name + " has been deprecated. "
                   "Change the call to include dim=X as an argument.", stacklevel=stacklevel)
-    if ndim == 0 or ndim == 3:
+    if ndim == 0 or ndim == 1 or ndim == 3:
         return 0
     else:
         return 1
