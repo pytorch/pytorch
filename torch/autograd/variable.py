@@ -358,7 +358,6 @@ class Variable(_C._VariableBase):
                 std = std.data
             return Variable(torch.normal(means, std))
 
-
 for method in dir(Variable):
     # This will also wrap some methods that normally aren't part of the
     # functional interface, but we don't care, as they won't ever be used
