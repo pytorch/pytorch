@@ -142,12 +142,15 @@ struct WorkspaceIdInjector {
       Blob* node_id_blob = workspace->GetBlob(NODE_ID);
       TensorCPU node_id_tensor = node_id_blob->template Get<TensorCPU>();
       int node_id = node_id_tensor.template data<int32_t>()[0];
-      int64_t global_ws_id = (seq_++) + (static_cast<int64_t>(node_id) << 32);
+      CAFFE_ENFORCE(
+          seq_ < (1 << 16),
+          "Integer overflow while calculating GLOBAL_WORKSPACE_ID blob");
+      int32_t global_ws_id = (seq_++) + (static_cast<int32_t>(node_id) << 16);
       Blob* global_ws_id_blob = workspace->CreateLocalBlob(GLOBAL_WORKSPACE_ID);
       TensorCPU* global_ws_id_tensor =
           global_ws_id_blob->template GetMutable<TensorCPU>();
       global_ws_id_tensor->Resize();
-      global_ws_id_tensor->template mutable_data<int64_t>()[0] = global_ws_id;
+      global_ws_id_tensor->template mutable_data<int32_t>()[0] = global_ws_id;
       VLOG(1) << "Adding " << GLOBAL_WORKSPACE_ID << " = " << global_ws_id;
     }
   }
