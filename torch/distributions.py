@@ -267,7 +267,7 @@ class Gamma(Distribution):
 
 
 def _dirichlet_sample_nograd(alpha):
-    gammas = _standard_gamma(alpha)
+    gammas = torch._C._standard_gamma(alpha)
     return gammas / gammas.sum(-1, True)
 
 
