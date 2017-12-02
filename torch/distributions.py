@@ -287,14 +287,6 @@ class _Dirichlet(Function):
         return grad_output * grad
 
 
-def _dirichlet_sample(alpha):
-    if not isinstance(alpha, Variable):
-        return _dirichlet_sample_nograd(alpha)
-    if not alpha.requires_grad:
-        return Variable(_dirichlet_sample_nograd(alpha.data))
-    return _StandardGamma.apply(alpha)
-
-
 class Dirichlet(Distribution):
     r"""
     Creates a Dirichlet distribution parameterized by concentration `alpha`.
@@ -315,11 +307,18 @@ class Dirichlet(Distribution):
     def __init__(self, alpha):
         self.alpha = alpha
 
+    def _sample(self, alpha):
+        if not isinstance(alpha, Variable):
+            return _dirichlet_sample_nograd(alpha)
+        if not alpha.requires_grad:
+            return Variable(_dirichlet_sample_nograd(alpha.data))
+        return _Dirichlet.apply(alpha)
+
     def sample(self):
-        return _dirichlet_sample(self.alpha)
+        return self._sample(self.alpha)
 
     def sample_n(self, n):
-        return _dirichlet_sample(_expand_n(self.alpha, n))
+        return self._sample(_expand_n(self.alpha, n))
 
     def log_prob(self, value):
         return ((torch.log(value) * (self.alpha - 1.0)).sum(-1)
@@ -369,5 +368,5 @@ class Beta(Distribution):
         if isinstance(value, Number):
             heads_tails = torch.Tensor([value, 1.0 - value])
         else:
-            heads_tails = torch.stack([value, 1.0 - value])
+            heads_tails = torch.stack([value, 1.0 - value], -1)
         return self.dirichlet.log_prob(heads_tails)
