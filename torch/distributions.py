@@ -243,6 +243,6 @@ class Gamma(Distribution):
         return _standard_gamma(_expand_n(self.alpha, n)) / self.beta
 
     def log_prob(self, value):
-        return (self.alpha * torch.log(self.beta)
-                + (self.alpha - 1) * torch.log(value)
-                - self.beta * value - torch.lgamma(self.alpha))
+        return (self.alpha * torch.log(self.beta) +
+                (self.alpha - 1) * torch.log(value) -
+                self.beta * value - torch.lgamma(self.alpha))
