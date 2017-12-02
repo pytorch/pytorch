@@ -67,9 +67,7 @@ ENDIF()
 INCLUDE_DIRECTORIES(${CUDA_INCLUDE_DIRS})
 INCLUDE_DIRECTORIES("${CUDA_SDK_ROOT_DIR}/common/inc")
 
-IF ("$ENV{STATIC_TH}" STREQUAL "YES")
 LIST(APPEND CUDA_NVCC_FLAGS "-Xcompiler -fPIC")
-ENDIF()
 
 IF(MAGMA_FOUND)
   INCLUDE_DIRECTORIES(${MAGMA_INCLUDE_DIR})
@@ -92,37 +90,6 @@ IF(MAGMA_FOUND)
 ELSE(MAGMA_FOUND)
   MESSAGE(STATUS "MAGMA not found. Compiling without MAGMA support")
 ENDIF(MAGMA_FOUND)
-
-IF ($ENV{TH_BINARY_BUILD})
-  MESSAGE(STATUS "TH_BINARY_BUILD detected. Statically linking libstdc++")
-  SET(CMAKE_CXX_FLAGS "-static-libstdc++ ${CMAKE_CXX_FLAGS}")
-  IF (UNIX AND NOT APPLE)
-    # hiding statically linked library symbols, this flag is not available for the linker under MACOSX
-    set (CMAKE_SHARED_LINKER_FLAGS "-Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/../../../tools/pytorch.version")
-    SET(CMAKE_CXX_FLAGS "-Wl,--exclude-libs,libstdc++.a ${CMAKE_CXX_FLAGS}")
-  ENDIF(UNIX AND NOT APPLE)
-ENDIF()
-
-IF(APPLE)
-  IF(${CUDA_VERSION} LESS 6.0)
-    # work around for mac os x bug:
-    # http://stackoverflow.com/questions/16286588/cuda-5-0-cmake-and-make-failing-on-osx-10-8-3
-    if (NOT DEFINED CUDA_HOST_COMPILER AND CMAKE_C_COMPILER_ID STREQUAL "Clang" AND EXISTS /usr/bin/gcc)
-      set(CUDA_HOST_COMPILER /usr/bin/gcc CACHE FILEPATH "Host side compiler used by NVCC")
-      message(STATUS "Setting CMAKE_HOST_COMPILER to /usr/bin/gcc instead of ${CMAKE_C_COMPILER}.")
-    endif()
-
-    # bug on Apple
-    LINK_DIRECTORIES("/usr/local/cuda/lib/")
-  ELSEIF(${CUDA_VERSION} LESS 7.0)
-    SET(CUDA_HOST_COMPILER clang)
-    LIST(APPEND CUDA_NVCC_FLAGS "-Xcompiler -stdlib=libstdc++ -Xlinker -stdlib=libstdc++")
-    IF("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
-      set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -stdlib=libstdc++")
-    ENDIF()
-  ENDIF()
-  # CUDA 7 supports clang and libc++ so no need to change anything
-ENDIF(APPLE)
 
 # Detect CUDA architecture and get best NVCC flags
 IF(NOT COMMAND CUDA_SELECT_NVCC_ARCH_FLAGS OR MSVC)
@@ -227,48 +194,18 @@ ELSE(CUDA_HAS_FP16 OR NOT ${CUDA_VERSION} LESS 7.5)
 ENDIF(CUDA_HAS_FP16 OR NOT ${CUDA_VERSION} LESS 7.5)
 
 MESSAGE(STATUS "CUDA_NVCC_FLAGS: ${CUDA_NVCC_FLAGS}")
-IF ("$ENV{STATIC_TH}" STREQUAL "YES")
-  CUDA_ADD_LIBRARY(THC STATIC ${src} ${src-cuda})
-  SET_TARGET_PROPERTIES(THC PROPERTIES COMPILE_FLAGS "-fPIC")
-ELSE()
-  CUDA_ADD_LIBRARY(THC SHARED ${src} ${src-cuda})
-  CUDA_ADD_CUBLAS_TO_TARGET(THC)
-  TARGET_LINK_LIBRARIES(THC ${TH_LIBRARIES} ${CUDA_curand_LIBRARY} ${CUDA_cusparse_LIBRARY})
+CUDA_ADD_LIBRARY(THC STATIC ${src} ${src-cuda})
+SET_TARGET_PROPERTIES(THC PROPERTIES COMPILE_FLAGS "-fPIC")
+FILE(WRITE "${CMAKE_INSTALL_PREFIX}/THC_deps.txt" "${CUDA_cublas_LIBRARY};${CUDA_curand_LIBRARY};${CUDA_cusparse_LIBRARY};")
 
-  IF(USE_MAGMA)
-    TARGET_LINK_LIBRARIES(THC ${MAGMA_LIBRARIES})
-    IF ($ENV{TH_BINARY_BUILD})
-      # because magma is linked statically and it wants a BLAS,
-      # we need to link the BLAS lib against THC. Usually TH will
-      # load a BLAS library and it's all fine, but in the binary builds,
-      # TH uses static linkage to MKL, so it doesn't have all symbols that
-      # magma needs. So in this case, explicitly find a BLAS and link against it
-      # just like in TH
-      SET(CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/../TH/cmake ${CMAKE_MODULE_PATH})
-      FIND_PACKAGE(BLAS)
-      IF(BLAS_FOUND)
-        TARGET_LINK_LIBRARIES(THC "${BLAS_LIBRARIES};${BLAS_LIBRARIES};${BLAS_LIBRARIES}")
-      ELSE(BLAS_FOUND)
-        MESSAGE(FATAL_ERROR "Binary build needs blas to be found here")
-      ENDIF(BLAS_FOUND)
-    ENDIF($ENV{TH_BINARY_BUILD})
-  ENDIF(USE_MAGMA)
+IF(USE_MAGMA)
+  FILE(APPEND "${CMAKE_INSTALL_PREFIX}/THC_deps.txt" "${MAGMA_LIBRARIES};")
+ENDIF(USE_MAGMA)
 
-  IF(NOT THC_SO_VERSION)
-    SET(THC_SO_VERSION 0)
-  ENDIF(NOT THC_SO_VERSION)
-  MESSAGE(STATUS "THC_SO_VERSION: ${THC_SO_VERSION}")
-  SET_TARGET_PROPERTIES(THC PROPERTIES
-    VERSION   ${THC_SO_VERSION}
-    SOVERSION ${THC_SO_VERSION})
-
-
-  INSTALL(TARGETS THC
-    RUNTIME DESTINATION "${THC_INSTALL_BIN_SUBDIR}"
-    LIBRARY DESTINATION "${THC_INSTALL_LIB_SUBDIR}"
-    ARCHIVE DESTINATION "${THC_INSTALL_LIB_SUBDIR}")
-ENDIF()
-
+INSTALL(TARGETS THC
+  RUNTIME DESTINATION "${THC_INSTALL_BIN_SUBDIR}"
+  LIBRARY DESTINATION "${THC_INSTALL_LIB_SUBDIR}"
+  ARCHIVE DESTINATION "${THC_INSTALL_LIB_SUBDIR}")
 
 INSTALL(FILES
           THC.h
