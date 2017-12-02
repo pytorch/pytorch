@@ -569,7 +569,6 @@ struct TempFile {
   }
   void sync() {
     fflush(file_);
-    fsync(fileno(file_));
   }
   void write(const std::string & str) {
     size_t result = fwrite(str.c_str(), 1, str.size(), file_);
@@ -636,9 +635,9 @@ static void runCompiler(const std::string & cpp, const std::string so) {
 
 struct CPUFusionFunction : public CompiledFusionFunction {
   CPUFusionFunction(const std::string & name, AnnotatedGraph & agraph)
-  : CompiledFusionFunction(name, agraph)
-  , so_file(so_template, 3)
-  , cpp_file(cpp_template, 4) {
+  : CompiledFusionFunction(name, agraph) {
+    TempFile so_file(so_template, 3);
+    TempFile cpp_file(cpp_template, 4);
 
     std::stringstream cu;
     concat_desc = codegen::emitCompilationUnit(cu, name, agraph, false);
@@ -656,8 +655,6 @@ protected:
   virtual void launch_raw(uint32_t numel, void ** arguments) override {
     kernel(numel, arguments);
   }
-  TempFile so_file;
-  TempFile cpp_file;
   std::unique_ptr<DynamicLibrary> so_lib;
   void (*kernel)(uint32_t, void**) = nullptr;
 };
