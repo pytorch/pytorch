@@ -262,6 +262,35 @@ class TestDistributions(TestCase):
                                         scipy.stats.beta(alpha, beta),
                                         'Beta(alpha={}, beta={})'.format(alpha, beta))
 
+    # This is a randomized test.
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    def test_beta_sample_grad(self):
+        self._set_rng_seed()
+        num_samples = 20
+        for alpha, beta in product([1e-2, 1e0, 1e2], [1e-2, 1e0, 1e2]):
+            alphas = Variable(torch.Tensor([alpha] * num_samples), requires_grad=True)
+            betas = Variable(torch.Tensor([beta] * num_samples))
+            x = Beta(alphas, betas).sample()
+            x.sum().backward()
+            x, ind = x.data.sort()
+            x = x.numpy()
+            actual_grad = alphas.grad.data[ind].numpy()
+            # Compare with expected gradient dx/dalpha along constant cdf(x,alpha,beta).
+            cdf = scipy.stats.beta.cdf
+            pdf = scipy.stats.beta.pdf
+            eps = 0.02 * alpha
+            cdf_alpha = (cdf(x, alpha + eps, beta) - cdf(x, alpha - eps, beta)) / (2 * eps)
+            cdf_x = pdf(x, alpha, beta)
+            expected_grad = -cdf_alpha / cdf_x
+            rel_error = np.abs(actual_grad - expected_grad) / (expected_grad + 1e-100)
+            self.assertLess(np.max(rel_error), 0.2,
+                            '\n'.join(['Bad gradients for Beta({}, {})'.format(alpha, beta),
+                                       'x {}'.format(x),
+                                       'expected {}'.format(expected_grad),
+                                       'actual {}'.format(actual_grad),
+                                       'rel error {}'.format(rel_error),
+                                       'max error {}'.format(rel_error.max())]))
+
 
 if __name__ == '__main__':
     run_tests()

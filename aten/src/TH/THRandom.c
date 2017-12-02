@@ -305,13 +305,17 @@ double THRandom_standard_gamma(THGenerator *_generator, double alpha) {
   }
 }
 
+// TODO Replace this with more accurate digamma().
+static inline double _digamma(double x) {
+  const double eps = x * 1e-2;
+  return (lgamma(x + eps) - lgamma(x - eps)) / (eps + eps);
+}
+
 double THRandom_standard_gamma_grad(double x, double alpha) {
     // Use asymptotic approximation for small x:
     // pdf(x) = x^(alpha - 1) / Gamma(alpha)
     if (x < 0.001) {
-        const double eps = alpha * 1e-2;
-        const double digamma_alpha = (lgamma(alpha + eps) - lgamma(alpha - eps)) / (2.0 * eps);
-        const double result = -x / alpha * (log(x) - 1 / alpha - digamma_alpha);
+        const double result = -x / alpha * (log(x) - 1 / alpha - _digamma(alpha));
         return isnan(result) ? 0.0 : result;
     }
 
@@ -342,36 +346,32 @@ double THRandom_standard_gamma_grad(double x, double alpha) {
 }
 
 double THRandom_dirichlet_grad(double x, double alpha, double total) {
-  // Use asymptotic approximation for x close to 0.
-  if (x * (1.0 + total) < 0.05) {
-    const double digamma_alpha = (lgamma(alpha * 1.01) - lgamma(alpha * 0.99)) * 50.0;
-    const double digamma_total = (lgamma(total * 1.01) - lgamma(total * 0.99)) * 50.0;
-    return x / alpha * (1.0 / alpha + digamma_alpha - digamma_total - log(x));
+  // Use an asymptotic approximation for x close to 0.
+  if (x * (1.0 + total) < 0.1) {
+    return x / alpha * (1.0 / alpha + _digamma(alpha) - _digamma(total) - log(x));
   }
 
-  // Use asymptotic approximation for x close to 1.
-  if (0.95 < x) {
-    const double digamma_alpha = (lgamma(alpha * 1.01) - lgamma(alpha * 0.99)) * 50.0;
-    const double digamma_total = (lgamma(total * 1.01) - lgamma(total * 0.99)) * 50.0;
-    return (x - 1.0) / (total - alpha) * (digamma_alpha - digamma_total);
+  // Use an asymptotic approximation for x close to 1.
+  if (0.9 < x) {
+    return (x - 1.0) / (total - alpha) * (_digamma(alpha) - _digamma(total));
   }
 
   // Use an exp(polynomial) correction to an analytic baseline.
   static const double coef[3][4][4] = {{
-      {-3.0888379e-07, -1.5812442e-05, 0.00010281548, -0.00016163972},
-      {1.3259998e-05, -0.00037499375, 0.0019150136, -0.0015663936},
-      {0.00028374979, -0.002862418, 0.00937229, -0.00083786357},
-      {0.0011204182, -0.0080705074, 0.0061141513, 0.02181815},
+      {-0.6005303, -0.67617563, 0.033289386, -0.0055232775},
+      {-0.75941092, 0.044471919, 0.0053838049, -0.00047044716},
+      {0.040206891, -0.00031460386, -0.0007468524, 3.7911054e-05},
+      {0.0021070384, -0.00037698363, -0.00014084846, 5.716011e-07},
     }, {
-      {-1.7598575e-06, -3.6188075e-05, -3.2373165e-05, -0.00027690999},
-      {5.3818633e-07, -0.00050119002, 0.002087266, -3.0084335e-05},
-      {0.00041383499, -0.0031784718, 0.021177818, 0.029183713},
-      {0.0026238916, -0.017761299, -0.068729522, -0.14214017},
+      {-0.14776487, -0.069132247, -0.016608477, 0.0029528664},
+      {0.027221814, 0.019624844, -0.0036339311, 0.00041609836},
+      {2.0367985e-05, 0.0021596372, -0.00051112079, -1.531012e-07},
+      {-0.00025852026, -1.2120283e-05, -3.1670831e-05, -1.5261991e-06},
     }, {
-      {-4.0046232e-08, -0.0001520638, -0.00046990864, 0.0020079535},
-      {4.5105746e-05, -0.00055498206, -0.0013608482, 0.038434021},
-      {-0.00053605648, 0.0084664223, 0.043496097, -0.76991405},
-      {-0.0073478223, 0.03535709, -0.6673362, -0.60076795},
+      {0.022796317, 0.011816618, -0.011096905, 0.0015584937},
+      {-0.006570404, 0.013915929, -0.0041164109, 0.00038323325},
+      {-0.0029764157, 0.0030127356, -0.00054195245, 1.2310123e-05},
+      {-0.00025888479, 0.00017524792, -2.2794739e-05, -1.0207707e-06},
   }};
   const double u = log(x / (1.0 - x));
   const double a = log(alpha);
