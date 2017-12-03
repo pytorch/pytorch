@@ -28,6 +28,12 @@ void BroadcastOp<Context>::initializeAlgorithm() {
   if (init_.template IsType<float>()) {
     algorithm_.reset(new ::gloo::CudaBroadcastOneToAll<float>(
         init_.context, init_.template getOutputs<float>(), init_.size, root_));
+  } else if (init_.template IsType<long>()) {
+    algorithm_.reset(new ::gloo::CudaBroadcastOneToAll<long>(
+        init_.context, init_.template getOutputs<long>(), init_.size, root_));
+  } else if (init_.template IsType<int>()) {
+    algorithm_.reset(new ::gloo::CudaBroadcastOneToAll<int>(
+        init_.context, init_.template getOutputs<int>(), init_.size, root_));
   } else if (init_.template IsType<float16>()) {
     algorithm_.reset(new ::gloo::CudaBroadcastOneToAll<::gloo::float16>(
         init_.context,
