@@ -176,34 +176,18 @@ def pad_sequence(sequences, lengths, batch_first=False):
     if batch_first:
         out_dims = [len(sequences), max_len] + trailing_dims
         out_variable = Variable(sequences[0].data.new(*out_dims).zero_())
-        for i, variable, length in zip(range(len(lengths)), sequences, lengths):
-            # temperory sort check, can be removed when we handle sorting internally
-            if prev_l < length:
-                    raise ValueError("lengths array has to be sorted in decreasing order")
-            prev_l = length
-            if length < max_len:
-                prev_l = length
-                padding_dims = [lengths[0] - length] + trailing_dims
-                filler = Variable(variable.data.new(*padding_dims).zero_())
-                out_variable[i] = torch.cat((variable, filler))
-            else:
-                out_variable[i] = variable
+        batch_dim = 0
     else:
-        # repeating the same logic but with T as first dimension
         out_dims = [max_len, len(sequences)] + trailing_dims
         out_variable = Variable(sequences[0].data.new(*out_dims).zero_())
-        for i, variable, length in zip(range(len(lengths)), sequences, lengths):
-            # temperory sort check, can be removed when we handle sorting internally
-            if prev_l < length:
-                    raise ValueError("lengths array has to be sorted in decreasing order")
-            prev_l = length
-            if length < max_len:
-                prev_l = length
-                padding_dims = [lengths[0] - length] + trailing_dims
-                filler = Variable(variable.data.new(*padding_dims).zero_())
-                out_variable[:, i] = torch.cat((variable, filler))
-            else:
-                out_variable[:, i] = variable
+        batch_dim = 1
+
+    for i, variable, length in zip(range(len(lengths)), sequences, lengths):
+        # temperory sort check, can be removed when we handle sorting internally
+        if prev_l < length:
+                raise ValueError("lengths array has to be sorted in decreasing order")
+        prev_l = length
+        out_variable.select(batch_dim, i)[:length] = variable
     return out_variable
 
 
