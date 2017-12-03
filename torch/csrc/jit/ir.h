@@ -92,9 +92,8 @@ public:
     parent_ = parent;
   }
   Scope* push(Symbol name) {
-    Scope* newScope = new Scope(this, name);
-    children_.push_back(std::unique_ptr<Scope>(newScope));
-    return newScope;
+    children_.push_back(std::unique_ptr<Scope>(new Scope(this, name)));
+    return children_.back().get();
   }
   Scope* parent() {
     if (parent_ == NULL) {
