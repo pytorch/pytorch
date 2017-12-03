@@ -90,6 +90,47 @@ static int open_libopencl_so()
   }
 }
 
+cl_int get_libopencl_path(char** cl_path)
+{
+  char *path = NULL, *str = NULL;
+  int i;
+
+  if((str=getenv("LIBOPENCL_SO_PATH")) && access_file(str)) {
+    path = str;
+  }
+  else if((str=getenv("LIBOPENCL_SO_PATH_2")) && access_file(str)) {
+    path = str;
+  }
+  else if((str=getenv("LIBOPENCL_SO_PATH_3")) && access_file(str)) {
+    path = str;
+  }
+  else if((str=getenv("LIBOPENCL_SO_PATH_4")) && access_file(str)) {
+    path = str;
+  }
+
+  if(!path)
+  {
+    for(i=0; i<(sizeof(default_so_paths) / sizeof(char*)); i++)
+    {
+      if(access_file(default_so_paths[i]))
+      {
+        path = (char *) default_so_paths[i];
+        break;
+      }
+    }
+  }
+
+  if(path)
+  {
+    so_handle = dlopen(path, RTLD_LAZY);
+    if (so_handle) {
+      *cl_path = strndup(path, strlen(path));
+      return CL_SUCCESS;
+    }
+  }
+  return CL_INVALID_PLATFORM;
+}
+
 void stubOpenclReset()
 {
   if(so_handle)
