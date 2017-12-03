@@ -61,12 +61,14 @@ class SGD(Optimizer):
         for group in self.param_groups:
             group.setdefault('nesterov', False)
 
-    def step(self, closure=None):
+    def step(self, closure=None, momentum_correction=None):
         """Performs a single optimization step.
 
         Arguments:
             closure (callable, optional): A closure that reevaluates the model
                 and returns the loss.
+            momentum_correction (optional): Appy momentum correction in distributed
+                training (multi nodes).
         """
         loss = None
         if closure is not None:
@@ -91,6 +93,8 @@ class SGD(Optimizer):
                         buf.mul_(momentum).add_(d_p)
                     else:
                         buf = param_state['momentum_buffer']
+                        if momentum_correction:
+                            buf.mul_(momentum_correction)
                         buf.mul_(momentum).add_(1 - dampening, d_p)
                     if nesterov:
                         d_p = d_p.add(momentum, buf)
