@@ -125,12 +125,12 @@ class PredictorExportMeta(collections.namedtuple(
                                    self.name)
 
 
-def prepare_prediction_net(filename, db_type):
+def prepare_prediction_net(filename, db_type, device_option=None):
     '''
     Helper function which loads all required blobs from the db
     and returns prediction net ready to be used
     '''
-    metanet_def = load_from_db(filename, db_type)
+    metanet_def = load_from_db(filename, db_type, device_option)
 
     global_init_net = utils.GetNet(
         metanet_def, predictor_constants.GLOBAL_INIT_NET_TYPE)
