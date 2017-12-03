@@ -82,7 +82,7 @@ typedef cl_int (*f_clRetainProgram) (cl_program);
 
 typedef cl_int (*f_clReleaseProgram) (cl_program);
 
-typedef cl_int (*f_clBuildProgram) (cl_program, cl_uint, const cl_device_id *, const char *, 
+typedef cl_int (*f_clBuildProgram) (cl_program, cl_uint, const cl_device_id *, const char *,
         void (*pfn_notify)(cl_program program, void * user_data), void *);
 
 typedef cl_int (*f_clCompileProgram) (cl_program, cl_uint, const cl_device_id *, const char *, cl_uint, const cl_program *,
@@ -233,5 +233,8 @@ typedef cl_int (*f_clGetGLContextInfoKHR) (const cl_context_properties *, cl_gl_
 // Additional api to reset currently opened opencl shared-object
 // Subsequent calls will use newly set environment variables
 void stubOpenclReset();
+
+// Helper function to get the path to libOpenCL.so
+cl_int get_libopencl_path(char** cl_path);
 
 #endif    // LIBOPENCL_STUB_H
