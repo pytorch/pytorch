@@ -1051,9 +1051,9 @@ class SparseDataParallelModelTestWithSharedIndices(TestCase):
             self.run_model(V, list(range(8)))
 
 
-@unittest.skipIf(not workspace.has_gpu_support, "No gpu support.")
+@unittest.skipIf(workspace.has_gpu_support, "No GPU support")
+@unittest.skipIf(workspace.NumCudaDevices() < 4, "Test requires at least 4 GPUs")
 class DeviceShiftTest(TestCase):
-
     def create_model(self):
         def input_builder_fun(model):
             model.param_init_net.UniformFill([], ["data"], shape=[32, 8])
