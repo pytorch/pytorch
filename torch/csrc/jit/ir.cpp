@@ -263,7 +263,15 @@ std::ostream& printNode(std::ostream & out, const Node * n, std::vector<const No
   } else {
     emitUses(out,n);
   }
-  out << "];\n";
+  out << "]";
+  std::string scopeName = n->scopeName();
+  if (scopeName.empty()) {
+    out << ";\n";
+  }
+  else {
+    out << ", ";
+    out << "scope: " << scopeName << ";\n";
+  }
   return out;
 }
 
