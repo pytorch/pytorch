@@ -1585,6 +1585,21 @@ class TestAutograd(TestCase):
                               True, f_args_variable, f_args_tensor)
 
     @skipIfNoLapack
+    def test_potrf(self):
+        root = Variable(torch.tril(torch.rand(S, S)), requires_grad=True)
+
+        def run_test(upper):
+            def func(root):
+                x = torch.mm(root, root.t())
+                return torch.potrf(x, upper)
+
+            gradcheck(func, [root])
+            gradgradcheck(func, [root])
+
+        run_test(upper=True)
+        run_test(upper=False)
+
+    @skipIfNoLapack
     def test_trtrs(self):
         def _test_with_size(N, C):
             A = Variable(torch.rand(N, N), requires_grad=True)
@@ -1652,43 +1667,6 @@ class TestAutograd(TestCase):
 
         for key in keys:
             self.assertTrue(hasattr(x, key))
-
-    @skipIfNoLapack
-    def test_potrf_gradient(self):
-        def _calc_deriv_numeric(A, L, upper):
-            # numerical forward derivative
-            dA = Variable(_make_cov(5))
-            eps = 1e-6
-            outb = torch.potrf(A + (eps / 2) * dA, upper)
-            outa = torch.potrf(A - (eps / 2) * dA, upper)
-            dL = (outb - outa) / eps
-
-            return dA, dL
-
-        def _calc_deriv_sym(A, L, upper):
-            # reverse mode
-            Lbar = Variable(torch.rand(5, 5).tril())
-            if upper:
-                Lbar = Lbar.t()
-            L.backward(Lbar)
-            Abar = A.grad
-
-            return Abar, Lbar
-
-        def _check_total_variation(A, L, upper):
-            dA, dL = _calc_deriv_numeric(A, L, upper)
-            Abar, Lbar = _calc_deriv_sym(A, L, upper)
-
-            # compare df = Tr(dA^T Abar) = Tr(dL^T Lbar)
-            df1 = (dL * Lbar).sum()
-            df2 = (dA * Abar).sum()
-
-            self.assertEqual(df1, df2, prec=1e-3)
-
-        for upper in [True, False]:
-            A = Variable(_make_cov(5), requires_grad=True)
-            L = torch.potrf(A, upper)
-            _check_total_variation(A, L, upper)
 
     def test_as_strided(self):
         x = Variable(torch.arange(0, 25).view(5, 5), requires_grad=True)
@@ -1907,11 +1885,6 @@ def prod_single_zero(dim_size):
     result = torch.randn(dim_size, dim_size)
     result[0, 1] = 0
     return Variable(result, requires_grad=True)
-
-
-def _make_cov(S):
-    L = torch.tril(torch.rand(S, S))
-    return torch.mm(L, L.t())
 
 
 def random_square_matrix_of_rank(l, rank):
@@ -2213,7 +2186,6 @@ method_tests = [
     ('det', lambda: random_fullrank_matrix_distinct_singular_value(S), (), 'distinct_postive_s', (), [skipIfNoLapack]),
     ('svd', lambda: random_fullrank_matrix_distinct_singular_value(S), (), '', (), [skipIfNoLapack]),
     ('gesv', (S, S), ((S, S),), '', (), [skipIfNoLapack]),
-    ('potrf', _make_cov(S), (True,), '', (), [skipIfNoLapack]),
     ('eq', (S, S, S), ((S, S, S),)),
     ('eq', (S, S, S), ((1,),), 'broadcast_rhs'),
     ('eq', (1,), ((S, S, S),), 'broadcast_lhs'),
@@ -2385,7 +2357,6 @@ EXCLUDE_FUNCTIONAL = {
     'addr',
 }
 EXCLUDE_GRADCHECK = {
-    'potrf'
 }
 EXCLUDE_GRADGRADCHECK = {
     'svd'
