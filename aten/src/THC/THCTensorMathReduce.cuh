@@ -434,7 +434,6 @@ __global__ void THCTensor_kernel_varInnermostDim(Real *tgt, Real *src_, unsigned
 
     Accreal local_sum =
         THCNumerics<Accreal>::mul(local_mean, ScalarConvert<int, Accreal>::to(count));
-    __syncthreads();
 
     /*
      * We are reducing across each row of 16 threads to find the true sum of the
@@ -462,7 +461,6 @@ __global__ void THCTensor_kernel_varInnermostDim(Real *tgt, Real *src_, unsigned
               THCNumerics<Accreal>::mul(mean_diff, mean_diff),
               ScalarConvert<int, Accreal>::to(count)));
     }
-    __syncthreads();
 
     /*
      * Sums the adjusted M2s. The thread with threadIdx.x == 0 has
@@ -484,7 +482,6 @@ __global__ void THCTensor_kernel_varInnermostDim(Real *tgt, Real *src_, unsigned
       tgt[row] = ScalarConvert<Accreal, Real>::to(
           apply_sqrt ? THCNumerics<Accreal>::sqrt(variance) : variance);
     }
-    __syncthreads();
   }
 }
 
