@@ -118,12 +118,12 @@ void fuseConsecutiveTransposes(std::shared_ptr<Graph>& graph) {
   for (auto it = graph->begin(); it != graph->end(); ++it) {
     auto* n = *it;
 
-    if (n->kind() == kTranspose && n->input()->node()->kind() == kTranspose) {
+    if (n->kind() == kTranspose && n->input()->kind() == kTranspose) {
       auto origInput = n->input();
-      n->is_(kperm, composeTransposes(origInput->node()->is(kperm), n->is(kperm)));
-      n->replaceInput(0, origInput->node()->input());
+      n->is_(kperm, composeTransposes(origInput->is(kperm), n->is(kperm)));
+      n->replaceInput(0, origInput->input());
       if (origInput->uses().size() == 0) {
-        origInput->node()->destroy();
+        origInput->destroy();
       }
       continue;
     }
@@ -136,7 +136,7 @@ void eliminateNopTranspose(std::shared_ptr<Graph>& graph) {
 
     if (n->kind() == kTranspose) {
       if (isNopTranspose(n->is(kperm))) {
-        n->replaceAllUsesWith(n->input()->node());
+        n->replaceAllUsesWith(n->input());
         it.destroyCurrent();
         continue;
       }
@@ -154,11 +154,11 @@ void fuseTransposeIntoGemm(std::shared_ptr<Graph>& graph) {
       for (size_t i : {0,1}) {
         auto inp = n->inputs()[i];
         auto trans = i == 0 ? ktransA : ktransB;
-        if (inp->node()->kind() == kTranspose && inp->node()->is(kperm) == simpleTransPerm) {
-          n->replaceInput(i, inp->node()->input());
+        if (inp->kind() == kTranspose && inp->is(kperm) == simpleTransPerm) {
+          n->replaceInput(i, inp->input());
           n->i_(trans, n->hasAttribute(trans) ? !n->i(trans) : 1);
           if (inp->uses().size() == 0) {
-            inp->node()->destroy();
+            inp->destroy();
           }
         }
       }
