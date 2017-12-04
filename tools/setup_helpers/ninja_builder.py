@@ -75,11 +75,11 @@ class ninja_build_ext(setuptools.command.build_ext.build_ext):
             if not self.initialized:
                 self.initialize()
             compile_info = self._setup_compile(output_dir, macros, include_dirs,
-                                            sources, depends, extra_postargs)
+                                               sources, depends, extra_postargs)
             macros, objects, extra_postargs, pp_opts, build = compile_info
 
             compile_opts = extra_preargs or []
-            compile_opts.append ('/c')
+            compile_opts.append('/c')
             if debug:
                 compile_opts.extend(self.compile_options_debug)
             else:
@@ -106,7 +106,7 @@ class ninja_build_ext(setuptools.command.build_ext.build_ext):
                     output_opt = "/fo" + obj
                     try:
                         self.spawn([self.rc] + pp_opts +
-                                [output_opt] + [input_opt])
+                                   [output_opt] + [input_opt])
                     except DistutilsExecError as msg:
                         raise CompileError(msg)
                     continue
@@ -127,12 +127,12 @@ class ninja_build_ext(setuptools.command.build_ext.build_ext):
                     try:
                         # first compile .MC to .RC and .H file
                         self.spawn([self.mc] +
-                                ['-h', h_dir, '-r', rc_dir] + [src])
-                        base, _ = os.path.splitext (os.path.basename (src))
-                        rc_file = os.path.join (rc_dir, base + '.rc')
+                                   ['-h', h_dir, '-r', rc_dir] + [src])
+                        base, _ = os.path.splitext(os.path.basename(src))
+                        rc_file = os.path.join(rc_dir, base + '.rc')
                         # then compile .RC to .RES file
                         self.spawn([self.rc] +
-                                ["/fo" + obj] + [rc_file])
+                                   ["/fo" + obj] + [rc_file])
 
                     except DistutilsExecError as msg:
                         raise CompileError(msg)
@@ -140,23 +140,23 @@ class ninja_build_ext(setuptools.command.build_ext.build_ext):
                 else:
                     # how to handle this file?
                     raise CompileError("Don't know how to compile %s to %s"
-                                    % (src, obj))
+                                       % (src, obj))
 
                 output_opt = "/Fo" + obj
                 try:
                     self.spawn([self.cc] + compile_opts + pp_opts +
-                            [input_opt, output_opt] +
-                            extra_postargs)
+                               [input_opt, output_opt] +
+                               extra_postargs)
                 except DistutilsExecError as msg:
                     raise CompileError(msg)
 
             return objects
 
         def win_link(self, target_desc, objects,
-                 output_filename, output_dir=None, libraries=None,
-                 library_dirs=None, runtime_library_dirs=None,
-                 export_symbols=None, debug=0, extra_preargs=None,
-                 extra_postargs=None, build_temp=None, target_lang=None):
+                     output_filename, output_dir=None, libraries=None,
+                     library_dirs=None, runtime_library_dirs=None,
+                     export_symbols=None, debug=0, extra_preargs=None,
+                     extra_postargs=None, build_temp=None, target_lang=None):
 
             # TODO: modify this function
             if not self.initialized:
@@ -167,12 +167,12 @@ class ninja_build_ext(setuptools.command.build_ext.build_ext):
             (libraries, library_dirs, runtime_library_dirs) = fixed_args
 
             if runtime_library_dirs:
-                self.warn ("I don't know what to do with 'runtime_library_dirs': "
-                        + str (runtime_library_dirs))
+                self.warn("I don't know what to do with 'runtime_library_dirs': " +
+                          str(runtime_library_dirs))
 
             lib_opts = gen_lib_options(self,
-                                    library_dirs, runtime_library_dirs,
-                                    libraries)
+                                       library_dirs, runtime_library_dirs,
+                                       libraries)
             if output_dir is not None:
                 output_filename = os.path.join(output_dir, output_filename)
 
@@ -193,7 +193,7 @@ class ninja_build_ext(setuptools.command.build_ext.build_ext):
                     export_opts.append("/EXPORT:" + sym)
 
                 ld_args = (ldflags + lib_opts + export_opts +
-                        objects + ['/OUT:' + output_filename])
+                           objects + ['/OUT:' + output_filename])
 
                 # The MSVC linker generates .lib and .exp files, which cannot be
                 # suppressed by any linker switches. The .lib files may even be
@@ -206,7 +206,7 @@ class ninja_build_ext(setuptools.command.build_ext.build_ext):
                     implib_file = os.path.join(
                         os.path.dirname(objects[0]),
                         self.library_filename(dll_name))
-                    ld_args.append ('/IMPLIB:' + implib_file)
+                    ld_args.append('/IMPLIB:' + implib_file)
 
                 if extra_preargs:
                     ld_args[:0] = extra_preargs
@@ -239,10 +239,10 @@ class ninja_build_ext(setuptools.command.build_ext.build_ext):
                 orig_compile(self, obj, src, ext, cc_args, extra_postargs, pp_opts)
 
         def unix_link(self, target_desc, objects,
-                 output_filename, output_dir=None, libraries=None,
-                 library_dirs=None, runtime_library_dirs=None,
-                 export_symbols=None, debug=0, extra_preargs=None,
-                 extra_postargs=None, build_temp=None, target_lang=None):
+                      output_filename, output_dir=None, libraries=None,
+                      library_dirs=None, runtime_library_dirs=None,
+                      export_symbols=None, debug=0, extra_preargs=None,
+                      extra_postargs=None, build_temp=None, target_lang=None):
 
             builder.run()
             orig_link(self, target_desc, objects,
