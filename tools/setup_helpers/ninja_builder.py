@@ -1,4 +1,5 @@
 import os
+import sys
 import setuptools
 import distutils
 from contextlib import contextmanager
@@ -25,7 +26,13 @@ class NinjaBuilder(object):
     def run(self):
         import ninja
         self.writer.close()
-        subprocess.check_call([self.ninja_program, '-f', self.filename])
+        try:
+            subprocess.check_call([self.ninja_program, '-f', self.filename])
+        except subprocess.CalledProcessError as err:
+            # avoid printing the setup.py stack trace because it obscures the
+            # C++ errors.
+            sys.stderr.write(str(err) + '\n')
+            sys.exit(1)
         compile_db_path = os.path.join(BUILD_DIR, '{}_compile_commands.json'.format(self.name))
         with open(compile_db_path, 'w') as compile_db:
             subprocess.check_call([self.ninja_program, '-f', self.filename,
