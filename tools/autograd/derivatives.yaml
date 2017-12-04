@@ -161,7 +161,8 @@
   self: other.cross(grad, dim)
   other: grad.cross(self, dim)
 
-- name: cumprod  # complicated
+- name: cumprod(Tensor self, int64_t dim)
+  self: not_implemented("cumprod")  # implemented in Python
 
 - name: cumsum(Tensor self, int64_t dim)
   self: cumsum_backward(grad, dim)
@@ -476,7 +477,8 @@
 - name: remainder(Tensor self, Tensor other)
   self: grad
 
-- name: renorm  # TODO!
+- name: renorm(Tensor self, Scalar p, int64_t dim, Scalar maxnorm)
+  self: renorm_backward(grad, self, p, dim, maxnorm)
 
 - name: RoiPooling2d_forward(Tensor input, Tensor rois, int64_t pooledHeight, int64_t pooledWidth, double spatialScale)
   input: RoiPooling2d_backward(input, rois, pooledHeight, pooledWidth, spatialScale, grad, result1)
