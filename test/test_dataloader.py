@@ -112,6 +112,18 @@ class SleepDataset(Dataset):
         return self.size
 
 
+class SeedDataset(Dataset):
+
+    def __init__(self, size):
+        self.size = size
+
+    def __getitem__(self, idx):
+        return torch.initial_seed()
+
+    def __len__(self):
+        return self.size
+
+
 class TestDataLoader(TestCase):
 
     def setUp(self):
@@ -219,6 +231,23 @@ class TestDataLoader(TestCase):
             self.assertNotEqual(p.exitcode, 0)
         finally:
             p.terminate()
+
+    def test_worker_seeding(self):
+        # worker has seed (main_proc_seed + worker_id + 1)
+        dataset = SeedDataset(4)
+        dataloader = DataLoader(dataset, batch_size=1, num_workers=1)
+        seed = torch.initial_seed()
+        batch = next(iter(dataloader))
+        self.assertEqual(seed + 1, batch[0])
+
+    def test_worker_init_fn(self):
+        # test custom init function
+        dataset = SeedDataset(4)
+        dataloader = DataLoader(dataset, batch_size=2, num_workers=2,
+                                worker_init_fn=lambda i: torch.manual_seed(12345))
+        for batch in dataloader:
+            self.assertEqual(12345, batch[0])
+            self.assertEqual(12345, batch[1])
 
     def test_shuffle(self):
         self._test_shuffle(DataLoader(self.dataset, shuffle=True))
