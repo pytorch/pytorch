@@ -607,6 +607,10 @@ def sigmoid(input):
     return _autograd_functions.Sigmoid.apply(input)
 
 
+def spatial_cross_map_lrn(input, size, alpha, beta, k):
+  return _functions.SpaTIalCrossMapLRN.apply(input, size, alpha, beta, k)
+
+
 # etc.
 
 def linear(input, weight, bias=None):
