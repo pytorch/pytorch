@@ -197,9 +197,6 @@ public:
   const Node * node() const {
     return node_;
   }
-  Scope* scope();
-  void setScope(Scope* scope);
-  std::string scopeName() const;
   Graph * owningGraph();
   const Graph * owningGraph() const;
   // TODO: make this more const correct
@@ -854,18 +851,6 @@ inline Value::Value(Node * node_, size_t offset_)
   unique_(node_->graph_->next_unique_++),
   stage_(node_->graph_->new_node_stage_) {
   node_->graph_->all_values.emplace(this);
-}
-
-inline Scope* Value::scope() {
-  return node()->scope();
-}
-
-inline void Value::setScope(Scope* scope) {
-  node()->setScope(scope);
-}
-
-inline std::string Value::scopeName() const {
-  return node()->scopeName();
 }
 
 inline Graph * Value::owningGraph() {
