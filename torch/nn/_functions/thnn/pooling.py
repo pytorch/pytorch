@@ -24,7 +24,7 @@ class MaxPool1d(Function):
             stride = kernel_size
         r = g.op("MaxPool", input,
                  kernel_shape_i=_single(kernel_size),
-                 pads_i=_single(padding),
+                 pads_i=_single(padding) * 2,
                  strides_i=_single(stride))
         return r, None
 
@@ -112,7 +112,7 @@ class MaxPool3d(Function):
             stride = kernel_size
         r = g.op("MaxPool", input,
                  kernel_shape_i=_triple(kernel_size),
-                 pads_i=_triple(padding),
+                 pads_i=_triple(padding) * 2,
                  strides_i=_triple(stride))
         return r, None
 
