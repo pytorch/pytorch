@@ -122,7 +122,7 @@ protected:
 // caching compiler
 struct FusionCompiler {
   TH_DISALLOW_COPY_AND_ASSIGN(FusionCompiler);
-  FusionCompiler() {}
+  FusionCompiler();
 
   // ignores types in graph, and uses specific contiguity annotations
   std::shared_ptr<CompiledFusionFunction> getOrCompile(AnnotatedGraph & agraph);
@@ -134,7 +134,11 @@ struct FusionCompiler {
   // this should not be used in the hot path of execution because it has to serialize
   // the graph each time
   void debugLaunchGraph(Graph & graph, bool is_cuda, at::ArrayRef<at::Tensor> inputs, at::ArrayRef<at::Tensor> outputs);
+  bool canCompileOnCPU() const {
+    return cxx.size() > 0;
+  }
 private:
+  std::string cxx; // compiler location
   std::unordered_map<std::string, std::shared_ptr<CompiledFusionFunction>> cache;
 };
 

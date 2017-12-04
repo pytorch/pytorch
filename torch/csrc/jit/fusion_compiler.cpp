@@ -620,21 +620,21 @@ private:
 static const std::string so_template = "/tmp/pytorch_fuserXXXXXX.so";
 static const std::string cpp_template = "/tmp/pytorch_fuserXXXXXX.cpp";
 
-// TODO: have python tell us what this is...
 static const std::string compile_string =
-  "g++ -O3 -g -march=native -std=c++11 -fPIC -shared \"${cpp_file}\" -o \"${so_file}\"";
+  "\"${cxx}\" -O3 -g -march=native -std=c++11 -fPIC -shared \"${cpp_file}\" -o \"${so_file}\"";
 
-static void runCompiler(const std::string & cpp, const std::string so) {
+static void runCompiler(const std::string & cxx, const std::string & cpp_file, const std::string & so_file) {
   TemplateEnv env;
-  env.s("cpp_file",cpp);
-  env.s("so_file",so);
+  env.s("cxx", cxx);
+  env.s("cpp_file",cpp_file);
+  env.s("so_file",so_file);
   std::string result = format(compile_string,env);
   int r = system(result.c_str());
   JIT_ASSERT(r == 0);
 }
 
 struct CPUFusionFunction : public CompiledFusionFunction {
-  CPUFusionFunction(const std::string & name, AnnotatedGraph & agraph)
+  CPUFusionFunction(const std::string & name, AnnotatedGraph & agraph, const std::string & cxx)
   : CompiledFusionFunction(name, agraph) {
     TempFile so_file(so_template, 3);
     TempFile cpp_file(cpp_template, 4);
@@ -644,7 +644,7 @@ struct CPUFusionFunction : public CompiledFusionFunction {
     compilation_unit = cu.str();
     cpp_file.write(compilation_unit);
     cpp_file.sync();
-    runCompiler(cpp_file.name(), so_file.name());
+    runCompiler(cxx, cpp_file.name(), so_file.name());
     so_lib.reset(new DynamicLibrary(so_file.name().c_str()));
     kernel = reinterpret_cast<void(*)(uint32_t, void**)>(so_lib->sym(name.c_str()));
   }
@@ -689,7 +689,8 @@ std::shared_ptr<CompiledFusionFunction> FusionCompiler::getOrCompile(AnnotatedGr
       throw std::runtime_error("cannot compile a CUDA fusion group, CUDA is not enabled.");
 #endif
     } else {
-      raw_func = new CPUFusionFunction(name, agraph);
+      JIT_ASSERT(canCompileOnCPU());
+      raw_func = new CPUFusionFunction(name, agraph, cxx);
     }
     it = cache.emplace(key_, std::shared_ptr<CompiledFusionFunction>(raw_func)).first;
   }
@@ -720,6 +721,28 @@ void FusionCompiler::debugLaunchGraph(Graph & graph, bool is_cuda, at::ArrayRef<
   }
   auto func = getOrCompile(agraph);
   func->launch_with_tensors(inputs, outputs);
+}
+
+static const std::string check_exists_string =
+  "which '${program}' > /dev/null";
+
+static bool programExists(const std::string & program) {
+  TemplateEnv env;
+  env.s("program", program);
+  std::string cmd = format(check_exists_string, env);
+  return 0 == system(cmd.c_str());
+}
+
+FusionCompiler::FusionCompiler() {
+  const char * cxx_env = getenv("CXX");
+  if(cxx_env != nullptr) {
+    cxx = cxx_env;
+  } else {
+    cxx = "g++";
+  }
+  if(!programExists(cxx)) {
+    cxx = "";
+  }
 }
 
 //TODO: thread safety

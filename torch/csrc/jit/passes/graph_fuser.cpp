@@ -1,4 +1,5 @@
 #include "torch/csrc/jit/passes/graph_fuser.h"
+#include "torch/csrc/jit/fusion_compiler.h"
 #include <unordered_map>
 
 namespace torch { namespace jit {
@@ -171,9 +172,11 @@ struct GraphFuser {
     // if the consumer allInputsAreThisProducer(consumer,producer)
     // we can move the consumer up into the producer.
     // but this requires better handling of merging fusion groups so it is not done now
+    bool consumer_is_cuda = isCuda(consumer);
     return isFusable(producer->node()) &&
       allUsersAreThisConsumerOrOccurAfterIt(consumer, producer) &&
-      isCuda(consumer) == isCuda(producer->node());
+      consumer_is_cuda == isCuda(producer->node()) &&
+      (consumer_is_cuda || sharedFusionCompiler().canCompileOnCPU());
   }
 
   // insert a producer node into a consuming fusion group.
