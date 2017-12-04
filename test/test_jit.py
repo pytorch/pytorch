@@ -69,6 +69,23 @@ class TestJit(TestCase):
         torch._C._jit_pass_lint(trace)
         self.assertExpected(str(trace))
 
+    def test_scopes(self):
+        x = Variable(torch.Tensor([0.4]), requires_grad=True)
+        y = Variable(torch.Tensor([0.7]), requires_grad=True)
+
+        def f(x, y):
+            out = x + y
+            with torch.jit.scope('Foo', out):
+                out = x * out
+                with torch.jit.scope('Bar', out):
+                    out = torch.tanh(out)
+                out = torch.sigmoid(out)
+            return out
+
+        trace, z = torch.jit.trace(f, (x, y), nderivs=0)
+        torch._C._jit_pass_lint(trace)
+        self.assertExpected(str(trace))
+
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     def test_lstm_fusion(self):
         input = Variable(torch.randn(3, 10).float().cuda())

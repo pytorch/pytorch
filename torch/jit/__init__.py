@@ -19,6 +19,30 @@ import copy
 _flatten = torch._C._jit_flatten
 
 
+# This global variable is set when we are tracing a *forwards* computation.
+# It is intended to be a cheap way to test if tracing has occurred, before
+# doing the slower path using `get_tracing_state` (below.)
+_tracing = False
+
+
+def get_tracing_state(args):
+    if not torch._C._is_tracing(args):
+        return None
+    return torch._C._get_tracing_state(args)
+
+
+@contextlib.contextmanager
+def scope(scope_name, *vars):
+    tracing_state = get_tracing_state(vars)
+    if tracing_state:
+        tracing_state.push_scope(scope_name)
+    try:
+        yield
+    finally:
+        if tracing_state:
+            tracing_state.pop_scope()
+
+
 def compile(arg=None, nderivs=1, optimize=True, enabled=True):
     """
     Decorator which marks a function or module class as eligible for
@@ -237,13 +261,16 @@ class TracedModule(Module):
         self.nderivs = nderivs
 
     def forward(self, *args):
+        global _tracing
         in_vars = _flatten(args)
         # NOTE: use full state, because we need it for BatchNorm export
         # This differs from the compiler path, which doesn't support it at the moment.
         module_state = list(self.state_dict(keep_vars=True).values())
         trace = torch._C._tracer_enter(in_vars + module_state, self.nderivs)
+        _tracing = True
         out = self.inner(*args)
         out_vars = _flatten(out)
+        _tracing = False
         torch._C._tracer_exit(out_vars)
         return trace, out
 
