@@ -219,6 +219,8 @@ class DataLoaderIter(object):
             # prime the prefetch loop
             for _ in range(2 * self.num_workers):
                 self._put_indices()
+        else:
+            self.num_workers = 0
 
     def __len__(self):
         return len(self.batch_sampler)
