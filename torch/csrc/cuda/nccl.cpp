@@ -47,13 +47,23 @@ struct NcclCommList {
   }
 };
 
+struct AutoNcclGroup {
+  AutoNcclGroup() {
+#if defined(NCCL_MAJOR) && (NCCL_MAJOR >= 2)
+    CHECK(ncclGroupStart());
+#endif
+  }
+  ~AutoNcclGroup() {
+#if defined(NCCL_MAJOR) && (NCCL_MAJOR >= 2)
+    CHECK(ncclGroupEnd());
+#endif
+  }
+};
+
 // accesses to this object have to be guarded by THC's CudaFreeMutex
 std::unordered_map<std::string, NcclCommList> _communicators;
 
-static ArrayRef<ncclComm_t> _get_communicators(TensorList inputs, ArrayRef<ncclComm_t> user_comms) {
-  if (user_comms.size() == inputs.size()) {
-    return user_comms;
-  }
+static ArrayRef<ncclComm_t> _get_communicators(TensorList inputs) {
   std::stringstream hash_stream;
   std::vector<int> devs;
   for (auto& input : inputs) {
@@ -70,7 +80,7 @@ static ArrayRef<ncclComm_t> _get_communicators(TensorList inputs, ArrayRef<ncclC
   }
 }
 
-static void _check_inputs(std::vector<at::Tensor> &inputs, std::vector<at::Tensor> &outputs, int input_multiplier, int output_multiplier) {
+static void _check_inputs(TensorList inputs, TensorList outputs, int input_multiplier, int output_multiplier) {
   // len(inputs) == len(outputs)
   size_t len = inputs.size();
 
@@ -143,18 +153,6 @@ static ncclDataType_t _get_data_type(const Type& type) {
   case at::kByte    : return ncclChar;
   default: throw std::runtime_error("Unconvertible NCCL type");
   }
-}
-
-static void _start_group() {
-#if defined(NCCL_MAJOR) && (NCCL_MAJOR >= 2)
-  CHECK(ncclGroupStart());
-#endif
-}
-
-static void _end_group() {
-#if defined(NCCL_MAJOR) && (NCCL_MAJOR >= 2)
-  CHECK(ncclGroupEnd());
-#endif
 }
 
 PyObject * THCPModule_nccl_version(PyObject *self, PyObject *args) {
@@ -272,9 +270,9 @@ PyObject * THCPModule_nccl_reduce(PyObject *self, PyObject *args) {
 
     int64_t count = inputs[0].numel();
     std::lock_guard<std::mutex> lock(*(THCCachingAllocator_getCudaFreeMutex()));
-    auto comms = _get_communicators(inputs, user_comms);
+    auto comms = user_comms.empty() ? _get_communicators(inputs) : ArrayRef<ncclComm_t>(user_comms);
     AutoGPU gpu_guard;
-    _start_group();
+    AutoNcclGroup nccl_group_guard;
     for (size_t i = 0; i < len; i++) {
       int device = inputs[i].get_device();
       gpu_guard.setDevice(device);
@@ -282,7 +280,6 @@ PyObject * THCPModule_nccl_reduce(PyObject *self, PyObject *args) {
       CHECK(ncclReduce(inputs[i].data_ptr(), outputs[i].data_ptr(),
            count, data_type, (ncclRedOp_t) op, root, comms[i], stream));
     }
-    _end_group();
   });
 
   Py_RETURN_NONE;
@@ -315,9 +312,9 @@ PyObject * THCPModule_nccl_all_reduce(PyObject *self, PyObject *args) {
 
     int64_t count = inputs[0].numel();
     std::lock_guard<std::mutex> lock(*(THCCachingAllocator_getCudaFreeMutex()));
-    auto comms = _get_communicators(inputs, user_comms);
+    auto comms = user_comms.empty() ? _get_communicators(inputs) : ArrayRef<ncclComm_t>(user_comms);
     AutoGPU gpu_guard;
-    _start_group();
+    AutoNcclGroup nccl_group_guard;
     for (size_t i = 0; i < len; i++) {
       int device = inputs[i].get_device();
       gpu_guard.setDevice(device);
@@ -325,7 +322,6 @@ PyObject * THCPModule_nccl_all_reduce(PyObject *self, PyObject *args) {
       CHECK(ncclAllReduce(inputs[i].data_ptr(), outputs[i].data_ptr(),
           count, data_type, (ncclRedOp_t) op, comms[i], stream));
     }
-    _end_group();
   });
 
   Py_RETURN_NONE;
@@ -356,16 +352,15 @@ PyObject * THCPModule_nccl_broadcast(PyObject *self, PyObject *args) {
 
     int64_t count = inputs[0].numel();
     std::lock_guard<std::mutex> lock(*(THCCachingAllocator_getCudaFreeMutex()));
-    auto comms = _get_communicators(inputs, user_comms);
+    auto comms = user_comms.empty() ? _get_communicators(inputs) : ArrayRef<ncclComm_t>(user_comms);
     AutoGPU gpu_guard;
-    _start_group();
+    AutoNcclGroup nccl_group_guard;
     for (size_t i = 0; i < len; i++) {
       int device = inputs[i].get_device();
       gpu_guard.setDevice(device);
       auto stream = (streams[i] == NULL) ? NULL : streams[i]->stream;
       CHECK(ncclBcast(inputs[i].data_ptr(), count, data_type, root, comms[i], stream));
     }
-    _end_group();
   });
 
   Py_RETURN_NONE;
@@ -395,9 +390,9 @@ PyObject * THCPModule_nccl_all_gather(PyObject *self, PyObject *args) {
 
     int64_t count = inputs[0].numel();
     std::lock_guard<std::mutex> lock(*(THCCachingAllocator_getCudaFreeMutex()));
-    auto comms = _get_communicators(inputs, user_comms);
+    auto comms = user_comms.empty() ? _get_communicators(inputs) : ArrayRef<ncclComm_t>(user_comms);
     AutoGPU gpu_guard;
-    _start_group();
+    AutoNcclGroup nccl_group_guard;
     for (size_t i = 0; i < len; i++) {
       int device = inputs[i].get_device();
       gpu_guard.setDevice(device);
@@ -410,7 +405,6 @@ PyObject * THCPModule_nccl_all_gather(PyObject *self, PyObject *args) {
         outputs[i].data_ptr(), comms[i], stream));
     #endif
     }
-    _end_group();
   });
 
   Py_RETURN_NONE;
@@ -441,9 +435,9 @@ PyObject * THCPModule_nccl_reduce_scatter(PyObject *self, PyObject *args) {
 
     int64_t count = inputs[0].numel() / len;
     std::lock_guard<std::mutex> lock(*(THCCachingAllocator_getCudaFreeMutex()));
-    auto comms = _get_communicators(inputs, user_comms);
+    auto comms = user_comms.empty() ? _get_communicators(inputs) : ArrayRef<ncclComm_t>(user_comms);
     AutoGPU gpu_guard;
-    _start_group();
+    AutoNcclGroup nccl_group_guard;
     for (size_t i = 0; i < len; i++) {
       int device = inputs[i].get_device();
       gpu_guard.setDevice(device);
@@ -451,7 +445,6 @@ PyObject * THCPModule_nccl_reduce_scatter(PyObject *self, PyObject *args) {
       CHECK(ncclReduceScatter(inputs[i].data_ptr(), outputs[i].data_ptr(),
           count, data_type, (ncclRedOp_t) op, comms[i], stream));
     }
-    _end_group();
   });
 
   Py_RETURN_NONE;
