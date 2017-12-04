@@ -65,8 +65,8 @@ class TestTensorPackOps(hu.HypothesisTestCase):
         return pack_segments_ref
 
     @given(
-        num_seq=st.integers(10, 1500),
-        cell_size=st.integers(1, 100),
+        num_seq=st.integers(10, 500),
+        cell_size=st.integers(1, 10),
         **hu.gcs
     )
     def test_pack_ops(self, num_seq, cell_size, gc, dc):
