@@ -123,6 +123,7 @@ function build_nccl() {
    mkdir -p build/nccl
    cd build/nccl
    ${CMAKE_VERSION} ../../nccl -DCMAKE_MODULE_PATH="$BASE_DIR/cmake/FindCUDA" \
+               ${CMAKE_GENERATOR} \
                -DCMAKE_BUILD_TYPE=Release \
                -DCMAKE_INSTALL_PREFIX="$INSTALL_DIR" \
                -DCMAKE_C_FLAGS="$C_FLAGS" \
