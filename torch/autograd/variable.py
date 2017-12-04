@@ -227,6 +227,26 @@ class Variable(_C._VariableBase):
     def cuda(self, device=None, async=False):
         return CudaTransfer.apply(self, device, async)
 
+    def is_pinned(self):
+        r"""Returns true if this tensor resides in pinned memory"""
+        storage = self.storage()
+        return storage.is_pinned() if storage else False
+
+    def is_shared(self):
+        r"""Checks if tensor is in shared memory.
+
+        This is always ``True`` for CUDA tensors.
+        """
+        return self.storage().is_shared()
+
+    def share_memory_(self):
+        r"""Moves the underlying storage to shared memory.
+
+        This is a no-op if the underlying storage is already in shared memory
+        and for CUDA tensors. Tensors in shared memory cannot be resized.
+        """
+        self.storage().share_memory_()
+
     def prod(self, dim=None, keepdim=None):
         return Prod.apply(self, dim, keepdim)
 
