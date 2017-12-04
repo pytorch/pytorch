@@ -89,6 +89,7 @@ void ToONNX(std::shared_ptr<tracer::TracingState>& state) {
         // Copy over source location information to all nodes created by
         // the symbolic
         outputs[i]->setSourceLocation(node->getSourceLocation());
+        outputs[i]->setScope(node->scope());
         env[old] = outputs[i];
       } else {
         // Null output means that the ONNX op doesn't have outputs corresponding
@@ -144,10 +145,6 @@ void ToONNX(std::shared_ptr<tracer::TracingState>& state) {
          << ": expected to return list of op nodes, instead received type ''"
          << py::str(raw_output.get_type()) << "': " << py::str(raw_output);
       throw std::runtime_error(ss.str());
-    }
-
-    for (auto& el: outputs) {
-      el->setScope(n->scope());
     }
 
     setOutputs(op_name, n, outputs);
@@ -225,7 +222,7 @@ void ToONNX(std::shared_ptr<tracer::TracingState>& state) {
       if (auto fn = std::dynamic_pointer_cast<autograd::HasSymbolic>(value->fn)) {
         auto outputs = fn->symbolic(&ctx, fmap(node->inputs(), envFn));
         for (auto& el: outputs) {
-          el->setScope(node->scope());
+          el->node()->setScope(node->scope());
         }
         setOutputs(value->name(), node, outputs);
       } else {
