@@ -276,7 +276,7 @@ def max_pool2d(g, input, kernel_size, stride, padding, dilation, ceil_mode):
         stride = kernel_size
     r = g.op("MaxPool", input,
              kernel_shape_i=_pair(kernel_size),
-             pads_i=_pair(padding),
+             pads_i=_pair(padding) * 2,
              strides_i=_pair(stride))
     return r, None
 
@@ -290,7 +290,7 @@ def avg_pool2d(g, input, kernel_size, stride, padding, ceil_mode, count_include_
     return g.op("AveragePool", input,
                 kernel_shape_i=_pair(kernel_size),
                 strides_i=_pair(stride),
-                pads_i=_pair(padding))
+                pads_i=_pair(padding) * 2)
 
 
 def avg_pool3d(g, input, kernel_size, stride, padding, ceil_mode, count_include_pad):
