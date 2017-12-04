@@ -74,6 +74,8 @@ _(shape) \
 _(axes) \
 _(group) \
 _(inplace) \
+_(transA) \
+_(transB) \
 _(other)
 
 enum BuiltinSymbol {
