@@ -22,7 +22,7 @@ def RNNTanhCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
 
 
 def _match_hidden_with_input(input, hidden):
-    '''The CUDNN backend doesn't support broadcasting, so this function
+    '''The backend fused kernels don't support broadcasting, so this function
     broadcasts the hidden batch size to match the input batch size, if
     possible'''
     if isinstance(hidden, tuple):
