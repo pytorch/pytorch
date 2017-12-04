@@ -3189,22 +3189,31 @@ See `?ormqr LAPACK documentation`_ for further details.
 
 """)
 
-add_docstr(torch._C.potrf,
-           r"""
-potrf(a, out=None)
-potrf(a, upper, out=None)
+add_docstr(torch._C.potrf, r"""
+potrf(a, upper=True, out=None) -> Tensor
 
-Computes the Cholesky decomposition of a positive semidefinite
-matrix :attr:`a`: returns matrix `u`
-If `upper` is ``True`` or not provided, `u` is upper triangular
-such that :math:`a = u^T u`.
-If `upper` is ``False``, `u` is lower triangular
-such that :math:`a = u u^T`.
+Computes the Cholesky decomposition of a symmetric positive-definite
+matrix :attr:`A`.
+
+If :attr:`upper` is ``True``, the returned matrix `U` is upper-triangular, and
+the decomposition has the form:
+
+.. math::
+
+  A = U^TU
+
+If :attr:`upper` is ``False``, the returned matrix `L` is lower-triangular, and
+the decomposition has the form:
+
+.. math::
+
+    A = LL^T
 
 Args:
-    a (Tensor): the input 2-D tensor, a symmetric positive semidefinite matrix
-    upper (bool, optional): whether to return a upper (default) or lower triangular matrix
-    out (Tensor, optional): the output tensor for `u`
+    a (Tensor): the input 2-D tensor, a symmetric positive-definite matrix
+    upper (bool, optional): flag that indicates whether to return the
+                            upper or lower triangular matrix
+    out (Tensor, optional): the output matrix
 
 Example::
 
@@ -3225,7 +3234,7 @@ Example::
      0.0000  0.0000  0.6451
     [torch.FloatTensor of size 3x3]
 
-    >>> torch.mm(u.t(),u)
+    >>> torch.mm(u.t(), u)
 
      2.3563  3.2318 -0.9406
      3.2318  4.9557 -2.1618
@@ -3234,10 +3243,8 @@ Example::
 
 """)
 
-add_docstr(torch._C.potri,
-           r"""
-potri(u, out=None)
-potri(u, upper, out=None)
+add_docstr(torch._C.potri, r"""
+potri(u, upper=True, out=None) -> Tensor
 
 Computes the inverse of a positive semidefinite matrix given its
 Cholesky factor :attr:`u`: returns matrix `inv`
@@ -3280,10 +3287,8 @@ Example::
 
 """)
 
-add_docstr(torch._C.potrs,
-           r"""
-potrs(b, u, out=None)
-potrs(b, u, upper, out=None)
+add_docstr(torch._C.potrs, r"""
+potrs(b, u, upper=True, out=None) -> Tensor
 
 Solves a linear system of equations with a positive semidefinite
 matrix to be inverted given its given a Cholesky factor
@@ -3498,10 +3503,8 @@ Example::
 
 """)
 
-add_docstr(torch._C.pstrf,
-           r"""
-pstrf(a, out=None)
-pstrf(a, upper, out=None)
+add_docstr(torch._C.pstrf, r"""
+pstrf(a, upper=True, out=None) -> (Tensor, Tensor)
 
 Computes the pivoted Cholesky decomposition of a positive semidefinite
 matrix :attr:`a`: returns matrices `u` and `piv`.

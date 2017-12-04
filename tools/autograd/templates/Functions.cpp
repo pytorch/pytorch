@@ -259,6 +259,9 @@ Tensor potrf_backward(Tensor grad, bool upper, Tensor L) {
   std::tie(S, std::ignore) = at::gesv(P + P.t(), L.t());
   std::tie(S, std::ignore) = at::gesv(S.t(), L.t());
   S = phi(S);
+  if (upper) {
+    S = S.t();
+  }
   return S;
 }
 
