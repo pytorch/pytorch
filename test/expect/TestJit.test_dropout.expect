@@ -1,4 +1,4 @@
 graph(%0 : Double(2, 2)) {
-  %1 : Double(2, 2), %2 : Handle = ^Dropout(0.6, True, False)(%0)
+  %1 : Double(2, 2), %2 : Handle = ^Dropout(0.6, True, False)(%0), scope: Dropout
   return (%1);
 }

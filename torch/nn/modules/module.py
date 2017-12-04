@@ -1,4 +1,4 @@
-from collections import OrderedDict
+from collections import OrderedDict, Iterable
 import functools
 
 import torch
@@ -319,10 +319,42 @@ class Module(object):
         self._forward_hooks[handle.id] = hook
         return handle
 
+    def _tracing_name(self, tracing_state):
+        if not tracing_state._traced_module_stack:
+            return None
+        module = tracing_state._traced_module_stack[-1]
+        for name, child in module.named_children():
+            if child is self:
+                return name
+        return None
+
+    def _slow_forward(self, *input, **kwargs):
+        input_vars = tuple(torch.autograd.function._iter_variables(input))
+        tracing_state = torch.jit.get_tracing_state(input_vars)
+        if not tracing_state:
+            return self.forward(*input, **kwargs)
+        if not hasattr(tracing_state, '_traced_module_stack'):
+            tracing_state._traced_module_stack = []
+        name = self._tracing_name(tracing_state)
+        if name:
+            tracing_state.push_scope('%s[%s]' % (self.__class__.__name__, name))
+        else:
+            tracing_state.push_scope(self.__class__.__name__)
+        tracing_state._traced_module_stack.append(self)
+        try:
+            result = self.forward(*input, **kwargs)
+        finally:
+            tracing_state.pop_scope()
+            tracing_state._traced_module_stack.pop()
+        return result
+
     def __call__(self, *input, **kwargs):
         for hook in self._forward_pre_hooks.values():
             hook(self, input)
-        result = self.forward(*input, **kwargs)
+        if torch.jit._tracing:
+            result = self._slow_forward(*input, **kwargs)
+        else:
+            result = self.forward(*input, **kwargs)
         for hook in self._forward_hooks.values():
             hook_result = hook(self, input, result)
             if hook_result is not None:
