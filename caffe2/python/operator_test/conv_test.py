@@ -199,7 +199,7 @@ class TestConvolution(hu.HypothesisTestCase):
                                    batch_size, order, engine, use_bias, gc, dc):
         dkernel = dilation * (kernel - 1) + 1
 
-        if gc.device_type == caffe2_pb2.CUDA and engine == 'CUDNN':
+        if engine == 'CUDNN':
             assume(_cudnn_supports(dilation=(dilation > 1),
                                    nhwc=(order == 'NHWC'),
                                    backward=True))
