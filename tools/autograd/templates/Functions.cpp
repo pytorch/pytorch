@@ -186,6 +186,7 @@ Tensor renorm_backward(const Tensor & grad, const Tensor & self, Scalar p, int64
   auto grad_norm = unflatten(maxnorm * invnorm * (grad_flat - invnorm * nb));
   auto norm = unflatten(norm_flat.expand_as(self_flat));
 
+  // TODO: remove the detach once comparison ops no longer require grad
   auto mask = Variable(norm < maxnorm).detach();
   return grad * mask.type_as(grad) + grad_norm * (1 - mask).type_as(grad);
 }
