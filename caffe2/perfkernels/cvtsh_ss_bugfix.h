@@ -22,7 +22,7 @@
 #endif
 
 // Regular clang was fixed in 3.9
-#if defined(__clang__) && (__clang_major__ < 4) && (__clang__minor__ < 9)
+#if defined(__clang__) && (__clang_major__ < 4) && (__clang_minor__ < 9)
 #define __CLANG_NEED_FIX 1
 #endif
 
