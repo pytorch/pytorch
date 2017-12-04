@@ -7,6 +7,8 @@ namespace at {
 struct Type;
 
 struct Storage {
+  static const char RESIZABLE = 2;
+
   Storage() {}
   Storage(const Storage& other) = delete;
   void operator=(const Storage&) = delete;
@@ -32,6 +34,8 @@ struct Storage {
   virtual Scalar get(std::size_t ind) = 0;
   virtual Scalar fast_get(std::size_t ind) = 0;
 
+  virtual void set_flag(char flag) = 0;
+  virtual void clear_flag(char flag) = 0;
 };
 
 } // namespace at
