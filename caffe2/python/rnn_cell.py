@@ -255,6 +255,7 @@ class LSTMCell(RNNCell):
         self.forget_bias = float(forget_bias)
         self.memory_optimization = memory_optimization
         self.drop_states = drop_states
+        self.gates_size = 4 * self.hidden_size
 
     def _apply(
         self,
@@ -285,7 +286,7 @@ class LSTMCell(RNNCell):
             fc_input,
             self.scope('gates_t'),
             dim_in=fc_input_dim,
-            dim_out=4 * self.hidden_size,
+            dim_out=self.gates_size,
             axis=2,
         )
         brew.sum(model, [gates_t, input_t], gates_t)
@@ -305,6 +306,7 @@ class LSTMCell(RNNCell):
         model.net.AddExternalOutputs(hidden_t, cell_t)
         if self.memory_optimization:
             self.recompute_blobs = [gates_t]
+
         return hidden_t, cell_t
 
     def get_input_params(self):
@@ -325,7 +327,7 @@ class LSTMCell(RNNCell):
             input_blob,
             self.scope('i2h'),
             dim_in=self.input_size,
-            dim_out=4 * self.hidden_size,
+            dim_out=self.gates_size,
             axis=2,
         )
 
@@ -334,6 +336,112 @@ class LSTMCell(RNNCell):
 
     def get_output_dim(self):
         return self.hidden_size
+
+
+class LayerNormLSTMCell(RNNCell):
+
+    def __init__(
+        self,
+        input_size,
+        hidden_size,
+        forget_bias,
+        memory_optimization,
+        drop_states=False,
+        initializer=None,
+        **kwargs
+    ):
+        super(LayerNormLSTMCell, self).__init__(
+            initializer=initializer, **kwargs
+        )
+        self.initializer = initializer or LSTMInitializer(
+            hidden_size=hidden_size
+        )
+
+        self.input_size = input_size
+        self.hidden_size = hidden_size
+        self.forget_bias = float(forget_bias)
+        self.memory_optimization = memory_optimization
+        self.drop_states = drop_states
+        self.gates_size = 4 * self.hidden_size
+
+    def _apply(
+        self,
+        model,
+        input_t,
+        seq_lengths,
+        states,
+        timestep,
+        extra_inputs=None,
+    ):
+        hidden_t_prev, cell_t_prev = states
+
+        fc_input = hidden_t_prev
+        fc_input_dim = self.hidden_size
+
+        if extra_inputs is not None:
+            extra_input_blobs, extra_input_sizes = zip(*extra_inputs)
+            fc_input = brew.concat(
+                model,
+                [hidden_t_prev] + list(extra_input_blobs),
+                self.scope('gates_concatenated_input_t'),
+                axis=2,
+            )
+            fc_input_dim += sum(extra_input_sizes)
+
+        gates_t = brew.fc(
+            model,
+            fc_input,
+            self.scope('gates_t'),
+            dim_in=fc_input_dim,
+            dim_out=self.gates_size,
+            axis=2,
+        )
+        brew.sum(model, [gates_t, input_t], gates_t)
+
+        gates_t, _, _ = brew.layer_norm(
+            model,
+            self.scope('gates_t'),
+            self.scope('gates_t_norm'),
+            dim_in=self.gates_size,
+            axis=-1,
+        )
+
+        hidden_t, cell_t = model.net.LSTMUnit(
+            [
+                hidden_t_prev,
+                cell_t_prev,
+                gates_t,
+                seq_lengths,
+                timestep,
+            ],
+            list(self.get_state_names()),
+            forget_bias=self.forget_bias,
+            drop_states=self.drop_states,
+        )
+        model.net.AddExternalOutputs(hidden_t, cell_t)
+        if self.memory_optimization:
+            self.recompute_blobs = [gates_t]
+
+        return hidden_t, cell_t
+
+    def get_input_params(self):
+        return {
+            'weights': self.scope('i2h') + '_w',
+            'biases': self.scope('i2h') + '_b',
+        }
+
+    def prepare_input(self, model, input_blob):
+        return brew.fc(
+            model,
+            input_blob,
+            self.scope('i2h'),
+            dim_in=self.input_size,
+            dim_out=self.gates_size,
+            axis=2,
+        )
+
+    def get_state_names(self):
+        return (self.scope('hidden_t'), self.scope('cell_t'))
 
 
 class MILSTMCell(LSTMCell):
@@ -367,29 +475,29 @@ class MILSTMCell(LSTMCell):
             fc_input,
             self.scope('prev_t'),
             dim_in=fc_input_dim,
-            dim_out=4 * self.hidden_size,
+            dim_out=self.gates_size,
             axis=2,
         )
 
         # defining initializers for MI parameters
         alpha = model.create_param(
             self.scope('alpha'),
-            shape=[4 * self.hidden_size],
+            shape=[self.gates_size],
             initializer=Initializer('ConstantFill', value=1.0),
         )
         beta_h = model.create_param(
             self.scope('beta1'),
-            shape=[4 * self.hidden_size],
+            shape=[self.gates_size],
             initializer=Initializer('ConstantFill', value=1.0),
         )
         beta_i = model.create_param(
             self.scope('beta2'),
-            shape=[4 * self.hidden_size],
+            shape=[self.gates_size],
             initializer=Initializer('ConstantFill', value=1.0),
         )
         b = model.create_param(
             self.scope('b'),
-            shape=[4 * self.hidden_size],
+            shape=[self.gates_size],
             initializer=Initializer('ConstantFill', value=0.0),
         )
 
@@ -1187,6 +1295,7 @@ def _LSTM(
 
 LSTM = functools.partial(_LSTM, LSTMCell)
 MILSTM = functools.partial(_LSTM, MILSTMCell)
+LayerNormLSTM = functools.partial(_LSTM, LayerNormLSTMCell)
 
 
 class UnrolledCell(RNNCell):
