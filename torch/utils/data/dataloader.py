@@ -361,6 +361,10 @@ class DataLoader(object):
         if sampler is not None and shuffle:
             raise ValueError('sampler is mutually exclusive with shuffle')
 
+        if self.num_workers < 0:
+            raise ValueError('num_workers cannot be negative; '
+                             'use num_workers=0 to disable multiprocessing.')
+
         if batch_sampler is None:
             if sampler is None:
                 if shuffle:
