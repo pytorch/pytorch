@@ -355,8 +355,8 @@ def _load(f, map_location, pickle_module):
                     ndim, = struct.unpack('<i', f.read(4))
                     # skip next 4 bytes; legacy encoding treated ndim as 8 bytes
                     f.read(4)
-                    size = struct.unpack('<{}'.format('q' * ndim), f.read(8 * ndim))
-                    stride = struct.unpack('<{}'.format('q' * ndim), f.read(8 * ndim))
+                    size = struct.unpack('<{}q'.format(ndim), f.read(8 * ndim))
+                    stride = struct.unpack('<{}q'.format(ndim), f.read(8 * ndim))
                     storage_offset, = struct.unpack('<q', f.read(8))
                     tensor = tensor_type().set_(storage, storage_offset, size, stride)
                     deserialized_objects[key] = tensor
