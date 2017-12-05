@@ -1,51 +1,3 @@
-#if !IS_DISTRIBUTED
-[[
-  name: THPTensor_(writeMetadata)
-  python_name: _write_metadata
-  defined_if: "!IS_DISTRIBUTED"
-  only_register: True
-]]
-PyObject * THPTensor_(writeMetadata)(THPTensor *self, PyObject *args)
-{
-  if (!args || PyTuple_Size(args) != 1) {
-    THPUtils_invalidArguments(args, NULL, "_write_metadata", 1, "a single file object");
-    return NULL;
-  }
-  int fd = PyObject_AsFileDescriptor(PyTuple_GET_ITEM(args, 0));
-  if (fd == -1) {
-    THPUtils_setError("write_file could not retrieve file descriptor from given object");
-    return NULL;
-  }
-  THPTensor_(writeMetadataRaw)(self->cdata, fd);
-  Py_RETURN_NONE;
-}
-
-[[
-  name: THPTensor_(newWithMetadataFile)
-  python_name: _new_with_metadata_file
-  defined_if: "!IS_DISTRIBUTED"
-  only_register: True
-  method_flags: METH_STATIC
-]]
-PyObject * THPTensor_(newWithMetadataFile)(PyObject *_null, PyObject *args)
-{
-  if (!args || PyTuple_Size(args) != 2 ||
-        !THPStorage_(Check)(PyTuple_GET_ITEM(args, 1))) {
-    THPUtils_invalidArguments(args, NULL, "_new_with_metadata_file", 1,
-        "single file object and a storage object");
-    return NULL;
-  }
-  int fd = PyObject_AsFileDescriptor(PyTuple_GET_ITEM(args, 0));
-  if (fd == -1) {
-    THPUtils_setError("write_file could not retrieve file descriptor from given object");
-    return NULL;
-  }
-  THStorage *storage = ((THPStorage*)PyTuple_GET_ITEM(args, 1))->cdata;
-  return THPTensor_(New)(THPTensor_(newWithMetadataFileRaw)(fd, storage));
-}
-#endif
-
-
 [[
   name: THPTensor_(toNumpy)
   python_name: numpy
@@ -121,5 +73,3 @@ PyObject * THPTensor_(toNumpy)(THPTensor *self, PyObject *args) {
   return array.release();
 #endif
 }
-
-

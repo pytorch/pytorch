@@ -4,27 +4,6 @@
 
 #define SYSCHECK(call) { ssize_t __result = call; if (__result < 0) throw std::system_error((int) __result, std::system_category()); }
 
-void THPTensor_(writeMetadataRaw)(THTensor *self, int fd)
-{
-  SYSCHECK(write(fd, &self->nDimension, sizeof(int64_t)));
-  SYSCHECK(write(fd, self->size, sizeof(*self->size) * self->nDimension));
-  SYSCHECK(write(fd, self->stride, sizeof(*self->stride) * self->nDimension));
-  SYSCHECK(write(fd, &self->storageOffset, sizeof(self->storageOffset)));
-}
-
-THTensor * THPTensor_(newWithMetadataFileRaw)(int fd, THStorage *storage)
-{
-  THTensorPtr tensor(THTensor_(new)(LIBRARY_STATE_NOARGS));
-  SYSCHECK(read(fd, &tensor->nDimension, sizeof(int64_t)));
-  tensor->size = (int64_t*)THAlloc(tensor->nDimension * sizeof(*tensor->size));
-  tensor->stride = (int64_t*)THAlloc(tensor->nDimension * sizeof(*tensor->stride));
-  SYSCHECK(read(fd, tensor->size, sizeof(*tensor->size) * tensor->nDimension));
-  SYSCHECK(read(fd, tensor->stride, sizeof(*tensor->stride) * tensor->nDimension));
-  SYSCHECK(read(fd, &tensor->storageOffset, sizeof(tensor->storageOffset)));
-  THStorage_(retain)(LIBRARY_STATE storage);
-  tensor->storage = storage;
-  return tensor.release();
-}
 
 void THPStorage_(writeFileRaw)(THStorage *self, int fd)
 {
