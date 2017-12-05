@@ -56,7 +56,7 @@ PyObject * THPVariable_numpy(PyObject* pyself, PyObject* arg) {
       strides.data(),
       self.data_ptr(),
       0,
-      NPY_ARRAY_ALIGNED | NPY_ARRAY_WRITEABLE | NPY_ARRAY_C_CONTIGUOUS,
+      NPY_ARRAY_ALIGNED | NPY_ARRAY_WRITEABLE,
       nullptr));
   if (!array) return NULL;
 

@@ -4552,6 +4552,7 @@ class TestTorch(TestCase):
             x = torch.randn(sz1, sz2).mul(255).type(tp)
             y = x.numpy()
             check2d(x, y)
+            self.assertTrue(y.flags['C_CONTIGUOUS'])
 
             # with storage offset
             xm = torch.randn(sz1 * 2, sz2).mul(255).type(tp)
@@ -4559,11 +4560,14 @@ class TestTorch(TestCase):
             y = x.numpy()
             self.assertTrue(x.storage_offset() > 0)
             check2d(x, y)
+            self.assertTrue(y.flags['C_CONTIGUOUS'])
 
-            # non-contiguous 2D
-            x = torch.randn(sz2, sz1).t().mul(255).type(tp)
-            y = x.numpy()
-            check2d(x, y)
+            if tp != 'torch.HalfTensor':
+                # non-contiguous 2D
+                x = torch.randn(sz2, sz1).mul(255).type(tp).t()
+                y = x.numpy()
+                check2d(x, y)
+                self.assertFalse(y.flags['C_CONTIGUOUS'])
 
             # with storage offset
             xm = torch.randn(sz2 * 2, sz1).mul(255).type(tp)

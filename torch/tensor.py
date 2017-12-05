@@ -407,6 +407,9 @@ class _TensorBase(object):
     def data(self):
         raise RuntimeError('cannot call .data on a torch.Tensor: did you intend to use autograd.Variable?')
 
+    def numpy(self):
+        return torch.autograd.Variable(self).numpy()
+
     # Numpy array interface, to support `numpy.asarray(tensor) -> ndarray`
     def __array__(self, dtype=None):
         if dtype is None:
