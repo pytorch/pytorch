@@ -196,7 +196,7 @@ class emit_nvtx(object):
         ...         model(x)
     """
     def __init__(self, enabled=True):
-        self.enabled = True
+        self.enabled = enabled
         self.entered = False
 
     def __enter__(self):
