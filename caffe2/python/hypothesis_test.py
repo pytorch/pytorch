@@ -1754,7 +1754,7 @@ class TestOperators(hu.HypothesisTestCase):
 
     @given(a=hu.tensor(elements=st.floats(allow_nan=True)),
            value=st.floats(min_value=-10, max_value=10),
-           **hu.gcs_cpu_only)
+           **hu.gcs)
     def test_replace_nan(self, a, value, gc, dc):
         def ref(data):
             out = np.copy(data)

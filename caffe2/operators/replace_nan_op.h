@@ -36,6 +36,9 @@ class ReplaceNaNOp final : public Operator<Context> {
   }
 
   template <typename T>
+  void ReplaceNaN(const T& value, const TIndex size, const T* X, T* Y);
+
+  template <typename T>
   bool DoRunWithType() {
     T value = OperatorBase::GetSingleArgument<T>("value", 0);
 
@@ -45,13 +48,8 @@ class ReplaceNaNOp final : public Operator<Context> {
 
     const T* input_data = input.template data<T>();
     T* output_data = output->template mutable_data<T>();
-    for (TIndex i = 0; i < input.size(); i++) {
-      if (std::isnan(input_data[i])) {
-        output_data[i] = value;
-      } else {
-        output_data[i] = input_data[i];
-      }
-    }
+
+    ReplaceNaN<T>(value, input.size(), input_data, output_data);
 
     return true;
   }
