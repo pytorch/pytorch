@@ -19,7 +19,7 @@ static PyObject* toList(char* data, IntList sizes, IntList strides, int64_t dim,
       case kShort: return THPUtils_packInt64(*(int16_t*)data);
       case kInt: return THPUtils_packInt64(*(int32_t*)data);
       case kLong: return THPUtils_packInt64(*(int64_t*)data);
-      case kHalf: return PyFloat_FromDouble(Scalar(*(half*)data).toDouble());
+      case kHalf: return PyFloat_FromDouble(at::convert<double, Half>(*(at::Half*)data));
       case kFloat: return PyFloat_FromDouble(*(float*)data);
       case kDouble: return PyFloat_FromDouble(*(double*)data);
       default: throw std::runtime_error("invalid type");
