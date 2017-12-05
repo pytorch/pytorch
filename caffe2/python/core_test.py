@@ -236,12 +236,22 @@ class TestCreateOperator(test_util.TestCase):
         self.assertEqual(op.device_option.device_type, caffe2_pb2.CUDA)
         self.assertEqual(op.device_option.cuda_gpu_id, 1)
         self.assertTrue(len(op.arg), 3)
-        self.assertEqual(op.arg[0].name, "arg1")
-        self.assertEqual(op.arg[1].name, "arg2")
-        self.assertEqual(op.arg[2].name, "arg3")
-        self.assertEqual(op.arg[0].i, 1)
-        self.assertEqual(op.arg[1].s, b"2")
-        self.assertEqual(list(op.arg[2].ints), [1, 2, 3])
+
+        # can't guarantee ordering of kwargs, so generate a set of args
+        # to test with
+        arg_map = {}
+        for arg in op.arg:
+            arg_map[arg.name] = arg
+
+        # Check all elements exist that should
+        self.assertEqual("arg1" in arg_map, True)
+        self.assertEqual("arg2" in arg_map, True)
+        self.assertEqual("arg3" in arg_map, True)
+
+        # Now test that all args were initialized correctly
+        self.assertEqual(arg_map["arg1"].i, 1)
+        self.assertEqual(arg_map["arg2"].s, b"2")
+        self.assertEqual(list(arg_map["arg3"].ints), [1, 2, 3])
 
     def testCreateWithNoneKwarg(self):
         with self.assertRaises(ValueError):
