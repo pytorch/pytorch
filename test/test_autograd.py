@@ -1292,6 +1292,10 @@ class TestAutograd(TestCase):
         self.assertEqual(x.shape[0], 3)
         self.assertEqual(x.shape[1], 4)
 
+    def test_numpy_requires_grad(self):
+        x = Variable(torch.randn(2, 2), requires_grad=True)
+        self.assertRaisesRegex(RuntimeError, 'requires grad', lambda: x.numpy())
+
     def test_return_leaf(self):
         class Identity(Function):
 

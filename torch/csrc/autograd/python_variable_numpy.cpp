@@ -39,6 +39,12 @@ static int numpy_dtype(const at::Type& type);
 PyObject * THPVariable_numpy(PyObject* pyself, PyObject* arg) {
   HANDLE_TH_ERRORS
   auto& self = reinterpret_cast<THPVariable*>(pyself)->cdata;
+  if (self.requires_grad()) {
+    throw std::runtime_error(
+        "Can't call numpy() on Variable that requires grad. "
+        "Use var.detach().numpy() instead.");
+  }
+
   auto dtype = numpy_dtype(self.type());
   auto sizes = cast_numpy(self.sizes());
   auto strides = cast_numpy(self.strides());
