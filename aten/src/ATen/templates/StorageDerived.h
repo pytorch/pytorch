@@ -7,7 +7,7 @@ $th_headers
 
 namespace at {
 
-struct ${Storage} : public Storage {
+struct ${Storage} final : public Storage {
 public:
   explicit ${Storage}(Context* context);
   ${Storage}(Context* context, ${THStorage} *wrapped);
@@ -30,6 +30,9 @@ public:
   virtual ${Storage}& fast_set(std::size_t ind, Scalar value) override;
   virtual Scalar get(std::size_t ind) override;
   virtual Scalar fast_get(std::size_t ind) override;
+
+  virtual void set_flag(char flag) override;
+  virtual void clear_flag(char flag) override;
 
   virtual Type& type() const override;
   virtual int getDevice() const override;

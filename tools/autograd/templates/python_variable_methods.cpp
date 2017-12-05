@@ -6,6 +6,7 @@
 #include "torch/csrc/Exceptions.h"
 #include "torch/csrc/Size.h"
 #include "torch/csrc/autograd/python_variable.h"
+#include "torch/csrc/autograd/python_variable_numpy.h"
 #include "torch/csrc/autograd/utils/wrap_outputs.h"
 #include "torch/csrc/utils/object_ptr.h"
 #include "torch/csrc/utils/python_arg_parser.h"
@@ -367,6 +368,7 @@ PyMethodDef variable_methods[] = {
   {"long", (PyCFunction)THPVariable_long, METH_NOARGS, NULL},
   {"ndimension", (PyCFunction)THPVariable_dim, METH_NOARGS, NULL},
   {"nelement", (PyCFunction)THPVariable_numel, METH_NOARGS, NULL},
+  {"numpy", (PyCFunction)THPVariable_numpy, METH_NOARGS, NULL},
   {"short", (PyCFunction)THPVariable_short, METH_NOARGS, NULL},
   {"size", (PyCFunction)THPVariable_size, METH_VARARGS | METH_KEYWORDS, NULL},
   {"storage", (PyCFunction)THPVariable_storage, METH_NOARGS, NULL},
