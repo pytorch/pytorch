@@ -6,19 +6,19 @@ from itertools import product
 from torch.autograd import Variable, gradcheck
 from torch.distributions import Bernoulli, Categorical, Normal, Gamma
 
-TEST_NUMPY = True
+TEST_SCIPY = True
 try:
     import numpy as np
     import scipy.stats
     import scipy.special
 except ImportError:
-    TEST_NUMPY = False
+    TEST_SCIPY = False
 
 
 class TestDistributions(TestCase):
     def _set_rng_seed(self, seed=0):
         torch.manual_seed(seed)
-        if TEST_NUMPY:
+        if TEST_SCIPY:
             np.random.seed(seed)
 
     def _gradcheck_log_prob(self, dist_ctor, ctor_params):
@@ -51,7 +51,7 @@ class TestDistributions(TestCase):
 
         # Aggragate into bins filled with roughly zero-mean unit-variance RVs.
         num_bins = 10
-        samples_per_bin = len(samples) / num_bins
+        samples_per_bin = int(len(samples) / num_bins)
         bins = samples.reshape((num_bins, samples_per_bin)).mean(axis=1)
         stddev = samples_per_bin ** -0.5
         threshold = stddev * scipy.special.erfinv(1 - 2 * failure_rate / num_bins)
@@ -125,7 +125,7 @@ class TestDistributions(TestCase):
         self._check_log_prob(Normal(mean, std), ref_log_prob)
 
     # This is a randomized test.
-    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    @unittest.skipIf(not TEST_SCIPY, "Scipy not found")
     def test_normal_sample(self):
         self._set_rng_seed()
         for mean, std in product([-1.0, 0.0, 1.0], [0.1, 1.0, 10.0]):
@@ -133,7 +133,7 @@ class TestDistributions(TestCase):
                                         scipy.stats.norm(loc=mean, scale=std),
                                         'Normal(mean={}, std={})'.format(mean, std))
 
-    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    @unittest.skipIf(not TEST_SCIPY, "Scipy not found")
     def test_gamma_shape(self):
         alpha = Variable(torch.exp(torch.randn(2, 3)), requires_grad=True)
         beta = Variable(torch.exp(torch.randn(2, 3)), requires_grad=True)
@@ -155,7 +155,7 @@ class TestDistributions(TestCase):
         self._check_log_prob(Gamma(alpha, beta), ref_log_prob)
 
     # This is a randomized test.
-    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    @unittest.skipIf(not TEST_SCIPY, "Scipy not found")
     def test_gamma_sample(self):
         self._set_rng_seed()
         for alpha, beta in product([0.1, 1.0, 5.0], [0.1, 1.0, 10.0]):
