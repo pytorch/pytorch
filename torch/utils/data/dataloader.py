@@ -219,8 +219,9 @@ class DataLoaderIter(object):
             # prime the prefetch loop
             for _ in range(2 * self.num_workers):
                 self._put_indices()
-        else:
-            self.num_workers = 0
+        elif self.num_workers < 0:
+            raise ValueError('num_workers cannot be negative; '
+                             'use num_workers=0 to disable multiprocessing.')
 
     def __len__(self):
         return len(self.batch_sampler)
