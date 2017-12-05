@@ -284,6 +284,16 @@ class TestOptim(TestCase):
             True
         )
 
+    def test_amsgrad(self):
+        self._test_basic_cases(
+            lambda weight, bias: optim.AMSGrad([weight, bias], lr=1e-3)
+        )
+        self._test_basic_cases(
+            lambda weight, bias: optim.AMSGrad(
+                self._build_params_dict(weight, bias, lr=1e-2),
+                lr=1e-3)
+        )
+
     def test_adadelta(self):
         self._test_rosenbrock(
             lambda params: optim.Adadelta(params),
