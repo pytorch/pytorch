@@ -397,7 +397,7 @@ static void WaitForReleaseHandle(LPVOID lpParam) {
   else
     filename = ctx->filename;
 
-  HANDLE g_hEvent = CreateEvent(NULL, false, false, filename);
+  HANDLE g_hEvent = CreateEvent(NULL, FALSE, FALSE, filename);
   WaitForSingleObject(g_hEvent,INFINITE);
 
   CloseHandle(ctx);
@@ -432,7 +432,7 @@ static void THMapAllocator_free(void* ctx_, void* data) {
 
     CloseHandle(ctx->handle);
     // Signal the child process to close the handle if it's still alive
-    HANDLE g_hEvent = OpenEvent(EVENT_ALL_ACCESS, false, false, filename);
+    HANDLE g_hEvent = OpenEvent(EVENT_ALL_ACCESS, FALSE, FALSE, filename);
     if (g_hEvent) {
       SetEvent(g_hEvent);
       CloseHandle(g_hEvent);
