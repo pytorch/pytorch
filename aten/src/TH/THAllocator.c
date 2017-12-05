@@ -386,6 +386,25 @@ static void *_map_alloc(void* ctx_, ptrdiff_t size)
   return data;
 }
 
+#ifdef _WIN32
+static void WaitForReleaseHandle(LPVOID lpParam) {
+  char *filename;
+
+  THMapAllocatorContext *ctx = (HANDLE)lpParam;
+
+  if (ctx->filename[0] == '/')
+    filename = ctx->filename + 1;
+  else
+    filename = ctx->filename;
+
+  HANDLE g_hEvent = CreateEvent(NULL, false, false, filename);
+  WaitForSingleObject(g_hEvent,INFINITE);
+
+  CloseHandle(ctx);
+  CloseHandle(g_hEvent);
+}
+#endif
+
 static void * THMapAllocator_alloc(void *ctx, ptrdiff_t size) {
   return _map_alloc(ctx, size);
 }
@@ -403,7 +422,26 @@ static void THMapAllocator_free(void* ctx_, void* data) {
 
 #ifdef _WIN32
   if ((ctx->flags & TH_ALLOCATOR_MAPPED_KEEPFD) || (ctx->flags & TH_ALLOCATOR_MAPPED_SHAREDMEM))
+  {
+    char *filename;
+
+    if (ctx->filename[0] == '/')
+      filename = ctx->filename + 1;
+    else
+      filename = ctx->filename;
+
     CloseHandle(ctx->handle);
+    // Signal the child process to close the handle if it's still alive
+    HANDLE g_hEvent = OpenEvent(EVENT_ALL_ACCESS, false, false, filename);
+    if (g_hEvent) {
+      SetEvent(g_hEvent);
+      CloseHandle(g_hEvent);
+    }
+  }
+  else if (ctx->handle) {
+    // Wait for the main process to close the handle
+    CreateThread(NULL, 0, WaitForReleaseHandle, (LPVOID)(ctx), NULL, 0);
+  }
   if(UnmapViewOfFile(data) == 0)
     THError("could not unmap the shared memory file");
 #else /* _WIN32 */
