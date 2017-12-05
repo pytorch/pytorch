@@ -260,19 +260,8 @@ class Variable(_C._VariableBase):
             repeats = torch.Size(repeats)
         return Repeat.apply(self, repeats)
 
-    def cumsum(self, dim):
-        return Cumsum.apply(self, dim)
-
     def cumprod(self, dim):
         return Cumprod.apply(self, dim)
-
-    def renorm(self, p, dim, maxnorm):
-        t = self.transpose(dim, 0)
-        flat = t.contiguous().view(self.size(0), -1)
-        norms = flat.norm(p, 1, True)
-        norms = norms.clamp(max=maxnorm).div(norms.add(1e-7))
-        flat_out = flat.mul(norms.expand_as(flat))
-        return flat_out.view(t.size()).transpose(dim, 0)
 
     def resize(self, *sizes):
         return Resize.apply(self, sizes)

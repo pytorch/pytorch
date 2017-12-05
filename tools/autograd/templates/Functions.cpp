@@ -165,6 +165,32 @@ Tensor mm_mat2_backward(const Tensor & grad, const Tensor & mat1, IntList sizes,
   }
 }
 
+Tensor renorm_backward(const Tensor & grad, const Tensor & self, Scalar p, int64_t dim, Scalar maxnorm) {
+  auto transposed_sizes = std::vector<int64_t>(self.transpose(dim, 0).sizes());
+  auto flatten = [&](const Tensor & t) {
+    return t.transpose(dim, 0).contiguous().view({t.size(dim), -1});
+  };
+  auto unflatten = [&](const Tensor & t) {
+    return t.contiguous().view(transposed_sizes).transpose(dim, 0);
+  };
+
+  // renorm computes the norm over all dimensions except `dim`, which is why
+  // we need the flatten and unflatten business. TODO: simplify this when we
+  // add support for norm over multiple dimensions.
+  auto self_flat = flatten(self);
+  auto grad_flat = flatten(grad);
+  auto norm_flat = self_flat.norm(p, 1, true);
+  auto grad_output = (self_flat * grad_flat).sum(1, true);
+  auto nb = norm_backward(grad_output, self_flat, p, norm_flat, 1, true);
+  auto invnorm = (norm_flat + 1e-7).reciprocal();
+  auto grad_norm = unflatten(maxnorm * invnorm * (grad_flat - invnorm * nb));
+  auto norm = unflatten(norm_flat.expand_as(self_flat));
+
+  // TODO: remove the detach once comparison ops no longer require grad
+  auto mask = Variable(norm < maxnorm).detach();
+  return grad * mask.type_as(grad) + grad_norm * (1 - mask).type_as(grad);
+}
+
 Tensor select_backward_scalar(Tensor grad, const Tensor & input, const Tensor & value) {
   auto grad_data = static_cast<Variable&>(grad).data();
   auto grad_input = zeros_like(input);
