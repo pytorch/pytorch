@@ -51,7 +51,7 @@ class TestDistributions(TestCase):
 
         # Aggragate into bins filled with roughly zero-mean unit-variance RVs.
         num_bins = 10
-        samples_per_bin = len(samples) / num_bins
+        samples_per_bin = len(samples) // num_bins
         bins = samples.reshape((num_bins, samples_per_bin)).mean(axis=1)
         stddev = samples_per_bin ** -0.5
         threshold = stddev * scipy.special.erfinv(1 - 2 * failure_rate / num_bins)
