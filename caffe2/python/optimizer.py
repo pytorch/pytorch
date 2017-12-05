@@ -99,10 +99,7 @@ class Optimizer(object):
         if learning_rate_blob is None:
             learning_rate_blob = self.make_unique_blob_name('lr')
 
-        # Each node needs its own iteration counter
-        current_scope = scope.CurrentDeviceScope()
-        node_name = current_scope.node_name if current_scope else ''
-        optimization_iter_blob = _OPTIMIZER_ITERATION_NAME + node_name
+        optimization_iter_blob = _OPTIMIZER_ITERATION_NAME
         if not param_init_net.BlobIsDefined(optimization_iter_blob):
             # Add training operators.
             with core.DeviceScope(core.DeviceOption(caffe2_pb2.CPU)):
@@ -111,7 +108,7 @@ class Optimizer(object):
                     value=iter_val,
                     dtype=core.DataType.INT64)
                 iter_mutex = param_init_net.CreateMutex(
-                    [], ["iteration_mutex" + node_name]
+                    [], ["iteration_mutex"]
                 )
                 net.AtomicIter([iter_mutex, iteration], [iteration])
         else:
