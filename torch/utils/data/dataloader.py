@@ -198,19 +198,14 @@ class DataLoaderIter(object):
             self.send_idx = 0
             self.rcvd_idx = 0
             self.reorder_dict = {}
-            self.data_queue = None
 
-            base_seeds = torch.LongTensor(self.num_workers).random_()
+            base_seed = torch.LongTensor(1).random_()[0]
             self.workers = [
                 multiprocessing.Process(
                     target=_worker_loop,
                     args=(self.dataset, self.index_queue, self.worker_result_queue, self.collate_fn,
-                          base_seeds[i], self.worker_init_fn, i))
+                          base_seed + i, self.worker_init_fn, i))
                 for i in range(self.num_workers)]
-
-            for w in self.workers:
-                w.daemon = True  # ensure that the worker exits on process exit
-                w.start()
 
             if self.pin_memory or self.timeout > 0:
                 self.data_queue = queue.Queue()
@@ -221,6 +216,10 @@ class DataLoaderIter(object):
                 self.worker_manager_thread.start()
             else:
                 self.data_queue = self.worker_result_queue
+
+            for w in self.workers:
+                w.daemon = True  # ensure that the worker exits on process exit
+                w.start()
 
             _update_worker_pids(id(self), tuple(w.pid for w in self.workers))
             _set_SIGCHLD_handler()
@@ -303,7 +302,7 @@ class DataLoaderIter(object):
             self.shutdown = True
             self.done_event.set()
             # if worker_manager_thread is waiting to put
-            while self.data_queue is not None and not self.data_queue.empty():
+            while not self.data_queue.empty():
                 self.data_queue.get()
             for _ in self.workers:
                 self.index_queue.put(None)
@@ -351,13 +350,14 @@ class DataLoader(object):
             worker subprocess with the worker id as input, after seeding and before data
             loading. (default: None)
 
-    .. note:: By default, each worker will have its PyTorch seed set to a long generated
-              by main process using its RNG. You may use `torch.initial_seed()` to access
+    .. note:: By default, each worker will have its PyTorch seed set to
+              ``base_seed + worker_id``, where ``base_seed`` is a long generated
+              by main process using its RNG. You may use ``torch.initial_seed()`` to access
               this value in :attr:`worker_init_fn`, which can be used to set other seeds
               (e.g. NumPy) before data loading.
 
-    .. warning:: If ``spawn'' start method is used, :attr:`worker_init_fn` cannot be a lambda
-                 function.
+    .. warning:: If ``spawn'' start method is used, :attr:`worker_init_fn` cannot be an
+                 unpicklable object, e.g., a lambda function.
     """
 
     def __init__(self, dataset, batch_size=1, shuffle=False, sampler=None, batch_sampler=None,
