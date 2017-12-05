@@ -200,6 +200,107 @@ class TestBatchMatMul(hu.HypothesisTestCase):
         # Gradient check wrt Y
         relax_fp16_check(self.assertGradientChecks, gc, op, [X, Y], 1, [0])
 
+    def _test_batch_matmul_with_broadcast_common(
+        self,
+        X,
+        Y,
+        dtype,
+        gc,
+        dc,
+        trans_a=None,
+        trans_b=None,
+    ):
+        if trans_a is not None and trans_b is not None:
+            op = core.CreateOperator(
+                'BatchMatMul', ['X', 'Y'], 'out', trans_a=trans_a, trans_b=trans_b, broadcast=1
+            )
+        else:
+            op = core.CreateOperator(
+                'BatchMatMul', ['X', 'Y'], 'out', broadcast=1
+            )
+
+        def matmul_ref(X, Y, trans_a, trans_b, dtype):
+            XX = (X.swapaxes(-1, -2) if trans_a else X).astype(np.float32)
+            YY = (Y.swapaxes(-1, -2) if trans_b else Y).astype(np.float32)
+            return (np.matmul(XX, YY).astype(dtype),)
+
+        # Check against numpy reference
+        self.assertReferenceChecks(gc, op, [X, Y, trans_a, trans_b, dtype], matmul_ref)
+        # Check over multiple devices
+        self.assertDeviceChecks(dc, op, [X, Y], [0])
+
+    @given(
+        C_1=st.integers(min_value=0, max_value=3),  # number of batch dims
+        C_2=st.integers(min_value=0, max_value=3),
+        M=st.integers(min_value=1, max_value=10),
+        K=st.integers(min_value=1, max_value=10),
+        N=st.integers(min_value=1, max_value=10),
+        trans_a=st.booleans(),
+        trans_b=st.booleans(),
+        **hu.gcs
+    )
+    def test_numpy_batch_matmul(self, C_1, C_2, M, K, N, trans_a, trans_b, gc, dc):
+        np.set_printoptions(threshold=np.nan)
+        dtype = np.float32
+        batch_dims = np.random.randint(
+            low=0,
+            high=3,
+            size=max(C_1, C_2),
+            dtype=np.int64).tolist()
+        lbd = len(batch_dims)
+        X = np.random.rand(*(batch_dims[lbd - C_1:] + [M, K])).astype(dtype) - 0.5
+        if trans_a:
+            X = X.swapaxes(-1, -2)
+        Y = np.random.rand(*(batch_dims[lbd - C_2:] + [K, N])).astype(dtype) - 0.5
+        if trans_b:
+            Y = Y.swapaxes(-1, -2)
+
+        self._test_batch_matmul_with_broadcast_common(X, Y, dtype, gc, dc, trans_a, trans_b)
+
+    @settings(max_examples=30)
+    @given(
+        K=st.integers(min_value=1, max_value=10),
+        **hu.gcs
+    )
+    def test_numpy_batch_matmul_1d(self, K, gc, dc):
+        np.set_printoptions(threshold=np.nan)
+        dtype = np.float32
+        X = np.random.rand(K).astype(dtype) - 0.5
+        # TODO: test trans_a and trans_b
+        Y = np.random.rand(K).astype(dtype) - 0.5
+
+        self._test_batch_matmul_with_broadcast_common(X, Y, dtype, gc, dc)
+
+    @settings(max_examples=30)
+    @given(
+        K=st.integers(min_value=1, max_value=10),
+        N=st.integers(min_value=1, max_value=10),
+        **hu.gcs
+    )
+    def test_numpy_batch_matmul_1d_2d(self, K, N, gc, dc):
+        np.set_printoptions(threshold=np.nan)
+        dtype = np.float32
+        X = np.random.rand(K).astype(dtype) - 0.5
+        # TODO: test trans_a and trans_b
+        Y = np.random.rand(*[K, N]).astype(dtype) - 0.5
+
+        self._test_batch_matmul_with_broadcast_common(X, Y, dtype, gc, dc)
+
+    @settings(max_examples=30)
+    @given(
+        M=st.integers(min_value=1, max_value=10),
+        K=st.integers(min_value=1, max_value=10),
+        **hu.gcs
+    )
+    def test_numpy_batch_matmul_2d_1d(self, M, K, gc, dc):
+        np.set_printoptions(threshold=np.nan)
+        dtype = np.float32
+        X = np.random.rand(*[M, K]).astype(dtype) - 0.5
+        # TODO: test trans_a and trans_b
+        Y = np.random.rand(K).astype(dtype) - 0.5
+
+        self._test_batch_matmul_with_broadcast_common(X, Y, dtype, gc, dc)
+
 
 if __name__ == "__main__":
     import unittest
