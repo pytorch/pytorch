@@ -4649,7 +4649,8 @@ class TestTorch(TestCase):
 
         # check zero dimensional
         x = np.zeros((0, 2))
-        self.assertRaises(RuntimeError, lambda: torch.from_numpy(x))
+        self.assertEqual(torch.from_numpy(x).shape, tuple())
+        self.assertEqual(torch.autograd.Variable.from_numpy(x).shape, [0])
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_ctor_with_numpy_array(self):

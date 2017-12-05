@@ -118,4 +118,12 @@ struct TypeError : public PyTorchError {
   }
 };
 
+// Translates to Python TypeError
+struct ValueError : public PyTorchError {
+  ValueError(const char *format, ...);
+  virtual PyObject* python_type() override {
+    return PyExc_ValueError;
+  }
+};
+
 } // namespace torch

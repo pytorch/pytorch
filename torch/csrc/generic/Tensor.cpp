@@ -7,28 +7,6 @@
 
 #include "THHalf.h"
 
-#ifdef TH_REAL_IS_DOUBLE
-#define NUMPY_TYPE_ENUM NPY_DOUBLE
-#endif
-#ifdef TH_REAL_IS_FLOAT
-#define NUMPY_TYPE_ENUM NPY_FLOAT
-#endif
-#ifdef TH_REAL_IS_HALF
-#define NUMPY_TYPE_ENUM NPY_HALF
-#endif
-#ifdef TH_REAL_IS_LONG
-#define NUMPY_TYPE_ENUM NPY_INT64
-#endif
-#ifdef TH_REAL_IS_INT
-#define NUMPY_TYPE_ENUM NPY_INT32
-#endif
-#ifdef TH_REAL_IS_SHORT
-#define NUMPY_TYPE_ENUM NPY_INT16
-#endif
-#ifdef TH_REAL_IS_BYTE
-#define NUMPY_TYPE_ENUM NPY_UINT8
-#endif
-
 
 // COPY_FROM_ARRAY macros for Numpy -> TH assignment
 //
@@ -192,86 +170,6 @@ static void THPTensor_(setInconsistentDepthError)(std::vector<size_t> &sizes,
   THPUtils_setError(error.c_str());
 }
 
-#if defined(NUMPY_TYPE_ENUM) || (defined(WITH_NUMPY) && defined(THC_GENERIC_FILE))
-
-#ifndef THC_REAL_IS_HALF
-#define load_real real
-#else
-#define load_real float
-#endif
-
-THTensor* THPTensor_(fromNumpy)(PyObject *numpy_array) {
-  PyArrayObject *array = (PyArrayObject*)numpy_array;
-
-  // Numpy and Torch disagree on empty tensors. In Torch, an empty
-  // tensor is a tensor with zero dimensions. In Numpy, an empty tensor
-  // keeps its shape, but has 0 as the size of one of the dimensions.
-  // So we'll convert all Numpy tensors of 0 elements to empty Torch tensors.
-  if (PyArray_SIZE(array) != 0) {
-    auto ndim = PyArray_NDIM(array);
-    size_t storage_size = 1;
-    THLongStoragePtr sizes(THLongStorage_newWithSize(ndim));
-    int64_t *sizes_data = sizes->data;
-    for (int i = 0; i < ndim; ++i) {
-      sizes_data[i] = PyArray_DIM(array, i);
-    }
-
-    THLongStoragePtr strides(THLongStorage_newWithSize(ndim));
-    int64_t *strides_data = strides->data;
-    int64_t elsize = PyArray_ITEMSIZE(array);
-    for (int i = 0; i < ndim; ++i) {
-      // numpy uses bytes, torch uses elements
-      // we have to cast sizeof to long, because otherwise stride gets
-      // promoted to size_t, and is UB for negative values
-      strides_data[i] = PyArray_STRIDE(array, i) / elsize;
-      if (strides_data[i] < 0) {
-        THPUtils_setError("some of the strides of a given numpy array are "
-            "negative. This is currently not supported, but will be added in "
-            "future releases.");
-        return NULL;
-      }
-      // XXX: this won't work for negative strides
-      storage_size += strides_data[i] * (sizes_data[i] - 1);
-    }
-
-    THTensor *result = NULL;
-#ifdef NUMPY_TYPE_ENUM
-    if (PyArray_TYPE(array) == NUMPY_TYPE_ENUM) {
-      THStoragePtr storage(THStorage_(newWithDataAndAllocator)(
-          LIBRARY_STATE (real*)PyArray_DATA(array),
-          storage_size,
-          // See Note [Numpy memory management]
-          &THNumpyArrayAllocator,
-          new NumpyArrayAllocator(numpy_array)));
-      THStorage_(clearFlag)(storage.get(), TH_STORAGE_RESIZABLE);
-      result = THTensor_(newWithStorage)(LIBRARY_STATE storage, 0, sizes, strides);
-    }
-    else
-#endif
-    {
-      THStoragePtr storage(THStorage_(newWithSize)(LIBRARY_STATE storage_size));
-      switch (PyArray_TYPE(array)) {
-        case NPY_DOUBLE:      COPY_FROM_ARRAY(double,  array, storage, storage_size); break;
-        case NPY_FLOAT:       COPY_FROM_ARRAY(float,   array, storage, storage_size); break;
-        case NPY_HALF:   COPY_FROM_HALF_ARRAY(         array, storage, storage_size); break;
-        case NPY_INT64:       COPY_FROM_ARRAY(int64_t, array, storage, storage_size); break;
-        case NPY_INT32:       COPY_FROM_ARRAY(int32_t, array, storage, storage_size); break;
-        case NPY_INT16:       COPY_FROM_ARRAY(int16_t, array, storage, storage_size); break;
-        case NPY_UINT8:       COPY_FROM_ARRAY(uint8_t, array, storage, storage_size); break;
-      }
-      result = THTensor_(newWithStorage)(LIBRARY_STATE storage, 0, sizes, strides);
-    }
-    return result;
-  } else {
-    THPUtils_setError("the given numpy array has zero-sized dimensions. "
-                      "Zero-sized dimensions are not supported in PyTorch");
-    return NULL;
-  }
-}
-
-#undef load_real
-#endif
-
 static PyObject * THPTensor_(pynew)(PyTypeObject *type, PyObject *args, PyObject *kwargs)
 {
   HANDLE_TH_ERRORS
@@ -349,15 +247,12 @@ static PyObject * THPTensor_(pynew)(PyTypeObject *type, PyObject *args, PyObject
     return (PyObject *)self.release();
   }
 
-#if defined(NUMPY_TYPE_ENUM) || (defined(WITH_NUMPY) && defined(THC_GENERIC_FILE))
+#if defined(WITH_NUMPY)
   // torch.Tensor(np.ndarray array)
   if (num_args == 1 && PyArray_Check(first_arg)) {
-    THPObjectPtr numpy_array(
-      PyArray_FromArray((PyArrayObject*)first_arg, nullptr, NPY_ARRAY_BEHAVED));
-    self->cdata = THPTensor_(fromNumpy)(numpy_array.get());
-    if (!self->cdata)
-        return NULL;
-    return (PyObject*)self.release();
+    auto tensor = torch::utils::tensor_from_numpy(first_arg);
+    tensor = tensor.toType(torch::getATenType(type));
+    return torch::createPyObject(tensor);
   }
 #endif
 
@@ -1920,7 +1815,5 @@ bool THPTensor_(postInit)(PyObject *module)
   torch::registerPyTypeObject((PyTypeObject*)THPTensorClass, type_name, is_cuda, false);
   return true;
 }
-
-#undef NUMPY_TYPE_ENUM
 
 #endif

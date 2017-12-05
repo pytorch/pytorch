@@ -319,6 +319,7 @@ class Variable(_C._VariableBase):
     def __rdiv__(self, other):
         return self.reciprocal() * other
     __rtruediv__ = __rdiv__
+    __itruediv__ = _C._VariableBase.__div__
 
     __pow__ = _C._VariableBase.pow
 
@@ -357,6 +358,21 @@ class Variable(_C._VariableBase):
         attrs = list(self.__dict__.keys())
         keys = variable_methods + attrs
         return sorted(keys)
+
+    # Numpy array interface, to support `numpy.asarray(tensor) -> ndarray`
+    def __array__(self, dtype=None):
+        if dtype is None:
+            return self.cpu().numpy()
+        else:
+            return self.cpu().numpy().astype(dtype, copy=False)
+
+    # Wrap Numpy array again in a suitable tensor when done, to support e.g.
+    # `numpy.sin(tensor) -> tensor` or `numpy.greater(tensor, 0) -> ByteTensor`
+    def __array_wrap__(self, array):
+        if array.dtype == bool:
+            # Workaround, torch has no built-in bool tensor
+            array = array.astype('uint8')
+        return Variable.from_numpy(array)
 
     class _torch(object):
         @staticmethod
