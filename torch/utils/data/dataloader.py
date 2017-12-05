@@ -31,7 +31,7 @@ class ExceptionWrapper(object):
         self.exc_msg = "".join(traceback.format_exception(*exc_info))
 
 
-def _worker_loop(dataset, index_queue, data_queue, collate_fn, init_fn, id):
+def _worker_loop(dataset, index_queue, data_queue, collate_fn, seed, init_fn, worker_id):
     global _use_shared_memory
     _use_shared_memory = True
 
@@ -42,10 +42,10 @@ def _worker_loop(dataset, index_queue, data_queue, collate_fn, init_fn, id):
     _set_worker_signal_handlers()
 
     torch.set_num_threads(1)
-    torch.manual_seed(torch.initial_seed() + id + 1)
+    torch.manual_seed(seed)
 
     if init_fn is not None:
-        init_fn(id)
+        init_fn(worker_id)
 
     while True:
         r = index_queue.get()
@@ -198,12 +198,14 @@ class DataLoaderIter(object):
             self.send_idx = 0
             self.rcvd_idx = 0
             self.reorder_dict = {}
+            self.data_queue = None
 
+            base_seeds = torch.LongTensor(self.num_workers).random_()
             self.workers = [
                 multiprocessing.Process(
                     target=_worker_loop,
                     args=(self.dataset, self.index_queue, self.worker_result_queue, self.collate_fn,
-                          self.worker_init_fn, i))
+                          base_seeds[i], self.worker_init_fn, i))
                 for i in range(self.num_workers)]
 
             for w in self.workers:
@@ -301,7 +303,7 @@ class DataLoaderIter(object):
             self.shutdown = True
             self.done_event.set()
             # if worker_manager_thread is waiting to put
-            while not self.data_queue.empty():
+            while self.data_queue is not None and not self.data_queue.empty():
                 self.data_queue.get()
             for _ in self.workers:
                 self.index_queue.put(None)
@@ -346,13 +348,16 @@ class DataLoader(object):
         timeout (numeric, optional): if positive, the timeout value for collecting a batch
             from workers. Should always be non-negative. (default: 0)
         worker_init_fn (callable, optional): If not None, this will be called on each
-            worker subprocess with the worker id after seeding and before data loading.
-            (default: None)
+            worker subprocess with the worker id as input, after seeding and before data
+            loading. (default: None)
 
-    .. note: By default, the workers will have their PyTorch seed set before data loading
-             as `(main_process_seed + worker_id + 1)`, i.e.,
-             `torch.manual_seed(torch.initial_seed() + id + 1)`. If setting other
-             seeds (e.g. NumPy) is desired, it can be done through :attr:`worker_init_fn`.
+    .. note:: By default, each worker will have its PyTorch seed set to a long generated
+              by main process using its RNG. You may use `torch.initial_seed()` to access
+              this value in :attr:`worker_init_fn`, which can be used to set other seeds
+              (e.g. NumPy) before data loading.
+
+    .. warning:: If ``spawn'' start method is used, :attr:`worker_init_fn` cannot be a lambda
+                 function.
     """
 
     def __init__(self, dataset, batch_size=1, shuffle=False, sampler=None, batch_sampler=None,

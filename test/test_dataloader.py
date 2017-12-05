@@ -232,19 +232,14 @@ class TestDataLoader(TestCase):
         finally:
             p.terminate()
 
-    def test_worker_seeding(self):
-        # worker has seed (main_proc_seed + worker_id + 1)
-        dataset = SeedDataset(4)
-        dataloader = DataLoader(dataset, batch_size=1, num_workers=1)
-        seed = torch.initial_seed()
-        batch = next(iter(dataloader))
-        self.assertEqual(seed + 1, batch[0])
-
     def test_worker_init_fn(self):
         # test custom init function
+        def init_fn(worker_id):
+            torch.manual_seed(12345)
+
         dataset = SeedDataset(4)
         dataloader = DataLoader(dataset, batch_size=2, num_workers=2,
-                                worker_init_fn=lambda i: torch.manual_seed(12345))
+                                worker_init_fn=init_fn)
         for batch in dataloader:
             self.assertEqual(12345, batch[0])
             self.assertEqual(12345, batch[1])
