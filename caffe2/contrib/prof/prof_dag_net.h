@@ -43,6 +43,10 @@ class ProfDAGNet : public DAGNetBase {
   }
   ProfDAGProtos GetOperatorStats();
 
+  // GetPerOperatorCost collects the execution time of each operator, the
+  // output is formatted as a map: (netName__opIndex__opType, cost)
+  ProfDAGProtos GetPerOperatorCost();
+
  protected:
   bool DoRunAsync() override;
   bool RunAt(int chain_id, const std::vector<int>& chain) override;

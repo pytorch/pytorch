@@ -31,20 +31,53 @@ class GetProfDagStatsOp final : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   GetProfDagStatsOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        net_name_(
-            OperatorBase::GetSingleArgument<std::string>("net_name", "")) {
+        net_name_(OperatorBase::GetSingleArgument<std::string>("net_name", "")),
+        partial_net_name_(OperatorBase::GetSingleArgument<std::string>(
+            "partial_net_name",
+            "")),
+        per_op_(OperatorBase::GetSingleArgument<bool>("per_op", false)) {
     ws_ = ws;
+    CAFFE_ENFORCE(
+        !(net_name_.empty() && partial_net_name_.empty()),
+        "You need to provide net_name or partial_net_name");
+    CAFFE_ENFORCE(
+        net_name_.empty() || partial_net_name_.empty(),
+        "You can not provide both net_name and partial_net_name");
   }
   ~GetProfDagStatsOp() {}
 
   bool RunOnDevice() override {
-    // Read operator statistics for net_name_
-    CAFFE_ENFORCE(!net_name_.empty(), "You need to provide net_name");
-    auto* net = ws_->GetNet(net_name_);
+    // find the net by net_name_ or partial_net_name
+    NetBase* net = nullptr;
+    if (!net_name_.empty()) {
+      net = ws_->GetNet(net_name_);
+    } else if (!partial_net_name_.empty()) {
+      for (auto& current_net : ws_->Nets()) {
+        if (current_net.find(partial_net_name_) != std::string::npos) {
+          CAFFE_ENFORCE(
+              net == nullptr,
+              "There are multiple nets with ",
+              partial_net_name_,
+              " as part of their name");
+          net = ws_->GetNet(current_net);
+        }
+      }
+      CAFFE_ENFORCE(
+          net,
+          "Can not find a net with ",
+          partial_net_name_,
+          " as part of its name");
+    }
 
     auto prof_dag_net = dynamic_cast_if_rtti<ProfDAGNet*>(net);
     CAFFE_ENFORCE(prof_dag_net);
-    auto stats = prof_dag_net->GetOperatorStats();
+
+    ProfDAGProtos stats;
+    if (per_op_) {
+      stats = prof_dag_net->GetPerOperatorCost();
+    } else {
+      stats = prof_dag_net->GetOperatorStats();
+    }
 
     // Write protobuf message to the output blob
     std::string serialized_data;
@@ -57,6 +90,8 @@ class GetProfDagStatsOp final : public Operator<Context> {
 
  protected:
   std::string net_name_;
+  std::string partial_net_name_;
+  bool per_op_;
   Workspace* ws_;
 };
 
