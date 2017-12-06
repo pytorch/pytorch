@@ -122,18 +122,20 @@ struct Parser {
     return parseList('(', ',', ')', [&](int i) { return parseExp(); });
   }
   TreeRef parseConst() {
+    float mult = 1.0f;
+    while (L.nextIf('-')) {
+      mult *= -1.0f;
+    }
     auto t = L.expect(TK_NUMBER);
-    return c(TK_CONST, t.range, {d(t.doubleValue())});
+    return c(TK_CONST, t.range, {d(mult * t.doubleValue())});
   }
   TreeRef parseAttributeValue() {
     int kind = L.cur().kind;
     switch (kind) {
-      case TK_NUMBER:
-        return parseConst();
-      case '{':
-        return parseList('{', ',', '}', [&](int i) { return parseConst(); });
+      case '[':
+        return parseList('[', ',', ']', [&](int i) { return parseConst(); });
       default:
-        L.expected("a constant expression");
+        return parseConst();
     }
   }
   std::pair<TreeRef, TreeRef> parseOperatorArguments() {
