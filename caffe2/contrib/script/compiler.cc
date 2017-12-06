@@ -120,7 +120,7 @@ struct DefCompiler {
         return "Add";
       case '-':
         if (ninputs == 1)
-          return "Negate";
+          return "Negative";
         else
           return "Sub";
       case '*':
@@ -158,7 +158,7 @@ struct DefCompiler {
       } break;
       case TK_LIST:
         for (auto t : value->trees()) {
-          auto v = t->doubleValue();
+          auto v = t->tree(0)->doubleValue();
           if (attr.format() == "f")
             arg->add_floats(v);
           else
