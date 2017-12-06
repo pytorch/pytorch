@@ -464,6 +464,15 @@ kernel void col2im(
     texture2d<half, access::write> out[[ texture(1), function_constant(has_out_tex) ]],
     constant half4* bias[[buffer(0)]],
     ushort3 gid[[thread_position_in_grid]]) {
+  if (has_out_tex) {
+    if (gid.x >= out.get_width() || gid.y >= out.get_height()) {
+      return;
+    }
+  } else {
+    if (gid.x >= outa.get_width() || gid.y >= outa.get_height()) {
+      return;
+    }
+  }
   const ushort kernel_h = ushort_arg_0;
   const ushort kernel_w = ushort_arg_1;
   const ushort stride_h = ushort_arg_2;

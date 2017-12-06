@@ -1063,7 +1063,7 @@ void testMPSCNN() {
     }
   }
 
-  {
+  @autoreleasepool {
     for (const auto& batchSize : std::vector<int>{1, 2}) {
       for (const auto& stride_h : std::vector<int>{1, 2, 3}) {
         for (const auto& stride_w : std::vector<int>{1, 2, 3}) {
@@ -2555,7 +2555,7 @@ void testMPSCNN() {
     }
   }
 
-  {
+  @autoreleasepool {
     for (const auto& inputChannels : std::vector<size_t>{3, 8}) {
       for (const auto& outputChannels : std::vector<size_t>{3, 8}) {
         for (const auto& batchSize : std::vector<size_t>{1, 2}) {
