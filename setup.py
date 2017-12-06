@@ -443,6 +443,7 @@ main_sources = [
     "torch/csrc/utils/tensor_list.cpp",
     "torch/csrc/utils/tensor_numpy.cpp",
     "torch/csrc/utils/tuple_parser.cpp",
+    "torch/csrc/utils/tensor_apply.cpp",
     "torch/csrc/allocators.cpp",
     "torch/csrc/serialization.cpp",
     "torch/csrc/jit/init.cpp",

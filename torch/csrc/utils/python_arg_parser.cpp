@@ -21,7 +21,8 @@ static std::unordered_map<std::string, ParameterType> type_map = {
   {"IntList", ParameterType::INT_LIST},
   {"Generator", ParameterType::GENERATOR},
   {"bool", ParameterType::BOOL},
-  {"Storage", ParameterType::STORAGE}
+  {"Storage", ParameterType::STORAGE},
+  {"PyObject*", ParameterType::PYOBJECT}
 };
 
 FunctionParameter::FunctionParameter(const std::string& fmt, bool keyword_only)
@@ -85,6 +86,7 @@ bool FunctionParameter::check(PyObject* obj) {
     case ParameterType::GENERATOR: return false;
     case ParameterType::BOOL: return PyBool_Check(obj);
     case ParameterType::STORAGE: return false;
+    case ParameterType::PYOBJECT: return true;
     default: throw std::runtime_error("unknown parameter type");
   }
 }
@@ -100,6 +102,7 @@ std::string FunctionParameter::type_name() const {
     case ParameterType::GENERATOR: return "torch.Generator";
     case ParameterType::BOOL: return "bool";
     case ParameterType::STORAGE: return "torch.Storage";
+    case ParameterType::PYOBJECT: return "object";
     default: throw std::runtime_error("unknown parameter type");
   }
 }
