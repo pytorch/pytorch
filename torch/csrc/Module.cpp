@@ -16,6 +16,7 @@
 #include "torch/csrc/DynamicTypes.h"
 #include "torch/csrc/autograd/generated/python_nn_functions.h"
 #include "torch/csrc/utils/python_strings.h"
+#include "torch/csrc/utils/tensor_numpy.h"
 #include "torch/csrc/jit/python_tracer.h"
 #include "torch/csrc/jit/init.h"
 #include "torch/csrc/jit/python_ir.h"
@@ -165,33 +166,9 @@ PyObject * THPModule_setDefaultTensorType(PyObject *_unused, PyObject *type)
 
 PyObject * THPModule_fromNumpy(PyObject *_unused, PyObject *array)
 {
-#ifndef WITH_NUMPY
-  THPUtils_setError("torch was compiled without numpy support");
-  return NULL;
-#else
-  THPUtils_assert(PyArray_Check(array), "from_numpy expects an np.ndarray "
-      "but got %s", THPUtils_typename(array));
-  int type = PyArray_TYPE((PyArrayObject*)array);
-  if (type == NPY_DOUBLE) {
-    return PyObject_CallFunctionObjArgs(THPDoubleTensorClass, array, NULL);
-  } else if (type == NPY_FLOAT) {
-    return PyObject_CallFunctionObjArgs(THPFloatTensorClass, array, NULL);
-  } else if (type == NPY_HALF) {
-    return PyObject_CallFunctionObjArgs(THPHalfTensorClass, array, NULL);
-  } else if (type == NPY_INT64) {
-    return PyObject_CallFunctionObjArgs(THPLongTensorClass, array, NULL);
-  } else if (type == NPY_INT32) {
-    return PyObject_CallFunctionObjArgs(THPIntTensorClass, array, NULL);
-  } else if (type == NPY_INT16) {
-    return PyObject_CallFunctionObjArgs(THPShortTensorClass, array, NULL);
-  } else if (type == NPY_UINT8) {
-    return PyObject_CallFunctionObjArgs(THPByteTensorClass, array, NULL);
-  }
-  THPUtils_setError("can't convert a given np.ndarray to a tensor - it has an "
-      "invalid type. The only supported types are: double, float, float16, int64, "
-      "int32, and uint8.");
-  return NULL;
-#endif
+  HANDLE_TH_ERRORS
+  return torch::createPyObject(torch::utils::tensor_from_numpy(array));
+  END_HANDLE_TH_ERRORS
 }
 
 /**

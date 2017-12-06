@@ -6,13 +6,13 @@
 #include "torch/csrc/Exceptions.h"
 #include "torch/csrc/Size.h"
 #include "torch/csrc/autograd/python_variable.h"
-#include "torch/csrc/autograd/python_variable_numpy.h"
 #include "torch/csrc/autograd/utils/wrap_outputs.h"
 #include "torch/csrc/utils/object_ptr.h"
 #include "torch/csrc/utils/python_arg_parser.h"
 #include "torch/csrc/utils/python_numbers.h"
 #include "torch/csrc/utils/python_tuples.h"
 #include "torch/csrc/utils/tensor_list.h"
+#include "torch/csrc/utils/tensor_numpy.h"
 
 #include "python_variable_methods_dispatch.h"
 
@@ -191,6 +191,14 @@ static PyObject * THPVariable_copy_(PyObject* self, PyObject* args, PyObject* kw
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject * THPVariable_from_numpy(PyObject* module, PyObject* arg)
+{
+  HANDLE_TH_ERRORS
+  auto data = torch::utils::tensor_from_numpy(arg);
+  return THPVariable_Wrap(make_variable(std::move(data)));
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject * THPVariable_detach(PyObject* self, PyObject* args)
 {
   HANDLE_TH_ERRORS
@@ -309,6 +317,19 @@ static PyObject * THPVariable_element_size(PyObject* self, PyObject* args)
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject * THPVariable_numpy(PyObject* self, PyObject* arg)
+{
+  HANDLE_TH_ERRORS
+  auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
+  if (self_.requires_grad()) {
+    throw std::runtime_error(
+        "Can't call numpy() on Variable that requires grad. "
+        "Use var.detach().numpy() instead.");
+  }
+  return torch::utils::tensor_to_numpy(self_.data());
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject * THPVariable_storage(PyObject* self, PyObject* arg)
 {
   HANDLE_TH_ERRORS
@@ -363,15 +384,16 @@ PyMethodDef variable_methods[] = {
   {"char", (PyCFunction)THPVariable_char, METH_NOARGS, NULL},
   {"clamp", (PyCFunction)THPVariable_clamp, METH_VARARGS | METH_KEYWORDS, NULL},
   {"clamp_", (PyCFunction)THPVariable_clamp_, METH_VARARGS | METH_KEYWORDS, NULL},
-  {"cpu", (PyCFunction)THPVariable_cpu, METH_NOARGS, NULL},
-  {"dim", (PyCFunction)THPVariable_dim, METH_NOARGS, NULL},
   {"contiguous", (PyCFunction)THPVariable_contiguous, METH_NOARGS, NULL},
   {"copy_", (PyCFunction)THPVariable_copy_, METH_VARARGS | METH_KEYWORDS, NULL},
+  {"cpu", (PyCFunction)THPVariable_cpu, METH_NOARGS, NULL},
+  {"dim", (PyCFunction)THPVariable_dim, METH_NOARGS, NULL},
   {"detach", (PyCFunction)THPVariable_detach, METH_NOARGS, NULL},
   {"detach_", (PyCFunction)THPVariable_detach_, METH_NOARGS, NULL},
   {"double", (PyCFunction)THPVariable_double, METH_NOARGS, NULL},
   {"element_size", (PyCFunction)THPVariable_element_size, METH_NOARGS, NULL},
   {"float", (PyCFunction)THPVariable_float, METH_NOARGS, NULL},
+  {"from_numpy", (PyCFunction)THPVariable_from_numpy, METH_STATIC | METH_O, NULL},
   {"half", (PyCFunction)THPVariable_half, METH_NOARGS, NULL},
   {"int", (PyCFunction)THPVariable_int, METH_NOARGS, NULL},
   {"long", (PyCFunction)THPVariable_long, METH_NOARGS, NULL},
