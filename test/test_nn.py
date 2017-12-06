@@ -2192,6 +2192,41 @@ class TestNN(NNTestCase):
 
                 hx.sum().backward()
 
+    def test_RNN_cell_broadcasting(self):
+        def test(module, is_lstm=False):
+            input = Variable(torch.randn(3, 10))
+            hx = Variable(torch.randn(1, 20), requires_grad=True)
+            if is_lstm:
+                cx = Variable(torch.randn(1, 20), requires_grad=True)
+                hx = (hx, cx)
+            cell = module(10, 20)
+            for i in range(6):
+                hidden = cell(input, hidden)
+            out = hidden[0] + hidden[1] if is_lstm else hidden
+            out.sum().backward()
+
+        test(nn.RNNCell)
+        test(nn.GRUCell)
+        test(nn.LSTMCell, True)
+
+    @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
+    def test_RNN_cell_broadcasting_cuda(self):
+        def test(module, is_lstm=False):
+            input = Variable(torch.randn(3, 10)).cuda()
+            hx = Variable(torch.randn(1, 20), requires_grad=True).cuda()
+            if is_lstm:
+                cx = Variable(torch.randn(1, 20), requires_grad=True).cuda()
+                hx = (hx, cx)
+            cell = module(10, 20).cuda()
+            for i in range(6):
+                hidden = cell(input, hidden)
+            out = hidden[0] + hidden[1] if is_lstm else hidden
+            out.sum().backward()
+
+        test(nn.RNNCell)
+        test(nn.GRUCell)
+        test(nn.LSTMCell, True)
+
     def test_invalid_dropout_p(self):
         v = Variable(torch.ones(1))
         self.assertRaises(ValueError, lambda: nn.Dropout(-0.1))

@@ -21,8 +21,21 @@ def RNNTanhCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
     return hy
 
 
+def _match_hidden_with_input(input, hidden):
+    '''The backend fused kernels don't support broadcasting, so this function
+    broadcasts the hidden batch size to match the input batch size, if
+    possible'''
+    if isinstance(hidden, tuple):
+        assert len(hidden) == 2
+        return (_match_hidden_with_input(input, hidden[0]),
+                _match_hidden_with_input(input, hidden[1]))
+
+    return hidden.expand(input.size(0), hidden.size(1))
+
+
 def LSTMCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
     if input.is_cuda:
+        hidden = _match_hidden_with_input(input, hidden)
         igates = F.linear(input, w_ih)
         hgates = F.linear(hidden[0], w_hh)
         state = fusedBackend.LSTMFused.apply
@@ -47,6 +60,7 @@ def LSTMCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
 def GRUCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
 
     if input.is_cuda:
+        hidden = _match_hidden_with_input(input, hidden)
         gi = F.linear(input, w_ih)
         gh = F.linear(hidden, w_hh)
         state = fusedBackend.GRUFused.apply
