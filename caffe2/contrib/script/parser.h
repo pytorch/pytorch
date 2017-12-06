@@ -127,7 +127,13 @@ struct Parser {
       mult *= -1.0f;
     }
     auto t = L.expect(TK_NUMBER);
-    return c(TK_CONST, t.range, {d(mult * t.doubleValue())});
+    std::string type_ident;
+
+    if (L.cur().kind == TK_IDENT) {
+      Token type_ident_tok = L.expect(TK_IDENT);
+      type_ident = type_ident_tok.text();
+    }
+    return c(TK_CONST, t.range, {d(mult * t.doubleValue()), s(type_ident)});
   }
   TreeRef parseAttributeValue() {
     int kind = L.cur().kind;
@@ -149,8 +155,7 @@ struct Parser {
           auto ident = parseIdent();
           L.expect('=');
           auto v = parseAttributeValue();
-          auto f = s(L.expect(TK_IDENT).text());
-          attributes.push_back(Attribute::create(ident->range(), ident, v, f));
+          attributes.push_back(Attribute::create(ident->range(), ident, v));
         } else {
           inputs.push_back(parseExp());
         }

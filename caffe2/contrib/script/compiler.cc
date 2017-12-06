@@ -81,7 +81,7 @@ struct DefCompiler {
   }
   void emitWhile(const While& stmt) {
     std::string loop_var = fresh();
-    emitConst(0, loop_var); // it needs a definition before loop
+    emitConst(0, loop_var, ""); // it needs a definition before loop
     auto op = cur().add_op();
     op->set_type("While");
     auto cond = op->add_arg();
@@ -151,7 +151,8 @@ struct DefCompiler {
     switch (value->kind()) {
       case TK_CONST: {
         auto v = value->tree(0)->doubleValue();
-        if (attr.format() == "f")
+        auto f = value->tree(1)->stringValue();
+        if (f == "f")
           arg->set_f(v);
         else
           arg->set_i(v);
@@ -159,7 +160,8 @@ struct DefCompiler {
       case TK_LIST:
         for (auto t : value->trees()) {
           auto v = t->tree(0)->doubleValue();
-          if (attr.format() == "f")
+          auto f = t->tree(1)->stringValue();
+          if (f == "f")
             arg->add_floats(v);
           else
             arg->add_ints(v);
@@ -221,23 +223,38 @@ struct DefCompiler {
         return op;
       } break;
       case TK_CONST: {
-        return emitConst(tree->tree(0)->doubleValue(), fresh());
+        return emitConst(
+            tree->tree(0)->doubleValue(),
+            fresh(),
+            tree->tree(1)->stringValue());
       } break;
       default:
         throw ErrorReport(tree) << "NYI: " << tree;
     }
   }
-  OperatorDef* emitConst(double v, const std::string& output) {
+  OperatorDef* emitConst(
+      double v,
+      const std::string& output,
+      const std::string& type_ident) {
     auto op = cur().add_op();
     op->set_type("ConstantFill");
     auto dtype = op->add_arg();
     dtype->set_name("dtype");
-    dtype->set_i(TensorProto_DataType_FLOAT);
-    auto shape = op->add_arg();
-    shape->set_name("shape");
     auto value = op->add_arg();
     value->set_name("value");
-    value->set_f(v);
+    if (type_ident == "f") {
+      dtype->set_i(TensorProto_DataType_FLOAT);
+      value->set_f(v);
+    } else if (type_ident == "LL") {
+      dtype->set_i(TensorProto_DataType_INT64);
+      value->set_i(v);
+    } else {
+      dtype->set_i(TensorProto_DataType_INT32);
+      value->set_i(v);
+    }
+    auto shape = op->add_arg();
+    shape->set_name("shape");
+    shape->add_ints(1);
     op->add_output(output);
     return op;
   }

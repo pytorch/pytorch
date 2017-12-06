@@ -113,7 +113,7 @@ struct Ident : public TreeView {
 
 struct Attribute : public TreeView {
   explicit Attribute(const TreeRef& tree) : TreeView(tree) {
-    tree_->match(TK_ATTRIBUTE, name_, value_, format_);
+    tree_->match(TK_ATTRIBUTE, name_, value_);
   }
   Ident name() const {
     return Ident(name_);
@@ -121,21 +121,13 @@ struct Attribute : public TreeView {
   TreeRef value() const {
     return value_;
   }
-  const std::string& format() const {
-    return format_->stringValue();
-  }
-  static TreeRef create(
-      const SourceRange& range,
-      TreeRef name,
-      TreeRef value,
-      TreeRef format) {
-    return Compound::create(TK_ATTRIBUTE, range, {name, value, format});
+  static TreeRef create(const SourceRange& range, TreeRef name, TreeRef value) {
+    return Compound::create(TK_ATTRIBUTE, range, {name, value});
   }
 
  private:
   TreeRef name_;
   TreeRef value_;
-  TreeRef format_;
 };
 
 struct Apply : public TreeView {
