@@ -318,6 +318,10 @@ def elu(g, input, alpha, inplace=False):
     return g.op("Elu", input, alpha_f=_scalar(alpha))
 
 
+def index_select(g, self, index, dim):
+    return g.op("Gather", self, index, axis_i=dim)
+
+
 # ignore clone operators that are inserted by PyTorch autograd
 def clone(g, input):
     return input
