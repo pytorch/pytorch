@@ -120,7 +120,7 @@ def build_libs(libs):
     if WITH_NINJA:
         my_env["CMAKE_GENERATOR"] = '-GNinja'
         my_env["CMAKE_INSTALL"] = 'ninja install'
-    else:
+    elif not IS_WINDOWS:
         my_env['CMAKE_GENERATOR'] = ''
         my_env['CMAKE_INSTALL'] = 'make install'
     if WITH_SYSTEM_NCCL:
