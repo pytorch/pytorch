@@ -29,7 +29,7 @@ uint64_t CPUGenerator::seed() {
 }
 
 uint64_t CPUGenerator::initialSeed() {
-  return THRandom_seed(generator);
+  return THRandom_initialSeed(generator);
 }
 
 CPUGenerator& CPUGenerator::manualSeed(uint64_t seed) {
