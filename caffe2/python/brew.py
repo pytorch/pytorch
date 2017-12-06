@@ -39,6 +39,7 @@ from caffe2.python.helpers.train import *
 from caffe2.python.helpers.conv import *
 from caffe2.python.helpers.tools import *
 from caffe2.python.helpers.elementwise_linear import *
+from caffe2.python.helpers.control_ops import *
 
 
 class HelperWrapper(object):
@@ -77,6 +78,8 @@ class HelperWrapper(object):
         'elementwise_linear': elementwise_linear,
         'layer_norm': layer_norm,
         'batch_mat_mul' : batch_mat_mul,
+        'cond' : cond,
+        'loop' : loop,
     }
 
     def __init__(self, wrapped):
