@@ -118,6 +118,33 @@ ProfDAGProtos ProfDAGNet::GetOperatorStats() {
   return prof_dag_protos;
 }
 
+// GetPerOperatorCost collects the execution time of each operator, the output
+// is formatted as a map: (netName__opIndex__opType, cost)
+ProfDAGProtos ProfDAGNet::GetPerOperatorCost() {
+  CAFFE_ENFORCE(
+      time_per_op_.size() == operator_nodes_.size(),
+      "Data collected for ",
+      time_per_op_.size(),
+      " ops, expected ",
+      operator_nodes_.size(),
+      " ops.");
+
+  ProfDAGProtos prof_dag_protos;
+  for (int idx = 0; idx < operator_nodes_.size(); idx++) {
+    const auto& op = operator_nodes_[idx].operator_;
+    const auto& def = op->debug_def();
+    const string& op_type = def.type();
+
+    auto buf = prof_dag_protos.add_stats();
+    std::string op_output_name =
+        name_ + "___" + to_string(idx) + "___" + op_type;
+    std::pair<std::string, Stats> op_stat =
+        std::pair<std::string, Stats>(op_output_name, time_per_op_[idx]);
+    buf->CopyFrom(ProtoMsg(op_stat));
+  }
+  return prof_dag_protos;
+}
+
 bool ProfDAGNet::RunAt(int /* unused */, const std::vector<int>& chain) {
   bool success = true;
   Timer timer;
