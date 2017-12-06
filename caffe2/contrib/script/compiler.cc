@@ -204,6 +204,9 @@ struct DefCompiler {
           op->add_input(v);
         }
         op->add_output(fresh());
+        auto broadcast = op->add_arg();
+        broadcast->set_name("broadcast");
+        broadcast->set_i(1);
         return op;
       }
       case TK_APPLY: {
