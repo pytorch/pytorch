@@ -4013,3 +4013,29 @@
     - THTensor* self
     - THSTensor* mask
 ]]
+
+[[
+  name: _indices
+  variants:
+    - method
+  backends:
+    - SparseCPU
+    - SparseCUDA
+  return: THDenseIndexTensor*
+  cname: newIndices
+  arguments:
+     - THTensor* self
+]]
+
+[[
+  name: _values
+  variants:
+    - method
+  backends:
+    - SparseCPU
+    - SparseCUDA
+  return: THDenseTensor*
+  cname: newValues
+  arguments:
+     - THTensor* self
+]]
