@@ -22,7 +22,8 @@ static std::unordered_map<std::string, ParameterType> type_map = {
   {"Generator", ParameterType::GENERATOR},
   {"bool", ParameterType::BOOL},
   {"Storage", ParameterType::STORAGE},
-  {"PyObject*", ParameterType::PYOBJECT}
+  {"PyObject*", ParameterType::PYOBJECT},
+  {"torch.Size", ParameterType::TORCH_SIZES}
 };
 
 FunctionParameter::FunctionParameter(const std::string& fmt, bool keyword_only)
@@ -85,8 +86,9 @@ bool FunctionParameter::check(PyObject* obj) {
     }
     case ParameterType::GENERATOR: return false;
     case ParameterType::BOOL: return PyBool_Check(obj);
-    case ParameterType::STORAGE: return false;
+    case ParameterType::STORAGE: return isStorage(obj);
     case ParameterType::PYOBJECT: return true;
+    case ParameterType::TORCH_SIZES: return THPSize_Check(obj);
     default: throw std::runtime_error("unknown parameter type");
   }
 }
@@ -103,6 +105,7 @@ std::string FunctionParameter::type_name() const {
     case ParameterType::BOOL: return "bool";
     case ParameterType::STORAGE: return "torch.Storage";
     case ParameterType::PYOBJECT: return "object";
+    case ParameterType::TORCH_SIZES: return "torch.Size";
     default: throw std::runtime_error("unknown parameter type");
   }
 }
@@ -140,6 +143,7 @@ FunctionSignature::FunctionSignature(const std::string& fmt)
   : min_args(0)
   , max_args(0)
   , max_pos_args(0)
+  , hidden(false)
   , deprecated(false)
 {
   auto open_paren = fmt.find('(');
@@ -178,7 +182,11 @@ FunctionSignature::FunctionSignature(const std::string& fmt)
   }
 
   if (fmt.substr(last_offset) == "|deprecated") {
+    hidden = true;
+    // TODO: raise warning when parsing deprecated signatures
     deprecated = true;
+  } else if (fmt.substr(last_offset) == "|hidden") {
+    hidden = true;
   }
 
   max_args = params.size();
@@ -420,7 +428,7 @@ void PythonArgParser::print_error(PyObject* args, PyObject* kwargs, PyObject* pa
   std::vector<int> plausible_idxs;
   ssize_t i = 0;
   for (auto& signature : signatures_) {
-    if (num_args >= signature.min_args && num_args <= signature.max_args && !signature.deprecated) {
+    if (num_args >= signature.min_args && num_args <= signature.max_args && !signature.hidden) {
       plausible_idxs.push_back(i);
     }
     i++;
@@ -433,7 +441,7 @@ void PythonArgParser::print_error(PyObject* args, PyObject* kwargs, PyObject* pa
 
   std::vector<std::string> options;
   for (auto& signature : signatures_) {
-    if (!signature.deprecated) {
+    if (!signature.hidden) {
       options.push_back(signature.toString());
     }
   }

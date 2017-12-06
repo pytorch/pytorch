@@ -1,5 +1,6 @@
 #pragma once
 
+#include <ATen/ATen.h>
 #include <Python.h>
 #include <stdint.h>
 #include <stdexcept>

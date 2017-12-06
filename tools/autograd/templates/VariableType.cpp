@@ -63,8 +63,11 @@ std::unique_ptr<Storage> VariableType::storage(size_t size) const {
 std::unique_ptr<Storage> VariableType::storageFromBlob(void * data, int64_t size, const std::function<void(void*)> & deleter) const {
   return baseType->storageFromBlob(data, size, deleter);
 }
+std::unique_ptr<Storage> VariableType::unsafeStorageFromTH(void * th_pointer, bool retain) const {
+  return baseType->unsafeStorageFromTH(th_pointer, retain);
+}
 Tensor VariableType::unsafeTensorFromTH(void * th_pointer, bool retain) const {
-  return baseType->unsafeTensorFromTH(th_pointer, retain);
+  return make_variable(baseType->unsafeTensorFromTH(th_pointer, retain), false);
 }
 std::unique_ptr<Generator> VariableType::generator() const {
   return baseType->generator();

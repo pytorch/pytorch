@@ -30,12 +30,13 @@
 #include "torch/csrc/utils/object_ptr.h"
 #include "torch/csrc/autograd/python_variable.h"
 #include "torch/csrc/utils/python_numbers.h"
+#include "torch/csrc/DynamicTypes.h"
 
 namespace torch {
 
 enum class ParameterType {
   TENSOR, SCALAR, INT64, DOUBLE, TENSOR_LIST, INT_LIST, GENERATOR,
-  BOOL, STORAGE, PYOBJECT
+  BOOL, STORAGE, PYOBJECT, TORCH_SIZES
 };
 
 struct FunctionParameter;
@@ -78,7 +79,7 @@ struct PythonArgs {
   inline std::vector<at::Tensor> tensorlist(int i);
   inline std::vector<int64_t> intlist(int i);
   inline at::Generator* generator(int i);
-  inline at::Storage& storage(int i);
+  inline std::unique_ptr<at::Storage> storage(int i);
   inline PyObject* pyobject(int i);
   inline int64_t toInt64(int i);
   inline double toDouble(int i);
@@ -97,6 +98,7 @@ struct FunctionSignature {
   ssize_t min_args;
   ssize_t max_args;
   ssize_t max_pos_args;
+  bool hidden;
   bool deprecated;
 };
 
@@ -205,8 +207,9 @@ inline at::Generator* PythonArgs::generator(int i) {
   throw std::runtime_error("PythonArgs::generator not implemented");
 }
 
-inline at::Storage& PythonArgs::storage(int i) {
-  throw std::runtime_error("PythonArgs::storage not implemented");
+inline std::unique_ptr<at::Storage> PythonArgs::storage(int i) {
+  if (!args[i]) return nullptr;
+  return createStorage(args[i]);
 }
 
 inline PyObject* PythonArgs::pyobject(int i) {
