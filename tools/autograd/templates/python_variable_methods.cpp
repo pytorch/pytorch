@@ -12,6 +12,7 @@
 #include "torch/csrc/utils/python_arg_parser.h"
 #include "torch/csrc/utils/python_numbers.h"
 #include "torch/csrc/utils/python_tuples.h"
+#include "torch/csrc/utils/tensor_list.h"
 
 #include "python_variable_methods_dispatch.h"
 
@@ -327,6 +328,14 @@ static PyObject * THPVariable_storage_type(PyObject* self, PyObject* arg)
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject * THPVariable_tolist(PyObject* self, PyObject* args)
+{
+  HANDLE_TH_ERRORS
+  auto self_ = reinterpret_cast<THPVariable*>(self)->cdata;
+  return THPUtils_tensorToList(self_.data());
+  END_HANDLE_TH_ERRORS
+}
+
 // generated methods start here
 
 ${py_methods}
@@ -374,6 +383,7 @@ PyMethodDef variable_methods[] = {
   {"storage", (PyCFunction)THPVariable_storage, METH_NOARGS, NULL},
   {"storage_type", (PyCFunction)THPVariable_storage_type, METH_NOARGS, NULL},
   {"stride", (PyCFunction)THPVariable_stride, METH_VARARGS | METH_KEYWORDS, NULL},
+  {"tolist", (PyCFunction)THPVariable_tolist, METH_NOARGS, NULL},
   ${py_method_defs}
   {NULL}
 };
