@@ -1,0 +1,41 @@
+[["dec_out", [6, 1, 44463]], ["avg_attn", [6, 1, 20]], ["scores_t", [1, 6]]]
+beam_search
+["scores_t"]
+
+def beam_search(dec_out, avg_attn, scores_t) -> ():
+    timestep = 0
+    max_out_seq_len = 20
+    while timestep < max_out_seq_len:
+        # Find the best score in each hypothesis
+        best_scores_per_hypo, best_tokens_per_hypo = TopK(dec_out, k=6)
+        scores_t_squeezed = Squeeze(scores_t, dims=[0])
+
+        # Add the best score in each hypothesis to the cumulative score so far
+        output_scores = best_scores_per_hypo + scores_t_squeezed
+
+        # Flatten scores so we can find the best overall out of all hypotheses
+        output_scores_flattened, _ = Reshape(output_scores, shape=[-1])
+
+        # TODO: figure out
+        slice_end = Conditional(timestep == 0, 6, -1)
+        # slice_end = timestep == 0 ? 6 : -1
+        output_scores_flattened_slice = Slice(output_scores_flattened, 0, slice_end)
+        output_scores_flattened_slice, _ = Reshape(output_scores_flattened_slice, shape=[1, -1])
+
+
+        # Find top K out of all
+        scores_t, best_indices = TopK(output_scores_flattened_slice, k=6)
+
+        # Integer floor divide on indices finds the association back to original hypotheses
+        # Use this to reorder states
+        hypo_t_int64 = best_indices / 6LL
+
+
+        # Reorder attentions
+        attention_t = Gather(avg_attn, hypo_t_int64)
+        attention_t, _ = Reshape(attention_t, shape=[1, 6, -1])
+        best_tokens_per_hypo_flatten, _ = Reshape(best_tokens_per_hypo, shape=[-1])
+        tokens_t_int64 = Gather(best_tokens_per_hypo_flatten, best_indices)
+        tokens_t = Cast(tokens_t_int64, to=2)
+
+        timestep = timestep + 1
