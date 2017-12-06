@@ -22,8 +22,9 @@ class TestCaffe2Script(hu.HypothesisTestCase):
                   r = t
               else:
                   r = f
-              r = Add(r,3,broadcast=1i)
-          def testWhile(m,r) -> (r):
+              r = Add(r,3f,broadcast=1i)
+          def testWhile(r) -> (r):
+              m = 0
               while m < 4:
                   r = r + r
                   m = m + 1
@@ -83,7 +84,6 @@ class TestCaffe2Script(hu.HypothesisTestCase):
         np.random.seed(int(seed))
         inputs = {}
         r = inputs['r'] = np.ones([3, 3]).astype(np.float32)
-        m = inputs['m'] = np.zeros([]).astype(np.float32)
 
         for name, inp in inputs.items():
             workspace.FeedBlob(name, inp)
@@ -92,6 +92,7 @@ class TestCaffe2Script(hu.HypothesisTestCase):
         CU.define(self.test_program)
         CU.create_net('testWhile').run()
 
+        m = 0
         while m < 4:
             r = r + r
             m = m + 1
