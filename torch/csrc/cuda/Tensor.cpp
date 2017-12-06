@@ -12,7 +12,8 @@
 
 #include "torch/csrc/cuda/override_macros.h"
 #include "torch/csrc/copy_utils.h"
-#include "DynamicTypes.h"
+#include "torch/csrc/DynamicTypes.h"
+#include "torch/csrc/utils/tensor_numpy.h"
 
 //generic_include THC torch/csrc/generic/Tensor.cpp
 

@@ -88,6 +88,15 @@ PyTypeObject* getPyTypeObject(const at::Storage& storage)
   throw std::invalid_argument("unsupported Storage type");
 }
 
+at::Type& getATenType(PyTypeObject* type)
+{
+  auto it = pytype_to_attype.find(type);
+  if (it != pytype_to_attype.end()) {
+    return *it->second;
+  }
+  throw std::invalid_argument("unsupported Python type");
+}
+
 at::Tensor createTensor(PyObject *data)
 {
   auto tensor_type = pytype_to_attype.at(Py_TYPE(data));
