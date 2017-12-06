@@ -117,12 +117,13 @@ def build_libs(libs):
         build_libs_cmd = ['bash', 'torch/lib/build_libs.sh']
     my_env = os.environ.copy()
     my_env["PYTORCH_PYTHON"] = sys.executable
-    if WITH_NINJA:
-        my_env["CMAKE_GENERATOR"] = '-GNinja'
-        my_env["CMAKE_INSTALL"] = 'ninja install'
-    else:
-        my_env['CMAKE_GENERATOR'] = ''
-        my_env['CMAKE_INSTALL'] = 'make install'
+    if not IS_WINDOWS:
+        if WITH_NINJA:
+            my_env["CMAKE_GENERATOR"] = '-GNinja'
+            my_env["CMAKE_INSTALL"] = 'ninja install'
+        else:
+            my_env['CMAKE_GENERATOR'] = ''
+            my_env['CMAKE_INSTALL'] = 'make install'
     if WITH_SYSTEM_NCCL:
         my_env["NCCL_ROOT_DIR"] = NCCL_ROOT_DIR
     if WITH_CUDA:
