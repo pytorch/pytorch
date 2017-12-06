@@ -26,7 +26,10 @@ class TestCaffe2Script(hu.HypothesisTestCase):
           def testWhile(r) -> (r):
               m = 0
               while m < 4:
-                  r = r + r
+                  # Plus operator automatically broadcasts, and we cannot
+                  # do in-place B and C arguments when we broadcast, so use
+                  # an explicit Add op.
+                  r = Add(r, r)
                   m = m + 1
       """
 
