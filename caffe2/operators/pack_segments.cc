@@ -110,6 +110,54 @@ bool PackSegmentsOp<CPUContext>::DoRunWithType2() {
   return true;
 }
 
+template <>
+template <typename T>
+bool UnpackSegmentsOp<CPUContext>::DoRunWithType() {
+  return DispatchHelper<
+      TensorTypes2<char, int32_t, int64_t, float, std::string>,
+      T>::call(this, Input(DATA));
+}
+
+template <>
+template <typename T, typename Data_T>
+bool UnpackSegmentsOp<CPUContext>::DoRunWithType2() {
+  const auto& data = Input(DATA);
+  const auto& lengths = Input(LENGTHS);
+  auto* output = Output(0);
+
+  CAFFE_ENFORCE(data.ndim() >= 2, "DATA should be at least 2-D");
+  CAFFE_ENFORCE(lengths.ndim() == 1, "LENGTH should be 1-D");
+
+  const T* l = lengths.template data<T>();
+
+  T total_l = std::accumulate(l, l + lengths.dim(0), 0);
+
+  auto shape = data.dims();
+  CAFFE_ENFORCE(
+      shape[0] == lengths.dim(0), "LENGTH should match DATA in dimension 0");
+  shape.erase(shape.begin());
+  shape[0] = total_l;
+  output->Resize(shape);
+  // create output tensor
+  auto* out = static_cast<char*>(output->raw_mutable_data(data.meta()));
+  if (!(data.dim(0) * data.dim(1))) {
+    return true;
+  }
+  int block_size = data.size() / (data.dim(0) * data.dim(1));
+  int block_bytesize = data.nbytes() / (data.dim(0) * data.dim(1));
+  const auto* d = static_cast<const char*>(data.raw_data());
+  int start = 0;
+  for (int i = 0; i < lengths.dim(0); ++i) {
+    context_.template CopyItems<CPUContext, CPUContext>(
+        data.meta(),
+        l[i] * block_size,
+        d + block_bytesize * data.dim(1) * i,
+        out + block_bytesize * start);
+    start += l[i];
+  }
+  return true;
+}
+
 REGISTER_CPU_OPERATOR(PackSegments, PackSegmentsOp<CPUContext>);
 REGISTER_CPU_OPERATOR(UnpackSegments, UnpackSegmentsOp<CPUContext>);
 

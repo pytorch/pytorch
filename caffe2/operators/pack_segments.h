@@ -66,9 +66,8 @@ class PackSegmentsOp final : public Operator<Context> {
   bool return_presence_mask_;
 
   // Scratch space required by the CUDA version
-  Tensor<Context> lengths_prefix_sum_buffer_;
-  Tensor<Context> lengths_prefix_sum_;
-  Tensor<Context> dev_max_length_buffer_;
+  Tensor<Context> dev_buffer_;
+  Tensor<Context> dev_lengths_prefix_sum_;
   Tensor<Context> dev_max_length_;
   Tensor<CPUContext> host_max_length_;
 };
@@ -85,49 +84,20 @@ class UnpackSegmentsOp final : public Operator<Context> {
   }
 
   template <typename T>
-  bool DoRunWithType() {
-    const auto& data = Input(DATA);
-    const auto& lengths = Input(LENGTHS);
-    auto* output = Output(0);
+  bool DoRunWithType();
 
-    CAFFE_ENFORCE(data.ndim() >= 2, "DATA should be at least 2-D");
-    CAFFE_ENFORCE(lengths.ndim() == 1, "LENGTH should be 1-D");
-
-    const T* l = lengths.template data<T>();
-
-    T max_length = 0;
-    for (T i = 0; i < lengths.dim(0); ++i) {
-      max_length = std::max(max_length, l[i]);
-    }
-    T total_l = std::accumulate(l, l + lengths.dim(0), 0);
-
-    auto shape = data.dims();
-    CAFFE_ENFORCE(
-        shape[0] == lengths.dim(0), "LENGTH should match DATA in dimension 0");
-    shape.erase(shape.begin());
-    shape[0] = total_l;
-    output->Resize(shape);
-    // create output tensor
-    auto* out = static_cast<char*>(output->raw_mutable_data(data.meta()));
-    if (!(data.dim(0) * data.dim(1))) {
-      return true;
-    }
-    int block_size = data.size() / (data.dim(0) * data.dim(1));
-    int block_bytesize = data.nbytes() / (data.dim(0) * data.dim(1));
-    const auto* d = static_cast<const char*>(data.raw_data());
-    int start = 0;
-    for (int i = 0; i < lengths.dim(0); ++i) {
-      context_.template CopyItems<Context, Context>(
-          data.meta(),
-          l[i] * block_size,
-          d + block_bytesize * data.dim(1) * i,
-          out + block_bytesize * start);
-      start += l[i];
-    }
-    return true;
-  }
+  template <typename T, typename Data_T>
+  bool DoRunWithType2();
 
   INPUT_TAGS(LENGTHS, DATA);
+
+ private:
+  Tensor<Context> dev_buffer_;
+  Tensor<Context> dev_lengths_prefix_sum_;
+  Tensor<Context> dev_max_length_;
+  Tensor<Context> dev_num_cell_;
+  Tensor<CPUContext> host_max_length_;
+  Tensor<CPUContext> host_num_cell_;
 };
 
 } // namespace caffe2
