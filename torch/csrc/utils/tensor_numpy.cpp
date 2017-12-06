@@ -28,7 +28,8 @@ using namespace at;
 
 namespace torch { namespace utils {
 
-static std::vector<npy_intp> cast_numpy(IntList x) {
+static std::vector<npy_intp> to_numpy_shape(IntList x) {
+  // shape and stride conversion from int64_t to npy_intp
   auto nelem = x.size();
   auto result = std::vector<npy_intp>(nelem);
   for (size_t i = 0; i < nelem; i++) {
@@ -37,7 +38,8 @@ static std::vector<npy_intp> cast_numpy(IntList x) {
   return result;
 }
 
-static std::vector<int64_t> cast_aten(int ndim, npy_intp* values) {
+static std::vector<int64_t> to_aten_shape(int ndim, npy_intp* values) {
+  // shape and stride conversion from npy_intp to int64_t
   auto result = std::vector<int64_t>(ndim);
   for (int i = 0; i < ndim; i++) {
     result[i] = static_cast<int64_t>(values[i]);
@@ -50,8 +52,8 @@ static ScalarType dtype_to_aten(int dtype);
 
 PyObject* tensor_to_numpy(const at::Tensor& tensor) {
   auto dtype = aten_to_dtype(tensor.type());
-  auto sizes = cast_numpy(tensor.sizes());
-  auto strides = cast_numpy(tensor.strides());
+  auto sizes = to_numpy_shape(tensor.sizes());
+  auto strides = to_numpy_shape(tensor.strides());
   // NumPy strides use bytes. Torch strides use element counts.
   auto element_size_in_bytes = tensor.type().elementSizeInBytes();
   for (auto& stride : strides) {
@@ -91,8 +93,8 @@ at::Tensor tensor_from_numpy(PyObject* obj) {
 
   auto array = (PyArrayObject*)obj;
   int ndim = PyArray_NDIM(array);
-  auto sizes = cast_aten(ndim, PyArray_DIMS(array));
-  auto strides = cast_aten(ndim, PyArray_STRIDES(array));
+  auto sizes = to_aten_shape(ndim, PyArray_DIMS(array));
+  auto strides = to_aten_shape(ndim, PyArray_STRIDES(array));
   // NumPy strides use bytes. Torch strides use element counts.
   auto element_size_in_bytes = PyArray_ITEMSIZE(array);
   for (auto& stride : strides) {
