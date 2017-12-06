@@ -969,10 +969,27 @@ kernel void concat(
 
 using RoIT = half;
 using RoIT4 = half4;
-kernel void roi_warp(texture2d_array<half, access::sample> in[[texture(0)]],
-                     texture2d_array<half, access::write> out[[texture(1)]],
+constant bool rw_has_in_arr = (ushort_arg_3 > 1 ||  ushort_arg_2 > 4);
+constant bool rw_has_out_arr = (ushort_arg_4 > 1 || ushort_arg_2 > 4);
+constant bool rw_has_in_tex = (!rw_has_in_arr);
+constant bool rw_has_out_tex = (!rw_has_out_arr);
+kernel void roi_warp(texture2d_array<half, access::sample> ina[[texture(0), function_constant(rw_has_in_arr)]],
+                     texture2d<half, access::sample> in[[texture(0), function_constant(rw_has_in_tex)]],
+                     texture2d_array<half, access::write> outa[[texture(1), function_constant(rw_has_out_arr)]],
+                     texture2d<half, access::write> out[[texture(1), function_constant(rw_has_out_tex)]],
                      constant half4* rois[[buffer(0)]],
                      ushort3 gid[[thread_position_in_grid]]) {
+  ushort out_width, out_height;
+  if (rw_has_out_arr) {
+    out_width = outa.get_width();
+    out_height = outa.get_height();
+  } else {
+    out_width = out.get_width();
+    out_height = out.get_height();
+  }
+  if (gid.x >= out_width || gid.y >= out_height) {
+    return;
+  }
   constexpr sampler s2(coord::pixel, address::clamp_to_edge, filter::linear);
 
   const half spatial_scale = half(ushort_arg_0) / 10000;
@@ -993,10 +1010,10 @@ kernel void roi_warp(texture2d_array<half, access::sample> in[[texture(0)]],
   const RoIT roi_width = max(roi_end_w - roi_start_w, (RoIT)1.);
   const RoIT roi_height = max(roi_end_h - roi_start_h, (RoIT)1.);
 
-  const RoIT bin_size_h = static_cast<RoIT>(roi_height) / static_cast<RoIT>(out.get_height());
-  const RoIT bin_size_w = static_cast<RoIT>(roi_width) / static_cast<RoIT>(out.get_width());
-  const ushort roi_bin_grid_h = sampling_ratio > 0 ? sampling_ratio : ceil(roi_height / static_cast<RoIT>(out.get_height()));
-  const ushort roi_bin_grid_w = sampling_ratio > 0 ? sampling_ratio : ceil(roi_width / static_cast<RoIT>(out.get_width()));
+  const RoIT bin_size_h = static_cast<RoIT>(roi_height) / static_cast<RoIT>(out_height);
+  const RoIT bin_size_w = static_cast<RoIT>(roi_width) / static_cast<RoIT>(out_width);
+  const ushort roi_bin_grid_h = sampling_ratio > 0 ? sampling_ratio : ceil(roi_height / static_cast<RoIT>(out_height));
+  const ushort roi_bin_grid_w = sampling_ratio > 0 ? sampling_ratio : ceil(roi_width / static_cast<RoIT>(out_width));
   const ushort iy_upper = (sampling_ratio > 0) ? roi_bin_grid_h : (roi_bin_grid_h + 1);
   const ushort ix_upper = (sampling_ratio > 0) ? roi_bin_grid_w : (roi_bin_grid_w + 1);
 
@@ -1009,11 +1026,19 @@ kernel void roi_warp(texture2d_array<half, access::sample> in[[texture(0)]],
           roi_start_h + ph * bin_size_h + iy * bin_size_h / static_cast<RoIT>(roi_bin_grid_h);
       const RoIT x =
           roi_start_w + pw * bin_size_w + ix * bin_size_w / static_cast<RoIT>(roi_bin_grid_w);
-      output_val += in.sample(s2, float2(x + 0.5, y + 0.5), c);
+      if (rw_has_in_arr) {
+        output_val += ina.sample(s2, float2(x + 0.5, y + 0.5), c);
+      } else {
+        output_val += in.sample(s2, float2(x + 0.5, y + 0.5));
+      }
     }
   }
   output_val /= count;
-  out.write(static_cast<half4>(output_val), gid.xy, gid.z);
+  if (rw_has_out_arr) {
+    outa.write(static_cast<half4>(output_val), gid.xy, gid.z);
+  } else {
+    out.write(static_cast<half4>(output_val), gid.xy);
+  }
 }
 
 kernel void resize_nearest(texture2d_array<half, access::sample> in[[texture(0)]],

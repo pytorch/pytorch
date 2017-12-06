@@ -1992,10 +1992,12 @@ class MPSCNNRoIWarpOp final : public Operator<CPUContext> {
         [commandBuffer computeCommandEncoder];
     id<MTLComputePipelineState> state =
         getMPSCNNContext().getSpecializedPipelineState(
-            kernelFor(output, @"roi_warp", @"roi_warp_nonarray"),
+            @"roi_warp",
             {{ushort(spatial_scale_ * 10000),
               ushort(sampling_ratio_),
-              ushort(featureChannels)}});
+              ushort(featureChannels),
+              ushort(X.numberOfImages),
+              ushort(output.numberOfImages)}});
 
     [encoder setComputePipelineState:state];
     [encoder setBuffer:roiBuffer_ offset:0 atIndex:0];
