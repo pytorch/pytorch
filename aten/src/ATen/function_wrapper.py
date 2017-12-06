@@ -182,6 +182,8 @@ TYPE_RETURN = {
     'THBoolTensor*': 'Tensor',
     'THIntegerTensor*': 'Tensor',
     'THSTensor*': 'Tensor',
+    'THDenseTensor*': 'Tensor',
+    'THDenseIndexTensor*': 'Tensor',
     'real': 'Tensor',
     'accreal': 'Tensor',
     'long': 'int64_t',
@@ -1031,11 +1033,17 @@ def create_derived(backend_type_env, declarations):
         elif ret['kind'] == 'type':
             assert len(calls) == 1
             call = calls[0]
-            if ret['type'] == 'THTensor*':
+            return_tensor_map = {
+                'THTensor*': '${Tensor}',
+                'THDenseTensor*': '${DenseTensor}',
+                'THDenseIndexTensor*': '${DenseBackend}LongTensor',
+            }
+            if ret['type'] in return_tensor_map.keys():
                 maybe_scalar = "->maybeScalar({})".format(scalar_check) \
                                if scalar_check is not None \
                                else ""
-                return_tensor = "return Tensor((new ${Tensor}(context,${arg_name}))${maybe_scalar},false);"
+                tensor_ctor = return_tensor_map[ret['type']]
+                return_tensor = "return Tensor((new %s(context,${arg_name}))${maybe_scalar},false);" % tensor_ctor
                 body.append(CodeTemplate(return_tensor).substitute(
                     env, arg_name=call, maybe_scalar=maybe_scalar))
             # return the same underlying Tensor type for both real and accreal; this ensures

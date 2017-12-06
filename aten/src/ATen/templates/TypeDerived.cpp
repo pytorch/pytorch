@@ -11,6 +11,8 @@
 #include "ATen/${Backend}IntTensor.h"
 #include "ATen/${Backend}LongTensor.h"
 #include "ATen/${SparseTensor}.h"
+#include "ATen/${DenseTensor}.h"
+#include "ATen/${DenseBackend}LongTensor.h"
 #include "ATen/Allocator.h"
 #include "ATen/Utils.h"
 #include "ATen/WrapDimUtils.h"
