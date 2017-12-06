@@ -305,40 +305,51 @@ double THRandom_standard_gamma(THGenerator *_generator, double alpha) {
   }
 }
 
+// TODO Replace this with more accurate digamma().
+static inline double _digamma(double x) {
+  const double eps = x * 1e-2;
+  return (lgamma(x + eps) - lgamma(x - eps)) / (eps + eps);
+}
+
 double THRandom_standard_gamma_grad(double x, double alpha) {
-    // Use asymptotic approximation for small x:
-    // pdf(x) = x^(alpha - 1) / Gamma(alpha)
-    if (x < 0.001) {
-        const double eps = alpha * 1e-2;
-        const double digamma_alpha = (lgamma(alpha + eps) - lgamma(alpha - eps)) / (2.0 * eps);
-        const double result = -x / alpha * (log(x) - 1 / alpha - digamma_alpha);
-        return isnan(result) ? 0.0 : result;
-    }
+  // Use an asymptotic approximation for small x.
+  if (x < 0.2) {
+    const double a0 = 1.0 / alpha;
+    const double a1 = 1.0 / (alpha + 1.0);
+    const double a2 = 1.0 / (alpha + 2.0);
+    const double pow_x_alpha = pow(x, alpha);
+    const double gamma_pdf = pow(x, alpha - 1.0) * exp(-x);
+    const double gamma_cdf = pow_x_alpha * (a0 - x*a1 + 0.5*x*x*a2);
+    const double gamma_cdf_alpha = -_digamma(alpha) * gamma_cdf
+        + pow_x_alpha * log(x) * (a0 - x*a1 + 0.5*x*x*a2*a2)
+        - pow_x_alpha * (a0*a0 - x*a1*a1 + 0.5*x*x*a2*a2);
+    const double result = -gamma_cdf_alpha / gamma_pdf;
+    return isnan(result) ? 0.0 : result;
+  }
 
-    // Use an asymptotic Normal approximation for large alpha:
-    // x ~ Normal(mean=alpha, std=sqrt(alpha))
-    if (alpha > 30.0) {
-        return sqrt(x / alpha);
-    }
+  // Use an asymptotic approximation for large alpha.
+  if (alpha > 50.0) {
+    return sqrt(x / alpha);
+  }
 
-    // Use a bivariate rational approximation to the reparameterized gradient.
-    const double u = log(x / alpha);
-    const double v = log(alpha);
-    static const double coef_uv[3][8] = {
-      {0.1606678, -0.11522799, 0.033979559, -0.0036550799,
-       1.0, 0.20731141, 0.067549705, 0.0022689283},
-      {0.50972793, 0.088434194, 0.039248477, 0.00078142115,
-       0.0017221762, 0.0087442751, -0.0028899172, -0.00025318191},
-      {-0.044541408, -0.0023919443, -0.0036231108, -0.00025103067,
-       0.002784394, 0.00028505613, 1.3238159e-05, -8.6837586e-07},
-    };
-    double coef_v[8];
-    for (int i = 0; i < 8; ++ i) {
-        coef_v[i] = coef_uv[0][i] + u * (coef_uv[1][i] + u * coef_uv[2][i]);
-    }
-    const double p = coef_v[0] + v * (coef_v[1] + v * (coef_v[2] + v * coef_v[3]));
-    const double q = coef_v[4] + v * (coef_v[5] + v * (coef_v[6] + v * coef_v[7]));
-    return exp(p / q);
+  // Use a bivariate rational approximation to the reparameterized gradient.
+  const double u = log(x / alpha);
+  const double v = log(alpha);
+  static const double coef_uv[3][8] = {
+    {0.16028008, -0.088064309, 0.019630876, -0.0016920282,
+     1.0, 0.36659853, 0.10843863, 0.0066895454},
+    {0.521894, 0.16095838, 0.06237597, 0.0023884253,
+     0.083457714, 0.0073297628, -0.0059299053, -0.00093720389},
+    {-0.0031143957, -0.012143877, -0.0057656484, -0.00064847254,
+     0.0087262576, -0.00022820524, 1.8871047e-05, 9.6307964e-06},
+  };
+  double coef_v[8];
+  for (int i = 0; i < 8; ++ i) {
+      coef_v[i] = coef_uv[0][i] + u * (coef_uv[1][i] + u * coef_uv[2][i]);
+  }
+  const double p = coef_v[0] + v * (coef_v[1] + v * (coef_v[2] + v * coef_v[3]));
+  const double q = coef_v[4] + v * (coef_v[5] + v * (coef_v[6] + v * coef_v[7]));
+  return exp(p / q);
 }
 
 double THRandom_cauchy(THGenerator *_generator, double median, double sigma)

@@ -169,7 +169,7 @@ class TestDistributions(TestCase):
     # This is a randomized test.
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_gamma_sample_grad(self):
-        self._set_rng_seed()
+        self._set_rng_seed(1)
         num_samples = 100
         for alpha in [1e-3, 1e-2, 1e-1, 1e0, 1e1, 1e2, 1e3, 1e4]:
             alphas = Variable(torch.Tensor([alpha] * num_samples), requires_grad=True)
