@@ -417,7 +417,8 @@ def load_derivatives(path, declarations_by_signature):
 
         # Finally, let us set up the derivative information
         derivatives = []
-        for raw_names, formula in defn.items():
+        for raw_names in sorted(defn.keys()):
+            formula = defn[raw_names]
             names = split_names(raw_names)
             output_indices = []
             args = []
