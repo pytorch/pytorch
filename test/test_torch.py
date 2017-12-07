@@ -4224,11 +4224,13 @@ class TestTorch(TestCase):
         b += [(t1.storage(), t1.storage(), t2.storage())]
         b += [a[0].storage()[0:2]]
         for use_name in (False, True):
-            with tempfile.NamedTemporaryFile() as f:
-                handle = f if not use_name else f.name
-                torch.save(b, handle)
-                f.seek(0)
-                c = torch.load(handle)
+            f = tempfile.NamedTemporaryFile(delete=False)
+            handle = f.name if use_name else f
+            torch.save(b, handle)
+            f.seek(0)
+            c = torch.load(handle)
+            f.close()
+            os.unlink(f.name)
             self.assertEqual(b, c, 0)
             self.assertTrue(isinstance(c[0], torch.FloatTensor))
             self.assertTrue(isinstance(c[1], torch.FloatTensor))
@@ -4393,6 +4395,7 @@ class TestTorch(TestCase):
         self.assertEqual(floats.size(), 1)
         self.assertEqual(floats[0], 2.25)
 
+    @unittest.skipIf(sys.platform == "win32", "TODO: need to fix this test case for Windows")
     def test_from_file(self):
         size = 10000
         with tempfile.NamedTemporaryFile() as f:

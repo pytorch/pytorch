@@ -188,6 +188,7 @@ class TestDataLoader(TestCase):
         next(loader1_it)
         next(loader2_it)
 
+    @unittest.skipIf(sys.platform == "win32", "TODO: need to fix this test case for Windows")
     def test_segfault(self):
         def _test_segfault():
             sys.stderr.close()
@@ -204,6 +205,7 @@ class TestDataLoader(TestCase):
         finally:
             p.terminate()
 
+    @unittest.skipIf(sys.platform == "win32", "TODO: need to fix this test case for Windows")
     def test_timeout(self):
         def _test_timeout():
             sys.stderr.close()
