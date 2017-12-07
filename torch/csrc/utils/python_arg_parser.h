@@ -202,7 +202,10 @@ inline bool PythonArgs::isNone(int i) {
 
 inline at::Generator* PythonArgs::generator(int i) {
   if (!args[i]) return nullptr;
-  throw std::runtime_error("PythonArgs::generator not implemented");
+  if (!THPGenerator_Check(args[i])) {
+    type_error("expected Generator as argument %d, but got %s", i, THPUtils_typename(args[i]));
+  }
+  return reinterpret_cast<THPGenerator*>(args[i])->cdata;
 }
 
 inline at::Storage& PythonArgs::storage(int i) {

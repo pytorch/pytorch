@@ -134,7 +134,8 @@
 - name: cat(TensorList tensors, int64_t dim)
   tensors: cat_tensors_backward(grad, to_arg_sizes(tensors, dim), dim)
 
-- name: cauchy  # TODO: reinforce
+- name: cauchy(Tensor self, double median, double sigma, Generator generator)
+  self: zeros_like(grad)
 
 - name: ceil(Tensor self)
   self: zeros_like(grad)
@@ -213,6 +214,9 @@
 
 - name: expand(Tensor self, IntList size)
   self: reduce_to(grad, self.sizes())
+
+- name: exponential(Tensor self, double lambd, Generator generator)
+  self: zeros_like(grad)
 
 - name: eye  # fallthrough
 
@@ -415,6 +419,9 @@
 - name: norm(Tensor self, Scalar p, int64_t dim, bool keepdim)
   self: norm_backward(grad, self, p, destination, dim, keepdim)
 
+- name: normal(Tensor self, double mean, double std, Generator generator)
+  self: zeros_like(grad)
+
 - name: numel  # fallthrough
 - name: ones  # fallthrough
 
@@ -466,6 +473,7 @@
 - name: rand  # fallthrough
 - name: randn  # fallthrough
 - name: randperm  # fallthrough
+
 - name: range  # fallthrough
 
 - name: reciprocal(Tensor self)
@@ -598,7 +606,8 @@
 - name: unfold(Tensor self, int64_t dimension, int64_t size, int64_t step)
   self: unfold_backward(grad, self.sizes(), dimension, size, step)
 
-- name: uniform  # fallthrough
+- name: uniform(Tensor self, double from, double to, Generator generator)
+  self: zeros_like(grad)
 
 - name: unsqueeze(Tensor self, int64_t dim)
   self: grad.squeeze(dim)

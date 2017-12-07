@@ -83,7 +83,7 @@ bool FunctionParameter::check(PyObject* obj) {
       // if a size is specified (e.g. IntList[2]) we also allow passing a single int
       return size > 0 && THPUtils_checkLong(obj);
     }
-    case ParameterType::GENERATOR: return false;
+    case ParameterType::GENERATOR: return THPGenerator_Check(obj);
     case ParameterType::BOOL: return PyBool_Check(obj);
     case ParameterType::STORAGE: return false;
     case ParameterType::PYOBJECT: return true;
