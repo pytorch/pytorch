@@ -525,7 +525,8 @@ class TestTorch(TestCase):
     @staticmethod
     def _test_neg(self, cast):
         float_types = ['torch.DoubleTensor', 'torch.FloatTensor', 'torch.LongTensor']
-        int_types = ['torch.IntTensor', 'torch.ShortTensor', 'torch.ByteTensor']
+        int_types = ['torch.IntTensor', 'torch.ShortTensor', 'torch.ByteTensor',
+                     'torch.CharTensor']
 
         for t in float_types + int_types:
             if t in float_types:
