@@ -20,8 +20,8 @@ for ex in example_files:
         CU.define(f.read())
 
     # Initialize workspace with required inputs
-    for name, shape in inits:
-        workspace.FeedBlob(name, np.random.rand(*shape).astype(np.float32))
+    for name, shape, dt in inits:
+        workspace.FeedBlob(name, np.random.rand(*shape).astype(np.dtype(dt)))
 
     net = CU.create_net(net_name)
     net.run()

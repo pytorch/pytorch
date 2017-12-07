@@ -1,4 +1,4 @@
-[["dec_out", [6, 1, 44463]], ["avg_attn", [6, 1, 20]], ["scores_t", [1, 6]]]
+[["dec_out", [6, 1, 44463], "float32"], ["avg_attn", [6, 1, 20], "float32"], ["scores_t", [1, 6], "float32"]]
 beam_search
 ["scores_t"]
 
@@ -6,6 +6,9 @@ def beam_search(dec_out, avg_attn, scores_t) -> ():
     timestep = 0
     max_out_seq_len = 20
     while timestep < max_out_seq_len:
+        # TODO: once we have a metaprogramming facility we need to insert the
+        # body of the post_eos_penalty here programmatically
+
         best_scores_per_hypo, best_tokens_per_hypo = dec_out.TopK(k=6)
 
         # Add the best score in each hypothesis to the cumulative score so far
