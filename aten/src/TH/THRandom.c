@@ -367,7 +367,8 @@ static inline double beta_grad_alpha_small(double x, double alpha, double beta) 
           +a1 * a1 + b2 * x / 2 * (
           -a2 * a2 + b3 * x / 3 * (
           +a3)));
-  return -const_cdf_alpha * one_over_const_pdf;
+  const double result = -const_cdf_alpha * one_over_const_pdf;
+  return isnan(result) ? 0.0 : result;
 }
 
 // Approximate reparameterized gradient of Beta(x,alpha,beta) wrt beta.
@@ -389,7 +390,8 @@ static inline double beta_grad_beta_small(double x, double alpha, double beta) {
                                -a1 + x / 2 * (
                                +a2 * (2 * beta - 3) + x / 3 * (
                                -a3 * (3 * beta * beta - 12 * beta + 11))));
-  return -const_cdf_beta * one_over_const_pdf;
+  const double result = -const_cdf_beta * one_over_const_pdf;
+  return isnan(result) ? 0.0 : result;
 }
 
 double THRandom_dirichlet_grad(double x, double alpha, double total) {
@@ -406,48 +408,49 @@ double THRandom_dirichlet_grad(double x, double alpha, double total) {
   }
 
   // Use a Laplace approximation when alpha and (total - alpha) are both large.
-  if (alpha > 50 && beta > 50) {
+  if (alpha > 100 && beta > 100) {
     const double logit = x / (1.0 - x);
     const double Logit = alpha / beta;
     return x * (1 - x) * (1.0 / alpha - log(logit / Logit) / (2 * Logit * total));
   }
 
-  // Use an exp(polynomial) correction to an analytic baseline.
-  static const double coef[4][4][4] = {{
-      {-0.63381592, -0.62246365, 0.015219491, -0.0055484627},
-      {-0.77312543, 0.084297971, -0.012711776, 0.0019187486},
-      {0.037542561, 0.0079021948, -0.0041382227, 0.00042930703},
-      {0.0019530523, 7.8106362e-05, -0.00027426572, 9.9708723e-06},
-    }, {
-      {-0.18060095, -0.034005924, -0.01154389, 0.00012729539},
-      {0.0037607047, 0.015491465, -0.0028254322, 0.00052803314},
-      {-0.0042950703, 0.0024180878, -0.00034927816, 5.6851785e-05},
-      {-0.00050787124, 0.00027129847, -9.7877585e-05, -3.9079818e-08},
-    }, {
-      {0.064234803, -0.015758691, -0.00013292907, 3.376526e-05},
-      {0.0052187343, -0.0013274189, 0.00017565629, 3.642805e-05},
-      {0.0041070981, -0.00059628226, 7.5351402e-05, 3.0046776e-07},
-      {0.00052836833, -0.00019237479, 6.407566e-06, -2.5178822e-07},
-    }, {
-      {-0.00044056581, 9.6905011e-05, -6.4467822e-06, -2.0260136e-06},
-      {-8.1602849e-05, -0.00031595728, 9.357204e-05, -4.4264965e-06},
-      {-0.00023237439, 7.8637122e-05, -4.5560448e-06, 1.8074315e-07},
-      {-7.3368784e-05, 6.498361e-06, -5.6484987e-07, 2.6232309e-08},
-  }};
-  const double u = log(x / (1.0 - x));
+  // Use a rational correction to an analytic baseline.
+  static const double c[2][3][3][3] = {
+    {{{0.9725276563, -0.0509239565, 1.625070847e-06},
+      {0.03797015233, 0.007409446855, -0.0008465634691},
+      {0.04498118832, -0.005657730635, 0.0006594371985}},
+     {{-0.4906583778, -0.03501797976, 0.0116832438},
+      {0.07144210068, 0.01917836117, -0.01049408328},
+      {-0.01850287138, 0.0009313017859, 0.001438917764}},
+     {{-0.04252776008, 0.07983672436, -0.005747111986},
+      {0.01119087258, -0.03621480878, 0.002405820172},
+      {0.008194427563, 0.002768270684, -0.0001137741838}}},
+    {{{1, -0.06216981624, -0.001621712526},
+      {0.03395698453, 0.01103224173, -0.000539324895},
+      {0.0438507131, -0.005479208201, 0.000601035911}},
+     {{0.007131342965, 0.03959558295, -0.003737549484},
+      {0.02450054108, 0.001429734367, -0.0002356644527},
+      {-0.004480783661, 0.004028770843, -0.0002935849718}},
+     {{-0.0046942397, 0.003926730136, -0.0003397299665},
+      {0.009286906003, -0.001605160177, 7.69956057e-05},
+      {-0.0006000287485, 0.0004877957422, -4.36865244e-05}}},
+  };
+  const double u = log(x);
   const double a = log(alpha);
   const double b = log(total);
   const double us[4] = {1.0, u, u * u, u * u * u};
   const double as[4] = {1.0, a, a * a, a * a * a};
-  const double bs[4] = {1.0, b, b * b, b * b * b};
-  double poly = 0.0;
-  for (int i = 0; i < 4; ++i)
-    for (int j = 0; j < 4; ++j)
-      for (int k = 0; k < 4; ++k)
-        poly += coef[i][j][k] * us[i] * as[j] * bs[k];
-
-  const double baseline = 4.0 * x * (1.0 - x);
-  return exp(poly) * baseline;
+  double p = 0.0;
+  double q = 0.0;
+  for (int i = 0; i < 3; ++i) {
+    for (int j = 0; j < 3; ++j) {
+      const double ua = us[i] * as[j];
+      p += ua * (c[0][i][j][0] + b * (c[0][i][j][1] + b * c[0][i][j][2]));
+      q += ua * (c[1][i][j][0] + b * (c[1][i][j][1] + b * c[1][i][j][2]));
+    }
+  }
+  if(q < 1e-3) q = 1e-3;
+  return p / q * x * (1.0 - x) * (_digamma(total) - _digamma(alpha)) / beta;
 }
 
 double THRandom_cauchy(THGenerator *_generator, double median, double sigma)

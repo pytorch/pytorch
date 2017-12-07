@@ -278,12 +278,12 @@ class TestDistributions(TestCase):
             # Compare with expected gradient dx/dalpha along constant cdf(x,alpha,beta).
             cdf = scipy.stats.beta.cdf
             pdf = scipy.stats.beta.pdf
-            eps = 0.02 * alpha
+            eps = 0.01 * alpha / (1.0 + np.sqrt(alpha))
             cdf_alpha = (cdf(x, alpha + eps, beta) - cdf(x, alpha - eps, beta)) / (2 * eps)
             cdf_x = pdf(x, alpha, beta)
             expected_grad = -cdf_alpha / cdf_x
             rel_error = np.abs(actual_grad - expected_grad) / (expected_grad + 1e-100)
-            self.assertLess(np.max(rel_error), 0.05,
+            self.assertLess(np.max(rel_error), 0.025,
                             '\n'.join(['Bad gradients for Beta({}, {})'.format(alpha, beta),
                                        'x {}'.format(x),
                                        'expected {}'.format(expected_grad),
