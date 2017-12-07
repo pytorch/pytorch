@@ -1,0 +1,13 @@
+[["tokens_t", [1, 6], "int32"], ["hypo_t", [1, 6], "int32"], ["log_probs", [6, 1, 44463], "float32"], ["on_initial_step", [1], "bool_"]]
+post_eos_penalty
+["log_probs"]
+
+def post_eos_penalty(tokens_t, hypo_t, log_probs, on_initial_step) \
+  -> (log_probs):
+  eos_token = 1
+  finished_penalty = 0f if on_initial_step else 0.5f
+  predecessor_tokens = tokens_t.FlattenToVec().Gather(hypo_t.FlattenToVec())
+  predecessor_is_eos = float(predecessor_tokens == eos_token)
+  log_probs = log_probs.Add(
+      predecessor_is_eos * finished_penalty, broadcast=1, axis=0
+  )
