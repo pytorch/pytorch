@@ -661,6 +661,9 @@
 - name: elu(Tensor self, Scalar alpha)
   self: elu_backward(grad, alpha, output)
 
+- name: elu_(Tensor self, Scalar alpha)
+  self: elu_backward(grad, alpha, output)
+
 - name: glu(Tensor self, int64_t dim)
   self: glu_backward(grad, self, dim)
 
@@ -670,7 +673,13 @@
 - name: hardtanh(Tensor self, Scalar min_val, Scalar max_val)
   self: hardtanh_backward(grad, self, min_val, max_val)
 
+- name: hardtanh_(Tensor self, Scalar min_val, Scalar max_val)
+  self: hardtanh_backward(grad, self, min_val, max_val)
+
 - name: leaky_relu(Tensor self, Scalar negative_slope)
+  self: leaky_relu_backward(grad, self, negative_slope)
+
+- name: leaky_relu_(Tensor self, Scalar negative_slope)
   self: leaky_relu_backward(grad, self, negative_slope)
 
 - name: log_sigmoid(Tensor self)
@@ -685,6 +694,9 @@
 - name: rrelu(Tensor self, Scalar lower, Scalar upper, bool training, Generator generator)
   self: rrelu_backward(grad, self, lower, upper, training, noise)
 
+- name: rrelu_(Tensor self, Scalar lower, Scalar upper, bool training, Generator generator)
+  self: rrelu_backward(grad, self, lower, upper, training, noise)
+
 - name: softmax(Tensor self, int64_t dim)
   self: softmax_backward(grad, self, dim, output)
 
@@ -695,6 +707,9 @@
   self: softshrink_backward(grad, self, lambd)
 
 - name: threshold(Tensor self, Scalar threshold, Scalar value)
+  self: threshold_backward(grad, self, threshold, value)
+
+- name: threshold_(Tensor self, Scalar threshold, Scalar value)
   self: threshold_backward(grad, self, threshold, value)
 
 - name: adaptive_max_pool2d(Tensor self, IntList output_size)
@@ -717,12 +732,6 @@
 
 - name: max_unpool3d(Tensor self, Tensor indices, IntList output_size, IntList stride, IntList padding)
   self: max_unpool3d_backward(grad, self, indices, output_size, stride, padding)
-
-- name: _sigmoid(Tensor self)
-  self: _sigmoid_backward(grad, output)
-
-- name: _tanh(Tensor self)
-  self: _tanh_backward(grad, output)
 
 # - name: batch_norm(Tensor self, Tensor weight, Tensor bias, Tensor running_mean, Tensor running_var, bool training, double momentum, double eps)
 

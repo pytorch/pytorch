@@ -376,8 +376,8 @@ def load_derivatives(path, declarations_by_signature, declarations_by_name):
 
         if defn_name in declarations_by_name and len(declarations_by_name[defn_name][0]) > 0:
             declaration = declarations_by_name[defn_name][0]
-            name = defn_name if defn_name[-1] != '_' else defn_name[:-1]
-            if declaration['mode'] == 'NN' and name + '_backward' in declarations_by_name:
+            base_name = defn_name if defn_name[-1] != '_' else defn_name[:-1]
+            if declaration['mode'] == 'NN' and base_name + '_backward' in declarations_by_name:
                 func = preprocess_nn_functions(declaration, declarations_by_name)
                 if func is not None:
                     autograd_functions.append(func)
