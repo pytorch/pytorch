@@ -28,6 +28,7 @@ struct VariableType final : public at::Type {
   virtual std::unique_ptr<at::Storage> storage() const override;
   virtual std::unique_ptr<at::Storage> storage(size_t size) const override;
   virtual std::unique_ptr<at::Storage> storageFromBlob(void * data, int64_t size, const std::function<void(void*)> & deleter) const override;
+  virtual std::unique_ptr<Storage> storageWithAllocator(int64_t size, std::unique_ptr<at::Allocator> allocator) const override;
   virtual std::unique_ptr<at::Generator> generator() const override;
   virtual const char * toString() const override;
   virtual at::TypeID ID() const override;

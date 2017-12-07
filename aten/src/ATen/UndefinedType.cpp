@@ -26,6 +26,9 @@ std::unique_ptr<Storage> UndefinedType::storageFromBlob(void * data, int64_t siz
 std::unique_ptr<Storage> UndefinedType::unsafeStorageFromTH(void * th_pointer, bool retain) const {
   runtime_error("unsafeStorageFromTH not defined for UndefinedType");
 }
+std::unique_ptr<Storage> UndefinedType::storageWithAllocator(int64_t size, std::unique_ptr<Allocator> allocator) const {
+  runtime_error("storageWithAllocator not defined for UndefinedType");
+}
 Tensor UndefinedType::unsafeTensorFromTH(void * th_pointer, bool retain) const {
   runtime_error("unsafeTensorFromTH not defined for UndefinedType");
 }

@@ -36,28 +36,39 @@ Type & Type::toBackend(Backend b) const {
 Type & Type::toScalarType(ScalarType s) const {
   return context->getType(backend(),s);
 }
-
-Tensor Type::tensorFromBlob(void * data, IntList sizes, const std::function<void(void*)> & deleter) {
+static std::vector<int64_t> defaultStrides(IntList sizes) {
   std::vector<int64_t> strides(sizes.size());
   int64_t stride = 1;
   for(size_t i = sizes.size(); i > 0; --i) {
     strides[i-1] = stride;
     stride *= sizes[i-1];
   }
-  return tensorFromBlob(data, sizes, strides, deleter);
+  return strides;
 }
-Tensor Type::tensorFromBlob(void * data, IntList sizes, IntList strides, const std::function<void(void*)> & deleter) {
+static int64_t computeStorageSize(IntList sizes, IntList strides) {
   // size of the underlying storage is 1 bigger than the offset
   // of the last element according to stride
   int64_t size = 1;
   for(size_t i = 0; i < sizes.size(); i++) {
     if(sizes[i] == 0) {
-      size = 0;
-      break;
+      return 0;
     }
     size += strides[i]*(sizes[i]-1);
   }
-  auto storage = storageFromBlob(data,size,deleter);
+  return size;
+}
+Tensor Type::tensorFromBlob(void * data, IntList sizes, const std::function<void(void*)> & deleter) const {
+  return tensorFromBlob(data, sizes, defaultStrides(sizes), deleter);
+}
+Tensor Type::tensorFromBlob(void * data, IntList sizes, IntList strides, const std::function<void(void*)> & deleter) const {
+  auto storage = storageFromBlob(data, computeStorageSize(sizes, strides), deleter);
+  return tensor(*storage, 0, sizes, strides);
+}
+Tensor Type::tensorWithAllocator(IntList sizes, std::unique_ptr<Allocator> allocator) const {
+  return tensorWithAllocator(sizes, defaultStrides(sizes), std::move(allocator));
+}
+Tensor Type::tensorWithAllocator(IntList sizes, IntList strides, std::unique_ptr<Allocator> allocator) const {
+  auto storage = storageWithAllocator(computeStorageSize(sizes, strides), std::move(allocator));
   return tensor(*storage, 0, sizes, strides);
 }
 Tensor Type::scalarTensor(Scalar s) const {
