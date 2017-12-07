@@ -445,7 +445,7 @@ criterion_tests = [
         input_size=(2, 3, 5, 5),
         target_fn=lambda: torch.rand(2, 5, 5).mul(3).floor().long(),
         reference_fn=lambda i, t, m:
-            nllloss2d_reference(i, t, ignore_index=1),
+            nlllossNd_reference(i, t, ignore_index=1),
         desc='ignore_index',
     ),
     dict(
