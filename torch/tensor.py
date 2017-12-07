@@ -274,7 +274,7 @@ class _TensorBase(object):
             raise ValueError('Number of dimensions of repeat dims can not be '
                              'smaller than number of dimensions of tensor')
 
-        xtensor = src.new().set_(src)
+        xtensor = src.clone()
         xsize = list(xtensor.size())
         for i in _range(len(repeats) - src.dim()):
             xsize = [1] + xsize
