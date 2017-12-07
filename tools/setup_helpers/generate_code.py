@@ -1,5 +1,6 @@
 import os
 import sys
+import glob
 
 source_files = set(['.py', '.cpp', '.h'])
 
@@ -17,8 +18,8 @@ def all_generator_source():
 inputs = [
     'torch/csrc/generic/TensorMethods.cwrap',
     'torch/lib/tmp_install/share/ATen/Declarations.yaml',
-    'torch/lib/tmp_install/share/ATen/Declarations.yaml'
-]
+    'tools/autograd/derivatives.yaml',
+] + glob.glob('torch/csrc/generic/methods/*.cwrap')
 
 outputs = [
     'torch/csrc/autograd/generated/Functions.cpp',
