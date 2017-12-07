@@ -10,14 +10,16 @@ struct ErrorReport : public std::exception {
       : ss(e.ss.str()), context(e.context), the_message(e.the_message) {}
 
   ErrorReport() : context(nullptr) {}
-  ErrorReport(TreeRef context) : context(context) {}
-
+  explicit ErrorReport(const SourceRange& r)
+      : context(std::make_shared<SourceRange>(r)) {}
+  explicit ErrorReport(const TreeRef& tree) : ErrorReport(tree->range()) {}
+  explicit ErrorReport(const Token& tok) : ErrorReport(tok.range) {}
   virtual const char* what() const noexcept override {
     std::stringstream msg;
     msg << "\n" << ss.str();
     if (context != nullptr) {
       msg << ":\n";
-      context->range().highlight(msg);
+      context->highlight(msg);
     } else {
       msg << ".\n";
     }
@@ -30,7 +32,7 @@ struct ErrorReport : public std::exception {
   friend const ErrorReport& operator<<(const ErrorReport& e, const T& t);
 
   mutable std::stringstream ss;
-  TreeRef context;
+  std::shared_ptr<SourceRange> context;
   mutable std::string the_message;
 };
 

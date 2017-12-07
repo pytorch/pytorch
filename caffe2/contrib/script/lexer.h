@@ -62,8 +62,15 @@ namespace script {
   _(TK_EQ, "eq", "==")                           \
   _(TK_LE, "le", "<=")                           \
   _(TK_GE, "ge", ">=")                           \
+  _(TK_IF_EXPR, "if", "")                        \
+  _(TK_TRUE, "True", "True")                     \
+  _(TK_FALSE, "False", "False")                  \
+  _(TK_AND, "and", "and")                        \
+  _(TK_OR, "or", "or")                           \
+  _(TK_NOT, "not", "not")                        \
+  _(TK_CAST, "cast", "")                         \
   _(TK_BUILT_IN, "built-in", "")
-static const char* valid_single_char_tokens = "+-*/()[]?:,={}><";
+static const char* valid_single_char_tokens = "+-*/()[]:,={}><.";
 
 enum TokenKind {
   // we use characters to represent themselves so skip all valid characters
@@ -104,7 +111,9 @@ struct SharedParserData {
   SharedParserData() : head(new TokenTrie()) {
     // listed in increasing order of precedence
     std::vector<std::vector<int>> binary_ops = {
-        {'?'},
+        {TK_IF},
+        {TK_AND, TK_OR},
+        {}, // reserve a level for unary not
         {'<', '>', TK_EQ, TK_LE, TK_GE, TK_NE},
         {'+', '-'},
         {'*', '/'},
@@ -142,17 +151,20 @@ struct SharedParserData {
       }
       prec++;
     }
+    // add unary not separately because it slots into the precedence of
+    // binary operators
+    unary_prec[TK_NOT] = binary_prec[TK_AND] + 1;
   }
   // 1. skip whitespace
   // 2. handle comment or newline
   //
   bool isNumber(const std::string& str, size_t start, size_t* len) {
     char first = str[start];
-    // strtod allows numbers to start with + or -
+    // strtod allows numbers to start with + or - or nan or inf
     // http://en.cppreference.com/w/cpp/string/byte/strtof
     // but we want only the number part, otherwise 1+3 will turn into two
     // adjacent numbers in the lexer
-    if (first == '-' || first == '+')
+    if (first == '-' || first == '+' || isalpha(first))
       return false;
     const char* startptr = str.c_str() + start;
     char* endptr;

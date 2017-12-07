@@ -17,47 +17,74 @@ struct Parser {
     // of the Compound tree are in the same place.
     return Ident::create(t.range, t.text());
   }
+  TreeRef createApply(TreeRef ident, TreeList& inputs) {
+    TreeList attributes;
+    auto range = L.cur().range;
+    parseOperatorArguments(inputs, attributes);
+    return Apply::create(
+        range,
+        ident,
+        List(range, std::move(inputs)),
+        List(range, std::move(attributes)));
+  }
   // things like a 1.0 or a(4) that are not unary/binary expressions
   // and have higher precedence than all of them
   TreeRef parseBaseExp() {
     TreeRef prefix;
-    if (L.cur().kind == TK_NUMBER) {
-      prefix = parseConst();
-    } else if (L.cur().kind == '(') {
-      L.next();
-      prefix = parseExp();
-      L.expect(')');
-    } else {
-      prefix = parseIdent();
-      auto range = L.cur().range;
-      if (L.cur().kind == '(') {
-        auto r = parseOperatorArguments();
-        prefix = Apply::create(range, prefix, r.first, r.second);
-      } else if (L.nextIf('.')) {
-        auto t = L.expect(TK_NUMBER);
-        prefix = Select::create(range, prefix, d(t.doubleValue()));
-      }
+    switch (L.cur().kind) {
+      case TK_NUMBER:
+      case TK_TRUE:
+      case TK_FALSE: {
+        prefix = parseConst();
+      } break;
+      case '(': {
+        L.next();
+        prefix = parseExp();
+        L.expect(')');
+      } break;
+      case TK_FLOAT:
+      case TK_INT:
+      case TK_LONG: {
+        auto r = L.cur().range;
+        auto type = c(L.next().kind, r, {});
+        L.expect('(');
+        auto exp = parseExp();
+        L.expect(')');
+        prefix = Cast::create(r, type, exp);
+      } break;
+      default: {
+        prefix = parseIdent();
+        if (L.cur().kind == '(') {
+          TreeList inputs;
+          prefix = createApply(prefix, inputs);
+        }
+      } break;
     }
-
+    while (L.nextIf('.')) {
+      auto name = parseIdent();
+      TreeList inputs = {prefix};
+      prefix = createApply(name, inputs);
+    }
     return prefix;
   }
   TreeRef parseOptionalReduction() {
+    auto r = L.cur().range;
     switch (L.cur().kind) {
       case '+':
       case '*':
       case TK_MIN:
       case TK_MAX:
-        return s(kindToString(L.next().kind));
+        return c(L.next().kind, r, {});
       default:
-        return s("="); // no reduction
+        return c('=', r, {}); // no reduction
     }
   }
   TreeRef
-  parseTrinary(TreeRef cond, const SourceRange& range, int binary_prec) {
-    auto true_branch = parseExp();
-    L.expect(':');
+  parseTrinary(TreeRef true_branch, const SourceRange& range, int binary_prec) {
+    auto cond = parseExp();
+    L.expect(TK_ELSE);
     auto false_branch = parseExp(binary_prec);
-    return c('?', range, {cond, true_branch, false_branch});
+    return c(TK_IF_EXPR, range, {cond, true_branch, false_branch});
   }
   // parse the longest expression whose binary operators have
   // precedence strictly greater than 'precedence'
@@ -87,7 +114,7 @@ struct Parser {
         binary_prec--;
 
       // special case for trinary operator
-      if (kind == '?') {
+      if (kind == TK_IF) {
         prefix = parseTrinary(prefix, pos, binary_prec);
         continue;
       }
@@ -122,16 +149,32 @@ struct Parser {
     return parseList('(', ',', ')', [&](int i) { return parseExp(); });
   }
   TreeRef parseConst() {
+    // 'b' - boolean
+    // 'LL' 64-bit integer
+    // 'f' single-precision float
+    // 'i' 32-bit integer
+    // 'f' is default if '.' appears in the number
+    auto range = L.cur().range;
+    if (L.nextIf(TK_TRUE)) {
+      return c(TK_CONST, range, {d(1), s("b")});
+    } else if (L.nextIf(TK_FALSE)) {
+      return c(TK_CONST, range, {d(0), s("b")});
+    }
     float mult = 1.0f;
     while (L.nextIf('-')) {
       mult *= -1.0f;
     }
     auto t = L.expect(TK_NUMBER);
-    std::string type_ident;
-
+    std::string type_ident =
+        (t.text().find('.') == std::string::npos) ? "i" : "f";
     if (L.cur().kind == TK_IDENT) {
       Token type_ident_tok = L.expect(TK_IDENT);
       type_ident = type_ident_tok.text();
+      if (type_ident != "LL" && type_ident != "f") {
+        throw ErrorReport(type_ident_tok)
+            << "expected 'f' or 'LL' "
+            << "as numeric type identifier but found '" << type_ident << "'";
+      }
     }
     return c(TK_CONST, t.range, {d(mult * t.doubleValue()), s(type_ident)});
   }
@@ -144,10 +187,7 @@ struct Parser {
         return parseConst();
     }
   }
-  std::pair<TreeRef, TreeRef> parseOperatorArguments() {
-    TreeList inputs;
-    TreeList attributes;
-    auto r = L.cur().range;
+  void parseOperatorArguments(TreeList& inputs, TreeList& attributes) {
     L.expect('(');
     if (L.cur().kind != ')') {
       do {
@@ -162,8 +202,6 @@ struct Parser {
       } while (L.nextIf(','));
     }
     L.expect(')');
-    return std::make_pair(
-        List(r, std::move(inputs)), List(r, std::move(attributes)));
   }
   TreeRef parseIdentList() {
     return parseList('(', ',', ')', [&](int i) { return parseIdent(); });
@@ -178,14 +216,17 @@ struct Parser {
     auto ident = parseIdent();
     return Param::create(typ->range(), ident, typ);
   }
+  void parseEndOfLine() {
+    // TODO: make sure parser always generates newline before dedent
+    if (L.cur().kind != TK_DEDENT)
+      L.expect(TK_NEWLINE);
+  }
   TreeRef parseAssign() {
     TreeRef list = parseOneOrMoreIdent();
     auto red = parseOptionalReduction();
     L.expect('=');
     auto rhs = parseExp();
-    // TODO: make sure parser always generates newline before dedent
-    if (L.cur().kind != TK_DEDENT)
-      L.expect(TK_NEWLINE);
+    parseEndOfLine();
     return Assign::create(list->range(), list, red, rhs);
   }
   TreeRef parseStmt() {
@@ -194,8 +235,21 @@ struct Parser {
         return parseIf();
       case TK_WHILE:
         return parseWhile();
-      default:
-        return parseAssign();
+      default: {
+        // TODO: when we have type-checking/semantic analysis,
+        // we should just parse <exp>, <exp> = <exp>, <exp>
+        // rather than use lookahead here.
+        // but for now allow statements of the form foo(...)
+        // and a.foo(...) to appear on lines of their own.
+        int lookahead = L.lookahead().kind;
+        if (lookahead == '(' || lookahead == '.') {
+          auto r = parseExp();
+          parseEndOfLine();
+          return r;
+        } else {
+          return parseAssign();
+        }
+      }
     }
   }
   TreeRef parseScalarType() {
