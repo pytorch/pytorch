@@ -449,15 +449,6 @@ criterion_tests = [
         desc='ignore_index',
     ),
     dict(
-        module_name='NLLLoss',
-        input_size=(2, 3, 5, 5, 2, 2),
-        target_fn=lambda: torch.rand(2, 5, 5, 2, 2).mul(3).floor().long(),
-        reference_fn=lambda i, t, m:
-            nlllossNd_reference(i, t, size_average=get_size_average(m)),
-        check_no_size_average=True,
-        desc='higher_dim'
-    ),
-    dict(
         module_name='HingeEmbeddingLoss',
         input_size=(10,),
         target_fn=lambda: torch.randn(10).gt(0).double().mul_(2).sub(1),
