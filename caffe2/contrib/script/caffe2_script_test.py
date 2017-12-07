@@ -22,7 +22,7 @@ class TestCaffe2Script(hu.HypothesisTestCase):
                   r = t
               else:
                   r = f
-              r = Add(r,3f,broadcast=1i)
+              r = Add(r,3f,broadcast=1)
           def testWhile(r) -> (r):
               m = 0
               while m < 4:
@@ -56,7 +56,98 @@ class TestCaffe2Script(hu.HypothesisTestCase):
         ref_c = np.matmul(X, W.transpose()) + ref_t
         actual_c = workspace.FetchBlob('c')
 
-        np.testing.assert_allclose(actual_c, ref_c)
+        np.testing.assert_allclose(actual_c, ref_c, rtol=1e-05)
+
+    def test_trinary(self):
+        CU = core.C.CompilationUnit()
+        CU.define("""
+            def foo(c) -> (d):
+                d = 1 + (2 if c else 4)
+        """)
+        workspace.FeedBlob('c', np.ones((1), dtype=bool))
+        net = CU.create_net('foo')
+        net.run()
+        assert(3 == workspace.FetchBlob('d'))
+        workspace.FeedBlob('c', np.zeros((1), dtype=bool))
+        net.run()
+        assert(5 == workspace.FetchBlob('d'))
+
+    def test_bool_literal(self):
+        CU = core.C.CompilationUnit()
+        CU.define("""
+            def foo() -> (a,b):
+                a = True
+                b = False
+        """)
+        net = CU.create_net('foo')
+        net.run()
+        assert(workspace.FetchBlob('a'))
+        assert(not workspace.FetchBlob('b'))
+
+    def test_bool_operators(self):
+        CU = core.C.CompilationUnit()
+        CU.define("""
+            def foo() -> (a, b, c, d, e):
+                a = True and False
+                b = True or False
+                c = not b
+                d = not False or True
+                e = not (1 if a else 0) == (1 if b else 0)
+        """)
+        net = CU.create_net('foo')
+        net.run()
+        assert(not workspace.FetchBlob('a'))
+        assert(workspace.FetchBlob('b'))
+        assert(not workspace.FetchBlob('c'))
+        assert(workspace.FetchBlob('d'))
+        assert(workspace.FetchBlob('e'))
+
+    def test_print(self):
+        CU = core.C.CompilationUnit()
+        CU.define("""
+            def foo() -> ():
+                a = 1
+                Print(a)
+                Print(a+1)
+                _ = 4
+                Print(_) # verify in print this isn't _ but some temorary
+                Print(1)
+                Print(1.f)
+                Print(3.0)
+        """)
+        net = CU.create_net('foo')
+        net.run()
+
+    def test_method(self):
+        CU = core.C.CompilationUnit()
+        CU.define("""
+            def foo() -> (a):
+                a = (3+1).Add(4).Add(1)
+        """)
+        net = CU.create_net('foo')
+        net.run()
+        assert(9 == workspace.FetchBlob('a'))
+
+    def test_plus_eq(self):
+        CU = core.C.CompilationUnit()
+        CU.define("""
+            def foo() -> (a):
+                a = 4
+                a += 1
+        """)
+        net = CU.create_net('foo')
+        net.run()
+        assert(5 == workspace.FetchBlob('a'))
+
+    def test_cast(self):
+        CU = core.C.CompilationUnit()
+        CU.define("""
+            def foo() -> (a):
+                a = int(4.5f)
+        """)
+        net = CU.create_net('foo')
+        net.run()
+        assert(4 == workspace.FetchBlob('a'))
 
     @given(seed=st.integers(min_value=0, max_value=65536), **hu.gcs)
     def test_if(self, seed, gc, dc):

@@ -24,6 +24,12 @@ struct DefCompiler {
     }
     emitStatements(def.statements());
   }
+  void emitExpressionStatement(TreeRef stmt) {
+    // expression with no used outputs
+    auto r = emit(stmt);
+    // remove the implicit single output
+    r->clear_output();
+  }
   void emitStatements(const ListView<TreeRef>& statements) {
     for (auto stmt : statements) {
       switch (stmt->kind()) {
@@ -37,7 +43,8 @@ struct DefCompiler {
           emitAssignment(Assign(stmt));
           break;
         default:
-          throw ErrorReport(stmt) << "NYI: " << stmt;
+          emitExpressionStatement(stmt);
+          break;
       }
     }
   }
@@ -50,13 +57,32 @@ struct DefCompiler {
     return env[ident.name()];
   }
   void emitAssignment(const Assign& stmt) {
-    auto op = emit(stmt.rhs());
+    OperatorDef* op;
+    if (stmt.reduction() != '=') {
+      if (stmt.idents().size() != 1) {
+        throw ErrorReport(stmt)
+            << "reductions are only allow when there is a single variable "
+            << "on the left-hand side.";
+      }
+      auto lhs = stmt.idents()[0];
+      auto expr =
+          Compound::create(stmt.reduction(), stmt.range(), {lhs, stmt.rhs()});
+      op = emit(expr);
+    } else {
+      op = emit(stmt.rhs());
+    }
     while (op->output_size() < stmt.idents().size())
       op->add_output();
     int i = 0;
     for (auto ident : stmt.idents()) {
-      op->set_output(i++, ident.name());
-      map(ident.name(), ident.name());
+      std::string name = ident.name();
+      // use of "_" gets renamed in Caffe2 graphs so that two uses
+      // don't unintentionally interfere with each other
+      if (name == "_") {
+        name = fresh();
+      }
+      op->set_output(i++, name);
+      map(ident.name(), name);
     }
   }
   void emitIf(const If& stmt) {
@@ -81,7 +107,7 @@ struct DefCompiler {
   }
   void emitWhile(const While& stmt) {
     std::string loop_var = fresh();
-    emitConst(0, loop_var, ""); // it needs a definition before loop
+    emitConst(0, loop_var, "i"); // it needs a definition before loop
     auto op = cur().add_op();
     op->set_type("While");
     auto cond = op->add_arg();
@@ -139,6 +165,14 @@ struct DefCompiler {
         return "LE";
       case TK_GE:
         return "GE";
+      case TK_IF_EXPR:
+        return "Conditional";
+      case TK_AND:
+        return "And";
+      case TK_OR:
+        return "Or";
+      case TK_NOT:
+        return "Not";
       default:
         throw std::runtime_error("unknown kind " + caffe2::to_string(kind));
     }
@@ -177,6 +211,7 @@ struct DefCompiler {
     }
     return result;
   }
+
   OperatorDef* emit(const TreeRef& tree) {
     switch (tree->kind()) {
       case TK_IDENT: {
@@ -195,7 +230,11 @@ struct DefCompiler {
       case '-':
       case '*':
       case '/':
-      case '+': {
+      case '+':
+      case TK_AND:
+      case TK_OR:
+      case TK_NOT:
+      case TK_IF_EXPR: {
         // must be before add_op
         auto values = getValues(tree->trees());
         auto op = cur().add_op();
@@ -225,6 +264,19 @@ struct DefCompiler {
         }
         return op;
       } break;
+      case TK_CAST: {
+        auto cast = Cast(tree);
+        auto c2type = getType(cast.type());
+        auto input = getValue(cast.input());
+        auto op = cur().add_op();
+        op->set_type("Cast");
+        op->add_input(input);
+        op->add_output(fresh());
+        auto arg = op->add_arg();
+        arg->set_name("to");
+        arg->set_i(c2type);
+        return op;
+      } break;
       case TK_CONST: {
         return emitConst(
             tree->tree(0)->doubleValue(),
@@ -233,8 +285,26 @@ struct DefCompiler {
       } break;
       default:
         throw ErrorReport(tree) << "NYI: " << tree;
+        break;
     }
   }
+
+  TensorProto_DataType getType(int type) {
+    switch (type) {
+      case TK_INT:
+        return TensorProto_DataType_INT32;
+      case TK_FLOAT:
+        return TensorProto_DataType_FLOAT;
+      case TK_LONG:
+        return TensorProto_DataType_INT64;
+      case TK_BOOL:
+        return TensorProto_DataType_BOOL;
+      default:
+        throw std::runtime_error(
+            "expected type token: " + caffe2::to_string(type));
+    }
+  }
+
   OperatorDef* emitConst(
       double v,
       const std::string& output,
@@ -251,9 +321,14 @@ struct DefCompiler {
     } else if (type_ident == "LL") {
       dtype->set_i(TensorProto_DataType_INT64);
       value->set_i(v);
-    } else {
+    } else if (type_ident == "b") {
+      dtype->set_i(TensorProto_DataType_BOOL);
+      value->set_i(v != 0);
+    } else if (type_ident == "i") {
       dtype->set_i(TensorProto_DataType_INT32);
       value->set_i(v);
+    } else {
+      throw std::runtime_error("unknown type_ident " + type_ident);
     }
     auto shape = op->add_arg();
     shape->set_name("shape");
