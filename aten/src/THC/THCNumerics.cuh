@@ -25,6 +25,7 @@ struct THCNumerics<uint8_t> {
   static inline __host__ __device__ bool eq(uint8_t a, uint8_t b) { return a == b; }
   static inline __host__ __device__ bool ne(uint8_t a, uint8_t b) { return a != b; }
 
+  static inline __host__ __device__  uint8_t neg(int8_t a) { return -a; }
   static inline __host__ __device__  uint8_t add(uint8_t a, uint8_t b) { return a + b; }
   static inline __host__ __device__  uint8_t mul(uint8_t a, uint8_t b) { return a * b; }
   static inline __host__ __device__  uint8_t sub(uint8_t a, uint8_t b) { return a - b; }
