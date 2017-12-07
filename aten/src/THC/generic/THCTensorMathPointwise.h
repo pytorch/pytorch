@@ -36,13 +36,7 @@ THC_API void THCTensor_(cinv)(THCState *state, THCTensor *self, THCTensor *src);
 
 #endif
 
-#if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE) || defined(THC_REAL_IS_HALF) || \
-    defined(THC_REAL_IS_SHORT) || defined(THC_REAL_IS_INT) || defined(THC_REAL_IS_LONG)
-
 THC_API void THCTensor_(neg)(THCState *state, THCTensor *self, THCTensor *src);
-
-#endif
-
 THC_API void THCTensor_(abs)(THCState *state, THCTensor *self, THCTensor *src);
 THC_API void THCTensor_(sign)(THCState *state, THCTensor *self, THCTensor *src);
 THC_API void THCTensor_(clamp)(THCState *state, THCTensor *self, THCTensor *src, real min_value, real max_value);

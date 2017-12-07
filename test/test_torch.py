@@ -525,7 +525,8 @@ class TestTorch(TestCase):
     @staticmethod
     def _test_neg(self, cast):
         float_types = ['torch.DoubleTensor', 'torch.FloatTensor', 'torch.LongTensor']
-        int_types = ['torch.IntTensor', 'torch.ShortTensor']
+        int_types = ['torch.IntTensor', 'torch.ShortTensor', 'torch.ByteTensor',
+                     'torch.CharTensor']
 
         for t in float_types + int_types:
             if t in float_types:
@@ -552,8 +553,6 @@ class TestTorch(TestCase):
 
     def test_reciprocal(self):
         a = torch.randn(100, 89)
-        zeros = torch.Tensor().resize_as_(a).zero_()
-
         res_div = 1 / a
         res_reciprocal = a.clone()
         res_reciprocal.reciprocal_()
