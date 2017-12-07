@@ -345,20 +345,68 @@ double THRandom_standard_gamma_grad(double x, double alpha) {
     return exp(p / q);
 }
 
+// Approximate reparameterized gradient of Beta(x,alpha,beta) wrt alpha.
+// Assumes x is close to zero.
+static inline double beta_grad_alpha_small(double x, double alpha, double beta) {
+  const double b1 = beta - 1.0;
+  const double b2 = beta - 2.0;
+  const double b3 = beta - 3.0;
+  const double a0 = 1.0 / alpha;
+  const double a1 = 1.0 / (alpha + 1.0);
+  const double a2 = 1.0 / (alpha + 2.0);
+  const double a3 = 1.0 / (alpha + 3.0);
+  // Let pdf = pow(x,alpha-1) * pow(1-x,beta-1) / Beta(alpha,beta).
+  // Let const = Beta(alpha,beta) / pow(x, alpha). Then
+  const double one_over_const_pdf = x / pow(1 - x, beta - 1);
+  const double const_cdf = +a0 + b1 * x * (
+                           -a1 + b2 * x / 2 * (
+                           +a2 + b3 * x / 3 * (
+                           -a3)));
+  const double const_cdf_alpha = (log(x) + _digamma(alpha + beta) - _digamma(alpha)) * const_cdf
+        + -a0 * a0 + b1 * x * (
+          +a1 * a1 + b2 * x / 2 * (
+          -a2 * a2 + b3 * x / 3 * (
+          +a3)));
+  return -const_cdf_alpha * one_over_const_pdf;
+}
+
+// Approximate reparameterized gradient of Beta(x,alpha,beta) wrt beta.
+// Assumes x is close to zero.
+static inline double beta_grad_beta_small(double x, double alpha, double beta) {
+  const double a0 = 1.0 / alpha;
+  const double a1 = 1.0 / (alpha + 1.0);
+  const double a2 = 1.0 / (alpha + 2.0);
+  const double a3 = 1.0 / (alpha + 3.0);
+  // Let pdf = pow(x,alpha-1) * pow(1-x,beta-1) / Beta(alpha,beta).
+  // Let const = Beta(alpha,beta) / pow(x, alpha). Then
+  const double one_over_const_pdf = x / pow(1 - x, beta - 1);
+  const double const_cdf = +a0 + (beta - 1.0) * x * (
+                           -a1 + (beta - 2.0) * x / 2 * (
+                           +a2 + (beta - 3.0) * x / 3 * (
+                           -a3)));
+  const double const_cdf_beta = (_digamma(alpha + beta) - _digamma(beta)) * const_cdf
+                               + 0 + x * (
+                               -a1 + x / 2 * (
+                               +a2 * (2 * beta - 3) + x / 3 * (
+                               -a3 * (3 * beta * beta - 12 * beta + 11))));
+  return -const_cdf_beta * one_over_const_pdf;
+}
+
 double THRandom_dirichlet_grad(double x, double alpha, double total) {
+  const double beta = total - alpha;
+
   // Use an asymptotic approximation for x close to 0.
-  if (x * (1.0 + total) < 0.1) {
-    return x / alpha * (1.0 / alpha + _digamma(alpha) - _digamma(total) - log(x));
+  if (x * (1.0 + total) < 0.75) {
+    return beta_grad_alpha_small(x, alpha, beta);
   }
 
   // Use an asymptotic approximation for x close to 1.
-  if (0.9 < x) {
-    return (x - 1.0) / (total - alpha) * (_digamma(alpha) - _digamma(total));
+  if ((1.0 - x) * (1.0 + total) < 0.5) {
+    return -beta_grad_beta_small(1.0 - x, beta, alpha);
   }
 
   // Use a Laplace approximation when alpha and (total - alpha) are both large.
-  if (alpha > 30 && (total - alpha) > 30) {
-    const double beta = total - alpha;
+  if (alpha > 50 && beta > 50) {
     const double logit = x / (1.0 - x);
     const double Logit = alpha / beta;
     return x * (1 - x) * (1.0 / alpha - log(logit / Logit) / (2 * Logit * total));
@@ -366,25 +414,25 @@ double THRandom_dirichlet_grad(double x, double alpha, double total) {
 
   // Use an exp(polynomial) correction to an analytic baseline.
   static const double coef[4][4][4] = {{
-    {-0.59794984, -0.6763899, 0.018050033, -0.00017865909},
-    {-0.75451765, 0.061738531, -0.0058435519, -7.119931e-05},
-    {0.039870548, 0.0059217351, -0.0016702284, 1.4617078e-05},
-    {0.0020759329, 0.00011658787, -0.00013008795, -2.6418838e-07},
-  }, {
-    {-0.15805327, -0.078008748, -0.0017424134, 0.0037446141},
-    {0.028648463, -0.0016079969, -0.0026147906, 0.00032874887},
-    {0.0035091005, -0.00059851471, -0.00036838812, -9.3371409e-06},
-    {0.00010832767, -8.7242836e-05, -1.340523e-05, -7.5041478e-07},
-  }, {
-    {0.02377927, 0.0171741, -0.0023496426, 0.0005601084},
-    {-0.010574877, 0.0042604144, -0.0017500996, 0.00025144196},
-    {-0.0018036052, 0.0013802807, -0.0003299283, 1.4357457e-05},
-    {-0.00012694283, 0.00010357741, -1.528167e-05, -2.1681598e-07},
-  }, {
-    {0.0026565288, 0.0033203533, -0.00027616489, -1.5667618e-05},
-    {-0.002266514, 0.0010078613, -0.00016677963, 1.390614e-05},
-    {-0.00039232604, 0.0002845357, -3.9020268e-05, -7.8686672e-07},
-    {-2.7316239e-05, 2.3145997e-05, -2.2452437e-06, -2.4202009e-07},
+      {-0.63381592, -0.62246365, 0.015219491, -0.0055484627},
+      {-0.77312543, 0.084297971, -0.012711776, 0.0019187486},
+      {0.037542561, 0.0079021948, -0.0041382227, 0.00042930703},
+      {0.0019530523, 7.8106362e-05, -0.00027426572, 9.9708723e-06},
+    }, {
+      {-0.18060095, -0.034005924, -0.01154389, 0.00012729539},
+      {0.0037607047, 0.015491465, -0.0028254322, 0.00052803314},
+      {-0.0042950703, 0.0024180878, -0.00034927816, 5.6851785e-05},
+      {-0.00050787124, 0.00027129847, -9.7877585e-05, -3.9079818e-08},
+    }, {
+      {0.064234803, -0.015758691, -0.00013292907, 3.376526e-05},
+      {0.0052187343, -0.0013274189, 0.00017565629, 3.642805e-05},
+      {0.0041070981, -0.00059628226, 7.5351402e-05, 3.0046776e-07},
+      {0.00052836833, -0.00019237479, 6.407566e-06, -2.5178822e-07},
+    }, {
+      {-0.00044056581, 9.6905011e-05, -6.4467822e-06, -2.0260136e-06},
+      {-8.1602849e-05, -0.00031595728, 9.357204e-05, -4.4264965e-06},
+      {-0.00023237439, 7.8637122e-05, -4.5560448e-06, 1.8074315e-07},
+      {-7.3368784e-05, 6.498361e-06, -5.6484987e-07, 2.6232309e-08},
   }};
   const double u = log(x / (1.0 - x));
   const double a = log(alpha);
@@ -398,8 +446,8 @@ double THRandom_dirichlet_grad(double x, double alpha, double total) {
       for (int k = 0; k < 4; ++k)
         poly += coef[i][j][k] * us[i] * as[j] * bs[k];
 
-  const double baseline = cosh(0.5 * u);
-  return exp(poly) / (baseline * baseline);
+  const double baseline = 4.0 * x * (1.0 - x);
+  return exp(poly) * baseline;
 }
 
 double THRandom_cauchy(THGenerator *_generator, double median, double sigma)
