@@ -2207,7 +2207,6 @@ class TestNN(NNTestCase):
         test(nn.LSTMCell, (bad_hx, good_hx), hidden_size)
         test(nn.LSTMCell, (good_hx, bad_hx), hidden_size)
 
-
     def test_invalid_dropout_p(self):
         v = Variable(torch.ones(1))
         self.assertRaises(ValueError, lambda: nn.Dropout(-0.1))
