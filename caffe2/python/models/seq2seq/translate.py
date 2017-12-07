@@ -389,7 +389,8 @@ class Seq2SeqModelCaffe2EnsembleDecoder(object):
             [],
             'word_rewards',
             shape=[self.target_vocab_size],
-            value=0,
+            value=0.0,
+            dtype=core.DataType.FLOAT,
         )
         (
             self.output_token_beam_list,
