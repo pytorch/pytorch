@@ -225,7 +225,7 @@
         - arg: THTensor* output
           output: True
         - arg: THGenerator* generator
-          default: THPDefaultGenerator->cdata
+          default: THPGenerator_TH_CData(THPDefaultGenerator)
           kwarg_only: True
         - THTensor* alpha
 ]]
