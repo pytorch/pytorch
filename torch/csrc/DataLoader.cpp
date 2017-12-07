@@ -1,10 +1,4 @@
-#include <sys/wait.h>
-#include <map>
-#include <set>
-#include <atomic>
-#include <signal.h>
 #include "THP.h"
-
 // In cases like DataLoader, if a worker process die due to bus error/segfault
 // or just hang, the main process, if implemented with
 // multiprocessing.queue.SimpleQueue, will hang waiting for data. This is
@@ -18,6 +12,12 @@
 // for Windows.
 
 #ifndef _WIN32
+
+#include <sys/wait.h>
+#include <map>
+#include <set>
+#include <atomic>
+#include <signal.h>
 
 // Critical signal handlers should be registered on worker processes before
 // doing work.
