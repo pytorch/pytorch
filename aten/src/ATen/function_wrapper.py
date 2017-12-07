@@ -644,7 +644,8 @@ def create_generic(top_env, declarations):
         # generate the at::native function declarations (i.e. what the user will implement)
         if isinstance(dispatch, dict):
             generated_native_functions = []
-            for _, value in dispatch.items():
+            for key in sorted(dispatch.keys()):
+                value = dispatch[key]
                 if value not in generated_native_functions:
                     option['native_type_method_dispatch'] = value
                     top_env['native_function_declarations'].append(
