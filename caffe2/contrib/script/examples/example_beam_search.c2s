@@ -2,14 +2,51 @@
 beam_search
 ["scores_t"]
 
-def beam_search(dec_out, avg_attn, scores_t) -> ():
+def beam_search(inputs, log_probs, attentions) -> ():
+    beam_size = 6LL
+    length = 20LL
+    beam_output_shape, _ = Concat(length + 1LL, beam_size, axis=0)
+    output_token_beam_list = ConstantFill(
+        beam_output_shape, value=0, dtype=2, input_as_shape=1)
+    output_prev_index_beam_list = ConstantFill(
+        beam_output_shape, value=0, dtype=2, input_as_shape=1)
+    output_score_beam_list = ConstantFill(
+        beam_output_shape, value=0f, dtype=1, input_as_shape=1)
+
+    input_length = inputs.Size().ExpandDims(dims=[0])
+
+    attention_beam_output_shape, _ = Concat(
+        input_length, beam_output_shape, axis=0)
+    output_attention_weights_beam_list = ConstantFill(
+        attention_beam_output_shape, value=0f, dtype=1, input_as_shape=1)
+
+    attention_step_output_shape, _ = Concat(beam_size, input_length, axis=0)
+    attention_t = ConstantFill(
+        attention_step_output_shape, value=0f, dtype=1, input_as_shape=1)
+
+    scores_t = ConstantFill(shape=[1, 6], value=0f, dtype=1)
+    tokens_t = ConstantFill(shape=[6], value=99, dtype=2)
+    hypo_t = ConstantFill(shape=[6], value=0, dtype=2)
+
+    output_token_beam_list = output_token_beam_list.ScatterAssign(0, tokens_t)
+    output_token_beam_list = output_token_beam_list.ExpandDims(dims=[2])
+    output_prev_index_beam_list = output_prev_index_beam_list.ScatterAssign(
+        0, hypo_t)
+    output_prev_index_beam_list = output_prev_index_beam_list.ExpandDims(dims=[2])
+    output_score_beam_list = output_score_beam_list.ScatterAssign(0, scores_t)
+    output_score_beam_list = output_score_beam_list.ExpandDims(dims=[2])
+    output_attention_weights_beam_list = output_attention_weights_beam_list\
+        .ScatterAssign(0, attention_t)
+
+    length_32 = int(length)
+
     timestep = 0
-    max_out_seq_len = 20
-    while timestep < max_out_seq_len:
+    not_finished = True
+    while not_finished:
         # TODO: once we have a metaprogramming facility we need to insert the
         # body of the post_eos_penalty here programmatically
 
-        best_scores_per_hypo, best_tokens_per_hypo = dec_out.TopK(k=6)
+        best_scores_per_hypo, best_tokens_per_hypo = log_probs.TopK(k=6)
 
         # Add the best score in each hypothesis to the cumulative score so far
         output_scores = best_scores_per_hypo + scores_t.Squeeze(dims=[0])
@@ -26,9 +63,10 @@ def beam_search(dec_out, avg_attn, scores_t) -> ():
         hypo_t_int64 = best_indices / 6LL
 
         # Reorder attentions
-        attention_t, _ = avg_attn.Gather(hypo_t_int64)\
+        attention_t, _ = attentions.Gather(hypo_t_int64)\
             .Reshape(shape=[1, 6, -1])
         tokens_t_int64 = best_tokens_per_hypo.FlattenToVec()\
             .Gather(best_indices).Cast(to=2)
 
         timestep += 1
+        not_finished = timestep < length_32
