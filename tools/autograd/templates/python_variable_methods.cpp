@@ -11,6 +11,7 @@
 #include "torch/csrc/utils/python_arg_parser.h"
 #include "torch/csrc/utils/python_numbers.h"
 #include "torch/csrc/utils/python_tuples.h"
+#include "torch/csrc/utils/tensor_apply.h"
 #include "torch/csrc/utils/tensor_list.h"
 #include "torch/csrc/utils/tensor_numpy.h"
 
@@ -23,6 +24,19 @@ using at::Backend;
 using namespace torch::autograd::utils;
 
 namespace torch { namespace autograd {
+
+static PyObject * THPVariable_apply_(PyObject* self, PyObject* arg)
+{
+  HANDLE_TH_ERRORS
+  auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
+  if (self_.requires_grad()) {
+    throw std::runtime_error(
+        "Can't call apply_() on Variable that requires grad. Use "
+        "var.detach().apply_() instead.");
+  }
+  return THPVariable_Wrap(torch::utils::apply_(self_, arg));
+  END_HANDLE_TH_ERRORS
+}
 
 static Tensor dispatch_clamp(const Tensor & self, Scalar min, Scalar max) {
   AutoNoGIL no_gil;
@@ -330,6 +344,41 @@ static PyObject * THPVariable_numpy(PyObject* self, PyObject* arg)
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject * THPVariable_map_(PyObject* self, PyObject* args, PyObject* kwargs)
+{
+  HANDLE_TH_ERRORS
+  static PythonArgParser parser({ "map_(Tensor other, PyObject* callable)" });
+  auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
+  PyObject* parsed_args[2];
+  auto r = parser.parse(args, kwargs, parsed_args);
+  Variable other = r.tensor(0);
+  if (self_.requires_grad() || other.requires_grad()) {
+    throw std::runtime_error(
+        "Can't call map_() on Variable that requires grad. Use "
+        "var.detach().map_() instead.");
+  }
+  return THPVariable_Wrap(torch::utils::map_(self_, other, r.pyobject(1)));
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject * THPVariable_map2_(PyObject* self, PyObject* args, PyObject* kwargs)
+{
+  HANDLE_TH_ERRORS
+  static PythonArgParser parser({ "map2_(Tensor x, Tensor y, PyObject* callable)" });
+  auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
+  PyObject* parsed_args[3];
+  auto r = parser.parse(args, kwargs, parsed_args);
+  Variable x = r.tensor(0);
+  Variable y = r.tensor(1);
+  if (self_.requires_grad() || x.requires_grad() || y.requires_grad()) {
+    throw std::runtime_error(
+        "Can't call map2_() on Variable that requires grad. Use "
+        "var.detach().map2_() instead.");
+  }
+  return THPVariable_Wrap(torch::utils::map2_(self_, x, y, r.pyobject(2)));
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject * THPVariable_storage(PyObject* self, PyObject* arg)
 {
   HANDLE_TH_ERRORS
@@ -380,6 +429,7 @@ PyMethodDef variable_methods[] = {
   {"__long__", (PyCFunction)THPVariable_integral_scalar, METH_NOARGS, NULL},
   {"__nonzero__", (PyCFunction)THPVariable_is_nonzero, METH_NOARGS, NULL},
   {"__matmul__", (PyCFunction)THPVariable_matmul, METH_VARARGS | METH_KEYWORDS, NULL},
+  {"apply_", (PyCFunction)THPVariable_apply_, METH_O, NULL},
   {"byte", (PyCFunction)THPVariable_byte, METH_NOARGS, NULL},
   {"char", (PyCFunction)THPVariable_char, METH_NOARGS, NULL},
   {"clamp", (PyCFunction)THPVariable_clamp, METH_VARARGS | METH_KEYWORDS, NULL},
@@ -397,6 +447,8 @@ PyMethodDef variable_methods[] = {
   {"half", (PyCFunction)THPVariable_half, METH_NOARGS, NULL},
   {"int", (PyCFunction)THPVariable_int, METH_NOARGS, NULL},
   {"long", (PyCFunction)THPVariable_long, METH_NOARGS, NULL},
+  {"map_", (PyCFunction)THPVariable_map_, METH_VARARGS | METH_KEYWORDS, NULL},
+  {"map2_", (PyCFunction)THPVariable_map2_, METH_VARARGS | METH_KEYWORDS, NULL},
   {"ndimension", (PyCFunction)THPVariable_dim, METH_NOARGS, NULL},
   {"nelement", (PyCFunction)THPVariable_numel, METH_NOARGS, NULL},
   {"numpy", (PyCFunction)THPVariable_numpy, METH_NOARGS, NULL},

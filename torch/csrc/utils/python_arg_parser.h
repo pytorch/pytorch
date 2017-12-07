@@ -35,7 +35,7 @@ namespace torch {
 
 enum class ParameterType {
   TENSOR, SCALAR, INT64, DOUBLE, TENSOR_LIST, INT_LIST, GENERATOR,
-  BOOL, STORAGE
+  BOOL, STORAGE, PYOBJECT
 };
 
 struct FunctionParameter;
@@ -79,6 +79,7 @@ struct PythonArgs {
   inline std::vector<int64_t> intlist(int i);
   inline at::Generator* generator(int i);
   inline at::Storage& storage(int i);
+  inline PyObject* pyobject(int i);
   inline int64_t toInt64(int i);
   inline double toDouble(int i);
   inline bool toBool(int i);
@@ -206,6 +207,11 @@ inline at::Generator* PythonArgs::generator(int i) {
 
 inline at::Storage& PythonArgs::storage(int i) {
   throw std::runtime_error("PythonArgs::storage not implemented");
+}
+
+inline PyObject* PythonArgs::pyobject(int i) {
+  if (!args[i]) return Py_None;
+  return args[i];
 }
 
 } // namespace torch

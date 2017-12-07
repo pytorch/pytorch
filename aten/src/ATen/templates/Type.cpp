@@ -69,6 +69,9 @@ Tensor Type::scalarTensor(Scalar s) const {
 bool Type::operator==(const Type& other) const {
   return this == &other;
 }
+bool Type::operator!=(const Type& other) const {
+  return this != &other;
+}
 
 ${type_method_definitions}
 
