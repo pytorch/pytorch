@@ -250,6 +250,10 @@ struct DefCompiler {
       }
       case TK_APPLY: {
         auto apply = Apply(tree);
+        // Handle built-ins like zeros, ones, etc
+        if (builtins.count(apply.name().name()) > 0) {
+          return builtins[apply.name().name()](this, apply);
+        }
         // must be before add_op
         auto values = getValues(apply.inputs());
         auto op = cur().add_op();
@@ -344,6 +348,76 @@ struct DefCompiler {
       env; // map from name in Def to name in NetDef
   std::vector<NetDef*> net_def_stack;
   int next_fresh = 0;
+
+ private:
+  OperatorDef* emitFillOp(const Apply& apply) {
+    auto builtin_type = apply.name().name();
+    auto values = getValues(apply.inputs());
+    if (values.size() > 1) {
+      throw ErrorReport(apply)
+          << "Built-in " << builtin_type << " accepts 0 or 1 inputs.";
+    }
+    bool has_shape = false;
+    for (const auto& attribute : apply.attributes()) {
+      if (attribute.name().name() == "shape") {
+        has_shape = true;
+      } else {
+        throw ErrorReport(apply)
+            << "Unrecognized attribute " << attribute.name().name()
+            << " for built-in " << builtin_type;
+      }
+    }
+    if (builtin_type == "zeros" || builtin_type == "ones") {
+      if ((values.size() != 1) && !has_shape) {
+        throw ErrorReport(apply)
+            << "Built-in " << builtin_type
+            << " requires either 1 input or 1 shape attribute";
+      }
+    } else {
+      // zeros_like or ones_like
+      if (values.size() != 1) {
+        throw ErrorReport(apply)
+            << "Built-in " << builtin_type << " requires 1 input";
+      }
+    }
+
+    auto op = cur().add_op();
+    op->set_type("ConstantFill");
+    if (values.size()) {
+      op->add_input(values[0]);
+      auto* input_as_shape = op->add_arg();
+      input_as_shape->set_name("input_as_shape");
+      if (builtin_type.find("_like") != std::string::npos) {
+        // zeros_like, ones_like take the shape of the input as constant
+        // tensor shape
+        input_as_shape->set_i(0);
+      } else {
+        // zeros, ones take the values in the tensor as constant tensor
+        // shape
+        input_as_shape->set_i(1);
+      }
+    } else {
+      fillArg(op->add_arg(), apply.attributes()[0]);
+    }
+
+    auto value = op->add_arg();
+    value->set_name("value");
+    if (builtin_type.find("ones") != std::string::npos) {
+      value->set_f(1.0f);
+    } else {
+      value->set_f(0.0f);
+    }
+    op->add_output(fresh());
+    return op;
+  }
+
+  std::unordered_map<
+      std::string,
+      std::function<OperatorDef*(DefCompiler*, const Apply&)>>
+      builtins{{"zeros", &DefCompiler::emitFillOp},
+               {"zeros_like", &DefCompiler::emitFillOp},
+               {"ones", &DefCompiler::emitFillOp},
+               {"ones_like", &DefCompiler::emitFillOp}};
 };
 
 struct CompilationUnitImpl {
