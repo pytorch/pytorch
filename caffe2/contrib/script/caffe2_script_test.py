@@ -6,6 +6,7 @@ from __future__ import unicode_literals
 from hypothesis import given
 
 from caffe2.python import core, workspace
+from caffe2.proto import caffe2_pb2
 import caffe2.python.hypothesis_test_util as hu
 import hypothesis.strategies as st
 
@@ -148,6 +149,36 @@ class TestCaffe2Script(hu.HypothesisTestCase):
         net = CU.create_net('foo')
         net.run()
         assert(4 == workspace.FetchBlob('a'))
+
+    def test_call_extern(self):
+        CU = core.C.CompilationUnit()
+        net = caffe2_pb2.NetDef()
+        net.op.extend([
+            core.CreateOperator(
+                'Mul',
+                ['i', 'i'],
+                ['o'],
+            )
+        ])
+        net.external_input.append('i')
+        net.external_output.append('o')
+
+        CU.extern("myActualExtern", net)
+        CU.define("""
+            def myExtern(x) -> (y):
+                t = x
+                if t > 1:
+                    y = t * t
+                else:
+                    y = 5
+            def foo() -> (b):
+                a = 4
+                a += 1
+                b = 2 + myExtern(a) + myExtern(a, rename=False) + myActualExtern(a)
+        """)
+        net = CU.create_net('foo')
+        net.run()
+        assert(77 == workspace.FetchBlob('b'))
 
     @given(seed=st.integers(min_value=0, max_value=65536), **hu.gcs)
     def test_if(self, seed, gc, dc):

@@ -7,28 +7,73 @@
 namespace caffe2 {
 namespace script {
 
+namespace {
+
+static std::unordered_set<std::string> ops_containing_nets = {
+    "If",
+    "While",
+    "RecurrentNetwork",
+};
+// record of defined function
+// NetDef + metadata
+struct FunctionDefinition {
+  explicit FunctionDefinition(Def tree)
+      : tree(new Def(tree)), net_def(new NetDef()) {}
+
+  explicit FunctionDefinition(std::unique_ptr<NetDef> def)
+      : tree(nullptr), net_def(std::move(def)) {
+    // we coop extern_inputs/extern_outputs to be the inputs/outputs to
+    // this net as a function
+    // but we _dont_ set these when creating the net in the workspace
+    // because they require the net to have valid inputs/outputs
+    inputs.insert(
+        inputs.begin(),
+        net_def->external_input().begin(),
+        net_def->external_input().end());
+    outputs.insert(
+        outputs.begin(),
+        net_def->external_output().begin(),
+        net_def->external_output().end());
+    net_def->clear_external_output();
+    net_def->clear_external_input();
+  }
+
+  bool isExtern() const {
+    return tree == nullptr;
+  }
+  std::unique_ptr<Def> tree;
+  std::unique_ptr<NetDef> net_def;
+  std::vector<std::string> inputs;
+  std::vector<std::string> outputs;
+};
+
+} // namespace
+
+using SymbolTable = std::unordered_map<std::string, FunctionDefinition>;
+
 struct DefCompiler {
-  DefCompiler(const Def& def, NetDef& net_def)
-      : def(def), net_def_stack({&net_def}) {}
+  DefCompiler(FunctionDefinition& def, SymbolTable& symbol_table)
+      : def(def),
+        net_def_stack({def.net_def.get()}),
+        symbol_table(symbol_table) {}
   void run() {
-    cur().set_name(def.name().name());
-    for (auto input : def.params()) {
+    auto& tree = *def.tree;
+    cur().set_name(tree.name().name());
+    for (auto input : tree.params()) {
       auto& name = input.ident().name();
       map(name, name);
-      // cur().add_external_input(name);
+      def.inputs.push_back(name);
     }
-    for (auto output : def.returns()) {
+    for (auto output : tree.returns()) {
       auto& name = output.ident().name();
       map(name, name);
-      // cur().add_external_output(name);
+      def.outputs.push_back(name);
     }
-    emitStatements(def.statements());
+    emitStatements(tree.statements());
   }
   void emitExpressionStatement(TreeRef stmt) {
     // expression with no used outputs
-    auto r = emit(stmt);
-    // remove the implicit single output
-    r->clear_output();
+    emit(stmt, {});
   }
   void emitStatements(const ListView<TreeRef>& statements) {
     for (auto stmt : statements) {
@@ -58,6 +103,16 @@ struct DefCompiler {
   }
   void emitAssignment(const Assign& stmt) {
     OperatorDef* op;
+    std::vector<std::string> outputs;
+    for (auto ident : stmt.idents()) {
+      std::string name = ident.name();
+      // use of "_" gets renamed in Caffe2 graphs so that two uses
+      // don't unintentionally interfere with each other
+      if (name == "_") {
+        name = fresh();
+      }
+      outputs.push_back(name);
+    }
     if (stmt.reduction() != '=') {
       if (stmt.idents().size() != 1) {
         throw ErrorReport(stmt)
@@ -67,22 +122,13 @@ struct DefCompiler {
       auto lhs = stmt.idents()[0];
       auto expr =
           Compound::create(stmt.reduction(), stmt.range(), {lhs, stmt.rhs()});
-      op = emit(expr);
+      emit(expr, outputs);
     } else {
-      op = emit(stmt.rhs());
+      emit(stmt.rhs(), outputs);
     }
-    while (op->output_size() < stmt.idents().size())
-      op->add_output();
     int i = 0;
     for (auto ident : stmt.idents()) {
-      std::string name = ident.name();
-      // use of "_" gets renamed in Caffe2 graphs so that two uses
-      // don't unintentionally interfere with each other
-      if (name == "_") {
-        name = fresh();
-      }
-      op->set_output(i++, name);
-      map(ident.name(), name);
+      map(ident.name(), outputs.at(i++));
     }
   }
   void emitIf(const If& stmt) {
@@ -115,8 +161,7 @@ struct DefCompiler {
     auto cond_net = cond->mutable_n();
 
     net_def_stack.push_back(cond_net);
-    auto cond_op = emit(stmt.cond());
-    cond_op->set_output(0, loop_var);
+    emit(stmt.cond(), {loop_var});
     net_def_stack.pop_back();
 
     op->add_input(loop_var);
@@ -128,17 +173,18 @@ struct DefCompiler {
     emitStatements(stmt.body());
     net_def_stack.pop_back();
   }
-  const std::string& getValue(const TreeRef& tree) {
+  std::string getValue(const TreeRef& tree) {
     switch (tree->kind()) {
       case TK_IDENT:
         return lookup(Ident(tree));
       default:
-        auto op = emit(tree);
-        return op->output(0);
+        std::string name = fresh();
+        emit(tree, {name});
+        return name;
     }
   }
-  std::string fresh() {
-    return std::string("$t") + caffe2::to_string(next_fresh++);
+  std::string fresh(std::string prefix = "$t") {
+    return std::string(prefix) + caffe2::to_string(next_fresh++);
   }
   const char* operatorName(int kind, int ninputs) {
     switch (kind) {
@@ -212,14 +258,121 @@ struct DefCompiler {
     return result;
   }
 
-  OperatorDef* emit(const TreeRef& tree) {
+  void renameOp(
+      std::unordered_map<std::string, std::string>& rename_map,
+      const Apply& apply,
+      const std::string& prefix,
+      bool isExtern,
+      OperatorDef* new_op) {
+    for (size_t i = 0; i < new_op->input().size(); i++) {
+      auto& name = new_op->input(i);
+      bool defined = rename_map.count(name) != 0;
+      if (!isExtern && !defined) {
+        throw ErrorReport(apply)
+            << " unexpected undefined name '" << name
+            << "' while attempting to inline '" << apply.name().name() << "'";
+      } else if (!defined) {
+        // extern function using a global name, assign it an identity mapping
+        rename_map[name] = name;
+      }
+      new_op->set_input(i, rename_map.at(name));
+    }
+    for (size_t i = 0; i < new_op->output().size(); i++) {
+      auto& name = new_op->output(i);
+      if (rename_map.count(name) == 0) {
+        rename_map[name] = prefix + name;
+      }
+      new_op->set_output(i, rename_map[name]);
+    }
+    // handle control flow inside the op as well
+    if (ops_containing_nets.count(new_op->type()) > 0) {
+      for (size_t i = 0; i < new_op->arg_size(); i++) {
+        auto* arg = new_op->mutable_arg(i);
+        if (arg->has_n()) {
+          auto* n = arg->mutable_n();
+          for (size_t j = 0; j < n->op_size(); j++) {
+            renameOp(rename_map, apply, prefix, isExtern, n->mutable_op(j));
+          }
+        }
+      }
+    }
+  }
+
+  bool hasBypassRename(const Apply& apply) {
+    for (auto attr : apply.attributes()) {
+      if (attr.name().name() == "rename") {
+        if (attr.value()->kind() != TK_CONST) {
+          throw ErrorReport(attr.value()) << "expected a single constant";
+        }
+        return attr.value()->tree(0)->doubleValue() == 0;
+      }
+    }
+    return false;
+  }
+
+  // emit a function call by inlining the function's NetDef into our
+  // net def, renaming temporaries func_name<unique_id>/orig_name
+  // renaming only happens for values defined by the function
+  // that are not marked outputs
+
+  // inputs/outputs are passed by reference
+  void emitFunctionCall(Apply& apply, const std::vector<std::string>& outputs) {
+    std::string fname = apply.name().name();
+    std::string prefix = fresh(fname) + "/";
+    auto& fn = symbol_table.at(apply.name().name());
+    bool isExtern = fn.isExtern();
+    auto inputs = getValues(apply.inputs());
+    std::unordered_map<std::string, std::string> rename_map;
+    if (inputs.size() != fn.inputs.size()) {
+      throw ErrorReport(apply) << fname << " expected " << fn.inputs.size()
+                               << " values but received " << inputs.size();
+    }
+    for (size_t i = 0; i < inputs.size(); i++) {
+      rename_map[fn.inputs[i]] = inputs[i];
+    }
+    if (outputs.size() != fn.outputs.size()) {
+      throw ErrorReport(apply) << fname << " expected " << fn.inputs.size()
+                               << " values but received " << inputs.size();
+    }
+    for (size_t i = 0; i < inputs.size(); i++) {
+      rename_map[fn.outputs[i]] = outputs[i];
+    }
+    for (auto& op : fn.net_def->op()) {
+      auto new_op = cur().add_op();
+      new_op->CopyFrom(op);
+      if (hasBypassRename(apply)) {
+        prefix = "";
+      }
+      renameOp(rename_map, apply, prefix, isExtern, new_op);
+    }
+  }
+  void expectOutputs(
+      const TreeRef& tree,
+      const std::vector<std::string>& outputs,
+      size_t size) {
+    if (outputs.size() != size) {
+      throw ErrorReport(tree)
+          << "expected operator to produce " << outputs.size()
+          << " outputs but it produced " << size;
+    }
+  }
+  void appendOutputs(
+      const TreeRef& tree,
+      OperatorDef* op,
+      const std::vector<std::string>& outputs,
+      size_t size) {
+    expectOutputs(tree, outputs, size);
+    for (size_t i = 0; i < size; i++) {
+      op->add_output(outputs[i]);
+    }
+  }
+  void emit(const TreeRef& tree, const std::vector<std::string>& outputs) {
     switch (tree->kind()) {
       case TK_IDENT: {
         auto op = cur().add_op();
         op->set_type("Copy");
         op->add_input(lookup(Ident(tree)));
-        op->add_output(fresh());
-        return op;
+        appendOutputs(tree, op, outputs, 1);
       } break;
       case TK_NE:
       case TK_EQ:
@@ -242,17 +395,21 @@ struct DefCompiler {
         for (auto& v : values) {
           op->add_input(v);
         }
-        op->add_output(fresh());
+        appendOutputs(tree, op, outputs, 1);
         auto broadcast = op->add_arg();
         broadcast->set_name("broadcast");
         broadcast->set_i(1);
-        return op;
-      }
+      } break;
       case TK_APPLY: {
         auto apply = Apply(tree);
         // Handle built-ins like zeros, ones, etc
         if (builtins.count(apply.name().name()) > 0) {
-          return builtins[apply.name().name()](this, apply);
+          builtins[apply.name().name()](this, apply, outputs);
+          break;
+        }
+        if (symbol_table.count(apply.name().name()) > 0) {
+          emitFunctionCall(apply, outputs);
+          break;
         }
         // must be before add_op
         auto values = getValues(apply.inputs());
@@ -262,11 +419,10 @@ struct DefCompiler {
           op->add_input(v);
         }
         // assume 1 output unless matched to more
-        op->add_output(fresh());
+        appendOutputs(tree, op, outputs, outputs.size());
         for (auto attribute : apply.attributes()) {
           fillArg(op->add_arg(), attribute);
         }
-        return op;
       } break;
       case TK_CAST: {
         auto cast = Cast(tree);
@@ -275,16 +431,16 @@ struct DefCompiler {
         auto op = cur().add_op();
         op->set_type("Cast");
         op->add_input(input);
-        op->add_output(fresh());
+        appendOutputs(tree, op, outputs, 1);
         auto arg = op->add_arg();
         arg->set_name("to");
         arg->set_i(c2type);
-        return op;
       } break;
       case TK_CONST: {
-        return emitConst(
+        expectOutputs(tree, outputs, 1);
+        emitConst(
             tree->tree(0)->doubleValue(),
-            fresh(),
+            outputs[0],
             tree->tree(1)->stringValue());
       } break;
       default:
@@ -343,14 +499,15 @@ struct DefCompiler {
   NetDef& cur() {
     return *net_def_stack.back();
   }
-  const Def& def;
+  FunctionDefinition& def; // the def being constructed
   std::unordered_map<std::string, std::string>
       env; // map from name in Def to name in NetDef
   std::vector<NetDef*> net_def_stack;
+  SymbolTable& symbol_table;
   int next_fresh = 0;
 
  private:
-  OperatorDef* emitFillOp(const Apply& apply) {
+  void emitFillOp(const Apply& apply, const std::vector<std::string>& outputs) {
     auto builtin_type = apply.name().name();
     auto values = getValues(apply.inputs());
     if (values.size() > 1) {
@@ -407,13 +564,15 @@ struct DefCompiler {
     } else {
       value->set_f(0.0f);
     }
-    op->add_output(fresh());
-    return op;
+    appendOutputs(apply, op, outputs, 1);
   }
 
   std::unordered_map<
       std::string,
-      std::function<OperatorDef*(DefCompiler*, const Apply&)>>
+      std::function<void(
+          DefCompiler*,
+          const Apply&,
+          const std::vector<std::string>& outputs)>>
       builtins{{"zeros", &DefCompiler::emitFillOp},
                {"zeros_like", &DefCompiler::emitFillOp},
                {"ones", &DefCompiler::emitFillOp},
@@ -427,30 +586,49 @@ struct CompilationUnitImpl {
       throw ErrorReport(def) << def.name().name() << " already defined.";
     }
     DefCompiler c(
-        def, functions.emplace(def.name().name(), NetDef()).first->second);
+        functions.emplace(def.name().name(), FunctionDefinition(def))
+            .first->second,
+        functions);
     c.run();
   }
+
   void define(const std::string& str) {
     Parser p(str);
     while (p.lexer().cur().kind != TK_EOF) {
       defineFunction(Def(p.parseFunction()));
     }
   }
+
   std::unique_ptr<NetBase> createNet(Workspace* ws, const std::string& str) {
     if (functions.count(str) == 0)
       throw ErrorReport() << "undefined function: " << str << "\n";
-    auto& net_def = functions[str];
-    return caffe2::CreateNet(net_def, ws);
+    auto& def = functions.at(str);
+    return caffe2::CreateNet(*def.net_def, ws);
+  }
+
+  void defineExtern(const std::string& name, std::unique_ptr<NetDef> net_def) {
+    // TODO: unify extern and function namespaces
+    if (functions.count(name) > 0) {
+      throw ErrorReport() << "function '" << name << "' already defined.";
+    }
+    functions.emplace(name, FunctionDefinition(std::move(net_def)));
   }
 
  private:
-  std::unordered_map<std::string, NetDef> functions;
+  friend class DefCompiler;
+  SymbolTable functions;
 };
 
 CompilationUnit::CompilationUnit() : pImpl(new CompilationUnitImpl()) {}
 
 void CompilationUnit::define(const std::string& str) {
   return pImpl->define(str);
+}
+
+void CompilationUnit::defineExtern(
+    const std::string& name,
+    std::unique_ptr<NetDef> nd) {
+  pImpl->defineExtern(name, std::move(nd));
 }
 
 std::unique_ptr<NetBase> CompilationUnit::createNet(
