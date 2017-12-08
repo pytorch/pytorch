@@ -2522,8 +2522,10 @@ for test in method_tests:
                     # compare grads to inplace grads
                     inplace_name = name + '_'
                     # can't broadcast inplace to left hand side
-                    broadcast_skip_inplace = 'broadcast_lhs' in test_name or 'broadcast_all' in test_name
-                    if hasattr(Variable(torch.ones(1)), inplace_name) and not broadcast_skip_inplace:
+                    skip_inplace = ('broadcast_lhs' in test_name or
+                                    'broadcast_all' in test_name or
+                                    test_name.startswith('test_resize'))
+                    if hasattr(Variable(torch.ones(1)), inplace_name) and not skip_inplace:
                         output_variable = getattr(self_variable, name)(*args_variable)
                         if not isinstance(output_variable, tuple):
                             output_variable = (output_variable,)
