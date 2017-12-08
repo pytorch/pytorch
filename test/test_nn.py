@@ -2198,14 +2198,14 @@ class TestNN(NNTestCase):
             cell = cell_module(10, hidden_size)
             self.assertRaises(RuntimeError, lambda: cell(input, hx))
 
-        hidden_size = 20
-        bad_hx = Variable(torch.randn(1, hidden_size))
-        good_hx = Variable(torch.randn(3, hidden_size))
+        for hidden_size in [20, 1]:
+            bad_hx = Variable(torch.randn(1, hidden_size))
+            good_hx = Variable(torch.randn(3, hidden_size))
 
-        test(nn.RNNCell, bad_hx, hidden_size)
-        test(nn.GRUCell, bad_hx, hidden_size)
-        test(nn.LSTMCell, (bad_hx, good_hx), hidden_size)
-        test(nn.LSTMCell, (good_hx, bad_hx), hidden_size)
+            test(nn.RNNCell, bad_hx, hidden_size)
+            test(nn.GRUCell, bad_hx, hidden_size)
+            test(nn.LSTMCell, (bad_hx, good_hx), hidden_size)
+            test(nn.LSTMCell, (good_hx, bad_hx), hidden_size)
 
     def test_invalid_dropout_p(self):
         v = Variable(torch.ones(1))
