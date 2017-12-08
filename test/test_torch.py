@@ -2572,6 +2572,71 @@ class TestTorch(TestCase):
     def test_det(self):
         self._test_det(self, lambda x: x)
 
+    @staticmethod
+    def _test_stft(self, conv_fn):
+        Variable = torch.autograd.Variable
+
+        def naive_stft(x, frame_length, hop, window=None, pad_end=0):
+            if isinstance(x, Variable):
+                x = x.data
+            x = x.clone()
+            if window is None:
+                window = x.new(frame_length).fill_(1)
+            else:
+                if isinstance(window, Variable):
+                    window = window.data
+                window = window.clone()
+            input_1d = x.dim() == 1
+            if input_1d:
+                x = x.view(1, -1)
+            batch = x.size(0)
+            if pad_end > 0:
+                x_pad = x.new(batch, pad_end).fill_(0)
+                x = torch.cat([x, x_pad], 1)
+            length = x.size(1)
+            magnitude = x.new(batch, int((length - frame_length) / float(hop)) + 1, frame_length)
+            phase = magnitude.clone()
+            for w in range(frame_length):  # freq
+                radians = conv_fn(torch.arange(frame_length)) * w * 2 * math.pi / frame_length
+                re_kernel = radians.cos().mul_(window)
+                im_kernel = -radians.sin().mul_(window)
+                for b in range(batch):
+                    for i, t in enumerate(range(0, length - frame_length + 1, hop)):
+                        seg = x[b, t:(t+frame_length)]
+                        re = seg.dot(re_kernel)
+                        im = seg.dot(im_kernel)
+                        magnitude[b, i, w] = (re ** 2 + im ** 2) ** 0.5
+                        phase[b, i, w] = math.atan(im / re)
+            if input_1d:
+                magnitude = magnitude[0]
+                phase = phase[0]
+            return conv_fn(magnitude), conv_fn(phase)
+
+        def _test(x, frame_length, hop, window=None, pad_end=0):
+            x = Variable(conv_fn(x.clone()))
+            if window is not None:
+                window = Variable(conv_fn(window.clone()))
+            magnitude, phase = x.stft(frame_length, hop, window, pad_end)
+            ref_magnitude, ref_phase = naive_stft(x, frame_length, hop, window, pad_end)
+            self.assertEqual(magnitude.data, ref_magnitude, 1e-8, 'stft magnitude')
+            # test radian closeness is a bit tricky
+            phase_diff = phase.data - ref_phase
+            abs_phase_diff = torch.min(phase_diff % math.pi, -phase_diff % math.pi)
+            self.assertEqual(abs_phase_diff, torch.zeros_like(abs_phase_diff), 1e-8, 'stft phase')
+
+        _test(torch.randn(2, 5), 4, 2, pad_end=1)
+        _test(torch.randn(4, 10), 10, 2, pad_end=0)
+        _test(torch.randn(4, 150), 90, 45, pad_end=0)
+        _test(torch.randn(10), 7, 2, pad_end=0)
+
+        _test(torch.randn(2, 5), 4, 2, window=torch.randn(4), pad_end=1)
+        _test(torch.randn(4, 10), 10, 2, window=torch.randn(10), pad_end=0)
+        _test(torch.randn(4, 150), 90, 45, window=torch.randn(90), pad_end=0)
+        _test(torch.randn(10), 7, 2, window=torch.randn(7), pad_end=0)
+
+    def test_stft(self):
+        self._test_stft(self, lambda x: x)
+
     @unittest.skip("Not implemented yet")
     def test_conv2(self):
         x = torch.rand(math.floor(torch.uniform(50, 100)), math.floor(torch.uniform(50, 100)))

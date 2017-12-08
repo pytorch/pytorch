@@ -2096,8 +2096,7 @@
     - Double
   backends:
     - CPU
-  backend_type_pairs: [[CPU,Float],[CPU,Double],[CUDA,Float]]
-
+    - CUDA
   variants:
     - method
     - function
@@ -2112,7 +2111,12 @@
 ]]
 [[
   name: atan2_
-  backend_type_pairs: [[CPU,Float],[CPU,Double],[CUDA,Float]]
+  types:
+    - Float
+    - Double
+  backends:
+    - CPU
+    - CUDA
   cname: atan2
   return: argument 0
   arguments:

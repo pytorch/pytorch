@@ -14,6 +14,8 @@ def parse_default(s):
         return False
     elif s == 'nullptr':
         return s
+    elif s == '{}':
+        return '{}'
     try:
         return int(s)
     except Exception:

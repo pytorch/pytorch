@@ -168,6 +168,7 @@ Other Operations
 .. autofunction:: trace
 .. autofunction:: tril
 .. autofunction:: triu
+.. autofunction:: stft
 
 
 BLAS and LAPACK Operations

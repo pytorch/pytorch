@@ -992,6 +992,9 @@ class TestCuda(TestCase):
     def test_view(self):
         TestTorch._test_view(self, lambda t: t.cuda())
 
+    def test_stft(self):
+        TestTorch._test_stft(self, lambda t: t.cuda())
+
     def test_broadcast(self):
         TestTorch._test_broadcast(self, lambda t: t.cuda())
 

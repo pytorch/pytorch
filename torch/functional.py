@@ -4,12 +4,12 @@ from operator import mul
 from functools import reduce
 
 __all__ = [
-    'split', 'chunk', 'stack', 'unbind', 'btriunpack', 'matmul', 'det',
+    'split', 'chunk', 'stack', 'unbind', 'btriunpack', 'matmul', 'det', 'stft'
 ]
 
 
 def split(tensor, split_size, dim=0):
-    """Splits the tensor into chunks all of size :attr:`split_size` (if possible).
+    r"""Splits the tensor into chunks all of size :attr:`split_size` (if possible).
 
     Last chunk will be smaller if the tensor size along a given dimension
     is not divisible by :attr`split_size`.
@@ -32,7 +32,7 @@ def split(tensor, split_size, dim=0):
 
 
 def chunk(tensor, chunks, dim=0):
-    """Splits a tensor into a specific number of chunks.
+    r"""Splits a tensor into a specific number of chunks.
 
     Arguments:
         tensor (Tensor): the tensor to split
@@ -46,7 +46,7 @@ def chunk(tensor, chunks, dim=0):
 
 
 def stack(sequence, dim=0, out=None):
-    """Concatenates sequence of tensors along a new dimension.
+    r"""Concatenates sequence of tensors along a new dimension.
 
     All tensors need to be of the same size.
 
@@ -67,7 +67,7 @@ def stack(sequence, dim=0, out=None):
 
 
 def unbind(tensor, dim=0):
-    """Removes a tensor dimension.
+    r"""Removes a tensor dimension.
 
     Returns a tuple of all slices along a given dimension, already without it.
 
@@ -79,7 +79,7 @@ def unbind(tensor, dim=0):
 
 
 def btriunpack(LU_data, LU_pivots, unpack_data=True, unpack_pivots=True):
-    """Unpacks the data and pivots from a batched LU factorization (btrifact) of a tensor.
+    r"""Unpacks the data and pivots from a batched LU factorization (btrifact) of a tensor.
 
     Returns a tuple indexed by:
       0: The pivots.
@@ -249,7 +249,7 @@ def matmul(tensor1, tensor2, out=None):
 
 
 def det(var):
-    """Calculates determinant of a 2D square Variable.
+    r"""Calculates determinant of a 2D square Variable.
 
     .. note::
         Backward through `det` internally uses SVD results. So double backward
@@ -263,3 +263,46 @@ def det(var):
     if torch.is_tensor(var):
         raise ValueError("det is currently only supported on Variable")
     return var.det()
+
+
+def stft(var, frame_length, hop, window=None, pad_end=0):
+    r"""stft(signal, frame_length, hop, window=None, pad_end=0) -> Tensor, Tensor
+
+    Short-time Fourier transform (STFT).
+
+    Ignoring the batch dimension, this method computes the following expression:
+
+    .. math::
+        X[m, \omega] = \sum_{k = 0}^{frame\_length} window[k]\ signal[m \times hop + k]\ e^{- j \frac{2 \pi \cdot \omega k}{frame\_length}}
+
+    , where :math:`m` is the index of the sliding window, and :math:`\omega` is
+    the frequency that :math:`0 \leq \omega < frame\_length`.
+
+    The input :attr:`signal` must be 1-D sequence :math:`(T)` or 2-D a batch of
+    sequences :math:`(N, T)`. :attr:`frame_length` is used both as sliding frame
+    window size and STFT filter size. :attr:`window` can be a 1-D tensor of size
+    :math:`(frame\_length)`. If :attr:`window` is the default value ``None``, it
+    is treated as having :math:`1` everywhere in the frame. :attr:`pad_end`
+    indicates the amount of zero padding at the end of :attr:`signal` before
+    STFT.
+
+    Returns the magnitude and the phase each of size :math:`(*, frame\_length)`,
+    where :math:`*` is the shape of input :attr:`signal`, and the last
+    dimension indicates the frequency.
+
+    Arguments:
+        signal (Tensor): the inpute tensor
+        frame_length (int): the size of window frame and STFT filter
+        hop (int): the distance between neighboring sliding window frames
+        window (Tensor, optional): the optional window function
+        hope_end (int, optional): implicit zero padding at the end of :attr:`signal`
+
+    Returns:
+        (Tensor, Tensor): A tuple containing
+
+            - the magnitudes of STFT result
+            - the phases of STFT result
+    """
+    if torch.is_tensor(var):
+        raise ValueError("stft is currently only supported on Variable")
+    return var.stft(frame_length, hop, window, pad_end)

@@ -90,6 +90,8 @@
 - func: stack(TensorList tensors, int64_t dim=0) -> Tensor
   variants: function
 
+- func: stft(Tensor self, int64_t frame_length, int64_t hop, Tensor window={}, int64_t pad_end=0) -> (Tensor, Tensor)
+
 - func: allclose(Tensor self, Tensor other, double rtol=1e-5, double atol=1e-8) -> bool
 
 - func: is_signed(Tensor self) -> bool
