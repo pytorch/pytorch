@@ -122,6 +122,12 @@ class ncclTypeWrapper<float> {
   static const ncclDataType_t type = ncclFloat;
 };
 
+template <>
+class ncclTypeWrapper<int> {
+ public:
+  static const ncclDataType_t type = ncclInt;
+};
+
 #ifdef CAFFE_HAS_CUDA_FP16
 template <>
 class ncclTypeWrapper<float16> {
@@ -134,6 +140,8 @@ template <typename T, typename InitF, typename F>
 void runNCCL(const NCCLExecution& ex, InitF&& init_f, F&& f) {
   // do initialization
   for (auto i = 0; i < ex.elements.size(); ++i) {
+    auto& ctx = ex.elements[i];
+    DeviceGuard g(ctx.device);
     init_f(ex.elements[i]);
   }
 
@@ -155,7 +163,7 @@ void runNCCL(const NCCLExecution& ex, InitF&& init_f, F&& f) {
     std::lock_guard<std::mutex> lock(CUDAContext::mutex());
 
 #if NCCL_VERSION_MIN(2, 0, 0)
-    ncclGroupStart();
+    CAFFE_NCCL_CHECK(ncclGroupStart());
 #endif
 
     for (auto i = 0; i < ex.elements.size(); ++i) {
@@ -171,7 +179,7 @@ void runNCCL(const NCCLExecution& ex, InitF&& init_f, F&& f) {
     }
 
 #if NCCL_VERSION_MIN(2, 0, 0)
-    ncclGroupEnd();
+    CAFFE_NCCL_CHECK(ncclGroupEnd());
 #endif
 
     for (auto i = 0; i < ex.elements.size(); ++i) {
@@ -321,6 +329,7 @@ void NCCL<T>::ReduceScatter(const NCCLExecution& ex) {
 
 // Explicit instantiation
 template class NCCL<float>;
+template class NCCL<int>;
 #ifdef CAFFE_HAS_CUDA_FP16
 template class NCCL<float16>;
 #endif
