@@ -17,40 +17,60 @@
 #include <string>
 
 #include "caffe2/core/init.h"
+#include "caffe2/core/logging.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/proto/caffe2.pb.h"
 #include "caffe2/utils/proto_utils.h"
 #include "caffe2/utils/string_utils.h"
-#include "caffe2/core/logging.h"
 
 CAFFE2_DEFINE_string(net, "", "The given net to benchmark.");
-CAFFE2_DEFINE_string(init_net, "",
-                     "The given net to initialize any parameters.");
-CAFFE2_DEFINE_string(input, "",
-                     "Input that is needed for running the network. If "
-                     "multiple input needed, use comma separated string.");
-CAFFE2_DEFINE_string(input_file, "",
-                     "Input file that contain the serialized protobuf for "
-                     "the input blobs. If multiple input needed, use comma "
-                     "separated string. Must have the same number of items "
-                     "as input does.");
-CAFFE2_DEFINE_string(input_dims, "",
-                     "Alternate to input_files, if all inputs are simple "
-                     "float TensorCPUs, specify the dimension using comma "
-                     "separated numbers. If multiple input needed, use "
-                     "semicolon to separate the dimension of different "
-                     "tensors.");
-CAFFE2_DEFINE_string(output, "",
-                     "Output that should be dumped after the execution "
-                     "finishes. If multiple outputs are needed, use comma "
-                     "separated string. If you want to dump everything, pass "
-                     "'*' as the output value.");
-CAFFE2_DEFINE_string(output_folder, "",
-                     "The folder that the output should be written to. This "
-                     "folder must already exist in the file system.");
+CAFFE2_DEFINE_string(
+    init_net,
+    "",
+    "The given net to initialize any parameters.");
+CAFFE2_DEFINE_string(
+    input,
+    "",
+    "Input that is needed for running the network. If "
+    "multiple input needed, use comma separated string.");
+CAFFE2_DEFINE_string(
+    input_file,
+    "",
+    "Input file that contain the serialized protobuf for "
+    "the input blobs. If multiple input needed, use comma "
+    "separated string. Must have the same number of items "
+    "as input does.");
+CAFFE2_DEFINE_string(
+    input_dims,
+    "",
+    "Alternate to input_files, if all inputs are simple "
+    "float TensorCPUs, specify the dimension using comma "
+    "separated numbers. If multiple input needed, use "
+    "semicolon to separate the dimension of different "
+    "tensors.");
+CAFFE2_DEFINE_string(
+    output,
+    "",
+    "Output that should be dumped after the execution "
+    "finishes. If multiple outputs are needed, use comma "
+    "separated string. If you want to dump everything, pass "
+    "'*' as the output value.");
+CAFFE2_DEFINE_string(
+    output_folder,
+    "",
+    "The folder that the output should be written to. This "
+    "folder must already exist in the file system.");
 CAFFE2_DEFINE_int(warmup, 0, "The number of iterations to warm up.");
 CAFFE2_DEFINE_int(iter, 10, "The number of iterations to run.");
-CAFFE2_DEFINE_bool(run_individual, false, "Whether to benchmark individual operators.");
+CAFFE2_DEFINE_bool(
+    run_individual,
+    false,
+    "Whether to benchmark individual operators.");
+
+CAFFE2_DEFINE_bool(force_engine, false, "Force engine field for all operators");
+CAFFE2_DEFINE_string(engine, "", "Forced engine field value");
+CAFFE2_DEFINE_bool(force_algo, false, "Force algo arg for all operators");
+CAFFE2_DEFINE_string(algo, "", "Forced algo arg value");
 
 using std::string;
 using std::unique_ptr;
@@ -71,7 +91,8 @@ int main(int argc, char** argv) {
     if (caffe2::FLAGS_input_file.size()) {
       vector<string> input_files = caffe2::split(',', caffe2::FLAGS_input_file);
       CAFFE_ENFORCE_EQ(
-          input_names.size(), input_files.size(),
+          input_names.size(),
+          input_files.size(),
           "Input name and file should have the same number.");
       for (int i = 0; i < input_names.size(); ++i) {
         caffe2::BlobProto blob_proto;
@@ -79,9 +100,11 @@ int main(int argc, char** argv) {
         workspace->CreateBlob(input_names[i])->Deserialize(blob_proto);
       }
     } else if (caffe2::FLAGS_input_dims.size()) {
-      vector<string> input_dims_list = caffe2::split(';', caffe2::FLAGS_input_dims);
+      vector<string> input_dims_list =
+          caffe2::split(';', caffe2::FLAGS_input_dims);
       CAFFE_ENFORCE_EQ(
-          input_names.size(), input_dims_list.size(),
+          input_names.size(),
+          input_dims_list.size(),
           "Input name and dims should have the same number of items.");
       for (int i = 0; i < input_names.size(); ++i) {
         vector<string> input_dims_str = caffe2::split(',', input_dims_list[i]);
@@ -95,19 +118,35 @@ int main(int argc, char** argv) {
         tensor->mutable_data<float>();
       }
     } else {
-      CAFFE_THROW("You requested input tensors, but neither input_file nor "
-                  "input_dims is set.");
+      CAFFE_THROW(
+          "You requested input tensors, but neither input_file nor "
+          "input_dims is set.");
     }
   }
 
   // Run main network.
   CAFFE_ENFORCE(ReadProtoFromFile(caffe2::FLAGS_net, &net_def));
+  // force changing engine and algo
+  for (const auto& op : net_def.op()) {
+    if (caffe2::FLAGS_force_engine) {
+      const_cast<caffe2::OperatorDef*>(&op)->set_engine(caffe2::FLAGS_engine);
+    }
+    if (caffe2::FLAGS_force_algo) {
+      if (std::none_of(op.arg().begin(), op.arg().end(), [](auto& arg) {
+            return arg.name() == "algo"
+                   ? const_cast<caffe2::Argument*>(&arg)->set_s(
+                         caffe2::FLAGS_algo),
+                   true : false;
+          })) {
+        const_cast<caffe2::OperatorDef*>(&op)->add_arg()->CopyFrom(
+            caffe2::MakeArgument("algo", caffe2::FLAGS_algo));
+      }
+    }
+  }
   caffe2::NetBase* net = workspace->CreateNet(net_def);
   CHECK_NOTNULL(net);
   net->TEST_Benchmark(
-      caffe2::FLAGS_warmup,
-      caffe2::FLAGS_iter,
-      caffe2::FLAGS_run_individual);
+      caffe2::FLAGS_warmup, caffe2::FLAGS_iter, caffe2::FLAGS_run_individual);
 
   string output_prefix = caffe2::FLAGS_output_folder.size()
       ? caffe2::FLAGS_output_folder + "/"
