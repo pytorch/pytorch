@@ -14,6 +14,7 @@ if nGPUs == 0:
 
 class TestNCCL(TestCase):
 
+    @unittest.skipIf(sys.platform == "win32", "NCCL doesn't support Windows")
     def test_unique_id(self):
         uid = nccl.unique_id()
         self.assertIsInstance(uid, bytes)
