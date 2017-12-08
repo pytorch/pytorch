@@ -262,6 +262,22 @@ static PyObject * THPVariable_integral_scalar(PyObject* self, PyObject* args) {
   END_HANDLE_TH_ERRORS
 }
 
+static Tensor dispatch_invert(const Tensor & self) {
+  AutoNoGIL no_gil;
+  AutoGPU auto_gpu(self);
+  return 1 - self;
+}
+
+static PyObject * THPVariable_invert(PyObject* self, PyObject* args) {
+  HANDLE_TH_ERRORS
+  auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
+  if (self_.type().scalarType() != at::kByte) {
+    throw TypeError("~ (operator.invert) is only implemented on byte tensors");
+  }
+  return THPVariable_Wrap(dispatch_invert(self_));
+  END_HANDLE_TH_ERRORS
+}
+
 static Tensor dispatch_to_backend(const Tensor & self, Backend backend) {
   AutoNoGIL no_gil;
   AutoGPU auto_gpu(self);
@@ -427,6 +443,7 @@ PyMethodDef variable_methods[] = {
   {"__float__", (PyCFunction)THPVariable_float_scalar, METH_NOARGS, NULL},
   {"__int__", (PyCFunction)THPVariable_integral_scalar, METH_NOARGS, NULL},
   {"__long__", (PyCFunction)THPVariable_integral_scalar, METH_NOARGS, NULL},
+  {"__invert__", (PyCFunction)THPVariable_invert, METH_NOARGS, NULL},
   {"__nonzero__", (PyCFunction)THPVariable_is_nonzero, METH_NOARGS, NULL},
   {"__matmul__", (PyCFunction)THPVariable_matmul, METH_VARARGS | METH_KEYWORDS, NULL},
   {"apply_", (PyCFunction)THPVariable_apply_, METH_O, NULL},
