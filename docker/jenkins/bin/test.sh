@@ -55,6 +55,14 @@ if [ -n "$BUILD_ENVIRONMENT" ]; then
   fi
 fi
 
+# Collect additional tests to run (outside caffe2/python)
+EXTRA_TESTS=()
+
+# CUDA builds always include NCCL support
+if [[ "$BUILD_ENVIRONMENT" == *-cuda* ]]; then
+  EXTRA_TESTS+=(caffe2/contrib/nccl)
+fi
+
 # Python tests
 echo "Running Python tests.."
 "$PYTHON" \
@@ -66,7 +74,9 @@ echo "Running Python tests.."
   --ignore caffe2/python/operator_test/pack_ops_test.py \
   --ignore caffe2/python/operator_test/rnn_cell_test.py \
   --ignore caffe2/python/mkl/mkl_sbn_speed_test.py \
-  caffe2/python/
+  caffe2/python/ \
+  ${EXTRA_TESTS[@]}
+
 tmp_exit_code="$?"
 if [ "$exit_code" -eq 0 ]; then
   exit_code="$tmp_exit_code"
