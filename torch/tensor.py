@@ -274,20 +274,19 @@ class _TensorBase(object):
             raise ValueError('Number of dimensions of repeat dims can not be '
                              'smaller than number of dimensions of tensor')
 
-        xtensor = src.clone()
+        xtensor = src.new().set_(src)
         xsize = list(xtensor.size())
         for i in _range(len(repeats) - src.dim()):
             xsize = [1] + xsize
 
         size = torch.Size([a * b for a, b in zip(xsize, repeats)])
-        xtensor.resize_(torch.Size(xsize))
+        xtensor = xtensor.view(torch.Size(xsize))
         result.resize_(size)
         urtensor = result.new(result)
         for i in _range(xtensor.dim()):
             urtensor = urtensor.unfold(i, xtensor.size(i), xtensor.size(i))
         for i in _range(urtensor.dim() - xtensor.dim()):
             xsize = [1] + xsize
-        xtensor.resize_(torch.Size(xsize))
         xxtensor = xtensor.expand_as(urtensor)
         urtensor.copy_(xxtensor)
         return result
