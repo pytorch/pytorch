@@ -127,20 +127,18 @@ int main(int argc, char** argv) {
   // Run main network.
   CAFFE_ENFORCE(ReadProtoFromFile(caffe2::FLAGS_net, &net_def));
   // force changing engine and algo
-  for (const auto& op : net_def.op()) {
-    if (caffe2::FLAGS_force_engine) {
+  if (caffe2::FLAGS_force_engine) {
+    LOG(INFO) << "force engine be: " << caffe2::FLAGS_engine;
+    for (const auto& op : net_def.op()) {
       const_cast<caffe2::OperatorDef*>(&op)->set_engine(caffe2::FLAGS_engine);
     }
-    if (caffe2::FLAGS_force_algo) {
-      if (std::none_of(op.arg().begin(), op.arg().end(), [](auto& arg) {
-            return arg.name() == "algo"
-                   ? const_cast<caffe2::Argument*>(&arg)->set_s(
-                         caffe2::FLAGS_algo),
-                   true : false;
-          })) {
-        const_cast<caffe2::OperatorDef*>(&op)->add_arg()->CopyFrom(
-            caffe2::MakeArgument("algo", caffe2::FLAGS_algo));
-      }
+  }
+  if (caffe2::FLAGS_force_algo) {
+    LOG(INFO) << "force algo be: " << caffe2::FLAGS_algo;
+    for (const auto& op : net_def.op()) {
+      caffe2::GetMutableArgument(
+          "algo", true, const_cast<caffe2::OperatorDef*>(&op))
+          ->set_s(caffe2::FLAGS_algo);
     }
   }
   caffe2::NetBase* net = workspace->CreateNet(net_def);
