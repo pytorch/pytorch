@@ -189,6 +189,11 @@ VIEW_FUNCTIONS = {
 MANUAL_IMPLEMENTATIONS = {
     'contiguous', 'resize_', 'resize_as_'
 }
+# These functions require manual Python bindings or are not exposed to Python
+SKIP_PYTHON_BINDINGS = [
+    'alias', 'contiguous', 'clamp.*', 'is_cuda', 'size', 'stride',
+    '.*_backward'
+]
 
 # Matches "foo" in "foo, bar" but not "foobar". Used to search for the
 # occurence of a parameter in the derivative formula
@@ -605,6 +610,7 @@ def create_autograd_functions(top_env, autogen_functions):
 def is_implemented(option):
     return (option['return_type'] in FALLTHROUGH_RETURN_TYPES or
             option['name'] in FALLTHROUGH_FUNCTIONS or
+            option['name'] in MANUAL_IMPLEMENTATIONS or
             option['name'].endswith('_backward') or
             option.get('derivative') is not None)
 
@@ -1023,14 +1029,9 @@ def gen_variable_type(declarations, out):
         if not is_implemented(declaration) and declaration['mode'] != 'native':
             return False
 
-        # don't bind size or stride since the python signatures are different
-        # exclude alias from Python bindings as well at least for now
-        # exclude 'is_cuda' because for historical reasons it is a property.
-        if name in ['alias', 'size', 'stride', 'is_cuda'] or name.startswith('clamp'):
-            return False
-
-        if name.endswith('_backward'):
-            return False
+        for pattern in SKIP_PYTHON_BINDINGS:
+            if re.match('^' + pattern + '$', name):
+                return False
 
         # we don't currently support functions which are only defined on Type
         # such as zeros(), randn(), etc.
