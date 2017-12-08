@@ -61,10 +61,18 @@ fi
 # Copy over common scripts to directory containing the Dockerfile to build
 cp -a bin common/* "$(dirname ${DOCKERFILE})"
 
+# Set Jenkins UID and GID if running Jenkins
+if [ -n "${JENKINS:-}" ]; then
+  JENKINS_UID=$(id -u jenkins)
+  JENKINS_GID=$(id -g jenkins)
+fi
+
 # Build image
 docker build \
        --build-arg EC2=${EC2:-} \
        --build-arg JENKINS=${JENKINS:-} \
+       --build-arg JENKINS_UID=${JENKINS_UID:-} \
+       --build-arg JENKINS_GID=${JENKINS_GID:-} \
        --build-arg UBUNTU_VERSION=${UBUNTU_VERSION} \
        --build-arg PYTHON_VERSION=${PYTHON_VERSION} \
        --build-arg CUDA_VERSION=${CUDA_VERSION} \

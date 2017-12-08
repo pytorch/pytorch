@@ -19,6 +19,8 @@ RUN bash ./install_python.sh && rm install_python.sh
 
 # (optional) Add Jenkins user
 ARG JENKINS
+ARG JENKINS_UID
+ARG JENKINS_GID
 ADD ./add_jenkins_user.sh add_jenkins_user.sh
-RUN if [ -n "${JENKINS}" ]; then bash ./add_jenkins_user.sh; fi
+RUN if [ -n "${JENKINS}" ]; then bash ./add_jenkins_user.sh ${JENKINS_UID} ${JENKINS_GID}; fi
 RUN rm add_jenkins_user.sh
