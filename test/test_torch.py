@@ -4241,13 +4241,15 @@ class TestTorch(TestCase):
         b += [(t1.storage(), t1.storage(), t2.storage())]
         b += [a[0].storage()[0:2]]
         for use_name in (False, True):
-            f = tempfile.NamedTemporaryFile(delete=False)
-            handle = f.name if use_name else f
-            torch.save(b, handle)
-            f.seek(0)
-            c = torch.load(handle)
-            f.close()
-            os.unlink(f.name)
+            # Passing filename to torch.save(...) will cause the file to be opened twice,
+            # which is not supported on Windows
+            if sys.platform == "win32" and not use_name:
+                continue
+            with tempfile.NamedTemporaryFile() as f:
+                handle = f if not use_name else f.name
+                torch.save(b, handle)
+                f.seek(0)
+                c = torch.load(handle)
             self.assertEqual(b, c, 0)
             self.assertTrue(isinstance(c[0], torch.FloatTensor))
             self.assertTrue(isinstance(c[1], torch.FloatTensor))
