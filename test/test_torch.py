@@ -4821,7 +4821,7 @@ class TestTorch(TestCase):
         for idx in iter_indices(x):
             self.assertIs(x[idx] >= y[idx], ge[idx] == 1)
 
-    def test_logical_ops(self):
+    def test_bitwise_ops(self):
         x = torch.randn(5, 5).gt(0)
         y = torch.randn(5, 5).gt(0)
 
@@ -4861,6 +4861,11 @@ class TestTorch(TestCase):
         x_clone = x.clone()
         x_clone ^= y
         self.assertEqual(x_clone, xor_result)
+
+    def test_invert(self):
+        # TODO remove this once we merge tensor and variable
+        x = torch.autograd.Variable(torch.ByteTensor([0, 1, 1]))
+        self.assertEqual((~x).tolist(), [1, 0, 0])
 
     def test_apply(self):
         x = torch.arange(1, 6)
