@@ -222,7 +222,7 @@ THDTensorDescriptor THDPModule_makeDescriptor(PyObject *obj)
   REGISTER_THC_DESCRIPTOR(ByteTensor);
 #undef REGISTER_THC_DESCRIPTOR
 #endif
-  throw std::runtime_error(std::string("don't know how to create a THDTensorDesciptor for HALF "
+  throw std::runtime_error(std::string("don't know how to create a THDTensorDesciptor for "
       "type ") + std::string(THPUtils_typename(obj)));
 }
 
