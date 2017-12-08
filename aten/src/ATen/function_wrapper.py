@@ -180,6 +180,7 @@ TYPE_RETURN = {
     'THIndexTensor*': 'Tensor',
     'THBoolTensor*': 'Tensor',
     'THIntegerTensor*': 'Tensor',
+    'THSTensor*': 'Tensor',
     'real': 'Tensor',
     'accreal': 'Tensor',
     'long': 'int64_t',
@@ -232,6 +233,7 @@ ALLOC_WRAP = {
     'THBoolTensor*': 'new ${Backend}ByteTensor(context)',
     'THIndexTensor*': 'new ${Backend}LongTensor(context)',
     'THIntegerTensor*': 'new ${Backend}IntTensor(context)',
+    'THSTensor*': 'new Sparse${Tensor}(context)',
 }
 
 # Replacements for constants when calling into TH
