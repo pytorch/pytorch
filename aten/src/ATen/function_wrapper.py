@@ -232,11 +232,13 @@ CHECKED_USE = {
 CHECKED_USE_NULLABLE = CodeTemplate('${arg_name}_ ? ${usage} : NULL')
 
 ALLOC_WRAP = {
-    'THTensor*': 'new ${Tensor}(context)',
-    'THBoolTensor*': 'new ${Backend}ByteTensor(context)',
-    'THIndexTensor*': 'new ${Backend}LongTensor(context)',
-    'THIntegerTensor*': 'new ${Backend}IntTensor(context)',
-    'THSTensor*': 'new Sparse${Tensor}(context)',
+    'THTensor*': 'new ${Tensor}(context${,arguments})',
+    'THBoolTensor*': 'new ${Backend}ByteTensor(context${,arguments})',
+    'THIndexTensor*': 'new ${Backend}LongTensor(context${,arguments})',
+    'THIntegerTensor*': 'new ${Backend}IntTensor(context${,arguments})',
+    'THSTensor*': 'new Sparse${Tensor}(context${,arguments})',
+    'THDenseTensor*': 'new ${DenseTensor}(context${,arguments})',
+    'THDenseIndexTensor*': 'new ${DenseBackend}LongTensor(context${,arguments})',
 }
 
 # Replacements for constants when calling into TH
@@ -837,7 +839,7 @@ def create_derived(backend_type_env, declarations):
 
     def allocate_arg(env, arg, output_count):
         name = arg['name']
-        allocation = CodeTemplate(ALLOC_WRAP[arg['type']]).substitute(env)
+        allocation = CodeTemplate(ALLOC_WRAP[arg['type']]).substitute(env, arguments=[])
         tensor_arg = '{}_'.format(name)
         if arg.get('mask', False):
             allocation = 'output_mask[{}] ? {} : nullptr'.format(output_count, allocation)
@@ -1033,19 +1035,15 @@ def create_derived(backend_type_env, declarations):
         elif ret['kind'] == 'type':
             assert len(calls) == 1
             call = calls[0]
-            return_tensor_map = {
-                'THTensor*': '${Tensor}',
-                'THDenseTensor*': '${DenseTensor}',
-                'THDenseIndexTensor*': '${DenseBackend}LongTensor',
-            }
-            if ret['type'] in return_tensor_map.keys():
+            if ret['type'] in ALLOC_WRAP.keys():
                 maybe_scalar = "->maybeScalar({})".format(scalar_check) \
                                if scalar_check is not None \
                                else ""
-                tensor_ctor = return_tensor_map[ret['type']]
-                return_tensor = "return Tensor((new %s(context,${arg_name}))${maybe_scalar},false);" % tensor_ctor
+                wrapped_tensor = CodeTemplate(ALLOC_WRAP[ret['type']]).substitute(
+                    env, arguments=[call])
+                return_tensor = "return Tensor((${wrapped_tensor})${maybe_scalar},false);"
                 body.append(CodeTemplate(return_tensor).substitute(
-                    env, arg_name=call, maybe_scalar=maybe_scalar))
+                    env, wrapped_tensor=wrapped_tensor, maybe_scalar=maybe_scalar))
             # return the same underlying Tensor type for both real and accreal; this ensures
             # e.g. x.sum(0) and x.sum() return the same type.
             elif ret['type'] == 'accreal' or ret['type'] == 'real':
