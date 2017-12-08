@@ -95,20 +95,20 @@ void THCTensor_(check_shape_except_dim)(THCState *state,
 inline void THCTensor_(check_shape_except_dim)(THCState *state, 
     THCTensor *first, THCTensor *second, int dimension)
 {
-  int64_t first_dims = THCTensor_(nDimension)(state, first);
-  int64_t second_dims = THCTensor_(nDimension)(state, second);
+  int first_dims = THCTensor_(nDimension)(state, first);
+  int second_dims = THCTensor_(nDimension)(state, second);
   THArgCheck(first_dims == second_dims, 0,
       "Tensors must have same number of dimensions: got %d and %d",
       first_dims, second_dims);
-  for (int64_t dim = 0; dim < first_dims; dim++) {
+  for (int dim = 0; dim < first_dims; dim++) {
     if (dim == dimension) {
       continue;
     }
     int64_t first_dim_size = THCTensor_(size)(state, first, dim);
     int64_t second_dim_size = THCTensor_(size)(state, second, dim);
     THArgCheck(first_dim_size == second_dim_size, 0,
-        "Sizes of tensors must match except in dimension %d. Got %d and %d in dimension %d",
-        dimension, first_dim_size, second_dim_size, dim);
+        "Sizes of tensors must match except in dimension %d. Got %lld and %lld in dimension %d",
+        dimension, (long long)first_dim_size, (long long)second_dim_size, dim);
   }
 }
 

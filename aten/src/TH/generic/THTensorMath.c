@@ -2812,20 +2812,20 @@ void THTensor_(cat)(THTensor *r_, THTensor *ta, THTensor *tb, int dimension)
 void THTensor_(check_shape_except_dim)(THTensor *first, THTensor *second, int dimension);
 inline void THTensor_(check_shape_except_dim)(THTensor *first, THTensor *second, int dimension)
 {
-  int64_t first_dims = first->nDimension;
-  int64_t second_dims = second->nDimension;
+  int first_dims = first->nDimension;
+  int second_dims = second->nDimension;
   THArgCheck(first_dims == second_dims, 0,
       "Tensors must have same number of dimensions: got %d and %d",
       first_dims, second_dims);
-  for (int64_t dim = 0; dim < first_dims; dim++) {
+  for (int dim = 0; dim < first_dims; dim++) {
     if (dim == dimension) {
       continue;
     }
     int64_t first_dim_size = first->size[dim];
     int64_t second_dim_size = second->size[dim];
     THArgCheck(first_dim_size == second_dim_size, 0,
-        "Sizes of tensors must match except in dimension %d. Got %d and %d in dimension %d",
-        dimension, first_dim_size, second_dim_size, dim);
+        "Sizes of tensors must match except in dimension %d. Got %lld and %lld in dimension %d",
+        dimension, (long long)first_dim_size, (long long)second_dim_size, dim);
   }
 }
 
