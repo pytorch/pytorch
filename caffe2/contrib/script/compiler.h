@@ -10,6 +10,7 @@ struct CompilationUnitImpl;
 struct CompilationUnit {
   CompilationUnit();
   void define(const std::string& str);
+  void defineExtern(const std::string& str, std::unique_ptr<NetDef> netdef);
   std::unique_ptr<NetBase> createNet(Workspace* ws, const std::string& name);
   ~CompilationUnit();
 
