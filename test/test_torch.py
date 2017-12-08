@@ -4497,6 +4497,7 @@ class TestTorch(TestCase):
         self.assertEqual(x.new([3, 4]).shape, [2])
         self.assertEqual(x.new([3, 4]).tolist(), [3, 4])
         self.assertEqual(x.new((3, 4)).tolist(), [3, 4])
+        self.assertEqual(x.new(size=(3, 4)).shape, [3, 4])
         self.assertEqual(x.new(tuple()).shape, [0])
         self.assertEqual(x.new(y.storage()).data_ptr(), y.data_ptr())
         self.assertEqual(x.new(y).data_ptr(), y.data_ptr())

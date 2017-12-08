@@ -98,34 +98,38 @@ static Tensor new_from_sequence(ScalarType scalarType, PyObject* data) {
   return tensor;
 }
 
+static Tensor new_from_sequence(const Type & type, int device, PyObject* data) {
+  auto tensor = new_from_sequence(type.scalarType(), data);
+  if (tensor.type() != type) {
+    AutoNoGIL no_gil;
+    AutoGPU auto_gpu(device);
+    tensor = tensor.toType(type);
+  }
+  return tensor;
+}
+
 Tensor tensor_new(const Type& type, PyObject* args, PyObject* kwargs) {
   static PythonArgParser parser({
     "new(*, int64_t device=-1)",
-    "new(torch.Size size, *, int64_t device=-1)",
+    "new(IntList size, *, int64_t device=-1)",
     "new(Storage storage)",
     "new(*, int64_t cdata)|hidden",
     "new(Tensor other)",
     "new(PyObject* data, *, int64_t device=-1)",
   });
-  static PythonArgParser parser2({
-    "new(IntList size, *, int64_t device=-1)",
-  });
 
   PyObject* parsed_args[2];
-
-  // Handle new(int...). This signature would be ambiguous if combined with
-  // the main parser.
-  if (PyTuple_GET_SIZE(args) >= 1 && THPUtils_checkLong(PyTuple_GET_ITEM(args, 0))) {
-    auto r = parser2.parse(args, kwargs, parsed_args);
-    int device = r.toInt64(1);
-    return new_with_sizes(type, device, r.intlist(0));
-  }
-
   auto r = parser.parse(args, kwargs, parsed_args);
   if (r.idx == 0) {
     AutoGPU auto_gpu(r.toInt64(0));
     return type.tensor();
   } else if (r.idx == 1) {
+    PyObject* arg = parsed_args[0];
+    if (!THPSize_Check(arg) && PyTuple_GET_SIZE(args) >= 1 && arg == PyTuple_GET_ITEM(args, 0)) {
+      // new(sequence) binds to this signature but should be treated differently
+      // unless the sequences is a torch.Size
+      return new_from_sequence(type, r.toInt64(1), r.pyobject(0));
+    }
     return new_with_sizes(type, r.toInt64(1), r.intlist(0));
   } else if (r.idx == 2) {
     return new_with_storage(type, *r.storage(0));
@@ -135,13 +139,7 @@ Tensor tensor_new(const Type& type, PyObject* args, PyObject* kwargs) {
   } else if (r.idx == 4) {
     return new_with_tensor(type, r.tensor(0));
   } else if (r.idx == 5) {
-    auto tensor = new_from_sequence(type.scalarType(), r.pyobject(0));
-    if (tensor.type() != type) {
-      AutoNoGIL no_gil;
-      AutoGPU auto_gpu(r.toInt64(1));
-      tensor = tensor.toType(type);
-    }
-    return tensor;
+    return new_from_sequence(type, r.toInt64(1), r.pyobject(0));
   }
   throw std::runtime_error("new(): invalid arguments");
 }

@@ -36,7 +36,7 @@ namespace torch {
 
 enum class ParameterType {
   TENSOR, SCALAR, INT64, DOUBLE, TENSOR_LIST, INT_LIST, GENERATOR,
-  BOOL, STORAGE, PYOBJECT, TORCH_SIZES
+  BOOL, STORAGE, PYOBJECT
 };
 
 struct FunctionParameter;

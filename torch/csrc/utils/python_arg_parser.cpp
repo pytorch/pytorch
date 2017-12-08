@@ -23,7 +23,6 @@ static std::unordered_map<std::string, ParameterType> type_map = {
   {"bool", ParameterType::BOOL},
   {"Storage", ParameterType::STORAGE},
   {"PyObject*", ParameterType::PYOBJECT},
-  {"torch.Size", ParameterType::TORCH_SIZES}
 };
 
 FunctionParameter::FunctionParameter(const std::string& fmt, bool keyword_only)
@@ -88,7 +87,6 @@ bool FunctionParameter::check(PyObject* obj) {
     case ParameterType::BOOL: return PyBool_Check(obj);
     case ParameterType::STORAGE: return isStorage(obj);
     case ParameterType::PYOBJECT: return true;
-    case ParameterType::TORCH_SIZES: return THPSize_Check(obj);
     default: throw std::runtime_error("unknown parameter type");
   }
 }
@@ -105,7 +103,6 @@ std::string FunctionParameter::type_name() const {
     case ParameterType::BOOL: return "bool";
     case ParameterType::STORAGE: return "torch.Storage";
     case ParameterType::PYOBJECT: return "object";
-    case ParameterType::TORCH_SIZES: return "torch.Size";
     default: throw std::runtime_error("unknown parameter type");
   }
 }
@@ -349,7 +346,8 @@ bool FunctionSignature::parse(PyObject* args, PyObject* kwargs, PyObject* dst[],
       return false;
     } else if (param.check(obj)) {
       dst[i++] = obj;
-    } else if (allow_varargs_intlist && arg_pos == 0 && !is_kwd) {
+    } else if (allow_varargs_intlist && arg_pos == 0 && !is_kwd &&
+               THPUtils_checkLong(obj)) {
       // take all positional arguments as this parameter
       // e.g. permute(1, 2, 3) -> permute((1, 2, 3))
       dst[i++] = args;
@@ -373,7 +371,7 @@ bool FunctionSignature::parse(PyObject* args, PyObject* kwargs, PyObject* dst[],
 
     if (!is_kwd) {
       arg_pos++;
-    } else {
+    } else if (obj) {
       remaining_kwargs--;
     }
   }
