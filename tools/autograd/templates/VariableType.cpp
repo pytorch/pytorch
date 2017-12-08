@@ -356,13 +356,8 @@ void VariableType::s_copy(const Tensor & src, Tensor & dst) const {
 
 Tensor & VariableType::resize_(Tensor & self, IntList size) const {
   auto& self_ = unpack(self, "self", 0);
-  check_inplace(self);
-  auto& self_var = static_cast<Variable&>(self);
-  if (self_var.grad_fn()) {
-    at::runtime_error("cannot resize non-leaf variables");
-  }
-  if (self_var.requires_grad()) {
-    at::runtime_error("cannot resize variables which require grad");
+  if (static_cast<Variable&>(self).requires_grad()) {
+    at::runtime_error("cannot resize variables that require grad");
   }
   baseType->resize_(self_, size);
   return self;
