@@ -366,6 +366,47 @@ struct DefCompiler {
       op->add_output(outputs[i]);
     }
   }
+  void emitOperator(
+      const Apply& apply,
+      const OpSchema* schema,
+      const std::vector<std::string>& outputs) {
+    // must be before add_op
+    auto values = getValues(apply.inputs());
+    if (values.size() < schema->min_input() ||
+        values.size() > schema->max_input()) {
+      if (schema->min_input() == schema->max_input()) {
+        throw ErrorReport(apply) << "operator expects " << schema->min_input()
+                                 << " inputs but found " << values.size();
+      } else {
+        throw ErrorReport(apply)
+            << "operator takes between " << schema->min_input() << " and "
+            << schema->max_input() << " inputs but found " << values.size()
+            << ".";
+      }
+    }
+    auto numActualOutputs = schema->CalculateOutput(values.size());
+    if (numActualOutputs != kCannotComputeNumOutputs &&
+        outputs.size() != numActualOutputs) {
+      throw ErrorReport(apply)
+          << "operator produces " << numActualOutputs
+          << " outputs but matched to " << outputs.size() << " outputs";
+    }
+    auto op = cur().add_op();
+    op->set_type(apply.name().name());
+    for (auto& v : values) {
+      op->add_input(v);
+    }
+    // assume 1 output unless matched to more
+    appendOutputs(apply, op, outputs, outputs.size());
+    for (auto attribute : apply.attributes()) {
+      fillArg(op->add_arg(), attribute);
+    }
+    // Ok, we checked the stuff where we can easily give a friendly error
+    // message, now verify against the schema and report the error at the line
+    if (!schema->Verify(*op)) {
+      throw ErrorReport(apply) << "failed schema checking";
+    }
+  }
   void emit(const TreeRef& tree, const std::vector<std::string>& outputs) {
     switch (tree->kind()) {
       case TK_IDENT: {
@@ -411,18 +452,14 @@ struct DefCompiler {
           emitFunctionCall(apply, outputs);
           break;
         }
-        // must be before add_op
-        auto values = getValues(apply.inputs());
-        auto op = cur().add_op();
-        op->set_type(apply.name().name());
-        for (auto& v : values) {
-          op->add_input(v);
+        auto schema = OpSchemaRegistry::Schema(apply.name().name());
+        if (schema) {
+          emitOperator(apply, schema, outputs);
+          break;
         }
-        // assume 1 output unless matched to more
-        appendOutputs(tree, op, outputs, outputs.size());
-        for (auto attribute : apply.attributes()) {
-          fillArg(op->add_arg(), attribute);
-        }
+        throw ErrorReport(apply)
+            << "attempting to call unknown operation or function '"
+            << apply.name().name() << "'";
       } break;
       case TK_CAST: {
         auto cast = Cast(tree);

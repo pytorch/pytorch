@@ -103,6 +103,40 @@ class TestCaffe2Script(hu.HypothesisTestCase):
         assert(workspace.FetchBlob('d'))
         assert(workspace.FetchBlob('e'))
 
+    def expect_fail(self, fn, msg):
+        try:
+            fn()
+        except RuntimeError as r:
+            if msg not in str(r):
+                raise RuntimeError(
+                    "Failed wrong: expected string '{}' ".format(msg) +
+                    "in error message but found\n{}".format(str(r)))
+
+    def test_fails(self):
+        def fail_inputs():
+            CU = core.C.CompilationUnit()
+            CU.define("""
+                def foo() -> ():
+                    Print(1,4)
+            """)
+        self.expect_fail(fail_inputs, "expects 1 inputs but found 2")
+
+        def fail_undef():
+            CU = core.C.CompilationUnit()
+            CU.define("""
+                def foo(a) -> (b):
+                    a = what()
+            """)
+        self.expect_fail(fail_undef, "attempting to call unknown operation")
+
+        def fail_schema():
+            CU = core.C.CompilationUnit()
+            CU.define("""
+                def foo(a) -> (b):
+                    a = FC(a,a,a)
+            """)
+        self.expect_fail(fail_schema, "failed schema checking")
+
     def test_print(self):
         CU = core.C.CompilationUnit()
         CU.define("""
