@@ -20,6 +20,16 @@
 #define PRAGMA(P) __pragma(P)
 #endif
 
+#define TH_CHECK_SAME_SIZE(TENSOR1, TENSOR2) \
+{ \
+  if(!THTensor_(isSameSizeAs)(TENSOR1, TENSOR2)) { \
+    THDescBuff T1buff = _THSizeDesc(TENSOR1->size, TENSOR1->nDimension); \
+    THDescBuff T2buff = _THSizeDesc(TENSOR2->size, TENSOR2->nDimension); \
+    THError("inconsistent tensor size, expected %s %s and %s %s to have the same size", \
+            #TENSOR1, T1buff.str, #TENSOR2, T2buff.str); \
+  } \
+}
+
 #define TH_TENSOR_APPLY_CONTIG(TYPE, TENSOR, CODE) \
 { \
   ptrdiff_t TH_TENSOR_size = THTensor_(nElement)(TENSOR); \
@@ -3503,6 +3513,148 @@ void THTensor_(standard_gamma_grad)(THTensor *self, THTensor *x, THTensor *alpha
     *self_data = THTensor_(standard_gamma_grad_one)(*x_data, *alpha_data);
   });
 }
+
+// Approximate reparameterized gradient of Beta(x,alpha,beta) wrt alpha.
+// Assumes x is close to zero.
+real THTensor_(beta_grad_alpha_small)(real x, real alpha, real beta) {
+  const real b1 = beta - 1;
+  const real b2 = beta - 2;
+  const real b3 = beta - 3;
+  const real a0 = 1 / alpha;
+  const real a1 = 1 / (alpha + 1);
+  const real a2 = 1 / (alpha + 2);
+  const real a3 = 1 / (alpha + 3);
+  // Let pdf = pow(x,alpha-1) * pow(1-x,beta-1) / Beta(alpha,beta).
+  // Let const = Beta(alpha,beta) / pow(x, alpha). Then
+  const real one_over_const_pdf = x / TH_MATH_NAME(pow)(1 - x, beta - 1);
+  const real const_cdf = +a0 + b1 * x * (
+                         -a1 + b2 * x / 2 * (
+                         +a2 + b3 * x / 3 * (
+                         -a3)));
+  const real const_cdf_alpha = (log(x) + THTensor_(digamma_one)(alpha + beta) -
+                                THTensor_(digamma_one)(alpha)) * const_cdf
+                             + -a0 * a0 + b1 * x * (
+                               +a1 * a1 + b2 * x / 2 * (
+                               -a2 * a2 + b3 * x / 3 * (
+                               +a3)));
+  const real result = -const_cdf_alpha * one_over_const_pdf;
+  return isnan(result) ? 0.0 : result;
+}
+
+// Approximate reparameterized gradient of Beta(x,alpha,beta) wrt beta.
+// Assumes x is close to zero.
+real THTensor_(beta_grad_beta_small)(real x, real alpha, real beta) {
+  const real a0 = 1.0 / alpha;
+  const real a1 = 1.0 / (alpha + 1.0);
+  const real a2 = 1.0 / (alpha + 2.0);
+  const real a3 = 1.0 / (alpha + 3.0);
+  // Let pdf = pow(x,alpha-1) * pow(1-x,beta-1) / Beta(alpha,beta).
+  // Let const = Beta(alpha,beta) / pow(x, alpha). Then
+  const real one_over_const_pdf = x / TH_MATH_NAME(pow)(1 - x, beta - 1);
+  const real const_cdf = +a0 + (beta - 1) * x * (
+                         -a1 + (beta - 2.0) * x / 2 * (
+                         +a2 + (beta - 3.0) * x / 3 * (
+                         -a3)));
+  const real const_cdf_beta = (THTensor_(digamma_one)(alpha + beta) -
+                               THTensor_(digamma_one)(beta)) * const_cdf
+                            + 0 + x * (
+                            -a1 + x / 2 * (
+                            +a2 * (2 * beta - 3) + x / 3 * (
+                            -a3 * (3 * beta * beta - 12 * beta + 11))));
+  const real result = -const_cdf_beta * one_over_const_pdf;
+  return isnan(result) ? 0.0 : result;
+}
+
+// Computes the reparameterized gradient -(d/dalpha cdf(x;alphas)) / pdf(x;alphas)
+// for random number x drawn from a Dirichlet distribution Dirichlet(alphas).
+// Total is the sum of all alphas.
+real THTensor_(dirichlet_grad_one)(real x, real alpha, real total) {
+  const real beta = total - alpha;
+
+  // Use an asymptotic approximation for x close to 0.
+  if (x * (1 + total) < 0.75f) {
+    return THTensor_(beta_grad_alpha_small)(x, alpha, beta);
+  }
+
+  // Use an asymptotic approximation for x close to 1.
+  if ((1 - x) * (1 + total) < 0.5f) {
+    return -THTensor_(beta_grad_beta_small)(1 - x, beta, alpha);
+  }
+
+  // Use a Laplace approximation when alpha and (total - alpha) are both large.
+  if (alpha > 100 && beta > 100) {
+    const real logit = x / (1 - x);
+    const real Logit = alpha / beta;
+    return x * (1 - x) * (1 / alpha - TH_MATH_NAME(log)(logit / Logit) / (2 * Logit * total));
+  }
+
+  // Use a rational correction to an analytic baseline.
+  static const real c[2][3][3][3] = {
+    {{{0.9725276563, -0.0509239565, 1.625070847e-06},
+      {0.03797015233, 0.007409446855, -0.0008465634691},
+      {0.04498118832, -0.005657730635, 0.0006594371985}},
+     {{-0.4906583778, -0.03501797976, 0.0116832438},
+      {0.07144210068, 0.01917836117, -0.01049408328},
+      {-0.01850287138, 0.0009313017859, 0.001438917764}},
+     {{-0.04252776008, 0.07983672436, -0.005747111986},
+      {0.01119087258, -0.03621480878, 0.002405820172},
+      {0.008194427563, 0.002768270684, -0.0001137741838}}},
+    {{{1, -0.06216981624, -0.001621712526},
+      {0.03395698453, 0.01103224173, -0.000539324895},
+      {0.0438507131, -0.005479208201, 0.000601035911}},
+     {{0.007131342965, 0.03959558295, -0.003737549484},
+      {0.02450054108, 0.001429734367, -0.0002356644527},
+      {-0.004480783661, 0.004028770843, -0.0002935849718}},
+     {{-0.0046942397, 0.003926730136, -0.0003397299665},
+      {0.009286906003, -0.001605160177, 7.69956057e-05},
+      {-0.0006000287485, 0.0004877957422, -4.36865244e-05}}},
+  };
+  const real u = TH_MATH_NAME(log)(x);
+  const real a = TH_MATH_NAME(log)(alpha);
+  const real b = TH_MATH_NAME(log)(total);
+  const real pow_u[4] = {1, u, u * u, u * u * u};
+  const real pow_a[4] = {1, a, a * a, a * a * a};
+  accreal p = 0.0;
+  accreal q = 0.0;
+  for (int i = 0; i < 3; ++i) {
+    for (int j = 0; j < 3; ++j) {
+      const real ua = pow_u[i] * pow_a[j];
+      p += ua * (c[0][i][j][0] + b * (c[0][i][j][1] + b * c[0][i][j][2]));
+      q += ua * (c[1][i][j][0] + b * (c[1][i][j][1] + b * c[1][i][j][2]));
+    }
+  }
+  if(q < 1e-3f) q = 1e-3f;
+  const real baseline = x * (1 - x) * (THTensor_(digamma_one)(total) - THTensor_(digamma_one)(alpha)) / beta;
+  return p / q * baseline;
+}
+
+void THTensor_(dirichlet_grad)(THTensor *self, THTensor *x, THTensor *alpha, THTensor *total)
+{
+  x = THTensor_(newContiguous)(x);
+  alpha = THTensor_(newContiguous)(alpha);
+  total = THTensor_(newContiguous)(total);
+  // FIXME these lines cause a linker error:
+  //   Undefined symbols for architecture x86_64:
+  //   "_TH_CHECK_SAME_SIZE", referenced from: ...
+  // TH_CHECK_SAME_SIZE(alpha, x);
+  // TH_CHECK_SAME_SIZE(total, x);
+  THTensor_(resizeAs)(self, x);
+  THTensor* grad = THTensor_(newContiguous)(self);
+
+  real*const grad_data = THTensor_(data)(grad);
+  real*const x_data = THTensor_(data)(x);
+  real*const alpha_data = THTensor_(data)(alpha);
+  real*const total_data = THTensor_(data)(total);
+  const int64_t numel = THTensor_(nElement)(x);
+  int64_t i;
+  #pragma omp parallel for if(numel > TH_OMP_OVERHEAD_THRESHOLD) private(i)
+  for(i = 0; i < numel; ++i) {
+    grad_data[i] = THTensor_(dirichlet_grad_one)(x_data[i], alpha_data[i], total_data[i]);
+  }
+
+  THTensor_(freeCopyTo)(grad, self);
+}
+
 
 #undef TH_MATH_NAME
 #endif /* floating point only part */

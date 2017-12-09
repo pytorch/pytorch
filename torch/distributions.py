@@ -300,7 +300,7 @@ class Dirichlet(Distribution):
     Args:
         alpha (Tensor or Variable): concentration parameter of the distribution
     """
-    reparameterized = True
+    has_rsample = True
 
     def __init__(self, alpha):
         self.alpha = alpha
@@ -338,7 +338,7 @@ class Beta(Distribution):
     Args:
         alpha (Tensor or Variable): concentration parameter of the distribution
     """
-    reparameterized = Dirichlet.reparameterized
+    has_rsample = True
 
     def __init__(self, alpha, beta):
         alpha_num = isinstance(alpha, Number)

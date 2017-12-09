@@ -2,22 +2,6 @@
 #define TH_GENERIC_FILE "generic/THTensorRandom.c"
 #else
 
-#ifdef _OPENMP
-#include <omp.h>
-#endif
-
-#define TH_OMP_OVERHEAD_THRESHOLD 100000
-
-#define TH_CHECK_SAME_SIZE(TENSOR1, TENSOR2) \
-{ \
-  if(!THTensor_(isSameSizeAs)(TENSOR1, TENSOR2)) { \
-    THDescBuff T1buff = _THSizeDesc(TENSOR1->size, TENSOR1->nDimension); \
-    THDescBuff T2buff = _THSizeDesc(TENSOR2->size, TENSOR2->nDimension); \
-    THError("inconsistent tensor size, expected %s %s and %s %s to have the same size", \
-            #TENSOR1, T1buff.str, #TENSOR2, T2buff.str); \
-  } \
-}
-
 void THTensor_(random)(THTensor *self, THGenerator *_generator)
 {
 

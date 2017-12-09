@@ -196,6 +196,7 @@ TH_API void THTensor_(rand)(THTensor *r_, THGenerator *_generator, THLongStorage
 TH_API void THTensor_(randn)(THTensor *r_, THGenerator *_generator, THLongStorage *size);
 
 TH_API void THTensor_(standard_gamma_grad)(THTensor *self, THTensor *x, THTensor *alpha);
+TH_API void THTensor_(dirichlet_grad)(THTensor *self, THTensor *x, THTensor *alpha, THTensor *total);
 #endif
 
 #if defined(TH_REAL_IS_BYTE)
