@@ -22,7 +22,8 @@ class ConnectionWrapper(object):
         return pickle.loads(buf)
 
     def __getattr__(self, name):
-        return getattr(self.conn, name)
+        conn = object.__getattribute__(self, 'conn')
+        return getattr(conn, name)
 
 
 class Queue(multiprocessing.queues.Queue):
