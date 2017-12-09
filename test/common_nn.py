@@ -564,21 +564,21 @@ class NNTestCase(TestCase):
 
     def _analytical_jacobian(self, module, input, jacobian_input=True, jacobian_parameters=True):
         output = self._forward(module, input)
+        output_size = output.nelement()
         output_t = output.data if isinstance(output, Variable) else output
-        d_out = output_t.new().resize_(output_t.size())
-        flat_d_out = d_out.view(-1)
 
         if jacobian_input:
-            jacobian_inp = self._jacobian(input, d_out.nelement())
+            jacobian_inp = self._jacobian(input, output_size)
             flat_jacobian_input = list(iter_tensors(jacobian_inp))
 
         if jacobian_parameters:
-            param, d_param = self._get_parameters(module)
-            num_param = sum(p.numel() for p in param)
-            jacobian_param = torch.zeros(num_param, d_out.nelement())
+            num_param = sum(p.numel() for p in self._get_parameters(module)[0])
+            jacobian_param = torch.zeros(num_param, output_size)
 
-        for i in range(flat_d_out.nelement()):
-            d_out.zero_()
+        for i in range(output_size):
+            _, d_param = self._get_parameters(module)
+            d_out = torch.zeros_like(output_t)
+            flat_d_out = d_out.view(-1)
             flat_d_out[i] = 1
 
             if jacobian_parameters:
@@ -603,12 +603,6 @@ class NNTestCase(TestCase):
         return res
 
     def _numerical_jacobian(self, module, input, jacobian_input=True, jacobian_parameters=True):
-        output = self._forward(module, input)
-        output_size = output.nelement()
-
-        if jacobian_parameters:
-            param, d_param = self._get_parameters(module)
-
         def fw(input):
             out = self._forward(module, input)
             if isinstance(out, Variable):
@@ -620,6 +614,7 @@ class NNTestCase(TestCase):
         if jacobian_input:
             res += get_numerical_jacobian(fw, input, input, eps=1e-6),
         if jacobian_parameters:
+            param, _ = self._get_parameters(module)
             res += torch.cat(list(get_numerical_jacobian(fw, input, p, eps=1e-6) for p in param), 0),
         return res
 

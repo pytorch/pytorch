@@ -525,7 +525,8 @@ class TestTorch(TestCase):
     @staticmethod
     def _test_neg(self, cast):
         float_types = ['torch.DoubleTensor', 'torch.FloatTensor', 'torch.LongTensor']
-        int_types = ['torch.IntTensor', 'torch.ShortTensor']
+        int_types = ['torch.IntTensor', 'torch.ShortTensor', 'torch.ByteTensor',
+                     'torch.CharTensor']
 
         for t in float_types + int_types:
             if t in float_types:
@@ -552,8 +553,6 @@ class TestTorch(TestCase):
 
     def test_reciprocal(self):
         a = torch.randn(100, 89)
-        zeros = torch.Tensor().resize_as_(a).zero_()
-
         res_div = 1 / a
         res_reciprocal = a.clone()
         res_reciprocal.reciprocal_()
@@ -2471,6 +2470,97 @@ class TestTorch(TestCase):
         self.assertFalse(MII.is_contiguous(), 'MII is contiguous')
         self.assertEqual(MII, MI, 0, 'inverse value in-place')
 
+    @staticmethod
+    def _test_det(self, conv_fn):
+        def reference_det(M):
+            # naive row reduction
+            M = M.clone()
+            l = M.size(0)
+            multiplier = 1
+            for i in range(l):
+                if M[i, 0] != 0:
+                    if i != 0:
+                        M[0], M[i] = M[i], M[0]
+                        multiplier = -1
+                    break
+            else:
+                return 0
+            for i in range(1, l):
+                row = M[i]
+                for j in range(i):
+                    row -= row[j] / M[j, j] * M[j]
+                M[i] = row
+            return M.diag().prod() * multiplier
+
+        # TODO: remove Variable wrapper once Variable and Tensor are the same
+        Variable = torch.autograd.Variable
+
+        eye_det = Variable(conv_fn(torch.eye(5))).det()
+        self.assertEqual(eye_det, eye_det.clone().fill_(1), 1e-8, 'determinant of identity')
+
+        def test(M):
+            M = conv_fn(M)
+            var_M = Variable(M)
+            M_det = var_M.det().data
+
+            self.assertEqual(M_det, M_det.clone().fill_(reference_det(M)), 1e-8, 'determinant')
+            self.assertEqual(M_det, var_M.inverse().det().data.pow_(-1), 1e-8, 'determinant after transpose')
+            self.assertEqual(M_det, var_M.transpose(0, 1).det().data, 1e-8, 'determinant after transpose')
+
+            for x in [0, 2, 4]:
+                for scale in [-2, -0.1, 0, 10]:
+                    target = M_det * scale
+                    # dim 0
+                    M_clone = M.clone()
+                    M_clone[:, x] *= scale
+                    det = Variable(M_clone).det().data
+                    self.assertEqual(target, det, 1e-8, 'determinant after scaling a row')
+                    # dim 1
+                    M_clone = M.clone()
+                    M_clone[x, :] *= scale
+                    det = Variable(M_clone).det().data
+                    self.assertEqual(target, det, 1e-8, 'determinant after scaling a column')
+
+            for x1, x2 in [(0, 3), (4, 1), (3, 2)]:
+                assert x1 != x2, 'x1 and x2 needs to be different for this test'
+                target = M_det.clone().zero_()
+                # dim 0
+                M_clone = M.clone()
+                M_clone[:, x2] = M_clone[:, x1]
+                det = Variable(M_clone).det().data
+                self.assertEqual(target, det, 1e-8, 'determinant when two rows are same')
+                # dim 1
+                M_clone = M.clone()
+                M_clone[x2, :] = M_clone[x1, :]
+                det = Variable(M_clone).det().data
+                self.assertEqual(target, det, 1e-8, 'determinant when two columns are same')
+
+                for scale1, scale2 in [(0.3, -1), (0, 2), (10, 0.1)]:
+                    target = -M_det * scale1 * scale2
+                    # dim 0
+                    M_clone = M.clone()
+                    t = M_clone[:, x1] * scale1
+                    M_clone[:, x1] += M_clone[:, x2] * scale2
+                    M_clone[:, x2] = t
+                    det = Variable(M_clone).det().data
+                    self.assertEqual(target, det, 1e-8, 'determinant after exchanging rows')
+                    # dim 1
+                    M_clone = M.clone()
+                    t = M_clone[x1, :] * scale1
+                    M_clone[x1, :] += M_clone[x2, :] * scale2
+                    M_clone[x2, :] = t
+                    det = Variable(M_clone).det().data
+                    self.assertEqual(target, det, 1e-8, 'determinant after exchanging columns')
+
+        test(torch.randn(5, 5))
+        r = torch.randn(5, 5)
+        test(r.mm(r.transpose(0, 1)))  # symmetric
+        test(torch.randn(5, 5, 5)[:, 2, :])  # non-contiguous
+
+    @skipIfNoLapack
+    def test_det(self):
+        self._test_det(self, lambda x: x)
+
     @unittest.skip("Not implemented yet")
     def test_conv2(self):
         x = torch.rand(math.floor(torch.uniform(50, 100)), math.floor(torch.uniform(50, 100)))
@@ -4349,6 +4439,19 @@ class TestTorch(TestCase):
         x.__repr__()
         str(x),
 
+    def test_sizeof(self):
+        sizeof_empty = torch.randn(0).storage().__sizeof__()
+        sizeof_10 = torch.randn(10).storage().__sizeof__()
+        sizeof_100 = torch.randn(100).storage().__sizeof__()
+        self.assertEqual((sizeof_100 - sizeof_empty) // (sizeof_10 - sizeof_empty), 10)
+        self.assertEqual((sizeof_100 - sizeof_empty) % (sizeof_10 - sizeof_empty), 0)
+
+        sizeof_empty = torch.randn(0).type(torch.ByteTensor).storage().__sizeof__()
+        sizeof_10 = torch.randn(10).type(torch.ByteTensor).storage().__sizeof__()
+        sizeof_100 = torch.randn(100).type(torch.ByteTensor).storage().__sizeof__()
+        self.assertEqual((sizeof_100 - sizeof_empty) // (sizeof_10 - sizeof_empty), 10)
+        self.assertEqual((sizeof_100 - sizeof_empty) % (sizeof_10 - sizeof_empty), 0)
+
     def test_unsqueeze(self):
         x = torch.randn(2, 3, 4)
         y = x.unsqueeze(1)
@@ -4448,6 +4551,7 @@ class TestTorch(TestCase):
             x = torch.randn(sz1, sz2).mul(255).type(tp)
             y = x.numpy()
             check2d(x, y)
+            self.assertTrue(y.flags['C_CONTIGUOUS'])
 
             # with storage offset
             xm = torch.randn(sz1 * 2, sz2).mul(255).type(tp)
@@ -4455,11 +4559,14 @@ class TestTorch(TestCase):
             y = x.numpy()
             self.assertTrue(x.storage_offset() > 0)
             check2d(x, y)
+            self.assertTrue(y.flags['C_CONTIGUOUS'])
 
-            # non-contiguous 2D
-            x = torch.randn(sz2, sz1).t().mul(255).type(tp)
-            y = x.numpy()
-            check2d(x, y)
+            if tp != 'torch.HalfTensor':
+                # non-contiguous 2D
+                x = torch.randn(sz2, sz1).mul(255).type(tp).t()
+                y = x.numpy()
+                check2d(x, y)
+                self.assertFalse(y.flags['C_CONTIGUOUS'])
 
             # with storage offset
             xm = torch.randn(sz2 * 2, sz1).mul(255).type(tp)
@@ -4541,7 +4648,8 @@ class TestTorch(TestCase):
 
         # check zero dimensional
         x = np.zeros((0, 2))
-        self.assertRaises(RuntimeError, lambda: torch.from_numpy(x))
+        self.assertEqual(torch.from_numpy(x).shape, tuple())
+        self.assertEqual(torch.autograd.Variable.from_numpy(x).shape, [0])
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_ctor_with_numpy_array(self):
@@ -4713,7 +4821,7 @@ class TestTorch(TestCase):
         for idx in iter_indices(x):
             self.assertIs(x[idx] >= y[idx], ge[idx] == 1)
 
-    def test_logical_ops(self):
+    def test_bitwise_ops(self):
         x = torch.randn(5, 5).gt(0)
         y = torch.randn(5, 5).gt(0)
 
@@ -4754,11 +4862,36 @@ class TestTorch(TestCase):
         x_clone ^= y
         self.assertEqual(x_clone, xor_result)
 
+    def test_invert(self):
+        # TODO remove this once we merge tensor and variable
+        x = torch.autograd.Variable(torch.ByteTensor([0, 1, 1]))
+        self.assertEqual((~x).tolist(), [1, 0, 0])
+
     def test_apply(self):
         x = torch.arange(1, 6)
         res = x.clone().apply_(lambda k: k + k)
         self.assertEqual(res, x * 2)
         self.assertRaises(RuntimeError, lambda: x.apply_(lambda k: "str"))
+
+    def test_map(self):
+        x = torch.autograd.Variable(torch.randn(3, 3))
+        y = torch.autograd.Variable(torch.randn(3))
+        res = x.clone()
+        res.map_(y, lambda a, b: a + b)
+        self.assertEqual(res, x + y)
+        self.assertRaisesRegex(TypeError, "not callable", lambda: res.map_(y, "str"))
+
+    def test_map2(self):
+        x = torch.autograd.Variable(torch.randn(3, 3))
+        y = torch.autograd.Variable(torch.randn(3))
+        z = torch.autograd.Variable(torch.randn(1, 3))
+        res = x.clone()
+        res.map2_(y, z, lambda a, b, c: a + b * c)
+        self.assertEqual(res, x + y * z)
+        z.requires_grad = True
+        self.assertRaisesRegex(
+            RuntimeError, "requires grad",
+            lambda: res.map2_(y, z, lambda a, b, c: a + b * c))
 
     def test_Size(self):
         x = torch.Size([1, 2, 3])

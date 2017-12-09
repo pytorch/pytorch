@@ -871,7 +871,9 @@ class AdaptiveMaxPool2d(Module):
 
     Args:
         output_size: the target output size of the image of the form H x W.
-                     Can be a tuple (H, W) or a single number H for a square image H x H
+                     Can be a tuple (H, W) or a single H for a square image H x H.
+                     H and W can be either a ``int``, or ``None`` which means the size will
+                     be the same as that of the input.
         return_indices: if ``True``, will return the indices along with the outputs.
                         Useful to pass to nn.MaxUnpool2d. Default: ``False``
 
@@ -882,6 +884,10 @@ class AdaptiveMaxPool2d(Module):
         >>> output = m(input)
         >>> # target output size of 7x7 (square)
         >>> m = nn.AdaptiveMaxPool2d(7)
+        >>> input = autograd.Variable(torch.randn(1, 64, 10, 9))
+        >>> output = m(input)
+        >>> # target output size of 10x7
+        >>> m = nn.AdaptiveMaxPool2d((None, 7))
         >>> input = autograd.Variable(torch.randn(1, 64, 10, 9))
         >>> output = m(input)
 
@@ -908,7 +914,10 @@ class AdaptiveMaxPool3d(Module):
 
     Args:
         output_size: the target output size of the image of the form D x H x W.
-                     Can be a tuple (D, H, W) or a single number D for a cube D x D x D
+                     Can be a tuple (D, H, W) or a single D for a cube D x D x D.
+                     D, H and W can be either a ``int``, or ``None`` which means the size will
+                     be the same as that of the input.
+
         return_indices: if ``True``, will return the indices along with the outputs.
                         Useful to pass to nn.MaxUnpool3d. Default: ``False``
 
@@ -919,6 +928,10 @@ class AdaptiveMaxPool3d(Module):
         >>> output = m(input)
         >>> # target output size of 7x7x7 (cube)
         >>> m = nn.AdaptiveMaxPool3d(7)
+        >>> input = autograd.Variable(torch.randn(1, 64, 10, 9, 8))
+        >>> output = m(input)
+        >>> # target output size of 7x9x8
+        >>> m = nn.AdaptiveMaxPool3d((7, None, None))
         >>> input = autograd.Variable(torch.randn(1, 64, 10, 9, 8))
         >>> output = m(input)
 
@@ -974,7 +987,9 @@ class AdaptiveAvgPool2d(Module):
 
     Args:
         output_size: the target output size of the image of the form H x W.
-                     Can be a tuple (H, W) or a single number H for a square image H x H
+                     Can be a tuple (H, W) or a single H for a square image H x H
+                     H and W can be either a ``int``, or ``None`` which means the size will
+                     be the same as that of the input.
 
     Examples:
         >>> # target output size of 5x7
@@ -983,6 +998,10 @@ class AdaptiveAvgPool2d(Module):
         >>> output = m(input)
         >>> # target output size of 7x7 (square)
         >>> m = nn.AdaptiveAvgPool2d(7)
+        >>> input = autograd.Variable(torch.randn(1, 64, 10, 9))
+        >>> output = m(input)
+        >>> # target output size of 10x7
+        >>> m = nn.AdaptiveMaxPool2d((None, 7))
         >>> input = autograd.Variable(torch.randn(1, 64, 10, 9))
         >>> output = m(input)
 
@@ -1009,6 +1028,8 @@ class AdaptiveAvgPool3d(Module):
     Args:
         output_size: the target output size of the form D x H x W.
                      Can be a tuple (D, H, W) or a single number D for a cube D x D x D
+                     D, H and W can be either a ``int``, or ``None`` which means the size will
+                     be the same as that of the input.
 
     Examples:
         >>> # target output size of 5x7x9
@@ -1017,6 +1038,10 @@ class AdaptiveAvgPool3d(Module):
         >>> output = m(input)
         >>> # target output size of 7x7x7 (cube)
         >>> m = nn.AdaptiveAvgPool3d(7)
+        >>> input = autograd.Variable(torch.randn(1, 64, 10, 9, 8))
+        >>> output = m(input)
+        >>> # target output size of 7x9x8
+        >>> m = nn.AdaptiveMaxPool3d((7, None, None))
         >>> input = autograd.Variable(torch.randn(1, 64, 10, 9, 8))
         >>> output = m(input)
 

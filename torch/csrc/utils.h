@@ -7,6 +7,7 @@
 #include <ATen/ATen.h>
 #include "torch/csrc/utils/object_ptr.h"
 #include "torch/csrc/utils/python_numbers.h"
+#include "torch/csrc/utils/python_compat.h"
 
 #ifdef WITH_CUDA
 #include <THC/THC.h>
@@ -141,14 +142,6 @@ std::vector<int> THPUtils_unpackIntTuple(PyObject *arg);
 void THPUtils_addPyMethodDefs(std::vector<PyMethodDef>& vector, PyMethodDef* methods);
 
 int THPUtils_getCallable(PyObject *arg, PyObject **result);
-// https://bugsfiles.kde.org/attachment.cgi?id=61186
-#if PY_VERSION_HEX >= 0x03020000
-#define THPUtils_parseSlice(SLICE, LEN, START, STOP, LENGTH, STEP) \
-  (PySlice_GetIndicesEx(SLICE, LEN, START, STOP, LENGTH, STEP) == 0)
-#else
-#define THPUtils_parseSlice(SLICE, LEN, START, STOP, LENGTH, STEP) \
-  (PySlice_GetIndicesEx((PySliceObject*)SLICE, LEN, START, STOP, LENGTH, STEP) == 0)
-#endif
 
 #define THStoragePtr TH_CONCAT_3(TH,Real,StoragePtr)
 #define THTensorPtr  TH_CONCAT_3(TH,Real,TensorPtr)

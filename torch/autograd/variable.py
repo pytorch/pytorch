@@ -46,26 +46,6 @@ class Variable(_C._VariableBase):
         volatile (bool): Value of the volatile flag. **Keyword only.**
     """
 
-    def __getitem__(self, key):
-        if torch.is_tensor(key):
-            key = Variable(key)  # auto-wrap tensors
-        if isinstance(key, Variable):
-            if type(key.data).__name__ == 'ByteTensor':
-                return MaskedSelect.apply(self, key)
-            elif type(key.data).__name__ == 'LongTensor':
-                return IndexSelect.apply(self, 0, key)
-            # else fall through and raise an error in Index
-        return Index.apply(self, key)
-
-    def __setitem__(self, key, value):
-        if isinstance(key, Variable) and type(key.data).__name__ == 'ByteTensor':
-            if isinstance(value, Variable):
-                return MaskedScatter.apply(self, key, value, True)
-            else:
-                return MaskedFill.apply(self, key, value, True)
-        else:
-            return SetItem.apply(self, key, value)
-
     def __deepcopy__(self, memo):
         if not self.is_leaf:
             raise RuntimeError("Only Variables created explicitly by the user "
@@ -97,24 +77,6 @@ class Variable(_C._VariableBase):
 
     def __repr__(self):
         return 'Variable containing:' + self.data.__repr__()
-
-    def __bool__(self):
-        if self.data.numel() <= 1:
-            return self.data.__bool__()
-        raise RuntimeError("bool value of Variable containing " +
-                           torch.typename(self.data) +
-                           " with more than one value is ambiguous")
-
-    __nonzero__ = __bool__
-
-    def __int__(self):
-        return int(self.data)
-
-    def __long__(self):
-        return long(self.data)
-
-    def __float__(self):
-        return float(self.data)
 
     def backward(self, gradient=None, retain_graph=None, create_graph=None, retain_variables=None):
         """Computes the gradient of current variable w.r.t. graph leaves.
@@ -257,20 +219,33 @@ class Variable(_C._VariableBase):
             return Type.apply(self, t)
         return self
 
-    def type_as(self, t):
-        if isinstance(t, Variable):
-            t = t.data
-        return self.type(type(t))
-
-    def _get_type(self, name):
-        module = torch._import_dotted_name(self.data.__module__)
-        return getattr(module, name)
+    def type_as(self, other):
+        if torch.is_tensor(other):
+            other = Variable(other)
+        return super(Variable, self).type_as(other)
 
     def cuda(self, device=None, async=False):
         return CudaTransfer.apply(self, device, async)
 
-    def cpu(self):
-        return self.type(getattr(torch, type(self.data).__name__))
+    def is_pinned(self):
+        r"""Returns true if this tensor resides in pinned memory"""
+        storage = self.storage()
+        return storage.is_pinned() if storage else False
+
+    def is_shared(self):
+        r"""Checks if tensor is in shared memory.
+
+        This is always ``True`` for CUDA tensors.
+        """
+        return self.storage().is_shared()
+
+    def share_memory_(self):
+        r"""Moves the underlying storage to shared memory.
+
+        This is a no-op if the underlying storage is already in shared memory
+        and for CUDA tensors. Tensors in shared memory cannot be resized.
+        """
+        self.storage().share_memory_()
 
     def prod(self, dim=None, keepdim=None):
         return Prod.apply(self, dim, keepdim)
@@ -285,22 +260,8 @@ class Variable(_C._VariableBase):
             repeats = torch.Size(repeats)
         return Repeat.apply(self, repeats)
 
-    def cumsum(self, dim):
-        return Cumsum.apply(self, dim)
-
     def cumprod(self, dim):
         return Cumprod.apply(self, dim)
-
-    def renorm(self, p, dim, maxnorm):
-        t = self.transpose(dim, 0)
-        flat = t.contiguous().view(self.size(0), -1)
-        norms = flat.norm(p, 1, True)
-        norms = norms.clamp(max=maxnorm).div(norms.add(1e-7))
-        flat_out = flat.mul(norms.expand_as(flat))
-        return flat_out.view(t.size()).transpose(dim, 0)
-
-    def matmul(self, other):
-        return torch.matmul(self, other)
 
     def resize(self, *sizes):
         return Resize.apply(self, sizes)
@@ -316,9 +277,6 @@ class Variable(_C._VariableBase):
 
     def index_add(self, dim, index, tensor):
         return self.clone().index_add_(dim, index, tensor)
-
-    def _advanced_index_add(self, index, tensor):
-        return AdvancedIndexAdd.apply(self, index, tensor)
 
     def index_copy(self, dim, index, tensor):
         return self.clone().index_copy_(dim, index, tensor)
@@ -358,14 +316,10 @@ class Variable(_C._VariableBase):
     def __rsub__(self, other):
         return -self + other
 
-    def __matmul__(self, other):
-        if not isinstance(other, Variable):
-            return NotImplemented
-        return self.matmul(other)
-
     def __rdiv__(self, other):
         return self.reciprocal() * other
     __rtruediv__ = __rdiv__
+    __itruediv__ = _C._VariableBase.__div__
 
     __pow__ = _C._VariableBase.pow
 
@@ -405,6 +359,21 @@ class Variable(_C._VariableBase):
         keys = variable_methods + attrs
         return sorted(keys)
 
+    # Numpy array interface, to support `numpy.asarray(tensor) -> ndarray`
+    def __array__(self, dtype=None):
+        if dtype is None:
+            return self.cpu().numpy()
+        else:
+            return self.cpu().numpy().astype(dtype, copy=False)
+
+    # Wrap Numpy array again in a suitable tensor when done, to support e.g.
+    # `numpy.sin(tensor) -> tensor` or `numpy.greater(tensor, 0) -> ByteTensor`
+    def __array_wrap__(self, array):
+        if array.dtype == bool:
+            # Workaround, torch has no built-in bool tensor
+            array = array.astype('uint8')
+        return Variable.from_numpy(array)
+
     class _torch(object):
         @staticmethod
         def normal(means, std=1):
@@ -413,7 +382,6 @@ class Variable(_C._VariableBase):
             if isinstance(std, Variable):
                 std = std.data
             return Variable(torch.normal(means, std))
-
 
 for method in dir(Variable):
     # This will also wrap some methods that normally aren't part of the

@@ -48,11 +48,13 @@ private:
   at::Tensor & unpack_byte(const Tensor & t, const char * name, int pos) const;
   at::Tensor & unpack_any(const Tensor & t, const char * name, int pos) const;
   at::Tensor unpack_opt(const Tensor & t, const char * name, int pos) const;
-  std::vector<at::Tensor> unpack(const at::TensorList &tl, const char *name, int pos) const;
+  std::vector<at::Tensor> unpack(at::TensorList tl, const char *name, int pos) const;
+  std::vector<at::Tensor> unpack_idxs(at::TensorList tl, const char *name, int pos) const;
 
   Variable as_variable(Tensor tensor) const;
   std::tuple<Variable, Variable> as_variable(std::tuple<Tensor, Tensor> tensor) const;
   std::tuple<Variable, Variable, Variable> as_variable(std::tuple<Tensor, Tensor, Tensor> tensor) const;
+  std::tuple<Variable, Variable, Variable, Variable> as_variable(std::tuple<Tensor, Tensor, Tensor, Tensor> tensor) const;
   std::vector<Variable> as_variable(TensorList tensor) const;
   Variable maybe_wrap(Tensor data, const Variable & self, bool inplace) const;
 

@@ -46,13 +46,19 @@ struct Event {
   Event(EventKind kind, std::string name, uint32_t thread_id, bool record_cuda)
   : kind_(kind)
   , name_(std::move(name))
-  , thread_id_(thread_id)
-  , cpu_ns_(getTime()) {
+  , thread_id_(thread_id) {
 #ifdef WITH_CUDA
     if(record_cuda) {
+      TORCH_CUDA_CHECK(cudaGetDevice(&device_));
       TORCH_CUDA_CHECK(cudaEventCreate(&event));
-      TORCH_CUDA_CHECK(cudaEventRecord(event, at::globalContext().getCurrentCUDAStream()));
+      auto stream = at::globalContext().getCurrentCUDAStream();
+      cpu_ns_ = getTime();
+      TORCH_CUDA_CHECK(cudaEventRecord(event, stream));
+    } else {
+      cpu_ns_ = getTime();
     }
+#else
+    cpu_ns_ = getTime();
 #endif
   }
   std::string kind() const {
@@ -77,6 +83,9 @@ struct Event {
     if(!e.has_cuda() || !has_cuda()) {
       throw std::logic_error("Events were not recorded for CUDA");
     }
+    if(e.device() != device()) {
+      throw std::logic_error("Events are not on the same device");
+    }
     TORCH_CUDA_CHECK(cudaEventSynchronize(event));
     TORCH_CUDA_CHECK(cudaEventSynchronize(e.event));
     float ms;
@@ -93,15 +102,18 @@ struct Event {
     return false;
 #endif
   }
-
+  int device() const {
+    return device_;
+  }
 private:
   EventKind kind_;
   std::string name_;
   uint32_t thread_id_;
-  uint64_t cpu_ns_;
+  int64_t cpu_ns_; // signed to allow for negative intervals
 #ifdef WITH_CUDA
   cudaEvent_t event = nullptr;
 #endif
+  int device_ = -1;
 };
 
 // a linked-list of fixed sized vectors, to avoid
@@ -168,7 +180,7 @@ inline RangeEventList& getEventList() {
   return *event_list;
 }
 
-inline void mark(std::string name) {
+inline void mark(std::string name, bool include_cuda = true) {
   if (state == ProfilerState::NVTX) {
 #ifdef WITH_CUDA
     nvtxMarkA(name.c_str());
@@ -176,7 +188,7 @@ inline void mark(std::string name) {
     throw std::logic_error("mark called with NVTX tracing, but compiled without CUDA");
 #endif
   } else {
-    getEventList().record(EventKind::Mark, std::move(name), thread_id, state == ProfilerState::CUDA);
+    getEventList().record(EventKind::Mark, std::move(name), thread_id, include_cuda && state == ProfilerState::CUDA);
   }
 }
 

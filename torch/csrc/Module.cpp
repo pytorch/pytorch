@@ -16,18 +16,20 @@
 #include "torch/csrc/DynamicTypes.h"
 #include "torch/csrc/autograd/generated/python_nn_functions.h"
 #include "torch/csrc/utils/python_strings.h"
+#include "torch/csrc/utils/tensor_numpy.h"
 #include "torch/csrc/jit/python_tracer.h"
 #include "torch/csrc/jit/init.h"
 #include "torch/csrc/jit/python_ir.h"
 
 #ifdef WITH_CUDNN
-#include "cudnn/Module.h"
+#include <ATen/cudnn/cudnn-wrapper.h>
 #endif
 
 #define WITH_NUMPY_IMPORT_ARRAY
 #include "THP.h"
 
 #include "ModuleSparse.cpp"
+#include "DataLoader.cpp"
 
 PyObject* module;
 PyObject* tensor_classes;
@@ -164,33 +166,9 @@ PyObject * THPModule_setDefaultTensorType(PyObject *_unused, PyObject *type)
 
 PyObject * THPModule_fromNumpy(PyObject *_unused, PyObject *array)
 {
-#ifndef WITH_NUMPY
-  THPUtils_setError("torch was compiled without numpy support");
-  return NULL;
-#else
-  THPUtils_assert(PyArray_Check(array), "from_numpy expects an np.ndarray "
-      "but got %s", THPUtils_typename(array));
-  int type = PyArray_TYPE((PyArrayObject*)array);
-  if (type == NPY_DOUBLE) {
-    return PyObject_CallFunctionObjArgs(THPDoubleTensorClass, array, NULL);
-  } else if (type == NPY_FLOAT) {
-    return PyObject_CallFunctionObjArgs(THPFloatTensorClass, array, NULL);
-  } else if (type == NPY_HALF) {
-    return PyObject_CallFunctionObjArgs(THPHalfTensorClass, array, NULL);
-  } else if (type == NPY_INT64) {
-    return PyObject_CallFunctionObjArgs(THPLongTensorClass, array, NULL);
-  } else if (type == NPY_INT32) {
-    return PyObject_CallFunctionObjArgs(THPIntTensorClass, array, NULL);
-  } else if (type == NPY_INT16) {
-    return PyObject_CallFunctionObjArgs(THPShortTensorClass, array, NULL);
-  } else if (type == NPY_UINT8) {
-    return PyObject_CallFunctionObjArgs(THPByteTensorClass, array, NULL);
-  }
-  THPUtils_setError("can't convert a given np.ndarray to a tensor - it has an "
-      "invalid type. The only supported types are: double, float, float16, int64, "
-      "int32, and uint8.");
-  return NULL;
-#endif
+  HANDLE_TH_ERRORS
+  return torch::createPyObject(torch::utils::tensor_from_numpy(array));
+  END_HANDLE_TH_ERRORS
 }
 
 /**
@@ -342,6 +320,7 @@ IMPLEMENT_STATELESS(bmm)
 // TODO: this doesn't implement options that return numbers!
 IMPLEMENT_STATELESS(multinomial)
 IMPLEMENT_STATELESS(normal)
+IMPLEMENT_STATELESS(standard_gamma)
 IMPLEMENT_STATELESS(bernoulli)
 IMPLEMENT_STATELESS(range)
 IMPLEMENT_STATELESS(arange)
@@ -698,6 +677,7 @@ static PyMethodDef TorchMethods[] = {
   {"bmm",             (PyCFunction)THPModule_bmm,               METH_VARARGS | METH_KEYWORDS, NULL},
   {"multinomial",     (PyCFunction)THPModule_multinomial,       METH_VARARGS | METH_KEYWORDS, NULL},
   {"normal",          (PyCFunction)THPModule_normal,            METH_VARARGS | METH_KEYWORDS, NULL},
+  {"_standard_gamma",  (PyCFunction)THPModule_standard_gamma,    METH_VARARGS | METH_KEYWORDS, NULL},
   {"bernoulli",       (PyCFunction)THPModule_bernoulli,         METH_VARARGS | METH_KEYWORDS, NULL},
   {"rand",            (PyCFunction)THPModule_rand,              METH_VARARGS | METH_KEYWORDS, NULL},
   {"randn",           (PyCFunction)THPModule_randn,             METH_VARARGS | METH_KEYWORDS, NULL},
@@ -790,6 +770,23 @@ static std::vector<PyMethodDef> methods;
 PyMethodDef* THDPModule_methods();
 #endif
 
+// TODO: Refactor this in some less manual way
+#ifdef WITH_CUDNN
+static PyObject * THCUDNN_cudnn_version(PyObject *self, PyObject *args)
+{
+  return PyLong_FromLong(CUDNN_VERSION);
+}
+
+static PyMethodDef _THCUDNN_methods[] = {
+  {"_cudnn_version", (PyCFunction)THCUDNN_cudnn_version, METH_VARARGS, NULL},
+  {NULL}
+};
+
+PyMethodDef* THCUDNN_methods() {
+  return _THCUDNN_methods;
+}
+#endif
+
 static PyObject* initModule() {
   HANDLE_TH_ERRORS
   THInferNumThreads();
@@ -797,6 +794,7 @@ static PyObject* initModule() {
 #define ASSERT_TRUE(cmd) if (!(cmd)) return NULL
 
   THPUtils_addPyMethodDefs(methods, TorchMethods);
+  THPUtils_addPyMethodDefs(methods, DataLoaderMethods);
 #ifdef WITH_CUDA
   THPUtils_addPyMethodDefs(methods, THCPModule_methods());
 #endif
@@ -925,7 +923,7 @@ static PyObject* initModule() {
 
   auto& defaultGenerator = at::globalContext().defaultGenerator(at::kCPU);
   THPDefaultGenerator = (THPGenerator*)THPGenerator_NewWithGenerator(
-    (THGenerator*)defaultGenerator.unsafeGetTH());
+    defaultGenerator);
   ASSERT_TRUE(PyModule_AddObject(module, "default_generator", (PyObject*)THPDefaultGenerator) == 0);
 
 #ifdef WITH_NUMPY

@@ -221,7 +221,7 @@ ALLOC_WRAP = {
 # Replacements for constants when calling into TH
 CONSTANT_REPLACEMENTS = [
     ('AS_REAL', '${AS_REAL}'),
-    ('THPDefaultGenerator->cdata',
+    ('THPGenerator_TH_CData(THPDefaultGenerator)',
      'dynamic_cast<${Generator}&>().generator'),
     ('__storage_size.get\\(\\)',
      'THLongStorageView::makeFromLength(static_cast<int64_t>(storage.size()))'),
@@ -231,7 +231,7 @@ CONSTANT_REPLACEMENTS = [
 # Replacements for constants in header file function definitions
 HEADER_CONSTANT_REPLACEMENTS = [
     (r'AS_REAL\((.*)\)', r'\1'),
-    ('THPDefaultGenerator->cdata', 'nullptr'),
+    ('THPGenerator_TH_CData\(THPDefaultGenerator\)', 'nullptr'),
     ('__last_dim', '-1'),
 ]
 
@@ -562,7 +562,14 @@ def create_generic(top_env, declarations):
         ret = option['return']
 
         return_types = []
-        for t in ret:
+        for t_raw in ret:
+            if isinstance(t_raw, string_type):
+                t = t_raw
+                name = None
+            else:
+                t = t_raw['type']
+                name = t_raw['name']
+
             # can't actually return a TensorList (since it's a reference object)
             actual_return_type = {'TensorList': 'std::vector<Tensor>'}.get(t, t)
 
@@ -570,10 +577,13 @@ def create_generic(top_env, declarations):
                 # follow normal ATen convention of returning Tensor & for inplace functions.
                 actual_return_type = 'Tensor &'
 
-            return_types.append({
+            rtype = {
                 'type': actual_return_type,
                 'dynamic_type': t,
-            })
+            }
+            if name is not None:
+                rtype['name'] = name
+            return_types.append(rtype)
 
         return return_types
 
@@ -634,7 +644,8 @@ def create_generic(top_env, declarations):
         # generate the at::native function declarations (i.e. what the user will implement)
         if isinstance(dispatch, dict):
             generated_native_functions = []
-            for _, value in dispatch.items():
+            for key in sorted(dispatch.keys()):
+                value = dispatch[key]
                 if value not in generated_native_functions:
                     option['native_type_method_dispatch'] = value
                     top_env['native_function_declarations'].append(
@@ -742,7 +753,7 @@ def create_derived(backend_type_env, declarations):
     def drop_argument(argument, option):
         return 'CUDA' in backend_type_env['Backend'] and (
             (option['mode'] == 'TH' and argument['type'] == 'THGenerator*') or
-            argument.get('default') == 'THPDefaultGenerator->cdata')
+            argument.get('default') == 'THPGenerator_TH_CData(THPDefaultGenerator)')
 
     def get_arguments(arguments, option):
         return [get_argument(argument, option)

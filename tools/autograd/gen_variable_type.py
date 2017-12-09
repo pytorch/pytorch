@@ -3,6 +3,7 @@ import copy
 import os
 import re
 import yaml
+import warnings
 from collections import defaultdict
 from tools.shared.module_loader import import_module
 from .nested_dict import nested_dict
@@ -107,7 +108,6 @@ std::shared_ptr<${op}> grad_fn;
 auto flags = compute_flags({ ${args_with_derivatives} });
 if (flags.requires_grad) {
   grad_fn = std::make_shared<${op}>(${op_ctor});
-  grad_fn->is_executable = true;
   grad_fn->next_functions = compute_next_functions({ ${args_with_derivatives} });
   ${save_inputs}
 }
@@ -115,8 +115,8 @@ ${base_impl_call}
 ${no_zero_dim}
 ${version_counter}
 ${set_flags}
-${save_outputs}
 ${record_trace}
+${save_outputs}
 return ${return_value};
 """)
 
@@ -176,7 +176,7 @@ deprecated_path = os.path.join(os.path.dirname(__file__), 'deprecated.yaml')
 FALLTHROUGH_RETURN_TYPES = {'int64_t', 'void*', 'bool', 'IntList'}
 FALLTHROUGH_FUNCTIONS = {
     'arange', 'eye', 'linspace', 'logspace', 'tensor', 'ones', 'ones_like',
-    'rand', 'randn', 'randperm', 'range', 'tensor', 'uniform', 'zeros',
+    'rand', 'randn', 'randperm', 'range', 'tensor', 'zeros',
     'zeros_like', 'set_',
     # these are only implemented on integral types
     '__and__', '__iand__', '__ilshift__', '__ior__', '__irshift__', '__ixor__',
@@ -189,6 +189,11 @@ VIEW_FUNCTIONS = {
 MANUAL_IMPLEMENTATIONS = {
     'contiguous', 'resize_', 'resize_as_'
 }
+# These functions require manual Python bindings or are not exposed to Python
+SKIP_PYTHON_BINDINGS = [
+    'alias', 'contiguous', 'clamp.*', 'is_cuda', 'size', 'stride',
+    '.*_backward'
+]
 
 # Matches "foo" in "foo, bar" but not "foobar". Used to search for the
 # occurence of a parameter in the derivative formula
@@ -371,7 +376,8 @@ def load_derivatives(path, declarations_by_signature):
 
         declarations = declarations_by_signature[signature]
         if len(declarations) == 0:
-            raise RuntimeError('no ATen declaration found for: {}'.format(signature))
+            warnings.warn('no ATen declaration found for: {}'.format(signature))
+            continue
         canonical = canonical_declaration(declarations, defn_name)
 
         # TODO: Check the types line up
@@ -416,7 +422,8 @@ def load_derivatives(path, declarations_by_signature):
 
         # Finally, let us set up the derivative information
         derivatives = []
-        for raw_names, formula in defn.items():
+        for raw_names in sorted(defn.keys()):
+            formula = defn[raw_names]
             names = split_names(raw_names)
             output_indices = []
             args = []
@@ -603,6 +610,7 @@ def create_autograd_functions(top_env, autogen_functions):
 def is_implemented(option):
     return (option['return_type'] in FALLTHROUGH_RETURN_TYPES or
             option['name'] in FALLTHROUGH_FUNCTIONS or
+            option['name'] in MANUAL_IMPLEMENTATIONS or
             option['name'].endswith('_backward') or
             option.get('derivative') is not None)
 
@@ -628,7 +636,7 @@ def create_variable_type(top_env, aten_declarations):
         differentiable = [arg for arg in tensor_arg_names if arg in names]
         if len(differentiable) != len(names):
             missing = names - set(differentiable)
-            raise RuntimeError('Missing arguments for derivatives: {}'.format(missing))
+            raise RuntimeError('Missing arguments for derivatives: {} in {}'.format(missing, func['name']))
         return differentiable
 
     def save_variables(option, saved_variables, is_output):
@@ -671,10 +679,10 @@ def create_variable_type(top_env, aten_declarations):
         else:
             return ''
 
-    def unpack_args(env, option):
+    def unpack_args(env, declaration):
         body = []
         unpacked_args = []
-        for i, arg in enumerate(option['arguments']):
+        for i, arg in enumerate(declaration['arguments']):
             if not requires_unpack(arg):
                 unpacked_args.append(arg['name'])
                 continue
@@ -683,6 +691,9 @@ def create_variable_type(top_env, aten_declarations):
             is_nullable = arg.get('is_nullable', False)
             ref = (not is_nullable) and dynamic_type != 'TensorList'
             suffix = get_suffix(dynamic_type, is_nullable)
+            if dynamic_type == 'TensorList' and declaration['name'] == 'index':
+                # TODO: specify this in Declarations.yaml somehow
+                suffix = '_idxs'
 
             body.append(UNPACK_TENSOR.substitute(
                 arg_name=arg['name'],
@@ -692,8 +703,8 @@ def create_variable_type(top_env, aten_declarations):
             ))
             unpacked_args.append(arg['name'] + '_')
 
-        if option.get('derivative') is not None:
-            for arg in option['derivative'].get('buffers', []):
+        if declaration.get('derivative') is not None:
+            for arg in declaration['derivative'].get('buffers', []):
                 unpacked_args.append(arg + '_')
         env['unpacked_args'] = unpacked_args
         return body
@@ -836,7 +847,7 @@ def create_variable_type(top_env, aten_declarations):
                 env['result'] = CodeTemplate("{ ${outs} }").substitute(outs=diff_outs)
             env['trace_outputs'] = CodeTemplate("{ ${outs} }").substitute(outs=trace_outs)
 
-        if any(arg['simple_type'] in {'Generator', 'Storage'} for arg in arguments):
+        if any(arg['simple_type'] in {'Generator', 'Storage'} for arg in arguments) or declaration['name'] == 'index':
             env['record_trace'] = []
         else:
             env['record_trace'] = emit_record_trace(env, declaration)
@@ -1018,14 +1029,9 @@ def gen_variable_type(declarations, out):
         if not is_implemented(declaration) and declaration['mode'] != 'native':
             return False
 
-        # don't bind size or stride since the python signatures are different
-        # exclude alias from Python bindings as well at least for now
-        # exclude 'is_cuda' because for historical reasons it is a property.
-        if name in ['alias', 'size', 'stride', 'is_cuda'] or name.startswith('clamp'):
-            return False
-
-        if name.endswith('_backward'):
-            return False
+        for pattern in SKIP_PYTHON_BINDINGS:
+            if re.match('^' + pattern + '$', name):
+                return False
 
         # we don't currently support functions which are only defined on Type
         # such as zeros(), randn(), etc.

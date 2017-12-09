@@ -7,6 +7,7 @@
 #include "torch/csrc/Types.h"
 #include "torch/csrc/autograd/python_cpp_function.h"
 #include "torch/csrc/autograd/python_hook.h"
+#include "torch/csrc/autograd/python_variable_indexing.h"
 #include "torch/csrc/autograd/functions/accumulate_grad.h"
 #include "torch/csrc/autograd/utils/wrap_outputs.h"
 #include "torch/csrc/cuda/AutoGPU.h"
@@ -209,6 +210,14 @@ int THPVariable_pyinit(PyObject *self, PyObject *args, PyObject *kwds)
 typedef PyObject *(*getter)(PyObject *, void *);
 typedef int (*setter)(PyObject *, PyObject *, void *);
 
+PyObject *THPVariable_get_cdata(THPVariable *self)
+{
+  HANDLE_TH_ERRORS
+  auto& var = self->cdata;
+  return PyLong_FromVoidPtr(var.unsafeGetTH(false));
+  END_HANDLE_TH_ERRORS
+}
+
 PyObject *THPVariable_get_version(THPVariable *self)
 {
   HANDLE_TH_ERRORS
@@ -389,9 +398,6 @@ int THPVariable_set_requires_grad(THPVariable *self, PyObject *obj)
     return -1;
   }
   var.requires_grad() = (obj == Py_True);
-  if (auto grad_accumulator = var.get()->grad_accumulator.lock()) {
-    grad_accumulator->is_executable = var.requires_grad();
-  }
   return 0;
   END_HANDLE_TH_ERRORS_RET(-1)
 }
@@ -459,6 +465,7 @@ PyObject *THPVariable_is_cuda(THPVariable *self)
 }
 
 static struct PyGetSetDef THPVariable_properties[] = {
+  {"_cdata", (getter)THPVariable_get_cdata, NULL, NULL, NULL},
   {"_version", (getter)THPVariable_get_version, NULL, NULL, NULL},
   {"grad_fn", (getter)THPVariable_get_grad_fn, NULL, NULL, NULL},
   {"_grad_fn", (getter)THPVariable_get_grad_fn, (setter)THPVariable_set_grad_fn, NULL, NULL},
@@ -477,6 +484,12 @@ static struct PyGetSetDef THPVariable_properties[] = {
   {NULL}
 };
 
+static PyMappingMethods THPVariable_as_mapping = {
+  THPVariable_length,
+  THPVariable_getitem,
+  THPVariable_setitem,
+};
+
 PyTypeObject THPVariableType = {
   PyVarObject_HEAD_INIT(NULL, 0)
   "torch._C._VariableBase",              /* tp_name */
@@ -490,7 +503,7 @@ PyTypeObject THPVariableType = {
   0,                                     /* tp_repr */
   0,                                     /* tp_as_number */
   0,                                     /* tp_as_sequence */
-  0,                                     /* tp_as_mapping */
+  &THPVariable_as_mapping,               /* tp_as_mapping */
   0,                                     /* tp_hash  */
   0,                                     /* tp_call */
   0,                                     /* tp_str */

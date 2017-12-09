@@ -15,6 +15,11 @@ class PackedSequence(PackedSequence_):
         Instances of this class should never be created manually. They are meant
         to be instantiated by functions like :func:`pack_padded_sequence`.
 
+        Batch sizes represent the number elements at each sequence step in
+        the batch, not the varying sequence lengths passed to
+        :func:`pack_padded_sequence`.  For instance, given data  ``abc`` and `d`
+        the ``PackedSequence`` would be ``adbc`` with ``batch_sizes=[2,1,1]``.
+
     Attributes:
         data (Variable): Variable containing packed sequence
         batch_sizes (list[int]): list of integers holding information about
@@ -106,10 +111,11 @@ def pad_packed_sequence(sequence, batch_first=False, padding_value=0.0):
     data_offset = 0
     prev_batch_size = batch_sizes[0]
     prev_i = 0
-    for i, batch_size in enumerate(batch_sizes):
+    for i, batch_size in enumerate(batch_sizes + [0]):
         if batch_size != prev_batch_size:
             l = prev_batch_size * (i - prev_i)
-            output[prev_i:i, :prev_batch_size] = var_data[data_offset:data_offset + l]
+            tmp = var_data[data_offset:data_offset + l]
+            output[prev_i:i, :prev_batch_size] = tmp.view(i - prev_i, prev_batch_size, *tmp.size()[1:])
             data_offset += l
             prev_i = i
         dec = prev_batch_size - batch_size
@@ -117,10 +123,6 @@ def pad_packed_sequence(sequence, batch_first=False, padding_value=0.0):
             lengths.extend((i,) * dec)
         prev_batch_size = batch_size
 
-    l = prev_batch_size * (len(batch_sizes) - prev_i)
-    output[prev_i:, :prev_batch_size] = var_data[data_offset:data_offset + l]
-
-    lengths.extend((i + 1,) * batch_size)
     lengths.reverse()
 
     if batch_first:

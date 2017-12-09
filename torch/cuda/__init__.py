@@ -522,6 +522,12 @@ torch._tensor_classes.add(CharTensor)
 torch._tensor_classes.add(ByteTensor)
 torch._tensor_classes.add(HalfTensor)
 
+torch._integer_tensor_classes.add(LongTensor)
+torch._integer_tensor_classes.add(IntTensor)
+torch._integer_tensor_classes.add(ShortTensor)
+torch._integer_tensor_classes.add(CharTensor)
+torch._integer_tensor_classes.add(ByteTensor)
+
 from . import sparse
 from . import profiler
 from . import nvtx

@@ -18,6 +18,14 @@ except ImportError:
 
 skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
 
+RUN_CUDA = torch.cuda.is_available()
+if torch.cuda.is_available():
+    CUDA_VERSION = torch._C._cuda_getCompiledVersion()
+    for d in range(torch.cuda.device_count()):
+        major = torch.cuda.get_device_capability(d)[0]
+        if (CUDA_VERSION < 8000 and major >= 6) or (CUDA_VERSION < 9000 and major >= 7):
+            RUN_CUDA = False
+
 
 def LSTMCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
     hx, cx = hidden
@@ -43,8 +51,7 @@ class TestJit(TestCase):
     maxDiff = None
 
     @contextmanager
-    def assertCompiled(self, fn):
-        compiled_fn = fn.compiled_fn
+    def assertCompiled(self, compiled_fn):
         self.assertIsInstance(compiled_fn, torch._C.CompiledFunction)
         hits, misses = compiled_fn.hits, compiled_fn.misses
         yield
@@ -62,7 +69,24 @@ class TestJit(TestCase):
         torch._C._jit_pass_lint(trace)
         self.assertExpected(str(trace))
 
-    @unittest.skipIf(not torch.cuda.is_available(), "fuser requires CUDA")
+    def test_scopes(self):
+        x = Variable(torch.Tensor([0.4]), requires_grad=True)
+        y = Variable(torch.Tensor([0.7]), requires_grad=True)
+
+        def f(x, y):
+            out = x + y
+            with torch.jit.scope('Foo', out):
+                out = x * out
+                with torch.jit.scope('Bar', out):
+                    out = torch.tanh(out)
+                out = torch.sigmoid(out)
+            return out
+
+        trace, z = torch.jit.trace(f, (x, y), nderivs=0)
+        torch._C._jit_pass_lint(trace)
+        self.assertExpected(str(trace))
+
+    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     def test_lstm_fusion(self):
         input = Variable(torch.randn(3, 10).float().cuda())
         hx = Variable(torch.randn(3, 20).float().cuda())
@@ -75,12 +99,20 @@ class TestJit(TestCase):
         torch._C._jit_pass_lint(trace)
         self.assertExpected(str(trace))
 
-    @unittest.skipIf(not torch.cuda.is_available(), "fuser requires CUDA")
-    def test_run_lstm_fusion(self):
-        input = Variable(torch.randn(3, 10).float().cuda())
-        hx = Variable(torch.randn(3, 20).float().cuda())
-        cx = Variable(torch.randn(3, 20).float().cuda())
-        module = nn.LSTMCell(10, 20).float().cuda()  # Just to allocate weights with correct sizes
+    def run_lstm_fusion(self, use_cuda):
+        def to_type(x):
+            x = x.float()
+            if use_cuda:
+                x = x.cuda()
+            return x
+
+        def rand_v(a, b):
+            return Variable(to_type(torch.randn(a, b)))
+
+        input = rand_v(3, 10)
+        hx = rand_v(3, 20)
+        cx = rand_v(3, 20)
+        module = to_type(nn.LSTMCell(10, 20))  # Just to allocate weights with correct sizes
 
         CompiledLSTMCell = torch.jit.compile(nderivs=0)(LSTMCell)
 
@@ -89,7 +121,14 @@ class TestJit(TestCase):
             z2 = CompiledLSTMCell(input, (hx, cx), *module.parameters())
         self.assertEqual(z, z2)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "fuser requires CUDA")
+    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    def test_run_lstm_fusion_cuda(self):
+        self.run_lstm_fusion(True)
+
+    def test_run_lstm_fusion_cpu(self):
+        self.run_lstm_fusion(False)
+
+    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     def test_run_lstm_fusion_concat(self):
         input = Variable(torch.randn(3, 10).float().cuda())
         hx = Variable(torch.randn(3, 20).float().cuda())
@@ -103,7 +142,7 @@ class TestJit(TestCase):
             z2 = CompiledLSTMCell(input, (hx, cx), *module.parameters())
         self.assertEqual(z, z2)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "fuser requires CUDA")
+    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     def test_concat_fusion(self):
         hx = Variable(torch.randn(3, 20).float().cuda())
         cx = Variable(torch.randn(3, 20).float().cuda())
@@ -117,7 +156,7 @@ class TestJit(TestCase):
         torch._C._jit_pass_lint(trace)
         self.assertExpected(str(trace))
 
-    @unittest.skipIf(not torch.cuda.is_available(), "fuser requires CUDA")
+    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     def test_fusion_distribute(self):
         def f(x, y):
             z1, z2 = (x + y).chunk(2, dim=1)
@@ -174,6 +213,7 @@ class TestJit(TestCase):
             self.assertTrue(fn.has_trace_for(*config))
             for unk_config in configurations[i + 1:]:
                 self.assertFalse(fn.has_trace_for(*unk_config))
+        self.assertEqual(fn.hits, 0)
 
     def test_cse(self):
         x = Variable(torch.Tensor([0.4, 0.3]), requires_grad=True)
@@ -203,7 +243,7 @@ class TestJit(TestCase):
         self.assertEqual(z, torch.sigmoid(torch.tanh(x * (x + y))))
         self.assertEqual(z, z2)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "fuser requires CUDA")
+    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     def test_compile_addc(self):
         x = Variable(torch.Tensor([0.4]), requires_grad=True).float().cuda()
         y = Variable(torch.Tensor([0.7]), requires_grad=True).float().cuda()
@@ -301,7 +341,7 @@ class TestJit(TestCase):
         x_grad = x.grad.data.clone()
         x.grad.data.zero_()
 
-        function = torch._C._jit_createAutogradClosure(trace)
+        function = torch._C._jit_createInterpreterFactory(trace)
         torch._C._jit_pass_lint(trace)
         z2, w2 = function()(x, y)
         (z2 * w2).backward()
@@ -330,7 +370,7 @@ class TestJit(TestCase):
         z = x.matmul(y)
 
         torch._C._tracer_exit((z,))
-        function = torch._C._jit_createAutogradClosure(trace)
+        function = torch._C._jit_createInterpreterFactory(trace)
 
         z2 = function()(x)
         self.assertEqual(z, z2)
@@ -677,7 +717,7 @@ class TestJit(TestCase):
         assert(torch.equal(torch.ones([2, 2]), t_node.t("a")))
         self.assertExpected(str(g2))
 
-    @unittest.skipIf(not torch.cuda.is_available(), "cpp tests require CUDA")
+    @unittest.skipIf(not RUN_CUDA, "cpp tests require CUDA")
     def test_cpp(self):
         torch._C._jit_run_cpp_tests()
 
@@ -758,10 +798,39 @@ class TestJit(TestCase):
 
         z, _ = model(x, y)
         z.sum().backward()
+        self.assertTrue(model.has_trace_for(x, y))
 
         with self.assertCompiled(model):
             z, _ = model(x, y)
         z.sum().backward()
+
+    def test_module_cast(self):
+        """Compiled modules can be casted to other data types"""
+        @torch.jit.compile(nderivs=0)
+        class Adder(nn.Module):
+            def __init__(self):
+                super(Adder, self).__init__()
+                self.y = nn.Parameter(torch.randn(2, 2))
+
+            def forward(self, x):
+                return x + self.y
+
+        x = Variable(torch.randn(2, 2).float())
+        # Wrap it in a sequential to make sure it works for submodules
+        a = nn.Sequential(Adder()).float()
+
+        def check_type(caster):
+            caster(a)
+            a(caster(x))
+            with self.assertCompiled(a[0]):
+                a(caster(x))
+
+        check_type(lambda x: x)
+        check_type(lambda x: x.double())
+        if torch.cuda.is_available():
+            check_type(lambda x: x.float().cuda())
+            check_type(lambda x: x.double().cuda())
+        self.assertEqual(a[0].hits, 4 if torch.cuda.is_available() else 2)
 
     # Tracer fails when it receives the same grad variable as multiple input to
     # traced region. The problem is that it's not immediately obvious how to

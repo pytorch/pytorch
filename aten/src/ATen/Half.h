@@ -1,10 +1,12 @@
 #pragma once
 
+#include "ATen/Config.h"
+
 #include <limits>
 #include <string>
 #include <stdint.h>
 #include <cmath>
-#ifdef AT_CUDA_ENABLED
+#if AT_CUDA_ENABLED()
 #include <cuda.h>
 #include <cuda_runtime.h>
 #include <cuda_fp16.h>
@@ -57,7 +59,7 @@ template<typename To, typename From> To checked_convert(From f, const char* name
 
 typedef struct  AT_ALIGN(2) {
   unsigned short x;
-#ifdef AT_CUDA_ENABLED
+#if AT_CUDA_ENABLED()
 #if CUDA_VERSION < 9000
   operator half() { return half{ x }; }
 #else
@@ -82,7 +84,7 @@ template<> bool overflows<Half, int64_t>(int64_t f);
 inline Half::operator double() {
   return convert<double,Half>(*this);
 }
-#ifdef AT_CUDA_ENABLED
+#if AT_CUDA_ENABLED()
 template<> half convert(double d);
 #endif
 
@@ -91,7 +93,7 @@ static inline To HalfFix(From h) {
   return To { h.x };
 }
 
-#ifdef AT_CUDA_ENABLED
+#if AT_CUDA_ENABLED()
 #if CUDA_VERSION >= 9000
 template<>
   inline __half HalfFix<__half, Half>(Half h) {

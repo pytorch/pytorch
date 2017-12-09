@@ -117,6 +117,14 @@ auto ${Storage}::fast_get(std::size_t ind) -> Scalar {
   return static_cast<${ScalarType}>(${to_at_type}(storage->data[ind]));
 }
 
+void ${Storage}::set_flag(char flag) {
+  ${THStorage}_setFlag(${state,} storage, flag);
+}
+
+void ${Storage}::clear_flag(char flag) {
+  ${THStorage}_clearFlag(${state,} storage, flag);
+}
+
 int ${Storage}::getDevice() const {
   ${storage_device} //storage->device;
 }

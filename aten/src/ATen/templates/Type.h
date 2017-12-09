@@ -1,5 +1,7 @@
 #pragma once
 
+#include "ATen/Config.h"
+
 #include <memory>
 #include <limits>
 #include <functional>
@@ -83,6 +85,7 @@ struct AT_API Type {
   Tensor scalarTensor(Scalar s) const;
 
   bool operator==(const Type& other) const;
+  bool operator!=(const Type& other) const;
 
   // example
   // virtual Tensor * add(Tensor & a, Tensor & b) = 0;

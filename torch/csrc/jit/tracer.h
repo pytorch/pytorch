@@ -238,25 +238,6 @@ inline void exit(const variable_list& outputs) {
 // with an Eval in the trace).
 void nontraceableBackwardSubgraph(const variable_list& inputs, const variable_list& outputs);
 
-// These definitions require Variable struct to be defined, so they can't be
-// in tracer_state.h
-inline VariableFlags VariableFlags::of(const Variable& var) {
-  VariableFlags f;
-  if (var.defined()) {
-    f.was_null = false;
-    f.requires_grad = var.requires_grad();
-    f.is_volatile = var.is_volatile();
-  } else {
-    f.was_null = true;
-  }
-  return f;
-}
-
-inline bool VariableFlags::verify(const Variable& var) const {
-  if (!var.defined()) return was_null;
-  return !was_null && requires_grad == var.requires_grad() && is_volatile == var.is_volatile();
-}
-
 Node* recordTrace(std::string op, at::ArrayRef<Variable> inputs, at::ArrayRef<Variable> outputs);
 
 }}} // namespace torch::jit::tracer

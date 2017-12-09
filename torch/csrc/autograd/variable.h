@@ -171,6 +171,7 @@ struct VariableViewImpl : public VariableImpl {
 
 inline Variable make_variable(at::Tensor data, VarFlags flags=DEFAULT_FLAGS,
                               int output_nr=0, std::shared_ptr<Function> grad_fn=nullptr) {
+  TORCH_ASSERT(!grad_fn || flags.requires_grad);
   if (data.defined() && data.dim() == 0) {
     // don't expose 0-dim tensors to Variable API.
     data = data.as_strided_({1}, {1});
@@ -186,6 +187,7 @@ inline Variable make_variable(at::Tensor data, bool requires_grad, bool is_volat
 
 inline Variable make_variable_view(Variable base, at::Tensor data, VarFlags flags=DEFAULT_FLAGS,
                                    int output_nr=0, std::shared_ptr<Function> grad_fn=nullptr) {
+  TORCH_ASSERT(!grad_fn || flags.requires_grad);
   if (data.defined() && data.dim() == 0) {
     // don't expose 0-dim tensors to Variable API.
     data = data.as_strided_({1}, {1});

@@ -10,6 +10,7 @@ from copy import deepcopy
 from itertools import repeat, product
 from functools import wraps, reduce
 from operator import mul
+from collections import OrderedDict
 
 import torch
 import torch.backends.cudnn as cudnn
@@ -721,7 +722,7 @@ class TestNN(NNTestCase):
         self.assertEqual(n[2], l3)
         self.assertEqual(n[3], l4)
 
-    def test_ListModule(self):
+    def test_ModuleList(self):
         modules = [nn.ReLU(), nn.Linear(5, 5)]
         module_list = nn.ModuleList(modules)
 
@@ -753,6 +754,25 @@ class TestNN(NNTestCase):
             module_list += nn.ReLU()
         with self.assertRaises(TypeError):
             module_list.extend(nn.ReLU())
+
+        l1 = nn.Linear(1, 2)
+        l2 = nn.Linear(2, 3)
+        l3 = nn.Linear(3, 2)
+        l4 = nn.Linear(2, 3)
+        subnet = nn.Sequential(l3, l4)
+        s = nn.Sequential(
+            OrderedDict([
+                ("layer1", l1),
+                ("layer2", l2),
+                ("layer3", l3),
+                ("layer4", l4),
+                ("subnet_layer", subnet)
+            ])
+        )
+        modules = list(s.modules())
+        module_list = nn.ModuleList()
+        module_list.extend(s.modules())
+        check()
 
     def test_ParameterList(self):
         def make_param():
@@ -789,6 +809,25 @@ class TestNN(NNTestCase):
         with self.assertRaises(TypeError):
             param_list.extend(make_param())
 
+        l1 = nn.Linear(1, 2)
+        l2 = nn.Linear(2, 3)
+        l3 = nn.Linear(3, 2)
+        l4 = nn.Linear(2, 3)
+        subnet = nn.Sequential(l3, l4)
+        s = nn.Sequential(
+            OrderedDict([
+                ("layer1", l1),
+                ("layer2", l2),
+                ("layer3", l3),
+                ("layer4", l4),
+                ("subnet_layer", subnet)
+            ])
+        )
+        parameters = list(s.parameters())
+        param_list = nn.ParameterList()
+        param_list.extend(s.parameters())
+        check()
+
     def test_add_module(self):
         l = nn.Linear(10, 20)
         net = nn.Module()
@@ -811,12 +850,20 @@ class TestNN(NNTestCase):
         net.l = l
         net.l2 = l
         net.add_module('empty', None)
+        net.register_buffer('indices', torch.LongTensor(1))
         net.float()
         self.assertIsInstance(l.weight.data, torch.FloatTensor)
         self.assertIsInstance(l.bias.data, torch.FloatTensor)
+        self.assertIsInstance(net.indices, torch.LongTensor)
         net.double()
         self.assertIsInstance(l.weight.data, torch.DoubleTensor)
         self.assertIsInstance(l.bias.data, torch.DoubleTensor)
+        self.assertIsInstance(net.indices, torch.LongTensor)
+        if TEST_CUDA:
+            net.float().cuda()
+            self.assertIsInstance(l.weight.data, torch.cuda.FloatTensor)
+            self.assertIsInstance(l.bias.data, torch.cuda.FloatTensor)
+            self.assertIsInstance(net.indices, torch.cuda.LongTensor)
         net.type(torch.FloatTensor)
         self.assertIsInstance(l.weight.data, torch.FloatTensor)
         self.assertIsInstance(l.bias.data, torch.FloatTensor)
@@ -934,6 +981,12 @@ class TestNN(NNTestCase):
 
     def test_embedding_padding_idx(self):
         embedding = nn.Embedding(10, 20, padding_idx=0)
+        input = Variable(torch.LongTensor([[0, 2, 4, 5], [4, 3, 0, 9]]))
+        output = embedding(input)
+        self.assertEqual(output[0][0].sum().data[0], 0)
+        self.assertEqual(output[1][2].sum().data[0], 0)
+
+        embedding = nn.Embedding(10, 20, padding_idx=0, sparse=True)
         input = Variable(torch.LongTensor([[0, 2, 4, 5], [4, 3, 0, 9]]))
         output = embedding(input)
         self.assertEqual(output[0][0].sum().data[0], 0)
@@ -1611,6 +1664,60 @@ class TestNN(NNTestCase):
         expected_out = l(i).data
         n = nn.DataParallel(Net())
         out = n(input=i)
+        self.assertEqual(out.get_device(), 0)
+        self.assertEqual(out.data, expected_out)
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    def test_data_parallel_module_kwargs_only_empty_list(self):
+        class Net(nn.Module):
+            def __init__(self):
+                super(Net, self).__init__()
+                self.l = l
+
+            def forward(self, input):
+                return self.l(input['data'])
+
+        l = nn.Linear(10, 5).float().cuda()
+        i = Variable(torch.randn(20, 10).float().cuda())
+        expected_out = l(i).data
+        n = nn.DataParallel(Net())
+        out = n(input={'data': i, 'unused': []})
+        self.assertEqual(out.get_device(), 0)
+        self.assertEqual(out.data, expected_out)
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    def test_data_parallel_module_kwargs_only_empty_dict(self):
+        class Net(nn.Module):
+            def __init__(self):
+                super(Net, self).__init__()
+                self.l = l
+
+            def forward(self, input):
+                return self.l(input['data'])
+
+        l = nn.Linear(10, 5).float().cuda()
+        i = Variable(torch.randn(20, 10).float().cuda())
+        expected_out = l(i).data
+        n = nn.DataParallel(Net())
+        out = n(input={'data': i, 'unused': {}})
+        self.assertEqual(out.get_device(), 0)
+        self.assertEqual(out.data, expected_out)
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    def test_data_parallel_module_kwargs_only_empty_tuple(self):
+        class Net(nn.Module):
+            def __init__(self):
+                super(Net, self).__init__()
+                self.l = l
+
+            def forward(self, input):
+                return self.l(input['data'])
+
+        l = nn.Linear(10, 5).float().cuda()
+        i = Variable(torch.randn(20, 10).float().cuda())
+        expected_out = l(i).data
+        n = nn.DataParallel(Net())
+        out = n(input={'data': i, 'unused': ()})
         self.assertEqual(out.get_device(), 0)
         self.assertEqual(out.data, expected_out)
 
@@ -2926,6 +3033,13 @@ class TestNN(NNTestCase):
         input2 = Variable(torch.randn(4, 5, 6), requires_grad=True)
         self.assertTrue(gradcheck(lambda x, y: F.cosine_similarity(x, y, dim=0), (input1, input2)))
         self.assertTrue(gradcheck(lambda x, y: F.cosine_similarity(x, y, dim=-1), (input1, input2)))
+
+        # Check cosine_similarity input/output shapes
+        input_size = (1, 3, 2, 1)
+        expected_size = (1, 2, 1)
+        input1 = Variable(torch.randn(input_size), requires_grad=True)
+        input2 = Variable(torch.randn(input_size), requires_grad=True)
+        self.assertEqual(F.cosine_similarity(input1, input2, dim=1).size(), expected_size)
 
     def test_grid_sample(self):
         def test_cpu_against_cuda(N, C, H, W, padding_mode):

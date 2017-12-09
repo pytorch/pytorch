@@ -10,6 +10,7 @@ TH_API void THVector_(muls)(real *y, const real *x, const real c, const ptrdiff_
 TH_API void THVector_(cdiv)(real *z, const real *x, const real *y, const ptrdiff_t n);
 TH_API void THVector_(divs)(real *y, const real *x, const real c, const ptrdiff_t n);
 TH_API void THVector_(copy)(real *y, const real *x, const ptrdiff_t n);
+TH_API void THVector_(neg)(real *y, const real *x, const ptrdiff_t n);
 
 #if defined(TH_REAL_IS_SHORT) || defined(TH_REAL_IS_INT) || defined(TH_REAL_IS_LONG)
 TH_API void THVector_(abs)(real *y, const real *x, const ptrdiff_t n);
@@ -46,10 +47,6 @@ TH_API void THVector_(frac)(real *y, const real *x, const ptrdiff_t n);
 TH_API void THVector_(cinv)(real *y, const real *x, const ptrdiff_t n);
 
 #endif /* floating point only part */
-
-#ifndef TH_REAL_IS_BYTE
-TH_API void THVector_(neg)(real *y, const real *x, const ptrdiff_t n);
-#endif
 
 /* Initialize the dispatch pointers */
 TH_API void THVector_(vectorDispatchInit)(void);

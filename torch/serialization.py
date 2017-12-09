@@ -347,12 +347,18 @@ def _load(f, map_location, pickle_module):
             tar.extract('tensors', path=tmpdir)
             with open(os.path.join(tmpdir, 'tensors'), 'rb', 0) as f:
                 num_tensors = pickle_module.load(f)
-                for i in range(num_tensors):
+                for _ in range(num_tensors):
                     args = pickle_module.load(f)
                     key, storage_id, original_tensor_type = args
                     storage = deserialized_objects[storage_id]
                     tensor_type = storage_to_tensor_type(storage)
-                    tensor = tensor_type._new_with_metadata_file(f, storage)
+                    ndim, = struct.unpack('<i', f.read(4))
+                    # skip next 4 bytes; legacy encoding treated ndim as 8 bytes
+                    f.read(4)
+                    size = struct.unpack('<{}q'.format(ndim), f.read(8 * ndim))
+                    stride = struct.unpack('<{}q'.format(ndim), f.read(8 * ndim))
+                    storage_offset, = struct.unpack('<q', f.read(8))
+                    tensor = tensor_type().set_(storage, storage_offset, size, stride)
                     deserialized_objects[key] = tensor
 
             pickle_file = tar.extractfile('pickle')

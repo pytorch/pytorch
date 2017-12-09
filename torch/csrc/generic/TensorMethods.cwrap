@@ -140,7 +140,6 @@ typedef THLongStorage THSize;
 typedef THLongStorage THStride;
 
 !!inc methods/Tensor.cwrap
-!!inc methods/TensorSerialization.cwrap
 !!inc methods/TensorApply.cwrap
 !!inc methods/TensorMath.cwrap
 !!inc methods/TensorCompare.cwrap

@@ -1,5 +1,6 @@
 #include "Functions.h"
 #include <ATen/WrapDimUtils.h>
+#include <iostream>
 
 // define constants like M_PI and C keywords for MSVC
 #ifdef _MSC_VER
@@ -164,6 +165,32 @@ Tensor mm_mat2_backward(const Tensor & grad, const Tensor & mat1, IntList sizes,
   }
 }
 
+Tensor renorm_backward(const Tensor & grad, const Tensor & self, Scalar p, int64_t dim, Scalar maxnorm) {
+  auto transposed_sizes = std::vector<int64_t>(self.transpose(dim, 0).sizes());
+  auto flatten = [&](const Tensor & t) {
+    return t.transpose(dim, 0).contiguous().view({t.size(dim), -1});
+  };
+  auto unflatten = [&](const Tensor & t) {
+    return t.contiguous().view(transposed_sizes).transpose(dim, 0);
+  };
+
+  // renorm computes the norm over all dimensions except `dim`, which is why
+  // we need the flatten and unflatten business. TODO: simplify this when we
+  // add support for norm over multiple dimensions.
+  auto self_flat = flatten(self);
+  auto grad_flat = flatten(grad);
+  auto norm_flat = self_flat.norm(p, 1, true);
+  auto grad_output = (self_flat * grad_flat).sum(1, true);
+  auto nb = norm_backward(grad_output, self_flat, p, norm_flat, 1, true);
+  auto invnorm = (norm_flat + 1e-7).reciprocal();
+  auto grad_norm = unflatten(maxnorm * invnorm * (grad_flat - invnorm * nb));
+  auto norm = unflatten(norm_flat.expand_as(self_flat));
+
+  // TODO: remove the detach once comparison ops no longer require grad
+  auto mask = Variable(norm < maxnorm).detach();
+  return grad * mask.type_as(grad) + grad_norm * (1 - mask).type_as(grad);
+}
+
 Tensor select_backward_scalar(Tensor grad, const Tensor & input, const Tensor & value) {
   auto grad_data = static_cast<Variable&>(grad).data();
   auto grad_input = zeros_like(input);
@@ -258,6 +285,9 @@ Tensor potrf_backward(Tensor grad, bool upper, Tensor L) {
   std::tie(S, std::ignore) = at::gesv(P + P.t(), L.t());
   std::tie(S, std::ignore) = at::gesv(S.t(), L.t());
   S = phi(S);
+  if (upper) {
+    S = S.t();
+  }
   return S;
 }
 
@@ -417,7 +447,7 @@ Tensor softplus_double_backward(const Tensor & grad, const Tensor & input, Scala
 
 Tensor as_strided_backward(const Tensor & grad, TensorGeometry base, IntList sizes, IntList strides, int64_t storage_offset) {
   auto src = base.zeros_with_stride(grad.type());
-  src.as_strided(sizes, strides, storage_offset - base.storage_offset).copy_(grad);
+  src.as_strided(sizes, strides, storage_offset - base.storage_offset()).copy_(grad);
   return src;
 }
 
@@ -500,6 +530,131 @@ std::tuple<Tensor, Tensor, Tensor> prelu_double_backward(
       }
       return std::tuple<Tensor,Tensor,Tensor>{ggO, gI, gW};
   }
+}
+
+// https://j-towns.github.io/papers/svd-derivative.pdf
+Tensor svd_backward(const std::vector<torch::autograd::Variable> &grads, const Tensor& self,
+          bool some, const Tensor& raw_u, const Tensor& sigma, const Tensor& raw_v) {
+  auto m = self.size(0);
+  auto n = self.size(1);
+  auto k = sigma.size(0);
+
+  Tensor u, v;
+  if (!some) {
+    // ignore the free subspace
+    u = raw_u.narrow(1, 0, k);
+    v = raw_v.narrow(1, 0, k);
+  } else {
+    u = raw_u;
+    v = raw_v;
+  }
+
+  auto gu = grads[0];
+  auto gsigma = grads[1];
+  auto gv = grads[2];
+  auto im = self.type().eye(m);
+  auto in = self.type().eye(n);
+  auto ut = u.t();
+  auto vt = v.t();
+  auto sigma_mat = sigma.diag();
+  auto sigma_mat_inv = sigma.pow(-1).diag();
+  auto sigma_expanded_sq = sigma.pow(2).expand_as(sigma_mat);
+  auto F = (sigma_expanded_sq - sigma_expanded_sq.t()).pow(-1);
+  auto& long_type = sigma.type().toScalarType(at::kLong);
+  auto diag_indices = long_type.arange(0, F.numel(), k + 1);
+  F.view({-1}).index_fill_(0, diag_indices, 0);
+
+  Tensor u_term, sigma_term, v_term;
+
+  if (gu.defined()) {
+    u_term = u.mm(F.mul(ut.mm(gu) - gu.t().mm(u))).mm(sigma_mat);
+    if (m > k) {
+      u_term = u_term + (im - u.mm(ut)).mm(gu).mm(sigma_mat_inv);
+    }
+    u_term = u_term.mm(vt);
+  } else {
+    u_term = self.type().zeros({1}).expand_as(self);
+  }
+
+  if (gsigma.defined()) {
+    sigma_term = u.mm(gsigma.diag()).mm(vt);
+  } else {
+    sigma_term = self.type().zeros({1}).expand_as(self);
+  }
+
+  if (gv.defined()) {
+    auto gvt = gv.t();
+    v_term = sigma_mat.mm(F.mul(vt.mm(gv) - gvt.mm(v))).mm(vt);
+    if (n > k) {
+      v_term = v_term + sigma_mat_inv.mm(gvt.mm(in - v.mm(vt)));
+    }
+    v_term = u.mm(v_term);
+  } else {
+    v_term = self.type().zeros({1}).expand_as(self);
+  }
+
+  return u_term + sigma_term + v_term;
+}
+
+// Formula:
+//   d det / d A_ij = \sum_k (\prod_{l neq k} Sigma_l) U_ik V_jk
+// that is, if det != 0
+//   d det / d A = U * (Sigma / det) * V^T
+Tensor _det_with_svd_backward(const std::vector<torch::autograd::Variable> &grads, const Tensor& self,
+          const Tensor& det, const Tensor& u, const Tensor& sigma, const Tensor& v) {
+  std::vector<torch::autograd::Variable> svd_grads(grads.begin() + 1, grads.end());
+  auto svd_term = svd_backward(svd_grads, self, true, u, sigma, v);
+
+  auto det_grad = grads[0];
+  auto size = self.size(0);
+  auto null_dim = size - sigma.nonzero().size(0);
+  if (null_dim >= 2) {
+    // \prod_{l neq k} Sigma_l is zero every where
+    return svd_term;
+  }
+  if (null_dim == 1) {
+    // only last sigma is 0
+    // \prod_{l neq k} Sigma_l is zero at all but last dim
+    // at last dim, it is:
+    auto scale = sigma.narrow(0, 0, size - 1).prod();
+    auto last_u = u.narrow(1, size - 1, 1);
+    auto last_v = v.narrow(1, size - 1, 1);
+    return svd_term + last_u.mm(last_v.transpose(0, 1)).mul_(scale.mul_(det_grad));
+  }
+  // no zero singular values
+  return svd_term + u.mm(sigma.pow(-1).mul_(det.mul(det_grad)).diag()).mm(v.transpose(0, 1));
+}
+
+// Reference:
+// https://people.maths.ox.ac.uk/gilesm/files/NA-08-01.pdf
+// Sec. 2.3.1 Matrix inverse product
+std::tuple<Tensor, Tensor> trtrs_backward(
+    const Tensor & grad_x, const Tensor & grad_m,
+    const Tensor & b, const Tensor & a, const Tensor & x,
+    const bool upper, const bool transpose, const bool unitriangular,
+    std::array<bool, 2> output_mask) {
+  Tensor grad_b, grad_a;
+  if (grad_x.defined()) {
+    grad_b = std::get<0>(grad_x.trtrs(a, upper, !transpose, unitriangular));
+    if (output_mask[1]) {
+      grad_a = transpose ? -x.mm(grad_b.t()) : -grad_b.mm(x.t());
+      if (upper) {
+        grad_a = grad_a.triu((int) unitriangular);
+      } else {
+        grad_a = grad_a.tril(-((int) unitriangular));
+      }
+    }
+  }
+  if (!grad_a.defined()) {
+    grad_a = a.type().zeros({1}).expand_as(a);
+  }
+  if (!grad_b.defined()) {
+    grad_b = b.type().zeros({1}).expand_as(b);
+  }
+  if (output_mask[1] && grad_m.defined()) {
+    grad_a = grad_a.add(grad_m);
+  }
+  return std::tuple<Tensor, Tensor>{grad_b, grad_a};
 }
 
 }

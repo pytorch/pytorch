@@ -122,7 +122,8 @@ Tensor & VariableType::unpack_any(const Tensor & t, const char * name, int pos) 
         pos, name);
   }
   auto scalarType = t.type().scalarType();
-  auto& type = *VariableImpl::getType(baseType->toScalarType(scalarType));
+  auto backend = t.type().backend();
+  auto& type = *VariableImpl::getType(baseType->toScalarType(scalarType).toBackend(backend));
   return checked_cast(type, t, name, pos).data();
 }
 
@@ -133,7 +134,7 @@ Tensor VariableType::unpack_opt(const Tensor & t, const char * name, int pos) co
   return unpack(t, name, pos);
 }
 
-std::vector<at::Tensor> VariableType::unpack(const at::TensorList &tl, const char *name, int pos) const {
+std::vector<at::Tensor> VariableType::unpack(at::TensorList tl, const char *name, int pos) const {
   std::vector<at::Tensor> ret(tl.size());
   for (size_t i = 0; i < tl.size(); ++i) {
     const auto &t = tl[i];
@@ -143,11 +144,31 @@ std::vector<at::Tensor> VariableType::unpack(const at::TensorList &tl, const cha
                     toString(), i, pos, name);
     }
     if (&t.type() == this) {
-      ret[i] = static_cast<VariableImpl*>(t.pImpl)->data;
+      ret[i] = static_cast<const Variable&>(t).data();
     } else {
       runtime_error("Expected object of type %s but found type %s at position #%d "
                     "for iterable argument #%d '%s'",
                     toString(),t.type().toString(), i, pos, name);
+    }
+  }
+  return ret;
+}
+
+std::vector<at::Tensor> VariableType::unpack_idxs(at::TensorList tl, const char *name, int pos) const {
+  auto& longType = *VariableImpl::getType(baseType->toScalarType(kLong));
+  auto& byteType = *VariableImpl::getType(baseType->toScalarType(kByte));
+  std::vector<at::Tensor> ret(tl.size());
+  for (size_t i = 0; i < tl.size(); ++i) {
+    const auto &t = tl[i];
+    if (!t.defined()) {
+      continue;
+    } else if (!(t.type() == longType || t.type() == byteType)) {
+      runtime_error("Expected object of type %s or %s but found type %s at position #%d "
+                    "for iterable argument #%d '%s'",
+                    longType.toString(), byteType.toString(), t.type().toString(),
+                    i, pos, name);
+    } else  {
+      ret[i] = static_cast<const Variable&>(t).data();
     }
   }
   return ret;
@@ -170,6 +191,15 @@ VariableType::as_variable(std::tuple<Tensor, Tensor, Tensor> tensors) const {
       make_variable(std::move(std::get<0>(tensors))),
       make_variable(std::move(std::get<1>(tensors))),
       make_variable(std::move(std::get<2>(tensors))));
+}
+
+std::tuple<Variable, Variable, Variable, Variable>
+VariableType::as_variable(std::tuple<Tensor, Tensor, Tensor, Tensor> tensors) const {
+  return std::make_tuple<>(
+      make_variable(std::move(std::get<0>(tensors))),
+      make_variable(std::move(std::get<1>(tensors))),
+      make_variable(std::move(std::get<2>(tensors))),
+      make_variable(std::move(std::get<3>(tensors))));
 }
 
 std::vector<Variable> VariableType::as_variable(TensorList tl) const {
@@ -314,10 +344,10 @@ void VariableType::s_copy(const Tensor & src, Tensor & dst) const {
   if (flags.requires_grad) {
     // TODO: handle device movement
     grad_fn = std::make_shared<CopyBackwards>();
-    grad_fn->is_executable = true;
     grad_fn->next_functions = compute_next_functions({ dst, src });
     grad_fn->num_inputs = 1;
     grad_fn->src_type = &src.type();
+    grad_fn->src_device = src.is_cuda() ? src.get_device() : -1;
   }
   baseType->s_copy(src_, dst_);
   increment_version(dst);
@@ -326,13 +356,8 @@ void VariableType::s_copy(const Tensor & src, Tensor & dst) const {
 
 Tensor & VariableType::resize_(Tensor & self, IntList size) const {
   auto& self_ = unpack(self, "self", 0);
-  check_inplace(self);
-  auto& self_var = static_cast<Variable&>(self);
-  if (self_var.grad_fn()) {
-    at::runtime_error("cannot resize non-leaf variables");
-  }
-  if (self_var.requires_grad()) {
-    at::runtime_error("cannot resize variables which require grad");
+  if (static_cast<Variable&>(self).requires_grad()) {
+    at::runtime_error("cannot resize variables that require grad");
   }
   baseType->resize_(self_, size);
   return self;

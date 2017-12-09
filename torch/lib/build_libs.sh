@@ -16,19 +16,20 @@ if [[ "$1" == "--with-cuda" ]]; then
 fi
 
 cd "$(dirname "$0")/../.."
-BASE_DIR=$(pwd)
+PWD=`printf "%q\n" "$(pwd)"`
+BASE_DIR="$PWD"
 cd torch/lib
-INSTALL_DIR="$(pwd)/tmp_install"
+INSTALL_DIR="$PWD/tmp_install"
 CMAKE_VERSION=${CMAKE_VERSION:="cmake"}
-C_FLAGS=" -DTH_INDEX_BASE=0 -I$INSTALL_DIR/include \
-  -I$INSTALL_DIR/include/TH -I$INSTALL_DIR/include/THC \
-  -I$INSTALL_DIR/include/THS -I$INSTALL_DIR/include/THCS \
-  -I$INSTALL_DIR/include/THNN -I$INSTALL_DIR/include/THCUNN"
+C_FLAGS=" -DTH_INDEX_BASE=0 -I\"$INSTALL_DIR/include\" \
+  -I\"$INSTALL_DIR/include/TH\" -I\"$INSTALL_DIR/include/THC\" \
+  -I\"$INSTALL_DIR/include/THS\" -I\"$INSTALL_DIR/include/THCS\" \
+  -I\"$INSTALL_DIR/include/THNN\" -I\"$INSTALL_DIR/include/THCUNN\""
 # Workaround OpenMPI build failure
 # ImportError: /build/pytorch-0.2.0/.pybuild/pythonX.Y_3.6/build/torch/_C.cpython-36m-x86_64-linux-gnu.so: undefined symbol: _ZN3MPI8Datatype4FreeEv
 # https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=686926
 C_FLAGS="${C_FLAGS} -DOMPI_SKIP_MPICXX=1"
-LDFLAGS="-L$INSTALL_DIR/lib "
+LDFLAGS="-L\"$INSTALL_DIR/lib\" "
 LD_POSTFIX=".so.1"
 LD_POSTFIX_UNVERSIONED=".so"
 if [[ $(uname) == 'Darwin' ]]; then
@@ -68,6 +69,7 @@ function build() {
       *) BUILD_C_FLAGS=$C_FLAGS" -fexceptions";;
   esac
   ${CMAKE_VERSION} ../../$1 -DCMAKE_MODULE_PATH="$BASE_DIR/cmake/FindCUDA" \
+              ${CMAKE_GENERATOR} \
               -DTorch_FOUND="1" \
               -DCMAKE_INSTALL_PREFIX="$INSTALL_DIR" \
               -DCMAKE_C_FLAGS="$BUILD_C_FLAGS" \
@@ -97,8 +99,9 @@ function build() {
               -Dnanopb_BUILD_GENERATOR=0 \
               -DCMAKE_DEBUG_POSTFIX="" \
               -DCMAKE_BUILD_TYPE=$([ $DEBUG ] && echo Debug || echo Release) \
-              ${@:2}
-  make install -j$(getconf _NPROCESSORS_ONLN)
+              ${@:2} \
+              -DCMAKE_EXPORT_COMPILE_COMMANDS=1
+  ${CMAKE_INSTALL} -j$(getconf _NPROCESSORS_ONLN)
   cd ../..
 
   local lib_prefix=$INSTALL_DIR/lib/lib$1
@@ -120,11 +123,12 @@ function build_nccl() {
    mkdir -p build/nccl
    cd build/nccl
    ${CMAKE_VERSION} ../../nccl -DCMAKE_MODULE_PATH="$BASE_DIR/cmake/FindCUDA" \
+               ${CMAKE_GENERATOR} \
                -DCMAKE_BUILD_TYPE=Release \
                -DCMAKE_INSTALL_PREFIX="$INSTALL_DIR" \
                -DCMAKE_C_FLAGS="$C_FLAGS" \
                -DCMAKE_CXX_FLAGS="$C_FLAGS $CPP_FLAGS"
-   make install
+  ${CMAKE_INSTALL}
    mkdir -p ${INSTALL_DIR}/lib
    cp "lib/libnccl.so.1" "${INSTALL_DIR}/lib/libnccl.so.1"
    if [ ! -f "${INSTALL_DIR}/lib/libnccl.so" ]; then
@@ -145,14 +149,16 @@ function build_aten() {
   mkdir -p build/aten
   cd  build/aten
   ${CMAKE_VERSION} ../../../../aten \
+  ${CMAKE_GENERATOR} \
   -DCMAKE_BUILD_TYPE=$([ $DEBUG ] && echo Debug || echo Release) \
   -DNO_CUDA=$((1-$WITH_CUDA)) \
   -DCUDNN_INCLUDE_DIR=$CUDNN_INCLUDE_DIR \
   -DCUDNN_LIB_DIR=$CUDNN_LIB_DIR \
   -DATEN_NO_CONTRIB=1 \
-  -DCMAKE_INSTALL_PREFIX="$INSTALL_DIR"
+  -DCMAKE_INSTALL_PREFIX="$INSTALL_DIR" \
+  -DCMAKE_EXPORT_COMPILE_COMMANDS=1
   # purpusefully not passing C_FLAGS for the same reason as above
-  make -j$(getconf _NPROCESSORS_ONLN) install
+  ${CMAKE_INSTALL} -j$(getconf _NPROCESSORS_ONLN)
   cd ../..
 }
 
@@ -174,17 +180,17 @@ done
 
 # If all the builds succeed we copy the libraries, headers,
 # binaries to torch/lib
-rm -rf $INSTALL_DIR/lib/cmake
-rm -rf $INSTALL_DIR/lib/python
-cp $INSTALL_DIR/lib/* .
+rm -rf "$INSTALL_DIR/lib/cmake"
+rm -rf "$INSTALL_DIR/lib/python"
+cp "$INSTALL_DIR/lib"/* .
 if [ -d "$INSTALL_DIR/lib64/" ]; then
-    cp $INSTALL_DIR/lib64/* .
+    cp "$INSTALL_DIR/lib64"/* .
 fi
 cp ../../aten/src/THNN/generic/THNN.h .
 cp ../../aten/src/THCUNN/generic/THCUNN.h .
-cp -r $INSTALL_DIR/include .
+cp -r "$INSTALL_DIR/include" .
 if [ -d "$INSTALL_DIR/bin/" ]; then
-    cp $INSTALL_DIR/bin/* .
+    cp "$INSTALL_DIR/bin/"/* .
 fi
 
 # this is for binary builds
@@ -192,5 +198,5 @@ if [[ $PYTORCH_BINARY_BUILD && $PYTORCH_SO_DEPS ]]
 then
     echo "Copying over dependency libraries $PYTORCH_SO_DEPS"
     # copy over dependency libraries into the current dir
-    cp $PYTORCH_SO_DEPS .
+    cp "$PYTORCH_SO_DEPS" .
 fi

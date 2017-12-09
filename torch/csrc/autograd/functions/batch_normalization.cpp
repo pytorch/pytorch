@@ -12,10 +12,7 @@
 #include <sstream>
 
 #ifdef WITH_CUDNN
-#include "torch/csrc/cudnn/BatchNorm.h"
-#include "torch/csrc/cudnn/Handles.h"
-#include "torch/csrc/cudnn/Types.h"
-extern THCState* state;
+#include <ATen/cudnn/cudnn-wrapper.h>
 #endif
 
 namespace {
@@ -38,9 +35,13 @@ auto BatchNormForward::apply(const variable_list& inputs) -> variable_list {
   check_input_variables("BatchNorm", inputs, 3, 1);
 
   AutoGPU guard(inputs[0]);
-  auto& input = inputs[0];
-  auto& weight = inputs[1];
-  auto& bias = inputs[2];
+  auto& input_var = inputs[0];
+  auto& weight_var = inputs[1];
+  auto& bias_var = inputs[2];
+
+  auto input = input_var.data();
+  auto weight = weight_var.opt_data();
+  auto bias = bias_var.opt_data();
 
   auto num_features = input.sizes()[1];
   check_dims_match_num_input_features("running_mean", num_features, running_mean.numel());
@@ -61,33 +62,20 @@ auto BatchNormForward::apply(const variable_list& inputs) -> variable_list {
                && cudnn_enabled && CUDNN_VERSION >= 5110L);
 #endif
 
-  auto input_data = input.data();
   Tensor output;
   auto save_mean = running_mean.type().tensor(running_mean.sizes());
   auto save_std = running_var.type().tensor(running_var.sizes());
 
   if (use_cudnn && eps >= CUDNN_BN_MIN_EPSILON) {
 #ifdef WITH_CUDNN
-    output = input_data.type().tensor(input.sizes());
-    torch::cudnn::cudnn_batch_norm_forward(
-        state,
-        torch::cudnn::getCudnnHandle(),
-        torch::cudnn::getCudnnDataType(input),
-        (THVoidTensor*)input.unsafeGetTH(false),
-        (THVoidTensor*)output.unsafeGetTH(false),
-        (THVoidTensor*)weight.unsafeGetTH(false),
-        (THVoidTensor*)bias.unsafeGetTH(false),
-        (THVoidTensor*)running_mean.unsafeGetTH(false),
-        (THVoidTensor*)running_var.unsafeGetTH(false),
-        (THVoidTensor*)save_mean.unsafeGetTH(false),
-        (THVoidTensor*)save_std.unsafeGetTH(false),
-        training,
-        momentum,
-        eps);
+    output = at::cudnn_batch_norm_forward(
+                input, weight, bias,
+                running_mean, running_var, save_mean, save_std,
+                training, momentum, eps);
 #endif
   } else {
     output = at::batch_norm_forward(
-        input_data, weight.opt_data(), bias.opt_data(),
+        input, weight, bias,
         running_mean, running_var, training, momentum, eps,
         save_mean, save_std);
   }
@@ -96,7 +84,7 @@ auto BatchNormForward::apply(const variable_list& inputs) -> variable_list {
   return wrap_outputs(inputs, std::move(outputs), [&](FunctionFlags f) {
     return std::make_shared<BatchNormBackward>(
         f, *this, std::move(save_mean), std::move(save_std),
-        input, weight, bias);
+        input_var, weight_var, bias_var);
   });
 };
 
@@ -129,25 +117,12 @@ auto BatchNormBackward::apply(const variable_list& grad_outputs) -> variable_lis
 
   if (use_cudnn && eps >= CUDNN_BN_MIN_EPSILON) {
 #ifdef WITH_CUDNN
-    grad_input = input.type().tensor(input.sizes());
-    grad_weight = weight.type().tensor(weight.sizes());
-    grad_bias = bias.type().tensor(bias.sizes());
-    torch::cudnn::cudnn_batch_norm_backward(
-        state,
-        torch::cudnn::getCudnnHandle(),
-        torch::cudnn::getCudnnDataType(input),
-        (THVoidTensor*)input.unsafeGetTH(false),
-        (THVoidTensor*)grad_output.unsafeGetTH(false),
-        (THVoidTensor*)grad_input.unsafeGetTH(false),
-        (THVoidTensor*)grad_weight.unsafeGetTH(false),
-        (THVoidTensor*)grad_bias.unsafeGetTH(false),
-        (THVoidTensor*)weight.unsafeGetTH(false),
-        (THVoidTensor*)running_mean.unsafeGetTH(false),
-        (THVoidTensor*)running_var.unsafeGetTH(false),
-        (THVoidTensor*)save_mean.unsafeGetTH(false),
-        (THVoidTensor*)save_std.unsafeGetTH(false),
-        training,
-        eps);
+    std::tie(grad_input, grad_weight, grad_bias) =
+      at::cudnn_batch_norm_backward(
+          input, grad_output, weight,
+          save_mean, save_std,
+          training, eps
+          );
 #endif
   } else {
     std::array<bool, 3> mask = {
