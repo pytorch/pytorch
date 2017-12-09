@@ -3897,11 +3897,22 @@ class TestTorch(TestCase):
 
         repeats = ((3, 1, 1),
                    (3, 3, 3),
-                   (1, 2, 1))
+                   (1, 2, 1),
+                   (2, 2, 2, 2))
+
+        def _generate_noncontiguous_input():
+
+            out = np.broadcast_to(np.random.random((1, 4)),
+                                  initial_shape)
+
+            assert not (out.flags.c_contiguous or out.flags.f_contiguous)
+
+            return out
 
         for repeat in repeats:
             for tensor in (torch.rand(*initial_shape),
-                           torch.from_numpy(np.random.random(initial_shape))):
+                           torch.from_numpy(np.random.random(initial_shape)),
+                           torch.from_numpy(_generate_noncontiguous_input()),):
 
                 self.assertEqual(tensor.repeat(*repeat).numpy(),
                                  np.tile(tensor.numpy(), repeat))
