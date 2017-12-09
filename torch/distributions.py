@@ -55,9 +55,9 @@ class Distribution(object):
     Distribution is the abstract base class for probability distributions.
     """
 
-    def sample(self, n):
+    def sample(self, n=None):
         """
-        Generates a single sample or single batch of samples if the distribution
+        Generates n samples or n batches of samples of samples if the distribution
         parameters are batched.
         """
         raise NotImplementedError
