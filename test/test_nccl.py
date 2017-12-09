@@ -14,6 +14,11 @@ if nGPUs == 0:
 
 class TestNCCL(TestCase):
 
+    def test_unique_id(self):
+        uid = nccl.unique_id()
+        self.assertIsInstance(uid, bytes)
+        self.assertGreater(len(uid), 1)
+
     @unittest.skipIf(nGPUs < 2, "only one GPU detected")
     def test_broadcast(self):
         expected = torch.FloatTensor(128).uniform_()

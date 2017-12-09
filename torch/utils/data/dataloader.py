@@ -9,7 +9,7 @@ import re
 import sys
 import traceback
 import threading
-from torch._six import string_classes
+from torch._six import string_classes, int_classes
 
 
 if sys.version_info[0] == 2:
@@ -114,7 +114,7 @@ def default_collate(batch):
         if elem.shape == ():  # scalars
             py_type = float if elem.dtype.name.startswith('float') else int
             return numpy_type_map[elem.dtype.name](list(map(py_type, batch)))
-    elif isinstance(batch[0], int):
+    elif isinstance(batch[0], int_classes):
         return torch.LongTensor(batch)
     elif isinstance(batch[0], float):
         return torch.DoubleTensor(batch)
@@ -360,6 +360,10 @@ class DataLoader(object):
 
         if sampler is not None and shuffle:
             raise ValueError('sampler is mutually exclusive with shuffle')
+
+        if self.num_workers < 0:
+            raise ValueError('num_workers cannot be negative; '
+                             'use num_workers=0 to disable multiprocessing.')
 
         if batch_sampler is None:
             if sampler is None:

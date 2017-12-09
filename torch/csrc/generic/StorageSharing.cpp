@@ -65,7 +65,7 @@ static std::string THPStorage_(__newHandle)() {
   handle += std::to_string(getpid());
 #endif
   handle += "_";
-  handle += std::to_string(THRandom_random(THPDefaultGenerator->cdata));
+  handle += std::to_string(THRandom_random(THPGenerator_TH_CData(THPDefaultGenerator)));
   return handle;
 }
 

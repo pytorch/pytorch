@@ -194,12 +194,7 @@ class _TensorBase(object):
 
     def tolist(self):
         r"""Returns a nested list represenation of this tensor."""
-        dim = self.dim()
-        if dim == 1:
-            return [v for v in self]
-        elif dim > 0:
-            return [subt.tolist() for subt in self]
-        return []
+        return torch.autograd.Variable(self).tolist()
 
     def view_as(self, tensor):
         r"""Returns this tensor viewed as the size as the specified tensor.
@@ -406,6 +401,9 @@ class _TensorBase(object):
     @property
     def data(self):
         raise RuntimeError('cannot call .data on a torch.Tensor: did you intend to use autograd.Variable?')
+
+    def numpy(self):
+        return torch.autograd.Variable(self).numpy()
 
     # Numpy array interface, to support `numpy.asarray(tensor) -> ndarray`
     def __array__(self, dtype=None):

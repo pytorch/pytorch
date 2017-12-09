@@ -71,11 +71,6 @@ TH_API double THRandom_exponential(THGenerator *_generator, double lambda);
 */
 TH_API double THRandom_standard_gamma(THGenerator *_generator, double alpha);
 
-/** Computes a reparameterized gradient of a sample from a standard Gamma
-    distribution wrt the shape parameter alpha.
-*/
-TH_API double THRandom_standard_gamma_grad(double x, double alpha);
-
 /** Computes a reparameterized gradient of a sample x from a Dirichlet
     distribution wrt the concentration parameter alpha.
     total is the sum of all concentration parameters, so total > alpha.

@@ -37,6 +37,10 @@ uint64_t CUDAGenerator::seed() {
   return THCRandom_initialSeed(context->thc_state);
 }
 
+uint64_t CUDAGenerator::initialSeed() {
+  return THCRandom_initialSeed(context->thc_state);
+}
+
 CUDAGenerator& CUDAGenerator::manualSeed(uint64_t seed) {
   THCRandom_manualSeed(context->thc_state, seed);
   return *this;

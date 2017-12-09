@@ -210,6 +210,14 @@ int THPVariable_pyinit(PyObject *self, PyObject *args, PyObject *kwds)
 typedef PyObject *(*getter)(PyObject *, void *);
 typedef int (*setter)(PyObject *, PyObject *, void *);
 
+PyObject *THPVariable_get_cdata(THPVariable *self)
+{
+  HANDLE_TH_ERRORS
+  auto& var = self->cdata;
+  return PyLong_FromVoidPtr(var.unsafeGetTH(false));
+  END_HANDLE_TH_ERRORS
+}
+
 PyObject *THPVariable_get_version(THPVariable *self)
 {
   HANDLE_TH_ERRORS
@@ -457,6 +465,7 @@ PyObject *THPVariable_is_cuda(THPVariable *self)
 }
 
 static struct PyGetSetDef THPVariable_properties[] = {
+  {"_cdata", (getter)THPVariable_get_cdata, NULL, NULL, NULL},
   {"_version", (getter)THPVariable_get_version, NULL, NULL, NULL},
   {"grad_fn", (getter)THPVariable_get_grad_fn, NULL, NULL, NULL},
   {"_grad_fn", (getter)THPVariable_get_grad_fn, (setter)THPVariable_set_grad_fn, NULL, NULL},

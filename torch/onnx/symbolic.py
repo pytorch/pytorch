@@ -206,6 +206,8 @@ def permute(g, self, dims):
 
 
 def view(g, self, size):
+    if self.type().sizes()[0] == size[0] and len(size) == 2:
+        return g.op("Flatten", self, axis_i=1)
     return g.op("Reshape", self, shape_i=size)
 
 
@@ -274,7 +276,7 @@ def max_pool2d(g, input, kernel_size, stride, padding, dilation, ceil_mode):
         stride = kernel_size
     r = g.op("MaxPool", input,
              kernel_shape_i=_pair(kernel_size),
-             pads_i=_pair(padding),
+             pads_i=_pair(padding) * 2,
              strides_i=_pair(stride))
     return r, None
 
@@ -288,7 +290,7 @@ def avg_pool2d(g, input, kernel_size, stride, padding, ceil_mode, count_include_
     return g.op("AveragePool", input,
                 kernel_shape_i=_pair(kernel_size),
                 strides_i=_pair(stride),
-                pads_i=_pair(padding))
+                pads_i=_pair(padding) * 2)
 
 
 def avg_pool3d(g, input, kernel_size, stride, padding, ceil_mode, count_include_pad):
@@ -327,3 +329,23 @@ def abs(g, self):
 
 def pow(g, self, exponent):
     return g.op("Pow", self, exponent)
+
+
+def clamp(g, self, min, max):
+    return g.op("Clip", self, min_f=min, max_f=max)
+
+
+def max(g, self, other):
+    return g.op("Max", self, other)
+
+
+def min(g, self, other):
+    return g.op("Min", self, other)
+
+
+def eq(g, self, other):
+    return g.op("Equal", self, other)
+
+
+def exp(g, self):
+    return g.op("Exp", self)

@@ -216,8 +216,6 @@ class _StandardGamma(Function):
 def _standard_gamma(alpha):
     if not isinstance(alpha, Variable):
         return torch._C._standard_gamma(alpha)
-    if not alpha.requires_grad:
-        return Variable(torch._C._standard_gamma(alpha.data))
     return _StandardGamma.apply(alpha)
 
 
@@ -236,7 +234,7 @@ class Gamma(Distribution):
         alpha (float or Tensor or Variable): shape parameter of the distribution
         beta (float or Tensor or Variable): rate = 1 / scale of the distribution
     """
-    reparameterized = True
+    has_rsample = True
 
     def __init__(self, alpha, beta):
         # TODO handle (Variable, Number) cases
@@ -261,9 +259,9 @@ class Gamma(Distribution):
         return _standard_gamma(_expand_n(self.alpha, n)) / self.beta
 
     def log_prob(self, value):
-        return (self.alpha * torch.log(self.beta)
-                + (self.alpha - 1) * torch.log(value)
-                - self.beta * value - torch.lgamma(self.alpha))
+        return (self.alpha * torch.log(self.beta) +
+                (self.alpha - 1) * torch.log(value) -
+                self.beta * value - torch.lgamma(self.alpha))
 
 
 def _dirichlet_sample_nograd(alpha):
