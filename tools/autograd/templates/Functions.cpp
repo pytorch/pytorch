@@ -165,6 +165,32 @@ Tensor mm_mat2_backward(const Tensor & grad, const Tensor & mat1, IntList sizes,
   }
 }
 
+Tensor renorm_backward(const Tensor & grad, const Tensor & self, Scalar p, int64_t dim, Scalar maxnorm) {
+  auto transposed_sizes = std::vector<int64_t>(self.transpose(dim, 0).sizes());
+  auto flatten = [&](const Tensor & t) {
+    return t.transpose(dim, 0).contiguous().view({t.size(dim), -1});
+  };
+  auto unflatten = [&](const Tensor & t) {
+    return t.contiguous().view(transposed_sizes).transpose(dim, 0);
+  };
+
+  // renorm computes the norm over all dimensions except `dim`, which is why
+  // we need the flatten and unflatten business. TODO: simplify this when we
+  // add support for norm over multiple dimensions.
+  auto self_flat = flatten(self);
+  auto grad_flat = flatten(grad);
+  auto norm_flat = self_flat.norm(p, 1, true);
+  auto grad_output = (self_flat * grad_flat).sum(1, true);
+  auto nb = norm_backward(grad_output, self_flat, p, norm_flat, 1, true);
+  auto invnorm = (norm_flat + 1e-7).reciprocal();
+  auto grad_norm = unflatten(maxnorm * invnorm * (grad_flat - invnorm * nb));
+  auto norm = unflatten(norm_flat.expand_as(self_flat));
+
+  // TODO: remove the detach once comparison ops no longer require grad
+  auto mask = Variable(norm < maxnorm).detach();
+  return grad * mask.type_as(grad) + grad_norm * (1 - mask).type_as(grad);
+}
+
 Tensor select_backward_scalar(Tensor grad, const Tensor & input, const Tensor & value) {
   auto grad_data = static_cast<Variable&>(grad).data();
   auto grad_input = zeros_like(input);
@@ -259,6 +285,9 @@ Tensor potrf_backward(Tensor grad, bool upper, Tensor L) {
   std::tie(S, std::ignore) = at::gesv(P + P.t(), L.t());
   std::tie(S, std::ignore) = at::gesv(S.t(), L.t());
   S = phi(S);
+  if (upper) {
+    S = S.t();
+  }
   return S;
 }
 
@@ -594,6 +623,38 @@ Tensor _det_with_svd_backward(const std::vector<torch::autograd::Variable> &grad
   }
   // no zero singular values
   return svd_term + u.mm(sigma.pow(-1).mul_(det.mul(det_grad)).diag()).mm(v.transpose(0, 1));
+}
+
+// Reference:
+// https://people.maths.ox.ac.uk/gilesm/files/NA-08-01.pdf
+// Sec. 2.3.1 Matrix inverse product
+std::tuple<Tensor, Tensor> trtrs_backward(
+    const Tensor & grad_x, const Tensor & grad_m,
+    const Tensor & b, const Tensor & a, const Tensor & x,
+    const bool upper, const bool transpose, const bool unitriangular,
+    std::array<bool, 2> output_mask) {
+  Tensor grad_b, grad_a;
+  if (grad_x.defined()) {
+    grad_b = std::get<0>(grad_x.trtrs(a, upper, !transpose, unitriangular));
+    if (output_mask[1]) {
+      grad_a = transpose ? -x.mm(grad_b.t()) : -grad_b.mm(x.t());
+      if (upper) {
+        grad_a = grad_a.triu((int) unitriangular);
+      } else {
+        grad_a = grad_a.tril(-((int) unitriangular));
+      }
+    }
+  }
+  if (!grad_a.defined()) {
+    grad_a = a.type().zeros({1}).expand_as(a);
+  }
+  if (!grad_b.defined()) {
+    grad_b = b.type().zeros({1}).expand_as(b);
+  }
+  if (output_mask[1] && grad_m.defined()) {
+    grad_a = grad_a.add(grad_m);
+  }
+  return std::tuple<Tensor, Tensor>{grad_b, grad_a};
 }
 
 }

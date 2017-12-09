@@ -122,7 +122,8 @@ _(sub) \
 _(tan) \
 _(trunc) \
 _(zeros) \
-_(exponent)
+_(exponent) \
+_(is_cuda)
 
 enum BuiltinSymbol {
   #define DEFINE_SYMBOL(s) \

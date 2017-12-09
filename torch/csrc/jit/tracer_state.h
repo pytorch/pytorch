@@ -74,6 +74,14 @@ struct TracingState : public std::enable_shared_from_this<TracingState> {
   bool is_complete() const {
     return !is_expired() && graph->stage() == num_stages - 1;
   }
+
+  void push_scope(const std::string& scope_name) {
+    graph->push_scope(scope_name);
+  }
+
+  void pop_scope() {
+    graph->pop_scope();
+  }
 };
 
 struct ValueTracingStateElem {

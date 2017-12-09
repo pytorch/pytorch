@@ -31,7 +31,7 @@ void ToONNX(std::shared_ptr<tracer::TracingState>& state) {
     throw std::logic_error("ToONNX: tracing state is expired");
   }
 
-  auto new_graph = std::make_shared<Graph>();
+  auto new_graph = std::make_shared<Graph>(state->graph->scope_root());
   std::unordered_map<void*, Value*> new_buffer_map;
 
   torch::autograd::SymbolicContext ctx;
@@ -86,6 +86,7 @@ void ToONNX(std::shared_ptr<tracer::TracingState>& state) {
         // Copy over source location information to all nodes created by
         // the symbolic
         outputs[i]->node()->setSourceLocation(node->getSourceLocation());
+        outputs[i]->node()->setScope(node->scope());
         env[old] = outputs[i];
       } else {
         // Null output means that the ONNX op doesn't have outputs corresponding
@@ -208,6 +209,9 @@ void ToONNX(std::shared_ptr<tracer::TracingState>& state) {
     IR_IFM(node, CppOp)
       if (auto fn = std::dynamic_pointer_cast<autograd::HasSymbolic>(value->fn)) {
         auto outputs = fn->symbolic(&ctx, fmap(node->inputs(), envFn), node->getSourceLocation());
+        for (auto& el: outputs) {
+          el->node()->setScope(node->scope());
+        }
         setOutputs(value->name(), node, outputs);
       } else {
         cloneNode(node);

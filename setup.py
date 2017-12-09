@@ -117,6 +117,12 @@ def build_libs(libs):
         build_libs_cmd = ['bash', 'torch/lib/build_libs.sh']
     my_env = os.environ.copy()
     my_env["PYTORCH_PYTHON"] = sys.executable
+    if WITH_NINJA:
+        my_env["CMAKE_GENERATOR"] = '-GNinja'
+        my_env["CMAKE_INSTALL"] = 'ninja install'
+    else:
+        my_env['CMAKE_GENERATOR'] = ''
+        my_env['CMAKE_INSTALL'] = 'make install'
     if WITH_SYSTEM_NCCL:
         my_env["NCCL_ROOT_DIR"] = NCCL_ROOT_DIR
     if WITH_CUDA:
@@ -224,6 +230,10 @@ class develop(setuptools.command.develop.develop):
                         for entry in load(f)]
         with open('compile_commands.json', 'w') as f:
             json.dump(all_commands, f, indent=2)
+        if not WITH_NINJA:
+            print("WARNING: 'develop' is not building C++ code incrementally")
+            print("because ninja is not installed. Run this to enable it:")
+            print(" > pip install ninja")
 
 
 def monkey_patch_THD_link_flags():
@@ -430,12 +440,16 @@ main_sources = [
     "torch/csrc/utils/invalid_arguments.cpp",
     "torch/csrc/utils/object_ptr.cpp",
     "torch/csrc/utils/python_arg_parser.cpp",
+    "torch/csrc/utils/tensor_list.cpp",
+    "torch/csrc/utils/tensor_numpy.cpp",
     "torch/csrc/utils/tuple_parser.cpp",
+    "torch/csrc/utils/tensor_apply.cpp",
     "torch/csrc/allocators.cpp",
     "torch/csrc/serialization.cpp",
     "torch/csrc/jit/init.cpp",
     "torch/csrc/jit/interpreter.cpp",
     "torch/csrc/jit/ir.cpp",
+    "torch/csrc/jit/fusion_compiler.cpp",
     "torch/csrc/jit/python_ir.cpp",
     "torch/csrc/jit/test_jit.cpp",
     "torch/csrc/jit/tracer.cpp",
@@ -554,7 +568,6 @@ if WITH_CUDA:
         "torch/csrc/cuda/utils.cpp",
         "torch/csrc/cuda/expand_utils.cpp",
         "torch/csrc/cuda/serialization.cpp",
-        "torch/csrc/jit/fusion_compiler.cpp",
     ]
     main_sources += split_types("torch/csrc/cuda/Tensor.cpp", ninja_global)
 

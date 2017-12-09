@@ -7,7 +7,11 @@ except ImportError:
     from yaml import Loader
 
 
-def python_num(s):
+def python_scalar(s):
+    if s.lower() == 'true':
+        return True
+    elif s.lower() == 'false':
+        return False
     try:
         return int(s)
     except Exception:
@@ -32,7 +36,7 @@ def parse_arguments(args):
 
         if '=' in name:
             ns = name.split('=', 1)
-            name, default = ns[0], python_num(ns[1])
+            name, default = ns[0], python_scalar(ns[1])
 
         typ = sanitize_types(t)
         assert len(typ) == 1

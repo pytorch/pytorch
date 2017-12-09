@@ -11,6 +11,9 @@
 #include "torch/csrc/utils/python_arg_parser.h"
 #include "torch/csrc/utils/python_numbers.h"
 #include "torch/csrc/utils/python_tuples.h"
+#include "torch/csrc/utils/tensor_apply.h"
+#include "torch/csrc/utils/tensor_list.h"
+#include "torch/csrc/utils/tensor_numpy.h"
 
 #include "python_variable_methods_dispatch.h"
 
@@ -21,6 +24,19 @@ using at::Backend;
 using namespace torch::autograd::utils;
 
 namespace torch { namespace autograd {
+
+static PyObject * THPVariable_apply_(PyObject* self, PyObject* arg)
+{
+  HANDLE_TH_ERRORS
+  auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
+  if (self_.requires_grad()) {
+    throw std::runtime_error(
+        "Can't call apply_() on Variable that requires grad. Use "
+        "var.detach().apply_() instead.");
+  }
+  return THPVariable_Wrap(torch::utils::apply_(self_, arg));
+  END_HANDLE_TH_ERRORS
+}
 
 static Tensor dispatch_clamp(const Tensor & self, Scalar min, Scalar max) {
   AutoNoGIL no_gil;
@@ -189,6 +205,14 @@ static PyObject * THPVariable_copy_(PyObject* self, PyObject* args, PyObject* kw
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject * THPVariable_from_numpy(PyObject* module, PyObject* arg)
+{
+  HANDLE_TH_ERRORS
+  auto data = torch::utils::tensor_from_numpy(arg);
+  return THPVariable_Wrap(make_variable(std::move(data)));
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject * THPVariable_detach(PyObject* self, PyObject* args)
 {
   HANDLE_TH_ERRORS
@@ -235,6 +259,22 @@ static PyObject * THPVariable_integral_scalar(PyObject* self, PyObject* args) {
   } else {
     return wrap(dispatch_to_CLong(self_));
   }
+  END_HANDLE_TH_ERRORS
+}
+
+static Tensor dispatch_invert(const Tensor & self) {
+  AutoNoGIL no_gil;
+  AutoGPU auto_gpu(self);
+  return 1 - self;
+}
+
+static PyObject * THPVariable_invert(PyObject* self, PyObject* args) {
+  HANDLE_TH_ERRORS
+  auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
+  if (self_.type().scalarType() != at::kByte) {
+    throw TypeError("~ (operator.invert) is only implemented on byte tensors");
+  }
+  return THPVariable_Wrap(dispatch_invert(self_));
   END_HANDLE_TH_ERRORS
 }
 
@@ -307,11 +347,78 @@ static PyObject * THPVariable_element_size(PyObject* self, PyObject* args)
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject * THPVariable_numpy(PyObject* self, PyObject* arg)
+{
+  HANDLE_TH_ERRORS
+  auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
+  if (self_.requires_grad()) {
+    throw std::runtime_error(
+        "Can't call numpy() on Variable that requires grad. "
+        "Use var.detach().numpy() instead.");
+  }
+  return torch::utils::tensor_to_numpy(self_.data());
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject * THPVariable_map_(PyObject* self, PyObject* args, PyObject* kwargs)
+{
+  HANDLE_TH_ERRORS
+  static PythonArgParser parser({ "map_(Tensor other, PyObject* callable)" });
+  auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
+  PyObject* parsed_args[2];
+  auto r = parser.parse(args, kwargs, parsed_args);
+  Variable other = r.tensor(0);
+  if (self_.requires_grad() || other.requires_grad()) {
+    throw std::runtime_error(
+        "Can't call map_() on Variable that requires grad. Use "
+        "var.detach().map_() instead.");
+  }
+  return THPVariable_Wrap(torch::utils::map_(self_, other, r.pyobject(1)));
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject * THPVariable_map2_(PyObject* self, PyObject* args, PyObject* kwargs)
+{
+  HANDLE_TH_ERRORS
+  static PythonArgParser parser({ "map2_(Tensor x, Tensor y, PyObject* callable)" });
+  auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
+  PyObject* parsed_args[3];
+  auto r = parser.parse(args, kwargs, parsed_args);
+  Variable x = r.tensor(0);
+  Variable y = r.tensor(1);
+  if (self_.requires_grad() || x.requires_grad() || y.requires_grad()) {
+    throw std::runtime_error(
+        "Can't call map2_() on Variable that requires grad. Use "
+        "var.detach().map2_() instead.");
+  }
+  return THPVariable_Wrap(torch::utils::map2_(self_, x, y, r.pyobject(2)));
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject * THPVariable_storage(PyObject* self, PyObject* arg)
 {
   HANDLE_TH_ERRORS
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
   return createPyObject(*self_.storage());
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject * THPVariable_storage_type(PyObject* self, PyObject* arg)
+{
+  HANDLE_TH_ERRORS
+  auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
+  auto storage = THPObjectPtr(createPyObject(*self_.storage()));
+  auto storage_type = (PyObject*)Py_TYPE(storage);
+  Py_INCREF(storage_type);
+  return storage_type;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject * THPVariable_tolist(PyObject* self, PyObject* args)
+{
+  HANDLE_TH_ERRORS
+  auto self_ = reinterpret_cast<THPVariable*>(self)->cdata;
+  return THPUtils_tensorToList(self_.data());
   END_HANDLE_TH_ERRORS
 }
 
@@ -336,30 +443,38 @@ PyMethodDef variable_methods[] = {
   {"__float__", (PyCFunction)THPVariable_float_scalar, METH_NOARGS, NULL},
   {"__int__", (PyCFunction)THPVariable_integral_scalar, METH_NOARGS, NULL},
   {"__long__", (PyCFunction)THPVariable_integral_scalar, METH_NOARGS, NULL},
+  {"__invert__", (PyCFunction)THPVariable_invert, METH_NOARGS, NULL},
   {"__nonzero__", (PyCFunction)THPVariable_is_nonzero, METH_NOARGS, NULL},
   {"__matmul__", (PyCFunction)THPVariable_matmul, METH_VARARGS | METH_KEYWORDS, NULL},
+  {"apply_", (PyCFunction)THPVariable_apply_, METH_O, NULL},
   {"byte", (PyCFunction)THPVariable_byte, METH_NOARGS, NULL},
   {"char", (PyCFunction)THPVariable_char, METH_NOARGS, NULL},
   {"clamp", (PyCFunction)THPVariable_clamp, METH_VARARGS | METH_KEYWORDS, NULL},
   {"clamp_", (PyCFunction)THPVariable_clamp_, METH_VARARGS | METH_KEYWORDS, NULL},
-  {"cpu", (PyCFunction)THPVariable_cpu, METH_NOARGS, NULL},
-  {"dim", (PyCFunction)THPVariable_dim, METH_NOARGS, NULL},
   {"contiguous", (PyCFunction)THPVariable_contiguous, METH_NOARGS, NULL},
   {"copy_", (PyCFunction)THPVariable_copy_, METH_VARARGS | METH_KEYWORDS, NULL},
+  {"cpu", (PyCFunction)THPVariable_cpu, METH_NOARGS, NULL},
+  {"dim", (PyCFunction)THPVariable_dim, METH_NOARGS, NULL},
   {"detach", (PyCFunction)THPVariable_detach, METH_NOARGS, NULL},
   {"detach_", (PyCFunction)THPVariable_detach_, METH_NOARGS, NULL},
   {"double", (PyCFunction)THPVariable_double, METH_NOARGS, NULL},
   {"element_size", (PyCFunction)THPVariable_element_size, METH_NOARGS, NULL},
   {"float", (PyCFunction)THPVariable_float, METH_NOARGS, NULL},
+  {"from_numpy", (PyCFunction)THPVariable_from_numpy, METH_STATIC | METH_O, NULL},
   {"half", (PyCFunction)THPVariable_half, METH_NOARGS, NULL},
   {"int", (PyCFunction)THPVariable_int, METH_NOARGS, NULL},
   {"long", (PyCFunction)THPVariable_long, METH_NOARGS, NULL},
+  {"map_", (PyCFunction)THPVariable_map_, METH_VARARGS | METH_KEYWORDS, NULL},
+  {"map2_", (PyCFunction)THPVariable_map2_, METH_VARARGS | METH_KEYWORDS, NULL},
   {"ndimension", (PyCFunction)THPVariable_dim, METH_NOARGS, NULL},
   {"nelement", (PyCFunction)THPVariable_numel, METH_NOARGS, NULL},
+  {"numpy", (PyCFunction)THPVariable_numpy, METH_NOARGS, NULL},
   {"short", (PyCFunction)THPVariable_short, METH_NOARGS, NULL},
   {"size", (PyCFunction)THPVariable_size, METH_VARARGS | METH_KEYWORDS, NULL},
   {"storage", (PyCFunction)THPVariable_storage, METH_NOARGS, NULL},
+  {"storage_type", (PyCFunction)THPVariable_storage_type, METH_NOARGS, NULL},
   {"stride", (PyCFunction)THPVariable_stride, METH_VARARGS | METH_KEYWORDS, NULL},
+  {"tolist", (PyCFunction)THPVariable_tolist, METH_NOARGS, NULL},
   ${py_method_defs}
   {NULL}
 };

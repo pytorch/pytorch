@@ -21,7 +21,7 @@ std::unordered_set<NodeKind> broadcasting = {
 };
 
 bool isNopTranspose(const std::vector<int64_t> & perm) {
-  for (size_t i = 0; i < perm.size(); i++)
+  for (int64_t i = 0; i < perm.size(); i++)
     if (perm[i] != i)
       return false;
   return true;
@@ -34,8 +34,8 @@ std::vector<int64_t> composeTransposes(const std::vector<int64_t> & t1,
   JIT_ASSERT(t1.size() == t2.size());
   std::vector<int64_t> ret;
   for (size_t i = 0; i < t1.size(); i++) {
-    JIT_ASSERT(   t1[i]  < t2.size());
-    JIT_ASSERT(t2[t1[i]] < t2.size());
+    JIT_ASSERT(   t1[i]  < int64_t(t2.size()));
+    JIT_ASSERT(t2[t1[i]] < int64_t(t2.size()));
     ret.push_back(t2[t1[i]]);
   }
   return ret;
