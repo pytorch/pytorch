@@ -334,7 +334,7 @@ struct DefCompiler {
       throw ErrorReport(apply) << fname << " expected " << fn.inputs.size()
                                << " values but received " << inputs.size();
     }
-    for (size_t i = 0; i < inputs.size(); i++) {
+    for (size_t i = 0; i < outputs.size(); i++) {
       rename_map[fn.outputs[i]] = outputs[i];
     }
     for (auto& op : fn.net_def->op()) {
