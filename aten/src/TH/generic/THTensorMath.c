@@ -3544,16 +3544,16 @@ real THTensor_(beta_grad_alpha_small)(real x, real alpha, real beta) {
 // Approximate reparameterized gradient of Beta(x,alpha,beta) wrt beta.
 // Assumes x is close to zero.
 real THTensor_(beta_grad_beta_small)(real x, real alpha, real beta) {
-  const real a0 = 1.0 / alpha;
-  const real a1 = 1.0 / (alpha + 1.0);
-  const real a2 = 1.0 / (alpha + 2.0);
-  const real a3 = 1.0 / (alpha + 3.0);
+  const real a0 = 1 / alpha;
+  const real a1 = 1 / (alpha + 1);
+  const real a2 = 1 / (alpha + 2);
+  const real a3 = 1 / (alpha + 3);
   // Let pdf = pow(x,alpha-1) * pow(1-x,beta-1) / Beta(alpha,beta).
   // Let const = Beta(alpha,beta) / pow(x, alpha). Then
   const real one_over_const_pdf = x / TH_MATH_NAME(pow)(1 - x, beta - 1);
   const real const_cdf = +a0 + (beta - 1) * x * (
-                         -a1 + (beta - 2.0) * x / 2 * (
-                         +a2 + (beta - 3.0) * x / 3 * (
+                         -a1 + (beta - 2) * x / 2 * (
+                         +a2 + (beta - 3) * x / 3 * (
                          -a3)));
   const real const_cdf_beta = (THTensor_(digamma_one)(alpha + beta) -
                                THTensor_(digamma_one)(beta)) * const_cdf
@@ -3614,8 +3614,8 @@ real THTensor_(dirichlet_grad_one)(real x, real alpha, real total) {
   const real b = TH_MATH_NAME(log)(total);
   const real pow_u[4] = {1, u, u * u, u * u * u};
   const real pow_a[4] = {1, a, a * a, a * a * a};
-  accreal p = 0.0;
-  accreal q = 0.0;
+  real p = 0.0;
+  real q = 0.0;
   for (int i = 0; i < 3; ++i) {
     for (int j = 0; j < 3; ++j) {
       const real ua = pow_u[i] * pow_a[j];
@@ -3624,7 +3624,8 @@ real THTensor_(dirichlet_grad_one)(real x, real alpha, real total) {
     }
   }
   if(q < 1e-3f) q = 1e-3f;
-  const real baseline = x * (1 - x) * (THTensor_(digamma_one)(total) - THTensor_(digamma_one)(alpha)) / beta;
+  const real baseline = x * (1 - x) * (THTensor_(digamma_one)(total) -
+                                       THTensor_(digamma_one)(alpha)) / beta;
   return p / q * baseline;
 }
 
