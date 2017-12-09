@@ -33,7 +33,11 @@ function(custom_protobuf_find)
   if(EXISTS "${CAFFE2_CUSTOM_PROTOC_EXECUTABLE}")
     set(PROTOBUF_PROTOC_EXECUTABLE ${CAFFE2_CUSTOM_PROTOC_EXECUTABLE} PARENT_SCOPE)
   else()
-    set(PROTOBUF_PROTOC_EXECUTABLE $<TARGET_FILE:protoc> PARENT_SCOPE)
+    # We cannot use a generator expression to refer to protoc,
+    # because we end up using this value in a DEPENDS clause in
+    # add_custom_command. Support for this was added in CMake v3.0.
+    # See bbffccca42d4f209220e833e1a86e735a5c83339 (v3.0.0-rc1-350-gbbffccc).
+    set(PROTOBUF_PROTOC_EXECUTABLE "${PROJECT_BINARY_DIR}/bin/protoc" PARENT_SCOPE)
   endif()
   set(Protobuf_FOUND TRUE PARENT_SCOPE)
 endfunction()
