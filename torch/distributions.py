@@ -41,16 +41,30 @@ class Distribution(object):
     r"""
     Distribution is the abstract base class for probability distributions.
     """
-    reparameterized = False
+    has_sample_grad = False
 
-    def sample(self, requires_grad=False):
+    def sample(self):
         """
         Generates a single sample or single batch of samples if the distribution
         parameters are batched.
         """
+        return self.rsample().detach()
+
+    def rsample(self):
+        """
+        Generates a single reparameterized sample or single batch of samples if the distribution
+        parameters are batched.
+        """
         raise NotImplementedError
 
-    def sample_n(self, n, requires_grad=False):
+    def sample_n(self, n):
+        """
+        Generates n reparameterized samples or n batches of samples if the distribution parameters
+        are batched.
+        """
+        return self.rsample_n(n).detach()
+
+    def rsample_n(self, n):
         """
         Generates n samples or n batches of samples if the distribution parameters
         are batched.
@@ -89,14 +103,10 @@ class Bernoulli(Distribution):
     def __init__(self, probs):
         self.probs = probs
 
-    def sample(self, requires_grad=False):
-        if requires_grad:
-            raise NotImplementedError("Can't sample from non-reparameterized Bernoulli with requires_grad=True")
+    def sample(self):
         return torch.bernoulli(self.probs)
 
-    def sample_n(self, n, requires_grad=False):
-        if requires_grad:
-            raise NotImplementedError("Can't sample from non-reparameterized Bernoulli with requires_grad=True")
+    def sample_n(self, n):
         return torch.bernoulli(self.probs.expand(n, *self.probs.size()))
 
     def log_prob(self, value):
@@ -140,14 +150,10 @@ class Categorical(Distribution):
             raise ValueError("probs must be 1D or 2D")
         self.probs = probs
 
-    def sample(self, requires_grad=False):
-        if requires_grad:
-            raise NotImplementedError("Can't sample from non-reparameterized Categorical with requires_grad=True")
+    def sample(self):
         return torch.multinomial(self.probs, 1, True).squeeze(-1)
 
-    def sample_n(self, n, requires_grad=False):
-        if requires_grad:
-            raise NotImplementedError("Can't sample from non-reparameterized Categorical with requires_grad=True")
+    def sample_n(self, n):
         if n == 1:
             return self.sample().expand(1, 1)
         else:
@@ -179,20 +185,29 @@ class Normal(Distribution):
         std (float or Tensor or Variable): standard deviation of the distribution
     """
 
-    reparameterized = True
+    has_sample_grad = True
 
     def __init__(self, mean, std):
         self.mean = mean
         self.std = std
 
-    def sample(self, requires_grad=False):
-        if requires_grad:
-            eps = torch.normal(torch.zeros_like(self.mean), torch.ones_like(self.std))
-            return self.mean + self.std * eps
-        else: 
-            return torch.normal(self.mean, self.std)
+    def sample(self):
+    	return torch.normal(self.mean, self.std)
 
-    def sample_n(self, n, requires_grad=False):
+    def rsample(self):
+        eps = torch.normal(torch.zeros_like(self.mean), torch.ones_like(self.std))
+        return self.mean + self.std * eps
+
+    def sample_n(self, n):
+        # cleanly expand float or Tensor or Variable parameters
+        def expand(v):
+            if isinstance(v, Number):
+                return torch.Tensor([v]).expand(n, 1)
+            else:
+                return v.expand(n, *v.size())
+        return torch.normal(expand(self.mean), expand(self.std))
+
+    def rsample_n(self, n):
         # cleanly expand float or Tensor or Variable parameters
         def expand(v):
             if isinstance(v, Number):
@@ -201,11 +216,8 @@ class Normal(Distribution):
                 return v.expand(n, *v.size())
         expanded_mean = expand(self.mean)
         expanded_std = expand(self.std)
-        if requires_grad:
-            eps = torch.normal(torch.zeros_like(expanded_mean), torch.ones_like(expanded_std))
-            return expanded_mean + expanded_std * eps
-        else:
-            return torch.normal(expanded_mean, expanded_std)
+        eps = torch.normal(torch.zeros_like(expanded_mean), torch.ones_like(expanded_std))
+        return expanded_mean + expanded_std * eps
 
     def log_prob(self, value):
         # compute the variance
