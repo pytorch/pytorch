@@ -355,6 +355,50 @@ def load_derivatives(path, declarations_by_signature, declarations_by_name):
         """Return the index of the first element of xs matching pred."""
         return next((i, x) for i, x in enumerate(xs) if pred(x))
 
+    def is_nn_fwd(defn_name, declarations_by_name):
+        """Return True if the definition is of an NN, non-double
+           backward function, False otherwise"""
+
+        if len(declarations_by_name[defn_name]) == 0:
+            return False
+        declaration = declarations_by_name[defn_name][0]
+        base_name = defn_name if not declaration['inplace'] else defn_name[:-1]
+        fwd_name = base_name + '_forward'
+        if declaration['mode'] != 'NN' or fwd_name not in declarations_by_name:
+            return False
+        return True
+
+    def preprocess_nn_function(defn_name, declarations_by_name):
+        """Set up declaration and derivative information for NN,
+           non-double backward functions"""
+
+        declaration = declarations_by_name[defn_name][0]
+        base_name = defn_name if not declaration['inplace'] else defn_name[:-1]
+        fwd_name = base_name + '_forward'
+
+        if declaration['inplace']:
+            declaration['base_name'] = fwd_name + '_'
+            declaration['derivative'] = declarations_by_name[base_name][0]['derivative']
+            return None
+
+        assert len(declarations_by_name[fwd_name]) == 1
+
+        declaration['base_name'] = fwd_name
+        fwd = declarations_by_name[fwd_name][0]
+
+        derivatives = []
+        for raw_names, formula in defn.items():
+            var_names = split_names(raw_names)
+            output_indices = list(range(len(var_names)))
+            derivatives.append(create_derivative(fwd, formula, output_indices, var_names))
+
+        buffers = declaration['buffers']
+
+        func = create_autograd_function(defn_name, derivatives, len(output_indices), buffers)
+        declaration['derivative'] = func
+
+        return func
+
     # Parse each entry from derivatives.yaml
     autograd_functions = []
     for defn in definitions:
@@ -374,14 +418,11 @@ def load_derivatives(path, declarations_by_signature, declarations_by_name):
                                .format(defn_name))
         signature = '{}({})'.format(defn_name, ', '.join(param_types))
 
-        if defn_name in declarations_by_name and len(declarations_by_name[defn_name][0]) > 0:
-            declaration = declarations_by_name[defn_name][0]
-            base_name = defn_name if defn_name[-1] != '_' else defn_name[:-1]
-            if declaration['mode'] == 'NN' and base_name + '_backward' in declarations_by_name:
-                func = preprocess_nn_functions(declaration, declarations_by_name)
-                if func is not None:
-                    autograd_functions.append(func)
-                continue
+        if is_nn_fwd(defn_name, declarations_by_name):
+            func = preprocess_nn_function(defn_name, declarations_by_name)
+            if func is not None:
+                autograd_functions.append(func)
+            continue
 
         declarations = declarations_by_signature[signature]
         if len(declarations) == 0:
@@ -465,74 +506,6 @@ def ensure_unique_names(autograd_functions):
         if len(overloads) > 1:
             for i, func in enumerate(overloads):
                 func['op'] += str(i)
-
-
-def preprocess_nn_functions(declaration, declarations_by_name):
-
-    name = declaration['name']
-    base_name = name[:-1] if declaration['inplace'] else name
-    if name == 'batch_norm' or 'conv3d' in name:
-        return None
-
-    fwd_name = base_name + '_forward'
-    bwd_name = base_name + '_backward'
-
-    # NB: This logic means we'll hit the logic below only for
-    # backwards, and not double-backwards.
-    if fwd_name not in declarations_by_name or bwd_name not in declarations_by_name:
-        return None
-
-    if declaration['inplace']:
-        declaration['base_name'] = fwd_name + '_'
-        declaration['derivative'] = declarations_by_name[base_name][0]['derivative']
-        return None
-
-    assert len(declarations_by_name[fwd_name]) == 1
-    assert len(declarations_by_name[bwd_name]) == 1
-
-    declaration['base_name'] = fwd_name
-    fwd = declarations_by_name[fwd_name][0]
-    bwd = declarations_by_name[bwd_name][0]
-
-    def actual(arg):
-        name = arg['name']
-        # To avoid confusion, we bind the mask in backwards
-        # to the name 'grad_input_mask', which is not the same
-        # as the argument naming convention in NN, which is
-        # 'output_mask'.  When we are autogenerating NN
-        # entries, we want to pass in 'grad_input_mask'
-        # as 'output_mask'; thus the substitution here.
-        if name == 'output_mask':
-            return 'grad_input_mask'
-        return name
-
-    actuals = [actual(arg) for arg in bwd['arguments']]
-    formula = '{}({})'.format(bwd_name, ', '.join(actuals))
-    formula = formula.replace('grad_output', 'grad')
-    # NB: This relies on the fact that NN autogenerated
-    # derivatives only ever can take a single 'grad' argument,
-    # and not make use of grads[0], grads[1], etc.
-    if not re.search(IDENT_REGEX.format('grad'), formula):
-        formula = '({}).mul_(grad)'.format(formula)
-
-    # we are computing the derivatives w.r.t these variables
-    var_names = []
-    for ret in bwd['returns']:
-        assert ret['name'].startswith('grad_')
-        var_names.append(ret['name'][5:].replace('input', 'self'))  # remove grad_ prefix
-    output_indices = list(range(len(var_names)))
-    derivatives = [create_derivative(fwd, formula, output_indices, var_names)]
-
-    # find arguments to foo_forward() call which don't exist in foo()
-    # these are buffers which have to be saved for the backwards call
-    args_by_name = {arg['name']: arg for arg in declaration['arguments']}
-    buffers = [arg['name'] for arg in fwd['arguments']
-               if arg['name'] not in args_by_name]
-
-    func = create_autograd_function(name, derivatives, len(output_indices), buffers)
-    declaration['derivative'] = func
-
-    return func
 
 
 def uses_grad(func):
