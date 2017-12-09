@@ -674,13 +674,13 @@
   self: hardtanh_backward(grad, self, min_val, max_val)
 
 - name: hardtanh_(Tensor self, Scalar min_val, Scalar max_val)
-  self: hardtanh_backward(grad, self, min_val, max_val)
+  self: hardtanh_backward(grad, output, min_val, max_val)
 
 - name: leaky_relu(Tensor self, Scalar negative_slope)
   self: leaky_relu_backward(grad, self, negative_slope)
 
 - name: leaky_relu_(Tensor self, Scalar negative_slope)
-  self: leaky_relu_backward(grad, self, negative_slope)
+  self: leaky_relu_backward(grad, output, negative_slope)
 
 - name: log_sigmoid(Tensor self)
   self: log_sigmoid_backward(grad, self, buffer)
@@ -695,7 +695,7 @@
   self: rrelu_backward(grad, self, lower, upper, training, noise)
 
 - name: rrelu_(Tensor self, Scalar lower, Scalar upper, bool training, Generator generator)
-  self: rrelu_backward(grad, self, lower, upper, training, noise)
+  self: rrelu_backward(grad, output, lower, upper, training, noise)
 
 - name: softmax(Tensor self, int64_t dim)
   self: softmax_backward(grad, self, dim, output)
@@ -710,7 +710,7 @@
   self: threshold_backward(grad, self, threshold, value)
 
 - name: threshold_(Tensor self, Scalar threshold, Scalar value)
-  self: threshold_backward(grad, self, threshold, value)
+  self: threshold_backward(grad, output, threshold, value)
 
 - name: adaptive_max_pool2d(Tensor self, IntList output_size)
   self: adaptive_max_pool2d_backward(grad, self, indices)
@@ -745,7 +745,7 @@
   self, weight, bias: conv2d_backward(grad, self, weight, kernel_size, stride, padding, finput, fgrad_input, grad_input_mask)
 
 - name: conv_depthwise2d(Tensor self, Tensor weight, IntList kernel_size, Tensor bias, IntList stride, IntList padding, IntList dilation)
-  self, weight, bias: conv_depthwise2d_backward(grad, self, weight, kernel_size, stride, padding, dilation, grad_input_mask)
+  self, weight: conv_depthwise2d_backward(grad, self, weight, kernel_size, stride, padding, dilation, grad_input_mask)
 
 #- name: conv3d(Tensor self, Tensor weight, IntList kernel_size, Tensor bias, IntList stride, IntList padding)
 
