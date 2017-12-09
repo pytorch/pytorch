@@ -304,11 +304,6 @@ class Variable(_C._VariableBase):
     def bernoulli(self):
         return Variable(torch.bernoulli(self.data))
 
-    def standard_gamma(self, grad=None):
-        if grad is None:
-            return Variable(torch.standard_gamma(self.data))
-        return Variable(torch.standard_gamma(self.data, grad), requires_grad=self.requires_grad)
-
     def __rsub__(self, other):
         return -self + other
 

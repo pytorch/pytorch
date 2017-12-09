@@ -116,14 +116,6 @@ void THTensor_(standard_gamma)(THTensor *self, THGenerator *gen, THTensor *alpha
   });
 }
 
-void THTensor_(standard_gamma_grad)(THTensor *self, THTensor *x, THTensor *alpha)
-{
-  THTensor_(resizeAs)(self, x);
-  TH_TENSOR_APPLY3(real, self, real, x, real, alpha, {
-    *self_data = (real)THRandom_standard_gamma_grad(*x_data, *alpha_data);
-  });
-}
-
 void THTensor_(cauchy)(THTensor *self, THGenerator *_generator, double median, double sigma)
 {
   TH_TENSOR_APPLY(real, self, *self_data = (real)THRandom_cauchy(_generator, median, sigma););
