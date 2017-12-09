@@ -308,8 +308,6 @@ class Dirichlet(Distribution):
     def _sample(self, alpha):
         if not isinstance(alpha, Variable):
             return _dirichlet_sample_nograd(alpha)
-        if not alpha.requires_grad:
-            return Variable(_dirichlet_sample_nograd(alpha.data))
         return _Dirichlet.apply(alpha)
 
     def sample(self):
@@ -319,9 +317,9 @@ class Dirichlet(Distribution):
         return self._sample(_expand_n(self.alpha, n))
 
     def log_prob(self, value):
-        return ((torch.log(value) * (self.alpha - 1.0)).sum(-1)
-                + torch.lgamma(self.alpha.sum(-1))
-                - torch.lgamma(self.alpha).sum(-1))
+        return ((torch.log(value) * (self.alpha - 1.0)).sum(-1) +
+                torch.lgamma(self.alpha.sum(-1)) -
+                torch.lgamma(self.alpha).sum(-1))
 
 
 class Beta(Distribution):
