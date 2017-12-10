@@ -75,7 +75,7 @@ class TestWorkspace(unittest.TestCase):
         workspace.FeedBlob("X", X)
         workspace.FeedBlob("W", W)
         flops, _ = workspace.GetOperatorCost(op.SerializeToString(), ["X", "W"])
-        self.assertEqual(flops, 648)
+        self.assertEqual(flops, 1152)
 
     def testRunNetOnce(self):
         self.assertEqual(
