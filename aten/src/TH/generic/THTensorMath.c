@@ -20,16 +20,6 @@
 #define PRAGMA(P) __pragma(P)
 #endif
 
-#define TH_CHECK_SAME_SIZE(TENSOR1, TENSOR2) \
-{ \
-  if(!THTensor_(isSameSizeAs)(TENSOR1, TENSOR2)) { \
-    THDescBuff T1buff = _THSizeDesc(TENSOR1->size, TENSOR1->nDimension); \
-    THDescBuff T2buff = _THSizeDesc(TENSOR2->size, TENSOR2->nDimension); \
-    THError("inconsistent tensor size, expected %s %s and %s %s to have the same size", \
-            #TENSOR1, T1buff.str, #TENSOR2, T2buff.str); \
-  } \
-}
-
 #define TH_TENSOR_APPLY_CONTIG(TYPE, TENSOR, CODE) \
 { \
   ptrdiff_t TH_TENSOR_size = THTensor_(nElement)(TENSOR); \
@@ -109,6 +99,16 @@
   CODE \
 }
 #endif
+
+#define TH_CHECK_SAME_SIZE(TENSOR1, TENSOR2) \
+{ \
+  if(!THTensor_(isSameSizeAs)(TENSOR1, TENSOR2)) { \
+    THDescBuff T1buff = _THSizeDesc(TENSOR1->size, TENSOR1->nDimension); \
+    THDescBuff T2buff = _THSizeDesc(TENSOR2->size, TENSOR2->nDimension); \
+    THError("inconsistent tensor size, expected %s %s and %s %s to have the same size", \
+            #TENSOR1, T1buff.str, #TENSOR2, T2buff.str); \
+  } \
+}
 
 void THTensor_(fill)(THTensor *r_, real value)
 {
@@ -3466,7 +3466,7 @@ inline real THTensor_(digamma_one)(real x) {
 /** Computes the reparameterized gradient -(d/dalpha cdf(x;alpha)) / pdf(x;alpha)
     for random number x drawn from a standard Gamma distribution Gamma(alpha).
 */
-real THTensor_(standard_gamma_grad_one)(real x, real alpha) {
+static inline real THTensor_(standard_gamma_grad_one)(real x, real alpha) {
   // Use an asymptotic approximation for small x.
   if (x < 0.2f) {
     const real a0 = 1 / alpha;
@@ -3516,7 +3516,7 @@ void THTensor_(standard_gamma_grad)(THTensor *self, THTensor *x, THTensor *alpha
 
 // Approximate reparameterized gradient of Beta(x,alpha,beta) wrt alpha.
 // Assumes x is close to zero.
-real THTensor_(beta_grad_alpha_small)(real x, real alpha, real beta) {
+static inline real THTensor_(beta_grad_alpha_small)(real x, real alpha, real beta) {
   const real b1 = beta - 1;
   const real b2 = beta - 2;
   const real b3 = beta - 3;
@@ -3543,7 +3543,7 @@ real THTensor_(beta_grad_alpha_small)(real x, real alpha, real beta) {
 
 // Approximate reparameterized gradient of Beta(x,alpha,beta) wrt beta.
 // Assumes x is close to zero.
-real THTensor_(beta_grad_beta_small)(real x, real alpha, real beta) {
+static inline real THTensor_(beta_grad_beta_small)(real x, real alpha, real beta) {
   const real a0 = 1 / alpha;
   const real a1 = 1 / (alpha + 1);
   const real a2 = 1 / (alpha + 2);
@@ -3568,7 +3568,7 @@ real THTensor_(beta_grad_beta_small)(real x, real alpha, real beta) {
 // Computes the reparameterized gradient -(d/dalpha cdf(x;alphas)) / pdf(x;alphas)
 // for random number x drawn from a Dirichlet distribution Dirichlet(alphas).
 // Total is the sum of all alphas.
-real THTensor_(dirichlet_grad_one)(real x, real alpha, real total) {
+static inline real THTensor_(dirichlet_grad_one)(real x, real alpha, real total) {
   const real beta = total - alpha;
 
   // Use an asymptotic approximation for x close to 0.
@@ -3588,7 +3588,7 @@ real THTensor_(dirichlet_grad_one)(real x, real alpha, real total) {
     return x * (1 - x) * (1 / alpha - TH_MATH_NAME(log)(logit / Logit) / (2 * Logit * total));
   }
 
-  // Use a rational correction to an analytic baseline.
+  // Use a rational correction to an analytic approximation.
   static const real c[2][3][3][3] = {
     {{{0.9725276563, -0.0509239565, 1.625070847e-06},
       {0.03797015233, 0.007409446855, -0.0008465634691},
@@ -3624,9 +3624,9 @@ real THTensor_(dirichlet_grad_one)(real x, real alpha, real total) {
     }
   }
   if(q < 1e-3f) q = 1e-3f;
-  const real baseline = x * (1 - x) * (THTensor_(digamma_one)(total) -
-                                       THTensor_(digamma_one)(alpha)) / beta;
-  return p / q * baseline;
+  const real approx = x * (1 - x) * (THTensor_(digamma_one)(total) -
+                                     THTensor_(digamma_one)(alpha)) / beta;
+  return p / q * approx;
 }
 
 void THTensor_(dirichlet_grad)(THTensor *self, THTensor *x, THTensor *alpha, THTensor *total)
@@ -3634,11 +3634,8 @@ void THTensor_(dirichlet_grad)(THTensor *self, THTensor *x, THTensor *alpha, THT
   x = THTensor_(newContiguous)(x);
   alpha = THTensor_(newContiguous)(alpha);
   total = THTensor_(newContiguous)(total);
-  // FIXME these lines cause a linker error:
-  //   Undefined symbols for architecture x86_64:
-  //   "_TH_CHECK_SAME_SIZE", referenced from: ...
-  // TH_CHECK_SAME_SIZE(alpha, x);
-  // TH_CHECK_SAME_SIZE(total, x);
+  TH_CHECK_SAME_SIZE(alpha, x);
+  TH_CHECK_SAME_SIZE(total, x);
   THTensor_(resizeAs)(self, x);
   THTensor* grad = THTensor_(newContiguous)(self);
 
@@ -3655,7 +3652,6 @@ void THTensor_(dirichlet_grad)(THTensor *self, THTensor *x, THTensor *alpha, THT
 
   THTensor_(freeCopyTo)(grad, self);
 }
-
 
 #undef TH_MATH_NAME
 #endif /* floating point only part */
