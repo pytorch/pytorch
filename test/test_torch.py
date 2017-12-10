@@ -3875,22 +3875,21 @@ class TestTorch(TestCase):
     def test_repeat(self):
 
         initial_shape = (8, 4)
+        tensor = torch.rand(*initial_shape)
 
-        for tensor in (torch.rand(*initial_shape),
-                       torch.from_numpy(np.random.random(initial_shape))):
+        size = (3, 1, 1)
+        torchSize = torch.Size(size)
+        target = [3, 8, 4]
+        self.assertEqual(tensor.repeat(*size).size(), target, 'Error in repeat')
+        self.assertEqual(tensor.repeat(torchSize).size(), target,
+                         'Error in repeat using LongStorage')
+        result = tensor.repeat(*size)
+        self.assertEqual(result.size(), target, 'Error in repeat using result')
+        result = tensor.repeat(torchSize)
+        self.assertEqual(result.size(), target, 'Error in repeat using result and LongStorage')
+        self.assertEqual(result.mean(0).view(8, 4), tensor, 'Error in repeat (not equal)')
 
-            size = (3, 1, 1)
-            torchSize = torch.Size(size)
-            target = [3, 8, 4]
-            self.assertEqual(tensor.repeat(*size).size(), target, 'Error in repeat')
-            self.assertEqual(tensor.repeat(torchSize).size(), target,
-                             'Error in repeat using LongStorage')
-            result = tensor.repeat(*size)
-            self.assertEqual(result.size(), target, 'Error in repeat using result')
-            result = tensor.repeat(torchSize)
-            self.assertEqual(result.size(), target, 'Error in repeat using result and LongStorage')
-            self.assertEqual(result.mean(0).view(8, 4), tensor, 'Error in repeat (not equal)')
-
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_repeat_tile(self):
 
         initial_shape = (8, 4)
@@ -3910,8 +3909,7 @@ class TestTorch(TestCase):
             return out
 
         for repeat in repeats:
-            for tensor in (torch.rand(*initial_shape),
-                           torch.from_numpy(np.random.random(initial_shape)),
+            for tensor in (torch.from_numpy(np.random.random(initial_shape)),
                            torch.from_numpy(_generate_noncontiguous_input()),):
 
                 self.assertEqual(tensor.repeat(*repeat).numpy(),
