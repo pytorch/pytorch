@@ -3456,7 +3456,7 @@ inline real THTensor_(digamma_one)(real x) {
 /** Computes the reparameterized gradient -(d/dalpha cdf(x;alpha)) / pdf(x;alpha)
     for random number x drawn from a standard Gamma distribution Gamma(alpha).
 */
-real THTensor_(standard_gamma_grad_one)(real x, real alpha) {
+static inline real THTensor_(standard_gamma_grad_one)(real x, real alpha) {
   // Use an asymptotic approximation for small x.
   if (x < 0.2f) {
     const real a0 = 1 / alpha;
