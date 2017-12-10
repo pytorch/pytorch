@@ -204,6 +204,10 @@ class TestAdagrad(hu.HypothesisTestCase):
             gc, op, [param_i, momentum_i, indices, grad, lr], ref_sparse
         )
 
+    # Suppress filter_too_much health check.
+    # Reproduce by commenting @settings and uncommenting @seed.
+    # @seed(302934307671667531413257853548643485645)
+    @settings(suppress_health_check=[HealthCheck.filter_too_much])
     @given(inputs=hu.tensors(n=2),
            lr=st.floats(min_value=0.01, max_value=0.99,
                         allow_nan=False, allow_infinity=False),
