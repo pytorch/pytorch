@@ -3499,7 +3499,7 @@ static inline real THTensor_(standard_gamma_grad_one)(real x, real alpha) {
   };
   real coef_v[8];
   for (int i = 0; i < 8; ++ i) {
-      coef_v[i] = coef_uv[0][i] + u * (coef_uv[1][i] + u * coef_uv[2][i]);
+    coef_v[i] = coef_uv[0][i] + u * (coef_uv[1][i] + u * coef_uv[2][i]);
   }
   const real p = coef_v[0] + v * (coef_v[1] + v * (coef_v[2] + v * coef_v[3]));
   const real q = coef_v[4] + v * (coef_v[5] + v * (coef_v[6] + v * coef_v[7]));

@@ -2192,6 +2192,34 @@ class TestNN(NNTestCase):
 
                 hx.sum().backward()
 
+    def test_RNN_cell_no_broadcasting(self):
+        def test(cell_module, input, hx, input_size, hidden_size):
+            cell = cell_module(input_size, hidden_size)
+            self.assertRaises(RuntimeError, lambda: cell(input, hx))
+
+        def test_all(hidden_size, bad_hx, good_hx, input_size, input):
+            test(nn.RNNCell, input, bad_hx, input_size, hidden_size)
+            test(nn.GRUCell, input, bad_hx, input_size, hidden_size)
+            test(nn.LSTMCell, input, (bad_hx, good_hx), input_size, hidden_size)
+            test(nn.LSTMCell, input, (good_hx, bad_hx), input_size, hidden_size)
+
+        hidden_size = 20
+        input_size = 10
+        input = Variable(torch.randn(3, input_size))
+        bad_hx = Variable(torch.randn(1, hidden_size))
+        good_hx = Variable(torch.randn(3, hidden_size))
+
+        # Test hidden/input batch size broadcasting
+        test_all(hidden_size, bad_hx, good_hx, input_size, input)
+
+        # Test hx's hidden_size vs module's hidden_size broadcasting
+        bad_hx = Variable(torch.randn(3, 1))
+        test_all(hidden_size, bad_hx, good_hx, input_size, input)
+
+        # Test input's input_size vs module's input_size broadcasting
+        bad_input = Variable(torch.randn(3, 1))
+        test_all(hidden_size, good_hx, good_hx, input_size, bad_input)
+
     def test_invalid_dropout_p(self):
         v = Variable(torch.ones(1))
         self.assertRaises(ValueError, lambda: nn.Dropout(-0.1))

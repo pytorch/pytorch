@@ -457,6 +457,23 @@ class RNNCellBase(Module):
         s += ')'
         return s.format(name=self.__class__.__name__, **self.__dict__)
 
+    def check_forward_input(self, input):
+        if input.size(1) != self.input_size:
+            raise RuntimeError(
+                "input has inconsistent input_size: got {}, expected {}".format(
+                    input.size(1), self.input_size))
+
+    def check_forward_hidden(self, input, hx, hidden_label=''):
+        if input.size(0) != hx.size(0):
+            raise RuntimeError(
+                "Input batch size {} doesn't match hidden{} batch size {}".format(
+                    input.size(0), hidden_label, hx.size(0)))
+
+        if hx.size(1) != self.hidden_size:
+            raise RuntimeError(
+                "hidden{} has inconsistent hidden_size: got {}, expected {}".format(
+                    hidden_label, input.size(1), self.input_size))
+
 
 class RNNCell(RNNCellBase):
     r"""An Elman RNN cell with tanh or ReLU non-linearity.
@@ -524,6 +541,8 @@ class RNNCell(RNNCellBase):
             weight.data.uniform_(-stdv, stdv)
 
     def forward(self, input, hx):
+        self.check_forward_input(input)
+        self.check_forward_hidden(input, hx)
         if self.nonlinearity == "tanh":
             func = self._backend.RNNTanhCell
         elif self.nonlinearity == "relu":
@@ -615,6 +634,9 @@ class LSTMCell(RNNCellBase):
             weight.data.uniform_(-stdv, stdv)
 
     def forward(self, input, hx):
+        self.check_forward_input(input)
+        self.check_forward_hidden(input, hx[0], '[0]')
+        self.check_forward_hidden(input, hx[1], '[1]')
         return self._backend.LSTMCell(
             input, hx,
             self.weight_ih, self.weight_hh,
@@ -691,6 +713,8 @@ class GRUCell(RNNCellBase):
             weight.data.uniform_(-stdv, stdv)
 
     def forward(self, input, hx):
+        self.check_forward_input(input)
+        self.check_forward_hidden(input, hx)
         return self._backend.GRUCell(
             input, hx,
             self.weight_ih, self.weight_hh,
