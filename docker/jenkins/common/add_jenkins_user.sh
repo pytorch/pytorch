@@ -2,9 +2,6 @@
 
 set -ex
 
-JENKINS_UID=$1
-JENKINS_GID=$2
-
 # Mirror jenkins user in container
 echo "jenkins:x:$JENKINS_UID:$JENKINS_GID::/var/lib/jenkins:" >> /etc/passwd
 echo "jenkins:x:$JENKINS_GID:" >> /etc/group

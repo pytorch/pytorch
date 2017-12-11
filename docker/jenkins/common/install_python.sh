@@ -7,25 +7,75 @@ if [ -z "$PYTHON_VERSION" ]; then
   exit 1
 fi
 
-apt-get update
-case "$PYTHON_VERSION" in
-  2*)
-    apt-get install -y --no-install-recommends \
-            python-dev \
-            python-setuptools
-    PYTHON=python2
-  ;;
-  3*)
-    apt-get install -y --no-install-recommends \
-            python3-dev \
-            python3-setuptools
-    PYTHON=python3
-  ;;
-  *)
-    echo "Invalid PYTHON_VERSION..."
+install_ubuntu() {
+  apt-get update
+
+  case "$PYTHON_VERSION" in
+    2*)
+      apt-get install -y --no-install-recommends \
+              python-dev \
+              python-setuptools
+      PYTHON=python2
+      ;;
+    3*)
+      apt-get install -y --no-install-recommends \
+              python3-dev \
+              python3-setuptools
+      PYTHON=python3
+      ;;
+    *)
+      echo "Invalid PYTHON_VERSION..."
+      exit 1
+      ;;
+  esac
+
+  # Clean up
+  apt-get autoclean && apt-get clean
+  rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
+}
+
+install_centos() {
+  source /etc/os-release
+  if [ "$ID" != "centos" ]; then
+    echo "Unknown ID: $ID"
     exit 1
-  ;;
-esac
+  fi
+
+  case "$PYTHON_VERSION" in
+    2*)
+      yum install -y \
+          python-devel \
+          python-setuptools
+      PYTHON=python2
+      ;;
+    3*)
+      yum install -y \
+          python34-devel \
+          python34-setuptools
+      PYTHON=python3
+      ;;
+    *)
+      echo "Invalid PYTHON_VERSION..."
+      exit 1
+      ;;
+  esac
+
+  # Cleanup
+  yum clean all
+  rm -rf /var/cache/yum
+  rm -rf /var/lib/yum/yumdb
+  rm -rf /var/lib/yum/history
+}
+
+# Install Python packages depending on the base OS
+if [ -f /etc/lsb-release ]; then
+  install_ubuntu
+elif [ -f /etc/os-release ]; then
+  install_centos
+else
+  echo "Unable to determine OS..."
+  exit 1
+fi
 
 # Install pip from source.
 # The python-pip package on Ubuntu Trusty is old

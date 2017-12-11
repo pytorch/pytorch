@@ -1,7 +1,7 @@
-ARG UBUNTU_VERSION
+ARG CENTOS_VERSION
 ARG CUDA_VERSION
 ARG CUDNN_VERSION
-FROM nvidia/cuda:${CUDA_VERSION}-cudnn${CUDNN_VERSION}-devel-ubuntu${UBUNTU_VERSION}
+FROM nvidia/cuda:${CUDA_VERSION}-cudnn${CUDNN_VERSION}-devel-centos${CENTOS_VERSION}
 
 # Install required packages to build Caffe2
 ARG EC2
@@ -22,7 +22,7 @@ ARG JENKINS
 ARG JENKINS_UID
 ARG JENKINS_GID
 ADD ./add_jenkins_user.sh add_jenkins_user.sh
-RUN if [ -n "${JENKINS}" ]; then bash ./add_jenkins_user.sh ${JENKINS_UID} ${JENKINS_GID}; fi
+RUN if [ -n "${JENKINS}" ]; then bash ./add_jenkins_user.sh; fi
 RUN rm add_jenkins_user.sh
 
 # Include BUILD_ENVIRONMENT environment variable in image
