@@ -32,8 +32,8 @@ policy, the code for implementing REINFORCE would be as follows::
 import math
 from numbers import Number
 import torch
-from torch.autograd import Variable
-
+from torch.autograd import Function, Variable
+from torch.autograd.function import once_differentiable
 
 __all__ = ['Distribution', 'Bernoulli', 'Categorical', 'Normal', 'Gamma']
 
@@ -198,10 +198,25 @@ class Normal(Distribution):
         return -((value - self.mean) ** 2) / (2 * var) - log_std - math.log(math.sqrt(2 * math.pi))
 
 
+class _StandardGamma(Function):
+    @staticmethod
+    def forward(ctx, alpha):
+        x = torch._C._standard_gamma(alpha)
+        ctx.save_for_backward(x, alpha)
+        return x
+
+    @staticmethod
+    @once_differentiable
+    def backward(ctx, grad_output):
+        x, alpha = ctx.saved_tensors
+        grad = torch._C._standard_gamma_grad(x, alpha)
+        return grad_output * grad
+
+
 def _standard_gamma(alpha):
     if not isinstance(alpha, Variable):
         return torch._C._standard_gamma(alpha)
-    return Variable(torch._C._standard_gamma(alpha.data))
+    return _StandardGamma.apply(alpha)
 
 
 class Gamma(Distribution):
@@ -219,6 +234,7 @@ class Gamma(Distribution):
         alpha (float or Tensor or Variable): shape parameter of the distribution
         beta (float or Tensor or Variable): rate = 1 / scale of the distribution
     """
+    has_rsample = True
 
     def __init__(self, alpha, beta):
         # TODO handle (Variable, Number) cases

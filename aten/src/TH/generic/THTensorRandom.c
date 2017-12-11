@@ -111,7 +111,9 @@ void THTensor_(exponential)(THTensor *self, THGenerator *_generator, double lamb
 void THTensor_(standard_gamma)(THTensor *self, THGenerator *gen, THTensor *alpha)
 {
   THTensor_(resizeAs)(self, alpha);
-  TH_TENSOR_APPLY2(real, self, real, alpha, *self_data = THRandom_standard_gamma(gen, *alpha_data););
+  TH_TENSOR_APPLY2(real, self, real, alpha, {
+    *self_data = THRandom_standard_gamma(gen, *alpha_data);
+  });
 }
 
 void THTensor_(cauchy)(THTensor *self, THGenerator *_generator, double median, double sigma)

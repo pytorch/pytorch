@@ -43,7 +43,10 @@ class TestDistributions(TestCase):
     def _check_sampler_sampler(self, torch_dist, ref_dist, message,
                                num_samples=10000, failure_rate=1e-3):
         # Checks that the .sample() method matches a reference function.
-        torch_samples = torch_dist.sample_n(num_samples).squeeze().cpu().numpy()
+        torch_samples = torch_dist.sample_n(num_samples).squeeze()
+        if isinstance(torch_samples, Variable):
+            torch_samples = torch_samples.data
+        torch_samples = torch_samples.cpu().numpy()
         ref_samples = ref_dist.rvs(num_samples)
         samples = [(x, +1) for x in torch_samples] + [(x, -1) for x in ref_samples]
         samples.sort()
@@ -160,8 +163,37 @@ class TestDistributions(TestCase):
         self._set_rng_seed()
         for alpha, beta in product([0.1, 1.0, 5.0], [0.1, 1.0, 10.0]):
             self._check_sampler_sampler(Gamma(alpha, beta),
-                                        scipy.stats.gamma(alpha, scale=1 / beta),
+                                        scipy.stats.gamma(alpha, scale=1.0 / beta),
                                         'Gamma(alpha={}, beta={})'.format(alpha, beta))
+
+    # This is a randomized test.
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    def test_gamma_sample_grad(self):
+        self._set_rng_seed(1)
+        num_samples = 100
+        for alpha in [1e-3, 1e-2, 1e-1, 1e0, 1e1, 1e2, 1e3, 1e4]:
+            alphas = Variable(torch.Tensor([alpha] * num_samples), requires_grad=True)
+            betas = Variable(torch.ones(num_samples))
+            x = Gamma(alphas, betas).sample()
+            x.sum().backward()
+            x, ind = x.data.sort()
+            x = x.numpy()
+            actual_grad = alphas.grad.data[ind].numpy()
+            # Compare with expected gradient dx/dalpha along constant cdf(x,alpha).
+            cdf = scipy.stats.gamma.cdf
+            pdf = scipy.stats.gamma.pdf
+            eps = 0.02 * alpha if alpha < 100 else 0.02 * alpha ** 0.5
+            cdf_alpha = (cdf(x, alpha + eps) - cdf(x, alpha - eps)) / (2 * eps)
+            cdf_x = pdf(x, alpha)
+            expected_grad = -cdf_alpha / cdf_x
+            rel_error = np.abs(actual_grad - expected_grad) / (expected_grad + 1e-100)
+            self.assertLess(np.max(rel_error), 0.005,
+                            '\n'.join(['Bad gradients for Gamma({}, 1)'.format(alpha),
+                                       'x {}'.format(x),
+                                       'expected {}'.format(expected_grad),
+                                       'actual {}'.format(actual_grad),
+                                       'rel error {}'.format(rel_error),
+                                       'max error {}'.format(rel_error.max())]))
 
 
 if __name__ == '__main__':
