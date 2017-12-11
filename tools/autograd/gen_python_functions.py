@@ -113,7 +113,10 @@ def create_python_bindings(
                 typename = 'Tensor'
 
             unpack = unpack_methods.get(typename, typename.lower())
-            actuals.append('r.{}({})'.format(unpack, arg_idx))
+            expr = 'r.{}({})'.format(unpack, arg_idx)
+            if typename == 'Storage &':
+                expr = '*' + expr
+            actuals.append(expr)
             dispatch_type = typename
             if dispatch_type == 'Tensor':
                 dispatch_type = 'const Tensor &'

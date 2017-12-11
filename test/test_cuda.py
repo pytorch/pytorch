@@ -437,6 +437,12 @@ class TestCuda(TestCase):
         self.assertEqual(z.get_device(), 0)
 
     @unittest.skipIf(torch.cuda.device_count() < 2, "only one GPU detected")
+    def test_new(self):
+        x = torch.autograd.Variable(torch.randn(3, 3).cuda())
+        self.assertEqual(x.new([0, 1, 2]).get_device(), 0)
+        self.assertEqual(x.new([0, 1, 2], device=1).get_device(), 1)
+
+    @unittest.skipIf(torch.cuda.device_count() < 2, "only one GPU detected")
     def test_copy_device(self):
         x = torch.randn(5, 5).cuda()
         with torch.cuda.device(1):

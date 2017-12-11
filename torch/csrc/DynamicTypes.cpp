@@ -3,6 +3,7 @@
 #include "DynamicTypes.h"
 #include "PythonTypes.h"
 #include "THP.h"
+#include "Exceptions.h"
 
 #include <vector>
 #include <unordered_map>
@@ -28,6 +29,7 @@ static std::unordered_map<std::string, at::ScalarType> attype_names = {
 static std::unordered_map<PyTypeObject*, at::Type*> pytype_to_attype;
 static std::unordered_map<at::Type*, PyTypeObject*> attype_to_pytype;
 static std::unordered_map<at::Type*, PyTypeObject*> attype_to_py_storage_type;
+static std::unordered_map<PyTypeObject*, at::Type*> py_storage_type_to_attype;
 
 static at::Backend get_backend(bool is_cuda, bool is_sparse) {
   if (is_cuda) {
@@ -67,6 +69,7 @@ void registerStoragePyTypeObject(PyTypeObject *pytype, const std::string& name, 
   auto attype = get_type(name, is_cuda, is_sparse);
   if (attype) {
     attype_to_py_storage_type[attype] = pytype;
+    py_storage_type_to_attype[pytype] = attype;
   }
 }
 
@@ -123,5 +126,19 @@ PyObject* createPyObject(const at::Storage& storage)
   return obj.release();
 }
 
+bool isStorage(PyObject* obj)
+{
+  auto it = py_storage_type_to_attype.find(Py_TYPE(obj));
+  return it != py_storage_type_to_attype.end();
+}
+std::unique_ptr<at::Storage> createStorage(PyObject* obj)
+{
+  auto it = py_storage_type_to_attype.find(Py_TYPE(obj));
+  if (it == py_storage_type_to_attype.end()) {
+    throw TypeError("not a storage '%s'", Py_TYPE(obj)->tp_name);
+  }
+  auto& type = *it->second;
+  return type.unsafeStorageFromTH(((THPVoidStorage*)obj)->cdata, true);
+}
 
 }  // namespace

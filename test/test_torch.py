@@ -4486,6 +4486,27 @@ class TestTorch(TestCase):
         self.assertIsInstance(x.char().sum(), int)
         self.assertIsInstance(x.byte().sum(), int)
 
+    def test_new(self):
+        x = torch.autograd.Variable(torch.Tensor())
+        y = torch.autograd.Variable(torch.randn(4, 4))
+        z = torch.autograd.Variable(torch.IntTensor([1, 2, 3]))
+        self.assertEqual(x.new().shape, [0])
+        self.assertEqual(x.new(), x)
+        self.assertEqual(x.new(1, 2).shape, [1, 2])
+        self.assertEqual(x.new(torch.Size([3, 4])).shape, [3, 4])
+        self.assertEqual(x.new([3, 4]).shape, [2])
+        self.assertEqual(x.new([3, 4]).tolist(), [3, 4])
+        self.assertEqual(x.new((3, 4)).tolist(), [3, 4])
+        self.assertEqual(x.new(size=(3, 4)).shape, [3, 4])
+        self.assertEqual(x.new(tuple()).shape, [0])
+        self.assertEqual(x.new(y.storage()).data_ptr(), y.data_ptr())
+        self.assertEqual(x.new(y).data_ptr(), y.data_ptr())
+        self.assertIsNot(x.new(y), y)
+
+        self.assertRaises(TypeError, lambda: x.new(z))
+        # TypeError would be better
+        self.assertRaises(RuntimeError, lambda: x.new(z.storage()))
+
     @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
     def test_pin_memory(self):
         x = torch.randn(3, 5)
