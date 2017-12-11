@@ -3,7 +3,7 @@
 # to access it.
 
 # Use the following command for very verbose prints.
-# GLOG_logtostderr=1 GLOG_v=1 PYTHONPATH=../../../build:$PYTHONPATH ipython notebook --ip='*'
+# GLOG_logtostderr=1 GLOG_v=1 PYTHONPATH=../../../build:$PYTHONPATH jupyter notebook "$@"
 
 # Use the following command for a normal run.
-PYTHONPATH=build:$PYTHONPATH ipython notebook --notebook-dir=caffe2/python/tutorial --ip='*'
+PYTHONPATH=build:$PYTHONPATH jupyter notebook --notebook-dir=caffe2/python/tutorials "$@"
