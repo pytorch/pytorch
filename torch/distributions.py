@@ -33,7 +33,7 @@ import math
 from numbers import Number
 import torch
 from torch.autograd import Variable
-
+import warnings
 
 __all__ = ['Distribution', 'Bernoulli', 'Categorical', 'Normal', 'Gamma']
 
@@ -42,6 +42,8 @@ def _expand_n(v, n):
     r"""
     Cleanly expand float or Tensor or Variable parameters.
     """
+    if n is None:
+        return v
     if isinstance(v, Number):
         return torch.Tensor([v]).expand(n, 1)
     else:
@@ -53,9 +55,9 @@ class Distribution(object):
     Distribution is the abstract base class for probability distributions.
     """
 
-    def sample(self):
+    def sample(self, n=None):
         """
-        Generates a single sample or single batch of samples if the distribution
+        Generates n samples or n batches of samples of samples if the distribution
         parameters are batched.
         """
         raise NotImplementedError
@@ -65,7 +67,8 @@ class Distribution(object):
         Generates n samples or n batches of samples if the distribution parameters
         are batched.
         """
-        raise NotImplementedError
+        warnings.warn('sample_n will be deprecated. Use .sample(n) instead', PendingDeprecationWarning)
+        return self.sample(n)
 
     def log_prob(self, value):
         """
@@ -99,11 +102,11 @@ class Bernoulli(Distribution):
     def __init__(self, probs):
         self.probs = probs
 
-    def sample(self):
-        return torch.bernoulli(self.probs)
-
-    def sample_n(self, n):
-        return torch.bernoulli(self.probs.expand(n, *self.probs.size()))
+    def sample(self, n=None):
+        if n is None:
+            return torch.bernoulli(self.probs)
+        else:
+            return torch.bernoulli(self.probs.expand(n, *self.probs.size()))
 
     def log_prob(self, value):
         # compute the log probabilities for 0 and 1
@@ -146,11 +149,10 @@ class Categorical(Distribution):
             raise ValueError("probs must be 1D or 2D")
         self.probs = probs
 
-    def sample(self):
-        return torch.multinomial(self.probs, 1, True).squeeze(-1)
-
-    def sample_n(self, n):
-        if n == 1:
+    def sample(self, n=None):
+        if n is None:
+            return torch.multinomial(self.probs, 1, True).squeeze(-1)
+        elif n == 1:
             return self.sample().expand(1, 1)
         else:
             return torch.multinomial(self.probs, n, True).t()
@@ -185,10 +187,7 @@ class Normal(Distribution):
         self.mean = mean
         self.std = std
 
-    def sample(self):
-        return torch.normal(self.mean, self.std)
-
-    def sample_n(self, n):
+    def sample(self, n=None):
         return torch.normal(_expand_n(self.mean, n), _expand_n(self.std, n))
 
     def log_prob(self, value):
@@ -236,10 +235,7 @@ class Gamma(Distribution):
         self.alpha = alpha
         self.beta = beta
 
-    def sample(self):
-        return _standard_gamma(self.alpha) / self.beta
-
-    def sample_n(self, n):
+    def sample(self, n=None):
         return _standard_gamma(_expand_n(self.alpha, n)) / self.beta
 
     def log_prob(self, value):
