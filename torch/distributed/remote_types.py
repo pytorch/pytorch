@@ -49,6 +49,7 @@ class DoubleTensor(_DistributedBase, torch._C.DistributedDoubleTensorBase, _Tens
     def storage_type(cls):
         return DoubleStorage
 
+
 class HalfTensor(_DistributedBase, torch._C.DistributedHalfTensorBase, _TensorBase):
     def is_signed(self):
         return True
