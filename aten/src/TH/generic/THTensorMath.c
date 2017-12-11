@@ -3448,7 +3448,7 @@ void THTensor_(bhistc)(THTensor *hist, THTensor *tensor, int64_t nbins, real min
 }
 
 // TODO Replace this with more accurate digamma().
-inline real THTensor_(digamma_one)(real x) {
+static inline real THTensor_(digamma_one)(real x) {
   const real eps = x * 1e-2;
   return (TH_MATH_NAME(lgamma)(x + eps) - TH_MATH_NAME(lgamma)(x - eps)) / (eps + eps);
 }
