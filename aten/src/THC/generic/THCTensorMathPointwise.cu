@@ -68,42 +68,6 @@ IMPLEMENT_CUDA_TENSOR_BASIC_FUNC(  abs, THCNumerics<real>::abs,   Real)
 #undef IMPLEMENT_CUDA_TENSOR_BASIC_FUNC_
 #undef IMPLEMENT_CUDA_TENSOR_BASIC_FUNC
 
-#if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE)
-
-#if defined(THC_REAL_IS_FLOAT)
-
-struct TensorATan2Op {
-  __device__ __forceinline__ void operator()(float* out, float* a, float* b) {
-    *out = atan2f(*a, *b);
-  }
-};
-
-#elif defined(THC_REAL_IS_DOUBLE)
-
-struct TensorATan2Op {
-  __device__ __forceinline__ void operator()(double* out, double* a, double* b) {
-    *out = atan2(*a, *b);
-  }
-};
-
-#endif
-
-void THCTensor_(atan2)(THCState *state, THCTensor *self_, THCTensor *tx, THCTensor *ty)
-{
-  THCAssertSameGPU(THCTensor_(checkGPU)(state, 3, self_, tx, ty));
-  THArgCheck(THCTensor_(nElement)(state, tx) ==
-             THCTensor_(nElement)(state, ty), 3, "sizes do not match");
-  THCTensor_(resizeAs)(state, self_, tx);
-
-  if (!THC_pointwiseApply3(state, self_, tx, ty, TensorATan2Op())) {
-    THArgCheck(false, 2, CUTORCH_DIM_WARNING);
-  }
-
-  THCudaCheck(cudaGetLastError());
-}
-
-#endif
-
 void THCTensor_(sign)(THCState* state, THCTensor* self_, THCTensor* src) {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self_, src));
   if (self_ == src) {
@@ -175,8 +139,21 @@ THCTensor_(cross)(THCState *state, THCTensor *self, THCTensor *x, THCTensor *y, 
   THCTensor_(free)(state, nself);
 }
 
-
 #if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE) || defined(THC_REAL_IS_HALF)
+
+void THCTensor_(atan2)(THCState *state, THCTensor *self_, THCTensor *tx, THCTensor *ty)
+{
+  THCAssertSameGPU(THCTensor_(checkGPU)(state, 3, self_, tx, ty));
+  THArgCheck(THCTensor_(nElement)(state, tx) ==
+             THCTensor_(nElement)(state, ty), 3, "sizes do not match");
+  THCTensor_(resizeAs)(state, self_, tx);
+
+  if (!THC_pointwiseApply3(state, self_, tx, ty, TensorATan2Op<real>())) {
+    THArgCheck(false, 2, CUTORCH_DIM_WARNING);
+  }
+
+  THCudaCheck(cudaGetLastError());
+}
 
 void THCTensor_(sigmoid)(THCState* state, THCTensor* self_, THCTensor* src) {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self_, src));

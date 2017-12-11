@@ -1070,8 +1070,7 @@
 [[
   name: atan2
   types:
-    - Float
-    - Double
+    - floating_point
   backends:
     - CPU
     - CUDA
@@ -1091,8 +1090,7 @@
 [[
   name: atan2_
   types:
-    - Float
-    - Double
+    - floating_point
   backends:
     - CPU
     - CUDA

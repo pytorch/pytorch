@@ -159,6 +159,14 @@ Comparison Ops
 .. autofunction:: topk
 
 
+Spectral Ops
+~~~~~~~~~~~~~~~~~~~~~~
+.. autofunction:: stft
+.. autofunction:: hann_window
+.. autofunction:: hamming_window
+.. autofunction:: bartlett_window
+
+
 Other Operations
 ~~~~~~~~~~~~~~~~~~~~~~
 .. autofunction:: cross
@@ -168,7 +176,6 @@ Other Operations
 .. autofunction:: trace
 .. autofunction:: tril
 .. autofunction:: triu
-.. autofunction:: stft
 
 
 BLAS and LAPACK Operations
