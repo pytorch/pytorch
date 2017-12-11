@@ -3447,6 +3447,63 @@ void THTensor_(bhistc)(THTensor *hist, THTensor *tensor, int64_t nbins, real min
   );
 }
 
+// TODO Replace this with more accurate digamma().
+inline real THTensor_(digamma_one)(real x) {
+  const real eps = x * 1e-2;
+  return (TH_MATH_NAME(lgamma)(x + eps) - TH_MATH_NAME(lgamma)(x - eps)) / (eps + eps);
+}
+
+/** Computes the reparameterized gradient -(d/dalpha cdf(x;alpha)) / pdf(x;alpha)
+    for random number x drawn from a standard Gamma distribution Gamma(alpha).
+*/
+static inline real THTensor_(standard_gamma_grad_one)(real x, real alpha) {
+  // Use an asymptotic approximation for small x.
+  if (x < 0.2f) {
+    const real a0 = 1 / alpha;
+    const real a1 = 1 / (alpha + 1);
+    const real a2 = 1 / (alpha + 2);
+    const real pow_x_alpha = TH_MATH_NAME(pow)(x, alpha);
+    const real gamma_pdf = TH_MATH_NAME(pow)(x, alpha - 1) * TH_MATH_NAME(exp)(-x);
+    const real gamma_cdf = pow_x_alpha * (a0 - x*a1 + 0.5f*x*x*a2);
+    const real gamma_cdf_alpha = (TH_MATH_NAME(log)(x) - THTensor_(digamma_one)(alpha)) * gamma_cdf
+        - pow_x_alpha * (a0*a0 - x*a1*a1 + 0.5f*x*x*a2*a2);
+    const real result = -gamma_cdf_alpha / gamma_pdf;
+    return isnan(result) ? 0 : result;
+  }
+
+  // Use an asymptotic approximation for large alpha.
+  if (alpha > 50.0f) {
+    return TH_MATH_NAME(sqrt)(x / alpha);
+  }
+
+  // Use a bivariate rational approximation to the reparameterized gradient.
+  const real u = TH_MATH_NAME(log)(x / alpha);
+  const real v = TH_MATH_NAME(log)(alpha);
+  static const real coef_uv[3][8] = {
+    {0.16028008, -0.088064309, 0.019630876, -0.0016920282,
+     1.0, 0.36659853, 0.10843863, 0.0066895454},
+    {0.521894, 0.16095838, 0.06237597, 0.0023884253,
+     0.083457714, 0.0073297628, -0.0059299053, -0.00093720389},
+    {-0.0031143957, -0.012143877, -0.0057656484, -0.00064847254,
+     0.0087262576, -0.00022820524, 1.8871047e-05, 9.6307964e-06},
+  };
+  real coef_v[8];
+  for (int i = 0; i < 8; ++ i) {
+    coef_v[i] = coef_uv[0][i] + u * (coef_uv[1][i] + u * coef_uv[2][i]);
+  }
+  const real p = coef_v[0] + v * (coef_v[1] + v * (coef_v[2] + v * coef_v[3]));
+  const real q = coef_v[4] + v * (coef_v[5] + v * (coef_v[6] + v * coef_v[7]));
+  return TH_MATH_NAME(exp)(p / q);
+}
+
+void THTensor_(standard_gamma_grad)(THTensor *self, THTensor *x, THTensor *alpha)
+{
+  THTensor_(resizeAs)(self, x);
+  TH_TENSOR_APPLY3(real, self, real, x, real, alpha, {
+    *self_data = THTensor_(standard_gamma_grad_one)(*x_data, *alpha_data);
+  });
+}
+
 #undef TH_MATH_NAME
 #endif /* floating point only part */
 #undef IS_NONZERO
