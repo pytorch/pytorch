@@ -1035,6 +1035,12 @@ def create_derived(backend_type_env, declarations):
         elif ret['kind'] == 'type':
             assert len(calls) == 1
             call = calls[0]
+            if 'aten_custom_call' in option:
+                # all aten_custom_call bodies handle settings on their own.
+                scalar_check = None
+                body.append(CodeTemplate(
+                    option['aten_custom_call']).substitute(env))
+
             if ret['type'] in ALLOC_WRAP.keys():
                 maybe_scalar = "->maybeScalar({})".format(scalar_check) \
                                if scalar_check is not None \

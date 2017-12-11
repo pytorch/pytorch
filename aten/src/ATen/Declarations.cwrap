@@ -4025,6 +4025,11 @@
   cname: newIndices
   arguments:
      - THTensor* self
+  aten_custom_call: |
+    if (self_->isScalar()) {
+      // Empty tensor
+      return self_->type().toScalarType(kLong).zeros({});
+    }
 ]]
 
 [[
