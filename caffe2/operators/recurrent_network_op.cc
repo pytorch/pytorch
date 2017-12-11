@@ -14,12 +14,12 @@
  * limitations under the License.
  */
 
-#include "recurrent_network_op.h"
+#include "caffe2/operators/recurrent_network_op.h"
 #include "caffe2/core/workspace.h"
 #include "caffe2/utils/proto_utils.h"
 
 #ifndef CAFFE2_RNN_NO_TEXT_FORMAT
-#include "google/protobuf/text_format.h"
+#include <google/protobuf/text_format.h>
 #endif
 
 CAFFE2_DEFINE_bool(

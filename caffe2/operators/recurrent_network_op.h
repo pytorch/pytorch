@@ -857,8 +857,8 @@ class AccumulateInputGradientOp : public Operator<Context> {
 
   template<typename T>
   bool DoRunWithType() {
-    const auto t =
-        OperatorBase::Input<Tensor<CPUContext>>(0).template data<int32_t>()[0];
+    const auto& t0 = OperatorBase::Input<Tensor<CPUContext>>(0);
+    const auto t = t0.template data<int32_t>()[0];
     auto& og = Input(1);
     auto* g = Output(0);
 
@@ -906,8 +906,8 @@ class RNNApplyLinkOp : public Operator<Context> {
   bool DoRunWithType() {
     // Both internal and external appear as both input and output to enforce
     // correct dependency computation.
-    const auto t =
-        OperatorBase::Input<Tensor<CPUContext>>(0).template data<int32_t>()[0];
+    const auto& t0 = OperatorBase::Input<Tensor<CPUContext>>(0);
+    const auto t = t0.template data<int32_t>()[0];
     auto& external = Input(1);
 
     auto* internal_out = Output(0);

@@ -34,13 +34,10 @@ class CreateBlobsQueueOp final : public Operator<Context> {
         name(operator_def.output().Get(0)) {}
 
   bool RunOnDevice() override {
-    const auto capacity =
-        OperatorBase::template GetSingleArgument<int>("capacity", 1);
-    const auto numBlobs =
-        OperatorBase::template GetSingleArgument<int>("num_blobs", 1);
+    const auto capacity = GetSingleArgument("capacity", 1);
+    const auto numBlobs = GetSingleArgument("num_blobs", 1);
     const auto enforceUniqueName =
-        OperatorBase::template GetSingleArgument<int>(
-            "enforce_unique_name", false);
+        GetSingleArgument("enforce_unique_name", false);
     const auto fieldNames =
         OperatorBase::template GetRepeatedArgument<std::string>("field_names");
     CAFFE_ENFORCE_EQ(this->OutputSize(), 1);
