@@ -127,18 +127,27 @@ class TestSparse(TestCase):
         self.assertEqual(x._values().numel(), 0)
 
     def test_ctor_size_checks(self):
-        indices = torch.zeros(3, 4).long()
-        indices[1, 0] = 3
+        indices = self.IndexTensor([
+            [0, 0, 0],
+            [0, 3, 0],
+            [0, 0, 0],
+            [0, 0, 0],
+        ])
+        values = self.ValueTensor([2, 1, 3, 4])
 
         # indices inconsistent with size
         self.assertRaises(
             RuntimeError,
-            lambda: self.SparseTensor(indices, torch.randn(4), torch.Size([2, 1, 1])))
+            lambda: self.SparseTensor(indices, values, torch.Size([2, 1, 1])))
 
         # values inconsistent with size
+        values = self.ValueTensor([
+            [2, 1, 2, 1],
+            [1, 0, 5, 2],
+        ])
         self.assertRaises(
             RuntimeError,
-            lambda: self.SparseTensor(indices, torch.randn(4, 2), torch.Size([2, 4, 2, 1])))
+            lambda: self.SparseTensor(indices, values, torch.Size([2, 4, 2, 1])))
 
     def test_to_dense(self):
         i = self.IndexTensor([
