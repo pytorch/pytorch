@@ -11,7 +11,7 @@ MODE_BORDER = 1
 
 def grid_sampler(input, grid, padding_mode):
     if cudnn.is_acceptable(input.data) and padding_mode == 'zeros':
-        return torch._C._VariableBase.cudnn_grid_sampler(input, grid)
+        return torch._C._VariableBase.cudnn_grid_sampler_forward(input, grid)
     else:
         return GridSampler.apply(input, grid, padding_mode)
 

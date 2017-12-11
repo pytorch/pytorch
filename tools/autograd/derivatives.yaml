@@ -858,3 +858,8 @@
 - name: _tanh_backward(Tensor grad_output, Tensor output)
   grad_output: _tanh_backward(grad, output)
   output: -2 * output * grad * grad_output
+
+# vision
+
+- name: cudnn_grid_sampler_forward(Tensor self, Tensor grid)
+  self, grid: cudnn_grid_sampler_backward(self, grid, grad)
