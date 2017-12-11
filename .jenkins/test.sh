@@ -3,22 +3,24 @@
 set -e
 
 LOCAL_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-ROOT_DIR=$(dirname "$LOCAL_DIR")
+ROOT_DIR=$(cd "$LOCAL_DIR"/.. && pwd)
 
 # Skip tests in environments where they are not built/applicable
-if [[ "${BUILD_ENVIRONMENT}" == *android ]]; then
+if [[ "${BUILD_ENVIRONMENT}" == *-android* ]]; then
   echo 'Skipping tests'
   exit 0
 fi
 
-cd "$ROOT_DIR"
-
 export PYTHONPATH="${PYTHONPATH}:/usr/local/caffe2"
 export LD_LIBRARY_PATH="${LD_LIBRARY_PATH}:/usr/local/caffe2/lib"
 
-rm -rf test
-mkdir -p test/{cpp,python}
-TEST_DIR="$ROOT_DIR/test"
+if [ -d ./test ]; then
+  echo "Directory ./test already exists; please remove it..."
+  exit 1
+fi
+
+mkdir -p ./test/{cpp,python}
+TEST_DIR="$PWD/test"
 
 cd /usr/local/caffe2
 
@@ -43,17 +45,38 @@ for test in ./test/*; do
   fi
 done
 
+# Figure out which Python to use
+PYTHON="python"
+if [ -n "$BUILD_ENVIRONMENT" ]; then
+  if [[ "$BUILD_ENVIRONMENT" == py2* ]]; then
+    PYTHON="python2"
+  elif [[ "$BUILD_ENVIRONMENT" == py3* ]]; then
+    PYTHON="python3"
+  fi
+fi
+
+# Collect additional tests to run (outside caffe2/python)
+EXTRA_TESTS=()
+
+# CUDA builds always include NCCL support
+if [[ "$BUILD_ENVIRONMENT" == *-cuda* ]]; then
+  EXTRA_TESTS+=(caffe2/contrib/nccl)
+fi
+
 # Python tests
 echo "Running Python tests.."
-python \
+"$PYTHON" \
   -m pytest \
   -v \
   --junit-xml="$TEST_DIR"/python/result.xml \
   --ignore caffe2/python/test/executor_test.py \
   --ignore caffe2/python/operator_test/matmul_op_test.py \
+  --ignore caffe2/python/operator_test/pack_ops_test.py \
   --ignore caffe2/python/operator_test/rnn_cell_test.py \
   --ignore caffe2/python/mkl/mkl_sbn_speed_test.py \
-  caffe2/python/
+  caffe2/python/ \
+  ${EXTRA_TESTS[@]}
+
 tmp_exit_code="$?"
 if [ "$exit_code" -eq 0 ]; then
   exit_code="$tmp_exit_code"
