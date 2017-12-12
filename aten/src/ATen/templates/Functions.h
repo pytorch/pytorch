@@ -10,10 +10,8 @@
 
 namespace at {
 
-static inline Tensor & copy_out(const Tensor & src, Tensor & dst) {
-  dst.resize_(src.sizes());
-  dst.type().copy(src,dst);
-  return dst;
+static inline Tensor & copy_out(Tensor & result, const Tensor & src) {
+  return result.copy_(src);
 }
 
 ${function_declarations}

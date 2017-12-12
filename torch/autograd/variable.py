@@ -224,9 +224,6 @@ class Variable(_C._VariableBase):
             other = Variable(other)
         return super(Variable, self).type_as(other)
 
-    def cuda(self, device=None, async=False):
-        return CudaTransfer.apply(self, device, async)
-
     def is_pinned(self):
         r"""Returns true if this tensor resides in pinned memory"""
         storage = self.storage()

@@ -186,23 +186,22 @@ static PyObject * THPVariable_contiguous(PyObject* self, PyObject* args)
   END_HANDLE_TH_ERRORS
 }
 
+static Tensor dispatch_copy_(Tensor & self, const Tensor & other, bool async) {
+  AutoNoGIL no_gil;
+  AutoGPU auto_gpu(self);
+  return self.copy_(other, async);
+}
+
 static PyObject * THPVariable_copy_(PyObject* self, PyObject* args, PyObject* kwargs)
 {
   HANDLE_TH_ERRORS
   static PythonArgParser parser({
-    "copy_(Tensor other)"
+    "copy_(Tensor other, bool async=False)"
   });
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
-  PyObject* parsed_args[1];
+  PyObject* parsed_args[2];
   auto r = parser.parse(args, kwargs, parsed_args);
-  if (r.idx == 0) {
-    Tensor other = r.tensor(0);
-    AutoNoGIL no_gil;
-    AutoGPU gpu(self_);
-    self_.copy_(other);
-  }
-  Py_INCREF(self);
-  return self;
+  return THPVariable_Wrap(dispatch_copy_(self_, r.tensor(0), r.toBool(1)));
   END_HANDLE_TH_ERRORS
 }
 
@@ -292,6 +291,34 @@ static PyObject * THPVariable_cpu(PyObject* self, PyObject* args)
    auto backend = self_.is_sparse() ? Backend::SparseCPU : Backend::CPU;
    return wrap(dispatch_to_backend(self_, backend));
    END_HANDLE_TH_ERRORS
+}
+
+static Tensor dispatch_cuda(const Tensor & self, int64_t device, bool async) {
+  AutoNoGIL no_gil;
+  AutoGPU auto_gpu(self);
+  auto_gpu.setDevice(device);  // no effect if device is -1
+  if (self.type().backend() == at::kCPU) {
+    // async is only relevant for CPU -> CUDA transfers
+    auto& type = self.type().toBackend(at::kCUDA);
+    return type.tensor(self.sizes()).copy_(self, async);
+  } else if (self.type().backend() == at::kCUDA && self.get_device() != at::current_device()) {
+    // force copy if self is a CUDA tensor on a different device
+    return self.clone();
+  }
+  return self.toBackend(at::kCUDA);
+}
+
+static PyObject * THPVariable_cuda(PyObject* self, PyObject* args, PyObject* kwargs)
+{
+  HANDLE_TH_ERRORS
+  static PythonArgParser parser({
+    "cuda(int64_t device=-1, bool async=False)"
+  });
+  auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
+  PyObject* parsed_args[2];
+  auto r = parser.parse(args, kwargs, parsed_args);
+  return THPVariable_Wrap(dispatch_cuda(self_, r.toInt64(0), r.toBool(1)));
+  END_HANDLE_TH_ERRORS
 }
 
 static Tensor dispatch_to_type(const Tensor & self, ScalarType scalarType) {
@@ -463,6 +490,7 @@ PyMethodDef variable_methods[] = {
   {"contiguous", (PyCFunction)THPVariable_contiguous, METH_NOARGS, NULL},
   {"copy_", (PyCFunction)THPVariable_copy_, METH_VARARGS | METH_KEYWORDS, NULL},
   {"cpu", (PyCFunction)THPVariable_cpu, METH_NOARGS, NULL},
+  {"cuda", (PyCFunction)THPVariable_cuda, METH_VARARGS | METH_KEYWORDS, NULL},
   {"dim", (PyCFunction)THPVariable_dim, METH_NOARGS, NULL},
   {"detach", (PyCFunction)THPVariable_detach, METH_NOARGS, NULL},
   {"detach_", (PyCFunction)THPVariable_detach_, METH_NOARGS, NULL},

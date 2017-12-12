@@ -61,7 +61,7 @@ const char * UndefinedType::typeString() {
   return "UndefinedType";
 }
 
-void UndefinedType::s_copy(const Tensor & src, Tensor & dst) const {
+Tensor & UndefinedType::s_copy_(Tensor & self, const Tensor & src, bool async) const {
   runtime_error("s_copy not defined for UndefinedType");
 }
 
