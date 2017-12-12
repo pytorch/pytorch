@@ -21,7 +21,6 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 from caffe2.python import core, workspace
-from caffe2.python.scope import CurrentNameScope
 from future.utils import viewitems, viewkeys
 
 def recurrent_net(
@@ -63,14 +62,6 @@ def recurrent_net(
     forward_only: if True, only forward steps are executed
     '''
     assert len(inputs) == 1, "Only one input blob is supported so far"
-
-    # Validate scoping
-    for einp in cell_net.Proto().external_input:
-        assert einp.startswith(CurrentNameScope()), \
-            '''
-            Cell net external inputs are not properly scoped, use
-            AddScopedExternalInputs() when creating them
-            '''
 
     input_blobs = [str(i[0]) for i in inputs]
     initial_input_blobs = [str(x[1]) for x in initial_cell_inputs]
