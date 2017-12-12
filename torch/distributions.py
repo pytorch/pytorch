@@ -134,7 +134,7 @@ class Bernoulli(Distribution):
         values = values.view((-1,) + (1,) * len(batch_shape))
         values = values.expand((-1,) + batch_shape)
         if self.probs.is_cuda:
-            values = values.cuda()
+            values = values.cuda(self.probs.get_device())
         if isinstance(self.probs, Variable):
             values = Variable(values)
         return values
@@ -197,7 +197,7 @@ class Categorical(Distribution):
         values = values.view((-1,) + (1,) * len(batch_shape))
         values = values.expand((-1,) + batch_shape)
         if self.probs.is_cuda:
-            values = values.cuda()
+            values = values.cuda(self.probs.get_device())
         if isinstance(self.probs, Variable):
             values = Variable(values)
         return values
