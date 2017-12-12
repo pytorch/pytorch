@@ -5,6 +5,7 @@ class Distribution(object):
     r"""
     Distribution is the abstract base class for probability distributions.
     """
+    has_enumerate_support = False
 
     def sample(self):
         """
