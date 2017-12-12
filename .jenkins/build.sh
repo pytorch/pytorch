@@ -60,6 +60,11 @@ case "${BUILD_ENVIRONMENT}" in
     ;;
 esac
 
+# Try to include Redis support for Linux builds
+if [ "$(uname)" == "Linux" ]; then
+  CMAKE_ARGS+=("-DUSE_REDIS=ON")
+fi
+
 # Configure
 cmake "${ROOT_DIR}" ${CMAKE_ARGS[*]} "$@"
 
