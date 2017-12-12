@@ -62,21 +62,29 @@ struct Parser {
     }
     while (L.nextIf('.')) {
       auto name = parseIdent();
-      TreeList inputs = {prefix};
-      prefix = createApply(name, inputs);
+      if (L.cur().kind == '(') {
+        TreeList inputs = {prefix};
+        prefix = createApply(name, inputs);
+      } else {
+        prefix = Select::create(name->range(), prefix, name);
+      }
     }
     return prefix;
   }
   TreeRef parseOptionalReduction() {
     auto r = L.cur().range;
     switch (L.cur().kind) {
-      case '+':
-      case '*':
-      case TK_MIN:
-      case TK_MAX:
-        return c(L.next().kind, r, {});
-      default:
+      case TK_PLUS_EQ:
+      case TK_MINUS_EQ:
+      case TK_TIMES_EQ:
+      case TK_DIV_EQ: {
+        int modifier = L.next().text()[0];
+        return c(modifier, r, {});
+      } break;
+      default: {
+        L.expect('=');
         return c('=', r, {}); // no reduction
+      } break;
     }
   }
   TreeRef
@@ -216,17 +224,27 @@ struct Parser {
     auto ident = parseIdent();
     return Param::create(typ->range(), ident, typ);
   }
-  void parseEndOfLine() {
-    // TODO: make sure parser always generates newline before dedent
+  // TODO: these functions should be unnecessary, but we currently do not
+  // emit a TK_NEWLINE before a series of TK_DEDENT tokens
+  // so if we see a TK_DEDENT then we know a newline must have happened and
+  // ignore it. The real fix is to patch the lexer so TK_NEWLINE does get
+  // emited before a TK_INDENT
+  void expectEndOfLine() {
     if (L.cur().kind != TK_DEDENT)
       L.expect(TK_NEWLINE);
   }
-  TreeRef parseAssign() {
-    TreeRef list = parseOneOrMoreIdent();
+  bool isEndOfLine() {
+    return L.cur().kind == TK_NEWLINE || L.cur().kind == TK_DEDENT;
+  }
+
+  // 'first' has already been parsed since expressions can exist
+  // alone on a line:
+  // first[,other,lhs] = rhs
+  TreeRef parseAssign(TreeRef first) {
+    TreeRef list = parseOneOrMoreExp(first);
     auto red = parseOptionalReduction();
-    L.expect('=');
     auto rhs = parseExp();
-    parseEndOfLine();
+    expectEndOfLine();
     return Assign::create(list->range(), list, red, rhs);
   }
   TreeRef parseStmt() {
@@ -235,19 +253,22 @@ struct Parser {
         return parseIf();
       case TK_WHILE:
         return parseWhile();
+      case TK_GLOBAL: {
+        auto range = L.next().range;
+        std::vector<TreeRef> idents;
+        do {
+          idents.push_back(parseIdent());
+        } while (L.nextIf(','));
+        expectEndOfLine();
+        return c(TK_GLOBAL, range, std::move(idents));
+      }
       default: {
-        // TODO: when we have type-checking/semantic analysis,
-        // we should just parse <exp>, <exp> = <exp>, <exp>
-        // rather than use lookahead here.
-        // but for now allow statements of the form foo(...)
-        // and a.foo(...) to appear on lines of their own.
-        int lookahead = L.lookahead().kind;
-        if (lookahead == '(' || lookahead == '.') {
-          auto r = parseExp();
-          parseEndOfLine();
-          return r;
+        auto r = parseExp();
+        if (!isEndOfLine()) {
+          return parseAssign(r);
         } else {
-          return parseAssign();
+          expectEndOfLine();
+          return r;
         }
       }
     }
@@ -279,11 +300,14 @@ struct Parser {
     auto list = parseOptionalIdentList();
     return TensorType::create(st->range(), st, list);
   }
-  TreeRef parseOneOrMoreIdent() {
-    TreeList list;
-    do {
-      list.push_back(parseIdent());
-    } while (L.nextIf(','));
+  // 'first' has already been parsed, add the rest
+  // if they exist
+  // first[, the, rest]
+  TreeRef parseOneOrMoreExp(TreeRef first) {
+    TreeList list{first};
+    while (L.nextIf(',')) {
+      list.push_back(parseExp());
+    }
     return List(list.back()->range(), std::move(list));
   }
   TreeRef parseIf() {

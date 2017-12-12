@@ -29,8 +29,6 @@ namespace script {
   _(TK_NEWLINE, "newline", "")                   \
   _(TK_INDENT, "indent", "")                     \
   _(TK_DEDENT, "dedent", "")                     \
-  _(TK_MIN, "min", "min")                        \
-  _(TK_MAX, "max", "max")                        \
   _(TK_WHERE, "where", "where")                  \
   _(TK_FLOAT, "float", "float")                  \
   _(TK_DOUBLE, "double", "double")               \
@@ -69,6 +67,11 @@ namespace script {
   _(TK_OR, "or", "or")                           \
   _(TK_NOT, "not", "not")                        \
   _(TK_CAST, "cast", "")                         \
+  _(TK_PLUS_EQ, "+=", "+=")                      \
+  _(TK_MINUS_EQ, "-=", "-=")                     \
+  _(TK_TIMES_EQ, "*=", "*=")                     \
+  _(TK_DIV_EQ, "/=", "/=")                       \
+  _(TK_GLOBAL, "global", "global")               \
   _(TK_BUILT_IN, "built-in", "")
 static const char* valid_single_char_tokens = "+-*/()[]:,={}><.";
 

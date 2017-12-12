@@ -184,6 +184,40 @@ class TestCaffe2Script(hu.HypothesisTestCase):
         net.run()
         assert(4 == workspace.FetchBlob('a'))
 
+    def test_global(self):
+        CU = core.C.CompilationUnit()
+        CU.define("""
+            def foo() -> (a):
+                global m
+                m.a = 4
+                m.b = 5
+                a = m.a + m.b
+        """)
+        net = CU.create_net('foo')
+        net.run()
+        assert(9 == workspace.FetchBlob('a'))
+
+    def test_module_as_arg_ret(self):
+        CU = core.C.CompilationUnit()
+        CU.define("""
+            def bar(a,c) -> (b):
+                b = Module()
+                temp = a.second
+                b.first = temp
+                b.second = a.first + c
+            def foo() -> (a,b):
+                x = Module()
+                x.first = 1
+                x.second = 2
+                x.y = bar(x,4)
+                a = x.y.first
+                b = x.y.second
+        """)
+        net = CU.create_net('foo')
+        net.run()
+        assert(2 == workspace.FetchBlob('a'))
+        assert(5 == workspace.FetchBlob('b'))
+
     def test_call_extern(self):
         CU = core.C.CompilationUnit()
         net = caffe2_pb2.NetDef()

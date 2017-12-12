@@ -87,6 +87,12 @@ struct DefCompiler {
         case TK_ASSIGN:
           emitAssignment(Assign(stmt));
           break;
+        case TK_GLOBAL:
+          for (auto ident : stmt->trees()) {
+            auto name = Ident(ident).name();
+            map(name, name);
+          }
+          break;
         default:
           emitExpressionStatement(stmt);
           break;
@@ -104,8 +110,8 @@ struct DefCompiler {
   void emitAssignment(const Assign& stmt) {
     OperatorDef* op;
     std::vector<std::string> outputs;
-    for (auto ident : stmt.idents()) {
-      std::string name = ident.name();
+    for (auto lhs : stmt.lhs()) {
+      std::string name = getLHS(lhs);
       // use of "_" gets renamed in Caffe2 graphs so that two uses
       // don't unintentionally interfere with each other
       if (name == "_") {
@@ -114,12 +120,12 @@ struct DefCompiler {
       outputs.push_back(name);
     }
     if (stmt.reduction() != '=') {
-      if (stmt.idents().size() != 1) {
+      if (stmt.lhs().size() != 1) {
         throw ErrorReport(stmt)
             << "reductions are only allow when there is a single variable "
             << "on the left-hand side.";
       }
-      auto lhs = stmt.idents()[0];
+      auto lhs = stmt.lhs()[0];
       auto expr =
           Compound::create(stmt.reduction(), stmt.range(), {lhs, stmt.rhs()});
       emit(expr, outputs);
@@ -127,8 +133,10 @@ struct DefCompiler {
       emit(stmt.rhs(), outputs);
     }
     int i = 0;
-    for (auto ident : stmt.idents()) {
-      map(ident.name(), outputs.at(i++));
+    for (auto ident : stmt.lhs()) {
+      if (ident->kind() == TK_IDENT)
+        map(Ident(ident).name(), outputs.at(i));
+      i++;
     }
   }
   void emitIf(const If& stmt) {
@@ -173,14 +181,39 @@ struct DefCompiler {
     emitStatements(stmt.body());
     net_def_stack.pop_back();
   }
+  std::string getLHS(const TreeRef& tree) {
+    switch (tree->kind()) {
+      case TK_IDENT: {
+        return Ident(tree).name();
+      } break;
+      case '.': {
+        auto sel = Select(tree);
+        std::string lhs = getValue(sel.value());
+        // TODO: check whether this subname exists in object lhs
+        return lhs + "/" + sel.selector().name();
+      } break;
+      default: {
+        throw ErrorReport(tree)
+            << "This expression cannot appear on the left-hand size of an assignment";
+      } break;
+    }
+  }
   std::string getValue(const TreeRef& tree) {
     switch (tree->kind()) {
-      case TK_IDENT:
+      case TK_IDENT: {
         return lookup(Ident(tree));
-      default:
+      } break;
+      case '.': {
+        auto sel = Select(tree);
+        std::string lhs = getValue(sel.value());
+        // TODO: check whether this subname exists in object lhs
+        return lhs + "/" + sel.selector().name();
+      } break;
+      default: {
         std::string name = fresh();
         emit(tree, {name});
         return name;
+      } break;
     }
   }
   std::string fresh(std::string prefix = "$t") {
@@ -258,6 +291,28 @@ struct DefCompiler {
     return result;
   }
 
+  bool renameLookup(
+      std::unordered_map<std::string, std::string>& rename_map,
+      const std::string& name,
+      std::string& rename) {
+    // first look for name in the map directly
+    auto it = rename_map.find(name);
+    if (it != rename_map.end()) {
+      rename = it->second;
+      return true;
+    }
+    // otherwise if we have a rename entry like a => b and a name "a/foo/bar"
+    // then replace it with "b/foo/bar"
+    auto p = name.find("/");
+    if (p == std::string::npos)
+      return false;
+    it = rename_map.find(name.substr(0, p));
+    if (it != rename_map.end()) {
+      rename = it->second + name.substr(p);
+      return true;
+    }
+    return false;
+  }
   void renameOp(
       std::unordered_map<std::string, std::string>& rename_map,
       const Apply& apply,
@@ -266,7 +321,8 @@ struct DefCompiler {
       OperatorDef* new_op) {
     for (size_t i = 0; i < new_op->input().size(); i++) {
       auto& name = new_op->input(i);
-      bool defined = rename_map.count(name) != 0;
+      std::string renamed;
+      bool defined = renameLookup(rename_map, name, renamed);
       if (!isExtern && !defined) {
         throw ErrorReport(apply)
             << " unexpected undefined name '" << name
@@ -275,14 +331,16 @@ struct DefCompiler {
         // extern function using a global name, assign it an identity mapping
         rename_map[name] = name;
       }
-      new_op->set_input(i, rename_map.at(name));
+      new_op->set_input(i, renamed);
     }
     for (size_t i = 0; i < new_op->output().size(); i++) {
       auto& name = new_op->output(i);
-      if (rename_map.count(name) == 0) {
-        rename_map[name] = prefix + name;
+      std::string renamed;
+      if (!renameLookup(rename_map, name, renamed)) {
+        renamed = prefix + name;
+        rename_map[name] = renamed;
       }
-      new_op->set_output(i, rename_map[name]);
+      new_op->set_output(i, renamed);
     }
     // handle control flow inside the op as well
     if (ops_containing_nets.count(new_op->type()) > 0) {
@@ -331,8 +389,8 @@ struct DefCompiler {
       rename_map[fn.inputs[i]] = inputs[i];
     }
     if (outputs.size() != fn.outputs.size()) {
-      throw ErrorReport(apply) << fname << " expected " << fn.inputs.size()
-                               << " values but received " << inputs.size();
+      throw ErrorReport(apply) << fname << " expected " << fn.outputs.size()
+                               << " values but received " << outputs.size();
     }
     for (size_t i = 0; i < outputs.size(); i++) {
       rename_map[fn.outputs[i]] = outputs[i];
@@ -407,12 +465,19 @@ struct DefCompiler {
       throw ErrorReport(apply) << "failed schema checking";
     }
   }
+
+  // Emit an operation, writing results into 'outputs'.
+  // This will _always_ compute something, unlike 'getValue' which simply
+  // returns an already computed reference if possible.
+  // So if 'tree' is an identifier or nested identifier (foo.bar)
+  // this will cause it to be _copied_ into outputs.
   void emit(const TreeRef& tree, const std::vector<std::string>& outputs) {
     switch (tree->kind()) {
-      case TK_IDENT: {
+      case TK_IDENT:
+      case '.': {
         auto op = cur().add_op();
         op->set_type("Copy");
-        op->add_input(lookup(Ident(tree)));
+        op->add_input(getValue(tree));
         appendOutputs(tree, op, outputs, 1);
       } break;
       case TK_NE:
@@ -603,7 +668,12 @@ struct DefCompiler {
     }
     appendOutputs(apply, op, outputs, 1);
   }
-
+  // emitModule doesn't actually do anything except for allow
+  // statements like a = Module() to register 'a' as a valid identifier
+  // so that a.b = ... will work
+  void emitModule(const Apply& apply, const std::vector<std::string>& outputs) {
+    expectOutputs(apply, outputs, 1);
+  }
   std::unordered_map<
       std::string,
       std::function<void(
@@ -613,7 +683,8 @@ struct DefCompiler {
       builtins{{"zeros", &DefCompiler::emitFillOp},
                {"zeros_like", &DefCompiler::emitFillOp},
                {"ones", &DefCompiler::emitFillOp},
-               {"ones_like", &DefCompiler::emitFillOp}};
+               {"ones_like", &DefCompiler::emitFillOp},
+               {"Module", &DefCompiler::emitModule}};
 };
 
 struct CompilationUnitImpl {
