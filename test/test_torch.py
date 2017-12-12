@@ -4167,7 +4167,7 @@ class TestTorch(TestCase):
         t.bernoulli_(p)
         self.assertTrue(isBinary(t))
 
-        p = torch.rand(10)
+        p = torch.rand(10, 10)
         t.bernoulli_(p)
         self.assertTrue(isBinary(t))
 
