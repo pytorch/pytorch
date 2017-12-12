@@ -195,6 +195,55 @@ class TestDistributions(TestCase):
                                        'rel error {}'.format(rel_error),
                                        'max error {}'.format(rel_error.max())]))
 
+    def test_valid_parameter_broadcasting(self):
+        # Test correct broadcasting of parameter sizes for distributions that have multiple
+        # parameters.
+        # example type (distribution instance, expected sample shape)
+        valid_examples = [
+            (Normal(mean=torch.Tensor([0, 0]), std=torch.Tensor([1])),
+             (2,)),
+            (Normal(mean=torch.Tensor([0, 0]), std=torch.Tensor([[1], [1]])),
+             (2, 2)),
+            (Normal(mean=torch.Tensor([0, 0]), std=torch.Tensor([[1]])),
+             (1, 2)),
+            (Normal(mean=torch.Tensor([0]), std=torch.Tensor([[1]])),
+             (1, 1)),
+            (Gamma(alpha=torch.Tensor([0, 0]), beta=torch.Tensor([[1], [1], [1]])),
+             (3, 2)),
+            (Gamma(alpha=torch.Tensor([0, 0]), beta=torch.Tensor([[1], [1]])),
+             (2, 2)),
+            (Gamma(alpha=torch.Tensor([0, 0]), beta=torch.Tensor([[1]])),
+             (1, 2)),
+            (Gamma(alpha=torch.Tensor([0]), beta=torch.Tensor([[1]])),
+             (1, 1)),
+        ]
+
+        for dist, expected_size in valid_examples:
+            dist_sample_size = dist.sample().size()
+            self.assertEqual(dist_sample_size, expected_size,
+                             'actual size: {} != expected size: {}'.format(dist_sample_size, expected_size))
+
+    def test_invalid_parameter_broadcasting(self):
+        # invalid broadcasting cases; should throw error
+        # example type (distribution class, distribution params)
+        invalid_examples = [
+            (Normal, {
+                'mean': torch.Tensor([[0, 0]]),
+                'std': torch.Tensor([1, 1, 1, 1])
+            }),
+            (Normal, {
+                'mean': torch.Tensor([[[0, 0, 0], [0, 0, 0]]]),
+                'std': torch.Tensor([1, 1])
+            }),
+            (Gamma, {
+                'alpha': torch.Tensor([0, 0]),
+                'beta': torch.Tensor([1, 1, 1])
+            })
+        ]
+
+        for dist, kwargs in invalid_examples:
+            self.assertRaises(ValueError, dist, **kwargs)
+
 
 if __name__ == '__main__':
     run_tests()
