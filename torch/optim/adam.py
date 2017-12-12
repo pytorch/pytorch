@@ -39,7 +39,6 @@ class Adam(Optimizer):
             closure (callable, optional): A closure that reevaluates the model
                 and returns the loss.
         """
-        amsgrad = group['amsgrad']
         loss = None
         if closure is not None:
             loss = closure()
@@ -51,6 +50,7 @@ class Adam(Optimizer):
                 grad = p.grad.data
                 if grad.is_sparse:
                     raise RuntimeError('Adam does not support sparse gradients, please consider SparseAdam instead')
+                amsgrad = group['amsgrad']
 
                 state = self.state[p]
 

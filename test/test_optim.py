@@ -281,12 +281,6 @@ class TestOptim(TestCase):
             lambda weight, bias: optim.Adam([weight, bias], lr=1e-3, 
                 amsgrad=True)
         )
-        self._test_rosenbrock(
-            lambda params: optim.Adam(params, lr=1e-2, weight_decay=1e-2,
-                amsgrad=True),
-            wrap_old_fn(old_optim.adam, learningRate=1e-2, weightDecay=1e-2,
-                amsgrad=True)
-        )
         self._test_basic_cases(
             lambda weight, bias: optim.Adam(
                 self._build_params_dict(weight, bias, lr=1e-2),
