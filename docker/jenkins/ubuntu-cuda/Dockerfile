@@ -17,6 +17,12 @@ ARG PYTHON_VERSION
 ADD ./install_python.sh install_python.sh
 RUN bash ./install_python.sh && rm install_python.sh
 
+# Install Anaconda
+ARG ANACONDA_VERSION
+ADD ./install_anaconda.sh install_anaconda.sh
+RUN if [ -n "${ANACONDA_VERSION}" ]; then bash ./install_anaconda.sh; fi
+RUN rm install_anaconda.sh
+
 # (optional) Add Jenkins user
 ARG JENKINS
 ARG JENKINS_UID
