@@ -21,6 +21,12 @@ valid_images=(
 
   # Build for Android
   py2-android-ubuntu16.04
+
+  # Builds for Anaconda
+  py2-conda-ubuntu16.04
+  py2-conda-cuda9.0-cudnn7-ubuntu16.04
+  py3-conda-ubuntu16.04
+  py3-conda-cuda9.0-cudnn7-ubuntu16.04
 )
 
 image="$1"
@@ -51,6 +57,10 @@ if [[ "$image" == *cuda* ]]; then
   CUDA_VERSION="$(echo "${image}" | perl -n -e'/cuda(\d+\.\d+)/ && print $1')"
   CUDNN_VERSION="$(echo "${image}" | perl -n -e'/cudnn(\d+)/ && print $1')"
   DOCKERFILE="${OS}-cuda/Dockerfile"
+fi
+
+if [[ "$image" == *conda* ]]; then
+  ANACONDA_VERSION=$PYTHON_VERSION
 fi
 
 if [[ "$image" == *-mkl-* ]]; then
@@ -88,6 +98,7 @@ docker build \
        --build-arg "UBUNTU_VERSION=${UBUNTU_VERSION}" \
        --build-arg "CENTOS_VERSION=${CENTOS_VERSION}" \
        --build-arg "PYTHON_VERSION=${PYTHON_VERSION}" \
+       --build-arg "ANACONDA_VERSION=${ANACONDA_VERSION}" \
        --build-arg "CUDA_VERSION=${CUDA_VERSION}" \
        --build-arg "CUDNN_VERSION=${CUDNN_VERSION}" \
        --build-arg "MKL=${MKL}" \
