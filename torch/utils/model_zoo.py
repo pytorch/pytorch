@@ -28,7 +28,7 @@ except ImportError:
 HASH_REGEX = re.compile(r'-([a-f0-9]*)\.')
 
 
-def load_url(url, model_dir=None, map_location=None):
+def load_url(url, model_dir=None, map_location=None, progress=True):
     r"""Loads the Torch serialized object at the given URL.
 
     If the object is already present in `model_dir`, it's deserialized and
@@ -61,11 +61,11 @@ def load_url(url, model_dir=None, map_location=None):
     if not os.path.exists(cached_file):
         sys.stderr.write('Downloading: "{}" to {}\n'.format(url, cached_file))
         hash_prefix = HASH_REGEX.search(filename).group(1)
-        _download_url_to_file(url, cached_file, hash_prefix)
+        _download_url_to_file(url, cached_file, hash_prefix, progress=progress)
     return torch.load(cached_file, map_location=map_location)
 
 
-def _download_url_to_file(url, dst, hash_prefix):
+def _download_url_to_file(url, dst, hash_prefix, progress):
     u = urlopen(url)
     if requests_available:
         file_size = int(u.headers["Content-Length"])
@@ -87,7 +87,8 @@ def _download_url_to_file(url, dst, hash_prefix):
                     break
                 f.write(buffer)
                 sha256.update(buffer)
-                pbar.update(len(buffer))
+                if progress:
+                    pbar.update(len(buffer))
 
         f.close()
         digest = sha256.hexdigest()
