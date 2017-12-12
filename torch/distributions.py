@@ -52,15 +52,30 @@ class Distribution(object):
     r"""
     Distribution is the abstract base class for probability distributions.
     """
+    has_sample_grad = False
 
     def sample(self):
         """
         Generates a single sample or single batch of samples if the distribution
         parameters are batched.
         """
+        return self.rsample().detach()
+
+    def rsample(self):
+        """
+        Generates a single reparameterized sample or single batch of samples if the distribution
+        parameters are batched.
+        """
         raise NotImplementedError
 
     def sample_n(self, n):
+        """
+        Generates n reparameterized samples or n batches of samples if the distribution parameters
+        are batched.
+        """
+        return self.rsample_n(n).detach()
+
+    def rsample_n(self, n):
         """
         Generates n samples or n batches of samples if the distribution parameters
         are batched.
@@ -181,15 +196,33 @@ class Normal(Distribution):
         std (float or Tensor or Variable): standard deviation of the distribution
     """
 
+    has_sample_grad = True
+
     def __init__(self, mean, std):
         self.mean = mean
         self.std = std
 
     def sample(self):
-        return torch.normal(self.mean, self.std)
+    	return torch.normal(self.mean, self.std)
+
+    def rsample(self):
+        eps = torch.normal(torch.zeros_like(self.mean), torch.ones_like(self.std))
+        return self.mean + self.std * eps
 
     def sample_n(self, n):
         return torch.normal(_expand_n(self.mean, n), _expand_n(self.std, n))
+
+    def rsample_n(self, n):
+        # cleanly expand float or Tensor or Variable parameters
+        def expand(v):
+            if isinstance(v, Number):
+                return torch.Tensor([v]).expand(n, 1)
+            else:
+                return v.expand(n, *v.size())
+        expanded_mean = expand(self.mean)
+        expanded_std = expand(self.std)
+        eps = torch.normal(torch.zeros_like(expanded_mean), torch.ones_like(expanded_std))
+        return expanded_mean + expanded_std * eps
 
     def log_prob(self, value):
         # compute the variance

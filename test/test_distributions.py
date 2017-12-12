@@ -71,6 +71,10 @@ class TestDistributions(TestCase):
         self.assertEqual(Bernoulli(r).sample().size(), (1,))
         self._gradcheck_log_prob(Bernoulli, (p,))
 
+        def call_rsample():
+            return Bernoulli(r).rsample()
+        self.assertRaises(NotImplementedError, call_rsample)
+
         def ref_log_prob(idx, val, log_prob):
             prob = p.data[idx]
             self.assertEqual(log_prob, math.log(prob if val else 1 - prob))
@@ -82,14 +86,19 @@ class TestDistributions(TestCase):
         self.assertEqual(Bernoulli(p).sample().size(), (2, 3, 5))
         self.assertEqual(Bernoulli(p).sample_n(2).size(), (2, 2, 3, 5))
 
-    def test_multinomial_1d(self):
+    def test_categorical_1d(self):
         p = Variable(torch.Tensor([0.1, 0.2, 0.3]), requires_grad=True)
         # TODO: this should return a 0-dim tensor once we have Scalar support
         self.assertEqual(Categorical(p).sample().size(), (1,))
         self.assertEqual(Categorical(p).sample_n(1).size(), (1, 1))
+
+        def call_rsample():
+            return Categorical(p).rsample()
+        self.assertRaises(NotImplementedError, call_rsample)
+
         self._gradcheck_log_prob(Categorical, (p,))
 
-    def test_multinomial_2d(self):
+    def test_categorical_2d(self):
         probabilities = [[0.1, 0.2, 0.3], [0.5, 0.3, 0.2]]
         p = Variable(torch.Tensor(probabilities), requires_grad=True)
         self.assertEqual(Categorical(p).sample().size(), (2,))
@@ -113,6 +122,35 @@ class TestDistributions(TestCase):
         self.assertEqual(Normal(mean_1d, std_1d).sample().size(), (1,))
         self.assertEqual(Normal(0.2, .6).sample_n(1).size(), (1, 1))
         self.assertEqual(Normal(-0.7, 50.0).sample_n(1).size(), (1, 1))
+
+        # test for reparametrized sample
+        state = torch.get_rng_state()
+        eps = torch.normal(torch.zeros_like(mean), torch.ones_like(std))
+        torch.set_rng_state(state)
+        z = Normal(mean, std).rsample()
+        z.backward(torch.ones_like(z))
+        self.assertEqual(mean.grad, torch.ones_like(mean))
+        self.assertEqual(std.grad, eps)
+        mean.grad.zero_()
+        std.grad.zero_()
+        self.assertEqual(z.size(), (5, 5))
+
+        # test for reparametrized sample_n
+        state = torch.get_rng_state()
+        z = Normal(mean, std).rsample_n(7)
+        torch.set_rng_state(state)
+        eps = torch.normal(torch.zeros_like(z), torch.ones_like(z)).sum(dim=0)
+        z.backward(torch.ones_like(z))
+        self.assertEqual(mean.grad, torch.ones_like(z).sum(dim=0))
+        self.assertEqual(std.grad, eps)
+        mean.grad.zero_()
+        std.grad.zero_()
+        self.assertEqual(z.size(), (7, 5, 5))
+
+        self.assertEqual(Normal(mean_1d, std_1d).rsample_n(1).size(), (1, 1))
+        self.assertEqual(Normal(mean_1d, std_1d,).rsample().size(), (1,))
+        self.assertEqual(Normal(0.2, .6,).rsample_n(1).size(), (1, 1))
+        self.assertEqual(Normal(-0.7, 50.0,).rsample_n(1).size(), (1, 1))
 
         self._gradcheck_log_prob(Normal, (mean, std))
         self._gradcheck_log_prob(Normal, (mean, 1.0))
