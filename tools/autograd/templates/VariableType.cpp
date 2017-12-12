@@ -345,7 +345,6 @@ Tensor & VariableType::s_copy_(Tensor & self, const Tensor & src, bool async) co
   auto flags = compute_flags({ self, src });
   flags.requires_grad &= isFloatingPoint(self.type().scalarType());
   if (flags.requires_grad) {
-    // TODO: handle device movement
     grad_fn = std::make_shared<CopyBackwards>();
     grad_fn->next_functions = compute_next_functions({ self, src });
     grad_fn->num_inputs = 1;

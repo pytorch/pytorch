@@ -295,17 +295,23 @@ static PyObject * THPVariable_cpu(PyObject* self, PyObject* args)
 
 static Tensor dispatch_cuda(const Tensor & self, int64_t device, bool async) {
   AutoNoGIL no_gil;
-  AutoGPU auto_gpu(self);
-  auto_gpu.setDevice(device);  // no effect if device is -1
-  if (self.type().backend() == at::kCPU) {
-    // async is only relevant for CPU -> CUDA transfers
-    auto& type = self.type().toBackend(at::kCUDA);
-    return type.tensor(self.sizes()).copy_(self, async);
-  } else if (self.type().backend() == at::kCUDA && self.get_device() != at::current_device()) {
-    // force copy if self is a CUDA tensor on a different device
-    return self.clone();
+  AutoGPU auto_gpu(device);
+  if (self.type().is_cuda() && self.get_device() == at::current_device()) {
+    return self;
   }
-  return self.toBackend(at::kCUDA);
+  auto backend = self.type().is_sparse() ? at::kSparseCUDA : at::kCUDA;
+  auto& type = self.type().toBackend(backend);
+  return type.tensor(self.sizes()).copy_(self, async);
+}
+
+static void lazy_init_cuda() {
+  static std::once_flag once;
+  std::call_once(once, []() {
+    auto module = THPObjectPtr(PyImport_ImportModule("torch.cuda"));
+    if (!module) throw python_error();
+    auto res = THPObjectPtr(PyObject_CallMethod(module.get(), "_lazy_init", ""));
+    if (!res) throw python_error();
+  });
 }
 
 static PyObject * THPVariable_cuda(PyObject* self, PyObject* args, PyObject* kwargs)
@@ -317,6 +323,7 @@ static PyObject * THPVariable_cuda(PyObject* self, PyObject* args, PyObject* kwa
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
   PyObject* parsed_args[2];
   auto r = parser.parse(args, kwargs, parsed_args);
+  lazy_init_cuda();
   return THPVariable_Wrap(dispatch_cuda(self_, r.toInt64(0), r.toBool(1)));
   END_HANDLE_TH_ERRORS
 }
