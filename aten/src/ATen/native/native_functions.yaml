@@ -28,6 +28,10 @@
 # recommended that you copy the generated C++ function declaration to your definition so that the two
 # match.
 
+- func: bernoulli_(Tensor self, Tensor p, Generator* generator=nullptr) -> Tensor
+
+- func: bernoulli_(Tensor self, double p, Generator* generator=nullptr) -> Tensor
+
 - func: type_as(Tensor self, Tensor other) -> Tensor
 
 - func: expand_as(Tensor self, Tensor other) -> Tensor

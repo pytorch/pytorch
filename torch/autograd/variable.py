@@ -307,12 +307,6 @@ class Variable(_C._VariableBase):
     def expand_as(self, tensor):
         return self.expand(tensor.size())
 
-    def multinomial(self, num_samples=1, replacement=False):
-        return Variable(torch.multinomial(self.data, num_samples, replacement))
-
-    def bernoulli(self):
-        return Variable(torch.bernoulli(self.data))
-
     def __rsub__(self, other):
         return -self + other
 
@@ -375,13 +369,8 @@ class Variable(_C._VariableBase):
         return Variable.from_numpy(array)
 
     class _torch(object):
-        @staticmethod
-        def normal(means, std=1):
-            if isinstance(means, Variable):
-                means = means.data
-            if isinstance(std, Variable):
-                std = std.data
-            return Variable(torch.normal(means, std))
+        pass
+
 
 for method in dir(Variable):
     # This will also wrap some methods that normally aren't part of the

@@ -7,11 +7,13 @@ except ImportError:
     from yaml import Loader
 
 
-def python_scalar(s):
+def parse_default(s):
     if s.lower() == 'true':
         return True
     elif s.lower() == 'false':
         return False
+    elif s == 'nullptr':
+        return s
     try:
         return int(s)
     except Exception:
@@ -21,10 +23,10 @@ def python_scalar(s):
 def sanitize_types(typ):
     # split tuples into constituent list
     if typ[0] == '(' and typ[-1] == ')':
-        type_list = [x.strip() for x in typ[1:-1].split(',')]
-    else:
-        type_list = [typ]
-    return type_list
+        return [x.strip() for x in typ[1:-1].split(',')]
+    elif typ == 'Generator*':
+        return ['Generator *']
+    return [typ]
 
 
 def parse_arguments(args):
@@ -36,7 +38,7 @@ def parse_arguments(args):
 
         if '=' in name:
             ns = name.split('=', 1)
-            name, default = ns[0], python_scalar(ns[1])
+            name, default = ns[0], parse_default(ns[1])
 
         typ = sanitize_types(t)
         assert len(typ) == 1
