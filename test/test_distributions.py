@@ -63,6 +63,17 @@ class TestDistributions(TestCase):
             self.assertLess(-threshold, bias, message)
             self.assertLess(bias, threshold, message)
 
+    def _check_enumerate_support(self, dist, examples):
+        for param, expected in examples:
+            param = torch.Tensor(param)
+            expected = torch.Tensor(expected)
+            actual = dist(param).enumerate_support()
+            self.assertEqual(actual, expected)
+            param = Variable(param)
+            expected = Variable(expected)
+            actual = dist(param).enumerate_support()
+            self.assertEqual(actual, expected)
+
     def test_bernoulli(self):
         p = Variable(torch.Tensor([0.7, 0.2, 0.4]), requires_grad=True)
         r = Variable(torch.Tensor([0.3]), requires_grad=True)
@@ -77,19 +88,27 @@ class TestDistributions(TestCase):
 
         self._check_log_prob(Bernoulli(p), ref_log_prob)
 
+    def test_bernoulli_enumerate_support(self):
+        examples = [
+            ([0.1], [[0], [1]]),
+            ([0.1, 0.9], [[0, 0], [1, 1]]),
+            ([[0.1, 0.2], [0.3, 0.4]], [[[0, 0], [0, 0]], [[1, 1], [1, 1]]]),
+        ]
+        self._check_enumerate_support(Bernoulli, examples)
+
     def test_bernoulli_3d(self):
         p = Variable(torch.Tensor(2, 3, 5).fill_(0.5), requires_grad=True)
         self.assertEqual(Bernoulli(p).sample().size(), (2, 3, 5))
         self.assertEqual(Bernoulli(p).sample_n(2).size(), (2, 2, 3, 5))
 
-    def test_multinomial_1d(self):
+    def test_categorical_1d(self):
         p = Variable(torch.Tensor([0.1, 0.2, 0.3]), requires_grad=True)
         # TODO: this should return a 0-dim tensor once we have Scalar support
         self.assertEqual(Categorical(p).sample().size(), (1,))
         self.assertEqual(Categorical(p).sample_n(1).size(), (1, 1))
         self._gradcheck_log_prob(Categorical, (p,))
 
-    def test_multinomial_2d(self):
+    def test_categorical_2d(self):
         probabilities = [[0.1, 0.2, 0.3], [0.5, 0.3, 0.2]]
         p = Variable(torch.Tensor(probabilities), requires_grad=True)
         self.assertEqual(Categorical(p).sample().size(), (2,))
@@ -101,6 +120,13 @@ class TestDistributions(TestCase):
             self.assertEqual(log_prob, math.log(sample_prob))
 
         self._check_log_prob(Categorical(p), ref_log_prob)
+
+    def test_categorical_enumerate_support(self):
+        examples = [
+            ([0.1, 0.2, 0.7], [0, 1, 2]),
+            ([[0.1, 0.9], [0.3, 0.7]], [[0, 0], [1, 1]]),
+        ]
+        self._check_enumerate_support(Categorical, examples)
 
     def test_normal(self):
         mean = Variable(torch.randn(5, 5), requires_grad=True)

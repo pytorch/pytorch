@@ -52,6 +52,7 @@ class Distribution(object):
     r"""
     Distribution is the abstract base class for probability distributions.
     """
+    has_enumerate_support = False
 
     def sample(self):
         """
@@ -77,6 +78,20 @@ class Distribution(object):
         """
         raise NotImplementedError
 
+    def enumerate_support(self):
+        """
+        Returns tensor containing all values supported by a discrete
+        distribution. The result will enumerate over dimension 0.
+
+        Note that this enumerates over all batched variables in lock-step
+        ``[[0, 0], [1, 1], ...]``. To iterate over the full Cartesian product
+        use ``itertools.product(m.enumerate_support())``.
+
+        Returns:
+            Variable or Tensor iterating over dimension 0.
+        """
+        raise NotImplementedError
+
 
 class Bernoulli(Distribution):
     r"""
@@ -95,6 +110,7 @@ class Bernoulli(Distribution):
     Args:
         probs (Tensor or Variable): the probabilty of sampling `1`
     """
+    has_enumerate_support = True
 
     def __init__(self, probs):
         self.probs = probs
@@ -111,6 +127,17 @@ class Bernoulli(Distribution):
 
         # evaluate using the values
         return log_pmf.gather(0, value.unsqueeze(0).long()).squeeze(0)
+
+    def enumerate_support(self):
+        batch_shape = self.probs.shape
+        values = torch.arange(2).long()
+        values = values.view((-1,) + (1,) * len(batch_shape))
+        values = values.expand((-1,) + batch_shape)
+        if self.probs.is_cuda:
+            values = values.cuda()
+        if isinstance(self.probs, Variable):
+            values = Variable(values)
+        return values
 
 
 class Categorical(Distribution):
@@ -139,6 +166,7 @@ class Categorical(Distribution):
     Args:
         probs (Tensor or Variable): event probabilities
     """
+    has_enumerate_support = True
 
     def __init__(self, probs):
         if probs.dim() != 1 and probs.dim() != 2:
@@ -162,6 +190,17 @@ class Categorical(Distribution):
             return p.gather(-1, value).log()
 
         return p.gather(-1, value.unsqueeze(-1)).squeeze(-1).log()
+
+    def enumerate_support(self):
+        batch_shape, event_size = self.probs.shape[:-1], self.probs.shape[-1]
+        values = torch.arange(event_size).long()
+        values = values.view((-1,) + (1,) * len(batch_shape))
+        values = values.expand((-1,) + batch_shape)
+        if self.probs.is_cuda:
+            values = values.cuda()
+        if isinstance(self.probs, Variable):
+            values = Variable(values)
+        return values
 
 
 class Normal(Distribution):
