@@ -48,4 +48,3 @@ class Bernoulli(Distribution):
         if isinstance(self.probs, Variable):
             values = Variable(values)
         return values
-
