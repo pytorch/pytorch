@@ -469,6 +469,7 @@ main_sources = [
     "torch/csrc/jit/passes/common_subexpression_elimination.cpp",
     "torch/csrc/jit/passes/peephole.cpp",
     "torch/csrc/jit/passes/inplace_check.cpp",
+    "torch/csrc/jit/passes/canonicalize.cpp",
     "torch/csrc/jit/passes/onnx/peephole.cpp",
     "torch/csrc/jit/generated/aten_dispatch.cpp",
     "torch/csrc/autograd/init.cpp",

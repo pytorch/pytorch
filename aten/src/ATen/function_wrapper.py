@@ -513,6 +513,7 @@ def create_generic(top_env, declarations):
             ('buffers', buffer_names),
             ('returns', option['returns']),
             ('inplace', option['inplace']),
+            ('primitive', option['primitive']),
         ]))
 
     def native_get_formals(option, include_constants=False):
@@ -674,6 +675,7 @@ def create_generic(top_env, declarations):
             ('mode', option['mode']),
             ('returns', option['returns']),
             ('inplace', option['inplace']),
+            ('primitive', option['primitive']),
         ]))
 
     output_declarations = []

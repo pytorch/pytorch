@@ -92,6 +92,8 @@ def _optimize_trace(trace, aten):
     torch._C._jit_pass_lint(trace)
     torch._C._jit_pass_dce(trace)
     torch._C._jit_pass_lint(trace)
+    torch._C._jit_pass_canonicalize(trace)
+    torch._C._jit_pass_lint(trace)
 
 
 def _trace(func, args, return_outs=False):

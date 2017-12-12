@@ -74,6 +74,13 @@ def run(paths):
             declaration['template_scalar'] = func.get('template_scalar')
             declaration['arguments'] = func.get('arguments', parse_arguments(arguments))
             declaration['type_method_definition_dispatch'] = func.get('dispatch', declaration['name'])
+            # NB: if the 'primitive'-ness of a function is not
+            # explicitly specified, we default to checking if there are
+            # separate dispatches.  If there are, it probably is a
+            # primitive (but if there aren't this may not necessarily
+            # be the case; see for example the CuDNN native functions).
+            fancy_dispatch = isinstance(func.get('dispatch'), dict) or func.get('template_scalar')
+            declaration['primitive'] = func.get('primitive', fancy_dispatch)
             declarations.append(declaration)
 
     return declarations

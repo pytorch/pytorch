@@ -19,6 +19,11 @@
 #           CUDA: func_cuda
 # template_scalar: if set to True, generates the native function as a templatized function on the scalar
 #                  (C++) type of the underlying function.
+# primitive: if True, this is a "primitive" native declaration, which
+#            must have its derivative expressed directly.  Non-primitive declarations
+#            may directly access the pointer data of their tensors, and
+#            generally cannot be differentiated simply by making use of
+#            the fact that they call other ATen functions.
 #
 # In addition to the variants generation, these declarations will also generate a C++ function declaration
 # in NativeFunctions.h; it is up to you to write the corresponding definitions in the correct file under /native
@@ -37,6 +42,10 @@
 - func: expand_as(Tensor self, Tensor other) -> Tensor
 
 - func: split(Tensor self, int64_t split_size, int64_t dim=0) -> TensorList
+  # This is not primitive, but if you derive the derivative
+  # automatically it is very inefficient (the backwards of 'narrow' is
+  # very inefficient, as it must zero pad its gradient into the size
+  # of the original input.)
 
 - func: chunk(Tensor self, int64_t chunks, int64_t dim=0) -> TensorList
 
@@ -45,6 +54,7 @@
 - func: stride(Tensor self, int64_t dim) -> int64_t
 
 - func: index(Tensor self, TensorList indices) -> Tensor
+  # NB: This function is special-cased in tools/autograd/gen_variable_type.py
 
 - func: index_put_(Tensor self, TensorList indices, Tensor values) -> Tensor
 
@@ -65,22 +75,33 @@
 - func: slice(Tensor self, int64_t start=0, int64_t end=9223372036854775807, int64_t step=1, int64_t dim=0) -> Tensor
 
 - func: permute(Tensor self, IntList dims) -> Tensor
+  # Manually differentiated (but not primitive, uses as_strided)
 
 - func: expand(Tensor self, IntList size) -> Tensor
+  # Manually differentiated (but not primitive, uses as_strided)
 
 - func: squeeze(Tensor self) -> Tensor
+  # Manually differentiated (but not primitive, uses as_strided)
 
 - func: squeeze(Tensor self, int64_t dim) -> Tensor
+  # Manually differentiated (but not primitive, uses as_strided)
 
 - func: squeeze_(Tensor self) -> Tensor
+  # Manually differentiated (but not primitive, uses as_strided)
 
 - func: squeeze_(Tensor self, int64_t dim) -> Tensor
+  # Manually differentiated (but not primitive, uses as_strided)
 
 - func: unsqueeze(Tensor self, int64_t dim) -> Tensor
+  # Manually differentiated (but not primitive, uses as_strided)
 
 - func: unsqueeze_(Tensor self, int64_t dim) -> Tensor
+  # Manually differentiated (but not primitive, uses as_strided)
 
 - func: _det_with_svd(Tensor self) -> (Tensor, Tensor, Tensor, Tensor)
+  primitive: True
+  # This function returns the SVD for computing the derivative.
+  # Don't try to differentiate it directly.
 
 - func: det(Tensor self) -> Tensor
 
@@ -95,12 +116,14 @@
 - func: matmul(Tensor self, Tensor other) -> Tensor
 
 - func: RoiPooling2d_forward(Tensor input, Tensor rois, int64_t pooledHeight, int64_t pooledWidth, double spatialScale) -> (Tensor, Tensor)
+  primitive: True
   variants: function
   dispatch:
     CPU: RoiPooling2d_forward_cpu
     CUDA: RoiPooling2d_forward_cuda
 
 - func: RoiPooling2d_backward(Tensor input, Tensor rois, int64_t pooledHeight, int64_t pooledWidth, double spatialScale, Tensor gradOutput, Tensor argmaxes) -> Tensor
+  primitive: True
   variants: function
   dispatch:
     CPU: RoiPooling2d_backward_cpu

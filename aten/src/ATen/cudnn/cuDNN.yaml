@@ -1,32 +1,42 @@
 - func: cudnn_convolution_forward(Tensor input, Tensor weight, IntList padding, IntList stride, IntList dilation, int64_t groups, bool benchmark, bool deterministic) -> Tensor
   variants: function
+  primitive: True
 
 - func: cudnn_convolution_transpose_backward(Tensor grad_output, Tensor weight, IntList padding, IntList stride, IntList dilation, int64_t groups, bool benchmark, bool deterministic) -> Tensor
   variants: function
+  primitive: True
 
 - func: cudnn_convolution_full_forward(Tensor input, Tensor weight, Tensor bias, IntList padding, IntList stride, IntList dilation, int64_t groups, bool benchmark, bool deterministic) -> Tensor
   variants: function
+  primitive: True
 
 - func: cudnn_convolution_transpose_full_forward(Tensor input, Tensor weight, Tensor bias, IntList padding, IntList output_padding, IntList stride, IntList dilation, int64_t groups, bool benchmark, bool deterministic) -> Tensor
   variants: function
+  primitive: True
 
 - func: cudnn_convolution_backward(IntList input_size, Tensor grad_output, Tensor weight, IntList padding, IntList stride, IntList dilation, int64_t groups, bool benchmark, bool deterministic) -> Tensor
   variants: function
+  primitive: True
 
 - func: cudnn_convolution_backward_weight(IntList weight_size, Tensor grad_output, Tensor input, IntList padding, IntList stride, IntList dilation, int64_t groups, bool benchmark, bool deterministic) -> Tensor
   variants: function
+  primitive: True
 
 - func: cudnn_convolution_transpose_backward_weight(IntList weight_size, Tensor grad_output, Tensor input, IntList padding, IntList stride, IntList dilation, int64_t groups, bool benchmark, bool deterministic) -> Tensor
   variants: function
+  primitive: True
 
 - func: cudnn_convolution_backward_bias(Tensor grad_output) -> Tensor
   variants: function
+  primitive: True
 
 - func: cudnn_batch_norm_forward(Tensor input, Tensor weight, Tensor bias, Tensor running_mean, Tensor running_var, Tensor save_mean, Tensor save_var, bool training, double exponential_average_factor, double epsilon) -> Tensor
   variants: function
+  primitive: True
 
 - func: cudnn_batch_norm_backward(Tensor input, Tensor grad_output, Tensor weight, Tensor save_mean, Tensor save_var, bool training, double epsilon) -> (Tensor, Tensor, Tensor)
   variants: function
+  primitive: True
 
 # NB: input is special cased in a way I don't quite understand
 - func: cudnn_grid_sampler(Tensor self, Tensor grid)
@@ -35,6 +45,7 @@
       name: output
   variants: function
   dispatch: cudnn_grid_sampler_forward
+  primitive: True
 
 - func: cudnn_grid_sampler_backward(Tensor self, Tensor grid, Tensor grad_output)
   return:
@@ -43,6 +54,7 @@
     - type: Tensor
       name: grad_grid
   variants: function
+  primitive: True
 
 - func: cudnn_affine_grid_generator(Tensor theta, int64_t N, int64_t C, int64_t H, int64_t W) -> Tensor
   return:
@@ -50,6 +62,7 @@
       name: grid
   variants: function
   dispatch: cudnn_affine_grid_generator_forward
+  primitive: True
 
 # TODO: Why do I have to call this grad?!
 - func: cudnn_affine_grid_generator_backward(Tensor grad, int64_t N, int64_t C, int64_t H, int64_t W)
@@ -57,3 +70,4 @@
     - type: Tensor
       name: grad_theta
   variants: function
+  primitive: True
