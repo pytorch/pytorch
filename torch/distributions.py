@@ -42,8 +42,6 @@ def _expand_n(v, n):
     r"""
     Cleanly expand float or Tensor or Variable parameters.
     """
-    if n is None:
-        return v
     if isinstance(v, Number):
         return torch.Tensor([v]).expand(n, 1)
     else:
@@ -55,10 +53,10 @@ class Distribution(object):
     Distribution is the abstract base class for probability distributions.
     """
 
-    def sample(self, n=None):
+    def sample(self, sample_shape=()):
         """
-        Generates n samples or n batches of samples of samples if the distribution
-        parameters are batched.
+        Generates sample_shape shaped samples or sample_shape shaped batches
+        of samples if the distribution parameters are batched.
         """
         raise NotImplementedError
 
@@ -68,7 +66,7 @@ class Distribution(object):
         are batched.
         """
         warnings.warn('sample_n will be deprecated. Use .sample(n) instead', PendingDeprecationWarning)
-        return self.sample(n)
+        return self.sample((n,))
 
     def log_prob(self, value):
         """
@@ -102,11 +100,13 @@ class Bernoulli(Distribution):
     def __init__(self, probs):
         self.probs = probs
 
-    def sample(self, n=None):
-        if n is None:
+    def sample(self, sample_shape=()):
+        if len(sample_shape) == 0:
             return torch.bernoulli(self.probs)
+        elif len(sample_shape) == 1:
+            return torch.bernoulli(self.probs.expand(sample_shape[0], *self.probs.size()))
         else:
-            return torch.bernoulli(self.probs.expand(n, *self.probs.size()))
+        	raise NotImplementedError("sample is not implemented for len(sample_shape)>1")
 
     def log_prob(self, value):
         # compute the log probabilities for 0 and 1
@@ -149,13 +149,16 @@ class Categorical(Distribution):
             raise ValueError("probs must be 1D or 2D")
         self.probs = probs
 
-    def sample(self, n=None):
-        if n is None:
+    def sample(self, sample_shape=()):
+        if len(sample_shape) == 0:
             return torch.multinomial(self.probs, 1, True).squeeze(-1)
-        elif n == 1:
-            return self.sample().expand(1, 1)
+        elif len(sample_shape) == 1:
+        	if sample_shape[0] == 1:
+        		return self.sample().expand(1, 1)
+        	else:
+        		return torch.multinomial(self.probs, sample_shape[0], True).t()
         else:
-            return torch.multinomial(self.probs, n, True).t()
+        	raise NotImplementedError("sample is not implemented for len(sample_shape)>1")
 
     def log_prob(self, value):
         p = self.probs / self.probs.sum(-1, keepdim=True)
@@ -187,8 +190,13 @@ class Normal(Distribution):
         self.mean = mean
         self.std = std
 
-    def sample(self, n=None):
-        return torch.normal(_expand_n(self.mean, n), _expand_n(self.std, n))
+    def sample(self, sample_shape=()):
+    	if len(sample_shape) == 0:
+    		return torch.normal(self.mean, self.std)
+    	elif len(sample_shape) == 1:
+    		return torch.normal(_expand_n(self.mean, sample_shape[0]), _expand_n(self.std, sample_shape[0]))
+    	else:
+    		raise NotImplementedError("sample is not implemented for len(sample_shape)>1")      
 
     def log_prob(self, value):
         # compute the variance
@@ -235,8 +243,13 @@ class Gamma(Distribution):
         self.alpha = alpha
         self.beta = beta
 
-    def sample(self, n=None):
-        return _standard_gamma(_expand_n(self.alpha, n)) / self.beta
+    def sample(self, sample_shape=()):
+    	if len(sample_shape) == 0:
+    		return _standard_gamma(self.alpha) / self.beta
+    	elif len(sample_shape) == 1:
+    		return _standard_gamma(_expand_n(self.alpha, sample_shape[0])) / self.beta
+    	else:
+    		raise NotImplementedError("sample is not implemented for len(sample_shape)>1") 
 
     def log_prob(self, value):
         return (self.alpha * torch.log(self.beta) +
