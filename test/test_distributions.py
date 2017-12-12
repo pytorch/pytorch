@@ -70,6 +70,9 @@ class TestDistributions(TestCase):
         self.assertEqual(Bernoulli(r).sample_n(8).size(), (8, 1))
         self.assertEqual(Bernoulli(r).sample().size(), (1,))
         self._gradcheck_log_prob(Bernoulli, (p,))
+        def call_sample_wshape_gt_2():
+            return Bernoulli(r).sample((1,2))
+        self.assertRaises(NotImplementedError, call_sample_wshape_gt_2)
 
         def ref_log_prob(idx, val, log_prob):
             prob = p.data[idx]
@@ -82,14 +85,17 @@ class TestDistributions(TestCase):
         self.assertEqual(Bernoulli(p).sample().size(), (2, 3, 5))
         self.assertEqual(Bernoulli(p).sample_n(2).size(), (2, 2, 3, 5))
 
-    def test_multinomial_1d(self):
+    def test_categorical_1d(self):
         p = Variable(torch.Tensor([0.1, 0.2, 0.3]), requires_grad=True)
         # TODO: this should return a 0-dim tensor once we have Scalar support
         self.assertEqual(Categorical(p).sample().size(), (1,))
         self.assertEqual(Categorical(p).sample_n(1).size(), (1, 1))
         self._gradcheck_log_prob(Categorical, (p,))
+        def call_sample_wshape_gt_2():
+            return Categorical(p).sample((1,2))
+        self.assertRaises(NotImplementedError, call_sample_wshape_gt_2)
 
-    def test_multinomial_2d(self):
+    def test_categorical_2d(self):
         probabilities = [[0.1, 0.2, 0.3], [0.5, 0.3, 0.2]]
         p = Variable(torch.Tensor(probabilities), requires_grad=True)
         self.assertEqual(Categorical(p).sample().size(), (2,))
@@ -113,6 +119,10 @@ class TestDistributions(TestCase):
         self.assertEqual(Normal(mean_1d, std_1d).sample().size(), (1,))
         self.assertEqual(Normal(0.2, .6).sample_n(1).size(), (1, 1))
         self.assertEqual(Normal(-0.7, 50.0).sample_n(1).size(), (1, 1))
+
+        def call_sample_wshape_gt_2():
+            return Normal(mean, std).sample((1,2))
+        self.assertRaises(NotImplementedError, call_sample_wshape_gt_2)
 
         self._gradcheck_log_prob(Normal, (mean, std))
         self._gradcheck_log_prob(Normal, (mean, 1.0))
@@ -149,6 +159,10 @@ class TestDistributions(TestCase):
         self.assertEqual(Gamma(0.5, 0.5).sample().size(), (1,))
         self.assertEqual(Gamma(0.5, 0.5).sample_n(1).size(), (1, 1))
 
+        def call_sample_wshape_gt_2():
+            return Gamma(alpha, beta).sample((1,2))
+        self.assertRaises(NotImplementedError, call_sample_wshape_gt_2)
+        
         def ref_log_prob(idx, x, log_prob):
             a = alpha.data.view(-1)[idx]
             b = beta.data.view(-1)[idx]
