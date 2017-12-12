@@ -10,11 +10,13 @@
 #include "torch/csrc/utils/object_ptr.h"
 #include "torch/csrc/utils/python_arg_parser.h"
 #include "torch/csrc/utils/python_numbers.h"
+#include "torch/csrc/utils/python_strings.h"
 #include "torch/csrc/utils/python_tuples.h"
 #include "torch/csrc/utils/tensor_apply.h"
 #include "torch/csrc/utils/tensor_list.h"
 #include "torch/csrc/utils/tensor_new.h"
 #include "torch/csrc/utils/tensor_numpy.h"
+#include "torch/csrc/utils/tensor_types.h"
 
 #include "python_variable_methods_dispatch.h"
 
@@ -278,32 +280,6 @@ static PyObject * THPVariable_invert(PyObject* self, PyObject* args) {
   END_HANDLE_TH_ERRORS
 }
 
-static Tensor dispatch_to_backend(const Tensor & self, Backend backend) {
-  AutoNoGIL no_gil;
-  AutoGPU auto_gpu(self);
-  return self.toBackend(backend);
-}
-
-static PyObject * THPVariable_cpu(PyObject* self, PyObject* args)
-{
-   HANDLE_TH_ERRORS
-   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
-   auto backend = self_.is_sparse() ? Backend::SparseCPU : Backend::CPU;
-   return wrap(dispatch_to_backend(self_, backend));
-   END_HANDLE_TH_ERRORS
-}
-
-static Tensor dispatch_cuda(const Tensor & self, int64_t device, bool async) {
-  AutoNoGIL no_gil;
-  AutoGPU auto_gpu(device);
-  if (self.type().is_cuda() && self.get_device() == at::current_device()) {
-    return self;
-  }
-  auto backend = self.type().is_sparse() ? at::kSparseCUDA : at::kCUDA;
-  auto& type = self.type().toBackend(backend);
-  return type.tensor(self.sizes()).copy_(self, async);
-}
-
 static void lazy_init_cuda() {
   static std::once_flag once;
   std::call_once(once, []() {
@@ -312,6 +288,31 @@ static void lazy_init_cuda() {
     auto res = THPObjectPtr(PyObject_CallMethod(module.get(), "_lazy_init", ""));
     if (!res) throw python_error();
   });
+}
+
+static Tensor dispatch_type(const Tensor & self, const at::Type & type, int device=-1, bool async=false) {
+  if (type.is_cuda()) {
+    lazy_init_cuda();
+  }
+  AutoNoGIL no_gil;
+  AutoGPU auto_gpu(device != -1 ? device : self.type().is_cuda() ? self.get_device() : -1);
+  if (self.type() == type && self.type().is_cuda() && self.get_device() != at::current_device()) {
+    return type.copy(self, async);
+  }
+  if (!self.type().is_cuda() && type.is_cuda()) {
+    return type.copy(self, async);
+  }
+  return self.toType(type);
+}
+
+static PyObject * THPVariable_cpu(PyObject* self, PyObject* args)
+{
+   HANDLE_TH_ERRORS
+   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
+   auto backend = self_.is_sparse() ? Backend::SparseCPU : Backend::CPU;
+   auto& type = self_.type().toBackend(backend);
+   return wrap(dispatch_type(self_, type));
+   END_HANDLE_TH_ERRORS
 }
 
 static PyObject * THPVariable_cuda(PyObject* self, PyObject* args, PyObject* kwargs)
@@ -323,24 +324,19 @@ static PyObject * THPVariable_cuda(PyObject* self, PyObject* args, PyObject* kwa
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
   PyObject* parsed_args[2];
   auto r = parser.parse(args, kwargs, parsed_args);
-  lazy_init_cuda();
-  return THPVariable_Wrap(dispatch_cuda(self_, r.toInt64(0), r.toBool(1)));
+  auto backend = self_.is_sparse() ? at::kSparseCUDA : at::kCUDA;
+  auto& type = self_.type().toBackend(backend);
+  return THPVariable_Wrap(dispatch_type(self_, type, r.toInt64(0), r.toBool(1)));
   END_HANDLE_TH_ERRORS
-}
-
-static Tensor dispatch_to_type(const Tensor & self, ScalarType scalarType) {
-  AutoNoGIL no_gil;
-  AutoGPU auto_gpu(self);
-  return self.toType(scalarType);
 }
 
 static PyObject * THPVariable_to_type(PyObject* self, ScalarType scalarType) {
   HANDLE_TH_ERRORS
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
-  return THPVariable_Wrap(dispatch_to_type(self_, scalarType));
+  auto& type = self_.type().toScalarType(scalarType);
+  return THPVariable_Wrap(dispatch_type(self_, type));
   END_HANDLE_TH_ERRORS
 }
-
 static PyObject * THPVariable_byte(PyObject* self, PyObject* args) {
   return THPVariable_to_type(self, ScalarType::Byte);
 }
@@ -465,6 +461,32 @@ static PyObject * THPVariable_tolist(PyObject* self, PyObject* args)
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject * THPVariable_type(PyObject* self, PyObject* args, PyObject* kwargs)
+{
+  HANDLE_TH_ERRORS
+  static PythonArgParser parser({
+    "type(PyObject* new_type=None, bool async=False)"
+  });
+  auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
+  PyObject* parsed_args[2];
+  auto r = parser.parse(args, kwargs, parsed_args);
+  if (r.isNone(0)) {
+    return THPUtils_packString(torch::utils::type_to_string(self_.type()));
+  }
+  auto obj = r.pyobject(0);
+  std::string type_name;
+  if (PyType_Check(obj)) {
+    type_name = ((PyTypeObject*)obj)->tp_name;
+  } else if (THPUtils_checkString(obj)) {
+    type_name = THPUtils_unpackString(obj);
+  } else {
+    throw TypeError("new_type must be a type or str object");
+  }
+  auto& type = torch::utils::type_from_string(type_name);
+  return THPVariable_Wrap(dispatch_type(self_, type, -1, r.toBool(1)));
+  END_HANDLE_TH_ERRORS
+}
+
 // generated methods start here
 
 ${py_methods}
@@ -520,6 +542,7 @@ PyMethodDef variable_methods[] = {
   {"storage_type", (PyCFunction)THPVariable_storage_type, METH_NOARGS, NULL},
   {"stride", (PyCFunction)THPVariable_stride, METH_VARARGS | METH_KEYWORDS, NULL},
   {"tolist", (PyCFunction)THPVariable_tolist, METH_NOARGS, NULL},
+  {"type", (PyCFunction)THPVariable_type, METH_VARARGS | METH_KEYWORDS, NULL},
   ${py_method_defs}
   {NULL}
 };

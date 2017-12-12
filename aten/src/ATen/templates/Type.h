@@ -77,7 +77,7 @@ struct AT_API Type {
   // for external dispatch
   virtual TypeID ID() const = 0;
 
-  Tensor copy(const Tensor & src) const;
+  Tensor copy(const Tensor & src, bool async=false) const;
   Tensor & copy_(Tensor & self, const Tensor & src, bool async=false) const;
   virtual Tensor & s_copy_(Tensor & self, const Tensor & src, bool async) const = 0;
 

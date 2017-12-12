@@ -23,10 +23,10 @@ Tensor & Type::copy_(Tensor & self, const Tensor & src, bool async) const {
   return s_copy_(self, b_src, async);
 }
 
-Tensor Type::copy(const Tensor & src) const {
+Tensor Type::copy(const Tensor & src, bool async) const {
   AT_ASSERT(src.defined(), "attempt to copy an undefined tensor");
   Tensor r = this->tensor(src.sizes());
-  r.copy_(src);
+  r.copy_(src, async);
   return r;
 }
 

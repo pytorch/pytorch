@@ -214,11 +214,6 @@ class Variable(_C._VariableBase):
         self.register_hook(retain_grad_hook)
         self.retains_grad = True
 
-    def type(self, t):
-        if t != type(self.data):
-            return Type.apply(self, t)
-        return self
-
     def type_as(self, other):
         if torch.is_tensor(other):
             other = Variable(other)
