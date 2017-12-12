@@ -80,15 +80,14 @@ def _download_url_to_file(url, dst, hash_prefix, progress):
     f = tempfile.NamedTemporaryFile(delete=False)
     try:
         sha256 = hashlib.sha256()
-        with tqdm(total=file_size) as pbar:
+        with tqdm(total=file_size, disable=not progress) as pbar:
             while True:
                 buffer = u.read(8192)
                 if len(buffer) == 0:
                     break
                 f.write(buffer)
                 sha256.update(buffer)
-                if progress:
-                    pbar.update(len(buffer))
+                pbar.update(len(buffer))
 
         f.close()
         digest = sha256.hexdigest()
@@ -106,11 +105,15 @@ if tqdm is None:
     # fake tqdm if it's not installed
     class tqdm(object):
 
-        def __init__(self, total):
+        def __init__(self, total, disable=False):
             self.total = total
+            self.disable = disable
             self.n = 0
 
         def update(self, n):
+            if self.disable:
+                return
+
             self.n += n
             sys.stderr.write("\r{0:.1f}%".format(100 * self.n / float(self.total)))
             sys.stderr.flush()
@@ -119,4 +122,7 @@ if tqdm is None:
             return self
 
         def __exit__(self, exc_type, exc_val, exc_tb):
+            if self.disable:
+                return
+
             sys.stderr.write('\n')
