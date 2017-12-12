@@ -74,6 +74,7 @@ class FileManager(object):
 TEMPLATE_PATH = options.source_path + "/templates"
 GENERATOR_DERIVED = CodeTemplate.from_file(
     TEMPLATE_PATH + "/GeneratorDerived.h")
+DISPATCH_H = CodeTemplate.from_file(TEMPLATE_PATH + "/Dispatch.h")
 STORAGE_DERIVED_CPP = CodeTemplate.from_file(
     TEMPLATE_PATH + "/StorageDerived.cpp")
 STORAGE_DERIVED_H = CodeTemplate.from_file(TEMPLATE_PATH + "/StorageDerived.h")
@@ -119,15 +120,16 @@ if not options.no_cuda:
 
 densities = ['Dense', 'Sparse']
 
+# scalar_name, c_type, accreal, th_scalar_type, is_floating_type
 scalar_types = [
-    ('Byte', 'uint8_t', 'Long', 'uint8_t'),
-    ('Char', 'int8_t', 'Long', 'int8_t'),
-    ('Double', 'double', 'Double', 'double'),
-    ('Float', 'float', 'Double', 'float'),
-    ('Int', 'int', 'Long', 'int32_t'),
-    ('Long', 'int64_t', 'Long', 'int64_t'),
-    ('Short', 'int16_t', 'Long', 'int16_t'),
-    ('Half', 'Half', 'Double', 'THHalf'),
+    ('Byte', 'uint8_t', 'Long', 'uint8_t', False),
+    ('Char', 'int8_t', 'Long', 'int8_t', False),
+    ('Double', 'double', 'Double', 'double', True),
+    ('Float', 'float', 'Double', 'float', True),
+    ('Int', 'int', 'Long', 'int32_t', False),
+    ('Long', 'int64_t', 'Long', 'int64_t', False),
+    ('Short', 'int16_t', 'Long', 'int16_t', False),
+    ('Half', 'Half', 'Double', 'THHalf', True),
 ]
 
 # shared environment for non-derived base classes Type.h Tensor.h Storage.h
@@ -179,7 +181,7 @@ def format_yaml(data):
 
 
 def generate_storage_type_and_tensor(backend, density, scalar_type, declarations):
-    scalar_name, c_type, accreal, th_scalar_type = scalar_type
+    scalar_name, c_type, accreal, th_scalar_type, is_floating_type = scalar_type
     env = {}
     density_tag = 'Sparse' if density == 'Sparse' else ''
     th_density_tag = 'S' if density == 'Sparse' else ''
@@ -188,6 +190,8 @@ def generate_storage_type_and_tensor(backend, density, scalar_type, declarations
     env['ScalarType'] = c_type
     env['THScalarType'] = th_scalar_type
     env['AccScalarName'] = accreal
+    env['isFloatingType'] = is_floating_type
+    env['isIntegralType'] = not is_floating_type
     env['Storage'] = "{}{}Storage".format(backend, scalar_name)
     env['Type'] = "{}{}{}Type".format(density_tag, backend, scalar_name)
     env['Tensor'] = "{}{}{}Tensor".format(density_tag, backend, scalar_name)
@@ -351,7 +355,9 @@ def generate_outputs():
     file_manager.write('Tensor.h', TENSOR_H.substitute(top_env))
     file_manager.write('TensorMethods.h', TENSOR_METHODS_H.substitute(top_env))
     file_manager.write('Functions.h', FUNCTIONS_H.substitute(top_env))
-    file_manager.write('Dispatch.h', dispatch_macros.create(all_types))
+
+    dispatch_macros_gen = dispatch_macros.create(all_types)
+    file_manager.write('Dispatch.h', DISPATCH_H.substitute(top_env, dispatch_macros=dispatch_macros_gen))
     file_manager.write('Copy.cpp', copy_wrapper.create(all_types))
     file_manager.write('NativeFunctions.h', NATIVE_FUNCTIONS_H.substitute(top_env))
 

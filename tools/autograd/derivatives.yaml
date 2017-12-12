@@ -650,6 +650,9 @@
 
 - name: zeros  # fallthrough
 
+- name: _standard_gamma(Tensor self, Generator generator)
+  self: grad * output._standard_gamma_grad(self)
+
 # NN
 
 - name: binary_cross_entropy(Tensor self, Tensor target, Tensor weight, bool size_average)
