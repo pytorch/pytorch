@@ -32,7 +32,7 @@ static bool THDPModule_loadClasses(PyObject *self)
 
   if (!THDPDoubleTensor_postInit(torch_module)) return false;
   if (!THDPFloatTensor_postInit(torch_module)) return false;
-  //if (!THDPHalfTensor_postInit(torch_module)) return false;
+  if (!THDPHalfTensor_postInit(torch_module)) return false;
   if (!THDPLongTensor_postInit(torch_module)) return false;
   if (!THDPIntTensor_postInit(torch_module)) return false;
   if (!THDPShortTensor_postInit(torch_module)) return false;
@@ -41,7 +41,7 @@ static bool THDPModule_loadClasses(PyObject *self)
 
   ASSERT_NOT_NULL(THDPDoubleStorageClass = PyObject_GetAttrString(torch_module,(char*)"DoubleStorage"));
   ASSERT_NOT_NULL(THDPFloatStorageClass  = PyObject_GetAttrString(torch_module,(char*)"FloatStorage"));
-  //ASSERT_NOT_NULL(THDPHalfStorageClass   = PyObject_GetAttrString(torch_module,(char*)"HalfStorage"));
+  ASSERT_NOT_NULL(THDPHalfStorageClass   = PyObject_GetAttrString(torch_module,(char*)"HalfStorage"));
   ASSERT_NOT_NULL(THDPLongStorageClass   = PyObject_GetAttrString(torch_module,(char*)"LongStorage"));
   ASSERT_NOT_NULL(THDPIntStorageClass    = PyObject_GetAttrString(torch_module,(char*)"IntStorage"));
   ASSERT_NOT_NULL(THDPShortStorageClass  = PyObject_GetAttrString(torch_module,(char*)"ShortStorage"));
@@ -67,7 +67,7 @@ static bool THDPModule_assignStateless(PyObject *self)
   PyObject *stateless;
   INIT_STATELESS(Double);
   INIT_STATELESS(Float);
-  //INIT_STATELESS(Half);
+  INIT_STATELESS(Half);
   INIT_STATELESS(Long);
   INIT_STATELESS(Int);
   INIT_STATELESS(Short);
@@ -214,6 +214,7 @@ THDTensorDescriptor THDPModule_makeDescriptor(PyObject *obj)
   REGISTER_THC_DESCRIPTOR(DoubleTensor);
   if (type == THCPFloatTensorClass)
     return THDTensorDescriptor_newFromTHCudaFloatTensor((THCudaTensor*)(((torch::THPVoidTensor*)obj)->cdata));
+  REGISTER_THC_DESCRIPTOR(HalfTensor);
   REGISTER_THC_DESCRIPTOR(LongTensor);
   REGISTER_THC_DESCRIPTOR(IntTensor);
   REGISTER_THC_DESCRIPTOR(ShortTensor);

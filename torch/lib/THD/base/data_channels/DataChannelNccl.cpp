@@ -33,6 +33,7 @@ std::unordered_map<at::ScalarType, ncclDataType_t> ncclDatatype = {
   {at::kDouble, ncclDouble},
   {at::kInt, ncclInt32},
   {at::kLong, ncclInt64},
+  {at::kHalf, ncclHalf},
 };
 
 
