@@ -24,7 +24,7 @@ PyObject *THPVariableClass = NULL;
 
 static const char* VOLATILE_WARNING =
     "volatile was removed and now has no effect. Use "
-    "`with torch.no_backprop():` instead.";
+    "`with torch.no_grad():` instead.";
 
 // Creates a new Python object for a Variable. The Variable must not already
 // have a PyObject* associated with it.

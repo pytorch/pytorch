@@ -2,7 +2,7 @@
 
 namespace torch { namespace autograd {
 
-struct BackpropMode {
+struct GradMode {
   static bool is_enabled() {
     return _enabled;
   }
@@ -13,12 +13,12 @@ private:
   static thread_local bool _enabled;
 };
 
-struct AutoBackpropMode {
-  AutoBackpropMode(bool enabled) : prev_mode(BackpropMode::is_enabled()) {
-    BackpropMode::set_enabled(enabled);
+struct AutoGradMode {
+  AutoGradMode(bool enabled) : prev_mode(GradMode::is_enabled()) {
+    GradMode::set_enabled(enabled);
   }
-  ~AutoBackpropMode() {
-    BackpropMode::set_enabled(prev_mode);
+  ~AutoGradMode() {
+    GradMode::set_enabled(prev_mode);
   }
   bool prev_mode;
 };

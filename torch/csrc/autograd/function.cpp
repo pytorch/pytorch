@@ -5,7 +5,7 @@
 
 #include "variable.h"
 #include "torch/csrc/jit/ir.h"
-#include "torch/csrc/autograd/backprop_mode.h"
+#include "torch/csrc/autograd/grad_mode.h"
 #include "torch/csrc/autograd/functions/special.h"
 
 namespace torch { namespace autograd {
@@ -16,8 +16,8 @@ auto makeFlags(const T &inputs) -> FunctionFlags {
   FunctionFlags f;
   f.is_executable = false;
   f.next_functions.resize(num_inputs);
-  if (!BackpropMode::is_enabled()) {
-    // TODO: avoid allocating next_functions entirely if backprop_mode is disabled
+  if (!GradMode::is_enabled()) {
+    // TODO: avoid allocating next_functions entirely if grad_mode is disabled
     return f;
   }
   int i = 0;

@@ -1,6 +1,6 @@
 #include "torch/csrc/autograd/engine.h"
 
-#include "torch/csrc/autograd/backprop_mode.h"
+#include "torch/csrc/autograd/grad_mode.h"
 #include "torch/csrc/autograd/functions/basic_ops.h"
 #include "torch/csrc/utils/auto_gpu.h"
 
@@ -66,7 +66,7 @@ struct GraphTask {
   std::atomic_bool has_error;
   std::atomic<uint64_t> outstanding_tasks;
   bool keep_graph;
-  bool backprop_mode;
+  bool grad_mode;
 
   std::mutex mutex;
   // Notified when a task finishes executing.  Check outstanding_tasks to see
@@ -79,12 +79,12 @@ struct GraphTask {
 
   int owner;
 
-  GraphTask(bool keep_graph, bool backprop_mode, const Engine::pre_callback_map& pre_callbacks, const Engine::post_callback_map& post_callbacks)
+  GraphTask(bool keep_graph, bool grad_mode, const Engine::pre_callback_map& pre_callbacks, const Engine::post_callback_map& post_callbacks)
     : exception()
     , has_error(false)
     , outstanding_tasks(0)
     , keep_graph(keep_graph)
-    , backprop_mode(backprop_mode)
+    , grad_mode(grad_mode)
     , mutex()
     , not_done()
     , pre_callbacks(pre_callbacks)
@@ -142,7 +142,7 @@ auto Engine::thread_main(GraphTask *graph_task) -> void {
   while (!graph_task || graph_task->outstanding_tasks > 0) {
     FunctionTask task = queue->pop_back();
     if (task.fn && !task.base->has_error.load()) {
-      BackpropMode::set_enabled(task.base->backprop_mode);
+      GradMode::set_enabled(task.base->grad_mode);
       try {
         evaluate_function(task);
       } catch (std::exception& e) {

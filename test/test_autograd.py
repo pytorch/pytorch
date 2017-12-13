@@ -604,10 +604,10 @@ class TestAutograd(TestCase):
 
         TestFn.apply(b).sum().backward()
 
-    def test_no_backprop(self):
+    def test_no_grad(self):
         x = Variable(torch.ones(5, 5), requires_grad=True)
         y = Variable(torch.ones(5, 5) * 4)
-        with torch.no_backprop():
+        with torch.no_grad():
             w = x + y
         self.assertFalse(w.requires_grad)
         self.assertRaises(RuntimeError, lambda: w.backward(torch.ones(5, 5)))
@@ -1376,10 +1376,10 @@ class TestAutograd(TestCase):
         self.assertEqual(y.grad.data, torch.ones(5))
         self.assertEqual(z.grad.data, torch.ones(5) * 2)
 
-    def test_no_backprop_assignment(self):
+    def test_no_grad_assignment(self):
         x = Variable(torch.randn(5, 5), requires_grad=True)
         y = Variable(torch.randn(5))
-        with torch.no_backprop():
+        with torch.no_grad():
             x[0] = y
 
         self.assertTrue(x.requires_grad)

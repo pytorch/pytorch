@@ -1,7 +1,7 @@
 #include "python_compiled_function.h"
 
 #include "torch/csrc/jit/pybind.h"
-#include "torch/csrc/autograd/backprop_mode.h"
+#include "torch/csrc/autograd/grad_mode.h"
 #include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/jit/tracer.h"
 #include "torch/csrc/jit/passes/dead_code_elimination.h"
@@ -98,7 +98,7 @@ struct CompiledFunction {
     PyObject* add_trace(PyObject *args, variable_list inputs) {
       JIT_ASSERT(!is_ready_);
       // Start tracing
-      auto num_stages = BackpropMode::is_enabled() ? fn_.nderivs_ + 1 : 1;
+      auto num_stages = GradMode::is_enabled() ? fn_.nderivs_ + 1 : 1;
       auto trace = tracer::enter(fmap<TraceInput>(inputs), num_stages);
 
       // Call back into Python function
@@ -132,7 +132,7 @@ struct CompiledFunction {
   TraceForKey& getTrace(ParsedArgs& args) {
     auto it = ktraces_.find(args.desc);
     if (it == ktraces_.end()) {
-      bool grad_enabled = BackpropMode::is_enabled();
+      bool grad_enabled = GradMode::is_enabled();
       std::tie(it, std::ignore) = ktraces_.emplace(args.desc,
                                                    TraceForKey(*this, grad_enabled));
     }

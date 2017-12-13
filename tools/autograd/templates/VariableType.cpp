@@ -5,7 +5,7 @@
 
 #include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/autograd/function.h"
-#include "torch/csrc/autograd/backprop_mode.h"
+#include "torch/csrc/autograd/grad_mode.h"
 #include "torch/csrc/autograd/saved_variable.h"
 #include "torch/csrc/autograd/generated/Functions.h"
 #include "torch/csrc/autograd/functions/tensor.h"
@@ -238,7 +238,7 @@ static void ensure_no_aten_scalars(Tensor & data) {
 
 template<typename T>
 static bool computes_grad_tmpl(T tensors) {
-  if (!BackpropMode::is_enabled()) {
+  if (!GradMode::is_enabled()) {
     return false;
   }
   for (const Tensor& tensor : tensors) {
@@ -292,7 +292,7 @@ static function_list compute_next_functions(TensorList tensors) {
 
 static void check_inplace(const Tensor& tensor) {
   auto& var = static_cast<const Variable&>(tensor);
-  if (var.requires_grad() && var.is_leaf() && BackpropMode::is_enabled()) {
+  if (var.requires_grad() && var.is_leaf() && GradMode::is_enabled()) {
     at::runtime_error(
       "a leaf Variable that requires grad has been used in an in-place operation.");
   }

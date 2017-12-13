@@ -1,6 +1,6 @@
 #include <Python.h>
 #include "torch/csrc/utils/pybind.h"
-#include "torch/csrc/autograd/backprop_mode.h"
+#include "torch/csrc/autograd/grad_mode.h"
 #include "torch/csrc/autograd/profiler.h"
 
 #include "THP.h"
@@ -59,19 +59,19 @@ PyObject * THPAutograd_initExtension(PyObject *_unused)
 
 namespace torch { namespace autograd {
 
-static PyObject * set_backprop_enabled(PyObject* _unused, PyObject *arg) {
+static PyObject * set_grad_enabled(PyObject* _unused, PyObject *arg) {
   HANDLE_TH_ERRORS
   if (!PyBool_Check(arg)) {
     at::runtime_error("enabled must be a bool (got %s)", Py_TYPE(arg)->tp_name);
   }
-  BackpropMode::set_enabled(arg == Py_True);
+  GradMode::set_enabled(arg == Py_True);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject * is_backprop_enabled(PyObject* _unused, PyObject *arg) {
+static PyObject * is_grad_enabled(PyObject* _unused, PyObject *arg) {
   HANDLE_TH_ERRORS
-  if (BackpropMode::is_enabled()) {
+  if (GradMode::is_enabled()) {
     Py_RETURN_TRUE;
   } else {
     Py_RETURN_FALSE;
@@ -81,8 +81,8 @@ static PyObject * is_backprop_enabled(PyObject* _unused, PyObject *arg) {
 
 // autograd methods on torch._C
 static PyMethodDef methods[] = {
-  {"set_backprop_enabled", (PyCFunction)set_backprop_enabled, METH_O, NULL},
-  {"is_backprop_enabled", (PyCFunction)is_backprop_enabled, METH_NOARGS, NULL},
+  {"set_grad_enabled", (PyCFunction)set_grad_enabled, METH_O, NULL},
+  {"is_grad_enabled", (PyCFunction)is_grad_enabled, METH_NOARGS, NULL},
   {NULL, NULL, 0, NULL}
 };
 

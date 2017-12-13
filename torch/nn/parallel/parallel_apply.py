@@ -33,10 +33,10 @@ def parallel_apply(modules, inputs, kwargs_tup=None, devices=None):
 
     lock = threading.Lock()
     results = {}
-    backprop_enabled = torch.is_backprop_enabled()
+    grad_enabled = torch.is_grad_enabled()
 
     def _worker(i, module, input, kwargs, device=None):
-        torch.set_backprop_enabled(backprop_enabled)
+        torch.set_grad_enabled(grad_enabled)
         if device is None:
             device = get_a_var(input).get_device()
         try:

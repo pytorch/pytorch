@@ -462,7 +462,7 @@ class TestNN(NNTestCase):
         self.assertEqual(module.weight.grad.data, module.weight.data.clone().zero_())
         self.assertEqual(module.bias.grad.data, module.bias.data.clone().zero_())
 
-    def test_no_backprop(self):
+    def test_no_grad(self):
         module = nn.Conv2d(2, 5, kernel_size=3, padding=1)
         input = torch.randn(1, 2, 10, 10)
         x = Variable(input)
@@ -472,7 +472,7 @@ class TestNN(NNTestCase):
         self.assertTrue(output.requires_grad)
         output.backward(torch.ones(1, 5, 10, 10))
 
-        with torch.no_backprop():
+        with torch.no_grad():
             output2 = module(y)
             self.assertFalse(output2.requires_grad)
             self.assertRaises(RuntimeError, lambda: output2.backward(torch.ones(1, 5, 10, 10)))
@@ -1542,17 +1542,17 @@ class TestNN(NNTestCase):
         self.assertEqual(out, l(i))
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
-    def test_data_parallel_no_backprop(self):
+    def test_data_parallel_no_grad(self):
         test = self
 
         class Layer(nn.Module):
             def forward(self, x):
-                test.assertFalse(torch.is_backprop_enabled())
+                test.assertFalse(torch.is_grad_enabled())
                 return x
 
         l = Layer()
         i = Variable(torch.randn(20, 10).float().cuda())
-        with torch.no_backprop():
+        with torch.no_grad():
             dp.data_parallel(l, i, (0, 1))
         self.assertRaises(AssertionError, lambda: dp.data_parallel(l, i, (0, 1)))
 

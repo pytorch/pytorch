@@ -10,10 +10,10 @@ import warnings
 from .variable import Variable
 from .function import Function, NestedIOFunction
 from .gradcheck import gradcheck
-from .backprop_mode import no_backprop
+from .grad_mode import no_grad
 from . import profiler
 
-__all__ = ['Variable', 'Function', 'backward', 'backprop_mode']
+__all__ = ['Variable', 'Function', 'backward', 'grad_mode']
 
 
 def _make_grads(outputs, grads):

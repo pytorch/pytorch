@@ -1,7 +1,7 @@
 #include "Python.h"
 #include "accumulate_grad.h"
 
-#include "torch/csrc/autograd/backprop_mode.h"
+#include "torch/csrc/autograd/grad_mode.h"
 #include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/autograd/functions/basic_ops.h"
 #include "torch/csrc/autograd/functions/tensor.h"
@@ -38,7 +38,7 @@ auto AccumulateGrad::apply(const variable_list& grads) -> variable_list {
   auto& grad = variable.grad();
   if (!grad.defined()) {
     variable.grad() = new_grad.clone();
-  } else if (!BackpropMode::is_enabled()) {
+  } else if (!GradMode::is_enabled()) {
     // This case is not strictly necessary, but it makes the first-order only case
     // slightly more efficient and, what's more important, more predictable for
     // the users. Thanks to this case we can avoid changing the grad tensor,

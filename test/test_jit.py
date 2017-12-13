@@ -701,7 +701,7 @@ class TestJit(TestCase):
                 self.assertEqual(grad_v, expected_grad)
             self.assertEqual(fn.has_trace_for(x, y), rx or ry)
 
-    def test_no_backprop_fallback(self):
+    def test_no_grad_fallback(self):
         """Check that Traceable falls back to num_backwards=0 if in no-backprop mode"""
         x = Variable(torch.randn(2, 2))
         y = Variable(torch.randn(2, 2), requires_grad=True)
@@ -712,7 +712,7 @@ class TestJit(TestCase):
 
         out = fn(x, y)
         self.assertFalse(fn.has_trace_for(x, y))
-        with torch.no_backprop():
+        with torch.no_grad():
             out = fn(x, y)
         self.assertTrue(fn.has_trace_for(x, y))
         with self.assertCompiled(fn):
