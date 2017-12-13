@@ -1,6 +1,7 @@
 from numbers import Number
 
 import torch
+from torch.autograd import Variable
 
 
 def expand_n(v, n):
@@ -47,19 +48,20 @@ def broadcast_all(*values):
         ValueError: if any of the values is not a `numbers.Number`, `torch.Tensor`
             or `torch.autograd.Variable` instance
     """
-    scalars = [(idx, v) for idx, v in enumerate(values) if isinstance(v, Number)]
-    tensors = [(idx, v) for idx, v in enumerate(values) if isinstance(v, (torch.Tensor, torch.autograd.Variable))]
-    if len(scalars) + len(tensors) != len(values):
+    values = list(values)
+    scalar_idxs = [i for i in range(len(values)) if isinstance(values[i], Number)]
+    tensor_idxs = [i for i in range(len(values)) if isinstance(values[i], (torch.Tensor, Variable))]
+    if len(scalar_idxs) + len(tensor_idxs) != len(values):
         raise ValueError('Input arguments must all be instances of numbers.Number, torch.Tensor or ' +
                          'torch.autograd.Variable.')
-    if tensors:
-        broadcast_shape = _broadcast_shape([t.size() for _, t in tensors])
-        tensors = [(idx, v.expand(broadcast_shape)) for idx, v in tensors]
-        tensor_template = tensors[0][1]
+    if tensor_idxs:
+        broadcast_shape = _broadcast_shape([values[i].size() for i in tensor_idxs])
+        for idx in tensor_idxs:
+            values[idx] = values[idx].expand(broadcast_shape)
+        template = values[tensor_idxs[0]]
+        for idx in scalar_idxs:
+            values[idx] = template.new(template.size()).fill_(values[idx])
     else:
-        tensor_template = torch.ones(1)
-    scalars = [(idx, tensor_template.new(tensor_template.size()).fill_(s)) for idx, s in scalars]
-    broadcasted_tensors = scalars + tensors
-    # return the input arguments in the same order
-    broadcasted_tensors.sort()
-    return list(zip(*broadcasted_tensors))[1]
+        for idx in scalar_idxs:
+            values[idx] = torch.Tensor([values[idx]])
+    return values
