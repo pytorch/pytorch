@@ -22,8 +22,7 @@ class Bernoulli(Distribution):
     """
 
     def __init__(self, probs):
-        probs, = broadcast_all(probs)
-        self.probs = probs
+        self.probs, = broadcast_all(probs)
 
     def sample(self):
         return torch.bernoulli(self.probs)

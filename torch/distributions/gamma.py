@@ -46,9 +46,7 @@ class Gamma(Distribution):
     has_rsample = True
 
     def __init__(self, alpha, beta):
-        alpha, beta = broadcast_all(alpha, beta)
-        self.alpha = alpha
-        self.beta = beta
+        self.alpha, self.beta = broadcast_all(alpha, beta)
 
     def sample(self):
         return _standard_gamma(self.alpha) / self.beta
