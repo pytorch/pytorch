@@ -40,6 +40,33 @@ class FixedLearningRate : public LearningRateFunctor<T> {
   }
 };
 
+// Alter: alternatate learning rate with active_period and inactive_period.
+// update for for a duration of active_period and then stop for a duration of
+// inactive_period if active_first, and vice versa
+template <typename T>
+class AlternateLearningRate : public LearningRateFunctor<T> {
+ public:
+  AlternateLearningRate(
+      const int64_t active_period,
+      const int64_t inactive_period,
+      const bool active_first)
+      : active_period_(active_period),
+        inactive_period_(inactive_period),
+        active_first_(active_first) {}
+  T operator()(const int64_t iter) const override {
+    if (iter % (active_period_ + inactive_period_) <
+        (active_first_ ? active_period_ : inactive_period_)) {
+      return active_first_ ? 1. : 0.;
+    } else {
+      return active_first_ ? 0. : 1.;
+    };
+  };
+
+  int64_t active_period_;
+  int64_t inactive_period_;
+  bool active_first_;
+};
+
 // Step: return gamma ^ (floor(iter / step))
 template <typename T>
 class StepLearningRate : public LearningRateFunctor<T> {
