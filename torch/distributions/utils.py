@@ -62,4 +62,4 @@ def broadcast_all(*values):
     broadcasted_tensors = scalars + tensors
     # return the input arguments in the same order
     broadcasted_tensors.sort()
-    return zip(*broadcasted_tensors)[1]
+    return list(zip(*broadcasted_tensors))[1]
