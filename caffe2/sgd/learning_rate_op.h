@@ -29,15 +29,28 @@ template <typename T, class Context>
 class LearningRateOp final : public Operator<Context> {
  public:
   LearningRateOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws), functor_(nullptr),
-        base_lr_(
-            OperatorBase::template GetSingleArgument<float>(
-                "base_lr", FLT_MAX)) {
+      : Operator<Context>(operator_def, ws),
+        functor_(nullptr),
+        base_lr_(OperatorBase::template GetSingleArgument<float>(
+            "base_lr",
+            FLT_MAX)) {
     CAFFE_ENFORCE_NE(base_lr_, FLT_MAX, "Base learning rate must be set.");
     const string policy = OperatorBase::GetSingleArgument<string>("policy", "");
     CAFFE_ENFORCE(policy.size(), "Must specify a learning rate policy.");
     if (policy == "fixed") {
       functor_.reset(new FixedLearningRate<T>());
+    } else if (policy == "alter") {
+      bool active_first =
+          OperatorBase::template GetSingleArgument<bool>("active_first", true);
+      int64_t active_period = OperatorBase::template GetSingleArgument<int64_t>(
+          "active_period", -1);
+      int64_t inactive_period =
+          OperatorBase::template GetSingleArgument<int64_t>(
+              "inactive_period", -1);
+      DCHECK_GE(active_period, 0);
+      DCHECK_GE(inactive_period, 0);
+      functor_.reset(new AlternateLearningRate<T>(
+          active_period, inactive_period, active_first));
     } else if (policy == "step") {
       int stepsize =
           OperatorBase::template GetSingleArgument<int>("stepsize", 0);
