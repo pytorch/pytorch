@@ -31,7 +31,7 @@ def create_dispatch(types, dispatch_name, backend_only):
         # Half CPU doesn't have math currently.
         if typ['Density'] != 'Sparse' and (backend_only != 'CPU' or typ['ScalarName'] != 'Half'):
             cases.append(CASE_TEMPLATE.substitute(typ))
-    backend_check = BACKEND_CHECK_TEMPLATE.substitute(typ) if backend_only else ''
+    backend_check = [BACKEND_CHECK_TEMPLATE.substitute(typ)] if backend_only else []
     return MACRO_TEMPLATE.substitute(cases=cases,
                                      dispatch_name=dispatch_name,
                                      backend_check=backend_check)
