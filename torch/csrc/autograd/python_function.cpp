@@ -570,19 +570,16 @@ struct InputFlags {
 };
 
 template<bool enforce_variables>
-std::pair<UnpackedInput, InputFlags> unpack_input(PyObject *args) {
+std::pair<UnpackedInput, InputFlags> unpack_input(PyObject *args, bool unflatten = true) {
   UnpackedInput unpacked;
   InputFlags flags;
 
-  auto num_args = PyTuple_GET_SIZE(args);
-  unpacked.tensor_input = PyTuple_New(num_args);
-  flags.needs_input_grad = PyTuple_New(num_args);
-  for (int i = 0; i < num_args; i++) {
-    PyObject *arg = PyTuple_GET_ITEM(args, i);
+  auto unpack_atom = [&](PyObject *arg) {
     PyObject *new_arg;
 
     bool is_variable = THPVariable_Check(arg);
     flags.is_variable_input.push_back(is_variable);
+    PyObject *needs_input_grad;
     if (!is_variable) {
       if (enforce_variables) {
         THPUtils_setError("expected a Variable argument, but got %s",
@@ -592,16 +589,51 @@ std::pair<UnpackedInput, InputFlags> unpack_input(PyObject *args) {
       Py_INCREF(arg);
       new_arg = arg;
       Py_INCREF(Py_False);
-      PyTuple_SET_ITEM(flags.needs_input_grad.get(), i, Py_False);
+      needs_input_grad = Py_False;
     } else {
       THPVariable* variable = (THPVariable*)arg;
       new_arg = THPVariable_get_data(variable);
       unpacked.input_vars.push_back(variable->cdata);
       PyObject* needs_grad = variable->cdata.requires_grad() ? Py_True : Py_False;
       Py_INCREF(needs_grad);
-      PyTuple_SET_ITEM(flags.needs_input_grad.get(), i, needs_grad);
+      needs_input_grad = needs_grad;
     }
-    PyTuple_SET_ITEM(unpacked.tensor_input.get(), i, new_arg);
+    return std::make_pair(new_arg, needs_input_grad);
+  };
+
+  auto num_args = PyTuple_GET_SIZE(args);
+  unpacked.tensor_input = PyTuple_New(num_args);
+  flags.needs_input_grad = PyTuple_New(num_args);
+  for (int i = 0; i < num_args; i++) {
+    PyObject *arg = PyTuple_GET_ITEM(args, i);
+    PyObject *new_arg, *needs_input_grad;
+
+    if (!unflatten) {
+      std::tie(new_arg, needs_input_grad) = unpack_atom(arg);
+      PyTuple_SET_ITEM(flags.needs_input_grad.get(), i, needs_input_grad);
+      PyTuple_SET_ITEM(unpacked.tensor_input.get(), i, new_arg);
+    }
+
+    // NB: For simplicity, for now we only support
+    //  - lists (could extend to tuples)
+    //  - only support one level of nesting
+    if (PyList_Check(arg)) {
+      auto num_inner = PyList_Size(arg);
+      PyObject *sub_needs_input_grad = PyList_New(num_inner);
+      PyObject *sub_tensor_input = PyList_New(num_inner);
+      for (int j = 0; j < num_inner; j++) {
+        PyObject *subarg = PyList_GET_ITEM(arg, j);
+        std::tie(new_arg, needs_input_grad) = unpack_atom(subarg);
+        PyList_SET_ITEM(sub_needs_input_grad, j, needs_input_grad);
+        PyList_SET_ITEM(sub_tensor_input, j, new_arg);
+      }
+      PyTuple_SET_ITEM(flags.needs_input_grad.get(), i, sub_needs_input_grad);
+      PyTuple_SET_ITEM(unpacked.tensor_input.get(), i, sub_tensor_input);
+    } else {
+      std::tie(new_arg, needs_input_grad) = unpack_atom(arg);
+      PyTuple_SET_ITEM(flags.needs_input_grad.get(), i, needs_input_grad);
+      PyTuple_SET_ITEM(unpacked.tensor_input.get(), i, new_arg);
+    }
   }
 
   flags.flags = Function::flags(unpacked.input_vars);
