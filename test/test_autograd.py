@@ -5,6 +5,7 @@ import math
 import torch
 import unittest
 import random
+import warnings
 from copy import deepcopy
 from collections import OrderedDict
 from itertools import product
@@ -60,9 +61,6 @@ class TestAutograd(TestCase):
 
         self.assertEqual(x.grad.data, y.data + torch.ones(5, 5))
         self.assertEqual(y.grad.data, x.data + torch.ones(5, 5) * 2)
-
-        self.assertFalse(x.grad.volatile)
-        self.assertFalse(y.grad.volatile)
         self.assertIsNotNone(x.grad.grad_fn)
         self.assertIsNotNone(y.grad.grad_fn)
 
@@ -734,6 +732,12 @@ class TestAutograd(TestCase):
         expected_grad = torch.Tensor(4, 4, 4).zero_()
         expected_grad[1].fill_(3)
         self.assertEqual(y.grad.data, expected_grad)
+
+    def test_volatile_deprecated(self):
+        v = torch.autograd.Variable(torch.randn(3, 3))
+        with warnings.catch_warnings(record=True) as w:
+            self.assertFalse(v.volatile)
+        self.assertIn('volatile', str(w[0].message))
 
     def test_requires_grad(self):
         x = Variable(torch.randn(5, 5))

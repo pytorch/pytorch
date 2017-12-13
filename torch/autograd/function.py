@@ -209,14 +209,12 @@ def once_differentiable(fn):
         # Unfortunately, this leads to unexpected error messages ("no nodes
         # require computing gradients"), but I don't have a better idea.
         # These functions would raise an error in backward anyway.
-        volatile = any(arg.volatile if isinstance(arg, Variable) else False
-                       for arg in args)
         requires_grad = any(arg.requires_grad if isinstance(arg, Variable) else False
                             for arg in args)
-        if volatile:
+        if not torch.is_grad_enabled():
             def err_fn(*args):
                 return args
-            kwargs = {'volatile': True}
+            kwargs = {}
         else:
             err_fn = torch._C._functions.DelayedError(
                 b"trying to differentiate twice a function that was marked"
@@ -236,7 +234,7 @@ def traceable(fn_cls):
     Traceable functions have additional restrictions - they can't pass any
     data-dependent values to backward (e.g. Prod passes the output, which makes
     it non-traceable), and their backward should be implemented entirely in terms
-    of operations on autograd Variables in all cases (even when grads are volatile).
+    of operations on autograd Variables in all cases.
 
     DON'T USE THIS DECORATOR. IT IS FOR INTERNAL USE ONLY AND SHOULD BE HANDLED WITH
     CARE (or can give incorrect results otherwise).

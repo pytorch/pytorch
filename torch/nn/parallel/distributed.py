@@ -226,8 +226,9 @@ class DistributedDataParallel(Module):
         bucket_idx = self.bucket_map[param]
 
         def distributed_data_parallel_hook(*unused):
-            if not param.grad.volatile:
-                raise RuntimeError("DistributedDataParallel only works with volatile gradients")
+            if param.grad.requires_grad:
+                raise RuntimeError("DistributedDataParallel only works with "
+                                   "gradients that don't require grad")
             bucket = self.buckets[bucket_idx][device_idx]
             bucket.append(param.grad.data)
 

@@ -87,7 +87,7 @@ class Variable(_C._VariableBase):
         Arguments:
             gradient (Tensor, Variable or None): Gradient w.r.t. the
                 variable. If it is a tensor, it will be automatically converted
-                to a Variable that is volatile unless ``create_graph`` is True.
+                to a Variable that does not require grad unless ``create_graph`` is True.
                 None values can be specified for scalar Variables or ones that
                 don't require grad. If a None value would be acceptable then
                 this argument is optional.
@@ -325,6 +325,7 @@ class Variable(_C._VariableBase):
 
     def __dir__(self):
         variable_methods = dir(self.__class__)
+        variable_methods.remove('volatile')  # deprecated
         attrs = list(self.__dict__.keys())
         keys = variable_methods + attrs
         return sorted(keys)
