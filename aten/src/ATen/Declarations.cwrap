@@ -3695,7 +3695,7 @@
         - arg: THGenerator* generator
           default: THPGenerator_TH_CData(THPDefaultGenerator)
           kwarg_only: True
-        - THTensor* means
+        - THTensor* mean
         - arg: double std
           default: 1
     - cname: normal_stddevs
@@ -3714,7 +3714,7 @@
         - arg: THGenerator* generator
           default: THPGenerator_TH_CData(THPDefaultGenerator)
           kwarg_only: True
-        - THTensor* means
+        - THTensor* mean
         - THTensor* std
 ]]
 [[
@@ -3855,9 +3855,7 @@
   variants:
     - method
     - function
-  before_call:
-    THTensor_(resizeAs)(LIBRARY_STATE ((THPTensor*)$arg0)->cdata, ((THPTensor*)$arg2)->cdata);
-  cname: BERNOULLI_TENSOR
+  cname: bernoulli_Tensor
   arguments:
     - arg: THTensor* output
       output: True
@@ -3866,36 +3864,6 @@
       default: THPGenerator_TH_CData(THPDefaultGenerator)
       kwarg_only: True
     - THTensor* self
-]]
-[[
-  name: bernoulli_
-  backends:
-    - CPU
-    - CUDA
-  return: self
-  options:
-    - cname: bernoulli
-      arguments:
-        - THTensor* self
-        - arg: THGenerator* generator
-          default: THPGenerator_TH_CData(THPDefaultGenerator)
-          kwarg_only: True
-        - arg: double p
-          default: 0.5
-    - cname: bernoulli_FloatTensor
-      arguments:
-        - THTensor* self
-        - arg: THGenerator* generator
-          default: THPGenerator_TH_CData(THPDefaultGenerator)
-          kwarg_only: True
-        - BackendFloatTensor* float_p
-    - cname: bernoulli_DoubleTensor
-      arguments:
-        - THTensor* self
-        - arg: THGenerator* generator
-          default: THPGenerator_TH_CData(THPDefaultGenerator)
-          kwarg_only: True
-        - BackendDoubleTensor* float_p
 ]]
 [[
   name: tensor

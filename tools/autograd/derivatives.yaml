@@ -121,6 +121,9 @@
   batch1: grad.bmm(batch2.transpose(1, 2)) * alpha
   batch2: batch1.transpose(1, 2).bmm(grad) * alpha
 
+- name: bernoulli(Tensor self, Generator generator)
+  self: zeros_like(grad)
+
 - name: bmm(Tensor self, Tensor mat2)
   self: grad.bmm(mat2.transpose(1, 2))
   mat2: self.transpose(1, 2).bmm(grad)
@@ -394,7 +397,8 @@
   self: grad * other
   other: grad * self
 
-- name: multinomial  # TODO: reinforce
+- name: multinomial(Tensor self, int64_t num_samples, bool replacement, Generator generator)
+  self: zeros_like(grad)
 
 - name: mv(Tensor self, Tensor vec)
   self: grad.ger(vec)
@@ -421,6 +425,16 @@
 
 - name: normal(Tensor self, double mean, double std, Generator generator)
   self: zeros_like(grad)
+
+- name: normal(Tensor mean, double std, Generator generator)
+  mean: grad.type().zeros(mean.sizes())
+
+- name: normal(double mean, Tensor std, Generator generator)
+  std: grad.type().zeros(std.sizes())
+
+- name: normal(Tensor mean, Tensor std, Generator generator)
+  mean: grad.type().zeros(mean.sizes())
+  std: grad.type().zeros(std.sizes())
 
 - name: numel  # fallthrough
 - name: ones  # fallthrough
@@ -472,6 +486,16 @@
 
 - name: rand  # fallthrough
 - name: randn  # fallthrough
+
+- name: random(Tensor self, int64_t from, int64_t to, Generator generator)
+  self: zeros_like(grad)
+
+- name: random(Tensor self, int64_t to, Generator generator)
+  self: zeros_like(grad)
+
+- name: random(Tensor self, Generator generator)
+  self: zeros_like(grad)
+
 - name: randperm  # fallthrough
 
 - name: range  # fallthrough
