@@ -1,5 +1,6 @@
 import torch
 from torch.distributions.distribution import Distribution
+from torch.distributions.utils import broadcast_all
 
 
 class Bernoulli(Distribution):
@@ -17,10 +18,11 @@ class Bernoulli(Distribution):
         [torch.FloatTensor of size 1]
 
     Args:
-        probs (Tensor or Variable): the probabilty of sampling `1`
+        probs (Number, Tensor or Variable): the probabilty of sampling `1`
     """
 
     def __init__(self, probs):
+        probs, = broadcast_all(probs)
         self.probs = probs
 
     def sample(self):

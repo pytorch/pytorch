@@ -66,9 +66,11 @@ class TestDistributions(TestCase):
     def test_bernoulli(self):
         p = Variable(torch.Tensor([0.7, 0.2, 0.4]), requires_grad=True)
         r = Variable(torch.Tensor([0.3]), requires_grad=True)
+        s = 0.3
         self.assertEqual(Bernoulli(p).sample_n(8).size(), (8, 3))
         self.assertEqual(Bernoulli(r).sample_n(8).size(), (8, 1))
         self.assertEqual(Bernoulli(r).sample().size(), (1,))
+        self.assertEqual(Bernoulli(s).sample().size(), (1,))
         self._gradcheck_log_prob(Bernoulli, (p,))
 
         def ref_log_prob(idx, val, log_prob):
@@ -200,6 +202,10 @@ class TestDistributions(TestCase):
         # parameters.
         # example type (distribution instance, expected sample shape)
         valid_examples = [
+            (Normal(mean=torch.Tensor([0, 0]), std=1),
+             (2,)),
+            (Normal(mean=0, std=torch.Tensor([1, 1])),
+             (2,)),
             (Normal(mean=torch.Tensor([0, 0]), std=torch.Tensor([1])),
              (2,)),
             (Normal(mean=torch.Tensor([0, 0]), std=torch.Tensor([[1], [1]])),
@@ -208,13 +214,17 @@ class TestDistributions(TestCase):
              (1, 2)),
             (Normal(mean=torch.Tensor([0]), std=torch.Tensor([[1]])),
              (1, 1)),
-            (Gamma(alpha=torch.Tensor([0, 0]), beta=torch.Tensor([[1], [1], [1]])),
+            (Gamma(alpha=torch.Tensor([1, 1]), beta=1),
+             (2,)),
+            (Gamma(alpha=1, beta=torch.Tensor([1, 1])),
+             (2,)),
+            (Gamma(alpha=torch.Tensor([1, 1]), beta=torch.Tensor([[1], [1], [1]])),
              (3, 2)),
-            (Gamma(alpha=torch.Tensor([0, 0]), beta=torch.Tensor([[1], [1]])),
+            (Gamma(alpha=torch.Tensor([1, 1]), beta=torch.Tensor([[1], [1]])),
              (2, 2)),
-            (Gamma(alpha=torch.Tensor([0, 0]), beta=torch.Tensor([[1]])),
+            (Gamma(alpha=torch.Tensor([1, 1]), beta=torch.Tensor([[1]])),
              (1, 2)),
-            (Gamma(alpha=torch.Tensor([0]), beta=torch.Tensor([[1]])),
+            (Gamma(alpha=torch.Tensor([1]), beta=torch.Tensor([[1]])),
              (1, 1)),
         ]
 
@@ -242,7 +252,7 @@ class TestDistributions(TestCase):
         ]
 
         for dist, kwargs in invalid_examples:
-            self.assertRaises(ValueError, dist, **kwargs)
+            self.assertRaises(RuntimeError, dist, **kwargs)
 
 
 if __name__ == '__main__':

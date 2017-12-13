@@ -3,7 +3,7 @@ from numbers import Number
 
 import torch
 from torch.distributions.distribution import Distribution
-from torch.distributions.utils import expand_n, broadcast_shape
+from torch.distributions.utils import expand_n, broadcast_all
 
 
 class Normal(Distribution):
@@ -24,10 +24,7 @@ class Normal(Distribution):
     """
 
     def __init__(self, mean, std):
-        if mean.size() != std.size():
-            param_shape = broadcast_shape(mean.size(), std.size())
-            mean = mean.expand(param_shape)
-            std = std.expand(param_shape)
+        mean, std = broadcast_all(mean, std)
         self.mean = mean
         self.std = std
 

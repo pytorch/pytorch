@@ -13,25 +13,50 @@ def expand_n(v, n):
         return v.expand(n, *v.size())
 
 
-def broadcast_shape(*shapes):
-    r"""
-    If the tensor sizes given by `*shapes` are
-    `broadcastable <http://pytorch.org/docs/master/notes/broadcasting.html>`_ ,
-    this returns the size of the resulting tensor. Raises `ValueError`, otherwise.
-
-    :param tuple shapes: shapes of tensors.
-    :returns: broadcasted shape
-    :rtype: tuple
-    :raises: ValueError
+def _broadcast_shape(shapes):
     """
-    reversed_shape = []
-    for shape in shapes:
-        for i, size in enumerate(reversed(shape)):
-            if i >= len(reversed_shape):
-                reversed_shape.append(size)
-            elif reversed_shape[i] == 1:
-                reversed_shape[i] = size
-            elif reversed_shape[i] != size and size != 1:
-                raise ValueError('shape mismatch: objects cannot be broadcast to a single shape: {}'.format(
-                    ' vs '.join(map(str, shapes))))
-    return tuple(reversed(reversed_shape))
+    Given a list of tensor sizes, returns the size of the resulting broadcasted
+    tensor.
+
+    Args:
+        shapes (list of torch.Size): list of tensor sizes
+    """
+    shape = torch.Size([1])
+    for s in shapes:
+        shape = torch._C._infer_size(s, shape)
+    return shape
+
+
+def broadcast_all(*values):
+    """
+    Given a list of values (possibly containing numbers), returns a list where each
+    value is broadcasted based on the following rules:
+        - `torch.Tensor` and `torch.autograd.Variable` instances are broadcasted as per
+          the `broadcasting rules <http://pytorch.org/docs/master/notes/broadcasting.html>`_
+        - numbers.Number instances (scalars) are upcast to Tensors / Variables depending
+          on the type of the first tensor passed to values. If all the values are scalars,
+          then the type is `torch.Tensor` having size `(1,)`.
+
+    Args:
+        values (list of `numbers.Number`, `torch.autograd.Variable` or `torch.Tensor`)
+
+    Raises:
+        ValueError: if any of the values is not a `numbers.Number`, `torch.Tensor` or
+            `torch.autograd.Variable` instance
+    """
+    scalars = [(idx, v) for idx, v in enumerate(values) if isinstance(v, Number)]
+    tensors = [(idx, v) for idx, v in enumerate(values) if isinstance(v, (torch.Tensor, torch.autograd.Variable))]
+    if len(scalars) + len(tensors) != len(values):
+        raise ValueError('Input arguments must all be instances of numbers.Number, torch.Tensor or '+
+                         'torch.autograd.Variable.')
+    if tensors:
+        broadcast_shape = _broadcast_shape([t.size() for _, t in tensors])
+        tensors = [(idx, v.expand(broadcast_shape)) for idx, v in tensors]
+        tensor_template = tensors[0][1]
+    else:
+        tensor_template = torch.ones(1)
+    scalars = [(idx, tensor_template.new(tensor_template.size()).fill_(s)) for idx, s in scalars]
+    broadcasted_tensors = scalars + tensors
+    # return the input arguments in the same order
+    broadcasted_tensors.sort()
+    return zip(*broadcasted_tensors)[1]
