@@ -919,6 +919,116 @@ class CUDAUnsortedSegmentSumOp : public Operator<CUDAContext> {
   Tensor<CUDAContext> scaling_factors_; // for mean
 };
 
+template <typename SIndex>
+__global__ void segment_lengths(int N, const SIndex* X, SIndex* Y) {
+  CUDA_1D_KERNEL_LOOP(i, N) {
+    atomicAdd(&Y[X[i]], 1);
+  }
+}
+
+template <typename T, typename SIndex, bool LOGEXP = false>
+__global__ void sorted_segment_mean_kernel(
+    const SIndex K,
+    const int N,
+    const SIndex* S,
+    const SIndex* I,
+    const T* X,
+    T* Y) {
+  for (int sId = blockIdx.x; sId < K; sId += gridDim.x) {
+    const int start_index = sId > 0 ? S[sId] * N : 0;
+    const int y_start_index = sId * N;
+    for (int i = threadIdx.x; i < N; i += blockDim.x) {
+      T sum = 0.0;
+      for (int j = 0; j < I[sId]; ++j) {
+        const T x_i_j = X[start_index + j * N + i];
+        sum += LOGEXP ? exp(x_i_j) : x_i_j;
+      }
+      const T norm_sum = sum / I[sId];
+      Y[y_start_index + i] = LOGEXP ? log(norm_sum) : norm_sum;
+    }
+  }
+}
+
+template <typename T, typename SIndex, bool LOGEXP, class Context = CUDAContext>
+class SortedSegmentRangeMeanOp : public Operator<Context> {
+ public:
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
+  SortedSegmentRangeMeanOp(const OperatorDef& operator_def, Workspace* ws)
+      : Operator<CUDAContext>(operator_def, ws) {}
+  ~SortedSegmentRangeMeanOp() {}
+
+  bool RunOnDevice() override {
+    const auto& input = Input(0);
+    const auto& indices = Input(1);
+    int M = input.dim32(0);
+    int N = input.size_from_dim(1);
+    auto* output = Output(0);
+    auto dims = input.dims();
+    SIndex K = 0;
+    context_.template CopyBytes<Context, CPUContext>(
+        sizeof(SIndex),
+        indices.template data<SIndex>() + indices.size() - 1,
+        &K);
+    context_.FinishDeviceComputation();
+    K += 1;
+    dims[0] = K;
+    if (scaling_factors_.size() != K) {
+      scaling_factors_.Resize(K);
+      segment_size_prefix_sum_.Resize(K);
+    }
+    output->Resize(dims);
+    math::Set<SIndex, CUDAContext>(
+        scaling_factors_.size(),
+        0,
+        scaling_factors_.template mutable_data<SIndex>(),
+        &context_);
+    segment_lengths<<<
+        CAFFE_GET_BLOCKS(indices.size()),
+        CAFFE_CUDA_NUM_THREADS,
+        0,
+        context_.cuda_stream()>>>(
+        indices.size(),
+        indices.template data<SIndex>(),
+        scaling_factors_.template mutable_data<SIndex>());
+    size_t temp_storage_bytes = 0;
+    cub::DeviceScan::ExclusiveSum(
+        nullptr,
+        temp_storage_bytes,
+        scaling_factors_.template data<SIndex>(),
+        segment_size_prefix_sum_.template mutable_data<SIndex>(),
+        K,
+        context_.cuda_stream());
+    auto buffer_size = (temp_storage_bytes + sizeof(T)) / sizeof(T);
+    prefix_buffer_.Resize(buffer_size);
+    void* dev_temp_storage =
+        static_cast<void*>(prefix_buffer_.mutable_data<T>());
+    cub::DeviceScan::ExclusiveSum(
+        dev_temp_storage,
+        temp_storage_bytes,
+        scaling_factors_.template data<SIndex>(),
+        segment_size_prefix_sum_.template mutable_data<SIndex>(),
+        K,
+        context_.cuda_stream());
+    sorted_segment_mean_kernel<T, SIndex, LOGEXP>
+        <<<min(K, CAFFE_MAXIMUM_NUM_BLOCKS),
+           CAFFE_CUDA_NUM_THREADS,
+           0,
+           context_.cuda_stream()>>>(
+            K,
+            N,
+            segment_size_prefix_sum_.template data<SIndex>(),
+            scaling_factors_.template data<SIndex>(),
+            input.template data<T>(),
+            output->template mutable_data<T>());
+    return true;
+  }
+
+ private:
+  Tensor<CUDAContext> scaling_factors_; // for mean
+  Tensor<CUDAContext> segment_size_prefix_sum_;
+  Tensor<CUDAContext> prefix_buffer_;
+};
+
 REGISTER_CUDA_OPERATOR_STR(
     "LengthsSum",
     CUDASparseLengthsSumOp<float, CUDAContext, false>);
@@ -934,6 +1044,12 @@ REGISTER_CUDA_OPERATOR_STR(
 REGISTER_CUDA_OPERATOR_STR(
     "UnsortedSegmentMean",
     CUDAUnsortedSegmentSumOp<float, int, true>);
+REGISTER_CUDA_OPERATOR_STR(
+    "SortedSegmentRangeMean",
+    SortedSegmentRangeMeanOp<float, int, false>);
+REGISTER_CUDA_OPERATOR_STR(
+    "SortedSegmentRangeLogMeanExp",
+    SortedSegmentRangeMeanOp<float, int, true>);
 
 template <typename T, class Context = CUDAContext>
 class CUDASparseLengthsSumGradientWithIndicesOp : public Operator<CUDAContext> {
