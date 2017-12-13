@@ -50,7 +50,7 @@ def broadcast_all(*values):
     scalars = [(idx, v) for idx, v in enumerate(values) if isinstance(v, Number)]
     tensors = [(idx, v) for idx, v in enumerate(values) if isinstance(v, (torch.Tensor, torch.autograd.Variable))]
     if len(scalars) + len(tensors) != len(values):
-        raise ValueError('Input arguments must all be instances of numbers.Number, torch.Tensor or '+
+        raise ValueError('Input arguments must all be instances of numbers.Number, torch.Tensor or ' +
                          'torch.autograd.Variable.')
     if tensors:
         broadcast_shape = _broadcast_shape([t.size() for _, t in tensors])
