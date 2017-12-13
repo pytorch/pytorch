@@ -335,7 +335,7 @@ def split_name_params(prototype):
     return name, params.split(', ')
 
 
-def load_derivatives(path, declarations_by_signature):
+def load_derivatives(path, declarations_by_signature, declarations_by_name):
     with open(path, 'r') as f:
         definitions = yaml.load(f, Loader=Loader)
 
@@ -355,6 +355,85 @@ def load_derivatives(path, declarations_by_signature):
         """Return the index of the first element of xs matching pred."""
         return next((i, x) for i, x in enumerate(xs) if pred(x))
 
+    def set_up_derivatives(defn, declaration):
+
+        # First, let us determine the set of inputs for which gradients
+        # were specified in declarations.  We'll use this in layout
+        # computation.
+        args_with_gradients = set()
+        for raw_names in defn:
+            args_with_gradients |= set(split_names(raw_names))
+
+        # Next, let us compute the layout of the grad_inputs we will
+        # return.  In general this is not in one-to-one correspondence
+        # with the inputs, because some will not have gradients, and we
+        # will not bother allocating an undefined tensor for them.
+        num_inputs = 0  # number of grad_inputs to return
+        arg_name_to_output_index = {}
+        for arg in declaration['arguments']:
+            if arg['name'] not in args_with_gradients:
+                continue
+            if arg['type'] == 'TensorList':
+                num_inputs = ''
+                output_index = '*'  # variable length thing
+            else:
+                output_index = num_inputs  # the current index
+                num_inputs += 1
+            arg_name_to_output_index[arg['name']] = output_index
+
+        # Finally, let us set up the derivative information
+        derivatives = []
+        for raw_names in sorted(defn.keys()):
+            formula = defn[raw_names]
+            names = split_names(raw_names)
+            output_indices = []
+            args = []
+            for name in names:
+                output_indices.append(arg_name_to_output_index[name])
+                args.append(name)
+            derivatives.append(create_derivative(declaration, formula, output_indices, args))
+
+        return derivatives, num_inputs
+
+    def is_nn_fwd(defn_name, declarations_by_name):
+        """Return True if the definition is of an NN, non-double
+           backward function, False otherwise"""
+
+        if len(declarations_by_name[defn_name]) == 0:
+            return False
+        declaration = declarations_by_name[defn_name][0]
+        base_name = defn_name if not declaration['inplace'] else defn_name[:-1]
+        fwd_name = base_name + '_forward'
+        if declaration['mode'] != 'NN' or fwd_name not in declarations_by_name:
+            return False
+        return True
+
+    def preprocess_nn_function(defn_name, declarations_by_name):
+        """Set up declaration and derivative information for NN,
+           non-double backward functions"""
+
+        declaration = declarations_by_name[defn_name][0]
+        base_name = defn_name if not declaration['inplace'] else defn_name[:-1]
+        fwd_name = base_name + '_forward'
+
+        if declaration['inplace']:
+            declaration['base_name'] = fwd_name + '_'
+            declaration['derivative'] = declarations_by_name[base_name][0]['derivative']
+            return None
+
+        assert len(declarations_by_name[fwd_name]) == 1
+
+        declaration['base_name'] = fwd_name
+        fwd = declarations_by_name[fwd_name][0]
+
+        derivatives, num_inputs = set_up_derivatives(defn, fwd)
+        buffers = declaration['buffers']
+
+        func = create_autograd_function(defn_name, derivatives, num_inputs, buffers)
+        declaration['derivative'] = func
+
+        return func
+
     # Parse each entry from derivatives.yaml
     autograd_functions = []
     for defn in definitions:
@@ -373,6 +452,12 @@ def load_derivatives(path, declarations_by_signature):
                                "Please use a different name in Declarations.cwrap."
                                .format(defn_name))
         signature = '{}({})'.format(defn_name, ', '.join(param_types))
+
+        if is_nn_fwd(defn_name, declarations_by_name):
+            func = preprocess_nn_function(defn_name, declarations_by_name)
+            if func is not None:
+                autograd_functions.append(func)
+            continue
 
         declarations = declarations_by_signature[signature]
         if len(declarations) == 0:
@@ -396,43 +481,10 @@ def load_derivatives(path, declarations_by_signature):
                                    'Declarations.yaml ({})'
                                    .format(i, defn_name, x, y))
 
-        # First, let us determine the set of inputs for which gradients
-        # were specified in declarations.  We'll use this in layout
-        # computation.
-        args_with_gradients = set()
-        for raw_names in defn:
-            args_with_gradients |= set(split_names(raw_names))
+        derivatives, num_inputs = set_up_derivatives(defn, canonical)
+        buffers = canonical.get('buffers')
 
-        # Next, let us compute the layout of the grad_inputs we will
-        # return.  In general this is not in one-to-one correspondence
-        # with the inputs, because some will not have gradients, and we
-        # will not bother allocating an undefined tensor for them.
-        num_inputs = 0  # number of grad_inputs to return
-        arg_name_to_output_index = {}
-        for arg in canonical['arguments']:
-            if arg['name'] not in args_with_gradients:
-                continue
-            if arg['type'] == 'TensorList':
-                num_inputs = ''
-                output_index = '*'  # variable length thing
-            else:
-                output_index = num_inputs  # the current index
-                num_inputs += 1
-            arg_name_to_output_index[arg['name']] = output_index
-
-        # Finally, let us set up the derivative information
-        derivatives = []
-        for raw_names in sorted(defn.keys()):
-            formula = defn[raw_names]
-            names = split_names(raw_names)
-            output_indices = []
-            args = []
-            for name in names:
-                output_indices.append(arg_name_to_output_index[name])
-                args.append(name)
-            derivatives.append(create_derivative(canonical, formula, output_indices, args))
-
-        func = create_autograd_function(defn_name, derivatives, num_inputs)
+        func = create_autograd_function(defn_name, derivatives, num_inputs, buffers)
         autograd_functions.append(func)
         for declaration in declarations:
             declaration['derivative'] = func
@@ -454,79 +506,6 @@ def ensure_unique_names(autograd_functions):
         if len(overloads) > 1:
             for i, func in enumerate(overloads):
                 func['op'] += str(i)
-
-
-def preprocess_nn_functions(declarations):
-    declarations_by_name = defaultdict(list)
-    for d in declarations:
-        declarations_by_name[d['name']].append(d)
-
-    autograd_functions = []
-    for declaration in declarations:
-        name = declaration['name']
-        base_name = name[:-1] if declaration['inplace'] else name
-        if name == 'batch_norm' or 'conv3d' in name:
-            continue
-
-        fwd_name = base_name + '_forward'
-        bwd_name = base_name + '_backward'
-
-        # NB: This logic means we'll hit the logic below only for
-        # backwards, and not double-backwards.
-        if bwd_name not in declarations_by_name:
-            continue
-
-        if declaration['inplace']:
-            declaration['base_name'] = fwd_name + '_'
-            declaration['derivative'] = declarations_by_name[base_name][0]['derivative']
-            continue
-
-        assert len(declarations_by_name[fwd_name]) == 1
-        assert len(declarations_by_name[bwd_name]) == 1
-
-        declaration['base_name'] = fwd_name
-        fwd = declarations_by_name[fwd_name][0]
-        bwd = declarations_by_name[bwd_name][0]
-
-        def actual(arg):
-            name = arg['name']
-            # To avoid confusion, we bind the mask in backwards
-            # to the name 'grad_input_mask', which is not the same
-            # as the argument naming convention in NN, which is
-            # 'output_mask'.  When we are autogenerating NN
-            # entries, we want to pass in 'grad_input_mask'
-            # as 'output_mask'; thus the substitution here.
-            if name == 'output_mask':
-                return 'grad_input_mask'
-            return name
-
-        actuals = [actual(arg) for arg in bwd['arguments']]
-        formula = '{}({})'.format(bwd_name, ', '.join(actuals))
-        formula = formula.replace('grad_output', 'grad')
-        # NB: This relies on the fact that NN autogenerated
-        # derivatives only ever can take a single 'grad' argument,
-        # and not make use of grads[0], grads[1], etc.
-        if not re.search(IDENT_REGEX.format('grad'), formula):
-            formula = '({}).mul_(grad)'.format(formula)
-
-        # we are computing the derivatives w.r.t these variables
-        var_names = []
-        for ret in bwd['returns']:
-            assert ret['name'].startswith('grad_')
-            var_names.append(ret['name'][5:].replace('input', 'self'))  # remove grad_ prefix
-        output_indices = list(range(len(var_names)))
-        derivatives = [create_derivative(fwd, formula, output_indices, var_names)]
-
-        # find arguments to foo_forward() call which don't exist in foo()
-        # these are buffers which have to be saved for the backwards call
-        args_by_name = {arg['name']: arg for arg in declaration['arguments']}
-        buffers = [arg['name'] for arg in fwd['arguments']
-                   if arg['name'] not in args_by_name]
-
-        func = create_autograd_function(name, derivatives, len(output_indices), buffers)
-        declaration['derivative'] = func
-        autograd_functions.append(func)
-    return autograd_functions
 
 
 def uses_grad(func):
@@ -625,6 +604,10 @@ def create_variable_type(top_env, aten_declarations):
 
     type_declarations = top_env['type_derived_method_declarations']
     type_definitions = top_env['type_derived_method_definitions']
+
+    declarations_by_name = defaultdict(list)
+    for d in aten_declarations:
+        declarations_by_name[d['name']].append(d)
 
     def skip_function(declaration):
         name = declaration['name']
@@ -853,6 +836,7 @@ def create_variable_type(top_env, aten_declarations):
             env['record_trace'] = emit_record_trace(env, declaration)
 
         func = declaration.get('derivative')
+
         if func is not None:
             env['op'] = func['op']
             env['op_ctor'] = ''
@@ -1015,10 +999,12 @@ def gen_variable_type(declarations, out):
 
     declarations_by_signature = group_declarations_by_signature()
 
-    th_autograd_funcs = load_derivatives(derivatives_path, declarations_by_signature)
-    nn_autograd_funcs = preprocess_nn_functions(aten_decls)
-    all_autograd_functions = th_autograd_funcs + nn_autograd_funcs
-    ensure_unique_names(all_autograd_functions)
+    declarations_by_name = defaultdict(list)
+    for d in aten_decls:
+        declarations_by_name[d['name']].append(d)
+
+    autograd_functions = load_derivatives(derivatives_path, declarations_by_signature, declarations_by_name)
+    ensure_unique_names(autograd_functions)
 
     def should_generate_python_binding(declaration):
         name = declaration['name']
@@ -1069,7 +1055,7 @@ def gen_variable_type(declarations, out):
         'py_nn_function_dispatch': [],
     }
 
-    create_autograd_functions(env, all_autograd_functions)
+    create_autograd_functions(env, autograd_functions)
     create_variable_type(env, aten_decls)
 
     from .gen_python_functions import create_python_bindings

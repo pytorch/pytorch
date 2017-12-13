@@ -502,12 +502,15 @@ def create_generic(top_env, declarations):
                 FUNCTION_DEFINITION.substitute(env))
             method_of.append('namespace')
 
+        buffer_names = [buffer['name'] for buffer in option.get('buffers', [])]
+
         output_options.append(OrderedDict([
             ('name', option['api_name']),
             ('method_prefix_derived', option['method_prefix_derived']),
             ('arguments', formals),
             ('method_of', method_of),
             ('mode', option['mode']),
+            ('buffers', buffer_names),
             ('returns', option['returns']),
             ('inplace', option['inplace']),
         ]))
