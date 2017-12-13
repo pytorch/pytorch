@@ -1,5 +1,6 @@
 import torch
-
+import random
+import numpy as np
 
 class Sampler(object):
     """Base class for all Samplers.
@@ -104,7 +105,6 @@ class EnlargeLabelShufflingSampler(Sampler):
     def __init__(self, indices):
         # mapping between label index and sorted label index
         sorted_labels = sorted(enumerate(indices), key=lambda x: x[1])
-        uniq_labels = set(sorted_labels)
         count = 1
         count_of_each_label = []
         tmp = -1
@@ -126,14 +126,14 @@ class EnlargeLabelShufflingSampler(Sampler):
         # preidx used for find the mapping beginning of arg "sorted_labels"
         preidx = 0
         for x in range(len(self.count_of_each_label)):
-            idxes = np.remainder(t.randperm(largest).numpy(), self.count_of_each_label[x]) + preidx
+            idxes = np.remainder(torch.randperm(largest).numpy(), self.count_of_each_label[x]) + preidx
             for y in idxes:
                 self.enlarged_index.append(sorted_labels[y][0])
             
             preidx += int(self.count_of_each_label[x])
 
     def __iter__(self):
-        shuffle(self.enlarged_index)
+        random.shuffle(self.enlarged_index)
         return iter(self.enlarged_index)
     
     def __len__(self):
