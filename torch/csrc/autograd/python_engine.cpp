@@ -7,6 +7,10 @@
 #include "torch/csrc/PtrWrapper.h"
 #include "torch/csrc/utils/auto_gil.h"
 
+#ifndef _WIN32
+#include <pthread.h>
+#endif
+
 #include <unordered_set>
 
 using namespace torch::autograd;
@@ -326,8 +330,19 @@ PyTypeObject THPEngineType = {
   THPEngine_new                          /* tp_new */
 };
 
+static void child_atfork() {
+  // Re-initialize the engine in the child process. Since we don't call the
+  // destructor first, this likely leaks some memory.
+  new (&engine) torch::autograd::python::PythonEngine();
+}
+
 bool THPEngine_initModule(PyObject *module)
 {
+#ifndef _WIN32
+  if (pthread_atfork(NULL, NULL, child_atfork) != 0) {
+    throw std::runtime_error("unable to set pthread_atfork handler");
+  }
+#endif
   if (PyType_Ready(&THPEngineType) < 0)
     return false;
   Py_INCREF(&THPEngineType);
