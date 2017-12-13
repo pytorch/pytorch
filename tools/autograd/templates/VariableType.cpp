@@ -237,7 +237,7 @@ static void ensure_no_aten_scalars(Tensor & data) {
 }
 
 template<typename T>
-static bool computes_grad_tmpl(T tensors, bool is_view) {
+static bool computes_grad_tmpl(T tensors) {
   if (!BackpropMode::is_enabled()) {
     return false;
   }
@@ -264,12 +264,12 @@ static variable_list cast_tensor_list(const TensorList& tensors) {
   return variable_list(tensors.begin(), tensors.end());
 }
 
-static bool compute_requires_grad(const TensorRefList& tensors, bool is_view=false) {
-  return computes_grad_tmpl(tensors, is_view);
+static bool compute_requires_grad(const TensorRefList& tensors) {
+  return computes_grad_tmpl(tensors);
 }
 
-static bool compute_requires_grad(TensorList tensors, bool is_view=false) {
-  return computes_grad_tmpl(tensors, is_view);
+static bool compute_requires_grad(TensorList tensors) {
+  return computes_grad_tmpl(tensors);
 }
 
 static void check_no_requires_grad(const Tensor& tensor, const char* name) {
@@ -305,6 +305,8 @@ static void rebase_history(Variable& var, std::shared_ptr<Function> grad_fn, int
   }
 }
 
+// var must be the only differentiable output of the function. Use the ArrayRef
+// overload for functions with multiple differentiable outputs.
 static void set_history(Variable& var, std::shared_ptr<Function> grad_fn, int output_nr=0) {
   if (grad_fn) {
     grad_fn->num_inputs = 1;

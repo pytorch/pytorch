@@ -341,6 +341,9 @@ static void _mark_dirty(THPFunction *self, t2var_type &t2var,
   self->dirty_tensors = NULL;
 }
 
+static t2var_type _parse_shared_pairs(THPFunction *self, t2var_type &t2var);
+static std::unordered_set<PyObject*> _parse_non_differentiable(THPFunction *self);
+
 // Given a Python tuple of raw output tensors (raw_output), set each of
 // the corresponding entries in a different Python tuple (outputs) with
 // these tensors wrapped with variables.  We save the gradient function (self)
@@ -354,8 +357,6 @@ static void _mark_dirty(THPFunction *self, t2var_type &t2var,
 // mappings for output tensors as well.
 static void _wrap_outputs(THPFunction *self, t2var_type &t2var,
     std::unordered_set<PyObject *> &dirty_inputs,
-    const t2var_type &shared_pairs,
-    const std::unordered_set<PyObject*>& non_differentiable,
     PyObject *raw_output, PyObject *outputs, bool is_executable)
 {
   auto cdata = is_executable ? THPFunction_asFunction(self) : nullptr;
@@ -364,6 +365,9 @@ static void _wrap_outputs(THPFunction *self, t2var_type &t2var,
     self->output_info.clear();
     self->output_info.reserve(num_outputs);
   }
+
+  auto shared_pairs = _parse_shared_pairs(self, t2var);
+  auto non_differentiable = _parse_non_differentiable(self);
 
   // Given an output tensor, find the input Variable with which it shares storage
   auto get_shared_base = [&](PyObject* tensor) -> Variable {
@@ -735,10 +739,7 @@ PyObject* process_outputs(PyObject *op_obj, THPFunction* grad_fn, const Unpacked
   std::unordered_set<PyObject *> dirty_inputs;
   bool is_inplace = static_cast<bool>(grad_fn->dirty_tensors);
   _mark_dirty(grad_fn, t2var, dirty_inputs);
-  _wrap_outputs(grad_fn, t2var, dirty_inputs,
-      _parse_shared_pairs(grad_fn, t2var),
-      _parse_non_differentiable(grad_fn),
-      raw_output, outputs, is_executable);
+  _wrap_outputs(grad_fn, t2var, dirty_inputs, raw_output, outputs, is_executable);
   // Free shared_pairs
   Py_CLEAR(grad_fn->shared_pairs);
   // NOTE: _trace_create has to run before _save_variables, because we need

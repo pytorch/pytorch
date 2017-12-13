@@ -47,8 +47,9 @@ py::object steal(py::handle x) {
 struct CompiledFunction {
 
   struct TraceForKey {
-    explicit TraceForKey(CompiledFunction& fn)
-      : fn_(fn) {}
+    TraceForKey(CompiledFunction& fn, bool grad_enabled)
+      : fn_(fn)
+      , grad_enabled_(grad_enabled) {}
 
     bool ready() {
       if (is_ready_) return true;
@@ -121,6 +122,7 @@ struct CompiledFunction {
     CompiledFunction& fn_;
     IODescriptor out_desc_;
     std::vector<std::shared_ptr<TracingState>> traces_;
+    bool grad_enabled_ = false;
     bool is_ready_ = false;
 
     std::shared_ptr<InterpreterFunctionFactory> factory_;
@@ -130,7 +132,9 @@ struct CompiledFunction {
   TraceForKey& getTrace(ParsedArgs& args) {
     auto it = ktraces_.find(args.desc);
     if (it == ktraces_.end()) {
-      std::tie(it, std::ignore) = ktraces_.emplace(args.desc, TraceForKey(*this));
+      bool grad_enabled = BackpropMode::is_enabled();
+      std::tie(it, std::ignore) = ktraces_.emplace(args.desc,
+                                                   TraceForKey(*this, grad_enabled));
     }
     return it->second;
   }

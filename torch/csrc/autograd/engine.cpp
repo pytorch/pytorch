@@ -142,7 +142,7 @@ auto Engine::thread_main(GraphTask *graph_task) -> void {
   while (!graph_task || graph_task->outstanding_tasks > 0) {
     FunctionTask task = queue->pop_back();
     if (task.fn && !task.base->has_error.load()) {
-      AutoBackpropMode backprop_guard(task.base->backprop_mode);
+      BackpropMode::set_enabled(task.base->backprop_mode);
       try {
         evaluate_function(task);
       } catch (std::exception& e) {

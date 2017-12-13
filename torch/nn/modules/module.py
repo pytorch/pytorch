@@ -685,7 +685,7 @@ class Module(object):
         for p in self.parameters():
             if p.grad is not None:
                 p.grad.detach_()
-                p.grad.data.zero_()
+                p.grad.zero_()
 
     def share_memory(self):
         return self._apply(lambda t: t.share_memory_())

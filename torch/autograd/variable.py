@@ -72,7 +72,7 @@ class Variable(_C._VariableBase):
     def __repr__(self):
         return 'Variable containing:' + self.data.__repr__()
 
-    def backward(self, gradient=None, retain_graph=None, create_graph=False, retain_variables=None):
+    def backward(self, gradient=None, retain_graph=None, create_graph=False):
         """Computes the gradient of current variable w.r.t. graph leaves.
 
         The graph is differentiated using the chain rule. If the variable is

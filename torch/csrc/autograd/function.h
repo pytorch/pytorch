@@ -37,10 +37,11 @@ struct edge_hasher {
   }
 };
 
-// TODO: clean-up
+// TODO: separate is_executable and next_functions
 // State used to create "backward" functions
 struct FunctionFlags {
   // Roughly speaking, is_executable corresponds to requires_grad.
+  // It's true if any input requires grad and gradient calculation is enabled.
   // See http://pytorch.org/docs/notes/autograd.html for more details.
   bool is_executable = false;
   // What functions take the output of this function as input.

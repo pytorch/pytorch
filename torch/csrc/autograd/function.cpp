@@ -17,6 +17,7 @@ auto makeFlags(const T &inputs) -> FunctionFlags {
   f.is_executable = false;
   f.next_functions.resize(num_inputs);
   if (!BackpropMode::is_enabled()) {
+    // TODO: avoid allocating next_functions entirely if backprop_mode is disabled
     return f;
   }
   int i = 0;
@@ -26,7 +27,7 @@ auto makeFlags(const T &inputs) -> FunctionFlags {
       f.is_executable |= var.requires_grad();
       if (var.grad_fn()) {
         f.next_functions[i] = std::make_pair<>(var.grad_fn(), var.output_nr());
-      } else {
+      } else if (var.requires_grad()) {
         f.next_functions[i] = std::make_pair<>(var.grad_accumulator(), 0);
       }
     }

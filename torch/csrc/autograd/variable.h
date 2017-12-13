@@ -114,7 +114,7 @@ public:
   // Mutex to ensure that concurrent read operations that modify internal state
   // are still thread-safe. Used by get_grad_fn and get_grad_accumulator.
   std::mutex mutex;
-  bool _requires_grad;  // only meaningful on leaf variables
+  bool _requires_grad;  // only meaningful on leaf variables (must be false otherwise)
   bool is_view;
   // The "output number" of this variable; e.g., if this variable
   // was the second output of a function, then output_nr == 1.

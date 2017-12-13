@@ -22,7 +22,9 @@ using namespace torch::autograd;
 
 PyObject *THPVariableClass = NULL;
 
-static const char* VOLATILE_WARNING = "volatile was removed. Use `with torch.no_backprop():` instead.";
+static const char* VOLATILE_WARNING =
+    "volatile was removed and now has no effect. Use "
+    "`with torch.no_backprop():` instead.";
 
 // Creates a new Python object for a Variable. The Variable must not already
 // have a PyObject* associated with it.
@@ -329,6 +331,8 @@ int THPVariable_set_grad(THPVariable *self, PyObject *py_grad)
 
 PyObject *THPVariable_get_volatile(THPVariable *self)
 {
+  const char* msg = "volatile was removed (Variable.volatile is always False)";
+  PyErr_WarnEx(PyExc_UserWarning, msg, 1);
   Py_RETURN_FALSE;
 }
 
