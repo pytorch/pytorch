@@ -23,7 +23,6 @@ def parse_arguments(args):
 
 
 def set_declaration_defaults(declaration):
-    declaration.setdefault('primitive', True)
     declaration.setdefault('arguments', [])
     declaration.setdefault('return', 'void')
     if 'cname' not in declaration:
