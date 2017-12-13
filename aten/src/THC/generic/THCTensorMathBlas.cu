@@ -561,16 +561,6 @@ THCTensor_(baddbmm)(THCState *state, THCTensor *result, real beta, THCTensor *t,
   const int64_t block = 512;
   const int64_t grid = (num_batches + block - 1) / block;
 
-/*  createBatchGemmBuffer<<<grid, block, 0, THCState_getCurrentStream(state)>>>(
-    d_matrices1, THCTensor_(data)(state, batch1_), batch1_->stride[0],
-    num_batches);
-  createBatchGemmBuffer<<<grid, block, 0, THCState_getCurrentStream(state)>>>(
-    d_matrices2, THCTensor_(data)(state, batch2_), batch2_->stride[0],
-    num_batches);
-  createBatchGemmBuffer<<<grid, block, 0, THCState_getCurrentStream(state)>>>(
-    (const real**)d_result_matrices, THCTensor_(data)(state,result_),
-    result_->stride[0], num_batches);*/
-
   createBatchGemmBuffer3<<<grid, block, 0, THCState_getCurrentStream(state)>>>(
     d_matrices1, d_matrices2, (const real**)d_result_matrices, THCTensor_(data)(state, batch1_),
     THCTensor_(data)(state, batch2_), THCTensor_(data)(state, result_),
