@@ -532,6 +532,7 @@ def create_generic(top_env, declarations):
             ('buffers', buffer_names),
             ('returns', option['returns']),
             ('inplace', option['inplace']),
+            # See Note [Abstract ATen methods]
             ('abstract', abstract),
         ]))
 
@@ -643,9 +644,14 @@ def create_generic(top_env, declarations):
         template_scalar = option.get('template_scalar')
         option['native_type_method_dispatch'] = dispatch
 
-        # generate the type method definition; if it has the same dispatch for all types,
-        # implement it in the base Type; otherwise use the standard (throwing)
-        # definition and implement it in the derived types.
+        # Note [Abstract ATen methods]
+        # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        # An abstract ATen method is one whose dispatch differs between
+        # types.  These are implemented in derived types (with a
+        # standard (throwing) definition in Type).  A concrete ATen
+        # method is one which has the same dispatch for all types;
+        # we just implement it in the base Type.  This is exposed
+        # in Declarations.yaml via a field named 'abstract'.
         if isinstance(dispatch, dict) or template_scalar:
             abstract = True
             top_env['type_method_definitions'].append(
@@ -696,6 +702,7 @@ def create_generic(top_env, declarations):
             ('mode', option['mode']),
             ('returns', option['returns']),
             ('inplace', option['inplace']),
+            # See Note [Abstract ATen methods]
             ('abstract', abstract),
         ]))
 
