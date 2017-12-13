@@ -355,6 +355,46 @@ def load_derivatives(path, declarations_by_signature, declarations_by_name):
         """Return the index of the first element of xs matching pred."""
         return next((i, x) for i, x in enumerate(xs) if pred(x))
 
+    def set_up_derivatives(defn, declaration):
+
+        # First, let us determine the set of inputs for which gradients
+        # were specified in declarations.  We'll use this in layout
+        # computation.
+        args_with_gradients = set()
+        for raw_names in defn:
+            args_with_gradients |= set(split_names(raw_names))
+
+        # Next, let us compute the layout of the grad_inputs we will
+        # return.  In general this is not in one-to-one correspondence
+        # with the inputs, because some will not have gradients, and we
+        # will not bother allocating an undefined tensor for them.
+        num_inputs = 0  # number of grad_inputs to return
+        arg_name_to_output_index = {}
+        for arg in declaration['arguments']:
+            if arg['name'] not in args_with_gradients:
+                continue
+            if arg['type'] == 'TensorList':
+                num_inputs = ''
+                output_index = '*'  # variable length thing
+            else:
+                output_index = num_inputs  # the current index
+                num_inputs += 1
+            arg_name_to_output_index[arg['name']] = output_index
+
+        # Finally, let us set up the derivative information
+        derivatives = []
+        for raw_names in sorted(defn.keys()):
+            formula = defn[raw_names]
+            names = split_names(raw_names)
+            output_indices = []
+            args = []
+            for name in names:
+                output_indices.append(arg_name_to_output_index[name])
+                args.append(name)
+            derivatives.append(create_derivative(declaration, formula, output_indices, args))
+
+        return derivatives, num_inputs
+
     def is_nn_fwd(defn_name, declarations_by_name):
         """Return True if the definition is of an NN, non-double
            backward function, False otherwise"""
@@ -386,15 +426,10 @@ def load_derivatives(path, declarations_by_signature, declarations_by_name):
         declaration['base_name'] = fwd_name
         fwd = declarations_by_name[fwd_name][0]
 
-        derivatives = []
-        for raw_names, formula in defn.items():
-            var_names = split_names(raw_names)
-            output_indices = list(range(len(var_names)))
-            derivatives.append(create_derivative(fwd, formula, output_indices, var_names))
-
+        derivatives, num_inputs = set_up_derivatives(defn, fwd)
         buffers = declaration['buffers']
 
-        func = create_autograd_function(defn_name, derivatives, len(output_indices), buffers)
+        func = create_autograd_function(defn_name, derivatives, num_inputs, buffers)
         declaration['derivative'] = func
 
         return func
@@ -446,43 +481,8 @@ def load_derivatives(path, declarations_by_signature, declarations_by_name):
                                    'Declarations.yaml ({})'
                                    .format(i, defn_name, x, y))
 
-        # First, let us determine the set of inputs for which gradients
-        # were specified in declarations.  We'll use this in layout
-        # computation.
-        args_with_gradients = set()
-        for raw_names in defn:
-            args_with_gradients |= set(split_names(raw_names))
-
-        # Next, let us compute the layout of the grad_inputs we will
-        # return.  In general this is not in one-to-one correspondence
-        # with the inputs, because some will not have gradients, and we
-        # will not bother allocating an undefined tensor for them.
-        num_inputs = 0  # number of grad_inputs to return
-        arg_name_to_output_index = {}
-        for arg in canonical['arguments']:
-            if arg['name'] not in args_with_gradients:
-                continue
-            if arg['type'] == 'TensorList':
-                num_inputs = ''
-                output_index = '*'  # variable length thing
-            else:
-                output_index = num_inputs  # the current index
-                num_inputs += 1
-            arg_name_to_output_index[arg['name']] = output_index
-
+        derivatives, num_inputs = set_up_derivatives(defn, canonical)
         buffers = canonical.get('buffers')
-
-        # Finally, let us set up the derivative information
-        derivatives = []
-        for raw_names in sorted(defn.keys()):
-            formula = defn[raw_names]
-            names = split_names(raw_names)
-            output_indices = []
-            args = []
-            for name in names:
-                output_indices.append(arg_name_to_output_index[name])
-                args.append(name)
-            derivatives.append(create_derivative(canonical, formula, output_indices, args))
 
         func = create_autograd_function(defn_name, derivatives, num_inputs, buffers)
         autograd_functions.append(func)
