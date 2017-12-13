@@ -1,4 +1,5 @@
 import torch
+from torch.autograd import Variable
 from torch.distributions.distribution import Distribution
 
 
@@ -19,6 +20,7 @@ class Bernoulli(Distribution):
     Args:
         probs (Tensor or Variable): the probabilty of sampling `1`
     """
+    has_enumerate_support = True
 
     def __init__(self, probs):
         self.probs = probs
@@ -35,3 +37,14 @@ class Bernoulli(Distribution):
 
         # evaluate using the values
         return log_pmf.gather(0, value.unsqueeze(0).long()).squeeze(0)
+
+    def enumerate_support(self):
+        batch_shape = self.probs.shape
+        values = torch.arange(2).long()
+        values = values.view((-1,) + (1,) * len(batch_shape))
+        values = values.expand((-1,) + batch_shape)
+        if self.probs.is_cuda:
+            values = values.cuda(self.probs.get_device())
+        if isinstance(self.probs, Variable):
+            values = Variable(values)
+        return values

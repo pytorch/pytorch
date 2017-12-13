@@ -1,4 +1,5 @@
 import torch
+from torch.autograd import Variable
 from torch.distributions.distribution import Distribution
 
 
@@ -28,6 +29,7 @@ class Categorical(Distribution):
     Args:
         probs (Tensor or Variable): event probabilities
     """
+    has_enumerate_support = True
 
     def __init__(self, probs):
         if probs.dim() != 1 and probs.dim() != 2:
@@ -51,3 +53,14 @@ class Categorical(Distribution):
             return p.gather(-1, value).log()
 
         return p.gather(-1, value.unsqueeze(-1)).squeeze(-1).log()
+
+    def enumerate_support(self):
+        batch_shape, event_size = self.probs.shape[:-1], self.probs.shape[-1]
+        values = torch.arange(event_size).long()
+        values = values.view((-1,) + (1,) * len(batch_shape))
+        values = values.expand((-1,) + batch_shape)
+        if self.probs.is_cuda:
+            values = values.cuda(self.probs.get_device())
+        if isinstance(self.probs, Variable):
+            values = Variable(values)
+        return values
