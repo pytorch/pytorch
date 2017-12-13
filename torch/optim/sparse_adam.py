@@ -26,7 +26,7 @@ class SparseAdam(Optimizer):
         https://openreview.net/forum?id=ryQu7f-RZ
     """
 
-    def __init__(self, params, lr=1e-3, betas=(0.9, 0.999), eps=1e-8, 
+    def __init__(self, params, lr=1e-3, betas=(0.9, 0.999), eps=1e-8,
                  amsgrad=False):
         defaults = dict(lr=lr, betas=betas, eps=eps, amsgrad=amsgrad)
         super(SparseAdam, self).__init__(params, defaults)
