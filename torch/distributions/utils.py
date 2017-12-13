@@ -31,11 +31,11 @@ def broadcast_all(*values):
     """
     Given a list of values (possibly containing numbers), returns a list where each
     value is broadcasted based on the following rules:
-        - `torch.Tensor` and `torch.autograd.Variable` instances are broadcasted as per
-          the `broadcasting rules <http://pytorch.org/docs/master/notes/broadcasting.html>`_
-        - numbers.Number instances (scalars) are upcast to Tensors / Variables depending
-          on the type of the first tensor passed to values. If all the values are scalars,
-          then the type is `torch.Tensor` having size `(1,)`.
+      - `torch.Tensor` and `torch.autograd.Variable` instances are broadcasted as per
+        the `broadcasting rules <http://pytorch.org/docs/master/notes/broadcasting.html>`_
+      - numbers.Number instances (scalars) are upcast to Tensor/Variable having the same
+        size and type as the first tensor passed to `values`. If all the values are scalars,
+        then they are upcasted to `torch.Tensor` having size `(1,)`.
 
     Args:
         values (list of `numbers.Number`, `torch.autograd.Variable` or `torch.Tensor`)
