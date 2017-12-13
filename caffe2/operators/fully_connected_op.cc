@@ -29,6 +29,12 @@ REGISTER_CPU_OPERATOR(
         CPUContext,
         DefaultEngine,
         false /* don't tranpose weight */>);
+REGISTER_CPU_OPERATOR(
+    FCTransposedGradient,
+    FullyConnectedGradientOp<
+        CPUContext,
+        DefaultEngine,
+        false /* don't tranpose weight */>);
 
 namespace {
 std::vector<TensorShape> FCShapeInference(
@@ -118,17 +124,30 @@ OPERATOR_SCHEMA(FC)
     .Output(0, "Y", "2D output tensor");
 
 OPERATOR_SCHEMA(FCGradient).NumInputs(3).NumOutputs(2, 3);
+OPERATOR_SCHEMA(FCTransposedGradient).NumInputs(3).NumOutputs(2, 3);
 
+namespace {
+
+template <const char* GradientOp>
 class GetFCGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;
-  vector<OperatorDef> GetGradientDefs() override {
+
+  std::vector<OperatorDef> GetGradientDefs() override {
     CAFFE_ENFORCE_EQ(def_.input_size(), 3);
     return SingleGradientDef(
-        "FCGradient",
+        GradientOp,
         "",
         vector<string>{I(0), I(1), GO(0)},
         vector<string>{GI(1), GI(2), GI(0)});
   }
 };
-REGISTER_GRADIENT(FC, GetFCGradient);
-}  // namespace caffe2
+
+constexpr char kFCGradient[] = "FCGradient";
+constexpr char kFCTransposedGradient[] = "FCTransposedGradient";
+
+REGISTER_GRADIENT(FC, GetFCGradient<kFCGradient>);
+REGISTER_GRADIENT(FCTransposed, GetFCGradient<kFCTransposedGradient>);
+
+} // namespace
+
+} // namespace caffe2

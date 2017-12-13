@@ -165,7 +165,10 @@ class FullyConnectedOp final : public Operator<Context> {
   bool float16_compute_;
 };
 
-template <class Context, class Engine = DefaultEngine>
+template <
+    class Context,
+    class Engine = DefaultEngine,
+    bool TransposeWeight = true>
 class FullyConnectedGradientOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
@@ -195,7 +198,8 @@ class FullyConnectedGradientOp : public Operator<Context> {
     const int M = X.size_to_dim(canonical_axis);
     const int K = X.size_from_dim(canonical_axis);
     const auto canonical_axis_w = W.canonical_axis_index(axis_w_);
-    const int N = W.size_to_dim(canonical_axis_w);
+    const int N = TransposeWeight ? W.size_to_dim(canonical_axis_w)
+                                  : W.size_from_dim(canonical_axis_w);
     CAFFE_ENFORCE(M * K == X.size());
     CAFFE_ENFORCE(K * N == W.size());
 
@@ -236,12 +240,12 @@ class FullyConnectedGradientOp : public Operator<Context> {
     math::Gemm<T_DY, Context, Engine>(
         CblasTrans,
         CblasNoTrans,
-        N,
-        K,
+        TransposeWeight ? N : K,
+        TransposeWeight ? K : N,
         M,
         1,
-        dY.template data<T_DY>(),
-        X.template data<T_X>(),
+        TransposeWeight ? dY.template data<T_DY>() : X.template data<T_X>(),
+        TransposeWeight ? X.template data<T_X>() : dY.template data<T_DY>(),
         0,
         dW->template mutable_data<T_DW>(),
         &context_,
@@ -274,7 +278,7 @@ class FullyConnectedGradientOp : public Operator<Context> {
       dX->ResizeLike(X);
       math::Gemm<T_DX, Context, Engine>(
           CblasNoTrans,
-          CblasNoTrans,
+          TransposeWeight ? CblasNoTrans : CblasTrans,
           M,
           K,
           N,
