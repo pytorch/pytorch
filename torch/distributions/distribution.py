@@ -12,24 +12,25 @@ class Distribution(object):
 
     def sample(self, sample_shape=()):
         """
-        Generates a sample_shape shaped sample or sample_shape shaped batch of samples if the distribution
-        parameters are batched. Currently only supports len(sample_shape)<2.
+        Generates a sample_shape shaped sample or sample_shape shaped batch of
+        samples if the distribution parameters are batched. Currently only
+        supports `len(sample_shape)<2`.
         """
         z = self.rsample(sample_shape)
         return z.detach() if hasattr(z, 'detach') else z
 
     def rsample(self, sample_shape=()):
         """
-        Generates a sample_shape shaped reparameterized sample or sample_shape shaped batch of 
-        reparameterized samples if the distribution parameters are batched. Currently only 
-        supports len(sample_shape)<2.
+        Generates a sample_shape shaped reparameterized sample or sample_shape
+        shaped batch of reparameterized samples if the distribution parameters
+        are batched. Currently only supports `len(sample_shape)<2`.
         """
         raise NotImplementedError
 
     def sample_n(self, n):
         """
-        Generates n samples or n batches of samples if the distribution parameters
-        are batched.
+        Generates n samples or n batches of samples if the distribution
+        parameters are batched.
         """
         warnings.warn('sample_n will be deprecated. Use .sample((n,)) instead', PendingDeprecationWarning)
         return self.sample((n,))
