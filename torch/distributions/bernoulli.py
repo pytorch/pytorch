@@ -29,7 +29,7 @@ class Bernoulli(Distribution):
         elif len(sample_shape) == 1:
             return torch.bernoulli(self.probs.expand(sample_shape[0], *self.probs.size()))
         else:
-        	raise NotImplementedError("sample is not implemented for len(sample_shape)>1")
+            raise NotImplementedError("sample is not implemented for len(sample_shape)>1")
 
     def log_prob(self, value):
         # compute the log probabilities for 0 and 1

@@ -16,10 +16,9 @@ class Distribution(object):
         z = self.rsample(sample_shape)
         return z.detach() if hasattr(z, 'detach') else z
 
-
     def rsample(self, sample_shape=()):
         """
-    	Generates a sample_shape shaped reparameterized sample or sample_shape shaped batch of reparameterized samples if the distribution
+        Generates a sample_shape shaped reparameterized sample or sample_shape shaped batch of reparameterized samples if the distribution
         parameters are batched. Currently only supports len(sample_shape)<2.
         """
         raise NotImplementedError

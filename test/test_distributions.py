@@ -105,7 +105,6 @@ class TestDistributions(TestCase):
             return Categorical(p).rsample()
         self.assertRaises(NotImplementedError, call_rsample)
 
-
     def test_categorical_2d(self):
         probabilities = [[0.1, 0.2, 0.3], [0.5, 0.3, 0.2]]
         p = Variable(torch.Tensor(probabilities), requires_grad=True)
