@@ -63,9 +63,6 @@ throw std::runtime_error("VariableType::${api_name} NYI");""")
 DERIVED_CALL = CodeTemplate("""\
 baseType->${method_prefix_derived}${base_name}(${unpacked_args})""")
 
-TYPE_CALL = CodeTemplate("""\
-Type::${method_prefix_derived}${api_name}(${args})""")
-
 UNPACK_TENSOR = CodeTemplate("""\
 auto${ref} ${arg_name}_ = unpack${suffix}(${arg_name}, "${arg_name}", ${arg_pos});""")
 
@@ -157,7 +154,7 @@ return ${return_value};
 
 METHOD_DEFINITION_BODY_VIA_TYPE = CodeTemplate("""\
 profiler::RecordFunction profiler("${name}");
-${base_impl_call}
+auto ret = Type::${method_prefix_derived}${api_name}(${args});
 ${record_trace}
 return ${return_value};
 """)
@@ -860,10 +857,10 @@ def create_variable_type(top_env, aten_declarations):
         body = []
 
         combined = nested_dict(env, declaration)
-        assert declaration['return_type'] not in FALLTHROUGH_RETURN_TYPES
-        assert declaration['name'] not in FALLTHROUGH_FUNCTIONS
-
         arguments = declaration['arguments']
+
+        assert not (any(arg['simple_type'] in {'Generator', 'Storage'} for arg in arguments))
+
         tensor_args = [arg for arg in arguments if arg['simple_type'] in {'Tensor', 'TensorList'}]
         env['tensor_args'] = [arg['name'] for arg in tensor_args]
 
@@ -877,13 +874,7 @@ def create_variable_type(top_env, aten_declarations):
             env['return_value'] = '{}(std::move(ret))'.format(declaration['return_type'])
             env['trace_outputs'] = get_trace_outputs(declaration)
 
-        assert not (any(arg['simple_type'] in {'Generator', 'Storage'} for arg in arguments))
         env['record_trace'] = emit_record_trace(env, declaration)
-
-        base_call = TYPE_CALL.substitute(combined)
-        base_call = 'auto ret = {}'.format(base_call)
-
-        env['base_impl_call'] = base_call + ';'
 
         body.extend(METHOD_DEFINITION_BODY_VIA_TYPE.substitute(combined).split('\n'))
         return body
