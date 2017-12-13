@@ -788,6 +788,11 @@ def create_variable_type(top_env, aten_declarations):
 
     def emit_record_trace(env, declaration):
 
+        # Operations involving Generator and Storage are not traceable
+        # at the moment
+        if any(arg['simple_type'] in {'Generator', 'Storage'} for arg in declaration['arguments']):
+            return []
+
         # Note [clang-802.0.42 tuple overload bug]
         # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
         # Originally, my plan for emit_$ecord_trace was to keep it as
@@ -858,8 +863,6 @@ def create_variable_type(top_env, aten_declarations):
 
         combined = nested_dict(env, declaration)
         arguments = declaration['arguments']
-
-        assert not (any(arg['simple_type'] in {'Generator', 'Storage'} for arg in arguments))
 
         tensor_args = [arg for arg in arguments if arg['simple_type'] in {'Tensor', 'TensorList'}]
         env['tensor_args'] = [arg['name'] for arg in tensor_args]
@@ -934,10 +937,7 @@ def create_variable_type(top_env, aten_declarations):
                 env['result'] = CodeTemplate("{ ${outs} }").substitute(outs=diff_outs)
             env['trace_outputs'] = get_trace_outputs(declaration)
 
-        if any(arg['simple_type'] in {'Generator', 'Storage'} for arg in arguments):
-            env['record_trace'] = []
-        else:
-            env['record_trace'] = emit_record_trace(env, declaration)
+        env['record_trace'] = emit_record_trace(env, declaration)
 
         func = declaration.get('derivative')
 
