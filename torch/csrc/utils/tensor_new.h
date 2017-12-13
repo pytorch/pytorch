@@ -5,6 +5,6 @@
 
 namespace torch { namespace utils {
 
-PyObject* tensor_to_list(const at::Tensor& tensor);
+at::Tensor tensor_new(const at::Type& type, PyObject* args, PyObject* kwargs);
 
 }} // namespace torch::utils

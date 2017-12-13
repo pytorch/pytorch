@@ -27,7 +27,8 @@ struct ${Type} final : public Type {
   virtual std::size_t elementSizeInBytes() const override;
   virtual TypeID ID() const override;
   static const char * typeString();
-  Tensor unsafeTensorFromTH(void * th_pointer, bool retain) const override;
+  virtual std::unique_ptr<Storage> unsafeStorageFromTH(void * th_pointer, bool retain) const override;
+  virtual Tensor unsafeTensorFromTH(void * th_pointer, bool retain) const override;
 
   // example
   // virtual Tensor * add(Tensor & a, Tensor & b) override;

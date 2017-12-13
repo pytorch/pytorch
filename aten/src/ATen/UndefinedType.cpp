@@ -23,6 +23,9 @@ std::unique_ptr<Storage> UndefinedType::storage(size_t size) const {
 std::unique_ptr<Storage> UndefinedType::storageFromBlob(void * data, int64_t size, const std::function<void(void*)> & deleter) const {
   runtime_error("storageFromBlob not defined for UndefinedType");
 }
+std::unique_ptr<Storage> UndefinedType::unsafeStorageFromTH(void * th_pointer, bool retain) const {
+  runtime_error("unsafeStorageFromTH not defined for UndefinedType");
+}
 Tensor UndefinedType::unsafeTensorFromTH(void * th_pointer, bool retain) const {
   runtime_error("unsafeTensorFromTH not defined for UndefinedType");
 }

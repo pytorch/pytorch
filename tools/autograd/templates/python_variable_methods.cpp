@@ -13,6 +13,7 @@
 #include "torch/csrc/utils/python_tuples.h"
 #include "torch/csrc/utils/tensor_apply.h"
 #include "torch/csrc/utils/tensor_list.h"
+#include "torch/csrc/utils/tensor_new.h"
 #include "torch/csrc/utils/tensor_numpy.h"
 
 #include "python_variable_methods_dispatch.h"
@@ -395,6 +396,14 @@ static PyObject * THPVariable_map2_(PyObject* self, PyObject* args, PyObject* kw
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject * THPVariable_new(PyObject* self, PyObject* args, PyObject* kwargs)
+{
+  HANDLE_TH_ERRORS
+  auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
+  return THPVariable_Wrap(torch::utils::tensor_new(self_.type(), args, kwargs));
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject * THPVariable_storage(PyObject* self, PyObject* arg)
 {
   HANDLE_TH_ERRORS
@@ -418,7 +427,7 @@ static PyObject * THPVariable_tolist(PyObject* self, PyObject* args)
 {
   HANDLE_TH_ERRORS
   auto self_ = reinterpret_cast<THPVariable*>(self)->cdata;
-  return THPUtils_tensorToList(self_.data());
+  return torch::utils::tensor_to_list(self_.data());
   END_HANDLE_TH_ERRORS
 }
 
@@ -468,6 +477,7 @@ PyMethodDef variable_methods[] = {
   {"map2_", (PyCFunction)THPVariable_map2_, METH_VARARGS | METH_KEYWORDS, NULL},
   {"ndimension", (PyCFunction)THPVariable_dim, METH_NOARGS, NULL},
   {"nelement", (PyCFunction)THPVariable_numel, METH_NOARGS, NULL},
+  {"new", (PyCFunction)THPVariable_new, METH_VARARGS | METH_KEYWORDS, NULL},
   {"numpy", (PyCFunction)THPVariable_numpy, METH_NOARGS, NULL},
   {"short", (PyCFunction)THPVariable_short, METH_NOARGS, NULL},
   {"size", (PyCFunction)THPVariable_size, METH_VARARGS | METH_KEYWORDS, NULL},
