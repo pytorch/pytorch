@@ -68,7 +68,7 @@ class TesterBase:
                 op = core.CreateOperator(
                     prefix + op_name, inputs, ['output'], **operator_args
                 )
-                print('Operator %s' % op.type)
+                print('Operator %s, ' % op.type, gc.device_type)
 
                 def seg_reduce(data, *args):
                     indices, segments = (
@@ -389,6 +389,30 @@ class TestSegmentOps(hu.HypothesisTestCase):
 
     @unittest.skipIf(not workspace.has_gpu_support, "No gpu support")
     @given(**hu.gcs)
+    def test_sorted_segment_range_mean(self, gc, dc):
+        X = np.random.rand(6, 32, 12).astype(np.float32)
+        segments = np.array([0, 0, 1, 1, 2, 3]).astype(np.int32)
+        op = core.CreateOperator(
+            "SortedSegmentRangeMean",
+            ["X", "segments"],
+            "out"
+        )
+        self.assertDeviceChecks(dc, op, [X, segments], [0])
+
+    @unittest.skipIf(not workspace.has_gpu_support, "No gpu support")
+    @given(**hu.gcs)
+    def test_sorted_segment_range_log_mean_exp(self, gc, dc):
+        X = np.random.rand(7, 32, 12).astype(np.float32)
+        segments = np.array([0, 0, 1, 1, 2, 2, 3]).astype(np.int32)
+        op = core.CreateOperator(
+            "SortedSegmentRangeLogMeanExp",
+            ["X", "segments"],
+            "out"
+        )
+        self.assertDeviceChecks(dc, op, [X, segments], [0])
+
+    @unittest.skipIf(not workspace.has_gpu_support, "No gpu support")
+    @given(**hu.gcs)
     def test_unsorted_means_large(self, gc, dc):
         X = np.random.rand(10000, 31, 19).astype(np.float32)
         segments = np.random.randint(0, 10000, size=10000).astype(np.int32)
@@ -476,7 +500,6 @@ class TestSegmentOps(hu.HypothesisTestCase):
         workspace.FeedBlob('L', L)
         with self.assertRaises(RuntimeError):
             workspace.RunOperatorOnce(op)
-
 
 if __name__ == "__main__":
     import unittest
