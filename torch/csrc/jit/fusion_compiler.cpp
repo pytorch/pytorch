@@ -625,8 +625,13 @@ private:
 static const std::string so_template = "/tmp/pytorch_fuserXXXXXX.so";
 static const std::string cpp_template = "/tmp/pytorch_fuserXXXXXX.cpp";
 
+#ifdef __PPC64__ 
+static const std::string compile_string =
+  "\"${cxx}\" -O3 -g -std=c++11 -fPIC -shared \"${cpp_file}\" -o \"${so_file}\"";
+#else
 static const std::string compile_string =
   "\"${cxx}\" -O3 -g -march=native -std=c++11 -fPIC -shared \"${cpp_file}\" -o \"${so_file}\"";
+#endif
 
 static void runCompiler(FusionCompilerConfig & config, const std::string & cpp_file, const std::string & so_file) {
   TemplateEnv env;
