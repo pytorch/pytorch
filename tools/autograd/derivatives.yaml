@@ -861,5 +861,8 @@
 
 # vision
 
-- name: cudnn_grid_sampler_forward(Tensor self, Tensor grid)
+- name: cudnn_grid_sampler(Tensor self, Tensor grid)
   self, grid: cudnn_grid_sampler_backward(self, grid, grad)
+
+- name: cudnn_affine_grid_generator(Tensor theta, int64_t N, int64_t C, int64_t H, int64_t W)
+  theta: cudnn_affine_grid_generator_backward(grad, N, C, H, W)
