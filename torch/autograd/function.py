@@ -3,6 +3,7 @@ import torch._C as _C
 import torch.utils.hooks as hooks
 from torch._six import with_metaclass
 import functools
+import types
 from collections import OrderedDict
 
 
@@ -411,7 +412,6 @@ def symbolic_override(symbolic_fn):
 
     def wrapper_maker(fn):
 
-        @functools.wraps(fn)
         def wrapper(*args, **kwargs):
             output = fn(*args, **kwargs)
             flat_args = tuple(_iter_variables(args))
@@ -441,6 +441,10 @@ def symbolic_override(symbolic_fn):
 
             flat_proxy_output = ExportProxy.apply(*flat_args)
             return _unflatten(flat_proxy_output, output)
+
+        # fn might be autograd.Function too, in this case wrapping doesn't work
+        if isinstance(fn, types.FunctionType):
+            wrapper = functools.wraps(fn)(wrapper)
 
         return wrapper
 
