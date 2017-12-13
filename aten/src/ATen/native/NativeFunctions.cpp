@@ -8,6 +8,16 @@
 namespace at {
 namespace native {
 
+Tensor& bernoulli_(Tensor& self, const Tensor& p, Generator* generator) {
+  self.copy_(at::bernoulli(std::get<0>(expand_inplace(self, p)), generator));
+  return self;
+}
+
+Tensor& bernoulli_(Tensor& self, double p, Generator* generator) {
+  Tensor probs = self.type().toScalarType(kDouble).tensor({}).fill_(p);
+  return native::bernoulli_(self, probs, generator);
+}
+
 Tensor type_as(const Tensor& self, const Tensor& other) {
   return self.toType(other.type());
 }

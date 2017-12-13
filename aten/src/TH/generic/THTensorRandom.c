@@ -64,6 +64,16 @@ void THTensor_(bernoulli_DoubleTensor)(THTensor *self, THGenerator *_generator, 
 
 #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
 
+
+void THTensor_(bernoulli_Tensor)(THTensor *self, THGenerator *_generator, THTensor* p)
+{
+#if defined(TH_REAL_IS_FLOAT)
+  THTensor_(bernoulli_FloatTensor)(self, _generator, p);
+#else
+  THTensor_(bernoulli_DoubleTensor)(self, _generator, p);
+#endif
+}
+
 void THTensor_(uniform)(THTensor *self, THGenerator *_generator, double a, double b)
 {
   #if defined(TH_REAL_IS_FLOAT)
