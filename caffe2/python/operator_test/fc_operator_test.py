@@ -96,7 +96,7 @@ class TestFcOperator(hu.HypothesisTestCase):
            m=st.integers(0, 5),
            k=st.integers(1, 5),
            multi_dim=st.sampled_from([True, False]),
-           **hu.gcs)
+           **hu.gcs_cpu_only)
     def test_fc_transposed(self, n, m, k, multi_dim, gc, dc):
         X = np.random.rand(m, k).astype(np.float32) - 0.5
         if multi_dim:
