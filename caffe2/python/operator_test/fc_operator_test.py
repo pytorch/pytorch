@@ -86,25 +86,27 @@ class TestFcOperator(hu.HypothesisTestCase):
         # Gradient checks
         threshold = 0.5 if dtype == np.float16 else 0.005
         stepsize = 0.5 if dtype == np.float16 else 0.05
-        self.assertGradientChecks(gc, op, [X, W, b], 0, [0],
-                                  threshold=threshold, stepsize=stepsize)
-        self.assertGradientChecks(gc, op, [X, W, b], 1, [0],
-                                  threshold=threshold, stepsize=stepsize)
-        self.assertGradientChecks(gc, op, [X, W, b], 2, [0],
-                                  threshold=threshold, stepsize=stepsize)
+        for i in range(3):
+            self.assertGradientChecks(gc, op, [X, W, b], i, [0],
+                                      threshold=threshold, stepsize=stepsize)
 
 
     @settings(max_examples=50)
     @given(n=st.integers(1, 5),
            m=st.integers(0, 5),
-           k=st.integers(1, 5))
-    def test_fc_transposed(self, n, m, k):
+           k=st.integers(1, 5),
+           multi_dim=st.sampled_from([True, False]),
+           **hu.gcs)
+    def test_fc_transposed(self, n, m, k, multi_dim, gc, dc):
         X = np.random.rand(m, k).astype(np.float32) - 0.5
-        W = np.random.rand(n, k).astype(np.float32).T - 0.5
+        if multi_dim:
+            W = np.random.rand(k, n, 1, 1).astype(np.float32) - 0.5
+        else:
+            W = np.random.rand(n, k).astype(np.float32).T - 0.5
         b = np.random.rand(n).astype(np.float32) - 0.5
 
         def fc_op(X, W, b):
-            return [np.dot(X, W) + b]
+            return [np.dot(X, W.reshape(k, n)) + b.reshape(n)]
 
         op = core.CreateOperator(
             'FCTransposed',
@@ -119,6 +121,13 @@ class TestFcOperator(hu.HypothesisTestCase):
             inputs=[X, W, b],
             reference=fc_op,
         )
+
+        # Gradient checks
+        threshold = 0.005
+        stepsize = 0.05
+        for i in range(3):
+            self.assertGradientChecks(gc, op, [X, W, b], i, [0],
+                                      threshold=threshold, stepsize=stepsize)
 
 if __name__ == "__main__":
     import unittest
