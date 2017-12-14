@@ -920,7 +920,7 @@ class CUDAUnsortedSegmentSumOp : public Operator<CUDAContext> {
 };
 
 template <typename SIndex>
-__global__ void segment_lengths(int N, const SIndex* X, SIndex* Y) {
+__global__ void segment_lengths_kernel(int N, const SIndex* X, SIndex* Y) {
   CUDA_1D_KERNEL_LOOP(i, N) {
     atomicAdd(&Y[X[i]], 1);
   }
@@ -972,30 +972,30 @@ class SortedSegmentRangeMeanOp : public Operator<Context> {
     context_.FinishDeviceComputation();
     K += 1;
     dims[0] = K;
-    if (scaling_factors_.size() != K) {
-      scaling_factors_.Resize(K);
-      segment_size_prefix_sum_.Resize(K);
+    if (segment_len_.size() != K) {
+      segment_len_.Resize(K);
+      segment_len_prefix_sum_.Resize(K);
     }
     output->Resize(dims);
     math::Set<SIndex, CUDAContext>(
-        scaling_factors_.size(),
+        segment_len_.size(),
         0,
-        scaling_factors_.template mutable_data<SIndex>(),
+        segment_len_.template mutable_data<SIndex>(),
         &context_);
-    segment_lengths<<<
+    segment_lengths_kernel<<<
         CAFFE_GET_BLOCKS(indices.size()),
         CAFFE_CUDA_NUM_THREADS,
         0,
         context_.cuda_stream()>>>(
         indices.size(),
         indices.template data<SIndex>(),
-        scaling_factors_.template mutable_data<SIndex>());
+        segment_len_.template mutable_data<SIndex>());
     size_t temp_storage_bytes = 0;
     cub::DeviceScan::ExclusiveSum(
         nullptr,
         temp_storage_bytes,
-        scaling_factors_.template data<SIndex>(),
-        segment_size_prefix_sum_.template mutable_data<SIndex>(),
+        segment_len_.template data<SIndex>(),
+        segment_len_prefix_sum_.template mutable_data<SIndex>(),
         K,
         context_.cuda_stream());
     auto buffer_size = (temp_storage_bytes + sizeof(T)) / sizeof(T);
@@ -1005,8 +1005,8 @@ class SortedSegmentRangeMeanOp : public Operator<Context> {
     cub::DeviceScan::ExclusiveSum(
         dev_temp_storage,
         temp_storage_bytes,
-        scaling_factors_.template data<SIndex>(),
-        segment_size_prefix_sum_.template mutable_data<SIndex>(),
+        segment_len_.template data<SIndex>(),
+        segment_len_prefix_sum_.template mutable_data<SIndex>(),
         K,
         context_.cuda_stream());
     sorted_segment_mean_kernel<T, SIndex, LOGEXP>
@@ -1016,17 +1016,100 @@ class SortedSegmentRangeMeanOp : public Operator<Context> {
            context_.cuda_stream()>>>(
             K,
             N,
-            segment_size_prefix_sum_.template data<SIndex>(),
-            scaling_factors_.template data<SIndex>(),
+            segment_len_prefix_sum_.template data<SIndex>(),
+            segment_len_.template data<SIndex>(),
             input.template data<T>(),
             output->template mutable_data<T>());
     return true;
   }
 
  private:
-  Tensor<CUDAContext> scaling_factors_; // for mean
-  Tensor<CUDAContext> segment_size_prefix_sum_;
+  Tensor<CUDAContext> segment_len_; // for mean
+  Tensor<CUDAContext> segment_len_prefix_sum_;
   Tensor<CUDAContext> prefix_buffer_;
+};
+
+template <typename T, typename SIndex, bool LOGEXP = false>
+__global__ void sorted_segment_mean_gradient_kernel(
+    const int M,
+    const int N,
+    const T* X,
+    const T* Y,
+    const T* dY,
+    const SIndex* I,
+    const SIndex* S,
+    T* dX) {
+  CUDA_1D_KERNEL_LOOP(i, M * N) {
+    const int sId = I[i / N];
+    const int sSize = S[sId];
+    const int yId = N * sId + i % N;
+    dX[i] = LOGEXP ? dY[yId] * exp(X[i] - Y[yId]) / sSize : dY[yId] / sSize;
+  }
+}
+
+template <typename T, typename SIndex, bool LOGEXP, class Context = CUDAContext>
+class SortedSegmentRangeMeanGradientOp : public Operator<Context> {
+ public:
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
+  SortedSegmentRangeMeanGradientOp(
+      const OperatorDef& operator_def,
+      Workspace* ws)
+      : Operator<CUDAContext>(operator_def, ws) {}
+  ~SortedSegmentRangeMeanGradientOp() {}
+
+  bool RunOnDevice() override {
+    const auto& X = Input(0);
+    const auto& Y = Input(1);
+    const auto& dY = Input(2);
+    const auto& I = Input(3);
+    auto* dX = Output(0);
+    dX->ResizeLike(X);
+
+    const int M = X.dim32(0);
+    const int N = X.size_from_dim(1);
+
+    SIndex K = 0;
+    context_.template CopyBytes<Context, CPUContext>(
+        sizeof(SIndex), I.template data<SIndex>() + I.size() - 1, &K);
+
+    K += 1;
+
+    if (segment_len_.size() != K) {
+      segment_len_.Resize(K);
+    }
+
+    math::Set<SIndex, CUDAContext>(
+        segment_len_.size(),
+        0,
+        segment_len_.template mutable_data<SIndex>(),
+        &context_);
+    segment_lengths_kernel<<<
+        CAFFE_GET_BLOCKS(I.size()),
+        CAFFE_CUDA_NUM_THREADS,
+        0,
+        context_.cuda_stream()>>>(
+        I.size(),
+        I.template data<SIndex>(),
+        segment_len_.template mutable_data<SIndex>());
+    sorted_segment_mean_gradient_kernel<T, SIndex, LOGEXP>
+        <<<CAFFE_GET_BLOCKS(dX->size()),
+           CAFFE_CUDA_NUM_THREADS,
+           0,
+           context_.cuda_stream()>>>(
+            M,
+            N,
+            X.template data<T>(),
+            Y.template data<T>(),
+            dY.template data<T>(),
+            I.template data<SIndex>(),
+            segment_len_.template data<SIndex>(),
+            dX->template mutable_data<T>());
+
+    return true;
+  }
+
+ private:
+  Tensor<CUDAContext> segment_len_; // for mean
 };
 
 REGISTER_CUDA_OPERATOR_STR(
@@ -1050,6 +1133,12 @@ REGISTER_CUDA_OPERATOR_STR(
 REGISTER_CUDA_OPERATOR_STR(
     "SortedSegmentRangeLogMeanExp",
     SortedSegmentRangeMeanOp<float, int, true>);
+REGISTER_CUDA_OPERATOR_STR(
+    "SortedSegmentRangeMeanGradient",
+    SortedSegmentRangeMeanGradientOp<float, int, false>);
+REGISTER_CUDA_OPERATOR_STR(
+    "SortedSegmentRangeLogMeanExpGradient",
+    SortedSegmentRangeMeanGradientOp<float, int, true>);
 
 template <typename T, class Context = CUDAContext>
 class CUDASparseLengthsSumGradientWithIndicesOp : public Operator<CUDAContext> {
