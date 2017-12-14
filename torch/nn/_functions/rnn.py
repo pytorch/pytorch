@@ -1,6 +1,6 @@
 import warnings
-from torch.autograd import Function, NestedIOFunction, Variable
-from torch.autograd.function import _iter_variables, _unflatten
+from torch.autograd import Function, Variable
+from torch.autograd.function import _iter_variables, _unflatten, allow_nested_inputs
 import torch.backends.cudnn as cudnn
 from .. import functional as F
 from .thnn import rnnFusedPointwise as fusedBackend
@@ -252,12 +252,11 @@ def AutogradRNN(mode, input_size, hidden_size, num_layers=1, batch_first=False,
     return forward
 
 
-class CudnnRNN(NestedIOFunction):
-
+class CudnnContext(object):
     def __init__(self, mode, input_size, hidden_size, num_layers=1,
                  batch_first=False, dropout=0, train=True, bidirectional=False,
                  batch_sizes=None, dropout_state=None, flat_weight=None):
-        super(CudnnRNN, self).__init__()
+
         if dropout_state is None:
             dropout_state = {}
         self.mode = cudnn.rnn.get_cudnn_mode(mode)
@@ -280,7 +279,20 @@ class CudnnRNN(NestedIOFunction):
                           "at every call, possibly greately increasing memory usage. "
                           "To compact weights again call flatten_parameters().", stacklevel=5)
 
-    def forward_extended(self, input, weight, hx):
+
+@allow_nested_inputs
+class CudnnRNN(Function):
+
+    @staticmethod
+    def forward(ctx, input, weight, hx,
+                mode, input_size, hidden_size, num_layers=1,
+                batch_first=False, dropout=0, train=True, bidirectional=False,
+                batch_sizes=None, dropout_state=None, flat_weight=None):
+
+        ctx.cudnn_context = CudnnContext(mode, input_size, hidden_size, num_layers, batch_first,
+                                         dropout, train, bidirectional, batch_sizes, dropout_state, flat_weight)
+        ctx.cudnn_context.requires_grad = ctx.requires_grad
+
         assert cudnn.is_acceptable(input)
         # TODO: raise a warning if weight_data_ptr is None
 
@@ -291,13 +303,14 @@ class CudnnRNN(NestedIOFunction):
         else:
             hy = tuple(h.new() for h in hx)
 
-        cudnn.rnn.forward(self, input, hx, weight, output, hy)
+        cudnn.rnn.forward(ctx.cudnn_context, input, hx, weight, output, hy)
 
-        self.save_for_backward(input, hx, weight, output)
+        ctx.save_for_backward(input, hx, weight, output)
         return output, hy
 
-    def backward_extended(self, grad_output, grad_hy):
-        input, hx, weight, output = self.saved_tensors
+    @staticmethod
+    def backward(ctx, grad_output, grad_hy):
+        input, hx, weight, output = ctx.saved_tensors
         input = input.contiguous()
 
         grad_input, grad_weight, grad_hx = None, None, None
@@ -310,11 +323,11 @@ class CudnnRNN(NestedIOFunction):
         else:
             grad_hx = tuple(h.new() for h in hx)
 
-        if self.retain_variables:
-            self._reserve_clone = self.reserve.clone()
+        if ctx.retain_variables:
+            _reserve_clone = ctx.cudnn_context.reserve.clone()
 
         cudnn.rnn.backward_grad(
-            self,
+            ctx.cudnn_context,
             input,
             hx,
             weight,
@@ -324,10 +337,10 @@ class CudnnRNN(NestedIOFunction):
             grad_input,
             grad_hx)
 
-        if any(self.needs_input_grad[1:]):
+        if any(ctx.needs_input_grad[1:]):
             grad_weight = [tuple(w.new().resize_as_(w) for w in layer_weight) for layer_weight in weight]
             cudnn.rnn.backward_weight(
-                self,
+                ctx,
                 input,
                 hx,
                 output,
@@ -336,52 +349,67 @@ class CudnnRNN(NestedIOFunction):
         else:
             grad_weight = [(None,) * len(layer_weight) for layer_weight in weight]
 
-        if self.retain_variables:
-            self.reserve = self._reserve_clone
-            del self._reserve_clone
+        if ctx.retain_variables:
+            ctx.cudnn_context.reserve = _reserve_clone
 
         return grad_input, grad_weight, grad_hx
 
 
-def hack_onnx_rnn(fargs, output, args, kwargs):
-    input, all_weights, hx = fargs
-    output_tensors = tuple(v.data for v in _iter_variables(output))
-    flat_weights = tuple(_iter_variables(all_weights))
-    flat_hx = tuple(_iter_variables(hx))
-
-    class RNNSymbolic(Function):
-        @staticmethod
-        def symbolic(g, *fargs):
-            # NOTE: fargs contains Variable inputs (input + weight + hidden)
-            # NOTE: args/kwargs contain RNN parameters
-            raise RuntimeError("hack_onnx_rnn NYI")
-
-        @staticmethod
-        def forward(ctx, *fargs):
-            return output_tensors
-
-        @staticmethod
-        def backward(ctx, *gargs, **gkwargs):
-            raise RuntimeError("FIXME: Traced RNNs don't support backward")
-
-    flat_output = RNNSymbolic.apply(*((input,) + flat_weights + flat_hx))
-    return _unflatten(flat_output, output)
+_Required = object()
+_cudnn_rnn_fspec = [
+    # input purposely omitted
+    ("weight", _Required),
+    ("hx", _Required),
+    ]
+_cudnn_rnn_spec = [
+    ("mode", _Required),
+    ("input_size", _Required),
+    ("hidden_size", _Required),
+    ("num_layers", 1),
+    ("batch_first", False),
+    ("dropout", 0),
+    ("train", True),
+    ("bidirectional", False),
+    ("batch_sizes", None),
+    ("dropout_state", None),
+    ("flat_weight", None),
+    ]
 
 
 def RNN(*args, **kwargs):
     def forward(input, *fargs, **fkwargs):
         if cudnn.is_acceptable(input.data):
-            func = CudnnRNN(*args, **kwargs)
-        else:
-            func = AutogradRNN(*args, **kwargs)
+            # ezyang: I couldn't figure out if args/kwargs/fargs/fkwargs was
+            # ever used in its full generality, so I banged out some code to
+            # turn all of these arguments back into positional ones, no matter
+            # how the input works.  We have to do this because Function.apply()
+            # doesn't understand keyword arguments.
 
-        # Hack for the tracer that allows us to represent RNNs as single
-        # nodes and export them to ONNX in this form
-        if torch._C._jit_is_tracing(input):
-            assert not fkwargs
-            output = func(input, *fargs)
-            return hack_onnx_rnn((input,) + fargs, output, args, kwargs)
+            pargs = [input]  # final, positional args
+
+            def consume_args(base_spec, args, kwargs):
+                """Given an argument signature 'base_spec', and positional
+                and keyword arguments args and kwargs, parses it into an
+                equivalent list of positional arguments as per the function
+                specification.
+                """
+                pargs = []
+                spec = iter(base_spec)
+                for arg in args:
+                    pargs.append(arg)
+                    next(spec)
+                for name, default in spec:
+                    r = kwargs.get(name, default)
+                    if r is _Required:
+                        raise RuntimeError("RNN missing required positional argument {}".format(name))
+                    pargs.append(r)
+                return pargs
+
+            pargs.extend(consume_args(_cudnn_rnn_fspec, fargs, fkwargs))
+            pargs.extend(consume_args(_cudnn_rnn_spec, args, kwargs))
+
+            return CudnnRNN.apply(*pargs)
         else:
-            return func(input, *fargs, **fkwargs)
+            return AutogradRNN(*args, **kwargs)(input, *fargs, **fkwargs)
 
     return forward

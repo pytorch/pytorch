@@ -76,15 +76,12 @@ class RNNBase(Module):
             return
 
         with torch.cuda.device_of(any_param):
-            # This is quite ugly, but it allows us to reuse the cuDNN code without larger
-            # modifications. It's really a low-level API that doesn't belong in here, but
-            # let's make this exception.
             from torch.backends.cudnn import rnn
             from torch.backends import cudnn
-            from torch.nn._functions.rnn import CudnnRNN
+            from torch.nn._functions.rnn import CudnnContext
             handle = cudnn.get_handle()
             with warnings.catch_warnings(record=True):
-                fn = CudnnRNN(
+                fn = CudnnContext(
                     self.mode,
                     self.input_size,
                     self.hidden_size,
