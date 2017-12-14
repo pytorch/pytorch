@@ -47,6 +47,7 @@ install_centos() {
       autoconf \
       automake \
       cmake \
+      cmake3 \
       curl \
       gcc \
       gcc-c++ \
