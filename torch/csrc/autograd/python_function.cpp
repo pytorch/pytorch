@@ -638,6 +638,7 @@ std::pair<UnpackedInput, InputFlags> unpack_input(PyObject *args, bool unflatten
       std::tie(new_arg, needs_input_grad) = unpack_atom(arg);
       PyTuple_SET_ITEM(flags.needs_input_grad.get(), i, needs_input_grad);
       PyTuple_SET_ITEM(unpacked.tensor_input.get(), i, new_arg);
+      continue;
     }
 
     // NB: For simplicity, for now we only support one level of nesting
