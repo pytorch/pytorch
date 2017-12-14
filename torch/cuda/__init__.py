@@ -105,7 +105,7 @@ def _check_capability():
         if CUDA_VERSION < 8000 and major >= 6:
             warnings.warn(error_str % (d, name, 8000, CUDA_VERSION))
         elif CUDA_VERSION < 9000 and major >= 7:
-            warnings.warn(error_str % (d, name, 8000, CUDA_VERSION))
+            warnings.warn(error_str % (d, name, 9000, CUDA_VERSION))
 
 
 def _lazy_call(callable):
