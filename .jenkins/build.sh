@@ -27,12 +27,15 @@ fi
 mkdir -p ./build
 cd ./build
 
-CMAKE_ARGS=("-DCMAKE_INSTALL_PREFIX=/usr/local/caffe2")
+INSTALL_PREFIX="/usr/local/caffe2"
+CMAKE_ARGS=("-DCMAKE_INSTALL_PREFIX=${INSTALL_PREFIX}")
 
 # Explicitly set Python executable.
 # On Ubuntu 16.04 the default Python is still 2.7.
+PYTHON="$(which python)"
 if [[ "${BUILD_ENVIRONMENT}" == py3* ]]; then
-  CMAKE_ARGS+=("-DPYTHON_EXECUTABLE=/usr/bin/python3")
+  PYTHON=/usr/bin/python3
+  CMAKE_ARGS+=("-DPYTHON_EXECUTABLE=${PYTHON}")
 fi
 
 case "${BUILD_ENVIRONMENT}" in
@@ -74,4 +77,37 @@ if [ "$(uname)" == "Linux" ]; then
 else
   echo "Don't know how to build on $(uname)"
   exit 1
+fi
+
+# Symlink the caffe2 base python path into the system python path,
+# so that we can import caffe2 without having to change $PYTHONPATH.
+# Run in a subshell to contain environment set by /etc/os-release.
+#
+# This is only done when running on Jenkins!  We don't want to pollute
+# the user environment with Python symlinks and ld.so.conf.d hacks.
+#
+if [ -n "${JENKINS_URL}" ]; then
+  (
+    source /etc/os-release
+
+    function python_version() {
+      "$PYTHON" -c 'import sys; print("python%d.%d" % sys.version_info[0:2])'
+    }
+
+    # Debian/Ubuntu
+    if [[ "$ID_LIKE" == *debian* ]]; then
+      python_path="/usr/local/lib/$(python_version)/dist-packages"
+      sudo ln -sf "${INSTALL_PREFIX}/caffe2" "${python_path}"
+    fi
+
+    # RHEL/CentOS
+    if [[ "$ID_LIKE" == *rhel* ]]; then
+      python_path="/usr/lib64/$(python_version)/site-packages/"
+      sudo ln -sf "${INSTALL_PREFIX}/caffe2" "${python_path}"
+    fi
+
+    # /etc/ld.so.conf.d is used on both Debian and RHEL
+    echo "${INSTALL_PREFIX}/lib" | sudo tee /etc/ld.so.conf.d/caffe2.conf
+    sudo ldconfig
+  )
 fi
