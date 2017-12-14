@@ -682,6 +682,64 @@ def milstm_reference(
     )
 
 
+def layer_norm_milstm_reference(
+        input,
+        hidden_input,
+        cell_input,
+        gates_w,
+        gates_b,
+        alpha,
+        beta1,
+        beta2,
+        b,
+        gates_t_norm_scale,
+        gates_t_norm_bias,
+        seq_lengths,
+        forget_bias,
+        drop_states=False):
+    T = input.shape[0]
+    N = input.shape[1]
+    G = input.shape[2]
+    D = hidden_input.shape[hidden_input.ndim - 1]
+    hidden = np.zeros(shape=(T + 1, N, D))
+    cell = np.zeros(shape=(T + 1, N, D))
+    assert hidden.shape[0] == T + 1
+    assert cell.shape[0] == T + 1
+    assert hidden.shape[1] == N
+    assert cell.shape[1] == N
+    cell[0, :, :] = cell_input
+    hidden[0, :, :] = hidden_input
+    for t in range(T):
+        input_t = input[t].reshape(1, N, G)
+        hidden_t_prev = hidden[t].reshape(1, N, D)
+        cell_t_prev = cell[t].reshape(1, N, D)
+        gates = np.dot(hidden_t_prev, gates_w.T) + gates_b
+        gates = (alpha * gates * input_t) + \
+                    (beta1 * gates) + \
+                    (beta2 * input_t) + \
+                    b
+        gates = layer_norm_with_scale_and_bias_ref(
+            gates, gates_t_norm_scale, gates_t_norm_bias
+        )
+        hidden_t, cell_t = lstm_unit(
+            hidden_t_prev,
+            cell_t_prev,
+            gates,
+            seq_lengths,
+            t,
+            forget_bias,
+            drop_states=drop_states,
+        )
+        hidden[t + 1] = hidden_t
+        cell[t + 1] = cell_t
+    return (
+        hidden[1:],
+        hidden[-1].reshape(1, N, D),
+        cell[1:],
+        cell[-1].reshape(1, N, D)
+    )
+
+
 def lstm_input():
     '''
     Create input tensor where each dimension is from 1 to 4, ndim=3 and
@@ -1031,9 +1089,12 @@ class RNNCellTest(hu.HypothesisTestCase):
     @ht_settings(max_examples=3, timeout=100)
     @utils.debug
     def test_lstm_main(self, **kwargs):
-        for lstm_type in [(rnn_cell.LSTM, lstm_reference),
-                          (rnn_cell.MILSTM, milstm_reference),
-                          (rnn_cell.LayerNormLSTM, layer_norm_lstm_reference)]:
+        for lstm_type in [
+            (rnn_cell.LSTM, lstm_reference),
+            (rnn_cell.MILSTM, milstm_reference),
+            (rnn_cell.LayerNormLSTM, layer_norm_lstm_reference),
+            (rnn_cell.LayerNormMILSTM, layer_norm_milstm_reference),
+        ]:
             for outputs_with_grads in [[0], [1], [0, 1, 2, 3]]:
                 for memory_optim in [False, True]:
                     self.lstm_base(lstm_type,

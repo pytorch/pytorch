@@ -398,6 +398,7 @@ class LayerNormLSTMCell(RNNCell):
         )
         brew.sum(model, [gates_t, input_t], gates_t)
 
+        # brew.layer_norm call is only difference from LSTMCell
         gates_t, _, _ = brew.layer_norm(
             model,
             self.scope('gates_t'),
@@ -528,6 +529,114 @@ class MILSTMCell(LSTMCell):
             model,
             [alpha_by_input_t_plus_beta_h_by_prev_t, beta_i_by_input_t_plus_b],
             self.scope('gates_t')
+        )
+        hidden_t, cell_t = model.net.LSTMUnit(
+            [hidden_t_prev, cell_t_prev, gates_t, seq_lengths, timestep],
+            [self.scope('hidden_t_intermediate'), self.scope('cell_t')],
+            forget_bias=self.forget_bias,
+            drop_states=self.drop_states,
+        )
+        model.net.AddExternalOutputs(
+            cell_t,
+            hidden_t,
+        )
+        if self.memory_optimization:
+            self.recompute_blobs = [gates_t]
+        return hidden_t, cell_t
+
+
+class LayerNormMILSTMCell(LSTMCell):
+
+    def _apply(
+        self,
+        model,
+        input_t,
+        seq_lengths,
+        states,
+        timestep,
+        extra_inputs=None,
+    ):
+        hidden_t_prev, cell_t_prev = states
+
+        fc_input = hidden_t_prev
+        fc_input_dim = self.hidden_size
+
+        if extra_inputs is not None:
+            extra_input_blobs, extra_input_sizes = zip(*extra_inputs)
+            fc_input = brew.concat(
+                model,
+                [hidden_t_prev] + list(extra_input_blobs),
+                self.scope('gates_concatenated_input_t'),
+                axis=2,
+            )
+            fc_input_dim += sum(extra_input_sizes)
+
+        prev_t = brew.fc(
+            model,
+            fc_input,
+            self.scope('prev_t'),
+            dim_in=fc_input_dim,
+            dim_out=self.gates_size,
+            axis=2,
+        )
+
+        # defining initializers for MI parameters
+        alpha = model.create_param(
+            self.scope('alpha'),
+            shape=[self.gates_size],
+            initializer=Initializer('ConstantFill', value=1.0),
+        )
+        beta_h = model.create_param(
+            self.scope('beta1'),
+            shape=[self.gates_size],
+            initializer=Initializer('ConstantFill', value=1.0),
+        )
+        beta_i = model.create_param(
+            self.scope('beta2'),
+            shape=[self.gates_size],
+            initializer=Initializer('ConstantFill', value=1.0),
+        )
+        b = model.create_param(
+            self.scope('b'),
+            shape=[self.gates_size],
+            initializer=Initializer('ConstantFill', value=0.0),
+        )
+
+        # alpha * input_t + beta_h
+        # Shape: [1, batch_size, 4 * hidden_size]
+        alpha_by_input_t_plus_beta_h = model.net.ElementwiseLinear(
+            [input_t, alpha, beta_h],
+            self.scope('alpha_by_input_t_plus_beta_h'),
+            axis=2,
+        )
+        # (alpha * input_t + beta_h) * prev_t =
+        # alpha * input_t * prev_t + beta_h * prev_t
+        # Shape: [1, batch_size, 4 * hidden_size]
+        alpha_by_input_t_plus_beta_h_by_prev_t = model.net.Mul(
+            [alpha_by_input_t_plus_beta_h, prev_t],
+            self.scope('alpha_by_input_t_plus_beta_h_by_prev_t')
+        )
+        # beta_i * input_t + b
+        # Shape: [1, batch_size, 4 * hidden_size]
+        beta_i_by_input_t_plus_b = model.net.ElementwiseLinear(
+            [input_t, beta_i, b],
+            self.scope('beta_i_by_input_t_plus_b'),
+            axis=2,
+        )
+        # alpha * input_t * prev_t + beta_h * prev_t + beta_i * input_t + b
+        # Shape: [1, batch_size, 4 * hidden_size]
+        gates_t = brew.sum(
+            model,
+            [alpha_by_input_t_plus_beta_h_by_prev_t, beta_i_by_input_t_plus_b],
+            self.scope('gates_t')
+        )
+        # brew.layer_norm call is only difference from MILSTMCell._apply
+        gates_t, _, _ = brew.layer_norm(
+            model,
+            self.scope('gates_t'),
+            self.scope('gates_t_norm'),
+            dim_in=self.gates_size,
+            axis=-1,
         )
         hidden_t, cell_t = model.net.LSTMUnit(
             [hidden_t_prev, cell_t_prev, gates_t, seq_lengths, timestep],
@@ -1296,6 +1405,7 @@ def _LSTM(
 LSTM = functools.partial(_LSTM, LSTMCell)
 MILSTM = functools.partial(_LSTM, MILSTMCell)
 LayerNormLSTM = functools.partial(_LSTM, LayerNormLSTMCell)
+LayerNormMILSTM = functools.partial(_LSTM, LayerNormMILSTMCell)
 
 
 class UnrolledCell(RNNCell):
