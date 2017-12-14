@@ -151,30 +151,24 @@ auto PyFunction::apply(const variable_list& inputs) -> variable_list {
     }
   }
 
-  // Now the number of gradients should match
-  if (num_outputs != num_forward_inputs) {
-    std::string msg("function ");
-    msg += name() + " returned an incorrect number of gradients (expected ";
-    msg += std::to_string(num_forward_inputs) + ", got " ;
-    msg += std::to_string(num_outputs) + ")";
-    throw std::runtime_error(msg);
-  }
-
   // Massage the Python results tuple back into a C++ variable_list
   variable_list results;
-  results.reserve(num_outputs);
+  results.reserve(num_outputs); // NB: might need more
   auto& input_info = py_fn->input_info;
-  for (int i = 0; i != num_outputs; ++i) {
-    PyObject* output = PyTuple_GET_ITEM(r.get(), i);
-    bool was_variable = is_variable_input[i];
+
+  int flat_index = 0;
+  auto massage_atom = [&](PyObject *output) {
+    bool was_variable = is_variable_input[flat_index];
+    flat_index++;
     if (!was_variable) {
       if (output != Py_None) {
         std::string msg("function ");
         msg += name() + " returned a gradient different than None at position ";
-        msg += std::to_string(i + 1) + ", but the corresponding forward input was not a Variable";
+        // NB: not flat_index+1, we already incremented!
+        msg += std::to_string(flat_index) + ", but the corresponding forward input was not a Variable";
         throw std::runtime_error(msg);
       }
-      continue;
+      return;
     }
     if (output == Py_None) {
       auto& info = input_info[results.size()];
@@ -192,6 +186,32 @@ auto PyFunction::apply(const variable_list& inputs) -> variable_list {
       }
       results.emplace_back(((THPVariable*)output)->cdata);
     }
+  };
+
+  for (int i = 0; i != num_outputs; ++i) {
+    PyObject* output = PyTuple_GET_ITEM(r.get(), i);
+    if (PyList_Check(output)) {
+      auto num_inner = PyList_Size(output);
+      for (int j = 0; j < num_inner; j++) {
+        massage_atom(PyList_GET_ITEM(output, j));
+      }
+    } else if (PyTuple_Check(output)) {
+      auto num_inner = PyTuple_Size(output);
+      for (int j = 0; j < num_inner; j++) {
+        massage_atom(PyTuple_GET_ITEM(output, j));
+      }
+    } else {
+      massage_atom(output);
+    }
+  }
+
+  // Now the number of gradients should match
+  if (flat_index != num_forward_inputs) {
+    std::string msg("function ");
+    msg += name() + " returned an incorrect number of gradients (expected ";
+    msg += std::to_string(num_forward_inputs) + ", got " ;
+    msg += std::to_string(flat_index) + ")";
+    throw std::runtime_error(msg);
   }
 
   return results;
@@ -614,9 +634,7 @@ std::pair<UnpackedInput, InputFlags> unpack_input(PyObject *args, bool unflatten
       PyTuple_SET_ITEM(unpacked.tensor_input.get(), i, new_arg);
     }
 
-    // NB: For simplicity, for now we only support
-    //  - lists (could extend to tuples)
-    //  - only support one level of nesting
+    // NB: For simplicity, for now we only support one level of nesting
     if (PyList_Check(arg)) {
       auto num_inner = PyList_Size(arg);
       PyObject *sub_needs_input_grad = PyList_New(num_inner);
@@ -626,6 +644,18 @@ std::pair<UnpackedInput, InputFlags> unpack_input(PyObject *args, bool unflatten
         std::tie(new_arg, needs_input_grad) = unpack_atom(subarg);
         PyList_SET_ITEM(sub_needs_input_grad, j, needs_input_grad);
         PyList_SET_ITEM(sub_tensor_input, j, new_arg);
+      }
+      PyTuple_SET_ITEM(flags.needs_input_grad.get(), i, sub_needs_input_grad);
+      PyTuple_SET_ITEM(unpacked.tensor_input.get(), i, sub_tensor_input);
+    } else if (PyTuple_Check(arg)) {
+      auto num_inner = PyTuple_Size(arg);
+      PyObject *sub_needs_input_grad = PyTuple_New(num_inner);
+      PyObject *sub_tensor_input = PyTuple_New(num_inner);
+      for (int j = 0; j < num_inner; j++) {
+        PyObject *subarg = PyTuple_GET_ITEM(arg, j);
+        std::tie(new_arg, needs_input_grad) = unpack_atom(subarg);
+        PyTuple_SET_ITEM(sub_needs_input_grad, j, needs_input_grad);
+        PyTuple_SET_ITEM(sub_tensor_input, j, new_arg);
       }
       PyTuple_SET_ITEM(flags.needs_input_grad.get(), i, sub_needs_input_grad);
       PyTuple_SET_ITEM(unpacked.tensor_input.get(), i, sub_tensor_input);
