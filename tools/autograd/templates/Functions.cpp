@@ -690,8 +690,6 @@ Tensor expand_as_dim1(const Tensor& src, const Tensor& target) {
   return src_expanded.expand_as(target);
 }
 
-}
-
 std::tuple<Tensor, Tensor, Tensor> batchnorm_double_backward(
     const Tensor & input,
     const Tensor & gamma,
@@ -805,6 +803,8 @@ std::tuple<Tensor, Tensor, Tensor> batchnorm_double_backward(
   }
 
   return std::tuple<Tensor, Tensor, Tensor>{gI, gG, ggO};
+
+}
 
 }
 
