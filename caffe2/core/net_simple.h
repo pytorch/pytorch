@@ -59,7 +59,8 @@ class SimpleNet : public NetBase {
   }
 
  protected:
-  bool DoRunAsync() override;
+  bool Run() override;
+  bool RunAsync() override;
 
   vector<unique_ptr<OperatorBase>> operators_;
 
