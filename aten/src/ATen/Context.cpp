@@ -55,6 +55,17 @@ Context & globalContext() {
   return globalContext_;
 }
 
+// NB: This method is *purely* whether or not a user requested
+// that CuDNN was enabled, it doesn't actually say anything about
+// whether or not CuDNN is actually usable.
+bool Context::userEnabledCuDNN() const {
+  return enabled_cudnn;
+}
+
+void Context::setUserEnabledCuDNN(bool e) {
+  enabled_cudnn = e;
+}
+
 bool Context::hasCUDA() const {
 #if AT_CUDA_ENABLED()
   int count;
