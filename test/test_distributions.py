@@ -22,6 +22,11 @@ class TestDistributions(TestCase):
         if TEST_NUMPY:
             np.random.seed(seed)
 
+    def test_sample_n_deprecated(self):
+        with warnings.catch_warnings(record=True) as w:
+            Normal(0, 1).sample_n(1)
+            self.assertTrue(w)
+
     def _gradcheck_log_prob(self, dist_ctor, ctor_params):
         # performs gradient checks on log_prob
         distribution = dist_ctor(*ctor_params)
@@ -144,11 +149,6 @@ class TestDistributions(TestCase):
             ([[0.1, 0.9], [0.3, 0.7]], [[0, 0], [1, 1]]),
         ]
         self._check_enumerate_support(Categorical, examples)
-
-    def test_sample_n_deprecated(self):
-        with warnings.catch_warnings(record=True) as w:
-            Normal(0, 1).sample_n(1)
-            self.assertTrue(w)
 
     def test_normal(self):
         mean = Variable(torch.randn(5, 5), requires_grad=True)
