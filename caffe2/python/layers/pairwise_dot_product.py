@@ -71,8 +71,9 @@ class PairwiseDotProduct(ModelLayer):
         self.y_embeddings = y_embeddings
 
         dtype = x_embeddings.field_types()[0].base
+
         self.output_schema = schema.Scalar(
-            (dtype, (output_dim)),
+            (dtype, (output_dim,)),
             self.get_next_blob_reference('output')
         )
 
