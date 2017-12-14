@@ -641,7 +641,7 @@ static inline Scalar standard_gamma_grad_one(Scalar x, Scalar alpha) {
 
 template <typename Scalar>
 struct StandardGammaGradOp {
-  void operator()(Scalar& ret_val, const Scalar& self_val, Scalar &alpha_val, bool& early_exit)
+  void operator()(Scalar& ret_val, const Scalar& self_val, const Scalar &alpha_val, bool& early_exit)
   {
     ret_val = standard_gamma_grad_one(self_val, alpha_val);
   }
@@ -653,9 +653,8 @@ struct StandardGammaGradOp {
 };
 
 Tensor _standard_gamma_grad(const Tensor& self, const Tensor& alpha) {
-  Tensor ret = self.type().zeros(self.sizes());
-  const Type& the_type = self.type();
-  dispatch_cpu_floating_types<StandardGammaGradOp>(the_type, "_standard_gamma_grad", ret, self, alpha);
+  Tensor ret = self.type().tensor(self.sizes());
+  dispatch_cpu_floating_types<StandardGammaGradOp>(self.type();, "_standard_gamma_grad", ret, self, alpha);
   return ret;
 }
 
