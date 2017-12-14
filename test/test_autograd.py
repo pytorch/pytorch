@@ -145,6 +145,7 @@ class TestAutograd(TestCase):
         self.assertEqual(v.grad.data.tolist(), [2])
 
     def test_nested_input(self):
+        @torch.autograd.function.allow_nested_inputs
         class MyStack(Function):
             @staticmethod
             def forward(ctx, xs, ys):

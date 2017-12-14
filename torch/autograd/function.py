@@ -163,6 +163,8 @@ class Function(with_metaclass(FunctionMeta, _C._FunctionBase, _ContextMethodMixi
     # for the tracer
     is_traceable = False
 
+    allow_nested = False
+
     @staticmethod
     def forward(ctx, *args, **kwargs):
         """Performs the operation.
@@ -242,6 +244,15 @@ def traceable(fn_cls):
     CARE (or can give incorrect results otherwise).
     """
     fn_cls.is_traceable = True
+    return fn_cls
+
+
+def allow_nested_inputs(fn_cls):
+    """Marks Function as allowing one-level of nesting in its inputs,
+    permitting lists and tuples to be passed to it.  In this mode,
+    needs_input_grad for such arguments is represented as a list/tuple
+    for each of its constituents."""
+    fn_cls.allow_nested = True
     return fn_cls
 
 

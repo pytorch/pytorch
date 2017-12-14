@@ -188,20 +188,26 @@ auto PyFunction::apply(const variable_list& inputs) -> variable_list {
     }
   };
 
+  THPObjectPtr allow_nested_obj(PyObject_GetAttrString(obj, "allow_nested"));
+
   for (int i = 0; i != num_outputs; ++i) {
     PyObject* output = PyTuple_GET_ITEM(r.get(), i);
-    if (PyList_Check(output)) {
-      auto num_inner = PyList_Size(output);
-      for (int j = 0; j < num_inner; j++) {
-        massage_atom(PyList_GET_ITEM(output, j));
-      }
-    } else if (PyTuple_Check(output)) {
-      auto num_inner = PyTuple_Size(output);
-      for (int j = 0; j < num_inner; j++) {
-        massage_atom(PyTuple_GET_ITEM(output, j));
-      }
-    } else {
+    if (allow_nested_obj != Py_True) {
       massage_atom(output);
+    } else {
+      if (PyList_Check(output)) {
+        auto num_inner = PyList_Size(output);
+        for (int j = 0; j < num_inner; j++) {
+          massage_atom(PyList_GET_ITEM(output, j));
+        }
+      } else if (PyTuple_Check(output)) {
+        auto num_inner = PyTuple_Size(output);
+        for (int j = 0; j < num_inner; j++) {
+          massage_atom(PyTuple_GET_ITEM(output, j));
+        }
+      } else {
+        massage_atom(output);
+      }
     }
   }
 
@@ -590,7 +596,7 @@ struct InputFlags {
 };
 
 template<bool enforce_variables>
-std::pair<UnpackedInput, InputFlags> unpack_input(PyObject *args, bool unflatten = true) {
+std::pair<UnpackedInput, InputFlags> unpack_input(PyObject *args, bool unflatten) {
   UnpackedInput unpacked;
   InputFlags flags;
 
@@ -843,7 +849,7 @@ PyObject *THPFunction_do_forward(THPFunction *self, PyObject *_inputs)
   HANDLE_TH_ERRORS
   torch::autograd::profiler::RecordFunction record(Py_TYPE(self)->tp_name);
 
-  auto info_pair = unpack_input<true>(_inputs);
+  auto info_pair = unpack_input<true>(_inputs, false /* unflatten */);
   auto& unpacked_input = info_pair.first;
   auto& input_info = info_pair.second;
   bool is_executable = input_info.flags.is_executable;
@@ -873,8 +879,11 @@ PyObject *THPFunction_apply(PyObject *cls, PyObject *inputs)
   if (!ctx_obj) return NULL;
   THPFunction* ctx = (THPFunction*)ctx_obj.get();
 
+  THPObjectPtr allow_nested_obj(PyObject_GetAttrString(cls, "allow_nested"));
+  PyObject_SetAttrString(ctx_obj.get(), "allow_nested", Py_True);
+
   // Prepare inputs and allocate context (grad fn)
-  auto info_pair = unpack_input<false>(inputs);
+  auto info_pair = unpack_input<false>(inputs, allow_nested_obj == Py_True);
   UnpackedInput& unpacked_input = info_pair.first;
   InputFlags& input_info = info_pair.second;
 
