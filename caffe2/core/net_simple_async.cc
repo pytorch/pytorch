@@ -72,17 +72,21 @@ AsyncSimpleNet::AsyncSimpleNet(
 bool AsyncSimpleNet::DoRunAsync() {
   StartAllObservers();
 
-  const auto& net_name = name_.c_str();
   VLOG(1) << "Running net " << name_;
   for (auto& op : operators_) {
-    const auto& opdef = op->debug_def();
-    const auto& op_ptr = op.get();
-    const auto& op_name = opdef.name().c_str();
-    const auto& op_type = opdef.type().c_str();
-    VLOG(1) << "Running operator " << op_name << "(" << op_type << ").";
-    CAFFE_SDT(operator_start_async, net_name, op_name, op_type, op_ptr);
+    VLOG(1) << "Running operator " << op->debug_def().name() << "("
+            << op->debug_def().type() << ").";
+#ifdef CAFFE2_ENABLE_SDT
+    const auto& op_name = op->debug_def().name().c_str();
+    const auto& op_type = op->debug_def().type().c_str();
+    auto* op_ptr = op.get();
+    const auto& net_name = name_.c_str();
+    CAFFE_SDT(operator_start, net_name, op_name, op_type, op_ptr);
+#endif
     bool res = op->RunAsync();
+#ifdef CAFFE2_ENABLE_SDT
     CAFFE_SDT(operator_done, net_name, op_name, op_type, op_ptr);
+#endif
     if (!res) {
       LOG(ERROR) << "Operator failed: " << ProtoDebugString(op->debug_def());
       return false;
