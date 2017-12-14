@@ -1,6 +1,5 @@
 import warnings
-from torch.autograd import Function, NestedIOFunction, Variable
-from torch.autograd.function import _iter_variables, _unflatten, symbolic_override
+from torch.autograd import NestedIOFunction
 import torch.backends.cudnn as cudnn
 from .. import functional as F
 from .thnn import rnnFusedPointwise as fusedBackend
@@ -349,12 +348,12 @@ def RNN_symbolic_builder(*args, **kwargs):
         # return g.op('LSTM', input, *all_weights[0], outputs=2)
         raise RuntimeError("RNN symbolic NYI")
 
-    return symbolic_override(symbolic)
+    import torch.onnx
+    return torch.onnx.symbolic_override(symbolic)
 
 
 def RNN(*args, **kwargs):
 
-    @RNN_symbolic_builder(*args, **kwargs)
     def forward(input, *fargs, **fkwargs):
         if cudnn.is_acceptable(input.data):
             func = CudnnRNN(*args, **kwargs)
@@ -364,7 +363,10 @@ def RNN(*args, **kwargs):
         # Hack for the tracer that allows us to represent RNNs as single
         # nodes and export them to ONNX in this form
         # It can be also used as a decorator at the higher level
-        func = RNN_symbolic_builder(*args, **kwargs)(func)
+        # Check the first argument explicitly to reduce the overhead of creating
+        # the lambda
+        if torch._C._jit_is_tracing(input):
+            func = RNN_symbolic_builder(*args, **kwargs)(func)
 
         return func(input, *fargs, **fkwargs)
 
