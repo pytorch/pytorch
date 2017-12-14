@@ -4,7 +4,7 @@ import torch
 import unittest
 from itertools import product
 from torch.autograd import Variable, gradcheck
-from torch.distributions import Bernoulli, Categorical, Normal, Gamma
+from torch.distributions import Bernoulli, Categorical, Normal, Gamma, Distribution
 import warnings
 
 TEST_NUMPY = True
@@ -21,11 +21,6 @@ class TestDistributions(TestCase):
         torch.manual_seed(seed)
         if TEST_NUMPY:
             np.random.seed(seed)
-
-    def test_sample_n_deprecated(self):
-        with warnings.catch_warnings(record=True) as w:
-            Normal(0, 1).sample_n(1)
-            self.assertTrue(w)
 
     def _gradcheck_log_prob(self, dist_ctor, ctor_params):
         # performs gradient checks on log_prob
