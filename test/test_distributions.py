@@ -4,7 +4,8 @@ import torch
 import unittest
 from itertools import product
 from torch.autograd import Variable, gradcheck
-from torch.distributions import Bernoulli, Categorical, Normal, Gamma
+from torch.distributions import Bernoulli, Categorical, Normal, Gamma, Distribution
+import warnings
 
 TEST_NUMPY = True
 try:
@@ -90,6 +91,14 @@ class TestDistributions(TestCase):
 
         self._check_log_prob(Bernoulli(p), ref_log_prob)
 
+        def call_sample_wshape_gt_2():
+            return Bernoulli(r).sample((1, 2))
+        self.assertRaises(NotImplementedError, call_sample_wshape_gt_2)
+
+        def call_rsample():
+            return Bernoulli(r).rsample()
+        self.assertRaises(NotImplementedError, call_rsample)
+
     def test_bernoulli_enumerate_support(self):
         examples = [
             ([0.1], [[0], [1]]),
@@ -109,6 +118,14 @@ class TestDistributions(TestCase):
         self.assertEqual(Categorical(p).sample().size(), (1,))
         self.assertEqual(Categorical(p).sample_n(1).size(), (1, 1))
         self._gradcheck_log_prob(Categorical, (p,))
+
+        def call_sample_wshape_gt_2():
+            return Categorical(p).sample((1, 2))
+        self.assertRaises(NotImplementedError, call_sample_wshape_gt_2)
+
+        def call_rsample():
+            return Categorical(p).rsample()
+        self.assertRaises(NotImplementedError, call_rsample)
 
     def test_categorical_2d(self):
         probabilities = [[0.1, 0.2, 0.3], [0.5, 0.3, 0.2]]
@@ -146,6 +163,17 @@ class TestDistributions(TestCase):
         self._gradcheck_log_prob(Normal, (mean, 1.0))
         self._gradcheck_log_prob(Normal, (0.0, std))
 
+        state = torch.get_rng_state()
+        eps = torch.normal(torch.zeros_like(mean), torch.ones_like(std))
+        torch.set_rng_state(state)
+        z = Normal(mean, std).rsample()
+        z.backward(torch.ones_like(z))
+        self.assertEqual(mean.grad, torch.ones_like(mean))
+        self.assertEqual(std.grad, eps)
+        mean.grad.zero_()
+        std.grad.zero_()
+        self.assertEqual(z.size(), (5, 5))
+
         def ref_log_prob(idx, x, log_prob):
             m = mean.data.view(-1)[idx]
             s = std.data.view(-1)[idx]
@@ -154,6 +182,10 @@ class TestDistributions(TestCase):
             self.assertAlmostEqual(log_prob, math.log(expected), places=3)
 
         self._check_log_prob(Normal(mean, std), ref_log_prob)
+
+        def call_sample_wshape_gt_2():
+            return Normal(mean, std).sample((1, 2))
+        self.assertRaises(NotImplementedError, call_sample_wshape_gt_2)
 
     # This is a randomized test.
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
@@ -176,6 +208,10 @@ class TestDistributions(TestCase):
         self.assertEqual(Gamma(alpha_1d, beta_1d).sample().size(), (1,))
         self.assertEqual(Gamma(0.5, 0.5).sample().size(), (1,))
         self.assertEqual(Gamma(0.5, 0.5).sample_n(1).size(), (1, 1))
+
+        def call_sample_wshape_gt_2():
+            return Gamma(alpha, beta).sample((1, 2))
+        self.assertRaises(NotImplementedError, call_sample_wshape_gt_2)
 
         def ref_log_prob(idx, x, log_prob):
             a = alpha.data.view(-1)[idx]
@@ -202,7 +238,7 @@ class TestDistributions(TestCase):
         for alpha in [1e-3, 1e-2, 1e-1, 1e0, 1e1, 1e2, 1e3, 1e4]:
             alphas = Variable(torch.Tensor([alpha] * num_samples), requires_grad=True)
             betas = Variable(torch.ones(num_samples))
-            x = Gamma(alphas, betas).sample()
+            x = Gamma(alphas, betas).rsample()
             x.sum().backward()
             x, ind = x.data.sort()
             x = x.numpy()

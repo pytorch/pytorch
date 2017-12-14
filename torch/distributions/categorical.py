@@ -37,14 +37,16 @@ class Categorical(Distribution):
             raise ValueError("probs must be 1D or 2D")
         self.probs = probs
 
-    def sample(self):
-        return torch.multinomial(self.probs, 1, True).squeeze(-1)
-
-    def sample_n(self, n):
-        if n == 1:
-            return self.sample().expand(1, 1)
+    def sample(self, sample_shape=()):
+        if len(sample_shape) == 0:
+            return torch.multinomial(self.probs, 1, True).squeeze(-1)
+        elif len(sample_shape) == 1:
+            if sample_shape[0] == 1:
+                return self.sample().expand(1, 1)
+            else:
+                return torch.multinomial(self.probs, sample_shape[0], True).t()
         else:
-            return torch.multinomial(self.probs, n, True).t()
+            raise NotImplementedError("sample is not implemented for len(sample_shape)>1")
 
     def log_prob(self, value):
         p = self.probs / self.probs.sum(-1, keepdim=True)

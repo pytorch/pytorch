@@ -26,11 +26,13 @@ class Bernoulli(Distribution):
     def __init__(self, probs):
         self.probs, = broadcast_all(probs)
 
-    def sample(self):
-        return torch.bernoulli(self.probs)
-
-    def sample_n(self, n):
-        return torch.bernoulli(self.probs.expand(n, *self.probs.size()))
+    def sample(self, sample_shape=()):
+        if len(sample_shape) == 0:
+            return torch.bernoulli(self.probs)
+        elif len(sample_shape) == 1:
+            return torch.bernoulli(self.probs.expand(sample_shape[0], *self.probs.size()))
+        else:
+            raise NotImplementedError("sample is not implemented for len(sample_shape)>1")
 
     def log_prob(self, value):
         # compute the log probabilities for 0 and 1

@@ -48,11 +48,13 @@ class Gamma(Distribution):
     def __init__(self, alpha, beta):
         self.alpha, self.beta = broadcast_all(alpha, beta)
 
-    def sample(self):
-        return _standard_gamma(self.alpha) / self.beta
-
-    def sample_n(self, n):
-        return _standard_gamma(expand_n(self.alpha, n)) / self.beta
+    def rsample(self, sample_shape=()):
+        if len(sample_shape) == 0:
+            return _standard_gamma(self.alpha) / self.beta
+        elif len(sample_shape) == 1:
+            return _standard_gamma(expand_n(self.alpha, sample_shape[0])) / self.beta
+        else:
+            raise NotImplementedError("rsample is not implemented for len(sample_shape)>1")
 
     def log_prob(self, value):
         return (self.alpha * torch.log(self.beta) +
