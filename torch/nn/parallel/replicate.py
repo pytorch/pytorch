@@ -26,10 +26,12 @@ def replicate(network, devices):
         module_indices[module] = i
         for j in range(num_replicas):
             replica = module.__new__(type(module))
-            replica.__dict__ = module.__dict__.copy()
-            replica._parameters = replica._parameters.copy()
-            replica._buffers = replica._buffers.copy()
-            replica._modules = replica._modules.copy()
+            replica._parameters = module._parameters.copy()
+            replica._buffers = module._buffers.copy()
+            replica._modules = module._modules.copy()
+            # NOTE: This line doesn't undo the previous ones, because
+            # those attributes are stored in slots and not the dict
+            replica.__dict__ = module.__dict__
             module_copies[j].append(replica)
 
     for i, module in enumerate(modules):

@@ -583,6 +583,21 @@ PyObject *THPModule_userEnabledCuDNN(PyObject *_unused)
   else Py_RETURN_FALSE;
 }
 
+// This is a workaround for Python's suboptimal inheritance scheme for
+// dict subclasses (that uses a more generic __getitem__ implementation for
+// no good reason). This might seem silly, but for larger models using the slower
+// implementation can cost as much as 30ms at every forward.
+PyObject* THPModule_inheritODictGetitem(PyObject *_unused, PyObject *_cls)
+{
+  auto *cls = reinterpret_cast<PyTypeObject*>(_cls);
+  auto *base = reinterpret_cast<PyTypeObject*>(PyTuple_GET_ITEM(cls->tp_bases, 0));
+  // OrderedDict is not implemented in C in Python 2.
+  if (base->tp_flags & Py_TPFLAGS_HEAPTYPE)
+    Py_RETURN_NONE;
+  cls->tp_as_mapping->mp_subscript = base->tp_as_mapping->mp_subscript;
+  Py_RETURN_NONE;
+}
+
 #ifdef WITH_CUDA
 extern PyObject * THCSPModule_initExtension(PyObject *self);
 #endif
@@ -611,6 +626,7 @@ static PyMethodDef TorchMethods[] = {
   {"from_numpy",      (PyCFunction)THPModule_fromNumpy,         METH_O,       NULL},
   {"_to_dlpack",      (PyCFunction)THPModule_toDLPack,          METH_O,       NULL},
   {"_from_dlpack",    (PyCFunction)THPModule_fromDLPack,        METH_O,       NULL},
+  {"_inherit_odict_getitem", (PyCFunction)THPModule_inheritODictGetitem, METH_O, NULL},
 
   {"sigmoid",         (PyCFunction)THPModule_sigmoid,           METH_VARARGS | METH_KEYWORDS, NULL},
   {"log",             (PyCFunction)THPModule_log,               METH_VARARGS | METH_KEYWORDS, NULL},

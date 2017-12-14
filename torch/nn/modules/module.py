@@ -46,15 +46,18 @@ class Module(object):
     """
 
     dump_patches = False
+    _initialized = False
+    __slots__ = ['__dict__', '_parameters', '_modules', '_buffers']
 
     def __init__(self):
-        self._backend = thnn_backend
         self._parameters = OrderedDict()
+        self._modules = OrderedDict()
         self._buffers = OrderedDict()
         self._backward_hooks = OrderedDict()
         self._forward_hooks = OrderedDict()
         self._forward_pre_hooks = OrderedDict()
-        self._modules = OrderedDict()
+        self._backend = thnn_backend
+        self._initialized = True
         self.training = True
 
     def forward(self, *input):
@@ -102,7 +105,7 @@ class Module(object):
                 from this module using the given name
             parameter (Parameter): parameter to be added to the module.
         """
-        if '_parameters' not in self.__dict__:
+        if not self._initialized:
             raise AttributeError(
                 "cannot assign parameter before Module.__init__() call")
 
@@ -376,24 +379,33 @@ class Module(object):
                     grad_fn.register_hook(wrapper)
         return result
 
+    def __getstate__(self):
+        d = self.__dict__.copy()
+        d['_parameters'] = self._parameters
+        d['_modules'] = self._modules
+        d['_buffers'] = self._buffers
+        return d
+
     def __setstate__(self, state):
+        self._parameters = state.pop('_parameters')
+        self._modules = state.pop('_modules')
+        self._buffers = state.pop('_buffers')
         self.__dict__.update(state)
+        self._initialized = True
         if '_forward_pre_hooks' not in self.__dict__:
             self._forward_pre_hooks = OrderedDict()
 
     def __getattr__(self, name):
-        if '_parameters' in self.__dict__:
-            _parameters = self.__dict__['_parameters']
+        if self._initialized:
+            _parameters = self._parameters
             if name in _parameters:
                 return _parameters[name]
-        if '_buffers' in self.__dict__:
-            _buffers = self.__dict__['_buffers']
+            _modules = self._modules
+            if name in _modules:
+                return _modules[name]
+            _buffers = self._buffers
             if name in _buffers:
                 return _buffers[name]
-        if '_modules' in self.__dict__:
-            modules = self.__dict__['_modules']
-            if name in modules:
-                return modules[name]
         raise AttributeError("'{}' object has no attribute '{}'".format(
             type(self).__name__, name))
 
@@ -403,41 +415,38 @@ class Module(object):
                 if name in d:
                     del d[name]
 
-        params = self.__dict__.get('_parameters')
         if isinstance(value, Parameter):
-            if params is None:
+            if not self._initialized:
                 raise AttributeError(
                     "cannot assign parameters before Module.__init__() call")
             remove_from(self.__dict__, self._buffers, self._modules)
             self.register_parameter(name, value)
-        elif params is not None and name in params:
+        elif self._initialized and name in self._parameters:
             if value is not None:
                 raise TypeError("cannot assign '{}' as parameter '{}' "
                                 "(torch.nn.Parameter or None expected)"
                                 .format(torch.typename(value), name))
             self.register_parameter(name, value)
         else:
-            modules = self.__dict__.get('_modules')
             if isinstance(value, Module):
-                if modules is None:
+                if not self._initialized:
                     raise AttributeError(
                         "cannot assign module before Module.__init__() call")
                 remove_from(self.__dict__, self._parameters, self._buffers)
-                modules[name] = value
-            elif modules is not None and name in modules:
+                self._modules[name] = value
+            elif self._initialized and name in self._modules:
                 if value is not None:
                     raise TypeError("cannot assign '{}' as child module '{}' "
                                     "(torch.nn.Module or None expected)"
                                     .format(torch.typename(value), name))
-                modules[name] = value
+                self._modules[name] = value
             else:
-                buffers = self.__dict__.get('_buffers')
-                if buffers is not None and name in buffers:
+                if self._initialized and name in self._buffers:
                     if value is not None and not torch.is_tensor(value):
                         raise TypeError("cannot assign '{}' as buffer '{}' "
                                         "(torch.Tensor or None expected)"
                                         .format(torch.typename(value), name))
-                    buffers[name] = value
+                    self._buffers[name] = value
                 else:
                     object.__setattr__(self, name, value)
 

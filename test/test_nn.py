@@ -1721,6 +1721,100 @@ class TestNN(NNTestCase):
         self.assertEqual(out.get_device(), 0)
         self.assertEqual(out.data, expected_out)
 
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    def test_data_parallel_module_cache(self):
+        net = nn.Sequential(nn.Linear(5, 10), nn.ReLU(), nn.Linear(10, 4)).cuda()
+        dp = nn.DataParallel(net)
+        i = Variable(torch.randn(16, 5).cuda())
+
+        @contextlib.contextmanager
+        def assertCacheFlush():
+            dp(i)
+            self.assertTrue(dp._replicas)
+            yield
+            self.assertFalse(dp._replicas)
+
+        with assertCacheFlush():
+            net[0].new_param = nn.Parameter(torch.randn(5, 10).cuda())
+        with assertCacheFlush():
+            net[1].new_submodule = nn.Module()
+        with assertCacheFlush():
+            net[2].register_buffer('new_buffer', torch.Tensor(2, 2).cuda())
+        with assertCacheFlush():
+            del net[0].new_param
+        with assertCacheFlush():
+            del net[1].new_submodule
+        with assertCacheFlush():
+            del net[2].new_buffer
+
+        # Changes in __dict__ shouldn't flush, but should be reflected in replicas
+        net[0].new_attr = object()
+        for replica in dp._replicas:
+            self.assertIs(replica.new_attr, net[0])
+
+        # Check consistency of Variable flags
+        # NOTE: replicated parameters may have higher requires_grad, because they
+        # are broadcasted in chunks, and never marked as non-differentiable
+        def assertFlagsConsistent():
+            for replica in dp._replicas:
+                self.assertTrue(all(rp.requires_grad >= p.requires_grad
+                                    for rp, p in zip(replica.parameters(), net.parameters())))
+
+        net = nn.Sequential(nn.Linear(5, 10), nn.ReLU(), nn.Linear(10, 4)).cuda()
+        dp = nn.DataParallel(net)
+        # All False
+        for p in net.parameters():
+            p.requires_grad = False
+        dp(i)
+        assertFlagsConsistent()
+        # Set any to True
+        next(net.parameters()).requires_grad = True
+        dp(i)
+        assertFlagsConsistent()
+        for value in (True, False, True, False):
+            for p in net.parameters():
+                p.requires_grad = value
+            dp(i)
+            assertFlagsConsistent()
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    def test_data_parallel_replica_consistency(self):
+        class LambdaModule(nn.Module):
+            def __init__(self):
+                super(LambdaModule, self).__init__()
+                self.param = nn.Parameter(torch.randn(2, 2).cuda())
+                self.submodule = nn.Module()
+                self.register_buffer('buffer', torch.randn(2, 2).cuda())
+
+            def forward(self, x):
+                return self.fn(self)
+
+        net = LambdaModule()
+        dp = nn.DataParallel(net)
+        i = Variable(torch.randn(16, 5).cuda())
+
+        def make_adder(obj):
+            def adder(self):
+                self.name = obj
+            return adder
+
+        def make_deleter(name):
+            def deleter(self):
+                delattr(self, name)
+            return deleter
+
+        def shouldRaise(fn, kind):
+            net.fn = fn
+            with self.assertRaisesRegex(RuntimeError, 'DataParallel replicas.*' + kind + 's modified'):
+                dp(i)
+
+        shouldRaise(make_adder(nn.Parameter(torch.randn(2, 2))), 'parameter')
+        shouldRaise(make_adder(nn.Module()), 'module')
+        shouldRaise(lambda self: self.register_buffer('name', torch.randn(5, 5)), 'buffer')
+        shouldRaise(make_deleter('param'), 'parameter')
+        shouldRaise(make_deleter('submodule'), 'module')
+        shouldRaise(make_deleter('buffer'), 'buffer')
+
     def test_state_dict(self):
         l = nn.Linear(5, 5)
         block = nn.Module()
