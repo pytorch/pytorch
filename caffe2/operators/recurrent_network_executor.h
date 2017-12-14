@@ -152,10 +152,10 @@ class RecurrentNetworkExecutorBase {
           rnn_op.op = CreateOperator(op_copy, ws);
           for (const auto& observer : observers_list) {
             std::unique_ptr<ObserverBase<OperatorBase>> observer_copy =
-                observer->clone();
+                observer->copy(rnn_op.op.get());
             CAFFE_ENFORCE(
                 observer_copy,
-                "Observers without clone() implemented cannot be attached "
+                "Observers without copy() implemented cannot be attached "
                 "to RNN using RNNExecutor.");
             rnn_op.op->AttachObserver(std::move(observer_copy));
           }
@@ -172,10 +172,10 @@ class RecurrentNetworkExecutorBase {
             rnn_op.op = CreateOperator(step_net_def_.op(rnn_op.order), ws);
             for (const auto& observer : observers_list) {
               std::unique_ptr<ObserverBase<OperatorBase>> observer_copy =
-                  observer->clone();
+                  observer->copy(rnn_op.op.get());
               CAFFE_ENFORCE(
                   observer_copy,
-                  "Observers without clone() implemented cannot be attached "
+                  "Observers without copy() implemented cannot be attached "
                   "to RNN using RNNExecutor.");
               rnn_op.op->AttachObserver(std::move(observer_copy));
             }

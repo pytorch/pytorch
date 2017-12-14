@@ -138,9 +138,10 @@ double PerfOperatorObserver::getMilliseconds() const {
   return milliseconds_;
 }
 
-std::unique_ptr<ObserverBase<OperatorBase>> PerfOperatorObserver::clone() {
+std::unique_ptr<ObserverBase<OperatorBase>> PerfOperatorObserver::copy(
+    OperatorBase* subject) {
   return std::unique_ptr<ObserverBase<OperatorBase>>(
-      new PerfOperatorObserver(this->subject_, netObserver_));
+      new PerfOperatorObserver(subject, netObserver_));
 }
 
 } // namespace caffe2

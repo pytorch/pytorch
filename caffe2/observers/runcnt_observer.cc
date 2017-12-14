@@ -9,9 +9,10 @@ RunCountOperatorObserver::RunCountOperatorObserver(
   CAFFE_ENFORCE(netObserver_, "Observers can't operate outside of the net");
 }
 
-std::unique_ptr<ObserverBase<OperatorBase>> RunCountOperatorObserver::clone() {
+std::unique_ptr<ObserverBase<OperatorBase>> RunCountOperatorObserver::copy(
+    OperatorBase* subject) {
   return std::unique_ptr<ObserverBase<OperatorBase>>(
-      new RunCountOperatorObserver(this->subject_, netObserver_));
+      new RunCountOperatorObserver(subject, netObserver_));
 }
 
 std::string RunCountNetObserver::debugInfo() {
