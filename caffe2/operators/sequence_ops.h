@@ -181,6 +181,7 @@ class AddPaddingOp final : public Operator<Context> {
         block_size);
   }
 
+ private:
   template <typename T>
   bool MakePadding(
       const T* in_ptr,
@@ -192,7 +193,6 @@ class AddPaddingOp final : public Operator<Context> {
       const T* padding_end_ptr,
       int64_t block_size);
 
- private:
   int startPaddingWidth_;
   int endPaddingWidth_;
 
