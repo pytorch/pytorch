@@ -125,16 +125,14 @@ std::shared_ptr<Function>& VariableViewImpl::get_grad_fn() {
 }
 
 void VariableViewImpl::rebase_history(int output_nr, std::shared_ptr<Function> grad_fn) {
-  if (!grad_fn) {
-    return;
-  }
   TORCH_ASSERT(output_nr == 0);
+  TORCH_ASSERT(grad_fn);
   TORCH_ASSERTM(grad_fn->num_inputs == 1, "Functions which modify views in-place must return a single Variable");
   this->output_nr = output_nr;
-  this->_grad_fn = grad_fn;
   base.output_nr() = 0;
   base.get()->_grad_fn = std::make_shared<CopySlices>(
       base, TensorGeometry(data), std::move(grad_fn));
+  get_grad_fn();  // trigger an update to the view's grad_fn
 }
 
 namespace {

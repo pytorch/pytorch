@@ -218,9 +218,8 @@ inline const std::shared_ptr<Function>& Variable::grad_fn() const {
   return get()->get_grad_fn();
 };
 inline void Variable::rebase_history(int output_nr, std::shared_ptr<Function> grad_fn) {
-  if (!grad_fn) {
-    return;
-  } else if (is_view()) {
+  TORCH_ASSERT(grad_fn);
+  if (is_view()) {
     auto& impl = static_cast<VariableViewImpl&>(*get());
     impl.rebase_history(output_nr, std::move(grad_fn));
   } else {

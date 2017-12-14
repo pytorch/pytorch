@@ -405,7 +405,9 @@ static void _wrap_outputs(THPFunction *self, t2var_type &t2var,
         auto grad_acc = dynamic_cast<AccumulateGrad*>(grad_acc_fn.get());
         grad_acc->variable.reset();
       }
-      prev.rebase_history(output_nr, cdata);
+      if (cdata) {
+        prev.rebase_history(output_nr, cdata);
+      }
       return prev;
     }
     // An input has been returned, but it wasn't modified. Return it as a view
