@@ -58,9 +58,10 @@ class TimeObserver<OperatorBase> final : public TimeObserverBase<OperatorBase> {
   explicit TimeObserver<OperatorBase>(OperatorBase* subject)
       : TimeObserverBase<OperatorBase>(subject) {}
 
-  std::unique_ptr<ObserverBase<OperatorBase>> clone() override {
+  std::unique_ptr<ObserverBase<OperatorBase>> copy(
+      OperatorBase* subject) override {
     return std::unique_ptr<ObserverBase<OperatorBase>>(
-        new TimeObserver<OperatorBase>(this->subject_));
+        new TimeObserver<OperatorBase>(subject));
   }
 };
 

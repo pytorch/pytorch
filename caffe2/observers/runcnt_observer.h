@@ -13,7 +13,8 @@ class RunCountOperatorObserver final : public ObserverBase<OperatorBase> {
   RunCountOperatorObserver(OperatorBase* op, RunCountNetObserver* netObserver);
   ~RunCountOperatorObserver() {}
 
-  std::unique_ptr<ObserverBase<OperatorBase>> clone() override;
+  std::unique_ptr<ObserverBase<OperatorBase>> copy(
+      OperatorBase* subject) override;
 
  private:
   void Start() override;
