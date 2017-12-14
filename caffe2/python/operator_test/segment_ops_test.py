@@ -398,6 +398,7 @@ class TestSegmentOps(hu.HypothesisTestCase):
             "out"
         )
         self.assertDeviceChecks(dc, op, [X, segments], [0])
+        self.assertGradientChecks(gc, op, [X, segments], 0, [0])
 
     @unittest.skipIf(not workspace.has_gpu_support, "No gpu support")
     @given(**hu.gcs)
@@ -410,6 +411,7 @@ class TestSegmentOps(hu.HypothesisTestCase):
             "out"
         )
         self.assertDeviceChecks(dc, op, [X, segments], [0])
+        self.assertGradientChecks(gc, op, [X, segments], 0, [0])
 
     @unittest.skipIf(not workspace.has_gpu_support, "No gpu support")
     @given(**hu.gcs)
