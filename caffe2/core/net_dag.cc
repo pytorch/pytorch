@@ -308,16 +308,20 @@ vector<float> DAGNetBase::TEST_Benchmark(
 }
 
 bool DAGNet::RunAt(int chain_id, const std::vector<int>& chain) {
-  const auto& net_name = name_.c_str();
   for (const auto i : chain) {
-    const auto& opdef = operator_nodes_[i].operator_->debug_def();
-    const auto& op = operator_nodes_[i].operator_.get();
-
-    const auto& op_name = opdef.name().c_str();
-    const auto& op_type = opdef.type().c_str();
-    CAFFE_SDT(operator_start, net_name, op_name, op_type, op);
+#ifdef CAFFE2_ENABLE_SDT
+    const auto& op_name =
+        operator_nodes_[i].operator_->debug_def().name().c_str();
+    const auto& op_type =
+        operator_nodes_[i].operator_->debug_def().type().c_str();
+    auto* op_ptr = operator_nodes_[i].operator_.get();
+    const auto& net_name = name_.c_str();
+    CAFFE_SDT(operator_start, net_name, op_name, op_type, op_ptr);
+#endif
     const auto success = operator_nodes_[i].operator_->Run();
-    CAFFE_SDT(operator_done, net_name, op_name, op_type, op);
+#ifdef CAFFE2_ENABLE_SDT
+    CAFFE_SDT(operator_done, net_name, op_name, op_type, op_ptr);
+#endif
     if (!success) {
       return false;
     }
