@@ -32,7 +32,7 @@ class Distribution(object):
         Generates n samples or n batches of samples if the distribution
         parameters are batched.
         """
-        warnings.warn('sample_n will be deprecated. Use .sample((n,)) instead', PendingDeprecationWarning)
+        warnings.warn('sample_n will be deprecated. Use .sample((n,)) instead', DeprecationWarning)
         return self.sample((n,))
 
     def log_prob(self, value):

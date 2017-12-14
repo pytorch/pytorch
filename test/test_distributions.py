@@ -5,6 +5,7 @@ import unittest
 from itertools import product
 from torch.autograd import Variable, gradcheck
 from torch.distributions import Bernoulli, Categorical, Normal, Gamma
+import warnings
 
 TEST_NUMPY = True
 try:
@@ -143,6 +144,11 @@ class TestDistributions(TestCase):
             ([[0.1, 0.9], [0.3, 0.7]], [[0, 0], [1, 1]]),
         ]
         self._check_enumerate_support(Categorical, examples)
+
+    def test_sample_n_deprecated(self):
+        with warnings.catch_warnings(record=True) as w:
+            Normal(0, 1).sample_n(1)
+            self.assertTrue(w)
 
     def test_normal(self):
         mean = Variable(torch.randn(5, 5), requires_grad=True)
