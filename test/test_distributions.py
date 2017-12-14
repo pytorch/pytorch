@@ -77,9 +77,11 @@ class TestDistributions(TestCase):
     def test_bernoulli(self):
         p = Variable(torch.Tensor([0.7, 0.2, 0.4]), requires_grad=True)
         r = Variable(torch.Tensor([0.3]), requires_grad=True)
+        s = 0.3
         self.assertEqual(Bernoulli(p).sample_n(8).size(), (8, 3))
         self.assertEqual(Bernoulli(r).sample_n(8).size(), (8, 1))
         self.assertEqual(Bernoulli(r).sample().size(), (1,))
+        self.assertEqual(Bernoulli(s).sample().size(), (1,))
         self._gradcheck_log_prob(Bernoulli, (p,))
 
         def ref_log_prob(idx, val, log_prob):
@@ -220,6 +222,63 @@ class TestDistributions(TestCase):
                                        'actual {}'.format(actual_grad),
                                        'rel error {}'.format(rel_error),
                                        'max error {}'.format(rel_error.max())]))
+
+    def test_valid_parameter_broadcasting(self):
+        # Test correct broadcasting of parameter sizes for distributions that have multiple
+        # parameters.
+        # example type (distribution instance, expected sample shape)
+        valid_examples = [
+            (Normal(mean=torch.Tensor([0, 0]), std=1),
+             (2,)),
+            (Normal(mean=0, std=torch.Tensor([1, 1])),
+             (2,)),
+            (Normal(mean=torch.Tensor([0, 0]), std=torch.Tensor([1])),
+             (2,)),
+            (Normal(mean=torch.Tensor([0, 0]), std=torch.Tensor([[1], [1]])),
+             (2, 2)),
+            (Normal(mean=torch.Tensor([0, 0]), std=torch.Tensor([[1]])),
+             (1, 2)),
+            (Normal(mean=torch.Tensor([0]), std=torch.Tensor([[1]])),
+             (1, 1)),
+            (Gamma(alpha=torch.Tensor([1, 1]), beta=1),
+             (2,)),
+            (Gamma(alpha=1, beta=torch.Tensor([1, 1])),
+             (2,)),
+            (Gamma(alpha=torch.Tensor([1, 1]), beta=torch.Tensor([[1], [1], [1]])),
+             (3, 2)),
+            (Gamma(alpha=torch.Tensor([1, 1]), beta=torch.Tensor([[1], [1]])),
+             (2, 2)),
+            (Gamma(alpha=torch.Tensor([1, 1]), beta=torch.Tensor([[1]])),
+             (1, 2)),
+            (Gamma(alpha=torch.Tensor([1]), beta=torch.Tensor([[1]])),
+             (1, 1)),
+        ]
+
+        for dist, expected_size in valid_examples:
+            dist_sample_size = dist.sample().size()
+            self.assertEqual(dist_sample_size, expected_size,
+                             'actual size: {} != expected size: {}'.format(dist_sample_size, expected_size))
+
+    def test_invalid_parameter_broadcasting(self):
+        # invalid broadcasting cases; should throw error
+        # example type (distribution class, distribution params)
+        invalid_examples = [
+            (Normal, {
+                'mean': torch.Tensor([[0, 0]]),
+                'std': torch.Tensor([1, 1, 1, 1])
+            }),
+            (Normal, {
+                'mean': torch.Tensor([[[0, 0, 0], [0, 0, 0]]]),
+                'std': torch.Tensor([1, 1])
+            }),
+            (Gamma, {
+                'alpha': torch.Tensor([0, 0]),
+                'beta': torch.Tensor([1, 1, 1])
+            })
+        ]
+
+        for dist, kwargs in invalid_examples:
+            self.assertRaises(RuntimeError, dist, **kwargs)
 
 
 if __name__ == '__main__':

@@ -4,7 +4,7 @@ import torch
 from torch.autograd import Variable, Function
 from torch.autograd.function import once_differentiable
 from torch.distributions.distribution import Distribution
-from torch.distributions.utils import expand_n
+from torch.distributions.utils import expand_n, broadcast_all
 
 
 class _StandardGamma(Function):
@@ -46,20 +46,7 @@ class Gamma(Distribution):
     has_rsample = True
 
     def __init__(self, alpha, beta):
-        # TODO handle (Variable, Number) cases
-        alpha_num = isinstance(alpha, Number)
-        beta_num = isinstance(beta, Number)
-        if alpha_num and not beta_num:
-            alpha = beta.new(beta.size()).fill_(alpha)
-        elif not alpha_num and beta_num:
-            beta = alpha.new(alpha.size()).fill_(beta)
-        elif alpha_num and beta_num:
-            alpha, beta = torch.Tensor([alpha]), torch.Tensor([beta])
-        elif alpha.size() != beta.size():
-            raise ValueError('Expected alpha.size() == beta.size(), actual {} vs {}'.format(
-                alpha.size(), beta.size()))
-        self.alpha = alpha
-        self.beta = beta
+        self.alpha, self.beta = broadcast_all(alpha, beta)
 
     def sample(self):
         return _standard_gamma(self.alpha) / self.beta
