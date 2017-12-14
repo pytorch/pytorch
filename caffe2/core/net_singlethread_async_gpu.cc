@@ -178,7 +178,7 @@ class SingleThreadAsyncNet : public SimpleNet {
     }
   }
 
-  bool DoRunAsync() override {
+  bool Run() override {
     if (!executor_.get()) {
       initialize();
     }

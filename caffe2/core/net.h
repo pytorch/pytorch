@@ -65,7 +65,7 @@ class NetBase : public Observable<NetBase> {
     }
   }
 
-  inline bool Run() {
+  virtual bool Run() {
     if (!RunAsync()) {
       LOG(ERROR) << "Failed to execute async run";
       return false;
@@ -79,7 +79,7 @@ class NetBase : public Observable<NetBase> {
     return true;
   }
 
-  bool RunAsync();
+  virtual bool RunAsync();
 
   /**
    * Benchmarks a network.
@@ -127,7 +127,9 @@ class NetBase : public Observable<NetBase> {
   }
 
  protected:
-  virtual bool DoRunAsync() = 0;
+  virtual bool DoRunAsync() {
+    CAFFE_THROW("Not implemented");
+  };
 
   vector<string> external_input_;
   vector<string> external_output_;

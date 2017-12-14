@@ -57,7 +57,7 @@ SimpleNet::SimpleNet(
   }
 }
 
-bool SimpleNet::DoRunAsync() {
+bool SimpleNet::Run() {
   StartAllObservers();
   VLOG(1) << "Running net " << name_;
   for (auto& op : operators_) {
@@ -81,6 +81,10 @@ bool SimpleNet::DoRunAsync() {
   }
   StopAllObservers();
   return true;
+}
+
+bool SimpleNet::RunAsync() {
+  return Run();
 }
 
 namespace {

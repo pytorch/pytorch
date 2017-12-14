@@ -65,16 +65,9 @@ class MKLOperator : public OperatorBase {
     // FinishDeviceComputation,
     // it is always just a re-route to RunOnDevice().
     try {
-      auto result = RunOnDevice();
-      if (result) {
-        event().SetFinished();
-      } else {
-        RecordEvent(getErrorMsg().c_str());
-      }
-      return result;
+      return RunOnDevice();
     } catch (EnforceNotMet& err) {
       err.AppendMessage(getErrorMsg());
-      RecordEvent(err.what());
       throw;
     }
   }
