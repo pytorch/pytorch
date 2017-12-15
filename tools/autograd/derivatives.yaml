@@ -695,13 +695,13 @@
   self: hardshrink_backward(grad, self, lambd)
 
 - name: hardtanh(Tensor self, Scalar min_val, Scalar max_val)
-  self: hardtanh_backward(grad, self, min_val, max_val)
+  self: hardtanh_backward(grad, output, min_val, max_val)
 
 - name: hardtanh_(Tensor self, Scalar min_val, Scalar max_val)
   self: hardtanh_backward(grad, output, min_val, max_val)
 
 - name: leaky_relu(Tensor self, Scalar negative_slope)
-  self: leaky_relu_backward(grad, self, negative_slope)
+  self: leaky_relu_backward(grad, output, negative_slope)
 
 - name: leaky_relu_(Tensor self, Scalar negative_slope)
   self: leaky_relu_backward(grad, output, negative_slope)
@@ -716,7 +716,7 @@
   self, weight: prelu_backward(grad, self, weight, grad_input_mask)
 
 - name: rrelu(Tensor self, Scalar lower, Scalar upper, bool training, Generator generator)
-  self: rrelu_backward(grad, self, lower, upper, training, noise)
+  self: rrelu_backward(grad, output, lower, upper, training, noise)
 
 - name: rrelu_(Tensor self, Scalar lower, Scalar upper, bool training, Generator generator)
   self: rrelu_backward(grad, output, lower, upper, training, noise)
