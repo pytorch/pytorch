@@ -643,7 +643,7 @@ template <typename Scalar>
 struct StandardGammaGradOp {
   static void apply(Tensor& ret, const Tensor& self, const Tensor& alpha) {
     CPU_tensor_apply3<Scalar>(ret, self, alpha,
-      [](Scalar& ret_val, const Scalar& self_val, const Scalar &alpha_val, bool& early_exit) {
+      [](Scalar& ret_val, const Scalar& self_val, const Scalar &alpha_val) {
          ret_val = standard_gamma_grad_one(self_val, alpha_val);
       }
     );

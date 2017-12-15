@@ -174,7 +174,7 @@ void CPU_tensor_apply2_dim(Tensor& tensor1, Tensor& tensor2, int64_t dim, Op op)
     /* Loop through the inner most region of the Tensor */
     for(; tensor1_i < tensor1_size && tensor2_i < tensor2_size; tensor1_i++, tensor2_i++, tensor1_data += tensor1_stride, tensor2_data += tensor2_stride)
     {
-      op(*tensor1_data, *tensor2_data, TH_TENSOR_APPLY_hasFinished);
+      op(*tensor1_data, *tensor2_data);
     }
     __ATH_TENSOR_APPLYX_UPDATE_COUNTERS(tensor1, 0)
     __ATH_TENSOR_APPLYX_UPDATE_COUNTERS(tensor2, 0)
@@ -220,7 +220,7 @@ void CPU_tensor_apply3_dim(Tensor &tensor1, Tensor& tensor2, Tensor& tensor3, in
     /* Loop through the inner most region of the Tensor */
     for(; tensor1_i <  tensor1_size && tensor2_i < tensor2_size && tensor3_i < tensor3_size; tensor1_i++, tensor2_i++, tensor3_i++, tensor1_data += tensor1_stride, tensor2_data += tensor2_stride, tensor3_data += tensor3_stride)
     {
-      op(*tensor1_data, *tensor2_data, *tensor3_data, TH_TENSOR_APPLY_hasFinished);
+      op(*tensor1_data, *tensor2_data, *tensor3_data);
     }
     __ATH_TENSOR_APPLYX_UPDATE_COUNTERS(tensor1, 0)
     __ATH_TENSOR_APPLYX_UPDATE_COUNTERS(tensor2, 0)
