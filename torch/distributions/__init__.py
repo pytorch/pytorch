@@ -35,6 +35,6 @@ from .categorical import Categorical
 from .distribution import Distribution
 from .gamma import Gamma
 from .normal import Normal
+from .exponential import Exponential
 
-
-__all__ = ['Distribution', 'Bernoulli', 'Categorical', 'Normal', 'Gamma']
+__all__ = ['Distribution', 'Bernoulli', 'Categorical', 'Normal', 'Gamma', 'Exponential']
