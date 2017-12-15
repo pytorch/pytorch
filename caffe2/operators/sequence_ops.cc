@@ -22,38 +22,15 @@ namespace caffe2 {
 
 template <>
 template <typename T>
-bool GatherPaddingOp<CPUContext>::DoRunWithType() {
-  const auto& in = Input(0);
-  CAFFE_ENFORCE_GE(in.ndim(), 1);
-  const int32_t outer_size = in.dims()[0];
-  const auto block_size = std::accumulate(
-      in.dims().begin() + 1, in.dims().end(), 1, std::multiplies<TIndex>());
-  const auto pad_width = startPaddingWidth_ + endPaddingWidth_;
-
-  // if no lengths is provided, assume it is a single full-span entry
-  const int32_t* lengths_ptr = &outer_size;
-  int64_t lengths_size = 1;
-  if (InputSize() > 1) {
-    const auto& lengths = Input(1);
-    lengths_ptr = lengths.data<int32_t>();
-    lengths_size = lengths.size();
-  }
-
-  std::vector<TIndex> padShape(in.dims().begin() + 1, in.dims().end());
-  // output will contain accumulator over paddings
-  Output(0)->Resize(padShape);
-  T* padding_start_ptr = Output(0)->template mutable_data<T>();
-  memset(padding_start_ptr, 0, sizeof(T) * block_size);
-
-  // if no end_padding is provided, assume it's the same as start_padding
-  T* padding_end_ptr = padding_start_ptr;
-  if (OutputSize() == 2) {
-    Output(1)->Resize(padShape);
-    padding_end_ptr = Output(1)->template mutable_data<T>();
-    memset(padding_end_ptr, 0, sizeof(T) * block_size);
-  }
-
-  const auto* in_ptr = in.template data<T>();
+void GatherPaddingOp<CPUContext>::GatherPadding(
+    const int outer_size,
+    const int lengths_size,
+    const int block_size,
+    const int pad_width,
+    const T* in_ptr,
+    const int* lengths_ptr,
+    T* padding_start_ptr,
+    T* padding_end_ptr) {
   int64_t total_length = 0;
   for (int i = 0; i < lengths_size; ++i) {
     // check total length consistency
@@ -77,7 +54,6 @@ bool GatherPaddingOp<CPUContext>::DoRunWithType() {
       in_ptr += block_size;
     }
   }
-  return true;
 }
 
 template <>
