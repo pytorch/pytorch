@@ -414,12 +414,7 @@ def load_derivatives(path, declarations_by_signature, declarations_by_name):
 
         declaration = declarations_by_name[defn_name][0]
         base_name = defn_name if not declaration['inplace'] else defn_name[:-1]
-        fwd_name = base_name + '_forward'
-
-        if declaration['inplace']:
-            declaration['base_name'] = fwd_name + '_'
-            declaration['derivative'] = declarations_by_name[base_name][0]['derivative']
-            return None
+        fwd_name = base_name + ('_forward' if not declaration['inplace'] else '_forward_')
 
         assert len(declarations_by_name[fwd_name]) == 1
 
