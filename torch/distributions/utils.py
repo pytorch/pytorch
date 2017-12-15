@@ -50,7 +50,8 @@ def broadcast_all(*values):
     """
     values = list(values)
     scalar_idxs = [i for i in range(len(values)) if isinstance(values[i], Number)]
-    tensor_idxs = [i for i in range(len(values)) if isinstance(values[i], (torch.Tensor, Variable))]
+    tensor_idxs = [i for i in range(len(values)) if
+                   torch.is_tensor(values[i]) or isinstance(values[i], Variable)]
     if len(scalar_idxs) + len(tensor_idxs) != len(values):
         raise ValueError('Input arguments must all be instances of numbers.Number, torch.Tensor or ' +
                          'torch.autograd.Variable.')
