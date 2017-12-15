@@ -14,7 +14,9 @@
  * limitations under the License.
  */
 
-#include <iostream> // NOLINT
+#include <chrono>
+#include <iostream>
+#include <thread>
 
 #include "caffe2/core/stats.h"
 #include <gtest/gtest.h>
@@ -88,7 +90,9 @@ TEST(StatsTest, StatsTestDuration) {
     CAFFE_AVG_EXPORTED_STAT(time_ns);
   };
   TestStats stats("stats");
-  CAFFE_DURATION(stats, time_ns) {}
+  CAFFE_DURATION(stats, time_ns) {
+    std::this_thread::sleep_for(std::chrono::microseconds(1));
+  }
 
   ExportedStatList data;
   StatRegistry::get().publish(data);
