@@ -158,16 +158,6 @@ ELSE()
   MESSAGE(STATUS "MAGMA not found. Compiling without MAGMA support")
 ENDIF()
 
-find_package(CuDNN)
-IF(NOT CUDNN_FOUND)
-  MESSAGE(STATUS "CuDNN not found. Compiling without CUDNN support")
-  set(AT_CUDNN_ENABLED 0)
-ELSE()
-  INCLUDE_DIRECTORIES(${CUDNN_INCLUDE_DIRS})
-  set(AT_CUDNN_ENABLED 1)
-ENDIF()
-
-
 # ARM specific flags
 FIND_PACKAGE(ARM)
 IF (ASIMD_FOUND)
@@ -386,16 +376,23 @@ else()
   add_subdirectory(src/THCS)
 endif()
 
+find_package(CuDNN)
+IF(NOT AT_CUDA_ENABLED OR NOT CUDNN_FOUND)
+  MESSAGE(STATUS "CuDNN not found. Compiling without CUDNN support")
+  set(AT_CUDNN_ENABLED 0)
+ELSE()
+  INCLUDE_DIRECTORIES(${CUDNN_INCLUDE_DIRS})
+  set(AT_CUDNN_ENABLED 1)
+ENDIF()
+
 set(cwrap_files
   ${CMAKE_CURRENT_SOURCE_DIR}/src/ATen/Declarations.cwrap
   ${CMAKE_CURRENT_SOURCE_DIR}/src/THNN/generic/THNN.h
   ${CMAKE_CURRENT_SOURCE_DIR}/src/THCUNN/generic/THCUNN.h
   ${CMAKE_CURRENT_SOURCE_DIR}/src/ATen/nn.yaml
   ${CMAKE_CURRENT_SOURCE_DIR}/src/ATen/native/native_functions.yaml
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/ATen/native/cudnn/native_functions.yaml
 )
-if(CUDNN_FOUND)
-  set(cwrap_files ${cwrap_files} ${CMAKE_CURRENT_SOURCE_DIR}/src/ATen/cudnn/cuDNN.yaml)
-endif()
 
 include_directories(
 ${CMAKE_CURRENT_SOURCE_DIR}/src/THNN
