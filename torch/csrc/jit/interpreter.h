@@ -6,7 +6,7 @@ namespace at {
   struct Tensor;
 }
 namespace torch { namespace jit {
-  
+
 // The interpreter run Graphs with Tensor inputs and Tensor outputs
 // a separate component in the autograd handles unwrapping and wrapping
 // variable objects for use in the interpreter.
@@ -14,6 +14,7 @@ namespace torch { namespace jit {
 struct CodeImpl;
 struct InterpreterStateImpl;
 struct Graph;
+struct TensorType;
 
 struct Code {
   Code()
@@ -36,6 +37,7 @@ struct InterpreterState {
   void runOneStage(
     const std::vector<at::Tensor> & inputs,
     std::vector<at::Tensor> & outputs);
+  const TensorType & tensorTypeForInput(size_t i) const;
   ~InterpreterState();
   // create a copy of InterpreterState with its current state
   // used when retain_graph=True so that stages can be re-run
