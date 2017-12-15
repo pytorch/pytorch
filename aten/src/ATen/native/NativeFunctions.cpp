@@ -641,14 +641,12 @@ static inline Scalar standard_gamma_grad_one(Scalar x, Scalar alpha) {
 
 template <typename Scalar>
 struct StandardGammaGradOp {
-  void operator()(Scalar& ret_val, const Scalar& self_val, const Scalar &alpha_val, bool& early_exit)
-  {
-    ret_val = standard_gamma_grad_one(self_val, alpha_val);
-  }
-
   static void apply(Tensor& ret, const Tensor& self, const Tensor& alpha) {
-    StandardGammaGradOp<Scalar> op;
-    CPU_tensor_apply3<Scalar, StandardGammaGradOp<Scalar>>(ret, self, alpha, op);
+    CPU_tensor_apply3<Scalar>(ret, self, alpha,
+      [](Scalar& ret_val, const Scalar& self_val, const Scalar &alpha_val, bool& early_exit) {
+         ret_val = standard_gamma_grad_one(self_val, alpha_val);
+      }
+    );
   }
 };
 
