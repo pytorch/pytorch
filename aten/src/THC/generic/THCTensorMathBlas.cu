@@ -437,6 +437,16 @@ __global__ void createBatchGemmBuffer(const real** buffer, real* data,
   }
 }
 
+__global__ void createBatchGemmBuffer3(const real** buffer1, const real ** buffer2, const real ** buffer3, real* data1,
+                                       real * data2, real * data3, long stride1, long stride2, long stride3, long num_batches) {
+  const long idx = blockIdx.x * blockDim.x + threadIdx.x;
+  if (idx < num_batches) {
+    buffer1[idx] = data1 + idx * stride1;
+    buffer2[idx] = data2 + idx * stride2;
+    buffer3[idx] = data3 + idx * stride3;
+  }
+}
+
 THC_API void
 THCTensor_(baddbmm)(THCState *state, THCTensor *result, real beta, THCTensor *t,
                     real alpha, THCTensor *batch1, THCTensor *batch2) {
@@ -554,15 +564,11 @@ THCTensor_(baddbmm)(THCState *state, THCTensor *result, real beta, THCTensor *t,
   const int64_t block = 512;
   const int64_t grid = (num_batches + block - 1) / block;
 
-  createBatchGemmBuffer<<<grid, block, 0, THCState_getCurrentStream(state)>>>(
-    d_matrices1, THCTensor_(data)(state, batch1_), batch1_->stride[0],
-    num_batches);
-  createBatchGemmBuffer<<<grid, block, 0, THCState_getCurrentStream(state)>>>(
-    d_matrices2, THCTensor_(data)(state, batch2_), batch2_->stride[0],
-    num_batches);
-  createBatchGemmBuffer<<<grid, block, 0, THCState_getCurrentStream(state)>>>(
-    (const real**)d_result_matrices, THCTensor_(data)(state,result_),
-    result_->stride[0], num_batches);
+  createBatchGemmBuffer3<<<grid, block, 0, THCState_getCurrentStream(state)>>>(
+    d_matrices1, d_matrices2, (const real**)d_result_matrices, THCTensor_(data)(state, batch1_),
+    THCTensor_(data)(state, batch2_), THCTensor_(data)(state, result_),
+    batch1_->stride[0], batch2_->stride[0], result_->stride[0], num_batches);
+
 #ifdef THC_REAL_IS_FLOAT
   THCudaBlas_SgemmBatched(
       state,
@@ -591,7 +597,7 @@ THCTensor_(baddbmm)(THCState *state, THCTensor *result, real beta, THCTensor *t,
       beta,
       d_result_matrices, ldc,
       num_batches);
-#endif
+#endif //THC_REAL
 
   THCudaFree(state, d_matrices1);
   THCudaFree(state, d_matrices2);
@@ -626,10 +632,12 @@ THCTensor_(baddbmm)(THCState *state, THCTensor *result, real beta, THCTensor *t,
       beta,
       THCTensor_(data)(state, result_), ldc, result_->stride[0],
       num_batches);
-#endif
-#endif
+#endif //THC_REAL
+#endif //CUDA_VERSION
 
 #elif defined(THC_REAL_IS_HALF)
+
+#if CUDA_VERSION < 9100
   // Currently no HgemmBatched in Cublas
   for (int64_t i = 0; i < num_batches; ++i) {
     THCudaBlas_Hgemm(
@@ -645,8 +653,42 @@ THCTensor_(baddbmm)(THCState *state, THCTensor *result, real beta, THCTensor *t,
         beta,
         THCTensor_(data)(state, result_) + i * result_->stride[0], ldc);
   }
-#endif
+#else
+  cudaDeviceProp* prop = THCState_getCurrentDeviceProperties(state);
+  if (prop->major >= 5){
 
+  THCudaBlas_HgemmStridedBatched(
+      state,
+      transpose_batch1,
+      transpose_batch2,
+      result_->size[transpose_result ? 2 : 1],
+      result_->size[transpose_result ? 1 : 2],
+      batch1_->size[transpose_result ? 1 : 2],
+      alpha,
+      THCTensor_(data)(state, batch1_), lda, batch1_->stride[0],
+      THCTensor_(data)(state, batch2_), ldb, batch2_->stride[0],
+      beta,
+      THCTensor_(data)(state, result_), ldc, result_->stride[0],
+      num_batches);
+   } else {
+      for (long i = 0; i < num_batches; ++i) {
+        THCudaBlas_Hgemm(
+        state,
+        transpose_batch1,
+        transpose_batch2,
+        result_->size[transpose_result ? 2 : 1],
+        result_->size[transpose_result ? 1 : 2],
+        batch1_->size[transpose_result ? 1 : 2],
+        alpha,
+        THCTensor_(data)(state, batch1_) + i * batch1_->stride[0], lda,
+        THCTensor_(data)(state, batch2_) + i * batch2_->stride[0], ldb,
+        beta,
+        THCTensor_(data)(state, result_) + i * result_->stride[0], ldc);
+      }
+   }
+
+#endif
+#endif
   if (batch1_ != batch1) {
     THCTensor_(free)(state, batch1_);
   }
