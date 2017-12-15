@@ -4243,7 +4243,7 @@ class TestTorch(TestCase):
         for use_name in (False, True):
             # Passing filename to torch.save(...) will cause the file to be opened twice,
             # which is not supported on Windows
-            if sys.platform == "win32" and not use_name:
+            if sys.platform == "win32" and use_name:
                 continue
             with tempfile.NamedTemporaryFile() as f:
                 handle = f if not use_name else f.name
