@@ -650,6 +650,9 @@
 
 - name: zeros  # fallthrough
 
+- name: _sparse_mask(Tensor self, SparseTensor mask)
+  self: not_implemented("_sparse_mask")
+
 # NN
 
 - name: binary_cross_entropy(Tensor self, Tensor target, Tensor weight, bool size_average)

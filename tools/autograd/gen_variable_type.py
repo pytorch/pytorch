@@ -747,7 +747,7 @@ def create_variable_type(top_env, aten_declarations):
 
             dynamic_type = arg['dynamic_type']
             is_nullable = arg.get('is_nullable', False)
-            ref = (not is_nullable) and dynamic_type != 'TensorList'
+            ref = (not is_nullable) and dynamic_type not in ['TensorList', 'SparseTensor']
             suffix = get_suffix(dynamic_type, is_nullable)
             if dynamic_type == 'TensorList' and declaration['name'] == 'index':
                 # TODO: specify this in Declarations.yaml somehow
