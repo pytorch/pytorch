@@ -405,7 +405,7 @@ def symbolic_override(symbolic_fn):
             flat_output_tensors = tuple(
                 v.data for v in function._iter_variables(output))
             assert len(list(function._iter_variables_permissive(
-                        list(kwargs.values())))) == 0, \
+                list(kwargs.values())))) == 0, \
                 "Passing Variable through kwargs is not supported"
 
             class ExportProxy(Function):
