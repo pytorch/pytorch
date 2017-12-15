@@ -123,8 +123,6 @@ REGISTER_SEGMENT_DEF(
 
 #define REGISTER_REDUCER_WITH_OPS(reducer_def)                              \
   REGISTER_SEGMENT_DEF(                                                     \
-      AbstractReduceFrontDef<float, CPUContext, reducer_def>);              \
-  REGISTER_SEGMENT_DEF(                                                     \
       AbstractSortedSegmentDef<float, int, CPUContext, reducer_def>);       \
   REGISTER_SEGMENT_DEF(                                                     \
       AbstractSparseSortedSegmentDef<float, int, CPUContext, reducer_def>); \
@@ -141,14 +139,19 @@ REGISTER_SEGMENT_DEF(
                        reducer_def,                                        \
                        GradientNeedIndices>)
 
-#define REGISTER_REDUCER_WITH_ALL_OPS(reducer_def) \
-  REGISTER_REDUCER_WITH_OPS(reducer_def)           \
+#define REGISTER_REDUCER_WITH_ALL_OPS(reducer_def)             \
+  REGISTER_SEGMENT_DEF(                                        \
+      AbstractReduceFrontDef<float, CPUContext, reducer_def>); \
+  REGISTER_REDUCER_WITH_OPS(reducer_def)                       \
   REGISTER_REDUCER_WITH_LENGTH_OPS(reducer_def, false)
 
 REGISTER_REDUCER_WITH_OPS(SumReducerDef);
 REGISTER_REDUCER_WITH_LENGTH_OPS(SumReducerDef, true);
+
+REGISTER_REDUCER_WITH_OPS(MeanReducerDef);
+REGISTER_REDUCER_WITH_LENGTH_OPS(MeanReducerDef, false);
+
 REGISTER_REDUCER_WITH_ALL_OPS(WeightedSumReducerDef);
-REGISTER_REDUCER_WITH_ALL_OPS(MeanReducerDef);
 
 // SparseLengths[Sum,WeightedSum,Mean] are now implemented separately,
 // so we only rely to the historical implementation for the backward + schema.
@@ -167,9 +170,6 @@ REGISTER_SEGMENT_DEF_SCHEMA_GRADIENT_ONLY(AbstractSparseLengthsDef<
 
 REGISTER_SEGMENT_DEF_SCHEMA_GRADIENT_ONLY(
     AbstractSparseLengthsDef<float, int, CPUContext, MeanReducerDef>)
-
-REGISTER_SEGMENT_DEF(AbstractReduceBackDef<float, CPUContext, SumReducerDef>);
-REGISTER_SEGMENT_DEF(AbstractReduceBackDef<float, CPUContext, MeanReducerDef>);
 
 // Auxiliary output gradients are currently implemented only for Lengths version
 #define REGISTER_GRADIENT_WITH_MAIN_INPUT(...)                     \
