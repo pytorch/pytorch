@@ -247,6 +247,10 @@ IF(CUDA_FOUND)
     target_link_libraries(ATen ${CUDNN_LIBRARIES})
   endif(CUDNN_FOUND)
 
+  if (NNPACK_FOUND)
+    target_link_libraries(ATen ${NNPACK_LIBRARIES})
+  endif(NNPACK_FOUND)
+
   IF(USE_MAGMA)
     TARGET_LINK_LIBRARIES(ATen ${MAGMA_LIBRARIES})
     IF ($ENV{TH_BINARY_BUILD})

@@ -8,39 +8,18 @@ namespace at { namespace native {
 
 // See Note [ATen preprocessor philosophy]
 
-at::Tensor cudnn_convolution_forward(
-    const at::Tensor& input, const at::Tensor& weight,
+at::Tensor cudnn_convolution(
+    const at::Tensor& input, const at::Tensor& weight, const at::Tensor& bias /* optional */,
     IntList padding, IntList stride, IntList dilation,
     int64_t groups, bool benchmark, bool deterministic) {
-  throw std::runtime_error("cudnn_convolution_forward: ATen not compiled with cuDNN support");
+  throw std::runtime_error("cudnn_convolution: ATen not compiled with cuDNN support");
 }
 
-at::Tensor cudnn_convolution_full_forward(
-    const at::Tensor& input, const at::Tensor& weight, const at::Tensor& bias,
-    IntList padding, IntList stride, IntList dilation,
-    int64_t groups, bool benchmark, bool deterministic) {
-  throw std::runtime_error("cudnn_convolution_full_forward: ATen not compiled with cuDNN support");
-}
-
-at::Tensor cudnn_convolution_backward(
+at::Tensor cudnn_convolution_backward_input(
     IntList input_size, const at::Tensor& grad_output, const at::Tensor& weight,
     IntList padding, IntList stride, IntList dilation, int64_t groups,
     bool benchmark, bool deterministic) {
-  throw std::runtime_error("cudnn_convolution_backward: ATen not compiled with cuDNN support");
-}
-
-at::Tensor cudnn_convolution_transpose_full_forward(
-    const at::Tensor& input, const at::Tensor& weight, const at::Tensor& bias,
-    IntList padding, IntList output_padding, IntList stride, IntList dilation,
-    int64_t groups, bool benchmark, bool deterministic) {
-  throw std::runtime_error("cudnn_convolution_transpose_full_forward: ATen not compiled with cuDNN support");
-}
-
-at::Tensor cudnn_convolution_transpose_backward(
-    const at::Tensor& grad_output, const at::Tensor& weight,
-    IntList padding, IntList stride, IntList dilation,
-    int64_t groups, bool benchmark, bool deterministic) {
-  throw std::runtime_error("cudnn_convolution_transpose_backward: ATen not compiled with cuDNN support");
+  throw std::runtime_error("cudnn_convolution_backward_input: ATen not compiled with cuDNN support");
 }
 
 at::Tensor cudnn_convolution_backward_weight(
@@ -50,6 +29,32 @@ at::Tensor cudnn_convolution_backward_weight(
   throw std::runtime_error("cudnn_convolution_backward_weight: ATen not compiled with cuDNN support");
 }
 
+at::Tensor cudnn_convolution_backward_bias(
+    const at::Tensor& grad_output) {
+  throw std::runtime_error("cudnn_convolution_backward_bias: ATen not compiled with cuDNN support");
+}
+
+std::tuple<at::Tensor,at::Tensor,at::Tensor> cudnn_convolution_backward(
+    const at::Tensor& input, const at::Tensor& grad_output, const at::Tensor& weight,
+    IntList padding, IntList stride, IntList dilation, int64_t groups,
+    bool benchmark, bool deterministic, std::array<bool,3> output_mask) {
+  throw std::runtime_error("cudnn_convolution_backward: ATen not compiled with cuDNN support");
+}
+
+at::Tensor cudnn_convolution_transpose(
+    const at::Tensor& input, const at::Tensor& weight, const at::Tensor& bias /* optional */,
+    IntList padding, IntList output_padding, IntList stride, IntList dilation,
+    int64_t groups, bool benchmark, bool deterministic) {
+  throw std::runtime_error("cudnn_convolution_transpose: ATen not compiled with cuDNN support");
+}
+
+at::Tensor cudnn_convolution_transpose_backward_input(
+    const at::Tensor& grad_output, const at::Tensor& weight,
+    IntList padding, IntList stride, IntList dilation,
+    int64_t groups, bool benchmark, bool deterministic) {
+  throw std::runtime_error("cudnn_convolution_transpose_backward: ATen not compiled with cuDNN support");
+}
+
 at::Tensor cudnn_convolution_transpose_backward_weight(
     IntList weight_size, const at::Tensor& grad_output, const at::Tensor& input,
     IntList padding, IntList stride, IntList dilation, int64_t groups,
@@ -57,9 +62,11 @@ at::Tensor cudnn_convolution_transpose_backward_weight(
   throw std::runtime_error("cudnn_convolution_transpose_backward_weight: ATen not compiled with cuDNN support");
 }
 
-at::Tensor cudnn_convolution_backward_bias(
-    const at::Tensor& grad_output) {
-  throw std::runtime_error("cudnn_convolution_backward_bias: ATen not compiled with cuDNN support");
+std::tuple<at::Tensor,at::Tensor,at::Tensor> cudnn_convolution_transpose_backward(
+    const at::Tensor& input, const at::Tensor& grad_output, const at::Tensor& weight,
+    IntList padding, IntList output_padding, IntList stride, IntList dilation, int64_t groups,
+    bool benchmark, bool deterministic, std::array<bool,3> output_mask) {
+  throw std::runtime_error("cudnn_convolution_transpose_backward: ATen not compiled with cuDNN support");
 }
 
 }}
@@ -763,22 +770,18 @@ void cudnn_convolution_add_bias_(CheckedFrom c, const TensorArg& output, const T
                                      &one, odesc.desc, output->data_ptr()));
 }
 
-// The general strategy: implementation of each convolution function is
-// split into three parts:
-//    - cudnn_convolution_forward (at::Tensor overload)
-//      This is the entry point for clients
-//    - cudnn_convolution_forward (const TensorArg& overload)
-//      This is the worker function.  It's factored out from the
-//      at::Tensor overload because it is used to implement both
-//      convolution forwards, and transposed convolution backwards
-//      (TensorArgs is setup so that argument checking gives accurate
-//      messages in all cases.)
-//    - _cudnn_convolution_forward
-//      This is the actual dispatch function, it is a direct wrapper
-//      on top of the CuDNN API and, in particular, does not implement
-//      legacy group support on old versions of CuDNN.
+// The general strategy:
 //
-// There's also a 'full' variant that comes with bias addition.
+//    - cudnn_convolution (Tensor)
+//      Entry points for clients, takes bias
+//
+//    - cudnn_convolution_forward (TensorArg)
+//      Entry point, which may be reused between regular
+//      convolution and transposed convolution.  Does NOT take bias.
+//
+//    - raw_cudnn_convolution_forward_out (Tensor)
+//      Low level function which invokes CuDNN, and takes an output
+//      tensor which is directly written to (thus _out).
 //
 // Where does argument checking happen?  Here's the division of
 // responsibility:
@@ -828,7 +831,7 @@ void raw_cudnn_convolution_forward_out(
   // reinitialize the workspace for each convolution we do.  This is
   // wasteful; we'd rather reuse the workspace.  OTOH, legacy group
   // convolution support is already pretty slow, so this might not
-  // matter.  (This applies to raw_cudnn_convolution_backward as well.)
+  // matter.  (This applies to raw_cudnn_convolution_backward_input as well.)
   cudnnConvolutionFwdAlgo_t fwdAlg;
   Workspace workspace = chooseAlgorithm(args, benchmark, &fwdAlg);
 
@@ -877,20 +880,7 @@ Tensor cudnn_convolution_forward(
   return *output;
 }
 
-Tensor cudnn_convolution_forward(
-    const Tensor& input_t, const Tensor& weight_t,
-    IntList padding, IntList stride, IntList dilation,
-    int64_t groups, bool benchmark, bool deterministic)
-{
-  TensorArg input  { input_t,  "input",  1 },
-            weight { weight_t, "weight", 2 };
-  setCuDNNStreamToCurrent();
-  return cudnn_convolution_forward(
-    "cudnn_convolution_forward",
-    input, weight, padding, stride, dilation, groups, benchmark, deterministic);
-}
-
-Tensor cudnn_convolution_full_forward(
+Tensor cudnn_convolution(
     const Tensor& input_t, const Tensor& weight_t, const Tensor& bias_t,
     IntList padding, IntList stride, IntList dilation,
     int64_t groups, bool benchmark, bool deterministic)
@@ -899,7 +889,7 @@ Tensor cudnn_convolution_full_forward(
             weight { weight_t, "weight", 2 },
             bias   { bias_t,   "bias",   3 };
   setCuDNNStreamToCurrent();
-  CheckedFrom c = "cudnn_convolution_full_forward";
+  CheckedFrom c = "cudnn_convolution";
   auto output_t = cudnn_convolution_forward(
     c, input, weight, padding, stride, dilation, groups, benchmark, deterministic);
   if (bias->defined()) {
@@ -910,7 +900,7 @@ Tensor cudnn_convolution_full_forward(
 
 // NB: output_padding not needed here, as there is no ambiguity to
 // resolve
-Tensor cudnn_convolution_transpose_backward(
+Tensor cudnn_convolution_transpose_backward_input(
     const Tensor& grad_output_t, const Tensor& weight_t,
     IntList padding, IntList stride, IntList dilation,
     int64_t groups, bool benchmark, bool deterministic)
@@ -919,8 +909,29 @@ Tensor cudnn_convolution_transpose_backward(
             weight      { weight_t, "weight", 2 };
   setCuDNNStreamToCurrent();
   return cudnn_convolution_forward(
-    "cudnn_convolution_transpose_backward",
+    "cudnn_convolution_transpose_backward_input",
     grad_output, weight, padding, stride, dilation, groups, benchmark, deterministic);
+}
+
+std::tuple<at::Tensor,at::Tensor,at::Tensor> cudnn_convolution_transpose_backward(
+    const at::Tensor& input, const at::Tensor& grad_output_t, const at::Tensor& weight,
+    IntList padding, IntList output_padding, IntList stride, IntList dilation, int64_t groups,
+    bool benchmark, bool deterministic, std::array<bool,3> output_mask) {
+
+  Tensor grad_output = grad_output_t.contiguous();
+
+  Tensor grad_input, grad_weight, grad_bias;
+  if (output_mask[0]) {
+    grad_input = at::cudnn_convolution_transpose_backward_input(grad_output, weight, padding, stride, dilation, groups, benchmark, deterministic);
+  }
+  if (output_mask[1]) {
+    grad_weight = at::cudnn_convolution_transpose_backward_weight(weight.sizes(), grad_output, input, padding, stride, dilation, groups, benchmark, deterministic);
+  }
+  if (output_mask[2]) {
+    grad_bias = at::cudnn_convolution_backward_bias(grad_output);
+  }
+
+  return std::tuple<Tensor,Tensor,Tensor>{grad_input, grad_weight, grad_bias};
 }
 
 // ---------------------------------------------------------------------
@@ -929,7 +940,7 @@ Tensor cudnn_convolution_transpose_backward(
 //
 // ---------------------------------------------------------------------
 
-void raw_cudnn_convolution_backward_out(
+void raw_cudnn_convolution_backward_input_out(
     const at::Tensor& grad_input,
     const at::Tensor& grad_output,
     const at::Tensor& weight,
@@ -970,7 +981,7 @@ void raw_cudnn_convolution_backward_out(
 // output_padding parameter.  Both of these interfaces are equivalent,
 // but they are differently convenient depending on the use case.
 
-Tensor cudnn_convolution_backward(
+Tensor cudnn_convolution_backward_input(
     CheckedFrom c,
     IntList input_size, const TensorArg& grad_output, const TensorArg& weight,
     IntList padding, IntList stride, IntList dilation, int64_t groups,
@@ -987,14 +998,14 @@ Tensor cudnn_convolution_backward(
 
 #if CUDNN_VERSION < 7000
   for (int i = 0; i < groups; i++) {
-    raw_cudnn_convolution_backward_out(
+    raw_cudnn_convolution_backward_input_out(
         narrowGroup(*grad_input, input_channels_dim, i, groups),
         narrowGroup(*grad_output, output_channels_dim, i, groups),
         narrowGroup(*weight, weight_output_channels_dim, i, groups),
         padding, stride, dilation, 1, benchmark, deterministic);
   }
 #else
-  raw_cudnn_convolution_backward_out(
+  raw_cudnn_convolution_backward_input_out(
       *grad_input, *grad_output, *weight,
       padding, stride, dilation, groups, benchmark, deterministic);
 #endif
@@ -1002,7 +1013,7 @@ Tensor cudnn_convolution_backward(
   return *grad_input;
 }
 
-Tensor cudnn_convolution_transpose(
+Tensor cudnn_convolution_transpose_forward(
     CheckedFrom c,
     const TensorArg& grad_output, const TensorArg& weight,
     IntList padding, IntList output_padding, IntList stride, IntList dilation, int64_t groups,
@@ -1010,11 +1021,11 @@ Tensor cudnn_convolution_transpose(
 {
   auto input_size = conv_input_size(grad_output->sizes(), weight->sizes(),
                                     padding, output_padding, stride, dilation, groups);
-  return cudnn_convolution_backward(c, input_size, grad_output, weight,
+  return cudnn_convolution_backward_input(c, input_size, grad_output, weight,
                                     padding, stride, dilation, groups, benchmark, deterministic);
 }
 
-Tensor cudnn_convolution_backward(
+Tensor cudnn_convolution_backward_input(
     IntList input_size, const Tensor& grad_output_t, const Tensor& weight_t,
     IntList padding, IntList stride, IntList dilation, int64_t groups,
     bool benchmark, bool deterministic)
@@ -1022,13 +1033,34 @@ Tensor cudnn_convolution_backward(
   TensorArg grad_output{ grad_output_t, "grad_output", 1 },
             weight{ weight_t, "weight", 2 };
   setCuDNNStreamToCurrent();
-  return cudnn_convolution_backward(
-      "cudnn_convolution_backward",
+  return cudnn_convolution_backward_input(
+      "cudnn_convolution_backward_input",
       input_size, grad_output, weight,
       padding, stride, dilation, groups, benchmark, deterministic);
 }
 
-Tensor cudnn_convolution_transpose_full_forward(
+std::tuple<at::Tensor,at::Tensor,at::Tensor> cudnn_convolution_backward(
+    const at::Tensor& input, const at::Tensor& grad_output_t, const at::Tensor& weight,
+    IntList padding, IntList stride, IntList dilation, int64_t groups,
+    bool benchmark, bool deterministic, std::array<bool,3> output_mask) {
+
+  Tensor grad_output = grad_output_t.contiguous();
+
+  Tensor grad_input, grad_weight, grad_bias;
+  if (output_mask[0]) {
+    grad_input = at::cudnn_convolution_backward_input(input.sizes(), grad_output, weight, padding, stride, dilation, groups, benchmark, deterministic);
+  }
+  if (output_mask[1]) {
+    grad_weight = at::cudnn_convolution_backward_weight(weight.sizes(), grad_output, input, padding, stride, dilation, groups, benchmark, deterministic);
+  }
+  if (output_mask[2]) {
+    grad_bias = at::cudnn_convolution_backward_bias(grad_output);
+  }
+
+  return std::tuple<Tensor,Tensor,Tensor>{grad_input, grad_weight, grad_bias};
+}
+
+Tensor cudnn_convolution_transpose(
     const Tensor& input_t, const Tensor& weight_t, const Tensor& bias_t,
     IntList padding, IntList output_padding, IntList stride, IntList dilation,
     int64_t groups, bool benchmark, bool deterministic)
@@ -1036,8 +1068,8 @@ Tensor cudnn_convolution_transpose_full_forward(
   TensorArg input  { input_t,  "input",  1 },
             weight { weight_t, "weight", 2 },
             bias   { bias_t,   "bias",   3 };
-  CheckedFrom c = "cudnn_convolution_transpose_full_forward";
-  auto output_t = cudnn_convolution_transpose(
+  CheckedFrom c = "cudnn_convolution_transpose";
+  auto output_t = cudnn_convolution_transpose_forward(
     c, input, weight, padding, output_padding, stride, dilation, groups, benchmark, deterministic);
   if (bias->defined()) {
     cudnn_convolution_add_bias_(c, { output_t, "result", 0 }, bias);
@@ -1177,6 +1209,7 @@ Tensor cudnn_convolution_backward_bias(
                                                    &zero, bdesc.desc, grad_bias->data_ptr()));
   return *grad_bias;
 }
+
 
 }}  // namespace
 

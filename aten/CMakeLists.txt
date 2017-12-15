@@ -378,11 +378,20 @@ endif()
 
 find_package(CuDNN)
 IF(NOT AT_CUDA_ENABLED OR NOT CUDNN_FOUND)
-  MESSAGE(STATUS "CuDNN not found. Compiling without CUDNN support")
+  MESSAGE(STATUS "CuDNN not found. Compiling without CuDNN support")
   set(AT_CUDNN_ENABLED 0)
 ELSE()
   INCLUDE_DIRECTORIES(${CUDNN_INCLUDE_DIRS})
   set(AT_CUDNN_ENABLED 1)
+ENDIF()
+
+find_package(NNPACK)
+if(NOT NNPACK_FOUND)
+  MESSAGE(STATUS "NNPACK not found. Compiling without nNPACK support")
+  set(AT_NNPACK_ENABLED 0)
+ELSE()
+  INCLUDE_DIRECTORIES(${NNPACK_INCLUDE_DIRS})
+  set(AT_NNPACK_ENABLED 1)
 ENDIF()
 
 set(cwrap_files

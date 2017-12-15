@@ -329,6 +329,7 @@ void THNN_(VolumetricConvolutionMM_updateOutput)(
           THTensor *weight,
           THTensor *bias,
           THTensor *finput,
+          THTensor *fgradInput, // unused
           int kT,
           int kW,
           int kH,
@@ -580,6 +581,7 @@ void THNN_(VolumetricConvolutionMM_accGradParameters)(
           THTensor *gradWeight,
           THTensor *gradBias,
           THTensor *finput,
+          THTensor *fgradInput,
           int kT, int kW, int kH,
           int dT, int dW, int dH,
           int pT, int pW, int pH,

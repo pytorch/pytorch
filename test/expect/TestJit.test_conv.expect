@@ -1,6 +1,10 @@
 graph(%0 : Double(20, 16, 50, 40)
       %1 : Double(13, 16, 3, 3)) {
   %2 : UNKNOWN_TYPE = Undefined(), scope: Conv2d
-  %3 : Double(20, 13, 48, 38), %4 : Handle = CppOp[ConvForward](%0, %1, %2), scope: Conv2d
-  return (%3);
+  %3 : Double(20, 13, 48, 38) = conv2d[kernel_size=[3, 3], stride=[1, 1], padding=[0, 0]](%0, %1, %2), scope: Conv2d
+  %4 : UNKNOWN_TYPE = Undefined(), scope: Conv2d
+  %5 : Double(20, 13, 48, 38) = _convolution_nogroup[stride=[1, 1], padding=[0, 0], dilation=[1, 1], transposed=0, output_padding=[0, 0]](%0, %1, %4), scope: Conv2d
+  %6 : UNKNOWN_TYPE = Undefined(), scope: Conv2d
+  %7 : Double(20, 13, 48, 38) = _convolution[stride=[1, 1], padding=[0, 0], dilation=[1, 1], transposed=0, output_padding=[0, 0], groups=1, benchmark=0, deterministic=0, cudnn_enabled=1](%0, %1, %6), scope: Conv2d
+  return (%7);
 }
