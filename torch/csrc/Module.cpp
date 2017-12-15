@@ -12,6 +12,8 @@
 #include <ATen/ATen.h>
 #include <ATen/dlpack.h>
 #include <ATen/DLConvertor.h>
+#include <pybind11/pybind11.h>
+#include <pybind11/stl.h>
 
 #include "torch/csrc/DynamicTypes.h"
 #include "torch/csrc/autograd/generated/python_nn_functions.h"
@@ -30,6 +32,8 @@
 
 #include "ModuleSparse.cpp"
 #include "DataLoader.cpp"
+
+namespace py = pybind11;
 
 PyObject* module;
 PyObject* tensor_classes;
@@ -549,9 +553,33 @@ PyObject *THPModule_fromDLPack(PyObject *_unused, PyObject *data)
   // destructor function that will be called when the underlying storage goes
   // out of scope. When the destructor is called, the dlMTensor is destructed too.
   at::Tensor atensor = at::fromDLPack(dlMTensor);
+
+  // It is possible that the call to at::fromDLPack is the very first
+  // call to create a Tensor in PyTorch. If so, then _lazy_init has
+  // not been called, and the attempt to call createPyObject will fail
+  // because cuda ATen types have not been registered in Python yet.
+  // so if we have a cuda tensor, then we need to make sure
+  // we have called _lazy_init here
+  if(atensor.is_cuda()) {
+    py::module::import("torch.cuda").attr("init")();
+  }
   // Make sure this capsule will never be used again.
   PyCapsule_SetName(data, "used_dltensor");
   return torch::createPyObject(atensor);
+}
+
+PyObject *THPModule_setUserEnabledCuDNN(PyObject *_unused, PyObject *arg)
+{
+  THPUtils_assert(PyBool_Check(arg), "set_enabled_cudnn expects a bool, "
+          "but got %s", THPUtils_typename(arg));
+  at::globalContext().setUserEnabledCuDNN(arg == Py_True);
+  Py_RETURN_NONE;
+}
+
+PyObject *THPModule_userEnabledCuDNN(PyObject *_unused)
+{
+  if (at::globalContext().userEnabledCuDNN()) Py_RETURN_TRUE;
+  else Py_RETURN_FALSE;
 }
 
 #ifdef WITH_CUDA
@@ -577,6 +605,8 @@ static PyMethodDef TorchMethods[] = {
   {"_get_backcompat_keepdim_warn", (PyCFunction)THPModule_getBackcompatKeepdimWarn, METH_NOARGS, NULL},
   {"get_num_threads", (PyCFunction)THPModule_getNumThreads,     METH_NOARGS,  NULL},
   {"set_num_threads", (PyCFunction)THPModule_setNumThreads,     METH_O,       NULL},
+  {"_get_cudnn_enabled", (PyCFunction)THPModule_userEnabledCuDNN, METH_NOARGS,     NULL},
+  {"_set_cudnn_enabled", (PyCFunction)THPModule_setUserEnabledCuDNN, METH_O,  NULL},
   {"from_numpy",      (PyCFunction)THPModule_fromNumpy,         METH_O,       NULL},
   {"_to_dlpack",      (PyCFunction)THPModule_toDLPack,          METH_O,       NULL},
   {"_from_dlpack",    (PyCFunction)THPModule_fromDLPack,        METH_O,       NULL},

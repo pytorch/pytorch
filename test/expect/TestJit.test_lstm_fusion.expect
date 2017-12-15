@@ -11,10 +11,10 @@ graph(%0 : Float(3, 10)
   %10 : Float(20!, 80!) = t(%4)
   %11 : Float(3!, 80) = expand[size=[3, 80]](%6)
   %12 : Float(3, 80) = addmm[beta={1}, alpha={1}](%11, %1, %10)
-  %29 : Float(3!, 20), %30 : Float(3!, 20), %31 : Float(3!, 20), %32 : Float(3!, 20) = split[split_size=20, dim=1](%9)
-  %33 : Float(3!, 20), %34 : Float(3!, 20), %35 : Float(3!, 20), %36 : Float(3!, 20) = split[split_size=20, dim=1](%12)
-  %27 : Float(3, 20), %28 : Float(3, 20) = fusion_group_0(%2, %32, %36, %31, %35, %30, %34, %29, %33)
-  return (%27, %28);
+  %13 : Float(3!, 20), %14 : Float(3!, 20), %15 : Float(3!, 20), %16 : Float(3!, 20) = chunk[chunks=4, dim=1](%9)
+  %17 : Float(3!, 20), %18 : Float(3!, 20), %19 : Float(3!, 20), %20 : Float(3!, 20) = chunk[chunks=4, dim=1](%12)
+  %21 : Float(3, 20), %22 : Float(3, 20) = fusion_group_0(%2, %16, %20, %15, %19, %14, %18, %13, %17)
+  return (%21, %22);
 }
 with fusion_group_0 = graph(%12 : Float(3, 20)
       %22 : Float(3!, 20)

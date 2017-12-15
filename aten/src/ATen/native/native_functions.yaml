@@ -45,6 +45,7 @@
 - func: stride(Tensor self, int64_t dim) -> int64_t
 
 - func: index(Tensor self, TensorList indices) -> Tensor
+  # NB: This function is special-cased in tools/autograd/gen_variable_type.py
 
 - func: index_put_(Tensor self, TensorList indices, Tensor values) -> Tensor
 

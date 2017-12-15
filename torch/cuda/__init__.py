@@ -105,7 +105,7 @@ def _check_capability():
         if CUDA_VERSION < 8000 and major >= 6:
             warnings.warn(error_str % (d, name, 8000, CUDA_VERSION))
         elif CUDA_VERSION < 9000 and major >= 7:
-            warnings.warn(error_str % (d, name, 8000, CUDA_VERSION))
+            warnings.warn(error_str % (d, name, 9000, CUDA_VERSION))
 
 
 def _lazy_call(callable):
@@ -120,6 +120,19 @@ _lazy_call(_check_capability)
 
 class DeferredCudaCallError(Exception):
     pass
+
+
+def init():
+    """Initialize PyTorch's CUDA state.  You may need to call
+    this explicitly if you are interacting with PyTorch via
+    its C API, as Python bindings for CUDA functionality will not
+    be until this initialization takes place.  Ordinary users
+    should not need this, as all of PyTorch's CUDA methods
+    automatically initialize CUDA state on-demand.
+
+    Does nothing if the CUDA state is already initialized.
+    """
+    _lazy_init()
 
 
 def _lazy_init():

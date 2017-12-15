@@ -4295,16 +4295,15 @@ svd(input, some=True, out=None) -> (Tensor, Tensor, Tensor)
 `U, S, V = torch.svd(A)` returns the singular value decomposition of a
 real matrix `A` of size `(n x m)` such that :math:`A = USV^T`.
 
-`U` is of shape :math:`(n \times \min(n, m))`.
+`U` is of shape :math:`(n \times n)`.
 
-`S` is a diagonal matrix of shape :math:`(\min(n, m) \times \min(n, m))`,
-represented as a vector of size :math:`\min(n, m)` containing the diagonal
-entries.
+`S` is a diagonal matrix of shape :math:`(n \times m)`, represented as a vector
+of size :math:`\min(n, m)` containing the diagonal entries.
 
-`V` is of shape :math:`(m \times \min(n, m))`.
+`V` is of shape :math:`(m \times m)`.
 
-:attr:`some` represents the number of singular values to be computed.
-If `some=True`, it computes some and `some=False` computes all.
+If :attr:`some` is ``True`` (default), the returned `U` and `V` matrices will
+contain only :math:`min(n, m)` orthonormal columns.
 
 .. note:: Irrespective of the original strides, the returned matrix `U`
           will be transposed, i.e. with strides `(1, n)` instead of `(n, 1)`.
@@ -4321,7 +4320,7 @@ If `some=True`, it computes some and `some=False` computes all.
 
 Args:
     input (Tensor): the input 2-D tensor
-    some (bool, optional): controls the number of singular values to be computed
+    some (bool, optional): controls the shape of returned `U` and `V`
     out (tuple, optional): the output tuple of tensors
 
 Example::

@@ -9,6 +9,7 @@ from torch.autograd import Variable, Function
 from torch.autograd.function import traceable
 from common import TestCase, run_tests
 import io
+import sys
 
 try:
     import torchvision
@@ -25,6 +26,8 @@ if torch.cuda.is_available():
         major = torch.cuda.get_device_capability(d)[0]
         if (CUDA_VERSION < 8000 and major >= 6) or (CUDA_VERSION < 9000 and major >= 7):
             RUN_CUDA = False
+
+IS_WINDOWS = sys.platform == "win32"
 
 
 def LSTMCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
@@ -58,6 +61,12 @@ class TestJit(TestCase):
         self.assertLess(hits, compiled_fn.hits)
         self.assertEqual(misses, compiled_fn.misses)
 
+    def assertExpectedTrace(self, trace, *args, **kwargs):
+        torch._C._jit_pass_lint(trace)
+        torch._C._jit_pass_canonicalize(trace)
+        torch._C._jit_pass_lint(trace)
+        self.assertExpected(str(trace), *args, **kwargs)
+
     def test_simple(self):
         x = Variable(torch.Tensor([0.4]), requires_grad=True)
         y = Variable(torch.Tensor([0.7]), requires_grad=True)
@@ -66,8 +75,48 @@ class TestJit(TestCase):
             return torch.sigmoid(torch.tanh(x * (x + y)))
 
         trace, z = torch.jit.trace(f, (x, y), nderivs=0)
+        self.assertExpectedTrace(trace)
+
+    # matmul is currently implemented as a native function, which
+    # exercises different codepaths in the JIT.  The following two
+    # tests ensure that (1) matmul indeed traces into an atomic,
+    # native operation, and (2) the JIT knows how to run it
+
+    def test_matmul_native(self):
+        x = Variable(torch.Tensor([[0.4]]), requires_grad=True)
+        y = Variable(torch.Tensor([[0.7]]), requires_grad=True)
+
+        trace, z = torch.jit.trace(lambda x, y: x.matmul(y), (x, y), nderivs=0)
         torch._C._jit_pass_lint(trace)
-        self.assertExpected(str(trace))
+        torch._C._jit_pass_dce(trace)
+        self.assertExpectedTrace(trace)
+
+    def test_matmul_native_run(self):
+        x = Variable(torch.Tensor([[0.4]]), requires_grad=True)
+        y = Variable(torch.Tensor([[0.7]]), requires_grad=True)
+
+        @torch.jit.compile(nderivs=0)
+        def fn(x, y):
+            return x.matmul(y)
+
+        z = fn(x, y)
+        with self.assertCompiled(fn):
+            z2 = fn(x, y)
+        self.assertEqual(z, z2)
+
+    @unittest.expectedFailure
+    def test_index(self):
+        x = Variable(torch.Tensor([0.4]), requires_grad=True)
+        y = Variable(torch.LongTensor([0]), requires_grad=True)
+
+        @torch.jit.compile(nderivs=0)
+        def fn(x, y):
+            return x[y]
+
+        z = fn(x, y)
+        with self.assertCompiled(fn):
+            z2 = fn(x, y)
+        self.assertEqual(z, z2)
 
     def test_scopes(self):
         x = Variable(torch.Tensor([0.4]), requires_grad=True)
@@ -83,9 +132,9 @@ class TestJit(TestCase):
             return out
 
         trace, z = torch.jit.trace(f, (x, y), nderivs=0)
-        torch._C._jit_pass_lint(trace)
-        self.assertExpected(str(trace))
+        self.assertExpectedTrace(trace)
 
+    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     def test_lstm_fusion(self):
         input = Variable(torch.randn(3, 10).float().cuda())
@@ -95,9 +144,10 @@ class TestJit(TestCase):
 
         trace, _ = torch.jit.trace(LSTMCell, (input, (hx, cx)) + tuple(module.parameters()))
         torch._C._jit_pass_lint(trace)
-        torch._C._jit_pass_fuse(trace)
+        torch._C._jit_pass_dce(trace)
         torch._C._jit_pass_lint(trace)
-        self.assertExpected(str(trace))
+        torch._C._jit_pass_fuse(trace)
+        self.assertExpectedTrace(trace)
 
     def run_lstm_fusion(self, use_cuda):
         def to_type(x):
@@ -121,13 +171,16 @@ class TestJit(TestCase):
             z2 = CompiledLSTMCell(input, (hx, cx), *module.parameters())
         self.assertEqual(z, z2)
 
+    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     def test_run_lstm_fusion_cuda(self):
         self.run_lstm_fusion(True)
 
+    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     def test_run_lstm_fusion_cpu(self):
         self.run_lstm_fusion(False)
 
+    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     def test_run_lstm_fusion_concat(self):
         input = Variable(torch.randn(3, 10).float().cuda())
@@ -142,6 +195,7 @@ class TestJit(TestCase):
             z2 = CompiledLSTMCell(input, (hx, cx), *module.parameters())
         self.assertEqual(z, z2)
 
+    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     def test_concat_fusion(self):
         hx = Variable(torch.randn(3, 20).float().cuda())
@@ -153,9 +207,9 @@ class TestJit(TestCase):
         trace, _ = torch.jit.trace(Foo, (hx, cx))
         torch._C._jit_pass_lint(trace)
         torch._C._jit_pass_fuse(trace)
-        torch._C._jit_pass_lint(trace)
-        self.assertExpected(str(trace))
+        self.assertExpectedTrace(trace)
 
+    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     def test_fusion_distribute(self):
         def f(x, y):
@@ -165,10 +219,10 @@ class TestJit(TestCase):
         y = Variable(torch.randn(4, 4).float().cuda())
         trace, _ = torch.jit.trace(f, (x, y), nderivs=0)
         torch._C._jit_pass_lint(trace)
-        self.assertExpected(str(trace), 'raw')
+        torch._C._jit_pass_dce(trace)
+        self.assertExpectedTrace(trace, 'raw')
         torch._C._jit_pass_fuse(trace)
-        torch._C._jit_pass_lint(trace)
-        self.assertExpected(str(trace))
+        self.assertExpectedTrace(trace)
 
     def test_arg_configurations(self):
         """Different arg configurations should trigger different traces"""
@@ -227,7 +281,7 @@ class TestJit(TestCase):
         torch._C._jit_pass_lint(trace)
         torch._C._jit_pass_cse(trace)
 
-        self.assertExpected(str(trace))
+        self.assertExpectedTrace(trace)
 
     def test_compile_run_twice(self):
         x = Variable(torch.Tensor([0.4]), requires_grad=True)
@@ -304,7 +358,7 @@ class TestJit(TestCase):
         trace, out = torch.jit.trace(MyFn.apply, x, nderivs=1)
         out.sum().backward()
         torch._C._jit_pass_dce(trace)
-        self.assertExpected(str(trace))
+        self.assertExpectedTrace(trace)
 
     def test_traced_module(self):
         input = Variable(torch.randn(3, 10))
@@ -388,7 +442,7 @@ class TestJit(TestCase):
         trace = torch._C._tracer_enter((x,) + tuple(m.parameters()), 0)
         y = m(x)
         torch._C._tracer_exit((y,))
-        self.assertExpected(str(trace))
+        self.assertExpectedTrace(trace)
 
     def test_legacy_fail(self):
 
@@ -411,7 +465,7 @@ class TestJit(TestCase):
         y.add_(2)
         y.add_(3)
         torch._C._tracer_exit((y,))
-        self.assertExpected(str(trace))
+        self.assertExpectedTrace(trace)
 
     def test_inplace_flags(self):
         class InplaceFn(Function):
@@ -491,7 +545,7 @@ class TestJit(TestCase):
         torch._C._jit_pass_dce(trace)
         # This is nondeterministic, see:
         #   https://github.com/ezyang/pytorch/issues/227
-        # self.assertExpected(str(trace))
+        # self.assertExpectedTrace(trace)
         self.skipTest("output is nondeterministic on Travis/Python 3.5")
 
     def test_backward_opaque(self):
@@ -511,7 +565,7 @@ class TestJit(TestCase):
         torch._C._jit_pass_dce(trace)
         # This is nondeterministic, see:
         #   https://github.com/ezyang/pytorch/issues/227
-        # self.assertExpected(str(trace))
+        # self.assertExpectedTrace(trace)
         self.skipTest("output is nondeterministic on Travis/Python 3.5")
 
     def test_backward_closure(self):
@@ -725,12 +779,12 @@ class TestJit(TestCase):
     def test_batchnorm(self):
         x = Variable(torch.randn(2, 2).fill_(1.0), requires_grad=True)
         trace, _ = torch.jit.trace(nn.BatchNorm2d(2), x)
-        self.assertExpected(str(trace))
+        self.assertExpectedTrace(trace)
 
     def test_dropout(self):
         x = Variable(torch.randn(2, 2).fill_(1.0), requires_grad=True)
         trace, _ = torch.jit.trace(nn.Dropout(0.6), x)
-        self.assertExpected(str(trace))
+        self.assertExpectedTrace(trace)
 
     @unittest.skip("unrecognized NodeKind: SpatialBN")
     def test_batchnorm_run_twice(self):
@@ -752,7 +806,7 @@ class TestJit(TestCase):
     def test_conv(self):
         x = Variable(torch.randn(20, 16, 50, 40).fill_(1.0), requires_grad=True)
         trace, _ = torch.jit.trace(nn.Conv2d(16, 13, 3, bias=False), x)
-        self.assertExpected(str(trace))
+        self.assertExpectedTrace(trace)
 
     def test_reuse_function(self):
         @torch.jit.compile(nderivs=0)
@@ -886,7 +940,7 @@ class TestJit(TestCase):
         return
         x = Variable(torch.randn(10, 3, 224, 224).fill_(1.0), requires_grad=True)
         trace, _ = torch.jit.trace(torchvision.models.AlexNet(), x)
-        self.assertExpected(str(trace))
+        self.assertExpectedTrace(trace)
         # NB: Purposely NOT testing protobuf export here
 
 if __name__ == '__main__':
