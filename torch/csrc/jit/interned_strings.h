@@ -40,6 +40,7 @@ _(Scale) \
 _(Transpose) \
 _(Reshape) \
 _(split) \
+_(chunk) \
 _(Offset) \
 _(value) \
 _(Subgraph) \

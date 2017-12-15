@@ -1,3 +1,32 @@
+# gen_variable_type.py's primary purpose is to generate
+# VariableType.cpp, which provides the binding code necessary to provide
+# a differentiable version of ATen operators.  There are a number of
+# different things we could mean:
+#
+#   - Given a non-differentiable forward implementation, we might
+#     directly associate it with a backward implementation to make
+#     it differentiable.  This is the common case.
+#
+#   - Some functions don't need a backwards implementation, because
+#     backpropagation will never propagate beyond them.  There are a
+#     number of different reasons why this may be the case:
+#
+#       - The function has no differentiable inputs
+#       - The function's output is not differentiable
+#       - The function has no data dependency on its input
+#
+#     These are currently called "fallthrough" functions, although
+#     they are not entirely fallthrough; for example, if the function
+#     in question returns a tensor, we have to wrap it in a
+#     (does not require grad) variable to abide by the API contract
+#     of Variable.
+#
+#   - Some function don't need a backwards implementation because they
+#     are implement as a composition of other (differentiable) ATen
+#     functions.  These are dispatched directly to the Type superclass,
+#     which will in turn dispatch back to VariableType for its
+#     differentiable subcomponents.
+
 import argparse
 import copy
 import os
@@ -31,23 +60,8 @@ ${return_type} VariableType::${method_prefix_derived}${api_name}(${formals}) con
 METHOD_DEFINITION_NYI = CodeTemplate("""\
 throw std::runtime_error("VariableType::${api_name} NYI");""")
 
-BASE_CALL = CodeTemplate("""\
+DERIVED_CALL = CodeTemplate("""\
 baseType->${method_prefix_derived}${base_name}(${unpacked_args})""")
-
-METHOD_DEFINITION_FALLTHROUGH = CodeTemplate("""\
-${unpack_args}
-return baseType->${method_prefix_derived}${api_name}(${unpacked_args});""")
-
-METHOD_DEFINITION_FALLTHROUGH_VARIABLE = CodeTemplate("""\
-${unpack_args}
-return as_variable(baseType->${method_prefix_derived}${api_name}(${unpacked_args}));""")
-
-METHOD_DEFINITION_FALLTHROUGH_INPLACE = CodeTemplate("""\
-${unpack_args}
-baseType->${method_prefix_derived}${api_name}(${unpacked_args});
-increment_version(self);
-return self;
-""")
 
 UNPACK_TENSOR = CodeTemplate("""\
 auto${ref} ${arg_name}_ = unpack${suffix}(${arg_name}, "${arg_name}", ${arg_pos});""")
@@ -98,7 +112,25 @@ if (should_compute_any_outputs()) {
 }
 """)
 
-METHOD_DEFINITION_DERIVATIVE = CodeTemplate("""\
+# NB: both fallthrough and derivative dispatch via derived (aka baseType).
+# That is why all of these paths need unpack_args.
+
+METHOD_DEFINITION_BODY_FALLTHROUGH = CodeTemplate("""\
+${unpack_args}
+return baseType->${method_prefix_derived}${api_name}(${unpacked_args});""")
+
+METHOD_DEFINITION_BODY_FALLTHROUGH_VARIABLE = CodeTemplate("""\
+${unpack_args}
+return as_variable(baseType->${method_prefix_derived}${api_name}(${unpacked_args}));""")
+
+METHOD_DEFINITION_BODY_FALLTHROUGH_INPLACE = CodeTemplate("""\
+${unpack_args}
+baseType->${method_prefix_derived}${api_name}(${unpacked_args});
+increment_version(self);
+return self;
+""")
+
+METHOD_DEFINITION_BODY_DERIVATIVE = CodeTemplate("""\
 profiler::RecordFunction profiler("${name}");
 ${unpack_args}
 ${buffers}
@@ -120,6 +152,13 @@ ${save_outputs}
 return ${return_value};
 """)
 
+METHOD_DEFINITION_BODY_VIA_TYPE = CodeTemplate("""\
+profiler::RecordFunction profiler("${name}");
+auto ret = Type::${method_prefix_derived}${api_name}(${args});
+${record_trace}
+return ${return_value};
+""")
+
 SET_FLAGS = CodeTemplate("""\
 set_flags(${result}, flags, grad_fn);
 """)
@@ -129,7 +168,7 @@ set_flags(${result}, flags, grad_fn, ${modifies_data});
 """)
 
 RECORD_TRACE = CodeTemplate("""\
-if (jit::tracer::isTracing({ ${tensor_args} })) {
+if (jit::tracer::isTracing( ${tensor_args} )) {
   jit::Node *n = jit::tracer::recordTrace( "${trace_name}", ${trace_inputs}, ${trace_outputs} );
   ${record_attributes}
 }
@@ -581,12 +620,53 @@ def create_autograd_functions(top_env, autogen_functions):
         process_function(func)
 
 
-def is_implemented(option):
-    return (option['return_type'] in FALLTHROUGH_RETURN_TYPES or
-            option['name'] in FALLTHROUGH_FUNCTIONS or
-            option['name'] in MANUAL_IMPLEMENTATIONS or
-            option['name'].endswith('_backward') or
-            option.get('derivative') is not None)
+def dispatch_strategy(declaration):
+    """How are we going to call the underlying implementation of a
+    declaration?  There are three strategies:
+
+        - use_derived: we want to call the implementation on CPUDoubleType
+          (or a similar, derived Type instance).  Because these derived
+          instances deal in Tensors, not Variables (it's a completely different
+          object, so it doesn't dispatch back to VariableType), code on
+          this dispatch path needs to wrap/unwrap tensors.  If the
+          derived implementation takes and returns tensors, the
+          implementation is usually differentiable (although we also use
+          the derived dispatch path for non-differentiable functions
+          that we still want to dispatch on the derived Type instance;
+          e.g., size())
+
+        - use_type: we want to call the implementation on Type, because
+          it is implemented concretely, and the functions it invokes will
+          get dispatched back to VariableType (which will ensure that they
+          are differentiable.)
+
+        - unimplemented: we don't have an underlying implementation, so
+          we will immediately error if they call this method on VariableType.
+    """
+    def use_derived(option):
+        return (option['return_type'] in FALLTHROUGH_RETURN_TYPES or
+                option['name'] in FALLTHROUGH_FUNCTIONS or
+                option['name'] in MANUAL_IMPLEMENTATIONS or
+                # TODO: Now that NN is represented explicitly in
+                # derivatives.yaml, get rid of this test soon.  We can't get
+                # rid of it /quite/ yet because we need to add NYI entries
+                # to derivatives.yaml, but actually they'll get real entries
+                # in https://github.com/pytorch/pytorch/pull/4116 so I am
+                # too lazy to delete it now.
+                option['name'].endswith('_backward') or
+                option.get('derivative') is not None)
+
+    if use_derived(declaration):
+        return 'use_derived'
+    elif not declaration['abstract']:
+        # This applies a heuristic: if the function is concrete (we
+        # don't have to override it) and we didn't declare it in
+        # derivatives.yaml, we'll assume that it is actually implemented
+        # out of differentiable functions.  (This assumption might not
+        # hold, but then you'll see gradcheck fail.)
+        return 'use_type'
+    else:
+        return 'unimplemented'
 
 
 def create_variable_type(top_env, aten_declarations):
@@ -693,7 +773,25 @@ def create_variable_type(top_env, aten_declarations):
             res.append(BUFFER_DECLARATION.substitute(name=name))
         return res
 
+    def mk_tuple_getters(declaration, pred):
+        # NB: This won't work if we get heterogenous outputs
+        return ['std::get<{}>(ret)'.format(i)
+                for i, v in enumerate(declaration['returns'])
+                if v['type'] == 'Tensor' and pred(v)]
+
+    def get_trace_outputs(declaration):
+        if len(declaration['returns']) > 1:
+            trace_outs = mk_tuple_getters(declaration, lambda v: True)
+        else:
+            trace_outs = ['ret']
+        return CodeTemplate("{ ${outs} }").substitute(outs=trace_outs)
+
     def emit_record_trace(env, declaration):
+
+        # Operations involving Generator and Storage are not traceable
+        # at the moment
+        if any(arg['simple_type'] in {'Generator', 'Storage'} for arg in declaration['arguments']):
+            return []
 
         # Note [clang-802.0.42 tuple overload bug]
         # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -722,10 +820,9 @@ def create_variable_type(top_env, aten_declarations):
 
         arguments = declaration['arguments']
         tensor_args = [arg for arg in arguments if arg['simple_type'] in {'Tensor', 'TensorList'}]
-        if len(tensor_args) == 1 and tensor_args[0]['simple_type'] == 'TensorList':
-            # Special case for TensorList.  This only works when there
-            # is a single argument
-            local['trace_inputs'] = "cast_tensor_list({})".format(declaration['arguments'][0]['name'])
+        if any(arg['simple_type'] == 'TensorList' for arg in tensor_args):
+            # Allocate a temporary vector with flatten and pass it in
+            local['trace_inputs'] = CodeTemplate("flatten( $tensor_args )").substitute(env)
         else:
             local['trace_inputs'] = CodeTemplate("{ ${tensor_args} }").substitute(env)
 
@@ -760,21 +857,43 @@ def create_variable_type(top_env, aten_declarations):
             body.append('check_no_requires_grad({}, "{}");'.format(name, name))
         return body
 
-    def emit_body(declaration):
-        if not is_implemented(declaration):
-            return METHOD_DEFINITION_NYI.substitute(declaration)
+    def emit_body_via_type(declaration):
+        env = {}
+        body = []
 
+        combined = nested_dict(env, declaration)
+        arguments = declaration['arguments']
+
+        tensor_args = [arg for arg in arguments if arg['simple_type'] in {'Tensor', 'TensorList'}]
+        env['tensor_args'] = [arg['name'] for arg in tensor_args]
+
+        if declaration['inplace']:
+            env['return_value'] = 'self'
+            env['trace_outputs'] = '{ self }'
+        elif declaration['return_type'] == 'std::vector<Tensor>':
+            env['return_value'] = 'ret'
+            env['trace_outputs'] = 'cast_tensor_list(ret)'
+        else:
+            env['return_value'] = '{}(std::move(ret))'.format(declaration['return_type'])
+            env['trace_outputs'] = get_trace_outputs(declaration)
+
+        env['record_trace'] = emit_record_trace(env, declaration)
+
+        body.extend(METHOD_DEFINITION_BODY_VIA_TYPE.substitute(combined).split('\n'))
+        return body
+
+    def emit_body_via_derived(declaration):
         env = {}
         body = []
         env['unpack_args'] = unpack_args(env, declaration)
 
         combined = nested_dict(env, declaration)
         if declaration['return_type'] in FALLTHROUGH_RETURN_TYPES:
-            body.extend(METHOD_DEFINITION_FALLTHROUGH.substitute(combined).split('\n'))
+            body.extend(METHOD_DEFINITION_BODY_FALLTHROUGH.substitute(combined).split('\n'))
             return body
         elif declaration['name'] in FALLTHROUGH_FUNCTIONS:
-            tmpl = (METHOD_DEFINITION_FALLTHROUGH_INPLACE if declaration['inplace']
-                    else METHOD_DEFINITION_FALLTHROUGH_VARIABLE)
+            tmpl = (METHOD_DEFINITION_BODY_FALLTHROUGH_INPLACE if declaration['inplace']
+                    else METHOD_DEFINITION_BODY_FALLTHROUGH_VARIABLE)
             body.extend(tmpl.substitute(combined).split('\n'))
             return body
 
@@ -797,16 +916,9 @@ def create_variable_type(top_env, aten_declarations):
         else:
             env['return_value'] = '{}(std::move(ret))'.format(declaration['return_type'])
             if len(declaration['returns']) > 1:
-                # NB: This won't work if we get heterogenous outputs
-                def mk_tuple_getters(pred):
-                    return ['std::get<{}>(ret)'.format(i)
-                            for i, v in enumerate(declaration['returns'])
-                            if v['type'] == 'Tensor' and pred(v)]
-                diff_outs = mk_tuple_getters(lambda v: v['dynamic_type'] == 'Tensor')
-                trace_outs = mk_tuple_getters(lambda v: True)
+                diff_outs = mk_tuple_getters(declaration, lambda v: v['dynamic_type'] == 'Tensor')
             else:
                 diff_outs = ['ret']
-                trace_outs = ['ret']
             # TODO: This is a bit dodgy, but the basic idea is, if you
             # used 'grad' in the derivative computation, you have
             # implicitly assumed that there is only one gradient being
@@ -823,12 +935,9 @@ def create_variable_type(top_env, aten_declarations):
                 env['result'] = "std::get<0>(ret)" if len(declaration['returns']) > 1 else 'ret'
             else:
                 env['result'] = CodeTemplate("{ ${outs} }").substitute(outs=diff_outs)
-            env['trace_outputs'] = CodeTemplate("{ ${outs} }").substitute(outs=trace_outs)
+            env['trace_outputs'] = get_trace_outputs(declaration)
 
-        if any(arg['simple_type'] in {'Generator', 'Storage'} for arg in arguments) or declaration['name'] == 'index':
-            env['record_trace'] = []
-        else:
-            env['record_trace'] = emit_record_trace(env, declaration)
+        env['record_trace'] = emit_record_trace(env, declaration)
 
         func = declaration.get('derivative')
 
@@ -856,7 +965,7 @@ def create_variable_type(top_env, aten_declarations):
         env['check_inplace'] = ''
         env['version_counter'] = ''
         env['no_zero_dim'] = ''
-        base_call = BASE_CALL.substitute(combined)
+        base_call = DERIVED_CALL.substitute(combined)
         if declaration['inplace']:
             env['check_inplace'] = 'check_inplace(self);'
             env['version_counter'] = 'increment_version(self);'
@@ -873,20 +982,26 @@ def create_variable_type(top_env, aten_declarations):
 
         env['base_impl_call'] = base_call + ';'
 
-        body.extend(METHOD_DEFINITION_DERIVATIVE.substitute(combined).split('\n'))
+        body.extend(METHOD_DEFINITION_BODY_DERIVATIVE.substitute(combined).split('\n'))
         return body
 
     def process_function(declaration):
         if skip_function(declaration):
             return
 
-        if not is_implemented(declaration) and declaration['mode'] == 'native':
-            # native functionsthat aren't implemented don't need Type implementations
-            # because they should dispatch to implemented functions.
-            return
-
         env = {}
-        env['type_definition_body'] = emit_body(declaration)
+
+        strategy = dispatch_strategy(declaration)
+        if strategy == 'use_derived':
+            env['type_definition_body'] = emit_body_via_derived(declaration)
+        elif strategy == 'use_type':
+            env['type_definition_body'] = emit_body_via_type(declaration)
+        else:
+            # Hard failure here to encourage us to fix these methods
+            # (rather than generate binding code which works for forward
+            # but not backward).  In the limit, this case should never occur,
+            # and we will replace this with an assert failure.
+            env['type_definition_body'] = METHOD_DEFINITION_NYI.substitute(declaration)
 
         combined = nested_dict(env, declaration)
         if 'Type' in combined['method_of']:
@@ -1003,11 +1118,8 @@ def gen_variable_type(declarations, out):
 
     def should_generate_python_binding(declaration):
         name = declaration['name']
-        # don't bind (non-native) unimplemented functions to prevent errors in test_autograd.
-        # Native functions, even if they don't have derivatives specified, should be bound
-        # so they can be called from python (their derivatives are defined based on the functions
-        # they call).
-        if not is_implemented(declaration) and declaration['mode'] != 'native':
+        # don't bind unimplemented functions to prevent errors in test_autograd.
+        if dispatch_strategy(declaration) == 'unimplemented':
             return False
 
         for pattern in SKIP_PYTHON_BINDINGS:
