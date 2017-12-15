@@ -4400,6 +4400,10 @@ class TestTorch(TestCase):
         self.assertEqual(type(tensor), torch.FloatTensor)
         self.assertEqual(tensor, torch.FloatTensor([[1.0, 2.0], [3.0, 4.0]]))
 
+        tensor = torch.load(test_file_path, map_location='cpu')
+        self.assertEqual(type(tensor), torch.FloatTensor)
+        self.assertEqual(tensor, torch.FloatTensor([[1.0, 2.0], [3.0, 4.0]]))
+
     def test_from_buffer(self):
         a = bytearray([1, 2, 3, 4])
         self.assertEqual(torch.ByteStorage.from_buffer(a).tolist(), [1, 2, 3, 4])
