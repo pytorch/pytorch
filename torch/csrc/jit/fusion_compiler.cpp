@@ -1,3 +1,4 @@
+#ifndef _WIN32
 #include "torch/csrc/jit/fusion_compiler.h"
 #include "torch/csrc/jit/ir.h"
 #include "torch/csrc/jit/code_template.h"
@@ -787,3 +788,61 @@ FusionCompiler & sharedFusionCompiler() {
 }
 
 }}
+
+# else
+// dummy implementations for windows
+
+#include "torch/csrc/jit/fusion_compiler.h"
+#include "torch/csrc/jit/ir.h"
+#include "torch/csrc/jit/code_template.h"
+#include "torch/csrc/jit/resource_guard.h"
+#include "torch/csrc/utils/disallow_copy.h"
+#include "ATen/ATen.h"
+#ifdef WITH_CUDA
+#include "torch/csrc/cuda/cuda_check.h"
+#include <nvrtc.h>
+#include <cuda.h>
+#include <cuda_runtime.h>
+#endif
+#include <string>
+#include <algorithm>
+#include <unordered_map>
+#include <vector>
+#include <sstream>
+#include <iostream>
+
+namespace torch { namespace jit {
+
+CompiledFusionFunction::CompiledFusionFunction(const std::string & name, AnnotatedGraph & agraph) {}
+
+void CompiledFusionFunction::launch_with_tensors(at::ArrayRef<at::Tensor> inputs, at::ArrayRef<at::Tensor> outputs) {}
+
+void CompiledFusionFunction::launch(at::ArrayRef<at::Tensor> inputs, std::vector<at::Tensor> & outputs) {}
+
+std::shared_ptr<CompiledFusionFunction> FusionCompiler::getOrCompile(AnnotatedGraph & agraph) {
+  return nullptr;
+}
+
+std::shared_ptr<CompiledFusionFunction> FusionCompiler::getOrCompile(Node* fusion_group) {
+  return nullptr;
+}
+
+
+std::shared_ptr<CompiledFusionFunction> FusionCompiler::getOrCompile(Graph & graph,
+                                                     bool is_cuda,
+                                                     at::ArrayRef<at::Tensor> inputs,
+                                                     at::ArrayRef<at::Tensor> outputs) {
+  return nullptr;
+}
+
+void FusionCompiler::debugLaunchGraph(Graph & graph, bool is_cuda, at::ArrayRef<at::Tensor> inputs, at::ArrayRef<at::Tensor> outputs) {}
+
+FusionCompiler::FusionCompiler() {}
+
+FusionCompiler & sharedFusionCompiler() {
+  throw std::runtime_error("NYI: fuser is not supported on Windows.");
+}
+
+}}
+
+# endif
