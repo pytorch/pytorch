@@ -27,6 +27,7 @@ VariableImpl::VariableImpl(Tensor data_, bool requires_grad, int output_nr, std:
   , is_view(false)
   , output_nr(output_nr)
   , pyobj(nullptr) {
+  TORCH_ASSERTM(!_grad_fn || !_requires_grad, "_requires_grad should be false if grad_fn is set");
   if (!data.defined()) {
     throw std::runtime_error("data is undefined");
   }

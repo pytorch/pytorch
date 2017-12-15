@@ -970,9 +970,12 @@ def create_variable_type(top_env, aten_declarations):
             env['check_inplace'] = 'check_inplace(self);'
             env['version_counter'] = 'increment_version(self);'
             if is_view:
+                # in-place view functions like squeeze_() go through a different
+                # code path because these functions only affect the tensor on
+                # which they're called, not other views of the same data.
                 env['set_flags'] = SET_HISTORY.substitute(combined)
             else:
-                env['set_flags'] = REBASE_HISTORY.substitute(combined,)
+                env['set_flags'] = REBASE_HISTORY.substitute(combined)
             if is_view:
                 env['no_zero_dim'] = 'ensure_no_aten_scalars(self);'
         else:

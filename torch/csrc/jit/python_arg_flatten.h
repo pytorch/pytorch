@@ -61,7 +61,7 @@ struct IODescriptor {
 
 static inline std::ostream& operator<<(std::ostream& out, const IODescriptor::VariableMetadata& meta) {
   auto & t = at::getType(meta.device < 0 ? at::kCPU : at::kCUDA, meta.type);
-  out << t << "(requires_grad=" << meta.requires_grad << ", " << "is_volatile=" << meta.is_volatile << ") {";
+  out << t << "(requires_grad=" << meta.requires_grad << ") {";
   for(size_t i = 0; i < meta.sizes.size(); ++i) {
     if(i > 0)
       out << ", ";
