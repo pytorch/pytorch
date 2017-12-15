@@ -421,20 +421,28 @@ def compare_cpu_gpu(tensor_constructor, arg_constructor, fn, t, precision=1e-5, 
 class TestCuda(TestCase):
 
     @unittest.skipIf(torch.cuda.device_count() < 2, "only one GPU detected")
-    def test_autogpu(self):
-        x = torch.randn(5, 5).cuda()
-        y = torch.randn(5, 5).cuda()
+    def _test_autogpu(self, TensorCtor):
+        x = TensorCtor().cuda()
+        y = TensorCtor().cuda()
         self.assertEqual(x.get_device(), 0)
         self.assertEqual(x.get_device(), 0)
         with torch.cuda.device(1):
-            z = torch.randn(5, 5).cuda()
+            z = TensorCtor().cuda()
             self.assertEqual(z.get_device(), 1)
             q = x.add(y)
             self.assertEqual(q.get_device(), 0)
-            w = torch.randn(5, 5).cuda()
+            w = TensorCtor().cuda()
             self.assertEqual(w.get_device(), 1)
+            self.assertEqual(y.cuda().get_device(), 1)
+            self.assertEqual(y.cuda(-1).get_device(), 1)
         z = z.cuda()
         self.assertEqual(z.get_device(), 0)
+
+    def test_autogpu(self):
+        # TODO: clean-up and merge with above code after Variable and Tensor
+        # are merged
+        self._test_autogpu(lambda: torch.randn(5, 5))
+        self._test_autogpu(lambda: torch.autograd.Variable(torch.randn(5, 5)))
 
     @unittest.skipIf(torch.cuda.device_count() < 2, "only one GPU detected")
     def test_new(self):

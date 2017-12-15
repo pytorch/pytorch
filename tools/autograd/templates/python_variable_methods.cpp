@@ -290,12 +290,12 @@ static void lazy_init_cuda() {
   });
 }
 
-static Tensor dispatch_type(const Tensor & self, const at::Type & type, int device=-1, bool async=false) {
+static Tensor dispatch_type(const Tensor & self, const at::Type & type, int device, bool async) {
   if (type.is_cuda()) {
     lazy_init_cuda();
   }
   AutoNoGIL no_gil;
-  AutoGPU auto_gpu(device != -1 ? device : self.type().is_cuda() ? self.get_device() : -1);
+  AutoGPU auto_gpu(device);
   if (self.type() == type && self.type().is_cuda() && self.get_device() != at::current_device()) {
     return type.copy(self, async);
   }
@@ -303,6 +303,11 @@ static Tensor dispatch_type(const Tensor & self, const at::Type & type, int devi
     return type.copy(self, async);
   }
   return self.toType(type);
+}
+
+static Tensor dispatch_type(const Tensor & self, const at::Type & type) {
+  int64_t device = self.is_cuda() ? self.get_device() : -1;
+  return dispatch_type(self, type, device, false);
 }
 
 static PyObject * THPVariable_cpu(PyObject* self, PyObject* args)
@@ -326,7 +331,11 @@ static PyObject * THPVariable_cuda(PyObject* self, PyObject* args, PyObject* kwa
   auto r = parser.parse(args, kwargs, parsed_args);
   auto backend = self_.is_sparse() ? at::kSparseCUDA : at::kCUDA;
   auto& type = self_.type().toBackend(backend);
-  return THPVariable_Wrap(dispatch_type(self_, type, r.toInt64(0), r.toBool(1)));
+  auto device = r.toInt64(0);
+  if (device == -1) {
+    device = at::current_device();
+  }
+  return THPVariable_Wrap(dispatch_type(self_, type, device, r.toBool(1)));
   END_HANDLE_TH_ERRORS
 }
 

@@ -21,7 +21,7 @@ static const char* backend_to_string(const at::Type& type) {
 }
 
 std::string type_to_string(const at::Type& type) {
-  std::stringstream ss;
+  std::ostringstream ss;
   ss << backend_to_string(type) << "." << toString(type.scalarType()) << "Tensor";
   return ss.str();
 }

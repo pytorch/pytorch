@@ -7,12 +7,7 @@
 #include "ATen/Generator.h"
 
 
-
 namespace at {
-
-static inline Tensor & copy_out(Tensor & result, const Tensor & src) {
-  return result.copy_(src);
-}
 
 ${function_declarations}
 
