@@ -1,3 +1,4 @@
+import torch
 from torch.autograd import Variable
 import warnings
 
@@ -9,6 +10,10 @@ class Distribution(object):
 
     has_rsample = False
     has_enumerate_support = False
+
+    def __init__(self, batch_shape=torch.Size(), event_shape=torch.Size()):
+        self._batch_shape = batch_shape
+        self._event_shape = event_shape
 
     def sample(self, sample_shape=()):
         """
@@ -60,3 +65,38 @@ class Distribution(object):
             Variable or Tensor iterating over dimension 0.
         """
         raise NotImplementedError
+
+    def _extended_shape(self, sample_shape=()):
+        """
+        Returns the size of the sample returned by the distribution, given
+        a `sample_shape`. Note, that the batch and event shapes of a distribution
+        instance are fixed at the time of construction. If this is empty, the
+        returned shape is upcast to (1,).
+
+        Args:
+            sample_shape (torch.Size): the size of the sample to be drawn.
+        """
+        shape = sample_shape + self._batch_shape + self._event_shape
+        if not shape:
+            shape = torch.Size((1,))
+        return shape
+
+    def _validate_log_prob_arg(self, value):
+        """
+        Argument validation for `log_prob` methods. The rightmost dimensions
+        of a value to be scored via `log_prob` must agree with the distribution's
+        batch and event shapes.
+
+        Args:
+            value (Tensor or Variable): the tensor whose log probability is to be
+                computed by the `log_prob` method.
+        Raises
+            ValueError: when the rightmost dimensions of `value` do not match the
+                distribution's batch and event shapes.
+        """
+        if not (torch.is_tensor(value) or isinstance(value, Variable)):
+            raise ValueError('The value argument to log_prob must be a Tensor or Variable instance.')
+        batch_dim_start = len(value.size()) - len(self._batch_shape) - len(self._event_shape)
+        if value.size()[batch_dim_start:] != self._batch_shape + self._event_shape:
+            raise ValueError('The right-most size of value must match: {}.'.
+                             format(self._batch_shape + self._event_shape))

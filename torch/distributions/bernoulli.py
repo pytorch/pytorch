@@ -1,3 +1,5 @@
+from numbers import Number
+
 import torch
 from torch.autograd import Variable
 from torch.distributions.distribution import Distribution
@@ -25,27 +27,29 @@ class Bernoulli(Distribution):
 
     def __init__(self, probs):
         self.probs, = broadcast_all(probs)
-
-    def sample(self, sample_shape=()):
-        if len(sample_shape) == 0:
-            return torch.bernoulli(self.probs)
-        elif len(sample_shape) == 1:
-            return torch.bernoulli(self.probs.expand(sample_shape[0], *self.probs.size()))
+        if isinstance(probs, Number):
+            batch_shape = torch.Size()
         else:
-            raise NotImplementedError("sample is not implemented for len(sample_shape)>1")
+            batch_shape = self.probs.size()
+        super(Bernoulli, self).__init__(batch_shape)
+
+    def sample(self, sample_shape=torch.Size()):
+        shape = self._extended_shape(sample_shape)
+        return torch.bernoulli(self.probs.expand(shape))
 
     def log_prob(self, value):
+        self._validate_log_prob_arg(value)
+        param_shape = value.size()
+        probs = self.probs.expand(param_shape)
         # compute the log probabilities for 0 and 1
-        log_pmf = (torch.stack([1 - self.probs, self.probs])).log()
-
+        log_pmf = (torch.stack([1 - probs, probs], dim=-1)).log()
         # evaluate using the values
-        return log_pmf.gather(0, value.unsqueeze(0).long()).squeeze(0)
+        return log_pmf.gather(-1, value.unsqueeze(-1).long()).squeeze(-1)
 
     def enumerate_support(self):
-        batch_shape = self.probs.shape
         values = torch.arange(2).long()
-        values = values.view((-1,) + (1,) * len(batch_shape))
-        values = values.expand((-1,) + batch_shape)
+        values = values.view((-1,) + (1,) * len(self._batch_shape))
+        values = values.expand((-1,) + self._batch_shape)
         if self.probs.is_cuda:
             values = values.cuda(self.probs.get_device())
         if isinstance(self.probs, Variable):

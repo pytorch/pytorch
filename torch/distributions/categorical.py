@@ -32,35 +32,31 @@ class Categorical(Distribution):
     has_enumerate_support = True
 
     def __init__(self, probs):
-        if probs.dim() != 1 and probs.dim() != 2:
-            # TODO: treat higher dimensions as part of the batch
-            raise ValueError("probs must be 1D or 2D")
         self.probs = probs
+        batch_shape = self.probs.size()[:-1]
+        super(Categorical, self).__init__(batch_shape)
 
-    def sample(self, sample_shape=()):
-        if len(sample_shape) == 0:
-            return torch.multinomial(self.probs, 1, True).squeeze(-1)
-        elif len(sample_shape) == 1:
-            if sample_shape[0] == 1:
-                return self.sample().expand(1, 1)
-            else:
-                return torch.multinomial(self.probs, sample_shape[0], True).t()
-        else:
-            raise NotImplementedError("sample is not implemented for len(sample_shape)>1")
+    def sample(self, sample_shape=torch.Size()):
+        num_events = self.probs.size()[-1]
+        sample_shape = self._extended_shape(sample_shape)
+        param_shape = sample_shape + self.probs.size()[-1:]
+        probs = self.probs.expand(param_shape)
+        probs_2d = probs.contiguous().view(-1, num_events)
+        sample_2d = torch.multinomial(probs_2d, 1, True)
+        return sample_2d.contiguous().view(sample_shape)
 
     def log_prob(self, value):
-        p = self.probs / self.probs.sum(-1, keepdim=True)
-        if value.dim() == 1 and self.probs.dim() == 1:
-            # special handling until we have 0-dim tensor support
-            return p.gather(-1, value).log()
-
-        return p.gather(-1, value.unsqueeze(-1)).squeeze(-1).log()
+        self._validate_log_prob_arg(value)
+        param_shape = value.size() + self.probs.size()[-1:]
+        log_pmf = (self.probs / self.probs.sum(-1, keepdim=True)).log()
+        log_pmf = log_pmf.expand(param_shape)
+        return log_pmf.gather(-1, value.unsqueeze(-1).long()).squeeze(-1)
 
     def enumerate_support(self):
-        batch_shape, event_size = self.probs.shape[:-1], self.probs.shape[-1]
-        values = torch.arange(event_size).long()
-        values = values.view((-1,) + (1,) * len(batch_shape))
-        values = values.expand((-1,) + batch_shape)
+        num_events = self.probs.size()[-1]
+        values = torch.arange(num_events).long()
+        values = values.view((-1,) + (1,) * len(self._batch_shape))
+        values = values.expand((-1,) + self._batch_shape)
         if self.probs.is_cuda:
             values = values.cuda(self.probs.get_device())
         if isinstance(self.probs, Variable):
