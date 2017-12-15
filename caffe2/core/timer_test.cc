@@ -26,21 +26,26 @@ namespace {
 
 TEST(TimerTest, Test) {
   Timer timer;
+
   // A timer auto-starts when it is constructed.
+  std::this_thread::sleep_for(std::chrono::microseconds(1));
   EXPECT_GT(timer.NanoSeconds(), 0);
+
   // Sleep for a while, and get the time.
   timer.Start();
   std::this_thread::sleep_for(std::chrono::milliseconds(100));
   float ns = timer.NanoSeconds();
   float us = timer.MicroSeconds();
   float ms = timer.MilliSeconds();
+
   // Time should be at least accurate +- 10%.
   EXPECT_NEAR(ns, 100000000, 10000000);
   EXPECT_NEAR(us, 100000, 10000);
   EXPECT_NEAR(ms, 100, 10);
+
   // Test restarting the clock.
   timer.Start();
-  EXPECT_LT(timer.NanoSeconds(), 1000);
+  EXPECT_LT(timer.MicroSeconds(), 1000);
 }
 
 TEST(TimerTest, TestLatency) {
