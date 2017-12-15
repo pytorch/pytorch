@@ -33,16 +33,14 @@ class Normal(Distribution):
             batch_shape = self.mean.size()
         super(Normal, self).__init__(batch_shape)
 
-    def sample(self, sample_shape=()):
+    def sample(self, sample_shape=torch.Size()):
         shape = self._extended_shape(sample_shape)
         return torch.normal(self.mean.expand(shape), self.std.expand(shape))
 
-    def rsample(self, sample_shape=()):
+    def rsample(self, sample_shape=torch.Size()):
         shape = self._extended_shape(sample_shape)
-        mean = self.mean.expand(shape)
-        std = self.std.expand(shape)
-        eps = mean.new(mean.size()).normal_()
-        return mean + eps * std
+        eps = self.mean.new(shape).normal_()
+        return self.mean + eps * self.std
 
     def log_prob(self, value):
         self._validate_log_prob_arg(value)

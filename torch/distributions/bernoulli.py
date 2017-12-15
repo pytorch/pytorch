@@ -33,7 +33,7 @@ class Bernoulli(Distribution):
             batch_shape = self.probs.size()
         super(Bernoulli, self).__init__(batch_shape)
 
-    def sample(self, sample_shape=()):
+    def sample(self, sample_shape=torch.Size()):
         shape = self._extended_shape(sample_shape)
         return torch.bernoulli(self.probs.expand(shape))
 

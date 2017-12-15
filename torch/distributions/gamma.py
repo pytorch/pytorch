@@ -53,7 +53,7 @@ class Gamma(Distribution):
             batch_shape = self.alpha.size()
         super(Gamma, self).__init__(batch_shape)
 
-    def rsample(self, sample_shape=()):
+    def rsample(self, sample_shape=torch.Size()):
         shape = self._extended_shape(sample_shape)
         return _standard_gamma(self.alpha.expand(shape)) / self.beta.expand(shape)
 

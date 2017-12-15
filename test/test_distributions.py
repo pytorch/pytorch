@@ -133,6 +133,7 @@ class TestDistributions(TestCase):
         self._gradcheck_log_prob(Categorical, (p,))
 
         # sample check for extreme value of probs
+        self._set_rng_seed(0)
         self.assertEqual(Categorical(s).sample(sample_shape=(2,)).data,
                          torch.Tensor([[0, 1], [0, 1]]))
 
@@ -164,6 +165,7 @@ class TestDistributions(TestCase):
         self.assertEqual(Normal(-0.7, 50.0).sample_n(1).size(), (1,))
 
         # sample check for extreme value of mean, std
+        self._set_rng_seed(1)
         self.assertEqual(Normal(mean_delta, std_delta).sample(sample_shape=(1, 2)),
                          torch.Tensor([[[1.0, 0.0], [1.0, 0.0]]]),
                          prec=1e-4)
