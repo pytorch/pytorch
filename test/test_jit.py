@@ -9,6 +9,7 @@ from torch.autograd import Variable, Function
 from torch.autograd.function import traceable
 from common import TestCase, run_tests
 import io
+import sys
 
 try:
     import torchvision
@@ -25,6 +26,8 @@ if torch.cuda.is_available():
         major = torch.cuda.get_device_capability(d)[0]
         if (CUDA_VERSION < 8000 and major >= 6) or (CUDA_VERSION < 9000 and major >= 7):
             RUN_CUDA = False
+
+IS_WINDOWS = sys.platform == "win32"
 
 
 def LSTMCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
@@ -86,6 +89,7 @@ class TestJit(TestCase):
         torch._C._jit_pass_lint(trace)
         self.assertExpected(str(trace))
 
+    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     def test_lstm_fusion(self):
         input = Variable(torch.randn(3, 10).float().cuda())
@@ -121,13 +125,16 @@ class TestJit(TestCase):
             z2 = CompiledLSTMCell(input, (hx, cx), *module.parameters())
         self.assertEqual(z, z2)
 
+    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     def test_run_lstm_fusion_cuda(self):
         self.run_lstm_fusion(True)
 
+    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     def test_run_lstm_fusion_cpu(self):
         self.run_lstm_fusion(False)
 
+    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     def test_run_lstm_fusion_concat(self):
         input = Variable(torch.randn(3, 10).float().cuda())
@@ -142,6 +149,7 @@ class TestJit(TestCase):
             z2 = CompiledLSTMCell(input, (hx, cx), *module.parameters())
         self.assertEqual(z, z2)
 
+    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     def test_concat_fusion(self):
         hx = Variable(torch.randn(3, 20).float().cuda())
@@ -156,6 +164,7 @@ class TestJit(TestCase):
         torch._C._jit_pass_lint(trace)
         self.assertExpected(str(trace))
 
+    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     def test_fusion_distribute(self):
         def f(x, y):

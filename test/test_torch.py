@@ -4241,6 +4241,10 @@ class TestTorch(TestCase):
         b += [(t1.storage(), t1.storage(), t2.storage())]
         b += [a[0].storage()[0:2]]
         for use_name in (False, True):
+            # Passing filename to torch.save(...) will cause the file to be opened twice,
+            # which is not supported on Windows
+            if sys.platform == "win32" and use_name:
+                continue
             with tempfile.NamedTemporaryFile() as f:
                 handle = f if not use_name else f.name
                 torch.save(b, handle)
@@ -4410,6 +4414,7 @@ class TestTorch(TestCase):
         self.assertEqual(floats.size(), 1)
         self.assertEqual(floats[0], 2.25)
 
+    @unittest.skipIf(sys.platform == "win32", "TODO: need to fix this test case for Windows")
     def test_from_file(self):
         size = 10000
         with tempfile.NamedTemporaryFile() as f:
