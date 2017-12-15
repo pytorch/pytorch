@@ -7,6 +7,7 @@ namespace at {
 struct AT_API UndefinedTensor final : public TensorImpl {
 public:
   static inline UndefinedTensor * singleton() {
+    static UndefinedTensor _singleton;
     return &_singleton;
   }
   virtual ~UndefinedTensor() {}
@@ -21,7 +22,6 @@ public:
   static const char * typeString();
 private:
   UndefinedTensor();
-  static UndefinedTensor _singleton;
 public:
   friend struct UndefinedType;
 };
