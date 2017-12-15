@@ -98,7 +98,6 @@ struct THPFunction {
 bool THPFunction_initModule(PyObject *module);
 extern PyTypeObject THPFunctionType;
 extern PyObject *THPFunctionClass;
-extern PyObject *THPBatchNormBackwardBackwardFunction;  // Temporarily here until we move it to C++
 
 // XXX: this function requires the GIL (it can have side effects).
 std::shared_ptr<torch::autograd::PyFunction> THPFunction_asFunction(THPFunction* self);

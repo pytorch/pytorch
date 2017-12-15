@@ -39,6 +39,10 @@ THDTensorDescriptor THDTensorDescriptor_newFromTHCudaFloatTensor(THCudaTensor *t
   return at::getType(at::Backend::CUDA, at::ScalarType::Float).unsafeTensorFromTH((void*)tensor, true);
 }
 
+THDTensorDescriptor THDTensorDescriptor_newFromTHCudaHalfTensor(THCudaHalfTensor *tensor) {
+  return at::getType(at::Backend::CUDA, at::ScalarType::Half).unsafeTensorFromTH((void*)tensor, true);
+}
+
 THDTensorDescriptor THDTensorDescriptor_newFromTHCudaLongTensor(THCudaLongTensor *tensor) {
   return at::getType(at::Backend::CUDA, at::ScalarType::Long).unsafeTensorFromTH((void*)tensor, true);
 }

@@ -41,6 +41,16 @@ constexpr Backend kCUDA = Backend::CUDA;
 constexpr Backend kSparseCPU = Backend::SparseCPU;
 constexpr Backend kSparseCUDA = Backend::SparseCUDA;
 
+static inline Backend toSparse(Backend b) {
+  switch (b) {
+    case Backend::CPU: return Backend::SparseCPU;
+    case Backend::CUDA: return Backend::SparseCUDA;
+    case Backend::SparseCPU: return Backend::SparseCPU;
+    case Backend::SparseCUDA: return Backend::SparseCUDA;
+    default: throw std::runtime_error("Unknown backend");
+  }
+}
+
 static inline const char * toString(Backend b) {
   switch(b) {
     case Backend::CPU: return "CPU";

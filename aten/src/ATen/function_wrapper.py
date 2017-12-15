@@ -8,8 +8,6 @@ if sys.version_info[0] == 3:
 else:
     string_type = basestring
 
-# temporary things we cannot handle
-EXCLUDE_PATTERN = "bernoulli.*"
 # what has to be done to add a Operation ...
 # 1. if broadcasting or without the full list of arguments, add a non-virtual
 #    declaration under Type.h
@@ -426,15 +424,9 @@ def create_generic(top_env, declarations):
 
         return broadcast_actuals
 
-    excluded_names = set()
-
     def process_option(option, output_options):
         option['inplace'] = re.search(
             '(^__i|[^_]_$)', option['api_name']) is not None
-
-        if re.match(EXCLUDE_PATTERN, option['name']):
-            excluded_names.add(option['name'])
-            raise NYIError("NYI")
 
         # print(yaml.dump(option))
         formals = get_formals(option)
@@ -510,12 +502,15 @@ def create_generic(top_env, declarations):
                 FUNCTION_DEFINITION.substitute(env))
             method_of.append('namespace')
 
+        buffer_names = [buffer['name'] for buffer in option.get('buffers', [])]
+
         output_options.append(OrderedDict([
             ('name', option['api_name']),
             ('method_prefix_derived', option['method_prefix_derived']),
             ('arguments', formals),
             ('method_of', method_of),
             ('mode', option['mode']),
+            ('buffers', buffer_names),
             ('returns', option['returns']),
             ('inplace', option['inplace']),
         ]))
@@ -693,7 +688,6 @@ def create_generic(top_env, declarations):
             except NYIError:
                 option['skip'] = True
         output_declarations.extend(output_options)
-    print("ATen Excluded: {}".format(excluded_names))
     return output_declarations
 
 
