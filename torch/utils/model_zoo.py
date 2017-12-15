@@ -28,7 +28,7 @@ except ImportError:
 HASH_REGEX = re.compile(r'-([a-f0-9]*)\.')
 
 
-def load_url(url, model_dir=None, map_location=None):
+def load_url(url, model_dir=None, map_location=None, progress=True):
     r"""Loads the Torch serialized object at the given URL.
 
     If the object is already present in `model_dir`, it's deserialized and
@@ -45,6 +45,7 @@ def load_url(url, model_dir=None, map_location=None):
         url (string): URL of the object to download
         model_dir (string, optional): directory in which to save the object
         map_location (optional): a function or a dict specifying how to remap storage locations (see torch.load)
+        progress (bool, optional): whether or not to display a progress bar to stderr
 
     Example:
         >>> state_dict = torch.utils.model_zoo.load_url('https://s3.amazonaws.com/pytorch/models/resnet18-5c106cde.pth')
@@ -61,11 +62,11 @@ def load_url(url, model_dir=None, map_location=None):
     if not os.path.exists(cached_file):
         sys.stderr.write('Downloading: "{}" to {}\n'.format(url, cached_file))
         hash_prefix = HASH_REGEX.search(filename).group(1)
-        _download_url_to_file(url, cached_file, hash_prefix)
+        _download_url_to_file(url, cached_file, hash_prefix, progress=progress)
     return torch.load(cached_file, map_location=map_location)
 
 
-def _download_url_to_file(url, dst, hash_prefix):
+def _download_url_to_file(url, dst, hash_prefix, progress):
     u = urlopen(url)
     if requests_available:
         file_size = int(u.headers["Content-Length"])
@@ -80,7 +81,7 @@ def _download_url_to_file(url, dst, hash_prefix):
     f = tempfile.NamedTemporaryFile(delete=False)
     try:
         sha256 = hashlib.sha256()
-        with tqdm(total=file_size) as pbar:
+        with tqdm(total=file_size, disable=not progress) as pbar:
             while True:
                 buffer = u.read(8192)
                 if len(buffer) == 0:
@@ -105,11 +106,15 @@ if tqdm is None:
     # fake tqdm if it's not installed
     class tqdm(object):
 
-        def __init__(self, total):
+        def __init__(self, total, disable=False):
             self.total = total
+            self.disable = disable
             self.n = 0
 
         def update(self, n):
+            if self.disable:
+                return
+
             self.n += n
             sys.stderr.write("\r{0:.1f}%".format(100 * self.n / float(self.total)))
             sys.stderr.flush()
@@ -118,4 +123,7 @@ if tqdm is None:
             return self
 
         def __exit__(self, exc_type, exc_val, exc_tb):
+            if self.disable:
+                return
+
             sys.stderr.write('\n')
