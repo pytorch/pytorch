@@ -106,6 +106,7 @@ class TestShapeInference(test_util.TestCase):
         model = model_helper.ModelHelper(name="test_model")
         model.net.ReduceBackSum(["x"], ["x_back_sum"])
         model.net.ReduceBackMean(["x"], ["x_back_mean"])
+        model.net.ReduceBackMax(["x"], ["x_back_max"])
         model.net.ReduceFrontSum(["x"], ["x_front_sum"])
         model.net.ReduceFrontMean(["x"], ["x_front_mean"])
         model.net.ReduceFrontMax(["x"], ["x_front_max"])
