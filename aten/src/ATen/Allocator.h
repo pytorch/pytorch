@@ -14,8 +14,8 @@ struct Allocator {
 
 namespace detail {
 
-struct AllocatorContext : public Retainable {
-  AllocatorContext(std::unique_ptr<Allocator> allocator)
+struct AllocatorRetainable : public Retainable {
+  AllocatorRetainable(std::unique_ptr<Allocator> allocator)
     : allocator(std::move(allocator)) {}
 
   void* allocate(std::size_t n) {
