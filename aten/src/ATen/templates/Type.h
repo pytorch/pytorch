@@ -66,6 +66,7 @@ struct AT_API Type {
   virtual std::unique_ptr<Storage> storageFromBlob(void * data, int64_t size, const std::function<void(void*)> & deleter=noop_deleter) const = 0;
   virtual std::unique_ptr<Generator> generator() const = 0;
   virtual Tensor unsafeTensorFromTH(void * th_pointer, bool retain) const = 0;
+  virtual std::unique_ptr<Storage> unsafeStorageFromTH(void * th_pointer, bool retain) const = 0;
   virtual const char * toString() const = 0;
   virtual std::size_t elementSizeInBytes() const = 0;
   virtual Type & toBackend(Backend b) const;
@@ -85,6 +86,7 @@ struct AT_API Type {
   Tensor scalarTensor(Scalar s) const;
 
   bool operator==(const Type& other) const;
+  bool operator!=(const Type& other) const;
 
   // example
   // virtual Tensor * add(Tensor & a, Tensor & b) = 0;

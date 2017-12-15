@@ -18,7 +18,7 @@ using at::Tensor;
 using at::TensorList;
 using at::Type;
 
-struct VariableType : public at::Type {
+struct VariableType final : public at::Type {
   VariableType(Context* context, at::Type* baseType);
   virtual at::ScalarType scalarType() const override;
   virtual at::Backend backend() const override;
@@ -35,7 +35,8 @@ struct VariableType : public at::Type {
   virtual at::Type & toBackend(at::Backend b) const override;
   virtual at::Type & toScalarType(at::ScalarType s) const override;
   static const char * typeString();
-  at::Tensor unsafeTensorFromTH(void * th_pointer, bool retain) const override;
+  virtual std::unique_ptr<at::Storage> unsafeStorageFromTH(void * th_pointer, bool retain) const override;
+  virtual at::Tensor unsafeTensorFromTH(void * th_pointer, bool retain) const override;
 
   virtual void s_copy(const Tensor & src, Tensor & dst) const override;
   ${type_derived_method_declarations}

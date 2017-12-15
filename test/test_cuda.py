@@ -402,7 +402,7 @@ def compare_cpu_gpu(tensor_constructor, arg_constructor, fn, t, precision=1e-5, 
             gpu_result = getattr(gpu_tensor, fn)(*gpu_args)
         except RuntimeError as e:
             reason = e.args[0]
-            if 'unimplemented data type' in reason:
+            if 'only supports floating-point types' in reason or 'unimplemented data type' in reason:
                 raise unittest.SkipTest('unimplemented data type')
             raise
         except AttributeError as e:
@@ -435,6 +435,12 @@ class TestCuda(TestCase):
             self.assertEqual(w.get_device(), 1)
         z = z.cuda()
         self.assertEqual(z.get_device(), 0)
+
+    @unittest.skipIf(torch.cuda.device_count() < 2, "only one GPU detected")
+    def test_new(self):
+        x = torch.autograd.Variable(torch.randn(3, 3).cuda())
+        self.assertEqual(x.new([0, 1, 2]).get_device(), 0)
+        self.assertEqual(x.new([0, 1, 2], device=1).get_device(), 1)
 
     @unittest.skipIf(torch.cuda.device_count() < 2, "only one GPU detected")
     def test_copy_device(self):

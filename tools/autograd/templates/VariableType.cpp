@@ -63,8 +63,11 @@ std::unique_ptr<Storage> VariableType::storage(size_t size) const {
 std::unique_ptr<Storage> VariableType::storageFromBlob(void * data, int64_t size, const std::function<void(void*)> & deleter) const {
   return baseType->storageFromBlob(data, size, deleter);
 }
+std::unique_ptr<Storage> VariableType::unsafeStorageFromTH(void * th_pointer, bool retain) const {
+  return baseType->unsafeStorageFromTH(th_pointer, retain);
+}
 Tensor VariableType::unsafeTensorFromTH(void * th_pointer, bool retain) const {
-  return baseType->unsafeTensorFromTH(th_pointer, retain);
+  return make_variable(baseType->unsafeTensorFromTH(th_pointer, retain), false);
 }
 std::unique_ptr<Generator> VariableType::generator() const {
   return baseType->generator();
@@ -95,7 +98,7 @@ Variable & VariableType::checked_cast(const Type & type, const Tensor & t, const
     runtime_error("Expected a Tensor of type %s but found an undefined Tensor for argument #%d '%s'",
         type.toString(), pos, name);
   }
-  if (&t.type() != &type) {
+  if (&t.type() != &type && &t.type() != &type.toBackend(toSparse(t.type().backend()))) {
     runtime_error("Expected object of type %s but found type %s for argument #%d '%s'",
         type.toString(), t.type().toString(), pos, name);
   }
@@ -356,13 +359,8 @@ void VariableType::s_copy(const Tensor & src, Tensor & dst) const {
 
 Tensor & VariableType::resize_(Tensor & self, IntList size) const {
   auto& self_ = unpack(self, "self", 0);
-  check_inplace(self);
-  auto& self_var = static_cast<Variable&>(self);
-  if (self_var.grad_fn()) {
-    at::runtime_error("cannot resize non-leaf variables");
-  }
-  if (self_var.requires_grad()) {
-    at::runtime_error("cannot resize variables which require grad");
+  if (static_cast<Variable&>(self).requires_grad()) {
+    at::runtime_error("cannot resize variables that require grad");
   }
   baseType->resize_(self_, size);
   return self;

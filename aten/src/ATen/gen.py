@@ -304,7 +304,7 @@ def declare_outputs():
              'Dispatch.h', 'Copy.cpp', 'NativeFunctions.h']
     for f in files:
         file_manager.will_write(f)
-    for fname in generators.keys():
+    for fname in sorted(generators.keys()):
         file_manager.will_write(fname)
     for backend, density, scalar_types in iterate_types():
         scalar_name = scalar_types[0]

@@ -122,6 +122,7 @@ protected:
 struct FusionCompilerConfig {
   std::string cxx = "g++"; // compiler location
   bool debug = false; // emit debugging information about fusions
+  bool openmp = true;
 };
 
 // caching compiler

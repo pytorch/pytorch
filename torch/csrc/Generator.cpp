@@ -20,20 +20,20 @@ PyObject * THPGenerator_New()
   return result;
 }
 
-PyObject * THPGenerator_NewWithGenerator(THGenerator *cdata)
+PyObject * THPGenerator_NewWithGenerator(at::Generator& cdata)
 {
   auto type = (PyTypeObject*)THPGeneratorClass;
   auto self = THPObjectPtr{type->tp_alloc(type, 0)};
   if (!self) throw python_error();
   auto self_ = reinterpret_cast<THPGenerator*>(self.get());
-  self_->cdata = cdata;
+  self_->cdata = &cdata;
   return self.release();
 }
 
 static void THPGenerator_dealloc(THPGenerator* self)
 {
   if (self->owner) {
-    THGenerator_free(self->cdata);
+    delete self->cdata;
   }
   Py_TYPE(self)->tp_free((PyObject*)self);
 }
@@ -46,7 +46,9 @@ static PyObject * THPGenerator_pynew(PyTypeObject *type, PyObject *args, PyObjec
     return NULL;
   }
   THPGeneratorPtr self((THPGenerator *)type->tp_alloc(type, 0));
-  self->cdata = THGenerator_new();
+  // having to pick a specific type rather than just a backend here is strange,
+  // but we don't really have fully fledged backend objects.
+  self->cdata = at::CPU(at::kFloat).generator().release();
   self->owner = true;
   return (PyObject*)self.release();
   END_HANDLE_TH_ERRORS
@@ -55,7 +57,7 @@ static PyObject * THPGenerator_pynew(PyTypeObject *type, PyObject *args, PyObjec
 static PyObject * THPGenerator_getState(THPGenerator *self)
 {
   HANDLE_TH_ERRORS
-  THGenerator *generator = self->cdata;
+  THGenerator *generator = THPGenerator_TH_CData(self);
   THPByteTensorPtr res((THPByteTensor *)THPByteTensor_NewEmpty());
   if (!res) return NULL;
   THByteTensor_getRNGState(generator, res->cdata);
@@ -66,7 +68,7 @@ static PyObject * THPGenerator_getState(THPGenerator *self)
 static PyObject * THPGenerator_setState(THPGenerator *self, PyObject *_new_state)
 {
   HANDLE_TH_ERRORS
-  THGenerator *generator = self->cdata;
+  THGenerator *generator = THPGenerator_TH_CData(self);
   THPUtils_assert(THPByteTensor_Check(_new_state), "set_state expects a "
           "torch.ByteTensor, but got %s", THPUtils_typename(_new_state));
   THByteTensor *new_state = ((THPByteTensor*)_new_state)->cdata;
@@ -79,10 +81,10 @@ static PyObject * THPGenerator_setState(THPGenerator *self, PyObject *_new_state
 static PyObject * THPGenerator_manualSeed(THPGenerator *self, PyObject *seed)
 {
   HANDLE_TH_ERRORS
-  THGenerator *generator = self->cdata;
+  auto generator = self->cdata;
   THPUtils_assert(THPUtils_checkLong(seed), "manual_seed expected a long, "
           "but got %s", THPUtils_typename(seed));
-  THRandom_manualSeed(generator, THPUtils_unpackLong(seed));
+  generator->manualSeed(THPUtils_unpackLong(seed));
   Py_INCREF(self);
   return (PyObject*)self;
   END_HANDLE_TH_ERRORS
@@ -91,14 +93,14 @@ static PyObject * THPGenerator_manualSeed(THPGenerator *self, PyObject *seed)
 static PyObject * THPGenerator_seed(THPGenerator *self)
 {
   HANDLE_TH_ERRORS
-  return PyLong_FromUnsignedLong(THRandom_seed(self->cdata));
+  return PyLong_FromUnsignedLong(self->cdata->seed());
   END_HANDLE_TH_ERRORS
 }
 
 static PyObject * THPGenerator_initialSeed(THPGenerator *self)
 {
   HANDLE_TH_ERRORS
-  return PyLong_FromUnsignedLong(THRandom_initialSeed(self->cdata));
+  return PyLong_FromUnsignedLong(self->cdata->initialSeed());
   END_HANDLE_TH_ERRORS
 }
 

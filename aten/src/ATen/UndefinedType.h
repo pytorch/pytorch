@@ -29,7 +29,8 @@ struct UndefinedType final : public Type {
   virtual Type & toScalarType(ScalarType s) const override;
   virtual TypeID ID() const override;
   static const char * typeString();
-  Tensor unsafeTensorFromTH(void * th_pointer, bool retain) const override;
+  virtual std::unique_ptr<Storage> unsafeStorageFromTH(void * th_pointer, bool retain) const override;
+  virtual Tensor unsafeTensorFromTH(void * th_pointer, bool retain) const override;
 
   virtual void s_copy(const Tensor & src, Tensor & dst) const override;
 };

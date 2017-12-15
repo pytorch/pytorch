@@ -37,8 +37,8 @@ class ByteStorage(_DistributedBase, torch._C.DistributedByteStorageBase, _Storag
     pass
 
 
-# class HalfStorage(_DistributedBase, torch._C.DistributedHalfStorageBase, _StorageBase):
-    # pass
+class HalfStorage(_DistributedBase, torch._C.DistributedHalfStorageBase, _StorageBase):
+    pass
 
 
 class DoubleTensor(_DistributedBase, torch._C.DistributedDoubleTensorBase, _TensorBase):
@@ -48,6 +48,15 @@ class DoubleTensor(_DistributedBase, torch._C.DistributedDoubleTensorBase, _Tens
     @classmethod
     def storage_type(cls):
         return DoubleStorage
+
+
+class HalfTensor(_DistributedBase, torch._C.DistributedHalfTensorBase, _TensorBase):
+    def is_signed(self):
+        return True
+
+    @classmethod
+    def storage_type(cls):
+        return HalfStorage
 
 
 class FloatTensor(_DistributedBase, torch._C.DistributedFloatTensorBase, _TensorBase):
@@ -115,6 +124,7 @@ class ByteTensor(_DistributedBase, torch._C.DistributedByteTensorBase, _TensorBa
 
 torch._storage_classes.add(DoubleStorage)
 torch._storage_classes.add(FloatStorage)
+torch._storage_classes.add(HalfStorage)
 torch._storage_classes.add(LongStorage)
 torch._storage_classes.add(IntStorage)
 torch._storage_classes.add(ShortStorage)
@@ -123,6 +133,7 @@ torch._storage_classes.add(ByteStorage)
 
 torch._tensor_classes.add(DoubleTensor)
 torch._tensor_classes.add(FloatTensor)
+torch._tensor_classes.add(HalfTensor)
 torch._tensor_classes.add(LongTensor)
 torch._tensor_classes.add(IntTensor)
 torch._tensor_classes.add(ShortTensor)
@@ -135,7 +146,7 @@ torch._integer_tensor_classes.add(ShortTensor)
 torch._integer_tensor_classes.add(CharTensor)
 torch._integer_tensor_classes.add(ByteTensor)
 
-_type_names = ['Double', 'Float', 'Long', 'Int', 'Short', 'Char', 'Byte']
+_type_names = ['Double', 'Float', 'Half', 'Long', 'Int', 'Short', 'Char', 'Byte']
 _locals = locals()
 _tensors = [_locals[t + 'Tensor'] for t in _type_names]
 _storages = [_locals[t + 'Storage'] for t in _type_names]

@@ -8,8 +8,6 @@ if sys.version_info[0] == 3:
 else:
     string_type = basestring
 
-# temporary things we cannot handle
-EXCLUDE_PATTERN = "bernoulli.*"
 # what has to be done to add a Operation ...
 # 1. if broadcasting or without the full list of arguments, add a non-virtual
 #    declaration under Type.h
@@ -221,7 +219,7 @@ ALLOC_WRAP = {
 # Replacements for constants when calling into TH
 CONSTANT_REPLACEMENTS = [
     ('AS_REAL', '${AS_REAL}'),
-    ('THPDefaultGenerator->cdata',
+    ('THPGenerator_TH_CData(THPDefaultGenerator)',
      'dynamic_cast<${Generator}&>().generator'),
     ('__storage_size.get\\(\\)',
      'THLongStorageView::makeFromLength(static_cast<int64_t>(storage.size()))'),
@@ -231,7 +229,7 @@ CONSTANT_REPLACEMENTS = [
 # Replacements for constants in header file function definitions
 HEADER_CONSTANT_REPLACEMENTS = [
     (r'AS_REAL\((.*)\)', r'\1'),
-    ('THPDefaultGenerator->cdata', 'nullptr'),
+    ('THPGenerator_TH_CData\(THPDefaultGenerator\)', 'nullptr'),
     ('__last_dim', '-1'),
 ]
 
@@ -426,15 +424,9 @@ def create_generic(top_env, declarations):
 
         return broadcast_actuals
 
-    excluded_names = set()
-
     def process_option(option, output_options):
         option['inplace'] = re.search(
             '(^__i|[^_]_$)', option['api_name']) is not None
-
-        if re.match(EXCLUDE_PATTERN, option['name']):
-            excluded_names.add(option['name'])
-            raise NYIError("NYI")
 
         # print(yaml.dump(option))
         formals = get_formals(option)
@@ -510,12 +502,15 @@ def create_generic(top_env, declarations):
                 FUNCTION_DEFINITION.substitute(env))
             method_of.append('namespace')
 
+        buffer_names = [buffer['name'] for buffer in option.get('buffers', [])]
+
         output_options.append(OrderedDict([
             ('name', option['api_name']),
             ('method_prefix_derived', option['method_prefix_derived']),
             ('arguments', formals),
             ('method_of', method_of),
             ('mode', option['mode']),
+            ('buffers', buffer_names),
             ('returns', option['returns']),
             ('inplace', option['inplace']),
         ]))
@@ -644,7 +639,8 @@ def create_generic(top_env, declarations):
         # generate the at::native function declarations (i.e. what the user will implement)
         if isinstance(dispatch, dict):
             generated_native_functions = []
-            for _, value in dispatch.items():
+            for key in sorted(dispatch.keys()):
+                value = dispatch[key]
                 if value not in generated_native_functions:
                     option['native_type_method_dispatch'] = value
                     top_env['native_function_declarations'].append(
@@ -692,7 +688,6 @@ def create_generic(top_env, declarations):
             except NYIError:
                 option['skip'] = True
         output_declarations.extend(output_options)
-    print("ATen Excluded: {}".format(excluded_names))
     return output_declarations
 
 
@@ -752,7 +747,7 @@ def create_derived(backend_type_env, declarations):
     def drop_argument(argument, option):
         return 'CUDA' in backend_type_env['Backend'] and (
             (option['mode'] == 'TH' and argument['type'] == 'THGenerator*') or
-            argument.get('default') == 'THPDefaultGenerator->cdata')
+            argument.get('default') == 'THPGenerator_TH_CData(THPDefaultGenerator)')
 
     def get_arguments(arguments, option):
         return [get_argument(argument, option)

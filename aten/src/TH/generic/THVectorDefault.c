@@ -206,8 +206,6 @@ VECTOR_IMPLEMENT_FUNCTION(cinv, TH_MATH_NAME(1.0) / )
 #undef TH_MATH_NAME
 #endif /* floating point only part */
 
-#ifndef TH_REAL_IS_BYTE
 VECTOR_IMPLEMENT_FUNCTION(neg,-)
-#endif
 
 #endif
