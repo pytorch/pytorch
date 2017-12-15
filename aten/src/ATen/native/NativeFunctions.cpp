@@ -589,28 +589,28 @@ Tensor RoiPooling2d_backward_cpu(
 
 
 // TODO Replace this with more accurate digamma().
-template <typename Scalar>
-static inline Scalar digamma_one(Scalar x) {
-  const Scalar eps = x * 1e-2;
+template <typename CScalar>
+static inline CScalar digamma_one(CScalar x) {
+  const CScalar eps = x * 1e-2;
   return (std::lgamma(x + eps) - std::lgamma(x - eps)) / (eps + eps);
 }
 
 /** Computes the reparameterized gradient -(d/dalpha cdf(x;alpha)) / pdf(x;alpha)
     for random number x drawn from a standard Gamma distribution Gamma(alpha).
 */
-template <typename Scalar>
-static inline Scalar standard_gamma_grad_one(Scalar x, Scalar alpha) {
+template <typename CScalar>
+static inline CScalar standard_gamma_grad_one(CScalar x, CScalar alpha) {
   // Use an asymptotic approximation for small x.
   if (x < 0.2f) {
-    const Scalar a0 = 1 / alpha;
-    const Scalar a1 = 1 / (alpha + 1);
-    const Scalar a2 = 1 / (alpha + 2);
-    const Scalar pow_x_alpha = std::pow(x, alpha);
-    const Scalar gamma_pdf = std::pow(x, alpha - 1) * std::exp(-x);
-    const Scalar gamma_cdf = pow_x_alpha * (a0 - x*a1 + 0.5f*x*x*a2);
-    const Scalar gamma_cdf_alpha = (std::log(x) - digamma_one(alpha)) * gamma_cdf
+    const CScalar a0 = 1 / alpha;
+    const CScalar a1 = 1 / (alpha + 1);
+    const CScalar a2 = 1 / (alpha + 2);
+    const CScalar pow_x_alpha = std::pow(x, alpha);
+    const CScalar gamma_pdf = std::pow(x, alpha - 1) * std::exp(-x);
+    const CScalar gamma_cdf = pow_x_alpha * (a0 - x*a1 + 0.5f*x*x*a2);
+    const CScalar gamma_cdf_alpha = (std::log(x) - digamma_one(alpha)) * gamma_cdf
         - pow_x_alpha * (a0*a0 - x*a1*a1 + 0.5f*x*x*a2*a2);
-    const Scalar result = -gamma_cdf_alpha / gamma_pdf;
+    const CScalar result = -gamma_cdf_alpha / gamma_pdf;
     return std::isnan(result) ? 0 : result;
   }
 
@@ -620,9 +620,9 @@ static inline Scalar standard_gamma_grad_one(Scalar x, Scalar alpha) {
   }
 
   // Use a bivariate rational approximation to the reparameterized gradient.
-  const Scalar u = std::log(x / alpha);
-  const Scalar v = std::log(alpha);
-  static const Scalar coef_uv[3][8] = {
+  const CScalar u = std::log(x / alpha);
+  const CScalar v = std::log(alpha);
+  static const CScalar coef_uv[3][8] = {
     {0.16028008, -0.088064309, 0.019630876, -0.0016920282,
      1.0, 0.36659853, 0.10843863, 0.0066895454},
     {0.521894, 0.16095838, 0.06237597, 0.0023884253,
@@ -630,20 +630,20 @@ static inline Scalar standard_gamma_grad_one(Scalar x, Scalar alpha) {
     {-0.0031143957, -0.012143877, -0.0057656484, -0.00064847254,
      0.0087262576, -0.00022820524, 1.8871047e-05, 9.6307964e-06},
   };
-  Scalar coef_v[8];
+  CScalar coef_v[8];
   for (int i = 0; i < 8; ++ i) {
     coef_v[i] = coef_uv[0][i] + u * (coef_uv[1][i] + u * coef_uv[2][i]);
   }
-  const Scalar p = coef_v[0] + v * (coef_v[1] + v * (coef_v[2] + v * coef_v[3]));
-  const Scalar q = coef_v[4] + v * (coef_v[5] + v * (coef_v[6] + v * coef_v[7]));
+  const CScalar p = coef_v[0] + v * (coef_v[1] + v * (coef_v[2] + v * coef_v[3]));
+  const CScalar q = coef_v[4] + v * (coef_v[5] + v * (coef_v[6] + v * coef_v[7]));
   return std::exp(p / q);
 }
 
-template <typename Scalar>
+template <typename CScalar>
 struct StandardGammaGradOp {
   static void apply(Tensor& ret, const Tensor& self, const Tensor& alpha) {
-    CPU_tensor_apply3<Scalar>(ret, self, alpha,
-      [](Scalar& ret_val, const Scalar& self_val, const Scalar &alpha_val) {
+    CPU_tensor_apply3<CScalar>(ret, self, alpha,
+      [](CScalar& ret_val, const CScalar& self_val, const CScalar &alpha_val) {
          ret_val = standard_gamma_grad_one(self_val, alpha_val);
       }
     );

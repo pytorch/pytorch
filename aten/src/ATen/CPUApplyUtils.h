@@ -154,13 +154,13 @@ static inline void check_correct_backend(const Tensor& t1, const Tensor &t2, con
     ATENSOR##_i = 0; \
   }
 
-template <typename ScalarType, typename Op>
+template <typename CScalar, typename Op>
 void CPU_tensor_apply2_dim(Tensor& tensor1, Tensor& tensor2, int64_t dim, Op op) {
   check_correct_backend(tensor1, tensor2);
   bool TH_TENSOR_APPLY_hasFinished = false;
   int64_t TH_TENSOR_dim_index = 0;
-  __ATH_TENSOR_APPLYX_PREAMBLE(ScalarType, tensor1, dim, 1)
-  __ATH_TENSOR_APPLYX_PREAMBLE(ScalarType, tensor2, dim, 1)
+  __ATH_TENSOR_APPLYX_PREAMBLE(CScalar, tensor1, dim, 1)
+  __ATH_TENSOR_APPLYX_PREAMBLE(CScalar, tensor2, dim, 1)
   auto t1_numel = tensor1.numel();
   auto t2_numel = tensor2.numel();
   if(t1_numel != t2_numel) {
@@ -185,19 +185,19 @@ void CPU_tensor_apply2_dim(Tensor& tensor1, Tensor& tensor2, int64_t dim, Op op)
     delete [] tensor2_counter;
 }
 
-template<typename ScalarType, typename Op>
+template<typename CScalar, typename Op>
 void CPU_tensor_apply2(Tensor tensor1, Tensor tensor2, Op op) {
-  CPU_tensor_apply2_dim<ScalarType, Op>(tensor1, tensor2, -1, op);
+  CPU_tensor_apply2_dim<CScalar, Op>(tensor1, tensor2, -1, op);
 }
 
-template <typename ScalarType, typename Op>
+template <typename CScalar, typename Op>
 void CPU_tensor_apply3_dim(Tensor &tensor1, Tensor& tensor2, Tensor& tensor3, int64_t dim, Op op) {
   check_correct_backend(tensor1, tensor2, tensor3);
   bool TH_TENSOR_APPLY_hasFinished = false;
   int64_t TH_TENSOR_dim_index = 0;
-  __ATH_TENSOR_APPLYX_PREAMBLE(ScalarType, tensor1, dim, 1)
-  __ATH_TENSOR_APPLYX_PREAMBLE(ScalarType, tensor2, dim, 1)
-  __ATH_TENSOR_APPLYX_PREAMBLE(ScalarType, tensor3, dim, 1)
+  __ATH_TENSOR_APPLYX_PREAMBLE(CScalar, tensor1, dim, 1)
+  __ATH_TENSOR_APPLYX_PREAMBLE(CScalar, tensor2, dim, 1)
+  __ATH_TENSOR_APPLYX_PREAMBLE(CScalar, tensor3, dim, 1)
 
   int elements_equal = 1;
   auto t1_numel = tensor1.numel();
@@ -234,9 +234,9 @@ void CPU_tensor_apply3_dim(Tensor &tensor1, Tensor& tensor2, Tensor& tensor3, in
     delete [] tensor3_counter;
 }
 
-template<typename ScalarType, typename Op>
+template<typename CScalar, typename Op>
 void CPU_tensor_apply3(Tensor tensor1, Tensor tensor2, Tensor tensor3, Op op) {
-  CPU_tensor_apply3_dim<ScalarType, Op>(tensor1, tensor2, tensor3, -1, op);
+  CPU_tensor_apply3_dim<CScalar, Op>(tensor1, tensor2, tensor3, -1, op);
 }
 
 }
