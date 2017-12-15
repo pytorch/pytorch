@@ -185,6 +185,14 @@ void CPU_tensor_apply2_dim(Tensor& tensor1, Tensor& tensor2, int64_t dim, Op op)
     delete [] tensor2_counter;
 }
 
+/*
+  Apply a pointwise operator to two tensors.
+
+  The calling convention for op is a function/functor that takes takes two references to
+  type CScalar; at least one of these references should be non-const in order to write the output.
+  For example, to compute a = b^2, op would be of the form:
+  [](CScalar &a_val, const CScalar &b_val) { a_val = b_val * b_val; };
+*/
 template<typename CScalar, typename Op>
 void CPU_tensor_apply2(Tensor tensor1, Tensor tensor2, Op op) {
   CPU_tensor_apply2_dim<CScalar, Op>(tensor1, tensor2, -1, op);
@@ -234,6 +242,14 @@ void CPU_tensor_apply3_dim(Tensor &tensor1, Tensor& tensor2, Tensor& tensor3, in
     delete [] tensor3_counter;
 }
 
+/*
+  Apply a pointwise operator to three tensors.
+
+  The calling convention for op is a function/functor that takes takes three references to
+  type CScalar; at least one of these references should be non-const in order to write the output.
+  For example, to compute a = b + c, op would be of the form:
+  [](CScalar &a_val, const CScalar &b_val, const CScalar &c_val) { a_val = b_val + c_val; };
+*/
 template<typename CScalar, typename Op>
 void CPU_tensor_apply3(Tensor tensor1, Tensor tensor2, Tensor tensor3, Op op) {
   CPU_tensor_apply3_dim<CScalar, Op>(tensor1, tensor2, tensor3, -1, op);
