@@ -1,4 +1,6 @@
 cmake_minimum_required(VERSION 2.8.12 FATAL_ERROR)
+#cmake_policy(SET CMP0022 NEW)
+#cmake_policy(SET CMP0023 NEW)
 
 # ---[ Project and semantic versioning.
 project(Caffe2 CXX C)
@@ -139,27 +141,37 @@ endif()
 
 # ---[ Make configuration files for cmake to allow dependent libraries
 # easier access to Caffe2.
-
-# Specific interface link libraries for caffe2
-if ((NOT USE_GLOG) OR (NOT USE_GFLAGS) OR CAFFE2_USE_CUSTOM_PROTOBUF)
-  message(WARNING
-      "Generated cmake files are only fully available if one builds "
-      "with system glog, gflags and protobuf.")
-else()
-  # Since one would use glog, gflags and protobuf functionalities, any
-  # dependent library will have to depend on glog, gflags and protobuf
-  # as well, so we mark them as INTERFACE transitive dependency.
-  target_link_libraries(caffe2 INTERFACE glog gflags protobuf)
-  if (USE_CUDA)
-    target_link_libraries(caffe2_gpu INTERFACE glog gflags protobuf)
-  endif()
+# Since one would use glog, gflags, and protobuf functionalities, any
+# dependent library will have to depend on glog, gflags, and protobuf
+# as well, so we mark them as INTERFACE transitive dependency.
+set(CAFFE2_INTERFACE_LIBS)
+if (USE_GLOG)
+  list(APPEND CAFFE2_INTERFACE_LIBS glog)
+endif()
+if (USE_GFLAGS)
+  list(APPEND CAFFE2_INTERFACE_LIBS gflags)
+endif()
+if (NOT CAFFE2_USE_CUSTOM_PROTOBUF)
+  list(APPEND CAFFE2_INTERFACE_LIBS protobuf)
 endif()
 
-# Note(jiayq): Android cmake has an unresolved issue right now
-# (install(EXPORT "Caffe2Targets" ...) includes target "caffe2" which
-#  requires target "cpufeatures" that is not in the export set.)
-# and as a result we disable it for now.
-if (NOT ANDROID)
+if ((NOT USE_GLOG) OR (NOT USE_GFLAGS) OR CAFFE2_USE_CUSTOM_PROTOBUF)
+  message(WARNING
+      "Generated cmake files are only fully tested if one builds "
+      "with system glog, gflags, and protobuf.")
+endif()
+target_link_libraries(caffe2 INTERFACE ${CAFFE2_INTERFACE_LIBS})
+if (USE_CUDA)
+  target_link_libraries(caffe2_gpu INTERFACE ${CAFFE2_INTERFACE_LIBS})
+endif()
+
+# Note(jiayq): when building static libraries, all PRIVATE dependencies
+# will also become interface libraries, and as a result if there are any
+# dependency libraries that are not exported, the following install export
+# script will fail. As a result, we will only provide the targets cmake
+# files for shared lib installation. For more info, read:
+# https://cmake.org/pipermail/cmake/2016-May/063400.html
+if (BUILD_SHARED_LIBS)
   configure_file(
       ${PROJECT_SOURCE_DIR}/cmake/Caffe2ConfigVersion.cmake.in
       ${PROJECT_BINARY_DIR}/Caffe2ConfigVersion.cmake
@@ -176,8 +188,11 @@ if (NOT ANDROID)
   install(EXPORT Caffe2Targets DESTINATION share/cmake/Caffe2
       FILE Caffe2Targets.cmake
       COMPONENT dev)
+else()
+  message(WARNING
+      "Generated cmake files are only available when building "
+      "shared libs.")
 endif()
-
 
 # ---[ Modules
 add_subdirectory(modules/module_test)
