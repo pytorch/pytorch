@@ -4,7 +4,7 @@ import torch
 from torch.autograd import Function, Variable
 from torch.autograd.function import once_differentiable
 from torch.distributions.distribution import Distribution
-from torch.distributions.utils import expand_n
+from torch.distributions.utils import broadcast_all
 
 
 def _dirichlet_sample_nograd(alpha):
@@ -46,18 +46,13 @@ class Dirichlet(Distribution):
     has_rsample = True
 
     def __init__(self, alpha):
-        self.alpha = alpha
+        self.alpha, = broadcast_all(alpha)
 
-    def _sample(self, alpha):
-        if not isinstance(alpha, Variable):
-            return _dirichlet_sample_nograd(alpha)
-        return _Dirichlet.apply(alpha)
-
-    def sample(self):
-        return self._sample(self.alpha)
-
-    def sample_n(self, n):
-        return self._sample(expand_n(self.alpha, n))
+    def rsample(self, sample_shape=()):
+        alpha = self.alpha.expand(sample_shape + self.alpha.shape)
+        if isinstance(alpha, Variable):
+            return _Dirichlet.apply(alpha)
+        return _dirichlet_sample_nograd(alpha)
 
     def log_prob(self, value):
         return ((torch.log(value) * (self.alpha - 1.0)).sum(-1) +

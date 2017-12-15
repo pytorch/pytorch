@@ -4,6 +4,7 @@ import torch
 from torch.autograd import Variable
 from torch.distributions.dirichlet import Dirichlet
 from torch.distributions.distribution import Distribution
+from torch.distributions.utils import broadcast_all
 
 
 class Beta(Distribution):
@@ -23,26 +24,12 @@ class Beta(Distribution):
     has_rsample = True
 
     def __init__(self, alpha, beta):
-        alpha_num = isinstance(alpha, Number)
-        beta_num = isinstance(beta, Number)
-        if alpha_num and beta_num:
-            alpha_beta = torch.Tensor([alpha, beta])
-        else:
-            if alpha_num and not beta_num:
-                alpha = beta.new(beta.size()).fill_(alpha)
-            elif not alpha_num and beta_num:
-                beta = alpha.new(alpha.size()).fill_(beta)
-            elif alpha.size() != beta.size():
-                raise ValueError('Expected alpha.size() == beta.size(), actual {} vs {}'.format(
-                    alpha.size(), beta.size()))
-            alpha_beta = torch.stack([alpha, beta], -1)
+        alpha, beta = broadcast_all(alpha, beta)
+        alpha_beta = torch.stack([alpha, beta], -1)
         self.dirichlet = Dirichlet(alpha_beta)
 
-    def sample(self):
-        return self.dirichlet.sample().select(-1, 0)
-
-    def sample_n(self, n):
-        return self.dirichlet.sample_n(n).select(-1, 0)
+    def rsample(self, sample_shape=()):
+        return self.dirichlet.rsample(sample_shape).select(-1, 0)
 
     def log_prob(self, value):
         if isinstance(value, Number):
