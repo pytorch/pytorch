@@ -4646,6 +4646,12 @@ class TestTorch(TestCase):
         z = from_dlpack(to_dlpack(x))
         self.assertEqual(z, x)
 
+    @unittest.skipIf(not torch.cuda.is_available(), "No CUDA")
+    def test_dlpack_cuda(self):
+        x = torch.randn(1, 2, 3, 4).cuda()
+        z = from_dlpack(to_dlpack(x))
+        self.assertEqual(z, x)
+
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_from_numpy(self):
         dtypes = [

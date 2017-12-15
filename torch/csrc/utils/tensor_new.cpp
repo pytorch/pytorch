@@ -1,7 +1,7 @@
+#include <Python.h>
 #include "tensor_new.h"
 
 #include <ATen/ATen.h>
-#include <Python.h>
 
 #include "torch/csrc/Exceptions.h"
 #include "torch/csrc/utils/auto_gil.h"
