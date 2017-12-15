@@ -13,7 +13,7 @@
 #include <sstream>
 
 #ifdef WITH_CUDNN
-#include <ATen/cudnn/cudnn-wrapper.h>
+#include "cudnn.h"
 #endif
 
 namespace {
