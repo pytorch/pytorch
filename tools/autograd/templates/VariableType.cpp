@@ -32,6 +32,7 @@ namespace torch { namespace autograd {
 // don't want to make the codegen do the dispatch manually)
 static void setattr(jit::Node* n, jit::Symbol name, int64_t v)             { n->i_(name, v); }
 static void setattr(jit::Node* n, jit::Symbol name, const at::Scalar& v)   { n->t_(name, v.toTensor()); }
+static void setattr(jit::Node* n, jit::Symbol name, SparseTensor s)        { n->t_(name, s.tref); }
 static void setattr(jit::Node* n, jit::Symbol name, const at::IntList& v)  { n->is_(name, v); }
 static void setattr(jit::Node* n, jit::Symbol name, bool v)                { n->i_(name, v); }
 static void setattr(jit::Node* n, jit::Symbol name, double v)              { n->f_(name, v); }
@@ -107,6 +108,11 @@ Variable & VariableType::checked_cast(const Type & type, const Tensor & t, const
 
 Tensor & VariableType::unpack(const Tensor & t, const char * name, int pos) const {
   return checked_cast(*this, t, name, pos).data();
+}
+
+SparseTensor VariableType::unpack(SparseTensor t, const char * name, int pos) const {
+  auto backend = is_cuda() ? kSparseCUDA : kSparseCPU;
+  return SparseTensor(checked_cast(this->toBackend(backend), t.tref, name, pos).data());
 }
 
 Tensor & VariableType::unpack_long(const Tensor & t, const char * name, int pos) const {
