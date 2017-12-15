@@ -331,8 +331,9 @@ struct GraphFuser {
     return group;
   }
 
+  // TODO: desugar chunks into splits and then remove this special case
   bool isChunk(Node * node) {
-    return node->kind() == ksplit;
+    return node->kind() == ksplit || node->kind() == kchunk;
   }
 
   // in places where op can be fused into a consumer but chunk is in the way
@@ -386,7 +387,10 @@ struct GraphFuser {
       // NB: I decided not to use cloneFrom here, because if we make cloneFrom
       // copy selects one day, it is definitely not what you want here (selects
       // have different types).
-      Node * input_chunk = graph->create(ksplit, 0);
+      // TODO: Perhaps we should use cloneFrom now, as it seems unlikely
+      // to copy select nodes now that we have refactored to have a Value
+      // distinct from Node.
+      Node * input_chunk = graph->create(chunk->kind(), 0);
       input_chunk->copyAttributes(*chunk);
       input_chunk->addInput(input);
       insertAt(&insertion_point, input_chunk);

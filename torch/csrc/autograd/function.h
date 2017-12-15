@@ -79,7 +79,7 @@ struct Function : std::enable_shared_from_this<Function> {
 
   variable_list operator()(const variable_list& inputs) {
     profiler::RecordFunction rec(this);
-    if (jit::tracer::isTracing(inputs)) {
+    if (jit::tracer::isTracingVar(inputs)) {
       return tracedApply(inputs);
     }
     return apply(inputs);

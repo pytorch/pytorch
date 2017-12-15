@@ -220,6 +220,20 @@ def split(g, self, split_size, dim):
     return g.op("Split", self, split_i=splits, axis_i=dim, outputs=len(splits))
 
 
+# TODO: It would be better to export this as a chunk directly, as this is
+# less sensitive to changes in input size.
+# TODO: Once we have proper scoping, stop reimplementing chunk, delete this
+# method, and use the desugared version
+def chunk(g, self, chunks, dim):
+    split_size = (self.type().sizes()[dim] + chunks - 1) // chunks
+    return split(g, self, split_size, dim)
+
+
+def select(g, self, dim, index):
+    slice_node = g.op("Slice", self, axes_i=[dim], starts_i=[index], ends_i=[index + 1])
+    return g.op("Squeeze", slice_node, axes_i=[dim])
+
+
 def squeeze(g, self, dim=None):
     if dim is None:
         dims = []
@@ -320,6 +334,15 @@ def elu(g, input, alpha, inplace=False):
 
 def index_select(g, self, index, dim):
     return g.op("Gather", self, index, axis_i=dim)
+
+
+def type_as(g, self, other):
+    if self.type().scalarType() == other.type().scalarType():
+        # no-op
+        return self
+    else:
+        # TODO: This should be pretty easy, just implement it with Cast
+        return _unimplemented("type_as", "non no-op application")
 
 
 # ignore clone operators that are inserted by PyTorch autograd

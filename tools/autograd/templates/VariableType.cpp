@@ -318,6 +318,27 @@ static void set_flags(at::ArrayRef<Variable> vl, VarFlags flags, std::shared_ptr
   }
 }
 
+variable_list flatten(const TensorList& tensors) {
+  return cast_tensor_list(tensors);
+}
+
+variable_list flatten(const Tensor& x, const TensorList& y) {
+  std::vector<Variable> r;
+  r.reserve(1 + y.size());
+  r.emplace_back(x);
+  r.insert(r.end(), y.begin(), y.end());
+  return r;
+}
+
+variable_list flatten(const Tensor& x, const TensorList& y, const Tensor& z) {
+  std::vector<Variable> r;
+  r.reserve(2 + y.size());
+  r.emplace_back(x);
+  r.insert(r.end(), y.begin(), y.end());
+  r.emplace_back(z);
+  return r;
+}
+
 std::vector<Tensor> as_tensor_list(std::vector<Variable> &vars) {
   std::vector<Tensor> tensors;
   for (auto& v : vars) {
