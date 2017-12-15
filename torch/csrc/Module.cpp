@@ -12,6 +12,8 @@
 #include <ATen/ATen.h>
 #include <ATen/dlpack.h>
 #include <ATen/DLConvertor.h>
+#include <pybind11/pybind11.h>
+#include <pybind11/stl.h>
 
 #include "torch/csrc/DynamicTypes.h"
 #include "torch/csrc/autograd/generated/python_nn_functions.h"
@@ -30,6 +32,8 @@
 
 #include "ModuleSparse.cpp"
 #include "DataLoader.cpp"
+
+namespace py = pybind11;
 
 PyObject* module;
 PyObject* tensor_classes;
@@ -550,6 +554,16 @@ PyObject *THPModule_fromDLPack(PyObject *_unused, PyObject *data)
   // destructor function that will be called when the underlying storage goes
   // out of scope. When the destructor is called, the dlMTensor is destructed too.
   at::Tensor atensor = at::fromDLPack(dlMTensor);
+
+  // It is possible that the call to at::fromDLPack is the very first
+  // call to create a Tensor in PyTorch. If so, then _lazy_init has
+  // not been called, and the attempt to call createPyObject will fail
+  // because cuda ATen types have not been registered in Python yet.
+  // so if we have a cuda tensor, then we need to make sure
+  // we have called _lazy_init here
+  if(atensor.is_cuda()) {
+    py::module::import("torch.cuda").attr("init")();
+  }
   // Make sure this capsule will never be used again.
   PyCapsule_SetName(data, "used_dltensor");
   return torch::createPyObject(atensor);
