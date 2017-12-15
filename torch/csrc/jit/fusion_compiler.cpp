@@ -813,16 +813,6 @@ FusionCompiler & sharedFusionCompiler() {
 
 namespace torch { namespace jit {
 
-// Host-side view of TensorInfo (that visivle for the kernel is defined above).
-// Note dims[0] - we need to dynamically allocate the dims.
-struct TensorInfo {
-  void * data;
-  uint32_t sizes_strides[0];
-
-  uint32_t* sizes(size_t nDim) { return &sizes_strides[0]; }
-  uint32_t* strides(size_t nDim) { return &sizes_strides[nDim]; }
-};
-
 CompiledFusionFunction::CompiledFusionFunction(const std::string & name, AnnotatedGraph & agraph) {}
 
 void CompiledFusionFunction::launch_with_tensors(at::ArrayRef<at::Tensor> inputs, at::ArrayRef<at::Tensor> outputs) {}
@@ -850,8 +840,7 @@ void FusionCompiler::debugLaunchGraph(Graph & graph, bool is_cuda, at::ArrayRef<
 FusionCompiler::FusionCompiler() {}
 
 FusionCompiler & sharedFusionCompiler() {
-  static FusionCompiler compiler;
-  return compiler;
+  throw std::runtime_error("NYI: fuser is not supported on Windows.");
 }
 
 }}
