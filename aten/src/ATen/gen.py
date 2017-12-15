@@ -7,7 +7,6 @@ import nn_parse
 import native_parse
 import preprocess_declarations
 import function_wrapper
-import dispatch_macros
 import copy_wrapper
 
 from code_template import CodeTemplate
@@ -74,7 +73,6 @@ class FileManager(object):
 TEMPLATE_PATH = options.source_path + "/templates"
 GENERATOR_DERIVED = CodeTemplate.from_file(
     TEMPLATE_PATH + "/GeneratorDerived.h")
-DISPATCH_H = CodeTemplate.from_file(TEMPLATE_PATH + "/Dispatch.h")
 STORAGE_DERIVED_CPP = CodeTemplate.from_file(
     TEMPLATE_PATH + "/StorageDerived.cpp")
 STORAGE_DERIVED_H = CodeTemplate.from_file(TEMPLATE_PATH + "/StorageDerived.h")
@@ -305,7 +303,7 @@ def iterate_types():
 def declare_outputs():
     files = ['Declarations.yaml', 'Type.h', 'Type.cpp', 'Tensor.h',
              'TensorMethods.h', 'Functions.h',
-             'Dispatch.h', 'Copy.cpp', 'NativeFunctions.h']
+             'Copy.cpp', 'NativeFunctions.h']
     for f in files:
         file_manager.will_write(f)
     for fname in sorted(generators.keys()):
@@ -356,8 +354,6 @@ def generate_outputs():
     file_manager.write('TensorMethods.h', TENSOR_METHODS_H.substitute(top_env))
     file_manager.write('Functions.h', FUNCTIONS_H.substitute(top_env))
 
-    dispatch_macros_gen = dispatch_macros.create(all_types)
-    file_manager.write('Dispatch.h', DISPATCH_H.substitute(top_env, dispatch_macros=dispatch_macros_gen))
     file_manager.write('Copy.cpp', copy_wrapper.create(all_types))
     file_manager.write('NativeFunctions.h', NATIVE_FUNCTIONS_H.substitute(top_env))
 
