@@ -45,6 +45,7 @@ def load_url(url, model_dir=None, map_location=None, progress=True):
         url (string): URL of the object to download
         model_dir (string, optional): directory in which to save the object
         map_location (optional): a function or a dict specifying how to remap storage locations (see torch.load)
+        progress (bool, optional): whether or not to display a progress bar to stderr
 
     Example:
         >>> state_dict = torch.utils.model_zoo.load_url('https://s3.amazonaws.com/pytorch/models/resnet18-5c106cde.pth')
