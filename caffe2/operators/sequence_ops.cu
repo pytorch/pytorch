@@ -138,6 +138,7 @@ __global__ void RemovePaddingKernel(
   }
 }
 
+template <bool Inclusive = true>
 void lengths_prefix_sum(
     const int32_t* lengths,
     int32_t num_items,
@@ -147,13 +148,23 @@ void lengths_prefix_sum(
   // Retrieve buffer size
   size_t temp_storage_bytes = 0;
   prefix_sum->Resize(num_items);
-  cub::DeviceScan::InclusiveSum(
-      NULL,
-      temp_storage_bytes,
-      lengths,
-      prefix_sum->mutable_data<int32_t>(),
-      num_items,
-      context->cuda_stream());
+  if (Inclusive) {
+    cub::DeviceScan::InclusiveSum(
+        NULL,
+        temp_storage_bytes,
+        lengths,
+        prefix_sum->mutable_data<int32_t>(),
+        num_items,
+        context->cuda_stream());
+  } else {
+    cub::DeviceScan::ExclusiveSum(
+        NULL,
+        temp_storage_bytes,
+        lengths,
+        prefix_sum->mutable_data<int32_t>(),
+        num_items,
+        context->cuda_stream());
+  }
 
   // Allocate temporary storage
   auto buffer_size = (temp_storage_bytes + sizeof(int32_t)) / sizeof(int32_t);
@@ -161,13 +172,23 @@ void lengths_prefix_sum(
   void* d_temp_storage =
       static_cast<void*>(prefix_buffer->mutable_data<int32_t>());
 
-  cub::DeviceScan::InclusiveSum(
-      d_temp_storage,
-      temp_storage_bytes,
-      lengths,
-      prefix_sum->mutable_data<int32_t>(),
-      num_items,
-      context->cuda_stream());
+  if (Inclusive) {
+    cub::DeviceScan::InclusiveSum(
+        d_temp_storage,
+        temp_storage_bytes,
+        lengths,
+        prefix_sum->mutable_data<int32_t>(),
+        num_items,
+        context->cuda_stream());
+  } else {
+    cub::DeviceScan::ExclusiveSum(
+        d_temp_storage,
+        temp_storage_bytes,
+        lengths,
+        prefix_sum->mutable_data<int32_t>(),
+        num_items,
+        context->cuda_stream());
+  }
 }
 } // namespace
 
@@ -291,5 +312,80 @@ bool RemovePaddingOp<CUDAContext>::DoRunWithType() {
   return true;
 }
 
+template <typename T>
+__global__ void gather_padding_kernel(
+    const int K,
+    const int N,
+    const int Y0Width,
+    const int Y1Width,
+    const T* X,
+    const int* I,
+    const int* L,
+    T* Y0,
+    T* Y1) {
+  typedef cub::BlockReduce<float, CAFFE_CUDA_NUM_THREADS> BlockReduce;
+  __shared__ typename BlockReduce::TempStorage y0_tmp;
+  __shared__ typename BlockReduce::TempStorage y1_tmp;
+  for (int i = blockIdx.x; i < N; i += gridDim.x) {
+    T sum_1 = T(0);
+    T sum_2 = T(0);
+    for (int j = threadIdx.x; j < K * Y0Width; j += blockDim.x) {
+      const int j1 = j / Y0Width;
+      const int j2 = j % Y0Width;
+      const int idx1 = N * (L[j1] + j2);
+      sum_1 += X[idx1 + i];
+    }
+    for (int j = threadIdx.x; j < K * Y1Width; j += blockDim.x) {
+      const int j1 = j / Y1Width;
+      const int j2 = j % Y1Width;
+      const int idx1 = N * L[j1];
+      const int idx2 = idx1 + N * (I[j1] - Y1Width + j2);
+      sum_2 += X[idx2 + i];
+    }
+    sum_1 = BlockReduce(y0_tmp).Reduce(sum_1, cub::Sum());
+    sum_2 = BlockReduce(y1_tmp).Reduce(sum_2, cub::Sum());
+    if (threadIdx.x == 0) {
+      Y0[i] = sum_1;
+      Y0 != Y1 ? Y1[i] = sum_2 : Y0[i] = sum_1 + sum_2;
+    }
+    __syncthreads();
+  }
+}
+
+template <>
+template <typename T>
+void GatherPaddingOp<CUDAContext>::GatherPadding(
+    const int outer_size,
+    const int lengths_size,
+    const int block_size,
+    const int pad_width,
+    const T* in_ptr,
+    const int* lengths_ptr,
+    T* padding_start_ptr,
+    T* padding_end_ptr) {
+  if (lengths_size > 0) {
+    lengths_prefix_sum<false>(
+        lengths_ptr,
+        lengths_size,
+        &lengths_prefix_sum_buffer_,
+        &lengths_prefix_sum_,
+        &context_);
+    gather_padding_kernel<T>
+        <<<min(block_size, CAFFE_MAXIMUM_NUM_BLOCKS),
+           CAFFE_CUDA_NUM_THREADS,
+           0,
+           context_.cuda_stream()>>>(
+            lengths_size,
+            block_size,
+            startPaddingWidth_,
+            endPaddingWidth_,
+            in_ptr,
+            lengths_ptr,
+            lengths_prefix_sum_.template data<int>(),
+            padding_start_ptr,
+            padding_end_ptr);
+  }
+}
 REGISTER_CUDA_OPERATOR(RemovePadding, RemovePaddingOp<CUDAContext>);
+REGISTER_CUDA_OPERATOR(GatherPadding, GatherPaddingOp<CUDAContext>);
 } // namespace caffe2
