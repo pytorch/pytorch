@@ -28,7 +28,7 @@ class Normal(Distribution):
     def __init__(self, mean, std):
         self.mean, self.std = broadcast_all(mean, std)
         if isinstance(mean, Number) and isinstance(std, Number):
-            batch_shape = ()
+            batch_shape = torch.Size()
         else:
             batch_shape = self.mean.size()
         super(Normal, self).__init__(batch_shape)

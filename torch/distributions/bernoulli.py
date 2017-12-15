@@ -28,7 +28,7 @@ class Bernoulli(Distribution):
     def __init__(self, probs):
         self.probs, = broadcast_all(probs)
         if isinstance(probs, Number):
-            batch_shape = ()
+            batch_shape = torch.Size()
         else:
             batch_shape = self.probs.size()
         super(Bernoulli, self).__init__(batch_shape)

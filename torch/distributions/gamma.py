@@ -48,7 +48,7 @@ class Gamma(Distribution):
     def __init__(self, alpha, beta):
         self.alpha, self.beta = broadcast_all(alpha, beta)
         if isinstance(alpha, Number) and isinstance(beta, Number):
-            batch_shape = ()
+            batch_shape = torch.Size()
         else:
             batch_shape = self.alpha.size()
         super(Gamma, self).__init__(batch_shape)
