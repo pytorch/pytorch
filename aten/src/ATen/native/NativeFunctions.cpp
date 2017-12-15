@@ -599,7 +599,7 @@ static inline CScalar digamma_one(CScalar x) {
     for random number x drawn from a standard Gamma distribution Gamma(alpha).
 */
 template <typename CScalar>
-static inline CScalar standard_gamma_grad_one(CScalar x, CScalar alpha) {
+static inline CScalar standard_gamma_grad_one(CScalar alpha, CScalar x) {
   // Use an asymptotic approximation for small x.
   if (x < 0.2f) {
     const CScalar a0 = 1 / alpha;
@@ -641,18 +641,18 @@ static inline CScalar standard_gamma_grad_one(CScalar x, CScalar alpha) {
 
 template <typename CScalar>
 struct StandardGammaGradOp {
-  static void apply(Tensor& ret, const Tensor& self, const Tensor& alpha) {
-    CPU_tensor_apply3<CScalar>(ret, self, alpha,
-      [](CScalar& ret_val, const CScalar& self_val, const CScalar &alpha_val) {
-         ret_val = standard_gamma_grad_one(self_val, alpha_val);
+  static void apply(Tensor& ret, const Tensor& self, const Tensor& output) {
+    CPU_tensor_apply3<CScalar>(ret, self, output,
+      [](CScalar& ret_val, const CScalar& self_val, const CScalar &output_val) {
+         ret_val = standard_gamma_grad_one(self_val, output_val);
       }
     );
   }
 };
 
-Tensor _standard_gamma_grad(const Tensor& self, const Tensor& alpha) {
+Tensor _standard_gamma_grad(const Tensor& self, const Tensor& output) {
   Tensor ret = self.type().tensor(self.sizes());
-  dispatch_cpu_floating_types<StandardGammaGradOp>(self.type(), "_standard_gamma_grad", ret, self, alpha);
+  dispatch_cpu_floating_types<StandardGammaGradOp>(self.type(), "_standard_gamma_grad", ret, self, output);
   return ret;
 }
 
