@@ -375,13 +375,30 @@ struct algorithm_spec<CollectiveType::BROADCAST, T> {
 #ifdef WITH_CUDA
     } else if (device == DeviceType::CUDA) {
       auto stream = THCState_getCurrentStream(THDGetCudaState());
-      algo = std::make_shared<::gloo::CudaBroadcastOneToAll<T>>(
-        context,
-        std::initializer_list<T*>{reinterpret_cast<T*>(input_buffer.get())},
-        count,
-        src_rank,
-        0,
-        std::vector<cudaStream_t>{stream});
+      
+      #if defined(GLOO_USE_IBVERBS) && GLOO_USE_IBVERBS
+            // Only enable GPU direct if the device supports it
+            if (context->getDevice()->hasGPUDirect()) {
+              algo = std::make_shared<::gloo::CudaBroadcastOneToAll<T,
+                                      ::gloo::CudaDeviceWorkspace<T>>>(
+                context,
+                std::initializer_list<T*>{reinterpret_cast<T*>(input_buffer.get())},
+                count,
+                src_rank,
+                0,
+                std::vector<cudaStream_t>{stream});
+            } else
+      #endif
+            {
+              algo = std::make_shared<::gloo::CudaBroadcastOneToAll<T,
+                                      ::gloo::CudaHostWorkspace<T>>>( 
+                context,
+                std::initializer_list<T*>{reinterpret_cast<T*>(input_buffer.get())},
+                count,
+                src_rank,
+                0,
+                std::vector<cudaStream_t>{stream});
+            }
 #endif
     } else {
       throw std::runtime_error("unsupported tensor device in Gloo broadcast");
