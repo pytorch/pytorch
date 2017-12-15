@@ -51,6 +51,7 @@ static inline void check_correct_backend(const Tensor& t1, const Tensor &t2, con
   check_correct_backend(t3, 3);
 }
 
+// TODO: turn this macro into a proper template
 #define __ATH_TENSOR_APPLYX_PREAMBLE(TYPE, ATENSOR, DIM, ALLOW_CONTIGUOUS) \
   TYPE *ATENSOR##_data = NULL; \
   int64_t *ATENSOR##_counter = NULL, *ATENSOR##_sizes = NULL, *ATENSOR##_strides = NULL, *ATENSOR##_dimOffset = NULL; \
@@ -115,6 +116,7 @@ static inline void check_correct_backend(const Tensor& t1, const Tensor &t2, con
   } \
   ATENSOR##_i = 0;
 
+// TODO: turn this macro into a proper template
 #define  __ATH_TENSOR_APPLYX_UPDATE_COUNTERS(ATENSOR, ALWAYS_UPDATE) \
   if(ATENSOR##_i == ATENSOR##_size || ALWAYS_UPDATE) \
   { \
@@ -150,38 +152,7 @@ static inline void check_correct_backend(const Tensor& t1, const Tensor &t2, con
         break; \
     } \
     ATENSOR##_i = 0; \
-  } \
-
-#define ATH_TENSOR_APPLY2_D(TYPE, ATENSOR1, ATENSOR2, DIM, CODE) \
-{ \
-  bool TH_TENSOR_APPLY_hasFinished = false; \
-  int64_t TH_TENSOR_dim_index = 0; \
-  __ATH_TENSOR_APPLYX_PREAMBLE(TYPE, ATENSOR1, DIM, 1) \
-  __ATH_TENSOR_APPLYX_PREAMBLE(TYPE, ATENSOR2, DIM, 1) \
-\
-  auto t1_numel = ATENSOR1.numel(); \
-  auto t2_numel = ATENSOR2.numel(); \
-  if(t1_numel != t2_numel) {                                    \
-    std::ostringstream oss; \
-    oss << "inconsistent tensor size, expected " << ATENSOR1.sizes() << " and " << ATENSOR2.sizes() \
-        << " to have the same number of elements, but got " << t1_numel << " and " << t2_numel << " elements respectively"; \
-    throw std::runtime_error(oss.str()); \
-  }                                                                   \
-  while(!TH_TENSOR_APPLY_hasFinished) \
-  { \
-    /* Loop through the inner most region of the Tensor */ \
-    for(; ATENSOR1##_i < ATENSOR1##_size && ATENSOR2##_i < ATENSOR2##_size; ATENSOR1##_i++, ATENSOR2##_i++, ATENSOR1##_data += ATENSOR1##_stride, ATENSOR2##_data += ATENSOR2##_stride) /* 0 et pas TENSOR##_dim! */ \
-    { \
-      CODE \
-    } \
-    __ATH_TENSOR_APPLYX_UPDATE_COUNTERS(ATENSOR1, 0) \
-    __ATH_TENSOR_APPLYX_UPDATE_COUNTERS(ATENSOR2, 0) \
-  } \
-  if(ATENSOR1##_counter != NULL) \
-    delete [] ATENSOR1##_counter; \
-  if(ATENSOR2##_counter != NULL) \
-    delete [] ATENSOR2##_counter; \
-}
+  }
 
 template <typename ScalarType, typename Op>
 void CPU_tensor_apply2_dim(Tensor& tensor1, Tensor& tensor2, int64_t dim, Op op) {
