@@ -183,10 +183,10 @@ class LayerParameter(object):
                 # ResetWorkspace to save memory
                 workspace.ResetWorkspace()
                 return shape
-            except RuntimeError:
+            except RuntimeError as exp:
                 logger.warning(
-                    "Cannot infer the shape of blob {} from operator {}".format(
-                        self.parameter, self.initializer.type)
+                    "Cannot infer the shape of blob {} from operator {}: {}".format(
+                        self.parameter, self.initializer.type, exp)
                 )
                 workspace.ResetWorkspace()
                 return None
