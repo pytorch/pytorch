@@ -83,7 +83,7 @@ class Conv1d(_ConvNd):
     :math:`L` is a length of signal sequence.
 
     | :attr:`stride` controls the stride for the cross-correlation, a single
-      number or a tuple.
+      number or a one-element tuple.
     | :attr:`padding` controls the amount of implicit zero-paddings on both
     |  sides for :attr:`padding` number of points.
     | :attr:`dilation` controls the spacing between the kernel points; also

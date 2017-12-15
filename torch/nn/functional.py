@@ -31,11 +31,11 @@ def conv1d(input, weight, bias=None, stride=1, padding=0, dilation=1,
         weight: filters of shape (out_channels x in_channels x kW)
         bias: optional bias of shape (out_channels). Default: None
         stride: the stride of the convolving kernel. Can be a single number or
-          a tuple (sW,). Default: 1
+          a one-element tuple (sW,). Default: 1
         padding: implicit zero paddings on both sides of the input. Can be a
-          single number or a tuple (padW,). Default: 0
+          single number or a one-element tuple (padW,). Default: 0
         dilation: the spacing between kernel elements. Can be a single number or
-          a tuple (dW,). Default: 1
+          a one-element tuple (dW,). Default: 1
         groups: split input into groups, in_channels should be divisible by
           the number of groups. Default: 1
 
