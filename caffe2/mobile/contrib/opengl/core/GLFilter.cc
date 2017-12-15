@@ -514,7 +514,7 @@ GLint GLFilter::compileShader(GLenum target,
                               GLsizei count,
                               const GLchar** sources,
                               GLuint* shader) const {
-  GLint status;
+  GLint status = 1;
 
   *shader = glCreateShader(target);
   glShaderSource(*shader, count, sources, NULL);
@@ -542,7 +542,7 @@ GLint GLFilter::compileShader(GLenum target,
 
 /* Link a program with all currently attached shaders */
 GLint GLFilter::linkProgram(GLuint program) const {
-  GLint status;
+  GLint status = 1;
 
   glLinkProgram(program);
 
@@ -563,7 +563,7 @@ GLint GLFilter::linkProgram(GLuint program) const {
 
 /* Validate a program (for i.e. inconsistent samplers) */
 GLint GLFilter::validateProgram(GLuint program) const {
-  GLint status;
+  GLint status = 1;
 
   glValidateProgram(program);
 
