@@ -27,6 +27,13 @@
 #include "caffe2/utils/math.h"
 #include "caffe2/utils/proto_utils.h"
 
+#import <UIKit/UIDevice.h>
+
+#define SYSTEM_VERSION_GREATER_THAN_OR_EQUAL_TO(v) \
+  ([[[UIDevice currentDevice] systemVersion]       \
+       compare:v                                   \
+       options:NSNumericSearch] != NSOrderedAscending)
+
 namespace caffe2 {
 
 /* Utility functions for operator definition */
@@ -1181,6 +1188,99 @@ void testMPSCNN() {
                   }
                 }
               }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  @autoreleasepool {
+    bool runtimeAtLeastIOS11 = SYSTEM_VERSION_GREATER_THAN_OR_EQUAL_TO(@"11.0");
+    if (runtimeAtLeastIOS11) {
+      for (const auto& batchSize : std::vector<int>{1, 2}) {
+        for (const auto& input_channels : std::vector<int>{32, 64, 128, 256}) {
+          for (const auto& channel_multiplier : std::vector<int>{1}) {
+            LOG(INFO) << "MPSCNNDepthwiseConv Test";
+            Workspace ws;
+            int output_channels = input_channels * channel_multiplier;
+            {
+              auto* t = ws.CreateBlob("X_cpu")->GetMutable<TensorCPU>();
+              t->Resize(batchSize, input_channels, 57, 72);
+              CPUContext ctx;
+              math::RandGaussian<float, CPUContext>(
+                  t->size(), 0, 1, t->mutable_data<float>(), &ctx);
+            }
+
+            {
+              auto* t = ws.CreateBlob("W")->GetMutable<TensorCPU>();
+              t->Resize(output_channels, 1, 3, 3);
+              CPUContext ctx;
+              math::RandGaussian<float, CPUContext>(
+                  t->size(), 0, 1, t->mutable_data<float>(), &ctx);
+            }
+
+            {
+              auto* t = ws.CreateBlob("b")->GetMutable<TensorCPU>();
+              t->Resize(output_channels);
+              CPUContext ctx;
+              math::RandGaussian<float, CPUContext>(
+                  t->size(), 0, 1, t->mutable_data<float>(), &ctx);
+            }
+
+            NetDef netdef;
+#define ADD_ARGS(op)                                      \
+  do {                                                    \
+    add_arg_str(op, "order", "NCHW");                     \
+    add_arg_int_list(                                     \
+        op,                                               \
+        std::vector<string>{"stride", "kernel", "group"}, \
+        std::vector<int>{1, 3, input_channels});          \
+  } while (false)
+            {
+              auto& op = *(netdef.add_op());
+              op.set_type("CopyToMPSCNN");
+              op.add_input("X_cpu");
+              op.add_output("X_mtl");
+            }
+
+            {
+              auto& op = *(netdef.add_op());
+              op.set_type("MPSCNNConv");
+              op.add_input("X_mtl");
+              op.add_input("W");
+              op.add_input("b");
+              ADD_ARGS(op);
+              op.add_output("Y_mtl");
+            }
+
+            {
+              auto& op = *(netdef.add_op());
+              op.set_type("CopyFromMPSCNN");
+              op.add_input("Y_mtl");
+              op.add_output("Y_cpu");
+            }
+
+            {
+              auto& op = *(netdef.add_op());
+              op.set_type("Conv");
+              op.add_input("X_cpu");
+              op.add_input("W");
+              op.add_input("b");
+              ADD_ARGS(op);
+              op.add_output("Y_ref");
+            }
+#undef ADD_ARGS
+            ws.RunNetOnce(netdef);
+            const auto& t2 = ws.GetBlob("Y_cpu")->Get<TensorCPU>();
+            const auto& t1 = ws.GetBlob("Y_ref")->Get<TensorCPU>();
+
+            CAFFE_ENFORCE_EQ(t1.dims(), t2.dims());
+            for (auto i = 0; i < t1.size(); ++i) {
+              // FP16 <-> FP32 round trip, accumulation, etc.
+              const float t1_i = t1.data<float>()[i];
+              const float t2_i = t2.data<float>()[i];
+              CHECK_NEAR(t1_i, t2_i, 0.3);
             }
           }
         }
