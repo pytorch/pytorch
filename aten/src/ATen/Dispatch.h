@@ -30,11 +30,8 @@ auto dispatch_all(const Type& the_type, const char *name, Args&&... args)
     }
 }
 template<template <typename> class F, typename ... Args>
-auto dispatch_cpu_floating_types(const Type& the_type, const char *name, Args&&... args)
+auto dispatch_floating_types(const Type& the_type, const char *name, Args&&... args)
   -> decltype(F<double>::apply(std::forward<Args>(args)...)) {
-    if (the_type.backend() != Backend::CPU) {
-        runtime_error("%s not implemented for '%s'", name, the_type.toString());
-    }
     switch(the_type.scalarType()) {
         case ScalarType::Double:
             return F<double>::apply(std::forward<Args>(args)...);

@@ -652,7 +652,7 @@ struct StandardGammaGradOp {
 
 Tensor _standard_gamma_grad(const Tensor& self, const Tensor& output) {
   Tensor ret = self.type().tensor(self.sizes());
-  dispatch_cpu_floating_types<StandardGammaGradOp>(self.type(), "_standard_gamma_grad", ret, self, output);
+  dispatch_floating_types<StandardGammaGradOp>(self.type(), "_standard_gamma_grad", ret, self, output);
   return ret;
 }
 
