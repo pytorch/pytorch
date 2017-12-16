@@ -4,7 +4,7 @@ import torch
 import unittest
 from itertools import product
 from torch.autograd import Variable, gradcheck
-from torch.distributions import Bernoulli, Categorical, Normal, Gamma, Distribution
+from torch.distributions import Bernoulli, Categorical, Normal, Gamma, Exponential
 
 TEST_NUMPY = True
 try:
@@ -203,6 +203,43 @@ class TestDistributions(TestCase):
                                         scipy.stats.norm(loc=mean, scale=std),
                                         'Normal(mean={}, std={})'.format(mean, std))
 
+    def test_exponential(self):
+        lambd = Variable(torch.randn(5, 5).abs(), requires_grad=True)
+        lambd_1d = Variable(torch.randn(1).abs(), requires_grad=True)
+        self.assertEqual(Exponential(lambd).sample().size(), (5, 5))
+        self.assertEqual(Exponential(lambd).sample_n(7).size(), (7, 5, 5))
+        self.assertEqual(Exponential(lambd_1d).sample_n(1).size(), (1, 1))
+        self.assertEqual(Exponential(lambd_1d).sample().size(), (1,))
+        self.assertEqual(Exponential(0.2).sample_n(1).size(), (1,))
+        self.assertEqual(Exponential(50.0).sample_n(1).size(), (1,))
+
+        self._gradcheck_log_prob(Exponential, (lambd,))
+        state = torch.get_rng_state()
+        eps = -torch.rand(lambd.size()).log()
+        torch.set_rng_state(state)
+        z = Exponential(lambd).rsample()
+        z.backward(torch.ones_like(z))
+        self.assertEqual(lambd.grad.data, -eps / lambd.data**2)
+        lambd.grad.zero_()
+        self.assertEqual(z.size(), (5, 5))
+
+        def ref_log_prob(idx, x, log_prob):
+            m = lambd.data.view(-1)[idx]
+            expected = math.log(m) - m * x
+            self.assertAlmostEqual(log_prob, expected, places=3)
+
+        self._check_log_prob(Exponential(lambd), ref_log_prob)
+
+    # This is a randomized test.
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    def test_exponential_sample(self):
+        self._set_rng_seed()
+        for mean, std in product([-1.0, 0.0, 1.0], [0.1, 1.0, 10.0]):
+            self._check_sampler_sampler(Normal(mean, std),
+                                        scipy.stats.norm(loc=mean, scale=std),
+                                        'Normal(mean={}, std={})'.format(mean, std))
+
+    # This is a randomized test.
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_gamma_shape(self):
         alpha = Variable(torch.exp(torch.randn(2, 3)), requires_grad=True)
@@ -391,6 +428,25 @@ class TestDistributionShapes(TestCase):
         self.assertEqual(normal.sample((3, 2)).size(), torch.Size((3, 2, 2)))
         self.assertEqual(normal.log_prob(self.tensor_sample_1).size(), torch.Size((3, 2)))
         self.assertRaises(ValueError, normal.log_prob, self.tensor_sample_2)
+
+    def test_exponential_shape_scalar_param(self):
+        expon = Exponential(1.)
+        self.assertEqual(expon._batch_shape, torch.Size())
+        self.assertEqual(expon._event_shape, torch.Size())
+        self.assertEqual(expon.sample().size(), torch.Size((1,)))
+        self.assertEqual(expon.sample((3, 2)).size(), torch.Size((3, 2)))
+        self.assertRaises(ValueError, expon.log_prob, self.scalar_sample)
+        self.assertEqual(expon.log_prob(self.tensor_sample_1).size(), torch.Size((3, 2)))
+        self.assertEqual(expon.log_prob(self.tensor_sample_2).size(), torch.Size((3, 2, 3)))
+
+    def test_exponential_shape_tensor_param(self):
+        expon = Exponential(torch.Tensor([1, 1]))
+        self.assertEqual(expon._batch_shape, torch.Size((2,)))
+        self.assertEqual(expon._event_shape, torch.Size(()))
+        self.assertEqual(expon.sample().size(), torch.Size((2,)))
+        self.assertEqual(expon.sample((3, 2)).size(), torch.Size((3, 2, 2)))
+        self.assertEqual(expon.log_prob(self.tensor_sample_1).size(), torch.Size((3, 2)))
+        self.assertRaises(ValueError, expon.log_prob, self.tensor_sample_2)
 
 
 if __name__ == '__main__':
