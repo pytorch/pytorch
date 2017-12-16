@@ -106,6 +106,9 @@ void initPythonIRBindings(PyObject * module_) {
     .def("hasMultipleOutputs",[](Node&n) {
       return n.outputs().size() > 1;
     })
+    .def("outputsSize",[](Node &n) {
+      return n.outputs().size();
+    })
     .NS(kind)
     .NS(stage)
     .NS(setStage)

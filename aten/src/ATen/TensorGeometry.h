@@ -4,7 +4,7 @@
 
 namespace at {
 
-struct TensorGeometry {
+struct AT_API TensorGeometry {
   TensorGeometry() : storage_offset_(0) {}
 
   explicit TensorGeometry(const Tensor& t)

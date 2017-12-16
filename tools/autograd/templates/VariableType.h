@@ -45,6 +45,7 @@ private:
   // checks that t is actually a Variable with the given expected_type
   static Variable & checked_cast(const Type & expected_type, const Tensor & t, const char * name, int pos);
   at::Tensor & unpack(const Tensor & t, const char * name, int pos) const;
+  at::SparseTensor unpack(SparseTensor t, const char * name, int pos) const;
   at::Tensor & unpack_long(const Tensor & t, const char * name, int pos) const;
   at::Tensor & unpack_byte(const Tensor & t, const char * name, int pos) const;
   at::Tensor & unpack_any(const Tensor & t, const char * name, int pos) const;

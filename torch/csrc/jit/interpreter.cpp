@@ -478,6 +478,13 @@ struct InterpreterStateImpl {
       outputs.clear();
       loadTensorsFromRegisters(stage.outputs, outputs);
   }
+  const TensorType & tensorTypeForInput(size_t i) const {
+    size_t graph_i = i;
+    for(size_t s = 0; s < current_stage; s++)
+      graph_i += function->stages[s].inputs.size;
+    JIT_ASSERTM(graph_i < function->graph->inputs().size(), "Input out of range");
+    return *function->graph->inputs().at(graph_i)->type()->expect<TensorType>();
+  }
   int get(const ListHandle<int> & list, int i) {
     return int_data[list.start + i];
   };
@@ -531,6 +538,9 @@ void InterpreterState::runOneStage(
   const std::vector<at::Tensor> & inputs,
   std::vector<at::Tensor> & outputs) {
     return pImpl->runOneStage(inputs, outputs);
+}
+const TensorType & InterpreterState::tensorTypeForInput(size_t i) const {
+  return pImpl->tensorTypeForInput(i);
 }
 InterpreterState InterpreterState::clone() const {
   return InterpreterState(new InterpreterStateImpl(*pImpl));

@@ -611,7 +611,7 @@ std::pair<UnpackedInput, InputFlags> unpack_input(PyObject *args) {
 static void _trace_create(PyObject* op_obj, THPFunction* bw_obj,
         PyObject *input_objects, PyObject *output_objects,
         const variable_list& input_vars, bool is_inplace) {
-  if (!tracer::isTracing(input_vars))
+  if (!tracer::isTracingVar(input_vars))
     return;
 
   if (!op_obj) {

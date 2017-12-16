@@ -3976,3 +3976,15 @@
     - arg: THSize* size
     - arg: THStride* stride
 ]]
+
+[[
+  name: _sparse_mask
+  return: argument 0
+  cname: sparseMask
+  aten_dense_sparse: True
+  arguments:
+    - arg: THSTensor* result
+      output: True
+    - THTensor* self
+    - THSTensor* mask
+]]

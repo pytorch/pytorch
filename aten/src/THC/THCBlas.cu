@@ -332,6 +332,36 @@ void THCudaBlas_Dgemm(THCState *state, char transa, char transb, int64_t m, int6
           "with the bound [val] <= %d", INT_MAX);
 }
 
+#if CUDA_VERSION >= 9100
+void THCudaBlas_HgemmStridedBatched(THCState *state, char transa, char transb, long m, long n, long k,
+                             half alpha, const half *a, long lda, long strideA, const half *b, long ldb, long strideB,
+                             half beta, half *c, long ldc, long strideC, long batchCount)
+{
+  if( (m >= INT_MAX) || (n >= INT_MAX) || (k >= INT_MAX) || (lda >= INT_MAX)  || (ldb >= INT_MAX) || (ldc >= INT_MAX) || (batchCount >= INT_MAX) )
+
+  {
+    THError("Cublas_SgemmStridedBatched only supports m, n, k, lda, ldb, ldc, batchCount"
+            "with the bound [val] <= %d", INT_MAX);
+  }
+
+  adjustLd(transa, transb, m, n, k, &lda, &ldb, &ldc);
+  cublasOperation_t opa = convertTransToCublasOperation(transa);
+  cublasOperation_t opb = convertTransToCublasOperation(transb);
+
+  cublasHandle_t handle = THCState_getCurrentBlasHandle(state);
+  cublasSetStream(handle, THCState_getCurrentStream(state));
+  float fAlpha = THC_half2float(alpha);
+  float fBeta = THC_half2float(beta);
+  THCublasCheck(cublasSetMathMode(handle, CUBLAS_TENSOR_OP_MATH));
+  THCublasCheck(cublasGemmStridedBatchedEx(handle,
+                                   opa, opb, (int)m, (int)n, (int)k,
+                                   (void*)&fAlpha, a, CUDA_R_16F, (int)lda, strideA,
+                                   b, CUDA_R_16F, (int)ldb, strideB,
+                                   (void*)&fBeta, c, CUDA_R_16F, (int)ldc, strideC,
+                                   (int)batchCount, CUDA_R_32F, CUBLAS_GEMM_DEFAULT_TENSOR_OP));
+  THCublasCheck(cublasSetMathMode(handle, CUBLAS_DEFAULT_MATH));
+}
+#endif
 
 void THCudaBlas_SgemmBatched(THCState *state, char transa, char transb, int64_t m, int64_t n, int64_t k,
                              float alpha, const float *a[], int64_t lda, const float *b[], int64_t ldb,

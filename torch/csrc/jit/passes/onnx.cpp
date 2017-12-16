@@ -24,7 +24,8 @@ bool hasUsedHandle(Node *node) {
 } // anonymous namespace
 
 // Transform PythonOps and Cpp Ops into Node's that match ONNX semantics.
-void ToONNX(std::shared_ptr<tracer::TracingState>& state) {
+// Argument aten indicates whether we should export ops as "ATen" ONNX ops if possible.
+void ToONNX(std::shared_ptr<tracer::TracingState>& state, bool aten) {
   // Check that the tracing state is live (it should be, because
   // you were supposed to request zero derivatives.)
   if (state->is_expired()) {
@@ -151,7 +152,7 @@ void ToONNX(std::shared_ptr<tracer::TracingState>& state) {
         py_inputs[input_nr++] = py::cast(envFn(input));
     }
 
-    py::object raw_output = onnx.attr("_run_symbolic_function")(ctx.graph, n, py_inputs);
+    py::object raw_output = onnx.attr("_run_symbolic_function")(ctx.graph, n, py_inputs, aten);
 
     processSymbolicOutput(symbolToString(n->kind()), n, raw_output);
   };
