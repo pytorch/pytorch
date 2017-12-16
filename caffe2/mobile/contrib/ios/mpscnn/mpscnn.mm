@@ -788,22 +788,55 @@ class MPSCNNConvOp final : public ConvPoolOpBase<CPUContext> {
           }
         }
       }
-      MPSCNNConvolutionDescriptor* desc = [MPSCNNConvolutionDescriptor
-          cnnConvolutionDescriptorWithKernelWidth:kW
-                                     kernelHeight:kH
-                             inputFeatureChannels:C
-                            outputFeatureChannels:M
-                                     neuronFilter:Neuron::t()];
-      desc.strideInPixelsX = stride_w();
-      desc.strideInPixelsY = stride_h();
-      desc.groups = this->group_;
+      // DepthwiseConv path
+      bool runtimeAtLeastIOS11 =
+          SYSTEM_VERSION_GREATER_THAN_OR_EQUAL_TO(@"11.0");
+      // Only inputFeatureChannels == outputFeatureChannels is supported right
+      // now
+      if (runtimeAtLeastIOS11 && this->group_ > 1 && Cf == 1 &&
+          M == this->group_) {
+        const MPSCNNDepthWiseConvolutionDescriptor* desc =
+            [MPSCNNDepthWiseConvolutionDescriptor
+                cnnConvolutionDescriptorWithKernelWidth:kW
+                                           kernelHeight:kH
+                                   inputFeatureChannels:C
+                                  outputFeatureChannels:M
+                                           neuronFilter:Neuron::t()];
+        desc.strideInPixelsX = stride_w();
+        desc.strideInPixelsY = stride_h();
+        desc.groups = 1;
+        conv_ = [[MPSCNNConvolution alloc]
+                   initWithDevice:getMPSCNNContext().device
+            convolutionDescriptor:desc
+                    kernelWeights:refilter.data()
+                        biasTerms:bias.template data<float>()
+                            flags:MPSCNNConvolutionFlagsNone];
+      } else {
+        if (this->group_ > 1) {
+          CAFFE_ENFORCE_EQ(
+              Cf % 4,
+              0,
+              "MPSCNNConvolution requires number of input \
+                           channels in each group to be multiple of 4 for \
+                           group > 1.");
+        }
+        MPSCNNConvolutionDescriptor* desc = [MPSCNNConvolutionDescriptor
+            cnnConvolutionDescriptorWithKernelWidth:kW
+                                       kernelHeight:kH
+                               inputFeatureChannels:C
+                              outputFeatureChannels:M
+                                       neuronFilter:Neuron::t()];
+        desc.strideInPixelsX = stride_w();
+        desc.strideInPixelsY = stride_h();
+        desc.groups = this->group_;
+        conv_ = [[MPSCNNConvolution alloc]
+                   initWithDevice:getMPSCNNContext().device
+            convolutionDescriptor:desc
+                    kernelWeights:refilter.data()
+                        biasTerms:bias.template data<float>()
+                            flags:MPSCNNConvolutionFlagsNone];
+      }
 
-      conv_ =
-          [[MPSCNNConvolution alloc] initWithDevice:getMPSCNNContext().device
-                              convolutionDescriptor:desc
-                                      kernelWeights:refilter.data()
-                                          biasTerms:bias.template data<float>()
-                                              flags:MPSCNNConvolutionFlagsNone];
       [conv_ setEdgeMode:MPSImageEdgeModeZero];
 
       MPSOffset offset;
@@ -816,7 +849,7 @@ class MPSCNNConvOp final : public ConvPoolOpBase<CPUContext> {
 
     CAFFE_ENFORCE_EQ(conv_.strideInPixelsY, stride_h());
     CAFFE_ENFORCE_EQ(conv_.strideInPixelsX, stride_w());
-    CAFFE_ENFORCE_EQ(conv_.inputFeatureChannels, Cf * conv_.groups);
+    CAFFE_ENFORCE_EQ(conv_.inputFeatureChannels, Cf * this->group_);
     CAFFE_ENFORCE_EQ(M % conv_.groups, 0);
     CAFFE_ENFORCE_EQ(conv_.outputFeatureChannels, M);
     CAFFE_ENFORCE_EQ(conv_.kernelWidth, kW);
