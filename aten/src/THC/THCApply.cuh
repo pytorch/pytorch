@@ -37,7 +37,7 @@
 // strides[i] and [j] if
 //    (1) strides[i][k] < strides[j][k] for some k (0 <= k < M)
 //        (exchanging them will benefit input #k), and
-//    (2) strides[i][k] >= strieds[j][k] for all k
+//    (2) strides[i][k] <= strieds[j][k] for all k
 //        (exchanging them will not make any input worse).
 template <typename T1, typename IndexType,
           typename T2 = void, typename T3 = void>
