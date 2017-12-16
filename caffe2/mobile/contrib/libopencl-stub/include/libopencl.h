@@ -7,6 +7,9 @@
 #include <CL/cl.h>
 #include <CL/cl_gl.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 typedef void (*f_pfn_notify)(const char *, const void *, size_t, void *);
 
@@ -235,6 +238,11 @@ typedef cl_int (*f_clGetGLContextInfoKHR) (const cl_context_properties *, cl_gl_
 void stubOpenclReset();
 
 // Helper function to get the path to libOpenCL.so
+int open_libopencl_so();
 cl_int get_libopencl_path(char** cl_path);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif    // LIBOPENCL_STUB_H

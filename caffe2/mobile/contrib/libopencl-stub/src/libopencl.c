@@ -49,7 +49,7 @@ static int access_file(const char *filename)
   return (stat(filename, &buffer) == 0);
 }
 
-static int open_libopencl_so()
+int open_libopencl_so()
 {
   char *path = NULL, *str = NULL;
   int i;
@@ -120,13 +120,10 @@ cl_int get_libopencl_path(char** cl_path)
     }
   }
 
-  if(path)
+  if (path)
   {
-    so_handle = dlopen(path, RTLD_LAZY);
-    if (so_handle) {
-      *cl_path = strndup(path, strlen(path));
-      return CL_SUCCESS;
-    }
+    *cl_path = strndup(path, strlen(path));
+    return CL_SUCCESS;
   }
   return CL_INVALID_PLATFORM;
 }
