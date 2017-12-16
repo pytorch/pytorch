@@ -187,6 +187,38 @@ struct CompiledFunction {
   std::unordered_map<IODescriptor, TraceForKey, torch::hash<IODescriptor>> ktraces_;
 };
 
+
+std::ostream& operator<<(std::ostream& out, const CompiledFunction::TraceForKey & trace) {
+  if(!trace.is_ready_) {
+      out << "<trace has been started but has not been completed>";
+      return out;
+  }
+  out << *trace.graph_ << "\n";
+  return out;
+}
+
+std::ostream& operator<<(std::ostream& out, const CompiledFunction & cf) {
+  out << "CompiledFunction: " << cf.name_ << "(nderivs=" << cf.nderivs_ << ", optimized=" << cf.optimize_ << ", enabled=" << cf.enabled_ << "):\n";
+  out << "trace cache hits: " << cf.hits_ << "\n";
+  out << "trace cache misses: " << cf.misses_ << "\n";
+  std::vector<std::string> trace_info;
+  for(auto & v : cf.ktraces_) {
+    std::stringstream ss;
+    ss << v.first << v.second <<  "\n\n";
+    trace_info.push_back(ss.str());
+  }
+  // unordered map, so sort to make this deterministic, the IODescriptors will
+  // be different so comparison won't read most of the string.
+  std::sort(trace_info.begin(), trace_info.end());
+  out << trace_info.size() << " traces found.\n";
+
+  for(size_t i = 0; i < trace_info.size(); ++i) {
+    out << "Trace " << i << " for input with layout " << trace_info[i];
+  }
+  return out;
+}
+
+
 namespace {
 
 CompiledFunction::TraceForKey* getTraceFor(CompiledFunction& fn,
@@ -233,6 +265,11 @@ void initCompilerMixin(PyObject *module) {
     })
     .def("set_captured_vars", [](CompiledFunction& fn, variable_list vars) {
       fn.captured_vars_ = std::move(vars);
+    })
+    .def("jit_debug_info", [](const CompiledFunction& s) -> std::string {
+      std::ostringstream ss;
+      ss << s;
+      return ss.str();
     })
     .def_property_readonly("hits", [](CompiledFunction& fn) {
       return fn.hits_.load();
