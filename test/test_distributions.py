@@ -204,31 +204,31 @@ class TestDistributions(TestCase):
                                         'Normal(mean={}, std={})'.format(mean, std))
 
     def test_exponential(self):
-        lambd = Variable(torch.randn(5, 5).abs(), requires_grad=True)
-        lambd_1d = Variable(torch.randn(1).abs(), requires_grad=True)
-        self.assertEqual(Exponential(lambd).sample().size(), (5, 5))
-        self.assertEqual(Exponential(lambd).sample_n(7).size(), (7, 5, 5))
-        self.assertEqual(Exponential(lambd_1d).sample_n(1).size(), (1, 1))
-        self.assertEqual(Exponential(lambd_1d).sample().size(), (1,))
+        rate = Variable(torch.randn(5, 5).abs(), requires_grad=True)
+        rate_1d = Variable(torch.randn(1).abs(), requires_grad=True)
+        self.assertEqual(Exponential(rate).sample().size(), (5, 5))
+        self.assertEqual(Exponential(rate).sample_n(7).size(), (7, 5, 5))
+        self.assertEqual(Exponential(rate_1d).sample_n(1).size(), (1, 1))
+        self.assertEqual(Exponential(rate_1d).sample().size(), (1,))
         self.assertEqual(Exponential(0.2).sample_n(1).size(), (1,))
         self.assertEqual(Exponential(50.0).sample_n(1).size(), (1,))
 
-        self._gradcheck_log_prob(Exponential, (lambd,))
+        self._gradcheck_log_prob(Exponential, (rate,))
         state = torch.get_rng_state()
-        eps = -torch.rand(lambd.size()).log()
+        eps = -torch.rand(rate.size()).log()
         torch.set_rng_state(state)
-        z = Exponential(lambd).rsample()
+        z = Exponential(rate).rsample()
         z.backward(torch.ones_like(z))
-        self.assertEqual(lambd.grad.data, -eps / lambd.data**2)
-        lambd.grad.zero_()
+        self.assertEqual(rate.grad.data, -eps / rate.data**2)
+        rate.grad.zero_()
         self.assertEqual(z.size(), (5, 5))
 
         def ref_log_prob(idx, x, log_prob):
-            m = lambd.data.view(-1)[idx]
+            m = rate.data.view(-1)[idx]
             expected = math.log(m) - m * x
             self.assertAlmostEqual(log_prob, expected, places=3)
 
-        self._check_log_prob(Exponential(lambd), ref_log_prob)
+        self._check_log_prob(Exponential(rate), ref_log_prob)
 
     # This is a randomized test.
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
