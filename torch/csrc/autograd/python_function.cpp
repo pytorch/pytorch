@@ -151,30 +151,24 @@ auto PyFunction::apply(const variable_list& inputs) -> variable_list {
     }
   }
 
-  // Now the number of gradients should match
-  if (num_outputs != num_forward_inputs) {
-    std::string msg("function ");
-    msg += name() + " returned an incorrect number of gradients (expected ";
-    msg += std::to_string(num_forward_inputs) + ", got " ;
-    msg += std::to_string(num_outputs) + ")";
-    throw std::runtime_error(msg);
-  }
-
   // Massage the Python results tuple back into a C++ variable_list
   variable_list results;
-  results.reserve(num_outputs);
+  results.reserve(num_outputs); // NB: might need more
   auto& input_info = py_fn->input_info;
-  for (int i = 0; i != num_outputs; ++i) {
-    PyObject* output = PyTuple_GET_ITEM(r.get(), i);
-    bool was_variable = is_variable_input[i];
+
+  int flat_index = 0;
+  auto massage_atom = [&](PyObject *output) {
+    bool was_variable = is_variable_input[flat_index];
+    flat_index++;
     if (!was_variable) {
       if (output != Py_None) {
         std::string msg("function ");
         msg += name() + " returned a gradient different than None at position ";
-        msg += std::to_string(i + 1) + ", but the corresponding forward input was not a Variable";
+        // NB: not flat_index+1, we already incremented!
+        msg += std::to_string(flat_index) + ", but the corresponding forward input was not a Variable";
         throw std::runtime_error(msg);
       }
-      continue;
+      return;
     }
     if (output == Py_None) {
       auto& info = input_info[results.size()];
@@ -192,6 +186,38 @@ auto PyFunction::apply(const variable_list& inputs) -> variable_list {
       }
       results.emplace_back(((THPVariable*)output)->cdata);
     }
+  };
+
+  THPObjectPtr allow_nested_obj(PyObject_GetAttrString(obj, "allow_nested"));
+
+  for (int i = 0; i != num_outputs; ++i) {
+    PyObject* output = PyTuple_GET_ITEM(r.get(), i);
+    if (allow_nested_obj != Py_True) {
+      massage_atom(output);
+    } else {
+      if (PyList_Check(output)) {
+        auto num_inner = PyList_Size(output);
+        for (int j = 0; j < num_inner; j++) {
+          massage_atom(PyList_GET_ITEM(output, j));
+        }
+      } else if (PyTuple_Check(output)) {
+        auto num_inner = PyTuple_Size(output);
+        for (int j = 0; j < num_inner; j++) {
+          massage_atom(PyTuple_GET_ITEM(output, j));
+        }
+      } else {
+        massage_atom(output);
+      }
+    }
+  }
+
+  // Now the number of gradients should match
+  if (flat_index != num_forward_inputs) {
+    std::string msg("function ");
+    msg += name() + " returned an incorrect number of gradients (expected ";
+    msg += std::to_string(num_forward_inputs) + ", got " ;
+    msg += std::to_string(flat_index) + ")";
+    throw std::runtime_error(msg);
   }
 
   return results;
@@ -570,19 +596,16 @@ struct InputFlags {
 };
 
 template<bool enforce_variables>
-std::pair<UnpackedInput, InputFlags> unpack_input(PyObject *args) {
+std::pair<UnpackedInput, InputFlags> unpack_input(PyObject *args, bool unflatten) {
   UnpackedInput unpacked;
   InputFlags flags;
 
-  auto num_args = PyTuple_GET_SIZE(args);
-  unpacked.tensor_input = PyTuple_New(num_args);
-  flags.needs_input_grad = PyTuple_New(num_args);
-  for (int i = 0; i < num_args; i++) {
-    PyObject *arg = PyTuple_GET_ITEM(args, i);
+  auto unpack_atom = [&](PyObject *arg) {
     PyObject *new_arg;
 
     bool is_variable = THPVariable_Check(arg);
     flags.is_variable_input.push_back(is_variable);
+    PyObject *needs_input_grad;
     if (!is_variable) {
       if (enforce_variables) {
         THPUtils_setError("expected a Variable argument, but got %s",
@@ -592,16 +615,62 @@ std::pair<UnpackedInput, InputFlags> unpack_input(PyObject *args) {
       Py_INCREF(arg);
       new_arg = arg;
       Py_INCREF(Py_False);
-      PyTuple_SET_ITEM(flags.needs_input_grad.get(), i, Py_False);
+      needs_input_grad = Py_False;
     } else {
       THPVariable* variable = (THPVariable*)arg;
       new_arg = THPVariable_get_data(variable);
       unpacked.input_vars.push_back(variable->cdata);
       PyObject* needs_grad = variable->cdata.requires_grad() ? Py_True : Py_False;
       Py_INCREF(needs_grad);
-      PyTuple_SET_ITEM(flags.needs_input_grad.get(), i, needs_grad);
+      needs_input_grad = needs_grad;
     }
-    PyTuple_SET_ITEM(unpacked.tensor_input.get(), i, new_arg);
+    return std::make_pair(new_arg, needs_input_grad);
+  };
+
+  auto num_args = PyTuple_GET_SIZE(args);
+  unpacked.tensor_input = PyTuple_New(num_args);
+  flags.needs_input_grad = PyTuple_New(num_args);
+  for (int i = 0; i < num_args; i++) {
+    PyObject *arg = PyTuple_GET_ITEM(args, i);
+    PyObject *new_arg, *needs_input_grad;
+
+    if (!unflatten) {
+      std::tie(new_arg, needs_input_grad) = unpack_atom(arg);
+      PyTuple_SET_ITEM(flags.needs_input_grad.get(), i, needs_input_grad);
+      PyTuple_SET_ITEM(unpacked.tensor_input.get(), i, new_arg);
+      continue;
+    }
+
+    // NB: For simplicity, for now we only support one level of nesting
+    if (PyList_Check(arg)) {
+      auto num_inner = PyList_Size(arg);
+      PyObject *sub_needs_input_grad = PyList_New(num_inner);
+      PyObject *sub_tensor_input = PyList_New(num_inner);
+      for (int j = 0; j < num_inner; j++) {
+        PyObject *subarg = PyList_GET_ITEM(arg, j);
+        std::tie(new_arg, needs_input_grad) = unpack_atom(subarg);
+        PyList_SET_ITEM(sub_needs_input_grad, j, needs_input_grad);
+        PyList_SET_ITEM(sub_tensor_input, j, new_arg);
+      }
+      PyTuple_SET_ITEM(flags.needs_input_grad.get(), i, sub_needs_input_grad);
+      PyTuple_SET_ITEM(unpacked.tensor_input.get(), i, sub_tensor_input);
+    } else if (PyTuple_Check(arg)) {
+      auto num_inner = PyTuple_Size(arg);
+      PyObject *sub_needs_input_grad = PyTuple_New(num_inner);
+      PyObject *sub_tensor_input = PyTuple_New(num_inner);
+      for (int j = 0; j < num_inner; j++) {
+        PyObject *subarg = PyTuple_GET_ITEM(arg, j);
+        std::tie(new_arg, needs_input_grad) = unpack_atom(subarg);
+        PyTuple_SET_ITEM(sub_needs_input_grad, j, needs_input_grad);
+        PyTuple_SET_ITEM(sub_tensor_input, j, new_arg);
+      }
+      PyTuple_SET_ITEM(flags.needs_input_grad.get(), i, sub_needs_input_grad);
+      PyTuple_SET_ITEM(unpacked.tensor_input.get(), i, sub_tensor_input);
+    } else {
+      std::tie(new_arg, needs_input_grad) = unpack_atom(arg);
+      PyTuple_SET_ITEM(flags.needs_input_grad.get(), i, needs_input_grad);
+      PyTuple_SET_ITEM(unpacked.tensor_input.get(), i, new_arg);
+    }
   }
 
   flags.flags = Function::flags(unpacked.input_vars);
@@ -781,7 +850,7 @@ PyObject *THPFunction_do_forward(THPFunction *self, PyObject *_inputs)
   HANDLE_TH_ERRORS
   torch::autograd::profiler::RecordFunction record(Py_TYPE(self)->tp_name);
 
-  auto info_pair = unpack_input<true>(_inputs);
+  auto info_pair = unpack_input<true>(_inputs, false /* unflatten */);
   auto& unpacked_input = info_pair.first;
   auto& input_info = info_pair.second;
   bool is_executable = input_info.flags.is_executable;
@@ -811,8 +880,11 @@ PyObject *THPFunction_apply(PyObject *cls, PyObject *inputs)
   if (!ctx_obj) return NULL;
   THPFunction* ctx = (THPFunction*)ctx_obj.get();
 
+  THPObjectPtr allow_nested_obj(PyObject_GetAttrString(cls, "allow_nested"));
+  PyObject_SetAttrString(ctx_obj.get(), "allow_nested", Py_True);
+
   // Prepare inputs and allocate context (grad fn)
-  auto info_pair = unpack_input<false>(inputs);
+  auto info_pair = unpack_input<false>(inputs, allow_nested_obj == Py_True);
   UnpackedInput& unpacked_input = info_pair.first;
   InputFlags& input_info = info_pair.second;
 

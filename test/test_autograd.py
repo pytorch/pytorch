@@ -144,6 +144,26 @@ class TestAutograd(TestCase):
         MyFunction.apply(v.clone()).backward()
         self.assertEqual(v.grad.data.tolist(), [2])
 
+    def test_nested_input(self):
+        @torch.autograd.function.allow_nested_inputs
+        class MyStack(Function):
+            @staticmethod
+            def forward(ctx, xs, ys):
+                ctx.xs_len = len(xs)
+                ctx.ys_len = len(ys)
+                return torch.cat(xs), torch.cat(ys)
+
+            @staticmethod
+            def backward(ctx, grad_xs_out, grad_ys_out):
+                return grad_xs_out.chunk(ctx.xs_len), grad_ys_out.chunk(ctx.ys_len)
+
+        v1 = Variable(torch.ones(1), requires_grad=True)
+        v2 = Variable(torch.ones(1), requires_grad=True)
+        xs_out, ys_out = MyStack.apply([v1, v2], [v1, v2])
+        (xs_out + ys_out).sum().backward()
+        self.assertEqual(v1.grad.data.tolist(), [2.0])
+        self.assertEqual(v2.grad.data.tolist(), [2.0])
+
     def test_accumulate_grad(self):
         grad_output = Variable(torch.ones(5, 5))
         for start_volatile, end_volatile in product((True, False), repeat=2):
