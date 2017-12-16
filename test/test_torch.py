@@ -4241,6 +4241,10 @@ class TestTorch(TestCase):
         b += [(t1.storage(), t1.storage(), t2.storage())]
         b += [a[0].storage()[0:2]]
         for use_name in (False, True):
+            # Passing filename to torch.save(...) will cause the file to be opened twice,
+            # which is not supported on Windows
+            if sys.platform == "win32" and use_name:
+                continue
             with tempfile.NamedTemporaryFile() as f:
                 handle = f if not use_name else f.name
                 torch.save(b, handle)
@@ -4396,6 +4400,10 @@ class TestTorch(TestCase):
         self.assertEqual(type(tensor), torch.FloatTensor)
         self.assertEqual(tensor, torch.FloatTensor([[1.0, 2.0], [3.0, 4.0]]))
 
+        tensor = torch.load(test_file_path, map_location='cpu')
+        self.assertEqual(type(tensor), torch.FloatTensor)
+        self.assertEqual(tensor, torch.FloatTensor([[1.0, 2.0], [3.0, 4.0]]))
+
     def test_from_buffer(self):
         a = bytearray([1, 2, 3, 4])
         self.assertEqual(torch.ByteStorage.from_buffer(a).tolist(), [1, 2, 3, 4])
@@ -4410,6 +4418,7 @@ class TestTorch(TestCase):
         self.assertEqual(floats.size(), 1)
         self.assertEqual(floats[0], 2.25)
 
+    @unittest.skipIf(sys.platform == "win32", "TODO: need to fix this test case for Windows")
     def test_from_file(self):
         size = 10000
         with tempfile.NamedTemporaryFile() as f:
@@ -4643,6 +4652,12 @@ class TestTorch(TestCase):
 
     def test_dlpack_conversion(self):
         x = torch.randn(1, 2, 3, 4).type('torch.FloatTensor')
+        z = from_dlpack(to_dlpack(x))
+        self.assertEqual(z, x)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "No CUDA")
+    def test_dlpack_cuda(self):
+        x = torch.randn(1, 2, 3, 4).cuda()
         z = from_dlpack(to_dlpack(x))
         self.assertEqual(z, x)
 

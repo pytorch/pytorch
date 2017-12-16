@@ -64,7 +64,7 @@ void initPythonTracerBindings(PyObject* module_) {
     return getTracingState(vars);
   });
   m.def("_is_tracing", [](const variable_list& vars) {
-    return isTracing(vars);
+    return isTracingVar(vars);
   });
 }
 

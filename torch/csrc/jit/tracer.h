@@ -64,32 +64,41 @@ inline std::vector<VariableFlags> getVarFlags(const variable_list& vars) {
 // are treated as constants.
 //
 // TODO: This code lives in the hotpath; make sure it is fast
-inline bool isTracing(const Variable& var) {
+inline bool isTracingVar(const Variable& var) {
   if (!var.defined() || !var.tracing_state()) return false;
   return std::any_of(var.tracing_state()->begin(), var.tracing_state()->end(), detail::isElemActive);
 }
 
-inline bool isTracing(std::initializer_list<Variable> vars) {
-  // Reference to avoid refcount bump
-  for (auto& var : vars) {
-    if (isTracing(var)) return true;
-  }
-  return false;
-}
-
-inline bool isTracing(const at::ArrayRef<Variable>& vars) {
+inline bool isTracingVar(at::ArrayRef<Variable> vars) {
   // Reference to avoid refcount bump
   for (const Variable& var : vars) {
-    if (isTracing(var)) return true;
+    if (isTracingVar(var)) return true;
   }
   return false;
 }
 
-inline bool isTracing(const at::TensorList& vars) {
-  for (const auto & var_t : vars) {
-    if (isTracing(static_cast<const Variable&>(var_t))) return true;
-  }
+// NB: Don't forget to forward declare your template calls: they are going to
+// recursively call one another!
+template<typename... Args> inline bool isTracing();
+template<typename... Args> inline bool isTracing(const at::Tensor& x, Args... args);
+template<typename... Args> inline bool isTracing(at::ArrayRef<at::Tensor> xs, Args... args);
+
+template<typename... Args>
+inline bool isTracing() {
   return false;
+}
+
+template<typename... Args>
+inline bool isTracing(const at::Tensor& x, Args... args) {
+  return isTracingVar(x) || isTracing(args...);
+}
+
+template<typename... Args>
+inline bool isTracing(at::ArrayRef<at::Tensor> xs, Args... args) {
+  for (const auto & x : xs) {
+    if (isTracingVar(x)) return true;
+  }
+  return isTracing(args...);
 }
 
 // Retrieve the tracing state which a function applied with 'vars' should

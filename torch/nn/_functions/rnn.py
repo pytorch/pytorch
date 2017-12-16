@@ -277,7 +277,7 @@ class CudnnRNN(NestedIOFunction):
         if flat_weight is None:
             warnings.warn("RNN module weights are not part of single contiguous "
                           "chunk of memory. This means they need to be compacted "
-                          "at every call, possibly greately increasing memory usage. "
+                          "at every call, possibly greatly increasing memory usage. "
                           "To compact weights again call flatten_parameters().", stacklevel=5)
 
     def forward_extended(self, input, weight, hx):

@@ -30,7 +30,6 @@ using namespace torch::jit;
 using at::Tensor;
 
 PyObject *THPFunctionClass = NULL;
-PyObject *THPBatchNormBackwardBackwardFunction = NULL;
 
 #define THPFunction_assert(condition, ...)                                     \
   if (!(condition)) { THPUtils_setError(__VA_ARGS__); throw python_error(); }
@@ -612,7 +611,7 @@ std::pair<UnpackedInput, InputFlags> unpack_input(PyObject *args) {
 static void _trace_create(PyObject* op_obj, THPFunction* bw_obj,
         PyObject *input_objects, PyObject *output_objects,
         const variable_list& input_vars, bool is_inplace) {
-  if (!tracer::isTracing(input_vars))
+  if (!tracer::isTracingVar(input_vars))
     return;
 
   if (!op_obj) {

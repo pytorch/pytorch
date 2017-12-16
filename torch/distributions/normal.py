@@ -2,8 +2,9 @@ import math
 from numbers import Number
 
 import torch
+from torch.autograd import Variable
 from torch.distributions.distribution import Distribution
-from torch.distributions.utils import expand_n
+from torch.distributions.utils import expand_n, broadcast_all
 
 
 class Normal(Distribution):
@@ -22,18 +23,27 @@ class Normal(Distribution):
         mean (float or Tensor or Variable): mean of the distribution
         std (float or Tensor or Variable): standard deviation of the distribution
     """
+    has_rsample = True
 
     def __init__(self, mean, std):
-        self.mean = mean
-        self.std = std
+        self.mean, self.std = broadcast_all(mean, std)
+        if isinstance(mean, Number) and isinstance(std, Number):
+            batch_shape = torch.Size()
+        else:
+            batch_shape = self.mean.size()
+        super(Normal, self).__init__(batch_shape)
 
-    def sample(self):
-        return torch.normal(self.mean, self.std)
+    def sample(self, sample_shape=torch.Size()):
+        shape = self._extended_shape(sample_shape)
+        return torch.normal(self.mean.expand(shape), self.std.expand(shape))
 
-    def sample_n(self, n):
-        return torch.normal(expand_n(self.mean, n), expand_n(self.std, n))
+    def rsample(self, sample_shape=torch.Size()):
+        shape = self._extended_shape(sample_shape)
+        eps = self.mean.new(shape).normal_()
+        return self.mean + eps * self.std
 
     def log_prob(self, value):
+        self._validate_log_prob_arg(value)
         # compute the variance
         var = (self.std ** 2)
         log_std = math.log(self.std) if isinstance(self.std, Number) else self.std.log()
