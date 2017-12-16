@@ -266,30 +266,31 @@ class _TensorBase(object):
         # If args == (torch.Size,), then we need to unpack the tuple
         if len(sizes) == 1 and isinstance(sizes[0], torch.Size):
             sizes = sizes[0]
-        repeats = list(sizes)
-        result = self.new()
-        src = self.contiguous()
 
-        if len(repeats) < src.dim():
+        repeats = list(sizes)
+
+        if len(repeats) < self.dim():
             raise ValueError('Number of dimensions of repeat dims can not be '
                              'smaller than number of dimensions of tensor')
 
-        xtensor = src.new().set_(src)
-        xsize = list(xtensor.size())
-        for i in _range(len(repeats) - src.dim()):
-            xsize = [1] + xsize
+        # Add new leading dimensions to the tensor if the
+        # number of target dimensions is larger than the
+        # number of source dimensions.
+        num_new_dimensions = len(repeats) - self.dim()
+        padded_size = [1] * num_new_dimensions + list(self.size())
+        target_size = torch.Size([a * b for a, b in zip(padded_size, repeats)])
 
-        size = torch.Size([a * b for a, b in zip(xsize, repeats)])
-        xtensor.resize_(torch.Size(xsize))
-        result.resize_(size)
+        xtensor = self.new().set_(self)
+        xtensor = xtensor.expand(padded_size)
+
+        result = self.new()
+        result.resize_(target_size)
         urtensor = result.new(result)
         for i in _range(xtensor.dim()):
             urtensor = urtensor.unfold(i, xtensor.size(i), xtensor.size(i))
-        for i in _range(urtensor.dim() - xtensor.dim()):
-            xsize = [1] + xsize
-        xtensor.resize_(torch.Size(xsize))
-        xxtensor = xtensor.expand_as(urtensor)
-        urtensor.copy_(xxtensor)
+
+        urtensor.copy_(xtensor.expand_as(urtensor))
+
         return result
 
     def masked_copy_(self, *args, **kwargs):
