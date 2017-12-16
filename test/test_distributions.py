@@ -310,7 +310,7 @@ class TestDistributions(TestCase):
         self.assertEqual(Beta(alpha_1d, beta_1d).sample().size(), (4,))
         self.assertEqual(Beta(alpha_1d, beta_1d).sample_n(1).size(), (1, 4))
         self.assertEqual(Beta(0.1, 0.3).sample().size(), (1,))
-        self.assertEqual(Beta(0.1, 0.3).sample_n(5).size(), (5, 1))
+        self.assertEqual(Beta(0.1, 0.3).sample_n(5).size(), (5,))
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_beta_log_prob(self):
@@ -444,6 +444,26 @@ class TestDistributionShapes(TestCase):
         self.assertEqual(bernoulli.log_prob(self.tensor_sample_1).size(), torch.Size((3, 2)))
         self.assertRaises(ValueError, bernoulli.log_prob, self.tensor_sample_2)
 
+    def test_beta_shape_scalar_params(self):
+        dist = Beta(0.1, 0.1)
+        self.assertEqual(dist._batch_shape, torch.Size())
+        self.assertEqual(dist._event_shape, torch.Size())
+        self.assertEqual(dist.sample().size(), torch.Size((1,)))
+        self.assertEqual(dist.sample((3, 2)).size(), torch.Size((3, 2)))
+        self.assertRaises(ValueError, dist.log_prob, self.scalar_sample)
+        self.assertEqual(dist.log_prob(self.tensor_sample_1).size(), torch.Size((3, 2)))
+        self.assertEqual(dist.log_prob(self.tensor_sample_2).size(), torch.Size((3, 2, 3)))
+
+    def test_beta_shape_tensor_params(self):
+        dist = Beta(torch.Tensor([[0.1, 0.2], [0.3, 0.4], [0.5, 0.6]]),
+                    torch.Tensor([[0.1, 0.2], [0.3, 0.4], [0.5, 0.6]]))
+        self.assertEqual(dist._batch_shape, torch.Size((3, 2)))
+        self.assertEqual(dist._event_shape, torch.Size(()))
+        self.assertEqual(dist.sample().size(), torch.Size((3, 2)))
+        self.assertEqual(dist.sample((3, 2)).size(), torch.Size((3, 2, 3, 2)))
+        self.assertEqual(dist.log_prob(self.tensor_sample_1).size(), torch.Size((3, 2)))
+        self.assertRaises(ValueError, dist.log_prob, self.tensor_sample_2)
+
     def test_categorical_shape(self):
         categorical = Categorical(torch.Tensor([[0.6, 0.3], [0.6, 0.3], [0.6, 0.3]]))
         self.assertEqual(categorical._batch_shape, torch.Size((3,)))
@@ -452,6 +472,15 @@ class TestDistributionShapes(TestCase):
         self.assertEqual(categorical.sample((3, 2)).size(), torch.Size((3, 2, 3,)))
         self.assertRaises(ValueError, categorical.log_prob, self.tensor_sample_1)
         self.assertEqual(categorical.log_prob(self.tensor_sample_2).size(), torch.Size((3, 2, 3)))
+
+    def test_dirichlet_shape(self):
+        dist = Dirichlet(torch.Tensor([[0.6, 0.3], [1.6, 1.3], [2.6, 2.3]]))
+        self.assertEqual(dist._batch_shape, torch.Size((3,)))
+        self.assertEqual(dist._event_shape, torch.Size((2,)))
+        self.assertEqual(dist.sample().size(), torch.Size((3, 2)))
+        self.assertEqual(dist.sample((5, 4)).size(), torch.Size((5, 4, 3, 2)))
+        self.assertEqual(dist.log_prob(self.tensor_sample_1).size(), torch.Size((3,)))
+        self.assertRaises(ValueError, dist.log_prob, self.tensor_sample_2)
 
     def test_gamma_shape_scalar_params(self):
         gamma = Gamma(1, 1)

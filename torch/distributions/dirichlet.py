@@ -47,14 +47,18 @@ class Dirichlet(Distribution):
 
     def __init__(self, alpha):
         self.alpha, = broadcast_all(alpha)
+        batch_shape, event_shape = alpha.shape[:-1], alpha.shape[-1:]
+        super(Dirichlet, self).__init__(batch_shape, event_shape)
 
     def rsample(self, sample_shape=()):
-        alpha = self.alpha.expand(sample_shape + self.alpha.shape)
+        shape = self._extended_shape(sample_shape)
+        alpha = self.alpha.expand(shape)
         if isinstance(alpha, Variable):
             return _Dirichlet.apply(alpha)
         return _dirichlet_sample_nograd(alpha)
 
     def log_prob(self, value):
+        self._validate_log_prob_arg(value)
         return ((torch.log(value) * (self.alpha - 1.0)).sum(-1) +
                 torch.lgamma(self.alpha.sum(-1)) -
                 torch.lgamma(self.alpha).sum(-1))

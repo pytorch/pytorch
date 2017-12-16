@@ -24,16 +24,21 @@ class Beta(Distribution):
     has_rsample = True
 
     def __init__(self, alpha, beta):
-        alpha, beta = broadcast_all(alpha, beta)
-        alpha_beta = torch.stack([alpha, beta], -1)
-        self.dirichlet = Dirichlet(alpha_beta)
+        if isinstance(alpha, Number) and isinstance(beta, Number):
+            alpha_beta = torch.Tensor([alpha, beta])
+        else:
+            alpha, beta = broadcast_all(alpha, beta)
+            alpha_beta = torch.stack([alpha, beta], -1)
+        self._dirichlet = Dirichlet(alpha_beta)
+        super(Beta, self).__init__(self._dirichlet._batch_shape)
 
     def rsample(self, sample_shape=()):
-        return self.dirichlet.rsample(sample_shape).select(-1, 0)
+        value = self._dirichlet.rsample(sample_shape).select(-1, 0)
+        if isinstance(value, Number):
+            value = self._dirichlet.alpha.new([value])
+        return value
 
     def log_prob(self, value):
-        if isinstance(value, Number):
-            heads_tails = torch.Tensor([value, 1.0 - value])
-        else:
-            heads_tails = torch.stack([value, 1.0 - value], -1)
-        return self.dirichlet.log_prob(heads_tails)
+        self._validate_log_prob_arg(value)
+        heads_tails = torch.stack([value, 1.0 - value], -1)
+        return self._dirichlet.log_prob(heads_tails)
