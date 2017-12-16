@@ -1,6 +1,5 @@
 import warnings
-from torch.autograd import Function, NestedIOFunction, Variable
-from torch.autograd.function import _iter_variables, _unflatten
+from torch.autograd import NestedIOFunction
 import torch.backends.cudnn as cudnn
 from .. import functional as F
 from .thnn import rnnFusedPointwise as fusedBackend
@@ -343,32 +342,18 @@ class CudnnRNN(NestedIOFunction):
         return grad_input, grad_weight, grad_hx
 
 
-def hack_onnx_rnn(fargs, output, args, kwargs):
-    input, all_weights, hx = fargs
-    output_tensors = tuple(v.data for v in _iter_variables(output))
-    flat_weights = tuple(_iter_variables(all_weights))
-    flat_hx = tuple(_iter_variables(hx))
+def RNN_symbolic_builder(*args, **kwargs):
+    def symbolic(g, input, all_weights, hx, **kwargs):
+        # Something can go here, e.g.
+        # return g.op('LSTM', input, *all_weights[0], outputs=2)
+        raise RuntimeError("RNN symbolic NYI")
 
-    class RNNSymbolic(Function):
-        @staticmethod
-        def symbolic(g, *fargs):
-            # NOTE: fargs contains Variable inputs (input + weight + hidden)
-            # NOTE: args/kwargs contain RNN parameters
-            raise RuntimeError("hack_onnx_rnn NYI")
-
-        @staticmethod
-        def forward(ctx, *fargs):
-            return output_tensors
-
-        @staticmethod
-        def backward(ctx, *gargs, **gkwargs):
-            raise RuntimeError("FIXME: Traced RNNs don't support backward")
-
-    flat_output = RNNSymbolic.apply(*((input,) + flat_weights + flat_hx))
-    return _unflatten(flat_output, output)
+    import torch.onnx
+    return torch.onnx.symbolic_override(symbolic)
 
 
 def RNN(*args, **kwargs):
+
     def forward(input, *fargs, **fkwargs):
         if cudnn.is_acceptable(input.data):
             func = CudnnRNN(*args, **kwargs)
@@ -377,11 +362,12 @@ def RNN(*args, **kwargs):
 
         # Hack for the tracer that allows us to represent RNNs as single
         # nodes and export them to ONNX in this form
+        # It can be also used as a decorator at the higher level
+        # Check the first argument explicitly to reduce the overhead of creating
+        # the lambda
         if torch._C._jit_is_tracing(input):
-            assert not fkwargs
-            output = func(input, *fargs)
-            return hack_onnx_rnn((input,) + fargs, output, args, kwargs)
-        else:
-            return func(input, *fargs, **fkwargs)
+            func = RNN_symbolic_builder(*args, **kwargs)(func)
+
+        return func(input, *fargs, **fkwargs)
 
     return forward
