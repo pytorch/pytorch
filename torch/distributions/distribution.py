@@ -15,20 +15,19 @@ class Distribution(object):
         self._batch_shape = batch_shape
         self._event_shape = event_shape
 
-    def sample(self, sample_shape=()):
+    def sample(self, sample_shape=torch.Size()):
         """
         Generates a sample_shape shaped sample or sample_shape shaped batch of
-        samples if the distribution parameters are batched. Currently only
-        supports `len(sample_shape)<2`.
+        samples if the distribution parameters are batched.
         """
         z = self.rsample(sample_shape)
         return z.detach() if hasattr(z, 'detach') else z
 
-    def rsample(self, sample_shape=()):
+    def rsample(self, sample_shape=torch.Size()):
         """
         Generates a sample_shape shaped reparameterized sample or sample_shape
         shaped batch of reparameterized samples if the distribution parameters
-        are batched. Currently only supports `len(sample_shape)<2`.
+        are batched.
         """
         raise NotImplementedError
 
