@@ -627,8 +627,17 @@ private:
 static const std::string so_template = "/tmp/pytorch_fuserXXXXXX.so";
 static const std::string cpp_template = "/tmp/pytorch_fuserXXXXXX.cpp";
 
+// NB: -march=native not supported on PPC64 g++.  It's a bit annoying
+// to do a configure-style test to decide whether or not the g++
+// actually supports it or not, so we heuristically use the host
+// compiler to predict if the runtime compiler supports the option we
+// want.  This probably won't work if you're cross-compiling.
 static const std::string compile_string =
-  "\"${cxx}\" -O3 -g -march=native -std=c++11 -fPIC ${fopenmp} -shared \"${cpp_file}\" -o \"${so_file}\"";
+  "\"${cxx}\" -O3 -g "
+#ifndef __PPC64__ 
+  "-march=native "
+#endif 
+  "-std=c++11 -fPIC ${fopenmp} -shared \"${cpp_file}\" -o \"${so_file}\"";
 
 static void runCompiler(FusionCompilerConfig & config, const std::string & cpp_file, const std::string & so_file) {
   TemplateEnv env;
