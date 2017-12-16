@@ -10,14 +10,13 @@ import torch.autograd
 import torch.serialization
 import re
 import collections
-import string
-import json
-import math
 import contextlib
 import numbers
 import warnings
-from torch._utils import _range
+import functools
+import types
 from torch._six import string_classes
+from torch.autograd import Function, function
 
 
 @contextlib.contextmanager
@@ -84,6 +83,11 @@ def export(model, args, f, export_params=True, verbose=False, training=False,
 
 
 def _optimize_trace(trace, aten):
+    # run dce first to eliminate dead parts of the graph that might have been
+    # left behind by things like symbolic_override
+    torch._C._jit_pass_dce(trace)
+    torch._C._jit_pass_lint(trace)
+
     torch._C._jit_pass_peephole(trace)
     torch._C._jit_pass_lint(trace)
     torch._C._jit_pass_onnx(trace, aten)
@@ -365,6 +369,73 @@ def _node_getitem(self, k):
     """
     sel = self.kindOf(k)
     return getattr(self, sel)(k)
+
+
+def symbolic_override(symbolic_fn):
+    """
+    Decorator to override ONNX export of the a function with specified subgraph.
+
+    Effectively allows to attach symbolic() implementation to an arbitrary
+    python function or autograd.Function. Requirements for the decorated
+    function:
+     - being non-member function or autograd.Function
+     - positional inputs are Variables/Tensors or (nested) lists or tuples of
+       them (similar requirement to NestedIOFunction)
+     - outputs are similarly Variables/Tensors or (nested) lists or tuples of
+       them
+     - keyword arguments are of non-tensor type
+
+    Example usage:
+
+    ```
+    def symb(g, x, y):
+        return g.op('Sum', x, y[0], y[1])
+
+    @symbolic_override(symb)
+    def foo(x, y):
+        return x + y[0] + y[1]
+    ```
+    """
+
+    def wrapper_maker(fn):
+
+        def wrapper(*args, **kwargs):
+            output = fn(*args, **kwargs)
+            flat_args = tuple(function._iter_variables(args))
+            if not any(map(torch._C._jit_is_tracing, flat_args)):
+                return output
+            flat_output_tensors = tuple(
+                v.data for v in function._iter_variables(output))
+            assert len(list(function._iter_variables_permissive(
+                list(kwargs.values())))) == 0, \
+                "Passing Variable through kwargs is not supported"
+
+            class ExportProxy(Function):
+                @staticmethod
+                def symbolic(g, *flat_args):
+                    symbolic_args = function._unflatten(flat_args, args)
+                    symbolic_output = symbolic_fn(g, *symbolic_args, **kwargs)
+                    return tuple(function._iter_jit_values(symbolic_output))
+
+                @staticmethod
+                def forward(ctx, *unused_args):
+                    return flat_output_tensors
+
+                @staticmethod
+                def backward(ctx, *unused_args, **unused_kwargs):
+                    raise RuntimeError(
+                        "symbolic_override is meant for inference export only")
+
+            flat_proxy_output = ExportProxy.apply(*flat_args)
+            return function._unflatten(flat_proxy_output, output)
+
+        # fn might be autograd.Function too, in this case wrapping doesn't work
+        if isinstance(fn, types.FunctionType):
+            wrapper = functools.wraps(fn)(wrapper)
+
+        return wrapper
+
+    return wrapper_maker
 
 
 torch._C.Graph.op = _graph_op
