@@ -275,16 +275,16 @@ class TestDistributions(TestCase):
         alpha = Variable(torch.exp(torch.randn(2, 3)), requires_grad=True)
         alpha_1d = Variable(torch.exp(torch.randn(4)), requires_grad=True)
         self.assertEqual(Dirichlet(alpha).sample().size(), (2, 3))
-        self.assertEqual(Dirichlet(alpha).sample_n(5).size(), (5, 2, 3))
+        self.assertEqual(Dirichlet(alpha).sample((5,)).size(), (5, 2, 3))
         self.assertEqual(Dirichlet(alpha_1d).sample().size(), (4,))
-        self.assertEqual(Dirichlet(alpha_1d).sample_n(1).size(), (1, 4))
+        self.assertEqual(Dirichlet(alpha_1d).sample((1,)).size(), (1, 4))
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_dirichlet_log_prob(self):
         num_samples = 10
         alpha = torch.exp(torch.randn(5))
         dist = Dirichlet(alpha)
-        x = dist.sample_n(num_samples)
+        x = dist.sample((num_samples,))
         actual_log_prob = dist.log_prob(x)
         for i in range(num_samples):
             expected_log_prob = scipy.stats.dirichlet.logpdf(x[i].numpy(), alpha.numpy())
@@ -306,11 +306,11 @@ class TestDistributions(TestCase):
         alpha_1d = Variable(torch.exp(torch.randn(4)), requires_grad=True)
         beta_1d = Variable(torch.exp(torch.randn(4)), requires_grad=True)
         self.assertEqual(Beta(alpha, beta).sample().size(), (2, 3))
-        self.assertEqual(Beta(alpha, beta).sample_n(5).size(), (5, 2, 3))
+        self.assertEqual(Beta(alpha, beta).sample((5,)).size(), (5, 2, 3))
         self.assertEqual(Beta(alpha_1d, beta_1d).sample().size(), (4,))
-        self.assertEqual(Beta(alpha_1d, beta_1d).sample_n(1).size(), (1, 4))
+        self.assertEqual(Beta(alpha_1d, beta_1d).sample((1,)).size(), (1, 4))
         self.assertEqual(Beta(0.1, 0.3).sample().size(), (1,))
-        self.assertEqual(Beta(0.1, 0.3).sample_n(5).size(), (5,))
+        self.assertEqual(Beta(0.1, 0.3).sample((5,)).size(), (5,))
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_beta_log_prob(self):
