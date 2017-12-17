@@ -154,10 +154,6 @@ IF(NOT NO_CUDA)
   ENDIF()
 endif()
 
-# NB: cudnn functions are NOT CUDA-dispatched (they're concrete), so we
-# must ALWAYS build them
-SET(all_cpp ${all_cpp} ${cudnn_cpp})
-
 filter_list(generated_h generated_cpp "\\.h$")
 
 INCLUDE_DIRECTORIES(${CMAKE_CURRENT_SOURCE_DIR}/..)
