@@ -96,7 +96,9 @@ class Distribution(object):
         """
         if not (torch.is_tensor(value) or isinstance(value, Variable)):
             raise ValueError('The value argument to log_prob must be a Tensor or Variable instance.')
-        batch_dim_start = len(value.size()) - len(self._batch_shape) - len(self._event_shape)
-        if value.size()[batch_dim_start:] != self._batch_shape + self._event_shape:
-            raise ValueError('The right-most size of value must match: {}.'.
-                             format(self._batch_shape + self._event_shape))
+        expected_shape = self._batch_shape + self._event_shape
+        actual_shape = value.size()
+        for i, j in zip(reversed(actual_shape), reversed(expected_shape)):
+            if i != 1 and j != 1 and i != j:
+                raise ValueError('Value is not broadcastable with params: {} vs {}.'.
+                                 format(actual_shape, expected_shape))

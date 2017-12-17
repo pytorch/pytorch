@@ -4,7 +4,7 @@ from numbers import Number
 import torch
 from torch.autograd import Variable
 from torch.distributions.distribution import Distribution
-from torch.distributions.utils import expand_n, broadcast_all
+from torch.distributions.utils import broadcast_all
 
 
 class Normal(Distribution):
