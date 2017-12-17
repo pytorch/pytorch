@@ -105,6 +105,7 @@ void initPythonIRBindings(PyObject * module_) {
       node->setType(other->typeOption());
       return node;
     })
+    .NS(scopeName)
 #define AS(name) def(#name,&Attributes<Node> :: name)
     // methods from Attributes
     .AS(copyAttributes)
