@@ -3520,23 +3520,27 @@ static inline real THTensor_(beta_grad_alpha_small)(real x, real alpha, real bet
   const real b1 = beta - 1;
   const real b2 = beta - 2;
   const real b3 = beta - 3;
+  const real b4 = beta - 4;
   const real a0 = 1 / alpha;
   const real a1 = 1 / (alpha + 1);
   const real a2 = 1 / (alpha + 2);
   const real a3 = 1 / (alpha + 3);
+  const real a4 = 1 / (alpha + 4);
   // Let pdf = pow(x,alpha-1) * pow(1-x,beta-1) / Beta(alpha,beta).
   // Let const = Beta(alpha,beta) / pow(x, alpha). Then
   const real one_over_const_pdf = x / TH_MATH_NAME(pow)(1 - x, beta - 1);
   const real const_cdf = +a0 + b1 * x * (
                          -a1 + b2 * x / 2 * (
                          +a2 + b3 * x / 3 * (
-                         -a3)));
+                         -a3 + b4 * x / 4 * (
+                         +a4))));
   const real const_cdf_alpha = (log(x) + THTensor_(digamma_one)(alpha + beta) -
                                 THTensor_(digamma_one)(alpha)) * const_cdf
                              + -a0 * a0 + b1 * x * (
                                +a1 * a1 + b2 * x / 2 * (
                                -a2 * a2 + b3 * x / 3 * (
-                               +a3)));
+                               +a2 * a3 + b4 * x / 4 * (
+                               -a4))));
   const real result = -const_cdf_alpha * one_over_const_pdf;
   return isnan(result) ? 0.0 : result;
 }
@@ -3572,7 +3576,7 @@ static inline real THTensor_(dirichlet_grad_one)(real x, real alpha, real total)
   const real beta = total - alpha;
 
   // Use an asymptotic approximation for x close to 0.
-  if (x * (1 + total) < 0.75f) {
+  if (x * (1 + total) < 0.85f) {
     return THTensor_(beta_grad_alpha_small)(x, alpha, beta);
   }
 
@@ -3581,33 +3585,31 @@ static inline real THTensor_(dirichlet_grad_one)(real x, real alpha, real total)
     return -THTensor_(beta_grad_beta_small)(1 - x, beta, alpha);
   }
 
-  // Use a Laplace approximation when alpha and (total - alpha) are both large.
-  if (alpha > 100 && beta > 100) {
-    const real logit = x / (1 - x);
-    const real Logit = alpha / beta;
-    return x * (1 - x) * (1 / alpha - TH_MATH_NAME(log)(logit / Logit) / (2 * Logit * total));
+  // Use an asymptotic approximation when alpha and (total - alpha) are both large.
+  if (alpha > 50 && beta > 2) {
+    return (1 - x) * TH_MATH_NAME(sqrt)(x / (alpha * total));
   }
 
   // Use a rational correction to an analytic approximation.
-  static const real c[2][3][3][3] = {
-    {{{0.9725276563, -0.0509239565, 1.625070847e-06},
-      {0.03797015233, 0.007409446855, -0.0008465634691},
-      {0.04498118832, -0.005657730635, 0.0006594371985}},
-     {{-0.4906583778, -0.03501797976, 0.0116832438},
-      {0.07144210068, 0.01917836117, -0.01049408328},
-      {-0.01850287138, 0.0009313017859, 0.001438917764}},
-     {{-0.04252776008, 0.07983672436, -0.005747111986},
-      {0.01119087258, -0.03621480878, 0.002405820172},
-      {0.008194427563, 0.002768270684, -0.0001137741838}}},
-    {{{1, -0.06216981624, -0.001621712526},
-      {0.03395698453, 0.01103224173, -0.000539324895},
-      {0.0438507131, -0.005479208201, 0.000601035911}},
-     {{0.007131342965, 0.03959558295, -0.003737549484},
-      {0.02450054108, 0.001429734367, -0.0002356644527},
-      {-0.004480783661, 0.004028770843, -0.0002935849718}},
-     {{-0.0046942397, 0.003926730136, -0.0003397299665},
-      {0.009286906003, -0.001605160177, 7.69956057e-05},
-      {-0.0006000287485, 0.0004877957422, -4.36865244e-05}}},
+  static const double c[2][3][3][3] = {
+    {{{1.018183628, -0.1206761155, 0.01201300226},
+      {-0.04136941261, 0.005983761076, 0.0004359632044},
+      {0.01871903062, -0.003142986761, 0.0003193022422}},
+     {{-0.1710086785, -0.1773445859, 0.02503325522},
+      {0.07786387381, 0.01992118909, -0.00743265712},
+      {-0.01536982253, -0.001258289593, 0.00146487621}},
+     {{0.01486207015, -0.005753100867, 0.007721033113},
+      {0.00198584584, -0.01445438298, -0.0005612075268},
+      {0.003173120668, 0.004602126094, -0.0002495685207}}},
+    {{{1, -0.09993694905, 0.007355892598},
+      {-0.04850639323, 0.009042562035, -0.001017624704},
+      {0.01695261402, -0.001441008578, 0.000320044464}},
+     {{0.1709691266, -0.01274600716, 0.001039108611},
+      {-0.01163796879, -0.003571179038, 0.0004598127807},
+      {-0.01297340245, 0.003984832484, -0.0001947143638}},
+     {{0.01465337425, -0.001756145071, 0.0001105873695},
+      {9.392799015e-06, -0.0007117711726, 8.385022912e-05},
+      {-0.002197194337, 0.0006524874554, -4.052046678e-05}}},
   };
   const real u = TH_MATH_NAME(log)(x);
   const real a = TH_MATH_NAME(log)(alpha);
