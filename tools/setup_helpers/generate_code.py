@@ -56,7 +56,7 @@ def generate_code(ninja_global=None):
 
     # cwrap depends on pyyaml, so we can't import it earlier
     root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    sys.path.append(root)
+    sys.path.insert(0, root)
     from tools.cwrap import cwrap
     from tools.cwrap.plugins.THPPlugin import THPPlugin
     from tools.cwrap.plugins.ArgcountSortPlugin import ArgcountSortPlugin
