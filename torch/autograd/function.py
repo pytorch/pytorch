@@ -252,7 +252,7 @@ class InplaceFunction(Function):
         self.inplace = inplace
 
 
-def _nested_map(condition, fn):
+def _nested_map(condition, fn, condition_msg=None):
     def _map(obj):
         if condition(obj):
             return fn(obj)
@@ -261,12 +261,16 @@ def _nested_map(condition, fn):
         elif isinstance(obj, (list, tuple)):
             return type(obj)(_map(x) for x in obj)
         else:
-            raise ValueError("NestedIOFunction doesn't know how to process "
-                             "an input object of type " + torch.typename(obj))
+            raise ValueError("Auto nesting doesn't know how to process "
+                             "an input object of type " + torch.typename(obj) +
+                             (". Accepted types: " + condition_msg +
+                              ", or lists/tuples of them"
+                              if condition_msg else ""))
+
     return _map
 
 
-def _iter_filter(condition):
+def _iter_filter(condition, skip_unknown=False, condition_msg=None):
     def _iter(obj):
         if condition(obj):
             yield obj
@@ -276,9 +280,13 @@ def _iter_filter(condition):
             for o in obj:
                 for var in _iter(o):
                     yield var
-        else:
-            raise ValueError("NestedIOFunction doesn't know how to process "
-                             "an input object of type " + torch.typename(obj))
+        elif not skip_unknown:
+            raise ValueError("Auto nesting doesn't know how to process "
+                             "an input object of type " + torch.typename(obj) +
+                             (". Accepted types: " + condition_msg +
+                              ", or lists/tuples of them"
+                              if condition_msg else ""))
+
     return _iter
 
 
@@ -297,27 +305,13 @@ def _unflatten(input, proto):
     return unflatten_helper(input, proto)[0]
 
 
-# Return suitable 'prototype' that doesn't hold
-# references possibly big options from 'obj'
-def _to_proto(obj):
-    def helper(obj):
-        if isinstance(obj, torch.autograd.Variable):
-            return "HOLE"
-        elif obj is None:
-            return None
-        elif isinstance(obj, (list, tuple)):
-            type_ = type(obj)
-            return type_(helper(o) for o in obj)
-        else:
-            raise ValueError("NestedIOFunction doesn't know how to process "
-                             "an input object of type " + torch.typename(obj))
-    return helper(obj)
-
-
-_iter_variables = _iter_filter(lambda o: isinstance(o, torch.autograd.Variable))
-_iter_tensors = _iter_filter(torch.is_tensor)
-_iter_None_tensors = _iter_filter(lambda o: o is None or torch.is_tensor(o))
-_map_variable_tensor = _nested_map(lambda o: isinstance(o, torch.autograd.Variable), lambda o: o.data)
+_iter_variables = _iter_filter(lambda o: isinstance(o, torch.autograd.Variable), condition_msg="Variables")
+_iter_variables_permissive = _iter_filter(lambda o: isinstance(o, torch.autograd.Variable), skip_unknown=True)
+_iter_jit_values = _iter_filter(lambda o: isinstance(o, torch._C.Value), condition_msg="jit's Values")
+_iter_tensors = _iter_filter(torch.is_tensor, condition_msg="Tensors")
+_iter_None_tensors = _iter_filter(lambda o: o is None or torch.is_tensor(o), condition_msg="Tensors or None")
+_map_variable_tensor = _nested_map(lambda o: isinstance(o, torch.autograd.Variable),
+                                   lambda o: o.data, condition_msg="Variables")
 
 
 class NestedIOFunction(Function):

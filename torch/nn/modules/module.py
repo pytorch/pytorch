@@ -709,4 +709,8 @@ class Module(object):
         modules = list(self._modules.keys())
         buffers = list(self._buffers.keys())
         keys = module_attrs + attrs + parameters + modules + buffers
+
+        # Eliminate attrs that are not legal Python variable names
+        keys = [key for key in keys if not key[0].isdigit()]
+
         return sorted(keys)

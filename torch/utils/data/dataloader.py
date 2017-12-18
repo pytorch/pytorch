@@ -4,6 +4,7 @@ from torch._C import _set_worker_signal_handlers, _update_worker_pids, \
     _remove_worker_pids, _error_if_any_worker_fails
 from .sampler import SequentialSampler, RandomSampler, BatchSampler
 import signal
+import functools
 import collections
 import re
 import sys
@@ -30,7 +31,7 @@ class ExceptionWrapper(object):
         self.exc_msg = "".join(traceback.format_exception(*exc_info))
 
 
-def _worker_loop(dataset, index_queue, data_queue, collate_fn):
+def _worker_loop(dataset, index_queue, data_queue, collate_fn, seed, init_fn, worker_id):
     global _use_shared_memory
     _use_shared_memory = True
 
@@ -41,6 +42,11 @@ def _worker_loop(dataset, index_queue, data_queue, collate_fn):
     _set_worker_signal_handlers()
 
     torch.set_num_threads(1)
+    torch.manual_seed(seed)
+
+    if init_fn is not None:
+        init_fn(worker_id)
+
     while True:
         r = index_queue.get()
         if r is None:
@@ -183,6 +189,7 @@ class DataLoaderIter(object):
         self.sample_iter = iter(self.batch_sampler)
 
         if self.num_workers > 0:
+            self.worker_init_fn = loader.worker_init_fn
             self.index_queue = multiprocessing.SimpleQueue()
             self.worker_result_queue = multiprocessing.SimpleQueue()
             self.batches_outstanding = 0
@@ -192,15 +199,13 @@ class DataLoaderIter(object):
             self.rcvd_idx = 0
             self.reorder_dict = {}
 
+            base_seed = torch.LongTensor(1).random_()[0]
             self.workers = [
                 multiprocessing.Process(
                     target=_worker_loop,
-                    args=(self.dataset, self.index_queue, self.worker_result_queue, self.collate_fn))
-                for _ in range(self.num_workers)]
-
-            for w in self.workers:
-                w.daemon = True  # ensure that the worker exits on process exit
-                w.start()
+                    args=(self.dataset, self.index_queue, self.worker_result_queue, self.collate_fn,
+                          base_seed + i, self.worker_init_fn, i))
+                for i in range(self.num_workers)]
 
             if self.pin_memory or self.timeout > 0:
                 self.data_queue = queue.Queue()
@@ -211,6 +216,10 @@ class DataLoaderIter(object):
                 self.worker_manager_thread.start()
             else:
                 self.data_queue = self.worker_result_queue
+
+            for w in self.workers:
+                w.daemon = True  # ensure that the worker exits on process exit
+                w.start()
 
             _update_worker_pids(id(self), tuple(w.pid for w in self.workers))
             _set_SIGCHLD_handler()
@@ -326,7 +335,7 @@ class DataLoader(object):
             indices at a time. Mutually exclusive with batch_size, shuffle,
             sampler, and drop_last.
         num_workers (int, optional): how many subprocesses to use for data
-            loading. 0 means that the data will be loaded in the main process
+            loading. 0 means that the data will be loaded in the main process.
             (default: 0)
         collate_fn (callable, optional): merges a list of samples to form a mini-batch.
         pin_memory (bool, optional): If ``True``, the data loader will copy tensors
@@ -337,11 +346,23 @@ class DataLoader(object):
             will be smaller. (default: False)
         timeout (numeric, optional): if positive, the timeout value for collecting a batch
             from workers. Should always be non-negative. (default: 0)
+        worker_init_fn (callable, optional): If not None, this will be called on each
+            worker subprocess with the worker id as input, after seeding and before data
+            loading. (default: None)
+
+    .. note:: By default, each worker will have its PyTorch seed set to
+              ``base_seed + worker_id``, where ``base_seed`` is a long generated
+              by main process using its RNG. You may use ``torch.initial_seed()`` to access
+              this value in :attr:`worker_init_fn`, which can be used to set other seeds
+              (e.g. NumPy) before data loading.
+
+    .. warning:: If ``spawn'' start method is used, :attr:`worker_init_fn` cannot be an
+                 unpicklable object, e.g., a lambda function.
     """
 
     def __init__(self, dataset, batch_size=1, shuffle=False, sampler=None, batch_sampler=None,
                  num_workers=0, collate_fn=default_collate, pin_memory=False, drop_last=False,
-                 timeout=0):
+                 timeout=0, worker_init_fn=None):
         self.dataset = dataset
         self.batch_size = batch_size
         self.num_workers = num_workers
@@ -349,6 +370,7 @@ class DataLoader(object):
         self.pin_memory = pin_memory
         self.drop_last = drop_last
         self.timeout = timeout
+        self.worker_init_fn = worker_init_fn
 
         if timeout < 0:
             raise ValueError('timeout option should be non-negative')

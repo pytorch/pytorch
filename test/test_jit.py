@@ -943,5 +943,26 @@ class TestJit(TestCase):
         self.assertExpectedTrace(trace)
         # NB: Purposely NOT testing protobuf export here
 
+    def test_debug_info(self):
+        """Check that debug info doesn't crash and has some reasonable info"""
+
+        @torch.jit.compile(nderivs=1)
+        def fn(x, y):
+            return x * y + x + y
+
+        x = Variable(torch.randn(5, 5), requires_grad=True)
+        y = Variable(torch.randn(5, 5), requires_grad=True)
+
+        out = fn(x, y)
+
+        out.sum().backward()
+
+        for _ in range(0, 100):
+            out = fn(x, y)
+        info_str = fn.jit_debug_info()
+        self.assertTrue("hits: 100" in info_str)
+        self.assertTrue("stage 1" in info_str)
+
+
 if __name__ == '__main__':
     run_tests()

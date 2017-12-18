@@ -302,7 +302,7 @@ tests = [
     ('triu', medium_2d, lambda t: [-2], 'negative'),
     ('unsqueeze', new_t(2, 3, 4), lambda t: [2],),
     ('unsqueeze', new_t(2, 3, 4), lambda t: [-2], 'neg_dim'),
-    ('view', small_3d, lambda t: [100, 10],),
+    ('view', small_3d, lambda t: [100, 10], 'contiguous'),
     ('view_as', small_3d, lambda t: [t(100, 10)],),
     ('zero', small_3d, lambda t: [],),
     ('zeros', small_3d, lambda t: [1, 2, 3, 4],),
@@ -421,20 +421,28 @@ def compare_cpu_gpu(tensor_constructor, arg_constructor, fn, t, precision=1e-5, 
 class TestCuda(TestCase):
 
     @unittest.skipIf(torch.cuda.device_count() < 2, "only one GPU detected")
-    def test_autogpu(self):
-        x = torch.randn(5, 5).cuda()
-        y = torch.randn(5, 5).cuda()
+    def _test_autogpu(self, TensorCtor):
+        x = TensorCtor().cuda()
+        y = TensorCtor().cuda()
         self.assertEqual(x.get_device(), 0)
         self.assertEqual(x.get_device(), 0)
         with torch.cuda.device(1):
-            z = torch.randn(5, 5).cuda()
+            z = TensorCtor().cuda()
             self.assertEqual(z.get_device(), 1)
             q = x.add(y)
             self.assertEqual(q.get_device(), 0)
-            w = torch.randn(5, 5).cuda()
+            w = TensorCtor().cuda()
             self.assertEqual(w.get_device(), 1)
+            self.assertEqual(y.cuda().get_device(), 1)
+            self.assertEqual(y.cuda(-1).get_device(), 1)
         z = z.cuda()
         self.assertEqual(z.get_device(), 0)
+
+    def test_autogpu(self):
+        # TODO: clean-up and merge with above code after Variable and Tensor
+        # are merged
+        self._test_autogpu(lambda: torch.randn(5, 5))
+        self._test_autogpu(lambda: torch.autograd.Variable(torch.randn(5, 5)))
 
     @unittest.skipIf(torch.cuda.device_count() < 2, "only one GPU detected")
     def test_new(self):
@@ -726,6 +734,38 @@ class TestCuda(TestCase):
         z = torch.cat([x, y], 0)
         self.assertEqual(z.get_device(), x.get_device())
 
+    def test_cat(self):
+        SIZE = 10
+        for dim in range(-3, 3):
+            pos_dim = dim if dim >= 0 else 3 + dim
+            x = torch.rand(13, SIZE, SIZE).transpose(0, pos_dim).cuda()
+            y = torch.rand(17, SIZE, SIZE).transpose(0, pos_dim).cuda()
+            z = torch.rand(19, SIZE, SIZE).transpose(0, pos_dim).cuda()
+
+            res1 = torch.cat((x, y, z), dim)
+            self.assertEqual(res1.narrow(pos_dim, 0, 13), x, 0)
+            self.assertEqual(res1.narrow(pos_dim, 13, 17), y, 0)
+            self.assertEqual(res1.narrow(pos_dim, 30, 19), z, 0)
+
+        x = torch.randn(20, SIZE, SIZE).cuda()
+        self.assertEqual(torch.cat(torch.split(x, 7)), x)
+        self.assertEqual(torch.cat(torch.chunk(x, 7)), x)
+
+        y = torch.randn(1, SIZE, SIZE).cuda()
+        z = torch.cat([x, y])
+        self.assertEqual(z.size(), (21, SIZE, SIZE))
+
+    def test_cat_bad_input_sizes(self):
+        x = torch.randn(2, 1).cuda()
+        y = torch.randn(2, 1, 1).cuda()
+        z = torch.randn(2, 1, 1).cuda()
+        self.assertRaises(RuntimeError, lambda: torch.cat([x, y, z]))
+
+        x = torch.randn(2, 1, 2).cuda()
+        y = torch.randn(2, 1, 1).cuda()
+        z = torch.randn(2, 2, 1).cuda()
+        self.assertRaises(RuntimeError, lambda: torch.cat([x, y, z], dim=1))
+
     def test_serialization(self):
         x = torch.randn(4, 4).cuda()
         with tempfile.NamedTemporaryFile() as f:
@@ -948,6 +988,9 @@ class TestCuda(TestCase):
     @unittest.skipIf(not HAS_MAGMA, "no MAGMA library detected")
     def test_det(self):
         TestTorch._test_det(self, lambda t: t.cuda())
+
+    def test_view(self):
+        TestTorch._test_view(self, lambda t: t.cuda())
 
     def test_broadcast(self):
         TestTorch._test_broadcast(self, lambda t: t.cuda())
