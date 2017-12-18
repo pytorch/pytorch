@@ -130,7 +130,7 @@ How to adjust Learning Rate
 ---------------------------
 
 :mod:`torch.optim.lr_scheduler` provides several methods to adjust the learning
-rate based on the number of epoches. :class:`torch.optim.lr_scheduler.ReduceLROnPlateau`
+rate based on the number of epochs. :class:`torch.optim.lr_scheduler.ReduceLROnPlateau`
 allows dynamic learning rate reducing based on some validation measurements.
 
 .. autoclass:: torch.optim.lr_scheduler.LambdaLR
@@ -140,6 +140,8 @@ allows dynamic learning rate reducing based on some validation measurements.
 .. autoclass:: torch.optim.lr_scheduler.MultiStepLR
     :members:
 .. autoclass:: torch.optim.lr_scheduler.ExponentialLR
+    :members:
+.. autoclass:: torch.optim.lr_scheduler.CosineAnnealingLR
     :members:
 .. autoclass:: torch.optim.lr_scheduler.ReduceLROnPlateau
     :members:
