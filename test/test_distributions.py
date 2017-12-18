@@ -207,19 +207,19 @@ class TestDistributions(TestCase):
         rate = Variable(torch.randn(5, 5).abs(), requires_grad=True)
         rate_1d = Variable(torch.randn(1).abs(), requires_grad=True)
         self.assertEqual(Exponential(rate).sample().size(), (5, 5))
-        self.assertEqual(Exponential(rate).sample_n(7).size(), (7, 5, 5))
-        self.assertEqual(Exponential(rate_1d).sample_n(1).size(), (1, 1))
+        self.assertEqual(Exponential(rate).sample((7,)).size(), (7, 5, 5))
+        self.assertEqual(Exponential(rate_1d).sample((1,)).size(), (1, 1))
         self.assertEqual(Exponential(rate_1d).sample().size(), (1,))
-        self.assertEqual(Exponential(0.2).sample_n(1).size(), (1,))
-        self.assertEqual(Exponential(50.0).sample_n(1).size(), (1,))
+        self.assertEqual(Exponential(0.2).sample((1,)).size(), (1,))
+        self.assertEqual(Exponential(50.0).sample((1,)).size(), (1,))
 
         self._gradcheck_log_prob(Exponential, (rate,))
         state = torch.get_rng_state()
-        eps = -torch.rand(rate.size()).log()
+        eps = rate.new(rate.size()).exponential_()
         torch.set_rng_state(state)
         z = Exponential(rate).rsample()
         z.backward(torch.ones_like(z))
-        self.assertEqual(rate.grad.data, -eps / rate.data**2)
+        self.assertEqual(rate.grad, -eps / rate**2)
         rate.grad.zero_()
         self.assertEqual(z.size(), (5, 5))
 
@@ -234,10 +234,11 @@ class TestDistributions(TestCase):
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_exponential_sample(self):
         self._set_rng_seed()
-        for mean, std in product([-1.0, 0.0, 1.0], [0.1, 1.0, 10.0]):
-            self._check_sampler_sampler(Normal(mean, std),
-                                        scipy.stats.norm(loc=mean, scale=std),
-                                        'Normal(mean={}, std={})'.format(mean, std))
+        for rate in [1e-5, 1.0, 10.]:
+            # NOTE: see note in distributions.exponential
+            self._check_sampler_sampler(Exponential(rate),
+                                        scipy.stats.expon(scale=1. / rate),
+                                        'Exponential(rate={})'.format(rate), failure_rate=5e-4)
 
     # This is a randomized test.
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")

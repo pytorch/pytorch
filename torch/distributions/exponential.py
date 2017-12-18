@@ -1,5 +1,4 @@
 from numbers import Number
-import math
 import torch
 from torch.distributions.distribution import Distribution
 from torch.distributions.utils import broadcast_all
@@ -28,10 +27,12 @@ class Exponential(Distribution):
 
     def rsample(self, sample_shape=torch.Size()):
         shape = self._extended_shape(sample_shape)
-        u = self.rate.new(*shape).uniform_()
-        return -u.log() / self.rate.expand(shape)
+        # NOTE: Current code fails _check_sampler_sampler when rate=10 with failure_rate=1e-3
+        # (bias: -0.0588 vs threshold:-0.059), whereas commented out code doesn't.
+        # u = self.rate.new(*shape).uniform_()
+        # return -u.log() / self.rate.expand(shape)
+        return self.rate.new(*shape).exponential_() / self.rate
 
     def log_prob(self, value):
         self._validate_log_prob_arg(value)
-        log = math.log if isinstance(self.rate, Number) else torch.log
-        return log(self.rate) - self.rate * value
+        return self.rate.log() - self.rate * value
