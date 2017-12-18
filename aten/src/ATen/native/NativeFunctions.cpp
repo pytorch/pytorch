@@ -292,7 +292,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> _det_with_svd(const Tensor& self) {
   if (!at::isFloatingType(self.type().scalarType()) ||
       self.dim() != 2 || self.size(0) != self.size(1)) {
     std::ostringstream ss;
-    ss << "det(" << self.type() << "{" << self.sizes() << "}): expected a 2D"
+    ss << "det(" << self.type() << "{" << self.sizes() << "}): expected a 2D "
        << "square tensor of floating types";
     throw std::runtime_error(ss.str());
   }
