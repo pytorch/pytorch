@@ -3940,16 +3940,26 @@ new_criterion_tests = [
         module_name='PoissonNLLLoss',
         input_size=(2, 3, 4, 5),
         target_fn=lambda: torch.randn(2, 3, 4, 5).floor_().abs_(),
-        desc='reduced_loss',
+        desc='no_full_loss',  # without sterling approx
     ),
     dict(
         module_name='PoissonNLLLoss',
         constructor_args=(False, True, True),
         input_fn=lambda: torch.randn(2, 3, 4, 5).abs_().add_(0.001),
         target_fn=lambda: torch.randn(2, 3, 4, 5).floor_().abs_(),
-        desc='full_loss',
+        desc='full_loss',  # with sterling approx
     ),
 ]
+
+
+def poissonnllloss_no_reduce_test():
+    t = Variable(torch.randn(10, 10))
+    return dict(
+        fullname='PoissonNLLLLoss_no_reduce',
+        constructor=wrap_functional(
+            lambda i: F.poisson_nll_loss(i, t.type_as(i), reduce=False)),
+        input_fn=lambda: torch.rand(10, 10),
+        pickle=False)
 
 
 def kldivloss_no_reduce_test():
@@ -4165,6 +4175,7 @@ def smoothl1loss_no_reduce_test():
 
 
 new_module_tests = [
+    poissonnllloss_no_reduce_test(),
     kldivloss_no_reduce_test(),
     l1loss_no_reduce_test(),
     mseloss_no_reduce_test(),

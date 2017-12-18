@@ -1120,7 +1120,7 @@ def nll_loss(input, target, weight=None, size_average=True, ignore_index=-100, r
         raise ValueError('Expected 2, 4, or more than 4 dimensions (got {})'.format(dim))
 
 
-def poisson_nll_loss(input, target, log_input=True, full=False, size_average=True, eps=1e-8):
+def poisson_nll_loss(input, target, log_input=True, full=False, size_average=True, eps=1e-8, reduce=True):
     r"""Poisson negative log likelihood loss.
 
     See :class:`~torch.nn.PoissonNLLLoss` for details.
@@ -1139,6 +1139,10 @@ def poisson_nll_loss(input, target, log_input=True, full=False, size_average=Tru
             the losses are instead summed for each minibatch. Default: ``True``
         eps (float, optional): Small value to avoid evaluation of log(0) when
             log_input=False. Default: 1e-8
+        reduce (bool, optional): By default, the losses are averaged
+            over observations for each minibatch, or summed, depending on
+            size_average. When reduce is ``False``, returns a loss per batch
+            element instead and ignores size_average. Default: ``True``
     """
     if log_input:
         loss = torch.exp(input) - target * input
@@ -1147,10 +1151,11 @@ def poisson_nll_loss(input, target, log_input=True, full=False, size_average=Tru
     if full:
         mask = target > 1
         loss[mask] += (target * torch.log(target) - target + 0.5 * torch.log(2 * math.pi * target))[mask]
+    if not reduce:
+        return loss
     if size_average:
         return torch.mean(loss)
-    else:
-        return torch.sum(loss)
+    return torch.sum(loss)
 
 
 kl_div = _add_docstr(torch._C._nn.kl_div, r"""
