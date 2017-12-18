@@ -38,7 +38,7 @@ struct VariableType final : public at::Type {
   virtual std::unique_ptr<at::Storage> unsafeStorageFromTH(void * th_pointer, bool retain) const override;
   virtual at::Tensor unsafeTensorFromTH(void * th_pointer, bool retain) const override;
 
-  virtual void s_copy(const Tensor & src, Tensor & dst) const override;
+  virtual Tensor & s_copy_(Tensor & self, const Tensor & src, bool async) const override;
   ${type_derived_method_declarations}
 
 private:

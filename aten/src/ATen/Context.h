@@ -36,6 +36,7 @@ public:
     return *generator;
   }
   bool hasCUDA() const;
+  int64_t current_device() const;
   // defined in header so that getType has ability to inline
   // call_once check. getType is called fairly frequently
   THCState* lazyInitCUDA() {
@@ -91,6 +92,10 @@ static inline Type& CUDA(ScalarType s) {
 
 static inline bool hasCUDA() {
   return globalContext().hasCUDA();
+}
+
+static inline int64_t current_device() {
+  return globalContext().current_device();
 }
 
 }

@@ -77,9 +77,9 @@ struct AT_API Type {
   // for external dispatch
   virtual TypeID ID() const = 0;
 
-  Tensor copy(const Tensor & src) const;
-  void copy(const Tensor & src, Tensor & dst) const;
-  virtual void s_copy(const Tensor & src, Tensor & dst) const = 0;
+  Tensor copy(const Tensor & src, bool async=false) const;
+  Tensor & copy_(Tensor & self, const Tensor & src, bool async=false) const;
+  virtual Tensor & s_copy_(Tensor & self, const Tensor & src, bool async) const = 0;
 
   Tensor tensorFromBlob(void * data, IntList sizes, const std::function<void(void*)> & deleter=noop_deleter);
   Tensor tensorFromBlob(void * data, IntList sizes, IntList strides, const std::function<void(void*)> & deleter=noop_deleter);
