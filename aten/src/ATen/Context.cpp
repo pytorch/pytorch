@@ -85,4 +85,15 @@ cudaStream_t Context::getCurrentCUDAStream() const {
 }
 #endif
 
+int64_t Context::current_device() const {
+#if AT_CUDA_ENABLED()
+  int device;
+  cudaError_t err = cudaGetDevice(&device);
+  if (err == cudaSuccess) {
+    return device;
+  }
+#endif
+  return -1;
+}
+
 }

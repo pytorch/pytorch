@@ -17,16 +17,16 @@ void Type::registerAll(Context * context) {
   context->type_registry[static_cast<int>(Backend::Undefined)][static_cast<int>(ScalarType::Undefined)].reset(new UndefinedType(context));
 }
 
-void Type::copy(const Tensor & src, Tensor & dst) const {
+Tensor & Type::copy_(Tensor & self, const Tensor & src, bool async) const {
   Tensor b_src;
-  std::tie(b_src) = expand_inplace(dst, src, "copy");
-  s_copy(b_src, dst);
+  std::tie(b_src) = expand_inplace(self, src, "copy");
+  return s_copy_(self, b_src, async);
 }
 
-Tensor Type::copy(const Tensor & src) const {
+Tensor Type::copy(const Tensor & src, bool async) const {
   AT_ASSERT(src.defined(), "attempt to copy an undefined tensor");
   Tensor r = this->tensor(src.sizes());
-  r.copy_(src);
+  r.copy_(src, async);
   return r;
 }
 

@@ -362,26 +362,26 @@ static bool isFloatingPoint(ScalarType s) {
   return s == kFloat || s == kDouble || s == kHalf;
 }
 
-void VariableType::s_copy(const Tensor & src, Tensor & dst) const {
+Tensor & VariableType::s_copy_(Tensor & self, const Tensor & src, bool async) const {
   // TODO: once copy is exposed in Declarations.yaml we may be able to bind
   // it automatically
-  auto& src_ = unpack_any(src, "src", 0);
-  auto& dst_ = unpack(dst, "dst", 1);
-  check_inplace(dst);
+  auto& self_ = unpack(self, "self", 0);
+  auto& src_ = unpack_any(src, "src", 1);
+  check_inplace(self);
   std::shared_ptr<CopyBackwards> grad_fn;
-  auto flags = compute_flags({ dst, src });
-  flags.requires_grad &= isFloatingPoint(dst.type().scalarType());
+  auto flags = compute_flags({ self, src });
+  flags.requires_grad &= isFloatingPoint(self.type().scalarType());
   if (flags.requires_grad) {
-    // TODO: handle device movement
     grad_fn = std::make_shared<CopyBackwards>();
-    grad_fn->next_functions = compute_next_functions({ dst, src });
+    grad_fn->next_functions = compute_next_functions({ self, src });
     grad_fn->num_inputs = 1;
     grad_fn->src_type = &src.type();
     grad_fn->src_device = src.is_cuda() ? src.get_device() : -1;
   }
-  baseType->s_copy(src_, dst_);
-  increment_version(dst);
-  set_flags(static_cast<Variable&>(dst), flags, std::move(grad_fn), true);
+  baseType->s_copy_(self_, src_, async);
+  increment_version(self);
+  set_flags(static_cast<Variable&>(self), flags, std::move(grad_fn), true);
+  return self;
 }
 
 Tensor & VariableType::resize_(Tensor & self, IntList size) const {
