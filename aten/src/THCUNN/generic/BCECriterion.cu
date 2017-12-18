@@ -2,32 +2,19 @@
 #define THC_GENERIC_FILE "generic/BCECriterion.cu"
 #else
 
-#include "THCApply.cuh"
-
 void THNN_(BCECriterion_updateOutput)(
            THCState *state,
            THCTensor *input,
            THCTensor *target,
            THCTensor *output,
            bool sizeAverage,
-           THCTensor *weights,
-           bool reduce)
+           THCTensor *weights)
 {
   THCUNN_check_nElement(state, input, target);
   THCUNN_check_nElement(state, input, weights);
+  THCTensor_(resize1d)(state, output, 1);
   THCUNN_assertSameGPU(state, 3, input, target, weights);
 
-  if (!reduce) {
-    THCTensor_(resizeAs)(state, output, input);
-    THC_pointwiseApply3(state, input, target, output,
-        bce_updateOutput_no_reduce_functor<real, accreal>());
-    if (weights) {
-      THCTensor_(cmul)(state, output, output, weights);
-    }
-    return;
-  }
-
-  THCTensor_(resize1d)(state, output, 1);
   ptrdiff_t size = THCTensor_(nElement)(state, input);
 
   input = THCTensor_(newContiguous)(state, input);
@@ -71,36 +58,21 @@ void THNN_(BCECriterion_updateGradInput)(
            THCState *state,
            THCTensor *input,
            THCTensor *target,
-           THCTensor *gradOutput,
            THCTensor *gradInput,
            bool sizeAverage,
-           THCTensor *weights,
-           bool reduce)
+           THCTensor *weights)
 {
   THCUNN_check_nElement(state, input, target);
   THCUNN_check_nElement(state, input, weights);
   THCUNN_assertSameGPU(state, 4, input, target, gradInput, weights);
 
-  THCTensor_(resizeAs)(state, gradInput, input);
-
-  if (!reduce) {
-    THCUNN_check_nElement(state, gradOutput, input);
-    THC_pointwiseApply3(state, input, target, gradInput,
-        bce_updateGradInput_no_reduce_functor<real, accreal>());
-    THCTensor_(cmul)(state, gradInput, gradInput, gradOutput);
-    if (weights) {
-      THCTensor_(cmul)(state, gradInput, gradInput, weights);
-    }
-    return;
-  }
-
-  THCUNN_check_dim_size(state, gradOutput, 1, 0, 1);
-
   ptrdiff_t size = THCTensor_(nElement)(state, input);
-  real norm = ScalarConvert<accreal, real>::to((sizeAverage ? accreal(1)/size : accreal(1)) * THCTensor_(get1d)(state, gradOutput, 0));
+  real norm = ScalarConvert<accreal, real>::to(sizeAverage ? accreal(1)/size : accreal(1));
 
   input = THCTensor_(newContiguous)(state, input);
   target = THCTensor_(newContiguous)(state, target);
+
+  THCTensor_(resizeAs)(state, gradInput, input);
 
   thrust::device_ptr<real> input_data(THCTensor_(data)(state, input));
   thrust::device_ptr<real> target_data(THCTensor_(data)(state, target));
