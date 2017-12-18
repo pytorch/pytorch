@@ -1,6 +1,7 @@
 #include "python_compiled_function.h"
 
 #include "torch/csrc/jit/pybind.h"
+#include "torch/csrc/autograd/grad_mode.h"
 #include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/jit/tracer.h"
 #include "torch/csrc/jit/passes/dead_code_elimination.h"
@@ -46,9 +47,9 @@ py::object steal(py::handle x) {
 struct CompiledFunction {
 
   struct TraceForKey {
-    TraceForKey(CompiledFunction& fn, bool is_volatile)
+    TraceForKey(CompiledFunction& fn, bool grad_enabled)
       : fn_(fn)
-      , is_volatile_(is_volatile) {}
+      , grad_enabled_(grad_enabled) {}
 
     bool ready() {
       if (is_ready_) return true;
@@ -97,7 +98,9 @@ struct CompiledFunction {
     PyObject* add_trace(PyObject *args, variable_list inputs) {
       JIT_ASSERT(!is_ready_);
       // Start tracing
-      auto trace = tracer::enter(fmap<TraceInput>(inputs), is_volatile_ ? 1 : (fn_.nderivs_ + 1));
+      AutoGradMode grad_mode(grad_enabled_);
+      auto num_stages = grad_enabled_ ? fn_.nderivs_ + 1 : 1;
+      auto trace = tracer::enter(fmap<TraceInput>(inputs), num_stages);
 
       // Call back into Python function
       auto out = PyObject_CallObject(fn_.function_.get(), args);
@@ -120,7 +123,7 @@ struct CompiledFunction {
     CompiledFunction& fn_;
     IODescriptor out_desc_;
     std::vector<std::shared_ptr<TracingState>> traces_;
-    bool is_volatile_;
+    bool grad_enabled_ = false;
     bool is_ready_ = false;
 
     std::shared_ptr<InterpreterFunctionFactory> factory_;
@@ -130,8 +133,9 @@ struct CompiledFunction {
   TraceForKey& getTrace(ParsedArgs& args) {
     auto it = ktraces_.find(args.desc);
     if (it == ktraces_.end()) {
+      bool grad_enabled = args.desc.grad_enabled;
       std::tie(it, std::ignore) = ktraces_.emplace(args.desc,
-                                                   TraceForKey(*this, args.is_volatile));
+                                                   TraceForKey(*this, grad_enabled));
     }
     return it->second;
   }

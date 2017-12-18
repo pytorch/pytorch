@@ -10,40 +10,33 @@ import warnings
 from .variable import Variable
 from .function import Function, NestedIOFunction
 from .gradcheck import gradcheck
+from .grad_mode import no_grad, enable_grad
 from . import profiler
 
-__all__ = ['Variable', 'Function', 'backward']
+__all__ = ['Variable', 'Function', 'backward', 'grad_mode']
 
 
-def _make_grads(outputs, grads, user_create_graph):
-    if user_create_graph is not None:
-        create_graph = user_create_graph
-    else:
-        create_graph = any(isinstance(grad, Variable) and not grad.volatile
-                           for grad in grads)
-
+def _make_grads(outputs, grads):
     new_grads = []
     for out, grad in zip(outputs, grads):
         if isinstance(grad, Variable):
             new_grads.append(grad)
         elif torch.is_tensor(grad):
-            new_grads.append(Variable(grad, volatile=not create_graph))
+            new_grads.append(Variable(grad))
         elif grad is None:
             if out.requires_grad:
                 if out.numel() != 1:
                     raise RuntimeError("grad can be implicitly created only for scalar outputs")
-                data = out.data
-                new_grads.append(
-                    Variable(data.new().resize_as_(data).fill_(1), volatile=not create_graph))
+                new_grads.append(torch.ones_like(out))
             else:
                 new_grads.append(None)
         else:
             raise TypeError("gradients can be either Tensors, Variables or None, but got " +
                             type(grad).__name__)
-    return tuple(new_grads), create_graph
+    return tuple(new_grads)
 
 
-def backward(variables, grad_variables=None, retain_graph=None, create_graph=None, retain_variables=None):
+def backward(variables, grad_variables=None, retain_graph=None, create_graph=False):
     """Computes the sum of gradients of given variables w.r.t. graph leaves.
 
     The graph is differentiated using the chain rule. If any of ``variables``
@@ -71,8 +64,7 @@ def backward(variables, grad_variables=None, retain_graph=None, create_graph=Non
             way. Defaults to the value of ``create_graph``.
         create_graph (bool, optional): If ``True``, graph of the derivative will
             be constructed, allowing to compute higher order derivative products.
-            Defaults to ``False``, unless ``grad_variables`` contains at least one
-            non-volatile Variable.
+            Defaults to ``False``.
     """
     variables = (variables,) if isinstance(variables, Variable) else tuple(variables)
 
@@ -83,22 +75,15 @@ def backward(variables, grad_variables=None, retain_graph=None, create_graph=Non
     else:
         grad_variables = list(grad_variables)
 
-    grad_variables, create_graph = _make_grads(variables, grad_variables, create_graph)
-
-    if retain_variables is not None:
-        if retain_graph is not None:
-            raise ValueError("only one of retain_graph and retain_variables can be specified")
-        retain_graph = retain_variables
-        warnings.warn("retain_variables option is deprecated and will be removed in 0.3. "
-                      "Use retain_graph instead.")
-    elif retain_graph is None:
+    grad_variables = _make_grads(variables, grad_variables)
+    if retain_graph is None:
         retain_graph = create_graph
 
     Variable._execution_engine.run_backward(
-        variables, grad_variables, retain_graph)
+        variables, grad_variables, retain_graph, create_graph)
 
 
-def grad(outputs, inputs, grad_outputs=None, retain_graph=None, create_graph=None,
+def grad(outputs, inputs, grad_outputs=None, retain_graph=None, create_graph=False,
          only_inputs=True, allow_unused=False):
     """Computes and returns the sum of gradients of outputs w.r.t. the inputs.
 
@@ -148,13 +133,14 @@ def grad(outputs, inputs, grad_outputs=None, retain_graph=None, create_graph=Non
     else:
         grad_outputs = list(grad_outputs)
 
-    grad_outputs, create_graph = _make_grads(outputs, grad_outputs, create_graph)
+    grad_outputs = _make_grads(outputs, grad_outputs)
     if retain_graph is None:
         retain_graph = create_graph
 
     return Variable._execution_engine.run_backward(
-        outputs, grad_outputs, retain_graph,
+        outputs, grad_outputs, retain_graph, create_graph,
         inputs, only_inputs, allow_unused)
+
 
 if not torch._C._autograd_init():
     raise RuntimeError("autograd initialization failed")

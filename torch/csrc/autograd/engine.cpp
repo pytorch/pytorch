@@ -1,4 +1,6 @@
 #include "torch/csrc/autograd/engine.h"
+
+#include "torch/csrc/autograd/grad_mode.h"
 #include "torch/csrc/autograd/functions/basic_ops.h"
 #include "torch/csrc/utils/auto_gpu.h"
 
@@ -64,6 +66,7 @@ struct GraphTask {
   std::atomic_bool has_error;
   std::atomic<uint64_t> outstanding_tasks;
   bool keep_graph;
+  bool grad_mode;
 
   std::mutex mutex;
   // Notified when a task finishes executing.  Check outstanding_tasks to see
@@ -76,11 +79,12 @@ struct GraphTask {
 
   int owner;
 
-  GraphTask(bool keep_graph, const Engine::pre_callback_map& pre_callbacks, const Engine::post_callback_map& post_callbacks)
+  GraphTask(bool keep_graph, bool grad_mode, const Engine::pre_callback_map& pre_callbacks, const Engine::post_callback_map& post_callbacks)
     : exception()
     , has_error(false)
     , outstanding_tasks(0)
     , keep_graph(keep_graph)
+    , grad_mode(grad_mode)
     , mutex()
     , not_done()
     , pre_callbacks(pre_callbacks)
@@ -138,6 +142,7 @@ auto Engine::thread_main(GraphTask *graph_task) -> void {
   while (!graph_task || graph_task->outstanding_tasks > 0) {
     FunctionTask task = queue->pop_back();
     if (task.fn && !task.base->has_error.load()) {
+      GradMode::set_enabled(task.base->grad_mode);
       try {
         evaluate_function(task);
       } catch (std::exception& e) {
@@ -321,13 +326,14 @@ struct ClearCallbacks {
 auto Engine::execute(const function_list& input_roots,
                      const variable_list& inputs,
                      bool keep_graph,
+                     bool create_graph,
                      const pre_callback_map& pre_callbacks,
                      const post_callback_map& post_callbacks) -> void {
   std::call_once(start_threads_flag, &Engine::start_threads, this);
   // Callbacks are only valid for the duration of this run and should always be cleared
   ClearCallbacks _cb_guard(final_callbacks, post_callbacks_lock);
 
-  GraphTask graph_task(keep_graph, pre_callbacks, post_callbacks);
+  GraphTask graph_task(keep_graph, create_graph, pre_callbacks, post_callbacks);
   std::unique_lock<std::mutex> lock(graph_task.mutex);
 
   // Now compute the dependencies for all executable functions and queue the root

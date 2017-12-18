@@ -1,6 +1,7 @@
 #include "Python.h"
 #include "accumulate_grad.h"
 
+#include "torch/csrc/autograd/grad_mode.h"
 #include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/autograd/functions/basic_ops.h"
 #include "torch/csrc/autograd/functions/tensor.h"
@@ -34,31 +35,22 @@ auto AccumulateGrad::apply(const variable_list& grads) -> variable_list {
     new_grad = (*hook)({new_grad})[0];
   }
 
-  // TODO: Currently if var.grad is volatile and new-grad is non-volatile we
-  // accumulate in-place. We should reconsider this and perhaps add the
-  // gradients out-of-place.
-
   auto& grad = variable.grad();
   if (!grad.defined()) {
-    grad = apply_fn<Clone>()(new_grad);
-  } else if (grad.is_volatile()) {
+    variable.grad() = new_grad.clone();
+  } else if (!GradMode::is_enabled()) {
     // This case is not strictly necessary, but it makes the first-order only case
     // slightly more efficient and, what's more important, more predictable for
     // the users. Thanks to this case we can avoid changing the grad tensor,
     // a thing never promised and documented, but used in some hacks seen
     // on the internet.
-    AutoGPU guard(grad);
     if (grad.type().is_sparse() && !new_grad.type().is_sparse()) {
       grad.data() = new_grad.data() + grad.data();
     } else {
       grad.data() += new_grad.data();
     }
   } else {
-    // If grad is non-volatile, it should stay like that
-    if (new_grad.is_volatile()) {
-      new_grad = make_variable(new_grad.data());
-    }
-    variable.grad() = apply_fn<Add>()(grad, new_grad);
+    variable.grad() = grad + new_grad;
   }
 
   return variable_list();

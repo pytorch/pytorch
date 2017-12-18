@@ -279,7 +279,7 @@ def _clone_inputs(args):
         if a is None:
             return None
         elif isinstance(a, Variable):
-            v = Variable(a.data.clone(), requires_grad=a.requires_grad, volatile=a.volatile)
+            v = Variable(a.data.clone(), requires_grad=a.requires_grad)
             if a.grad is not None:
                 v.grad = clone_input(v.grad)
             return v

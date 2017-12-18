@@ -16,32 +16,30 @@ struct IODescriptor {
       : sizes(var.sizes())
       , type(var.type().scalarType())
       , device(var.type().is_cuda() ? var.get_device() : -1)
-      , requires_grad(var.requires_grad())
-      , is_volatile(var.is_volatile()) {}
+      , requires_grad(var.requires_grad()) {}
 
     bool operator==(const VariableMetadata& o) const {
-      return std::tie(  device,   requires_grad,   is_volatile,   type,  sizes) ==
-             std::tie(o.device, o.requires_grad, o.is_volatile, o.type, o.sizes);
+      return std::tie(  device,   requires_grad,   type,  sizes) ==
+             std::tie(o.device, o.requires_grad, o.type, o.sizes);
     }
 
     static std::size_t hash(const VariableMetadata& m) {
-      return get_hash(m.sizes, m.device, m.requires_grad, m.type, m.is_volatile);
+      return get_hash(m.sizes, m.device, m.requires_grad, m.type);
     }
 
     std::vector<int64_t> sizes;
     at::ScalarType type;
     int device;
     bool requires_grad;
-    bool is_volatile;
   };
 
   bool operator==(const IODescriptor& o) const {
-    return std::tie(  structure,   metadata) ==
-           std::tie(o.structure, o.metadata);
+    return std::tie(  structure,   metadata,   grad_enabled) ==
+           std::tie(o.structure, o.metadata, o.grad_enabled);
   }
 
   static std::size_t hash(const IODescriptor& o) {
-    return get_hash(o.structure, o.metadata);
+    return get_hash(o.structure, o.metadata, o.grad_enabled);
   }
 
   void extend(const autograd::variable_list& list) {
@@ -59,11 +57,12 @@ struct IODescriptor {
   // different than the number of 'v's in structure.
   std::string structure;
   std::vector<VariableMetadata> metadata;
+  bool grad_enabled;
 };
 
 static inline std::ostream& operator<<(std::ostream& out, const IODescriptor::VariableMetadata& meta) {
   auto & t = at::getType(meta.device < 0 ? at::kCPU : at::kCUDA, meta.type);
-  out << t << "(requires_grad=" << meta.requires_grad << ", " << "is_volatile=" << meta.is_volatile << ") {";
+  out << t << "(requires_grad=" << meta.requires_grad << ") {";
   for(size_t i = 0; i < meta.sizes.size(); ++i) {
     if(i > 0)
       out << ", ";
@@ -75,6 +74,7 @@ static inline std::ostream& operator<<(std::ostream& out, const IODescriptor::Va
 
 static inline std::ostream& operator<<(std::ostream & out, const IODescriptor & desc) {
   out << desc.structure << "\n";
+  out << "  with grad_enabled=" << desc.grad_enabled << "\n";
   for(size_t i = 0; i < desc.metadata.size(); ++i) {
     out << "  with v" << i << " having type " << desc.metadata[i] << "\n";
   }
@@ -85,10 +85,8 @@ struct ParsedArgs {
   // Flat vector of Variables found in arguments
   autograd::variable_list vars;
   // Metadata describing nesting of objects received from Python and
-  // metadata of vars.
+  // metadata of vars and whether grad is enabled.
   IODescriptor desc;
-  // True iff any of vars is volatile
-  bool is_volatile = false;
 
   void extend(const autograd::variable_list& list) {
     if (list.empty()) return;

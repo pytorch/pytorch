@@ -60,17 +60,13 @@ struct HandleBuilder {
     }
   }
   autograd::Variable addInput(at::Retainable* input, const VariableFlags & flags_) {
-    // TODO: handle volatile correctly
     if(handle && flags_.requires_grad) {
-      autograd::VarFlags flags = {true, false};
       return autograd::make_variable(
         unsafeToTensorShare(input),
-        flags,
         handle->forward_inputs->num_inputs++,
         handle->forward_inputs);
     } else {
-      autograd::VarFlags flags = {false, false};
-      return autograd::make_variable(unsafeToTensorShare(input), flags);
+      return autograd::make_variable(unsafeToTensorShare(input));
     }
   }
   at::Retainable* addOutput(const autograd::Variable & output) {
@@ -174,12 +170,14 @@ Operation createEvalOperation(CppOp * op) {
       }
       return false; // stop output and do not run DummyFunction
     });
+    // TODO: handle create_graph appropriately
+    bool create_graph = true;
     // note: node handle_in->use_count() == 1 means that we are guarenteed that we have the only
     // only copy of the handle. This might make it seem it is ok to pass keep_graph=False.
     // However, it is possible for 'copied_next_fns' to grab functions used by _other_ handles,
     // and these functions will be executed in this run. Since these other handles
     // may still be alive, it is not safe to release the graph
-    engine.execute(handle_in->forward_outputs, v_inputs, true, callbacks);
+    engine.execute(handle_in->forward_outputs, v_inputs, true, create_graph, callbacks);
     builder.writeTo(outputs);
   };
 }
