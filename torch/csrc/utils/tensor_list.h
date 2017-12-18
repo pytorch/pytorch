@@ -1,7 +1,7 @@
 #pragma once
 
-#include <ATen/ATen.h>
 #include <Python.h>
+#include <ATen/ATen.h>
 
 namespace torch { namespace utils {
 
