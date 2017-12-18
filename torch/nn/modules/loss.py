@@ -120,9 +120,15 @@ class NLLLoss(_WeightedLoss):
             Default: ``True``
 
     Shape:
-        - Input: :math:`(N, C)` where `C = number of classes`
-        - Target: :math:`(N)` where each value is `0 <= targets[i] <= C-1`
+        - Input: :math:`(N, C)` where `C = number of classes`.
+            In the case of K-dimensional loss where :math:`K >= 2`, then
+            :math:`(N, C, *)` where `*` is `K` extra dimensions.
+        - Target: :math:`(N)` where each value is `0 <= targets[i] <= C-1`.
+            In the case of K-dimensional loss, where :math:`K >= 2`, then
+            :math:`(N, C, *)` where `*` is `K` extra dimensions.
         - Output: scalar. If reduce is ``False``, then :math:`(N)` instead.
+            In the case of K-dimensional loss and reduce is ``False``, then
+            :math:`(N, C, *)`, the same size as the target.
 
     Examples::
 
