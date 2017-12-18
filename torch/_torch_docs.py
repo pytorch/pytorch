@@ -5046,7 +5046,6 @@ Example::
 
 """)
 
-
 add_docstr(torch._C.btrisolve,
            r"""
 btrisolve(b, LU_data, LU_pivots) -> Tensor

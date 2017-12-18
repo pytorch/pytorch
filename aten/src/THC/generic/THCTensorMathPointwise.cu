@@ -139,8 +139,21 @@ THCTensor_(cross)(THCState *state, THCTensor *self, THCTensor *x, THCTensor *y, 
   THCTensor_(free)(state, nself);
 }
 
-
 #if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE) || defined(THC_REAL_IS_HALF)
+
+void THCTensor_(atan2)(THCState *state, THCTensor *self_, THCTensor *tx, THCTensor *ty)
+{
+  THCAssertSameGPU(THCTensor_(checkGPU)(state, 3, self_, tx, ty));
+  THArgCheck(THCTensor_(nElement)(state, tx) ==
+             THCTensor_(nElement)(state, ty), 3, "sizes do not match");
+  THCTensor_(resizeAs)(state, self_, tx);
+
+  if (!THC_pointwiseApply3(state, self_, tx, ty, TensorATan2Op<real>())) {
+    THArgCheck(false, 2, CUTORCH_DIM_WARNING);
+  }
+
+  THCudaCheck(cudaGetLastError());
+}
 
 void THCTensor_(sigmoid)(THCState* state, THCTensor* self_, THCTensor* src) {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self_, src));
