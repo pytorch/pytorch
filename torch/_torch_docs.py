@@ -594,6 +594,8 @@ add_docstr(torch._C.cat,
 cat(seq, dim=0, out=None) -> Tensor
 
 Concatenates the given sequence of :attr:`seq` tensors in the given dimension.
+All tensors must either have the same shape (except in the cat dimension) or be
+empty.
 
 :func:`torch.cat` can be seen as an inverse operation for :func:`torch.split`
 and :func:`torch.chunk`
@@ -601,7 +603,9 @@ and :func:`torch.chunk`
 :func:`cat` can be best understood via examples.
 
 Args:
-    seq (sequence of tensors): any python sequence of tensors of the same type
+    seq (sequence of tensors): any python sequence of tensors of the same type.
+        Non-empty tensors provided must have the same shape, except in the
+        cat dimension.
     dim (int, optional): the dimension over which the tensors are concatenated
     out (Tensor, optional): the output tensor
 
