@@ -22,16 +22,6 @@ namespace torch { namespace autograd {
 using at::Tensor;
 struct VariableImpl;
 
-// TODO: fix name conflict with jit VariableFlags
-struct VarFlags {
-  constexpr VarFlags(bool requires_grad, bool is_volatile)
-    : requires_grad(requires_grad), is_volatile(is_volatile) {}
-  VarFlags() : VarFlags(false, false) {}
-  bool requires_grad;
-  bool is_volatile;
-};
-
-constexpr VarFlags DEFAULT_FLAGS = {false, false};
 
 struct Variable : public at::Tensor {
   inline Variable(VariableImpl * self, bool retain);
@@ -58,8 +48,8 @@ struct Variable : public at::Tensor {
 
   inline const std::shared_ptr<Function>& grad_fn() const;
 
-  // Updates the flags and grad_fn of an existing Variable. Called after in-place modifications.
-  inline void rebase_history(VarFlags flags, int output_nr, std::shared_ptr<Function> grad_fn);
+  // Updates the grad_fn of an existing Variable. Called after in-place modifications.
+  inline void rebase_history(int output_nr, std::shared_ptr<Function> grad_fn);
 
   std::shared_ptr<Function> grad_accumulator() const;
   Variable detach() const;
@@ -77,11 +67,7 @@ struct Variable : public at::Tensor {
   inline const int& output_nr() const;
   inline       int& output_nr();
 
-  inline const bool& requires_grad() const;
-  inline       bool& requires_grad();
-
-  inline const bool& is_volatile() const;
-  inline       bool& is_volatile();
+  inline bool requires_grad() const;
 
   inline bool is_view() const;
   inline Variable& base() const;
@@ -97,7 +83,7 @@ struct Variable : public at::Tensor {
 
 struct VariableImpl : public at::TensorImpl {
 public:
-  VariableImpl(at::Tensor data, VarFlags flags=DEFAULT_FLAGS, int output_nr=0,
+  VariableImpl(at::Tensor data, bool requires_grad=false, int output_nr=0,
                std::shared_ptr<Function> grad_fn=nullptr);
   virtual ~VariableImpl();
   virtual const char * toString() const override;
@@ -128,8 +114,7 @@ public:
   // Mutex to ensure that concurrent read operations that modify internal state
   // are still thread-safe. Used by get_grad_fn and get_grad_accumulator.
   std::mutex mutex;
-  bool requires_grad;
-  bool is_volatile;
+  bool _requires_grad;  // only meaningful on leaf variables (must be false otherwise)
   bool is_view;
   // The "output number" of this variable; e.g., if this variable
   // was the second output of a function, then output_nr == 1.
@@ -150,8 +135,7 @@ public:
 // due to in-place modifications of the shared data. Accesses should go through
 // get_grad_fn(). All other fields are always valid.
 struct VariableViewImpl : public VariableImpl {
-  VariableViewImpl(Variable base, at::Tensor data, VarFlags flags, int output_nr,
-                   std::shared_ptr<Function> grad_fn);
+  VariableViewImpl(Variable base, at::Tensor data, int output_nr, std::shared_ptr<Function> grad_fn);
 
   // Gets the up-to-date grad_fn. If the shared data or base was modified, we
   // re-create the grad_fn to express the up-to-date view relationship between
@@ -160,7 +144,7 @@ struct VariableViewImpl : public VariableImpl {
 
   // Called after in-place modifications. Modifies the grad_fn of the base
   // Variable.
-  void rebase_history(VarFlags flags, int output_nr, std::shared_ptr<Function> grad_fn);
+  void rebase_history(int output_nr, std::shared_ptr<Function> grad_fn);
 
   // The base Variable (never a view)
   Variable base;
@@ -170,30 +154,31 @@ struct VariableViewImpl : public VariableImpl {
   int attr_version;
 };
 
-inline Variable make_variable(at::Tensor data, VarFlags flags=DEFAULT_FLAGS,
-                              int output_nr=0, std::shared_ptr<Function> grad_fn=nullptr) {
-  TORCH_ASSERT(!grad_fn || flags.requires_grad);
+inline Variable make_variable(at::Tensor data, bool requires_grad=false) {
   if (data.defined() && data.dim() == 0) {
     // don't expose 0-dim tensors to Variable API.
     data = data.as_strided_({1}, {1});
   }
-  return Variable(new VariableImpl(std::move(data), flags, output_nr, std::move(grad_fn)), false);
+  return Variable(new VariableImpl(std::move(data), requires_grad), false);
+}
+
+inline Variable make_variable(at::Tensor data, int output_nr, std::shared_ptr<Function> grad_fn) {
+  if (data.defined() && data.dim() == 0) {
+    // don't expose 0-dim tensors to Variable API.
+    data = data.as_strided_({1}, {1});
+  }
+  return Variable(new VariableImpl(std::move(data), false, output_nr, std::move(grad_fn)), false);
 }
 
 Variable make_variable(at::Tensor data, std::shared_ptr<Function> grad_fn);
 
-inline Variable make_variable(at::Tensor data, bool requires_grad, bool is_volatile=false) {
-  return make_variable(std::move(data), VarFlags(requires_grad, is_volatile));
-}
-
-inline Variable make_variable_view(Variable base, at::Tensor data, VarFlags flags=DEFAULT_FLAGS,
-                                   int output_nr=0, std::shared_ptr<Function> grad_fn=nullptr) {
-  TORCH_ASSERT(!grad_fn || flags.requires_grad);
+inline Variable make_variable_view(Variable base, at::Tensor data, int output_nr=0,
+                                   std::shared_ptr<Function> grad_fn=nullptr) {
   if (data.defined() && data.dim() == 0) {
     // don't expose 0-dim tensors to Variable API.
     data = data.as_strided_({1}, {1});
   }
-  return Variable(new VariableViewImpl(std::move(base), std::move(data), flags, output_nr, std::move(grad_fn)), false);
+  return Variable(new VariableViewImpl(std::move(base), std::move(data), output_nr, std::move(grad_fn)), false);
 }
 
 
@@ -232,13 +217,12 @@ inline bool Variable::is_leaf() const {
 inline const std::shared_ptr<Function>& Variable::grad_fn() const {
   return get()->get_grad_fn();
 };
-inline void Variable::rebase_history(VarFlags flags, int output_nr, std::shared_ptr<Function> grad_fn) {
+inline void Variable::rebase_history(int output_nr, std::shared_ptr<Function> grad_fn) {
+  TORCH_ASSERT(grad_fn);
   if (is_view()) {
     auto& impl = static_cast<VariableViewImpl&>(*get());
-    impl.rebase_history(flags, output_nr, std::move(grad_fn));
+    impl.rebase_history(output_nr, std::move(grad_fn));
   } else {
-    get()->requires_grad = flags.requires_grad;
-    get()->is_volatile = flags.is_volatile;
     get()->output_nr = output_nr;
     get()->_grad_fn = std::move(grad_fn);
   }
@@ -274,11 +258,8 @@ inline int& Variable::output_nr() {
   return get()->output_nr;
 }
 
-inline const bool& Variable::requires_grad() const {
-  return get()->requires_grad;
-}
-inline bool& Variable::requires_grad() {
-  return get()->requires_grad;
+inline bool Variable::requires_grad() const {
+  return get()->_requires_grad || get()->_grad_fn || (is_view() && base().requires_grad());
 }
 
 inline const std::string& Variable::name() const {
@@ -286,13 +267,6 @@ inline const std::string& Variable::name() const {
 }
 inline std::string& Variable::name() {
   return get()->name;
-}
-
-inline const bool& Variable::is_volatile() const {
-  return get()->is_volatile;
-}
-inline bool& Variable::is_volatile() {
-  return get()->is_volatile;
 }
 
 inline bool Variable::is_view()const {

@@ -137,8 +137,8 @@ ${buffers}
 ${check_inplace}
 ${check_no_requires_grad}
 std::shared_ptr<${op}> grad_fn;
-auto flags = compute_flags({ ${args_with_derivatives} });
-if (flags.requires_grad) {
+auto requires_grad = compute_requires_grad({ ${args_with_derivatives} });
+if (requires_grad) {
   grad_fn = std::make_shared<${op}>(${op_ctor});
   grad_fn->next_functions = compute_next_functions({ ${args_with_derivatives} });
   ${save_inputs}
@@ -159,12 +159,12 @@ ${record_trace}
 return ${return_value};
 """)
 
-SET_FLAGS = CodeTemplate("""\
-set_flags(${result}, flags, grad_fn);
+SET_HISTORY = CodeTemplate("""\
+set_history(${result}, grad_fn);
 """)
 
-SET_FLAGS_INPLACE = CodeTemplate("""\
-set_flags(${result}, flags, grad_fn, ${modifies_data});
+REBASE_HISTORY = CodeTemplate("""\
+rebase_history(${result}, grad_fn);
 """)
 
 RECORD_TRACE = CodeTemplate("""\
@@ -969,12 +969,17 @@ def create_variable_type(top_env, aten_declarations):
         if declaration['inplace']:
             env['check_inplace'] = 'check_inplace(self);'
             env['version_counter'] = 'increment_version(self);'
-            modifies_data = 'false' if is_view else 'true'
-            env['set_flags'] = SET_FLAGS_INPLACE.substitute(combined, modifies_data=modifies_data)
+            if is_view:
+                # in-place view functions like squeeze_() go through a different
+                # code path because these functions only affect the tensor on
+                # which they're called, not other views of the same data.
+                env['set_flags'] = SET_HISTORY.substitute(combined)
+            else:
+                env['set_flags'] = REBASE_HISTORY.substitute(combined)
             if is_view:
                 env['no_zero_dim'] = 'ensure_no_aten_scalars(self);'
         else:
-            env['set_flags'] = SET_FLAGS.substitute(combined)
+            env['set_flags'] = SET_HISTORY.substitute(combined)
             if is_view:
                 base_call = 'auto ret = as_view(static_cast<const Variable&>(self), {})'.format(base_call)
             else:

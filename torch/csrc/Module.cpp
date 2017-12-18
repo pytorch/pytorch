@@ -827,6 +827,7 @@ static PyObject* initModule() {
 
   THPUtils_addPyMethodDefs(methods, TorchMethods);
   THPUtils_addPyMethodDefs(methods, DataLoaderMethods);
+  THPUtils_addPyMethodDefs(methods, torch::autograd::python_functions());
 #ifdef WITH_CUDA
   THPUtils_addPyMethodDefs(methods, THCPModule_methods());
 #endif

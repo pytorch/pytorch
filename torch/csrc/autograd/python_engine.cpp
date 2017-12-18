@@ -44,10 +44,11 @@ void PythonEngine::execute(
     const function_list& roots,
     const variable_list& inputs,
     bool keep_graph,
+    bool create_graph,
     const pre_callback_map& pre_callbacks,
     const post_callback_map& post_callbacks) {
   try {
-    Engine::execute(roots, inputs, keep_graph, pre_callbacks, post_callbacks);
+    Engine::execute(roots, inputs, keep_graph, create_graph, pre_callbacks, post_callbacks);
   } catch (python_error& e) {
     e.restore();
     throw;
@@ -158,13 +159,18 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
   PyObject *variables = NULL;
   PyObject *grad_variables = NULL;
   unsigned char keep_graph = 0;
+  unsigned char create_graph = 0;
   PyObject *inputs = NULL;
   unsigned char only_inputs = 0;
   unsigned char allow_unreachable = 0;
-  const char *accepted_kwargs[] = {"variables", "grad_variables",
-      "keep_graph", "inputs", "only_inputs", "allow_unreachable", NULL};
-  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "OOb|Obb", (char**)accepted_kwargs,
-        &variables, &grad_variables, &keep_graph, &inputs, &only_inputs, &allow_unreachable))
+  const char *accepted_kwargs[] = {
+      "variables", "grad_variables", "keep_graph", "create_graph", "inputs",
+      "only_inputs", "allow_unreachable",
+      NULL
+  };
+  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "OObb|Obb", (char**)accepted_kwargs,
+        &variables, &grad_variables, &keep_graph, &create_graph, &inputs,
+        &only_inputs, &allow_unreachable))
     return NULL;
 
   THPUtils_assert(PyTuple_Check(variables), "variables argument is expected to "
@@ -184,8 +190,6 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
     THPUtils_assert(THPVariable_Check(_variable), "element %d of variables "
         "tuple is not a Variable", i);
     auto& variable = ((THPVariable*)_variable)->cdata;
-    THPUtils_assert(!variable.is_volatile(),
-        "element %d of variables tuple is volatile", i);
     // If grad_fn is NULL (as is the case for a leaf node), we instead
     // interpret the gradient function to be a grad accumulator,
     // which will accumulate its inputs into the grad property of the
@@ -194,8 +198,6 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
     // have requires_grad=True can have grad accumulators.
     auto grad_fn = variable.grad_fn() ? variable.grad_fn() : variable.grad_accumulator();
     int output_nr = variable.grad_fn() ? variable.output_nr() : 0;
-    THPUtils_assert(!variable.is_volatile(),
-        "element %d of variables tuple is volatile", i);
     THPUtils_assert(grad_fn,
         "element %d of variables does not require grad and does not have a grad_fn", i);
     roots[i] = std::make_pair<>(std::move(grad_fn), output_nr);
@@ -265,7 +267,7 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
 
   {
     AutoNoGIL no_gil;
-    engine.execute(roots, grads, keep_graph, callbacks);
+    engine.execute(roots, grads, keep_graph, create_graph, callbacks);
   }
 
   if (ctx.outputs) {

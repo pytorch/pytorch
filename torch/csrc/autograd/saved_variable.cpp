@@ -13,7 +13,6 @@ SavedVariable::SavedVariable(const Variable& variable, bool is_output)
   }
   data = variable.data();
   requires_grad = variable.requires_grad();
-  is_volatile = variable.is_volatile();
   expected_version = variable.current_version();
   version = variable.get()->version_counter.save();
   has_grad_fn = !variable.is_leaf();
@@ -43,7 +42,6 @@ auto SavedVariable::unpack(std::shared_ptr<Function> saved_for) const -> Variabl
         "modified by an inplace operation");
   }
 
-  auto flags = VarFlags(requires_grad, is_volatile);
   auto grad_fn = _grad_fn;
   if (has_grad_fn && !grad_fn) {
     if (!saved_for) {
@@ -57,7 +55,12 @@ auto SavedVariable::unpack(std::shared_ptr<Function> saved_for) const -> Variabl
   // NB: saved views are unpacked as normal Variables (not views) even though
   // they still share the same storage. This works only because we never call
   // in-place functions on unpacked variables.
-  auto var = make_variable(data, flags, output_nr, std::move(grad_fn));
+  Variable var;
+  if (grad_fn) {
+    var = make_variable(data, output_nr, std::move(grad_fn));
+  } else {
+    var = make_variable(data, requires_grad);
+  }
   var.version_counter() = version;
 
   // If a Variable is a leaf (no grad_fn saved), and it requires_grad, then we
@@ -71,15 +74,6 @@ auto SavedVariable::unpack(std::shared_ptr<Function> saved_for) const -> Variabl
 
   return var;
 }
-
-auto SavedVariable::unpack_data(std::shared_ptr<Function> saved_for) const -> Tensor {
-  auto var = unpack(saved_for);
-  if (var.defined()) {
-    return var.data();
-  }
-  return Tensor();
-}
-
 
 const char* ERR_BACKWARD_TWICE =
     "Trying to backward through the graph a second time, but the buffers have "

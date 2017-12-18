@@ -24,8 +24,6 @@ struct THPVariable {
 extern PyObject *THPVariableClass;
 
 bool THPVariable_initModule(PyObject *module);
-PyObject * THPVariable_NewVolatile(PyObject *data);
-PyObject * THPVariable_NewLeaf(PyObject *data);
 PyObject * THPVariable_Wrap(torch::autograd::Variable var);
 PyObject * THPVariable_get_data(THPVariable *self);
 

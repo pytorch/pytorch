@@ -37,15 +37,13 @@ struct edge_hasher {
   }
 };
 
+// TODO: separate is_executable and next_functions
 // State used to create "backward" functions
 struct FunctionFlags {
   // Roughly speaking, is_executable corresponds to requires_grad.
-  // See http://pytorch.org/docs/notes/autograd.html for more details:
-  // both is_executable and is_volatile specify whether or not backwards
-  // gradient computation will be performed for a function, but they differ in
-  // their precedence.
+  // It's true if any input requires grad and gradient calculation is enabled.
+  // See http://pytorch.org/docs/notes/autograd.html for more details.
   bool is_executable = false;
-  bool is_volatile = false;
   // What functions take the output of this function as input.
   // There is one function per output of this function.
   function_list next_functions;
@@ -91,8 +89,7 @@ struct Function : std::enable_shared_from_this<Function> {
     return shared_from_this();
   };
 
-  // Computes is_executable, is_volatile, and next_functions from a list
-  // of input variables
+  // Computes is_executable and next_functions from a list of input variables
   static FunctionFlags flags(const variable_list& inputs);
   static FunctionFlags flags(const std::initializer_list<Variable>& inputs);
   static FunctionFlags flags(at::TensorList inputs);

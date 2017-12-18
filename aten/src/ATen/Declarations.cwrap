@@ -2276,6 +2276,7 @@
   name: zero_
   cname: zero
   return: self
+  aten_sparse: True
   arguments:
     - THTensor* self
 ]]
@@ -3931,6 +3932,7 @@
   name: assign_
   cname: copy
   cpu_half: True
+  aten_sparse: True
   return: self
   arguments:
     - THTensor* self

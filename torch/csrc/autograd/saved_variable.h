@@ -22,7 +22,6 @@ struct SavedVariable {
     , has_grad_fn(false)
     , version()
     , requires_grad(false)
-    , is_volatile(false)
     , expected_version(-1) {}
 
   SavedVariable(const Variable& variable, bool is_output);
@@ -37,13 +36,11 @@ struct SavedVariable {
   std::weak_ptr<Function> grad_accumulator;
   SavedVersion version;
   bool requires_grad;
-  bool is_volatile;
   int expected_version;
   int output_nr;
   std::unique_ptr<jit::tracer::ValueTracingState> tracing_state;
 
   Variable unpack(std::shared_ptr<Function> saved_for=nullptr) const;
-  at::Tensor unpack_data(std::shared_ptr<Function> saved_for=nullptr) const;
 };
 
 }} // namespace torch::autograd

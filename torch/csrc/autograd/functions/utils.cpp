@@ -16,7 +16,7 @@ variable_list wrap_outputs(const variable_list& inputs, tensor_list&& outputs,
   if (!flags.is_executable) {
     for (auto& output : outputs) {
       if (output.defined()) {
-        result.emplace_back(make_variable(output, false, flags.is_volatile));
+        result.emplace_back(make_variable(output, false));
       } else {
         result.emplace_back();
       }

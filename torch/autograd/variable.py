@@ -32,10 +32,6 @@ class Variable(_C._VariableBase):
             created by a subgraph containing any Variable, that requires it.
             See :ref:`excluding-subgraphs` for more details.
             Can be changed only on leaf Variables.
-        volatile: Boolean indicating that the Variable should be used in
-            inference mode, i.e. don't save the history. See
-            :ref:`excluding-subgraphs` for more details.
-            Can be changed only on leaf Variables.
         is_leaf: Boolean indicating if the Variable is a graph leaf (i.e
             if it was created by the user).
         grad_fn: Gradient function graph trace.
@@ -43,7 +39,6 @@ class Variable(_C._VariableBase):
     Parameters:
         data (any tensor class): Tensor to wrap.
         requires_grad (bool): Value of the requires_grad flag. **Keyword only.**
-        volatile (bool): Value of the volatile flag. **Keyword only.**
     """
 
     def __deepcopy__(self, memo):
@@ -52,12 +47,11 @@ class Variable(_C._VariableBase):
                                "(graph leaves) support the deepcopy protocol at the moment")
         result = type(self)(self.data.clone())
         result.requires_grad = self.requires_grad
-        result.volatile = self.volatile
         memo[id(self)] = result
         return result
 
     def __reduce_ex__(self, proto):
-        state = (self.requires_grad, self.volatile, self._backward_hooks)
+        state = (self.requires_grad, False, self._backward_hooks)
         if proto > 1:
             return type(self), (self.data,), state
         if sys.version_info[0] == 2:
@@ -73,12 +67,12 @@ class Variable(_C._VariableBase):
             state = (state[3], state[4], state[2])
         if not self.is_leaf:
             raise RuntimeError('__setstate__ can be only called on leaf variables')
-        self.requires_grad, self.volatile, self._backward_hooks = state
+        self.requires_grad, _, self._backward_hooks = state
 
     def __repr__(self):
         return 'Variable containing:' + self.data.__repr__()
 
-    def backward(self, gradient=None, retain_graph=None, create_graph=None, retain_variables=None):
+    def backward(self, gradient=None, retain_graph=None, create_graph=False):
         """Computes the gradient of current variable w.r.t. graph leaves.
 
         The graph is differentiated using the chain rule. If the variable is
@@ -93,7 +87,7 @@ class Variable(_C._VariableBase):
         Arguments:
             gradient (Tensor, Variable or None): Gradient w.r.t. the
                 variable. If it is a tensor, it will be automatically converted
-                to a Variable that is volatile unless ``create_graph`` is True.
+                to a Variable that does not require grad unless ``create_graph`` is True.
                 None values can be specified for scalar Variables or ones that
                 don't require grad. If a None value would be acceptable then
                 this argument is optional.
@@ -104,10 +98,9 @@ class Variable(_C._VariableBase):
                 ``create_graph``.
             create_graph (bool, optional): If ``True``, graph of the derivative will
                 be constructed, allowing to compute higher order derivative
-                products. Defaults to ``False``, unless ``gradient`` is a volatile
-                Variable.
+                products. Defaults to ``False``.
         """
-        torch.autograd.backward(self, gradient, retain_graph, create_graph, retain_variables)
+        torch.autograd.backward(self, gradient, retain_graph, create_graph)
 
     def register_hook(self, hook):
         """Registers a backward hook.
@@ -134,8 +127,6 @@ class Variable(_C._VariableBase):
             [torch.FloatTensor of size 3]
             >>> h.remove()  # removes the hook
         """
-        if self.volatile:
-            raise RuntimeError("cannot register a hook on a volatile variable")
         if not self.requires_grad:
             raise RuntimeError("cannot register a hook on a variable that "
                                "doesn't require gradient")
@@ -177,8 +168,7 @@ class Variable(_C._VariableBase):
     detach = _add_docstr(_C._VariableBase.detach, r"""
     Returns a new Variable, detached from the current graph.
 
-    Result will never require gradient. If the input is volatile, the output
-    will be volatile too.
+    The result will never require gradient.
 
     .. note::
 
@@ -335,6 +325,7 @@ class Variable(_C._VariableBase):
 
     def __dir__(self):
         variable_methods = dir(self.__class__)
+        variable_methods.remove('volatile')  # deprecated
         attrs = list(self.__dict__.keys())
         keys = variable_methods + attrs
         return sorted(keys)
