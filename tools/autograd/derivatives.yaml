@@ -128,8 +128,11 @@
   self: grad.bmm(mat2.transpose(1, 2))
   mat2: self.transpose(1, 2).bmm(grad)
 
-- name: btrifact(Tensor self, Tensor info, bool pivot)
+- name: btrifact(Tensor self, bool pivot)
   self: not_implemented("btrifact")
+
+- name: btrifact_with_info(Tensor self, bool pivot)
+  self: not_implemented("btrifact_with_info")
 
 - name: btrisolve(Tensor self, Tensor LU_data, Tensor LU_pivots)
   self: not_implemented("btrisolve")

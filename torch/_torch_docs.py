@@ -3706,7 +3706,7 @@ Returns a 1-D tensor of size :math:`\lfloor \frac{end - start}{step} \rfloor + 1
 with values from :attr:`start` to :attr:`end` with step :attr:`step`. Step is
 the gap between two values in the tensor. :math:`x_{i+1} = x_i + step`.
 
-Warning:
+.. warning::
     This function is deprecated in favor of :func:`torch.arange`.
 
 Args:
@@ -5025,24 +5025,61 @@ Example::
 
 add_docstr(torch._C.btrifact,
            r"""
-btrifact(A, info=None, pivot=True) -> Tensor, IntTensor
+btrifact(A, info=None, pivot=True) -> (Tensor, IntTensor)
 
 Batch LU factorization.
 
-Returns a tuple containing the LU factorization and pivots.
-The optional argument `info` provides information if the
-factorization succeeded for each minibatch example.
-The info values are from dgetrf and a non-zero value indicates an error
-occurred. The specific values are from cublas if cuda is being used, otherwise
-LAPACK. Pivoting is done if pivot is set.
+Returns a tuple containing the LU factorization and pivots. Pivoting is done if
+:attr:`pivot` is set.
+
+The optional argument :attr:`info` stores information if the factorization
+succeeded for each minibatch example. The :attr:`info` is provided as an
+`IntTensor`, its values will be filled from dgetrf and a non-zero value
+indicates an error occurred. Specifically, the values are from cublas if cuda is
+being used, otherwise LAPACK.
+
+.. warning::
+    The :attr:`info` argument is deprecated in favor of :meth:`torch.btrifact_with_info`.
 
 Arguments:
     A (Tensor): the tensor to factor
+    info (IntTensor, optional): an `IntTensor` to store values indicating whether
+        factorization succeeds
+    pivot (bool, optional): controls whether pivoting is done
+
+Returns:
+    A tuple containing factorization and pivots.
 
 Example::
 
     >>> A = torch.randn(2, 3, 3)
-    >>> A_LU = A.btrifact()
+    >>> A_LU, pivots = A.btrifact()
+
+""")
+
+add_docstr(torch._C.btrifact_with_info,
+           r"""
+btrifact_with_info(A, pivot=True) -> (Tensor, IntTensor, IntTensor)
+
+Batch LU factorization with additional error information.
+
+This is a version of :meth:`torch.btrifact` that always creates an info
+`IntTensor`, and returns it as the third return value
+
+Arguments:
+    A (Tensor): the tensor to factor
+    pivot (bool, optional): controls whether pivoting is done
+
+Returns:
+    A tuple containing factorization, pivots, and an `IntTensor` where nonzero
+    values indicate whether factorization for each minibatch sample succeeds.
+
+Example::
+
+    >>> A = torch.randn(2, 3, 3)
+    >>> A_LU, pivots, info = A.btrifact_with_info()
+    >>> if info.nonzero.size(0) == 0:
+    >>>   print('LU factorization succeeded for all samples!')
 
 """)
 

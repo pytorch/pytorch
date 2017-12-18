@@ -188,6 +188,7 @@ BLAS and LAPACK Operations
 .. autofunction:: baddbmm
 .. autofunction:: bmm
 .. autofunction:: btrifact
+.. autofunction:: btrifact_with_info
 .. autofunction:: btrisolve
 .. autofunction:: dot
 .. autofunction:: eig
