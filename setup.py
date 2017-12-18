@@ -370,6 +370,10 @@ if IS_WINDOWS:
                           # structured exception handling (SEH)
                           # /DNOMINMAX removes builtin min/max functions
                           ]
+    if sys.version_info[0] == 2:
+        # /bigobj increases number of sections in .obj file, which is needed to link
+        # against libaries in Python 2.7 under Windows
+        extra_compile_args.append('/bigobj')
 else:
     extra_compile_args = ['-std=c++11', '-Wno-write-strings',
                           # Python 2.6 requires -fno-strict-aliasing, see

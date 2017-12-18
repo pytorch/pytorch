@@ -15,6 +15,14 @@
 #define PyLong_FromLong         PyLong_FromLongLong
 #define PyLong_AsLong           PyLong_AsLongLong
 #define PyLong_FromUnsignedLong PyLong_FromUnsignedLongLong
+
+#ifdef PyInt_Check
+#undef PyInt_FromLong
+#undef PyInt_AsLong
+
+#define PyInt_FromLong          PyLong_FromLong
+#define PyInt_AsLong            PyLong_AsLong
+#endif
 #endif
 
 #include "THP_export.h"
