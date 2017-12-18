@@ -584,6 +584,7 @@ if WITH_NCCL:
     extra_compile_args += ['-DWITH_NCCL']
     main_sources += [
         "torch/csrc/cuda/nccl.cpp",
+        "torch/csrc/cuda/python_nccl.cpp",
     ]
 if WITH_CUDNN:
     main_libraries += ['cudnn']
