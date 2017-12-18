@@ -110,7 +110,14 @@ class GetPowGradient : public GradientMakerBase {
     scale_arg.set_f(exponent);
     Argument pow_arg;
     pow_arg.set_name("exponent");
-    pow_arg.set_f(exponent - 1);
+    if (I(0) != O(0)) {
+      pow_arg.set_f(exponent - 1);
+    } else {
+      LOG(WARNING) << "In-place Pow gradient, possible loss of precision";
+      constexpr float kEps = 1e-12;
+      CAFFE_ENFORCE(std::fabs(exponent) > kEps);
+      pow_arg.set_f((exponent - 1) / exponent);
+    }
     return vector<OperatorDef>{CreateOperatorDef(
                                    "Pow",
                                    "",

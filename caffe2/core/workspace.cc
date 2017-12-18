@@ -198,7 +198,8 @@ const Blob* Workspace::GetBlob(const string& name) const {
 
 void Workspace::AddBlobMapping(
     const Workspace* parent,
-    const std::unordered_map<string, string>& forwarded_blobs) {
+    const std::unordered_map<string, string>& forwarded_blobs,
+    bool skip_defined_blobs) {
   CAFFE_ENFORCE(parent, "Parent workspace must be specified");
   for (const auto& forwarded : forwarded_blobs) {
     CAFFE_ENFORCE(
@@ -213,6 +214,9 @@ void Workspace::AddBlobMapping(
           forwarded.second,
           "Redefinition of blob " + forwarded.first);
     } else {
+      if (skip_defined_blobs && HasBlob(forwarded.first)) {
+        continue;
+      }
       CAFFE_ENFORCE(
           !HasBlob(forwarded.first), "Redefinition of blob " + forwarded.first);
       // Lazy blob resolution - store the parent workspace and

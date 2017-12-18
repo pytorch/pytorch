@@ -40,4 +40,22 @@ OPERATOR_SCHEMA(CreateScope).NumInputs(0).NumOutputs(1).SetDoc(R"DOC(
 by Do operator to store local blobs
     )DOC");
 
+template <>
+bool HasScopeOp<CPUContext>::RunOnDevice() {
+  const auto& ws_stack = OperatorBase::Input<detail::WorkspaceStack>(0);
+  auto* output = Output(0);
+  output->Resize(1);
+  bool* output_value = output->template mutable_data<bool>();
+  *output_value = !ws_stack.empty();
+  return true;
+}
+
+REGISTER_CPU_OPERATOR(HasScope, HasScopeOp<CPUContext>);
+
+SHOULD_NOT_DO_GRADIENT(HasScope);
+
+OPERATOR_SCHEMA(HasScope).NumInputs(1).NumOutputs(1).SetDoc(R"DOC(
+Checks whether scope blob has any saved scopes left
+    )DOC");
+
 } // namespace caffe2

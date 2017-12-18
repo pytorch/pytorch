@@ -45,7 +45,27 @@ class IfOp final : public Operator<Context> {
   }
 
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  bool RunOnDevice() override;
+
+  bool RunOnDevice() override {
+    CAFFE_ENFORCE(
+        this->template InputIsType<Tensor<Context>>(0),
+        "Invalid condition in If operator: tensor expected");
+
+    const auto& condition = Input(0);
+    CAFFE_ENFORCE_EQ(
+        condition.size(),
+        1,
+        "Invalid condition tensor in If operator: single value expected");
+
+    auto conditionValue = *condition.template data<bool>();
+    if (conditionValue) {
+      return then_net_->Run();
+    } else if (else_net_) {
+      return else_net_->Run();
+    }
+
+    return true;
+  }
 
  private:
   std::unique_ptr<NetBase> then_net_;

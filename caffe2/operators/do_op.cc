@@ -16,36 +16,7 @@
 
 #include "caffe2/operators/do_op.h"
 
-#include "caffe2/operators/create_scope_op.h"
-
 namespace caffe2 {
-
-template <>
-bool DoOp<CPUContext>::RunOnDevice() {
-  auto* ws_stack =
-      OperatorBase::Output<detail::WorkspaceStack>(OutputSize() - 1);
-  std::shared_ptr<Workspace> net_workspace;
-  if (is_gradient_op_) {
-    net_workspace = ws_stack->popGradientWorkspace(parent_ws_, blob_bindings_);
-  } else {
-    if (reuse_workspace_ && !ws_stack->empty()) {
-      net_workspace =
-          ws_stack->reuseLastForwardWorkspace(parent_ws_, blob_bindings_);
-    } else {
-      net_workspace =
-          ws_stack->pushForwardWorkspace(parent_ws_, blob_bindings_);
-    }
-  }
-  CAFFE_ENFORCE(net_workspace, "Failed to initialize Do op workspace");
-
-  // TODO(iliacher): figure how to reuse existing net with a new workspace
-  auto* net = net_workspace->GetNet(net_def_.name());
-  if (!net) {
-    net = net_workspace->CreateNet(net_def_, true);
-  }
-  CAFFE_ENFORCE(net, "Failed to initialize subnet");
-  return net->Run();
-}
 
 REGISTER_CPU_OPERATOR(Do, DoOp<CPUContext>);
 

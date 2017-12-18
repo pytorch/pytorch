@@ -203,7 +203,8 @@ def add_while_op(
         loop_outputs,
         net=loop_body_net.Proto(),
         inner_blobs=loop_body_outer_blob_names,
-        outer_blobs_idx=loop_body_outer_blob_names_idx)
+        outer_blobs_idx=loop_body_outer_blob_names_idx,
+        copy_external_blobs=True)
     do_loop_body_net.AddExternalOutput(*loop_outputs)
 
     while_args = {}

@@ -25,6 +25,7 @@
 #include "caffe2/core/context.h"
 #include "caffe2/core/logging.h"
 #include "caffe2/core/operator.h"
+#include "caffe2/operators/create_scope_op.h"
 #include "caffe2/proto/caffe2.pb.h"
 
 namespace caffe2 {
@@ -39,11 +40,16 @@ class DoOp final : public Operator<Context> {
         "net must be specified in Do operator");
     net_def_ = this->template GetSingleArgument<NetDef>("net", NetDef());
     is_gradient_op_ = operator_def.is_gradient_op();
+    copy_external_blobs_ =
+        this->template GetSingleArgument<bool>("copy_external_blobs", false);
     reuse_workspace_ =
         this->template GetSingleArgument<bool>("reuse_workspace", false);
     CAFFE_ENFORCE(
-        !is_gradient_op_ || !reuse_workspace_,
+        !(is_gradient_op_ && reuse_workspace_),
         "Gradient Do op requires use of stacked workspaces");
+    CAFFE_ENFORCE(
+        !(copy_external_blobs_ && reuse_workspace_),
+        "Reuse workspace and copy external blobs simultaneously in Do op");
 
     const auto& inner_blobs =
         this->template GetRepeatedArgument<std::string>("inner_blobs");
@@ -74,6 +80,7 @@ class DoOp final : public Operator<Context> {
           "Reusage of outer name: " + outer_name);
       used_outer_names.insert(outer_name);
       blob_bindings_[inner_blobs[blob_idx]] = outer_name;
+      forwarded_inner_blobs_.insert(inner_blobs[blob_idx]);
     }
     std::unordered_set<std::string> all_outer_names(
         outer_blob_names.begin(), outer_blob_names.end());
@@ -84,7 +91,38 @@ class DoOp final : public Operator<Context> {
   }
 
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  bool RunOnDevice() override;
+
+  bool RunOnDevice() override {
+    auto* ws_stack =
+        OperatorBase::Output<detail::WorkspaceStack>(OutputSize() - 1);
+    std::shared_ptr<Workspace> net_workspace;
+    if (is_gradient_op_) {
+      net_workspace =
+          ws_stack->popGradientWorkspace(parent_ws_, blob_bindings_);
+    } else {
+      if (reuse_workspace_ && !ws_stack->empty()) {
+        net_workspace =
+            ws_stack->reuseLastForwardWorkspace(parent_ws_, blob_bindings_);
+      } else {
+        net_workspace =
+            ws_stack->pushForwardWorkspace(parent_ws_, blob_bindings_);
+      }
+    }
+    CAFFE_ENFORCE(net_workspace, "Failed to initialize Do op workspace");
+
+    // TODO(iliacher): figure how to reuse existing net with a new workspace
+    auto* net = net_workspace->GetNet(net_def_.name());
+    if (!net) {
+      net = net_workspace->CreateNet(net_def_, true);
+    }
+    CAFFE_ENFORCE(net, "Failed to initialize subnet");
+    auto success = net->Run();
+    if (!is_gradient_op_ && copy_external_blobs_) {
+      net_workspace->template CopyForwardedTensors<Context>(
+          forwarded_inner_blobs_);
+    }
+    return success;
+  }
 
  private:
   // returns vector of input blob names followed by output blob names in
@@ -148,7 +186,9 @@ class DoOp final : public Operator<Context> {
   }
 
   std::unordered_map<std::string, std::string> blob_bindings_;
+  std::unordered_set<std::string> forwarded_inner_blobs_;
   bool is_gradient_op_;
+  bool copy_external_blobs_;
   bool reuse_workspace_;
   NetDef net_def_;
   Workspace* parent_ws_;
