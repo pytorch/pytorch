@@ -198,13 +198,14 @@ class BatchMatMulOp final : public Operator<Context> {
       }
       if (!A_broadcasted) {
         new_dims.push_back(M);
+      } else {
+        new_dims.push_back(1);
       }
       if (!B_broadcasted) {
         new_dims.push_back(N);
+      } else {
+        new_dims.push_back(1);
       }
-      // Allocate output tensor
-      Y->Resize(new_dims);
-      auto* Y_data = Y->template mutable_data<T>();
 
       // Calculate strides. Continuing our example above,
       //   [4, M, K] * [2, 3, 4, K, N] = [2, 3, 4, M, N]
@@ -252,14 +253,26 @@ class BatchMatMulOp final : public Operator<Context> {
         B_slice_size = B_stride;
       }
 
-      // Zero batch dimension indicates no elements
-      if (num_sub_batches == 0) {
-        return true;
-      }
-
       size_t num_outer_batches = 1;
       for (size_t i = 0; i < num_outer_dims; ++i) {
         num_outer_batches *= new_dims[i];
+      }
+
+      // Mutually exclusive since otherwise we would've taken the vector-vector
+      // path above
+      if (A_broadcasted) {
+        new_dims.erase(new_dims.end() - 2);
+      } else if (B_broadcasted) {
+        new_dims.erase(new_dims.end() - 1);
+      }
+
+      // Allocate output tensor
+      Y->Resize(new_dims);
+      auto* Y_data = Y->template mutable_data<T>();
+
+      // Zero batch dimension indicates no elements
+      if (num_sub_batches == 0 || num_outer_batches == 0) {
+        return true;
       }
 
       // TODO(T23893772): doing this in a loop is likely going to be slow on GPU
