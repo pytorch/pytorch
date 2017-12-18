@@ -31,10 +31,12 @@ policy, the code for implementing REINFORCE would be as follows::
 """
 
 from .bernoulli import Bernoulli
+from .beta import Beta
 from .categorical import Categorical
+from .dirichlet import Dirichlet
 from .distribution import Distribution
 from .gamma import Gamma
 from .normal import Normal
 
 
-__all__ = ['Distribution', 'Bernoulli', 'Categorical', 'Normal', 'Gamma']
+__all__ = ['Distribution', 'Bernoulli', 'Beta', 'Categorical', 'Dirichlet', 'Gamma', 'Normal']
