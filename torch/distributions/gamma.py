@@ -7,25 +7,10 @@ from torch.distributions.distribution import Distribution
 from torch.distributions.utils import broadcast_all
 
 
-class _StandardGamma(Function):
-    @staticmethod
-    def forward(ctx, alpha):
-        x = torch._C._standard_gamma(alpha)
-        ctx.save_for_backward(x, alpha)
-        return x
-
-    @staticmethod
-    @once_differentiable
-    def backward(ctx, grad_output):
-        x, alpha = ctx.saved_tensors
-        grad = torch._C._standard_gamma_grad(x, alpha)
-        return grad_output * grad
-
-
 def _standard_gamma(alpha):
     if not isinstance(alpha, Variable):
         return torch._C._standard_gamma(alpha)
-    return _StandardGamma.apply(alpha)
+    return alpha._standard_gamma()
 
 
 class Gamma(Distribution):

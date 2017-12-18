@@ -105,6 +105,8 @@
 - func: is_signed(Tensor self) -> bool
   template_scalar: True
 
+- func: _standard_gamma_grad(Tensor self, Tensor output) -> Tensor
+
 - func: matmul(Tensor self, Tensor other) -> Tensor
 
 - func: RoiPooling2d_forward(Tensor input, Tensor rois, int64_t pooledHeight, int64_t pooledWidth, double spatialScale) -> (Tensor, Tensor)
