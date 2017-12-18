@@ -34,14 +34,6 @@ namespace caffe2 {
 
 using at::Half; // for AT_FORALL_SCALAR_TYPES
 
-std::function<void(void*)> deleterFor(at::Tensor t) {
-  // return a closure that holds a handle to t until it is called
-  // to keep the aten memory alive
-  return [t](void * ptr) mutable {
-    t.reset();
-  };
-}
-
 template <class Context>
 class ATenOp : public Operator<Context> {
  public:
@@ -110,7 +102,12 @@ private:
     auto at_sizes = src.sizes();
     std::vector<int64_t> dims(at_sizes.begin(),at_sizes.end());
     dst->Resize(dims);
-    dst->ShareExternalPointer(src.data_ptr(), typeMetaFor(src), 0, deleterFor(src));
+    dst->ShareExternalPointer(
+        src.data_ptr(), typeMetaFor(src), 0, [src](void* ptr) mutable {
+          // return a closure that holds a handle to t until it is called
+          // to keep the aten memory alive
+          return src.reset();
+        });
   }
   void assignListStartingAt(
       size_t offset,
