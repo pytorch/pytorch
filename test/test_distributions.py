@@ -233,12 +233,11 @@ class TestDistributions(TestCase):
     # This is a randomized test.
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_exponential_sample(self):
-        self._set_rng_seed()
+        self._set_rng_seed(1)
         for rate in [1e-5, 1.0, 10.]:
-            # NOTE: see note in distributions.exponential
             self._check_sampler_sampler(Exponential(rate),
                                         scipy.stats.expon(scale=1. / rate),
-                                        'Exponential(rate={})'.format(rate), failure_rate=5e-4)
+                                        'Exponential(rate={})'.format(rate))
 
     # This is a randomized test.
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
