@@ -34,12 +34,12 @@ struct IODescriptor {
   };
 
   bool operator==(const IODescriptor& o) const {
-    return std::tie(  structure,   metadata) ==
-           std::tie(o.structure, o.metadata);
+    return std::tie(  structure,   metadata,   grad_enabled) ==
+           std::tie(o.structure, o.metadata, o.grad_enabled);
   }
 
   static std::size_t hash(const IODescriptor& o) {
-    return get_hash(o.structure, o.metadata);
+    return get_hash(o.structure, o.metadata, o.grad_enabled);
   }
 
   void extend(const autograd::variable_list& list) {
@@ -57,6 +57,7 @@ struct IODescriptor {
   // different than the number of 'v's in structure.
   std::string structure;
   std::vector<VariableMetadata> metadata;
+  bool grad_enabled;
 };
 
 static inline std::ostream& operator<<(std::ostream& out, const IODescriptor::VariableMetadata& meta) {
@@ -73,6 +74,7 @@ static inline std::ostream& operator<<(std::ostream& out, const IODescriptor::Va
 
 static inline std::ostream& operator<<(std::ostream & out, const IODescriptor & desc) {
   out << desc.structure << "\n";
+  out << "  with grad_enabled=" << desc.grad_enabled << "\n";
   for(size_t i = 0; i < desc.metadata.size(); ++i) {
     out << "  with v" << i << " having type " << desc.metadata[i] << "\n";
   }
@@ -83,7 +85,7 @@ struct ParsedArgs {
   // Flat vector of Variables found in arguments
   autograd::variable_list vars;
   // Metadata describing nesting of objects received from Python and
-  // metadata of vars.
+  // metadata of vars and whether grad is enabled.
   IODescriptor desc;
 
   void extend(const autograd::variable_list& list) {

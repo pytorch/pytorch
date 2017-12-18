@@ -714,10 +714,10 @@ class TestJit(TestCase):
         self.assertFalse(fn.has_trace_for(x, y))
         with torch.no_grad():
             out = fn(x, y)
-        self.assertTrue(fn.has_trace_for(x, y))
-        with self.assertCompiled(fn):
-            out2 = fn(x, y)
-        self.assertEqual(out, out2)
+            self.assertTrue(fn.has_trace_for(x, y))
+            with self.assertCompiled(fn):
+                out2 = fn(x, y)
+            self.assertEqual(out, out2)
 
     def test_backward_flag_checks(self):
         x = Variable(torch.randn(1), requires_grad=True)

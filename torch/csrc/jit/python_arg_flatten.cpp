@@ -1,5 +1,7 @@
 #include "python_arg_flatten.h"
 
+#include "torch/csrc/autograd/grad_mode.h"
+
 namespace torch { namespace jit { namespace python {
 
 using namespace torch::autograd;
@@ -52,6 +54,7 @@ void flatten_rec(PyObject* obj, ParsedArgs& args) {
 
 ParsedArgs flatten(py::handle obj) {
   ParsedArgs args;
+  args.desc.grad_enabled = autograd::GradMode::is_enabled();
   flatten_rec(obj.ptr(), args);
   return args;
 }

@@ -98,7 +98,8 @@ struct CompiledFunction {
     PyObject* add_trace(PyObject *args, variable_list inputs) {
       JIT_ASSERT(!is_ready_);
       // Start tracing
-      auto num_stages = GradMode::is_enabled() ? fn_.nderivs_ + 1 : 1;
+      AutoGradMode grad_mode(grad_enabled_);
+      auto num_stages = grad_enabled_ ? fn_.nderivs_ + 1 : 1;
       auto trace = tracer::enter(fmap<TraceInput>(inputs), num_stages);
 
       // Call back into Python function
@@ -132,7 +133,7 @@ struct CompiledFunction {
   TraceForKey& getTrace(ParsedArgs& args) {
     auto it = ktraces_.find(args.desc);
     if (it == ktraces_.end()) {
-      bool grad_enabled = GradMode::is_enabled();
+      bool grad_enabled = args.desc.grad_enabled;
       std::tie(it, std::ignore) = ktraces_.emplace(args.desc,
                                                    TraceForKey(*this, grad_enabled));
     }
