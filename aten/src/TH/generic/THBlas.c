@@ -201,11 +201,12 @@ void THBlas_(gemv)(char trans, int64_t m, int64_t n, real alpha, real *a, int64_
     lda = m;
 
 #if defined(USE_BLAS) && (defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_FLOAT))
-  if( (m <= INT_MAX) && (n <= INT_MAX) &&
-      (lda >= THMax(1, m)) && (lda <= INT_MAX) &&
+  if( (m <= INT_MAX) && (n <= INT_MAX) && (lda <= INT_MAX) &&
       (incx > 0) && (incx <= INT_MAX) &&
       (incy > 0) && (incy <= INT_MAX) )
   {
+    THArgCheck(lda >= THMax(1, m), 6,
+      "lda should be at least max(1, m=%d), but have %d", m, lda);
     int i_m = (int)m;
     int i_n = (int)n;
     int i_lda = (int)lda;
@@ -259,11 +260,12 @@ void THBlas_(ger)(int64_t m, int64_t n, real alpha, real *x, int64_t incx, real 
     lda = m;
 
 #if defined(USE_BLAS) && (defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_FLOAT))
-  if( (m <= INT_MAX) && (n <= INT_MAX) &&
-      (lda >= THMax(1, m)) && (lda <= INT_MAX) &&
+  if( (m <= INT_MAX) && (n <= INT_MAX) && (lda <= INT_MAX) &&
       (incx > 0) && (incx <= INT_MAX) &&
       (incy > 0) && (incy <= INT_MAX) )
   {
+    THArgCheck(lda >= THMax(1, m), 9,
+      "lda should be at least max(1, m=%d), but have %d", m, lda);
     int i_m = (int)m;
     int i_n = (int)n;
     int i_lda = (int)lda;
@@ -322,10 +324,14 @@ void THBlas_(gemm)(char transa, char transb, int64_t m, int64_t n, int64_t k, re
 
 #if defined(USE_BLAS) && (defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_FLOAT))
   if( (m <= INT_MAX) && (n <= INT_MAX) && (k <= INT_MAX) &&
-      (lda >= THMax(1, (transa_ ? k : m))) && (lda <= INT_MAX) &&
-      (ldb >= THMax(1, (transb_ ? n : k))) && (ldb <= INT_MAX) &&
-      (ldc >= THMax(1, m)) && (ldc <= INT_MAX) )
+      (lda <= INT_MAX) && (ldb <= INT_MAX) && (ldc <= INT_MAX) )
   {
+    THArgCheck(lda >= THMax(1, (transa_ ? k : m)), 8,
+      "lda should be at least max(1, %d), but have %d", (transa_ ? k : m), lda);
+    THArgCheck(ldb >= THMax(1, (transb_ ? n : k)), 10,
+      "ldb should be at least max(1, %d), but have %d", (transb_ ? n : k), ldb);
+    THArgCheck(ldc >= THMax(1, m), 13,
+      "ldc should be at least max(1, m=%d), but have %d", m, ldc);
     int i_m = (int)m;
     int i_n = (int)n;
     int i_k = (int)k;
