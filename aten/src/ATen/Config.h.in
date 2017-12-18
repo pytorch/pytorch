@@ -6,3 +6,7 @@
 
 #define AT_CUDA_ENABLED() @AT_CUDA_ENABLED@
 #define AT_CUDNN_ENABLED() @AT_CUDNN_ENABLED@
+
+#if !AT_CUDA_ENABLED() && AT_CUDNN_ENABLED()
+#error "Cannot enable CuDNN without CUDA"
+#endif

@@ -24,7 +24,7 @@
 #include "torch/csrc/jit/python_ir.h"
 
 #ifdef WITH_CUDNN
-#include <ATen/cudnn/cudnn-wrapper.h>
+#include "cudnn.h"
 #endif
 
 #define WITH_NUMPY_IMPORT_ARRAY

@@ -1,13 +1,80 @@
-#include "Conv.h"
+#include <ATen/ATen.h>
+#include <ATen/NativeFunctions.h>
+#include <ATen/Config.h>
+
+#if !AT_CUDNN_ENABLED()
+
+namespace at { namespace native {
+
+// See Note [ATen preprocessor philosophy]
+
+at::Tensor cudnn_convolution_forward(
+    const at::Tensor& input, const at::Tensor& weight,
+    IntList padding, IntList stride, IntList dilation,
+    int64_t groups, bool benchmark, bool deterministic) {
+  throw std::runtime_error("cudnn_convolution_forward: ATen not compiled with cuDNN support");
+}
+
+at::Tensor cudnn_convolution_full_forward(
+    const at::Tensor& input, const at::Tensor& weight, const at::Tensor& bias,
+    IntList padding, IntList stride, IntList dilation,
+    int64_t groups, bool benchmark, bool deterministic) {
+  throw std::runtime_error("cudnn_convolution_full_forward: ATen not compiled with cuDNN support");
+}
+
+at::Tensor cudnn_convolution_backward(
+    IntList input_size, const at::Tensor& grad_output, const at::Tensor& weight,
+    IntList padding, IntList stride, IntList dilation, int64_t groups,
+    bool benchmark, bool deterministic) {
+  throw std::runtime_error("cudnn_convolution_backward: ATen not compiled with cuDNN support");
+}
+
+at::Tensor cudnn_convolution_transpose_full_forward(
+    const at::Tensor& input, const at::Tensor& weight, const at::Tensor& bias,
+    IntList padding, IntList output_padding, IntList stride, IntList dilation,
+    int64_t groups, bool benchmark, bool deterministic) {
+  throw std::runtime_error("cudnn_convolution_transpose_full_forward: ATen not compiled with cuDNN support");
+}
+
+at::Tensor cudnn_convolution_transpose_backward(
+    const at::Tensor& grad_output, const at::Tensor& weight,
+    IntList padding, IntList stride, IntList dilation,
+    int64_t groups, bool benchmark, bool deterministic) {
+  throw std::runtime_error("cudnn_convolution_transpose_backward: ATen not compiled with cuDNN support");
+}
+
+at::Tensor cudnn_convolution_backward_weight(
+    IntList weight_size, const at::Tensor& grad_output, const at::Tensor& input,
+    IntList padding, IntList stride, IntList dilation, int64_t groups,
+    bool benchmark, bool deterministic) {
+  throw std::runtime_error("cudnn_convolution_backward_weight: ATen not compiled with cuDNN support");
+}
+
+at::Tensor cudnn_convolution_transpose_backward_weight(
+    IntList weight_size, const at::Tensor& grad_output, const at::Tensor& input,
+    IntList padding, IntList stride, IntList dilation, int64_t groups,
+    bool benchmark, bool deterministic) {
+  throw std::runtime_error("cudnn_convolution_transpose_backward_weight: ATen not compiled with cuDNN support");
+}
+
+at::Tensor cudnn_convolution_backward_bias(
+    const at::Tensor& grad_output) {
+  throw std::runtime_error("cudnn_convolution_backward_bias: ATen not compiled with cuDNN support");
+}
+
+}}
+
+#else  // AT_CUDNN_ENABLED
 
 #include "THC/THC.h"
-#include "Exceptions.h"
-#include "Utils.h"
-#include "Types.h"
+
+#include <ATen/cudnn/cudnn-wrapper.h>
+#include <ATen/cudnn/Descriptors.h>
+#include <ATen/cudnn/Types.h>
+#include <ATen/cudnn/Utils.h>
 
 #include <ATen/Check.h>
 
-#include "cudnn-wrapper.h"
 #include <functional>
 #include <iterator>
 #include <sstream>
@@ -1112,3 +1179,5 @@ Tensor cudnn_convolution_backward_bias(
 }
 
 }}  // namespace
+
+#endif

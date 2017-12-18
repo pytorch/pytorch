@@ -321,7 +321,7 @@ def declare_outputs():
 def generate_outputs():
     cwrap_files = [f for f in files if f.endswith('.cwrap')]
     nn_files = [f for f in files if f.endswith('nn.yaml') or f.endswith('.h')]
-    native_files = [f for f in files if f.endswith('native_functions.yaml') or f.endswith('cuDNN.yaml')]
+    native_files = [f for f in files if f.endswith('native_functions.yaml')]
 
     declarations = [d
                     for file in cwrap_files
