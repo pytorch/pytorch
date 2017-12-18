@@ -1,6 +1,6 @@
 # Loss functions
 
-- name: binary_cross_entropy(Tensor self, Tensor target, Tensor weight={}, bool size_average=true, bool reduce=true)
+- name: binary_cross_entropy(Tensor self, Tensor target, Tensor weight={}, bool size_average=true)
   cname: BCECriterion
 
 - name: kl_div(Tensor self, Tensor target, bool size_average=true, bool reduce=true)

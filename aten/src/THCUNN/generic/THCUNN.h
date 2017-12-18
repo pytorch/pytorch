@@ -66,18 +66,15 @@ TH_API void THNN_(BCECriterion_updateOutput)(
                   THCTensor *target,
                   THCTensor *output,
                   bool sizeAverage,
-                  THCTensor *weights,         // [OPTIONAL]
-                  bool reduce);
+                  THCTensor *weights);        // [OPTIONAL]
 
 TH_API void THNN_(BCECriterion_updateGradInput)(
                   THCState *state,
                   THCTensor *input,
                   THCTensor *target,
-                  THCTensor *gradOutput,
                   THCTensor *gradInput,
                   bool sizeAverage,
-                  THCTensor *weights,         // [OPTIONAL]
-                  bool reduce);
+                  THCTensor *weights);        // [OPTIONAL]
 
 TH_API void THNN_(ClassNLLCriterion_updateOutput)(
                   THCState *state,

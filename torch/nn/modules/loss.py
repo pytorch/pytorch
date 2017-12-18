@@ -366,17 +366,11 @@ class BCELoss(_WeightedLoss):
             over observations for each minibatch. However, if the field
             size_average is set to ``False``, the losses are instead summed for
             each minibatch. Default: ``True``
-        reduce (bool, optional): By default, the losses are averaged or summed over
-            observations for each minibatch depending on size_average. When reduce
-            is False, returns a loss per batch element instead and ignores
-            size_average. Default: True
 
     Shape:
         - Input: :math:`(N, *)` where `*` means, any number of additional
           dimensions
         - Target: :math:`(N, *)`, same shape as the input
-        - Output: scalar. If `reduce` is False, then `(N, *)`, same shape as
-          input.
 
     Examples::
 
@@ -387,15 +381,10 @@ class BCELoss(_WeightedLoss):
         >>> output = loss(m(input), target)
         >>> output.backward()
     """
-    def __init__(self, weight=None, size_average=True, reduce=True):
-        super(BCELoss, self).__init__(weight, size_average)
-        self.reduce = reduce
-
     def forward(self, input, target):
         _assert_no_grad(target)
         return F.binary_cross_entropy(input, target, weight=self.weight,
-                                      size_average=self.size_average,
-                                      reduce=self.reduce)
+                                      size_average=self.size_average)
 
 
 class BCEWithLogitsLoss(Module):

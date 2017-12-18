@@ -1212,7 +1212,7 @@ def cross_entropy(input, target, weight=None, size_average=True, ignore_index=-1
     return nll_loss(log_softmax(input, 1), target, weight, size_average, ignore_index, reduce)
 
 
-def binary_cross_entropy(input, target, weight=None, size_average=True, reduce=True):
+def binary_cross_entropy(input, target, weight=None, size_average=True):
     r"""Function that measures the Binary Cross Entropy
     between the target and the output.
 
@@ -1227,10 +1227,6 @@ def binary_cross_entropy(input, target, weight=None, size_average=True, reduce=T
                 over observations for each minibatch. However, if the field
                 sizeAverage is set to False, the losses are instead summed
                 for each minibatch. Default: ``True``
-        reduce (bool, optional): By default, the losses are averaged or summed over
-                observations for each minibatch depending on size_average. When reduce
-                is False, returns a loss per batch element instead and ignores
-                size_average. Default: True
 
     Examples::
 
@@ -1252,7 +1248,7 @@ def binary_cross_entropy(input, target, weight=None, size_average=True, reduce=T
         if torch.is_tensor(weight):
             weight = Variable(weight)
 
-    return torch._C._nn.binary_cross_entropy(input, target, weight, size_average, reduce)
+    return torch._C._nn.binary_cross_entropy(input, target, weight, size_average)
 
 
 def binary_cross_entropy_with_logits(input, target, weight=None, size_average=True):
