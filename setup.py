@@ -733,7 +733,7 @@ setup(name="torch", version=version,
       cmdclass=cmdclass,
       packages=packages,
       package_data={'torch': [
-          'lib/*.so*', 'lib/*.dylib*', 'lib/*.dll',
+          'lib/*.so*', 'lib/*.dylib*', 'lib/*.dll', 'lib/*.lib',
           'lib/torch_shm_manager',
           'lib/*.h',
           'lib/include/TH/*.h', 'lib/include/TH/generic/*.h',
