@@ -412,7 +412,7 @@ PyObject * THCPModule_initExtension(PyObject *self)
 }
 
 #ifdef WITH_NCCL
-#include "nccl.h"
+#include "python_nccl.h"
 
 void THCPModule_useNccl()
 {
