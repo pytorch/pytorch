@@ -1,11 +1,37 @@
-#include "BatchNorm.h"
+#include <ATen/ATen.h>
+#include <ATen/NativeFunctions.h>
+#include <ATen/Config.h>
 
-#include "Descriptors.h"
-#include "Types.h"
-#include "Utils.h"
+#if !AT_CUDNN_ENABLED()
+
+namespace at { namespace native {
+
+// See Note [ATen preprocessor philosophy]
+
+Tensor cudnn_batch_norm_forward(
+    const Tensor& input, const Tensor& weight,
+    const Tensor& bias, const Tensor& running_mean, const Tensor& running_var,
+    const Tensor& save_mean, const Tensor& save_var, bool training,
+    double exponential_average_factor, double epsilon) {
+  throw std::runtime_error("cudnn_batch_norm_forward: ATen not compiled with cuDNN support");
+}
+
+std::tuple<Tensor, Tensor, Tensor> cudnn_batch_norm_backward(
+    const Tensor& input, const Tensor& grad_output, const Tensor& weight,
+    const Tensor& save_mean, const Tensor& save_var, bool training,
+    double epsilon) {
+  throw std::runtime_error("cudnn_batch_norm_backward: ATen not compiled with cuDNN support");
+}
+
+}}  // namespace at::native
+
+#else // AT_CUDNN_ENABLED
+
+#include <ATen/cudnn/Descriptors.h>
+#include <ATen/cudnn/Types.h>
+#include <ATen/cudnn/Utils.h>
 
 #include <ATen/Check.h>
-
 
 namespace at { namespace native {
 
@@ -178,3 +204,5 @@ std::tuple<Tensor, Tensor, Tensor> cudnn_batch_norm_backward(
 }
 
 }}  // namespace native
+
+#endif
