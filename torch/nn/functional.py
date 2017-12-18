@@ -1072,8 +1072,12 @@ def nll_loss(input, target, weight=None, size_average=True, ignore_index=-100, r
 
     Args:
         input: :math:`(N, C)` where `C = number of classes` or `(N, C, H, W)`
-            in case of 2D - Loss
-        target: :math:`(N)` where each value is `0 <= targets[i] <= C-1`
+            in case of 2D Loss, or `(N, C, *) in the case of K-dimensional Loss,
+            where :math:`K > 2` and `*` is `K` extra dimensions.
+        target: :math:`(N)` where each value is `0 <= targets[i] <= C-1`.
+            In the case of 2D Loss, then :math:`(N, H, W)`. For K-dimensional
+            Loss where :math:`K > 2`, then :math:`(N, *)`, where `*` is `K`
+            extra dimensions.
         weight (Tensor, optional): a manual rescaling weight given to each
             class. If given, has to be a Tensor of size `C`
         size_average (bool, optional): By default, the losses are averaged
@@ -1099,8 +1103,21 @@ def nll_loss(input, target, weight=None, size_average=True, ignore_index=-100, r
         return torch._C._nn.nll_loss(input, target, weight, size_average, ignore_index, reduce)
     elif dim == 4:
         return torch._C._nn.nll_loss2d(input, target, weight, size_average, ignore_index, reduce)
+    elif dim > 4:
+        n = input.size(0)
+        c = input.size(1)
+        out_size = (n,) + input.size()[2:]
+        if target.size()[1:] != input.size()[2:]:
+            raise ValueError('Expected target size {}, got {}'.format(
+                out_size, input.size()))
+        input = input.contiguous().view(n, c, 1, -1)
+        target = target.contiguous().view(n, 1, -1)
+        if reduce:
+            return torch._C._nn.nll_loss2d(input, target, weight, size_average, ignore_index, reduce)
+        out = torch._C._nn.nll_loss2d(input, target, weight, size_average, ignore_index, reduce)
+        return out.view(out_size)
     else:
-        raise ValueError('Expected 2 or 4 dimensions (got {})'.format(dim))
+        raise ValueError('Expected 2, 4, or more than 4 dimensions (got {})'.format(dim))
 
 
 def poisson_nll_loss(input, target, log_input=True, full=False, size_average=True, eps=1e-8):
