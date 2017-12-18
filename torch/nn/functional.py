@@ -1072,8 +1072,12 @@ def nll_loss(input, target, weight=None, size_average=True, ignore_index=-100, r
 
     Args:
         input: :math:`(N, C)` where `C = number of classes` or `(N, C, H, W)`
-            in case of 2D - Loss
-        target: :math:`(N)` where each value is `0 <= targets[i] <= C-1`
+            in case of 2D Loss, or `(N, C, *) in the case of K-dimensional Loss,
+            where :math:`K > 2` and `*` is `K` extra dimensions.
+        target: :math:`(N)` where each value is `0 <= targets[i] <= C-1`.
+            In the case of 2D Loss, then :math:`(N, H, W)`. For K-dimensional
+            Loss where :math:`K > 2`, then :math:`(N, *)`, where `*` is `K`
+            extra dimensions.
         weight (Tensor, optional): a manual rescaling weight given to each
             class. If given, has to be a Tensor of size `C`
         size_average (bool, optional): By default, the losses are averaged
@@ -1099,11 +1103,24 @@ def nll_loss(input, target, weight=None, size_average=True, ignore_index=-100, r
         return torch._C._nn.nll_loss(input, target, weight, size_average, ignore_index, reduce)
     elif dim == 4:
         return torch._C._nn.nll_loss2d(input, target, weight, size_average, ignore_index, reduce)
+    elif dim > 4:
+        n = input.size(0)
+        c = input.size(1)
+        out_size = (n,) + input.size()[2:]
+        if target.size()[1:] != input.size()[2:]:
+            raise ValueError('Expected target size {}, got {}'.format(
+                out_size, input.size()))
+        input = input.contiguous().view(n, c, 1, -1)
+        target = target.contiguous().view(n, 1, -1)
+        if reduce:
+            return torch._C._nn.nll_loss2d(input, target, weight, size_average, ignore_index, reduce)
+        out = torch._C._nn.nll_loss2d(input, target, weight, size_average, ignore_index, reduce)
+        return out.view(out_size)
     else:
-        raise ValueError('Expected 2 or 4 dimensions (got {})'.format(dim))
+        raise ValueError('Expected 2, 4, or more than 4 dimensions (got {})'.format(dim))
 
 
-def poisson_nll_loss(input, target, log_input=True, full=False, size_average=True, eps=1e-8):
+def poisson_nll_loss(input, target, log_input=True, full=False, size_average=True, eps=1e-8, reduce=True):
     r"""Poisson negative log likelihood loss.
 
     See :class:`~torch.nn.PoissonNLLLoss` for details.
@@ -1122,6 +1139,10 @@ def poisson_nll_loss(input, target, log_input=True, full=False, size_average=Tru
             the losses are instead summed for each minibatch. Default: ``True``
         eps (float, optional): Small value to avoid evaluation of log(0) when
             log_input=False. Default: 1e-8
+        reduce (bool, optional): By default, the losses are averaged
+            over observations for each minibatch, or summed, depending on
+            size_average. When reduce is ``False``, returns a loss per batch
+            element instead and ignores size_average. Default: ``True``
     """
     if log_input:
         loss = torch.exp(input) - target * input
@@ -1130,10 +1151,11 @@ def poisson_nll_loss(input, target, log_input=True, full=False, size_average=Tru
     if full:
         mask = target > 1
         loss[mask] += (target * torch.log(target) - target + 0.5 * torch.log(2 * math.pi * target))[mask]
+    if not reduce:
+        return loss
     if size_average:
         return torch.mean(loss)
-    else:
-        return torch.sum(loss)
+    return torch.sum(loss)
 
 
 kl_div = _add_docstr(torch._C._nn.kl_div, r"""
@@ -1190,7 +1212,7 @@ def cross_entropy(input, target, weight=None, size_average=True, ignore_index=-1
     return nll_loss(log_softmax(input, 1), target, weight, size_average, ignore_index, reduce)
 
 
-def binary_cross_entropy(input, target, weight=None, size_average=True):
+def binary_cross_entropy(input, target, weight=None, size_average=True, reduce=True):
     r"""Function that measures the Binary Cross Entropy
     between the target and the output.
 
@@ -1205,6 +1227,10 @@ def binary_cross_entropy(input, target, weight=None, size_average=True):
                 over observations for each minibatch. However, if the field
                 sizeAverage is set to False, the losses are instead summed
                 for each minibatch. Default: ``True``
+        reduce (bool, optional): By default, the losses are averaged or summed over
+                observations for each minibatch depending on size_average. When reduce
+                is False, returns a loss per batch element instead and ignores
+                size_average. Default: True
 
     Examples::
 
@@ -1226,7 +1252,7 @@ def binary_cross_entropy(input, target, weight=None, size_average=True):
         if torch.is_tensor(weight):
             weight = Variable(weight)
 
-    return torch._C._nn.binary_cross_entropy(input, target, weight, size_average)
+    return torch._C._nn.binary_cross_entropy(input, target, weight, size_average, reduce)
 
 
 def binary_cross_entropy_with_logits(input, target, weight=None, size_average=True):

@@ -1,3 +1,4 @@
+import math
 import unittest
 import functools
 from copy import deepcopy
@@ -8,7 +9,7 @@ import torch.nn.functional as F
 from torch.optim import SGD
 from torch.autograd import Variable
 from torch import sparse
-from torch.optim.lr_scheduler import LambdaLR, StepLR, MultiStepLR, ExponentialLR, ReduceLROnPlateau
+from torch.optim.lr_scheduler import LambdaLR, StepLR, MultiStepLR, ExponentialLR, CosineAnnealingLR, ReduceLROnPlateau
 from common import TestCase, run_tests
 
 
@@ -460,10 +461,10 @@ class TestLRScheduler(TestCase):
         # lr = 0.05     if epoch < 3
         # lr = 0.005    if 30 <= epoch < 6
         # lr = 0.0005   if epoch >= 9
-        single_targets = [0.05] * 3 + [0.005] * 3 + [0.0005] * 3 + [0.00005] * 3
-        targets = [single_targets, list(map(lambda x: x * 10, single_targets))]
-        scheduler = StepLR(self.opt, gamma=0.1, step_size=3)
         epochs = 10
+        single_targets = [0.05] * 3 + [0.005] * 3 + [0.0005] * 3 + [0.00005] * 3
+        targets = [single_targets, list(map(lambda x: x * epochs, single_targets))]
+        scheduler = StepLR(self.opt, gamma=0.1, step_size=3)
         self._test(scheduler, targets, epochs)
 
     def test_multi_step_lr(self):
@@ -471,106 +472,116 @@ class TestLRScheduler(TestCase):
         # lr = 0.005    if 2 <= epoch < 5
         # lr = 0.0005   if epoch < 9
         # lr = 0.00005   if epoch >= 9
-        single_targets = [0.05] * 2 + [0.005] * 3 + [0.0005] * 4 + [0.00005] * 3
-        targets = [single_targets, list(map(lambda x: x * 10, single_targets))]
-        scheduler = MultiStepLR(self.opt, gamma=0.1, milestones=[2, 5, 9])
         epochs = 10
+        single_targets = [0.05] * 2 + [0.005] * 3 + [0.0005] * 4 + [0.00005] * 3
+        targets = [single_targets, list(map(lambda x: x * epochs, single_targets))]
+        scheduler = MultiStepLR(self.opt, gamma=0.1, milestones=[2, 5, 9])
         self._test(scheduler, targets, epochs)
 
     def test_exp_lr(self):
-        single_targets = [0.05 * (0.9 ** x) for x in range(10)]
-        targets = [single_targets, list(map(lambda x: x * 10, single_targets))]
-        scheduler = ExponentialLR(self.opt, gamma=0.9)
         epochs = 10
+        single_targets = [0.05 * (0.9 ** x) for x in range(epochs)]
+        targets = [single_targets, list(map(lambda x: x * epochs, single_targets))]
+        scheduler = ExponentialLR(self.opt, gamma=0.9)
+        self._test(scheduler, targets, epochs)
+
+    def test_cos_anneal_lr(self):
+        epochs = 10
+        eta_min = 1e-10
+        single_targets = [eta_min + (0.05 - eta_min) *
+                          (1 + math.cos(x / epochs * math.pi)) / 2
+                          for x in range(epochs)]
+        targets = [single_targets, list(map(lambda x: x * epochs, single_targets))]
+        scheduler = CosineAnnealingLR(self.opt, T_max=epochs, eta_min=eta_min)
         self._test(scheduler, targets, epochs)
 
     def test_reduce_lr_on_plateau1(self):
+        epochs = 10
         for param_group in self.opt.param_groups:
             param_group['lr'] = 0.5
         targets = [[0.5] * 20]
         metrics = [10 - i * 0.0167 for i in range(20)]
         scheduler = ReduceLROnPlateau(self.opt, threshold_mode='abs', mode='min',
                                       threshold=0.01, patience=5, cooldown=5)
-        epochs = 10
         self._test_reduce_lr_on_plateau(scheduler, targets, metrics, epochs)
 
     def test_reduce_lr_on_plateau2(self):
+        epochs = 22
         for param_group in self.opt.param_groups:
             param_group['lr'] = 0.5
         targets = [[0.5] * 6 + [0.05] * 7 + [0.005] * 7 + [0.0005] * 2]
         metrics = [10 - i * 0.0165 for i in range(22)]
         scheduler = ReduceLROnPlateau(self.opt, patience=5, cooldown=0, threshold_mode='abs',
                                       mode='min', threshold=0.1)
-        epochs = 22
         self._test_reduce_lr_on_plateau(scheduler, targets, metrics, epochs)
 
     def test_reduce_lr_on_plateau3(self):
+        epochs = 22
         for param_group in self.opt.param_groups:
             param_group['lr'] = 0.5
         targets = [[0.5] * (2 + 6) + [0.05] * (5 + 6) + [0.005] * 4]
         metrics = [-0.8] * 2 + [-0.234] * 20
         scheduler = ReduceLROnPlateau(self.opt, mode='max', patience=5, cooldown=5,
                                       threshold_mode='abs')
-        epochs = 22
         self._test_reduce_lr_on_plateau(scheduler, targets, metrics, epochs)
 
     def test_reduce_lr_on_plateau4(self):
+        epochs = 20
         for param_group in self.opt.param_groups:
             param_group['lr'] = 0.5
         targets = [[0.5] * 20]
         metrics = [1.5 * (1.025 ** i) for i in range(20)]  # 1.025 > 1.1**0.25
         scheduler = ReduceLROnPlateau(self.opt, mode='max', patience=3,
                                       threshold_mode='rel', threshold=0.1)
-        epochs = 20
         self._test_reduce_lr_on_plateau(scheduler, targets, metrics, epochs)
 
     def test_reduce_lr_on_plateau5(self):
+        epochs = 20
         for param_group in self.opt.param_groups:
             param_group['lr'] = 0.5
         targets = [[0.5] * 6 + [0.05] * (5 + 6) + [0.005] * 4]
         metrics = [1.5 * (1.005 ** i) for i in range(20)]
         scheduler = ReduceLROnPlateau(self.opt, mode='max', threshold_mode='rel',
                                       threshold=0.1, patience=5, cooldown=5)
-        epochs = 20
         self._test_reduce_lr_on_plateau(scheduler, targets, metrics, epochs)
 
     def test_reduce_lr_on_plateau6(self):
+        epochs = 20
         for param_group in self.opt.param_groups:
             param_group['lr'] = 0.5
         targets = [[0.5] * 20]
         metrics = [1.5 * (0.85 ** i) for i in range(20)]
         scheduler = ReduceLROnPlateau(self.opt, mode='min', threshold_mode='rel',
                                       threshold=0.1)
-        epochs = 20
         self._test_reduce_lr_on_plateau(scheduler, targets, metrics, epochs)
 
     def test_reduce_lr_on_plateau7(self):
+        epochs = 20
         for param_group in self.opt.param_groups:
             param_group['lr'] = 0.5
         targets = [[0.5] * 6 + [0.05] * (5 + 6) + [0.005] * 4]
         metrics = [1] * 7 + [0.6] + [0.5] * 12
         scheduler = ReduceLROnPlateau(self.opt, mode='min', threshold_mode='rel',
                                       threshold=0.1, patience=5, cooldown=5)
-        epochs = 20
         self._test_reduce_lr_on_plateau(scheduler, targets, metrics, epochs)
 
     def test_reduce_lr_on_plateau8(self):
+        epochs = 20
         for param_group in self.opt.param_groups:
             param_group['lr'] = 0.5
         targets = [[0.5] * 6 + [0.4] * 14, [0.5] * 6 + [0.3] * 14]
         metrics = [1.5 * (1.005 ** i) for i in range(20)]
         scheduler = ReduceLROnPlateau(self.opt, mode='max', threshold_mode='rel', min_lr=[0.4, 0.3],
                                       threshold=0.1, patience=5, cooldown=5)
-        epochs = 20
         self._test_reduce_lr_on_plateau(scheduler, targets, metrics, epochs)
 
     def test_lambda_lr(self):
+        epochs = 10
         self.opt.param_groups[0]['lr'] = 0.05
         self.opt.param_groups[1]['lr'] = 0.4
-        targets = [[0.05 * (0.9 ** x) for x in range(10)], [0.4 * (0.8 ** x) for x in range(10)]]
+        targets = [[0.05 * (0.9 ** x) for x in range(epochs)], [0.4 * (0.8 ** x) for x in range(epochs)]]
         scheduler = LambdaLR(self.opt,
                              lr_lambda=[lambda x1: 0.9 ** x1, lambda x2: 0.8 ** x2])
-        epochs = 10
         self._test(scheduler, targets, epochs)
 
     def _test(self, scheduler, targets, epochs=10):

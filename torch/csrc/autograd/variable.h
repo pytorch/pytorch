@@ -113,6 +113,7 @@ public:
   // Get the VariableType for a base Tensor type
   static at::Type* getType(const at::Type& baseType);
   static at::Type* getType(const at::Tensor& tensor);
+  static std::vector<at::Type*> allTypes();
 
 public:
   std::shared_ptr<Function> get_grad_accumulator();

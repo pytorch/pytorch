@@ -167,7 +167,7 @@ struct VariableTypes {
     for (int p = 0; p < static_cast<int>(Backend::NumOptions); ++p) {
       for (int s = 0; s < static_cast<int>(ScalarType::NumOptions); s++) {
         auto baseType = context.type_registry[p][s].get();
-        if (baseType) {
+        if (baseType && baseType->backend() != Backend::Undefined) {
           auto id = static_cast<int>(baseType->ID());
           types[id].reset(new VariableType(&context, baseType));
         }
@@ -188,10 +188,21 @@ Type* VariableImpl::getType(const Tensor& tensor)
   return getType(tensor.type());
 }
 
+static VariableTypes vt;
+
 Type* VariableImpl::getType(const Type& baseType)
 {
-  static VariableTypes vt;
   return vt.types[static_cast<int>(baseType.ID())].get();
+}
+
+std::vector<Type*> VariableImpl::allTypes() {
+  std::vector<Type*> types;
+  for (int i = 0; i < static_cast<int>(TypeID::NumOptions); i++) {
+    if (vt.types[i]) {
+      types.push_back(vt.types[i].get());
+    }
+  }
+  return types;
 }
 
 Variable Variable::detach() const {

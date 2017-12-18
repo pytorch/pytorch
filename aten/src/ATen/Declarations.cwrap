@@ -1966,7 +1966,8 @@
         - arg: THTensor* destination
           output: True
         - THTensor* self
-        - real p
+        - arg: real p
+          python_default_init: AS_REAL(2)
         - arg: long dim
           wrap_dim: self
         - arg: bool keepdim
@@ -2092,12 +2093,10 @@
 [[
   name: atan2
   types:
-    - Float
-    - Double
+    - floating_point
   backends:
     - CPU
-  backend_type_pairs: [[CPU,Float],[CPU,Double],[CUDA,Float]]
-
+    - CUDA
   variants:
     - method
     - function
@@ -2112,7 +2111,11 @@
 ]]
 [[
   name: atan2_
-  backend_type_pairs: [[CPU,Float],[CPU,Double],[CUDA,Float]]
+  types:
+    - floating_point
+  backends:
+    - CPU
+    - CUDA
   cname: atan2
   return: argument 0
   arguments:

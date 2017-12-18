@@ -214,18 +214,10 @@ class Variable(_C._VariableBase):
         self.register_hook(retain_grad_hook)
         self.retains_grad = True
 
-    def type(self, t):
-        if t != type(self.data):
-            return Type.apply(self, t)
-        return self
-
     def type_as(self, other):
         if torch.is_tensor(other):
             other = Variable(other)
         return super(Variable, self).type_as(other)
-
-    def cuda(self, device=None, async=False):
-        return CudaTransfer.apply(self, device, async)
 
     def is_pinned(self):
         r"""Returns true if this tensor resides in pinned memory"""
@@ -268,12 +260,6 @@ class Variable(_C._VariableBase):
 
     def resize_as(self, variable):
         return Resize.apply(self, variable.size())
-
-    def norm(self, p=2, dim=None, keepdim=False):
-        if dim is None:
-            return super(Variable, self).norm(p)
-        else:
-            return super(Variable, self).norm(p, dim, keepdim)
 
     def index_add(self, dim, index, tensor):
         return self.clone().index_add_(dim, index, tensor)
