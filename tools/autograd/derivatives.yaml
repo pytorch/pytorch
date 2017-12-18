@@ -653,6 +653,9 @@
 - name: _sparse_mask(Tensor self, SparseTensor mask)
   self: not_implemented("_sparse_mask")
 
+- name: _standard_gamma(Tensor self, Generator generator)
+  self: grad * self._standard_gamma_grad(output)
+
 # NN
 
 - name: binary_cross_entropy(Tensor self, Tensor target, Tensor weight, bool size_average, bool reduce)

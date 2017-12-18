@@ -124,5 +124,33 @@ int main() {
     ASSERT_THROWS(d5.matmul(d5wrong), "must match the size");
   }
 
+  // _standard_gamma_grad
+  {
+    // check empty
+    auto empty = T.ones({0});
+    ASSERT_EQUAL(empty, empty._standard_gamma_grad(empty));
+
+    // check scalar equals one element
+    auto one_scalar = T.ones({}).mul(5);
+    auto one_with_dim = T.ones({1}).mul(5);
+    ASSERT_ALLCLOSE(one_scalar._standard_gamma_grad(one_scalar),
+                    one_with_dim._standard_gamma_grad(one_with_dim).sum());
+
+    // check types
+    Type & DT = CPU(kDouble);
+    auto t1 = T.randn({3, 4});
+    auto t2 = DT.randn({3, 4});
+    ASSERT_THROWS(t1._standard_gamma_grad(t2), "expected scalar type");
+    if(at::hasCUDA()) {
+      Type & CT = CUDA(kFloat);
+      auto ct1 = CT.randn({3, 4});
+      auto ct2 = CT.randn({3, 4});
+
+      ASSERT_THROWS(ct1._standard_gamma_grad(ct2), "not implemented");
+      ASSERT_THROWS(ct1._standard_gamma_grad(t2), "not implemented");
+      ASSERT_THROWS(t1._standard_gamma_grad(ct2), "CUDA Backend");
+    }
+  }
+
   return 0;
 }

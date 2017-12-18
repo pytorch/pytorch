@@ -15,19 +15,16 @@ constexpr auto Float = ScalarType::Float;
 
 template<typename scalar_type>
 struct Foo {
-  static void CPU(const Type & t, Tensor a, Tensor b) {
+  static void apply(Tensor a, Tensor b) {
     scalar_type s = 1;
-    cout << "hello, dispatch: " << t.toString() << s << "\n";
+    cout << "hello, dispatch: " << a.type().toString() << s << "\n";
     auto data = (scalar_type*)a.data_ptr();
     (void)data;
-  }
-  static void CUDA(const Type & t, Tensor a, Tensor b) {
   }
 };
 template<>
 struct Foo<Half> {
-  static void CPU(const Type & t, Tensor a, Tensor b) {}
-  static void CUDA(const Type & t, Tensor a, Tensor b) {}
+  static void apply(Tensor a, Tensor b) {}
 };
 
 void test_ctors() {
@@ -142,7 +139,7 @@ int main() {
   ASSERT(what.toTensor().type().scalarType() == kLong);
   ASSERT(Scalar(CPU(kFloat).ones({})).toTensor().type().scalarType() == kFloat);
 
-  dispatch<Foo>(x.type(),x,prev_h);
+  dispatch_all<Foo>(x.type(),"foo",x,prev_h);
 
   // test direct C-scalar type conversions
   try {
