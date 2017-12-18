@@ -302,7 +302,7 @@ tests = [
     ('triu', medium_2d, lambda t: [-2], 'negative'),
     ('unsqueeze', new_t(2, 3, 4), lambda t: [2],),
     ('unsqueeze', new_t(2, 3, 4), lambda t: [-2], 'neg_dim'),
-    ('view', small_3d, lambda t: [100, 10],),
+    ('view', small_3d, lambda t: [100, 10], 'contiguous'),
     ('view_as', small_3d, lambda t: [t(100, 10)],),
     ('zero', small_3d, lambda t: [],),
     ('zeros', small_3d, lambda t: [1, 2, 3, 4],),
@@ -988,6 +988,9 @@ class TestCuda(TestCase):
     @unittest.skipIf(not HAS_MAGMA, "no MAGMA library detected")
     def test_det(self):
         TestTorch._test_det(self, lambda t: t.cuda())
+
+    def test_view(self):
+        TestTorch._test_view(self, lambda t: t.cuda())
 
     def test_broadcast(self):
         TestTorch._test_broadcast(self, lambda t: t.cuda())

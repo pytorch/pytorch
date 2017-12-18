@@ -3828,10 +3828,11 @@ class TestTorch(TestCase):
         self.assertEqual(tensor.var(0)[0], 0.03125)
         self.assertEqual(tensor.var(), 0.03125)
 
-    def test_view(self):
-        tensor = torch.rand(15)
-        template = torch.rand(3, 5)
-        empty = torch.Tensor()
+    @staticmethod
+    def _test_view(self, cast):
+        tensor = cast(torch.rand(15))
+        template = cast(torch.rand(3, 5))
+        empty = cast(torch.Tensor())
         target = template.size()
         self.assertEqual(tensor.view_as(template).size(), target)
         self.assertEqual(tensor.view(3, 5).size(), target)
@@ -3848,6 +3849,52 @@ class TestTorch(TestCase):
         self.assertRaises(RuntimeError, lambda: tensor.view(15, 0))
         self.assertRaises(RuntimeError, lambda: tensor.view(7, -1))
         self.assertRaises(RuntimeError, lambda: tensor.view(15, -1, -1))
+        # test view when tensor is not contiguous in every dimension, but only
+        # contiguous dimensions are touched.
+        tensor = cast(torch.rand(4, 2, 5, 1, 6, 2, 9, 3)).transpose(-1, 2).transpose(-2, 3)
+        # size:                      [   4,    2,    3,    9,    6,    2,    1,    5]
+        # stride:                    [3840, 1620,    1,    3,   54,   27,  324,  324]
+        # contiguous dim chunks:     [__________, ____, ____, __________, ____, ____]
+        # merging 1 to chunk after:  [__________, ____, ____, __________, __________]
+        contig_tensor = tensor.clone()
+        # [4, 2] => [8, 1]
+        # [3] => [3]
+        # [9] => [3, 3]
+        # [6, 2] => [4, 1, 3]
+        # [1, 5] => [5]
+        view_size = [8, 1, 3, 3, 3, 4, 1, 3, 5]
+        self.assertEqual(tensor.view(*view_size), contig_tensor.view(*view_size))
+        # [4, 2] => [2, 4]
+        # [3] => [3]
+        # [9] => [1, 9]
+        # [6, 2] => [2, 2, 3]
+        # [1, 5] => [5, 1]
+        view_size = [2, 4, 3, 1, 9, 2, 2, 3, 5, 1]
+        self.assertEqual(tensor.view(*view_size), contig_tensor.view(*view_size))
+        # adding size 1 dims
+        view_size = [1, 1, 2, 1, 4, 3, 1, 1, 9, 1, 2, 1, 2, 3, 1, 5, 1, 1]
+        self.assertEqual(tensor.view(*view_size), contig_tensor.view(*view_size))
+
+        # invalid views
+        self.assertRaises(RuntimeError, lambda: tensor.view(-1))
+        # crossing [4, 2], [3]
+        self.assertRaises(RuntimeError, lambda: tensor.view(24, 9, 6, 2, 1, 5))
+        # crossing [6, 2], [1, 5]
+        self.assertRaises(RuntimeError, lambda: tensor.view(8, 3, 9, 6, 10))
+        # crossing [9], [6, 2]
+        self.assertRaises(RuntimeError, lambda: tensor.view(8, 3, 54, 2, 1, 5))
+
+        # view with stride 0 dims
+        tensor = cast(torch.Tensor(1, 1)).expand(3, 4)  # all dims are contiguous
+        contig_tensor = tensor.clone()
+        self.assertEqual(tensor.view(-1), contig_tensor.view(-1))
+        self.assertEqual(tensor.view(1, -1, 1), contig_tensor.view(1, -1, 1))
+        self.assertEqual(tensor.view(-1, 1), contig_tensor.view(-1, 1))
+        self.assertEqual(tensor.view(6, 2, 1), contig_tensor.view(6, 2, 1))
+        self.assertEqual(tensor.view(1, 6, 2, 1), contig_tensor.view(1, 6, 2, 1))
+
+    def test_view(self):
+        TestTorch._test_view(self, lambda x: x)
 
     def test_expand(self):
         tensor = torch.rand(1, 8, 1)

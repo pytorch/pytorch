@@ -1789,8 +1789,18 @@ Returns a new tensor with the same data as the :attr:`self` tensor but of a
 different size.
 
 The returned tensor shares the same data and must have the same number
-of elements, but may have a different size. A tensor must be
-:func:`contiguous` to be viewed.
+of elements, but may have a different size. For a tensor to be viewed, the new
+view size must be compatible with its original size and stride, i.e., each new
+view dimension must either be a subspace of an original dimension, or only span
+across original dimensions :math:`d, d+1, \dots, d+k` that satisfy the following
+contiguity-like condition that :math:`\forall i = 0, \dots, k-1`,
+
+.. math::
+
+  stride[i] = stride[i+1] \times size[i+1]
+
+Otherwise, :func:`contiguous` needs to be called before the tensor can be
+viewed.
 
 Args:
     args (torch.Size or int...): the desired size
