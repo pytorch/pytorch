@@ -261,12 +261,6 @@ class Variable(_C._VariableBase):
     def resize_as(self, variable):
         return Resize.apply(self, variable.size())
 
-    def norm(self, p=2, dim=None, keepdim=False):
-        if dim is None:
-            return super(Variable, self).norm(p)
-        else:
-            return super(Variable, self).norm(p, dim, keepdim)
-
     def index_add(self, dim, index, tensor):
         return self.clone().index_add_(dim, index, tensor)
 

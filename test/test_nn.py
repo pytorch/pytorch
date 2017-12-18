@@ -3962,6 +3962,32 @@ def poissonnllloss_no_reduce_test():
         pickle=False)
 
 
+def bceloss_no_reduce_test():
+    t = torch.randn(15, 10).gt(0).double()
+    return dict(
+        fullname='BCELoss_no_reduce',
+        constructor=wrap_functional(
+            lambda i: F.binary_cross_entropy(i, Variable(t.type_as(i.data)), reduce=False)),
+        input_fn=lambda: torch.rand(15, 10).clamp_(2e-2, 1 - 2e-2),
+        reference_fn=lambda i, m: -(t * i.log() + (1 - t) * (1 - i).log()),
+        check_gradgrad=False,
+        pickle=False)
+
+
+def bceloss_weights_no_reduce_test():
+    t = torch.randn(15, 10).gt(0).double()
+    weights = torch.rand(10)
+    return dict(
+        fullname='BCELoss_weights_no_reduce',
+        constructor=wrap_functional(
+            lambda i: F.binary_cross_entropy(i, Variable(t.type_as(i.data)),
+                                             weight=weights.type_as(i.data), reduce=False)),
+        input_fn=lambda: torch.rand(15, 10).clamp_(2e-2, 1 - 2e-2),
+        reference_fn=lambda i, m: -(t * i.log() + (1 - t) * (1 - i).log()) * weights,
+        check_gradgrad=False,
+        pickle=False)
+
+
 def kldivloss_no_reduce_test():
     t = Variable(torch.randn(10, 10))
     return dict(
@@ -4176,6 +4202,8 @@ def smoothl1loss_no_reduce_test():
 
 new_module_tests = [
     poissonnllloss_no_reduce_test(),
+    bceloss_no_reduce_test(),
+    bceloss_weights_no_reduce_test(),
     kldivloss_no_reduce_test(),
     l1loss_no_reduce_test(),
     mseloss_no_reduce_test(),

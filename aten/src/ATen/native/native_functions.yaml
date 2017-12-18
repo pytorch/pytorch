@@ -19,6 +19,12 @@
 #           CUDA: func_cuda
 # template_scalar: if set to True, generates the native function as a templatized function on the scalar
 #                  (C++) type of the underlying function.
+# python_default_init: a map from argument names to default initialize expressions in C++. Such default
+#                      expressions will only be used in Python API. This allows us to write argument with
+#                      a default value that can either cause ambiguity in c++ (e.g., `Scalar p` arguement
+#                      in `norm`) or have a type that doesn't allow default value None/NULL/nullptr (e.g.,
+#                      `int64_t fft_size` argument in stft, which we want to default to value of another
+#                      argument if not provided).
 #
 # In addition to the variants generation, these declarations will also generate a C++ function declaration
 # in NativeFunctions.h; it is up to you to write the corresponding definitions in the correct file under /native
@@ -89,6 +95,10 @@
 
 - func: stack(TensorList tensors, int64_t dim=0) -> Tensor
   variants: function
+
+- func: stft(Tensor self, int64_t frame_length, int64_t hop, int64_t fft_size, bool return_onesided=true, Tensor window={}, int64_t pad_end=0) -> Tensor
+  python_default_init:
+    fft_size: frame_length
 
 - func: allclose(Tensor self, Tensor other, double rtol=1e-5, double atol=1e-8) -> bool
 
