@@ -196,7 +196,7 @@ class TestCase(unittest.TestCase):
 
         if torch.is_tensor(x) and torch.is_tensor(y):
             def assertTensorsEqual(a, b):
-                super(TestCase, self).assertEqual(a.size(), b.size())
+                super(TestCase, self).assertEqual(a.size(), b.size(), message)
                 if a.numel() > 0:
                     b = b.type_as(a)
                     b = b.cuda(device=a.get_device()) if a.is_cuda else b.cpu()
@@ -209,7 +209,7 @@ class TestCase(unittest.TestCase):
                         diff = diff.abs()
                     max_err = diff.max()
                     self.assertLessEqual(max_err, prec, message)
-            self.assertEqual(x.is_sparse, y.is_sparse, message)
+            self.assertEqual(x.is_sparse, y.is_sparse, prec, message)
             if x.is_sparse:
                 x = self.safeCoalesce(x)
                 y = self.safeCoalesce(y)
@@ -218,11 +218,11 @@ class TestCase(unittest.TestCase):
             else:
                 assertTensorsEqual(x, y)
         elif isinstance(x, string_classes) and isinstance(y, string_classes):
-            super(TestCase, self).assertEqual(x, y)
+            super(TestCase, self).assertEqual(x, y, message)
         elif type(x) == set and type(y) == set:
-            super(TestCase, self).assertEqual(x, y)
+            super(TestCase, self).assertEqual(x, y, message)
         elif is_iterable(x) and is_iterable(y):
-            super(TestCase, self).assertEqual(len(x), len(y))
+            super(TestCase, self).assertEqual(len(x), len(y), message)
             for x_, y_ in zip(x, y):
                 self.assertEqual(x_, y_, prec, message)
         else:

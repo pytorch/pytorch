@@ -1,10 +1,12 @@
-from common import TestCase, run_tests
 import math
-import torch
 import unittest
+from collections import namedtuple
 from itertools import product
+
+from common import TestCase, run_tests
+import torch
 from torch.autograd import Variable, gradcheck
-from torch.distributions import Bernoulli, Categorical, Normal, Gamma, Distribution
+from torch.distributions import Bernoulli, Categorical, Normal, Gamma
 
 TEST_NUMPY = True
 try:
@@ -13,6 +15,45 @@ try:
     import scipy.special
 except ImportError:
     TEST_NUMPY = False
+
+
+# Register all distributions for generic tests.
+Example = namedtuple('Example', ['Dist', 'params'])
+EXAMPLES = [
+    Example(Bernoulli, [
+        {'probs': Variable(torch.Tensor([0.7, 0.2, 0.4]), requires_grad=True)},
+        {'probs': Variable(torch.Tensor([0.3]), requires_grad=True)},
+        {'probs': 0.3},
+    ]),
+    Example(Categorical, [
+        {'probs': Variable(torch.Tensor([[0.1, 0.2, 0.3], [0.5, 0.3, 0.2]]), requires_grad=True)},
+        {'probs': Variable(torch.Tensor([[1.0, 0.0], [0.0, 1.0]]), requires_grad=True)},
+    ]),
+    Example(Gamma, [
+        {
+            'alpha': Variable(torch.exp(torch.randn(2, 3)), requires_grad=True),
+            'beta': Variable(torch.exp(torch.randn(2, 3)), requires_grad=True),
+        },
+        {
+            'alpha': Variable(torch.exp(torch.randn(1)), requires_grad=True),
+            'beta': Variable(torch.exp(torch.randn(1)), requires_grad=True),
+        },
+    ]),
+    Example(Normal, [
+        {
+            'mean': Variable(torch.randn(5, 5), requires_grad=True),
+            'std':Variable(torch.randn(5, 5).abs(), requires_grad=True),
+        },
+        {
+            'mean': Variable(torch.randn(1), requires_grad=True),
+            'std': Variable(torch.randn(1), requires_grad=True),
+        },
+        {
+            'mean': torch.Tensor([1.0, 0.0]),
+            'std': torch.Tensor([1e-5, 1e-5]),
+        },
+    ]),
+]
 
 
 class TestDistributions(TestCase):
@@ -391,6 +432,18 @@ class TestDistributionShapes(TestCase):
         self.assertEqual(normal.sample((3, 2)).size(), torch.Size((3, 2, 2)))
         self.assertEqual(normal.log_prob(self.tensor_sample_1).size(), torch.Size((3, 2)))
         self.assertRaises(ValueError, normal.log_prob, self.tensor_sample_2)
+
+    def test_entropy_shape(self):
+        for Dist, params in EXAMPLES:
+            for i, param in enumerate(params):
+                dist = Dist(**param)
+                actual_shape = dist.entropy().size()
+                expected_shape = dist._batch_shape
+                if not expected_shape:
+                    expected_shape = torch.Size((1,))  # TODO Remove this once scalars are supported.
+                message = '{} example {}/{}, shape mismatch. expected {}, actual {}'.format(
+                    Dist.__name__, i, len(params), expected_shape, actual_shape)
+                self.assertEqual(actual_shape, expected_shape, message=message)
 
 
 if __name__ == '__main__':

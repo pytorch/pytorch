@@ -48,3 +48,6 @@ class Normal(Distribution):
         var = (self.std ** 2)
         log_std = math.log(self.std) if isinstance(self.std, Number) else self.std.log()
         return -((value - self.mean) ** 2) / (2 * var) - log_std - math.log(math.sqrt(2 * math.pi))
+
+    def entropy(self):
+        return 0.5 + 0.5 * math.log(2 * math.pi) + torch.log(self.std)
