@@ -217,8 +217,17 @@ void THNN_(SpatialDilatedMaxPooling_updateGradInput)(
   THCTensor_(resizeAs)(state, gradInput, input);
 
   int count = THCTensor_(nElement)(state, input);
-
-  MaxPoolBackward<real, accreal> <<< GET_BLOCKS(count), CUDA_NUM_THREADS, 0, THCState_getCurrentStream(state) >>>
+  dim3 grid;
+  int imgcount = nInputCols * nInputRows;
+  const int blocks = (imgcount + BACKWARD_THREADS - 1) / BACKWARD_THREADS;
+  grid.x = blocks;
+  grid.y = batchSize;
+  grid.z = nInputPlane;
+  uint64_t maxGridY = THCState_getCurrentDeviceProperties(state)->maxGridSize[1];
+  uint64_t maxGridZ = THCState_getCurrentDeviceProperties(state)->maxGridSize[2];
+  if (maxGridY < grid.y) grid.y = maxGridY;
+  if (maxGridZ < grid.z) grid.z = maxGridZ;
+  MaxPoolBackward<real, accreal> <<< grid, BACKWARD_THREADS, 0, THCState_getCurrentStream(state) >>>
       (count,
       THCTensor_(data)(state, gradOutput),
       THCIndexTensor_(data)(state, indices),
