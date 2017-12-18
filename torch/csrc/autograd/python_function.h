@@ -69,10 +69,6 @@ struct THPFunction {
     // by Python with 'save_for_backward'.  If NULL, no tensors were
     // saved.
     PyObject *to_save;
-    // Python pairs of distinct tensors which share storage.  Set by
-    // Python with 'mark_shared_storage'.  If NULL, no tensors share
-    // storage.
-    PyObject *shared_pairs;
     // Python tuple of tensors which are not differentiable.  Set by
     // Python with 'mark_non_differentiable'.  If NULL, no tensors were
     // non-differentiable.

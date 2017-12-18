@@ -114,6 +114,9 @@ static Variable valueToTensor(const Type & type, PyObject* value) {
   if (PyFloat_Check(value)) {
     return type.scalarTensor(Scalar(THPUtils_unpackDouble(value)));
   }
+  if (THPModule_isTensor(value)) {
+    return make_variable(createTensor(value));
+  }
   throw TypeError("can't assign a %s to a %s", Py_TYPE(value)->tp_name, type.toString());
 }
 
