@@ -62,7 +62,7 @@ static inline void THNN_(VolumetricAveragePooling_shapeCheck)(
   }
   else
   {
-    THArgCheck(false, 2, "4D or 5D tensor expected, but got: %d", input->nDimension);
+    THArgError(2, "4D or 5D tensor expected, but got: %d", input->nDimension);
   }
 
   // The second argument is the index of padH.

@@ -68,7 +68,7 @@ static inline void THNN_(VolumetricDilatedMaxPooling_shapeCheck)(
   }
   else
   {
-    THArgCheck(false, 2, "4D or 5D tensor expected, got %d", THCTensor_(nDimension)(state, input));
+    THArgError(2, "4D or 5D tensor expected, got %d", THCTensor_(nDimension)(state, input));
   }
 
   THArgCheck(kT/2 >= padT && kW/2 >= padW && kH/2 >= padH, 13,
@@ -163,7 +163,7 @@ void THNN_(VolumetricDilatedMaxPooling_updateOutput)(
     inputHeight = THCTensor_(size)(state, input, 2);
     inputWidth  = THCTensor_(size)(state, input, 3);
   }
-  else /* 5D */
+  else if (THCTensor_(nDimension)(state, input) == 5)
   {
     /* sizes */
     batchSize   = THCTensor_(size)(state, input, 0);
@@ -171,6 +171,10 @@ void THNN_(VolumetricDilatedMaxPooling_updateOutput)(
     inputTime   = THCTensor_(size)(state, input, 2);
     inputHeight = THCTensor_(size)(state, input, 3);
     inputWidth  = THCTensor_(size)(state, input, 4);
+  }
+  else
+  {
+    THArgError(2, "4D or 5D tensor expected, got %d", THCTensor_(nDimension)(state, input));
   }
 
   if (ceilMode)
