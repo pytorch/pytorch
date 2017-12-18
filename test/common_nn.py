@@ -400,6 +400,8 @@ criterion_tests = [
         module_name='BCELoss',
         input_fn=lambda: torch.rand(15, 10).clamp_(1e-2, 1 - 1e-2),
         target_fn=lambda: torch.randn(15, 10).gt(0).double(),
+        reference_fn=lambda i, t, m: -(t * i.log() + (1 - t) * (1 - i).log()).sum() /
+            (i.numel() if get_size_average(m) else 1),
         check_gradgrad=False,
     ),
     dict(
@@ -407,6 +409,8 @@ criterion_tests = [
         constructor_args_fn=lambda: (torch.rand(10),),
         input_fn=lambda: torch.rand(15, 10).clamp_(1e-2, 1 - 1e-2),
         target_fn=lambda: torch.randn(15, 10).gt(0).double(),
+        reference_fn=lambda i, t, m: -((t * i.log() + (1 - t) * (1 - i).log()) * get_weight(m)).sum() /
+            (i.numel() if get_size_average(m) else 1),
         desc='weights',
         check_gradgrad=False,
     ),
