@@ -28,6 +28,10 @@
 # recommended that you copy the generated C++ function declaration to your definition so that the two
 # match.
 
+- func: bernoulli_(Tensor self, Tensor p, Generator* generator=nullptr) -> Tensor
+
+- func: bernoulli_(Tensor self, double p, Generator* generator=nullptr) -> Tensor
+
 - func: type_as(Tensor self, Tensor other) -> Tensor
 
 - func: expand_as(Tensor self, Tensor other) -> Tensor
@@ -41,8 +45,11 @@
 - func: stride(Tensor self, int64_t dim) -> int64_t
 
 - func: index(Tensor self, TensorList indices) -> Tensor
+  # NB: This function is special-cased in tools/autograd/gen_variable_type.py
 
 - func: index_put_(Tensor self, TensorList indices, Tensor values) -> Tensor
+
+- func: is_nonzero(Tensor self) -> bool
 
 - func: is_same_size(Tensor self, Tensor other) -> bool
 
@@ -60,6 +67,8 @@
 
 - func: permute(Tensor self, IntList dims) -> Tensor
 
+- func: pin_memory(Tensor self) -> Tensor
+
 - func: expand(Tensor self, IntList size) -> Tensor
 
 - func: squeeze(Tensor self) -> Tensor
@@ -74,11 +83,19 @@
 
 - func: unsqueeze_(Tensor self, int64_t dim) -> Tensor
 
+- func: _det_with_svd(Tensor self) -> (Tensor, Tensor, Tensor, Tensor)
+
+- func: det(Tensor self) -> Tensor
+
 - func: stack(TensorList tensors, int64_t dim=0) -> Tensor
   variants: function
 
+- func: allclose(Tensor self, Tensor other, double rtol=1e-5, double atol=1e-8) -> bool
+
 - func: is_signed(Tensor self) -> bool
   template_scalar: True
+
+- func: matmul(Tensor self, Tensor other) -> Tensor
 
 - func: RoiPooling2d_forward(Tensor input, Tensor rois, int64_t pooledHeight, int64_t pooledWidth, double spatialScale) -> (Tensor, Tensor)
   variants: function

@@ -22,8 +22,12 @@ void registerStoragePyTypeObject(
 PyObject* createPyObject(const at::Tensor& tensor);
 PyObject* createPyObject(const at::Storage& storage);
 PyTypeObject* getPyTypeObject(const at::Tensor& tensor);
+at::Type& getATenType(PyTypeObject* type);
 //rename to createPyObject when THPP is removed
 // Creates a at::Tensor from a PyObject.  Does NOT steal the PyObject reference.
-at::Tensor createTensor(PyObject *data);
+at::Tensor createTensor(PyObject* data);
+std::unique_ptr<at::Storage> createStorage(PyObject* obj);
+
+bool isStorage(PyObject* obj);
 
 }  // namespace torch

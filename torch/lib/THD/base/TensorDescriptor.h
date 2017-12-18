@@ -21,6 +21,7 @@ THD_API THDTensorDescriptor THDTensorDescriptor_newFromTHByteTensor(THByteTensor
 #ifdef WITH_CUDA
 THD_API THDTensorDescriptor THDTensorDescriptor_newFromTHCudaDoubleTensor(THCudaDoubleTensor *tensor);
 THD_API THDTensorDescriptor THDTensorDescriptor_newFromTHCudaFloatTensor(THCudaTensor *tensor);
+THD_API THDTensorDescriptor THDTensorDescriptor_newFromTHCudaHalfTensor(THCudaHalfTensor *tensor);
 THD_API THDTensorDescriptor THDTensorDescriptor_newFromTHCudaLongTensor(THCudaLongTensor *tensor);
 THD_API THDTensorDescriptor THDTensorDescriptor_newFromTHCudaIntTensor(THCudaIntTensor *tensor);
 THD_API THDTensorDescriptor THDTensorDescriptor_newFromTHCudaShortTensor(THCudaShortTensor *tensor);

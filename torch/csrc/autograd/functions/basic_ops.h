@@ -37,7 +37,6 @@ struct GraphRoot : public Function {
   GraphRoot(function_list functions, variable_list inputs)
     : outputs(std::move(inputs)) {
       next_functions = std::move(functions);
-      is_executable = true;
     };
 
   virtual variable_list apply(const variable_list& inputs) {

@@ -54,7 +54,9 @@ UNPACK_SELF = "auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;"
 # to add an appropriate wrap() overload in torch/csrc/autograd/utils/wrap_outputs.h.
 SUPPORTED_RETURN_TYPES = {
     'Tensor', 'std::tuple<Tensor,Tensor>',
-    'std::tuple<Tensor,Tensor,Tensor>', 'std::vector<Tensor>',
+    'std::tuple<Tensor,Tensor,Tensor>',
+    'std::tuple<Tensor,Tensor,Tensor,Tensor>',
+    'std::vector<Tensor>',
     'Scalar', 'bool', 'int64_t', 'void*'
 }
 
@@ -69,6 +71,7 @@ def create_python_bindings(
 
     unpack_methods = {
         'const Tensor &': 'tensor',
+        'SparseTensor': 'tensor',
         'Tensor &': 'tensor',
         'Generator *': 'generator',
         'Storage &': 'storage',
@@ -111,7 +114,12 @@ def create_python_bindings(
                 typename = 'Tensor'
 
             unpack = unpack_methods.get(typename, typename.lower())
-            actuals.append('r.{}({})'.format(unpack, arg_idx))
+            expr = 'r.{}({})'.format(unpack, arg_idx)
+            if typename == 'Storage &':
+                expr = '*' + expr
+            if typename == 'SparseTensor':
+                expr = 'SparseTensor({})'.format(expr)
+            actuals.append(expr)
             dispatch_type = typename
             if dispatch_type == 'Tensor':
                 dispatch_type = 'const Tensor &'
@@ -162,6 +170,7 @@ def create_python_bindings(
             if not is_class:
                 # Use 'input' instead of 'self' for NN functions
                 prototype = prototype.replace('Tensor self', 'Tensor input')
+            prototype = prototype.replace('SparseTensor', 'Tensor')
             if 'deprecated' in o:
                 prototype += '|deprecated'
             env['prototypes'].append('"{}",'.format(prototype))

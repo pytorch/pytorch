@@ -106,6 +106,9 @@ void initPythonIRBindings(PyObject * module_) {
     .def("hasMultipleOutputs",[](Node&n) {
       return n.outputs().size() > 1;
     })
+    .def("outputsSize",[](Node &n) {
+      return n.outputs().size();
+    })
     .NS(kind)
     .NS(stage)
     .NS(setStage)
@@ -130,6 +133,7 @@ void initPythonIRBindings(PyObject * module_) {
     .NS(hasUses)
     .NS(eraseOutput)
     .NS(addOutput)
+    .NS(scopeName)
 
 #define AS(name) def(#name,&Attributes<Node> :: name)
     // methods from Attributes

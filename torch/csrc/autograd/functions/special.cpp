@@ -144,7 +144,6 @@ bool Eval::trySimpleEval(const variable_list& inputs, const variable_list& outpu
     grad_next_fns.emplace_back(placeholder, 0);
     placeholders.emplace_back(std::move(placeholder));
   }
-  is_executable = grad_fn->is_executable;
   simple_graph = grad_fn;
   grad_fn->tracing_state->in_eval_subgraph = true;
   return true;
@@ -226,8 +225,6 @@ bool Eval::replaceSubgraph(const variable_list& inputs, const variable_list& _ou
 
     // Replace subgraph with this node.
     next_functions.insert(next_functions.begin(), subgraph.boundary.ends.begin(), subgraph.boundary.ends.end());
-    is_executable = std::any_of(relevant_outputs.begin(), relevant_outputs.end(),
-                                [](const Variable& var) { return var.requires_grad(); });
 
     // Ensure placeholders and inputs are sorted in the same way.
     edge_order input_order = computeInputOrder(inputs, inherited_placeholders);

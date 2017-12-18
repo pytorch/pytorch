@@ -18,9 +18,6 @@ PyObject * THPAutograd_initExtension(PyObject *_unused)
   THPVariableClass      = PyMapping_GetItemString(autograd_dict,(char*)"Variable");
   THPFunctionClass      = PyMapping_GetItemString(autograd_dict,(char*)"Function");
 
-  THPUtils_assert_PyImport("torch.nn._functions.thnn", thnn_functions);
-  THPBatchNormBackwardBackwardFunction = PyObject_GetAttrString(thnn_functions,(char*)"batchnorm_double_backwards_fn");
-
   THPUtils_assert(THPVariableClass, "couldn't find Variable class in "
           "torch.autograd module");
   THPUtils_assert(THPFunctionClass, "couldn't find Function class in "
@@ -32,6 +29,7 @@ PyObject * THPAutograd_initExtension(PyObject *_unused)
   .def("kind",&torch::autograd::profiler::Event::kind)
   .def("name",&torch::autograd::profiler::Event::name)
   .def("thread_id",&torch::autograd::profiler::Event::thread_id)
+  .def("device",&torch::autograd::profiler::Event::device)
   .def("cpu_elapsed_us",&torch::autograd::profiler::Event::cpu_elapsed_us)
   .def("cuda_elapsed_us",&torch::autograd::profiler::Event::cuda_elapsed_us)
   .def("has_cuda",&torch::autograd::profiler::Event::has_cuda);

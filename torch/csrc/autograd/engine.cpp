@@ -239,7 +239,7 @@ auto Engine::evaluate_function(FunctionTask& task) -> void {
     auto& next_fn = fn.next_functions[i].first;
     int input_nr = fn.next_functions[i].second;
 
-    if (!next_fn || !next_fn->is_executable) {
+    if (!next_fn) {
       continue;
     }
 
@@ -293,7 +293,7 @@ auto Engine::compute_dependencies(Function* root, GraphTask& task) -> void {
     auto fn = queue.back(); queue.pop_back();
     for (auto& edge : fn->next_functions) {
       Function* next_ptr = edge.first.get();
-      if (!next_ptr || !next_ptr->is_executable) continue;
+      if (!next_ptr) continue;
       dependencies[next_ptr] += 1;
       bool inserted;
       std::tie(std::ignore, inserted) = seen.insert(next_ptr);
@@ -329,12 +329,6 @@ auto Engine::execute(const function_list& input_roots,
 
   GraphTask graph_task(keep_graph, pre_callbacks, post_callbacks);
   std::unique_lock<std::mutex> lock(graph_task.mutex);
-
-  auto is_executable = [](const edge_type& e) { return e.first->is_executable; };
-  if (!std::any_of(input_roots.begin(), input_roots.end(), is_executable)) {
-    throw std::runtime_error(
-      "there are no graph nodes that require computing gradients");
-  }
 
   // Now compute the dependencies for all executable functions and queue the root
   auto graph_root = std::make_shared<GraphRoot>(input_roots, inputs);

@@ -257,10 +257,13 @@ def kldivloss_reference(input, target, size_average=True, reduce=True):
     return result
 
 
-def nllloss2d_reference(input, target, weight=None, ignore_index=-100,
+def nlllossNd_reference(input, target, weight=None, ignore_index=-100,
                         size_average=True, reduce=True):
-    N, C, H, W = input.size()
-    output = torch.zeros(N, H, W).type_as(input)
+    assert input.dim() >= 4
+    N = input.size(0)
+    C = input.size(1)
+    out_size = (N,) + input.size()[2:]
+    output = torch.zeros(out_size).type_as(input)
     if isinstance(target, Variable):
         target = target.data
 
@@ -268,13 +271,13 @@ def nllloss2d_reference(input, target, weight=None, ignore_index=-100,
         weight = torch.ones(C).type_as(input)
 
     total_weight_data = 0
-    for n in range(0, N):
-        for h in range(0, H):
-            for w in range(0, W):
-                t_nhw = target[n][h][w]
-                norm = 0. if ignore_index == t_nhw else weight[t_nhw]
-                output[n][h][w] = -input[n][t_nhw][h][w] * norm
-                total_weight_data += norm
+    for tup in product(*[range(size) for size in out_size]):
+        t_nx = target[tup]
+        norm = 0. if ignore_index == t_nx else weight[t_nx]
+        input_index = list(tup)
+        input_index.insert(1, t_nx)
+        output[tup] = -input[tuple(input_index)] * norm
+        total_weight_data += norm
 
     if reduce and size_average:
         return output.sum() / total_weight_data
@@ -322,7 +325,7 @@ def smoothl1loss_reference(input, target, size_average=True, reduce=True):
 loss_reference_fns = {
     'KLDivLoss': kldivloss_reference,
     'NLLLoss': nllloss_reference,
-    'NLLLoss2d': nllloss2d_reference,
+    'NLLLossNd': nlllossNd_reference,
     'SmoothL1Loss': smoothl1loss_reference,
 }
 
@@ -428,7 +431,7 @@ criterion_tests = [
         input_size=(2, 3, 5, 5),
         target_fn=lambda: torch.rand(2, 5, 5).mul(3).floor().long(),
         reference_fn=lambda i, t, m:
-            nllloss2d_reference(i, t, size_average=get_size_average(m)),
+            nlllossNd_reference(i, t, size_average=get_size_average(m)),
         check_no_size_average=True,
     ),
     dict(
@@ -437,7 +440,7 @@ criterion_tests = [
         input_size=(2, 3, 5, 5),
         target=torch.rand(2, 5, 5).mul(3).floor().long(),
         reference_fn=lambda i, t, m:
-            nllloss2d_reference(i, t, weight=get_weight(m)),
+            nlllossNd_reference(i, t, weight=get_weight(m)),
         desc='weights',
     ),
     dict(
@@ -446,7 +449,7 @@ criterion_tests = [
         input_size=(2, 3, 5, 5),
         target_fn=lambda: torch.rand(2, 5, 5).mul(3).floor().long(),
         reference_fn=lambda i, t, m:
-            nllloss2d_reference(i, t, ignore_index=1),
+            nlllossNd_reference(i, t, ignore_index=1),
         desc='ignore_index',
     ),
     dict(
@@ -568,21 +571,21 @@ class NNTestCase(TestCase):
 
     def _analytical_jacobian(self, module, input, jacobian_input=True, jacobian_parameters=True):
         output = self._forward(module, input)
+        output_size = output.nelement()
         output_t = output.data if isinstance(output, Variable) else output
-        d_out = output_t.new().resize_(output_t.size())
-        flat_d_out = d_out.view(-1)
 
         if jacobian_input:
-            jacobian_inp = self._jacobian(input, d_out.nelement())
+            jacobian_inp = self._jacobian(input, output_size)
             flat_jacobian_input = list(iter_tensors(jacobian_inp))
 
         if jacobian_parameters:
-            param, d_param = self._get_parameters(module)
-            num_param = sum(p.numel() for p in param)
-            jacobian_param = torch.zeros(num_param, d_out.nelement())
+            num_param = sum(p.numel() for p in self._get_parameters(module)[0])
+            jacobian_param = torch.zeros(num_param, output_size)
 
-        for i in range(flat_d_out.nelement()):
-            d_out.zero_()
+        for i in range(output_size):
+            _, d_param = self._get_parameters(module)
+            d_out = torch.zeros_like(output_t)
+            flat_d_out = d_out.view(-1)
             flat_d_out[i] = 1
 
             if jacobian_parameters:
@@ -607,12 +610,6 @@ class NNTestCase(TestCase):
         return res
 
     def _numerical_jacobian(self, module, input, jacobian_input=True, jacobian_parameters=True):
-        output = self._forward(module, input)
-        output_size = output.nelement()
-
-        if jacobian_parameters:
-            param, d_param = self._get_parameters(module)
-
         def fw(input):
             out = self._forward(module, input)
             if isinstance(out, Variable):
@@ -624,6 +621,7 @@ class NNTestCase(TestCase):
         if jacobian_input:
             res += get_numerical_jacobian(fw, input, input, eps=1e-6),
         if jacobian_parameters:
+            param, _ = self._get_parameters(module)
             res += torch.cat(list(get_numerical_jacobian(fw, input, p, eps=1e-6) for p in param), 0),
         return res
 

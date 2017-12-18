@@ -7,7 +7,13 @@ except ImportError:
     from yaml import Loader
 
 
-def python_num(s):
+def parse_default(s):
+    if s.lower() == 'true':
+        return True
+    elif s.lower() == 'false':
+        return False
+    elif s == 'nullptr':
+        return s
     try:
         return int(s)
     except Exception:
@@ -17,10 +23,10 @@ def python_num(s):
 def sanitize_types(typ):
     # split tuples into constituent list
     if typ[0] == '(' and typ[-1] == ')':
-        type_list = [x.strip() for x in typ[1:-1].split(',')]
-    else:
-        type_list = [typ]
-    return type_list
+        return [x.strip() for x in typ[1:-1].split(',')]
+    elif typ == 'Generator*':
+        return ['Generator *']
+    return [typ]
 
 
 def parse_arguments(args):
@@ -32,7 +38,7 @@ def parse_arguments(args):
 
         if '=' in name:
             ns = name.split('=', 1)
-            name, default = ns[0], python_num(ns[1])
+            name, default = ns[0], parse_default(ns[1])
 
         typ = sanitize_types(t)
         assert len(typ) == 1
@@ -54,11 +60,16 @@ def run(paths):
     for path in paths:
         for func in parse_native_yaml(path):
             declaration = {'mode': 'native'}
-            func_decl, return_type = [x.strip() for x in func['func'].split('->')]
+            if '->' in func['func']:
+                func_decl, return_type = [x.strip() for x in func['func'].split('->')]
+                return_type = sanitize_types(return_type)
+            else:
+                func_decl = func['func']
+                return_type = None
             fn_name, arguments = func_decl.split('(')
             arguments = arguments.split(')')[0]
             declaration['name'] = func.get('name', fn_name)
-            declaration['return'] = list(func.get('return', sanitize_types(return_type)))
+            declaration['return'] = list(func.get('return', return_type))
             declaration['variants'] = func.get('variants', ['method', 'function'])
             declaration['template_scalar'] = func.get('template_scalar')
             declaration['arguments'] = func.get('arguments', parse_arguments(arguments))

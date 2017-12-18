@@ -10,14 +10,13 @@ import torch.autograd
 import torch.serialization
 import re
 import collections
-import string
-import json
-import math
 import contextlib
 import numbers
 import warnings
-from torch._utils import _range
+import functools
+import types
 from torch._six import string_classes
+from torch.autograd import Function, function
 
 
 @contextlib.contextmanager
@@ -40,7 +39,8 @@ def set_training(model, mode):
             model.train(old_mode)
 
 
-def export(model, args, f, export_params=True, verbose=False, training=False, input_names=None, output_names=None):
+def export(model, args, f, export_params=True, verbose=False, training=False,
+           input_names=None, output_names=None, aten=False):
     """
     Export a model into ONNX format.  This exporter runs your model
     once in order to get a trace of its execution to be exported; at the
@@ -75,18 +75,28 @@ def export(model, args, f, export_params=True, verbose=False, training=False, in
             input nodes of the graph, in order
         output_names(list of strings, default empty list): names to assign to the
             output nodes of the graph, in order
+        aten (bool, default False): export the model in aten mode. If using aten mode,
+            all the ops original exported by the functions in symbolic.py are exported
+            as ATen ops.
     """
     _export(model, args, f, export_params, verbose, training, input_names, output_names)
 
 
-def _optimize_trace(trace):
+def _optimize_trace(trace, aten):
+    # run dce first to eliminate dead parts of the graph that might have been
+    # left behind by things like symbolic_override
+    torch._C._jit_pass_dce(trace)
+    torch._C._jit_pass_lint(trace)
+
     torch._C._jit_pass_peephole(trace)
     torch._C._jit_pass_lint(trace)
-    torch._C._jit_pass_onnx(trace)
+    torch._C._jit_pass_onnx(trace, aten)
     torch._C._jit_pass_lint(trace)
     torch._C._jit_pass_onnx_peephole(trace)
     torch._C._jit_pass_lint(trace)
     torch._C._jit_pass_dce(trace)
+    torch._C._jit_pass_lint(trace)
+    torch._C._jit_pass_canonicalize(trace)
     torch._C._jit_pass_lint(trace)
 
 
@@ -102,7 +112,8 @@ def _trace(func, args, return_outs=False):
     return trace
 
 
-def _export(model, args, f, export_params=True, verbose=False, training=False, input_names=None, output_names=None):
+def _export(model, args, f, export_params=True, verbose=False, training=False,
+            input_names=None, output_names=None, aten=False):
     # Special case for common case of passing a single Variable
     if isinstance(args, torch.autograd.Variable):
         args = (args, )
@@ -123,7 +134,7 @@ def _export(model, args, f, export_params=True, verbose=False, training=False, i
         raise RuntimeError("state_dict changed after running the tracer; "
                            "something weird is happening in your model!")
 
-    _optimize_trace(trace)
+    _optimize_trace(trace, aten)
 
     _set_input_and_output_names(trace.graph(), input_names, output_names)
 
@@ -131,12 +142,13 @@ def _export(model, args, f, export_params=True, verbose=False, training=False, i
         print(trace)
 
     # TODO: Don't allocate a in-memory string for the protobuf
+    from torch.onnx.symbolic import _onnx_opset_version
     if export_params:
         # NB: OrderedDict values is not actually a list, but trace.export is
         # not duck-typed and expects an actual list.
-        proto = trace.export(list(model.state_dict().values()))
+        proto = trace.export(list(model.state_dict().values()), _onnx_opset_version)
     else:
-        proto = trace.export()
+        proto = trace.export([], _onnx_opset_version)
 
     torch.serialization._with_file_like(f, "wb", lambda f: f.write(proto))
     return torch_out
@@ -173,7 +185,13 @@ def _run_symbolic_method(op_name, symbolic_fn, args):
         raise
 
 
-def _add_attribute(node, key, value):
+def _is_onnx_list(value):
+    if not isinstance(value, string_classes) and not torch.is_tensor(value) and isinstance(value, collections.Iterable):
+        return True
+    return False
+
+
+def _add_attribute(node, key, value, aten):
     """ initializes the right attribute based on type of value """
     m = attr_pattern.match(key)
     if m is None:
@@ -181,15 +199,35 @@ def _add_attribute(node, key, value):
             "Invalid attribute specifier '{}' names " +
             " must be suffixed with type, e.g. 'dim_i' or 'dims_i'").format(key))
     name, kind = m.group(1), m.group(2)
-    if not isinstance(value, string_classes) and not torch.is_tensor(value) and isinstance(value, collections.Iterable):
+    if _is_onnx_list(value):
         kind += "s"
-    return getattr(node, kind + '_')(name, value)
+    if aten:
+        if torch.is_tensor(value):
+            # Caffe2 proto does not support tensor attribute.
+            if value.numel() > 1:
+                raise ValueError("Should not pass tensor attribute")
+            value = _scalar(value)
+            if isinstance(value, float):
+                kind = "f"
+            else:
+                kind = "i"
+    return getattr(node, kind + "_")(name, value)
+
+
+def _scalar(x):
+    """Convert a scalar tensor into a Python value."""
+    assert x.numel() == 1
+    return x[0]
 
 
 def _newNode(g, opname, outputs, *args, **kwargs):
+    aten = kwargs.pop("aten", False)
     n = g.create(opname, args, outputs)
     for k, v in sorted(kwargs.items()):
-        _add_attribute(n, k, v)
+        # TODO: enable inplace in aten exporting mode.
+        if k == "inplace":
+            continue
+        _add_attribute(n, k, v, aten=aten)
     return n
 
 
@@ -249,7 +287,7 @@ def _graph_op(g, opname, *raw_args, **kwargs):
 # inplace annotations, but we are losing information this way.
 
 
-def _run_symbolic_function(g, n, inputs):
+def _run_symbolic_function(g, n, inputs, aten=False):
     import torch.onnx.symbolic
 
     try:
@@ -258,12 +296,20 @@ def _run_symbolic_function(g, n, inputs):
             op_name = n.kind()[:-1]
         else:
             op_name = n.kind()
+        # Export ops in aten mode.
+        if aten:
+            attrs = {k + "_" + n.kindOf(k)[0]: n[k] for k in n.attributeNames()}
+            outputs = n.outputsSize()
+            attrs["outputs"] = outputs
+            return _graph_at(g, op_name, *inputs, aten=True, **attrs)
+
+        # Export ONNX regular ops.
+        attrs = {k: n[k] for k in n.attributeNames()}
         if not hasattr(torch.onnx.symbolic, op_name):
             warnings.warn("ONNX export failed on {} because torch.onnx.symbolic.{} does not exist"
                           .format(op_name, op_name))
             return None
         fn = getattr(torch.onnx.symbolic, op_name)
-        attrs = {k: n[k] for k in n.attributeNames()}
         return fn(g, *inputs, **attrs)
 
     except TypeError as e:
@@ -273,6 +319,7 @@ def _run_symbolic_function(g, n, inputs):
         raise
 
 
+# Generate an ONNX ATen op node.
 def _graph_at(g, opname, *args, **kwargs):
     return g.op("ATen", *args, operator_s=opname, **kwargs)
 
@@ -322,6 +369,73 @@ def _node_getitem(self, k):
     """
     sel = self.kindOf(k)
     return getattr(self, sel)(k)
+
+
+def symbolic_override(symbolic_fn):
+    """
+    Decorator to override ONNX export of the a function with specified subgraph.
+
+    Effectively allows to attach symbolic() implementation to an arbitrary
+    python function or autograd.Function. Requirements for the decorated
+    function:
+     - being non-member function or autograd.Function
+     - positional inputs are Variables/Tensors or (nested) lists or tuples of
+       them (similar requirement to NestedIOFunction)
+     - outputs are similarly Variables/Tensors or (nested) lists or tuples of
+       them
+     - keyword arguments are of non-tensor type
+
+    Example usage:
+
+    ```
+    def symb(g, x, y):
+        return g.op('Sum', x, y[0], y[1])
+
+    @symbolic_override(symb)
+    def foo(x, y):
+        return x + y[0] + y[1]
+    ```
+    """
+
+    def wrapper_maker(fn):
+
+        def wrapper(*args, **kwargs):
+            output = fn(*args, **kwargs)
+            flat_args = tuple(function._iter_variables(args))
+            if not any(map(torch._C._jit_is_tracing, flat_args)):
+                return output
+            flat_output_tensors = tuple(
+                v.data for v in function._iter_variables(output))
+            assert len(list(function._iter_variables_permissive(
+                list(kwargs.values())))) == 0, \
+                "Passing Variable through kwargs is not supported"
+
+            class ExportProxy(Function):
+                @staticmethod
+                def symbolic(g, *flat_args):
+                    symbolic_args = function._unflatten(flat_args, args)
+                    symbolic_output = symbolic_fn(g, *symbolic_args, **kwargs)
+                    return tuple(function._iter_jit_values(symbolic_output))
+
+                @staticmethod
+                def forward(ctx, *unused_args):
+                    return flat_output_tensors
+
+                @staticmethod
+                def backward(ctx, *unused_args, **unused_kwargs):
+                    raise RuntimeError(
+                        "symbolic_override is meant for inference export only")
+
+            flat_proxy_output = ExportProxy.apply(*flat_args)
+            return function._unflatten(flat_proxy_output, output)
+
+        # fn might be autograd.Function too, in this case wrapping doesn't work
+        if isinstance(fn, types.FunctionType):
+            wrapper = functools.wraps(fn)(wrapper)
+
+        return wrapper
+
+    return wrapper_maker
 
 
 torch._C.Graph.op = _graph_op

@@ -1,8 +1,17 @@
+#include "Python.h"
 #include "interpreter_autograd_function.h"
 
 namespace torch { namespace jit {
 
 using namespace torch::jit::tracer;
+
+static at::Tensor zeroTensorWithType(const TensorType & type) {
+  auto device = (type.device() < 0)? at::kCPU : at::kCUDA;
+  auto & at_type = at::getType(device, type.scalarType());
+  // note: this has to be a contiguous tensor of zeros, because the fusion engine
+  // specialized to what is normally here which might be fully dense
+  return at_type.zeros(type.sizes());
+}
 
 autograd::variable_list InterpreterAutogradFunction::apply(
     const autograd::variable_list& inputs) {
@@ -18,15 +27,31 @@ autograd::variable_list InterpreterAutogradFunction::apply(
   const auto & details = stage_details_[stage_];
 
   // Validate inputs
-  for (std::size_t i = 0; i < (std::size_t)num_inputs; ++i) {
-    if (!details.input_flags[i].verify(inputs[i])) {
-      throw std::runtime_error("JIT interpreter received inputs with different "
-          "flags than it was compiled for.");
+  std::vector<at::Tensor> tinputs;
+  tinputs.reserve(inputs.size());
+  TORCH_ASSERT(inputs.size() == num_inputs);
+  TORCH_ASSERT(inputs.size() == details.input_flags.size());
+  for (std::size_t i = 0; i < (std::size_t)inputs.size(); ++i) {
+    if(stage_ > 0 && !inputs[i].defined() && !details.input_flags[i].was_null) {
+      // [Temporary workaround for variants] until tracer produces all variants:
+      // if you have a function x, y = fn(z) and only use x then gradient for y
+      // will be undefined. If you reuse the same trace with and _sometimes_ use y
+      // then in the cases where you don't use it, the grad_y input in stage 1
+      // will be undefined. To ensure we can continue, we create a 0 gradient,
+      // using trace information to figure out what shape it should be
+      tinputs.push_back(zeroTensorWithType(interp_.tensorTypeForInput(i)));
+    } else if(!details.input_flags[i].verify(inputs[i])) {
+      std::stringstream ss;
+      ss << "JIT interpreter received inputs with different "
+        << "flags than it was compiled for. Compiled with " << details.input_flags[i]
+        << " but found " << VariableFlags::of(inputs[i]) << "\n";
+      throw std::runtime_error(ss.str());
+    } else {
+      tinputs.push_back(inputs[i].data());
     }
   }
 
   // Run the interpreter
-  auto tinputs = fmap(inputs, [](const autograd::Variable& i) { return i.data(); });
   std::vector<at::Tensor> toutputs;
   InterpreterState interp = (keep_graph_) ? interp_.clone() : interp_;
   interp.runOneStage(tinputs, toutputs);
@@ -36,6 +61,14 @@ autograd::variable_list InterpreterAutogradFunction::apply(
   auto make_grad_fn = [&]() {
     grad_fn = std::make_shared<InterpreterAutogradFunction>(
         std::move(interp), stage_details_, stage_ + 1);
+
+    // Running this next stage is actually not valid (nderiv is too low)
+    // but we don't know if the user will ever ask for it so we don't error out here.
+    // Instead we have to return early because we rely on stage_details_[stage+1] in the
+    // remaining code
+    if(stage_ + 1 == stage_details_.size())
+      return;
+
     // Patch next_functions to include prevous stage next_functions
     // This is needed because stage N is really a derivative of
     // all stages from 1 to N-1. If a part of stage x graph is
@@ -43,17 +76,22 @@ autograd::variable_list InterpreterAutogradFunction::apply(
     // and so we need to copy next_fns because those Variables
     // aren't real inputs to that stage, so that's the only place
     // where we can get them.
-    for (auto copied_idx : details.copied_next_fns) {
+    for (auto copied_idx : stage_details_[stage_ + 1].copied_next_fns) {
       grad_fn->next_functions.push_back(next_functions[copied_idx]);
     }
     // Add grad_fns corresponding to inputs
     for (auto & input : inputs) {
-      if (!input.requires_grad()) continue; // See Note [Null-edge pruning]
+      if (!input.requires_grad()) {
+        continue; // See Note [Null-edge pruning]
+      } else if (!input.defined()) {
+        // See Note [Temporary workaround for variants]
+        grad_fn->next_functions.emplace_back();
+        continue;
+      }
       grad_fn->next_functions.emplace_back(
         input.grad_fn() ? input.grad_fn() : input.grad_accumulator(),
         input.output_nr());
     }
-    grad_fn->is_executable = true;
   };
 
   // Wrap the outputs
@@ -95,7 +133,7 @@ InterpreterFunctionFactory::InterpreterFunctionFactory(TracingState *state) {
   }
 }
 
-std::shared_ptr<InterpreterAutogradFunction> InterpreterFunctionFactory::construct() {
+std::shared_ptr<autograd::Function> InterpreterFunctionFactory::construct() {
   return std::make_shared<InterpreterAutogradFunction>(code_, stage_details_);
 }
 

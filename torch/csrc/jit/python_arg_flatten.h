@@ -61,6 +61,26 @@ struct IODescriptor {
   std::vector<VariableMetadata> metadata;
 };
 
+static inline std::ostream& operator<<(std::ostream& out, const IODescriptor::VariableMetadata& meta) {
+  auto & t = at::getType(meta.device < 0 ? at::kCPU : at::kCUDA, meta.type);
+  out << t << "(requires_grad=" << meta.requires_grad << ", " << "is_volatile=" << meta.is_volatile << ") {";
+  for(size_t i = 0; i < meta.sizes.size(); ++i) {
+    if(i > 0)
+      out << ", ";
+    out << meta.sizes[i];
+  }
+  out << "}";
+  return out;
+}
+
+static inline std::ostream& operator<<(std::ostream & out, const IODescriptor & desc) {
+  out << desc.structure << "\n";
+  for(size_t i = 0; i < desc.metadata.size(); ++i) {
+    out << "  with v" << i << " having type " << desc.metadata[i] << "\n";
+  }
+  return out;
+}
+
 struct ParsedArgs {
   // Flat vector of Variables found in arguments
   autograd::variable_list vars;

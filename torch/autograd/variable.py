@@ -78,24 +78,6 @@ class Variable(_C._VariableBase):
     def __repr__(self):
         return 'Variable containing:' + self.data.__repr__()
 
-    def __bool__(self):
-        if self.data.numel() <= 1:
-            return self.data.__bool__()
-        raise RuntimeError("bool value of Variable containing " +
-                           torch.typename(self.data) +
-                           " with more than one value is ambiguous")
-
-    __nonzero__ = __bool__
-
-    def __int__(self):
-        return int(self.data)
-
-    def __long__(self):
-        return long(self.data)
-
-    def __float__(self):
-        return float(self.data)
-
     def backward(self, gradient=None, retain_graph=None, create_graph=None, retain_variables=None):
         """Computes the gradient of current variable w.r.t. graph leaves.
 
@@ -232,22 +214,30 @@ class Variable(_C._VariableBase):
         self.register_hook(retain_grad_hook)
         self.retains_grad = True
 
-    def type(self, t):
-        if t != type(self.data):
-            return Type.apply(self, t)
-        return self
+    def type_as(self, other):
+        if torch.is_tensor(other):
+            other = Variable(other)
+        return super(Variable, self).type_as(other)
 
-    def type_as(self, t):
-        if isinstance(t, Variable):
-            t = t.data
-        return self.type(type(t))
+    def is_pinned(self):
+        r"""Returns true if this tensor resides in pinned memory"""
+        storage = self.storage()
+        return storage.is_pinned() if storage else False
 
-    def _get_type(self, name):
-        module = torch._import_dotted_name(self.data.__module__)
-        return getattr(module, name)
+    def is_shared(self):
+        r"""Checks if tensor is in shared memory.
 
-    def cuda(self, device=None, async=False):
-        return CudaTransfer.apply(self, device, async)
+        This is always ``True`` for CUDA tensors.
+        """
+        return self.storage().is_shared()
+
+    def share_memory_(self):
+        r"""Moves the underlying storage to shared memory.
+
+        This is a no-op if the underlying storage is already in shared memory
+        and for CUDA tensors. Tensors in shared memory cannot be resized.
+        """
+        self.storage().share_memory_()
 
     def prod(self, dim=None, keepdim=None):
         return Prod.apply(self, dim, keepdim)
@@ -262,22 +252,8 @@ class Variable(_C._VariableBase):
             repeats = torch.Size(repeats)
         return Repeat.apply(self, repeats)
 
-    def cumsum(self, dim):
-        return Cumsum.apply(self, dim)
-
     def cumprod(self, dim):
         return Cumprod.apply(self, dim)
-
-    def renorm(self, p, dim, maxnorm):
-        t = self.transpose(dim, 0)
-        flat = t.contiguous().view(self.size(0), -1)
-        norms = flat.norm(p, 1, True)
-        norms = norms.clamp(max=maxnorm).div(norms.add(1e-7))
-        flat_out = flat.mul(norms.expand_as(flat))
-        return flat_out.view(t.size()).transpose(dim, 0)
-
-    def matmul(self, other):
-        return torch.matmul(self, other)
 
     def resize(self, *sizes):
         return Resize.apply(self, sizes)
@@ -323,23 +299,13 @@ class Variable(_C._VariableBase):
     def expand_as(self, tensor):
         return self.expand(tensor.size())
 
-    def multinomial(self, num_samples=1, replacement=False):
-        return Variable(torch.multinomial(self.data, num_samples, replacement))
-
-    def bernoulli(self):
-        return Variable(torch.bernoulli(self.data))
-
     def __rsub__(self, other):
         return -self + other
-
-    def __matmul__(self, other):
-        if not isinstance(other, Variable):
-            return NotImplemented
-        return self.matmul(other)
 
     def __rdiv__(self, other):
         return self.reciprocal() * other
     __rtruediv__ = __rdiv__
+    __itruediv__ = _C._VariableBase.__div__
 
     __pow__ = _C._VariableBase.pow
 
@@ -379,14 +345,23 @@ class Variable(_C._VariableBase):
         keys = variable_methods + attrs
         return sorted(keys)
 
+    # Numpy array interface, to support `numpy.asarray(tensor) -> ndarray`
+    def __array__(self, dtype=None):
+        if dtype is None:
+            return self.cpu().numpy()
+        else:
+            return self.cpu().numpy().astype(dtype, copy=False)
+
+    # Wrap Numpy array again in a suitable tensor when done, to support e.g.
+    # `numpy.sin(tensor) -> tensor` or `numpy.greater(tensor, 0) -> ByteTensor`
+    def __array_wrap__(self, array):
+        if array.dtype == bool:
+            # Workaround, torch has no built-in bool tensor
+            array = array.astype('uint8')
+        return Variable.from_numpy(array)
+
     class _torch(object):
-        @staticmethod
-        def normal(means, std=1):
-            if isinstance(means, Variable):
-                means = means.data
-            if isinstance(std, Variable):
-                std = std.data
-            return Variable(torch.normal(means, std))
+        pass
 
 
 for method in dir(Variable):

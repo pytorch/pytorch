@@ -239,7 +239,15 @@ std::ostream& printNode(std::ostream & out, const Node * n, std::vector<const No
       printAttributes(out,n);
     }
   IR_END()
-  out << "(" << n->inputs() << ")\n";
+  out << "(" << n->inputs() << ")";
+  std::string scopeName = n->scopeName();
+  if (scopeName.empty()) {
+    out << "\n";
+  }
+  else {
+    out << ", ";
+    out << "scope: " << scopeName << "\n";
+  }
   return out;
 }
 
@@ -479,6 +487,7 @@ void PythonOp::cloneFrom(Node * other_) {
   this->is_legacy = other->is_legacy;
   Py_INCREF(other->pyobj.get());
   this->pyobj = THPObjectPtr(other->pyobj.get());
+  this->var_flags = other->var_flags;
   for(auto & sa : other->scalar_args) {
     Py_INCREF(sa.get());
     this->scalar_args.emplace_back(sa.get());

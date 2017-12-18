@@ -84,6 +84,11 @@ DataChannelMPI::DataChannelMPI()
 
 
 DataChannelMPI::~DataChannelMPI() {
+  destroy();
+}
+
+
+void DataChannelMPI::destroy() {
   for (auto& group : _groups) {
     auto comm = group.second.first;
     if (comm != MPI_COMM_WORLD && comm != MPI_COMM_NULL)
@@ -430,6 +435,48 @@ THDGroup DataChannelMPI::newGroup(const std::vector<rank_type>& ranks) {
   THDGroup new_group_id = static_cast<THDGroup>(_groups.size());
   _groups.insert({new_group_id, std::make_pair(new_comm, new_group)});
   return new_group_id;
+}
+
+void DataChannelMPI::allReduce(std::vector<at::Tensor>& data,
+                               THDReduceOp operation,
+                               THDGroup groupId) {
+
+  throw std::runtime_error("DataChannelMPI does not support mult-GPU cross "
+                           "node allreduce");
+}
+
+
+void DataChannelMPI::allGather(std::vector<at::Tensor>& output,
+                               std::vector<at::Tensor>& input,
+                               THDGroup groupId) {
+
+  throw std::runtime_error("DataChannelMPI does not support mult-GPU cross "
+                           "node allgather");
+}
+
+
+void DataChannelMPI::reduce(std::vector<at::Tensor>& data,
+                            THDReduceOp operation,
+                            rank_type dstRank,
+                            THDGroup groupId) {
+
+  throw std::runtime_error("DataChannelMPI does not support mult-GPU cross "
+                           "node reduce");
+}
+
+
+void DataChannelMPI::broadcast(std::vector<at::Tensor>& data,
+                               rank_type srcRank,
+                               THDGroup groupId) {
+
+  throw std::runtime_error("DataChannelMPI does not support mult-GPU cross "
+                           "node broadcast");
+}
+
+
+void DataChannelMPI::clearGroupCache(THDGroup group_id) {
+  throw std::runtime_error("DataChannelMPI does not support clear "
+                           "group cache");
 }
 
 } // namespace thd

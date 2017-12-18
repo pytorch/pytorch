@@ -1,4 +1,6 @@
-#ifdef AT_CUDA_ENABLED
+#include "ATen/Config.h"
+
+#if AT_CUDA_ENABLED()
 
 #include "ATen/CUDAGenerator.h"
 #include "ATen/Context.h"
@@ -32,6 +34,10 @@ CUDAGenerator& CUDAGenerator::free() {
 }
 
 uint64_t CUDAGenerator::seed() {
+  return THCRandom_initialSeed(context->thc_state);
+}
+
+uint64_t CUDAGenerator::initialSeed() {
   return THCRandom_initialSeed(context->thc_state);
 }
 

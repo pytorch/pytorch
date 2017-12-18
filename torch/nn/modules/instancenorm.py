@@ -37,7 +37,7 @@ class _InstanceNorm(_BatchNorm):
 
 
 class InstanceNorm1d(_InstanceNorm):
-    r"""Applies Instance Normalization over a 2d or 3d input that is seen as a mini-batch.
+    r"""Applies Instance Normalization over a 3d input that is seen as a mini-batch.
 
     .. math::
 

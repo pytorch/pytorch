@@ -5,13 +5,18 @@ $th_headers
 #include "ATen/Storage.h"
 #include "ATen/Context.h"
 
+#include <memory>
+
 namespace at {
 
-struct ${Storage} : public Storage {
+struct Allocator;
+
+struct ${Storage} final : public Storage {
 public:
   explicit ${Storage}(Context* context);
   ${Storage}(Context* context, ${THStorage} *wrapped);
   ${Storage}(Context* context, std::size_t size);
+  ${Storage}(Context* context, std::size_t size, std::unique_ptr<Allocator> allocator);
   ${Storage}(Context* context,
     void * data, std::size_t size, const std::function<void(void*)> & deleter);
   virtual ~${Storage}();
@@ -30,6 +35,9 @@ public:
   virtual ${Storage}& fast_set(std::size_t ind, Scalar value) override;
   virtual Scalar get(std::size_t ind) override;
   virtual Scalar fast_get(std::size_t ind) override;
+
+  virtual void set_flag(char flag) override;
+  virtual void clear_flag(char flag) override;
 
   virtual Type& type() const override;
   virtual int getDevice() const override;

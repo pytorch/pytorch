@@ -9,6 +9,29 @@ MODE_ZEROS = 0
 MODE_BORDER = 1
 
 
+def grid_sampler(input, grid, padding_mode):
+    if cudnn.is_acceptable(input.data) and padding_mode == 'zeros':
+        return torch._C._VariableBase.cudnn_grid_sampler(input, grid)
+    else:
+        return GridSampler.apply(input, grid, padding_mode)
+
+
+def affine_grid_generator(theta, size):
+    if theta.data.is_cuda:
+        if not cudnn.enabled:
+            raise RuntimeError("AffineGridGenerator needs CuDNN for "
+                               "processing CUDA inputs, but CuDNN is not enabled")
+        if not cudnn.is_acceptable(theta.data):
+            raise RuntimeError("AffineGridGenerator generator theta not acceptable for CuDNN")
+        N, C, H, W = size
+        return torch._C._VariableBase.cudnn_affine_grid_generator(theta, N, C, H, W)
+    else:
+        return AffineGridGenerator.apply(theta, size)
+
+
+# TODO: Port these completely into C++
+
+
 class GridSampler(Function):
 
     @staticmethod
@@ -24,17 +47,9 @@ class GridSampler(Function):
                              .format(padding_mode))
 
         grid_sz = grid.size()
-        if cudnn.is_acceptable(input) and padding_mode == 'zeros':
-            output = input.new(grid_sz[0], input.size(1), grid_sz[1], grid_sz[2])
-            grid = grid.contiguous()
-            if 0 in input.stride():
-                input = input.contiguous()
-            torch._C._cudnn_grid_sampler_forward(input, grid, output)
-        else:
-            backend = type2backend[type(input)]
-            output = input.new(grid_sz[0], input.size(1), grid_sz[1], grid_sz[2])
-            backend.SpatialGridSamplerBilinear_updateOutput(
-                backend.library_state, input, grid, output, ctx.padding_mode)
+        backend = type2backend[type(input)]
+        output = input.new(grid_sz[0], input.size(1), grid_sz[1], grid_sz[2])
+        backend.SpatialGridSamplerBilinear_updateOutput(backend.library_state, input, grid, output, ctx.padding_mode)
         return output
 
     @staticmethod
@@ -43,26 +58,12 @@ class GridSampler(Function):
         input, grid = ctx.saved_tensors
         padding_mode = ctx.padding_mode
 
-        if cudnn.is_acceptable(input) and padding_mode == 'zeros':
-            grad_input = input.new(input.size())
-            grad_grid = grid.new(grid.size())
-            grid = grid.contiguous()
-            if 0 in input.stride():
-                input = input.contiguous()
-            # Sometimes grad_output is a scalar (like 1) expanded as a tensor.
-            # cudnn requires a tensor that has non-zero strides.
-            if 0 in grad_output.stride():
-                grad_output = grad_output.contiguous()
-            torch._C._cudnn_grid_sampler_backward(input, grad_input,
-                                                  grid, grad_grid,
-                                                  grad_output)
-        else:
-            backend = type2backend[type(input)]
-            grad_input = input.new(input.size())
-            grad_grid = grid.new(grid.size())
-            backend.SpatialGridSamplerBilinear_updateGradInput(
-                backend.library_state, input, grad_input,
-                grid, grad_grid, grad_output, padding_mode)
+        backend = type2backend[type(input)]
+        grad_input = input.new(input.size())
+        grad_grid = grid.new(grid.size())
+        backend.SpatialGridSamplerBilinear_updateGradInput(
+            backend.library_state, input, grad_input,
+            grid, grad_grid, grad_output, padding_mode)
         return grad_input, grad_grid, None
 
 
@@ -81,22 +82,18 @@ class AffineGridGenerator(Function):
         N, C, H, W = size
         ctx.size = size
         if theta.is_cuda:
-            ctx.is_cuda = True
             AffineGridGenerator._enforce_cudnn(theta)
-            grid = theta.new(N, H, W, 2)
-            theta = theta.contiguous()
-            torch._C._cudnn_affine_grid_generator_forward(theta, grid, N, C, H, W)
-        else:
-            ctx.is_cuda = False
-            base_grid = theta.new(N, H, W, 3)
-            linear_points = torch.linspace(-1, 1, W) if W > 1 else torch.Tensor([-1])
-            base_grid[:, :, :, 0] = torch.ger(torch.ones(H), linear_points).expand_as(base_grid[:, :, :, 0])
-            linear_points = torch.linspace(-1, 1, H) if H > 1 else torch.Tensor([-1])
-            base_grid[:, :, :, 1] = torch.ger(linear_points, torch.ones(W)).expand_as(base_grid[:, :, :, 1])
-            base_grid[:, :, :, 2] = 1
-            ctx.base_grid = base_grid
-            grid = torch.bmm(base_grid.view(N, H * W, 3), theta.transpose(1, 2))
-            grid = grid.view(N, H, W, 2)
+            assert False
+        ctx.is_cuda = False
+        base_grid = theta.new(N, H, W, 3)
+        linear_points = torch.linspace(-1, 1, W) if W > 1 else torch.Tensor([-1])
+        base_grid[:, :, :, 0] = torch.ger(torch.ones(H), linear_points).expand_as(base_grid[:, :, :, 0])
+        linear_points = torch.linspace(-1, 1, H) if H > 1 else torch.Tensor([-1])
+        base_grid[:, :, :, 1] = torch.ger(linear_points, torch.ones(W)).expand_as(base_grid[:, :, :, 1])
+        base_grid[:, :, :, 2] = 1
+        ctx.base_grid = base_grid
+        grid = torch.bmm(base_grid.view(N, H * W, 3), theta.transpose(1, 2))
+        grid = grid.view(N, H, W, 2)
         return grid
 
     @staticmethod
@@ -107,15 +104,10 @@ class AffineGridGenerator(Function):
         assert ctx.is_cuda == grad_grid.is_cuda
         if grad_grid.is_cuda:
             AffineGridGenerator._enforce_cudnn(grad_grid)
-            grad_theta = grad_grid.new(N, 2, 3)
-            grad_grid = grad_grid.contiguous()
-            torch._C._cudnn_affine_grid_generator_backward(grad_theta, grad_grid,
-                                                           N, C, H, W)
-        else:
-            base_grid = ctx.base_grid
-            grad_theta = torch.bmm(
-                base_grid.view(N, H * W, 3).transpose(1, 2),
-                grad_grid.view(N, H * W, 2))
-            grad_theta = grad_theta.transpose(1, 2)
-
+            assert False
+        base_grid = ctx.base_grid
+        grad_theta = torch.bmm(
+            base_grid.view(N, H * W, 3).transpose(1, 2),
+            grad_grid.view(N, H * W, 2))
+        grad_theta = grad_theta.transpose(1, 2)
         return grad_theta, None

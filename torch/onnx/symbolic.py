@@ -1,6 +1,6 @@
 import torch
 from torch.autograd._functions.utils import check_onnx_broadcast  # TODO: move me
-from torch.nn.modules.utils import _pair
+from torch.nn.modules.utils import _pair, _triple
 import warnings
 
 # EDITING THIS FILE? READ THIS FIRST!
@@ -49,6 +49,30 @@ def _broadcast_if_scalar(x):
 
 def _unimplemented(op, msg):
     warnings.warn("ONNX export failed on " + op + " because " + msg + " not supported")
+
+
+# ---------------------------------------------------------------------
+# ONNX operator version
+# ---------------------------------------------------------------------
+
+# READ ME BEFORE EDITING _onnx_opset_version:
+#
+# The variable below controls which ONNX operator set version we are
+# targeting.   THIS VARIABLE HAS SEMANTIC EFFECT!  Say a breaking
+# change occurred in version 8.  As long as this variable < 8, you can
+# export models targeting the old behavior.  However, if you bump
+# this variable to 8 or later, the breaking change will take into effect:
+# you MUST adjust any symbolic affected by breaking changes.  The ONNX
+# spec publishes a *comprehensive* list of BC-breaking changes for every
+# operator revision at:
+#
+#   https://github.com/onnx/onnx/blob/master/docs/Changelog.md
+#
+# Please be sure to go through and check all of our implementations here before
+# increasing this number.  This includes symbolic definitions NOT in this
+# file, so grep for "OpName" (with quotes)
+
+_onnx_opset_version = 2
 
 
 # ---------------------------------------------------------------------
@@ -182,6 +206,8 @@ def permute(g, self, dims):
 
 
 def view(g, self, size):
+    if self.type().sizes()[0] == size[0] and len(size) == 2:
+        return g.op("Flatten", self, axis_i=1)
     return g.op("Reshape", self, shape_i=size)
 
 
@@ -192,6 +218,20 @@ def split(g, self, split_size, dim):
     if leftover:
         splits.append(leftover)
     return g.op("Split", self, split_i=splits, axis_i=dim, outputs=len(splits))
+
+
+# TODO: It would be better to export this as a chunk directly, as this is
+# less sensitive to changes in input size.
+# TODO: Once we have proper scoping, stop reimplementing chunk, delete this
+# method, and use the desugared version
+def chunk(g, self, chunks, dim):
+    split_size = (self.type().sizes()[dim] + chunks - 1) // chunks
+    return split(g, self, split_size, dim)
+
+
+def select(g, self, dim, index):
+    slice_node = g.op("Slice", self, axes_i=[dim], starts_i=[index], ends_i=[index + 1])
+    return g.op("Squeeze", slice_node, axes_i=[dim])
 
 
 def squeeze(g, self, dim=None):
@@ -205,20 +245,17 @@ def squeeze(g, self, dim=None):
     return g.op("Squeeze", self, axes_i=dims)
 
 
-# NB: This appears to be dead at the moment
-def prelu(g, input, weight):
-    if all(s == 1 for s in weight.type().sizes()):
-        return _unimplemented("prelu", "single weight shared among input channels")
-    return g.op("PRelu", input, weight)
+def prelu(g, self, weight):
+    return g.op("PRelu", self, weight)
 
 
-def threshold(g, input, threshold, value, inplace=False):
+def threshold(g, self, threshold, value):
     # See Note [Export inplace]
     if _scalar(threshold) != 0:
         return _unimplemented("threshold", "non-zero threshold")
     if _scalar(value) != 0:
         return _unimplemented("threshold", "non-zero value")
-    return g.op("Relu", input)
+    return g.op("Relu", self)
 
 
 def leaky_relu(g, input, negative_slope, inplace=False):
@@ -238,6 +275,12 @@ def softmax(g, input, dim=None):
     return g.op('Softmax', input, axis_i=dim)
 
 
+def softplus(g, self, beta, threshold):
+    if beta != 1:
+        return _unimplemented("beta", "has to be 1")
+    return g.op('Softplus', self)
+
+
 def max_pool2d(g, input, kernel_size, stride, padding, dilation, ceil_mode):
     if ceil_mode:
         return _unimplemented("max_pool2d", "ceil_mode")
@@ -247,7 +290,7 @@ def max_pool2d(g, input, kernel_size, stride, padding, dilation, ceil_mode):
         stride = kernel_size
     r = g.op("MaxPool", input,
              kernel_shape_i=_pair(kernel_size),
-             pads_i=_pair(padding),
+             pads_i=_pair(padding) * 2,
              strides_i=_pair(stride))
     return r, None
 
@@ -261,7 +304,19 @@ def avg_pool2d(g, input, kernel_size, stride, padding, ceil_mode, count_include_
     return g.op("AveragePool", input,
                 kernel_shape_i=_pair(kernel_size),
                 strides_i=_pair(stride),
-                pads_i=_pair(padding))
+                pads_i=_pair(padding) * 2)
+
+
+def avg_pool3d(g, input, kernel_size, stride, padding, ceil_mode, count_include_pad):
+    if ceil_mode:
+        return _unimplemented("avg_pool3d", "ceil_mode")
+    if not stride:
+        stride = kernel_size
+    # TODO: What about count_include_pad?!
+    return g.op("AveragePool", input,
+                kernel_shape_i=_triple(kernel_size),
+                strides_i=_triple(stride),
+                pads_i=_triple(padding))
 
 
 def log_softmax(g, input, dim=None):
@@ -277,6 +332,47 @@ def elu(g, input, alpha, inplace=False):
     return g.op("Elu", input, alpha_f=_scalar(alpha))
 
 
+def index_select(g, self, index, dim):
+    return g.op("Gather", self, index, axis_i=dim)
+
+
+def type_as(g, self, other):
+    if self.type().scalarType() == other.type().scalarType():
+        # no-op
+        return self
+    else:
+        # TODO: This should be pretty easy, just implement it with Cast
+        return _unimplemented("type_as", "non no-op application")
+
+
 # ignore clone operators that are inserted by PyTorch autograd
 def clone(g, input):
     return input
+
+
+def abs(g, self):
+    return g.op("Abs", self)
+
+
+def pow(g, self, exponent):
+    return g.op("Pow", self, exponent)
+
+
+def clamp(g, self, min, max):
+    return g.op("Clip", self, min_f=min, max_f=max)
+
+
+def max(g, self, other):
+    return g.op("Max", self, other)
+
+
+def min(g, self, other):
+    return g.op("Min", self, other)
+
+
+def eq(g, self, other):
+    return g.op("Equal", self, other)
+
+
+def exp(g, self):
+    return g.op("Exp", self)

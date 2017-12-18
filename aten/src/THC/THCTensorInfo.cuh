@@ -233,15 +233,13 @@ struct IndexToOffset {
     IndexType offset = 0;
 
     // Use static dims
-    for (int i = Dims - 1; i >= 0; --i) {
+    for (int i = Dims - 1; i > 0; --i) {
       IndexType curDimIndex = linearId % info.sizes[i];
       IndexType curDimOffset = curDimIndex * info.strides[i];
       offset += curDimOffset;
-
-      if (i > 0) {
-        linearId /= info.sizes[i];
-      }
+      linearId /= info.sizes[i];
     }
+    offset += linearId * info.strides[0];
 
     return offset;
   }

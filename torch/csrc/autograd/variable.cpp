@@ -13,7 +13,7 @@ namespace torch { namespace autograd {
 
 Variable make_variable(at::Tensor data, std::shared_ptr<Function> grad_fn) {
   TORCH_ASSERT(grad_fn);
-  auto flags = VarFlags(grad_fn->is_executable, false);
+  auto flags = VarFlags(true, false);
   int output_nr = grad_fn->num_inputs++;
   return make_variable(std::move(data), flags, output_nr, std::move(grad_fn));
 }
@@ -167,7 +167,7 @@ struct VariableTypes {
     for (int p = 0; p < static_cast<int>(Backend::NumOptions); ++p) {
       for (int s = 0; s < static_cast<int>(ScalarType::NumOptions); s++) {
         auto baseType = context.type_registry[p][s].get();
-        if (baseType) {
+        if (baseType && baseType->backend() != Backend::Undefined) {
           auto id = static_cast<int>(baseType->ID());
           types[id].reset(new VariableType(&context, baseType));
         }
@@ -188,17 +188,28 @@ Type* VariableImpl::getType(const Tensor& tensor)
   return getType(tensor.type());
 }
 
+static VariableTypes vt;
+
 Type* VariableImpl::getType(const Type& baseType)
 {
-  static VariableTypes vt;
   return vt.types[static_cast<int>(baseType.ID())].get();
+}
+
+std::vector<Type*> VariableImpl::allTypes() {
+  std::vector<Type*> types;
+  for (int i = 0; i < static_cast<int>(TypeID::NumOptions); i++) {
+    if (vt.types[i]) {
+      types.push_back(vt.types[i].get());
+    }
+  }
+  return types;
 }
 
 Variable Variable::detach() const {
   Variable detached = make_variable(data());
   detached.is_volatile() = is_volatile();
   detached.version_counter() = version_counter();
-  return std::move(detached);
+  return detached;
 }
 
 void Variable::detach_() {

@@ -43,6 +43,15 @@ struct TensorBase {
   int64_t dim() const {
     return pImpl->dim();
   }
+  void reset() {
+    TensorBase().swap(*this);
+  }
+  void reset(TensorImpl * rhs) {
+    TensorBase(rhs, true).swap(*this);
+  }
+  void reset(TensorImpl * rhs, bool retain) {
+    TensorBase(rhs, retain).swap(*this );
+  }
   void swap(TensorBase & rhs) {
     TensorImpl * tmp = pImpl;
     pImpl = rhs.pImpl;
@@ -51,6 +60,12 @@ struct TensorBase {
   TensorImpl * get() const {
     return pImpl;
   }
+  TensorImpl * detach() {
+    TensorImpl * ret = pImpl;
+    pImpl = UndefinedTensor::singleton();
+    return ret;
+  }
+
   bool defined() const {
     return pImpl != UndefinedTensor::singleton();
   }

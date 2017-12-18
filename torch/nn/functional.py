@@ -11,7 +11,7 @@ from . import _functions
 from .modules import utils
 from ._functions.linear import Bilinear
 from ._functions.padding import ConstantPadNd
-from ._functions.vision import GridSampler, AffineGridGenerator
+from ._functions import vision
 from torch.autograd import Variable
 from .modules.utils import _single, _pair, _triple
 
@@ -31,11 +31,11 @@ def conv1d(input, weight, bias=None, stride=1, padding=0, dilation=1,
         weight: filters of shape (out_channels x in_channels x kW)
         bias: optional bias of shape (out_channels). Default: None
         stride: the stride of the convolving kernel. Can be a single number or
-          a tuple (sW,). Default: 1
+          a one-element tuple (sW,). Default: 1
         padding: implicit zero paddings on both sides of the input. Can be a
-          single number or a tuple (padW,). Default: 0
+          single number or a one-element tuple (padW,). Default: 0
         dilation: the spacing between kernel elements. Can be a single number or
-          a tuple (dW,). Default: 1
+          a one-element tuple (dW,). Default: 1
         groups: split input into groups, in_channels should be divisible by
           the number of groups. Default: 1
 
@@ -768,7 +768,7 @@ softplus(input, beta=1, threshold=20) -> Variable
 def _get_softmax_dim(name, ndim, stacklevel):
     warnings.warn("Implicit dimension choice for " + name + " has been deprecated. "
                   "Change the call to include dim=X as an argument.", stacklevel=stacklevel)
-    if ndim == 0 or ndim == 3:
+    if ndim == 0 or ndim == 1 or ndim == 3:
         return 0
     else:
         return 1
@@ -1072,8 +1072,12 @@ def nll_loss(input, target, weight=None, size_average=True, ignore_index=-100, r
 
     Args:
         input: :math:`(N, C)` where `C = number of classes` or `(N, C, H, W)`
-            in case of 2D - Loss
-        target: :math:`(N)` where each value is `0 <= targets[i] <= C-1`
+            in case of 2D Loss, or `(N, C, *) in the case of K-dimensional Loss,
+            where :math:`K > 2` and `*` is `K` extra dimensions.
+        target: :math:`(N)` where each value is `0 <= targets[i] <= C-1`.
+            In the case of 2D Loss, then :math:`(N, H, W)`. For K-dimensional
+            Loss where :math:`K > 2`, then :math:`(N, *)`, where `*` is `K`
+            extra dimensions.
         weight (Tensor, optional): a manual rescaling weight given to each
             class. If given, has to be a Tensor of size `C`
         size_average (bool, optional): By default, the losses are averaged
@@ -1099,11 +1103,24 @@ def nll_loss(input, target, weight=None, size_average=True, ignore_index=-100, r
         return torch._C._nn.nll_loss(input, target, weight, size_average, ignore_index, reduce)
     elif dim == 4:
         return torch._C._nn.nll_loss2d(input, target, weight, size_average, ignore_index, reduce)
+    elif dim > 4:
+        n = input.size(0)
+        c = input.size(1)
+        out_size = (n,) + input.size()[2:]
+        if target.size()[1:] != input.size()[2:]:
+            raise ValueError('Expected target size {}, got {}'.format(
+                out_size, input.size()))
+        input = input.contiguous().view(n, c, 1, -1)
+        target = target.contiguous().view(n, 1, -1)
+        if reduce:
+            return torch._C._nn.nll_loss2d(input, target, weight, size_average, ignore_index, reduce)
+        out = torch._C._nn.nll_loss2d(input, target, weight, size_average, ignore_index, reduce)
+        return out.view(out_size)
     else:
-        raise ValueError('Expected 2 or 4 dimensions (got {})'.format(dim))
+        raise ValueError('Expected 2, 4, or more than 4 dimensions (got {})'.format(dim))
 
 
-def poisson_nll_loss(input, target, log_input=True, full=False, size_average=True, eps=1e-8):
+def poisson_nll_loss(input, target, log_input=True, full=False, size_average=True, eps=1e-8, reduce=True):
     r"""Poisson negative log likelihood loss.
 
     See :class:`~torch.nn.PoissonNLLLoss` for details.
@@ -1122,6 +1139,10 @@ def poisson_nll_loss(input, target, log_input=True, full=False, size_average=Tru
             the losses are instead summed for each minibatch. Default: ``True``
         eps (float, optional): Small value to avoid evaluation of log(0) when
             log_input=False. Default: 1e-8
+        reduce (bool, optional): By default, the losses are averaged
+            over observations for each minibatch, or summed, depending on
+            size_average. When reduce is ``False``, returns a loss per batch
+            element instead and ignores size_average. Default: ``True``
     """
     if log_input:
         loss = torch.exp(input) - target * input
@@ -1130,10 +1151,11 @@ def poisson_nll_loss(input, target, log_input=True, full=False, size_average=Tru
     if full:
         mask = target > 1
         loss[mask] += (target * torch.log(target) - target + 0.5 * torch.log(2 * math.pi * target))[mask]
+    if not reduce:
+        return loss
     if size_average:
         return torch.mean(loss)
-    else:
-        return torch.sum(loss)
+    return torch.sum(loss)
 
 
 kl_div = _add_docstr(torch._C._nn.kl_div, r"""
@@ -1530,7 +1552,7 @@ def grid_sample(input, grid, mode='bilinear', padding_mode='zeros'):
 
     """
     batch_size, channels, in_height, in_width = input.size()
-    return GridSampler.apply(input, grid, padding_mode)
+    return vision.grid_sampler(input, grid, padding_mode)
 
 
 def affine_grid(theta, size):
@@ -1546,7 +1568,7 @@ def affine_grid(theta, size):
     Returns:
         output (Variable): output Tensor of size (N x H x W x 2)
     """
-    return AffineGridGenerator.apply(theta, size)
+    return vision.affine_grid_generator(theta, size)
 
 
 def pad(input, pad, mode='constant', value=0):

@@ -120,9 +120,15 @@ class NLLLoss(_WeightedLoss):
             Default: ``True``
 
     Shape:
-        - Input: :math:`(N, C)` where `C = number of classes`
-        - Target: :math:`(N)` where each value is `0 <= targets[i] <= C-1`
+        - Input: :math:`(N, C)` where `C = number of classes`.
+            In the case of K-dimensional loss where :math:`K >= 2`, then
+            :math:`(N, C, *)` where `*` is `K` extra dimensions.
+        - Target: :math:`(N)` where each value is `0 <= targets[i] <= C-1`.
+            In the case of K-dimensional loss, where :math:`K >= 2`, then
+            :math:`(N, C, *)` where `*` is `K` extra dimensions.
         - Output: scalar. If reduce is ``False``, then :math:`(N)` instead.
+            In the case of K-dimensional loss and reduce is ``False``, then
+            :math:`(N, C, *)`, the same size as the target.
 
     Examples::
 
@@ -212,6 +218,10 @@ class PoissonNLLLoss(_Loss):
             is set to ``False``, the losses are instead summed for each minibatch.
         eps (float, optional): Small value to avoid evaluation of log(0) when
             log_input==``False``. Default: 1e-8
+        reduce (bool, optional): By default, the losses are averaged
+            over observations for each minibatch, or summed, depending on
+            size_average. When reduce is ``False``, returns a loss per batch
+            element instead and ignores size_average. Default: ``True``
 
     Examples::
 
@@ -221,16 +231,17 @@ class PoissonNLLLoss(_Loss):
         >>> output = loss(log_input, target)
         >>> output.backward()
     """
-    def __init__(self, log_input=True, full=False, size_average=True, eps=1e-8):
-        super(PoissonNLLLoss, self).__init__()
+    def __init__(self, log_input=True, full=False, size_average=True, eps=1e-8, reduce=True):
+        super(PoissonNLLLoss, self).__init__(size_average)
         self.log_input = log_input
         self.full = full
-        self.size_average = size_average
         self.eps = eps
+        self.reduce = reduce
 
     def forward(self, log_input, target):
         _assert_no_grad(target)
-        return F.poisson_nll_loss(log_input, target, self.log_input, self.full, self.size_average, self.eps)
+        return F.poisson_nll_loss(log_input, target, self.log_input, self.full,
+                                  self.size_average, self.eps, self.reduce)
 
 
 class KLDivLoss(_Loss):

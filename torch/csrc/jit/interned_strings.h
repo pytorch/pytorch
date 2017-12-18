@@ -40,6 +40,7 @@ _(Scale) \
 _(Transpose) \
 _(Reshape) \
 _(split) \
+_(chunk) \
 _(Offset) \
 _(value) \
 _(Subgraph) \
@@ -74,6 +75,8 @@ _(shape) \
 _(axes) \
 _(group) \
 _(inplace) \
+_(transA) \
+_(transB) \
 _(other) \
 _(__and__) \
 _(__lshift__) \
@@ -120,7 +123,8 @@ _(sub) \
 _(tan) \
 _(trunc) \
 _(zeros) \
-_(exponent)
+_(exponent) \
+_(is_cuda)
 
 enum BuiltinSymbol {
   #define DEFINE_SYMBOL(s) \
@@ -132,5 +136,9 @@ enum BuiltinSymbol {
 
 const char * symbolToString(Symbol s);
 Symbol stringToSymbol(const std::string & s);
+
+inline Symbol operator "" _sym(const char * s, size_t) {
+  return stringToSymbol(s);
+}
 
 }}

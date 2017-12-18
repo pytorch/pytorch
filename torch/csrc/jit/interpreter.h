@@ -7,11 +7,6 @@ namespace at {
 }
 namespace torch { namespace jit {
 
-struct NotImplementedException : public std::logic_error {
-  NotImplementedException()
-  : std::logic_error("Function not yet implemented.") {}
-};
-
 // The interpreter run Graphs with Tensor inputs and Tensor outputs
 // a separate component in the autograd handles unwrapping and wrapping
 // variable objects for use in the interpreter.
@@ -19,6 +14,7 @@ struct NotImplementedException : public std::logic_error {
 struct CodeImpl;
 struct InterpreterStateImpl;
 struct Graph;
+struct TensorType;
 
 struct Code {
   Code()
@@ -30,7 +26,7 @@ struct Code {
   }
 private:
   std::shared_ptr<CodeImpl> pImpl;
-  friend class InterpreterStateImpl;
+  friend struct InterpreterStateImpl;
 };
 
 struct InterpreterState {
@@ -41,6 +37,7 @@ struct InterpreterState {
   void runOneStage(
     const std::vector<at::Tensor> & inputs,
     std::vector<at::Tensor> & outputs);
+  const TensorType & tensorTypeForInput(size_t i) const;
   ~InterpreterState();
   // create a copy of InterpreterState with its current state
   // used when retain_graph=True so that stages can be re-run

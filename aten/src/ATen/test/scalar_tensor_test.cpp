@@ -33,8 +33,8 @@ int main() {
   for (auto s = sizes.begin(); s != sizes.end(); ++s) {
     // verify that the dim, sizes, strides, etc match what was requested.
     auto t = T.ones(*s);
-    ASSERT(t.dim() == s->size());
-    ASSERT(t.ndimension() == s->size());
+    ASSERT((std::size_t)t.dim() == s->size());
+    ASSERT((std::size_t)t.ndimension() == s->size());
     ASSERT(t.sizes().equals(*s));
     ASSERT(t.strides().size() == s->size());
     auto numel = std::accumulate(s->begin(), s->end(), 1, std::multiplies<int64_t>());

@@ -90,6 +90,28 @@ void THCTensor_(cat)(THCState *state, THCTensor *result,
   THCTensor_(catArray)(state, result, inputs, 2, dimension);
 }
 
+void THCTensor_(check_shape_except_dim)(THCState *state, 
+    THCTensor *first, THCTensor *second, int dimension);
+inline void THCTensor_(check_shape_except_dim)(THCState *state, 
+    THCTensor *first, THCTensor *second, int dimension)
+{
+  int first_dims = THCTensor_(nDimension)(state, first);
+  int second_dims = THCTensor_(nDimension)(state, second);
+  THArgCheck(first_dims == second_dims, 0,
+      "Tensors must have same number of dimensions: got %d and %d",
+      first_dims, second_dims);
+  for (int dim = 0; dim < first_dims; dim++) {
+    if (dim == dimension) {
+      continue;
+    }
+    int64_t first_dim_size = THCTensor_(size)(state, first, dim);
+    int64_t second_dim_size = THCTensor_(size)(state, second, dim);
+    THArgCheck(first_dim_size == second_dim_size, 0,
+        "Sizes of tensors must match except in dimension %d. Got %lld and %lld in dimension %d",
+        dimension, (long long)first_dim_size, (long long)second_dim_size, dim);
+  }
+}
+
 void THCTensor_(catArray)(THCState *state, THCTensor *result,
 			  THCTensor **inputs, int numInputs, int dimension)
 {
@@ -97,11 +119,12 @@ void THCTensor_(catArray)(THCState *state, THCTensor *result,
   int i, j, cohortMax;
   int64_t offset;
   bool hasEmptyInput = false;
+  THCTensor *notEmptyTensor = NULL;
 
   // Even in the case where dimension is negative (i.e. when we want
   // to cat along the last dimension), this logic still works, as the
   // loop below will overwrite the value
-  int maxDim = dimension + 1;
+  int nDims = dimension + 1;
 
   // cat_dimension is the actual dimension we cat along
   int cat_dimension = dimension;
@@ -110,61 +133,44 @@ void THCTensor_(catArray)(THCState *state, THCTensor *result,
   {
     int inputDim = THCTensor_(nDimension)(state, inputs[i]);
     hasEmptyInput |= !inputDim;
-    maxDim = THMax(maxDim, inputDim);
+    if (inputDim > 0) {
+      nDims = inputDim;
+      notEmptyTensor = inputs[i];
+    }
   }
 
   // In the event that the user specified -1 as the concat dimension, then
-  // we want to pick the maxDim  as dimension to cat along (and thus maxDim - 1 as the
-  // value due to 0-based indexing). If the maxDim is // 0 (i.e. we are catting all
+  // we want to pick the nDims as dimension to cat along (and thus nDims - 1 as the
+  // value due to 0-based indexing). If the nDims is // 0 (i.e. we are catting all
   // empty tensors), then we set cat_dimension to be 0
   if (dimension + TH_INDEX_BASE == -1) {
-    cat_dimension = maxDim ? (maxDim - 1) : 0;
+    cat_dimension = nDims ? (nDims - 1) : 0;
   }
 
   THArgCheck(numInputs > 0, 3, "invalid number of inputs %d", numInputs);
   THArgCheck(cat_dimension >= 0, 4, "invalid dimension %d", dimension + TH_INDEX_BASE);
-
-  size = THLongStorage_newWithSize(maxDim);
-  for(i = 0; i < maxDim; i++)
-  {
-    // dimSize is either the size of the dim if it exists, either 1 if #dim > 0, otherwise 0
-    int64_t dimSize = i < THCTensor_(nDimension)(state, inputs[0])
-                       ? THCTensor_(size)(state, inputs[0], i)
-                       : THMin(THCTensor_(nDimension)(state, inputs[0]), 1);
-    if (i == cat_dimension)
-    {
-      for (j = 1; j < numInputs; j++)
-      {
-        // accumulate the size over the dimension we want to cat on.
-        // Empty tensors are allowed
-        dimSize += i < THCTensor_(nDimension)(state, inputs[j])
-                       ? THCTensor_(size)(state, inputs[j], i)
-                       : THMin(THCTensor_(nDimension)(state, inputs[j]), 1);
-      }
+  
+  size = THLongStorage_newWithSize(nDims);
+  
+  // Compute size of the result in the cat dimension
+  int64_t cat_dim_size = 0;
+  for (int i = 0; i < numInputs; i++) {
+    THCTensor *tensor = inputs[i];
+    if (THCTensor_(nDimension)(state, tensor) == 0) {
+      continue;
     }
-    else
-    {
-      for (j = 1; j < numInputs; j++)
-      {
-        int64_t sz = i < THCTensor_(nDimension)(state, inputs[j])
-                      ? THCTensor_(size)(state, inputs[j], i)
-                      : THMin(THCTensor_(nDimension)(state, inputs[j]), 1);
-
-        // If it's a dimension we're not catting on
-        // Then fail if sizes are different AND > 0
-        if (dimSize != sz && dimSize && sz) {
-          THLongStorage_free(size);
-          THError("inconsistent tensor sizes");
-        }
-        else if(!dimSize)
-        {
-          dimSize = sz;
-        }
-      }
-    }
-    size->data[i] = dimSize;
+    THCTensor_(check_shape_except_dim)(state, notEmptyTensor, tensor, cat_dimension);
+    cat_dim_size += THCTensor_(size)(state, tensor, cat_dimension);
   }
 
+  // Compute the size of the result
+  for (int dim = 0; dim < nDims; dim++) {
+    int64_t result_dim_size = THCTensor_(size)(state, notEmptyTensor, dim);
+    if (dim == cat_dimension) {
+      result_dim_size = cat_dim_size;
+    }
+    size->data[dim] = result_dim_size;
+  }
   THCTensor_(resize)(state, result, size, NULL);
   THLongStorage_free(size);
 
@@ -198,7 +204,7 @@ void THCTensor_(catArray)(THCState *state, THCTensor *result,
     OutputTensorSizeStride<unsigned int, CAT_ARRAY_MAX_INPUT_DIMS> param;
 
     // Next, let's initialize the size, stride arrays for the output Tensor.
-    for (i = 0; i < maxDim; ++i) {
+    for (i = 0; i < nDims; ++i) {
       param.outputSize[i] = THCTensor_(size)(state, result, i);
       param.outputStride[i] = THCTensor_(stride)(state, result, i);
     }
@@ -250,7 +256,7 @@ void THCTensor_(catArray)(THCState *state, THCTensor *result,
       getCatGrid(state, j, catGrid);
 
 
-      switch (maxDim) {
+      switch (nDims) {
         case 1:
           HANDLE_CASE(1);
           break;
