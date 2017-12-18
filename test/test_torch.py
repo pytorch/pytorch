@@ -690,6 +690,7 @@ class TestTorch(TestCase):
                                ((-1.6181, 0.7148),
                                 (1.3728, 0.1319))))
         a = cast(a)
+        a_LU = a.btrifact()  # test default info
         info = cast(torch.IntTensor())
         a_LU = a.btrifact(info=info)
         self.assertEqual(info.abs().sum(), 0)
