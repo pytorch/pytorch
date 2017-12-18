@@ -38,8 +38,8 @@ def split(tensor, split_size_or_sections, dim=0):
     else:
         if dim_size != sum(split_size_or_sections):
             raise ValueError("Sum of split sizes exceeds tensor dim")
-        split_indices = torch.cat((torch.zeros(1, 1).int(), split_size_or_sections), dim=1)
-        split_indices = torch.cumsum(split_indices, dim=1)[:, :-1].view(-1)
+        split_indices = [0] + split_size_or_sections
+        split_indices = torch.cumsum(torch.Tensor(split_indices), dim=0)
 
         return tuple(
             tensor.narrow(int(dim), int(start), int(length))
