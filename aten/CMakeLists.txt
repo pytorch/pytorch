@@ -391,7 +391,6 @@ set(cwrap_files
   ${CMAKE_CURRENT_SOURCE_DIR}/src/THCUNN/generic/THCUNN.h
   ${CMAKE_CURRENT_SOURCE_DIR}/src/ATen/nn.yaml
   ${CMAKE_CURRENT_SOURCE_DIR}/src/ATen/native/native_functions.yaml
-  ${CMAKE_CURRENT_SOURCE_DIR}/src/ATen/native/cudnn/native_functions.yaml
 )
 
 include_directories(
