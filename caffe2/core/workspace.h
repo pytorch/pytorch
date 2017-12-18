@@ -28,6 +28,7 @@
 #include <cstddef>
 #include <mutex>
 #include <typeinfo>
+#include <unordered_set>
 #include <vector>
 
 #include "caffe2/core/blob.h"
@@ -128,11 +129,46 @@ class Workspace {
   }
 
   /**
-   * Add blob mappings from another workspace
+   * Adds blob mappings from workspace to the blobs from parent workspace.
+   * Creates blobs under possibly new names that redirect read/write operations
+   * to the blobs in the parent workspace.
+   * Arguments:
+   *  parent - pointer to parent workspace
+   *  forwarded_blobs - map from new blob name to blob name in parent's
+   * workspace skip_defined_blob - if set skips blobs with names that already
+   * exist in the workspace, otherwise throws exception
    */
   void AddBlobMapping(
       const Workspace* parent,
-      const std::unordered_map<string, string>& forwarded_blobs);
+      const std::unordered_map<string, string>& forwarded_blobs,
+      bool skip_defined_blobs = false);
+
+  /**
+   * Converts prevously mapped tensor blobs to local blobs, copies values from
+   * parent workspace blobs into new local blobs. Ignores undefined blobs.
+   */
+  template <class Context>
+  void CopyForwardedTensors(const std::unordered_set<std::string>& blobs) {
+    for (const auto& blob : blobs) {
+      if (!forwarded_blobs_.count(blob)) {
+        continue;
+      }
+      const auto& ws_blob = forwarded_blobs_[blob];
+      const auto* parent_ws = ws_blob.first;
+      auto* from_blob = parent_ws->GetBlob(ws_blob.second);
+      CAFFE_ENFORCE(from_blob);
+      CAFFE_ENFORCE(
+          from_blob->template IsType<Tensor<Context>>(),
+          "Expected blob with tensor value",
+          ws_blob.second);
+      forwarded_blobs_.erase(blob);
+      auto* to_blob = CreateBlob(blob);
+      CAFFE_ENFORCE(to_blob);
+      const auto& from_tensor = from_blob->template Get<Tensor<Context>>();
+      auto* to_tensor = to_blob->template GetMutable<Tensor<Context>>();
+      to_tensor->CopyFrom(from_tensor);
+    }
+  }
 
   /**
    * Return list of blobs owned by this Workspace, not including blobs

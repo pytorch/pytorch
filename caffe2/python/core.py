@@ -28,7 +28,8 @@ from six import binary_type, string_types, text_type
 
 from caffe2.proto import caffe2_pb2
 from caffe2.python import scope, utils, workspace
-from caffe2.python.control_ops_grad import gen_do_gradient, gen_if_gradient
+from caffe2.python.control_ops_grad import \
+    gen_do_gradient, gen_if_gradient, gen_while_gradient
 
 import caffe2.python._import_c_extension as C
 import pickle
@@ -1110,6 +1111,7 @@ class GradientRegistry(object):
 
 GradientRegistry.RegisterGradient('Do')(gen_do_gradient)
 GradientRegistry.RegisterGradient('If')(gen_if_gradient)
+GradientRegistry.RegisterGradient('While')(gen_while_gradient)
 
 
 def get_ssa(net, blob_versions=None):
