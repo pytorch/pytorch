@@ -41,8 +41,10 @@ __global__ void MaxPoolForward(const int nthreads, const Dtype* bottom_data,
   }
 }
 
+const int BACKWARD_THREADS = 256;
 
 template <typename Dtype, typename AccType>
+__launch_bounds__(BACKWARD_THREADS,2048/BACKWARD_THREADS)
 __global__ void MaxPoolBackward(const int nthreads, const Dtype* top_diff,
     const int64_t* top_mask, const int num, const int channels,
     const int height, const int width, const int pooled_height,
@@ -50,32 +52,60 @@ __global__ void MaxPoolBackward(const int nthreads, const Dtype* top_diff,
     const int stride_h, const int stride_w, const int pad_h, const int pad_w,
     const int dilation_h, const int dilation_w,
     Dtype* bottom_diff) {
-  CUDA_KERNEL_LOOP(index, nthreads) {
-    // find out the local index
-    // find out the local offset
-    int w = index % width;
-    int h = (index / width) % height;
-    int c = (index / width / height) % channels;
-    int n = index / width / height / channels;
-    int phstart =
-        (h + pad_h < ((kernel_h - 1) * dilation_h + 1)) ? 0 : (h + pad_h - ((kernel_h - 1) * dilation_h + 1)) / stride_h + 1;
-    int phend = min((h + pad_h) / stride_h + 1, pooled_height);
-    int pwstart =
-        (w + pad_w < ((kernel_w - 1) * dilation_w + 1)) ? 0 : (w + pad_w - ((kernel_w - 1) * dilation_w + 1)) / stride_w + 1;
-    int pwend = min((w + pad_w) / stride_w + 1, pooled_width);
-
-    AccType gradient = AccType(0);
-    int offset = (n * channels + c) * pooled_height * pooled_width;
-    top_diff += offset;
-    top_mask += offset;
-    for (int ph = phstart; ph < phend; ++ph) {
-      for (int pw = pwstart; pw < pwend; ++pw) {
-        if (top_mask[ph * pooled_width + pw] - TH_INDEX_BASE == h * width + w) {
-          gradient += ScalarConvert<Dtype, AccType>::to(top_diff[ph * pooled_width + pw]);
-        }
-      }
+    CUDA_KERNEL_LOOP(index, height*width) {
+    int h = index/width;
+    int w = index - h * width;
+//get some templating performance benefits without actually templating
+    int phstart, phend, pwstart, pwend;
+    if (stride_h == 1) {
+       phstart =
+        (h + pad_h < ((kernel_h - 1) * dilation_h + 1)) ? 0 : (h + pad_h - ((kernel_h - 1) * dilation_h + 1))  + 1;
+       phend = min((h + pad_h)  + 1, pooled_height);
+    } else if (stride_h == 2) {
+       phstart =
+        (h + pad_h < ((kernel_h - 1) * dilation_h + 1)) ? 0 : (h + pad_h - ((kernel_h - 1) * dilation_h + 1)) / 2  + 1;
+       phend = min((h + pad_h) / 2  + 1, pooled_height);
+    } else {
+       phstart =
+        (h + pad_h < ((kernel_h - 1) * dilation_h + 1)) ? 0 : (h + pad_h - ((kernel_h - 1) * dilation_h + 1)) / stride_h  + 1;
+       phend = min((h + pad_h) / stride_h  + 1, pooled_height);
     }
-    bottom_diff[index] = ScalarConvert<AccType, Dtype>::to(gradient);
+    if (stride_w == 1) {
+        pwstart =
+        (w + pad_w < ((kernel_w - 1) * dilation_w + 1)) ? 0 : (w + pad_w - ((kernel_w - 1) * dilation_w + 1)) + 1;
+        pwend = min((w + pad_w) + 1, pooled_width);
+    } else if (stride_w == 2) {
+        pwstart =
+        (w + pad_w < ((kernel_w - 1) * dilation_w + 1)) ? 0 : (w + pad_w - ((kernel_w - 1) * dilation_w + 1)) / 2 + 1;
+        pwend = min((w + pad_w) / 2 + 1, pooled_width);
+    } else {
+        pwstart =
+        (w + pad_w < ((kernel_w - 1) * dilation_w + 1)) ? 0 : (w + pad_w - ((kernel_w - 1) * dilation_w + 1)) / stride_w + 1;
+        pwend = min((w + pad_w) / stride_w + 1, pooled_width);
+    }
+    for (int n = blockIdx.y; n < num; n += gridDim.y)
+       for (int c = blockIdx.z; c < channels; c+= gridDim.z) { 
+
+        AccType gradient = AccType(0);
+        int offset = (n * channels + c) * pooled_height * pooled_width;
+        top_diff += offset;
+        top_mask += offset;
+//get some templating performance benefits without actually templating
+        if ((phstart + 1 != phend) || (pwstart + 1 != pwend)) {
+        for (int ph = phstart; ph < phend; ++ph) {
+          for (int pw = pwstart; pw < pwend; ++pw) {
+            if (top_mask[ph * pooled_width + pw] - TH_INDEX_BASE == h * width + w) {
+              gradient += ScalarConvert<Dtype, AccType>::to(top_diff[ph * pooled_width + pw]);
+            }
+          }
+        }
+        } else {
+            if (top_mask[phstart * pooled_width + pwstart] - TH_INDEX_BASE == h * width + w) {
+              gradient += ScalarConvert<Dtype, AccType>::to(top_diff[phstart * pooled_width + pwstart]);
+            }  
+        }
+        bottom_diff[(n*channels+c)*height*width+index] = ScalarConvert<AccType, Dtype>::to(gradient);
+      }
   }
 }
 
