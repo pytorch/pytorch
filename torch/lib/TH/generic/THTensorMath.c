@@ -1331,14 +1331,17 @@ void THTensor_(addmv)(THTensor *r_, real beta, THTensor *t, real alpha, THTensor
     THTensor_(copy)(r_, t);
   }
 
-  if(mat->stride[0] == 1)
+  // n == 1 || lda >= max(1, m)
+  #define LDA_COND(M, N, LDA) ((N) == 1 || (LDA) >= THMax(1, (M)))
+
+  if(mat->stride[0] == 1 && LDA_COND(mat->size[0], mat->size[1], mat->stride[1]))
   {
     THBlas_(gemv)('n', mat->size[0], mat->size[1],
                   alpha, THTensor_(data)(mat), mat->stride[1],
                   THTensor_(data)(vec), vec->stride[0],
                   beta, THTensor_(data)(r_), r_->stride[0]);
   }
-  else if(mat->stride[1] == 1)
+  else if(mat->stride[1] == 1 && LDA_COND(mat->size[1], mat->size[0], mat->stride[0]))
   {
     THBlas_(gemv)('t',  mat->size[1], mat->size[0],
                   alpha, THTensor_(data)(mat), mat->stride[0],
@@ -1356,6 +1359,8 @@ void THTensor_(addmv)(THTensor *r_, real beta, THTensor *t, real alpha, THTensor
 
     THTensor_(free)(cmat);
   }
+
+  #undef LDA_COND
 }
 
 void THTensor_(match)(THTensor *r_, THTensor *m1, THTensor *m2, real gain)
@@ -1434,15 +1439,18 @@ void THTensor_(addmm)(THTensor *r_, real beta, THTensor *t, real alpha, THTensor
     }
   }
 
+  // n == 1 || ldc >= max(1, m)
+  #define LDC_COND(M, N, LDC) ((N) == 1 || (LDC) >= THMax(1, M))
+
   /* r_ */
   if(r_->stride[0] == 1 &&
-     r_->stride[1] != 0)
+     LDC_COND(r_->size[0], r_->size[1], r_->stride[1]))
   {
     transpose_r = 'n';
     r__ = r_;
   }
   else if(r_->stride[1] == 1 &&
-          r_->stride[0] != 0)
+          LDC_COND(r_->size[1], r_->size[0], r_->stride[0]))
   {
     THTensor *swap = m2;
     m2 = m1;
@@ -1453,22 +1461,30 @@ void THTensor_(addmm)(THTensor *r_, real beta, THTensor *t, real alpha, THTensor
   else
   {
     transpose_r = 'n';
-
+    // make r__ FORTRAN contiguous
     THTensor *transp_r_ = THTensor_(newTranspose)(r_, 0, 1);
     r__ = THTensor_(newClone)(transp_r_);
     THTensor_(free)(transp_r_);
     THTensor_(transpose)(r__, NULL, 0, 1);
   }
 
+  #undef LDC_COND
+
+  int64_t m = r__->size[(transpose_r == 'n' ? 0 : 1)];
+  int64_t n = r__->size[(transpose_r == 'n' ? 1 : 0)];
+  int64_t k = m1->size[(transpose_r == 'n' ? 1 : 0)];
+  int64_t ldr__ = r__->stride[(transpose_r == 'n' ? 1 : 0)];
+
   /* m1 */
+  /* Need ldm1_ >= max(1, (transpose_m1 == 't' ? m : k)) */
   if(m1->stride[(transpose_r == 'n' ? 0 : 1)] == 1 &&
-     m1->stride[(transpose_r == 'n' ? 1 : 0)] != 0)
+     m1->stride[(transpose_r == 'n' ? 1 : 0)] >= THMax(1, k))
   {
     transpose_m1 = 'n';
     m1_ = m1;
   }
   else if(m1->stride[(transpose_r == 'n' ? 1 : 0)] == 1 &&
-          m1->stride[(transpose_r == 'n' ? 0 : 1)] != 0)
+          m1->stride[(transpose_r == 'n' ? 0 : 1)] >= THMax(1, m))
   {
     transpose_m1 = 't';
     m1_ = m1;
@@ -1481,14 +1497,15 @@ void THTensor_(addmm)(THTensor *r_, real beta, THTensor *t, real alpha, THTensor
   }
 
   /* m2 */
+  /* Need ldm2_ >= max(1, (transpose_m2 == 't' ? n : k)) */
   if(m2->stride[(transpose_r == 'n' ? 0 : 1)] == 1 &&
-     m2->stride[(transpose_r == 'n' ? 1 : 0)] != 0)
+     m2->stride[(transpose_r == 'n' ? 1 : 0)] >= THMax(1, k))
   {
     transpose_m2 = 'n';
     m2_ = m2;
   }
   else if(m2->stride[(transpose_r == 'n' ? 1 : 0)] == 1 &&
-          m2->stride[(transpose_r == 'n' ? 0 : 1)] != 0)
+          m2->stride[(transpose_r == 'n' ? 0 : 1)] >= THMax(1, n))
   {
     transpose_m2 = 't';
     m2_ = m2;
@@ -1500,21 +1517,24 @@ void THTensor_(addmm)(THTensor *r_, real beta, THTensor *t, real alpha, THTensor
     free_m2 = 1;
   }
 
+  int64_t ldm1_ = (transpose_m1 == 'n' ? m1_->stride[(transpose_r == 'n' ? 1 : 0)] : m1_->stride[(transpose_r == 'n' ? 0 : 1)]);
+  int64_t ldm2_ = (transpose_m2 == 'n' ? m2_->stride[(transpose_r == 'n' ? 1 : 0)] : m2_->stride[(transpose_r == 'n' ? 0 : 1)]);
+
 #pragma omp critical(blasgemm)
   /* do the operation */
   THBlas_(gemm)(transpose_m1,
                 transpose_m2,
-                r__->size[(transpose_r == 'n' ? 0 : 1)],
-                r__->size[(transpose_r == 'n' ? 1 : 0)],
-                m1_->size[(transpose_r == 'n' ? 1 : 0)],
+                m,
+                n,
+                k,
                 alpha,
                 THTensor_(data)(m1_),
-                (transpose_m1 == 'n' ? m1_->stride[(transpose_r == 'n' ? 1 : 0)] : m1_->stride[(transpose_r == 'n' ? 0 : 1)]),
+                ldm1_,
                 THTensor_(data)(m2_),
-                (transpose_m2 == 'n' ? m2_->stride[(transpose_r == 'n' ? 1 : 0)] : m2_->stride[(transpose_r == 'n' ? 0 : 1)]),
+                ldm2_,
                 beta,
                 THTensor_(data)(r__),
-                r__->stride[(transpose_r == 'n' ? 1 : 0)]);
+                ldr__);
 
   /* free intermediate variables */
   if(free_m1)
@@ -1555,14 +1575,17 @@ void THTensor_(addr)(THTensor *r_, real beta, THTensor *t, real alpha, THTensor 
   else if(beta != 1)
     THTensor_(mul)(r_, r_, beta);
 
-  if(r_->stride[0] == 1)
+  // n == 1 || lda >= max(1, m)
+  #define LDA_COND(M, N, LDA) ((N) == 1 || (LDA) >= THMax(1, (M)))
+
+  if(r_->stride[0] == 1 && LDA_COND(vec1->size[0], vec2->size[0], r_->stride[1]))
   {
     THBlas_(ger)(vec1->size[0], vec2->size[0],
                  alpha, THTensor_(data)(vec1), vec1->stride[0],
                  THTensor_(data)(vec2), vec2->stride[0],
                  THTensor_(data)(r_), r_->stride[1]);
   }
-  else if(r_->stride[1] == 1)
+  else if(r_->stride[1] == 1 && LDA_COND(vec2->size[0], vec1->size[0], r_->stride[0]))
   {
     THBlas_(ger)(vec2->size[0], vec1->size[0],
                  alpha, THTensor_(data)(vec2), vec2->stride[0],
@@ -1580,6 +1603,8 @@ void THTensor_(addr)(THTensor *r_, real beta, THTensor *t, real alpha, THTensor 
 
     THTensor_(freeCopyTo)(cr, r_);
   }
+
+  #undef LDA_COND
 }
 
 void THTensor_(addbmm)(THTensor *result, real beta, THTensor *t, real alpha, THTensor *batch1, THTensor *batch2)

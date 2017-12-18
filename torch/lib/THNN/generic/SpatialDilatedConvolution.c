@@ -82,7 +82,11 @@ void THNN_(SpatialDilatedConvolution_updateOutput)(
 
   input = THTensor_(newContiguous)(input);
   weight = THTensor_(newContiguous)(weight);
-  bias = bias ? THTensor_(newContiguous)(bias) : bias;
+  THArgCheck(THTensor_(isContiguous)(columns), 5, "columns needs to be contiguous");
+  if (bias) {
+    bias = THTensor_(newContiguous)(bias);
+    THArgCheck(THTensor_(isContiguous)(ones), 6, "ones needs to be contiguous");
+  }
   int batch = 1;
   if (input->nDimension == 3) {
     // Force batch
@@ -107,7 +111,8 @@ void THNN_(SpatialDilatedConvolution_updateOutput)(
   // Define a buffer of ones, for bias accumulation
   // Note: this buffer can be shared with other modules, it only ever gets increased,
   // and always contains ones.
-  if (ones->nDimension != 2 || ones->size[0]*ones->size[1] < outputHeight*outputWidth) {
+  if (!THTensor_(isContiguous)(ones) || ones->nDimension != 2 ||
+      ones->size[0]*ones->size[1] < outputHeight*outputWidth) {
     // Resize plane and fill with ones...
     THTensor_(resize2d)(ones, outputHeight, outputWidth);
     THTensor_(fill)(ones, 1);
@@ -207,6 +212,7 @@ void THNN_(SpatialDilatedConvolution_updateGradInput)(
   input = THTensor_(newContiguous)(input);
   weight = THTensor_(newContiguous)(weight);
   gradOutput = THTensor_(newContiguous)(gradOutput);
+  THArgCheck(THTensor_(isContiguous)(gradColumns), 5, "gradColumns needs to be contiguous");
   int batch = 1;
   if (input->nDimension == 3) {
     // Force batch
@@ -310,8 +316,11 @@ void THNN_(SpatialDilatedConvolution_accGradParameters)(
   input = THTensor_(newContiguous)(input);
   gradOutput = THTensor_(newContiguous)(gradOutput);
   THArgCheck(THTensor_(isContiguous)(gradWeight), 4, "gradWeight needs to be contiguous");
-  if (gradBias)
+  THArgCheck(THTensor_(isContiguous)(columns), 6, "columns needs to be contiguous");
+  if (gradBias) {
     THArgCheck(THTensor_(isContiguous)(gradBias), 5, "gradBias needs to be contiguous");
+    THArgCheck(THTensor_(isContiguous)(ones), 7, "ones needs to be contiguous");
+  }
   int batch = 1;
   if (input->nDimension == 3) {
     // Force batch
@@ -328,13 +337,6 @@ void THNN_(SpatialDilatedConvolution_accGradParameters)(
 
   // Batch size + input planes
   int64_t batchSize = input->size[0];
-
-  // Define a buffer of ones, for bias accumulation
-  if (ones->nDimension != 2 || ones->size[0]*ones->size[1] < outputHeight*outputWidth) {
-    // Resize plane and fill with ones...
-    THTensor_(resize2d)(ones, outputHeight, outputWidth);
-    THTensor_(fill)(ones, 1);
-  }
 
   // Resize temporary columns
   THTensor_(resize2d)(columns, nInputPlane*kW*kH, outputHeight*outputWidth);
@@ -380,6 +382,12 @@ void THNN_(SpatialDilatedConvolution_accGradParameters)(
 
     // Do GEMV (note: this is a bit confusing because gemv assumes column-major matrices)
     if (gradBias) {
+      // Define a buffer of ones, for bias accumulation
+      if (ones->nDimension != 2 || ones->size[0]*ones->size[1] < outputHeight*outputWidth) {
+        // Resize plane and fill with ones...
+        THTensor_(resize2d)(ones, outputHeight, outputWidth);
+        THTensor_(fill)(ones, 1);
+      }
       THBlas_(gemv)(
           't',
           k_, m_,
