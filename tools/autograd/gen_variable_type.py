@@ -1043,10 +1043,14 @@ def load_aten_declarations(path):
             if arg.get('size') is not None:
                 typename = '{}[{}]'.format(typename, arg['size'])
             param = typename + ' ' + arg['name']
+            default = None
             if arg.get('default') is not None:
                 default = arg['default']
                 if default == 'nullptr' or default == '{}':
                     default = 'None'
+            if arg.get('python_default_init') is not None:
+                default = 'None'
+            if default is not None:
                 param += '=' + str(default)
             typed_args.append(param)
 

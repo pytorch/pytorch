@@ -14,6 +14,8 @@ def parse_default(s):
         return False
     elif s == 'nullptr':
         return s
+    elif s == '{}':
+        return '{}'
     try:
         return int(s)
     except Exception:
@@ -29,22 +31,30 @@ def sanitize_types(typ):
     return [typ]
 
 
-def parse_arguments(args):
+def parse_arguments(args, func):
     arguments = []
+    python_default_inits = func.get('python_default_init', {})
 
     for arg in args.split(','):
         t, name = [a.strip() for a in arg.rsplit(' ', 1)]
         default = None
+        python_default_init = None
 
         if '=' in name:
             ns = name.split('=', 1)
             name, default = ns[0], parse_default(ns[1])
+
+        if name in python_default_inits:
+            assert default is None
+            python_default_init = python_default_inits[name]
 
         typ = sanitize_types(t)
         assert len(typ) == 1
         argument_dict = {'type': typ[0], 'name': name}
         if default is not None:
             argument_dict['default'] = default
+        if python_default_init is not None:
+            argument_dict['python_default_init'] = python_default_init
 
         arguments.append(argument_dict)
     return arguments
@@ -72,7 +82,7 @@ def run(paths):
             declaration['return'] = list(func.get('return', return_type))
             declaration['variants'] = func.get('variants', ['method', 'function'])
             declaration['template_scalar'] = func.get('template_scalar')
-            declaration['arguments'] = func.get('arguments', parse_arguments(arguments))
+            declaration['arguments'] = func.get('arguments', parse_arguments(arguments, func))
             declaration['type_method_definition_dispatch'] = func.get('dispatch', declaration['name'])
             declarations.append(declaration)
 

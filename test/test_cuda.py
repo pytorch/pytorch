@@ -180,7 +180,7 @@ tests = [
     ('addr', medium_2d, lambda t: [medium_1d(t), medium_1d(t)],),
     ('addr', medium_2d, lambda t: [number(0.4, 2, t), medium_1d(t), medium_1d(t)], 'scalar'),
     ('addr', medium_2d, lambda t: [number(0.5, 3, t), number(0.4, 2, t), medium_1d(t), medium_1d(t)], 'two_scalars'),
-    ('atan2', medium_2d, lambda t: [medium_2d(t)], None, float_types),
+    ('atan2', medium_2d, lambda t: [medium_2d(t)], None, float_types + [torch.HalfTensor]),
     ('fmod', small_3d, lambda t: [3], 'value'),
     ('fmod', small_3d, lambda t: [small_3d_positive(t)], 'tensor'),
     ('chunk', medium_2d, lambda t: [4],),
@@ -991,6 +991,9 @@ class TestCuda(TestCase):
 
     def test_view(self):
         TestTorch._test_view(self, lambda t: t.cuda())
+
+    def test_stft(self):
+        TestTorch._test_stft(self, lambda t: t.cuda())
 
     def test_broadcast(self):
         TestTorch._test_broadcast(self, lambda t: t.cuda())

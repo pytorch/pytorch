@@ -11,11 +11,14 @@ import warnings
 import pickle
 from torch.utils.dlpack import from_dlpack, to_dlpack
 from itertools import product, combinations
-from common import TestCase, iter_indices, TEST_NUMPY, run_tests, download_file, skipIfNoLapack, \
-    suppress_warnings
+from common import TestCase, iter_indices, TEST_NUMPY, TEST_SCIPY, run_tests, \
+    download_file, skipIfNoLapack, suppress_warnings
 
 if TEST_NUMPY:
     import numpy as np
+
+if TEST_SCIPY:
+    from scipy import signal
 
 SIZE = 100
 
@@ -2463,6 +2466,25 @@ class TestTorch(TestCase):
         Xhat = torch.mm(U, torch.mm(S.diag(), V.t()))
         self.assertEqual(X, Xhat, 1e-8, 'USV\' wrong')
 
+    @staticmethod
+    def _test_window_function(self, torch_method, scipy_name):
+        for size in [1, 2, 5, 10, 50, 100, 1024, 2048]:
+            for periodic in [True, False]:
+                ref = torch.from_numpy(signal.get_window(scipy_name, size, fftbins=periodic))
+                self.assertEqual(torch_method(size, periodic=periodic), ref)
+
+    @unittest.skipIf(not TEST_SCIPY, "Scipy not found")
+    def test_hann_window(self):
+        self._test_window_function(self, torch.hann_window, 'hann')
+
+    @unittest.skipIf(not TEST_SCIPY, "Scipy not found")
+    def test_hamming_window(self):
+        self._test_window_function(self, torch.hamming_window, 'hamming')
+
+    @unittest.skipIf(not TEST_SCIPY, "Scipy not found")
+    def test_bartlett_window(self):
+        self._test_window_function(self, torch.bartlett_window, 'bartlett')
+
     @skipIfNoLapack
     def test_inverse(self):
         M = torch.randn(5, 5)
@@ -2571,6 +2593,108 @@ class TestTorch(TestCase):
     @skipIfNoLapack
     def test_det(self):
         self._test_det(self, lambda x: x)
+
+    @staticmethod
+    def _test_stft(self, conv_fn):
+        Variable = torch.autograd.Variable
+
+        def naive_stft(x, frame_length, hop, fft_size=None, return_onesided=True,
+                       window=None, pad_end=0):
+            if fft_size is None:
+                fft_size = frame_length
+            if isinstance(x, Variable):
+                x = x.data
+            x = x.clone()
+            if window is None:
+                window = x.new(frame_length).fill_(1)
+            else:
+                if isinstance(window, Variable):
+                    window = window.data
+                window = window.clone()
+            input_1d = x.dim() == 1
+            if input_1d:
+                x = x.view(1, -1)
+            batch = x.size(0)
+            if pad_end > 0:
+                x_pad = x.new(batch, pad_end).fill_(0)
+                x = torch.cat([x, x_pad], 1)
+            length = x.size(1)
+            if TEST_NUMPY and TEST_SCIPY:
+                sp_result = signal.stft(
+                    x,
+                    nperseg=frame_length,
+                    noverlap=frame_length - hop,
+                    window=window,
+                    nfft=fft_size,
+                    return_onesided=return_onesided,
+                    boundary=None,
+                    padded=False,
+                )[2].transpose((0, 2, 1)) * np.abs(window.sum())
+                result = torch.Tensor(np.stack([sp_result.real, sp_result.imag], -1))
+            else:
+                if return_onesided:
+                    return_size = int(fft_size / 2) + 1
+                else:
+                    return_size = fft_size
+                result = x.new(batch, int((length - frame_length) / float(hop)) + 1, return_size, 2)
+                for w in range(return_size):  # freq
+                    radians = conv_fn(torch.arange(frame_length)) * w * 2 * math.pi / fft_size
+                    re_kernel = radians.cos().mul_(window)
+                    im_kernel = -radians.sin().mul_(window)
+                    for b in range(batch):
+                        for i, t in enumerate(range(0, length - frame_length + 1, hop)):
+                            seg = x[b, t:(t + frame_length)]
+                            re = seg.dot(re_kernel)
+                            im = seg.dot(im_kernel)
+                            result[b, i, w, 0] = re
+                            result[b, i, w, 1] = im
+            if input_1d:
+                result = result[0]
+            return conv_fn(result)
+
+        def _test(sizes, frame_length, hop, fft_size=None, return_onesided=True,
+                  window=None, pad_end=0, expected_error=None):
+            x = Variable(conv_fn(torch.randn(*sizes)))
+            if window is not None:
+                window = Variable(conv_fn(window.clone()))
+            if expected_error is None:
+                result = x.stft(frame_length, hop, fft_size, return_onesided, window, pad_end)
+                ref_result = naive_stft(x, frame_length, hop, fft_size, return_onesided, window, pad_end)
+                self.assertEqual(result.data, ref_result, 1e-8, 'stft result')
+            else:
+                self.assertRaises(expected_error,
+                                  lambda: x.stft(frame_length, hop, fft_size, return_onesided, window, pad_end))
+
+        _test((2, 5), 4, 2, pad_end=1)
+        _test((4, 150), 90, 45, pad_end=0)
+        _test((10,), 7, 2, pad_end=0)
+        _test((10, 4000), 1024, 512, pad_end=0)
+
+        _test((2, 5), 4, 2, window=torch.randn(4), pad_end=1)
+        _test((4, 150), 90, 45, window=torch.randn(90), pad_end=0)
+        _test((10,), 7, 2, window=torch.randn(7), pad_end=0)
+        _test((10, 4000), 1024, 512, window=torch.randn(1024), pad_end=0)
+
+        _test((2, 5), 4, 2, fft_size=5, window=torch.randn(4), pad_end=1)
+        _test((4, 150), 90, 45, fft_size=100, window=torch.randn(90), pad_end=0)
+        _test((10,), 7, 2, fft_size=33, window=torch.randn(7), pad_end=0)
+        _test((10, 4000), 1024, 512, fft_size=1500, window=torch.randn(1024), pad_end=0)
+
+        _test((2, 5), 4, 2, fft_size=5, return_onesided=False, window=torch.randn(4), pad_end=1)
+        _test((4, 150), 90, 45, fft_size=100, return_onesided=False, window=torch.randn(90), pad_end=0)
+        _test((10,), 7, 2, fft_size=33, return_onesided=False, window=torch.randn(7), pad_end=0)
+        _test((10, 4000), 1024, 512, fft_size=1500, return_onesided=False, window=torch.randn(1024), pad_end=0)
+
+        _test((10, 4, 2), 1, 1, expected_error=RuntimeError)
+        _test((10,), 11, 1, expected_error=RuntimeError)
+        _test((10,), 0, 1, pad_end=4, expected_error=RuntimeError)
+        _test((10,), 15, 1, pad_end=4, expected_error=RuntimeError)
+        _test((10,), 5, -4, expected_error=RuntimeError)
+        _test((10,), 5, 4, window=torch.randn(11), expected_error=RuntimeError)
+        _test((10,), 5, 4, window=torch.randn(1, 1), expected_error=RuntimeError)
+
+    def test_stft(self):
+        self._test_stft(self, lambda x: x)
 
     @unittest.skip("Not implemented yet")
     def test_conv2(self):
