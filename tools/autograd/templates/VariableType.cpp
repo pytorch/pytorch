@@ -67,6 +67,9 @@ std::unique_ptr<Storage> VariableType::storageFromBlob(void * data, int64_t size
 std::unique_ptr<Storage> VariableType::unsafeStorageFromTH(void * th_pointer, bool retain) const {
   return baseType->unsafeStorageFromTH(th_pointer, retain);
 }
+std::unique_ptr<Storage> VariableType::storageWithAllocator(int64_t size, std::unique_ptr<Allocator> allocator) const {
+  return baseType->storageWithAllocator(size, std::move(allocator));
+}
 Tensor VariableType::unsafeTensorFromTH(void * th_pointer, bool retain) const {
   return make_variable(baseType->unsafeTensorFromTH(th_pointer, retain), false);
 }
