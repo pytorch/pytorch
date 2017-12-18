@@ -28,7 +28,7 @@ from torch.nn import Parameter
 from torch.nn.parallel._functions import Broadcast
 from common_nn import NNTestCase, ModuleTest, CriterionTest, TestBase, \
     module_tests, criterion_tests, TEST_CUDA, TEST_MULTIGPU, TEST_CUDNN, \
-    TEST_CUDNN_VERSION, loss_reference_fns, get_size_average
+    TEST_CUDNN_VERSION, loss_reference_fns, get_size_average, get_weight
 from common import freeze_rng_state, run_tests, TestCase, skipIfNoLapack, \
     TEST_SCIPY, download_file, IS_WINDOWS
 
@@ -4052,7 +4052,7 @@ new_criterion_tests = [
         input_size=(2, 3, 5, 5),
         target_fn=lambda: torch.rand(2, 5, 5).mul(3).floor().long(),
         reference_fn=lambda i, t, m:
-            nlllossNd_reference(i, t, size_average=get_size_average(m)),
+            loss_reference_fns['NLLLossNd'](i, t, size_average=get_size_average(m)),
         check_no_size_average=True,
         desc='2d'
     ),
@@ -4062,7 +4062,7 @@ new_criterion_tests = [
         input_size=(2, 3, 5, 5),
         target=torch.rand(2, 5, 5).mul(3).floor().long(),
         reference_fn=lambda i, t, m:
-            nlllossNd_reference(i, t, weight=get_weight(m)),
+            loss_reference_fns['NLLLossNd'](i, t, weight=get_weight(m)),
         desc='2d_weights',
     ),
     dict(
@@ -4071,7 +4071,7 @@ new_criterion_tests = [
         input_size=(2, 3, 5, 5),
         target_fn=lambda: torch.rand(2, 5, 5).mul(3).floor().long(),
         reference_fn=lambda i, t, m:
-            nlllossNd_reference(i, t, ignore_index=1),
+            loss_reference_fns['NLLLossNd'](i, t, ignore_index=1),
         desc='2d_ignore_index',
     ),
     dict(
