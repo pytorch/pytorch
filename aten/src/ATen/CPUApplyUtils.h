@@ -58,7 +58,7 @@ static inline void check_correct_backend(const Tensor& t1, const Tensor &t2, con
   int64_t ATENSOR##_stride = 0, ATENSOR##_size = 0, ATENSOR##_dim = 0, ATENSOR##_i; \
   int ATENSOR##_contiguous = ALLOW_CONTIGUOUS && DIM < 0; \
 \
-  if(ATENSOR.dim() == 0) \
+  if(ATENSOR.sizes().equals({0})) \
     TH_TENSOR_APPLY_hasFinished = true; \
   else \
   { \
