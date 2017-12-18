@@ -278,10 +278,23 @@ class TestOptim(TestCase):
                 self._build_params_dict(weight, bias, lr=1e-2),
                 lr=1e-3)
         )
+        self._test_basic_cases(
+            lambda weight, bias: optim.Adam([weight, bias], lr=1e-3,
+                                            amsgrad=True)
+        )
+        self._test_basic_cases(
+            lambda weight, bias: optim.Adam(
+                self._build_params_dict(weight, bias, lr=1e-2),
+                lr=1e-3, amsgrad=True)
+        )
 
     def test_sparse_adam(self):
         self._test_rosenbrock_sparse(
             lambda params: optim.SparseAdam(params, lr=4e-2),
+            True
+        )
+        self._test_rosenbrock_sparse(
+            lambda params: optim.SparseAdam(params, lr=4e-2, amsgrad=True),
             True
         )
 

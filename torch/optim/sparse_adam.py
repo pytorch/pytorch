@@ -17,13 +17,18 @@ class SparseAdam(Optimizer):
             running averages of gradient and its square (default: (0.9, 0.999))
         eps (float, optional): term added to the denominator to improve
             numerical stability (default: 1e-8)
+        amsgrad (boolean, optional): whether to use the AMSGrad variant of this
+            algorithm from the paper `On the Convergence of Adam and Beyond`_
 
     .. _Adam\: A Method for Stochastic Optimization:
         https://arxiv.org/abs/1412.6980
+    .. _On the Convergence of Adam and Beyond:
+        https://openreview.net/forum?id=ryQu7f-RZ
     """
 
-    def __init__(self, params, lr=1e-3, betas=(0.9, 0.999), eps=1e-8):
-        defaults = dict(lr=lr, betas=betas, eps=eps)
+    def __init__(self, params, lr=1e-3, betas=(0.9, 0.999), eps=1e-8,
+                 amsgrad=False):
+        defaults = dict(lr=lr, betas=betas, eps=eps, amsgrad=amsgrad)
         super(SparseAdam, self).__init__(params, defaults)
 
     def step(self, closure=None):
@@ -44,6 +49,7 @@ class SparseAdam(Optimizer):
                 grad = p.grad.data
                 if not grad.is_sparse:
                     raise RuntimeError('SparseAdam does not support dense gradients, please consider Adam instead')
+                amsgrad = group['amsgrad']
 
                 state = self.state[p]
 
@@ -54,6 +60,9 @@ class SparseAdam(Optimizer):
                     state['exp_avg'] = torch.zeros_like(p.data)
                     # Exponential moving average of squared gradient values
                     state['exp_avg_sq'] = torch.zeros_like(p.data)
+                    if amsgrad:
+                        # Maintains max of all exp. moving avg. of sq. grad. values
+                        state['max_exp_avg_sq'] = torch.zeros_like(p.data)
 
                 state['step'] += 1
 
@@ -69,6 +78,9 @@ class SparseAdam(Optimizer):
                     return constructor(grad_indices, values, size)
 
                 exp_avg, exp_avg_sq = state['exp_avg'], state['exp_avg_sq']
+                if amsgrad:
+                    max_exp_avg_sq = state['max_exp_avg_sq']
+                    old_max_exp_avg_sq_values = max_exp_avg_sq._sparse_mask(grad)._values()
                 beta1, beta2 = group['betas']
 
                 # Decay the first and second moment running average coefficient
@@ -83,7 +95,14 @@ class SparseAdam(Optimizer):
 
                 # Dense addition again is intended, avoiding another _sparse_mask
                 numer = exp_avg_update_values.add_(old_exp_avg_values)
-                denom = exp_avg_sq_update_values.add_(old_exp_avg_sq_values).sqrt_().add_(group['eps'])
+                exp_avg_sq_update_values.add_(old_exp_avg_sq_values)
+                if amsgrad:
+                    torch.max(old_max_exp_avg_sq_values, exp_avg_sq_update_values, out=old_max_exp_avg_sq_values)
+                    denom = old_max_exp_avg_sq_values.sqrt_().add_(group['eps'])
+                    max_exp_avg_sq = make_sparse(old_max_exp_avg_sq_values)
+                    del old_max_exp_avg_sq_values
+                else:
+                    denom = exp_avg_sq_update_values.sqrt_().add_(group['eps'])
                 del exp_avg_update_values, exp_avg_sq_update_values
 
                 bias_correction1 = 1 - beta1 ** state['step']
