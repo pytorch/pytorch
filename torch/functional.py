@@ -25,8 +25,7 @@ def split(tensor, split_size_or_sections, dim=0):
         dim += tensor.dim()
     dim_size = tensor.size(dim)
 
-    splits = torch.IntTensor([split_size_or_sections])
-    if splits.dim() == 1:
+    if isinstance(split_size_or_sections, int):
         split_size = split_size_or_sections
         num_splits = (dim_size + split_size - 1) // split_size
         last_split_size = split_size - (split_size * num_splits - dim_size)
@@ -37,9 +36,9 @@ def split(tensor, split_size_or_sections, dim=0):
                      in _range(0, num_splits))
 
     else:
-        if dim_size != torch.sum(splits):
+        if dim_size != sum(split_size_or_sections):
             raise ValueError("Sum of split sizes exceeds tensor dim")
-        split_indices = torch.cat((torch.zeros(1, 1).int(), splits), dim=1)
+        split_indices = torch.cat((torch.zeros(1, 1).int(), split_size_or_sections), dim=1)
         split_indices = torch.cumsum(split_indices, dim=1)[:, :-1].view(-1)
 
         return tuple(
