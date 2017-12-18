@@ -1,6 +1,5 @@
 import torch
 import random
-import numpy as np
 
 
 class Sampler(object):
@@ -121,14 +120,14 @@ class EnlargeLabelShufflingSampler(Sampler):
             tmp = y
         count_of_each_label.append(count)
         # get the largest count among all classes. used to enlarge every class to the same amount
-        largest = int(np.amax(count_of_each_label))
+        largest = max(count_of_each_label)
         self.count_of_each_label = count_of_each_label
         self.enlarged_index = []
 
         # preidx used for find the mapping beginning of arg "sorted_labels"
         preidx = 0
         for x in range(len(self.count_of_each_label)):
-            idxes = np.remainder(torch.randperm(largest).numpy(), self.count_of_each_label[x]) + preidx
+            idxes = torch.remainder(torch.randperm(largest).numpy(), self.count_of_each_label[x]) + preidx
             for y in idxes:
                 self.enlarged_index.append(sorted_labels[y][0])
             preidx += int(self.count_of_each_label[x])
@@ -138,7 +137,7 @@ class EnlargeLabelShufflingSampler(Sampler):
         return iter(self.enlarged_index)
 
     def __len__(self):
-        return np.amax(self.count_of_each_label) * len(self.count_of_each_label)
+        return max(self.count_of_each_label) * len(self.count_of_each_label)
 
 
 class BatchSampler(object):
