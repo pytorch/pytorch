@@ -15,7 +15,8 @@ def split(tensor, split_size_or_sections, dim=0):
     Last chunk will be smaller if the tensor size along a given dimension
     is not divisible by ``split_size``.
     If ``split_size_or_sections`` is a list, then ``tensor`` will be split
-    into chunks of the specified sizes.
+    into ``len(split_size_or_sections)`` chunks with sizes in ``dim`` according
+    to ``split_size_or_sections``.
 
     Arguments:
         tensor (Tensor): tensor to split.
