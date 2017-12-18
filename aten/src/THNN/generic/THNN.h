@@ -34,14 +34,17 @@ TH_API void THNN_(BCECriterion_updateOutput)(
           THTensor *target,
           THTensor *output,
           bool sizeAverage,
-          THTensor *weights);          // [OPTIONAL]
+          THTensor *weights,           // [OPTIONAL]
+          bool reduce);
 TH_API void THNN_(BCECriterion_updateGradInput)(
           THNNState *state,
           THTensor *input,
           THTensor *target,
+          THTensor *gradOutput,
           THTensor *gradInput,
           bool sizeAverage,
-          THTensor *weights);          // [OPTIONAL]
+          THTensor *weights,           // [OPTIONAL]
+          bool reduce);
 
 TH_API void THNN_(ClassNLLCriterion_updateOutput)(
           THNNState *state,            // library's state
