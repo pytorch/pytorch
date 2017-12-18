@@ -4,7 +4,7 @@ import torch
 import torch.cuda.nccl as nccl
 import torch.cuda
 
-from common import TestCase, run_tests
+from common import TestCase, run_tests, IS_WINDOWS
 
 nGPUs = torch.cuda.device_count()
 if nGPUs == 0:
@@ -14,7 +14,7 @@ if nGPUs == 0:
 
 class TestNCCL(TestCase):
 
-    @unittest.skipIf(sys.platform == "win32", "NCCL doesn't support Windows")
+    @unittest.skipIf(IS_WINDOWS, "NCCL doesn't support Windows")
     def test_unique_id(self):
         uid = nccl.unique_id()
         self.assertIsInstance(uid, bytes)
