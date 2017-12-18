@@ -27,6 +27,7 @@ namespace at {
 class Context;
 struct Storage;
 struct Generator;
+struct Allocator;
 
 // Note [Empty versus 0-dim tensors]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -64,6 +65,7 @@ struct AT_API Type {
   virtual std::unique_ptr<Storage> storage() const = 0;
   virtual std::unique_ptr<Storage> storage(size_t size) const = 0;
   virtual std::unique_ptr<Storage> storageFromBlob(void * data, int64_t size, const std::function<void(void*)> & deleter=noop_deleter) const = 0;
+  virtual std::unique_ptr<Storage> storageWithAllocator(int64_t size, std::unique_ptr<Allocator> allocator) const = 0;
   virtual std::unique_ptr<Generator> generator() const = 0;
   virtual Tensor unsafeTensorFromTH(void * th_pointer, bool retain) const = 0;
   virtual std::unique_ptr<Storage> unsafeStorageFromTH(void * th_pointer, bool retain) const = 0;
@@ -81,8 +83,10 @@ struct AT_API Type {
   Tensor & copy_(Tensor & self, const Tensor & src, bool async=false) const;
   virtual Tensor & s_copy_(Tensor & self, const Tensor & src, bool async) const = 0;
 
-  Tensor tensorFromBlob(void * data, IntList sizes, const std::function<void(void*)> & deleter=noop_deleter);
-  Tensor tensorFromBlob(void * data, IntList sizes, IntList strides, const std::function<void(void*)> & deleter=noop_deleter);
+  Tensor tensorFromBlob(void * data, IntList sizes, const std::function<void(void*)> & deleter=noop_deleter) const;
+  Tensor tensorFromBlob(void * data, IntList sizes, IntList strides, const std::function<void(void*)> & deleter=noop_deleter) const;
+  Tensor tensorWithAllocator(IntList sizes, std::unique_ptr<Allocator> allocator) const;
+  Tensor tensorWithAllocator(IntList sizes, IntList strides, std::unique_ptr<Allocator> allocator) const;
   Tensor scalarTensor(Scalar s) const;
 
   bool operator==(const Type& other) const;

@@ -67,6 +67,8 @@
 
 - func: permute(Tensor self, IntList dims) -> Tensor
 
+- func: pin_memory(Tensor self) -> Tensor
+
 - func: expand(Tensor self, IntList size) -> Tensor
 
 - func: squeeze(Tensor self) -> Tensor
