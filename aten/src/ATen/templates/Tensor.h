@@ -51,7 +51,7 @@ struct Tensor : public detail::TensorBase {
       Tensor(rhs).swap(*this);
       return *this;
   }
-  
+
   Tensor & operator=(Tensor const & rhs) && {
     return assign_(rhs);
   }
@@ -76,7 +76,7 @@ struct Tensor : public detail::TensorBase {
     return pImpl->storage();
   }
   inline Tensor toType(const Type & t) const;
-  inline Tensor & copy_(const Tensor & src);
+  inline Tensor & copy_(const Tensor & src, bool async=false);
   inline Tensor toType(ScalarType t) const;
   inline Tensor toBackend(Backend b) const;
 

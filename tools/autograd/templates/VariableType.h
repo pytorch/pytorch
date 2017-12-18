@@ -28,6 +28,7 @@ struct VariableType final : public at::Type {
   virtual std::unique_ptr<at::Storage> storage() const override;
   virtual std::unique_ptr<at::Storage> storage(size_t size) const override;
   virtual std::unique_ptr<at::Storage> storageFromBlob(void * data, int64_t size, const std::function<void(void*)> & deleter) const override;
+  virtual std::unique_ptr<Storage> storageWithAllocator(int64_t size, std::unique_ptr<at::Allocator> allocator) const override;
   virtual std::unique_ptr<at::Generator> generator() const override;
   virtual const char * toString() const override;
   virtual at::TypeID ID() const override;
@@ -38,13 +39,14 @@ struct VariableType final : public at::Type {
   virtual std::unique_ptr<at::Storage> unsafeStorageFromTH(void * th_pointer, bool retain) const override;
   virtual at::Tensor unsafeTensorFromTH(void * th_pointer, bool retain) const override;
 
-  virtual void s_copy(const Tensor & src, Tensor & dst) const override;
+  virtual Tensor & s_copy_(Tensor & self, const Tensor & src, bool async) const override;
   ${type_derived_method_declarations}
 
 private:
   // checks that t is actually a Variable with the given expected_type
   static Variable & checked_cast(const Type & expected_type, const Tensor & t, const char * name, int pos);
   at::Tensor & unpack(const Tensor & t, const char * name, int pos) const;
+  at::SparseTensor unpack(SparseTensor t, const char * name, int pos) const;
   at::Tensor & unpack_long(const Tensor & t, const char * name, int pos) const;
   at::Tensor & unpack_byte(const Tensor & t, const char * name, int pos) const;
   at::Tensor & unpack_any(const Tensor & t, const char * name, int pos) const;

@@ -1277,6 +1277,15 @@ class TestAutograd(TestCase):
             if sys.version_info[0] == 2:
                 self._test_scalar_conversions(lambda x: x.cuda(), lambda x: long(x))
 
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA unavailable")
+    def test_pin_memory(self):
+        x = Variable(torch.randn(2, 2), requires_grad=True)
+        self.assertEqual(x, x.pin_memory())
+        self.assertIsNot(x, x.pin_memory())
+        self.assertTrue(x.pin_memory().requires_grad)
+        gradcheck(lambda x: x.pin_memory(), [x])
+        gradgradcheck(lambda x: x.pin_memory(), [x])
+
     def test_isolated_node(self):
         x = Variable(torch.randn(5, 5), requires_grad=True)
         y = Variable(torch.randn(5, 5), requires_grad=True)

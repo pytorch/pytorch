@@ -21,7 +21,11 @@ auto CopyBackwards::apply(const variable_list& grads) -> variable_list {
   }
   if (should_compute_output(1)) {
     AutoGPU autoGPU(src_device);
-    grad_inputs[1] = grad.toType(*src_type);
+    if (grad.is_cuda() && grad.get_device() != src_device) {
+      grad_inputs[1] = src_type->copy(grad);
+    } else {
+      grad_inputs[1] = grad.toType(*src_type);
+    }
   }
   return grad_inputs;
 };

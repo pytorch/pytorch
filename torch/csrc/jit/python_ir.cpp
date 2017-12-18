@@ -133,6 +133,7 @@ void initPythonIRBindings(PyObject * module_) {
     .NS(hasUses)
     .NS(eraseOutput)
     .NS(addOutput)
+    .NS(scopeName)
 
 #define AS(name) def(#name,&Attributes<Node> :: name)
     // methods from Attributes

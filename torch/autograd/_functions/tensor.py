@@ -22,27 +22,6 @@ class Type(Function):
                 return grad_output.type(ctx.input_type), None
 
 
-class CudaTransfer(Function):
-
-    @staticmethod
-    def forward(ctx, i, device=None, async=False):
-        ctx.source_device = -1 if not i.is_cuda else i.get_device()
-        ctx.source_was_cuda = i.is_cuda
-        if device is not None:
-            return i.cuda(device, async=async)
-        else:
-            return i.cuda(async=async)
-
-    @staticmethod
-    def backward(ctx, grad_output):
-        if ctx.source_device != -1:
-            return grad_output.cuda(ctx.source_device), None, None
-        elif ctx.source_was_cuda:
-            return grad_output, None, None
-        else:
-            return grad_output.cpu(), None, None
-
-
 # TODO: deprecate this
 class Resize(Function):
 

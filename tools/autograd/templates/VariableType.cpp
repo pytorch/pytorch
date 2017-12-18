@@ -32,6 +32,7 @@ namespace torch { namespace autograd {
 // don't want to make the codegen do the dispatch manually)
 static void setattr(jit::Node* n, jit::Symbol name, int64_t v)             { n->i_(name, v); }
 static void setattr(jit::Node* n, jit::Symbol name, const at::Scalar& v)   { n->t_(name, v.toTensor()); }
+static void setattr(jit::Node* n, jit::Symbol name, SparseTensor s)        { n->t_(name, s.tref); }
 static void setattr(jit::Node* n, jit::Symbol name, const at::IntList& v)  { n->is_(name, v); }
 static void setattr(jit::Node* n, jit::Symbol name, bool v)                { n->i_(name, v); }
 static void setattr(jit::Node* n, jit::Symbol name, double v)              { n->f_(name, v); }
@@ -65,6 +66,9 @@ std::unique_ptr<Storage> VariableType::storageFromBlob(void * data, int64_t size
 }
 std::unique_ptr<Storage> VariableType::unsafeStorageFromTH(void * th_pointer, bool retain) const {
   return baseType->unsafeStorageFromTH(th_pointer, retain);
+}
+std::unique_ptr<Storage> VariableType::storageWithAllocator(int64_t size, std::unique_ptr<Allocator> allocator) const {
+  return baseType->storageWithAllocator(size, std::move(allocator));
 }
 Tensor VariableType::unsafeTensorFromTH(void * th_pointer, bool retain) const {
   return make_variable(baseType->unsafeTensorFromTH(th_pointer, retain), false);
@@ -107,6 +111,11 @@ Variable & VariableType::checked_cast(const Type & type, const Tensor & t, const
 
 Tensor & VariableType::unpack(const Tensor & t, const char * name, int pos) const {
   return checked_cast(*this, t, name, pos).data();
+}
+
+SparseTensor VariableType::unpack(SparseTensor t, const char * name, int pos) const {
+  auto backend = is_cuda() ? kSparseCUDA : kSparseCPU;
+  return SparseTensor(checked_cast(this->toBackend(backend), t.tref, name, pos).data());
 }
 
 Tensor & VariableType::unpack_long(const Tensor & t, const char * name, int pos) const {
@@ -318,6 +327,27 @@ static void set_flags(at::ArrayRef<Variable> vl, VarFlags flags, std::shared_ptr
   }
 }
 
+variable_list flatten(const TensorList& tensors) {
+  return cast_tensor_list(tensors);
+}
+
+variable_list flatten(const Tensor& x, const TensorList& y) {
+  std::vector<Variable> r;
+  r.reserve(1 + y.size());
+  r.emplace_back(x);
+  r.insert(r.end(), y.begin(), y.end());
+  return r;
+}
+
+variable_list flatten(const Tensor& x, const TensorList& y, const Tensor& z) {
+  std::vector<Variable> r;
+  r.reserve(2 + y.size());
+  r.emplace_back(x);
+  r.insert(r.end(), y.begin(), y.end());
+  r.emplace_back(z);
+  return r;
+}
+
 std::vector<Tensor> as_tensor_list(std::vector<Variable> &vars) {
   std::vector<Tensor> tensors;
   for (auto& v : vars) {
@@ -335,26 +365,26 @@ static bool isFloatingPoint(ScalarType s) {
   return s == kFloat || s == kDouble || s == kHalf;
 }
 
-void VariableType::s_copy(const Tensor & src, Tensor & dst) const {
+Tensor & VariableType::s_copy_(Tensor & self, const Tensor & src, bool async) const {
   // TODO: once copy is exposed in Declarations.yaml we may be able to bind
   // it automatically
-  auto& src_ = unpack_any(src, "src", 0);
-  auto& dst_ = unpack(dst, "dst", 1);
-  check_inplace(dst);
+  auto& self_ = unpack(self, "self", 0);
+  auto& src_ = unpack_any(src, "src", 1);
+  check_inplace(self);
   std::shared_ptr<CopyBackwards> grad_fn;
-  auto flags = compute_flags({ dst, src });
-  flags.requires_grad &= isFloatingPoint(dst.type().scalarType());
+  auto flags = compute_flags({ self, src });
+  flags.requires_grad &= isFloatingPoint(self.type().scalarType());
   if (flags.requires_grad) {
-    // TODO: handle device movement
     grad_fn = std::make_shared<CopyBackwards>();
-    grad_fn->next_functions = compute_next_functions({ dst, src });
+    grad_fn->next_functions = compute_next_functions({ self, src });
     grad_fn->num_inputs = 1;
     grad_fn->src_type = &src.type();
     grad_fn->src_device = src.is_cuda() ? src.get_device() : -1;
   }
-  baseType->s_copy(src_, dst_);
-  increment_version(dst);
-  set_flags(static_cast<Variable&>(dst), flags, std::move(grad_fn), true);
+  baseType->s_copy_(self_, src_, async);
+  increment_version(self);
+  set_flags(static_cast<Variable&>(self), flags, std::move(grad_fn), true);
+  return self;
 }
 
 Tensor & VariableType::resize_(Tensor & self, IntList size) const {

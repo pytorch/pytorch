@@ -5,13 +5,18 @@ $th_headers
 #include "ATen/Storage.h"
 #include "ATen/Context.h"
 
+#include <memory>
+
 namespace at {
+
+struct Allocator;
 
 struct ${Storage} final : public Storage {
 public:
   explicit ${Storage}(Context* context);
   ${Storage}(Context* context, ${THStorage} *wrapped);
   ${Storage}(Context* context, std::size_t size);
+  ${Storage}(Context* context, std::size_t size, std::unique_ptr<Allocator> allocator);
   ${Storage}(Context* context,
     void * data, std::size_t size, const std::function<void(void*)> & deleter);
   virtual ~${Storage}();

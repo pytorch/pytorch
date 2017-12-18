@@ -20,7 +20,11 @@ struct InterpreterAutogradFunction : public autograd::Function {
                               const std::vector<StageDetails>& stage_details)
     : interp_(code)
     , stage_details_(stage_details)
-    , stage_(0) {}
+    , stage_(0) {
+      // stage 0 isn't run through the autograd, so we set this
+      // here just in case it is used
+      num_inputs = stage_details.at(0).input_flags.size();
+    }
 
   InterpreterAutogradFunction(InterpreterState interp,
                               const std::vector<StageDetails>& stage_details,
