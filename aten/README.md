@@ -244,7 +244,7 @@ differentation.
 
 #### Note [ATen preprocessor philosophy]
 
-ATen is defined to be simple to use, and one of the things this implies is
+ATen is designed to be simple to use, and one of the things this implies is
 that it should not be necessary to use preprocessor macros when using ATen;
 we would rather provide all symbols, even for functionality that is not
 available on the system ATen is running on.
