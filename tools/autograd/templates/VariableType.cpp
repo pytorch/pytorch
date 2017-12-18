@@ -382,7 +382,7 @@ Tensor & VariableType::s_copy_(Tensor & self, const Tensor & src, bool async) co
     grad_fn->src_type = &src.type();
     grad_fn->src_device = src.is_cuda() ? src.get_device() : -1;
   }
-  baseType->s_copy(self_, src_, async);
+  baseType->s_copy_(self_, src_, async);
   increment_version(self);
   rebase_history(static_cast<Variable&>(self), std::move(grad_fn));
   return self;
