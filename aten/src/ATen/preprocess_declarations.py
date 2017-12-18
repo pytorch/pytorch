@@ -86,7 +86,7 @@ def handle_outputs_taken_as_arguments(options):
 
     def is_nullable(arg):
         return (arg['type'] in {'THIntegerTensor*', 'THTensor*'} and
-                arg.get('default', '') in {'NULL', 'nullptr'})
+                arg.get('default', '') in {None, 'NULL', 'nullptr'})
 
     def should_generate_out_variant(option):
         if 'function' in option['variants']:

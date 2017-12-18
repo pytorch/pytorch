@@ -349,6 +349,7 @@ IMPLEMENT_STATELESS(geqrf)
 IMPLEMENT_STATELESS(orgqr)
 IMPLEMENT_STATELESS(ormqr)
 IMPLEMENT_STATELESS(btrifact)
+IMPLEMENT_STATELESS(btrifact_with_info)
 IMPLEMENT_STATELESS(btrisolve)
 IMPLEMENT_STATELESS(gt)
 IMPLEMENT_STATELESS(lt)
@@ -767,6 +768,7 @@ static PyMethodDef TorchMethods[] = {
   {"orgqr",           (PyCFunction)THPModule_orgqr,             METH_VARARGS | METH_KEYWORDS, NULL},
   {"ormqr",           (PyCFunction)THPModule_ormqr,             METH_VARARGS | METH_KEYWORDS, NULL},
   {"btrifact",        (PyCFunction)THPModule_btrifact,          METH_VARARGS | METH_KEYWORDS, NULL},
+  {"btrifact_with_info", (PyCFunction)THPModule_btrifact_with_info, METH_VARARGS | METH_KEYWORDS, NULL},
   {"btrisolve",       (PyCFunction)THPModule_btrisolve,         METH_VARARGS | METH_KEYWORDS, NULL},
 
   // Sparse functions

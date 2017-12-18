@@ -242,6 +242,18 @@ class Variable(_C._VariableBase):
             repeats = torch.Size(repeats)
         return Repeat.apply(self, repeats)
 
+    def btrifact(self, info=None, pivot=True):
+        if info is not None:
+            warnings.warn("info option in btrifact is deprecated and will be removed in v0.4, "
+                          "consider using btrifact_with_info instead")
+            factorization, pivots, _info = super(Variable, self).btrifact_with_info(pivot=pivot)
+            if not isinstance(info, Variable) or info.type() != _info.type():
+                raise ValueError('btrifact expects info to be a Variable of IntTenor')
+            info.data.copy_(_info.data)
+            return factorization, pivots
+        else:
+            return super(Variable, self).btrifact(pivot=pivot)
+
     def cumprod(self, dim):
         return Cumprod.apply(self, dim)
 
