@@ -33,6 +33,7 @@ def create_predict_net(predictor_export_meta):
     net.Proto().external_input.extend(
         predictor_export_meta.inputs + predictor_export_meta.parameters)
     net.Proto().external_output.extend(predictor_export_meta.outputs)
+    net.Proto().arg.extend(predictor_export_meta.predict_net.arg)
     if predictor_export_meta.net_type is not None:
         net.Proto().type = predictor_export_meta.net_type
     if predictor_export_meta.num_workers is not None:
