@@ -1172,6 +1172,16 @@ class TestAutograd(TestCase):
         view = x.narrow(0, 1, 4)
         self.assertRaisesRegex(RuntimeError, 'view', lambda: view.detach_())
 
+    def test_detach_base(self):
+        "detaching base does not detach view"
+        x = Variable(torch.randn(10, 10), requires_grad=True)
+        view = x.narrow(0, 1, 4)
+        x.detach_()
+        self.assertFalse(x.requires_grad)
+        self.assertTrue(view.requires_grad)
+        self.assertIsNotNone(view.grad_fn)
+        self.assertIs(view._base, x)
+
     def _test_type_conversion_backward(self, t, ):
         fvar = Variable(t(torch.randn(5, 5).float()), requires_grad=True)
         fvar.double().sum().backward()
