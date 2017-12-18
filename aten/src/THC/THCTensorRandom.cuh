@@ -46,7 +46,7 @@ multinomialAliasDrawKernel(int size, int64_t *output, int64_t *J, T *q, int64_t 
     T bern_uniform = bernoulli[idx];
     int _mask = (int) THCNumerics<T>::lt(bern_uniform, q[rand_ind]);
     output[idx] = J[rand_ind]*(1 -_mask) + (rand_ind+1L) * _mask;
-  }  
+  }
 }
 
 template <typename T>
@@ -94,15 +94,19 @@ template <typename T>
 __global__ void renormRowsL1(T* dist, long rows, long cols) {
   extern __shared__  unsigned char my_smem[];
   T *smem = reinterpret_cast<T *>(my_smem);
-
+  T zero = ScalarConvert<int, T>::to(0);
+  T val;
   for (int64_t row = blockIdx.x; row < rows; row += gridDim.x) {
     T sum = ScalarConvert<int, T>::to(0);
     for (int64_t col = threadIdx.x; col < cols; col += blockDim.x) {
-      sum = THCNumerics<T>::add(sum, dist[row * cols + col]);
+      val = dist[row * cols + col];
+      assert(THCNumerics<T>::ge(val, zero));
+      sum = THCNumerics<T>::add(sum, val);
     }
 
-    sum = reduceBlock(smem, blockDim.x, sum, ReduceAdd<T, T>(), ScalarConvert<int, T>::to(0));
+    sum = reduceBlock(smem, blockDim.x, sum, ReduceAdd<T, T>(), zero);
     if (threadIdx.x == 0) {
+      assert(THCNumerics<T>::gt(sum, zero));
       smem[0] = sum;
     }
     __syncthreads();
@@ -169,10 +173,11 @@ sampleMultinomialOnce(int64_t* dest,
     // Each block handles one distribution
     // First pass, find the total sum of the distribution
     AccT sum = accZero;
+    T val;
     for (int cat = threadIdx.x; cat < categories; cat += blockDim.x) {
-      sum = THCNumerics<AccT>::add(
-        sum,
-        ScalarConvert<T, AccT>::to(dist[curDist * categories + cat]));
+      val = dist[curDist * categories + cat];
+      assert(THCNumerics<T>::ge(val, zero));
+      sum = THCNumerics<AccT>::add(sum, ScalarConvert<T, AccT>::to(val));
     }
 
     // threadIdx.x == 0 has the sum value from this
@@ -182,6 +187,7 @@ sampleMultinomialOnce(int64_t* dest,
     if (threadIdx.x == 0) {
       // Make sure the sum of our distribution didn't overflow
       assert(!isinf(sum));
+      assert(THCNumerics<AccT>::gt(sum, accZero));
 
       asmem[0] = sum;
       smem[0] = sampled[curDist];
