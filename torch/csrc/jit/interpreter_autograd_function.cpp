@@ -55,7 +55,7 @@ autograd::variable_list InterpreterAutogradFunction::apply(
     // expects a defined tensor, then we have to give it one.
     // Undefined tensors are used as stand-ins for zero tensors, so
     // we create a zero-filled tensor of the right size
-    if(traced_flags.defined && !actual_flags.defined) {
+    if(!actual_flags.defined) {
       // [Temporary workaround for variants] until tracer produces all variants:
       // This case appears commonly when you have a function
       // x, y = fn(z)
@@ -64,7 +64,11 @@ autograd::variable_list InterpreterAutogradFunction::apply(
       // then in the cases where you don't use it, the grad_y input in stage 1
       // will be undefined. To ensure we can continue, we create a 0 gradient,
       // using trace information to figure out what shape it should be
-      tinputs.push_back(zeroTensorWithType(interp_.tensorTypeForInput(i)));
+      if(traced_flags.defined) {
+        tinputs.push_back(zeroTensorWithType(interp_.tensorTypeForInput(i)));
+      } else {
+        tinputs.push_back(at::Tensor());
+      }
     } else {
       tinputs.push_back(inputs[i].data());
     }
