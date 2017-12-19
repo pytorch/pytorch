@@ -27,7 +27,7 @@ from caffe2.python.modeling.parameter_sharing import (
 from caffe2.python.optimizer import get_param_device
 from caffe2.python.layers import layers
 from caffe2.proto import caffe2_pb2
-from future.utils import viewitems
+from future.utils import viewitems, viewvalues
 
 import logging
 import numpy as np
@@ -95,13 +95,12 @@ class LayerModelHelper(model_helper.ModelHelper):
             (name, value)
         )
 
-    def add_global_constant(self, name, array=None, dtype=None,
-                            initializer=None):
-        # This is global namescope for constants. They will be created in all
-        # init_nets and there should be very few of them.
-        assert name not in self.global_constants
-        self.global_constants[name] = self.net.NextBlob(name)
-
+    @staticmethod
+    def _get_global_constant_initializer_op(
+        blob_name, array=None, dtype=None, initializer=None
+    ):
+        # to add a global constant to model, one first need to get the
+        # initializer
         if array is not None:
             assert initializer is None,\
                 "Only one from array and initializer should be specified"
@@ -124,28 +123,65 @@ class LayerModelHelper(model_helper.ModelHelper):
                 op_name = 'GivenTensorFill'
 
             def initializer(blob_name):
-                return core.CreateOperator(op_name,
-                                           [],
-                                           blob_name,
-                                           shape=array.shape,
-                                           values=array.flatten().tolist()
-                                           )
+                return core.CreateOperator(
+                    op_name, [],
+                    blob_name,
+                    shape=array.shape,
+                    values=array.flatten().tolist()
+                )
         else:
             assert initializer is not None
+        initializer_op = initializer(blob_name)
+        return initializer_op
 
-        self.global_constant_initializers.append(
-            initializer(self.global_constants[name]))
-        return self.global_constants[name]
+    def add_global_constant(
+        self, name, array=None, dtype=None, initializer=None
+    ):
+        # This is global namescope for constants. They will be created in all
+        # init_nets and there should be very few of them.
+        assert name not in self.global_constants, \
+            "%s already added in global_constants" % name
+        blob_name = self.net.NextBlob(name)
+        self.global_constants[name] = blob_name
+        initializer_op = LayerModelHelper._get_global_constant_initializer_op(
+            blob_name, array, dtype, initializer
+        )
+        assert blob_name not in self.global_constant_initializers, \
+            "there is already a initializer op associated with blob %s" % \
+            blob_name
+        self.global_constant_initializers[blob_name] = initializer_op
+        return blob_name
+
+    def maybe_add_global_constant(self, name, *args, **kwargs):
+        # To ad hoc add new global constants without duplication
+        # if the name was already registered in global_constants, it will not be
+        # added even if the intended value is different from its original value
+        if name in self.global_constants:
+            blob_name = self.global_constants[name]
+            initializer_op = \
+                LayerModelHelper._get_global_constant_initializer_op(
+                    blob_name, *args, **kwargs
+                )
+            # check if the original initializer is the same as the one intended
+            # now
+            assert initializer_op == \
+                self.global_constant_initializers[blob_name], \
+                "conflict initializers for global constant %s, " \
+                "previous %s, now %s" % (
+                    blob_name, str(initializer_op),
+                    str(self.global_constant_initializers[blob_name]))
+            return blob_name
+        return self.add_global_constant(name, *args, **kwargs)
 
     def _init_global_constants(self):
         self.global_constants = {}
-        self.global_constant_initializers = []
+        self.global_constant_initializers = {}
         self.add_global_constant('ONE', 1.0)
         self.add_global_constant('ZERO', 0.0)
         self.add_global_constant('ZERO_RANGE', [0, 0], dtype='int32')
 
     def _add_global_constants(self, init_net):
-        for initializer_op in self.global_constant_initializers:
+        for initializer_op in viewvalues(self.global_constant_initializers):
             init_net._net.op.extend([initializer_op])
 
     def create_init_net(self, name):
