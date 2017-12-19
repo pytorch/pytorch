@@ -6,25 +6,6 @@
 #include <TH/TH.h>
 #include <THS/THS.h>
 
-// macros for Windows compatibility
-#ifdef _WIN32
-#undef PyLong_FromLong
-#undef PyLong_AsLong
-#undef PyLong_FromUnsignedLong
-
-#define PyLong_FromLong         PyLong_FromLongLong
-#define PyLong_AsLong           PyLong_AsLongLong
-#define PyLong_FromUnsignedLong PyLong_FromUnsignedLongLong
-
-#ifdef PyInt_Check
-#undef PyInt_FromLong
-#undef PyInt_AsLong
-
-#define PyInt_FromLong          PyLong_FromLong
-#define PyInt_AsLong            PyLong_AsLong
-#endif
-#endif
-
 #include "THP_export.h"
 
 // Back-compatibility macros, Thanks to http://cx-oracle.sourceforge.net/
@@ -35,6 +16,17 @@
 #define PyInt_FromLong          PyLong_FromLong
 #define PyInt_AsLong            PyLong_AsLong
 #define PyInt_Type              PyLong_Type
+#endif
+
+// macros for Windows compatibility
+#ifdef _WIN32
+#define PyInt_FromInt64         PyLong_FromLongLong
+#define PyInt_AsInt64           PyLong_AsLongLong
+#define PyLong_FromUInt64       PyLong_FromUnsignedLongLong
+#else
+#define PyInt_FromInt64         PyInt_FromLong
+#define PyInt_AsInt64           PyInt_AsLong
+#define PyLong_FromUInt64       PyLong_FromUnsignedLong
 #endif
 
 // By default, don't specify library state (TH doesn't use one)

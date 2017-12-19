@@ -24,7 +24,8 @@ class ConnectionWrapper(object):
     def __getattr__(self, name):
         if 'conn' in self.__dict__:
             return getattr(self.conn, name)
-        raise AttributeError('no attribute: ' + name)
+        raise AttributeError("'{}' object has no attribute '{}'".format(
+            type(self).__name__, 'conn'))
 
 
 class Queue(multiprocessing.queues.Queue):
