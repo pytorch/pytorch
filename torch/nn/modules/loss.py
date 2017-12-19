@@ -1,3 +1,5 @@
+import warnings
+
 from torch.autograd import Variable
 import torch
 from .module import Module
@@ -189,11 +191,11 @@ class NLLLoss(_WeightedLoss):
 
 
 class NLLLoss2d(NLLLoss):
-    def __init__(self, *args, **kwargs):
-        raise RuntimeError(r"""NLLLoss2d was removed.
-              Please use NLLLoss instead as a drop-in replacement.
-              Please see http://pytorch.org/docs/master/nn.html#torch.nn.NLLLoss for details.
-        """)
+    def __init__(self, weight=None, size_average=True, ignore_index=-100, reduce=True):
+        warnings.warn("NLLLoss2d has been deprecated. "
+                      "Please use NLLLoss instead as a drop-in replacement and see "
+                      "http://pytorch.org/docs/master/nn.html#torch.nn.NLLLoss for more details.")
+        super(NLLLoss2d, self).__init__(weight, size_average, ignore_index, reduce)
 
 
 class PoissonNLLLoss(_Loss):
