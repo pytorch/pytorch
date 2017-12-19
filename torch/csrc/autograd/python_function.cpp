@@ -867,6 +867,7 @@ static void _prepare_grads(THPFunction *self, THPObjectPtr& raw_grads, bool is_g
 
   // Look for Nones and replace them with new buffers
   auto& grads_info = is_grad_output ? self->output_info : self->input_info;
+  TORCH_ASSERT(grads_info.size() == (size_t)num_grads);
   for (int i = 0; i < num_grads; i++) {
     PyObject *grad = PyTuple_GET_ITEM(raw_grads.get(), i);
     if (grad == Py_None) {
