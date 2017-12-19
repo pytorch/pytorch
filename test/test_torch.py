@@ -4785,6 +4785,7 @@ class TestTorch(TestCase):
             y = x.numpy()
             for i in range(sz):
                 self.assertEqual(x[i], y[i])
+            self.assertEqual(x.numpy_dtype(), y.dtype)
 
             # 1D > 0 storage offset
             xm = torch.randn(sz * 2).mul(255).type(tp)

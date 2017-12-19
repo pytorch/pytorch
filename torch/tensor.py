@@ -406,6 +406,9 @@ class _TensorBase(object):
     def numpy(self):
         return torch.autograd.Variable(self).numpy()
 
+    def numpy_dtype(self):
+        return torch.autograd.Variable(self).numpy_dtype()
+
     # Numpy array interface, to support `numpy.asarray(tensor) -> ndarray`
     def __array__(self, dtype=None):
         if dtype is None:
