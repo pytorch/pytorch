@@ -2276,6 +2276,7 @@
   name: zero_
   cname: zero
   return: self
+  aten_sparse: True
   arguments:
     - THTensor* self
 ]]
@@ -3869,6 +3870,26 @@
     - THTensor* self
 ]]
 [[
+  name: _standard_gamma
+  types:
+    - floating_point
+  backends:
+    - CPU
+  return: argument 0
+  variants:
+    - method
+    - function
+  options:
+    - cname: standard_gamma
+      arguments:
+        - arg: THTensor* output
+          output: True
+        - arg: THGenerator* generator
+          default: THPGenerator_TH_CData(THPDefaultGenerator)
+          kwarg_only: True
+        - THTensor* self
+]]
+[[
   name: tensor
   return: THTensor*
   cpu_half: True
@@ -3911,6 +3932,7 @@
   name: assign_
   cname: copy
   cpu_half: True
+  aten_sparse: True
   return: self
   arguments:
     - THTensor* self

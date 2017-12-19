@@ -384,15 +384,9 @@ class TestMultiprocessing(TestCase):
         self.assertFalse(p.is_alive())
 
     def test_variable_sharing(self):
-        configs = [
-            (True, False),
-            (False, False),
-            (False, True),
-        ]
-        for requires_grad, volatile in configs:
+        for requires_grad in [True, False]:
             var = Variable(torch.arange(1, 26).view(5, 5),
-                           requires_grad=requires_grad,
-                           volatile=volatile)
+                           requires_grad=requires_grad)
             self._test_autograd_sharing(var)
 
     def test_parameter_sharing(self):

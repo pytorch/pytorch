@@ -37,6 +37,7 @@ from .dirichlet import Dirichlet
 from .distribution import Distribution
 from .gamma import Gamma
 from .normal import Normal
+from .exponential import Exponential
 
 
-__all__ = ['Distribution', 'Bernoulli', 'Beta', 'Categorical', 'Dirichlet', 'Gamma', 'Normal']
+__all__ = ['Distribution', 'Bernoulli', 'Beta', 'Categorical', 'Dirichlet', 'Gamma', 'Normal', 'Exponential']

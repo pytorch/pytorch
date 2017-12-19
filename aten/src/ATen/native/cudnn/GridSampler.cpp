@@ -1,8 +1,31 @@
-#include "GridSampler.h"
+#include <ATen/ATen.h>
+#include <ATen/NativeFunctions.h>
+#include <ATen/Config.h>
 
-#include "Descriptors.h"
-#include "Types.h"
-#include "Utils.h"
+#if !AT_CUDNN_ENABLED()
+
+namespace at { namespace native {
+
+// See Note [ATen preprocessor philosophy]
+
+Tensor cudnn_grid_sampler_forward(
+    const Tensor& input_t, const Tensor& grid_t) {
+  throw std::runtime_error("cudnn_grid_sampler_forward: ATen not compiled with cuDNN support");
+}
+
+std::tuple<Tensor, Tensor> cudnn_grid_sampler_backward(
+    const Tensor& input_t, const Tensor& grid_t,
+    const Tensor& grad_output_t) {
+  throw std::runtime_error("cudnn_grid_sampler_backward: ATen not compiled with cuDNN support");
+}
+
+}}
+
+#else // AT_CUDNN_ENABLED
+
+#include <ATen/cudnn/Descriptors.h>
+#include <ATen/cudnn/Types.h>
+#include <ATen/cudnn/Utils.h>
 
 #include <ATen/Check.h>
 
@@ -119,3 +142,5 @@ std::tuple<Tensor, Tensor> cudnn_grid_sampler_backward(
 }
 
 }}  // namespace at::cudnn
+
+#endif

@@ -254,7 +254,7 @@ variable_list Eval::apply(const variable_list& inputs) {
     outputs.resize(placeholders.size());
     auto& engine = python::PythonEngine::getDefaultEngine();
     auto exec_data = filterRoots(inputs);
-    engine.execute(exec_data.first, exec_data.second, true, getCallbacks(outputs, outputs_mutex));
+    engine.execute(exec_data.first, exec_data.second, true, true, getCallbacks(outputs, outputs_mutex));
   }
 
   auto bw_eval = newEval();

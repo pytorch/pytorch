@@ -13,9 +13,6 @@ class Parameter(Variable):
     the model. If there was no such class as :class:`Parameter`, these
     temporaries would get registered too.
 
-    Another difference is that parameters can't be volatile and that they
-    require gradient by default.
-
     Arguments:
         data (Tensor): parameter tensor.
         requires_grad (bool, optional): if the parameter requires gradient. See

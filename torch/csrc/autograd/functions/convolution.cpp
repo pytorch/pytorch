@@ -11,7 +11,7 @@
 #ifdef WITH_CUDA
 #include "THC/THC.h"
 #ifdef WITH_CUDNN
-#include <ATen/cudnn/cudnn-wrapper.h>
+#include "cudnn.h"
 #endif
 #endif
 

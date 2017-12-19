@@ -241,3 +241,17 @@ of this processing occurs, it's helpful to look at the generated file
 ATen methods in a uniform manner.  This file is utilized by PyTorch
 which further extends the ATen interface with support for automatic
 differentation.
+
+#### Note [ATen preprocessor philosophy]
+
+ATen is designed to be simple to use, and one of the things this implies is
+that it should not be necessary to use preprocessor macros when using ATen;
+we would rather provide all symbols, even for functionality that is not
+available on the system ATen is running on.
+
+This means that internally inside ATen, whereas other libraries might
+simply omit source files for, e.g., CuDNN, when CuDNN libraries are not
+installed, ATen will always build these source files, compiling stub
+functions for anything that is not available.  ATen never uses
+`AT_ENABLED_CUDA()` in header files, and all types in ATen's public API
+are always available no matter your build configuration.

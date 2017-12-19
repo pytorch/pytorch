@@ -1,31 +1,16 @@
 from numbers import Number
 
 import torch
-from torch.autograd import Variable, Function
+from torch.autograd import Function, Variable
 from torch.autograd.function import once_differentiable
 from torch.distributions.distribution import Distribution
-from torch.distributions.utils import digamma, expand_n, broadcast_all
-
-
-class _StandardGamma(Function):
-    @staticmethod
-    def forward(ctx, alpha):
-        x = torch._C._standard_gamma(alpha)
-        ctx.save_for_backward(x, alpha)
-        return x
-
-    @staticmethod
-    @once_differentiable
-    def backward(ctx, grad_output):
-        x, alpha = ctx.saved_tensors
-        grad = torch._C._standard_gamma_grad(x, alpha)
-        return grad_output * grad
+from torch.distributions.utils import broadcast_all, digamma
 
 
 def _standard_gamma(alpha):
     if not isinstance(alpha, Variable):
         return torch._C._standard_gamma(alpha)
-    return _StandardGamma.apply(alpha)
+    return alpha._standard_gamma()
 
 
 class Gamma(Distribution):

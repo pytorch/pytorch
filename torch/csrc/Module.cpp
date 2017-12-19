@@ -24,7 +24,7 @@
 #include "torch/csrc/jit/python_ir.h"
 
 #ifdef WITH_CUDNN
-#include <ATen/cudnn/cudnn-wrapper.h>
+#include "cudnn.h"
 #endif
 
 #define WITH_NUMPY_IMPORT_ARRAY
@@ -325,7 +325,6 @@ IMPLEMENT_STATELESS(bmm)
 IMPLEMENT_STATELESS(multinomial)
 IMPLEMENT_STATELESS(normal)
 IMPLEMENT_STATELESS(standard_gamma)
-IMPLEMENT_STATELESS(standard_gamma_grad)
 IMPLEMENT_STATELESS(dirichlet_grad)
 IMPLEMENT_STATELESS(bernoulli)
 IMPLEMENT_STATELESS(range)
@@ -710,7 +709,6 @@ static PyMethodDef TorchMethods[] = {
   {"multinomial",     (PyCFunction)THPModule_multinomial,       METH_VARARGS | METH_KEYWORDS, NULL},
   {"normal",          (PyCFunction)THPModule_normal,            METH_VARARGS | METH_KEYWORDS, NULL},
   {"_standard_gamma",  (PyCFunction)THPModule_standard_gamma,    METH_VARARGS | METH_KEYWORDS, NULL},
-  {"_standard_gamma_grad", (PyCFunction)THPModule_standard_gamma_grad, METH_VARARGS | METH_KEYWORDS, NULL},
   {"_dirichlet_grad", (PyCFunction)THPModule_dirichlet_grad,    METH_VARARGS | METH_KEYWORDS, NULL},
   {"bernoulli",       (PyCFunction)THPModule_bernoulli,         METH_VARARGS | METH_KEYWORDS, NULL},
   {"rand",            (PyCFunction)THPModule_rand,              METH_VARARGS | METH_KEYWORDS, NULL},
@@ -829,6 +827,7 @@ static PyObject* initModule() {
 
   THPUtils_addPyMethodDefs(methods, TorchMethods);
   THPUtils_addPyMethodDefs(methods, DataLoaderMethods);
+  THPUtils_addPyMethodDefs(methods, torch::autograd::python_functions());
 #ifdef WITH_CUDA
   THPUtils_addPyMethodDefs(methods, THCPModule_methods());
 #endif

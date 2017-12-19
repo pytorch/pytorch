@@ -8,6 +8,8 @@ namespace torch { namespace autograd {
 
 void initAutogradClosureBindings(PyObject* module);
 
+PyMethodDef* python_functions();
+
 }}
 
 #include "torch/csrc/autograd/python_function.h"

@@ -171,6 +171,9 @@
 - name: cumsum(Tensor self, int64_t dim)
   self: cumsum_backward(grad, dim)
 
+- name: conv_tbc(Tensor self, Tensor weight, Tensor bias, int64_t pad)
+  self, weight, bias: conv_tbc_backward(grad, self, weight, bias, pad)
+
 - name: data_ptr  # fallthrough
 
 - name: _det_with_svd(Tensor self)
@@ -652,6 +655,9 @@
 
 - name: _sparse_mask(Tensor self, SparseTensor mask)
   self: not_implemented("_sparse_mask")
+
+- name: _standard_gamma(Tensor self, Generator generator)
+  self: grad * self._standard_gamma_grad(output)
 
 # NN
 

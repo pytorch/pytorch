@@ -12,7 +12,6 @@ VariableFlags VariableFlags::of(const Variable& var) {
   if (var.defined()) {
     f.was_null = false;
     f.requires_grad = var.requires_grad();
-    f.is_volatile = var.is_volatile();
   } else {
     f.was_null = true;
   }
@@ -21,7 +20,7 @@ VariableFlags VariableFlags::of(const Variable& var) {
 
 bool VariableFlags::verify(const Variable& var) const {
   if (!var.defined()) return was_null;
-  return !was_null && requires_grad == var.requires_grad() && is_volatile == var.is_volatile();
+  return !was_null && requires_grad == var.requires_grad();
 }
 
 

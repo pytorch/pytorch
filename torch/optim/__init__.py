@@ -21,6 +21,7 @@ from . import lr_scheduler
 del adadelta
 del adagrad
 del adam
+del sparse_adam
 del adamax
 del asgd
 del sgd

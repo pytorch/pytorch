@@ -9,7 +9,7 @@ from .. import functional as F
 def _assert_no_grad(variable):
     assert not variable.requires_grad, \
         "nn criterions don't compute the gradient w.r.t. targets - please " \
-        "mark these variables as volatile or not requiring gradients"
+        "mark these variables as not requiring gradients"
 
 
 class _Loss(Module):

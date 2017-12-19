@@ -275,7 +275,7 @@ class TestNN(NNTestCase):
         d_params = []
         for p in module.parameters():
             if p.grad is None:
-                p._grad = Variable(p.data.clone().zero_(), volatile=True)
+                p._grad = torch.zeros_like(p)
             params.append(p.data)
             d_params.append(p.grad.data)
         return params, d_params
@@ -462,27 +462,20 @@ class TestNN(NNTestCase):
         self.assertEqual(module.weight.grad.data, module.weight.data.clone().zero_())
         self.assertEqual(module.bias.grad.data, module.bias.data.clone().zero_())
 
-        # non-volatile grad should be zeroed out of place
-        initial = module.weight.grad = Variable(torch.ones(5, 5))
-        module.zero_grad()
-        self.assertIsNot(module.weight.grad, initial)
-        self.assertEqual(module.weight.grad.data, torch.zeros(5, 5))
-
-    def test_volatile(self):
+    def test_no_grad(self):
         module = nn.Conv2d(2, 5, kernel_size=3, padding=1)
         input = torch.randn(1, 2, 10, 10)
         x = Variable(input)
-        y = Variable(input.clone(), volatile=True)
+        y = Variable(input.clone())
 
         output = module(x)
-        self.assertFalse(output.volatile)
         self.assertTrue(output.requires_grad)
         output.backward(torch.ones(1, 5, 10, 10))
 
-        vol_output = module(y)
-        self.assertTrue(vol_output.volatile)
-        self.assertFalse(vol_output.requires_grad)
-        self.assertRaises(RuntimeError, lambda: vol_output.backward(torch.ones(1, 5, 10, 10)))
+        with torch.no_grad():
+            output2 = module(y)
+            self.assertFalse(output2.requires_grad)
+            self.assertRaises(RuntimeError, lambda: output2.backward(torch.ones(1, 5, 10, 10)))
 
     def _test_dropout(self, cls, input):
         p = 0.2
@@ -1547,6 +1540,21 @@ class TestNN(NNTestCase):
         i = Variable(torch.randn(20, 10).float().cuda())
         out = dp.data_parallel(l, i, (0, 1))
         self.assertEqual(out, l(i))
+
+    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
+    def test_data_parallel_no_grad(self):
+        test = self
+
+        class Layer(nn.Module):
+            def forward(self, x):
+                test.assertFalse(torch.is_grad_enabled())
+                return x
+
+        l = Layer()
+        i = Variable(torch.randn(20, 10).float().cuda())
+        with torch.no_grad():
+            dp.data_parallel(l, i, (0, 1))
+        self.assertRaises(AssertionError, lambda: dp.data_parallel(l, i, (0, 1)))
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_data_parallel(self):
@@ -3345,6 +3353,13 @@ class TestNN(NNTestCase):
 
         _assertGradAndGradgradChecks(self, lambda x1, x2: F.bilinear(x1, x2, module.weight, module.bias),
                                      (input1_1, input2_1))
+
+    def test_conv_tbc(self):
+        inp = Variable(torch.randn(9, 4, 5), requires_grad=True)
+        weight = Variable(torch.randn(3, 5, 6), requires_grad=True)
+        bias = Variable(torch.randn(6), requires_grad=True)
+
+        gradcheck(lambda i, w, b, pad: F.conv_tbc(i, w, b, pad), (inp, weight, bias, 3))
 
     def run_conv_double_back_test(self, kern, stride, padding, chan_in, chan_out, batch_size,
                                   inp_size, dilation, no_weight, groups=1, use_cuda=False, use_bias=True):
