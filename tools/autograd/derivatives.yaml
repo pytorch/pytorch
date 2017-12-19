@@ -745,6 +745,21 @@
 - name: threshold_(Tensor self, Scalar threshold, Scalar value)
   self: threshold_backward(grad, output, threshold, value)
 
+- name: reflection_pad1d(Tensor self, IntList padding)
+  self: reflection_pad1d_backward(grad, self, padding)
+
+- name: reflection_pad2d(Tensor self, IntList padding)
+  self: reflection_pad2d_backward(grad, self, padding)
+
+- name: replication_pad1d(Tensor self, IntList padding)
+  self: replication_pad1d_backward(grad, self, padding)
+
+- name: replication_pad2d(Tensor self, IntList padding)
+  self: replication_pad2d_backward(grad, self, padding)
+
+- name: replication_pad3d(Tensor self, IntList padding)
+  self: replication_pad3d_backward(grad, self, padding)
+
 - name: adaptive_avg_pool2d(Tensor self, IntList output_size)
   self: adaptive_avg_pool2d_backward(grad, self)
 
@@ -885,6 +900,26 @@
 - name: rrelu_backward(Tensor grad_output, Tensor self, Scalar lower, Scalar upper, bool training, Tensor noise)
   grad_output: rrelu_backward(grad, self, lower, upper, training, noise)
   self: zeros_like(grad)
+
+- name: reflection_pad1d_backward(Tensor grad_output, Tensor self, IntList padding)
+  grad_output: reflection_pad1d(grad, padding)
+  self: zeros_like(self)
+
+- name: reflection_pad2d_backward(Tensor grad_output, Tensor self, IntList padding)
+  grad_output: reflection_pad2d(grad, padding)
+  self: zeros_like(self)
+
+- name: replication_pad1d_backward(Tensor grad_output, Tensor self, IntList padding)
+  grad_output: replication_pad1d(grad, padding)
+  self: zeros_like(self)
+
+- name: replication_pad2d_backward(Tensor grad_output, Tensor self, IntList padding)
+  grad_output: replication_pad2d(grad, padding)
+  self: zeros_like(self)
+
+- name: replication_pad3d_backward(Tensor grad_output, Tensor self, IntList padding)
+  grad_output: replication_pad3d(grad, padding)
+  self: zeros_like(self)
 
 - name: smooth_l1_loss_backward(Tensor grad_output, Tensor self, Tensor target, bool size_average, bool reduce)
   grad_output: smooth_l1_loss_double_backward_grad_output(grad, grad_output, self, target, size_average, reduce)

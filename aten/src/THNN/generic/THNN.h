@@ -1559,31 +1559,31 @@ TH_API void THNN_(SpatialReflectionPadding_updateOutput)(
           THNNState *state,
           THTensor *input,
           THTensor *output,
-          int pad_l, int pad_r,
-          int pad_t, int pad_b);
+          int pad_left, int pad_right,
+          int pad_top, int pad_bottom);
 
 TH_API void THNN_(SpatialReflectionPadding_updateGradInput)(
           THNNState *state,
           THTensor *input,
           THTensor *gradOutput,
           THTensor *gradInput,
-          int pad_l, int pad_r,
-          int pad_t, int pad_b);
+          int pad_left, int pad_right,
+          int pad_top, int pad_bottom);
 
 TH_API void THNN_(SpatialReplicationPadding_updateOutput)(
           THNNState *state,
           THTensor *input,
           THTensor *output,
-          int pad_l, int pad_r,
-          int pad_t, int pad_b);
+          int pad_left, int pad_right,
+          int pad_top, int pad_bottom);
 
 TH_API void THNN_(SpatialReplicationPadding_updateGradInput)(
           THNNState *state,
           THTensor *input,
           THTensor *gradOutput,
           THTensor *gradInput,
-          int pad_l, int pad_r,
-          int pad_t, int pad_b);
+          int pad_left, int pad_right,
+          int pad_top, int pad_bottom);
 
 TH_API void THNN_(FeatureLPPooling_updateOutput)(
           THNNState *state,
@@ -1609,18 +1609,18 @@ TH_API void THNN_(VolumetricReplicationPadding_updateOutput)(
           THNNState *state,
           THTensor *input,
           THTensor *output,
-          int pleft, int pright,
-          int ptop, int pbottom,
-          int pfront, int pback);
+          int pad_left, int pad_right,
+          int pad_top, int pad_bottom,
+          int pad_front, int pad_back);
 
 TH_API void THNN_(VolumetricReplicationPadding_updateGradInput)(
           THNNState *state,
           THTensor *input,
           THTensor *gradOutput,
           THTensor *gradInput,
-          int pleft, int pright,
-          int ptop, int pbottom,
-          int pfront, int pback);
+          int pad_left, int pad_right,
+          int pad_top, int pad_bottom,
+          int pad_front, int pad_back);
 
 TH_API void THNN_(VolumetricUpSamplingNearest_updateOutput)(
           THNNState *state,
@@ -1658,27 +1658,27 @@ TH_API void THNN_(TemporalReflectionPadding_updateOutput)(
           THNNState *state,
           THTensor *input,
           THTensor *output,
-          int pad_l, int pad_r);
+          int pad_left, int pad_right);
 
 TH_API void THNN_(TemporalReflectionPadding_updateGradInput)(
           THNNState *state,
           THTensor *input,
           THTensor *gradOutput,
           THTensor *gradInput,
-          int pad_l, int pad_r);
+          int pad_left, int pad_right);
 
 TH_API void THNN_(TemporalReplicationPadding_updateOutput)(
           THNNState *state,
           THTensor *input,
           THTensor *output,
-          int pad_l, int pad_r);
+          int pad_left, int pad_right);
 
 TH_API void THNN_(TemporalReplicationPadding_updateGradInput)(
           THNNState *state,
           THTensor *input,
           THTensor *gradOutput,
           THTensor *gradInput,
-          int pad_l, int pad_r);
+          int pad_left, int pad_right);
 
 
 #endif
