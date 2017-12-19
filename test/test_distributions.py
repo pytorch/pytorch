@@ -55,6 +55,10 @@ EXAMPLES = [
         {'alpha': Variable(torch.exp(torch.randn(2, 3)), requires_grad=True)},
         {'alpha': Variable(torch.exp(torch.randn(4)), requires_grad=True)},
     ]),
+    Example(Exponential, [
+        {'rate': Variable(torch.randn(5, 5).abs(), requires_grad=True)},
+        {'rate': Variable(torch.randn(1).abs(), requires_grad=True)},
+    ]),
     Example(Normal, [
         {
             'mean': Variable(torch.randn(5, 5), requires_grad=True),
@@ -516,6 +520,18 @@ class TestDistributionShapes(TestCase):
         self.tensor_sample_1 = torch.ones(3, 2)
         self.tensor_sample_2 = torch.ones(3, 2, 3)
 
+    def test_entropy_shape(self):
+        for Dist, params in EXAMPLES:
+            for i, param in enumerate(params):
+                dist = Dist(**param)
+                actual_shape = dist.entropy().size()
+                expected_shape = dist._batch_shape
+                if not expected_shape:
+                    expected_shape = torch.Size((1,))  # TODO Remove this once scalars are supported.
+                message = '{} example {}/{}, shape mismatch. expected {}, actual {}'.format(
+                    Dist.__name__, i, len(params), expected_shape, actual_shape)
+                self.assertEqual(actual_shape, expected_shape, message=message)
+
     def test_bernoulli_shape_scalar_params(self):
         bernoulli = Bernoulli(0.3)
         self.assertEqual(bernoulli._batch_shape, torch.Size())
@@ -611,19 +627,6 @@ class TestDistributionShapes(TestCase):
         self.assertEqual(normal.log_prob(self.tensor_sample_1).size(), torch.Size((3, 2)))
         self.assertRaises(ValueError, normal.log_prob, self.tensor_sample_2)
 
-<<<<<<< HEAD
-    def test_entropy_shape(self):
-        for Dist, params in EXAMPLES:
-            for i, param in enumerate(params):
-                dist = Dist(**param)
-                actual_shape = dist.entropy().size()
-                expected_shape = dist._batch_shape
-                if not expected_shape:
-                    expected_shape = torch.Size((1,))  # TODO Remove this once scalars are supported.
-                message = '{} example {}/{}, shape mismatch. expected {}, actual {}'.format(
-                    Dist.__name__, i, len(params), expected_shape, actual_shape)
-                self.assertEqual(actual_shape, expected_shape, message=message)
-=======
     def test_exponential_shape_scalar_param(self):
         expon = Exponential(1.)
         self.assertEqual(expon._batch_shape, torch.Size())
@@ -642,7 +645,6 @@ class TestDistributionShapes(TestCase):
         self.assertEqual(expon.sample((3, 2)).size(), torch.Size((3, 2, 2)))
         self.assertEqual(expon.log_prob(self.tensor_sample_1).size(), torch.Size((3, 2)))
         self.assertRaises(ValueError, expon.log_prob, self.tensor_sample_2)
->>>>>>> master
 
 
 if __name__ == '__main__':
