@@ -372,3 +372,12 @@ class TestDB(unittest.TestCase):
             self.assertEqual([str(blob) for blob in rec.field_blobs()],
                              [str('blob:' + name) for name in rec.field_names()])
             random.shuffle(columns)
+
+    def testStructGet(self):
+        net = core.Net('test_net')
+        s1 = schema.NewRecord(net, schema.Scalar(np.float32))
+        s2 = schema.NewRecord(net, schema.Scalar(np.float32))
+        t = schema.Tuple(s1, s2)
+        assert t.get('field_0', None) == s1
+        assert t.get('field_1', None) == s2
+        assert t.get('field_2', None) is None
