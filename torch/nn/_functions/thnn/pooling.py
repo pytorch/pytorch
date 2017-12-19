@@ -1,101 +1,13 @@
 from torch.autograd import Variable
-from torch.autograd.function import Function, once_differentiable
+from torch.autograd.function import Function
 from torch._thnn import type2backend
 
 from . import _all_functions
-from torch.nn.modules.utils import _single, _pair, _triple
+from torch.nn.modules.utils import _single
 
 
 # NB: Looking for MaxPool2d or AvgPool2d?  They're natively implemented by ATen.
 # Look at tools/autograd/derivatives.yaml
-
-
-class MaxPool1d(Function):
-
-    @staticmethod
-    def symbolic(g, input, kernel_size, stride=None, padding=0, dilation=1,
-                 ceil_mode=False):
-        from torch.onnx.symbolic import _unimplemented
-        if ceil_mode:
-            return _unimplemented("MaxPool1d", "ceil_mode")
-        if set(_single(dilation)) != {1}:
-            return _unimplemented("MaxPool1d", "dilation")
-        if stride is None:
-            stride = kernel_size
-        r = g.op("MaxPool", input,
-                 kernel_shape_i=_single(kernel_size),
-                 pads_i=_single(padding) * 2,
-                 strides_i=_single(stride))
-        return r, None
-
-    @staticmethod
-    def forward(ctx, input, kernel_size, stride=None, padding=0, dilation=1,
-                ceil_mode=False):
-        if (input.dim() != 3):
-            raise ValueError('expected 3D input (got {}D input)'
-                             .format(input.dim()))
-        ctx.kernel_size = kernel_size
-        ctx.stride = stride if stride is not None else kernel_size
-        ctx.pad = padding
-        ctx.dilation = dilation
-        ctx.ceil_mode = ceil_mode
-
-        input2d = input.unsqueeze(2)    # size = N*C*1*L
-        backend = type2backend[type(input)]
-        indices, output = input2d.new().long(), input2d.new()
-        backend.SpatialDilatedMaxPooling_updateOutput(backend.library_state,
-                                                      input2d, output, indices,
-                                                      ctx.kernel_size, 1,
-                                                      ctx.stride, 1,
-                                                      ctx.pad, 0,
-                                                      ctx.dilation, 1,
-                                                      ctx.ceil_mode)
-        indices = indices.squeeze(2)
-        output = output.squeeze(2)
-        ctx.save_for_backward(input, indices)
-        ctx.mark_non_differentiable(indices)
-        return output, indices
-
-    @staticmethod
-    def backward(ctx, grad_output, _indices_grad=None):
-        input, indices = ctx.saved_variables
-
-        grad_input = MaxPool1dBackward.apply(input, indices, grad_output, ctx.kernel_size, ctx.stride, ctx.pad,
-                                             ctx.dilation, ctx.ceil_mode)
-        return grad_input, None, None, None, None, None, None
-
-
-class MaxPool1dBackward(Function):
-
-    @staticmethod
-    def forward(ctx, input, indices, grad_output, kernel_size, stride, padding, dilation, ceil_mode):
-        ctx.kernel_size = kernel_size
-        ctx.stride = stride
-        ctx.pad = padding
-        ctx.dilation = dilation
-        ctx.ceil_mode = ceil_mode
-        input2d = input.unsqueeze(2)
-        indices2d = indices.unsqueeze(2)
-        grad_output2d = grad_output.unsqueeze(2)
-        grad_input = grad_output2d.new()
-        ctx.save_for_backward(indices)
-        backend = type2backend[type(input)]
-        backend.SpatialDilatedMaxPooling_updateGradInput(backend.library_state,
-                                                         input2d, grad_output2d, grad_input, indices2d,
-                                                         ctx.kernel_size, 1,
-                                                         ctx.stride, 1,
-                                                         ctx.pad, 0,
-                                                         ctx.dilation, 1,
-                                                         ctx.ceil_mode)
-        grad_input = grad_input.squeeze(2)
-        return grad_input
-
-    @staticmethod
-    def backward(ctx, ggI, ggIndices=None):
-        indices, = ctx.saved_variables
-        gI = Variable(ggI.data.new(ggI.size()).zero_())
-        ggO = ggI.gather(dim=2, index=indices)
-        return gI, None, ggO, None, None, None, None, None, None
 
 
 class FractionalMaxPool2d(Function):
@@ -297,8 +209,6 @@ class AdaptiveAvgPool1dBackward(Function):
         return gI, ggO, None, None
 
 
-_all_functions.append(MaxPool1d)
-_all_functions.append(MaxPool1dBackward)
 _all_functions.append(FractionalMaxPool2d)
 _all_functions.append(FractionalMaxPool2dBackward)
 _all_functions.append(AdaptiveMaxPool1d)
