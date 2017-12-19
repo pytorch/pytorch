@@ -5,6 +5,7 @@
 #include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/jit/tracer.h"
 #include "torch/csrc/jit/passes/dead_code_elimination.h"
+#include "torch/csrc/jit/passes/common_subexpression_elimination.h"
 #include "torch/csrc/jit/passes/peephole.h"
 #include "torch/csrc/jit/passes/graph_fuser.h"
 #include "torch/csrc/jit/passes/inplace_check.h"
@@ -80,6 +81,7 @@ struct CompiledFunction {
       if (fn_.optimize_) {
         PeepholeOptimize(complete_trace->graph);
         FuseGraph(complete_trace->graph);
+        EliminateCommonSubexpression(complete_trace->graph);
       }
       factory_ = std::make_shared<InterpreterFunctionFactory>(complete_trace.get());
       graph_ = complete_trace->graph;
