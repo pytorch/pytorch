@@ -2025,6 +2025,23 @@ class TestTorch(TestCase):
         self.assertEqual(x.slice(-2, 3, dim=1).data.tolist(), [[2], [6], [10], [14]])
         self.assertEqual(x.slice(0, -1, 2).data.tolist(), [[0, 1, 2, 3], [8, 9, 10, 11]])
 
+    def test_is_signed(self):
+        # TODO: remove the Variable wrapper once we merge Variable and Tensor
+        from torch.autograd import Variable
+        self.assertEqual(Variable(torch.IntTensor(5)).is_signed(), True)
+        self.assertEqual(Variable(torch.ByteTensor(5)).is_signed(), False)
+        self.assertEqual(Variable(torch.FloatTensor(5)).is_signed(), True)
+        self.assertEqual(Variable(torch.HalfTensor(10)).is_signed(), True)
+
+    @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
+    def test_is_signed_cuda(self):
+        # TODO: remove the Variable wrapper once we merge Variable and Tensor
+        from torch.autograd import Variable
+        self.assertEqual(Variable(torch.IntTensor(5).cuda()).is_signed(), True)
+        self.assertEqual(Variable(torch.ByteTensor(5).cuda()).is_signed(), False)
+        self.assertEqual(Variable(torch.FloatTensor(5).cuda()).is_signed(), True)
+        self.assertEqual(Variable(torch.HalfTensor(10).cuda()).is_signed(), True)
+
     @skipIfNoLapack
     def test_gesv(self):
         a = torch.Tensor(((6.80, -2.11, 5.66, 5.97, 8.23),
