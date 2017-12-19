@@ -42,3 +42,6 @@ class Beta(Distribution):
         self._validate_log_prob_arg(value)
         heads_tails = torch.stack([value, 1.0 - value], -1)
         return self._dirichlet.log_prob(heads_tails)
+
+    def entropy(self):
+        return self._dirichlet.entropy()

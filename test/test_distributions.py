@@ -26,6 +26,16 @@ EXAMPLES = [
         {'probs': Variable(torch.Tensor([0.3]), requires_grad=True)},
         {'probs': 0.3},
     ]),
+    Example(Beta, [
+        {
+            'alpha': Variable(torch.exp(torch.randn(2, 3)), requires_grad=True),
+            'beta': Variable(torch.exp(torch.randn(2, 3)), requires_grad=True),
+        },
+        {
+            'alpha': Variable(torch.exp(torch.randn(4)), requires_grad=True),
+            'beta': Variable(torch.exp(torch.randn(4)), requires_grad=True),
+        },
+    ]),
     Example(Categorical, [
         {'probs': Variable(torch.Tensor([[0.1, 0.2, 0.3], [0.5, 0.3, 0.2]]), requires_grad=True)},
         {'probs': Variable(torch.Tensor([[1.0, 0.0], [0.0, 1.0]]), requires_grad=True)},
@@ -39,6 +49,10 @@ EXAMPLES = [
             'alpha': Variable(torch.exp(torch.randn(1)), requires_grad=True),
             'beta': Variable(torch.exp(torch.randn(1)), requires_grad=True),
         },
+    ]),
+    Example(Dirichlet, [
+        {'alpha': Variable(torch.exp(torch.randn(2, 3)), requires_grad=True)},
+        {'alpha': Variable(torch.exp(torch.randn(4)), requires_grad=True)},
     ]),
     Example(Normal, [
         {
