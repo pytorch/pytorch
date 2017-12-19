@@ -959,6 +959,15 @@ class TestJit(TestCase):
         self.assertTrue("hits: 100" in info_str)
         self.assertTrue("stage 1" in info_str)
 
+    @unittest.expectedFailure
+    def test_index_trace(self):
+        x = Variable(torch.randn(4, 4), requires_grad=True)
+        trace, z = torch.jit.trace(lambda x: x[0], (x, ), nderivs=1)
+        z.sum().backward()
+        torch._C._jit_pass_lint(trace)
+        torch._C._jit_pass_dce(trace)
+        self.assertExpectedTrace(trace)
+
 
 if __name__ == '__main__':
     run_tests()
