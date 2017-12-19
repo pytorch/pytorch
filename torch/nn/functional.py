@@ -224,6 +224,19 @@ def conv_transpose3d(input, weight, bias=None, stride=1, padding=0,
     return f(input, weight, bias)
 
 
+def conv_tbc(input, weight, bias, pad=0):
+    r"""Applies a 1-dimensional sequence convolution over an input sequence.
+    Input and output dimensions are (Time, Batch, Channels) hence TBC.
+
+    Args:
+        input: input tensor of shape (sequence length x batch x channels)
+        weight: filter of shape (kernel width x input channels x output channels)
+        bias: bias of shape (output channels)
+        pad: number of timesteps to pad
+    """
+    return input.conv_tbc(weight, bias, pad)
+
+
 # Pooling
 def avg_pool1d(input, kernel_size, stride=None, padding=0,
                ceil_mode=False, count_include_pad=True):

@@ -376,3 +376,7 @@ def eq(g, self, other):
 
 def exp(g, self):
     return g.op("Exp", self)
+
+
+def conv_tbc(g, input, weight, bias, pad):
+    return g.op("ATen", input, weight, bias, operator_s="conv_tbc", pad_i=pad)
