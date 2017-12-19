@@ -168,8 +168,8 @@ OPERATOR_SCHEMA(ResizeNearest)
             output_width = floor(input_width * width_scale)
             output_height = floor(output_height * height_scale)
             )DOC")
-    .Input(0, "X", "1D input tensor")
-    .Output(0, "Y", "1D input tensor");
+    .Input(0, "X", "Input tensor")
+    .Output(0, "Y", "Output tensor");
 
 // Input: dY, output: dX
 OPERATOR_SCHEMA(ResizeNearestGradient)
