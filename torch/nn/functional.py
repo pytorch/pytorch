@@ -1627,21 +1627,21 @@ def pad(input, pad, mode='constant', value=0):
     elif input.dim() == 3:
         assert len(pad) == 2, '3D tensors expect 2 values for padding'
         if mode == 'reflect':
-            return _functions.thnn.ReflectionPad1d.apply(input, *pad)
+            return torch._C._nn.reflection_pad1d(input, pad)
         elif mode == 'replicate':
-            return _functions.thnn.ReplicationPad1d.apply(input, *pad)
+            return torch._C._nn.replication_pad1d(input, pad)
     elif input.dim() == 4:
         assert len(pad) == 4, '4D tensors expect 4 values for padding'
         if mode == 'reflect':
-            return _functions.thnn.ReflectionPad2d.apply(input, *pad)
+            return torch._C._nn.reflection_pad2d(input, pad)
         elif mode == 'replicate':
-            return _functions.thnn.ReplicationPad2d.apply(input, *pad)
+            return torch._C._nn.replication_pad2d(input, pad)
     elif input.dim() == 5:
         assert len(pad) == 6, '5D tensors expect 6 values for padding'
         if mode == 'reflect':
             raise NotImplementedError
         elif mode == 'replicate':
-            return _functions.thnn.ReplicationPad3d.apply(input, *pad)
+            return torch._C._nn.replication_pad3d(input, pad)
     else:
         raise NotImplementedError("Only 3D, 4D, 5D padding with non-constant padding are supported for now")
 
