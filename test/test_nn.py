@@ -3265,7 +3265,7 @@ class TestNN(NNTestCase):
         self.assertEqual(torch.ones(1, 1, 4), out_t.data)
 
         input = Variable(torch.randn(1, 1, 2), requires_grad=True)
-        self.assertTrue(gradcheck(lambda x: F.upsample(x, 4, mode='nearest'), (input,)))
+        gradcheck(lambda x: F.upsample(x, 4, mode='nearest'), [input])
 
     def test_upsamplingLinear1d(self):
         m = nn.Upsample(size=4, mode='linear')
@@ -3274,7 +3274,7 @@ class TestNN(NNTestCase):
         self.assertEqual(torch.ones(1, 1, 4), out_t.data)
 
         input = Variable(torch.randn(1, 1, 2), requires_grad=True)
-        self.assertTrue(gradcheck(lambda x: F.upsample(x, 4, mode='linear'), (input,)))
+        gradcheck(lambda x: F.upsample(x, 4, mode='linear'), (input,))
 
     def test_upsamplingNearest2d(self):
         m = nn.Upsample(size=4, mode='nearest')
@@ -3283,7 +3283,11 @@ class TestNN(NNTestCase):
         self.assertEqual(torch.ones(1, 1, 4, 4), out_t.data)
 
         input = Variable(torch.randn(1, 1, 2, 2), requires_grad=True)
-        self.assertTrue(gradcheck(lambda x: F.upsample(x, 4, mode='nearest'), (input,)))
+        self.assertEqual(
+            F.upsample(input, 4, mode='nearest'),
+            F.upsample(input, scale_factor=2, mode='nearest'))
+        gradcheck(lambda x: F.upsample(x, 4, mode='nearest'), [input])
+        gradgradcheck(lambda x: F.upsample(x, 4, mode='nearest'), [input])
 
     def test_upsamplingBilinear2d(self):
         m = nn.Upsample(size=4, mode='bilinear')
@@ -3292,7 +3296,7 @@ class TestNN(NNTestCase):
         self.assertEqual(torch.ones(1, 1, 4, 4), out_t.data)
 
         input = Variable(torch.randn(1, 1, 2, 2), requires_grad=True)
-        self.assertTrue(gradcheck(lambda x: F.upsample(x, 4, mode='bilinear'), (input,)))
+        gradcheck(lambda x: F.upsample(x, 4, mode='bilinear'), [input])
 
     def test_upsamplingNearest3d(self):
         m = nn.Upsample(size=4, mode='nearest')
@@ -3301,7 +3305,7 @@ class TestNN(NNTestCase):
         self.assertEqual(torch.ones(1, 1, 4, 4, 4), out_t.data)
 
         input = Variable(torch.randn(1, 1, 2, 2, 2), requires_grad=True)
-        self.assertTrue(gradcheck(lambda x: F.upsample(x, 4, mode='nearest'), (input,)))
+        gradcheck(lambda x: F.upsample(x, 4, mode='nearest'), [input])
 
     def test_upsamplingTrilinear3d(self):
         m = nn.Upsample(size=4, mode='trilinear')
@@ -3310,7 +3314,11 @@ class TestNN(NNTestCase):
         self.assertEqual(torch.ones(1, 1, 4, 4, 4), out_t.data)
 
         input = Variable(torch.randn(1, 1, 2, 2, 2), requires_grad=True)
-        self.assertTrue(gradcheck(lambda x: F.upsample(x, 4, mode='trilinear'), (input,)))
+        self.assertEqual(
+            F.upsample(input, (4, 4, 4), mode='trilinear'),
+            F.upsample(input, scale_factor=2, mode='trilinear'))
+        gradcheck(lambda x: F.upsample(x, 4, mode='trilinear'), [input])
+        gradgradcheck(lambda x: F.upsample(x, 4, mode='trilinear'), [input])
 
     def test_linear_broadcasting(self):
         m = nn.Linear(5, 8)

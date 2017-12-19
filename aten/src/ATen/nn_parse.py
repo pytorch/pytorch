@@ -99,6 +99,7 @@ ARGUMENT_MAPPINGS = {
     'p': 'padding',
     'o': 'output_size',
     'osize': 'output_size',
+    'isize': 'input_size',
     'dilation': 'dilation',
     'adj': 'output_padding',
     'a': 'output_padding',
@@ -107,6 +108,8 @@ ARGUMENT_MAPPINGS = {
 DIMENSION_OFFSET = {
     'width': -1,
     'height': -2,
+    'B': 0,
+    'C': 1,
     'W': -1,
     'H': -2,
     'T': -3,
@@ -128,16 +131,6 @@ SUBSTITUTIONS = {
 }
 
 
-def get_dimensionality(cname):
-    if 'Temporal' in cname:
-        return 1
-    elif 'Spatial' in cname:
-        return 2
-    elif 'Volumetric' in cname:
-        return 3
-    return None
-
-
 def camel_to_snake(name):
     # from https://stackoverflow.com/questions/1175208/elegant-python-function-to-convert-camelcase-to-snake-case
     s1 = re.sub('(.)([A-Z][a-z]+)', r'\1_\2', name)
@@ -146,7 +139,6 @@ def camel_to_snake(name):
 
 def get_thnn_args(thnn_function, params, inplace):
     params_by_name = {p['name']: p for p in params}
-    dimensionality = get_dimensionality(thnn_function.name)
 
     def arg_expr(prefix, suffix):
         # e.g kW, kH
@@ -158,7 +150,7 @@ def get_thnn_args(thnn_function, params, inplace):
             name = name + '_'
         index = DIMENSION_OFFSET[suffix]
         if index < 0:
-            index += dimensionality
+            index += param['size']
         expr = '{}[{}]'.format(name, index)
         return {'type': 'EXPRESSION', 'name': expr}
 
@@ -289,6 +281,12 @@ def backward_declaration(base, thnn_functions):
             del arg['output']
 
     arguments += unique_args([output_arguments(f) for f in thnn_functions])
+
+    if 'upsample' in base['name']:
+        # Add input_size as parameter to upsample backwards functions
+        # Note that input_size is 4-dim for upsample_xxx2d
+        size = 2 + int(re.search(r'(\d+)d', base['name']).group(1))
+        arguments.append({'type': 'IntList', 'name': 'input_size', 'size': size})
 
     def initialize_output_arg(arg):
         # the mask array<bool, N> specifies which return values to compute
