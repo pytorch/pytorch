@@ -902,23 +902,23 @@
   self: zeros_like(grad)
 
 - name: reflection_pad1d_backward(Tensor grad_output, Tensor self, IntList padding)
-  grad_output: reflection_pad1d_backward(grad, self, padding)
+  grad_output: reflection_pad1d(grad, padding)
   self: zeros_like(self)
 
 - name: reflection_pad2d_backward(Tensor grad_output, Tensor self, IntList padding)
-  grad_output: reflection_pad2d_backward(grad, self, padding)
+  grad_output: reflection_pad2d(grad, padding)
   self: zeros_like(self)
 
 - name: replication_pad1d_backward(Tensor grad_output, Tensor self, IntList padding)
-  grad_output: replication_pad1d_backward(grad, self, padding)
+  grad_output: replication_pad1d(grad, padding)
   self: zeros_like(self)
 
 - name: replication_pad2d_backward(Tensor grad_output, Tensor self, IntList padding)
-  grad_output: replication_pad2d_backward(grad, self, padding)
+  grad_output: replication_pad2d(grad, padding)
   self: zeros_like(self)
 
 - name: replication_pad3d_backward(Tensor grad_output, Tensor self, IntList padding)
-  grad_output: replication_pad3d_backward(grad, self, padding)
+  grad_output: replication_pad3d(grad, padding)
   self: zeros_like(self)
 
 - name: smooth_l1_loss_backward(Tensor grad_output, Tensor self, Tensor target, bool size_average, bool reduce)
