@@ -190,4 +190,19 @@ void checkAllDefined(CheckedFrom c, ArrayRef<TensorArg> ts) {
   }
 }
 
+void checkBackend(CheckedFrom c, const Tensor& t, Backend backend) {
+  if (t.type().backend() != backend) {
+    std::ostringstream oss;
+    oss << "Expected tensor to have " << toString(t.type().backend()) << " Backend, but got tensor with "
+        << toString(t.type().backend()) << " Backend "
+        << "(while checking arguments for )" << c << ")";
+  }
+}
+
+void checkBackend(CheckedFrom c, ArrayRef<Tensor> tensors, at::Backend backend) {
+  for (auto &t : tensors) {
+    checkBackend(c, t, backend);
+  }
+}
+
 }

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <sstream>
+#include "ATen/Check.h"
 
 namespace at {
 
@@ -32,24 +33,6 @@ namespace at {
  * dimensions can be merged for the purposes of APPLY, reducing the number of nested
  * loops.
  */
-
-static inline void check_correct_backend(const Tensor &t, unsigned int pos) {
-  if (t.type().backend() != Backend::CPU) {
-    runtime_error("Expected tensor at position %d to have CPU Backend, but has %s Backend",
-                  pos, toString(t.type().backend()));
-  }
-}
-
-static inline void check_correct_backend(const Tensor& t1, const Tensor &t2) {
-  check_correct_backend(t1, 1);
-  check_correct_backend(t2, 2);
-}
-
-static inline void check_correct_backend(const Tensor& t1, const Tensor &t2, const Tensor &t3) {
-  check_correct_backend(t1, 1);
-  check_correct_backend(t2, 2);
-  check_correct_backend(t3, 3);
-}
 
 // TODO: turn this macro into a proper template
 #define __ATH_TENSOR_APPLYX_PREAMBLE(TYPE, ATENSOR, DIM, ALLOW_CONTIGUOUS) \
@@ -154,13 +137,13 @@ static inline void check_correct_backend(const Tensor& t1, const Tensor &t2, con
     ATENSOR##_i = 0; \
   }
 
-template <typename CScalar, typename Op>
+template <typename scalar1, typename scalar2, typename Op>
 void CPU_tensor_apply2_dim(Tensor& tensor1, Tensor& tensor2, int64_t dim, Op op) {
-  check_correct_backend(tensor1, tensor2);
+  checkBackend("CPU_tensor_apply2", {tensor1, tensor2}, Backend::CPU);
   bool TH_TENSOR_APPLY_hasFinished = false;
   int64_t TH_TENSOR_dim_index = 0;
-  __ATH_TENSOR_APPLYX_PREAMBLE(CScalar, tensor1, dim, 1)
-  __ATH_TENSOR_APPLYX_PREAMBLE(CScalar, tensor2, dim, 1)
+  __ATH_TENSOR_APPLYX_PREAMBLE(scalar1, tensor1, dim, 1)
+  __ATH_TENSOR_APPLYX_PREAMBLE(scalar2, tensor2, dim, 1)
   auto t1_numel = tensor1.numel();
   auto t2_numel = tensor2.numel();
   if(t1_numel != t2_numel) {
@@ -189,23 +172,23 @@ void CPU_tensor_apply2_dim(Tensor& tensor1, Tensor& tensor2, int64_t dim, Op op)
   Apply a pointwise operator to two tensors.
 
   The calling convention for op is a function/functor that takes takes two references to
-  type CScalar; at least one of these references should be non-const in order to write the output.
+  type scalar; at least one of these references should be non-const in order to write the output.
   For example, to compute a = b^2, op would be of the form:
-  [](CScalar &a_val, const CScalar &b_val) { a_val = b_val * b_val; };
+  [](scalar &a_val, const scalar &b_val) { a_val = b_val * b_val; };
 */
-template<typename CScalar, typename Op>
+template<typename scalar1, typename scalar2, typename Op>
 void CPU_tensor_apply2(Tensor tensor1, Tensor tensor2, Op op) {
-  CPU_tensor_apply2_dim<CScalar, Op>(tensor1, tensor2, -1, op);
+  CPU_tensor_apply2_dim<scalar1, scalar2, Op>(tensor1, tensor2, -1, op);
 }
 
-template <typename CScalar, typename Op>
+template<typename scalar1, typename scalar2, typename scalar3, typename Op>
 void CPU_tensor_apply3_dim(Tensor &tensor1, Tensor& tensor2, Tensor& tensor3, int64_t dim, Op op) {
-  check_correct_backend(tensor1, tensor2, tensor3);
+  checkBackend("CPU_tensor_apply3", {tensor1, tensor2, tensor3}, Backend::CPU);
   bool TH_TENSOR_APPLY_hasFinished = false;
   int64_t TH_TENSOR_dim_index = 0;
-  __ATH_TENSOR_APPLYX_PREAMBLE(CScalar, tensor1, dim, 1)
-  __ATH_TENSOR_APPLYX_PREAMBLE(CScalar, tensor2, dim, 1)
-  __ATH_TENSOR_APPLYX_PREAMBLE(CScalar, tensor3, dim, 1)
+  __ATH_TENSOR_APPLYX_PREAMBLE(scalar1, tensor1, dim, 1)
+  __ATH_TENSOR_APPLYX_PREAMBLE(scalar2, tensor2, dim, 1)
+  __ATH_TENSOR_APPLYX_PREAMBLE(scalar3, tensor3, dim, 1)
 
   int elements_equal = 1;
   auto t1_numel = tensor1.numel();
@@ -246,13 +229,82 @@ void CPU_tensor_apply3_dim(Tensor &tensor1, Tensor& tensor2, Tensor& tensor3, in
   Apply a pointwise operator to three tensors.
 
   The calling convention for op is a function/functor that takes takes three references to
-  type CScalar; at least one of these references should be non-const in order to write the output.
+  type scalar; at least one of these references should be non-const in order to write the output.
   For example, to compute a = b + c, op would be of the form:
-  [](CScalar &a_val, const CScalar &b_val, const CScalar &c_val) { a_val = b_val + c_val; };
+  [](scalar &a_val, const scalar &b_val, const scalar &c_val) { a_val = b_val + c_val; };
 */
-template<typename CScalar, typename Op>
+template<typename scalar1, typename scalar2, typename scalar3, typename Op>
 void CPU_tensor_apply3(Tensor tensor1, Tensor tensor2, Tensor tensor3, Op op) {
-  CPU_tensor_apply3_dim<CScalar, Op>(tensor1, tensor2, tensor3, -1, op);
+  CPU_tensor_apply3_dim<scalar1, scalar2, scalar3, Op>(tensor1, tensor2, tensor3, -1, op);
+}
+
+template <typename scalar1, typename scalar2, typename scalar3, typename scalar4, typename Op>
+void CPU_tensor_apply4_dim(Tensor &tensor1, Tensor& tensor2, Tensor& tensor3, Tensor& tensor4, int64_t dim, Op op) {
+  checkBackend("CPU_tensor_apply4", {tensor1, tensor2, tensor3, tensor4}, Backend::CPU);
+  bool TH_TENSOR_APPLY_hasFinished = false;
+  int64_t TH_TENSOR_dim_index = 0;
+  __ATH_TENSOR_APPLYX_PREAMBLE(scalar1, tensor1, dim, 1)
+  __ATH_TENSOR_APPLYX_PREAMBLE(scalar2, tensor2, dim, 1)
+  __ATH_TENSOR_APPLYX_PREAMBLE(scalar3, tensor3, dim, 1)
+  __ATH_TENSOR_APPLYX_PREAMBLE(scalar4, tensor4, dim, 1)
+
+  int elements_equal = 1;
+  auto t1_numel = tensor1.numel();
+  auto t2_numel = tensor2.numel();
+  auto t3_numel = tensor3.numel();
+  auto t4_numel = tensor4.numel();
+  if(t1_numel!= t2_numel) {
+    elements_equal = 0;
+  } else if(t1_numel != t3_numel) {
+    elements_equal = 0;
+  } else if(t1_numel != t4_numel) {
+      elements_equal = 0;
+  }
+  if (elements_equal == 0) {
+    std::ostringstream oss;
+    oss << "inconsistent tensor size, expected " << tensor1.sizes() << ", " << tensor2.sizes() << ", "
+        << tensor3.sizes() << ", and " << tensor4.sizes() << " to have the same number of elements, but got "
+        << t1_numel << ", " << t2_numel << ", " << t3_numel << ", and " << t4_numel << " elements respectively";
+    throw std::runtime_error(oss.str());
+  }
+
+  while(!TH_TENSOR_APPLY_hasFinished)
+  {
+    /* Loop through the inner most region of the Tensor */
+    for(; tensor1_i <  tensor1_size && tensor2_i < tensor2_size && tensor3_i < tensor3_size && tensor4_i < tensor4_size
+        ; tensor1_i++, tensor2_i++, tensor3_i++, tensor4_i++,
+          tensor1_data += tensor1_stride, tensor2_data += tensor2_stride, tensor3_data += tensor3_stride, tensor4_data += tensor4_stride)
+    {
+      op(*tensor1_data, *tensor2_data, *tensor3_data, *tensor4_data);
+    }
+    __ATH_TENSOR_APPLYX_UPDATE_COUNTERS(tensor1, 0)
+    __ATH_TENSOR_APPLYX_UPDATE_COUNTERS(tensor2, 0)
+    __ATH_TENSOR_APPLYX_UPDATE_COUNTERS(tensor3, 0)
+    __ATH_TENSOR_APPLYX_UPDATE_COUNTERS(tensor4, 0)
+  }
+  if(tensor1_counter != NULL)
+    delete [] tensor1_counter;
+  if(tensor2_counter != NULL)
+    delete [] tensor2_counter;
+  if(tensor3_counter != NULL)
+    delete [] tensor3_counter;
+  if(tensor4_counter != NULL)
+    delete [] tensor4_counter;
+}
+
+/*
+  Apply a pointwise operator to four tensors.
+
+  The calling convention for op is a function/functor that takes takes four references to
+  type scalar; at least one of these references should be non-const in order to write the output.
+  For example, to compute a = b + c * d, op would be of the form:
+  [](scalar &a_val, const scalar &b_val, const scalar &c_val, const scalar &d_val) {
+    a_val = b_val + c_val * d_val;
+  };
+*/
+template<typename scalar1, typename scalar2, typename scalar3, typename scalar4, typename Op>
+void CPU_tensor_apply4(Tensor tensor1, Tensor tensor2, Tensor tensor3, Tensor tensor4, Op op) {
+  CPU_tensor_apply4_dim<scalar1, scalar2, scalar3, scalar4, Op>(tensor1, tensor2, tensor3, tensor4, -1, op);
 }
 
 }

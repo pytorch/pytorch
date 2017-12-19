@@ -70,4 +70,6 @@ void checkSameSize(CheckedFrom c, const TensorArg& t1, const TensorArg& t2);
 void checkDefined(CheckedFrom c, const TensorArg& t);
 void checkAllDefined(CheckedFrom c, at::ArrayRef<TensorArg> t);
 
+// FixMe: does TensorArg slow things down?
+void checkBackend(CheckedFrom c, at::ArrayRef<Tensor> t, at::Backend backend);
 }
