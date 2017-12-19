@@ -230,7 +230,6 @@ class NewCriterionTest(InputVariableMixin, CriterionTest):
 
 
 class TestNN(NNTestCase):
-
     def _forward(self, module, input):
         with freeze_rng_state():
             return module(input)
