@@ -81,7 +81,6 @@ def run(paths):
             declaration['name'] = func.get('name', fn_name)
             declaration['return'] = list(func.get('return', return_type))
             declaration['variants'] = func.get('variants', ['method', 'function'])
-            declaration['template_scalar'] = func.get('template_scalar')
             declaration['arguments'] = func.get('arguments', parse_arguments(arguments, func))
             declaration['type_method_definition_dispatch'] = func.get('dispatch', declaration['name'])
             declarations.append(declaration)

@@ -11,5 +11,3 @@ ${native_function_declarations}
 
 }
 }
-
-#include "ATen/native/NativeFunctions-inl.h"

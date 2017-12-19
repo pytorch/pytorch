@@ -74,11 +74,6 @@ ${return_type} ${Type}::${api_name}(${formals}) const {
     ${return_call} at::native::${native_type_method_dispatch}(${actuals});
 }
 """)
-TYPE_DERIVED_DEFINITION_NATIVE_TEMPLATE_SCALAR = CodeTemplate("""\
-${return_type} ${Type}::${api_name}(${formals}) const {
-    ${return_call} at::native::${native_type_method_dispatch}<${ScalarType}>(${actuals});
-}
-""")
 
 # 6. add non-virtual declaration to Tensor.h
 TENSOR_METHOD_DECLARATION = CodeTemplate("""\
@@ -103,10 +98,6 @@ static inline ${return_type} ${api_name}(${formals}) {
 # 10. add a native declaration for a native function
 NATIVE_DECLARATION = CodeTemplate("""\
 ${return_type} ${native_type_method_dispatch}(${formals_with_defaults});
-""")
-
-NATIVE_TEMPLATE_SCALAR_DECLARATION = CodeTemplate("""\
-template <typename scalartype> ${return_type} ${native_type_method_dispatch}(${formals_with_defaults});
 """)
 
 # We need to cast to the base type because C++ may hide the base class
@@ -648,7 +639,6 @@ def create_generic(top_env, declarations):
         top_env['type_method_declarations'].append(
             TYPE_METHOD_DECLARATION_CONCRETE.substitute(env))
         dispatch = option['type_method_definition_dispatch']
-        template_scalar = option.get('template_scalar')
         option['native_type_method_dispatch'] = dispatch
 
         # Note [Abstract ATen methods]
@@ -659,7 +649,7 @@ def create_generic(top_env, declarations):
         # method is one which has the same dispatch for all types;
         # we just implement it in the base Type.  This is exposed
         # in Declarations.yaml via a field named 'abstract'.
-        if isinstance(dispatch, dict) or template_scalar:
+        if isinstance(dispatch, dict):
             abstract = True
             top_env['type_method_definitions'].append(
                 TYPE_METHOD_DEFINITION_ABSTRACT.substitute(env))
@@ -667,9 +657,6 @@ def create_generic(top_env, declarations):
             abstract = False
             top_env['type_method_definitions'].append(
                 TYPE_METHOD_DEFINITION_CONCRETE.substitute(env))
-
-        def native_decl():
-            return NATIVE_TEMPLATE_SCALAR_DECLARATION if template_scalar else NATIVE_DECLARATION
 
         # generate the at::native function declarations (i.e. what the user will implement)
         if isinstance(dispatch, dict):
@@ -679,11 +666,11 @@ def create_generic(top_env, declarations):
                 if value not in generated_native_functions:
                     option['native_type_method_dispatch'] = value
                     top_env['native_function_declarations'].append(
-                        native_decl().substitute(env))
+                        NATIVE_DECLARATION.substitute(env))
                     generated_native_functions.append(value)
         else:
             top_env['native_function_declarations'].append(
-                native_decl().substitute(env))
+                NATIVE_DECLARATION.substitute(env))
 
         method_of = ['Type']
         if is_method:
@@ -1065,7 +1052,6 @@ def create_derived(backend_type_env, declarations):
 
     def process_native(option):
         dispatch = option['type_method_definition_dispatch']
-        template_scalar = option.get('template_scalar')
         env = nested_dict(option, backend_type_env)
 
         if isinstance(dispatch, dict):
@@ -1079,17 +1065,8 @@ def create_derived(backend_type_env, declarations):
                 option['native_type_method_dispatch'] = native_dispatch
                 type_object_declarations.append(
                     TYPE_DERIVED_DECLARATION.substitute(env))
-                if template_scalar:
-                    type_object_definitions.append(
-                        TYPE_DERIVED_DEFINITION_NATIVE_TEMPLATE_SCALAR.substitute(env))
-                else:
-                    type_object_definitions.append(
-                        TYPE_DERIVED_DEFINITION_NATIVE.substitute(env))
-        elif template_scalar:
-            type_object_declarations.append(
-                TYPE_DERIVED_DECLARATION.substitute(env))
-            type_object_definitions.append(
-                TYPE_DERIVED_DEFINITION_NATIVE_TEMPLATE_SCALAR.substitute(env))
+                type_object_definitions.append(
+                    TYPE_DERIVED_DEFINITION_NATIVE.substitute(env))
 
     for declaration in declarations:
         for option in declaration['options']:
