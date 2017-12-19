@@ -89,8 +89,17 @@
 
 # Pooling
 
+- name: adaptive_avg_pool2d(Tensor self, IntList[2] output_size)
+  cname: SpatialAdaptiveAveragePooling
+
+- name: adaptive_avg_pool3d(Tensor self, IntList[3] output_size)
+  cname: VolumetricAdaptiveAveragePooling
+
 - name: adaptive_max_pool2d(Tensor self, IntList[2] output_size)
   cname: SpatialAdaptiveMaxPooling
+
+- name: adaptive_max_pool3d(Tensor self, IntList[3] output_size)
+  cname: VolumetricAdaptiveMaxPooling
 
 - name: avg_pool2d(Tensor self, IntList[2] kernel_size, IntList[2] stride={}, IntList[2] padding=0, bool ceil_mode=false, bool count_include_pad=false)
   cname: SpatialAveragePooling
@@ -107,7 +116,7 @@
   default_init:
     stride: kernel_size
 
-- name: max_pool3d(Tensor self, IntList[3] kernel_size, IntList[3] stride={}, IntList[3] padding=0, IntList[2] dilation=1, bool ceil_mode=false)
+- name: max_pool3d(Tensor self, IntList[3] kernel_size, IntList[3] stride={}, IntList[3] padding=0, IntList[3] dilation=1, bool ceil_mode=false)
   cname: VolumetricDilatedMaxPooling
   default_init:
     stride: kernel_size

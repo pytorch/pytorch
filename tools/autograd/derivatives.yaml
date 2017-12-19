@@ -745,8 +745,17 @@
 - name: threshold_(Tensor self, Scalar threshold, Scalar value)
   self: threshold_backward(grad, output, threshold, value)
 
+- name: adaptive_avg_pool2d(Tensor self, IntList output_size)
+  self: adaptive_avg_pool2d_backward(grad, self)
+
+- name: adaptive_avg_pool3d(Tensor self, IntList output_size)
+  self: adaptive_avg_pool3d_backward(grad, self)
+
 - name: adaptive_max_pool2d(Tensor self, IntList output_size)
   self: adaptive_max_pool2d_backward(grad, self, indices)
+
+- name: adaptive_max_pool3d(Tensor self, IntList output_size)
+  self: adaptive_max_pool3d_backward(grad, self, indices)
 
 - name: avg_pool2d(Tensor self, IntList kernel_size, IntList stride, IntList padding, bool ceil_mode, bool count_include_pad)
   self: avg_pool2d_backward(grad, self, kernel_size, stride, padding, ceil_mode, count_include_pad)
@@ -789,6 +798,22 @@
   self, weight, bias: conv_dilated3d_backward(grad, self, weight, kernel_size, stride, padding, dilation, columns, ones, grad_input_mask)
 
 # NN double backwards support
+
+- name: adaptive_avg_pool2d_backward(Tensor grad_output, Tensor self)
+  grad_output: adaptive_avg_pool2d(grad, { grad_output.size(-2), grad_output.size(-1) })
+  self: zeros_like(self)
+
+- name: adaptive_avg_pool3d_backward(Tensor grad_output, Tensor self)
+  grad_output: adaptive_avg_pool3d(grad, { grad_output.size(-3), grad_output.size(-2), grad_output.size(-1) })
+  self: zeros_like(self)
+
+- name: adaptive_max_pool2d_backward(Tensor grad_output, Tensor self, Tensor indices)
+  grad_output: adaptive_max_pool_double_backward(grad, self, indices, 2)
+  self: zeros_like(self)
+
+- name: adaptive_max_pool3d_backward(Tensor grad_output, Tensor self, Tensor indices)
+  grad_output: adaptive_max_pool_double_backward(grad, self, indices, 3)
+  self: zeros_like(self)
 
 - name: avg_pool2d_backward(Tensor grad_output, Tensor self, IntList kernel_size, IntList stride, IntList padding, bool ceil_mode, bool count_include_pad)
   grad_output: avg_pool2d(grad, kernel_size, stride, padding, ceil_mode, count_include_pad)
