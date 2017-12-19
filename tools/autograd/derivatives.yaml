@@ -805,11 +805,11 @@
   self: zeros_like(self)
 
 - name: adaptive_max_pool2d_backward(Tensor grad_output, Tensor self, Tensor indices)
-  grad_output: adaptive_max_pool_double_backward(grad, self, indices)
+  grad_output: adaptive_max_pool_double_backward(grad, self, indices, 2)
   self: zeros_like(self)
 
 - name: adaptive_max_pool3d_backward(Tensor grad_output, Tensor self, Tensor indices)
-  grad_output: adaptive_max_pool_double_backward(grad, self, indices)
+  grad_output: adaptive_max_pool_double_backward(grad, self, indices, 3)
   self: zeros_like(self)
 
 - name: avg_pool2d_backward(Tensor grad_output, Tensor self, IntList kernel_size, IntList stride, IntList padding, bool ceil_mode, bool count_include_pad)
