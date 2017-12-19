@@ -168,6 +168,28 @@ class TestFillerOperator(hu.HypothesisTestCase):
         # Check against numpy reference
         self.assertReferenceChecks(gc, op, [shape, value], _fill_diagonal)
 
+    @given(lengths=st.lists(st.integers(min_value=0, max_value=10),
+                            min_size=0,
+                            max_size=10),
+           **hu.gcs)
+    def test_lengths_range_fill(self, lengths, gc, dc):
+        op = core.CreateOperator(
+            "LengthsRangeFill",
+            ["lengths"],
+            ["increasing_seq"])
+
+        def _len_range_fill(lengths):
+            sids = []
+            for _, l in enumerate(lengths):
+                sids.extend(list(range(l)))
+            return (np.array(sids, dtype=np.int32), )
+
+        self.assertReferenceChecks(
+            device_option=gc,
+            op=op,
+            inputs=[np.array(lengths, dtype=np.int32)],
+            reference=_len_range_fill)
+
     @given(**hu.gcs)
     def test_gaussian_fill_op(self, gc, dc):
         op = core.CreateOperator(
