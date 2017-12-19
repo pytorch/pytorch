@@ -10,9 +10,7 @@ void assertEqualTensorList(TensorList t1, TensorList t2) {
   }
 }
 
-int main() {
-  Type & T = CPU(kFloat);
-
+void test(Type & T) {
   auto t = T.randn({3, 3});
   // split
   {
@@ -135,21 +133,48 @@ int main() {
     auto one_with_dim = T.ones({1}).mul(5);
     ASSERT_ALLCLOSE(one_scalar._standard_gamma_grad(one_scalar),
                     one_with_dim._standard_gamma_grad(one_with_dim).sum());
+  }
 
-    // check types
-    Type & DT = CPU(kDouble);
-    auto t1 = T.randn({3, 4});
-    auto t2 = DT.randn({3, 4});
-    ASSERT_THROWS(t1._standard_gamma_grad(t2), "expected scalar type");
-    if(at::hasCUDA()) {
-      Type & CT = CUDA(kFloat);
-      auto ct1 = CT.randn({3, 4});
-      auto ct2 = CT.randn({3, 4});
+  // where
+  {
+    // empty
+    auto empty = T.ones({0});
+    auto &bT = T.toScalarType(ScalarType::Byte);
+    auto empty_byte = bT.ones({0});
+    ASSERT_EQUAL(empty, at::where(empty_byte, empty, empty));
 
-      ASSERT_THROWS(ct1._standard_gamma_grad(ct2), "not implemented");
-      ASSERT_THROWS(ct1._standard_gamma_grad(t2), "not implemented");
-      ASSERT_THROWS(t1._standard_gamma_grad(ct2), "CUDA Backend");
-    }
+    // check scalar equals one element
+    auto x_scalar = T.ones({}).mul(5);
+    auto y_scalar = T.ones({}).mul(7);
+    auto cond_scalar = bT.zeros({});
+    auto x_1d = x_scalar.unsqueeze(0);
+    auto y_1d = y_scalar.unsqueeze(0);
+    auto cond_1d = cond_scalar.unsqueeze(0);
+    ASSERT_ALLCLOSE(at::where(cond_scalar, x_scalar, y_scalar).unsqueeze(0),
+                    at::where(cond_1d, x_1d, y_1d));
+  }
+}
+
+int main() {
+  Type & T = CPU(kFloat);
+  test(T);
+
+  // check mixing types
+  Type & DT = CPU(kDouble);
+  auto t1 = T.randn({3, 4});
+  auto t2 = DT.randn({3, 4});
+  ASSERT_THROWS(t1._standard_gamma_grad(t2), "expected scalar type");
+
+  if (at::hasCUDA()) {
+    Type & CT = CUDA(kFloat);
+    test(CT);
+
+    auto ct1 = CT.randn({3, 4});
+    auto ct2 = CT.randn({3, 4});
+
+    ASSERT_THROWS(ct1._standard_gamma_grad(ct2), "not implemented");
+    ASSERT_THROWS(ct1._standard_gamma_grad(t2), "not implemented");
+    ASSERT_THROWS(t1._standard_gamma_grad(ct2), "CUDA Backend");
   }
 
   return 0;

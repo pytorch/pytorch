@@ -111,6 +111,9 @@
 # _s_where derivative.
 - func: where(BoolTensor condition, Tensor self, Tensor other) -> Tensor
 - func: _s_where(BoolTensor condition, Tensor self, Tensor other) -> Tensor
+  dispatch:
+    CPU: _s_where_cpu
+    CUDA: _s_where_cuda
 
 - func: RoiPooling2d_forward(Tensor input, Tensor rois, int64_t pooledHeight, int64_t pooledWidth, double spatialScale) -> (Tensor, Tensor)
   variants: function
