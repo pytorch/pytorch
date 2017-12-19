@@ -210,7 +210,7 @@ class TestCase(unittest.TestCase):
                         diff = diff.abs()
                     max_err = diff.max()
                     self.assertLessEqual(max_err, prec, message)
-            self.assertEqual(x.is_sparse, y.is_sparse, message)
+            super(TestCase, self).assertEqual(x.is_sparse, y.is_sparse, message)
             if x.is_sparse:
                 x = self.safeCoalesce(x)
                 y = self.safeCoalesce(y)
