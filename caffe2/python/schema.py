@@ -439,6 +439,15 @@ class Struct(Field):
                 raise KeyError('field "%s" not found' % (item))
             return field
 
+    def get(self, item, default_value):
+        """
+        similar to python's dictionary get method, return field of item if found
+        (i.e. self.item is valid) or otherwise return default_value
+
+        it's a syntax suger of python's builtin getattr method
+        """
+        return getattr(self, item, default_value)
+
     def __getattr__(self, item):
         if item.startswith('__'):
             raise AttributeError(item)
