@@ -110,6 +110,12 @@ DIMENSION_OFFSET = {
     'W': -1,
     'H': -2,
     'T': -3,
+    'left': 0,
+    'right': 1,
+    'top': 2,
+    'bottom': 3,
+    'front': 4,
+    'back': 5,
 }
 
 SUBSTITUTIONS = {
@@ -150,7 +156,9 @@ def get_thnn_args(thnn_function, params, inplace):
         param = params_by_name[name]
         if param['type'] == 'IntList' and 'size' in param:
             name = name + '_'
-        index = dimensionality + DIMENSION_OFFSET[suffix]
+        index = DIMENSION_OFFSET[suffix]
+        if index < 0:
+            index += dimensionality
         expr = '{}[{}]'.format(name, index)
         return {'type': 'EXPRESSION', 'name': expr}
 
@@ -160,11 +168,15 @@ def get_thnn_args(thnn_function, params, inplace):
         if name == 'state':
             continue
         aten_name = camel_to_snake(SUBSTITUTIONS.get(name, name))
+        parts = aten_name.split('_')
         if aten_name in params_by_name:
             param = params_by_name[aten_name]
             if arg.is_optional:
                 param['is_nullable'] = True
             thnn_args.append(copy.deepcopy(param))
+        elif len(parts) == 2 and parts[0] in ARGUMENT_MAPPINGS and parts[1] in DIMENSION_OFFSET:
+            # e.g. pad_left
+            thnn_args.append(arg_expr(parts[0], parts[1]))
         elif name[-1] in DIMENSION_OFFSET and name[:-1] in ARGUMENT_MAPPINGS:
             # e.g kW, kH
             thnn_args.append(arg_expr(name[:-1], name[-1]))

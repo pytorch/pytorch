@@ -127,6 +127,24 @@
 - name: max_unpool3d(Tensor self, LongTensor indices, IntList[3] output_size, IntList[3] stride, IntList[3] padding)
   cname: VolumetricMaxUnpooling
 
+# Padding
+
+- name: reflection_pad1d(Tensor self, IntList[2] padding)
+  cname: TemporalReflectionPadding
+
+- name: reflection_pad2d(Tensor self, IntList[4] padding)
+  cname: SpatialReflectionPadding
+
+- name: replication_pad1d(Tensor self, IntList[2] padding)
+  cname: TemporalReplicationPadding
+
+- name: replication_pad2d(Tensor self, IntList[4] padding)
+  cname: SpatialReplicationPadding
+
+- name: replication_pad3d(Tensor self, IntList[6] padding)
+  cname: VolumetricReplicationPadding
+
+
 # Private functions. These also exist in TH, but we want the backwards functions
 # to implement derivatives.
 
