@@ -289,12 +289,17 @@ struct CodeImpl {
     // this is done with a backward scan where we mark the first time we see it
     std::unordered_set<int> seen_registers;
     auto scanUses = [&](UseList & u) {
-      listBegin(u.free_flags);
-      for(int i = 0; i < u.values.size; i++) {
+      // scan backwards because the same value may appear > once in a use list
+      // and it is the last use that should free it
+      std::vector<bool> free_flags(u.values.size);
+      for(int i = u.values.size - 1; i >= 0; i--) {
         int reg = get(u.values,i);
-        listInsert(u.free_flags, seen_registers.count(reg) == 0);
+        free_flags[i] = seen_registers.count(reg) == 0;
         seen_registers.insert(reg);
       }
+      listBegin(u.free_flags);
+      for(auto b : free_flags)
+        listInsert(u.free_flags, b);
     };
     for(auto sit = stages.rbegin(); sit != stages.rend(); sit++) {
       scanUses(sit->outputs);

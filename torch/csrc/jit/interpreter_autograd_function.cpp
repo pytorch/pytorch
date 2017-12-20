@@ -32,20 +32,43 @@ autograd::variable_list InterpreterAutogradFunction::apply(
   TORCH_ASSERT(inputs.size() == static_cast<std::size_t>(num_inputs));
   TORCH_ASSERT(inputs.size() == details.input_flags.size());
   for (std::size_t i = 0; i < (std::size_t)inputs.size(); ++i) {
-    if(stage_ > 0 && !inputs[i].defined() && !details.input_flags[i].was_null) {
+    auto actual_flags = VariableFlags::of(inputs[i]);
+    auto traced_flags = details.input_flags[i];
+
+    // check that this trace is general enough to handle the input
+    // flags of the actual tensor. We can't handle the following two cases
+    // because we won't have a trace containing computation of either
+    // the tensor itself (not defined) or the stage for its gradient (requires_grad=False)
+    if(!traced_flags.defined && actual_flags.defined) {
+      throw std::runtime_error("JIT intepreter received a defined input, but the"
+        " trace was compiled with the input being undefined.");
+    }
+    if(!traced_flags.requires_grad && actual_flags.requires_grad) {
+      throw std::runtime_error("JIT inteperpreter recieved an input with "
+        " requires_grad=True, but was compiled with requires_grad=False");
+    }
+
+    // The remaining cases we can handle. If the gradient was not
+    // required but the trace will compute it, then we just compute it and
+    // ignore the result.
+    // However, if we are passed an undefined tensor, but the trace
+    // expects a defined tensor, then we have to give it one.
+    // Undefined tensors are used as stand-ins for zero tensors, so
+    // we create a zero-filled tensor of the right size
+    if(!actual_flags.defined) {
       // [Temporary workaround for variants] until tracer produces all variants:
-      // if you have a function x, y = fn(z) and only use x then gradient for y
+      // This case appears commonly when you have a function
+      // x, y = fn(z)
+      // and only use x then gradient for y
       // will be undefined. If you reuse the same trace with and _sometimes_ use y
       // then in the cases where you don't use it, the grad_y input in stage 1
       // will be undefined. To ensure we can continue, we create a 0 gradient,
       // using trace information to figure out what shape it should be
-      tinputs.push_back(zeroTensorWithType(interp_.tensorTypeForInput(i)));
-    } else if(!details.input_flags[i].verify(inputs[i])) {
-      std::stringstream ss;
-      ss << "JIT interpreter received inputs with different "
-        << "flags than it was compiled for. Compiled with " << details.input_flags[i]
-        << " but found " << VariableFlags::of(inputs[i]) << "\n";
-      throw std::runtime_error(ss.str());
+      if(traced_flags.defined) {
+        tinputs.push_back(zeroTensorWithType(interp_.tensorTypeForInput(i)));
+      } else {
+        tinputs.push_back(at::Tensor());
+      }
     } else {
       tinputs.push_back(inputs[i].data());
     }
@@ -80,10 +103,11 @@ autograd::variable_list InterpreterAutogradFunction::apply(
       grad_fn->next_functions.push_back(next_functions[copied_idx]);
     }
     // Add grad_fns corresponding to inputs
-    for (auto & input : inputs) {
-      if (!input.requires_grad()) {
+    for(size_t i = 0; i < inputs.size(); ++i) {
+      auto & input = inputs[i];
+      if (!details.input_flags[i].requires_grad) {
         continue; // See Note [Null-edge pruning]
-      } else if (!input.defined()) {
+      } else if (!input.defined() || !input.requires_grad()) {
         // See Note [Temporary workaround for variants]
         grad_fn->next_functions.emplace_back();
         continue;
