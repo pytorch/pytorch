@@ -32,3 +32,6 @@ class Exponential(Distribution):
     def log_prob(self, value):
         self._validate_log_prob_arg(value)
         return self.rate.log() - self.rate * value
+
+    def entropy(self):
+        return 1.0 - torch.log(self.rate)

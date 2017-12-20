@@ -7,6 +7,7 @@
 #include "ATen/WrapDimUtils.h"
 #include <functional>
 #include <numeric>
+#include <type_traits>
 
 namespace at {
 namespace native {
@@ -154,6 +155,20 @@ bool is_distributed(const Tensor& self) {
 
 bool is_sparse(const Tensor& self) {
   return self.type().is_sparse();
+}
+
+template <typename scalar>
+struct IsSigned {
+  static bool apply() { return std::is_signed<scalar>(); }
+};
+
+template<>
+struct IsSigned<Half> {
+  static bool apply() { return true; }
+};
+
+bool is_signed(const Tensor &self) {
+  return dispatch_all<IsSigned>(self.type(), "is_signed");
 }
 
 Tensor permute(const Tensor& self, IntList dims) {

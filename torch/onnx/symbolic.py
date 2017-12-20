@@ -1,6 +1,6 @@
 import torch
 from torch.autograd._functions.utils import check_onnx_broadcast  # TODO: move me
-from torch.nn.modules.utils import _pair, _triple
+from torch.nn.modules.utils import _single, _pair, _triple
 import warnings
 
 # EDITING THIS FILE? READ THIS FIRST!
@@ -281,6 +281,20 @@ def softplus(g, self, beta, threshold):
     return g.op('Softplus', self)
 
 
+def max_pool1d(g, input, kernel_size, stride, padding, dilation, ceil_mode):
+    if ceil_mode:
+        return _unimplemented("max_pool1d", "ceil_mode")
+    if set(_single(dilation)) != {1}:
+        return _unimplemented("max_pool1d", "dilation")
+    if stride is None:
+        stride = kernel_size
+    r = g.op("MaxPool", input,
+             kernel_shape_i=_single(kernel_size),
+             pads_i=_single(padding) * 2,
+             strides_i=_single(stride))
+    return r, None
+
+
 def max_pool2d(g, input, kernel_size, stride, padding, dilation, ceil_mode):
     if ceil_mode:
         return _unimplemented("max_pool2d", "ceil_mode")
@@ -317,6 +331,28 @@ def avg_pool3d(g, input, kernel_size, stride, padding, ceil_mode, count_include_
                 kernel_shape_i=_triple(kernel_size),
                 strides_i=_triple(stride),
                 pads_i=_triple(padding))
+
+
+def reflection_pad(g, input, padding):
+    from torch.autograd._functions.utils import prepare_onnx_paddings
+    mode = "reflect"
+    paddings = prepare_onnx_paddings(len(input.type().sizes()), padding)
+    return g.op("Pad", input, pads_i=paddings, mode_s=mode)
+
+
+def replication_pad(g, input, padding):
+    from torch.autograd._functions.utils import prepare_onnx_paddings
+    mode = "edge"
+    paddings = prepare_onnx_paddings(len(input.type().sizes()), padding)
+    return g.op("Pad", input, pads_i=paddings, mode_s=mode)
+
+
+reflection_pad1d = reflection_pad
+reflection_pad2d = reflection_pad
+reflection_pad3d = reflection_pad
+replication_pad1d = replication_pad
+replication_pad2d = replication_pad
+replication_pad3d = replication_pad
 
 
 def log_softmax(g, input, dim=None):

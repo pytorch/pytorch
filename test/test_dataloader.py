@@ -8,7 +8,7 @@ import unittest
 from torch import multiprocessing
 from torch.utils.data import Dataset, TensorDataset, DataLoader, ConcatDataset
 from torch.utils.data.dataloader import default_collate
-from common import TestCase, run_tests, TEST_NUMPY
+from common import TestCase, run_tests, TEST_NUMPY, IS_WINDOWS
 from common_nn import TEST_CUDA
 
 
@@ -223,7 +223,7 @@ class TestDataLoader(TestCase):
         next(loader1_it)
         next(loader2_it)
 
-    @unittest.skipIf(sys.platform == "win32", "TODO: need to fix this test case for Windows")
+    @unittest.skipIf(IS_WINDOWS, "TODO: need to fix this test case for Windows")
     def test_segfault(self):
         def _test_segfault():
             sys.stderr.close()
@@ -240,7 +240,7 @@ class TestDataLoader(TestCase):
         finally:
             p.terminate()
 
-    @unittest.skipIf(sys.platform == "win32", "TODO: need to fix this test case for Windows")
+    @unittest.skipIf(IS_WINDOWS, "TODO: need to fix this test case for Windows")
     def test_timeout(self):
         def _test_timeout():
             sys.stderr.close()
@@ -266,6 +266,7 @@ class TestDataLoader(TestCase):
             seeds.add(batch[0])
         self.assertEqual(len(seeds), num_workers)
 
+    @unittest.skipIf(IS_WINDOWS, "TODO: need to fix this test case for Windows")
     def test_worker_init_fn(self):
         # test custom init function
         def init_fn(worker_id):
@@ -348,6 +349,7 @@ class TestDataLoader(TestCase):
     def test_error_workers(self):
         self._test_error(DataLoader(ErrorDataset(41), batch_size=2, shuffle=True, num_workers=4))
 
+    @unittest.skipIf(IS_WINDOWS, "TODO: need to fix this test case for Windows")
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     def test_partial_workers(self):
         "check that workers exit even if the iterator is not exhausted"

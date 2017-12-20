@@ -314,6 +314,14 @@ Tensor split_backward(const std::vector<torch::autograd::Variable> &grads, int64
   return ret;
 }
 
+Tensor adaptive_max_pool_double_backward(const Tensor & grad, const Tensor & self, const Tensor & indices, int dim) {
+  TORCH_ASSERT(indices.dim() >= dim);
+  auto size = std::vector<int64_t>(indices.sizes().slice(0, indices.dim() - dim));
+  size.push_back(-1);
+  auto indices_view = indices.view(size);
+  return grad.contiguous().view(size).gather(-1, indices_view).view(indices.sizes());
+}
+
 Tensor glu_double_backward(const Tensor & grad, const Tensor & grad_output, const Tensor & input, int64_t dim) {
   auto& gO = grad_output;
   auto input_size = input.size(dim) / 2;

@@ -89,6 +89,7 @@ void THCudaBlas_Sgemv(THCState *state, char trans, int64_t m, int64_t n, float a
   if (trans == 't') op = CUBLAS_OP_T;
   else if (trans == 'n') op = CUBLAS_OP_N;
   else if (trans == 'c') op = CUBLAS_OP_C;
+  else THError("Cublas_Sgemv parameter trans should be 't', 'n' or 'c'.");
 
   if( (m <= INT_MAX) && (n <= INT_MAX) &&
       (lda > 0) && (lda <= INT_MAX) &&
@@ -119,6 +120,7 @@ void THCudaBlas_Dgemv(THCState *state, char trans, int64_t m, int64_t n, double 
   if (trans == 't') op = CUBLAS_OP_T;
   else if (trans == 'n') op = CUBLAS_OP_N;
   else if (trans == 'c') op = CUBLAS_OP_C;
+  else THError("Cublas_Sgemv parameter trans should be 't', 'n' or 'c'.");
 
   if( (m <= INT_MAX) && (n <= INT_MAX) &&
       (lda > 0) && (lda <= INT_MAX) &&

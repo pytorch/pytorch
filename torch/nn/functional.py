@@ -332,8 +332,7 @@ def max_pool1d(input, kernel_size, stride=None, padding=0, dilation=1,
 
     See :class:`~torch.nn.MaxPool1d` for details.
     """
-    ret = _functions.thnn.MaxPool1d.apply(input, kernel_size, stride, padding, dilation,
-                                          ceil_mode)
+    ret = torch._C._VariableBase.max_pool1d(input, kernel_size, stride, padding, dilation, ceil_mode)
     return ret if return_indices else ret[0]
 
 
@@ -355,8 +354,7 @@ def max_pool3d(input, kernel_size, stride=None, padding=0, dilation=1,
 
     See :class:`~torch.nn.MaxPool2d` for details.
     """
-    ret = _functions.thnn.MaxPool3d.apply(input, kernel_size, stride, padding, dilation,
-                                          ceil_mode)
+    ret = torch._C._nn.max_pool3d(input, kernel_size, stride, padding, dilation, ceil_mode)
     return ret if return_indices else ret[0]
 
 
@@ -476,7 +474,7 @@ def adaptive_max_pool2d(input, output_size, return_indices=False):
             double-integer tuple)
         return_indices: whether to return pooling indices. Default: ``False``
     """
-    ret = _functions.thnn.AdaptiveMaxPool2d.apply(input, output_size)
+    ret = torch._C._nn.adaptive_max_pool2d(input, output_size)
     return ret if return_indices else ret[0]
 
 
@@ -491,7 +489,7 @@ def adaptive_max_pool3d(input, output_size, return_indices=False):
             triple-integer tuple)
         return_indices: whether to return pooling indices. Default: ``False``
     """
-    ret = _functions.thnn.AdaptiveMaxPool3d.apply(input, output_size)
+    ret = torch._C._nn.adaptive_max_pool3d(input, output_size)
     return ret if return_indices else ret[0]
 
 
@@ -507,30 +505,31 @@ def adaptive_avg_pool1d(input, output_size):
     return _functions.thnn.AdaptiveAvgPool1d.apply(input, output_size)
 
 
-def adaptive_avg_pool2d(input, output_size):
-    r"""Applies a 2D adaptive average pooling over an input signal composed of
-    several input planes.
+adaptive_avg_pool2d = _add_docstr(torch._C._nn.adaptive_avg_pool2d, r"""
+adaptive_avg_pool2d(input, output_size) -> Variable
 
-    See :class:`~torch.nn.AdaptiveAvgPool2d` for details and output shape.
+Applies a 2D adaptive average pooling over an input signal composed of
+several input planes.
 
-    Args:
-        output_size: the target output size (single integer or
-            double-integer tuple)
-    """
-    return _functions.thnn.AdaptiveAvgPool2d.apply(input, output_size)
+See :class:`~torch.nn.AdaptiveAvgPool2d` for details and output shape.
 
+Args:
+    output_size: the target output size (single integer or
+        double-integer tuple)
+""")
 
-def adaptive_avg_pool3d(input, output_size):
-    r"""Applies a 3D adaptive average pooling over an input signal composed of
-    several input planes.
+adaptive_avg_pool3d = _add_docstr(torch._C._nn.adaptive_avg_pool3d, r"""
+adaptive_avg_pool3d(input, output_size) -> Variable
 
-    See :class:`~torch.nn.AdaptiveAvgPool3d` for details and output shape.
+Applies a 3D adaptive average pooling over an input signal composed of
+several input planes.
 
-    Args:
-        output_size: the target output size (single integer or
-            triple-integer tuple)
-    """
-    return _functions.thnn.AdaptiveAvgPool3d.apply(input, output_size)
+See :class:`~torch.nn.AdaptiveAvgPool3d` for details and output shape.
+
+Args:
+    output_size: the target output size (single integer or
+        triple-integer tuple)
+""")
 
 
 # Activation functions
@@ -849,14 +848,13 @@ def log_softmax(input, dim=None, _stacklevel=3):
     return torch._C._nn.log_softmax(input, dim)
 
 
-def softshrink(input, lambd=0.5):
-    r"""softshrink(input, lambd=0.5) -> Variable
+softshrink = _add_docstr(torch._C._nn.softshrink, r"""
+softshrink(input, lambd=0.5) -> Variable
 
-    Applies the soft shrinkage function elementwise
+Applies the soft shrinkage function elementwise
 
-    See :class:`~torch.nn.Softshrink` for more details.
-    """
-    return _functions.thnn.auto.Softshrink.apply(input, lambd)
+See :class:`~torch.nn.Softshrink` for more details.
+""")
 
 
 def tanh(input):
@@ -1628,21 +1626,21 @@ def pad(input, pad, mode='constant', value=0):
     elif input.dim() == 3:
         assert len(pad) == 2, '3D tensors expect 2 values for padding'
         if mode == 'reflect':
-            return _functions.thnn.ReflectionPad1d.apply(input, *pad)
+            return torch._C._nn.reflection_pad1d(input, pad)
         elif mode == 'replicate':
-            return _functions.thnn.ReplicationPad1d.apply(input, *pad)
+            return torch._C._nn.replication_pad1d(input, pad)
     elif input.dim() == 4:
         assert len(pad) == 4, '4D tensors expect 4 values for padding'
         if mode == 'reflect':
-            return _functions.thnn.ReflectionPad2d.apply(input, *pad)
+            return torch._C._nn.reflection_pad2d(input, pad)
         elif mode == 'replicate':
-            return _functions.thnn.ReplicationPad2d.apply(input, *pad)
+            return torch._C._nn.replication_pad2d(input, pad)
     elif input.dim() == 5:
         assert len(pad) == 6, '5D tensors expect 6 values for padding'
         if mode == 'reflect':
             raise NotImplementedError
         elif mode == 'replicate':
-            return _functions.thnn.ReplicationPad3d.apply(input, *pad)
+            return torch._C._nn.replication_pad3d(input, pad)
     else:
         raise NotImplementedError("Only 3D, 4D, 5D padding with non-constant padding are supported for now")
 

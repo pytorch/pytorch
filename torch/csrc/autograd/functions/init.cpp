@@ -128,7 +128,7 @@ PyObject* getTensorAttr(PyObject* obj, void* _unused)
 // specialization.  So we write a little stub function which does have
 // the right type.
 static PyObject* PortablePyInt_FromLong(int64_t ival) {
-  return PyInt_FromLong(ival);
+  return THPUtils_packInt64(ival);
 }
 
 static struct PyGetSetDef batch_norm_forward_properties[] = {

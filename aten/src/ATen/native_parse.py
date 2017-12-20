@@ -1,3 +1,4 @@
+import re
 import yaml
 
 try:
@@ -51,6 +52,10 @@ def parse_arguments(args, func):
         typ = sanitize_types(t)
         assert len(typ) == 1
         argument_dict = {'type': typ[0], 'name': name}
+        match = re.match(r'IntList\[(\d+)\]', argument_dict['type'])
+        if match:
+            argument_dict['type'] = 'IntList'
+            argument_dict['size'] = int(match.group(1))
         if default is not None:
             argument_dict['default'] = default
         if python_default_init is not None:
@@ -81,7 +86,6 @@ def run(paths):
             declaration['name'] = func.get('name', fn_name)
             declaration['return'] = list(func.get('return', return_type))
             declaration['variants'] = func.get('variants', ['method', 'function'])
-            declaration['template_scalar'] = func.get('template_scalar')
             declaration['arguments'] = func.get('arguments', parse_arguments(arguments, func))
             declaration['type_method_definition_dispatch'] = func.get('dispatch', declaration['name'])
             declarations.append(declaration)

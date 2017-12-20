@@ -11,7 +11,7 @@ import torch.cuda
 import torch.multiprocessing as mp
 from torch.autograd import Variable
 from torch.nn import Parameter
-from common import TestCase, run_tests
+from common import TestCase, run_tests, IS_WINDOWS
 
 
 TEST_REPEATS = 30
@@ -290,6 +290,7 @@ class TestMultiprocessing(TestCase):
         p.join(1)
         self.assertEqual(t, torch.ones(5, 5) * 3, 0)
 
+    @unittest.skipIf(IS_WINDOWS, 'NYI: not supported on Windows')
     @unittest.skipIf(not TEST_CUDA_IPC, 'CUDA IPC not available')
     def test_cuda(self):
         torch.cuda.FloatTensor([1])  # initialize CUDA outside of leak checker
@@ -324,6 +325,7 @@ class TestMultiprocessing(TestCase):
             self.assertEqual(tensor_size, 5)
             self.assertEqual(storage_size, 5)
 
+    @unittest.skipIf(IS_WINDOWS, 'NYI: not supported on Windows')
     @unittest.skipIf(not torch.cuda.is_available(), 'CUDA not available')
     def test_cuda_bad_call(self):
         # Initialize CUDA
@@ -336,6 +338,7 @@ class TestMultiprocessing(TestCase):
         p.join()
         self.assertIsInstance(outq.get(), RuntimeError)
 
+    @unittest.skipIf(IS_WINDOWS, 'NYI: not supported on Windows')
     @unittest.skipIf(not TEST_CUDA_IPC, 'CUDA IPC not available')
     def test_event(self):
         ctx = mp.get_context('spawn')

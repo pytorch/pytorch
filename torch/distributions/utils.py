@@ -3,6 +3,15 @@ from numbers import Number
 import torch
 from torch.autograd import Variable
 
+# TODO Remove this once torch.digamma is implemented.
+try:
+    from torch import digamma
+except ImportError:
+    def digamma(x):
+        """Finite difference approximation of digamma."""
+        eps = x * 0.01
+        return (torch.lgamma(x + eps) - torch.lgamma(x - eps)) / (2 * eps)
+
 
 def expand_n(v, n):
     r"""

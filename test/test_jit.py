@@ -7,7 +7,7 @@ from contextlib import contextmanager
 from itertools import product
 from torch.autograd import Variable, Function
 from torch.autograd.function import traceable
-from common import TestCase, run_tests
+from common import TestCase, run_tests, IS_WINDOWS
 import io
 import sys
 
@@ -26,8 +26,6 @@ if torch.cuda.is_available():
         major = torch.cuda.get_device_capability(d)[0]
         if (CUDA_VERSION < 8000 and major >= 6) or (CUDA_VERSION < 9000 and major >= 7):
             RUN_CUDA = False
-
-IS_WINDOWS = sys.platform == "win32"
 
 
 def LSTMCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
@@ -295,6 +293,7 @@ class TestJit(TestCase):
         self.assertEqual(z, torch.sigmoid(torch.tanh(x * (x + y))))
         self.assertEqual(z, z2)
 
+    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     def test_compile_addc(self):
         x = Variable(torch.Tensor([0.4]), requires_grad=True).float().cuda()
@@ -767,6 +766,7 @@ class TestJit(TestCase):
         assert(torch.equal(torch.ones([2, 2]), t_node.t("a")))
         self.assertExpected(str(g2))
 
+    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "cpp tests require CUDA")
     def test_cpp(self):
         torch._C._jit_run_cpp_tests()

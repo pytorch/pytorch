@@ -34,6 +34,14 @@
 # define TH_API TH_EXTERNC
 #endif
 
+#ifdef _WIN32
+# define TH_NO_RETURN __declspec(noreturn)
+# define TH_UNREACHABLE
+#else
+# define TH_NO_RETURN __attribute__((noreturn))
+# define TH_UNREACHABLE __builtin_unreachable();
+#endif
+
 #ifndef M_PI
 # define M_PI 3.14159265358979323846
 #endif
@@ -53,7 +61,7 @@ typedef struct {
 
 TH_API double THLog1p(const double x);
 TH_API THDescBuff _THSizeDesc(const int64_t *size, const int64_t ndim);
-TH_API void _THError(const char *file, const int line, const char *fmt, ...);
+TH_API TH_NO_RETURN void _THError(const char *file, const int line, const char *fmt, ...);
 TH_API void _THAssertionFailed(const char *file, const int line, const char *exp, const char *fmt, ...);
 TH_API void THSetErrorHandler(THErrorHandlerFunction new_handler, void *data);
 TH_API void THSetDefaultErrorHandler(THErrorHandlerFunction new_handler, void *data);
@@ -78,6 +86,12 @@ TH_API void THInferNumThreads(void);
 #define THArgCheck(...)                                               \
 do {                                                                  \
   _THArgCheck(__FILE__, __LINE__, __VA_ARGS__);                       \
+} while(0)
+
+#define THArgError(...)                                               \
+do {                                                                  \
+  _THArgCheck(__FILE__, __LINE__, false, __VA_ARGS__);                \
+  TH_UNREACHABLE                                                      \
 } while(0)
 
 #define THArgCheckWithCleanup(condition, cleanup, ...)                \

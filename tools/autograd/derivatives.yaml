@@ -745,8 +745,32 @@
 - name: threshold_(Tensor self, Scalar threshold, Scalar value)
   self: threshold_backward(grad, output, threshold, value)
 
+- name: reflection_pad1d(Tensor self, IntList padding)
+  self: reflection_pad1d_backward(grad, self, padding)
+
+- name: reflection_pad2d(Tensor self, IntList padding)
+  self: reflection_pad2d_backward(grad, self, padding)
+
+- name: replication_pad1d(Tensor self, IntList padding)
+  self: replication_pad1d_backward(grad, self, padding)
+
+- name: replication_pad2d(Tensor self, IntList padding)
+  self: replication_pad2d_backward(grad, self, padding)
+
+- name: replication_pad3d(Tensor self, IntList padding)
+  self: replication_pad3d_backward(grad, self, padding)
+
+- name: adaptive_avg_pool2d(Tensor self, IntList output_size)
+  self: adaptive_avg_pool2d_backward(grad, self)
+
+- name: adaptive_avg_pool3d(Tensor self, IntList output_size)
+  self: adaptive_avg_pool3d_backward(grad, self)
+
 - name: adaptive_max_pool2d(Tensor self, IntList output_size)
   self: adaptive_max_pool2d_backward(grad, self, indices)
+
+- name: adaptive_max_pool3d(Tensor self, IntList output_size)
+  self: adaptive_max_pool3d_backward(grad, self, indices)
 
 - name: avg_pool2d(Tensor self, IntList kernel_size, IntList stride, IntList padding, bool ceil_mode, bool count_include_pad)
   self: avg_pool2d_backward(grad, self, kernel_size, stride, padding, ceil_mode, count_include_pad)
@@ -789,6 +813,22 @@
   self, weight, bias: conv_dilated3d_backward(grad, self, weight, kernel_size, stride, padding, dilation, columns, ones, grad_input_mask)
 
 # NN double backwards support
+
+- name: adaptive_avg_pool2d_backward(Tensor grad_output, Tensor self)
+  grad_output: adaptive_avg_pool2d(grad, { grad_output.size(-2), grad_output.size(-1) })
+  self: zeros_like(self)
+
+- name: adaptive_avg_pool3d_backward(Tensor grad_output, Tensor self)
+  grad_output: adaptive_avg_pool3d(grad, { grad_output.size(-3), grad_output.size(-2), grad_output.size(-1) })
+  self: zeros_like(self)
+
+- name: adaptive_max_pool2d_backward(Tensor grad_output, Tensor self, Tensor indices)
+  grad_output: adaptive_max_pool_double_backward(grad, self, indices, 2)
+  self: zeros_like(self)
+
+- name: adaptive_max_pool3d_backward(Tensor grad_output, Tensor self, Tensor indices)
+  grad_output: adaptive_max_pool_double_backward(grad, self, indices, 3)
+  self: zeros_like(self)
 
 - name: avg_pool2d_backward(Tensor grad_output, Tensor self, IntList kernel_size, IntList stride, IntList padding, bool ceil_mode, bool count_include_pad)
   grad_output: avg_pool2d(grad, kernel_size, stride, padding, ceil_mode, count_include_pad)
@@ -860,6 +900,26 @@
 - name: rrelu_backward(Tensor grad_output, Tensor self, Scalar lower, Scalar upper, bool training, Tensor noise)
   grad_output: rrelu_backward(grad, self, lower, upper, training, noise)
   self: zeros_like(grad)
+
+- name: reflection_pad1d_backward(Tensor grad_output, Tensor self, IntList padding)
+  grad_output: reflection_pad1d(grad, padding)
+  self: zeros_like(self)
+
+- name: reflection_pad2d_backward(Tensor grad_output, Tensor self, IntList padding)
+  grad_output: reflection_pad2d(grad, padding)
+  self: zeros_like(self)
+
+- name: replication_pad1d_backward(Tensor grad_output, Tensor self, IntList padding)
+  grad_output: replication_pad1d(grad, padding)
+  self: zeros_like(self)
+
+- name: replication_pad2d_backward(Tensor grad_output, Tensor self, IntList padding)
+  grad_output: replication_pad2d(grad, padding)
+  self: zeros_like(self)
+
+- name: replication_pad3d_backward(Tensor grad_output, Tensor self, IntList padding)
+  grad_output: replication_pad3d(grad, padding)
+  self: zeros_like(self)
 
 - name: smooth_l1_loss_backward(Tensor grad_output, Tensor self, Tensor target, bool size_average, bool reduce)
   grad_output: smooth_l1_loss_double_backward_grad_output(grad, grad_output, self, target, size_average, reduce)

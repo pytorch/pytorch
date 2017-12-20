@@ -46,6 +46,12 @@ class Bernoulli(Distribution):
         # evaluate using the values
         return log_pmf.gather(-1, value.unsqueeze(-1).long()).squeeze(-1)
 
+    def entropy(self):
+        p = torch.stack([self.probs, 1.0 - self.probs])
+        p_log_p = torch.log(p) * p
+        p_log_p[p == 0] = 0
+        return -p_log_p.sum(0)
+
     def enumerate_support(self):
         values = torch.arange(2).long()
         values = values.view((-1,) + (1,) * len(self._batch_shape))
