@@ -37,3 +37,6 @@ class Laplace(Distribution):
     def log_prob(self, value):
         self._validate_log_prob_arg(value)
         return -torch.log(2 * self.scale) - torch.abs(value - self.loc) / self.scale
+
+    def entropy(self):
+        return 1 + torch.log(2 * self.scale)
