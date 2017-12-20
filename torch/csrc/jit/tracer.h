@@ -169,7 +169,7 @@ inline Value* getOutputTrace(const std::shared_ptr<TracingState>& state, const V
     std::ostringstream os;
     os << "output " << output_no << " of traced region did not have observable "
        << "data dependence with trace inputs; this probably indicates your program "
-       << "cannot be understood by the tracer.  Contents of variable:\n" << var;
+       << "cannot be understood by the tracer.";
     throw std::runtime_error(os.str());
   }
   return vts->trace;
