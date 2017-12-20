@@ -236,21 +236,21 @@ PyObject * THCPModule_manualSeedAll(PyObject *_unused, PyObject *seed)
 PyObject * THCPModule_seed(PyObject *_unused)
 {
   HANDLE_TH_ERRORS
-  return PyLong_FromUnsignedLong(THCRandom_seed(state));
+  return THPUtils_packUInt64(THCRandom_seed(state));
   END_HANDLE_TH_ERRORS
 }
 
 PyObject * THCPModule_seedAll(PyObject *_unused)
 {
   HANDLE_TH_ERRORS
-  return PyLong_FromUnsignedLong(THCRandom_seedAll(state));
+  return THPUtils_packUInt64(THCRandom_seedAll(state));
   END_HANDLE_TH_ERRORS
 }
 
 PyObject * THCPModule_initialSeed(PyObject *_unused)
 {
   HANDLE_TH_ERRORS
-  return PyLong_FromUnsignedLong(THCRandom_initialSeed(state));
+  return THPUtils_packUInt64(THCRandom_initialSeed(state));
   END_HANDLE_TH_ERRORS
 }
 

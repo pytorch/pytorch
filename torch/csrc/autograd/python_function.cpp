@@ -1021,7 +1021,7 @@ PyObject *THPFunction_next_functions(THPFunction *self, void *_unused)
     PyObject* fn = functionToPyObject(next_fns[i].first);
     if (!fn) return NULL;
     PyTuple_SET_ITEM(fn_tuple.get(), 0, fn);
-    PyTuple_SET_ITEM(fn_tuple.get(), 1, PyInt_FromLong(next_fns[i].second));
+    PyTuple_SET_ITEM(fn_tuple.get(), 1, THPUtils_packInt64(next_fns[i].second));
     PyTuple_SET_ITEM(result.get(), i, fn_tuple.release());
   }
   return result.release();
