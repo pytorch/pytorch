@@ -29,7 +29,7 @@ autograd::variable_list InterpreterAutogradFunction::apply(
   // Validate inputs
   std::vector<at::Tensor> tinputs;
   tinputs.reserve(inputs.size());
-  TORCH_ASSERT(inputs.size() == num_inputs);
+  TORCH_ASSERT(inputs.size() == static_cast<std::size_t>(num_inputs));
   TORCH_ASSERT(inputs.size() == details.input_flags.size());
   for (std::size_t i = 0; i < (std::size_t)inputs.size(); ++i) {
     if(stage_ > 0 && !inputs[i].defined() && !details.input_flags[i].was_null) {
