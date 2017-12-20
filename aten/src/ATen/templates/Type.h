@@ -14,6 +14,7 @@
 #include "ATen/ScalarType.h"
 #include "ATen/Scalar.h"
 #include "ATen/Tensor.h"
+#include "ATen/Allocator.h"
 
 // To solve the conflict of s_addr in inaddr.h
 #ifdef _MSC_VER
