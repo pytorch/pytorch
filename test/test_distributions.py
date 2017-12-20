@@ -1,13 +1,12 @@
 import math
 import unittest
-import warnings
 from itertools import product
 
 import torch
 from common import TestCase, run_tests
 from torch.autograd import Variable, gradcheck
 from torch.distributions import (Bernoulli, Beta, Categorical, Dirichlet,
-                                 Distribution, Gamma, Normal, Exponential)
+                                 Exponential, Gamma, Laplace, Normal)
 
 TEST_NUMPY = True
 try:
@@ -248,6 +247,58 @@ class TestDistributions(TestCase):
                                         scipy.stats.expon(scale=1. / rate),
                                         'Exponential(rate={})'.format(rate))
 
+    def test_laplace(self):
+        mean = Variable(torch.randn(5, 5), requires_grad=True)
+        std = Variable(torch.randn(5, 5).abs(), requires_grad=True)
+        mean_1d = Variable(torch.randn(1), requires_grad=True)
+        std_1d = Variable(torch.randn(1), requires_grad=True)
+        mean_delta = torch.Tensor([1.0, 0.0])
+        std_delta = torch.Tensor([1e-5, 1e-5])
+        self.assertEqual(Laplace(mean, std).sample().size(), (5, 5))
+        self.assertEqual(Laplace(mean, std).sample_n(7).size(), (7, 5, 5))
+        self.assertEqual(Laplace(mean_1d, std_1d).sample_n(1).size(), (1, 1))
+        self.assertEqual(Laplace(mean_1d, std_1d).sample().size(), (1,))
+        self.assertEqual(Laplace(0.2, .6).sample_n(1).size(), (1,))
+        self.assertEqual(Laplace(-0.7, 50.0).sample_n(1).size(), (1,))
+
+        # sample check for extreme value of mean, std
+        self._set_rng_seed()
+        self.assertEqual(Laplace(mean_delta, std_delta).sample(sample_shape=(1, 2)),
+                         torch.Tensor([[[1.0, 0.0], [1.0, 0.0]]]),
+                         prec=1e-4)
+
+        self._gradcheck_log_prob(Laplace, (mean, std))
+        self._gradcheck_log_prob(Laplace, (mean, 1.0))
+        self._gradcheck_log_prob(Laplace, (0.0, std))
+
+        state = torch.get_rng_state()
+        eps = torch.ones_like(mean).uniform_(-0.5, 0.5)
+        torch.set_rng_state(state)
+        z = Laplace(mean, std).rsample()
+        z.backward(torch.ones_like(z))
+        self.assertEqual(mean.grad, torch.ones_like(mean))
+        self.assertEqual(std.grad, -eps.sign() * torch.log(1 - 2 * eps.abs()))
+        mean.grad.zero_()
+        std.grad.zero_()
+        self.assertEqual(z.size(), (5, 5))
+
+        def ref_log_prob(idx, x, log_prob):
+            m = mean.data.view(-1)[idx]
+            s = std.data.view(-1)[idx]
+            expected = (-math.log(2 * s) - abs(x - m) / s)
+            self.assertAlmostEqual(log_prob, expected, places=3)
+
+        self._check_log_prob(Laplace(mean, std), ref_log_prob)
+
+    # This is a randomized test.
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    def test_laplace_sample(self):
+        self._set_rng_seed(1)
+        for mean, std in product([-1.0, 0.0, 1.0], [0.1, 1.0, 10.0]):
+            self._check_sampler_sampler(Laplace(mean, std),
+                                        scipy.stats.laplace(loc=mean, scale=std),
+                                        'Laplace(loc={}, scale={})'.format(mean, std))
+
     # This is a randomized test.
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_gamma_shape(self):
@@ -357,7 +408,7 @@ class TestDistributions(TestCase):
             dist = Beta(alpha, beta)
             x = dist.sample()
             actual_log_prob = dist.log_prob(x).sum()
-            expected_log_prob = scipy.stats.beta.logpdf(x, alpha, beta)
+            expected_log_prob = scipy.stats.beta.logpdf(x, alpha, beta)[0]
             self.assertAlmostEqual(actual_log_prob, expected_log_prob, places=3)
 
     # This is a randomized test.
