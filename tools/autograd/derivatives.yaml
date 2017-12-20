@@ -696,11 +696,11 @@
 - name: soft_margin_loss(Tensor self, Tensor target, bool size_average)
   self: soft_margin_loss_backward(self, target, size_average).mul_(grad)
 
-- name: elu(Tensor self, Scalar alpha)
-  self: elu_backward(grad, alpha, output)
+- name: elu(Tensor self, Scalar alpha, Scalar scale)
+  self: elu_backward(grad, alpha, scale, output)
 
-- name: elu_(Tensor self, Scalar alpha)
-  self: elu_backward(grad, alpha, output)
+- name: elu_(Tensor self, Scalar alpha, Scalar scale)
+  self: elu_backward(grad, alpha, scale, output)
 
 - name: glu(Tensor self, int64_t dim)
   self: glu_backward(grad, self, dim)
@@ -884,8 +884,8 @@
   grad_output: avg_pool3d(grad, kernel_size, stride, padding, ceil_mode, count_include_pad)
   self: zeros_like(self)
 
-- name: elu_backward(Tensor grad_output, Scalar alpha, Tensor output)
-  grad_output: elu_backward(grad, alpha, output)
+- name: elu_backward(Tensor grad_output, Scalar alpha, Scalar scale, Tensor output)
+  grad_output: elu_backward(grad, alpha, scale, output)
   output: grad * grad_output * (output < 0).toType(grad.type())
 
 - name: glu_backward(Tensor grad_output, Tensor self, int64_t dim)
