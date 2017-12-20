@@ -19,8 +19,6 @@ from tools.setup_helpers.cuda import WITH_CUDA, CUDA_HOME, CUDA_VERSION
 from tools.setup_helpers.cudnn import WITH_CUDNN, CUDNN_LIB_DIR, CUDNN_INCLUDE_DIR
 from tools.setup_helpers.nccl import WITH_NCCL, WITH_SYSTEM_NCCL, NCCL_LIB_DIR, \
     NCCL_INCLUDE_DIR, NCCL_ROOT_DIR, NCCL_SYSTEM_LIB
-from tools.setup_helpers.nnpack import WITH_NNPACK, NNPACK_LIB_PATHS, \
-    NNPACK_INCLUDE_DIRS
 from tools.setup_helpers.nvtoolext import NVTOOLEXT_HOME
 from tools.setup_helpers.split_types import split_types
 from tools.setup_helpers.generate_code import generate_code
@@ -287,13 +285,6 @@ class build_ext(build_ext_parent):
             monkey_patch_THD_link_flags()
         else:
             print('-- Building without distributed package')
-
-        # Do we actually need this here?
-        if WITH_NNPACK:
-            nnpack_dir = NNPACK_LIB_PATHS[0]
-            print('-- Detected NNPACK at ' + nnpack_dir)
-        else:
-            print('-- Not using NNPACK')
 
         generate_code(ninja_global)
 
@@ -592,14 +583,6 @@ if WITH_CUDNN:
     if not IS_WINDOWS:
         extra_link_args.insert(0, '-Wl,-rpath,' + CUDNN_LIB_DIR)
     extra_compile_args += ['-DWITH_CUDNN']
-
-if WITH_NNPACK:
-    include_dirs.extend(NNPACK_INCLUDE_DIRS)
-    main_link_args.extend(NNPACK_LIB_PATHS)
-    main_sources += [
-        "torch/csrc/nnpack/NNPACK.cpp",
-    ]
-    extra_compile_args += ['-DWITH_NNPACK']
 
 if DEBUG:
     if IS_WINDOWS:
