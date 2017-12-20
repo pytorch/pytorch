@@ -38,6 +38,14 @@ FunctionParameter::FunctionParameter(const std::string& fmt, bool keyword_only)
   }
 
   auto type_str = fmt.substr(0, space);
+
+  auto question = type_str.find('?');
+  if (question != std::string::npos) {
+    allow_none = true;
+    type_str = type_str.substr(0, question);
+  }
+
+  // Parse and remove brackets from type_str
   auto bracket = type_str.find('[');
   if (bracket != std::string::npos) {
     auto size_str = type_str.substr(bracket + 1, type_str.length() - bracket - 2);

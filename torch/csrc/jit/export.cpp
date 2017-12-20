@@ -7,7 +7,6 @@
 #include "torch/csrc/utils/python_strings.h"
 #include "torch/csrc/Exceptions.h"
 
-#include "torch/csrc/autograd/functions/convolution.h"
 #include "torch/csrc/utils/functional.h"
 #include <ATen/ATen.h>
 

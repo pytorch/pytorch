@@ -1,19 +1,16 @@
 # THNN
 
-THNN is a library that gathers nn's C implementations of neural network modules. It's entirely free of Lua dependency and therefore can be used in any application that has a C FFI. Please note that it only contains quite low level functions, and an object oriented C/C++ wrapper will be created soon as another library.
+THNN is a library that gathers nn's C implementations of neural network modules. It's entirely free of Lua dependency and therefore can be used in any application that has a C FFI. Please note that it only contains quite low level functions; most users will want to use ATen, which provides a C++ wrapper around these functions.
 
-There is also a CUDA counterpart of THNN (THCUNN) in the [cunn repository](https://github.com/torch/cunn/tree/master/lib/THCUNN).
+There is also a CUDA counterpart of THNN, THCUNN.
+
+Looking to add an implementation?  Consider writing an ATen native function
+instead!  See [../ATen/native](ATen/native).
 
 ## Links
 
 * [API reference](doc/api_reference.md)
 * [Style guidelines](doc/style_guidelines.md)
-
-## Motivation
-
-Torch's neural network package (nn) provided many optimized C implementations of modules, but the source files contained Lua specific code and headers so they couldn't be easily compiled and included anywhere else.
-
-THNN is based on the same code, but is written in pure C, so it can be easily included in other code. **Future C implementations should be committed to THNN.**
 
 ## API
 
@@ -28,5 +25,3 @@ For information on argument types please check the [API reference](doc/api_refer
 ## Developer docs
 
 * [Style guidelines](doc/style_guidelines.md)
-
-This section will be expanded when FFI refactoring will be finished.

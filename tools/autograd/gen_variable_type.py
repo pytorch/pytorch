@@ -495,8 +495,10 @@ def load_derivatives(path, declarations_by_signature, declarations_by_name):
 
         declarations = declarations_by_signature[signature]
         if len(declarations) == 0:
-            warnings.warn('no ATen declaration found for: {}'.format(signature))
-            continue
+            avail = [k for k, v in declarations_by_signature.items()
+                     if k.startswith(defn_name + '(') and len(v) > 0]
+            raise RuntimeError('no ATen declaration found for: {}.  '
+                               'Available signatures: {}'.format(signature, ', '.join(avail)))
         canonical = canonical_declaration(declarations, defn_name)
 
         # TODO: Check the types line up
@@ -1045,6 +1047,8 @@ def load_aten_declarations(path):
                 typed_args.append('*')
                 positional = False
             typename = arg['simple_type']
+            if arg.get('is_nullable'):
+                typename = '{}?'.format(typename)
             if arg.get('size') is not None:
                 typename = '{}[{}]'.format(typename, arg['size'])
             param = typename + ' ' + arg['name']
@@ -1059,7 +1063,10 @@ def load_aten_declarations(path):
                 param += '=' + str(default)
             typed_args.append(param)
 
-        # Python function prototype
+        # Python function prototype.
+        # This is the string that we give to FunctionParameter, which is
+        # then parsed into the actual structure which we do parsing
+        # with.
         declaration['typed_args'] = typed_args
         declaration['prototype'] = FUNCTION_PROTOTYPE.substitute(declaration)
 

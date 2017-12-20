@@ -1,6 +1,61 @@
-#include "NNPACK.h"
+#include <ATen/Config.h>
+#include <ATen/ATen.h>
 
-#include "TH/TH.h"
+#if !AT_NNPACK_ENABLED()
+
+namespace at { namespace native {
+
+at::Tensor nnpack_spatial_convolution(
+    const at::Tensor& input,
+    const at::Tensor& weight,
+    const at::Tensor& bias,
+    int64_t kW,
+    int64_t kH,
+    int64_t padW,
+    int64_t padH) {
+  throw std::runtime_error("nnpack_spatial_convolution: ATen not compiled with NNPACK support");
+}
+
+at::Tensor nnpack_spatial_convolution_backward_input(
+    const at::Tensor& input,
+    const at::Tensor& gradOutput,
+    const at::Tensor& weight,
+    int64_t kW,
+    int64_t kH,
+    int64_t padW,
+    int64_t padH) {
+  throw std::runtime_error("nnpack_spatial_convolution_backward_input: ATen not compiled with NNPACK support");
+}
+
+at::Tensor nnpack_spatial_convolution_backward_weight(
+    const at::Tensor& input,
+    at::IntList weight_size,
+    const at::Tensor& gradOutput,
+    int64_t kW,
+    int64_t kH,
+    int64_t padW,
+    int64_t padH) {
+  throw std::runtime_error("nnpack_spatial_convolution_backward_weight: ATen not compiled with NNPACK support");
+}
+
+std::tuple<at::Tensor,at::Tensor,at::Tensor> nnpack_spatial_convolution_backward(
+    const at::Tensor& input,
+    const at::Tensor& gradOutput,
+    const at::Tensor& weight,
+    int64_t kW,
+    int64_t kH,
+    int64_t padW,
+    int64_t padH,
+    std::array<bool,3> output_mask) {
+  throw std::runtime_error("nnpack_spatial_convolution_backward: ATen not compiled with NNPACK support");
+}
+
+}} // at::native
+
+#else
+
+#include "nnpack.h"
+
 #include <stdlib.h>
 
 #ifdef _OPENMP
@@ -9,8 +64,8 @@
 #include <thread>
 #endif
 
-namespace torch {
-namespace nnpack {
+namespace at {
+namespace native {
 
 // Stolen from Caffe2
 static pthreadpool_t nnpack_threadpool_ = nullptr;
@@ -53,15 +108,46 @@ static inline void allocate_workspace() {
   posix_memalign(&workspace, nnpack_memory_alignment_boundary, workspace_size);
 }
 
-void SpatialConvolution_updateOutput(
-    at::Tensor& input,
-    at::Tensor& output,
-    at::Tensor& weight,
-    at::Tensor& bias,
-    int kW,
-    int kH,
-    int padW,
-    int padH) {
+constexpr int input_batch_size_dim = 0;
+constexpr int input_channels_dim = 1;
+constexpr int input_height_dim = 2;
+constexpr int input_width_dim = 3;
+constexpr int output_batch_size_dim = 0;
+constexpr int output_channels_dim = 1;
+constexpr int output_height_dim = 2;
+constexpr int output_width_dim = 3;
+constexpr int weight_output_channels_dim = 0;
+constexpr int weight_input_channels_dim = 1;
+constexpr int weight_height_dim = 2;
+constexpr int weight_width_dim = 3;
+
+// Often written as 2 + max_dim (extra dims for batch size and channels)
+constexpr int max_dim = 3;
+
+std::vector<int64_t> conv_output_size(
+    IntList input_size, IntList weight_size,
+    int64_t kW, int64_t kH, int64_t padW, int64_t padH
+) {
+  auto dim = input_size.size();
+  std::vector<int64_t> output_size(dim);
+  output_size[output_batch_size_dim] = input_size[input_batch_size_dim];
+  output_size[output_channels_dim] = weight_size[weight_output_channels_dim];
+  output_size[output_height_dim] = input_size[input_height_dim] + 2 * padH - (kH - 1);
+  output_size[output_width_dim]  = input_size[input_width_dim]  + 2 * padW - (kW - 1);
+  return output_size;
+}
+
+Tensor nnpack_spatial_convolution(
+    const at::Tensor& input,
+    const at::Tensor& weight,
+    const at::Tensor& bias,
+    int64_t kW,
+    int64_t kH,
+    int64_t padW,
+    int64_t padH) {
+
+  at::Tensor output = input.type().tensor(conv_output_size(input.sizes(), weight.sizes(), kW, kH, padW, padH));
+
   // Our input Tensor must be in the form N,C,H,W
   if (input.ndimension() != 4) {
     throw std::runtime_error("NNPack convolutionOutput expects 4D input Tensor N,C,H,W");
@@ -209,17 +295,21 @@ void SpatialConvolution_updateOutput(
   if (status != nnp_status_success) {
     throw std::runtime_error("NNPACK SpatialConvolution_updateOutput failed");
   }
+
+  return output;
 }
 
-void SpatialConvolution_updateGradInput(
-    at::Tensor& input,
-    at::Tensor& gradOutput,
-    at::Tensor& gradInput,
-    at::Tensor& weight,
-    int kW,
-    int kH,
-    int padW,
-    int padH) {
+Tensor nnpack_spatial_convolution_backward_input(
+    const at::Tensor& input,
+    const at::Tensor& gradOutput,
+    const at::Tensor& weight,
+    int64_t kW,
+    int64_t kH,
+    int64_t padW,
+    int64_t padH) {
+
+  at::Tensor gradInput = input.type().tensor(input.sizes());
+
   // Our input and gradInput Tensors must be in the form N,C,H,W
   if (input.ndimension() != 4) {
     throw std::runtime_error("NNPack convolution updateGradInput expects 4D input Tensor N,C,H,W");
@@ -335,16 +425,21 @@ void SpatialConvolution_updateGradInput(
   if (status != nnp_status_success) {
     throw std::runtime_error("NNPACK SpatialConvolution_updateGradInput failed");
   }
+
+  return gradInput;
 }
 
-void SpatialConvolution_accGradWeight(
-    at::Tensor& input,
-    at::Tensor& gradOutput,
-    at::Tensor& gradWeight,
-    int kW,
-    int kH,
-    int padW,
-    int padH) {
+Tensor nnpack_spatial_convolution_backward_weight(
+    const at::Tensor& input,
+    IntList weight_size,
+    const at::Tensor& gradOutput,
+    int64_t kW,
+    int64_t kH,
+    int64_t padW,
+    int64_t padH) {
+
+  at::Tensor gradWeight = input.type().tensor(weight_size);
+
   // Our input and gradInput Tensors must be in the form N,C,H,W
   if (input.ndimension() != 4) {
     throw std::runtime_error("NNPack convolutionOutput expects 4D input Tensor N,C,H,W");
@@ -451,7 +546,35 @@ void SpatialConvolution_accGradWeight(
   if (status != nnp_status_success) {
     throw std::runtime_error("NNPACK SpatialConvolution_accGradWeight failed");
   }
+
+  return gradWeight;
 }
 
-} // torch::nnpack
-} // torch
+std::tuple<Tensor,Tensor,Tensor> nnpack_spatial_convolution_backward(
+    const at::Tensor& input,
+    const at::Tensor& grad_output,
+    const at::Tensor& weight,
+    int64_t kW,
+    int64_t kH,
+    int64_t padW,
+    int64_t padH,
+    std::array<bool,3> output_mask) {
+
+  Tensor grad_input, grad_weight, grad_bias;
+  if (output_mask[0]) {
+    grad_input = at::nnpack_spatial_convolution_backward_input(input, grad_output, weight, kW, kH, padW, padH);
+  }
+  if (output_mask[1]) {
+    grad_weight = at::nnpack_spatial_convolution_backward_weight(input, weight.sizes(), grad_output, kW, kH, padW, padH);
+  }
+  if (output_mask[2]) {
+    grad_bias = grad_output.contiguous().view({grad_output.size(0), grad_output.size(1), -1}).sum(0).sum(1);
+  }
+
+  return std::tuple<Tensor,Tensor,Tensor>{grad_input, grad_weight, grad_bias};
+
+}
+
+}} // at::native
+
+#endif  // AT_NNPACK_ENABLED

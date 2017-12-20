@@ -70,7 +70,7 @@ auto BatchNormForward::apply(const variable_list& inputs) -> variable_list {
 
   if (use_cudnn && eps >= CUDNN_BN_MIN_EPSILON) {
 #ifdef WITH_CUDNN
-    output = at::cudnn_batch_norm_forward(
+    output = at::cudnn_batch_norm(
                 input, weight, bias,
                 running_mean, running_var, save_mean, save_std,
                 training, momentum, eps);

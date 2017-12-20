@@ -1336,6 +1336,7 @@ TH_API void THNN_(VolumetricAveragePooling_updateGradInput)(
                   bool ceil_mode,
                   bool count_include_pad);
 
+// VolumetricConvolution is legacy and purposefully not bound by ATen
 TH_API void THNN_(VolumetricConvolution_updateOutput)(
                   THCState *state,
                   THCTensor *input,

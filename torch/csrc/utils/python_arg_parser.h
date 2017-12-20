@@ -135,6 +135,11 @@ struct FunctionParameter {
 inline at::Tensor PythonArgs::tensor(int i) {
   if (!args[i]) return at::Tensor();
   if (!THPVariable_Check(args[i])) {
+    // NB: Are you here because you passed None to a Variable method,
+    // and you expected an undefined tensor to be returned?   Don't add
+    // a test for Py_None here; instead, you need to mark the argument
+    // as *allowing none*; you can do this by writing 'Tensor?' instead
+    // of 'Tensor' in the ATen metadata.
     type_error("expected Variable as argument %d, but got %s", i, THPUtils_typename(args[i]));
   }
   return reinterpret_cast<THPVariable*>(args[i])->cdata;

@@ -138,7 +138,7 @@ void checkAllSameGPU(CheckedFrom c, ArrayRef<TensorArg> tensors) {
 }
 
 void checkSameType(CheckedFrom c, const TensorArg& t1, const TensorArg& t2) {
-  if (t1->type().ID() != t2->type().ID()) {
+  if (t1->type() != t2->type()) {
     std::ostringstream oss;
     oss << "Expected tensor for " << t1 << " to have the same type as "
         << "tensor for " << t2 << "; but type " << t1->toString() << " "
