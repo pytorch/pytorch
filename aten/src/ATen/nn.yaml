@@ -179,7 +179,13 @@
 
 # Batch normalization
 
-- name: batch_norm(Tensor self, Tensor weight, Tensor bias, Tensor running_mean, Tensor running_var, bool training, double momentum, double eps)
+# The buffers here are somewhat hazardous, because their type will be
+# based off of self, even though you may plausibly wish running_mean
+# and running_var to have different precision than self (e.g.,
+# BatchNorm on half).  Fortunately, THNN doesn't actually ever do this,
+# so the buffer allocation code is "correct".  If you ever do fix this,
+# you should just port the function entirely to a native ATen function.
+- name: thnn_batch_norm(Tensor self, Tensor weight, Tensor bias, Tensor running_mean, Tensor running_var, bool training, double momentum, double eps)
   cname: BatchNormalization
   buffers: [save_mean, save_std]
 

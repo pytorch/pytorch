@@ -712,11 +712,16 @@ std::tuple<Tensor, Tensor, Tensor> batchnorm_double_backward(
     const Tensor & ggB,
     const Tensor & gO,
     double eps,
-    const Tensor & save_mean, // not Variable
-    const Tensor & save_std, // not Variable
-    const Tensor & running_mean, // not Variable
-    const Tensor & running_var, // not Variable
+    const Tensor & save_mean_v,
+    const Tensor & save_std_v,
+    const Tensor & running_mean_v,
+    const Tensor & running_var_v,
     bool training) {
+
+  const Tensor& save_mean = static_cast<const Variable&>(save_mean_v).data();
+  const Tensor& save_std = static_cast<const Variable&>(save_std_v).data();
+  const Tensor& running_mean = static_cast<const Variable&>(running_mean_v).data();
+  const Tensor& running_var = static_cast<const Variable&>(running_var_v).data();
 
   bool affine = gamma.defined();
   // TODO: Do we have a ScalarOrTensor type?  Would such a thing exist?

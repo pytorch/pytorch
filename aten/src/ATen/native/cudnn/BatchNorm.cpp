@@ -8,16 +8,16 @@ namespace at { namespace native {
 
 // See Note [ATen preprocessor philosophy]
 
-Tensor cudnn_batch_norm_forward(
+std::tuple<Tensor, Tensor, Tensor> cudnn_batch_norm(
     const Tensor& input, const Tensor& weight,
     const Tensor& bias, const Tensor& running_mean, const Tensor& running_var,
-    const Tensor& save_mean, const Tensor& save_var, bool training,
-    double exponential_average_factor, double epsilon) {
-  throw std::runtime_error("cudnn_batch_norm_forward: ATen not compiled with cuDNN support");
+    bool training, double exponential_average_factor, double epsilon) {
+  throw std::runtime_error("cudnn_batch_norm: ATen not compiled with cuDNN support");
 }
 
 std::tuple<Tensor, Tensor, Tensor> cudnn_batch_norm_backward(
     const Tensor& input, const Tensor& grad_output, const Tensor& weight,
+    const Tensor& running_mean, const Tensor& running_var,
     const Tensor& save_mean, const Tensor& save_var, bool training,
     double epsilon) {
   throw std::runtime_error("cudnn_batch_norm_backward: ATen not compiled with cuDNN support");
@@ -47,38 +47,32 @@ Tensor expandScale(const Tensor& t, int64_t dim) {
 
 }  // namespace
 
-Tensor cudnn_batch_norm_forward(
+std::tuple<Tensor, Tensor, Tensor> cudnn_batch_norm(
     const Tensor& input_t, const Tensor& weight_t,
     const Tensor& bias_t, const Tensor& running_mean_t, const Tensor& running_var_t,
-    const Tensor& save_mean_t, const Tensor& save_var_t, bool training,
-    double exponential_average_factor, double epsilon)
+    bool training, double exponential_average_factor, double epsilon)
 {
   TensorArg input{ input_t, "input", 1 },
             weight{ weight_t, "weight", 2 },
             bias{ bias_t, "bias", 3 },
             running_mean{ running_mean_t, "running_mean", 4 },
-            running_var{ running_var_t, "running_var", 5 },
-            save_mean{ save_mean_t, "save_mean", 6 },
-            save_var{ save_var_t, "save_var", 7 };
-  CheckedFrom c = "cudnn_batch_norm_forward";
+            running_var{ running_var_t, "running_var", 5 };
+  CheckedFrom c = "cudnn_batch_norm";
   setCuDNNStreamToCurrent();
 
   checkAllDefined(c, {input, weight, bias, running_mean, running_var});
-  if (training) {
-    checkAllDefined(c, {save_mean, save_var});
-  }
-  checkAllSameGPU(c, {input, weight, bias, running_mean, running_var, save_mean, save_var});
+  checkAllSameGPU(c, {input, weight, bias, running_mean, running_var});
   if (input->type().scalarType() == ScalarType::Half) {
     checkScalarType(c, weight, ScalarType::Float);
   } else {
     checkAllSameType(c, {input, weight});
   }
-  checkAllSameType(c, {weight, bias, running_mean, running_var, save_mean, save_var});
+  checkAllSameType(c, {weight, bias, running_mean, running_var});
   // TODO: is weight required to be contiguous?
-  checkAllContiguous(c, {input, weight, bias, running_mean, running_var, save_mean, save_var});
+  checkAllContiguous(c, {input, weight, bias, running_mean, running_var});
   checkDimRange(c, input, 2, 6 /* exclusive */);
   auto num_features = input->size(1);
-  for (auto t : {weight, bias, running_mean, running_var, save_mean, save_var}) {
+  for (auto t : {weight, bias, running_mean, running_var}) {
     checkNumel(c, t, num_features);
   }
 
@@ -103,6 +97,15 @@ Tensor cudnn_batch_norm_forward(
 
   Constant one(dataType, 1);
   Constant zero(dataType, 0);
+
+  // Though technically we only need to allocate this for training,
+  //  (1) THNN batch normalization expects non-undefined tensors for
+  //  backwards (which we will pass these to, if !training, because
+  //  CuDNN backwards with !training doesn't gradcheck), and
+  //  (2) These are pretty small tensors, no big deal.
+  Tensor save_mean = running_mean_t.type().tensor(running_mean_t.sizes());
+  Tensor save_var = running_var_t.type().tensor(running_var_t.sizes());
+
   if (training) {
     CUDNN_CHECK(cudnnBatchNormalizationForwardTraining(
       handle, mode, &one, &zero,
@@ -115,8 +118,8 @@ Tensor cudnn_batch_norm_forward(
       running_mean->data_ptr(),
       running_var->data_ptr(),
       epsilon,
-      save_mean->data_ptr(),
-      save_var->data_ptr()));
+      save_mean.data_ptr(),
+      save_var.data_ptr()));
   } else {
     CUDNN_CHECK(cudnnBatchNormalizationForwardInference(
       handle, mode, &one, &zero,
@@ -130,11 +133,17 @@ Tensor cudnn_batch_norm_forward(
       epsilon));
   }
 
-  return output_t;
+  // save_mean and save_var can be undefined
+  // If this causes problems, we can initialize them to empty tensors
+  // of the correct type
+  return std::tuple<Tensor, Tensor, Tensor>{output_t, save_mean, save_var};
 }
 
 std::tuple<Tensor, Tensor, Tensor> cudnn_batch_norm_backward(
     const Tensor& input_t, const Tensor& grad_output_t, const Tensor& weight_t,
+    // Unused: but we require them to be passed so that double backwards
+    // has access
+    const Tensor& running_mean, const Tensor& running_var,
     const Tensor& save_mean_t, const Tensor& save_var_t, bool training,
     double epsilon)
 {
@@ -146,7 +155,12 @@ std::tuple<Tensor, Tensor, Tensor> cudnn_batch_norm_backward(
   CheckedFrom c = "cudnn_batch_norm_backward";
   setCuDNNStreamToCurrent();
 
-  checkAllDefined(c, {input, grad_output, weight, save_mean, save_var});
+  checkAllDefined(c, {input, grad_output, weight});
+  if (training) {
+    checkAllDefined(c, {save_mean, save_var});
+  } else {
+    throw std::runtime_error("cudnn_batch_norm_backward: !training backwards doesn't seem to work");
+  }
   checkAllSameGPU(c, {input, grad_output, weight, save_mean, save_var});
   if (input->type().scalarType() == ScalarType::Half) {
     checkScalarType(c, weight, ScalarType::Float);
@@ -161,6 +175,7 @@ std::tuple<Tensor, Tensor, Tensor> cudnn_batch_norm_backward(
   checkSameSize(c, input, grad_output);
   auto num_features = input->size(1);
   for (auto t : {weight, save_mean, save_var}) {
+    if (!t->defined()) continue;
     checkNumel(c, t, num_features);
   }
 
@@ -197,8 +212,8 @@ std::tuple<Tensor, Tensor, Tensor> cudnn_batch_norm_backward(
     grad_weight_t.data_ptr(),
     grad_bias_t.data_ptr(),
     epsilon,
-    save_mean->data_ptr(),
-    save_var->data_ptr()));
+    training ? save_mean->data_ptr() : nullptr,
+    training ? save_var->data_ptr() : nullptr));
 
   return std::tuple<Tensor,Tensor,Tensor>{grad_input_t, grad_weight_t, grad_bias_t};
 }

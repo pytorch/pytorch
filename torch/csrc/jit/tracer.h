@@ -152,6 +152,24 @@ inline Value* getValueTrace(const std::shared_ptr<TracingState>& state, const Va
   auto vts = detail::getValueState(state, var, true);
   if (vts->trace) return vts->trace;
 
+  // HACK.  In an ideal world, buffers would be wrapped in variables, permitting
+  // us to trace them just like we normally would.  In fact, internally, within
+  // ATen, buffers get precisely this treatment.
+  //
+  // However, propagating this treatment would require us to do some fairly
+  // disruptive changes to Python userland, where buffers are expected to be
+  // passed around as plain tensors inside modules.  Some day we should do
+  // this, but for now, we wrap all buffers in one-off Variables.  This means
+  // they'll show up as constants when we trace.
+  //
+  // To deal with this, we cheat a little and consult the buffer map to
+  // see if the wrapped tensor corresponds to a buffer.  If it does, use
+  // that instead of making a constant.
+  auto it = state->buffer_map.find(var.data().unsafeGetTH(false));
+  if (it != state->buffer_map.end()) {
+    return it->second;
+  }
+
   Value *constant = state->graph->appendNode(state->graph->createConstant(var.data()))->output();
   constant->inferTypeFrom(var.data());
   setValueTrace(state, var, constant);
@@ -173,15 +191,6 @@ inline Value* getOutputTrace(const std::shared_ptr<TracingState>& state, const V
     throw std::runtime_error(os.str());
   }
   return vts->trace;
-}
-
-inline Value* getBufferTrace(const std::unordered_map<void*, Value*>& buffer_map, at::Tensor buf) {
-  auto it = buffer_map.find(buf.unsafeGetTH(false));
-  if (it == buffer_map.end()) {
-    throw std::runtime_error("untraced buffer");
-  } else {
-    return it->second;
-  }
 }
 
 // Only one field may be non-null
