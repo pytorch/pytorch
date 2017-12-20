@@ -123,7 +123,7 @@
 
 # TODO: Why does kW come before kH?  Hella confusing, because it
 # doesn't match the input layout.
-- func: nnpack_spatial_convolution(Tensor input, Tensor weight, Tensor bias, int64_t kW, int64_t kH, int64_t padW, int64_t padH) -> Tensor
+- func: nnpack_spatial_convolution(Tensor input, Tensor weight, Tensor? bias, int64_t kW, int64_t kH, int64_t padW, int64_t padH) -> Tensor
   variants: function
 
 - func: nnpack_spatial_convolution_backward_input(Tensor input, Tensor grad_output, Tensor weight, int64_t kW, int64_t kH, int64_t padW, int64_t padH) -> Tensor

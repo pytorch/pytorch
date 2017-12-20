@@ -137,7 +137,7 @@ std::vector<int64_t> conv_output_size(
   return output_size;
 }
 
-void nnpack_spatial_convolution(
+Tensor nnpack_spatial_convolution(
     const at::Tensor& input,
     const at::Tensor& weight,
     const at::Tensor& bias,
@@ -295,9 +295,11 @@ void nnpack_spatial_convolution(
   if (status != nnp_status_success) {
     throw std::runtime_error("NNPACK SpatialConvolution_updateOutput failed");
   }
+
+  return output;
 }
 
-void nnpack_spatial_convolution_backward_input(
+Tensor nnpack_spatial_convolution_backward_input(
     const at::Tensor& input,
     const at::Tensor& gradOutput,
     const at::Tensor& weight,
@@ -423,9 +425,11 @@ void nnpack_spatial_convolution_backward_input(
   if (status != nnp_status_success) {
     throw std::runtime_error("NNPACK SpatialConvolution_updateGradInput failed");
   }
+
+  return gradInput;
 }
 
-void nnpack_spatial_convolution_backward_weight(
+Tensor nnpack_spatial_convolution_backward_weight(
     const at::Tensor& input,
     IntList weight_size,
     const at::Tensor& gradOutput,
@@ -542,6 +546,8 @@ void nnpack_spatial_convolution_backward_weight(
   if (status != nnp_status_success) {
     throw std::runtime_error("NNPACK SpatialConvolution_accGradWeight failed");
   }
+
+  return gradWeight;
 }
 
 std::tuple<Tensor,Tensor,Tensor> nnpack_spatial_convolution_backward(
