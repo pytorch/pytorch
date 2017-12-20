@@ -496,7 +496,7 @@ def load_derivatives(path, declarations_by_signature, declarations_by_name):
         declarations = declarations_by_signature[signature]
         if len(declarations) == 0:
             avail = [k for k, v in declarations_by_signature.items()
-                       if k.startswith(defn_name + '(') and len(v) > 0]
+                     if k.startswith(defn_name + '(') and len(v) > 0]
             raise RuntimeError('no ATen declaration found for: {}.  '
                                'Available signatures: {}'.format(signature, ', '.join(avail)))
         canonical = canonical_declaration(declarations, defn_name)
