@@ -40,6 +40,7 @@ Indexing, Slicing, Joining, Mutating Ops
 .. autofunction:: transpose
 .. autofunction:: unbind
 .. autofunction:: unsqueeze
+.. autofunction:: where
 
 
 Random sampling
