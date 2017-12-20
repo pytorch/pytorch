@@ -730,9 +730,9 @@ class TestJit(TestCase):
         grad_x.backward()
         self.assertTrue(fn.has_trace_for(x))
 
-        with self.assertRaisesRegex(RuntimeError, 'different flags'):
+        with self.assertRaisesRegex(RuntimeError, 'was compiled with'):
             fn(x).backward(Variable(torch.ones(1), requires_grad=True))
-        with self.assertRaisesRegex(RuntimeError, 'different flags'):
+        with self.assertRaisesRegex(RuntimeError, 'was compiled with'):
             grad_x, = torch.autograd.grad(fn(x), (x,), create_graph=True)
             grad_x.backward(Variable(torch.ones(1), requires_grad=True))
 
