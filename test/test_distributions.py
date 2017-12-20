@@ -368,6 +368,10 @@ class TestDistributions(TestCase):
             self._check_sampler_sampler(Beta(alpha, beta),
                                         scipy.stats.beta(alpha, beta),
                                         'Beta(alpha={}, beta={})'.format(alpha, beta))
+        # Check that small alphas do not cause NANs.
+        for Tensor in [torch.FloatTensor, torch.DoubleTensor]:
+            x = Beta(Tensor([1e-6]), Tensor([1e-6])).sample()[0]
+            self.assertTrue(np.isfinite(x) and x > 0, 'Invalid Beta.sample(): {}'.format(x))
 
     # This is a randomized test.
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
