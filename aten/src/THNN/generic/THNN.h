@@ -753,15 +753,15 @@ TH_API void THNN_(TemporalUpSamplingLinear_updateOutput)(
           THNNState *state,
           THTensor *input,
           THTensor *output,
-          int outputWidth);
+          int osizeW);
 TH_API void THNN_(TemporalUpSamplingLinear_updateGradInput)(
           THNNState *state,
           THTensor *gradOutput,
           THTensor *gradInput,
-          int nbatch,
-          int nchannels,
-          int inputWidth,
-          int outputWidth);
+          int isizeB,
+          int isizeC,
+          int isizeW,
+          int osizeW);
 
 TH_API void THNN_(BatchNormalization_updateOutput)(
           THNNState *state,
@@ -1211,18 +1211,18 @@ TH_API void THNN_(SpatialUpSamplingBilinear_updateOutput)(
           THNNState *state,
           THTensor *input,
           THTensor *output,
-          int outputHeight,
-          int outputWidth);
+          int osizeH,
+          int osizeW);
 TH_API void THNN_(SpatialUpSamplingBilinear_updateGradInput)(
           THNNState *state,
           THTensor *gradOutput,
           THTensor *gradInput,
-          int nbatch,
-          int nchannels,
-          int inputHeight,
-          int inputWidth,
-          int outputHeight,
-          int outputWidth);
+          int isizeB,
+          int isizeC,
+          int isizeH,
+          int isizeW,
+          int osizeH,
+          int osizeW);
 
 TH_API void THNN_(SpatialGridSamplerBilinear_updateOutput)(
           THNNState *state,
@@ -1246,7 +1246,7 @@ TH_API void THNN_(unfolded_acc)(
           int padW, int padH,
           int nInputPlane,
           int inputWidth, int inputHeight,
-          int outputWidth, int outputHeight);
+          int osizeW, int outputHeight);
 TH_API void THNN_(unfolded_copy)(
           THTensor *finput,
           THTensor *input,
@@ -1641,21 +1641,21 @@ TH_API void THNN_(VolumetricUpSamplingTrilinear_updateOutput)(
           THNNState *state,
           THTensor *input,
           THTensor *output,
-          int outputDepth,
-          int outputHeight,
-          int outputWidth);
+          int osizeT,
+          int osizeH,
+          int osizeW);
 TH_API void THNN_(VolumetricUpSamplingTrilinear_updateGradInput)(
           THNNState *state,
           THTensor *gradOutput,
           THTensor *gradInput,
-          int nbatch,
-          int nchannels,
-          int inputDepth,
-          int inputHeight,
-          int inputWidth,
-          int outputDepth,
-          int outputHeight,
-          int outputWidth);
+          int isizeB,
+          int isizeC,
+          int isizeT,
+          int isizeH,
+          int isizeW,
+          int osizeT,
+          int osizeH,
+          int osizeW);
 
 TH_API void THNN_(TemporalReflectionPadding_updateOutput)(
           THNNState *state,
