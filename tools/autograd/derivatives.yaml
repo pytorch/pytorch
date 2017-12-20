@@ -765,6 +765,24 @@
 - name: replication_pad3d(Tensor self, IntList padding)
   self: replication_pad3d_backward(grad, self, padding)
 
+- name: upsample_linear1d(Tensor self, IntList output_size)
+  self: upsample_linear1d_backward(grad, output_size, self.sizes())
+
+- name: upsample_bilinear2d(Tensor self, IntList output_size)
+  self: upsample_bilinear2d_backward(grad, output_size, self.sizes())
+
+- name: upsample_trilinear3d(Tensor self, IntList output_size)
+  self: upsample_trilinear3d_backward(grad, output_size, self.sizes())
+
+- name: upsample_nearest1d(Tensor self, int64_t scale_factor)
+  self: upsample_nearest1d_backward(grad, self, scale_factor)
+
+- name: upsample_nearest2d(Tensor self, int64_t scale_factor)
+  self: upsample_nearest2d_backward(grad, self, scale_factor)
+
+- name: upsample_nearest3d(Tensor self, int64_t scale_factor)
+  self: upsample_nearest3d_backward(grad, self, scale_factor)
+
 - name: adaptive_avg_pool2d(Tensor self, IntList output_size)
   self: adaptive_avg_pool2d_backward(grad, self)
 
@@ -970,6 +988,27 @@
 
 - name: threshold_backward(Tensor grad_output, Tensor self, Scalar threshold, Scalar value)
   grad_output: threshold_backward(grad, self, threshold, value)
+  self: zeros_like(grad)
+
+- name: upsample_linear1d_backward(Tensor grad_output, IntList output_size, IntList input_size)
+  grad_output: upsample_linear1d(grad, output_size)
+
+- name: upsample_bilinear2d_backward(Tensor grad_output, IntList output_size, IntList input_size)
+  grad_output: upsample_bilinear2d(grad, output_size)
+
+- name: upsample_trilinear3d_backward(Tensor grad_output, IntList output_size, IntList input_size)
+  grad_output: upsample_trilinear3d(grad, output_size)
+
+- name: upsample_nearest1d_backward(Tensor grad_output, Tensor self, int64_t scale_factor)
+  grad_output: upsample_nearest1d(grad, scale_factor)
+  self: zeros_like(grad)
+
+- name: upsample_nearest2d_backward(Tensor grad_output, Tensor self, int64_t scale_factor)
+  grad_output: upsample_nearest2d(grad, scale_factor)
+  self: zeros_like(grad)
+
+- name: upsample_nearest3d_backward(Tensor grad_output, Tensor self, int64_t scale_factor)
+  grad_output: upsample_nearest3d(grad, scale_factor)
   self: zeros_like(grad)
 
 - name: _sigmoid_backward(Tensor grad_output, Tensor output)

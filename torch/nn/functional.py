@@ -1460,14 +1460,51 @@ def upsample(input, size=None, scale_factor=None, mode='nearest'):
         mode (string): algorithm used for upsampling:
             'nearest' | 'linear' | 'bilinear' | 'trilinear'. Default: 'nearest'
     """
+    from numbers import Integral
+    from .modules.utils import _ntuple
+
+    def _check_size_scale_factor():
+        if size is None and scale_factor is None:
+            raise ValueError('either size or scale_factor should be defined')
+        if size is not None and scale_factor is not None:
+            raise ValueError('only one of size or scale_factor should be defined')
+        if scale_factor is not None and not isinstance(scale_factor, (Integral, tuple)):
+            raise ValueError('scale_factor must be of integer type or a tuple of integer types')
+
+    def _scale_factor(dim):
+        _check_size_scale_factor()
+        if scale_factor is not None and not isinstance(scale_factor, Integral):
+            raise ValueError('scale_factor must be a single Integer value for nearest neighbor sampling')
+        if scale_factor is not None:
+            return scale_factor
+        sizes = _ntuple(dim)(size)
+        computed_scale_factor = sizes[0] // input.size(2)
+        for d in range(dim):
+            if sizes[d] % input.size(d + 2) != 0:
+                raise RuntimeError("output size specified in UpsamplingNearest "
+                                   "({}) has to be divisible by the input size, but got: "
+                                   "{}".format('x'.join(map(str, sizes)),
+                                               'x'.join(map(str, input.size()))))
+            if sizes[d] // input.size(d + 2) != computed_scale_factor:
+                raise RuntimeError("input aspect ratio doesn't match the output ratio")
+
+        return computed_scale_factor
+
+    def _output_size(dim):
+        _check_size_scale_factor()
+        if size is not None:
+            return size
+        scale_factors = _ntuple(dim)(scale_factor)
+        return [input.size(i + 2) * scale_factors[i] for i in range(dim)]
+
     if input.dim() == 3 and mode == 'nearest':
-        return _functions.thnn.UpsamplingNearest1d.apply(input, _single(size), scale_factor)
+        return torch._C._nn.upsample_nearest1d(input, _scale_factor(1))
     elif input.dim() == 4 and mode == 'nearest':
-        return _functions.thnn.UpsamplingNearest2d.apply(input, _pair(size), scale_factor)
+        return torch._C._nn.upsample_nearest2d(input, _scale_factor(2))
     elif input.dim() == 5 and mode == 'nearest':
-        return _functions.thnn.UpsamplingNearest3d.apply(input, _triple(size), scale_factor)
+        return torch._C._nn.upsample_nearest3d(input, _scale_factor(3))
     elif input.dim() == 3 and mode == 'linear':
-        return _functions.thnn.UpsamplingLinear1d.apply(input, _single(size), scale_factor)
+        return torch._C._nn.upsample_linear1d(input, _output_size(1))
     elif input.dim() == 3 and mode == 'bilinear':
         raise NotImplementedError("Got 3D input, but bilinear mode needs 4D input")
     elif input.dim() == 3 and mode == 'trilinear':
@@ -1475,7 +1512,7 @@ def upsample(input, size=None, scale_factor=None, mode='nearest'):
     elif input.dim() == 4 and mode == 'linear':
         raise NotImplementedError("Got 4D input, but linear mode needs 3D input")
     elif input.dim() == 4 and mode == 'bilinear':
-        return _functions.thnn.UpsamplingBilinear2d.apply(input, _pair(size), scale_factor)
+        return torch._C._nn.upsample_bilinear2d(input, _output_size(2))
     elif input.dim() == 4 and mode == 'trilinear':
         raise NotImplementedError("Got 4D input, but trilinear mode needs 5D input")
     elif input.dim() == 5 and mode == 'linear':
@@ -1483,7 +1520,7 @@ def upsample(input, size=None, scale_factor=None, mode='nearest'):
     elif input.dim() == 5 and mode == 'bilinear':
         raise NotImplementedError("Got 5D input, but bilinear mode needs 4D input")
     elif input.dim() == 5 and mode == 'trilinear':
-        return _functions.thnn.UpsamplingTrilinear3d.apply(input, _triple(size), scale_factor)
+        return torch._C._nn.upsample_trilinear3d(input, _output_size(3))
     else:
         raise NotImplementedError("Input Error: Only 3D, 4D and 5D input Tensors supported"
                                   " (got {}D) for the modes: nearest | linear | bilinear | trilinear"

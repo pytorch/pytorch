@@ -355,6 +355,11 @@ replication_pad2d = replication_pad
 replication_pad3d = replication_pad
 
 
+def upsample_nearest2d(g, input, scale_factor):
+    return g.op("Upsample", input, width_scale_f=scale_factor,
+                height_scale_f=scale_factor, mode_s="nearest")
+
+
 def log_softmax(g, input, dim=None):
     return g.op("Log", g.op('Softmax', input, axis_i=dim).setTypeAs(input))
 
