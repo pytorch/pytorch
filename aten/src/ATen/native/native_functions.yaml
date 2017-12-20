@@ -133,6 +133,12 @@
 - func: max_pool1d(Tensor self, IntList[1] kernel_size, IntList[1] stride={}, IntList[1] padding=0, IntList[1] dilation=1, bool ceil_mode=false) -> (Tensor, Tensor)
   variants: function
 
+- func: selu(Tensor self) -> Tensor
+  variants: function
+
+- func: selu_(Tensor self) -> Tensor
+  variants: function
+
 # TODO: Why does kW come before kH?  Hella confusing, because it
 # doesn't match the input layout.
 - func: nnpack_spatial_convolution(Tensor input, Tensor weight, Tensor? bias, int64_t kW, int64_t kH, int64_t padW, int64_t padH) -> Tensor

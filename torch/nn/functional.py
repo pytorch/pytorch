@@ -682,7 +682,15 @@ def selu(input, inplace=False):
 
     See :class:`~torch.nn.SELU` for more details.
     """
-    return _functions.thnn.SELU.apply(input, inplace)
+    if inplace:
+        return torch._C._VariableBase.selu_(input)
+    return torch._C._VariableBase.selu(input)
+
+selu_ = _add_docstr(torch._C._VariableBase.selu_, r"""
+selu_(input) -> Variable
+
+In-place verison of :func:`~selu`.
+""")
 
 
 def leaky_relu(input, negative_slope=0.01, inplace=False):

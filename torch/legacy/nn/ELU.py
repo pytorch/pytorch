@@ -22,6 +22,7 @@ class ELU(Module):
             input,
             self.output,
             self.alpha,
+            1.0,
             self.inplace
         )
         return self.output
@@ -33,7 +34,7 @@ class ELU(Module):
             self.gradInput,
             self.output,
             self.alpha,
-            self.inplace
+            1.0
         )
         return self.gradInput
 

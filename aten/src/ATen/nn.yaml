@@ -35,7 +35,7 @@
 
 # Activation functions
 
-- name: elu(Tensor self, Scalar alpha=1)
+- name: elu(Tensor self, Scalar alpha=1, Scalar scale=1)
   cname: ELU
   has_inplace: True
 
