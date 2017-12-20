@@ -143,15 +143,10 @@ inline void setValueTrace(const std::shared_ptr<TracingState>& state, const Vari
 // update on, but subsequently ignores it because the alpha scaling factor is zero.
 // This is one of the cases where a Variable can be created inside of a trace, and
 // if we treat it as a constant, everything will work out.
-inline Value* getValueTrace(const std::shared_ptr<TracingState>& state, const Variable& var, bool mustExist = false) {
+inline Value* getValueTrace(const std::shared_ptr<TracingState>& state, const Variable& var) {
   if (!var.defined()) {
     Node *n = state->graph->createUndefined();
     return state->graph->appendNode(n)->output();
-  }
-  if (mustExist) {
-    auto vts = detail::getValueState(state, var, false);
-    if (!vts) throw std::runtime_error("untraced variable");
-    return vts->trace;
   }
 
   auto vts = detail::getValueState(state, var, true);
@@ -161,6 +156,23 @@ inline Value* getValueTrace(const std::shared_ptr<TracingState>& state, const Va
   constant->inferTypeFrom(var.data());
   setValueTrace(state, var, constant);
   return constant;
+}
+
+inline Value* getOutputTrace(const std::shared_ptr<TracingState>& state, const Variable& var, size_t output_no) {
+  if (!var.defined()) {
+    Node *n = state->graph->createUndefined();
+    return state->graph->appendNode(n)->output();
+  }
+
+  auto vts = detail::getValueState(state, var, false);
+  if (!vts) {
+    std::ostringstream os;
+    os << "output " << output_no << " of traced region did not have observable "
+       << "data dependence with trace inputs; this probably indicates your program "
+       << "cannot be understood by the tracer.";
+    throw std::runtime_error(os.str());
+  }
+  return vts->trace;
 }
 
 inline Value* getBufferTrace(const std::unordered_map<void*, Value*>& buffer_map, at::Tensor buf) {
@@ -219,8 +231,10 @@ namespace detail {
 
 // Exit code shared between exit and TraceExitHook::run
 inline void _exit(const std::shared_ptr<TracingState>& state, const variable_list& outputs) {
+  size_t i = 0;
   for (auto& output : outputs) {
-    state->graph->registerOutput(getValueTrace(state, output, true));
+    state->graph->registerOutput(getOutputTrace(state, output, i));
+    i++;
   }
   state->active = false;
   state->var_flags[state->graph->stage()].second = detail::getVarFlags(outputs);

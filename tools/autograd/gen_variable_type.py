@@ -67,8 +67,8 @@ UNPACK_TENSOR = CodeTemplate("""\
 auto${ref} ${arg_name}_ = unpack${suffix}(${arg_name}, "${arg_name}", ${arg_pos});""")
 
 FUNCTION_DECLARATION = CodeTemplate("""\
-struct ${op} : public TraceableFunction {
-  using TraceableFunction::TraceableFunction;
+struct ${op} : public ${superclass} {
+  using ${superclass}::${superclass};
   variable_list apply(const variable_list& grads) override;
   std::string name() override { return "${op}"; }
   void releaseVariables() override {
@@ -233,6 +233,13 @@ SKIP_PYTHON_BINDINGS = [
     'alias', 'contiguous', 'clamp.*', 'is_cuda', 'size', 'stride',
     '.*_backward'
 ]
+# These functions have backwards which cannot be traced, and so must have
+# their backward functions traced opaquely.
+# VIEW_FUNCTIONS are not traceable because they use as_strided, which
+# has an untraceable backwards, see
+# https://github.com/pytorch/pytorch/issues/4250
+# TODO: This is probably not exhaustive, but it's a start
+UNTRACEABLE_FUNCTIONS = VIEW_FUNCTIONS
 
 # Matches "foo" in "foo, bar" but not "foobar". Used to search for the
 # occurence of a parameter in the derivative formula
@@ -613,6 +620,10 @@ def create_autograd_functions(top_env, autogen_functions):
             body.append(emit_derivative(derivative))
 
         env['body'] = body
+        if func['name'] in UNTRACEABLE_FUNCTIONS:
+            env['superclass'] = 'Function'
+        else:
+            env['superclass'] = 'TraceableFunction'
         env = nested_dict(env, func)
         function_declarations.append(FUNCTION_DECLARATION.substitute(env))
         function_definitions.append(FUNCTION_DEFINITION.substitute(env))
