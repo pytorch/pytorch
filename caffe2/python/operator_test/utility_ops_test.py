@@ -184,6 +184,7 @@ class TestUtilityOps(hu.HypothesisTestCase):
         X = np.random.rand(n, m, d).astype(np.float32)
         Y = np.random.rand(n, m, d).astype(np.float32)
         Z = np.random.rand(n, m, d).astype(np.float32)
+        inputs = [X, Y, Z]
 
         def max_op(X, Y, Z):
             return [np.maximum(np.maximum(X, Y), Z)]
@@ -197,9 +198,10 @@ class TestUtilityOps(hu.HypothesisTestCase):
         self.assertReferenceChecks(
             device_option=gc,
             op=op,
-            inputs=[X, Y, Z],
+            inputs=inputs,
             reference=max_op,
         )
+        self.assertDeviceChecks(dc, op, inputs, [0])
 
     @given(n=st.integers(4, 5), m=st.integers(6, 7),
            d=st.integers(2, 3), **hu.gcs)
@@ -209,6 +211,7 @@ class TestUtilityOps(hu.HypothesisTestCase):
         Y = np.random.rand(n, m, d).astype(np.float32)
         Z = np.random.rand(n, m, d).astype(np.float32)
         mx = np.maximum(np.maximum(X, Y), Z)
+        inputs = [mx, go, X, Y, Z]
 
         def max_grad_op(mx, go, X, Y, Z):
             def mx_grad(a):
@@ -225,9 +228,65 @@ class TestUtilityOps(hu.HypothesisTestCase):
         self.assertReferenceChecks(
             device_option=gc,
             op=op,
-            inputs=[mx, go, X, Y, Z],
+            inputs=inputs,
             reference=max_grad_op,
         )
+        self.assertDeviceChecks(dc, op, inputs, [0, 1, 2])
+
+    @given(n=st.integers(4, 5), m=st.integers(6, 7),
+           d=st.integers(2, 3), **hu.gcs)
+    def test_elementwise_min(self, n, m, d, gc, dc):
+        X = np.random.rand(n, m, d).astype(np.float32)
+        Y = np.random.rand(n, m, d).astype(np.float32)
+        Z = np.random.rand(n, m, d).astype(np.float32)
+        inputs = [X, Y, Z]
+
+        def min_op(X, Y, Z):
+            return [np.minimum(np.minimum(X, Y), Z)]
+
+        op = core.CreateOperator(
+            "Min",
+            ["X", "Y", "Z"],
+            ["mx"]
+        )
+
+        self.assertReferenceChecks(
+            device_option=gc,
+            op=op,
+            inputs=inputs,
+            reference=min_op,
+        )
+        self.assertDeviceChecks(dc, op, inputs, [0])
+
+    @given(n=st.integers(4, 5), m=st.integers(6, 7),
+           d=st.integers(2, 3), **hu.gcs)
+    def test_elementwise_min_grad(self, n, m, d, gc, dc):
+        go = np.random.rand(n, m, d).astype(np.float32)
+        X = np.random.rand(n, m, d).astype(np.float32)
+        Y = np.random.rand(n, m, d).astype(np.float32)
+        Z = np.random.rand(n, m, d).astype(np.float32)
+        mx = np.minimum(np.minimum(X, Y), Z)
+        inputs = [mx, go, X, Y, Z]
+
+        def min_grad_op(mx, go, X, Y, Z):
+            def mx_grad(a):
+                return go * (mx == a)
+
+            return [mx_grad(a) for a in [X, Y, Z]]
+
+        op = core.CreateOperator(
+            "MinGradient",
+            ["mx", "go", "X", "Y", "Z"],
+            ["gX", "gY", "gZ"]
+        )
+
+        self.assertReferenceChecks(
+            device_option=gc,
+            op=op,
+            inputs=inputs,
+            reference=min_grad_op,
+        )
+        self.assertDeviceChecks(dc, op, inputs, [0, 1, 2])
 
     @given(
         inputs=hu.lengths_tensor().flatmap(
