@@ -87,6 +87,8 @@ REGISTER_CPU_OPERATOR(
     ScatterWeightedSumOp<float, CPUContext>);
 REGISTER_CPU_OPERATOR(Max, MaxOp<float, CPUContext>);
 REGISTER_CPU_OPERATOR(MaxGradient, MaxGradientOp<float, CPUContext>);
+REGISTER_CPU_OPERATOR(Min, MinOp<float, CPUContext>);
+REGISTER_CPU_OPERATOR(MinGradient, MinGradientOp<float, CPUContext>);
 REGISTER_CPU_OPERATOR(ScatterAssign, ScatterAssignOp<CPUContext>);
 // From whatever the current context, ensure the output is TensorCPU
 REGISTER_CPU_OPERATOR(
@@ -332,6 +334,22 @@ have the same shape and data type.
     .Output(0, "max", "Output tensor. Same dimension as inputs.");
 
 OPERATOR_SCHEMA(MaxGradient).NumInputs(3, INT_MAX).NumOutputs(1, INT_MAX);
+
+OPERATOR_SCHEMA(Min)
+    .NumInputs(1, INT_MAX)
+    .NumOutputs(1)
+    .IdenticalTypeAndShapeOfInput(0)
+    .AllowInplace({{0, 0}})
+    .SetDoc(R"DOC(
+Element-wise min of each of the input tensors. The first input tensor can be
+used in-place as the output tensor, in which case the min will be done in
+place and results will be accumulated in input0. All inputs and outputs must
+have the same shape and data type.
+)DOC")
+    .Input(0, "data_0", "First of the input tensors. Can be inplace.")
+    .Output(0, "min", "Output tensor. Same dimension as inputs.");
+
+OPERATOR_SCHEMA(MinGradient).NumInputs(3, INT_MAX).NumOutputs(1, INT_MAX);
 
 OPERATOR_SCHEMA(ScatterAssign)
     .NumInputs(3)
@@ -879,6 +897,20 @@ class GetMaxGradient : public GradientMakerBase {
 };
 REGISTER_GRADIENT(Max, GetMaxGradient);
 
+class GetMinGradient : public GradientMakerBase {
+  using GradientMakerBase::GradientMakerBase;
+  vector<OperatorDef> GetGradientDefs() override {
+    auto gradInputs = vector<string>();
+    auto inputs = vector<string>{O(0), GO(0)};
+    for (int i = 0; i < def_.input_size(); i++) {
+      gradInputs.push_back(GI(i));
+      inputs.push_back(I(i));
+    }
+    return SingleGradientDef("MinGradient", "", inputs, gradInputs);
+  }
+};
+REGISTER_GRADIENT(Min, GetMinGradient);
+
 class GetGatherGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;
   vector<OperatorDef> GetGradientDefs() override {
@@ -997,7 +1029,22 @@ bool MaxOp<T, Context>::Compute() {
 }
 
 template <typename T, class Context>
-bool MaxGradientOp<T, Context>::RunOnDevice() {
+bool MinOp<T, Context>::Compute() {
+  auto& input0 = Input(0);
+  const int N = input0.size();
+  T* output_data = Output(0)->template mutable_data<T>();
+
+  for (int i = 1; i < InputSize(); i++) {
+    auto input_data = Input(i).template data<T>();
+    EigenVectorMap<T> output_vec(output_data, N);
+    output_vec = output_vec.cwiseMin(ConstEigenVectorMap<T>(input_data, N));
+  }
+
+  return true;
+}
+
+template <typename T, class Context>
+bool SelectGradientOpBase<T, Context>::RunOnDevice() {
   auto& output = Input(0);
   auto& grad_output = Input(1);
   const int kInputStartOffset = 2;

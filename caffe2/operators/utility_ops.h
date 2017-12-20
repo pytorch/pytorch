@@ -581,12 +581,11 @@ class ScatterWeightedSumOp : public Operator<Context> {
   Tensor<Context> weights_device_;
 };
 
-
 template <typename T, class Context>
-class MaxOp : public Operator<Context> {
+class MaxMinOpBase : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  USE_SIMPLE_CTOR_DTOR(MaxOp);
+  USE_SIMPLE_CTOR_DTOR(MaxMinOpBase)
 
   bool RunOnDevice() override {
     auto& input0 = Input(0);
@@ -612,19 +611,55 @@ class MaxOp : public Operator<Context> {
           output->dims());
     }
 
-    return Compute();
+    return this->Compute();
   }
 
-  virtual bool Compute();
+  virtual bool Compute() = 0;
 };
 
 template <typename T, class Context>
-class MaxGradientOp : public Operator<Context> {
+class SelectGradientOpBase : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  USE_SIMPLE_CTOR_DTOR(MaxGradientOp);
+  USE_SIMPLE_CTOR_DTOR(SelectGradientOpBase)
 
   bool RunOnDevice() override;
+};
+
+template <typename T, class Context>
+class MaxOp : public MaxMinOpBase<T, Context> {
+ public:
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
+  MaxOp(const OperatorDef& operator_def, Workspace* ws)
+      : MaxMinOpBase<T, Context>(operator_def, ws) {}
+  virtual ~MaxOp() noexcept {}
+  bool Compute() override;
+};
+
+template <typename T, class Context>
+class MaxGradientOp : public SelectGradientOpBase<T, Context> {
+ public:
+  MaxGradientOp(const OperatorDef& operator_def, Workspace* ws)
+      : SelectGradientOpBase<T, Context>(operator_def, ws) {}
+  virtual ~MaxGradientOp() noexcept {}
+};
+
+template <typename T, class Context>
+class MinOp : public MaxMinOpBase<T, Context> {
+ public:
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
+  MinOp(const OperatorDef& operator_def, Workspace* ws)
+      : MaxMinOpBase<T, Context>(operator_def, ws) {}
+  virtual ~MinOp() noexcept {}
+  bool Compute() override;
+};
+
+template <typename T, class Context>
+class MinGradientOp : public SelectGradientOpBase<T, Context> {
+ public:
+  MinGradientOp(const OperatorDef& operator_def, Workspace* ws)
+      : SelectGradientOpBase<T, Context>(operator_def, ws) {}
+  virtual ~MinGradientOp() noexcept {}
 };
 
 /**
