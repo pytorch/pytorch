@@ -114,7 +114,8 @@ auto ConvParams::use_cudnn(const at::Tensor& input) const -> bool {
 
 auto ConvParams::use_nnpack(const at::Tensor& input) const -> bool {
 #if AT_NNPACK_ENABLED()
-  return input.type() == CPU(kFloat) && // only on CPU Float Tensors
+  return input.type().backend() == kCPU &&
+         input.type().scalarType() == kFloat && // only on CPU Float Tensors
          !is_strided() && // doesn't support strides
          !is_dilated() && // or dilation
          !transposed &&   // or transposed tensors
