@@ -102,6 +102,7 @@ class TestJit(TestCase):
             z2 = fn(x, y)
         self.assertEqual(z, z2)
 
+    # index-2 is not implemented in interpreter
     @unittest.expectedFailure
     def test_index(self):
         x = Variable(torch.Tensor([0.4]), requires_grad=True)
@@ -115,6 +116,29 @@ class TestJit(TestCase):
         with self.assertCompiled(fn):
             z2 = fn(x, y)
         self.assertEqual(z, z2)
+
+    # Backwards tracing was broken for indexing by a constant,
+    # because it's internally implemented using as_strided,
+    # and we attempted to trace its derivative (which is not
+    # currently supported.)  It currently works because
+    # slice() is now not marked as traceable.
+    def test_index_constant(self):
+        x = Variable(torch.Tensor([0.4]), requires_grad=True)
+
+        @torch.jit.compile(nderivs=1)
+        def fn(x):
+            return x[0]
+
+        z = fn(x)
+        z.backward()
+        grad = x.grad.clone()
+        x.grad.zero_()
+        with self.assertCompiled(fn):
+            z2 = fn(x)
+            z2.backward()
+            grad2 = x.grad.clone()
+        self.assertEqual(z, z2)
+        self.assertEqual(grad, grad2)
 
     def test_scopes(self):
         x = Variable(torch.Tensor([0.4]), requires_grad=True)
@@ -958,6 +982,33 @@ class TestJit(TestCase):
         info_str = fn.jit_debug_info()
         self.assertTrue("hits: 100" in info_str)
         self.assertTrue("stage 1" in info_str)
+
+    # Inplace copies don't work with tracer yet.
+    # This is actually somewhat important to support correctly
+    # as all backwards functions of views are implemented
+    # as a zero filled tensor with a gradient fill on the
+    # viewed portion.
+    @unittest.expectedFailure
+    def test_inplace_copy(self):
+        x = Variable(torch.randn(4, 4), requires_grad=True)
+
+        def f(x):
+            out = Variable(torch.zeros(x.size()))
+            out.copy_(x)
+            return out
+
+        trace, z = torch.jit.trace(f, (x, ), nderivs=0)
+        torch._C._jit_pass_lint(trace)
+        torch._C._jit_pass_dce(trace)
+        self.assertExpectedTrace(trace)
+
+    def test_index_trace(self):
+        x = Variable(torch.randn(4, 4), requires_grad=True)
+        trace, z = torch.jit.trace(lambda x: x[0], (x, ), nderivs=1)
+        z.sum().backward()
+        torch._C._jit_pass_lint(trace)
+        torch._C._jit_pass_dce(trace)
+        self.assertExpectedTrace(trace)
 
 
 if __name__ == '__main__':
