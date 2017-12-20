@@ -62,7 +62,7 @@ EXAMPLES = [
     Example(Normal, [
         {
             'mean': Variable(torch.randn(5, 5), requires_grad=True),
-            'std':Variable(torch.randn(5, 5).abs(), requires_grad=True),
+            'std': Variable(torch.randn(5, 5).abs(), requires_grad=True),
         },
         {
             'mean': Variable(torch.randn(1), requires_grad=True),
