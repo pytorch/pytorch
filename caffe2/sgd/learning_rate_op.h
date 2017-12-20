@@ -51,6 +51,24 @@ class LearningRateOp final : public Operator<Context> {
       DCHECK_GE(inactive_period, 0);
       functor_.reset(new AlternateLearningRate<T>(
           active_period, inactive_period, active_first));
+    } else if (policy == "hill") {
+      int64_t num_iter =
+          OperatorBase::template GetSingleArgument<int>("num_iter", 0);
+      DCHECK_GT(num_iter, 0);
+      T start_multiplier = OperatorBase::template GetSingleArgument<float>(
+          "start_multiplier", 0.);
+      DCHECK_GE(start_multiplier, 0); // start_multiplier in range [0, 1]
+      DCHECK_LE(start_multiplier, 1);
+      T gamma = OperatorBase::template GetSingleArgument<float>("gamma", 0);
+      DCHECK_GT(gamma, 0);
+      T power = OperatorBase::template GetSingleArgument<float>("power", 0);
+      DCHECK_GT(power, 0);
+      T end_multiplier =
+          OperatorBase::template GetSingleArgument<float>("end_multiplier", 0);
+      DCHECK_GE(end_multiplier, 0); // end_multiplier in range [0, 1]
+      DCHECK_LE(end_multiplier, 1);
+      functor_.reset(new HillLearningRate<T>(
+          num_iter, start_multiplier, gamma, power, end_multiplier));
     } else if (policy == "step") {
       int stepsize =
           OperatorBase::template GetSingleArgument<int>("stepsize", 0);
