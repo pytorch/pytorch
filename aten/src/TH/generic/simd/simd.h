@@ -82,7 +82,7 @@ static inline uint32_t detectHostSIMDExtensions()
   char *evar;
 
   evar = getenv("TH_NO_VSX");
-  if (evar == NULL || strncmp(evar, "1", 2) != 0)
+  if (evar == NULL || strncmp(evar, "1", 1) != 0)
     hostSimdExts = SIMDExtension_VSX;
   return hostSimdExts;
 }
@@ -128,7 +128,7 @@ static inline uint32_t detectHostSIMDExtensions()
   char *evar;
 
   evar = getenv("TH_NO_AVX2");
-  if (evar == NULL || strncmp(evar, "1", 2) != 0)
+  if (evar == NULL || strncmp(evar, "1", 1) != 0)
     TH_NO_AVX2 = 0;
 
   // Check for AVX2. Requires separate CPUID
@@ -144,14 +144,14 @@ static inline uint32_t detectHostSIMDExtensions()
   cpuid(&eax, &ebx, &ecx, &edx);
 
   evar = getenv("TH_NO_AVX");
-  if (evar == NULL || strncmp(evar, "1", 2) != 0)
+  if (evar == NULL || strncmp(evar, "1", 1) != 0)
     TH_NO_AVX = 0;
   if (ecx & CPUID_AVX_BIT && TH_NO_AVX == 0) {
     hostSimdExts |= SIMDExtension_AVX;
   }
 
   evar = getenv("TH_NO_SSE");
-  if (evar == NULL || strncmp(evar, "1", 2) != 0)
+  if (evar == NULL || strncmp(evar, "1", 1) != 0)
     TH_NO_SSE = 0;
   if (edx & CPUID_SSE_BIT && TH_NO_SSE == 0) {
     hostSimdExts |= SIMDExtension_SSE;
