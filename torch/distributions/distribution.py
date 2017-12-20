@@ -67,7 +67,7 @@ class Distribution(object):
 
     def entropy(self):
         """
-        Returns entropy of distribution, bathed over batch_shape.
+        Returns entropy of distribution, batched over batch_shape.
 
         Returns:
             Tensor or Variable of shape batch_shape.
