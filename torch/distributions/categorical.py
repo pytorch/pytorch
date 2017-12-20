@@ -52,6 +52,11 @@ class Categorical(Distribution):
         log_pmf = log_pmf.expand(param_shape)
         return log_pmf.gather(-1, value.unsqueeze(-1).long()).squeeze(-1)
 
+    def entropy(self):
+        p_log_p = torch.log(self.probs) * self.probs
+        p_log_p[self.probs == 0] = 0
+        return -p_log_p.sum(-1)
+
     def enumerate_support(self):
         num_events = self.probs.size()[-1]
         values = torch.arange(num_events).long()

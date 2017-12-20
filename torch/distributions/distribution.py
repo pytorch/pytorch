@@ -65,6 +65,15 @@ class Distribution(object):
         """
         raise NotImplementedError
 
+    def entropy(self):
+        """
+        Returns entropy of distribution, batched over batch_shape.
+
+        Returns:
+            Tensor or Variable of shape batch_shape.
+        """
+        raise NotImplementedError
+
     def _extended_shape(self, sample_shape=()):
         """
         Returns the size of the sample returned by the distribution, given
