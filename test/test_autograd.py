@@ -142,6 +142,20 @@ class TestAutograd(TestCase):
         MyFunction.apply(v.clone()).backward()
         self.assertEqual(v.grad.data.tolist(), [2])
 
+    def test_legacy_function_none_grad(self):
+        class MyFunction(Function):
+            def forward(self, x):
+                return torch.zeros(2, 2, 2)
+
+            def backward(self, grad_output):
+                return None
+
+        shape = (2, 3)
+        v = Variable(torch.ones(shape), requires_grad=True)
+        y = v[0, 0].expand(3, 5).t().sum()
+        MyFunction()(y).sum().backward()
+        self.assertEqual(v.grad.data, torch.zeros(shape))
+
     def test_accumulate_grad(self):
         grad_output = Variable(torch.ones(5, 5))
 
@@ -404,7 +418,7 @@ class TestAutograd(TestCase):
             self.assertIsInstance(grad_input, tuple)
             self.assertIsInstance(grad_output, tuple)
             self.assertIsNotNone(grad_input[0])
-            self.assertIsNone(grad_input[1])
+            self.assertIsNotNone(grad_input[1])
             self.assertIsNotNone(grad_output[0])
             self.assertIsNotNone(grad_output[1])
             was_called[0] = True
