@@ -229,9 +229,8 @@ class TestCase(unittest.TestCase):
             for x_, y_ in zip(x, y):
                 self.assertEqual(x_, y_, prec, message)
         elif isinstance(x, Number) and isinstance(y, Number):
-            if abs(x) == float('inf') and abs(y) == float('inf'):
-                return
-            super(TestCase, self).assertLessEqual(abs(x - y), prec, message)
+            if x != y:
+                super(TestCase, self).assertLessEqual(abs(x - y), prec, message)
         else:
             super(TestCase, self).assertEqual(x, y, message)
 
