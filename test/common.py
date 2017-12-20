@@ -32,6 +32,7 @@ torch.manual_seed(SEED)
 def run_tests():
     unittest.main(argv=UNITTEST_ARGS)
 
+IS_WINDOWS = sys.platform == "win32"
 
 TEST_NUMPY = True
 try:
@@ -338,7 +339,7 @@ class TestCase(unittest.TestCase):
                      "python {} {} --accept").format(munged_id, s, __main__.__file__, munged_id))
 
         # a hack for JIT tests
-        if sys.platform == 'win32':
+        if IS_WINDOWS:
             expected = re.sub(r'CppOp\[(.+?)\]', 'CppOp[]', expected)
             s = re.sub(r'CppOp\[(.+?)\]', 'CppOp[]', s)
 
