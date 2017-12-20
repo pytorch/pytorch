@@ -817,6 +817,11 @@ bool THCPStream_init(PyObject *module);
 
 #ifdef WITH_CUDA
 PyMethodDef* THCPModule_methods();
+namespace torch { namespace cuda {
+
+void initModule(PyObject *module);
+
+}} // namespace torch::cuda
 #endif
 
 bool THCSPDoubleTensor_init(PyObject *module);
@@ -910,6 +915,9 @@ static PyObject* initModule() {
   torch::autograd::initAutogradClosureBindings(module);
   torch::jit::initJITBindings(module);
   torch::autograd::initNNFunctions(module);
+#ifdef WITH_CUDA
+  torch::cuda::initModule(module);
+#endif
   ASSERT_TRUE(THPDoubleStorage_init(module));
   ASSERT_TRUE(THPFloatStorage_init(module));
   ASSERT_TRUE(THPHalfStorage_init(module));

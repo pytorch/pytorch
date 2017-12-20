@@ -14,6 +14,7 @@
 #include "THCP.h"
 
 #include "torch/csrc/utils/python_strings.h"
+#include "torch/csrc/cuda/python_comm.h"
 #include "ModuleSparse.cpp"
 
 THCState *state;
@@ -476,3 +477,11 @@ static struct PyMethodDef _THCPModule_methods[] = {
 PyMethodDef* THCPModule_methods() {
   return _THCPModule_methods;
 }
+
+namespace torch { namespace cuda {
+
+void initModule(PyObject *module) {
+  python::initCommMethods(module);
+}
+
+}}

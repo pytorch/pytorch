@@ -4034,11 +4034,16 @@
     - SparseCPU
     - SparseCUDA
   variants: [function]
-  cname: newWithTensorAndSize
-  arguments:
-    - THDenseIndexTensor* indices
-    - THDenseTensor* values
-    - THSize* size
+  options:
+    - cname: newWithTensor
+      arguments:
+        - THDenseIndexTensor* indices
+        - THDenseTensor* values
+    - cname: newWithTensorAndSize
+      arguments:
+        - THDenseIndexTensor* indices
+        - THDenseTensor* values
+        - THSize* size
 ]]
 
 # In theory, this could be a part of the above declaration. But in
