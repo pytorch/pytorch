@@ -50,6 +50,11 @@ static std::vector<int64_t> to_aten_shape(int ndim, npy_intp* values) {
 static int aten_to_dtype(const at::Type& type);
 static ScalarType dtype_to_aten(int dtype);
 
+PyObject* tensor_to_numpy_dtype(const at::Tensor& tensor) {
+  auto dtype = aten_to_dtype(tensor.type());
+  return (PyObject *)PyArray_DescrFromType(dtype);
+}
+
 PyObject* tensor_to_numpy(const at::Tensor& tensor) {
   auto dtype = aten_to_dtype(tensor.type());
   auto sizes = to_numpy_shape(tensor.sizes());
