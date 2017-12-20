@@ -1,3 +1,4 @@
+import re
 import yaml
 
 try:
@@ -51,6 +52,10 @@ def parse_arguments(args, func):
         typ = sanitize_types(t)
         assert len(typ) == 1
         argument_dict = {'type': typ[0], 'name': name}
+        match = re.match(r'IntList\[(\d+)\]', argument_dict['type'])
+        if match:
+            argument_dict['type'] = 'IntList'
+            argument_dict['size'] = int(match.group(1))
         if default is not None:
             argument_dict['default'] = default
         if python_default_init is not None:

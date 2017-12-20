@@ -1,6 +1,6 @@
 import torch
 from torch.autograd._functions.utils import check_onnx_broadcast  # TODO: move me
-from torch.nn.modules.utils import _pair, _triple
+from torch.nn.modules.utils import _single, _pair, _triple
 import warnings
 
 # EDITING THIS FILE? READ THIS FIRST!
@@ -279,6 +279,20 @@ def softplus(g, self, beta, threshold):
     if beta != 1:
         return _unimplemented("beta", "has to be 1")
     return g.op('Softplus', self)
+
+
+def max_pool1d(g, input, kernel_size, stride, padding, dilation, ceil_mode):
+    if ceil_mode:
+        return _unimplemented("max_pool1d", "ceil_mode")
+    if set(_single(dilation)) != {1}:
+        return _unimplemented("max_pool1d", "dilation")
+    if stride is None:
+        stride = kernel_size
+    r = g.op("MaxPool", input,
+             kernel_shape_i=_single(kernel_size),
+             pads_i=_single(padding) * 2,
+             strides_i=_single(stride))
+    return r, None
 
 
 def max_pool2d(g, input, kernel_size, stride, padding, dilation, ceil_mode):
