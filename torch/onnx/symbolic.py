@@ -401,7 +401,7 @@ def elu(g, input, alpha, inplace=False):
     return g.op("Elu", input, alpha_f=_scalar(alpha))
 
 
-def selu(g, input, inplace=False):
+def selu(g, input):
     return g.op("Selu", input)
 
 
