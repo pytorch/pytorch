@@ -12,6 +12,10 @@ using namespace at;
 namespace torch { namespace autograd {
 
 Variable make_variable(at::Tensor data, std::shared_ptr<Function> grad_fn) {
+  // TODO: If you ever want to support returning an undefined tensor from
+  // a function, you'll have to uncomment the line below.  Not sure if
+  // we actually want to support this.
+  // if (!data.defined()) return Variable();
   TORCH_ASSERT(grad_fn);
   int output_nr = grad_fn->num_inputs++;
   return make_variable(std::move(data), output_nr, std::move(grad_fn));

@@ -359,6 +359,34 @@ def log_softmax(g, input, dim=None):
     return g.op("Log", g.op('Softmax', input, axis_i=dim).setTypeAs(input))
 
 
+def _convolution(g, input, weight, bias, stride, padding, dilation,
+                 transposed, output_padding, groups, benchmark, deterministic, cudnn_enabled):
+    if any(o != 0 for o in output_padding):
+        return _unimplemented("_convolution", "non-zero output_padding")
+
+    weight_size = weight.type().sizes()
+
+    args = [input, weight]
+    # ONNX only supports 1D bias
+    if bias.node().kind() != "Undefined" and len(bias.type().sizes()) == 1:
+        args.append(bias)
+
+    kwargs = {"kernel_shape_i": weight_size[2:],
+              "strides_i": stride,
+              # NB: ONNX supports asymmetric padding, whereas PyTorch supports only
+              # symmetric padding
+              "pads_i": padding + padding,
+              "dilations_i": dilation,
+              "group_i": groups}
+
+    n = g.op("ConvTranspose" if transposed else "Conv", *args, **kwargs)
+
+    if bias.node().kind() != "Undefined" and len(bias.type().sizes()) != 1:
+        return g.op("Add", n, bias, broadcast_i=1, axis_i=1)
+    else:
+        return n
+
+
 def unfold(g, input, dimension, size, step):
     return g.op("ATen", input, operator_s="unfold", dimension_i=dimension, size_i=size, step_i=step)
 

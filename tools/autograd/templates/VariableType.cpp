@@ -299,6 +299,9 @@ static void check_inplace(const Tensor& tensor) {
 }
 
 static void rebase_history(Variable& var, std::shared_ptr<Function> grad_fn, int output_nr=0) {
+  if (!var.defined()) {
+    return;
+  }
   if (grad_fn) {
     grad_fn->num_inputs = 1;
     var.rebase_history(output_nr, std::move(grad_fn));
@@ -320,6 +323,7 @@ static void set_history(at::ArrayRef<Variable> vl, std::shared_ptr<Function> gra
     grad_fn->num_inputs = vl.size();
     int64_t output_nr = 0;
     for (auto& var : vl) {
+      if (!var.defined()) continue;
       // TODO: combine this with the Variable construction
       var.get()->output_nr = output_nr;
       var.get()->_grad_fn = grad_fn;

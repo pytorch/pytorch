@@ -36,7 +36,9 @@ def parse_arguments(args, func):
     arguments = []
     python_default_inits = func.get('python_default_init', {})
 
-    for arg in args.split(','):
+    # TODO: Use a real parser here; this will get bamboozled
+    # by signatures that contain things like std::array<bool, 2> (note the space)
+    for arg in args.split(', '):
         t, name = [a.strip() for a in arg.rsplit(' ', 1)]
         default = None
         python_default_init = None
@@ -51,7 +53,7 @@ def parse_arguments(args, func):
 
         typ = sanitize_types(t)
         assert len(typ) == 1
-        argument_dict = {'type': typ[0], 'name': name}
+        argument_dict = {'type': typ[0].rstrip('?'), 'name': name, 'is_nullable': typ[0].endswith('?')}
         match = re.match(r'IntList\[(\d+)\]', argument_dict['type'])
         if match:
             argument_dict['type'] = 'IntList'
