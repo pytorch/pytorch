@@ -18,17 +18,6 @@
 #define PyInt_Type              PyLong_Type
 #endif
 
-// macros for Windows compatibility
-#ifdef _WIN32
-#define PyInt_FromInt64         PyLong_FromLongLong
-#define PyInt_AsInt64           PyLong_AsLongLong
-#define PyLong_FromUInt64       PyLong_FromUnsignedLongLong
-#else
-#define PyInt_FromInt64         PyInt_FromLong
-#define PyInt_AsInt64           PyInt_AsLong
-#define PyLong_FromUInt64       PyLong_FromUnsignedLong
-#endif
-
 // By default, don't specify library state (TH doesn't use one)
 #define LIBRARY_STATE
 #define LIBRARY_STATE_NOARGS
