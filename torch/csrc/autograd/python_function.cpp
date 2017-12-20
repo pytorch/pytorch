@@ -842,35 +842,36 @@ PyObject *THPFunction_apply(PyObject *cls, PyObject *inputs)
 // Backward
 ////////////////////////////////////////////////////////////////////////////////
 
-static void _prepare_grad_output(THPFunction *self, THPObjectPtr& raw_grad_output)
+static void _prepare_grads(THPFunction *self, THPObjectPtr& raw_grads, bool is_grad_output)
 {
   AutoGPU gpu_guard(-1);
-  int num_grad_output = PyTuple_GET_SIZE(raw_grad_output.get());
-  // First, check if any of grad_outputs is None. If not, there's nothing to do
+  int num_grads = PyTuple_GET_SIZE(raw_grads.get());
+  // First, check if any of grads is None. If not, there's nothing to do
   bool has_none = false;
-  for (int i = 0; i < num_grad_output; i++) {
-    has_none |= PyTuple_GET_ITEM(raw_grad_output.get(), i) == Py_None;
+  for (int i = 0; i < num_grads; i++) {
+    has_none |= PyTuple_GET_ITEM(raw_grads.get(), i) == Py_None;
   }
   if (!has_none)
       return;
 
-  THPObjectPtr grad_output;
-  grad_output = PyTuple_New(num_grad_output);
-  if (!grad_output) throw python_error();
+  THPObjectPtr grads;
+  grads = PyTuple_New(num_grads);
+  if (!grads) throw python_error();
 
   // Look for Nones and replace them with new buffers
-  auto& output_info = self->output_info;
-  for (int i = 0; i < num_grad_output; i++) {
-    PyObject *grad = PyTuple_GET_ITEM(raw_grad_output.get(), i);
+  auto& grads_info = is_grad_output ? self->output_info : self->input_info;
+  TORCH_ASSERT(grads_info.size() == (size_t)num_grads);
+  for (int i = 0; i < num_grads; i++) {
+    PyObject *grad = PyTuple_GET_ITEM(raw_grads.get(), i);
     if (grad == Py_None) {
-      grad = createPyObject(output_info[i].zeros(gpu_guard).data());
+      grad = createPyObject(grads_info[i].zeros(gpu_guard).data());
       if (!grad) throw python_error();
     } else {
       Py_INCREF(grad);
     }
-    PyTuple_SET_ITEM(grad_output.get(), i, grad);
+    PyTuple_SET_ITEM(grads.get(), i, grad);
   }
-  raw_grad_output = grad_output.release();
+  raw_grads = grads.release();
 }
 
 static void _trim_grad_input(THPFunction *self, THPObjectPtr& grad_input)
@@ -913,7 +914,7 @@ PyObject * THPFunction_do_backward(THPFunction *self, PyObject *args)
     // zero-filled buffers instead
     Py_INCREF(raw_grad_output);
     THPObjectPtr grad_output(raw_grad_output);
-    _prepare_grad_output(self, grad_output);
+    _prepare_grads(self, grad_output, true);
 
     // self.backward(*grad_output)
     THPObjectPtr backward_fn(PyObject_GetAttrString((PyObject*)self, "backward"));
@@ -932,6 +933,8 @@ PyObject * THPFunction_do_backward(THPFunction *self, PyObject *args)
         "gradient tensors (expected %d, but got %d)", THPUtils_typename(self),
         num_next_fns, num_grads);
 
+    // If any of the remaining grad_inputs are None, zero them.
+    _prepare_grads(self, grad_input, false);
     return grad_input.release();
 
   } catch (python_error& e) {
