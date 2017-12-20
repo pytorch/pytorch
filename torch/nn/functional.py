@@ -457,7 +457,7 @@ def adaptive_max_pool1d(input, output_size, return_indices=False):
         output_size: the target output size (single integer)
         return_indices: whether to return pooling indices. Default: ``False``
     """
-    ret = _functions.thnn.AdaptiveMaxPool1d.apply(input, output_size)
+    ret = torch._C._VariableBase.adaptive_max_pool1d(input, output_size)
     return ret if return_indices else ret[0]
 
 
@@ -491,17 +491,17 @@ def adaptive_max_pool3d(input, output_size, return_indices=False):
     return ret if return_indices else ret[0]
 
 
-def adaptive_avg_pool1d(input, output_size):
-    r"""Applies a 1D adaptive average pooling over an input signal composed of
-    several input planes.
+adaptive_avg_pool1d = _add_docstr(torch._C._VariableBase.adaptive_avg_pool1d, r"""
+adaptive_avg_pool1d(input, output_size) -> Variable
 
-    See :class:`~torch.nn.AdaptiveAvgPool1d` for details and output shape.
+Applies a 1D adaptive average pooling over an input signal composed of
+several input planes.
 
-    Args:
-        output_size: the target output size (single integer)
-    """
-    return _functions.thnn.AdaptiveAvgPool1d.apply(input, output_size)
+See :class:`~torch.nn.AdaptiveAvgPool1d` for details and output shape.
 
+Args:
+    output_size: the target output size (single integer)
+""")
 
 adaptive_avg_pool2d = _add_docstr(torch._C._nn.adaptive_avg_pool2d, r"""
 adaptive_avg_pool2d(input, output_size) -> Variable
