@@ -238,7 +238,7 @@ CompiledFunction::TraceForKey* getTraceFor(CompiledFunction& fn,
 
 static py::tuple tuple_tail(const py::tuple & tup) {
   py::tuple r(tup.size() - 1);
-  for(int i = 1; i < tup.size(); i++) {
+  for(std::size_t i = 1; i < tup.size(); i++) {
     r[i-1] = tup[i];
   }
   return r;
