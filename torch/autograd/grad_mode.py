@@ -54,7 +54,7 @@ class enable_grad(object):
         self.prev = torch.is_grad_enabled()
 
     def __enter__(self):
-        torch.set_grad_enabled(False)
+        torch.set_grad_enabled(True)
 
     def __exit__(self, *args):
         torch.set_grad_enabled(self.prev)
