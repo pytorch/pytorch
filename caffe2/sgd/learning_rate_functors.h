@@ -151,6 +151,36 @@ class ConstantWarmupLearningRate : public LearningRateFunctor<T> {
   uint64_t num_iter_;
 };
 
+// hill: the learning rate changes according to following 3 stages
+// 1) linear warmup (increasing) at first num_iter steps from start_multiplier
+// 2) inverse shrink (decreasing) afterwards (gamma, power)
+// 3) lower bounded by end_multiplier
+template <typename T>
+class HillLearningRate : public LearningRateFunctor<T> {
+ public:
+  HillLearningRate(
+      const int64_t num_iter,
+      const T start_multiplier,
+      const T gamma,
+      const T power,
+      const T end_multiplier)
+      : linear_warmup_lr_(start_multiplier, num_iter),
+        inv_lr_(gamma, power),
+        num_iter_(num_iter),
+        end_multiplier_(end_multiplier) {}
+  T operator()(const int64_t iter) const override {
+    if (iter < num_iter_) {
+      return linear_warmup_lr_(iter);
+    } else {
+      return std::max(end_multiplier_, inv_lr_(iter - num_iter_));
+    }
+  }
+  LinearWarmupLearningRate<T> linear_warmup_lr_;
+  InvLearningRate<T> inv_lr_;
+  int64_t num_iter_;
+  T end_multiplier_;
+};
+
 } // namespace caffe2
 
 #endif // CAFFE2_SGD_LEARNING_RATE_FUNCTORS_H_
