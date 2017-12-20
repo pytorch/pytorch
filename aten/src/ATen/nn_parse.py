@@ -99,6 +99,7 @@ ARGUMENT_MAPPINGS = {
     'p': 'padding',
     'o': 'output_size',
     'osize': 'output_size',
+    'output': 'output_size',  # as a prefix e.g. outputW
     'isize': 'input_size',
     'dilation': 'dilation',
     'adj': 'output_padding',

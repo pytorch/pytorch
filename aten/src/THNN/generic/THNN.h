@@ -951,7 +951,7 @@ TH_API void THNN_(SpatialFractionalMaxPooling_updateOutput)(
           THTensor *input,
           THTensor *output,
           int outputW, int outputH,
-          int poolSizeW, int poolSizeH,
+          int kW, int kH,
           THIndexTensor *indices,
           THTensor *randomSamples);
 TH_API void THNN_(SpatialFractionalMaxPooling_updateGradInput)(
@@ -960,7 +960,7 @@ TH_API void THNN_(SpatialFractionalMaxPooling_updateGradInput)(
           THTensor *gradOutput,
           THTensor *gradInput,
           int outputW, int outputH,
-          int poolSizeW, int poolSizeH,
+          int kW, int kH,
           THIndexTensor *indices);
 
 TH_API void THNN_(SpatialFullConvolution_updateOutput)(
