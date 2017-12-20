@@ -284,7 +284,7 @@ def softplus(g, self, beta, threshold):
 def max_pool1d(g, input, kernel_size, stride, padding, dilation, ceil_mode):
     if ceil_mode:
         return _unimplemented("max_pool1d", "ceil_mode")
-    if set(_pair(dilation)) != {1}:
+    if set(_single(dilation)) != {1}:
         return _unimplemented("max_pool1d", "dilation")
     if stride is None:
         stride = kernel_size
