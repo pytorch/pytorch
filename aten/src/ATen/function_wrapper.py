@@ -565,10 +565,16 @@ def create_generic(top_env, declarations):
 
         # ensure we get reference-type formals when appropriate
         def native_translate_formals(argument, option):
+            def translate_map(const):
+                return {
+                    'Tensor': 'const Tensor &' if const else 'Tensor &',
+                    'BoolTensor': 'const Tensor &' if const else 'Tensor &'
+                }
+
             if (option['inplace'] and argument['name'] == 'self') or argument.get('output', False):
-                argument['type'] = {'Tensor': 'Tensor &'}.get(argument['type'], argument['type'])
+                argument['type'] = translate_map(False).get(argument['type'], argument['type'])
             else:
-                argument['type'] = {'Tensor': 'const Tensor &'}.get(argument['type'], argument['type'])
+                argument['type'] = translate_map(True).get(argument['type'], argument['type'])
 
             return argument
 
