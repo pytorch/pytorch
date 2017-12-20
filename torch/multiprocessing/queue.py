@@ -22,10 +22,13 @@ class ConnectionWrapper(object):
         return pickle.loads(buf)
 
     def __getattr__(self, name):
-        if 'conn' in self.__dict__:
-            return getattr(self.conn, name)
-        raise AttributeError("'{}' object has no attribute '{}'".format(
-            type(self).__name__, 'conn'))
+        return getattr(self.conn, name)
+
+    def __setstate__(self, state):
+        self.__dict__ = state
+
+    def __getstate__(self):
+        return self.__dict__
 
 
 class Queue(multiprocessing.queues.Queue):
