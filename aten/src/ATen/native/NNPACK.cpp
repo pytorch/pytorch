@@ -3,6 +3,8 @@
 
 #if !AT_NNPACK_ENABLED()
 
+namespace at { namespace native {
+
 at::Tensor nnpack_spatial_convolution(
     const at::Tensor& input,
     const at::Tensor& weight,
@@ -27,7 +29,7 @@ at::Tensor nnpack_spatial_convolution_backward_input(
 
 at::Tensor nnpack_spatial_convolution_backward_weight(
     const at::Tensor& input,
-    IntList weight_size;
+    at::IntList weight_size,
     const at::Tensor& gradOutput,
     int kW,
     int kH,
@@ -47,6 +49,8 @@ std::tuple<at::Tensor,at::Tensor,at::Tensor> nnpack_spatial_convolution_backward
     std::array<bool,3> output_mask) {
   throw std::runtime_error("nnpack_spatial_convolution_backward: ATen not compiled with NNPACK support");
 }
+
+}} // at::native
 
 #else
 
