@@ -60,13 +60,19 @@ struct Parser {
         }
       } break;
     }
-    while (L.nextIf('.')) {
-      auto name = parseIdent();
-      if (L.cur().kind == '(') {
-        TreeList inputs = {prefix};
-        prefix = createApply(name, inputs);
+    while (true) {
+      if (L.nextIf('.')) {
+        const auto name = parseIdent();
+        if (L.cur().kind == '(') {
+          TreeList inputs = {prefix};
+          prefix = createApply(name, inputs);
+        } else {
+          prefix = Select::create(name->range(), prefix, name);
+        }
+      } else if (L.cur().kind == '[') {
+        prefix = parseSliceOrGather(prefix);
       } else {
-        prefix = Select::create(name->range(), prefix, name);
+        break;
       }
     }
     return prefix;
@@ -210,6 +216,39 @@ struct Parser {
       } while (L.nextIf(','));
     }
     L.expect(')');
+  }
+
+  // OK: [a] (gather), [a:], [:a], [a:b], [:] (slice)
+  // Not OK: []
+  TreeRef parseSliceOrGather(TreeRef value) {
+    const auto range = L.cur().range;
+    L.expect('[');
+
+    // `first` will either be the gather indices, or the start of the slice.
+    TreeRef first, second;
+
+    // Here we can either have a colon (which starts a slice), or an expression.
+    // If an expression, we don't know yet if it will be a slice or a gather.
+    if (L.cur().kind != ':') {
+      first = parseExp();
+      if (L.nextIf(']')) {
+        return Gather::create(range, value, first);
+      } else {
+        first = c(TK_OPTION, range, {first});
+      }
+    } else {
+      first = c(TK_OPTION, range, {});
+    }
+    L.expect(':');
+    // Now we *may* have an expression.
+    if (L.cur().kind != ']') {
+      second = c(TK_OPTION, range, {parseExp()});
+    } else {
+      second = c(TK_OPTION, range, {});
+    }
+    L.expect(']');
+
+    return Slice::create(range, value, first, second);
   }
   TreeRef parseIdentList() {
     return parseList('(', ',', ')', [&](int i) { return parseIdent(); });

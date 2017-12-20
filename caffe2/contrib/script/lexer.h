@@ -72,7 +72,9 @@ namespace script {
   _(TK_TIMES_EQ, "*=", "*=")                     \
   _(TK_DIV_EQ, "/=", "/=")                       \
   _(TK_GLOBAL, "global", "global")               \
-  _(TK_BUILT_IN, "built-in", "")
+  _(TK_BUILT_IN, "built-in", "")                 \
+  _(TK_SLICE, "slice", "")                       \
+  _(TK_GATHER, "gather", "")
 static const char* valid_single_char_tokens = "+-*/()[]:,={}><.";
 
 enum TokenKind {

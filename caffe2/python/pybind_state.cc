@@ -725,6 +725,7 @@ void addObjectMethods(py::module& m) {
   py::class_<script::CompilationUnit>(m, "CompilationUnit")
       .def(py::init<>())
       .def("define", &script::CompilationUnit::define)
+      .def("get_proto", &script::CompilationUnit::getProto)
       .def(
           "create_net",
           [](script::CompilationUnit* self, const std::string& name) {

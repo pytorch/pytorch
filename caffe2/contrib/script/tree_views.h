@@ -159,6 +159,72 @@ struct Apply : public TreeView {
   TreeRef attributes_;
 };
 
+struct Slice : public TreeView {
+  explicit Slice(const TreeRef& tree) : TreeView(tree) {
+    tree_->match(TK_SLICE, value_, start_, end_);
+  }
+
+  TreeRef value() const {
+    return value_;
+  }
+
+  OptionView<TreeRef> start() const {
+    return OptionView<TreeRef>(start_);
+  }
+
+  OptionView<TreeRef> end() const {
+    return OptionView<TreeRef>(end_);
+  }
+
+  TreeRef startOr(int alternative) const {
+    const auto startOption = start();
+    return startOption.present() ? startOption.get() : createInt(alternative);
+  }
+
+  TreeRef endOr(int alternative) const {
+    const auto endOption = end();
+    return endOption.present() ? endOption.get() : createInt(alternative);
+  }
+
+  static TreeRef
+  create(const SourceRange& range, TreeRef value, TreeRef start, TreeRef end) {
+    return Compound::create(TK_SLICE, range, {value, start, end});
+  }
+
+ private:
+  TreeRef createInt(int value) const {
+    return Compound::create(
+        TK_CONST, range(), {Number::create(value), String::create("i")});
+  }
+
+  TreeRef value_;
+  TreeRef start_;
+  TreeRef end_;
+};
+
+struct Gather : public TreeView {
+  explicit Gather(const TreeRef& tree) : TreeView(tree) {
+    tree_->match(TK_GATHER, value_, indices_);
+  }
+
+  TreeRef value() const {
+    return value_;
+  }
+
+  TreeRef indices() const {
+    return indices_;
+  }
+
+  static TreeRef
+  create(const SourceRange& range, TreeRef value, TreeRef indices) {
+    return Compound::create(TK_GATHER, range, {value, indices});
+  }
+
+ private:
+  TreeRef value_;
+  TreeRef indices_;
+};
+
 struct Cast : public TreeView {
   explicit Cast(const TreeRef& tree) : TreeView(tree) {
     tree_->match(TK_CAST, type_, input_);
