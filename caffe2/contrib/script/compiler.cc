@@ -545,10 +545,46 @@ struct DefCompiler {
             outputs[0],
             tree->tree(1)->stringValue());
       } break;
+      case TK_GATHER: {
+        const auto gather = Gather(tree);
+        desugarAndEmitOperator(
+            "Gather",
+            gather.range(),
+            {gather.value(), gather.indices()},
+            outputs);
+        break;
+      }
+      case TK_SLICE: {
+        const auto slice = Slice(tree);
+        desugarAndEmitOperator(
+            "Slice",
+            slice.range(),
+            {slice.value(), slice.startOr(0), slice.endOr(-1)},
+            outputs);
+        break;
+      }
       default:
         throw ErrorReport(tree) << "NYI: " << tree;
         break;
     }
+  }
+
+  // Desugars constructs that are syntactic sugar and emits the corresponding
+  // operator invocation, e.g. tensor[indices] -> tensor.Gather(indices).
+  void desugarAndEmitOperator(
+      const std::string& operatorName,
+      const SourceRange& range,
+      TreeList&& inputs,
+      const std::vector<std::string>& outputs) {
+    const auto applyName = Ident::create(range, operatorName);
+    const auto applyInputs =
+        Compound::create(TK_LIST, range, std::move(inputs));
+    const auto applyAttributes = Compound::create(TK_LIST, range, {});
+    const auto apply =
+        Apply::create(range, applyName, applyInputs, applyAttributes);
+    const auto schema = OpSchemaRegistry::Schema(operatorName);
+    assert(schema != nullptr);
+    emitOperator(Apply(apply), schema, outputs);
   }
 
   TensorProto_DataType getType(int type) {
@@ -688,7 +724,6 @@ struct DefCompiler {
 };
 
 struct CompilationUnitImpl {
-  CompilationUnitImpl() {}
   void defineFunction(const Def& def) {
     if (functions.count(def.name().name()) > 0) {
       throw ErrorReport(def) << def.name().name() << " already defined.";
@@ -722,6 +757,10 @@ struct CompilationUnitImpl {
     functions.emplace(name, FunctionDefinition(std::move(net_def)));
   }
 
+  std::string getProto(const std::string& functionName) {
+    return functions.at(functionName).net_def->DebugString();
+  }
+
  private:
   friend class DefCompiler;
   SymbolTable functions;
@@ -743,6 +782,10 @@ std::unique_ptr<NetBase> CompilationUnit::createNet(
     Workspace* ws,
     const std::string& str) {
   return pImpl->createNet(ws, str);
+}
+
+std::string CompilationUnit::getProto(const std::string& functionName) const {
+  return pImpl->getProto(functionName);
 }
 
 CompilationUnit::~CompilationUnit() {}

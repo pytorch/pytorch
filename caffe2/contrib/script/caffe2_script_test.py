@@ -13,6 +13,21 @@ import hypothesis.strategies as st
 import numpy as np
 
 
+def feed_inputs(inputs):
+    for name, value in inputs.items():
+        workspace.FeedBlob(name, value)
+
+
+def assert_proto_equals(proto, expected):
+    proto_lines = proto.strip().split('\n')
+    expected_lines = expected.strip().split('\n')
+    assert len(proto_lines) == len(expected_lines), \
+        '{} != {}'.format(proto, expected)
+    for left, right in zip(proto_lines, expected_lines):
+        assert left.strip() == right.strip(), \
+            '{} != {}'.format(proto, expected)
+
+
 class TestCaffe2Script(hu.HypothesisTestCase):
     test_program = """
           def foo(a,b,X,W) -> (c):
@@ -46,8 +61,7 @@ class TestCaffe2Script(hu.HypothesisTestCase):
         X = inputs['X'] = np.random.rand(firstdim, firstdim).astype(np.float32)
         W = inputs['W'] = np.random.rand(seconddim, firstdim).astype(np.float32)
 
-        for name, inp in inputs.items():
-            workspace.FeedBlob(name, inp)
+        feed_inputs(inputs)
 
         CU = core.C.CompilationUnit()
         CU.define(self.test_program)
@@ -257,8 +271,7 @@ class TestCaffe2Script(hu.HypothesisTestCase):
         t = inputs['t'] = np.random.rand(3, 3).astype(np.float32)
         f = inputs['f'] = np.random.rand(3, 3).astype(np.float32)
 
-        for name, inp in inputs.items():
-            workspace.FeedBlob(name, inp)
+        feed_inputs(inputs)
 
         CU = core.C.CompilationUnit()
         CU.define(self.test_program)
@@ -278,8 +291,7 @@ class TestCaffe2Script(hu.HypothesisTestCase):
         inputs = {}
         r = inputs['r'] = np.ones([3, 3]).astype(np.float32)
 
-        for name, inp in inputs.items():
-            workspace.FeedBlob(name, inp)
+        feed_inputs(inputs)
 
         CU = core.C.CompilationUnit()
         CU.define(self.test_program)
@@ -293,3 +305,216 @@ class TestCaffe2Script(hu.HypothesisTestCase):
         actual_r = workspace.FetchBlob('r')
 
         np.testing.assert_allclose(actual_r, r)
+
+    @given(seed=st.integers(min_value=0, max_value=65536), **hu.gcs)
+    def test_gather(self, seed, gc, dc):
+        CU = core.C.CompilationUnit()
+        CU.define("""
+        def easy(tensor, indices) -> (output):
+            output = tensor[indices]
+        def hard(tensor, i, j, k) -> (output):
+            output = tensor[i][j][k]
+        """)
+
+        # First check that the generated proto is as expected. This tests that
+        # we desugar the gather syntax correctly and emit the right code.
+        proto = CU.get_proto('easy')
+        assert_proto_equals(proto, """
+            name: "easy"
+            op {
+              input: "tensor"
+              input: "indices"
+              output: "output"
+              type: "Gather"
+            }""")
+
+        proto = CU.get_proto('hard')
+        assert_proto_equals(proto, """
+            name: "hard"
+            op {
+              input: "tensor"
+              input: "i"
+              output: "$t1"
+              type: "Gather"
+            }
+            op {
+              input: "$t1"
+              input: "j"
+              output: "$t0"
+              type: "Gather"
+            }
+            op {
+              input: "$t0"
+              input: "k"
+              output: "output"
+              type: "Gather"
+            }""")
+
+        # Now just test that the effect of the generated code is as expected.
+        np.random.seed(int(seed))
+        tensor = np.random.rand(5, 4, 3).astype(np.float32)
+        indices = np.random.randint(len(tensor), size=(5, 5))
+
+        feed_inputs(dict(tensor=tensor, indices=indices))
+
+        net = CU.create_net('easy')
+        net.run()
+
+        output = workspace.FetchBlob('output')
+        expected_output = [tensor[sample] for sample in indices]
+        np.testing.assert_allclose(output, expected_output)
+
+    @given(seed=st.integers(min_value=0, max_value=65536), **hu.gcs)
+    def test_slice(self, seed, gc, dc):
+        CU = core.C.CompilationUnit()
+        CU.define("""
+        def slice_from_tensor(tensor, start, end) -> (output):
+            output = tensor[start:end]
+        def slice_from_vector(vector, start, end) -> (a, b, c, d):
+            a = vector[start:end]
+            b = vector[start:]
+            c = vector[:end]
+            d = vector[:]
+        """)
+
+        # slice_from_tensor
+        proto = CU.get_proto('slice_from_tensor')
+        assert_proto_equals(proto, """
+            name: "slice_from_tensor"
+            op {
+              input: "tensor"
+              input: "start"
+              input: "end"
+              output: "output"
+              type: "Slice"
+            }""")
+
+        np.random.seed(int(seed))
+        tensor = np.random.rand(5, 4, 3).astype(np.float32)
+        start = np.array([0, 1, 0], dtype=np.int32)
+        end = np.array([-1, 2, -1], dtype=np.int32)
+
+        feed_inputs(dict(tensor=tensor, start=start, end=end))
+
+        net = CU.create_net('slice_from_tensor')
+        net.run()
+
+        output = workspace.FetchBlob('output')
+        np.testing.assert_allclose(output, tensor[:, 1:2])
+
+        # slice_from_vector
+        proto = CU.get_proto('slice_from_vector')
+        assert_proto_equals(proto, """
+            name: "slice_from_vector"
+            op {
+              input: "vector"
+              input: "start"
+              input: "end"
+              output: "a"
+              type: "Slice"
+            }
+            op {
+              output: "$t0"
+              type: "ConstantFill"
+              arg {
+                name: "dtype"
+                i: 2
+              }
+              arg {
+                name: "value"
+                i: -1
+              }
+              arg {
+                name: "shape"
+                ints: 1
+              }
+            }
+            op {
+              input: "vector"
+              input: "start"
+              input: "$t0"
+              output: "b"
+              type: "Slice"
+            }
+            op {
+              output: "$t1"
+              type: "ConstantFill"
+              arg {
+                name: "dtype"
+                i: 2
+              }
+             arg {
+                name: "value"
+                i: 0
+              }
+              arg {
+                name: "shape"
+                ints: 1
+              }
+            }
+            op {
+              input: "vector"
+              input: "$t1"
+              input: "end"
+              output: "c"
+              type: "Slice"
+            }
+            op {
+              output: "$t2"
+              type: "ConstantFill"
+              arg {
+                name: "dtype"
+                i: 2
+              }
+             arg {
+                name: "value"
+                i: 0
+              }
+              arg {
+                name: "shape"
+                ints: 1
+              }
+            }
+            op {
+              output: "$t3"
+              type: "ConstantFill"
+              arg {
+                name: "dtype"
+                i: 2
+              }
+             arg {
+                name: "value"
+                i: -1
+              }
+              arg {
+                name: "shape"
+                ints: 1
+              }
+            }
+            op {
+              input: "vector"
+              input: "$t2"
+              input: "$t3"
+              output: "d"
+              type: "Slice"
+            }""")
+
+        vector = np.random.rand(10).astype(np.float32)
+        start = np.array([2], dtype=np.int32)
+        end = np.array([6], dtype=np.int32)
+        feed_inputs(dict(vector=vector, start=start, end=end))
+
+        net = CU.create_net('slice_from_vector')
+        net.run()
+
+        output = workspace.FetchBlob('a')
+        np.testing.assert_allclose(output, vector[2:6])
+
+        output = workspace.FetchBlob('b')
+        np.testing.assert_allclose(output, vector[2:])
+
+        output = workspace.FetchBlob('c')
+        np.testing.assert_allclose(output, vector[:6])
+
+        output = workspace.FetchBlob('d')
+        np.testing.assert_allclose(output, vector)
