@@ -49,6 +49,7 @@ struct Variable : public at::Tensor {
   inline const std::shared_ptr<Function>& grad_fn() const;
 
   // Updates the grad_fn of an existing Variable. Called after in-place modifications.
+  // XXX: this should be called only _after_ the version counter is implemented.
   inline void rebase_history(int output_nr, std::shared_ptr<Function> grad_fn);
 
   std::shared_ptr<Function> grad_accumulator() const;
