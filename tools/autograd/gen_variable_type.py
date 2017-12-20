@@ -67,20 +67,8 @@ UNPACK_TENSOR = CodeTemplate("""\
 auto${ref} ${arg_name}_ = unpack${suffix}(${arg_name}, "${arg_name}", ${arg_pos});""")
 
 FUNCTION_DECLARATION = CodeTemplate("""\
-struct ${op} : public Function {
-  using Function::Function;
-  variable_list apply(const variable_list& grads) override;
-  std::string name() override { return "${op}"; }
-  void releaseVariables() override {
-    ${release_variables}
-  }
-  ${saved_variables}
-};
-""")
-
-TRACEABLE_FUNCTION_DECLARATION = CodeTemplate("""\
-struct ${op} : public TraceableFunction {
-  using TraceableFunction::TraceableFunction;
+struct ${op} : public ${superclass} {
+  using ${superclass}::${superclass};
   variable_list apply(const variable_list& grads) override;
   std::string name() override { return "${op}"; }
   void releaseVariables() override {
@@ -630,11 +618,12 @@ def create_autograd_functions(top_env, autogen_functions):
             body.append(emit_derivative(derivative))
 
         env['body'] = body
-        env = nested_dict(env, func)
         if func['name'] in UNTRACEABLE_FUNCTIONS:
-            function_declarations.append(FUNCTION_DECLARATION.substitute(env))
+            env['superclass'] = 'Function'
         else:
-            function_declarations.append(TRACEABLE_FUNCTION_DECLARATION.substitute(env))
+            env['superclass'] = 'TraceableFunction'
+        env = nested_dict(env, func)
+        function_declarations.append(FUNCTION_DECLARATION.substitute(env))
         function_definitions.append(FUNCTION_DEFINITION.substitute(env))
         py_function_initializers.append(PY_FUNCTION_DEFINITION.substitute(env))
 

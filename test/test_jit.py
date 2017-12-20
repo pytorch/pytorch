@@ -119,6 +119,11 @@ class TestJit(TestCase):
             z2 = fn(x, y)
         self.assertEqual(z, z2)
 
+    # Backwards tracing was broken for indexing by a constant,
+    # because it's internally implemented using as_strided,
+    # and we attempted to trace its derivative (which is not
+    # currently supported.)  It currently works because
+    # slice() is now not marked as traceable.
     def test_index_constant(self):
         x = Variable(torch.Tensor([0.4]), requires_grad=True)
 
@@ -979,7 +984,11 @@ class TestJit(TestCase):
         self.assertTrue("hits: 100" in info_str)
         self.assertTrue("stage 1" in info_str)
 
-    # inplace copies don't work with tracer yet
+    # Inplace copies don't work with tracer yet.
+    # This is actually somewhat important to support correctly
+    # as all backwards functions of views are implemented
+    # as a zero filled tensor with a gradient fill on the
+    # viewed portion.
     @unittest.expectedFailure
     def test_inplace_copy(self):
         x = Variable(torch.randn(4, 4), requires_grad=True)
