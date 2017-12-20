@@ -13,19 +13,19 @@ void THNN_(ELU_updateOutput)(
            accreal scale,
            bool inplace)
 {
-  real poscoef = ScalarConvert<accreal, real>::to(alpha * scale);
-  real negcoef = ScalarConvert<accreal, real>::to(scale);
+  real negcoef = ScalarConvert<accreal, real>::to(alpha * scale);
+  real poscoef = ScalarConvert<accreal, real>::to(scale);
   THCUNN_assertSameGPU(state, 2, input, output);
 
   if (inplace)
   {
-    THC_pointwiseApply1(state, input, ELUupdateOutputIP_functor<real>(poscoef, negcoef));
+    THC_pointwiseApply1(state, input, ELUupdateOutputIP_functor<real>(negcoef, poscoef));
     THCTensor_(set)(state, output, input);
   }
   else
   {
     THCTensor_(resizeAs)(state, output, input);
-    THC_pointwiseApply2(state, output, input, ELUupdateOutput_functor<real>(poscoef, negcoef));
+    THC_pointwiseApply2(state, output, input, ELUupdateOutput_functor<real>(negcoef, poscoef));
   }
 }
 
@@ -38,13 +38,13 @@ void THNN_(ELU_updateGradInput)(
            accreal alpha,
            accreal scale)
 {
-  real poscoef = ScalarConvert<accreal, real>::to(alpha * scale);
-  real negcoef = ScalarConvert<accreal, real>::to(scale);
+  real negcoef = ScalarConvert<accreal, real>::to(alpha * scale);
+  real poscoef = ScalarConvert<accreal, real>::to(scale);
   THCUNN_check_nElement(state, output, gradOutput);
   THCUNN_assertSameGPU(state, 3, output, gradOutput, gradInput);
 
   THCTensor_(resizeAs)(state, gradInput, output);
-  THC_pointwiseApply3(state, gradInput, output, gradOutput, ELUupdateGradInput_functor<real>(poscoef, negcoef));
+  THC_pointwiseApply3(state, gradInput, output, gradOutput, ELUupdateGradInput_functor<real>(negcoef, poscoef));
 }
 
 #endif
