@@ -103,7 +103,7 @@ Tensor stft(const Tensor& self, const int64_t frame_length,
   input = input.view({batch, 1, len, 1});
   kernel = kernel.view({return_size * 2, 1, frame_length, 1});
   // conv is actually correlation, so we are good
-  auto conv_out = at::conv2d(input, kernel, {frame_length, 1}, {}, hop).squeeze_(-1);
+  auto conv_out = at::conv2d(input, kernel, {}, hop).squeeze_(-1);
   // transpose to [batch x time x freq x (re/im)]
   auto out = conv_out.view({batch, 2, return_size, -1}).transpose_(1, -1);
   if (self.dim() == 1) {

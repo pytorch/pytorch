@@ -191,30 +191,30 @@
 
 # Convolutions
 
-- name: conv_transpose2d(Tensor self, Tensor weight, IntList[2] kernel_size, Tensor bias={}, IntList[2] stride=1, IntList[2] padding=0, IntList[2] output_padding=0, IntList[2] dilation=1)
+- name: thnn_conv_transpose2d(Tensor self, Tensor weight, IntList[2] kernel_size, Tensor bias={}, IntList[2] stride=1, IntList[2] padding=0, IntList[2] output_padding=0, IntList[2] dilation=1)
   cname: SpatialFullDilatedConvolution
   buffers: [columns, ones]
 
-- name: conv_transpose3d(Tensor self, Tensor weight, Tensor bias={}, IntList[3] stride=1, IntList[3] padding=0, IntList[3] output_padding=0, IntList[3] dilation=1)
+- name: thnn_conv_transpose3d(Tensor self, Tensor weight, Tensor bias={}, IntList[3] stride=1, IntList[3] padding=0, IntList[3] output_padding=0, IntList[3] dilation=1)
   cname: VolumetricFullDilatedConvolution
   buffers: [finput, fgrad_input]
 
-- name: conv2d(Tensor self, Tensor weight, IntList[2] kernel_size, Tensor bias={}, IntList[2] stride=1, IntList[2] padding=0)
+- name: thnn_conv2d(Tensor self, Tensor weight, IntList[2] kernel_size, Tensor bias={}, IntList[2] stride=1, IntList[2] padding=0)
   cname: SpatialConvolutionMM
   buffers: [finput, fgrad_input]
 
-- name: conv_depthwise2d(Tensor self, Tensor weight, IntList[2] kernel_size, Tensor bias={}, IntList[2] stride=1, IntList[2] padding=0, IntList[2] dilation=1)
+- name: thnn_conv_depthwise2d(Tensor self, Tensor weight, IntList[2] kernel_size, Tensor bias={}, IntList[2] stride=1, IntList[2] padding=0, IntList[2] dilation=1)
   cname: SpatialDepthwiseConvolution
   buffers: []
 
-- name: conv3d(Tensor self, Tensor weight, IntList[3] kernel_size, Tensor bias={}, IntList[3] stride=1, IntList[3] padding=0)
+- name: thnn_conv3d(Tensor self, Tensor weight, IntList[3] kernel_size, Tensor bias={}, IntList[3] stride=1, IntList[3] padding=0)
   cname: VolumetricConvolutionMM
   buffers: [finput, fgrad_input]
 
-- name: conv_dilated2d(Tensor self, Tensor weight, IntList[2] kernel_size, Tensor bias={}, IntList[2] stride=1, IntList[2] padding=0, IntList[2] dilation=1)
+- name: thnn_conv_dilated2d(Tensor self, Tensor weight, IntList[2] kernel_size, Tensor bias={}, IntList[2] stride=1, IntList[2] padding=0, IntList[2] dilation=1)
   cname: SpatialDilatedConvolution
   buffers: [columns, ones]
 
-- name: conv_dilated3d(Tensor self, Tensor weight, IntList[3] kernel_size, Tensor bias={}, IntList[3] stride=1, IntList[3] padding=0, IntList[3] dilation=1)
+- name: thnn_conv_dilated3d(Tensor self, Tensor weight, IntList[3] kernel_size, Tensor bias={}, IntList[3] stride=1, IntList[3] padding=0, IntList[3] dilation=1)
   cname: VolumetricDilatedConvolution
   buffers: [columns, ones]

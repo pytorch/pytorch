@@ -246,6 +246,13 @@ SKIP_PYTHON_BINDINGS = [
 # https://github.com/pytorch/pytorch/issues/4250
 # TODO: This is probably not exhaustive, but it's a start
 UNTRACEABLE_FUNCTIONS = VIEW_FUNCTIONS
+# These functions we don't want to record for tracing, because we always want
+# to trace their constituent parts.  This is a temporary hack in lieue
+# of proper scopes, where subsequent compilation passes can ask for the unfolding
+# on demand.  Only concrete ATen methods can be disabled this way; it will have
+# NO EFFECT otherwise.
+DONT_RECORD_TRACE = {'convolution', 'conv1d', 'conv2d', 'conv3d',
+                     'conv_transpose1d', 'conv_transpose2d', 'conv_transpose3d'}
 
 # Matches "foo" in "foo, bar" but not "foobar". Used to search for the
 # occurence of a parameter in the derivative formula
@@ -896,7 +903,10 @@ def create_variable_type(top_env, aten_declarations):
             env['return_value'] = '{}(std::move(ret))'.format(declaration['return_type'])
             env['trace_outputs'] = get_trace_outputs(declaration)
 
-        env['record_trace'] = emit_record_trace(env, declaration)
+        if declaration['name'] in DONT_RECORD_TRACE:
+            env['record_trace'] = ''
+        else:
+            env['record_trace'] = emit_record_trace(env, declaration)
 
         body.extend(METHOD_DEFINITION_BODY_VIA_TYPE.substitute(combined).split('\n'))
         return body
