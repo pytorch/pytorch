@@ -1,10 +1,10 @@
 from numbers import Number
 
 import torch
-from torch.autograd import Variable, Function
+from torch.autograd import Function, Variable
 from torch.autograd.function import once_differentiable
 from torch.distributions.distribution import Distribution
-from torch.distributions.utils import broadcast_all
+from torch.distributions.utils import broadcast_all, digamma
 
 
 def _standard_gamma(alpha):
@@ -47,3 +47,7 @@ class Gamma(Distribution):
         return (self.alpha * torch.log(self.beta) +
                 (self.alpha - 1) * torch.log(value) -
                 self.beta * value - torch.lgamma(self.alpha))
+
+    def entropy(self):
+        return (self.alpha - torch.log(self.beta) + torch.lgamma(self.alpha) +
+                (1.0 - self.alpha) * digamma(self.alpha))
