@@ -3,7 +3,7 @@
 
 #if !AT_NNPACK_ENABLED()
 
-void nnpack_spatial_convolution(
+at::Tensor nnpack_spatial_convolution(
     const at::Tensor& input,
     const at::Tensor& weight,
     const at::Tensor& bias,
@@ -14,7 +14,7 @@ void nnpack_spatial_convolution(
   throw std::runtime_error("nnpack_spatial_convolution: ATen not compiled with NNPACK support");
 }
 
-void nnpack_spatial_convolution_backward_input(
+at::Tensor nnpack_spatial_convolution_backward_input(
     const at::Tensor& input,
     const at::Tensor& gradOutput,
     const at::Tensor& weight,
@@ -25,7 +25,7 @@ void nnpack_spatial_convolution_backward_input(
   throw std::runtime_error("nnpack_spatial_convolution_backward_input: ATen not compiled with NNPACK support");
 }
 
-void nnpack_spatial_convolution_backward_weight(
+at::Tensor nnpack_spatial_convolution_backward_weight(
     const at::Tensor& input,
     IntList weight_size;
     const at::Tensor& gradOutput,
@@ -36,7 +36,7 @@ void nnpack_spatial_convolution_backward_weight(
   throw std::runtime_error("nnpack_spatial_convolution_backward_weight: ATen not compiled with NNPACK support");
 }
 
-std::tuple<Tensor,Tensor,Tensor> nnpack_spatial_convolution_backward(
+std::tuple<at::Tensor,at::Tensor,at::Tensor> nnpack_spatial_convolution_backward(
     const at::Tensor& input,
     const at::Tensor& gradOutput,
     const at::Tensor& weight,
