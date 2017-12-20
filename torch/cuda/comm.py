@@ -5,69 +5,35 @@ from torch._utils import _accumulate, _take_tensors, _flatten_dense_tensors, \
     _unflatten_sparse_tensors, _reorder_tensors_as
 
 
-def broadcast(tensor, devices):
+def broadcast(*args, **kwargs):
     """Broadcasts a tensor to a number of GPUs.
-
     Arguments:
         tensor (Tensor): tensor to broadcast.
         devices (Iterable): an iterable of devices among which to broadcast.
           Note that it should be like (src, dst1, dst2, ...), the first element
           of which is the source device to broadcast from.
-
     Returns:
         A tuple containing copies of the ``tensor``, placed on devices
         corresponding to indices from ``devices``.
     """
-    tensors = [tensor]
-    if nccl.is_available(tensors) and len(set(devices)) == len(devices):
-        for device in devices[1:]:
-            with torch.cuda.device(device):
-                tensors.append(type(tensor)(tensor.size()))
-        nccl.broadcast(tensors)
-        return tuple(tensors)
-
-    return tuple(tensor.cuda(gpu, async=True) for gpu in devices)
+    return torch._C._broadcast(*args, **kwargs)
 
 
-def broadcast_coalesced(tensors, devices, buffer_size=10485760):
+def broadcast_coalesced(*args, **kwargs):
     """Broadcasts a sequence tensors to the specified GPUs.
-
     Small tensors are first coalesced into a buffer to reduce the number
     of synchronizations.
-
     Arguments:
         tensors (sequence): tensors to broadcast.
         devices (Iterable): an iterable of devices among which to broadcast.
           Note that it should be like (src, dst1, dst2, ...), the first element
           of which is the source device to broadcast from.
         buffer_size (int): maximum size of the buffer used for coalescing
-
     Returns:
         A tuple containing copies of the ``tensor``, placed on devices
         corresponding to indices from ``devices``.
     """
-    for tensor in tensors:
-        if tensor.get_device() != devices[0]:
-            raise RuntimeError('all tensors must be on devices[0]')
-    outputs = [[] for _ in devices]
-    # use the original tensors for the first device
-    outputs[0].extend(tensors)
-    for chunk in _take_tensors(tensors, buffer_size):
-        if chunk[0].is_sparse:
-            flat_indices, flat_values = _flatten_sparse_tensors(chunk)
-            result_indices = broadcast(flat_indices, devices)
-            result_values = broadcast(flat_values, devices)
-            unflat_results = tuple(_unflatten_sparse_tensors(iv, chunk) for iv in zip(result_indices, result_values))
-        else:
-            flat = _flatten_dense_tensors(chunk)
-            results = broadcast(flat, devices)
-            unflat_results = tuple(_unflatten_dense_tensors(tensor, chunk) for tensor in results)
-        # use the broadcasted tensors for the remaining devices
-        for dst, unflat_res in zip(outputs[1:], unflat_results[1:]):
-            dst.extend(unflat_res)
-    for i, output in enumerate(outputs):
-        outputs[i] = _reorder_tensors_as(output, tensors)
-    return tuple(outputs)
+    return torch._C._broadcast_coalesced(*args, **kwargs)
 
 
 def reduce_add(inputs, destination=None):
