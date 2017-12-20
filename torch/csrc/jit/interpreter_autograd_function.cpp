@@ -104,6 +104,9 @@ autograd::variable_list InterpreterAutogradFunction::apply(
     }
     // Add grad_fns corresponding to inputs
     for(size_t i = 0; i < inputs.size(); ++i) {
+      // If an input isn't used, there's no gradient for it, and next stage
+      // won't even have its grad in the trace. Don't create an entry for it.
+      if (!details.used_inputs[i]) continue;
       auto & input = inputs[i];
       if (!details.input_flags[i].requires_grad) {
         continue; // See Note [Null-edge pruning]
@@ -139,9 +142,14 @@ autograd::variable_list InterpreterAutogradFunction::apply(
 InterpreterFunctionFactory::InterpreterFunctionFactory(TracingState *state) {
   code_ = jit::Code(state->graph);
   stage_details_.resize(state->graph->stage() + 1);
+  auto graph_inputs = state->graph->inputs();
+  auto inputs_it = graph_inputs.begin();
   for (std::size_t stage = 0; stage < state->graph->stage() + 1; ++stage) {
     auto & details = stage_details_[stage];
     std::tie(details.input_flags, details.output_flags) = std::move(state->var_flags[stage]);
+    for (std::size_t i = 0; inputs_it != graph_inputs.end() && (*inputs_it)->stage() == stage; ++i, ++inputs_it) {
+      details.used_inputs.push_back((*inputs_it)->uses().size() > 0);
+    }
     if (stage >= 1) {
       auto & current_outputs = state->output_edges[stage];
       auto & prev_outputs = state->output_edges[stage - 1];
