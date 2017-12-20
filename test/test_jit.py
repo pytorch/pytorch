@@ -142,7 +142,6 @@ class TestJit(TestCase):
         self.assertEqual(z, z2)
         self.assertEqual(grad, grad2)
 
-
     def test_scopes(self):
         x = Variable(torch.Tensor([0.4]), requires_grad=True)
         y = Variable(torch.Tensor([0.7]), requires_grad=True)
@@ -992,10 +991,12 @@ class TestJit(TestCase):
     @unittest.expectedFailure
     def test_inplace_copy(self):
         x = Variable(torch.randn(4, 4), requires_grad=True)
+
         def f(x):
             out = Variable(torch.zeros(x.size()))
             out.copy_(x)
             return out
+
         trace, z = torch.jit.trace(f, (x, ), nderivs=0)
         torch._C._jit_pass_lint(trace)
         torch._C._jit_pass_dce(trace)
