@@ -118,6 +118,9 @@
     CPU: RoiPooling2d_backward_cpu
     CUDA: RoiPooling2d_backward_cuda
 
+- func: max_pool1d(Tensor self, IntList[1] kernel_size, IntList[1] stride={}, IntList[1] padding=0, IntList[1] dilation=1, bool ceil_mode=false) -> (Tensor, Tensor)
+  variants: function
+
 - func: cudnn_convolution_forward(Tensor input, Tensor weight, IntList padding, IntList stride, IntList dilation, int64_t groups, bool benchmark, bool deterministic) -> Tensor
   variants: function
 

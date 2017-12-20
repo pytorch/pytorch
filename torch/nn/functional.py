@@ -332,8 +332,7 @@ def max_pool1d(input, kernel_size, stride=None, padding=0, dilation=1,
 
     See :class:`~torch.nn.MaxPool1d` for details.
     """
-    ret = _functions.thnn.MaxPool1d.apply(input, kernel_size, stride, padding, dilation,
-                                          ceil_mode)
+    ret = torch._C._VariableBase.max_pool1d(input, kernel_size, stride, padding, dilation, ceil_mode)
     return ret if return_indices else ret[0]
 
 
