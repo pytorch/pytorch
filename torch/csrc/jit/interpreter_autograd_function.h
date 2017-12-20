@@ -13,6 +13,7 @@ struct StageDetails {
   std::vector<VariableFlags> input_flags;
   std::vector<VariableFlags> output_flags;
   std::vector<int> copied_next_fns;
+  std::vector<bool> used_inputs;
 };
 
 struct InterpreterAutogradFunction : public autograd::Function {

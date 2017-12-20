@@ -851,6 +851,16 @@ class TestJit(TestCase):
 
         self.assertEqual(r1, r2)
 
+    def test_unused_input(self):
+            @torch.jit.compile(nderivs=1)
+            def fn(a, b, c):
+                return a + b
+
+            a, b, c = [Variable(torch.randn(2, 2), requires_grad=True) for _ in range(3)]
+            fn(a, b, c).sum().backward()
+            with self.assertCompiled(fn):
+                fn(a, b, c).sum().backward()
+
     def test_mini_wlm(self):
         """Exercise null-edge pruning in the tracer."""
 
