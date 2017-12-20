@@ -106,6 +106,12 @@
 
 - func: matmul(Tensor self, Tensor other) -> Tensor
 
+# we define both of these because 'where' does the broadcast and '_s_where' doesn't;
+# this allows us to implicitly calculate the broadcast derivative, while only dealing with the
+# _s_where derivative.
+- func: where(BoolTensor condition, Tensor self, Tensor other) -> Tensor
+- func: _s_where(BoolTensor condition, Tensor self, Tensor other) -> Tensor
+
 - func: RoiPooling2d_forward(Tensor input, Tensor rois, int64_t pooledHeight, int64_t pooledWidth, double spatialScale) -> (Tensor, Tensor)
   variants: function
   dispatch:
