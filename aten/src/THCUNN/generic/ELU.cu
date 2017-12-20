@@ -9,21 +9,23 @@ void THNN_(ELU_updateOutput)(
            THCState *state,
            THCTensor *input,
            THCTensor *output,
-           accreal alpha_,
+           accreal alpha,
+           accreal scale,
            bool inplace)
 {
-  real alpha = ScalarConvert<accreal, real>::to(alpha_);
+  real negcoef = ScalarConvert<accreal, real>::to(alpha * scale);
+  real poscoef = ScalarConvert<accreal, real>::to(scale);
   THCUNN_assertSameGPU(state, 2, input, output);
 
   if (inplace)
   {
-    THC_pointwiseApply1(state, input, ELUupdateOutputIP_functor<real>(alpha));
+    THC_pointwiseApply1(state, input, ELUupdateOutputIP_functor<real>(negcoef, poscoef));
     THCTensor_(set)(state, output, input);
   }
   else
   {
     THCTensor_(resizeAs)(state, output, input);
-    THC_pointwiseApply2(state, output, input, ELUupdateOutput_functor<real>(alpha));
+    THC_pointwiseApply2(state, output, input, ELUupdateOutput_functor<real>(negcoef, poscoef));
   }
 }
 
@@ -33,23 +35,16 @@ void THNN_(ELU_updateGradInput)(
            THCTensor *gradOutput,
            THCTensor *gradInput,
            THCTensor *output,
-           accreal alpha_,
-           bool inplace)
+           accreal alpha,
+           accreal scale)
 {
-  real alpha = ScalarConvert<accreal, real>::to(alpha_);
+  real negcoef = ScalarConvert<accreal, real>::to(alpha * scale);
+  real poscoef = ScalarConvert<accreal, real>::to(scale);
   THCUNN_check_nElement(state, output, gradOutput);
   THCUNN_assertSameGPU(state, 3, output, gradOutput, gradInput);
 
-  if (inplace)
-  {
-    THC_pointwiseApply2(state, gradOutput, output, ELUupdateGradInputIP_functor<real>(alpha));
-    THCTensor_(set)(state, gradInput, gradOutput);
-  }
-  else
-  {
-    THCTensor_(resizeAs)(state, gradInput, output);
-    THC_pointwiseApply3(state, gradInput, output, gradOutput, ELUupdateGradInput_functor<real>(alpha));
-  }
+  THCTensor_(resizeAs)(state, gradInput, output);
+  THC_pointwiseApply3(state, gradInput, output, gradOutput, ELUupdateGradInput_functor<real>(negcoef, poscoef));
 }
 
 #endif

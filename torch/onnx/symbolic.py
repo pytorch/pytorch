@@ -401,6 +401,10 @@ def elu(g, input, alpha, inplace=False):
     return g.op("Elu", input, alpha_f=_scalar(alpha))
 
 
+def selu(g, input):
+    return g.op("Selu", input)
+
+
 def index_select(g, self, index, dim):
     return g.op("Gather", self, index, axis_i=dim)
 
