@@ -356,7 +356,6 @@ IMPLEMENT_STATELESS(ge)
 IMPLEMENT_STATELESS(le)
 IMPLEMENT_STATELESS(eq)
 IMPLEMENT_STATELESS(ne)
-IMPLEMENT_STATELESS(where)
 
 IMPLEMENT_STATELESS_ADDXX(addmm)
 IMPLEMENT_STATELESS_ADDXX(addmv)
@@ -671,7 +670,6 @@ static PyMethodDef TorchMethods[] = {
   {"le",              (PyCFunction)THPModule_le,                METH_VARARGS | METH_KEYWORDS, NULL},
   {"eq",              (PyCFunction)THPModule_eq,                METH_VARARGS | METH_KEYWORDS, NULL},
   {"ne",              (PyCFunction)THPModule_ne,                METH_VARARGS | METH_KEYWORDS, NULL},
-  {"where",           (PyCFunction)THPModule_where,             METH_VARARGS | METH_KEYWORDS, NULL},
   {"kthvalue",        (PyCFunction)THPModule_kthvalue,          METH_VARARGS | METH_KEYWORDS, NULL},
   {"mode",            (PyCFunction)THPModule_mode,              METH_VARARGS | METH_KEYWORDS, NULL},
   {"median",          (PyCFunction)THPModule_median,            METH_VARARGS | METH_KEYWORDS, NULL},
