@@ -193,8 +193,10 @@ def generate_storage_type_and_tensor(backend, density, scalar_type, declarations
     env['Storage'] = "{}{}Storage".format(backend, scalar_name)
     env['Type'] = "{}{}{}Type".format(density_tag, backend, scalar_name)
     env['Tensor'] = "{}{}{}Tensor".format(density_tag, backend, scalar_name)
+    env['DenseTensor'] = "{}{}Tensor".format(backend, scalar_name)
     env['SparseTensor'] = "Sparse{}{}Tensor".format(backend, scalar_name)
     env['Backend'] = density_tag + backend
+    env['DenseBackend'] = backend
 
     # used for generating switch logic for external functions
     tag = density_tag + backend + scalar_name

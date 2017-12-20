@@ -4013,3 +4013,34 @@
     - THTensor* self
     - THSTensor* mask
 ]]
+
+[[
+  name: _indices
+  variants:
+    - method
+  backends:
+    - SparseCPU
+    - SparseCUDA
+  return: THDenseIndexTensor*
+  cname: newIndices
+  arguments:
+     - THTensor* self
+  aten_custom_call: |
+    if (self_->isScalar()) {
+      // Empty tensor
+      return self_->type().toScalarType(kLong).tensor({0});
+    }
+]]
+
+[[
+  name: _values
+  variants:
+    - method
+  backends:
+    - SparseCPU
+    - SparseCUDA
+  return: THDenseTensor*
+  cname: newValues
+  arguments:
+     - THTensor* self
+]]
