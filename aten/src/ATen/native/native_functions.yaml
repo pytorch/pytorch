@@ -19,7 +19,7 @@
 #           CUDA: func_cuda
 # python_default_init: a map from argument names to default initialize expressions in C++. Such default
 #                      expressions will only be used in Python API. This allows us to write argument with
-#                      a default value that can either cause ambiguity in c++ (e.g., `Scalar p` arguement
+#                      a default value that can either cause ambiguity in c++ (e.g., `Scalar p` argument
 #                      in `norm`) or have a type that doesn't allow default value None/NULL/nullptr (e.g.,
 #                      `int64_t fft_size` argument in stft, which we want to default to value of another
 #                      argument if not provided).
@@ -159,6 +159,27 @@
 
 - func: det(Tensor self) -> Tensor
 - func: _det_with_svd(Tensor self) -> (Tensor, Tensor, Tensor, Tensor)
+
+- func: embedding(Tensor weight, IndexTensor indices, int64_t padding_idx=-1, bool scale_grad_by_freq=false, bool sparse=false) -> Tensor
+  variants: function
+
+- func: embedding_backward(Tensor grad, IndexTensor indices, int64_t num_weights, int64_t padding_idx, bool scale_grad_by_freq, bool sparse) -> Tensor
+  variants: function
+
+- func: embedding_dense_backward(Tensor grad, IndexTensor indices, int64_t num_weights, int64_t padding_idx, bool scale_grad_by_freq) -> Tensor
+  variants: function
+  dispatch:
+    CPU: embedding_backward_cpu
+    CUDA: embedding_backward_cuda
+
+- func: embedding_renorm_(Tensor self, IndexTensor indices, double max_norm, double norm_type) -> Tensor
+  variants: function
+  dispatch:
+    CPU: embedding_renorm_cpu_
+    CUDA: embedding_renorm_cuda_
+
+- func: embedding_sparse_backward(Tensor grad, IndexTensor indices, int64_t num_weights, int64_t padding_idx, bool scale_grad_by_freq) -> Tensor
+  variants: function
 
 - func: expand(Tensor self, IntList size) -> Tensor
 

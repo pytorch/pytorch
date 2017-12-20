@@ -94,14 +94,9 @@ class Embedding(Module):
             self.weight.data[self.padding_idx].fill_(0)
 
     def forward(self, input):
-        padding_idx = self.padding_idx
-        if padding_idx is None:
-            padding_idx = -1
-        return self._backend.Embedding.apply(
-            input, self.weight,
-            padding_idx, self.max_norm, self.norm_type,
-            self.scale_grad_by_freq, self.sparse
-        )
+        return F.embedding(
+            input, self.weight, self.padding_idx, self.max_norm,
+            self.norm_type, self.scale_grad_by_freq, self.sparse)
 
     def __repr__(self):
         s = '{name}({num_embeddings}, {embedding_dim}'

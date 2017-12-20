@@ -44,5 +44,22 @@ R dispatch_floating_types(const Type& the_type, const char *name, Args&&... args
   }
 }
 
+#define DISPATCH_ALL_FLOATING_TYPES(TYPE, NAME, F...)                            \
+  [&]() {                                                                         \
+    const Type& the_type = TYPE;                                                  \
+    switch (the_type.scalarType()) {                                              \
+      case ScalarType::Double: {                                                  \
+        using scalar = double;                                                    \
+        return F();                                                               \
+      } case ScalarType::Float: {                                                 \
+        using scalar = float;                                                     \
+        return F();                                                               \
+      } case ScalarType::Half: {                                                  \
+        using scalar = half;                                                      \
+        return F();                                                               \
+      } default:                                                                  \
+        runtime_error("%s not implemented for '%s'", NAME, the_type.toString());  \
+    }                                                                             \
+  }()
 
 }

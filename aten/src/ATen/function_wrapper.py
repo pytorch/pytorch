@@ -580,7 +580,8 @@ def create_generic(top_env, declarations):
             def translate_map(const):
                 return {
                     'Tensor': 'const Tensor &' if const else 'Tensor &',
-                    'BoolTensor': 'const Tensor &' if const else 'Tensor &'
+                    'BoolTensor': 'const Tensor &' if const else 'Tensor &',
+                    'IndexTensor': 'const Tensor &' if const else 'Tensor &',
                 }
 
             if (option['inplace'] and argument['name'] == 'self') or argument.get('output', False):

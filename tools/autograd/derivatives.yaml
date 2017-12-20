@@ -677,6 +677,12 @@
 - name: binary_cross_entropy(Tensor self, Tensor target, Tensor weight, bool size_average, bool reduce)
   self: binary_cross_entropy_backward(grad, self, target, weight, size_average, reduce)
 
+- name: embedding(Tensor weight, Tensor indices, int64_t padding_idx, bool scale_grad_by_freq, bool sparse)
+  weight: embedding_backward(grad, indices, weight.size(0), padding_idx, scale_grad_by_freq, sparse)
+
+- name: embedding_renorm(Tensor self, Tensor indices, double max_norm, double norm_type)
+  self: not_implemented("embedding_renorm")
+
 - name: kl_div(Tensor self, Tensor target, bool size_average, bool reduce)
   self: kl_div_backward(grad, self, target, size_average, reduce)
 
