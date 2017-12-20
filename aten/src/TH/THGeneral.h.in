@@ -66,7 +66,6 @@ TH_API void _THAssertionFailed(const char *file, const int line, const char *exp
 TH_API void THSetErrorHandler(THErrorHandlerFunction new_handler, void *data);
 TH_API void THSetDefaultErrorHandler(THErrorHandlerFunction new_handler, void *data);
 TH_API void _THArgCheck(const char *file, int line, int condition, int argNumber, const char *fmt, ...);
-TH_API void _THArgError(const char *file, int line, int argNumber, const char *fmt, ...);
 TH_API void THSetArgErrorHandler(THArgErrorHandlerFunction new_handler, void *data);
 TH_API void THSetDefaultArgErrorHandler(THArgErrorHandlerFunction new_handler, void *data);
 TH_API void* THAlloc(ptrdiff_t size);
