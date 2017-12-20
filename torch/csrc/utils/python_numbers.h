@@ -18,15 +18,12 @@ inline PyObject* THPUtils_packInt64(int64_t value) {
   return PyLong_FromLongLong(value);
 }
 
-inline PyObject* THPUtils_packUnsignedInt64(uint64_t value) {
+inline PyObject* THPUtils_packUInt64(uint64_t value) {
 #if PY_MAJOR_VERSION == 2
   if (value <= INT32_MAX) {
     return PyInt_FromLong(static_cast<long>(value));
   }
 #endif
-  if (sizeof(unsigned long) == sizeof(uint64_t)) {
-    return PyLong_FromUnsignedLong(static_cast<unsigned long>(value));
-  }
   return PyLong_FromUnsignedLongLong(value);
 }
 
