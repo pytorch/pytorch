@@ -149,11 +149,24 @@ struct CompiledFunction {
     return args;
   }
 
+  py::object fallback(py::handle pyargs) {
+    return steal(PyObject_CallObject(function_.get(), pyargs.ptr()));
+  }
+
   py::object call(py::handle pyargs) {
     if (!enabled_) {
-      return steal(PyObject_CallObject(function_.get(), pyargs.ptr()));
+      return fallback(pyargs);
     }
     auto args = flattenArgs(pyargs);
+
+    if(isTracingVar(args.vars)) {
+      // Some outer compiled function has called another compiled function.
+      // In this case we just fall back to the original python function,
+      // allowing the inner trace to be inlined into the outer.
+      // This scenario occurs when blocking an lstm loop.
+      return fallback(pyargs);
+    }
+
     auto& ktrace = getTrace(args);
 
     variable_list out_vars;
