@@ -8,8 +8,6 @@ namespace torch { namespace autograd {
 
 struct SymbolicContext {
   jit::Graph* graph;
-  const std::unordered_map<void*, jit::Value*>* buffer_map;
-  int batch_norm_count = 0;
 };
 
 struct symbolic_unconvertible : public std::runtime_error {

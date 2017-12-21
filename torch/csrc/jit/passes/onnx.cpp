@@ -37,7 +37,6 @@ void ToONNX(std::shared_ptr<tracer::TracingState>& state, bool aten) {
 
   torch::autograd::SymbolicContext ctx;
   ctx.graph = new_graph.get();
-  ctx.buffer_map = &new_buffer_map;
   std::unordered_map<Value*, Value*> env;
 
   py::object onnx = py::module::import("torch.onnx");

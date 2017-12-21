@@ -14,6 +14,11 @@ void THNN_(BatchNormalization_updateOutput)(
   int64_t f;
   ptrdiff_t n = THTensor_(nElement)(input) / nInput;
 
+  if (train) {
+    THTensor_(resizeAs)(save_mean, running_mean);
+    THTensor_(resizeAs)(save_std, running_var);
+  }
+
   #pragma omp parallel for
   for (f = 0; f < nInput; ++f) {
     THTensor *in = THTensor_(newSelect)(input, 1, f);
