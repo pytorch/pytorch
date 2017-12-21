@@ -130,6 +130,12 @@ increment_version(self);
 return self;
 """)
 
+# XXX: the order of definitions here is actually very important, even when it's not
+# visible at first glance. The non-obvious invariants are:
+# - set_flags has to appear after version_counter, because rebase_history requires
+#   that the counter is incremented before it is called
+# - record_trace has to appear before save_outputs, because the saved variables
+#   should have their trace set correctly
 METHOD_DEFINITION_BODY_DERIVATIVE = CodeTemplate("""\
 profiler::RecordFunction profiler("${name}");
 ${unpack_args}
