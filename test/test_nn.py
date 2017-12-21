@@ -2176,33 +2176,31 @@ class TestNN(NNTestCase):
 
         # batch_first = true
         expected = Variable(torch.Tensor([[1, 2, 3], [4, 5, 0], [6, 0, 0]]))
-        padded = rnn_utils.pad_sequence([a, b, c], [3, 2, 1], True)
+        padded = rnn_utils.pad_sequence([a, b, c], True)
         self.assertEqual(padded, expected)
 
         # batch_first = false
-        padded = rnn_utils.pad_sequence([a, b, c], [3, 2, 1])
+        padded = rnn_utils.pad_sequence([a, b, c])
         self.assertEqual(padded, expected.transpose(0, 1))
 
         # more dimensional
         maxlen = 9
         for num_dim in (0, 1, 2, 3):
             sequences = []
-            lengths = []
             trailing_dims = [4] * num_dim
             for i in range(maxlen, 0, -1):
                 seq_len = i * i
-                lengths.append(seq_len)
                 sequences.append(Variable(torch.rand(seq_len, 5, *trailing_dims)))
             expected = []
             for seq in sequences:
                 expected.append(pad(seq, maxlen * maxlen))
             # batch first = true
             expected = Variable(torch.stack(expected))
-            padded = rnn_utils.pad_sequence(sequences, lengths, True)
+            padded = rnn_utils.pad_sequence(sequences, True)
             self.assertEqual(padded, expected)
 
             # batch first = false
-            padded = rnn_utils.pad_sequence(sequences, lengths)
+            padded = rnn_utils.pad_sequence(sequences)
             self.assertEqual(padded, expected.transpose(0, 1))
 
         # unsorted sequences should raise exception
@@ -2211,8 +2209,8 @@ class TestNN(NNTestCase):
 
     def test_pack_sequence(self):
         def _compatibility_test(sequences, lengths, batch_first):
-            padded = rnn_utils.pad_sequence(sequences, lengths, batch_first)
-            packed = rnn_utils.pack_sequence(sequences, lengths)
+            padded = rnn_utils.pad_sequence(sequences, batch_first)
+            packed = rnn_utils.pack_sequence(sequences)
             unpacked = rnn_utils.pad_packed_sequence(packed, batch_first)
             self.assertEqual(padded, unpacked[0])
             pack_padded = rnn_utils.pack_padded_sequence(padded, lengths, batch_first)
@@ -2222,7 +2220,7 @@ class TestNN(NNTestCase):
         a = Variable(torch.Tensor([1, 2, 3]))
         b = Variable(torch.Tensor([4, 5]))
         c = Variable(torch.Tensor([6]))
-        packed = rnn_utils.pack_sequence([a, b, c], [3, 2, 1])
+        packed = rnn_utils.pack_sequence([a, b, c])
         expected = torch.Tensor([1, 4, 6, 2, 5, 3])
         self.assertEqual(packed.batch_sizes, [3, 2, 1])
         self.assertEqual(packed.data.data, expected)
