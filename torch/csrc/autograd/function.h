@@ -71,7 +71,7 @@ struct Function : std::enable_shared_from_this<Function> {
   virtual ~Function() {}
 
   // Implements the operation
-  // NOTE: Don't call this function directly. Use apply_fn or operator() instead.
+  // NOTE: Don't call this function directly. Use operator() instead.
   virtual variable_list apply(const variable_list& inputs) = 0;
   variable_list tracedApply(variable_list inputs);
 
@@ -182,24 +182,6 @@ struct TraceableFunction : public Function {
   using Function::Function;
 
   virtual inline bool is_traceable() final { return true; };
-};
-
-template<typename T>
-struct apply_fn {
-  template<typename... Args>
-  apply_fn(Args&& ...args)
-    : fn_(std::make_shared<T>(std::forward<Args>(args)...)) {}
-
-  Variable operator()(const variable_list& inputs) {
-    return (*fn_)(inputs)[0];
-  }
-
-  template<typename... Args>
-  Variable operator()(Args&& ...inputs) {
-    return (*fn_)(variable_list{inputs...})[0];
-  }
-
-  std::shared_ptr<T> fn_;
 };
 
 }} // namespace torch::autograd
