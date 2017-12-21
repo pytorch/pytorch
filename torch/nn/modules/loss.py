@@ -96,7 +96,7 @@ class NLLLoss(_WeightedLoss):
 
     The input given through a forward call is expected to contain
     log-probabilities of each class. input has to be a Tensor of size either
-    :math:`(minibatch, C)` or :math:`(minibatch, C, d_1, d_2, ..., d_n)` 
+    :math:`(minibatch, C)` or :math:`(minibatch, C, d_1, d_2, ..., d_n)`
     with :math:`n >= 2` for the `n`-dimensional case.
 
     Obtaining log-probabilities in a neural network is easily achieved by
