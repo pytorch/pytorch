@@ -82,12 +82,12 @@ int open_libopencl_so()
   if(path)
   {
     so_handle = dlopen(path, RTLD_LAZY);
-    return 0;
+    if(so_handle) {
+      return 0;
+    }
   }
-  else
-  {
-    return -1;
-  }
+
+  return -1;
 }
 
 cl_int get_libopencl_path(char** cl_path)
