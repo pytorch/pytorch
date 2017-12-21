@@ -4,6 +4,7 @@
 #include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/utils/hash.h"
 
+#include <ATen/ATen.h>
 #include <tuple>
 #include <vector>
 #include <functional>
@@ -99,6 +100,7 @@ struct ParsedArgs {
 
 
 ParsedArgs flatten(py::handle obj);
-PyObject* unflatten(autograd::variable_list&& outputs, const IODescriptor& structure);
+PyObject* unflatten(at::ArrayRef<autograd::Variable> outputs,
+                    const IODescriptor& structure);
 
 }}} // namespace torch::jit::python

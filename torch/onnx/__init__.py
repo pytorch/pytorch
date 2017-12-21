@@ -17,6 +17,7 @@ import functools
 import types
 from torch._six import string_classes
 from torch.autograd import Function, function
+from torch.jit import _unique_state_dict
 
 
 @contextlib.contextmanager
@@ -120,7 +121,7 @@ def _export(model, args, f, export_params=True, verbose=False, training=False,
 
     # A basic sanity check: make sure the state_dict keys are the same
     # before and after running the model.  Fail fast!
-    orig_state_dict_keys = model.state_dict().keys()
+    orig_state_dict_keys = _unique_state_dict(model).keys()
 
     # By default, training=False, which is good because running a model in
     # training mode could result in internal buffers getting updated, dropout
@@ -130,7 +131,7 @@ def _export(model, args, f, export_params=True, verbose=False, training=False,
     with set_training(model, training):
         trace, torch_out = torch.jit.trace(model, args)
 
-    if orig_state_dict_keys != model.state_dict().keys():
+    if orig_state_dict_keys != _unique_state_dict(model).keys():
         raise RuntimeError("state_dict changed after running the tracer; "
                            "something weird is happening in your model!")
 
@@ -146,7 +147,7 @@ def _export(model, args, f, export_params=True, verbose=False, training=False,
     if export_params:
         # NB: OrderedDict values is not actually a list, but trace.export is
         # not duck-typed and expects an actual list.
-        proto = trace.export(list(model.state_dict().values()), _onnx_opset_version)
+        proto = trace.export(list(_unique_state_dict(model).values()), _onnx_opset_version)
     else:
         proto = trace.export([], _onnx_opset_version)
 
