@@ -54,6 +54,10 @@ public:
   // to test this instead
   bool userEnabledCuDNN() const;
   void setUserEnabledCuDNN(bool e);
+  bool benchmarkCuDNN() const;
+  void setBenchmarkCuDNN(bool);
+  bool deterministicCuDNN() const;
+  void setDeterministicCuDNN(bool);
   ~Context();
   std::unique_ptr<Generator>
     generator_registry[static_cast<int>(Backend::NumOptions)];
@@ -70,6 +74,8 @@ private:
   void doInitCUDA();
   std::once_flag thc_init;
   bool enabled_cudnn = true;
+  bool deterministic_cudnn = false;
+  bool benchmark_cudnn = false;
 };
 
 AT_API Context & globalContext();

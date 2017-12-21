@@ -583,6 +583,34 @@ PyObject *THPModule_userEnabledCuDNN(PyObject *_unused)
   else Py_RETURN_FALSE;
 }
 
+PyObject *THPModule_setDeterministicCuDNN(PyObject *_unused, PyObject *arg)
+{
+  THPUtils_assert(PyBool_Check(arg), "set_deterministic_cudnn expects a bool, "
+          "but got %s", THPUtils_typename(arg));
+  at::globalContext().setDeterministicCuDNN(arg == Py_True);
+  Py_RETURN_NONE;
+}
+
+PyObject *THPModule_deterministicCuDNN(PyObject *_unused)
+{
+  if (at::globalContext().deterministicCuDNN()) Py_RETURN_TRUE;
+  else Py_RETURN_FALSE;
+}
+
+PyObject *THPModule_setBenchmarkCuDNN(PyObject *_unused, PyObject *arg)
+{
+  THPUtils_assert(PyBool_Check(arg), "set_benchmark_cudnn expects a bool, "
+          "but got %s", THPUtils_typename(arg));
+  at::globalContext().setBenchmarkCuDNN(arg == Py_True);
+  Py_RETURN_NONE;
+}
+
+PyObject *THPModule_benchmarkCuDNN(PyObject *_unused)
+{
+  if (at::globalContext().benchmarkCuDNN()) Py_RETURN_TRUE;
+  else Py_RETURN_FALSE;
+}
+
 #ifdef WITH_CUDA
 extern PyObject * THCSPModule_initExtension(PyObject *self);
 #endif
@@ -608,6 +636,10 @@ static PyMethodDef TorchMethods[] = {
   {"set_num_threads", (PyCFunction)THPModule_setNumThreads,     METH_O,       NULL},
   {"_get_cudnn_enabled", (PyCFunction)THPModule_userEnabledCuDNN, METH_NOARGS,     NULL},
   {"_set_cudnn_enabled", (PyCFunction)THPModule_setUserEnabledCuDNN, METH_O,  NULL},
+  {"_get_cudnn_benchmark", (PyCFunction)THPModule_benchmarkCuDNN, METH_NOARGS,     NULL},
+  {"_set_cudnn_benchmark", (PyCFunction)THPModule_setBenchmarkCuDNN, METH_O,  NULL},
+  {"_get_cudnn_deterministic", (PyCFunction)THPModule_deterministicCuDNN, METH_NOARGS,     NULL},
+  {"_set_cudnn_deterministic", (PyCFunction)THPModule_setDeterministicCuDNN, METH_O,  NULL},
   {"from_numpy",      (PyCFunction)THPModule_fromNumpy,         METH_O,       NULL},
   {"_to_dlpack",      (PyCFunction)THPModule_toDLPack,          METH_O,       NULL},
   {"_from_dlpack",    (PyCFunction)THPModule_fromDLPack,        METH_O,       NULL},

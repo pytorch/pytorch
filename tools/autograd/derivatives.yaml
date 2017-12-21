@@ -821,47 +821,47 @@
   save_mean: not_implemented("thnn_batch_norm_backward save_mean")
   save_std: not_implemented("thnn_batch_norm_backward save_std")
 
-- name: conv_transpose2d(Tensor self, Tensor weight, IntList kernel_size, Tensor bias, IntList stride, IntList padding, IntList output_padding, IntList dilation)
-  self, weight, bias: conv_transpose2d_backward(grad, self, weight, kernel_size, stride, padding, output_padding, dilation, columns, ones, grad_input_mask)
+- name: thnn_conv_transpose2d(Tensor self, Tensor weight, IntList kernel_size, Tensor bias, IntList stride, IntList padding, IntList output_padding, IntList dilation)
+  self, weight, bias: thnn_conv_transpose2d_backward(grad, self, weight, kernel_size, stride, padding, output_padding, dilation, columns, ones, grad_input_mask)
 
-- name: conv_transpose2d_backward(Tensor grad_output, Tensor self, Tensor weight, IntList kernel_size, IntList stride, IntList padding, IntList output_padding, IntList dilation, Tensor columns, Tensor ones, std::array<bool,3> output_mask)
+- name: thnn_conv_transpose2d_backward(Tensor grad_output, Tensor self, Tensor weight, IntList kernel_size, IntList stride, IntList padding, IntList output_padding, IntList dilation, Tensor columns, Tensor ones, std::array<bool,3> output_mask)
   grad_output, self, weight: _convolution_double_backward(grads[0], grads[1], grads[2], grad_output, weight, self, stride, padding, dilation, true, output_padding, 1, false, false, false, grad_input_mask)
 
-- name: conv_transpose3d(Tensor self, Tensor weight, Tensor bias, IntList stride, IntList padding, IntList output_padding, IntList dilation)
-  self, weight, bias: conv_transpose3d_backward(grad, self, weight, stride, padding, output_padding, dilation, finput, fgrad_input, grad_input_mask)
+- name: thnn_conv_transpose3d(Tensor self, Tensor weight, Tensor bias, IntList stride, IntList padding, IntList output_padding, IntList dilation)
+  self, weight, bias: thnn_conv_transpose3d_backward(grad, self, weight, stride, padding, output_padding, dilation, finput, fgrad_input, grad_input_mask)
 
-- name: conv_transpose3d_backward(Tensor grad_output, Tensor self, Tensor weight, IntList stride, IntList padding, IntList output_padding, IntList dilation, Tensor finput, Tensor fgrad_input, std::array<bool,3> output_mask)
+- name: thnn_conv_transpose3d_backward(Tensor grad_output, Tensor self, Tensor weight, IntList stride, IntList padding, IntList output_padding, IntList dilation, Tensor finput, Tensor fgrad_input, std::array<bool,3> output_mask)
   grad_output, self, weight: _convolution_double_backward(grads[0], grads[1], grads[2], grad_output, weight, self, stride, padding, dilation, true, output_padding, 1, false, false, false, grad_input_mask)
 
-- name: conv2d(Tensor self, Tensor weight, IntList kernel_size, Tensor bias, IntList stride, IntList padding)
-  self, weight, bias: conv2d_backward(grad, self, weight, kernel_size, stride, padding, finput, fgrad_input, grad_input_mask)
+- name: thnn_conv2d(Tensor self, Tensor weight, IntList kernel_size, Tensor bias, IntList stride, IntList padding)
+  self, weight, bias: thnn_conv2d_backward(grad, self, weight, kernel_size, stride, padding, finput, fgrad_input, grad_input_mask)
 
-- name: conv2d_backward(Tensor grad_output, Tensor self, Tensor weight, IntList kernel_size, IntList stride, IntList padding, Tensor finput, Tensor fgrad_input, std::array<bool,3> output_mask)
+- name: thnn_conv2d_backward(Tensor grad_output, Tensor self, Tensor weight, IntList kernel_size, IntList stride, IntList padding, Tensor finput, Tensor fgrad_input, std::array<bool,3> output_mask)
   grad_output, self, weight: _convolution_double_backward(grads[0], grads[1], grads[2], grad_output, weight, self, stride, padding, {{1, 1}}, false, {{0, 0}}, 1, false, false, false, grad_input_mask)
 
-- name: conv_depthwise2d(Tensor self, Tensor weight, IntList kernel_size, Tensor bias, IntList stride, IntList padding, IntList dilation)
-  self, weight: conv_depthwise2d_backward(grad.contiguous(), self, weight, kernel_size, stride, padding, dilation, grad_input_mask)
+- name: thnn_conv_depthwise2d(Tensor self, Tensor weight, IntList kernel_size, Tensor bias, IntList stride, IntList padding, IntList dilation)
+  self, weight: thnn_conv_depthwise2d_backward(grad.contiguous(), self, weight, kernel_size, stride, padding, dilation, grad_input_mask)
   bias: grad.contiguous().view({grad.size(0), grad.size(1), -1}).sum(0).sum(1)
 
-- name: conv_depthwise2d_backward(Tensor grad_output, Tensor self, Tensor weight, IntList kernel_size, IntList stride, IntList padding, IntList dilation, std::array<bool,2> output_mask)
+- name: thnn_conv_depthwise2d_backward(Tensor grad_output, Tensor self, Tensor weight, IntList kernel_size, IntList stride, IntList padding, IntList dilation, std::array<bool,2> output_mask)
   grad_output, self, weight: _convolution_double_backward(grads[0], grads[1], grads[2], grad_output, weight, self, stride, padding, dilation, false, {{0, 0}}, 1, false, false, false, grad_input_mask)
 
-- name: conv3d(Tensor self, Tensor weight, IntList kernel_size, Tensor bias, IntList stride, IntList padding)
-  self, weight, bias: conv3d_backward(grad, self, weight, kernel_size, stride, padding, finput, fgrad_input, grad_input_mask)
+- name: thnn_conv3d(Tensor self, Tensor weight, IntList kernel_size, Tensor bias, IntList stride, IntList padding)
+  self, weight, bias: thnn_conv3d_backward(grad, self, weight, kernel_size, stride, padding, finput, fgrad_input, grad_input_mask)
 
-- name: conv3d_backward(Tensor grad_output, Tensor self, Tensor weight, IntList kernel_size, IntList stride, IntList padding, Tensor finput, Tensor fgrad_input, std::array<bool,3> output_mask)
+- name: thnn_conv3d_backward(Tensor grad_output, Tensor self, Tensor weight, IntList kernel_size, IntList stride, IntList padding, Tensor finput, Tensor fgrad_input, std::array<bool,3> output_mask)
   grad_output, self, weight: _convolution_double_backward(grads[0], grads[1], grads[2], grad_output, weight, self, stride, padding, {{1, 1, 1}}, false, {{0, 0, 0}}, 1, false, false, false, grad_input_mask)
 
-- name: conv_dilated2d(Tensor self, Tensor weight, IntList kernel_size, Tensor bias, IntList stride, IntList padding, IntList dilation)
-  self, weight, bias: conv_dilated2d_backward(grad, self, weight, kernel_size, stride, padding, dilation, columns, ones, grad_input_mask)
+- name: thnn_conv_dilated2d(Tensor self, Tensor weight, IntList kernel_size, Tensor bias, IntList stride, IntList padding, IntList dilation)
+  self, weight, bias: thnn_conv_dilated2d_backward(grad, self, weight, kernel_size, stride, padding, dilation, columns, ones, grad_input_mask)
 
-- name: conv_dilated2d_backward(Tensor grad_output, Tensor self, Tensor weight, IntList kernel_size, IntList stride, IntList padding, IntList dilation, Tensor columns, Tensor ones, std::array<bool,3> output_mask)
+- name: thnn_conv_dilated2d_backward(Tensor grad_output, Tensor self, Tensor weight, IntList kernel_size, IntList stride, IntList padding, IntList dilation, Tensor columns, Tensor ones, std::array<bool,3> output_mask)
   grad_output, self, weight: _convolution_double_backward(grads[0], grads[1], grads[2], grad_output, weight, self, stride, padding, dilation, false, {{0, 0}}, 1, false, false, false, grad_input_mask)
 
-- name: conv_dilated3d(Tensor self, Tensor weight, IntList kernel_size, Tensor bias, IntList stride, IntList padding, IntList dilation)
-  self, weight, bias: conv_dilated3d_backward(grad, self, weight, kernel_size, stride, padding, dilation, columns, ones, grad_input_mask)
+- name: thnn_conv_dilated3d(Tensor self, Tensor weight, IntList kernel_size, Tensor bias, IntList stride, IntList padding, IntList dilation)
+  self, weight, bias: thnn_conv_dilated3d_backward(grad, self, weight, kernel_size, stride, padding, dilation, columns, ones, grad_input_mask)
 
-- name: conv_dilated3d_backward(Tensor grad_output, Tensor self, Tensor weight, IntList kernel_size, IntList stride, IntList padding, IntList dilation, Tensor columns, Tensor ones, std::array<bool,3> output_mask)
+- name: thnn_conv_dilated3d_backward(Tensor grad_output, Tensor self, Tensor weight, IntList kernel_size, IntList stride, IntList padding, IntList dilation, Tensor columns, Tensor ones, std::array<bool,3> output_mask)
   grad_output, self, weight: _convolution_double_backward(grads[0], grads[1], grads[2], grad_output, weight, self, stride, padding, dilation, false, {{0, 0, 0}}, 1, false, false, false, grad_input_mask)
 
 # NN double backwards support
@@ -1061,10 +1061,13 @@
 - name: cudnn_affine_grid_generator(Tensor theta, int64_t N, int64_t C, int64_t H, int64_t W)
   theta: cudnn_affine_grid_generator_backward(grad, N, C, H, W)
 
-# NB: Why is the backwards here so complicated?  When we remove the special case
-# here, gradcheck fails.  It is tracked at
-# https://github.com/pytorch/pytorch/issues/4284
-# Also, the quotes around the gradient are needed to appease YAML parsing rules.
+# NB: Why is the backwards here so complicated?  CuDNN cannot be used to compute
+# backward in evaluation mode, because the math for backward in evaluation mode
+# is different (since the forward math is different), and CuDNN does not support
+# it.  And in any case, you shouldn't be using this bn in evaluation mode,
+# because it should be merged into the previous convolution (left for future
+# work.)
+# NB2: The quotes around the gradient are needed to appease YAML parsing rules.
 - name: cudnn_batch_norm(Tensor input, Tensor weight, Tensor bias, Tensor running_mean, Tensor running_var, bool training, double exponential_average_factor, double epsilon)
   input, weight, bias: "training ? cudnn_batch_norm_backward(input, grads[0].contiguous(), weight, running_mean, running_var, result1, result2, epsilon) : thnn_batch_norm_backward(grads[0].contiguous(), input, weight, running_mean, running_var, training, epsilon, result1, result2, grad_input_mask)"
 

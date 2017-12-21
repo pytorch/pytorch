@@ -66,6 +66,22 @@ void Context::setUserEnabledCuDNN(bool e) {
   enabled_cudnn = e;
 }
 
+bool Context::deterministicCuDNN() const {
+  return deterministic_cudnn;
+}
+
+void Context::setDeterministicCuDNN(bool b) {
+  deterministic_cudnn = b;
+}
+
+bool Context::benchmarkCuDNN() const {
+  return benchmark_cudnn;
+}
+
+void Context::setBenchmarkCuDNN(bool b) {
+  benchmark_cudnn = b;
+}
+
 bool Context::hasCUDA() const {
 #if AT_CUDA_ENABLED()
   int count;

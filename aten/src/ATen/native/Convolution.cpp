@@ -213,6 +213,59 @@ static at::Tensor subtensor(at::Tensor& tensor, int dim, int groups, int g) {
 }
 
 
+at::Tensor conv1d(
+    const Tensor& input, const Tensor& weight, const Tensor& bias,
+    IntList stride, IntList padding, IntList dilation, int64_t groups) {
+  return at::convolution(input, weight, bias, stride, padding, dilation,
+                         false, {{0}}, groups);
+}
+
+at::Tensor conv2d(
+    const Tensor& input, const Tensor& weight, const Tensor& bias,
+    IntList stride, IntList padding, IntList dilation, int64_t groups) {
+  return at::convolution(input, weight, bias, stride, padding, dilation,
+                         false, {{0, 0}}, groups);
+}
+
+at::Tensor conv3d(
+    const Tensor& input, const Tensor& weight, const Tensor& bias,
+    IntList stride, IntList padding, IntList dilation, int64_t groups) {
+  return at::convolution(input, weight, bias, stride, padding, dilation,
+                         false, {{0, 0, 0}}, groups);
+}
+
+at::Tensor conv_transpose1d(
+    const Tensor& input, const Tensor& weight, const Tensor& bias,
+    IntList stride, IntList padding, IntList output_padding, int64_t groups, IntList dilation) {
+  return at::convolution(input, weight, bias, stride, padding, dilation,
+                         true, output_padding, groups);
+}
+
+at::Tensor conv_transpose2d(
+    const Tensor& input, const Tensor& weight, const Tensor& bias,
+    IntList stride, IntList padding, IntList output_padding, int64_t groups, IntList dilation) {
+  return at::convolution(input, weight, bias, stride, padding, dilation,
+                         true, output_padding, groups);
+}
+
+at::Tensor conv_transpose3d(
+    const Tensor& input, const Tensor& weight, const Tensor& bias,
+    IntList stride, IntList padding, IntList output_padding, int64_t groups, IntList dilation) {
+  return at::convolution(input, weight, bias, stride, padding, dilation,
+                         true, output_padding, groups);
+}
+
+at::Tensor convolution(
+    const Tensor& input, const Tensor& weight, const Tensor& bias,
+    IntList stride, IntList padding, IntList dilation,
+    bool transposed, IntList output_padding, int64_t groups) {
+  auto& ctx = at::globalContext();
+  return at::_convolution(input, weight, bias, stride, padding, dilation,
+                          transposed, output_padding, groups,
+                          ctx.benchmarkCuDNN(), ctx.deterministicCuDNN(), ctx.userEnabledCuDNN());
+}
+
+
 at::Tensor _convolution(
     const Tensor& input_r, const Tensor& weight_r, const Tensor& bias_r,
     IntList stride_, IntList padding_, IntList dilation_,
@@ -257,7 +310,7 @@ at::Tensor _convolution(
       auto padding = params.padding;
       auto dilation = params.dilation;
 
-      output = at::conv_depthwise2d(input, weight, kernel_size, bias, stride, padding, dilation);
+      output = at::thnn_conv_depthwise2d(input, weight, kernel_size, bias, stride, padding, dilation);
   } else if (params.use_cudnn(input)) {
 #if AT_CUDNN_ENABLED()
     if (input.type() != weight.type()){
@@ -330,18 +383,18 @@ at::Tensor _convolution_nogroup(
 
   if (params.transposed) {
     if (dim == 4) {
-      return at::conv_transpose2d(
+      return at::thnn_conv_transpose2d(
           input, weight, kernel_size, bias,
           stride, padding, output_padding, dilation);
     } else if (dim == 5) {
-      return at::conv_transpose3d(
+      return at::thnn_conv_transpose3d(
         input, weight, bias,
         stride, padding, output_padding, dilation);
       }
   } else {  /* Not transposed */
     if (dim == 4) {
       if (dilated) {
-        return at::conv_dilated2d(
+        return at::thnn_conv_dilated2d(
             input, weight, kernel_size, bias,
             stride, padding, dilation);
       } else {  /* dim == 4, non-dilated */
@@ -355,19 +408,19 @@ at::Tensor _convolution_nogroup(
         } else {
           /* CPU implementation has specialized MM kernels
              for non-dilated case here */
-          return at::conv2d(
+          return at::thnn_conv2d(
               input, weight, kernel_size, bias,
               stride, padding);
         }
       }
     } else if (dim == 5 && (input.type().is_cuda() || dilated)) {
-      return at::conv_dilated3d(
+      return at::thnn_conv_dilated3d(
           input, weight, kernel_size, bias,
           stride, padding, dilation);
     } else if (dim == 5) { /* dim == 5, CPU, non-dilated */
       /* CPU implementation has specialized MM kernels
          for non-dilated case here */
-      return at::conv3d(
+      return at::thnn_conv3d(
           input, weight, kernel_size, bias,
           stride, padding);
     }
