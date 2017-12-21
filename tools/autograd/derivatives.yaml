@@ -650,8 +650,8 @@
 
 - name: _s_where(Tensor condition, Tensor self, Tensor other)
   condition: zeros_like(condition)
-  self: _s_where(condition, grad, zeros_like(grad))
-  other: _s_where(condition, zeros_like(grad), grad)
+  self: where(condition, grad, zeros_like(grad))
+  other: where(condition, zeros_like(grad), grad)
 
 - name: zero(Tensor self)
   self: zeros_like(grad)
