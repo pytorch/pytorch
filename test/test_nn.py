@@ -1147,6 +1147,24 @@ class TestNN(NNTestCase):
         self._test_EmbeddingBag(True, 'sum')
         self._test_EmbeddingBag(True, 'mean')
 
+    def test_fractional_max_pool2d(self):
+        x = Variable(torch.randn(1, 2, 7, 7), requires_grad=True)
+        samples = x.new(1, 2, 2).uniform_()
+
+        def func(x):
+            return F.fractional_max_pool2d(
+                x, (2, 2), output_size=(3, 3), _random_samples=samples)
+
+        self.assertEqual(func(x).shape, (1, 2, 3, 3))
+        gradcheck(func, [x])
+        gradgradcheck(func, [x])
+
+        x = Variable(torch.randn(2, 7, 7), requires_grad=True)
+        samples = x.new(2, 2).uniform_()
+        self.assertEqual(func(x).shape, (2, 3, 3))
+        gradcheck(func, [x])
+        gradgradcheck(func, [x])
+
     def test_Dropout(self):
         input = torch.Tensor(1000)
         self._test_dropout(nn.Dropout, input)
