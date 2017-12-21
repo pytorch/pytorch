@@ -71,7 +71,7 @@ using port_type = std::uint16_t;
 using size_type = std::uint64_t;
 
 #define SYSCHECK(expr) { \
-  errno = 0; (expr);     \
+  errno = 0; auto ___output = (expr); (void)___output;     \
   if (errno != 0) throw std::system_error(errno, std::system_category()); \
 }
 

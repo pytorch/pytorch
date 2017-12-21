@@ -96,7 +96,7 @@ bool MasterCommandChannel::init() {
   ::close(_sockets[0]);
 
   int fd[2];
-  SYSCHECK((void)::pipe(fd));
+  SYSCHECK(::pipe(fd));
   _sockets[0] = fd[0];
   _error_pipe = fd[1];
   _error_thread = std::thread(&MasterCommandChannel::errorHandler, this);
