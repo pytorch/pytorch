@@ -249,3 +249,27 @@ class TestCheckpoint(TestCase):
 
         finally:
             shutil.rmtree(tmpdir)
+
+    def test_ckpt_save_failure(self):
+        num_nodes = 3
+        # The goal of this test is to ensure that the job runs
+        # successfully even if saving a checkpoint fails.
+        # Hence tmpdir is a non existent directory to emulate a failure
+        # while saving checkpoints
+        tmpdir = "/tmp/path_does_not_exist/"
+
+        # Check the saving checkpoint failure does not cause job failure
+        workspace.ResetWorkspace()
+        for node_id in range(num_nodes):
+            ws = workspace.C.Workspace()
+            session = LocalSession(ws)
+            checkpoint = MultiNodeCheckpointManager(tmpdir, 'minidb')
+            with Cluster():
+                with Job() as job:
+                    build_pipeline(node_id)
+                compiled_job = job.compile(LocalSession)
+                job_runner = JobRunner(compiled_job, checkpoint)
+                num_epochs = job_runner(session)
+            # make sure all epochs are executed even though saving the checkpoint failed
+            # Saving checkpoint failure should not cause job failure
+            self.assertEquals(num_epochs, len(EXPECTED_TOTALS))
