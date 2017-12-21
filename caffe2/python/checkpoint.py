@@ -276,7 +276,7 @@ class CheckpointManager(object):
         """
         Build a Task that is run once after `init_group` and after each
         epoch is run. This will execute a Save ops to serialize and persist
-        blobs present in the global workspaace.
+        blobs present in the global workspace.
         """
         logger.info('Saving to %s' % self._db_name(epoch))
         with Task() as task:
@@ -521,16 +521,14 @@ class JobRunner(object):
             # Save the first checkpoint before training starts, or resume from
             # a previously saved checkpoint.
             if from_scratch:
-                logger.info('Saving first checkpoints ...')
-                session.run(self.checkpoint_manager.save(0))
-                self.checkpoint_manager.write_checkpoint_metadata(0)
-                logger.info('First checkpoints saved')
+                self.save_checkpoints(0, session)
             else:
                 logger.info('Loading checkpoints for epoch {} ...'.format(
                     self.resume_from_epoch))
                 session.run(
                     self.checkpoint_manager.load(self.resume_from_epoch))
                 logger.info('Checkpoint loaded')
+
         logger.info("Finished initializing")
 
         # Start training.
@@ -542,10 +540,7 @@ class JobRunner(object):
             stop_signals = [o.fetch() for o in self.job.stop_signals]
 
             if self.checkpoint_manager:
-                logger.info('Saving checkpoints for epoch {}'.format(epoch))
-                session.run(self.checkpoint_manager.save(epoch))
-                self.checkpoint_manager.write_checkpoint_metadata(epoch)
-                logger.info('Checkpoints saved')
+                self.save_checkpoints(epoch, session)
 
             if any(stop_signals):
                 logger.info('Stopping')
@@ -587,6 +582,30 @@ class JobRunner(object):
         logger.info('Loading checkpoint for epoch {} ...'.format(epoch))
         return self.checkpoint_manager.load_blobs_locally(
             self.job.nodes_to_checkpoint(), blob_names, epoch, session)
+
+    def save_checkpoints(self, epoch, session):
+        """Triggers operation to save checkpoints
+
+        This method will trigger the Save ops to serialize and persist the
+        blobs present in the global workspaace.
+
+        Args:
+            epoch: An integer. The checkpoint epoch-id that we are saving.
+            session: A Session object to execute the save ops.
+
+        Raises:
+            ValueError: When the checkpoint manager is invalid.
+        """
+        if not self.checkpoint_manager:
+            raise ValueError('Checkpoint manager is None')
+        try:
+            logger.info('Saving checkpoints for epoch {}'.format(epoch))
+            session.run(self.checkpoint_manager.save(epoch))
+            self.checkpoint_manager.write_checkpoint_metadata(epoch)
+            logger.info('Checkpoints saved')
+        except Exception as ex:
+            logger.warning("Unable to write checkpoint for epoch {}. Error={}".
+                            format(epoch, ex))
 
 
 def epoch_limiter(num_epochs):
