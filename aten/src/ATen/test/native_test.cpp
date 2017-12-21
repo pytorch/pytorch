@@ -147,7 +147,7 @@ int main() {
       auto ct2 = CT.randn({3, 4});
 
       ASSERT_THROWS(ct1._standard_gamma_grad(ct2), "not implemented");
-      ASSERT_THROWS(ct1._standard_gamma_grad(t2), "not implemented");
+      ASSERT_THROWS(ct1._standard_gamma_grad(t1), "not implemented");
       ASSERT_THROWS(t1._standard_gamma_grad(ct2), "CUDA Backend");
     }
   }

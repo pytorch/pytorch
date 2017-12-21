@@ -103,6 +103,9 @@
 - func: is_signed(Tensor self) -> bool
 
 - func: _standard_gamma_grad(Tensor self, Tensor output) -> Tensor
+  dispatch:
+    CPU: _standard_gamma_grad_cpu
+    CUDA: _standard_gamma_grad_cuda
 
 - func: matmul(Tensor self, Tensor other) -> Tensor
 
