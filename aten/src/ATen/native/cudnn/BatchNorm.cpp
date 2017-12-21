@@ -18,7 +18,7 @@ std::tuple<Tensor, Tensor, Tensor> cudnn_batch_norm(
 std::tuple<Tensor, Tensor, Tensor> cudnn_batch_norm_backward(
     const Tensor& input, const Tensor& grad_output, const Tensor& weight,
     const Tensor& running_mean, const Tensor& running_var,
-    const Tensor& save_mean, const Tensor& save_var, bool training,
+    const Tensor& save_mean, const Tensor& save_var,
     double epsilon) {
   throw std::runtime_error("cudnn_batch_norm_backward: ATen not compiled with cuDNN support");
 }
