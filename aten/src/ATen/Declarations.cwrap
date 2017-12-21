@@ -3913,6 +3913,18 @@
         - arg: THStride* stride
           default: NULL
 ]]
+[[
+  name: sparse_coo_tensor
+  return: THTensor*
+  backends:
+    - SparseCPU
+    - SparseCUDA
+  variants: [function]
+  cname: newWithTensor
+  arguments:
+    - THDenseIndexTensor* indices
+    - THDenseTensor* values
+]]
 
 # In theory, this could be a part of the above declaration. But in
 # practice this leads to all sorts of problems with ambiguous overloads.

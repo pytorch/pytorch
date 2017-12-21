@@ -143,6 +143,8 @@ TYPE_FORMAL_GENERIC = {
     'THBoolTensor*': 'Tensor &',
     'THIndexTensor*': 'Tensor &',
     'THIntegerTensor*': 'Tensor &',
+    'THDenseTensor*': 'Tensor &',
+    'THDenseIndexTensor*': 'Tensor &',
     'THStorage*': 'Storage &',
     'THGenerator*': 'Generator *',
     'THSize*': 'IntList',
@@ -158,6 +160,8 @@ DYNAMIC_TYPE = {
     'THBoolTensor*': 'BoolTensor',
     'THIndexTensor*': 'IndexTensor',
     'THIntegerTensor*': 'IntegerTensor',
+    'THDenseTensor*': 'Tensor',
+    'THDenseIndexTensor*': 'IntegerTensor',
     'THStorage*': 'Storage',
     'THGenerator*': 'Generator*',
     'THSize*': 'IntList',
@@ -196,6 +200,12 @@ CHECKED_CAST = {
     'THIntegerTensor*':
         CodeTemplate(
             'checked_cast_tensor<${Backend}IntTensor>(${arg_name}.pImpl,"${arg_name}",${arg_pos}, ${null_okay})'),
+    'THDenseTensor*':
+        CodeTemplate(
+            'checked_cast_tensor<${DenseTensor}>(${arg_name}.pImpl,"${arg_name}",${arg_pos}, ${null_okay})'),
+    'THDenseIndexTensor*':
+        CodeTemplate(
+            'checked_cast_tensor<${DenseBackend}LongTensor>(${arg_name}.pImpl,"${arg_name}",${arg_pos}, ${null_okay})'),
     'THStorage*': CodeTemplate('checked_cast_storage<${Storage}>(&${arg_name},"${arg_name}",${arg_pos})'),
     'THGenerator*':
         CodeTemplate(
@@ -215,6 +225,8 @@ CHECKED_USE = {
     'THIndexTensor*': '{}_->tensor',
     'THBoolTensor*': '{}_->tensor',
     'THIntegerTensor*': '{}_->tensor',
+    'THDenseTensor*': '{}_->tensor',
+    'THDenseIndexTensor*': '{}_->tensor',
     'THStorage*': '{}_->storage',
     'THGenerator*': '{}_->generator',
     'TensorList': "{0}_.data(), {0}_.size()",
