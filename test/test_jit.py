@@ -280,7 +280,7 @@ class TestJit(TestCase):
 
         @torch.jit.compile(nderivs=0)
         def fn(*args):
-            in_vars = torch._C._jit_flatten(args)
+            in_vars, _ = torch._C._jit_flatten(args)
             return in_vars[0] + 1
 
         for i, config in enumerate(configurations):
@@ -295,10 +295,14 @@ class TestJit(TestCase):
         x = Variable(torch.Tensor([0.4, 0.3]), requires_grad=True)
         y = Variable(torch.Tensor([0.7, 0.5]), requires_grad=True)
 
-        trace = torch._C._tracer_enter((x, y), 0)
-        w = (x + y) * (x + y) * (x + y)
-        t = torch.tanh(w) + torch.tanh(w)
-        z = (x + y) * (x + y) * (x + y) + t
+        trace, inputs = torch._C._tracer_enter((x, y), 0)
+
+        def fn(x, y):
+            w = (x + y) * (x + y) * (x + y)
+            t = torch.tanh(w) + torch.tanh(w)
+            z = (x + y) * (x + y) * (x + y) + t
+            return z
+        z = fn(*inputs)
         torch._C._tracer_exit((z,))
         torch._C._jit_pass_lint(trace)
         torch._C._jit_pass_cse(trace)
@@ -403,10 +407,13 @@ class TestJit(TestCase):
         x = Variable(torch.Tensor([0.4]), requires_grad=True)
         y = Variable(torch.Tensor([0.7]), requires_grad=True)
 
-        trace = torch._C._tracer_enter((x, y), 1)
+        trace, inputs = torch._C._tracer_enter((x, y), 1)
 
-        z = torch.sigmoid(x * (x + y))
-        w = torch.abs(x * x * x + y) + Variable(torch.ones(1))
+        def fn(x, y):
+            z = torch.sigmoid(x * (x + y))
+            w = torch.abs(x * x * x + y) + Variable(torch.ones(1))
+            return z, w
+        z, w = fn(*inputs)
 
         torch._C._tracer_exit((z, w))
         torch._C._jit_pass_lint(trace)
@@ -441,10 +448,10 @@ class TestJit(TestCase):
     def test_constant(self):
         x = Variable(torch.randn(2, 2), requires_grad=True)
 
-        trace = torch._C._tracer_enter((x,), 0)
+        trace, (tx,) = torch._C._tracer_enter((x,), 0)
 
         y = Variable(torch.diag(torch.Tensor([2, 2])))
-        z = x.matmul(y)
+        z = tx.matmul(y)
 
         torch._C._tracer_exit((z,))
         function = torch._C._jit_createInterpreterFactory(trace)
@@ -462,8 +469,8 @@ class TestJit(TestCase):
         x = Variable(torch.randn(1, 3, 10, 10))
         m = nn.Conv2d(3, 8, 3, 1)
 
-        trace = torch._C._tracer_enter((x,) + tuple(m.parameters()), 0)
-        y = m(x)
+        trace, inputs = torch._C._tracer_enter((x,) + tuple(m.parameters()), 0)
+        y = m(inputs[0])
         torch._C._tracer_exit((y,))
         self.assertExpectedTrace(trace)
 
@@ -477,16 +484,20 @@ class TestJit(TestCase):
                 return grad_output
 
         x = Variable(torch.Tensor([0]), requires_grad=True)
-        trace = torch._C._tracer_enter((x,), 0)
-        self.assertRaisesRegex(RuntimeError, "MyLegacyFn", lambda: MyLegacyFn()(x))
-        torch._C._tracer_exit((x,))
+        trace, inputs = torch._C._tracer_enter((x,), 0)
+        self.assertRaisesRegex(RuntimeError, "MyLegacyFn", lambda: MyLegacyFn()(*inputs))
+        torch._C._tracer_exit(inputs)
 
     def test_inplace_transplant(self):
         x = Variable(torch.Tensor([0]), requires_grad=True)
-        trace = torch._C._tracer_enter((x,), 0)
-        y = x.clone()
-        y.add_(2)
-        y.add_(3)
+        trace, inputs = torch._C._tracer_enter((x,), 0)
+
+        def fn(x):
+            y = x.clone()
+            y.add_(2)
+            y.add_(3)
+            return y
+        y = fn(*inputs)
         torch._C._tracer_exit((y,))
         self.assertExpectedTrace(trace)
 
@@ -511,11 +522,15 @@ class TestJit(TestCase):
                 return go
 
         x = Variable(torch.Tensor([0]), requires_grad=True)
-        trace = torch._C._tracer_enter((x,), 0)
-        y = RegularFn.apply(x)
-        y = InplaceFn.apply(y)
-        y = InplaceFn.apply(y)
-        y = RegularFn.apply(y)
+        trace, inputs = torch._C._tracer_enter((x,), 0)
+
+        def fn(x):
+            y = RegularFn.apply(x)
+            y = InplaceFn.apply(y)
+            y = InplaceFn.apply(y)
+            y = RegularFn.apply(y)
+            return y
+        y = fn(*inputs)
         torch._C._tracer_exit((y,))
         ops = [n for n in trace.graph().nodes()]
         for op in ops:
@@ -551,8 +566,11 @@ class TestJit(TestCase):
         x = a
         y = a * b
 
-        trace = torch._C._tracer_enter((x, y), 2)
-        z = y * 2 * x
+        trace, inputs = torch._C._tracer_enter((x, y), 2)
+
+        def fn(x, y):
+            return y * 2 * x
+        z = fn(*inputs)
         torch._C._tracer_exit((z,))
         torch._C._jit_pass_lint(trace)
 
@@ -575,8 +593,11 @@ class TestJit(TestCase):
         x = Variable(torch.randn(3, 3), requires_grad=True)
         y = Variable(torch.randn(3, 3), requires_grad=True)
 
-        trace = torch._C._tracer_enter((x, y), 2)
-        z = x.cross(y)
+        trace, inputs = torch._C._tracer_enter((x, y), 2)
+
+        def fn(x, y):
+            return x.cross(y)
+        z = fn(*inputs)
         torch._C._tracer_exit((z,))
         torch._C._jit_pass_lint(trace)
 
@@ -621,8 +642,11 @@ class TestJit(TestCase):
         y = Variable(torch.randn(2, 2), requires_grad=True)
 
         def record_trace(num_backwards):
-            trace = torch._C._tracer_enter((x, y), num_backwards)
-            z = y * 2 * x
+            trace, inputs = torch._C._tracer_enter((x, y), num_backwards)
+
+            def fn(x, y):
+                return y * 2 * x
+            z = fn(*inputs)
             torch._C._tracer_exit((z,))
             return z, trace
 
@@ -863,6 +887,19 @@ class TestJit(TestCase):
             with self.assertCompiled(fn):
                 fn(a, b, c).sum().backward()
 
+    def test_repeated_input(self):
+        @torch.jit.compile(nderivs=1)
+        def fn(a, b):
+            return a + b
+
+        a, b = [Variable(torch.randn(2, 2), requires_grad=True) for _ in range(2)]
+        fn(a, a).sum().backward()
+        with self.assertCompiled(fn):
+            fn(a, a).sum().backward()
+        with self.assertCompiled(fn):
+            fn(a, b).sum().backward()
+        self.assertExpected(str(fn.graph_for(a, a)))
+
     def test_re_enter(self):
             @torch.jit.compile(nderivs=1)
             def fn(a, b):
@@ -1040,6 +1077,21 @@ class TestJit(TestCase):
         torch._C._jit_pass_lint(trace)
         torch._C._jit_pass_dce(trace)
         self.assertExpectedTrace(trace)
+
+    def test_shared_param(self):
+
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super(MyModule, self).__init__()
+                self.b = self.a = nn.Parameter(torch.randn(2, 2))
+
+            def forward(self, x):
+                return x * self.a + self.b
+
+        m = MyModule()
+        trace, _ = torch.jit.trace(m, (Variable(torch.randn(2, 2)),), nderivs=0)
+        self.assertEqual(len(list(trace.graph().inputs())), 2)
+        self.assertExpected(str(trace))
 
 
 if __name__ == '__main__':

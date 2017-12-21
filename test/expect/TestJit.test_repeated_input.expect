@@ -1,0 +1,7 @@
+graph(%0 : Double(2, 2)
+      %1 : Double(2, 2)
+      -------- stage 1 --------
+      %3 : Double(2, 2!)) {
+  %2 : Double(2, 2) = add[alpha={1}](%0, %1)
+  return (%2, %3, %3);
+}
