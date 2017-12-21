@@ -6,7 +6,7 @@ import math
 
 __all__ = [
     'split', 'chunk', 'stack', 'unbind', 'btriunpack', 'matmul', 'det', 'stft',
-    'hann_window', 'hamming_window', 'bartlett_window',
+    'hann_window', 'hamming_window', 'bartlett_window', 'where',
 ]
 
 
@@ -440,3 +440,30 @@ def bartlett_window(window_length, periodic=True):
         return window[:-1]
     else:
         return window
+
+
+def where(condition, x, y):
+    r"""Return a tensor of elements selected from either :attr:`x` or :attr:`y`, depending on :attr:`condition`.
+
+    defined as::
+
+         out_i =  x_i        if condition_i
+                  y_i        else
+
+    .. note::
+        This function only works with ``Variables``.
+
+    .. note::
+        The tensors :attr:`condition`, :attr:`x`, :attr:`y` must be :ref:`broadcastable <broadcasting-semantics>`.
+
+    Arguments:
+        condition (ByteTensor): When True (nonzero), yield x, otherwise yield y.
+        x (Tensor): values selected at indices where :attr:`condition` is True.
+        y (Tensor): values selected at indices where :attr:`condition` is False.
+
+    Returns:
+        Tensor: A tensor of shape equal to the broadcasted shape of :attr:`condition`, :attr:`x`, :attr:`y`
+    """
+    # the parameter order is changed here; the functional order is the same as numpy; the
+    # method follows the usual torch mask semantics of x.fn(mask, y)
+    return torch._C._VariableBase.where(x, condition, y)

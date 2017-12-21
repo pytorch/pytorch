@@ -1734,6 +1734,26 @@ class TestAutograd(TestCase):
         gradcheck(as_strided, [x], raise_exception=True)
         gradgradcheck(as_strided, [x], [Variable(torch.randn(3, 3))])
 
+    def _test_where_functional(self, t):
+        x = Variable(t(torch.randn(5, 5)), requires_grad=True)
+        y = Variable(t(torch.randn(5, 5)), requires_grad=True)
+        cond = Variable(t(mask_not_all_zeros((5, 5))), requires_grad=False)
+
+        def where(cond, x, y):
+            return torch.where(cond, x, y)
+
+        gradcheck(where, [cond, x, y], raise_exception=True)
+        gradgradcheck(where, [cond, x, y], [Variable(t(torch.randn(5, 5)))])
+
+        x = Variable(t(torch.randn(5, 1, 5)), requires_grad=True)
+        y = Variable(t(torch.randn(5, 5, 1)), requires_grad=True)
+        gradcheck(where, [cond, x, y], raise_exception=True)
+        gradgradcheck(where, [cond, x, y], [Variable(t(torch.randn(5, 5, 5)))])
+
+    def test_where_functional(self):
+        # TODO: .cuda() lambda
+        self._test_where_functional(lambda t: t)
+
     def test_inplace_view_backprop_base(self):
         # modify view and back-prop through base
         root = Variable(torch.randn(2, 2), requires_grad=True)
@@ -2398,6 +2418,7 @@ EXCLUDE_FUNCTIONAL = {
     'baddbmm',
     'addmv',
     'addr',
+    'where'  # argument order
 }
 EXCLUDE_GRADCHECK = {
 }
