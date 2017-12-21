@@ -111,6 +111,9 @@
   default_init:
     stride: kernel_size
 
+- name: fractional_max_pool2d(Tensor self, IntList[2] kernel_size, IntList[2] output_size, Tensor random_samples)
+  cname: SpatialFractionalMaxPooling
+
 - name: max_pool2d(Tensor self, IntList[2] kernel_size, IntList[2] stride={}, IntList[2] padding=0, IntList[2] dilation=1, bool ceil_mode=false)
   cname: SpatialDilatedMaxPooling
   default_init:
