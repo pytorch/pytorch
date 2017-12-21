@@ -72,9 +72,6 @@ using list_of_retainable = std::vector<at::Retainable*>;
 // list_of_retainable output list.
 // pack_list never operates on tensor temporaries.
 void pack_list(list_of_retainable & outputs, Tensor v) { outputs.push_back(toRetainableSteal(std::move(v))); }
-void pack_list(list_of_retainable & outputs, Scalar v) {
-  outputs.push_back(toRetainableSteal(v.toTensor()));
-}
 void pack_list(list_of_retainable & outputs, std::vector<Tensor> && ts) {
   outputs.reserve(ts.size());
   for(auto & t : ts) {
