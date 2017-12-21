@@ -9,7 +9,7 @@
 namespace at { namespace native {
 
 namespace {
-  void check_dims_match_num_input_features(const std::string& arg_name, int64_t expected, int64_t actual){
+  void check_dims_match_num_input_features(const char* arg_name, int64_t expected, int64_t actual){
     if (actual != expected){
       std::stringstream ss;
       ss << arg_name << " should contain " << expected << " elements not " << actual ;
