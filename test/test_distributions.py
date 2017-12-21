@@ -8,7 +8,7 @@ import torch
 from common import TestCase, run_tests
 from torch.autograd import Variable, gradcheck
 from torch.distributions import (Bernoulli, Beta, Categorical, Dirichlet,
-                                 Distribution, Exponential, Gamma, Normal)
+                                 Exponential, Gamma, Laplace, Normal)
 
 TEST_NUMPY = True
 try:
@@ -71,6 +71,20 @@ EXAMPLES = [
         {
             'mean': torch.Tensor([1.0, 0.0]),
             'std': torch.Tensor([1e-5, 1e-5]),
+        },
+    ]),
+    Example(Laplace, [
+        {
+            'loc': Variable(torch.randn(5, 5), requires_grad=True),
+            'scale': Variable(torch.randn(5, 5).abs(), requires_grad=True),
+        },
+        {
+            'loc': Variable(torch.randn(1), requires_grad=True),
+            'scale': Variable(torch.randn(1), requires_grad=True),
+        },
+        {
+            'loc': torch.Tensor([1.0, 0.0]),
+            'scale': torch.Tensor([1e-5, 1e-5]),
         },
     ]),
 ]
@@ -306,6 +320,58 @@ class TestDistributions(TestCase):
                                         scipy.stats.expon(scale=1. / rate),
                                         'Exponential(rate={})'.format(rate))
 
+    def test_laplace(self):
+        loc = Variable(torch.randn(5, 5), requires_grad=True)
+        scale = Variable(torch.randn(5, 5).abs(), requires_grad=True)
+        loc_1d = Variable(torch.randn(1), requires_grad=True)
+        scale_1d = Variable(torch.randn(1), requires_grad=True)
+        loc_delta = torch.Tensor([1.0, 0.0])
+        scale_delta = torch.Tensor([1e-5, 1e-5])
+        self.assertEqual(Laplace(loc, scale).sample().size(), (5, 5))
+        self.assertEqual(Laplace(loc, scale).sample_n(7).size(), (7, 5, 5))
+        self.assertEqual(Laplace(loc_1d, scale_1d).sample_n(1).size(), (1, 1))
+        self.assertEqual(Laplace(loc_1d, scale_1d).sample().size(), (1,))
+        self.assertEqual(Laplace(0.2, .6).sample_n(1).size(), (1,))
+        self.assertEqual(Laplace(-0.7, 50.0).sample_n(1).size(), (1,))
+
+        # sample check for extreme value of mean, std
+        self._set_rng_seed()
+        self.assertEqual(Laplace(loc_delta, scale_delta).sample(sample_shape=(1, 2)),
+                         torch.Tensor([[[1.0, 0.0], [1.0, 0.0]]]),
+                         prec=1e-4)
+
+        self._gradcheck_log_prob(Laplace, (loc, scale))
+        self._gradcheck_log_prob(Laplace, (loc, 1.0))
+        self._gradcheck_log_prob(Laplace, (0.0, scale))
+
+        state = torch.get_rng_state()
+        eps = torch.ones_like(loc).uniform_(-.5, .5)
+        torch.set_rng_state(state)
+        z = Laplace(loc, scale).rsample()
+        z.backward(torch.ones_like(z))
+        self.assertEqual(loc.grad, torch.ones_like(loc))
+        self.assertEqual(scale.grad, -eps.sign() * torch.log1p(-2 * eps.abs()))
+        loc.grad.zero_()
+        scale.grad.zero_()
+        self.assertEqual(z.size(), (5, 5))
+
+        def ref_log_prob(idx, x, log_prob):
+            m = loc.data.view(-1)[idx]
+            s = scale.data.view(-1)[idx]
+            expected = (-math.log(2 * s) - abs(x - m) / s)
+            self.assertAlmostEqual(log_prob, expected, places=3)
+
+        self._check_log_prob(Laplace(loc, scale), ref_log_prob)
+
+    # This is a randomized test.
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    def test_laplace_sample(self):
+        self._set_rng_seed(1)
+        for loc, scale in product([-1.0, 0.0, 1.0], [0.1, 1.0, 10.0]):
+            self._check_sampler_sampler(Laplace(loc, scale),
+                                        scipy.stats.laplace(loc=loc, scale=scale),
+                                        'Laplace(loc={}, scale={})'.format(loc, scale))
+
     # This is a randomized test.
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_gamma_shape(self):
@@ -489,6 +555,18 @@ class TestDistributions(TestCase):
              (1, 2)),
             (Gamma(alpha=torch.Tensor([1]), beta=torch.Tensor([[1]])),
              (1, 1)),
+            (Laplace(loc=torch.Tensor([0, 0]), scale=1),
+             (2,)),
+            (Laplace(loc=0, scale=torch.Tensor([1, 1])),
+             (2,)),
+            (Laplace(loc=torch.Tensor([0, 0]), scale=torch.Tensor([1])),
+             (2,)),
+            (Laplace(loc=torch.Tensor([0, 0]), scale=torch.Tensor([[1], [1]])),
+             (2, 2)),
+            (Laplace(loc=torch.Tensor([0, 0]), scale=torch.Tensor([[1]])),
+             (1, 2)),
+            (Laplace(loc=torch.Tensor([0]), scale=torch.Tensor([[1]])),
+             (1, 1)),
         ]
 
         for dist, expected_size in valid_examples:
@@ -511,6 +589,10 @@ class TestDistributions(TestCase):
             (Gamma, {
                 'alpha': torch.Tensor([0, 0]),
                 'beta': torch.Tensor([1, 1, 1])
+            }),
+            (Laplace, {
+                'loc': torch.Tensor([0, 0]),
+                'scale': torch.Tensor([1, 1, 1])
             })
         ]
 
@@ -649,6 +731,25 @@ class TestDistributionShapes(TestCase):
         self.assertEqual(expon.sample((3, 2)).size(), torch.Size((3, 2, 2)))
         self.assertEqual(expon.log_prob(self.tensor_sample_1).size(), torch.Size((3, 2)))
         self.assertRaises(ValueError, expon.log_prob, self.tensor_sample_2)
+
+    def test_laplace_shape_scalar_params(self):
+        laplace = Laplace(0, 1)
+        self.assertEqual(laplace._batch_shape, torch.Size())
+        self.assertEqual(laplace._event_shape, torch.Size())
+        self.assertEqual(laplace.sample().size(), torch.Size((1,)))
+        self.assertEqual(laplace.sample((3, 2)).size(), torch.Size((3, 2)))
+        self.assertRaises(ValueError, laplace.log_prob, self.scalar_sample)
+        self.assertEqual(laplace.log_prob(self.tensor_sample_1).size(), torch.Size((3, 2)))
+        self.assertEqual(laplace.log_prob(self.tensor_sample_2).size(), torch.Size((3, 2, 3)))
+
+    def test_laplace_shape_tensor_params(self):
+        laplace = Laplace(torch.Tensor([0, 0]), torch.Tensor([1, 1]))
+        self.assertEqual(laplace._batch_shape, torch.Size((2,)))
+        self.assertEqual(laplace._event_shape, torch.Size(()))
+        self.assertEqual(laplace.sample().size(), torch.Size((2,)))
+        self.assertEqual(laplace.sample((3, 2)).size(), torch.Size((3, 2, 2)))
+        self.assertEqual(laplace.log_prob(self.tensor_sample_1).size(), torch.Size((3, 2)))
+        self.assertRaises(ValueError, laplace.log_prob, self.tensor_sample_2)
 
 
 if __name__ == '__main__':
