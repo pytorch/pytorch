@@ -438,6 +438,7 @@ static PyObject * THPVariable_new(PyObject* self, PyObject* args, PyObject* kwar
 {
   HANDLE_TH_ERRORS
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
+  AutoGPU auto_gpu(self_);
   return THPVariable_Wrap(torch::utils::tensor_new(self_.type(), args, kwargs));
   END_HANDLE_TH_ERRORS
 }
