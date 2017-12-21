@@ -175,7 +175,7 @@ def pad_sequence(sequences, batch_first=False):
     else:
         out_dims = (max_len, len(sequences)) + trailing_dims
         batch_dim = 1
-    
+
     out_variable = Variable(sequences[0].data.new(*out_dims).zero_())
     for i, variable in enumerate(sequences):
         length = variable.size(0)
@@ -193,7 +193,7 @@ def pack_sequence(sequences):
     ``sequences`` should be a list of Variables of size ``Lx*``, where L is
     the length of a sequence and * is any number of trailing dimensions,
     including zero. They should be sorted in the order of decreasing length.
-        
+
     Example:
         >>> from torch.nn.utils.rnn import pack_sequence
         >>> a = Variable(torch.Tensor([1,2,3]))
