@@ -126,64 +126,60 @@ def pad_packed_sequence(sequence, batch_first=False, padding_value=0.0):
     return output, lengths
 
 
-def pad_sequence(sequences, lengths, batch_first=False):
+def pad_sequence(sequences, batch_first=False):
     r"""Pad a list of variable length Variables with zero
 
-    The ``pad_sequence`` pads the list of Variables on zeroth dimension and
-    stack all the sequences on zeroth dimension. For example, if the input is
-    list of sequences with size `` Lx*`` and if batch_first is False, the
-    output will be of size `` TxBx* `` and if batch_first is True,
-    output will be of size ``BxTx* ``. The ``pad_sequence`` accepts list of
-    sequences and its lengths which should be sorted in decreasing order
+    ``pad_sequence`` stacks a list of Variables along a new dimension,
+    and padds them to equal length. For example, if the input is list of
+    sequences with size ``Lx*`` and if batch_first is False, and ``TxBx*``
+    otherwise. The list of sequences should be sorted in the order of
+    decreasing length.
 
-    B is batch size - Number of elements in ``sequences``
-    T is length longest sequence
-    L is length of the sequence
-    * is any number of trailing dimensions, including none
+    B is batch size. It's equal to the number of elements in ``sequences``.
+    T is length longest sequence.
+    L is length of the sequence.
+    * is any number of trailing dimensions, including none.
 
-    >>> from torch.nn.utils.rnn import pad_sequence
-    >>> a = Variable(torch.ones(25, 300))
-    >>> b = Variable(torch.ones(22, 300))
-    >>> c = Variable(torch.ones(15, 300))
-    >>> pad_sequence([a, b, c], [25, 22, 15]).size()
-    torch.Size([25, 3, 300])
+    Example:
+        >>> from torch.nn.utils.rnn import pad_sequence
+        >>> a = Variable(torch.ones(25, 300))
+        >>> b = Variable(torch.ones(22, 300))
+        >>> c = Variable(torch.ones(15, 300))
+        >>> pad_sequence([a, b, c]).size()
+        torch.Size([25, 3, 300])
 
     Note:
         This function returns a Variable of size TxBx* or BxTx* where T is the
-            length of longest sequence (lengths[0])
+            length of longest sequence.
         Function assumes trailing dimensions and type of all the Variables
-            in sequences are same
+            in sequences are same.
 
     Arguments:
         sequences (list[Variable]): list of variable length sequences.
-        lengths (list[int]): list of sequences lengths of each batch element.
-        batch_first (bool, optional): if True, the input is expected in Bx*x*
-            format.
+        batch_first (bool, optional): output will be in BxTx* if True, or in
+            TxBx* otherwise
 
     Returns:
-        Variable of size ``T x B x * `` if batch_first = False
+        Variable of size ``T x B x * `` if batch_first is False
         Variable of size ``B x T x * `` otherwise
     """
 
-    if len(lengths) != len(sequences):
-        raise ValueError("number of elements in lengths and sequences didn't match")
-
     # assuming trailing dimensions and type of all the Variables
     # in sequences are same and fetching those from sequences[0]
-    max_len = lengths[0]
-    trailing_dims = list(sequences[0].size())[1:]
+    max_size = sequences[0].size()
+    max_len, trailing_dims = max_size[0], max_size[1:]
     prev_l = max_len
     if batch_first:
-        out_dims = [len(sequences), max_len] + trailing_dims
-        out_variable = Variable(sequences[0].data.new(*out_dims).zero_())
+        out_dims = (len(sequences), max_len) + trailing_dims
         batch_dim = 0
     else:
-        out_dims = [max_len, len(sequences)] + trailing_dims
-        out_variable = Variable(sequences[0].data.new(*out_dims).zero_())
+        out_dims = (max_len, len(sequences)) + trailing_dims
         batch_dim = 1
-
-    for i, variable, length in zip(range(len(lengths)), sequences, lengths):
-        # temperory sort check, can be removed when we handle sorting internally
+    
+    out_variable = Variable(sequences[0].data.new(*out_dims).zero_())
+    for i, variable in enumerate(sequences):
+        length = variable.size(0)
+        # temporary sort check, can be removed when we handle sorting internally
         if prev_l < length:
                 raise ValueError("lengths array has to be sorted in decreasing order")
         prev_l = length
@@ -191,26 +187,19 @@ def pad_sequence(sequences, lengths, batch_first=False):
     return out_variable
 
 
-def pack_sequence(sequences, lengths):
+def pack_sequence(sequences):
     r"""Packs a list of variable length Variables
 
-    sequences should be a list of Variables each has size `` Lx* `` where
-    L is length of the sequence and * is any trailing dimension including zero
-    ``pack_sequence`` assumes each Variable is of different length and pack them
-
-    Note:
-        sequences can have any input that has at least one dimension.
-        But ``pack_sequence`` assumes, first dimension has varaible length
-        sequences. You can apply it to pack the labels, and use the output of
-        the RNN with them to compute the loss directly. A Variable can be
-        retrieved from a :class:`PackedSequence` object by accessing
-        its ``.data`` attribute.
-    Ex.
+    ``sequences`` should be a list of Variables of size ``Lx*``, where L is
+    the length of a sequence and * is any number of trailing dimensions,
+    including zero. They should be sorted in the order of decreasing length.
+        
+    Example:
         >>> from torch.nn.utils.rnn import pack_sequence
         >>> a = Variable(torch.Tensor([1,2,3]))
         >>> b = Variable(torch.Tensor([4,5]))
         >>> c = Variable(torch.Tensor([6]))
-        >>> pack_sequence([a, b, c], [3, 2, 1])
+        >>> pack_sequence([a, b, c]])
         PackedSequence(data=
          1
          4
@@ -223,11 +212,9 @@ def pack_sequence(sequences, lengths):
 
 
     Arguments:
-        sequences (list[Variable]): variable length sequences.
-        lengths (list[int]): list of sequence's lengths of each batch element.
+        sequences (list[Variable]): A list of sequences of decreasing length.
 
     Returns:
         a :class:`PackedSequence` object
     """
-
-    return pack_padded_sequence(pad_sequence(sequences, lengths), lengths)
+    return pack_padded_sequence(pad_sequence(sequences), [v.size(0) for v in sequences])
