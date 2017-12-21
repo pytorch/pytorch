@@ -900,6 +900,18 @@ class TestJit(TestCase):
             fn(a, b).sum().backward()
         self.assertExpected(str(fn.graph_for(a, a)))
 
+    def test_repeated_output(self):
+        @torch.jit.compile(nderivs=1)
+        def fn(a, b):
+            z = a + b
+            return z, z
+
+        a, b = [Variable(torch.randn(2, 2), requires_grad=True) for _ in range(2)]
+        sum(fn(a, b)).sum().backward()
+        with self.assertCompiled(fn):
+            sum(fn(a, b)).sum().backward()
+        self.assertExpected(str(fn.graph_for(a, b)))
+
     def test_re_enter(self):
             @torch.jit.compile(nderivs=1)
             def fn(a, b):
