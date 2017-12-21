@@ -173,7 +173,6 @@ std::tuple<Tensor, Tensor, Tensor> cudnn_batch_norm_backward(
   checkSameSize(c, input, grad_output);
   auto num_features = input->size(1);
   for (auto t : {weight, save_mean, save_var}) {
-    if (!t->defined()) continue;
     checkNumel(c, t, num_features);
   }
 
