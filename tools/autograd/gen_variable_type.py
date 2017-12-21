@@ -97,11 +97,15 @@ if (should_compute_output(${idx})) {
 }
 """)
 
-DERIVATIVE_MULTI = CodeTemplate("""\
-if (should_compute_output({ ${idxs} })) {
+GRAD_INPUT_MASK = CodeTemplate("""\
   auto grad_input_mask = std::array<bool, ${n}>{
     ${masks}
-  };
+  };\
+""")
+
+DERIVATIVE_MULTI = CodeTemplate("""\
+if (should_compute_output({ ${idxs} })) {
+${grad_input_mask}
   std::tie(${grad_inputs}) = ${derivative};
 }
 """)
@@ -622,11 +626,15 @@ def create_autograd_functions(top_env, autogen_functions):
             elif len(idxs) == 1:
                 return DERIVATIVE_TENSOR.substitute(idx=idxs[0], derivative=formula)
             else:
+                if 'grad_input_mask' in formula:
+                    masks = ['should_compute_output({}),'.format(i) for i in idxs]
+                    grad_input_mask = GRAD_INPUT_MASK.substitute(masks=masks, n=len(idxs))
+                else:
+                    grad_input_mask = ''
                 grad_inputs = ', '.join(['grad_inputs[{}]'.format(i) for i in idxs])
-                masks = ['should_compute_output({}),'.format(i) for i in idxs]
                 return DERIVATIVE_MULTI.substitute(
                     idxs=idxs, derivative=formula, grad_inputs=grad_inputs,
-                    masks=masks, n=len(idxs))
+                    grad_input_mask=grad_input_mask)
 
         body.extend(unpack)
         for derivative in func['derivatives']:
