@@ -415,7 +415,7 @@ class TestDistributions(TestCase):
             dist = Beta(alpha, beta)
             x = dist.sample()
             actual_log_prob = dist.log_prob(x).sum()
-            expected_log_prob = scipy.stats.beta.logpdf(x, alpha, beta)
+            expected_log_prob = scipy.stats.beta.logpdf(x, alpha, beta)[0]
             self.assertAlmostEqual(actual_log_prob, expected_log_prob, places=3)
 
     # This is a randomized test.
