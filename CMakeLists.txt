@@ -56,6 +56,9 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 
 enable_testing()
 
+# ---[ Misc checks to cope with various compiler modes
+include(cmake/MiscCheck.cmake)
+
 # External projects
 include(ExternalProject)
 
@@ -72,9 +75,6 @@ endif()
 
 # ---[ Dependencies
 include(cmake/Dependencies.cmake)
-
-# ---[ Misc checks to cope with various compiler modes
-include(cmake/MiscCheck.cmake)
 
 # ---[ Whitelist file if whitelist is specified
 include(cmake/Whitelist.cmake)

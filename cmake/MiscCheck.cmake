@@ -1,6 +1,8 @@
-INCLUDE(CheckCXXSourceCompiles)
+include(CheckCXXSourceCompiles)
+include(CMakePushCheckState)
 
-# ---[ Check if the data type long and int32_t/int64_t overlap. 
+# ---[ Check if the data type long and int32_t/int64_t overlap.
+cmake_push_check_state(RESET)
 set(CMAKE_REQUIRED_FLAGS "-std=c++11")
 CHECK_CXX_SOURCE_COMPILES(
     "#include <cstdint>
@@ -19,13 +21,14 @@ else()
   message(STATUS "Need to define long as a separate typeid.")
   set(CAFFE2_UNIQUE_LONG_TYPEMETA 1)
 endif()
-
+cmake_pop_check_state()
 
 # ---[ Check if we want to turn off deprecated warning due to glog.
 # Note(jiayq): on ubuntu 14.04, the default glog install uses ext/hash_set that
 # is being deprecated. As a result, we will test if this is the environment we
 # are building under. If yes, we will turn off deprecation warning for a
 # cleaner build output.
+cmake_push_check_state(RESET)
 set(CMAKE_REQUIRED_FLAGS "-std=c++11")
 CHECK_CXX_SOURCE_COMPILES(
     "#include <glog/stl_logging.h>
@@ -38,9 +41,10 @@ if(NOT CAFFE2_NEED_TO_TURN_OFF_DEPRECATION_WARNING AND NOT MSVC)
   message(STATUS "Turning off deprecation warning due to glog.")
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-deprecated")
 endif()
+cmake_pop_check_state()
 
-# ---[ Check if the compiler has avx/avx2 support. We will only check avx2.
-
+# ---[ Check if the compiler has AVX/AVX2 support. We only check AVX2.
+cmake_push_check_state(RESET)
 if (MSVC)
   set(CMAKE_REQUIRED_FLAGS "/arch:AVX2")
 else()
@@ -66,6 +70,7 @@ if (CAFFE2_COMPILER_SUPPORTS_AVX2_EXTENSIONS)
     set(CAFFE2_PERF_WITH_AVX2 1)
   endif()
 endif()
+cmake_pop_check_state()
 
 # ---[ If we are using msvc, set no warning flags
 # Note(jiayq): if you are going to add a warning flag, check if this is
