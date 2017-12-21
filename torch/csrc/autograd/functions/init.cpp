@@ -85,15 +85,6 @@ PyObject* getTensorAttr(PyObject* obj, void* _unused)
   END_HANDLE_TH_ERRORS
 }
 
-// The type for PyInt_FromLong varies between Windows (int64_t) and
-// Linux (long).  Unfortunately, on Clang, if the template type argument
-// does not *exactly* line up, Clang discards the template
-// specialization.  So we write a little stub function which does have
-// the right type.
-static PyObject* PortablePyInt_FromLong(int64_t ival) {
-  return THPUtils_packInt64(ival);
-}
-
 static PyObject* accumulateGradVar(PyObject *_self, void* _unused)
 {
   THPCppFunction* self = (THPCppFunction*)_self;
