@@ -277,7 +277,51 @@ Args:
 """)
 
 
-# share the same interface
+def fractional_max_pool2d(input, kernel_size, output_size=None,
+                          output_ratio=None, return_indices=False,
+                          _random_samples=None):
+    r"""Applies 2D fractional max pooling over an input signal composed of several input planes.
+
+    Fractiona MaxPooling is described in detail in the paper `Fractional MaxPooling`_ by Ben Graham
+
+    The max-pooling operation is applied in kHxkW regions by a stochastic
+    step size determined by the target output size.
+    The number of output features is equal to the number of input planes.
+
+    Args:
+        kernel_size: the size of the window to take a max over.
+                     Can be a single number k (for a square kernel of k x k) or a tuple (kh x kw)
+        output_size: the target output size of the image of the form oH x oW.
+                     Can be a tuple (oH, oW) or a single number oH for a square image oH x oH
+        output_ratio: If one wants to have an output size as a ratio of the input size, this option can be given.
+                      This has to be a number or tuple in the range (0, 1)
+        return_indices: if ``True``, will return the indices along with the outputs.
+                        Useful to pass to max_unpool2d.
+
+    Examples:
+        >>> input = autograd.Variable(torch.randn(20, 16, 50, 32))
+        >>> # pool of square window of size=3, and target output size 13x12
+        >>> F.fractional_max_pool2d(input, 3, output_size=(13, 12))
+        >>> # pool of square window and target output size being half of input image size
+        >>> F.fractional_max_pool2d(input, 3, output_ratio=(0.5, 0.5))
+
+    .. _Fractional MaxPooling:
+        http://arxiv.org/abs/1412.6071
+    """
+    if output_size is None and output_ratio is None:
+        raise ValueError("fractional_max_pool2d requires specifying either "
+                         "an output_size, or a output_ratio")
+    if output_size is None:
+        output_ratio = _pair(output_ratio)
+        output_size = (int(input.size(2) * output_ratio[0]),
+                       int(input.size(3) * output_ratio[1]))
+
+    if _random_samples is None:
+        _random_samples = input.new(input.size(0), input.size(1), 2).uniform_()
+    ret = torch._C._nn.fractional_max_pool2d(input, kernel_size, output_size, _random_samples)
+    return ret if return_indices else ret[0]
+
+
 def max_pool1d(input, kernel_size, stride=None, padding=0, dilation=1,
                ceil_mode=False, return_indices=False):
     """Applies a 1D max pooling over an input signal composed of several input
