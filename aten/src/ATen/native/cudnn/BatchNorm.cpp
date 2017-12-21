@@ -139,12 +139,15 @@ std::tuple<Tensor, Tensor, Tensor> cudnn_batch_norm(
   return std::tuple<Tensor, Tensor, Tensor>{output_t, save_mean, save_var};
 }
 
+// NB: CuDNN only implements the backward algorithm for batchnorm
+// in training mode (evaluation mode batchnorm has a different algorithm),
+// which is why this doesn't accept a 'training' parameter.
 std::tuple<Tensor, Tensor, Tensor> cudnn_batch_norm_backward(
     const Tensor& input_t, const Tensor& grad_output_t, const Tensor& weight_t,
     // Unused: but we require them to be passed so that double backwards
     // has access
     const Tensor& running_mean, const Tensor& running_var,
-    const Tensor& save_mean_t, const Tensor& save_var_t, bool training,
+    const Tensor& save_mean_t, const Tensor& save_var_t,
     double epsilon)
 {
   TensorArg input{ input_t, "input", 1 },
@@ -155,12 +158,7 @@ std::tuple<Tensor, Tensor, Tensor> cudnn_batch_norm_backward(
   CheckedFrom c = "cudnn_batch_norm_backward";
   setCuDNNStreamToCurrent();
 
-  checkAllDefined(c, {input, grad_output, weight});
-  if (training) {
-    checkAllDefined(c, {save_mean, save_var});
-  } else {
-    throw std::runtime_error("cudnn_batch_norm_backward: !training backwards doesn't seem to work");
-  }
+  checkAllDefined(c, {input, grad_output, weight, save_mean, save_var});
   checkAllSameGPU(c, {input, grad_output, weight, save_mean, save_var});
   if (input->type().scalarType() == ScalarType::Half) {
     checkScalarType(c, weight, ScalarType::Float);
@@ -183,10 +181,10 @@ std::tuple<Tensor, Tensor, Tensor> cudnn_batch_norm_backward(
   if (input->dim() == 2) {
     mode = CUDNN_BATCHNORM_PER_ACTIVATION;
   } else {
-    mode = CUDNN_BATCHNORM_SPATIAL;
 #if CUDNN_VERSION >= 7003
-    if(training)
-      mode = CUDNN_BATCHNORM_SPATIAL_PERSISTENT;
+    mode = CUDNN_BATCHNORM_SPATIAL_PERSISTENT;
+#else
+    mode = CUDNN_BATCHNORM_SPATIAL;
 #endif
   }
 
@@ -212,8 +210,8 @@ std::tuple<Tensor, Tensor, Tensor> cudnn_batch_norm_backward(
     grad_weight_t.data_ptr(),
     grad_bias_t.data_ptr(),
     epsilon,
-    training ? save_mean->data_ptr() : nullptr,
-    training ? save_var->data_ptr() : nullptr));
+    save_mean->data_ptr(),
+    save_var->data_ptr()));
 
   return std::tuple<Tensor,Tensor,Tensor>{grad_input_t, grad_weight_t, grad_bias_t};
 }
