@@ -38,6 +38,7 @@ from .distribution import Distribution
 from .gamma import Gamma
 from .normal import Normal
 from .exponential import Exponential
+from .laplace import Laplace
 
 
-__all__ = ['Distribution', 'Bernoulli', 'Beta', 'Categorical', 'Dirichlet', 'Gamma', 'Normal', 'Exponential']
+__all__ = ['Distribution', 'Bernoulli', 'Beta', 'Categorical', 'Dirichlet', 'Gamma', 'Normal', 'Exponential', 'Laplace']
