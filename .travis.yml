@@ -25,7 +25,7 @@ script:
     - travis_retry pip install --upgrade pip setuptools wheel
     - travis_retry pip install -r requirements.txt --only-binary=scipy
     - git submodule update --init --recursive
-    - MAX_JOBS=8 python setup.py install
+    - MAX_JOBS=6 python setup.py install
     - OMP_NUM_THREADS=2 ./test/run_test.sh
 
 addons:

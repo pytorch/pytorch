@@ -698,8 +698,6 @@ Tensor expand_as_dim1(const Tensor& src, const Tensor& target) {
   return src_expanded.expand_as(target);
 }
 
-} // anonymous namespace
-
 // NB: This currently is PURPOSELY outside of the anonymous namespace, because
 // we are manually calling it from some legacy batchnorm invocation code.  Once
 // that code moves into derivatives.yaml, this can be moved into the anonymous
@@ -712,11 +710,26 @@ std::tuple<Tensor, Tensor, Tensor> batchnorm_double_backward(
     const Tensor & ggB,
     const Tensor & gO,
     double eps,
-    const Tensor & save_mean, // not Variable
-    const Tensor & save_std, // not Variable
-    const Tensor & running_mean, // not Variable
-    const Tensor & running_var, // not Variable
+    const Tensor & save_mean_v,
+    const Tensor & save_std_v,
+    const Tensor & running_mean_v,
+    const Tensor & running_var_v,
     bool training) {
+
+  // NB: In the original design of BatchNorm, save_mean, save_std, running_mean
+  // and running_var are unconditionally tensor "buffers", and never get wrapped
+  // in variables.  However, when ATen happened, we never designed the API
+  // to allow mixed passing of tensors and variables (and this would be very
+  // confusing, because we always write "Tensor" in the signatures no matter if
+  // it's a Variable or a Tensor).  So, when a user calls
+  // batchnorm_double_backward from Python (which still thinks that these are
+  // plain tensors), it goes ahead and wraps them in variables to appease
+  // the interface that only understand variables.  Consequently, we have to
+  // unwrap them again.
+  const Tensor& save_mean = static_cast<const Variable&>(save_mean_v).data();
+  const Tensor& save_std = static_cast<const Variable&>(save_std_v).data();
+  const Tensor& running_mean = static_cast<const Variable&>(running_mean_v).data();
+  const Tensor& running_var = static_cast<const Variable&>(running_var_v).data();
 
   bool affine = gamma.defined();
   // TODO: Do we have a ScalarOrTensor type?  Would such a thing exist?
@@ -819,6 +832,8 @@ std::tuple<Tensor, Tensor, Tensor> batchnorm_double_backward(
   return std::tuple<Tensor, Tensor, Tensor>{gI, gG, ggO};
 
 }
+
+} // anonymous namespace
 
 ${autograd_function_definitions}
 

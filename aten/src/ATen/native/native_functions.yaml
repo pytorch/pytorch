@@ -192,11 +192,11 @@
 
 # batchnorm
 
-- func: cudnn_batch_norm(Tensor input, Tensor weight, Tensor? bias, Tensor running_mean, Tensor running_var, Tensor save_mean, Tensor save_var, bool training, double exponential_average_factor, double epsilon) -> Tensor
+- func: cudnn_batch_norm(Tensor input, Tensor weight, Tensor? bias, Tensor running_mean, Tensor running_var, bool training, double exponential_average_factor, double epsilon) -> (Tensor, Tensor, Tensor)
   variants: function
-  dispatch: cudnn_batch_norm_forward
 
-- func: cudnn_batch_norm_backward(Tensor input, Tensor grad_output, Tensor weight, Tensor save_mean, Tensor save_var, bool training, double epsilon) -> (Tensor, Tensor, Tensor)
+# NB: You can only use this if you used cudnn_batch_norm training=True
+- func: cudnn_batch_norm_backward(Tensor input, Tensor grad_output, Tensor weight, Tensor running_mean, Tensor running_var, Tensor? save_mean, Tensor? save_var, double epsilon) -> (Tensor, Tensor, Tensor)
   variants: function
 
 # NB: input is special cased in a way I don't quite understand
@@ -242,4 +242,7 @@
 # NB: We MUST call the input self, otherwise codegen will attempt to
 # dispatch on ggI... which might be undefined.
 - func: _convolution_double_backward(Tensor? ggI, Tensor? ggW, Tensor? ggb, Tensor gO, Tensor weight, Tensor self, IntList stride, IntList padding, IntList dilation, bool transposed, IntList output_padding, int64_t groups, bool benchmark, bool deterministic, bool cudnn_enabled, std::array<bool,3> output_mask) -> (Tensor, Tensor, Tensor)
+  variants: function
+
+- func: batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor running_mean, Tensor running_var, bool training, double momentum, double eps, bool cudnn_enabled) -> Tensor
   variants: function
