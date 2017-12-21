@@ -84,8 +84,6 @@ def is_acceptable(tensor):
 
 _handles = {}
 
-deterministic = False
-benchmark = False
 verbose = False
 
 CUDNN_DATA_FLOAT = 0
@@ -113,9 +111,14 @@ CUDNN_TENSOR_OP_MATH = 1
 
 def set_flags(_enabled, _benchmark, _deterministic, _verbose):
     global benchmark, deterministic, verbose
-    orig_flags = torch._C._get_cudnn_enabled(), benchmark, deterministic, verbose
-    benchmark, deterministic, verbose = _benchmark, _deterministic, _verbose
+    orig_flags = (torch._C._get_cudnn_enabled(),
+                  torch._C._get_cudnn_benchmark(),
+                  torch._C._get_cudnn_deterministic(),
+                  verbose)
+    verbose = _verbose
     torch._C._set_cudnn_enabled(_enabled)
+    torch._C._set_cudnn_benchmark(_benchmark)
+    torch._C._set_cudnn_deterministic(_deterministic)
     return orig_flags
 
 
@@ -385,12 +388,16 @@ def add_tensor(*args):
 #
 #   torch.backends.cudnn.enabled = True
 
-class EnabledProp(object):
+class ContextProp(object):
+    def __init__(self, getter, setter):
+        self.getter = getter
+        self.setter = setter
+
     def __get__(self, obj, objtype):
-        return torch._C._get_cudnn_enabled()
+        return self.getter()
 
     def __set__(self, obj, val):
-        torch._C._set_cudnn_enabled(val)
+        self.setter(val)
 
 
 class CudnnModule(object):
@@ -400,7 +407,9 @@ class CudnnModule(object):
         # get GC'ed and a lot of things will break.  See:
         # https://stackoverflow.com/questions/47540722/how-do-i-use-the-sys-modules-replacement-trick-in-init-py-on-python-2
         self.__old_mod = m
-    enabled = EnabledProp()
+    enabled = ContextProp(torch._C._get_cudnn_enabled, torch._C._set_cudnn_enabled)
+    deterministic = ContextProp(torch._C._get_cudnn_deterministic, torch._C._set_cudnn_deterministic)
+    benchmark = ContextProp(torch._C._get_cudnn_benchmark, torch._C._set_cudnn_benchmark)
 
 # This is the sys.modules replacement trick, see
 # https://stackoverflow.com/questions/2447353/getattr-on-a-module/7668273#7668273

@@ -61,6 +61,8 @@ class TestJit(TestCase):
 
     def assertExpectedTrace(self, trace, *args, **kwargs):
         torch._C._jit_pass_lint(trace)
+        torch._C._jit_pass_dce(trace)
+        torch._C._jit_pass_lint(trace)
         torch._C._jit_pass_canonicalize(trace)
         torch._C._jit_pass_lint(trace)
         self.assertExpected(str(trace), *args, **kwargs)
