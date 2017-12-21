@@ -861,6 +861,25 @@ class TestJit(TestCase):
             with self.assertCompiled(fn):
                 fn(a, b, c).sum().backward()
 
+    def test_re_enter(self):
+            @torch.jit.compile(nderivs=1)
+            def fn(a, b):
+                return a + b
+
+            @torch.jit.compile(nderivs=1)
+            def fn2(a, b, c):
+                    return fn(a, b) + c
+
+            a, b, c = [Variable(torch.randn(2, 2), requires_grad=True) for _ in range(3)]
+
+            fn(a, b).sum().backward()
+            with self.assertCompiled(fn):
+                fn(a, b).sum().backward()
+
+            fn2(a, b, c).sum().backward()
+            with self.assertCompiled(fn2):
+                fn2(a, b, c).sum().backward()
+
     def test_mini_wlm(self):
         """Exercise null-edge pruning in the tracer."""
 
