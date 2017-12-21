@@ -115,10 +115,6 @@ bool THPAutograd_initFunctions(PyObject* _unused)
   static PyTypeObject AccumulateGradClass;
   addClass<AccumulateGrad, NoCtor>(module, AccumulateGradClass, "AccumulateGrad", accumulate_grad_properties);
 
-  static PyTypeObject AddClass, AddBackwardClass;
-  addClass<Add, NoCtor>(module, AddClass, "Add");
-  addClass<AddBackward_Deprecated, NoCtor>(module, AddBackwardClass, "AddBackward_Deprecated");
-
   static PyTypeObject ErrorClass;
   addClass<Error, NoCtor>(module, ErrorClass, "Error");
 
