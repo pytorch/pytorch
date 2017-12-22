@@ -36,9 +36,9 @@ __device__ __forceinline__ bool warp_has_collision(int val) {
 }
 
 // parallelizes over features
-template <typename scalar>
+template <typename scalar_t>
 __global__ void embedding_backward_feature_kernel(
-  int64_t* indices, scalar* grad, scalar* grad_weight,
+  int64_t* indices, scalar_t* grad, scalar_t* grad_weight,
   int64_t num_indices, int64_t stride, int padding_idx) {
 
   const int feature_dim = blockIdx.x * 4 + threadIdx.x / 32;
@@ -85,12 +85,12 @@ __global__ void embedding_backward_feature_kernel(
 }
 
 
-template <typename scalar>
+template <typename scalar_t>
 __global__ void embedding_backward_kernel(
-  int64_t* input, int64_t* indices, scalar* grad_output, scalar* grad_weight,
+  int64_t* input, int64_t* indices, scalar_t* grad_output, scalar_t* grad_weight,
   int64_t* count, int64_t numel, int64_t stride, int padding_idx) {
 
-  using acc_scalar = cuda::acc_type<scalar>;
+  using accscalar_t = cuda::acc_type<scalar_t>;
   int idx = blockIdx.x * 4 + threadIdx.y;
 
   // Each warp is responsible for an input into the LookupTable.
@@ -114,17 +114,17 @@ __global__ void embedding_backward_kernel(
       const int start_feature = threadIdx.x + blockIdx.y * blockDim.x * SZ;
       const int weight_row = ((int) input[idx]) * stride;
       const int grad_row = ((int) indices[idx]) * stride;
-      const acc_scalar scale = count ? (acc_scalar)1.0 / count[idx] : 1.0;
+      const accscalar_t scale = count ? (accscalar_t)1.0 / count[idx] : 1.0;
 
-      acc_scalar gradient[SZ];
-      acc_scalar weight[SZ];
+      accscalar_t gradient[SZ];
+      accscalar_t weight[SZ];
 
       #pragma unroll
       for (int ii = 0; ii < SZ; ii++) {
         int feature_dim = start_feature + ii * WARP_SIZE;
         if (feature_dim < stride) {
-          gradient[ii] = scalar_cast<acc_scalar>(grad_output[grad_row + feature_dim]);
-          weight[ii] = scalar_cast<acc_scalar>(grad_weight[weight_row + feature_dim]);
+          gradient[ii] = scalar_cast<accscalar_t>(grad_output[grad_row + feature_dim]);
+          weight[ii] = scalar_cast<accscalar_t>(grad_weight[weight_row + feature_dim]);
         }
       }
 
@@ -137,7 +137,7 @@ __global__ void embedding_backward_kernel(
       for (int ii = 0; ii < SZ; ii++) {
         int feature_dim = start_feature + ii * WARP_SIZE;
         if (feature_dim < stride) {
-            grad_weight[weight_row + feature_dim] = scalar_cast<scalar>(weight[ii]);
+            grad_weight[weight_row + feature_dim] = scalar_cast<scalar_t>(weight[ii]);
         }
       }
 
@@ -147,21 +147,21 @@ __global__ void embedding_backward_kernel(
 }
 
 /* Calculate norms of the rows of weight_ptr given by idx_ptr and capture them in norms */
-template <typename scalar, typename acc_scalar>
+template <typename scalar_t, typename accscalar_t>
 __global__ void renorm_kernel(
-    scalar* weights, int64_t* indices, acc_scalar max_norm,
-    acc_scalar norm_type, int dim) {
+    scalar_t* weights, int64_t* indices, accscalar_t max_norm,
+    accscalar_t norm_type, int dim) {
 
   // Some casting hacks since dynamic shared memory and templates don't work together:
   extern __shared__ unsigned char smem[];
-  auto sdata = reinterpret_cast<acc_scalar*>(smem);
+  auto sdata = reinterpret_cast<accscalar_t*>(smem);
 
   int tid = threadIdx.x;
   int base_index = indices[blockIdx.x] * dim;
 
-  acc_scalar v = 0;
+  accscalar_t v = 0;
   for (int i = tid; i < dim; i += blockDim.x) {
-    auto x = scalar_cast<acc_scalar>(weights[base_index + i]);
+    auto x = scalar_cast<accscalar_t>(weights[base_index + i]);
     if (norm_type == 1) {
       v += std::abs(x);
     } else if (norm_type == 2) {
@@ -171,17 +171,17 @@ __global__ void renorm_kernel(
     }
   }
 
-  using Op = ReduceAdd<acc_scalar, acc_scalar>;
-  v = reduceBlock<acc_scalar>(sdata, blockDim.x, v, Op(), 0);
+  using Op = ReduceAdd<accscalar_t, accscalar_t>;
+  v = reduceBlock<accscalar_t>(sdata, blockDim.x, v, Op(), 0);
 
   if (tid == 0) {
-    sdata[0] = std::pow(v, 1.0 / scalar_cast<acc_scalar>(norm_type));
+    sdata[0] = std::pow(v, 1.0 / scalar_cast<accscalar_t>(norm_type));
   }
   __syncthreads();
 
   // now we renormalize the blocks that need it
   if (sdata[0] > max_norm) {
-    auto factor = scalar_cast<scalar>(max_norm / (sdata[0] + 1e-7));
+    auto factor = scalar_cast<scalar_t>(max_norm / (sdata[0] + 1e-7));
     for (int i = tid; i < dim; i += blockDim.x) {
       weights[base_index + i] *= factor;
     }
@@ -213,8 +213,8 @@ Tensor embedding_backward_cuda(const Tensor & grad_, const Tensor & indices,
    DISPATCH_ALL_FLOATING_TYPES(grad.type(), "embedding_backward", [&]() {
      embedding_backward_feature_kernel<<<grid, block, 0, stream>>>(
        indices.data<int64_t>(),
-       grad.data<scalar>(),
-       grad_weight.data<scalar>(),
+       grad.data<scalar_t>(),
+       grad_weight.data<scalar_t>(),
        num_indices,
        stride,
        padding_idx);
@@ -289,8 +289,8 @@ Tensor embedding_backward_cuda(const Tensor & grad_, const Tensor & indices,
     embedding_backward_kernel<<<grid, block, 0, stream>>>(
       sorted_indices.data<int64_t>(),
       orig_indices.data<int64_t>(),
-      grad.data<scalar>(),
-      grad_weight.data<scalar>(),
+      grad.data<scalar_t>(),
+      grad_weight.data<scalar_t>(),
       count.defined() ? count.data<int64_t>() : nullptr,
       num_indices,
       stride,
@@ -332,12 +332,12 @@ Tensor & embedding_renorm_cuda_(Tensor & self, const Tensor & indices,
   int dim = self.stride(0);
 
   DISPATCH_ALL_FLOATING_TYPES(self.type(), "embedding_backward", [&]() {
-    using acc_scalar = cuda::acc_type<scalar>;
-    renorm_kernel<<<grid, block, 128 * sizeof(acc_scalar), stream>>>(
-      self.data<scalar>(),
+    using accscalar_t = cuda::acc_type<scalar_t>;
+    renorm_kernel<<<grid, block, 128 * sizeof(accscalar_t), stream>>>(
+      self.data<scalar_t>(),
       unique_indices.data<int64_t>(),
-      scalar_cast<acc_scalar>(max_norm),
-      scalar_cast<acc_scalar>(norm_type),
+      scalar_cast<accscalar_t>(max_norm),
+      scalar_cast<accscalar_t>(norm_type),
       dim);
   });
   THCudaCheck(cudaGetLastError());
