@@ -686,6 +686,18 @@ Utilities
 .. autofunction:: torch.nn.utils.rnn.pad_packed_sequence
 
 
+:hidden:`pad_sequence`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: torch.nn.utils.rnn.pad_sequence
+
+
+:hidden:`pack_sequence`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: torch.nn.utils.rnn.pack_sequence
+
+
 torch.nn.functional
 ===================
 
