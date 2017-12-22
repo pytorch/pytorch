@@ -705,14 +705,10 @@ struct StandardGammaGradOp {
   }
 };
 
-Tensor _standard_gamma_grad_cpu(const Tensor& self, const Tensor& output) {
+Tensor _standard_gamma_grad(const Tensor& self, const Tensor& output) {
   Tensor ret = self.type().tensor(self.sizes());
   dispatch_floating_types<StandardGammaGradOp>(self.type(), "_standard_gamma_grad", ret, self, output);
   return ret;
-}
-
-Tensor _standard_gamma_grad_cuda(const Tensor& self, const Tensor& output) {
-  runtime_error("_standard_gamma_grad is not implemented for CUDA types");
 }
 
 Tensor conv_tbc(const Tensor& self, const Tensor& weight, const Tensor& bias, int64_t pad) {
