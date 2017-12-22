@@ -92,6 +92,7 @@ rm -rf pip-9.0.1*
 pip install --no-cache-dir \
     future \
     hypothesis \
+    jupyter \
     numpy \
     protobuf \
     pytest \
