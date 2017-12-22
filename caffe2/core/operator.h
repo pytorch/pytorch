@@ -488,11 +488,13 @@ class Operator : public OperatorBase {
   /* using override */ using OperatorBase::InputSize;               \
   /* using override */ using OperatorBase::OutputSize
 
-#define USE_OPERATOR_FUNCTIONS(context)                   \
-  USE_OPERATOR_BASE_FUNCTIONS;                            \
-  /* using override */ using Operator<context>::context_; \
-  /* using override */ using Operator<context>::Input;    \
-  /* using override */ using Operator<context>::Output
+#define USE_OPERATOR_FUNCTIONS(context)                    \
+  USE_OPERATOR_BASE_FUNCTIONS;                             \
+  /* using override */ using Operator<context>::context_;  \
+  /* using override */ using Operator<context>::Input;     \
+  /* using override */ using Operator<context>::InputBlob; \
+  /* using override */ using Operator<context>::Output;    \
+  /* using override */ using Operator<context>::OutputBlob
 
 #define USE_OPERATOR_CONTEXT_FUNCTIONS USE_OPERATOR_FUNCTIONS(Context)
 
