@@ -254,6 +254,20 @@ bmm(batch2) -> Tensor
 See :func:`torch.bmm`
 """)
 
+add_docstr_all('btrifact',
+               r"""
+btrifact(info=None, pivot=True) -> (Tensor, Tensor)
+
+See :func:`torch.btrifact`
+""")
+
+add_docstr_all('btrifact_with_info',
+               r"""
+btrifact_with_info(pivot=True) -> (Tensor, Tensor, Tensor)
+
+See :func:`torch.btrifact_with_info`
+""")
+
 add_docstr_all('cauchy_',
                r"""
 cauchy_(median=0, sigma=1, *, generator=None) -> Tensor
