@@ -151,23 +151,16 @@ Tensor & embedding_renorm_cpu_(
   checkScalarType("embedding_renorm_", indices_arg, kLong);
 
   auto num_indices = indices.numel();
-  auto indices_data = std::unique_ptr<int64_t[]>(new int64_t[num_indices]);
-  std::memcpy(indices_data.get(), indices.data_ptr(), num_indices * sizeof(int64_t));
-  std::qsort(indices_data.get(), num_indices, sizeof(int64_t),
-    [](const void* a, const void* b) {
-      int64_t arg1 = *static_cast<const int64_t*>(a);
-      int64_t arg2 = *static_cast<const int64_t*>(b);
-      if(arg1 < arg2) return -1;
-      if(arg1 > arg2) return 1;
-      return 0;
-    });
+  auto data_ptr = indices.data<int64_t>();
+  auto sorted_indices = std::vector<int64_t>(data_ptr, data_ptr + num_indices);
+  std::sort(sorted_indices.begin(), sorted_indices.end(), std::less<int64_t>());
 
   #pragma omp parallel for if(num_indices > 1000)
   for (int64_t i = 0; i < num_indices; i++) {
-    if (i > 0 && indices_data[i] == indices_data[i - 1]) {
+    if (i > 0 && sorted_indices[i] == sorted_indices[i - 1]) {
       continue;
     }
-    auto row = self[indices_data[i]];
+    auto row = self[sorted_indices[i]];
     auto norm = row.norm(norm_type).toCDouble();
     if (norm > max_norm) {
       auto scale = max_norm / (norm + 1e-7);
