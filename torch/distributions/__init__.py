@@ -39,6 +39,8 @@ from .gamma import Gamma
 from .normal import Normal
 from .exponential import Exponential
 from .laplace import Laplace
+from .chi2 import Chi2
 
 
-__all__ = ['Distribution', 'Bernoulli', 'Beta', 'Categorical', 'Dirichlet', 'Gamma', 'Normal', 'Exponential', 'Laplace']
+__all__ = ['Distribution', 'Bernoulli', 'Beta', 'Categorical', 'Chi2', 'Dirichlet',
+           'Gamma', 'Normal', 'Exponential', 'Laplace']
