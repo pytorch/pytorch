@@ -92,6 +92,17 @@ void THTensor_(uniform)(THTensor *self, THGenerator *_generator, double a, doubl
 
 void THTensor_(normal)(THTensor *self, THGenerator *_generator, double mean, double stdv)
 {
+#if defined(TH_REAL_IS_FLOAT) && defined(USE_AVX2)
+  const int size = THTensor_(numel)(self);
+  if (size >= 16 && THTensor_(isContiguous)(self)) {
+    THTensor_(normal_fill_AVX2)(self->storage->data,
+                                size,
+                                _generator,
+                                mean,
+                                stdv);
+    return;
+  }
+#endif
   TH_TENSOR_APPLY(real, self, *self_data = (real)THRandom_normal(_generator, mean, stdv););
 }
 
