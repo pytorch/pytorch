@@ -697,6 +697,15 @@ class TestSparse(TestCase):
         self._test_new_device((30, 20), 1)
         self._test_new_device((30, 20, 10), 1)
 
+    def test_is_sparse(self):
+        x = torch.randn(3, 3)
+        self.assertFalse(x.is_sparse)
+        self.assertFalse(torch.autograd.Variable(x).is_sparse)
+
+        x = self.SparseTensor()
+        self.assertTrue(x.is_sparse)
+        self.assertTrue(torch.autograd.Variable(x).is_sparse)
+
 
 class TestUncoalescedSparse(TestSparse):
     def setUp(self):
