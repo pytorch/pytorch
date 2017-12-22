@@ -983,6 +983,7 @@ def embedding(input, weight, padding_idx=None, max_norm=None, norm_type=2,
         [torch.FloatTensor of size 1x4x3]
 
     """
+    input = input.contiguous()
     if padding_idx is None:
         padding_idx = -1
     if max_norm is not None:
