@@ -152,5 +152,7 @@ int main() {
     }
   }
 
+  ASSERT(false);
+  std::cout << "native test complete" << std::endl;
   return 0;
 }
