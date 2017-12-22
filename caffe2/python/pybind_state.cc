@@ -146,12 +146,7 @@ void switchWorkspaceInternal(const std::string& name, bool create_if_missing) {
 }
 
 namespace python_detail {
-
 // Python Op implementations.
-struct Func {
-  py::object py_func;
-  bool needs_workspace;
-};
 using FuncRegistry = std::unordered_map<std::string, Func>;
 
 FuncRegistry& gRegistry() {
@@ -189,99 +184,13 @@ py::object fetchBlob(Workspace* ws, const std::string& name) {
     return py::bytes(ss.str());
   }
 }
-}
+} // namespace python_detail
 
-PythonOpBase::PythonOpBase(
-    const OperatorDef& operator_def,
-    Workspace* ws,
-    const std::string& pickled_builder_arg_name)
-    : Operator(operator_def, ws),
-      ws_(ws),
-      token_(OperatorBase::GetSingleArgument<std::string>("token", "")) {
-  using namespace python_detail;
-  auto pickled = GetSingleArgument<string>(pickled_builder_arg_name, "");
-  CAFFE_ENFORCE(
-      !pickled.empty() || !token_.empty(),
-      "PythonOp requires either pickled_builder or token arg.");
-  if (!pickled.empty()) {
-    py::gil_scoped_acquire g;
-    try {
-      auto pickle =
-          py::reinterpret_steal<py::object>(PyImport_ImportModule("pickle"));
-      CAFFE_ENFORCE(pickle);
-      auto loads = pickle.attr("loads").cast<py::object>();
-      CAFFE_ENFORCE(loads);
-      auto builder_call = loads(py::bytes(pickled)).cast<py::tuple>();
-      CAFFE_ENFORCE(builder_call);
-      CAFFE_ENFORCE_EQ(py::len(builder_call), 3);
-      auto func = builder_call[0].cast<py::object>();
-      auto args = builder_call[1].cast<py::tuple>();
-      auto kwargs = builder_call[2].cast<py::dict>();
-      auto built_func = func(*args, **kwargs);
-      CAFFE_ENFORCE(built_func);
-      built_func_.reset(new Func{
-          built_func, GetSingleArgument<bool>("pass_workspace", false)});
-    } catch (const py::error_already_set& e) {
-      std::stringstream error;
-      error << "Python exception encountered while creating PythonOp: "
-            << e.what();
-      LOG(ERROR) << error.str();
-      CAFFE_THROW(error.str());
-    }
-  }
-}
-
-PythonOpBase::~PythonOpBase() {
-  if (built_func_) {
-    // since it may trigger python interpreter when refcount reaches zero
-    py::gil_scoped_acquire g;
-    built_func_.reset();
-  }
-}
-
-bool PythonOpBase::RunOnDevice() {
-  std::vector<TensorCPU*> inputs;
-  inputs.reserve(InputSize());
-  for (auto i = 0; i < InputSize(); ++i) {
-    inputs.push_back(const_cast<TensorCPU*>(&Input(i)));
-  }
-  std::vector<TensorCPU*> outputs;
-  outputs.reserve(OutputSize());
-  for (auto i = 0; i < OutputSize(); ++i) {
-    outputs.push_back(Output(i));
-  }
-  auto* pyFunc = built_func_ ? built_func_.get() : &getFunc(token_);
-  CAFFE_ENFORCE(pyFunc);
-  {
-    // Acquire GIL for call to Python runtime.
-    py::gil_scoped_acquire g;
-    try {
-      if (pyFunc->needs_workspace) {
-        pyFunc->py_func(inputs, outputs, ws_);
-      } else {
-        pyFunc->py_func(inputs, outputs);
-      }
-    } catch (const py::error_already_set& e) {
-      std::stringstream error;
-      error << "Exception encountered running PythonOp function: " << e.what();
-      LOG(ERROR) << error.str();
-      CAFFE_THROW(error.str());
-    }
-  }
-  return true;
-}
-
-const python_detail::Func& PythonOp::getFunc(const std::string& token) {
-  return python_detail::getOpFunc(token);
-}
-
-const python_detail::Func& PythonGradientOp::getFunc(const std::string& token) {
-  return python_detail::getGradientFunc(token);
-}
-
-struct GetPythonGradient : public GradientMakerBase {
+class GetPythonGradient : public GradientMakerBase {
+ public:
   using GradientMakerBase::GradientMakerBase;
   std::vector<OperatorDef> GetGradientDefs() override {
+    CAFFE_ENFORCE(Def().type() == "Python" || Def().type() == "PythonDLPack");
     ArgumentHelper helper(Def());
     auto gradOutputIndices =
         helper.GetRepeatedArgument<int>("grad_output_indices");
@@ -316,18 +225,28 @@ struct GetPythonGradient : public GradientMakerBase {
       }
     }
 
-    return SingleGradientDef(
-        "PythonGradient", "", gradientInputs, gradientOutputs);
+    std::string grad_op_name = "PythonGradient";
+    if (Def().type() == "PythonDLPack") {
+      grad_op_name = "PythonDLPackGradient";
+    }
+    return SingleGradientDef(grad_op_name, "", gradientInputs, gradientOutputs);
   }
 };
 
-REGISTER_CPU_OPERATOR(Python, PythonOp);
-REGISTER_CPU_OPERATOR(PythonGradient, PythonGradientOp);
+REGISTER_CPU_OPERATOR(Python, PythonOp<CPUContext, false>);
+REGISTER_CPU_OPERATOR(PythonGradient, PythonGradientOp<CPUContext, false>);
 // Always allow running in-place
 OPERATOR_SCHEMA(Python).AllowInplace([](int, int) { return true; });
 OPERATOR_SCHEMA(PythonGradient).AllowInplace([](int, int) { return true; });
-
 REGISTER_GRADIENT(Python, GetPythonGradient);
+
+REGISTER_CPU_OPERATOR(PythonDLPack, PythonOp<CPUContext, true>);
+REGISTER_CPU_OPERATOR(PythonDLPackGradient, PythonGradientOp<CPUContext, true>);
+OPERATOR_SCHEMA(PythonDLPack).AllowInplace([](int, int) { return true; });
+OPERATOR_SCHEMA(PythonDLPackGradient).AllowInplace([](int, int) {
+  return true;
+});
+REGISTER_GRADIENT(PythonDLPack, GetPythonGradient);
 
 static bool ParseProtobufFromLargeString(const string& str, Message* proto) {
   ::google::protobuf::io::ArrayInputStream input_stream(str.data(), str.size());
@@ -421,6 +340,40 @@ void addObjectMethods(py::module& m) {
           "Feed an input array or string, with the (optional) DeviceOption",
           py::arg("arg"),
           py::arg("device_option") = py::none());
+
+  py::class_<DLPackWrapper<CPUContext>>(m, "DLPackTensorCPU")
+      .def_property_readonly(
+          "data",
+          [](DLPackWrapper<CPUContext>* t) -> py::object {
+            CAFFE_ENFORCE_EQ(
+                t->device_option.device_type(),
+                CPU,
+                "Expected CPU device option for CPU tensor");
+            return t->data();
+          },
+          "Return DLPack tensor with tensor's data.")
+      .def(
+          "feed",
+          [](DLPackWrapper<CPUContext>* t, py::object obj) {
+            CAFFE_ENFORCE_EQ(
+                t->device_option.device_type(),
+                CPU,
+                "Expected CPU device option for CPU tensor");
+            t->feed(obj);
+          },
+          "Copy data from given DLPack tensor into this tensor.")
+      .def_property_readonly(
+          "_shape",
+          [](const DLPackWrapper<CPUContext>& t) {
+            auto* tensor = t.tensor;
+            return tensor->dims();
+          })
+      .def(
+          "_reshape",
+          [](DLPackWrapper<CPUContext>* t, std::vector<TIndex> dims) {
+            auto* tensor = t->tensor;
+            tensor->Resize(dims);
+          });
 
   py::class_<TensorCPU>(m, "TensorCPU")
       .def_property_readonly(
