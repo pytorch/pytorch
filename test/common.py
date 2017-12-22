@@ -188,7 +188,7 @@ class TestCase(unittest.TestCase):
             raise AssertionError("cannot compare {} and {}".format(type(x), type(y)))
         return x, y
 
-    def assertEqual(self, x, y, prec=None, message=''):
+    def assertEqual(self, x, y, prec=None, message='', allow_inf=False):
         if isinstance(prec, str) and message == '':
             message = prec
             prec = None
@@ -229,8 +229,13 @@ class TestCase(unittest.TestCase):
             for x_, y_ in zip(x, y):
                 self.assertEqual(x_, y_, prec, message)
         elif isinstance(x, Number) and isinstance(y, Number):
-            if x != y:
-                super(TestCase, self).assertLessEqual(abs(x - y), prec, message)
+            if abs(x) == float('inf') or abs(y) == float('inf'):
+                if allow_inf:
+                    super(TestCase, self).assertEqual(x, y, message)
+                else:
+                    self.fail("Expected finite numeric values - x={}, y={}".format(x, y))
+                return
+            super(TestCase, self).assertLessEqual(abs(x - y), prec, message)
         else:
             super(TestCase, self).assertEqual(x, y, message)
 

@@ -1,6 +1,5 @@
 import math
 import unittest
-import warnings
 from collections import namedtuple
 from itertools import product
 
