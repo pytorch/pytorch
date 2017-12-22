@@ -64,7 +64,7 @@ DERIVED_CALL = CodeTemplate("""\
 baseType->${method_prefix_derived}${base_name}(${unpacked_args})""")
 
 UNPACK_TENSOR = CodeTemplate("""\
-auto${ref} ${arg_name}_ = unpack${suffix}(${arg_name}, "${arg_name}", ${arg_pos});""")
+auto${ref} ${arg_name}_ = unpack${suffix}(${arg_name}, "${arg_name}", ${arg_pos} ${,extra_args});""")
 
 FUNCTION_DECLARATION = CodeTemplate("""\
 struct ${op} : public ${superclass} {
@@ -261,6 +261,16 @@ DONT_RECORD_TRACE = {'convolution', 'conv1d', 'conv2d', 'conv3d',
 # Matches "foo" in "foo, bar" but not "foobar". Used to search for the
 # occurence of a parameter in the derivative formula
 IDENT_REGEX = r'(^|\W){}($|\W)'
+
+# a mapping from dynamic type to corresponding ATen scalar type
+SCALAR_TYPE_MAP = {
+    'IndexTensor': 'at::kLong',
+    'BoolTensor': 'at::kByte',
+    'IntegerTensor': 'at::kInt',
+    'HalfTensor': 'at::kHalf',
+    'FloatTensor': 'at::kFloat',
+    'DoubleTensor': 'at::kDouble',
+}
 
 
 def format_return_type(returns):
@@ -760,17 +770,6 @@ def create_variable_type(top_env, aten_declarations):
     def requires_unpack(arg):
         return 'Tensor' in arg['dynamic_type']
 
-    def get_suffix(dynamic_type, is_nullable):
-        if is_nullable:
-            assert dynamic_type == 'Tensor'
-            return '_opt'
-        elif dynamic_type == 'IndexTensor':
-            return '_long'
-        elif dynamic_type == 'BoolTensor':
-            return '_byte'
-        else:
-            return ''
-
     def unpack_args(env, declaration):
         body = []
         unpacked_args = []
@@ -781,17 +780,25 @@ def create_variable_type(top_env, aten_declarations):
 
             dynamic_type = arg['dynamic_type']
             is_nullable = arg.get('is_nullable', False)
+            extra_args = []
             ref = (not is_nullable) and dynamic_type not in ['TensorList', 'SparseTensor']
-            suffix = get_suffix(dynamic_type, is_nullable)
+            suffix = ''
             if dynamic_type == 'TensorList' and declaration['name'] == 'index':
                 # TODO: specify this in Declarations.yaml somehow
                 suffix = '_idxs'
+            elif dynamic_type in SCALAR_TYPE_MAP:
+                suffix = '_type'
+                extra_args.append(SCALAR_TYPE_MAP[dynamic_type])
+
+            if is_nullable:
+                suffix += '_opt'
 
             body.append(UNPACK_TENSOR.substitute(
                 arg_name=arg['name'],
                 arg_pos=i,
                 suffix=suffix,
                 ref='&' if ref else '',
+                extra_args=extra_args,
             ))
             unpacked_args.append(arg['name'] + '_')
 

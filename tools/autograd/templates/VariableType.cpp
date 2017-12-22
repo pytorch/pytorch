@@ -114,19 +114,28 @@ Tensor & VariableType::unpack(const Tensor & t, const char * name, int pos) cons
   return checked_cast(*this, t, name, pos).data();
 }
 
+Tensor VariableType::unpack_opt(const Tensor & t, const char * name, int pos) const {
+  if (!t.defined()) {
+    return Tensor();
+  }
+  return unpack(t, name, pos);
+}
+
 SparseTensor VariableType::unpack(SparseTensor t, const char * name, int pos) const {
   auto backend = is_cuda() ? kSparseCUDA : kSparseCPU;
   return SparseTensor(checked_cast(this->toBackend(backend), t.tref, name, pos).data());
 }
 
-Tensor & VariableType::unpack_long(const Tensor & t, const char * name, int pos) const {
-  auto& type = *VariableImpl::getType(baseType->toScalarType(kLong));
+Tensor & VariableType::unpack_type(const Tensor & t, const char * name, int pos, ScalarType scalar_type) const {
+  auto& type = *VariableImpl::getType(baseType->toScalarType(scalar_type));
   return checked_cast(type, t, name, pos).data();
 }
 
-Tensor & VariableType::unpack_byte(const Tensor & t, const char * name, int pos) const {
-  auto& type = *VariableImpl::getType(baseType->toScalarType(kByte));
-  return checked_cast(type, t, name, pos).data();
+Tensor VariableType::unpack_type_opt(const Tensor & t, const char * name, int pos, ScalarType scalar_type) const {
+  if (!t.defined()) {
+    return Tensor();
+  }
+  return unpack_type(t, name, pos, scalar_type);
 }
 
 Tensor & VariableType::unpack_any(const Tensor & t, const char * name, int pos) const {
@@ -138,13 +147,6 @@ Tensor & VariableType::unpack_any(const Tensor & t, const char * name, int pos) 
   auto backend = t.type().backend();
   auto& type = *VariableImpl::getType(baseType->toScalarType(scalarType).toBackend(backend));
   return checked_cast(type, t, name, pos).data();
-}
-
-Tensor VariableType::unpack_opt(const Tensor & t, const char * name, int pos) const {
-  if(!t.defined()) {
-    return Tensor();
-  }
-  return unpack(t, name, pos);
 }
 
 std::vector<at::Tensor> VariableType::unpack(at::TensorList tl, const char *name, int pos) const {
