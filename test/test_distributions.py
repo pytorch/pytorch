@@ -405,6 +405,7 @@ class TestDistributions(TestCase):
 
     # This is a randomized test.
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    @unittest.expectedFailure
     def test_gamma_sample_grad(self):
         self._set_rng_seed(1)
         num_samples = 100
