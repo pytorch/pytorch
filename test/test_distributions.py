@@ -599,6 +599,13 @@ class TestDistributions(TestCase):
         for dist, kwargs in invalid_examples:
             self.assertRaises(RuntimeError, dist, **kwargs)
 
+    def test_rsample_backward_smoke(self):
+        for Dist, params in EXAMPLES:
+            for i, param in enumerate(params):
+                if Dist.has_rsample and all(isinstance(p, Variable) for p in param):
+                    dist = Dist(**param)
+                    dist.rsample().sum().backward()
+
 
 class TestDistributionShapes(TestCase):
     def setUp(self):
