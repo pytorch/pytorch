@@ -151,10 +151,11 @@ class MaxPool2d(Module):
             if padh != 0 and padw != 0 else ''
         dilation_str = (', dilation=(' + str(dilh) + ', ' + str(dilw) + ')'
                         if dilh != 0 and dilw != 0 else '')
+        ceil_str = ', ceil_mode=' + str(self.ceil_mode)
         return self.__class__.__name__ + '(' \
             + 'kernel_size=(' + str(kh) + ', ' + str(kw) + ')' \
             + ', stride=(' + str(dh) + ', ' + str(dw) + ')' \
-            + padding_str + dilation_str + ')'
+            + padding_str + dilation_str + ceil_str + ')'
 
 
 class MaxUnpool1d(Module):
