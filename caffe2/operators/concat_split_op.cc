@@ -36,7 +36,7 @@ OPERATOR_SCHEMA(Concat)
     .NumInputs(1, INT_MAX)
     .NumOutputs(2)
     .Arg("axis", "Which axis to concat on")
-    .Arg("order", "Either NHWC or HCWH, will concat on C axis, defaults to NCHW")
+    .Arg("order", "Either NHWC or NCHW, will concat on C axis, defaults to NCHW")
     .Arg(
         "add_axis",
         "Pass 1 to add the axis specified in arg 'axis' to all "
