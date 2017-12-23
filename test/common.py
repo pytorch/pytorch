@@ -306,12 +306,15 @@ class TestCase(unittest.TestCase):
             if text.startswith(prefix):
                 return text[len(prefix):]
             return text
-        munged_id = remove_prefix(self.id(), "__main__.")
-        # NB: we take __file__ from __main__, so we place the expect directory
-        # where the test script lives, NOT where test/common.py lives.  This
-        # doesn't matter in PyTorch where all test scripts are in the same
-        # directory as test/common.py, but it matters in onnx-pytorch
-        expected_file = os.path.join(os.path.dirname(os.path.realpath(__main__.__file__)),
+        # NB: we take __file__ from the module that defined the test
+        # class, so we place the expect directory where the test script
+        # lives, NOT where test/common.py lives.  This doesn't matter in
+        # PyTorch where all test scripts are in the same directory as
+        # test/common.py, but it matters in onnx-pytorch
+        module_id = self.__class__.__module__
+        munged_id = remove_prefix(self.id(), module_id + ".")
+        test_file = os.path.realpath(sys.modules[module_id].__file__)
+        expected_file = os.path.join(os.path.dirname(test_file),
                                      "expect",
                                      munged_id)
         if subname:
