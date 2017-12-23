@@ -240,7 +240,7 @@ MANUAL_IMPLEMENTATIONS = {
 }
 # These functions require manual Python bindings or are not exposed to Python
 SKIP_PYTHON_BINDINGS = [
-    'alias', 'contiguous', 'clamp.*', 'is_cuda', 'size', 'stride',
+    'alias', 'contiguous', 'clamp.*', 'is_cuda', 'is_sparse', 'size', 'stride',
     '.*_backward'
 ]
 # These functions have backwards which cannot be traced, and so must have
