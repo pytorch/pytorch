@@ -65,7 +65,7 @@ class SGD(Optimizer):
         if (isinstance(noisy, tuple) or isinstance(noisy, list)) and (momentum != 0):
             raise ValueError("Noisy SGD cannot be used with momentum")
         if (isinstance(noisy, tuple) or isinstance(noisy, list)) and len(noisy) != 2:
-            raise ValueError("Noisy SGD requires 2 parameters".format(len(noisy)))
+            raise ValueError("Noisy SGD requires 2 parameters")
         if noisy is not None:
             self.counter = 0
         super(SGD, self).__init__(params, defaults)
@@ -115,7 +115,7 @@ class SGD(Optimizer):
                 if group['noisy'] is None:
                     p.data.add_(-group['lr'], d_p)
                 else:
-                    std = ((noisy[0])**(0.5)) / (1 + self.counter)**(noisy[1] / 2)
+                    std = (noisy[0] / (1 + self.counter)**(noisy[1]))**(0.5)
                     noise = torch.normal(std=torch.FloatTensor([std]).expand_as(d_p))
                     if d_p.is_cuda:
                         noise = noise.cuda()
