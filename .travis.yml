@@ -3,38 +3,6 @@ language: python
 dist: trusty
 git:
   submodules: false
-python:
-    - 2.7.9
-    - 2.7
-    - 3.5
-    - 3.6
-    - nightly
-
-cache:
-    - ccache
-    - directories:
-        - $HOME/.ccache
-
-script:
-    - unset CCACHE_DISABLE
-    - export CCACHE_DIR=$HOME/.ccache
-    - export CC="ccache gcc-5"
-    - export CXX="ccache g++-5"
-    - ccache --show-stats
-    - tools/run_aten_tests.sh
-    - travis_retry pip install --upgrade pip setuptools wheel
-    - travis_retry pip install -r requirements.txt --only-binary=scipy
-    - git submodule update --init --recursive
-    - MAX_JOBS=6 python setup.py install
-    - OMP_NUM_THREADS=2 ./test/run_test.sh
-
-addons:
-    apt:
-        sources:
-            - ubuntu-toolchain-r-test
-        packages:
-            - g++-5
-            - valgrind
 
 # This reportedly works around an issue downloading packages from pypi on
 # travis.  Consider removing this after the underlying issue is fixed.
