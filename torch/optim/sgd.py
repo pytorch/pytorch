@@ -115,7 +115,7 @@ class SGD(Optimizer):
                 if group['noisy'] is None:
                     p.data.add_(-group['lr'], d_p)
                 else:
-                    std = ((noisy[0])**(0.5))/(1 + self.counter)**(noisy[1]/2)
+                    std = ((noisy[0])**(0.5)) / (1 + self.counter)**(noisy[1] / 2)
                     noise = torch.normal(std=torch.FloatTensor([std]).expand_as(d_p))
                     if d_p.is_cuda:
                         noise = noise.cuda()
