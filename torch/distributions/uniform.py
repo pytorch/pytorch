@@ -9,8 +9,8 @@ from torch.distributions.utils import broadcast_all
 
 class Uniform(Distribution):
     r"""
-    Creates a uniform random distribution parameterized by
-    `low` and `high`.
+    Generates uniformly distributed random samples from the half-open interval
+    `[low, high)`.
 
     Example::
 
