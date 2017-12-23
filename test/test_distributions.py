@@ -404,8 +404,7 @@ class TestDistributions(TestCase):
                                         'Gamma(alpha={}, beta={})'.format(alpha, beta))
 
     # This is a randomized test.
-    # @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
-    @unittest.skip("TODO: fix this test with SciPy installed")
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_gamma_sample_grad(self):
         self._set_rng_seed(1)
         num_samples = 100
