@@ -138,7 +138,7 @@ class RNNBase(Module):
         if self.input_size != input.size(-1):
             raise RuntimeError(
                 'input.size(-1) must be equal to input_size. Expected {}, got {}'.format(
-                    fn.input_size, input.size(-1)))
+                    self.input_size, input.size(-1)))
 
         if is_input_packed:
             mini_batch = batch_sizes[0]
