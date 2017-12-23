@@ -111,7 +111,7 @@ def prepare_batch(batch):
     )
 
 
-class Seq2SeqModelCaffe2:
+class Seq2SeqModelCaffe2(object):
 
     def _build_model(
         self,
