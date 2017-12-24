@@ -5,7 +5,6 @@ from torch.autograd import Variable
 
 from .._functions.packing import PackPadded
 
-
 PackedSequence_ = namedtuple('PackedSequence', ['data', 'batch_sizes'])
 
 
@@ -58,12 +57,12 @@ def pack_padded_sequence(input, lengths, batch_first=False):
     Returns:
         a :class:`PackedSequence` object
     """
-        
+
     if batch_first:
         input = input.transpose(0, 1)
 
     data, batch_sizes = PackPadded.apply(input, lengths)
-    
+
     return PackedSequence(data, batch_sizes)
 
 

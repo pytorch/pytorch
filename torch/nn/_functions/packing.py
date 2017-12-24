@@ -14,7 +14,7 @@ class PackPadded(Function):
         batch_sizes = []
         lengths_iter = reversed(lengths)
         batch_size = input.size(1)
-        
+
         if len(lengths) != batch_size:
             raise ValueError("Expected `len(lengths)` to be equal to batch_size, but got "
                              "{} (batch_size={}).".format(len(lengths), batch_size))
@@ -26,23 +26,23 @@ class PackPadded(Function):
                 steps.append(input[prev_l:l, :c_batch_size].contiguous().view(-1, *input.size()[2:]))
                 batch_sizes.extend([c_batch_size] * (l - prev_l))
                 prev_l = l
-                
-            elif prev_l > l:  
+
+            elif prev_l > l:
                 raise ValueError("'lengths' array has to be sorted in decreasing order")
 
         ctx.batch_sizes = batch_sizes
         ctx.input_size = input.size()
-                
+
         return torch.cat(steps), torch.LongTensor(batch_sizes)
 
     @staticmethod
     def backward(ctx, grad_steps, grad_batch_sizes):
-        
+
         idx = 0
         ret = grad_steps.new(*ctx.input_size).zero_()
-        
+
         for i, bs in enumerate(ctx.batch_sizes):
-            ret[i, :bs, ...] = grad_steps[idx:idx+bs, ...]
+            ret[i, :bs, ...] = grad_steps[idx:idx + bs, ...]
             idx += bs
-            
+
         return ret, None
