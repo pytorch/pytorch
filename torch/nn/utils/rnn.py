@@ -63,7 +63,7 @@ def pack_padded_sequence(input, lengths, batch_first=False):
 
     data, batch_sizes = PackPadded.apply(input, lengths)
 
-    return PackedSequence(data, batch_sizes)
+    return PackedSequence(data, batch_sizes.data)
 
 
 def pad_packed_sequence(sequence, batch_first=False, padding_value=0.0):
@@ -96,7 +96,8 @@ def pad_packed_sequence(sequence, batch_first=False, padding_value=0.0):
     data_offset = 0
     prev_batch_size = batch_sizes[0]
     prev_i = 0
-    for i, batch_size in enumerate(batch_sizes + [0]):
+    # TODO: use itertools.chain to avoid converting to list? 
+    for i, batch_size in enumerate(list(batch_sizes) + [0]):
         if batch_size != prev_batch_size:
             l = prev_batch_size * (i - prev_i)
             tmp = var_data[data_offset:data_offset + l]

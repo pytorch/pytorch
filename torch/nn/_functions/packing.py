@@ -30,6 +30,7 @@ class PackPadded(Function):
             elif prev_l > l:
                 raise ValueError("'lengths' array has to be sorted in decreasing order")
 
+        # TODO: convert batch_sizes to tensor here and use ctx.save_for_backward?
         ctx.batch_sizes = batch_sizes
         ctx.input_size = input.size()
 
