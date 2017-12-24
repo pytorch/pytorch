@@ -55,7 +55,7 @@ class LayerNormGradientOp : public Operator<Context> {
   LayerNormGradientOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
         axis_(OperatorBase::GetSingleArgument<int>("axis", 1)),
-        epsilon_(OperatorBase::GetSingleArgument<float>("epsilon", 0.001)) {}
+        epsilon_(OperatorBase::GetSingleArgument<float>("epsilon", 0.001f)) {}
   ~LayerNormGradientOp() {}
 
   template <typename T>

@@ -106,16 +106,27 @@ cmake_pop_check_state()
 # "THIRD_PARTY_NAME related"
 if (${CMAKE_CXX_COMPILER_ID} STREQUAL "MSVC")
   add_compile_options(
-      /wd4018 # (3): Signed/unsigned mismatch
+      ##########################################
+      # Third party related. Cannot remove.
+      ##########################################
       /wd4065 # (3): switch with default but no case. Protobuf related.
-      /wd4244 # (2/3/4): Possible loss of precision
-      /wd4267 # (3): Conversion of size_t to smaller type. Possible loss of data.
-      /wd4503 # (1): decorated name length exceeded, name was truncated. Eigen related.
+      /wd4503 # (1): decorated name length exceeded, name was truncated.
+              #      Eigen related.
       /wd4506 # (1): no definition for inline function. Protobuf related.
-      /wd4554 # (3)： check operator precedence for possible error. Eigen related.
-      /wd4800 # (3): Forcing non-boolean value to true or false.
-      /wd4996 # (3): Use of a deprecated member
+      /wd4554 # (3)： check operator precedence for possible error.
+              # Eigen related.
+      ##########################################
+      # These are directly Caffe2 related.
+      ##########################################
+      /wd4018 # (3): Signed/unsigned mismatch. We've used it in many places of
+              #      the code and it would be hard to correct all.
+      /wd4244 # (2/3/4): Possible loss of precision. Various cases where we
+              #      implicitly cast TIndex to int etc. Need further cleaning.
+      /wd4267 # (3): Conversion of size_t to smaller type. Same reason as 4244.
+      /wd4996 # (3): Use of deprecated POSIX functions. Since we develop
+              #      mainly on Linux, this is ignored.
   )
+  
   # Exception handing for compiler warining C4530, see
   # https://msdn.microsoft.com/en-us/library/2axwkyt4.aspx
   add_definitions("/EHsc")

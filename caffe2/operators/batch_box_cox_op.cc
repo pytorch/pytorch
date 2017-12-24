@@ -110,7 +110,7 @@ bool BatchBoxCoxOp<CPUContext>::DoRunWithType() {
   const auto* lambda1_ptr = lambda1.template data<T>();
   const auto* lambda2_ptr = lambda2.template data<T>();
 
-  const T k_eps = 1e-6;
+  const T k_eps = static_cast<T>(1e-6);
 
 #ifdef CAFFE2_USE_MKL
   if (min_block_size_ < 1) {

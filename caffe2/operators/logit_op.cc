@@ -19,7 +19,7 @@
 namespace caffe2 {
 struct LogitCPUFunctor {
   explicit LogitCPUFunctor(OperatorBase& op)
-      : eps_(op.GetSingleArgument<float>("eps", 1e-6)) {
+      : eps_(op.GetSingleArgument<float>("eps", 1e-6f)) {
     CAFFE_ENFORCE_GT(eps_, 0.0);
     CAFFE_ENFORCE_LT(eps_, 0.5);
   }

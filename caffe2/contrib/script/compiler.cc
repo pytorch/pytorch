@@ -108,7 +108,6 @@ struct DefCompiler {
     return env[ident.name()];
   }
   void emitAssignment(const Assign& stmt) {
-    OperatorDef* op;
     std::vector<std::string> outputs;
     for (auto lhs : stmt.lhs()) {
       std::string name = getLHS(lhs);
@@ -762,7 +761,7 @@ struct CompilationUnitImpl {
   }
 
  private:
-  friend class DefCompiler;
+  friend struct DefCompiler;
   SymbolTable functions;
 };
 

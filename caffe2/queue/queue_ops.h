@@ -228,7 +228,7 @@ class WeightedSampleDequeueBlobsOp final : public Operator<Context> {
     }
     std::partial_sum(cumProbs_.begin(), cumProbs_.end(), cumProbs_.begin());
     // Put last value to be 1.0001 to avoid numerical issues.
-    cumProbs_.back() = 1.0001;
+    cumProbs_.back() = 1.0001f;
 
     LOG(INFO) << "Dequeue weights: " << weights;
     LOG(INFO) << "cumProbs: " << cumProbs_;

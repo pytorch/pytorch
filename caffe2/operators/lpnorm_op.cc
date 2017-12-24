@@ -44,7 +44,7 @@ bool LpNormGradientOp<float, CPUContext>::RunOnDevice() {
   CAFFE_ENFORCE_EQ(dnorm.ndim(), 1);
   CAFFE_ENFORCE_EQ(dnorm.dim32(0), 1);
   dX->ResizeLike(X);
-  const float kEps = 1e-12;
+  const float kEps = 1e-12f;
 
   if (p_ == 1) {
     // Todo: implement in eigen
@@ -60,7 +60,7 @@ bool LpNormGradientOp<float, CPUContext>::RunOnDevice() {
     }
   } else if (p_ == 2) {
     EigenVectorMap<float>(dX->mutable_data<float>(), X.size()).array() =
-        ConstEigenVectorMap<float>(X.data<float>(), X.size()).array() * 2.0 *
+        ConstEigenVectorMap<float>(X.data<float>(), X.size()).array() * 2.0f *
         (dnorm.data<float>())[0];
   }
 

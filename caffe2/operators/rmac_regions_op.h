@@ -28,7 +28,7 @@ class RMACRegionsOp final : public Operator<Context> {
   RMACRegionsOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
         scales_(OperatorBase::GetSingleArgument<int>("scales", 3)),
-        overlap_(OperatorBase::GetSingleArgument<float>("overlap", 0.4)) {}
+        overlap_(OperatorBase::GetSingleArgument<float>("overlap", 0.4f)) {}
 
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
