@@ -37,7 +37,7 @@ class Distribution(object):
         parameters are batched.
         """
         warnings.warn('sample_n will be deprecated. Use .sample((n,)) instead', UserWarning)
-        return self.sample((n,))
+        return self.sample(torch.Size((n,)))
 
     def log_prob(self, value):
         """
