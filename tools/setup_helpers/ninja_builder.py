@@ -61,17 +61,23 @@ class ninja_build_ext(setuptools.command.build_ext.build_ext):
             finally:
                 setattr(obj, attr_name, orig_val)
 
-        if os.sys.platform == 'win32':
-            orig_compile = distutils.msvccompiler.MSVCCompiler.compile
-            orig_link = distutils.msvccompiler.MSVCCompiler.link
+        if self.compiler.compiler_type == 'msvc':
+            import distutils.msvccompiler
+            import distutils.msvc9compiler
+            if sys.version[0] == 2:
+                orig_compiler = distutils.msvc9compiler.MSVCCompiler
+            else:
+                orig_compiler = distutils._msvccompiler.MSVCCompiler
+            orig_compile = orig_compiler.compile
+            orig_link = orig_compiler.link
         else:
-            orig_compile = distutils.unixccompiler.UnixCCompiler._compile
-            orig_link = distutils.unixccompiler.UnixCCompiler.link
+            orig_compiler = distutils.unixccompiler.UnixCCompiler
+            orig_compile = orig_compiler._compile
+            orig_link = orig_compiler.link
 
         def win_compile(self, sources,
                         output_dir=None, macros=None, include_dirs=None, debug=0,
                         extra_preargs=None, extra_postargs=None, depends=None):
-            # TODO: modify this function
             if not self.initialized:
                 self.initialize()
             compile_info = self._setup_compile(output_dir, macros, include_dirs,
@@ -85,6 +91,8 @@ class ninja_build_ext(setuptools.command.build_ext.build_ext):
             else:
                 compile_opts.extend(self.compile_options)
 
+            add_cpp_opts = False
+
             for obj in objects:
                 try:
                     src, ext = build[obj]
@@ -96,17 +104,26 @@ class ninja_build_ext(setuptools.command.build_ext.build_ext):
                     # without asking the user to browse for it
                     src = os.path.abspath(src)
 
+                def spawn(cmd):
+                    builder.writer.build(
+                        [obj], 'compile', [src],
+                        variables={
+                            'cmd': cmd,
+                            'deps': 'msvc'
+                        })
+
                 if ext in self._c_extensions:
                     input_opt = "/Tc" + src
                 elif ext in self._cpp_extensions:
                     input_opt = "/Tp" + src
+                    add_cpp_opts = True
                 elif ext in self._rc_extensions:
                     # compile .RC to .RES file
                     input_opt = src
                     output_opt = "/fo" + obj
                     try:
-                        self.spawn([self.rc] + pp_opts +
-                                   [output_opt] + [input_opt])
+                        spawn([self.rc] + pp_opts +
+                              [output_opt] + [input_opt])
                     except DistutilsExecError as msg:
                         raise CompileError(msg)
                     continue
@@ -126,13 +143,13 @@ class ninja_build_ext(setuptools.command.build_ext.build_ext):
                     rc_dir = os.path.dirname(obj)
                     try:
                         # first compile .MC to .RC and .H file
-                        self.spawn([self.mc] +
-                                   ['-h', h_dir, '-r', rc_dir] + [src])
+                        spawn([self.mc] +
+                              ['-h', h_dir, '-r', rc_dir] + [src])
                         base, _ = os.path.splitext(os.path.basename(src))
                         rc_file = os.path.join(rc_dir, base + '.rc')
                         # then compile .RC to .RES file
-                        self.spawn([self.rc] +
-                                   ["/fo" + obj] + [rc_file])
+                        spawn([self.rc] +
+                              ["/fo" + obj] + [rc_file])
 
                     except DistutilsExecError as msg:
                         raise CompileError(msg)
@@ -142,85 +159,19 @@ class ninja_build_ext(setuptools.command.build_ext.build_ext):
                     raise CompileError("Don't know how to compile %s to %s"
                                        % (src, obj))
 
-                output_opt = "/Fo" + obj
+                args = [self.cc] + compile_opts + pp_opts
+                if add_cpp_opts:
+                    args.append('/EHsc')
+                args.append(input_opt)
+                args.append("/Fo" + obj)
+                args.extend(extra_postargs)
+
                 try:
-                    self.spawn([self.cc] + compile_opts + pp_opts +
-                               [input_opt, output_opt] +
-                               extra_postargs)
+                    spawn(args)
                 except DistutilsExecError as msg:
                     raise CompileError(msg)
 
             return objects
-
-        def win_link(self, target_desc, objects,
-                     output_filename, output_dir=None, libraries=None,
-                     library_dirs=None, runtime_library_dirs=None,
-                     export_symbols=None, debug=0, extra_preargs=None,
-                     extra_postargs=None, build_temp=None, target_lang=None):
-
-            # TODO: modify this function
-            if not self.initialized:
-                self.initialize()
-            (objects, output_dir) = self._fix_object_args(objects, output_dir)
-            fixed_args = self._fix_lib_args(libraries, library_dirs,
-                                            runtime_library_dirs)
-            (libraries, library_dirs, runtime_library_dirs) = fixed_args
-
-            if runtime_library_dirs:
-                self.warn("I don't know what to do with 'runtime_library_dirs': " +
-                          str(runtime_library_dirs))
-
-            lib_opts = gen_lib_options(self,
-                                       library_dirs, runtime_library_dirs,
-                                       libraries)
-            if output_dir is not None:
-                output_filename = os.path.join(output_dir, output_filename)
-
-            if self._need_link(objects, output_filename):
-                if target_desc == CCompiler.EXECUTABLE:
-                    if debug:
-                        ldflags = self.ldflags_shared_debug[1:]
-                    else:
-                        ldflags = self.ldflags_shared[1:]
-                else:
-                    if debug:
-                        ldflags = self.ldflags_shared_debug
-                    else:
-                        ldflags = self.ldflags_shared
-
-                export_opts = []
-                for sym in (export_symbols or []):
-                    export_opts.append("/EXPORT:" + sym)
-
-                ld_args = (ldflags + lib_opts + export_opts +
-                           objects + ['/OUT:' + output_filename])
-
-                # The MSVC linker generates .lib and .exp files, which cannot be
-                # suppressed by any linker switches. The .lib files may even be
-                # needed! Make sure they are generated in the temporary build
-                # directory. Since they have different names for debug and release
-                # builds, they can go into the same directory.
-                if export_symbols is not None:
-                    (dll_name, dll_ext) = os.path.splitext(
-                        os.path.basename(output_filename))
-                    implib_file = os.path.join(
-                        os.path.dirname(objects[0]),
-                        self.library_filename(dll_name))
-                    ld_args.append('/IMPLIB:' + implib_file)
-
-                if extra_preargs:
-                    ld_args[:0] = extra_preargs
-                if extra_postargs:
-                    ld_args.extend(extra_postargs)
-
-                self.mkpath(os.path.dirname(output_filename))
-                try:
-                    self.spawn([self.linker] + ld_args)
-                except DistutilsExecError as msg:
-                    raise LinkError(msg)
-
-            else:
-                log.debug("skipping %s (up-to-date)", output_filename)
 
         def unix_compile(self, obj, src, ext, cc_args, extra_postargs, pp_opts):
             depfile = os.path.splitext(obj)[0] + '.d'
@@ -238,11 +189,11 @@ class ninja_build_ext(setuptools.command.build_ext.build_ext):
             with patch(self, 'spawn', spawn):
                 orig_compile(self, obj, src, ext, cc_args, extra_postargs, pp_opts)
 
-        def unix_link(self, target_desc, objects,
-                      output_filename, output_dir=None, libraries=None,
-                      library_dirs=None, runtime_library_dirs=None,
-                      export_symbols=None, debug=0, extra_preargs=None,
-                      extra_postargs=None, build_temp=None, target_lang=None):
+        def link(self, target_desc, objects,
+                 output_filename, output_dir=None, libraries=None,
+                 library_dirs=None, runtime_library_dirs=None,
+                 export_symbols=None, debug=0, extra_preargs=None,
+                 extra_postargs=None, build_temp=None, target_lang=None):
 
             builder.run()
             orig_link(self, target_desc, objects,
@@ -251,13 +202,14 @@ class ninja_build_ext(setuptools.command.build_ext.build_ext):
                       export_symbols, debug, extra_preargs,
                       extra_postargs, build_temp, target_lang)
 
-        if os.sys.platform == 'win32':
-            with patch(distutils.msvccompiler.MSVCCompiler, 'compile', win_compile):
-                with patch(distutils.msvccompiler.MSVCCompiler, 'link', win_link):
-                    with patch(self, 'force', True):
-                        self._build_default(ext)
+        if self.compiler.compiler_type == 'msvc':
+            _compile_func = win_compile
+            _compile_func_name = 'compile'
         else:
-            with patch(distutils.unixccompiler.UnixCCompiler, '_compile', unix_compile):
-                with patch(distutils.unixccompiler.UnixCCompiler, 'link', unix_link):
-                    with patch(self, 'force', True):
-                        self._build_default(ext)
+            _compile_func = unix_compile
+            _compile_func_name = '_compile'
+
+        with patch(orig_compiler, _compile_func_name, _compile_func):
+            with patch(orig_compiler, 'link', link):
+                with patch(self, 'force', True):
+                    self._build_default(ext)
