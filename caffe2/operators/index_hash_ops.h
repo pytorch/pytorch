@@ -68,7 +68,7 @@ class IndexHashOp : public Operator<Context> {
     for (int i = 0; i < sizeof(T) / sizeof(int8_t); i++) {
       hashed = hashed * 65537 + bytes[i];
     }
-    hashed = (modulo_ + hashed % modulo_) % modulo_;
+    hashed = static_cast<T>((modulo_ + hashed % modulo_) % modulo_);
     return hashed;
   }
 

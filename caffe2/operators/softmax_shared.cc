@@ -62,7 +62,7 @@ void SoftmaxCPU(
     for (int i = 0; i < N; ++i) {
       for (int j = 0; j < D; ++j) {
         Ydata[i * D + j] =
-            Xdata[i * D + j] - rowmax[i] - log(fmaxf(scale[i], 1e-20));
+            Xdata[i * D + j] - rowmax[i] - log(fmaxf(scale[i], 1e-20f));
       }
     }
   }

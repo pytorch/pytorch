@@ -30,8 +30,8 @@ class SpatialBNOp : public Operator<Context> {
   SpatialBNOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
         is_test_(OperatorBase::GetSingleArgument<int>(OpSchema::Arg_IsTest, 0)),
-        epsilon_(OperatorBase::GetSingleArgument<float>("epsilon", 1e-5)),
-        momentum_(OperatorBase::GetSingleArgument<float>("momentum", 0.9)),
+        epsilon_(OperatorBase::GetSingleArgument<float>("epsilon", 1e-5f)),
+        momentum_(OperatorBase::GetSingleArgument<float>("momentum", 0.9f)),
         order_(StringToStorageOrder(
             OperatorBase::GetSingleArgument<string>("order", "NCHW"))) {
     // TODO(jiayq): update the input and output size checks.
@@ -63,7 +63,7 @@ class SpatialBNGradientOp : public Operator<Context> {
   SpatialBNGradientOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
         is_test_(OperatorBase::GetSingleArgument<int>(OpSchema::Arg_IsTest, 0)),
-        epsilon_(OperatorBase::GetSingleArgument<float>("epsilon", 1e-5)),
+        epsilon_(OperatorBase::GetSingleArgument<float>("epsilon", 1e-5f)),
         order_(StringToStorageOrder(
             OperatorBase::GetSingleArgument<string>("order", "NCHW"))) {
     CAFFE_ENFORCE(InputSize() == 5);

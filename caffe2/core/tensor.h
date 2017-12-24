@@ -835,7 +835,8 @@ void TensorPrinter::Print(const Tensor<CPUContext>& tensor) {
   std::stringstream values_stream;
   // One most likely doesn't want to print int64-number of items for visual
   // inspection, so we cast down to int here.
-  int total_count = std::min(tensor.size(), TIndex(limit_));
+  int total_count = static_cast<int>(
+      std::min(tensor.size(), TIndex(limit_)));
   const T* tensor_data = tensor.template data<T>();
   for (int i = 0; i < total_count - 1; ++i) {
     values_stream << tensor_data[i] << ",";

@@ -55,6 +55,7 @@
 
 # Visual Studio Code files
 .vscode
+.vs
 
 # OSX dir files
 .DS_Store

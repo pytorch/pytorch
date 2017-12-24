@@ -45,7 +45,7 @@ class HSoftmaxOpBase : public Operator<Context> {
   Tensor<Context> sum_multiplier_;
   Tensor<Context> bias_multiplier_;
   static constexpr T kLOG_THRESHOLD() {
-    return 1e-20;
+    return 1e-20f;
   }
   static std::unordered_map<int, PathProto> getHierarchyForLabels(
       int M,
@@ -132,7 +132,7 @@ class HSoftmaxSearchOp final : public HSoftmaxOp<T, Context> {
   HSoftmaxSearchOp(const OperatorDef& operator_def, Workspace* ws)
       : HSoftmaxOp<T, Context>(operator_def, ws),
         top_n_(OperatorBase::GetSingleArgument<int>("topN", 5)),
-        beam_(OperatorBase::GetSingleArgument<float>("beam", 0.01)) {
+        beam_(OperatorBase::GetSingleArgument<float>("beam", 0.01f)) {
     CAFFE_ENFORCE(tree_.ParseFromString(
         OperatorBase::GetSingleArgument<string>("tree", "")));
   }

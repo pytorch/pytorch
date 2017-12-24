@@ -99,7 +99,7 @@ bool L1DistanceGradientOp<float, CPUContext>::RunOnDevice() {
     for (int j = 0; j < D; ++j) {
       const float temp =
           (X.data<float>())[offset + j] - (Y.data<float>())[offset + j];
-      const float kEps = 1e-12;
+      const float kEps = 1e-12f;
       if (temp < -kEps) {
         dX->mutable_data<float>()[offset + j] = -(dDistance.data<float>())[i];
         dY->mutable_data<float>()[offset + j] = (dDistance.data<float>())[i];

@@ -29,7 +29,7 @@
 namespace caffe2 {
 
 namespace {
-const float kEqualityThreshold = 1e-10;
+const float kEqualityThreshold = 1e-10f;
 }
 
 template <

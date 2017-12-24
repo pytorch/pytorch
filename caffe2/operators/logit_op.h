@@ -10,7 +10,7 @@ class LogitGradientOp final : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   LogitGradientOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        eps_(OperatorBase::GetSingleArgument<float>("eps", 1e-6)) {}
+        eps_(OperatorBase::GetSingleArgument<float>("eps", 1e-6f)) {}
   ~LogitGradientOp() {}
 
   bool RunOnDevice() override;
