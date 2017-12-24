@@ -671,8 +671,13 @@ add_docstr_all('index_add_',
 index_add_(dim, index, tensor) -> Tensor
 
 Accumulate the elements of :attr:`tensor` into the :attr:`self` tensor by adding
-to the indices in the order given in :attr:`index`. The shape of :attr:`tensor'
-must exactly match the elements indexed or an error will be raised.
+to the indices in the order given in :attr:`index`. For example, if ``dim == 0``
+and ``index[i] == j``, then the ``i``\ th row of :attr:`tensor` is added to the
+``j``\ th row of :attr:`self`.
+
+The :attr:`dim`\ th dimension of :attr:`tensor` must have the same size as the
+length of :attr:`index` (which must be a vector), and all other dimensions must
+match :attr:`self`, or an error will be raised.
 
 Args:
     dim (int): dimension along which to index
@@ -680,15 +685,17 @@ Args:
     tensor (Tensor): the tensor containing values to add
 
 Example:
-    >>> x = torch.Tensor([[1, 1, 1], [1, 1, 1], [1, 1, 1]])
+    >>> x = torch.Tensor(5, 3).fill_(1)
     >>> t = torch.Tensor([[1, 2, 3], [4, 5, 6], [7, 8, 9]])
-    >>> index = torch.LongTensor([0, 2, 1])
+    >>> index = torch.LongTensor([0, 4, 2])
     >>> x.index_add_(0, index, t)
     >>> x
       2   3   4
+      1   1   1
       8   9  10
+      1   1   1
       5   6   7
-    [torch.FloatTensor of size 3x3]
+    [torch.FloatTensor of size 5x3]
 """)
 
 add_docstr_all('index_copy_',
@@ -696,8 +703,13 @@ add_docstr_all('index_copy_',
 index_copy_(dim, index, tensor) -> Tensor
 
 Copies the elements of :attr:`tensor` into the :attr:`self` tensor by selecting
-the indices in the order given in index. The shape of :attr:`tensor` must
-exactly match the elements indexed or an error will be raised.
+the indices in the order given in :attr:`index`. For example, if ``dim == 0``
+and ``index[i] == j``, then the ``i``\ th row of :attr:`tensor` is copied to the
+``j``\ th row of :attr:`self`.
+
+The :attr:`dim`\ th dimension of :attr:`tensor` must have the same size as the
+length of :attr:`index` (which must be a vector), and all other dimensions must
+match :attr:`self`, or an error will be raised.
 
 Args:
     dim (int): dimension along which to index
@@ -705,15 +717,17 @@ Args:
     tensor (Tensor): the tensor containing values to copy
 
 Example:
-    >>> x = torch.Tensor(3, 3)
+    >>> x = torch.zeros(5, 3)
     >>> t = torch.Tensor([[1, 2, 3], [4, 5, 6], [7, 8, 9]])
-    >>> index = torch.LongTensor([0, 2, 1])
+    >>> index = torch.LongTensor([0, 4, 2])
     >>> x.index_copy_(0, index, t)
     >>> x
      1  2  3
+     0  0  0
      7  8  9
+     0  0  0
      4  5  6
-    [torch.FloatTensor of size 3x3]
+    [torch.FloatTensor of size 5x3]
 """)
 
 add_docstr_all('index_fill_',

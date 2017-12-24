@@ -3755,6 +3755,24 @@ class TestTorch(TestCase):
             dest2[idx[i]] = dest2[idx[i]] + src[i]
         self.assertEqual(dest, dest2)
 
+    def test_index_select(self):
+        src = torch.randn(3, 4, 5)
+        # Index can be duplicated.
+        idx = torch.LongTensor([2, 1, 0, 1, 2])
+        dest = torch.index_select(src, 0, idx)
+        self.assertEqual(dest.shape, (5, 4, 5))
+        for i in range(idx.size(0)):
+            self.assertEqual(dest[i], src[idx[i]])
+
+        # Check that 'out' is used correctly.
+        out = torch.randn(5 * 4 * 5)
+        dest = torch.index_select(src, 0, idx, out=out.view(5, 4, 5))
+        self.assertEqual(dest.shape, (5, 4, 5))
+        for i in range(idx.size(0)):
+            self.assertEqual(dest[i], src[idx[i]])
+        out.fill_(0.123)
+        self.assertEqual(out, dest.view(-1))  # Must point to the same storage.
+
     def test_take(self):
         def check(src, idx):
             expected = src.contiguous().view(-1).index_select(
