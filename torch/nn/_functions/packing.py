@@ -4,7 +4,9 @@ from torch.autograd import Function
 
 class PackPadded(Function):
     @staticmethod
-    def forward(ctx, input, lengths):
+    def forward(ctx, input, lengths, batch_first):
+        if batch_first:
+            input = input.transpose(0, 1)
 
         if lengths[-1] <= 0:
             raise ValueError("Length of all samples has to be greater than 0, "
@@ -32,6 +34,7 @@ class PackPadded(Function):
 
         # TODO: convert batch_sizes to tensor here and use ctx.save_for_backward?
         ctx.batch_sizes = batch_sizes
+        ctx.batch_first = batch_first
         ctx.input_size = input.size()
 
         return torch.cat(steps), torch.LongTensor(batch_sizes)
@@ -46,4 +49,7 @@ class PackPadded(Function):
             ret[i, :bs, ...] = grad_steps[idx:idx + bs, ...]
             idx += bs
 
-        return ret, None
+        if ctx.batch_first:
+            ret = ret.transpose(0, 1)
+
+        return ret, None, None
