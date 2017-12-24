@@ -1757,11 +1757,14 @@ index_select(input, dim, index, out=None) -> Tensor
 Returns a new tensor which indexes the :attr:`input` tensor along dimension
 :attr:`dim` using the entries in :attr:`index` which is a `LongTensor`.
 
-The returned tensor has the same number of dimensions as
-the original tensor.
+The returned tensor has the same number of dimensions as the original tensor
+(:attr:`input`).  The :attr:`dim`\ th dimension has the same size as the length
+of :attr:`index`; other dimensions have the same size as in the original tensor.
 
-.. note:: The returned tensor does **not** use the same storage as
-          the original tensor
+.. note:: The returned tensor does **not** use the same storage as the original
+          tensor.  If :attr:`out` has a different shape than expected, we
+          silently change it to the correct shape, reallocating the underlying
+          storage if necessary.
 
 Args:
     input (Tensor): the input tensor
