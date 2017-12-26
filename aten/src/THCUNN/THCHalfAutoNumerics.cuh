@@ -172,6 +172,10 @@ inline __host__ __device__ half log1p(half a) {
   return THCNumerics<half>::log1p(a);
 }
 
+inline __host__ __device__ half expm1(half a) {
+  return THCNumerics<half>::expm1(a);
+}
+
 inline __host__ __device__ half pow(half a, half b) {
   return THCNumerics<half>::pow(a, b);
 }

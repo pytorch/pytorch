@@ -106,6 +106,7 @@ Pointwise Ops
 .. autofunction:: erf
 .. autofunction:: erfinv
 .. autofunction:: exp
+.. autofunction:: expm1
 .. autofunction:: floor
 .. autofunction:: fmod
 .. autofunction:: frac

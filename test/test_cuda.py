@@ -356,6 +356,7 @@ simple_pointwise_float = [
     'erf',
     'erfinv',
     'exp',
+    'expm1',
     'reciprocal',
     'floor',
     'frac',

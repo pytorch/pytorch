@@ -1324,6 +1324,35 @@
     - THTensor* self
 ]]
 [[
+  name: expm1_
+  types:
+    - floating_point
+  backends:
+    - CPU
+    - CUDA
+  cname: expm1
+  return: self
+  arguments:
+    - THTensor* self
+    - THTensor* self
+]]
+[[
+  name: expm1
+  types:
+    - floating_point
+  backends:
+    - CPU
+    - CUDA
+  variants:
+    - method
+    - function
+  return: argument 0
+  arguments:
+    - arg: THTensor* result
+      output: True
+    - THTensor* self
+]]
+[[
   name: cos_
   types:
     - floating_point
