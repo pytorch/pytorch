@@ -8,9 +8,7 @@ import torch
 from common import TestCase, run_tests
 from torch.autograd import Variable, gradcheck
 from torch.distributions import (Bernoulli, Beta, Categorical, Chi2, Dirichlet,
-                                 Exponential, Gamma, Laplace, Normal)
-from torch.distributions.uniform import Uniform
-
+                                 Exponential, Gamma, Laplace, Normal, Uniform)
 TEST_NUMPY = True
 try:
     import numpy as np

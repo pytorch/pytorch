@@ -40,7 +40,8 @@ from .normal import Normal
 from .exponential import Exponential
 from .laplace import Laplace
 from .chi2 import Chi2
+from .uniform import Uniform
 
 
 __all__ = ['Distribution', 'Bernoulli', 'Beta', 'Categorical', 'Chi2', 'Dirichlet',
-           'Gamma', 'Normal', 'Exponential', 'Laplace']
+           'Gamma', 'Normal', 'Exponential', 'Laplace', 'Uniform']
