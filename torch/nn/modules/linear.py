@@ -57,7 +57,8 @@ class Linear(Module):
     def __repr__(self):
         return self.__class__.__name__ + '(' \
             + 'in_features=' + str(self.in_features) \
-            + ', out_features=' + str(self.out_features) + ')'
+            + ', out_features=' + str(self.out_features) \
+            + ', bias=' + str(self.bias is not None) + ')'
 
 
 class Bilinear(Module):
@@ -115,6 +116,7 @@ class Bilinear(Module):
         return self.__class__.__name__ + '(' \
             + 'in1_features=' + str(self.in1_features) \
             + ', in2_features=' + str(self.in2_features) \
-            + ', out_features=' + str(self.out_features) + ')'
+            + ', out_features=' + str(self.out_features) \
+            + ', bias=' + str(self.bias is not None) + ')'
 
 # TODO: PartialLinear - maybe in sparse?
