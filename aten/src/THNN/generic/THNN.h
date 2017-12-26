@@ -164,6 +164,44 @@ TH_API void THNN_(HardTanh_updateGradInput)(
           accreal max_val,             // upper threshold
           bool inplace);
 
+TH_API void THNN_(Im2Col_updateOutput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *output,
+          int kH, int kW,
+          int dH, int dW,
+          int padH, int padW,
+          int sH, int sW);
+
+TH_API void THNN_(Im2Col_updateGradInput)(
+          THNNState *state,
+          THTensor *gradOutput,
+          THTensor *gradInput,
+          int inputHeight, int inputWidth,
+          int kH, int kW,
+          int dH, int dW,
+          int padH, int padW,
+          int sH, int sW);
+
+TH_API void THNN_(Col2Im_updateOutput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *output,
+          int outputHeight, int outputWidth,
+          int kH, int kW,
+          int dH, int dW,
+          int padH, int padW,
+          int sH, int sW);
+
+TH_API void THNN_(Col2Im_updateGradInput)(
+          THNNState *state,
+          THTensor *gradOutput,
+          THTensor *gradInput,
+          int kH, int kW,
+          int dH, int dW,
+          int padH, int padW,
+          int sH, int sW);
+
 TH_API void THNN_(L1Cost_updateOutput)(
           THNNState *state,            // library's state
           THTensor *input,             // input tensor
@@ -1631,6 +1669,7 @@ TH_API void THNN_(VolumetricUpSamplingNearest_updateOutput)(
           THTensor *input,
           THTensor *output,
           int scale_factor);
+
 TH_API void THNN_(VolumetricUpSamplingNearest_updateGradInput)(
           THNNState *state,
           THTensor *input,
@@ -1645,6 +1684,7 @@ TH_API void THNN_(VolumetricUpSamplingTrilinear_updateOutput)(
           int osizeT,
           int osizeH,
           int osizeW);
+
 TH_API void THNN_(VolumetricUpSamplingTrilinear_updateGradInput)(
           THNNState *state,
           THTensor *gradOutput,
@@ -1683,6 +1723,5 @@ TH_API void THNN_(TemporalReplicationPadding_updateGradInput)(
           THTensor *gradOutput,
           THTensor *gradInput,
           int pad_left, int pad_right);
-
 
 #endif

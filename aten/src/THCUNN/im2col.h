@@ -107,6 +107,14 @@ void col2im(cudaStream_t stream, const Dtype* data_col, const int channels,
             const int output_height, const int output_width,
             const int patch_h, const int patch_w, const int pad_h,
             const int pad_w, const int stride_h, const int stride_w,
+            const int dilation_h, const int dilation_w, Dtype* data_im);
+
+template <typename Dtype, typename Acctype>
+void col2im(cudaStream_t stream, const Dtype* data_col, const int channels,
+            const int height, const int width,
+            const int output_height, const int output_width,
+            const int patch_h, const int patch_w, const int pad_h,
+            const int pad_w, const int stride_h, const int stride_w,
             const int dilation_h, const int dilation_w, Dtype* data_im) {
   int num_kernels = channels * height * width;
   // To avoid involving atomic operations, we will launch one kernel per
