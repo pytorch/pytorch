@@ -260,8 +260,8 @@ class TestDistributions(TestCase):
         uniform = Uniform(low_1d, high_1d)
         above_high = Variable(torch.Tensor([4.0]))
         below_low = Variable(torch.Tensor([-1.0]))
-        self.assertEqual(uniform.log_prob(above_high).data[0], -float('inf'))
-        self.assertEqual(uniform.log_prob(below_low).data[0], -float('inf'))
+        self.assertEqual(uniform.log_prob(above_high).data[0], -float('inf'), allow_inf=True)
+        self.assertEqual(uniform.log_prob(below_low).data[0], -float('inf'), allow_inf=True)
 
         self._set_rng_seed(1)
         self._gradcheck_log_prob(Uniform, (low, high))
