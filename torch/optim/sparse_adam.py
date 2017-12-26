@@ -98,8 +98,8 @@ class SparseAdam(Optimizer):
                 exp_avg_sq_update_values.add_(old_exp_avg_sq_values)
                 if amsgrad:
                     torch.max(old_max_exp_avg_sq_values, exp_avg_sq_update_values, out=old_max_exp_avg_sq_values)
-                    denom = old_max_exp_avg_sq_values.sqrt_().add_(group['eps'])
                     max_exp_avg_sq.put_(grad_indices, old_max_exp_avg_sq_values)
+                    denom = old_max_exp_avg_sq_values.sqrt_().add_(group['eps'])
                     del old_max_exp_avg_sq_values
                 else:
                     denom = exp_avg_sq_update_values.sqrt_().add_(group['eps'])
