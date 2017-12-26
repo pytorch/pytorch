@@ -1268,9 +1268,9 @@ class TestAutograd(TestCase):
         f[0] = float('nan')
         self.assertTrue(math.isnan(float(f)))
         f[0] = float('inf')
-        self.assertEqual(float(f), float('inf'))
+        self.assertEqual(float(f), float('inf'), allow_inf=True)
         f[0] = float('-inf')
-        self.assertEqual(float(f), float('-inf'))
+        self.assertEqual(float(f), float('-inf'), allow_inf=True)
 
         # integral -> floating point
         # check we can convert something that loses precision
