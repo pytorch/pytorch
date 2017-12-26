@@ -242,6 +242,9 @@ class TestTorch(TestCase):
     def test_exp(self):
         self._testMathByName('exp')
 
+    def test_expm1(self):
+        self._testMathByName('expm1')
+
     def test_floor(self):
         self._testMathByName('floor')
 
