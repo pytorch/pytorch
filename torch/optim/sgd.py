@@ -7,6 +7,8 @@ class SGD(Optimizer):
 
     Nesterov momentum is based on the formula from
     `On the importance of initialization and momentum in deep learning`__.
+    Noisy SGD update is based on the formula from
+    `Adding Gradient Noise improves Learning for Very Deep Networks`__.
 
     Args:
         params (iterable): iterable of parameters to optimize or dicts defining
@@ -16,6 +18,8 @@ class SGD(Optimizer):
         weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
         dampening (float, optional): dampening for momentum (default: 0)
         nesterov (bool, optional): enables Nesterov momentum (default: False)
+        noisy (tuple, optional): enables noisy gradient updates with parameters
+            :math:`\eta` and :math:`\gamma` (default: None)
 
     Example:
         >>> optimizer = torch.optim.SGD(model.parameters(), lr=0.1, momentum=0.9)
@@ -46,20 +50,31 @@ class SGD(Optimizer):
              p = p - v
 
         The Nesterov version is analogously modified.
+
+    .. note::
+        The noisy updates can be only used for vanilla SGD, hence including
+        momentum could throw an exception.
     """
 
     def __init__(self, params, lr=required, momentum=0, dampening=0,
-                 weight_decay=0, nesterov=False):
+                 weight_decay=0, nesterov=False, noisy=None):
         defaults = dict(lr=lr, momentum=momentum, dampening=dampening,
-                        weight_decay=weight_decay, nesterov=nesterov)
+                        weight_decay=weight_decay, nesterov=nesterov, noisy=noisy)
         if nesterov and (momentum <= 0 or dampening != 0):
             raise ValueError("Nesterov momentum requires a momentum and zero dampening")
+        if (isinstance(noisy, tuple) or isinstance(noisy, list)) and (momentum != 0):
+            raise ValueError("Noisy SGD cannot be used with momentum")
+        if (isinstance(noisy, tuple) or isinstance(noisy, list)) and len(noisy) != 2:
+            raise ValueError("Noisy SGD requires 2 parameters")
+        if noisy is not None:
+            self.counter = 0
         super(SGD, self).__init__(params, defaults)
 
     def __setstate__(self, state):
         super(SGD, self).__setstate__(state)
         for group in self.param_groups:
             group.setdefault('nesterov', False)
+            group.setdefault('noisy', None)
 
     def step(self, closure=None):
         """Performs a single optimization step.
@@ -97,6 +112,15 @@ class SGD(Optimizer):
                     else:
                         d_p = buf
 
-                p.data.add_(-group['lr'], d_p)
+                if group['noisy'] is None:
+                    p.data.add_(-group['lr'], d_p)
+                else:
+                    std = (noisy[0] / (1 + self.counter)**(noisy[1]))**(0.5)
+                    noise = torch.normal(std=torch.FloatTensor([std]).expand_as(d_p))
+                    if d_p.is_cuda:
+                        noise = noise.cuda()
+                    noisy_d_p = d_p.add(noise)
+                    p.data.add_(-group['lr'], noisy_d_p)
+                    self.counter += 1
 
         return loss
