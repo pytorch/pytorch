@@ -196,7 +196,7 @@ class TestDistributions(TestCase):
             self.assertEqual(log_prob, math.log(prob if val else 1 - prob))
 
         self._check_log_prob(Bernoulli(p), ref_log_prob)
-        self.assertRaises(NotImplementedError,  Bernoulli(r).rsample)
+        self.assertRaises(NotImplementedError, Bernoulli(r).rsample)
 
     def test_bernoulli_enumerate_support(self):
         examples = [
