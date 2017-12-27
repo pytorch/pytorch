@@ -183,7 +183,7 @@ Tensor renorm_backward(const Tensor & grad, const Tensor & self, Scalar p, int64
 
   // TODO: remove the detach once comparison ops no longer require grad
   auto mask = Variable(norm < maxnorm).detach();
-  return grad * mask.type_as(grad) + grad_norm * (1 - mask).type_as(grad);
+  return at::where(mask, grad, grad_norm);
 }
 
 Tensor select_backward_scalar(Tensor grad, const Tensor & input, const Tensor & value) {

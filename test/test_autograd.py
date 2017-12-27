@@ -1751,8 +1751,11 @@ class TestAutograd(TestCase):
         gradgradcheck(where, [cond, x, y], [Variable(t(torch.randn(5, 5, 5)))])
 
     def test_where_functional(self):
-        # TODO: .cuda() lambda
         self._test_where_functional(lambda t: t)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA unavailable")
+    def test_where_functional_cuda(self):
+        self._test_where_functional(lambda t: t.cuda())
 
     def test_inplace_view_backprop_base(self):
         # modify view and back-prop through base
