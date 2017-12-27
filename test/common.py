@@ -239,11 +239,11 @@ class TestCase(unittest.TestCase):
         else:
             super(TestCase, self).assertEqual(x, y, message)
 
-    def assertAlmostEqual(self, x, y, places=None, msg=None, delta=None):
+    def assertAlmostEqual(self, x, y, places=None, msg=None, delta=None, allow_inf=None):
         prec = delta
         if places:
             prec = 10**(-places)
-        self.assertEqual(x, y, prec, msg)
+        self.assertEqual(x, y, prec, msg, allow_inf)
 
     def assertNotEqual(self, x, y, prec=None, message=''):
         if prec is None:
