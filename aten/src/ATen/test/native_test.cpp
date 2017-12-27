@@ -105,7 +105,7 @@ void test(Type & T, Type & AccT) {
     // > 2-d, 2-d
     // we use a "folding" algorithm in this case of matmul, so the direct comparison to bmm doesn't work;
     // instead, compare to the higher precision computation (technically, we should always do this).
-    // tolerancecs are selected empirically.
+    // Tolerances are selected empirically.
     double atol = 1e-04;
     double rtol = 1e-06;
     d2 = T.randn({3, 4});
