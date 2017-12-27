@@ -25,7 +25,7 @@ struct IsSigned<Half> {
 };
 
 bool is_signed(const Tensor &self) {
-  return dispatch_all<IsSigned>(self.type(), "is_signed");
+  return dispatch_all<bool, IsSigned>(self.type(), "is_signed");
 }
 
 bool is_sparse(const Tensor& self) {

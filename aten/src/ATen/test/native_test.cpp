@@ -156,7 +156,7 @@ void test(Type & T, Type & AccT) {
   }
 
   // where
-  if (!at::hasCUDA()) {
+  {
     // empty
     auto empty = T.ones({0});
     auto &bT = T.toScalarType(ScalarType::Byte);
