@@ -4924,7 +4924,8 @@ class TestTorch(TestCase):
             np.int64,
             np.int32,
             np.int16,
-            np.uint8
+            np.uint8,
+            np.longlong,
         ]
         for dtype in dtypes:
             array = np.array([1, 2, 3, 4], dtype=dtype)
