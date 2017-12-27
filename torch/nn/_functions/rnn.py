@@ -342,11 +342,50 @@ class CudnnRNN(NestedIOFunction):
         return grad_input, grad_weight, grad_hx
 
 
-def RNN_symbolic_builder(*args, **kwargs):
-    def symbolic(g, input, all_weights, hx, **kwargs):
-        # Something can go here, e.g.
-        # return g.op('LSTM', input, *all_weights[0], outputs=2)
-        raise RuntimeError("RNN symbolic NYI")
+def RNN_symbolic_builder(cell_type, input_size, hidden_size, num_layers, batch_first, dropout, bidirectional, **kwargs):
+    assert cell_type == 'LSTM'
+    assert not batch_first
+    assert not dropout
+    assert not bidirectional
+
+    def symbolic(g, input, all_weights, h0_and_c0, **fkwargs):
+        h0, c0 = h0_and_c0
+        sequence_len = input.type().sizes()[0]
+        batch_size = input.type().sizes()[1]
+
+        # TODO leave out this argument to increase parametricity.
+        # This is nontrivial because we provide subsequent optional
+        # arguments, and ONNX does not have a mechanism for skipping
+        # non-trailing optional arguments.
+        sequence_lens = g.op('Constant', value_t=torch.IntTensor(batch_size).fill_(sequence_len))
+
+        prev_output = input
+        h_outs = []
+        for i in range(num_layers):
+            # pytorch is input, forget, cell, output.
+            # onnx is    input, output, forget, cell.
+            # Therefore lots of awkward slicing and concatenation.
+
+            def reform(x):
+                return g.op(
+                    'Concat',
+                    g.op('Slice', x, axes_i=[0], starts_i=[0 * hidden_size], ends_i=[1 * hidden_size]),
+                    g.op('Slice', x, axes_i=[0], starts_i=[3 * hidden_size], ends_i=[4 * hidden_size]),
+                    g.op('Slice', x, axes_i=[0], starts_i=[1 * hidden_size], ends_i=[3 * hidden_size]),
+                    axis_i=0)
+
+            weight_ih, weight_hh, bias_ih, bias_hh = map(reform, all_weights[i])
+
+            bias_concat = g.op('Concat', bias_ih, bias_hh, axis_i=0)
+
+            h_in = h0 if num_layers == 1 else g.op('Slice', h0, axes_i=[0], starts_i=[i], ends_i=[i + 1])
+            c_in = c0 if num_layers == 1 else g.op('Slice', c0, axes_i=[0], starts_i=[i], ends_i=[i + 1])
+
+            inputs = [prev_output, weight_ih, weight_hh, bias_concat, sequence_lens, h_in, c_in]
+            prev_output, h_out = g.op('LSTM', *inputs, outputs=2, hidden_size_i=hidden_size)
+            h_outs.append(h_out)
+        h_outs = h_out if num_layers == 1 else g.op('Concat', *h_outs, axis_i=0)
+        return prev_output, h_outs, None
 
     import torch.onnx
     return torch.onnx.symbolic_override(symbolic)
