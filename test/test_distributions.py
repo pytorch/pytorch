@@ -529,7 +529,7 @@ class TestDistributions(TestCase):
             x = dist.sample()
             actual_log_prob = dist.log_prob(x).sum()
             expected_log_prob = scipy.stats.beta.logpdf(x, alpha, beta)[0]
-            self.assertAlmostEqual(actual_log_prob, expected_log_prob, places=3)
+            self.assertAlmostEqual(actual_log_prob, expected_log_prob, places=3, allow_inf=True)
 
     # This is a randomized test.
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
