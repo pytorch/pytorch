@@ -21,7 +21,7 @@ Tensor& bernoulli_(Tensor& self, double p, Generator* generator) {
 // TODO Replace this with more accurate digamma().
 template <typename scalar>
 static inline scalar digamma_one(scalar x) {
-  const scalar eps = x * 1e-3;
+  const double eps = x * 1e-3;
   return (std::lgamma(x + eps) - std::lgamma(x - eps)) / (eps + eps);
 }
 
@@ -52,24 +52,22 @@ static inline scalar standard_gamma_grad_one(scalar alpha, scalar x) {
 
   // Use a Rice saddle point expansion for large alpha.
   if (alpha > 8.0f) {
-    if (0.995f * alpha <= x && x <= 1.005f * alpha) {
+    if (0.9f * alpha <= x && x <= 1.1f * alpha) {
       const auto numer_1 = 1 + 24 * alpha * (1 + 12 * alpha);
       const auto numer_2 = 1440 * (alpha * alpha) + 6 * x * (53 - 120 * x)
           - 65 * x * x / alpha + alpha * (107 + 3600 * x);
       const auto denom = 1244160 * (alpha * alpha) * (alpha * alpha);
-      const auto result = numer_1 * numer_2 / denom;
-      return std::isnan(result) ? 0 : result;
+      return numer_1 * numer_2 / denom;
     }
     const auto denom = std::sqrt(8 * alpha);
     const auto term2 = denom / (alpha - x);
-    const auto term3 = std::pow(x - alpha - alpha * std::log(x / alpha), -1.5);
+    const auto term3 = std::pow(x - alpha - alpha * std::log(x / alpha), -1.5f);
     const auto term23 = (x < alpha) ? term2 - term3 : term2 + term3;
     const auto term1 = std::log(x / alpha) * term23
                      - std::sqrt(2 / alpha) * (alpha + x) / ((alpha - x) * (alpha - x));
     const auto stirling = 1 + 1 / (12 * alpha) * (1 + 1 / (24 * alpha));
     const auto numer = x * term1;
-    const auto result = -stirling * numer / denom;
-    return std::isnan(result) ? 0 : result;
+    return -stirling * numer / denom;
   }
 
   // Use a bivariate rational approximation to the reparameterized gradient.
