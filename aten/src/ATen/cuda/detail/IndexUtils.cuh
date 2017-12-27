@@ -2,13 +2,14 @@
 
 #include "ATen/ATen.h"
 #include "TensorInfo.cuh"
+#include <limits>
 
 namespace at {
 namespace cuda {
 namespace detail {
 
 bool overlappingIndices(const at::Tensor& t);
-bool canUse32BitIndexMath(const at::Tensor &t, ptrdiff_t max_elem=UINT32_MAX);
+bool canUse32BitIndexMath(const at::Tensor &t, int64_t max_elem=std::numeric_limits<int64_t>::max());
 
 template <typename scalar, typename IndexType>
 TensorInfo<scalar, IndexType>

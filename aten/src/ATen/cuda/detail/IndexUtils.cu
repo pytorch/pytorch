@@ -69,18 +69,18 @@ bool overlappingIndices(const Tensor& t) {
   return false;
 }
 
-bool canUse32BitIndexMath(const Tensor& t, ptrdiff_t max_elem) {
-  ptrdiff_t elements = t.numel();
+bool canUse32BitIndexMath(const Tensor& t, int64_t max_elem) {
+  int64_t elements = t.numel();
   if (elements >= max_elem) {
     return false;
   }
 
-  ptrdiff_t offset = 0;
-  ptrdiff_t linearId = elements - 1;
+  int64_t offset = 0;
+  int64_t linearId = elements - 1;
 
   for (int i = t.dim() - 1; i >= 0; --i) {
-    ptrdiff_t curDimIndex = linearId % t.size(i);
-    ptrdiff_t curDimOffset = curDimIndex * t.stride(i);
+    int64_t curDimIndex = linearId % t.size(i);
+    int64_t curDimOffset = curDimIndex * t.stride(i);
     offset += curDimOffset;
     linearId /= t.size(i);
   }
