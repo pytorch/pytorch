@@ -8,6 +8,8 @@ import contextlib
 from functools import wraps
 from itertools import product
 from copy import deepcopy
+from numbers import Number
+
 import __main__
 import errno
 
@@ -186,7 +188,7 @@ class TestCase(unittest.TestCase):
             raise AssertionError("cannot compare {} and {}".format(type(x), type(y)))
         return x, y
 
-    def assertEqual(self, x, y, prec=None, message=''):
+    def assertEqual(self, x, y, prec=None, message='', allow_inf=False):
         if isinstance(prec, str) and message == '':
             message = prec
             prec = None
@@ -197,7 +199,7 @@ class TestCase(unittest.TestCase):
 
         if torch.is_tensor(x) and torch.is_tensor(y):
             def assertTensorsEqual(a, b):
-                super(TestCase, self).assertEqual(a.size(), b.size())
+                super(TestCase, self).assertEqual(a.size(), b.size(), message)
                 if a.numel() > 0:
                     b = b.type_as(a)
                     b = b.cuda(device=a.get_device()) if a.is_cuda else b.cpu()
@@ -210,7 +212,7 @@ class TestCase(unittest.TestCase):
                         diff = diff.abs()
                     max_err = diff.max()
                     self.assertLessEqual(max_err, prec, message)
-            self.assertEqual(x.is_sparse, y.is_sparse, message)
+            super(TestCase, self).assertEqual(x.is_sparse, y.is_sparse, message)
             if x.is_sparse:
                 x = self.safeCoalesce(x)
                 y = self.safeCoalesce(y)
@@ -219,20 +221,29 @@ class TestCase(unittest.TestCase):
             else:
                 assertTensorsEqual(x, y)
         elif isinstance(x, string_classes) and isinstance(y, string_classes):
-            super(TestCase, self).assertEqual(x, y)
+            super(TestCase, self).assertEqual(x, y, message)
         elif type(x) == set and type(y) == set:
-            super(TestCase, self).assertEqual(x, y)
+            super(TestCase, self).assertEqual(x, y, message)
         elif is_iterable(x) and is_iterable(y):
-            super(TestCase, self).assertEqual(len(x), len(y))
+            super(TestCase, self).assertEqual(len(x), len(y), message)
             for x_, y_ in zip(x, y):
                 self.assertEqual(x_, y_, prec, message)
-        else:
-            try:
-                self.assertLessEqual(abs(x - y), prec, message)
+        elif isinstance(x, Number) and isinstance(y, Number):
+            if abs(x) == float('inf') or abs(y) == float('inf'):
+                if allow_inf:
+                    super(TestCase, self).assertEqual(x, y, message)
+                else:
+                    self.fail("Expected finite numeric values - x={}, y={}".format(x, y))
                 return
-            except (TypeError, AssertionError):
-                pass
+            super(TestCase, self).assertLessEqual(abs(x - y), prec, message)
+        else:
             super(TestCase, self).assertEqual(x, y, message)
+
+    def assertAlmostEqual(self, x, y, places=None, msg=None, delta=None, allow_inf=None):
+        prec = delta
+        if places:
+            prec = 10**(-places)
+        self.assertEqual(x, y, prec, msg, allow_inf)
 
     def assertNotEqual(self, x, y, prec=None, message=''):
         if prec is None:
@@ -306,12 +317,15 @@ class TestCase(unittest.TestCase):
             if text.startswith(prefix):
                 return text[len(prefix):]
             return text
-        munged_id = remove_prefix(self.id(), "__main__.")
-        # NB: we take __file__ from __main__, so we place the expect directory
-        # where the test script lives, NOT where test/common.py lives.  This
-        # doesn't matter in PyTorch where all test scripts are in the same
-        # directory as test/common.py, but it matters in onnx-pytorch
-        expected_file = os.path.join(os.path.dirname(os.path.realpath(__main__.__file__)),
+        # NB: we take __file__ from the module that defined the test
+        # class, so we place the expect directory where the test script
+        # lives, NOT where test/common.py lives.  This doesn't matter in
+        # PyTorch where all test scripts are in the same directory as
+        # test/common.py, but it matters in onnx-pytorch
+        module_id = self.__class__.__module__
+        munged_id = remove_prefix(self.id(), module_id + ".")
+        test_file = os.path.realpath(sys.modules[module_id].__file__)
+        expected_file = os.path.join(os.path.dirname(test_file),
                                      "expect",
                                      munged_id)
         if subname:

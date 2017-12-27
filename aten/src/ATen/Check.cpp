@@ -195,7 +195,8 @@ void checkBackend(CheckedFrom c, const Tensor& t, Backend backend) {
     std::ostringstream oss;
     oss << "Expected tensor to have " << toString(t.type().backend()) << " Backend, but got tensor with "
         << toString(t.type().backend()) << " Backend "
-        << "(while checking arguments for )" << c << ")";
+        << "(while checking arguments for " << c << ")";
+    throw std::runtime_error(oss.str());
   }
 }
 

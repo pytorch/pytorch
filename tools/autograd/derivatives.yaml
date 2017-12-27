@@ -128,8 +128,11 @@
   self: grad.bmm(mat2.transpose(1, 2))
   mat2: self.transpose(1, 2).bmm(grad)
 
-- name: btrifact(Tensor self, Tensor info, bool pivot)
+- name: btrifact(Tensor self, bool pivot)
   self: not_implemented("btrifact")
+
+- name: btrifact_with_info(Tensor self, bool pivot)
+  self: not_implemented("btrifact_with_info")
 
 - name: btrisolve(Tensor self, Tensor LU_data, Tensor LU_pivots)
   self: not_implemented("btrisolve")
@@ -650,8 +653,8 @@
 
 - name: _s_where(Tensor condition, Tensor self, Tensor other)
   condition: zeros_like(condition)
-  self: _s_where(condition, grad, zeros_like(grad))
-  other: _s_where(condition, zeros_like(grad), grad)
+  self: where(condition, grad, zeros_like(grad))
+  other: where(condition, zeros_like(grad), grad)
 
 - name: zero(Tensor self)
   self: zeros_like(grad)
@@ -663,6 +666,9 @@
 
 - name: _standard_gamma(Tensor self, Generator generator)
   self: grad * self._standard_gamma_grad(output)
+
+- name: _standard_gamma_grad(Tensor self, Tensor output)
+  self: not_implemented("_standard_gamma_grad")
 
 # NN
 
@@ -801,6 +807,9 @@
 - name: avg_pool3d(Tensor self, IntList kernel_size, IntList stride, IntList padding, bool ceil_mode, bool count_include_pad)
   self: avg_pool3d_backward(grad, self, kernel_size, stride, padding, ceil_mode, count_include_pad)
 
+- name: fractional_max_pool2d(Tensor self, IntList kernel_size, IntList output_size, Tensor random_samples)
+  self: fractional_max_pool2d_backward(grad, self, kernel_size, output_size, indices)
+
 - name: max_pool2d(Tensor self, IntList kernel_size, IntList stride, IntList padding, IntList dilation, bool ceil_mode)
   self: max_pool2d_backward(grad, self, kernel_size, stride, padding, dilation, ceil_mode, indices)
 
@@ -893,6 +902,10 @@
 - name: elu_backward(Tensor grad_output, Scalar alpha, Scalar scale, Tensor output)
   grad_output: elu_backward(grad, alpha, scale, output)
   output: grad * grad_output * (output < 0).toType(grad.type())
+
+- name: fractional_max_pool2d_backward(Tensor grad_output, Tensor self, IntList kernel_size, IntList output_size, Tensor indices)
+  grad_output: adaptive_max_pool_double_backward(grad, self, indices, 2)
+  self: zeros_like(self)
 
 - name: glu_backward(Tensor grad_output, Tensor self, int64_t dim)
   grad_output: glu_double_backward_grad_output(grad, self, dim)

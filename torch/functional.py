@@ -93,6 +93,16 @@ def btriunpack(LU_data, LU_pivots, unpack_data=True, unpack_pivots=True):
         LU_pivots (Tensor): the packed LU factorization pivots
         unpack_data (bool): flag indicating if the data should be unpacked
         unpack_pivots (bool): tlag indicating if the pivots should be unpacked
+
+    Example::
+
+        >>> A = torch.randn(2, 3, 3)
+        >>> A_LU, pivots = A.btrifact()
+        >>> P, a_L, a_U = torch.btriunpack(A_LU, pivots)
+        >>>
+        >>> # test that (P, A_L, A_U) gives LU factorization
+        >>> A_ = torch.bmm(P, torch.bmm(A_L, A_U))
+        >>> assert torch.equal(A_, A) == True  # can recover A
     """
 
     nBatch, sz, _ = LU_data.size()

@@ -690,10 +690,15 @@ class TestTorch(TestCase):
                                ((-1.6181, 0.7148),
                                 (1.3728, 0.1319))))
         a = cast(a)
+        a_LU, pivots = a.btrifact()  # test default info
         info = cast(torch.IntTensor())
-        a_LU = a.btrifact(info=info)
+        a_LU, pivots = a.btrifact(info=info)
         self.assertEqual(info.abs().sum(), 0)
-        P, a_L, a_U = torch.btriunpack(*a_LU)
+        a_LU_, pivots_, info_ = a.btrifact_with_info()
+        self.assertEqual(a_LU, a_LU_)
+        self.assertEqual(pivots, pivots_)
+        self.assertEqual(info, info_)
+        P, a_L, a_U = torch.btriunpack(a_LU, pivots)
         a_ = torch.bmm(P, torch.bmm(a_L, a_U))
         self.assertEqual(a_, a)
 
@@ -3749,6 +3754,24 @@ class TestTorch(TestCase):
         for i in range(idx.size(0)):
             dest2[idx[i]] = dest2[idx[i]] + src[i]
         self.assertEqual(dest, dest2)
+
+    def test_index_select(self):
+        src = torch.randn(3, 4, 5)
+        # Index can be duplicated.
+        idx = torch.LongTensor([2, 1, 0, 1, 2])
+        dest = torch.index_select(src, 0, idx)
+        self.assertEqual(dest.shape, (5, 4, 5))
+        for i in range(idx.size(0)):
+            self.assertEqual(dest[i], src[idx[i]])
+
+        # Check that 'out' is used correctly.
+        out = torch.randn(5 * 4 * 5)
+        dest = torch.index_select(src, 0, idx, out=out.view(5, 4, 5))
+        self.assertEqual(dest.shape, (5, 4, 5))
+        for i in range(idx.size(0)):
+            self.assertEqual(dest[i], src[idx[i]])
+        out.fill_(0.123)
+        self.assertEqual(out, dest.view(-1))  # Must point to the same storage.
 
     def test_take(self):
         def check(src, idx):

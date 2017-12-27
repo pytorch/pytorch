@@ -279,8 +279,8 @@ bool CUDA_tensor_apply2(at::Tensor a,
     return false;
   }
 
-  if (a.dim() == 0) {
-    // Zero-dim tensor; do nothing
+  if (a.numel() == 0) {
+    // Empty tensor; do nothing
     return true;
   }
   const dim3 block = getApplyBlock();
@@ -471,8 +471,8 @@ bool CUDA_tensor_apply3(at::Tensor a,
     return false;
   }
 
-  if (a.dim() == 0) {
-    // Zero-dim tensor; do nothing
+  if (a.numel() == 0) {
+    // Empty tensor; do nothing
     return true;
   }
 
@@ -708,8 +708,8 @@ bool CUDA_tensor_apply4(at::Tensor a,
     return false;
   }
 
-  if (a.dim() == 0) {
-    // Zero-dim tensor; do nothing
+  if (a.numel() == 0) {
+    // Empty tensor; do nothing
     return true;
   }
 

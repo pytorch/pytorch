@@ -1,6 +1,5 @@
 import math
 import unittest
-import warnings
 from collections import namedtuple
 from itertools import product
 
@@ -9,6 +8,7 @@ from common import TestCase, run_tests
 from torch.autograd import Variable, gradcheck
 from torch.distributions import (Bernoulli, Beta, Categorical, Dirichlet,
                                  Exponential, Gamma, Laplace, Normal)
+from torch.distributions.uniform import Uniform
 
 TEST_NUMPY = True
 try:
@@ -71,6 +71,20 @@ EXAMPLES = [
         {
             'mean': torch.Tensor([1.0, 0.0]),
             'std': torch.Tensor([1e-5, 1e-5]),
+        },
+    ]),
+    Example(Uniform, [
+        {
+            'low': Variable(torch.zeros(5, 5), requires_grad=True),
+            'high': Variable(torch.ones(5, 5), requires_grad=True),
+        },
+        {
+            'low': Variable(torch.zeros(1), requires_grad=True),
+            'high': Variable(torch.ones(1), requires_grad=True),
+        },
+        {
+            'low': torch.Tensor([1.0, 1.0]),
+            'high': torch.Tensor([2.0, 3.0]),
         },
     ]),
     Example(Laplace, [
@@ -230,6 +244,39 @@ class TestDistributions(TestCase):
             ([[0.1, 0.9], [0.3, 0.7]], [[0, 0], [1, 1]]),
         ]
         self._check_enumerate_support(Categorical, examples)
+
+    def test_uniform(self):
+        low = Variable(torch.zeros(5, 5), requires_grad=True)
+        high = Variable(torch.ones(5, 5) * 3, requires_grad=True)
+        low_1d = Variable(torch.zeros(1), requires_grad=True)
+        high_1d = Variable(torch.ones(1) * 3, requires_grad=True)
+        self.assertEqual(Uniform(low, high).sample().size(), (5, 5))
+        self.assertEqual(Uniform(low, high).sample_n(7).size(), (7, 5, 5))
+        self.assertEqual(Uniform(low_1d, high_1d).sample().size(), (1,))
+        self.assertEqual(Uniform(low_1d, high_1d).sample_n(1).size(), (1, 1))
+        self.assertEqual(Uniform(0.0, 1.0).sample_n(1).size(), (1,))
+
+        # Check log_prob computation when value outside range
+        uniform = Uniform(low_1d, high_1d)
+        above_high = Variable(torch.Tensor([4.0]))
+        below_low = Variable(torch.Tensor([-1.0]))
+        self.assertEqual(uniform.log_prob(above_high).data[0], -float('inf'), allow_inf=True)
+        self.assertEqual(uniform.log_prob(below_low).data[0], -float('inf'), allow_inf=True)
+
+        self._set_rng_seed(1)
+        self._gradcheck_log_prob(Uniform, (low, high))
+        self._gradcheck_log_prob(Uniform, (low, 1.0))
+        self._gradcheck_log_prob(Uniform, (0.0, high))
+
+        state = torch.get_rng_state()
+        rand = low.new(low.size()).uniform_()
+        torch.set_rng_state(state)
+        u = Uniform(low, high).rsample()
+        u.backward(torch.ones_like(u))
+        self.assertEqual(low.grad, 1 - rand)
+        self.assertEqual(high.grad, rand)
+        low.grad.zero_()
+        high.grad.zero_()
 
     def test_normal(self):
         mean = Variable(torch.randn(5, 5), requires_grad=True)
@@ -482,7 +529,7 @@ class TestDistributions(TestCase):
             x = dist.sample()
             actual_log_prob = dist.log_prob(x).sum()
             expected_log_prob = scipy.stats.beta.logpdf(x, alpha, beta)[0]
-            self.assertAlmostEqual(actual_log_prob, expected_log_prob, places=3)
+            self.assertAlmostEqual(actual_log_prob, expected_log_prob, places=3, allow_inf=True)
 
     # This is a randomized test.
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
@@ -712,6 +759,25 @@ class TestDistributionShapes(TestCase):
         self.assertEqual(normal.sample((3, 2)).size(), torch.Size((3, 2, 2)))
         self.assertEqual(normal.log_prob(self.tensor_sample_1).size(), torch.Size((3, 2)))
         self.assertRaises(ValueError, normal.log_prob, self.tensor_sample_2)
+
+    def test_uniform_shape_scalar_params(self):
+        uniform = Uniform(0, 1)
+        self.assertEqual(uniform._batch_shape, torch.Size())
+        self.assertEqual(uniform._event_shape, torch.Size())
+        self.assertEqual(uniform.sample().size(), torch.Size((1,)))
+        self.assertEqual(uniform.sample(torch.Size((3, 2))).size(), torch.Size((3, 2)))
+        self.assertRaises(ValueError, uniform.log_prob, self.scalar_sample)
+        self.assertEqual(uniform.log_prob(self.tensor_sample_1).size(), torch.Size((3, 2)))
+        self.assertEqual(uniform.log_prob(self.tensor_sample_2).size(), torch.Size((3, 2, 3)))
+
+    def test_uniform_shape_tensor_params(self):
+        uniform = Uniform(torch.Tensor([0, 0]), torch.Tensor([1, 1]))
+        self.assertEqual(uniform._batch_shape, torch.Size((2,)))
+        self.assertEqual(uniform._event_shape, torch.Size(()))
+        self.assertEqual(uniform.sample().size(), torch.Size((2,)))
+        self.assertEqual(uniform.sample(torch.Size((3, 2))).size(), torch.Size((3, 2, 2)))
+        self.assertEqual(uniform.log_prob(self.tensor_sample_1).size(), torch.Size((3, 2)))
+        self.assertRaises(ValueError, uniform.log_prob, self.tensor_sample_2)
 
     def test_exponential_shape_scalar_param(self):
         expon = Exponential(1.)

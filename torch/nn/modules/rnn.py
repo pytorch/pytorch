@@ -138,7 +138,7 @@ class RNNBase(Module):
         if self.input_size != input.size(-1):
             raise RuntimeError(
                 'input.size(-1) must be equal to input_size. Expected {}, got {}'.format(
-                    fn.input_size, input.size(-1)))
+                    self.input_size, input.size(-1)))
 
         if is_input_packed:
             mini_batch = batch_sizes[0]
@@ -280,6 +280,7 @@ class RNN(RNNBase):
         - **input** (seq_len, batch, input_size): tensor containing the features
           of the input sequence. The input can also be a packed variable length
           sequence. See :func:`torch.nn.utils.rnn.pack_padded_sequence`
+          or :func:`torch.nn.utils.rnn.pack_sequence`
           for details.
         - **h_0** (num_layers * num_directions, batch, hidden_size): tensor
           containing the initial hidden state for each element in the batch.
@@ -368,7 +369,8 @@ class LSTM(RNNBase):
         - **input** (seq_len, batch, input_size): tensor containing the features
           of the input sequence.
           The input can also be a packed variable length sequence.
-          See :func:`torch.nn.utils.rnn.pack_padded_sequence` for details.
+          See :func:`torch.nn.utils.rnn.pack_padded_sequence` or
+          :func:`torch.nn.utils.rnn.pack_sequence` for details.
         - **h_0** (num_layers \* num_directions, batch, hidden_size): tensor
           containing the initial hidden state for each element in the batch.
         - **c_0** (num_layers \* num_directions, batch, hidden_size): tensor

@@ -29,7 +29,8 @@
 #define SIGNAL_HANDLER(SIGNAL, HANDLER_NAME, ERROR_MSG)                       \
 static void HANDLER_NAME(int sig, siginfo_t *info, void *ctx)                 \
 {                                                                             \
-  (void)write(STDERR_FILENO, ERROR_MSG, sizeof(ERROR_MSG) / sizeof(char));    \
+  auto _w = write(STDERR_FILENO, ERROR_MSG, sizeof(ERROR_MSG) / sizeof(char));\
+  (void)_w;                                                                   \
   struct sigaction sa;                                                        \
   sa.sa_handler = SIG_DFL;                                                    \
   sa.sa_flags = 0;                                                            \

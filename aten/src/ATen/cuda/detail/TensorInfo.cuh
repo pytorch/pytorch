@@ -49,7 +49,7 @@ TensorInfo<T, IndexType>::TensorInfo(T* p,
                                      IndexType st[MAX_TENSORINFO_DIMS]) {
   data = p;
   dims = dim;
-  assert(dims > 0 && dims < MAX_TENSORINFO_DIMS);
+  assert(dims < MAX_TENSORINFO_DIMS);
 
   for (int i = 0; i < dim; ++i) {
     sizes[i] = sz[i];
