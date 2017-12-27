@@ -266,7 +266,9 @@ def _graph_op(g, opname, *raw_args, **kwargs):
     kwargs = dict((k, v) for k, v in kwargs.items() if v is not None)
 
     def const_if_tensor(arg):
-        if isinstance(arg, torch._C.Value):
+        if arg is None:
+            return arg
+        elif isinstance(arg, torch._C.Value):
             return arg
         else:
             return g.op("Constant", value_z=arg)
