@@ -15,6 +15,20 @@ class Distribution(object):
         self._batch_shape = batch_shape
         self._event_shape = event_shape
 
+    @property
+    def batch_shape(self):
+        """
+        Returns the shape over which parameters are batched.
+        """
+        return self._batch_shape
+
+    @property
+    def event_shape(self):
+        """
+        Returns the shape of a single sample (without batching).
+        """
+        return self._event_shape
+
     def sample(self, sample_shape=torch.Size()):
         """
         Generates a sample_shape shaped sample or sample_shape shaped batch of
@@ -74,7 +88,7 @@ class Distribution(object):
         """
         raise NotImplementedError
 
-    def _extended_shape(self, sample_shape=()):
+    def _extended_shape(self, sample_shape=torch.Size()):
         """
         Returns the size of the sample returned by the distribution, given
         a `sample_shape`. Note, that the batch and event shapes of a distribution
@@ -84,7 +98,7 @@ class Distribution(object):
         Args:
             sample_shape (torch.Size): the size of the sample to be drawn.
         """
-        shape = sample_shape + self._batch_shape + self._event_shape
+        shape = torch.Size(sample_shape + self._batch_shape + self._event_shape)
         if not shape:
             shape = torch.Size((1,))
         return shape
