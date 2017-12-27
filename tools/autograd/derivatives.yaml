@@ -98,11 +98,9 @@
 - name: alias(Tensor self)
   self: grad
 
-- name: all  # fallthrough
-
-- name: any  # fallthrough
-
-- name: arange  # fallthrough
+# all
+# any
+# arange
 
 - name: as_strided(Tensor self, IntList size, IntList stride, int64_t storage_offset)
   self: as_strided_backward(grad, TensorGeometry(self), size, stride, storage_offset)
@@ -177,7 +175,7 @@
 - name: conv_tbc(Tensor self, Tensor weight, Tensor bias, int64_t pad)
   self, weight, bias: conv_tbc_backward(grad, self, weight, bias, pad)
 
-- name: data_ptr  # fallthrough
+# data_ptr
 
 - name: _det_with_svd(Tensor self)
   self: _det_with_svd_backward(grads, self, result0, result1, result2, result3)
@@ -210,7 +208,7 @@
   self: zeros_like(self)
   other: zeros_like(other)
 
-- name: equal  # fallthrough
+# equal
 
 - name: erf(Tensor self)
   self: 2.0 / sqrt(M_PI) * exp(-(self.pow(2))) * grad
@@ -227,7 +225,7 @@
 - name: exponential(Tensor self, double lambd, Generator generator)
   self: zeros_like(grad)
 
-- name: eye  # fallthrough
+# eye
 
 - name: fill(Tensor self, Scalar value)
   self: zeros_like(grad)
@@ -273,7 +271,7 @@
   self: std::get<0>(gesv(grad, A.t()))
   A: -at::mm(std::get<0>(gesv(grad, A.t())), solution.t())
 
-- name: get_device  # fallthrough
+# get_device
 
 - name: gt(Tensor self, Scalar other)
   self: zeros_like(self)
@@ -302,13 +300,10 @@
 - name: inverse(Tensor self)
   self: -at::mm(output.t(), at::mm(grad, output.t()))
 
-- name: is_contiguous  # fallthrough
-
-- name: is_same_size  # fallthrough
-
-- name: is_signed  # fallthrough
-
-- name: is_set_to  # fallthrough
+# is_contiguous
+# is_same_size
+# is_signed
+# is_set_to
 
 - name: kthvalue(Tensor self, int64_t k, int64_t dim, bool keepdim)
   self: select_backward(grad, dim, indices, self.sizes(), keepdim)
@@ -338,7 +333,7 @@
 - name: log_normal(Tensor self, double mean, double std, Generator generator)
   self: zeros_like(grad)
 
-- name: logspace  # fallthrough
+# logspace
 
 - name: lt(Tensor self, Scalar other)
   self: zeros_like(self)
@@ -442,8 +437,8 @@
   mean: grad.type().zeros(mean.sizes())
   std: grad.type().zeros(std.sizes())
 
-- name: numel  # fallthrough
-- name: ones  # fallthrough
+# numel
+# ones
 
 - name: orgqr(Tensor self, Tensor input2)
   self: not_implemented("orgqr")
@@ -490,8 +485,8 @@
 - name: qr(Tensor self)
   self: not_implemented("qr")
 
-- name: rand  # fallthrough
-- name: randn  # fallthrough
+# rand
+# randn
 
 - name: random(Tensor self, int64_t from, int64_t to, Generator generator)
   self: zeros_like(grad)
@@ -502,9 +497,8 @@
 - name: random(Tensor self, Generator generator)
   self: zeros_like(grad)
 
-- name: randperm  # fallthrough
-
-- name: range  # fallthrough
+# randperm
+# range
 
 - name: reciprocal(Tensor self)
   self: grad / -(self * self)
@@ -538,7 +532,7 @@
   self: grad
   src: grad.gather(dim, index)
 
-- name: set  # fallthrough
+# set
 
 - name: sigmoid(Tensor self)
   self: _sigmoid_backward(grad, result)
@@ -552,7 +546,7 @@
 - name: sinh(Tensor self)
   self: grad * self.cosh()
 
-- name: size  # fallthrough
+# size
 
 - name: sort(Tensor self, int64_t dim, bool descending)
   self: select_backward(grad, dim, indices, self.sizes(), true)
@@ -575,9 +569,8 @@
 - name: std(Tensor self, int64_t dim, bool unbiased, bool keepdim)
   self: var_backward(grad * (destination * 2).reciprocal(), self, dim, unbiased, keepdim)
 
-- name: storage_offset  # fallthrough
-
-- name: stride  # fallthrough
+# storage_offset
+# stride
 
 - name: sub(Tensor self, Scalar other, *, Scalar alpha)
   self: grad
@@ -610,7 +603,7 @@
 - name: tanh(Tensor self)
   self: _tanh_backward(grad, result)
 
-- name: tensor  # fallthrough
+# tensor
 
 - name: topk(Tensor self, int64_t k, int64_t dim, bool largest, bool sorted)
   self: select_backward(grad, dim, indices, self.sizes(), true)
@@ -659,7 +652,7 @@
 - name: zero(Tensor self)
   self: zeros_like(grad)
 
-- name: zeros  # fallthrough
+# zeros
 
 - name: _sparse_mask(Tensor self, SparseTensor mask)
   self: not_implemented("_sparse_mask")
