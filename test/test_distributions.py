@@ -1,3 +1,27 @@
+"""
+Note [Randomized statistical tests]
+-----------------------------------
+
+This note describes how to maintain tests in this file as random sources
+change. This file contains two types of randomized tests:
+
+1. The easier type of randomized test are tests that should always pass but are
+   initialized with random data. If these fail something is wrong, but it's
+   fine to use a fixed seed by inheriting from common.TestCase.
+
+2. The trickier tests are statistical tests. These tests explicitly call
+   set_rng_seed(n) and are marked "see Note [Randomized statistical tests]".
+   These statistical tests have a known positive failure rate
+   (we set failure_rate=1e-3 by default). We need to balance strength of these
+   tests with annoyance of false alarms. One way that works is to specifically
+   set seeds in each of the randomized tests. When a random generator
+   occasionally changes (as in #4312 vectorizing the Box-Muller sampler), some
+   of these statistical tests may (rarely) fail. If one fails in this case,
+   it's fine to increment the seed of the failing test (but you shouldn't need
+   to increment it more than once; otherwise something is probably actually
+   wrong).
+"""
+
 import math
 import unittest
 from collections import namedtuple
@@ -347,10 +371,9 @@ class TestDistributions(TestCase):
 
         self._check_log_prob(Normal(mean, std), ref_log_prob)
 
-    # This is a randomized test.
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_normal_sample(self):
-        set_rng_seed()
+        set_rng_seed(0)  # see Note [Randomized statistical tests]
         for mean, std in product([-1.0, 0.0, 1.0], [0.1, 1.0, 10.0]):
             self._check_sampler_sampler(Normal(mean, std),
                                         scipy.stats.norm(loc=mean, scale=std),
@@ -383,10 +406,9 @@ class TestDistributions(TestCase):
 
         self._check_log_prob(Exponential(rate), ref_log_prob)
 
-    # This is a randomized test.
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_exponential_sample(self):
-        set_rng_seed(1)
+        set_rng_seed(1)  # see Note [Randomized statistical tests]
         for rate in [1e-5, 1.0, 10.]:
             self._check_sampler_sampler(Exponential(rate),
                                         scipy.stats.expon(scale=1. / rate),
@@ -407,7 +429,7 @@ class TestDistributions(TestCase):
         self.assertEqual(Laplace(-0.7, 50.0).sample_n(1).size(), (1,))
 
         # sample check for extreme value of mean, std
-        set_rng_seed()
+        set_rng_seed(0)
         self.assertEqual(Laplace(loc_delta, scale_delta).sample(sample_shape=(1, 2)),
                          torch.Tensor([[[1.0, 0.0], [1.0, 0.0]]]),
                          prec=1e-4)
@@ -435,10 +457,9 @@ class TestDistributions(TestCase):
 
         self._check_log_prob(Laplace(loc, scale), ref_log_prob)
 
-    # This is a randomized test.
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_laplace_sample(self):
-        set_rng_seed(1)
+        set_rng_seed(1)  # see Note [Randomized statistical tests]
         for loc, scale in product([-1.0, 0.0, 1.0], [0.1, 1.0, 10.0]):
             self._check_sampler_sampler(Laplace(loc, scale),
                                         scipy.stats.laplace(loc=loc, scale=scale),
@@ -465,19 +486,17 @@ class TestDistributions(TestCase):
 
         self._check_log_prob(Gamma(alpha, beta), ref_log_prob)
 
-    # This is a randomized test.
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_gamma_sample(self):
-        set_rng_seed()
+        set_rng_seed(0)  # see Note [Randomized statistical tests]
         for alpha, beta in product([0.1, 1.0, 5.0], [0.1, 1.0, 10.0]):
             self._check_sampler_sampler(Gamma(alpha, beta),
                                         scipy.stats.gamma(alpha, scale=1.0 / beta),
                                         'Gamma(alpha={}, beta={})'.format(alpha, beta))
 
-    # This is a randomized test.
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_gamma_sample_grad(self):
-        set_rng_seed(1)
+        set_rng_seed(1)  # see Note [Randomized statistical tests]
         num_samples = 100
         for alpha in [1e-3, 1e-2, 1e-1, 1e0, 1e1, 1e2, 1e3, 1e4]:
             alphas = Variable(torch.Tensor([alpha] * num_samples), requires_grad=True)
@@ -522,10 +541,9 @@ class TestDistributions(TestCase):
             expected_log_prob = scipy.stats.dirichlet.logpdf(x[i].numpy(), alpha.numpy())
             self.assertAlmostEqual(actual_log_prob[i], expected_log_prob, places=3)
 
-    # This is a randomized test.
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_dirichlet_sample(self):
-        set_rng_seed()
+        set_rng_seed(0)  # see Note [Randomized statistical tests]
         alpha = torch.exp(torch.randn(3))
         self._check_sampler_sampler(Dirichlet(alpha),
                                     scipy.stats.dirichlet(alpha.numpy()),
@@ -555,10 +573,9 @@ class TestDistributions(TestCase):
             expected_log_prob = scipy.stats.beta.logpdf(x, alpha, beta)[0]
             self.assertAlmostEqual(actual_log_prob, expected_log_prob, places=3)
 
-    # This is a randomized test.
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_beta_sample(self):
-        set_rng_seed(1)
+        set_rng_seed(1)  # see Note [Randomized statistical tests]
         for alpha, beta in product([0.1, 1.0, 10.0], [0.1, 1.0, 10.0]):
             self._check_sampler_sampler(Beta(alpha, beta),
                                         scipy.stats.beta(alpha, beta),
@@ -568,10 +585,9 @@ class TestDistributions(TestCase):
             x = Beta(Tensor([1e-6]), Tensor([1e-6])).sample()[0]
             self.assertTrue(np.isfinite(x) and x > 0, 'Invalid Beta.sample(): {}'.format(x))
 
-    # This is a randomized test.
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_beta_sample_grad(self):
-        set_rng_seed()
+        set_rng_seed(0)  # see Note [Randomized statistical tests]
         num_samples = 20
         for alpha, beta in product([1e-2, 1e0, 1e2], [1e-2, 1e0, 1e2]):
             alphas = Variable(torch.Tensor([alpha] * num_samples), requires_grad=True)

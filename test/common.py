@@ -97,7 +97,7 @@ def to_gpu(obj, type_map={}):
         return deepcopy(obj)
 
 
-def set_rng_seed(seed=0):
+def set_rng_seed(seed):
     torch.manual_seed(seed)
     if TEST_NUMPY:
         numpy.random.seed(seed)
