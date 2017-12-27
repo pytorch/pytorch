@@ -4,7 +4,7 @@ from collections import namedtuple
 from itertools import product
 
 import torch
-from common import TestCase, run_tests
+from common import TestCase, run_tests, set_rng_seed
 from torch.autograd import Variable, gradcheck
 from torch.distributions import (Bernoulli, Beta, Categorical, Dirichlet,
                                  Exponential, Gamma, Laplace, Normal,
@@ -17,12 +17,6 @@ try:
     import scipy.special
 except ImportError:
     TEST_NUMPY = False
-
-
-def set_rng_seed(seed=0):
-    torch.manual_seed(seed)
-    if TEST_NUMPY:
-        np.random.seed(seed)
 
 
 # Register all distributions for generic tests.
@@ -115,9 +109,6 @@ EXAMPLES = [
 
 
 class TestDistributions(TestCase):
-    def setUp(self):
-        set_rng_seed(0)
-
     def _gradcheck_log_prob(self, dist_ctor, ctor_params):
         # performs gradient checks on log_prob
         distribution = dist_ctor(*ctor_params)
@@ -682,7 +673,7 @@ class TestDistributions(TestCase):
 
 class TestDistributionShapes(TestCase):
     def setUp(self):
-        set_rng_seed(0)
+        super(TestCase, self).setUp()
         self.scalar_sample = 1
         self.tensor_sample_1 = torch.ones(3, 2)
         self.tensor_sample_2 = torch.ones(3, 2, 3)
