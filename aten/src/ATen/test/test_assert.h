@@ -44,3 +44,8 @@ try {                                                               \
 #define ASSERT_ALLCLOSE(t1, t2)   \
   ASSERT(t1.is_same_size(t2));    \
   ASSERT(t1.allclose(t2));
+
+// allclose broadcasts, so check same size before allclose.
+#define ASSERT_ALLCLOSE_TOLERANCES(t1, t2, atol, rtol)   \
+  ASSERT(t1.is_same_size(t2));    \
+  ASSERT(t1.allclose(t2, atol, rtol));
