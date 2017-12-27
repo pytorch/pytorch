@@ -99,6 +99,9 @@ bool Context::hasCUDA() const {
 cudaStream_t Context::getCurrentCUDAStream() const {
   return THCState_getCurrentStream(thc_state);
 }
+struct cudaDeviceProp* Context::getCurrentDeviceProperties() const {
+  return THCState_getCurrentDeviceProperties(thc_state);
+}
 #endif
 
 int64_t Context::current_device() const {

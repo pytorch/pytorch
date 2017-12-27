@@ -139,7 +139,7 @@ int main() {
   ASSERT(what.toTensor().type().scalarType() == kLong);
   ASSERT(Scalar(CPU(kFloat).ones({})).toTensor().type().scalarType() == kFloat);
 
-  dispatch_all<Foo>(x.type(),"foo",x,prev_h);
+  dispatch_all<void, Foo>(x.type(),"foo",x,prev_h);
 
   // test direct C-scalar type conversions
   try {
