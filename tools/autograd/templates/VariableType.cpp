@@ -187,27 +187,27 @@ std::vector<at::Tensor> VariableType::unpack_idxs(at::TensorList tl, const char 
   return ret;
 }
 
-Variable VariableType::as_variable(Tensor tensor) const {
+static Variable as_variable(Tensor tensor) {
   return make_variable(std::move(tensor));
 }
 
-std::tuple<Variable, Variable>
-VariableType::as_variable(std::tuple<Tensor, Tensor> tensors) const {
+static std::tuple<Variable, Variable>
+as_variable(std::tuple<Tensor, Tensor> tensors) {
   return std::make_tuple<>(
       make_variable(std::move(std::get<0>(tensors))),
       make_variable(std::move(std::get<1>(tensors))));
 }
 
-std::tuple<Variable, Variable, Variable>
-VariableType::as_variable(std::tuple<Tensor, Tensor, Tensor> tensors) const {
+static std::tuple<Variable, Variable, Variable>
+as_variable(std::tuple<Tensor, Tensor, Tensor> tensors) {
   return std::make_tuple<>(
       make_variable(std::move(std::get<0>(tensors))),
       make_variable(std::move(std::get<1>(tensors))),
       make_variable(std::move(std::get<2>(tensors))));
 }
 
-std::tuple<Variable, Variable, Variable, Variable>
-VariableType::as_variable(std::tuple<Tensor, Tensor, Tensor, Tensor> tensors) const {
+static std::tuple<Variable, Variable, Variable, Variable>
+as_variable(std::tuple<Tensor, Tensor, Tensor, Tensor> tensors) {
   return std::make_tuple<>(
       make_variable(std::move(std::get<0>(tensors))),
       make_variable(std::move(std::get<1>(tensors))),
@@ -215,7 +215,7 @@ VariableType::as_variable(std::tuple<Tensor, Tensor, Tensor, Tensor> tensors) co
       make_variable(std::move(std::get<3>(tensors))));
 }
 
-std::vector<Variable> VariableType::as_variable(TensorList tl) const {
+static std::vector<Variable> as_variable(TensorList tl) {
   std::vector<Variable> variables;
   for (auto& t : tl) {
     variables.emplace_back(make_variable(std::move(t)));
@@ -332,11 +332,11 @@ static void set_history(at::ArrayRef<Variable> vl, std::shared_ptr<Function> gra
   }
 }
 
-variable_list flatten(const TensorList& tensors) {
+static variable_list flatten(const TensorList& tensors) {
   return cast_tensor_list(tensors);
 }
 
-variable_list flatten(const Tensor& x, const TensorList& y) {
+static variable_list flatten(const Tensor& x, const TensorList& y) {
   std::vector<Variable> r;
   r.reserve(1 + y.size());
   r.emplace_back(x);
@@ -344,7 +344,7 @@ variable_list flatten(const Tensor& x, const TensorList& y) {
   return r;
 }
 
-variable_list flatten(const Tensor& x, const TensorList& y, const Tensor& z) {
+static variable_list flatten(const Tensor& x, const TensorList& y, const Tensor& z) {
   std::vector<Variable> r;
   r.reserve(2 + y.size());
   r.emplace_back(x);
@@ -353,7 +353,7 @@ variable_list flatten(const Tensor& x, const TensorList& y, const Tensor& z) {
   return r;
 }
 
-std::vector<Tensor> as_tensor_list(std::vector<Variable> &vars) {
+static std::vector<Tensor> as_tensor_list(std::vector<Variable> &vars) {
   std::vector<Tensor> tensors;
   for (auto& v : vars) {
     tensors.emplace_back(std::move(v));
@@ -413,7 +413,7 @@ Tensor VariableType::contiguous(const Tensor & self) const {
   return self.clone();
 }
 
-std::vector<int64_t> to_arg_sizes(TensorList tensors, int64_t dim) {
+static std::vector<int64_t> to_arg_sizes(TensorList tensors, int64_t dim) {
   std::vector<int64_t> arg_sizes(tensors.size());
   for (size_t i = 0; i < tensors.size(); ++i) {
     arg_sizes[i] = tensors[i].size(dim);
