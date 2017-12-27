@@ -3974,7 +3974,7 @@
 ]]
 
 [[
-  name: _copyIgnoringOverlaps_
+  name: _copy_ignoring_overlaps_
   cname: copyIgnoringOverlaps
   return: self
   backends:

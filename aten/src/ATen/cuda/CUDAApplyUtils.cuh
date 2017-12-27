@@ -424,7 +424,7 @@ bool CUDA_tensor_apply2(at::Tensor a,
     // Ignore overlaps when copying back; if we use copy
     // instead, it will recursively try and invoke ourselves to make
     // oldA contiguous.
-    oldA._copyIgnoringOverlaps_(a);
+    oldA._copy_ignoring_overlaps_(a);
     a = oldA;
   }
 
@@ -432,7 +432,7 @@ bool CUDA_tensor_apply2(at::Tensor a,
     // Ignore overlaps when copying back; if we use copy
     // instead, it will recursively try and invoke ourselves to make
     // oldB contiguous.
-    oldB._copyIgnoringOverlaps_(b);
+    oldB._copy_ignoring_overlaps_(b);
     b = oldB;
   }
 
@@ -649,7 +649,7 @@ bool CUDA_tensor_apply3(at::Tensor a,
     // Ignore overlaps when copying back; if we use THCTensor_copy
     // instead, it will recursively try and invoke ourselves to make
     // oldA contiguous.
-    oldA._copyIgnoringOverlaps_(a);
+    oldA._copy_ignoring_overlaps_(a);
     a = oldA;
   }
 
@@ -657,7 +657,7 @@ bool CUDA_tensor_apply3(at::Tensor a,
     // Ignore overlaps when copying back; if we use THCTensor_copy
     // instead, it will recursively try and invoke ourselves to make
     // oldB contiguous.
-    oldB._copyIgnoringOverlaps_(b);
+    oldB._copy_ignoring_overlaps_(b);
     b = oldB;
   }
 
@@ -665,7 +665,7 @@ bool CUDA_tensor_apply3(at::Tensor a,
     // Ignore overlaps when copying back; if we use THCTensor_copy
     // instead, it will recursively try and invoke ourselves to make
     // oldC contiguous.
-    oldC._copyIgnoringOverlaps_(c);
+    oldC._copy_ignoring_overlaps_(c);
     c = oldC;
   }
 
@@ -924,7 +924,7 @@ bool CUDA_tensor_apply4(at::Tensor a,
     // Ignore overlaps when copying back; if we use THCTensor_copy
     // instead, it will recursively try and invoke ourselves to make
     // oldA contiguous.
-    oldA._copyIgnoringOverlaps_(a);
+    oldA._copy_ignoring_overlaps_(a);
     a = oldA;
   }
 
@@ -932,7 +932,7 @@ bool CUDA_tensor_apply4(at::Tensor a,
     // Ignore overlaps when copying back; if we use THCTensor_copy
     // instead, it will recursively try and invoke ourselves to make
     // oldB contiguous.
-    oldB._copyIgnoringOverlaps_(b);
+    oldB._copy_ignoring_overlaps_(b);
     b = oldB;
   }
 
@@ -940,7 +940,7 @@ bool CUDA_tensor_apply4(at::Tensor a,
     // Ignore overlaps when copying back; if we use THCTensor_copy
     // instead, it will recursively try and invoke ourselves to make
     // oldC contiguous.
-    oldC._copyIgnoringOverlaps_(c);
+    oldC._copy_ignoring_overlaps_(c);
     c = oldC;
   }
 
@@ -948,7 +948,7 @@ bool CUDA_tensor_apply4(at::Tensor a,
     // Ignore overlaps when copying back; if we use THCTensor_copy
     // instead, it will recursively try and invoke ourselves to make
     // oldC contiguous.
-    oldD._copyIgnoringOverlaps_(c);
+    oldD._copy_ignoring_overlaps_(c);
     d = oldD;
   }
 
