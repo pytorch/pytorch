@@ -10,7 +10,7 @@ void assertEqualTensorList(TensorList t1, TensorList t2) {
   }
 }
 
-void test(Type & T) {
+void test(Type & T, Type & AccT) {
   auto t = T.randn({3, 3});
   // split
   {
@@ -103,12 +103,19 @@ void test(Type & T) {
     ASSERT_ALLCLOSE(d1o.matmul(d5), d1o.expand({24, 1, 2}).bmm(d5.view({24, 2, 3})).view({3, 2, 4, 3}));
 
     // > 2-d, 2-d
+    // we use a "folding" algorithm in this case of matmul, so the direct comparison to bmm doesn't work;
+    // instead, compare to the higher precision computation (technically, we should always do this).
+    // Tolerances are selected empirically.
+    double atol = 1e-04;
+    double rtol = 1e-06;
     d2 = T.randn({3, 4});
     d2o = T.randn({4, 2});
-    ASSERT_ALLCLOSE(d3.matmul(d2), d3.bmm(d2.expand({5, 3, 4})));
-    ASSERT_ALLCLOSE(d2o.matmul(d3), d2o.expand({5, 4, 2}).bmm(d3));
+    auto result = d5.matmul(d2).toType(AccT);
 
-    ASSERT_ALLCLOSE(d5.matmul(d2), d5.view({24, 2, 3}).bmm(d2.expand({24, 3, 4})).view({3, 2, 4, 2, 4}));
+    auto d5Acc = d5.toType(AccT);
+    auto d2Acc = d2.toType(AccT);
+    auto acc_result = d5Acc.view({24, 2, 3}).bmm(d2Acc.expand({24, 3, 4})).view({3, 2, 4, 2, 4});
+    ASSERT_ALLCLOSE_TOLERANCES(result, acc_result, atol, rtol);
     ASSERT_ALLCLOSE(d2o.matmul(d5), d2o.expand({24, 4, 2}).bmm(d5.view({24, 2, 3})).view({3, 2, 4, 4, 3}));
 
     // > 2-d, > 2-d
@@ -169,12 +176,10 @@ void test(Type & T) {
 }
 
 int main() {
-  Type & T = CPU(kFloat);
-  test(T);
+  test(CPU(kFloat), CPU(kDouble));
 
   if (at::hasCUDA()) {
-    Type & CT = CUDA(kFloat);
-    test(CT);
+    test(CUDA(kFloat), CUDA(kDouble));
   }
 
   return 0;
