@@ -36,7 +36,7 @@ class OneHotCategorical(Distribution):
     def sample(self, sample_shape=torch.Size()):
         sample_shape = torch.Size(sample_shape)
         probs = self._categorical.probs
-        one_hot = probs.new(sample_shape + probs.size()).zero_()
+        one_hot = probs.new(self._extended_shape(sample_shape)).zero_()
         indices = self._categorical.sample(sample_shape)
         if indices.dim() < one_hot.dim():
             indices = indices.unsqueeze(-1)
@@ -51,7 +51,7 @@ class OneHotCategorical(Distribution):
 
     def enumerate_support(self):
         probs = self._categorical.probs
-        n = probs.shape[-1]
+        n = self.event_shape[0]
         if isinstance(probs, Variable):
             values = Variable(torch.eye(n, out=probs.data.new(n, n)))
         else:
