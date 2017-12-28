@@ -35,7 +35,15 @@ def create_autograd_function(name, derivatives, num_inputs, buffers=None):
 
 
 def create_derivative(declaration, formula, output_indices, var_names):
-    returns = [r for r in declaration['returns'] if r.get('name') != 'self']
+    def transform_return(r):
+        # In-place functions take in and return self. Call the modified version
+        # "output" so that it can be referred to in derivative definitions.
+        if r['name'] == 'self':
+            r = copy.deepcopy(r)
+            r['name'] = 'output'
+        return r
+
+    returns = [transform_return(r) for r in declaration['returns']]
     arguments = declaration['arguments']
     formula, saved_inputs = saved_variables(formula, arguments)
     formula, saved_outputs = saved_variables(formula, returns)
