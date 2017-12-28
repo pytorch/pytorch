@@ -152,6 +152,7 @@ static ScalarType dtype_to_aten(int dtype) {
     case NPY_DOUBLE: return kDouble;
     case NPY_FLOAT: return kFloat;
     case NPY_HALF: return kHalf;
+    case NPY_LONGLONG:
     case NPY_INT64: return kLong;
     case NPY_INT32: return kInt;
     case NPY_INT16: return kShort;

@@ -260,6 +260,9 @@
 # _s_where derivative.
 - func: where(BoolTensor condition, Tensor self, Tensor other) -> Tensor
 - func: _s_where(BoolTensor condition, Tensor self, Tensor other) -> Tensor
+  dispatch:
+    CPU: _s_where_cpu
+    CUDA: _s_where_cuda
 
 - func: _standard_gamma_grad(Tensor self, Tensor output) -> Tensor
   dispatch:

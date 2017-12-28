@@ -1,3 +1,8 @@
+# Generates Python bindings for ATen functions
+#
+# The bindings are generated as methods on python_variable or functions on the
+# torch._C._nn object.
+
 from .nested_dict import nested_dict
 from tools.shared.module_loader import import_module
 
