@@ -48,3 +48,15 @@ Probability distributions - torch.distributions
 
 .. autoclass:: Normal
     :members:
+
+:hidden:`OneHotCategorical`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: OneHotCategorical
+    :members:
+
+:hidden:`Uniform`
+~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: Uniform
+    :members:
