@@ -84,6 +84,9 @@ struct Tensor : public detail::TensorBase {
     return pImpl->unsafeGetTH(retain);
   }
 
+  // Purposely not defined here to avoid inlining
+  void print() const;
+
   //toLongData(), toFloatData() etc.
   #define TO_TYPE_DATA(T,name,_) \
   T * to##name##Data() const;
