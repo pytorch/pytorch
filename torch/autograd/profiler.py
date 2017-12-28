@@ -10,7 +10,7 @@ from collections import defaultdict, namedtuple
 try:
     FileNotFoundError
 except NameError:
-    #py2.7
+    # py2.7
     FileNotFoundError = IOError
 
 
