@@ -3125,6 +3125,81 @@ void THTensor_(atan2)(THTensor *r_, THTensor *tx, THTensor *ty)
   TH_TENSOR_APPLY3(real, r_, real, tx, real, ty, *r__data = TH_MATH_NAME(atan2)(*tx_data,*ty_data););
 }
 
+// Some helpers for THTensor_(digamma)
+accreal THTensor_(polevl)(accreal x, accreal *A, size_t len);
+accreal THTensor_(digamma_asym)(accreal x);
+real THTensor_(digamma_one)(real x);
+
+/*
+ * Evaluates A[0] x^len + A[1] X^{len-1} + ... + A[len-1]
+ */
+inline accreal THTensor_(polevl)(accreal x, accreal *A, size_t len) {
+  accreal result = 0;
+  for (size_t i = 0; i <= len; i++) {
+    result = result * x + A[i];
+  }
+  return result;
+}
+
+inline accreal THTensor_(digamma_asym)(accreal x) {
+  static accreal A[] = {
+     8.33333333333333333333E-2,
+    -2.10927960927960927961E-2,
+     7.57575757575757575758E-3,
+    -4.16666666666666666667E-3,
+     3.96825396825396825397E-3,
+    -8.33333333333333333333E-3,
+     8.33333333333333333333E-2
+  };
+
+  accreal y = 0;
+  if (x < 1.0e17) {
+	  accreal z = 1.0 / (x * x);
+	  y = z * THTensor_(polevl)(z, A, 6);
+  }
+  return log(x) - (0.5 / x) - y;
+}
+
+/*
+ * Algorithm adapted from Cephes
+ */
+inline real THTensor_(digamma_one)(real x) {
+  static accreal PI = 3.14159265358979323846;
+  static accreal PSI_10 = 2.25175258906672110764;
+  if (x == 0) {
+    return INFINITY;
+  }
+
+  int x_is_integer = x == floor(x);
+  if (x < 0) {
+    if (x_is_integer) {
+      return INFINITY;
+    }
+    return THTensor_(digamma_one)(1 - x) - PI / tan(PI * x);
+  }
+
+	// Push x to be >= 10
+  accreal result = 0;
+  while (x < 10) {
+    result -= 1 / x;
+    x += 1;
+  }
+  if (x == 10) {
+    return result + PSI_10;
+  }
+
+  return THTensor_(digamma_asym)(x) + result;
+}
+
+void THTensor_(digamma)(THTensor *r_, THTensor *t)
+{
+  THTensor_(resizeAs)(r_, t);
+  TH_TENSOR_APPLY2(real, r_, real, t,
+    accreal x = *t_data;
+    *r__data = THTensor_(digamma_one)(x);
+  );
+}
+
 void THTensor_(lerp)(THTensor *r_, THTensor *a, THTensor *b, real weight)
 {
   THArgCheck(THTensor_(nElement)(a) == THTensor_(nElement)(b), 2, "sizes do not match");

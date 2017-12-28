@@ -364,6 +364,7 @@ simple_pointwise_float = [
     'round',
     'trunc',
     'ceil',
+    'lgamma',
 ]
 
 for fn in simple_pointwise_float:
@@ -1092,6 +1093,23 @@ class TestCuda(TestCase):
         # Stability for outer dimensions
         tensor = tensor.unsqueeze(1)
         self.assertEqual(tensor.var(0)[0], 0.03125)
+
+    def test_digamma(self):
+        def test(use_double=False):
+            cpu_tensor = torch.randn(10, 10, 10)
+            gpu_tensor = cpu_tensor.cuda()
+            zeros = torch.zeros(10, 10, 10)
+            if (use_double):
+                cpu_tensor = cpu_tensor.double()
+                gpu_tensor = gpu_tensor.double()
+                zeros = zeros.double()
+            cpu_out = cpu_tensor.digamma()
+            gpu_out = gpu_tensor.digamma()
+            norm_errors = (gpu_out - cpu_out.cuda()) / gpu_out
+            self.assertEqual(norm_errors, zeros)
+
+        test(True)
+        test(False)
 
     @unittest.skipIf(not HAS_MAGMA, "no MAGMA library detected")
     def test_symeig(self):
