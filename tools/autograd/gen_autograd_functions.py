@@ -4,8 +4,10 @@
 #  Functions.h/cpp: subclasses of autograd::Function
 #  python_functions.h/cpp: Python bindings for the above classes
 #
+import re
 from .utils import nested_dict, CodeTemplate, write
-from .gen_variable_type import VIEW_FUNCTIONS, uses_single_grad, template_path
+from .gen_autograd import VIEW_FUNCTIONS, template_path
+from .utils import IDENT_REGEX
 
 FUNCTIONS_H = CodeTemplate.from_file(template_path + '/Functions.h')
 FUNCTIONS_CPP = CodeTemplate.from_file(template_path + '/Functions.cpp')
@@ -158,3 +160,13 @@ def process_function(func):
     else:
         env['superclass'] = 'TraceableFunction'
     return nested_dict(env, func)
+
+
+def uses_single_grad(func):
+    if func is None:
+        return False
+    for derivative in func['derivatives']:
+        formula = derivative['formula']
+        if re.search(IDENT_REGEX.format('grad'), formula):
+            return True
+    return False
