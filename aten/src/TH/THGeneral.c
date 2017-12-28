@@ -292,6 +292,11 @@ double THLog1p(const double x)
 #endif
 }
 
+double THExpm1(const double x)
+{
+  return expm1(x);
+}
+
 void THSetNumThreads(int num_threads)
 {
 #ifdef _OPENMP

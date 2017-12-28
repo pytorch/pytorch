@@ -142,6 +142,8 @@ __inline double log1p(double x) { return THLog1p(x); }
 inline double log1p(double x) { return THLog1p(x); }
 #endif
 
+inline double expm1(double x) { return THExpm1(x); }
+
 #define snprintf _snprintf
 #define popen _popen
 #define pclose _pclose

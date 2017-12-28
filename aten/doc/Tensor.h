@@ -244,6 +244,8 @@ struct Tensor : public detail::TensorBase {
   Tensor & lgamma_();
   Tensor & exp_();
   Tensor exp() const;
+  Tensor & expm1_();
+  Tensor expm1() const;
   Tensor & cos_();
   Tensor cos() const;
   Tensor & acos_();

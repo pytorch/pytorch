@@ -152,6 +152,8 @@ view of a storage and defines numeric operations on it.
    .. automethod:: erfinv_
    .. automethod:: exp
    .. automethod:: exp_
+   .. automethod:: expm1
+   .. automethod:: expm1_
    .. automethod:: expand
    .. automethod:: expand_as
    .. automethod:: exponential_

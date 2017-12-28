@@ -1353,6 +1353,18 @@ Example::
     torch.FloatTensor([1, 2])
 """)
 
+add_docstr(torch._C.expm1,
+           r"""
+expm1(tensor, out=None) -> Tensor
+
+Computes the exponential of each element minus 1.
+
+Example::
+
+    >>> torch.expm1(torch.Tensor([0, math.log(2)]))
+    torch.FloatTensor([0, 1])
+""")
+
 add_docstr(torch._C.eye,
            r"""
 eye(n, m=None, out=None)
