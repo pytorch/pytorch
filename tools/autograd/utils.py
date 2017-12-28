@@ -12,7 +12,7 @@ try:
     # use faster C loader if available
     from yaml import CLoader as YamlLoader
 except ImportError:
-    from yaml import YamlLoader
+    from yaml import Loader as YamlLoader
 
 
 GENERATED_COMMENT = CodeTemplate("""\
