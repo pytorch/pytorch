@@ -97,6 +97,12 @@ def to_gpu(obj, type_map={}):
         return deepcopy(obj)
 
 
+def set_rng_seed(seed):
+    torch.manual_seed(seed)
+    if TEST_NUMPY:
+        numpy.random.seed(seed)
+
+
 @contextlib.contextmanager
 def freeze_rng_state():
     rng_state = torch.get_rng_state()
@@ -129,7 +135,7 @@ class TestCase(unittest.TestCase):
     maxDiff = None
 
     def setUp(self):
-        torch.manual_seed(SEED)
+        set_rng_seed(SEED)
 
     def assertTensorsSlowEqual(self, x, y, prec=None, message=''):
         max_err = 0
