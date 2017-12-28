@@ -67,11 +67,6 @@
 - name: prelu(Tensor self, Tensor weight)
   cname: PReLU
 
-- name: rrelu(Tensor self, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=false, Generator* generator=nullptr)
-  cname: RReLU
-  buffers: [noise]
-  has_inplace: True
-
 - name: softmax(Tensor self, int64_t dim)
   cname: SoftMax
   wrap_dim:
@@ -82,6 +77,10 @@
 
 - name: softshrink(Tensor self, Scalar lambd=0.5)
   cname: SoftShrink
+
+- name: rrelu_with_noise(Tensor self, Tensor noise, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=false, Generator* generator=nullptr)
+  cname: RReLU
+  has_inplace: True
 
 - name: threshold(Tensor self, Scalar threshold, Scalar value)
   cname: Threshold

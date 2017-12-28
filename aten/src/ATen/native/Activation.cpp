@@ -11,9 +11,15 @@ Tensor selu(const Tensor & self) {
 }
 
 Tensor & selu_(Tensor & self) {
-  // TODO: at::elu_ should return `Tensor &`
-  at::elu_(self, SELU_ALPHA, SELU_SCALE);
-  return self;
+  return at::elu_(self, SELU_ALPHA, SELU_SCALE);
+}
+
+Tensor rrelu(const Tensor & self, Scalar lower, Scalar upper, bool training, Generator* generator) {
+  return at::rrelu_with_noise(self, self.type().tensor(), lower, upper, training, generator);
+}
+
+Tensor & rrelu_(Tensor & self, Scalar lower, Scalar upper, bool training, Generator* generator) {
+  return at::rrelu_with_noise_(self, self.type().tensor(), lower, upper, training, generator);
 }
 
 }}  // namespace at::native

@@ -160,6 +160,8 @@ def get_thnn_args(thnn_function, params, inplace):
         name = arg.name
         if name == 'state':
             continue
+        if inplace and name == 'output':
+            name = 'self'
         aten_name = camel_to_snake(SUBSTITUTIONS.get(name, name))
         parts = aten_name.split('_')
         if aten_name in params_by_name:
@@ -213,7 +215,7 @@ def unique_args(argslist):
     return result
 
 
-def function_info(name, arguments, cimpls, buffers, backends):
+def function_info(name, arguments, cimpls, buffers, backends, inplace):
     """
     cimpls contains information use to call into THNN:
         cname: THNN function name
@@ -225,7 +227,7 @@ def function_info(name, arguments, cimpls, buffers, backends):
         'name': name,
         'types': ['Float', 'Double', 'Half'],  # Half will be stripped for CPU backend
         'arguments': arguments,
-        'return': get_return(arguments),
+        'return': 'argument 0' if inplace else get_return(arguments),
         'buffers': buffers,
         'backends': backends,
         'cimpls': cimpls,
@@ -240,14 +242,15 @@ def base_declaration(func, thnn_function, backends, inplace=False):
         name += '_'
     params = params.split(', ')
     arguments = [argument_to_declaration(a, func) for a in params]
-    arguments += output_arguments(thnn_function)
+    if not inplace:
+        arguments += output_arguments(thnn_function)
     buffers = [argument_to_declaration('Tensor ' + buf)
                for buf in func.get('buffers', [])]
 
     thnn_args = get_thnn_args(thnn_function, arguments + buffers, inplace)
     cimpl = {'cname': thnn_function.name, 'arguments': thnn_args}
 
-    return function_info(name, arguments, [cimpl], buffers, backends)
+    return function_info(name, arguments, [cimpl], buffers, backends, inplace)
 
 
 def forward_declaration(base, thnn_function, inplace=False):
@@ -265,7 +268,7 @@ def forward_declaration(base, thnn_function, inplace=False):
     arguments = remove_unused_args(arguments, thnn_args)
     cimpl = {'cname': thnn_function.name, 'arguments': thnn_args}
 
-    return function_info(name, arguments, [cimpl], [], base['backends'])
+    return function_info(name, arguments, [cimpl], [], base['backends'], inplace)
 
 
 def backward_declaration(base, thnn_functions):
@@ -327,7 +330,7 @@ def backward_declaration(base, thnn_functions):
             cimpl['condition'] = get_condition(func)
         cimpls.append(cimpl)
 
-    return function_info(name, arguments, cimpls, [], base['backends'])
+    return function_info(name, arguments, cimpls, [], base['backends'], False)
 
 
 def parse_nn_yaml(filename):
