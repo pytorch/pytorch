@@ -122,6 +122,10 @@ Tensor slice(const Tensor& self, int64_t start, int64_t end, int64_t step, int64
   return self.as_strided(sizes, strides, storage_offset);
 }
 
+Tensor slice_dim(const Tensor& self, int64_t dim, int64_t start, int64_t end, int64_t step) {
+  return at::native::slice(self, start, end, step, dim);
+}
+
 std::vector<Tensor> split(const Tensor& self, int64_t split_size, int64_t dim) {
   int64_t dim_size = self.size(dim);
   int64_t num_splits = (dim_size + split_size - 1) / split_size;
