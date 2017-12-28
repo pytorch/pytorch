@@ -133,18 +133,15 @@ def pad_packed_sequence(sequence, batch_first=False, padding_value=0.0):
 
 def pad_sequence(sequences, batch_first=False):
     r"""Pad a list of variable length Variables with zero
-
     ``pad_sequence`` stacks a list of Variables along a new dimension,
     and padds them to equal length. For example, if the input is list of
     sequences with size ``Lx*`` and if batch_first is False, and ``TxBx*``
     otherwise. The list of sequences should be sorted in the order of
     decreasing length.
-
     B is batch size. It's equal to the number of elements in ``sequences``.
     T is length longest sequence.
     L is length of the sequence.
     * is any number of trailing dimensions, including none.
-
     Example:
         >>> from torch.nn.utils.rnn import pad_sequence
         >>> a = Variable(torch.ones(25, 300))
@@ -152,18 +149,15 @@ def pad_sequence(sequences, batch_first=False):
         >>> c = Variable(torch.ones(15, 300))
         >>> pad_sequence([a, b, c]).size()
         torch.Size([25, 3, 300])
-
     Note:
         This function returns a Variable of size TxBx* or BxTx* where T is the
             length of longest sequence.
         Function assumes trailing dimensions and type of all the Variables
             in sequences are same.
-
     Arguments:
         sequences (list[Variable]): list of variable length sequences.
         batch_first (bool, optional): output will be in BxTx* if True, or in
             TxBx* otherwise
-
     Returns:
         Variable of size ``T x B x * `` if batch_first is False
         Variable of size ``B x T x * `` otherwise
@@ -172,14 +166,12 @@ def pad_sequence(sequences, batch_first=False):
     # assuming trailing dimensions and type of all the Variables
     # in sequences are same and fetching those from sequences[0]
     max_size = sequences[0].size()
-    max_len, trailing_dims = max_size[0], max_size[1:]
+    max_len, feat_size = max_size[0], max_size[-1]
     prev_l = max_len
     if batch_first:
-        out_dims = (len(sequences), max_len) + trailing_dims
-        batch_dim = 0
+        out_dims = (len(sequences), max_len, feat_size)
     else:
-        out_dims = (max_len, len(sequences)) + trailing_dims
-        batch_dim = 1
+        out_dims = (max_len, len(sequences), feat_size)
 
     out_variable = Variable(sequences[0].data.new(*out_dims).zero_())
     for i, variable in enumerate(sequences):
@@ -188,7 +180,13 @@ def pad_sequence(sequences, batch_first=False):
         if prev_l < length:
                 raise ValueError("lengths array has to be sorted in decreasing order")
         prev_l = length
-        out_variable.select(batch_dim, i)[:length] = variable
+
+        # avoid having multiple refs to same variable
+        if batch_first:
+            out_variable[i, :variable.size(0), :] = variable
+        else:
+            out_variable[:variable.size(0), i, :] = variable
+
     return out_variable
 
 
