@@ -236,5 +236,10 @@ Tensor & unsqueeze_(Tensor& self, int64_t dim) {
   return self.as_strided_(std::get<0>(g), std::get<1>(g));
 }
 
+
+Tensor view_as(const Tensor& self, const Tensor& other) {
+  return self.view(other.sizes());
+}
+
 }
 }
