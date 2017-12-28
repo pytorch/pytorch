@@ -172,7 +172,7 @@ def pad_sequence(sequences, batch_first=False):
     # assuming trailing dimensions and type of all the Variables
     # in sequences are same and fetching those from sequences[0]
     max_size = sequences[0].size()
-    max_len, trailing_dims = max_size[0], max_size[2:]
+    max_len, trailing_dims = max_size[0], max_size[1:]
     prev_l = max_len
     if batch_first:
         out_dims = (len(sequences), max_len) + trailing_dims
