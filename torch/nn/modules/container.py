@@ -50,14 +50,21 @@ class Sequential(Module):
                 self.add_module(str(idx), module)
 
     def __getitem__(self, idx):
-        if not (-len(self) <= idx < len(self)):
-            raise IndexError('index {} is out of range'.format(idx))
-        if idx < 0:
-            idx += len(self)
-        it = iter(self._modules.values())
-        for i in range(idx):
-            next(it)
-        return next(it)
+        if isinstance(idx, slice):
+            ret_seq = Sequential()
+            seq_list = list(self._modules.items())
+            for i in range(*idx.indices(len(self._modules))):
+                ret_seq.add_module(seq_list[i][0], seq_list[i][1])
+            return ret_seq
+        else:
+            if not (-len(self) <= idx < len(self)):
+                raise IndexError('index {} is out of range'.format(idx))
+            if idx < 0:
+                idx += len(self)
+            it = iter(self._modules.values())
+            for i in range(idx):
+                next(it)
+            return next(it)
 
     def __len__(self):
         return len(self._modules)
