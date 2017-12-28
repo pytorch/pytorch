@@ -106,7 +106,7 @@ Tensor sum_backward(const Tensor & grad, IntList sizes, int64_t dim, bool keepdi
 }
 
 Tensor reverse_dim(const Tensor& t, int64_t dim) {
-  Tensor index = t.type().toScalarType(at::ScalarType::Long).arange(t.size(dim) -1, -1, -1);
+  Tensor index = t.type().toScalarType(at::ScalarType::Long).arange(t.size(dim) - 1, -1, -1);
   return t.index_select(dim, index);
 }
 
@@ -138,9 +138,9 @@ Tensor prod_safe_zeros_backward(const Tensor &grad, const Tensor& inp, int64_t d
 Tensor prod_backward(const Tensor& grad, const Tensor& input, const Tensor& result) {
   Tensor zero_idx = (input == 0).nonzero();
   if (zero_idx.numel() == 0) {
-    return grad.mul(result).expand_as(input).div(input);
+    return (grad * result) / input;
   } else if (zero_idx.size(0) > 1) {
-    return (grad * 0).expand_as(input);
+    return zeros_like(input);
   } else {
     return prod_safe_zeros_backward(grad, input.contiguous().view(-1), 0).view_as(input);
   }
@@ -157,7 +157,7 @@ Tensor prod_backward(Tensor grad, const Tensor& input, Tensor result, int64_t di
   Tensor slice_zero_count = zero_mask.sum(dim, true);
   int64_t total_zeros = slice_zero_count.sum().toCLong();
   if (total_zeros == 0) {
-    return grad.mul(result).expand_as(input).div(input);
+    return (grad * result) / input;
   } else {
     return prod_safe_zeros_backward(grad, input, dim);
   }
