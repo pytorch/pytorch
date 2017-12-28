@@ -524,7 +524,7 @@ add_docstr_all('expm1_',
                r"""
 expm1_() -> Tensor
 
-In-place version of :meth:`~Tensor.exp`
+In-place version of :meth:`~Tensor.expm1`
 """)
 
 add_docstr_all('exponential_',
