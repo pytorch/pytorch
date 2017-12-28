@@ -67,6 +67,7 @@ class TestOptim(TestCase):
 
         params = Variable(params_t, requires_grad=True)
         optimizer = constructor([params])
+
         if not sparse_only:
             params_c = Variable(params_t.clone(), requires_grad=True)
             optimizer_c = constructor([params_c])
@@ -112,6 +113,9 @@ class TestOptim(TestCase):
         bias = Variable(bias, requires_grad=True)
         input = Variable(input)
         optimizer = constructor(weight, bias)
+
+        # to check if the optimizer can be printed as a string
+        optimizer.__repr__()
 
         def fn():
             optimizer.zero_grad()
@@ -177,6 +181,7 @@ class TestOptim(TestCase):
         state_dict = deepcopy(optimizer.state_dict())
         state_dict_c = deepcopy(optimizer.state_dict())
         optimizer_cuda.load_state_dict(state_dict_c)
+
         # Make sure state dict wasn't modified
         self.assertEqual(state_dict, state_dict_c)
 
