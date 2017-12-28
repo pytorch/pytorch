@@ -7,6 +7,12 @@ import tempfile
 import itertools
 from collections import defaultdict, namedtuple
 
+try:
+    FileNotFoundError
+except NameError:
+    # py2.7
+    FileNotFoundError = IOError
+
 
 class EventList(list):
     """A list of Events (for pretty printing)"""
