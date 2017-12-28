@@ -240,13 +240,13 @@ int main() {
           }
         }
 
-        // assign_
+        // copy_
         {
           auto lhs = T.ones(*lhs_it);
           auto lhs_save = T.ones(*lhs_it);
           auto rhs = T.ones(*rhs_it);
           try {
-            lhs.assign_(rhs);
+            lhs.copy_(rhs);
             ASSERT(lhs_save.numel() == rhs.numel());
             // ensure didn't change shape
             assert_equal_size_dim(lhs, lhs_save);
