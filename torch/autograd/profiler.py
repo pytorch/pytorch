@@ -7,6 +7,12 @@ import tempfile
 import itertools
 from collections import defaultdict, namedtuple
 
+try:
+    FileNotFoundError
+except NameError:
+    # py2.7
+    FileNotFoundError = IOError
+
 
 class range(object):
     def __init__(self, name):
