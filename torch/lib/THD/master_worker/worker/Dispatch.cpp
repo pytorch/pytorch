@@ -194,6 +194,7 @@ static const std::unordered_map<rpc::function_id_type, dispatch_fn> functions {
     {Functions::tensorLog, tensorLog},
     {Functions::tensorLog1p, tensorLog1p},
     {Functions::tensorExp, tensorExp},
+    {Functions::tensorExpm1, tensorExpm1},
     {Functions::tensorCos, tensorCos},
     {Functions::tensorAcos, tensorAcos},
     {Functions::tensorCosh, tensorCosh},

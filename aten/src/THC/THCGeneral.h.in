@@ -5,6 +5,7 @@
 #include "THAllocator.h"
 #include "THCThreadLocal.h"
 #undef log1p
+#undef expm1
 
 #include "cuda.h"
 #include "cuda_runtime.h"

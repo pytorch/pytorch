@@ -248,6 +248,7 @@ IMPLEMENT_STATELESS(lgamma)
 IMPLEMENT_STATELESS(erf)
 IMPLEMENT_STATELESS(erfinv)
 IMPLEMENT_STATELESS(exp)
+IMPLEMENT_STATELESS(expm1)
 IMPLEMENT_STATELESS(cos)
 IMPLEMENT_STATELESS(acos)
 IMPLEMENT_STATELESS(cosh)
@@ -652,6 +653,7 @@ static PyMethodDef TorchMethods[] = {
   {"erf",             (PyCFunction)THPModule_erf,               METH_VARARGS | METH_KEYWORDS, NULL},
   {"erfinv",          (PyCFunction)THPModule_erfinv,            METH_VARARGS | METH_KEYWORDS, NULL},
   {"exp",             (PyCFunction)THPModule_exp,               METH_VARARGS | METH_KEYWORDS, NULL},
+  {"expm1",           (PyCFunction)THPModule_expm1,             METH_VARARGS | METH_KEYWORDS, NULL},
   {"cos",             (PyCFunction)THPModule_cos,               METH_VARARGS | METH_KEYWORDS, NULL},
   {"acos",            (PyCFunction)THPModule_acos,              METH_VARARGS | METH_KEYWORDS, NULL},
   {"cosh",            (PyCFunction)THPModule_cosh,              METH_VARARGS | METH_KEYWORDS, NULL},
