@@ -552,8 +552,8 @@ class TestDistributions(TestCase):
         num_samples = 20
         grid = [1e-2, 1e-1, 1e0, 1e1, 1e2]
         for alpha, beta in product(grid, grid):
-            alphas = Variable(torch.Tensor([alpha] * num_samples), requires_grad=True)
-            betas = Variable(torch.Tensor([beta] * num_samples))
+            alphas = Variable(torch.FloatTensor([alpha] * num_samples), requires_grad=True)
+            betas = Variable(torch.Tensor([beta] * num_samples).type_as(alphas))
             x = Beta(alphas, betas).rsample()
             x.sum().backward()
             x, ind = x.data.sort()
@@ -567,7 +567,7 @@ class TestDistributions(TestCase):
             cdf_x = pdf(x, alpha, beta)
             expected_grad = -cdf_alpha / cdf_x
             rel_error = np.abs(actual_grad - expected_grad) / (expected_grad + 1e-100)
-            self.assertLess(np.max(rel_error), 0.005,
+            self.assertLess(np.max(rel_error), 0.002,
                             '\n'.join(['Bad gradients for Beta({}, {})'.format(alpha, beta),
                                        'x {}'.format(x),
                                        'expected {}'.format(expected_grad),
