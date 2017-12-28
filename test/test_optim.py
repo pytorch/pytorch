@@ -38,9 +38,6 @@ class TestOptim(TestCase):
         params = Variable(torch.Tensor([1.5, 1.5]), requires_grad=True)
         optimizer = constructor([params])
 
-        # to check if the optimizer can be printed as a string
-        optimizer.__repr__()
-
         solution = torch.Tensor([1, 1])
         initial_dist = params.data.dist(solution)
 
@@ -71,15 +68,9 @@ class TestOptim(TestCase):
         params = Variable(params_t, requires_grad=True)
         optimizer = constructor([params])
 
-        # to check if the optimizer can be printed as a string
-        optimizer.__repr__()
-
         if not sparse_only:
             params_c = Variable(params_t.clone(), requires_grad=True)
             optimizer_c = constructor([params_c])
-
-            # to check if the optimizer can be printed as a string
-            optimizer_c.__repr__()
 
         solution = torch.Tensor([1, 1])
         initial_dist = params.data.dist(solution)
@@ -155,9 +146,6 @@ class TestOptim(TestCase):
         optimizer = constructor(weight, bias)
         fn = functools.partial(fn_base, optimizer, weight, bias)
 
-        # to check if the optimizer can be printed as a string
-        optimizer.__repr__()
-
         # Prime the optimizer
         for i in range(20):
             optimizer.step(fn)
@@ -170,10 +158,6 @@ class TestOptim(TestCase):
         state_dict = deepcopy(optimizer.state_dict())
         state_dict_c = deepcopy(optimizer.state_dict())
         optimizer_c.load_state_dict(state_dict_c)
-
-        # to check if the optimizer can be printed as a string
-        optimizer_c.__repr__()
-
         # Run both optimizations in parallel
         for i in range(20):
             optimizer.step(fn)
@@ -197,9 +181,6 @@ class TestOptim(TestCase):
         state_dict = deepcopy(optimizer.state_dict())
         state_dict_c = deepcopy(optimizer.state_dict())
         optimizer_cuda.load_state_dict(state_dict_c)
-
-        # to check if the optimizer can be printed as a string
-        optimizer_cuda.__repr__()
 
         # Make sure state dict wasn't modified
         self.assertEqual(state_dict, state_dict_c)
