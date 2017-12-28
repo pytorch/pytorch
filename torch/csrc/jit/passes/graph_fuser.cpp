@@ -32,6 +32,7 @@ std::unordered_set<NodeKind> simple_mappable = {
   kdiv,
   keq,
   kexp,
+  kexpm1,
   kfloor,
   kfmod,
   kfrac,

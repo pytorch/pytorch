@@ -129,6 +129,8 @@ static inline Tensor & lgamma_out(Tensor & result, const Tensor & self);
 static inline Tensor lgamma(const Tensor & self);
 static inline Tensor & exp_out(Tensor & result, const Tensor & self);
 static inline Tensor exp(const Tensor & self);
+static inline Tensor & expm1_out(Tensor & result, const Tensor & self);
+static inline Tensor expm1(const Tensor & self);
 static inline Tensor & cos_out(Tensor & result, const Tensor & self);
 static inline Tensor cos(const Tensor & self);
 static inline Tensor & acos_out(Tensor & result, const Tensor & self);
@@ -907,6 +909,12 @@ static inline Tensor & exp_out(Tensor & result, const Tensor & self) {
     return infer_type(self).exp_out(result, self);
 }
 static inline Tensor exp(const Tensor & self) {
+    return infer_type(self).exp(self);
+}
+static inline Tensor & expm1_out(const Tensor & result, const Tensor & self) {
+    return infer_type(self).exp_out(result, self);
+}
+static inline Tensor expm1(const Tensor & self) {
     return infer_type(self).exp(self);
 }
 static inline Tensor & cos_out(Tensor & result, const Tensor & self) {

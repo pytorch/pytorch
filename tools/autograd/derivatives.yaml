@@ -219,6 +219,9 @@
 - name: exp(Tensor self)
   self: grad * result
 
+- name: expm1(Tensor self)
+  self: grad * self.exp()
+
 - name: expand(Tensor self, IntList size)
   self: reduce_to(grad, self.sizes())
 

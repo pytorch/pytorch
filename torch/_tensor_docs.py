@@ -513,6 +513,20 @@ exp_() -> Tensor
 In-place version of :meth:`~Tensor.exp`
 """)
 
+add_docstr_all('expm1',
+               r"""
+expm1() -> Tensor
+
+See :func:`torch.expm1`
+""")
+
+add_docstr_all('expm1_',
+               r"""
+expm1_() -> Tensor
+
+In-place version of :meth:`~Tensor.exp`
+""")
+
 add_docstr_all('exponential_',
                r"""
 exponential_(lambd=1, *, generator=None) -> Tensor
