@@ -186,7 +186,7 @@ def pad_sequence(sequences, batch_first=False):
         if prev_l < length:
                 raise ValueError("lengths array has to be sorted in decreasing order")
         prev_l = length
-        
+    
         # use index notation to prevent duplicate references to the variable
         if batch_first:
             out_variable[i, :length, ...] = variable
