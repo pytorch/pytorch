@@ -67,6 +67,8 @@
 - name: prelu(Tensor self, Tensor weight)
   cname: PReLU
 
+# NOTE: we treat noise as an input (it's really a buffer) because the codegen
+# can't handle in-place functions that have buffers
 - name: rrelu_with_noise(Tensor self, Tensor noise, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=false, Generator* generator=nullptr)
   cname: RReLU
   has_inplace: True
