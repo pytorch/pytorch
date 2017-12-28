@@ -218,6 +218,12 @@
     CPU: RoiPooling2d_backward_cpu
     CUDA: RoiPooling2d_backward_cuda
 
+- func: rrelu(Tensor self, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=false, Generator* generator=nullptr) -> Tensor
+  variants: function
+
+- func: rrelu_(Tensor self, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=false, Generator* generator=nullptr) -> Tensor
+  variants: function
+
 - func: select(Tensor self, int64_t dim, int64_t index) -> Tensor
 
 - func: selu(Tensor self) -> Tensor

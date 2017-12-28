@@ -731,11 +731,11 @@
 - name: prelu(Tensor self, Tensor weight)
   self, weight: prelu_backward(grad, self, weight, grad_input_mask)
 
-- name: rrelu(Tensor self, Scalar lower, Scalar upper, bool training, Generator generator)
-  self: rrelu_backward(grad, output, lower, upper, training, noise)
+- name: rrelu_with_noise(Tensor self, Tensor noise, Scalar lower, Scalar upper, bool training, Generator generator)
+  self: rrelu_with_noise_backward(grad, output, noise, lower, upper, training)
 
-- name: rrelu_(Tensor self, Scalar lower, Scalar upper, bool training, Generator generator)
-  self: rrelu_backward(grad, output, lower, upper, training, noise)
+- name: rrelu_with_noise_(Tensor self, Tensor noise, Scalar lower, Scalar upper, bool training, Generator generator)
+  self: rrelu_with_noise_backward(grad, output, noise, lower, upper, training)
 
 - name: softmax(Tensor self, int64_t dim)
   self: softmax_backward(grad, self, dim, output)
@@ -958,8 +958,8 @@
 - name: prelu_backward(Tensor grad_output, Tensor self, Tensor weight, std::array<bool,2> output_mask)
   grad_output, self, weight: prelu_double_backward(grads[0], grads[1], grad_output, self, weight, grad_input_mask)
 
-- name: rrelu_backward(Tensor grad_output, Tensor self, Scalar lower, Scalar upper, bool training, Tensor noise)
-  grad_output: rrelu_backward(grad, self, lower, upper, training, noise)
+- name: rrelu_with_noise_backward(Tensor grad_output, Tensor self, Tensor noise, Scalar lower, Scalar upper, bool training)
+  grad_output: rrelu_with_noise_backward(grad, self, noise, lower, upper, training)
   self: zeros_like(grad)
 
 - name: reflection_pad1d_backward(Tensor grad_output, Tensor self, IntList padding)
