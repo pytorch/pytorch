@@ -88,20 +88,15 @@ class ninja_build_ext(setuptools.command.build_ext.build_ext):
                 src_list = [m.group(2) for m in (
                     src_regex.match(elem) for elem in cmd) if m]
 
-                if len(src_list) >= 1:
-                    src = src_list[0]
-                else:
-                    # Cannot find src, revert back to original style
-                    orig_spawn(cmd)
-                    return
-
                 obj_regex = re.compile('/Fo(.*)')
                 obj_list = [m.group(1) for m in (
                     src_regex.match(elem) for elem in cmd) if m]
-                if len(obj_list) >= 1:
+
+                if len(src_list) >= 1 and len(obj_list) >= 1:
+                    src = src_list[0]
                     obj = obj_list[0]
                 else:
-                    # Cannot find obj, revert back to original style
+                    # Cannot find src or obj, revert back to original style
                     orig_spawn(cmd)
                     return
 
