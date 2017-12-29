@@ -32,7 +32,6 @@ class PackPadded(Function):
             elif prev_l > l:
                 raise ValueError("'lengths' array has to be sorted in decreasing order")
 
-        # TODO: convert batch_sizes to tensor here and use ctx.save_for_backward?
         ctx.batch_sizes = batch_sizes
         ctx.batch_first = batch_first
         ctx.input_size = input.size()
@@ -41,15 +40,14 @@ class PackPadded(Function):
 
     @staticmethod
     def backward(ctx, grad_steps, grad_batch_sizes):
+        grad_input = grad_steps.new(*ctx.input_size).zero_()
 
-        idx = 0
-        ret = grad_steps.new(*ctx.input_size).zero_()
-
+        offset = 0
         for i, bs in enumerate(ctx.batch_sizes):
-            ret[i, :bs, ...] = grad_steps[idx:idx + bs, ...]
-            idx += bs
+            grad_input[i, :bs] = grad_steps[offset:offset + bs]
+            offset += bs
 
         if ctx.batch_first:
-            ret = ret.transpose(0, 1)
+            grad_input = grad_input.transpose(0, 1)
 
-        return ret, None, None
+        return grad_input, None, None
