@@ -17,6 +17,7 @@
 #include <cub/block/block_reduce.cuh>
 
 #include "caffe2/core/context_gpu.h"
+#include "caffe2/operators/normalize_l1_op.h"
 #include "caffe2/operators/normalize_op.h"
 
 namespace caffe2 {
@@ -183,4 +184,4 @@ REGISTER_CUDA_OPERATOR(
     NormalizeGradient,
     NormalizeGradientOp<float, CUDAContext>);
 REGISTER_CUDA_OPERATOR(NormalizeL1, NormalizeL1Op<float, CUDAContext>);
-} // namespace
+} // namespace caffe2

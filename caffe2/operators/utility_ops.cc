@@ -74,9 +74,7 @@ void UniqueOp<CPUContext>::DoRun() {
 
 REGISTER_CPU_OPERATOR(WallClockTime, WallClockTimeOp<CPUContext>);
 REGISTER_CPU_OPERATOR(Print, PrintOp<CPUContext>);
-REGISTER_CPU_OPERATOR(Flatten, FlattenOp<CPUContext>);
 REGISTER_CPU_OPERATOR(FlattenToVec, FlattenToVecOp<CPUContext>);
-
 REGISTER_CPU_OPERATOR(Alias, AliasOp<CPUContext>);
 REGISTER_CPU_OPERATOR(ResizeLike, ResizeLikeOp<CPUContext>);
 REGISTER_CPU_OPERATOR(SumInt, SumOp<CPUContext>);
@@ -85,10 +83,6 @@ REGISTER_CPU_OPERATOR(WeightedSumGradient, WeightedSumGradientOp<CPUContext>);
 REGISTER_CPU_OPERATOR(
     ScatterWeightedSum,
     ScatterWeightedSumOp<float, CPUContext>);
-REGISTER_CPU_OPERATOR(Max, MaxOp<float, CPUContext>);
-REGISTER_CPU_OPERATOR(MaxGradient, MaxGradientOp<float, CPUContext>);
-REGISTER_CPU_OPERATOR(Min, MinOp<float, CPUContext>);
-REGISTER_CPU_OPERATOR(MinGradient, MinGradientOp<float, CPUContext>);
 REGISTER_CPU_OPERATOR(ScatterAssign, ScatterAssignOp<CPUContext>);
 // From whatever the current context, ensure the output is TensorCPU
 REGISTER_CPU_OPERATOR(
@@ -139,48 +133,6 @@ OPERATOR_SCHEMA(Print)
     .Input(0, "tensor", "The tensor to print.");
 
 OPERATOR_SCHEMA(LengthsToShape).NumInputs(1).NumOutputs(1);
-
-OPERATOR_SCHEMA(Flatten)
-    .NumInputs(1)
-    .NumOutputs(1)
-    .TensorInferenceFunction([](const OperatorDef& def,
-                                const vector<TensorShape>& in) {
-      ArgumentHelper helper(def);
-      const int axis = helper.GetSingleArgument<int>("axis", 1);
-      vector<TensorShape> out(1);
-      TIndex outer = 1;
-      TIndex inner = 1;
-      std::size_t index = 0;
-      for (auto d : in[0].dims()) {
-        if (index < axis) {
-          outer *= d;
-        } else {
-          inner *= d;
-        }
-        ++index;
-      }
-      out[0].set_data_type(in[0].data_type());
-      out[0].add_dims(outer);
-      out[0].add_dims(inner);
-      return out;
-    })
-    .SetDoc(R"DOC(
-Flattens the input tensor into a 2D matrix. If input tensor has shape
-(d_0, d_1, ... d_n) then the output will have shape
-(d_0 X d_1 ... d_(axis-1), d_axis X d_(axis+1) ... X dn)
-)DOC")
-    .Input(0, "input", "A tensor of rank >= axis.")
-    .Output(
-        0,
-        "output",
-        "A 2D tensor with the contents of the input tensor, "
-        "with input dimensions up to axis flattened to the outer dimension "
-        "of the output and remaining input dimensions flattened into the inner "
-        "dimension of the output.")
-    .Arg(
-        "axis",
-        "(Default to 1) Indicate up to which input dimensions "
-        "(exclusive) should be flattened to the outer dimension of the output");
 
 OPERATOR_SCHEMA(FlattenToVec)
     .NumInputs(1)
@@ -318,38 +270,6 @@ Currently only works on CPU because of access to INDICES.
     .Input(4, "Weight_1", "Scalar weight for X_1 update")
     .Output(0, "X_0", "Has to be exactly the same tensor as the input 0")
     .EnforceInplace({{0, 0}});
-
-OPERATOR_SCHEMA(Max)
-    .NumInputs(1, INT_MAX)
-    .NumOutputs(1)
-    .IdenticalTypeAndShapeOfInput(0)
-    .AllowInplace({{0, 0}})
-    .SetDoc(R"DOC(
-Element-wise max of each of the input tensors. The first input tensor can be
-used in-place as the output tensor, in which case the max will be done in
-place and results will be accumulated in input0. All inputs and outputs must
-have the same shape and data type.
-)DOC")
-    .Input(0, "data_0", "First of the input tensors. Can be inplace.")
-    .Output(0, "max", "Output tensor. Same dimension as inputs.");
-
-OPERATOR_SCHEMA(MaxGradient).NumInputs(3, INT_MAX).NumOutputs(1, INT_MAX);
-
-OPERATOR_SCHEMA(Min)
-    .NumInputs(1, INT_MAX)
-    .NumOutputs(1)
-    .IdenticalTypeAndShapeOfInput(0)
-    .AllowInplace({{0, 0}})
-    .SetDoc(R"DOC(
-Element-wise min of each of the input tensors. The first input tensor can be
-used in-place as the output tensor, in which case the min will be done in
-place and results will be accumulated in input0. All inputs and outputs must
-have the same shape and data type.
-)DOC")
-    .Input(0, "data_0", "First of the input tensors. Can be inplace.")
-    .Output(0, "min", "Output tensor. Same dimension as inputs.");
-
-OPERATOR_SCHEMA(MinGradient).NumInputs(3, INT_MAX).NumOutputs(1, INT_MAX);
 
 OPERATOR_SCHEMA(ScatterAssign)
     .NumInputs(3)
@@ -822,15 +742,6 @@ SHOULD_NOT_DO_GRADIENT(IsEmpty);
 SHOULD_NOT_DO_GRADIENT(LengthsToShape);
 SHOULD_NOT_DO_GRADIENT(UnsafeCoalesce);
 
-class GetFlattenGradient : public GradientMakerBase {
-  using GradientMakerBase::GradientMakerBase;
-  vector<OperatorDef> GetGradientDefs() override {
-    return SingleGradientDef(
-        "ResizeLike", "", vector<string>{GO(0), I(0)}, vector<string>{GI(0)});
-  }
-};
-REGISTER_GRADIENT(Flatten, GetFlattenGradient);
-
 class GetAliasGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;
   vector<OperatorDef> GetGradientDefs() override {
@@ -882,34 +793,6 @@ class GetWeightedSumGradient : public GradientMakerBase {
   }
 };
 REGISTER_GRADIENT(WeightedSum, GetWeightedSumGradient);
-
-class GetMaxGradient : public GradientMakerBase {
-  using GradientMakerBase::GradientMakerBase;
-  vector<OperatorDef> GetGradientDefs() override {
-    auto gradInputs = vector<string>();
-    auto inputs = vector<string>{O(0), GO(0)};
-    for (int i = 0; i < def_.input_size(); i++) {
-      gradInputs.push_back(GI(i));
-      inputs.push_back(I(i));
-    }
-    return SingleGradientDef("MaxGradient", "", inputs, gradInputs);
-  }
-};
-REGISTER_GRADIENT(Max, GetMaxGradient);
-
-class GetMinGradient : public GradientMakerBase {
-  using GradientMakerBase::GradientMakerBase;
-  vector<OperatorDef> GetGradientDefs() override {
-    auto gradInputs = vector<string>();
-    auto inputs = vector<string>{O(0), GO(0)};
-    for (int i = 0; i < def_.input_size(); i++) {
-      gradInputs.push_back(GI(i));
-      inputs.push_back(I(i));
-    }
-    return SingleGradientDef("MinGradient", "", inputs, gradInputs);
-  }
-};
-REGISTER_GRADIENT(Min, GetMinGradient);
 
 class GetGatherGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;
@@ -1012,63 +895,6 @@ SHOULD_NOT_DO_GRADIENT(SegmentIdsToLengthWeights);
 SHOULD_NOT_DO_GRADIENT(GatherRangesOp);
 SHOULD_NOT_DO_GRADIENT(LengthsGather);
 SHOULD_NOT_DO_GRADIENT(AccumulateHistogram);
-
-template <typename T, class Context>
-bool MaxOp<T, Context>::Compute() {
-  auto& input0 = Input(0);
-  const int N = input0.size();
-  T* output_data = Output(0)->template mutable_data<T>();
-
-  for (int i = 1; i < InputSize(); i++) {
-    auto input_data = Input(i).template data<T>();
-    EigenVectorMap<T> output_vec(output_data, N);
-    output_vec = output_vec.cwiseMax(ConstEigenVectorMap<T>(input_data, N));
-  }
-
-  return true;
-}
-
-template <typename T, class Context>
-bool MinOp<T, Context>::Compute() {
-  auto& input0 = Input(0);
-  const int N = input0.size();
-  T* output_data = Output(0)->template mutable_data<T>();
-
-  for (int i = 1; i < InputSize(); i++) {
-    auto input_data = Input(i).template data<T>();
-    EigenVectorMap<T> output_vec(output_data, N);
-    output_vec = output_vec.cwiseMin(ConstEigenVectorMap<T>(input_data, N));
-  }
-
-  return true;
-}
-
-template <typename T, class Context>
-bool SelectGradientOpBase<T, Context>::RunOnDevice() {
-  auto& output = Input(0);
-  auto& grad_output = Input(1);
-  const int kInputStartOffset = 2;
-
-  const T* data = output.template data<T>();
-  ConstEigenArrayMap<T> output_array(
-      output.template data<T>(), 1, output.size());
-  ConstEigenArrayMap<T> grad_out_array(
-      grad_output.template data<T>(), 1, grad_output.size());
-
-  for (int i = 0; i < OutputSize(); i++) {
-    auto& input = Input(i + kInputStartOffset);
-    ConstEigenArrayMap<T> input_array(
-        input.template data<T>(), 1, input.size());
-
-    auto* grad_input = Output(i);
-    grad_input->ResizeLike(input);
-    EigenArrayMap<T> grad_in_array(
-        grad_input->template mutable_data<T>(), 1, grad_input->size());
-    grad_in_array = grad_out_array *
-        input_array.cwiseEqual(output_array).template cast<T>();
-  }
-  return true;
-}
 
 template <>
 bool NanCheckOp<CPUContext>::RunOnDevice() {
