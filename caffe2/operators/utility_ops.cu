@@ -26,13 +26,14 @@
 #include <thrust/system/cuda/execution_policy.h>
 #include <thrust/unique.h>
 #include "caffe2/core/context_gpu.h"
+#include "flatten_op.h"
+#include "minmax_ops.h"
 #include "utility_ops.h"
 
 namespace caffe2 {
 CAFFE_KNOWN_TYPE(const float*);
 
 REGISTER_CUDA_OPERATOR(EnsureDense, EnsureDenseOp<CUDAContext>);
-
 
 __global__ void NanCheckKernel(int N, const float* X, bool* result) {
   bool has_nan = false;
@@ -220,13 +221,17 @@ bool SelectGradientOpBase<float, CUDAContext>::RunOnDevice() {
   return true;
 }
 
-template<typename T_INDEX>
-__global__ void
-GatherKernel(const float* X, float* Y, const T_INDEX* indices, const int N, const int block_size) {
+template <typename T_INDEX>
+__global__ void GatherKernel(
+    const float* X,
+    float* Y,
+    const T_INDEX* indices,
+    const int N,
+    const int block_size) {
   for (int i = blockIdx.x; i < N; i += gridDim.x) {
     T_INDEX idx = indices[i];
     const float* src_offset = X + idx * block_size;
-    float* dst_offset = Y + i   * block_size;
+    float* dst_offset = Y + i * block_size;
     for (int j = threadIdx.x; j < block_size; j += blockDim.x) {
       dst_offset[j] = src_offset[j];
     }
@@ -235,7 +240,7 @@ GatherKernel(const float* X, float* Y, const T_INDEX* indices, const int N, cons
 
 template <>
 bool GatherOp<CUDAContext>::RunOnDevice() {
-  return DispatchHelper<TensorTypes<int32_t,int64_t>>::call(
+  return DispatchHelper<TensorTypes<int32_t, int64_t>>::call(
       this, OperatorBase::Input<TensorCUDA>(INDICES));
 }
 
@@ -272,9 +277,7 @@ bool GatherOp<CUDAContext>::DoRunWithType() {
       std::min(N, CAFFE_MAXIMUM_NUM_BLOCKS),
       CAFFE_CUDA_NUM_THREADS,
       0,
-      context_.cuda_stream()>>>(
-        src_base, out, idxs, N, block_size
-      );
+      context_.cuda_stream()>>>(src_base, out, idxs, N, block_size);
   return true;
 }
 
@@ -320,7 +323,7 @@ bool ScatterWeightedSumOp<float, CUDAContext>::RunOnDevice() {
 
 template <>
 template <typename Index>
-bool ScatterWeightedSumOp<float,CUDAContext>::DoRunWithType() {
+bool ScatterWeightedSumOp<float, CUDAContext>::DoRunWithType() {
   CAFFE_ENFORCE_EQ(InputSize() % 2, 1);
   auto& X0 = Input(0);
   auto& weight0 = Input(1);
@@ -551,4 +554,4 @@ bool RangeOp<CUDAContext>::DoRunOnDevice(
 }
 
 REGISTER_CUDA_OPERATOR(Range, RangeOp<CUDAContext>);
-}  // namespace caffe2
+} // namespace caffe2
