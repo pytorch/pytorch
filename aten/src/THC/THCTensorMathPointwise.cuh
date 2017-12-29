@@ -779,67 +779,18 @@ struct TensorBitXorOp {
   }
 };
 
-/*
- * Algorithm adapted from Cephes
- */
+// TODO Replace this with a more accurate digamma().
 template <typename real, typename accreal>
 struct TensorDigammaOp {
   __device__ __forceinline__ void
   operator()(real* out, real* in) {
-    static accreal PI = 3.14159265358979323846;
-    static accreal PSI_10 = 2.25175258906672110764;
-    static accreal A[] = {
-       8.33333333333333333333E-2,
-      -2.10927960927960927961E-2,
-       7.57575757575757575758E-3,
-      -4.16666666666666666667E-3,
-       3.96825396825396825397E-3,
-      -8.33333333333333333333E-3,
-       8.33333333333333333333E-2,
-    };
-
-    accreal x = ScalarConvert<real, accreal>::to(*in);
-    if (x == 0) {
-      *out = ScalarConvert<float, real>::to(INFINITY);
-      return;
-    }
-
-    bool x_is_integer = x == floor(x);
-    accreal result = 0;
-    if (x < 0) {
-      if (x_is_integer) {
-        *out = ScalarConvert<float, real>::to(INFINITY);
-        return;
-      }
-      result = - PI / tan(PI * x);
-      x = 1 - x;
-    }
-
-    while (x < 10) {
-      result -= 1 / x;
-      x += 1;
-    }
-    if (x == 10) {
-      *out = ScalarConvert<accreal, real>::to(result + PSI_10);
-      return;
-    }
-
-    accreal y = 0;
-    if (x < 1.0e17) {
-      accreal z = 1.0 / (x * x);
-
-      accreal polevl_result = 0;
-      for (int i = 0; i <= 6; i++) {
-        polevl_result = polevl_result * z + A[i];
-      }
-      y = z * polevl_result;
-    }
-
-    *out = ScalarConvert<accreal, real>::to(
-        log(x) - (0.5 / x) - y + result);
-    return;
+    static accreal eps = 1e-3;
+    const accreal x = ScalarConvert<real, accreal>::to(*in);
+    const accreal dx = x * eps;
+    *out = ScalarConvert<accreal, real>(
+        (THCNumerics<accreal>::lgamma(x + dx) -
+         THCNumerics<accreal>::lgamma(x - dx)) / (dx + dx));
   }
 };
-
 
 #endif // THC_TENSORMATH_POINTWISE_CUH
