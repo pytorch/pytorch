@@ -97,8 +97,7 @@ class ninja_build_ext(setuptools.command.build_ext.build_ext):
                     obj = obj_list[0]
                 else:
                     # Cannot find src or obj, revert back to original style
-                    orig_spawn(cmd)
-                    return
+                    return orig_spawn(cmd)
 
                 builder.writer.build(
                     [obj], 'compile', [src],
