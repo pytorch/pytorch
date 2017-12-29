@@ -425,7 +425,7 @@
   self: norm_backward(grad, self, p, result)
 
 - name: norm(Tensor self, Scalar p, int64_t dim, bool keepdim)
-  self: norm_backward(grad, self, p, destination, dim, keepdim)
+  self: norm_backward(grad, self, p, result, dim, keepdim)
 
 - name: normal(Tensor self, double mean, double std, Generator generator)
   self: zeros_like(grad)
@@ -504,7 +504,7 @@
 # range
 
 - name: reciprocal(Tensor self)
-  self: -grad * destination * destination
+  self: -grad * result * result
 
 - name: remainder(Tensor self, Scalar other)
   self: grad
@@ -570,7 +570,7 @@
   self: var_backward(grad * (result * 2).reciprocal(), self, unbiased)
 
 - name: std(Tensor self, int64_t dim, bool unbiased, bool keepdim)
-  self: var_backward(grad * (destination * 2).reciprocal(), self, dim, unbiased, keepdim)
+  self: var_backward(grad * (result * 2).reciprocal(), self, dim, unbiased, keepdim)
 
 # storage_offset
 # stride
