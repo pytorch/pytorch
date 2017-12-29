@@ -3127,7 +3127,7 @@ void THTensor_(atan2)(THTensor *r_, THTensor *tx, THTensor *ty)
 
 // TODO Replace this with more accurate digamma().
 inline real THTensor_(digamma_one)(real x) {
-  const double dx = x * 1e-3;
+  const double dx = x * 1e-4;
   return (lgamma(x + dx) - lgamma(x - dx)) / (dx + dx);
 }
 

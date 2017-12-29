@@ -784,7 +784,7 @@ template <typename real, typename accreal>
 struct TensorDigammaOp {
   __device__ __forceinline__ void
   operator()(real* out, real* in) {
-    static accreal eps = 1e-3;
+    static accreal eps = 1e-4;
     const accreal x = ScalarConvert<real, accreal>::to(*in);
     const accreal dx = x * eps;
     *out = ScalarConvert<accreal, real>(
