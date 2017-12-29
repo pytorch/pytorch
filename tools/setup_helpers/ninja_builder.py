@@ -1,3 +1,4 @@
+import re
 import os
 import sys
 import setuptools
@@ -70,6 +71,7 @@ class ninja_build_ext(setuptools.command.build_ext.build_ext):
                 orig_compiler = distutils._msvccompiler.MSVCCompiler
             orig_compile = orig_compiler.compile
             orig_link = orig_compiler.link
+            orig_spawn = orig_compiler.spawn
         else:
             orig_compiler = distutils.unixccompiler.UnixCCompiler
             orig_compile = orig_compiler._compile
@@ -78,100 +80,42 @@ class ninja_build_ext(setuptools.command.build_ext.build_ext):
         def win_compile(self, sources,
                         output_dir=None, macros=None, include_dirs=None, debug=0,
                         extra_preargs=None, extra_postargs=None, depends=None):
-            if not self.initialized:
-                self.initialize()
-            compile_info = self._setup_compile(output_dir, macros, include_dirs,
-                                               sources, depends, extra_postargs)
-            macros, objects, extra_postargs, pp_opts, build = compile_info
 
-            compile_opts = extra_preargs or []
-            compile_opts.append('/c')
-            if debug:
-                compile_opts.extend(self.compile_options_debug)
-            else:
-                compile_opts.extend(self.compile_options)
+            def spawn(cmd):
+                # Using regex to match src and obj
 
-            add_cpp_opts = False
+                src_regex = re.compile('/T(p|c)(.*)')
+                src_list = [m.group(2) for m in (
+                    src_regex.match(elem) for elem in cmd) if m]
 
-            for obj in objects:
-                try:
-                    src, ext = build[obj]
-                except KeyError:
-                    continue
-                if debug:
-                    # pass the full pathname to MSVC in debug mode,
-                    # this allows the debugger to find the source file
-                    # without asking the user to browse for it
-                    src = os.path.abspath(src)
-
-                def spawn(cmd):
-                    builder.writer.build(
-                        [obj], 'compile', [src],
-                        variables={
-                            'cmd': cmd,
-                            'deps': 'msvc'
-                        })
-
-                if ext in self._c_extensions:
-                    input_opt = "/Tc" + src
-                elif ext in self._cpp_extensions:
-                    input_opt = "/Tp" + src
-                    add_cpp_opts = True
-                elif ext in self._rc_extensions:
-                    # compile .RC to .RES file
-                    input_opt = src
-                    output_opt = "/fo" + obj
-                    try:
-                        spawn([self.rc] + pp_opts +
-                              [output_opt] + [input_opt])
-                    except DistutilsExecError as msg:
-                        raise CompileError(msg)
-                    continue
-                elif ext in self._mc_extensions:
-                    # Compile .MC to .RC file to .RES file.
-                    #   * '-h dir' specifies the directory for the
-                    #     generated include file
-                    #   * '-r dir' specifies the target directory of the
-                    #     generated RC file and the binary message resource
-                    #     it includes
-                    #
-                    # For now (since there are no options to change this),
-                    # we use the source-directory for the include file and
-                    # the build directory for the RC file and message
-                    # resources. This works at least for win32all.
-                    h_dir = os.path.dirname(src)
-                    rc_dir = os.path.dirname(obj)
-                    try:
-                        # first compile .MC to .RC and .H file
-                        spawn([self.mc] +
-                              ['-h', h_dir, '-r', rc_dir] + [src])
-                        base, _ = os.path.splitext(os.path.basename(src))
-                        rc_file = os.path.join(rc_dir, base + '.rc')
-                        # then compile .RC to .RES file
-                        spawn([self.rc] +
-                              ["/fo" + obj] + [rc_file])
-
-                    except DistutilsExecError as msg:
-                        raise CompileError(msg)
-                    continue
+                if len(src_list) >= 1:
+                    src = src_list[0]
                 else:
-                    # how to handle this file?
-                    raise CompileError("Don't know how to compile %s to %s"
-                                       % (src, obj))
+                    # Cannot find src, revert back to original style
+                    orig_spawn(cmd)
+                    return
 
-                args = [self.cc] + compile_opts + pp_opts
-                if add_cpp_opts:
-                    args.append('/EHsc')
-                args.append(input_opt)
-                args.append("/Fo" + obj)
-                args.extend(extra_postargs)
+                obj_regex = re.compile('/Fo(.*)')
+                obj_list = [m.group(1) for m in (
+                    src_regex.match(elem) for elem in cmd) if m]
+                if len(obj_list) >= 1:
+                    obj = obj_list[0]
+                else:
+                    # Cannot find obj, revert back to original style
+                    orig_spawn(cmd)
+                    return
 
-                try:
-                    spawn(args)
-                except DistutilsExecError as msg:
-                    raise CompileError(msg)
+                builder.writer.build(
+                    [obj], 'compile', [src],
+                    variables={
+                        'cmd': cmd,
+                        'deps': 'msvc'
+                    })
 
-            return objects
+            with patch(self, 'spawn', spawn):
+                orig_compile(self, sources,
+                             output_dir, macros, include_dirs, debug,
+                             extra_preargs, extra_postargs, depends)
 
         def unix_compile(self, obj, src, ext, cc_args, extra_postargs, pp_opts):
             depfile = os.path.splitext(obj)[0] + '.d'
