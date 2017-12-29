@@ -19,6 +19,7 @@ from tools.setup_helpers.cuda import WITH_CUDA, CUDA_HOME, CUDA_VERSION
 from tools.setup_helpers.cudnn import WITH_CUDNN, CUDNN_LIB_DIR, CUDNN_INCLUDE_DIR
 from tools.setup_helpers.nccl import WITH_NCCL, WITH_SYSTEM_NCCL, NCCL_LIB_DIR, \
     NCCL_INCLUDE_DIR, NCCL_ROOT_DIR, NCCL_SYSTEM_LIB
+from tools.setup_helpers.nnpack import WITH_NNPACK
 from tools.setup_helpers.nvtoolext import NVTOOLEXT_HOME
 from tools.setup_helpers.split_types import split_types
 from tools.setup_helpers.generate_code import generate_code
@@ -127,6 +128,8 @@ def build_libs(libs):
     if WITH_CUDA:
         my_env["CUDA_BIN_PATH"] = CUDA_HOME
         build_libs_cmd += ['--with-cuda']
+    if WITH_NNPACK:
+        build_libs_cmd += ['--with-nnpack']
     if WITH_CUDNN:
         my_env["CUDNN_LIB_DIR"] = CUDNN_LIB_DIR
         my_env["CUDNN_INCLUDE_DIR"] = CUDNN_INCLUDE_DIR
