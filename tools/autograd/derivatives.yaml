@@ -601,7 +601,7 @@
   self: zeros_like(self).put_(index, grad, true)
 
 - name: tan(Tensor self)
-  self: grad / self.cos().pow(2)
+  self: grad * (1 + result.pow(2))
 
 - name: tanh(Tensor self)
   self: _tanh_backward(grad, result)
