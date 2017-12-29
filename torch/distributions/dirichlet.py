@@ -4,7 +4,7 @@ import torch
 from torch.autograd import Function, Variable
 from torch.autograd.function import once_differentiable
 from torch.distributions.distribution import Distribution
-from torch.distributions.utils import broadcast_all, digamma
+from torch.distributions.utils import broadcast_all
 
 
 def _dirichlet_sample_nograd(alpha):
@@ -67,4 +67,5 @@ class Dirichlet(Distribution):
         k = self.alpha.size(-1)
         a0 = self.alpha.sum(-1)
         return (torch.lgamma(self.alpha).sum(-1) - torch.lgamma(a0) -
-                (k - a0) * digamma(a0) - ((self.alpha - 1.0) * digamma(self.alpha)).sum(-1))
+                (k - a0) * torch.digamma(a0) -
+                ((self.alpha - 1.0) * torch.digamma(self.alpha)).sum(-1))
