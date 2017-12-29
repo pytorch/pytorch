@@ -56,7 +56,7 @@
   self: grad * self.sign()
 
 - name: acos(Tensor self)
-  self: grad * -((-self * self + 1).sqrt().reciprocal())
+  self: grad * -((-self * self + 1).rsqrt())
 
 - name: add(Tensor self, Scalar other, *, Scalar alpha)
   self: grad
@@ -106,7 +106,7 @@
   self: as_strided_backward(grad, TensorGeometry(self), size, stride, storage_offset)
 
 - name: asin(Tensor self)
-  self: grad * (-self * self + 1).sqrt().reciprocal()
+  self: grad * (-self * self + 1).rsqrt()
 
 - name: atan(Tensor self)
   self: grad * (self * self + 1).reciprocal()
@@ -504,7 +504,7 @@
 # range
 
 - name: reciprocal(Tensor self)
-  self: grad / -(self * self)
+  self: -grad * result * result
 
 - name: remainder(Tensor self, Scalar other)
   self: grad
@@ -558,7 +558,7 @@
   self: split_backward(grads, split_size, dim, self.sizes(), self.type())
 
 - name: sqrt(Tensor self)
-  self: grad * self.pow(-0.5) / 2
+  self: grad * self.rsqrt() * 0.5
 
 - name: squeeze(Tensor self)
   self: unsqueeze_to(grad, self.sizes());
