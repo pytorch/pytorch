@@ -6,6 +6,8 @@
 #include <TH/TH.h>
 #include <THS/THS.h>
 
+#include "THP_export.h"
+
 // Back-compatibility macros, Thanks to http://cx-oracle.sourceforge.net/
 // define PyInt_* macros for Python 3.x.  NB: We must include Python.h first,
 // otherwise we'll incorrectly conclude PyInt_Check isn't defined!
@@ -21,8 +23,6 @@
 #define LIBRARY_STATE_NOARGS
 #define LIBRARY_STATE_TYPE
 #define LIBRARY_STATE_TYPE_NOARGS
-
-#define THP_API extern "C"
 
 #include "PtrWrapper.h"
 #include "Exceptions.h"

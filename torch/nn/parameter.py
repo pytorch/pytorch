@@ -2,7 +2,7 @@ from torch.autograd import Variable
 
 
 class Parameter(Variable):
-    """A kind of Variable that is to be considered a module parameter.
+    r"""A kind of Variable that is to be considered a module parameter.
 
     Parameters are :class:`~torch.autograd.Variable` subclasses, that have a
     very special property when used with :class:`Module` s - when they're
@@ -12,9 +12,6 @@ class Parameter(Variable):
     want to cache some temporary state, like last hidden state of the RNN, in
     the model. If there was no such class as :class:`Parameter`, these
     temporaries would get registered too.
-
-    Another difference is that parameters can't be volatile and that they
-    require gradient by default.
 
     Arguments:
         data (Tensor): parameter tensor.

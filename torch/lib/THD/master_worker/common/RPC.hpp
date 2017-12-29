@@ -2,8 +2,8 @@
 #include "../master/THDTensor.h"
 #include "ByteArray.hpp"
 #include "TH/THStorage.h"
+#include "RPCType.hpp"
 
-#include <THPP/Type.hpp>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -38,8 +38,8 @@ private:
 template <typename ...Args>
 std::unique_ptr<RPCMessage> packMessage(function_id_type fid, const Args&... args);
 
-thpp::Type unpackType(RPCMessage& raw_message);
-thpp::Type peekType(RPCMessage& raw_message);
+RPCType unpackType(RPCMessage& raw_message);
+RPCType peekType(RPCMessage& raw_message);
 double unpackFloat(RPCMessage& raw_message);
 function_id_type unpackFunctionId(RPCMessage& raw_message);
 int64_t unpackInteger(RPCMessage& raw_message);

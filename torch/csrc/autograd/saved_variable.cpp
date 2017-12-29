@@ -6,23 +6,22 @@ using namespace at;
 
 namespace torch { namespace autograd {
 
-SavedVariable::SavedVariable(const Variable& variable, Function* saved_for)
+SavedVariable::SavedVariable(const Variable& variable, bool is_output)
   : SavedVariable() {
   if (!variable.defined()) {
     return;
   }
   data = variable.data();
   requires_grad = variable.requires_grad();
-  is_volatile = variable.is_volatile();
   expected_version = variable.current_version();
-  version = variable.get()->version_counter->new_saved_ref();
-  has_grad_fn = variable.grad_fn() != nullptr;
+  version = variable.get()->version_counter.save();
+  has_grad_fn = !variable.is_leaf();
   output_nr = variable.output_nr();
   if (!has_grad_fn) {
     grad_accumulator = variable.grad_accumulator();
   }
-  if (variable.grad_fn().get() != saved_for) {
-    grad_fn = variable.grad_fn();
+  if (!is_output) {
+    _grad_fn = variable.grad_fn();
   }
   if (variable.tracing_state()) {
     tracing_state.reset(new jit::tracer::ValueTracingState(*variable.tracing_state()));
@@ -31,32 +30,38 @@ SavedVariable::SavedVariable(const Variable& variable, Function* saved_for)
 
 auto SavedVariable::unpack(std::shared_ptr<Function> saved_for) const -> Variable {
   if (!data.defined()) {
-    if (version) {
+    if (version.defined()) {
       throw std::runtime_error(ERR_BACKWARD_TWICE);
     }
     return Variable();
   }
 
-  int current_version = **version;
-  if (expected_version != current_version) {
-    throw std::runtime_error("one of the variables "
-        "needed for gradient computation has been modified by an "
-        "inplace operation");
+  if (version.is_modified()) {
+    throw std::runtime_error(
+        "one of the variables needed for gradient computation has been "
+        "modified by an inplace operation");
   }
 
-  Variable var = make_variable(data, requires_grad, is_volatile);
+  auto grad_fn = _grad_fn;
   if (has_grad_fn && !grad_fn) {
     if (!saved_for) {
       // If saving the grad_fn would create a circular reference, then it must
       // be passed in to the unpack function.
       throw std::runtime_error("No grad_fn for non-leaf saved variable");
     }
-    var.grad_fn() = saved_for;
-  } else {
-    var.grad_fn() = grad_fn;
+    grad_fn = std::move(saved_for);
   }
-  var.output_nr() = output_nr;
-  var.get()->version_counter->join_with(*version);
+
+  // NB: saved views are unpacked as normal Variables (not views) even though
+  // they still share the same storage. This works only because we never call
+  // in-place functions on unpacked variables.
+  Variable var;
+  if (grad_fn) {
+    var = make_variable(data, output_nr, std::move(grad_fn));
+  } else {
+    var = make_variable(data, requires_grad);
+  }
+  var.version_counter() = version;
 
   // If a Variable is a leaf (no grad_fn saved), and it requires_grad, then we
   // should have saved the grad accumulator. Even if the Variable no longer
@@ -69,15 +74,6 @@ auto SavedVariable::unpack(std::shared_ptr<Function> saved_for) const -> Variabl
 
   return var;
 }
-
-auto SavedVariable::unpack_data(std::shared_ptr<Function> saved_for) const -> Tensor {
-  auto var = unpack(saved_for);
-  if (var.defined()) {
-    return var.data();
-  }
-  return Tensor();
-}
-
 
 const char* ERR_BACKWARD_TWICE =
     "Trying to backward through the graph a second time, but the buffers have "

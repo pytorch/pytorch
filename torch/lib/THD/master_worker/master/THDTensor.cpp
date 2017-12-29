@@ -1,3 +1,5 @@
+#define __STDC_FORMAT_MACROS
+
 #include "THDTensor.h"
 #include "State.hpp"
 #include "Utils.hpp"
@@ -5,8 +7,6 @@
 #include "master_worker/common/Functions.hpp"
 #include "master_worker/master/Master.hpp"
 #include "process_group/General.hpp"
-
-#include <THPP/Traits.hpp>
 
 #include <cstring>
 #include <memory>

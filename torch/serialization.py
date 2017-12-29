@@ -10,10 +10,12 @@ import tempfile
 import warnings
 from contextlib import closing, contextmanager
 from ._utils import _import_dotted_name
+from ._six import string_classes as _string_classes
 if sys.version_info[0] == 2:
     import cPickle as pickle
 else:
     import pickle
+    import pathlib
 
 DEFAULT_PROTOCOL = 2
 
@@ -106,7 +108,9 @@ def _with_file_like(f, mode, body):
     it in 'mode' if it is a string filename.
     """
     new_fd = False
-    if isinstance(f, str) or (sys.version_info[0] == 2 and isinstance(f, unicode)):
+    if isinstance(f, str) or \
+            (sys.version_info[0] == 2 and isinstance(f, unicode)) or \
+            (sys.version_info[0] == 3 and isinstance(f, pathlib.Path)):
         new_fd = True
         f = open(f, mode)
     try:
@@ -150,7 +154,7 @@ def _save(obj, f, pickle_module, pickle_protocol):
             try:
                 source_file = inspect.getsourcefile(obj)
                 source = inspect.getsource(obj)
-            except:  # saving the source is optional, so we can ignore any errors
+            except Exception:  # saving the source is optional, so we can ignore any errors
                 warnings.warn("Couldn't retrieve source code for container of "
                               "type " + obj.__name__ + ". It won't be checked "
                               "for correctness upon loading.")
@@ -222,7 +226,10 @@ def load(f, map_location=None, pickle_module=pickle):
     the right device. Otherwise, torch.load will fall back to the default behavior,
     as if map_location wasn't specified.
 
-    If map_location is a dict, it will be used to remap location tags
+    If map_location is a string, it should be a device tag, where all tensors
+    should be loaded.
+
+    Otherwise, if map_location is a dict, it will be used to remap location tags
     appearing in the file (keys), to ones that specify where to put the
     storages (values).
 
@@ -233,7 +240,7 @@ def load(f, map_location=None, pickle_module=pickle):
         f: a file-like object (has to implement fileno that returns a file
             descriptor, and must implement seek), or a string containing a file
             name
-        map_location: a function or a dict specifying how to remap storage
+        map_location: a function, string or a dict specifying how to remap storage
             locations
         pickle_module: module used for unpickling metadata and objects (has to
             match the pickle_module used to serialize file)
@@ -241,6 +248,8 @@ def load(f, map_location=None, pickle_module=pickle):
     Example:
         >>> torch.load('tensors.pt')
         # Load all tensors onto the CPU
+        >>> torch.load('tensors.pt', map_location='cpu')
+        # Load all tensors onto the CPU, using a function
         >>> torch.load('tensors.pt', map_location=lambda storage, loc: storage)
         # Load all tensors onto GPU 1
         >>> torch.load('tensors.pt', map_location=lambda storage, loc: storage.cuda(1))
@@ -249,7 +258,9 @@ def load(f, map_location=None, pickle_module=pickle):
 
     """
     new_fd = False
-    if isinstance(f, str) or (sys.version_info[0] == 2 and isinstance(f, unicode)):
+    if isinstance(f, str) or \
+            (sys.version_info[0] == 2 and isinstance(f, unicode)) or \
+            (sys.version_info[0] == 3 and isinstance(f, pathlib.Path)):
         new_fd = True
         f = open(f, 'rb')
     try:
@@ -268,6 +279,9 @@ def _load(f, map_location, pickle_module):
         def restore_location(storage, location):
             location = map_location.get(location, location)
             return default_restore_location(storage, location)
+    elif isinstance(map_location, _string_classes):
+        def restore_location(storage, location):
+            return default_restore_location(storage, map_location)
     else:
         def restore_location(storage, location):
             result = map_location(storage, location)
@@ -342,12 +356,18 @@ def _load(f, map_location, pickle_module):
             tar.extract('tensors', path=tmpdir)
             with open(os.path.join(tmpdir, 'tensors'), 'rb', 0) as f:
                 num_tensors = pickle_module.load(f)
-                for i in range(num_tensors):
+                for _ in range(num_tensors):
                     args = pickle_module.load(f)
                     key, storage_id, original_tensor_type = args
                     storage = deserialized_objects[storage_id]
                     tensor_type = storage_to_tensor_type(storage)
-                    tensor = tensor_type._new_with_metadata_file(f, storage)
+                    ndim, = struct.unpack('<i', f.read(4))
+                    # skip next 4 bytes; legacy encoding treated ndim as 8 bytes
+                    f.read(4)
+                    size = struct.unpack('<{}q'.format(ndim), f.read(8 * ndim))
+                    stride = struct.unpack('<{}q'.format(ndim), f.read(8 * ndim))
+                    storage_offset, = struct.unpack('<q', f.read(8))
+                    tensor = tensor_type().set_(storage, storage_offset, size, stride)
                     deserialized_objects[key] = tensor
 
             pickle_file = tar.extractfile('pickle')
@@ -384,13 +404,15 @@ def _load(f, map_location, pickle_module):
         else:
             raise RuntimeError("Unknown saved id type: %s" % saved_id[0])
 
-    # try the legacy loader first, which only works if f is a tarfile
-    try:
-        return legacy_load(f)
-    except tarfile.TarError:
-        pass
+    foffset = f.tell()
+    if foffset == 0:
+        # only if offset is zero we can attempt the legacy tar file loader
+        try:
+            return legacy_load(f)
+        except tarfile.TarError:
+            # if not a tarfile, reset file offset and proceed
+            f.seek(foffset)
 
-    f.seek(0)
     magic_number = pickle_module.load(f)
     if magic_number != MAGIC_NUMBER:
         raise RuntimeError("Invalid magic number; corrupt file?")

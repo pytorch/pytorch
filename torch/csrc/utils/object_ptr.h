@@ -1,6 +1,6 @@
 #pragma once
 
-#include <Python.h>
+#include "torch/csrc/utils/python_stub.h"
 
 template<class T>
 class THPPointer {
@@ -12,7 +12,7 @@ public:
   ~THPPointer() { free(); };
   T * get() { return ptr; }
   const T * get() const { return ptr; }
-  T * release() { T *tmp = ptr; ptr = NULL; return tmp; }
+  T * release() { T *tmp = ptr; ptr = nullptr; return tmp; }
   operator T*() { return ptr; }
   THPPointer& operator =(T *new_ptr) { free(); ptr = new_ptr; return *this; }
   THPPointer& operator =(THPPointer &&p) { free(); ptr = p.ptr; p.ptr = nullptr; return *this; }

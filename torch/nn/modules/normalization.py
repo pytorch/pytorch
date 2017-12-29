@@ -15,11 +15,11 @@ class CrossMapLRN2d(Module):
                                            self.k)(input)
 
     def __repr__(self):
-        return self.__class__.__name__ + ' (' \
+        return self.__class__.__name__ + '(' \
+            + str(self.size) \
             + ', alpha=' + str(self.alpha) \
             + ', beta=' + str(self.beta) \
-            + ', k=' + str(self.k) \
-            + ')'
+            + ', k=' + str(self.k) + ')'
 
 
 # TODO: ContrastiveNorm2d

@@ -1,5 +1,6 @@
 import ctypes
 import tempfile
+import contextlib
 from . import cudart, check_error
 
 
@@ -43,3 +44,12 @@ def start():
 
 def stop():
     check_error(cudart().cudaProfilerStop())
+
+
+@contextlib.contextmanager
+def profile():
+    try:
+        start()
+        yield
+    finally:
+        stop()

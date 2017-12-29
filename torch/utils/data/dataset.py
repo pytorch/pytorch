@@ -1,4 +1,5 @@
 import bisect
+import warnings
 
 
 class Dataset(object):
@@ -66,15 +67,21 @@ class ConcatDataset(Dataset):
         super(ConcatDataset, self).__init__()
         assert len(datasets) > 0, 'datasets should not be an empty iterable'
         self.datasets = list(datasets)
-        self.cummulative_sizes = self.cumsum(self.datasets)
+        self.cumulative_sizes = self.cumsum(self.datasets)
 
     def __len__(self):
-        return self.cummulative_sizes[-1]
+        return self.cumulative_sizes[-1]
 
     def __getitem__(self, idx):
-        dataset_idx = bisect.bisect_right(self.cummulative_sizes, idx)
+        dataset_idx = bisect.bisect_right(self.cumulative_sizes, idx)
         if dataset_idx == 0:
             sample_idx = idx
         else:
-            sample_idx = idx - self.cummulative_sizes[dataset_idx - 1]
+            sample_idx = idx - self.cumulative_sizes[dataset_idx - 1]
         return self.datasets[dataset_idx][sample_idx]
+
+    @property
+    def cummulative_sizes(self):
+        warnings.warn("cummulative_sizes attribute is renamed to "
+                      "cumulative_sizes", DeprecationWarning, stacklevel=2)
+        return self.cumulative_sizes

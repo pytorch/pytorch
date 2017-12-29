@@ -14,75 +14,85 @@ class _TensorBase(object):
     # CUDA case, which handles constructing the tensor on the same GPU
     # as this tensor.
     def new(self, *args, **kwargs):
-        """Constructs a new tensor of the same data type."""
+        r"""Constructs a new tensor of the same data type as :attr:`self` tensor.
+
+        Any valid argument combination to the tensor constructor is accepted by
+        this method, including sizes, :class:`torch.Storage`, NumPy ndarray,
+        Python Sequence, etc. See :ref:`torch.Tensor <tensor-doc>` for more
+        details.
+
+        .. note:: For CUDA tensors, this method will create new tensor on the
+                  same device as this tensor.
+        """
         return self.__class__(*args, **kwargs)
 
     def type_as(self, tensor):
-        """Returns this tensor cast to the type of the given tensor.
+        r"""Returns this :attr:`self` tensor cast to the type of the given
+        tensor.
 
-        This is a no-op if the tensor is already of the correct type. This is
-        equivalent to::
+        This is a no-op if the :attr:`self` tensor is already of the correct
+        type. This is equivalent to::
 
             self.type(tensor.type())
 
         Params:
-            tensor (Tensor): the tensor which has the desired type
+            tensor (Tensor): the tensor with the desired type
         """
         return self.type(tensor.type())
 
     def cpu(self):
-        """Returns a CPU copy of this tensor if it's not already on the CPU"""
+        r"""Returns a CPU copy of this tensor if it's not already on the CPU"""
         return self.type(getattr(torch, self.__class__.__name__))
 
     def double(self):
-        """Casts this tensor to double type"""
+        r"""Casts this tensor to double type"""
         return self.type(type(self).__module__ + '.DoubleTensor')
 
     def float(self):
-        """Casts this tensor to float type"""
+        r"""Casts this tensor to float type"""
         return self.type(type(self).__module__ + '.FloatTensor')
 
     def half(self):
-        """Casts this tensor to half-precision float type"""
+        r"""Casts this tensor to half-precision float type"""
         return self.type(type(self).__module__ + '.HalfTensor')
 
     def long(self):
-        """Casts this tensor to long type"""
+        r"""Casts this tensor to long type"""
         return self.type(type(self).__module__ + '.LongTensor')
 
     def int(self):
-        """Casts this tensor to int type"""
+        r"""Casts this tensor to int type"""
         return self.type(type(self).__module__ + '.IntTensor')
 
     def short(self):
-        """Casts this tensor to short type"""
+        r"""Casts this tensor to short type"""
         return self.type(type(self).__module__ + '.ShortTensor')
 
     def char(self):
-        """Casts this tensor to char type"""
+        r"""Casts this tensor to char type"""
         return self.type(type(self).__module__ + '.CharTensor')
 
     def byte(self):
-        """Casts this tensor to byte type"""
+        r"""Casts this tensor to byte type"""
         return self.type(type(self).__module__ + '.ByteTensor')
 
     def is_pinned(self):
-        """Returns true if this tensor resides in pinned memory"""
+        r"""Returns true if this tensor resides in pinned memory"""
         storage = self.storage()
         return storage.is_pinned() if storage else False
 
     def pin_memory(self):
-        """Copies the tensor to pinned memory, if it's not already pinned."""
+        r"""Copies the tensor to pinned memory, if it's not already pinned."""
         if self.is_cuda:
             raise TypeError("cannot pin '{0}' only CPU memory can be pinned"
                             .format(self.type()))
-        storage = self.storage()
+        storage = self.contiguous().storage()
         if storage is None:
             storage = (self.storage_type())()
         return type(self)().set_(storage.pin_memory()).view_as(self)
 
     def share_memory_(self):
-        """Moves the underlying storage to shared memory.
+        r"""Moves the underlying storage to shared memory.
 
         This is a no-op if the underlying storage is already in shared memory
         and for CUDA tensors. Tensors in shared memory cannot be resized.
@@ -91,7 +101,7 @@ class _TensorBase(object):
         return self
 
     def is_shared(self):
-        """Checks if tensor is in shared memory.
+        r"""Checks if tensor is in shared memory.
 
         This is always ``True`` for CUDA tensors.
         """
@@ -99,9 +109,10 @@ class _TensorBase(object):
 
     @property
     def shape(self):
-        """Alias for .size()
+        r"""Alias for .size()
 
-        Returns a torch.Size object, containing the dimensions of the tensor
+        Returns a torch.Size object, containing the dimensions of the
+        :attr:`self` Tensor.
         """
         return self.size()
 
@@ -148,8 +159,10 @@ class _TensorBase(object):
     def __bool__(self):
         if self.numel() == 0:
             return False
-        raise RuntimeError("bool value of non-empty " + torch.typename(self) +
-                           " objects is ambiguous")
+        elif self.numel() == 1:
+            return torch.squeeze(self)[0] != 0
+        raise RuntimeError("bool value of " + torch.typename(self) +
+                           " containing more than one value is ambiguous")
 
     __nonzero__ = __bool__
 
@@ -160,36 +173,31 @@ class _TensorBase(object):
             return iter([])
 
     def split(self, split_size, dim=0):
-        """Splits this tensor into a tuple of tensors.
+        r"""Splits this tensor into tensor chunks of :attr:`split_size` size.
 
         See :func:`torch.split`.
         """
         return torch.split(self, split_size, dim)
 
     def chunk(self, n_chunks, dim=0):
-        """Splits this tensor into a tuple of tensors.
+        r"""Splits this tensor into a certain number of tensor chunks.
 
         See :func:`torch.chunk`.
         """
         return torch.chunk(self, n_chunks, dim)
 
     def matmul(self, other):
-        """Matrix product of two tensors.
+        r"""Matrix product of two tensors.
 
         See :func:`torch.matmul`."""
         return torch.matmul(self, other)
 
     def tolist(self):
-        """Returns a nested list represenation of this tensor."""
-        dim = self.dim()
-        if dim == 1:
-            return [v for v in self]
-        elif dim > 0:
-            return [subt.tolist() for subt in self]
-        return []
+        r"""Returns a nested list represenation of this tensor."""
+        return torch.autograd.Variable(self).tolist()
 
     def view_as(self, tensor):
-        """Returns this tensor viewed as the size as the specified tensor.
+        r"""Returns this tensor viewed as the size as the specified tensor.
 
         This is equivalent to::
 
@@ -198,7 +206,7 @@ class _TensorBase(object):
         return self.view(tensor.size())
 
     def permute(self, *dims):
-        """Permute the dimensions of this tensor.
+        r"""Permute the dimensions of this tensor.
 
         Args:
             *dims (int...): The desired ordering of dimensions
@@ -227,7 +235,7 @@ class _TensorBase(object):
         return tensor
 
     def expand_as(self, tensor):
-        """Expands this tensor to the size of the specified tensor.
+        r"""Expands this tensor to the size of the specified tensor.
 
         This is equivalent to::
 
@@ -236,7 +244,7 @@ class _TensorBase(object):
         return self.expand(tensor.size())
 
     def repeat(self, *sizes):
-        """Repeats this tensor along the specified dimensions.
+        r"""Repeats this tensor along the specified dimensions.
 
         Unlike :meth:`expand`, this function copies the tensor's data.
 
@@ -258,30 +266,31 @@ class _TensorBase(object):
         # If args == (torch.Size,), then we need to unpack the tuple
         if len(sizes) == 1 and isinstance(sizes[0], torch.Size):
             sizes = sizes[0]
-        repeats = list(sizes)
-        result = self.new()
-        src = self.contiguous()
 
-        if len(repeats) < src.dim():
+        repeats = list(sizes)
+
+        if len(repeats) < self.dim():
             raise ValueError('Number of dimensions of repeat dims can not be '
                              'smaller than number of dimensions of tensor')
 
-        xtensor = src.new().set_(src)
-        xsize = list(xtensor.size())
-        for i in _range(len(repeats) - src.dim()):
-            xsize = [1] + xsize
+        # Add new leading dimensions to the tensor if the
+        # number of target dimensions is larger than the
+        # number of source dimensions.
+        num_new_dimensions = len(repeats) - self.dim()
+        padded_size = [1] * num_new_dimensions + list(self.size())
+        target_size = torch.Size([a * b for a, b in zip(padded_size, repeats)])
 
-        size = torch.Size([a * b for a, b in zip(xsize, repeats)])
-        xtensor.resize_(torch.Size(xsize))
-        result.resize_(size)
+        xtensor = self.new().set_(self)
+        xtensor = xtensor.expand(padded_size)
+
+        result = self.new()
+        result.resize_(target_size)
         urtensor = result.new(result)
         for i in _range(xtensor.dim()):
             urtensor = urtensor.unfold(i, xtensor.size(i), xtensor.size(i))
-        for i in _range(urtensor.dim() - xtensor.dim()):
-            xsize = [1] + xsize
-        xtensor.resize_(torch.Size(xsize))
-        xxtensor = xtensor.expand_as(urtensor)
-        urtensor.copy_(xxtensor)
+
+        urtensor.copy_(xtensor.expand_as(urtensor))
+
         return result
 
     def masked_copy_(self, *args, **kwargs):
@@ -371,10 +380,31 @@ class _TensorBase(object):
     def __hash__(self):
         return id(self)
 
+    def __int__(self):
+        if self.numel() == 1:
+            return int(self[(0,) * self.ndimension()])
+        raise TypeError("only 1-element tensors can be converted "
+                        "to Python scalars")
+
+    def __long__(self):
+        if self.numel() == 1:
+            return long(self[(0,) * self.ndimension()])
+        raise TypeError("only 1-element tensors can be converted "
+                        "to Python scalars")
+
+    def __float__(self):
+        if self.numel() == 1:
+            return float(self[(0,) * self.ndimension()])
+        raise TypeError("only 1-element tensors can be converted "
+                        "to Python scalars")
+
     # provide user guidance when they inavertently call autograd properties on a Tensor
     @property
     def data(self):
         raise RuntimeError('cannot call .data on a torch.Tensor: did you intend to use autograd.Variable?')
+
+    def numpy(self):
+        return torch.autograd.Variable(self).numpy()
 
     # Numpy array interface, to support `numpy.asarray(tensor) -> ndarray`
     def __array__(self, dtype=None):

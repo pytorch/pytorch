@@ -342,7 +342,8 @@ class TestLuaReader(TestCase):
             path = download_file('https://download.pytorch.org/test_data/legacy_modules.t7')
         except unittest.SkipTest:
             return
-        tests = load_lua(path)
+        long_size = 8 if sys.platform == 'win32' else None
+        tests = load_lua(path, long_size=long_size)
         for name, test in tests['modules'].items():
             test_name = 'test_' + name.replace('nn.', '')
             setattr(cls, test_name, cls._module_test(name, test))
@@ -386,7 +387,7 @@ class TestONNXUtils(TestCase):
         sizes = [2, 3, 4]
         pad = [1, 2, 3, 4]
         paddings = prepare_onnx_paddings(len(sizes), pad)
-        self.assertEqual(paddings, [0, 0, 3, 4, 1, 2])
+        self.assertEqual(paddings, [0, 3, 1, 0, 4, 2])
 
     def test_check_onnx_broadcast(self):
 

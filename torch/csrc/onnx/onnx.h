@@ -1,7 +1,7 @@
 #pragma once
 
 #include "torch/csrc/onnx/onnx.pb.h"
-#include "torch/csrc/jit/assert.h"
+#include "torch/csrc/assertions.h"
 
 #include <pb_encode.h>
 #include <ATen/ATen.h>
@@ -168,6 +168,21 @@ DEFINE_CONST(UINT64)
 DEFINE_CONST(COMPLEX64)
 DEFINE_CONST(COMPLEX128)
 #undef DEFINE_CONST
+
+#define DEFINE_CONST(C) \
+const auto a##C = onnx_AttributeProto_AttributeType_##C;
+DEFINE_CONST(FLOAT)
+DEFINE_CONST(INT)
+DEFINE_CONST(STRING)
+DEFINE_CONST(TENSOR)
+DEFINE_CONST(GRAPH)
+DEFINE_CONST(FLOATS)
+DEFINE_CONST(INTS)
+DEFINE_CONST(STRINGS)
+DEFINE_CONST(TENSORS)
+DEFINE_CONST(GRAPHS)
+#undef DEFINE_CONST
+
 // C++ wrappers which simulate the Google C++ Protobuf API
 //
 // These are NOT COMPLETE wrappers. If you find something is missing, add it!
@@ -270,6 +285,7 @@ public:
     proto.graphs  = list<GraphProto, onnx_GraphProto_fields>(&graphs);
   }
   void set_name(const std::string& s) { proto.name = string(&name, s); }
+  void set_type(onnx_AttributeProto_AttributeType t) { proto.has_type = true; proto.type = t; }
   void set_f(float f) { proto.has_f = true; proto.f = f; }
   void set_i(int64_t i) { proto.has_i = true; proto.i = i; }
   void set_s(std::string s_) { proto.s = string(&s, s_); }
@@ -290,6 +306,7 @@ public:
 class NodeProto : public MicroProto<onnx_NodeProto> {
 private:
   std::string op_type;
+  std::string doc_string;
   unique_vector<std::string> inputs;
   unique_vector<std::string> outputs;
   unique_vector<AttributeProto> attributes;
@@ -309,6 +326,7 @@ public:
     return ptr;
   }
   void set_op_type(const std::string& s) { proto.op_type= string(&op_type, s); }
+  void set_doc_string(const std::string& s) { proto.doc_string = string(&doc_string, s); }
 };
 
 class GraphProto : public MicroProto<onnx_GraphProto> {
@@ -349,6 +367,15 @@ public:
   }
 };
 
+class OperatorSetIdProto : public MicroProto<onnx_OperatorSetIdProto> {
+private:
+  std::string domain;
+public:
+  OperatorSetIdProto() : MicroProto(onnx_OperatorSetIdProto_init_default) {}
+  void set_domain(const std::string& s) { proto.domain = string(&domain, s); }
+  void set_version(int64_t v) { proto.has_version = true; proto.version = v; }
+};
+
 class ModelProto : public MicroProto<onnx_ModelProto> {
 private:
   std::string producer_name;
@@ -356,20 +383,25 @@ private:
   std::string domain;
   std::string doc_string;
   std::unique_ptr<GraphProto> graph;
+  unique_vector<OperatorSetIdProto> opset_import;
 public:
   ModelProto() : MicroProto(onnx_ModelProto_init_default) {
     proto.has_ir_version = true;
     proto.ir_version = onnx_Version_IR_VERSION;
-    proto.producer_name = string(&producer_name, "pytorch");
-    // TODO: stop hard-coding this
-    proto.producer_version = string(&producer_version, "0.2");
-    proto.domain = string(&domain, "com.facebook");
+    proto.opset_import = list<OperatorSetIdProto, onnx_OperatorSetIdProto_fields>(&opset_import);
   }
   void set_model_version(int64_t i) { proto.has_model_version = true; proto.model_version = i; }
   void set_doc_string(const std::string& s) { proto.doc_string = string(&doc_string, s); }
+  void set_producer_name(const std::string& s) { proto.producer_name = string(&producer_name, s); }
+  void set_producer_version(const std::string& s) { proto.producer_version = string(&producer_version, s); }
   GraphProto* mutable_graph() {
     proto.graph = msg<GraphProto, onnx_GraphProto_fields>(&graph);
     return graph.get();
+  }
+  OperatorSetIdProto* add_opset_import() {
+    auto ptr = new OperatorSetIdProto();
+    opset_import.emplace_back(ptr);
+    return ptr;
   }
 };
 

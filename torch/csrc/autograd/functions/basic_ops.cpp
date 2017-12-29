@@ -29,7 +29,7 @@ auto Add::apply(const variable_list& inputs) -> variable_list {
   AutoGPU guard(input1);
 
   at::Tensor output;
-  if (input1.type().isSparse()) {
+  if (input1.type().is_sparse()) {
     output = input2 + input1;
   } else {
     output = input1 + input2;

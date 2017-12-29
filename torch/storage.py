@@ -30,6 +30,9 @@ class _StorageBase(object):
     def __reduce__(self):
         return type(self), (self.tolist(),)
 
+    def __sizeof__(self):
+        return super(_StorageBase, self).__sizeof__() + self.element_size() * self.size()
+
     def clone(self):
         """Returns a copy of this storage"""
         return type(self)(self.size()).copy_(self)

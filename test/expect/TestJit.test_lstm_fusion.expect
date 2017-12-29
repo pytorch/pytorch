@@ -1,40 +1,42 @@
-graph(%1 : Double(3, 10)
-      %2 : Double(3, 20)
-      %3 : Double(3, 20)
-      %4 : Double(80, 10)
-      %5 : Double(80, 20)
-      %6 : Double(80)
-      %7 : Double(80)) {
-  %8 : Double(10!, 80!) = Transpose[perm=[1, 0]](%4), uses = [%9.i1];
-  %9 : Double(3, 80) = Gemm[alpha=1, beta=1, broadcast=1](%1, %8, %6), uses = [%30.i0];
-  %10 : Double(20!, 80!) = Transpose[perm=[1, 0]](%5), uses = [%11.i1];
-  %11 : Double(3, 80) = Gemm[alpha=1, beta=1, broadcast=1](%2, %10, %7), uses = [%35.i0];
-  %31 : Double(3!, 20), %32 : Double(3!, 20), %33 : Double(3!, 20), %34 : Double(3!, 20) = Split[split=[20, 20, 20, 20], axis=1](%9), uses = [[%27.i7], [%27.i5], [%27.i3], [%27.i1]];
-  %36 : Double(3!, 20), %37 : Double(3!, 20), %38 : Double(3!, 20), %39 : Double(3!, 20) = Split[split=[20, 20, 20, 20], axis=1](%11), uses = [[%27.i8], [%27.i6], [%27.i4], [%27.i2]];
-  %28 : Double(3, 20), %29 : Double(3, 20) = fusion_group_0(%3, %34, %39, %33, %38, %32, %37, %31, %36), uses = [[%0.i0], [%0.i1]];
-  return (%28, %29);
+graph(%0 : Float(3, 10)
+      %1 : Float(3, 20)
+      %2 : Float(3, 20)
+      %3 : Float(80, 10)
+      %4 : Float(80, 20)
+      %5 : Float(80)
+      %6 : Float(80)) {
+  %7 : Float(10!, 80!) = t(%3)
+  %8 : Float(3!, 80) = expand[size=[3, 80]](%5)
+  %9 : Float(3, 80) = addmm[beta={1}, alpha={1}](%8, %0, %7)
+  %10 : Float(20!, 80!) = t(%4)
+  %11 : Float(3!, 80) = expand[size=[3, 80]](%6)
+  %12 : Float(3, 80) = addmm[beta={1}, alpha={1}](%11, %1, %10)
+  %13 : Float(3!, 20), %14 : Float(3!, 20), %15 : Float(3!, 20), %16 : Float(3!, 20) = chunk[chunks=4, dim=1](%9)
+  %17 : Float(3!, 20), %18 : Float(3!, 20), %19 : Float(3!, 20), %20 : Float(3!, 20) = chunk[chunks=4, dim=1](%12)
+  %21 : Float(3, 20), %22 : Float(3, 20) = fusion_group_0(%2, %16, %20, %15, %19, %14, %18, %13, %17)
+  return (%21, %22);
 }
-with fusion_group_0 = graph(%13 : Double(3, 20)
-      %23 : Double(3!, 20)
-      %24 : Double(3!, 20)
-      %26 : Double(3!, 20)
-      %27 : Double(3!, 20)
-      %29 : Double(3!, 20)
-      %30 : Double(3!, 20)
-      %32 : Double(3!, 20)
-      %33 : Double(3!, 20)) {
-  %34 : Double(3, 20) = Add(%32, %33), uses = [%22.i0];
-  %31 : Double(3, 20) = Add(%29, %30), uses = [%20.i0];
-  %28 : Double(3, 20) = Add(%26, %27), uses = [%18.i0];
-  %25 : Double(3, 20) = Add(%23, %24), uses = [%16.i0];
-  %22 : Double(3, 20) = Sigmoid(%34), uses = [%11.i0];
-  %20 : Double(3, 20) = Sigmoid(%31), uses = [%14.i0];
-  %18 : Double(3, 20) = Tanh(%28), uses = [%11.i1];
-  %16 : Double(3, 20) = Sigmoid(%25), uses = [%3.i0];
-  %14 : Double(3, 20) = Mul(%20, %13), uses = [%8.i0];
-  %11 : Double(3, 20) = Mul(%22, %18), uses = [%8.i1];
-  %8 : Double(3, 20) = Add(%14, %11), uses = [%5.i0, %0.i1];
-  %5 : Double(3, 20) = Tanh(%8), uses = [%3.i1];
-  %3 : Double(3, 20) = Mul(%16, %5), uses = [%0.i0];
-  return (%3, %8);
+with fusion_group_0 = graph(%12 : Float(3, 20)
+      %22 : Float(3!, 20)
+      %23 : Float(3!, 20)
+      %25 : Float(3!, 20)
+      %26 : Float(3!, 20)
+      %28 : Float(3!, 20)
+      %29 : Float(3!, 20)
+      %31 : Float(3!, 20)
+      %32 : Float(3!, 20)) {
+  %33 : Float(3, 20) = add[alpha={1}](%31, %32)
+  %30 : Float(3, 20) = add[alpha={1}](%28, %29)
+  %27 : Float(3, 20) = add[alpha={1}](%25, %26)
+  %24 : Float(3, 20) = add[alpha={1}](%22, %23)
+  %21 : Float(3, 20) = sigmoid(%33)
+  %19 : Float(3, 20) = sigmoid(%30)
+  %17 : Float(3, 20) = tanh(%27)
+  %15 : Float(3, 20) = sigmoid(%24)
+  %13 : Float(3, 20) = mul(%19, %12)
+  %10 : Float(3, 20) = mul(%21, %17)
+  %7 : Float(3, 20) = add[alpha={1}](%13, %10)
+  %4 : Float(3, 20) = tanh(%7)
+  %2 : Float(3, 20) = mul(%15, %4)
+  return (%2, %7);
 }

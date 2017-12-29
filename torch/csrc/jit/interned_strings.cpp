@@ -3,7 +3,7 @@
 #include <string>
 #include <unordered_map>
 #include <mutex>
-#include "torch/csrc/jit/assert.h"
+#include "torch/csrc/assertions.h"
 #include "torch/csrc/jit/interned_strings.h"
 
 namespace torch { namespace jit {

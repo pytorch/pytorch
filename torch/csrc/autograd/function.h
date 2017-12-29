@@ -6,9 +6,9 @@
 // Subclasses may represent "forward" or "backward" operations (i.e functions
 // and their derivatives). Some functions may be used as both.
 
-#include <Python.h>
 #include "torch/csrc/autograd/saved_variable.h"
 #include "torch/csrc/utils/auto_unique_ptr.h"
+#include "torch/csrc/utils/python_stub.h"
 #include "torch/csrc/autograd/function_hook.h"
 #include "torch/csrc/autograd/profiler.h"
 #include "torch/csrc/jit/tracer.h"
@@ -37,15 +37,13 @@ struct edge_hasher {
   }
 };
 
+// TODO: separate is_executable and next_functions
 // State used to create "backward" functions
 struct FunctionFlags {
   // Roughly speaking, is_executable corresponds to requires_grad.
-  // See http://pytorch.org/docs/notes/autograd.html for more details:
-  // both is_executable and is_volatile specify whether or not backwards
-  // gradient computation will be performed for a function, but they differ in
-  // their precedence.
+  // It's true if any input requires grad and gradient calculation is enabled.
+  // See http://pytorch.org/docs/notes/autograd.html for more details.
   bool is_executable = false;
-  bool is_volatile = false;
   // What functions take the output of this function as input.
   // There is one function per output of this function.
   function_list next_functions;
@@ -55,8 +53,6 @@ struct Function : std::enable_shared_from_this<Function> {
   Function()
     : num_inputs(0)
     , next_functions()
-    , is_executable(false)
-    , is_stochastic(false)
     , pre_hooks()
     , post_hooks()
     , pyobj(nullptr)
@@ -65,8 +61,6 @@ struct Function : std::enable_shared_from_this<Function> {
   Function(FunctionFlags&& flags)
     : num_inputs(0)
     , next_functions(std::move(flags.next_functions))
-    , is_executable(flags.is_executable)
-    , is_stochastic(false)
     , pre_hooks()
     , post_hooks()
     , pyobj(nullptr)
@@ -83,7 +77,7 @@ struct Function : std::enable_shared_from_this<Function> {
 
   variable_list operator()(const variable_list& inputs) {
     profiler::RecordFunction rec(this);
-    if (jit::tracer::isTracing(inputs)) {
+    if (jit::tracer::isTracingVar(inputs)) {
       return tracedApply(inputs);
     }
     return apply(inputs);
@@ -95,21 +89,22 @@ struct Function : std::enable_shared_from_this<Function> {
     return shared_from_this();
   };
 
-  // Computes is_executable, is_volatile, and next_functions from a list
-  // of input variables
+  // Computes is_executable and next_functions from a list of input variables
   static FunctionFlags flags(const variable_list& inputs);
   static FunctionFlags flags(const std::initializer_list<Variable>& inputs);
-  static FunctionFlags flags(const tensor_list& inputs);
+  static FunctionFlags flags(at::TensorList inputs);
 
   // Releases saved variables if the operation won't be reused
   virtual inline void releaseVariables() {}
-
+  // called before a an apply if will release variables is going to be called
+  // allows larger ops like InterpreterAutogradFunction
+  // to incrementally release variables as they run
+  virtual inline void willReleaseVariables() {}
   // Function name for debugging
   virtual std::string name();
 
   inline bool should_compute_output(int i) const {
-    auto& fn = next_functions[i].first;
-    return fn && fn->is_executable;
+    return bool(next_functions[i].first);
   }
 
   inline bool should_compute_any_outputs() const {
@@ -121,8 +116,13 @@ struct Function : std::enable_shared_from_this<Function> {
     return false;
   }
 
+  inline bool should_compute_output(std::initializer_list<int> idxs) const {
+    return std::any_of(idxs.begin(), idxs.end(), [this](int i) {
+      return should_compute_output(i);
+    });
+  }
+
   inline void set_flags(FunctionFlags&& flags) {
-    is_executable = flags.is_executable;
     next_functions = std::move(flags.next_functions);
   }
 
@@ -148,13 +148,11 @@ struct Function : std::enable_shared_from_this<Function> {
   // need to be implemented :)
   virtual inline std::unique_ptr<saved_variable_list> saved_variables() { return nullptr; }
 
-  static void setUpContextEdge(jit::Node* this_node, int ctx_output_nr,
+  static void setUpContextEdge(jit::Node* this_node,
                                const variable_list& inputs, const variable_list& outputs);
 
   int num_inputs;
   function_list next_functions;
-  bool is_executable;
-  bool is_stochastic;
   std::vector<std::shared_ptr<FunctionPreHook>> pre_hooks;
   std::vector<std::shared_ptr<FunctionPostHook>> post_hooks;
 

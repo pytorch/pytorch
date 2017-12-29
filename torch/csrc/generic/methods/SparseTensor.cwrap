@@ -38,10 +38,28 @@ PyObject * THSPTensor_(size)(PyObject *self, PyObject *args, PyObject *kwargs)
 #endif
 
 [[
+  name: THSPTensor_(new)
+  python_name: new
+  method_flags: METH_KEYWORDS
+  backends:
+    - CUDA
+  only_register: True
+  sparse: yes
+]]
+#if IS_CUDA
+static PyObject * THSPTensor_(pynew)(PyTypeObject *type, PyObject *args, PyObject *kwargs);
+PyObject * THSPTensor_(new)(THPTensor *self, PyObject *args, PyObject *kwargs)
+{
+  THCPAutoGPU gpu_guard(args, (PyObject*)self);
+  return THSPTensor_(pynew)(Py_TYPE(self), args, kwargs);
+}
+#endif
+
+[[
   name: nDimension
   sparse: yes
   python_name: ndimension
-  return: long
+  return: int64_t
   arguments:
   - THSTensor* self
 ]]
@@ -56,6 +74,24 @@ PyObject * THSPTensor_(size)(PyObject *self, PyObject *args, PyObject *kwargs)
 [[
   name: nnz
   python_name: _nnz
+  sparse: yes
+  return: int64_t
+  arguments:
+  - THSTensor* self
+]]
+
+[[
+  name: nDimensionI
+  python_name: _dimI
+  sparse: yes
+  return: long
+  arguments:
+  - THSTensor* self
+]]
+
+[[
+  name: nDimensionV
+  python_name: _dimV
   sparse: yes
   return: long
   arguments:
@@ -136,8 +172,8 @@ PyObject * THSPTensor_(size)(PyObject *self, PyObject *args, PyObject *kwargs)
   return: THSTensor*
   arguments:
   - THSTensor* self
-  - long dim0
-  - long dim1
+  - int64_t dim0
+  - int64_t dim1
 ]]
 
 [[
@@ -147,8 +183,8 @@ PyObject * THSPTensor_(size)(PyObject *self, PyObject *args, PyObject *kwargs)
   return: argument 0
   arguments:
   - THSTensor* self
-  - long dim0
-  - long dim1
+  - int64_t dim0
+  - int64_t dim1
 ]]
 
 [[
@@ -160,8 +196,8 @@ PyObject * THSPTensor_(size)(PyObject *self, PyObject *args, PyObject *kwargs)
   cname: newTranspose
   return: THSTensor*
   before_call: |
-    long nDimI = ((THSPTensor*)${arg0})->cdata->nDimensionI;
-    long nDimV = ((THSPTensor*)${arg0})->cdata->nDimensionV;
+    int64_t nDimI = ((THSPTensor*)${arg0})->cdata->nDimensionI;
+    int64_t nDimV = ((THSPTensor*)${arg0})->cdata->nDimensionV;
     THPUtils_assert(nDimI == 2 && nDimV == 0, "t() expects a 2D sparse tensor, but self is %ldD indices and %ldD values", nDimI, nDimV);
   arguments:
     - THSTensor* self
@@ -175,8 +211,8 @@ PyObject * THSPTensor_(size)(PyObject *self, PyObject *args, PyObject *kwargs)
   cname: transpose
   return: self
   before_call: |
-    long nDimI = ((THSPTensor*)${arg0})->cdata->nDimensionI;
-    long nDimV = ((THSPTensor*)${arg0})->cdata->nDimensionV;
+    int64_t nDimI = ((THSPTensor*)${arg0})->cdata->nDimensionI;
+    int64_t nDimV = ((THSPTensor*)${arg0})->cdata->nDimensionV;
     THPUtils_assert(nDimI == 2 && nDimV == 0, "t_() expects a 2D sparse tensor, but self is %ldD indices and %ldD values", nDimI, nDimV);
   arguments:
     - THSTensor* self
@@ -293,6 +329,33 @@ PyObject * THSPTensor_(size)(PyObject *self, PyObject *args, PyObject *kwargs)
   return: self
   arguments:
     - THSTensor* self
+]]
+
+[[
+  name: zeros
+  sparse: yes
+  variants:
+    - function
+  auto_gpu: False
+  return: argument 0
+  arguments:
+    - arg: THSTensor* result
+      output: True
+    - arg: THSize* size
+      long_args: True
+]]
+
+[[
+  name: zeros_like
+  sparse: yes
+  cname: zerosLike
+  variants:
+    - function
+  return: argument 0
+  arguments:
+    - arg: THSTensor* result
+      output: True
+    - THSTensor* input
 ]]
 
 [[
@@ -459,7 +522,7 @@ PyObject * THSPTensor_(size)(PyObject *self, PyObject *args, PyObject *kwargs)
   python_name: get_device
   backends:
     - CUDA
-  return: long
+  return: int64_t
   arguments:
     - THSTensor* self
 ]]
