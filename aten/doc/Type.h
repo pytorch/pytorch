@@ -321,6 +321,9 @@ struct AT_API Type {
   virtual Tensor & m_exp_(Tensor & self) const;
   virtual Tensor & exp_out(Tensor & result, const Tensor & self) const;
   virtual Tensor exp(const Tensor & self) const;
+  virtual Tensor & m_expm1_(Tensor & self) const;
+  virtual Tensor & expm1_out(Tensor & result, const Tensor & self) const;
+  virtual Tensor expm1(const Tensor & self) const;
   virtual Tensor & m_cos_(Tensor & self) const;
   virtual Tensor & cos_out(Tensor & result, const Tensor & self) const;
   virtual Tensor cos(const Tensor & self) const;

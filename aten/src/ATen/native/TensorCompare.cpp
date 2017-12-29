@@ -40,21 +40,18 @@ struct WhereOp {
 };
 
 Tensor where(const Tensor& condition, const Tensor& self, const Tensor& other) {
+  if (condition.type().scalarType() != ScalarType::Byte) {
+    runtime_error("Expected condition to have ScalarType Byte, but got ScalarType %s",
+                  toString(condition.type().scalarType()));
+  }
   Tensor b_condition, b_self, b_other;
   std::tie(b_condition, b_self, b_other) = expand_outplace(condition, self, other, "where");
   return at::_s_where(b_condition, b_self, b_other);
 }
 
-Tensor _s_where(const Tensor& condition, const Tensor& self, const Tensor& other) {
-  if (condition.type().scalarType() != ScalarType::Byte) {
-    runtime_error("Expected condition to have ScalarType Byte, but got ScalarType %s",
-                  toString(condition.type().scalarType()));
-  }
-  if (self.type().backend() != Backend::CPU) {
-    runtime_error("where() only supported with Backend::CPU, got %s", toString(self.type().backend()));
-  }
+Tensor _s_where_cpu(const Tensor& condition, const Tensor& self, const Tensor& other) {
   Tensor ret = self.type().tensor(self.sizes());
-  dispatch_all<WhereOp>(ret.type(), "where", ret, condition, self, other);
+  dispatch_all<void, WhereOp>(ret.type(), "where", ret, condition, self, other);
   return ret;
 }
 

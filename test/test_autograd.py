@@ -1268,9 +1268,9 @@ class TestAutograd(TestCase):
         f[0] = float('nan')
         self.assertTrue(math.isnan(float(f)))
         f[0] = float('inf')
-        self.assertEqual(float(f), float('inf'))
+        self.assertEqual(float(f), float('inf'), allow_inf=True)
         f[0] = float('-inf')
-        self.assertEqual(float(f), float('-inf'))
+        self.assertEqual(float(f), float('-inf'), allow_inf=True)
 
         # integral -> floating point
         # check we can convert something that loses precision
@@ -1751,8 +1751,11 @@ class TestAutograd(TestCase):
         gradgradcheck(where, [cond, x, y], [Variable(t(torch.randn(5, 5, 5)))])
 
     def test_where_functional(self):
-        # TODO: .cuda() lambda
         self._test_where_functional(lambda t: t)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA unavailable")
+    def test_where_functional_cuda(self):
+        self._test_where_functional(lambda t: t.cuda())
 
     def test_inplace_view_backprop_base(self):
         # modify view and back-prop through base
@@ -2026,6 +2029,7 @@ method_tests = [
     ('expand', (1,), (S, S, S), 'scalar'),
     ('expand', (1, S), (1, 1, S), 'new_dim_front_old_front_1'),
     ('exp', (S, S, S), ()),
+    ('expm1', (S, S, S), ()),
     ('erf', torch.rand(S, S, S), ()),
     ('erfinv', torch.rand(S, S, S).clamp(-0.9, 0.9), ()),
     ('log', torch.rand(S, S, S) + 1e-2, ()),

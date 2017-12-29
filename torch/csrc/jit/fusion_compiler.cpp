@@ -30,6 +30,7 @@ std::unordered_map<NodeKind, std::string> simple_map_ops = {
   {klog1p, "log1pf(${0})"},
   {klgamma, "lgammaf(${0})"},
   {kexp, "expf(${0})"},
+  {kexpm1, "expm1f(${0})"},
   {kcos, "cosf(${0})"},
   {kacos, "acosf(${0})"},
   {kcosh, "coshf(${0})"},

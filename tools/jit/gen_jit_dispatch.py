@@ -1,10 +1,9 @@
 import os
 import argparse
-from collections import defaultdict
-from tools.shared.module_loader import import_module
 from itertools import count
-from ..autograd.gen_variable_type import load_aten_declarations, CodeTemplate, write, \
-    FALLTHROUGH_RETURN_TYPES, FALLTHROUGH_FUNCTIONS, GENERATED_COMMENT
+from ..autograd.utils import CodeTemplate, write
+from ..autograd.gen_variable_type import load_aten_declarations, \
+    FALLTHROUGH_RETURN_TYPES, FALLTHROUGH_FUNCTIONS
 
 template_path = os.path.join(os.path.dirname(__file__), 'templates')
 

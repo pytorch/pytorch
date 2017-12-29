@@ -35,13 +35,25 @@ from .beta import Beta
 from .categorical import Categorical
 from .dirichlet import Dirichlet
 from .distribution import Distribution
-from .gamma import Gamma
-from .normal import Normal
 from .exponential import Exponential
+from .gamma import Gamma
 from .laplace import Laplace
 from .chi2 import Chi2
+from .normal import Normal
+from .one_hot_categorical import OneHotCategorical
 from .uniform import Uniform
 
-
-__all__ = ['Distribution', 'Bernoulli', 'Beta', 'Categorical', 'Chi2', 'Dirichlet',
-           'Gamma', 'Normal', 'Exponential', 'Laplace', 'Uniform']
+__all__ = [
+    'Bernoulli',
+    'Beta',
+    'Categorical',
+    'Chi2',
+    'Dirichlet',
+    'Distribution',
+    'Exponential',
+    'Gamma',
+    'Laplace',
+    'Normal',
+    'OneHotCategorical',
+    'Uniform',
+]

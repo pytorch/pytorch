@@ -730,11 +730,11 @@ def rrelu(input, lower=1. / 8, upper=1. / 3, training=False, inplace=False):
     Randomized leaky ReLU.
     """
     if inplace:
-        return torch._C._nn.rrelu_(input, lower, upper, training)
-    return torch._C._nn.rrelu(input, lower, upper, training)
+        return torch._C._VariableBase.rrelu_(input, lower, upper, training)
+    return torch._C._VariableBase.rrelu(input, lower, upper, training)
 
 
-rrelu_ = _add_docstr(torch._C._nn.rrelu_, r"""
+rrelu_ = _add_docstr(torch._C._VariableBase.rrelu_, r"""
 rrelu_(input, lower=1./8, upper=1./3, training=False) -> Variable
 
 In-place version of :func:`~rrelu`.

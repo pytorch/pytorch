@@ -47,6 +47,7 @@ public:
   }
 #if AT_CUDA_ENABLED()
   cudaStream_t getCurrentCUDAStream() const;
+  struct cudaDeviceProp* getCurrentDeviceProperties() const;
 #endif
   // NB: This method is *purely* whether or not a user requested
   // that CuDNN was enabled, it doesn't actually say anything about
