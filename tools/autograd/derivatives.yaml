@@ -504,7 +504,7 @@
 # range
 
 - name: reciprocal(Tensor self)
-  self: -grad * result * result
+  self: -grad * destination * destination
 
 - name: remainder(Tensor self, Scalar other)
   self: grad
