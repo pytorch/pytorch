@@ -90,7 +90,7 @@ class ninja_build_ext(setuptools.command.build_ext.build_ext):
 
                 obj_regex = re.compile('/Fo(.*)')
                 obj_list = [m.group(1) for m in (
-                    src_regex.match(elem) for elem in cmd) if m]
+                    obj_regex.match(elem) for elem in cmd) if m]
 
                 if len(src_list) >= 1 and len(obj_list) >= 1:
                     src = src_list[0]
