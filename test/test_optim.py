@@ -293,10 +293,6 @@ class TestOptim(TestCase):
             lambda params: optim.SparseAdam(params, lr=4e-2),
             True
         )
-        self._test_rosenbrock_sparse(
-            lambda params: optim.SparseAdam(params, lr=4e-2, amsgrad=True),
-            True
-        )
 
     def test_adadelta(self):
         self._test_rosenbrock(
