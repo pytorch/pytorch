@@ -33,6 +33,7 @@ policy, the code for implementing REINFORCE would be as follows::
 from .bernoulli import Bernoulli
 from .beta import Beta
 from .categorical import Categorical
+from .cauchy import Cauchy
 from .dirichlet import Dirichlet
 from .distribution import Distribution
 from .exponential import Exponential
@@ -47,6 +48,7 @@ __all__ = [
     'Bernoulli',
     'Beta',
     'Categorical',
+    'Cauchy',
     'Chi2',
     'Dirichlet',
     'Distribution',

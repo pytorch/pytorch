@@ -31,12 +31,18 @@ Probability distributions - torch.distributions
 .. autoclass:: Categorical
     :members:
 
+:hidden:`Cauchy`
+~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: Cauchy
+    :members:
+
 :hidden:`Chi2`
 ~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autoclass:: Chi2
     :members:
-
+    
 :hidden:`Dirichlet`
 ~~~~~~~~~~~~~~~~~~~~~~~
 

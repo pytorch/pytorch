@@ -5,6 +5,7 @@ from torch.autograd import Function, Variable
 from torch.autograd.function import once_differentiable
 from torch.distributions.distribution import Distribution
 from torch.distributions.utils import broadcast_all, digamma
+import warnings
 
 
 def _standard_gamma(alpha):
@@ -31,6 +32,9 @@ class Gamma(Distribution):
     has_rsample = True
 
     def __init__(self, alpha, beta):
+        if alpha < 0.1 if isinstance(alpha, Number) else alpha.lt(0.1).any():
+            warnings.warn('Sampling from {} with small shape parameter may be unstable.'
+                          .format(self.__class__.__name__), UserWarning)
         self.alpha, self.beta = broadcast_all(alpha, beta)
         if isinstance(alpha, Number) and isinstance(beta, Number):
             batch_shape = torch.Size()
