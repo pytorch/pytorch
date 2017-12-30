@@ -1768,8 +1768,8 @@ def pearson_correlation(x1, x2, eps=1e-8):
             Default: 1e-8
 
     Shape:
-        - Input: :math: `(\ast_1, \ast_2)`
-        - Output: :math: `(1)`
+        - Input: :math:`(\ast_1, \ast_2)`
+        - Output: :math:`(1)`
 
     Example::
 
@@ -1785,6 +1785,38 @@ def pearson_correlation(x1, x2, eps=1e-8):
     dot_prod = x1_bar.dot(x2_bar)
     norm_prod = x1_bar.norm(2) * x2_bar.norm(2)
     return dot_prod / norm_prod.clamp(min=eps)
+
+
+def correlation_matrix(x1, eps=1e-8):
+    r"""Returns Correlation matrix for x1
+
+    ..math ::
+        \text{correlation_matrix}(v_1, v_2) = \dfrac{\mathrm{cov}(v_1, v_2)}{\sigma_{v_1}\sigma_{v_2}}
+        \text{where } \sigma_{z} \text{ denotes the standard deviation of } z
+        \text{ and } \mathrm{cov}(x, y) \text{ denotes the covariance between } x \text{ and } y
+
+    Args:
+        x1 (Variable): First input.
+        eps (float, optional): Small value to avoid division by zero.
+            Default: 1e-8
+
+    Shape:
+        - Input: :math:`(N, D)`
+        - Output: :math:`(N, N)`
+
+    Example::
+
+        >>> input1 = autograd.Variable(torch.randn(100, 128))
+        >>> output = F.correlation_matrix(input1)
+        >>> print(output)
+    """
+    assert x1.dim() == 2, "Input must be a 2D matrix."
+    x1_bar = x1 - x1.mean(1).repeat(x.size(1)).view(x.size(1), -1).t()
+    cov_matrix = x1_bar.mm(x1_bar.t()).div(x1_bar.size(1) - 1)
+    inv_stddev = torch.rsqrt(torch.diag(cov_matrix))
+    cor_matrix = cov_matrix.mul(inv_stddev.expand_as(cov_matrix))
+    cor_matrix.mul_(inv_stddev.expand_as(cov_matrix).t())
+    return cor_matrix.clamp(-1.0, 1.0)
 
 
 def triplet_margin_loss(anchor, positive, negative, margin=1.0, p=2, eps=1e-6, swap=False):
