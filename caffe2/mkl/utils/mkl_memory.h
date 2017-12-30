@@ -188,8 +188,10 @@ class MKLMemory {
       bool share_mem_if_possible = false) {
     buffer_.reset();
     dims_.resize(dimension);
+    size_ = 1;
     for (int i = 0; i < dimension; ++i) {
       dims_[i] = size[dimension - 1 - i];
+      size_ *= dims_[i];
     }
     user_layout_.Reset(dimension, size, strides);
     if (primitive) {
@@ -219,8 +221,10 @@ class MKLMemory {
       bool share_mem_if_possible = false) {
     buffer_.reset();
     dims_.resize(dims.size());
+    size_ = 1;
     for (int i = 0; i < dims.size(); ++i) {
       dims_[i] = dims[i];
+      size_ *= dims_[i];
     }
     size_t dimension = dims.size();
     vector<size_t> size(dimension);
@@ -254,6 +258,8 @@ class MKLMemory {
     if (share_mem_if_possible_ && layout_is_user_layout_) {
       VLOG(2) << "Sharing underlying memory and skip copy.";
       buffer_.reset(const_cast<void*>(ptr), [](void*) -> void {});
+    } else if (size_ == 0) {
+      VLOG(2) << "Cannot copy into empty MKL buffer.";
     } else {
       VLOG(2) << "Copying external content.";
       MKLDNN_SAFE_CALL(dnnConversionExecute<T>(
@@ -270,13 +276,20 @@ class MKLMemory {
   }
 
   void CopyFrom(const MKLMemory<T>& other) {
-    if (share_mem_if_possible_ && dnnLayoutCompare(other.layout_, layout_)) {
+    CAFFE_ENFORCE_EQ(
+        other.dims(),
+        dims_,
+        "Dims does not match the expected dims of the resource.");
+
+    if (share_mem_if_possible_ && dnnLayoutCompare<T>(other.layout_, layout_)) {
       buffer_ = other.buffer_;
+    } else if (size_ == 0) {
+      VLOG(2) << "Cannot copy between empty MKL buffers";
     } else {
       PrimitiveWrapper<T> convert(
           dnnConversionCreate<T>, other.layout_, layout_);
       MKLDNN_SAFE_CALL(
-          dnnConversionExecute<T>(convert, other.buffer_, buffer()));
+          dnnConversionExecute<T>(convert, other.buffer(), buffer()));
     }
   }
 
@@ -343,7 +356,7 @@ class MKLMemory {
       MKLMemory<T>* other,
       const dnnPrimitive_t primitive = nullptr,
       const dnnResourceType_t type = dnnResourceNumber) {
-    if (buffer_.get() == other->buffer_.get()) {
+    if (buffer_ && buffer_.get() == other->buffer_.get()) {
       CAFFE_ENFORCE(
           dnnLayoutCompare<T>(other->layout_, layout_),
           "MKLMemory layout does not match, despite in-place buffers");
@@ -355,8 +368,6 @@ class MKLMemory {
       // This is already mapping to the same memory region. Skip copy.
       return;
     }
-    CAFFE_ENFORCE(
-        buffer_.get(), "Canot copy out from an uninitialized MKLMemory.");
     // TODO(jiayq): if primitive creation is a big overhead and we will be
     // consistently copying stuff with fixed src and dst layouts, consider
     // making a cache for the primitive below.
@@ -364,6 +375,12 @@ class MKLMemory {
     if (dims() != other->dims()) {
       other->Reset(dims(), primitive, type);
     }
+    if (size_ == 0) {
+      VLOG(2) << "Cannot copy between empty MKL buffers.";
+      return;
+    }
+    CAFFE_ENFORCE(
+        buffer_.get(), "Cannot copy out from an uninitialized MKLMemory.");
     PrimitiveWrapper<T> convert(
         dnnConversionCreate<T>, layout_, other->layout_);
     MKLDNN_SAFE_CALL(
@@ -374,6 +391,10 @@ class MKLMemory {
     if (buffer_ == nullptr) {
       CAFFE_ENFORCE(
           layout_ != nullptr, "Trying to allocate buffer but layout is empty.");
+      if (size_ == 0) {
+        VLOG(2) << "Cannot allocate empty MKL buffer.";
+        return buffer_.get();
+      }
       void* allocated = nullptr;
       MKLDNN_SAFE_CALL(dnnAllocateBuffer<T>(&allocated, layout_));
       buffer_.reset(allocated, [](void* ptr) -> void {
@@ -401,6 +422,13 @@ class MKLMemory {
   inline int dim32(const int i) const {
     CAFFE_ENFORCE_LT(dims_.at(i), std::numeric_limits<int>::max());
     return static_cast<int>(dims_[i]);
+  }
+
+  /**
+   * Returns the size (i.e., the number of items) in the buffer.
+   */
+  inline TIndex size() const {
+    return size_;
   }
 
   /**
@@ -471,6 +499,8 @@ class MKLMemory {
   // The dimensions in the same order as Caffe2 does. This is used to
   // interface with C2.
   vector<TIndex> dims_;
+  // Number of items in the buffer.
+  TIndex size_ = -1;
   // The user dnn layout.
   LayoutWrapper<T> user_layout_;
   // The internal dnn layout.
