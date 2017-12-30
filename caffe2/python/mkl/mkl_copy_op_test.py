@@ -58,6 +58,25 @@ class MKCopyTest(hu.HypothesisTestCase):
         ))
         np.testing.assert_array_equal(X, self.ws.blobs["X_copy"].fetch())
 
+    @given(n=st.sampled_from([0, 10]))
+    def test_mkl_zero_copy(self, n):
+        shape = (0, n)
+        X = np.zeros(shape=shape).astype(np.float32)
+        self.ws.create_blob("X").feed(X, pb2.DeviceOption())
+        self.ws.run(core.CreateOperator(
+            "CopyCPUToMKL",
+            ["X"],
+            ["X_MKL"],
+            device_option=pb2.DeviceOption(device_type=pb2.MKLDNN)
+        ))
+        self.ws.run(core.CreateOperator(
+            "CopyMKLToCPU",
+            ["X_MKL"],
+            ["X_copy"],
+            device_option=pb2.DeviceOption(device_type=pb2.MKLDNN)
+        ))
+        np.testing.assert_equal(shape, self.ws.blobs["X_copy"].fetch().shape)
+
 
 if __name__ == "__main__":
     import unittest
