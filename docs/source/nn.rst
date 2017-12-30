@@ -992,6 +992,10 @@ Distance functions
 
 .. autofunction:: cosine_similarity
 
+:hidden:`pearson_correlation`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: pearson_correlation
 
 Loss functions
 --------------

@@ -3236,6 +3236,18 @@ class TestNN(NNTestCase):
         input2 = Variable(torch.randn(input_size), requires_grad=True)
         self.assertEqual(F.cosine_similarity(input1, input2, dim=1).size(), expected_size)
 
+    def test_pearson_correlation(self):
+        input1 = Variable(torch.randn(16), requires_grad=True)
+        input2 = Variable(torch.randn(16), requires_grad=True)
+        self.assertTrue(gradcheck(lambda x, y: F.pearson_correlation(x, y), (input1, input2)))
+
+        # Check pearson_correlation input/output shapes
+        input_size = (30,)
+        expected_size = (1,)
+        input1 = Variable(torch.randn(input_size), requires_grad=True)
+        input2 = Variable(torch.randn(input_size), requires_grad=True)
+        self.assertEqual(F.pearson_correlation(input1, input2).size(), expected_size)
+
     def test_grid_sample(self):
         def test_cpu_against_cuda(N, C, H, W, padding_mode):
             def test_shape(N, C, IH, IW, H, W, padding_mode):
