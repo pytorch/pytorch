@@ -306,6 +306,8 @@ class build_ext(build_ext_parent):
             else:
                 # To generate .obj files for AutoGPU for the export class
                 # a header file cannot build, so it has to be copied to someplace as a source file
+                if not os.path.exists("torch/csrc/generated"):
+                    os.mkdir("torch/csrc/generated")
                 if os.path.exists("torch/csrc/generated/AutoGPU_cpu_win.cpp"):
                     os.remove("torch/csrc/generated/AutoGPU_cpu_win.cpp")
                 shutil.copyfile("torch/csrc/cuda/AutoGPU.h", "torch/csrc/generated/AutoGPU_cpu_win.cpp")
