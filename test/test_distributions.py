@@ -567,7 +567,7 @@ class TestDistributions(TestCase):
             cdf_x = pdf(x, alpha, beta)
             expected_grad = -cdf_alpha / cdf_x
             rel_error = np.abs(actual_grad - expected_grad) / (expected_grad + 1e-100)
-            self.assertLess(np.max(rel_error), 0.002,
+            self.assertLess(np.max(rel_error), 0.001,
                             '\n'.join(['Bad gradients for Beta({}, {})'.format(alpha, beta),
                                        'x {}'.format(x),
                                        'expected {}'.format(expected_grad),
