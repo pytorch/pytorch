@@ -56,7 +56,7 @@
   self: grad * self.sign()
 
 - name: acos(Tensor self)
-  self: grad * -((-self * self + 1).sqrt().reciprocal())
+  self: grad * -((-self * self + 1).rsqrt())
 
 - name: add(Tensor self, Scalar other, *, Scalar alpha)
   self: grad
@@ -106,10 +106,10 @@
   self: as_strided_backward(grad, TensorGeometry(self), size, stride, storage_offset)
 
 - name: asin(Tensor self)
-  self: grad * (-self * self + 1).sqrt().reciprocal()
+  self: grad * (-self * self + 1).rsqrt()
 
 - name: atan(Tensor self)
-  self: grad * (self * self + 1).reciprocal()
+  self: grad / (self * self + 1)
 
 - name: atan2(Tensor self, Tensor other)
   self, other: atan2_backward(grad, self, other, grad_input_mask)
@@ -192,7 +192,7 @@
 
 - name: div(Tensor self, Tensor other)
   self: grad / other
-  other: -grad * self / (other * other)
+  other: -grad * result * other
 
 - name: dot(Tensor self, Tensor tensor)
   self: grad * tensor
@@ -504,11 +504,7 @@
 # range
 
 - name: reciprocal(Tensor self)
-<<<<<<< HEAD
   self: -grad * result * result
-=======
-  self: grad / -(self * self)
->>>>>>> parent of c46c9f7... Merge branch 'derivative-improvements' of https://github.com/vishwakftw/pytorch
 
 - name: remainder(Tensor self, Scalar other)
   self: grad
@@ -562,7 +558,7 @@
   self: split_backward(grads, split_size, dim, self.sizes(), self.type())
 
 - name: sqrt(Tensor self)
-  self: grad * self.pow(-0.5) / 2
+  self: grad * self.rsqrt() * 0.5
 
 - name: squeeze(Tensor self)
   self: unsqueeze_to(grad, self.sizes());
@@ -571,10 +567,10 @@
   self: maybe_unsqueeze(grad, dim, self.size(dim) == 1 && self.sizes().size() != 1)
 
 - name: std(Tensor self, bool unbiased)
-  self: var_backward(grad * (result * 2).reciprocal(), self, unbiased)
+  self: var_backward(grad / (result * 2), self, unbiased)
 
 - name: std(Tensor self, int64_t dim, bool unbiased, bool keepdim)
-  self: var_backward(grad * (result * 2).reciprocal(), self, dim, unbiased, keepdim)
+  self: var_backward(grad / (result * 2), self, dim, unbiased, keepdim)
 
 # storage_offset
 # stride
