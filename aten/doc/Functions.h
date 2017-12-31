@@ -117,7 +117,7 @@ static inline std::tuple<Tensor &,Tensor &> sort_out(Tensor & values, Tensor & i
 static inline std::tuple<Tensor,Tensor> sort(const Tensor & self, int64_t dim=-1, bool descending=false);
 static inline std::tuple<Tensor &,Tensor &> topk_out(Tensor & values, Tensor & indices, const Tensor & self, int64_t k, int64_t dim=-1, bool largest=true, bool sorted=true);
 static inline std::tuple<Tensor,Tensor> topk(const Tensor & self, int64_t k, int64_t dim=-1, bool largest=true, bool sorted=true);
-static inline Tensor & abs_out(Tensor & destination, const Tensor & self);
+static inline Tensor & abs_out(Tensor & result, const Tensor & self);
 static inline Tensor abs(const Tensor & self);
 static inline Tensor & sigmoid_out(Tensor & result, const Tensor & self);
 static inline Tensor sigmoid(const Tensor & self);
@@ -167,36 +167,36 @@ static inline Tensor & trunc_out(Tensor & result, const Tensor & self);
 static inline Tensor trunc(const Tensor & self);
 static inline Tensor & frac_out(Tensor & result, const Tensor & self);
 static inline Tensor frac(const Tensor & self);
-static inline Tensor & mean_out(Tensor & destination, const Tensor & self, int64_t dim, bool keepdim=false);
+static inline Tensor & mean_out(Tensor & result, const Tensor & self, int64_t dim, bool keepdim=false);
 static inline Tensor mean(const Tensor & self, int64_t dim, bool keepdim=false);
 static inline Scalar mean(const Tensor & self);
-static inline Tensor & var_out(Tensor & destination, const Tensor & self, int64_t dim, bool unbiased=true, bool keepdim=false);
+static inline Tensor & var_out(Tensor & result, const Tensor & self, int64_t dim, bool unbiased=true, bool keepdim=false);
 static inline Tensor var(const Tensor & self, int64_t dim, bool unbiased=true, bool keepdim=false);
 static inline Scalar var(const Tensor & self, bool unbiased=true);
-static inline Tensor & std_out(Tensor & destination, const Tensor & self, int64_t dim, bool unbiased=true, bool keepdim=false);
+static inline Tensor & std_out(Tensor & result, const Tensor & self, int64_t dim, bool unbiased=true, bool keepdim=false);
 static inline Tensor std(const Tensor & self, int64_t dim, bool unbiased=true, bool keepdim=false);
 static inline Scalar std(const Tensor & self, bool unbiased=true);
-static inline Tensor & norm_out(Tensor & destination, const Tensor & self, Scalar p, int64_t dim, bool keepdim=false);
+static inline Tensor & norm_out(Tensor & result, const Tensor & self, Scalar p, int64_t dim, bool keepdim=false);
 static inline Tensor norm(const Tensor & self, Scalar p, int64_t dim, bool keepdim=false);
 static inline Scalar norm(const Tensor & self, Scalar p=2);
-static inline Tensor & renorm_out(Tensor & destination, const Tensor & self, Scalar p, int64_t dim, Scalar maxnorm);
+static inline Tensor & renorm_out(Tensor & result, const Tensor & self, Scalar p, int64_t dim, Scalar maxnorm);
 static inline Tensor renorm(const Tensor & self, Scalar p, int64_t dim, Scalar maxnorm);
 static inline Scalar dist(const Tensor & self, const Tensor & other, Scalar p=2);
-static inline Tensor & reciprocal_out(Tensor & destination, const Tensor & self);
+static inline Tensor & reciprocal_out(Tensor & result, const Tensor & self);
 static inline Tensor reciprocal(const Tensor & self);
-static inline Tensor & neg_out(Tensor & destination, const Tensor & self);
+static inline Tensor & neg_out(Tensor & result, const Tensor & self);
 static inline Tensor neg(const Tensor & self);
-static inline Tensor & atan2_out(Tensor & destination, const Tensor & self, const Tensor & other);
+static inline Tensor & atan2_out(Tensor & result, const Tensor & self, const Tensor & other);
 static inline Tensor atan2(const Tensor & self, const Tensor & other);
-static inline Tensor & pow_out(Tensor & destination, const Tensor & self, Scalar exponent);
+static inline Tensor & pow_out(Tensor & result, const Tensor & self, Scalar exponent);
 static inline Tensor pow(const Tensor & self, Scalar exponent);
-static inline Tensor & pow_out(Tensor & destination, const Tensor & self, const Tensor & exponent);
+static inline Tensor & pow_out(Tensor & result, const Tensor & self, const Tensor & exponent);
 static inline Tensor pow(const Tensor & self, const Tensor & exponent);
-static inline Tensor & lerp_out(Tensor & destination, const Tensor & self, const Tensor & end, Scalar weight);
+static inline Tensor & lerp_out(Tensor & result, const Tensor & self, const Tensor & end, Scalar weight);
 static inline Tensor lerp(const Tensor & self, const Tensor & end, Scalar weight);
 static inline Tensor & linspace_out(Tensor & result, Scalar start, Scalar end, int64_t steps=100);
 static inline Tensor & logspace_out(Tensor & result, Scalar start, Scalar end, int64_t steps=100);
-static inline Tensor & histc_out(Tensor & destination, const Tensor & self, int64_t bins=100, Scalar min=0, Scalar max=0);
+static inline Tensor & histc_out(Tensor & result, const Tensor & self, int64_t bins=100, Scalar min=0, Scalar max=0);
 static inline Tensor histc(const Tensor & self, int64_t bins=100, Scalar min=0, Scalar max=0);
 static inline Tensor & sum_out(Tensor & result, const Tensor & self, int64_t dim, bool keepdim=false);
 static inline Tensor sum(const Tensor & self, int64_t dim, bool keepdim=false);
@@ -237,16 +237,16 @@ static inline Tensor & remainder_out(Tensor & result, const Tensor & self, Scala
 static inline Tensor remainder(const Tensor & self, Scalar other);
 static inline Tensor & remainder_out(Tensor & result, const Tensor & self, const Tensor & other);
 static inline Tensor remainder(const Tensor & self, const Tensor & other);
-static inline Tensor & clamp_out(Tensor & destination, const Tensor & self, Scalar min, Scalar max);
+static inline Tensor & clamp_out(Tensor & result, const Tensor & self, Scalar min, Scalar max);
 static inline Tensor clamp(const Tensor & self, Scalar min, Scalar max);
 static inline Tensor & clamp_out(Tensor & result, const Tensor & self, Scalar min);
 static inline Tensor clamp(const Tensor & self, Scalar min);
 static inline Scalar dot(const Tensor & self, const Tensor & tensor);
-static inline Tensor & tril_out(Tensor & destination, const Tensor & self, int64_t diagonal=0);
+static inline Tensor & tril_out(Tensor & result, const Tensor & self, int64_t diagonal=0);
 static inline Tensor tril(const Tensor & self, int64_t diagonal=0);
-static inline Tensor & triu_out(Tensor & destination, const Tensor & self, int64_t diagonal=0);
+static inline Tensor & triu_out(Tensor & result, const Tensor & self, int64_t diagonal=0);
 static inline Tensor triu(const Tensor & self, int64_t diagonal=0);
-static inline Tensor & cross_out(Tensor & destination, const Tensor & self, const Tensor & other, int64_t dim=-1);
+static inline Tensor & cross_out(Tensor & result, const Tensor & self, const Tensor & other, int64_t dim=-1);
 static inline Tensor cross(const Tensor & self, const Tensor & other, int64_t dim=-1);
 static inline Tensor & eye_out(Tensor & result, int64_t n, int64_t m=1);
 static inline Tensor & diag_out(Tensor & result, const Tensor & self, int64_t diagonal=0);
@@ -875,8 +875,8 @@ static inline std::tuple<Tensor &,Tensor &> topk_out(Tensor & values, Tensor & i
 static inline std::tuple<Tensor,Tensor> topk(const Tensor & self, int64_t k, int64_t dim, bool largest, bool sorted) {
     return infer_type(self).topk(self, k, dim, largest, sorted);
 }
-static inline Tensor & abs_out(Tensor & destination, const Tensor & self) {
-    return infer_type(self).abs_out(destination, self);
+static inline Tensor & abs_out(Tensor & result, const Tensor & self) {
+    return infer_type(self).abs_out(result, self);
 }
 static inline Tensor abs(const Tensor & self) {
     return infer_type(self).abs(self);
@@ -1025,8 +1025,8 @@ static inline Tensor & frac_out(Tensor & result, const Tensor & self) {
 static inline Tensor frac(const Tensor & self) {
     return infer_type(self).frac(self);
 }
-static inline Tensor & mean_out(Tensor & destination, const Tensor & self, int64_t dim, bool keepdim) {
-    return infer_type(self).mean_out(destination, self, dim, keepdim);
+static inline Tensor & mean_out(Tensor & result, const Tensor & self, int64_t dim, bool keepdim) {
+    return infer_type(self).mean_out(result, self, dim, keepdim);
 }
 static inline Tensor mean(const Tensor & self, int64_t dim, bool keepdim) {
     return infer_type(self).mean(self, dim, keepdim);
@@ -1034,8 +1034,8 @@ static inline Tensor mean(const Tensor & self, int64_t dim, bool keepdim) {
 static inline Scalar mean(const Tensor & self) {
     return infer_type(self).mean(self);
 }
-static inline Tensor & var_out(Tensor & destination, const Tensor & self, int64_t dim, bool unbiased, bool keepdim) {
-    return infer_type(self).var_out(destination, self, dim, unbiased, keepdim);
+static inline Tensor & var_out(Tensor & result, const Tensor & self, int64_t dim, bool unbiased, bool keepdim) {
+    return infer_type(self).var_out(result, self, dim, unbiased, keepdim);
 }
 static inline Tensor var(const Tensor & self, int64_t dim, bool unbiased, bool keepdim) {
     return infer_type(self).var(self, dim, unbiased, keepdim);
@@ -1043,8 +1043,8 @@ static inline Tensor var(const Tensor & self, int64_t dim, bool unbiased, bool k
 static inline Scalar var(const Tensor & self, bool unbiased) {
     return infer_type(self).var(self, unbiased);
 }
-static inline Tensor & std_out(Tensor & destination, const Tensor & self, int64_t dim, bool unbiased, bool keepdim) {
-    return infer_type(self).std_out(destination, self, dim, unbiased, keepdim);
+static inline Tensor & std_out(Tensor & result, const Tensor & self, int64_t dim, bool unbiased, bool keepdim) {
+    return infer_type(self).std_out(result, self, dim, unbiased, keepdim);
 }
 static inline Tensor std(const Tensor & self, int64_t dim, bool unbiased, bool keepdim) {
     return infer_type(self).std(self, dim, unbiased, keepdim);
@@ -1052,8 +1052,8 @@ static inline Tensor std(const Tensor & self, int64_t dim, bool unbiased, bool k
 static inline Scalar std(const Tensor & self, bool unbiased) {
     return infer_type(self).std(self, unbiased);
 }
-static inline Tensor & norm_out(Tensor & destination, const Tensor & self, Scalar p, int64_t dim, bool keepdim) {
-    return infer_type(self).norm_out(destination, self, p, dim, keepdim);
+static inline Tensor & norm_out(Tensor & result, const Tensor & self, Scalar p, int64_t dim, bool keepdim) {
+    return infer_type(self).norm_out(result, self, p, dim, keepdim);
 }
 static inline Tensor norm(const Tensor & self, Scalar p, int64_t dim, bool keepdim) {
     return infer_type(self).norm(self, p, dim, keepdim);
@@ -1061,8 +1061,8 @@ static inline Tensor norm(const Tensor & self, Scalar p, int64_t dim, bool keepd
 static inline Scalar norm(const Tensor & self, Scalar p) {
     return infer_type(self).norm(self, p);
 }
-static inline Tensor & renorm_out(Tensor & destination, const Tensor & self, Scalar p, int64_t dim, Scalar maxnorm) {
-    return infer_type(self).renorm_out(destination, self, p, dim, maxnorm);
+static inline Tensor & renorm_out(Tensor & result, const Tensor & self, Scalar p, int64_t dim, Scalar maxnorm) {
+    return infer_type(self).renorm_out(result, self, p, dim, maxnorm);
 }
 static inline Tensor renorm(const Tensor & self, Scalar p, int64_t dim, Scalar maxnorm) {
     return infer_type(self).renorm(self, p, dim, maxnorm);
@@ -1070,38 +1070,38 @@ static inline Tensor renorm(const Tensor & self, Scalar p, int64_t dim, Scalar m
 static inline Scalar dist(const Tensor & self, const Tensor & other, Scalar p) {
     return infer_type(self).dist(self, other, p);
 }
-static inline Tensor & reciprocal_out(Tensor & destination, const Tensor & self) {
-    return infer_type(self).reciprocal_out(destination, self);
+static inline Tensor & reciprocal_out(Tensor & result, const Tensor & self) {
+    return infer_type(self).reciprocal_out(result, self);
 }
 static inline Tensor reciprocal(const Tensor & self) {
     return infer_type(self).reciprocal(self);
 }
-static inline Tensor & neg_out(Tensor & destination, const Tensor & self) {
-    return infer_type(self).neg_out(destination, self);
+static inline Tensor & neg_out(Tensor & result, const Tensor & self) {
+    return infer_type(self).neg_out(result, self);
 }
 static inline Tensor neg(const Tensor & self) {
     return infer_type(self).neg(self);
 }
-static inline Tensor & atan2_out(Tensor & destination, const Tensor & self, const Tensor & other) {
-    return infer_type(self).atan2_out(destination, self, other);
+static inline Tensor & atan2_out(Tensor & result, const Tensor & self, const Tensor & other) {
+    return infer_type(self).atan2_out(result, self, other);
 }
 static inline Tensor atan2(const Tensor & self, const Tensor & other) {
     return infer_type(self).atan2(self, other);
 }
-static inline Tensor & pow_out(Tensor & destination, const Tensor & self, Scalar exponent) {
-    return infer_type(self).pow_out(destination, self, exponent);
+static inline Tensor & pow_out(Tensor & result, const Tensor & self, Scalar exponent) {
+    return infer_type(self).pow_out(result, self, exponent);
 }
 static inline Tensor pow(const Tensor & self, Scalar exponent) {
     return infer_type(self).pow(self, exponent);
 }
-static inline Tensor & pow_out(Tensor & destination, const Tensor & self, const Tensor & exponent) {
-    return infer_type(self).pow_out(destination, self, exponent);
+static inline Tensor & pow_out(Tensor & result, const Tensor & self, const Tensor & exponent) {
+    return infer_type(self).pow_out(result, self, exponent);
 }
 static inline Tensor pow(const Tensor & self, const Tensor & exponent) {
     return infer_type(self).pow(self, exponent);
 }
-static inline Tensor & lerp_out(Tensor & destination, const Tensor & self, const Tensor & end, Scalar weight) {
-    return infer_type(self).lerp_out(destination, self, end, weight);
+static inline Tensor & lerp_out(Tensor & result, const Tensor & self, const Tensor & end, Scalar weight) {
+    return infer_type(self).lerp_out(result, self, end, weight);
 }
 static inline Tensor lerp(const Tensor & self, const Tensor & end, Scalar weight) {
     return infer_type(self).lerp(self, end, weight);
@@ -1112,8 +1112,8 @@ static inline Tensor & linspace_out(Tensor & result, Scalar start, Scalar end, i
 static inline Tensor & logspace_out(Tensor & result, Scalar start, Scalar end, int64_t steps) {
     return infer_type(result).logspace_out(result, start, end, steps);
 }
-static inline Tensor & histc_out(Tensor & destination, const Tensor & self, int64_t bins, Scalar min, Scalar max) {
-    return infer_type(self).histc_out(destination, self, bins, min, max);
+static inline Tensor & histc_out(Tensor & result, const Tensor & self, int64_t bins, Scalar min, Scalar max) {
+    return infer_type(self).histc_out(result, self, bins, min, max);
 }
 static inline Tensor histc(const Tensor & self, int64_t bins, Scalar min, Scalar max) {
     return infer_type(self).histc(self, bins, min, max);
@@ -1235,8 +1235,8 @@ static inline Tensor & remainder_out(Tensor & result, const Tensor & self, const
 static inline Tensor remainder(const Tensor & self, const Tensor & other) {
     return infer_type(self).remainder(self, other);
 }
-static inline Tensor & clamp_out(Tensor & destination, const Tensor & self, Scalar min, Scalar max) {
-    return infer_type(self).clamp_out(destination, self, min, max);
+static inline Tensor & clamp_out(Tensor & result, const Tensor & self, Scalar min, Scalar max) {
+    return infer_type(self).clamp_out(result, self, min, max);
 }
 static inline Tensor clamp(const Tensor & self, Scalar min, Scalar max) {
     return infer_type(self).clamp(self, min, max);
@@ -1250,20 +1250,20 @@ static inline Tensor clamp(const Tensor & self, Scalar min) {
 static inline Scalar dot(const Tensor & self, const Tensor & tensor) {
     return infer_type(self).dot(self, tensor);
 }
-static inline Tensor & tril_out(Tensor & destination, const Tensor & self, int64_t diagonal) {
-    return infer_type(self).tril_out(destination, self, diagonal);
+static inline Tensor & tril_out(Tensor & result, const Tensor & self, int64_t diagonal) {
+    return infer_type(self).tril_out(result, self, diagonal);
 }
 static inline Tensor tril(const Tensor & self, int64_t diagonal) {
     return infer_type(self).tril(self, diagonal);
 }
-static inline Tensor & triu_out(Tensor & destination, const Tensor & self, int64_t diagonal) {
-    return infer_type(self).triu_out(destination, self, diagonal);
+static inline Tensor & triu_out(Tensor & result, const Tensor & self, int64_t diagonal) {
+    return infer_type(self).triu_out(result, self, diagonal);
 }
 static inline Tensor triu(const Tensor & self, int64_t diagonal) {
     return infer_type(self).triu(self, diagonal);
 }
-static inline Tensor & cross_out(Tensor & destination, const Tensor & self, const Tensor & other, int64_t dim) {
-    return infer_type(self).cross_out(destination, self, other, dim);
+static inline Tensor & cross_out(Tensor & result, const Tensor & self, const Tensor & other, int64_t dim) {
+    return infer_type(self).cross_out(result, self, other, dim);
 }
 static inline Tensor cross(const Tensor & self, const Tensor & other, int64_t dim) {
     return infer_type(self).cross(self, other, dim);

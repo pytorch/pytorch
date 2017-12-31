@@ -56,7 +56,7 @@
   self: grad * self.sign()
 
 - name: acos(Tensor self)
-  self: grad * -((-self * self + 1).sqrt().reciprocal())
+  self: grad * -((-self * self + 1).rsqrt())
 
 - name: add(Tensor self, Scalar other, *, Scalar alpha)
   self: grad
@@ -106,10 +106,10 @@
   self: as_strided_backward(grad, TensorGeometry(self), size, stride, storage_offset)
 
 - name: asin(Tensor self)
-  self: grad * (-self * self + 1).sqrt().reciprocal()
+  self: grad * (-self * self + 1).rsqrt()
 
 - name: atan(Tensor self)
-  self: grad * (self * self + 1).reciprocal()
+  self: grad / (self * self + 1)
 
 - name: atan2(Tensor self, Tensor other)
   self, other: atan2_backward(grad, self, other, grad_input_mask)
@@ -192,7 +192,7 @@
 
 - name: div(Tensor self, Tensor other)
   self: grad / other
-  other: -grad * self / (other * other)
+  other: -grad * result * other
 
 - name: dot(Tensor self, Tensor tensor)
   self: grad * tensor
@@ -425,7 +425,7 @@
   self: norm_backward(grad, self, p, result)
 
 - name: norm(Tensor self, Scalar p, int64_t dim, bool keepdim)
-  self: norm_backward(grad, self, p, destination, dim, keepdim)
+  self: norm_backward(grad, self, p, result, dim, keepdim)
 
 - name: normal(Tensor self, double mean, double std, Generator generator)
   self: zeros_like(grad)
@@ -504,7 +504,7 @@
 # range
 
 - name: reciprocal(Tensor self)
-  self: grad / -(self * self)
+  self: -grad * result * result
 
 - name: remainder(Tensor self, Scalar other)
   self: grad
@@ -558,7 +558,7 @@
   self: split_backward(grads, split_size, dim, self.sizes(), self.type())
 
 - name: sqrt(Tensor self)
-  self: grad * self.pow(-0.5) / 2
+  self: grad * self.rsqrt() * 0.5
 
 - name: squeeze(Tensor self)
   self: unsqueeze_to(grad, self.sizes());
@@ -567,10 +567,10 @@
   self: maybe_unsqueeze(grad, dim, self.size(dim) == 1 && self.sizes().size() != 1)
 
 - name: std(Tensor self, bool unbiased)
-  self: var_backward(grad * (result * 2).reciprocal(), self, unbiased)
+  self: var_backward(grad / (result * 2), self, unbiased)
 
 - name: std(Tensor self, int64_t dim, bool unbiased, bool keepdim)
-  self: var_backward(grad * (destination * 2).reciprocal(), self, dim, unbiased, keepdim)
+  self: var_backward(grad / (result * 2), self, dim, unbiased, keepdim)
 
 # storage_offset
 # stride
@@ -601,7 +601,7 @@
   self: zeros_like(self).put_(index, grad, true)
 
 - name: tan(Tensor self)
-  self: grad / self.cos().pow(2)
+  self: grad * (1 + result.pow(2))
 
 - name: tanh(Tensor self)
   self: _tanh_backward(grad, result)
