@@ -31,6 +31,12 @@ Probability distributions - torch.distributions
 .. autoclass:: Categorical
     :members:
 
+:hidden:`Cauchy`
+~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: Cauchy
+    :members:
+
 :hidden:`Dirichlet`
 ~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -47,4 +53,16 @@ Probability distributions - torch.distributions
 ~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autoclass:: Normal
+    :members:
+
+:hidden:`OneHotCategorical`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: OneHotCategorical
+    :members:
+
+:hidden:`Uniform`
+~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: Uniform
     :members:

@@ -83,4 +83,5 @@ def split_types(file_name, ninja_global):
 
 # when called from ninja
 if __name__ == '__main__':
-    split_types(sys.argv[1], None)
+    file_name = sys.argv[1].strip("'")
+    split_types(file_name, None)

@@ -47,6 +47,17 @@ class Optimizer(object):
     def __setstate__(self, state):
         self.__dict__.update(state)
 
+    def __repr__(self):
+        format_string = self.__class__.__name__ + ' ('
+        for i, group in enumerate(self.param_groups):
+            format_string += '\n'
+            format_string += 'Parameter Group {0}\n'.format(i)
+            for key in sorted(group.keys()):
+                if key != 'params':
+                    format_string += '    {0}: {1}\n'.format(key, group[key])
+        format_string += ')'
+        return format_string
+
     def state_dict(self):
         """Returns the state of the optimizer as a :class:`dict`.
 

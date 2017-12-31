@@ -24,6 +24,7 @@ TH_API void THVector_(lgamma)(real *y, const real *x, const ptrdiff_t n);
 TH_API void THVector_(log1p)(real *y, const real *x, const ptrdiff_t n);
 TH_API void THVector_(sigmoid)(real *y, const real *x, const ptrdiff_t n);
 TH_API void THVector_(exp)(real *y, const real *x, const ptrdiff_t n);
+TH_API void THVector_(expm1)(real *y, const real *x, const ptrdiff_t n);
 TH_API void THVector_(erf)(real *y, const real *x, const ptrdiff_t n);
 TH_API void THVector_(erfinv)(real *y, const real *x, const ptrdiff_t n);
 TH_API void THVector_(cos)(real *y, const real *x, const ptrdiff_t n);

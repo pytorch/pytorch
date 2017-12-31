@@ -96,6 +96,7 @@ _(div) \
 _(eq) \
 _(equal) \
 _(exp) \
+_(expm1) \
 _(floor) \
 _(fmod) \
 _(frac) \

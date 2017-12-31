@@ -53,3 +53,6 @@ test/data/linear.pt
 # macOS dir files
 .DS_Store
 
+# Ninja files
+.ninja_deps
+.ninja_log

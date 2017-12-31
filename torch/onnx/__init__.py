@@ -43,8 +43,8 @@ def export(model, args, f, export_params=True, verbose=False, training=False,
            input_names=None, output_names=None, aten=False):
     """
     Export a model into ONNX format.  This exporter runs your model
-    once in order to get a trace of its execution to be exported; at the
-    moment, it does not support dynamic models (e.g., RNNs.)
+    once in order to get a trace of its execution to be exported;
+    at the moment, it supports a limited set of dynamic models (e.g., RNNs.)
 
     See also: :ref:`onnx-export`
 
