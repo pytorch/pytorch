@@ -100,6 +100,9 @@ class ninja_build_ext(setuptools.command.build_ext.build_ext):
                     # Cannot find src or obj, revert back to original style
                     return orig_spawn(cmd)
 
+                from distutils.spawn import _nt_quote_args
+                cmd = _nt_quote_args(cmd)
+
                 builder.writer.build(
                     [obj], 'compile', [src],
                     variables={
@@ -108,9 +111,9 @@ class ninja_build_ext(setuptools.command.build_ext.build_ext):
                     })
 
             with patch(self, 'spawn', spawn):
-                orig_compile(self, sources,
-                             output_dir, macros, include_dirs, debug,
-                             extra_preargs, extra_postargs, depends)
+                return orig_compile(self, sources,
+                                    output_dir, macros, include_dirs, debug,
+                                    extra_preargs, extra_postargs, depends)
 
         def unix_compile(self, obj, src, ext, cc_args, extra_postargs, pp_opts):
             depfile = os.path.splitext(obj)[0] + '.d'
