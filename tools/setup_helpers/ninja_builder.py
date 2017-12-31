@@ -73,6 +73,7 @@ class ninja_build_ext(setuptools.command.build_ext.build_ext):
             orig_link = orig_compiler.link
             orig_spawn = orig_compiler.spawn
         else:
+            import distutils.unixccompiler
             orig_compiler = distutils.unixccompiler.UnixCCompiler
             orig_compile = orig_compiler._compile
             orig_link = orig_compiler.link
