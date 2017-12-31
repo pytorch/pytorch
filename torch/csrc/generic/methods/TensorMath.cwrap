@@ -13,7 +13,7 @@
     - method
     - function
   arguments:
-    - arg: THTensor* destination
+    - arg: THTensor* result
       output: True
     - THTensor* self
 ]]
@@ -816,7 +816,7 @@
     - cname: mean
       return: argument 0
       arguments:
-        - arg: THTensor* destination
+        - arg: THTensor* result
           output: True
         - THTensor* self
         - arg: int64_t dim
@@ -826,7 +826,7 @@
       return: argument 0
       before_call: maybeThrowBackCompatKeepdimWarn("mean");
       arguments:
-        - arg: THTensor* destination
+        - arg: THTensor* result
           output: True
         - THTensor* self
         - arg: int64_t dim
@@ -856,7 +856,7 @@
     - cname: var
       return: argument 0
       arguments:
-        - arg: THTensor* destination
+        - arg: THTensor* result
           output: True
         - THTensor* self
         - arg: int64_t dim
@@ -870,7 +870,7 @@
       return: argument 0
       before_call: maybeThrowBackCompatKeepdimWarn("var");
       arguments:
-        - arg: THTensor* destination
+        - arg: THTensor* result
           output: True
         - THTensor* self
         - arg: int64_t dim
@@ -904,7 +904,7 @@
     - cname: std
       return: argument 0
       arguments:
-        - arg: THTensor* destination
+        - arg: THTensor* result
           output: True
         - THTensor* self
         - arg: int64_t dim
@@ -918,7 +918,7 @@
       return: argument 0
       before_call: maybeThrowBackCompatKeepdimWarn("std");
       arguments:
-        - arg: THTensor* destination
+        - arg: THTensor* result
           output: True
         - THTensor* self
         - arg: int64_t dim
@@ -950,7 +950,7 @@
     - cname: norm
       return: argument 0
       arguments:
-        - arg: THTensor* destination
+        - arg: THTensor* result
           output: True
         - THTensor* self
         - real p
@@ -961,7 +961,7 @@
       return: argument 0
       before_call: maybeThrowBackCompatKeepdimWarn("norm");
       arguments:
-        - arg: THTensor* destination
+        - arg: THTensor* result
           output: True
         - THTensor* self
         - real p
@@ -984,7 +984,7 @@
     - cname: renorm
       return: argument 0
       arguments:
-        - arg: THTensor* destination
+        - arg: THTensor* result
           output: True
         - THTensor* self
         - real p
@@ -1047,7 +1047,7 @@
     - cname: cinv
       return: argument 0
       arguments:
-        - arg: THTensor* destination
+        - arg: THTensor* result
           output: True
         - THTensor* self
 ]]
@@ -1079,7 +1079,7 @@
     - cname: neg
       return: argument 0
       arguments:
-        - arg: THTensor* destination
+        - arg: THTensor* result
           output: True
         - THTensor* self
 ]]
@@ -1110,7 +1110,7 @@
   cname: atan2
   return: argument 0
   arguments:
-    - arg: THTensor* destination
+    - arg: THTensor* result
       output: True
     - arg: THTensor* self
       broadcast: other fallback
@@ -1151,20 +1151,20 @@
   options:
     - cname: pow
       arguments:
-        - arg: THTensor* destination
+        - arg: THTensor* result
           output: True
         - THTensor* self
         - real exponent
     - cname: cpow
       arguments:
-        - arg: THTensor* destination
+        - arg: THTensor* result
           output: True
         - arg: THTensor* self
           broadcast: exponent fallback
         - THTensor* exponent
     - cname: tpow
       arguments:
-        - arg: THTensor* destination
+        - arg: THTensor* result
           output: True
         - real base
         - THTensor* self
@@ -1206,7 +1206,7 @@
   return: argument 0
   cname: lerp
   arguments:
-    - arg: THTensor* destination
+    - arg: THTensor* result
       output: True
     - arg: THTensor* self
       broadcast: end fallback
@@ -1282,28 +1282,28 @@
   return: argument 0
   options:
     - arguments:
-      - arg: THTensor* destination
+      - arg: THTensor* result
         output: True
       - THTensor* self
       - CONSTANT 100
       - CONSTANT 0
       - CONSTANT 0
     - arguments:
-      - arg: THTensor* destination
+      - arg: THTensor* result
         output: True
       - THTensor* self
       - int64_t bins
       - CONSTANT 0
       - CONSTANT 0
     - arguments:
-      - arg: THTensor* destination
+      - arg: THTensor* result
         output: True
       - THTensor* self
       - int64_t bins
       - real min
       - CONSTANT 0
     - arguments:
-      - arg: THTensor* destination
+      - arg: THTensor* result
         output: True
       - THTensor* self
       - int64_t bins
@@ -1717,7 +1717,7 @@
   options:
     - cname: clamp
       arguments:
-      - arg: THTensor* destination
+      - arg: THTensor* result
         output: True
       - THTensor* self
       - real min
@@ -1785,7 +1785,7 @@
     - function
   return: argument 0
   arguments:
-    - arg: THTensor* destination
+    - arg: THTensor* result
       output: True
     - THTensor* self
     - arg: int64_t diagonal
@@ -1810,7 +1810,7 @@
     - function
   return: argument 0
   arguments:
-    - arg: THTensor* destination
+    - arg: THTensor* result
       output: True
     - THTensor* self
     - arg: int64_t diagonal
@@ -1835,7 +1835,7 @@
     - function
   return: argument 0
   arguments:
-    - arg: THTensor* destination
+    - arg: THTensor* result
       output: True
     - THTensor* self
     - THTensor* other
