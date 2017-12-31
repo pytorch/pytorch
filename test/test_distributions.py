@@ -30,9 +30,9 @@ from itertools import product
 import torch
 from common import TestCase, run_tests, set_rng_seed
 from torch.autograd import Variable, gradcheck
-from torch.distributions import (Bernoulli, Beta, Categorical, Cauchy,
-                                 Dirichlet, Exponential, Gamma, Laplace,
-                                 Normal, OneHotCategorical, Uniform)
+from torch.distributions import (Bernoulli, Beta, Categorical, Dirichlet,
+                                 Exponential, Gamma, Laplace, Normal,
+                                 OneHotCategorical, Uniform)
 
 TEST_NUMPY = True
 try:
@@ -68,12 +68,6 @@ EXAMPLES = [
     Example(OneHotCategorical, [
         {'probs': Variable(torch.Tensor([[0.1, 0.2, 0.3], [0.5, 0.3, 0.2]]), requires_grad=True)},
         {'probs': Variable(torch.Tensor([[1.0, 0.0], [0.0, 1.0]]), requires_grad=True)},
-    ]),
-    Example(Cauchy, [
-        {'loc': 0.0, 'scale': 1.0},
-        {'loc': Variable(torch.Tensor([0.0])), 'scale': 1.0},
-        {'loc': Variable(torch.Tensor([[0.0], [0.0]])),
-         'scale': Variable(torch.Tensor([[1.0], [1.0]]))}
     ]),
     Example(Gamma, [
         {
@@ -333,32 +327,6 @@ class TestDistributions(TestCase):
         low.grad.zero_()
         high.grad.zero_()
 
-    def test_cauchy(self):
-        loc = Variable(torch.zeros(5, 5), requires_grad=True)
-        scale = Variable(torch.ones(5, 5), requires_grad=True)
-        loc_1d = Variable(torch.zeros(1), requires_grad=True)
-        scale_1d = Variable(torch.ones(1), requires_grad=True)
-        self.assertEqual(Cauchy(loc, scale).sample().size(), (5, 5))
-        self.assertEqual(Cauchy(loc, scale).sample_n(7).size(), (7, 5, 5))
-        self.assertEqual(Cauchy(loc_1d, scale_1d).sample().size(), (1,))
-        self.assertEqual(Cauchy(loc_1d, scale_1d).sample_n(1).size(), (1, 1))
-        self.assertEqual(Cauchy(0.0, 1.0).sample_n(1).size(), (1,))
-
-        set_rng_seed(1)
-        self._gradcheck_log_prob(Uniform, (loc, scale))
-        self._gradcheck_log_prob(Uniform, (loc, 1.0))
-        self._gradcheck_log_prob(Uniform, (0.0, scale))
-
-        state = torch.get_rng_state()
-        eps = loc.new(loc.size()).cauchy_()
-        torch.set_rng_state(state)
-        c = Cauchy(loc, scale).rsample()
-        c.backward(torch.ones_like(c))
-        self.assertEqual(loc.grad, torch.ones_like(scale))
-        self.assertEqual(scale.grad, eps)
-        loc.grad.zero_()
-        scale.grad.zero_()
-
     def test_normal(self):
         mean = Variable(torch.randn(5, 5), requires_grad=True)
         std = Variable(torch.randn(5, 5).abs(), requires_grad=True)
@@ -531,8 +499,8 @@ class TestDistributions(TestCase):
         set_rng_seed(1)  # see Note [Randomized statistical tests]
         num_samples = 100
         for alpha in [1e-3, 1e-2, 1e-1, 1e0, 1e1, 1e2, 1e3, 1e4]:
-            alphas = Variable(torch.FloatTensor([alpha] * num_samples), requires_grad=True)
-            betas = Variable(torch.ones(num_samples).type_as(alphas))
+            alphas = Variable(torch.Tensor([alpha] * num_samples), requires_grad=True)
+            betas = Variable(torch.ones(num_samples))
             x = Gamma(alphas, betas).rsample()
             x.sum().backward()
             x, ind = x.data.sort()
@@ -541,19 +509,18 @@ class TestDistributions(TestCase):
             # Compare with expected gradient dx/dalpha along constant cdf(x,alpha).
             cdf = scipy.stats.gamma.cdf
             pdf = scipy.stats.gamma.pdf
-            eps = 0.01 * alpha / (1.0 + alpha ** 0.5)
+            eps = 0.02 * alpha if alpha < 100 else 0.02 * alpha ** 0.5
             cdf_alpha = (cdf(x, alpha + eps) - cdf(x, alpha - eps)) / (2 * eps)
             cdf_x = pdf(x, alpha)
             expected_grad = -cdf_alpha / cdf_x
-            rel_error = np.abs(actual_grad - expected_grad) / (expected_grad + 1e-30)
-            self.assertLess(np.max(rel_error), 0.0005,
+            rel_error = np.abs(actual_grad - expected_grad) / (expected_grad + 1e-100)
+            self.assertLess(np.max(rel_error), 0.005,
                             '\n'.join(['Bad gradients for Gamma({}, 1)'.format(alpha),
                                        'x {}'.format(x),
                                        'expected {}'.format(expected_grad),
                                        'actual {}'.format(actual_grad),
                                        'rel error {}'.format(rel_error),
-                                       'max error {}'.format(rel_error.max()),
-                                       'at alpha={}, x={}'.format(alpha, x[rel_error.argmax()])]))
+                                       'max error {}'.format(rel_error.max())]))
 
     def test_dirichlet_shape(self):
         alpha = Variable(torch.exp(torch.randn(2, 3)), requires_grad=True)
@@ -796,25 +763,6 @@ class TestDistributionShapes(TestCase):
         self.assertEqual(dist.log_prob(self.tensor_sample_1).size(), torch.Size((3,)))
         self.assertRaises(ValueError, dist.log_prob, self.tensor_sample_2)
         self.assertEqual(dist.log_prob(dist.enumerate_support()).size(), torch.Size((2, 3)))
-
-    def test_cauchy_shape_scalar_params(self):
-        cauchy = Cauchy(0, 1)
-        self.assertEqual(cauchy._batch_shape, torch.Size())
-        self.assertEqual(cauchy._event_shape, torch.Size())
-        self.assertEqual(cauchy.sample().size(), torch.Size((1,)))
-        self.assertEqual(cauchy.sample(torch.Size((3, 2))).size(), torch.Size((3, 2)))
-        self.assertRaises(ValueError, cauchy.log_prob, self.scalar_sample)
-        self.assertEqual(cauchy.log_prob(self.tensor_sample_1).size(), torch.Size((3, 2)))
-        self.assertEqual(cauchy.log_prob(self.tensor_sample_2).size(), torch.Size((3, 2, 3)))
-
-    def test_cauchy_shape_tensor_params(self):
-        cauchy = Cauchy(torch.Tensor([0, 0]), torch.Tensor([1, 1]))
-        self.assertEqual(cauchy._batch_shape, torch.Size((2,)))
-        self.assertEqual(cauchy._event_shape, torch.Size(()))
-        self.assertEqual(cauchy.sample().size(), torch.Size((2,)))
-        self.assertEqual(cauchy.sample(torch.Size((3, 2))).size(), torch.Size((3, 2, 2)))
-        self.assertEqual(cauchy.log_prob(self.tensor_sample_1).size(), torch.Size((3, 2)))
-        self.assertRaises(ValueError, cauchy.log_prob, self.tensor_sample_2)
 
     def test_dirichlet_shape(self):
         dist = Dirichlet(torch.Tensor([[0.6, 0.3], [1.6, 1.3], [2.6, 2.3]]))
