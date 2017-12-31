@@ -558,7 +558,7 @@
   self: split_backward(grads, split_size, dim, self.sizes(), self.type())
 
 - name: sqrt(Tensor self)
-  self: grad * self.rsqrt()
+  self: grad * self.rsqrt() * 0.5
 
 - name: squeeze(Tensor self)
   self: unsqueeze_to(grad, self.sizes());
