@@ -73,7 +73,7 @@
 - name: addcdiv(Tensor self, Tensor tensor1, Tensor tensor2, *, Scalar value)
   self: grad
   tensor1: grad * value / tensor2
-  tensor2: -grad * value * tensor1 / (tensor2 * tensor2)
+  tensor2: grad * (self - result) / tensor2
 
 - name: addcmul(Tensor self, Tensor tensor1, Tensor tensor2, *, Scalar value)
   self: grad
