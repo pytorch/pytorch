@@ -66,11 +66,8 @@ static void normal_fill_16_AVX2(float *data,
   const __m256 n1 = _mm256_mul_ps(radius, costheta);
   const __m256 n2 = _mm256_mul_ps(radius, sintheta);
 
-  const __m256 n1_shifted = _mm256_add_ps(_mm256_mul_ps(n1, *stddev), *mean);
-  const __m256 n2_shifted = _mm256_add_ps(_mm256_mul_ps(n2, *stddev), *mean);
-
-  _mm256_storeu_ps(data, n1_shifted);
-  _mm256_storeu_ps(data + 8, n2_shifted);
+  _mm256_storeu_ps(data, _mm256_fmadd_ps(n1, *stddev, *mean));
+  _mm256_storeu_ps(data + 8, _mm256_fmadd_ps(n2, *stddev, *mean));
 }
 
 void THFloatVector_normal_fill_AVX2(float *data,
