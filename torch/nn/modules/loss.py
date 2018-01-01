@@ -108,15 +108,9 @@ class NLLLoss(_WeightedLoss):
 
     .. math::
         \ell(x, y) = L = \{l_1,\dots,l_N\}^\top, \quad
-        l_n = - \log p_{n,y_n} \cdot \mathbb{1}\{y_n \not= \text{ignore_index}\},
+        l_n = - x_{n,y_n} \cdot \mathbb{1}\{y_n \not= \text{ignore_index}\},
 
-    where :math:`N` is the batch size, and the softmax activation of the 
-    :math:`i`-th output unit for :math:`n`-th sample of the batch is
-    
-    .. math::
-        p_{n,i} = \frac{\exp(x_{n,i})}{\sum_{k=1}^{C} \exp(x_{n,k})}.
-
-    If reduce is ``True``, then
+    where :math:`N` is the batch size. If reduce is ``True``, then
 
     .. math::
         \ell(x, y) = \begin{cases}
