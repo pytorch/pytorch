@@ -16,12 +16,16 @@ class Adam(Optimizer):
             running averages of gradient and its square (default: (0.9, 0.999))
         eps (float, optional): term added to the denominator to improve
             numerical stability (default: 1e-8)
-        weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
+        weight_decay (float, optional): weight decay (L2 penalty) using the 
+            method from the paper `Fixing Weight Decay Regularization in 
+            Adam` (default: 0)
         amsgrad (boolean, optional): whether to use the AMSGrad variant of this
             algorithm from the paper `On the Convergence of Adam and Beyond`_
 
     .. _Adam\: A Method for Stochastic Optimization:
         https://arxiv.org/abs/1412.6980
+    .. _Fixing Weight Decay Regularization in Adam:
+        https://arxiv.org/abs/1711.05101
     .. _On the Convergence of Adam and Beyond:
         https://openreview.net/forum?id=ryQu7f-RZ
     """
@@ -81,9 +85,6 @@ class Adam(Optimizer):
 
                 state['step'] += 1
 
-                if group['weight_decay'] != 0:
-                    grad = grad.add(group['weight_decay'], p.data)
-
                 # Decay the first and second moment running average coefficient
                 exp_avg.mul_(beta1).add_(1 - beta1, grad)
                 exp_avg_sq.mul_(beta2).addcmul_(1 - beta2, grad, grad)
@@ -99,6 +100,12 @@ class Adam(Optimizer):
                 bias_correction2 = 1 - beta2 ** state['step']
                 step_size = group['lr'] * math.sqrt(bias_correction2) / bias_correction1
 
+                if group['weight_decay'] != 0:
+                    xold = p.data.clone()
+
                 p.data.addcdiv_(-step_size, exp_avg, denom)
+
+                if group['weight_decay'] != 0:
+                     p.data.add_(-group['weight_decay'], xold)
 
         return loss
