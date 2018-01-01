@@ -779,31 +779,44 @@ struct TensorBitXorOp {
   }
 };
 
-// TODO Replace this with a more accurate digamma().
 template <typename real, typename accreal>
 struct TensorDigammaOp {
   __device__ __forceinline__ void
   operator()(real* out, real* in) {
-    const accreal x = ScalarConvert<real, accreal>::to(*in);
-    const accreal dx = x * 1e-4;
-    *out = ScalarConvert<accreal, real>::to(
-        (THCNumerics<accreal>::lgamma(x + dx) -
-         THCNumerics<accreal>::lgamma(x - dx)) / (dx + dx));
+    real result = 0;
+    if (x < 0.5) {
+      result -= M_PI / THCNumerics<real>::tan(M_PI * x);
+      x = 1 - x;
+    }
+    for (int i = 0; i < 4; ++i) {
+      result -= 1 / x;
+      x += 1;
+    }
+    const real ixx = 1 / (x*x);
+    result += THCNumerics<real>::log(x) - 1 / (2*x) - ixx * (1./12 - ixx * (1./120 - ixx * (1./252)));
+    *out = result;
   }
 };
 
-// TODO Replace this with a more accurate trigamma().
 template <typename real, typename accreal>
 struct TensorTrigammaOp {
   __device__ __forceinline__ void
   operator()(real* out, real* in) {
-    static accreal eps = 1e-4;
-    const accreal x = ScalarConvert<real, accreal>::to(*in);
-    const accreal dx = x * eps;
-    *out = ScalarConvert<accreal, real>(
-        (THCNumerics<accreal>::lgamma(x + dx) -
-         2 * THCNumerics<accreal>::lgamma(x) +
-         THCNumerics<accreal>::lgamma(x - dx)) / (dx * dx));
+    real sign = +1;
+    real result = 0;
+    if (x < 0.5) {
+      sign = -1;
+      real sin_pi_x = THCNumerics<real>::sin(M_PI * x);
+      result -= (M_PI * M_PI) / (sin_pi_x * sin_pi_x);
+      x = 1 - x;
+    }
+    for (int i = 0; i < 6; ++i) {
+      result += 1 / (x * x);
+      x += 1;
+    }
+    const real ixx = 1 / (x*x);
+    result += (1 + 1 / (2*x) + ixx * (1./6 - ixx * (1./30 - ixx * (1./42)))) / x;
+    *out = sign * result;
   }
 };
 
