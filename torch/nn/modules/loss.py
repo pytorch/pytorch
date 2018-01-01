@@ -114,10 +114,10 @@ class NLLLoss(_WeightedLoss):
 
     .. math::
         \ell(x, y) = \begin{cases}
-            \sum_{n=1}^N w_{y_n} l_n \Big/ \sum_{n=1}^N w_{y_n} \cdot 
-            \mathbb{1}\{y_n \not= \text{ignore_index}\}, & \text{if}\; 
+            \sum_{n=1}^N w_{y_n} l_n \Big/ \sum_{n=1}^N w_{y_n} \cdot
+            \mathbb{1}\{y_n \not= \text{ignore_index}\}, & \text{if}\;
             \text{size_average} = \text{True},\\
-            \sum_{n=1}^N w_{y_n} l_n,  & \text{if}\; 
+            \sum_{n=1}^N w_{y_n} l_n,  & \text{if}\;
             \text{size_average} = \text{False}.
         \end{cases}
 
@@ -455,7 +455,7 @@ class BCEWithLogitsLoss(Module):
 
     .. math::
         \ell(x, y) = L = \{l_1,\dots,l_N\}^\top, \quad
-        l_n = - w_n \left[ t_n \cdot \log \sigma(x_n) 
+        l_n = - w_n \left[ t_n \cdot \log \sigma(x_n)
         + (1 - t_n) \cdot \log (1 - \sigma(x_n)) \right],
 
     where :math:`N` is the batch size. If reduce is ``True``, then
