@@ -563,7 +563,6 @@ class TestDistributions(TestCase):
                                        'max error {}'.format(rel_error.max()),
                                        'at alpha={}, x={}'.format(alpha, x[rel_error.argmax()])]))
 
-    # This is a randomized test.
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_chi2_shape(self):
         df = Variable(torch.exp(torch.randn(2, 3)), requires_grad=True)
@@ -582,19 +581,17 @@ class TestDistributions(TestCase):
 
         self._check_log_prob(Chi2(df), ref_log_prob)
 
-    # This is a randomized test.
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_chi2_sample(self):
-        set_rng_seed(0)
+        set_rng_seed(0)  # see Note [Randomized statistical tests]
         for df in [0.1, 1.0, 5.0]:
             self._check_sampler_sampler(Chi2(df),
                                         scipy.stats.chi2(df),
                                         'Chi2(df={})'.format(df))
 
-    # This is a randomized test.
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_chi2_sample_grad(self):
-        set_rng_seed(0)
+        set_rng_seed(0)  # see Note [Randomized statistical tests]
         num_samples = 100
         for df in [1e-3, 1e-2, 1e-1, 1e0, 1e1, 1e2, 1e3, 1e4]:
             dfs = Variable(torch.Tensor([df] * num_samples), requires_grad=True)
