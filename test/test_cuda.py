@@ -365,6 +365,8 @@ simple_pointwise_float = [
     'trunc',
     'ceil',
     'lgamma',
+    'digamma',
+    'trigamma',
 ]
 
 for fn in simple_pointwise_float:

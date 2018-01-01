@@ -195,6 +195,37 @@
 ]]
 
 [[
+  name: trigamma
+  types:
+    - floating_point
+  backends:
+    - CPU
+    - CUDA
+  variants:
+    - method
+    - function
+  return: argument 0
+  arguments:
+    - arg: THTensor* result
+      output: True
+    - THTensor* self
+]]
+
+[[
+  name: trigamma_
+  types:
+    - floating_point
+  backends:
+    - CPU
+    - CUDA
+  cname: trigamma
+  return: self
+  arguments:
+    - THTensor* self
+    - THTensor* self
+]]
+
+[[
   name: exp_
   types:
     - floating_point

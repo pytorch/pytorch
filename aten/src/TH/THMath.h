@@ -126,4 +126,26 @@ Date:  February 1996
 }
 #undef CENTRAL_RANGE
 
+// TODO Replace this with more accurate digamma().
+static inline double TH_digamma(double x) {
+  const double dx = x * 1e-4;
+  return (lgamma(x + dx) - lgamma(x - dx)) / (dx + dx);
+}
+
+static inline float TH_digammaf(float x) {
+  const double dx = x * 1e-4;
+  return (lgammaf(x + dx) - lgammaf(x - dx)) / (dx + dx);
+}
+
+// TODO Replace this with more accurate trigamma().
+static inline double TH_trigamma(double x) {
+  const double dx = x * 1e-4;
+  return (lgamma(x + dx) - 2 * lgamma(x) + lgamma(x - dx)) / (dx * dx);
+}
+
+static inline float TH_trigammaf(float x) {
+  const float dx = x * 1e-4f;
+  return (lgammaf(x + dx) - 2 * lgammaf(x) + lgammaf(x - dx)) / (dx * dx);
+}
+
 #endif // _THMATH_H
