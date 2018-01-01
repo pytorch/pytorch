@@ -796,7 +796,7 @@ struct TensorDigammaOp {
     }
     const accreal ixx = 1 / (x*x);
     result += THCNumerics<accreal>::log(x) - 1 / (2*x) - ixx * (1./12 - ixx * (1./120 - ixx * (1./252)));
-    *out = result;
+    *out = ScalarConvert<accreal, real>::to(result);
   }
 };
 
