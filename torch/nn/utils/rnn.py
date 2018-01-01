@@ -26,7 +26,16 @@ class PackedSequence(PackedSequence_):
         batch_sizes (list[int]): list of integers holding information about
             the batch size at each sequence step
     """
-    pass
+    @classmethod
+    def _impute_data_mask(cls, name):
+        """Impute `method` of attribute `data` into class `cls`"""
+        def fn(self, *args, **kwargs):
+            return type(self)(getattr(self.data, name)(*args, **kwargs), self.batch_sizes)
+        setattr(cls, name, fn)
+
+# Impute following `torch.Tensor` methods into `PackedSequence`
+for method_name in 'cuda cpu half double'.split():
+    PackedSequence._impute_data_mask(method_name)
 
 
 def pack_padded_sequence(input, lengths, batch_first=False):
