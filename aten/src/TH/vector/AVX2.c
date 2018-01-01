@@ -9,8 +9,6 @@
 #include "avx_mathfun.h"
 #include "../THRandom.h"
 
-#include <assert.h>
-
 void THDoubleVector_cadd_AVX2(double *z, const double *x, const double *y, const double c, const ptrdiff_t n) {
   ptrdiff_t i;
   __m256d YMM15 = _mm256_set_pd(c, c, c, c);
@@ -49,56 +47,64 @@ void THFloatVector_cadd_AVX2(float *z, const float *x, const float *y, const flo
   }
 }
 
-static void normal_fill_16_AVX2(float *normal,
-                               const float *uniform,
-                               const __m256* two_pi,
-                               const __m256* one,
-                               const __m256* minus_two) {
-  const __m256 u1 = _mm256_sub_ps(*one, _mm256_load_ps(uniform));
-  const __m256 u2 = _mm256_load_ps(uniform + 8);
+static void normal_fill_16_AVX2(float *data,
+                                const __m256* two_pi,
+                                const __m256* one,
+                                const __m256* minus_two,
+                                const __m256* mean,
+                                const __m256* stddev) {
+  const __m256 u1 = _mm256_sub_ps(*one, _mm256_loadu_ps(data));
+  const __m256 u2 = _mm256_loadu_ps(data + 8);
 
-  __m256 radius = _mm256_sqrt_ps(_mm256_mul_ps(*minus_two, log256_ps(u1)));
-  __m256 theta = _mm256_mul_ps(*two_pi, u2);
+  // sincos256_ps and log256_ps are from avx_mathfun.h
+  const __m256 radius = _mm256_sqrt_ps(_mm256_mul_ps(*minus_two, log256_ps(u1)));
+  const __m256 theta = _mm256_mul_ps(*two_pi, u2);
 
   __m256 sintheta, costheta;
   sincos256_ps(theta, &sintheta, &costheta);
 
-  _mm256_storeu_ps(normal, _mm256_mul_ps(radius, costheta));
-  _mm256_storeu_ps(normal + 8, _mm256_mul_ps(radius, sintheta));
+  const __m256 n1 = _mm256_mul_ps(radius, costheta);
+  const __m256 n2 = _mm256_mul_ps(radius, sintheta);
+
+  const __m256 n1_shifted = _mm256_add_ps(_mm256_mul_ps(n1, *stddev), *mean);
+  const __m256 n2_shifted = _mm256_add_ps(_mm256_mul_ps(n2, *stddev), *mean);
+
+  _mm256_storeu_ps(data, n1_shifted);
+  _mm256_storeu_ps(data + 8, n2_shifted);
 }
 
-void THFloatTensor_normal_fill_AVX2(float *data,
-                                    const int size,
+void THFloatVector_normal_fill_AVX2(float *data,
+                                    const int64_t size,
                                     THGenerator *generator,
                                     const float mean,
-                                    const float stdv)
+                                    const float stddev)
 {
-  assert(size >= 16 && "Tensor size must be >= 16 for AVX2 normal fill");
-  const __m256 two_pi = _mm256_set1_ps(2.0f * 3.14159265358979323846f);
+  THAssert(size >= 16 && "Size must be >= 16 for AVX2 normal fill");
+  const __m256 two_pi = _mm256_set1_ps(2.0f * M_PI);
   const __m256 one = _mm256_set1_ps(1.0f);
   const __m256 minus_two = _mm256_set1_ps(-2.0f);
+  const __m256 mean_v = _mm256_set1_ps(mean);
+  const __m256 stddev_v = _mm256_set1_ps(stddev);
 
   // First fill the data with the uniform numbers. Box-Mueller is a 2 -> 2
   // mapping of 2 uniform numbers to 2 normal numbers (per iteration), so we
   // we need exactly as much space for uniform and normal numbers and can just
   // use the single buffer for both.
-  float tail[16];
-  for (int i = 0; i < size; ++i) {
+  for (int64_t i = 0; i < size; ++i) {
     data[i] = THRandom_uniformFloat(generator, 0, 1);
-    // Store the last 16 uniform values we produce for later edge cases.
-    if (size % 16 != 0 && i >= (size - 16)) {
-      tail[i - (size - 16)] = data[i];
-    }
   }
 
-  for (int i = 0; i < size - 16; i += 16) {
-    normal_fill_16_AVX2(data + i, data + i, &two_pi, &one, &minus_two);
+  for (int64_t i = 0; i < size - 15; i += 16) {
+    normal_fill_16_AVX2(data + i, &two_pi, &one, &minus_two, &mean_v, &stddev_v);
   }
 
   if (size % 16 != 0) {
-    // We essentially rewind so that we have 16 values, including the tail which
-    // we didn't handle above, and then compute them all in one step.
-    normal_fill_16_AVX2(data + (size - 16), tail, &two_pi, &one, &minus_two);
+    // We rewind so that we have 16 values and then compute them in one step.
+    data += (size - 16);
+    for (int i = 0; i < 16; ++i) {
+      data[i] = THRandom_uniformFloat(generator, 0, 1);
+    }
+    normal_fill_16_AVX2(data, &two_pi, &one, &minus_two, &mean_v, &stddev_v);
   }
 }
 

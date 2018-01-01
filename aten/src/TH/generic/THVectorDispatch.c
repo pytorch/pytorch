@@ -239,6 +239,22 @@ void THVector_(copy)(real *y, const real *x, const ptrdiff_t n) {
   THVector_(copy_DISPATCHPTR)(y, x, n);
 }
 
+static void (*THVector_(normal_fill_DISPATCHPTR))(real *, const int64_t, THGenerator *, const real, const real) = &THVector_(normal_fill_DEFAULT);
+static FunctionDescription THVector_(normal_fill_DISPATCHTABLE)[] = {
+  #if defined(TH_REAL_IS_FLOAT) && defined(USE_AVX2)
+      FUNCTION_IMPL(THVector_(normal_fill_AVX2), SIMDExtension_AVX2),
+  #endif
+
+  FUNCTION_IMPL(THVector_(normal_fill_DEFAULT), SIMDExtension_DEFAULT)
+};
+void THVector_(normal_fill)(real *data,
+                            const int64_t size,
+                            struct THGenerator *generator,
+                            const real mean,
+                            const real stddev) {
+  THVector_(normal_fill_DISPATCHPTR)(data, size, generator, mean, stddev);
+}
+
 /* This needs to be called in order to initialize the dispatch pointers at runtime.
  * This function simply checks what SIMD extensions are available, and then walks the dispatch table
  * to choose the best function.
@@ -257,6 +273,7 @@ void THVector_(vectorDispatchInit)(void)
   INIT_DISPATCH_PTR(cdiv);
   INIT_DISPATCH_PTR(divs);
   INIT_DISPATCH_PTR(copy);
+  INIT_DISPATCH_PTR(normal_fill);
 }
 
 #endif
