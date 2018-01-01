@@ -296,7 +296,8 @@ class RNN(RNNBase):
 
     Attributes:
         weight_ih_l[k]: the learnable input-hidden weights of the k-th layer,
-            of shape `(input_size x hidden_size)`
+            of shape `(hidden_size x input_size)` for k=0. Otherwise, the shape is
+            `(hidden_size x hidden_size)`
         weight_hh_l[k]: the learnable hidden-hidden weights of the k-th layer,
             of shape `(hidden_size x hidden_size)`
         bias_ih_l[k]: the learnable input-hidden bias of the k-th layer,
