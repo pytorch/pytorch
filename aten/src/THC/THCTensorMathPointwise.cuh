@@ -783,17 +783,19 @@ template <typename real, typename accreal>
 struct TensorDigammaOp {
   __device__ __forceinline__ void
   operator()(real* out, real* in) {
-    real result = 0;
+    static accreal PI = 3.14159265358979323846;
+    accreal x = ScalarConvert<real, accreal>::to(*in);
+    accreal result = 0;
     if (x < 0.5) {
-      result -= M_PI / THCNumerics<real>::tan(M_PI * x);
+      result -= PI / THCNumerics<accreal>::tan(PI * x);
       x = 1 - x;
     }
     for (int i = 0; i < 4; ++i) {
       result -= 1 / x;
       x += 1;
     }
-    const real ixx = 1 / (x*x);
-    result += THCNumerics<real>::log(x) - 1 / (2*x) - ixx * (1./12 - ixx * (1./120 - ixx * (1./252)));
+    const accreal ixx = 1 / (x*x);
+    result += THCNumerics<accreal>::log(x) - 1 / (2*x) - ixx * (1./12 - ixx * (1./120 - ixx * (1./252)));
     *out = result;
   }
 };
@@ -802,21 +804,23 @@ template <typename real, typename accreal>
 struct TensorTrigammaOp {
   __device__ __forceinline__ void
   operator()(real* out, real* in) {
-    real sign = +1;
-    real result = 0;
+    static accreal PI = 3.14159265358979323846;
+    accreal x = ScalarConvert<real, accreal>::to(*in);
+    accreal sign = +1;
+    accreal result = 0;
     if (x < 0.5) {
       sign = -1;
-      real sin_pi_x = THCNumerics<real>::sin(M_PI * x);
-      result -= (M_PI * M_PI) / (sin_pi_x * sin_pi_x);
+      accreal sin_pi_x = THCNumerics<accreal>::sin(PI * x);
+      result -= (PI * PI) / (sin_pi_x * sin_pi_x);
       x = 1 - x;
     }
     for (int i = 0; i < 6; ++i) {
       result += 1 / (x * x);
       x += 1;
     }
-    const real ixx = 1 / (x*x);
+    const accreal ixx = 1 / (x*x);
     result += (1 + 1 / (2*x) + ixx * (1./6 - ixx * (1./30 - ixx * (1./42)))) / x;
-    *out = sign * result;
+    *out = ScalarConvert<accreal, real>::to(sign * result);
   }
 };
 
