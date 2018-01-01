@@ -13,9 +13,14 @@ class SGD(Optimizer):
             parameter groups
         lr (float): learning rate
         momentum (float, optional): momentum factor (default: 0)
-        weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
+        weight_decay (float, optional): weight decay (L2 penalty) using the 
+            method from the paper `Fixing Weight Decay Regularization in 
+            Adam` (default: 0)
         dampening (float, optional): dampening for momentum (default: 0)
         nesterov (bool, optional): enables Nesterov momentum (default: False)
+
+    .. _Fixing Weight Decay Regularization in Adam:
+        https://arxiv.org/abs/1711.05101
 
     Example:
         >>> optimizer = torch.optim.SGD(model.parameters(), lr=0.1, momentum=0.9)
@@ -89,8 +94,7 @@ class SGD(Optimizer):
                 if p.grad is None:
                     continue
                 d_p = p.grad.data
-                if weight_decay != 0:
-                    d_p.add_(weight_decay, p.data)
+
                 if momentum != 0:
                     param_state = self.state[p]
                     if 'momentum_buffer' not in param_state:
@@ -103,7 +107,12 @@ class SGD(Optimizer):
                         d_p = d_p.add(momentum, buf)
                     else:
                         d_p = buf
+                if weight_decay != 0:
+                    xold = p.data.clone()
 
                 p.data.add_(-group['lr'], d_p)
+
+                if weight_decay != 0:
+                    p.data.add_(-weight_decay, xold)
 
         return loss
