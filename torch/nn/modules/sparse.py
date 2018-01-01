@@ -103,6 +103,20 @@ class Embedding(Module):
             self.scale_grad_by_freq, self.sparse
         )
 
+    def lookup_with_autopadding(self, lookup_ids):
+        if not (type(lookup_ids) is list and type(lookup_ids[0] is list)):
+            raise ValueError("lookup_ids should be a list of list")
+        if self.padding_idx is None:
+            raise ValueError("padding_idx should not be None")
+        lengths = [len(item) for item in lookup_ids]
+        max_length = max(lengths)
+        for i, item in enumerate(lookup_ids):
+            item += [self.padding_idx for _ in range(max_length - lengths[i])]
+        lookup_ids = Variable(torch.LongTensor(lookup_ids))
+        lengths = Variable(torch.LongTensor(lengths))
+        sorted_len, indices = torch.sort(lengths, 0, descending=True)
+        return self(lookup_ids), self(lookup_ids)[indices], sorted_len
+
     def __repr__(self):
         s = '{name}({num_embeddings}, {embedding_dim}'
         if self.padding_idx is not None:
