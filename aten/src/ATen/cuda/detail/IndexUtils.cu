@@ -46,7 +46,6 @@ bool overlappingIndices(const Tensor& t) {
 
   if (nonSize1Dims == 0) {
     /* no overlap */
-    free(info);
     return false;
   }
 
@@ -55,7 +54,6 @@ bool overlappingIndices(const Tensor& t) {
 
   /* Base case: innermost dimension must have stride >= 1 */
   if (info[nonSize1Dims - 1].stride < 1) {
-    free(info);
     return true;
   }
 
@@ -63,13 +61,11 @@ bool overlappingIndices(const Tensor& t) {
   for (int i = nonSize1Dims - 2; i >= 0; --i) {
     if (info[i].stride < info[i + 1].size * info[i + 1].stride) {
       /* There are overlaps */
-      free(info);
       return true;
     }
   }
 
   /* Tensor has holes or is contiguous */
-  free(info);
   return false;
 }
 
