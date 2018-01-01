@@ -3581,7 +3581,7 @@ static inline real THTensor_(dirichlet_grad_one)(real x, real alpha, real total)
   }
 
   // Use a rational correction to an analytic approximation.
-  static const double c[2][3][3][4] = {
+  static const real c[2][3][3][4] = {
     {{{1.003668233, -0.01061107488, -0.0657888334, 0.01201642863},
       {0.6336835991, -0.3557432599, 0.05486251648, -0.001465281033},
       {-0.03276231906, 0.004474107445, 0.002429354597, -0.0001557569013}},
@@ -3615,7 +3615,6 @@ static inline real THTensor_(dirichlet_grad_one)(real x, real alpha, real total)
       q += ua * (c[1][i][j][0] + b * (c[1][i][j][1] + b * (c[1][i][j][2] + b * c[1][i][j][3])));
     }
   }
-  if(q < 1e-3f) q = 1e-3f;
   const real approx = x * (1 - x) * (THTensor_(digamma_one)(total) -
                                      THTensor_(digamma_one)(alpha)) / beta;
   return p / q * approx;

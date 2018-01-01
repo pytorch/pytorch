@@ -625,7 +625,7 @@ class TestDistributions(TestCase):
         grid = [1e-2, 1e-1, 1e0, 1e1, 1e2]
         for alpha, beta in product(grid, grid):
             alphas = Variable(torch.FloatTensor([alpha] * num_samples), requires_grad=True)
-            betas = Variable(torch.Tensor([beta] * num_samples).type_as(alphas))
+            betas = Variable(torch.FloatTensor([beta] * num_samples).type_as(alphas))
             x = Beta(alphas, betas).rsample()
             x.sum().backward()
             x, ind = x.data.sort()
