@@ -326,7 +326,10 @@
   self: grad * digamma(self)
 
 - name: digamma(Tensor self)
-  self: not_implemented("digamma")
+  self: grad * trigamma(self)
+
+- name: trigamma(Tensor self)
+  self: not_implemented("trigamma")
 
 - name: linspace(Scalar start, Scalar end, int64_t steps)
 

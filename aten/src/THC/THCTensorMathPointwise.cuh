@@ -792,4 +792,19 @@ struct TensorDigammaOp {
   }
 };
 
+// TODO Replace this with a more accurate trigamma().
+template <typename real, typename accreal>
+struct TensorTrigammaOp {
+  __device__ __forceinline__ void
+  operator()(real* out, real* in) {
+    static accreal eps = 1e-4;
+    const accreal x = ScalarConvert<real, accreal>::to(*in);
+    const accreal dx = x * eps;
+    *out = ScalarConvert<accreal, real>(
+        (THCNumerics<accreal>::lgamma(x + dx) -
+         2 * THCNumerics<accreal>::lgamma(x) +
+         THCNumerics<accreal>::lgamma(x - dx)) / (dx * dx));
+  }
+};
+
 #endif // THC_TENSORMATH_POINTWISE_CUH

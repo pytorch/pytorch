@@ -197,39 +197,15 @@ class TestTorch(TestCase):
     def test_lgamma(self):
         self._testMathByName('lgamma')
 
+    @unittest.skipIf(not TEST_SCIPY, "Scipy not found")
     def test_digamma(self):
-        makeshift = True  # TODO Replace makeshift digamma() with higher precision version.
-        x = torch.Tensor([-0.1, 3, 999])
-        expected = torch.Tensor([
-            9.24507305005294,
-            0.92278433509846,
-            6.90625419464,
-        ])
+        from scipy.special import digamma
+        self._testMath(torch.digamma, digamma)
 
-        out = torch.digamma(x)
-        self.assertEqual(out, expected, 1e-5)
-
-        out = x.digamma()
-        self.assertEqual(out, expected, 1e-5)
-
-        if not makeshift:
-            y = torch.Tensor([-10, 0])
-            out = torch.digamma(y)
-            self.assertTrue((out == float('inf')).all())
-
-        # This tests against a scipy reference implementation.
-        x = torch.logspace(-5, 5, steps=21)
-        expected = torch.Tensor([
-            -1.00000577e+05, -3.16233538e+04, -1.00005771e+04,
-            -3.16285436e+03, -1.00057557e+03, -3.16799792e+02,
-            -1.00560885e+02, -3.21491437e+01, -1.04237549e+01,
-            -3.31321826e+00, -5.77215665e-01, 9.84925052e-01,
-            2.25175259e+00, 3.43798293e+00, 4.60016185e+00,
-            5.75488076e+00, 6.90725520e+00, 8.05888970e+00,
-            9.21029037e+00, 1.03616171e+01, 1.15129204e+01,
-        ])
-        out = torch.digamma(x)
-        self.assertEqual(out, expected, 1e-3 if makeshift else 1e-5)
+    @unittest.skipIf(not TEST_SCIPY, "Scipy not found")
+    def test_trigamma(self):
+        from scipy.special import polygamma
+        self._testMath(torch.trigamma, lambda x: polygamma(1, x)[()])
 
     def test_asin(self):
         self._testMath(torch.asin, lambda x: math.asin(x) if abs(x) <= 1 else float('nan'))
