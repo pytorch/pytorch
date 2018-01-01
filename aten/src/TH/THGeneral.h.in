@@ -149,8 +149,6 @@ __inline double expm1(double x) { return THExpm1(x); }
 inline double expm1(double x) { return THExpm1(x); }
 #endif
 
-
-
 #define snprintf _snprintf
 #define popen _popen
 #define pclose _pclose
