@@ -1115,6 +1115,23 @@ class TestCuda(TestCase):
         test(True)
         test(False)
 
+    def test_trigamma(self):
+        def test(use_double=False):
+            cpu_tensor = torch.randn(10, 10, 10)
+            gpu_tensor = cpu_tensor.cuda()
+            zeros = torch.zeros(10, 10, 10)
+            if (use_double):
+                cpu_tensor = cpu_tensor.double()
+                gpu_tensor = gpu_tensor.double()
+                zeros = zeros.double()
+            cpu_out = cpu_tensor.trigamma()
+            gpu_out = gpu_tensor.trigamma()
+            norm_errors = (gpu_out - cpu_out.cuda()) / gpu_out
+            self.assertEqual(norm_errors, zeros)
+
+        test(True)
+        test(False)
+
     @unittest.skipIf(not HAS_MAGMA, "no MAGMA library detected")
     def test_symeig(self):
         # Small case
