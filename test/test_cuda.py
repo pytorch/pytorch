@@ -332,6 +332,8 @@ custom_precision = {
     'rsqrt': 1e-4,
     'cumprod': 1e-4,
     'qr': 3e-4,
+    'digamma': 1e0,  # large values lead to large absolute error but small relative error
+    'trigamma': 1e3,  # large values lead to large absolute error but small relative error
 }
 
 simple_pointwise = [
