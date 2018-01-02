@@ -51,7 +51,7 @@ class Bernoulli(Distribution):
     def _binary_cross_entropy(self, value):
         max_val = (-self.logits).clamp(min=0)
         return self.logits - self.logits * value + max_val + \
-               ((-max_val).exp() + (-self.logits - max_val).exp()).log()
+            ((-max_val).exp() + (-self.logits - max_val).exp()).log()
 
     def log_prob(self, value):
         self._validate_log_prob_arg(value)
