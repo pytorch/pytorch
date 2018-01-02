@@ -79,6 +79,12 @@ Probability distributions - torch.distributions
 .. autoclass:: OneHotCategorical
     :members:
 
+:hidden:`StudentT`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: StudentT
+    :members:
+
 :hidden:`Uniform`
 ~~~~~~~~~~~~~~~~~~~~~~~
 
