@@ -391,7 +391,7 @@ class BCELoss(_WeightedLoss):
 
     .. math::
         \ell(x, y) = L = \{l_1,\dots,l_N\}^\top, \quad
-        l_n = - w_n \left[ t_n \cdot \log x_n + (1 - t_n) \cdot \log (1 - x_n) \right],
+        l_n = - w_n \left[ y_n \cdot \log x_n + (1 - y_n) \cdot \log (1 - x_n) \right],
 
     where :math:`N` is the batch size. If reduce is ``True``, then
 
@@ -402,7 +402,7 @@ class BCELoss(_WeightedLoss):
         \end{cases}
 
     This is used for measuring the error of a reconstruction in for example
-    an auto-encoder. Note that the targets `t[i]` should be numbers
+    an auto-encoder. Note that the targets `y` should be numbers
     between 0 and 1.
 
     Args:
@@ -515,8 +515,8 @@ class HingeEmbeddingLoss(_Loss):
 
     .. math::
         l_n = \begin{cases}
-        x_n, & \text{if}\; y_n = 1,\\
-        \max \{0, \Delta - x_n\}, & \text{if}\; y_n = -1,
+            x_n, & \text{if}\; y_n = 1,\\
+            \max \{0, \Delta - x_n\}, & \text{if}\; y_n = -1,
         \end{cases}
 
     and the total loss functions is
