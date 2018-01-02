@@ -66,6 +66,20 @@ static int THPVariable_traverse(THPVariable *self, visitproc visit, void *arg)
 {
   Py_VISIT(self->data);
   Py_VISIT(self->backward_hooks);
+  // We don't want to traverse the grad_fn, even if the Variable owns it and the
+  // shared pointer's use count is 1. This is because we would need to treat
+  // the grad_fn as part of the Python state and hold the GIL sometimes when
+  // grad_fn's shared_ptr is copied, otherwise a race condition with the Python
+  // GC could occur. Holding the GIL when the shared_ptr is copied adds
+  // undesirable complexity/overhead.
+  //
+  // When hooks, a Variable, and its grad_fn are involved in a Python reference
+  // cycle, because we're not traversing the grad_fn, the reference cycle will
+  // in fact leak.
+  //
+  // See https://gist.github.com/zou3519/7ac92b84dd7d206dcc6eae55fee8372c
+  // for more details about the race condition involving traversing the grad_fn
+  // and the python GC.
   if (self->cdata.defined()) {
     for (auto& hook : self->cdata.hooks()) {
       if (auto pyhook = dynamic_cast<PyFunctionPreHook*>(hook.get())) {
