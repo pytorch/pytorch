@@ -66,3 +66,21 @@ def broadcast_all(*values):
         for idx in scalar_idxs:
             values[idx] = torch.Tensor([values[idx]])
     return values
+
+
+def tril_mask(value):
+    """
+    Returns a Lower Trianglular mask: a ByteTensor of shape `value.shape` that
+    is ones in the lower triangle and zero elsewhere.
+    """
+    if value.dim() < 2 or value.size(-2) != value.size(-1):
+        raise ValueError('Expected innermost dimensions of tensor to be square. '
+                         'Actual shape: {}'.format(value.size()))
+    n = value.size(-1)
+    coords = value.new(n)
+    torch.arange(n, out=coords)
+    mask = coords <= coords.view(n, 1)
+    if mask.dim() < value.dim():
+        mask = mask.view((1,) * (value.dim() - mask.dim()) + mask.size())
+        mask = mask.expand_as(value)
+    return mask

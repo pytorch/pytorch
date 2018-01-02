@@ -28,11 +28,14 @@ from collections import namedtuple
 from itertools import product
 
 import torch
-from common import TestCase, run_tests, set_rng_seed
 from torch.autograd import Variable, gradcheck
 from torch.distributions import (Bernoulli, Beta, Categorical, Cauchy, Chi2,
                                  Dirichlet, Exponential, Gamma, Laplace,
                                  Normal, OneHotCategorical, Uniform)
+from torch.distributions.constraints import dependent
+from torch.distributions.utils import tril_mask
+
+from common import TestCase, run_tests, set_rng_seed
 
 TEST_NUMPY = True
 try:
@@ -108,7 +111,7 @@ EXAMPLES = [
         },
         {
             'mean': Variable(torch.randn(1), requires_grad=True),
-            'std': Variable(torch.randn(1), requires_grad=True),
+            'std': Variable(torch.randn(1).abs(), requires_grad=True),
         },
         {
             'mean': torch.Tensor([1.0, 0.0]),
@@ -136,7 +139,7 @@ EXAMPLES = [
         },
         {
             'loc': Variable(torch.randn(1), requires_grad=True),
-            'scale': Variable(torch.randn(1), requires_grad=True),
+            'scale': Variable(torch.randn(1).abs(), requires_grad=True),
         },
         {
             'loc': torch.Tensor([1.0, 0.0]),
@@ -1000,6 +1003,51 @@ class TestDistributionShapes(TestCase):
         self.assertEqual(laplace.sample((3, 2)).size(), torch.Size((3, 2, 2)))
         self.assertEqual(laplace.log_prob(self.tensor_sample_1).size(), torch.Size((3, 2)))
         self.assertRaises(ValueError, laplace.log_prob, self.tensor_sample_2)
+
+
+class TestConstraints(TestCase):
+    def test_params_contains(self):
+        for Dist, params in EXAMPLES:
+            for i, param in enumerate(params):
+                dist = Dist(**param)
+                for name, value in param.items():
+                    if not (torch.is_tensor(value) or isinstance(value, Variable)):
+                        value = torch.Tensor([value])
+                    if Dist in (Categorical, OneHotCategorical) and name == 'probs':
+                        # These distributions accept positive probs, but elsewhere we
+                        # use a stricter constraint to the simplex.
+                        value = value / value.sum(-1, True)
+                    constraint = dist.params[name]
+                    if constraint is dependent:
+                        continue
+                    message = '{} example {}/{} parameter {} = {}'.format(
+                        Dist.__name__, i, len(params), name, value)
+                    self.assertTrue(constraint.check(value).all(), msg=message)
+
+    def test_support_contains(self):
+        for Dist, params in EXAMPLES:
+            for i, param in enumerate(params):
+                dist = Dist(**param)
+                value = dist.sample()
+                constraint = dist.support
+                message = '{} example {}/{} sample = {}'.format(
+                    Dist.__name__, i, len(params), value)
+                self.assertTrue(constraint.check(value).all(), msg=message)
+
+
+class TestUtils(TestCase):
+    def test_tril_mask(self):
+        examples = [
+            ((2, 2), [[1, 0], [1, 1]]),
+            ((3, 3), [[1, 0, 0], [1, 1, 0], [1, 1, 1]]),
+            ((2, 2, 2), [[[1, 0], [1, 1]], [[1, 0], [1, 1]]]),
+        ]
+        for shape, expected in examples:
+            value = torch.zeros(*shape)
+            expected = torch.ByteTensor(expected)
+            actual = tril_mask(value)
+            self.assertEqual(actual.shape, expected.shape)
+            self.assertTrue((actual == expected).all())
 
 
 if __name__ == '__main__':
