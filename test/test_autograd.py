@@ -372,32 +372,6 @@ class TestAutograd(TestCase):
         self.assertEqual(counter[0], 1, 'bw_hook not called')
         self.assertEqual(x.grad.data, torch.ones(5, 5) * 2)
 
-    @unittest.skipIf(sys.version_info[0] == 2, "Python 2 doesn't collect cycles involving __del__")
-    def test_hooks_cycle(self):
-        import gc
-        counter = [0]
-
-        class GradHook(object):
-            def __init__(self, var):
-                self.var = var
-
-            def __del__(self):
-                counter[0] += 1
-
-            def __call__(self, *args):
-                pass
-
-        def run_test():
-            x = Variable(torch.ones(5, 5), requires_grad=True)
-            y = x * 2
-            x.register_hook(GradHook(x))
-            y.register_hook(GradHook(y))
-            y._backward_hooks[1] = GradHook(y)
-
-        run_test()
-        gc.collect()
-        self.assertEqual(counter[0], 3)
-
     def test_hook_none(self):
         # WARNING: this is a test for autograd internals.
         # You should never have to use such things in your code.
