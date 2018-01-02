@@ -6,6 +6,10 @@
 #endif
 #include <math.h>
 
+#ifndef M_PIf
+#define M_PIf 3.1415926535f
+#endif  // M_PIf
+
 static inline double TH_sigmoid(double value) {
   return 1.0 / (1.0 + exp(-value));
 }
@@ -125,5 +129,71 @@ Date:  February 1996
     return(x);
 }
 #undef CENTRAL_RANGE
+
+static inline double TH_digamma(double x) {
+  double result = 0;
+  if (x < 0.5) {
+    result -= M_PI / tan(M_PI * x);
+    x = 1 - x;
+  }
+  for (int i = 0; i < 4; ++i) {
+    result -= 1 / x;
+    x += 1;
+  }
+  const double ixx = 1 / (x*x);
+  result += log(x) - 1 / (2*x) - ixx * (1./12 - ixx * (1./120 - ixx * (1./252)));
+  return result;
+}
+
+static inline float TH_digammaf(float x) {
+  float result = 0;
+  if (x < 0.5) {
+    result -= M_PIf / tanf(M_PIf * x);
+    x = 1 - x;
+  }
+  for (int i = 0; i < 4; ++i) {
+    result -= 1 / x;
+    x += 1;
+  }
+  const float ixx = 1 / (x*x);
+  result += logf(x) - 1 / (2*x) - ixx * (1.f/12 - ixx * (1.f/120 - ixx * (1.f/252)));
+  return result;
+}
+
+static inline double TH_trigamma(double x) {
+  double sign = +1;
+  double result = 0;
+  if (x < 0.5) {
+    sign = -1;
+    const double sin_pi_x = sin(M_PI * x);
+    result -= (M_PI * M_PI) / (sin_pi_x * sin_pi_x);
+    x = 1 - x;
+  }
+  for (int i = 0; i < 6; ++i) {
+    result += 1 / (x * x);
+    x += 1;
+  }
+  const double ixx = 1 / (x*x);
+  result += (1 + 1 / (2*x) + ixx * (1./6 - ixx * (1./30 - ixx * (1./42)))) / x;
+  return sign * result;
+}
+
+static inline float TH_trigammaf(float x) {
+  float sign = +1;
+  float result = 0;
+  if (x < 0.5f) {
+    sign = -1;
+    const float sin_pi_x = sinf(M_PIf * x);
+    result -= (M_PIf * M_PIf) / (sin_pi_x * sin_pi_x);
+    x = 1 - x;
+  }
+  for (int i = 0; i < 6; ++i) {
+    result += 1 / (x * x);
+    x += 1;
+  }
+  const float ixx = 1 / (x*x);
+  result += (1 + 1 / (2*x) + ixx * (1.f/6 - ixx * (1.f/30 - ixx * (1.f/42)))) / x;
+  return sign * result;
+}
 
 #endif // _THMATH_H

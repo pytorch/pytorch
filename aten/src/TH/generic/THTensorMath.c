@@ -3064,6 +3064,8 @@ TENSOR_IMPLEMENT_LOGICAL_SUM(logicalany, ||, 0)
 
 LAB_IMPLEMENT_BASIC_FUNCTION(log,TH_MATH_NAME(log))
 LAB_IMPLEMENT_BASIC_FUNCTION(lgamma,TH_MATH_NAME(lgamma))
+LAB_IMPLEMENT_BASIC_FUNCTION(digamma,TH_MATH_NAME(TH_digamma))
+LAB_IMPLEMENT_BASIC_FUNCTION(trigamma,TH_MATH_NAME(TH_trigamma))
 LAB_IMPLEMENT_BASIC_FUNCTION(log1p,TH_MATH_NAME(log1p))
 LAB_IMPLEMENT_BASIC_FUNCTION(sigmoid,TH_MATH_NAME(TH_sigmoid))
 LAB_IMPLEMENT_BASIC_FUNCTION(exp,TH_MATH_NAME(exp))
@@ -3123,6 +3125,14 @@ void THTensor_(atan2)(THTensor *r_, THTensor *tx, THTensor *ty)
 {
   THTensor_(resizeAs)(r_, tx);
   TH_TENSOR_APPLY3(real, r_, real, tx, real, ty, *r__data = TH_MATH_NAME(atan2)(*tx_data,*ty_data););
+}
+
+void THTensor_(polygamma)(THTensor *r_, int64_t n, THTensor *t) {
+  switch (n) {
+    case 0: THTensor_(digamma)(r_, t); return;
+    case 1: THTensor_(trigamma)(r_, t); return;
+    default: THError("polygamma(n,x) is not implemented for n>=2");
+  }
 }
 
 void THTensor_(lerp)(THTensor *r_, THTensor *a, THTensor *b, real weight)
@@ -3481,12 +3491,6 @@ void THTensor_(bhistc)(THTensor *hist, THTensor *tensor, int64_t nbins, real min
   );
 }
 
-// TODO Replace this with more accurate digamma().
-static inline real THTensor_(digamma_one)(real x) {
-  const real eps = x * 1e-2;
-  return (TH_MATH_NAME(lgamma)(x + eps) - TH_MATH_NAME(lgamma)(x - eps)) / (eps + eps);
-}
-
 // Approximate reparameterized gradient of Beta(x,alpha,beta) wrt alpha.
 // Assumes x is close to zero.
 static inline real THTensor_(beta_grad_alpha_small)(real x, real alpha, real beta) {
@@ -3507,8 +3511,8 @@ static inline real THTensor_(beta_grad_alpha_small)(real x, real alpha, real bet
                          +a2 + b3 * x / 3 * (
                          -a3 + b4 * x / 4 * (
                          +a4))));
-  const real const_cdf_alpha = (log(x) + THTensor_(digamma_one)(alpha + beta) -
-                                THTensor_(digamma_one)(alpha)) * const_cdf
+  const real const_cdf_alpha = (log(x) + TH_MATH_NAME(TH_digamma)(alpha + beta) -
+                                TH_MATH_NAME(TH_digamma)(alpha)) * const_cdf
                              + -a0 * a0 + b1 * x * (
                                +a1 * a1 + b2 * x / 2 * (
                                -a2 * a2 + b3 * x / 3 * (
@@ -3532,8 +3536,8 @@ static inline real THTensor_(beta_grad_beta_small)(real x, real alpha, real beta
                          -a1 + (beta - 2) * x / 2 * (
                          +a2 + (beta - 3) * x / 3 * (
                          -a3)));
-  const real const_cdf_beta = (THTensor_(digamma_one)(alpha + beta) -
-                               THTensor_(digamma_one)(beta)) * const_cdf
+  const real const_cdf_beta = (TH_MATH_NAME(TH_digamma)(alpha + beta) -
+                               TH_MATH_NAME(TH_digamma)(beta)) * const_cdf
                             + 0 + x * (
                             -a1 + x / 2 * (
                             +a2 * (2 * beta - 3) + x / 3 * (
@@ -3599,8 +3603,8 @@ static inline real THTensor_(dirichlet_grad_one)(real x, real alpha, real total)
     }
   }
   if(q < 1e-3f) q = 1e-3f;
-  const real approx = x * (1 - x) * (THTensor_(digamma_one)(total) -
-                                     THTensor_(digamma_one)(alpha)) / beta;
+  const real approx = x * (1 - x) * (TH_MATH_NAME(TH_digamma)(total) -
+                                     TH_MATH_NAME(TH_digamma)(alpha)) / beta;
   return p / q * approx;
 }
 

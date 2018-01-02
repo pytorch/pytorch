@@ -4,7 +4,7 @@ import torch
 from torch.autograd import Function, Variable
 from torch.autograd.function import once_differentiable
 from torch.distributions.distribution import Distribution
-from torch.distributions.utils import broadcast_all, digamma
+from torch.distributions.utils import broadcast_all
 
 
 def _standard_gamma(alpha):
@@ -50,4 +50,4 @@ class Gamma(Distribution):
 
     def entropy(self):
         return (self.alpha - torch.log(self.beta) + torch.lgamma(self.alpha) +
-                (1.0 - self.alpha) * digamma(self.alpha))
+                (1.0 - self.alpha) * torch.digamma(self.alpha))
