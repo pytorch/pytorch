@@ -185,13 +185,24 @@ void THCTensor_(digamma)(THCState* state, THCTensor* self_, THCTensor* src) {
   THCudaCheck(cudaGetLastError());
 }
 
-void THCTensor_(trigamma)(THCState* state, THCTensor* self_, THCTensor* src) {
+void THCTensor_(polygamma)(THCState* state, THCTensor* self_, int n, THCTensor* src) {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self_, src));
   if (self_ != src) {
     THCTensor_(resizeAs)(state, self_, src);
   }
-  if (!THC_pointwiseApply2(state, self_, src, TensorTrigammaOp<real, accreal>())) {
-    THArgCheck(false, 2, CUTORCH_DIM_WARNING);
+  switch (n) {
+    case 0:
+      if (!THC_pointwiseApply2(state, self_, src, TensorDigammaOp<real, accreal>())) {
+        THArgCheck(false, 2, CUTORCH_DIM_WARNING);
+      }
+      break;
+    case 0:
+      if (!THC_pointwiseApply2(state, self_, src, TensorTrigammaOp<real, accreal>())) {
+        THArgCheck(false, 2, CUTORCH_DIM_WARNING);
+      }
+      break;
+    default:
+      THError("polygamma(n,x) is not implemented for n>=2");
   }
 
   THCudaCheck(cudaGetLastError());

@@ -1324,7 +1324,7 @@
     - THTensor* self
 ]]
 [[
-  name: trigamma
+  name: polygamma
   types:
     - floating_point
   backends:
@@ -1337,19 +1337,21 @@
   arguments:
     - arg: THTensor* result
       output: True
+    - int64_t n
     - THTensor* self
 ]]
 [[
-  name: trigamma_
+  name: polygamma_
   types:
     - floating_point
   backends:
     - CPU
     - CUDA
-  cname: trigamma
+  cname: polygamma
   return: self
   arguments:
     - THTensor* self
+    - int64_t n
     - THTensor* self
 ]]
 [[

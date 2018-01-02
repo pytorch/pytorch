@@ -333,7 +333,6 @@ custom_precision = {
     'cumprod': 1e-4,
     'qr': 3e-4,
     'digamma': 1e0,  # large values lead to large absolute error but small relative error
-    'trigamma': 1e3,  # large values lead to large absolute error but small relative error
 }
 
 simple_pointwise = [
@@ -1115,7 +1114,7 @@ class TestCuda(TestCase):
         test(True)
         test(False)
 
-    def test_trigamma(self):
+    def test_polygamma(self):
         def test(use_double=False):
             cpu_tensor = torch.randn(10, 10, 10)
             gpu_tensor = cpu_tensor.cuda()
@@ -1124,10 +1123,11 @@ class TestCuda(TestCase):
                 cpu_tensor = cpu_tensor.double()
                 gpu_tensor = gpu_tensor.double()
                 zeros = zeros.double()
-            cpu_out = cpu_tensor.trigamma()
-            gpu_out = gpu_tensor.trigamma()
-            norm_errors = (gpu_out - cpu_out.cuda()) / gpu_out
-            self.assertEqual(norm_errors, zeros)
+            for n in [0, 1]:
+                cpu_out = cpu_tensor.polygamma(n)
+                gpu_out = gpu_tensor.polygamma(n)
+                norm_errors = (gpu_out - cpu_out.cuda()) / gpu_out
+                self.assertEqual(norm_errors, zeros)
 
         test(True)
         test(False)

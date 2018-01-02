@@ -152,6 +152,7 @@ TH_API void THTensor_(log)(THTensor *r_, THTensor *t);
 TH_API void THTensor_(lgamma)(THTensor *r_, THTensor *t);
 TH_API void THTensor_(digamma)(THTensor *r_, THTensor *t);
 TH_API void THTensor_(trigamma)(THTensor *r_, THTensor *t);
+TH_API void THTensor_(polygamma)(THTensor *r_, int64_t n, THTensor *t);
 TH_API void THTensor_(log1p)(THTensor *r_, THTensor *t);
 TH_API void THTensor_(exp)(THTensor *r_, THTensor *t);
 TH_API void THTensor_(expm1)(THTensor *r_, THTensor *t);

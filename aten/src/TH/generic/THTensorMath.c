@@ -3127,6 +3127,14 @@ void THTensor_(atan2)(THTensor *r_, THTensor *tx, THTensor *ty)
   TH_TENSOR_APPLY3(real, r_, real, tx, real, ty, *r__data = TH_MATH_NAME(atan2)(*tx_data,*ty_data););
 }
 
+void THTensor_(polygamma)(THTensor *r_, int64_t n, THTensor *t) {
+  switch (n) {
+    case 0: THTensor_(digamma)(r_, t); return;
+    case 1: THTensor_(trigamma)(r_, t); return;
+    default: THError("polygamma(n,x) is not implemented for n>=2");
+  }
+}
+
 void THTensor_(lerp)(THTensor *r_, THTensor *a, THTensor *b, real weight)
 {
   THArgCheck(THTensor_(nElement)(a) == THTensor_(nElement)(b), 2, "sizes do not match");
