@@ -104,18 +104,19 @@ class NLLLoss(_WeightedLoss):
     The target that this loss expects is a class index
     `(0 to C-1, where C = number of classes)`
 
-    The loss can be described as:
+    If :attr:`reduce` is ``False``, the loss can be described as:
 
     .. math::
         \ell(x, y) = L = \{l_1,\dots,l_N\}^\top, \quad
-        l_n = - x_{n,y_n} \cdot \mathbb{1}\{y_n \not= \text{ignore_index}\},
+        l_n = - w_{y_n} x_{n,y_n}, \quad
+        w_{c} = \text{weight}[c] \cdot \mathbb{1}\{c \not= \text{ignore_index}\},
 
-    where :math:`N` is the batch size. If reduce is ``True``, then
+    where :math:`N` is the batch size. If :attr:`reduce` is ``True`` (default),
+    then
 
     .. math::
         \ell(x, y) = \begin{cases}
-            \sum_{n=1}^N w_{y_n} l_n \Big/ \sum_{n=1}^N w_{y_n} \cdot
-            \mathbb{1}\{y_n \not= \text{ignore_index}\}, & \text{if}\;
+            \sum_{n=1}^N \frac{w_{y_n}}{\sum_{n=1}^N w_{y_n}} l_n, & \text{if}\;
             \text{size_average} = \text{True},\\
             \sum_{n=1}^N w_{y_n} l_n,  & \text{if}\;
             \text{size_average} = \text{False}.
@@ -123,18 +124,21 @@ class NLLLoss(_WeightedLoss):
 
     Args:
         weight (Tensor, optional): a manual rescaling weight given to each
-           class. If given, has to be a Tensor of size `C`
+           class. If given, it has to be a Tensor of size `C`. Otherwise, it is
+           treated as if having all ones.
         size_average (bool, optional): By default, the losses are averaged
-           over observations for each minibatch. However, if the field
-           size_average is set to ``False``, the losses are instead summed for
-           each minibatch. Ignored when reduce is ``False``. Default: ``True``
+           over observations for each minibatch with weights set by
+           :attr:`weight`. However, if the field :attr:`size_average` is set to
+           ``False``, the losses are instead summed for each minibatch. Ignored
+           when :attr:`reduce` is ``False``. Default: ``True``
         ignore_index (int, optional): Specifies a target value that is ignored
-            and does not contribute to the input gradient. When size_average
-            is ``True``, the loss is averaged over non-ignored targets.
+            and does not contribute to the input gradient. When
+            :attr:`size_average` is ``True``, the loss is averaged over
+            non-ignored targets.
         reduce (bool, optional): By default, the losses are averaged or summed
-            for each minibatch. When reduce is ``False``, the loss function returns
-            a loss per batch element instead and ignores size_average.
-            Default: ``True``
+            for each minibatch. When :attr:`reduce` is ``False``, the loss
+            function returns a loss per batch element instead and
+            ignores :attr:`size_average`. Default: ``True``
 
     Shape:
         - Input: :math:`(N, C)` where `C = number of classes`.
@@ -179,22 +183,24 @@ class NLLLoss2d(NLLLoss):
             class. If given, has to be a 1D Tensor having as many elements,
             as there are classes.
         size_average: By default, the losses are averaged over observations
-            for each minibatch. However, if the field size_average is set to
-            ``False``, the losses are instead summed for each minibatch.
-            Ignored when reduce is ``False``. Default: ``True``
+            for each minibatch. However, if the field :attr:`size_average` is
+            set to ``False``, the losses are instead summed for each minibatch.
+            Ignored when :attr:`reduce` is ``False``. Default: ``True``
         ignore_index (int, optional): Specifies a target value that is ignored
-            and does not contribute to the input gradient. When size_average
-            is ``True``, the loss is averaged over non-ignored targets.
+            and does not contribute to the input gradient. When
+            :attr:`size_average` is ``True``, the loss is averaged over
+            non-ignored targets.
         reduce (bool, optional): By default, the losses are averaged or summed
-            for each minibatch depending on size_average. When reduce is ``False``,
-            the loss function returns a loss per batch element instead and
-            ignores size_average. Default: ``True``
+            for each minibatch depending on :attr:`size_average`. When
+            :attr:`reduce` is ``False``, the loss function returns a loss per
+            batch element instead and ignores :attr:`size_average`.
+            Default: ``True``
 
 
     Shape:
         - Input: :math:`(N, C, H, W)` where `C = number of classes`
         - Target: :math:`(N, H, W)` where each value is `0 <= targets[i] <= C-1`
-        - Output: scalar. If reduce is ``False``, then :math:`(N, H, W)` instead.
+        - Output: scalar. If :attr:`reduce` is ``False``, then :math:`(N, H, W)` instead.
 
     Examples::
 
