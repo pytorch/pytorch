@@ -51,7 +51,7 @@ class TestLayers(LayersTestCase):
         input_record_LR = self.new_record(
             schema.Struct(
                 ('label', schema.Scalar((np.float64, (1, )))),
-                ('prediction', schema.Scalar((np.float32, (2, )))),
+                ('logit', schema.Scalar((np.float32, (2, )))),
                 ('weight', schema.Scalar((np.float64, (1, ))))
             )
         )
@@ -267,7 +267,7 @@ class TestLayers(LayersTestCase):
     def testBatchLRLoss(self):
         input_record = self.new_record(schema.Struct(
             ('label', schema.Scalar((np.float64, (1,)))),
-            ('prediction', schema.Scalar((np.float32, (2,)))),
+            ('logit', schema.Scalar((np.float32, (2,)))),
             ('weight', schema.Scalar((np.float64, (1,))))
         ))
         loss = self.model.BatchLRLoss(input_record)
