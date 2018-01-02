@@ -2,7 +2,7 @@ import torch
 from torch.autograd import Variable
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
-from torch.distributions.utils import get_logits, get_probs, log_sum_exp
+from torch.distributions.utils import probs_to_logits, logits_to_probs, log_sum_exp
 
 
 class Categorical(Distribution):
@@ -40,10 +40,10 @@ class Categorical(Distribution):
                              "but not both.".format(probs, logits))
         if probs is not None:
             self.probs = probs / probs.sum(-1, keepdim=True)
-            self.logits = get_logits(self.probs)
+            self.logits = probs_to_logits(self.probs)
         else:
             self.logits = logits - log_sum_exp(logits)
-            self.probs = get_probs(self.logits)
+            self.probs = logits_to_probs(self.logits)
         batch_shape = self.probs.size()[:-1]
         super(Categorical, self).__init__(batch_shape)
 

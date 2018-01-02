@@ -4,7 +4,7 @@ import torch
 from torch.autograd import Variable
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
-from torch.distributions.utils import broadcast_all, get_logits, get_probs
+from torch.distributions.utils import broadcast_all, probs_to_logits, logits_to_probs
 
 
 class Bernoulli(Distribution):
@@ -34,10 +34,10 @@ class Bernoulli(Distribution):
                              "but not both.".format(probs, logits))
         if probs is not None:
             self.probs, = broadcast_all(probs)
-            self.logits = get_logits(self.probs, is_binary=True)
+            self.logits = probs_to_logits(self.probs, is_binary=True)
         else:
             self.logits, = broadcast_all(logits)
-            self.probs = get_probs(self.logits, is_binary=True)
+            self.probs = logits_to_probs(self.logits, is_binary=True)
         if isinstance(probs, Number):
             batch_shape = torch.Size()
         else:

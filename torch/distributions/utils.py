@@ -88,18 +88,22 @@ def softmax(tensor):
     return F.softmax(tensor, -1)
 
 
-def log_sum_exp(tensor):
+def log_sum_exp(tensor, keepdim=True):
     """
     Numerically stable implementation for the `LogSumExp` operation. The
     summing is done along the last dimension.
+
+    Args:
+        tensor (torch.Tensor or torch.autograd.Variable)
+        keepdim (Boolean): Whether to retain the last dimension on summing.
     """
     max_val = tensor.max(dim=-1, keepdim=True)[0]
-    return max_val + (tensor - max_val).exp().sum(dim=-1, keepdim=True).log()
+    return max_val + (tensor - max_val).exp().sum(dim=-1, keepdim=keepdim).log()
 
 
-def get_probs(logits, is_binary=False):
+def logits_to_probs(logits, is_binary=False):
     """
-    Convert a tensor of logits into probabilities. Note that for the
+    Converts a tensor of logits into probabilities. Note that for the
     binary case, each value denotes log odds, whereas for the
     multi-dimensional case, the values along the last dimension denote
     the log probabilities (possibly unnormalized) of the events.
@@ -109,7 +113,7 @@ def get_probs(logits, is_binary=False):
     return softmax(logits)
 
 
-def get_logits(probs, is_binary=False):
+def probs_to_logits(probs, is_binary=False):
     """
     Converts a tensor of probabilities into logits. For the binary case,
     this denotes the probability of occurrence of the event indexed by `1`.
