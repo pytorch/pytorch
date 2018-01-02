@@ -98,7 +98,7 @@ std::tuple<Tensor, Tensor, Tensor> conv_tbc_backward(const Tensor& dOutput, cons
 
   Tensor dBias = zeros_like(bias); 
   auto tmp = dOutput.sum(0, false);
-  dBias.assign_(tmp.sum(0));
+  dBias.copy_(tmp.sum(0));
 
   return std::make_tuple(dInput, dWeight, dBias);
 }

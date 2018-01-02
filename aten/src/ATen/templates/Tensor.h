@@ -52,9 +52,7 @@ struct Tensor : public detail::TensorBase {
       return *this;
   }
 
-  Tensor & operator=(Tensor const & rhs) && {
-    return assign_(rhs);
-  }
+  inline Tensor & operator=(Tensor const & rhs) &&;
   Tensor & operator=(Scalar v) &&;
   Tensor & assign_(Scalar v);
   const char * toString() const {
@@ -117,8 +115,7 @@ struct Tensor : public detail::TensorBase {
   Tensor operator[](int64_t idx) const;
 
   // STOP.  Thinking of adding a method here, which only makes use
-  // of other ATen methods?  Define it in ATen/NativeFunctions.h
-  // instead.
+  // of other ATen methods?  Define it in native_functions.yaml.
 
   //example
   //Tensor * add(Tensor & b);
