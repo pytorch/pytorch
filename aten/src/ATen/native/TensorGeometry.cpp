@@ -42,7 +42,7 @@ Tensor narrow(const Tensor& self, int64_t dim, int64_t start, int64_t length) {
   if (length <= 0 || start > cur_size - length) {
     runtime_error("length out of range");
   }
-  return at::native::slice(self, start, start + length, 1, dim);
+  return at::native::slice(self, dim, start, start + length, 1);
 }
 
 Tensor permute(const Tensor& self, IntList dims) {
@@ -89,7 +89,7 @@ Tensor select(const Tensor& self, int64_t dim, int64_t index) {
   return self.as_strided(sizes, strides, storage_offset);
 }
 
-Tensor slice(const Tensor& self, int64_t start, int64_t end, int64_t step, int64_t dim) {
+Tensor slice(const Tensor& self, int64_t dim, int64_t start, int64_t end, int64_t step) {
   int64_t ndim = self.dim();
   AT_ASSERT(ndim > 0, "slice() cannot be applied to a 0-dim tensor.");
   dim = maybe_wrap_dim(dim, ndim);
@@ -120,10 +120,6 @@ Tensor slice(const Tensor& self, int64_t start, int64_t end, int64_t step, int64
   sizes[dim] = (len + step - 1) / step;  // round-up
   strides[dim] *= step;
   return self.as_strided(sizes, strides, storage_offset);
-}
-
-Tensor slice_dim(const Tensor& self, int64_t dim, int64_t start, int64_t end, int64_t step) {
-  return at::native::slice(self, start, end, step, dim);
 }
 
 std::vector<Tensor> split(const Tensor& self, int64_t split_size, int64_t dim) {

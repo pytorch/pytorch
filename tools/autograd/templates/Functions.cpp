@@ -267,14 +267,14 @@ Tensor cumprod_backward(const Tensor &grad, const Tensor &input, int64_t dim) {
   Tensor omitted_products;
   for (int k = 0; k < dim_size; ++k) {
     if (k == 0) {
-      prods_from_k_plus_1 = at::cumprod(input.slice_dim(dim, k + 1), dim);
+      prods_from_k_plus_1 = at::cumprod(input.slice(dim, k + 1), dim);
       omitted_products = at::cat({ones, prods_from_k_plus_1}, dim);
     } else if (k == dim_size - 1) {
-      Tensor prods_until_k = at::prod(input.slice_dim(dim, 0, k), dim, true);
+      Tensor prods_until_k = at::prod(input.slice(dim, 0, k), dim, true);
       omitted_products = prods_until_k;
     } else {
-      Tensor prods_until_k = at::prod(input.slice_dim(dim, 0, k), dim, true);
-      prods_from_k_plus_1 = at::cumprod(input.slice_dim(dim, k+1), dim);
+      Tensor prods_until_k = at::prod(input.slice(dim, 0, k), dim, true);
+      prods_from_k_plus_1 = at::cumprod(input.slice(dim, k+1), dim);
       omitted_products = prods_until_k.expand_as(prods_from_k_plus_1) * prods_from_k_plus_1;
       omitted_products = at::cat({prods_until_k, omitted_products}, dim);
     }
@@ -285,7 +285,7 @@ Tensor cumprod_backward(const Tensor &grad, const Tensor &input, int64_t dim) {
     TORCH_ASSERT(omitted_products.size(dim) == dim_size - k);
 
     grad_input.select(dim, k).copy_(
-        at::sum(grad.slice_dim(dim, k) * omitted_products,dim));
+        at::sum(grad.slice(dim, k) * omitted_products,dim));
   }
 
   return grad_input;

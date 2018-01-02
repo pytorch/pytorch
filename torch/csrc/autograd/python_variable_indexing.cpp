@@ -78,7 +78,7 @@ static Variable applySlice(const Variable& self, int64_t dim, PyObject* slice, b
   if (!ensure_view && start == 0 && stop == length && step == 1) {
     return self;
   }
-  return self.slice(start, stop, step, dim);
+  return self.slice(dim, start, stop, step);
 }
 
 static Variable applySelect(const Variable& self, int64_t dim, int64_t index) {
