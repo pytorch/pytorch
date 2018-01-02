@@ -173,6 +173,41 @@ void THCTensor_(sigmoid)(THCState* state, THCTensor* self_, THCTensor* src) {
   THCudaCheck(cudaGetLastError());
 }
 
+void THCTensor_(digamma)(THCState* state, THCTensor* self_, THCTensor* src) {
+  THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self_, src));
+  if (self_ != src) {
+    THCTensor_(resizeAs)(state, self_, src);
+  }
+  if (!THC_pointwiseApply2(state, self_, src, TensorDigammaOp<real, accreal>())) {
+    THArgCheck(false, 2, CUTORCH_DIM_WARNING);
+  }
+
+  THCudaCheck(cudaGetLastError());
+}
+
+void THCTensor_(polygamma)(THCState* state, THCTensor* self_, int64_t n, THCTensor* src) {
+  THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self_, src));
+  if (self_ != src) {
+    THCTensor_(resizeAs)(state, self_, src);
+  }
+  switch (n) {
+    case 0:
+      if (!THC_pointwiseApply2(state, self_, src, TensorDigammaOp<real, accreal>())) {
+        THArgCheck(false, 2, CUTORCH_DIM_WARNING);
+      }
+      break;
+    case 1:
+      if (!THC_pointwiseApply2(state, self_, src, TensorTrigammaOp<real, accreal>())) {
+        THArgCheck(false, 2, CUTORCH_DIM_WARNING);
+      }
+      break;
+    default:
+      THError("polygamma(n,x) is not implemented for n>=2");
+  }
+
+  THCudaCheck(cudaGetLastError());
+}
+
 void THCTensor_(pow)(THCState *state, THCTensor *self_, THCTensor *src, real value) {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self_, src));
   if (self_ == src) {

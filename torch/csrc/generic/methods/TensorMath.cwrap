@@ -164,6 +164,70 @@
 ]]
 
 [[
+  name: digamma
+  types:
+    - floating_point
+  backends:
+    - CPU
+    - CUDA
+  variants:
+    - method
+    - function
+  return: argument 0
+  arguments:
+    - arg: THTensor* result
+      output: True
+    - THTensor* self
+]]
+
+[[
+  name: digamma_
+  types:
+    - floating_point
+  backends:
+    - CPU
+    - CUDA
+  cname: digamma
+  return: self
+  arguments:
+    - THTensor* self
+    - THTensor* self
+]]
+
+[[
+  name: polygamma
+  types:
+    - floating_point
+  backends:
+    - CPU
+    - CUDA
+  variants:
+    - method
+    - function
+  return: argument 0
+  arguments:
+    - arg: THTensor* result
+      output: True
+    - int64_t n
+    - THTensor* self
+]]
+
+[[
+  name: polygamma_
+  types:
+    - floating_point
+  backends:
+    - CPU
+    - CUDA
+  cname: polygamma
+  return: self
+  arguments:
+    - THTensor* self
+    - int64_t n
+    - THTensor* self
+]]
+
+[[
   name: exp_
   types:
     - floating_point
