@@ -8,13 +8,7 @@ namespace at {
 
 
 inline Tensor & Tensor::operator=(Scalar v) && {
-  return assign_(v);
-}
-inline Tensor & Tensor::assign_(Scalar v) {
-  AT_ASSERT(defined(), "attempting to assign a scalar to an undefined tensor");
-  AT_ASSERT(dim() == 0, "attempting to assign a scalar to %d dim tensor", dim());
-  pImpl->assign_(v);
-  return *this;
+  return fill_(v);
 }
 inline Tensor Tensor::operator-() const {
   return neg();
