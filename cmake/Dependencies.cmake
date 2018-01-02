@@ -433,6 +433,16 @@ if(USE_GLOO)
   endif()
 endif()
 
+# ---[ profiling
+if(USE_PROF)
+  find_package(htrace)
+  if(htrace_FOUND)
+    set(USE_PROF_HTRACE ON)
+  else()
+    message(WARNING "htrace not found. Caffe2 will build without htrace prof")
+  endif()
+endif()
+
 if (USE_MOBILE_OPENGL)
   if (ANDROID)
     list(APPEND Caffe2_DEPENDENCY_LIBS EGL GLESv2)
