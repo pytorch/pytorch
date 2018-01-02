@@ -239,21 +239,6 @@ int main() {
             assert_equal_size_dim(lhs, rhs);
           }
         }
-
-        // assign_
-        {
-          auto lhs = T.ones(*lhs_it);
-          auto lhs_save = T.ones(*lhs_it);
-          auto rhs = T.ones(*rhs_it);
-          try {
-            lhs.assign_(rhs);
-            ASSERT(lhs_save.numel() == rhs.numel());
-            // ensure didn't change shape
-            assert_equal_size_dim(lhs, lhs_save);
-          } catch (std::runtime_error &e) {
-            ASSERT(lhs_save.numel() != rhs.numel());
-          }
-        }
       }
 
       // view
