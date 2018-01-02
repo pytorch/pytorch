@@ -46,8 +46,11 @@ $PYCMD test_jit.py $@
 
 echo "Running multiprocessing tests"
 $PYCMD test_multiprocessing.py $@
-MULTIPROCESSING_METHOD=spawn $PYCMD test_multiprocessing.py $@
-MULTIPROCESSING_METHOD=forkserver $PYCMD test_multiprocessing.py $@
+# Turn off unsupported methods for Windows
+if [[ "$OSTYPE" != "msys" ]]; then
+  MULTIPROCESSING_METHOD=spawn $PYCMD test_multiprocessing.py $@
+  MULTIPROCESSING_METHOD=forkserver $PYCMD test_multiprocessing.py $@
+fi
 
 echo "Running util tests"
 $PYCMD test_utils.py $@
