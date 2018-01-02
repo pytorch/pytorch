@@ -37,16 +37,34 @@ Probability distributions - torch.distributions
 .. autoclass:: Cauchy
     :members:
 
+:hidden:`Chi2`
+~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: Chi2
+    :members:
+
 :hidden:`Dirichlet`
 ~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autoclass:: Dirichlet
     :members:
 
+:hidden:`Exponential`
+~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: Exponential
+    :members:
+
 :hidden:`Gamma`
 ~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autoclass:: Gamma
+    :members:
+
+:hidden:`Laplace`
+~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: Laplace
     :members:
 
 :hidden:`Normal`
