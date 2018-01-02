@@ -30,7 +30,7 @@ from itertools import product
 import torch
 from common import TestCase, run_tests, set_rng_seed
 from torch.autograd import Variable, gradcheck
-from torch.distributions import (Bernoulli, Beta, Categorical, Cauchy,
+from torch.distributions import (Bernoulli, Beta, Categorical, Cauchy, Chi2,
                                  Dirichlet, Exponential, Gamma, Laplace,
                                  Normal, OneHotCategorical, Uniform)
 
@@ -83,6 +83,14 @@ EXAMPLES = [
         {
             'alpha': Variable(torch.exp(torch.randn(1)), requires_grad=True),
             'beta': Variable(torch.exp(torch.randn(1)), requires_grad=True),
+        },
+    ]),
+    Example(Chi2, [
+        {
+            'df': Variable(torch.exp(torch.randn(2, 3)), requires_grad=True),
+        },
+        {
+            'df': Variable(torch.exp(torch.randn(1)), requires_grad=True),
         },
     ]),
     Example(Dirichlet, [
@@ -555,6 +563,59 @@ class TestDistributions(TestCase):
                                        'max error {}'.format(rel_error.max()),
                                        'at alpha={}, x={}'.format(alpha, x[rel_error.argmax()])]))
 
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    def test_chi2_shape(self):
+        df = Variable(torch.exp(torch.randn(2, 3)), requires_grad=True)
+        df_1d = Variable(torch.exp(torch.randn(1)), requires_grad=True)
+        self.assertEqual(Chi2(df).sample().size(), (2, 3))
+        self.assertEqual(Chi2(df).sample_n(5).size(), (5, 2, 3))
+        self.assertEqual(Chi2(df_1d).sample_n(1).size(), (1, 1))
+        self.assertEqual(Chi2(df_1d).sample().size(), (1,))
+        self.assertEqual(Chi2(0.5).sample().size(), (1,))
+        self.assertEqual(Chi2(0.5).sample_n(1).size(), (1,))
+
+        def ref_log_prob(idx, x, log_prob):
+            d = df.data.view(-1)[idx]
+            expected = scipy.stats.chi2.logpdf(x, d)
+            self.assertAlmostEqual(log_prob, expected, places=3)
+
+        self._check_log_prob(Chi2(df), ref_log_prob)
+
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    def test_chi2_sample(self):
+        set_rng_seed(0)  # see Note [Randomized statistical tests]
+        for df in [0.1, 1.0, 5.0]:
+            self._check_sampler_sampler(Chi2(df),
+                                        scipy.stats.chi2(df),
+                                        'Chi2(df={})'.format(df))
+
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    def test_chi2_sample_grad(self):
+        set_rng_seed(0)  # see Note [Randomized statistical tests]
+        num_samples = 100
+        for df in [1e-3, 1e-2, 1e-1, 1e0, 1e1, 1e2, 1e3, 1e4]:
+            dfs = Variable(torch.Tensor([df] * num_samples), requires_grad=True)
+            x = Chi2(dfs).rsample()
+            x.sum().backward()
+            x, ind = x.data.sort()
+            x = x.numpy()
+            actual_grad = dfs.grad.data[ind].numpy()
+            # Compare with expected gradient dx/ddf along constant cdf(x,df).
+            cdf = scipy.stats.chi2.cdf
+            pdf = scipy.stats.chi2.pdf
+            eps = 0.02 * df if df < 100 else 0.02 * df ** 0.5
+            cdf_df = (cdf(x, df + eps) - cdf(x, df - eps)) / (2 * eps)
+            cdf_x = pdf(x, df)
+            expected_grad = -cdf_df / cdf_x
+            rel_error = np.abs(actual_grad - expected_grad) / (expected_grad + 1e-100)
+            self.assertLess(np.max(rel_error), 0.005,
+                            '\n'.join(['Bad gradients for Chi2({})'.format(df),
+                                       'x {}'.format(x),
+                                       'expected {}'.format(expected_grad),
+                                       'actual {}'.format(actual_grad),
+                                       'rel error {}'.format(rel_error),
+                                       'max error {}'.format(rel_error.max())]))
+
     def test_dirichlet_shape(self):
         alpha = Variable(torch.exp(torch.randn(2, 3)), requires_grad=True)
         alpha_1d = Variable(torch.exp(torch.randn(4)), requires_grad=True)
@@ -843,6 +904,25 @@ class TestDistributionShapes(TestCase):
         self.assertEqual(gamma.sample((3, 2)).size(), torch.Size((3, 2, 2)))
         self.assertEqual(gamma.log_prob(self.tensor_sample_1).size(), torch.Size((3, 2)))
         self.assertRaises(ValueError, gamma.log_prob, self.tensor_sample_2)
+
+    def test_chi2_shape_scalar_params(self):
+        chi2 = Chi2(1)
+        self.assertEqual(chi2._batch_shape, torch.Size())
+        self.assertEqual(chi2._event_shape, torch.Size())
+        self.assertEqual(chi2.sample().size(), torch.Size((1,)))
+        self.assertEqual(chi2.sample((3, 2)).size(), torch.Size((3, 2)))
+        self.assertRaises(ValueError, chi2.log_prob, self.scalar_sample)
+        self.assertEqual(chi2.log_prob(self.tensor_sample_1).size(), torch.Size((3, 2)))
+        self.assertEqual(chi2.log_prob(self.tensor_sample_2).size(), torch.Size((3, 2, 3)))
+
+    def test_chi2_shape_tensor_params(self):
+        chi2 = Chi2(torch.Tensor([1, 1]))
+        self.assertEqual(chi2._batch_shape, torch.Size((2,)))
+        self.assertEqual(chi2._event_shape, torch.Size(()))
+        self.assertEqual(chi2.sample().size(), torch.Size((2,)))
+        self.assertEqual(chi2.sample((3, 2)).size(), torch.Size((3, 2, 2)))
+        self.assertEqual(chi2.log_prob(self.tensor_sample_1).size(), torch.Size((3, 2)))
+        self.assertRaises(ValueError, chi2.log_prob, self.tensor_sample_2)
 
     def test_normal_shape_scalar_params(self):
         normal = Normal(0, 1)
