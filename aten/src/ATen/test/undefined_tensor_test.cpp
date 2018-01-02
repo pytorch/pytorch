@@ -16,7 +16,7 @@ int main() {
 
   ASSERT_THROWS(und.strides(), "strides");
   ASSERT_THROWS(und.dim(), "dim");
-  ASSERT_THROWS(und.assign_(Scalar(5)), "assign");
+  ASSERT_THROWS([]() {return Tensor();}() = Scalar(5), "UndefinedType");
   ASSERT_THROWS(und.unsafeGetTH(true), "unsafeGetTH");
   ASSERT_THROWS(und.add(und), "add");
   ASSERT_THROWS(und.add(ft), "add");

@@ -72,10 +72,6 @@ Scalar VariableImpl::localScalar() {
   return data.pImpl->localScalar();
 }
 
-void VariableImpl::assign_(Scalar s) {
-  data.assign_(s);
-}
-
 std::shared_ptr<Function> VariableImpl::get_grad_accumulator() {
   if (_grad_fn) {
     throw std::logic_error("get_grad_accumulator() should be only called on leaf Variables");
