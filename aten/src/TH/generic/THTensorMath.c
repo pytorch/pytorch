@@ -3064,6 +3064,8 @@ TENSOR_IMPLEMENT_LOGICAL_SUM(logicalany, ||, 0)
 
 LAB_IMPLEMENT_BASIC_FUNCTION(log,TH_MATH_NAME(log))
 LAB_IMPLEMENT_BASIC_FUNCTION(lgamma,TH_MATH_NAME(lgamma))
+LAB_IMPLEMENT_BASIC_FUNCTION(digamma,TH_MATH_NAME(TH_digamma))
+LAB_IMPLEMENT_BASIC_FUNCTION(trigamma,TH_MATH_NAME(TH_trigamma))
 LAB_IMPLEMENT_BASIC_FUNCTION(log1p,TH_MATH_NAME(log1p))
 LAB_IMPLEMENT_BASIC_FUNCTION(sigmoid,TH_MATH_NAME(TH_sigmoid))
 LAB_IMPLEMENT_BASIC_FUNCTION(exp,TH_MATH_NAME(exp))
@@ -3123,6 +3125,14 @@ void THTensor_(atan2)(THTensor *r_, THTensor *tx, THTensor *ty)
 {
   THTensor_(resizeAs)(r_, tx);
   TH_TENSOR_APPLY3(real, r_, real, tx, real, ty, *r__data = TH_MATH_NAME(atan2)(*tx_data,*ty_data););
+}
+
+void THTensor_(polygamma)(THTensor *r_, int64_t n, THTensor *t) {
+  switch (n) {
+    case 0: THTensor_(digamma)(r_, t); return;
+    case 1: THTensor_(trigamma)(r_, t); return;
+    default: THError("polygamma(n,x) is not implemented for n>=2");
+  }
 }
 
 void THTensor_(lerp)(THTensor *r_, THTensor *a, THTensor *b, real weight)
@@ -3481,17 +3491,10 @@ void THTensor_(bhistc)(THTensor *hist, THTensor *tensor, int64_t nbins, real min
   );
 }
 
-// TODO Replace this with more accurate digamma().
-static inline real THTensor_(digamma_one)(real x) {
-  const double eps = x * 1e-3;
-  return (lgamma(x + eps) - lgamma(x - eps)) / (eps + eps);
-}
-
 // Approximate reparameterized gradient of Beta(x,alpha,beta) wrt alpha.
 // Assumes x is close to zero and uses a Taylor expansion.
 static inline real THTensor_(beta_grad_alpha_small)(real x, real alpha, real beta) {
-  const real factor = THTensor_(digamma_one)(alpha)
-                    - THTensor_(digamma_one)(alpha + beta) - TH_MATH_NAME(log)(x);
+  const real factor = TH_digamma(alpha) - TH_digamma(alpha + beta) - TH_MATH_NAME(log)(x);
   real numer = 1;
   real series = numer / alpha * (factor + 1 / alpha);
   for (int i = 1; i <= 10; ++i) {
@@ -3506,7 +3509,7 @@ static inline real THTensor_(beta_grad_alpha_small)(real x, real alpha, real bet
 // Approximate reparameterized gradient of Beta(x,alpha,beta) wrt beta.
 // Assumes x is close to zero and uses a Taylor expansion.
 static inline real THTensor_(beta_grad_beta_small)(real x, real alpha, real beta) {
-  const real factor = THTensor_(digamma_one)(alpha+beta) - THTensor_(digamma_one)(beta);
+  const real factor = TH_digamma(alpha+beta) - TH_digamma(beta);
   real numer = 1;
   real betas = 1;
   real dbetas = 0;
@@ -3615,8 +3618,7 @@ static inline real THTensor_(dirichlet_grad_one)(real x, real alpha, real total)
       q += ua * (c[1][i][j][0] + b * (c[1][i][j][1] + b * (c[1][i][j][2] + b * c[1][i][j][3])));
     }
   }
-  const real approx = x * (1 - x) * (THTensor_(digamma_one)(total) -
-                                     THTensor_(digamma_one)(alpha)) / beta;
+  const real approx = x * (1 - x) * (TH_digamma(total) - TH_digamma(alpha)) / beta;
   return p / q * approx;
 }
 

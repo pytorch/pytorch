@@ -323,7 +323,13 @@
   end: grad * weight
 
 - name: lgamma(Tensor self)
-  self: not_implemented("lgamma")
+  self: grad * digamma(self)
+
+- name: digamma(Tensor self)
+  self: grad * polygamma(1, self)
+
+- name: polygamma(int64_t n, Tensor self)
+  self: grad * polygamma(n + 1, self)
 
 - name: linspace(Scalar start, Scalar end, int64_t steps)
 

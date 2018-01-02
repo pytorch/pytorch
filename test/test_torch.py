@@ -197,6 +197,17 @@ class TestTorch(TestCase):
     def test_lgamma(self):
         self._testMathByName('lgamma')
 
+    @unittest.skipIf(not TEST_SCIPY, "Scipy not found")
+    def test_digamma(self):
+        from scipy.special import digamma
+        self._testMath(torch.digamma, digamma)
+
+    @unittest.skipIf(not TEST_SCIPY, "Scipy not found")
+    def test_polygamma(self):
+        from scipy.special import polygamma
+        for n in [0, 1]:
+            self._testMath(lambda x: torch.polygamma(n, x), lambda x: polygamma(n, x)[()])
+
     def test_asin(self):
         self._testMath(torch.asin, lambda x: math.asin(x) if abs(x) <= 1 else float('nan'))
 

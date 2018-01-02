@@ -38,6 +38,7 @@ from .dirichlet import Dirichlet
 from .distribution import Distribution
 from .exponential import Exponential
 from .gamma import Gamma
+from .chi2 import Chi2
 from .laplace import Laplace
 from .normal import Normal
 from .one_hot_categorical import OneHotCategorical
@@ -48,6 +49,7 @@ __all__ = [
     'Beta',
     'Categorical',
     'Cauchy',
+    'Chi2',
     'Dirichlet',
     'Distribution',
     'Exponential',
