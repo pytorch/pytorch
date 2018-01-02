@@ -152,12 +152,16 @@ static ScalarType dtype_to_aten(int dtype) {
     case NPY_DOUBLE: return kDouble;
     case NPY_FLOAT: return kFloat;
     case NPY_HALF: return kHalf;
-    case NPY_LONGLONG:
-    case NPY_INT64: return kLong;
     case NPY_INT32: return kInt;
     case NPY_INT16: return kShort;
     case NPY_UINT8: return kByte;
-    default: break;
+    default:
+      // Workaround: MSVC does not support two switch cases that have the same value
+      if (dtype == NPY_LONGLONG || dtype == NPY_INT64) {
+        return kLong;
+      } else {
+        break;
+      }
   }
   auto pytype = THPObjectPtr(PyArray_TypeObjectFromType(dtype));
   if (!pytype) throw python_error();
