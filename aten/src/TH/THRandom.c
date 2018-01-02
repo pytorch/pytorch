@@ -273,7 +273,7 @@ double THRandom_normal(THGenerator *_generator, double mean, double stdv)
 
 double THRandom_pareto(THGenerator *_generator, double scale, double alpha)
 {
-  THArgCheck(scale > 0, 2, "scale parameter must be strictly positive");
+  THArgCheck(scale > 0, 1, "scale parameter must be strictly positive");
   THArgCheck(alpha > 0, 2, "shape parameter must be strictly positive");
 
   return scale * pow(1 - uniform_double(_generator), -1.0 / alpha)
@@ -281,7 +281,7 @@ double THRandom_pareto(THGenerator *_generator, double scale, double alpha)
 
 double THRandom_exponential(THGenerator *_generator, double lambda)
 {
-  THArgCheck(lambda > 0, 2, "lambda parameter must be strictly positive");
+  THArgCheck(lambda > 0, 1, "lambda parameter must be strictly positive");
 
   return(-1. / lambda * log(1-uniform_double(_generator)));
 }
