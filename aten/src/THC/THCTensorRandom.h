@@ -12,11 +12,12 @@ typedef struct _Generator {
   struct mtgp32_kernel_params *kernel_params;
   int initf;
   uint64_t initial_seed;
-} Generator;
+  int64_t philox_seed_offset;
+} THCGenerator;
 
 typedef struct THCRNGState {
   /* One generator per GPU */
-  Generator* gen;
+  THCGenerator* gen;
   int num_devices;
 } THCRNGState;
 

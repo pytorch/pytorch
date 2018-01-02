@@ -11,7 +11,7 @@ THC_API void THCTensor_(uniform)(THCState* state, THCTensor *self_, double a, do
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, self_));
   ptrdiff_t size = THCTensor_(nElement)(state, self_);
   if (size == 0) return;
-  Generator* gen = THCRandom_getGenerator(state);
+  THCGenerator* gen = THCRandom_getGenerator(state);
   THCTensor *self = THCTensor_(newContiguous)(state, self_);
   real *data = THCTensor_(data)(state, self);
 
@@ -26,7 +26,7 @@ THC_API void THCTensor_(normal)(THCState* state, THCTensor *self_, double mean, 
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, self_));
   ptrdiff_t size = THCTensor_(nElement)(state, self_);
   if (size == 0) return;
-  Generator* gen = THCRandom_getGenerator(state);
+  THCGenerator* gen = THCRandom_getGenerator(state);
   THCTensor *self = THCTensor_(newContiguous)(state, self_);
   real *data = THCTensor_(data)(state, self);
 
@@ -64,7 +64,7 @@ THC_API void THCTensor_(logNormal)(THCState* state, THCTensor *self_, double mea
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, self_));
   ptrdiff_t size = THCTensor_(nElement)(state, self_);
   if (size == 0) return;
-  Generator* gen = THCRandom_getGenerator(state);
+  THCGenerator* gen = THCRandom_getGenerator(state);
 
   THCTensor *self = THCTensor_(newContiguous)(state, self_);
   real *data = THCTensor_(data)(state, self);
@@ -80,7 +80,7 @@ THC_API void THCTensor_(exponential)(THCState* state, THCTensor *self_, double l
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, self_));
   ptrdiff_t size = THCTensor_(nElement)(state, self_);
   if (size == 0) return;
-  Generator* gen = THCRandom_getGenerator(state);
+  THCGenerator* gen = THCRandom_getGenerator(state);
 
   THCTensor *self = THCTensor_(newContiguous)(state, self_);
   real *data = THCTensor_(data)(state, self);
@@ -96,7 +96,7 @@ THC_API void THCTensor_(cauchy)(THCState* state, THCTensor *self_, double median
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, self_));
   ptrdiff_t size = THCTensor_(nElement)(state, self_);
   if (size == 0) return;
-  Generator* gen = THCRandom_getGenerator(state);
+  THCGenerator* gen = THCRandom_getGenerator(state);
 
   THCTensor *self = THCTensor_(newContiguous)(state, self_);
   real *data = THCTensor_(data)(state, self);
@@ -135,7 +135,7 @@ THC_API void THCTensor_(multinomial)(struct THCState *state,
                                       int with_replacement)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self, prob_dist));
-  Generator* gen = THCRandom_getGenerator(state);
+  THCGenerator* gen = THCRandom_getGenerator(state);
 
   int inputSize = THCTensor_(nDimension)(state, prob_dist);
   THArgCheck(inputSize > 0 && inputSize <= 2, 2,
@@ -357,7 +357,7 @@ THC_API void THCTensor_(multinomialAliasSetup)(THCState *state, THCTensor *_prob
 THC_API void THCTensor_(multinomialAliasDraw)(THCState *state, THCudaLongTensor *self, THCudaLongTensor *_J, THCTensor *_q){
   THAssert(THCTensor_(isContiguous)(state, _q));
   THAssert(THCudaLongTensor_isContiguous(state, _J));
-  Generator* gen = THCRandom_getGenerator(state);
+  THCGenerator* gen = THCRandom_getGenerator(state);
   int64_t K = THCudaLongTensor_nElement(state, _J);
   int64_t output_nelem = THCudaLongTensor_nElement(state, self);
   ptrdiff_t size = THCudaLongTensor_nElement(state, self);
@@ -407,7 +407,7 @@ THC_API void THCTensor_(bernoulli)(THCState* state, THCTensor *self_, double p)
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, self_));
   ptrdiff_t size = THCTensor_(nElement)(state, self_);
   if (size == 0) return;
-  Generator* gen = THCRandom_getGenerator(state);
+  THCGenerator* gen = THCRandom_getGenerator(state);
   THCTensor *self = THCTensor_(newContiguous)(state, self_);
   real *data = THCTensor_(data)(state, self);
 
@@ -433,7 +433,7 @@ THC_API void THCTensor_(NAME)(THCState* state,                                 \
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self_, probs_));             \
   ptrdiff_t size = THCTensor_(nElement)(state, self_);                         \
   if (size == 0) return;                                                       \
-  Generator* gen = THCRandom_getGenerator(state);                              \
+  THCGenerator* gen = THCRandom_getGenerator(state);                           \
   THCTensor *self = THCTensor_(newContiguous)(state, self_);                   \
   PROB_TYPE *probs = PROB_TYPE##_newContiguous(state, probs_);                 \
   ptrdiff_t prob_size = PROB_TYPE##_nElement(state, probs);                    \
@@ -473,7 +473,7 @@ THC_API void THCTensor_(geometric)(THCState* state, THCTensor *self_, double p)
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, self_));
   ptrdiff_t size = THCTensor_(nElement)(state, self_);
   if (size == 0) return;
-  Generator* gen = THCRandom_getGenerator(state);
+  THCGenerator* gen = THCRandom_getGenerator(state);
 
   THCTensor *self = THCTensor_(newContiguous)(state, self_);
   real *data = THCTensor_(data)(state, self);
@@ -491,7 +491,7 @@ THC_API void THCTensor_(clampedRandom)(THCState* state, THCTensor *self_, int64_
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, self_));
   ptrdiff_t size = THCTensor_(nElement)(state, self_);
   if (size == 0) return;
-  Generator* gen = THCRandom_getGenerator(state);
+  THCGenerator* gen = THCRandom_getGenerator(state);
   THCTensor *self = THCTensor_(newContiguous)(state, self_);
   real *data = THCTensor_(data)(state, self);
 
@@ -524,7 +524,7 @@ THC_API void THCTensor_(random)(THCState* state, THCTensor *self_)
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, self_));
   ptrdiff_t size = THCTensor_(nElement)(state, self_);
   if (size == 0) return;
-  Generator* gen = THCRandom_getGenerator(state);
+  THCGenerator* gen = THCRandom_getGenerator(state);
   THCTensor *self = THCTensor_(newContiguous)(state, self_);
   real *data = THCTensor_(data)(state, self);
 

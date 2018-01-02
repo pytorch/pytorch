@@ -453,6 +453,9 @@
 - name: permute(Tensor self, IntList dims)
   self: permute_backwards(grad, dims)
 
+- name: poisson(Tensor self, Generator generator)
+  self: zeros_like(self)
+
 - name: potrf(Tensor self, bool upper)
   self: potrf_backward(grad, upper, output)
 
