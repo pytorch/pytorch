@@ -240,6 +240,11 @@ static float uniform_float(THGenerator *_generator)
 
 *********************************************************/
 
+double THRandom_standard_uniform(THGenerator *_generator)
+{
+  return uniform_double(_generator);
+}
+
 double THRandom_uniform(THGenerator *_generator, double a, double b)
 {
   return(uniform_double(_generator) * (b - a) + a);
