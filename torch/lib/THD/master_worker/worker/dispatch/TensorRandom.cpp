@@ -61,6 +61,15 @@ static void tensorNormal(rpc::RPCMessage& raw_message) {
   tensor.normal_(mean, stdv, _generator);
 }
 
+static void tensorPareto(rpc:RPSMessage& raw_message) {
+  at::Tensor tensor = unpackRetrieveTensor(raw_message);
+  at::Generator *_generator = unpackRetrieveGenerator(raw_message);
+  double scale = unpackFloat(raw_message);
+  double alpha = unpackFloat(raw_message);
+  finalize(raw_message);
+  tensor.pareto_(scale, alpha, _generator);
+}
+
 static void tensorExponential(rpc::RPCMessage& raw_message) {
   at::Tensor tensor = unpackRetrieveTensor(raw_message);
   at::Generator *_generator = unpackRetrieveGenerator(raw_message);

@@ -118,6 +118,11 @@ void THTensor_(normal_means_stddevs)(THTensor *self, THGenerator *gen, THTensor 
   THTensor_(cadd)(self, self, 1, means);
 }
 
+void THTensor_(pareto)(THTensor *self, THGenerator *_generator, double scale, double alpha)
+{
+  TH_TENSOR_APPLY(real, self, *self_data = (real)THRandom_pareto(_generator, scale, alpha););
+}
+
 void THTensor_(exponential)(THTensor *self, THGenerator *_generator, double lambda)
 {
   TH_TENSOR_APPLY(real, self, *self_data = (real)THRandom_exponential(_generator, lambda););

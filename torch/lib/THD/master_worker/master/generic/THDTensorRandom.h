@@ -17,6 +17,8 @@ THD_API void THDTensor_(uniform)(THDTensor *self, THDGenerator *_generator,
                                  double a, double b);
 THD_API void THDTensor_(normal)(THDTensor *self, THDGenerator *_generator,
                                 double mean, double stdv);
+THD_API void THDTensor_(pareto)(THDTensor *self, THDGenerator *_generator,
+                                double scale, double alpha);
 THD_API void THDTensor_(exponential)(THDTensor *self, THDGenerator *_generator,
                                      double lambda);
 THD_API void THDTensor_(cauchy)(THDTensor *self, THDGenerator *_generator,

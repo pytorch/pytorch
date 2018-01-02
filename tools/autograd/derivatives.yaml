@@ -452,6 +452,9 @@
   input2: not_implemented("ormqr")
   input3: not_implemented("ormqr")
 
+- name: pareto(Tensor self, double scale, double alpha, Generator generator)
+  self: zeros_like(grad)
+
 - name: permute(Tensor self, IntList dims)
   self: permute_backwards(grad, dims)
 

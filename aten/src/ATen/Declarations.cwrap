@@ -3941,6 +3941,24 @@
         - THTensor* self
 ]]
 [[
+  name: pareto_
+  types:
+    - floating_point
+  backends:
+    - CPU
+    - CUDA
+  cname: pareto
+  return: self
+  arguments:
+    - THTensor* self
+    - arg: THGenerator* generator
+      default: THPGenerator_TH_CData(THPDefaultGenerator)
+      kwarg_only: True
+    - arg: double scale
+      default: 1
+    - arg: double alpha
+]]
+[[
   name: tensor
   return: THTensor*
   cpu_half: True

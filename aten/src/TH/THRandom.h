@@ -59,6 +59,12 @@ TH_API float THRandom_uniformFloat(THGenerator *_generator, float a, float b);
 */
 TH_API double THRandom_normal(THGenerator *_generator, double mean, double stdv);
 
+/** Generates a random number from a Pareto distribution.
+    The density is $p(x) = alpha scale^{alpha} / x^{alpha + 1} for x >= scale
+    and zero otherwise, where alpha and scale are strictly positive numbers.
+*/
+TH_API double THRandom_pareto(THGenerator *_generator, double scale, double alpha);
+
 /** Generates a random number from an exponential distribution.
     The density is $p(x) = lambda * exp(-lambda * x)$, where
     lambda is a positive number.

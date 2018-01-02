@@ -75,6 +75,22 @@ THC_API void THCTensor_(logNormal)(THCState* state, THCTensor *self_, double mea
   THCTensor_(freeCopyTo)(state, self, self_);
 };
 
+THC_API void THCTensor_(pareto)(THCState* state, THCTensor *self_, double scale, double alpha)
+{
+  THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, self_));
+  ptrdiff_t size = THCTensor_(nElement)(state, self_);
+  if (size == 0) return;
+  Generator* gen = THCRandom_getGenerator(state);
+
+  THCTensor *self = THCTensor_(newContiguous)(state, self_);
+  real *data = THCTensor_(data)(state, self);
+
+  generate_pareto<<<NUM_BLOCKS, BLOCK_SIZE, 0, THCState_getCurrentStream(state)>>>(
+      gen->gen_states, size, data, scale, alpha);
+
+  THCTensor_(freeCopyTo)(state, self, self_);
+};
+
 THC_API void THCTensor_(exponential)(THCState* state, THCTensor *self_, double lambda)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, self_));

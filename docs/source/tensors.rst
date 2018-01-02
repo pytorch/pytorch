@@ -233,6 +233,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: numpy
    .. automethod:: orgqr
    .. automethod:: ormqr
+   .. automethod:: pareto_
    .. automethod:: permute
    .. automethod:: pin_memory
    .. automethod:: potrf
