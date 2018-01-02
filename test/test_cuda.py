@@ -332,6 +332,7 @@ custom_precision = {
     'rsqrt': 1e-4,
     'cumprod': 1e-4,
     'qr': 3e-4,
+    'digamma': 1e0,  # large values lead to large absolute error but small relative error
 }
 
 simple_pointwise = [
@@ -364,6 +365,9 @@ simple_pointwise_float = [
     'round',
     'trunc',
     'ceil',
+    'lgamma',
+    'digamma',
+    'trigamma',
 ]
 
 for fn in simple_pointwise_float:
@@ -1092,6 +1096,41 @@ class TestCuda(TestCase):
         # Stability for outer dimensions
         tensor = tensor.unsqueeze(1)
         self.assertEqual(tensor.var(0)[0], 0.03125)
+
+    def test_digamma(self):
+        def test(use_double=False):
+            cpu_tensor = torch.randn(10, 10, 10)
+            gpu_tensor = cpu_tensor.cuda()
+            zeros = torch.zeros(10, 10, 10)
+            if (use_double):
+                cpu_tensor = cpu_tensor.double()
+                gpu_tensor = gpu_tensor.double()
+                zeros = zeros.double()
+            cpu_out = cpu_tensor.digamma()
+            gpu_out = gpu_tensor.digamma()
+            norm_errors = (gpu_out - cpu_out.cuda()) / gpu_out
+            self.assertEqual(norm_errors, zeros)
+
+        test(True)
+        test(False)
+
+    def test_polygamma(self):
+        def test(use_double=False):
+            cpu_tensor = torch.randn(10, 10, 10)
+            gpu_tensor = cpu_tensor.cuda()
+            zeros = torch.zeros(10, 10, 10)
+            if (use_double):
+                cpu_tensor = cpu_tensor.double()
+                gpu_tensor = gpu_tensor.double()
+                zeros = zeros.double()
+            for n in [0, 1]:
+                cpu_out = cpu_tensor.polygamma(n)
+                gpu_out = gpu_tensor.polygamma(n)
+                norm_errors = (gpu_out - cpu_out.cuda()) / gpu_out
+                self.assertEqual(norm_errors, zeros)
+
+        test(True)
+        test(False)
 
     @unittest.skipIf(not HAS_MAGMA, "no MAGMA library detected")
     def test_symeig(self):
