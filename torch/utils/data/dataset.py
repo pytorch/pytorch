@@ -1,6 +1,9 @@
 import bisect
 import warnings
 
+from torch._utils import _accumulate
+from torch import randperm
+
 
 class Dataset(object):
     """An abstract class representing a Dataset.
@@ -85,3 +88,31 @@ class ConcatDataset(Dataset):
         warnings.warn("cummulative_sizes attribute is renamed to "
                       "cumulative_sizes", DeprecationWarning, stacklevel=2)
         return self.cumulative_sizes
+
+
+class Subset(Dataset):
+    def __init__(self, dataset, indices):
+        self.dataset = dataset
+        self.indices = indices
+
+    def __getitem__(self, idx):
+        return self.dataset[self.indices[idx]]
+
+    def __len__(self):
+        return len(self.indices)
+
+
+def random_split(dataset, lengths):
+    """
+    Randomly split a dataset into non-overlapping new datasets of given lengths
+    ds
+
+    Arguments:
+        dataset (Dataset): Dataset to be split
+        lengths (iterable): lengths of splits to be produced
+    """
+    if sum(lengths) != len(dataset):
+        raise ValueError("Sum of input lengths does not equal the length of the input dataset!")
+
+    indices = randperm(sum(lengths))
+    return [Subset(dataset, indices[offset - length:offset]) for offset, length in zip(_accumulate(lengths), lengths)]
