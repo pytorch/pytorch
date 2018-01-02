@@ -3492,58 +3492,73 @@ void THTensor_(bhistc)(THTensor *hist, THTensor *tensor, int64_t nbins, real min
 }
 
 // Approximate reparameterized gradient of Beta(x,alpha,beta) wrt alpha.
-// Assumes x is close to zero.
+// Assumes x is close to zero and uses a Taylor expansion.
 static inline real THTensor_(beta_grad_alpha_small)(real x, real alpha, real beta) {
-  const real b1 = beta - 1;
-  const real b2 = beta - 2;
-  const real b3 = beta - 3;
-  const real b4 = beta - 4;
-  const real a0 = 1 / alpha;
-  const real a1 = 1 / (alpha + 1);
-  const real a2 = 1 / (alpha + 2);
-  const real a3 = 1 / (alpha + 3);
-  const real a4 = 1 / (alpha + 4);
-  // Let pdf = pow(x,alpha-1) * pow(1-x,beta-1) / Beta(alpha,beta).
-  // Let const = Beta(alpha,beta) / pow(x, alpha). Then
-  const real one_over_const_pdf = x / TH_MATH_NAME(pow)(1 - x, beta - 1);
-  const real const_cdf = +a0 + b1 * x * (
-                         -a1 + b2 * x / 2 * (
-                         +a2 + b3 * x / 3 * (
-                         -a3 + b4 * x / 4 * (
-                         +a4))));
-  const real const_cdf_alpha = (log(x) + TH_MATH_NAME(TH_digamma)(alpha + beta) -
-                                TH_MATH_NAME(TH_digamma)(alpha)) * const_cdf
-                             + -a0 * a0 + b1 * x * (
-                               +a1 * a1 + b2 * x / 2 * (
-                               -a2 * a2 + b3 * x / 3 * (
-                               +a2 * a3 + b4 * x / 4 * (
-                               -a4))));
-  const real result = -const_cdf_alpha * one_over_const_pdf;
+  const real factor = TH_digamma(alpha) - TH_digamma(alpha + beta) - TH_MATH_NAME(log)(x);
+  real numer = 1;
+  real series = numer / alpha * (factor + 1 / alpha);
+  for (int i = 1; i <= 10; ++i) {
+    numer *= (i - beta) * x / i;
+    const real denom = alpha + i;
+    series += numer / denom * (factor + 1 / denom);
+  }
+  const real result = x * TH_MATH_NAME(pow)(1 - x, 1 - beta) * series;
   return isnan(result) ? 0.0 : result;
 }
 
 // Approximate reparameterized gradient of Beta(x,alpha,beta) wrt beta.
-// Assumes x is close to zero.
+// Assumes x is close to zero and uses a Taylor expansion.
 static inline real THTensor_(beta_grad_beta_small)(real x, real alpha, real beta) {
-  const real a0 = 1 / alpha;
-  const real a1 = 1 / (alpha + 1);
-  const real a2 = 1 / (alpha + 2);
-  const real a3 = 1 / (alpha + 3);
-  // Let pdf = pow(x,alpha-1) * pow(1-x,beta-1) / Beta(alpha,beta).
-  // Let const = Beta(alpha,beta) / pow(x, alpha). Then
-  const real one_over_const_pdf = x / TH_MATH_NAME(pow)(1 - x, beta - 1);
-  const real const_cdf = +a0 + (beta - 1) * x * (
-                         -a1 + (beta - 2) * x / 2 * (
-                         +a2 + (beta - 3) * x / 3 * (
-                         -a3)));
-  const real const_cdf_beta = (TH_MATH_NAME(TH_digamma)(alpha + beta) -
-                               TH_MATH_NAME(TH_digamma)(beta)) * const_cdf
-                            + 0 + x * (
-                            -a1 + x / 2 * (
-                            +a2 * (2 * beta - 3) + x / 3 * (
-                            -a3 * (3 * beta * beta - 12 * beta + 11))));
-  const real result = -const_cdf_beta * one_over_const_pdf;
+  const real factor = TH_digamma(alpha+beta) - TH_digamma(beta);
+  real numer = 1;
+  real betas = 1;
+  real dbetas = 0;
+  real series = factor / alpha;
+  for (int i = 1; i <= 8; ++i) {
+    numer *= -x / i;
+    dbetas = dbetas * (beta - i) + betas;
+    betas = betas * (beta - i);
+    series += numer / (alpha + i) * (dbetas + factor * betas);
+  }
+  const real result = -x * TH_MATH_NAME(pow)(1 - x, 1 - beta) * series;
   return isnan(result) ? 0.0 : result;
+}
+
+// Approximate reparameterized gradient of Beta(x,alpha,beta) wrt alpha.
+// Assumes alpha and beta are both large and uses a Rice saddle point expansion.
+// To ensure numerical stability, this computation is performed at higher precision.
+static inline real THTensor_(beta_grad_alpha_mid)(double x, double alpha, double beta) {
+  const double total = alpha + beta;
+  const double mean = alpha / total;
+  const double std = sqrt(alpha * beta / (total + 1)) / total;
+  if (mean - 0.1 * std <= x && x <= mean + 0.1 * std) {
+    // Avoid the singularity at x = mean.
+    const double poly = 47 * x * (beta*beta)*(beta*beta) + alpha * (
+                      (43 + 20 * (16 + 27 * beta) * x) * (beta*beta)*beta + alpha * (
+                      3 * (59 + 180 * beta - 90 * x) * (beta*beta) + alpha * (
+                      (453 + 1620 * beta * (1 - x) - 455 * x) * beta + alpha * (
+                      8 * (1 - x) * (135 * beta - 11)))));
+    const double prefactor_num = (1 + 12 * alpha) * (1 + 12 * beta) / (total * total);
+    const double prefactor_den = 12960 * alpha * alpha * alpha * beta * beta * (1 + 12 * total);
+    return prefactor_num * poly / prefactor_den;
+  }
+  const double prefactor = x * (x-1) / sqrt(2 * alpha * beta / total);
+  const double stirling = (1 + 1 / (12 * alpha) + 1 / (288 * alpha*alpha))
+                        * (1 + 1 / (12 * beta) + 1 / (288 * beta*beta))
+                        / (1 + 1 / (12 * total) + 1 / (288 * total*total));
+  const double term1_num = 2 * (alpha*alpha) * (x - 1) + alpha * beta * (x - 1) - x * (beta*beta);
+  const double axbx = alpha * (x-1) + beta * x;
+  const double term1_den = sqrt(2 * alpha / beta) * pow(total, 1.5f) * axbx*axbx;
+  const double term1 = term1_num / term1_den;
+  const double term2 = 0.5f * log(alpha / (total * x));
+  const double term3_num = sqrt(8 * alpha * beta / total);
+  const double term3_den = beta * x + alpha * (x - 1);
+  const double term3 = term3_num / term3_den;
+  const double term4_base = beta * log(beta / (total * (1 - x))) +
+                          alpha * log(alpha / (total * x));
+  const double term4 = pow(term4_base, -1.5f);
+  const double term1234 = term1 + term2 * (term3 + (x < mean ? term4 : -term4));
+  return stirling * prefactor * term1234;
 }
 
 // Computes the reparameterized gradient -(d/dalpha cdf(x;alphas)) / pdf(x;alphas)
@@ -3551,60 +3566,59 @@ static inline real THTensor_(beta_grad_beta_small)(real x, real alpha, real beta
 // Total is the sum of all alphas.
 static inline real THTensor_(dirichlet_grad_one)(real x, real alpha, real total) {
   const real beta = total - alpha;
+  const real boundary = total * x * (1 - x);
 
   // Use an asymptotic approximation for x close to 0.
-  if (x * (1 + total) < 0.85f) {
+  if (x <= 0.5f && boundary < 2.5f) {
     return THTensor_(beta_grad_alpha_small)(x, alpha, beta);
   }
 
   // Use an asymptotic approximation for x close to 1.
-  if ((1 - x) * (1 + total) < 0.5f) {
+  if (x >= 0.5f && boundary < 0.75f) {
     return -THTensor_(beta_grad_beta_small)(1 - x, beta, alpha);
   }
 
   // Use an asymptotic approximation when alpha and (total - alpha) are both large.
-  if (alpha > 50 && beta > 2) {
-    return (1 - x) * TH_MATH_NAME(sqrt)(x / (alpha * total));
+  if (alpha > 6 && beta > 6) {
+    return THTensor_(beta_grad_alpha_mid)(x, alpha, beta);
   }
 
   // Use a rational correction to an analytic approximation.
-  static const double c[2][3][3][3] = {
-    {{{1.018183628, -0.1206761155, 0.01201300226},
-      {-0.04136941261, 0.005983761076, 0.0004359632044},
-      {0.01871903062, -0.003142986761, 0.0003193022422}},
-     {{-0.1710086785, -0.1773445859, 0.02503325522},
-      {0.07786387381, 0.01992118909, -0.00743265712},
-      {-0.01536982253, -0.001258289593, 0.00146487621}},
-     {{0.01486207015, -0.005753100867, 0.007721033113},
-      {0.00198584584, -0.01445438298, -0.0005612075268},
-      {0.003173120668, 0.004602126094, -0.0002495685207}}},
-    {{{1, -0.09993694905, 0.007355892598},
-      {-0.04850639323, 0.009042562035, -0.001017624704},
-      {0.01695261402, -0.001441008578, 0.000320044464}},
-     {{0.1709691266, -0.01274600716, 0.001039108611},
-      {-0.01163796879, -0.003571179038, 0.0004598127807},
-      {-0.01297340245, 0.003984832484, -0.0001947143638}},
-     {{0.01465337425, -0.001756145071, 0.0001105873695},
-      {9.392799015e-06, -0.0007117711726, 8.385022912e-05},
-      {-0.002197194337, 0.0006524874554, -4.052046678e-05}}},
+  static const real c[2][3][3][4] = {
+    {{{1.003668233, -0.01061107488, -0.0657888334, 0.01201642863},
+      {0.6336835991, -0.3557432599, 0.05486251648, -0.001465281033},
+      {-0.03276231906, 0.004474107445, 0.002429354597, -0.0001557569013}},
+     {{0.221950385, -0.3187676331, 0.01799915743, 0.01074823814},
+      {-0.2951249643, 0.06219954479, 0.01535556598, 0.001550077057},
+      {0.02155310298, 0.004170831599, 0.001292462449, 6.976601077e-05}},
+     {{-0.05980841433, 0.008441916499, 0.01085618172, 0.002319392565},
+      {0.02911413504, 0.01400243777, -0.002721828457, 0.000751041181},
+      {0.005900514878, -0.001936558688, -9.495446725e-06, 5.385558597e-05}}},
+    {{{1, -0.02924021934, -0.04438342661, 0.007285809825},
+      {0.6357567472, -0.3473456711, 0.05454656494, -0.002407477521},
+      {-0.03301322327, 0.004845219414, 0.00231480583, -0.0002307248149}},
+     {{0.5925320577, -0.1757678135, 0.01505928619, 0.000564515273},
+      {0.1014815858, -0.06589186703, 0.01272886114, -0.0007316646956},
+      {-0.007258481865, 0.001096195486, 0.0003934994223, -4.12701925e-05}},
+     {{0.06469649321, -0.0236701437, 0.002902096474, -5.896963079e-05},
+      {0.001925008108, -0.002869809258, 0.0008000589141, -6.063713228e-05},
+      {-0.0003477407336, 6.959756487e-05, 1.097287507e-05, -1.650964693e-06}}},
   };
   const real u = TH_MATH_NAME(log)(x);
-  const real a = TH_MATH_NAME(log)(alpha);
-  const real b = TH_MATH_NAME(log)(total);
-  const real pow_u[4] = {1, u, u * u, u * u * u};
-  const real pow_a[4] = {1, a, a * a, a * a * a};
+  const real a = TH_MATH_NAME(log)(alpha) - u;
+  const real b = TH_MATH_NAME(log)(total) - a;
+  const real pow_u[3] = {1, u, u * u};
+  const real pow_a[3] = {1, a, a * a};
   real p = 0.0;
   real q = 0.0;
   for (int i = 0; i < 3; ++i) {
     for (int j = 0; j < 3; ++j) {
       const real ua = pow_u[i] * pow_a[j];
-      p += ua * (c[0][i][j][0] + b * (c[0][i][j][1] + b * c[0][i][j][2]));
-      q += ua * (c[1][i][j][0] + b * (c[1][i][j][1] + b * c[1][i][j][2]));
+      p += ua * (c[0][i][j][0] + b * (c[0][i][j][1] + b * (c[0][i][j][2] + b * c[0][i][j][3])));
+      q += ua * (c[1][i][j][0] + b * (c[1][i][j][1] + b * (c[1][i][j][2] + b * c[1][i][j][3])));
     }
   }
-  if(q < 1e-3f) q = 1e-3f;
-  const real approx = x * (1 - x) * (TH_MATH_NAME(TH_digamma)(total) -
-                                     TH_MATH_NAME(TH_digamma)(alpha)) / beta;
+  const real approx = x * (1 - x) * (TH_digamma(total) - TH_digamma(alpha)) / beta;
   return p / q * approx;
 }
 
