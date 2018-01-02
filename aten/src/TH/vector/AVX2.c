@@ -97,7 +97,7 @@ void THFloatVector_normal_fill_AVX2(float *data,
 
   if (size % 16 != 0) {
     // We rewind so that we have 16 values and then compute them in one step.
-    data += (size - 16);
+    data = data + size - 16;
     for (int i = 0; i < 16; ++i) {
       data[i] = THRandom_uniformFloat(generator, 0, 1);
     }

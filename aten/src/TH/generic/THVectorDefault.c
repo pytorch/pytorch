@@ -170,7 +170,7 @@ void THVector_(normal_fill_DEFAULT)(real *data,
 
   if (size % 16 != 0) {
     // Recompute the last 16 values.
-    data += (size - 16);
+    data = data + size - 16;
     for (int64_t i = 0; i < 16; ++i) {
 #ifdef TH_REAL_IS_FLOAT
       data[i] = THRandom_uniformFloat(generator, 0, 1);
