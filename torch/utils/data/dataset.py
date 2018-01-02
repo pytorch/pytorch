@@ -1,7 +1,7 @@
 import bisect
 import warnings
-from itertools import accumulate
 
+from torch._utils import _accumulate
 from torch import randperm
 
 
@@ -104,7 +104,7 @@ class Subset(Dataset):
 
 def random_split(dataset, lengths):
     """
-    Randomply split a dataset into non-overlapping new datasets of given lengths
+    Randomly split a dataset into non-overlapping new datasets of given lengths
     ds
 
     Arguments:
@@ -115,8 +115,5 @@ def random_split(dataset, lengths):
         raise ValueError("Sum of input lengths does not equal the length of the input dataset!")
 
     indices = randperm(sum(lengths))
-    splits = []
-    for i in range(len(lengths)):
-        offset = sum(lengths[:i + 1])
-        splits.append(Subset(dataset, indices[offset - lengths[i]:offset]))
-    return splits
+    return [Subset(dataset, indices[offset - length:offset])
+        for offset, length in zip(_accumulate(lengths), lengths)]
