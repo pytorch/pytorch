@@ -3,7 +3,7 @@
 #include "ATen/Dispatch.h"
 #include "ATen/NativeFunctions.h"
 
-#include "AccumulateType.h"
+#include "ATen/cuda/AccumulateType.h"
 
 #include <THC/THCDeviceUtils.cuh>
 #include <THC/THCNumerics.cuh>
