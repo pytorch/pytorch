@@ -683,9 +683,10 @@ class TestDistributions(TestCase):
     def test_beta_sample_grad(self):
         set_rng_seed(0)  # see Note [Randomized statistical tests]
         num_samples = 20
-        for alpha, beta in product([1e-2, 1e0, 1e2], [1e-2, 1e0, 1e2]):
-            alphas = Variable(torch.Tensor([alpha] * num_samples), requires_grad=True)
-            betas = Variable(torch.Tensor([beta] * num_samples))
+        grid = [1e-2, 1e-1, 1e0, 1e1, 1e2]
+        for alpha, beta in product(grid, grid):
+            alphas = Variable(torch.FloatTensor([alpha] * num_samples), requires_grad=True)
+            betas = Variable(torch.FloatTensor([beta] * num_samples).type_as(alphas))
             x = Beta(alphas, betas).rsample()
             x.sum().backward()
             x, ind = x.data.sort()
@@ -694,12 +695,12 @@ class TestDistributions(TestCase):
             # Compare with expected gradient dx/dalpha along constant cdf(x,alpha,beta).
             cdf = scipy.stats.beta.cdf
             pdf = scipy.stats.beta.pdf
-            eps = 0.02 * alpha / (1.0 + np.sqrt(alpha))
+            eps = 0.01 * alpha / (1.0 + np.sqrt(alpha))
             cdf_alpha = (cdf(x, alpha + eps, beta) - cdf(x, alpha - eps, beta)) / (2 * eps)
             cdf_x = pdf(x, alpha, beta)
             expected_grad = -cdf_alpha / cdf_x
             rel_error = np.abs(actual_grad - expected_grad) / (expected_grad + 1e-100)
-            self.assertLess(np.max(rel_error), 0.01,
+            self.assertLess(np.max(rel_error), 0.001,
                             '\n'.join(['Bad gradients for Beta({}, {})'.format(alpha, beta),
                                        'x {}'.format(x),
                                        'expected {}'.format(expected_grad),
