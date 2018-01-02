@@ -125,7 +125,7 @@ Tensor prod_safe_zeros_backward(const Tensor &grad, const Tensor& inp, int64_t d
   Tensor exclusive_reverse_nocp = at::cat({ones, narrow_reverse}, dim);
   Tensor exclusive_reverse = reverse_dim(exclusive_reverse_nocp.cumprod(dim), dim);
 
-  return grad.expand_as(exclusive_normal).mul(exclusive_normal.mul(exclusive_reverse));
+  return grad * (exclusive_normal * exclusive_reverse);
 }
 
 // note that the gradient for prod is equivalent to:
@@ -284,7 +284,6 @@ Tensor cumprod_backward(const Tensor &grad, const Tensor &input, int64_t dim) {
     // dim_size - k
     TORCH_ASSERT(omitted_products.size(dim) == dim_size - k);
 
-    // should we implement copy_ or _set_item in variable?
     grad_input.select(dim, k).copy_(
         at::sum(grad.slice_dim(dim, k) * omitted_products,dim));
   }
