@@ -25,6 +25,13 @@ IF "%~1"=="--with-cuda" (
   set /a NO_CUDA=1
 )
 
+IF "%~1"=="--with-nnpack" (
+  set /a NO_NNPACK=0
+  shift
+) ELSE (
+  set /a NO_NNPACK=1
+)
+
 IF "%CMAKE_GENERATOR%"=="" (
   set CMAKE_GENERATOR_COMMAND=
   set MAKE_COMMAND=msbuild INSTALL.vcxproj /p:Configuration=Release
@@ -90,6 +97,7 @@ goto:eof
                   -DTHNN_SO_VERSION=1 ^
                   -DTHCUNN_SO_VERSION=1 ^
                   -DNO_CUDA=%NO_CUDA% ^
+                  -DNO_NNPACK=%NO_NNPACK% ^
                   -Dnanopb_BUILD_GENERATOR=0 ^
                   -DCMAKE_BUILD_TYPE=Release
 
@@ -107,6 +115,7 @@ goto:eof
   cmake ../../../../%~1 %CMAKE_GENERATOR_COMMAND% ^
                   -DCMAKE_INSTALL_PREFIX="%INSTALL_DIR%" ^
                   -DNO_CUDA=%NO_CUDA% ^
+                  -DNO_NNPACK=%NO_NNPACK% ^
                   -DCUDNN_INCLUDE_DIR="%CUDNN_INCLUDE_DIR%" ^
                   -DCUDNN_LIB_DIR="%CUDNN_LIB_DIR%" ^
                   -DCMAKE_BUILD_TYPE=Release

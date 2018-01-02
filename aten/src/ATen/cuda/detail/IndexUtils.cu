@@ -32,7 +32,7 @@ bool overlappingIndices(const Tensor& t) {
   // `dim`, or the innermost stride is 0.
 
   /* Extract size/stride arrays; only consider size >1 dims. */
-  SizeAndStride info[t.dim()];
+  SizeAndStride *info = (SizeAndStride *)alloca(sizeof(SizeAndStride) * t.dim());
   int dims = t.dim();
   int nonSize1Dims = 0;
   for (int i = 0; i < dims; ++i) {
