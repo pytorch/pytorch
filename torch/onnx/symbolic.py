@@ -189,6 +189,10 @@ def expand(g, self, size):
     return g.op("Expand", self, shape_i=size)
 
 
+def embedding(g, weight, indices, padding_idx, scale_grad_by_freq, sparse):
+    return g.op("Gather", weight, indices)
+
+
 def transpose(g, self, dim0, dim1):
     if dim0 == dim1:  # micro-optimization
         return self
