@@ -54,7 +54,6 @@ struct Tensor : public detail::TensorBase {
 
   inline Tensor & operator=(Tensor const & rhs) &&;
   Tensor & operator=(Scalar v) &&;
-  Tensor & assign_(Scalar v);
   const char * toString() const {
     return pImpl->toString();
   }
