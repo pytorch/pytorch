@@ -2,6 +2,7 @@ from numbers import Number
 
 import torch
 from torch.autograd import Variable
+import torch.nn.functional as F
 
 
 def expand_n(v, n):
@@ -66,3 +67,57 @@ def broadcast_all(*values):
         for idx in scalar_idxs:
             values[idx] = torch.Tensor([values[idx]])
     return values
+
+
+def _get_clamping_buffer(tensor):
+    clamp_eps = 1e-6
+    if isinstance(tensor, Variable):
+        tensor = tensor.data
+    if isinstance(tensor, (torch.DoubleTensor, torch.cuda.DoubleTensor)):
+        clamp_eps = 1e-15
+    return clamp_eps
+
+
+def softmax(tensor):
+    """
+    Wrapper around softmax to make it work with both Tensors and Variables.
+    TODO: Remove once https://github.com/pytorch/pytorch/issues/2633 is resolved.
+    """
+    if not isinstance(tensor, Variable):
+        return F.softmax(Variable(tensor), -1).data
+    return F.softmax(tensor, -1)
+
+
+def log_sum_exp(tensor):
+    """
+    Numerically stable implementation for the `LogSumExp` operation. The
+    summing is done along the last dimension.
+    """
+    max_val = tensor.max(dim=-1, keepdim=True)[0]
+    return max_val + (tensor - max_val).exp().sum(dim=-1, keepdim=True).log()
+
+
+def get_probs(logits, is_binary=False):
+    """
+    Convert a tensor of logits into probabilities. Note that for the
+    binary case, each value denotes log odds, whereas for the
+    multi-dimensional case, the values along the last dimension denote
+    the log probabilities (possibly unnormalized) of the events.
+    """
+    if is_binary:
+        return F.sigmoid(logits)
+    return softmax(logits)
+
+
+def get_logits(probs, is_binary=False):
+    """
+    Converts a tensor of probabilities into logits. For the binary case,
+    this denotes the probability of occurrence of the event indexed by `1`.
+    For the multi-dimensional case, the values along the last dimension
+    denote the probabilities of occurrence of each of the events.
+    """
+    eps = _get_clamping_buffer(probs)
+    ps_clamped = probs.clamp(min=eps, max=1 - eps)
+    if is_binary:
+        return torch.log(ps_clamped) - torch.log1p(-ps_clamped)
+    return torch.log(ps_clamped)

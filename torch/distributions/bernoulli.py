@@ -4,7 +4,7 @@ import torch
 from torch.autograd import Variable
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
-from torch.distributions.utils import broadcast_all
+from torch.distributions.utils import broadcast_all, get_logits, get_probs
 
 
 class Bernoulli(Distribution):
@@ -28,8 +28,16 @@ class Bernoulli(Distribution):
     support = constraints.boolean
     has_enumerate_support = True
 
-    def __init__(self, probs):
-        self.probs, = broadcast_all(probs)
+    def __init__(self, probs=None, logits=None):
+        if (probs is None) == (logits is None):
+            raise ValueError("Got probs={}, logits={}. Either `probs` or `logits` must be specified, "
+                             "but not both.".format(probs, logits))
+        if probs is not None:
+            self.probs, = broadcast_all(probs)
+            self.logits = get_logits(self.probs, is_binary=True)
+        else:
+            self.logits, = broadcast_all(logits)
+            self.probs = get_probs(self.logits, is_binary=True)
         if isinstance(probs, Number):
             batch_shape = torch.Size()
         else:
@@ -40,20 +48,17 @@ class Bernoulli(Distribution):
         shape = self._extended_shape(sample_shape)
         return torch.bernoulli(self.probs.expand(shape))
 
+    def _binary_cross_entropy(self, value):
+        max_val = (-self.logits).clamp(min=0)
+        return self.logits - self.logits * value + max_val + \
+               ((-max_val).exp() + (-self.logits - max_val).exp()).log()
+
     def log_prob(self, value):
         self._validate_log_prob_arg(value)
-        param_shape = value.size()
-        probs = self.probs.expand(param_shape)
-        # compute the log probabilities for 0 and 1
-        log_pmf = (torch.stack([1 - probs, probs], dim=-1)).log()
-        # evaluate using the values
-        return log_pmf.gather(-1, value.unsqueeze(-1).long()).squeeze(-1)
+        return -self._binary_cross_entropy(value)
 
     def entropy(self):
-        p = torch.stack([self.probs, 1.0 - self.probs])
-        p_log_p = torch.log(p) * p
-        p_log_p[p == 0] = 0
-        return -p_log_p.sum(0)
+        return self._binary_cross_entropy(self.probs)
 
     def enumerate_support(self):
         values = torch.arange(2).long()
