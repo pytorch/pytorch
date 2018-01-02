@@ -7,9 +7,32 @@ import traceback
 import unittest
 from torch import multiprocessing
 from torch.utils.data import Dataset, TensorDataset, DataLoader, ConcatDataset
+from torch.utils.data.dataset import random_split
 from torch.utils.data.dataloader import default_collate
 from common import TestCase, run_tests, TEST_NUMPY, IS_WINDOWS
 from common_nn import TEST_CUDA
+
+
+class TestDatasetRandomSplit(TestCase):
+    def test_lengths_must_equal_datset_size(self):
+        with self.assertRaises(ValueError):
+            random_split([1, 2, 3, 4], [1, 2])
+
+    def test_splits_have_correct_size(self):
+        splits = random_split([1, 2, 3, 4, 5, 6], [2, 4])
+        self.assertEqual(len(splits), 2)
+        self.assertEqual(len(splits[0]), 2)
+        self.assertEqual(len(splits[1]), 4)
+
+    def test_splits_are_mutually_exclusive(self):
+        data = [5, 2, 3, 4, 1, 6]
+        splits = random_split(data, [2, 4])
+        all_values = []
+        all_values.extend(list(splits[0]))
+        all_values.extend(list(splits[1]))
+        data.sort()
+        all_values.sort()
+        self.assertListEqual(data, all_values)
 
 
 class TestTensorDataset(TestCase):
