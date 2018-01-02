@@ -6,6 +6,19 @@
 
 namespace caffe2 {
 
+// Returns true if the given integer type is a power-of-2 (positive only)
+// Note(jiayq): windows reported an error per
+//     https://github.com/caffe2/caffe2/issues/997
+// and as a result will make it a macro.
+#ifdef _MSC_VER
+#define integerIsPowerOf2(v) ((v) && !((v) & ((v) - 1)))
+#else // _MSC_VER
+template <typename T>
+constexpr bool integerIsPowerOf2(T v) {
+  return (v && !(v & (v - 1)));
+}
+#endif // _MSC_VER
+
 /// The maximum in-block bitonic sort we support
 constexpr int kMaxBitonicSortSize = 4096;
 
@@ -39,9 +52,9 @@ __device__ inline void bitonicSort(K* keys,
   // Assume the sort is taking place in shared memory
   // static_assert(Power2SortSize * (sizeof(K) + sizeof(V)) < 32768,
   //               "sort data too large (>32768 bytes)");
-  static_assert(math::integerIsPowerOf2(Power2SortSize),
+  static_assert(integerIsPowerOf2(Power2SortSize),
                 "sort size must be power of 2");
-  static_assert(math::integerIsPowerOf2(ThreadsPerBlock),
+  static_assert(integerIsPowerOf2(ThreadsPerBlock),
                 "threads in block must be power of 2");
 
   // If what we are sorting is too small, then not all threads
@@ -107,7 +120,7 @@ __device__ inline void warpBitonicSort(K* keys,
   // Smaller sorts should use a warp shuffle sort
   static_assert(Power2SortSize > kWarpSize,
                 "sort not large enough");
-  static_assert(math::integerIsPowerOf2(Power2SortSize),
+  static_assert(integerIsPowerOf2(Power2SortSize),
                 "sort size must be power of 2");
   static_assert(Power2SortSize <= kMaxBitonicSortSize,
                 "sort size <= 4096 only supported");

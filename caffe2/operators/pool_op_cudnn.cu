@@ -134,8 +134,11 @@ class CuDNNPoolOp : public ConvPoolOpBase<CUDAContext> {
     CUDNN_ENFORCE(cudnnCreatePoolingDescriptor(&pooling_desc_));
     // Figure out the pooling descriptor.
     if (operator_def.type().substr(0, 7) == "MaxPool") {
-#if CUDNN_VERSION_MIN(6,0,0)
-      mode_ = CUDNN_POOLING_MAX_DETERMINISTIC;
+      bool deterministic =
+          OperatorBase::GetSingleArgument<bool>("deterministic", false);
+#if CUDNN_VERSION_MIN(6, 0, 0)
+      mode_ =
+          deterministic ? CUDNN_POOLING_MAX_DETERMINISTIC : CUDNN_POOLING_MAX;
 #else
       mode_ = CUDNN_POOLING_MAX;
 #endif
@@ -253,15 +256,17 @@ class CuDNNPoolOp : public ConvPoolOpBase<CUDAContext> {
       }
     }
     // Carry out the pooling computation.
+    const T* Xdata = X.template data<T>();
+    T* Ydata = Y->template mutable_data<T>();
     CUDNN_ENFORCE(cudnnPoolingForward(
         cudnn_wrapper_.inline_cudnn_handle(),
         pooling_desc_,
         cudnnTypeWrapper<T>::kOne(),
         bottom_desc_,
-        X.template data<T>(),
+        Xdata,
         cudnnTypeWrapper<T>::kZero(),
         top_desc_,
-        Y->template mutable_data<T>()));
+        Ydata));
     return true;
   }
 
@@ -382,8 +387,12 @@ class CuDNNPoolGradientOp : public ConvPoolOpBase<CUDAContext> {
                   dX->mutable_data<float>());
           return true;
         }
+#if CUDNN_VERSION_MIN(6, 0, 0)
         if (mode_ == CUDNN_POOLING_MAX ||
             mode_ == CUDNN_POOLING_MAX_DETERMINISTIC) {
+#else
+        if (mode_ == CUDNN_POOLING_MAX) {
+#endif
           global_maxpool_backward_NCHW<float>
               <<<CAFFE_GET_BLOCKS(dX->size()),
                  CAFFE_CUDA_NUM_THREADS,
@@ -449,19 +458,24 @@ class CuDNNPoolGradientOp : public ConvPoolOpBase<CUDAContext> {
       }
     }
     // Carry out the pooling computation.
+    const T* Xdata = X.template data<T>();
+    const T* Ydata = Y.template data<T>();
+    const T* dYdata = dY.template data<T>();
+    T* dXdata = dX->template mutable_data<T>();
+
     CUDNN_ENFORCE(cudnnPoolingBackward(
         cudnn_wrapper_.inline_cudnn_handle(),
         pooling_desc_,
         cudnnTypeWrapper<T>::kOne(),
         top_desc_,
-        Y.template data<T>(),
+        Ydata,
         top_desc_,
-        dY.template data<T>(),
+        dYdata,
         bottom_desc_,
-        X.template data<T>(),
+        Xdata,
         cudnnTypeWrapper<T>::kZero(),
         bottom_desc_,
-        dX->template mutable_data<T>()));
+        dXdata));
     return true;
   }
 
@@ -490,10 +504,6 @@ class CuDNNPoolGradientOp : public ConvPoolOpBase<CUDAContext> {
   cudnnTensorDescriptor_t top_desc_;
   cudnnPoolingDescriptor_t pooling_desc_;
   cudnnPoolingMode_t mode_;
-
-  // Input: X, Y, dY
-  // Output: dX
-  INPUT_TAGS(IN, OUT, OUT_GRAD);
 };
 
 namespace {

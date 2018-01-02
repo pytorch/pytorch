@@ -68,7 +68,12 @@ class CuDNNTransposeOp final : public Operator<CUDAContext> {
     }
     Y->Resize(new_dims_);
     // Do the actual transpose, which is implemented in DoRunWithType().
+#if CUDNN_VERSION_MIN(6, 0, 0)
     return DispatchHelper<TensorTypes<float, int>>::call(this, Input(0));
+#else
+    // CUDNN 5.1 does not have int support yet.
+    return DispatchHelper<TensorTypes<float>>::call(this, Input(0));
+#endif
   }
 
  protected:
@@ -89,11 +94,13 @@ class CuDNNTransposeOp final : public Operator<CUDAContext> {
     }
 
     cudnnDataType_t typedesc = cudnnTypeWrapper<T>::type;
+#if CUDNN_VERSION_MIN(6, 0, 0)
     if (typedesc == CUDNN_DATA_INT32) {
       // CUDNN Transpose only support float for now
       return TransposeCUDA<int>(
           axes_, context_, input, output, buffer_cpu_, buffer_);
     }
+#endif
 
     CAFFE_ENFORCE(ndim < MAX_DIMS, "Input ndim exceeds compile time max.");
 
