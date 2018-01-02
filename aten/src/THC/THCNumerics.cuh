@@ -715,6 +715,12 @@ struct ScalarConvert<half, half> {
     return v;
   }
 };
+
+template <typename T, typename U>
+__host__ __device__ T scalar_cast(U u) {
+  return ScalarConvert<U, T>::to(u);
+}
+
 #endif
 
 #endif // THC_NUMERICS_INC

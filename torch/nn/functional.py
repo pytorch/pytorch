@@ -913,9 +913,8 @@ def bilinear(input1, input2, weight, bias=None):
         return Bilinear.apply(input1, input2, weight, bias)
 
 
-def embedding(input, embedding_matrix,
-              max_norm=None, norm_type=2, scale_grad_by_freq=False,
-              sparse=False):
+def embedding(input, weight, padding_idx=None, max_norm=None, norm_type=2,
+              scale_grad_by_freq=False, sparse=False):
     r"""A simple lookup table that looks up embeddings in a fixed dictionary and size.
 
     This module is often used to retrieve word embeddings using indices.
@@ -924,9 +923,10 @@ def embedding(input, embedding_matrix,
 
     Args:
         input: tensor, containing indices into the embedding matrix
-        embedding_matrix:
-                Number of rows should correspond to the maximum possible index + 1,
-                number of columns is the embedding size
+        weight:
+            Number of rows should correspond to the maximum possible index + 1,
+            number of columns is the embedding size
+        padding_idx (int, optional): Entries at the given index do not contribute to the gradient
         max_norm (float, optional): If given, will renormalize the embeddings to always have a norm lesser than this
         norm_type (float, optional): The p of the p-norm to compute for the max_norm option
         scale_grad_by_freq (boolean, optional): if given, this will scale gradients by the frequency of
@@ -951,7 +951,7 @@ def embedding(input, embedding_matrix,
         >>> input = Variable(torch.LongTensor([[1,2,4,5],[4,3,2,9]]))
         >>> # an embedding matrix containing 10 tensors of size 3
         >>> embedding_matrix = Variable(torch.rand(10, 3))
-        >>> torch.nn.functional.embedding(input, embedding_matrix)
+        >>> F.embedding(input, embedding_matrix)
 
         Variable containing:
         (0 ,.,.) =
@@ -972,7 +972,7 @@ def embedding(input, embedding_matrix,
         >>> weights[0, :].zero_()
         >>> embedding_matrix = Variable(weights)
         >>> input = Variable(torch.LongTensor([[0,2,0,5]]))
-        >>> torch.nn.functional.embedding(input, embedding_matrix)
+        >>> F.embedding(input, embedding_matrix, padding_idx=0)
 
         Variable containing:
         (0 ,.,.) =
@@ -983,11 +983,13 @@ def embedding(input, embedding_matrix,
         [torch.FloatTensor of size 1x4x3]
 
     """
-    return _functions.thnn.Embedding.apply(
-        input, embedding_matrix,
-        -1, max_norm, norm_type,
-        scale_grad_by_freq, sparse
-    )
+    input = input.contiguous()
+    if padding_idx is None:
+        padding_idx = -1
+    if max_norm is not None:
+        with torch.no_grad():
+            torch._C._VariableBase.embedding_renorm_(weight, input, max_norm, norm_type)
+    return torch._C._VariableBase.embedding(weight, input, padding_idx, scale_grad_by_freq)
 
 
 def embedding_bag(embedding_matrix, indices, offsets=None,
