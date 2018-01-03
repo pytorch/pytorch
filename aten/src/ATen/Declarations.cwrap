@@ -339,6 +339,7 @@
     - method
     - function
   return: argument 0
+  scalar_check: index_->isScalar()
   arguments:
     - arg: THTensor* result
       output: True
@@ -3059,6 +3060,7 @@
     - method
     - function
   return: argument 0
+  scalar_check: False
   before_call: |
     long s1 = THTensor_(size)(LIBRARY_STATE ((THPTensor*)$arg4)->cdata, 0);
     long s2 = THTensor_(size)(LIBRARY_STATE ((THPTensor*)$arg5)->cdata, 0);
