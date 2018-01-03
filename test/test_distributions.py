@@ -600,7 +600,7 @@ class TestDistributions(TestCase):
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_pareto_sample(self):
-        set_rng_seed(0) # see Note [Randomized statistical tests]
+        set_rng_seed(0)  # see Note [Randomized statistical tests]
         for scale, alpha in product([0.1, 1.0, 5.0], [0.1, 1.0, 10.0]):
             self._check_sampler_sampler(Pareto(scale, alpha),
                                         scipy.stats.pareto(alpha, scale=scale),
@@ -608,7 +608,7 @@ class TestDistributions(TestCase):
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_pareto_sample_grad(self):
-        set_rng_seed(0) # see Note [Randomized statistical tests]
+        set_rng_seed(0)  # see Note [Randomized statistical tests]
         num_samples = 100
         for alpha in [1e-3, 1e-2, 1e-1, 1e0, 1e1, 1e2, 1e3, 1e4]:
             alphas = Variable(torch.FloatTensor([alpha] * num_samples), requires_grad=True)
