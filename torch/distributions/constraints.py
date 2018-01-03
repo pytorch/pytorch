@@ -1,5 +1,4 @@
 import torch
-from torch.nn.functional import sigmoid, softmax
 
 
 class Constraint(object):
