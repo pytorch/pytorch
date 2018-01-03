@@ -5,6 +5,7 @@ from torch.autograd import Variable
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
 from torch.distributions.utils import broadcast_all, probs_to_logits, logits_to_probs
+from torch.nn.functional import binary_cross_entropy_with_logits
 
 
 class Bernoulli(Distribution):
@@ -48,17 +49,13 @@ class Bernoulli(Distribution):
         shape = self._extended_shape(sample_shape)
         return torch.bernoulli(self.probs.expand(shape))
 
-    def _binary_cross_entropy(self, value):
-        max_val = (-self.logits).clamp(min=0)
-        return self.logits - self.logits * value + max_val + \
-            ((-max_val).exp() + (-self.logits - max_val).exp()).log()
-
     def log_prob(self, value):
         self._validate_log_prob_arg(value)
-        return -self._binary_cross_entropy(value)
+        logits, value = broadcast_all(self.logits, value)
+        return -binary_cross_entropy_with_logits(logits, value, reduce=False)
 
     def entropy(self):
-        return self._binary_cross_entropy(self.probs)
+        return binary_cross_entropy_with_logits(self.logits, self.probs, reduce=False)
 
     def enumerate_support(self):
         values = torch.arange(2).long()

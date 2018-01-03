@@ -1338,7 +1338,7 @@ def binary_cross_entropy(input, target, weight=None, size_average=True, reduce=T
     return torch._C._nn.binary_cross_entropy(input, target, weight, size_average, reduce)
 
 
-def binary_cross_entropy_with_logits(input, target, weight=None, size_average=True):
+def binary_cross_entropy_with_logits(input, target, weight=None, size_average=True, reduce=True):
     r"""Function that measures Binary Cross Entropy between target and output
     logits.
 
@@ -1370,7 +1370,9 @@ def binary_cross_entropy_with_logits(input, target, weight=None, size_average=Tr
     if weight is not None:
         loss = loss * weight
 
-    if size_average:
+    if not reduce:
+        return loss
+    elif size_average:
         return loss.mean()
     else:
         return loss.sum()
