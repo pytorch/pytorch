@@ -1116,7 +1116,6 @@ class TestNumericalStability(TestCase):
             p = Variable(logits, requires_grad=True)
             dist = dist_class(logits=p)
         log_pdf = dist.log_prob(Variable(x))
-        log_pdf.retain_grad()
         log_pdf.sum().backward()
         self.assertEqual(log_pdf.data,
                          expected_value,

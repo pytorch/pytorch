@@ -36,8 +36,7 @@ class Categorical(Distribution):
 
     def __init__(self, probs=None, logits=None):
         if (probs is None) == (logits is None):
-            raise ValueError("Got probs={}, logits={}. Either `probs` or `logits` must be specified, "
-                             "but not both.".format(probs, logits))
+            raise ValueError("Either `probs` or `logits` must be specified, but not both.")
         if probs is not None:
             self.probs = probs / probs.sum(-1, keepdim=True)
             self.logits = probs_to_logits(self.probs)

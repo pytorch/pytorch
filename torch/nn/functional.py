@@ -1353,6 +1353,10 @@ def binary_cross_entropy_with_logits(input, target, weight=None, size_average=Tr
                 over observations for each minibatch. However, if the field
                 sizeAverage is set to False, the losses are instead summed
                 for each minibatch. Default: ``True``
+        reduce (bool, optional): By default, the losses are averaged or summed over
+                observations for each minibatch depending on size_average. When reduce
+                is False, returns a loss per batch element instead and ignores
+                size_average. Default: True
 
     Examples::
 
