@@ -229,9 +229,6 @@ class Variable(_C._VariableBase):
         """
         self.storage().share_memory_()
 
-    def prod(self, dim=None, keepdim=None):
-        return Prod.apply(self, dim, keepdim)
-
     def view_as(self, tensor):
         return self.view(tensor.size())
 
@@ -253,9 +250,6 @@ class Variable(_C._VariableBase):
             return factorization, pivots
         else:
             return super(Variable, self).btrifact(pivot=pivot)
-
-    def cumprod(self, dim):
-        return Cumprod.apply(self, dim)
 
     def resize(self, *sizes):
         return Resize.apply(self, sizes)
