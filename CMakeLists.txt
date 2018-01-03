@@ -196,4 +196,4 @@ else()
 endif()
 
 # ---[ Modules
-add_subdirectory(modules/module_test)
+add_subdirectory(modules)
