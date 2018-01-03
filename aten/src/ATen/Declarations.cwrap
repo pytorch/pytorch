@@ -4052,17 +4052,6 @@
 ]]
 
 [[
-  name: assign_
-  cname: copy
-  cpu_half: True
-  aten_sparse: True
-  return: self
-  arguments:
-    - THTensor* self
-    - THTensor* src
-]]
-
-[[
   name: _copy_ignoring_overlaps_
   cname: copyIgnoringOverlaps
   return: self
