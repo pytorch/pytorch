@@ -1,6 +1,5 @@
 import torch
 from torch.nn.functional import sigmoid, softmax
-from torch.distributions.utils import tril_mask
 
 
 class Constraint(object):
@@ -97,8 +96,7 @@ class LowerTriangular(Constraint):
     Constrain to lower-triangular square matrices.
     """
     def check(self, value):
-        mask = tril_mask(value)
-        return ((value == 0) & ~mask).min(-1).min(-1)
+        return (torch.tril(value) == value).min(-1).min(-1)
 
 
 # Functions and constants are the recommended interface.
