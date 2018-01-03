@@ -100,23 +100,26 @@ class TestMomentumSGD(hu.HypothesisTestCase):
         # Create an indexing array containing values which index into grad
         indices = data_strategy.draw(
             hu.tensor(
+                max_dim=1,
+                min_value=1,
+                max_value=grad.shape[0],
                 dtype=np.int64,
-                elements=st.sampled_from(np.arange(grad.shape[0]))
+                elements=st.sampled_from(np.arange(grad.shape[0])),
             ),
         )
-        hypothesis.note('indices.shape: %s' % str(indices.shape))
 
-        # For now, the indices must be unique
+        # Verify that the generated indices are unique
         hypothesis.assume(
             np.array_equal(
-                np.unique(indices.flatten()), np.sort(indices.flatten())
-            )
-        )
+                np.unique(indices.flatten()),
+                np.sort(indices.flatten())))
 
         # Sparsify grad
         grad = grad[indices]
+
         # Make momentum >= 0
         m = np.abs(m)
+
         # Convert lr to a numpy array
         lr = np.asarray([lr], dtype=np.float32)
 
@@ -144,7 +147,11 @@ class TestMomentumSGD(hu.HypothesisTestCase):
             param[i] -= grad_new
             return (grad_new, m, param)
 
-        self.assertReferenceChecks(gc, op, [grad, m, lr, w, indices], sparse)
+        self.assertReferenceChecks(
+            gc,
+            op,
+            [grad, m, lr, w, indices],
+            sparse)
 
     @given(n=st.integers(4, 8), nesterov=st.booleans(), **hu.gcs_gpu_only)
     @unittest.skipIf(not workspace.has_gpu_support, "No gpu support.")
