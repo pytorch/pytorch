@@ -86,20 +86,12 @@ EXAMPLES = [
         },
     ]),
     Example(Chi2, [
-        {
-            'df': Variable(torch.exp(torch.randn(2, 3)), requires_grad=True),
-        },
-        {
-            'df': Variable(torch.exp(torch.randn(1)), requires_grad=True),
-        },
+        {'df': Variable(torch.exp(torch.randn(2, 3)), requires_grad=True)},
+        {'df': Variable(torch.exp(torch.randn(1)), requires_grad=True)},
     ]),
     Example(StudentT, [
-        {
-            'df': Variable(torch.exp(torch.randn(2, 3)), requires_grad=True),
-        },
-        {
-            'df': Variable(torch.exp(torch.randn(1)), requires_grad=True),
-        },
+        {'df': Variable(torch.exp(torch.randn(2, 3)), requires_grad=True)},
+        {'df': Variable(torch.exp(torch.randn(1)), requires_grad=True)},
     ]),
     Example(Dirichlet, [
         {'alpha': Variable(torch.exp(torch.randn(2, 3)), requires_grad=True)},
@@ -645,10 +637,10 @@ class TestDistributions(TestCase):
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_studentT_sample(self):
         set_rng_seed(0)  # see Note [Randomized statistical tests]
-        for df in [0.1, 1.0, 5.0]:
-            self._check_sampler_sampler(StudentT(df),
-                                        scipy.stats.t(df),
-                                        'StudentT(df={})'.format(df))
+        for df, loc, scale in product([0.1, 1.0, 5.0, 10.0], [-1.0, 0.0, 1.0], [0.1, 1.0, 10.0]):
+            self._check_sampler_sampler(StudentT(df=df, loc=loc, scale=scale),
+                                        scipy.stats.t(df=df, loc=loc, scale=scale),
+                                        'StudentT(df={}, loc={}, scale={})'.format(df, loc, scale))
 
     # test_studentT_sample_grad is omitted since reparameterized gradients
     # for this distribution are stochastic and are only correct in expectation.
@@ -788,6 +780,18 @@ class TestDistributions(TestCase):
              (1, 2)),
             (Laplace(loc=torch.Tensor([0]), scale=torch.Tensor([[1]])),
              (1, 1)),
+            (StudentT(df=torch.Tensor([1, 1]), loc=1),
+             (2,)),
+            (StudentT(df=1, scale=torch.Tensor([1, 1])),
+             (2,)),
+            (StudentT(df=torch.Tensor([1, 1]), loc=torch.Tensor([1])),
+             (2,)),
+            (StudentT(df=torch.Tensor([1, 1]), scale=torch.Tensor([[1], [1]])),
+             (2, 2)),
+            (StudentT(df=torch.Tensor([1, 1]), loc=torch.Tensor([[1]])),
+             (1, 2)),
+            (StudentT(df=torch.Tensor([1]), scale=torch.Tensor([[1]])),
+             (1, 1)),
         ]
 
         for dist, expected_size in valid_examples:
@@ -814,6 +818,14 @@ class TestDistributions(TestCase):
             (Laplace, {
                 'loc': torch.Tensor([0, 0]),
                 'scale': torch.Tensor([1, 1, 1])
+            }),
+            (StudentT, {
+                'df': torch.Tensor([1, 1]),
+                'scale': torch.Tensor([1, 1, 1])
+            }),
+            (StudentT, {
+                'df': torch.Tensor([1, 1]),
+                'loc': torch.Tensor([1, 1, 1])
             })
         ]
 
