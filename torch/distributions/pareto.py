@@ -42,4 +42,4 @@ class Pareto(Distribution):
         return torch.log(self.alpha / value) + self.alpha * (self.scale / value).log()
 
     def entropy(self):
-        return ((self.scale / self.alpha).log() + (1 + self.alpha.reciprocal())) / math.log(2)
+        return ((self.scale / self.alpha).log() + (1 + self.alpha.reciprocal()))
