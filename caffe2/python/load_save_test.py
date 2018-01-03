@@ -137,21 +137,21 @@ class TestLoadSaveBase(test_util.TestCase):
                 if e.errno != errno.ENOENT:
                     raise
 
-    def saveFile(self, tmp_folder, db_type):
+    def saveFile(self, tmp_folder, db_name, db_type, start_blob_id):
         dtypes = [np.float16, np.float32, np.float64, np.bool, np.int8,
                   np.int16, np.int32, np.int64, np.uint8, np.uint16]
         arrays = [np.random.permutation(6).reshape(2, 3).astype(T)
                   for T in dtypes]
 
         for i, arr in enumerate(arrays):
-            self.assertTrue(workspace.FeedBlob(str(i), arr))
-            self.assertTrue(workspace.HasBlob(str(i)))
+            self.assertTrue(workspace.FeedBlob(str(i + start_blob_id), arr))
+            self.assertTrue(workspace.HasBlob(str(i + start_blob_id)))
 
         # Saves the blobs to a local db.
-        tmp_file = os.path.join(tmp_folder, "db")
+        tmp_file = os.path.join(tmp_folder, db_name)
         op = core.CreateOperator(
             "Save",
-            [str(i) for i in range(len(arrays))], [],
+            [str(i + start_blob_id) for i in range(len(arrays))], [],
             absolute_path=1,
             db=tmp_file, db_type=db_type)
         workspace.RunOperatorOnce(op)
@@ -190,7 +190,7 @@ class TestLoadSave(TestLoadSaveBase):
 
     def testLoadExcessblobs(self):
         tmp_folder = tempfile.mkdtemp()
-        tmp_file, arrays = self.saveFile(tmp_folder, self._db_type)
+        tmp_file, arrays = self.saveFile(tmp_folder, "db", self._db_type, 0)
 
         op = core.CreateOperator(
             "Load",
@@ -209,7 +209,7 @@ class TestLoadSave(TestLoadSaveBase):
 
     def testTruncatedFile(self):
         tmp_folder = tempfile.mkdtemp()
-        tmp_file, arrays = self.saveFile(tmp_folder, self._db_type)
+        tmp_file, arrays = self.saveFile(tmp_folder, "db", self._db_type, 0)
 
         with open(tmp_file, 'wb+') as fdest:
             fdest.seek(20, os.SEEK_END)
@@ -354,6 +354,121 @@ class TestLoadSave(TestLoadSaveBase):
             if e.errno != errno.ENOENT:
                 raise
 
+    def testLoadMultipleFilesGivenSourceBlobNames(self):
+        tmp_folder = tempfile.mkdtemp()
+        db_file_1, arrays_1 = self.saveFile(tmp_folder, "db1", self._db_type, 0)
+        db_file_2, arrays_2 = self.saveFile(
+            tmp_folder, "db2", self._db_type, len(arrays_1)
+        )
+        db_files = [db_file_1, db_file_2]
+        blobs_names = [str(i) for i in range(len(arrays_1) + len(arrays_2))]
+
+        workspace.ResetWorkspace()
+        self.assertEqual(len(workspace.Blobs()), 0)
+        self.assertTrue(
+            workspace.RunOperatorOnce(
+                core.CreateOperator(
+                    "Load",
+                    [], blobs_names,
+                    absolute_path=1,
+                    dbs=db_files, db_type=self._db_type,
+                    source_blob_names=blobs_names
+                )
+            )
+        )
+        self.assertEqual(len(workspace.Blobs()), len(blobs_names))
+        for i in range(len(arrays_1)):
+            np.testing.assert_array_equal(
+                workspace.FetchBlob(str(i)), arrays_1[i]
+            )
+        for i in range(len(arrays_2)):
+            np.testing.assert_array_equal(
+                workspace.FetchBlob(str(i + len(arrays_1))), arrays_2[i]
+            )
+        try:
+            shutil.rmtree(tmp_folder)
+        except OSError as e:
+            if e.errno != errno.ENOENT:
+                raise
+
+    def testLoadAllMultipleFiles(self):
+        tmp_folder = tempfile.mkdtemp()
+        db_file_1, arrays_1 = self.saveFile(tmp_folder, "db1", self._db_type, 0)
+        db_file_2, arrays_2 = self.saveFile(
+            tmp_folder, "db2", self._db_type, len(arrays_1)
+        )
+        db_files = [db_file_1, db_file_2]
+
+        workspace.ResetWorkspace()
+        self.assertEqual(len(workspace.Blobs()), 0)
+        self.assertTrue(
+            workspace.RunOperatorOnce(
+                core.CreateOperator(
+                    "Load",
+                    [], [],
+                    absolute_path=1,
+                    dbs=db_files, db_type=self._db_type,
+                    load_all=True
+                )
+            )
+        )
+        self.assertEqual(len(workspace.Blobs()), len(arrays_1) + len(arrays_2))
+        for i in range(len(arrays_1)):
+            np.testing.assert_array_equal(
+                workspace.FetchBlob(str(i)), arrays_1[i]
+            )
+        for i in range(len(arrays_2)):
+            np.testing.assert_array_equal(
+                workspace.FetchBlob(str(i + len(arrays_1))), arrays_2[i]
+            )
+        try:
+            shutil.rmtree(tmp_folder)
+        except OSError as e:
+            if e.errno != errno.ENOENT:
+                raise
+
+    def testLoadAllMultipleFilesWithSameKey(self):
+        tmp_folder = tempfile.mkdtemp()
+        db_file_1, arrays_1 = self.saveFile(tmp_folder, "db1", self._db_type, 0)
+        db_file_2, arrays_2 = self.saveFile(tmp_folder, "db2", self._db_type, 0)
+
+        db_files = [db_file_1, db_file_2]
+        workspace.ResetWorkspace()
+        self.assertEqual(len(workspace.Blobs()), 0)
+        op = core.CreateOperator(
+            "Load",
+            [], [],
+            absolute_path=1,
+            dbs=db_files, db_type=self._db_type,
+            load_all=True)
+        with self.assertRaises(RuntimeError):
+            workspace.RunOperatorOnce(op)
+        try:
+            shutil.rmtree(tmp_folder)
+        except OSError as e:
+            if e.errno != errno.ENOENT:
+                raise
+
+    def testLoadRepeatedFiles(self):
+        tmp_folder = tempfile.mkdtemp()
+        tmp_file, arrays = self.saveFile(tmp_folder, "db", self._db_type, 0)
+
+        db_files = [tmp_file, tmp_file]
+        workspace.ResetWorkspace()
+        self.assertEqual(len(workspace.Blobs()), 0)
+        op = core.CreateOperator(
+            "Load",
+            [], [str(i) for i in range(len(arrays))],
+            absolute_path=1,
+            dbs=db_files, db_type=self._db_type,
+            load_all=False)
+        with self.assertRaises(RuntimeError):
+            workspace.RunOperatorOnce(op)
+        try:
+            shutil.rmtree(tmp_folder)
+        except OSError as e:
+            if e.errno != errno.ENOENT:
+                raise
 
 
 if __name__ == '__main__':
