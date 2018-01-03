@@ -146,11 +146,13 @@ class SynchronizedSeedDataset(Dataset):
     def __len__(self):
         return self.size
 
+
 def _test_timeout():
     sys.stderr.close()
     dataset = SleepDataset(10, 10)
     dataloader = DataLoader(dataset, batch_size=2, num_workers=2, timeout=1)
     _ = next(iter(dataloader))
+
 
 def _test_segfault():
     sys.stderr.close()
@@ -158,9 +160,11 @@ def _test_segfault():
     dataloader = DataLoader(dataset, batch_size=2, num_workers=2)
     _ = next(iter(dataloader))
 
+
 # test custom init function
 def init_fn(worker_id):
     torch.manual_seed(12345)
+
 
 class TestDataLoader(TestCase):
 
