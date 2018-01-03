@@ -1129,17 +1129,6 @@ ormqr(input2, input3, left=True, transpose=False) -> Tensor
 See :func:`torch.ormqr`
 """)
 
-add_docstr_all('pareto_',
-               r"""
-pareto_(scale=1, alpha, *, generator=None) -> Tensor
-
-Fills the tensor with numbers drawn from the Pareto distribution:
-
-.. math::
-
-    P(x) = \dfrac{\alpha scale^{\alpha}}{x^{\alpha + 1}}
-""")
-
 add_docstr_all('potrf',
                r"""
 potrf(upper=True) -> Tensor

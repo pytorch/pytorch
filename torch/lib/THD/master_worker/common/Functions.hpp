@@ -219,7 +219,6 @@ enum Functions: std::uint16_t {
   tensorBernoulli_DoubleTensor,
   tensorUniform,
   tensorNormal,
-  tensorPareto,
   tensorExponential,
   tensorCauchy,
   tensorLogNormal,

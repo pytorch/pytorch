@@ -61,14 +61,6 @@ void THDTensor_(normal)(THDTensor *self, THDGenerator *_generator, double mean,
   );
 }
 
-void THDTensor_(pareto)(THDTensor *self, THDGenerator *_generator,
-                        double scale, double alpha) {
-  masterCommandChannel->sendMessage(
-    packMessage(Functions::tensorPareto, self, _generator, scale, alpha),
-    THDState::s_current_worker
-  );
-}
-
 void THDTensor_(exponential)(THDTensor *self, THDGenerator *_generator,
                              double lambda) {
   masterCommandChannel->sendMessage(

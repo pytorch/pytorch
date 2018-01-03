@@ -240,7 +240,6 @@ static const std::unordered_map<rpc::function_id_type, dispatch_fn> functions {
     {Functions::tensorBernoulli_DoubleTensor, tensorBernoulli_DoubleTensor},
     {Functions::tensorUniform, tensorUniform},
     {Functions::tensorNormal, tensorNormal},
-    {Functions::tensorPareto, tensorPareto},
     {Functions::tensorExponential, tensorExponential},
     {Functions::tensorCauchy, tensorCauchy},
     {Functions::tensorLogNormal, tensorLogNormal},

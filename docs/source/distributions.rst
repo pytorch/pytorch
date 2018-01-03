@@ -79,12 +79,6 @@ Probability distributions - torch.distributions
 .. autoclass:: OneHotCategorical
     :members:
 
-:hidden:`Pareto`
-~~~~~~~~~~~~~~~~
-
-.. autoclass:: Pareto
-    :members:
-
 :hidden:`Uniform`
 ~~~~~~~~~~~~~~~~~~~~~~~
 
