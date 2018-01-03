@@ -167,7 +167,7 @@
   other: grad.cross(self, dim)
 
 - name: cumprod(Tensor self, int64_t dim)
-  self: not_implemented("cumprod")  # implemented in Python
+  self: cumprod_backward(grad, self, dim)
 
 - name: cumsum(Tensor self, int64_t dim)
   self: cumsum_backward(grad, dim)
@@ -478,11 +478,11 @@
   self: grad * exponent * self.pow(exponent - 1)
   exponent: grad * self.pow(exponent) * self.log()
 
-# TODO: complicated
-# - name: prod(Tensor self, int64_t dim, bool keepdim)
+- name: prod(Tensor self, int64_t dim, bool keepdim)
+  self: prod_backward(grad, self, result, dim, keepdim)
 
 - name: prod(Tensor self)
-  self: not_implemented("prod")
+  self: prod_backward(grad, self, result)
 
 - name: pstrf(Tensor self, bool upper, Scalar tol)
   self: not_implemented("pstrf")
