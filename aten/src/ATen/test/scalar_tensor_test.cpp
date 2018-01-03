@@ -24,9 +24,7 @@ bool should_expand(const IntList &from_size, const IntList &to_size) {
   return true;
 }
 
-int main() {
-  Type & T = CPU(kFloat);
-
+void test(Type &T) {
   std::vector<std::vector<int64_t> > sizes = { {}, {0}, {1}, {1, 1}, {2}};
 
   // single-tensor/size tests
@@ -285,6 +283,14 @@ int main() {
         }
       }
     }
+  }
+}
+
+int main() {
+  test(CPU(kFloat));
+
+  if (at::hasCUDA()) {
+    test(CUDA(kFloat));
   }
 
   return 0;
