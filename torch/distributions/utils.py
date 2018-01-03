@@ -1,3 +1,4 @@
+from functools import update_wrapper
 from numbers import Number
 
 import torch
@@ -125,3 +126,21 @@ def probs_to_logits(probs, is_binary=False):
     if is_binary:
         return torch.log(ps_clamped) - torch.log1p(-ps_clamped)
     return torch.log(ps_clamped)
+
+
+class lazy_property(object):
+    """
+    Non-data descriptor that calls the wrapped method to compute the property
+    on first call; thereafter replacing the wrapped method into an instance
+    attribute.
+    """
+    def __init__(self, wrapped):
+        self.wrapped = wrapped
+        update_wrapper(self, wrapped)
+
+    def __get__(self, instance, obj_type=None):
+        if instance is None:
+            return self
+        value = self.wrapped(instance)
+        setattr(instance, self.wrapped.__name__, value)
+        return value

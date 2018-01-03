@@ -4,7 +4,7 @@ import torch
 from torch.autograd import Variable
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
-from torch.distributions.utils import broadcast_all, probs_to_logits, logits_to_probs
+from torch.distributions.utils import broadcast_all, probs_to_logits, logits_to_probs, lazy_property
 from torch.nn.functional import binary_cross_entropy_with_logits
 
 
@@ -34,15 +34,21 @@ class Bernoulli(Distribution):
             raise ValueError("Either `probs` or `logits` must be specified, but not both.")
         if probs is not None:
             self.probs, = broadcast_all(probs)
-            self.logits = probs_to_logits(self.probs, is_binary=True)
         else:
             self.logits, = broadcast_all(logits)
-            self.probs = logits_to_probs(self.logits, is_binary=True)
-        if isinstance(probs, Number):
+        if isinstance(probs, Number) or isinstance(logits, Number):
             batch_shape = torch.Size()
         else:
-            batch_shape = self.probs.size()
+            batch_shape = self.probs.size() if probs is not None else self.logits.size()
         super(Bernoulli, self).__init__(batch_shape)
+
+    @lazy_property
+    def logits(self):
+        return probs_to_logits(self.probs, is_binary=True)
+
+    @lazy_property
+    def probs(self):
+        return logits_to_probs(self.logits, is_binary=True)
 
     def sample(self, sample_shape=torch.Size()):
         shape = self._extended_shape(sample_shape)
