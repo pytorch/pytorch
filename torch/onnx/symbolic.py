@@ -156,6 +156,10 @@ def bmm(g, self, other):
     return g.op("MatMul", self, other)
 
 
+def matmul(g, self, other):
+    return g.op("MatMul", self, other)
+
+
 def addmm(g, self, mat1, mat2, beta, alpha):
     return g.op("Gemm", mat1, mat2, self, beta_f=_scalar(beta), alpha_f=_scalar(alpha))
 
