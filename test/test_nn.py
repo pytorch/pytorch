@@ -2132,9 +2132,9 @@ class TestNN(NNTestCase):
                 continue
             for depth_multiplier in [1, 2]:
                 m = nn.Conv2d(2, 2 * depth_multiplier, kernel_size=3, groups=2).type(tp)
-                i = Variable(torch.randn(2, 2, 6, 6).type(tp), requires_grad=True)
+                i = Variable(torch.randn(2, 2, 6, 6).type(tp) / 2, requires_grad=True)
                 output = m(i)
-                grad_output = torch.randn(2, 2 * depth_multiplier, 4, 4).type(tp)
+                grad_output = torch.randn(2, 2 * depth_multiplier, 4, 4).type(tp) / 2
                 output.backward(grad_output)
 
                 offset = 1 * depth_multiplier
