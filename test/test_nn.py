@@ -110,6 +110,9 @@ class NewModuleTest(InputVariableMixin, ModuleTest):
         module.__repr__()
 
         if self.check_inplace:
+            # check if the inplace variant of the module gives the same result
+            # as the out-of-place
+
             module_ip = self.constructor(*self.constructor_args, inplace=True)
 
             input_version = input._version
@@ -130,6 +133,9 @@ class NewModuleTest(InputVariableMixin, ModuleTest):
             test_case.assertEqual(input.grad, input_ip.grad)
 
         if type(input.data) == torch.LongTensor and TEST_CUDA:
+            # check that cuda() moves module parameters to correct GPU device,
+            # and that float() casts parameters correctly
+
             input = input.cuda()
             module.float().cuda()
             module(input)
@@ -146,6 +152,8 @@ class NewModuleTest(InputVariableMixin, ModuleTest):
                     test_case.assertEqual(type(p.data), torch.cuda.FloatTensor)
                     test_case.assertEqual(p.get_device(), 1)
         else:
+            # check that float()/double() casters work correctly
+
             # to float
             if type(input.data) != torch.LongTensor:
                 input = input.float()
@@ -164,6 +172,9 @@ class NewModuleTest(InputVariableMixin, ModuleTest):
 
             # TODO: Hardshrink is lacking a CUDA implementation
             if TEST_CUDA and self.should_test_cuda and type(module) != nn.Hardshrink:
+                # check that cuda() moves module parameters to correct GPU device,
+                # and that float() casts parameters correctly
+
                 # to GPU0
                 input = input.float().cuda()
                 module.float().cuda()
@@ -187,6 +198,7 @@ class NewModuleTest(InputVariableMixin, ModuleTest):
                     test_case.assertEqual(type(p.data), torch.cuda.FloatTensor)
                     test_case.assertEqual(p.get_device(), 0)
 
+                # test that forwards of module runs correctly without cuDNN
                 if self.cudnn:
                     torch.backends.cudnn.enabled = False
                     try:
@@ -198,6 +210,7 @@ class NewModuleTest(InputVariableMixin, ModuleTest):
                         torch.backends.cudnn.enabled = True
 
                 if torch.cuda.device_count() >= 2:
+                    # test cross-GPU transfer works
                     # to GPU1
                     input = input.cuda(1)
                     module.cuda(1)
@@ -234,8 +247,8 @@ class TestNN(NNTestCase):
         with freeze_rng_state():
             return module(input)
 
-    def _backward(self, module, input, output, grad_output):
-        output.backward(grad_output, retain_graph=True)
+    def _backward(self, module, input, output, grad_output, create_graph=False):
+        output.backward(grad_output, retain_graph=True, create_graph=create_graph)
         if input.grad is None:
             return None
         return input.grad.data
@@ -4444,6 +4457,7 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='affine',
+        FIXME_no_cuda_gradgrad_comparison=True,  # See #4422
     ),
     dict(
         module_name='BatchNorm1d',
@@ -4452,6 +4466,7 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='3d_input',
+        FIXME_no_cuda_gradgrad_comparison=True,  # See #4422
     ),
     dict(
         module_name='BatchNorm1d',
@@ -4460,6 +4475,7 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='not_affine',
+        FIXME_no_cuda_gradgrad_comparison=True,  # See #4422
     ),
     dict(
         module_name='BatchNorm1d',
@@ -4468,6 +4484,7 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='3d_input_not_affine',
+        FIXME_no_cuda_gradgrad_comparison=True,  # See #4422
     ),
     dict(
         module_name='BatchNorm2d',
@@ -4475,6 +4492,7 @@ new_module_tests = [
         input_size=(2, 3, 6, 6),
         cudnn=True,
         check_eval=True,
+        FIXME_no_cuda_gradgrad_comparison=True,  # See #4422
     ),
     dict(
         module_name='BatchNorm2d',
@@ -4483,6 +4501,7 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='momentum',
+        FIXME_no_cuda_gradgrad_comparison=True,  # See #4422
     ),
     dict(
         module_name='BatchNorm2d',
@@ -4491,6 +4510,7 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='not_affine',
+        FIXME_no_cuda_gradgrad_comparison=True,  # See #4422
     ),
     dict(
         module_name='BatchNorm3d',
@@ -4498,6 +4518,7 @@ new_module_tests = [
         input_size=(2, 3, 4, 4, 4),
         cudnn=True,
         check_eval=True,
+        FIXME_no_cuda_gradgrad_comparison=True,  # See #4422
     ),
     dict(
         module_name='BatchNorm3d',
@@ -4506,6 +4527,7 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='momentum',
+        FIXME_no_cuda_gradgrad_comparison=True,  # See #4422
     ),
     dict(
         module_name='BatchNorm3d',
@@ -4514,6 +4536,7 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='not_affine',
+        FIXME_no_cuda_gradgrad_comparison=True,  # See #4422
     ),
     dict(
         module_name='Conv1d',
@@ -4586,6 +4609,7 @@ new_module_tests = [
         input_size=(1, 3, 6),
         cudnn=True,
         desc='dilated',
+        FIXME_no_cuda_gradgrad_comparison=True,  # See #4500
     ),
     dict(
         fullname='ConvTranspose1d_groups',
@@ -4661,6 +4685,7 @@ new_module_tests = [
         input_size=(1, 3, 6, 7),
         cudnn=True,
         desc='dilated',
+        FIXME_no_cuda_gradgrad_comparison=True,  # See #4500
     ),
     dict(
         module_name='ConvTranspose2d',
@@ -4674,6 +4699,7 @@ new_module_tests = [
         constructor=lambda: nn.ConvTranspose2d(2, 4, (2, 3), groups=2),
         input_size=(1, 2, 4, 5),
         cudnn=True,
+        FIXME_no_cuda_gradgrad_comparison=True,  # See #4500
     ),
     dict(
         fullname='Conv2d_depthwise',
@@ -4855,6 +4881,7 @@ new_module_tests = [
         constructor_args=(2, 3, (2, 3, 2)),
         cudnn=True,
         input_size=(1, 2, 4, 5, 4),
+        FIXME_no_cuda_gradgrad_comparison=True,  # See #4500
     ),
     dict(
         module_name='ConvTranspose3d',
@@ -4862,6 +4889,7 @@ new_module_tests = [
         cudnn=True,
         input_size=(1, 2, 4, 5, 4),
         desc='dilated',
+        FIXME_no_cuda_gradgrad_comparison=True,  # See #4500
     ),
     dict(
         module_name='MaxPool3d',
