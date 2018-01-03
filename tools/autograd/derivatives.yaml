@@ -192,7 +192,7 @@
 
 - name: div(Tensor self, Tensor other)
   self: grad / other
-  other: -grad * result / other
+  other: -grad * self / (other * other)
 
 - name: dot(Tensor self, Tensor tensor)
   self: grad * tensor
