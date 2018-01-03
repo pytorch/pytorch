@@ -33,8 +33,11 @@
 #include <immintrin.h>
 
 /* yes I know, the top of this file is quite ugly */
-# define ALIGN32_BEG
-# define ALIGN32_END __attribute__((aligned(32)))
+#if defined(__GNUC__)
+# define ALIGN32_BEG __attribute__((aligned(32)))
+#elif defined(_WIN32)
+# define ALIGN32_BEG __declspec(align(32))
+#endif
 
 /* __m128 is ugly to write */
 typedef __m256  v8sf; // vector of 8 float (avx)
@@ -42,7 +45,7 @@ typedef __m256i v8si; // vector of 8 int   (avx)
 typedef __m128i v4si; // vector of 8 int   (avx)
 
 #define _PI32AVX_CONST(Name, Val)                                            \
-  static const ALIGN32_BEG int _pi32avx_##Name[4] ALIGN32_END = { Val, Val, Val, Val }
+  static const ALIGN32_BEG int _pi32avx_##Name[4] = { Val, Val, Val, Val }
 
 _PI32AVX_CONST(1, 1);
 _PI32AVX_CONST(inv1, ~1);
@@ -52,11 +55,11 @@ _PI32AVX_CONST(4, 4);
 
 /* declare some AVX constants -- why can't I figure a better way to do that? */
 #define _PS256_CONST(Name, Val)                                            \
-  static const ALIGN32_BEG float _ps256_##Name[8] ALIGN32_END = { Val, Val, Val, Val, Val, Val, Val, Val }
+  static const ALIGN32_BEG float _ps256_##Name[8] = { Val, Val, Val, Val, Val, Val, Val, Val }
 #define _PI32_CONST256(Name, Val)                                            \
-  static const ALIGN32_BEG int _pi32_256_##Name[8] ALIGN32_END = { Val, Val, Val, Val, Val, Val, Val, Val }
+  static const ALIGN32_BEG int _pi32_256_##Name[8] = { Val, Val, Val, Val, Val, Val, Val, Val }
 #define _PS256_CONST_TYPE(Name, Type, Val)                                 \
-  static const ALIGN32_BEG Type _ps256_##Name[8] ALIGN32_END = { Val, Val, Val, Val, Val, Val, Val, Val }
+  static const ALIGN32_BEG Type _ps256_##Name[8] = { Val, Val, Val, Val, Val, Val, Val, Val }
 
 _PS256_CONST(1  , 1.0f);
 _PS256_CONST(0p5, 0.5f);
