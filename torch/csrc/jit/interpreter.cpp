@@ -108,8 +108,8 @@ Operation createPythonOperation(PythonOp* op) {
       if(arg_type == 's') {
         py_inputs[i] = py::reinterpret_borrow<py::object>(op->scalar_args[next_scalar++].get());
       } else if(arg_type == 't') {
-        py_inputs[i] = THPVariable_Wrap(
-          builder.addInput(inputs.at(next_tensor), op->var_flags.at(next_tensor)));
+        py_inputs[i] = py::reinterpret_steal<py::object>(THPVariable_Wrap(
+          builder.addInput(inputs.at(next_tensor), op->var_flags.at(next_tensor))));
         next_tensor++;
       }
       i++;
