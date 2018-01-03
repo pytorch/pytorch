@@ -9,6 +9,10 @@
 #     formula for multiple input names, by specifying a key
 #     "input1, input2" (see atan2 for an example).
 #
+# If a function has out-of-place and in-place variants, then the derivative
+# definition for the in-place variant is optional. It will default to the
+# definition for the out-of-place variant.
+#
 # Gradient expressions are standard C++ expressions operating on ATen
 # variables.  In a gradient expression, the following variables are in
 # scope:
@@ -38,12 +42,6 @@
 # derivative formula for every input, including inputs named things
 # like 'grad_output', and (2) the gradient to multiply with is always
 # called 'grad' (even though it really is a grad-grad).
-#
-# LOOKING FOR AN THNN DEFINITION?  These are implicitly defined by
-# preprocess_nn_functions, because THNN functions follow a specific
-# convention; thus, you don't have to explicitly write it down in
-# derivatives.yaml (in fact, you MUST NOT write it down, because then
-# you'll have two derivative definitions!)
 #
 # NB: There are a number of gradient definitions in here which are bogus
 # (implemented using zeros_like).  These gradients are (hopefully) not

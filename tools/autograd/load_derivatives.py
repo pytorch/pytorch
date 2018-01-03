@@ -276,7 +276,7 @@ def to_camel_case(name):
 def match_declarations_with_autograd_functions(declarations, autograd_functions):
     """Sets the "derivative" key on declarations to matching autograd functions
 
-    In-place functions wil use the out-of-place derivative definition if there
+    In-place functions will use the out-of-place derivative definition if there
     is no in-place specific derivative.
     """
 

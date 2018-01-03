@@ -518,6 +518,8 @@ def create_generic(top_env, declarations):
         mode = option['mode']
         abstract = True
         if mode == 'NN' and option.get('cimpls') is None:
+            # NN function with no _forward/_backward suffix don't have cimpls.
+            # They call the _forward function and discard any buffer returns
             abstract = False
             top_env['type_method_declarations'].append(
                 TYPE_METHOD_DECLARATION_CONCRETE.substitute(env))
