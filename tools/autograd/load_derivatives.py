@@ -56,6 +56,14 @@ def create_derivative(declaration, formula, output_indices, var_names):
     formula, saved_inputs = saved_variables(formula, arguments)
     formula, saved_outputs = saved_variables(formula, returns)
 
+    # Check that the referenced gradients in the formula are in bounds
+    for i in used_gradient_indices(formula):
+        if i >= len(declaration['returns']):
+            raise RuntimeError(
+                "Out of bounds grads access: derivative formula for {} "
+                "used grads[{}], but the forward only returns {} outputs."
+                .format(declaration['name'], i, len(declaration['returns'])))
+
     return {
         'formula': formula,
         'output_indices': output_indices,
@@ -187,6 +195,23 @@ def get_signature(declaration, ignore_inplace=False):
         name = name[:-1]
     simple_types = [arg['simple_type'] for arg in declaration['arguments']]
     return '{}({})'.format(name, ', '.join(simple_types))
+
+
+GRAD_INDEX_REGEX = r'(?:^|\W)grads\[(\d+)\]'
+
+
+def used_gradient_indices(formula):
+    """Determine a list of gradient indices (the i in grads[i]) that
+    are used by the formula.
+
+    NB: references to 'grad' don't count as a gradient index (technically,
+    we should return 0 in this case, but it doesn't matter this can never
+    be out of bounds
+
+    >>> used_gradient_indices("foo(grads[0], grads[1])")
+    [0, 1]
+    """
+    return [int(i) for i in re.findall(GRAD_INDEX_REGEX, formula)]
 
 
 def saved_variables(formula, args):
