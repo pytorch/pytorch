@@ -253,6 +253,18 @@ void test(Type &T) {
         }
       }
 
+      // take
+      {
+        auto lhs = T.ones(*lhs_it);
+        auto rhs = T.zeros(*rhs_it).toType(ScalarType::Long);
+        try {
+          auto result = lhs.take(rhs);
+          assert_equal_size_dim(result, rhs);
+        } catch (std::runtime_error &e) {
+          ASSERT(lhs.numel() == 0 && rhs.numel() != 0);
+        }
+      }
+
       // expand
       {
         auto lhs = T.ones(*lhs_it);

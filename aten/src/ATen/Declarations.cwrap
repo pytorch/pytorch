@@ -339,6 +339,7 @@
     - method
     - function
   return: argument 0
+  scalar_check: index_->isScalar()
   arguments:
     - arg: THTensor* result
       output: True
