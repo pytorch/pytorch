@@ -172,7 +172,7 @@ MANUAL_IMPLEMENTATIONS = {
 }
 # These functions require manual Python bindings or are not exposed to Python
 SKIP_PYTHON_BINDINGS = [
-    'alias', 'contiguous', 'clamp.*', 'is_cuda', 'is_sparse', 'size', 'stride',
+    'alias', 'contiguous', 'clamp.*', 'is_cuda', 'is_sparse', 'size', 'stride', 'slice_dim',
     '.*_backward'
 ]
 # These functions we don't want to record for tracing, because we always want
