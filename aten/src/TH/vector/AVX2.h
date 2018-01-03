@@ -1,6 +1,7 @@
 #ifndef TH_AVX2_H
 #define TH_AVX2_H
 
+#include <stdint.h>
 #include <stddef.h>
 
 struct THGenerator;
