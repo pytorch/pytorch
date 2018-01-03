@@ -175,7 +175,7 @@ __global__ void renorm_kernel(
   v = reduceBlock<accscalar_t>(sdata, blockDim.x, v, Op(), 0);
 
   if (tid == 0) {
-    sdata[0] = std::pow(v, 1.0 / scalar_cast<accscalar_t>(norm_type));
+    sdata[0] = std::pow(v, scalar_cast<accscalar_t>(1.0 / norm_type));
   }
   __syncthreads();
 
