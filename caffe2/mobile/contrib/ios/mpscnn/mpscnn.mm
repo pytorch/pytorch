@@ -21,9 +21,10 @@
 
 #include "caffe2/core/operator.h"
 #include "caffe2/core/timer.h"
-#include "caffe2/mobile/fb/aloha/headers.h"
 #include "caffe2/operators/conv_pool_op_base.h"
 #include "caffe2/operators/conv_transpose_unpool_op_base.h"
+#include "caffe2/operators/generate_proposals_op.h"
+#include "caffe2/operators/generate_proposals_op_util_boxes.h"
 #include "caffe2/operators/spatial_batch_norm_op.h"
 
 #include "mpscnn.h"
