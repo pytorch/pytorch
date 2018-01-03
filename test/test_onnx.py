@@ -1,11 +1,12 @@
 import io
+import torch
 from common import TestCase
 from torch.autograd import Variable
 
 
 class TestONNXExport(TestCase):
     """
-    Ensures that basic pytorch Modules can be exported to onnx without errors
+    Test that basic pytorch Modules can be exported to onnx without errors
     """
 
     def test_export_linear_bias(self):
