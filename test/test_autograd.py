@@ -1614,6 +1614,17 @@ class TestAutograd(TestCase):
                               lambda a, b, c, dim: torch.cat((a, b, c), dim),
                               True, f_args_variable, f_args_tensor)
 
+    def test_cat_empty(self):
+        f_args_variable = (Variable(torch.randn(0), requires_grad=True),
+                           Variable(torch.randn(S, S), requires_grad=True))
+        # gradgradcheck doesn't work (because gradcheck doesn't work for empty outputs?)
+        # hence False passed below, but gradcheck checked explicitly.
+        f_args_tensor = deepcopy(unpack_variables(f_args_variable))
+        run_functional_checks(self, "test_cat_empty", "cat",
+                              lambda a, b: torch.cat((a, b)),
+                              False, f_args_variable, f_args_tensor)
+        self.assertTrue(gradcheck(lambda a, b: torch.cat((a, b)), f_args_variable, eps=1e-6, atol=PRECISION))
+
     @skipIfNoLapack
     def test_potrf(self):
         root = Variable(torch.tril(torch.rand(S, S)), requires_grad=True)
