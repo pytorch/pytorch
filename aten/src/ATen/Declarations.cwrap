@@ -1158,7 +1158,7 @@
     - method
     - function
   arguments:
-    - arg: THTensor* destination
+    - arg: THTensor* result
       output: True
     - THTensor* self
 ]]
@@ -1954,7 +1954,7 @@
       return: argument 0
       scalar_check: keepdim == false && self_->dim() == 1
       arguments:
-        - arg: THTensor* destination
+        - arg: THTensor* result
           output: True
         - THTensor* self
         - arg: long dim
@@ -1985,7 +1985,7 @@
       return: argument 0
       scalar_check: keepdim == false && self_->dim() == 1
       arguments:
-        - arg: THTensor* destination
+        - arg: THTensor* result
           output: True
         - THTensor* self
         - arg: long dim
@@ -2020,7 +2020,7 @@
       return: argument 0
       scalar_check: keepdim == false && self_->dim() == 1
       arguments:
-        - arg: THTensor* destination
+        - arg: THTensor* result
           output: True
         - THTensor* self
         - arg: long dim
@@ -2053,7 +2053,7 @@
       return: argument 0
       scalar_check: keepdim == false && self_->dim() == 1
       arguments:
-        - arg: THTensor* destination
+        - arg: THTensor* result
           output: True
         - THTensor* self
         - arg: real p
@@ -2075,7 +2075,7 @@
     - function
   return: argument 0
   arguments:
-    - arg: THTensor* destination
+    - arg: THTensor* result
       output: True
     - THTensor* self
     - real p
@@ -2134,7 +2134,7 @@
     - cname: cinv
       return: argument 0
       arguments:
-        - arg: THTensor* destination
+        - arg: THTensor* result
           output: True
         - THTensor* self
 ]]
@@ -2164,7 +2164,7 @@
     - cname: neg
       return: argument 0
       arguments:
-        - arg: THTensor* destination
+        - arg: THTensor* result
           output: True
         - THTensor* self
 ]]
@@ -2193,7 +2193,7 @@
   cname: atan2
   return: argument 0
   arguments:
-    - arg: THTensor* destination
+    - arg: THTensor* result
       output: True
     - arg: THTensor* self
       broadcast: other fallback
@@ -2228,20 +2228,20 @@
   options:
     - cname: pow
       arguments:
-        - arg: THTensor* destination
+        - arg: THTensor* result
           output: True
         - THTensor* self
         - real exponent
     - cname: cpow
       arguments:
-        - arg: THTensor* destination
+        - arg: THTensor* result
           output: True
         - arg: THTensor* self
           broadcast: exponent fallback
         - THTensor* exponent
     - cname: tpow
       arguments:
-        - arg: THTensor* destination
+        - arg: THTensor* result
           output: True
         - real base
         - THTensor* self
@@ -2281,7 +2281,7 @@
   return: argument 0
   cname: lerp
   arguments:
-    - arg: THTensor* destination
+    - arg: THTensor* result
       output: True
     - arg: THTensor* self
       broadcast: end fallback
@@ -2352,7 +2352,7 @@
     - function
   return: argument 0
   arguments:
-    - arg: THTensor* destination
+    - arg: THTensor* result
       output: True
     - THTensor* self
     - arg: long bins
@@ -2745,7 +2745,7 @@
     - function
   return: argument 0
   arguments:
-    - arg: THTensor* destination
+    - arg: THTensor* result
       output: True
     - THTensor* self
     - real min
@@ -2835,7 +2835,7 @@
     - function
   return: argument 0
   arguments:
-    - arg: THTensor* destination
+    - arg: THTensor* result
       output: True
     - THTensor* self
     - arg: long diagonal
@@ -2858,7 +2858,7 @@
     - function
   return: argument 0
   arguments:
-    - arg: THTensor* destination
+    - arg: THTensor* result
       output: True
     - THTensor* self
     - arg: long diagonal
@@ -2881,7 +2881,7 @@
     - function
   return: argument 0
   arguments:
-    - arg: THTensor* destination
+    - arg: THTensor* result
       output: True
     - THTensor* self
     - THTensor* other
