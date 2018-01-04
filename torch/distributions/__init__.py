@@ -40,6 +40,7 @@ from .exponential import Exponential
 from .gamma import Gamma
 from .chi2 import Chi2
 from .laplace import Laplace
+from .multinomial import Multinomial
 from .normal import Normal
 from .one_hot_categorical import OneHotCategorical
 from .uniform import Uniform
@@ -55,6 +56,7 @@ __all__ = [
     'Exponential',
     'Gamma',
     'Laplace',
+    'Multinomial',
     'Normal',
     'OneHotCategorical',
     'Uniform',
