@@ -16,8 +16,8 @@ class Adam(Optimizer):
             running averages of gradient and its square (default: (0.9, 0.999))
         eps (float, optional): term added to the denominator to improve
             numerical stability (default: 1e-8)
-        weight_decay (float, optional): weight decay (L2 penalty) using the 
-            method from the paper `Fixing Weight Decay Regularization in 
+        weight_decay (float, optional): weight decay (L2 penalty) using the
+            method from the paper `Fixing Weight Decay Regularization in
             Adam` (default: 0)
         amsgrad (boolean, optional): whether to use the AMSGrad variant of this
             algorithm from the paper `On the Convergence of Adam and Beyond`_

@@ -13,8 +13,8 @@ class SGD(Optimizer):
             parameter groups
         lr (float): learning rate
         momentum (float, optional): momentum factor (default: 0)
-        weight_decay (float, optional): weight decay (L2 penalty) using the 
-            method from the paper `Fixing Weight Decay Regularization in 
+        weight_decay (float, optional): weight decay (L2 penalty) using the
+            method from the paper `Fixing Weight Decay Regularization in
             Adam` (default: 0)
         dampening (float, optional): dampening for momentum (default: 0)
         nesterov (bool, optional): enables Nesterov momentum (default: False)
