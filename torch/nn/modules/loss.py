@@ -1,3 +1,5 @@
+import warnings
+
 from torch.autograd import Variable
 import torch
 from .module import Module
@@ -93,8 +95,9 @@ class NLLLoss(_WeightedLoss):
     unbalanced training set.
 
     The input given through a forward call is expected to contain
-    log-probabilities of each class: input has to be a 2D Tensor of size
-    `(minibatch, C)`
+    log-probabilities of each class. input has to be a Tensor of size either
+    :math:`(minibatch, C)` or :math:`(minibatch, C, d_1, d_2, ..., d_K)`
+    with :math:`K >= 2` for the `K`-dimensional case (described later).
 
     Obtaining log-probabilities in a neural network is easily achieved by
     adding a  `LogSoftmax`  layer in the last layer of your network.
@@ -122,6 +125,11 @@ class NLLLoss(_WeightedLoss):
             \text{size_average} = \text{False}.
         \end{cases}
 
+    Can also be used for higher dimension inputs, such as 2D images, by providing
+    an input of size :math:`(minibatch, C, d_1, d_2, ..., d_K)` with :math:`K >= 2`,
+    where :math:`K` is the number of dimensions, and a target of appropriate shape
+    (see below). In the case of images, it computes NLL loss per-pixel.
+
     Args:
         weight (Tensor, optional): a manual rescaling weight given to each
            class. If given, it has to be a Tensor of size `C`. Otherwise, it is
@@ -141,15 +149,16 @@ class NLLLoss(_WeightedLoss):
             ignores :attr:`size_average`. Default: ``True``
 
     Shape:
-        - Input: :math:`(N, C)` where `C = number of classes`.
-            In the case of K-dimensional loss where :math:`K >= 2`, then
-            :math:`(N, C, *)` where `*` is `K` extra dimensions.
-        - Target: :math:`(N)` where each value is `0 <= targets[i] <= C-1`.
-            In the case of K-dimensional loss, where :math:`K >= 2`, then
-            :math:`(N, C, *)` where `*` is `K` extra dimensions.
-        - Output: scalar. If reduce is ``False``, then :math:`(N)` instead.
-            In the case of K-dimensional loss and reduce is ``False``, then
-            :math:`(N, C, *)`, the same size as the target.
+        - Input: :math:`(N, C)` where `C = number of classes`, or
+            :math:`(N, C, d_1, d_2, ..., d_K)` with :math:`K >= 2`
+            in the case of `K`-dimensional loss.
+        - Target: :math:`(N)` where each value is `0 <= targets[i] <= C-1`, or
+            :math:`(N, d_1, d_2, ..., d_K)` with :math:`K >= 2` in the case of
+            K-dimensional loss.
+        - Output: :math:`(1)`. If reduce is ``False``, then the same size
+            as the target: :math:`(N)`, or
+            :math:`(N, d_1, d_2, ..., d_K)` with :math:`K >= 2` in the case
+            of K-dimensional loss.
 
     Examples::
 
@@ -160,6 +169,18 @@ class NLLLoss(_WeightedLoss):
         >>> # each element in target has to have 0 <= value < C
         >>> target = autograd.Variable(torch.LongTensor([1, 0, 4]))
         >>> output = loss(m(input), target)
+        >>> output.backward()
+        >>>
+        >>>
+        >>> # 2D loss example (used, for example, with image inputs)
+        >>> N, C = 5, 4
+        >>> loss = nn.NLLLoss()
+        >>> # input is of size N x C x height x width
+        >>> data = Variable(torch.randn(N, 16, 10, 10))
+        >>> m = nn.Conv2d(16, C, (3, 3))
+        >>> # each element in target has to have 0 <= value < C
+        >>> target = Variable(torch.LongTensor(N, 8, 8).random_(0, C))
+        >>> output = loss(m(data), target)
         >>> output.backward()
     """
 
@@ -175,46 +196,11 @@ class NLLLoss(_WeightedLoss):
 
 
 class NLLLoss2d(NLLLoss):
-    r"""This is negative log likehood loss, but for image inputs. It computes
-    NLL loss per-pixel.
-
-    Args:
-        weight (Tensor, optional): a manual rescaling weight given to each
-            class. If given, has to be a 1D Tensor having as many elements,
-            as there are classes.
-        size_average: By default, the losses are averaged over observations
-            for each minibatch. However, if the field :attr:`size_average` is
-            set to ``False``, the losses are instead summed for each minibatch.
-            Ignored when :attr:`reduce` is ``False``. Default: ``True``
-        ignore_index (int, optional): Specifies a target value that is ignored
-            and does not contribute to the input gradient. When
-            :attr:`size_average` is ``True``, the loss is averaged over
-            non-ignored targets.
-        reduce (bool, optional): By default, the losses are averaged or summed
-            for each minibatch depending on :attr:`size_average`. When
-            :attr:`reduce` is ``False``, the loss function returns a loss per
-            batch element instead and ignores :attr:`size_average`.
-            Default: ``True``
-
-
-    Shape:
-        - Input: :math:`(N, C, H, W)` where `C = number of classes`
-        - Target: :math:`(N, H, W)` where each value is `0 <= targets[i] <= C-1`
-        - Output: scalar. If :attr:`reduce` is ``False``, then :math:`(N, H, W)` instead.
-
-    Examples::
-
-        >>> N, C = 5, 4
-        >>> loss = nn.NLLLoss2d()
-        >>> # input is of size N x C x height x width
-        >>> data = Variable(torch.randn(N, 16, 10, 10))
-        >>> m = nn.Conv2d(16, C, (3, 3))
-        >>> # each element in target has to have 0 <= value < C
-        >>> target = Variable(torch.LongTensor(N, 8, 8).random_(0, C))
-        >>> output = loss(m(data), target)
-        >>> output.backward()
-    """
-    pass
+    def __init__(self, weight=None, size_average=True, ignore_index=-100, reduce=True):
+        warnings.warn("NLLLoss2d has been deprecated. "
+                      "Please use NLLLoss instead as a drop-in replacement and see "
+                      "http://pytorch.org/docs/master/nn.html#torch.nn.NLLLoss for more details.")
+        super(NLLLoss2d, self).__init__(weight, size_average, ignore_index, reduce)
 
 
 class PoissonNLLLoss(_Loss):

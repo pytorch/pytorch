@@ -1155,13 +1155,12 @@ def nll_loss(input, target, weight=None, size_average=True, ignore_index=-100, r
     See :class:`~torch.nn.NLLLoss` for details.
 
     Args:
-        input: :math:`(N, C)` where `C = number of classes` or `(N, C, H, W)`
-            in case of 2D Loss, or `(N, C, *) in the case of K-dimensional Loss,
-            where :math:`K > 2` and `*` is `K` extra dimensions.
-        target: :math:`(N)` where each value is `0 <= targets[i] <= C-1`.
-            In the case of 2D Loss, then :math:`(N, H, W)`. For K-dimensional
-            Loss where :math:`K > 2`, then :math:`(N, *)`, where `*` is `K`
-            extra dimensions.
+        input: :math:`(N, C)` where `C = number of classes` or :math:`(N, C, H, W)`
+            in case of 2D Loss, or :math:`(N, C, d_1, d_2, ..., d_K)` where :math:`K > 2`
+            in the case of K-dimensional loss.
+        target: :math:`(N)` where each value is `0 <= targets[i] <= C-1`,
+            or :math:`(N, C, d_1, d_2, ..., d_K)` where :math:`K >= 2` for
+            K-dimensional loss.
         weight (Tensor, optional): a manual rescaling weight given to each
             class. If given, has to be a Tensor of size `C`
         size_average (bool, optional): By default, the losses are averaged

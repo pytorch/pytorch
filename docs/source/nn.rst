@@ -524,12 +524,6 @@ Loss functions
 .. autoclass:: PoissonNLLLoss
     :members:
 
-:hidden:`NLLLoss2d`
-~~~~~~~~~~~~~~~~~~~
-
-.. autoclass:: NLLLoss2d
-    :members:
-
 :hidden:`KLDivLoss`
 ~~~~~~~~~~~~~~~~~~~
 

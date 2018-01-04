@@ -427,32 +427,6 @@ criterion_tests = [
         desc='weights',
     ),
     dict(
-        module_name='NLLLoss2d',
-        input_size=(2, 3, 5, 5),
-        target_fn=lambda: torch.rand(2, 5, 5).mul(3).floor().long(),
-        reference_fn=lambda i, t, m:
-            nlllossNd_reference(i, t, size_average=get_size_average(m)),
-        check_no_size_average=True,
-    ),
-    dict(
-        module_name='NLLLoss2d',
-        constructor_args_fn=lambda: (torch.rand(3),),
-        input_size=(2, 3, 5, 5),
-        target=torch.rand(2, 5, 5).mul(3).floor().long(),
-        reference_fn=lambda i, t, m:
-            nlllossNd_reference(i, t, weight=get_weight(m)),
-        desc='weights',
-    ),
-    dict(
-        module_name='NLLLoss2d',
-        constructor_args=(None, True, 1),
-        input_size=(2, 3, 5, 5),
-        target_fn=lambda: torch.rand(2, 5, 5).mul(3).floor().long(),
-        reference_fn=lambda i, t, m:
-            nlllossNd_reference(i, t, ignore_index=1),
-        desc='ignore_index',
-    ),
-    dict(
         module_name='HingeEmbeddingLoss',
         input_size=(10,),
         target_fn=lambda: torch.randn(10).gt(0).double().mul_(2).sub(1),

@@ -617,6 +617,11 @@ def prepare_tests():
         test_params = deepcopy(test_params)
         name = test_params.pop('module_name')
         name = name_remap.get(name, name.replace('Loss', 'Criterion'))
+
+        # nn.NLLLoss2d is deprecated, but there is a NLLLoss test for 2d
+        if name == 'ClassNLLCriterion' and 'desc' in test_params.keys() and '2d' in test_params['desc']:
+            name = 'SpatialClassNLLCriterion'
+
         test_params['constructor'] = getattr(nn, name)
         test = CriterionTest(**test_params)
         add_test(test)
