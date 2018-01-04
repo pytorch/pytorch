@@ -110,15 +110,16 @@ def get_analytical_jacobian(input, output):
             zero_gradients(input)
             output.backward(grad_output, create_graph=True)
             for jacobian_x, (d_x, x) in zip(jacobian_c, iter_variables(input)):
-                if d_x is None:
-                    jacobian_x[:, i].zero_()
-                else:
-                    if d_x.size() != x.size():
-                        correct_grad_sizes = False
-                    jacobian_x[:, i] = d_x.to_dense() if d_x.is_sparse else d_x
+                if jacobian_x.numel() != 0:
+                    if d_x is None:
+                        jacobian_x[:, i].zero_()
+                    else:
+                        jacobian_x[:, i] = d_x.to_dense() if d_x.is_sparse else d_x
+                if d_x is not None and d_x.size() != x.size():
+                    correct_grad_sizes = False
 
     for jacobian_x, jacobian_reentrant_x in zip(jacobian, jacobian_reentrant):
-        if (jacobian_x - jacobian_reentrant_x).abs().max() != 0:
+        if jacobian_x.numel() != 0 and (jacobian_x - jacobian_reentrant_x).abs().max() != 0:
             reentrant = False
 
     return jacobian, reentrant, correct_grad_sizes
@@ -178,8 +179,9 @@ def gradcheck(func, inputs, eps=1e-6, atol=1e-5, rtol=1e-3, raise_exception=True
         numerical = get_numerical_jacobian(fn, inputs, inputs, eps)
 
         for j, (a, n) in enumerate(zip(analytical, numerical)):
-            if not ((a - n).abs() <= (atol + rtol * n.abs())).all():
-                return fail_test('for output no. %d,\n numerical:%s\nanalytical:%s\n' % (j, numerical, analytical))
+            if a.numel() != 0 or n.numel() != 0:
+                if not ((a - n).abs() <= (atol + rtol * n.abs())).all():
+                    return fail_test('for output no. %d,\n numerical:%s\nanalytical:%s\n' % (j, numerical, analytical))
 
         if not reentrant:
             return fail_test('not reentrant')

@@ -323,7 +323,11 @@ variable_list cat_tensors_backward(const Tensor & grad, const std::vector<int64_
   for (size_t i = 0; i < sizes.size(); ++i) {
     auto size = sizes[i];
     accumulate += size;
-    grad_inputs[i] = grad.narrow(dim, accumulate - size, size);
+    if (size == 0) {
+      grad_inputs[i] = grad.type().zeros({0});
+    } else {
+      grad_inputs[i] = grad.narrow(dim, accumulate - size, size);
+    }
   }
   return grad_inputs;
 }
