@@ -3383,7 +3383,7 @@ void THTensor_(linspace)(THTensor *r_, real a, real b, int64_t n)
     THTensor_(set1d)(r_, 0, a);
   } else {
      TH_TENSOR_APPLY(real, r_,
-             *r__data = a + i*(b-a)/((real)(n-1));
+             *r__data = a + (b-a)/((real)(n-1))*i;
              i++;
            );
   }
