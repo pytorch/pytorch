@@ -2,6 +2,62 @@
 #define THC_GENERIC_FILE "generic/THCTensorIndex.cu"
 #else
 
+// Check tensor dimensions for index operations, and return the slice size.
+// src can be nullptr in case of indexFill: in that case it is ignored.
+static ptrdiff_t THCTensor_(getSliceSize)(THCState *state, THCTensor *dst,
+                                          int dim,
+                                          THCudaLongTensor *index,
+                                          THCTensor *src)
+{
+  int dstDims = THCTensor_(nDimension)(state, dst);
+  int srcDims = (src == nullptr) ? dstDims : THCTensor_(nDimension)(state, src);
+
+  THArgCheck(THCudaLongTensor_nDimension(state, index) == 1, 4,
+             "expecting vector of indices");
+  THArgCheck(dim >= 0 && dim < dstDims, 2, "Indexing dim is out of bounds");
+
+  ptrdiff_t dstSliceSize = 1;
+  for (int d = 0; d < dstDims; d++) {
+    if (d != dim) {
+      dstSliceSize *= dst->size[d];
+    }
+  }
+
+  if (src == nullptr) return dstSliceSize;
+
+  THArgCheck(dim < srcDims, 3, "Indexing dim is out of bounds");
+  THArgCheck(THCudaLongTensor_nElement(state, index) == src->size[dim], 4,
+             "length of src.size[dim] is not equal to length of indices");
+
+  ptrdiff_t srcSliceSize = 1;
+  bool mismatch = false;
+
+  if (dstDims != srcDims) mismatch = true;
+
+  for (int d = 0; d < srcDims; d++) {
+    if (d != dim) {
+      srcSliceSize *= src->size[d];
+      if (!mismatch && dst->size[d] != src->size[d]) mismatch = true;
+    }
+  }
+
+  THArgCheck(dstSliceSize == srcSliceSize, 2,
+             "Source/destination tensor have different slice sizes (%ld vs %ld)",
+             dstSliceSize, srcSliceSize);
+
+  if (mismatch) {
+    static bool warningShown = false;
+    if (!warningShown) {
+      warningShown = true;
+      fprintf(stderr,
+              "Warning: source/destination slices have same size but different "
+              "shape for an index operation.  This behavior is deprecated.\n");
+    }
+  }
+
+  return dstSliceSize;
+}
+
 void THCTensor_(indexCopy_long)(THCState *state, THCTensor *dst, int dim, THLongTensor *indices, THCTensor *src)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, dst, src));
@@ -26,27 +82,18 @@ void THCTensor_(indexCopy)(THCState *state, THCTensor *dst, int dim, THCudaLongT
   dims = THCudaLongTensor_nDimension(state, indices);
   THArgCheck(dims <= MAX_CUTORCH_DIMS, 4, CUTORCH_DIM_WARNING);
 
-  ptrdiff_t numIndices = THCudaLongTensor_nElement(state, indices);
-
-  int srcDims = THCTensor_(nDimension)(state, src);
-  cudaStream_t stream = THCState_getCurrentStream(state);
-
-  THArgCheck(THCudaLongTensor_nDimension(state, indices) == 1, 3,
-             "expecting vector of indices");
-  THArgCheck(dim < srcDims, 4, "Indexing dim is out of bounds");
-  THArgCheck(srcDims > 0, 2, "Source tensor is empty");
-  THArgCheck(numIndices == src->size[dim], 4, "length of src.size[dim] is not equal to length of indices");
-
-  int indContig = THCudaLongTensor_isContiguous(state, indices);
-
   // The `src` is partitioned into two parts:
   // -the size of each slice we are indexing, which is the
   // total size of the tensor ignoring dimension `dim`;
   // -the number of indices we are choosing, which is the total size
   // of the tensor `indices`.
+  ptrdiff_t sliceSize = THCTensor_(getSliceSize)(state, dst, dim, indices, src);
   ptrdiff_t srcTotalSize = THCTensor_(nElement)(state, src);
   int64_t dstCopyDimSize = THCTensor_(size)(state, dst, dim);
-  ptrdiff_t sliceSize = srcTotalSize / numIndices;
+
+  ptrdiff_t numIndices = THCudaLongTensor_nElement(state, indices);
+  cudaStream_t stream = THCState_getCurrentStream(state);
+  int indContig = THCudaLongTensor_isContiguous(state, indices);
 
   int mpc = THCState_getCurrentDeviceProperties(state)->multiProcessorCount;
 
@@ -221,27 +268,18 @@ void THCTensor_(indexAdd)(THCState *state, THCTensor *dst, int dim, THCudaLongTe
   dims = THCudaLongTensor_nDimension(state, indices);
   THArgCheck(dims <= MAX_CUTORCH_DIMS, 4, CUTORCH_DIM_WARNING);
 
-  ptrdiff_t numIndices = THCudaLongTensor_nElement(state, indices);
-
-  int srcDims = THCTensor_(nDimension)(state, src);
-  cudaStream_t stream = THCState_getCurrentStream(state);
-
-  THArgCheck(THCudaLongTensor_nDimension(state, indices) == 1, 3,
-             "expecting vector of indices");
-  THArgCheck(dim < srcDims, 4, "Indexing dim is out of bounds");
-  THArgCheck(srcDims > 0, 2, "Source tensor is empty");
-  THArgCheck(numIndices == src->size[dim], 4, "length of src.size[dim] is not equal to length of indices");
-
-  int indContig = THCudaLongTensor_isContiguous(state, indices);
-
   // The `src` is partitioned into two parts:
   // -the size of each slice we are indexing, which is the
   // total size of the tensor ignoring dimension `dim`;
   // -the number of indices we are choosing, which is the total size
   // of the tensor `indices`.
+  ptrdiff_t sliceSize = THCTensor_(getSliceSize)(state, dst, dim, indices, src);
   ptrdiff_t srcTotalSize = THCTensor_(nElement)(state, src);
   int64_t dstAddDimSize = THCTensor_(size)(state, dst, dim);
-  ptrdiff_t sliceSize = srcTotalSize / numIndices;
+
+  ptrdiff_t numIndices = THCudaLongTensor_nElement(state, indices);
+  cudaStream_t stream = THCState_getCurrentStream(state);
+  int indContig = THCudaLongTensor_isContiguous(state, indices);
 
   int mpc = THCState_getCurrentDeviceProperties(state)->multiProcessorCount;
 
@@ -346,26 +384,19 @@ void THCTensor_(indexFill)(THCState *state, THCTensor *dst, int dim, THCudaLongT
   dims = THCudaLongTensor_nDimension(state, indices);
   THArgCheck(dims <= MAX_CUTORCH_DIMS, 4, CUTORCH_DIM_WARNING);
 
-  ptrdiff_t numIndices = THCudaLongTensor_nElement(state, indices);
-
-  int srcDims = THCTensor_(nDimension)(state, dst);
-  cudaStream_t stream = THCState_getCurrentStream(state);
-
-  THArgCheck(THCudaLongTensor_nDimension(state, indices) == 1, 3,
-             "expecting vector of indices");
-  THArgCheck(dim < srcDims, 4, "Indexing dim is out of bounds");
-  THArgCheck(srcDims > 0, 2, "Source tensor is empty");
-
-  int indContig = THCudaLongTensor_isContiguous(state, indices);
-
   // The `src` is partitioned into two parts:
   // -the size of each slice we are indexing, which is the
   // total size of the tensor ignoring dimension `dim`;
   // -the number of indices we are choosing, which is the total size
   // of the tensor `indices`.
+  ptrdiff_t sliceSize =
+    THCTensor_(getSliceSize)(state, dst, dim, indices, nullptr);
   ptrdiff_t dstTotalSize = THCTensor_(nElement)(state, dst);
   int64_t dstFillDimSize = THCTensor_(size)(state, dst, dim);
-  ptrdiff_t sliceSize = dstTotalSize / dstFillDimSize;
+
+  ptrdiff_t numIndices = THCudaLongTensor_nElement(state, indices);
+  cudaStream_t stream = THCState_getCurrentStream(state);
+  int indContig = THCudaLongTensor_isContiguous(state, indices);
 
   int mpc = THCState_getCurrentDeviceProperties(state)->multiProcessorCount;
 
