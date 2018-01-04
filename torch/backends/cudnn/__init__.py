@@ -1,3 +1,4 @@
+import os
 import ctypes
 import sys
 import torch
@@ -6,7 +7,11 @@ from torch.version import cuda
 from contextlib import contextmanager
 from subprocess import Popen, PIPE
 
-enabled = True  # set to False to globally disable cuDNN
+# Write:
+#
+#   torch.backends.cudnn.enabled = False
+#
+# to globally disable CuDNN
 
 lib = None
 __cudnn_version = None
@@ -56,7 +61,7 @@ def version():
 
 
 def is_acceptable(tensor):
-    if not enabled:
+    if not torch._C._get_cudnn_enabled():
         return False
     if not (isinstance(tensor, torch.cuda.HalfTensor) or
             isinstance(tensor, torch.cuda.FloatTensor) or
@@ -79,8 +84,6 @@ def is_acceptable(tensor):
 
 _handles = {}
 
-deterministic = False
-benchmark = False
 verbose = False
 
 CUDNN_DATA_FLOAT = 0
@@ -107,9 +110,15 @@ CUDNN_TENSOR_OP_MATH = 1
 
 
 def set_flags(_enabled, _benchmark, _deterministic, _verbose):
-    global enabled, benchmark, deterministic, verbose
-    orig_flags = enabled, benchmark, deterministic, verbose
-    enabled, benchmark, deterministic, verbose = _enabled, _benchmark, _deterministic, _verbose
+    global benchmark, deterministic, verbose
+    orig_flags = (torch._C._get_cudnn_enabled(),
+                  torch._C._get_cudnn_benchmark(),
+                  torch._C._get_cudnn_deterministic(),
+                  verbose)
+    verbose = _verbose
+    torch._C._set_cudnn_enabled(_enabled)
+    torch._C._set_cudnn_benchmark(_benchmark)
+    torch._C._set_cudnn_deterministic(_deterministic)
     return orig_flags
 
 
@@ -276,10 +285,11 @@ class RNNDescriptor(object):
                 CUDNN_RNN_ALGO_STANDARD,
                 datatype
             ))
-        if version() >= 7000 and int(cuda[0]) >= 9:
-            lib.cudnnSetRNNMatrixMathType(self, CUDNN_DEFAULT_MATH)
-            if datatype == CUDNN_DATA_HALF:
-                lib.cudnnSetRNNMatrixMathType(self, CUDNN_TENSOR_OP_MATH)
+            if version() >= 7000 and int(cuda[0]) >= 9 and (
+                    torch.cuda.get_device_capability(torch.cuda.current_device())[0] >= 7):
+                lib.cudnnSetRNNMatrixMathType(self, CUDNN_DEFAULT_MATH)
+                if datatype == CUDNN_DATA_HALF:
+                    lib.cudnnSetRNNMatrixMathType(self, CUDNN_TENSOR_OP_MATH)
         else:
             check_error(lib.cudnnSetRNNDescriptor(
                 self,
@@ -372,3 +382,35 @@ def descriptor_sequence(tensor, batch_sizes):
 
 def add_tensor(*args):
     check_error(lib.cudnnAddTensor(*args))
+
+
+# The magic here is to allow us to intercept code like this:
+#
+#   torch.backends.cudnn.enabled = True
+
+class ContextProp(object):
+    def __init__(self, getter, setter):
+        self.getter = getter
+        self.setter = setter
+
+    def __get__(self, obj, objtype):
+        return self.getter()
+
+    def __set__(self, obj, val):
+        self.setter(val)
+
+
+class CudnnModule(object):
+    def __init__(self, m):
+        self.__dict__ = m.__dict__
+        # You have to retain the old module, otherwise it will
+        # get GC'ed and a lot of things will break.  See:
+        # https://stackoverflow.com/questions/47540722/how-do-i-use-the-sys-modules-replacement-trick-in-init-py-on-python-2
+        self.__old_mod = m
+    enabled = ContextProp(torch._C._get_cudnn_enabled, torch._C._set_cudnn_enabled)
+    deterministic = ContextProp(torch._C._get_cudnn_deterministic, torch._C._set_cudnn_deterministic)
+    benchmark = ContextProp(torch._C._get_cudnn_benchmark, torch._C._set_cudnn_benchmark)
+
+# This is the sys.modules replacement trick, see
+# https://stackoverflow.com/questions/2447353/getattr-on-a-module/7668273#7668273
+sys.modules[__name__] = CudnnModule(sys.modules[__name__])

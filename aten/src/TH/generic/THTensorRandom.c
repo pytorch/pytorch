@@ -64,6 +64,21 @@ void THTensor_(bernoulli_DoubleTensor)(THTensor *self, THGenerator *_generator, 
 
 #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
 
+#if defined(TH_REAL_IS_FLOAT)
+#define TH_REAL_MIN FLT_MIN
+#elif defined(TH_REAL_IS_DOUBLE)
+#define TH_REAL_MIN DBL_MIN
+#endif
+
+void THTensor_(bernoulli_Tensor)(THTensor *self, THGenerator *_generator, THTensor* p)
+{
+#if defined(TH_REAL_IS_FLOAT)
+  THTensor_(bernoulli_FloatTensor)(self, _generator, p);
+#else
+  THTensor_(bernoulli_DoubleTensor)(self, _generator, p);
+#endif
+}
+
 void THTensor_(uniform)(THTensor *self, THGenerator *_generator, double a, double b)
 {
   #if defined(TH_REAL_IS_FLOAT)
@@ -75,9 +90,14 @@ void THTensor_(uniform)(THTensor *self, THGenerator *_generator, double a, doubl
   #endif
 }
 
-void THTensor_(normal)(THTensor *self, THGenerator *_generator, double mean, double stdv)
+void THTensor_(normal)(THTensor *self, THGenerator *_generator, double mean, double stddev)
 {
-  TH_TENSOR_APPLY(real, self, *self_data = (real)THRandom_normal(_generator, mean, stdv););
+  const int64_t size = THTensor_(numel)(self);
+  if (size >= 16 && THTensor_(isContiguous)(self)) {
+    THVector_(normal_fill)(self->storage->data, size, _generator, mean, stddev);
+  } else {
+    TH_TENSOR_APPLY(real, self, *self_data = (real)THRandom_normal(_generator, mean, stddev););
+  }
 }
 
 void THTensor_(normal_means)(THTensor *self, THGenerator *gen, THTensor *means, double stddev)
@@ -108,6 +128,17 @@ void THTensor_(exponential)(THTensor *self, THGenerator *_generator, double lamb
   TH_TENSOR_APPLY(real, self, *self_data = (real)THRandom_exponential(_generator, lambda););
 }
 
+void THTensor_(standard_gamma)(THTensor *self, THGenerator *gen, THTensor *alpha)
+{
+  THTensor_(resizeAs)(self, alpha);
+  TH_TENSOR_APPLY2(real, self, real, alpha, {
+    const real sample = THRandom_standard_gamma(gen, *alpha_data);
+    *self_data = sample > 0 ? sample : TH_REAL_MIN;
+  });
+}
+
+#undef TH_REAL_MIN
+
 void THTensor_(cauchy)(THTensor *self, THGenerator *_generator, double median, double sigma)
 {
   TH_TENSOR_APPLY(real, self, *self_data = (real)THRandom_cauchy(_generator, median, sigma););
@@ -117,7 +148,6 @@ void THTensor_(logNormal)(THTensor *self, THGenerator *_generator, double mean, 
 {
   TH_TENSOR_APPLY(real, self, *self_data = (real)THRandom_logNormal(_generator, mean, stdv););
 }
-
 
 void THTensor_(multinomialAliasSetup)(THTensor *probs, THLongTensor *J, THTensor *q)
 {
@@ -248,7 +278,7 @@ void THTensor_(multinomial)(THLongTensor *self, THGenerator *_generator, THTenso
   THArgCheckWithCleanup(n_sample > 0,
     THCleanup(if (start_dim == 1) THTensor_(resize1d)(prob_dist, n_categories);),
     2,
-    "cannot sample n_sample < 0 samples");
+    "cannot sample n_sample <= 0 samples");
 
   if (!with_replacement)
   {
@@ -268,12 +298,18 @@ void THTensor_(multinomial)(THLongTensor *self, THGenerator *_generator, THTenso
   {
     /* Get normalized cumulative distribution from prob distribution */
     double sum = 0;
+    double val;
     for (j=0; j<n_categories; j++)
     {
-      sum += THStorage_(get)( \
+      val = THStorage_(get)( \
         prob_dist->storage, \
         prob_dist->storageOffset+i*prob_dist->stride[0]+j*prob_dist->stride[1] \
       );
+      THArgCheckWithCleanup((val >= 0),
+                            THCleanup(THDoubleTensor_free(cum_dist); if (start_dim == 1) THTensor_(resize1d)(prob_dist, n_categories);),
+                            2,
+                            "invalid multinomial distribution (encountering probability entry < 0)");
+      sum += val;
       THDoubleStorage_set(
         cum_dist->storage, \
         cum_dist->storageOffset+j*cum_dist->stride[0], \
@@ -386,7 +422,6 @@ void THTensor_(multinomial)(THLongTensor *self, THGenerator *_generator, THTenso
     THTensor_(resize1d)(prob_dist, n_categories);
   }
 }
-
 #endif
 
 #if defined(TH_REAL_IS_BYTE)
@@ -412,5 +447,4 @@ void THTensor_(setRNGState)(THGenerator *_generator, THTensor *self)
   THGenerator_copy(_generator, rng_state);
 }
 #endif
-
 #endif

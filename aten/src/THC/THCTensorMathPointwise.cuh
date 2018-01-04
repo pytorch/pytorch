@@ -9,6 +9,14 @@
 #include "THCNumerics.cuh"
 #include "THCReduce.cuh"
 
+
+template <typename T>
+struct TensorATan2Op {
+  __device__ __forceinline__ void operator()(T* out, T* a, T* b) {
+    *out = THCNumerics<T>::atan2(*a, *b);
+  }
+};
+
 template <typename T>
 struct TensorSigmoidOp {
   __device__ __forceinline__ void operator()(T* out, T* in) const {
@@ -771,5 +779,51 @@ struct TensorBitXorOp {
   }
 };
 
+template <typename real, typename accreal>
+struct TensorDigammaOp {
+  using compute_type = typename std::conditional<std::is_same<real, half>::value, accreal, real>::type;
+  __device__ __forceinline__ void
+  operator()(real* out, real* in) {
+    static const compute_type PI = 3.14159265358979323846;
+    compute_type x = ScalarConvert<real, compute_type>::to(*in);
+    compute_type result = 0;
+    if (x < 0.5f) {
+      result -= PI / THCNumerics<compute_type>::tan(PI * x);
+      x = 1 - x;
+    }
+    for (int i = 0; i < 4; ++i) {
+      result -= 1 / x;
+      x += 1;
+    }
+    const compute_type ixx = 1 / (x*x);
+    result += THCNumerics<compute_type>::log(x) - 1 / (2*x) - ixx * (1.f/12 - ixx * (1.f/120 - ixx * (1.f/252)));
+    *out = ScalarConvert<compute_type, real>::to(result);
+  }
+};
+
+template <typename real, typename accreal>
+struct TensorTrigammaOp {
+  using compute_type = typename std::conditional<std::is_same<real, half>::value, accreal, real>::type;
+  __device__ __forceinline__ void
+  operator()(real* out, real* in) {
+    static const compute_type PI = 3.14159265358979323846;
+    compute_type x = ScalarConvert<real, compute_type>::to(*in);
+    compute_type sign = +1;
+    compute_type result = 0;
+    if (x < 0.5f) {
+      sign = -1;
+      compute_type sin_pi_x = THCNumerics<compute_type>::sin(PI * x);
+      result -= (PI * PI) / (sin_pi_x * sin_pi_x);
+      x = 1 - x;
+    }
+    for (int i = 0; i < 6; ++i) {
+      result += 1 / (x * x);
+      x += 1;
+    }
+    const compute_type ixx = 1 / (x*x);
+    result += (1 + 1 / (2*x) + ixx * (1.f/6 - ixx * (1.f/30 - ixx * (1.f/42)))) / x;
+    *out = ScalarConvert<compute_type, real>::to(sign * result);
+  }
+};
 
 #endif // THC_TENSORMATH_POINTWISE_CUH

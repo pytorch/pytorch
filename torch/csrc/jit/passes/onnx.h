@@ -5,6 +5,6 @@
 
 namespace torch { namespace jit {
 
-void ToONNX(std::shared_ptr<tracer::TracingState>& state);
+void ToONNX(std::shared_ptr<tracer::TracingState>& state, bool aten);
 
 }}

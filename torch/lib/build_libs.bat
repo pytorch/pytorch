@@ -25,14 +25,21 @@ IF "%~1"=="--with-cuda" (
   set /a NO_CUDA=1
 )
 
+IF "%~1"=="--with-nnpack" (
+  set /a NO_NNPACK=0
+  shift
+) ELSE (
+  set /a NO_NNPACK=1
+)
+
 IF "%CMAKE_GENERATOR%"=="" (
   set CMAKE_GENERATOR_COMMAND=
   set MAKE_COMMAND=msbuild INSTALL.vcxproj /p:Configuration=Release
 ) ELSE (
-  set CMAKE_GENERATOR_COMMAND=-G %CMAKE_GENERATOR%
+  set CMAKE_GENERATOR_COMMAND=-G "%CMAKE_GENERATOR%"
   IF "%CMAKE_GENERATOR%"=="Ninja" (
-    set CC=cl.exe
-    set CXX=cl.exe
+    IF "%CC%"== "" set CC=cl.exe
+    IF "%CXX%"== "" set CXX=cl.exe
     set MAKE_COMMAND=cmake --build . --target install --config Release -- -j%NUMBER_OF_PROCESSORS% || exit /b 1
   ) ELSE (
     set MAKE_COMMAND=msbuild INSTALL.vcxproj /p:Configuration=Release
@@ -64,7 +71,7 @@ goto:eof
 
 :build
   @setlocal
-  IF NOT "%PREBUILD_COMMAND%"=="" call %PREBUILD_COMMAND%
+  IF NOT "%PREBUILD_COMMAND%"=="" call "%PREBUILD_COMMAND%" %PREBUILD_COMMAND_ARGS%
   mkdir build\%~1
   cd build/%~1
   cmake ../../%~1 %CMAKE_GENERATOR_COMMAND% ^
@@ -90,6 +97,7 @@ goto:eof
                   -DTHNN_SO_VERSION=1 ^
                   -DTHCUNN_SO_VERSION=1 ^
                   -DNO_CUDA=%NO_CUDA% ^
+                  -DNO_NNPACK=%NO_NNPACK% ^
                   -Dnanopb_BUILD_GENERATOR=0 ^
                   -DCMAKE_BUILD_TYPE=Release
 
@@ -101,12 +109,13 @@ goto:eof
 
 :build_aten
   @setlocal
-  IF NOT "%PREBUILD_COMMAND%"=="" call %PREBUILD_COMMAND%
+  IF NOT "%PREBUILD_COMMAND%"=="" call "%PREBUILD_COMMAND%" %PREBUILD_COMMAND_ARGS%
   mkdir build\%~1
   cd build/%~1
   cmake ../../../../%~1 %CMAKE_GENERATOR_COMMAND% ^
                   -DCMAKE_INSTALL_PREFIX="%INSTALL_DIR%" ^
                   -DNO_CUDA=%NO_CUDA% ^
+                  -DNO_NNPACK=%NO_NNPACK% ^
                   -DCUDNN_INCLUDE_DIR="%CUDNN_INCLUDE_DIR%" ^
                   -DCUDNN_LIB_DIR="%CUDNN_LIB_DIR%" ^
                   -DCMAKE_BUILD_TYPE=Release

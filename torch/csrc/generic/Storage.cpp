@@ -190,7 +190,7 @@ static PyObject * THPStorage_(get)(THPStorage *self, PyObject *index)
       nindex += THStorage_(size)(LIBRARY_STATE self->cdata);
     if (nindex < 0 || nindex >= self->cdata->size) {
       PyErr_Format(PyExc_IndexError, "index %" PRId64 " out of range for storage of "
-              "size %" PRId64, nindex, self->cdata->size);
+              "size %" PRId64, (int64_t) nindex, (int64_t) self->cdata->size);
       return NULL;
     }
     real value = THStorage_(get)(LIBRARY_STATE self->cdata, nindex);
@@ -386,6 +386,19 @@ bool THPStorage_(init)(PyObject *module)
   PyModule_AddObject(module, THPStorageBaseStr, (PyObject *)&THPStorageType);
   THPStorage_(initCopyMethods)();
   return true;
+}
+
+void THPStorage_(postInit)(PyObject *module)
+{
+  THPStorageClass = PyObject_GetAttrString(module,(char*)TH_CONCAT_STRING_2(Real,Storage));
+  if (!THPStorageClass) throw python_error();
+
+  bool is_cuda = false;
+#ifdef THC_GENERIC_FILE
+  is_cuda = true;
+#endif
+  const char *type_name = TH_CONCAT_STRING_2(Real,);
+  torch::registerStoragePyTypeObject((PyTypeObject*)THPStorageClass, type_name, is_cuda, false);
 }
 
 #endif

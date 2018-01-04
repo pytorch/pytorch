@@ -10,9 +10,9 @@ ScalarType UndefinedType::scalarType() const {
 Backend UndefinedType::backend() const {
   return Backend::Undefined;
 }
-bool UndefinedType::isCuda() const { return false; }
-bool UndefinedType::isSparse() const { return false; }
-bool UndefinedType::isDistributed() const { return false; }
+bool UndefinedType::is_cuda() const { return false; }
+bool UndefinedType::is_sparse() const { return false; }
+bool UndefinedType::is_distributed() const { return false; }
 
 std::unique_ptr<Storage> UndefinedType::storage() const {
   runtime_error("storage not defined for UndefinedType");
@@ -22,6 +22,12 @@ std::unique_ptr<Storage> UndefinedType::storage(size_t size) const {
 }
 std::unique_ptr<Storage> UndefinedType::storageFromBlob(void * data, int64_t size, const std::function<void(void*)> & deleter) const {
   runtime_error("storageFromBlob not defined for UndefinedType");
+}
+std::unique_ptr<Storage> UndefinedType::unsafeStorageFromTH(void * th_pointer, bool retain) const {
+  runtime_error("unsafeStorageFromTH not defined for UndefinedType");
+}
+std::unique_ptr<Storage> UndefinedType::storageWithAllocator(int64_t size, std::unique_ptr<Allocator> allocator) const {
+  runtime_error("storageWithAllocator not defined for UndefinedType");
 }
 Tensor UndefinedType::unsafeTensorFromTH(void * th_pointer, bool retain) const {
   runtime_error("unsafeTensorFromTH not defined for UndefinedType");
@@ -58,7 +64,7 @@ const char * UndefinedType::typeString() {
   return "UndefinedType";
 }
 
-void UndefinedType::s_copy(const Tensor & src, Tensor & dst) const {
+Tensor & UndefinedType::s_copy_(Tensor & self, const Tensor & src, bool async) const {
   runtime_error("s_copy not defined for UndefinedType");
 }
 

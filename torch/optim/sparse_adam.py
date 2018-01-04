@@ -83,7 +83,8 @@ class SparseAdam(Optimizer):
 
                 # Dense addition again is intended, avoiding another _sparse_mask
                 numer = exp_avg_update_values.add_(old_exp_avg_values)
-                denom = exp_avg_sq_update_values.add_(old_exp_avg_sq_values).sqrt_().add_(group['eps'])
+                exp_avg_sq_update_values.add_(old_exp_avg_sq_values)
+                denom = exp_avg_sq_update_values.sqrt_().add_(group['eps'])
                 del exp_avg_update_values, exp_avg_sq_update_values
 
                 bias_correction1 = 1 - beta1 ** state['step']

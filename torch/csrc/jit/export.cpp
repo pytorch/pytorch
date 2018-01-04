@@ -7,7 +7,6 @@
 #include "torch/csrc/utils/python_strings.h"
 #include "torch/csrc/Exceptions.h"
 
-#include "torch/csrc/autograd/functions/convolution.h"
 #include "torch/csrc/utils/functional.h"
 #include <ATen/ATen.h>
 
@@ -21,7 +20,7 @@ namespace torch { namespace jit {
 
 namespace {
 
-std::string node_name(Node* n) {
+std::string value_name(Value* n) {
   return n->uniqueName();
 }
 
@@ -69,7 +68,8 @@ void encodeTensor(onnx::TensorProto * p, const at::Tensor & tensor) {
       break;
   }
   p->set_data_type(onnx_type);
-  at::Tensor cont = tensor.toType(at::CPU(at_type)).contiguous();
+  // CPU's HalfTensor doesn't have contiguous(), so first calling contiguous()
+  at::Tensor cont = tensor.contiguous().toType(at::CPU(at_type));
   p->set_raw_data(cont);
 }
 
@@ -131,7 +131,7 @@ void addAttribute(onnx::NodeProto * n_p, jit::Node * n, jit::Symbol name) {
   }
 }
 
-void encodeTypeProtoTensorType(onnx::TypeProtoTensorTypeProto* tensor_type, Node* n) {
+void encodeTypeProtoTensorType(onnx::TypeProtoTensorTypeProto* tensor_type, Value* n) {
   onnx::TypeProtoTensorShapeProto* shape = tensor_type->mutable_shape();
   JIT_ASSERT(n->hasType());
   TensorType* node_type = n->type()->expect<TensorType>();
@@ -170,8 +170,8 @@ void encodeTypeProtoTensorType(onnx::TypeProtoTensorTypeProto* tensor_type, Node
   tensor_type->set_data_type(onnx_type);
 }
 
-void encodeValueInfo(onnx::ValueInfoProto* v, Node* n) {
-  v->set_name(node_name(n));
+void encodeValueInfo(onnx::ValueInfoProto* v, Value* n) {
+  v->set_name(value_name(n));
   onnx::TypeProto* t = v->mutable_type();
   onnx::TypeProtoTensorTypeProto* tensor_type = t->mutable_tensor_type();
   encodeTypeProtoTensorType(tensor_type, n);
@@ -190,22 +190,20 @@ void encodeGraph(onnx::GraphProto * p_g, const std::shared_ptr<Graph> & g, const
     encodeValueInfo(v, output);
   }
   for (auto node : g->nodes()) {
-    if (node->kind() == kSelect) {
-      // No select nodes in ONNX: instead we make use
-      // of the select invariant
-      continue;
-    }
-    if (node->kind() == kUndefined && node->uses().empty()) {
+    if (node->kind() == kUndefined && !node->hasUses()) {
       // Undefined nodes never show up in ONNX; they're just a tool
       // to help symbolics do the right thing.
       continue;
     }
     auto p_n = p_g->add_node();
+    if (node->getSourceLocation()) {
+      p_n->set_doc_string(node->getSourceLocation()->python_traceback);
+    }
     for(auto input : node->inputs()) {
-      p_n->add_input(node_name(input));
+      p_n->add_input(value_name(input));
     }
     for(auto output : node->outputs()) {
-      p_n->add_output(node_name(output));
+      p_n->add_output(value_name(output));
     }
     p_n->set_op_type(symbolToString(node->kind()));
     for(auto attr_name : node->attributeNames()) {
@@ -266,11 +264,18 @@ void validateGraph(const std::shared_ptr<Graph>& graph) {
 }
 
 std::string ExportGraph(const std::shared_ptr<Graph>& graph,
-                        const std::vector<at::Tensor> & initializers) {
+                        const std::vector<at::Tensor> & initializers,
+                        int64_t onnx_opset_version) {
 
   validateGraph(graph);
 
   onnx::ModelProto model_proto;
+  model_proto.set_producer_name("pytorch");
+  model_proto.set_producer_version("0.3");
+  auto* imp = model_proto.add_opset_import();
+  // This is the version of ONNX operator set we are targeting
+  imp->set_version(onnx_opset_version);
+
   // Set up nanopb callbacks and compute the amount of space needed to store
   // the resulting protobuf
   encodeModel(&model_proto, graph, initializers);

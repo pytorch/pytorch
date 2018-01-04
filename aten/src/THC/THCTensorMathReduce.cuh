@@ -389,24 +389,30 @@ __host__ void THCTensor_varOuterDim(THCState *state, TensorTypeK *tgt, TensorTyp
  *    overall_M2 = M2x + nx * (mean(x) - overall_mean)^2
  *               + M2y + ny * (mean(x) - overall_mean)^2
  *
+ * This implementation assumes that each block has been launched with 16 x 32 threads.
  */
 template<typename Real, typename Accreal, bool flag, bool apply_sqrt>
 __global__ void THCTensor_kernel_varInnermostDim(Real *tgt, Real *src_, unsigned num_rows, unsigned row_size)
 {
-  __shared__ Accreal mean[16];
-  __shared__ Accreal local_sum[32][16];
-  __shared__ Accreal adjusted_M2[32][16];
-
-  // Each block computes the var/std of blockDim.x (16) rows at once
+  /*
+   * Each block computes the var/std of blockDim.y (32) rows at once.
+   * One can visualize the computation as a 16 (x) by 32 (y) grid.
+   * - Each of the 32 rows of the block is responsible for the computation
+   *   of one input row. 
+   * - Each row has 16 columns; the variance computation of one input row is 
+   *   split between 16 threads.
+   * - Each of those 16 threads handles the accumulation of 1/16 of the input
+   *   row's data.
+   */
   for (unsigned block_row = blockIdx.x * blockDim.y; block_row < num_rows; block_row += blockDim.y * gridDim.x) {
     unsigned row = block_row + threadIdx.y;
 
     /*
-     * Compute local mean, local M2 via Welford's algorithm
-     * in blockDim.y threads through sequential reduction in each thread.
+     * Compute local mean, local M2 via Welford's algorithm for this thread.
      */
-    Accreal local_mean = ScalarConvert<int, Accreal>::to(0);
-    Accreal local_M2 = ScalarConvert<int, Accreal>::to(0);
+    Accreal acc_zero = ScalarConvert<int, Accreal>::to(0);
+    Accreal local_mean = acc_zero;
+    Accreal local_M2 = acc_zero;
     unsigned count = 0;
 
     if (row < num_rows) {
@@ -426,58 +432,47 @@ __global__ void THCTensor_kernel_varInnermostDim(Real *tgt, Real *src_, unsigned
       }
     }
 
-    local_sum[threadIdx.y][threadIdx.x] =
+    Accreal local_sum =
         THCNumerics<Accreal>::mul(local_mean, ScalarConvert<int, Accreal>::to(count));
-    __syncthreads();
 
-
-    // Compute the true mean of each of the blockDim.x rows by reducing the sums
-    for (unsigned s = 8; s > 1; s >>= 1) {
-      if (row < num_rows && threadIdx.x < s) {
-        local_sum[threadIdx.y][threadIdx.x] = THCNumerics<Accreal>::add(
-            local_sum[threadIdx.y][threadIdx.x],
-            local_sum[threadIdx.y][threadIdx.x + s]);
-      }
-      __syncthreads();
+    /*
+     * We are reducing across each row of 16 threads to find the true sum of the
+     * entire input row. The warp shfl xor loop ultimately gives each thread the 
+     * true sum.
+     */
+    for (unsigned lane_mask = 8; lane_mask > 0; lane_mask >>= 1) {
+      local_sum = THCNumerics<Accreal>::add(local_sum, 
+          WARP_SHFL_XOR((row < num_rows) ? local_sum : acc_zero, lane_mask, 16));
     }
-
-    if (row < num_rows && threadIdx.x == 0) {
-      mean[threadIdx.y] = THCNumerics<Accreal>::div(
-          THCNumerics<Accreal>::add(local_sum[threadIdx.y][0], local_sum[threadIdx.y][1]),
-          ScalarConvert<int, Accreal>::to(row_size));
-    }
-    __syncthreads();
-
+    Accreal true_mean = THCNumerics<Accreal>::div(local_sum, 
+        ScalarConvert<int, Accreal>::to(row_size));
 
     /*
      * Adjust each local_M2 according to the following:
      *   adjusted_M2 = local_M2 + mean_diff * mean_diff * count
      * The sum of these adjusted M2s is equal to the overall M2.
      */
+    Accreal adjusted_M2 = acc_zero;
     if (row < num_rows) {
-      Accreal mean_diff = THCNumerics<Accreal>::sub(mean[threadIdx.y], local_mean);
-      adjusted_M2[threadIdx.y][threadIdx.x] = THCNumerics<Accreal>::add(
+      Accreal mean_diff = THCNumerics<Accreal>::sub(true_mean, local_mean);
+      adjusted_M2 = THCNumerics<Accreal>::add(
           local_M2,
           THCNumerics<Accreal>::mul(
               THCNumerics<Accreal>::mul(mean_diff, mean_diff),
               ScalarConvert<int, Accreal>::to(count)));
     }
-    __syncthreads();
 
-
-    // Sum the adjusted M2s to get the M2 for each of the blockDim.x rows
-    for (unsigned s = 8; s > 1; s >>= 1) {
-      if (row < num_rows && threadIdx.x < s) {
-        adjusted_M2[threadIdx.y][threadIdx.x] =
-          THCNumerics<Accreal>::add(
-              adjusted_M2[threadIdx.y][threadIdx.x],
-              adjusted_M2[threadIdx.y][threadIdx.x + s]);
-      }
-      __syncthreads();
+    /*
+     * Sums the adjusted M2s. The thread with threadIdx.x == 0 has
+     * the total sum, which is equal to the M2 for the entire input row.
+     */
+    for (unsigned s = 8; s >= 1; s >>= 1) {
+      adjusted_M2 = THCNumerics<Accreal>::add(adjusted_M2, 
+          WARP_SHFL_DOWN((row < num_rows) ? adjusted_M2 : acc_zero, s, 16));
     }
 
     if (row < num_rows && threadIdx.x == 0) {
-      Accreal M2 = THCNumerics<Accreal>::add(adjusted_M2[threadIdx.y][0], adjusted_M2[threadIdx.y][1]);
+      Accreal M2 = adjusted_M2;
       Accreal variance;
       if (flag) {
         variance = THCNumerics<Accreal>::div(M2, ScalarConvert<int, Accreal>::to(row_size));
@@ -487,7 +482,6 @@ __global__ void THCTensor_kernel_varInnermostDim(Real *tgt, Real *src_, unsigned
       tgt[row] = ScalarConvert<Accreal, Real>::to(
           apply_sqrt ? THCNumerics<Accreal>::sqrt(variance) : variance);
     }
-    __syncthreads();
   }
 }
 

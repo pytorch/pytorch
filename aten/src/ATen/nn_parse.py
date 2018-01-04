@@ -99,6 +99,8 @@ ARGUMENT_MAPPINGS = {
     'p': 'padding',
     'o': 'output_size',
     'osize': 'output_size',
+    'output': 'output_size',  # as a prefix e.g. outputW
+    'isize': 'input_size',
     'dilation': 'dilation',
     'adj': 'output_padding',
     'a': 'output_padding',
@@ -107,12 +109,21 @@ ARGUMENT_MAPPINGS = {
 DIMENSION_OFFSET = {
     'width': -1,
     'height': -2,
+    'B': 0,
+    'C': 1,
     'W': -1,
     'H': -2,
     'T': -3,
+    'left': 0,
+    'right': 1,
+    'top': 2,
+    'bottom': 3,
+    'front': 4,
+    'back': 5,
 }
 
 SUBSTITUTIONS = {
+    'input': 'self',
     'weights': 'weight',
     'train': 'training',
     'val': 'value',
@@ -121,25 +132,14 @@ SUBSTITUTIONS = {
 }
 
 
-def get_dimensionality(cname):
-    if 'Temporal' in cname:
-        return 1
-    elif 'Spatial' in cname:
-        return 2
-    elif 'Volumetric' in cname:
-        return 3
-    return None
-
-
 def camel_to_snake(name):
     # from https://stackoverflow.com/questions/1175208/elegant-python-function-to-convert-camelcase-to-snake-case
     s1 = re.sub('(.)([A-Z][a-z]+)', r'\1_\2', name)
     return re.sub('([a-z0-9])([A-Z])', r'\1_\2', s1).lower()
 
 
-def get_thnn_args(thnn_function, params):
+def get_thnn_args(thnn_function, params, inplace):
     params_by_name = {p['name']: p for p in params}
-    dimensionality = get_dimensionality(thnn_function.name)
 
     def arg_expr(prefix, suffix):
         # e.g kW, kH
@@ -149,7 +149,9 @@ def get_thnn_args(thnn_function, params):
         param = params_by_name[name]
         if param['type'] == 'IntList' and 'size' in param:
             name = name + '_'
-        index = dimensionality + DIMENSION_OFFSET[suffix]
+        index = DIMENSION_OFFSET[suffix]
+        if index < 0:
+            index += param['size']
         expr = '{}[{}]'.format(name, index)
         return {'type': 'EXPRESSION', 'name': expr}
 
@@ -158,12 +160,18 @@ def get_thnn_args(thnn_function, params):
         name = arg.name
         if name == 'state':
             continue
+        if inplace and name == 'output':
+            name = 'self'
         aten_name = camel_to_snake(SUBSTITUTIONS.get(name, name))
+        parts = aten_name.split('_')
         if aten_name in params_by_name:
             param = params_by_name[aten_name]
             if arg.is_optional:
                 param['is_nullable'] = True
             thnn_args.append(copy.deepcopy(param))
+        elif len(parts) == 2 and parts[0] in ARGUMENT_MAPPINGS and parts[1] in DIMENSION_OFFSET:
+            # e.g. pad_left
+            thnn_args.append(arg_expr(parts[0], parts[1]))
         elif name[-1] in DIMENSION_OFFSET and name[:-1] in ARGUMENT_MAPPINGS:
             # e.g kW, kH
             thnn_args.append(arg_expr(name[:-1], name[-1]))
@@ -171,6 +179,8 @@ def get_thnn_args(thnn_function, params):
             thnn_args.append(arg_expr(name[0], name[1:]))
         elif name == 'scale':
             thnn_args.append({'type': 'EXPRESSION', 'name': '1'})
+        elif name == 'inplace':
+            thnn_args.append({'type': 'EXPRESSION', 'name': str(inplace).lower()})
         else:
             raise RuntimeError("{}: can't find binding for '{}'"
                                .format(thnn_function.name, name))
@@ -205,7 +215,7 @@ def unique_args(argslist):
     return result
 
 
-def function_info(name, arguments, cimpls, buffers, backends):
+def function_info(name, arguments, cimpls, buffers, backends, inplace):
     """
     cimpls contains information use to call into THNN:
         cname: THNN function name
@@ -217,7 +227,7 @@ def function_info(name, arguments, cimpls, buffers, backends):
         'name': name,
         'types': ['Float', 'Double', 'Half'],  # Half will be stripped for CPU backend
         'arguments': arguments,
-        'return': get_return(arguments),
+        'return': 'argument 0' if inplace else get_return(arguments),
         'buffers': buffers,
         'backends': backends,
         'cimpls': cimpls,
@@ -225,35 +235,40 @@ def function_info(name, arguments, cimpls, buffers, backends):
     }
 
 
-def base_declaration(func, thnn_function, backends):
+def base_declaration(func, thnn_function, backends, inplace=False):
     """Creates the NN function without any buffers in it's signature"""
     name, params = re.match(NAME_PARAM_REGEX, func['name']).groups()
+    if inplace:
+        name += '_'
     params = params.split(', ')
     arguments = [argument_to_declaration(a, func) for a in params]
-    arguments += output_arguments(thnn_function)
+    if not inplace:
+        arguments += output_arguments(thnn_function)
     buffers = [argument_to_declaration('Tensor ' + buf)
                for buf in func.get('buffers', [])]
 
-    thnn_args = get_thnn_args(thnn_function, arguments + buffers)
-    cimpl = {'cname': thnn_function.name, 'arguments': thnn_args}
-
-    return function_info(name, arguments, [cimpl], buffers, backends)
+    return function_info(name, arguments, None, buffers, backends, inplace)
 
 
-def forward_declaration(base, thnn_function):
+def forward_declaration(base, thnn_function, inplace=False):
     name = '{}_forward'.format(base['name'])
+    if inplace:
+        name += '_'
 
     arguments = [copy.deepcopy(arg) for arg in base['arguments']
                  if not arg.get('output')]
 
-    arguments += base['buffers']
     arguments += output_arguments(thnn_function)
+    for buffer in base['buffers']:
+        buffer = copy.deepcopy(buffer)
+        buffer['output'] = True
+        arguments.append(buffer)
 
-    thnn_args = get_thnn_args(thnn_function, arguments)
+    thnn_args = get_thnn_args(thnn_function, arguments, inplace)
     arguments = remove_unused_args(arguments, thnn_args)
     cimpl = {'cname': thnn_function.name, 'arguments': thnn_args}
 
-    return function_info(name, arguments, [cimpl], [], base['backends'])
+    return function_info(name, arguments, [cimpl], [], base['backends'], inplace)
 
 
 def backward_declaration(base, thnn_functions):
@@ -261,14 +276,22 @@ def backward_declaration(base, thnn_functions):
 
     arguments = []
     arguments.append({'type': 'THTensor*', 'name': 'grad_output'})
-    arguments += [copy.deepcopy(arg) for arg in base['arguments']]
+    arguments += [copy.deepcopy(arg) for arg in base['arguments']
+                  if arg['name'] != 'inplace']
     arguments += base['buffers']
 
+    # outputs from the forward may be inputs to the backwards
     for arg in arguments:
         if 'output' in arg:
             del arg['output']
 
     arguments += unique_args([output_arguments(f) for f in thnn_functions])
+
+    if 'upsample' in base['name']:
+        # Add input_size as parameter to upsample backwards functions
+        # Note that input_size is 4-dim for upsample_xxx2d
+        size = 2 + int(re.search(r'(\d+)d', base['name']).group(1))
+        arguments.append({'type': 'IntList', 'name': 'input_size', 'size': size})
 
     def initialize_output_arg(arg):
         # the mask array<bool, N> specifies which return values to compute
@@ -290,7 +313,7 @@ def backward_declaration(base, thnn_functions):
             if arg.get('output', False):
                 initialize_output_arg(arg)
 
-    thnn_args = [get_thnn_args(f, arguments) for f in thnn_functions]
+    thnn_args = [get_thnn_args(f, arguments, False) for f in thnn_functions]
     arguments = remove_unused_args(arguments, unique_args(thnn_args))
     cimpls = []
 
@@ -308,7 +331,7 @@ def backward_declaration(base, thnn_functions):
             cimpl['condition'] = get_condition(func)
         cimpls.append(cimpl)
 
-    return function_info(name, arguments, cimpls, [], base['backends'])
+    return function_info(name, arguments, cimpls, [], base['backends'], False)
 
 
 def parse_nn_yaml(filename):
@@ -351,9 +374,12 @@ def run(paths):
                     bwd_functions.append(header_functions[cname + suffix])
 
             base = base_declaration(func, fwd_function, backends)
-
             declarations.append(base)
             declarations.append(forward_declaration(base, fwd_function))
             declarations.append(backward_declaration(base, bwd_functions))
+
+            if func.get('has_inplace', False):
+                declarations.append(base_declaration(func, fwd_function, backends, True))
+                declarations.append(forward_declaration(base, fwd_function, True))
 
     return declarations

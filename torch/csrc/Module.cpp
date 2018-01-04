@@ -12,22 +12,28 @@
 #include <ATen/ATen.h>
 #include <ATen/dlpack.h>
 #include <ATen/DLConvertor.h>
+#include <pybind11/pybind11.h>
+#include <pybind11/stl.h>
 
 #include "torch/csrc/DynamicTypes.h"
 #include "torch/csrc/autograd/generated/python_nn_functions.h"
 #include "torch/csrc/utils/python_strings.h"
+#include "torch/csrc/utils/tensor_numpy.h"
 #include "torch/csrc/jit/python_tracer.h"
 #include "torch/csrc/jit/init.h"
 #include "torch/csrc/jit/python_ir.h"
 
 #ifdef WITH_CUDNN
-#include "cudnn/Module.h"
+#include "cudnn.h"
 #endif
 
 #define WITH_NUMPY_IMPORT_ARRAY
 #include "THP.h"
 
 #include "ModuleSparse.cpp"
+#include "DataLoader.cpp"
+
+namespace py = pybind11;
 
 PyObject* module;
 PyObject* tensor_classes;
@@ -57,14 +63,14 @@ static bool THPModule_loadClasses(PyObject *self)
   if (!THPCharTensor_postInit(torch_module)) return false;
   if (!THPByteTensor_postInit(torch_module)) return false;
 
-  ASSERT_NOT_NULL(THPDoubleStorageClass = PyObject_GetAttrString(torch_module,(char*)"DoubleStorage"));
-  ASSERT_NOT_NULL(THPFloatStorageClass  = PyObject_GetAttrString(torch_module,(char*)"FloatStorage"));
-  ASSERT_NOT_NULL(THPHalfStorageClass   = PyObject_GetAttrString(torch_module,(char*)"HalfStorage"));
-  ASSERT_NOT_NULL(THPLongStorageClass   = PyObject_GetAttrString(torch_module,(char*)"LongStorage"));
-  ASSERT_NOT_NULL(THPIntStorageClass    = PyObject_GetAttrString(torch_module,(char*)"IntStorage"));
-  ASSERT_NOT_NULL(THPShortStorageClass  = PyObject_GetAttrString(torch_module,(char*)"ShortStorage"));
-  ASSERT_NOT_NULL(THPCharStorageClass   = PyObject_GetAttrString(torch_module,(char*)"CharStorage"));
-  ASSERT_NOT_NULL(THPByteStorageClass   = PyObject_GetAttrString(torch_module,(char*)"ByteStorage"));
+  THPDoubleStorage_postInit(torch_module);
+  THPFloatStorage_postInit(torch_module);
+  THPHalfStorage_postInit(torch_module);
+  THPLongStorage_postInit(torch_module);
+  THPIntStorage_postInit(torch_module);
+  THPShortStorage_postInit(torch_module);
+  THPCharStorage_postInit(torch_module);
+  THPByteStorage_postInit(torch_module);
 
   return true;
 #undef ASSERT_NOT_NULL
@@ -164,33 +170,9 @@ PyObject * THPModule_setDefaultTensorType(PyObject *_unused, PyObject *type)
 
 PyObject * THPModule_fromNumpy(PyObject *_unused, PyObject *array)
 {
-#ifndef WITH_NUMPY
-  THPUtils_setError("torch was compiled without numpy support");
-  return NULL;
-#else
-  THPUtils_assert(PyArray_Check(array), "from_numpy expects an np.ndarray "
-      "but got %s", THPUtils_typename(array));
-  int type = PyArray_TYPE((PyArrayObject*)array);
-  if (type == NPY_DOUBLE) {
-    return PyObject_CallFunctionObjArgs(THPDoubleTensorClass, array, NULL);
-  } else if (type == NPY_FLOAT) {
-    return PyObject_CallFunctionObjArgs(THPFloatTensorClass, array, NULL);
-  } else if (type == NPY_HALF) {
-    return PyObject_CallFunctionObjArgs(THPHalfTensorClass, array, NULL);
-  } else if (type == NPY_INT64) {
-    return PyObject_CallFunctionObjArgs(THPLongTensorClass, array, NULL);
-  } else if (type == NPY_INT32) {
-    return PyObject_CallFunctionObjArgs(THPIntTensorClass, array, NULL);
-  } else if (type == NPY_INT16) {
-    return PyObject_CallFunctionObjArgs(THPShortTensorClass, array, NULL);
-  } else if (type == NPY_UINT8) {
-    return PyObject_CallFunctionObjArgs(THPByteTensorClass, array, NULL);
-  }
-  THPUtils_setError("can't convert a given np.ndarray to a tensor - it has an "
-      "invalid type. The only supported types are: double, float, float16, int64, "
-      "int32, and uint8.");
-  return NULL;
-#endif
+  HANDLE_TH_ERRORS
+  return torch::createPyObject(torch::utils::tensor_from_numpy(array));
+  END_HANDLE_TH_ERRORS
 }
 
 /**
@@ -263,9 +245,12 @@ IMPLEMENT_STATELESS(sigmoid)
 IMPLEMENT_STATELESS(log)
 IMPLEMENT_STATELESS(log1p)
 IMPLEMENT_STATELESS(lgamma)
+IMPLEMENT_STATELESS(digamma)
+IMPLEMENT_STATELESS(polygamma)
 IMPLEMENT_STATELESS(erf)
 IMPLEMENT_STATELESS(erfinv)
 IMPLEMENT_STATELESS(exp)
+IMPLEMENT_STATELESS(expm1)
 IMPLEMENT_STATELESS(cos)
 IMPLEMENT_STATELESS(acos)
 IMPLEMENT_STATELESS(cosh)
@@ -342,6 +327,8 @@ IMPLEMENT_STATELESS(bmm)
 // TODO: this doesn't implement options that return numbers!
 IMPLEMENT_STATELESS(multinomial)
 IMPLEMENT_STATELESS(normal)
+IMPLEMENT_STATELESS(standard_gamma)
+IMPLEMENT_STATELESS(dirichlet_grad)
 IMPLEMENT_STATELESS(bernoulli)
 IMPLEMENT_STATELESS(range)
 IMPLEMENT_STATELESS(arange)
@@ -365,6 +352,7 @@ IMPLEMENT_STATELESS(geqrf)
 IMPLEMENT_STATELESS(orgqr)
 IMPLEMENT_STATELESS(ormqr)
 IMPLEMENT_STATELESS(btrifact)
+IMPLEMENT_STATELESS(btrifact_with_info)
 IMPLEMENT_STATELESS(btrisolve)
 IMPLEMENT_STATELESS(gt)
 IMPLEMENT_STATELESS(lt)
@@ -570,9 +558,61 @@ PyObject *THPModule_fromDLPack(PyObject *_unused, PyObject *data)
   // destructor function that will be called when the underlying storage goes
   // out of scope. When the destructor is called, the dlMTensor is destructed too.
   at::Tensor atensor = at::fromDLPack(dlMTensor);
+
+  // It is possible that the call to at::fromDLPack is the very first
+  // call to create a Tensor in PyTorch. If so, then _lazy_init has
+  // not been called, and the attempt to call createPyObject will fail
+  // because cuda ATen types have not been registered in Python yet.
+  // so if we have a cuda tensor, then we need to make sure
+  // we have called _lazy_init here
+  if(atensor.is_cuda()) {
+    py::module::import("torch.cuda").attr("init")();
+  }
   // Make sure this capsule will never be used again.
   PyCapsule_SetName(data, "used_dltensor");
   return torch::createPyObject(atensor);
+}
+
+PyObject *THPModule_setUserEnabledCuDNN(PyObject *_unused, PyObject *arg)
+{
+  THPUtils_assert(PyBool_Check(arg), "set_enabled_cudnn expects a bool, "
+          "but got %s", THPUtils_typename(arg));
+  at::globalContext().setUserEnabledCuDNN(arg == Py_True);
+  Py_RETURN_NONE;
+}
+
+PyObject *THPModule_userEnabledCuDNN(PyObject *_unused)
+{
+  if (at::globalContext().userEnabledCuDNN()) Py_RETURN_TRUE;
+  else Py_RETURN_FALSE;
+}
+
+PyObject *THPModule_setDeterministicCuDNN(PyObject *_unused, PyObject *arg)
+{
+  THPUtils_assert(PyBool_Check(arg), "set_deterministic_cudnn expects a bool, "
+          "but got %s", THPUtils_typename(arg));
+  at::globalContext().setDeterministicCuDNN(arg == Py_True);
+  Py_RETURN_NONE;
+}
+
+PyObject *THPModule_deterministicCuDNN(PyObject *_unused)
+{
+  if (at::globalContext().deterministicCuDNN()) Py_RETURN_TRUE;
+  else Py_RETURN_FALSE;
+}
+
+PyObject *THPModule_setBenchmarkCuDNN(PyObject *_unused, PyObject *arg)
+{
+  THPUtils_assert(PyBool_Check(arg), "set_benchmark_cudnn expects a bool, "
+          "but got %s", THPUtils_typename(arg));
+  at::globalContext().setBenchmarkCuDNN(arg == Py_True);
+  Py_RETURN_NONE;
+}
+
+PyObject *THPModule_benchmarkCuDNN(PyObject *_unused)
+{
+  if (at::globalContext().benchmarkCuDNN()) Py_RETURN_TRUE;
+  else Py_RETURN_FALSE;
 }
 
 #ifdef WITH_CUDA
@@ -598,6 +638,12 @@ static PyMethodDef TorchMethods[] = {
   {"_get_backcompat_keepdim_warn", (PyCFunction)THPModule_getBackcompatKeepdimWarn, METH_NOARGS, NULL},
   {"get_num_threads", (PyCFunction)THPModule_getNumThreads,     METH_NOARGS,  NULL},
   {"set_num_threads", (PyCFunction)THPModule_setNumThreads,     METH_O,       NULL},
+  {"_get_cudnn_enabled", (PyCFunction)THPModule_userEnabledCuDNN, METH_NOARGS,     NULL},
+  {"_set_cudnn_enabled", (PyCFunction)THPModule_setUserEnabledCuDNN, METH_O,  NULL},
+  {"_get_cudnn_benchmark", (PyCFunction)THPModule_benchmarkCuDNN, METH_NOARGS,     NULL},
+  {"_set_cudnn_benchmark", (PyCFunction)THPModule_setBenchmarkCuDNN, METH_O,  NULL},
+  {"_get_cudnn_deterministic", (PyCFunction)THPModule_deterministicCuDNN, METH_NOARGS,     NULL},
+  {"_set_cudnn_deterministic", (PyCFunction)THPModule_setDeterministicCuDNN, METH_O,  NULL},
   {"from_numpy",      (PyCFunction)THPModule_fromNumpy,         METH_O,       NULL},
   {"_to_dlpack",      (PyCFunction)THPModule_toDLPack,          METH_O,       NULL},
   {"_from_dlpack",    (PyCFunction)THPModule_fromDLPack,        METH_O,       NULL},
@@ -606,9 +652,12 @@ static PyMethodDef TorchMethods[] = {
   {"log",             (PyCFunction)THPModule_log,               METH_VARARGS | METH_KEYWORDS, NULL},
   {"log1p",           (PyCFunction)THPModule_log1p,             METH_VARARGS | METH_KEYWORDS, NULL},
   {"lgamma",          (PyCFunction)THPModule_lgamma,            METH_VARARGS | METH_KEYWORDS, NULL},
+  {"digamma",         (PyCFunction)THPModule_digamma,           METH_VARARGS | METH_KEYWORDS, NULL},
+  {"polygamma",       (PyCFunction)THPModule_polygamma,         METH_VARARGS | METH_KEYWORDS, NULL},
   {"erf",             (PyCFunction)THPModule_erf,               METH_VARARGS | METH_KEYWORDS, NULL},
   {"erfinv",          (PyCFunction)THPModule_erfinv,            METH_VARARGS | METH_KEYWORDS, NULL},
   {"exp",             (PyCFunction)THPModule_exp,               METH_VARARGS | METH_KEYWORDS, NULL},
+  {"expm1",           (PyCFunction)THPModule_expm1,             METH_VARARGS | METH_KEYWORDS, NULL},
   {"cos",             (PyCFunction)THPModule_cos,               METH_VARARGS | METH_KEYWORDS, NULL},
   {"acos",            (PyCFunction)THPModule_acos,              METH_VARARGS | METH_KEYWORDS, NULL},
   {"cosh",            (PyCFunction)THPModule_cosh,              METH_VARARGS | METH_KEYWORDS, NULL},
@@ -698,6 +747,8 @@ static PyMethodDef TorchMethods[] = {
   {"bmm",             (PyCFunction)THPModule_bmm,               METH_VARARGS | METH_KEYWORDS, NULL},
   {"multinomial",     (PyCFunction)THPModule_multinomial,       METH_VARARGS | METH_KEYWORDS, NULL},
   {"normal",          (PyCFunction)THPModule_normal,            METH_VARARGS | METH_KEYWORDS, NULL},
+  {"_standard_gamma",  (PyCFunction)THPModule_standard_gamma,    METH_VARARGS | METH_KEYWORDS, NULL},
+  {"_dirichlet_grad", (PyCFunction)THPModule_dirichlet_grad,    METH_VARARGS | METH_KEYWORDS, NULL},
   {"bernoulli",       (PyCFunction)THPModule_bernoulli,         METH_VARARGS | METH_KEYWORDS, NULL},
   {"rand",            (PyCFunction)THPModule_rand,              METH_VARARGS | METH_KEYWORDS, NULL},
   {"randn",           (PyCFunction)THPModule_randn,             METH_VARARGS | METH_KEYWORDS, NULL},
@@ -723,6 +774,7 @@ static PyMethodDef TorchMethods[] = {
   {"orgqr",           (PyCFunction)THPModule_orgqr,             METH_VARARGS | METH_KEYWORDS, NULL},
   {"ormqr",           (PyCFunction)THPModule_ormqr,             METH_VARARGS | METH_KEYWORDS, NULL},
   {"btrifact",        (PyCFunction)THPModule_btrifact,          METH_VARARGS | METH_KEYWORDS, NULL},
+  {"btrifact_with_info", (PyCFunction)THPModule_btrifact_with_info, METH_VARARGS | METH_KEYWORDS, NULL},
   {"btrisolve",       (PyCFunction)THPModule_btrisolve,         METH_VARARGS | METH_KEYWORDS, NULL},
 
   // Sparse functions
@@ -790,6 +842,23 @@ static std::vector<PyMethodDef> methods;
 PyMethodDef* THDPModule_methods();
 #endif
 
+// TODO: Refactor this in some less manual way
+#ifdef WITH_CUDNN
+static PyObject * THCUDNN_cudnn_version(PyObject *self, PyObject *args)
+{
+  return PyLong_FromLong(CUDNN_VERSION);
+}
+
+static PyMethodDef _THCUDNN_methods[] = {
+  {"_cudnn_version", (PyCFunction)THCUDNN_cudnn_version, METH_VARARGS, NULL},
+  {NULL}
+};
+
+PyMethodDef* THCUDNN_methods() {
+  return _THCUDNN_methods;
+}
+#endif
+
 static PyObject* initModule() {
   HANDLE_TH_ERRORS
   THInferNumThreads();
@@ -797,6 +866,8 @@ static PyObject* initModule() {
 #define ASSERT_TRUE(cmd) if (!(cmd)) return NULL
 
   THPUtils_addPyMethodDefs(methods, TorchMethods);
+  THPUtils_addPyMethodDefs(methods, DataLoaderMethods);
+  THPUtils_addPyMethodDefs(methods, torch::autograd::python_functions());
 #ifdef WITH_CUDA
   THPUtils_addPyMethodDefs(methods, THCPModule_methods());
 #endif
@@ -925,7 +996,7 @@ static PyObject* initModule() {
 
   auto& defaultGenerator = at::globalContext().defaultGenerator(at::kCPU);
   THPDefaultGenerator = (THPGenerator*)THPGenerator_NewWithGenerator(
-    (THGenerator*)defaultGenerator.unsafeGetTH());
+    defaultGenerator);
   ASSERT_TRUE(PyModule_AddObject(module, "default_generator", (PyObject*)THPDefaultGenerator) == 0);
 
 #ifdef WITH_NUMPY

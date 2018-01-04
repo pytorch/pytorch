@@ -50,6 +50,9 @@ test/data/linear.pt
 *.swp
 *~
 
-# OSX dir files
+# macOS dir files
 .DS_Store
 
+# Ninja files
+.ninja_deps
+.ninja_log

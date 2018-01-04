@@ -13,10 +13,6 @@
 namespace torch { namespace autograd { namespace utils {
 
 inline PyObject* wrap(at::Tensor tensor) {
-  if (tensor.defined() && tensor.dim() == 0) {
-    // don't expose 0-dim tensors to Variable API.
-    Variable(tensor).data().as_strided_({1}, {1});
-  }
   return THPVariable_Wrap(Variable(std::move(tensor)));
 }
 
@@ -34,6 +30,16 @@ inline PyObject* wrap(std::tuple<at::Tensor, at::Tensor, at::Tensor> tensors) {
   PyTuple_SET_ITEM(r.get(), 0, wrap(std::move(std::get<0>(tensors))));
   PyTuple_SET_ITEM(r.get(), 1, wrap(std::move(std::get<1>(tensors))));
   PyTuple_SET_ITEM(r.get(), 2, wrap(std::move(std::get<2>(tensors))));
+  return r.release();
+}
+
+inline PyObject* wrap(std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor> tensors) {
+  auto r = THPObjectPtr{PyTuple_New(4)};
+  if (!r) throw python_error();
+  PyTuple_SET_ITEM(r.get(), 0, wrap(std::move(std::get<0>(tensors))));
+  PyTuple_SET_ITEM(r.get(), 1, wrap(std::move(std::get<1>(tensors))));
+  PyTuple_SET_ITEM(r.get(), 2, wrap(std::move(std::get<2>(tensors))));
+  PyTuple_SET_ITEM(r.get(), 3, wrap(std::move(std::get<3>(tensors))));
   return r.release();
 }
 
@@ -56,6 +62,14 @@ inline PyObject* wrap(bool value) {
 
 inline PyObject* wrap(int64_t value) {
   return THPUtils_packInt64(value);
+}
+
+inline PyObject* wrap(double value) {
+  return PyFloat_FromDouble(value);
+}
+
+inline PyObject* wrap(void* value) {
+  return THPUtils_packInt64(reinterpret_cast<intptr_t>(value));
 }
 
 inline PyObject* wrap(at::Scalar scalar) {

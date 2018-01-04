@@ -24,17 +24,15 @@ bool should_expand(const IntList &from_size, const IntList &to_size) {
   return true;
 }
 
-int main() {
-  Type & T = CPU(kFloat);
-
+void test(Type &T) {
   std::vector<std::vector<int64_t> > sizes = { {}, {0}, {1}, {1, 1}, {2}};
 
   // single-tensor/size tests
   for (auto s = sizes.begin(); s != sizes.end(); ++s) {
     // verify that the dim, sizes, strides, etc match what was requested.
     auto t = T.ones(*s);
-    ASSERT(t.dim() == s->size());
-    ASSERT(t.ndimension() == s->size());
+    ASSERT((std::size_t)t.dim() == s->size());
+    ASSERT((std::size_t)t.ndimension() == s->size());
     ASSERT(t.sizes().equals(*s));
     ASSERT(t.strides().size() == s->size());
     auto numel = std::accumulate(s->begin(), s->end(), 1, std::multiplies<int64_t>());
@@ -239,21 +237,6 @@ int main() {
             assert_equal_size_dim(lhs, rhs);
           }
         }
-
-        // assign_
-        {
-          auto lhs = T.ones(*lhs_it);
-          auto lhs_save = T.ones(*lhs_it);
-          auto rhs = T.ones(*rhs_it);
-          try {
-            lhs.assign_(rhs);
-            ASSERT(lhs_save.numel() == rhs.numel());
-            // ensure didn't change shape
-            assert_equal_size_dim(lhs, lhs_save);
-          } catch (std::runtime_error &e) {
-            ASSERT(lhs_save.numel() != rhs.numel());
-          }
-        }
       }
 
       // view
@@ -267,6 +250,18 @@ int main() {
           assert_equal_size_dim(result, rhs);
         } catch (std::runtime_error &e) {
           ASSERT(lhs.numel() != rhs.numel());
+        }
+      }
+
+      // take
+      {
+        auto lhs = T.ones(*lhs_it);
+        auto rhs = T.zeros(*rhs_it).toType(ScalarType::Long);
+        try {
+          auto result = lhs.take(rhs);
+          assert_equal_size_dim(result, rhs);
+        } catch (std::runtime_error &e) {
+          ASSERT(lhs.numel() == 0 && rhs.numel() != 0);
         }
       }
 
@@ -300,6 +295,14 @@ int main() {
         }
       }
     }
+  }
+}
+
+int main() {
+  test(CPU(kFloat));
+
+  if (at::hasCUDA()) {
+    test(CUDA(kFloat));
   }
 
   return 0;

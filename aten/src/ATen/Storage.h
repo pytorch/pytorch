@@ -7,6 +7,8 @@ namespace at {
 struct Type;
 
 struct Storage {
+  static const char RESIZABLE = 2;
+
   Storage() {}
   Storage(const Storage& other) = delete;
   void operator=(const Storage&) = delete;
@@ -18,6 +20,7 @@ struct Storage {
   virtual const void* data() const = 0;
   virtual Storage& retain() = 0;
   virtual Storage& free() = 0;
+  virtual void * unsafeGetTH(bool retain) const = 0;
 
   virtual Storage& resize(int64_t new_size) = 0;
 
@@ -31,6 +34,8 @@ struct Storage {
   virtual Scalar get(std::size_t ind) = 0;
   virtual Scalar fast_get(std::size_t ind) = 0;
 
+  virtual void set_flag(char flag) = 0;
+  virtual void clear_flag(char flag) = 0;
 };
 
 } // namespace at

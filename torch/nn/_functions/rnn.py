@@ -1,6 +1,5 @@
 import warnings
-from torch.autograd import Function, NestedIOFunction, Variable
-from torch.autograd.function import _iter_variables, _unflatten
+from torch.autograd import NestedIOFunction
 import torch.backends.cudnn as cudnn
 from .. import functional as F
 from .thnn import rnnFusedPointwise as fusedBackend
@@ -277,7 +276,7 @@ class CudnnRNN(NestedIOFunction):
         if flat_weight is None:
             warnings.warn("RNN module weights are not part of single contiguous "
                           "chunk of memory. This means they need to be compacted "
-                          "at every call, possibly greately increasing memory usage. "
+                          "at every call, possibly greatly increasing memory usage. "
                           "To compact weights again call flatten_parameters().", stacklevel=5)
 
     def forward_extended(self, input, weight, hx):
@@ -343,32 +342,57 @@ class CudnnRNN(NestedIOFunction):
         return grad_input, grad_weight, grad_hx
 
 
-def hack_onnx_rnn(fargs, output, args, kwargs):
-    input, all_weights, hx = fargs
-    output_tensors = tuple(v.data for v in _iter_variables(output))
-    flat_weights = tuple(_iter_variables(all_weights))
-    flat_hx = tuple(_iter_variables(hx))
+def RNN_symbolic_builder(cell_type, input_size, hidden_size, num_layers, batch_first, dropout, bidirectional, **kwargs):
+    assert cell_type == 'LSTM'
+    assert not batch_first
+    assert not dropout
+    assert not bidirectional
 
-    class RNNSymbolic(Function):
-        @staticmethod
-        def symbolic(g, *fargs):
-            # NOTE: fargs contains Variable inputs (input + weight + hidden)
-            # NOTE: args/kwargs contain RNN parameters
-            raise RuntimeError("hack_onnx_rnn NYI")
+    def symbolic(g, input, all_weights, h0_and_c0, **fkwargs):
+        h0, c0 = h0_and_c0
+        sequence_len = input.type().sizes()[0]
+        batch_size = input.type().sizes()[1]
 
-        @staticmethod
-        def forward(ctx, *fargs):
-            return output_tensors
+        # TODO leave out this argument to increase parametricity.
+        # This is nontrivial because we provide subsequent optional
+        # arguments, and ONNX does not have a mechanism for skipping
+        # non-trailing optional arguments.
+        sequence_lens = g.op('Constant', value_t=torch.IntTensor(batch_size).fill_(sequence_len))
 
-        @staticmethod
-        def backward(ctx, *gargs, **gkwargs):
-            raise RuntimeError("FIXME: Traced RNNs don't support backward")
+        prev_output = input
+        h_outs = []
+        for i in range(num_layers):
+            # pytorch is input, forget, cell, output.
+            # onnx is    input, output, forget, cell.
+            # Therefore lots of awkward slicing and concatenation.
 
-    flat_output = RNNSymbolic.apply(*((input,) + flat_weights + flat_hx))
-    return _unflatten(flat_output, output)
+            def reform(x):
+                return g.op(
+                    'Concat',
+                    g.op('Slice', x, axes_i=[0], starts_i=[0 * hidden_size], ends_i=[1 * hidden_size]),
+                    g.op('Slice', x, axes_i=[0], starts_i=[3 * hidden_size], ends_i=[4 * hidden_size]),
+                    g.op('Slice', x, axes_i=[0], starts_i=[1 * hidden_size], ends_i=[3 * hidden_size]),
+                    axis_i=0)
+
+            weight_ih, weight_hh, bias_ih, bias_hh = map(reform, all_weights[i])
+
+            bias_concat = g.op('Concat', bias_ih, bias_hh, axis_i=0)
+
+            h_in = h0 if num_layers == 1 else g.op('Slice', h0, axes_i=[0], starts_i=[i], ends_i=[i + 1])
+            c_in = c0 if num_layers == 1 else g.op('Slice', c0, axes_i=[0], starts_i=[i], ends_i=[i + 1])
+
+            inputs = [prev_output, weight_ih, weight_hh, bias_concat, sequence_lens, h_in, c_in]
+            prev_output, h_out = g.op('LSTM', *inputs, outputs=2, hidden_size_i=hidden_size)
+            h_outs.append(h_out)
+        h_outs = h_out if num_layers == 1 else g.op('Concat', *h_outs, axis_i=0)
+        return prev_output, h_outs, None
+
+    import torch.onnx
+    return torch.onnx.symbolic_override(symbolic)
 
 
 def RNN(*args, **kwargs):
+
     def forward(input, *fargs, **fkwargs):
         if cudnn.is_acceptable(input.data):
             func = CudnnRNN(*args, **kwargs)
@@ -377,11 +401,12 @@ def RNN(*args, **kwargs):
 
         # Hack for the tracer that allows us to represent RNNs as single
         # nodes and export them to ONNX in this form
+        # It can be also used as a decorator at the higher level
+        # Check the first argument explicitly to reduce the overhead of creating
+        # the lambda
         if torch._C._jit_is_tracing(input):
-            assert not fkwargs
-            output = func(input, *fargs)
-            return hack_onnx_rnn((input,) + fargs, output, args, kwargs)
-        else:
-            return func(input, *fargs, **fkwargs)
+            func = RNN_symbolic_builder(*args, **kwargs)(func)
+
+        return func(input, *fargs, **fkwargs)
 
     return forward

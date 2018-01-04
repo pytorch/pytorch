@@ -26,15 +26,15 @@ const char * UndefinedTensor::typeString() {
 void * UndefinedTensor::unsafeGetTH(bool retain) {
   runtime_error("unsafeGetTH(bool retain) called on undefined Tensor");
 }
+std::unique_ptr<Storage> UndefinedTensor::storage() {
+  runtime_error("storage() called on undefined Tensor");
+}
 
 IntList UndefinedTensor::strides() const {
   runtime_error("strides() called on undefined Tensor");
 }
 Scalar UndefinedTensor::localScalar() {
   runtime_error("localScalar() called on undefined Tensor");
-}
-void UndefinedTensor::assign_(Scalar s) {
-  runtime_error("assign_() called on undefined Tensor");
 }
 
 UndefinedTensor UndefinedTensor::_singleton;

@@ -1,5 +1,7 @@
 #pragma once
 
+#include "ATen/Config.h"
+
 #include "ATen/Generator.h"
 #include "ATen/Scalar.h"
 #include "ATen/ScalarType.h"
@@ -37,6 +39,7 @@ struct Tensor : public detail::TensorBase {
   Tensor(const Tensor & rhs) = default;
   Tensor(Tensor && rhs) noexcept = default;
 
+  // reimplemented from TensorBase so the return type is Tensor rather than TensorBase
   Tensor & operator=(Tensor && rhs) & {
     rhs.swap(*this);
     return *this;
@@ -48,33 +51,9 @@ struct Tensor : public detail::TensorBase {
       Tensor(rhs).swap(*this);
       return *this;
   }
-  Tensor & operator=(Tensor const & rhs) && {
-    return assign_(rhs);
-  }
+
+  inline Tensor & operator=(Tensor const & rhs) &&;
   Tensor & operator=(Scalar v) &&;
-  Tensor & assign_(Scalar v);
-  void reset() {
-    Tensor().swap(*this);
-  }
-  void reset(TensorImpl * rhs) {
-    Tensor(rhs, true).swap(*this);
-  }
-  void reset(TensorImpl * rhs, bool retain) {
-    Tensor(rhs, retain).swap(*this );
-  }
-  TensorImpl * get() const {
-    return pImpl;
-  }
-  TensorImpl * detach() {
-    TensorImpl * ret = pImpl;
-    pImpl = nullptr;
-    return ret;
-  }
-  void swap(Tensor & rhs) {
-    TensorImpl * tmp = pImpl;
-    pImpl = rhs.pImpl;
-    rhs.pImpl = tmp;
-  }
   const char * toString() const {
     return pImpl->toString();
   }
@@ -90,8 +69,11 @@ struct Tensor : public detail::TensorBase {
   Type & type() const {
     return pImpl->type();
   }
+  std::unique_ptr<Storage> storage() const {
+    return pImpl->storage();
+  }
   inline Tensor toType(const Type & t) const;
-  inline Tensor & copy_(const Tensor & src);
+  inline Tensor & copy_(const Tensor & src, bool async=false);
   inline Tensor toType(ScalarType t) const;
   inline Tensor toBackend(Backend b) const;
 
@@ -101,6 +83,9 @@ struct Tensor : public detail::TensorBase {
   void * unsafeGetTH(bool retain) const {
     return pImpl->unsafeGetTH(retain);
   }
+
+  // Purposely not defined here to avoid inlining
+  void print() const;
 
   //toLongData(), toFloatData() etc.
   #define TO_TYPE_DATA(T,name,_) \
@@ -130,6 +115,9 @@ struct Tensor : public detail::TensorBase {
   Tensor& operator/=(const Tensor & other);
   Tensor& operator/=(Scalar other);
   Tensor operator[](int64_t idx) const;
+
+  // STOP.  Thinking of adding a method here, which only makes use
+  // of other ATen methods?  Define it in native_functions.yaml.
 
   //example
   //Tensor * add(Tensor & b);

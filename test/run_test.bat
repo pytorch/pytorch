@@ -2,15 +2,11 @@
 
 set PYCMD=python
 
-echo Running JIT tests
-%PYCMD% test_jit.py
-
 echo Running torch tests
 %PYCMD% test_torch.py
 
 echo Running autograd tests
 %PYCMD% test_autograd.py
-%PYCMD% test_potrf.py
 
 echo Running sparse tests
 %PYCMD% test_sparse.py
@@ -23,6 +19,9 @@ echo Running legacy nn tests
 
 echo Running optim tests
 %PYCMD% test_optim.py
+
+echo Running JIT tests
+%PYCMD% test_jit.py
 
 echo Running multiprocessing tests
 %PYCMD% test_multiprocessing.py

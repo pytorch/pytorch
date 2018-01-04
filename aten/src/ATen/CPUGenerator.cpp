@@ -28,6 +28,10 @@ uint64_t CPUGenerator::seed() {
   return THRandom_seed(generator);
 }
 
+uint64_t CPUGenerator::initialSeed() {
+  return THRandom_initialSeed(generator);
+}
+
 CPUGenerator& CPUGenerator::manualSeed(uint64_t seed) {
   THRandom_manualSeed(generator, seed);
   return *this;

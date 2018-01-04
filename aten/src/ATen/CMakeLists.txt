@@ -7,17 +7,6 @@ IF(POLICY CMP0026)
  CMAKE_POLICY(SET CMP0026 OLD)
 ENDIF()
 
-if(${CMAKE_VERSION} VERSION_LESS "2.8.12")
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11")
-else(${CMAKE_VERSION} VERSION_LESS "2.8.12")
-  if(${CMAKE_VERSION} VERSION_LESS "3.1")
-    add_compile_options(-std=c++11) # CMake 2.8.12 to 3.1
-  endif(${CMAKE_VERSION} VERSION_LESS "3.1")
-endif(${CMAKE_VERSION} VERSION_LESS "2.8.12")
-
-IF(NOT MSVC)
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wno-vla")
-ENDIF(NOT MSVC)
 
 ########################
 # SET_SOURCE_FILES_PROPERTIES must be in the same CMakeLists.txt file as the target that includes the file
@@ -47,7 +36,7 @@ IF(C_AVX2_FOUND)
   ENDIF(MSVC)
 ENDIF(C_AVX2_FOUND)
 
-IF(NOT MSVC)
+IF(NOT MSVC AND NOT "${CMAKE_C_COMPILER_ID}" MATCHES "Clang")
   SET_SOURCE_FILES_PROPERTIES(${PROJECT_SOURCE_DIR}/src/TH/THAtomic.c PROPERTIES COMPILE_FLAGS "-fno-openmp")
   SET_SOURCE_FILES_PROPERTIES(${PROJECT_SOURCE_DIR}/src/TH/THAllocator.c PROPERTIES COMPILE_FLAGS "-fno-openmp")
 ENDIF()
@@ -81,26 +70,14 @@ function(filter_list output input)
     set(${output} ${result} PARENT_SCOPE)
 endfunction()
 
-IF(NOT Torch_FOUND)
-  FIND_PACKAGE(Torch REQUIRED)
-ENDIF()
 
 IF ($ENV{TH_BINARY_BUILD})
   MESSAGE(STATUS "TH_BINARY_BUILD detected. Statically linking libstdc++")
   SET(CMAKE_CXX_FLAGS "-static-libstdc++ ${CMAKE_CXX_FLAGS}")
   IF (UNIX AND NOT APPLE)
-    # hiding statically linked library symbols, this flag is not available for the linker under MACOSX
+    # hiding statically linked library symbols, this flag is not available for the linker under macOS
     SET(CMAKE_CXX_FLAGS "-Wl,--exclude-libs,libstdc++.a ${CMAKE_CXX_FLAGS}")
   ENDIF(UNIX AND NOT APPLE)
-ENDIF()
-
-IF(NO_CUDA)
-  MESSAGE(STATUS "ignoring CUDA")
-  SET(CUDA_FLAG -n)
-ELSE()
-  FIND_PACKAGE(CUDA 5.5 REQUIRED)
-  ADD_DEFINITIONS(-DAT_CUDA_ENABLED)
-  INCLUDE_DIRECTORIES(${CUDA_INCLUDE_DIRS})
 ENDIF()
 
 # Can be compiled standalone
@@ -111,10 +88,20 @@ IF(NOT AT_INSTALL_BIN_DIR OR NOT AT_INSTALL_LIB_DIR OR NOT AT_INSTALL_INCLUDE_DI
   SET(AT_INSTALL_SHARE_DIR "share" CACHE PATH "AT install include subdirectory")
 ENDIF()
 
+# TODO: Maybe put this in the generated files directory
+CONFIGURE_FILE(Config.h.in "${CMAKE_CURRENT_SOURCE_DIR}/Config.h")
+
 FILE(GLOB base_h RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} "*.h")
 FILE(GLOB base_cpp RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} "*.cpp")
+FILE(GLOB native_cpp RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} "native/*.cpp")
+FILE(GLOB native_cudnn_cpp RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} "native/cudnn/*.cpp")
+FILE(GLOB native_cuda_cu RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} "native/cuda/*.cu")
+
+FILE(GLOB cudnn_cpp RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} "cudnn/*.cpp")
 
 FILE(GLOB all_python RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} "*.py")
+
+FILE(GLOB_RECURSE aten_cuda_cu RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} "cuda/*.cu")
 
 IF(DEFINED ENV{PYTORCH_PYTHON})
   message(STATUS "Using python found in $ENV{PYTORCH_PYTHON}")
@@ -130,7 +117,8 @@ SET(GEN_COMMAND
 )
 
 EXECUTE_PROCESS(
-    COMMAND ${GEN_COMMAND} --output-dependencies ${CMAKE_CURRENT_BINARY_DIR}/generated_cpp.txt
+    COMMAND ${GEN_COMMAND}
+      --output-dependencies ${CMAKE_CURRENT_BINARY_DIR}/generated_cpp.txt
     RESULT_VARIABLE RETURN_VALUE
 )
 if (NOT RETURN_VALUE EQUAL 0)
@@ -140,21 +128,33 @@ endif()
 file(READ ${CMAKE_CURRENT_BINARY_DIR}/generated_cpp.txt generated_cpp)
 
 FILE(GLOB_RECURSE all_templates "templates/*")
-SET(native_functions ${CMAKE_CURRENT_SOURCE_DIR}/NativeFunctions.h)
 
 FILE(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/ATen)
 
 ADD_CUSTOM_COMMAND(OUTPUT ${generated_cpp}
 COMMAND ${GEN_COMMAND}
-DEPENDS ${all_python} ${all_templates} ${native_functions} ${cwrap_files})
+DEPENDS ${all_python} ${all_templates} ${cwrap_files})
 
-SET(all_cpp ${base_cpp} ${generated_cpp} ${ATen_CPU_SRCS})
+# Generated headers used from a cuda (.cu) file are
+# not tracked correctly in cmake . We make the libATen.so depend explicitly
+# on building the generated aten files to workaround.
+ADD_CUSTOM_TARGET(aten_files_are_generated
+  DEPENDS ${generated_cpp}
+)
+
+
+SET(all_cpp ${base_cpp} ${native_cpp} ${native_cudnn_cpp} ${generated_cpp} ${ATen_CPU_SRCS})
 
 INCLUDE_DIRECTORIES(${ATen_CPU_INCLUDE})
 IF(NOT NO_CUDA)
   INCLUDE_DIRECTORIES(${ATen_CUDA_INCLUDE})
   INCLUDE_DIRECTORIES("${CUDA_SDK_ROOT_DIR}/common/inc")
+  INCLUDE_DIRECTORIES("${CMAKE_CURRENT_SOURCE_DIR}/cuda")
+  SET(ATen_CUDA_SRCS ${ATen_CUDA_SRCS} ${aten_cuda_cu} ${native_cuda_cu})
   SET(all_cpp ${all_cpp} ${ATen_CUDA_SRCS})
+  IF(CUDNN_FOUND)
+    SET(all_cpp ${all_cpp} ${cudnn_cpp})
+  ENDIF()
 endif()
 
 filter_list(generated_h generated_cpp "\\.h$")
@@ -170,6 +170,7 @@ IF(CUDA_FOUND)
 ELSE()
   ADD_LIBRARY(ATen ${AT_LINK_STYLE} ${all_cpp})
 ENDIF()
+ADD_DEPENDENCIES(ATen aten_files_are_generated)
 
 SET_TARGET_PROPERTIES(ATen PROPERTIES VERSION 1 SOVERSION 1)
 
@@ -177,20 +178,13 @@ if(NOT ${CMAKE_VERSION} VERSION_LESS "3.1")
     SET_PROPERTY(TARGET ATen PROPERTY CXX_STANDARD 11)
 endif(NOT ${CMAKE_VERSION} VERSION_LESS "3.1")
 
-
-FIND_PACKAGE(BLAS)
 IF(BLAS_FOUND)
-  SET(USE_BLAS 1)
   IF ($ENV{TH_BINARY_BUILD})
     MESSAGE(STATUS "TH_BINARY_BUILD detected. Enabling special linkage.")
     TARGET_LINK_LIBRARIES(ATen "${BLAS_LIBRARIES};${BLAS_LIBRARIES};${BLAS_LIBRARIES}")
   ELSE ($ENV{TH_BINARY_BUILD})
     TARGET_LINK_LIBRARIES(ATen ${BLAS_LIBRARIES})
   ENDIF ($ENV{TH_BINARY_BUILD})
-
-  IF(BLAS_INFO STREQUAL "mkl")
-    ADD_DEFINITIONS(-DTH_BLAS_MKL)
-  ENDIF()
 ENDIF(BLAS_FOUND)
 
 IF(LAPACK_FOUND)
@@ -251,9 +245,15 @@ IF(CUDA_FOUND)
     ${CUDA_cusparse_LIBRARY}
     ${CUDA_curand_LIBRARY})
   CUDA_ADD_CUBLAS_TO_TARGET(ATen)
-  IF(USE_CUDNN)
-    TARGET_LINK_LIBRARIES(ATen ${CUDNN_LIBRARIES})
-  ENDIF(USE_CUDNN)
+
+  if(CUDNN_FOUND)
+    target_link_libraries(ATen ${CUDNN_LIBRARIES})
+  endif(CUDNN_FOUND)
+
+  if (NNPACK_FOUND)
+    target_link_libraries(ATen ${NNPACK_LIBRARIES})
+  endif(NNPACK_FOUND)
+
   IF(USE_MAGMA)
     TARGET_LINK_LIBRARIES(ATen ${MAGMA_LIBRARIES})
     IF ($ENV{TH_BINARY_BUILD})

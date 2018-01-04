@@ -25,15 +25,6 @@ THCState *state;
 static bool THCPModule_loadClasses(PyObject *torch_module)
 {
 #define ASSERT_NOT_NULL(ptr) if (!(ptr)) { THPUtils_setError("couldn't load classes"); return false; }
-  ASSERT_NOT_NULL(THCPDoubleStorageClass = PyObject_GetAttrString(torch_module, (char*)"DoubleStorage"));
-  ASSERT_NOT_NULL(THCPFloatStorageClass  = PyObject_GetAttrString(torch_module, (char*)"FloatStorage"));
-  ASSERT_NOT_NULL(THCPHalfStorageClass   = PyObject_GetAttrString(torch_module, (char*)"HalfStorage"));
-  ASSERT_NOT_NULL(THCPLongStorageClass   = PyObject_GetAttrString(torch_module, (char*)"LongStorage"));
-  ASSERT_NOT_NULL(THCPIntStorageClass    = PyObject_GetAttrString(torch_module, (char*)"IntStorage"));
-  ASSERT_NOT_NULL(THCPShortStorageClass  = PyObject_GetAttrString(torch_module, (char*)"ShortStorage"));
-  ASSERT_NOT_NULL(THCPCharStorageClass   = PyObject_GetAttrString(torch_module, (char*)"CharStorage"));
-  ASSERT_NOT_NULL(THCPByteStorageClass   = PyObject_GetAttrString(torch_module, (char*)"ByteStorage"));
-
   if (!THCPDoubleTensor_postInit(torch_module)) return false;
   if (!THCPFloatTensor_postInit(torch_module)) return false;
   if (!THCPHalfTensor_postInit(torch_module)) return false;
@@ -42,6 +33,15 @@ static bool THCPModule_loadClasses(PyObject *torch_module)
   if (!THCPShortTensor_postInit(torch_module)) return false;
   if (!THCPCharTensor_postInit(torch_module)) return false;
   if (!THCPByteTensor_postInit(torch_module)) return false;
+
+  THCPDoubleStorage_postInit(torch_module);
+  THCPFloatStorage_postInit(torch_module);
+  THCPHalfStorage_postInit(torch_module);
+  THCPLongStorage_postInit(torch_module);
+  THCPIntStorage_postInit(torch_module);
+  THCPShortStorage_postInit(torch_module);
+  THCPCharStorage_postInit(torch_module);
+  THCPByteStorage_postInit(torch_module);
 
   return true;
 #undef ASSERT_NOT_NULL
@@ -133,6 +133,19 @@ PyObject * THCPModule_getDeviceName_wrap(PyObject *self, PyObject *arg)
   END_HANDLE_TH_ERRORS
 }
 
+PyObject * THCPModule_getDeviceCapability_wrap(PyObject *self, PyObject *arg)
+{
+  HANDLE_TH_ERRORS
+  THPUtils_assert(THPUtils_checkLong(arg), "invalid argument to getDeviceCapability");
+  long device = THPUtils_unpackLong(arg);
+
+  cudaDeviceProp prop;
+  THCudaCheck(cudaGetDeviceProperties(&prop, device));
+  return Py_BuildValue("(ii)", prop.major, prop.minor);
+  END_HANDLE_TH_ERRORS
+}
+
+
 PyObject * THCPModule_getCurrentStream_wrap(PyObject *self)
 {
   HANDLE_TH_ERRORS
@@ -172,6 +185,11 @@ PyObject * THCPModule_getDriverVersion(PyObject *self)
     return NULL;
   }
   return PyLong_FromLong((int64_t) driverVersion);
+}
+
+PyObject * THCPModule_getCompiledVersion(PyObject *self)
+{
+  return PyLong_FromLong((long) CUDA_VERSION);
 }
 
 PyObject * THCPModule_getRNGState(PyObject *_unused)
@@ -218,21 +236,21 @@ PyObject * THCPModule_manualSeedAll(PyObject *_unused, PyObject *seed)
 PyObject * THCPModule_seed(PyObject *_unused)
 {
   HANDLE_TH_ERRORS
-  return PyLong_FromUnsignedLong(THCRandom_seed(state));
+  return THPUtils_packUInt64(THCRandom_seed(state));
   END_HANDLE_TH_ERRORS
 }
 
 PyObject * THCPModule_seedAll(PyObject *_unused)
 {
   HANDLE_TH_ERRORS
-  return PyLong_FromUnsignedLong(THCRandom_seedAll(state));
+  return THPUtils_packUInt64(THCRandom_seedAll(state));
   END_HANDLE_TH_ERRORS
 }
 
 PyObject * THCPModule_initialSeed(PyObject *_unused)
 {
   HANDLE_TH_ERRORS
-  return PyLong_FromUnsignedLong(THCRandom_initialSeed(state));
+  return THPUtils_packUInt64(THCRandom_initialSeed(state));
   END_HANDLE_TH_ERRORS
 }
 
@@ -378,11 +396,13 @@ static struct PyMethodDef _THCPModule_methods[] = {
   {"_cuda_getDevice",   (PyCFunction)THCPModule_getDevice_wrap,   METH_NOARGS,  NULL},
   {"_cuda_getDeviceCount", (PyCFunction)THCPModule_getDeviceCount_wrap, METH_NOARGS, NULL},
   {"_cuda_getDeviceName", (PyCFunction)THCPModule_getDeviceName_wrap, METH_O,   NULL},
+  {"_cuda_getDeviceCapability", (PyCFunction)THCPModule_getDeviceCapability_wrap, METH_O,   NULL},
   {"_cuda_getCurrentStream", (PyCFunction)THCPModule_getCurrentStream_wrap, METH_NOARGS, NULL},
   {"_cuda_getCurrentBlasHandle", (PyCFunction)THCPModule_getCurrentBlasHandle_wrap, METH_NOARGS, NULL},
   {"_cuda_setStream",    (PyCFunction)THCPModule_setStream_wrap,  METH_O, NULL},
   {"_cuda_isDriverSufficient", (PyCFunction)THCPModule_isDriverSufficient, METH_NOARGS, NULL},
   {"_cuda_getDriverVersion", (PyCFunction)THCPModule_getDriverVersion, METH_NOARGS, NULL},
+  {"_cuda_getCompiledVersion", (PyCFunction)THCPModule_getCompiledVersion, METH_NOARGS, NULL},
   {"_cuda_getRNGState", (PyCFunction)THCPModule_getRNGState,      METH_NOARGS,  NULL},
   {"_cuda_setRNGState", (PyCFunction)THCPModule_setRNGState,      METH_O,       NULL},
   {"_cuda_emptyCache", (PyCFunction) THCPModule_emptyCache,       METH_NOARGS,  NULL},
@@ -397,6 +417,9 @@ static struct PyMethodDef _THCPModule_methods[] = {
   {"_cuda_lock_mutex",   (PyCFunction)THCPModule_cudaLockMutex,   METH_NOARGS,  NULL},
   {"_cuda_unlock_mutex", (PyCFunction)THCPModule_cudaUnlockMutex, METH_NOARGS,  NULL},
 #ifdef WITH_NCCL
+  {"_nccl_version", (PyCFunction)THCPModule_nccl_version, METH_NOARGS, NULL},
+  {"_nccl_unique_id", (PyCFunction)THCPModule_nccl_unique_id, METH_NOARGS, NULL},
+  {"_nccl_init_rank", (PyCFunction)THCPModule_nccl_init_rank, METH_VARARGS, NULL},
   {"_nccl_reduce", (PyCFunction)THCPModule_nccl_reduce, METH_VARARGS, NULL},
   {"_nccl_all_reduce", (PyCFunction)THCPModule_nccl_all_reduce, METH_VARARGS, NULL},
   {"_nccl_broadcast", (PyCFunction)THCPModule_nccl_broadcast, METH_VARARGS, NULL},

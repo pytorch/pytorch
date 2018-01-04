@@ -1,0 +1,5 @@
+graph(%0 : Double(4, 4)) {
+  %1 : Double(4) = select[dim=0, index=0](%0)
+  %2 : Double(4) = add[other={0}, alpha={1}](%1)
+  return (%2);
+}

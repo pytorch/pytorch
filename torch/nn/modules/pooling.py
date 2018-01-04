@@ -151,10 +151,11 @@ class MaxPool2d(Module):
             if padh != 0 and padw != 0 else ''
         dilation_str = (', dilation=(' + str(dilh) + ', ' + str(dilw) + ')'
                         if dilh != 0 and dilw != 0 else '')
+        ceil_str = ', ceil_mode=' + str(self.ceil_mode)
         return self.__class__.__name__ + '(' \
             + 'kernel_size=(' + str(kh) + ', ' + str(kw) + ')' \
             + ', stride=(' + str(dh) + ', ' + str(dw) + ')' \
-            + padding_str + dilation_str + ')'
+            + padding_str + dilation_str + ceil_str + ')'
 
 
 class MaxUnpool1d(Module):
@@ -702,32 +703,27 @@ class FractionalMaxPool2d(Module):
     def __init__(self, kernel_size, output_size=None, output_ratio=None,
                  return_indices=False, _random_samples=None):
         super(FractionalMaxPool2d, self).__init__()
-        self.kh, self.kw = _pair(kernel_size)
+        self.kernel_size = _pair(kernel_size)
         self.return_indices = return_indices
         self.register_buffer('_random_samples', _random_samples)
-        if output_size is not None:
-            self.outh, self.outw = _pair(output_size)
-            self.rh, self.rw = None, None
-            assert output_ratio is None
-        elif output_ratio is not None:
-            self.outh, self.outw = None, None
-            self.rh, self.rw = _pair(output_ratio)
-            assert output_size is None
-            assert 0 < self.rh < 1
-            assert 0 < self.rw < 1
-        else:
+        self.output_size = _pair(output_size) if output_size is not None else None
+        self.output_ratio = _pair(output_ratio) if output_ratio is not None else None
+        if output_size is None and output_ratio is None:
             raise ValueError("FractionalMaxPool2d requires specifying either "
                              "an output size, or a pooling ratio")
+        if output_size is not None and output_ratio is not None:
+            raise ValueError("only one of output_size and output_ratio may be specified")
+        if self.output_ratio is not None:
+            if not (0 < self.output_ratio[0] < 1 and 0 < self.output_ratio[1] < 1):
+                raise ValueError("output_ratio must be between 0 and 1 (got {})"
+                                 .format(output_ratio))
 
     def forward(self, input):
-        output_size, output_ratio = None, None
-        if self.outh is not None:
-            output_size = self.outh, self.outw
-        else:
-            output_ratio = self.rh, self.rw
-        ret = self._backend.FractionalMaxPool2d.apply(input, self.kw, self.kh, output_size, output_ratio,
-                                                      self._random_samples)
-        return ret if self.return_indices else ret[0]
+        samples = None if self._random_samples is None else Variable(self._random_samples)
+        return F.fractional_max_pool2d(
+            input, self.kernel_size, self.output_size, self.output_ratio,
+            self.return_indices,
+            _random_samples=samples)
 
 
 class LPPool2d(Module):
@@ -871,7 +867,9 @@ class AdaptiveMaxPool2d(Module):
 
     Args:
         output_size: the target output size of the image of the form H x W.
-                     Can be a tuple (H, W) or a single number H for a square image H x H
+                     Can be a tuple (H, W) or a single H for a square image H x H.
+                     H and W can be either a ``int``, or ``None`` which means the size will
+                     be the same as that of the input.
         return_indices: if ``True``, will return the indices along with the outputs.
                         Useful to pass to nn.MaxUnpool2d. Default: ``False``
 
@@ -882,6 +880,10 @@ class AdaptiveMaxPool2d(Module):
         >>> output = m(input)
         >>> # target output size of 7x7 (square)
         >>> m = nn.AdaptiveMaxPool2d(7)
+        >>> input = autograd.Variable(torch.randn(1, 64, 10, 9))
+        >>> output = m(input)
+        >>> # target output size of 10x7
+        >>> m = nn.AdaptiveMaxPool2d((None, 7))
         >>> input = autograd.Variable(torch.randn(1, 64, 10, 9))
         >>> output = m(input)
 
@@ -908,7 +910,10 @@ class AdaptiveMaxPool3d(Module):
 
     Args:
         output_size: the target output size of the image of the form D x H x W.
-                     Can be a tuple (D, H, W) or a single number D for a cube D x D x D
+                     Can be a tuple (D, H, W) or a single D for a cube D x D x D.
+                     D, H and W can be either a ``int``, or ``None`` which means the size will
+                     be the same as that of the input.
+
         return_indices: if ``True``, will return the indices along with the outputs.
                         Useful to pass to nn.MaxUnpool3d. Default: ``False``
 
@@ -919,6 +924,10 @@ class AdaptiveMaxPool3d(Module):
         >>> output = m(input)
         >>> # target output size of 7x7x7 (cube)
         >>> m = nn.AdaptiveMaxPool3d(7)
+        >>> input = autograd.Variable(torch.randn(1, 64, 10, 9, 8))
+        >>> output = m(input)
+        >>> # target output size of 7x9x8
+        >>> m = nn.AdaptiveMaxPool3d((7, None, None))
         >>> input = autograd.Variable(torch.randn(1, 64, 10, 9, 8))
         >>> output = m(input)
 
@@ -974,7 +983,9 @@ class AdaptiveAvgPool2d(Module):
 
     Args:
         output_size: the target output size of the image of the form H x W.
-                     Can be a tuple (H, W) or a single number H for a square image H x H
+                     Can be a tuple (H, W) or a single H for a square image H x H
+                     H and W can be either a ``int``, or ``None`` which means the size will
+                     be the same as that of the input.
 
     Examples:
         >>> # target output size of 5x7
@@ -983,6 +994,10 @@ class AdaptiveAvgPool2d(Module):
         >>> output = m(input)
         >>> # target output size of 7x7 (square)
         >>> m = nn.AdaptiveAvgPool2d(7)
+        >>> input = autograd.Variable(torch.randn(1, 64, 10, 9))
+        >>> output = m(input)
+        >>> # target output size of 10x7
+        >>> m = nn.AdaptiveMaxPool2d((None, 7))
         >>> input = autograd.Variable(torch.randn(1, 64, 10, 9))
         >>> output = m(input)
 
@@ -1009,6 +1024,8 @@ class AdaptiveAvgPool3d(Module):
     Args:
         output_size: the target output size of the form D x H x W.
                      Can be a tuple (D, H, W) or a single number D for a cube D x D x D
+                     D, H and W can be either a ``int``, or ``None`` which means the size will
+                     be the same as that of the input.
 
     Examples:
         >>> # target output size of 5x7x9
@@ -1017,6 +1034,10 @@ class AdaptiveAvgPool3d(Module):
         >>> output = m(input)
         >>> # target output size of 7x7x7 (cube)
         >>> m = nn.AdaptiveAvgPool3d(7)
+        >>> input = autograd.Variable(torch.randn(1, 64, 10, 9, 8))
+        >>> output = m(input)
+        >>> # target output size of 7x9x8
+        >>> m = nn.AdaptiveMaxPool3d((7, None, None))
         >>> input = autograd.Variable(torch.randn(1, 64, 10, 9, 8))
         >>> output = m(input)
 

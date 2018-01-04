@@ -2,6 +2,8 @@
 #define TH_GENERIC_FILE "generic/THVectorDefault.c"
 #else
 
+#include "../THRandom.h"
+
 void THVector_(copy_DEFAULT)(real *x, const real *y, const ptrdiff_t n) {
   ptrdiff_t i = 0;
 
@@ -128,6 +130,58 @@ void THVector_(divs_DEFAULT)(real *y, const real *x, const real c, const ptrdiff
     y[i] = x[i] / c;
 }
 
+// Fills 16 normally distributed samples into data, interleaved with a
+// stride of 8, i.e. in order of ([0], [8]), ([1], [9]), ...
+static void THVector_(interleaved_normal_fill_16)(real *data,
+                                                  const real mean,
+                                                  const real stddev)
+{
+  for (int j = 0; j < 8; ++j) {
+    const real u1 = 1 - data[j]; // [0, 1) -> (0, 1] for log.
+    const real u2 = data[j + 8];
+
+    const real radius = sqrt(-2 * log(u1));
+    const real theta = 2.0f * M_PI * u2;
+
+    data[j] = radius * cos(theta) * stddev + mean;
+    data[j + 8] = radius * sin(theta) * stddev + mean;
+  }
+}
+
+void THVector_(normal_fill_DEFAULT)(real *data,
+                                    int64_t size,
+                                    THGenerator *generator,
+                                    const real mean,
+                                    const real stddev)
+{
+  THAssert(size >= 16 && "Size must be >= 16 for normal fill");
+
+  for (int64_t i = 0; i < size; ++i) {
+#ifdef TH_REAL_IS_FLOAT
+    data[i] = THRandom_uniformFloat(generator, 0, 1);
+#else
+    data[i] = THRandom_uniform(generator, 0, 1);
+#endif
+  }
+
+  for (int64_t i = 0; i < size - 15; i += 16) {
+    THVector_(interleaved_normal_fill_16)(data + i, mean, stddev);
+  }
+
+  if (size % 16 != 0) {
+    // Recompute the last 16 values.
+    data = data + size - 16;
+    for (int64_t i = 0; i < 16; ++i) {
+#ifdef TH_REAL_IS_FLOAT
+      data[i] = THRandom_uniformFloat(generator, 0, 1);
+#else
+      data[i] = THRandom_uniform(generator, 0, 1);
+#endif
+    }
+    THVector_(interleaved_normal_fill_16)(data, mean, stddev);
+  }
+}
+
 #define VECTOR_IMPLEMENT_FUNCTION(NAME, CFUNC)  \
   void THVector_(NAME)(real *y, const real *x, const ptrdiff_t n) \
   { \
@@ -178,9 +232,12 @@ VECTOR_IMPLEMENT_FUNCTION(abs,abs)
 
 VECTOR_IMPLEMENT_FUNCTION(log,TH_MATH_NAME(log))
 VECTOR_IMPLEMENT_FUNCTION(lgamma,TH_MATH_NAME(lgamma))
+VECTOR_IMPLEMENT_FUNCTION(digamma,TH_MATH_NAME(TH_digamma))
+VECTOR_IMPLEMENT_FUNCTION(trigamma,TH_MATH_NAME(TH_trigamma))
 VECTOR_IMPLEMENT_FUNCTION(log1p,TH_MATH_NAME(log1p))
 VECTOR_IMPLEMENT_FUNCTION(sigmoid,TH_MATH_NAME(TH_sigmoid))
 VECTOR_IMPLEMENT_FUNCTION(exp,TH_MATH_NAME(exp))
+VECTOR_IMPLEMENT_FUNCTION(expm1,TH_MATH_NAME(expm1))
 VECTOR_IMPLEMENT_FUNCTION(erf,TH_MATH_NAME(erf))
 VECTOR_IMPLEMENT_FUNCTION(erfinv, TH_erfinv)
 VECTOR_IMPLEMENT_FUNCTION(cos,TH_MATH_NAME(cos))
@@ -206,8 +263,6 @@ VECTOR_IMPLEMENT_FUNCTION(cinv, TH_MATH_NAME(1.0) / )
 #undef TH_MATH_NAME
 #endif /* floating point only part */
 
-#ifndef TH_REAL_IS_BYTE
 VECTOR_IMPLEMENT_FUNCTION(neg,-)
-#endif
 
 #endif

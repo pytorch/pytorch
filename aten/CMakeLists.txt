@@ -5,6 +5,7 @@ set(CMAKE_MODULE_PATH
   /usr/lib/x86_64-linux-gnu/
   ${CMAKE_CURRENT_SOURCE_DIR}/src/TH/cmake
   ${CMAKE_MODULE_PATH})
+SET(CMAKE_LIBRARY_PATH /usr/lib/x86_64-linux-gnu/ ${CMAKE_LIBRARY_PATH})
 project(ATen)
 
 cmake_policy(SET CMP0012 NEW)
@@ -24,11 +25,10 @@ if("${isSystemDir}" STREQUAL "-1")
   set(CMAKE_INSTALL_RPATH "${CMAKE_INSTALL_PREFIX}/lib")
 endif()
 
-# C++11
-set(CMAKE_CXX_FLAGS "--std=c++11 ${CMAKE_CXX_FLAGS}")
-
-set(CMAKE_C_FLAGS "-fexceptions ${CMAKE_C_FLAGS}")
-set(CMAKE_CXX_FLAGS "-fexceptions ${CMAKE_CXX_FLAGS}")
+IF(NOT MSVC)
+  set(CMAKE_CXX_FLAGS "--std=c++11 -Wall -Wno-vla -fexceptions ${CMAKE_CXX_FLAGS}")
+  set(CMAKE_C_FLAGS "-fexceptions ${CMAKE_C_FLAGS}")
+ENDIF(NOT MSVC)
 
 
 # Top-level build config
@@ -52,11 +52,13 @@ IF(MSVC)
   ENDIF()
 ENDIF(MSVC)
 
-IF (CMAKE_VERSION VERSION_LESS "3.1")
-  SET(CMAKE_C_FLAGS "-std=c11 ${CMAKE_C_FLAGS}")
-ELSE ()
-  SET(CMAKE_C_STANDARD 11)
-ENDIF ()
+IF (NOT MSVC)
+  IF (CMAKE_VERSION VERSION_LESS "3.1")
+    SET(CMAKE_C_FLAGS "-std=c11 ${CMAKE_C_FLAGS}")
+  ELSE ()
+    SET(CMAKE_C_STANDARD 11)
+  ENDIF ()
+ENDIF(NOT MSVC)
 
 if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
   if(CMAKE_CXX_COMPILER_VERSION VERSION_GREATER "4.9")
@@ -68,6 +70,7 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
 endif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
 
 LIST(APPEND CUDA_NVCC_FLAGS -Wno-deprecated-gpu-targets)
+LIST(APPEND CUDA_NVCC_FLAGS --expt-extended-lambda)
 
 if(NOT CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
   SET(CMAKE_CXX_STANDARD 11)
@@ -79,7 +82,7 @@ ENDIF()
 LIST(APPEND CUDA_NVCC_FLAGS $ENV{TORCH_NVCC_FLAGS})
 CUDA_SELECT_NVCC_ARCH_FLAGS(NVCC_FLAGS_EXTRA $ENV{TORCH_CUDA_ARCH_LIST})
 LIST(APPEND CUDA_NVCC_FLAGS ${NVCC_FLAGS_EXTRA})
-IF(CMAKE_POSITION_INDEPENDENT_CODE)
+IF(CMAKE_POSITION_INDEPENDENT_CODE AND NOT MSVC)
   LIST(APPEND CUDA_NVCC_FLAGS "-Xcompiler -fPIC")
 ENDIF()
 
@@ -121,15 +124,21 @@ IF (APPLE AND CMAKE_COMPILER_IS_GNUCC)
   ENDIF ()
 ENDIF ()
 
-IF (WITH_OPENMP)
+IF (WITH_OPENMP AND NOT CHECKED_OPENMP)
   FIND_PACKAGE(OpenMP)
-  IF(OPENMP_FOUND)
-    MESSAGE(STATUS "Compiling with OpenMP support")
-    SET(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${OpenMP_C_FLAGS}")
-    SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_CXX_FLAGS}")
-    SET(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${OpenMP_EXE_LINKER_FLAGS}")
-  ENDIF(OPENMP_FOUND)
-ENDIF (WITH_OPENMP)
+  SET(CHECKED_OPENMP ON CACHE BOOL "already checked for OpenMP")
+  
+  # OPENMP_FOUND is not cached in FindOpenMP.cmake (all other variables are cached)
+  # see https://github.com/Kitware/CMake/blob/master/Modules/FindOpenMP.cmake
+  SET(OPENMP_FOUND ${OPENMP_FOUND} CACHE BOOL "OpenMP Support found")
+ENDIF (WITH_OPENMP AND NOT CHECKED_OPENMP)
+
+IF(OPENMP_FOUND)
+  MESSAGE(STATUS "Compiling with OpenMP support")
+  SET(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${OpenMP_C_FLAGS}")
+  SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_CXX_FLAGS}")
+ENDIF(OPENMP_FOUND)
+
 
 SET(CUDA_ATTACH_VS_BUILD_RULE_TO_CUDA_FILE OFF)
 
@@ -155,7 +164,6 @@ IF(CUDA_FOUND AND MAGMA_FOUND)
 ELSE()
   MESSAGE(STATUS "MAGMA not found. Compiling without MAGMA support")
 ENDIF()
-
 
 # ARM specific flags
 FIND_PACKAGE(ARM)
@@ -319,30 +327,18 @@ MACRO(Install_Required_Library ln)
       DESTINATION "${TH_INSTALL_BIN_SUBDIR}")
 ENDMACRO(Install_Required_Library libname)
 
-IF (BLAS_FOUND AND BLAS_INSTALL_LIBRARIES)
-  IF (BLAS_goto2_LIBRARY)
-    Install_Required_Library(${BLAS_goto2_LIBRARY})
-    Install_Required_Library("${libpath}/libgfortran")
-    Install_Required_Library("${libpath}/libquadmath")
-    Install_Required_Library("${libpath}/libgcc")
+FIND_PACKAGE(BLAS)
+IF(BLAS_FOUND)
+  SET(USE_BLAS 1)
+  IF(BLAS_INFO STREQUAL "mkl")
+    ADD_DEFINITIONS(-DTH_BLAS_MKL)
   ENDIF()
-  IF (BLAS_openblas_LIBRARY)
-    Install_Required_Library(${BLAS_openblas_LIBRARY})
-    Install_Required_Library("${libpath}/libquadmath")
-    Install_Required_Library("${libpath}/libgfortran")
-    Install_Required_Library("${libpath}/libgcc")
-  ENDIF()
-ENDIF()
+ENDIF(BLAS_FOUND)
 
 FIND_PACKAGE(LAPACK)
 IF(LAPACK_FOUND)
   SET(USE_LAPACK 1)
 ENDIF(LAPACK_FOUND)
-
-FIND_PACKAGE(CuDNN)
-IF(CUDNN_FOUND)
-  SET(USE_CUDNN 1)
-ENDIF(CUDNN_FOUND)
 
 #############################################
 
@@ -354,8 +350,6 @@ SET(ATEN_INSTALL_BIN_SUBDIR "bin" CACHE PATH "ATen install binary subdirectory")
 SET(ATEN_INSTALL_LIB_SUBDIR "lib" CACHE PATH "ATen install library subdirectory")
 SET(ATEN_INSTALL_INCLUDE_SUBDIR "include" CACHE PATH "ATen install include subdirectory")
 
-
-set(Torch_FOUND 1)
 add_definitions(-DTH_INDEX_BASE=0)
 set(TH_LINK_STYLE STATIC)
 add_subdirectory(src/TH)
@@ -378,11 +372,38 @@ add_subdirectory(src/THS)
 
 if(NO_CUDA)
   message("disabling CUDA because NO_CUDA is set")
+  SET(CUDA_FLAG -n)
+  SET(AT_CUDA_ENABLED 0)
 else()
+  SET(AT_CUDA_ENABLED 1)
+  INCLUDE_DIRECTORIES(${CUDA_INCLUDE_DIRS})
   find_package(CUDA 5.5 REQUIRED)
   add_subdirectory(src/THC)
   add_subdirectory(src/THCUNN)
   add_subdirectory(src/THCS)
+endif()
+
+find_package(CuDNN)
+IF(NOT AT_CUDA_ENABLED OR NOT CUDNN_FOUND)
+  MESSAGE(STATUS "CuDNN not found. Compiling without CuDNN support")
+  set(AT_CUDNN_ENABLED 0)
+ELSE()
+  INCLUDE_DIRECTORIES(${CUDNN_INCLUDE_DIRS})
+  set(AT_CUDNN_ENABLED 1)
+ENDIF()
+
+if(NO_NNPACK)
+  message("disabling NNPACK because NO_NNPACK is set")
+  set(AT_NNPACK_ENABLED 0)
+else()
+  find_package(NNPACK)
+  if(NOT NNPACK_FOUND)
+    MESSAGE(STATUS "NNPACK not found. Compiling without nNPACK support")
+    set(AT_NNPACK_ENABLED 0)
+  ELSE()
+    INCLUDE_DIRECTORIES(${NNPACK_INCLUDE_DIRS})
+    set(AT_NNPACK_ENABLED 1)
+  ENDIF()
 endif()
 
 set(cwrap_files
@@ -390,6 +411,7 @@ set(cwrap_files
   ${CMAKE_CURRENT_SOURCE_DIR}/src/THNN/generic/THNN.h
   ${CMAKE_CURRENT_SOURCE_DIR}/src/THCUNN/generic/THCUNN.h
   ${CMAKE_CURRENT_SOURCE_DIR}/src/ATen/nn.yaml
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/ATen/native/native_functions.yaml
 )
 
 include_directories(
@@ -400,6 +422,9 @@ add_subdirectory(src/ATen)
 include_directories(
 ${CMAKE_CURRENT_SOURCE_DIR}/src
 ${CMAKE_CURRENT_BINARY_DIR}/src/ATen)
+if(NOT NO_CUDA)
+  include_directories(${CUDA_INCLUDE_DIRS})
+endif()
 add_subdirectory(src/ATen/test)
 
 if(ATEN_NO_CONTRIB)

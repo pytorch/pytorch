@@ -6,15 +6,18 @@
 
 namespace at {
 
+inline Tensor & Tensor::operator=(Tensor const & rhs) && {
+  return copy_(rhs);
+}
+
 inline Tensor Tensor::toType(const Type & t) const {
   if(type() == t)
     return *this;
   return t.copy(*this);
 }
 
-inline Tensor & Tensor::copy_(const Tensor & src) {
-  type().copy(src, *this);
-  return *this;
+inline Tensor & Tensor::copy_(const Tensor & src, bool async) {
+  return type().copy_(*this, src, async);
 }
 
 inline Tensor Tensor::toType(ScalarType t) const {
@@ -47,7 +50,7 @@ AT_FORALL_SCALAR_TYPES(DEFINE_CAST)
 #undef DEFINE_CAST
 
 #define DEFINE_TO_C_TYPE(T,name,_) \
-inline T Tensor::toC##name () const { return Scalar(*this).to##name (); }
+inline T Tensor::toC##name () const { return pImpl->localScalar().to##name (); }
 
 AT_FORALL_SCALAR_TYPES(DEFINE_TO_C_TYPE)
 #undef DEFINE_TO_C_TYPE

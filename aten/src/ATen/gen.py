@@ -1,12 +1,12 @@
 from optparse import OptionParser
 import yaml
+from collections import OrderedDict
 
 import cwrap_parser
 import nn_parse
 import native_parse
 import preprocess_declarations
 import function_wrapper
-import dispatch_macros
 import copy_wrapper
 
 from code_template import CodeTemplate
@@ -28,8 +28,47 @@ parser.add_option('-o', '--output-dependencies',
 parser.add_option('-n', '--no-cuda', action='store_true')
 
 options, files = parser.parse_args()
-if options.output_dependencies is not None:
-    output_dependencies_file = open(options.output_dependencies, 'w')
+
+
+class FileManager(object):
+    def __init__(self):
+        self.filenames = set()
+        self.outputs_written = False
+        self.undeclared_files = []
+
+    def will_write(self, filename):
+        filename = "ATen/" + filename
+        if self.outputs_written:
+            raise Exception("'will_write' can only be called before " +
+                            "the call to write_outputs, refactor so outputs are registered " +
+                            "before running the generators")
+        self.filenames.add(filename)
+
+    def write_outputs(self, filename):
+        with open(filename, 'w') as f:
+            for name in sorted(self.filenames):
+                f.write(name + ";")
+        self.outputs_written = True
+
+    def write(self, filename, s):
+        filename = "ATen/" + filename
+        with open(filename, "w") as f:
+            f.write(s)
+        if filename not in self.filenames:
+            self.undeclared_files.append(filename)
+        else:
+            self.filenames.remove(filename)
+
+    def check_all_files_written(self):
+        if len(self.undeclared_files) > 0:
+            raise Exception(
+                "trying to write files {} which are not ".format(self.undeclared_files) +
+                "in the list of outputs this script produces. " +
+                "use will_write to add them.")
+        if len(self.filenames) > 0:
+            raise Exception("Outputs declared with 'will_write' were " +
+                            "never written: {}".format(self.filenames))
+
 
 TEMPLATE_PATH = options.source_path + "/templates"
 GENERATOR_DERIVED = CodeTemplate.from_file(
@@ -56,7 +95,9 @@ TENSOR_METHODS_H = CodeTemplate.from_file(TEMPLATE_PATH + "/TensorMethods.h")
 
 FUNCTIONS_H = CodeTemplate.from_file(TEMPLATE_PATH + "/Functions.h")
 
-NATIVE_FUNCTIONS_PATH = options.source_path + "/NativeFunctions.h"
+NATIVE_FUNCTIONS_H = CodeTemplate.from_file(TEMPLATE_PATH + "/NativeFunctions.h")
+
+file_manager = FileManager()
 
 generators = {
     'CPUGenerator.h': {
@@ -77,15 +118,16 @@ if not options.no_cuda:
 
 densities = ['Dense', 'Sparse']
 
+# scalar_name, c_type, accreal, th_scalar_type, is_floating_type
 scalar_types = [
-    ('Byte', 'uint8_t', 'Long', 'uint8_t'),
-    ('Char', 'int8_t', 'Long', 'int8_t'),
-    ('Double', 'double', 'Double', 'double'),
-    ('Float', 'float', 'Double', 'float'),
-    ('Int', 'int', 'Long', 'int32_t'),
-    ('Long', 'int64_t', 'Long', 'int64_t'),
-    ('Short', 'int16_t', 'Long', 'int16_t'),
-    ('Half', 'Half', 'Double', 'THHalf'),
+    ('Byte', 'uint8_t', 'Long', 'uint8_t', False),
+    ('Char', 'int8_t', 'Long', 'int8_t', False),
+    ('Double', 'double', 'Double', 'double', True),
+    ('Float', 'float', 'Double', 'float', True),
+    ('Int', 'int', 'Long', 'int32_t', False),
+    ('Long', 'int64_t', 'Long', 'int64_t', False),
+    ('Short', 'int16_t', 'Long', 'int16_t', False),
+    ('Half', 'Half', 'Double', 'THHalf', True),
 ]
 
 # shared environment for non-derived base classes Type.h Tensor.h Storage.h
@@ -100,16 +142,29 @@ top_env = {
     'function_declarations': [],
     'function_definitions': [],
     'type_ids': [],
+    'native_function_declarations': [],
 }
 
 
-def write(filename, s):
-    filename = "ATen/" + filename
-    if options.output_dependencies is not None:
-        output_dependencies_file.write(filename + ";")
-        return
-    with open(filename, "w") as f:
-        f.write(s)
+def dict_representer(dumper, data):
+    return dumper.represent_dict(data.items())
+
+
+def postprocess_output_declarations(output_declarations):
+    # ensure each return has a name associated with it
+    for decl in output_declarations:
+        has_named_ret = False
+        for n, ret in enumerate(decl['returns']):
+            if 'name' not in ret:
+                assert not has_named_ret
+                if len(decl['returns']) == 1:
+                    ret['name'] = 'result'
+                else:
+                    ret['name'] = 'result' + str(n)
+            else:
+                has_named_ret = True
+
+    return output_declarations
 
 
 def format_yaml(data):
@@ -118,11 +173,13 @@ def format_yaml(data):
         return ""
     noalias_dumper = yaml.dumper.SafeDumper
     noalias_dumper.ignore_aliases = lambda self, data: True
+    # Support serializing OrderedDict
+    noalias_dumper.add_representer(OrderedDict, dict_representer)
     return yaml.dump(data, default_flow_style=False, Dumper=noalias_dumper)
 
 
 def generate_storage_type_and_tensor(backend, density, scalar_type, declarations):
-    scalar_name, c_type, accreal, th_scalar_type = scalar_type
+    scalar_name, c_type, accreal, th_scalar_type, is_floating_type = scalar_type
     env = {}
     density_tag = 'Sparse' if density == 'Sparse' else ''
     th_density_tag = 'S' if density == 'Sparse' else ''
@@ -131,11 +188,15 @@ def generate_storage_type_and_tensor(backend, density, scalar_type, declarations
     env['ScalarType'] = c_type
     env['THScalarType'] = th_scalar_type
     env['AccScalarName'] = accreal
+    env['isFloatingType'] = is_floating_type
+    env['isIntegralType'] = not is_floating_type
     env['Storage'] = "{}{}Storage".format(backend, scalar_name)
     env['Type'] = "{}{}{}Type".format(density_tag, backend, scalar_name)
     env['Tensor'] = "{}{}{}Tensor".format(density_tag, backend, scalar_name)
+    env['DenseTensor'] = "{}{}Tensor".format(backend, scalar_name)
     env['SparseTensor'] = "Sparse{}{}Tensor".format(backend, scalar_name)
     env['Backend'] = density_tag + backend
+    env['DenseBackend'] = backend
 
     # used for generating switch logic for external functions
     tag = density_tag + backend + scalar_name
@@ -203,19 +264,19 @@ def generate_storage_type_and_tensor(backend, density, scalar_type, declarations
     if density != 'Sparse':
         # there are no special storage types for Sparse, they are composed
         # of Dense tensors
-        write(env['Storage'] + ".cpp", STORAGE_DERIVED_CPP.substitute(env))
-        write(env['Storage'] + ".h", STORAGE_DERIVED_H.substitute(env))
+        file_manager.write(env['Storage'] + ".cpp", STORAGE_DERIVED_CPP.substitute(env))
+        file_manager.write(env['Storage'] + ".h", STORAGE_DERIVED_H.substitute(env))
         env['TensorDenseOrSparse'] = TENSOR_DENSE_CPP.substitute(env)
         env['THTensor_nDimension'] = 'tensor->nDimension'
     else:
         env['TensorDenseOrSparse'] = TENSOR_SPARSE_CPP.substitute(env)
         env['THTensor_nDimension'] = 'tensor->nDimensionI + tensor->nDimensionV'
 
-    write(env['Type'] + ".cpp", TYPE_DERIVED_CPP.substitute(env))
-    write(env['Type'] + ".h", TYPE_DERIVED_H.substitute(env))
+    file_manager.write(env['Type'] + ".cpp", TYPE_DERIVED_CPP.substitute(env))
+    file_manager.write(env['Type'] + ".h", TYPE_DERIVED_H.substitute(env))
 
-    write(env['Tensor'] + ".cpp", TENSOR_DERIVED_CPP.substitute(env))
-    write(env['Tensor'] + ".h", TENSOR_DERIVED_H.substitute(env))
+    file_manager.write(env['Tensor'] + ".cpp", TENSOR_DERIVED_CPP.substitute(env))
+    file_manager.write(env['Tensor'] + ".h", TENSOR_DERIVED_H.substitute(env))
 
     type_register = (('context->type_registry[static_cast<int>(Backend::{})]' +
                       '[static_cast<int>(ScalarType::{})].reset(new {}(context));')
@@ -227,46 +288,82 @@ def generate_storage_type_and_tensor(backend, density, scalar_type, declarations
     return env
 
 
-cwrap_files = [f for f in files if f.endswith('.cwrap')]
-nn_files = [f for f in files if f.endswith('.yaml') or f.endswith('.h')]
-
-declarations = [d
-                for file in cwrap_files
-                for d in cwrap_parser.parse(file)]
-print(nn_files)
-declarations += nn_parse.run(nn_files)
-declarations += native_parse.parse(NATIVE_FUNCTIONS_PATH)
-declarations = preprocess_declarations.run(declarations)
-for fname, env in generators.items():
-    write(fname, GENERATOR_DERIVED.substitute(env))
+def iterate_types():
+    for backend in backends:
+        for density in densities:
+            for scalar_type in scalar_types:
+                if density == 'Sparse' and scalar_type[0] == 'Half':
+                    # THS does not do half type yet.
+                    continue
+                yield (backend, density, scalar_type)
 
 
-# note: this will fill in top_env['type/tensor_method_declarations/definitions']
-# and modify the declarations to include any information that will all_backends
-# be used by function_wrapper.create_derived
-output_declarations = function_wrapper.create_generic(top_env, declarations)
-write("Declarations.yaml", format_yaml(output_declarations))
-
-# populated by generate_storage_type_and_tensor
-all_types = []
-
-for backend in backends:
-    for density in densities:
-        for scalar_type in scalar_types:
-            if density == 'Sparse' and scalar_type[0] == 'Half':
-                # THS does not do half type yet.
+###################
+# declare what files will be output _before_ we do any work
+# so that the script runs quickly when we are just querying the
+# outputs
+def declare_outputs():
+    files = ['Declarations.yaml', 'Type.h', 'Type.cpp', 'Tensor.h',
+             'TensorMethods.h', 'Functions.h',
+             'Copy.cpp', 'NativeFunctions.h']
+    for f in files:
+        file_manager.will_write(f)
+    for fname in sorted(generators.keys()):
+        file_manager.will_write(fname)
+    for backend, density, scalar_types in iterate_types():
+        scalar_name = scalar_types[0]
+        full_backend = "Sparse" + backend if density == "Sparse" else backend
+        for kind in ["Storage", "Type", "Tensor"]:
+            if kind == 'Storage' and density == "Sparse":
                 continue
-            all_types.append(generate_storage_type_and_tensor(
-                backend, density, scalar_type, declarations))
+            file_manager.will_write("{}{}{}.h".format(full_backend, scalar_name, kind))
+            file_manager.will_write("{}{}{}.cpp".format(full_backend, scalar_name, kind))
 
-write('Type.h', TYPE_H.substitute(top_env))
-write('Type.cpp', TYPE_CPP.substitute(top_env))
 
-write('Tensor.h', TENSOR_H.substitute(top_env))
-write('TensorMethods.h', TENSOR_METHODS_H.substitute(top_env))
-write('Functions.h', FUNCTIONS_H.substitute(top_env))
-write('Dispatch.h', dispatch_macros.create(all_types))
-write('Copy.cpp', copy_wrapper.create(all_types))
+def generate_outputs():
+    cwrap_files = [f for f in files if f.endswith('.cwrap')]
+    nn_files = [f for f in files if f.endswith('nn.yaml') or f.endswith('.h')]
+    native_files = [f for f in files if f.endswith('native_functions.yaml')]
 
+    declarations = [d
+                    for file in cwrap_files
+                    for d in cwrap_parser.parse(file)]
+
+    declarations += nn_parse.run(nn_files)
+    declarations += native_parse.run(native_files)
+    declarations = preprocess_declarations.run(declarations)
+    for fname, env in generators.items():
+        file_manager.write(fname, GENERATOR_DERIVED.substitute(env))
+
+    # note: this will fill in top_env['type/tensor_method_declarations/definitions']
+    # and modify the declarations to include any information that will all_backends
+    # be used by function_wrapper.create_derived
+    output_declarations = function_wrapper.create_generic(top_env, declarations)
+    output_declarations = postprocess_output_declarations(output_declarations)
+    file_manager.write("Declarations.yaml", format_yaml(output_declarations))
+
+    # populated by generate_storage_type_and_tensor
+    all_types = []
+
+    for backend, density, scalar_type in iterate_types():
+        all_types.append(generate_storage_type_and_tensor(
+            backend, density, scalar_type, declarations))
+
+    file_manager.write('Type.h', TYPE_H.substitute(top_env))
+    file_manager.write('Type.cpp', TYPE_CPP.substitute(top_env))
+
+    file_manager.write('Tensor.h', TENSOR_H.substitute(top_env))
+    file_manager.write('TensorMethods.h', TENSOR_METHODS_H.substitute(top_env))
+    file_manager.write('Functions.h', FUNCTIONS_H.substitute(top_env))
+
+    file_manager.write('Copy.cpp', copy_wrapper.create(all_types))
+    file_manager.write('NativeFunctions.h', NATIVE_FUNCTIONS_H.substitute(top_env))
+
+    file_manager.check_all_files_written()
+
+
+declare_outputs()
 if options.output_dependencies is not None:
-    output_dependencies_file.close()
+    file_manager.write_outputs(options.output_dependencies)
+else:
+    generate_outputs()

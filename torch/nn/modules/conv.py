@@ -47,7 +47,7 @@ class _ConvNd(Module):
             self.bias.data.uniform_(-stdv, stdv)
 
     def __repr__(self):
-        s = ('{name} ({in_channels}, {out_channels}, kernel_size={kernel_size}'
+        s = ('{name}({in_channels}, {out_channels}, kernel_size={kernel_size}'
              ', stride={stride}')
         if self.padding != (0,) * len(self.padding):
             s += ', padding={padding}'
@@ -78,10 +78,12 @@ class Conv1d(_ConvNd):
                        + \sum_{{k}=0}^{C_{in}-1} weight(C_{out_j}, k)  \star input(N_i, k)
         \end{array}
 
-    where :math:`\star` is the valid `cross-correlation`_ operator
+    where :math:`\star` is the valid `cross-correlation`_ operator,
+    :math:`N` is a batch size, :math:`C` denotes a number of channels,
+    :math:`L` is a length of signal sequence.
 
     | :attr:`stride` controls the stride for the cross-correlation, a single
-      number or a tuple.
+      number or a one-element tuple.
     | :attr:`padding` controls the amount of implicit zero-paddings on both
     |  sides for :attr:`padding` number of points.
     | :attr:`dilation` controls the spacing between the kernel points; also
@@ -103,6 +105,16 @@ class Conv1d(_ConvNd):
          columns of the input might be lost, because it is a valid
          `cross-correlation`_, and not a full `cross-correlation`_.
          It is up to the user to add proper padding.
+
+    .. note::
+
+         The configuration when `groups == in_channels` and `out_channels = K * in_channels`
+         where `K` is a positive integer is termed in literature as depthwise convolution.
+
+         In other words, for an input of size :math:`(N, C_{in}, L_{in})`, if you want a
+         depthwise convolution with a depthwise multiplier `K`,
+         then you use the constructor arguments
+         :math:`(in\_channels=C_{in}, out\_channels=C_{in} * K, ..., groups=C_{in})`
 
     Args:
         in_channels (int): Number of channels in the input image
@@ -171,7 +183,10 @@ class Conv2d(_ConvNd):
                        + \sum_{{k}=0}^{C_{in}-1} weight(C_{out_j}, k)  \star input(N_i, k)
         \end{array}
 
-    where :math:`\star` is the valid 2D `cross-correlation`_ operator
+    where :math:`\star` is the valid 2D `cross-correlation`_ operator,
+    :math:`N` is a batch size, :math:`C` denotes a number of channels,
+    :math:`H` is a height of input planes in pixels, and :math:`W` is
+    width in pixels.
 
     | :attr:`stride` controls the stride for the cross-correlation, a single
       number or a tuple.
@@ -202,6 +217,16 @@ class Conv2d(_ConvNd):
          columns of the input might be lost, because it is a valid `cross-correlation`_,
          and not a full `cross-correlation`_.
          It is up to the user to add proper padding.
+
+    .. note::
+
+         The configuration when `groups == in_channels` and `out_channels = K * in_channels`
+         where `K` is a positive integer is termed in literature as depthwise convolution.
+
+         In other words, for an input of size :math:`(N, C_{in}, H_{in}, W_{in})`, if you want a
+         depthwise convolution with a depthwise multiplier `K`,
+         then you use the constructor arguments
+         :math:`(in\_channels=C_{in}, out\_channels=C_{in} * K, ..., groups=C_{in})`
 
     Args:
         in_channels (int): Number of channels in the input image
@@ -299,6 +324,16 @@ class Conv3d(_ConvNd):
          columns of the input might be lost, because it is a valid `cross-correlation`_,
          and not a full `cross-correlation`_.
          It is up to the user to add proper padding.
+
+    .. note::
+
+         The configuration when `groups == in_channels` and `out_channels = K * in_channels`
+         where `K` is a positive integer is termed in literature as depthwise convolution.
+
+         In other words, for an input of size :math:`(N, C_{in}, D_{in}, H_{in}, W_{in})`, if you want a
+         depthwise convolution with a depthwise multiplier `K`,
+         then you use the constructor arguments
+         :math:`(in\_channels=C_{in}, out\_channels=C_{in} * K, ..., groups=C_{in})`
 
     Args:
         in_channels (int): Number of channels in the input image

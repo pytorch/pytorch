@@ -52,6 +52,7 @@ void _THError(const char *file, const int line, const char *fmt, ...)
     (*threadErrorHandler)(msg, threadErrorHandlerData);
   else
     (*defaultErrorHandler)(msg, defaultErrorHandlerData);
+  TH_UNREACHABLE;
 }
 
 void _THAssertionFailed(const char *file, const int line, const char *exp, const char *fmt, ...) {
@@ -113,6 +114,7 @@ void _THArgCheck(const char *file, int line, int condition, int argNumber, const
       (*threadArgErrorHandler)(argNumber, msg, threadArgErrorHandlerData);
     else
       (*defaultArgErrorHandler)(argNumber, msg, defaultArgErrorHandlerData);
+    TH_UNREACHABLE;
   }
 }
 
@@ -288,6 +290,11 @@ double THLog1p(const double x)
 #else
   return log1p(x);
 #endif
+}
+
+double THExpm1(const double x)
+{
+  return expm1(x);
 }
 
 void THSetNumThreads(int num_threads)

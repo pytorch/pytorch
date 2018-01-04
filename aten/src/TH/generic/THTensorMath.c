@@ -100,6 +100,16 @@
 }
 #endif
 
+#define TH_CHECK_SAME_SIZE(TENSOR1, TENSOR2) \
+{ \
+  if(!THTensor_(isSameSizeAs)(TENSOR1, TENSOR2)) { \
+    THDescBuff T1buff = _THSizeDesc(TENSOR1->size, TENSOR1->nDimension); \
+    THDescBuff T2buff = _THSizeDesc(TENSOR2->size, TENSOR2->nDimension); \
+    THError("inconsistent tensor size, expected %s %s and %s %s to have the same size", \
+            #TENSOR1, T1buff.str, #TENSOR2, T2buff.str); \
+  } \
+}
+
 void THTensor_(fill)(THTensor *r_, real value)
 {
   if (THTensor_(isContiguous)(r_) || THTensor_(isTransposed)(r_)) {
@@ -1331,14 +1341,17 @@ void THTensor_(addmv)(THTensor *r_, real beta, THTensor *t, real alpha, THTensor
     THTensor_(copy)(r_, t);
   }
 
-  if(mat->stride[0] == 1)
+  // n == 1 || lda >= max(1, m)
+  #define LDA_COND(M, N, LDA) ((N) == 1 || (LDA) >= THMax(1, (M)))
+
+  if(mat->stride[0] == 1 && LDA_COND(mat->size[0], mat->size[1], mat->stride[1]))
   {
     THBlas_(gemv)('n', mat->size[0], mat->size[1],
                   alpha, THTensor_(data)(mat), mat->stride[1],
                   THTensor_(data)(vec), vec->stride[0],
                   beta, THTensor_(data)(r_), r_->stride[0]);
   }
-  else if(mat->stride[1] == 1)
+  else if(mat->stride[1] == 1 && LDA_COND(mat->size[1], mat->size[0], mat->stride[0]))
   {
     THBlas_(gemv)('t',  mat->size[1], mat->size[0],
                   alpha, THTensor_(data)(mat), mat->stride[0],
@@ -1356,6 +1369,8 @@ void THTensor_(addmv)(THTensor *r_, real beta, THTensor *t, real alpha, THTensor
 
     THTensor_(free)(cmat);
   }
+
+  #undef LDA_COND
 }
 
 void THTensor_(match)(THTensor *r_, THTensor *m1, THTensor *m2, real gain)
@@ -1434,15 +1449,18 @@ void THTensor_(addmm)(THTensor *r_, real beta, THTensor *t, real alpha, THTensor
     }
   }
 
+  // n == 1 || ldc >= max(1, m)
+  #define LDC_COND(M, N, LDC) ((N) == 1 || (LDC) >= THMax(1, M))
+
   /* r_ */
   if(r_->stride[0] == 1 &&
-     r_->stride[1] != 0)
+     LDC_COND(r_->size[0], r_->size[1], r_->stride[1]))
   {
     transpose_r = 'n';
     r__ = r_;
   }
   else if(r_->stride[1] == 1 &&
-          r_->stride[0] != 0)
+          LDC_COND(r_->size[1], r_->size[0], r_->stride[0]))
   {
     THTensor *swap = m2;
     m2 = m1;
@@ -1453,22 +1471,30 @@ void THTensor_(addmm)(THTensor *r_, real beta, THTensor *t, real alpha, THTensor
   else
   {
     transpose_r = 'n';
-
+    // make r__ FORTRAN contiguous
     THTensor *transp_r_ = THTensor_(newTranspose)(r_, 0, 1);
     r__ = THTensor_(newClone)(transp_r_);
     THTensor_(free)(transp_r_);
     THTensor_(transpose)(r__, NULL, 0, 1);
   }
 
+  #undef LDC_COND
+
+  int64_t m = r__->size[(transpose_r == 'n' ? 0 : 1)];
+  int64_t n = r__->size[(transpose_r == 'n' ? 1 : 0)];
+  int64_t k = m1->size[(transpose_r == 'n' ? 1 : 0)];
+  int64_t ldr__ = r__->stride[(transpose_r == 'n' ? 1 : 0)];
+
   /* m1 */
+  /* Need ldm1_ >= max(1, (transpose_m1 == 't' ? m : k)) */
   if(m1->stride[(transpose_r == 'n' ? 0 : 1)] == 1 &&
-     m1->stride[(transpose_r == 'n' ? 1 : 0)] != 0)
+     m1->stride[(transpose_r == 'n' ? 1 : 0)] >= THMax(1, k))
   {
     transpose_m1 = 'n';
     m1_ = m1;
   }
   else if(m1->stride[(transpose_r == 'n' ? 1 : 0)] == 1 &&
-          m1->stride[(transpose_r == 'n' ? 0 : 1)] != 0)
+          m1->stride[(transpose_r == 'n' ? 0 : 1)] >= THMax(1, m))
   {
     transpose_m1 = 't';
     m1_ = m1;
@@ -1481,14 +1507,15 @@ void THTensor_(addmm)(THTensor *r_, real beta, THTensor *t, real alpha, THTensor
   }
 
   /* m2 */
+  /* Need ldm2_ >= max(1, (transpose_m2 == 't' ? n : k)) */
   if(m2->stride[(transpose_r == 'n' ? 0 : 1)] == 1 &&
-     m2->stride[(transpose_r == 'n' ? 1 : 0)] != 0)
+     m2->stride[(transpose_r == 'n' ? 1 : 0)] >= THMax(1, k))
   {
     transpose_m2 = 'n';
     m2_ = m2;
   }
   else if(m2->stride[(transpose_r == 'n' ? 1 : 0)] == 1 &&
-          m2->stride[(transpose_r == 'n' ? 0 : 1)] != 0)
+          m2->stride[(transpose_r == 'n' ? 0 : 1)] >= THMax(1, n))
   {
     transpose_m2 = 't';
     m2_ = m2;
@@ -1500,21 +1527,24 @@ void THTensor_(addmm)(THTensor *r_, real beta, THTensor *t, real alpha, THTensor
     free_m2 = 1;
   }
 
+  int64_t ldm1_ = (transpose_m1 == 'n' ? m1_->stride[(transpose_r == 'n' ? 1 : 0)] : m1_->stride[(transpose_r == 'n' ? 0 : 1)]);
+  int64_t ldm2_ = (transpose_m2 == 'n' ? m2_->stride[(transpose_r == 'n' ? 1 : 0)] : m2_->stride[(transpose_r == 'n' ? 0 : 1)]);
+
 #pragma omp critical(blasgemm)
   /* do the operation */
   THBlas_(gemm)(transpose_m1,
                 transpose_m2,
-                r__->size[(transpose_r == 'n' ? 0 : 1)],
-                r__->size[(transpose_r == 'n' ? 1 : 0)],
-                m1_->size[(transpose_r == 'n' ? 1 : 0)],
+                m,
+                n,
+                k,
                 alpha,
                 THTensor_(data)(m1_),
-                (transpose_m1 == 'n' ? m1_->stride[(transpose_r == 'n' ? 1 : 0)] : m1_->stride[(transpose_r == 'n' ? 0 : 1)]),
+                ldm1_,
                 THTensor_(data)(m2_),
-                (transpose_m2 == 'n' ? m2_->stride[(transpose_r == 'n' ? 1 : 0)] : m2_->stride[(transpose_r == 'n' ? 0 : 1)]),
+                ldm2_,
                 beta,
                 THTensor_(data)(r__),
-                r__->stride[(transpose_r == 'n' ? 1 : 0)]);
+                ldr__);
 
   /* free intermediate variables */
   if(free_m1)
@@ -1555,14 +1585,17 @@ void THTensor_(addr)(THTensor *r_, real beta, THTensor *t, real alpha, THTensor 
   else if(beta != 1)
     THTensor_(mul)(r_, r_, beta);
 
-  if(r_->stride[0] == 1)
+  // n == 1 || lda >= max(1, m)
+  #define LDA_COND(M, N, LDA) ((N) == 1 || (LDA) >= THMax(1, (M)))
+
+  if(r_->stride[0] == 1 && LDA_COND(vec1->size[0], vec2->size[0], r_->stride[1]))
   {
     THBlas_(ger)(vec1->size[0], vec2->size[0],
                  alpha, THTensor_(data)(vec1), vec1->stride[0],
                  THTensor_(data)(vec2), vec2->stride[0],
                  THTensor_(data)(r_), r_->stride[1]);
   }
-  else if(r_->stride[1] == 1)
+  else if(r_->stride[1] == 1 && LDA_COND(vec2->size[0], vec1->size[0], r_->stride[0]))
   {
     THBlas_(ger)(vec2->size[0], vec1->size[0],
                  alpha, THTensor_(data)(vec2), vec2->stride[0],
@@ -1580,6 +1613,8 @@ void THTensor_(addr)(THTensor *r_, real beta, THTensor *t, real alpha, THTensor 
 
     THTensor_(freeCopyTo)(cr, r_);
   }
+
+  #undef LDA_COND
 }
 
 void THTensor_(addbmm)(THTensor *result, real beta, THTensor *t, real alpha, THTensor *batch1, THTensor *batch2)
@@ -2809,116 +2844,114 @@ void THTensor_(cat)(THTensor *r_, THTensor *ta, THTensor *tb, int dimension)
   THTensor_(catArray)(r_, inputs, 2, dimension);
 }
 
+void THTensor_(check_shape_except_dim)(THTensor *first, THTensor *second, int dimension);
+inline void THTensor_(check_shape_except_dim)(THTensor *first, THTensor *second, int dimension)
+{
+  int first_dims = first->nDimension;
+  int second_dims = second->nDimension;
+  THArgCheck(first_dims == second_dims, 0,
+      "Tensors must have same number of dimensions: got %d and %d",
+      first_dims, second_dims);
+  for (int dim = 0; dim < first_dims; dim++) {
+    if (dim == dimension) {
+      continue;
+    }
+    int64_t first_dim_size = first->size[dim];
+    int64_t second_dim_size = second->size[dim];
+    THArgCheck(first_dim_size == second_dim_size, 0,
+        "Sizes of tensors must match except in dimension %d. Got %lld and %lld in dimension %d",
+        dimension, (long long)first_dim_size, (long long)second_dim_size, dim);
+  }
+}
+
 void THTensor_(catArray)(THTensor *result, THTensor **inputs, int numInputs, int dimension)
 {
-  THLongStorage *size;
-  int i, j;
-  int64_t offset;
-  int maxDim = dimension + 1;
+  // Find a non-empty tensor to record nDims
   int allEmpty = 1;
-  int allContiguous = 1;
-
-  // cat_dimension is the actual dimension we cat along
-  int cat_dimension = dimension;
-
-  for (i = 0; i < numInputs; i++)
-  {
-    maxDim = THMax(maxDim, inputs[i]->nDimension);
+  int nDims = 0;
+  THTensor *notEmptyTensor;
+  for (int i = 0; i < numInputs; i++) {
+    int input_dims = inputs[i]->nDimension;
+    if (input_dims == 0) {
+      continue;
+    }
+    // We've found a non-empty tensor
+    allEmpty = 0;
+    notEmptyTensor = inputs[i];
+    nDims = input_dims;
+    break;
+  }
+  if (allEmpty) {
+    return;
   }
 
+  // Compute cat_dimension based on the non-empty tensor
+  THArgCheck(dimension >= -1 && dimension < nDims, 4, "invalid dimension %d", dimension);
   // When the user input dimension is -1 (i.e. -2 in C)
-  // Then we pick the maximum last dimension across all tensors.
-  if ( dimension + TH_INDEX_BASE == -1 )
-  {
-    cat_dimension = maxDim?(maxDim-1):0;
+  // Then we pick the last dimension across non-empty tensors.
+  int cat_dimension = dimension;
+  if (dimension + TH_INDEX_BASE == -1) {
+    cat_dimension = nDims ? nDims - 1 : 0;
   }
 
   THArgCheck(numInputs > 0, 3, "invalid number of inputs %d", numInputs);
-  THArgCheck(cat_dimension >= 0, 4, "invalid dimension %d", dimension + TH_INDEX_BASE);
 
-  size = THLongStorage_newWithSize(maxDim);
-
-  for(i = 0; i < maxDim; i++)
-  {
-    // dimSize is either the size of the dim if it exists, either 1 if #dim > 0, otherwise 0
-    int64_t dimSize = i < inputs[0]->nDimension ? inputs[0]->size[i] : THMin(inputs[0]->nDimension, 1);
-    if (i == cat_dimension)
-    {
-      for (j = 1; j < numInputs; j++)
-      {
-        // accumulate the size over the dimension we want to cat on.
-        // Empty tensors are allowed
-        dimSize += i < inputs[j]->nDimension ? inputs[j]->size[i] : THMin(inputs[j]->nDimension, 1);
-      }
+  // Compute size of the result in the cat dimension
+  int64_t cat_dim_size = 0;
+  for (int i = 0; i < numInputs; i++) {
+    THTensor *tensor = inputs[i];
+    if (tensor->nDimension == 0) {
+      continue;
     }
-    else
-    {
-      for (j = 1; j < numInputs; j++)
-      {
-        int64_t sz = (i < inputs[j]->nDimension ? inputs[j]->size[i] : THMin(inputs[j]->nDimension, 1));
-        // If it's a dimension we're not catting on
-        // Then fail if sizes are different AND > 0
-        if (dimSize != sz && dimSize && sz)
-        {
-          THLongStorage_free(size);
-          THError("inconsistent tensor sizes");
-        }
-        else if(!dimSize)
-        {
-          dimSize = sz;
-        }
-      }
-    }
-    allEmpty = allEmpty && !dimSize;
-    size->data[i] = dimSize;
+    THTensor_(check_shape_except_dim)(notEmptyTensor, tensor, cat_dimension);
+    cat_dim_size += tensor->size[cat_dimension];
   }
 
-  // Initiate catting and resizing
-  // If at least one of the input is not empty
-  if (!allEmpty)
-  {
-    THTensor_(resize)(result, size, NULL);
+  // Compute the size of the result
+  THLongStorage *size = THLongStorage_newWithSize(nDims);
+  for (int dim = 0; dim < nDims; dim++) {
+    int64_t result_dim_size = notEmptyTensor->size[dim];
+    if (dim == cat_dimension) {
+      result_dim_size = cat_dim_size;
+    }
+    size->data[dim] = result_dim_size;
+  }
+  THTensor_(resize)(result, size, NULL);
 
-    // Check contiguity of all inputs and result
-    for (i = 0; i < numInputs; i++) {
-      if(inputs[i]->nDimension) {
-        allContiguous = allContiguous && THTensor_(isContiguous)(inputs[i]);
+  // Check contiguity of all inputs and result
+  int allContiguous = 1;
+  for (int i = 0; i < numInputs; i++) {
+    if(inputs[i]->nDimension) {
+      allContiguous = allContiguous && THTensor_(isContiguous)(inputs[i]);
+    }
+  }
+  allContiguous = allContiguous && THTensor_(isContiguous)(result);
+
+  // First path is for contiguous inputs along dim 0
+  // Second path for non-contiguous
+  int64_t offset;
+  if (cat_dimension == 0 && allContiguous) {
+    real* result_data = result->storage->data + result->storageOffset;
+    offset = 0;
+    for (int j = 0; j < numInputs; j++) {
+      if (inputs[j]->nDimension) {
+        THTensor* input0 = inputs[j];
+        real* input0_data = input0->storage->data + input0->storageOffset;
+        int64_t input0_size = THTensor_(nElement)(input0);
+        memcpy(result_data + offset, input0_data, input0_size*sizeof(real));
+        offset += input0_size;
       }
     }
-    allContiguous = allContiguous && THTensor_(isContiguous)(result);
-
-    // First path is for contiguous inputs along dim 1
-    // Second path for non-contiguous
-    if (cat_dimension == 0 && allContiguous)
-    {
-      real* result_data = result->storage->data + result->storageOffset;
-      offset = 0;
-      for (j = 0; j < numInputs; j++)
-      {
-        if (inputs[j]->nDimension)
-        {
-          THTensor* input0 = inputs[j];
-          real* input0_data = input0->storage->data + input0->storageOffset;
-          int64_t input0_size = THTensor_(nElement)(input0);
-          memcpy(result_data + offset, input0_data, input0_size*sizeof(real));
-          offset += input0_size;
-        }
-      }
-    }
-    else
-    {
-      offset = 0;
-      for (j = 0; j < numInputs; j++)
-      {
-        if (inputs[j]->nDimension)
-        {
-          int64_t dimSize = cat_dimension < inputs[j]->nDimension ? inputs[j]->size[cat_dimension] : 1;
-          THTensor *nt = THTensor_(newWithTensor)(result);
-          THTensor_(narrow)(nt, NULL, cat_dimension, offset, dimSize);
-          THTensor_(copy)(nt, inputs[j]);
-          THTensor_(free)(nt);
-          offset += dimSize;
-        }
+  } else {
+    offset = 0;
+    for (int j = 0; j < numInputs; j++) {
+      if (inputs[j]->nDimension) {
+        int64_t dimSize = cat_dimension < inputs[j]->nDimension ? inputs[j]->size[cat_dimension] : 1;
+        THTensor *nt = THTensor_(newWithTensor)(result);
+        THTensor_(narrow)(nt, NULL, cat_dimension, offset, dimSize);
+        THTensor_(copy)(nt, inputs[j]);
+        THTensor_(free)(nt);
+        offset += dimSize;
       }
     }
   }
@@ -2995,14 +3028,14 @@ TENSOR_IMPLEMENT_LOGICAL(ne,!=)
     } \
   }
 
+LAB_IMPLEMENT_BASIC_FUNCTION(neg,-)
+
 #if defined(TH_REAL_IS_LONG)
 LAB_IMPLEMENT_BASIC_FUNCTION(abs,labs)
-LAB_IMPLEMENT_BASIC_FUNCTION(neg,-)
 #endif /* int64_t only part */
 
 #if defined(TH_REAL_IS_SHORT) || defined(TH_REAL_IS_INT)
 LAB_IMPLEMENT_BASIC_FUNCTION(abs,abs)
-LAB_IMPLEMENT_BASIC_FUNCTION(neg,-)
 #endif /* int only part */
 
 #if defined(TH_REAL_IS_BYTE)
@@ -3031,9 +3064,12 @@ TENSOR_IMPLEMENT_LOGICAL_SUM(logicalany, ||, 0)
 
 LAB_IMPLEMENT_BASIC_FUNCTION(log,TH_MATH_NAME(log))
 LAB_IMPLEMENT_BASIC_FUNCTION(lgamma,TH_MATH_NAME(lgamma))
+LAB_IMPLEMENT_BASIC_FUNCTION(digamma,TH_MATH_NAME(TH_digamma))
+LAB_IMPLEMENT_BASIC_FUNCTION(trigamma,TH_MATH_NAME(TH_trigamma))
 LAB_IMPLEMENT_BASIC_FUNCTION(log1p,TH_MATH_NAME(log1p))
 LAB_IMPLEMENT_BASIC_FUNCTION(sigmoid,TH_MATH_NAME(TH_sigmoid))
 LAB_IMPLEMENT_BASIC_FUNCTION(exp,TH_MATH_NAME(exp))
+LAB_IMPLEMENT_BASIC_FUNCTION(expm1,TH_MATH_NAME(expm1))
 LAB_IMPLEMENT_BASIC_FUNCTION(cos,TH_MATH_NAME(cos))
 LAB_IMPLEMENT_BASIC_FUNCTION(acos,TH_MATH_NAME(acos))
 LAB_IMPLEMENT_BASIC_FUNCTION(cosh,TH_MATH_NAME(cosh))
@@ -3053,7 +3089,6 @@ LAB_IMPLEMENT_BASIC_FUNCTION(round,TH_MATH_NAME(round))
 LAB_IMPLEMENT_BASIC_FUNCTION(abs,TH_MATH_NAME(fabs))
 LAB_IMPLEMENT_BASIC_FUNCTION(trunc,TH_MATH_NAME(trunc))
 LAB_IMPLEMENT_BASIC_FUNCTION(frac,TH_MATH_NAME(TH_frac))
-LAB_IMPLEMENT_BASIC_FUNCTION(neg,-)
 LAB_IMPLEMENT_BASIC_FUNCTION(cinv, TH_MATH_NAME(1.0) / )
 
 
@@ -3090,6 +3125,14 @@ void THTensor_(atan2)(THTensor *r_, THTensor *tx, THTensor *ty)
 {
   THTensor_(resizeAs)(r_, tx);
   TH_TENSOR_APPLY3(real, r_, real, tx, real, ty, *r__data = TH_MATH_NAME(atan2)(*tx_data,*ty_data););
+}
+
+void THTensor_(polygamma)(THTensor *r_, int64_t n, THTensor *t) {
+  switch (n) {
+    case 0: THTensor_(digamma)(r_, t); return;
+    case 1: THTensor_(trigamma)(r_, t); return;
+    default: THError("polygamma(n,x) is not implemented for n>=2");
+  }
 }
 
 void THTensor_(lerp)(THTensor *r_, THTensor *a, THTensor *b, real weight)
@@ -3340,7 +3383,7 @@ void THTensor_(linspace)(THTensor *r_, real a, real b, int64_t n)
     THTensor_(set1d)(r_, 0, a);
   } else {
      TH_TENSOR_APPLY(real, r_,
-             *r__data = a + i*(b-a)/((real)(n-1));
+             *r__data = a + (b-a)/((real)(n-1))*i;
              i++;
            );
   }
@@ -3446,6 +3489,161 @@ void THTensor_(bhistc)(THTensor *hist, THTensor *tensor, int64_t nbins, real min
                           }
                         }
   );
+}
+
+// Approximate reparameterized gradient of Beta(x,alpha,beta) wrt alpha.
+// Assumes x is close to zero and uses a Taylor expansion.
+static inline real THTensor_(beta_grad_alpha_small)(real x, real alpha, real beta) {
+  const real factor = TH_digamma(alpha) - TH_digamma(alpha + beta) - TH_MATH_NAME(log)(x);
+  real numer = 1;
+  real series = numer / alpha * (factor + 1 / alpha);
+  for (int i = 1; i <= 10; ++i) {
+    numer *= (i - beta) * x / i;
+    const real denom = alpha + i;
+    series += numer / denom * (factor + 1 / denom);
+  }
+  const real result = x * TH_MATH_NAME(pow)(1 - x, 1 - beta) * series;
+  return isnan(result) ? 0.0 : result;
+}
+
+// Approximate reparameterized gradient of Beta(x,alpha,beta) wrt beta.
+// Assumes x is close to zero and uses a Taylor expansion.
+static inline real THTensor_(beta_grad_beta_small)(real x, real alpha, real beta) {
+  const real factor = TH_digamma(alpha+beta) - TH_digamma(beta);
+  real numer = 1;
+  real betas = 1;
+  real dbetas = 0;
+  real series = factor / alpha;
+  for (int i = 1; i <= 8; ++i) {
+    numer *= -x / i;
+    dbetas = dbetas * (beta - i) + betas;
+    betas = betas * (beta - i);
+    series += numer / (alpha + i) * (dbetas + factor * betas);
+  }
+  const real result = -x * TH_MATH_NAME(pow)(1 - x, 1 - beta) * series;
+  return isnan(result) ? 0.0 : result;
+}
+
+// Approximate reparameterized gradient of Beta(x,alpha,beta) wrt alpha.
+// Assumes alpha and beta are both large and uses a Rice saddle point expansion.
+// To ensure numerical stability, this computation is performed at higher precision.
+static inline real THTensor_(beta_grad_alpha_mid)(double x, double alpha, double beta) {
+  const double total = alpha + beta;
+  const double mean = alpha / total;
+  const double std = sqrt(alpha * beta / (total + 1)) / total;
+  if (mean - 0.1 * std <= x && x <= mean + 0.1 * std) {
+    // Avoid the singularity at x = mean.
+    const double poly = 47 * x * (beta*beta)*(beta*beta) + alpha * (
+                      (43 + 20 * (16 + 27 * beta) * x) * (beta*beta)*beta + alpha * (
+                      3 * (59 + 180 * beta - 90 * x) * (beta*beta) + alpha * (
+                      (453 + 1620 * beta * (1 - x) - 455 * x) * beta + alpha * (
+                      8 * (1 - x) * (135 * beta - 11)))));
+    const double prefactor_num = (1 + 12 * alpha) * (1 + 12 * beta) / (total * total);
+    const double prefactor_den = 12960 * alpha * alpha * alpha * beta * beta * (1 + 12 * total);
+    return prefactor_num * poly / prefactor_den;
+  }
+  const double prefactor = x * (x-1) / sqrt(2 * alpha * beta / total);
+  const double stirling = (1 + 1 / (12 * alpha) + 1 / (288 * alpha*alpha))
+                        * (1 + 1 / (12 * beta) + 1 / (288 * beta*beta))
+                        / (1 + 1 / (12 * total) + 1 / (288 * total*total));
+  const double term1_num = 2 * (alpha*alpha) * (x - 1) + alpha * beta * (x - 1) - x * (beta*beta);
+  const double axbx = alpha * (x-1) + beta * x;
+  const double term1_den = sqrt(2 * alpha / beta) * pow(total, 1.5f) * axbx*axbx;
+  const double term1 = term1_num / term1_den;
+  const double term2 = 0.5f * log(alpha / (total * x));
+  const double term3_num = sqrt(8 * alpha * beta / total);
+  const double term3_den = beta * x + alpha * (x - 1);
+  const double term3 = term3_num / term3_den;
+  const double term4_base = beta * log(beta / (total * (1 - x))) +
+                          alpha * log(alpha / (total * x));
+  const double term4 = pow(term4_base, -1.5f);
+  const double term1234 = term1 + term2 * (term3 + (x < mean ? term4 : -term4));
+  return stirling * prefactor * term1234;
+}
+
+// Computes the reparameterized gradient -(d/dalpha cdf(x;alphas)) / pdf(x;alphas)
+// for random number x drawn from a Dirichlet distribution Dirichlet(alphas).
+// Total is the sum of all alphas.
+static inline real THTensor_(dirichlet_grad_one)(real x, real alpha, real total) {
+  const real beta = total - alpha;
+  const real boundary = total * x * (1 - x);
+
+  // Use an asymptotic approximation for x close to 0.
+  if (x <= 0.5f && boundary < 2.5f) {
+    return THTensor_(beta_grad_alpha_small)(x, alpha, beta);
+  }
+
+  // Use an asymptotic approximation for x close to 1.
+  if (x >= 0.5f && boundary < 0.75f) {
+    return -THTensor_(beta_grad_beta_small)(1 - x, beta, alpha);
+  }
+
+  // Use an asymptotic approximation when alpha and (total - alpha) are both large.
+  if (alpha > 6 && beta > 6) {
+    return THTensor_(beta_grad_alpha_mid)(x, alpha, beta);
+  }
+
+  // Use a rational correction to an analytic approximation.
+  static const real c[2][3][3][4] = {
+    {{{1.003668233, -0.01061107488, -0.0657888334, 0.01201642863},
+      {0.6336835991, -0.3557432599, 0.05486251648, -0.001465281033},
+      {-0.03276231906, 0.004474107445, 0.002429354597, -0.0001557569013}},
+     {{0.221950385, -0.3187676331, 0.01799915743, 0.01074823814},
+      {-0.2951249643, 0.06219954479, 0.01535556598, 0.001550077057},
+      {0.02155310298, 0.004170831599, 0.001292462449, 6.976601077e-05}},
+     {{-0.05980841433, 0.008441916499, 0.01085618172, 0.002319392565},
+      {0.02911413504, 0.01400243777, -0.002721828457, 0.000751041181},
+      {0.005900514878, -0.001936558688, -9.495446725e-06, 5.385558597e-05}}},
+    {{{1, -0.02924021934, -0.04438342661, 0.007285809825},
+      {0.6357567472, -0.3473456711, 0.05454656494, -0.002407477521},
+      {-0.03301322327, 0.004845219414, 0.00231480583, -0.0002307248149}},
+     {{0.5925320577, -0.1757678135, 0.01505928619, 0.000564515273},
+      {0.1014815858, -0.06589186703, 0.01272886114, -0.0007316646956},
+      {-0.007258481865, 0.001096195486, 0.0003934994223, -4.12701925e-05}},
+     {{0.06469649321, -0.0236701437, 0.002902096474, -5.896963079e-05},
+      {0.001925008108, -0.002869809258, 0.0008000589141, -6.063713228e-05},
+      {-0.0003477407336, 6.959756487e-05, 1.097287507e-05, -1.650964693e-06}}},
+  };
+  const real u = TH_MATH_NAME(log)(x);
+  const real a = TH_MATH_NAME(log)(alpha) - u;
+  const real b = TH_MATH_NAME(log)(total) - a;
+  const real pow_u[3] = {1, u, u * u};
+  const real pow_a[3] = {1, a, a * a};
+  real p = 0.0;
+  real q = 0.0;
+  for (int i = 0; i < 3; ++i) {
+    for (int j = 0; j < 3; ++j) {
+      const real ua = pow_u[i] * pow_a[j];
+      p += ua * (c[0][i][j][0] + b * (c[0][i][j][1] + b * (c[0][i][j][2] + b * c[0][i][j][3])));
+      q += ua * (c[1][i][j][0] + b * (c[1][i][j][1] + b * (c[1][i][j][2] + b * c[1][i][j][3])));
+    }
+  }
+  const real approx = x * (1 - x) * (TH_digamma(total) - TH_digamma(alpha)) / beta;
+  return p / q * approx;
+}
+
+void THTensor_(dirichlet_grad)(THTensor *self, THTensor *x, THTensor *alpha, THTensor *total)
+{
+  x = THTensor_(newContiguous)(x);
+  alpha = THTensor_(newContiguous)(alpha);
+  total = THTensor_(newContiguous)(total);
+  TH_CHECK_SAME_SIZE(alpha, x);
+  TH_CHECK_SAME_SIZE(total, x);
+  THTensor_(resizeAs)(self, x);
+  THTensor* grad = THTensor_(newContiguous)(self);
+
+  real*const grad_data = THTensor_(data)(grad);
+  real*const x_data = THTensor_(data)(x);
+  real*const alpha_data = THTensor_(data)(alpha);
+  real*const total_data = THTensor_(data)(total);
+  const int64_t numel = THTensor_(nElement)(x);
+  int64_t i;
+  #pragma omp parallel for if(numel > TH_OMP_OVERHEAD_THRESHOLD) private(i)
+  for(i = 0; i < numel; ++i) {
+    grad_data[i] = THTensor_(dirichlet_grad_one)(x_data[i], alpha_data[i], total_data[i]);
+  }
+
+  THTensor_(freeCopyTo)(grad, self);
 }
 
 #undef TH_MATH_NAME

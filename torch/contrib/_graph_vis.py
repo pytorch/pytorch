@@ -85,7 +85,7 @@ def write(self, filename):
     counts = {}
     offset = 0
     for n in self.nodes():
-        if len(n.uses()) == 0 or n.kind() == 'Select' or n.kind() == 'Undefined':
+        if len(n.uses()) == 0 or n.kind() == 'Undefined':
             continue
         ident = counts.get(n.kind(), 0)
         counts[n.kind()] = ident + 1

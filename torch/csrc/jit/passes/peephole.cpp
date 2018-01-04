@@ -1,4 +1,4 @@
-#include "torch/csrc/jit/passes/dead_code_elimination.h"
+#include "torch/csrc/jit/passes/peephole.h"
 
 namespace torch { namespace jit {
 
@@ -13,9 +13,10 @@ void PeepholeOptimize(std::shared_ptr<Graph>& graph) {
   for (auto it = graph->begin(); it != graph->end(); ++it) {
     auto* n = *it;
 
+    // eliminate redundant expand
     if (n->kind() == kexpand) {
       if (n->is(ksize) == n->input()->type()->expect<TensorType>()->sizes()) {
-        n->replaceAllUsesWith(n->input());
+        n->output()->replaceAllUsesWith(n->input());
         it.destroyCurrent();
         continue;
       }

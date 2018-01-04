@@ -22,8 +22,8 @@ struct DataChannelMPI : DataChannel {
 
   private:
     template<typename T>
-    void steal_buffer(std::shared_ptr<T> ptr);
-    void steal_tensor_buffer(at::Tensor& t);
+    void save_buffer(std::shared_ptr<T> ptr);
+    void save_tensor_buffer(at::Tensor& t);
     MPI_Request& new_request();
 
     std::vector<std::shared_ptr<void>> _buffers;
@@ -35,20 +35,34 @@ struct DataChannelMPI : DataChannel {
   virtual ~DataChannelMPI();
 
   bool init() override;
+  void destroy() override;
 
   rank_type getRank() override;
   rank_type getNumProcesses() override;
 
+  void allGather(std::vector<at::Tensor>& output,
+                 std::vector<at::Tensor>& input,
+                 THDGroup group_id = THDGroupWORLD) override;
   void allGather(std::vector<at::Tensor>& output, at::Tensor& input,
                  THDGroup group_id = THDGroupWORLD) override;
   void gather(std::vector<at::Tensor>& output, at::Tensor& input,
               rank_type dst_rank, THDGroup group_id = THDGroupWORLD) override;
   void scatter(std::vector<at::Tensor>& input, at::Tensor& output,
                rank_type src_rank, THDGroup group_id = THDGroupWORLD) override;
+  void allReduce(std::vector<at::Tensor>& data,
+                 THDReduceOp operation,
+                 THDGroup group_id = THDGroupWORLD) override;
   void allReduce(at::Tensor& data, THDReduceOp operation,
                  THDGroup group_id = THDGroupWORLD) override;
+  void reduce(std::vector<at::Tensor>& data,
+              THDReduceOp operation,
+              rank_type dstRank,
+              THDGroup group_id = THDGroupWORLD) override;
   void reduce(at::Tensor& data, THDReduceOp operation, rank_type dst_rank,
               THDGroup group_id = THDGroupWORLD) override;
+  void broadcast(std::vector<at::Tensor>& data,
+                 rank_type srcRank,
+                 THDGroup group_id = THDGroupWORLD) override;
   void broadcast(at::Tensor& data, rank_type src_rank,
                  THDGroup group_id = THDGroupWORLD) override;
   void send(Scalar& data, rank_type dst_rank) override;
@@ -61,10 +75,10 @@ struct DataChannelMPI : DataChannel {
 
   void barrier(THDGroup group_id = THDGroupWORLD) override;
   THDGroup newGroup(const std::vector<rank_type>& ranks) override;
+  void clearGroupCache(THDGroup group_id = THDGroupWORLD) override;
 
 private:
-  void _broadcastPack(at::Tensor& data, rank_type src_rank, MPI_Comm comm) const;
-  void _broadcastUnpack(at::Tensor& data, rank_type src_rank, MPI_Comm comm) const;
+  at::Tensor _newLikeFlat(std::vector<at::Tensor>& tensors) const;
 
   rank_type _rank; // Current process' rank
   rank_type _num_processes; // Number of processes in network

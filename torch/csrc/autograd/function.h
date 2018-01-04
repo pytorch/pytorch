@@ -37,15 +37,13 @@ struct edge_hasher {
   }
 };
 
+// TODO: separate is_executable and next_functions
 // State used to create "backward" functions
 struct FunctionFlags {
   // Roughly speaking, is_executable corresponds to requires_grad.
-  // See http://pytorch.org/docs/notes/autograd.html for more details:
-  // both is_executable and is_volatile specify whether or not backwards
-  // gradient computation will be performed for a function, but they differ in
-  // their precedence.
+  // It's true if any input requires grad and gradient calculation is enabled.
+  // See http://pytorch.org/docs/notes/autograd.html for more details.
   bool is_executable = false;
-  bool is_volatile = false;
   // What functions take the output of this function as input.
   // There is one function per output of this function.
   function_list next_functions;
@@ -55,8 +53,6 @@ struct Function : std::enable_shared_from_this<Function> {
   Function()
     : num_inputs(0)
     , next_functions()
-    , is_executable(false)
-    , is_stochastic(false)
     , pre_hooks()
     , post_hooks()
     , pyobj(nullptr)
@@ -65,8 +61,6 @@ struct Function : std::enable_shared_from_this<Function> {
   Function(FunctionFlags&& flags)
     : num_inputs(0)
     , next_functions(std::move(flags.next_functions))
-    , is_executable(flags.is_executable)
-    , is_stochastic(false)
     , pre_hooks()
     , post_hooks()
     , pyobj(nullptr)
@@ -77,13 +71,13 @@ struct Function : std::enable_shared_from_this<Function> {
   virtual ~Function() {}
 
   // Implements the operation
-  // NOTE: Don't call this function directly. Use apply_fn or operator() instead.
+  // NOTE: Don't call this function directly. Use operator() instead.
   virtual variable_list apply(const variable_list& inputs) = 0;
   variable_list tracedApply(variable_list inputs);
 
   variable_list operator()(const variable_list& inputs) {
     profiler::RecordFunction rec(this);
-    if (jit::tracer::isTracing(inputs)) {
+    if (jit::tracer::isTracingVar(inputs)) {
       return tracedApply(inputs);
     }
     return apply(inputs);
@@ -95,21 +89,22 @@ struct Function : std::enable_shared_from_this<Function> {
     return shared_from_this();
   };
 
-  // Computes is_executable, is_volatile, and next_functions from a list
-  // of input variables
+  // Computes is_executable and next_functions from a list of input variables
   static FunctionFlags flags(const variable_list& inputs);
   static FunctionFlags flags(const std::initializer_list<Variable>& inputs);
   static FunctionFlags flags(at::TensorList inputs);
 
   // Releases saved variables if the operation won't be reused
   virtual inline void releaseVariables() {}
-
+  // called before a an apply if will release variables is going to be called
+  // allows larger ops like InterpreterAutogradFunction
+  // to incrementally release variables as they run
+  virtual inline void willReleaseVariables() {}
   // Function name for debugging
   virtual std::string name();
 
   inline bool should_compute_output(int i) const {
-    auto& fn = next_functions[i].first;
-    return fn && fn->is_executable;
+    return bool(next_functions[i].first);
   }
 
   inline bool should_compute_any_outputs() const {
@@ -128,7 +123,6 @@ struct Function : std::enable_shared_from_this<Function> {
   }
 
   inline void set_flags(FunctionFlags&& flags) {
-    is_executable = flags.is_executable;
     next_functions = std::move(flags.next_functions);
   }
 
@@ -154,13 +148,11 @@ struct Function : std::enable_shared_from_this<Function> {
   // need to be implemented :)
   virtual inline std::unique_ptr<saved_variable_list> saved_variables() { return nullptr; }
 
-  static void setUpContextEdge(jit::Node* this_node, int ctx_output_nr,
+  static void setUpContextEdge(jit::Node* this_node,
                                const variable_list& inputs, const variable_list& outputs);
 
   int num_inputs;
   function_list next_functions;
-  bool is_executable;
-  bool is_stochastic;
   std::vector<std::shared_ptr<FunctionPreHook>> pre_hooks;
   std::vector<std::shared_ptr<FunctionPostHook>> post_hooks;
 
@@ -169,45 +161,11 @@ struct Function : std::enable_shared_from_this<Function> {
   auto_unique_ptr<jit::tracer::FunctionTracingState> tracing_state;
 };
 
-// Actually what is a ForwardFunction here applies to all functions that are
-// applied only in forward OR are backward closures that don't save any Variables.
-// I chose this name, because the second situation is quite rare.
-template<bool transparent_state = false>
-struct ForwardFunction : public Function {
-  using Function::Function;
-
-  virtual inline std::unique_ptr<saved_variable_list> saved_variables() final {
-    return std::unique_ptr<saved_variable_list>(new saved_variable_list());
-  }
-
-  virtual inline bool is_traceable() final { return false; };
-
-  virtual inline bool passes_state_transparently() final { return transparent_state; };
-};
-
 // See Function::is_traceable() for definition.
 struct TraceableFunction : public Function {
   using Function::Function;
 
   virtual inline bool is_traceable() final { return true; };
-};
-
-template<typename T>
-struct apply_fn {
-  template<typename... Args>
-  apply_fn(Args&& ...args)
-    : fn_(std::make_shared<T>(std::forward<Args>(args)...)) {}
-
-  Variable operator()(const variable_list& inputs) {
-    return (*fn_)(inputs)[0];
-  }
-
-  template<typename... Args>
-  Variable operator()(Args&& ...inputs) {
-    return (*fn_)(variable_list{inputs...})[0];
-  }
-
-  std::shared_ptr<T> fn_;
 };
 
 }} // namespace torch::autograd

@@ -23,9 +23,9 @@ We are in an early-release beta. Expect some adventures and rough edges.
 
 | System | 2.7 | 3.5 |
 | --- | --- | --- |
-| Linux CPU | [![Build Status](https://travis-ci.org/pytorch/pytorch.svg?branch=master)](https://travis-ci.org/pytorch/pytorch) | [![Build Status](https://travis-ci.org/pytorch/pytorch.svg?branch=master)](https://travis-ci.org/pytorch/pytorch) |
-| Linux GPU | [![Build Status](http://build.pytorch.org:8080/buildStatus/icon?job=pytorch-master-py2-linux)](https://build.pytorch.org/job/pytorch-master-py2-linux) | [![Build Status](http://build.pytorch.org:8080/buildStatus/icon?job=pytorch-master-py3-linux)](https://build.pytorch.org/job/pytorch-master-py3-linux) |
-| macOS CPU | [![Build Status](http://build.pytorch.org:8080/buildStatus/icon?job=pytorch-master-py2-osx-cpu)](https://build.pytorch.org/job/pytorch-master-py2-osx-cpu) | [![Build Status](http://build.pytorch.org:8080/buildStatus/icon?job=pytorch-master-py3-osx-cpu)](https://build.pytorch.org/job/pytorch-master-py3-osx-cpu) |
+| Linux CPU | [![Build Status](https://ci.pytorch.org/jenkins/job/pytorch-master/badge/icon)](https://ci.pytorch.org/jenkins/job/pytorch-master/) | [![Build Status](https://ci.pytorch.org/jenkins/job/pytorch-master/badge/icon)](https://ci.pytorch.org/jenkins/job/pytorch-master/) |
+| Linux GPU | [![Build Status](https://ci.pytorch.org/jenkins/job/pytorch-master/badge/icon)](https://ci.pytorch.org/jenkins/job/pytorch-master/) | [![Build Status](https://ci.pytorch.org/jenkins/job/pytorch-master/badge/icon)](https://ci.pytorch.org/jenkins/job/pytorch-master/) |
+| Windows GPU | <center>—</center> | [![Build Status](https://ci.pytorch.org/jenkins/job/pytorch-builds/job/pytorch-win-ws2016-cuda9-cudnn7-py3-trigger/badge/icon)](https://ci.pytorch.org/jenkins/job/pytorch-builds/job/pytorch-win-ws2016-cuda9-cudnn7-py3-trigger/)
 
 
 ## More about PyTorch
@@ -177,7 +177,7 @@ conda install numpy pyyaml mkl setuptools cmake cffi
 conda install -c soumith magma-cuda80 # or magma-cuda75 if CUDA 7.5
 ```
 
-On OSX
+On macOS
 ```bash
 export CMAKE_PREFIX_PATH=[anaconda root directory]
 conda install numpy pyyaml setuptools cmake cffi
@@ -193,7 +193,7 @@ On Linux
 python setup.py install
 ```
 
-On OSX
+On macOS
 ```bash
 MACOSX_DEPLOYMENT_TARGET=10.9 CC=clang CXX=clang++ python setup.py install
 ```

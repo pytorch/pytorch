@@ -533,8 +533,8 @@ void THNN_(LSTM_forw_ind_wrap)(
 
   INDTYPE hid_size = cxI.sizes[cxI.dims-1];
   if(has_bias){
-    THAssertMsg( hid_size*4 == THCTensor_(nElement)(state, bias1) &&
-                 hid_size*4 == THCTensor_(nElement)(state, bias2),
+    THAssertMsg( hid_size*4 == static_cast<INDTYPE>(THCTensor_(nElement)(state, bias1)) &&
+                 hid_size*4 == static_cast<INDTYPE>(THCTensor_(nElement)(state, bias2)),
                  "Bias in pointwise operation is an incorrect size, must be 4 x feature size.");
   }
 
@@ -728,8 +728,8 @@ void THNN_(GRU_forw_ind_wrap)(
 
   INDTYPE hid_size = hxI.sizes[hxI.dims-1];
   if(has_bias){
-    THAssertMsg( hid_size*3 == THCTensor_(nElement)(state, bias1) &&
-                 hid_size*3 == THCTensor_(nElement)(state, bias2),
+    THAssertMsg( hid_size*3 == static_cast<INDTYPE>(THCTensor_(nElement)(state, bias1)) &&
+                 hid_size*3 == static_cast<INDTYPE>(THCTensor_(nElement)(state, bias2)),
                  "Bias in pointwise operation is an incorrect size, must be 3 x feature size.");
   }
 

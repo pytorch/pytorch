@@ -1,3 +1,5 @@
+import warnings
+
 from torch.autograd import Variable
 import torch
 from .module import Module
@@ -9,7 +11,7 @@ from .. import functional as F
 def _assert_no_grad(variable):
     assert not variable.requires_grad, \
         "nn criterions don't compute the gradient w.r.t. targets - please " \
-        "mark these variables as volatile or not requiring gradients"
+        "mark these variables as not requiring gradients"
 
 
 class _Loss(Module):
@@ -28,7 +30,19 @@ class L1Loss(_Loss):
     r"""Creates a criterion that measures the mean absolute value of the
     element-wise difference between input `x` and target `y`:
 
-    :math:`{loss}(x, y)  = 1/n \sum |x_i - y_i|`
+    The loss can be described as:
+
+    .. math::
+        \ell(x, y) = L = \{l_1,\dots,l_N\}^\top, \quad
+        l_n = \left| x_n - y_n \right|,
+
+    where :math:`N` is the batch size. If reduce is ``True``, then:
+
+    .. math::
+        \ell(x, y) = \begin{cases}
+            \operatorname{mean}(L), & \text{if}\; \text{size_average} = \text{True},\\
+            \operatorname{sum}(L),  & \text{if}\; \text{size_average} = \text{False}.
+        \end{cases}
 
     `x` and `y` arbitrary shapes with a total of `n` elements each.
 
@@ -81,8 +95,9 @@ class NLLLoss(_WeightedLoss):
     unbalanced training set.
 
     The input given through a forward call is expected to contain
-    log-probabilities of each class: input has to be a 2D Tensor of size
-    `(minibatch, C)`
+    log-probabilities of each class. input has to be a Tensor of size either
+    :math:`(minibatch, C)` or :math:`(minibatch, C, d_1, d_2, ..., d_K)`
+    with :math:`K >= 2` for the `K`-dimensional case (described later).
 
     Obtaining log-probabilities in a neural network is easily achieved by
     adding a  `LogSoftmax`  layer in the last layer of your network.
@@ -92,37 +107,58 @@ class NLLLoss(_WeightedLoss):
     The target that this loss expects is a class index
     `(0 to C-1, where C = number of classes)`
 
-    The loss can be described as::
+    If :attr:`reduce` is ``False``, the loss can be described as:
 
-        loss(x, class) = -x[class]
+    .. math::
+        \ell(x, y) = L = \{l_1,\dots,l_N\}^\top, \quad
+        l_n = - w_{y_n} x_{n,y_n}, \quad
+        w_{c} = \text{weight}[c] \cdot \mathbb{1}\{c \not= \text{ignore_index}\},
 
-    or in the case of the weight argument it is specified as follows::
+    where :math:`N` is the batch size. If :attr:`reduce` is ``True`` (default),
+    then
 
-        loss(x, class) = -weight[class] * x[class]
+    .. math::
+        \ell(x, y) = \begin{cases}
+            \sum_{n=1}^N \frac{w_{y_n}}{\sum_{n=1}^N w_{y_n}} l_n, & \text{if}\;
+            \text{size_average} = \text{True},\\
+            \sum_{n=1}^N w_{y_n} l_n,  & \text{if}\;
+            \text{size_average} = \text{False}.
+        \end{cases}
 
-    or in the case of ignore_index::
-
-        loss(x, class) = class != ignoreIndex ? -weight[class] * x[class] : 0
+    Can also be used for higher dimension inputs, such as 2D images, by providing
+    an input of size :math:`(minibatch, C, d_1, d_2, ..., d_K)` with :math:`K >= 2`,
+    where :math:`K` is the number of dimensions, and a target of appropriate shape
+    (see below). In the case of images, it computes NLL loss per-pixel.
 
     Args:
         weight (Tensor, optional): a manual rescaling weight given to each
-           class. If given, has to be a Tensor of size `C`
+           class. If given, it has to be a Tensor of size `C`. Otherwise, it is
+           treated as if having all ones.
         size_average (bool, optional): By default, the losses are averaged
-           over observations for each minibatch. However, if the field
-           size_average is set to ``False``, the losses are instead summed for
-           each minibatch. Ignored when reduce is ``False``. Default: ``True``
+           over observations for each minibatch with weights set by
+           :attr:`weight`. However, if the field :attr:`size_average` is set to
+           ``False``, the losses are instead summed for each minibatch. Ignored
+           when :attr:`reduce` is ``False``. Default: ``True``
         ignore_index (int, optional): Specifies a target value that is ignored
-            and does not contribute to the input gradient. When size_average
-            is ``True``, the loss is averaged over non-ignored targets.
+            and does not contribute to the input gradient. When
+            :attr:`size_average` is ``True``, the loss is averaged over
+            non-ignored targets.
         reduce (bool, optional): By default, the losses are averaged or summed
-            for each minibatch. When reduce is ``False``, the loss function returns
-            a loss per batch element instead and ignores size_average.
-            Default: ``True``
+            for each minibatch. When :attr:`reduce` is ``False``, the loss
+            function returns a loss per batch element instead and
+            ignores :attr:`size_average`. Default: ``True``
 
     Shape:
-        - Input: :math:`(N, C)` where `C = number of classes`
-        - Target: :math:`(N)` where each value is `0 <= targets[i] <= C-1`
-        - Output: scalar. If reduce is ``False``, then :math:`(N)` instead.
+        - Input: :math:`(N, C)` where `C = number of classes`, or
+            :math:`(N, C, d_1, d_2, ..., d_K)` with :math:`K >= 2`
+            in the case of `K`-dimensional loss.
+        - Target: :math:`(N)` where each value is `0 <= targets[i] <= C-1`, or
+            :math:`(N, d_1, d_2, ..., d_K)` with :math:`K >= 2` in the case of
+            K-dimensional loss.
+        - Output: :math:`(1)`. If reduce is ``False``, then the same size
+            as the target: :math:`(N)`, or
+            :math:`(N, d_1, d_2, ..., d_K)` with :math:`K >= 2` in the case
+            of K-dimensional loss.
 
     Examples::
 
@@ -133,6 +169,18 @@ class NLLLoss(_WeightedLoss):
         >>> # each element in target has to have 0 <= value < C
         >>> target = autograd.Variable(torch.LongTensor([1, 0, 4]))
         >>> output = loss(m(input), target)
+        >>> output.backward()
+        >>>
+        >>>
+        >>> # 2D loss example (used, for example, with image inputs)
+        >>> N, C = 5, 4
+        >>> loss = nn.NLLLoss()
+        >>> # input is of size N x C x height x width
+        >>> data = Variable(torch.randn(N, 16, 10, 10))
+        >>> m = nn.Conv2d(16, C, (3, 3))
+        >>> # each element in target has to have 0 <= value < C
+        >>> target = Variable(torch.LongTensor(N, 8, 8).random_(0, C))
+        >>> output = loss(m(data), target)
         >>> output.backward()
     """
 
@@ -148,40 +196,11 @@ class NLLLoss(_WeightedLoss):
 
 
 class NLLLoss2d(NLLLoss):
-    r"""This is negative log likehood loss, but for image inputs. It computes
-    NLL loss per-pixel.
-
-    Args:
-        weight (Tensor, optional): a manual rescaling weight given to each
-            class. If given, has to be a 1D Tensor having as many elements,
-            as there are classes.
-        size_average: By default, the losses are averaged over observations
-            for each minibatch. However, if the field size_average is set to
-            ``False``, the losses are instead summed for each minibatch.
-            Ignored when reduce is ``False``. Default: ``True``
-        reduce (bool, optional): By default, the losses are averaged or summed
-            for each minibatch depending on size_average. When reduce is ``False``,
-            the loss function returns a loss per batch element instead and
-            ignores size_average. Default: ``True``
-
-
-    Shape:
-        - Input: :math:`(N, C, H, W)` where `C = number of classes`
-        - Target: :math:`(N, H, W)` where each value is `0 <= targets[i] <= C-1`
-        - Output: scalar. If reduce is ``False``, then :math:`(N, H, W)` instead.
-
-    Examples::
-
-        >>> m = nn.Conv2d(16, 32, (3, 3)).float()
-        >>> loss = nn.NLLLoss2d()
-        >>> # input is of size N x C x height x width
-        >>> input = autograd.Variable(torch.randn(3, 16, 10, 10))
-        >>> # each element in target has to have 0 <= value < C
-        >>> target = autograd.Variable(torch.LongTensor(3, 8, 8).random_(0, 4))
-        >>> output = loss(m(input), target)
-        >>> output.backward()
-    """
-    pass
+    def __init__(self, weight=None, size_average=True, ignore_index=-100, reduce=True):
+        warnings.warn("NLLLoss2d has been deprecated. "
+                      "Please use NLLLoss instead as a drop-in replacement and see "
+                      "http://pytorch.org/docs/master/nn.html#torch.nn.NLLLoss for more details.")
+        super(NLLLoss2d, self).__init__(weight, size_average, ignore_index, reduce)
 
 
 class PoissonNLLLoss(_Loss):
@@ -208,6 +227,10 @@ class PoissonNLLLoss(_Loss):
             is set to ``False``, the losses are instead summed for each minibatch.
         eps (float, optional): Small value to avoid evaluation of log(0) when
             log_input==``False``. Default: 1e-8
+        reduce (bool, optional): By default, the losses are averaged
+            over observations for each minibatch, or summed, depending on
+            size_average. When reduce is ``False``, returns a loss per batch
+            element instead and ignores size_average. Default: ``True``
 
     Examples::
 
@@ -217,16 +240,17 @@ class PoissonNLLLoss(_Loss):
         >>> output = loss(log_input, target)
         >>> output.backward()
     """
-    def __init__(self, log_input=True, full=False, size_average=True, eps=1e-8):
-        super(PoissonNLLLoss, self).__init__()
+    def __init__(self, log_input=True, full=False, size_average=True, eps=1e-8, reduce=True):
+        super(PoissonNLLLoss, self).__init__(size_average)
         self.log_input = log_input
         self.full = full
-        self.size_average = size_average
         self.eps = eps
+        self.reduce = reduce
 
     def forward(self, log_input, target):
         _assert_no_grad(target)
-        return F.poisson_nll_loss(log_input, target, self.log_input, self.full, self.size_average, self.eps)
+        return F.poisson_nll_loss(log_input, target, self.log_input, self.full,
+                                  self.size_average, self.eps, self.reduce)
 
 
 class KLDivLoss(_Loss):
@@ -245,7 +269,17 @@ class KLDivLoss(_Loss):
 
     The loss can be described as:
 
-    .. math:: loss(x, target) = 1/n \sum(target_i * (log(target_i) - x_i))
+    .. math::
+        \ell(x, y) = L = \{l_1,\dots,l_N\}^\top, \quad
+        l_n = y_n \odot \left( \log y_n - x_n \right),
+
+    where :math:`N` is the batch size. If reduce is ``True``, then:
+
+    .. math::
+        \ell(x, y) = \begin{cases}
+            \operatorname{mean}(L), & \text{if}\; \text{size_average} = \text{True},\\
+            \operatorname{sum}(L),  & \text{if}\; \text{size_average} = \text{False}.
+        \end{cases}
 
     By default, the losses are averaged for each minibatch over observations
     **as well as** over dimensions. However, if the field
@@ -282,9 +316,21 @@ class KLDivLoss(_Loss):
 
 class MSELoss(_Loss):
     r"""Creates a criterion that measures the mean squared error between
-    `n` elements in the input `x` and target `y`:
+    `n` elements in the input `x` and target `y`.
 
-    :math:`{loss}(x, y)  = 1/n \sum |x_i - y_i|^2`
+    The loss can be described as:
+
+    .. math::
+        \ell(x, y) = L = \{l_1,\dots,l_N\}^\top, \quad
+        l_n = \left( x_n - y_n \right)^2,
+
+    where :math:`N` is the batch size. If reduce is ``True``, then:
+
+    .. math::
+        \ell(x, y) = \begin{cases}
+            \operatorname{mean}(L), & \text{if}\; \text{size_average} = \text{True},\\
+            \operatorname{sum}(L),  & \text{if}\; \text{size_average} = \text{False}.
+        \end{cases}
 
     `x` and `y` arbitrary shapes with a total of `n` elements each.
 
@@ -333,14 +379,22 @@ class BCELoss(_WeightedLoss):
     r"""Creates a criterion that measures the Binary Cross Entropy
     between the target and the output:
 
-    .. math:: loss(o, t) = - 1/n \sum_i (t[i] * log(o[i]) + (1 - t[i]) * log(1 - o[i]))
+    The loss can be described as:
 
-    or in the case of the weight argument being specified:
+    .. math::
+        \ell(x, y) = L = \{l_1,\dots,l_N\}^\top, \quad
+        l_n = - w_n \left[ y_n \cdot \log x_n + (1 - y_n) \cdot \log (1 - x_n) \right],
 
-    .. math:: loss(o, t) = - 1/n \sum_i weight[i] * (t[i] * log(o[i]) + (1 - t[i]) * log(1 - o[i]))
+    where :math:`N` is the batch size. If reduce is ``True``, then
+
+    .. math::
+        \ell(x, y) = \begin{cases}
+            \operatorname{mean}(L), & \text{if}\; \text{size_average} = \text{True},\\
+            \operatorname{sum}(L),  & \text{if}\; \text{size_average} = \text{False}.
+        \end{cases}
 
     This is used for measuring the error of a reconstruction in for example
-    an auto-encoder. Note that the targets `t[i]` should be numbers
+    an auto-encoder. Note that the targets `y` should be numbers
     between 0 and 1.
 
     Args:
@@ -351,11 +405,17 @@ class BCELoss(_WeightedLoss):
             over observations for each minibatch. However, if the field
             size_average is set to ``False``, the losses are instead summed for
             each minibatch. Default: ``True``
+        reduce (bool, optional): By default, the losses are averaged or summed over
+            observations for each minibatch depending on size_average. When reduce
+            is False, returns a loss per batch element instead and ignores
+            size_average. Default: True
 
     Shape:
         - Input: :math:`(N, *)` where `*` means, any number of additional
           dimensions
         - Target: :math:`(N, *)`, same shape as the input
+        - Output: scalar. If `reduce` is False, then `(N, *)`, same shape as
+          input.
 
     Examples::
 
@@ -366,10 +426,15 @@ class BCELoss(_WeightedLoss):
         >>> output = loss(m(input), target)
         >>> output.backward()
     """
+    def __init__(self, weight=None, size_average=True, reduce=True):
+        super(BCELoss, self).__init__(weight, size_average)
+        self.reduce = reduce
+
     def forward(self, input, target):
         _assert_no_grad(target)
         return F.binary_cross_entropy(input, target, weight=self.weight,
-                                      size_average=self.size_average)
+                                      size_average=self.size_average,
+                                      reduce=self.reduce)
 
 
 class BCEWithLogitsLoss(Module):
@@ -378,14 +443,20 @@ class BCEWithLogitsLoss(Module):
     followed by a `BCELoss` as, by combining the operations into one layer,
     we take advantage of the log-sum-exp trick for numerical stability.
 
-    This Binary Cross Entropy between the target and the output logits
-    (no sigmoid applied) is:
+    The loss can be described as:
 
-    .. math:: loss(o, t) = - 1/n \sum_i (t[i] * log(sigmoid(o[i])) + (1 - t[i]) * log(1 - sigmoid(o[i])))
+    .. math::
+        \ell(x, y) = L = \{l_1,\dots,l_N\}^\top, \quad
+        l_n = - w_n \left[ t_n \cdot \log \sigma(x_n)
+        + (1 - t_n) \cdot \log (1 - \sigma(x_n)) \right],
 
-    or in the case of the weight argument being specified:
+    where :math:`N` is the batch size. If reduce is ``True``, then
 
-    .. math:: loss(o, t) = - 1/n \sum_i weight[i] * (t[i] * log(sigmoid(o[i])) + (1 - t[i]) * log(1 - sigmoid(o[i])))
+    .. math::
+        \ell(x, y) = \begin{cases}
+            \operatorname{mean}(L), & \text{if}\; \text{size_average} = \text{True},\\
+            \operatorname{sum}(L),  & \text{if}\; \text{size_average} = \text{False}.
+        \end{cases}
 
     This is used for measuring the error of a reconstruction in for example
     an auto-encoder. Note that the targets `t[i]` should be numbers
@@ -432,9 +503,23 @@ class HingeEmbeddingLoss(_Loss):
     dissimilar, e.g. using the L1 pairwise distance as `x`, and is typically
     used for learning nonlinear embeddings or semi-supervised learning::
 
-                         { x_i,                  if y_i ==  1
-        loss(x, y) = 1/n {
-                         { max(0, margin - x_i), if y_i == -1
+    The loss function for :math:`n`-th sample in the mini-batch is:
+
+    .. math::
+        l_n = \begin{cases}
+            x_n, & \text{if}\; y_n = 1,\\
+            \max \{0, \Delta - x_n\}, & \text{if}\; y_n = -1,
+        \end{cases}
+
+    and the total loss functions is
+
+    .. math::
+        \ell(x, y) = \begin{cases}
+            \operatorname{mean}(L), & \text{if}\; \text{size_average} = \text{True},\\
+            \operatorname{sum}(L),  & \text{if}\; \text{size_average} = \text{False}.
+        \end{cases}
+
+    where :math:`L = \{l_1,\dots,l_N\}^\top`.
 
     `x` and `y` can be of arbitrary shapes with a total of `n` elements each.
     The sum operation operates over all the elements.
@@ -467,7 +552,7 @@ class MultiLabelMarginLoss(_Loss):
 
     `y` and `x` must have the same size.
 
-    The criterion only considers the first non zero `y[j]` targets.
+    The criterion only considers the first non-negative `y[j]` targets.
 
     This allows for different samples to have variable amounts of target classes
     """

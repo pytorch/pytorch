@@ -78,7 +78,7 @@ using GraphsAttr = VectorAttributeValue<std::shared_ptr<Graph>,AttributeKind::gs
 
 // CRTP so that Node which inherits Attributes can be return for
 // method chaining e.g:
-// Node * n = g->create(kSelect)->set_i(kOffset,3)->set_f(kValue,3.5);
+// Node * n = g->create(kSelect)->i_(kOffset,3)->f_(kValue,3.5);
 // we return Derived* pointers because Nodes are normally held as pointers.
 template<typename Derived>
 struct Attributes {

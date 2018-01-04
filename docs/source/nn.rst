@@ -524,12 +524,6 @@ Loss functions
 .. autoclass:: PoissonNLLLoss
     :members:
 
-:hidden:`NLLLoss2d`
-~~~~~~~~~~~~~~~~~~~
-
-.. autoclass:: NLLLoss2d
-    :members:
-
 :hidden:`KLDivLoss`
 ~~~~~~~~~~~~~~~~~~~
 
@@ -686,6 +680,18 @@ Utilities
 .. autofunction:: torch.nn.utils.rnn.pad_packed_sequence
 
 
+:hidden:`pad_sequence`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: torch.nn.utils.rnn.pad_sequence
+
+
+:hidden:`pack_sequence`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: torch.nn.utils.rnn.pack_sequence
+
+
 torch.nn.functional
 ===================
 
@@ -815,17 +821,20 @@ Non-linear activation functions
 ~~~~~~~~~~~~~~~~~~~
 
 .. autofunction:: threshold
+.. autofunction:: threshold_
 
 
 :hidden:`relu`
 ~~~~~~~~~~~~~~
 
 .. autofunction:: relu
+.. autofunction:: relu_
 
 :hidden:`hardtanh`
 ~~~~~~~~~~~~~~~~~~
 
 .. autofunction:: hardtanh
+.. autofunction:: hardtanh_
 
 :hidden:`relu6`
 ~~~~~~~~~~~~~~~
@@ -836,6 +845,7 @@ Non-linear activation functions
 ~~~~~~~~~~~~~
 
 .. autofunction:: elu
+.. autofunction:: elu_
 
 :hidden:`selu`
 ~~~~~~~~~~~~~~
@@ -846,6 +856,7 @@ Non-linear activation functions
 ~~~~~~~~~~~~~~~~~~~~
 
 .. autofunction:: leaky_relu
+.. autofunction:: leaky_relu_
 
 :hidden:`prelu`
 ~~~~~~~~~~~~~~~
@@ -856,6 +867,7 @@ Non-linear activation functions
 ~~~~~~~~~~~~~~~
 
 .. autofunction:: rrelu
+.. autofunction:: rrelu_
 
 :hidden:`glu`
 ~~~~~~~~~~~~~~~

@@ -1,18 +1,21 @@
 #pragma once
 
 #include <atomic>
+#include <memory>
 #include <iostream>
 
+#include "ATen/Retainable.h"
 #include "ATen/ScalarType.h"
 
 namespace at {
 
 struct Type;
 class Scalar;
+struct Storage;
 
-struct TensorImpl {
+struct TensorImpl : public Retainable {
   explicit TensorImpl(Type * type)
-  :  refcount(1), is_scalar(false), type_(type) {}
+  : is_scalar(false), type_(type) {}
   Type & type() const {
     return *type_;
   }
@@ -21,17 +24,8 @@ struct TensorImpl {
   virtual IntList strides() const = 0;
   virtual int64_t dim() const = 0;
   virtual Scalar localScalar() = 0;
-  virtual void assign_(Scalar s) = 0;
   virtual void * unsafeGetTH(bool retain) = 0;
-  void retain() {
-    ++refcount;
-  }
-  virtual void release() {
-    if(--refcount == 0) {
-      delete this;
-    }
-  }
-  virtual ~TensorImpl() {}
+  virtual std::unique_ptr<Storage> storage() = 0;
   friend struct Type;
 
   // 0-dim patchup of TH requires us to have a flag marking
@@ -55,9 +49,7 @@ struct TensorImpl {
   void setScalar(bool s) {
     is_scalar = s;
   }
-
 private:
-  std::atomic<int> refcount;
   bool is_scalar;
   Type * type_;
 };

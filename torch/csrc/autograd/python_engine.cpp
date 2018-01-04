@@ -7,6 +7,10 @@
 #include "torch/csrc/PtrWrapper.h"
 #include "torch/csrc/utils/auto_gil.h"
 
+#ifndef _WIN32
+#include <pthread.h>
+#endif
+
 #include <unordered_set>
 
 using namespace torch::autograd;
@@ -40,10 +44,11 @@ void PythonEngine::execute(
     const function_list& roots,
     const variable_list& inputs,
     bool keep_graph,
+    bool create_graph,
     const pre_callback_map& pre_callbacks,
     const post_callback_map& post_callbacks) {
   try {
-    Engine::execute(roots, inputs, keep_graph, pre_callbacks, post_callbacks);
+    Engine::execute(roots, inputs, keep_graph, create_graph, pre_callbacks, post_callbacks);
   } catch (python_error& e) {
     e.restore();
     throw;
@@ -130,20 +135,42 @@ void compute_partial_exec_callbacks(const function_list& roots,
   }
 }
 
+static bool _reinitialize_engine = false;
+
+static void _maybe_reinitialize_engine_after_fork() {
+  // This is "probably" thread-safe because the flag is set in a fork handler
+  // before any threads are created, and this function is only called with the
+  // GIL held. However, using fork + threads is playing with fire so this is
+  // more of a "best effort" thing. For example, if the fork occurs while the
+  // backwards threads hold a lock, we'll probably deadlock in the engine
+  // destructor.
+  if (_reinitialize_engine) {
+    engine.~PythonEngine();
+    new (&engine) torch::autograd::python::PythonEngine();
+    _reinitialize_engine = false;
+  }
+}
+
 // Implementation of torch._C._EngineBase.run_backward
 PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwargs)
 {
   HANDLE_TH_ERRORS
+  _maybe_reinitialize_engine_after_fork();
   PyObject *variables = NULL;
   PyObject *grad_variables = NULL;
   unsigned char keep_graph = 0;
+  unsigned char create_graph = 0;
   PyObject *inputs = NULL;
   unsigned char only_inputs = 0;
   unsigned char allow_unreachable = 0;
-  const char *accepted_kwargs[] = {"variables", "grad_variables",
-      "keep_graph", "inputs", "only_inputs", "allow_unreachable", NULL};
-  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "OOb|Obb", (char**)accepted_kwargs,
-        &variables, &grad_variables, &keep_graph, &inputs, &only_inputs, &allow_unreachable))
+  const char *accepted_kwargs[] = {
+      "variables", "grad_variables", "keep_graph", "create_graph", "inputs",
+      "only_inputs", "allow_unreachable",
+      NULL
+  };
+  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "OObb|Obb", (char**)accepted_kwargs,
+        &variables, &grad_variables, &keep_graph, &create_graph, &inputs,
+        &only_inputs, &allow_unreachable))
     return NULL;
 
   THPUtils_assert(PyTuple_Check(variables), "variables argument is expected to "
@@ -163,8 +190,6 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
     THPUtils_assert(THPVariable_Check(_variable), "element %d of variables "
         "tuple is not a Variable", i);
     auto& variable = ((THPVariable*)_variable)->cdata;
-    THPUtils_assert(!variable.is_volatile(),
-        "element %d of variables tuple is volatile", i);
     // If grad_fn is NULL (as is the case for a leaf node), we instead
     // interpret the gradient function to be a grad accumulator,
     // which will accumulate its inputs into the grad property of the
@@ -173,8 +198,6 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
     // have requires_grad=True can have grad accumulators.
     auto grad_fn = variable.grad_fn() ? variable.grad_fn() : variable.grad_accumulator();
     int output_nr = variable.grad_fn() ? variable.output_nr() : 0;
-    THPUtils_assert(!variable.is_volatile(),
-        "element %d of variables tuple is volatile", i);
     THPUtils_assert(grad_fn,
         "element %d of variables does not require grad and does not have a grad_fn", i);
     roots[i] = std::make_pair<>(std::move(grad_fn), output_nr);
@@ -214,8 +237,6 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
       if (allow_unreachable && !grad_fn) continue;
       THPUtils_assert(grad_fn,
           "One of the differentiated Variables appears to not have been used in the graph");
-      THPUtils_assert(grad_fn->is_executable,
-          "One of the differentiated Variables has a non-executable grad_fn. Submit a bug report.");
       auto& fn_info = ctx.output_map[grad_fn];
       fn_info.first.emplace_back(output_nr, i);
       fn_info.second = is_leaf;
@@ -246,7 +267,7 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
 
   {
     AutoNoGIL no_gil;
-    engine.execute(roots, grads, keep_graph, callbacks);
+    engine.execute(roots, grads, keep_graph, create_graph, callbacks);
   }
 
   if (ctx.outputs) {
@@ -265,6 +286,8 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
 }
 
 PyObject* THPEngine_queue_callback(PyObject *self, PyObject *_callback) {
+  HANDLE_TH_ERRORS
+  _maybe_reinitialize_engine_after_fork();
   std::shared_ptr<PyObject> callback(_callback, [](PyObject *obj) { AutoGIL gil; Py_DECREF(obj); });
   Py_INCREF(_callback);
   engine.queue_callback([callback]() {
@@ -273,6 +296,7 @@ PyObject* THPEngine_queue_callback(PyObject *self, PyObject *_callback) {
     if (!result) throw python_error();
   });
   Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
 }
 
 PyObject *THPEngine_new(PyTypeObject *type, PyObject *args, PyObject *kwargs)
@@ -328,8 +352,17 @@ PyTypeObject THPEngineType = {
   THPEngine_new                          /* tp_new */
 };
 
+static void child_atfork() {
+  _reinitialize_engine = true;
+}
+
 bool THPEngine_initModule(PyObject *module)
 {
+#ifndef _WIN32
+  if (pthread_atfork(NULL, NULL, child_atfork) != 0) {
+    throw std::runtime_error("unable to set pthread_atfork handler");
+  }
+#endif
   if (PyType_Ready(&THPEngineType) < 0)
     return false;
   Py_INCREF(&THPEngineType);

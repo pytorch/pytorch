@@ -18,7 +18,7 @@
 #define real int8_t
 #define accreal int64_t
 #define Real Char
-#define THDInf CHAR_MAX
+#define THDInf SCHAR_MAX
 #define THD_REAL_IS_CHAR
 #line 1 THD_GENERIC_FILE
 #include THD_GENERIC_FILE

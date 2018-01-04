@@ -172,6 +172,10 @@ inline __host__ __device__ half log1p(half a) {
   return THCNumerics<half>::log1p(a);
 }
 
+inline __host__ __device__ half expm1(half a) {
+  return THCNumerics<half>::expm1(a);
+}
+
 inline __host__ __device__ half pow(half a, half b) {
   return THCNumerics<half>::pow(a, b);
 }
@@ -183,6 +187,20 @@ inline __host__ __device__ half sqrt(half a) {
 inline __host__ __device__ half tanh(half a) {
   return THCNumerics<half>::tanh(a);
 }
+
+#if defined(_MSC_VER) && CUDA_VERSION >= 9000
+inline __host__ __device__ half operator+(half a, int b) {
+  return THCNumerics<half>::add(a, ScalarConvert<int, half>::to(b));
+}
+
+inline __host__ __device__ double operator+(half a, double b) {
+  return ScalarConvert<half, double>::to(a) + b;
+}
+
+inline __host__ __device__ half operator*(half a, bool b) {
+  return THCNumerics<half>::mul(a, ScalarConvert<bool, half>::to(b));
+}
+#endif
 
 // comparison functions
 
