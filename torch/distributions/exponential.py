@@ -1,5 +1,7 @@
 from numbers import Number
+
 import torch
+from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
 from torch.distributions.utils import broadcast_all
 
@@ -18,6 +20,8 @@ class Exponential(Distribution):
     Args:
         rate (float or Tensor or Variable): rate = 1 / scale of the distribution
     """
+    params = {'rate': constraints.positive}
+    support = constraints.positive
     has_rsample = True
 
     def __init__(self, rate):
