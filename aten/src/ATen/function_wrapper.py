@@ -250,8 +250,6 @@ ALLOC_WRAP = {
 # Replacements for constants when calling into TH
 CONSTANT_REPLACEMENTS = [
     ('AS_REAL', '${AS_REAL}'),
-    ('THPGenerator_TH_CData(THPDefaultGenerator)',
-     'dynamic_cast<${Generator}&>().generator'),
     ('__storage_size.get\\(\\)',
      'THLongStorageView::makeFromLength(static_cast<int64_t>(storage.size()))'),
     ('__last_dim', 'self.ndimension()-1'),
@@ -260,7 +258,6 @@ CONSTANT_REPLACEMENTS = [
 # Replacements for constants in header file function definitions
 HEADER_CONSTANT_REPLACEMENTS = [
     (r'AS_REAL\((.*)\)', r'\1'),
-    ('THPGenerator_TH_CData\(THPDefaultGenerator\)', 'nullptr'),
     ('__last_dim', '-1'),
 ]
 
@@ -832,8 +829,7 @@ def create_derived(backend_type_env, declarations):
 
     def drop_argument(argument, option):
         return 'CUDA' in backend_type_env['Backend'] and (
-            (option['mode'] == 'TH' and argument['type'] == 'THGenerator*') or
-            argument.get('default') == 'THPGenerator_TH_CData(THPDefaultGenerator)')
+            option['mode'] == 'TH' and argument['type'] == 'THGenerator*')
 
     def get_arguments(arguments, option):
         return [get_argument(argument, option)
