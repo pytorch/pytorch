@@ -9,7 +9,7 @@ source:
 
 build:
   number: 1
-  skip: True  # [win]
+  skip: True  # [win or py3k]
   script_env:
     - CONDA_CMAKE_ARGS
 
@@ -21,11 +21,10 @@ requirements:
     - six
     - eigen
     - python
-    - protobuf ==3.4.0
+    - protobuf
     - cmake
-    - leveldb
     - lmdb
-    - snappy
+    - snappy ==1.1.6
     - mkl-include
     - mkl
   run:
@@ -35,11 +34,11 @@ requirements:
     - six
     - eigen
     - python
-    - protobuf ==3.4.0
-    - leveldb
+    - protobuf
     - lmdb
-    - snappy
+    - snappy ==1.1.6
     - future
+    - mkl-include
     - mkl
 
 about:

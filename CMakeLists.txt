@@ -145,15 +145,18 @@ endif()
 # Since one would use glog, gflags, and protobuf functionalities, any
 # dependent library will have to depend on glog, gflags, and protobuf
 # as well, so we mark them as INTERFACE transitive dependency.
+# To fix the conda builds, these have been set as dependencies on the full
+# paths to glog, gflags, and protobuf. This may make libcaffe2 no longer
+# relocatable.
 set(CAFFE2_INTERFACE_LIBS)
 if (USE_GLOG)
-  list(APPEND CAFFE2_INTERFACE_LIBS glog)
+  list(APPEND CAFFE2_INTERFACE_LIBS ${GLOG_LIBRARIES})
 endif()
 if (USE_GFLAGS)
-  list(APPEND CAFFE2_INTERFACE_LIBS gflags)
+  list(APPEND CAFFE2_INTERFACE_LIBS ${GFLAGS_LIBRARIES})
 endif()
 if (NOT CAFFE2_USE_CUSTOM_PROTOBUF)
-  list(APPEND CAFFE2_INTERFACE_LIBS protobuf)
+  list(APPEND CAFFE2_INTERFACE_LIBS ${PROTOBUF_LIBRARIES})
 endif()
 
 if ((NOT USE_GLOG) OR (NOT USE_GFLAGS) OR CAFFE2_USE_CUSTOM_PROTOBUF)
