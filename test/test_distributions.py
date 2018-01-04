@@ -32,7 +32,7 @@ from torch.autograd import Variable, gradcheck
 from torch.distributions import (Bernoulli, Beta, Categorical, Cauchy, Chi2,
                                  Dirichlet, Exponential, Gamma, Laplace,
                                  Normal, OneHotCategorical, Uniform)
-from torch.distributions.constraints import dependent
+from torch.distributions.constraints import Constraint, is_dependent
 
 from common import TestCase, run_tests, set_rng_seed
 
@@ -1017,7 +1017,7 @@ class TestConstraints(TestCase):
                         # use a stricter constraint to the simplex.
                         value = value / value.sum(-1, True)
                     constraint = dist.params[name]
-                    if constraint is dependent:
+                    if is_dependent(constraint):
                         continue
                     message = '{} example {}/{} parameter {} = {}'.format(
                         Dist.__name__, i, len(params), name, value)
@@ -1025,6 +1025,7 @@ class TestConstraints(TestCase):
 
     def test_support_contains(self):
         for Dist, params in EXAMPLES:
+            self.assertIsInstance(Dist.support, Constraint)
             for i, param in enumerate(params):
                 dist = Dist(**param)
                 value = dist.sample()

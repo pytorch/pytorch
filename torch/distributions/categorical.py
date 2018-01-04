@@ -38,7 +38,7 @@ class Categorical(Distribution):
         batch_shape = self.probs.size()[:-1]
         super(Categorical, self).__init__(batch_shape)
 
-    @property
+    @constraints.dependent_property
     def support(self):
         return constraints.integer_interval(0, self.probs.size()[-1] - 1)
 

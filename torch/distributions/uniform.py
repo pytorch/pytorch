@@ -36,7 +36,7 @@ class Uniform(Distribution):
             batch_shape = self.low.size()
         super(Uniform, self).__init__(batch_shape)
 
-    @property
+    @constraints.dependent_property
     def support(self):
         return constraints.interval(self.low, self.high)
 

@@ -1,22 +1,39 @@
 import torch
 
 
+__all__ = [
+    'Constraint',
+    'boolean',
+    'dependent',
+    'dependent_property',
+    'integer_interval',
+    'interval',
+    'is_dependent',
+    'lower_triangular',
+    'nonnegative_integer',
+    'positive',
+    'real',
+    'simplex',
+    'unit_interval',
+]
+
+
 class Constraint(object):
     """
     Abstract base class for constraints.
 
-    A constraint object represents a region over which a continuous variable is
-    valid, e.g. within which a variable can be optimized.
+    A constraint object represents a region over which a variable is valid,
+    e.g. within which a variable can be optimized.
     """
     def check(self, value):
         """
-        Returns a byte tensor of sample_shape + batch_shape indicating whether
-        each value satisfies this constraint.
+        Returns a byte tensor of `sample_shape + batch_shape` indicating
+        whether each event in value satisfies this constraint.
         """
         raise NotImplementedError
 
 
-class Dependent(Constraint):
+class _Dependent(Constraint):
     """
     Placeholder for variables whose support depends on other variables.
     These variables obey no simple coordinate-wise constraints.
@@ -25,7 +42,29 @@ class Dependent(Constraint):
         raise ValueError('Cannot determine validity of dependent constraint')
 
 
-class Boolean(Constraint):
+def is_dependent(constraint):
+    return isinstance(constraint, _Dependent)
+
+
+class _DependentProperty(property, _Dependent):
+    """
+    Decorator that extends @property to act like a `Dependent` constraint when
+    called on a class and act like a property when called on an object.
+
+    Example::
+
+        class Uniform(Distribution):
+            def __init__(self, low, high):
+                self.low = low
+                self.high = high
+            @constraints.dependent_property
+            def support(self):
+                return constraints.interval(self.low, self.high)
+    """
+    pass
+
+
+class _Boolean(Constraint):
     """
     Constrain to the two values `{0, 1}`.
     """
@@ -33,7 +72,7 @@ class Boolean(Constraint):
         return (value == 0) | (value == 1)
 
 
-class NonnegativeInteger(Constraint):
+class _NonnegativeInteger(Constraint):
     """
     Constrain to non-negative integers `{0, 1, 2, ...}`.
     """
@@ -41,7 +80,7 @@ class NonnegativeInteger(Constraint):
         return (value % 1 == 0) & (value >= 0)
 
 
-class IntegerInterval(Constraint):
+class _IntegerInterval(Constraint):
     """
     Constrain to an integer interval `[lower_bound, upper_bound]`.
     """
@@ -53,7 +92,7 @@ class IntegerInterval(Constraint):
         return (value % 1 == 0) & (self.lower_bound <= value) & (value <= self.upper_bound)
 
 
-class Real(Constraint):
+class _Real(Constraint):
     """
     Trivially constrain to the extended real line `[-inf, inf]`.
     """
@@ -61,7 +100,7 @@ class Real(Constraint):
         return value == value  # False for NANs.
 
 
-class Positive(Constraint):
+class _Positive(Constraint):
     """
     Constrain to the positive half line `[0, inf]`.
     """
@@ -69,7 +108,7 @@ class Positive(Constraint):
         return value >= 0
 
 
-class Interval(Constraint):
+class _Interval(Constraint):
     """
     Constrain to a real interval `[lower_bound, upper_bound]`.
     """
@@ -81,7 +120,7 @@ class Interval(Constraint):
         return (self.lower_bound <= value) & (value <= self.upper_bound)
 
 
-class Simplex(Constraint):
+class _Simplex(Constraint):
     """
     Constrain to the unit simplex in the innermost (rightmost) dimension.
     Specifically: `x >= 0` and `x.sum(-1) == 1`.
@@ -90,7 +129,7 @@ class Simplex(Constraint):
         return (value >= 0) & ((value.sum(-1, True) - 1).abs() < 1e-6)
 
 
-class LowerTriangular(Constraint):
+class _LowerTriangular(Constraint):
     """
     Constrain to lower-triangular square matrices.
     """
@@ -98,14 +137,15 @@ class LowerTriangular(Constraint):
         return (torch.tril(value) == value).min(-1).min(-1)
 
 
-# Functions and constants are the recommended interface.
-dependent = Dependent()
-boolean = Boolean()
-nonnegative_integer = NonnegativeInteger()
-integer_interval = IntegerInterval
-real = Real()
-positive = Positive()
-unit_interval = Interval(0, 1)
-interval = Interval
-simplex = Simplex()
-lower_triangular = LowerTriangular()
+# Public interface.
+dependent = _Dependent()
+dependent_property = _DependentProperty
+boolean = _Boolean()
+nonnegative_integer = _NonnegativeInteger()
+integer_interval = _IntegerInterval
+real = _Real()
+positive = _Positive()
+unit_interval = _Interval(0, 1)
+interval = _Interval
+simplex = _Simplex()
+lower_triangular = _LowerTriangular()
