@@ -1,7 +1,8 @@
 import torch
 from torch.autograd import Variable
-from torch.distributions.distribution import Distribution
+from torch.distributions import constraints
 from torch.distributions.categorical import Categorical
+from torch.distributions.distribution import Distribution
 
 
 class OneHotCategorical(Distribution):
@@ -25,6 +26,8 @@ class OneHotCategorical(Distribution):
     Args:
         probs (Tensor or Variable): event probabilities
     """
+    params = {'probs': constraints.simplex}
+    support = constraints.simplex
     has_enumerate_support = True
 
     def __init__(self, probs):

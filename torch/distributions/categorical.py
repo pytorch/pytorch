@@ -1,5 +1,6 @@
 import torch
 from torch.autograd import Variable
+from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
 
 
@@ -29,12 +30,17 @@ class Categorical(Distribution):
     Args:
         probs (Tensor or Variable): event probabilities
     """
+    params = {'probs': constraints.simplex}
     has_enumerate_support = True
 
     def __init__(self, probs):
         self.probs = probs
         batch_shape = self.probs.size()[:-1]
         super(Categorical, self).__init__(batch_shape)
+
+    @constraints.dependent_property
+    def support(self):
+        return constraints.integer_interval(0, self.probs.size()[-1] - 1)
 
     def sample(self, sample_shape=torch.Size()):
         num_events = self.probs.size()[-1]

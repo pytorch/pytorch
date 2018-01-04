@@ -3,6 +3,7 @@ from numbers import Number
 import math
 
 import torch
+from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
 from torch.distributions.utils import broadcast_all
 
@@ -23,6 +24,7 @@ class Pareto(Distribution):
         alpha (float or Tensor or Variable): Shape parameter of the distribution
     """
     has_rsample = True
+    params = {'alpha': constraints.positive, 'scale': constraints.positive}
 
     def __init__(self, scale, alpha):
         self.scale, self.alpha = broadcast_all(scale, alpha)
@@ -31,6 +33,10 @@ class Pareto(Distribution):
         else:
             batch_shape = self.scale.size()
         super(Pareto, self).__init__(batch_shape)
+
+    @constraints.dependent_property
+    def support(self):
+        return constraints.greater_than(self.scale)
 
     def rsample(self, sample_shape=torch.Size()):
         shape = self._extended_shape(sample_shape)
