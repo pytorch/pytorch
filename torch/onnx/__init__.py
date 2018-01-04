@@ -101,13 +101,13 @@ def _optimize_trace(trace, aten):
     torch._C._jit_pass_lint(trace)
 
 
-def _trace(func, args, return_outs=False):
+def _trace(func, args, return_outs=False, aten=False):
     # Special case for common case of passing a single Variable
     if isinstance(args, torch.autograd.Variable):
         args = (args, )
 
     trace, torch_out = torch.jit.trace(func, args)
-    _optimize_trace(trace)
+    _optimize_trace(trace, aten)
     if return_outs:
         return trace, torch_out
     return trace
