@@ -24,7 +24,6 @@ struct TensorImpl : public Retainable {
   virtual IntList strides() const = 0;
   virtual int64_t dim() const = 0;
   virtual Scalar localScalar() = 0;
-  virtual void assign_(Scalar s) = 0;
   virtual void * unsafeGetTH(bool retain) = 0;
   virtual std::unique_ptr<Storage> storage() = 0;
   friend struct Type;

@@ -156,6 +156,10 @@ def bmm(g, self, other):
     return g.op("MatMul", self, other)
 
 
+def matmul(g, self, other):
+    return g.op("MatMul", self, other)
+
+
 def addmm(g, self, mat1, mat2, beta, alpha):
     return g.op("Gemm", mat1, mat2, self, beta_f=_scalar(beta), alpha_f=_scalar(alpha))
 
@@ -187,6 +191,10 @@ def t(g, self):
 def expand(g, self, size):
     # TODO: This is not a real ONNX operator at the moment
     return g.op("Expand", self, shape_i=size)
+
+
+def embedding(g, weight, indices, padding_idx, scale_grad_by_freq, sparse):
+    return g.op("Gather", weight, indices)
 
 
 def transpose(g, self, dim0, dim1):

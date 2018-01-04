@@ -86,9 +86,11 @@ static Tensor new_from_sequence(ScalarType scalarType, PyObject* data) {
   if (THPUtils_checkString(data)) {
     throw TypeError("new(): invalid data type '%s'", Py_TYPE(data)->tp_name);
   }
+#ifdef WITH_NUMPY
   if (PyArray_Check(data)) {
     return autograd::make_variable(tensor_from_numpy(data), false);
   }
+#endif
 
   auto sizes = compute_sizes(data);
   auto tensor = autograd::make_variable(CPU(scalarType).tensor(sizes), false);

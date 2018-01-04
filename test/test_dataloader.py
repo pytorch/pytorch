@@ -1,5 +1,6 @@
 import math
 import sys
+import os
 import ctypes
 import torch
 import time
@@ -7,9 +8,32 @@ import traceback
 import unittest
 from torch import multiprocessing
 from torch.utils.data import Dataset, TensorDataset, DataLoader, ConcatDataset
+from torch.utils.data.dataset import random_split
 from torch.utils.data.dataloader import default_collate
 from common import TestCase, run_tests, TEST_NUMPY, IS_WINDOWS
 from common_nn import TEST_CUDA
+
+
+class TestDatasetRandomSplit(TestCase):
+    def test_lengths_must_equal_datset_size(self):
+        with self.assertRaises(ValueError):
+            random_split([1, 2, 3, 4], [1, 2])
+
+    def test_splits_have_correct_size(self):
+        splits = random_split([1, 2, 3, 4, 5, 6], [2, 4])
+        self.assertEqual(len(splits), 2)
+        self.assertEqual(len(splits[0]), 2)
+        self.assertEqual(len(splits[1]), 4)
+
+    def test_splits_are_mutually_exclusive(self):
+        data = [5, 2, 3, 4, 1, 6]
+        splits = random_split(data, [2, 4])
+        all_values = []
+        all_values.extend(list(splits[0]))
+        all_values.extend(list(splits[1]))
+        data.sort()
+        all_values.sort()
+        self.assertListEqual(data, all_values)
 
 
 class TestTensorDataset(TestCase):
@@ -130,15 +154,16 @@ class SynchronizedSeedDataset(Dataset):
 
     def __init__(self, size, num_workers):
         assert size >= num_workers
-        self.count = multiprocessing.Value('i', 0)
+        self.count = multiprocessing.Value('i', 0, lock=True)
         self.barrier = multiprocessing.Semaphore(0)
         self.num_workers = num_workers
         self.size = size
 
     def __getitem__(self, idx):
-        self.count.value += 1
-        if self.count.value == self.num_workers:
-            self.barrier.release()
+        with self.count.get_lock():
+            self.count.value += 1
+            if self.count.value == self.num_workers:
+                self.barrier.release()
         self.barrier.acquire()
         self.barrier.release()
         return torch.initial_seed()
@@ -148,6 +173,7 @@ class SynchronizedSeedDataset(Dataset):
 
 
 def _test_timeout():
+    os.close(sys.stderr.fileno())
     sys.stderr.close()
     dataset = SleepDataset(10, 10)
     dataloader = DataLoader(dataset, batch_size=2, num_workers=2, timeout=1)
@@ -155,6 +181,7 @@ def _test_timeout():
 
 
 def _test_segfault():
+    os.close(sys.stderr.fileno())
     sys.stderr.close()
     dataset = SegfaultDataset(10)
     dataloader = DataLoader(dataset, batch_size=2, num_workers=2)

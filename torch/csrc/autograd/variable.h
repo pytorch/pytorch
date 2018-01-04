@@ -92,7 +92,6 @@ public:
   virtual at::IntList strides() const override;
   virtual int64_t dim() const override;
   virtual at::Scalar localScalar() override;
-  virtual void assign_(at::Scalar s) override;
   virtual void * unsafeGetTH(bool retain) override;
   virtual std::unique_ptr<at::Storage> storage() override;
   static const char * typeString();

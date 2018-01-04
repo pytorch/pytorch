@@ -105,6 +105,192 @@ Tensor sum_backward(const Tensor & grad, IntList sizes, int64_t dim, bool keepdi
   }
 }
 
+Tensor reverse_dim(const Tensor& t, int64_t dim) {
+  Tensor index = t.type().toScalarType(at::ScalarType::Long).arange(t.size(dim) - 1, -1, -1);
+  return t.index_select(dim, index);
+}
+
+Tensor prod_safe_zeros_backward(const Tensor &grad, const Tensor& inp, int64_t dim) {
+  if (inp.size(dim) == 1) {
+    return grad;
+  }
+
+  std::vector<int64_t> ones_size(inp.sizes());
+  ones_size[dim] = 1;
+  Tensor ones = grad.type().ones(ones_size);
+  Tensor exclusive_normal_nocp = at::cat({ones, inp.narrow(dim, 0, inp.size(dim) - 1)}, dim);
+  Tensor exclusive_normal = exclusive_normal_nocp.cumprod(dim);
+
+  Tensor narrow_reverse = reverse_dim(inp.narrow(dim, 1, inp.size(dim) - 1), dim);
+  Tensor exclusive_reverse_nocp = at::cat({ones, narrow_reverse}, dim);
+  Tensor exclusive_reverse = reverse_dim(exclusive_reverse_nocp.cumprod(dim), dim);
+
+  return grad * (exclusive_normal * exclusive_reverse);
+}
+
+// note that the gradient for prod is equivalent to:
+// cumprod(exclusive, normal) * cumprod(exclusive, reverse), e.g.:
+// input:                        [    a,     b,     c]
+// cumprod(exclusive, normal):   [1    ,     a, a * b]
+// cumprod(exclusive, reverse):  [b * c,     c,     1]
+// product:                      [b * c, a * c, a * b]
+// and this is safe under input with 0s.
+Tensor prod_backward(const Tensor& grad, const Tensor& input, const Tensor& result) {
+  Tensor zero_idx = (input == 0).nonzero();
+  if (zero_idx.numel() == 0) {
+    return (grad * result) / input;
+  } else if (zero_idx.size(0) > 1) {
+    return zeros_like(input);
+  } else {
+    return prod_safe_zeros_backward(grad, input.contiguous().view(-1), 0).view_as(input);
+  }
+}
+
+Tensor prod_backward(Tensor grad, const Tensor& input, Tensor result, int64_t dim, bool keepdim) {
+  dim = at::maybe_wrap_dim(dim, input.sizes().size());
+  if (!keepdim && input.dim() != 1) {
+    grad = grad.unsqueeze(dim);
+    result = result.unsqueeze(dim);
+  }
+
+  Tensor zero_mask = (input == 0);
+  Tensor slice_zero_count = zero_mask.sum(dim, true);
+  int64_t total_zeros = slice_zero_count.sum().toCLong();
+  if (total_zeros == 0) {
+    return (grad * result) / input;
+  } else {
+    return prod_safe_zeros_backward(grad, input, dim);
+  }
+}
+
+Tensor sum_scan_exclusive(const Tensor& x, int64_t dim) {
+  Tensor ret = at::cumsum(-x, dim);
+
+  int64_t end_idx = ret.size(dim) - 1;
+  Tensor ret_sum = ret.narrow(dim, end_idx, 1).clone();
+  ret -= ret_sum.expand_as(ret);
+  ret += x;
+  return ret;
+}
+
+Tensor cumprod_backward(const Tensor &grad, const Tensor &input, int64_t dim) {
+  /*
+    There are two algorithms to do this. The first one
+    is very efficient, but works only when there are no
+    nonzero elements in the input.
+
+    The second one is much more complex, but it doesn't
+    assume anything on the input. The main downside is
+    that it takes time O(n^2), where n = input.size(self.dim)
+    (i.e. the length of the cumulative product). This is in
+    contrast to the forward pass and the efficient algorithm,
+    which are both O(n).
+
+    The second algorithm is a simple application of the chain
+    rule. If x is an n-dimensional vector, and y = cumprod(x),
+    and F is the final cost, then
+
+    dF / dx_k = sum_j (dF / dy_j) * (dy_j / dx_k)   (1)
+
+    The term dF / dy_j is just grad_output[j] (assuming again
+    everything is one-dimensional).
+
+    The term (dy_j / dx_k) is easilly seen to be
+
+    if j >= k
+      dy_j / dx_k = prod_{1 <= i <= j, i != k} x_i
+    else:
+      dy_j / dx_k = 0
+
+    Note that the indicator (j>=k) can be taken out
+    by replacing the sum in (1) with a sum from
+    j = k to n.
+
+    Thus,
+    df / dx_k = sum_{k <= j <= n} grad_output[j] * (dy_j / dx_k)
+
+    with
+    dy_j / dx_k = prod_{1 <= i <= j, i != k} x_i     (2)
+
+    Note that this last term is just the cumulative product
+    with k omitted. Thus, if x_k (the input) is nonzero, we can
+    just express this as
+
+    dy_j / dx_k = (prod_{1 <= i <= j} x_i) / x_k
+                = y_j / x_k
+
+    So therefore,
+
+    df / dx_k = sum_{k <= j <= n} grad_output[j] * y_j / x_k
+
+    so
+
+    grad_output = sum_scan_exclusiv(grad_output * output) / input
+
+    If the input is nonzero, we need to calculate the dy_j / dx_k
+    by using the formula (2), called in the code omitted_products.
+
+    The way the code calculates it is simply by noting that
+
+    prod_{1 <= i <= j, i != k} x_i
+        = (prod_{1 <= i <= k} x_i) * (prod_{k + 1 <= i <= j} x_i)
+
+    the first term is calculated as prods_until_k, which since
+    doesn't depend in j is easy to vectorize.
+
+    The second term (indexed by j) is the cumulative product of
+    x_{k+1}, x_{k+2}, ..., x_n, and it's named in the code
+    prods_from_k_pkus_1, and it's calculated as a cumprod.
+
+    In order to vectorize this properly, we need to add to
+    omitted_products the dimensions where k > j, and therefore
+    dy_j / dx_k = 0, which is done right after the assert.
+  */
+
+  dim = at::maybe_wrap_dim(dim, input.sizes().size());
+  int64_t dim_size = input.size(dim);
+  if (dim_size == 1) {
+    return grad;
+  }
+
+  // Simple case with nonzero elements in the input
+  if ((input != 0).all()) {
+    Tensor result = at::cumprod(input, dim);
+    return sum_scan_exclusive(result * grad, dim) / input;
+  }
+
+  std::vector<int64_t> ones_size(input.sizes());
+  ones_size[dim] = 1;
+  Tensor ones = grad.type().ones({1}).expand(ones_size);
+  Tensor grad_input = grad.type().zeros(input.sizes());
+  Tensor prods_from_k_plus_1;
+  Tensor omitted_products;
+  for (int k = 0; k < dim_size; ++k) {
+    if (k == 0) {
+      prods_from_k_plus_1 = at::cumprod(input.slice(dim, k + 1), dim);
+      omitted_products = at::cat({ones, prods_from_k_plus_1}, dim);
+    } else if (k == dim_size - 1) {
+      Tensor prods_until_k = at::prod(input.slice(dim, 0, k), dim, true);
+      omitted_products = prods_until_k;
+    } else {
+      Tensor prods_until_k = at::prod(input.slice(dim, 0, k), dim, true);
+      prods_from_k_plus_1 = at::cumprod(input.slice(dim, k+1), dim);
+      omitted_products = prods_until_k.expand_as(prods_from_k_plus_1) * prods_from_k_plus_1;
+      omitted_products = at::cat({prods_until_k, omitted_products}, dim);
+    }
+
+    // At this point omitted_products is the same size
+    // as input, except on the dimension dim where it's
+    // dim_size - k
+    TORCH_ASSERT(omitted_products.size(dim) == dim_size - k);
+
+    grad_input.select(dim, k).copy_(
+        at::sum(grad.slice(dim, k) * omitted_products,dim));
+  }
+
+  return grad_input;
+}
+
 Tensor cumsum_backward(const Tensor & x, int64_t dim) {
   auto ret = at::cumsum(-x, dim);
   auto ret_sum = ret.narrow(dim, ret.size(dim) - 1, 1).clone();
