@@ -14,7 +14,12 @@
  * limitations under the License.
  */
 
+#include <memory>
+#include <tuple>
+#include <vector>
+
 #include <gtest/gtest.h>
+
 #include "caffe2/core/blob.h"
 #include "caffe2/core/context.h"
 #include "caffe2/core/tensor.h"
@@ -24,97 +29,137 @@
 
 namespace caffe2 {
 
-TEST(MathTest, GemmNoTransNoTrans) {
-  DeviceOption option;
-  CPUContext cpu_context(option);
-  TensorCPU X(std::vector<int>{5, 10});
-  TensorCPU W(std::vector<int>{10, 6});
-  TensorCPU Y(std::vector<int>{5, 6});
-  EXPECT_EQ(X.size(), 50);
-  EXPECT_EQ(W.size(), 60);
-  math::Set<float, CPUContext>(X.size(), 1, X.mutable_data<float>(), &cpu_context);
-  math::Set<float, CPUContext>(W.size(), 1, W.mutable_data<float>(), &cpu_context);
-  EXPECT_EQ(Y.size(), 30);
-  for (int i = 0; i < X.size(); ++i) {
-    CHECK_EQ(X.data<float>()[i], 1);
-  }
-  for (int i = 0; i < W.size(); ++i) {
-    CHECK_EQ(W.data<float>()[i], 1);
+namespace {
+
+constexpr float kOne = 1.0f;
+constexpr float kPointFive = 0.5f;
+constexpr float kZero = 0.0f;
+
+class GemmTest : public testing::TestWithParam<testing::tuple<bool, bool>> {
+ protected:
+  void SetUp() override {
+    cpu_context_ = make_unique<CPUContext>(option_);
+    trans_X_ = std::get<0>(GetParam());
+    trans_W_ = std::get<1>(GetParam());
+    X_.Resize(trans_X_ ? std::vector<int>{5, 10} : std::vector<int>{10, 5});
+    W_.Resize(trans_W_ ? std::vector<int>{10, 6} : std::vector<int>{6, 10});
+    Y_.Resize(std::vector<int>{5, 6});
+    math::Set<float, CPUContext>(
+        X_.size(), 1.0f, X_.template mutable_data<float>(), cpu_context_.get());
+    math::Set<float, CPUContext>(
+        W_.size(), 1.0f, W_.template mutable_data<float>(), cpu_context_.get());
   }
 
-  const float kOne = 1.0;
-  const float kPointFive = 0.5;
-  const float kZero = 0.0;
-  math::Gemm<float, CPUContext>(CblasNoTrans, CblasNoTrans, 5, 6, 10, kOne,
-                                X.data<float>(), W.data<float>(), kZero, Y.mutable_data<float>(),
-                                &cpu_context);
-  EXPECT_EQ(Y.size(), 30);
-  for (int i = 0; i < Y.size(); ++i) {
-    CHECK_EQ(Y.data<float>()[i], 10) << i;
+  void RunGemm(const float alpha, const float beta) {
+    math::Gemm<float, CPUContext>(
+        trans_X_ ? CblasTrans : CblasNoTrans,
+        trans_W_ ? CblasTrans : CblasNoTrans,
+        5,
+        6,
+        10,
+        alpha,
+        X_.template data<float>(),
+        W_.template data<float>(),
+        beta,
+        Y_.template mutable_data<float>(),
+        cpu_context_.get());
   }
-  // Test Accumulate
-  math::Gemm<float, CPUContext>(CblasNoTrans, CblasNoTrans, 5, 6, 10, kOne,
-                                X.data<float>(), W.data<float>(), kPointFive,
-                                Y.mutable_data<float>(), &cpu_context);
-  EXPECT_EQ(Y.size(), 30);
-  for (int i = 0; i < Y.size(); ++i) {
-    CHECK_EQ(Y.data<float>()[i], 15) << i;
+
+  void VerifyResult(const float value) const {
+    ASSERT_EQ(30, Y_.size());
+    for (int i = 0; i < Y_.size(); ++i) {
+      EXPECT_FLOAT_EQ(value, Y_.template data<float>()[i]);
+    }
   }
-  // Test Accumulate
-  math::Gemm<float, CPUContext>(CblasNoTrans, CblasNoTrans, 5, 6, 10,
-                                kPointFive,
-                                X.data<float>(), W.data<float>(), kOne, Y.mutable_data<float>(),
-                                &cpu_context);
-  EXPECT_EQ(Y.size(), 30);
-  for (int i = 0; i < Y.size(); ++i) {
-    CHECK_EQ(Y.data<float>()[i], 20) << i;
-  }
+
+  DeviceOption option_;
+  std::unique_ptr<CPUContext> cpu_context_;
+  TensorCPU X_;
+  TensorCPU W_;
+  TensorCPU Y_;
+  bool trans_X_;
+  bool trans_W_;
+};
+
+TEST_P(GemmTest, GemmFloatTest) {
+  RunGemm(kOne, kZero);
+  VerifyResult(10.0f);
+  RunGemm(kOne, kPointFive);
+  VerifyResult(15.0f);
+  RunGemm(kPointFive, kOne);
+  VerifyResult(20.0f);
 }
 
-TEST(MathTest, GemmNoTransTrans) {
-  DeviceOption option;
-  CPUContext cpu_context(option);
-  TensorCPU X(std::vector<int>{5, 10});
-  TensorCPU W(std::vector<int>{6, 10});
-  TensorCPU Y(std::vector<int>{5, 6});
-  EXPECT_EQ(X.size(), 50);
-  EXPECT_EQ(W.size(), 60);
-  math::Set<float, CPUContext>(X.size(), 1, X.mutable_data<float>(), &cpu_context);
-  math::Set<float, CPUContext>(W.size(), 1, W.mutable_data<float>(), &cpu_context);
-  EXPECT_EQ(Y.size(), 30);
-  for (int i = 0; i < X.size(); ++i) {
-    CHECK_EQ(X.data<float>()[i], 1);
-  }
-  for (int i = 0; i < W.size(); ++i) {
-    CHECK_EQ(W.data<float>()[i], 1);
+INSTANTIATE_TEST_CASE_P(
+    GemmTransXTransWParam,
+    GemmTest,
+    testing::Combine(testing::Bool(), testing::Bool()));
+
+class GemmBatchedTest
+    : public testing::TestWithParam<testing::tuple<bool, bool>> {
+ protected:
+  void SetUp() override {
+    cpu_context_ = make_unique<CPUContext>(option_);
+    trans_X_ = std::get<0>(GetParam());
+    trans_W_ = std::get<1>(GetParam());
+    X_.Resize(
+        trans_X_ ? std::vector<int>{3, 5, 10} : std::vector<int>{3, 10, 5});
+    W_.Resize(
+        trans_W_ ? std::vector<int>{3, 10, 6} : std::vector<int>{3, 6, 10});
+    Y_.Resize(std::vector<int>{3, 5, 6});
+    math::Set<float, CPUContext>(
+        X_.size(), 1.0f, X_.template mutable_data<float>(), cpu_context_.get());
+    math::Set<float, CPUContext>(
+        W_.size(), 1.0f, W_.template mutable_data<float>(), cpu_context_.get());
   }
 
-  const float kOne = 1.0;
-  const float kPointFive = 0.5;
-  const float kZero = 0.0;
-  math::Gemm<float, CPUContext>(CblasNoTrans, CblasTrans, 5, 6, 10, kOne,
-                                X.data<float>(), W.data<float>(), kZero, Y.mutable_data<float>(),
-                                &cpu_context);
-  EXPECT_EQ(Y.size(), 30);
-  for (int i = 0; i < Y.size(); ++i) {
-    CHECK_EQ(Y.data<float>()[i], 10) << i;
+  void RunGemmBatched(const float alpha, const float beta) {
+    math::GemmBatched<float, CPUContext>(
+        trans_X_ ? CblasTrans : CblasNoTrans,
+        trans_W_ ? CblasTrans : CblasNoTrans,
+        3,
+        5,
+        6,
+        10,
+        alpha,
+        X_.template data<float>(),
+        W_.template data<float>(),
+        beta,
+        Y_.template mutable_data<float>(),
+        cpu_context_.get());
   }
-  // Test Accumulate
-  math::Gemm<float, CPUContext>(CblasNoTrans, CblasTrans, 5, 6, 10, kOne,
-                                X.data<float>(), W.data<float>(), kPointFive,
-                                Y.mutable_data<float>(), &cpu_context);
-  EXPECT_EQ(Y.size(), 30);
-  for (int i = 0; i < Y.size(); ++i) {
-    CHECK_EQ(Y.data<float>()[i], 15) << i;
+
+  void VerifyResult(const float value) const {
+    ASSERT_EQ(90, Y_.size());
+    for (int i = 0; i < Y_.size(); ++i) {
+      EXPECT_FLOAT_EQ(value, Y_.template data<float>()[i]);
+    }
   }
-  math::Gemm<float, CPUContext>(CblasNoTrans, CblasTrans, 5, 6, 10, kPointFive,
-                                X.data<float>(), W.data<float>(), kOne, Y.mutable_data<float>(),
-                                &cpu_context);
-  EXPECT_EQ(Y.size(), 30);
-  for (int i = 0; i < Y.size(); ++i) {
-    CHECK_EQ(Y.data<float>()[i], 20) << i;
-  }
+
+  DeviceOption option_;
+  std::unique_ptr<CPUContext> cpu_context_;
+  TensorCPU X_;
+  TensorCPU W_;
+  TensorCPU Y_;
+  bool trans_X_;
+  bool trans_W_;
+};
+
+TEST_P(GemmBatchedTest, GemmBatchedFloatTest) {
+  RunGemmBatched(kOne, kZero);
+  VerifyResult(10.0f);
+  RunGemmBatched(kOne, kPointFive);
+  VerifyResult(15.0f);
+  RunGemmBatched(kPointFive, kOne);
+  VerifyResult(20.0f);
 }
+
+INSTANTIATE_TEST_CASE_P(
+    GemmTransXTransWParam,
+    GemmBatchedTest,
+    testing::Combine(testing::Bool(), testing::Bool()));
+
+} // namespace
 
 TEST(MathTest, GemvNoTrans) {
   DeviceOption option;
@@ -124,8 +169,10 @@ TEST(MathTest, GemvNoTrans) {
   TensorCPU Y(std::vector<int>{5});
   EXPECT_EQ(A.size(), 50);
   EXPECT_EQ(X.size(), 10);
-  math::Set<float, CPUContext>(A.size(), 1, A.mutable_data<float>(), &cpu_context);
-  math::Set<float, CPUContext>(X.size(), 1, X.mutable_data<float>(), &cpu_context);
+  math::Set<float, CPUContext>(
+      A.size(), 1, A.mutable_data<float>(), &cpu_context);
+  math::Set<float, CPUContext>(
+      X.size(), 1, X.mutable_data<float>(), &cpu_context);
   EXPECT_EQ(Y.size(), 5);
   for (int i = 0; i < A.size(); ++i) {
     CHECK_EQ(A.data<float>()[i], 1);
@@ -134,24 +181,44 @@ TEST(MathTest, GemvNoTrans) {
     CHECK_EQ(X.data<float>()[i], 1);
   }
 
-  const float kOne = 1.0;
-  const float kPointFive = 0.5;
-  const float kZero = 0.0;
-  math::Gemv<float, CPUContext>(CblasNoTrans, 5, 10, kOne, A.data<float>(), X.data<float>(),
-                                kZero, Y.mutable_data<float>(), &cpu_context);
+  math::Gemv<float, CPUContext>(
+      CblasNoTrans,
+      5,
+      10,
+      kOne,
+      A.data<float>(),
+      X.data<float>(),
+      kZero,
+      Y.mutable_data<float>(),
+      &cpu_context);
   for (int i = 0; i < Y.size(); ++i) {
     CHECK_EQ(Y.data<float>()[i], 10) << i;
   }
   // Test Accumulate
-  math::Gemv<float, CPUContext>(CblasNoTrans, 5, 10, kOne, A.data<float>(), X.data<float>(),
-                                kPointFive, Y.mutable_data<float>(), &cpu_context);
+  math::Gemv<float, CPUContext>(
+      CblasNoTrans,
+      5,
+      10,
+      kOne,
+      A.data<float>(),
+      X.data<float>(),
+      kPointFive,
+      Y.mutable_data<float>(),
+      &cpu_context);
   for (int i = 0; i < Y.size(); ++i) {
     CHECK_EQ(Y.data<float>()[i], 15) << i;
   }
   // Test Accumulate
-  math::Gemv<float, CPUContext>(CblasNoTrans, 5, 10, kPointFive, A.data<float>(),
-                                X.data<float>(), kOne, Y.mutable_data<float>(),
-                                &cpu_context);
+  math::Gemv<float, CPUContext>(
+      CblasNoTrans,
+      5,
+      10,
+      kPointFive,
+      A.data<float>(),
+      X.data<float>(),
+      kOne,
+      Y.mutable_data<float>(),
+      &cpu_context);
   for (int i = 0; i < Y.size(); ++i) {
     CHECK_EQ(Y.data<float>()[i], 20) << i;
   }
@@ -165,8 +232,10 @@ TEST(MathTest, GemvTrans) {
   TensorCPU Y(std::vector<int>{10});
   EXPECT_EQ(A.size(), 60);
   EXPECT_EQ(X.size(), 6);
-  math::Set<float, CPUContext>(A.size(), 1, A.mutable_data<float>(), &cpu_context);
-  math::Set<float, CPUContext>(X.size(), 1, X.mutable_data<float>(), &cpu_context);
+  math::Set<float, CPUContext>(
+      A.size(), 1, A.mutable_data<float>(), &cpu_context);
+  math::Set<float, CPUContext>(
+      X.size(), 1, X.mutable_data<float>(), &cpu_context);
   EXPECT_EQ(Y.size(), 10);
   for (int i = 0; i < A.size(); ++i) {
     CHECK_EQ(A.data<float>()[i], 1);
@@ -175,31 +244,52 @@ TEST(MathTest, GemvTrans) {
     CHECK_EQ(X.data<float>()[i], 1);
   }
 
-  const float kOne = 1.0;
-  const float kPointFive = 0.5;
-  const float kZero = 0.0;
-  math::Gemv<float, CPUContext>(CblasTrans, 6, 10, kOne, A.data<float>(), X.data<float>(),
-                                kZero, Y.mutable_data<float>(), &cpu_context);
+  math::Gemv<float, CPUContext>(
+      CblasTrans,
+      6,
+      10,
+      kOne,
+      A.data<float>(),
+      X.data<float>(),
+      kZero,
+      Y.mutable_data<float>(),
+      &cpu_context);
   for (int i = 0; i < Y.size(); ++i) {
     CHECK_EQ(Y.data<float>()[i], 6) << i;
   }
   // Test Accumulate
-  math::Gemv<float, CPUContext>(CblasTrans, 6, 10, kOne, A.data<float>(), X.data<float>(),
-                                kPointFive, Y.mutable_data<float>(), &cpu_context);
+  math::Gemv<float, CPUContext>(
+      CblasTrans,
+      6,
+      10,
+      kOne,
+      A.data<float>(),
+      X.data<float>(),
+      kPointFive,
+      Y.mutable_data<float>(),
+      &cpu_context);
   for (int i = 0; i < Y.size(); ++i) {
     CHECK_EQ(Y.data<float>()[i], 9) << i;
   }
   // Test Accumulate
-  math::Gemv<float, CPUContext>(CblasTrans, 6, 10, kPointFive, A.data<float>(),
-                                X.data<float>(), kOne, Y.mutable_data<float>(),
-                                &cpu_context);
+  math::Gemv<float, CPUContext>(
+      CblasTrans,
+      6,
+      10,
+      kPointFive,
+      A.data<float>(),
+      X.data<float>(),
+      kOne,
+      Y.mutable_data<float>(),
+      &cpu_context);
   for (int i = 0; i < Y.size(); ++i) {
     CHECK_EQ(Y.data<float>()[i], 12) << i;
   }
 }
 
-using convert::cpu_half2float;
 using convert::cpu_float2half_rn;
+using convert::cpu_half2float;
+
 TEST(MathTest, FloatToHalfConversion) {
   float a = 1.0f;
   float b = 1.75f;
