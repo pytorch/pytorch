@@ -16,7 +16,7 @@ class Cauchy(Distribution):
     Example::
 
         >>> m = Cauchy(torch.Tensor([0.0]), torch.Tensor([1.0]))
-        >>> m.sample()  # sample from a cauchy distribution with loc=0 and scale=1
+        >>> m.sample()  # sample from a Cauchy distribution with loc=0 and scale=1
          2.3214
         [torch.FloatTensor of size 1]
 
