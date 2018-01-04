@@ -6,10 +6,6 @@
 
 Caffe2 is a lightweight, modular, and scalable deep learning framework. Building on the original [Caffe](http://caffe.berkeleyvision.org), Caffe2 is designed with expression, speed, and modularity in mind.
 
-## News and Events
-
-[Caffe2 research award competition request for proposals](https://research.fb.com/programs/research-awards/proposals/caffe2-rfp/)
-
 ## Questions and Feedback
 
 Please use Github issues (https://github.com/caffe2/caffe2/issues) to ask questions, report bugs, and request new features.
