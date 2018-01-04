@@ -389,7 +389,7 @@ class TestDataLoader(TestCase):
                 break
         del loader
         for w in workers:
-            w.join(1.0 * BASE_TIMEOUT)  # timeout of one second
+            w.join(1.0 * BASE_TIMEOUT)
             self.assertFalse(w.is_alive(), 'subprocess not terminated')
             self.assertEqual(w.exitcode, 0)
         worker_manager_thread.join(1.0 * BASE_TIMEOUT)
