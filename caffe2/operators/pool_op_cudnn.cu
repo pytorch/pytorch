@@ -58,7 +58,7 @@ global_maxpool_kernel_NCHW(const int NC, const int sz, const T* data, T* out) {
   typedef cub::BlockReduce<T, CAFFE_CUDA_NUM_THREADS> BlockReduce;
   __shared__ typename BlockReduce::TempStorage temp_storage;
   for (int j = blockIdx.x; j < NC; j += gridDim.x) {
-    T max(data[blockIdx.x * sz + threadIdx.x]);
+    T max(-FLT_MAX);
     for (int k = threadIdx.x; k < sz; k += blockDim.x) {
       max = data[j * sz + k] > max ? data[j * sz + k] : max;
     }
