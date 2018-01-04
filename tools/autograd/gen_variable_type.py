@@ -82,7 +82,6 @@ return self;
 METHOD_DEFINITION_BODY_DERIVATIVE = CodeTemplate("""\
 profiler::RecordFunction profiler("${name}");
 ${unpack_args}
-${buffers}
 ${check_inplace}
 ${check_no_requires_grad}
 std::shared_ptr<${op}> grad_fn;
@@ -275,13 +274,9 @@ def create_variable_type(top_env, aten_declarations):
     type_declarations = top_env['type_derived_method_declarations']
     type_definitions = top_env['type_derived_method_definitions']
 
-    declarations_by_name = defaultdict(list)
-    for d in aten_declarations:
-        declarations_by_name[d['name']].append(d)
-
     def skip_function(declaration):
         name = declaration['name']
-        return name.endswith('_out') or '_forward' in name
+        return name.endswith('_out')
 
     def find_args_with_derivatives(func, tensor_arg_names):
         """Find arguments that have derivative definitions"""
@@ -356,17 +351,8 @@ def create_variable_type(top_env, aten_declarations):
             ))
             unpacked_args.append(arg['name'] + '_')
 
-        if declaration.get('derivative') is not None:
-            for arg in declaration['derivative'].get('buffers', []):
-                unpacked_args.append(arg + '_')
         env['unpacked_args'] = unpacked_args
         return body
-
-    def emit_buffers(buffers):
-        res = []
-        for name in buffers:
-            res.append(BUFFER_DECLARATION.substitute(name=name))
-        return res
 
     def mk_tuple_getters(declaration, pred):
         # NB: This won't work if we get heterogenous outputs
@@ -542,14 +528,12 @@ def create_variable_type(top_env, aten_declarations):
         if func is not None:
             env['op'] = func['op']
             env['op_ctor'] = ''
-            env['buffers'] = emit_buffers(func.get('buffers', []))
             env['save_inputs'] = save_variables(declaration, func['saved_inputs'], False)
             env['save_outputs'] = save_variables(declaration, func['saved_outputs'], True)
             env['args_with_derivatives'] = find_args_with_derivatives(func, env['tensor_args'])
         else:
             env['op'] = 'Error'
             env['op_ctor'] = '"the derivative for {} is not implemented"'.format(declaration['api_name'])
-            env['buffers'] = []
             env['save_inputs'] = []
             env['save_outputs'] = []
             env['args_with_derivatives'] = env['tensor_args']
@@ -669,10 +653,21 @@ def load_aten_declarations(path):
     return declarations
 
 
-def load_deprecated_signatures(declarations_by_signature):
+def load_deprecated_signatures(aten_decls):
+    def group_declarations_by_signature():
+        d = defaultdict(list)
+        for declaration in aten_decls:
+            name = declaration['name']
+            base_name = name[:-1] if declaration['inplace'] else name
+            simple_types = [arg['simple_type'] for arg in declaration['arguments']]
+            signature = '{}({})'.format(base_name, ', '.join(simple_types))
+            d[signature].append(declaration)
+        return d
+
     with open(deprecated_path, 'r') as f:
         deprecated_defs = yaml.load(f, Loader=YamlLoader)
     declarations = []
+    declarations_by_signature = group_declarations_by_signature()
 
     def get_signature(name, params, call_args):
         # create a mapping of parameter name to parameter type
@@ -709,24 +704,8 @@ def load_deprecated_signatures(declarations_by_signature):
 def gen_variable_type(declarations, out):
     aten_decls = load_aten_declarations(declarations)
 
-    def group_declarations_by_signature():
-        d = defaultdict(list)
-        for declaration in aten_decls:
-            name = declaration['name']
-            base_name = name[:-1] if declaration['inplace'] else name
-            simple_types = [arg['simple_type'] for arg in declaration['arguments']]
-            signature = '{}({})'.format(base_name, ', '.join(simple_types))
-            d[signature].append(declaration)
-        return d
-
-    declarations_by_signature = group_declarations_by_signature()
-
-    declarations_by_name = defaultdict(list)
-    for d in aten_decls:
-        declarations_by_name[d['name']].append(d)
-
     from .load_derivatives import load_derivatives
-    autograd_functions = load_derivatives(derivatives_path, declarations_by_signature, declarations_by_name)
+    autograd_functions = load_derivatives(derivatives_path, aten_decls)
 
     def should_generate_python_binding(declaration):
         name = declaration['name']
@@ -757,7 +736,7 @@ def gen_variable_type(declarations, out):
         else:
             py_variable_methods[name].append(declaration)
 
-    for declaration in load_deprecated_signatures(declarations_by_signature):
+    for declaration in load_deprecated_signatures(aten_decls):
         py_variable_methods[declaration['name']].append(declaration)
 
     env = {
