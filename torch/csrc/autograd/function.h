@@ -71,7 +71,7 @@ struct Function : std::enable_shared_from_this<Function> {
   virtual ~Function() {}
 
   // Implements the operation
-  // NOTE: Don't call this function directly. Use apply_fn or operator() instead.
+  // NOTE: Don't call this function directly. Use operator() instead.
   virtual variable_list apply(const variable_list& inputs) = 0;
   variable_list tracedApply(variable_list inputs);
 
@@ -161,45 +161,11 @@ struct Function : std::enable_shared_from_this<Function> {
   auto_unique_ptr<jit::tracer::FunctionTracingState> tracing_state;
 };
 
-// Actually what is a ForwardFunction here applies to all functions that are
-// applied only in forward OR are backward closures that don't save any Variables.
-// I chose this name, because the second situation is quite rare.
-template<bool transparent_state = false>
-struct ForwardFunction : public Function {
-  using Function::Function;
-
-  virtual inline std::unique_ptr<saved_variable_list> saved_variables() final {
-    return std::unique_ptr<saved_variable_list>(new saved_variable_list());
-  }
-
-  virtual inline bool is_traceable() final { return false; };
-
-  virtual inline bool passes_state_transparently() final { return transparent_state; };
-};
-
 // See Function::is_traceable() for definition.
 struct TraceableFunction : public Function {
   using Function::Function;
 
   virtual inline bool is_traceable() final { return true; };
-};
-
-template<typename T>
-struct apply_fn {
-  template<typename... Args>
-  apply_fn(Args&& ...args)
-    : fn_(std::make_shared<T>(std::forward<Args>(args)...)) {}
-
-  Variable operator()(const variable_list& inputs) {
-    return (*fn_)(inputs)[0];
-  }
-
-  template<typename... Args>
-  Variable operator()(Args&& ...inputs) {
-    return (*fn_)(variable_list{inputs...})[0];
-  }
-
-  std::shared_ptr<T> fn_;
 };
 
 }} // namespace torch::autograd
