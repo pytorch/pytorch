@@ -36,10 +36,11 @@ class Bernoulli(Distribution):
             self.probs, = broadcast_all(probs)
         else:
             self.logits, = broadcast_all(logits)
-        if isinstance(probs, Number) or isinstance(logits, Number):
+        probs_or_logits = probs if probs is not None else logits
+        if isinstance(probs_or_logits, Number):
             batch_shape = torch.Size()
         else:
-            batch_shape = self.probs.size() if probs is not None else self.logits.size()
+            batch_shape = probs_or_logits.size()
         super(Bernoulli, self).__init__(batch_shape)
 
     @lazy_property

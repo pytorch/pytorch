@@ -130,8 +130,9 @@ def probs_to_logits(probs, is_binary=False):
 
 class lazy_property(object):
     """
-    Non-data descriptor that calls the wrapped method to compute the property
-    on first call; thereafter replacing the wrapped method into an instance
+    Used as a decorator for lazy loading of class attributes. This uses a
+    non-data descriptor that calls the wrapped method to compute the property on
+    first call; thereafter replacing the wrapped method into an instance
     attribute.
     """
     def __init__(self, wrapped):
