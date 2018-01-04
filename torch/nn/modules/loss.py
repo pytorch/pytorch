@@ -96,8 +96,8 @@ class NLLLoss(_WeightedLoss):
 
     The input given through a forward call is expected to contain
     log-probabilities of each class. input has to be a Tensor of size either
-    :math:`(minibatch, C)` or :math:`(minibatch, C, d_1, d_2, ..., d_n)`
-    with :math:`n >= 2` for the `n`-dimensional case.
+    :math:`(minibatch, C)` or :math:`(minibatch, C, d_1, d_2, ..., d_K)`
+    with :math:`K >= 2` for the `K`-dimensional case (described later).
 
     Obtaining log-probabilities in a neural network is easily achieved by
     adding a  `LogSoftmax`  layer in the last layer of your network.
@@ -125,6 +125,11 @@ class NLLLoss(_WeightedLoss):
             \text{size_average} = \text{False}.
         \end{cases}
 
+    Can also be used for higher dimension inputs, such as 2D images, by providing
+    an input of size :math:`(minibatch, C, d_1, d_2, ..., d_K)` with :math:`K >= 2`,
+    where :math:`K` is the number of dimensions, and a target of appropriate shape
+    (see below). In the case of images, it computes NLL loss per-pixel.
+
     Args:
         weight (Tensor, optional): a manual rescaling weight given to each
            class. If given, it has to be a Tensor of size `C`. Otherwise, it is
@@ -149,7 +154,7 @@ class NLLLoss(_WeightedLoss):
             in the case of `K`-dimensional loss.
         - Target: :math:`(N)` where each value is `0 <= targets[i] <= C-1`, or
             :math:`(N, d_1, d_2, ..., d_K)` with :math:`K >= 2` in the case of
-            In the case of K-dimensional loss.
+            K-dimensional loss.
         - Output: :math:`(1)`. If reduce is ``False``, then the same size
             as the target: :math:`(N)`, or
             :math:`(N, d_1, d_2, ..., d_K)` with :math:`K >= 2` in the case
