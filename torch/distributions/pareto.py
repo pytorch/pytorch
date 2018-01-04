@@ -35,7 +35,7 @@ class Pareto(Distribution):
     def rsample(self, sample_shape=torch.Size()):
         shape = self._extended_shape(sample_shape)
         exp_dist = self.alpha.new(shape).exponential_()
-        return self.scale * torch.exp(exp_dist)
+        return self.scale * torch.exp(exp_dist / self.alpha)
 
     def log_prob(self, value):
         self._validate_log_prob_arg(value)
