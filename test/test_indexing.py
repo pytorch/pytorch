@@ -83,6 +83,15 @@ class TestIndexing(TestCase):
         idx = Variable(torch.LongTensor())
         self.assertEqual(x[idx].numel(), 0)
 
+        # empty assignment should have no effect but not throw an exception
+        y = x.clone()
+        y[idx] = -1
+        self.assertEqual(x, y)
+
+        mask = torch.zeros(4, 3).byte()
+        y[mask] = -1
+        self.assertEqual(x, y)
+
     def test_basic_advanced_combined(self):
         # From the NumPy indexing example
         x = Variable(torch.arange(0, 12).view(4, 3))
