@@ -33,6 +33,11 @@ CAFFE2_DEFINE_int(
     caffe2_operator_max_engine_name_length,
     10,
     "Maximum engine name length to be stored");
+CAFFE2_DEFINE_bool(
+    caffe2_disable_implicit_engine_preference,
+    false,
+    "If set, disable implicit engine preferences. This is useful for unit "
+    "testing and debugging cases.");
 
 namespace caffe2 {
 
@@ -133,15 +138,19 @@ unique_ptr<OperatorBase> _CreateOperator(
     const auto op_def_engines = split(',', operator_def.engine());
     engines.insert(engines.end(), op_def_engines.begin(), op_def_engines.end());
   }
-  if (g_per_op_engine_pref().count(device_type) &&
+  if (!FLAGS_caffe2_disable_implicit_engine_preference &&
+      g_per_op_engine_pref().count(device_type) &&
       g_per_op_engine_pref()[device_type].count(op_type)) {
     const auto& preferred_engines =
         g_per_op_engine_pref()[device_type][op_type];
+    VLOG(2) << "Inserting per-op engine preference: " << preferred_engines;
     engines.insert(
         engines.end(), preferred_engines.begin(), preferred_engines.end());
   }
-  if (g_global_engine_pref().count(device_type)) {
+  if (!FLAGS_caffe2_disable_implicit_engine_preference &&
+      g_global_engine_pref().count(device_type)) {
     const auto& preferred_engines = g_global_engine_pref()[device_type];
+    VLOG(2) << "Inserting global engine preference: " << preferred_engines;
     engines.insert(
         engines.end(), preferred_engines.begin(), preferred_engines.end());
   }
