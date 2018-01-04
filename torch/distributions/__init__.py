@@ -42,6 +42,7 @@ from .chi2 import Chi2
 from .laplace import Laplace
 from .normal import Normal
 from .one_hot_categorical import OneHotCategorical
+from .pareto import Pareto
 from .uniform import Uniform
 
 __all__ = [
@@ -57,5 +58,6 @@ __all__ = [
     'Laplace',
     'Normal',
     'OneHotCategorical',
+    'Pareto',
     'Uniform',
 ]
