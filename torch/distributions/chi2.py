@@ -1,4 +1,5 @@
-from torch.distributions import Gamma
+from torch.distributions import constraints
+from torch.distributions.gamma import Gamma
 
 
 class Chi2(Gamma):
@@ -16,6 +17,7 @@ class Chi2(Gamma):
     Args:
         df (float or Tensor or Variable): shape parameter of the distribution
     """
+    params = {'df': constraints.positive}
 
     def __init__(self, df):
         super(Chi2, self).__init__(0.5 * df, 0.5)

@@ -1,5 +1,7 @@
 from numbers import Number
+
 import torch
+from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
 from torch.distributions.utils import broadcast_all
 
@@ -19,6 +21,8 @@ class Laplace(Distribution):
         loc (float or Tensor or Variable): mean of the distribution
         scale (float or Tensor or Variable): scale of the distribution
     """
+    params = {'loc': constraints.real, 'scale': constraints.positive}
+    support = constraints.real
     has_rsample = True
 
     def __init__(self, loc, scale):

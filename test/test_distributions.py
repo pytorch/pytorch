@@ -33,6 +33,7 @@ from torch.autograd import Variable, gradcheck
 from torch.distributions import (Bernoulli, Beta, Categorical, Cauchy, Chi2,
                                  Dirichlet, Exponential, Gamma, Laplace,
                                  Normal, OneHotCategorical, Pareto, Uniform)
+from torch.distributions.constraints import Constraint, is_dependent
 
 TEST_NUMPY = True
 try:
@@ -104,7 +105,7 @@ EXAMPLES = [
         },
         {
             'loc': Variable(torch.randn(1), requires_grad=True),
-            'scale': Variable(torch.randn(1), requires_grad=True),
+            'scale': Variable(torch.randn(1).abs(), requires_grad=True),
         },
         {
             'loc': torch.Tensor([1.0, 0.0]),
@@ -118,7 +119,7 @@ EXAMPLES = [
         },
         {
             'mean': Variable(torch.randn(1), requires_grad=True),
-            'std': Variable(torch.randn(1), requires_grad=True),
+            'std': Variable(torch.randn(1).abs(), requires_grad=True),
         },
         {
             'mean': torch.Tensor([1.0, 0.0]),
@@ -1053,6 +1054,37 @@ class TestDistributionShapes(TestCase):
         self.assertEqual(laplace.sample((3, 2)).size(), torch.Size((3, 2, 2)))
         self.assertEqual(laplace.log_prob(self.tensor_sample_1).size(), torch.Size((3, 2)))
         self.assertRaises(ValueError, laplace.log_prob, self.tensor_sample_2)
+
+
+class TestConstraints(TestCase):
+    def test_params_contains(self):
+        for Dist, params in EXAMPLES:
+            for i, param in enumerate(params):
+                dist = Dist(**param)
+                for name, value in param.items():
+                    if not (torch.is_tensor(value) or isinstance(value, Variable)):
+                        value = torch.Tensor([value])
+                    if Dist in (Categorical, OneHotCategorical) and name == 'probs':
+                        # These distributions accept positive probs, but elsewhere we
+                        # use a stricter constraint to the simplex.
+                        value = value / value.sum(-1, True)
+                    constraint = dist.params[name]
+                    if is_dependent(constraint):
+                        continue
+                    message = '{} example {}/{} parameter {} = {}'.format(
+                        Dist.__name__, i, len(params), name, value)
+                    self.assertTrue(constraint.check(value).all(), msg=message)
+
+    def test_support_contains(self):
+        for Dist, params in EXAMPLES:
+            self.assertIsInstance(Dist.support, Constraint)
+            for i, param in enumerate(params):
+                dist = Dist(**param)
+                value = dist.sample()
+                constraint = dist.support
+                message = '{} example {}/{} sample = {}'.format(
+                    Dist.__name__, i, len(params), value)
+                self.assertTrue(constraint.check(value).all(), msg=message)
 
 
 if __name__ == '__main__':

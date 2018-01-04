@@ -2,6 +2,7 @@ from numbers import Number
 
 import torch
 from torch.autograd import Variable
+from torch.distributions import constraints
 from torch.distributions.dirichlet import Dirichlet
 from torch.distributions.distribution import Distribution
 from torch.distributions.utils import broadcast_all
@@ -21,6 +22,8 @@ class Beta(Distribution):
     Args:
         alpha (Tensor or Variable): concentration parameter of the distribution
     """
+    params = {'alpha': constraints.positive, 'beta': constraints.positive}
+    support = constraints.unit_interval
     has_rsample = True
 
     def __init__(self, alpha, beta):

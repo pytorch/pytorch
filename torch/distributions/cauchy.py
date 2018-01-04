@@ -1,8 +1,8 @@
+import math
 from numbers import Number
 
-import math
-
 import torch
+from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
 from torch.distributions.utils import broadcast_all
 
@@ -24,6 +24,8 @@ class Cauchy(Distribution):
         loc (float or Tensor or Variable): mode or median of the distribution.
         scale (float or Tensor or Variable): half width at half maximum.
     """
+    params = {'loc': constraints.real, 'scale': constraints.positive}
+    support = constraints.real
     has_rsample = True
 
     def __init__(self, loc, scale):
