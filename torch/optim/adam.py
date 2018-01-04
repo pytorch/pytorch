@@ -106,6 +106,6 @@ class Adam(Optimizer):
                 p.data.addcdiv_(-step_size, exp_avg, denom)
 
                 if group['weight_decay'] != 0:
-                     p.data.add_(-group['weight_decay'], xold)
+                    p.data.add_(-group['weight_decay'], xold)
 
         return loss
