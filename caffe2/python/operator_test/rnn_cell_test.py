@@ -32,6 +32,7 @@ from hypothesis import assume, given
 from hypothesis import settings as ht_settings
 import hypothesis.strategies as st
 import numpy as np
+import unittest
 
 
 def lstm_unit(hidden_t_prev, cell_t_prev, gates,
@@ -920,7 +921,6 @@ def prepare_mul_rnn(model, input_blob, shape, T, outputs_with_grad, num_layers):
 
 
 class RNNCellTest(hu.HypothesisTestCase):
-
     @given(
         input_tensor=hu.tensor(min_dim=3, max_dim=3, max_value=3),
         num_layers=st.integers(1, 4),
@@ -942,12 +942,12 @@ class RNNCellTest(hu.HypothesisTestCase):
                                 outputs_with_grad, num_layers))
             workspace.RunNetOnce(model.param_init_net)
             nets.append(model.net)
-
             workspace.blobs[input_blob] = input_tensor
-            gradient_checker.NetGradientChecker.CompareNets(
-                nets, outputs, outputs_with_grad_ids=outputs_with_grad,
-                inputs_with_grads=[input_blob],
-            )
+
+        gradient_checker.NetGradientChecker.CompareNets(
+            nets, outputs, outputs_with_grad_ids=outputs_with_grad,
+            inputs_with_grads=[input_blob],
+        )
 
     @given(
         input_tensor=hu.tensor(min_dim=3, max_dim=3, max_value=3),
@@ -1080,31 +1080,34 @@ class RNNCellTest(hu.HypothesisTestCase):
                 workspace.RunNetOnce(net)
                 workspace.ResetWorkspace()
 
+    def test_lstm(self):
+        self.lstm_base(lstm_type=(rnn_cell.LSTM, lstm_reference))
+
+    def test_milstm(self):
+        self.lstm_base(lstm_type=(rnn_cell.MILSTM, milstm_reference))
+
+    def test_norm_lstm(self):
+        self.lstm_base(
+            lstm_type=(rnn_cell.LayerNormLSTM, layer_norm_lstm_reference),
+        )
+
+    def test_norm_milstm(self):
+        self.lstm_base(
+            lstm_type=(rnn_cell.LayerNormMILSTM, layer_norm_milstm_reference)
+        )
+
     @given(
+        seed=st.integers(0, 2**32 - 1),
         input_tensor=lstm_input(),
         forget_bias=st.floats(-10.0, 10.0),
         fwd_only=st.booleans(),
         drop_states=st.booleans(),
+        memory_optim=st.booleans(),
+        outputs_with_grads=st.sampled_from([[0], [1], [0, 1, 2, 3]]),
     )
-    @ht_settings(max_examples=3, timeout=100)
-    @utils.debug
-    def test_lstm_main(self, **kwargs):
-        for lstm_type in [
-            (rnn_cell.LSTM, lstm_reference),
-            (rnn_cell.MILSTM, milstm_reference),
-            (rnn_cell.LayerNormLSTM, layer_norm_lstm_reference),
-            (rnn_cell.LayerNormMILSTM, layer_norm_milstm_reference),
-        ]:
-            for outputs_with_grads in [[0], [1], [0, 1, 2, 3]]:
-                for memory_optim in [False, True]:
-                    self.lstm_base(lstm_type,
-                                   outputs_with_grads=outputs_with_grads,
-                                   memory_optim=memory_optim,
-                                   **kwargs)
-
-    def lstm_base(self, lstm_type, outputs_with_grads, memory_optim,
+    def lstm_base(self, seed, lstm_type, outputs_with_grads, memory_optim,
                   input_tensor, forget_bias, fwd_only, drop_states):
-        print("LSTM test parameters: ", locals())
+        np.random.seed(seed)
         create_lstm, ref = lstm_type
         ref = partial(ref, forget_bias=forget_bias)
 
@@ -1745,3 +1748,11 @@ class RNNCellTest(hu.HypothesisTestCase):
                 step_size=0.0001,
                 threshold=0.05,
             )
+
+if __name__ == "__main__":
+    workspace.GlobalInit([
+        'caffe2',
+        '--caffe2_log_level=0',
+    ])
+    unittest.main()
+
