@@ -15,6 +15,7 @@
 #include <initializer_list>
 #include <iostream>
 #include <functional>
+#include <cstddef>
 
 #ifdef _MSC_VER
 #ifdef Type
@@ -37,7 +38,7 @@ static void setattr(jit::Node* n, jit::Symbol name, SparseTensor s)        { n->
 static void setattr(jit::Node* n, jit::Symbol name, const at::IntList& v)  { n->is_(name, v); }
 static void setattr(jit::Node* n, jit::Symbol name, bool v)                { n->i_(name, v); }
 static void setattr(jit::Node* n, jit::Symbol name, double v)              { n->f_(name, v); }
-template<unsigned long N>
+template<std::size_t N>
 static void setattr(jit::Node* n, jit::Symbol name, std::array<bool, N> v) { n->is_(name, std::vector<int64_t>(v.begin(), v.end())); }
 
 VariableType::VariableType(Context* context, Type* baseType)
