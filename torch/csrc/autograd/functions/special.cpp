@@ -1,8 +1,22 @@
 #include "torch/csrc/autograd/functions/special.h"
 
+#include "torch/csrc/assertions.h"
 #include "torch/csrc/autograd/python_engine.h"
 
 namespace torch { namespace autograd {
+
+// Used when an output has multiple uses (there's only one entry
+// in next_functions per output).
+struct Replicate : public Function {
+  Replicate() {
+    num_inputs = 1;
+  }
+
+  virtual variable_list apply(const variable_list& inputs) {
+		TORCH_ASSERT(inputs.size() == 1);
+    return variable_list(next_functions.size(), inputs[0]);
+  }
+};
 
 // Note [Null-edge pruning]
 // Evals have a problem with null edges appearing in the graph, because there's
@@ -237,9 +251,32 @@ bool Eval::replaceSubgraph(const variable_list& inputs, const variable_list& _ou
   }
 
   // Rebase outputs.
+  auto this_shared = shared_from_this();
+  std::unordered_set<Variable*> repeated_outputs;
+  // NB: every output can be in 3 states:
+  // - unique so far - only the else of second if is taken
+  // - repeated first time - first if + first branch of second if
+  // - repeated many times - first branch of second if only
   for (auto & output : relevant_outputs) {
-    output.get()->_grad_fn = shared_from_this();
-    output.get()->output_nr = num_inputs++;
+    // This output is already rebased. This happens when there
+    // the same Variable has been returned multiple times, and
+    // is repeated in this list.
+    if (output.get()->_grad_fn.get() == this) {
+      auto replicate = std::make_shared<Replicate>();
+      replicate->next_functions.emplace_back(this_shared, output.output_nr());
+      output.get()->_grad_fn = replicate;
+      output.get()->output_nr = 0;
+      repeated_outputs.emplace(&output);
+    }
+    // NOTE: this check should be fairly cheap, and the set shouldn't
+    // perform any allocations until we actually see repeated outputs.
+    if (repeated_outputs.count(&output) > 0) {
+      auto & replicate = output.grad_fn();
+      replicate->next_functions.emplace_back(this_shared, num_inputs++);
+    } else {
+      output.get()->_grad_fn = this_shared;
+      output.get()->output_nr = num_inputs++;
+    }
   }
 
   return true;

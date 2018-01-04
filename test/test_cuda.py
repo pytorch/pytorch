@@ -9,7 +9,7 @@ import torch.cuda
 import torch.cuda.comm as comm
 
 from test_torch import TestTorch
-from common import TestCase, get_gpu_type, to_gpu, freeze_rng_state, run_tests
+from common import TestCase, get_gpu_type, to_gpu, freeze_rng_state, run_tests, IS_WINDOWS
 
 HAS_CUDA = True
 if not torch.cuda.is_available():
@@ -424,7 +424,6 @@ def compare_cpu_gpu(tensor_constructor, arg_constructor, fn, t, precision=1e-5, 
 
 
 class TestCuda(TestCase):
-
     @unittest.skipIf(torch.cuda.device_count() < 2, "only one GPU detected")
     def _test_autogpu(self, TensorCtor):
         x = TensorCtor().cuda()
@@ -1208,7 +1207,7 @@ if HAS_CUDA:
                 setattr(TestCuda,
                         test_name,
                         compare_cpu_gpu(constr, arg_constr, name_inner, t, precision))
-                if t == torch.FloatTensor:
+                if t == torch.FloatTensor and not IS_WINDOWS:  # CUDA HalfTensor currently doesn't work on Windows
                     assert not hasattr(TestCuda, test_name + '_gpu_half'), "Duplicated test name: " + test_name
                     setattr(TestCuda,
                             test_name + '_gpu_half',

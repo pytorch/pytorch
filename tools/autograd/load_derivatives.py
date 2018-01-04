@@ -11,24 +11,32 @@ from .utils import YamlLoader
 from .gen_variable_type import IDENT_REGEX, split_name_params
 
 
-def load_derivatives(path, declarations_by_signature, declarations_by_name):
+def load_derivatives(path, declarations):
     with open(path, 'r') as f:
         definitions = yaml.load(f, Loader=YamlLoader)
 
+    declarations_by_signature = defaultdict(list)
+    for declaration in declarations:
+        declarations_by_signature[get_signature(declaration)].append(declaration)
+
     autograd_functions = [
-        process_definition(defn, declarations_by_signature, declarations_by_name)
+        process_definition(defn, declarations_by_signature)
         for defn in definitions]
     ensure_unique_names(autograd_functions)
+    match_declarations_with_autograd_functions(declarations, autograd_functions)
+
     return autograd_functions
 
 
-def create_autograd_function(name, derivatives, num_inputs, buffers=None):
+def create_autograd_function(name, derivatives, num_inputs, signature):
+    op = to_camel_case(name) + 'Backward'
+    op = op.replace('ForwardBackward', 'Backward')
     return {
         'name': name,
-        'op': to_camel_case(name) + 'Backward',
+        'op': op,
         'num_inputs': num_inputs,
+        'signature': signature,
         'derivatives': derivatives,
-        'buffers': [] if buffers is None else buffers,
         'saved_inputs': all_saved_variables(derivatives, 'saved_inputs'),
         'saved_outputs': all_saved_variables(derivatives, 'saved_outputs'),
     }
@@ -57,7 +65,7 @@ def create_derivative(declaration, formula, output_indices, var_names):
     }
 
 
-def process_definition(defn, declarations_by_signature, declarations_by_name):
+def process_definition(defn, declarations_by_signature):
     """Processes a single entry `defn` in derivatives.yaml"""
 
     def canonical_declaration(declarations, name):
@@ -115,40 +123,6 @@ def process_definition(defn, declarations_by_signature, declarations_by_name):
 
         return derivatives, num_inputs
 
-    def is_nn_fwd(defn_name, declarations_by_name):
-        """Return True if the definition is of an NN, non-double
-           backward function, False otherwise"""
-
-        if len(declarations_by_name[defn_name]) == 0:
-            return False
-        declaration = declarations_by_name[defn_name][0]
-        base_name = defn_name if not declaration['inplace'] else defn_name[:-1]
-        fwd_name = base_name + '_forward'
-        if declaration['mode'] != 'NN' or fwd_name not in declarations_by_name:
-            return False
-        return True
-
-    def preprocess_nn_function(defn_name, declarations_by_name):
-        """Set up declaration and derivative information for NN,
-           non-double backward functions"""
-
-        declaration = declarations_by_name[defn_name][0]
-        base_name = defn_name if not declaration['inplace'] else defn_name[:-1]
-        fwd_name = base_name + ('_forward' if not declaration['inplace'] else '_forward_')
-
-        assert len(declarations_by_name[fwd_name]) == 1
-
-        declaration['base_name'] = fwd_name
-        fwd = declarations_by_name[fwd_name][0]
-
-        derivatives, num_inputs = set_up_derivatives(defn, fwd)
-        buffers = declaration['buffers']
-
-        func = create_autograd_function(defn_name, derivatives, num_inputs, buffers)
-        declaration['derivative'] = func
-
-        return func
-
     def unzip(xs):
         return zip(*xs)
 
@@ -161,9 +135,6 @@ def process_definition(defn, declarations_by_signature, declarations_by_name):
                            "Please use a different name in Declarations.cwrap."
                            .format(defn_name))
     signature = '{}({})'.format(defn_name, ', '.join(param_types))
-
-    if is_nn_fwd(defn_name, declarations_by_name):
-        return preprocess_nn_function(defn_name, declarations_by_name)
 
     declarations = declarations_by_signature[signature]
     if len(declarations) == 0:
@@ -190,12 +161,7 @@ def process_definition(defn, declarations_by_signature, declarations_by_name):
                                .format(i, defn_name, x, y))
 
     derivatives, num_inputs = set_up_derivatives(defn, canonical)
-    buffers = canonical.get('buffers')
-
-    func = create_autograd_function(defn_name, derivatives, num_inputs, buffers)
-    for declaration in declarations:
-        declaration['derivative'] = func
-    return func
+    return create_autograd_function(defn_name, derivatives, num_inputs, signature)
 
 
 def ensure_unique_names(autograd_functions):
@@ -212,6 +178,15 @@ def ensure_unique_names(autograd_functions):
         if len(overloads) > 1:
             for i, func in enumerate(overloads):
                 func['op'] += str(i)
+
+
+def get_signature(declaration, ignore_inplace=False):
+    name = declaration['name']
+    if ignore_inplace and declaration['inplace']:
+        assert name.endswith('_')
+        name = name[:-1]
+    simple_types = [arg['simple_type'] for arg in declaration['arguments']]
+    return '{}({})'.format(name, ', '.join(simple_types))
 
 
 def saved_variables(formula, args):
@@ -296,3 +271,25 @@ def all_saved_variables(derivatives, key):
 
 def to_camel_case(name):
     return ''.join([p.title() for p in name.split('_')])
+
+
+def match_declarations_with_autograd_functions(declarations, autograd_functions):
+    """Sets the "derivative" key on declarations to matching autograd functions
+
+    In-place functions will use the out-of-place derivative definition if there
+    is no in-place specific derivative.
+    """
+
+    functions_by_signature = {f['signature']: f for f in autograd_functions}
+
+    def find_function(declaration):
+        signature = get_signature(declaration)
+        if signature in functions_by_signature:
+            return functions_by_signature[signature]
+
+        # if there is no exact match look for the out-of-place signature
+        signature = get_signature(declaration, ignore_inplace=True)
+        return functions_by_signature.get(signature)
+
+    for declaration in declarations:
+        declaration['derivative'] = find_function(declaration)

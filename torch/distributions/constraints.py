@@ -6,6 +6,7 @@ __all__ = [
     'boolean',
     'dependent',
     'dependent_property',
+    'greater_than',
     'integer_interval',
     'interval',
     'is_dependent',
@@ -100,12 +101,15 @@ class _Real(Constraint):
         return value == value  # False for NANs.
 
 
-class _Positive(Constraint):
+class _GreaterThan(Constraint):
     """
-    Constrain to the positive half line `[0, inf]`.
+    Constrain to a real half line `[lower_bound, inf]`.
     """
+    def __init__(self, lower_bound):
+        self.lower_bound = lower_bound
+
     def check(self, value):
-        return value >= 0
+        return self.lower_bound <= value
 
 
 class _Interval(Constraint):
@@ -144,7 +148,8 @@ boolean = _Boolean()
 nonnegative_integer = _NonnegativeInteger()
 integer_interval = _IntegerInterval
 real = _Real()
-positive = _Positive()
+positive = _GreaterThan(0)
+greater_than = _GreaterThan
 unit_interval = _Interval(0, 1)
 interval = _Interval
 simplex = _Simplex()

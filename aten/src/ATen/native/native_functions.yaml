@@ -255,7 +255,7 @@
 
 - func: size(Tensor self, int64_t dim) -> int64_t
 
-- func: slice(Tensor self, int64_t start=0, int64_t end=9223372036854775807, int64_t step=1, int64_t dim=0) -> Tensor
+- func: slice(Tensor self, int64_t dim=0, int64_t start=0, int64_t end=9223372036854775807, int64_t step=1) -> Tensor
 
 - func: split(Tensor self, int64_t split_size, int64_t dim=0) -> TensorList
 
@@ -281,6 +281,8 @@
 - func: unsqueeze(Tensor self, int64_t dim) -> Tensor
 
 - func: unsqueeze_(Tensor self, int64_t dim) -> Tensor
+
+- func: view_as(Tensor self, Tensor other) -> Tensor
 
 # we define both of these because 'where' does the broadcast and '_s_where' doesn't;
 # this allows us to implicitly calculate the broadcast derivative, while only dealing with the
