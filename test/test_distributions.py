@@ -636,11 +636,23 @@ class TestDistributions(TestCase):
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_studentT_sample(self):
-        set_rng_seed(0)  # see Note [Randomized statistical tests]
+        set_rng_seed(1)  # see Note [Randomized statistical tests]
         for df, loc, scale in product([0.1, 1.0, 5.0, 10.0], [-1.0, 0.0, 1.0], [0.1, 1.0, 10.0]):
             self._check_sampler_sampler(StudentT(df=df, loc=loc, scale=scale),
                                         scipy.stats.t(df=df, loc=loc, scale=scale),
                                         'StudentT(df={}, loc={}, scale={})'.format(df, loc, scale))
+
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    def test_studentT_log_prob(self):
+        set_rng_seed(0)  # see Note [Randomized statistical tests]
+        num_samples = 10
+        for df, loc, scale in product([0.1, 1.0, 5.0, 10.0], [-1.0, 0.0, 1.0], [0.1, 1.0, 10.0]):
+            dist = StudentT(df=df, loc=loc, scale=scale)
+            x = dist.sample((num_samples,))
+            actual_log_prob = dist.log_prob(x)
+            for i in range(num_samples):
+                expected_log_prob = scipy.stats.t.logpdf(x[i], df=df, loc=loc, scale=scale)
+                self.assertAlmostEqual(actual_log_prob[i], expected_log_prob, places=3)
 
     # test_studentT_sample_grad is omitted since reparameterized gradients
     # for this distribution are stochastic and are only correct in expectation.
