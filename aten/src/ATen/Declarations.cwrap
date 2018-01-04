@@ -3721,7 +3721,7 @@
     - arg: THTensor* result
       output: True
     - arg: THGenerator* generator
-      default: THPGenerator_TH_CData(THPDefaultGenerator)
+      default: nullptr
       kwarg_only: True
     - long n
 ]]
@@ -3735,20 +3735,20 @@
       arguments:
         - THTensor* self
         - arg: THGenerator* generator
-          default: THPGenerator_TH_CData(THPDefaultGenerator)
+          default: nullptr
           kwarg_only: True
     - cname: cappedRandom
       arguments:
         - THTensor* self
         - arg: THGenerator* generator
-          default: THPGenerator_TH_CData(THPDefaultGenerator)
+          default: nullptr
           kwarg_only: True
         - long to
     - cname: clampedRandom
       arguments:
         - THTensor* self
         - arg: THGenerator* generator
-          default: THPGenerator_TH_CData(THPDefaultGenerator)
+          default: nullptr
           kwarg_only: True
         - long from
         - long to
@@ -3768,7 +3768,7 @@
     - arg: THIndexTensor* result
       output: True
     - arg: THGenerator* generator
-      default: THPGenerator_TH_CData(THPDefaultGenerator)
+      default: nullptr
       kwarg_only: True
     - THTensor* self
     - long num_samples
@@ -3787,7 +3787,7 @@
   arguments:
     - THTensor* self
     - arg: THGenerator* generator
-      default: THPGenerator_TH_CData(THPDefaultGenerator)
+      default: nullptr
       kwarg_only: True
     - arg: double from
       default: 0
@@ -3810,7 +3810,7 @@
         - arg: THTensor* output
           output: True
         - arg: THGenerator* generator
-          default: THPGenerator_TH_CData(THPDefaultGenerator)
+          default: nullptr
           kwarg_only: True
         - THTensor* mean
         - arg: double std
@@ -3820,7 +3820,7 @@
         - arg: THTensor* output
           output: True
         - arg: THGenerator* generator
-          default: THPGenerator_TH_CData(THPDefaultGenerator)
+          default: nullptr
           kwarg_only: True
         - arg: double mean
         - THTensor* std
@@ -3829,7 +3829,7 @@
         - arg: THTensor* output
           output: True
         - arg: THGenerator* generator
-          default: THPGenerator_TH_CData(THPDefaultGenerator)
+          default: nullptr
           kwarg_only: True
         - THTensor* mean
         - THTensor* std
@@ -3846,7 +3846,7 @@
   arguments:
     - THTensor* self
     - arg: THGenerator* generator
-      default: THPGenerator_TH_CData(THPDefaultGenerator)
+      default: nullptr
       kwarg_only: True
     - arg: double mean
       default: 0
@@ -3865,7 +3865,7 @@
   arguments:
     - THTensor* self
     - arg: THGenerator* generator
-      default: THPGenerator_TH_CData(THPDefaultGenerator)
+      default: nullptr
       kwarg_only: True
     - arg: double median
       default: 0
@@ -3885,7 +3885,7 @@
   arguments:
     - THTensor* self
     - arg: THGenerator* generator
-      default: THPGenerator_TH_CData(THPDefaultGenerator)
+      default: nullptr
       kwarg_only: True
     - arg: double mean
       default: 1
@@ -3904,7 +3904,7 @@
   arguments:
     - THTensor* self
     - arg: THGenerator* generator
-      default: THPGenerator_TH_CData(THPDefaultGenerator)
+      default: nullptr
       kwarg_only: True
     - arg: double lambd
       default: 1
@@ -3923,7 +3923,7 @@
     - arg: THTensor* result
       output: True
     - arg: THGenerator* generator
-      default: THPGenerator_TH_CData(THPDefaultGenerator)
+      default: nullptr
       kwarg_only: True
     - arg: THSize* size
       long_args: True
@@ -3942,7 +3942,7 @@
     - arg: THTensor* result
       output: True
     - arg: THGenerator* generator
-      default: THPGenerator_TH_CData(THPDefaultGenerator)
+      default: nullptr
       kwarg_only: True
     - arg: THSize* size
       long_args: True
@@ -3957,7 +3957,7 @@
   arguments:
     - THTensor* self
     - arg: THGenerator* generator
-      default: THPGenerator_TH_CData(THPDefaultGenerator)
+      default: nullptr
       kwarg_only: True
     - double p
 ]]
@@ -3978,7 +3978,7 @@
       output: True
       resize: self
     - arg: THGenerator* generator
-      default: THPGenerator_TH_CData(THPDefaultGenerator)
+      default: nullptr
       kwarg_only: True
     - THTensor* self
 ]]
@@ -3998,7 +3998,7 @@
         - arg: THTensor* output
           output: True
         - arg: THGenerator* generator
-          default: THPGenerator_TH_CData(THPDefaultGenerator)
+          default: nullptr
           kwarg_only: True
         - THTensor* self
 ]]
