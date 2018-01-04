@@ -1207,7 +1207,7 @@ if HAS_CUDA:
                 setattr(TestCuda,
                         test_name,
                         compare_cpu_gpu(constr, arg_constr, name_inner, t, precision))
-                if t == torch.FloatTensor and not IS_WINDOWS: # CUDA HalfTensor currently doesn't work on Windows
+                if t == torch.FloatTensor and not IS_WINDOWS:  # CUDA HalfTensor currently doesn't work on Windows
                     assert not hasattr(TestCuda, test_name + '_gpu_half'), "Duplicated test name: " + test_name
                     setattr(TestCuda,
                             test_name + '_gpu_half',
