@@ -325,7 +325,7 @@ class TestMultiprocessing(TestCase):
             self.assertEqual(tensor_size, 5)
             self.assertEqual(storage_size, 5)
 
-    # @unittest.skipIf(IS_WINDOWS, 'NYI: not supported on Windows')
+    @unittest.skipIf(IS_WINDOWS, 'not applicable to Windows')
     @unittest.skipIf(not torch.cuda.is_available(), 'CUDA not available')
     def test_cuda_bad_call(self):
         # Initialize CUDA
