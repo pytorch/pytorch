@@ -16,8 +16,6 @@ static inline void THNN_(SpatialDilatedConvolution_shapeCheck)(
 	           "kernel size should be greater than zero, but got kH: %d kW: %d", kH, kW);
   THArgCheck(dW > 0 && dH > 0, 11,
              "stride should be greater than zero, but got dH: %d dW: %d", dH, dW);
-  THArgCheck(THCTensor_(isContiguous)(state, weight), 4,
-             "weight tensor has to be contiguous");
   THArgCheck(!bias || THCTensor_(isContiguous)(state, bias), 5,
              "bias tensor has to be contiguous");
   THArgCheck(dilationW > 0 && dilationH > 0, 14,
