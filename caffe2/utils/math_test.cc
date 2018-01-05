@@ -304,4 +304,85 @@ TEST(MathTest, FloatToHalfConversion) {
   CHECK_EQ(c, converted_c);
 }
 
+TEST(MathTest, TranposeTest) {
+  DeviceOption option;
+  CPUContext cpu_context(option);
+
+  {
+    // Test for 1D transpose.
+    TensorCPU X(std::vector<int>{3});
+    TensorCPU Y(std::vector<int>{3});
+    for (int i = 0; i < 3; ++i) {
+      X.mutable_data<float>()[i] = static_cast<float>(i + 1);
+    }
+    math::Transpose<float, CPUContext>(
+        X.dims(),
+        Y.dims(),
+        {0},
+        X.data<float>(),
+        Y.mutable_data<float>(),
+        &cpu_context);
+    for (int i = 0; i < 3; ++i) {
+      EXPECT_FLOAT_EQ(static_cast<float>(i + 1), Y.data<float>()[i]);
+    }
+  }
+
+  {
+    // Test for 2D transpose.
+    TensorCPU X(std::vector<int>{2, 3});
+    TensorCPU Y(std::vector<int>{3, 2});
+    for (int i = 0; i < 6; ++i) {
+      X.mutable_data<float>()[i] = static_cast<float>(i + 1);
+    }
+    math::Transpose<float, CPUContext>(
+        X.dims(),
+        Y.dims(),
+        {1, 0},
+        X.data<float>(),
+        Y.mutable_data<float>(),
+        &cpu_context);
+    const std::vector<float> expected_output = {
+        1.0f, 4.0f, 2.0f, 5.0f, 3.0f, 6.0f};
+    for (int i = 0; i < 6; ++i) {
+      EXPECT_FLOAT_EQ(expected_output[i], Y.data<float>()[i]);
+    }
+  }
+
+  {
+    // Test for 3D transpose.
+    TensorCPU X(std::vector<int>{2, 2, 2});
+    TensorCPU Y(std::vector<int>{2, 2, 2});
+    for (int i = 0; i < 8; ++i) {
+      X.mutable_data<float>()[i] = static_cast<float>(i + 1);
+    }
+    math::Transpose<float, CPUContext>(
+        X.dims(),
+        Y.dims(),
+        {1, 2, 0},
+        X.data<float>(),
+        Y.mutable_data<float>(),
+        &cpu_context);
+    const std::vector<float> expected_output1 = {
+        1.0f, 5.0f, 2.0f, 6.0f, 3.0f, 7.0f, 4.0f, 8.0f};
+    for (int i = 0; i < 8; ++i) {
+      EXPECT_FLOAT_EQ(expected_output1[i], Y.data<float>()[i]);
+    }
+
+    math::Set<float, CPUContext>(
+        Y.size(), 0.0f, Y.mutable_data<float>(), &cpu_context);
+    math::Transpose<float, CPUContext>(
+        X.dims(),
+        Y.dims(),
+        {1, 0, 2},
+        X.data<float>(),
+        Y.mutable_data<float>(),
+        &cpu_context);
+    const std::vector<float> expected_output2 = {
+        1.0f, 2.0f, 5.0f, 6.0f, 3.0f, 4.0f, 7.0f, 8.0f};
+    for (int i = 0; i < 8; ++i) {
+      EXPECT_FLOAT_EQ(expected_output2[i], Y.data<float>()[i]);
+    }
+  }
+}
+
 } // namespace caffe2

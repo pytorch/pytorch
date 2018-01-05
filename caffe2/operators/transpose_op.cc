@@ -15,151 +15,21 @@
  */
 
 #include "caffe2/operators/transpose_op.h"
-#ifdef CAFFE2_USE_HPTT
-
-#include <hptt.h>
 
 namespace caffe2 {
-
-namespace {
-template <typename T>
-bool tryRunWithHPTT(const std::vector<int>& axes, const TensorCPU& input, TensorCPU* output) {
-  if (!std::is_same<T, float>::value) {
-    return false;
-  }
-  std::vector<int> axes_cm(axes.size());
-  std::vector<int> idims_cm(axes.size());
-
-  // Convert row-major index to column major.
-  auto cm = [&](int i) { return axes.size() - i - 1; };
-
-  for (auto i = 0; i < axes.size(); ++i) {
-    axes_cm[i] = cm(axes[cm(i)]);
-    idims_cm[i] = input.dim32(cm(i));
-  }
-
-  auto plan = hptt::create_plan(axes_cm.data(),
-                                axes.size(),
-                                1.0,
-                                input.template data<float>(),
-                                idims_cm.data(),
-                                nullptr,
-                                0.0,
-                                output->template mutable_data<float>(),
-                                nullptr,
-                                hptt::ESTIMATE,
-                                1);
-  if (!plan) {
-    return false;
-  }
-  plan->execute();
-  return true;
-}
-} // namespace
-
-} // namespace caffe2
-#endif
-
-namespace caffe2 {
-
-
-
-#define COMPILE_TIME_MAX_TRANSPOSE_DIMS 10
 
 template <>
 template <typename T>
 bool TransposeOp<CPUContext>::DoRunWithType() {
-  const auto& input = Input(0);
-  auto* output = Output(0);
-
-#ifdef CAFFE2_USE_HPTT
-  if (tryRunWithHPTT<T>(axes_, input, output)) {
-    return true;
-  }
-#endif
-
-  int from_inds[COMPILE_TIME_MAX_TRANSPOSE_DIMS] = {0};
-  size_t count = input.size();
-  int num_axes = axes_.size();
-  const T* from_data = input.template data<T>();
-  T* to_data = output->template mutable_data<T>();
-  auto in_dims = input.dims();
-  auto out_dims = output->dims();
-
-  // Measure amount of contiguous data we can copy at once
-  TIndex blocksize = 1;
-  int n_shared_idxs = 0;
-  for (int i = num_axes - 1; i >= 0; --i) {
-    if (axes_[i] == i) {
-      blocksize *= new_dims_[i];
-      ++n_shared_idxs;
-    } else {
-      break;
-    }
-  }
-
-  if (num_axes < 2 || n_shared_idxs == num_axes) {
-    memcpy(to_data, from_data, count * sizeof(T));
-    return true;
-  }
-
-  int itr_axes = num_axes - n_shared_idxs;
-
-  // Calculate strides
-  TIndex stride_x[COMPILE_TIME_MAX_TRANSPOSE_DIMS] = {0};
-  for (size_t i = 0; i < itr_axes; i++) {
-    stride_x[i] = 1;
-    for (size_t j = axes_[i] + 1; j < itr_axes; j++) {
-      stride_x[i] *= in_dims[j];
-    }
-  }
-
-  TIndex itr_idxs[COMPILE_TIME_MAX_TRANSPOSE_DIMS] = {0};
-
-  // Branch here to avoid branching within the loop
-  if (blocksize > 1) {
-    for (size_t index = 0; index < (count / blocksize); index++) {
-      TIndex from_index = 0;
-      for (int i = 0; i < itr_axes; ++i) {
-        from_index += stride_x[i] * itr_idxs[i];
-      }
-
-      memcpy(
-          to_data + blocksize * index,
-          from_data + blocksize * from_index,
-          blocksize * sizeof(T));
-
-      ++itr_idxs[itr_axes - 1];
-      for (int i = itr_axes - 1; i >= 1; --i) {
-        auto expected_dim = out_dims[i];
-        if (itr_idxs[i] < expected_dim) {
-          break;
-        }
-        itr_idxs[i] %= expected_dim;
-        ++itr_idxs[i - 1];
-      }
-    }
-  } else {
-    for (size_t index = 0; index < count; index++) {
-      TIndex from_index = 0;
-      for (int i = 0; i < itr_axes; ++i) {
-        from_index += stride_x[i] * itr_idxs[i];
-      }
-
-      *(to_data + index) = *(from_data + from_index);
-
-      ++itr_idxs[itr_axes - 1];
-      for (int i = itr_axes - 1; i >= 1; --i) {
-        auto expected_dim = out_dims[i];
-        if (itr_idxs[i] < expected_dim) {
-          break;
-        }
-        itr_idxs[i] %= expected_dim;
-        ++itr_idxs[i - 1];
-      }
-    }
-  }
-
+  const auto& X = Input(0);
+  auto* Y = Output(0);
+  math::Transpose<T, CPUContext>(
+      X.dims(),
+      new_dims_,
+      axes_,
+      X.template data<T>(),
+      Y->template mutable_data<T>(),
+      &context_);
   return true;
 }
 
