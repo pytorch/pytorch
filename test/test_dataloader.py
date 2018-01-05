@@ -13,7 +13,7 @@ from torch.utils.data.dataloader import default_collate
 from common import TestCase, run_tests, TEST_NUMPY, IS_WINDOWS
 from common_nn import TEST_CUDA
 
-BASE_TIMEOUT = 2.0 if IS_WINDOWS else 1.0
+BASE_TIMEOUT = 2.5 if IS_WINDOWS else 1.0
 
 
 class TestDatasetRandomSplit(TestCase):
