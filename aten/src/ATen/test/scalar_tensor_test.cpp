@@ -265,6 +265,21 @@ void test(Type &T) {
         }
       }
 
+
+      // ger
+      {
+        auto lhs = T.ones(*lhs_it);
+        auto rhs = T.ones(*rhs_it);
+        try {
+          auto result = lhs.ger(rhs);
+          int64_t dim0 = lhs.dim() == 0 ? 1 : lhs.size(0);
+          int64_t dim1 = rhs.dim() == 0 ? 1 : rhs.size(0);
+          assert_equal_size_dim(result, result.type().tensor({dim0, dim1}));
+        } catch (std::runtime_error &e) {
+          ASSERT(lhs.numel() == 0 || rhs.numel() == 0 || lhs.dim() > 1 || rhs.dim() > 1);
+        }
+      }
+
       // expand
       {
         auto lhs = T.ones(*lhs_it);
