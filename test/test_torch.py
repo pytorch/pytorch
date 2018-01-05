@@ -2092,6 +2092,37 @@ class TestTorch(TestCase):
         torch.gesv(b, a, out=(tb, ta))[0]
         self.assertEqual(res1, tb)
 
+    def _test_bgesv(self, cast):
+        # test against gesv
+        A = cast(torch.randn(1, 5, 5))
+        b = cast(torch.randn(1, 5, 10))
+        x_exp, LU_exp = torch.gesv(b.squeeze(0), A.squeeze(0))
+        x, LU = torch.bgesv(b, A)
+        self.assertEqual(x, x_exp.unsqueeze(0))
+        self.assertEqual(LU, LU_exp.unsqueeze(0))
+
+        # basic correctness test
+        A = cast(torch.randn(3, 5, 5))
+        b = cast(torch.randn(3, 5, 10))
+        x, LU = torch.bgesv(b, A)
+        self.assertEqual(torch.bmm(A, x), b)
+
+        # specified outputs
+        tA = cast(torch.Tensor())
+        tb = cast(torch.Tensor())
+        x1, LU1 = torch.bgesv(b, A, out=(tb, tA))
+        self.assertEqual(x1, x)
+        self.assertEqual(LU1, LU)
+
+        # self output
+        x2, LU2 = torch.bgesv(b, A, out=(b, A))
+        self.assertEqual(x1, x)
+        self.assertEqual(LU1, LU)
+
+    @skipIfNoLapack
+    def test_bgesv(self):
+        self._test_bgesv(lambda t: t)
+
     @skipIfNoLapack
     def test_qr(self):
 

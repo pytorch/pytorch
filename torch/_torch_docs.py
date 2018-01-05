@@ -1703,6 +1703,51 @@ Example::
 
 """)
 
+add_docstr(torch._C.bgesv,
+           r"""
+bgesv(B, A, out=None) -> (Tensor, Tensor)
+
+A batched system of linear equations solver.
+`X, LU = torch.bgesv(B, A)` returns the solution to the system of linear
+equations represented by :math:`A_i X_i = B_i`.
+
+`LU_i` contains `L` and `U` factors for LU factorization of `A_i`.
+
+:attr:Each `A_i` has to be a square and non-singular matrix. As a result,
+`A` must be a 3D tensor.
+
+If `A` is an :math:`(n \times m \times m)` tensor and `B` is :math:`(n \times m \times k)`,
+the result `LU` is :math:`(n \times m \times m)` and `X_i` is :math:`(n \times m \times k)`.
+
+.. note::
+
+    Irrespective of the original strides, the returned matrices
+    `X` and `LU` will be transposed. `X` has strides :math:`(m * k, 1, m)`
+    and `LU` has strides :math:`(m * m, 1, m)`.
+
+Args:
+    B (Tensor): input tensor of :math:`(n \times m \times k)` dimensions.
+        B is a batch of :math:`(m \times k)` matrices.
+    A (Tensor): input tensor of :math:`(n \times m \times m)` dimensions
+        A is a batch of :math:`(m \times m)` square matrices.
+    out (Tensor, optional): optional output tensors
+
+Example::
+
+    >>> A = torch.Tensor([[[1.4, 2.6],
+    ...                    [3.1, 4.4]],
+    ...                   [[0.5, 0.2],
+    ...                    [0.1, 5.2]]])
+    >>> B = torch.Tensor([[[1, 2, 5],
+    ...                    [3, 4, 6]],
+    ...                   [[0.5, 0.2, 0.1],
+    ...                    [0.1, 5.2, 3.1]]])
+    >>> X, LU = torch.bgesv(B, A)
+    >>> torch.dist(B, torch.bmm(A, X))
+    1.099080577660061e-06
+
+""")
+
 add_docstr(torch._C.get_num_threads,
            r"""
 get_num_threads() -> int
