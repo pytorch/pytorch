@@ -77,7 +77,7 @@ std::unordered_map<NodeKind, std::string> simple_map_ops = {
 
   //alpha
   {kadd, "${0} + ${alpha}*${1}"},
-  {ksub, "${0} - ${alpha}*${1})"},
+  {ksub, "(${0} - ${alpha}*${1})"},
 
   // special
   {klerp, "${0} + ${weight}*(${1} - ${0})"},
