@@ -223,8 +223,9 @@ void THCTensor_(put)(THCState *state, THCTensor *dst, THCudaLongTensor *index, T
   THArgCheck(THCTensor_(nDimension)(state, src) <= MAX_CUTORCH_DIMS, 2, CUTORCH_DIM_WARNING);
   THArgCheck(THCudaLongTensor_nDimension(state, index) <= MAX_CUTORCH_DIMS, 2, CUTORCH_DIM_WARNING);
 
-  int srcDims = THCTensor_(nDimension)(state, src);
-  THArgCheck(srcDims > 0, 2, "Source tensor is empty");
+  if (numIndices == 0) {
+    return;
+  }
 
   if (accumulate) {
     // wrap indices so to replace negative indices
