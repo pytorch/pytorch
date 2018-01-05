@@ -2,6 +2,7 @@ import torch
 from torch.autograd import Variable
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
+from torch.distributions.utils import probs_to_logits, logits_to_probs, log_sum_exp, lazy_property
 
 
 class Categorical(Distribution):
@@ -33,14 +34,27 @@ class Categorical(Distribution):
     params = {'probs': constraints.simplex}
     has_enumerate_support = True
 
-    def __init__(self, probs):
-        self.probs = probs
-        batch_shape = self.probs.size()[:-1]
+    def __init__(self, probs=None, logits=None):
+        if (probs is None) == (logits is None):
+            raise ValueError("Either `probs` or `logits` must be specified, but not both.")
+        if probs is not None:
+            self.probs = probs / probs.sum(-1, keepdim=True)
+        else:
+            self.logits = logits - log_sum_exp(logits)
+        batch_shape = self.probs.size()[:-1] if probs is not None else self.logits.size()[:-1]
         super(Categorical, self).__init__(batch_shape)
 
     @constraints.dependent_property
     def support(self):
         return constraints.integer_interval(0, self.probs.size()[-1] - 1)
+
+    @lazy_property
+    def logits(self):
+        return probs_to_logits(self.probs)
+
+    @lazy_property
+    def probs(self):
+        return logits_to_probs(self.logits)
 
     def sample(self, sample_shape=torch.Size()):
         num_events = self.probs.size()[-1]
@@ -54,13 +68,11 @@ class Categorical(Distribution):
     def log_prob(self, value):
         self._validate_log_prob_arg(value)
         param_shape = value.size() + self.probs.size()[-1:]
-        log_pmf = (self.probs / self.probs.sum(-1, keepdim=True)).log()
-        log_pmf = log_pmf.expand(param_shape)
+        log_pmf = self.logits.expand(param_shape)
         return log_pmf.gather(-1, value.unsqueeze(-1).long()).squeeze(-1)
 
     def entropy(self):
-        p_log_p = torch.log(self.probs) * self.probs
-        p_log_p[self.probs == 0] = 0
+        p_log_p = self.logits * self.probs
         return -p_log_p.sum(-1)
 
     def enumerate_support(self):
