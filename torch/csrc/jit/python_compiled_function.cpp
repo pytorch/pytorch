@@ -97,15 +97,31 @@ struct CompiledFunction {
       return fn->apply(inputs);
     }
 
-    PyObject* add_trace(PyObject *args, variable_list inputs) {
+    PyObject* add_trace(PyObject *args, ParsedArgs input_info) {
       JIT_ASSERT(!is_ready_);
       // Start tracing
       AutoGradMode grad_mode(grad_enabled_);
       auto num_stages = grad_enabled_ ? fn_.nderivs_ + 1 : 1;
-      auto trace = tracer::enter(fmap<TraceInput>(inputs), num_stages);
+      auto enter_info = tracer::enter(fmap<TraceInput>(input_info.vars), num_stages);
+      auto & trace = enter_info.first;
+      auto & new_vars = enter_info.second;
+
+      // Enter returns us a new list of Variables to use as inputs, so handle that.
+      std::size_t num_all_inputs = input_info.vars.size();
+      std::size_t num_captured = fn_.captured_vars_.size();
+      // Check that no captured Variables were replaced by enter. It's hard to handle that.
+      for (std::size_t i = num_all_inputs - num_captured; i < num_all_inputs; ++i) {
+        TORCH_EXPECTM(input_info.vars[i].get() == new_vars[i].get(),
+                      "Some of the Variables captured by the JIT are repeated");
+      }
+      // Now only arguments to this function could have changed. Slice their vars out, and
+      // re-create the structure of args, but using new Variables.
+      variable_list new_inputs(new_vars.begin(),
+                               new_vars.end() - num_captured);
+      THPObjectPtr new_args { unflatten(new_inputs, input_info.desc) };
 
       // Call back into Python function
-      auto out = PyObject_CallObject(fn_.function_.get(), args);
+      auto out = PyObject_CallObject(fn_.function_.get(), new_args.get());
       if (!out) throw py::error_already_set();
 
       // Flatten outputs and update fields
@@ -175,7 +191,7 @@ struct CompiledFunction {
       return steal(unflatten(ktrace.run(std::move(args.vars)), ktrace.out_desc_));
     } else {
       misses_++;
-      return steal(ktrace.add_trace(pyargs.ptr(), std::move(args.vars)));
+      return steal(ktrace.add_trace(pyargs.ptr(), std::move(args)));
     }
   }
 

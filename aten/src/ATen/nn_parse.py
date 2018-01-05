@@ -247,10 +247,7 @@ def base_declaration(func, thnn_function, backends, inplace=False):
     buffers = [argument_to_declaration('Tensor ' + buf)
                for buf in func.get('buffers', [])]
 
-    thnn_args = get_thnn_args(thnn_function, arguments + buffers, inplace)
-    cimpl = {'cname': thnn_function.name, 'arguments': thnn_args}
-
-    return function_info(name, arguments, [cimpl], buffers, backends, inplace)
+    return function_info(name, arguments, None, buffers, backends, inplace)
 
 
 def forward_declaration(base, thnn_function, inplace=False):
@@ -261,8 +258,11 @@ def forward_declaration(base, thnn_function, inplace=False):
     arguments = [copy.deepcopy(arg) for arg in base['arguments']
                  if not arg.get('output')]
 
-    arguments += base['buffers']
     arguments += output_arguments(thnn_function)
+    for buffer in base['buffers']:
+        buffer = copy.deepcopy(buffer)
+        buffer['output'] = True
+        arguments.append(buffer)
 
     thnn_args = get_thnn_args(thnn_function, arguments, inplace)
     arguments = remove_unused_args(arguments, thnn_args)
@@ -280,6 +280,7 @@ def backward_declaration(base, thnn_functions):
                   if arg['name'] != 'inplace']
     arguments += base['buffers']
 
+    # outputs from the forward may be inputs to the backwards
     for arg in arguments:
         if 'output' in arg:
             del arg['output']

@@ -106,32 +106,11 @@ bool THPAutograd_initFunctions(PyObject* _unused)
   static PyTypeObject AccumulateGradClass;
   addClass<AccumulateGrad, NoCtor>(module, AccumulateGradClass, "AccumulateGrad", accumulate_grad_properties);
 
-  static PyTypeObject AddClass, AddBackwardClass;
-  addClass<Add, NoCtor>(module, AddClass, "Add");
-  addClass<AddBackward_Deprecated, NoCtor>(module, AddBackwardClass, "AddBackward_Deprecated");
-
   static PyTypeObject ErrorClass;
   addClass<Error, NoCtor>(module, ErrorClass, "Error");
 
   static PyTypeObject DelayedErrorClass;
   addClass<DelayedError, DelayedErrorCtor>(module, DelayedErrorClass, "DelayedError");
-
-  static PyTypeObject CloneClass;
-  addClass<Clone, NoCtor>(module, CloneClass, "Clone");
-  static PyTypeObject ContiguousClass;
-  addClass<Contiguous, NoCtor>(module, ContiguousClass, "Contiguous");
-  static PyTypeObject IdentityClass;
-  addClass<Identity, NoCtor>(module, IdentityClass, "Identity");
-  static PyTypeObject TransposeClass;
-  addClass<Transpose, NoCtor>(module, TransposeClass, "Transpose");
-  static PyTypeObject ViewClass;
-  addClass<View, NoCtor>(module, ViewClass, "View");
-  static PyTypeObject ExpandClass;
-  addClass<Expand, NoCtor>(module, ExpandClass, "Expand");
-  static PyTypeObject NarrowClass;
-  addClass<Narrow, NoCtor>(module, NarrowClass, "Narrow");
-  static PyTypeObject CatClass;
-  addClass<Cat, NoCtor>(module, CatClass, "Cat");
 
   static PyTypeObject EvalClass;
   addClass<Eval, NoCtor>(module, EvalClass, "Eval");
