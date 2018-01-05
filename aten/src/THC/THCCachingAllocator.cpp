@@ -80,6 +80,12 @@ struct THCCachingAllocator
   typedef bool (*Comparison)(const Block*, const Block*);
   typedef std::set<Block*, Comparison> FreeBlocks;
 
+  // max memory allocated
+  static size_t max_memory_allocated;
+
+  // current memory allocated
+  static size_t memory_allocated;
+
   // lock around all operations
   std::mutex mutex;
 
@@ -161,6 +167,9 @@ struct THCCachingAllocator
     allocated_blocks[block->ptr] = block;
 
     *devPtr = (void*)block->ptr;
+
+    memory_allocated += block->size;
+    max_memory_allocated = std::max(max_memory_allocated, memory_allocated);
     return cudaSuccess;
   }
 
@@ -180,6 +189,7 @@ struct THCCachingAllocator
     allocated_blocks.erase(it);
     block->allocated = false;
 
+    memory_allocated -= block->size;
     if (!block->stream_uses.empty()) {
       return insert_events(block);
     }
@@ -441,6 +451,9 @@ struct THCCachingAllocator
   }
 };
 
+size_t THCCachingAllocator::max_memory_allocated = 0;
+size_t THCCachingAllocator::memory_allocated = 0;
+
 static cudaError_t THCCachingAllocator_malloc(void* ctx, void** ptr, size_t size, cudaStream_t stream)
 {
   THCCachingAllocator* a = (THCCachingAllocator*) ctx;
@@ -496,8 +509,12 @@ THC_API std::mutex* THCCachingAllocator_getCudaFreeMutex()
   return &caching_allocator.cuda_free_mutex;
 }
 
-THC_API cudaError_t THCCachingAllocator_emptyCache(void)
+THC_API size_t THCCachingAllocator_currentMemoryAllocated(void)
 {
-  return caching_allocator.emptyCache();
+  return caching_allocator.memory_allocated;
 }
 
+THC_API size_t THCCachingAllocator_maxMemoryAllocated(void)
+{
+  return caching_allocator.max_memory_allocated;
+}

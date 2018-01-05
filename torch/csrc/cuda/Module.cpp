@@ -324,6 +324,22 @@ PyObject * THCPModule_emptyCache(PyObject *_unused)
   Py_RETURN_NONE;
 }
 
+PyObject * THCPModule_memoryAllocated(PyObject *_unused)
+{
+  HANDLE_TH_ERRORS
+  auto memory_allocated = THCCachingAllocator_currentMemoryAllocated();
+  return PyLong_FromLong((int64_t) memory_allocated);
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject * THCPModule_maxMemoryAllocated(PyObject *_unused)
+{
+  HANDLE_TH_ERRORS
+  auto max_memory_allocated = THCCachingAllocator_maxMemoryAllocated();
+  return PyLong_FromLong((int64_t) max_memory_allocated);
+  END_HANDLE_TH_ERRORS
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // Cuda module initialization
 ////////////////////////////////////////////////////////////////////////////////
@@ -406,6 +422,8 @@ static struct PyMethodDef _THCPModule_methods[] = {
   {"_cuda_getRNGState", (PyCFunction)THCPModule_getRNGState,      METH_NOARGS,  NULL},
   {"_cuda_setRNGState", (PyCFunction)THCPModule_setRNGState,      METH_O,       NULL},
   {"_cuda_emptyCache", (PyCFunction) THCPModule_emptyCache,       METH_NOARGS,  NULL},
+  {"_cuda_memoryAllocated", (PyCFunction) THCPModule_memoryAllocated, METH_NOARGS,  NULL},
+  {"_cuda_maxMemoryAllocated", (PyCFunction) THCPModule_maxMemoryAllocated, METH_NOARGS,  NULL},
   {"_cuda_manualSeed",  (PyCFunction)THCPModule_manualSeed,       METH_O,       NULL},
   {"_cuda_manualSeedAll", (PyCFunction)THCPModule_manualSeedAll,  METH_O,       NULL},
   {"_cuda_seed",        (PyCFunction)THCPModule_seed,             METH_NOARGS,  NULL},

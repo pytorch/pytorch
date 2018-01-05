@@ -40,6 +40,8 @@ Streams and events
 Memory management
 -----------------
 .. autofunction:: empty_cache
+.. autofunction:: memory_allocated
+.. autofunction:: max_memory_allocated
 
 NVIDIA Tools Extension (NVTX)
 -----------------------------

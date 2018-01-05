@@ -340,6 +340,20 @@ def empty_cache():
     return torch._C._cuda_emptyCache()
 
 
+def memory_allocated():
+    """Returns the current total GPU memory usage by tensors in bytes.
+
+    .. note:: This is likely less than the amount shown in `nvidia-smi` since
+    some unused memory can be held by the cached memory allocator and some
+    context needs to be created on GPU. """
+    return torch._C._cuda_memoryAllocated()
+
+
+def max_memory_allocated():
+    """Returns the maximum total GPU memory usage by tensors in bytes."""
+    return torch._C._cuda_maxMemoryAllocated()
+
+
 def _host_allocator():
     _lazy_init()
     return torch._C._cuda_cudaHostAllocator()
