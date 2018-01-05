@@ -81,7 +81,7 @@ class Embedding(Module):
         self.embedding_dim = embedding_dim
         if padding_idx is not None:
             if padding_idx > 0:
-                assert padding_idx < self.num_embeddings, 'Padding_idx must be within num_embeddings' 
+                assert padding_idx < self.num_embeddings, 'Padding_idx must be within num_embeddings'
             elif padding_idx < 0:
                 assert padding_idx >= -self.num_embeddings, 'Padding_idx must be within num_embeddings'
                 padding_idx = self.num_embeddings + padding_idx
