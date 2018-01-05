@@ -327,7 +327,7 @@ def emit_body(declaration):
         combined = nested_dict(local, nested_dict(env, declaration))
         return RECORD_TRACE.substitute(combined)
 
-    def declare_return_values():
+    def declare_returned_variables():
         if inplace or name.endswith('_out'):
             return ''
         if len(declaration['returns']) == 1:
@@ -407,7 +407,7 @@ def emit_body(declaration):
         if inplace:
             body.append('check_inplace(self);')
         body.extend(setup_derivative())
-    body.append(declare_return_values())
+    body.append(declare_returned_variables())
     body.append(emit_call(env))
     if requires_derivative:
         if inplace and is_view:
