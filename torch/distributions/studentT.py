@@ -1,6 +1,7 @@
 from numbers import Number
 import torch
 import math
+from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
 from torch.distributions import Chi2
 from torch.distributions.utils import broadcast_all
@@ -20,6 +21,8 @@ class StudentT(Distribution):
     Args:
         df (float or Tensor or Variable): degrees of freedom
     """
+    params = {'df': constraints.positive, 'loc': constraints.real, 'scale': constraints.positive}
+    support = constraints.real
     has_rsample = True
 
     def __init__(self, df, loc=0, scale=1):
