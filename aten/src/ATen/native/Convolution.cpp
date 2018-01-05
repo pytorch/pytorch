@@ -395,10 +395,7 @@ at::Tensor _convolution_nogroup(
     if (dim == 4) {
       if (dilated) {
         return at::thnn_conv_dilated2d(
-            // TODO: This might not be necessary in the non-CUDA case,
-            // as we only triggered a failure here with
-            // test_ConvTranspose1d_cuda.  Very unsatisfactory...
-            input, weight.contiguous(), kernel_size, bias,
+            input, weight, kernel_size, bias,
             stride, padding, dilation);
       } else {  /* dim == 4, non-dilated */
         if (params.use_nnpack(input)) {
