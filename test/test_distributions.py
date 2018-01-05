@@ -34,6 +34,8 @@ from torch.distributions import (Bernoulli, Beta, Categorical, Cauchy, Chi2,
                                  Dirichlet, Exponential, Gamma, Laplace,
                                  Normal, OneHotCategorical, Pareto, Uniform)
 from torch.distributions.constraints import Constraint, is_dependent
+from torch.distributions.utils import _get_clamping_buffer
+
 
 TEST_NUMPY = True
 try:
@@ -240,7 +242,13 @@ class TestDistributions(TestCase):
             self.assertEqual(log_prob, math.log(prob if val else 1 - prob))
 
         self._check_log_prob(Bernoulli(p), ref_log_prob)
+        self._check_log_prob(Bernoulli(logits=p.log() - (-p).log1p()), ref_log_prob)
         self.assertRaises(NotImplementedError, Bernoulli(r).rsample)
+
+        # check entropy computation
+        self.assertEqual(Bernoulli(p).entropy().data, torch.Tensor([0.6108, 0.5004, 0.6730]), prec=1e-4)
+        self.assertEqual(Bernoulli(torch.Tensor([0.0])).entropy(), torch.Tensor([0.0]))
+        self.assertEqual(Bernoulli(s).entropy(), torch.Tensor([0.6108]), prec=1e-4)
 
     def test_bernoulli_enumerate_support(self):
         examples = [
@@ -286,6 +294,11 @@ class TestDistributions(TestCase):
             self.assertEqual(log_prob, math.log(sample_prob))
 
         self._check_log_prob(Categorical(p), ref_log_prob)
+        self._check_log_prob(Categorical(logits=p.log()), ref_log_prob)
+
+        # check entropy computation
+        self.assertEqual(Categorical(p).entropy().data, torch.Tensor([1.0114, 1.0297]), prec=1e-4)
+        self.assertEqual(Categorical(s).entropy().data, torch.Tensor([0.0, 0.0]))
 
     def test_categorical_enumerate_support(self):
         examples = [
@@ -1085,6 +1098,108 @@ class TestConstraints(TestCase):
                 message = '{} example {}/{} sample = {}'.format(
                     Dist.__name__, i, len(params), value)
                 self.assertTrue(constraint.check(value).all(), msg=message)
+
+
+class TestNumericalStability(TestCase):
+    def _test_pdf_score(self,
+                        dist_class,
+                        x,
+                        expected_value,
+                        probs=None,
+                        logits=None,
+                        expected_gradient=None,
+                        prec=1e-5):
+        if probs is not None:
+            p = Variable(probs, requires_grad=True)
+            dist = dist_class(p)
+        else:
+            p = Variable(logits, requires_grad=True)
+            dist = dist_class(logits=p)
+        log_pdf = dist.log_prob(Variable(x))
+        log_pdf.sum().backward()
+        self.assertEqual(log_pdf.data,
+                         expected_value,
+                         prec=prec,
+                         message='Failed for tensor type: {}. Expected = {}, Actual = {}'
+                         .format(type(x), expected_value, log_pdf.data))
+        if expected_gradient is not None:
+            self.assertEqual(p.grad.data,
+                             expected_gradient,
+                             prec=prec,
+                             message='Failed for tensor type: {}. Expected = {}, Actual = {}'
+                             .format(type(x), expected_gradient, p.grad.data))
+
+    def test_bernoulli_gradient(self):
+        for tensor_type in [torch.FloatTensor, torch.DoubleTensor]:
+            self._test_pdf_score(dist_class=Bernoulli,
+                                 probs=tensor_type([0]),
+                                 x=tensor_type([0]),
+                                 expected_value=tensor_type([0]),
+                                 expected_gradient=tensor_type([0]))
+
+            self._test_pdf_score(dist_class=Bernoulli,
+                                 probs=tensor_type([0]),
+                                 x=tensor_type([1]),
+                                 expected_value=tensor_type([_get_clamping_buffer(tensor_type([]))]).log(),
+                                 expected_gradient=tensor_type([0]))
+
+            self._test_pdf_score(dist_class=Bernoulli,
+                                 probs=tensor_type([1e-4]),
+                                 x=tensor_type([1]),
+                                 expected_value=tensor_type([math.log(1e-4)]),
+                                 expected_gradient=tensor_type([10000]))
+
+            # Lower precision due to:
+            # >>> 1 / (1 - torch.FloatTensor([0.9999]))
+            # 9998.3408
+            # [torch.FloatTensor of size 1]
+            self._test_pdf_score(dist_class=Bernoulli,
+                                 probs=tensor_type([1 - 1e-4]),
+                                 x=tensor_type([0]),
+                                 expected_value=tensor_type([math.log(1e-4)]),
+                                 expected_gradient=tensor_type([-10000]),
+                                 prec=2)
+
+            self._test_pdf_score(dist_class=Bernoulli,
+                                 logits=tensor_type([math.log(9999)]),
+                                 x=tensor_type([0]),
+                                 expected_value=tensor_type([math.log(1e-4)]),
+                                 expected_gradient=tensor_type([-1]),
+                                 prec=1e-3)
+
+    def test_bernoulli_with_logits_underflow(self):
+        for tensor_type, lim in ([(torch.FloatTensor, -1e38),
+                                  (torch.DoubleTensor, -1e308)]):
+            self._test_pdf_score(dist_class=Bernoulli,
+                                 logits=tensor_type([lim]),
+                                 x=tensor_type([0]),
+                                 expected_value=tensor_type([0]),
+                                 expected_gradient=tensor_type([0]))
+
+    def test_bernoulli_with_logits_overflow(self):
+        for tensor_type, lim in ([(torch.FloatTensor, 1e38),
+                                  (torch.DoubleTensor, 1e308)]):
+            self._test_pdf_score(dist_class=Bernoulli,
+                                 logits=tensor_type([lim]),
+                                 x=tensor_type([1]),
+                                 expected_value=tensor_type([0]),
+                                 expected_gradient=tensor_type([0]))
+
+    def test_categorical_log_prob(self):
+        for tensor_type in ([torch.FloatTensor, torch.DoubleTensor]):
+            p = Variable(tensor_type([0, 1]), requires_grad=True)
+            categorical = OneHotCategorical(p)
+            log_pdf = categorical.log_prob(Variable(tensor_type([0, 1])))
+            self.assertEqual(log_pdf.data[0], 0)
+
+    def test_categorical_log_prob_with_logits(self):
+        for tensor_type in ([torch.FloatTensor, torch.DoubleTensor]):
+            p = Variable(tensor_type([-float('inf'), 0]), requires_grad=True)
+            categorical = OneHotCategorical(logits=p)
+            log_pdf_prob_1 = categorical.log_prob(Variable(tensor_type([0, 1])))
+            self.assertEqual(log_pdf_prob_1.data[0], 0)
+            log_pdf_prob_0 = categorical.log_prob(Variable(tensor_type([1, 0])))
+            self.assertEqual(log_pdf_prob_0.data[0], -float('inf'), allow_inf=True)
 
 
 if __name__ == '__main__':
