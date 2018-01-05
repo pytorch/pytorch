@@ -30,6 +30,8 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cstring>
+#include <numeric>
 #include <random>
 #include <unordered_set>
 #include <vector>
@@ -42,6 +44,10 @@
 #ifdef CAFFE2_USE_MKL
 #include <mkl.h>
 #endif // CAFFE2_USE_MKL
+
+#ifdef CAFFE2_USE_HPTT
+#include <hptt.h>
+#endif // CAFFE2_USE_HPTT
 
 #if defined(_MSC_VER)
 #include <process.h>
@@ -1532,6 +1538,153 @@ void CopyMatrix<CPUContext>(
   }
 CAFFE2_SPECIALIZED_COPYVECTOR(float)
 #undef CAFFE2_SPECIALIZED_COPYVECTOR
+
+namespace {
+
+#ifdef CAFFE2_USE_HPTT
+
+bool TryTransposeWithHPTT(
+    const std::vector<TIndex>& dims,
+    const std::vector<int>& axes,
+    const float* X,
+    float* Y) {
+  std::vector<int> axes_cm(axes.size());
+  std::vector<int> dims_cm(axes.size());
+  const int n = axes.size();
+
+  // Convert row-major index to column-major.
+  const auto cm_fn = [n](const int i) { return n - i - 1; };
+  for (int i = 0; i < n; ++i) {
+    axes_cm[i] = cm_fn(axes[cm_fn(i)]);
+    dims_cm[i] = dims[cm_fn(i)];
+  }
+  auto plan = hptt::create_plan(
+      axes_cm.data(),
+      n,
+      1.0,
+      X,
+      dims_cm.data(),
+      nullptr,
+      0.0,
+      Y,
+      nullptr,
+      hptt::ESTIMATE,
+      1);
+  if (plan == nullptr) {
+    return false;
+  }
+  plan->execute();
+  return true;
+}
+
+#endif // CAFFE2_USE_HPTT
+
+std::vector<TIndex> MakeBase(
+    const std::vector<TIndex>& dims,
+    const std::vector<int>& axes,
+    const int num) {
+  std::vector<TIndex> base(num, 0);
+  std::vector<TIndex> buff(num, 0);
+  TIndex cur_base = 1;
+  for (int i = num - 1; i >= 0; --i) {
+    buff[i] = cur_base;
+    cur_base *= dims[i];
+  }
+  for (int i = 0; i < num; ++i) {
+    base[i] = buff[axes[i]];
+  }
+  return base;
+}
+
+void IncreaseIndex(
+    const std::vector<TIndex>& dims,
+    std::vector<TIndex>* index) {
+  for (int i = index->size() - 1; i >= 0; --i) {
+    ++index->at(i);
+    if (index->at(i) >= dims[i]) {
+      index->at(i) -= dims[i];
+    } else {
+      break;
+    }
+  }
+}
+
+template <typename T>
+void TransposeCPU(
+    const std::vector<TIndex>& x_dims,
+    const std::vector<TIndex>& y_dims,
+    const std::vector<int>& axes,
+    const T* X,
+    T* Y) {
+  const TIndex count = std::accumulate(
+      x_dims.cbegin(), x_dims.cend(), TIndex(1), std::multiplies<TIndex>());
+  const int num_axes = axes.size();
+
+  // Measure amount of contiguous data we can copy at once
+  TIndex block_size = 1;
+  int num_shared_idxs = 0;
+  for (int i = num_axes - 1; i >= 0 && axes[i] == i; --i) {
+    block_size *= y_dims[i];
+    ++num_shared_idxs;
+  }
+
+  if (num_axes < 2 || num_shared_idxs == num_axes) {
+    memcpy(Y, X, count * sizeof(T));
+    return;
+  }
+
+  const int itr_axes = num_axes - num_shared_idxs;
+  const std::vector<TIndex> base_x = MakeBase(x_dims, axes, itr_axes);
+  std::vector<TIndex> index_digits(itr_axes, 0);
+  const TIndex num_blocks = count / block_size;
+  for (TIndex y_index = 0; y_index < num_blocks; ++y_index) {
+    const TIndex x_index = std::inner_product(
+        base_x.cbegin(), base_x.cend(), index_digits.cbegin(), TIndex(0));
+    if (block_size == 1) {
+      Y[y_index] = X[x_index];
+    } else {
+      memcpy(
+          Y + block_size * y_index,
+          X + block_size * x_index,
+          block_size * sizeof(T));
+    }
+    IncreaseIndex(y_dims, &index_digits);
+  }
+}
+
+} // namespace
+
+template <>
+void Transpose<float, CPUContext>(
+    const std::vector<TIndex>& x_dims,
+    const std::vector<TIndex>& y_dims,
+    const std::vector<int>& axes,
+    const float* X,
+    float* Y,
+    CPUContext* /* context */) {
+#ifdef CAFFE2_USE_HPTT
+  if (TryTransposeWithHPTT(x_dims, axes, X, Y)) {
+    return;
+  }
+#endif // CAFFE2_USE_HPTT
+  TransposeCPU(x_dims, y_dims, axes, X, Y);
+}
+
+#define CAFFE2_SPECIALIZED_TRANSPOSE(T)       \
+  template <>                                 \
+  void Transpose<T, CPUContext>(              \
+      const std::vector<TIndex>& x_dims,      \
+      const std::vector<TIndex>& y_dims,      \
+      const std::vector<int>& axes,           \
+      const T* X,                             \
+      T* Y,                                   \
+      CPUContext* /* context */) {            \
+    TransposeCPU(x_dims, y_dims, axes, X, Y); \
+  }
+CAFFE2_SPECIALIZED_TRANSPOSE(double)
+CAFFE2_SPECIALIZED_TRANSPOSE(int)
+CAFFE2_SPECIALIZED_TRANSPOSE(long)
+#undef CAFFE2_SPECIALIZED_TRANSPOSE
 
 } // namespace math
 } // namespace caffe2
