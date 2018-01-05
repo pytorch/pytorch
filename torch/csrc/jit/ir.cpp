@@ -285,6 +285,29 @@ std::ostream& operator<<(std::ostream & out, const Graph & g) {
   return out;
 }
 
+static void checkSameDevice(const Node* node) {
+  bool has_device = false;
+  int device;
+  auto checkValue = [&](const Value* v) {
+    if(v->hasType()) {
+      if(TensorType* type = v->type()->cast<TensorType>()) {
+        if(!has_device) {
+          has_device = true;
+          device = type->device();
+        } else {
+          JIT_ASSERT(device == type->device());
+        }
+      }
+    }
+  };
+  for(auto input : node->inputs()) {
+    checkValue(input);
+  }
+  for(auto output : node->outputs()) {
+    checkValue(output);
+  }
+}
+
 using node_set = std::set<const Node*>;
 #define ALL_OF(container) container.begin(), container.end()
 
@@ -365,6 +388,7 @@ void Node::lint() const {
     // TODO: add invariants
   // TODO: It's not good for these ops to be top-level, it makes cases longer.
   IR_ELSEIF(FusionGroup)
+    checkSameDevice(value);
     // TODO: Typecheck the parameters
     value->g(kSubgraph)->lint();
   IR_END()

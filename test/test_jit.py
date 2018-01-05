@@ -27,6 +27,8 @@ if torch.cuda.is_available():
         if (CUDA_VERSION < 8000 and major >= 6) or (CUDA_VERSION < 9000 and major >= 7):
             RUN_CUDA = False
 
+RUN_CUDA_MULTI_GPU = RUN_CUDA and torch.cuda.device_count() > 1
+
 
 def LSTMCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
     hx, cx = hidden
@@ -369,6 +371,23 @@ class TestJit(TestCase):
     def test_compile_addc(self):
         x = Variable(torch.Tensor([0.4]), requires_grad=True).float().cuda()
         y = Variable(torch.Tensor([0.7]), requires_grad=True).float().cuda()
+
+        @torch.jit.compile(nderivs=0)
+        def doit(x, y):
+            return torch.sigmoid(torch.tanh(x * (x + y) + 1))
+
+        z = doit(x, y)
+        with self.assertCompiled(doit):
+            z2 = doit(x, y)
+        self.assertEqual(z, torch.sigmoid(torch.tanh(x * (x + y) + 1)))
+        self.assertEqual(z, z2)
+
+    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
+    @unittest.skipIf(not RUN_CUDA_MULTI_GPU, "needs non-zero device")
+    def test_compile_fuse_last_device(self):
+        max_device = torch.cuda.device_count() - 1
+        x = Variable(torch.Tensor([0.4]), requires_grad=True).float().cuda(max_device)
+        y = Variable(torch.Tensor([0.7]), requires_grad=True).float().cuda(max_device)
 
         @torch.jit.compile(nderivs=0)
         def doit(x, y):

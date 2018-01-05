@@ -90,11 +90,11 @@ struct GraphFuser {
   GraphFuser(std::shared_ptr<Graph>& graph)
   : graph(graph) {}
 
-  bool isCuda(Node * node) {
+  int getDevice(Node * node) {
     if(node->kind() == kFusionGroup) {
-      return node->i(kis_cuda);
+      return node->i(kdevice);
     }
-    return node->output()->type()->expect<TensorType>()->device() != -1;
+    return node->output()->type()->expect<TensorType>()->device();
   }
   // TODO: the fusion compiler has a lot of float-specific codegen
   // so for now we only consider nodes that operate on floating point numbers
@@ -179,11 +179,11 @@ struct GraphFuser {
     // if the consumer allInputsAreThisProducer(consumer,producer)
     // we can move the consumer up into the producer.
     // but this requires better handling of merging fusion groups so it is not done now
-    bool consumer_is_cuda = isCuda(consumer);
+    int consumer_device = getDevice(consumer);
     return isFusable(producer->node()) &&
       allUsersAreThisConsumerOrOccurAfterIt(consumer, producer) &&
-      consumer_is_cuda == isCuda(producer->node()) &&
-      (consumer_is_cuda || sharedFusionCompiler().canCompileOnCPU());
+      consumer_device == getDevice(producer->node()) &&
+      (consumer_device != kCPUDevice || sharedFusionCompiler().canCompileOnCPU());
   }
 
   // insert a producer node into a consuming fusion group.
@@ -291,7 +291,7 @@ struct GraphFuser {
   // turn consumer node n into a fusion group with just n inside
   // to prepare for fusion and replace uses of n with the new group
   Node * createSingletonFusionGroup(Node * n) {
-    auto group = graph->createFusionGroup(isCuda(n));
+    auto group = graph->createFusionGroup(getDevice(n));
     // propogate position information for the new node so we can always
     // have a valid mapping
     topological_index[group] = topological_index[n];
