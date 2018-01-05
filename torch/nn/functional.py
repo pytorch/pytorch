@@ -1048,8 +1048,14 @@ def embedding(input, weight, padding_idx=None, max_norm=None, norm_type=2,
 
     """
     input = input.contiguous()
-    if padding_idx is None:
-        padding_idx = -1
+    if padding_idx is not None:
+        if padding_idx > 0:
+            assert padding_idx < weight.size(0), 'Padding_idx must be within num_embeddings'
+        elif padding_idx < 0:
+            assert padding_idx >= -weight.size(0), 'Padding_idx must be within num_embeddings'
+            padding_idx = weight.size(0) + padding_idx
+    elif padding_idx is None:
+            padding_idx = -1
     if max_norm is not None:
         with torch.no_grad():
             torch._C._VariableBase.embedding_renorm_(weight, input, max_norm, norm_type)
