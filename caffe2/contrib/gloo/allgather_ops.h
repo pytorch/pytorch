@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2016-present, Facebook, Inc.
+ * Copyright (c) 2017-present, Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -30,13 +30,12 @@ namespace caffe2 {
 namespace gloo {
 
 template <class Context>
-class BroadcastOp final : public Operator<Context> {
+class AllgatherOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
-  BroadcastOp(const OperatorDef& operator_def, Workspace* ws)
+  AllgatherOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        root_(OperatorBase::template GetSingleArgument<int>("root", 0)),
         ws_(ws),
         status_blob_(
             OperatorBase::GetSingleArgument<std::string>("status_blob", "")) {
@@ -45,7 +44,7 @@ class BroadcastOp final : public Operator<Context> {
     }
   }
 
-  virtual ~BroadcastOp() {}
+  virtual ~AllgatherOp() {}
 
   bool RunOnDevice() override {
     std::call_once(once_, [&] { initialize(); });
@@ -71,14 +70,18 @@ class BroadcastOp final : public Operator<Context> {
 
  protected:
   void initialize() {
+    // Allocate output tensor
+    CAFFE_ENFORCE_EQ(OutputSize(), 1);
+    auto comm_size =
+        OperatorBase::Input<std::shared_ptr<::gloo::Context>>(0)->size;
+    const auto dims =
+        std::vector<TIndex>(1, (InputSize() - 1) * Input(1).size() * comm_size);
+    Output(0)->Resize(dims);
+
     // Store which inputs/outputs this instance initialized with
     update(init_);
 
-    // Verify inputs == ouputs
-    CAFFE_ENFORCE_EQ(init_.inputs.size(), init_.outputs.size());
-    for (auto i = 0; i < init_.inputs.size(); i++) {
-      CAFFE_ENFORCE_EQ(init_.inputs[i], init_.outputs[i]);
-    }
+    CAFFE_ENFORCE_EQ(init_.outputs.size(), 1);
 
     // Verify tensors all have same size
     size_t size = Input(1).size();
@@ -86,7 +89,7 @@ class BroadcastOp final : public Operator<Context> {
       CAFFE_ENFORCE_EQ(Input(i).size(), size);
     }
 
-    // Verify tensors all have same size
+    // Verify tensors all have same type
     TypeMeta meta = Input(1).meta();
     for (auto i = 2; i < InputSize(); i++) {
       CAFFE_ENFORCE(Input(i).meta() == meta);
@@ -98,7 +101,6 @@ class BroadcastOp final : public Operator<Context> {
 
   void initializeAlgorithm();
 
-  const int root_;
   std::once_flag once_;
   std::unique_ptr<::gloo::Algorithm> algorithm_;
 
@@ -109,13 +111,13 @@ class BroadcastOp final : public Operator<Context> {
   void update(GlooParameters& params) {
     params.context = OperatorBase::Input<std::shared_ptr<::gloo::Context>>(0);
     params.inputs.resize(InputSize() - 1);
-    params.outputs.resize(OutputSize());
+    params.size = Input(1).size();
+    params.meta = Input(1).meta();
     for (auto i = 0; i < params.inputs.size(); i++) {
       params.inputs[i] = Input(i + 1).template raw_data();
-      params.outputs[i] = Output(i)->template raw_mutable_data();
     }
-    params.size = Output(0)->size();
-    params.meta = Output(0)->meta();
+    params.outputs.resize(OutputSize());
+    params.outputs[0] = Output(0)->raw_mutable_data(params.meta);
   }
 
   GlooParameters init_;

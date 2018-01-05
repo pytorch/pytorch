@@ -361,6 +361,86 @@ class TestCase(hu.HypothesisTestCase):
                     tmpdir=tmpdir,
                     use_float16=use_float16)
 
+    def _test_allgather(self,
+                        comm_rank=None,
+                        comm_size=None,
+                        blob_size=None,
+                        num_blobs=None,
+                        tmpdir=None,
+                        use_float16=False
+                        ):
+        store_handler, common_world = self.create_common_world(
+            comm_rank=comm_rank,
+            comm_size=comm_size,
+            tmpdir=tmpdir)
+
+        blob_size = self.synchronize(
+            store_handler,
+            blob_size,
+            comm_rank=comm_rank)
+
+        num_blobs = self.synchronize(
+            store_handler,
+            num_blobs,
+            comm_rank=comm_rank)
+
+        blobs = []
+        for i in range(num_blobs):
+            blob = "blob_{}".format(i)
+            value = np.full(blob_size, (comm_rank * num_blobs) + i,
+                            np.float16 if use_float16 else np.float32)
+            workspace.FeedBlob(blob, value)
+            blobs.append(blob)
+
+        net = core.Net("allgather")
+        net.Allgather(
+            [common_world] + blobs,
+            ["Gathered"],
+            engine=op_engine)
+
+        workspace.CreateNet(net)
+        workspace.RunNet(net.Name())
+        # create expected output
+        expected_output = np.array([])
+        for i in range(comm_size):
+            for j in range(num_blobs):
+                value = np.full(blob_size, (i * num_blobs) + j,
+                                np.float16 if use_float16 else np.float32)
+                expected_output = np.concatenate((expected_output, value))
+        np.testing.assert_array_equal(
+            workspace.FetchBlob("Gathered"), expected_output)
+
+        # Run the net a few more times to check the operator
+        # works not just the first time it's called
+        for _tmp in range(4):
+            workspace.RunNet(net.Name())
+
+    @given(comm_size=st.integers(min_value=2, max_value=8),
+           blob_size=st.integers(min_value=1e3, max_value=1e6),
+           num_blobs=st.integers(min_value=1, max_value=4),
+           device_option=st.sampled_from([hu.cpu_do]),
+           use_float16=st.booleans())
+    def test_allgather(self, comm_size, blob_size, num_blobs, device_option,
+                       use_float16):
+        TestCase.test_counter += 1
+        if os.getenv('COMM_RANK') is not None:
+            self.run_test_distributed(
+                self._test_allgather,
+                blob_size=blob_size,
+                num_blobs=num_blobs,
+                use_float16=use_float16,
+                device_option=device_option)
+        else:
+            with TemporaryDirectory() as tmpdir:
+                self.run_test_locally(
+                    self._test_allgather,
+                    comm_size=comm_size,
+                    blob_size=blob_size,
+                    num_blobs=num_blobs,
+                    device_option=device_option,
+                    tmpdir=tmpdir,
+                    use_float16=use_float16)
+
     @given(device_option=st.sampled_from([hu.cpu_do]))
     def test_forked_cw(self, device_option):
         TestCase.test_counter += 1

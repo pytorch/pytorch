@@ -91,7 +91,7 @@ Does an allreduce operation among the nodes. Currently only Sum is supported.
     .Output(0, "Y", "The allreduced tensor, same on all nodes.");
 
 OPERATOR_SCHEMA(Allgather)
-    .NumInputs(2)
+    .NumInputs(2, INT_MAX)
     .NumOutputs(1)
     .InputsCanCrossDevices()
     .SetDoc(R"DOC(
