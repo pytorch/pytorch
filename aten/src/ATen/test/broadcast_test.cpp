@@ -8,11 +8,10 @@ int main() {
 
   // 0) pre-req tests:
   // can't expand empty tensor
-  try {
+  {
     auto empty = T.randn({0});
-    empty.expand({3});
-    ASSERT(false);
-  } catch(std::runtime_error &e) {}
+    ASSERT_THROWS(empty.expand({3}));
+  }
 
   // 1) out-place function with 2 args
   {
@@ -29,20 +28,18 @@ int main() {
     ASSERT((aScalar + b).equal(aScalar.expand(b.sizes()) + b.expand(b.sizes())));
 
     // old fallback behavior yields error
-    try {
+    {
       auto a = T.randn({3, 5});
       auto b = T.randn({5, 3});
-      a + b;
-      ASSERT(false);
-    } catch (std::runtime_error &e) {}
+      ASSERT_THROWS(a + b);
+    }
 
     // with mismatched sizes
-    try {
+    {
       auto a = T.randn({3, 5});
       auto b = T.randn({7, 5});
-      a + b;
-      ASSERT(false);
-    } catch (std::runtime_error &e) {}
+      ASSERT_THROWS(a + b);
+    }
   }
 
   // 2) out-place function with 3 args
@@ -63,20 +60,18 @@ int main() {
            aTensorScalar.expand(expanded_sizes).addcmul(b.expand(expanded_sizes), c.expand(expanded_sizes))));
 
     // old fallback behavior yields error
-    try {
+    {
       auto a = T.randn({3, 2, 5});
       auto b = T.randn({2, 3, 5});
       auto c = T.randn({5, 3, 2});
-      a.addcmul(b, c);
-      ASSERT(false);
-    } catch(std::runtime_error &e) {}
+      ASSERT_THROWS(a.addcmul(b, c));
+    }
 
     // with mismatched sizes
-    try {
+    {
       auto c = T.randn({5, 5, 5});
-      a.addcmul(b, c);
-      ASSERT(false);
-    } catch(std::runtime_error &e) {}
+      ASSERT_THROWS(a.addcmul(b, c));
+    }
   }
 
   // 3) in-place function with 2 args
@@ -92,12 +87,11 @@ int main() {
     ASSERT((a + bScalar).equal(a + bScalar.expand(a.sizes())));
 
     // error: would have to expand inplace arg
-    try {
+    {
       auto a = T.randn({1, 5});
       auto b = T.randn({3, 1});
-      a.add_(b);
-      ASSERT(false);
-    } catch(std::runtime_error &e) {}
+      ASSERT_THROWS(a.add_(b));
+    }
   }
 
   // 4) in-place function with 3 args
@@ -116,13 +110,12 @@ int main() {
     ASSERT(a.addcmul_(bScalar, c).equal(aClone.addcmul_(bScalar.expand(a.sizes()), c.expand(a.sizes()))));
 
     // error: would have to expand inplace arg
-    try {
+    {
       auto a = T.randn({1, 3, 5});
       auto b = T.randn({4, 1, 1});
       auto c = T.randn({1, 3, 1});
-      a.addcmul_(b, c);
-      ASSERT(false);
-    } catch(std::runtime_error &e) {}
+      ASSERT_THROWS(a.addcmul_(b, c));
+    }
   }
 
   // explicit dim specification
@@ -139,11 +132,10 @@ int main() {
     ASSERT(aScalar.addmm(b, c).equal(aScalar.expand({5, 7}).addmm(b, c)));
 
     // with mismatched sizes
-    try {
+    {
       auto a = T.randn({3, 3});
-      a.addmm(b, c);
-      ASSERT(false);
-    } catch(std::runtime_error &e) {}
+      ASSERT_THROWS(a.addmm(b, c));
+    }
   }
 
   return 0;

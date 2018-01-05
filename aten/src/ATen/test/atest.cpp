@@ -31,14 +31,10 @@ int main() {
   foo = foo+foo*3;
   foo -= 4;
 
-  bool threw = false;
-  try {
+  {
     Tensor no;
-    add_out(no,foo,foo);
-  } catch (std::runtime_error&) {
-    threw = true;
+    ASSERT_THROWS(add_out(no,foo,foo));
   }
-  check(threw);
   Scalar a = 4;
 
   float b = a.to<float>();
@@ -70,13 +66,7 @@ int main() {
 
   cout << f << endl;
   cout << f.strides() << " " << f.sizes() << endl;
-  threw = false;
-  try {
-    f.resize_({3,4,5});
-  } catch(std::runtime_error&) {
-    threw = true;
-  }
-  check(threw);
+  ASSERT_THROWS(f.resize_({3,4,5}));
   {
     int isgone = 0;
     {

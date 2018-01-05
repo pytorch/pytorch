@@ -116,13 +116,7 @@ int main() {
   Tensor next_h = i2h.add(h2h);
   next_h = next_h.tanh();
 
-  bool threw = false;
-  try {
-    Scalar{Tensor{}};
-  } catch (std::runtime_error& e) {
-    threw = true;
-  }
-  ASSERT(threw);
+  ASSERT_THROWS(Scalar{Tensor{}});
 
   test_ctors();
   test_overflow();
@@ -142,11 +136,10 @@ int main() {
   dispatch_all<void, Foo>(x.type(),"foo",x,prev_h);
 
   // test direct C-scalar type conversions
-  try {
+  {
     auto x = T.ones({1,2});
-    x.toCFloat();
-    ASSERT(false);
-  } catch (std::runtime_error &e) {}
+    ASSERT_THROWS(x.toCFloat());
+  }
   auto float_one = T.ones({});
   ASSERT(float_one.toCFloat() == 1);
   ASSERT(float_one.toCInt() == 1);

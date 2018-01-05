@@ -28,10 +28,7 @@ int main() {
   // test case with empty tensor
   {
     auto a = T.randn(0);
-    try {
-      a.prod(0);
-      ASSERT(false);
-    } catch (std::runtime_error &e) {}
+    ASSERT_THROWS(a.prod(0));
   }
 
   // test case with scalar vs 1-dim, 1-size
@@ -40,9 +37,6 @@ int main() {
     ASSERT(a.prod(0).equal(a.prod(-1)));
     a.get()->maybeScalar(true);
     ASSERT(a.get()->isScalar());
-    try {
-      a.prod(0);
-      ASSERT(false);
-    } catch (std::runtime_error &e) {}
+    ASSERT_THROWS(a.prod(0));
   }
 }
