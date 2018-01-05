@@ -425,6 +425,79 @@ def compare_cpu_gpu(tensor_constructor, arg_constructor, fn, t, precision=1e-5, 
 
 
 class TestCuda(TestCase):
+
+    def test_memory_allocated_stats(self):
+        torch.cuda.empty_cache()
+        m0 = last_m = torch.cuda.memory_allocated()
+        max_m = torch.cuda.max_memory_allocated()
+
+        def assert_change(comp=1):
+            # comp > 0: increased
+            # comp = 0: equal
+            # comp < 0: decreased
+            nonlocal last_m, max_m
+            new_m = torch.cuda.memory_allocated()
+            new_max_m = torch.cuda.max_memory_allocated()
+            if comp > 0:
+                self.assertGreater(new_m, last_m)
+            elif comp < 0:
+                self.assertLess(new_m, last_m)
+            else:
+                self.assertEqual(new_m, last_m)
+            self.assertLessEqual(new_m, new_max_m)
+            self.assertGreaterEqual(new_max_m, max_m)
+            last_m = new_m
+            max_m = new_max_m
+
+        tensors1 = [torch.randn(1).cuda(), torch.randn(10, 20).cuda(), torch.randn(200, 300, 2000).cuda()]
+        m1 = torch.cuda.memory_allocated()
+        assert_change(1)
+
+        tensors2 = []
+        N = 30
+
+        for i in range(1, int(N / 2) + 1):
+            # small ones
+            tensors2.append(torch.randn(i, i * 3).cuda())
+        assert_change(1)
+
+        for i in range(1, N - len(tensors2) + 1):
+            # large ones
+            tensors2.append(torch.randn(i * 7, i * 9, i * 11).cuda())
+        assert_change(1)
+
+        tensors2.append(torch.randn(0, 0, 0).cuda())
+        assert_change(0)
+
+        permute = []
+        for i in torch.randperm(len(tensors2)):
+            permute.append(tensors2[i])
+            assert_change(0)
+
+        del tensors2
+        assert_change(0)
+        tensors2 = permute
+        assert_change(0)
+        del permute
+        assert_change(0)
+
+        for i in range(int(N / 2)):
+            x = tensors2[i].numel()
+            del tensors2[i]
+            assert_change(-x)
+
+        for i in range(1, int(2 * N / 3) + 1):
+            tensors2.append(torch.randn(i, i * 5, i * 12).cuda())
+            assert_change(1)
+
+        del tensors2
+        assert_change(-1)
+        self.assertEqual(torch.cuda.memory_allocated(), m1)
+
+        del tensors1
+        assert_change(-1)
+        self.assertEqual(torch.cuda.memory_allocated(), m0)
+
     @unittest.skipIf(torch.cuda.device_count() < 2, "only one GPU detected")
     def _test_autogpu(self, TensorCtor):
         x = TensorCtor().cuda()
