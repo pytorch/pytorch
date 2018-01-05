@@ -3,6 +3,7 @@ from numbers import Number
 import torch
 from torch.autograd import Function, Variable
 from torch.autograd.function import once_differentiable
+from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
 from torch.distributions.utils import broadcast_all
 
@@ -43,6 +44,8 @@ class Dirichlet(Distribution):
     Args:
         alpha (Tensor or Variable): concentration parameter of the distribution
     """
+    params = {'alpha': constraints.positive}
+    support = constraints.simplex
     has_rsample = True
 
     def __init__(self, alpha):

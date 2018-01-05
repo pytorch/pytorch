@@ -207,15 +207,7 @@ void ToONNX(std::shared_ptr<tracer::TracingState>& state, bool aten) {
     // Needed so that symbolic calls create nodes with correct stages.
     auto stage_guard = new_graph->setStageTemporary(node->stage());
     IR_IFM(node, CppOp)
-      if (auto fn = std::dynamic_pointer_cast<autograd::HasSymbolic>(value->fn)) {
-        auto outputs = fn->symbolic(&ctx, fmap(node->inputs(), envFn), node->getSourceLocation());
-        for (auto& el: outputs) {
-          el->node()->setScope(node->scope());
-        }
-        setOutputs(value->name(), node, outputs);
-      } else {
-        cloneNode(node);
-      }
+      cloneNode(node);
     IR_ELSEIFM(PythonOp)
       callPySymbolicMethod(value);
     IR_ELSE()
