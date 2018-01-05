@@ -470,20 +470,24 @@ void CompiledFusionFunction::launch(at::ArrayRef<at::Tensor> inputs, std::vector
 
 #ifdef WITH_CUDA
 
+void checkCUDAVersion(const cudaDeviceProp & prop) {
+  if ((prop.major >= 6 && CUDA_VERSION < 8000) ||
+      (prop.major >= 7 && CUDA_VERSION < 9000)) {
+    std::stringstream err_string;
+    err_string << "In CompiledFusionFunction, PyTorch compiled with insufficient CUDA version: "
+         << CUDA_VERSION << " for the current GPU device " << prop.name
+         << " with device capability " << prop.major << "." << prop.minor;
+    throw std::runtime_error(err_string.str());
+  }
+}
+
 struct CUDAFusionFunction : public CompiledFusionFunction {
   CUDAFusionFunction(const std::string & name, AnnotatedGraph & agraph)
   : CompiledFusionFunction(name, agraph) {
-    TORCH_CUDA_CHECK(cudaGetDevice(&device));
-    TORCH_CUDA_CHECK(cudaGetDeviceProperties(&prop, device));
+    AutoGPU gpu_guard(agraph.device);
 
-    if ((prop.major >= 6 && CUDA_VERSION < 8000) ||
-        (prop.major >= 7 && CUDA_VERSION < 9000)) {
-      std::stringstream err_string;
-      err_string << "In CompiledFusionFunction, PyTorch compiled with insufficient CUDA version: "
-  	       << CUDA_VERSION << " for the current GPU device " << prop.name
-  	       << " with device capability " << prop.major << "." << prop.minor;
-      throw std::runtime_error(err_string.str());
-    }
+    TORCH_CUDA_CHECK(cudaGetDeviceProperties(&prop, agraph.device));
+    checkCUDAVersion(prop);
 
     std::stringstream cu;
     concat_desc = codegen::emitCompilationUnit(cu, name, agraph, true);
@@ -635,9 +639,9 @@ static const std::string cpp_template = "/tmp/pytorch_fuserXXXXXX.cpp";
 // want.  This probably won't work if you're cross-compiling.
 static const std::string compile_string =
   "\"${cxx}\" -O3 -g "
-#ifndef __PPC64__ 
+#ifndef __PPC64__
   "-march=native "
-#endif 
+#endif
   "-std=c++11 -fPIC ${fopenmp} -shared \"${cpp_file}\" -o \"${so_file}\"";
 
 static void runCompiler(FusionCompilerConfig & config, const std::string & cpp_file, const std::string & so_file) {
@@ -700,16 +704,7 @@ protected:
 std::shared_ptr<CompiledFusionFunction> FusionCompiler::getOrCompile(AnnotatedGraph & agraph) {
   std::stringstream key;
   key << *agraph.graph << "\n";
-  key << "is_cuda " << agraph.is_cuda << "\n";
-  if(agraph.is_cuda) {
-#ifdef WITH_CUDA
-    int device;
-    TORCH_CUDA_CHECK(cudaGetDevice(&device));
-    key << "Device " << device << "\n";
-#else
-    throw std::runtime_error("cannot compile a CUDA fusion group, CUDA is not enabled.");
-#endif
-  }
+  key << "device " << agraph.device << "\n";
   for(auto & i : agraph.input_desc)
     key << i << "\n";
   for(auto & i : agraph.output_desc)
@@ -720,7 +715,7 @@ std::shared_ptr<CompiledFusionFunction> FusionCompiler::getOrCompile(AnnotatedGr
   if (it == cache.end()) {
     std::string name = "kernel_" + std::to_string(cache.size());
     CompiledFusionFunction * raw_func;
-    if(agraph.is_cuda) {
+    if(agraph.device != kCPUDevice) {
 #ifdef WITH_CUDA
       raw_func = new CUDAFusionFunction(name, agraph);
 #else
@@ -737,7 +732,7 @@ std::shared_ptr<CompiledFusionFunction> FusionCompiler::getOrCompile(AnnotatedGr
 
 std::shared_ptr<CompiledFusionFunction> FusionCompiler::getOrCompile(Node* fusion_group) {
   auto & graph = *fusion_group->g(kSubgraph);
-  AnnotatedGraph agraph(graph, fusion_group->i(kis_cuda));
+  AnnotatedGraph agraph(graph, fusion_group->i(kdevice));
   for(auto & input : graph.inputs()) {
     auto t = input->type()->expect<TensorType>();
     agraph.input_desc.emplace_back(t);
@@ -751,10 +746,10 @@ std::shared_ptr<CompiledFusionFunction> FusionCompiler::getOrCompile(Node* fusio
 
 
 std::shared_ptr<CompiledFusionFunction> FusionCompiler::getOrCompile(Graph & graph,
-                                                     bool is_cuda,
+                                                     int device,
                                                      at::ArrayRef<at::Tensor> inputs,
                                                      at::ArrayRef<at::Tensor> outputs) {
-  AnnotatedGraph agraph(graph, is_cuda);
+  AnnotatedGraph agraph(graph, device);
   for(auto & i : inputs) {
    agraph.input_desc.emplace_back(i);
   }
@@ -764,8 +759,8 @@ std::shared_ptr<CompiledFusionFunction> FusionCompiler::getOrCompile(Graph & gra
   return getOrCompile(agraph);
 }
 
-void FusionCompiler::debugLaunchGraph(Graph & graph, bool is_cuda, at::ArrayRef<at::Tensor> inputs, at::ArrayRef<at::Tensor> outputs) {
-  auto func = getOrCompile(graph, is_cuda, inputs, outputs);
+void FusionCompiler::debugLaunchGraph(Graph & graph, int device, at::ArrayRef<at::Tensor> inputs, at::ArrayRef<at::Tensor> outputs) {
+  auto func = getOrCompile(graph, device, inputs, outputs);
   func->launch_with_tensors(inputs, outputs);
 }
 
@@ -839,13 +834,13 @@ std::shared_ptr<CompiledFusionFunction> FusionCompiler::getOrCompile(Node* fusio
 
 
 std::shared_ptr<CompiledFusionFunction> FusionCompiler::getOrCompile(Graph & graph,
-                                                     bool is_cuda,
+                                                     int device,
                                                      at::ArrayRef<at::Tensor> inputs,
                                                      at::ArrayRef<at::Tensor> outputs) {
   return nullptr;
 }
 
-void FusionCompiler::debugLaunchGraph(Graph & graph, bool is_cuda, at::ArrayRef<at::Tensor> inputs, at::ArrayRef<at::Tensor> outputs) {}
+void FusionCompiler::debugLaunchGraph(Graph & graph, int device, at::ArrayRef<at::Tensor> inputs, at::ArrayRef<at::Tensor> outputs) {}
 
 FusionCompiler::FusionCompiler() {}
 
