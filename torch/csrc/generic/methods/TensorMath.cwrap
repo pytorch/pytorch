@@ -2368,6 +2368,27 @@ static const char *R = &__R;
 ]]
 
 [[
+  name: bgesv
+  types:
+    - Float
+    - Double
+  backends:
+    - CPU
+    - CUDA
+  variants:
+    - method
+    - function
+  return: argument 0,1
+  arguments:
+    - arg: THTensor* solution
+      output: True
+    - arg: THTensor* lu
+      output: True
+    - THTensor* self
+    - THTensor* A
+]]
+
+[[
   name: gels
   types:
     - Float

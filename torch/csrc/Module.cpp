@@ -337,6 +337,7 @@ IMPLEMENT_STATELESS(rand)
 IMPLEMENT_STATELESS(randn)
 IMPLEMENT_STATELESS(masked_select)
 IMPLEMENT_STATELESS(gesv)
+IMPLEMENT_STATELESS(bgesv)
 IMPLEMENT_STATELESS(gels)
 IMPLEMENT_STATELESS(trtrs)
 IMPLEMENT_STATELESS(symeig)
@@ -759,6 +760,7 @@ static PyMethodDef TorchMethods[] = {
   {"cat",             (PyCFunction)THPModule_cat,               METH_VARARGS | METH_KEYWORDS, NULL},
   {"masked_select",   (PyCFunction)THPModule_masked_select,     METH_VARARGS | METH_KEYWORDS, NULL},
   {"gesv",            (PyCFunction)THPModule_gesv,              METH_VARARGS | METH_KEYWORDS, NULL},
+  {"bgesv",           (PyCFunction)THPModule_bgesv,             METH_VARARGS | METH_KEYWORDS, NULL},
   {"gels",            (PyCFunction)THPModule_gels,              METH_VARARGS | METH_KEYWORDS, NULL},
   {"trtrs",           (PyCFunction)THPModule_trtrs,             METH_VARARGS | METH_KEYWORDS, NULL},
   {"symeig",          (PyCFunction)THPModule_symeig,            METH_VARARGS | METH_KEYWORDS, NULL},
