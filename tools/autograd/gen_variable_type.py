@@ -54,6 +54,9 @@ DONT_PROFILE = {
     'size', 'storage_offset', 'stride',
 }
 
+# We don't set or modify grad_fn on these methods. Generally, they return
+# tensors that have requires_grad=False. In-place functions listed here will
+# not examine or modify requires_grad or grad_fn.
 DONT_REQUIRE_DERIVATIVE = {
     # These  only depend on the input Tensor's shape and device, not the data
     'ones_like', 'zeros_like',
