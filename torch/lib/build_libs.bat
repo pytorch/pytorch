@@ -32,6 +32,12 @@ IF "%~1"=="--with-nnpack" (
   set /a NO_NNPACK=1
 )
 
+IF "%DEBUG%"=="1" (
+  set BUILD_TYPE=Debug
+) ELSE (
+  set BUILD_TYPE=Release 
+)
+
 IF "%CMAKE_GENERATOR%"=="" (
   set CMAKE_GENERATOR_COMMAND=
   set MAKE_COMMAND=msbuild INSTALL.vcxproj /p:Configuration=Release
@@ -99,7 +105,7 @@ goto:eof
                   -DNO_CUDA=%NO_CUDA% ^
                   -DNO_NNPACK=%NO_NNPACK% ^
                   -Dnanopb_BUILD_GENERATOR=0 ^
-                  -DCMAKE_BUILD_TYPE=Release
+                  -DCMAKE_BUILD_TYPE=%BUILD_TYPE%
 
   %MAKE_COMMAND%
   cd ../..
@@ -118,7 +124,7 @@ goto:eof
                   -DNO_NNPACK=%NO_NNPACK% ^
                   -DCUDNN_INCLUDE_DIR="%CUDNN_INCLUDE_DIR%" ^
                   -DCUDNN_LIB_DIR="%CUDNN_LIB_DIR%" ^
-                  -DCMAKE_BUILD_TYPE=Release
+                  -DCMAKE_BUILD_TYPE=%BUILD_TYPE%
 
   %MAKE_COMMAND%
   cd ../..
