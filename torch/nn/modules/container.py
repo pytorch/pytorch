@@ -185,12 +185,13 @@ class ParameterList(Module):
 
     def __getitem__(self, idx):
         if isinstance(idx, slice):
-            return ModuleList(list(self._parameters.values())[idx])
-        if not (-len(self) <= idx < len(self)):
-            raise IndexError('index {} is out of range'.format(idx))
-        if idx < 0:
-            idx += len(self)
-        return self._parameters[str(idx)]
+            return ParameterList(list(self._parameters.values())[idx])
+        else:
+            if not (-len(self) <= idx < len(self)):
+                raise IndexError('index {} is out of range'.format(idx))
+            if idx < 0:
+                idx += len(self)
+            return self._parameters[str(idx)]
 
     def __setitem__(self, idx, param):
         return self.register_parameter(str(idx), param)
