@@ -102,11 +102,8 @@ class SGD(Optimizer):
                         d_p = buf
 
                 if weight_decay != 0:
-                    xold = p.data.clone()
+                    p.data.add_(-weight_decay, p.data)
 
                 p.data.add_(-group['lr'], d_p)
-
-                if weight_decay != 0:
-                    p.data.add_(-weight_decay, xold)
 
         return loss
