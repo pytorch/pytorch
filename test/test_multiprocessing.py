@@ -18,7 +18,8 @@ TEST_REPEATS = 30
 HAS_SHM_FILES = os.path.isdir('/dev/shm')
 TEST_CUDA_IPC = torch.cuda.is_available() and \
     sys.version_info[0] == 3 and \
-    sys.platform != 'darwin'
+    sys.platform != 'darwin' and \
+    sys.platform != 'win32'
 TEST_MULTIGPU = TEST_CUDA_IPC and torch.cuda.device_count() > 1
 
 
@@ -318,6 +319,7 @@ class TestMultiprocessing(TestCase):
             self.assertEqual(tensor_size, 5)
             self.assertEqual(storage_size, 5)
 
+    @unittest.skipIf(IS_WINDOWS, 'not applicable to Windows (only fails with fork)')
     @unittest.skipIf(not torch.cuda.is_available(), 'CUDA not available')
     def test_cuda_bad_call(self):
         # Initialize CUDA
