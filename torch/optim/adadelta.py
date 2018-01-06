@@ -75,11 +75,9 @@ class Adadelta(Optimizer):
                 delta = acc_delta.add(eps).sqrt_().div_(std).mul_(grad)
 
                 if group['weight_decay'] != 0:
-                    xold = p.data.clone()
-                p.data.add_(-group['lr'], delta)
+                    p.data.add_(-group['weight_decay'], p.data)
 
-                if group['weight_decay'] != 0:
-                    p.data.add_(-group['weight_decay'], xold)
+                p.data.add_(-group['lr'], delta)
 
                 acc_delta.mul_(rho).addcmul_(1 - rho, delta, delta)
 
