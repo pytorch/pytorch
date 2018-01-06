@@ -50,14 +50,17 @@ class Sequential(Module):
                 self.add_module(str(idx), module)
 
     def __getitem__(self, idx):
-        if not (-len(self) <= idx < len(self)):
-            raise IndexError('index {} is out of range'.format(idx))
-        if idx < 0:
-            idx += len(self)
-        it = iter(self._modules.values())
-        for i in range(idx):
-            next(it)
-        return next(it)
+        if isinstance(idx, slice):
+            return Sequential(OrderedDict(list(self._modules.items())[idx]))
+        else:
+            if not (-len(self) <= idx < len(self)):
+                raise IndexError('index {} is out of range'.format(idx))
+            if idx < 0:
+                idx += len(self)
+            it = iter(self._modules.values())
+            for i in range(idx):
+                next(it)
+            return next(it)
 
     def __len__(self):
         return len(self._modules)
@@ -102,11 +105,14 @@ class ModuleList(Module):
             self += modules
 
     def __getitem__(self, idx):
-        if not (-len(self) <= idx < len(self)):
-            raise IndexError('index {} is out of range'.format(idx))
-        if idx < 0:
-            idx += len(self)
-        return self._modules[str(idx)]
+        if isinstance(idx, slice):
+            return ModuleList(list(self._modules.values())[idx])
+        else:
+            if not (-len(self) <= idx < len(self)):
+                raise IndexError('index {} is out of range'.format(idx))
+            if idx < 0:
+                idx += len(self)
+            return self._modules[str(idx)]
 
     def __setitem__(self, idx, module):
         return setattr(self, str(idx), module)
@@ -178,11 +184,14 @@ class ParameterList(Module):
             self += parameters
 
     def __getitem__(self, idx):
-        if not (-len(self) <= idx < len(self)):
-            raise IndexError('index {} is out of range'.format(idx))
-        if idx < 0:
-            idx += len(self)
-        return self._parameters[str(idx)]
+        if isinstance(idx, slice):
+            return ParameterList(list(self._parameters.values())[idx])
+        else:
+            if not (-len(self) <= idx < len(self)):
+                raise IndexError('index {} is out of range'.format(idx))
+            if idx < 0:
+                idx += len(self)
+            return self._parameters[str(idx)]
 
     def __setitem__(self, idx, param):
         return self.register_parameter(str(idx), param)

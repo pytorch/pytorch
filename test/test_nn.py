@@ -714,6 +714,11 @@ class TestNN(NNTestCase):
         self.assertEqual(n[1], l2)
         self.assertEqual(n[2], l3)
         self.assertEqual(n[3], l4)
+        self.assertEqual(n[1:], nn.Sequential(l2, l3, l4))
+        self.assertEqual(n[3:], nn.Sequential(l4))
+        self.assertEqual(n[:-1], nn.Sequential(l1, l2, l3))
+        self.assertEqual(n[:-3], nn.Sequential(l1))
+        self.assertEqual(n[::-1], nn.Sequential(l4, l3, l2, l1))
 
     def test_ModuleList(self):
         modules = [nn.ReLU(), nn.Linear(5, 5)]
@@ -742,6 +747,11 @@ class TestNN(NNTestCase):
         modules[2] = nn.Conv2d(5, 3, 2)
         module_list[2] = modules[2]
         check()
+        self.assertEqual(module_list[1:], nn.ModuleList(modules[1:]))
+        self.assertEqual(module_list[3:], nn.ModuleList(modules[3:]))
+        self.assertEqual(module_list[:-1], nn.ModuleList(modules[:-1]))
+        self.assertEqual(module_list[:-3], nn.ModuleList(modules[:-3]))
+        self.assertEqual(module_list[::-1], nn.ModuleList(modules[::-1]))
 
         with self.assertRaises(TypeError):
             module_list += nn.ReLU()
@@ -796,6 +806,11 @@ class TestNN(NNTestCase):
         parameters[2] = make_param()
         param_list[2] = parameters[2]
         check()
+        self.assertEqual(param_list[1:], nn.ParameterList(parameters[1:]))
+        self.assertEqual(param_list[3:], nn.ParameterList(parameters[3:]))
+        self.assertEqual(param_list[:-1], nn.ParameterList(parameters[:-1]))
+        self.assertEqual(param_list[:-3], nn.ParameterList(parameters[:-3]))
+        self.assertEqual(param_list[::-1], nn.ParameterList(parameters[::-1]))
 
         with self.assertRaises(TypeError):
             param_list += make_param()
