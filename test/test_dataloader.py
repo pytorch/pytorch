@@ -274,7 +274,10 @@ class TestDataLoader(TestCase):
     def test_segfault(self):
         p = multiprocessing.Process(target=_test_segfault)
         p.start()
-        p.join(1.0 * BASE_TIMEOUT)
+        start_time = time.time()
+        p.join()
+        elapsed_time = time.time() - start_time
+        print('segfault:' + str(elapsed_time))
         try:
             self.assertFalse(p.is_alive())
             self.assertNotEqual(p.exitcode, 0)
@@ -284,7 +287,10 @@ class TestDataLoader(TestCase):
     def test_timeout(self):
         p = multiprocessing.Process(target=_test_timeout)
         p.start()
-        p.join(3.0 * BASE_TIMEOUT)
+        start_time = time.time()
+        p.join()
+        elapsed_time = time.time() - start_time
+        print('timeout:' + str(elapsed_time))
         try:
             self.assertFalse(p.is_alive())
             self.assertNotEqual(p.exitcode, 0)
@@ -389,7 +395,10 @@ class TestDataLoader(TestCase):
                 break
         del loader
         for w in workers:
-            w.join(1.0 * BASE_TIMEOUT)
+            start_time = time.time()
+            w.join()
+            elapsed_time = time.time() - start_time
+            print('partial_worker:' + str(elapsed_time))
             self.assertFalse(w.is_alive(), 'subprocess not terminated')
             self.assertEqual(w.exitcode, 0)
         worker_manager_thread.join(1.0 * BASE_TIMEOUT)
