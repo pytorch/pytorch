@@ -91,7 +91,7 @@ class RMSprop(Optimizer):
                     p.data.add_(-group['lr'], buf)
                 else:
                     p.data.addcdiv_(-group['lr'], grad, avg)
-                
+
                 if group['weight_decay'] != 0:
                     p.data.add_(-group['weight_decay'], xold)
 

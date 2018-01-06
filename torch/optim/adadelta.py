@@ -64,7 +64,7 @@ class Adadelta(Optimizer):
                 square_avg.mul_(rho).addcmul_(1 - rho, grad, grad)
                 std = square_avg.add(eps).sqrt_()
                 delta = acc_delta.add(eps).sqrt_().div_(std).mul_(grad)
-                
+
                 if group['weight_decay'] != 0:
                     xold = p.data.clone()
                 p.data.add_(-group['lr'], delta)
