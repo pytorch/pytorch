@@ -25,16 +25,20 @@ class StudentT(Distribution):
     support = constraints.real
     has_rsample = True
 
-    def __init__(self, df, loc=0, scale=1):
+    def __init__(self, df, loc=0., scale=1.):
         self.df, self.loc, self.scale = broadcast_all(df, loc, scale)
         self._chi2 = Chi2(df)
         batch_shape = torch.Size() if isinstance(df, Number) else self.df.size()
         super(StudentT, self).__init__(batch_shape)
 
     def rsample(self, sample_shape=torch.Size()):
+        # NOTE: This does not agree with scipy implementation as much as other distributions.
+        # (see https://github.com/fritzo/notebooks/blob/master/debug-student-t.ipynb). Using DoubleTensor
+        # parameters seems to help.
+
         #   X ~ Normal(0, 1)
         #   Z ~ Chi2(df)
-        #   Y = X / sqrt(Z / df) ~ StudentT(df).
+        #   Y = X / sqrt(Z / df) ~ StudentT(df)
         shape = self._extended_shape(sample_shape)
         X = self.df.new(*shape).normal_()
         Z = self._chi2.rsample(sample_shape)
