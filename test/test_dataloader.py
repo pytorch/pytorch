@@ -13,6 +13,8 @@ from torch.utils.data.dataloader import default_collate
 from common import TestCase, run_tests, TEST_NUMPY, IS_WINDOWS
 from common_nn import TEST_CUDA
 
+JOIN_TIMEOUT = 14.0 if IS_WINDOWS else 1.5
+
 
 class TestDatasetRandomSplit(TestCase):
     def test_lengths_must_equal_datset_size(self):
@@ -172,6 +174,27 @@ class SynchronizedSeedDataset(Dataset):
         return self.size
 
 
+def _test_timeout():
+    os.close(sys.stderr.fileno())
+    sys.stderr.close()
+    dataset = SleepDataset(10, 10)
+    dataloader = DataLoader(dataset, batch_size=2, num_workers=2, timeout=1)
+    _ = next(iter(dataloader))
+
+
+def _test_segfault():
+    os.close(sys.stderr.fileno())
+    sys.stderr.close()
+    dataset = SegfaultDataset(10)
+    dataloader = DataLoader(dataset, batch_size=2, num_workers=2)
+    _ = next(iter(dataloader))
+
+
+# test custom init function
+def init_fn(worker_id):
+    torch.manual_seed(12345)
+
+
 class TestDataLoader(TestCase):
 
     def setUp(self):
@@ -248,36 +271,20 @@ class TestDataLoader(TestCase):
         next(loader1_it)
         next(loader2_it)
 
-    @unittest.skipIf(IS_WINDOWS, "TODO: need to fix this test case for Windows")
     def test_segfault(self):
-        def _test_segfault():
-            os.close(sys.stderr.fileno())
-            sys.stderr.close()
-            dataset = SegfaultDataset(10)
-            dataloader = DataLoader(dataset, batch_size=2, num_workers=2)
-            _ = next(iter(dataloader))
-
         p = multiprocessing.Process(target=_test_segfault)
         p.start()
-        p.join(1.0)
+        p.join(JOIN_TIMEOUT)
         try:
             self.assertFalse(p.is_alive())
             self.assertNotEqual(p.exitcode, 0)
         finally:
             p.terminate()
 
-    @unittest.skipIf(IS_WINDOWS, "TODO: need to fix this test case for Windows")
     def test_timeout(self):
-        def _test_timeout():
-            os.close(sys.stderr.fileno())
-            sys.stderr.close()
-            dataset = SleepDataset(10, 10)
-            dataloader = DataLoader(dataset, batch_size=2, num_workers=2, timeout=1)
-            _ = next(iter(dataloader))
-
         p = multiprocessing.Process(target=_test_timeout)
         p.start()
-        p.join(3.0)
+        p.join(3.0 + JOIN_TIMEOUT)
         try:
             self.assertFalse(p.is_alive())
             self.assertNotEqual(p.exitcode, 0)
@@ -293,12 +300,7 @@ class TestDataLoader(TestCase):
             seeds.add(batch[0])
         self.assertEqual(len(seeds), num_workers)
 
-    @unittest.skipIf(IS_WINDOWS, "TODO: need to fix this test case for Windows")
     def test_worker_init_fn(self):
-        # test custom init function
-        def init_fn(worker_id):
-            torch.manual_seed(12345)
-
         dataset = SeedDataset(4)
         dataloader = DataLoader(dataset, batch_size=2, num_workers=2,
                                 worker_init_fn=init_fn)
@@ -376,7 +378,6 @@ class TestDataLoader(TestCase):
     def test_error_workers(self):
         self._test_error(DataLoader(ErrorDataset(41), batch_size=2, shuffle=True, num_workers=4))
 
-    @unittest.skipIf(IS_WINDOWS, "TODO: need to fix this test case for Windows")
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     def test_partial_workers(self):
         "check that workers exit even if the iterator is not exhausted"
@@ -388,10 +389,10 @@ class TestDataLoader(TestCase):
                 break
         del loader
         for w in workers:
-            w.join(1.0)  # timeout of one second
+            w.join(JOIN_TIMEOUT)
             self.assertFalse(w.is_alive(), 'subprocess not terminated')
             self.assertEqual(w.exitcode, 0)
-        worker_manager_thread.join(1.0)
+        worker_manager_thread.join(JOIN_TIMEOUT)
         self.assertFalse(worker_manager_thread.is_alive())
 
     def test_len(self):
