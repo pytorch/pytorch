@@ -13,9 +13,8 @@ class Adagrad(Optimizer):
             parameter groups
         lr (float, optional): learning rate (default: 1e-2)
         lr_decay (float, optional): learning rate decay (default: 0)
-        weight_decay (float, optional): weight decay (L2 penalty) using the
-            method from the paper `Fixing Weight Decay Regularization in
-            Adam` (default: 0)
+        weight_decay (float, optional): weight decay using the method from
+            the paper `Fixing Weight Decay Regularization in Adam` (default: 0)
 
     .. _Adaptive Subgradient Methods for Online Learning and Stochastic
         Optimization: http://jmlr.org/papers/v12/duchi11a.html
