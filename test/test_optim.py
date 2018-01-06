@@ -260,6 +260,9 @@ class TestOptim(TestCase):
                 self._build_params_dict_single(weight, bias, lr=1e-2),
                 lr=1e-3)
         )
+        self._test_basic_cases(
+            lambda weight, bias: optim.SGD([weight, bias], lr=1e-3, weight_decay=1e-2)
+        )
         with self.assertRaisesRegex(ValueError, "Invalid momentum value: -0.5"):
             optim.SGD(None, lr=1e-2, momentum=-0.5)
 
@@ -284,6 +287,9 @@ class TestOptim(TestCase):
             lambda weight, bias: optim.Adam(
                 self._build_params_dict(weight, bias, lr=1e-2),
                 lr=1e-3)
+        )
+        self._test_basic_cases(
+            lambda weight, bias: optim.Adam([weight, bias], lr=1e-3, weight_decay=1e-2)
         )
         self._test_basic_cases(
             lambda weight, bias: optim.Adam([weight, bias], lr=1e-3,
@@ -325,6 +331,9 @@ class TestOptim(TestCase):
             lambda weight, bias: optim.Adadelta(
                 self._build_params_dict(weight, bias, rho=0.95))
         )
+        self._test_basic_cases(
+            lambda weight, bias: optim.Adadelta([weight, bias], weight_decay=1e-2)
+        )
         with self.assertRaisesRegex(ValueError, "Invalid rho value: 1.1"):
             optim.Adadelta(None, lr=1e-2, rho=1.1)
 
@@ -343,6 +352,9 @@ class TestOptim(TestCase):
         )
         self._test_basic_cases(
             lambda weight, bias: optim.Adagrad([weight, bias], lr=1e-1)
+        )
+        self._test_basic_cases(
+            lambda weight, bias: optim.Adagrad([weight, bias], lr=1e-1, weight_decay=1e-2)
         )
         self._test_basic_cases(
             lambda weight, bias: optim.Adagrad(
@@ -374,6 +386,9 @@ class TestOptim(TestCase):
             lambda weight, bias: optim.Adagrad([weight, bias], lr=1e-1)
         )
         self._test_basic_cases(
+            lambda weight, bias: optim.Adagrad([weight, bias], lr=1e-1, weight_decay=1e-2)
+        )
+        self._test_basic_cases(
             lambda weight, bias: optim.Adagrad(
                 self._build_params_dict(weight, bias, lr=1e-2),
                 lr=1e-1)
@@ -398,6 +413,9 @@ class TestOptim(TestCase):
             lambda weight, bias: optim.Adagrad([weight, bias], lr=1e-2)
         )
         self._test_basic_cases(
+            lambda weight, bias: optim.Adagrad([weight, bias], lr=1e-2, weight_decay=1e-2)
+        )
+        self._test_basic_cases(
             lambda weight, bias: optim.Adagrad(
                 self._build_params_dict(weight, bias, lr=1e-3),
                 lr=1e-2)
@@ -420,6 +438,9 @@ class TestOptim(TestCase):
         )
         self._test_basic_cases(
             lambda weight, bias: optim.ASGD([weight, bias], lr=1e-3, t0=100)
+        )
+        self._test_basic_cases(
+            lambda weight, bias: optim.ASGD([weight, bias], lr=1e-3, t0=100, weight_decay=1e-2)
         )
         self._test_basic_cases(
             lambda weight, bias: optim.ASGD(

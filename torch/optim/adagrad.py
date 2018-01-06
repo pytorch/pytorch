@@ -13,10 +13,14 @@ class Adagrad(Optimizer):
             parameter groups
         lr (float, optional): learning rate (default: 1e-2)
         lr_decay (float, optional): learning rate decay (default: 0)
-        weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
+        weight_decay (float, optional): weight decay (L2 penalty) using the
+            method from the paper `Fixing Weight Decay Regularization in
+            Adam` (default: 0)
 
     .. _Adaptive Subgradient Methods for Online Learning and Stochastic
         Optimization: http://jmlr.org/papers/v12/duchi11a.html
+    .. _Fixing Weight Decay Regularization in Adam:
+        https://arxiv.org/abs/1711.05101
     """
 
     def __init__(self, params, lr=1e-2, lr_decay=0, weight_decay=0):
@@ -63,14 +67,11 @@ class Adagrad(Optimizer):
 
                 state['step'] += 1
 
-                if group['weight_decay'] != 0:
-                    if p.grad.data.is_sparse:
-                        raise RuntimeError("weight_decay option is not compatible with sparse gradients")
-                    grad = grad.add(group['weight_decay'], p.data)
-
                 clr = group['lr'] / (1 + (state['step'] - 1) * group['lr_decay'])
 
                 if grad.is_sparse:
+                    if group['weight_decay'] != 0:
+                        raise RuntimeError("weight_decay option is not compatible with sparse gradients")
                     grad = grad.coalesce()  # the update is non-linear so indices must be unique
                     grad_indices = grad._indices()
                     grad_values = grad._values()
@@ -88,6 +89,10 @@ class Adagrad(Optimizer):
                 else:
                     state['sum'].addcmul_(1, grad, grad)
                     std = state['sum'].sqrt().add_(1e-10)
+                    if group['weight_decay'] != 0:
+                        xold = p.data.clone()
                     p.data.addcdiv_(-clr, grad, std)
+                    if group['weight_decay'] != 0:
+                        p.data.add_(-group['weight_decay'], xold)
 
         return loss

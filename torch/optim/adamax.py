@@ -15,9 +15,13 @@ class Adamax(Optimizer):
             running averages of gradient and its square
         eps (float, optional): term added to the denominator to improve
             numerical stability (default: 1e-8)
-        weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
+        weight_decay (float, optional): weight decay (L2 penalty) using the
+            method from the paper `Fixing Weight Decay Regularization in
+            Adam` (default: 0)
 
     __ https://arxiv.org/abs/1412.6980
+    .. _Fixing Weight Decay Regularization in Adam:
+        https://arxiv.org/abs/1711.05101
     """
 
     def __init__(self, params, lr=2e-3, betas=(0.9, 0.999), eps=1e-8,
@@ -68,9 +72,6 @@ class Adamax(Optimizer):
 
                 state['step'] += 1
 
-                if group['weight_decay'] != 0:
-                    grad = grad.add(group['weight_decay'], p.data)
-
                 # Update biased first moment estimate.
                 exp_avg.mul_(beta1).add_(1 - beta1, grad)
                 # Update the exponentially weighted infinity norm.
@@ -83,6 +84,12 @@ class Adamax(Optimizer):
                 bias_correction = 1 - beta1 ** state['step']
                 clr = group['lr'] / bias_correction
 
+                if group['weight_decay'] != 0:
+                    xold = p.data.clone()
+
                 p.data.addcdiv_(-clr, exp_avg, exp_inf)
+
+                if group['weight_decay'] != 0:
+                    p.data.add_(-group['weight_decay'], xold)
 
         return loss

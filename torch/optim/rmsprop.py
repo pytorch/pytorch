@@ -21,8 +21,12 @@ class RMSprop(Optimizer):
             numerical stability (default: 1e-8)
         centered (bool, optional) : if ``True``, compute the centered RMSProp,
             the gradient is normalized by an estimation of its variance
-        weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
+        weight_decay (float, optional): weight decay (L2 penalty) using the
+            method from the paper `Fixing Weight Decay Regularization in
+            Adam` (default: 0)
 
+    .. _Fixing Weight Decay Regularization in Adam:
+        https://arxiv.org/abs/1711.05101
     """
 
     def __init__(self, params, lr=1e-2, alpha=0.99, eps=1e-8, weight_decay=0, momentum=0, centered=False):
@@ -81,7 +85,7 @@ class RMSprop(Optimizer):
                 state['step'] += 1
 
                 if group['weight_decay'] != 0:
-                    grad = grad.add(group['weight_decay'], p.data)
+                    xold = p.data.clone()
 
                 square_avg.mul_(alpha).addcmul_(1 - alpha, grad, grad)
 
@@ -98,5 +102,8 @@ class RMSprop(Optimizer):
                     p.data.add_(-group['lr'], buf)
                 else:
                     p.data.addcdiv_(-group['lr'], grad, avg)
+                
+                if group['weight_decay'] != 0:
+                    p.data.add_(-group['weight_decay'], xold)
 
         return loss
