@@ -2799,7 +2799,7 @@ class TestNN(NNTestCase):
 
             if isinstance(input_val, rnn_utils.PackedSequence):
                 input = rnn_utils.PackedSequence(
-                    Variable(input_val.data, requires_grad=True), input_val.batch_sizes)
+                    Variable(input_val.data.data, requires_grad=True), input_val.batch_sizes)
                 input_var = input.data
             else:
                 input = Variable(input_val.clone(), requires_grad=True)
