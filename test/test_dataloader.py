@@ -13,7 +13,7 @@ from torch.utils.data.dataloader import default_collate
 from common import TestCase, run_tests, TEST_NUMPY, IS_WINDOWS
 from common_nn import TEST_CUDA
 
-BASE_TIMEOUT = 10.0 if IS_WINDOWS else 1.0
+BASE_TIMEOUT = 10.0 if IS_WINDOWS else 0.0
 
 
 class TestDatasetRandomSplit(TestCase):
@@ -274,7 +274,7 @@ class TestDataLoader(TestCase):
     def test_segfault(self):
         p = multiprocessing.Process(target=_test_segfault)
         p.start()
-        p.join(1.0 * BASE_TIMEOUT)
+        p.join(1.0 + BASE_TIMEOUT)
         try:
             self.assertFalse(p.is_alive())
             self.assertNotEqual(p.exitcode, 0)
@@ -284,7 +284,7 @@ class TestDataLoader(TestCase):
     def test_timeout(self):
         p = multiprocessing.Process(target=_test_timeout)
         p.start()
-        p.join(3.0 * BASE_TIMEOUT)
+        p.join(3.0 + BASE_TIMEOUT)
         try:
             self.assertFalse(p.is_alive())
             self.assertNotEqual(p.exitcode, 0)
@@ -389,10 +389,10 @@ class TestDataLoader(TestCase):
                 break
         del loader
         for w in workers:
-            w.join(1.0 * BASE_TIMEOUT)
+            w.join(1.0 + BASE_TIMEOUT)
             self.assertFalse(w.is_alive(), 'subprocess not terminated')
             self.assertEqual(w.exitcode, 0)
-        worker_manager_thread.join(1.0 * BASE_TIMEOUT)
+        worker_manager_thread.join(1.0 + BASE_TIMEOUT)
         self.assertFalse(worker_manager_thread.is_alive())
 
     def test_len(self):
