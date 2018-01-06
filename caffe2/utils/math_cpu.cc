@@ -34,16 +34,16 @@
 #include <numeric>
 #include <random>
 #include <unordered_set>
-#include <vector>
 
-#include "Eigen/Core"
-#include "caffe2/core/context.h"
-#include "caffe2/utils/cpu_neon.h"
 #include "caffe2/utils/math.h"
+#include "caffe2/utils/cpu_neon.h"
+#include "caffe2/core/context.h"
+#include "Eigen/Core"
+#include "Eigen/Dense"
 
 #ifdef CAFFE2_USE_MKL
 #include <mkl.h>
-#endif // CAFFE2_USE_MKL
+#endif  // CAFFE2_USE_MKL
 
 #ifdef CAFFE2_USE_HPTT
 #include <hptt.h>
@@ -100,40 +100,40 @@ void Gemm<float, CPUContext>(
     C_mat *= beta;
   }
   switch (TransA) {
-    case CblasNoTrans: {
-      switch (TransB) {
-        case CblasNoTrans:
-          C_mat.noalias() += alpha *
-              (ConstEigenMatrixMap<float>(B, N, K) *
-               ConstEigenMatrixMap<float>(A, K, M));
-          return;
-        case CblasTrans:
-          C_mat.noalias() += alpha *
-              (ConstEigenMatrixMap<float>(B, K, N).transpose() *
-               ConstEigenMatrixMap<float>(A, K, M));
-          return;
-        default:
-          LOG(FATAL) << "Unexpected CBLAS_TRANSPOSE for TransB";
-      }
-    }
-    case CblasTrans: {
-      switch (TransB) {
-        case CblasNoTrans:
-          C_mat.noalias() += alpha *
-              (ConstEigenMatrixMap<float>(B, N, K) *
-               ConstEigenMatrixMap<float>(A, M, K).transpose());
-          return;
-        case CblasTrans:
-          C_mat.noalias() += alpha *
-              (ConstEigenMatrixMap<float>(B, K, N).transpose() *
-               ConstEigenMatrixMap<float>(A, M, K).transpose());
-          return;
-        default:
-          LOG(FATAL) << "Unexpected CBLAS_TRANSPOSE for TransB";
-      }
-    }
+  case CblasNoTrans: {
+    switch (TransB) {
+    case CblasNoTrans:
+      C_mat.noalias() += alpha * (
+          ConstEigenMatrixMap<float>(B, N, K) *
+          ConstEigenMatrixMap<float>(A, K, M));
+      return;
+    case CblasTrans:
+      C_mat.noalias() += alpha * (
+          ConstEigenMatrixMap<float>(B, K, N).transpose() *
+          ConstEigenMatrixMap<float>(A, K, M));
+      return;
     default:
-      LOG(FATAL) << "Unexpected CBLAS_TRANSPOSE for TransA";
+      LOG(FATAL) << "Unexpected CBLAS_TRANSPOSE for TransB";
+    }
+  }
+  case CblasTrans: {
+    switch (TransB) {
+    case CblasNoTrans:
+      C_mat.noalias() += alpha * (
+          ConstEigenMatrixMap<float>(B, N, K) *
+          ConstEigenMatrixMap<float>(A, M, K).transpose());
+      return;
+    case CblasTrans:
+      C_mat.noalias() += alpha * (
+          ConstEigenMatrixMap<float>(B, K, N).transpose() *
+          ConstEigenMatrixMap<float>(A, M, K).transpose());
+      return;
+    default:
+      LOG(FATAL) << "Unexpected CBLAS_TRANSPOSE for TransB";
+    }
+  }
+  default:
+    LOG(FATAL) << "Unexpected CBLAS_TRANSPOSE for TransA";
   }
 }
 
@@ -166,14 +166,14 @@ void GemmEx<float, CPUContext>(
     case CblasNoTrans: {
       switch (TransB) {
         case CblasNoTrans:
-          C_mat.noalias() += alpha *
-              (ConstStridedMap(B, N, K, OuterStride(ldb)) *
-               ConstStridedMap(A, K, M, OuterStride(lda)));
+          C_mat.noalias() +=
+              alpha * (ConstStridedMap(B, N, K, OuterStride(ldb)) *
+                       ConstStridedMap(A, K, M, OuterStride(lda)));
           return;
         case CblasTrans:
-          C_mat.noalias() += alpha *
-              (ConstStridedMap(B, K, N, OuterStride(ldb)).transpose() *
-               ConstStridedMap(A, K, M, OuterStride(lda)));
+          C_mat.noalias() +=
+              alpha * (ConstStridedMap(B, K, N, OuterStride(ldb)).transpose() *
+                       ConstStridedMap(A, K, M, OuterStride(lda)));
           return;
         default:
           LOG(FATAL) << "Unexpected CBLAS_TRANSPOSE for TransB";
@@ -182,14 +182,14 @@ void GemmEx<float, CPUContext>(
     case CblasTrans: {
       switch (TransB) {
         case CblasNoTrans:
-          C_mat.noalias() += alpha *
-              (ConstStridedMap(B, N, K, OuterStride(ldb)) *
-               ConstStridedMap(A, M, K, OuterStride(lda)).transpose());
+          C_mat.noalias() +=
+              alpha * (ConstStridedMap(B, N, K, OuterStride(ldb)) *
+                       ConstStridedMap(A, M, K, OuterStride(lda)).transpose());
           return;
         case CblasTrans:
-          C_mat.noalias() += alpha *
-              (ConstStridedMap(B, K, N, OuterStride(ldb)).transpose() *
-               ConstStridedMap(A, M, K, OuterStride(lda)).transpose());
+          C_mat.noalias() +=
+              alpha * (ConstStridedMap(B, K, N, OuterStride(ldb)).transpose() *
+                       ConstStridedMap(A, M, K, OuterStride(lda)).transpose());
           return;
         default:
           LOG(FATAL) << "Unexpected CBLAS_TRANSPOSE for TransB";
@@ -222,15 +222,15 @@ void Gemv<float, CPUContext>(
   }
   switch (TransA) {
     case CblasNoTrans: {
-      y_vec.noalias() += alpha *
-          (ConstEigenMatrixMap<float>(A, N, M).transpose() *
-           ConstEigenVectorMap<float>(x, N));
+      y_vec.noalias() += alpha * (
+          ConstEigenMatrixMap<float>(A, N, M).transpose() *
+          ConstEigenVectorMap<float>(x, N));
       return;
     }
     case CblasTrans: {
-      y_vec.noalias() += alpha *
-          (ConstEigenMatrixMap<float>(A, N, M) *
-           ConstEigenVectorMap<float>(x, M));
+      y_vec.noalias() += alpha * (
+          ConstEigenMatrixMap<float>(A, N, M) *
+          ConstEigenVectorMap<float>(x, M));
       return;
     }
     default:
@@ -256,12 +256,13 @@ void Gemv<float, CPUContext>(
 CAFFE2_SPECIALIZED_SCALE(float)
 #undef CAFFE2_SPECIALIZED_SCALE
 
-#define CAFFE2_SPECIALIZED_DOT(T)                                        \
-  template <>                                                            \
-  void Dot<T, CPUContext>(                                               \
-      const int N, const T* a, const T* b, T* y, CPUContext* context) {  \
-    *y = ConstEigenVectorMap<T>(a, N).dot(ConstEigenVectorMap<T>(b, N)); \
-  }
+#define CAFFE2_SPECIALIZED_DOT(T)                                              \
+template<>                                                                     \
+void Dot<T, CPUContext>(                                                       \
+    const int N, const T* a, const T* b, T* y,                                 \
+    CPUContext* context) {                                                     \
+  *y = ConstEigenVectorMap<T>(a, N).dot(ConstEigenVectorMap<T>(b, N));         \
+}
 CAFFE2_SPECIALIZED_DOT(float)
 #undef CAFFE2_SPECIALIZED_DOT
 
@@ -279,22 +280,17 @@ CAFFE2_SPECIALIZED_DOT(float)
 CAFFE2_SPECIALIZED_AXPY(float)
 #undef CAFFE2_SPECIALIZED_AXPY
 
-#define CAFFE2_SPECIALIZED_AXPBY(T)                              \
-  template <>                                                    \
-  void Axpby<T, CPUContext>(                                     \
-      const int N,                                               \
-      const T alpha,                                             \
-      const T* x,                                                \
-      const T beta,                                              \
-      T* y,                                                      \
-      CPUContext* context) {                                     \
-    EigenVectorMap<T> y_vec(y, N);                               \
-    y_vec = y_vec * beta + ConstEigenVectorMap<T>(x, N) * alpha; \
-  }
+#define CAFFE2_SPECIALIZED_AXPBY(T)                                            \
+template <>                                                                    \
+void Axpby<T, CPUContext>(const int N, const T alpha, const T* x,              \
+                          const T beta, T* y, CPUContext* context) {           \
+  EigenVectorMap<T> y_vec(y, N);                                               \
+  y_vec = y_vec * beta + ConstEigenVectorMap<T>(x, N) * alpha;                 \
+}
 CAFFE2_SPECIALIZED_AXPBY(float)
 #undef CAFFE2_SPECIALIZED_AXPBY
 
-#else // CAFFE2_USE_EIGEN_FOR_BLAS
+#else  // CAFFE2_USE_EIGEN_FOR_BLAS
 
 template <>
 void Gemm<float, CPUContext>(
@@ -312,21 +308,8 @@ void Gemm<float, CPUContext>(
     TensorProto::DataType /*math_type*/) {
   int lda = (TransA == CblasNoTrans) ? K : M;
   int ldb = (TransB == CblasNoTrans) ? N : K;
-  cblas_sgemm(
-      CblasRowMajor,
-      TransA,
-      TransB,
-      M,
-      N,
-      K,
-      alpha,
-      A,
-      lda,
-      B,
-      ldb,
-      beta,
-      C,
-      N);
+  cblas_sgemm(CblasRowMajor, TransA, TransB, M, N, K, alpha, A, lda, B, ldb,
+              beta, C, N);
 }
 
 template <>
@@ -345,21 +328,8 @@ void GemmEx<float, CPUContext>(
     float* C,
     const int ldc,
     CPUContext* /*context*/) {
-  cblas_sgemm(
-      CblasRowMajor,
-      TransA,
-      TransB,
-      M,
-      N,
-      K,
-      alpha,
-      A,
-      lda,
-      B,
-      ldb,
-      beta,
-      C,
-      ldc);
+  cblas_sgemm(CblasRowMajor, TransA, TransB, M, N, K, alpha, A, lda, B, ldb,
+              beta, C, ldc);
 }
 
 template <>
@@ -432,7 +402,7 @@ CAFFE2_SPECIALIZED_AXPY(float, s)
       CPUContext*) {                                   \
     cblas_##prefix##axpby(N, alpha, x, 1, beta, y, 1); \
   }
-#else // CAFFE2_USE_MKL
+#else  // CAFFE2_USE_MKL
 #define CAFFE2_SPECIALIZED_AXPBY(T, prefix)     \
   template <>                                   \
   void Axpby<T, CPUContext>(                    \
@@ -445,17 +415,20 @@ CAFFE2_SPECIALIZED_AXPY(float, s)
     cblas_##prefix##scal(N, beta, y, 1);        \
     cblas_##prefix##axpy(N, alpha, x, 1, y, 1); \
   }
-#endif // CAFFE2_USE_MKL
+#endif  // CAFFE2_USE_MKL
 CAFFE2_SPECIALIZED_AXPBY(float, s)
 #undef CAFFE2_SPECIALIZED_AXPBY
 
-#endif // CAFFE2_USE_EIGEN_FOR_BLAS
+#endif  // CAFFE2_USE_EIGEN_FOR_BLAS
 
 template <>
 void GemmBatched<float, CPUContext>(
     const CBLAS_TRANSPOSE TransA,
     const CBLAS_TRANSPOSE TransB,
-    const int batch_size,
+    const int A_size,
+    const int A_batches,
+    const int B_size,
+    const int B_batches,
     const int M,
     const int N,
     const int K,
@@ -467,55 +440,25 @@ void GemmBatched<float, CPUContext>(
     CPUContext* context,
     Tensor<CPUContext>*, /* scratch */
     TensorProto::DataType /* math_type */) {
-  const int a_stride = M * K;
-  const int b_stride = K * N;
-  const int c_stride = M * N;
 
-#ifdef CAFFE2_USE_MKL
-  const int lda = (TransA == CblasNoTrans) ? K : M;
-  const int ldb = (TransB == CblasNoTrans) ? N : K;
-  std::vector<const float*> a_array(batch_size, nullptr);
-  std::vector<const float*> b_array(batch_size, nullptr);
-  std::vector<float*> c_array(batch_size, nullptr);
-  for (int i = 0; i < batch_size; ++i) {
-    a_array[i] = A + a_stride * i;
-    b_array[i] = B + b_stride * i;
-    c_array[i] = C + c_stride * i;
-  }
-  cblas_sgemm_batch(
-      CblasRowMajor,
-      &TransA,
-      &TransB,
-      &M,
-      &N,
-      &K,
-      &alpha,
-      a_array.data(),
-      &lda,
-      b_array.data(),
-      &ldb,
-      &beta,
-      c_array.data(),
-      &N,
-      1,
-      &batch_size);
-#else // CAFFE2_USE_MKL
+  auto a_offset = A_size / A_batches;
+  auto b_offset = B_size / B_batches;
+  auto y_offset = M * N;
   // loop over matrices in the batch
-  for (int i = 0; i < batch_size; ++i) {
+  for (int i = 0; i < A_batches; ++i) {
     math::Gemm<float, CPUContext>(
         TransA,
         TransB,
         M,
         N,
         K,
-        alpha,
-        A + a_stride * i,
-        B + b_stride * i,
-        beta,
-        C + c_stride * i,
+        1,
+        A + a_offset * i,
+        B + b_offset * i,
+        0,
+        C + y_offset * i,
         context);
   }
-#endif // CAFFE2_USE_MKL
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -584,17 +527,17 @@ DELEGATE_POWX_FUNCTION(double, vdPowx)
       const int N, const T* a, const T* b, T* y, CPUContext*) {    \
     OriginalFunc(N, a, b, y);                                      \
   }
-DELEGATE_SIMPLE_BINARY_FUNCTION(float, Add, vsAdd)
+DELEGATE_SIMPLE_BINARY_FUNCTION(float,  Add, vsAdd)
 DELEGATE_SIMPLE_BINARY_FUNCTION(double, Add, vdAdd)
-DELEGATE_SIMPLE_BINARY_FUNCTION(float, Sub, vsSub)
+DELEGATE_SIMPLE_BINARY_FUNCTION(float,  Sub, vsSub)
 DELEGATE_SIMPLE_BINARY_FUNCTION(double, Sub, vdSub)
-DELEGATE_SIMPLE_BINARY_FUNCTION(float, Mul, vsMul)
+DELEGATE_SIMPLE_BINARY_FUNCTION(float,  Mul, vsMul)
 DELEGATE_SIMPLE_BINARY_FUNCTION(double, Mul, vdMul)
-DELEGATE_SIMPLE_BINARY_FUNCTION(float, Div, vsDiv)
+DELEGATE_SIMPLE_BINARY_FUNCTION(float,  Div, vsDiv)
 DELEGATE_SIMPLE_BINARY_FUNCTION(double, Div, vdDiv)
 #undef DELEGATE_SIMPLE_BINARY_FUNCTION
 
-#else // CAFFE2_USE_MKL
+#else  // CAFFE2_USE_MKL
 
 #define DELEGATE_SIMPLE_UNARY_FUNCTION(T, Funcname, expr)                    \
   template <>                                                                \
@@ -630,29 +573,31 @@ DELEGATE_SINCOS_FUNCTION(double)
 DELEGATE_POWX_FUNCTION(float)
 #undef DELEGATE_POWX_FUNCTION
 
-#endif // CAFFE2_USE_MKL
+#endif  // CAFFE2_USE_MKL
 
-#define EIGEN_SIMPLE_BINARY_FUNCTION(T, Funcname, expr)                      \
-  template <>                                                                \
-  void Funcname<T, CPUContext>(                                              \
-      const int N, const T* a, const T* b, T* y, CPUContext*) {              \
-    EigenVectorMap<T>(y, N) = ConstEigenVectorMap<T>(a, N)                   \
-                                  .array() expr ConstEigenVectorMap<T>(b, N) \
-                                  .array();                                  \
-  }
+
+#define EIGEN_SIMPLE_BINARY_FUNCTION(T, Funcname, expr)                        \
+template <>                                                                    \
+void Funcname<T, CPUContext>(                                                  \
+    const int N, const T* a, const T* b, T* y,                                 \
+    CPUContext*) {                                                             \
+  EigenVectorMap<T>(y, N) =                                                    \
+      ConstEigenVectorMap<T>(a, N).array() expr                                \
+      ConstEigenVectorMap<T>(b, N).array();                                    \
+}
 
 #ifdef CAFFE2_USE_MKL
 
-#define DEFINE_SIMPLE_BINARY_FUNCTION(Funcname, expr)   \
-  EIGEN_SIMPLE_BINARY_FUNCTION(int32_t, Funcname, expr) \
-  EIGEN_SIMPLE_BINARY_FUNCTION(int64_t, Funcname, expr)
+#define DEFINE_SIMPLE_BINARY_FUNCTION(Funcname, expr)                          \
+EIGEN_SIMPLE_BINARY_FUNCTION(int32_t, Funcname, expr)                          \
+EIGEN_SIMPLE_BINARY_FUNCTION(int64_t, Funcname, expr)
 
 #else
 
-#define DEFINE_SIMPLE_BINARY_FUNCTION(Funcname, expr)   \
-  EIGEN_SIMPLE_BINARY_FUNCTION(float, Funcname, expr)   \
-  EIGEN_SIMPLE_BINARY_FUNCTION(int32_t, Funcname, expr) \
-  EIGEN_SIMPLE_BINARY_FUNCTION(int64_t, Funcname, expr)
+#define DEFINE_SIMPLE_BINARY_FUNCTION(Funcname, expr)                          \
+EIGEN_SIMPLE_BINARY_FUNCTION(float, Funcname, expr)                            \
+EIGEN_SIMPLE_BINARY_FUNCTION(int32_t, Funcname, expr)                          \
+EIGEN_SIMPLE_BINARY_FUNCTION(int64_t, Funcname, expr)
 
 #endif
 
@@ -663,6 +608,7 @@ DEFINE_SIMPLE_BINARY_FUNCTION(Div, /)
 
 #undef EIGEN_SIMPLE_BINARY_FUNCTION
 #undef DEFINE_FLOAT_BINARY_FUNCTION
+
 
 ////////////////////////////////////////////////////////////////////////////////
 // Common math functions being used in Caffe that do not have a BLAS or MKL
@@ -764,10 +710,10 @@ CAFFE2_SPECIALIZED_MAXIMUM(float)
         ConstEigenVectorArrayMap<T>(x, M).transpose();                       \
   }
 
-#define DEFINE_BROADCAST_BINARY_FUNCTION(name, op)      \
-  DELEGATE_BROADCAST_BINARY_FUNCTION(int32_t, name, op) \
-  DELEGATE_BROADCAST_BINARY_FUNCTION(int64_t, name, op) \
-  DELEGATE_BROADCAST_BINARY_FUNCTION(float, name, op)
+#define DEFINE_BROADCAST_BINARY_FUNCTION(name, op)                       \
+  DELEGATE_BROADCAST_BINARY_FUNCTION(int32_t, name, op)                  \
+  DELEGATE_BROADCAST_BINARY_FUNCTION(int64_t, name, op)                  \
+  DELEGATE_BROADCAST_BINARY_FUNCTION(float, name, op)                    \
 
 DEFINE_BROADCAST_BINARY_FUNCTION(Add, +)
 DEFINE_BROADCAST_BINARY_FUNCTION(Sub, -)
@@ -1231,10 +1177,8 @@ void Im2col<float, CPUContext, StorageOrder::NHWC>(
       for (int ih = h_pad; ih < h_pad + dkernel_h; ih += dilation_h) {
         for (int iw = w_pad; iw < w_pad + dkernel_w; iw += dilation_w) {
           if (ih >= 0 && ih < height && iw >= 0 && iw < width) {
-            memcpy(
-                data_col,
-                data_im + (ih * width + iw) * channels,
-                sizeof(float) * channels);
+            memcpy(data_col, data_im + (ih * width + iw) * channels,
+                   sizeof(float) * channels);
           } else {
             // This should be simply padded with zero.
             memset(data_col, 0, sizeof(float) * channels);
@@ -1397,7 +1341,7 @@ void Col2im<float, CPUContext, StorageOrder::NHWC>(
           if (ih >= 0 && ih < height && iw >= 0 && iw < width) {
             auto* data_im_patch = data_im + (ih * width + iw) * channels;
             Add<float, CPUContext>(
-                channels, data_im_patch, data_col, data_im_patch, context);
+                  channels, data_im_patch, data_col, data_im_patch, context);
           }
           data_col += channels;
         }
@@ -1428,9 +1372,10 @@ void BiasCHW<float, CPUContext>(
 
     // FIXME: if input < kVecSizeInFloat, can't vectorize at all
 
-    int prologue = kVecSizeInFloat -
-        // remainder in floats
-        (((uintptr_t)image) % (sizeof(float32x4_t))) / sizeof(float);
+    int prologue =
+      kVecSizeInFloat -
+      // remainder in floats
+      (((uintptr_t) image) % (sizeof(float32x4_t))) / sizeof(float);
 
     int i = 0;
     // Prologue loop

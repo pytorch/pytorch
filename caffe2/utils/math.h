@@ -252,7 +252,10 @@ template <typename T, class Context, class Engine = DefaultEngine>
 void GemmBatched(
     const CBLAS_TRANSPOSE TransA,
     const CBLAS_TRANSPOSE TransB,
-    const int batch_size,
+    const int A_size,
+    const int A_batches,
+    const int B_size,
+    const int B_batches,
     const int M,
     const int N,
     const int K,
