@@ -43,6 +43,7 @@ from .laplace import Laplace
 from .multinomial import Multinomial
 from .normal import Normal
 from .one_hot_categorical import OneHotCategorical
+from .pareto import Pareto
 from .uniform import Uniform
 
 __all__ = [
@@ -59,5 +60,6 @@ __all__ = [
     'Multinomial',
     'Normal',
     'OneHotCategorical',
+    'Pareto',
     'Uniform',
 ]

@@ -835,6 +835,70 @@ def softmax(input, dim=None, _stacklevel=3):
     return torch._C._nn.softmax(input, dim)
 
 
+def _sample_gumbel(shape, eps=1e-10, out=None):
+    """
+    Sample from Gumbel(0, 1)
+
+    based on
+    https://github.com/ericjang/gumbel-softmax/blob/3c8584924603869e90ca74ac20a6a03d99a91ef9/Categorical%20VAE.ipynb ,
+    (MIT license)
+    """
+    U = out.resize_(shape).uniform_() if out is not None else torch.rand(shape)
+    return - torch.log(eps - torch.log(U + eps))
+
+
+def _gumbel_softmax_sample(logits, tau=1, eps=1e-10):
+    """
+    Draw a sample from the Gumbel-Softmax distribution
+
+    based on
+    https://github.com/ericjang/gumbel-softmax/blob/3c8584924603869e90ca74ac20a6a03d99a91ef9/Categorical%20VAE.ipynb
+    (MIT license)
+    """
+    dims = logits.dim()
+    gumbel_noise = _sample_gumbel(logits.size(), eps=eps, out=logits.data.new())
+    y = logits + Variable(gumbel_noise)
+    return softmax(y / tau, dims - 1)
+
+
+def gumbel_softmax(logits, tau=1, hard=False, eps=1e-10):
+    """
+    Sample from the Gumbel-Softmax distribution and optionally discretize.
+    Args:
+      logits: [batch_size, n_class] unnormalized log-probs
+      tau: non-negative scalar temperature
+      hard: if True, take argmax, but differentiate w.r.t. soft sample y
+    Returns:
+      [batch_size, n_class] sample from the Gumbel-Softmax distribution.
+      If hard=True, then the returned sample will be one-hot, otherwise it will
+      be a probability distribution that sums to 1 across classes
+
+    Constraints:
+    - this implementation only works on batch_size x num_features tensor for now
+
+    based on
+    https://github.com/ericjang/gumbel-softmax/blob/3c8584924603869e90ca74ac20a6a03d99a91ef9/Categorical%20VAE.ipynb ,
+    (MIT license)
+    """
+    shape = logits.size()
+    assert len(shape) == 2
+    y_soft = _gumbel_softmax_sample(logits, tau=tau, eps=eps)
+    if hard:
+        _, k = y_soft.data.max(-1)
+        # this bit is based on
+        # https://discuss.pytorch.org/t/stop-gradients-for-st-gumbel-softmax/530/5
+        y_hard = logits.data.new(*shape).zero_().scatter_(-1, k.view(-1, 1), 1.0)
+        # this cool bit of code achieves two things:
+        # - makes the output value exactly one-hot (since we add then
+        #   subtract y_soft value)
+        # - makes the gradient equal to y_soft gradient (since we strip
+        #   all other gradients)
+        y = Variable(y_hard - y_soft.data) + y_soft
+    else:
+        y = y_soft
+    return y
+
+
 def log_softmax(input, dim=None, _stacklevel=3):
     r"""Applies a softmax followed by a logarithm.
 
@@ -1091,13 +1155,12 @@ def nll_loss(input, target, weight=None, size_average=True, ignore_index=-100, r
     See :class:`~torch.nn.NLLLoss` for details.
 
     Args:
-        input: :math:`(N, C)` where `C = number of classes` or `(N, C, H, W)`
-            in case of 2D Loss, or `(N, C, *) in the case of K-dimensional Loss,
-            where :math:`K > 2` and `*` is `K` extra dimensions.
-        target: :math:`(N)` where each value is `0 <= targets[i] <= C-1`.
-            In the case of 2D Loss, then :math:`(N, H, W)`. For K-dimensional
-            Loss where :math:`K > 2`, then :math:`(N, *)`, where `*` is `K`
-            extra dimensions.
+        input: :math:`(N, C)` where `C = number of classes` or :math:`(N, C, H, W)`
+            in case of 2D Loss, or :math:`(N, C, d_1, d_2, ..., d_K)` where :math:`K > 2`
+            in the case of K-dimensional loss.
+        target: :math:`(N)` where each value is `0 <= targets[i] <= C-1`,
+            or :math:`(N, C, d_1, d_2, ..., d_K)` where :math:`K >= 2` for
+            K-dimensional loss.
         weight (Tensor, optional): a manual rescaling weight given to each
             class. If given, has to be a Tensor of size `C`
         size_average (bool, optional): By default, the losses are averaged
@@ -1275,7 +1338,7 @@ def binary_cross_entropy(input, target, weight=None, size_average=True, reduce=T
     return torch._C._nn.binary_cross_entropy(input, target, weight, size_average, reduce)
 
 
-def binary_cross_entropy_with_logits(input, target, weight=None, size_average=True):
+def binary_cross_entropy_with_logits(input, target, weight=None, size_average=True, reduce=True):
     r"""Function that measures Binary Cross Entropy between target and output
     logits.
 
@@ -1290,6 +1353,10 @@ def binary_cross_entropy_with_logits(input, target, weight=None, size_average=Tr
                 over observations for each minibatch. However, if the field
                 sizeAverage is set to False, the losses are instead summed
                 for each minibatch. Default: ``True``
+        reduce (bool, optional): By default, the losses are averaged or summed over
+                observations for each minibatch depending on size_average. When reduce
+                is False, returns a loss per batch element instead and ignores
+                size_average. Default: True
 
     Examples::
 
@@ -1307,7 +1374,9 @@ def binary_cross_entropy_with_logits(input, target, weight=None, size_average=Tr
     if weight is not None:
         loss = loss * weight
 
-    if size_average:
+    if not reduce:
+        return loss
+    elif size_average:
         return loss.mean()
     else:
         return loss.sum()

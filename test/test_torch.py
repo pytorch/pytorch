@@ -2030,19 +2030,19 @@ class TestTorch(TestCase):
         empty = Variable(torch.Tensor())
         x = Variable(torch.arange(0, 16).view(4, 4))
         self.assertEqual(x.slice(), x)
-        self.assertEqual(x.slice(0, 4), x)
+        self.assertEqual(x.slice(0, 0, 4), x)
         # start and stop are clamped to the size of dim
-        self.assertEqual(x.slice(0, 5), x)
+        self.assertEqual(x.slice(0, 0, 5), x)
         # if start >= stop then the result is empty
-        self.assertEqual(x.slice(2, 1), empty)
-        self.assertEqual(x.slice(2, 2), empty)
+        self.assertEqual(x.slice(0, 2, 1), empty)
+        self.assertEqual(x.slice(0, 2, 2), empty)
         # out of bounds is also empty
-        self.assertEqual(x.slice(10, 12), empty)
+        self.assertEqual(x.slice(0, 10, 12), empty)
         # additional correctness checks
-        self.assertEqual(x.slice(0, 1).data.tolist(), [[0, 1, 2, 3]])
-        self.assertEqual(x.slice(0, -3).data.tolist(), [[0, 1, 2, 3]])
-        self.assertEqual(x.slice(-2, 3, dim=1).data.tolist(), [[2], [6], [10], [14]])
-        self.assertEqual(x.slice(0, -1, 2).data.tolist(), [[0, 1, 2, 3], [8, 9, 10, 11]])
+        self.assertEqual(x.slice(0, 0, 1).data.tolist(), [[0, 1, 2, 3]])
+        self.assertEqual(x.slice(0, 0, -3).data.tolist(), [[0, 1, 2, 3]])
+        self.assertEqual(x.slice(start=-2, end=3, dim=1).data.tolist(), [[2], [6], [10], [14]])
+        self.assertEqual(x.slice(0, 0, -1, 2).data.tolist(), [[0, 1, 2, 3], [8, 9, 10, 11]])
 
     def test_is_signed(self):
         # TODO: remove the Variable wrapper once we merge Variable and Tensor
@@ -4263,6 +4263,28 @@ class TestTorch(TestCase):
         dim = 0
         target_sizes = ([3, 4], [3, 4], [1, 4])
         splits = tensor.split(split_size, dim)
+        start = 0
+        for target_size, split in zip(target_sizes, splits):
+            self.assertEqual(split.size(), target_size)
+            self.assertEqual(tensor.narrow(dim, start, target_size[dim]), split, 0)
+            start = start + target_size[dim]
+
+        # Variable sections split
+        tensor = torch.randn(20, 10)
+        dim = 0
+        split_sizes = [5, 5, 10]
+        target_sizes = ([[5, 10], [5, 10], [10, 10]])
+        splits = tensor.split(split_sizes, dim)
+        start = 0
+        for target_size, split in zip(target_sizes, splits):
+            self.assertEqual(split.size(), target_size)
+            self.assertEqual(tensor.narrow(dim, start, target_size[dim]), split, 0)
+            start = start + target_size[dim]
+
+        split_sizes = [2, 2, 6]
+        target_sizes = ([20, 2], [20, 2], [20, 6])
+        dim = 1
+        splits = tensor.split(split_sizes, dim)
         start = 0
         for target_size, split in zip(target_sizes, splits):
             self.assertEqual(split.size(), target_size)

@@ -90,9 +90,14 @@ void THTensor_(uniform)(THTensor *self, THGenerator *_generator, double a, doubl
   #endif
 }
 
-void THTensor_(normal)(THTensor *self, THGenerator *_generator, double mean, double stdv)
+void THTensor_(normal)(THTensor *self, THGenerator *_generator, double mean, double stddev)
 {
-  TH_TENSOR_APPLY(real, self, *self_data = (real)THRandom_normal(_generator, mean, stdv););
+  const int64_t size = THTensor_(numel)(self);
+  if (size >= 16 && THTensor_(isContiguous)(self)) {
+    THVector_(normal_fill)(self->storage->data, size, _generator, mean, stddev);
+  } else {
+    TH_TENSOR_APPLY(real, self, *self_data = (real)THRandom_normal(_generator, mean, stddev););
+  }
 }
 
 void THTensor_(normal_means)(THTensor *self, THGenerator *gen, THTensor *means, double stddev)
@@ -417,7 +422,6 @@ void THTensor_(multinomial)(THLongTensor *self, THGenerator *_generator, THTenso
     THTensor_(resize1d)(prob_dist, n_categories);
   }
 }
-
 #endif
 
 #if defined(TH_REAL_IS_BYTE)
@@ -443,5 +447,4 @@ void THTensor_(setRNGState)(THGenerator *_generator, THTensor *self)
   THGenerator_copy(_generator, rng_state);
 }
 #endif
-
 #endif

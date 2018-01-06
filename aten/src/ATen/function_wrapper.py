@@ -53,7 +53,7 @@ virtual ${return_type} ${api_name}(${formals_with_defaults}) const;
 """)
 TYPE_METHOD_DEFINITION_CONCRETE = CodeTemplate("""\
 ${return_type} Type::${api_name}(${formals}) const {
-    ${return_call} at::native::${native_type_method_dispatch}(${actuals});
+    ${type_definition_body}
 }
 """)
 # 4. add virtual override to TypeDerived.h
@@ -73,6 +73,9 @@ TYPE_DERIVED_DEFINITION_NATIVE = CodeTemplate("""\
 ${return_type} ${Type}::${api_name}(${formals}) const {
     ${return_call} at::native::${native_type_method_dispatch}(${actuals});
 }
+""")
+TYPE_DEFINITION_BODY_NATIVE = CodeTemplate("""\
+${return_call} at::native::${native_type_method_dispatch}(${actuals});
 """)
 
 # 6. add non-virtual declaration to Tensor.h
@@ -247,8 +250,6 @@ ALLOC_WRAP = {
 # Replacements for constants when calling into TH
 CONSTANT_REPLACEMENTS = [
     ('AS_REAL', '${AS_REAL}'),
-    ('THPGenerator_TH_CData(THPDefaultGenerator)',
-     'dynamic_cast<${Generator}&>().generator'),
     ('__storage_size.get\\(\\)',
      'THLongStorageView::makeFromLength(static_cast<int64_t>(storage.size()))'),
     ('__last_dim', 'self.ndimension()-1'),
@@ -257,7 +258,6 @@ CONSTANT_REPLACEMENTS = [
 # Replacements for constants in header file function definitions
 HEADER_CONSTANT_REPLACEMENTS = [
     (r'AS_REAL\((.*)\)', r'\1'),
-    ('THPGenerator_TH_CData\(THPDefaultGenerator\)', 'nullptr'),
     ('__last_dim', '-1'),
 ]
 
@@ -456,6 +456,29 @@ def create_generic(top_env, declarations):
 
         return broadcast_actuals
 
+    def emit_nn_body(option):
+        # Concrete definition on Type.cpp for NN functions. Delegates to the
+        # xxx_forward variant variant after creating any necessary buffers.
+        actuals = option['actuals']
+        base_name = option['name'][:-1] if option['inplace'] else option['name']
+        fwd_name = option['api_name'].replace(base_name, base_name + '_forward')
+
+        if len(option['buffers']) == 0:
+            return 'return {}({});'.format(fwd_name, ', '.join(actuals))
+
+        body = []
+        if option['api_name'].endswith('_out'):
+            # _out variants must create buffers and insert them in the
+            # arguments list between output and input arguments
+            for buffer in option['buffers']:
+                body.append('Tensor {} = tensor();'.format(buffer['name']))
+            actuals = [arg['name'] for arg in option['arguments'] if arg.get('output')]
+            actuals += [buffer['name'] for buffer in option['buffers']]
+            actuals += [arg['name'] for arg in option['arguments'] if not arg.get('output')]
+
+        body.append('return std::get<0>({}({}));'.format(fwd_name, ', '.join(actuals)))
+        return body
+
     def process_option(option, output_options):
         option['inplace'] = re.search(
             '(^__i|[^_]_$)', option['api_name']) is not None
@@ -489,8 +512,19 @@ def create_generic(top_env, declarations):
         option['method_prefix_derived'] = '' if broadcast_arg is None else 's_'
         env = nested_dict(option, top_env)
 
+        mode = option['mode']
         abstract = True
-        if broadcast_arg is None:
+        if mode == 'NN' and option.get('cimpls') is None:
+            # NN function with no _forward/_backward suffix don't have cimpls.
+            # They call the _forward function and discard any buffer returns
+            abstract = False
+            top_env['type_method_declarations'].append(
+                TYPE_METHOD_DECLARATION_CONCRETE.substitute(env))
+            body = emit_nn_body(option)
+            top_env['type_method_definitions'].append(
+                TYPE_METHOD_DEFINITION_CONCRETE.substitute(
+                    env, type_definition_body=body))
+        elif broadcast_arg is None:
             top_env['type_method_declarations'].append(
                 TYPE_METHOD_DECLARATION_ABSTRACT.substitute(env))
             top_env['type_method_definitions'].append(
@@ -542,7 +576,7 @@ def create_generic(top_env, declarations):
             ('method_prefix_derived', option['method_prefix_derived']),
             ('arguments', formals),
             ('method_of', method_of),
-            ('mode', option['mode']),
+            ('mode', mode),
             ('buffers', buffer_names),
             ('returns', option['returns']),
             ('inplace', option['inplace']),
@@ -678,8 +712,10 @@ def create_generic(top_env, declarations):
                 TYPE_METHOD_DEFINITION_ABSTRACT.substitute(env))
         else:
             abstract = False
+            body = TYPE_DEFINITION_BODY_NATIVE.substitute(env)
             top_env['type_method_definitions'].append(
-                TYPE_METHOD_DEFINITION_CONCRETE.substitute(env))
+                TYPE_METHOD_DEFINITION_CONCRETE.substitute(
+                    env, type_definition_body=body))
 
         # generate the at::native function declarations (i.e. what the user will implement)
         if isinstance(dispatch, dict):
@@ -793,8 +829,7 @@ def create_derived(backend_type_env, declarations):
 
     def drop_argument(argument, option):
         return 'CUDA' in backend_type_env['Backend'] and (
-            (option['mode'] == 'TH' and argument['type'] == 'THGenerator*') or
-            argument.get('default') == 'THPGenerator_TH_CData(THPDefaultGenerator)')
+            option['mode'] == 'TH' and argument['type'] == 'THGenerator*')
 
     def get_arguments(arguments, option):
         return [get_argument(argument, option)
@@ -837,12 +872,6 @@ def create_derived(backend_type_env, declarations):
                           for arg in option['formals_list']]
         return [SPARSE_CHECK.substitute(env, check_name=check_name, sparse_actuals=sparse_actuals)]
 
-    def handle_buffers(env, option):
-        if 'buffers' not in option:
-            return []
-        return [BUFFER_DEFINITION.substitute(env, name=b['name'])
-                for b in option['buffers']]
-
     def allocate_arg(env, arg, output_count):
         name = arg['name']
         allocation = CodeTemplate(ALLOC_WRAP[arg['type']]).substitute(env, arguments=[])
@@ -861,7 +890,11 @@ def create_derived(backend_type_env, declarations):
         if isinstance(resize, str):
             return "{}.resize_({}.sizes());".format(arg['name'], resize)
         else:
-            dims = ['{}.size({})'.format(name, dim) for name, dim in resize]
+            resize_scalar = arg.get('resize_scalar', False)
+            if resize_scalar:
+                dims = ['{}.dim() == 0 ? 1 : {}.size({})'.format(name, name, dim) for name, dim in resize]
+            else:
+                dims = ['{}.size({})'.format(name, dim) for name, dim in resize]
             return "{}.resize_({{ {} }});".format(arg['name'], ','.join(dims))
 
     def handle_call(env, option, cimpl):
@@ -896,7 +929,6 @@ def create_derived(backend_type_env, declarations):
             body += only_zero_dim_check
             return body
 
-        body += handle_buffers(env, option)
         # arguments are potentially duplicated because of one argument
         # referencing another
         seen_names = set()
@@ -1103,6 +1135,8 @@ def create_derived(backend_type_env, declarations):
         for option in declaration['options']:
             if not option.get('skip', False):
                 try:
+                    if option['mode'] == 'NN' and option.get('cimpls') is None:
+                        continue
                     if option['mode'] != 'native':
                         process_option(option)
                     else:
