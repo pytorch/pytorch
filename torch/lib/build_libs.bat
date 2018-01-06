@@ -46,9 +46,9 @@ IF "%CMAKE_GENERATOR%"=="" (
   IF "%CMAKE_GENERATOR%"=="Ninja" (
     IF "%CC%"== "" set CC=cl.exe
     IF "%CXX%"== "" set CXX=cl.exe
-    set MAKE_COMMAND=cmake --build . --target install --config Release -- -j%NUMBER_OF_PROCESSORS% || exit /b 1
+    set MAKE_COMMAND=cmake --build . --target install --config %BUILD_TYPE% -- -j%NUMBER_OF_PROCESSORS% || exit /b 1
   ) ELSE (
-    set MAKE_COMMAND=msbuild INSTALL.vcxproj /p:Configuration=Release
+    set MAKE_COMMAND=msbuild INSTALL.vcxproj /p:Configuration=%BUILD_TYPE%
   )
 )
 
