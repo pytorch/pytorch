@@ -17,9 +17,13 @@ class Adadelta(Optimizer):
             numerical stability (default: 1e-6)
         lr (float, optional): coefficient that scale delta before it is applied
             to the parameters (default: 1.0)
-        weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
+        weight_decay (float, optional): weight decay (L2 penalty) using the
+            method from the paper `Fixing Weight Decay Regularization in
+            Adam` (default: 0)
 
     __ https://arxiv.org/abs/1212.5701
+    .. _Fixing Weight Decay Regularization in Adam:
+        https://arxiv.org/abs/1711.05101
     """
 
     def __init__(self, params, lr=1.0, rho=0.9, eps=1e-6, weight_decay=0):
@@ -57,13 +61,17 @@ class Adadelta(Optimizer):
 
                 state['step'] += 1
 
-                if group['weight_decay'] != 0:
-                    grad = grad.add(group['weight_decay'], p.data)
-
                 square_avg.mul_(rho).addcmul_(1 - rho, grad, grad)
                 std = square_avg.add(eps).sqrt_()
                 delta = acc_delta.add(eps).sqrt_().div_(std).mul_(grad)
+                
+                if group['weight_decay'] != 0:
+                    xold = p.data.clone()
                 p.data.add_(-group['lr'], delta)
+
+                if group['weight_decay'] != 0:
+                    p.data.add_(-group['weight_decay'], xold)
+
                 acc_delta.mul_(rho).addcmul_(1 - rho, delta, delta)
 
         return loss

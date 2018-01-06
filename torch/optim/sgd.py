@@ -100,6 +100,7 @@ class SGD(Optimizer):
                         d_p = d_p.add(momentum, buf)
                     else:
                         d_p = buf
+
                 if weight_decay != 0:
                     xold = p.data.clone()
 

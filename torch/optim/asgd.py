@@ -16,10 +16,14 @@ class ASGD(Optimizer):
         lambd (float, optional): decay term (default: 1e-4)
         alpha (float, optional): power for eta update (default: 0.75)
         t0 (float, optional): point at which to start averaging (default: 1e6)
-        weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
+        weight_decay (float, optional): weight decay (L2 penalty) using the
+            method from the paper `Fixing Weight Decay Regularization in
+            Adam` (default: 0)
 
     .. _Acceleration of stochastic approximation by averaging:
         http://dl.acm.org/citation.cfm?id=131098
+    .. _Fixing Weight Decay Regularization in Adam:
+        https://arxiv.org/abs/1711.05101
     """
 
     def __init__(self, params, lr=1e-2, lambd=1e-4, alpha=0.75, t0=1e6, weight_decay=0):
@@ -57,13 +61,17 @@ class ASGD(Optimizer):
                 state['step'] += 1
 
                 if group['weight_decay'] != 0:
-                    grad = grad.add(group['weight_decay'], p.data)
+                    xold = p.data.clone()
 
                 # decay term
                 p.data.mul_(1 - group['lambd'] * state['eta'])
 
                 # update parameter
                 p.data.add_(-state['eta'], grad)
+
+                # weight decay
+                if group['weight_decay'] != 0:
+                    p.data.add_(-group['weight_decay'], xold)
 
                 # averaging
                 if state['mu'] != 1:
