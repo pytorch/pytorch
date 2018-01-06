@@ -17,9 +17,8 @@ class Adadelta(Optimizer):
             numerical stability (default: 1e-6)
         lr (float, optional): coefficient that scale delta before it is applied
             to the parameters (default: 1.0)
-        weight_decay (float, optional): weight decay (L2 penalty) using the
-            method from the paper `Fixing Weight Decay Regularization in
-            Adam` (default: 0)
+        weight_decay (float, optional): weight decay using the method from
+            the paper `Fixing Weight Decay Regularization in Adam` (default: 0)
 
     __ https://arxiv.org/abs/1212.5701
     .. _Fixing Weight Decay Regularization in Adam:
