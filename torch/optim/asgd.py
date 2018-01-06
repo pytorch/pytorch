@@ -16,9 +16,8 @@ class ASGD(Optimizer):
         lambd (float, optional): decay term (default: 1e-4)
         alpha (float, optional): power for eta update (default: 0.75)
         t0 (float, optional): point at which to start averaging (default: 1e6)
-        weight_decay (float, optional): weight decay (L2 penalty) using the
-            method from the paper `Fixing Weight Decay Regularization in
-            Adam` (default: 0)
+        weight_decay (float, optional): weight decay using the method from
+            the paper `Fixing Weight Decay Regularization in Adam` (default: 0)
 
     .. _Acceleration of stochastic approximation by averaging:
         http://dl.acm.org/citation.cfm?id=131098
