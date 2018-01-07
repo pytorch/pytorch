@@ -73,7 +73,7 @@ class RMSprop(Optimizer):
                 state['step'] += 1
 
                 if group['weight_decay'] != 0:
-                    xold = p.data.clone()
+                    p.data.add_(-group['weight_decay'], p.data)
 
                 square_avg.mul_(alpha).addcmul_(1 - alpha, grad, grad)
 
@@ -90,8 +90,5 @@ class RMSprop(Optimizer):
                     p.data.add_(-group['lr'], buf)
                 else:
                     p.data.addcdiv_(-group['lr'], grad, avg)
-
-                if group['weight_decay'] != 0:
-                    p.data.add_(-group['weight_decay'], xold)
 
         return loss
