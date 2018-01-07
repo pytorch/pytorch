@@ -428,26 +428,28 @@ class TestCuda(TestCase):
 
     def test_memory_allocated_stats(self):
         torch.cuda.empty_cache()
-        m0 = last_m = torch.cuda.memory_allocated()
-        max_m = torch.cuda.max_memory_allocated()
+        m0 = torch.cuda.memory_allocated()
+        last_m_arr = [torch.cuda.memory_allocated()]
+        max_m_arr = [torch.cuda.max_memory_allocated()]
 
         def assert_change(comp=1):
             # comp > 0: increased
             # comp = 0: equal
             # comp < 0: decreased
-            nonlocal last_m, max_m
             new_m = torch.cuda.memory_allocated()
             new_max_m = torch.cuda.max_memory_allocated()
             if comp > 0:
-                self.assertGreater(new_m, last_m)
+                self.assertGreater(new_m, last_m_arr[0])
             elif comp < 0:
-                self.assertLess(new_m, last_m)
+                self.assertLess(new_m, last_m_arr[0])
             else:
-                self.assertEqual(new_m, last_m)
+                self.assertEqual(new_m, last_m_arr[0])
             self.assertLessEqual(new_m, new_max_m)
-            self.assertGreaterEqual(new_max_m, max_m)
-            last_m = new_m
-            max_m = new_max_m
+            self.assertGreaterEqual(new_max_m, max_m_arr[0])
+            last_m_arr[0] = new_m
+            max_m_arr[0] = new_max_m
+
+        assert_change(0)
 
         tensors1 = [torch.randn(1).cuda(), torch.randn(10, 20).cuda(), torch.randn(200, 300, 2000).cuda()]
         m1 = torch.cuda.memory_allocated()
@@ -459,12 +461,12 @@ class TestCuda(TestCase):
         for i in range(1, int(N / 2) + 1):
             # small ones
             tensors2.append(torch.randn(i, i * 3).cuda())
-        assert_change(1)
+            assert_change(1)
 
-        for i in range(1, N - len(tensors2) + 1):
+        for i in range(1, int(N / 2) + 1):
             # large ones
             tensors2.append(torch.randn(i * 7, i * 9, i * 11).cuda())
-        assert_change(1)
+            assert_change(1)
 
         tensors2.append(torch.randn(0, 0, 0).cuda())
         assert_change(0)
@@ -484,7 +486,7 @@ class TestCuda(TestCase):
         for i in range(int(N / 2)):
             x = tensors2[i].numel()
             del tensors2[i]
-            assert_change(-x)
+            assert_change(-x)  # in case that tensors2[i] is empty
 
         for i in range(1, int(2 * N / 3) + 1):
             tensors2.append(torch.randn(i, i * 5, i * 12).cuda())

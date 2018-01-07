@@ -80,10 +80,10 @@ struct THCCachingAllocator
   typedef bool (*Comparison)(const Block*, const Block*);
   typedef std::set<Block*, Comparison> FreeBlocks;
 
-  // max memory allocated
+  // max total memory allocated
   static size_t max_memory_allocated;
 
-  // current memory allocated
+  // current total memory allocated
   static size_t memory_allocated;
 
   // lock around all operations

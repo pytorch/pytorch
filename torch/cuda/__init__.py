@@ -344,8 +344,8 @@ def memory_allocated():
     """Returns the current total GPU memory usage by tensors in bytes.
 
     .. note:: This is likely less than the amount shown in `nvidia-smi` since
-    some unused memory can be held by the cached memory allocator and some
-    context needs to be created on GPU. """
+    some unused memory can be held by the caching allocator and some context
+    needs to be created on GPU. """
     return torch._C._cuda_memoryAllocated()
 
 
