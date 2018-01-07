@@ -1,6 +1,5 @@
 from collections import OrderedDict
 
-import torch
 from torch.distributions.distribution import Distribution
 
 _KL_REGISTRY = OrderedDict()
@@ -30,11 +29,10 @@ def register_kl(type_p, type_q):
         raise TypeError('Expected type_p to be a Distribution subclass but got {}'.format(type_p))
     if not isinstance(type_q, type) and issubclass(type_q, Distribution):
         raise TypeError('Expected type_q to be a Distribution subclass but got {}'.format(type_q))
-    p_registry = _KL_REGISTRY.setdefault(type_p, OrderedDict())
 
     def decorator(fun):
+        _KL_REGISTRY[type_p, type_q] = fun
         _KL_DISPATCH_TABLE.clear()  # reset since lookup order may change
-        p_registry[type_q] = fun
         return fun
 
     return decorator
@@ -43,18 +41,13 @@ def register_kl(type_p, type_q):
 def _dispatch_kl(type_p, type_q):
     # Look for an exact match.
     try:
-        return _KL_REGISTRY[type_p][type_q]
+        return _KL_REGISTRY[type_p, type_q]
     except KeyError:
         pass
     # Look for the first approximate match.
-    for super_p, p_registry in _KL_REGISTRY.items():
-        if issubclass(type_p, super_p):
-            try:
-                return p_registry[type_q]
-            except KeyError:
-                for super_q, fun in p_registry.items():
-                    if issubclass(type_q, super_q):
-                        return fun
+    for super_p, super_q in _KL_REGISTRY:
+        if issubclass(type_p, super_p) and issubclass(type_q, super_q):
+            return _KL_REGISTRY[super_p, super_q]
     raise NotImplementedError
 
 
