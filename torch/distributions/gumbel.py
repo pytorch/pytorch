@@ -25,6 +25,7 @@ class Gumbel(Distribution):
     """
     has_rsample = True
     params = {'loc': constraints.real, 'scale': constraints.positive}
+    support = constraints.real
 
     def __init__(self, loc, scale):
         self.loc, self.scale = broadcast_all(loc, scale)
@@ -33,10 +34,6 @@ class Gumbel(Distribution):
         else:
             batch_shape = self.scale.size()
         super(Gumbel, self).__init__(batch_shape)
-
-    @constraints.dependent_property
-    def support(self):
-        return constraints.real
 
     def rsample(self, sample_shape=torch.Size()):
         shape = self._extended_shape(sample_shape)
