@@ -66,6 +66,11 @@ def kl_divergence(p, q):
     try:
         fun = _KL_DISPATCH_TABLE[type(p), type(q)]
     except KeyError:
-        fun = _dispatch_kl(type(p), type(q))
+        try:
+            fun = _dispatch_kl(type(p), type(q))
+        except NotImplementedError:
+            fun = NotImplemented
         _KL_DISPATCH_TABLE[type(p), type(q)] = fun
+    if fun is NotImplemented:
+        raise NotImplementedError
     return fun(p, q)
