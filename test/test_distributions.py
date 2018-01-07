@@ -1078,16 +1078,12 @@ class TestKL(TestCase):
             (Chi2(2), Gamma(3, 4)),
         ]
 
-    def test_kl_empirical(self):
+    def test_kl_monte_carlo(self):
         set_rng_seed(0)  # see Note [Randomized statistical tests]
         for p, q in self.examples:
             x = p.sample(sample_shape=(10000,))
-            expected = (p.log_prob(x) - q.log_prob(x)).mean()
+            expected = (p.log_prob(x) - q.log_prob(x)).mean(0)
             actual = kl_divergence(p, q)
-            message = 'Incorrect KL({}, {}) shape. expected (1,), actual {}'.format(
-                type(p).__name__, type(q).__name__, actual.shape)
-            self.assertEqual(actual.shape, torch.Size((1,)), message=message)
-            actual = actual[0]
             message = 'Incorrect KL({}, {}). expected {}, actual {}'.format(
                 type(p).__name__, type(q).__name__, expected, actual)
             self.assertEqual(expected, actual, prec=0.1, message=message)
