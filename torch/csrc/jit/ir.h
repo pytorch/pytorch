@@ -711,6 +711,12 @@ public:
   Scope * current_scope() {
     return current_scope_;
   }
+  Scope * set_current_scope(Scope* scope) {
+    if (scope->getRoot() != scope_root_.get()) {
+      throw std::runtime_error("trying to set a scope as current that does not belong to the Graph's scope trie");
+    }
+    return current_scope_ = scope;
+  }
   std::shared_ptr<Scope> scope_root() {
     return scope_root_;
   }
