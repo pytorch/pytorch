@@ -3,7 +3,8 @@ from collections import OrderedDict
 import torch
 from torch.distributions.distribution import Distribution
 
-KL_REGISTRY = OrderedDict()
+_KL_REGISTRY = OrderedDict()
+_KL_DISPATCH_TABLE = {}
 
 
 def register_kl(type_p, type_q):
@@ -23,9 +24,10 @@ def register_kl(type_p, type_q):
         raise TypeError('Expected type_p to be a Distribution subclass but got {}'.format(type_p))
     if not isinstance(type_q, type) and issubclass(type_q, Distribution):
         raise TypeError('Expected type_q to be a Distribution subclass but got {}'.format(type_q))
-    p_registry = KL_REGISTRY.setdefault(type_p, OrderedDict())
+    p_registry = _KL_REGISTRY.setdefault(type_p, OrderedDict())
 
     def decorator(fun):
+        _KL_DISPATCH_TABLE.clear()  # reset since lookup order may change
         p_registry[type_q] = fun
         return fun
 
@@ -35,11 +37,11 @@ def register_kl(type_p, type_q):
 def _dispatch_kl(type_p, type_q):
     # Look for an exact match.
     try:
-        return KL_REGISTRY[type_p][type_q]
+        return _KL_REGISTRY[type_p][type_q]
     except KeyError:
         pass
     # Look for the first approximate match.
-    for super_p, p_registry in KL_REGISTRY.items():
+    for super_p, p_registry in _KL_REGISTRY.items():
         if issubclass(type_p, super_p):
             try:
                 return p_registry[type_q]
@@ -61,4 +63,9 @@ def kl_divergence(p, q):
     Returns:
         (Variable or Tensor): A batch of KL distributions of shape `batch_shape`.
     """
-    return _dispatch_kl(type(p), type(q))(p, q)
+    try:
+        fun = _KL_DISPATCH_TABLE[type(p), type(q)]
+    except KeyError:
+        fun = _dispatch_kl(type(p), type(q))
+        _KL_DISPATCH_TABLE[type(p), type(q)] = fun
+    return fun(p, q)
