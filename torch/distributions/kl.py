@@ -16,9 +16,15 @@ def register_kl(type_p, type_q):
         def kl_normal_normal(p, q):
             # insert implementation here
 
+    Lookup order is:
+
+    1.  First look for an exact match.
+    2.  Then find the first pair of registered superclasses, in order that
+        functions were registered.
+
     Args:
-        type_p (type): A distribution subclass.
-        type_q (type): A distribution subclass.
+        type_p (type): A subclass of :class:`~torch.distributions.Distribution`.
+        type_q (type): A subclass of :class:`~torch.distributions.Distribution`.
     """
     if not isinstance(type_p, type) and issubclass(type_p, Distribution):
         raise TypeError('Expected type_p to be a Distribution subclass but got {}'.format(type_p))
@@ -53,15 +59,23 @@ def _dispatch_kl(type_p, type_q):
 
 
 def kl_divergence(p, q):
-    """
-    Compute Kullback-Leibler divergence `KL(p || q)` between two distributions.
+    r"""
+    Compute Kullback-Leibler divergence :math:`KL(p \| q)` between two distributions.
+
+    .. math::
+
+        KL(p \| q) = \int p(x) \log\frac {p(x)} {q(x)} \,dx
 
     Args:
-        p (Distribution): A distribution object.
-        q (Distribution): A distribution object.
+        p (Distrubution): A :class:`~torch.distributions.Distribution` object.
+        q (Distrubution): A :class:`~torch.distributions.Distribution` object.
 
     Returns:
-        (Variable or Tensor): A batch of KL distributions of shape `batch_shape`.
+        (Variable or Tensor): A batch of KL divergences of shape `batch_shape`.
+
+    Raises:
+        NotImplementedError: If the distribution types have not been registered via
+            :meth:`register_kl`.
     """
     try:
         fun = _KL_DISPATCH_TABLE[type(p), type(q)]
