@@ -18,7 +18,7 @@ def register_kl(type_p, type_q):
     Lookup order is:
 
     1.  First look for an exact match.
-    2.  Then find the first pair of registered superclasses, in order that
+    2.  Otherwise find the first pair of registered superclasses, in order that
         functions were registered.
 
     Args:
@@ -32,7 +32,7 @@ def register_kl(type_p, type_q):
 
     def decorator(fun):
         _KL_REGISTRY[type_p, type_q] = fun
-        _KL_DISPATCH_TABLE.clear()  # reset since lookup order may change
+        _KL_DISPATCH_TABLE.clear()  # reset since lookup order may have changed
         return fun
 
     return decorator

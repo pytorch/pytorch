@@ -58,7 +58,7 @@ class Gamma(Distribution):
 
 
 @register_kl(Gamma, Gamma)
-def _kl_gamma_gamma(p, q):
+def kl_gamma_gamma(p, q):
     # Adapted from https://stats.stackexchange.com/questions/11646
     def f(a, b, c, d):
         return -d * a / c + b * a.log() - torch.lgamma(b) + (b - 1) * torch.digamma(d) + (1 - b) * c.log()
