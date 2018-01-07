@@ -48,4 +48,4 @@ class Gumbel(Distribution):
         return -(self.scale.log() + z + torch.exp(-z))
 
     def entropy(self):
-        return self.scale.log() + 1 + 0.5771
+        return self.scale.log() + 1 + 0.57721566490153286060
