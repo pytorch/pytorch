@@ -89,9 +89,7 @@ class Adagrad(Optimizer):
                     state['sum'].addcmul_(1, grad, grad)
                     std = state['sum'].sqrt().add_(1e-10)
                     if group['weight_decay'] != 0:
-                        xold = p.data.clone()
+                        p.data.add_(-group['weight_decay'], p.data)
                     p.data.addcdiv_(-clr, grad, std)
-                    if group['weight_decay'] != 0:
-                        p.data.add_(-group['weight_decay'], xold)
 
         return loss

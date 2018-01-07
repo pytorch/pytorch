@@ -84,11 +84,8 @@ class Adamax(Optimizer):
                 clr = group['lr'] / bias_correction
 
                 if group['weight_decay'] != 0:
-                    xold = p.data.clone()
+                    p.data.add_(-group['weight_decay'], p.data)
 
                 p.data.addcdiv_(-clr, exp_avg, exp_inf)
-
-                if group['weight_decay'] != 0:
-                    p.data.add_(-group['weight_decay'], xold)
 
         return loss
