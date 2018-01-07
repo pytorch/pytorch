@@ -90,3 +90,9 @@ Probability distributions - torch.distributions
 
 .. autoclass:: Uniform
     :members:
+
+:hidden:`KL Divergence`
+~~~~~~~~~~~~~~~~~~~~~~~
+
+.. automethod:: torch.distributions.kl.kl_divergence
+.. automethod:: torch.distributions.kl.register_kl
