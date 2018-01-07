@@ -24,10 +24,10 @@ class Gumbel(Distribution):
         scale (float or Tensor or Variable): Scale parameter of the distribution
     """
     has_rsample = True
-    params = {'loc': constraints.positive, 'scale': constrains.real}
+    params = {'loc': constraints.positive, 'scale': constraints.real}
 
     def __init__(self, loc, scale):
-        self.loc, self.alpha = _broadcast_all(loc, scale)
+        self.loc, self.scale = broadcast_all(loc, scale)
         if isinstance(loc, Number) and isinstance(scale, Number):
             batch_shape = torch.Size()
         else:
@@ -44,12 +44,12 @@ class Gumbel(Distribution):
         uni_dist = 1 - self.scale.new(shape).uniform_()
         # X ~ Uniform(0, 1)
         # Y = loc - scale * ln (ln (X)) ~ Gumbel(loc, scale)
-        return self.loc - self.scale * t.log(-uni_dist.log())
+        return self.loc - self.scale * torch.log(-uni_dist.log())
 
     def log_prob(self, value):
         self._validate_log_prob_arg(value)
         z = (value - self.loc) / self.scale
-        return -(self.scale.log() + z + t.exp(-z))
+        return -(self.scale.log() + z + torch.exp(-z))
 
     def entropy(self):
-        return self.scale.log() + 1 + EULER_MASCHARONI
+        return self.scale.log() + 1 + 0.5771
