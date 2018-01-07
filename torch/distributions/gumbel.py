@@ -24,7 +24,7 @@ class Gumbel(Distribution):
         scale (float or Tensor or Variable): Scale parameter of the distribution
     """
     has_rsample = True
-    params = {'loc': constraints.positive, 'scale': constraints.real}
+    params = {'loc': constraints.real, 'scale': constraints.positive}
 
     def __init__(self, loc, scale):
         self.loc, self.scale = broadcast_all(loc, scale)
@@ -40,10 +40,9 @@ class Gumbel(Distribution):
 
     def rsample(self, sample_shape=torch.Size()):
         shape = self._extended_shape(sample_shape)
-        # uniform_() is [0, 1), but we need (0, 1]
-        uni_dist = 1 - self.scale.new(shape).uniform_()
+        uni_dist = self.scale.new(shape).uniform_()
         # X ~ Uniform(0, 1)
-        # Y = loc - scale * ln (ln (X)) ~ Gumbel(loc, scale)
+        # Y = loc - scale * ln (-ln (X)) ~ Gumbel(loc, scale)
         return self.loc - self.scale * torch.log(-uni_dist.log())
 
     def log_prob(self, value):
