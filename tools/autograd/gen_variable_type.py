@@ -204,7 +204,7 @@ def split_name_params(prototype):
     return name, params.split(', ')
 
 
-def uses_grad(func):
+def uses_single_grad(func):
     if func is None:
         return False
     for derivative in func['derivatives']:
@@ -515,7 +515,7 @@ def create_variable_type(top_env, aten_declarations):
             # I don't think this is a good way to implement this, but
             # there doesn't seem to be a good place to mark things as
             # differentiable or non-differentiable at the moment.
-            if uses_grad(declaration.get('derivative')):
+            if uses_single_grad(declaration.get('derivative')):
                 env['result'] = "std::get<0>(ret)" if len(declaration['returns']) > 1 else 'ret'
             else:
                 env['result'] = CodeTemplate("{ ${outs} }").substitute(outs=diff_outs)

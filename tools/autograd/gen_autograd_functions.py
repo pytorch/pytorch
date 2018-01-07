@@ -5,7 +5,7 @@
 #  python_functions.h/cpp: Python bindings for the above classes
 #
 from .utils import nested_dict, CodeTemplate, write
-from .gen_variable_type import VIEW_FUNCTIONS, uses_grad, template_path
+from .gen_variable_type import VIEW_FUNCTIONS, uses_single_grad, template_path
 
 FUNCTIONS_H = CodeTemplate.from_file(template_path + '/Functions.h')
 FUNCTIONS_CPP = CodeTemplate.from_file(template_path + '/Functions.cpp')
@@ -127,7 +127,7 @@ def process_function(func):
 
     body = []
 
-    if uses_grad(func):
+    if uses_single_grad(func):
         body.append('auto& grad = grads[0];')
 
     def emit_derivative(derivative):

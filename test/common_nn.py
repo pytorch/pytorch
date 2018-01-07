@@ -720,6 +720,9 @@ class ModuleTest(TestBase):
         self.jacobian_input = kwargs.get('jacobian_input', True)
         self.should_test_cuda = kwargs.get('test_cuda', True)
         self.should_test_pickle = kwargs.get('pickle', True)
+        self.check_gradgrad = kwargs.get('check_gradgrad', True)
+        self.FIXME_no_cuda_gradgrad_comparison = \
+            kwargs.get('FIXME_no_cuda_gradgrad_comparison', False)
 
     def __call__(self, test_case):
         module = self.constructor(*self.constructor_args)
@@ -818,14 +821,49 @@ class ModuleTest(TestBase):
             gpu_output = test_case._forward(gpu_module, gpu_input)
             test_case.assertEqual(cpu_output, gpu_output, 2e-4)
 
+            # Run backwards on CPU and GPU and compare results
             for i in range(5):
                 cpu_output_t = cpu_output.data if isinstance(cpu_output, Variable) else cpu_output
-                cpu_gradOutput = cpu_output_t.clone().bernoulli_()
+                cpu_gradOutput = cpu_output_t.clone().normal_()
                 gpu_gradOutput = cpu_gradOutput.type('torch.cuda.FloatTensor')
                 cpu_gradInput = test_case._backward(cpu_module, cpu_input, cpu_output, cpu_gradOutput)
                 gpu_gradInput = test_case._backward(gpu_module, gpu_input, gpu_output, gpu_gradOutput)
                 test_case.assertEqual(cpu_gradInput, gpu_gradInput, 2e-4)
                 for cpu_d_p, gpu_d_p in zip(cpu_param[1], gpu_param[1]):
+                    test_case.assertEqual(cpu_d_p, gpu_d_p, 2e-4)
+
+            # Run double-backwards on CPU and GPU and compare results
+            if self.check_gradgrad and not self.FIXME_no_cuda_gradgrad_comparison:
+                cpu_output_t = cpu_output.data if isinstance(cpu_output, Variable) else cpu_output
+                cpu_gradOutput = Variable(cpu_output_t.clone().normal_(), requires_grad=True)
+                gpu_gradOutput = Variable(cpu_gradOutput.type('torch.cuda.FloatTensor').data, requires_grad=True)
+
+                cpu_gradInputs = torch.autograd.grad(
+                    cpu_module(cpu_input),
+                    (cpu_input,) + tuple(cpu_module.parameters()),
+                    cpu_gradOutput,
+                    create_graph=True)
+                gpu_gradInputs = torch.autograd.grad(
+                    gpu_module(gpu_input),
+                    (gpu_input,) + tuple(gpu_module.parameters()),
+                    gpu_gradOutput,
+                    create_graph=True)
+
+                # We mix output into the second backwards computation so that
+                # torch.autograd.grad doesn't complain that some inputs
+                # are unreachable (which can happen if you differentiate
+                # only on the gradient.
+                cpu_gg = torch.autograd.grad(
+                    cpu_output.sum() + sum(map(lambda x: x.sum(), cpu_gradInputs)),
+                    (cpu_input, cpu_gradOutput) + tuple(cpu_module.parameters()),
+                    retain_graph=True)
+                gpu_gg = torch.autograd.grad(
+                    gpu_output.sum() + sum(map(lambda x: x.sum(), gpu_gradInputs)),
+                    (gpu_input, gpu_gradOutput) + tuple(gpu_module.parameters()),
+                    retain_graph=True)
+
+                test_case.assertEqual(cpu_gradInput, gpu_gradInput, 2e-4)
+                for cpu_d_p, gpu_d_p in zip(cpu_gg, gpu_gg):
                     test_case.assertEqual(cpu_d_p, gpu_d_p, 2e-4)
 
             self.test_noncontig(test_case, gpu_module, gpu_input)
