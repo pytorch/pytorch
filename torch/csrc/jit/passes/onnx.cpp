@@ -86,7 +86,6 @@ void ToONNX(std::shared_ptr<tracer::TracingState>& state, bool aten) {
         // Copy over source location information to all nodes created by
         // the symbolic
         outputs[i]->node()->setSourceLocation(node->getSourceLocation());
-        outputs[i]->node()->setScope(node->scope());
         env[old] = outputs[i];
       } else {
         // Null output means that the ONNX op doesn't have outputs corresponding
@@ -150,6 +149,8 @@ void ToONNX(std::shared_ptr<tracer::TracingState>& state, bool aten) {
     for (auto* input : n->inputs()) {
         py_inputs[input_nr++] = py::cast(envFn(input));
     }
+
+    auto scope_guard = ctx.graph->set_current_scope_temporary(n->scope());
 
     py::object raw_output = onnx.attr("_run_symbolic_function")(ctx.graph, n, py_inputs, aten);
 
