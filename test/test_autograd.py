@@ -2393,6 +2393,8 @@ method_tests = [
     ('dist', (S, S, S), ((), 4), 'scalar_4_broadcast_rhs'),
     ('dist', (), ((S, S, S), 4), 'scalar_4_broadcast_lhs'),
     ('diag', (M, M), NO_ARGS, '2d'),
+    ('diag', (3, 5), NO_ARGS, '2d_wide'),
+    ('diag', (5, 3), NO_ARGS, '2d_tall'),
     ('diag', (M,), NO_ARGS, '1d'),
     ('diag', (M, M), (1,), '2d_1'),
     ('diag', (M, M), (2,), '2d_2'),

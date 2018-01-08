@@ -711,6 +711,27 @@ Tensor smooth_l1_loss_double_backward_grad_output(const Tensor & grad, const Ten
   return (r * grad).sum().view({1});
 }
 
+Tensor diag_backward(const Tensor & grad, const Tensor & self, int64_t diagonal) {
+  auto ndimension = self.ndimension();
+  TORCH_ASSERT(ndimension == 1 || ndimension == 2);
+
+  auto grad_input = grad.diag(diagonal);
+  if (ndimension == 1 || self.size(0) == self.size(1)) {
+    return grad_input;
+  }
+
+  // cat rows or cols to grad_input so that it matches self's shape.
+  auto length = grad_input.size(0);
+  auto self_nrows = self.size(0);
+  auto self_ncols = self.size(1);
+  if (self_nrows == length) {
+    auto extra_cols = grad_input.type().zeros({self_nrows, self_ncols - length});
+    return at::cat({grad_input, extra_cols}, 1);
+  }
+  auto extra_rows = grad_input.type().zeros({self_nrows - length, self_ncols});
+  return at::cat({grad_input, extra_rows});
+}
+
 Tensor max_pool2d_double_backward(const Tensor & grad, const Tensor & indices) {
   // fold the first two dims together and the last two together
   auto fold = [](const Tensor & t) -> Tensor {
