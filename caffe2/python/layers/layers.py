@@ -134,7 +134,7 @@ LayerPsParam = namedtuple('LayerPsParam', ['sparse_key', 'average_length'])
 class LayerParameter(object):
 
     def __init__(self, parameter=None, optimizer=None, initializer=None,
-                 ps_param=None):
+                 ps_param=None, regularizer=None):
         assert isinstance(parameter, core.BlobReference), \
             "expect {0} to be a blob reference".format(str(parameter))
         # need to put the following line (shape) before initialier
@@ -144,6 +144,7 @@ class LayerParameter(object):
         self.optimizer = optimizer
         self.initializer = initializer
         self.ps_param = ps_param
+        self.regularizer = regularizer
 
     @property
     def initializer(self):
@@ -331,13 +332,14 @@ class ModelLayer(object):
                 init_net._net.op.extend([init_op])
 
     def create_param(self, param_name, shape, initializer, optimizer,
-                     ps_param=None):
+                     ps_param=None, regularizer=None):
         with scope.NameScope(self.name, reset=True):
             param = self.model.create_param(param_name=param_name,
                                             shape=shape,
                                             initializer=initializer,
                                             optimizer=optimizer,
-                                            ps_param=ps_param)
+                                            ps_param=ps_param,
+                                            regularizer=regularizer)
 
             # make sure we don't share parameters in the same layer
             assert all(param.parameter != p.parameter for p in self.params)

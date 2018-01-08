@@ -31,7 +31,7 @@ class FC(SamplingTrainableMixin, ModelLayer):
 
     def __init__(self, model, input_record, output_dims, weight_init=None,
                  bias_init=None, weight_optim=None, bias_optim=None, name='fc',
-                 **kwargs):
+                 weight_reg=None, bias_reg=None, **kwargs):
         super(FC, self).__init__(model, name, input_record, **kwargs)
         assert isinstance(input_record, schema.Scalar), "Incorrect input type"
         assert len(input_record.field_types()[0].shape) > 0, (
@@ -50,12 +50,14 @@ class FC(SamplingTrainableMixin, ModelLayer):
         self.w = self.create_param(param_name='w',
                                    shape=[output_dims, input_dims],
                                    initializer=weight_init,
-                                   optimizer=weight_optim)
+                                   optimizer=weight_optim,
+                                   regularizer=weight_reg)
 
         self.b = self.create_param(param_name='b',
                                    shape=[output_dims, ],
                                    initializer=bias_init,
-                                   optimizer=bias_optim)
+                                   optimizer=bias_optim,
+                                   regularizer=bias_reg)
 
         self.output_schema = schema.Scalar(
             (np.float32, (output_dims, )),

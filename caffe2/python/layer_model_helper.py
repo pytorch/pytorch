@@ -21,10 +21,14 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 from caffe2.python import core, model_helper, schema, scope
+from caffe2.python.modeling.parameter_info import (
+    ParameterInfo,
+)
 from caffe2.python.modeling.parameter_sharing import (
     parameter_sharing_context,
 )
 from caffe2.python.optimizer import get_param_device
+from caffe2.python.regularizer import Regularizer
 from caffe2.python.layers import layers
 from caffe2.proto import caffe2_pb2
 from future.utils import viewitems, viewvalues
@@ -60,6 +64,7 @@ class LayerModelHelper(model_helper.ModelHelper):
 
         # optimizer bookkeeping
         self.param_to_optim = {}
+        self.param_to_reg = {}
 
         self._default_optimizer = None
         self._loss = None
@@ -203,7 +208,7 @@ class LayerModelHelper(model_helper.ModelHelper):
             )
 
     def create_param(self, param_name, shape, initializer, optimizer=None,
-                     ps_param=None):
+                     ps_param=None, regularizer=None):
         if isinstance(param_name, core.BlobReference):
             param_name = str(param_name)
         elif isinstance(param_name, six.string_types):
@@ -239,6 +244,7 @@ class LayerModelHelper(model_helper.ModelHelper):
             initializer=initializer_op,
             optimizer=optimizer,
             ps_param=ps_param,
+            regularizer=regularizer
         )
 
         self._validate_param_shape(param_name, shape)
@@ -267,6 +273,21 @@ class LayerModelHelper(model_helper.ModelHelper):
                 param.optimizer or self.default_optimizer
 
             self.params.append(param.parameter)
+            if isinstance(param, layers.LayerParameter):
+                self.param_to_reg[param.parameter] = param.regularizer
+            elif isinstance(param, ParameterInfo):
+                # TODO:
+                # Currently, LSTM and RNNcells, which use ModelHelper instead of
+                # LayerModelHelper as super class, are called in pooling_methods
+                # In ModelHelper, regularization is not supported in create_param
+                # We will unify the way of create_param of ModelHelper and
+                # LayerModelHelper in the future.
+                logger.info('regularization is unsupported for ParameterInfo object')
+            else:
+                raise ValueError(
+                    'unknown object type besides ParameterInfo and LayerParameter: {}'
+                    .format(param)
+                )
 
         # The primary value of adding everything to self.net - generation of the
         # operators right away, i.e. if error happens it'll be detected
@@ -379,6 +400,36 @@ class LayerModelHelper(model_helper.ModelHelper):
     @property
     def layers(self):
         return self._layers
+
+    def apply_regularizers_on_loss(
+        self,
+        train_net,
+        train_init_net,
+        blob_to_device=None,
+    ):
+        for param, regularizer in viewitems(self.param_to_reg):
+            if regularizer is None or regularizer.apply_after_optimizer:
+                continue
+            assert isinstance(regularizer, Regularizer)
+            added_loss_blob = regularizer(train_net, train_init_net, param)
+            self.add_loss(
+                schema.Scalar(blob=added_loss_blob),
+                str(added_loss_blob)
+            )
+
+    def apply_regularizers_after_optimizer(
+        self,
+        train_net,
+        train_init_net,
+        grad_map,
+        blob_to_device=None,
+    ):
+        for param, regularizer in viewitems(self.param_to_reg):
+            if regularizer is None or not regularizer.apply_after_optimizer:
+                continue
+            assert isinstance(regularizer, Regularizer)
+            regularizer(
+                train_net, train_init_net, param, grad_map.get(str(param)))
 
     def apply_optimizers(
         self,
