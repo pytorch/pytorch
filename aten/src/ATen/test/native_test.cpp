@@ -61,10 +61,10 @@ void test(Type & T, Type & AccT) {
   // size / stride
   {
     auto scalar = T.randn({});
-    ASSERT_THROWS(scalar.size(0), "dimension specified as 0 but tensor has no dimensions");
-    ASSERT_THROWS(scalar.size(-1), "dimension specified as -1 but tensor has no dimensions");
-    ASSERT_THROWS(scalar.stride(0), "dimension specified as 0 but tensor has no dimensions");
-    ASSERT_THROWS(scalar.stride(-1), "dimension specified as -1 but tensor has no dimensions");
+    ASSERT_THROWSM(scalar.size(0), "dimension specified as 0 but tensor has no dimensions");
+    ASSERT_THROWSM(scalar.size(-1), "dimension specified as -1 but tensor has no dimensions");
+    ASSERT_THROWSM(scalar.stride(0), "dimension specified as 0 but tensor has no dimensions");
+    ASSERT_THROWSM(scalar.stride(-1), "dimension specified as -1 but tensor has no dimensions");
 
     auto empty = T.randn({0});
     ASSERT(empty.size(0) == 0);
@@ -80,8 +80,8 @@ void test(Type & T, Type & AccT) {
     auto d2 = T.randn({2, 3});
 
     // 0-d
-    ASSERT_THROWS(scalar.matmul(d2), "both arguments to matmul need to be at least 1D");
-    ASSERT_THROWS(d2.matmul(scalar), "both arguments to matmul need to be at least 1D");
+    ASSERT_THROWSM(scalar.matmul(d2), "both arguments to matmul need to be at least 1D");
+    ASSERT_THROWSM(d2.matmul(scalar), "both arguments to matmul need to be at least 1D");
 
     // 1-d
     ASSERT_ALLCLOSE(d1.matmul(d1), d1.dot(d1));
@@ -126,7 +126,7 @@ void test(Type & T, Type & AccT) {
 
     // non-expandable case
     auto d5wrong = T.randn({2, 4, 2, 4, 3, 2});
-    ASSERT_THROWS(d5.matmul(d5wrong), "must match the size");
+    ASSERT_THROWSM(d5.matmul(d5wrong), "must match the size");
   }
 
   // _standard_gamma_grad
@@ -145,14 +145,14 @@ void test(Type & T, Type & AccT) {
     Type & DT = CPU(kDouble);
     auto t1 = T.randn({3, 4});
     auto t2 = DT.randn({3, 4});
-    ASSERT_THROWS(t1._standard_gamma_grad(t2), "expected scalar type");
+    ASSERT_THROWSM(t1._standard_gamma_grad(t2), "expected scalar type");
   } else {
     auto ct1 = T.randn({3, 4});
     auto ct2 = T.randn({3, 4});
     auto t1 = T.toBackend(Backend::CPU).randn({3, 4});
-    ASSERT_THROWS(ct1._standard_gamma_grad(ct2), "not implemented");
-    ASSERT_THROWS(ct1._standard_gamma_grad(t1), "not implemented");
-    ASSERT_THROWS(t1._standard_gamma_grad(ct2), "CUDA Backend");
+    ASSERT_THROWSM(ct1._standard_gamma_grad(ct2), "not implemented");
+    ASSERT_THROWSM(ct1._standard_gamma_grad(t1), "not implemented");
+    ASSERT_THROWSM(t1._standard_gamma_grad(ct2), "CUDA Backend");
   }
 
   // where
