@@ -72,6 +72,7 @@ def rewrite_run_net_simple(net):
     for op in net.op:
         op.device_option.MergeFrom(
             core.DeviceOption(device_type=caffe2_pb2.MKLDNN))
+        op.engine = ""
 
 
 def rewrite_model_helper_simple(model):
