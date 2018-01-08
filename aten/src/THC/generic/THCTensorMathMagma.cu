@@ -59,6 +59,30 @@ static THCTensor* THCTensor_(newColumnMajor)(THCState *state, THCTensor *self, T
   return self;
 }
 
+/*
+ * Creates a clone of a 3D tensor such that each 2D batch is in column major
+ * format and each batch is contiguous WRT itself in memory.
+ */
+static THCTensor* THCTensor_(newBatchedColumnMajor)(THCState *state, THCTensor *self, THCTensor *src)
+{
+  THAssert(src->nDimension == 3);
+  int64_t stride[3] = { src->size[1] * src->size[2], 1, src->size[1] };
+
+  if (self == src && self->stride[0] == stride[0] &&
+      self->stride[1] == stride[1]  && self->stride[2] == self->size[2]) {
+    THCTensor_(retain)(state, self);
+    return self;
+  }
+
+  if (self == src) {
+    self = THCTensor_(new)(state);
+  } else {
+    THCTensor_(retain)(state, self);
+  }
+  THCTensor_(resizeNd)(state, self, 3, src->size, stride);
+  THCTensor_(copy)(state, self, src);
+  return self;
+}
 
 THC_API void THCTensor_(gesv)(THCState *state, THCTensor *rb_, THCTensor *ra_, THCTensor *b_, THCTensor *a_)
 {
@@ -97,6 +121,77 @@ THC_API void THCTensor_(gesv)(THCState *state, THCTensor *rb_, THCTensor *ra_, T
   THError(NoMagma(gesv));
 #endif
 }
+
+THC_API void THCTensor_(bgesv)(THCState *state, THCTensor *rb_, THCTensor *ra_, THCTensor *b_, THCTensor *a_)
+{
+#ifdef USE_MAGMA
+  THArgCheck(a_->nDimension == 3, 1, "A should be 3 dimensional");
+  THArgCheck(b_->nDimension == 3, 2, "b should be 3 dimensional");
+  THArgCheck(a_->size[1] == a_->size[2], 1, "A should be batches of square matrices");
+  THArgCheck(b_->size[0] == a_->size[0], 2, "A, b batch_count incompatible");
+  THArgCheck(b_->size[1] == a_->size[1], 2, "A, b size incompatible");
+
+  int64_t batch_count = a_->size[0];
+  int64_t n = a_->size[1];
+  int64_t nrhs = b_->size[2];
+
+  THCTensor *a = THCTensor_(newBatchedColumnMajor)(state, ra_, a_);
+  THCTensor *b = THCTensor_(newBatchedColumnMajor)(state, rb_, b_);
+  real *a_data = THCTensor_(data)(state, a);
+  real *b_data = THCTensor_(data)(state, b);
+
+  real **a_array = th_magma_malloc_pinned<real *>(batch_count);
+  real **b_array = th_magma_malloc_pinned<real *>(batch_count);
+
+  int *info_array = th_magma_malloc_pinned<int>(batch_count);
+  int *ipiv_data = th_magma_malloc_pinned<int>(batch_count * n);
+  int **ipiv_array = th_magma_malloc_pinned<int *>(batch_count);
+
+  for (int64_t i = 0; i < batch_count; i++) {
+    a_array[i] = &a_data[i * n * n];
+    b_array[i] = &b_data[i * n * nrhs]; 
+    ipiv_array[i] = &ipiv_data[i * n];
+  }
+
+  magma_queue_t magma_queue;
+  magma_queue_create_from_cuda(
+      THCTensor_(getDevice)(state, a_),
+      THCState_getCurrentStream(state),
+      THCState_getCurrentBlasHandle(state),
+      THCState_getCurrentSparseHandle(state),
+      &magma_queue);
+
+#if defined(THC_REAL_IS_FLOAT)
+  magma_sgesv_batched(n, nrhs, a_array, n, ipiv_array, b_array, n, info_array, batch_count, magma_queue);
+#else
+  magma_dgesv_batched(n, nrhs, a_array, n, ipiv_array, b_array, n, info_array, batch_count, magma_queue);
+#endif
+
+  magma_queue_destroy(magma_queue);
+  magma_free_pinned(ipiv_array);
+  magma_free_pinned(ipiv_data);
+  magma_free_pinned(a_array);
+  magma_free_pinned(b_array);
+  THCTensor_(freeCopyTo)(state, a, ra_);
+  THCTensor_(freeCopyTo)(state, b, rb_);
+
+  for (int64_t i = 0; i < batch_count; i++) {
+    int info = info_array[i];
+    if (info < 0) {
+      THError("MAGMA bgesv (gesv_batched) : For batch number %lld: Argument %d : illegal value",
+          (long long)i, -info);
+    } else if (info > 0) {
+      THError("MAGMA bgesv (gesv_batched) : For batch number %lld: U(%d,%d) is zero, singular U.",
+          (long long)i, info, info);
+    }
+  }
+
+  magma_free_pinned(info_array);
+#else
+  THError(NoMagma(bgesv));
+#endif
+}
+
 
 THC_API void THCTensor_(gels)(THCState *state, THCTensor *rb_, THCTensor *ra_, THCTensor *b_, THCTensor *a_)
 {

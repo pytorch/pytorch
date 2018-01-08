@@ -2236,6 +2236,7 @@ method_tests = [
     ('det', lambda: random_fullrank_matrix_distinct_singular_value(S), (), 'distinct_postive_s', (), [skipIfNoLapack]),
     ('svd', lambda: random_fullrank_matrix_distinct_singular_value(S), (), '', (), [skipIfNoLapack]),
     ('gesv', (S, S), ((S, S),), '', (), [skipIfNoLapack]),
+    ('bgesv', (S, S, S), ((S, S, S),), '', (), [skipIfNoLapack]),
     ('eq', (S, S, S), ((S, S, S),)),
     ('eq', (S, S, S), ((1,),), 'broadcast_rhs'),
     ('eq', (1,), ((S, S, S),), 'broadcast_lhs'),

@@ -272,6 +272,10 @@
   self: std::get<0>(gesv(grad, A.t()))
   A: -at::mm(std::get<0>(gesv(grad, A.t())), solution.t())
 
+- name: bgesv(Tensor self, Tensor A)
+  self: std::get<0>(bgesv(grad, A.transpose(1, 2)))
+  A: -at::bmm(std::get<0>(bgesv(grad, A.transpose(1, 2))), solution.transpose(1, 2))
+
 # get_device
 
 - name: gt(Tensor self, Scalar other)

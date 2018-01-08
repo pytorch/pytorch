@@ -101,6 +101,31 @@ static THTensor *THTensor_(cloneColumnMajor)(THTensor *self, THTensor *src)
   return THTensor_(cloneColumnMajorNrows)(self, src, src->size[0]);
 }
 
+/*
+ * Creates a clone of a 3D tensor such that each 2D batch is in column major
+ * format and each batch is contiguous WRT itself in memory.
+ */
+static THTensor *THTensor_(cloneBatchedColumnMajor)(THTensor *self, THTensor *src)
+{
+  THAssert(src->nDimension == 3);
+  int64_t stride[3] = { src->size[1] * src->size[2], 1, src->size[1] };
+
+  if (self == src && self->stride[0] == stride[0] &&
+      self->stride[1] == stride[1] && self->stride[2] == stride[2]) {
+    THTensor_(retain)(self);
+    return self;
+  }
+
+  if (self == src) {
+    self = THTensor_(new)();
+  } else {
+    THTensor_(retain)(self);
+  }
+  THTensor_(resizeNd)(self, 3, src->size, stride);
+  THTensor_(copy)(self, src);
+  return self;
+}
+
 void THTensor_(gesv)(THTensor *rb_, THTensor *ra_, THTensor *b, THTensor *a)
 {
   int free_b = 0;
@@ -151,6 +176,48 @@ void THTensor_(gesv)(THTensor *rb_, THTensor *ra_, THTensor *b, THTensor *a)
   THTensor_(freeCopyTo)(rb__, rb_);
   THIntTensor_free(ipiv);
   if (free_b) THTensor_(free)(b);
+}
+
+void THTensor_(bgesv)(THTensor *rb_, THTensor *ra_, THTensor *b, THTensor *a)
+{
+  if (a == NULL) a = ra_;
+  if (b == NULL) b = rb_;
+
+  THArgCheck(a->nDimension == 3, 1, "A should be 3 dimensional");
+  THArgCheck(b->nDimension == 3, 2, "b should be 3 dimensional");
+  THArgCheck(a->size[1] == a->size[2], 1, "A should be batches of square matrices");
+  THArgCheck(b->size[0] == a->size[0], 2, "A, b batch_count incompatible");
+  THArgCheck(b->size[1] == a->size[1], 2, "A, b size incompatible");
+
+  int64_t batch_count = a->size[0];
+  int64_t n = a->size[1];
+  int64_t nrhs = b->size[2];
+
+  THTensor *a_copy = THTensor_(cloneBatchedColumnMajor)(ra_, a);
+  THTensor *b_copy = THTensor_(cloneBatchedColumnMajor)(rb_, b);
+  real *a_copy_data = THTensor_(data)(a_copy);
+  real *b_copy_data = THTensor_(data)(b_copy);
+
+  THIntTensor *ipiv = THIntTensor_newWithSize1d(n);
+  int info;
+
+  for (int64_t i = 0; i < batch_count; i++) {
+    real *a_working_copy = &a_copy_data[i * n * n];
+    real *b_working_copy = &b_copy_data[i * n * nrhs];
+    THLapack_(gesv)(n, nrhs, a_working_copy, n, THIntTensor_data(ipiv),
+        b_working_copy, n, &info);
+    THLapackCheckWithCleanup(
+        "Lapack Error in %s : U(%d,%d) is zero, singular U for batch element %lld.",
+        THCleanup(
+            THTensor_(free)(a_copy);
+            THTensor_(free)(b_copy);
+            THIntTensor_free(ipiv);),
+        "bgesv", info, info, (long long)i);
+  }
+
+  THTensor_(freeCopyTo)(a_copy, ra_);
+  THTensor_(freeCopyTo)(b_copy, rb_);
+  THIntTensor_free(ipiv);
 }
 
 void THTensor_(trtrs)(THTensor *rb_, THTensor *ra_, THTensor *b, THTensor *a,
