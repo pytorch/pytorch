@@ -200,14 +200,11 @@ class NewModuleTest(InputVariableMixin, ModuleTest):
 
                 # test that forwards of module runs correctly without cuDNN
                 if self.cudnn:
-                    torch.backends.cudnn.enabled = False
-                    try:
+                    with torch.backends.cudnn.flags(enabled=False):
                         module(input)
                         for p in module.parameters():
                             test_case.assertEqual(type(p.data), torch.cuda.FloatTensor)
                             test_case.assertEqual(p.get_device(), 0)
-                    finally:
-                        torch.backends.cudnn.enabled = True
 
                 if torch.cuda.device_count() >= 2:
                     # test cross-GPU transfer works
@@ -2037,13 +2034,13 @@ class TestNN(NNTestCase):
         weights = Variable(torch.randn(1, 1, 3, 3).double().cuda())
         bias = Variable(torch.randn(1).double().cuda())
 
-        torch.backends.cudnn.enabled = False
-        # inconsistent types should raise an exception
-        self.assertRaises(RuntimeError, lambda: nn.functional.conv2d(inputs, weights))
-        self.assertRaises(RuntimeError, lambda: nn.functional.conv2d(inputs, weights.float(), bias))
+        with torch.backends.cudnn.flags(enabled=False):
+            # inconsistent types should raise an exception
+            self.assertRaises(RuntimeError, lambda: nn.functional.conv2d(inputs, weights))
+            self.assertRaises(RuntimeError, lambda: nn.functional.conv2d(inputs, weights.float(), bias))
 
-        # but it should work with the same type
-        nn.functional.conv2d(inputs.float(), weights.float(), bias.float())
+            # but it should work with the same type
+            nn.functional.conv2d(inputs.float(), weights.float(), bias.float())
 
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
@@ -2052,13 +2049,13 @@ class TestNN(NNTestCase):
         weights = Variable(torch.randn(1, 1, 3, 3).double().cuda())
         bias = Variable(torch.randn(1).double().cuda())
 
-        torch.backends.cudnn.enabled = True
-        # inconsistent types should raise an exception
-        self.assertRaises(RuntimeError, lambda: nn.functional.conv2d(inputs, weights))
-        self.assertRaises(RuntimeError, lambda: nn.functional.conv2d(inputs, weights.float(), bias))
+        with torch.backends.cudnn.flags(enabled=True):
+            # inconsistent types should raise an exception
+            self.assertRaises(RuntimeError, lambda: nn.functional.conv2d(inputs, weights))
+            self.assertRaises(RuntimeError, lambda: nn.functional.conv2d(inputs, weights.float(), bias))
 
-        # but it should work with the same type
-        nn.functional.conv2d(inputs.float(), weights.float(), bias.float())
+            # but it should work with the same type
+            nn.functional.conv2d(inputs.float(), weights.float(), bias.float())
 
     @unittest.skipIf(IS_WINDOWS, 'TODO: fix this test for Windows')
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
@@ -2104,19 +2101,15 @@ class TestNN(NNTestCase):
         dtype = torch.cuda.FloatTensor
 
         def run_test(benchmark):
-            torch.backends.cudnn.benchmark = benchmark
-            conv = torch.nn.Conv2d(256, 256, kernel_size=3, padding=1).type(dtype)
-            for size in sizes:
-                x = torch.randn(size).type(dtype)
-                out = conv(Variable(x, requires_grad=True))
-                out.backward(torch.ones(out.size()).type(dtype))
+            with torch.backends.cudnn.flags(benchmark=benchmark):
+                conv = torch.nn.Conv2d(256, 256, kernel_size=3, padding=1).type(dtype)
+                for size in sizes:
+                    x = torch.randn(size).type(dtype)
+                    out = conv(Variable(x, requires_grad=True))
+                    out.backward(torch.ones(out.size()).type(dtype))
 
-        b = torch.backends.cudnn.benchmark
-        try:
-            run_test(benchmark=False)
-            run_test(benchmark=True)
-        finally:
-            torch.backends.cudnn.benchmark = b
+        run_test(benchmark=False)
+        run_test(benchmark=True)
 
     def test_conv_modules_raise_error_on_incorrect_input_size(self):
         modules = [nn.Conv1d(3, 8, 3), nn.ConvTranspose1d(3, 8, 3),
@@ -2631,9 +2624,7 @@ class TestNN(NNTestCase):
         grad_output = torch.randn(seq_length, batch, hidden_size)
         hx_val = torch.randn(num_layers, batch, hidden_size)
         grad_hy = torch.randn(num_layers, batch, hidden_size)
-        prev = torch.backends.cudnn.enabled
-        try:
-            torch.backends.cudnn.enabled = False
+        with torch.backends.cudnn.flags(enabled=False):
             for module in (nn.GRU, nn.LSTM):
                 for bias in (True, False):
                     rnn = module(input_size, hidden_size, num_layers, bias=bias)
@@ -2676,8 +2667,6 @@ class TestNN(NNTestCase):
                         self.assertEqual(hx[1].grad.data, hx_cuda[1].grad.data)
                     else:
                         self.assertEqual(hx.grad.data, hx_cuda.grad.data)
-        finally:
-            torch.backends.cudnn.enabled = prev
 
     def test_rnn_args_check(self):
         input_size = 3
@@ -2777,11 +2766,8 @@ class TestNN(NNTestCase):
 
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
     def test_rnn_retain_variables_cuda(self):
-        try:
-            torch.backends.cudnn.enabled = False
+        with torch.backends.cudnn.flags(enabled=False):
             self._test_rnn_retain_variables(torch.cuda.FloatTensor)
-        finally:
-            torch.backends.cudnn.enabled = True
         self._test_rnn_retain_variables(torch.cuda.FloatTensor)
 
     def _test_RNN_cpu_vs_cudnn(self, dropout):
