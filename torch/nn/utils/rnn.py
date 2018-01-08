@@ -26,16 +26,29 @@ class PackedSequence(PackedSequence_):
         batch_sizes (list[int]): list of integers holding information about
             the batch size at each sequence step
     """
+
+    @classmethod
+    def _impute_data_prop(cls, name):
+        @property
+        def prop(self):
+            return getattr(self.data, name)
+        setattr(cls, name, prop)
+
     @classmethod
     def _impute_data_mask(cls, name):
-        """Impute `method` of attribute `data` into class `cls`"""
+        """Impute method `name` of attribute `data` into class `cls`"""
         def fn(self, *args, **kwargs):
             return type(self)(getattr(self.data, name)(*args, **kwargs), self.batch_sizes)
         setattr(cls, name, fn)
 
-# Impute following `torch.Tensor` methods into `PackedSequence`
-for method_name in 'cuda cpu half double'.split():
+# Impute following `torch.Tensor` methods and properties into `PackedSequence`
+_methods_to_impute = 'cuda cpu double float long int short char byte'.split()
+for method_name in _methods_to_impute:
     PackedSequence._impute_data_mask(method_name)
+
+_props_to_impute = 'is_cuda'.split()
+for prop_name in _props_to_impute:
+    PackedSequence._impute_data_prop(prop_name)
 
 
 def pack_padded_sequence(input, lengths, batch_first=False):
@@ -91,7 +104,19 @@ def pack_padded_sequence(input, lengths, batch_first=False):
     return PackedSequence(torch.cat(steps), batch_sizes)
 
 
-def pad_packed_sequence(sequence, batch_first=False, padding_value=0.0):
+_zero_by_type = {
+    'torch.DoubleTensor': 0.0,
+    'torch.FloatTensor': 0.0,
+    'torch.HalfTensor': 0.0,
+    'torch.LongTensor': 0,
+    'torch.IntTensor': 0,
+    'torch.ShortTensor': 0,
+    'torch.CharTensor': 0,
+    'torch.ByteTensor': 0,
+}
+
+
+def pad_packed_sequence(sequence, batch_first=False, padding_value=None):
     r"""Pads a packed batch of variable length sequences.
 
     It is an inverse operation to :func:`pack_padded_sequence`.
@@ -114,6 +139,8 @@ def pad_packed_sequence(sequence, batch_first=False, padding_value=0.0):
     """
     var_data, batch_sizes = sequence
     max_batch_size = batch_sizes[0]
+    if padding_value is None:
+        padding_value = _zero_by_type[var_data.type()]
     output = var_data.data.new(len(batch_sizes), max_batch_size, *var_data.size()[1:]).fill_(padding_value)
     output = Variable(output)
 
