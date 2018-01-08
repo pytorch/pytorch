@@ -1922,6 +1922,26 @@ class TestAutograd(TestCase):
         test()
         self.assertEqual(dealloc[0], 1)
 
+    def test_out_argument(self):
+        # Gradcheck torch.mul with an out= parameter
+        a = Variable(torch.randn(2, 2), requires_grad=True)
+        b = Variable(torch.randn(2, 2), requires_grad=True)
+
+        def fn(a, b):
+            x = torch.zeros_like(a)
+            torch.mul(a, b, out=x)
+            return x
+
+        gradcheck(fn, [a, b])
+        gradgradcheck(fn, [a, b])
+
+    def test_out_argument_view(self):
+        # out= with a view should raise an exception if the inputs require grad
+        a = Variable(torch.randn(2, 2), requires_grad=True)
+        b = Variable(torch.randn(2, 2), requires_grad=True)
+        x = torch.zeros_like(a)
+        self.assertRaises(RuntimeError, lambda: torch.mul(a, b, out=x[:]))
+
 
 def index_variable(shape, max_indices):
     if not isinstance(shape, tuple):
