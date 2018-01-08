@@ -35,6 +35,20 @@ struct ConvParams {
   bool is_depthwise(const at::Tensor& input, const at::Tensor& weight) const;
 };
 
+std::ostream& operator<<(std::ostream & out, const ConvParams& params) {
+  out << "ConvParams {"
+      << "  stride = " << IntList{params.stride}
+      << "  padding = " << IntList{params.padding}
+      << "  dilation = " << IntList{params.dilation}
+      << "  transposed = " << params.transposed
+      << "  output_padding = " << IntList{params.output_padding}
+      << "  groups = " << params.groups
+      << "  benchmark = " << params.benchmark
+      << "  deterministic = " << params.deterministic
+      << "  cudnn_enabled = " << params.cudnn_enabled
+      << "}";
+}
+
 auto ConvParams::is_strided() const -> bool {
   bool is_strided = false;
   for (int s : stride) {
@@ -273,7 +287,18 @@ at::Tensor _convolution(
     bool benchmark, bool deterministic, bool cudnn_enabled) {
 
   auto input = input_r.contiguous();
-  auto weight = weight_r;
+  // NB: Is it actually necessary to make weight contiguous here?
+  // To definitely answer this yes or no, you would have to go through
+  // each of convolution implementations in THNN, THCUNN, NNPACK
+  // and cuDNN and figure their requirements out individually, and then
+  // insert appropriate contiguous().  (For example, the current
+  // cuDNN bindings will simply error if you pass them a non-contiguous
+  // weight.)
+  //
+  // The sledgehammer approach here could give up performance when
+  // some kernels support non-contiguous weights.  But you really shouldn't be
+  // running convolution with non-contiguous weights, so be it.
+  auto weight = weight_r.contiguous();
   auto bias = bias_r;
 
   ConvParams params;

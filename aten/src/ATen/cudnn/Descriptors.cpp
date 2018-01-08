@@ -94,6 +94,13 @@ void FilterDescriptor::set(const at::Tensor &t, int64_t pad) {
     throw std::runtime_error("cuDNN supports only up to " STR(CUDNN_DIM_MAX) " dimensions");
 #undef _STR
 #undef STR
+  if (!t.is_contiguous()) {
+    // NB: It is possible for this test to be insufficient, because the
+    // Tensor passed in to set the filter descriptor may not be the actual
+    // Tensor whose data pointer is passed to cuDNN.  Nevertheless,
+    // that is the common case, so we can catch most client errors with this test.
+    throw std::runtime_error("cuDNN filters (a.k.a. weights) must be contiguous");
+  }
   int size[CUDNN_DIM_MAX];
   for (int i = 0; i < dim; ++i) {
     size[i] = (int) t.size(i);
