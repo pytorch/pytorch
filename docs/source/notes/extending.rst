@@ -118,8 +118,8 @@ Extending :mod:`torch.nn`
 
 :mod:`~torch.nn` exports two kinds of interfaces - modules and their functional
 versions. You can extend it in both ways, but we recommend using modules for
-all kinds of layers, that hold any parameters or buffers, and recommend using
-a functional form parameter-less operations like activation functions, pooling,
+all kinds of layers that hold any parameters or buffers, and recommend using
+a function for parameter-less operations like activation functions, pooling,
 etc.
 
 Adding a functional version of an operation is already fully covered in the
