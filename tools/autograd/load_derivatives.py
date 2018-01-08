@@ -8,7 +8,7 @@ import copy
 import re
 import yaml
 from .utils import YamlLoader
-from .gen_variable_type import IDENT_REGEX, split_name_params
+from .utils import IDENT_REGEX, split_name_params
 
 
 def load_derivatives(path, declarations):

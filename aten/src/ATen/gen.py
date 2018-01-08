@@ -157,7 +157,9 @@ def postprocess_output_declarations(output_declarations):
         for n, ret in enumerate(decl['returns']):
             if 'name' not in ret:
                 assert not has_named_ret
-                if len(decl['returns']) == 1:
+                if decl['inplace']:
+                    ret['name'] = 'self'
+                elif len(decl['returns']) == 1:
                     ret['name'] = 'result'
                 else:
                     ret['name'] = 'result' + str(n)
