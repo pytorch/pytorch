@@ -3,7 +3,7 @@ from torch.distributions.distribution import Distribution
 from torch.distributions import Categorical
 from numbers import Number
 from torch.distributions import constraints
-from torch.distributions.utils import log_sum_exp, lazy_property
+from torch.distributions.utils import log_sum_exp
 
 
 class Multinomial(Distribution):
@@ -27,7 +27,7 @@ class Multinomial(Distribution):
 
 
     Args:
-        total_count (Tensor or Variable): event probabilities
+        total_count (Tensor or Variable): number of trials
         probs (Tensor or Variable): event probabilities
     """
 
@@ -62,10 +62,16 @@ class Multinomial(Distribution):
         sample_shape = torch.Size(sample_shape)
         num_events = self._event_shape[0]
         extended_shape = torch.Size((1,)) if not sample_shape else sample_shape
-        samples = self._categorical.sample((self.total_count,)+extended_shape).float()
-        countsList = [torch.histc(m, bins=num_events, min=0, max=num_events-1)
+        samples = self._categorical.sample((self.total_count,) + extended_shape).float()
+        countsList = [torch.histc(m, bins=num_events, min=0, max=num_events - 1)
                       for m in torch.unbind(samples.view(self.total_count, -1), dim=-1)]
         counts = torch.stack(countsList, dim=0)
+        if isinstance(counts, torch.autograd.Variable):
+            counts = counts.detach()
+        if (isinstance(self.logits, torch.DoubleTensor) or
+            (isinstance(self.logits, torch.autograd.Variable) and
+             isinstance(self.logits.data, (torch.DoubleTensor, torch.cuda.DoubleTensor)))):
+            counts = counts.double()
         return counts.contiguous().view(self._extended_shape(sample_shape))
 
     def log_prob(self, value):

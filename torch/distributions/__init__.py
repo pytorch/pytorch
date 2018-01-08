@@ -44,6 +44,7 @@ from .multinomial import Multinomial
 from .normal import Normal
 from .one_hot_categorical import OneHotCategorical
 from .pareto import Pareto
+from .studentT import StudentT
 from .uniform import Uniform
 
 __all__ = [
@@ -61,5 +62,6 @@ __all__ = [
     'Normal',
     'OneHotCategorical',
     'Pareto',
+    'StudentT',
     'Uniform',
 ]
