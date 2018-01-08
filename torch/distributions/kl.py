@@ -1,9 +1,10 @@
-from collections import OrderedDict
+import warnings
+from functools import total_ordering
 
 from torch.distributions.distribution import Distribution
 
-_KL_REGISTRY = OrderedDict()
-_KL_DISPATCH_TABLE = {}
+_KL_REGISTRY = {}  # Source of truth mapping a few general (type, type) pairs to functions.
+_KL_DISPATCH_TABLE = {}  # Memoized version mapping many specific (type, type) pairs to functions.
 
 
 def register_kl(type_p, type_q):
@@ -15,11 +16,18 @@ def register_kl(type_p, type_q):
         def kl_normal_normal(p, q):
             # insert implementation here
 
-    Lookup order is:
+    Lookup returns the most specific (type,type) match ordered by subclass. If
+    the match is ambiguous, a `RuntimeWarning` is raised. For example to
+    resolve the ambiguous situation::
 
-    1.  First look for an exact match.
-    2.  Otherwise find the first pair of registered superclasses, in order that
-        functions were registered.
+        @register_kl(BaseP, DerivedQ)
+        def kl_version1(p, q): ...
+        @register_kl(DerivedP, BaseQ)
+        def kl_version2(p, q): ...
+
+    you should register a third most-specific implementation, e.g.
+
+        register_kl(DerivedP, DerivedQ)(kl_version1)  # Break the tie.
 
     Args:
         type_p (type): A subclass of :class:`~torch.distributions.Distribution`.
@@ -38,17 +46,41 @@ def register_kl(type_p, type_q):
     return decorator
 
 
+@total_ordering
+class _Match(object):
+    __slots__ = ['types']
+
+    def __init__(self, *types):
+        self.types = types
+
+    def __eq__(self, other):
+        return self.types == other.types
+
+    def __le__(self, other):
+        for x, y in zip(self.types, other.types):
+            if not issubclass(x, y):
+                return False
+            if x is not y:
+                break
+        return True
+
+
 def _dispatch_kl(type_p, type_q):
-    # Look for an exact match.
-    try:
-        return _KL_REGISTRY[type_p, type_q]
-    except KeyError:
-        pass
-    # Look for the first approximate match.
-    for super_p, super_q in _KL_REGISTRY:
-        if issubclass(type_p, super_p) and issubclass(type_q, super_q):
-            return _KL_REGISTRY[super_p, super_q]
-    raise NotImplementedError
+    """
+    Find the most specific approximate match, assuming single inheritance.
+    """
+    matches = [(super_p, super_q) for super_p, super_q in _KL_REGISTRY
+               if issubclass(type_p, super_p) and issubclass(type_q, super_q)]
+    if not matches:
+        return NotImplemented
+    # Check that the left- and right- lexicographic orders agree.
+    left_p, left_q = min(_Match(*m) for m in matches).types
+    right_q, right_p = min(_Match(*reversed(m)) for m in matches).types
+    if left_p != right_p or left_q != right_q:
+        warnings.warn('Ambiguous kl_divergence({}, {}). Please register_kl({}, {})'.format(
+            type_p.__name__, type_q.__name__, left_p.__name__, right_q.__name__),
+            RuntimeWarning)
+    return _KL_REGISTRY[left_p, left_q]
 
 
 def kl_divergence(p, q):
@@ -73,10 +105,7 @@ def kl_divergence(p, q):
     try:
         fun = _KL_DISPATCH_TABLE[type(p), type(q)]
     except KeyError:
-        try:
-            fun = _dispatch_kl(type(p), type(q))
-        except NotImplementedError:
-            fun = NotImplemented
+        fun = _dispatch_kl(type(p), type(q))
         _KL_DISPATCH_TABLE[type(p), type(q)] = fun
     if fun is NotImplemented:
         raise NotImplementedError
