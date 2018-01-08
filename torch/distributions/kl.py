@@ -76,11 +76,13 @@ def _dispatch_kl(type_p, type_q):
     # Check that the left- and right- lexicographic orders agree.
     left_p, left_q = min(_Match(*m) for m in matches).types
     right_q, right_p = min(_Match(*reversed(m)) for m in matches).types
-    if left_p != right_p or left_q != right_q:
+    left_fun = _KL_REGISTRY[left_p, left_q]
+    right_fun = _KL_REGISTRY[right_p, right_q]
+    if left_fun is not right_fun:
         warnings.warn('Ambiguous kl_divergence({}, {}). Please register_kl({}, {})'.format(
             type_p.__name__, type_q.__name__, left_p.__name__, right_q.__name__),
             RuntimeWarning)
-    return _KL_REGISTRY[left_p, left_q]
+    return left_fun
 
 
 def kl_divergence(p, q):
