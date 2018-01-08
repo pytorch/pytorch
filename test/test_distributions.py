@@ -232,7 +232,7 @@ class TestDistributions(TestCase):
             actual = dist(param).enumerate_support()
             self.assertEqual(actual, expected)
 
-    def test_support_return_type(self):
+    def test_enumerate_support_type(self):
         for Dist, params in EXAMPLES:
             for i, param in enumerate(params):
                 dist = Dist(**param)
