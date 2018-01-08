@@ -108,9 +108,10 @@ static THTensor *THTensor_(cloneColumnMajor)(THTensor *self, THTensor *src)
 static THTensor *THTensor_(cloneBatchedColumnMajor)(THTensor *self, THTensor *src)
 {
   THAssert(src->nDimension == 3);
-  int64_t matrix_size = src->size[1] * src->size[2];
-  if (self == src && self->stride[0] == matrix_size && 
-      self->stride[1] == 1 && self->stride[2] == self->size[1]) {
+  int64_t stride[3] = { src->size[1] * src->size[2], 1, src->size[1] };
+
+  if (self == src && self->stride[0] == stride[0] &&
+      self->stride[1] == stride[1] && self->stride[2] == stride[2]) {
     THTensor_(retain)(self);
     return self;
   }
@@ -120,11 +121,7 @@ static THTensor *THTensor_(cloneBatchedColumnMajor)(THTensor *self, THTensor *sr
   } else {
     THTensor_(retain)(self);
   }
-
-  int64_t size[3] = { src->size[0], src->size[1], src->size[2] };
-  int64_t stride[3] = { matrix_size, 1, src->size[1] };
-
-  THTensor_(resizeNd)(self, 3, size, stride);
+  THTensor_(resizeNd)(self, 3, src->size, stride);
   THTensor_(copy)(self, src);
   return self;
 }

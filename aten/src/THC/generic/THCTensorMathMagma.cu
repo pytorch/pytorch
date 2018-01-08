@@ -59,26 +59,27 @@ static THCTensor* THCTensor_(newColumnMajor)(THCState *state, THCTensor *self, T
   return self;
 }
 
+/*
+ * Creates a clone of a 3D tensor such that each 2D batch is in column major
+ * format and each batch is contiguous WRT itself in memory.
+ */
 static THCTensor* THCTensor_(newBatchedColumnMajor)(THCState *state, THCTensor *self, THCTensor *src)
 {
   THAssert(src->nDimension == 3);
-  int64_t matrix_size = src->size[1] * src->size[2];
-  if (self == src && self->stride[0] == matrix_size && 
-      self->stride[1] == 1 && self->stride[2] == self->size[1])
-  {
+  int64_t stride[3] = { src->size[1] * src->size[2], 1, src->size[1] };
+
+  if (self == src && self->stride[0] == stride[0] &&
+      self->stride[1] == stride[1]  && self->stride[2] == self->size[2]) {
     THCTensor_(retain)(state, self);
     return self;
   }
 
-  if (self == src)
+  if (self == src) {
     self = THCTensor_(new)(state);
-  else
+  } else {
     THCTensor_(retain)(state, self);
-
-  int64_t size[3] = { src->size[0], src->size[1], src->size[2] };
-  int64_t stride[3] = { matrix_size, 1, src->size[1] };
-
-  THCTensor_(resizeNd)(state, self, 3, size, stride);
+  }
+  THCTensor_(resizeNd)(state, self, 3, src->size, stride);
   THCTensor_(copy)(state, self, src);
   return self;
 }
@@ -166,6 +167,14 @@ THC_API void THCTensor_(bgesv)(THCState *state, THCTensor *rb_, THCTensor *ra_, 
   magma_dgesv_batched(n, nrhs, a_array, n, ipiv_array, b_array, n, info_array, batch_count, magma_queue);
 #endif
 
+  magma_queue_destroy(magma_queue);
+  magma_free_pinned(ipiv_array);
+  magma_free_pinned(ipiv_data);
+  magma_free_pinned(a_array);
+  magma_free_pinned(b_array);
+  THCTensor_(freeCopyTo)(state, a, ra_);
+  THCTensor_(freeCopyTo)(state, b, rb_);
+
   for (int64_t i = 0; i < batch_count; i++) {
     int info = info_array[i];
     if (info < 0) {
@@ -177,14 +186,7 @@ THC_API void THCTensor_(bgesv)(THCState *state, THCTensor *rb_, THCTensor *ra_, 
     }
   }
 
-  magma_queue_destroy(magma_queue);
-  magma_free_pinned(ipiv_array);
-  magma_free_pinned(ipiv_data);
   magma_free_pinned(info_array);
-  magma_free_pinned(a_array);
-  magma_free_pinned(b_array);
-  THCTensor_(freeCopyTo)(state, a, ra_);
-  THCTensor_(freeCopyTo)(state, b, rb_);
 #else
   THError(NoMagma(bgesv));
 #endif

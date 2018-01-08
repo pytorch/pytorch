@@ -2093,13 +2093,30 @@ class TestTorch(TestCase):
         self.assertEqual(res1, tb)
 
     def _test_bgesv(self, cast):
-        # test against gesv
+        # test against gesv: one batch
         A = cast(torch.randn(1, 5, 5))
         b = cast(torch.randn(1, 5, 10))
         x_exp, LU_exp = torch.gesv(b.squeeze(0), A.squeeze(0))
         x, LU = torch.bgesv(b, A)
         self.assertEqual(x, x_exp.unsqueeze(0))
         self.assertEqual(LU, LU_exp.unsqueeze(0))
+
+        # test against gesv in a loop: four batches
+        A = cast(torch.randn(4, 5, 5))
+        b = cast(torch.randn(4, 5, 10))
+
+        x_exp_list = list()
+        LU_exp_list = list()
+        for i in range(4):
+            x_exp, LU_exp = torch.gesv(b[i], A[i])
+            x_exp_list.append(x_exp)
+            LU_exp_list.append(LU_exp)
+        x_exp = torch.stack(x_exp_list)
+        LU_exp = torch.stack(LU_exp_list)
+
+        x, LU = torch.bgesv(b, A)
+        self.assertEqual(x, x_exp)
+        self.assertEqual(LU, LU_exp)
 
         # basic correctness test
         A = cast(torch.randn(3, 5, 5))
