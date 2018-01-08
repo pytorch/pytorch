@@ -172,7 +172,7 @@ class TestJit(TestCase):
 
         class Net(nn.Module):
 
-            def __init__(self, num_classes=1000):
+            def __init__(self):
                 super(Net, self).__init__()
                 self.features = nn.Sequential(
                     nn.Conv2d(3, 64, kernel_size=11, stride=4, padding=2),
