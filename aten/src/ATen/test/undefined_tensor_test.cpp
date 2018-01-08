@@ -14,31 +14,31 @@ int main() {
   ASSERT(!und.defined());
   ASSERT(std::string("UndefinedTensor") == und.toString());
 
-  ASSERT_THROWS(und.strides(), "strides");
-  ASSERT_THROWS(und.dim(), "dim");
-  ASSERT_THROWS([]() {return Tensor();}() = Scalar(5), "UndefinedType");
-  ASSERT_THROWS(und.unsafeGetTH(true), "unsafeGetTH");
-  ASSERT_THROWS(und.add(und), "add");
-  ASSERT_THROWS(und.add(ft), "add");
-  ASSERT_THROWS(ft.add(und), "add");
-  ASSERT_THROWS(und.add(5), "add");
-  ASSERT_THROWS(und.mm(und), "mm");
+  ASSERT_THROWSM(und.strides(), "strides");
+  ASSERT_THROWSM(und.dim(), "dim");
+  ASSERT_THROWSM([]() {return Tensor();}() = Scalar(5), "UndefinedType");
+  ASSERT_THROWSM(und.unsafeGetTH(true), "unsafeGetTH");
+  ASSERT_THROWSM(und.add(und), "add");
+  ASSERT_THROWSM(und.add(ft), "add");
+  ASSERT_THROWSM(ft.add(und), "add");
+  ASSERT_THROWSM(und.add(5), "add");
+  ASSERT_THROWSM(und.mm(und), "mm");
 
   und.toType(und.type());
-  ASSERT_THROWS(und.toType(ft.type()), "attempt to copy an undefined tensor");
-  ASSERT_THROWS(ft.toType(und.type()), "UndefinedType");
+  ASSERT_THROWSM(und.toType(ft.type()), "attempt to copy an undefined tensor");
+  ASSERT_THROWSM(ft.toType(und.type()), "UndefinedType");
   und.toType(ScalarType::Undefined);
-  ASSERT_THROWS(und.toType(ScalarType::Float), "toScalarType");
-  ASSERT_THROWS(ft.toType(ScalarType::Undefined), "UndefinedType");
+  ASSERT_THROWSM(und.toType(ScalarType::Float), "toScalarType");
+  ASSERT_THROWSM(ft.toType(ScalarType::Undefined), "UndefinedType");
 
   // copy_
-  ASSERT_THROWS(und.copy_(und), "copy");
-  ASSERT_THROWS(und.copy_(ft), "copy");
-  ASSERT_THROWS(ft.copy_(und), "copy");
+  ASSERT_THROWSM(und.copy_(und), "copy");
+  ASSERT_THROWSM(und.copy_(ft), "copy");
+  ASSERT_THROWSM(ft.copy_(und), "copy");
 
   und.toBackend(Backend::Undefined);
-  ASSERT_THROWS(und.toBackend(Backend::CPU), "toBackend");
-  ASSERT_THROWS(ft.toBackend(Backend::Undefined), "UndefinedType");
+  ASSERT_THROWSM(und.toBackend(Backend::CPU), "toBackend");
+  ASSERT_THROWSM(ft.toBackend(Backend::Undefined), "UndefinedType");
 
   Tensor to_move = CPU(kFloat).ones({1});
   Tensor m(std::move(to_move));
