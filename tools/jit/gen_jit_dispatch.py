@@ -39,6 +39,7 @@ CONSTRUCTOR = CodeTemplate("""\
   return TensorOp([=](const list_of_retainable & inputs,
                       list_of_retainable & outputs) {
     autograd::profiler::RecordFunction record("${name}");
+    AutoGPU device_guard(deviceForInputs(inputs));
     pack_list(outputs, ${call});
   }, "${name}", ${num_inputs});
 }},
