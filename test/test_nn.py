@@ -36,6 +36,65 @@ if TEST_SCIPY:
     from scipy import stats
 
 
+class PackedSequenceTest(TestCase):
+
+    _type_by_name = {
+        'torch.DoubleTensor': (torch.DoubleTensor, 'double'),
+        'torch.FloatTensor': (torch.FloatTensor, 'float'),
+        # TODO 'torch.HalfTensor': (torch.HalfTensor, 'half'),
+        # * First need to fix:
+        # AttributeError: 'torch.HalfTensor' object has no attribute 'fill_'
+        'torch.LongTensor': (torch.LongTensor, 'long'),
+        'torch.IntTensor': (torch.IntTensor, 'int'),
+        'torch.ShortTensor': (torch.ShortTensor, 'short'),
+        'torch.CharTensor': (torch.CharTensor, 'char'),
+        'torch.ByteTensor': (torch.ByteTensor, 'byte'),
+    }
+
+    def __init__(self, *args, **kwargs):
+        super(PackedSequenceTest, self).__init__(*args, **kwargs)
+        self.batch_size = 5
+        self.max_length = 6
+
+    def _ordered_sequence(self, type):
+        """Create ordered list of random sequences"""
+        seqs = [type(random.randint(1, self.max_length))
+                for _ in range(self.batch_size)]
+        seqs = [Variable(s.random_()) for s in seqs]
+        ordered = sorted(seqs, key=len, reverse=True)
+        return ordered
+
+    def _padded_sequence(self, type):
+        """Create Variable of random padded sequences"""
+        ordered = self._ordered_sequence(type)
+        lengths = list(map(len, ordered))
+        padded_tensor = rnn_utils.pad_sequence(ordered)
+        return padded_tensor, lengths
+
+    def test_type_masks(self):
+        """Test type conversion of `PackedSequence` against type conversion of tensor"""
+        for _, (input_type, _) in self._type_by_name.items():
+            for expected_type, (_, mask_name) in self._type_by_name.items():
+                padded, lengths = self._padded_sequence(input_type)
+                packed = rnn_utils.pack_padded_sequence(padded, lengths)
+                # Apply mask to `PackedSequence` instance and unpack
+                masked = getattr(packed, mask_name)()
+                unpacked, lengths_out = rnn_utils.pad_packed_sequence(masked)
+                self.assertEqual(unpacked.type(), expected_type)
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    def test_cuda_mask(self):
+        type = 'torch.FloatTensor'
+        cuda_type = 'torch.cuda.FloatTensor'
+        padded, lengths = self._padded_sequence(type)
+        packed = rnn_utils.pack_padded_sequence(padded, lengths)
+        self.assertFalse(packed.is_cuda)
+        packed = packed.cuda()
+        self.assertTrue(packed.is_cuda)
+        unpacked, _ = rnn_utils.pad_packed_sequence(packed)
+        self.assertEqual(unpacked.type(), cuda_type)
+
+
 def default_tensor_type(type):
     type_str = torch.typename(type)
 
