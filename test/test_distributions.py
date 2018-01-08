@@ -31,7 +31,7 @@ import torch
 from common import TestCase, run_tests, set_rng_seed
 from torch.autograd import Variable, gradcheck
 from torch.distributions import (Bernoulli, Beta, Categorical, Cauchy, Chi2,
-                                 Dirichlet, Exponential, Gamma, Laplace,
+                                 Dirichlet, Exponential, Gamma, Gumbel, Laplace,
                                  Normal, OneHotCategorical, Pareto, StudentT, Uniform)
 from torch.distributions.constraints import Constraint, is_dependent
 from torch.distributions.utils import _get_clamping_buffer
@@ -97,6 +97,16 @@ EXAMPLES = [
         {
             'alpha': Variable(torch.exp(torch.randn(1)), requires_grad=True),
             'beta': Variable(torch.exp(torch.randn(1)), requires_grad=True),
+        },
+    ]),
+    Example(Gumbel, [
+        {
+            'loc': Variable(torch.randn(5, 5), requires_grad=True),
+            'scale': Variable(torch.randn(5, 5).abs(), requires_grad=True),
+        },
+        {
+            'loc': Variable(torch.randn(1), requires_grad=True),
+            'scale': Variable(torch.randn(1).abs(), requires_grad=True),
         },
     ]),
     Example(Laplace, [
@@ -638,6 +648,35 @@ class TestDistributions(TestCase):
             self._check_sampler_sampler(Pareto(scale, alpha),
                                         scipy.stats.pareto(alpha, scale=scale),
                                         'Pareto(scale={}, alpha={})'.format(scale, alpha))
+
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    def test_gumbel_shape(self):
+        loc = Variable(torch.randn(2, 3), requires_grad=True)
+        scale = Variable(torch.randn(2, 3).abs(), requires_grad=True)
+        loc_1d = torch.randn(1)
+        scale_1d = torch.randn(1).abs()
+        self.assertEqual(Gumbel(loc, scale).sample().size(), (2, 3))
+        self.assertEqual(Gumbel(loc, scale).sample_n(5).size(), (5, 2, 3))
+        self.assertEqual(Gumbel(loc_1d, scale_1d).sample().size(), (1,))
+        self.assertEqual(Gumbel(loc_1d, scale_1d).sample_n(1).size(), (1, 1))
+        self.assertEqual(Gumbel(1.0, 1.0).sample().size(), (1,))
+        self.assertEqual(Gumbel(1.0, 1.0).sample_n(1).size(), (1,))
+
+        def ref_log_prob(idx, x, log_prob):
+            l = loc.data.view(-1)[idx]
+            s = scale.data.view(-1)[idx]
+            expected = scipy.stats.gumbel_r.logpdf(x, loc=l, scale=s)
+            self.assertAlmostEqual(log_prob, expected, places=3)
+
+        self._check_log_prob(Gumbel(loc, scale), ref_log_prob)
+
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    def test_gumbel_sample(self):
+        set_rng_seed(1)  # see note [Randomized statistical tests]
+        for loc, scale in product([-5.0, -1.0, -0.1, 0.1, 1.0, 5.0], [0.1, 1.0, 10.0]):
+            self._check_sampler_sampler(Gumbel(loc, scale),
+                                        scipy.stats.gumbel_r(loc=loc, scale=scale),
+                                        'Gumbel(loc={}, scale={})'.format(loc, scale))
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_chi2_shape(self):

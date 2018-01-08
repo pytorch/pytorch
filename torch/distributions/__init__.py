@@ -39,6 +39,7 @@ from .distribution import Distribution
 from .exponential import Exponential
 from .gamma import Gamma
 from .chi2 import Chi2
+from .gumbel import Gumbel
 from .laplace import Laplace
 from .normal import Normal
 from .one_hot_categorical import OneHotCategorical
@@ -56,6 +57,7 @@ __all__ = [
     'Distribution',
     'Exponential',
     'Gamma',
+    'Gumbel',
     'Laplace',
     'Normal',
     'OneHotCategorical',
