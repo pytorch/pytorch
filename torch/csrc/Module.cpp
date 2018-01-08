@@ -246,7 +246,6 @@ IMPLEMENT_STATELESS(log)
 IMPLEMENT_STATELESS(log1p)
 IMPLEMENT_STATELESS(lgamma)
 IMPLEMENT_STATELESS(digamma)
-IMPLEMENT_STATELESS(polygamma)
 IMPLEMENT_STATELESS(erf)
 IMPLEMENT_STATELESS(erfinv)
 IMPLEMENT_STATELESS(exp)
@@ -368,6 +367,10 @@ IMPLEMENT_STATELESS_ADDXX(addbmm)
 IMPLEMENT_STATELESS_ADDXX(baddbmm)
 IMPLEMENT_STATELESS_ADDXX(addcmul)
 IMPLEMENT_STATELESS_ADDXX(addcdiv)
+
+// For torch.polygamma(n, x), the `self` argument comes second, the
+// first two arguments needs to be swapped before dispatch.
+IMPLEMENT_STATELESS_ADDXX(polygamma)
 
 #undef IMPLEMENT_STATELESS
 #undef IMPLEMENT_STATELESS_ADDXX
