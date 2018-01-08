@@ -392,8 +392,12 @@ def demangle(name):
     """Demangle a C++ identifier using c++filt"""
     try:
         with open(os.devnull, 'w') as devnull:
-            return subprocess.check_output(['c++filt', '-n', name], stderr=devnull).rstrip().decode("ascii")
-    except subprocess.CalledProcessError:
+            is_win = sys.platform == 'win32'
+            filt_cmd = ['undname', name] if is_win else ['c++filt', '-n', name]
+            orig_name = subprocess.check_output(filt_cmd, stderr=devnull).rstrip().decode("ascii")
+            orig_name = re.search('is :- \"(.*)"', orig_name).group(1) if is_win else orig_name
+            return orig_name
+    except (subprocess.CalledProcessError, AttributeError):
         return name
 
 

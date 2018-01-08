@@ -91,6 +91,12 @@ Probability distributions - torch.distributions
 .. autoclass:: Pareto
     :members:
 
+:hidden:`StudentT`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: StudentT
+    :members:
+
 :hidden:`Uniform`
 ~~~~~~~~~~~~~~~~~~~~~~~
 
