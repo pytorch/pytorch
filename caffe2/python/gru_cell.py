@@ -31,6 +31,7 @@ class GRUCell(rnn_cell.RNNCell):
         forget_bias,  # Currently unused!  Values here will be ignored.
         memory_optimization,
         drop_states=False,
+        linear_before_reset=False,
         **kwargs
     ):
         super(GRUCell, self).__init__(**kwargs)
@@ -39,6 +40,7 @@ class GRUCell(rnn_cell.RNNCell):
         self.forget_bias = float(forget_bias)
         self.memory_optimization = memory_optimization
         self.drop_states = drop_states
+        self.linear_before_reset = linear_before_reset
 
     # Unlike LSTMCell, GRUCell needs the output of one gate to feed into another.
     # (reset gate -> output_gate)
@@ -96,18 +98,34 @@ class GRUCell(rnn_cell.RNNCell):
             reset_gate_t,
             self.scope('reset_gate_t_sigmoid')
         )
-        modified_hidden_t_prev = model.net.Mul(
-            [reset_gate_t_sigmoid, hidden_t_prev],
-            self.scope('modified_hidden_t_prev')
-        )
-        output_gate_t = brew.fc(
-            model,
-            modified_hidden_t_prev,
-            self.scope('output_gate_t'),
-            dim_in=self.hidden_size,
-            dim_out=self.hidden_size,
-            axis=2,
-        )
+
+        # `self.linear_before_reset = True` matches cudnn semantics
+        if self.linear_before_reset:
+            output_gate_fc = brew.fc(
+                model,
+                hidden_t_prev,
+                self.scope('output_gate_fc'),
+                dim_in=self.hidden_size,
+                dim_out=self.hidden_size,
+                axis=2,
+            )
+            output_gate_t = model.net.Mul(
+                [reset_gate_t_sigmoid, output_gate_fc],
+                self.scope('output_gate_t')
+            )
+        else:
+            modified_hidden_t_prev = model.net.Mul(
+                [reset_gate_t_sigmoid, hidden_t_prev],
+                self.scope('modified_hidden_t_prev')
+            )
+            output_gate_t = brew.fc(
+                model,
+                modified_hidden_t_prev,
+                self.scope('output_gate_t'),
+                dim_in=self.hidden_size,
+                dim_out=self.hidden_size,
+                axis=2,
+            )
 
         # Add input contributions to update and output gate.
         # We already (in-place) added input contributions to the reset gate.

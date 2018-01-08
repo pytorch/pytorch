@@ -35,7 +35,8 @@ def tanh(x):
 def _prepare_rnn(t, n, dim_in, create_rnn, outputs_with_grads,
                   forget_bias, memory_optim=False,
                   forward_only=False, drop_states=False, T=None,
-                  two_d_initial_states=None, dim_out=None):
+                  two_d_initial_states=None, dim_out=None,
+                  **kwargs):
     if dim_out is None:
         dim_out = [dim_in]
     print("Dims: ", t, n, dim_in, dim_out)
@@ -76,6 +77,7 @@ def _prepare_rnn(t, n, dim_in, create_rnn, outputs_with_grads,
             forward_only=forward_only,
             drop_states=drop_states,
             static_rnn_unroll_size=T,
+            **kwargs
         )
 
     workspace.RunNetOnce(model.param_init_net)

@@ -1308,6 +1308,7 @@ def _LSTM(
     drop_states=False,
     return_last_layer_only=True,
     static_rnn_unroll_size=None,
+    **cell_kwargs
 ):
     '''
     Adds a standard LSTM recurrent network operator to a model.
@@ -1369,6 +1370,7 @@ def _LSTM(
             name=name,
             forward_only=forward_only,
             drop_states=drop_states,
+            **cell_kwargs
         )
         cells.append(cell)
 
