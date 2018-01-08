@@ -179,10 +179,10 @@ THC_API void THCTensor_(bgesv)(THCState *state, THCTensor *rb_, THCTensor *ra_, 
     int info = info_array[i];
     if (info < 0) {
       THError("MAGMA bgesv (gesv_batched) : For batch number %lld: Argument %d : illegal value",
-          (long long)batch_count, -info);
+          (long long)i, -info);
     } else if (info > 0) {
       THError("MAGMA bgesv (gesv_batched) : For batch number %lld: U(%d,%d) is zero, singular U.",
-          (long long)batch_count, info, info);
+          (long long)i, info, info);
     }
   }
 
