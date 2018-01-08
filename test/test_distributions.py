@@ -162,6 +162,12 @@ EXAMPLES = [
 ]
 
 
+def unwrap(value):
+    if isinstance(value, Variable):
+        return value.data
+    return value
+
+
 class TestDistributions(TestCase):
     def _gradcheck_log_prob(self, dist_ctor, ctor_params):
         # performs gradient checks on log_prob
@@ -225,11 +231,23 @@ class TestDistributions(TestCase):
             actual = dist(param).enumerate_support()
             self.assertEqual(actual, expected)
 
+    def test_enumerate_support_type(self):
+        for Dist, params in EXAMPLES:
+            for i, param in enumerate(params):
+                dist = Dist(**param)
+                try:
+                    self.assertTrue(type(unwrap(dist.sample())) is type(unwrap(dist.enumerate_support())),
+                                    msg=('{} example {}/{}, return type mismatch between ' +
+                                         'sample and enumerate_support.').format(Dist.__name__, i, len(params)))
+                except NotImplementedError:
+                    pass
+
     def test_bernoulli(self):
         p = Variable(torch.Tensor([0.7, 0.2, 0.4]), requires_grad=True)
         r = Variable(torch.Tensor([0.3]), requires_grad=True)
         s = 0.3
         self.assertEqual(Bernoulli(p).sample_n(8).size(), (8, 3))
+        self.assertTrue(isinstance(Bernoulli(p).sample().data, torch.Tensor))
         self.assertEqual(Bernoulli(r).sample_n(8).size(), (8, 1))
         self.assertEqual(Bernoulli(r).sample().size(), (1,))
         self.assertEqual(Bernoulli(r).sample((3, 2)).size(), (3, 2, 1))
@@ -268,6 +286,7 @@ class TestDistributions(TestCase):
         p = Variable(torch.Tensor([0.1, 0.2, 0.3]), requires_grad=True)
         # TODO: this should return a 0-dim tensor once we have Scalar support
         self.assertEqual(Categorical(p).sample().size(), (1,))
+        self.assertTrue(isinstance(Categorical(p).sample().data, torch.LongTensor))
         self.assertEqual(Categorical(p).sample((2, 2)).size(), (2, 2))
         self.assertEqual(Categorical(p).sample_n(1).size(), (1,))
         self._gradcheck_log_prob(Categorical, (p,))
@@ -309,6 +328,7 @@ class TestDistributions(TestCase):
     def test_one_hot_categorical_1d(self):
         p = Variable(torch.Tensor([0.1, 0.2, 0.3]), requires_grad=True)
         self.assertEqual(OneHotCategorical(p).sample().size(), (3,))
+        self.assertTrue(isinstance(OneHotCategorical(p).sample().data, torch.Tensor))
         self.assertEqual(OneHotCategorical(p).sample((2, 2)).size(), (2, 2, 3))
         self.assertEqual(OneHotCategorical(p).sample_n(1).size(), (1, 3))
         self._gradcheck_log_prob(OneHotCategorical, (p,))
