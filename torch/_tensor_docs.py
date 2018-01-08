@@ -1795,10 +1795,10 @@ add_docstr_all('uniform_',
                r"""
 uniform_(from=0, to=1) -> Tensor
 
-Fills :attr:`self` tensor with numbers sampled from the uniform distribution:
+Fills :attr:`self` tensor with numbers sampled from the continuous uniform
+distribution:
 
 .. math:
-
     P(x) = \dfrac{1}{to - from}
 """)
 
