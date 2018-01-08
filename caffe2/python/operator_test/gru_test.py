@@ -75,7 +75,8 @@ def gru_reference(input, hidden_input,
                    reset_gate_w, reset_gate_b,
                    update_gate_w, update_gate_b,
                    output_gate_w, output_gate_b,
-                   seq_lengths, drop_states=False):
+                   seq_lengths, drop_states=False,
+                   linear_before_reset=False):
     D = hidden_input.shape[hidden_input.ndim - 1]
     T = input.shape[0]
     N = input.shape[1]
@@ -100,8 +101,12 @@ def gru_reference(input, hidden_input,
         update_gate = np.dot(hidden_t_prev, update_gate_w.T) + update_gate_b
         update_gate = update_gate + input_update
 
-        output_gate = np.dot(hidden_t_prev * sigmoid(reset_gate), output_gate_w.T) + \
-            output_gate_b
+        if linear_before_reset:
+            with_linear = np.dot(hidden_t_prev, output_gate_w.T) + output_gate_b
+            output_gate = sigmoid(reset_gate) * with_linear
+        else:
+            with_reset = hidden_t_prev * sigmoid(reset_gate)
+            output_gate = np.dot(with_reset, output_gate_w.T) + output_gate_b
         output_gate = output_gate + input_output
 
         gates_out_t = np.concatenate(
@@ -290,9 +295,10 @@ class GRUCellTest(hu.HypothesisTestCase):
         input_tensor=gru_input(),
         fwd_only=st.booleans(),
         drop_states=st.booleans(),
+        linear_before_reset=st.booleans(),
         **hu.gcs
     )
-    @ht_settings(max_examples=15)
+    @ht_settings(max_examples=20)
     def test_gru_main(self, **kwargs):
         for outputs_with_grads in [[0], [1], [0, 1]]:
             self.gru_base(gru_cell.GRU, gru_reference,
@@ -300,19 +306,23 @@ class GRUCellTest(hu.HypothesisTestCase):
                            **kwargs)
 
     def gru_base(self, create_rnn, ref, outputs_with_grads,
-                  input_tensor, fwd_only, drop_states, gc, dc):
+                  input_tensor, fwd_only, drop_states, linear_before_reset, gc, dc):
+
         print("GRU test parameters: ", locals())
         t, n, d = input_tensor.shape
         assert d % 3 == 0
         d = d // 3
-        ref = partial(ref, drop_states=drop_states)
+        ref = partial(ref,
+                      drop_states=drop_states,
+                      linear_before_reset=linear_before_reset)
         with core.DeviceScope(gc):
             net = _prepare_rnn(t, n, d, create_rnn,
                                 outputs_with_grads=outputs_with_grads,
                                 memory_optim=False,
                                 forget_bias=0.0,
                                 forward_only=fwd_only,
-                                drop_states=drop_states)[1]
+                                drop_states=drop_states,
+                                linear_before_reset=linear_before_reset)[1]
         # here we don't provide a real input for the net but just for one of
         # its ops (RecurrentNetworkOp). So have to hardcode this name
         workspace.FeedBlob("test_name_scope/external/recurrent/i2h",
