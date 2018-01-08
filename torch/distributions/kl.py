@@ -1,7 +1,10 @@
 import warnings
 from functools import total_ordering
 
-from torch.distributions.distribution import Distribution
+import torch
+
+from .distribution import Distribution
+from .gamma import Gamma
 
 _KL_REGISTRY = {}  # Source of truth mapping a few general (type, type) pairs to functions.
 _KL_MEMOIZE = {}  # Memoized version mapping many specific (type, type) pairs to functions.
@@ -85,38 +88,6 @@ def _dispatch_kl(type_p, type_q):
     return left_fun
 
 
-def kl_function(type_p, type_q):
-    """
-    Lookup the KL divergence implementation for two types of distributions.
-    This is useful for reusing implementations, for example::
-
-        kl_normal_normal = kl_function(Normal, Normal)
-
-        @register_kl(LogNormal, LogNormal)
-        def kl_lognormal_lognormal(p, q):
-            return kl_normal_normal(p._normal, q._normal)
-
-    Args:
-        type_p (type): A subclass of :class:`~torch.distributions.Distribution`.
-        type_q (type): A subclass of :class:`~torch.distributions.Distribution`.
-
-    Returns:
-        callable: The registered implementation for `type_p` and `type_q`
-
-    Raises:
-        NotImplementedError: If the distribution types have not been registered via
-            :meth:`register_kl`.
-    """
-    try:
-        fun = _KL_MEMOIZE[type_q, type_q]
-    except KeyError:
-        fun = _dispatch_kl(type_q, type_q)
-        _KL_MEMOIZE[type_q, type_q] = fun
-    if fun is NotImplemented:
-        raise NotImplementedError
-    return fun
-
-
 def kl_divergence(p, q):
     r"""
     Compute Kullback-Leibler divergence :math:`KL(p \| q)` between two distributions.
@@ -136,4 +107,24 @@ def kl_divergence(p, q):
         NotImplementedError: If the distribution types have not been registered via
             :meth:`register_kl`.
     """
-    return kl_function(type(p), type(q))(p, q)
+    try:
+        fun = _KL_MEMOIZE[type(p), type(q)]
+    except KeyError:
+        fun = _dispatch_kl(type(p), type(q))
+        _KL_MEMOIZE[type(p), type(q)] = fun
+    if fun is NotImplemented:
+        raise NotImplementedError
+    return fun(p, q)
+
+
+################################################################################
+# KL Divergence Implementations
+################################################################################
+
+@register_kl(Gamma, Gamma)
+def _kl_gamma_gamma(p, q):
+    # Adapted from https://stats.stackexchange.com/questions/11646
+    def f(a, b, c, d):
+        return -d * a / c + b * a.log() - torch.lgamma(b) + (b - 1) * torch.digamma(d) + (1 - b) * c.log()
+
+    return f(p.beta, p.alpha, p.beta, p.alpha) - f(q.beta, q.alpha, p.beta, p.alpha)

@@ -5,7 +5,6 @@ from torch.autograd import Function, Variable
 from torch.autograd.function import once_differentiable
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
-from torch.distributions.kl import register_kl
 from torch.distributions.utils import broadcast_all
 
 
@@ -55,12 +54,3 @@ class Gamma(Distribution):
     def entropy(self):
         return (self.alpha - torch.log(self.beta) + torch.lgamma(self.alpha) +
                 (1.0 - self.alpha) * torch.digamma(self.alpha))
-
-
-@register_kl(Gamma, Gamma)
-def kl_gamma_gamma(p, q):
-    # Adapted from https://stats.stackexchange.com/questions/11646
-    def f(a, b, c, d):
-        return -d * a / c + b * a.log() - torch.lgamma(b) + (b - 1) * torch.digamma(d) + (1 - b) * c.log()
-
-    return f(p.beta, p.alpha, p.beta, p.alpha) - f(q.beta, q.alpha, p.beta, p.alpha)

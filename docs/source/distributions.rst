@@ -105,4 +105,3 @@ Probability distributions - torch.distributions
 
 .. autofunction:: kl_divergence
 .. autofunction:: register_kl
-.. autofunction:: kl_function
