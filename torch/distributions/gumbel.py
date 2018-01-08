@@ -1,8 +1,5 @@
 from numbers import Number
 
-import math
-from numpy import euler_gamma
-
 import torch
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
@@ -49,4 +46,4 @@ class Gumbel(Distribution):
         return -(self.scale.log() + z + torch.exp(-z))
 
     def entropy(self):
-        return self.scale.log() + 1 + euler_gamma
+        return self.scale.log() + (1.57721566490153286060)  # 1 + Euler Mascheroni Constant
