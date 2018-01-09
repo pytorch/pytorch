@@ -4530,7 +4530,6 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='affine',
-        FIXME_no_cuda_gradgrad_comparison=True,  # See #4422
     ),
     dict(
         module_name='BatchNorm1d',
@@ -4539,7 +4538,6 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='3d_input',
-        FIXME_no_cuda_gradgrad_comparison=True,  # See #4422
     ),
     dict(
         module_name='BatchNorm1d',
@@ -4548,7 +4546,6 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='not_affine',
-        FIXME_no_cuda_gradgrad_comparison=True,  # See #4422
     ),
     dict(
         module_name='BatchNorm1d',
@@ -4557,7 +4554,6 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='3d_input_not_affine',
-        FIXME_no_cuda_gradgrad_comparison=True,  # See #4422
     ),
     dict(
         module_name='BatchNorm2d',
@@ -4565,7 +4561,6 @@ new_module_tests = [
         input_size=(2, 3, 6, 6),
         cudnn=True,
         check_eval=True,
-        FIXME_no_cuda_gradgrad_comparison=True,  # See #4422
     ),
     dict(
         module_name='BatchNorm2d',
@@ -4574,7 +4569,6 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='momentum',
-        FIXME_no_cuda_gradgrad_comparison=True,  # See #4422
     ),
     dict(
         module_name='BatchNorm2d',
@@ -4583,7 +4577,6 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='not_affine',
-        FIXME_no_cuda_gradgrad_comparison=True,  # See #4422
     ),
     dict(
         module_name='BatchNorm3d',
@@ -4591,7 +4584,6 @@ new_module_tests = [
         input_size=(2, 3, 4, 4, 4),
         cudnn=True,
         check_eval=True,
-        FIXME_no_cuda_gradgrad_comparison=True,  # See #4422
     ),
     dict(
         module_name='BatchNorm3d',
@@ -4600,7 +4592,6 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='momentum',
-        FIXME_no_cuda_gradgrad_comparison=True,  # See #4422
     ),
     dict(
         module_name='BatchNorm3d',
@@ -4609,7 +4600,6 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='not_affine',
-        FIXME_no_cuda_gradgrad_comparison=True,  # See #4422
     ),
     dict(
         module_name='Conv1d',
