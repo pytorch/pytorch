@@ -71,11 +71,11 @@ def broadcast_all(*values):
 
 
 def _get_clamping_buffer(tensor):
-    clamp_eps = 1e-6
+    clamp_eps = 1.1921e-07
     if isinstance(tensor, Variable):
         tensor = tensor.data
     if isinstance(tensor, (torch.DoubleTensor, torch.cuda.DoubleTensor)):
-        clamp_eps = 1e-15
+        clamp_eps = 2.2204e-16
     return clamp_eps
 
 
@@ -122,7 +122,7 @@ def probs_to_logits(probs, is_binary=False):
     denote the probabilities of occurrence of each of the events.
     """
     eps = _get_clamping_buffer(probs)
-    ps_clamped = probs.clamp(min=eps, max=1 - eps)
+    ps_clamped = probs.clamp(min=eps, max=1-eps)
     if is_binary:
         return torch.log(ps_clamped) - torch.log1p(-ps_clamped)
     return torch.log(ps_clamped)
