@@ -121,10 +121,106 @@ def kl_divergence(p, q):
 # KL Divergence Implementations
 ################################################################################
 
+# Same distributions
+
+@register_kl(Bernoulli, Bernoulli)
+def _kl_bernoulli_bernoulli(p, q):
+    t1 = p.probs * (p.probs / q.probs).log()
+    t2 = (1 - p.probs) * ((1 - p.probs) / (1 - q.probs)).log()
+    return t1 + t2
+
+@register_kl(Beta, Beta)
+def _kl_beta_beta(p, q):
+    sum_params_p = p.alpha + p.beta
+    sum_params_q = q.alpha + q.beta
+    t1 = q.alpha.lgamma() + q.beta.lgamma() + (sum_params_p).lgamma()
+    t2 = p.alpha.lgamma() + p.beta.lgamma() + (sum_params_q).lgamma()
+    t3 = (p.alpha - q.alpha) * torch.digamma(p.alpha)
+    t4 = (p.beta - q.beta) * torch.digamma(p.beta)
+    t5 = (sum_params_q - sum_params_p) * torch.digamma(sum_params_p)
+    return t1 - t2 + t3 + t4 + t5
+
+@register_kl(Exponential, Exponential)
+def _kl_exponential_exponential(p, q):
+    rate_ratio = p.rate / q.rate
+    t1 = -rate_ratio.log()
+    return t1 + rate_ratio - 1
+
 @register_kl(Gamma, Gamma)
 def _kl_gamma_gamma(p, q):
-    # Adapted from https://stats.stackexchange.com/questions/11646
-    def f(a, b, c, d):
-        return -d * a / c + b * a.log() - torch.lgamma(b) + (b - 1) * torch.digamma(d) + (1 - b) * c.log()
+    t1 = q.alpha * (p.beta / q.beta).log()
+    t2 = torch.lgamma(q.alpha) - torch.lgamma(p.alpha)
+    t3 = (p.alpha - q.alpha) * torch.digamma(p.alpha)
+    t4 = (q.beta - p.beta) * (p.alpha / p.beta)
+    return t1 + t2 + t3 + t4
 
-    return f(p.beta, p.alpha, p.beta, p.alpha) - f(q.beta, q.alpha, p.beta, p.alpha)
+@register_kl(Laplace, Laplace)
+def _kl_laplace_laplace(p, q):
+    #  From http://www.mast.queensu.ca/~communications/Papers/gil-msc11.pdf
+    scale_ratio = p.scale / q.scale
+    loc_abs_diff = (p.loc - q.loc).abs()
+    t1 = -scale_ratio.log()
+    t2 = loc_abs_diff / q.scale
+    t3 = scale_ratio * torch.exp(-loc_abs_diff / p.scale)
+    return t1 + t2 + t3 - 1
+
+@register_kl(Normal, Normal)
+def _kl_normal_normal(p, q):
+    std_dev_ratio = p.std / q.std
+    t1 = -std_dev_ratio.log()
+    t2 = std_dev_ratio.pow(2)
+    t3 = ((p.mean - q.mean) / q.std).pow(2)
+    return t1 + (t2 + t3 - 1) / 2
+
+@register_kl(Pareto, Pareto)
+def _kl_pareto_pareto(p, q):
+    #  From http://www.mast.queensu.ca/~communications/Papers/gil-msc11.pdf
+    scale_ratio = p.scale / q.scale
+    alpha_ratio = q.alpha / p.alpha
+    t1 = q.alpha * scale_ratio.log()
+    t2 = -alpha_ratio.log()
+    return t1 + t2 + alpha_ratio - 1
+
+@register_kl(Uniform, Uniform)
+def _kl_uniform_uniform(p, q):
+    return ((q.high - q.low) / (p.high - p.low)).log()
+
+# Different distributions
+
+@register_kl(Gamma, Exponential)
+def _kl_gamma_exponential(p, q):
+    return -p.entropy() - q.rate.log() + q.rate * p.alpha / p.beta
+
+@register_kl(Beta, Exponential)
+def _kl_beta_exponential(p, q):
+    return -p.entropy() - q.rate.log() + q.rate * (p.alpha / (p.alpha + p.beta))
+
+@register_kl(Beta, Gamma)
+def _kl_beta_gamma(p, q):
+    t1 = -p.entropy()
+    t2 = q.alpha.lgamma() - q.alpha * q.beta.log()
+    t3 = (q.alpha - 1) * (p.alpha.digamma() - (p.alpha + p.beta).digamma())
+    t4 = q.beta * p.alpha / (p.alpha + p.beta)
+    return t1 + t2 - t3 + t4
+
+@register_kl(Beta, Normal)
+def _kl_beta_normal(p, q):
+    E_beta = p.alpha / (p.alpha + p.beta)
+    var_normal = q.std.pow(2)
+    t1 = -p.entropy()
+    t2 = 0.5 * (var_normal * 2 * math.pi).log()
+    t3 = (E_beta * (1 - E_beta) / (p.alpha + p.beta + 1) + E_beta.pow(2)) * 0.5
+    t4 = q.mean * E_beta
+    t5 = q.mean.pow(2) * 0.5
+    return t1 + t2 + (t3 - t4 + t5) / var_normal
+
+@register_kl(Exponential, Beta)
+def _kl_exponential_beta(p, q):
+    return torch.new(p.rate.size()).fill_(float('inf'))
+
+@register_kl(Exponential, Gamma)
+def _kl_exponential_gamma(p, q):
+    t1 = q.alpha * q.beta.log() - torch.lgamma(q.alpha)
+    t2 = (q.alpha - 1) * (p.rate.log() + 0.57721566490153286060) / p.rate
+    t3 = q.beta / p.rate
+    return t1 - t2 - t3
