@@ -2,6 +2,7 @@ import warnings
 from functools import total_ordering
 
 import torch
+import math
 
 from .distribution import Distribution
 from .bernoulli import Bernoulli
@@ -149,7 +150,7 @@ def _kl_beta_beta(p, q):
 
 @register_kl(Exponential, Exponential)
 def _kl_exponential_exponential(p, q):
-    rate_ratio = p.rate / q.rate
+    rate_ratio = q.rate / p.rate
     t1 = -rate_ratio.log()
     return t1 + rate_ratio - 1
 
@@ -240,10 +241,9 @@ def _kl_exponential_beta(p, q):
 
 @register_kl(Exponential, Gamma)
 def _kl_exponential_gamma(p, q):
-    t1 = q.alpha * q.beta.log() - torch.lgamma(q.alpha)
-    t2 = (q.alpha - 1) * (p.rate.log() + 0.57721566490153286060) / p.rate
-    t3 = q.beta / p.rate
-    return t1 - t2 - t3
+    ratio = q.beta / p.rate
+    t1 = -q.alpha * torch.log(ratio)
+    return t1 + ratio + q.alpha.lgamma() + q.alpha * 0.57721566490153286060 - 1.57721566490153286060
 
 @register_kl(Exponential, Normal)
 def _kl_exponential_normal(p, q):
@@ -308,7 +308,7 @@ def _kl_laplace_normal(p, q):
     t1 = 0.5 * torch.log(2 * scale_sqr_var_ratio / math.pi)
     t2 = 0.5 * p.loc.pow(2)
     t3 = p.loc * q.mean
-    t4 = q.mean.pow(2)
+    t4 = 0.5 * q.mean.pow(2)
     return -t1 + scale_sqr_var_ratio + (t2 - t3 + t4) / var_normal - 1
 
 @register_kl(Laplace, Uniform)
@@ -330,8 +330,8 @@ def _kl_normal_gamma(p, q):
 @register_kl(Normal, Laplace)
 def _kl_normal_laplace(p, q):
     common_term = (p.std / q.scale)
-    common_const = math.sqrt(2 / math.pi)
-    return (math.log(common_const) - 0.5) - torch.log(common_term) + common_const * common_term
+    common_const = math.sqrt(2.0 / math.pi)
+    return (math.log(common_const) - 0.5) - torch.log(common_term) + common_term * common_const
 
 @register_kl(Normal, Uniform)
 def _kl_normal_uniform(p, q):

@@ -15,23 +15,21 @@ class Beta(Distribution):
     Example::
 
         >>> m = Beta(torch.Tensor([0.5]), torch.Tensor([0.5]))
-        >>> m.sample()  # Beta distributed with concentrarion alpha
+        >>> m.sample()  # Beta distributed with concentration alpha and beta
          0.1046
-        [torch.FloatTensor of size 2]
+        [torch.FloatTensor of size 1]
 
     Args:
-        alpha (Tensor or Variable): concentration parameter of the distribution
+        alpha (float or Tensor or Variable): 1st concentration parameter of the distribution
+        beta (float or Tensor or Variable): 2nd concentration parameter of the distribution
     """
     params = {'alpha': constraints.positive, 'beta': constraints.positive}
     support = constraints.unit_interval
     has_rsample = True
 
     def __init__(self, alpha, beta):
-        if isinstance(alpha, Number) and isinstance(beta, Number):
-            alpha_beta = torch.Tensor([alpha, beta])
-        else:
-            alpha, beta = broadcast_all(alpha, beta)
-            alpha_beta = torch.stack([alpha, beta], -1)
+        self.alpha, self.beta = broadcast_all(alpha, beta)
+        alpha_beta = torch.stack([self.alpha, self.beta], -1)
         self._dirichlet = Dirichlet(alpha_beta)
         super(Beta, self).__init__(self._dirichlet._batch_shape)
 

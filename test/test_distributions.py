@@ -1210,10 +1210,25 @@ class TestDistributionShapes(TestCase):
 class TestKL(TestCase):
     def setUp(self):
         self.examples = [
-            (Gamma(1, 2), Gamma(3, 4)),
+            (Bernoulli(0.7), Bernoulli(0.3)),
+            (Beta(1, 2), Beta(3, 4)),
+            (Beta(1, 2), Chi2(3)),
+            (Beta(1, 2), Exponential(3)),
+            (Beta(1, 2), Gamma(3, 4)),
+            (Beta(1, 2), Normal(-3, 4)),
             (Chi2(2), Chi2(3)),
-            (Gamma(1, 2), Chi2(3)),
             (Chi2(2), Gamma(3, 4)),
+            (Chi2(2), Exponential(3)),
+            (Exponential(1), Exponential(2)),
+            (Exponential(1), Gamma(2, 3)),
+            (Exponential(2), Normal(-3, 4)),
+            (Gamma(1, 2), Chi2(3)),
+            (Gamma(1, 2), Exponential(3)),
+            (Gamma(1, 2), Gamma(3, 4)),
+            (Laplace(1, 2), Laplace(-3, 4)),
+            (Laplace(-1, 2), Normal(-3, 4)),
+            #  (Normal(-1, 2), Laplace(-3, 4)), This case fails
+            (Normal(1, 2), Normal(-3, 4)),
         ]
 
     def test_kl_monte_carlo(self):
