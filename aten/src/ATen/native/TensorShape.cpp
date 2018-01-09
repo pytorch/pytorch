@@ -198,9 +198,10 @@ Tensor squeeze(const Tensor& self) {
 }
 
 Tensor squeeze(const Tensor& self, int64_t dim) {
-  dim = maybe_wrap_dim(dim, self.dim());
+  int64_t dims = self.dim();
+  dim = maybe_wrap_dim(dim, dims);
 
-  if (self.sizes()[dim] != 1) {
+  if (dims == 0 || self.sizes()[dim] != 1) {
     return self.as_strided(self.sizes().vec(), self.strides().vec());
   }
   auto g = inferSqueezeGeometry(self, dim);
@@ -213,9 +214,10 @@ Tensor & squeeze_(Tensor& self) {
 }
 
 Tensor & squeeze_(Tensor& self, int64_t dim) {
+  int64_t dims = self.dim();
   dim = maybe_wrap_dim(dim, self.dim());
 
-  if (self.sizes()[dim] != 1) {
+  if (dims == 0 || self.sizes()[dim] != 1) {
     return self.as_strided_(self.sizes().vec(), self.strides().vec());
   }
   auto g = inferSqueezeGeometry(self, dim);
