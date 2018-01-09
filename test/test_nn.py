@@ -3691,9 +3691,9 @@ class TestNN(NNTestCase):
     def test_cudnn_noncontiguous_weight(self):
         # Noncontiguous weights must be contiguous() before being
         # passed to cuDNN
-        input = Variable(torch.cuda.DoubleTensor([1,1,1]).view(1,1,3))
-        weights1 = Variable(torch.cuda.DoubleTensor([1]).expand(1,1,2))
-        weights2 = Variable(torch.cuda.DoubleTensor([1]).expand(1,1,2)).contiguous()
+        input = Variable(torch.cuda.DoubleTensor([1, 1, 1]).view(1, 1, 3))
+        weights1 = Variable(torch.cuda.DoubleTensor([1]).expand(1, 1, 2))
+        weights2 = Variable(torch.cuda.DoubleTensor([1]).expand(1, 1, 2)).contiguous()
         self.assertEqual(F.conv1d(input, weights1, bias=None, stride=2, dilation=2),
                          F.conv1d(input, weights2, bias=None, stride=2, dilation=2))
 
