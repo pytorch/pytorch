@@ -25,7 +25,7 @@ class _InstanceNorm(_BatchNorm):
 
         out = F.batch_norm(
             input_reshaped, running_mean, running_var, weight, bias,
-            not self.use_running_stats, self.momentum, self.eps)
+            self.training or not self.use_running_stats, self.momentum, self.eps)
 
         # Reshape back
         self.running_mean.copy_(running_mean.view(b, c).mean(0, keepdim=False))
