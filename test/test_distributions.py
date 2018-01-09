@@ -303,7 +303,7 @@ class TestDistributions(TestCase):
         self.assertEqual(Multinomial(10, p).sample((2, 2)).size(), (2, 2, 3))
         self.assertEqual(Multinomial(10, p).sample_n(1).size(), (1, 3))
         self._gradcheck_log_prob(Multinomial, (10, p))
-
+        self._gradcheck_log_prob(Multinomial, (10, None, p.log()))
         dist = Multinomial(10, probs=p)
         set_rng_seed(0)
         x = dist.sample()
@@ -329,6 +329,7 @@ class TestDistributions(TestCase):
         self.assertEqual(Multinomial(10, p).sample(sample_shape=(3, 4)).size(), (3, 4, 2, 3))
         self.assertEqual(Multinomial(10, p).sample_n(6).size(), (6, 2, 3))
         self._gradcheck_log_prob(Multinomial, (10, p))
+        self._gradcheck_log_prob(Multinomial, (10, None, p.log()))
 
         # sample check for extreme value of probs
         self.assertEqual(Multinomial(10, s).sample().data,
