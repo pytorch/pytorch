@@ -194,8 +194,8 @@ class CuDNNPoolOp : public ConvPoolOpBase<CUDAContext> {
 
     // Fast path for global pooling, as cudnn is slow. But only
     // on float, because fp16 not supported for CUB.
-    if (sizeof(T) == 4) {
-      if (order_ == StorageOrder::NCHW && Y->size() == N * C) {
+    if (std::is_same<T, float>::value) {
+      if (order_ == StorageOrder::NCHW && global_pooling_) {
         if (mode_ == CUDNN_POOLING_AVERAGE_COUNT_EXCLUDE_PADDING) {
           global_avgpool_kernel_NCHW<float>
               <<<std::min(N * C, CAFFE_MAXIMUM_NUM_BLOCKS),
@@ -275,9 +275,9 @@ class CuDNNPoolOp : public ConvPoolOpBase<CUDAContext> {
     auto* Y = Output(0);
 
     if (X.IsType<float>()) {
-      return DoRunWithType<float,float>();
+      return DoRunWithType<float, float>();
     } else if (X.IsType<float16>()) {
-      return DoRunWithType<float16,float>();
+      return DoRunWithType<float16, float>();
     } else {
       LOG(FATAL) << "Unsupported input types";
     }
@@ -292,6 +292,7 @@ class CuDNNPoolOp : public ConvPoolOpBase<CUDAContext> {
   cudnnTensorDescriptor_t top_desc_;
   cudnnPoolingDescriptor_t pooling_desc_;
   cudnnPoolingMode_t mode_;
+
  private:
 };
 
@@ -347,34 +348,34 @@ class CuDNNPoolGradientOp : public ConvPoolOpBase<CUDAContext> {
     int N = 0, C = 0, H = 0, W = 0, D = 0;
     int H_out = 0, W_out = 0, D_out = 0;
     switch (order_) {
-    case StorageOrder::NHWC:
-      N = X.dim32(0);
-      H = X.dim32(1);
-      W = X.ndim() > 3 ? X.dim32(2) : 1;
-      D = X.ndim() > 4 ? X.dim32(3) : 1;
-      C = X.dim32(X.ndim() - 1);
-      H_out = Y.dim32(1);
-      W_out = Y.ndim() > 3 ? Y.dim32(2) : 1;
-      D_out = Y.ndim() > 4 ? Y.dim32(3) : 1;
-      break;
-    case StorageOrder::NCHW:
-      N = X.dim32(0);
-      C = X.dim32(1);
-      H = X.dim32(2);
-      W = X.ndim() > 3 ? X.dim32(3) : 1;
-      D = X.ndim() > 4 ? X.dim32(4) : 1;
-      H_out = Y.dim32(2);
-      W_out = Y.ndim() > 3 ? Y.dim32(3) : 1;
-      D_out = Y.ndim() > 4 ? Y.dim32(4) : 1;
-      break;
-    default:
-      LOG(FATAL) << "Unknown storage order: " << order_;
+      case StorageOrder::NHWC:
+        N = X.dim32(0);
+        H = X.dim32(1);
+        W = X.ndim() > 3 ? X.dim32(2) : 1;
+        D = X.ndim() > 4 ? X.dim32(3) : 1;
+        C = X.dim32(X.ndim() - 1);
+        H_out = Y.dim32(1);
+        W_out = Y.ndim() > 3 ? Y.dim32(2) : 1;
+        D_out = Y.ndim() > 4 ? Y.dim32(3) : 1;
+        break;
+      case StorageOrder::NCHW:
+        N = X.dim32(0);
+        C = X.dim32(1);
+        H = X.dim32(2);
+        W = X.ndim() > 3 ? X.dim32(3) : 1;
+        D = X.ndim() > 4 ? X.dim32(4) : 1;
+        H_out = Y.dim32(2);
+        W_out = Y.ndim() > 3 ? Y.dim32(3) : 1;
+        D_out = Y.ndim() > 4 ? Y.dim32(4) : 1;
+        break;
+      default:
+        LOG(FATAL) << "Unknown storage order: " << order_;
     }
 
     // Fast path for global pooling, as cudnn is slow. But only
     // on float, because fp16 not supported for CUB.
-    if (sizeof(T) == 4) {
-      if (order_ == StorageOrder::NCHW && dY.size() == N * C) {
+    if (std::is_same<T, float>::value) {
+      if (order_ == StorageOrder::NCHW && global_pooling_) {
         if (mode_ == CUDNN_POOLING_AVERAGE_COUNT_EXCLUDE_PADDING) {
           global_avgpool_backward_NCHW<float>
               <<<CAFFE_GET_BLOCKS(dX->size()),
@@ -487,9 +488,9 @@ class CuDNNPoolGradientOp : public ConvPoolOpBase<CUDAContext> {
     dX->ResizeLike(X);
 
     if (X.IsType<float>()) {
-      return DoRunWithType<float,float>();
+      return DoRunWithType<float, float>();
     } else if (X.IsType<float16>()) {
-      return DoRunWithType<float16,float>();
+      return DoRunWithType<float16, float>();
     } else {
       LOG(FATAL) << "Unsupported input types";
     }
@@ -530,5 +531,5 @@ REGISTER_CUDNN_OPERATOR(MaxPool2DGradient, CuDNNPoolGradientOp);
 
 REGISTER_CUDNN_OPERATOR(MaxPool3D, CuDNNPoolOp);
 REGISTER_CUDNN_OPERATOR(MaxPool3DGradient, CuDNNPoolGradientOp);
-}  // namespace
-}  // namespace caffe2
+} // namespace
+} // namespace caffe2

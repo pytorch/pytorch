@@ -292,6 +292,7 @@ def create_resnet50(
         'final_avg',
         kernel=final_avg_kernel,
         stride=1,
+        global_pooling=True,
     )
 
     # Final dimension of the "image" is reduced to 7x7
