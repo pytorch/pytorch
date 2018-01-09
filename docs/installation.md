@@ -1,11 +1,13 @@
 ## Building Caffe2
 
-[![Build Status](https://travis-ci.org/caffe2/caffe2.svg?branch=cmake)](https://travis-ci.org/caffe2/caffe2)
+This guide builds from source. For alternatives, refer to https://caffe2.ai/docs/getting-started.html
 
-    git clone https://github.com/caffe2/caffe2.git
+Get latest source from GitHub.
+
+    git clone --recursive https://github.com/caffe2/caffe2.git
     cd caffe2
 
-#### OS X
+#### MacOS X
 
     brew install openblas glog gtest automake protobuf leveled lmdb
     mkdir build && cd build
@@ -34,11 +36,11 @@
 
 ## Python support
 
-To use caffe2 in Python, you need the two libraries, future and six,
+To use Caffe2 in Python, you need two libraries, future and six.
 
     pip install future six
 
-To run the tutorials you'll need ipython-notebooks and matplotlib, which can be installed on OS X with:
+To run the tutorials you'll need jupyter (formerly ipython) notebooks and matplotlib, which can be installed on MacOS X with
 
     brew install matplotlib --with-python3
-    pip install ipython notebook
+    pip install jupyter
