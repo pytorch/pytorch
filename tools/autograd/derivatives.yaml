@@ -16,16 +16,27 @@
 # Gradient expressions are standard C++ expressions operating on ATen
 # variables.  In a gradient expression, the following variables are in
 # scope:
-#   - 'grad' (aka 'grad_output'), the gradient of the output which
-#     we are going to left-multiply.  When the forward returns multiple
-#     outputs, 'grad' always refers to the first output; you can refer
-#     to other outputs using 'grads'
+#
+#   - 'grad', the gradient of the output (often spelled grad_output
+#     in Python) which we are going to left-multiply.
+#
+#     When a function returns multiple *differentiable* outputs,
+#     you can refer to the gradients of each outputs using 'grads',
+#     e.g., 'grads[0]', 'grads[1]'
+#
+#     When a function returns *one* differentiable output (the
+#     first output) and some more nondifferentiable outputs,
+#     you MUST refer to the gradient of the differentiable output with
+#     'grad' (this case is special-cased in our code generation).
+#
 #   - Any of the input arguments, tensor or non-tensor, including
 #     argument names tha only appear in Declarations.cwrap, e.g. 'output'.
+#
 #   - 'result', representing the result of evaluating the forward
 #     expression for ATen native function declarations. If the forward
 #     expression outputs a tuple, use 'resultX' instead to access the
 #     X-th entry
+#
 #   - 'grad_input_mask', a std::array<bool, n> (where n is the number
 #     of differentiable inputs), specifying which inputs actually
 #     require gradient.  (This is only available when multiple
@@ -1050,7 +1061,7 @@
 # work.)
 # NB2: The quotes around the gradient are needed to appease YAML parsing rules.
 - name: cudnn_batch_norm(Tensor input, Tensor weight, Tensor bias, Tensor running_mean, Tensor running_var, bool training, double exponential_average_factor, double epsilon)
-  input, weight, bias: "training ? cudnn_batch_norm_backward(input, grads[0].contiguous(), weight, running_mean, running_var, result1, result2, epsilon) : thnn_batch_norm_backward(grads[0].contiguous(), input, weight, running_mean, running_var, training, epsilon, result1, result2, grad_input_mask)"
+  input, weight, bias: "training ? cudnn_batch_norm_backward(input, grad.contiguous(), weight, running_mean, running_var, result1, result2, epsilon) : thnn_batch_norm_backward(grad.contiguous(), input, weight, running_mean, running_var, training, epsilon, result1, result2, grad_input_mask)"
 
 # HACK: save_mean and save_var are going to be passed in as
 # requires_grad variables (even though we'll never backprop through
