@@ -961,7 +961,7 @@
       - THTensor* other
     - cname: min
       return: argument 0,1
-      scalar_check: keepdim == false && self_->dim() == 1
+      scalar_check: self_->isScalar() || (keepdim == false && self_->dim() == 1)
       arguments:
         - arg: THTensor* min
           output: True
@@ -993,7 +993,7 @@
       - THTensor* other
     - cname: max
       return: argument 0,1
-      scalar_check: keepdim == false && self_->dim() == 1
+      scalar_check: self_->isScalar() || (keepdim == false && self_->dim() == 1)
       arguments:
         - arg: THTensor* max
           output: True
@@ -1013,7 +1013,7 @@
     - method
     - function
   return: argument 0,1
-  scalar_check: keepdim == false && self_->dim() == 1
+  scalar_check: self_->isScalar() || (keepdim == false && self_->dim() == 1)
   arguments:
     - arg: THTensor* values
       output: True
@@ -1033,7 +1033,7 @@
     - method
     - function
   return: argument 0,1
-  scalar_check: keepdim == false && self_->dim() == 1
+  scalar_check: self_->isScalar() || (keepdim == false && self_->dim() == 1)
   arguments:
     - arg: THTensor* values
       output: True
@@ -1058,7 +1058,7 @@
       arguments:
         - THTensor* self
     - cname: median
-      scalar_check: keepdim == false && self_->dim() == 1
+      scalar_check: self_->isScalar() || (keepdim == false && self_->dim() == 1)
       arguments:
         - arg: THTensor* values
           output: True
@@ -1952,7 +1952,7 @@
         - THTensor* self
     - cname: mean
       return: argument 0
-      scalar_check: keepdim == false && self_->dim() == 1
+      scalar_check: self_->isScalar() || (keepdim == false && self_->dim() == 1)
       arguments:
         - arg: THTensor* result
           output: True
@@ -1983,7 +1983,7 @@
           default: 0
     - cname: var
       return: argument 0
-      scalar_check: keepdim == false && self_->dim() == 1
+      scalar_check: self_->isScalar() || (keepdim == false && self_->dim() == 1)
       arguments:
         - arg: THTensor* result
           output: True
@@ -2018,7 +2018,7 @@
           default: 0
     - cname: std
       return: argument 0
-      scalar_check: keepdim == false && self_->dim() == 1
+      scalar_check: self_->isScalar() || (keepdim == false && self_->dim() == 1)
       arguments:
         - arg: THTensor* result
           output: True
@@ -2051,7 +2051,7 @@
           default: AS_REAL(2)
     - cname: norm
       return: argument 0
-      scalar_check: keepdim == false && self_->dim() == 1
+      scalar_check: self_->isScalar() || (keepdim == false && self_->dim() == 1)
       arguments:
         - arg: THTensor* result
           output: True
@@ -2382,7 +2382,7 @@
         - THTensor* self
     - cname: sum
       return: argument 0
-      scalar_check: keepdim == false && self_->dim() == 1
+      scalar_check: self_->isScalar() || (keepdim == false && self_->dim() == 1)
       arguments:
         - arg: THTensor* result
           output: True
@@ -2404,7 +2404,7 @@
         - THTensor* self
     - cname: prod
       return: argument 0
-      scalar_check: keepdim == false && self_->dim() == 1
+      scalar_check: self_->isScalar() || (keepdim == false && self_->dim() == 1)
       arguments:
         - arg: THTensor* result
           output: True

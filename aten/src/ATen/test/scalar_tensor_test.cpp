@@ -1,5 +1,6 @@
 #include "ATen/ATen.h"
 #include "test_assert.h"
+#include <algorithm>
 #include <iostream>
 #include <numeric>
 
@@ -64,10 +65,8 @@ void test(Type &T) {
     }
 
     // squeeze (with dimension argument)
-    if (t.dim() > 0 && t.sizes()[0] == 1) {
-      ASSERT(t.squeeze(0).dim() == t.dim() - 1);
-    } else if (t.dim() == 0) {
-      ASSERT_THROWS(t.squeeze(0));
+    if (t.dim() == 0 || t.sizes()[0] == 1) {
+      ASSERT(t.squeeze(0).dim() == std::max<int64_t>(t.dim() - 1, 0));
     } else {
       // In PyTorch, it is a no-op to try to squeeze a dimension that has size != 1;
       // in NumPy this is an error.
@@ -89,10 +88,8 @@ void test(Type &T) {
     {
       // squeeze_ (with dimension argument)
       auto t2 = T.ones(*s);
-      if (t2.dim() > 0 && t2.sizes()[0] == 1) {
-        ASSERT(t2.squeeze_(0).dim() == t.dim() - 1);
-      } else if (t2.dim() == 0) {
-        ASSERT_THROWS(t2.squeeze_(0));
+      if (t2.dim() == 0 ||  t2.sizes()[0] == 1) {
+        ASSERT(t2.squeeze_(0).dim() == std::max<int64_t>(t.dim() - 1, 0));
       } else {
         // In PyTorch, it is a no-op to try to squeeze a dimension that has size != 1;
         // in NumPy this is an error.
@@ -114,22 +111,18 @@ void test(Type &T) {
     }
 
     // reduce (with dimension argument and with 1 return argument)
-    if (t.dim() > 0 && t.numel() != 0) {
-      ASSERT(t.sum(0).dim() == t.dim() - 1);
-    } else if (t.dim() == 0) {
-      ASSERT_THROWS(t.sum(0));
+    if (t.numel() != 0) {
+      ASSERT(t.sum(0).dim() == std::max<int64_t>(t.dim() - 1, 0));
     } else {
       // FIXME: you should be able to reduce over size {0}
       ASSERT_THROWS(t.sum(0));
     }
 
     // reduce (with dimension argument and with 2 return arguments)
-    if (t.dim() > 0 && t.numel() != 0) {
+    if (t.numel() != 0) {
       auto ret = t.min(0);
-      ASSERT(std::get<0>(ret).dim() == t.dim() - 1);
-      ASSERT(std::get<1>(ret).dim() == t.dim() - 1);
-    } else if (t.dim() == 0) {
-      ASSERT_THROWS(t.min(0));
+      ASSERT(std::get<0>(ret).dim() == std::max<int64_t>(t.dim() - 1, 0));
+      ASSERT(std::get<1>(ret).dim() == std::max<int64_t>(t.dim() - 1, 0));
     } else {
       // FIXME: you should be able to reduce over size {0}
       ASSERT_THROWS(t.min(0));
@@ -138,17 +131,14 @@ void test(Type &T) {
     // simple indexing
     if (t.dim() > 0 && t.numel() != 0) {
       ASSERT(t[0].dim() == std::max<int64_t>(t.dim() - 1, 0));
-    } else if (t.dim() == 0) {
+    } else {
       ASSERT_THROWS(t[0]);
     }
 
-    // fill_
-    if (t.dim() > 0 && t.numel() != 0) {
-      // can only fill_ 0-dim tensors
-      TRY_CATCH_ELSE(t.fill_(t.sum(0)),
-                     ASSERT(t.dim() != 1),
-                     ASSERT(t.dim() == 1));
-    }
+    // fill_ (argument to fill_ can only be a 0-dim tensor)
+    TRY_CATCH_ELSE(t.fill_(t.sum(0)),
+                   ASSERT(t.numel() == 0 || t.dim() > 1),
+                   ASSERT(t.numel() > 0 && t.dim() <= 1));
   }
 
   for (auto lhs_it = sizes.begin(); lhs_it != sizes.end(); ++lhs_it) {
