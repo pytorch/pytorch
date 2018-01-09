@@ -799,6 +799,36 @@ class TestDistributions(TestCase):
                                     'Dirichlet(alpha={})'.format(list(alpha)),
                                     multivariate=True)
 
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    def test_dirichlet_sample_grad(self):
+        set_rng_seed(0)  # see Note [Randomized statistical tests]
+        num_samples = 20
+        grid = [1e-1, 1e0, 1e1]
+        for alpha in product(grid, grid, grid):
+            alphas = Variable(torch.FloatTensor([alpha] * num_samples), requires_grad=True)
+            x = Dirichlet(alphas).rsample()[:, 0]
+            x.sum().backward()
+            x, ind = x.data.sort()
+            x = x.numpy()
+            actual_grad = alphas.grad.data[ind].numpy()[:, 0]
+            # Compare with expected gradient dx/dalpha0 along constant cdf(x,alpha).
+            # This reduces to a distribution Beta(alpha[0], alpha[1] + alpha[2]).
+            cdf = scipy.stats.beta.cdf
+            pdf = scipy.stats.beta.pdf
+            alpha, beta = alpha[0], alpha[1] + alpha[2]
+            eps = 0.01 * alpha / (1.0 + np.sqrt(alpha))
+            cdf_alpha = (cdf(x, alpha + eps, beta) - cdf(x, alpha - eps, beta)) / (2 * eps)
+            cdf_x = pdf(x, alpha, beta)
+            expected_grad = -cdf_alpha / cdf_x
+            rel_error = np.abs(actual_grad - expected_grad) / (expected_grad + 1e-100)
+            self.assertLess(np.max(rel_error), 0.001,
+                            '\n'.join(['Bad gradients for Beta({}, {})'.format(alpha, beta),
+                                       'x {}'.format(x),
+                                       'expected {}'.format(expected_grad),
+                                       'actual {}'.format(actual_grad),
+                                       'rel error {}'.format(rel_error),
+                                       'max error {}'.format(rel_error.max())]))
+
     def test_beta_shape(self):
         alpha = Variable(torch.exp(torch.randn(2, 3)), requires_grad=True)
         beta = Variable(torch.exp(torch.randn(2, 3)), requires_grad=True)
