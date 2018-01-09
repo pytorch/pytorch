@@ -37,6 +37,6 @@ int main() {
     ASSERT(a.prod(0).equal(a.prod(-1)));
     a.get()->maybeScalar(true);
     ASSERT(a.get()->isScalar());
-    ASSERT_THROWS(a.prod(0));
+    ASSERT(a.prod(0).equal(a.prod(-1)));
   }
 }
