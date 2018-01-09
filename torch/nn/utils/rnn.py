@@ -146,7 +146,7 @@ def pad_packed_sequence(sequence, batch_first=False, padding_value=0):
         sequence (PackedSequence): batch to pad
         batch_first (bool, optional): if ``True``, the output will be in BxTx*
             format.
-        padding_value (float, optional): values for padded elements (defaults to zero).
+        padding_value (float, optional): values for padded elements.
 
     Returns:
         Tuple of Variable containing the padded sequence, and a list of lengths
