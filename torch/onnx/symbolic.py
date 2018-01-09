@@ -3,6 +3,8 @@ from torch.autograd._functions.utils import check_onnx_broadcast  # TODO: move m
 from torch.nn.modules.utils import _single, _pair, _triple
 import warnings
 
+import torch.onnx
+
 # EDITING THIS FILE? READ THIS FIRST!
 #
 # - Parameter ordering does NOT necessarily match what is in VariableType.cpp;
@@ -479,3 +481,95 @@ def exp(g, self):
 
 def conv_tbc(g, input, weight, bias, pad):
     return g.op("ATen", input, weight, bias, operator_s="conv_tbc", pad_i=pad)
+
+
+def RNN_symbolic_builder(cell_type, *args, **kwargs):
+    if cell_type == 'LSTM':
+        return LSTM_symbolic_builder(*args, **kwargs)
+    elif cell_type == 'GRU':
+        return GRU_symbolic_builder(*args, **kwargs)
+    else:
+        return _unimplemented("RNN", "cell type " + cell_type)
+
+
+def reform_weights(g, w, n, intervals):
+    slices = [g.op('Slice', w, axes_i=[0], starts_i=[x * n], ends_i=[y * n]) for x, y in intervals]
+    return g.op('Concat', *slices, axis_i=0)
+
+
+def LSTM_symbolic_builder(input_size, hidden_size, num_layers, batch_first, dropout, bidirectional, **kwargs):
+    if batch_first:
+        return _unimplemented("LSTM", "batch_first")
+    if dropout:
+        return _unimplemented("LSTM", "dropout")
+    if bidirectional:
+        return _unimplemented("LSTM", "bidirectional")
+
+    def symbolic(g, input, all_weights, h0_and_c0, **fkwargs):
+        h0, c0 = h0_and_c0
+
+        # TODO elide this argument to increase parametricity. This is
+        # nontrivial because we provide subsequent optional arguments,
+        # and ONNX does not have a mechanism for skipping non-trailing
+        # optional arguments.
+        sequence_len, batch_size = input.type().sizes()[0:2]
+        sequence_lens = g.op('Constant', value_t=torch.IntTensor(batch_size).fill_(sequence_len))
+
+        prev_output = input
+        h_outs = []
+        for i in range(num_layers):
+            # pytorch is input, forget, cell, output.
+            # onnx is    input, output, forget, cell.
+            weight_ih, weight_hh, bias_ih, bias_hh = \
+                [reform_weights(g, w, hidden_size, [(0, 1), (3, 4), (1, 3)]) for w in all_weights[i]]
+
+            bias_concat = g.op('Concat', bias_ih, bias_hh, axis_i=0)
+
+            h_in = h0 if num_layers == 1 else g.op('Slice', h0, axes_i=[0], starts_i=[i], ends_i=[i + 1])
+            c_in = c0 if num_layers == 1 else g.op('Slice', c0, axes_i=[0], starts_i=[i], ends_i=[i + 1])
+
+            inputs = [prev_output, weight_ih, weight_hh, bias_concat, sequence_lens, h_in, c_in]
+            prev_output, h_out = g.op('LSTM', *inputs, outputs=2, hidden_size_i=hidden_size)
+            h_outs.append(h_out)
+        h_outs = h_out if num_layers == 1 else g.op('Concat', *h_outs, axis_i=0)
+        return prev_output, h_outs, None
+
+    return torch.onnx.symbolic_override(symbolic)
+
+
+def GRU_symbolic_builder(input_size, hidden_size, num_layers, batch_first, dropout, bidirectional, **kwargs):
+    if batch_first:
+        return _unimplemented("GRU", "batch_first")
+    if dropout:
+        return _unimplemented("GRU", "dropout")
+    if bidirectional:
+        return _unimplemented("GRU", "bidirectional")
+
+    def symbolic(g, input, all_weights, h0, **fkwargs):
+        # TODO elide this argument to increase parametricity. This is
+        # nontrivial because we provide subsequent optional arguments,
+        # and ONNX does not have a mechanism for skipping non-trailing
+        # optional arguments.
+        sequence_len, batch_size = input.type().sizes()[0:2]
+        sequence_lens = g.op('Constant', value_t=torch.IntTensor(batch_size).fill_(sequence_len))
+
+        prev_output = input
+        h_outs = []
+        for i in range(num_layers):
+            # pytorch is reset, input, hidden
+            # onnx is    input, reset, hidden
+            weight_ih, weight_hh, bias_ih, bias_hh = \
+                [reform_weights(g, w, hidden_size, [(1, 2), (0, 1), (2, 3)]) for w in all_weights[i]]
+
+            bias_concat = g.op('Concat', bias_ih, bias_hh, axis_i=0)
+
+            h_in = h0 if num_layers == 1 else g.op('Slice', h0, axes_i=[0], starts_i=[i], ends_i=[i + 1])
+
+            inputs = [prev_output, weight_ih, weight_hh, bias_concat, sequence_lens, h_in]
+            prev_output, h_out = g.op(
+                'GRU', *inputs, outputs=2, hidden_size_i=hidden_size, linear_before_reset_i=1)
+            h_outs.append(h_out)
+        h_outs = h_out if num_layers == 1 else g.op('Concat', *h_outs, axis_i=0)
+        return prev_output, h_outs
+
+    return torch.onnx.symbolic_override(symbolic)

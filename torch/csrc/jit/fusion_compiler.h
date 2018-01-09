@@ -46,15 +46,13 @@ private:
   size_t nDim_;
 };
 
-// short-term storage only, so it borrows Graph.
-// this type is probably temporary.
-// it will be replaced when the needed TensorDesc information is encoded
-// directly in the information in the IR (e.g. in the Type object)
+constexpr int kCPUDevice = -1;
 struct AnnotatedGraph {
-  AnnotatedGraph(Graph & graph, bool is_cuda)
-  : graph(&graph), is_cuda(is_cuda) {}
+  // short-term storage only, so it borrows Graph.
+  AnnotatedGraph(Graph & graph, int device)
+  : graph(&graph), device(device) {}
   Graph* graph = nullptr;
-  bool is_cuda = false;
+  int device = kCPUDevice;
   std::vector<TensorDesc> input_desc;
   std::vector<TensorDesc> output_desc;
 };
@@ -137,14 +135,14 @@ struct FusionCompiler {
 
   // uses inputs/outputs as examples to infer continuity, does not run the graph
   std::shared_ptr<CompiledFusionFunction> getOrCompile(Graph & graph,
-                                                       bool is_cuda,
+                                                       int device,
                                                        at::ArrayRef<at::Tensor> inputs,
                                                        at::ArrayRef<at::Tensor> outputs);
   // debugging function that lets you do everything from compilation to execution
   // in one step.
   // this should not be used in the hot path of execution because it has to serialize
   // the graph each time
-  void debugLaunchGraph(Graph & graph, bool is_cuda, at::ArrayRef<at::Tensor> inputs, at::ArrayRef<at::Tensor> outputs);
+  void debugLaunchGraph(Graph & graph, int device, at::ArrayRef<at::Tensor> inputs, at::ArrayRef<at::Tensor> outputs);
   bool canCompileOnCPU() const {
     return config_.cxx.size() > 0;
   }

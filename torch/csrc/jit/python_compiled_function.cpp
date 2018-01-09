@@ -224,7 +224,7 @@ struct CompiledFunction {
 
 
 std::ostream& operator<<(std::ostream& out, const CompiledFunction::TraceForKey & trace) {
-  if(!trace.is_ready_) {
+  if(!const_cast<CompiledFunction::TraceForKey&>(trace).ready()) {
       out << "<trace has been started but has not been completed>";
       return out;
   }

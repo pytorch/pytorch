@@ -70,7 +70,7 @@ def generate_code(ninja_global=None):
 
     from tools.cwrap.plugins.Broadcast import Broadcast
     from tools.cwrap.plugins.ProcessorSpecificPlugin import ProcessorSpecificPlugin
-    from tools.autograd.gen_variable_type import gen_variable_type
+    from tools.autograd.gen_autograd import gen_autograd
     from tools.jit.gen_jit_dispatch import gen_jit_dispatch
     thp_plugin = THPPlugin()
 
@@ -85,7 +85,7 @@ def generate_code(ninja_global=None):
     for d in (autograd_gen_dir, jit_gen_dir):
         if not os.path.exists(d):
             os.mkdir(d)
-    gen_variable_type(
+    gen_autograd(
         'torch/lib/tmp_install/share/ATen/Declarations.yaml',
         autograd_gen_dir)
     gen_jit_dispatch(

@@ -2,8 +2,7 @@ import os
 import argparse
 from itertools import count
 from ..autograd.utils import CodeTemplate, write
-from ..autograd.gen_variable_type import load_aten_declarations, \
-    FALLTHROUGH_RETURN_TYPES, FALLTHROUGH_FUNCTIONS
+from ..autograd.gen_autograd import load_aten_declarations
 
 template_path = os.path.join(os.path.dirname(__file__), 'templates')
 
@@ -40,6 +39,7 @@ CONSTRUCTOR = CodeTemplate("""\
   return TensorOp([=](const list_of_retainable & inputs,
                       list_of_retainable & outputs) {
     autograd::profiler::RecordFunction record("${name}");
+    AutoGPU device_guard(deviceForInputs(inputs));
     pack_list(outputs, ${call});
   }, "${name}", ${num_inputs});
 }},
@@ -52,8 +52,9 @@ def is_jit_op(decl):
             not decl['name'].endswith('_forward') and
             not any(arg['simple_type'] == 'Generator' for arg in decl['arguments']) and
             not any(arg['simple_type'] == 'SparseTensor' for arg in decl['arguments']) and
-            not decl['return_type'] in FALLTHROUGH_RETURN_TYPES and
-            not decl['name'] in FALLTHROUGH_FUNCTIONS)
+            not any(arg['simple_type'] == 'Storage' for arg in decl['arguments']) and
+            any(arg['simple_type'] in {'Tensor', 'TensorList'} for arg in decl['arguments']) and
+            'Tensor' in decl['return_type'])
 
 
 def gen_jit_dispatch(declarations, out):
