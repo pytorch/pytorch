@@ -102,8 +102,13 @@ def should_generate_python_binding(declaration):
         if re.match('^' + pattern + '$', name):
             return False
 
+    # TODO: fix handling of SparseTensor. We don't want to generate Python
+    # bindings to SparseTensor overloads, such as add(Tensor, SparseTensor),
+    # since the Tensor-based signature already dynamically dispatches correctly.
+    # However, _sparse_mask only has a SparseTensor signature so we need to bind
+    # that function.
     for arg in declaration['arguments']:
-        if arg['type'] == 'SparseTensor':
+        if arg['type'] == 'SparseTensor' and declaration['name'] != '_sparse_mask':
             return False
 
     # we don't currently support functions which are only defined on Type
