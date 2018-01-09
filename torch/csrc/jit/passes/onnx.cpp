@@ -188,6 +188,8 @@ void ToONNX(std::shared_ptr<tracer::TracingState>& state, bool aten) {
       py_symbolic_args[input_nr++] = obj;
     }
 
+    auto scope_guard = ctx.graph->set_current_scope_temporary(op->scope());
+
     // Call the symbolic function
     // Use a little trampoline function so we can give good error messages
     // upon argument mismatch
