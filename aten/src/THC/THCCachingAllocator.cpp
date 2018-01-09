@@ -1,6 +1,7 @@
 #include "THCCachingAllocator.h"
 
 #include <cuda_runtime_api.h>
+#include <algorithm>
 #include <deque>
 #include <map>
 #include <memory>
@@ -43,6 +44,35 @@ const size_t kRoundSmall = 512;     // round up small allocs to 512 bytes
 const size_t kRoundLarge = 131072;  // round up large allocs to 128 KiB
 const size_t kSmallAlloc = 1048576; // largest "small" allocation is 1 MiB
 
+struct DeviceStats {
+  uint64_t   amount_allocated;      // total amount allocated in bytes
+  uint64_t   max_amount_allocated;  // max total amount allocated in bytes
+  uint64_t   amount_cached;         // total amount in cache in bytes
+  uint64_t   max_amount_cached;     // max total amount in cache in bytes
+
+  DeviceStats() :
+      amount_allocated(0), max_amount_allocated(0),
+      amount_cached(0), max_amount_cached(0) { }
+
+  void increaseAllocated(size_t delta) {
+    amount_allocated += delta;
+    max_amount_allocated = std::max(max_amount_allocated, amount_allocated);
+  }
+
+  void decreaseAllocated(size_t delta) {
+    amount_allocated -= delta;
+  }
+
+  void increaseCached(size_t delta) {
+    amount_cached += delta;
+    max_amount_cached = std::max(max_amount_cached, amount_cached);
+  }
+
+  void decreaseCached(size_t delta) {
+    amount_cached -= delta;
+  }
+};
+
 struct Block {
   int           device;      // gpu
   cudaStream_t  stream;      // allocation stream
@@ -80,6 +110,9 @@ struct THCCachingAllocator
   typedef bool (*Comparison)(const Block*, const Block*);
   typedef std::set<Block*, Comparison> FreeBlocks;
 
+  // device statistics
+  std::vector<DeviceStats> device_stats;
+
   // lock around all operations
   std::mutex mutex;
 
@@ -102,6 +135,14 @@ struct THCCachingAllocator
       large_blocks(BlockComparator),
       small_blocks(BlockComparator) {}
 
+  DeviceStats &get_stats_for_device(int device) {
+    THAssert(device >= 0);
+    if ((size_t) device >= device_stats.size()) {
+      device_stats.resize(device + 1);
+    }
+    return device_stats.at(device);
+  }
+
   /** allocates a block which is safe to use from the provided stream */
   cudaError_t malloc(void** devPtr, size_t size, cudaStream_t stream)
   {
@@ -121,6 +162,8 @@ struct THCCachingAllocator
     size = round_size(size);
     bool small = size <= kSmallAlloc;
 
+    DeviceStats &stats = get_stats_for_device(device);
+
     Block search_key(device, stream, size);
     auto& free_blocks = small ? large_blocks : small_blocks;
 
@@ -138,6 +181,7 @@ struct THCCachingAllocator
       if (err != cudaSuccess) {
         return err;
       }
+      stats.increaseCached(alloc_size);
       block = new Block(device, stream, alloc_size, (char*)ptr);
     }
 
@@ -161,6 +205,8 @@ struct THCCachingAllocator
     allocated_blocks[block->ptr] = block;
 
     *devPtr = (void*)block->ptr;
+
+    stats.increaseAllocated(block->size);
     return cudaSuccess;
   }
 
@@ -180,6 +226,7 @@ struct THCCachingAllocator
     allocated_blocks.erase(it);
     block->allocated = false;
 
+    get_stats_for_device(block->device).decreaseAllocated(block->size);
     if (!block->stream_uses.empty()) {
       return insert_events(block);
     }
@@ -358,6 +405,7 @@ struct THCCachingAllocator
         if (err != cudaSuccess) {
           return err;
         }
+        get_stats_for_device(block->device).decreaseCached(block->size);
         auto cur = it;
         ++it;
         blocks.erase(cur);
@@ -496,8 +544,30 @@ THC_API std::mutex* THCCachingAllocator_getCudaFreeMutex()
   return &caching_allocator.cuda_free_mutex;
 }
 
-THC_API cudaError_t THCCachingAllocator_emptyCache(void)
-{
-  return caching_allocator.emptyCache();
+static inline void assertValidDevice(int device) {
+  int device_count;
+  THCudaCheck(cudaGetDeviceCount(&device_count));
+  THAssertMsg(0 <= device && device < device_count, "Invalid device argument.");
 }
 
+THC_API uint64_t THCCachingAllocator_currentMemoryAllocated(int device)
+{
+  assertValidDevice(device);
+  return caching_allocator.get_stats_for_device(device).amount_allocated;
+}
+
+THC_API uint64_t THCCachingAllocator_maxMemoryAllocated(int device) {
+  assertValidDevice(device);
+  return caching_allocator.get_stats_for_device(device).max_amount_allocated;
+}
+
+THC_API uint64_t THCCachingAllocator_currentMemoryCached(int device)
+{
+  assertValidDevice(device);
+  return caching_allocator.get_stats_for_device(device).amount_cached;
+}
+
+THC_API uint64_t THCCachingAllocator_maxMemoryCached(int device) {
+  assertValidDevice(device);
+  return caching_allocator.get_stats_for_device(device).max_amount_cached;
+}
