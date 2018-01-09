@@ -2426,7 +2426,8 @@ class TestNN(NNTestCase):
         expected_data = [[torch.arange(1, 6) + (i + 1) * 100 + 5 * n for i in range(batch_size)]
                          for n, batch_size in enumerate(batch_sizes)]
         expected_data = list(itertools.chain.from_iterable(expected_data))
-        expected_data = torch.stack(expected_data, dim=0)
+        expected_data = torch.cat(expected_data)
+        expected_last_step_data = torch.stack([padded.data[length - 1, i] for i, length in enumerate(lengths)])
 
         for batch_first in (True, False):
             src = padded
@@ -2437,6 +2438,10 @@ class TestNN(NNTestCase):
             packed = rnn_utils.pack_padded_sequence(src, lengths, batch_first=batch_first)
             self.assertEqual(packed.data.data, expected_data)
             self.assertEqual(packed.batch_sizes, batch_sizes)
+
+            # check last_step_tensor
+            last_step = packed.last_step_tensor()
+            self.assertEqual(last_step.data, expected_last_step_data)
 
             # test inverse
             unpacked, unpacked_len = rnn_utils.pad_packed_sequence(packed, batch_first=batch_first)
