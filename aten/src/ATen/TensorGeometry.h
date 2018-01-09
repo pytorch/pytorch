@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ATen/Type.h>
+#include <ATen/WrapDimUtils.h>
 
 namespace at {
 
@@ -19,8 +20,15 @@ struct AT_API TensorGeometry {
   Tensor zeros_with_stride(const Type& type) const;
 
   int64_t dim() const { return sizes_.size(); }
-  int64_t size(int64_t dim) const { return sizes_.at(static_cast<size_t>(dim)); }
+  int64_t size(int64_t dim) const {
+    dim = maybe_wrap_dim(dim, this->dim());
+    return sizes_.at(static_cast<size_t>(dim));
+  }
   IntList sizes() const { return IntList{ sizes_ }; }
+  int64_t stride(int64_t dim) const {
+    dim = maybe_wrap_dim(dim, this->dim());
+    return strides_.at(static_cast<size_t>(dim));
+  }
   IntList strides() const { return IntList{ strides_ }; }
   int64_t storage_offset() const { return storage_offset_; }
   int64_t numel() const {
