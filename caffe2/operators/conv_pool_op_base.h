@@ -153,7 +153,7 @@ class ConvPoolOpBase : public Operator<Context> {
         CAFFE_ENFORCE(
             pads_[2 * dim] == 0 && pads_[2 * dim + 1] == 0 &&
                 dilation_[dim] == 1 && stride_[dim] == 1,
-            "If global_pooling is set dilation and stride shouldn't be set.");
+            "If global_pooling is set pad, dilation and stride shouldn't be set.");
       }
     }
 
@@ -322,7 +322,6 @@ class ConvPoolOpBase : public Operator<Context> {
         output_dims.push_back(dim_size);
       }
     }
-
   }
 
   // ComputePads could be used in backward functions to figure out the padding
