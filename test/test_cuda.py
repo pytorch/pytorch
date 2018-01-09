@@ -425,6 +425,171 @@ def compare_cpu_gpu(tensor_constructor, arg_constructor, fn, t, precision=1e-5, 
 
 
 class TestCuda(TestCase):
+
+    @staticmethod
+    def _test_memory_stats_generator(self, device=None, N=35):
+        if device is None:
+            device = torch.cuda.current_device()
+
+        m0 = torch.cuda.memory_allocated(device)
+        last_m_arr = [torch.cuda.memory_allocated(device)]
+        max_m_arr = [torch.cuda.max_memory_allocated(device)]
+        last_c_arr = [torch.cuda.memory_cached(device)]
+        max_c_arr = [torch.cuda.max_memory_cached(device)]
+
+        def alloc(*size):
+            with torch.cuda.device(device):
+                # NOTE: do **not** use methods that can have additional
+                #       memory overhead, e.g., inplace random sampling methods.
+                #       they can leave some memory occupied even after being
+                #       deallocated, e.g., initialized RNG state, causing some
+                #       memory checks below to fail.
+                return torch.cuda.FloatTensor(*size)
+
+        def assert_change(comp=1, empty_cache=False):
+            # comp > 0: increased
+            # comp = 0: equal
+            # comp < 0: decreased
+            new_m = torch.cuda.memory_allocated(device)
+            new_max_m = torch.cuda.max_memory_allocated(device)
+            if comp > 0:
+                self.assertGreater(new_m, last_m_arr[0])
+            elif comp < 0:
+                self.assertLess(new_m, last_m_arr[0])
+            else:
+                self.assertEqual(new_m, last_m_arr[0])
+            self.assertLessEqual(new_m, new_max_m)
+            self.assertGreaterEqual(new_max_m, max_m_arr[0])
+            last_m_arr[0] = new_m
+            max_m_arr[0] = new_max_m
+
+            new_c = torch.cuda.memory_cached(device)
+            new_max_c = torch.cuda.max_memory_cached(device)
+            # emptying cache may happen (due to allocation or empty_cache), so
+            # we can't assert new_c >= last_c
+            self.assertLessEqual(new_c, new_max_c)
+            self.assertGreaterEqual(new_max_c, max_c_arr[0])
+            last_c_arr[0] = new_c
+            max_c_arr[0] = new_max_c
+
+            if empty_cache:
+                torch.cuda.empty_cache()
+                new_c = torch.cuda.memory_cached(device)
+                new_max_c = torch.cuda.max_memory_cached(device)
+                self.assertLessEqual(new_c, last_c_arr[0])
+                self.assertLessEqual(new_c, new_max_c)
+                self.assertEqual(new_max_c, max_c_arr[0])
+                last_c_arr[0] = new_c
+
+        assert_change(0)
+        assert_change(0)
+        yield
+
+        tensors1 = [alloc(1), alloc(10, 20), alloc(200, 300, 2000)]
+        m1 = torch.cuda.memory_allocated(device)
+        assert_change(1)
+        yield
+
+        tensors2 = []
+
+        for i in range(1, int(N / 2) + 1):
+            # small ones
+            tensors2.append(alloc(i, i * 4))
+            assert_change(1)
+            yield
+
+        for i in range(5, int(N / 2) + 5):
+            # large ones
+            tensors2.append(alloc(i, i * 7, i * 9, i * 11))
+            assert_change(1)
+            yield
+
+        tensors2.append(alloc(0, 0, 0))
+        assert_change(0)
+        yield
+
+        permute = []
+        for i in torch.randperm(len(tensors2)):
+            permute.append(tensors2[i])
+            assert_change(0)
+            yield
+
+        del tensors2
+        assert_change(0)
+        yield
+        tensors2 = permute
+        assert_change(0)
+        yield
+        del permute
+        assert_change(0)
+        yield
+
+        for i in range(int(N / 2)):
+            x = tensors2[i].numel()
+            del tensors2[i]
+            assert_change(-x)  # in case that tensors2[i] is empty
+            yield
+
+        for i in range(2, int(2 * N / 3) + 2):
+            tensors2.append(alloc(i, i * 3, i * 8))
+            assert_change(1)
+            yield
+
+        del tensors2
+        assert_change(-1)
+        assert_change(0)
+        self.assertEqual(torch.cuda.memory_allocated(device), m1)
+        yield True
+
+        del tensors1
+        assert_change(-1)
+        self.assertEqual(torch.cuda.memory_allocated(device), m0)
+
+        # test empty_cache
+        assert_change(0, empty_cache=True)
+
+    def test_memory_stats(self):
+        torch.cuda.empty_cache()
+        for _ in self._test_memory_stats_generator(self):
+            pass
+
+    @unittest.skipIf(torch.cuda.device_count() < 2, "only one GPU detected")
+    def test_memory_stats_multigpu(self):
+        # advance a generator with a end flag
+        def advance(gen, end):
+            if not end:
+                try:
+                    next(gen)
+                except StopIteration:
+                    end = True
+            return end
+
+        # interlace
+        torch.cuda.empty_cache()
+        gen0 = self._test_memory_stats_generator(self, device=0, N=35)
+        gen1 = self._test_memory_stats_generator(self, device=1, N=35)
+        end0 = end1 = False
+        while not (end0 and end1):
+            end0 = advance(gen0, end0)
+            end1 = advance(gen1, end1)
+
+        # semi-random order
+        torch.cuda.empty_cache()
+        gen0 = self._test_memory_stats_generator(self, device=0, N=35)
+        gen1 = self._test_memory_stats_generator(self, device=1, N=35)
+        end0 = end1 = False
+
+        while not (end0 and end1):
+            end0 = advance(gen0, end0)
+            if not end0:
+                gen1_max_times = torch.LongTensor(1).random_(0, 3)[0]
+            else:
+                gen1_max_times = float('inf')
+            t = 0
+            while t < gen1_max_times and not end1:
+                end1 = advance(gen1, end1)
+                t += 1
+
     @unittest.skipIf(torch.cuda.device_count() < 2, "only one GPU detected")
     def _test_autogpu(self, TensorCtor):
         x = TensorCtor().cuda()
