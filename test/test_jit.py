@@ -78,6 +78,46 @@ class TestJit(TestCase):
         torch._C._jit_pass_lint(trace)
         self.assertExpected(str(trace))
 
+    def test_scopes_intermediate_node(self):
+
+        class Net(nn.Module):
+            def forward(self, x):
+                return F.log_softmax(x, dim=0)
+
+        net = Net()
+        t = Variable(torch.ones(2), requires_grad=True)
+        trace, _ = torch.jit.trace(net, (t, ))
+        torch.onnx._optimize_trace(trace, False)
+
+        self.assertExpectedTrace(trace)
+
+    def test_scopes_identity_node(self):
+
+        class Net(nn.Module):
+
+            def __init__(self):
+                super(Net, self).__init__()
+                self.features = nn.Sequential(
+                    nn.Conv2d(3, 64, kernel_size=11, stride=4, padding=2),
+                    nn.ReLU(inplace=True),
+                    nn.MaxPool2d(kernel_size=3, stride=2),
+                )
+
+            def forward(self, x):
+                x = self.features(x)
+                return x
+
+        model = Net()
+
+        t = Variable(torch.ones(1, 3, 227, 227), requires_grad=True)
+
+        with torch.onnx.set_training(model, False):
+            trace, _ = torch.jit.trace(model, (t, ))
+
+        torch.onnx._optimize_trace(trace, False)
+
+        self.assertExpectedTrace(trace)
+
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     def test_lstm_fusion(self):
         input = Variable(torch.randn(3, 10).cuda())
