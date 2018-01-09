@@ -439,8 +439,11 @@ class TestCuda(TestCase):
 
         def alloc(*size):
             with torch.cuda.device(device):
-                # NOTE: do **not** use methods that will have additional
-                #       overhead, e.g., inplace random sampling methods.
+                # NOTE: do **not** use methods that can have additional
+                #       memory overhead, e.g., inplace random sampling methods.
+                #       they can leave some memory occupied even after being
+                #       deallocated, e.g., initialized RNG state, causing some
+                #       memory checks below to fail.
                 return torch.cuda.FloatTensor(*size)
 
         def assert_change(comp=1, empty_cache=False):
@@ -542,6 +545,7 @@ class TestCuda(TestCase):
         assert_change(-1)
         self.assertEqual(torch.cuda.memory_allocated(device), m0)
 
+        # test empty_cache
         assert_change(0, empty_cache=True)
 
     def test_memory_stats(self):
