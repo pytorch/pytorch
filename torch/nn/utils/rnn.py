@@ -26,7 +26,6 @@ class PackedSequence(PackedSequence_):
         batch_sizes (list[int]): list of integers holding information about
             the batch size at each sequence step
     """
-    
     def last_step_indices(self):
         """A helper function for :func:`last_step_tensor`.
         The returned indices is used to select the last step of a :class:`PackedSequence` object.
