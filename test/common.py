@@ -17,9 +17,11 @@ import torch
 import torch.cuda
 from torch.autograd import Variable
 from torch._six import string_classes
+import torch.backends.cudnn
 
 
 torch.set_default_tensor_type('torch.DoubleTensor')
+torch.backends.cudnn.disable_global_flags()
 
 
 parser = argparse.ArgumentParser(add_help=False)

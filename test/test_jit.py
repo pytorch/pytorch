@@ -27,6 +27,8 @@ if torch.cuda.is_available():
         if (CUDA_VERSION < 8000 and major >= 6) or (CUDA_VERSION < 9000 and major >= 7):
             RUN_CUDA = False
 
+RUN_CUDA_MULTI_GPU = RUN_CUDA and torch.cuda.device_count() > 1
+
 
 def LSTMCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
     hx, cx = hidden
@@ -157,6 +159,47 @@ class TestJit(TestCase):
 
         trace, z = torch.jit.trace(f, (x, y), nderivs=0)
         self.assertExpectedTrace(trace)
+
+        class Net(nn.Module):
+            def forward(self, x):
+                return F.log_softmax(x, dim=0)
+
+        net = Net()
+        t = Variable(torch.ones(2), requires_grad=True)
+        trace, _ = torch.jit.trace(net, (t, ))
+        torch.onnx._optimize_trace(trace, False)
+        g = torch._C._jit_get_graph(trace)
+        for node in g.nodes():
+            self.assertTrue(node.scopeName() == 'Net')
+
+        class Net(nn.Module):
+
+            def __init__(self):
+                super(Net, self).__init__()
+                self.features = nn.Sequential(
+                    nn.Conv2d(3, 64, kernel_size=11, stride=4, padding=2),
+                    nn.ReLU(inplace=True),
+                    nn.MaxPool2d(kernel_size=3, stride=2),
+                )
+
+            def forward(self, x):
+                x = self.features(x)
+                return x
+
+        model = Net()
+
+        t = Variable(torch.ones(1, 3, 227, 227), requires_grad=True)
+
+        with torch.onnx.set_training(model, False):
+            trace, _ = torch.jit.trace(model, (t, ))
+
+        torch.onnx._optimize_trace(trace, False)
+        graph = torch._C._jit_get_graph(trace)
+        nodes = list(graph.nodes())
+
+        self.assertTrue(nodes[0].scopeName() == 'Net/Sequential[features]/Conv2d[0]')
+        self.assertTrue(nodes[1].scopeName() == 'Net/Sequential[features]/ReLU[1]')
+        self.assertTrue(nodes[2].scopeName() == 'Net/Sequential[features]/MaxPool2d[2]')
 
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
@@ -328,6 +371,23 @@ class TestJit(TestCase):
     def test_compile_addc(self):
         x = Variable(torch.Tensor([0.4]), requires_grad=True).float().cuda()
         y = Variable(torch.Tensor([0.7]), requires_grad=True).float().cuda()
+
+        @torch.jit.compile(nderivs=0)
+        def doit(x, y):
+            return torch.sigmoid(torch.tanh(x * (x + y) + 1))
+
+        z = doit(x, y)
+        with self.assertCompiled(doit):
+            z2 = doit(x, y)
+        self.assertEqual(z, torch.sigmoid(torch.tanh(x * (x + y) + 1)))
+        self.assertEqual(z, z2)
+
+    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
+    @unittest.skipIf(not RUN_CUDA_MULTI_GPU, "needs non-zero device")
+    def test_compile_fuse_last_device(self):
+        max_device = torch.cuda.device_count() - 1
+        x = Variable(torch.Tensor([0.4]), requires_grad=True).float().cuda(max_device)
+        y = Variable(torch.Tensor([0.7]), requires_grad=True).float().cuda(max_device)
 
         @torch.jit.compile(nderivs=0)
         def doit(x, y):

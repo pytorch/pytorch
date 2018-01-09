@@ -31,9 +31,9 @@ import torch
 from common import TestCase, run_tests, set_rng_seed
 from torch.autograd import Variable, gradcheck
 from torch.distributions import (Bernoulli, Beta, Categorical, Cauchy, Chi2,
-                                 Dirichlet, Exponential, Gamma, Laplace,
+                                 Dirichlet, Exponential, Gamma, Gumbel, Laplace,
                                  Normal, OneHotCategorical, Multinomial, Pareto,
-                                 StudentT, Uniform)
+                                 StudentT, Uniform, kl_divergence)
 from torch.distributions.constraints import Constraint, is_dependent
 from torch.distributions.utils import _get_clamping_buffer
 
@@ -104,6 +104,16 @@ EXAMPLES = [
             'beta': Variable(torch.exp(torch.randn(1)), requires_grad=True),
         },
     ]),
+    Example(Gumbel, [
+        {
+            'loc': Variable(torch.randn(5, 5), requires_grad=True),
+            'scale': Variable(torch.randn(5, 5).abs(), requires_grad=True),
+        },
+        {
+            'loc': Variable(torch.randn(1), requires_grad=True),
+            'scale': Variable(torch.randn(1).abs(), requires_grad=True),
+        },
+    ]),
     Example(Laplace, [
         {
             'loc': Variable(torch.randn(5, 5), requires_grad=True),
@@ -165,6 +175,12 @@ EXAMPLES = [
         },
     ]),
 ]
+
+
+def unwrap(value):
+    if isinstance(value, Variable):
+        return value.data
+    return value
 
 
 class TestDistributions(TestCase):
@@ -230,11 +246,23 @@ class TestDistributions(TestCase):
             actual = dist(param).enumerate_support()
             self.assertEqual(actual, expected)
 
+    def test_enumerate_support_type(self):
+        for Dist, params in EXAMPLES:
+            for i, param in enumerate(params):
+                dist = Dist(**param)
+                try:
+                    self.assertTrue(type(unwrap(dist.sample())) is type(unwrap(dist.enumerate_support())),
+                                    msg=('{} example {}/{}, return type mismatch between ' +
+                                         'sample and enumerate_support.').format(Dist.__name__, i, len(params)))
+                except NotImplementedError:
+                    pass
+
     def test_bernoulli(self):
         p = Variable(torch.Tensor([0.7, 0.2, 0.4]), requires_grad=True)
         r = Variable(torch.Tensor([0.3]), requires_grad=True)
         s = 0.3
         self.assertEqual(Bernoulli(p).sample_n(8).size(), (8, 3))
+        self.assertTrue(isinstance(Bernoulli(p).sample().data, torch.Tensor))
         self.assertEqual(Bernoulli(r).sample_n(8).size(), (8, 1))
         self.assertEqual(Bernoulli(r).sample().size(), (1,))
         self.assertEqual(Bernoulli(r).sample((3, 2)).size(), (3, 2, 1))
@@ -313,6 +341,7 @@ class TestDistributions(TestCase):
         p = Variable(torch.Tensor([0.1, 0.2, 0.3]), requires_grad=True)
         # TODO: this should return a 0-dim tensor once we have Scalar support
         self.assertEqual(Categorical(p).sample().size(), (1,))
+        self.assertTrue(isinstance(Categorical(p).sample().data, torch.LongTensor))
         self.assertEqual(Categorical(p).sample((2, 2)).size(), (2, 2))
         self.assertEqual(Categorical(p).sample_n(1).size(), (1,))
         self._gradcheck_log_prob(Categorical, (p,))
@@ -354,6 +383,7 @@ class TestDistributions(TestCase):
     def test_one_hot_categorical_1d(self):
         p = Variable(torch.Tensor([0.1, 0.2, 0.3]), requires_grad=True)
         self.assertEqual(OneHotCategorical(p).sample().size(), (3,))
+        self.assertTrue(isinstance(OneHotCategorical(p).sample().data, torch.Tensor))
         self.assertEqual(OneHotCategorical(p).sample((2, 2)).size(), (2, 2, 3))
         self.assertEqual(OneHotCategorical(p).sample_n(1).size(), (1, 3))
         self._gradcheck_log_prob(OneHotCategorical, (p,))
@@ -663,6 +693,35 @@ class TestDistributions(TestCase):
             self._check_sampler_sampler(Pareto(scale, alpha),
                                         scipy.stats.pareto(alpha, scale=scale),
                                         'Pareto(scale={}, alpha={})'.format(scale, alpha))
+
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    def test_gumbel_shape(self):
+        loc = Variable(torch.randn(2, 3), requires_grad=True)
+        scale = Variable(torch.randn(2, 3).abs(), requires_grad=True)
+        loc_1d = torch.randn(1)
+        scale_1d = torch.randn(1).abs()
+        self.assertEqual(Gumbel(loc, scale).sample().size(), (2, 3))
+        self.assertEqual(Gumbel(loc, scale).sample_n(5).size(), (5, 2, 3))
+        self.assertEqual(Gumbel(loc_1d, scale_1d).sample().size(), (1,))
+        self.assertEqual(Gumbel(loc_1d, scale_1d).sample_n(1).size(), (1, 1))
+        self.assertEqual(Gumbel(1.0, 1.0).sample().size(), (1,))
+        self.assertEqual(Gumbel(1.0, 1.0).sample_n(1).size(), (1,))
+
+        def ref_log_prob(idx, x, log_prob):
+            l = loc.data.view(-1)[idx]
+            s = scale.data.view(-1)[idx]
+            expected = scipy.stats.gumbel_r.logpdf(x, loc=l, scale=s)
+            self.assertAlmostEqual(log_prob, expected, places=3)
+
+        self._check_log_prob(Gumbel(loc, scale), ref_log_prob)
+
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    def test_gumbel_sample(self):
+        set_rng_seed(1)  # see note [Randomized statistical tests]
+        for loc, scale in product([-5.0, -1.0, -0.1, 0.1, 1.0, 5.0], [0.1, 1.0, 10.0]):
+            self._check_sampler_sampler(Gumbel(loc, scale),
+                                        scipy.stats.gumbel_r(loc=loc, scale=scale),
+                                        'Gumbel(loc={}, scale={})'.format(loc, scale))
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_chi2_shape(self):
@@ -1193,6 +1252,26 @@ class TestDistributionShapes(TestCase):
         self.assertEqual(laplace.sample((3, 2)).size(), torch.Size((3, 2, 2)))
         self.assertEqual(laplace.log_prob(self.tensor_sample_1).size(), torch.Size((3, 2)))
         self.assertRaises(ValueError, laplace.log_prob, self.tensor_sample_2)
+
+
+class TestKL(TestCase):
+    def setUp(self):
+        self.examples = [
+            (Gamma(1, 2), Gamma(3, 4)),
+            (Chi2(2), Chi2(3)),
+            (Gamma(1, 2), Chi2(3)),
+            (Chi2(2), Gamma(3, 4)),
+        ]
+
+    def test_kl_monte_carlo(self):
+        set_rng_seed(0)  # see Note [Randomized statistical tests]
+        for p, q in self.examples:
+            x = p.sample(sample_shape=(10000,))
+            expected = (p.log_prob(x) - q.log_prob(x)).mean(0)
+            actual = kl_divergence(p, q)
+            message = 'Incorrect KL({}, {}). expected {}, actual {}'.format(
+                type(p).__name__, type(q).__name__, expected, actual)
+            self.assertEqual(expected, actual, prec=0.1, message=message)
 
 
 class TestConstraints(TestCase):

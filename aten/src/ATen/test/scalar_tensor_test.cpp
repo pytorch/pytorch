@@ -1,5 +1,6 @@
 #include "ATen/ATen.h"
 #include "test_assert.h"
+#include <algorithm>
 #include <iostream>
 #include <numeric>
 
@@ -49,11 +50,7 @@ void test(Type &T) {
     if (t.numel() != 0) {
       ASSERT(t.unsqueeze(0).dim() == t.dim() + 1);
     } else {
-      try {
-        // can't unsqueeze empty tensor
-        t.unsqueeze(0);
-        assert (false);
-      } catch (std::runtime_error &e) {}
+      ASSERT_THROWS(t.unsqueeze(0));
     }
 
     // unsqueeze_
@@ -63,22 +60,13 @@ void test(Type &T) {
         auto r = t2.unsqueeze_(0);
         ASSERT(r.dim() == t.dim() + 1);
       } else {
-        try {
-          // can't unsqueeze empty tensor
-          t2.unsqueeze_(0);
-          assert (false);
-        } catch (std::runtime_error &e) {}
+        ASSERT_THROWS(t2.unsqueeze_(0));
       }
     }
 
     // squeeze (with dimension argument)
-    if (t.dim() > 0 && t.sizes()[0] == 1) {
-      ASSERT(t.squeeze(0).dim() == t.dim() - 1);
-    } else if (t.dim() == 0) {
-      try {
-        t.squeeze(0);
-        ASSERT(false);
-      } catch (std::runtime_error &e) {}
+    if (t.dim() == 0 || t.sizes()[0] == 1) {
+      ASSERT(t.squeeze(0).dim() == std::max<int64_t>(t.dim() - 1, 0));
     } else {
       // In PyTorch, it is a no-op to try to squeeze a dimension that has size != 1;
       // in NumPy this is an error.
@@ -100,13 +88,8 @@ void test(Type &T) {
     {
       // squeeze_ (with dimension argument)
       auto t2 = T.ones(*s);
-      if (t2.dim() > 0 && t2.sizes()[0] == 1) {
-        ASSERT(t2.squeeze_(0).dim() == t.dim() - 1);
-      } else if (t2.dim() == 0) {
-        try {
-          t2.squeeze_(0);
-          ASSERT(false);
-        } catch (std::runtime_error &e) {}
+      if (t2.dim() == 0 ||  t2.sizes()[0] == 1) {
+        ASSERT(t2.squeeze_(0).dim() == std::max<int64_t>(t.dim() - 1, 0));
       } else {
         // In PyTorch, it is a no-op to try to squeeze a dimension that has size != 1;
         // in NumPy this is an error.
@@ -128,59 +111,34 @@ void test(Type &T) {
     }
 
     // reduce (with dimension argument and with 1 return argument)
-    if (t.dim() > 0 && t.numel() != 0) {
-      ASSERT(t.sum(0).dim() == t.dim() - 1);
-    } else if (t.dim() == 0) {
-      try {
-        t.sum(0);
-        ASSERT(false);
-      } catch (std::runtime_error &e) {}
+    if (t.numel() != 0) {
+      ASSERT(t.sum(0).dim() == std::max<int64_t>(t.dim() - 1, 0));
     } else {
       // FIXME: you should be able to reduce over size {0}
-      try {
-        t.sum(0);
-        ASSERT(false);
-      } catch (std::runtime_error &e) {}
+      ASSERT_THROWS(t.sum(0));
     }
 
     // reduce (with dimension argument and with 2 return arguments)
-    if (t.dim() > 0 && t.numel() != 0) {
+    if (t.numel() != 0) {
       auto ret = t.min(0);
-      ASSERT(std::get<0>(ret).dim() == t.dim() - 1);
-      ASSERT(std::get<1>(ret).dim() == t.dim() - 1);
-    } else if (t.dim() == 0) {
-      try {
-        t.sum(0);
-        ASSERT(false);
-      } catch (std::runtime_error &e) {}
+      ASSERT(std::get<0>(ret).dim() == std::max<int64_t>(t.dim() - 1, 0));
+      ASSERT(std::get<1>(ret).dim() == std::max<int64_t>(t.dim() - 1, 0));
     } else {
       // FIXME: you should be able to reduce over size {0}
-      try {
-        t.sum(0);
-        ASSERT(false);
-      } catch (std::runtime_error &e) {}
+      ASSERT_THROWS(t.min(0));
     }
 
     // simple indexing
     if (t.dim() > 0 && t.numel() != 0) {
       ASSERT(t[0].dim() == std::max<int64_t>(t.dim() - 1, 0));
-    } else if (t.dim() == 0) {
-      try {
-        t[0];
-        ASSERT(false);
-      } catch (std::runtime_error &e) {}
+    } else {
+      ASSERT_THROWS(t[0]);
     }
 
-    // fill_
-    if (t.dim() > 0 && t.numel() != 0) {
-      try {
-        // can only fill_ 0-dim tensors
-        t.fill_(t.sum(0));
-        assert(t.dim() == 1);
-      } catch (std::runtime_error &e) {
-        assert(t.dim() != 1);
-      }
-    }
+    // fill_ (argument to fill_ can only be a 0-dim tensor)
+    TRY_CATCH_ELSE(t.fill_(t.sum(0)),
+                   ASSERT(t.numel() == 0 || t.dim() > 1),
+                   ASSERT(t.numel() > 0 && t.dim() <= 1));
   }
 
   for (auto lhs_it = sizes.begin(); lhs_it != sizes.end(); ++lhs_it) {
@@ -244,25 +202,18 @@ void test(Type &T) {
         auto lhs = T.ones(*lhs_it);
         auto rhs = T.ones(*rhs_it);
         auto rhs_size = *rhs_it;
-        try {
-          auto result = lhs.view(rhs_size);
-          ASSERT(lhs.numel() == rhs.numel());
-          assert_equal_size_dim(result, rhs);
-        } catch (std::runtime_error &e) {
-          ASSERT(lhs.numel() != rhs.numel());
-        }
+        TRY_CATCH_ELSE(auto result = lhs.view(rhs_size),
+                       ASSERT(lhs.numel() != rhs.numel()),
+                       ASSERT(lhs.numel() == rhs.numel()); assert_equal_size_dim(result, rhs););
       }
 
       // take
       {
         auto lhs = T.ones(*lhs_it);
         auto rhs = T.zeros(*rhs_it).toType(ScalarType::Long);
-        try {
-          auto result = lhs.take(rhs);
-          assert_equal_size_dim(result, rhs);
-        } catch (std::runtime_error &e) {
-          ASSERT(lhs.numel() == 0 && rhs.numel() != 0);
-        }
+        TRY_CATCH_ELSE(auto result = lhs.take(rhs),
+                       ASSERT(lhs.numel() == 0 && rhs.numel() != 0),
+                       assert_equal_size_dim(result, rhs));
       }
 
 
@@ -270,14 +221,13 @@ void test(Type &T) {
       {
         auto lhs = T.ones(*lhs_it);
         auto rhs = T.ones(*rhs_it);
-        try {
-          auto result = lhs.ger(rhs);
-          int64_t dim0 = lhs.dim() == 0 ? 1 : lhs.size(0);
-          int64_t dim1 = rhs.dim() == 0 ? 1 : rhs.size(0);
-          assert_equal_size_dim(result, result.type().tensor({dim0, dim1}));
-        } catch (std::runtime_error &e) {
-          ASSERT(lhs.numel() == 0 || rhs.numel() == 0 || lhs.dim() > 1 || rhs.dim() > 1);
-        }
+        TRY_CATCH_ELSE(auto result = lhs.ger(rhs),
+                       ASSERT(lhs.numel() == 0 || rhs.numel() == 0 || lhs.dim() > 1 || rhs.dim() > 1),
+                       [&]() {
+                         int64_t dim0 = lhs.dim() == 0 ? 1 : lhs.size(0);
+                         int64_t dim1 = rhs.dim() == 0 ? 1 : rhs.size(0);
+                         assert_equal_size_dim(result, result.type().tensor({dim0, dim1}));
+                       }(););
       }
 
       // expand
@@ -287,26 +237,18 @@ void test(Type &T) {
         auto rhs = T.ones(*rhs_it);
         auto rhs_size = *rhs_it;
         bool should_pass = should_expand(lhs_size, rhs_size);
-        try {
-          auto result = lhs.expand(rhs_size);
-          ASSERT(should_pass);
-          assert_equal_size_dim(result, rhs);
-        } catch (std::runtime_error &e) {
-          ASSERT(!should_pass);
-        }
+        TRY_CATCH_ELSE(auto result = lhs.expand(rhs_size),
+                       ASSERT(!should_pass),
+                       ASSERT(should_pass); assert_equal_size_dim(result, rhs););
 
         // in-place functions (would be good if we can also do a non-broadcasting one, b/c
         // broadcasting functions will always end up operating on tensors of same size;
         // is there an example of this outside of assign_ ?)
         {
           bool should_pass_inplace = should_expand(rhs_size, lhs_size);
-          try {
-            lhs.add_(rhs);
-            ASSERT(should_pass_inplace);
-            assert_equal_size_dim(lhs, T.ones(*lhs_it));
-          } catch (std::runtime_error &e) {
-            ASSERT(!should_pass_inplace);
-          }
+          TRY_CATCH_ELSE(lhs.add_(rhs),
+                         ASSERT(!should_pass_inplace),
+                         ASSERT(should_pass_inplace); assert_equal_size_dim(lhs, T.ones(*lhs_it)););
         }
       }
     }

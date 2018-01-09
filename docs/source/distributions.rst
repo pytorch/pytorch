@@ -61,6 +61,12 @@ Probability distributions - torch.distributions
 .. autoclass:: Gamma
     :members:
 
+:hidden:`Gumbel`
+~~~~~~~~~~~~~~~~
+
+.. autoclass:: Gumbel
+    :members:
+
 :hidden:`Laplace`
 ~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -96,3 +102,12 @@ Probability distributions - torch.distributions
 
 .. autoclass:: Uniform
     :members:
+
+`KL Divergence`
+~~~~~~~~~~~~~~~~~~~~~~~
+
+.. automodule:: torch.distributions.kl
+.. currentmodule:: torch.distributions.kl
+
+.. autofunction:: kl_divergence
+.. autofunction:: register_kl

@@ -324,6 +324,46 @@ PyObject * THCPModule_emptyCache(PyObject *_unused)
   Py_RETURN_NONE;
 }
 
+PyObject * THCPModule_memoryAllocated(PyObject *_unused, PyObject *arg)
+{
+  HANDLE_TH_ERRORS
+  THPUtils_assert(THPUtils_checkLong(arg), "invalid argument to memory_allocated");
+  int device = (int) THPUtils_unpackLong(arg);
+  auto memory_allocated = THCCachingAllocator_currentMemoryAllocated(device);
+  return PyLong_FromUnsignedLongLong(memory_allocated);
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject * THCPModule_maxMemoryAllocated(PyObject *_unused, PyObject *arg)
+{
+  HANDLE_TH_ERRORS
+  THPUtils_assert(THPUtils_checkLong(arg), "invalid argument to max_memory_allocated");
+  int device = (int) THPUtils_unpackLong(arg);
+  auto max_memory_allocated = THCCachingAllocator_maxMemoryAllocated(device);
+  return PyLong_FromUnsignedLongLong(max_memory_allocated);
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject * THCPModule_memoryCached(PyObject *_unused, PyObject *arg)
+{
+  HANDLE_TH_ERRORS
+  THPUtils_assert(THPUtils_checkLong(arg), "invalid argument to memory_cached");
+  int device = (int) THPUtils_unpackLong(arg);
+  auto memory_cached = THCCachingAllocator_currentMemoryCached(device);
+  return PyLong_FromUnsignedLongLong(memory_cached);
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject * THCPModule_maxMemoryCached(PyObject *_unused, PyObject *arg)
+{
+  HANDLE_TH_ERRORS
+  THPUtils_assert(THPUtils_checkLong(arg), "invalid argument to max_memory_cached");
+  int device = (int) THPUtils_unpackLong(arg);
+  auto max_memory_cached = THCCachingAllocator_maxMemoryCached(device);
+  return PyLong_FromUnsignedLongLong(max_memory_cached);
+  END_HANDLE_TH_ERRORS
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // Cuda module initialization
 ////////////////////////////////////////////////////////////////////////////////
@@ -406,6 +446,10 @@ static struct PyMethodDef _THCPModule_methods[] = {
   {"_cuda_getRNGState", (PyCFunction)THCPModule_getRNGState,      METH_NOARGS,  NULL},
   {"_cuda_setRNGState", (PyCFunction)THCPModule_setRNGState,      METH_O,       NULL},
   {"_cuda_emptyCache", (PyCFunction) THCPModule_emptyCache,       METH_NOARGS,  NULL},
+  {"_cuda_memoryAllocated", (PyCFunction) THCPModule_memoryAllocated, METH_O,  NULL},
+  {"_cuda_maxMemoryAllocated", (PyCFunction) THCPModule_maxMemoryAllocated, METH_O,  NULL},
+  {"_cuda_memoryCached", (PyCFunction) THCPModule_memoryCached, METH_O,  NULL},
+  {"_cuda_maxMemoryCached", (PyCFunction) THCPModule_maxMemoryCached, METH_O,  NULL},
   {"_cuda_manualSeed",  (PyCFunction)THCPModule_manualSeed,       METH_O,       NULL},
   {"_cuda_manualSeedAll", (PyCFunction)THCPModule_manualSeedAll,  METH_O,       NULL},
   {"_cuda_seed",        (PyCFunction)THCPModule_seed,             METH_NOARGS,  NULL},
