@@ -321,6 +321,7 @@ static void rebase_history(Tensor& tensor, std::shared_ptr<Function> grad_fn) {
 
 static void rebase_history(TensorList tensors, std::shared_ptr<Function> grad_fn) {
   if (grad_fn) {
+    grad_fn->num_inputs = tensors.size();
     int output_nr = 0;
     for (auto& tensor : tensors) {
       if (tensor.defined()) {
@@ -329,7 +330,6 @@ static void rebase_history(TensorList tensors, std::shared_ptr<Function> grad_fn
         output_nr++;
       }
     }
-    grad_fn->num_inputs = output_nr;
   }
 }
 
@@ -346,6 +346,7 @@ static void set_history(Tensor& tensor, std::shared_ptr<Function> grad_fn) {
 
 static void set_history(TensorList tensors, std::shared_ptr<Function> grad_fn) {
   if (grad_fn) {
+    grad_fn->num_inputs = tensors.size();
     int64_t output_nr = 0;
     for (auto& tensor : tensors) {
       if (tensor.defined()) {
@@ -355,7 +356,6 @@ static void set_history(TensorList tensors, std::shared_ptr<Function> grad_fn) {
         output_nr++;
       }
     }
-    grad_fn->num_inputs = output_nr;
   }
 }
 
