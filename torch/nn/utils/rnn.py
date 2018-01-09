@@ -26,29 +26,56 @@ class PackedSequence(PackedSequence_):
         batch_sizes (list[int]): list of integers holding information about
             the batch size at each sequence step
     """
+    def cuda(self, *args, **kwargs):
+        """Returns a GPU copy if `self.data` not already on the GPU"""
+        if self.is_cuda:
+            return self
+        else:
+            return type(self)(self.data.cuda(*args, **kwargs), self.batch_sizes)
 
-    @classmethod
-    def _impute_data_prop(cls, name):
-        @property
-        def prop(self):
-            return getattr(self.data, name)
-        setattr(cls, name, prop)
+    def cpu(self):
+        """Returns a CPU copy if `self.data` not already on the CPU"""
+        if self.is_cuda:
+            return type(self)(self.data.cpu(), self.batch_sizes)
+        else:
+            return self
 
-    @classmethod
-    def _impute_data_mask(cls, name):
-        """Impute method `name` of attribute `data` into class `cls`"""
-        def fn(self, *args, **kwargs):
-            return type(self)(getattr(self.data, name)(*args, **kwargs), self.batch_sizes)
-        setattr(cls, name, fn)
+    def double(self):
+        r"""Returns copy with `self.data` cast to double type"""
+        return type(self)(self.data.double(), self.batch_sizes)
 
-# Impute following `torch.Tensor` methods and properties into `PackedSequence`
-_methods_to_impute = 'cuda cpu double float long int short char byte'.split()
-for method_name in _methods_to_impute:
-    PackedSequence._impute_data_mask(method_name)
+    def float(self):
+        r"""Returns copy with `self.data` cast to float type"""
+        return type(self)(self.data.float(), self.batch_sizes)
 
-_props_to_impute = 'is_cuda'.split()
-for prop_name in _props_to_impute:
-    PackedSequence._impute_data_prop(prop_name)
+    def half(self):
+        r"""Returns copy with `self.data` cast to half type"""
+        return type(self)(self.data.half(), self.batch_sizes)
+
+    def long(self):
+        r"""Returns copy with `self.data` cast to long type"""
+        return type(self)(self.data.long(), self.batch_sizes)
+
+    def int(self):
+        r"""Returns copy with `self.data` cast to int type"""
+        return type(self)(self.data.int(), self.batch_sizes)
+
+    def short(self):
+        r"""Returns copy with `self.data` cast to short type"""
+        return type(self)(self.data.short(), self.batch_sizes)
+
+    def char(self):
+        r"""Returns copy with `self.data` cast to char type"""
+        return type(self)(self.data.char(), self.batch_sizes)
+
+    def byte(self):
+        r"""Returns copy with `self.data` cast to byte type"""
+        return type(self)(self.data.byte(), self.batch_sizes)
+
+    @property
+    def is_cuda(self):
+        r"""Returns true if `self.data` stored on a gpu"""
+        return self.data.is_cuda
 
 
 def pack_padded_sequence(input, lengths, batch_first=False):
@@ -104,18 +131,6 @@ def pack_padded_sequence(input, lengths, batch_first=False):
     return PackedSequence(torch.cat(steps), batch_sizes)
 
 
-_zero_by_type = {
-    'torch.DoubleTensor': 0.0,
-    'torch.FloatTensor': 0.0,
-    'torch.HalfTensor': 0.0,
-    'torch.LongTensor': 0,
-    'torch.IntTensor': 0,
-    'torch.ShortTensor': 0,
-    'torch.CharTensor': 0,
-    'torch.ByteTensor': 0,
-}
-
-
 def pad_packed_sequence(sequence, batch_first=False, padding_value=None):
     r"""Pads a packed batch of variable length sequences.
 
@@ -131,7 +146,7 @@ def pad_packed_sequence(sequence, batch_first=False, padding_value=None):
         sequence (PackedSequence): batch to pad
         batch_first (bool, optional): if ``True``, the output will be in BxTx*
             format.
-        padding_value (float, optional): values for padded elements
+        padding_value (None, optional): values for padded elements (defaults to zero).
 
     Returns:
         Tuple of Variable containing the padded sequence, and a list of lengths
@@ -140,7 +155,7 @@ def pad_packed_sequence(sequence, batch_first=False, padding_value=None):
     var_data, batch_sizes = sequence
     max_batch_size = batch_sizes[0]
     if padding_value is None:
-        padding_value = _zero_by_type[var_data.type()]
+        padding_value = 0 if type(var_data.data) in torch._integer_tensor_classes else 0.0
     output = var_data.data.new(len(batch_sizes), max_batch_size, *var_data.size()[1:]).fill_(padding_value)
     output = Variable(output)
 
