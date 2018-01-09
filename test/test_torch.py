@@ -205,8 +205,10 @@ class TestTorch(TestCase):
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found")
     def test_polygamma(self):
         from scipy.special import polygamma
+        from torch.autograd import Variable
         for n in [0, 1]:
             self._testMath(lambda x: torch.polygamma(n, x), lambda x: polygamma(n, x)[()])
+            self._testMath(lambda x: torch.polygamma(n, Variable(x)).data, lambda x: polygamma(n, x)[()])
 
     def test_asin(self):
         self._testMath(torch.asin, lambda x: math.asin(x) if abs(x) <= 1 else float('nan'))
