@@ -31,8 +31,9 @@ import torch
 from common import TestCase, run_tests, set_rng_seed
 from torch.autograd import Variable, gradcheck
 from torch.distributions import (Bernoulli, Beta, Categorical, Cauchy, Chi2,
-                                 Dirichlet, Exponential, Gamma, Gumbel, Laplace,
-                                 Normal, OneHotCategorical, Pareto, StudentT, Uniform)
+                                 Dirichlet, Exponential, Gamma, Gumbel,
+                                 Laplace, Normal, OneHotCategorical, Pareto,
+                                 StudentT, Uniform, kl_divergence)
 from torch.distributions.constraints import Constraint, is_dependent
 from torch.distributions.utils import _get_clamping_buffer
 
@@ -1204,6 +1205,26 @@ class TestDistributionShapes(TestCase):
         self.assertEqual(laplace.sample((3, 2)).size(), torch.Size((3, 2, 2)))
         self.assertEqual(laplace.log_prob(self.tensor_sample_1).size(), torch.Size((3, 2)))
         self.assertRaises(ValueError, laplace.log_prob, self.tensor_sample_2)
+
+
+class TestKL(TestCase):
+    def setUp(self):
+        self.examples = [
+            (Gamma(1, 2), Gamma(3, 4)),
+            (Chi2(2), Chi2(3)),
+            (Gamma(1, 2), Chi2(3)),
+            (Chi2(2), Gamma(3, 4)),
+        ]
+
+    def test_kl_monte_carlo(self):
+        set_rng_seed(0)  # see Note [Randomized statistical tests]
+        for p, q in self.examples:
+            x = p.sample(sample_shape=(10000,))
+            expected = (p.log_prob(x) - q.log_prob(x)).mean(0)
+            actual = kl_divergence(p, q)
+            message = 'Incorrect KL({}, {}). expected {}, actual {}'.format(
+                type(p).__name__, type(q).__name__, expected, actual)
+            self.assertEqual(expected, actual, prec=0.1, message=message)
 
 
 class TestConstraints(TestCase):
