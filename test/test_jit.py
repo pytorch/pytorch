@@ -160,6 +160,8 @@ class TestJit(TestCase):
         trace, z = torch.jit.trace(f, (x, y), nderivs=0)
         self.assertExpectedTrace(trace)
 
+    def test_scopes_intermediate_node(self):
+
         class Net(nn.Module):
             def forward(self, x):
                 return F.log_softmax(x, dim=0)
@@ -168,9 +170,10 @@ class TestJit(TestCase):
         t = Variable(torch.ones(2), requires_grad=True)
         trace, _ = torch.jit.trace(net, (t, ))
         torch.onnx._optimize_trace(trace, False)
-        g = torch._C._jit_get_graph(trace)
-        for node in g.nodes():
-            self.assertTrue(node.scopeName() == 'Net')
+
+        self.assertExpectedTrace(trace)
+
+    def test_scopes_identity_node(self):
 
         class Net(nn.Module):
 
@@ -194,12 +197,8 @@ class TestJit(TestCase):
             trace, _ = torch.jit.trace(model, (t, ))
 
         torch.onnx._optimize_trace(trace, False)
-        graph = torch._C._jit_get_graph(trace)
-        nodes = list(graph.nodes())
 
-        self.assertTrue(nodes[0].scopeName() == 'Net/Sequential[features]/Conv2d[0]')
-        self.assertTrue(nodes[1].scopeName() == 'Net/Sequential[features]/ReLU[1]')
-        self.assertTrue(nodes[2].scopeName() == 'Net/Sequential[features]/MaxPool2d[2]')
+        self.assertExpectedTrace(trace)
 
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
