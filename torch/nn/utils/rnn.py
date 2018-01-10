@@ -28,7 +28,56 @@ class PackedSequence(PackedSequence_):
         batch_sizes (list[int]): list of integers holding information about
             the batch size at each sequence step
     """
-    pass
+    def cuda(self, *args, **kwargs):
+        """Returns a GPU copy if `self.data` not already on the GPU"""
+        if self.is_cuda:
+            return self
+        else:
+            return type(self)(self.data.cuda(*args, **kwargs), self.batch_sizes)
+
+    def cpu(self):
+        """Returns a CPU copy if `self.data` not already on the CPU"""
+        if self.is_cuda:
+            return type(self)(self.data.cpu(), self.batch_sizes)
+        else:
+            return self
+
+    def double(self):
+        r"""Returns copy with `self.data` cast to double type"""
+        return type(self)(self.data.double(), self.batch_sizes)
+
+    def float(self):
+        r"""Returns copy with `self.data` cast to float type"""
+        return type(self)(self.data.float(), self.batch_sizes)
+
+    def half(self):
+        r"""Returns copy with `self.data` cast to half type"""
+        return type(self)(self.data.half(), self.batch_sizes)
+
+    def long(self):
+        r"""Returns copy with `self.data` cast to long type"""
+        return type(self)(self.data.long(), self.batch_sizes)
+
+    def int(self):
+        r"""Returns copy with `self.data` cast to int type"""
+        return type(self)(self.data.int(), self.batch_sizes)
+
+    def short(self):
+        r"""Returns copy with `self.data` cast to short type"""
+        return type(self)(self.data.short(), self.batch_sizes)
+
+    def char(self):
+        r"""Returns copy with `self.data` cast to char type"""
+        return type(self)(self.data.char(), self.batch_sizes)
+
+    def byte(self):
+        r"""Returns copy with `self.data` cast to byte type"""
+        return type(self)(self.data.byte(), self.batch_sizes)
+
+    @property
+    def is_cuda(self):
+        r"""Returns true if `self.data` stored on a gpu"""
+        return self.data.is_cuda
 
 
 def pack_padded_sequence(input, lengths, batch_first=False):
@@ -63,7 +112,7 @@ def pack_padded_sequence(input, lengths, batch_first=False):
     return PackedSequence(data, list(batch_sizes.data))
 
 
-def pad_packed_sequence(sequence, batch_first=False, padding_value=0.0):
+def pad_packed_sequence(sequence, batch_first=False, padding_value=0):
     r"""Pads a packed batch of variable length sequences.
 
     It is an inverse operation to :func:`pack_padded_sequence`.
@@ -78,7 +127,7 @@ def pad_packed_sequence(sequence, batch_first=False, padding_value=0.0):
         sequence (PackedSequence): batch to pad
         batch_first (bool, optional): if ``True``, the output will be in BxTx*
             format.
-        padding_value (float, optional): values for padded elements
+        padding_value (float, optional): values for padded elements.
 
     Returns:
         Tuple of Variable containing the padded sequence, and a list of lengths
