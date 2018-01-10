@@ -496,6 +496,32 @@ static PyObject * THPVariable_type(PyObject* self, PyObject* args, PyObject* kwa
   END_HANDLE_TH_ERRORS
 }
 
+// FixMe: remove when scalars fully supported
+inline PyObject* _wrap_scalar(at::Tensor tensor) {
+  if (!tensor.sizes().equals({1})) {
+    throw std::runtime_error("tried to wrap scalar of non-scalar size");
+  }
+  auto v = Variable(std::move(tensor));
+  v.data().squeeze_();
+  return THPVariable_Wrap(v, true);
+}
+
+static PyObject * THPVariable__scalar_sum(PyObject* self, PyObject* args, PyObject* kwargs)
+{
+  HANDLE_TH_ERRORS
+  static PythonArgParser parser({
+    "sum()",
+  });
+  auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
+  PyObject* parsed_args[3];
+  auto r = parser.parse(args, kwargs, parsed_args);
+  if (r.idx == 0) {
+    return _wrap_scalar(dispatch_sum(self_));
+  }
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
 // generated methods start here
 
 ${py_methods}
@@ -552,6 +578,7 @@ PyMethodDef variable_methods[] = {
   {"stride", (PyCFunction)THPVariable_stride, METH_VARARGS | METH_KEYWORDS, NULL},
   {"tolist", (PyCFunction)THPVariable_tolist, METH_NOARGS, NULL},
   {"type", (PyCFunction)THPVariable_type, METH_VARARGS | METH_KEYWORDS, NULL},
+  {"_scalar_sum", (PyCFunction)THPVariable__scalar_sum,  METH_VARARGS | METH_KEYWORDS, NULL},
   ${py_method_defs}
   {NULL}
 };

@@ -44,13 +44,13 @@ static PyObject* THPVariable_NewWithVar(PyTypeObject* type, Variable var)
   return obj;
 }
 
-PyObject * THPVariable_Wrap(Variable var)
+PyObject * THPVariable_Wrap(Variable var, bool allow_scalar)
 {
   if (!var.defined()) {
     Py_RETURN_NONE;
   }
 
-  if (var.dim() == 0) {
+  if (!allow_scalar && var.dim() == 0) {
     throw std::runtime_error("Variable API does not support Scalars");
   }
 
