@@ -6,7 +6,7 @@ class _InstanceNorm(_BatchNorm):
     def __init__(self, num_features, eps=1e-5, momentum=0.1, affine=False):
         super(_InstanceNorm, self).__init__(
             num_features, eps, momentum, affine)
-        self.use_running_stats = False
+        self._use_running_stats = False
 
     def forward(self, input):
         b, c = input.size(0), input.size(1)
@@ -25,7 +25,7 @@ class _InstanceNorm(_BatchNorm):
 
         out = F.batch_norm(
             input_reshaped, running_mean, running_var, weight, bias,
-            not self.use_running_stats, self.momentum, self.eps)
+            not self._use_running_stats, self.momentum, self.eps)
 
         # Reshape back
         self.running_mean.copy_(running_mean.view(b, c).mean(0, keepdim=False))
@@ -40,7 +40,7 @@ class _InstanceNorm(_BatchNorm):
         and evaluation modes. But users can set this method to use running
         statistics in the fashion similar to batch normalization in eval mode.
         """
-        self.use_running_stats = mode
+        self._use_running_stats = mode
 
 
 class InstanceNorm1d(_InstanceNorm):

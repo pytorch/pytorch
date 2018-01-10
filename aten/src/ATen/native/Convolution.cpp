@@ -156,14 +156,15 @@ auto ConvParams::is_depthwise(
 static void check_input_shape_forward(const at::Tensor& input,
                                       const at::Tensor& weight, const at::Tensor& bias,
                                       int64_t groups, bool transposed) {
-  int k = input.ndimension();
+  int64_t k = input.ndimension();
+  int64_t weight_dim = weight.ndimension();
 
-  if (weight.ndimension() != k) {
-      std::stringstream ss;
-      ss << "Expected " << k << "-dimensional input for " << k
-         << "-dimensional weight " << weight.sizes() << ", but got input of size "
-         << input.sizes() << " instead";
-      throw std::runtime_error(ss.str());
+  if (weight_dim != k) {
+    std::stringstream ss;
+    ss << "Expected " << weight_dim << "-dimensional input for " << weight_dim
+       << "-dimensional weight " << weight.sizes() << ", but got input of size "
+       << input.sizes() << " instead";
+    throw std::runtime_error(ss.str());
   }
   if (weight.size(0) < groups) {
     std::stringstream ss;
@@ -280,6 +281,20 @@ at::Tensor convolution(
                           ctx.benchmarkCuDNN(), ctx.deterministicCuDNN(), ctx.userEnabledCuDNN());
 }
 
+static inline std::vector<int64_t> convolution_expand_param_if_needed(
+  IntList list_param, const char *param_name, int64_t expected_dim) {
+  if (list_param.size() == 1) {
+    return std::vector<int64_t>(expected_dim, list_param[0]);
+  } else if ((int64_t) list_param.size() != expected_dim) {
+    std::ostringstream ss;
+    ss << "expected " << param_name << " to be a single integer value or a "
+       << "list of " << expected_dim << " values to match the convolution "
+       << "dimensions, but got " << param_name << "=" << list_param.size();
+    throw std::runtime_error(ss.str());
+  } else {
+    return list_param.vec();
+  }
+}
 
 at::Tensor _convolution(
     const Tensor& input_r, const Tensor& weight_r, const Tensor& bias_r,
@@ -290,13 +305,19 @@ at::Tensor _convolution(
   auto input = input_r.contiguous();
   auto weight = weight_r;
   auto bias = bias_r;
+  auto k = input.ndimension();
+  int64_t dim = k - 2;
+
+  if (dim <= 0) {
+    throw std::runtime_error("input has less dimensions than expected");
+  }
 
   ConvParams params;
-  params.stride = stride_;
-  params.padding = padding_;
-  params.dilation = dilation_;
+  params.stride = convolution_expand_param_if_needed(stride_, "stride", dim);
+  params.padding = convolution_expand_param_if_needed(padding_, "padding", dim);
+  params.dilation = convolution_expand_param_if_needed(dilation_, "dilation", dim);
   params.transposed = transposed_;
-  params.output_padding = output_padding_;
+  params.output_padding = convolution_expand_param_if_needed(output_padding_, "output_padding", dim);
   params.groups = groups_;
   params.benchmark = benchmark;
   params.deterministic = deterministic;
@@ -306,8 +327,6 @@ at::Tensor _convolution(
   if (params.is_output_padding_neg()) throw std::runtime_error("negative output_padding is not supported");
 
   check_input_shape_forward(input, weight, bias, params.groups, params.transposed);
-
-  auto k = input.ndimension();
 
   if (k == 3) {
     params.view1d_as_2d();
@@ -372,7 +391,6 @@ at::Tensor _convolution(
 
   return output;
 }
-
 
 // A generic function for convolution implementations which don't
 // natively implement groups (e.g., not CuDNN).
