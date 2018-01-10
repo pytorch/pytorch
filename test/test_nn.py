@@ -3747,6 +3747,16 @@ class TestNN(NNTestCase):
                                                no_weight)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    def test_cudnn_noncontiguous_weight(self):
+        # Noncontiguous weights must be contiguous() before being
+        # passed to cuDNN
+        input = Variable(torch.cuda.DoubleTensor([1, 1, 1]).view(1, 1, 3))
+        weights1 = Variable(torch.cuda.DoubleTensor([1]).expand(1, 1, 2))
+        weights2 = Variable(torch.cuda.DoubleTensor([1]).expand(1, 1, 2)).contiguous()
+        self.assertEqual(F.conv1d(input, weights1, bias=None, stride=2, dilation=2),
+                         F.conv1d(input, weights2, bias=None, stride=2, dilation=2))
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     def test_conv_double_backward_cuda(self):
         batch_size = 1
         for kern, inp_size, dilations in [(3, 5, [1, 2]), (4, 9, [1])]:
@@ -4672,7 +4682,6 @@ new_module_tests = [
         input_size=(1, 3, 6),
         cudnn=True,
         desc='dilated',
-        FIXME_no_cuda_gradgrad_comparison=True,  # See #4500
     ),
     dict(
         fullname='ConvTranspose1d_groups',
@@ -4748,7 +4757,6 @@ new_module_tests = [
         input_size=(1, 3, 6, 7),
         cudnn=True,
         desc='dilated',
-        FIXME_no_cuda_gradgrad_comparison=True,  # See #4500
     ),
     dict(
         module_name='ConvTranspose2d',
@@ -4762,7 +4770,6 @@ new_module_tests = [
         constructor=lambda: nn.ConvTranspose2d(2, 4, (2, 3), groups=2),
         input_size=(1, 2, 4, 5),
         cudnn=True,
-        FIXME_no_cuda_gradgrad_comparison=True,  # See #4500
     ),
     dict(
         fullname='Conv2d_depthwise',
@@ -4944,7 +4951,6 @@ new_module_tests = [
         constructor_args=(2, 3, (2, 3, 2)),
         cudnn=True,
         input_size=(1, 2, 4, 5, 4),
-        FIXME_no_cuda_gradgrad_comparison=True,  # See #4500
     ),
     dict(
         module_name='ConvTranspose3d',
@@ -4952,7 +4958,6 @@ new_module_tests = [
         cudnn=True,
         input_size=(1, 2, 4, 5, 4),
         desc='dilated',
-        FIXME_no_cuda_gradgrad_comparison=True,  # See #4500
     ),
     dict(
         module_name='MaxPool3d',

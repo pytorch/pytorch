@@ -35,6 +35,21 @@ struct ConvParams {
   bool is_depthwise(const at::Tensor& input, const at::Tensor& weight) const;
 };
 
+std::ostream& operator<<(std::ostream & out, const ConvParams& params) {
+  out << "ConvParams {"
+      << "  stride = " << IntList{params.stride}
+      << "  padding = " << IntList{params.padding}
+      << "  dilation = " << IntList{params.dilation}
+      << "  transposed = " << params.transposed
+      << "  output_padding = " << IntList{params.output_padding}
+      << "  groups = " << params.groups
+      << "  benchmark = " << params.benchmark
+      << "  deterministic = " << params.deterministic
+      << "  cudnn_enabled = " << params.cudnn_enabled
+      << "}";
+  return out;
+}
+
 auto ConvParams::is_strided() const -> bool {
   bool is_strided = false;
   for (int s : stride) {
