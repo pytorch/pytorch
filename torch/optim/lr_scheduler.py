@@ -326,7 +326,7 @@ class ReduceLROnPlateau(object):
         if mode not in {'min', 'max'}:
             raise ValueError('mode ' + mode + ' is unknown!')
         if threshold_mode not in {'rel', 'abs'}:
-            raise ValueError('threshold mode ' + mode + ' is unknown!')
+            raise ValueError('threshold mode ' + threshold_mode + ' is unknown!')
         if mode == 'min' and threshold_mode == 'rel':
             rel_epsilon = 1. - threshold
             self.is_better = lambda a, best: a < best * rel_epsilon
