@@ -39,7 +39,8 @@ void initNNPACK() {
   static std::once_flag once;
   std::call_once(once, []() {
     enum nnp_status nnpack_status = nnp_initialize();
-    CAFFE_ENFORCE(nnpack_status == nnp_status_success, "NNPack is not supported here!");
+    CAFFE_ENFORCE(
+        nnpack_status == nnp_status_success, "NNPack is not supported here!");
   });
 }
 
@@ -54,13 +55,18 @@ class NNPACKConvOp final : public ConvPoolOpBase<CPUContext> {
         algorithm_(getConvolutionAlgorithm()),
         transformStrategy_(getConvolutionTransformStrategy()),
         ws_(ws) {
-    OPERATOR_NEEDS_FEATURE(this->order_ == StorageOrder::NCHW,
-                           "NNPack only supports NCHW order. Please consider add \
+    OPERATOR_NEEDS_FEATURE(
+        this->order_ == StorageOrder::NCHW,
+        "NNPack only supports NCHW order. Please consider add \
             TransposeOp with axes=[0, 3, 1, 2] before NNPack Conv.");
-    OPERATOR_NEEDS_FEATURE(pad_t() < kernel_h(), "NNPACK only supports pad < kernel size");
-    OPERATOR_NEEDS_FEATURE(pad_b() < kernel_h(), "NNPACK only supports pad < kernel size");
-    OPERATOR_NEEDS_FEATURE(pad_l() < kernel_w(), "NNPACK only supports pad < kernel size");
-    OPERATOR_NEEDS_FEATURE(pad_r() < kernel_w(), "NNPACK only supports pad < kernel size");
+    OPERATOR_NEEDS_FEATURE(
+        pad_t() < kernel_h(), "NNPACK only supports pad < kernel size");
+    OPERATOR_NEEDS_FEATURE(
+        pad_b() < kernel_h(), "NNPACK only supports pad < kernel size");
+    OPERATOR_NEEDS_FEATURE(
+        pad_l() < kernel_w(), "NNPACK only supports pad < kernel size");
+    OPERATOR_NEEDS_FEATURE(
+        pad_r() < kernel_w(), "NNPACK only supports pad < kernel size");
 
     createSharedBuffer<CPUContext>(ws);
   }
@@ -92,8 +98,8 @@ nnp_convolution_algorithm NNPACKConvOp::getConvolutionAlgorithm() const {
     // algorithm are different than NNPACK's version, as Winograd
     // tends to be a lot faster. Use Winograd if the convolution
     // is 3x3d1s1.
-    if (kernel_h() == 3 && kernel_w() == 3 && dilation_h() == 1 && dilation_w() == 1 &&
-        stride_h() == 1 && stride_w() == 1) {
+    if (kernel_h() == 3 && kernel_w() == 3 && dilation_h() == 1 &&
+        dilation_w() == 1 && stride_h() == 1 && stride_w() == 1) {
       // use Winograd
       return nnp_convolution_algorithm_wt8x8;
     }
@@ -127,9 +133,10 @@ nnp_convolution_algorithm NNPACKConvOp::getConvolutionAlgorithm() const {
   return nnp_convolution_algorithm_auto;
 }
 
-nnp_convolution_transform_strategy NNPACKConvOp::getConvolutionTransformStrategy() const {
-  auto kts =
-      OperatorBase::GetSingleArgument<std::string>("convolution_transform_strategy", "COMPUTE");
+nnp_convolution_transform_strategy
+NNPACKConvOp::getConvolutionTransformStrategy() const {
+  auto kts = OperatorBase::GetSingleArgument<std::string>(
+      "convolution_transform_strategy", "COMPUTE");
   if (kts == "PRECOMPUTE") {
     return nnp_convolution_transform_strategy_precompute;
   }
@@ -361,30 +368,32 @@ bool NNPACKConvOp::RunOnDeviceWithOrderNCHW() {
             "NNPACK convolution computation returned error");
         if (FLAGS_caffe2_profile_nnpack) {
           char buffer[1024];
-          const double gmacs = double(Y->dim32(2) * Y->dim32(3) * Y->dim32(1) * X.dim32(1) *
-                                      kernel_size.width * kernel_size.height / group_ / group_) /
-                               1.0E9;
+          const double gmacs =
+              double(
+                  Y->dim32(2) * Y->dim32(3) * Y->dim32(1) * X.dim32(1) *
+                  kernel_size.width * kernel_size.height / group_ / group_) /
+              1.0E9;
           const double gflops = 2 * gmacs / profile.total;
-          auto ret =
-              snprintf(buffer,
-                       sizeof(buffer),
-                       "H: %3zu, W: %3zu, iC: %3zu, oC: %3zu, K: %1zu, S: %1zu, P: %1zu, GMACs: "
-                       "%4.2f, totalT: %6.3f, inputT: %6.3f, "
-                       "kernelT: %6.3f, blockT: %6.3f, outputT: %6.3f, GFLOPS: %6.3f",
-                       size_t(X.dim(2)),
-                       size_t(X.dim(3)),
-                       size_t(X.dim(1)),
-                       size_t(Y->dim(1)),
-                       size_t(kernel_size.width),
-                       size_t(output_subsample.width),
-                       size_t(padding.top),
-                       gmacs,
-                       profile.total * 1E3,
-                       profile.input_transform * 1E3,
-                       profile.kernel_transform * 1E3,
-                       profile.block_multiplication * 1E3,
-                       profile.output_transform * 1E3,
-                       gflops);
+          auto ret = snprintf(
+              buffer,
+              sizeof(buffer),
+              "H: %3zu, W: %3zu, iC: %3zu, oC: %3zu, K: %1zu, S: %1zu, P: %1zu, GMACs: "
+              "%4.2f, totalT: %6.3f, inputT: %6.3f, "
+              "kernelT: %6.3f, blockT: %6.3f, outputT: %6.3f, GFLOPS: %6.3f",
+              size_t(X.dim(2)),
+              size_t(X.dim(3)),
+              size_t(X.dim(1)),
+              size_t(Y->dim(1)),
+              size_t(kernel_size.width),
+              size_t(output_subsample.width),
+              size_t(padding.top),
+              gmacs,
+              profile.total * 1E3,
+              profile.input_transform * 1E3,
+              profile.kernel_transform * 1E3,
+              profile.block_multiplication * 1E3,
+              profile.output_transform * 1E3,
+              gflops);
           CAFFE_ENFORCE(ret > 0);
           LOG(INFO) << buffer;
         }
