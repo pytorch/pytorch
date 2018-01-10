@@ -799,11 +799,10 @@ class ModuleTest(TestBase):
             raise unittest.SkipTest('Excluded from CUDA tests')
         try:
             cpu_input = self._get_input()
-            type_map = {torch.DoubleTensor: torch.cuda.FloatTensor}
-            gpu_input = to_gpu(cpu_input, type_map=type_map)
+            gpu_input = to_gpu(cpu_input)
 
             cpu_module = self.constructor(*self.constructor_args)
-            gpu_module = self.constructor(*self.constructor_args).float().cuda()
+            gpu_module = self.constructor(*self.constructor_args).cuda()
             cpu_param = test_case._get_parameters(cpu_module)
             gpu_param = test_case._get_parameters(gpu_module)
             for cpu_p, gpu_p in zip(cpu_param[0], gpu_param[0]):
@@ -825,7 +824,7 @@ class ModuleTest(TestBase):
             for i in range(5):
                 cpu_output_t = cpu_output.data if isinstance(cpu_output, Variable) else cpu_output
                 cpu_gradOutput = cpu_output_t.clone().normal_()
-                gpu_gradOutput = cpu_gradOutput.type('torch.cuda.FloatTensor')
+                gpu_gradOutput = cpu_gradOutput.cuda()
                 cpu_gradInput = test_case._backward(cpu_module, cpu_input, cpu_output, cpu_gradOutput)
                 gpu_gradInput = test_case._backward(gpu_module, gpu_input, gpu_output, gpu_gradOutput)
                 test_case.assertEqual(cpu_gradInput, gpu_gradInput, 2e-4)
@@ -836,7 +835,7 @@ class ModuleTest(TestBase):
             if self.check_gradgrad and not self.FIXME_no_cuda_gradgrad_comparison:
                 cpu_output_t = cpu_output.data if isinstance(cpu_output, Variable) else cpu_output
                 cpu_gradOutput = Variable(cpu_output_t.clone().normal_(), requires_grad=True)
-                gpu_gradOutput = Variable(cpu_gradOutput.type('torch.cuda.FloatTensor').data, requires_grad=True)
+                gpu_gradOutput = Variable(cpu_gradOutput.data.cuda(), requires_grad=True)
 
                 cpu_gradInputs = torch.autograd.grad(
                     cpu_module(cpu_input),
