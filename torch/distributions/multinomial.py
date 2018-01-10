@@ -4,7 +4,7 @@ from torch.autograd import Variable
 from torch.distributions import Categorical
 from numbers import Number
 from torch.distributions import constraints
-from torch.distributions.utils import log_sum_exp
+from torch.distributions.utils import log_sum_exp, broadcast_all
 
 
 class Multinomial(Distribution):
@@ -77,7 +77,9 @@ class Multinomial(Distribution):
 
     def log_prob(self, value):
         self._validate_log_prob_arg(value)
+        logits, value = broadcast_all(self.probs.log(), value)
         log_factorial_n = torch.lgamma(value.sum(-1) + 1)
         log_factorial_xs = torch.lgamma(value + 1).sum(-1)
-        log_powers = (self.logits[value != 0] * value[value != 0]).sum(-1)
+        logits[(value == 0) & (logits == -float('inf'))] = 0
+        log_powers = (logits * value).sum(-1)
         return log_factorial_n - log_factorial_xs + log_powers
