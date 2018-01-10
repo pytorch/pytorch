@@ -518,7 +518,20 @@ class TestDictDataLoader(TestCase):
         for batch_ndx, sample in enumerate(loader):
             self.assertTrue(sample['a_tensor'].is_pinned())
             self.assertTrue(sample['another_dict']['a_number'].is_pinned())
-
+            
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    def test_pin_memory_with_collate(self):
+        from collections import namedtuple
+        from pprint import pprint
+        Batch = namedtuple('Batch', ['data', 'labels'])
+        print(self.dataset)
+        def collate(x):
+            data, labels = zip(*[(e['a_tensor'], e['another_dict']) for e in x])
+            return Batch(data=torch.cat(data), labels=labels)
+        loader = DataLoader(self.dataset, batch_size=2, pin_memory=True, collate_fn=collate)
+        for batch in loader:
+            self.assertTrue(isinstance(batch, Batch))
+            self.assertTrue(batch.data.is_pinned())
 
 if __name__ == '__main__':
     run_tests()
