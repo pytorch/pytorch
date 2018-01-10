@@ -170,6 +170,10 @@ def neg(g, self):
     return g.op("Neg", self)
 
 
+def sqrt(g, self):
+    return g.op('Sqrt', self)
+
+
 def tanh(g, self):
     return g.op("Tanh", self)
 
@@ -184,6 +188,18 @@ def mean(g, self, dim=None, keepdim=None):
     if keepdim is None:
         keepdim = 0
     return g.op("ReduceMean", self, axes_i=dim, keepdims_i=keepdim)
+
+
+def sum(g, self, dim=None, keepdim=None):
+    if keepdim is None:
+        keepdim = 0
+    return g.op("ReduceSum", self, axes_i=dim, keepdims_i=keepdim)
+
+
+def prod(g, self, dim=None, keepdim=None):
+    if keepdim is None:
+        keepdim = 0
+    return g.op("ReduceProd", self, axes_i=dim, keepdims_i=keepdim)
 
 
 def t(g, self):
@@ -371,7 +387,7 @@ def upsample_nearest2d(g, input, scale_factor):
 
 
 def log_softmax(g, input, dim=None):
-    return g.op("Log", g.op('Softmax', input, axis_i=dim).setTypeAs(input))
+    return g.op("LogSoftmax", input, axis_i=dim)
 
 
 def _convolution(g, input, weight, bias, stride, padding, dilation,
