@@ -9,14 +9,13 @@ from torch.autograd import Variable
 # This follows semantics of numpy.finfo.
 _Finfo = namedtuple('_Finfo', ['eps', 'tiny'])
 _FINFO = {
-    'torch.HalfTensor': _Finfo(eps=0.00097656, tiny=6.1035e-05),
-    'torch.FloatTensor': _Finfo(eps=1.19209e-07, tiny=1.17549e-38),
-    'torch.DoubleTensor': _Finfo(eps=2.22044604925e-16, tiny=2.22507385851e-308),
-    'torch.cuda.HalfTensor': _Finfo(eps=0.00097656, tiny=6.1035e-05),
-    'torch.cuda.FloatTensor': _Finfo(eps=1.19209e-07, tiny=1.17549e-38),
-    'torch.cuda.DoubleTensor': _Finfo(eps=2.22044604925e-16, tiny=2.22507385851e-308),
+    torch.HalfStorage: _Finfo(eps=0.00097656, tiny=6.1035e-05),
+    torch.FloatStorage: _Finfo(eps=1.19209e-07, tiny=1.17549e-38),
+    torch.DoubleStorage: _Finfo(eps=2.22044604925e-16, tiny=2.22507385851e-308),
+    torch.cuda.HalfStorage: _Finfo(eps=0.00097656, tiny=6.1035e-05),
+    torch.cuda.FloatStorage: _Finfo(eps=1.19209e-07, tiny=1.17549e-38),
+    torch.cuda.DoubleStorage: _Finfo(eps=2.22044604925e-16, tiny=2.22507385851e-308),
 }
-_FINFO_MEMOIZE = {}
 
 
 def _finfo(tensor):
@@ -31,12 +30,7 @@ def _finfo(tensor):
     Returns:
         _Finfo: a `namedtuple` with fields `.eps` and `.tiny`.
     """
-    try:
-        return _FINFO_MEMOIZE[tensor.storage_type()]
-    except KeyError:
-        finfo = _FINFO[tensor.type()]
-        _FINFO_MEMOIZE[tensor.storage_type()] = finfo
-        return finfo
+    return _FINFO[tensor.storage_type()]
 
 
 def expand_n(v, n):
