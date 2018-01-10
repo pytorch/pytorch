@@ -7,15 +7,25 @@ import torch.nn.functional as F
 from torch.autograd import Variable
 
 # This follows semantics of numpy.finfo.
-Finfo = namedtuple('Finfo', ['eps', 'tiny'])
-finfo = {
-    'torch.HalfTensor': Finfo(eps=0.00097656, tiny=6.1035e-05),
-    'torch.FloatTensor': Finfo(eps=1.19209e-07, tiny=1.17549e-38),
-    'torch.DoubleTensor': Finfo(eps=2.22044604925e-16, tiny=2.22507385851e-308),
-    'torch.cuda.HalfTensor': Finfo(eps=0.00097656, tiny=6.1035e-05),
-    'torch.cuda.FloatTensor': Finfo(eps=1.19209e-07, tiny=1.17549e-38),
-    'torch.cuda.DoubleTensor': Finfo(eps=2.22044604925e-16, tiny=2.22507385851e-308),
+_Finfo = namedtuple('_Finfo', ['eps', 'tiny'])
+_FINFO = {
+    'torch.HalfTensor': _Finfo(eps=0.00097656, tiny=6.1035e-05),
+    'torch.FloatTensor': _Finfo(eps=1.19209e-07, tiny=1.17549e-38),
+    'torch.DoubleTensor': _Finfo(eps=2.22044604925e-16, tiny=2.22507385851e-308),
+    'torch.cuda.HalfTensor': _Finfo(eps=0.00097656, tiny=6.1035e-05),
+    'torch.cuda.FloatTensor': _Finfo(eps=1.19209e-07, tiny=1.17549e-38),
+    'torch.cuda.DoubleTensor': _Finfo(eps=2.22044604925e-16, tiny=2.22507385851e-308),
 }
+
+
+def _finfo(tensor):
+    """
+    Return floating point info about a `Tensor` or `Variable`:
+    - `.eps` is the smallest number that can be added to 1 without being lost.
+    - `.tiny` is the smallest positive number greater than zero
+      (much smaller than `.eps`).
+    """
+    return _FINFO[tensor.type()]
 
 
 def expand_n(v, n):
@@ -124,7 +134,7 @@ def probs_to_logits(probs, is_binary=False):
     For the multi-dimensional case, the values along the last dimension
     denote the probabilities of occurrence of each of the events.
     """
-    eps = finfo[probs.type()].eps
+    eps = _finfo(probs).eps
     ps_clamped = probs.clamp(min=eps, max=1 - eps)
     if is_binary:
         return torch.log(ps_clamped) - torch.log1p(-ps_clamped)

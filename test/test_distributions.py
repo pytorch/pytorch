@@ -35,7 +35,7 @@ from torch.distributions import (Bernoulli, Beta, Categorical, Cauchy, Chi2,
                                  Laplace, Normal, OneHotCategorical, Pareto,
                                  StudentT, Uniform, kl_divergence)
 from torch.distributions.constraints import Constraint, is_dependent
-from torch.distributions.utils import finfo
+from torch.distributions.utils import _finfo
 
 TEST_NUMPY = True
 try:
@@ -1298,7 +1298,7 @@ class TestNumericalStability(TestCase):
             self._test_pdf_score(dist_class=Bernoulli,
                                  probs=tensor_type([0]),
                                  x=tensor_type([1]),
-                                 expected_value=tensor_type([finfo[tensor_type([]).type()].eps]).log(),
+                                 expected_value=tensor_type([_finfo(tensor_type([])).eps]).log(),
                                  expected_gradient=tensor_type([0]))
 
             self._test_pdf_score(dist_class=Bernoulli,
