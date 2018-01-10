@@ -266,7 +266,7 @@ at::Tensor convolution(
 }
 
 static inline std::vector<int64_t> convolution_expand_param_if_needed(
-  IntList &list_param, std::string param_name, size_t expected_dim) {
+  IntList list_param, const char *param_name, size_t expected_dim) {
   if (list_param.size() == 1) {
     return std::vector<int64_t>(expected_dim, list_param[0]);
   } else if (list_param.size() != expected_dim) {
@@ -290,7 +290,11 @@ at::Tensor _convolution(
   auto weight = weight_r;
   auto bias = bias_r;
   auto k = input.ndimension();
-  size_t dim = k - 2;
+  int64_t dim = k - 2;
+
+  if (dim <= 0) {
+    throw std::runtime_error("input has less dimensions than expected");
+  }
 
   ConvParams params;
   params.stride = convolution_expand_param_if_needed(stride_, "stride", dim);
