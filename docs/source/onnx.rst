@@ -130,9 +130,12 @@ The following operators are supported:
 * mm
 * addmm
 * neg
+* sqrt
 * tanh
 * sigmoid
 * mean
+* sum
+* prod
 * t
 * expand (only when used before a broadcasting ONNX operator; e.g., add)
 * transpose
