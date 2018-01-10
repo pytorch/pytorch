@@ -28,7 +28,10 @@ namespace caffe2 {
 
 namespace {
 
-void AddNoiseInput(const vector<TIndex>& shape, const string& name, Workspace* ws) {
+void AddNoiseInput(
+    const vector<TIndex>& shape,
+    const string& name,
+    Workspace* ws) {
   DeviceOption option;
   CPUContext context(option);
   Blob* blob = ws->CreateBlob(name);
@@ -66,17 +69,19 @@ void compare(
     const std::string& convolutionTransformStrategy,
     float maxRelErr,
     float absErrForRelErrFailure) {
-  LOG(INFO) << "running N " << N << " inputC " << inputC << " H " << H << " W " << W << " outputC "
-            << outputC << " kernelH " << kernelH << " kernelW " << kernelW << " strideH " << strideH
-            << " strideW " << strideW << " padT " << padT << " padL " << padL << " padB " << padB
-            << " padR " << padR << " group " << group;
+  LOG(INFO) << "running N " << N << " inputC " << inputC << " H " << H << " W "
+            << W << " outputC " << outputC << " kernelH " << kernelH
+            << " kernelW " << kernelW << " strideH " << strideH << " strideW "
+            << strideW << " padT " << padT << " padL " << padL << " padB "
+            << padB << " padR " << padR << " group " << group;
 
   Workspace ws;
 
   OperatorDef nnpackOpDef;
   nnpackOpDef.set_name("test");
   nnpackOpDef.set_type("Conv");
-  nnpackOpDef.set_engine(algorithm == "DEPTHWISE_3x3" ? "DEPTHWISE_3x3" : "NNPACK");
+  nnpackOpDef.set_engine(
+      algorithm == "DEPTHWISE_3x3" ? "DEPTHWISE_3x3" : "NNPACK");
   nnpackOpDef.add_input("X");
   nnpackOpDef.add_input("W");
   nnpackOpDef.add_input("B");
@@ -100,7 +105,8 @@ void compare(
   nnpackOpDef.add_arg()->CopyFrom(MakeArgument("group", group));
 
   AddNoiseInput(vector<TIndex>{N, inputC, H, W}, "X", &ws);
-  AddNoiseInput(vector<TIndex>{outputC, inputC / group , kernelH, kernelW}, "W", &ws);
+  AddNoiseInput(
+      vector<TIndex>{outputC, inputC / group, kernelH, kernelW}, "W", &ws);
   AddNoiseInput(vector<TIndex>{outputC}, "B", &ws);
 
   unique_ptr<OperatorBase> nnpackOp(CreateOperator(nnpackOpDef, &ws));
@@ -185,16 +191,17 @@ int randInt(int a, int b) {
   return std::uniform_int_distribution<int>(a, b)(gen);
 }
 
-void runConv(int kernelH,
-             int kernelW,
-             int strideH,
-             int strideW,
-             int group = 1,
-             std::string algo = "",
-             int planesIn = randInt(1, 6),
-             int planesOut = randInt(1, 6),
-             int n = randInt(1, 2),
-             std::string convolutionTransformStrategy = "COMPUTE") {
+void runConv(
+    int kernelH,
+    int kernelW,
+    int strideH,
+    int strideW,
+    int group = 1,
+    std::string algo = "",
+    int planesIn = randInt(1, 6),
+    int planesOut = randInt(1, 6),
+    int n = randInt(1, 2),
+    std::string convolutionTransformStrategy = "COMPUTE") {
   int h = randInt(20, 100);
   int w = randInt(20, 100);
   // This pad restriction is imposed by NNPACK
@@ -203,24 +210,25 @@ void runConv(int kernelH,
   int padL = std::min(randInt(0, 3), kernelW - 1);
   int padR = std::min(randInt(0, 3), kernelW - 1);
 
-  caffe2::compare(n,
-                  planesIn,
-                  h,
-                  w,
-                  planesOut,
-                  kernelH,
-                  kernelW,
-                  strideH,
-                  strideW,
-                  padT,
-                  padL,
-                  padB,
-                  padR,
-                  group,
-                  algo,
-                  convolutionTransformStrategy,
-                  0.05f,
-                  0.1f);
+  caffe2::compare(
+      n,
+      planesIn,
+      h,
+      w,
+      planesOut,
+      kernelH,
+      kernelW,
+      strideH,
+      strideW,
+      padT,
+      padL,
+      padB,
+      padR,
+      group,
+      algo,
+      convolutionTransformStrategy,
+      0.05f,
+      0.1f);
 }
 
 } // unnamed namespace
@@ -229,7 +237,6 @@ constexpr size_t kIters = 20;
 
 // TODO(#14383029) cblas_sgemm not yet implemented on limited mobile cases.
 #if !defined(CAFFE2_FB_LIMITED_MOBILE_CAPABILITY)
-
 
 TEST(MobileNNPACK, Conv_3x3s1) {
   for (int i = 0; i < kIters; ++i) {
@@ -240,16 +247,17 @@ TEST(MobileNNPACK, Conv_3x3s1) {
 TEST(MobileNNPACK, Conv_3x3s1_precompute) {
   for (int i = 0; i < kIters; ++i) {
     int group = randInt(1, 2);
-    runConv(3,
-            3,
-            1,
-            1,
-            group,
-            "WINOGRAD",
-            group * randInt(1, 8),
-            group * randInt(1, 8),
-            1,
-            "PRECOMPUTE");
+    runConv(
+        3,
+        3,
+        1,
+        1,
+        group,
+        "WINOGRAD",
+        group * randInt(1, 8),
+        group * randInt(1, 8),
+        1,
+        "PRECOMPUTE");
   }
 }
 
@@ -262,16 +270,17 @@ TEST(MobileNNPACK, Conv_3x3s1_FP16) {
 TEST(MobileNNPACK, Conv_3x3s1_FP16_precompute) {
   for (int i = 0; i < kIters; ++i) {
     int group = randInt(1, 2);
-    runConv(3,
-            3,
-            1,
-            1,
-            group,
-            "WINOGRAD_FP16",
-            group * randInt(1, 8),
-            group * randInt(1, 8),
-            1,
-            "PRECOMPUTE");
+    runConv(
+        3,
+        3,
+        1,
+        1,
+        group,
+        "WINOGRAD_FP16",
+        group * randInt(1, 8),
+        group * randInt(1, 8),
+        1,
+        "PRECOMPUTE");
   }
 }
 
@@ -298,7 +307,8 @@ TEST(MobileNNPACK, Conv_1x1s1_precompute) {
     auto inChannels = randInt(1, 8) * group;
     auto outChannels = randInt(1, 8) * group;
     auto n = 1;
-    runConv(1, 1, 1, 1, group, "DIRECT", inChannels, outChannels, n, "PRECOMPUTE");
+    runConv(
+        1, 1, 1, 1, group, "DIRECT", inChannels, outChannels, n, "PRECOMPUTE");
   }
 }
 
@@ -345,8 +355,8 @@ TEST(MobileNNPACK, Conv_HxWsHxW) {
 TEST(MobileNNPACK, Depthwise3x3Conv) {
   for (int i = 0; i < kIters; ++i) {
     int channel = 2;
-    runConv(3, 3, 1, 1, channel, "DEPTHWISE_3x3", channel, channel,
-            randInt(1, 2));
+    runConv(
+        3, 3, 1, 1, channel, "DEPTHWISE_3x3", channel, channel, randInt(1, 2));
   }
 }
 
