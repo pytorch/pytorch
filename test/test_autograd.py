@@ -760,7 +760,7 @@ class TestAutograd(TestCase):
         self.assertTrue(a.requires_grad)
 
     def test_no_requires_grad_inplace(self):
-        # basic case, shoudl be able to modify inplace while requires_grad is False
+        # basic case, should be able to modify inplace while requires_grad is False
         a = Variable(torch.randn(2, 3))
         a.add_(5)
         a.requires_grad = True
