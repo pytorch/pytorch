@@ -1278,13 +1278,13 @@ class TestNumericalStability(TestCase):
         self.assertEqual(log_pdf.data,
                          expected_value,
                          prec=prec,
-                         message='Failed for tensor type: {}. Expected = {}, Actual = {}'
+                         message='Incorrect value for tensor type: {}. Expected = {}, Actual = {}'
                          .format(type(x), expected_value, log_pdf.data))
         if expected_gradient is not None:
             self.assertEqual(p.grad.data,
                              expected_gradient,
                              prec=prec,
-                             message='Failed for tensor type: {}. Expected = {}, Actual = {}'
+                             message='Incorrect gradient for tensor type: {}. Expected = {}, Actual = {}'
                              .format(type(x), expected_gradient, p.grad.data))
 
     def test_bernoulli_gradient(self):
