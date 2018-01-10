@@ -141,14 +141,15 @@ auto ConvParams::is_depthwise(
 static void check_input_shape_forward(const at::Tensor& input,
                                       const at::Tensor& weight, const at::Tensor& bias,
                                       int64_t groups, bool transposed) {
-  int k = input.ndimension();
+  int64_t k = input.ndimension();
+  int64_t weight_dim = weight.ndimension();
 
-  if (weight.ndimension() != k) {
-      std::stringstream ss;
-      ss << "Expected " << k << "-dimensional input for " << k
-         << "-dimensional weight " << weight.sizes() << ", but got input of size "
-         << input.sizes() << " instead";
-      throw std::runtime_error(ss.str());
+  if (weight_dim != k) {
+    std::stringstream ss;
+    ss << "Expected " << weight_dim << "-dimensional input for " << weight_dim
+       << "-dimensional weight " << weight.sizes() << ", but got input of size "
+       << input.sizes() << " instead";
+    throw std::runtime_error(ss.str());
   }
   if (weight.size(0) < groups) {
     std::stringstream ss;
@@ -266,10 +267,10 @@ at::Tensor convolution(
 }
 
 static inline std::vector<int64_t> convolution_expand_param_if_needed(
-  IntList list_param, const char *param_name, size_t expected_dim) {
+  IntList list_param, const char *param_name, int64_t expected_dim) {
   if (list_param.size() == 1) {
     return std::vector<int64_t>(expected_dim, list_param[0]);
-  } else if (list_param.size() != expected_dim) {
+  } else if ((int64_t) list_param.size() != expected_dim) {
     std::ostringstream ss;
     ss << "expected " << param_name << " to be a single integer value or a "
        << "list of " << expected_dim << " values to match the convolution "
