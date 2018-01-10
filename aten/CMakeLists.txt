@@ -127,7 +127,7 @@ ENDIF ()
 IF (WITH_OPENMP AND NOT CHECKED_OPENMP)
   FIND_PACKAGE(OpenMP)
   SET(CHECKED_OPENMP ON CACHE BOOL "already checked for OpenMP")
-  
+
   # OPENMP_FOUND is not cached in FindOpenMP.cmake (all other variables are cached)
   # see https://github.com/Kitware/CMake/blob/master/Modules/FindOpenMP.cmake
   SET(OPENMP_FOUND ${OPENMP_FOUND} CACHE BOOL "OpenMP Support found")
@@ -425,6 +425,7 @@ ${CMAKE_CURRENT_BINARY_DIR}/src/ATen)
 if(NOT NO_CUDA)
   include_directories(${CUDA_INCLUDE_DIRS})
 endif()
+
 add_subdirectory(src/ATen/test)
 
 if(ATEN_NO_CONTRIB)
