@@ -1,9 +1,21 @@
+from collections import namedtuple
 from functools import update_wrapper
 from numbers import Number
 
 import torch
-from torch.autograd import Variable
 import torch.nn.functional as F
+from torch.autograd import Variable
+
+# This follows semantics of numpy.finfo.
+Finfo = namedtuple('Finfo', ['eps', 'tiny'])
+finfo = {
+    'torch.HalfTensor': Finfo(eps=0.00097656, tiny=6.1035e-05),
+    'torch.FloatTensor': Finfo(eps=1.19209e-07, tiny=1.17549e-38),
+    'torch.DoubleTensor': Finfo(eps=2.22044604925e-16, tiny=2.22507385851e-308),
+    'torch.cuda.HalfTensor': Finfo(eps=0.00097656, tiny=6.1035e-05),
+    'torch.cuda.FloatTensor': Finfo(eps=1.19209e-07, tiny=1.17549e-38),
+    'torch.cuda.DoubleTensor': Finfo(eps=2.22044604925e-16, tiny=2.22507385851e-308),
+}
 
 
 def expand_n(v, n):
@@ -70,15 +82,6 @@ def broadcast_all(*values):
     return values
 
 
-def _get_clamping_buffer(tensor):
-    clamp_eps = 1e-6
-    if isinstance(tensor, Variable):
-        tensor = tensor.data
-    if isinstance(tensor, (torch.DoubleTensor, torch.cuda.DoubleTensor)):
-        clamp_eps = 1e-15
-    return clamp_eps
-
-
 def softmax(tensor):
     """
     Wrapper around softmax to make it work with both Tensors and Variables.
@@ -121,7 +124,7 @@ def probs_to_logits(probs, is_binary=False):
     For the multi-dimensional case, the values along the last dimension
     denote the probabilities of occurrence of each of the events.
     """
-    eps = _get_clamping_buffer(probs)
+    eps = finfo[probs.type()].eps
     ps_clamped = probs.clamp(min=eps, max=1 - eps)
     if is_binary:
         return torch.log(ps_clamped) - torch.log1p(-ps_clamped)
