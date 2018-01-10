@@ -70,10 +70,10 @@ class TestAutograd(TestCase):
         class MyFunction(Function):
 
             @staticmethod
-            def forward(ctx, tensor1, scalar, tensor2):
-                ctx.scalar = scalar
+            def forward(ctx, tensor1, pyscalar, tensor2):
+                ctx.pyscalar = pyscalar
                 ctx.save_for_backward(tensor1, tensor2)
-                return tensor1 + scalar * tensor2 + tensor1 * tensor2
+                return tensor1 + pyscalar * tensor2 + tensor1 * tensor2
 
             @staticmethod
             def backward(ctx, grad_output):
@@ -83,7 +83,7 @@ class TestAutograd(TestCase):
                 self.assertIsInstance(var2, Variable)
                 self.assertIsInstance(grad_output, Variable)
                 return (grad_output + grad_output * var2, None,
-                        grad_output * ctx.scalar + grad_output * var1)
+                        grad_output * ctx.pyscalar + grad_output * var1)
 
         x, y = self._function_test(MyFunction)
 
@@ -102,10 +102,10 @@ class TestAutograd(TestCase):
         class MyFunction(Function):
 
             @staticmethod
-            def forward(ctx, tensor1, scalar, tensor2):
-                ctx.scalar = scalar
+            def forward(ctx, tensor1, pyscalar, tensor2):
+                ctx.pyscalar = pyscalar
                 ctx.save_for_backward(tensor1, tensor2)
-                return tensor1 + scalar * tensor2 + tensor1 * tensor2
+                return tensor1 + pyscalar * tensor2 + tensor1 * tensor2
 
             @staticmethod
             @once_differentiable
@@ -116,7 +116,7 @@ class TestAutograd(TestCase):
                 self.assertTrue(torch.is_tensor(t2))
                 self.assertTrue(torch.is_tensor(grad_output))
                 return (grad_output + grad_output * t2, None,
-                        grad_output * ctx.scalar + grad_output * t1)
+                        grad_output * ctx.pyscalar + grad_output * t1)
 
         x, y = self._function_test(MyFunction)
         self.assertEqual(graph_desc(x.grad.grad_fn),
@@ -1227,18 +1227,18 @@ class TestAutograd(TestCase):
                 self._test_type_conversion_backward(lambda x: x.cuda(0))
                 self._test_type_conversion_backward(lambda x: x.cuda(1))
 
-    def _test_scalar_conversions(self, t, integral_conv):
+    def _test_pyscalar_conversions(self, t, integral_conv):
         # integral -> integral
         l = Variable(t(torch.zeros(1, 1, 1).long()))
-        scalar = -12345
-        l[0] = scalar
-        self.assertEqual(integral_conv(l), scalar)
+        pyscalar = -12345
+        l[0] = pyscalar
+        self.assertEqual(integral_conv(l), pyscalar)
 
         # floating point -> floating point
         f = Variable(t(torch.randn(1, 1)))
-        scalar = -12345.1
-        f[0] = scalar
-        self.assertEqual(float(f), scalar)
+        pyscalar = -12345.1
+        f[0] = pyscalar
+        self.assertEqual(float(f), pyscalar)
         f[0] = float('nan')
         self.assertTrue(math.isnan(float(f)))
         f[0] = float('inf')
@@ -1248,10 +1248,10 @@ class TestAutograd(TestCase):
 
         # integral -> floating point
         # check we can convert something that loses precision
-        scalar = 1234567890123456789
-        self.assertNotEqual(scalar, integral_conv(float(scalar)))
-        l[0] = scalar
-        self.assertEqual(float(l), float(scalar))
+        pyscalar = 1234567890123456789
+        self.assertNotEqual(pyscalar, integral_conv(float(pyscalar)))
+        l[0] = pyscalar
+        self.assertEqual(float(l), float(pyscalar))
 
         # floating point -> integral
         f[0] = float('nan')
@@ -1277,14 +1277,14 @@ class TestAutograd(TestCase):
         test_nonzero(f, float('inf'), bool(float('inf')))
         test_nonzero(f, float('-inf'), bool(float('-inf')))
 
-    def test_scalar_conversions(self):
-        self._test_scalar_conversions(lambda x: x, lambda x: int(x))
+    def test_pyscalar_conversions(self):
+        self._test_pyscalar_conversions(lambda x: x, lambda x: int(x))
         if sys.version_info[0] == 2:
-            self._test_scalar_conversions(lambda x: x, lambda x: long(x))
+            self._test_pyscalar_conversions(lambda x: x, lambda x: long(x))
         if torch.cuda.is_available():
-            self._test_scalar_conversions(lambda x: x.cuda(), lambda x: int(x))
+            self._test_pyscalar_conversions(lambda x: x.cuda(), lambda x: int(x))
             if sys.version_info[0] == 2:
-                self._test_scalar_conversions(lambda x: x.cuda(), lambda x: long(x))
+                self._test_pyscalar_conversions(lambda x: x.cuda(), lambda x: long(x))
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA unavailable")
     def test_pin_memory(self):
@@ -1444,7 +1444,7 @@ class TestAutograd(TestCase):
                                   for arg in args)
             unpacked_result = fn(*unpacked_args)
             packed_result = fn(*args).data
-            # if non-Variable torch function returns a scalar, compare to scalar
+            # if non-Variable torch function returns a pyscalar, compare to pyscalar
             if not torch.is_tensor(unpacked_result):
                 assert packed_result.dim() == 1
                 assert packed_result.nelement() == 1
@@ -2011,7 +2011,7 @@ method_tests = [
     ('expand', (S, 1, 1), (S, S, S)),
     ('expand', (torch.Size([S, 1, S]),), (S, S, S), 'size'),
     ('expand', (S, 1), (S, S, S), 'new_dim'),
-    ('expand', (1,), (S, S, S), 'scalar'),
+    ('expand', (1,), (S, S, S), '1_element'),
     ('expand', (1, S), (1, 1, S), 'new_dim_front_old_front_1'),
     ('exp', (S, S, S), ()),
     ('expm1', (S, S, S), ()),
@@ -2248,12 +2248,12 @@ method_tests = [
     ('lt_', (S, S, S), ((1,),), 'broadcast_rhs'),
     ('le_', (S, S, S), ((S, S, S),)),
     ('le_', (S, S, S), ((1,),), 'broadcast_rhs'),
-    ('eq_', (S, S, S), (0,), 'scalar'),
-    ('ne_', (S, S, S), (0,), 'scalar'),
-    ('gt_', (S, S, S), (0,), 'scalar'),
-    ('ge_', (S, S, S), (0,), 'scalar'),
-    ('lt_', (S, S, S), (0,), 'scalar'),
-    ('le_', (S, S, S), (0,), 'scalar'),
+    ('eq_', (S, S, S), (0,), 'pyscalar'),
+    ('ne_', (S, S, S), (0,), 'pyscalar'),
+    ('gt_', (S, S, S), (0,), 'pyscalar'),
+    ('ge_', (S, S, S), (0,), 'pyscalar'),
+    ('lt_', (S, S, S), (0,), 'pyscalar'),
+    ('le_', (S, S, S), (0,), 'pyscalar'),
     ('permute', (1, 2, 3, 4), (0, 2, 3, 1)),
     ('select', (S, S, S), (1, 2), 'dim', [0]),
     ('select', (S,), (0, 2), '1d'),
@@ -2575,13 +2575,8 @@ for test in method_tests:
                         inplace_args_variable_copy = tuple(i + 0 if i is not None else None
                                                            for i in inplace_args_variable)
 
-                        try:
-                            inplace_output_variable = (
-                                getattr(inplace_self_variable_copy[0], inplace_name)(*inplace_args_variable_copy))
-                        except RuntimeError as err:
-                            if 'only supports scalar multiplication' in str(err):
-                                return
-                            raise
+                        inplace_output_variable = (
+                            getattr(inplace_self_variable_copy[0], inplace_name)(*inplace_args_variable_copy))
                         if not isinstance(inplace_output_variable, tuple):
                             inplace_output_variable = (inplace_output_variable,)
                         self.assertEqual(inplace_output_variable, output_variable)
@@ -2610,11 +2605,7 @@ for test in method_tests:
             # can't broadcast inplace to left hand side
             broadcast_skip_inplace = 'broadcast_lhs' in test_name or 'broadcast_all' in test_name
             if hasattr(Variable(torch.ones(1)), inplace_name) and not broadcast_skip_inplace:
-                try:
-                    check(inplace_name)
-                except Exception as e:
-                    if 'only supports scalar' not in e.args[0]:
-                        raise
+                check(inplace_name)
 
         assert not hasattr(TestAutograd, test_name), 'Two tests have the same name: ' + test_name
 
