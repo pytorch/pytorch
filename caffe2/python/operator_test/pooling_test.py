@@ -161,11 +161,9 @@ class TestPooling(hu.HypothesisTestCase):
 
         self.assertDeviceChecks(dc, op, [X], [0], threshold=0.001)
         if 'MaxPool' not in op_type:
-            self.assertDeviceChecks(dc, op, [X], [0], threshold=0.001)
+            self.assertGradientChecks(gc, op, [X], 0, [0], threshold=0.001)
 
-    @given(stride=st.integers(1, 3),
-           pad=st.integers(0, 2),
-           kernel=st.integers(1, 6),
+    @given(kernel=st.integers(3, 6),
            size=st.integers(3, 5),
            input_channels=st.integers(1, 3),
            batch_size=st.integers(1, 3),
@@ -174,50 +172,9 @@ class TestPooling(hu.HypothesisTestCase):
                                     "MaxPool3D", "AveragePool3D"]),
            engine=st.sampled_from(["", "CUDNN"]),
            **hu.gcs)
-    def test_global_pooling_3d(self, stride, pad, kernel, size, input_channels,
+    def test_global_pooling_3d(self, kernel, size, input_channels,
                                batch_size, order, op_type, engine, gc, dc):
-        assume(pad < kernel)
-        assume(size + pad + pad >= kernel)
-        # Used to determine if we can use global pooling for average or max pooling
-        # the assumptions here are:
-        # 1. kernel can be greater than input dim, but always smaller than dim + pads
-        #    on both sides, ie.
-        #         dim.H + pad_t + pad_b >= kernel.H
-        #         dim.W + pad_l + pad_r >= kernel.W
-        #         dim.D + pad_f + pad_e >= kernel.D         (f = front e = end)
-        # 2. padding applied to both sides of the input dim
-        # 3. pooling are applied by first align kernel with one side of padding, then
-        #    shifting kernel for a stride distance towards the other side of padding
-        # 4. kernel continue shifts by stride distance until when one more stride is
-        #    applied, kernel will go beyond input dim plus padding.
-        # So it is possible if stride value is large, some input dim elements will
-        # not be covered. consider these cases:
-        #
-        # case 1:
-        # kernel = 4, dim = 3, pad_l = 2, pad_r = 2, stride = 4
-        # when kernel is applied for the first time, pad_l and dim upto 2
-        # is covered then we have 1 unit left of dim and pad_r not covered, but
-        # because stride is 4, shift kernel by 4 will go beyond pad_r, we should not
-        # apply another kernel, the out_size will be 1, and some element (last of
-        # dim) is ignored, therefore we can not use global pooling
-        #
-        # case 2:
-        # k = 4, dim = 3, pad_l = 1, pad_r = 2, stride = 1
-        # after kernel applied first time, pad_l and dim and 1st pad_r element all
-        # covered, shift kernel by stride move it to the end of pad_r, covering dim +
-        # pad_r, not beyond pad_r, so we should apply the kernel for a second time.
-        # out_size = 2 and we should not use global pooling either because dim is
-        # covered twice.
-        #
-        # case 3:
-        # k = 4, dim = 3, pad_l = 1, pad_r = 1, stride = 2
-        # first kernel apply cover all dim, but can not shift by stride because
-        # kernel go beyond pad_r so kernel is only applied once and cover entire dim
-        # this is the only case we can use global pooling.
-        #
-        # Summary: use global pooling when all dim is covered and only covered once
-        assume(kernel >= size)
-        assume(kernel + stride > size + pad + pad)
+        # pad and stride ignored because they will be infered in global_pooling
         op = core.CreateOperator(
             op_type,
             ["X"],
@@ -234,7 +191,7 @@ class TestPooling(hu.HypothesisTestCase):
 
         self.assertDeviceChecks(dc, op, [X], [0], threshold=0.001)
         if 'MaxPool' not in op_type:
-            self.assertDeviceChecks(dc, op, [X], [0], threshold=0.001)
+            self.assertGradientChecks(gc, op, [X], 0, [0], threshold=0.001)
 
     @unittest.skipIf(not workspace.has_gpu_support, "No GPU support")
     @given(stride=st.integers(1, 3),
