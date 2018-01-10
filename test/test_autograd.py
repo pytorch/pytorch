@@ -759,6 +759,31 @@ class TestAutograd(TestCase):
         a += b
         self.assertTrue(a.requires_grad)
 
+    def test_no_requires_grad_inplace(self):
+        # basic case, should be able to modify inplace while requires_grad is False
+        a = Variable(torch.randn(2, 3))
+        a.add_(5)
+        a.requires_grad = True
+        a.sum().backward()
+        self.assertEqual(a.grad.data, torch.ones(2, 3))
+
+        # same but with a view
+        a = Variable(torch.randn(2, 3))
+        b = a[:]
+        b.add_(5)
+        a.requires_grad = True
+        a.sum().backward()
+        self.assertEqual(a.grad.data, torch.ones(2, 3))
+
+        # should fail if requires_grad = True when we modify inplace
+        a = Variable(torch.randn(2, 3))
+        b = a[:]
+        a.requires_grad = True
+        with self.assertRaises(RuntimeError):
+            a.add_(5)
+        with self.assertRaises(RuntimeError):
+            b.add_(5)
+
     def test_grad_assignment(self):
         x = Variable(torch.randn(5, 5))
         a = Variable(torch.randn(2, 2))  # size mismatch
