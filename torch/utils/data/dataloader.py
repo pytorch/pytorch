@@ -313,9 +313,9 @@ class DataLoaderIter(object):
             # done_event should be sufficient to exit worker_manager_thread, but
             # be safe here and put another None
             self.worker_result_queue.put(None)
-        if self.worker_pids_set:
-            _remove_worker_pids(id(self))
-            self.worker_pids_set = False
+            if self.worker_pids_set:
+                _remove_worker_pids(id(self))
+                self.worker_pids_set = False
 
     def __del__(self):
         if self.num_workers > 0:
