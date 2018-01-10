@@ -11,6 +11,7 @@
 #include "torch/csrc/autograd/functions/tensor.h"
 #include "torch/csrc/autograd/functions/basic_ops.h"
 #include "torch/csrc/jit/tracer.h"
+#include "torch/csrc/utils/variadic.h"
 
 #include <initializer_list>
 #include <iostream>
@@ -238,29 +239,41 @@ static void ensure_no_aten_scalars(Tensor & data) {
   }
 }
 
-template<typename T>
-static bool computes_grad_tmpl(T tensors) {
-  if (!GradMode::is_enabled()) {
-    return false;
-  }
-  for (const Tensor& tensor : tensors) {
-    auto& var = static_cast<const Variable&>(tensor);
-    if (var.defined() && var.requires_grad()) {
-      return true;
-    }
-  }
-  return false;
-}
-
 using TensorRef = std::reference_wrapper<const Tensor>;
 using TensorRefList = std::initializer_list<TensorRef>;
 
-static bool compute_requires_grad(const TensorRefList& tensors) {
-  return computes_grad_tmpl(tensors);
+template<typename... Args> inline bool _compute_requires_grad();
+template<typename... Args> inline bool _compute_requires_grad(const at::Tensor& x, Args... args);
+template<typename... Args> inline bool _compute_requires_grad(at::ArrayRef<at::Tensor> xs, Args... args);
+
+inline bool _tensor_requires_grad(const at::Tensor& tensor) {
+  const auto& var = static_cast<const Variable&>(tensor);
+  return var.defined() && var.requires_grad();
 }
 
-static bool compute_requires_grad(TensorList tensors) {
-  return computes_grad_tmpl(tensors);
+template<typename... Args>
+inline bool _compute_requires_grad() {
+  return false;
+}
+template<typename... Args>
+inline bool _compute_requires_grad(const at::Tensor& x, Args... args) {
+  if (_tensor_requires_grad(x)) return true;
+  return _compute_requires_grad(args...);
+}
+template<typename... Args>
+inline bool _compute_requires_grad(at::ArrayRef<at::Tensor> xs, Args... args) {
+  for (const Tensor& x : xs) {
+    if (_tensor_requires_grad(x)) return true;
+  }
+  return _compute_requires_grad(args...);
+}
+
+template<typename... Args>
+static bool compute_requires_grad(Args... args) {
+  if (!GradMode::is_enabled()) {
+    return false;
+  }
+  return _compute_requires_grad(args...);
 }
 
 static void check_no_requires_grad(const Tensor& tensor, const char* name) {
@@ -271,14 +284,6 @@ static void check_no_requires_grad(const Tensor& tensor, const char* name) {
     msg += "' is not implemented";
     throw std::runtime_error(msg);
   }
-}
-
-static function_list compute_next_functions(const std::initializer_list<Tensor>& tensors) {
-  return Function::flags(tensors).next_functions;
-}
-
-static function_list compute_next_functions(TensorList tensors) {
-  return Function::flags(tensors).next_functions;
 }
 
 static void check_inplace(const Tensor& tensor) {
@@ -326,26 +331,28 @@ static void set_history(at::ArrayRef<Tensor> tl, std::shared_ptr<Function> grad_
   }
 }
 
-static at::ArrayRef<Variable> flatten(TensorList tensors) {
-  auto data = static_cast<const Variable*>(tensors.data());
-  return at::ArrayRef<Variable>(data, tensors.size());
+template<typename... Args> inline void flattenTensors(variable_list& dest);
+template<typename... Args> inline void flattenTensors(variable_list& dest, const at::Tensor& x, Args... args);
+template<typename... Args> inline void flattenTensors(variable_list& dest, at::ArrayRef<at::Tensor> xs, Args... args);
+
+template<typename... Args>
+inline void flattenTensors(variable_list& dest) {}
+template<typename... Args>
+inline void flattenTensors(variable_list& dest, const at::Tensor& x, Args... args) {
+  dest.emplace_back(x);
+  flattenTensors(dest, args...);
+}
+template<typename... Args>
+inline void flattenTensors(variable_list& dest, at::ArrayRef<at::Tensor> xs, Args... args) {
+  dest.insert(dest.end(), xs.begin(), xs.end());
+  flattenTensors(dest, args...);
 }
 
-static variable_list flatten(const Tensor& x, const TensorList& y) {
-  std::vector<Variable> r;
-  r.reserve(1 + y.size());
-  r.emplace_back(x);
-  r.insert(r.end(), y.begin(), y.end());
-  return r;
-}
-
-static variable_list flatten(const Tensor& x, TensorList y, const Tensor& z) {
-  std::vector<Variable> r;
-  r.reserve(2 + y.size());
-  r.emplace_back(x);
-  r.insert(r.end(), y.begin(), y.end());
-  r.emplace_back(z);
-  return r;
+template<typename... Args> inline variable_list flatten(Args... args) {
+  variable_list dest;
+  dest.reserve(countTensors(args...));
+  flattenTensors(dest, args...);
+  return dest;
 }
 
 static void increment_version(const Tensor & t) {
@@ -364,11 +371,11 @@ Tensor & VariableType::s_copy_(Tensor & self, const Tensor & src, bool async) co
   auto& src_ = unpack_any(src, "src", 1);
   check_inplace(self);
   std::shared_ptr<CopyBackwards> grad_fn;
-  auto requires_grad = compute_requires_grad({ self, src });
+  auto requires_grad = compute_requires_grad(self, src);
   requires_grad &= isFloatingPoint(self.type().scalarType());
   if (requires_grad) {
     grad_fn = std::make_shared<CopyBackwards>();
-    grad_fn->next_functions = compute_next_functions({ self, src });
+    grad_fn->next_functions = Function::flags(self, src).next_functions;
     grad_fn->num_inputs = 1;
     grad_fn->src_type = &src.type();
     grad_fn->src_device = src.is_cuda() ? src.get_device() : -1;
