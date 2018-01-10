@@ -334,3 +334,29 @@ def _kl_pareto_gamma(p, q):
     result = -2 - t1 + q.alpha.lgamma() + t2
     result[(p.support.lower < q.support.lower_bound) | p.alpha <= 1] = float('inf')
     return result
+
+@register_kl(Pareto, Normal)
+def _kl_pareto_normal(p, q):
+    var_normal = q.std.pow(2)
+    common_term = p.scale / (p.alpha - 1)
+    alpha_sqr = p.alpha.pow(2)
+    t1 = p.alpha.reciprocal()
+    t2 = 0.5 * (p.alpha.pow(2) * 2 * math.pi * var_normal / p.scale.pow(2)).log()
+    t3 = 0.5 * common_term.pow(2) * (p.alpha / p.alpha - 2 + alpha_sqr)
+    t3[p.alpha <= 2] = float('inf')
+    t4 = q.mean * common_term * p.alpha
+    t5 = q.mean.pow(2)
+    return -t1 + t2 + (t3 - t4 + t5) / var_normal - 1
+
+@register_kl(Uniform, Beta)
+def _kl_uniform_beta(p, q):
+    common_term = p.high - p.low
+    t1 = torch.log(common_term)
+    def ret_x_log_x(tensor):
+        return x * x.log()
+    t2 = (q.alpha - 1) * (ret_x_log_x(p.high) - ret_x_log_x(p.low) - common_term) / common_term
+    t3 = (q.beta - 1) * (ret_x_log_x((1 - p.high)) - ret_x_log_x((1 - p.low)) + common_term) / common_term
+    t4 = q.alpha.lgamma() + q.beta.lgamma() - (q.alpha + q.beta).lgamma()
+    result = -t1 -t2 + t3 + t4
+    result[(p.high > q.support.upper_bound) | (p.low < q.support.lower_bound)] = float('inf')
+    return result
