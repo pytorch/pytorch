@@ -117,7 +117,7 @@ std::shared_ptr<Function>& VariableViewImpl::get_grad_fn() {
     fn->size = sizes();
     fn->stride = strides();
     fn->storage_offset = data.storage_offset();
-    fn->set_flags(Function::flags({ base }));
+    fn->set_flags(Function::flags(base));
     fn->num_inputs = 1;
     _grad_fn = std::move(fn);
     attr_version = current_version;

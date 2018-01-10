@@ -9,9 +9,11 @@
 #include "torch/csrc/autograd/saved_variable.h"
 #include "torch/csrc/utils/auto_unique_ptr.h"
 #include "torch/csrc/utils/python_stub.h"
+#include "torch/csrc/utils/variadic.h"
 #include "torch/csrc/autograd/function_hook.h"
 #include "torch/csrc/autograd/profiler.h"
 #include "torch/csrc/jit/tracer.h"
+#include "torch/csrc/autograd/grad_mode.h"
 
 #include <ATen/ATen.h>
 
@@ -48,6 +50,47 @@ struct FunctionFlags {
   // There is one function per output of this function.
   function_list next_functions;
 };
+
+namespace detail {
+
+// Why can't we just combine the set_variable and set_tensor variants
+// into one set of overloads?  The problem is Variable is convertible
+// to both Tensor and ArrayRef<Variable>, making the overload ambiguous.
+
+// Invariant: this function unconditionally calls f.next_functions.emplace_back
+inline void set_function_flags(FunctionFlags& f, const Variable& var) {
+  if (!var.defined()) {
+    f.next_functions.emplace_back();
+    return;
+  }
+  f.is_executable |= var.requires_grad();
+  if (var.grad_fn()) {
+    f.next_functions.emplace_back(var.grad_fn(), var.output_nr());
+  } else if (var.requires_grad()) {
+    f.next_functions.emplace_back(var.grad_accumulator(), 0);
+  } else {
+    f.next_functions.emplace_back();
+  }
+}
+
+struct SetFunctionFlags : IterArgs<SetFunctionFlags> {
+  FunctionFlags& out;
+  SetFunctionFlags(FunctionFlags& out) : out(out) {}
+  using IterArgs<SetFunctionFlags>::operator();
+  void operator()(const Variable& v) { set_function_flags(out, v); }
+};
+
+struct SetTensorFunctionFlags : IterArgs<SetTensorFunctionFlags> {
+  FunctionFlags& out;
+  SetTensorFunctionFlags(FunctionFlags& out) : out(out) {}
+  using IterArgs<SetTensorFunctionFlags>::operator();
+  void operator()(const Tensor& t) {
+    set_function_flags(out, static_cast<const Variable&>(t));
+  }
+};
+
+
+} // namespace detail
 
 struct Function : std::enable_shared_from_this<Function> {
   static thread_local uint64_t function_counter;
@@ -93,10 +136,25 @@ struct Function : std::enable_shared_from_this<Function> {
     return shared_from_this();
   };
 
-  // Computes is_executable and next_functions from a list of input variables
-  static FunctionFlags flags(const variable_list& inputs);
-  static FunctionFlags flags(const std::initializer_list<Variable>& inputs);
-  static FunctionFlags flags(at::TensorList inputs);
+  // Computes is_executable and next_functions from an arbitrary argument list
+  // of variables and lists of variables (but whose static type is Tensor)
+  template<typename... Args> inline static FunctionFlags tensor_flags(Args&&... args) {
+    FunctionFlags f;
+    if (!GradMode::is_enabled()) return f;
+    f.next_functions.reserve(count_tensors(std::forward<Args>(args)...));
+    detail::SetTensorFunctionFlags(f).apply(std::forward<Args>(args)...);
+    return f; // RVO
+  }
+
+  // Computes is_executable and next_functions from an arbitrary argument list
+  // of variables and lists of variables
+  template<typename... Args> inline static FunctionFlags flags(Args&&... args) {
+    FunctionFlags f;
+    if (!GradMode::is_enabled()) return f;
+    f.next_functions.reserve(count_variables(std::forward<Args>(args)...));
+    detail::SetFunctionFlags(f).apply(std::forward<Args>(args)...);
+    return f; // RVO
+  }
 
   // Releases saved variables if the operation won't be reused
   virtual inline void releaseVariables() {}
