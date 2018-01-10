@@ -96,6 +96,13 @@ def _dispatch_kl(type_p, type_q):
     return left_fun
 
 
+def _infinite_like(tensor):
+    """
+    Helper function for obtaining infinite KL Divergence throughout
+    """
+    return tensor.new([float('inf')]).expand_as(tensor)
+
+
 def kl_divergence(p, q):
     r"""
     Compute Kullback-Leibler divergence :math:`KL(p \| q)` between two distributions.
@@ -182,24 +189,26 @@ def _kl_normal_normal(p, q):
 
 @register_kl(Pareto, Pareto)
 def _kl_pareto_pareto(p, q):
-    if p.support.lower_bound >= q.support.lower_bound:
-        #  From http://www.mast.queensu.ca/~communications/Papers/gil-msc11.pdf
-        scale_ratio = p.scale / q.scale
-        alpha_ratio = q.alpha / p.alpha
-        t1 = q.alpha * scale_ratio.log()
-        t2 = -alpha_ratio.log()
-        return t1 + t2 + alpha_ratio - 1
-    else:
-        return torch.new(p.scale.size()).fill_(float('inf'))
+    #  From http://www.mast.queensu.ca/~communications/Papers/gil-msc11.pdf
+    scale_ratio = p.scale / q.scale
+    alpha_ratio = q.alpha / p.alpha
+    t1 = q.alpha * scale_ratio.log()
+    t2 = -alpha_ratio.log()
+    result = t1 + t2 + alpha_ratio - 1
+    result[p.support.lower_bound < q.support.lower_bound] = float('inf')
+    return result
 
 @register_kl(Uniform, Uniform)
 def _kl_uniform_uniform(p, q):
-    if q.support.lower_bound <= p.support.lower_bound and q.support.upper_bound >= p.support.upper_bound:
-        return ((q.high - q.low) / (p.high - p.low)).log()
-    else:
-        return torch.new(q.high.size()).fill_(float('inf'))
+    result = ((q.high - q.low) / (p.high - p.low)).log()
+    result[(q.low > p.low) | (q.high < p.high)] = float('inf')
+    return result
 
 # Different distributions
+
+@register_kl(Beta, Pareto)
+def _kl_beta_infinity(p, q):
+    return _infinite_like(p.alpha)
 
 @register_kl(Beta, Exponential)
 def _kl_beta_exponential(p, q):
@@ -224,20 +233,17 @@ def _kl_beta_normal(p, q):
     t5 = q.mean.pow(2) * 0.5
     return t1 + t2 + (t3 - t4 + t5) / var_normal
 
-@register_kl(Beta, Pareto)
-def _kl_beta_pareto(p, q):
-    return torch.new(p.rate.size()).fill_(float('inf'))
-
 @register_kl(Beta, Uniform)
 def _kl_beta_uniform(p, q):
-    if q.support.lower_bound <= p.support.lower_bound and q.support.upper_bound >= p.support.upper_bound:
-        return -p.entropy() + (q.high - q.low).log()
-    else:
-        return torch.new(p.rate.size()).fill_(float('inf'))
+    result = -p.entropy() + (q.high - q.low).log()
+    result[(q.low > p.support.lower_bound) | (q.high < p.support.upper_bound)] = float('inf')
+    return result
 
 @register_kl(Exponential, Beta)
-def _kl_exponential_beta(p, q):
-    return torch.new(p.rate.size()).fill_(float('inf'))
+@register_kl(Exponential, Pareto)
+@register_kl(Exponential, Uniform)
+def _kl_exponential_infinity(p, q):
+    return _infinite_like(p.rate)
 
 @register_kl(Exponential, Gamma)
 def _kl_exponential_gamma(p, q):
@@ -255,17 +261,11 @@ def _kl_exponential_normal(p, q):
     t4 = q.mean.pow(2) * 0.5
     return t1 - 1 + (t2 - t3 + t4) / var_normal
 
-@register_kl(Exponential, Pareto)
-def _kl_exponential_pareto(p, q):
-    return torch.new(p.rate.size()).fill_(float('inf'))
-
-@register_kl(Exponential, Uniform)
-def _kl_exponential_uniform(p, q):
-    return torch.new(p.rate.size()).fill_(float('inf'))
-
 @register_kl(Gamma, Beta)
-def _kl_gamma_beta(p, q):
-    return torch.new(p.alpha.size()).fill_(float('inf'))
+@register_kl(Gamma, Pareto)
+@register_kl(Gamma, Uniform)
+def _kl_gamma_infinity(p, q):
+    return _infinite_like(p.alpha)
 
 @register_kl(Gamma, Exponential)
 def _kl_gamma_exponential(p, q):
@@ -281,25 +281,13 @@ def _kl_gamma_exponential(p, q):
     t4 = 0.5 * q.mean.pow(2)
     return t1 + (p.alpha - 1) * p.alpha.digamma() + (t2 - t3 + t4) / var_normal
 
-@register_kl(Gamma, Pareto)
-def _kl_gamma_pareto(p, q):
-    return torch.new(p.alpha.size()).fill_(float('inf'))
-
-@register_kl(Gamma, Uniform)
-def _kl_gamma_uniform(p, q):
-    return torch.new(p.alpha.size()).fill_(float('inf'))
-
 @register_kl(Laplace, Beta)
-def _kl_laplace_beta(p, q):
-    return torch.new(p.loc.size()).fill_(float('inf'))
-
 @register_kl(Laplace, Exponential)
-def _kl_laplace_exponential(p, q):
-    return torch.new(p.loc.size()).fill_(float('inf'))
-
 @register_kl(Laplace, Gamma)
-def _kl_laplace_gamma(p, q):
-    return torch.new(p.loc.size()).fill_(float('inf'))
+@register_kl(Laplace, Pareto)
+@register_kl(Laplace, Uniform)
+def _kl_laplace_infinity(p, q):
+    return _infinite_like(p.loc)
 
 @register_kl(Laplace, Normal)
 def _kl_laplace_normal(p, q):
@@ -311,20 +299,12 @@ def _kl_laplace_normal(p, q):
     t4 = 0.5 * q.mean.pow(2)
     return -t1 + scale_sqr_var_ratio + (t2 - t3 + t4) / var_normal - 1
 
-@register_kl(Laplace, Uniform)
-def _kl_laplace_uniform(p, q):
-    return torch.new(p.loc.size()).fill_(float('inf'))
-
 @register_kl(Normal, Beta)
-def _kl_normal_beta(p, q):
-    return torch.new(p.mean.size()).fill_(float('inf'))
-
 @register_kl(Normal, Exponential)
-def _kl_normal_exponential(p, q):
-    return torch.new(p.mean.size()).fill_(float('inf'))
-
 @register_kl(Normal, Gamma)
-def _kl_normal_gamma(p, q):
+@register_kl(Normal, Pareto)
+@register_kl(Normal, Uniform)
+def _kl_normal_infinity(p, q):
     return torch.new(p.mean.size()).fill_(float('inf'))
 
 @register_kl(Normal, Laplace)
@@ -333,39 +313,24 @@ def _kl_normal_laplace(p, q):
     common_const = math.sqrt(2.0 / math.pi)
     return (math.log(common_const) - 0.5) - torch.log(common_term) + common_term * common_const
 
-@register_kl(Normal, Uniform)
-def _kl_normal_uniform(p, q):
-    return torch.new(p.mean.size()).fill_(float('inf'))
-
 @register_kl(Pareto, Beta)
-def _kl_pareto_beta(p, q):
-    return torch.new(p.scale.size()).fill_(float('inf'))
+@register_kl(Pareto, Uniform)
+def _kl_pareto_infinity(p, q):
+    return _infinite_like(p.scale)
 
 @register_kl(Pareto, Exponential)
 def _kl_pareto_exponential(p, q):
-    if p.support.lower_bound >= q.support.lower_bound:
-        if p.alpha > 1:
-            param_prod = p.alpha * q.rate
-            t1 = torch.log(param_prod / p.scale)
-            t2 = param_prod * p.scale / (p.alpha - 1)
-            return -t1 + t2 - p.alpha.reciprocal() - 1
-        else:
-            return torch.new(p.scale.size()).fill_(float('inf'))
-    else:
-        return torch.new(p.scale.size()).fill_(float('inf'))
+    param_prod = p.alpha * q.rate
+    t1 = torch.log(param_prod / p.scale)
+    t2 = param_prod * p.scale / (p.alpha - 1)
+    result = -t1 + t2 - p.alpha.reciprocal() - 1
+    result[(p.support.lower_bound < q.support.lower_bound) | p.alpha <= 1] = float('inf')
+    return result
 
 @register_kl(Pareto, Gamma)
 def _kl_pareto_gamma(p, q):
-    if p.support.lower_bound >= q.support.lower_bound:
-        if p.alpha > 1:
-            t1 = torch.log(p.scale.pow(p.alpha) * q.beta.pow(q.alpha) / p.alpha)
-            t2 = q.beta * p.alpha * p.scale / (p.alpha - 1)
-            return -2 - t1 + q.alpha.lgamma() + t2
-        else:
-            return torch.new(p.scale.size()).fill_(float('inf'))
-    else:
-        return torch.new(p.scale.size()).fill_(float('inf'))
-
-@register_kl(Pareto, Uniform)
-def _kl_pareto_uniform(p, q):
-    return torch.new(p.scale.size()).fill_(float('inf'))
+    t1 = torch.log(p.scale.pow(p.alpha) * q.beta.pow(q.alpha) / p.alpha)
+    t2 = q.beta * p.alpha * p.scale / (p.alpha - 1)
+    result = -2 - t1 + q.alpha.lgamma() + t2
+    result[(p.support.lower < q.support.lower_bound) | p.alpha <= 1] = float('inf')
+    return result
