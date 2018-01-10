@@ -129,6 +129,27 @@ def get_ckpt_filename(node_name, epoch):
     return node_name + '.' + str(epoch)
 
 
+def db_name(epoch, node_name, db_prefix, path_prefix=None):
+    """Returns the full db name where checkpoint files are saved.
+
+    Args:
+        epoch: An integer. The checkpoint epoch.
+        node_name: A string. The name of the node.
+        db_prefix: A string. The prefix used to construct full db name.
+        path_prefix: A string. Optional param used to construct db name or path
+            where checkpoint files are are stored.
+    Returns:
+        db_name: A string. The absolute path of full_db_name where checkpoint
+            files are saved
+    """
+    if path_prefix:
+        db_name = path_prefix + get_ckpt_filename(node_name, epoch)
+    else:
+        ckpt_filename = get_ckpt_filename(node_name, epoch)
+        db_name = os.path.join(db_prefix, ckpt_filename)
+    return db_name
+
+
 class CheckpointManager(object):
     """
     Controls saving and loading of workspaces on every epoch boundary of a job.
@@ -191,7 +212,8 @@ class CheckpointManager(object):
                     self._blob_names,
                     include_shared=False)
             else:
-                full_db_name = self._db_name(retrieve_from_epoch, path_prefix)
+                full_db_name = db_name(retrieve_from_epoch,
+                                        self._node_name, self._db_prefix, path_prefix)
                 db_type = path_type or self._db_type
                 logger.info("Initializing checkpoints from = %s"
                             % full_db_name)
@@ -207,21 +229,13 @@ class CheckpointManager(object):
         assert self._names_output
         return self._names_output.fetch().tolist()
 
-    def _db_name(self, epoch, path_prefix=None):
-        if path_prefix:
-            db_name = path_prefix + get_ckpt_filename(self._node_name, epoch)
-        else:
-            ckpt_filename = get_ckpt_filename(self._node_name, epoch)
-            db_name = os.path.join(self._db_prefix, ckpt_filename)
-        return db_name
-
     def load(self, epoch, path_prefix=None, path_type=None):
         """
         Build a Task that will be run by JobRunner when the job is to be
         resumed from a given epoch. This task will run a Load op that will
         load and deserialize all relevant blobs from a persistent storage.
         """
-        full_db_name = self._db_name(epoch, path_prefix)
+        full_db_name = db_name(epoch, self._node_name, self._db_prefix, path_prefix)
         db_type = path_type or self._db_type
         logger.info("Loading checkpoints from = %s" % full_db_name)
         with Task() as task:
@@ -248,25 +262,26 @@ class CheckpointManager(object):
             A Task which loads the specified blobs from the checkpoint of the
             given epoch.
         """
-        logger.info('Load from %s' % self._db_name(epoch))
+        logger.info('Load from %s' % db_name(epoch, self._node_name, self._db_prefix))
         with Task() as task:
             ops.Load(
                 [],
                 blob_names,
-                db=self._db_name(epoch),
+                db=db_name(epoch, self._node_name, self._db_prefix),
                 db_type=self._db_type,
                 absolute_path=True,
                 allow_incomplete=True)
         return task
 
     def check_db_exists(self, epoch):
-        logger.info('Check existence of %s' % self._db_name(epoch))
+        logger.info('Check existence of %s' %
+                    db_name(epoch, self._node_name, self._db_prefix))
         with Task() as task:
             existence = ops.Const(False)
             ops.DBExists(
                 [],
                 [existence],
-                db_name=self._db_name(epoch),
+                db_name=db_name(epoch, self._node_name, self._db_prefix),
                 db_type=self._db_type,
                 absolute_path=True)
             task.add_output(existence)
@@ -278,10 +293,11 @@ class CheckpointManager(object):
         epoch is run. This will execute a Save ops to serialize and persist
         blobs present in the global workspace.
         """
-        logger.info('Saving to %s' % self._db_name(epoch))
+        logger.info('Saving to %s' % db_name(epoch, self._node_name, self._db_prefix))
         with Task() as task:
             ops.Save(
-                self.blob_list(), [], db=self._db_name(epoch),
+                self.blob_list(), [],
+                db=db_name(epoch, self._node_name, self._db_prefix),
                 db_type=self._db_type, absolute_path=True)
         return task
 
@@ -395,7 +411,8 @@ class MultiNodeCheckpointManager(object):
             session.run(existence_task)
             existence = existence_task.outputs()[0].fetch()
             if not existence:
-                logger.info('DB %s does not exist!' % manager._db_name(epoch))
+                logger.info('DB %s does not exist!' %
+                            db_name(epoch, manager._node_name, manager._db_prefix))
                 return False
             load_task = manager.load_blobs_from_checkpoint(blob_names, epoch)
             session.run(load_task)
@@ -418,7 +435,7 @@ class MultiNodeCheckpointManager(object):
         """
         for node, manager in self._node_managers:
             if str(node) == node_name:
-                return manager._db_name(epoch)
+                return db_name(epoch, manager._node_name, manager._db_prefix)
 
     def save(self, epoch):
         return self._task_group(CheckpointManager.save, epoch)
