@@ -8,8 +8,8 @@ source:
   path: ..
 
 build:
-  number: 1
-  skip: True  # [win or py3k]
+  number: 0
+  skip: True  # [win]
   script_env:
     - CONDA_CMAKE_ARGS
 
@@ -19,9 +19,8 @@ requirements:
     - glog
     - numpy
     - six
-    - eigen
     - python
-    - protobuf
+    - protobuf {{ protobuf }}
     - cmake
     - lmdb
     - snappy ==1.1.6
@@ -32,7 +31,6 @@ requirements:
     - glog
     - numpy
     - six
-    - eigen
     - python
     - protobuf
     - lmdb
@@ -41,11 +39,15 @@ requirements:
     - mkl-include
     - mkl
 
+test:
+  imports:
+    - caffe2.python.core
+
 about:
   home: https://caffe2.ai/
   license: BSD
-  summary: deep learning library
+  summary: Caffe2 is a lightweight, modular, and scalable deep learning framework.
 
 extra:
   recipe-maintainers:
-    - ezyang
+    - pjh5
