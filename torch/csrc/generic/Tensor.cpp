@@ -770,7 +770,6 @@ static bool THPTensor_(_convertToTensorIndexers)(
 
           // Clean up Indexers
           for (auto& idx : indexers) {
-            THIndexTensor_(free)(LIBRARY_STATE idx->cdata);
             Py_DECREF(idx);
           }
           return false;
@@ -831,7 +830,6 @@ static bool THPTensor_(_convertToTensorIndexers)(
 
           // Clean up Indexers
           for (auto& idx : indexers) {
-            THIndexTensor_(free)(LIBRARY_STATE idx->cdata);
             Py_DECREF(idx);
           }
 
@@ -850,7 +848,6 @@ static bool THPTensor_(_convertToTensorIndexers)(
 
     // Clean up Indexers
     for (auto& idx : indexers) {
-      THIndexTensor_(free)(LIBRARY_STATE idx->cdata);
       Py_DECREF(idx);
     }
     return false;
@@ -858,7 +855,6 @@ static bool THPTensor_(_convertToTensorIndexers)(
 
   // Clean up Indexers
   for (auto& idx : indexers) {
-    THIndexTensor_(free)(LIBRARY_STATE idx->cdata);
     Py_DECREF(idx);
   }
   return true;
