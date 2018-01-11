@@ -200,11 +200,13 @@ def sum(g, self, dim=None, keepdim=None):
 
 
 def prod(g, self, dim=None, keepdim=None):
-    if dim is None and keepdim is None:
-        return g.op("Prod", self)
+    if dim is None:
+        dims = None
+    else:
+        dims = [dim]
     if keepdim is None:
         keepdim = 0
-    return g.op("ReduceProd", self, axes_i=[dim], keepdims_i=keepdim)
+    return g.op("ReduceProd", self, axes_i=dims, keepdims_i=keepdim)
 
 
 def t(g, self):
