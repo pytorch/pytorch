@@ -2,7 +2,7 @@ import torch
 from torch.autograd import Variable
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
-from torch.distributions.utils import probs_to_logits, logits_to_probs, log_sum_exp, lazy_property
+from torch.distributions.utils import probs_to_logits, logits_to_probs, log_sum_exp, lazy_property, broadcast_all
 
 
 class Categorical(Distribution):
@@ -67,7 +67,12 @@ class Categorical(Distribution):
 
     def log_prob(self, value):
         self._validate_log_prob_arg(value)
-        param_shape = value.size() + self.probs.size()[-1:]
+        if self.batch_shape:
+            value_shape = torch._C._infer_size(value.size(), self.probs.size()[:-1])
+        else:
+            value_shape = value.size()
+        param_shape = value_shape + self.probs.size()[-1:]
+        value = value.expand(value_shape)
         log_pmf = self.logits.expand(param_shape)
         return log_pmf.gather(-1, value.unsqueeze(-1).long()).squeeze(-1)
 
