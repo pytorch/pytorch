@@ -376,9 +376,6 @@ def log_softmax(g, input, dim=None):
 
 def _convolution(g, input, weight, bias, stride, padding, dilation,
                  transposed, output_padding, groups, benchmark, deterministic, cudnn_enabled):
-    if any(o != 0 for o in output_padding):
-        return _unimplemented("_convolution", "non-zero output_padding")
-
     weight_size = weight.type().sizes()
 
     args = [input, weight]
@@ -393,6 +390,14 @@ def _convolution(g, input, weight, bias, stride, padding, dilation,
               "pads_i": padding + padding,
               "dilations_i": dilation,
               "group_i": groups}
+
+    if any(o != 0 for o in output_padding):
+        # ONNX supports both output_shape and output_padding. they are equivalent expressive.
+        # output_padding is more straightforward, so we use it here.
+        # output_shape = stride * (input_shape - 1) + output_padding + kernel_shape - padding * 2
+        assert transposed
+        assert len(stride) == len(output_padding)
+        kwargs["output_padding_i"] = output_padding
 
     n = g.op("ConvTranspose" if transposed else "Conv", *args, **kwargs)
 

@@ -16,7 +16,8 @@ import glob
 
 from tools.setup_helpers.env import check_env_flag
 from tools.setup_helpers.cuda import WITH_CUDA, CUDA_HOME, CUDA_VERSION
-from tools.setup_helpers.cudnn import WITH_CUDNN, CUDNN_LIB_DIR, CUDNN_INCLUDE_DIR
+from tools.setup_helpers.cudnn import (WITH_CUDNN, CUDNN_LIBRARY,
+                                       CUDNN_LIB_DIR, CUDNN_INCLUDE_DIR)
 from tools.setup_helpers.nccl import WITH_NCCL, WITH_SYSTEM_NCCL, NCCL_LIB_DIR, \
     NCCL_INCLUDE_DIR, NCCL_ROOT_DIR, NCCL_SYSTEM_LIB
 from tools.setup_helpers.nnpack import WITH_NNPACK
@@ -132,6 +133,7 @@ def build_libs(libs):
         build_libs_cmd += ['--with-nnpack']
     if WITH_CUDNN:
         my_env["CUDNN_LIB_DIR"] = CUDNN_LIB_DIR
+        my_env["CUDNN_LIBRARY"] = CUDNN_LIBRARY
         my_env["CUDNN_INCLUDE_DIR"] = CUDNN_INCLUDE_DIR
 
     if subprocess.call(build_libs_cmd + libs, env=my_env) != 0:
@@ -269,7 +271,7 @@ class build_ext(build_ext_parent):
         else:
             print('-- NumPy not found')
         if WITH_CUDNN:
-            print('-- Detected cuDNN at ' + CUDNN_LIB_DIR + ', ' + CUDNN_INCLUDE_DIR)
+            print('-- Detected cuDNN at ' + CUDNN_LIBRARY + ', ' + CUDNN_INCLUDE_DIR)
         else:
             print('-- Not using cuDNN')
         if WITH_CUDA:
@@ -715,18 +717,19 @@ cmdclass = {
 cmdclass.update(build_dep_cmds)
 
 
-setup(name="torch", version=version,
-      description="Tensors and Dynamic neural networks in Python with strong GPU acceleration",
-      ext_modules=extensions,
-      cmdclass=cmdclass,
-      packages=packages,
-      package_data={'torch': [
-          'lib/*.so*', 'lib/*.dylib*', 'lib/*.dll', 'lib/*.lib',
-          'lib/torch_shm_manager',
-          'lib/*.h',
-          'lib/include/TH/*.h', 'lib/include/TH/generic/*.h',
-          'lib/include/THC/*.h', 'lib/include/THC/generic/*.h',
-          'lib/include/ATen/*.h',
-      ]},
-      install_requires=['pyyaml', 'numpy'],
-      )
+if __name__ == '__main__':
+    setup(name="torch", version=version,
+          description="Tensors and Dynamic neural networks in Python with strong GPU acceleration",
+          ext_modules=extensions,
+          cmdclass=cmdclass,
+          packages=packages,
+          package_data={'torch': [
+              'lib/*.so*', 'lib/*.dylib*', 'lib/*.dll', 'lib/*.lib',
+              'lib/torch_shm_manager',
+              'lib/*.h',
+              'lib/include/TH/*.h', 'lib/include/TH/generic/*.h',
+              'lib/include/THC/*.h', 'lib/include/THC/generic/*.h',
+              'lib/include/ATen/*.h',
+          ]},
+          install_requires=['pyyaml', 'numpy'],
+          )

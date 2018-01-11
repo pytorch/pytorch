@@ -15,6 +15,13 @@ def _dirichlet_sample_nograd(alpha):
     return probs.clamp_(min=eps, max=1 - eps)
 
 
+# This helper is exposed for testing.
+def _Dirichlet_backward(x, alpha, grad_output):
+    total = alpha.sum(-1, True).expand_as(alpha)
+    grad = torch._C._dirichlet_grad(x, alpha, total)
+    return grad * (grad_output - (x * grad_output).sum(-1, True))
+
+
 class _Dirichlet(Function):
     @staticmethod
     def forward(ctx, alpha):
@@ -26,9 +33,7 @@ class _Dirichlet(Function):
     @once_differentiable
     def backward(ctx, grad_output):
         x, alpha = ctx.saved_tensors
-        total = alpha.sum(-1, True).expand_as(alpha)
-        grad = torch._C._dirichlet_grad(x, alpha, total)
-        return grad_output * grad
+        return _Dirichlet_backward(x, alpha, grad_output)
 
 
 class Dirichlet(Distribution):
