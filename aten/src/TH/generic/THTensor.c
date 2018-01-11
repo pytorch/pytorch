@@ -250,7 +250,7 @@ static int THTensor_(isViewable)(THTensor *tensor, THLongStorage *view_size, THL
     // if end of tensor size chunk, check view
     if ((tensor_d == 0) ||
         (tensor->size[tensor_d - 1] != 1 && tensor->stride[tensor_d - 1] != tensor_numel * chunk_base_stride)) {
-      while ((view_numel < tensor_numel || view_size->data[view_d] == 1) && view_d >= 0) {
+      while (view_d >= 0 && (view_numel < tensor_numel || view_size->data[view_d] == 1)) {
         new_stride->data[view_d] = view_numel * chunk_base_stride;
         view_numel *= view_size->data[view_d];
         view_d--;
