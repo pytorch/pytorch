@@ -8,6 +8,7 @@
 #include <mutex>
 #include <set>
 #include <unordered_map>
+#include <vector>
 
 //
 // Yet another caching allocator for CUDA device allocations.

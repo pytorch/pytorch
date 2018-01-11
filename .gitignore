@@ -56,3 +56,4 @@ test/data/linear.pt
 # Ninja files
 .ninja_deps
 .ninja_log
+compile_commands.json

@@ -3,7 +3,7 @@ from numbers import Number
 import torch
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
-from torch.distributions.utils import broadcast_all
+from torch.distributions.utils import _finfo, broadcast_all
 
 
 class Laplace(Distribution):
@@ -35,11 +35,10 @@ class Laplace(Distribution):
 
     def rsample(self, sample_shape=torch.Size()):
         shape = self._extended_shape(sample_shape)
-        u = self.loc.new(*shape).uniform_(-.5, .5)
-        u[u == -0.5] = 0
+        u = self.loc.new(*shape).uniform_(_finfo(self.loc).eps - 1, 1)
         # TODO: If we ever implement tensor.nextafter, below is what we want ideally.
         # u = self.loc.new(*shape).uniform_(self.loc.nextafter(-.5, 0), .5)
-        return self.loc - self.scale * u.sign() * torch.log1p(-2 * u.abs())
+        return self.loc - self.scale * u.sign() * torch.log1p(-u.abs())
 
     def log_prob(self, value):
         self._validate_log_prob_arg(value)

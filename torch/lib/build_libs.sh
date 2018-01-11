@@ -53,7 +53,6 @@ if [[ $WITH_CUDA -eq 1 ]]; then
 fi
 CWRAP_FILES="\
 $BASE_DIR/torch/lib/ATen/Declarations.cwrap;\
-$BASE_DIR/torch/lib/ATen/Local.cwrap;\
 $BASE_DIR/torch/lib/THNN/generic/THNN.h;\
 $BASE_DIR/torch/lib/THCUNN/generic/THCUNN.h;\
 $BASE_DIR/torch/lib/ATen/nn.yaml"
