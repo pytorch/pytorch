@@ -17,7 +17,7 @@ def all_generator_source():
 
 inputs = [
     'torch/csrc/generic/TensorMethods.cwrap',
-    'torch/lib/tmp_install/share/ATen/Declarations.yaml',
+    'aten/src/ATen/Declarations.cwrap',
     'tools/autograd/derivatives.yaml',
 ] + glob.glob('torch/csrc/generic/methods/*.cwrap')
 
@@ -86,10 +86,10 @@ def generate_code(ninja_global=None):
         if not os.path.exists(d):
             os.mkdir(d)
     gen_autograd(
-        'torch/lib/tmp_install/share/ATen/Declarations.yaml',
+        'aten/src/ATen/Declarations.cwrap',
         autograd_gen_dir)
     gen_jit_dispatch(
-        'torch/lib/tmp_install/share/ATen/Declarations.yaml',
+        'aten/src/ATen/Declarations.cwrap',
         jit_gen_dir)
 
 # called from ninja
