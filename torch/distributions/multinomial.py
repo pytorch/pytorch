@@ -36,7 +36,7 @@ class Multinomial(Distribution):
         logits (Tensor or Variable): event log probabilities
     """
 
-    params = {'total_count': constraints.nonnegative_integer, 'probs': constraints.simplex}
+    params = {'total_count': constraints.nonnegative_integer, 'probs': constraints.simplex, 'logits': constraints.smaller_than(0)}
 
     def __init__(self, total_count=1, probs=None, logits=None):
         self.total_count = total_count if isinstance(total_count, Number) else total_count.data[0]
