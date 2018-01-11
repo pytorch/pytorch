@@ -96,6 +96,7 @@ def broadcast_all(*values):
             values[idx] = torch.Tensor([values[idx]])
     return values
 
+
 def softmax(tensor):
     """
     Wrapper around softmax to make it work with both Tensors and Variables.

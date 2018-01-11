@@ -9,11 +9,17 @@ from torch.distributions.utils import log_sum_exp, broadcast_all
 
 class Multinomial(Distribution):
     r"""
-    Creates a Multinomial distribution parameterized by `probs` and `total_count`.
-    The innermost dimension of `probs` indexes over categories. All other dimensions index over batches.
-    - `total_count` need not be specified if only .log_prob() is called (see example below)
-    - .sample() requires a single shared `total_count` for all parameters and samples
-    - .log_prob() allows different total_count for each parameter and sample.
+    Creates a Multinomial distribution parameterized by `total_count` and
+    either `probs` or `logits` (but not both). The innermost dimension of
+    `probs` indexes over categories. All other dimensions index over batches.
+
+    Note that `total_count` need not be specified if only :meth:`log_prob` is
+    called (see example below)
+
+    -   :meth:`sample` requires a single shared `total_count` for all
+        parameters and samples.
+    -   :meth:`log_prob` allows different `total_count` for each parameter and
+        sample.
 
     Example::
 
@@ -29,24 +35,24 @@ class Multinomial(Distribution):
         -4.1338
         [torch.FloatTensor of size 1]
 
-
     Args:
-        total_count (Tensor or Variable): number of trials
+        total_count (int or Tensor or Variable): number of trials
         probs (Tensor or Variable): event probabilities
         logits (Tensor or Variable): event log probabilities
     """
-
-    params = {'total_count': constraints.nonnegative_integer, 'probs': constraints.simplex, 'logits': constraints.smaller_than(0)}
+    params = {'total_count': constraints.nonnegative_integer,
+              'probs': constraints.simplex, 'logits': constraints.real}
 
     def __init__(self, total_count=1, probs=None, logits=None):
-        self.total_count = total_count if isinstance(total_count, Number) else total_count.data[0]
-        if (probs is None) == (logits is None):
-            raise ValueError("Either `probs` or `logits` must be specified, but not both.")
-        if probs is not None:
-            probs = probs / probs.sum(-1, keepdim=True)
+        if isinstance(total_count, Number):
+            self.total_count = total_count
         else:
-            logits = logits - log_sum_exp(logits)
-        self._categorical = Categorical(probs=probs) if probs is not None else Categorical(logits=logits)
+            if isinstance(total_count, Variable):
+                total_count = total_count.data
+            self.total_count = total_count.view(-1)[0]
+            if (total_count != self.total_count).any():
+                raise NotImplementedError('inhomogeneous total_count is not supported')
+        self._categorical = Categorical(probs=probs, logits=logits)
         batch_shape = probs.size()[:-1] if probs is not None else logits.size()[:-1]
         event_shape = probs.size()[-1:] if probs is not None else logits.size()[-1:]
         super(Multinomial, self).__init__(batch_shape, event_shape)
@@ -65,7 +71,7 @@ class Multinomial(Distribution):
 
     def sample(self, sample_shape=torch.Size()):
         sample_shape = torch.Size(sample_shape)
-        samples = self._categorical.sample(torch.Size((self.total_count,))+sample_shape)
+        samples = self._categorical.sample(torch.Size((self.total_count,)) + sample_shape)
         # samples.shape is (total_count, sample_shape, batch_shape), need to change it to
         # (sample_shape, batch_shape, total_count)
         shifted_idx = list(range(samples.dim()))

@@ -329,8 +329,8 @@ class TestDistributions(TestCase):
         total_count = 10
         probabilities = [[0.1, 0.2, 0.3], [0.5, 0.3, 0.2]]
         probabilities_1 = [[1.0, 0.0], [0.0, 1.0]]
-        p = Variable(torch.FloatTensor(probabilities), requires_grad=True)
-        s = Variable(torch.FloatTensor(probabilities_1), requires_grad=True)
+        p = Variable(torch.Tensor(probabilities), requires_grad=True)
+        s = Variable(torch.Tensor(probabilities_1), requires_grad=True)
         self.assertEqual(Multinomial(total_count, p).sample().size(), (2, 3))
         self.assertEqual(Multinomial(total_count, p).sample(sample_shape=(3, 4)).size(), (3, 4, 2, 3))
         self.assertEqual(Multinomial(total_count, p).sample_n(6).size(), (6, 2, 3))

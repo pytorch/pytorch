@@ -10,12 +10,12 @@ __all__ = [
     'integer_interval',
     'interval',
     'is_dependent',
+    'less_than',
     'lower_triangular',
     'nonnegative_integer',
     'positive',
     'real',
     'simplex',
-    'smaller_than',
     'unit_interval',
 ]
 
@@ -112,7 +112,8 @@ class _GreaterThan(Constraint):
     def check(self, value):
         return self.lower_bound <= value
 
-class _SmallerThan(Constraint):
+
+class _LessThan(Constraint):
     """
     Constrain to a real half line `[inf, upper_bound]`.
     """
@@ -121,6 +122,7 @@ class _SmallerThan(Constraint):
 
     def check(self, value):
         return value <= self.upper_bound
+
 
 class _Interval(Constraint):
     """
@@ -160,7 +162,7 @@ integer_interval = _IntegerInterval
 real = _Real()
 positive = _GreaterThan(0)
 greater_than = _GreaterThan
-smaller_than = _SmallerThan
+less_than = _LessThan
 unit_interval = _Interval(0, 1)
 interval = _Interval
 simplex = _Simplex()
