@@ -26,7 +26,14 @@ else:
 
 PRECISION = 1e-4
 
-NO_ARGS = object()
+class NoArgsClass(object):
+    def __iter__(self):
+        return self
+
+    def next(self):
+        raise StopIteration()
+
+NO_ARGS = NoArgsClass()
 
 @contextlib.contextmanager
 def backward_engine(engine):
@@ -2513,10 +2520,7 @@ for test in method_tests:
 
     for dim_perm in product([-1, 1], repeat=len(dim_args_idx)):
         test_name = basic_test_name
-        if args == NO_ARGS:
-            new_args = []
-        else:
-            new_args = [arg * dim_perm[dim_args_idx.index(i)] if i in dim_args_idx else arg for i, arg in enumerate(args)]
+        new_args = [arg * dim_perm[dim_args_idx.index(i)] if i in dim_args_idx else arg for i, arg in enumerate(args)]
         test_name = basic_test_name + ''.join('_neg' + str(i) for i, idx in enumerate(dim_perm) if idx < 0)
         new_args = tuple(new_args)
 
