@@ -419,7 +419,7 @@ __global__ void
 
     *gi = gcx;
 #else
-    float gcx = THCNumerics<T>::tanh(H2F(cy));
+    float gcx = THCNumerics<float>::tanh(H2F(cy));
 
     float gog = H2F(go) * gcx;
     gcx = H2F(go) * H2F(og) * ( 1 - gcx*gcx) + H2F(goc);
