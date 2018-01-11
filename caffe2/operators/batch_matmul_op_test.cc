@@ -17,7 +17,6 @@
 #include <memory>
 #include <vector>
 
-#include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
 #include "caffe2/operators/batch_matmul_op.h"
@@ -25,10 +24,7 @@
 namespace caffe2 {
 namespace {
 
-using testing::ElementsAreArray;
-using testing::Test;
-
-class BatchMatMulOpTest : public Test {
+class BatchMatMulOpTest : public testing::Test {
  protected:
   void SetUp() override {
     cpu_context_ = make_unique<CPUContext>(option_);
@@ -57,7 +53,11 @@ class BatchMatMulOpTest : public Test {
     const Blob* Y_blob = ws_.GetBlob("Y");
     ASSERT_NE(nullptr, Y_blob);
     const auto& Y = Y_blob->Get<TensorCPU>();
-    ASSERT_THAT(Y.dims(), ElementsAreArray(dims));
+    const auto& Y_dims = Y.dims();
+    ASSERT_EQ(dims.size(), Y_dims.size());
+    for (std::size_t i = 0; i < dims.size(); ++i) {
+      ASSERT_EQ(dims[i], Y_dims[i]);
+    }
     for (int i = 0; i < Y.size(); ++i) {
       EXPECT_FLOAT_EQ(value, Y.data<float>()[i]);
     }
