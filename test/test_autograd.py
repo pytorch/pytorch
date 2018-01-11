@@ -26,6 +26,7 @@ else:
 
 PRECISION = 1e-4
 
+
 class NoArgsClass(object):
     def __iter__(self):
         return self
@@ -35,6 +36,7 @@ class NoArgsClass(object):
     next = __next__  # Python 2 compatibility
 
 NO_ARGS = NoArgsClass()
+
 
 @contextlib.contextmanager
 def backward_engine(engine):
@@ -2242,7 +2244,8 @@ method_tests = [
     ('det', lambda: random_square_matrix_of_rank(S, S - 2), NO_ARGS, 'dim2_null', NO_ARGS, [skipIfNoLapack]),
     ('det', lambda: random_square_matrix_of_rank(S, 1), NO_ARGS, 'rank1', NO_ARGS, [skipIfNoLapack]),
     ('det', lambda: random_square_matrix_of_rank(S, 2), NO_ARGS, 'rank2', NO_ARGS, [skipIfNoLapack]),
-    ('det', lambda: random_fullrank_matrix_distinct_singular_value(S), NO_ARGS, 'distinct_postive_s', NO_ARGS, [skipIfNoLapack]),
+    ('det', lambda: random_fullrank_matrix_distinct_singular_value(S), NO_ARGS,
+     'distinct_postive_s', NO_ARGS, [skipIfNoLapack]),
     ('svd', lambda: random_fullrank_matrix_distinct_singular_value(S), NO_ARGS, '', NO_ARGS, [skipIfNoLapack]),
     ('gesv', (S, S), ((S, S),), '', NO_ARGS, [skipIfNoLapack]),
     ('eq_', (S, S, S), ((S, S, S),)),
