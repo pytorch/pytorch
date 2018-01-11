@@ -112,7 +112,7 @@ def _x_log_x(tensor):
     """
     Utility function for calculating x log x
     """
-    return x * x.log()
+    return tensor * tensor.log()
 
 
 def kl_divergence(p, q):
@@ -468,7 +468,7 @@ def _kl_uniform_beta(p, q):
 
 @register_kl(Uniform, Exponential)
 def _kl_uniform_exponetial(p, q):
-    result = -p.entropy() + q.rate * (p.high + p.low - 2) * 0.5
+    result = q.rate * (p.high + p.low) / 2 - ((p.high - p.low) * q.rate).log()
     result[p.low < q.support.lower_bound] = float('inf')
     return result
 
@@ -483,6 +483,16 @@ def _kl_uniform_gamma(p, q):
     result = -t1 + t2 + t3 + t4
     result[p.low < q.support.lower_bound] = float('inf')
     return result
+
+
+@register_kl(Uniform, Gumbel)
+def _kl_uniform_gumbel(p, q):
+    common_term = q.scale / (p.high - p.low)
+    high_loc_diff = (p.high - q.loc) / q.scale
+    low_loc_diff = (p.low - q.loc) / q.scale
+    t1 = common_term.log() + 0.5 * (high_loc_diff + low_loc_diff)
+    t2 = common_term * (torch.exp(-high_loc_diff) - torch.exp(-low_loc_diff))
+    return t1 - t2
 
 # TODO: Uniform-Laplace KL Divergence
 

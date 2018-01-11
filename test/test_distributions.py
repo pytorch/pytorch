@@ -1237,6 +1237,11 @@ class TestKL(TestCase):
             (Pareto(1, 2), Exponential(3)),  # This case fails for n = 10000
             (Pareto(1, 2), Gamma(3, 4)),  # This case fails for n = 10000, 21000
             (Pareto(1, 3), Normal(-2, 4)),
+            (Uniform(0.25, 0.75), Beta(3, 4)),
+            (Uniform(1, 2), Exponential(3)),
+            (Uniform(1, 2), Gamma(3, 4)),
+            (Uniform(-1, 2), Gumbel(-3, 4)),
+            (Uniform(-1, 2), Normal(-3, 4)),
         ]
 
     def test_kl_monte_carlo(self):
