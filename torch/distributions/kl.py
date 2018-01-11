@@ -103,6 +103,13 @@ def _infinite_like(tensor):
     return tensor.new([float('inf')]).expand_as(tensor)
 
 
+def _x_log_x(tensor):
+    """
+    Utility function for calculating x log x
+    """
+    return x * x.log()
+
+
 def kl_divergence(p, q):
     r"""
     Compute Kullback-Leibler divergence :math:`KL(p \| q)` between two distributions.
@@ -352,11 +359,34 @@ def _kl_pareto_normal(p, q):
 def _kl_uniform_beta(p, q):
     common_term = p.high - p.low
     t1 = torch.log(common_term)
-    def ret_x_log_x(tensor):
-        return x * x.log()
-    t2 = (q.alpha - 1) * (ret_x_log_x(p.high) - ret_x_log_x(p.low) - common_term) / common_term
-    t3 = (q.beta - 1) * (ret_x_log_x((1 - p.high)) - ret_x_log_x((1 - p.low)) + common_term) / common_term
+    t2 = (q.alpha - 1) * (_x_log_x(p.high) - _x_log_x(p.low) - common_term) / common_term
+    t3 = (q.beta - 1) * (_x_log_x((1 - p.high)) - _x_log_x((1 - p.low)) + common_term) / common_term
     t4 = q.alpha.lgamma() + q.beta.lgamma() - (q.alpha + q.beta).lgamma()
     result = -t1 -t2 + t3 + t4
     result[(p.high > q.support.upper_bound) | (p.low < q.support.lower_bound)] = float('inf')
     return result
+
+@register_kl(Uniform, Exponential)
+def _kl_uniform_exponetial(p, q):
+    result = -p.entropy() + q.rate * (p.high + p.low - 2) * 0.5
+    result[p.low < q.support.lower_bound] = float('inf')
+    return result
+
+@register_kl(Uniform, Gamma)
+def _kl_uniform_gamma(p, q):
+    common_term = p.high - p.low
+    t1 = common_term.log()
+    t2 = q.alpha.lgamma() - q.alpha * q.beta.log()
+    t3 = (1 - q.alpha) * (_x_log_x(p.high) - _x_log_x(p.low) - common_term) / common_term
+    t4 = q.beta * (p.high + p.low) / 2
+    result = -t1 + t2 + t3 + t4
+    result[p.low < q.support.lower_bound] = float('inf')
+    return result
+
+@register_kl(Uniform, Normal)
+def _kl_uniform_normal(p, q):
+    common_term = p.high - p.low
+    t1 = (math.sqrt(math.pi * 2) * q.std / common_term).log()
+    t2 = (common_term).pow(2) / 12
+    t3 = ((p.high + p.low - 2 * q.mean) / 2).pow(2)
+    return t1 + 0.5 * (t2 + t3) / q.std.pow(2)
