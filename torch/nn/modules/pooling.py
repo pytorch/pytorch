@@ -148,7 +148,7 @@ class MaxPool2d(Module):
         padh, padw = _pair(self.padding)
         dilh, dilw = _pair(self.dilation)
         padding_str = ', padding=(' + str(padh) + ', ' + str(padw) + ')' \
-            if padh != 0 and padw != 0 else ''
+            if padh != 0 or padw != 0 else ''
         dilation_str = (', dilation=(' + str(dilh) + ', ' + str(dilw) + ')'
                         if dilh != 0 and dilw != 0 else '')
         ceil_str = ', ceil_mode=' + str(self.ceil_mode)
