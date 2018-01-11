@@ -14,7 +14,11 @@
  * limitations under the License.
  */
 
+#include <memory>
+#include <vector>
+
 #include <gtest/gtest.h>
+
 #include "caffe2/core/blob.h"
 #include "caffe2/core/context.h"
 #include "caffe2/core/tensor.h"
@@ -115,6 +119,71 @@ TEST(MathTest, GemmNoTransTrans) {
     CHECK_EQ(Y.data<float>()[i], 20) << i;
   }
 }
+
+namespace {
+
+class GemmBatchedTest
+    : public testing::TestWithParam<testing::tuple<bool, bool>> {
+ protected:
+  void SetUp() override {
+    cpu_context_ = make_unique<CPUContext>(option_);
+    X_.Resize(std::vector<TIndex>{3, 5, 10});
+    W_.Resize(std::vector<TIndex>{3, 6, 10});
+    Y_.Resize(std::vector<TIndex>{3, 5, 6});
+    math::Set<float, CPUContext>(
+        X_.size(), 1, X_.mutable_data<float>(), cpu_context_.get());
+    math::Set<float, CPUContext>(
+        W_.size(), 1, W_.mutable_data<float>(), cpu_context_.get());
+    trans_X_ = std::get<0>(GetParam());
+    trans_W_ = std::get<1>(GetParam());
+  }
+
+  void RunGemmBatched(const float alpha, const float beta) {
+    math::GemmBatched(
+        trans_X_ ? CblasTrans : CblasNoTrans,
+        trans_W_ ? CblasTrans : CblasNoTrans,
+        3,
+        5,
+        6,
+        10,
+        alpha,
+        X_.template data<float>(),
+        W_.template data<float>(),
+        beta,
+        Y_.template mutable_data<float>(),
+        cpu_context_.get());
+  }
+
+  void VerifyOutput(const float value) const {
+    for (int i = 0; i < Y_.size(); ++i) {
+      EXPECT_FLOAT_EQ(value, Y_.template data<float>()[i]);
+    }
+  }
+
+  DeviceOption option_;
+  std::unique_ptr<CPUContext> cpu_context_;
+  TensorCPU X_;
+  TensorCPU W_;
+  TensorCPU Y_;
+  bool trans_X_;
+  bool trans_W_;
+};
+
+TEST_P(GemmBatchedTest, GemmBatchedFloatTest) {
+  RunGemmBatched(1.0f, 0.0f);
+  VerifyOutput(10.0f);
+  RunGemmBatched(1.0f, 0.5f);
+  VerifyOutput(15.0f);
+  RunGemmBatched(0.5f, 1.0f);
+  VerifyOutput(20.0f);
+}
+
+INSTANTIATE_TEST_CASE_P(
+    GemmBatchedTrans,
+    GemmBatchedTest,
+    testing::Combine(testing::Bool(), testing::Bool()));
+
+} // namespace
 
 TEST(MathTest, GemvNoTrans) {
   DeviceOption option;

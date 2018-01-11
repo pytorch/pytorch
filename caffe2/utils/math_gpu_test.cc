@@ -15,8 +15,11 @@
  */
 
 #include <iostream>
+#include <memory>
+#include <vector>
 
 #include <gtest/gtest.h>
+
 #include "caffe2/core/context.h"
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/core/flags.h"
@@ -253,5 +256,85 @@ TEST(MathUtilGPUTest, testCopyVector) {
       },
       [](int i) { return 5.0f - i; });
 }
+
+namespace {
+
+class GemmBatchedGPUTest
+    : public testing::TestWithParam<testing::tuple<bool, bool>> {
+ protected:
+  void SetUp() override {
+    if (!HasCudaGPU()) {
+      return;
+    }
+    option_.set_device_type(CUDA);
+    cuda_context_ = make_unique<CUDAContext>(option_);
+    Blob* X_blob = ws_.CreateBlob("X");
+    Blob* W_blob = ws_.CreateBlob("W");
+    Blob* Y_blob = ws_.CreateBlob("Y");
+    X_ = X_blob->GetMutable<Tensor<CUDAContext>>();
+    W_ = W_blob->GetMutable<Tensor<CUDAContext>>();
+    Y_ = Y_blob->GetMutable<Tensor<CUDAContext>>();
+    X_->Resize(std::vector<TIndex>{3, 5, 10});
+    W_->Resize(std::vector<TIndex>{3, 6, 10});
+    Y_->Resize(std::vector<TIndex>{3, 5, 6});
+    math::Set<float, CUDAContext>(
+        X_->size(), 1.0f, X_->mutable_data<float>(), cuda_context_.get());
+    math::Set<float, CUDAContext>(
+        W_->size(), 1.0f, W_->mutable_data<float>(), cuda_context_.get());
+    trans_X_ = std::get<0>(GetParam());
+    trans_W_ = std::get<1>(GetParam());
+  }
+
+  void RunGemmBatched(const float alpha, const float beta) {
+    math::GemmBatched(
+        trans_X_ ? CblasTrans : CblasNoTrans,
+        trans_W_ ? CblasTrans : CblasNoTrans,
+        3,
+        5,
+        6,
+        10,
+        alpha,
+        X_->template data<float>(),
+        W_->template data<float>(),
+        beta,
+        Y_->template mutable_data<float>(),
+        cuda_context_.get());
+  }
+
+  void VerifyOutput(const float value) const {
+    TensorCPU Y_cpu(*Y_);
+    for (int i = 0; i < Y_cpu.size(); ++i) {
+      EXPECT_FLOAT_EQ(value, Y_cpu.template data<float>()[i]);
+    }
+  }
+
+  Workspace ws_;
+  DeviceOption option_;
+  std::unique_ptr<CUDAContext> cuda_context_;
+  Tensor<CUDAContext>* X_ = nullptr;
+  Tensor<CUDAContext>* W_ = nullptr;
+  Tensor<CUDAContext>* Y_ = nullptr;
+  bool trans_X_;
+  bool trans_W_;
+};
+
+TEST_P(GemmBatchedGPUTest, GemmBatchedGPUFloatTest) {
+  if (!HasCudaGPU()) {
+    return;
+  }
+  RunGemmBatched(1.0f, 0.0f);
+  VerifyOutput(10.0f);
+  RunGemmBatched(1.0f, 0.5f);
+  VerifyOutput(15.0f);
+  RunGemmBatched(0.5f, 1.0f);
+  VerifyOutput(20.0f);
+}
+
+INSTANTIATE_TEST_CASE_P(
+    GemmBatchedGPUTrans,
+    GemmBatchedGPUTest,
+    testing::Combine(testing::Bool(), testing::Bool()));
+
+} // namespace
 
 } // namespace caffe2

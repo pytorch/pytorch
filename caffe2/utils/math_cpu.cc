@@ -34,6 +34,7 @@
 #include <numeric>
 #include <random>
 #include <unordered_set>
+#include <vector>
 
 #include "caffe2/utils/math.h"
 #include "caffe2/utils/cpu_neon.h"
@@ -425,10 +426,7 @@ template <>
 void GemmBatched<float, CPUContext>(
     const CBLAS_TRANSPOSE TransA,
     const CBLAS_TRANSPOSE TransB,
-    const int A_size,
-    const int A_batches,
-    const int B_size,
-    const int B_batches,
+    const int batch_size,
     const int M,
     const int N,
     const int K,
@@ -440,25 +438,55 @@ void GemmBatched<float, CPUContext>(
     CPUContext* context,
     Tensor<CPUContext>*, /* scratch */
     TensorProto::DataType /* math_type */) {
+  const int a_stride = M * K;
+  const int b_stride = K * N;
+  const int c_stride = M * N;
 
-  auto a_offset = A_size / A_batches;
-  auto b_offset = B_size / B_batches;
-  auto y_offset = M * N;
+#ifdef CAFFE2_USE_MKL
+  const int lda = (TransA == CblasNoTrans) ? K : M;
+  const int ldb = (TransB == CblasNoTrans) ? N : K;
+  std::vector<const float*> a_array(batch_size, nullptr);
+  std::vector<const float*> b_array(batch_size, nullptr);
+  std::vector<float*> c_array(batch_size, nullptr);
+  for (int i = 0; i < batch_size; ++i) {
+    a_array[i] = A + a_stride * i;
+    b_array[i] = B + b_stride * i;
+    c_array[i] = C + c_stride * i;
+  }
+  cblas_sgemm_batch(
+      CblasRowMajor,
+      &TransA,
+      &TransB,
+      &M,
+      &N,
+      &K,
+      &alpha,
+      a_array.data(),
+      &lda,
+      b_array.data(),
+      &ldb,
+      &beta,
+      c_array.data(),
+      &N, // ldc_array
+      1,
+      &batch_size);
+#else // CAFFE2_USE_MKL
   // loop over matrices in the batch
-  for (int i = 0; i < A_batches; ++i) {
+  for (int i = 0; i < batch_size; ++i) {
     math::Gemm<float, CPUContext>(
         TransA,
         TransB,
         M,
         N,
         K,
-        1,
-        A + a_offset * i,
-        B + b_offset * i,
-        0,
-        C + y_offset * i,
+        alpha,
+        A + a_stride * i,
+        B + b_stride * i,
+        beta,
+        C + c_stride * i,
         context);
   }
+#endif
 }
 
 ////////////////////////////////////////////////////////////////////////////////

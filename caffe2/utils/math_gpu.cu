@@ -281,10 +281,7 @@ template <>
 void GemmBatched<float, CUDAContext>(
     const CBLAS_TRANSPOSE TransA,
     const CBLAS_TRANSPOSE TransB,
-    const int A_size,
-    const int A_batches,
-    const int B_size,
-    const int B_batches,
+    const int batch_size,
     const int M,
     const int N,
     const int K,
@@ -296,55 +293,53 @@ void GemmBatched<float, CUDAContext>(
     CUDAContext* context,
     Tensor<CUDAContext>* scratch,
     TensorProto::DataType math_type) {
-
+  const int a_stride = M * K;
+  const int b_stride = K * N;
+  const int c_stride = M * N;
 #if __CUDACC_VER_MAJOR__ < 8
-  auto a_offset = A_size / A_batches;
-  auto b_offset = B_size / B_batches;
-  auto y_offset = M * N;
   // loop over matrices in the batch
-  for (int i = 0; i < A_batches; ++i) {
+  for (int i = 0; i < batch_size; ++i) {
     math::Gemm<float, CUDAContext>(
         TransA,
         TransB,
         M,
         N,
         K,
-        1,
-        A + a_offset * i,
-        B + b_offset * i,
-        0,
-        C + y_offset * i,
+        alpha,
+        A + a_stride * i,
+        B + b_stride * i,
+        beta,
+        C + c_stride * i,
         context);
   }
 #else
   // Note that cublas follows fortran order, so the order is different from
   // the cblas convention.
-  int lda = (TransA == CblasNoTrans) ? K : M;
-  int ldb = (TransB == CblasNoTrans) ? N : K;
-
+  const int lda = (TransA == CblasNoTrans) ? K : M;
+  const int ldb = (TransB == CblasNoTrans) ? N : K;
   cublasOperation_t cuTransA =
       (TransA == CblasNoTrans) ? CUBLAS_OP_N : CUBLAS_OP_T;
   cublasOperation_t cuTransB =
       (TransB == CblasNoTrans) ? CUBLAS_OP_N : CUBLAS_OP_T;
   CUBLAS_ENFORCE(cublasSgemmStridedBatched(
-        context->cublas_handle(),
-        cuTransB,
-        cuTransA,
-        N,
-        M,
-        K,
-        &alpha,
-        B,
-        ldb,
-        B_size / B_batches, // B stride
-        A,
-        lda,
-        A_size / A_batches, // A stride
-        &beta,
-        C,
-        N,
-        M*N,                // C stride
-        A_batches));
+      context->cublas_handle(),
+      cuTransB,
+      cuTransA,
+      N,
+      M,
+      K,
+      &alpha,
+      B,
+      ldb,
+      b_stride,
+      A,
+      lda,
+      a_stride,
+      &beta,
+      C,
+      N,
+      c_stride,
+      batch_size));
 #endif
 }
 
@@ -368,10 +363,7 @@ template <>
 void GemmBatched<float16, CUDAContext>(
     const CBLAS_TRANSPOSE TransA,
     const CBLAS_TRANSPOSE TransB,
-    const int A_size,
-    const int A_batches,
-    const int B_size,
-    const int B_batches,
+    const int batch_size,
     const int M,
     const int N,
     const int K,
@@ -383,24 +375,23 @@ void GemmBatched<float16, CUDAContext>(
     CUDAContext* context,
     Tensor<CUDAContext>* scratch,
     TensorProto::DataType math_type) {
-
+  const int a_stride = M * K;
+  const int b_stride = K * N;
+  const int c_stride = M * N;
 #if __CUDACC_VER_MAJOR__ < 8
-  auto a_offset = A_size / A_batches;
-  auto b_offset = B_size / B_batches;
-  auto y_offset = M * N;
   // loop over matrices in the batch
-  for (int i = 0; i < A_batches; ++i) {
+  for (int i = 0; i < batch_size; ++i) {
     math::Gemm<float16, CUDAContext>(
         TransA,
         TransB,
         M,
         N,
         K,
-        1,
-        A + a_offset * i,
-        B + b_offset * i,
-        0,
-        C + y_offset * i,
+        alpha,
+        A + a_stride * i,
+        B + b_stride * i,
+        beta,
+        C + c_stride * i,
         context);
   }
 #else
@@ -410,11 +401,13 @@ void GemmBatched<float16, CUDAContext>(
   // 3) math_type == FLOAT16, scratch == nullptr = batched Hgemm
 
   if (scratch != nullptr) {
+    const int A_size = a_stride * batch_size;
+    const int B_size = b_stride * batch_size;
     // cast, cublasSgemmStridedBatched, cast
     size_t in_elems = A_size + B_size;
-    size_t out_elems = A_batches*M*N;
+    size_t out_elems = c_stride * batch_size;
 
-    scratch->Resize(in_elems+out_elems);
+    scratch->Resize(in_elems + out_elems);
     float* scratch_ptr = scratch->mutable_data<float>();
 
     float* A_fp32 = scratch_ptr;
@@ -432,13 +425,10 @@ void GemmBatched<float16, CUDAContext>(
                         context->cuda_stream()>>>(B_size, (half*)B, B_fp32);
 
     // run fp32 batched Gemm
-    GemmBatched<float,CUDAContext>(
+    GemmBatched<float, CUDAContext>(
         TransA,
         TransB,
-        A_size,
-        A_batches,
-        B_size,
-        B_batches,
+        batch_size,
         M,
         N,
         K,
@@ -450,35 +440,33 @@ void GemmBatched<float16, CUDAContext>(
         context);
 
     // cast result back to fp16
-    FloatToHalfKernel<<<CAFFE_GET_BLOCKS(A_batches*M*N),
-                        CAFFE_CUDA_NUM_THREADS,
-                        0,
-                        context->cuda_stream()>>>(A_batches*M*N, C_fp32, (half*)C);
+    FloatToHalfKernel<<<
+        CAFFE_GET_BLOCKS(batch_size * M * N),
+        CAFFE_CUDA_NUM_THREADS,
+        0,
+        context->cuda_stream()>>>(batch_size * M * N, C_fp32, (half*)C);
   } else {
     if (math_type == TensorProto_DataType_FLOAT) {
-      auto a_offset = A_size / A_batches;
-      auto b_offset = B_size / B_batches;
-      auto y_offset = M * N;
       // loop over matrices in the batch
-      for (int i = 0; i < A_batches; ++i) {
+      for (int i = 0; i < batch_size; ++i) {
         math::Gemm<float16, CUDAContext>(
             TransA,
             TransB,
             M,
             N,
             K,
-            1,
-            A + a_offset * i,
-            B + b_offset * i,
-            0,
-            C + y_offset * i,
+            alpha,
+            A + a_stride * i,
+            B + b_stride * i,
+            beta,
+            C + c_stride * i,
             context);
       }
     } else if (math_type == TensorProto_DataType_FLOAT16) {
       // Note that cublas follows fortran order, so the order is different from
       // the cblas convention.
-      int lda = (TransA == CblasNoTrans) ? K : M;
-      int ldb = (TransB == CblasNoTrans) ? N : K;
+      const int lda = (TransA == CblasNoTrans) ? K : M;
+      const int ldb = (TransB == CblasNoTrans) ? N : K;
       cublasOperation_t cuTransA =
           (TransA == CblasNoTrans) ? CUBLAS_OP_N : CUBLAS_OP_T;
       cublasOperation_t cuTransB =
@@ -488,24 +476,24 @@ void GemmBatched<float16, CUDAContext>(
       auto alpha_fp16 = convert::floatToHalf(alpha);
       auto beta_fp16 = convert::floatToHalf(beta);
       CUBLAS_ENFORCE(cublasHgemmStridedBatched(
-            context->cublas_handle(),
-            cuTransB,
-            cuTransA,
-            N,
-            M,
-            K,
-            &alpha_fp16,
-            (const __half*)B,
-            ldb,
-            B_size / B_batches,
-            (const __half*)A,
-            lda,
-            A_size / A_batches,
-            &beta_fp16,
-            (__half*)C,
-            N,
-            M*N,
-            A_batches));
+          context->cublas_handle(),
+          cuTransB,
+          cuTransA,
+          N,
+          M,
+          K,
+          &alpha_fp16,
+          (const __half*)B,
+          ldb,
+          b_stride,
+          (const __half*)A,
+          lda,
+          a_stride,
+          &beta_fp16,
+          (__half*)C,
+          N,
+          c_stride,
+          batch_size));
     }
   }
 #endif
@@ -605,10 +593,7 @@ template <>
 void GemmBatched<float, CUDAContext, TensorCoreEngine>(
     const CBLAS_TRANSPOSE TransA,
     const CBLAS_TRANSPOSE TransB,
-    const int A_size,
-    const int A_batches,
-    const int B_size,
-    const int B_batches,
+    const int batch_size,
     const int M,
     const int N,
     const int K,
@@ -623,10 +608,7 @@ void GemmBatched<float, CUDAContext, TensorCoreEngine>(
   return GemmBatched<float, CUDAContext, DefaultEngine>(
       TransA,
       TransB,
-      A_size,
-      A_batches,
-      B_size,
-      B_batches,
+      batch_size,
       M,
       N,
       K,
@@ -644,10 +626,7 @@ template <>
 void GemmBatched<float16, CUDAContext, TensorCoreEngine>(
     const CBLAS_TRANSPOSE TransA,
     const CBLAS_TRANSPOSE TransB,
-    const int A_size,
-    const int A_batches,
-    const int B_size,
-    const int B_batches,
+    const int batch_size,
     const int M,
     const int N,
     const int K,
@@ -662,10 +641,7 @@ void GemmBatched<float16, CUDAContext, TensorCoreEngine>(
   return GemmBatched<float16, CUDAContext, DefaultEngine>(
       TransA,
       TransB,
-      A_size,
-      A_batches,
-      B_size,
-      B_batches,
+      batch_size,
       M,
       N,
       K,
