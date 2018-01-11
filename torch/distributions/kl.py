@@ -20,6 +20,9 @@ _KL_REGISTRY = {}  # Source of truth mapping a few general (type, type) pairs to
 _KL_MEMOIZE = {}  # Memoized version mapping many specific (type, type) pairs to functions.
 
 
+_euler_gamma = 0.57721566490153286060
+
+
 def register_kl(type_p, type_q):
     """
     Decorator to register a pairwise function with :meth:`kl_divergence`.
@@ -153,6 +156,7 @@ def _kl_bernoulli_bernoulli(p, q):
     t2 = (1 - p.probs) * ((1 - p.probs) / (1 - q.probs)).log()
     return t1 + t2
 
+
 @register_kl(Beta, Beta)
 def _kl_beta_beta(p, q):
     sum_params_p = p.alpha + p.beta
@@ -163,6 +167,7 @@ def _kl_beta_beta(p, q):
     t4 = (p.beta - q.beta) * torch.digamma(p.beta)
     t5 = (sum_params_q - sum_params_p) * torch.digamma(sum_params_p)
     return t1 - t2 + t3 + t4 + t5
+
 
 @register_kl(Dirichlet, Dirichlet)
 def _kl_dirichlet_dirichlet(p, q):
@@ -175,11 +180,13 @@ def _kl_dirichlet_dirichlet(p, q):
     t5 = (p.alpha - q.alpha) * (p.alpha.digamma() - sum_p_alpha.digamma())
     return t1 - t3 - t2 + t4 + t5.sum(0)
 
+
 @register_kl(Exponential, Exponential)
 def _kl_exponential_exponential(p, q):
     rate_ratio = q.rate / p.rate
     t1 = -rate_ratio.log()
     return t1 + rate_ratio - 1
+
 
 @register_kl(Gamma, Gamma)
 def _kl_gamma_gamma(p, q):
@@ -188,6 +195,7 @@ def _kl_gamma_gamma(p, q):
     t3 = (p.alpha - q.alpha) * torch.digamma(p.alpha)
     t4 = (q.beta - p.beta) * (p.alpha / p.beta)
     return t1 + t2 + t3 + t4
+
 
 @register_kl(Laplace, Laplace)
 def _kl_laplace_laplace(p, q):
@@ -199,6 +207,7 @@ def _kl_laplace_laplace(p, q):
     t3 = scale_ratio * torch.exp(-loc_abs_diff / p.scale)
     return t1 + t2 + t3 - 1
 
+
 @register_kl(Normal, Normal)
 def _kl_normal_normal(p, q):
     std_dev_ratio = p.std / q.std
@@ -206,6 +215,7 @@ def _kl_normal_normal(p, q):
     t2 = std_dev_ratio.pow(2)
     t3 = ((p.mean - q.mean) / q.std).pow(2)
     return t1 + (t2 + t3 - 1) / 2
+
 
 @register_kl(Pareto, Pareto)
 def _kl_pareto_pareto(p, q):
@@ -218,6 +228,7 @@ def _kl_pareto_pareto(p, q):
     result[p.support.lower_bound < q.support.lower_bound] = float('inf')
     return result
 
+
 @register_kl(Uniform, Uniform)
 def _kl_uniform_uniform(p, q):
     result = ((q.high - q.low) / (p.high - p.low)).log()
@@ -226,13 +237,16 @@ def _kl_uniform_uniform(p, q):
 
 # Different distributions
 
+
 @register_kl(Beta, Pareto)
 def _kl_beta_infinity(p, q):
     return _infinite_like(p.alpha)
 
+
 @register_kl(Beta, Exponential)
 def _kl_beta_exponential(p, q):
     return -p.entropy() - q.rate.log() + q.rate * (p.alpha / (p.alpha + p.beta))
+
 
 @register_kl(Beta, Gamma)
 def _kl_beta_gamma(p, q):
@@ -241,6 +255,7 @@ def _kl_beta_gamma(p, q):
     t3 = (q.alpha - 1) * (p.alpha.digamma() - (p.alpha + p.beta).digamma())
     t4 = q.beta * p.alpha / (p.alpha + p.beta)
     return t1 + t2 - t3 + t4
+
 
 @register_kl(Beta, Normal)
 def _kl_beta_normal(p, q):
@@ -253,11 +268,13 @@ def _kl_beta_normal(p, q):
     t5 = q.mean.pow(2) * 0.5
     return t1 + t2 + (t3 - t4 + t5) / var_normal
 
+
 @register_kl(Beta, Uniform)
 def _kl_beta_uniform(p, q):
     result = -p.entropy() + (q.high - q.low).log()
     result[(q.low > p.support.lower_bound) | (q.high < p.support.upper_bound)] = float('inf')
     return result
+
 
 @register_kl(Exponential, Beta)
 @register_kl(Exponential, Pareto)
@@ -265,11 +282,23 @@ def _kl_beta_uniform(p, q):
 def _kl_exponential_infinity(p, q):
     return _infinite_like(p.rate)
 
+
 @register_kl(Exponential, Gamma)
 def _kl_exponential_gamma(p, q):
     ratio = q.beta / p.rate
     t1 = -q.alpha * torch.log(ratio)
-    return t1 + ratio + q.alpha.lgamma() + q.alpha * 0.57721566490153286060 - 1.57721566490153286060
+    return t1 + ratio + q.alpha.lgamma() + q.alpha * _euler_gamma - (1 + _euler_gamma)
+
+
+@register_kl(Exponential, Gumbel)
+def _kl_exponential_gumbel(p, q):
+    scale_rate_prod = p.rate * q.scale
+    loc_scale_ratio = q.loc / q.scale
+    t1 = scale_rate_prod.log() - 1
+    t2 = torch.exp(loc_scale_ratio) * scale_rate_prod / (scale_rate_prod + 1)
+    t3 = scale_rate_prod.reciprocal()
+    return t1 - loc_scale_ratio + t2 + t3
+
 
 @register_kl(Exponential, Normal)
 def _kl_exponential_normal(p, q):
@@ -281,15 +310,28 @@ def _kl_exponential_normal(p, q):
     t4 = q.mean.pow(2) * 0.5
     return t1 - 1 + (t2 - t3 + t4) / var_normal
 
+
 @register_kl(Gamma, Beta)
 @register_kl(Gamma, Pareto)
 @register_kl(Gamma, Uniform)
 def _kl_gamma_infinity(p, q):
     return _infinite_like(p.alpha)
 
+
 @register_kl(Gamma, Exponential)
 def _kl_gamma_exponential(p, q):
     return -p.entropy() - q.rate.log() + q.rate * p.alpha / p.beta
+
+
+@register_kl(Gamma, Gumbel)
+def _kl_gamma_gumbel(p, q):
+    beta_scale_prod = p.beta * q.scale
+    loc_scale_ratio = q.loc / q.scale
+    t1 = (p.alpha - 1) * p.alpha.digamma() - p.alpha.lgamma() - p.alpha
+    t2 = beta_scale_prod.log() + p.alpha / beta_scale_prod
+    t3 = torch.exp(loc_scale_ratio) * (1 + beta_scale_prod.reciprocal()).pow(-p.alpha) - loc_scale_ratio
+    return t1 + t2 + t3
+
 
 @register_kl(Gamma, Normal)
 def _kl_gamma_exponential(p, q):
@@ -301,6 +343,7 @@ def _kl_gamma_exponential(p, q):
     t4 = 0.5 * q.mean.pow(2)
     return t1 + (p.alpha - 1) * p.alpha.digamma() + (t2 - t3 + t4) / var_normal
 
+
 @register_kl(Gumbel, Beta)
 @register_kl(Gumbel, Exponential)
 @register_kl(Gumbel, Gamma)
@@ -311,13 +354,15 @@ def _kl_gumbel_infinity(p, q):
 
 # TODO: Add Gumbel-Laplace KL Divergence
 
+
 @register_kl(Gumbel, Normal)
 def _kl_gumbel_normal(p, q):
     param_ratio = p.scale / q.std
     t1 = (param_ratio / math.sqrt(2 * math.pi)).log()
     t2 = (math.pi * param_ratio) / 12
-    t3 = ((p.loc + p.scale * (p.euler_gamma_1p - 1) - q.mean) / q.std).pow(2) * 0.5
-    return -t1 + t2 + t3 - p.euler_gamma_1p
+    t3 = ((p.loc + p.scale * _euler_gamma - q.mean) / q.std).pow(2) * 0.5
+    return -t1 + t2 + t3 - (_euler_gamma + 1)
+
 
 @register_kl(Laplace, Beta)
 @register_kl(Laplace, Exponential)
@@ -326,6 +371,7 @@ def _kl_gumbel_normal(p, q):
 @register_kl(Laplace, Uniform)
 def _kl_laplace_infinity(p, q):
     return _infinite_like(p.loc)
+
 
 @register_kl(Laplace, Normal)
 def _kl_laplace_normal(p, q):
@@ -337,6 +383,7 @@ def _kl_laplace_normal(p, q):
     t4 = 0.5 * q.mean.pow(2)
     return -t1 + scale_sqr_var_ratio + (t2 - t3 + t4) / var_normal - 1
 
+
 @register_kl(Normal, Beta)
 @register_kl(Normal, Exponential)
 @register_kl(Normal, Gamma)
@@ -345,16 +392,30 @@ def _kl_laplace_normal(p, q):
 def _kl_normal_infinity(p, q):
     return torch.new(p.mean.size()).fill_(float('inf'))
 
+
+@register_kl(Normal, Gumbel)
+def _kl_normal_gumbel(p, q):
+    mean_scale_ratio = p.mean / q.scale
+    var_scale_sqr_ratio = (p.std / q.scale).pow(2)
+    loc_scale_ratio = q.loc / q.scale
+    t1 = var_scale_sqr_ratio.log() * 0.5
+    t2 = mean_scale_ratio - loc_scale_ratio
+    t3 = torch.exp(-mean_scale_ratio + 0.5 * var_scale_sqr_ratio + loc_scale_ratio)
+    return -t1 + t2 + t3 - (0.5 * (1 + math.log(2 * math.pi)))
+
+
 @register_kl(Normal, Laplace)
-def _kl_normal_laplace(p, q): #  this fails
+def _kl_normal_laplace(p, q):  # this fails
     common_term = (p.std / q.scale)
     common_const = math.sqrt(2.0 / math.pi)
     return (math.log(common_const) - 0.5) - torch.log(common_term) + common_term * common_const
+
 
 @register_kl(Pareto, Beta)
 @register_kl(Pareto, Uniform)
 def _kl_pareto_infinity(p, q):
     return _infinite_like(p.scale)
+
 
 @register_kl(Pareto, Exponential)
 def _kl_pareto_exponential(p, q):
@@ -364,6 +425,7 @@ def _kl_pareto_exponential(p, q):
     result = t1 - t2 + t3 - 1
     result[(p.support.lower_bound < q.support.lower_bound) | (p.alpha <= 1)] = float('inf')
     return result
+
 
 @register_kl(Pareto, Gamma)
 def _kl_pareto_gamma(p, q):
@@ -378,6 +440,7 @@ def _kl_pareto_gamma(p, q):
 
 # TODO: Pareto-Laplace KL Divergence
 
+
 @register_kl(Pareto, Normal)
 def _kl_pareto_normal(p, q):
     var_normal = 2 * q.std.pow(2)
@@ -390,6 +453,7 @@ def _kl_pareto_normal(p, q):
     result[p.alpha <= 2] = float('inf')
     return result
 
+
 @register_kl(Uniform, Beta)
 def _kl_uniform_beta(p, q):
     common_term = p.high - p.low
@@ -397,15 +461,17 @@ def _kl_uniform_beta(p, q):
     t2 = (q.alpha - 1) * (_x_log_x(p.high) - _x_log_x(p.low) - common_term) / common_term
     t3 = (q.beta - 1) * (_x_log_x((1 - p.high)) - _x_log_x((1 - p.low)) + common_term) / common_term
     t4 = q.alpha.lgamma() + q.beta.lgamma() - (q.alpha + q.beta).lgamma()
-    result = -t1 -t2 + t3 + t4
+    result = t3 + t4 - t1 - t2
     result[(p.high > q.support.upper_bound) | (p.low < q.support.lower_bound)] = float('inf')
     return result
+
 
 @register_kl(Uniform, Exponential)
 def _kl_uniform_exponetial(p, q):
     result = -p.entropy() + q.rate * (p.high + p.low - 2) * 0.5
     result[p.low < q.support.lower_bound] = float('inf')
     return result
+
 
 @register_kl(Uniform, Gamma)
 def _kl_uniform_gamma(p, q):
@@ -419,6 +485,7 @@ def _kl_uniform_gamma(p, q):
     return result
 
 # TODO: Uniform-Laplace KL Divergence
+
 
 @register_kl(Uniform, Normal)
 def _kl_uniform_normal(p, q):
