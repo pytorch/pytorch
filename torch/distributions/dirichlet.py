@@ -15,6 +15,7 @@ def _dirichlet_sample_nograd(alpha):
     return probs.clamp_(min=eps, max=1 - eps)
 
 
+# This helper is exposed for testing.
 def _Dirichlet_backward(x, alpha, grad_output):
     total = alpha.sum(-1, True).expand_as(alpha)
     grad = torch._C._dirichlet_grad(x, alpha, total)
