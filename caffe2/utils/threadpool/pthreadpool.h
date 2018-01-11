@@ -21,12 +21,6 @@
 
 #include "ThreadPoolCommon.h"
 
-#ifndef CAFFE2_THREADPOOL_MOBILE
-#error "mobile build state not defined"
-#endif
-
-// ThreadPool only used in mobile builds at the moment
-#if CAFFE2_THREADPOOL_MOBILE
 
 #include <stddef.h> // for size_t
 
@@ -121,7 +115,5 @@ void pthreadpool_destroy(pthreadpool_t threadpool);
 #ifdef __cplusplus
 } /* extern "C" */
 #endif
-
-#endif // CAFFE2_THREADPOOL_MOBILE
 
 #endif // CAFFE2_UTILS_PTHREADPOOL_H_

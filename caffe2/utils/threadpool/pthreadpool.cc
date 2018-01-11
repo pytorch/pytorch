@@ -30,7 +30,6 @@
 #include "caffe2/utils/fixed_divisor.h"
 #include "caffe2/utils/threadpool/pthreadpool.h"
 
-#if CAFFE2_THREADPOOL_MOBILE
 
 static inline size_t divide_round_up(size_t dividend, size_t divisor) {
   if (dividend % divisor == 0) {
@@ -181,5 +180,3 @@ void pthreadpool_compute_2d_tiled(
     pthreadpool_compute_1d(threadpool, (pthreadpool_function_1d_t) compute_2d_tiled, &context, tile_range_i * tile_range_j);
   }
 }
-
-#endif // CAFFE2_THREADPOOL_MOBILE

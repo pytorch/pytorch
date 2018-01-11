@@ -238,13 +238,13 @@ constexpr size_t kIters = 20;
 // TODO(#14383029) cblas_sgemm not yet implemented on limited mobile cases.
 #if !defined(CAFFE2_FB_LIMITED_MOBILE_CAPABILITY)
 
-TEST(MobileNNPACK, Conv_3x3s1) {
+TEST(NNPACK, Conv_3x3s1) {
   for (int i = 0; i < kIters; ++i) {
     runConv(3, 3, 1, 1);
   }
 }
 
-TEST(MobileNNPACK, Conv_3x3s1_precompute) {
+TEST(NNPACK, Conv_3x3s1_precompute) {
   for (int i = 0; i < kIters; ++i) {
     int group = randInt(1, 2);
     runConv(
@@ -261,13 +261,13 @@ TEST(MobileNNPACK, Conv_3x3s1_precompute) {
   }
 }
 
-TEST(MobileNNPACK, Conv_3x3s1_FP16) {
+TEST(NNPACK, Conv_3x3s1_FP16) {
   for (int i = 0; i < kIters; ++i) {
     runConv(3, 3, 1, 1, 1, "WINOGRAD_FP16");
   }
 }
 
-TEST(MobileNNPACK, Conv_3x3s1_FP16_precompute) {
+TEST(NNPACK, Conv_3x3s1_FP16_precompute) {
   for (int i = 0; i < kIters; ++i) {
     int group = randInt(1, 2);
     runConv(
@@ -284,14 +284,14 @@ TEST(MobileNNPACK, Conv_3x3s1_FP16_precompute) {
   }
 }
 
-TEST(MobileNNPACK, Conv_NxNs1) {
+TEST(NNPACK, Conv_NxNs1) {
   for (int i = 0; i < kIters; ++i) {
     int kernel = randInt(2, 10);
     runConv(kernel, kernel, 1, 1);
   }
 }
 
-TEST(MobileNNPACK, Conv_1x1s1) {
+TEST(NNPACK, Conv_1x1s1) {
   for (int i = 0; i < kIters; ++i) {
     auto group = randInt(1, 3);
     auto inChannels = randInt(1, 8) * group;
@@ -301,7 +301,7 @@ TEST(MobileNNPACK, Conv_1x1s1) {
   }
 }
 
-TEST(MobileNNPACK, Conv_1x1s1_precompute) {
+TEST(NNPACK, Conv_1x1s1_precompute) {
   for (int i = 0; i < kIters; ++i) {
     auto group = randInt(1, 3);
     auto inChannels = randInt(1, 8) * group;
@@ -312,7 +312,7 @@ TEST(MobileNNPACK, Conv_1x1s1_precompute) {
   }
 }
 
-TEST(MobileNNPACK, Conv_NxNs_grouped) {
+TEST(NNPACK, Conv_NxNs_grouped) {
   for (int i = 0; i < kIters; ++i) {
     int group = randInt(2, 3);
     int iC = randInt(1, 6) * group;
@@ -323,7 +323,7 @@ TEST(MobileNNPACK, Conv_NxNs_grouped) {
   }
 }
 
-TEST(MobileNNPACK, Conv_NxNs_grouped_precompute) {
+TEST(NNPACK, Conv_NxNs_grouped_precompute) {
   for (int i = 0; i < kIters; ++i) {
     int group = randInt(2, 3);
     int iC = randInt(1, 6) * group;
@@ -334,7 +334,7 @@ TEST(MobileNNPACK, Conv_NxNs_grouped_precompute) {
   }
 }
 
-TEST(MobileNNPACK, Conv_NxNsW) {
+TEST(NNPACK, Conv_NxNsW) {
   for (int i = 0; i < 3; ++i) {
     int kernel = randInt(3, 5);
     int stride = randInt(1, kernel - 1);
@@ -342,7 +342,7 @@ TEST(MobileNNPACK, Conv_NxNsW) {
   }
 }
 
-TEST(MobileNNPACK, Conv_HxWsHxW) {
+TEST(NNPACK, Conv_HxWsHxW) {
   for (int i = 0; i < 3; ++i) {
     int kernelH = randInt(2, 5);
     int kernelW = randInt(2, 5);
@@ -352,7 +352,7 @@ TEST(MobileNNPACK, Conv_HxWsHxW) {
   }
 }
 
-TEST(MobileNNPACK, Depthwise3x3Conv) {
+TEST(NNPACK, Depthwise3x3Conv) {
   for (int i = 0; i < kIters; ++i) {
     int channel = 2;
     runConv(

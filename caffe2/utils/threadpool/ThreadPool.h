@@ -19,13 +19,7 @@
 
 #include "ThreadPoolCommon.h"
 
-#ifndef CAFFE2_THREADPOOL_MOBILE
-#error "mobile build state not defined"
-#endif
-
-// ThreadPool only used in mobile builds at the moment
-#if CAFFE2_THREADPOOL_MOBILE
-
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <vector>
@@ -67,7 +61,5 @@ private:
 };
 
 } // namespace caffe2
-
-#endif // CAFFE2_THREADPOOL_MOBILE
 
 #endif // CAFFE2_UTILS_THREADPOOL_H_
