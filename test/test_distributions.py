@@ -29,11 +29,12 @@ from itertools import product
 
 import torch
 from common import TestCase, run_tests, set_rng_seed
-from torch.autograd import Variable, gradcheck
+from torch.autograd import Variable, grad, gradcheck
 from torch.distributions import (Bernoulli, Beta, Categorical, Cauchy, Chi2,
                                  Dirichlet, Exponential, Gamma, Gumbel,
                                  Laplace, Normal, OneHotCategorical, Pareto,
                                  StudentT, Uniform, kl_divergence)
+from torch.distributions.dirichlet import _Dirichlet_backward
 from torch.distributions.constraints import Constraint, is_dependent
 from torch.distributions.utils import _finfo
 
@@ -593,35 +594,6 @@ class TestDistributions(TestCase):
                                         'Gamma(alpha={}, beta={})'.format(alpha, beta))
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
-    def test_gamma_sample_grad(self):
-        set_rng_seed(1)  # see Note [Randomized statistical tests]
-        num_samples = 100
-        for alpha in [1e-2, 1e-1, 1e0, 1e1, 1e2, 1e3, 1e4]:
-            alphas = Variable(torch.FloatTensor([alpha] * num_samples), requires_grad=True)
-            betas = Variable(torch.ones(num_samples).type_as(alphas))
-            x = Gamma(alphas, betas).rsample()
-            x.sum().backward()
-            x, ind = x.data.sort()
-            x = x.numpy()
-            actual_grad = alphas.grad.data[ind].numpy()
-            # Compare with expected gradient dx/dalpha along constant cdf(x,alpha).
-            cdf = scipy.stats.gamma.cdf
-            pdf = scipy.stats.gamma.pdf
-            eps = 0.01 * alpha / (1.0 + alpha ** 0.5)
-            cdf_alpha = (cdf(x, alpha + eps) - cdf(x, alpha - eps)) / (2 * eps)
-            cdf_x = pdf(x, alpha)
-            expected_grad = -cdf_alpha / cdf_x
-            rel_error = np.abs(actual_grad - expected_grad) / (expected_grad + 1e-30)
-            self.assertLess(np.max(rel_error), 0.0005,
-                            '\n'.join(['Bad gradients for Gamma({}, 1)'.format(alpha),
-                                       'x {}'.format(x),
-                                       'expected {}'.format(expected_grad),
-                                       'actual {}'.format(actual_grad),
-                                       'rel error {}'.format(rel_error),
-                                       'max error {}'.format(rel_error.max()),
-                                       'at alpha={}, x={}'.format(alpha, x[rel_error.argmax()])]))
-
-    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_pareto_shape(self):
         scale = Variable(torch.randn(2, 3).abs(), requires_grad=True)
         alpha = Variable(torch.randn(2, 3).abs(), requires_grad=True)
@@ -705,33 +677,6 @@ class TestDistributions(TestCase):
                                         scipy.stats.chi2(df),
                                         'Chi2(df={})'.format(df))
 
-    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
-    def test_chi2_sample_grad(self):
-        set_rng_seed(0)  # see Note [Randomized statistical tests]
-        num_samples = 100
-        for df in [1e-3, 1e-2, 1e-1, 1e0, 1e1, 1e2, 1e3, 1e4]:
-            dfs = Variable(torch.Tensor([df] * num_samples), requires_grad=True)
-            x = Chi2(dfs).rsample()
-            x.sum().backward()
-            x, ind = x.data.sort()
-            x = x.numpy()
-            actual_grad = dfs.grad.data[ind].numpy()
-            # Compare with expected gradient dx/ddf along constant cdf(x,df).
-            cdf = scipy.stats.chi2.cdf
-            pdf = scipy.stats.chi2.pdf
-            eps = 0.02 * df if df < 100 else 0.02 * df ** 0.5
-            cdf_df = (cdf(x, df + eps) - cdf(x, df - eps)) / (2 * eps)
-            cdf_x = pdf(x, df)
-            expected_grad = -cdf_df / cdf_x
-            rel_error = np.abs(actual_grad - expected_grad) / (expected_grad + 1e-100)
-            self.assertLess(np.max(rel_error), 0.005,
-                            '\n'.join(['Bad gradients for Chi2({})'.format(df),
-                                       'x {}'.format(x),
-                                       'expected {}'.format(expected_grad),
-                                       'actual {}'.format(actual_grad),
-                                       'rel error {}'.format(rel_error),
-                                       'max error {}'.format(rel_error.max())]))
-
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_studentT_shape(self):
         df = Variable(torch.exp(torch.randn(2, 3)), requires_grad=True)
@@ -769,8 +714,6 @@ class TestDistributions(TestCase):
             for i in range(num_samples):
                 expected_log_prob = scipy.stats.t.logpdf(x[i], df=df, loc=loc, scale=scale)
                 self.assertAlmostEqual(actual_log_prob[i], expected_log_prob, places=3)
-
-    # TODO: add test_studentT_sample_grad once standard_t_grad() is implemented
 
     def test_dirichlet_shape(self):
         alpha = Variable(torch.exp(torch.randn(2, 3)), requires_grad=True)
@@ -834,35 +777,6 @@ class TestDistributions(TestCase):
         for Tensor in [torch.FloatTensor, torch.DoubleTensor]:
             x = Beta(Tensor([1e-6]), Tensor([1e-6])).sample()[0]
             self.assertTrue(np.isfinite(x) and x > 0, 'Invalid Beta.sample(): {}'.format(x))
-
-    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
-    def test_beta_sample_grad(self):
-        set_rng_seed(0)  # see Note [Randomized statistical tests]
-        num_samples = 20
-        grid = [1e-2, 1e-1, 1e0, 1e1, 1e2]
-        for alpha, beta in product(grid, grid):
-            alphas = Variable(torch.FloatTensor([alpha] * num_samples), requires_grad=True)
-            betas = Variable(torch.FloatTensor([beta] * num_samples).type_as(alphas))
-            x = Beta(alphas, betas).rsample()
-            x.sum().backward()
-            x, ind = x.data.sort()
-            x = x.numpy()
-            actual_grad = alphas.grad.data[ind].numpy()
-            # Compare with expected gradient dx/dalpha along constant cdf(x,alpha,beta).
-            cdf = scipy.stats.beta.cdf
-            pdf = scipy.stats.beta.pdf
-            eps = 0.01 * alpha / (1.0 + np.sqrt(alpha))
-            cdf_alpha = (cdf(x, alpha + eps, beta) - cdf(x, alpha - eps, beta)) / (2 * eps)
-            cdf_x = pdf(x, alpha, beta)
-            expected_grad = -cdf_alpha / cdf_x
-            rel_error = np.abs(actual_grad - expected_grad) / (expected_grad + 1e-100)
-            self.assertLess(np.max(rel_error), 0.001,
-                            '\n'.join(['Bad gradients for Beta({}, {})'.format(alpha, beta),
-                                       'x {}'.format(x),
-                                       'expected {}'.format(expected_grad),
-                                       'actual {}'.format(actual_grad),
-                                       'rel error {}'.format(rel_error),
-                                       'max error {}'.format(rel_error.max())]))
 
     def test_valid_parameter_broadcasting(self):
         # Test correct broadcasting of parameter sizes for distributions that have multiple
@@ -956,6 +870,219 @@ class TestDistributions(TestCase):
 
         for dist, kwargs in invalid_examples:
             self.assertRaises(RuntimeError, dist, **kwargs)
+
+
+# These tests are only needed for a few distributions that implement custom
+# reparameterized gradients. Most .rsample() implementations simply rely on
+# the reparameterization trick and do not need to be tested for accuracy.
+class TestRsample(TestCase):
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    def test_gamma(self):
+        num_samples = 100
+        for alpha in [1e-2, 1e-1, 1e0, 1e1, 1e2, 1e3, 1e4]:
+            alphas = Variable(torch.FloatTensor([alpha] * num_samples), requires_grad=True)
+            betas = Variable(torch.ones(num_samples).type_as(alphas))
+            x = Gamma(alphas, betas).rsample()
+            x.sum().backward()
+            x, ind = x.data.sort()
+            x = x.numpy()
+            actual_grad = alphas.grad.data[ind].numpy()
+            # Compare with expected gradient dx/dalpha along constant cdf(x,alpha).
+            cdf = scipy.stats.gamma.cdf
+            pdf = scipy.stats.gamma.pdf
+            eps = 0.01 * alpha / (1.0 + alpha ** 0.5)
+            cdf_alpha = (cdf(x, alpha + eps) - cdf(x, alpha - eps)) / (2 * eps)
+            cdf_x = pdf(x, alpha)
+            expected_grad = -cdf_alpha / cdf_x
+            rel_error = np.abs(actual_grad - expected_grad) / (expected_grad + 1e-30)
+            self.assertLess(np.max(rel_error), 0.0005, '\n'.join([
+                'Bad gradient dx/alpha for x ~ Gamma({}, 1)'.format(alpha),
+                'x {}'.format(x),
+                'expected {}'.format(expected_grad),
+                'actual {}'.format(actual_grad),
+                'rel error {}'.format(rel_error),
+                'max error {}'.format(rel_error.max()),
+                'at alpha={}, x={}'.format(alpha, x[rel_error.argmax()]),
+            ]))
+
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    def test_chi2(self):
+        num_samples = 100
+        for df in [1e-2, 1e-1, 1e0, 1e1, 1e2, 1e3, 1e4]:
+            dfs = Variable(torch.FloatTensor([df] * num_samples), requires_grad=True)
+            x = Chi2(dfs).rsample()
+            x.sum().backward()
+            x, ind = x.data.sort()
+            x = x.numpy()
+            actual_grad = dfs.grad.data[ind].numpy()
+            # Compare with expected gradient dx/ddf along constant cdf(x,df).
+            cdf = scipy.stats.chi2.cdf
+            pdf = scipy.stats.chi2.pdf
+            eps = 0.01 * df / (1.0 + df ** 0.5)
+            cdf_df = (cdf(x, df + eps) - cdf(x, df - eps)) / (2 * eps)
+            cdf_x = pdf(x, df)
+            expected_grad = -cdf_df / cdf_x
+            rel_error = np.abs(actual_grad - expected_grad) / (expected_grad + 1e-30)
+            self.assertLess(np.max(rel_error), 0.001, '\n'.join([
+                'Bad gradient dx/ddf for x ~ Chi2({})'.format(df),
+                'x {}'.format(x),
+                'expected {}'.format(expected_grad),
+                'actual {}'.format(actual_grad),
+                'rel error {}'.format(rel_error),
+                'max error {}'.format(rel_error.max()),
+            ]))
+
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    def test_dirichlet_on_diagonal(self):
+        num_samples = 20
+        grid = [1e-1, 1e0, 1e1]
+        for a0, a1, a2 in product(grid, grid, grid):
+            alphas = Variable(torch.FloatTensor([[a0, a1, a2]] * num_samples), requires_grad=True)
+            x = Dirichlet(alphas).rsample()[:, 0]
+            x.sum().backward()
+            x, ind = x.data.sort()
+            x = x.numpy()
+            actual_grad = alphas.grad.data[ind].numpy()[:, 0]
+            # Compare with expected gradient dx/dalpha0 along constant cdf(x,alpha).
+            # This reduces to a distribution Beta(alpha[0], alpha[1] + alpha[2]).
+            cdf = scipy.stats.beta.cdf
+            pdf = scipy.stats.beta.pdf
+            alpha, beta = a0, a1 + a2
+            eps = 0.01 * alpha / (1.0 + np.sqrt(alpha))
+            cdf_alpha = (cdf(x, alpha + eps, beta) - cdf(x, alpha - eps, beta)) / (2 * eps)
+            cdf_x = pdf(x, alpha, beta)
+            expected_grad = -cdf_alpha / cdf_x
+            rel_error = np.abs(actual_grad - expected_grad) / (expected_grad + 1e-30)
+            self.assertLess(np.max(rel_error), 0.001, '\n'.join([
+                'Bad gradient dx[0]/dalpha[0] for Dirichlet([{}, {}, {}])'.format(a0, a1, a2),
+                'x {}'.format(x),
+                'expected {}'.format(expected_grad),
+                'actual {}'.format(actual_grad),
+                'rel error {}'.format(rel_error),
+                'max error {}'.format(rel_error.max()),
+                'at x={}'.format(x[rel_error.argmax()]),
+            ]))
+
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    def test_beta_wrt_alpha(self):
+        num_samples = 20
+        grid = [1e-2, 1e-1, 1e0, 1e1, 1e2]
+        for alpha, beta in product(grid, grid):
+            alphas = Variable(torch.FloatTensor([alpha] * num_samples), requires_grad=True)
+            betas = Variable(torch.FloatTensor([beta] * num_samples).type_as(alphas))
+            x = Beta(alphas, betas).rsample()
+            x.sum().backward()
+            x, ind = x.data.sort()
+            x = x.numpy()
+            actual_grad = alphas.grad.data[ind].numpy()
+            # Compare with expected gradient dx/dalpha along constant cdf(x,alpha,beta).
+            cdf = scipy.stats.beta.cdf
+            pdf = scipy.stats.beta.pdf
+            eps = 0.01 * alpha / (1.0 + np.sqrt(alpha))
+            cdf_alpha = (cdf(x, alpha + eps, beta) - cdf(x, alpha - eps, beta)) / (2 * eps)
+            cdf_x = pdf(x, alpha, beta)
+            expected_grad = -cdf_alpha / cdf_x
+            rel_error = np.abs(actual_grad - expected_grad) / (expected_grad + 1e-30)
+            self.assertLess(np.max(rel_error), 0.005, '\n'.join([
+                'Bad gradient dx/dalpha for x ~ Beta({}, {})'.format(alpha, beta),
+                'x {}'.format(x),
+                'expected {}'.format(expected_grad),
+                'actual {}'.format(actual_grad),
+                'rel error {}'.format(rel_error),
+                'max error {}'.format(rel_error.max()),
+                'at x = {}'.format(x[rel_error.argmax()]),
+            ]))
+
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    def test_beta_wrt_beta(self):
+        num_samples = 20
+        grid = [1e-2, 1e-1, 1e0, 1e1, 1e2]
+        for alpha, beta in product(grid, grid):
+            betas = Variable(torch.FloatTensor([beta] * num_samples), requires_grad=True)
+            alphas = Variable(torch.FloatTensor([alpha] * num_samples).type_as(betas))
+            x = Beta(alphas, betas).rsample()
+            x.sum().backward()
+            x, ind = x.data.sort()
+            x = x.numpy()
+            actual_grad = betas.grad.data[ind].numpy()
+            # Compare with expected gradient dx/dbeta along constant cdf(x,alpha,beta).
+            cdf = scipy.stats.beta.cdf
+            pdf = scipy.stats.beta.pdf
+            eps = 0.01 * beta / (1.0 + np.sqrt(beta))
+            cdf_beta = (cdf(x, alpha, beta + eps) - cdf(x, alpha, beta - eps)) / (2 * eps)
+            cdf_x = pdf(x, alpha, beta)
+            expected_grad = -cdf_beta / cdf_x
+            rel_error = np.abs(actual_grad - expected_grad) / (expected_grad + 1e-30)
+            self.assertLess(np.max(rel_error), 0.005, '\n'.join([
+                'Bad gradient dx/dbeta for x ~ Beta({}, {})'.format(alpha, beta),
+                'x {}'.format(x),
+                'expected {}'.format(expected_grad),
+                'actual {}'.format(actual_grad),
+                'rel error {}'.format(rel_error),
+                'max error {}'.format(rel_error.max()),
+                'at x = {!r}'.format(x[rel_error.argmax()]),
+            ]))
+
+    def test_dirichlet_multivariate(self):
+        alpha_crit = 0.25 * (5.0 ** 0.5 - 1.0)
+        num_samples = 100000
+        for shift in [-0.1, -0.05, -0.01, 0.0, 0.01, 0.05, 0.10]:
+            alpha = alpha_crit + shift
+            alpha = Variable(torch.FloatTensor([alpha]), requires_grad=True)
+            alpha_vec = torch.cat([alpha, alpha, alpha.new([1])])
+            z = Dirichlet(alpha_vec.expand(num_samples, 3)).rsample()
+            mean_z3 = 1.0 / (2.0 * alpha + 1.0)
+            loss = torch.pow(z[:, 2] - mean_z3, 2.0).mean()
+            actual_grad = grad(loss, [alpha])[0].data
+            # Compute expected gradient by hand.
+            num = 1.0 - 2.0 * alpha - 4.0 * alpha**2
+            den = (1.0 + alpha)**2 * (1.0 + 2.0 * alpha)**3
+            expected_grad = (num / den).data
+            self.assertEqual(actual_grad, expected_grad, 0.002, '\n'.join([
+                "alpha = alpha_c + %.2g" % shift,
+                "expected_grad: %.5g" % expected_grad,
+                "actual_grad: %.5g" % actual_grad,
+                "error = %.2g" % torch.abs(expected_grad - actual_grad).max(),
+            ]))
+
+    def test_dirichlet_tangent_field(self):
+        num_samples = 20
+        alpha_grid = [0.5, 1.0, 2.0]
+
+        # v = dx/dalpha[0] is the reparameterized gradient aka tangent field.
+        def compute_v(x, alpha):
+            return torch.stack([
+                _Dirichlet_backward(x, alpha, torch.eye(3, 3)[i].expand_as(x))[:, 0]
+                for i in range(3)
+            ], dim=-1)
+
+        for a1, a2, a3 in product(alpha_grid, alpha_grid, alpha_grid):
+            alpha = Variable(torch.Tensor([a1, a2, a3]).expand(num_samples, 3), requires_grad=True)
+            x = Dirichlet(alpha).rsample()
+            dlogp_da = grad([Dirichlet(alpha).log_prob(x.detach()).sum()],
+                            [alpha], retain_graph=True)[0].data[:, 0]
+            dlogp_dx = grad([Dirichlet(alpha.detach()).log_prob(x).sum()],
+                            [x], retain_graph=True)[0].data
+            v = torch.stack([grad([x[:, i].sum()], [alpha], retain_graph=True)[0].data[:, 0]
+                             for i in range(3)], dim=-1)
+            # Compute ramaining properties by finite difference.
+            x = x.data
+            alpha = alpha.data
+            self.assertEqual(compute_v(x, alpha), v, message='Bug in compute_v() helper')
+            # dx is an arbitrary orthonormal basis tangent to the simplex.
+            dx = torch.Tensor([[2, -1, -1], [0, 1, -1]])
+            dx /= dx.norm(2, -1, True)
+            eps = 1e-2 * x.min(-1, True)[0]  # avoid boundary
+            dv0 = (compute_v(x + eps * dx[0], alpha) - compute_v(x - eps * dx[0], alpha)) / (2 * eps)
+            dv1 = (compute_v(x + eps * dx[1], alpha) - compute_v(x - eps * dx[1], alpha)) / (2 * eps)
+            div_v = (dv0 * dx[0] + dv1 * dx[1]).sum(-1)
+            # This is a modification of the standard continuity equation, using the product rule to allow
+            # expression in terms of log_prob rather than the less numerically stable log_prob.exp().
+            error = dlogp_da + (dlogp_dx * v).sum(-1) + div_v
+            self.assertLess(torch.abs(error).max(), 0.005, '\n'.join([
+                'Dirichlet([{}, {}, {}]) gradient violates continuity equation:'.format(a1, a2, a3),
+                'error = {}'.format(error),
+            ]))
 
 
 class TestDistributionShapes(TestCase):
