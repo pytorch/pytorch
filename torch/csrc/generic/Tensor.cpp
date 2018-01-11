@@ -719,7 +719,7 @@ static bool THPTensor_(_convertToTensorIndexers)(
   // store THPTensors rather than THTensors.
 
   std::vector<Py_ssize_t> indexingDims;
-  std::vector<THPIndexTensor*>indexers;
+  std::vector<THPPointer<THPIndexTensor>> indexers;
 
   if (THPTensor_(_checkSingleSequenceTriggersAdvancedIndexing)(index)) {
     // Handle the special case where we only have a single indexer
@@ -732,7 +732,7 @@ static bool THPTensor_(_convertToTensorIndexers)(
       return false;
     }
     indexingDims.push_back(0);
-    indexers.push_back(indexer);
+    indexers.push_back(THPPointer<THPIndexTensor>(indexer));
   } else {
     // The top-level indexer should be a sequence, per the check above
     THPObjectPtr fast(PySequence_Fast(index, NULL));
@@ -768,14 +768,10 @@ static bool THPTensor_(_convertToTensorIndexers)(
               "convertible to LongTensors. The indexing object at position %zd is of type %s "
               "and cannot be converted", i, THPUtils_typename(obj));
 
-          // Clean up Indexers
-          for (auto& idx : indexers) {
-            Py_DECREF(idx);
-          }
           return false;
         }
         indexingDims.push_back(i + ellipsisOffset);
-        indexers.push_back(indexer);
+        indexers.push_back(THPPointer<THPIndexTensor>(indexer));
       }
     }
   }
@@ -789,7 +785,7 @@ static bool THPTensor_(_convertToTensorIndexers)(
   for (const auto& indexer : indexers) {
     maybeBroadcasted.emplace_back(THIndexTensor_(new)(LIBRARY_STATE_NOARGS));
     // borrow the underlying Tensor from the indexer map
-    candidates.emplace_back(indexer->cdata);
+    candidates.emplace_back(indexer.get()->cdata);
   }
 
   // Broadcast/Expand indexing Tensors as necessary
@@ -828,10 +824,6 @@ static bool THPTensor_(_convertToTensorIndexers)(
               "for dimension %lld (of size %lld)",
               (long long)indexAtDim, (long long)dim, (long long)sizeAtDim);
 
-          // Clean up Indexers
-          for (auto& idx : indexers) {
-            Py_DECREF(idx);
-          }
 
           return false;
         }
@@ -846,17 +838,9 @@ static bool THPTensor_(_convertToTensorIndexers)(
     }
     PyErr_Format(PyExc_IndexError, "The advanced indexing objects could not be broadcast");
 
-    // Clean up Indexers
-    for (auto& idx : indexers) {
-      Py_DECREF(idx);
-    }
     return false;
   }
 
-  // Clean up Indexers
-  for (auto& idx : indexers) {
-    Py_DECREF(idx);
-  }
   return true;
 }
 
