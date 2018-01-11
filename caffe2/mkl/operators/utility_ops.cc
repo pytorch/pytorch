@@ -54,6 +54,17 @@ class CopyMKLToCPUOp final : public MKLOperator<float> {
 REGISTER_MKL_OPERATOR(CopyCPUToMKL, mkl::CopyCPUToMKLOp);
 REGISTER_MKL_OPERATOR(CopyMKLToCPU, mkl::CopyMKLToCPUOp);
 
+OPERATOR_SCHEMA(CopyCPUToMKL)
+    .NumInputs(1)
+    .NumOutputs(1)
+    .Input(0, "cpu_blob", "The input TensorCPU to copy")
+    .Output(0, "mkl_blob", "The output MKLMemory to copy to");
+OPERATOR_SCHEMA(CopyMKLToCPU)
+    .NumInputs(1)
+    .NumOutputs(1)
+    .Input(0, "mkl_blob", "The input MKLMemory to copy")
+    .Output(0, "cpu_blob", "The output TensorCPU to copy to");
+
 } // namespace caffe2
 
 #endif // CAFFE2_HAS_MKL_DNN
