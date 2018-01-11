@@ -16,24 +16,19 @@
 # Also, failed builds will accumulate those caffe2_<timestamp> directories. You
 # can remove them after a succesfull build with
 # $ conda build purge
+#
 
 set -ex
 
-if [ -z "$PREFIX" ]; then
-  PREFIX="$CONDA_PREFIX"
-fi
 echo "Installing caffe2 to ${PREFIX}"
 
-# conda build will copy everything over, including build directories.
-# Don't let this pollute the build!
-rm -rf build || true
+PYTHON_ARGS="$(python ./scripts/get_python_cmake_flags.py)"
+CMAKE_ARGS=()
 
 # Default leveldb from conda-forge doesn't work. If you want to use leveldb,
 # use this old pip version
 # pip install leveldb==0.18
-
-PYTHON_ARGS="$(python ./scripts/get_python_cmake_flags.py)"
-CMAKE_ARGS=()
+CMAKE_ARGS+=("-DUSE_LEVELDB=OFF")
 
 # This installation defaults to using MKL because it is much faster. If you
 # want to build without MKL then you should also remove mkl from meta.yaml in
@@ -54,13 +49,15 @@ CMAKE_ARGS+=("-DUSE_NCCL=OFF")
 # Install under specified prefix
 CMAKE_ARGS+=("-DCMAKE_INSTALL_PREFIX=$PREFIX")
 CMAKE_ARGS+=("-DCMAKE_PREFIX_PATH=$PREFIX")
-CMAKE_ARGS+=("-DUSE_LEVELDB=OFF")
 
-# Build. Note this assumes uname==Darwin as this script is meant for mac
 mkdir -p build
 cd build
 cmake "${CMAKE_ARGS[@]}"  $CONDA_CMAKE_ARGS $PYTHON_ARGS ..
-make VERBOSE=1 "-j$(sysctl -n hw.ncpu)"
+if [ "$(uname)" == 'Darwin' ]; then
+  make "-j$(sysctl -n hw.ncpu)"
+else
+  make "-j$(nproc)"
+fi
 
 make install/fast
 
