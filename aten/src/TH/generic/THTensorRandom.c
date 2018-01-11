@@ -370,7 +370,7 @@ void THTensor_(multinomial)(THLongTensor *self, THGenerator *_generator, THTenso
       );
 
       /* Once a sample is drawn, it cannot be drawn again. ie sample without replacement */
-      if (!with_replacement)
+      if (!with_replacement && j < n_sample - 1)
       {
         /* update cumulative distribution so that sample cannot be drawn again */
         double diff;
