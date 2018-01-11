@@ -257,7 +257,7 @@ struct algorithm_spec<CollectiveType::ALL_GATHER, T> {
     if (device == DeviceType::CPU) {
       algo = std::make_shared<::gloo::AllgatherRing<T>>(
         context,
-        std::initializer_list<T*>{reinterpret_cast<T*>(input_buffer.get())},
+        std::initializer_list<const T*>{reinterpret_cast<const T*>(input_buffer.get())},
         reinterpret_cast<T*>(output_buffer.get()),
         count);
     } else {
