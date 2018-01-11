@@ -32,6 +32,7 @@ class NoArgsClass(object):
 
     def __next__(self):
         raise StopIteration()
+    next = __next__  # Python 2 compatibility
 
 NO_ARGS = NoArgsClass()
 
