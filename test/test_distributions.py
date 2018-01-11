@@ -35,7 +35,7 @@ from torch.distributions import (Bernoulli, Beta, Categorical, Cauchy, Chi2,
                                  Laplace, Normal, OneHotCategorical, Pareto,
                                  StudentT, Uniform, kl_divergence)
 from torch.distributions.constraints import Constraint, is_dependent
-from torch.distributions.utils import _get_clamping_buffer
+from torch.distributions.utils import _finfo
 
 TEST_NUMPY = True
 try:
@@ -596,7 +596,7 @@ class TestDistributions(TestCase):
     def test_gamma_sample_grad(self):
         set_rng_seed(1)  # see Note [Randomized statistical tests]
         num_samples = 100
-        for alpha in [1e-3, 1e-2, 1e-1, 1e0, 1e1, 1e2, 1e3, 1e4]:
+        for alpha in [1e-2, 1e-1, 1e0, 1e1, 1e2, 1e3, 1e4]:
             alphas = Variable(torch.FloatTensor([alpha] * num_samples), requires_grad=True)
             betas = Variable(torch.ones(num_samples).type_as(alphas))
             x = Gamma(alphas, betas).rsample()
@@ -1278,13 +1278,13 @@ class TestNumericalStability(TestCase):
         self.assertEqual(log_pdf.data,
                          expected_value,
                          prec=prec,
-                         message='Failed for tensor type: {}. Expected = {}, Actual = {}'
+                         message='Incorrect value for tensor type: {}. Expected = {}, Actual = {}'
                          .format(type(x), expected_value, log_pdf.data))
         if expected_gradient is not None:
             self.assertEqual(p.grad.data,
                              expected_gradient,
                              prec=prec,
-                             message='Failed for tensor type: {}. Expected = {}, Actual = {}'
+                             message='Incorrect gradient for tensor type: {}. Expected = {}, Actual = {}'
                              .format(type(x), expected_gradient, p.grad.data))
 
     def test_bernoulli_gradient(self):
@@ -1298,7 +1298,7 @@ class TestNumericalStability(TestCase):
             self._test_pdf_score(dist_class=Bernoulli,
                                  probs=tensor_type([0]),
                                  x=tensor_type([1]),
-                                 expected_value=tensor_type([_get_clamping_buffer(tensor_type([]))]).log(),
+                                 expected_value=tensor_type([_finfo(tensor_type([])).eps]).log(),
                                  expected_gradient=tensor_type([0]))
 
             self._test_pdf_score(dist_class=Bernoulli,

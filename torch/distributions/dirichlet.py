@@ -5,12 +5,14 @@ from torch.autograd import Function, Variable
 from torch.autograd.function import once_differentiable
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
-from torch.distributions.utils import broadcast_all
+from torch.distributions.utils import _finfo, broadcast_all
 
 
 def _dirichlet_sample_nograd(alpha):
-    gammas = torch._C._standard_gamma(alpha)
-    return gammas / gammas.sum(-1, True)
+    probs = torch._C._standard_gamma(alpha)
+    probs /= probs.sum(-1, True)
+    eps = _finfo(probs).eps
+    return probs.clamp_(min=eps, max=1 - eps)
 
 
 class _Dirichlet(Function):
