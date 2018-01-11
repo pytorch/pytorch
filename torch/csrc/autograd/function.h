@@ -53,47 +53,53 @@ struct FunctionFlags {
 
 namespace {
 
-inline void variable_function_flags(FunctionFlags& f, size_t i, const Variable& var) {
+// Why can't we just combine the set_variable and set_tensor variants
+// into one set of overloads?  The problem is Variable is convertible
+// to both Tensor and ArrayRef<Variable>, making the overload ambiguous.
+
+inline void set_variable_function_flags_single(FunctionFlags& f, const Variable& var) {
   if (!var.defined()) return;
   f.is_executable |= var.requires_grad();
   if (var.grad_fn()) {
-    f.next_functions[i] = std::make_pair<>(var.grad_fn(), var.output_nr());
+    f.next_functions.emplace_back(var.grad_fn(), var.output_nr());
   } else if (var.requires_grad()) {
-    f.next_functions[i] = std::make_pair<>(var.grad_accumulator(), 0);
+    f.next_functions.emplace_back(var.grad_accumulator(), 0);
+  } else {
+    f.next_functions.emplace_back();
+  }
+}
+inline void set_variable_function_flags_single(FunctionFlags& f, at::ArrayRef<Variable> vars) {
+  for (const auto& var : vars) {
+    set_variable_function_flags_single(f, var);
   }
 }
 
-template<typename... Args> inline void set_variable_function_flags(FunctionFlags& flags, size_t i);
-template<typename... Args> inline void set_variable_function_flags(FunctionFlags& flags, size_t i, const Variable& x, Args... args);
-template<typename... Args> inline void set_variable_function_flags(FunctionFlags& flags, size_t i, at::ArrayRef<Variable> xs, Args... args);
+template<typename... Args>
+inline void set_variable_function_flags(FunctionFlags& flags) {}
 
-template<typename... Args> inline void set_variable_function_flags(FunctionFlags& flags, size_t i) {}
-template<typename... Args> inline void set_variable_function_flags(FunctionFlags& flags, size_t i, const Variable& x, Args... args) {
-  variable_function_flags(flags, i++, x);
-  set_variable_function_flags(flags, i, args...);
+template<typename T, typename... Args>
+inline void set_variable_function_flags(FunctionFlags& flags, T x, Args... args) {
+  set_variable_function_flags_single(flags, x);
+  set_variable_function_flags(flags, args...);
 }
-template<typename... Args> inline void set_variable_function_flags(FunctionFlags& flags, size_t i, at::ArrayRef<Variable> xs, Args... args) {
+
+inline void set_tensor_function_flags_single(FunctionFlags& f, const at::Tensor& x) {
+  set_variable_function_flags_single(f, static_cast<const Variable&>(x));
+}
+
+inline void set_tensor_function_flags_single(FunctionFlags& f, at::ArrayRef<at::Tensor> xs) {
   for (const auto& x : xs) {
-    variable_function_flags(flags, i++, x);
+    set_tensor_function_flags_single(f, x);
   }
-  set_variable_function_flags(flags, i, args...);
 }
 
-// Sigh... such duplication.
-template<typename... Args> inline void set_tensor_function_flags(FunctionFlags& flags, size_t i);
-template<typename... Args> inline void set_tensor_function_flags(FunctionFlags& flags, size_t i, const at::Tensor& x, Args... args);
-template<typename... Args> inline void set_tensor_function_flags(FunctionFlags& flags, size_t i, at::ArrayRef<at::Tensor> xs, Args... args);
+template<typename... Args>
+inline void set_tensor_function_flags(FunctionFlags& flags) {}
 
-template<typename... Args> inline void set_tensor_function_flags(FunctionFlags& flags, size_t i) {}
-template<typename... Args> inline void set_tensor_function_flags(FunctionFlags& flags, size_t i, const at::Tensor& x, Args... args) {
-  variable_function_flags(flags, i++, static_cast<const Variable&>(x));
-  set_tensor_function_flags(flags, i, args...);
-}
-template<typename... Args> inline void set_tensor_function_flags(FunctionFlags& flags, size_t i, at::ArrayRef<at::Tensor> xs, Args... args) {
-  for (const auto& x : xs) {
-    variable_function_flags(flags, i++, static_cast<const Variable&>(x));
-  }
-  set_tensor_function_flags(flags, i, args...);
+template<typename T, typename... Args>
+inline void set_tensor_function_flags(FunctionFlags& flags, T x, Args... args) {
+  set_tensor_function_flags_single(flags, x);
+  set_tensor_function_flags(flags, args...);
 }
 
 } // anonymous namespace
@@ -144,12 +150,12 @@ struct Function : std::enable_shared_from_this<Function> {
   template<typename... Args> inline static FunctionFlags tensor_flags(Args... args) {
     FunctionFlags f;
     f.is_executable = false;
-    f.next_functions.resize(count_tensors(args...));
+    f.next_functions.reserve(count_tensors(args...));
     if (!GradMode::is_enabled()) {
       // TODO: avoid allocating next_functions entirely if grad_mode is disabled
       return f;
     }
-    set_tensor_function_flags(f, 0, args...);
+    set_tensor_function_flags(f, args...);
     return f;
   }
 
@@ -157,12 +163,12 @@ struct Function : std::enable_shared_from_this<Function> {
   template<typename... Args> inline static FunctionFlags flags(Args... args) {
     FunctionFlags f;
     f.is_executable = false;
-    f.next_functions.resize(count_variables(args...));
+    f.next_functions.reserve(count_variables(args...));
     if (!GradMode::is_enabled()) {
       // TODO: avoid allocating next_functions entirely if grad_mode is disabled
       return f;
     }
-    set_variable_function_flags(f, 0, args...);
+    set_variable_function_flags(f, args...);
     return f;
   }
 
