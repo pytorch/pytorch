@@ -2666,6 +2666,10 @@ method_tests = [
     ('fill_', (), (1,), 'number_scalar'),
     # FIXME: we should compute the derivative w.r.t torch.tensor(1)
     ('fill_', (S, S, S), (non_differentiable(torch.tensor(1)),), 'variable'),
+    ('gesv', (S, S, S), ((S, S, S),), 'batched', NO_ARGS, [skipIfNoLapack]),
+    ('gesv', (2, 3, S, S), ((2, 3, S, S),), 'batched_dims', NO_ARGS, [skipIfNoLapack]),
+    ('gesv', (2, 2, S, S), ((1, S, S),), 'batched_broadcast_A', NO_ARGS, [skipIfNoLapack]),
+    ('gesv', (1, S, S), ((2, 2, S, S),), 'batched_broadcast_b', NO_ARGS, [skipIfNoLapack]),
     ('eq_', (S, S, S), ((S, S, S),)),
     ('eq_', (S, S, S), ((1,),), 'broadcast_rhs'),
     ('eq_', (), ((),), 'scalar'),
@@ -2910,6 +2914,7 @@ def exclude_tensor_method(name, test_name):
         'scatter',
         'scatter_add',
         'det',
+        'gesv'
     }
     if test_name in exclude_all_tensor_method_by_test_name:
         return True

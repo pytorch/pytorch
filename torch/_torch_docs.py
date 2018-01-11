@@ -1962,7 +1962,7 @@ Example::
 
 add_docstr(torch.gesv,
            r"""
-gesv(B, A, out=None) -> (Tensor, Tensor)
+torch.gesv(B, A) -> (Variable, Variable)
 
 This function returns the solution to the system of linear
 equations represented by :math:`AX = B` and the LU factorization of
@@ -1970,21 +1970,27 @@ A, in order as a tuple `X, LU`.
 
 `LU` contains `L` and `U` factors for LU factorization of `A`.
 
-:attr:`A` has to be a square and non-singular matrix (2-D tensor).
+`torch.gesv(B, A)` can take in 2D inputs `B, A` or inputs that are
+batches of 2D matrices. If the inputs are batches, then returns
+batched outputs `X, LU`.
 
-If `A` is an :math:`(m \times m)` matrix and `B` is :math:`(m \times k)`,
-the result `LU` is :math:`(m \times m)` and `X` is :math:`(m \times k)`.
+.. note::
+
+    Calling `torch.gesv` on `Tensor` only supports 2D matrix inputs.
+    `torch.gesv` for `Variable`s supports both 2D and batched inputs.
 
 .. note::
 
     Irrespective of the original strides, the returned matrices
-    `X` and `LU` will be transposed, i.e. with strides `(1, m)`
-    instead of `(m, 1)`.
+    `X` and `LU` will be transposed, i.e. with strides
+    `B.contiguous().transpose(-1, -2).strides()` and
+    `A.contiguous().transpose(-1, -2).strides()` respectively.
 
 Args:
-    B (Tensor): input matrix of :math:`(m \times k)` dimensions
-    A (Tensor): input square matrix of :math:`(m \times m)` dimensions
-    out (Tensor, optional): optional output matrix
+    B (Variable): input matrix of size :math:`(..., m, k)` , where `...`
+    is any number of batch dimensions.
+    A (Variable): input square matrix of size :math:`(..., m \times m)`, where
+    `...` is any number of batch dimensions.
 
 Example::
 
@@ -2003,6 +2009,11 @@ Example::
       7.0977
     [torch.FloatTensor of size ()]
 
+    >>> # Batched solver example
+    >>> A = Variable(torch.randn(2, 3, 1, 4, 4))
+    >>> B = Variable(torch.randn(2, 3, 1, 4, 6))
+    >>> X, LU = torch.gesv(B, A)
+    >>> torch.dist(B, A.matmul(X))  # should be small
 """)
 
 add_docstr(torch.get_num_threads,
