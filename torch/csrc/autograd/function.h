@@ -144,7 +144,7 @@ struct Function : std::enable_shared_from_this<Function> {
   template<typename... Args> inline static FunctionFlags tensor_flags(Args... args) {
     FunctionFlags f;
     f.is_executable = false;
-    f.next_functions.resize(countTensors(args...));
+    f.next_functions.resize(count_tensors(args...));
     if (!GradMode::is_enabled()) {
       // TODO: avoid allocating next_functions entirely if grad_mode is disabled
       return f;
@@ -157,7 +157,7 @@ struct Function : std::enable_shared_from_this<Function> {
   template<typename... Args> inline static FunctionFlags flags(Args... args) {
     FunctionFlags f;
     f.is_executable = false;
-    f.next_functions.resize(countVariables(args...));
+    f.next_functions.resize(count_variables(args...));
     if (!GradMode::is_enabled()) {
       // TODO: avoid allocating next_functions entirely if grad_mode is disabled
       return f;

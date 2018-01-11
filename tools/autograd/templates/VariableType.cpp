@@ -242,29 +242,24 @@ static void ensure_no_aten_scalars(Tensor & data) {
 using TensorRef = std::reference_wrapper<const Tensor>;
 using TensorRefList = std::initializer_list<TensorRef>;
 
-template<typename... Args> inline bool _compute_requires_grad();
-template<typename... Args> inline bool _compute_requires_grad(const at::Tensor& x, Args... args);
-template<typename... Args> inline bool _compute_requires_grad(at::ArrayRef<at::Tensor> xs, Args... args);
-
-inline bool _tensor_requires_grad(const at::Tensor& tensor) {
+inline bool _compute_requires_grad_single(const at::Tensor& tensor) {
   const auto& var = static_cast<const Variable&>(tensor);
   return var.defined() && var.requires_grad();
+}
+inline bool _compute_requires_grad_single(at::ArrayRef<at::Tensor> tensors) {
+  for (const Tensor& tensor : tensors) {
+    if (_compute_requires_grad_single(tensor)) return true;
+  }
+  return false;
 }
 
 template<typename... Args>
 inline bool _compute_requires_grad() {
   return false;
 }
-template<typename... Args>
-inline bool _compute_requires_grad(const at::Tensor& x, Args... args) {
-  if (_tensor_requires_grad(x)) return true;
-  return _compute_requires_grad(args...);
-}
-template<typename... Args>
-inline bool _compute_requires_grad(at::ArrayRef<at::Tensor> xs, Args... args) {
-  for (const Tensor& x : xs) {
-    if (_tensor_requires_grad(x)) return true;
-  }
+template<typename T, typename... Args>
+inline bool _compute_requires_grad(T arg, Args... args) {
+  if (_compute_requires_grad_single(arg)) return true;
   return _compute_requires_grad(args...);
 }
 
@@ -331,27 +326,25 @@ static void set_history(at::ArrayRef<Tensor> tl, std::shared_ptr<Function> grad_
   }
 }
 
-template<typename... Args> inline void flattenTensors(variable_list& dest);
-template<typename... Args> inline void flattenTensors(variable_list& dest, const at::Tensor& x, Args... args);
-template<typename... Args> inline void flattenTensors(variable_list& dest, at::ArrayRef<at::Tensor> xs, Args... args);
+inline void _flatten_single(variable_list& dest, const at::Tensor& x) {
+  dest.emplace_back(x);
+}
+inline void _flatten_single(variable_list& dest, at::ArrayRef<at::Tensor> xs) {
+  dest.insert(dest.end(), xs.begin(), xs.end());
+}
 
 template<typename... Args>
-inline void flattenTensors(variable_list& dest) {}
-template<typename... Args>
-inline void flattenTensors(variable_list& dest, const at::Tensor& x, Args... args) {
-  dest.emplace_back(x);
-  flattenTensors(dest, args...);
-}
-template<typename... Args>
-inline void flattenTensors(variable_list& dest, at::ArrayRef<at::Tensor> xs, Args... args) {
-  dest.insert(dest.end(), xs.begin(), xs.end());
-  flattenTensors(dest, args...);
+inline void _flatten(variable_list& dest) {}
+template<typename T, typename... Args>
+inline void _flatten(variable_list& dest, T x, Args... args) {
+  _flatten_single(dest, x);
+  _flatten(dest, args...);
 }
 
 template<typename... Args> inline variable_list flatten(Args... args) {
   variable_list dest;
-  dest.reserve(countTensors(args...));
-  flattenTensors(dest, args...);
+  dest.reserve(count_tensors(args...));
+  _flatten(dest, args...);
   return dest;
 }
 

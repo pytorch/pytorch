@@ -5,21 +5,16 @@
 
 namespace torch {
 
-template<typename... Args> inline size_t countTensors();
-template<typename... Args> inline size_t countTensors(const at::Tensor& x, Args... args);
-template<typename... Args> inline size_t countTensors(at::ArrayRef<at::Tensor> xs, Args... args);
+inline size_t count_tensors_single(const at::Tensor& x) { return 1; }
+inline size_t count_tensors_single(at::ArrayRef<at::Tensor> xs) { return xs.size(); }
 
 template<typename... Args>
-inline size_t countTensors() {
+inline size_t count_tensors() {
   return 0;
 }
-template<typename... Args>
-inline size_t countTensors(const at::Tensor& x, Args... args) {
-  return 1 + countTensors(args...);
-}
-template<typename... Args>
-inline size_t countTensors(at::ArrayRef<at::Tensor> xs, Args... args) {
-  return xs.size() + countTensors(args...);
+template<typename T, typename... Args>
+inline size_t count_tensors(T x, Args... args) {
+  return count_tensors_single(x) + count_tensors(args...);
 }
 
 } // namespace torch
