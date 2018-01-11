@@ -219,9 +219,6 @@ class BatchMatMulOp final : public Operator<Context> {
       size_t A_stride = 1; // How far to increment A pointer each itr
       size_t B_stride = 1; // How far to increment B pointer each itr
       size_t Y_stride = 1; // How far to increment Y pointer each itr
-      // How large the slices of A and B we are operating on at each iteration
-      // are.
-      size_t A_slice_size, B_slice_size;
       // How many "inner batches" we have. That is, the product of sizes for
       // the slices excluding M, K, and N, for their respective matrices.
       size_t num_sub_batches = 1;
@@ -235,12 +232,9 @@ class BatchMatMulOp final : public Operator<Context> {
             num_sub_batches *= *(first_r_itr + i);
           }
         }
-        A_slice_size = A_stride;
         B_stride = 0;
-        B_slice_size = B.size();
       } else {
         A_stride = 0;
-        A_slice_size = A.size();
         auto second_r_itr = dims_B.rbegin();
         auto output_r_itr = new_dims.rbegin();
         for (size_t i = 0; i < num_inner_dims; ++i) {
@@ -250,7 +244,6 @@ class BatchMatMulOp final : public Operator<Context> {
             num_sub_batches *= *(second_r_itr + i);
           }
         }
-        B_slice_size = B_stride;
       }
 
       size_t num_outer_batches = 1;
@@ -280,9 +273,6 @@ class BatchMatMulOp final : public Operator<Context> {
         math::GemmBatched<T, Context, Engine>(
             trans_a_ ? CblasTrans : CblasNoTrans,
             trans_b_ ? CblasTrans : CblasNoTrans,
-            A_slice_size,
-            num_sub_batches,
-            B_slice_size,
             num_sub_batches,
             M,
             N,
