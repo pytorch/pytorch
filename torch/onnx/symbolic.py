@@ -171,7 +171,7 @@ def neg(g, self):
 
 
 def sqrt(g, self):
-    return g.op('Sqrt', self)
+    return g.op("Sqrt", self)
 
 
 def tanh(g, self):
