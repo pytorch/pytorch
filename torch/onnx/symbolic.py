@@ -183,23 +183,28 @@ def sigmoid(g, self):
 
 
 def mean(g, self, dim=None, keepdim=None):
-    kwargs = {}
+    if dim is None and keepdim is None:
+        return g.op("Mean", self)
     # NB: ONNX's default is different from PyTorch's
     if keepdim is None:
         keepdim = 0
-    return g.op("ReduceMean", self, axes_i=dim, keepdims_i=keepdim)
+    return g.op("ReduceMean", self, axes_i=[dim], keepdims_i=keepdim)
 
 
 def sum(g, self, dim=None, keepdim=None):
+    if dim is None and keepdim is None:
+        return g.op("Sum", self)
     if keepdim is None:
         keepdim = 0
-    return g.op("ReduceSum", self, axes_i=dim, keepdims_i=keepdim)
+    return g.op("ReduceSum", self, axes_i=[dim], keepdims_i=keepdim)
 
 
 def prod(g, self, dim=None, keepdim=None):
+    if dim is None and keepdim is None:
+        return g.op("Prod", self)
     if keepdim is None:
         keepdim = 0
-    return g.op("ReduceProd", self, axes_i=dim, keepdims_i=keepdim)
+    return g.op("ReduceProd", self, axes_i=[dim], keepdims_i=keepdim)
 
 
 def t(g, self):
