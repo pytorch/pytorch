@@ -1219,22 +1219,27 @@ class TestKL(TestCase):
             (Chi2(2), Chi2(3)),
             (Chi2(2), Gamma(3, 4)),
             (Chi2(2), Exponential(3)),
+            (Dirichlet(torch.Tensor([1, 2])), Dirichlet(torch.Tensor([3, 4]))),
             (Exponential(1), Exponential(2)),
             (Exponential(1), Gamma(2, 3)),
             (Exponential(2), Normal(-3, 4)),
             (Gamma(1, 2), Chi2(3)),
             (Gamma(1, 2), Exponential(3)),
             (Gamma(1, 2), Gamma(3, 4)),
+            (Gumbel(-1, 2), Normal(-3, 4)),
             (Laplace(1, 2), Laplace(-3, 4)),
             (Laplace(-1, 2), Normal(-3, 4)),
-            #  (Normal(-1, 2), Laplace(-3, 4)), This case fails
+            #  (Normal(-1, 2), Laplace(-3, 4)),  This case fails
             (Normal(1, 2), Normal(-3, 4)),
+            (Pareto(1, 2), Exponential(3)), #  This case fails for n = 10000
+            (Pareto(1, 2), Gamma(3, 4)), #  This case fails for n = 10000, 21000
+            (Pareto(1, 3), Normal(-2, 4)),
         ]
 
     def test_kl_monte_carlo(self):
         set_rng_seed(0)  # see Note [Randomized statistical tests]
         for p, q in self.examples:
-            x = p.sample(sample_shape=(10000,))
+            x = p.sample(sample_shape=(22000,))
             expected = (p.log_prob(x) - q.log_prob(x)).mean(0)
             actual = kl_divergence(p, q)
             message = 'Incorrect KL({}, {}). expected {}, actual {}'.format(

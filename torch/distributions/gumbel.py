@@ -27,6 +27,7 @@ class Gumbel(Distribution):
 
     def __init__(self, loc, scale):
         self.loc, self.scale = broadcast_all(loc, scale)
+        self.euler_gamma_1p = 1.57721566490153286060
         if isinstance(loc, Number) and isinstance(scale, Number):
             batch_shape = torch.Size()
         else:
@@ -46,4 +47,4 @@ class Gumbel(Distribution):
         return -(self.scale.log() + z + torch.exp(-z))
 
     def entropy(self):
-        return self.scale.log() + (1.57721566490153286060)  # 1 + Euler Mascheroni Constant
+        return self.scale.log() + (self.euler_gamma_1p)  # 1 + Euler Mascheroni Constant
