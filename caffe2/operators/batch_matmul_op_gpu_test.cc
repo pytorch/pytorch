@@ -17,7 +17,6 @@
 #include <memory>
 #include <vector>
 
-#include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
 #include "caffe2/core/context_gpu.h"
@@ -26,10 +25,7 @@
 namespace caffe2 {
 namespace {
 
-using testing::ElementsAreArray;
-using testing::Test;
-
-class BatchMatMulOpGPUTest : public Test {
+class BatchMatMulOpGPUTest : public testing::Test {
  protected:
   void SetUp() override {
     if (!HasCudaGPU()) {
@@ -64,7 +60,11 @@ class BatchMatMulOpGPUTest : public Test {
     ASSERT_NE(nullptr, Y_blob);
     const auto& Y = Y_blob->Get<Tensor<CUDAContext>>();
     TensorCPU Y_cpu(Y);
-    ASSERT_THAT(Y_cpu.dims(), ElementsAreArray(dims));
+    const auto& Y_dims = Y_cpu.dims();
+    ASSERT_EQ(dims.size(), Y_dims.size());
+    for (std::size_t i = 0; i < dims.size(); ++i) {
+      ASSERT_EQ(dims[i], Y_dims[i]);
+    }
     for (int i = 0; i < Y_cpu.size(); ++i) {
       EXPECT_FLOAT_EQ(value, Y_cpu.data<float>()[i]);
     }
