@@ -62,6 +62,10 @@ class LayerModelHelper(model_helper.ModelHelper):
         self._layers = []
         self._param_to_shape = {}
 
+        # seed default
+        self._seed = None
+        self._sequence_seed = True
+
         # optimizer bookkeeping
         self.param_to_optim = {}
         self.param_to_reg = {}
@@ -302,6 +306,20 @@ class LayerModelHelper(model_helper.ModelHelper):
                 param_blobs.append(param.parameter)
 
         return param_blobs
+
+    @property
+    def seed(self):
+        return self._seed
+
+    def store_seed(self, seed, sequence_seed=True):
+        # Store seed config that will be applied to each op in the net.
+        self._seed = seed
+        # If sequence_seed is True, the i-th op has rand_seed=`seed + i`
+        self._sequence_seed = sequence_seed
+
+    def apply_seed(self, net):
+        if self._seed:
+            net.set_rand_seed(self._seed, self._sequence_seed)
 
     @property
     def default_optimizer(self):
