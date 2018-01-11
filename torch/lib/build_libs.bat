@@ -124,6 +124,7 @@ goto:eof
                   -DNO_NNPACK=%NO_NNPACK% ^
                   -DCUDNN_INCLUDE_DIR="%CUDNN_INCLUDE_DIR%" ^
                   -DCUDNN_LIB_DIR="%CUDNN_LIB_DIR%" ^
+                  -DCUDNN_LIBRARY="%CUDNN_LIBRARY%" ^
                   -DCMAKE_BUILD_TYPE=%BUILD_TYPE%
 
   %MAKE_COMMAND%
