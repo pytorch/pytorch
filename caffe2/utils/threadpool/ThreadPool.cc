@@ -31,7 +31,6 @@ CAFFE2_DEFINE_int(caffe2_threadpool_android_cap, true, "");
 // Whether or not threadpool caps apply to iOS
 CAFFE2_DEFINE_int(caffe2_threadpool_ios_cap, false, "");
 
-#if CAFFE2_THREADPOOL_MOBILE
 
 namespace caffe2 {
 
@@ -62,8 +61,6 @@ std::unique_ptr<ThreadPool> ThreadPool::defaultThreadPool() {
   applyCap = caffe2::FLAGS_caffe2_threadpool_android_cap;
 #elif CAFFE2_IOS
   applyCap = caffe2::FLAGS_caffe2_threadpool_ios_cap;
-#else
-#error Undefined architecture
 #endif
 
   if (applyCap) {
@@ -185,5 +182,3 @@ void ThreadPool::run(const std::function<void(int, size_t)>& fn, size_t range) {
 }
 
 } // namespace caffe2
-
-#endif // CAFFE2_THREADPOOL_MOBILE

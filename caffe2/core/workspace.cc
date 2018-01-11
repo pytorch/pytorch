@@ -320,7 +320,6 @@ bool Workspace::RunPlan(const PlanDef& plan, ShouldContinue shouldContinue) {
   return RunPlanOnWorkspace(this, plan, shouldContinue);
 }
 
-#if CAFFE2_MOBILE
 ThreadPool* Workspace::GetThreadPool() {
   std::lock_guard<std::mutex> guard(thread_pool_creation_mutex_);
   if (!thread_pool_) {
@@ -328,6 +327,5 @@ ThreadPool* Workspace::GetThreadPool() {
   }
   return thread_pool_.get();
 }
-#endif // CAFFE2_MOBILE
 
 } // namespace caffe2

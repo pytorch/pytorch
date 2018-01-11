@@ -19,11 +19,6 @@
 
 #include "ThreadPoolCommon.h"
 
-#ifndef CAFFE2_THREADPOOL_MOBILE
-#error "mobile build state not defined"
-#endif
-
-#if CAFFE2_THREADPOOL_MOBILE
 
 namespace caffe2 {
 
@@ -40,7 +35,5 @@ struct pthreadpool {
 };
 
 } // extern "C"
-
-#endif // CAFFE2_THREADPOOL_MOBILE
 
 #endif  // CAFFE2_UTILS_PTHREADPOOL_IMPL_H_

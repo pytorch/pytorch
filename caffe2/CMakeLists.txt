@@ -34,9 +34,7 @@ add_subdirectory(perfkernels)
 add_subdirectory(python)
 add_subdirectory(queue)
 add_subdirectory(sgd)
-if (BUILD_SHARE_DIR)
-  add_subdirectory(share)
-endif()
+add_subdirectory(share)
 # add_subdirectory(test) # todo: use caffe2_gtest_main instead of gtest_main because we will need to call GlobalInit
 add_subdirectory(transforms)
 add_subdirectory(utils)
@@ -300,9 +298,10 @@ endif()
 # Binaries
 if (BUILD_BINARY)
   add_subdirectory(binaries)
+  # Benchmarking binaries require observers included in the build
   # There is a linking issue that happens in some of the Windows builds.
-  # TODO(Yangqing): after the module redesing, enable this back.
-  if (NOT MSVC AND BUILD_SHARE_DIR)
+  # TODO(Yangqing): after the module redesign, enable this back.
+  if (BUILD_OBSERVERS AND NOT MSVC)
     add_subdirectory(share/contrib/binaries)
   endif()
 endif()

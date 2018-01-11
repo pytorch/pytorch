@@ -16,11 +16,6 @@
 
 #include "caffe2/core/common.h"
 
-#ifndef CAFFE2_MOBILE
-#error "Caffe2 mobile state not defined"
-#endif
-
-#if CAFFE2_MOBILE
 
 #include "caffe2/core/context.h"
 #include "caffe2/core/logging.h"
@@ -258,7 +253,7 @@ bool NNPACKConvOp::RunOnDeviceWithOrderNCHW() {
           transformStrategy_ = nnp_convolution_transform_strategy_reuse;
         }
       } else {
-        LOG(ERROR)
+        LOG(WARNING)
             << "Failed to query workspace size to precompute kernels, falling back to re-compute strategy";
         transformStrategy_ = nnp_convolution_transform_strategy_compute;
       }
@@ -406,5 +401,3 @@ bool NNPACKConvOp::RunOnDeviceWithOrderNCHW() {
 REGISTER_CPU_OPERATOR_WITH_ENGINE(Conv, NNPACK, NNPACKConvOp);
 
 } // namespace caffe2
-
-#endif // CAFFE2_MOBILE

@@ -17,7 +17,7 @@ set(CAFFE2_VERSION
 option(BUILD_BINARY "Build C++ binaries" ON)
 option(BUILD_PYTHON "Build Python binaries" ON)
 option(BUILD_SHARED_LIBS "Build libcaffe2.so" ON)
-option(BUILD_SHARE_DIR "Build files in the share/ directory" OFF)
+option(BUILD_OBSERVERS "Build performance observers/loggers in caffe2/share/observers directory" OFF)
 option(BUILD_TEST "Build C++ test binaries (need gtest and gbenchmark)" ON)
 option(USE_ATEN "Use ATen" OFF)
 option(USE_ASAN "Use Address Sanitizer" OFF)

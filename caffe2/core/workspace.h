@@ -20,10 +20,6 @@
 #include "caffe2/core/common.h"
 #include "caffe2/core/observer.h"
 
-#ifndef CAFFE2_MOBILE
-#error "mobile build state not defined"
-#endif
-
 #include <climits>
 #include <cstddef>
 #include <mutex>
@@ -36,9 +32,7 @@
 #include "caffe2/core/net.h"
 #include "caffe2/proto/caffe2.pb.h"
 #include "caffe2/utils/signal_handler.h"
-#if CAFFE2_MOBILE
 #include "caffe2/utils/threadpool/ThreadPool.h"
-#endif // CAFFE2_MOBILE
 
 CAFFE2_DECLARE_bool(caffe2_print_blob_sizes_at_exit);
 
@@ -291,14 +285,12 @@ class Workspace {
   bool RunPlan(const PlanDef& plan_def,
                ShouldContinue should_continue = StopOnSignal{});
 
-#if CAFFE2_MOBILE
   /*
    * Returns a CPU threadpool instace for parallel execution of
    * work. The threadpool is created lazily; if no operators use it,
    * then no threadpool will be created.
    */
   ThreadPool* GetThreadPool();
-#endif
 
   // RunOperatorOnce and RunNetOnce runs an operator or net once. The difference
   // between RunNet and RunNetOnce lies in the fact that RunNet allows you to
@@ -318,10 +310,8 @@ class Workspace {
   const Workspace* shared_;
   std::unordered_map<string, std::pair<const Workspace*, string>>
       forwarded_blobs_;
-#if CAFFE2_MOBILE
   std::unique_ptr<ThreadPool> thread_pool_;
   std::mutex thread_pool_creation_mutex_;
-#endif // CAFFE2_MOBILE
 
   DISABLE_COPY_AND_ASSIGN(Workspace);
 };
