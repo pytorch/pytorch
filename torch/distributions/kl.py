@@ -345,7 +345,7 @@ def _kl_gamma_gumbel(p, q):
 
 
 @register_kl(Gamma, Normal)
-def _kl_gamma_exponential(p, q):
+def _kl_gamma_normal(p, q):
     var_normal = q.std.pow(2)
     beta_sqr = p.beta.pow(2)
     t1 = 0.5 * torch.log(beta_sqr * var_normal * 2 * math.pi) - p.alpha - p.alpha.lgamma()
