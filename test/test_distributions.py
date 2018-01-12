@@ -304,26 +304,25 @@ class TestDistributions(TestCase):
         self.assertEqual(Multinomial(total_count, p).sample().size(), (3,))
         self.assertEqual(Multinomial(total_count, p).sample((2, 2)).size(), (2, 2, 3))
         self.assertEqual(Multinomial(total_count, p).sample_n(1).size(), (1, 3))
-        set_rng_seed(0)
         self._gradcheck_log_prob(lambda p: Multinomial(total_count, p), [p])
-        p.grad.zero_()
         self._gradcheck_log_prob(lambda p: Multinomial(total_count, None, p.log()), [p])
+        self.assertRaises(NotImplementedError, Multinomial(10, p).rsample)
 
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    def test_multinomial_1d_log_prob(self):
+        total_count = 10
+        p = Variable(torch.Tensor([0.1, 0.2, 0.3]), requires_grad=True)
         dist = Multinomial(total_count, probs=p)
-        set_rng_seed(0)
         x = dist.sample()
         log_prob = dist.log_prob(x)
         expected = torch.Tensor(scipy.stats.multinomial.logpmf(x.numpy(), n=total_count, p=dist.probs.detach().numpy()))
         self.assertEqual(log_prob.data, expected)
 
         dist = Multinomial(total_count, logits=p.log())
-        set_rng_seed(0)
         x = dist.sample()
         log_prob = dist.log_prob(x)
         expected = torch.Tensor(scipy.stats.multinomial.logpmf(x.numpy(), n=total_count, p=dist.probs.detach().numpy()))
         self.assertEqual(log_prob.data, expected)
-
-        self.assertRaises(NotImplementedError, Multinomial(10, p).rsample)
 
     def test_multinomial_2d(self):
         total_count = 10
