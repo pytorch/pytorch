@@ -104,14 +104,14 @@ class GRUCell(rnn_cell.RNNCell):
             output_gate_fc = brew.fc(
                 model,
                 hidden_t_prev,
-                self.scope('output_gate_fc'),
+                self.scope('output_gate_t'),
                 dim_in=self.hidden_size,
                 dim_out=self.hidden_size,
                 axis=2,
             )
             output_gate_t = model.net.Mul(
                 [reset_gate_t_sigmoid, output_gate_fc],
-                self.scope('output_gate_t')
+                self.scope('output_gate_t_mul')
             )
         else:
             modified_hidden_t_prev = model.net.Mul(
@@ -135,7 +135,7 @@ class GRUCell(rnn_cell.RNNCell):
         )
         output_gate_t = model.net.Sum(
             [output_gate_t, input_t_output],
-            self.scope('output_gate_t'),
+            self.scope('output_gate_t_summed'),
         )
 
         # Join gate outputs and add input contributions
