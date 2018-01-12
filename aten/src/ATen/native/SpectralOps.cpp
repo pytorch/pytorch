@@ -52,7 +52,7 @@ Tensor stft(const Tensor& self, const int64_t frame_length,
   int64_t len = input.size(1);
   if (pad_end < 0) {
     std::ostringstream ss;
-    REPR(ss) << ": expected pad_end >= 0, but get pad_end=" << pad_end;
+    REPR(ss) << ": expected pad_end >= 0, but got pad_end=" << pad_end;
     throw std::runtime_error(ss.str());
   }
   // pad zeros
@@ -65,24 +65,24 @@ Tensor stft(const Tensor& self, const int64_t frame_length,
   if (frame_length <= 0 || frame_length > len) {
     std::ostringstream ss;
     REPR(ss) << ": expected 0 < frame_length < " << len
-             << ", but get frame_length=" << frame_length;
+             << ", but got frame_length=" << frame_length;
     throw std::runtime_error(ss.str());
   }
   if (hop <= 0) {
     std::ostringstream ss;
-    REPR(ss) << " expected hop > 0, but get hop=" << hop;
+    REPR(ss) << " expected hop > 0, but got hop=" << hop;
     throw std::runtime_error(ss.str());
   }
   if (fft_size <= 0) {
     std::ostringstream ss;
-    REPR(ss) << " expected fft_size > 0, but get fft_size=" << fft_size;
+    REPR(ss) << " expected fft_size > 0, but got fft_size=" << fft_size;
     throw std::runtime_error(ss.str());
   }
   if (window.defined() && (window.dim() != 1 || window.size(0) != frame_length)) {
     std::ostringstream ss;
     REPR(ss) << ": expected a 1D window tensor of size equal to "
              << "frame_length=" << frame_length
-             << ", but get window with size {" << window.sizes() << "}";
+             << ", but got window with size {" << window.sizes() << "}";
     throw std::runtime_error(ss.str());
   }
   #undef REPR
@@ -99,11 +99,11 @@ Tensor stft(const Tensor& self, const int64_t frame_length,
   if (window.defined()) {
     kernel *= window.view({1, -1});
   }
-  // prepare for conv2d
-  input = input.view({batch, 1, len, 1});
-  kernel = kernel.view({return_size * 2, 1, frame_length, 1});
+  // prepare for conv1d
+  input = input.view({batch, 1, len});
+  kernel = kernel.view({return_size * 2, 1, frame_length});
   // conv is actually correlation, so we are good
-  auto conv_out = at::conv2d(input, kernel, {}, hop).squeeze_(-1);
+  auto conv_out = at::conv1d(input, kernel, {}, hop).squeeze_(-1);
   // transpose to [batch x time x freq x (re/im)]
   auto out = conv_out.view({batch, 2, return_size, -1}).transpose_(1, -1);
   if (self.dim() == 1) {

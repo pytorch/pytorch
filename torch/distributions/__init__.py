@@ -34,12 +34,13 @@ from .bernoulli import Bernoulli
 from .beta import Beta
 from .categorical import Categorical
 from .cauchy import Cauchy
+from .chi2 import Chi2
 from .dirichlet import Dirichlet
 from .distribution import Distribution
 from .exponential import Exponential
 from .gamma import Gamma
-from .chi2 import Chi2
 from .gumbel import Gumbel
+from .kl import kl_divergence, register_kl
 from .laplace import Laplace
 from .normal import Normal
 from .one_hot_categorical import OneHotCategorical
@@ -64,4 +65,6 @@ __all__ = [
     'Pareto',
     'StudentT',
     'Uniform',
+    'kl_divergence',
+    'register_kl',
 ]

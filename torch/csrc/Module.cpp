@@ -216,12 +216,14 @@ static PyObject * dispatchStateless(PyObject *args, PyObject *kwargs, const char
   return THPUtils_dispatchStateless(tensor, name, args, kwargs);
 }
 
-static PyObject * dispatchStatelessAddXX(PyObject *args, PyObject *kwargs, const char *name) {
+static PyObject * dispatchStatelessSwap(PyObject *args, PyObject *kwargs, const char *name) {
   PyObject *tensor = findTensor(args, kwargs);
   if (THPVariable_Check(tensor) && PyTuple_GET_SIZE(args) >= 2 && tensor == PyTuple_GET_ITEM(args, 1)) {
-    // On Variables, swap the first two arguments if the 'self' argument comes
-    // second. This handles the deprecated torch.addxx signatures. For example,
-    // torch.addmm(1, var, 2, a, b) -> var.addmm(1, 2, a, b)
+    // Unlike tensors, the stateless methods on Variables are dispatched in a different manner.
+    // On Variables, the `self` argument must be at the first argument when dispatching.
+    // For stateless methods which has more than one arguments and the `self` comes second,
+    // (e.g., `polygamma(n, x)`, etc.), the `self` argument needs to be swapped to the
+    // first position before dispatching.
     auto newArgs = THPObjectPtr{swapFirstTwoItems(args)};
     return THPUtils_dispatchStateless(tensor, name, newArgs.get(), kwargs);
   } else {
@@ -235,18 +237,21 @@ static PyObject * TH_CONCAT_2(THPModule_, name)(PyObject *_unused, PyObject *arg
   return dispatchStateless(args, kwargs, #name);                               \
 }
 
-#define IMPLEMENT_STATELESS_ADDXX(name)                                        \
+#define IMPLEMENT_STATELESS_SWAP(name)                                         \
 static PyObject * TH_CONCAT_2(THPModule_, name)(PyObject *_unused, PyObject *args, PyObject *kwargs) \
 {                                                                              \
-  return dispatchStatelessAddXX(args, kwargs, #name);                          \
+  return dispatchStatelessSwap(args, kwargs, #name);                           \
 }
+
+// This handles the deprecated torch.addxx signatures. For example,
+// torch.addmm(1, var, 2, a, b) -> var.addmm(1, 2, a, b)
+#define IMPLEMENT_STATELESS_ADDXX IMPLEMENT_STATELESS_SWAP
 
 IMPLEMENT_STATELESS(sigmoid)
 IMPLEMENT_STATELESS(log)
 IMPLEMENT_STATELESS(log1p)
 IMPLEMENT_STATELESS(lgamma)
 IMPLEMENT_STATELESS(digamma)
-IMPLEMENT_STATELESS(polygamma)
 IMPLEMENT_STATELESS(erf)
 IMPLEMENT_STATELESS(erfinv)
 IMPLEMENT_STATELESS(exp)
@@ -361,6 +366,10 @@ IMPLEMENT_STATELESS(le)
 IMPLEMENT_STATELESS(eq)
 IMPLEMENT_STATELESS(ne)
 
+// For torch.polygamma(n, x), the `self` argument comes second, the
+// first two arguments needs to be swapped before dispatch.
+IMPLEMENT_STATELESS_SWAP(polygamma)
+
 IMPLEMENT_STATELESS_ADDXX(addmm)
 IMPLEMENT_STATELESS_ADDXX(addmv)
 IMPLEMENT_STATELESS_ADDXX(addr)
@@ -370,6 +379,7 @@ IMPLEMENT_STATELESS_ADDXX(addcmul)
 IMPLEMENT_STATELESS_ADDXX(addcdiv)
 
 #undef IMPLEMENT_STATELESS
+#undef IMPLEMENT_STATELESS_SWAP
 #undef IMPLEMENT_STATELESS_ADDXX
 
 // In nonzero, the first argument might be a LongTensor that will be used

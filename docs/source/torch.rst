@@ -69,7 +69,7 @@ There are a few more in-place random sampling functions defined on Tensors as we
 - :func:`torch.Tensor.log_normal_` - samples from the log-normal distribution
 - :func:`torch.Tensor.normal_` - in-place version of :func:`torch.normal`
 - :func:`torch.Tensor.random_` - numbers sampled from the discrete uniform distribution
-- :func:`torch.Tensor.uniform_` - numbers sampled from the uniform distribution
+- :func:`torch.Tensor.uniform_` - numbers sampled from the continuous uniform distribution
 
 
 Serialization

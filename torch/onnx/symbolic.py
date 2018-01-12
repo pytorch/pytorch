@@ -282,6 +282,24 @@ def glu(g, input, dim):
 
 
 def softmax(g, input, dim=None):
+    # Softmax does normalization at vector level.
+    # PyTorch and ONNX use different strategies to split the input tensor into vectors.
+    # Thus dim and axis have different meanings.
+    # PyTorch slices the input tensor into vectors along the `dim`-th dimension.
+    # ONNX reshapes the input into a 2-D tensor, and `axis` indicates where the input is coerced.
+    # If input is a 2 x 3 tensor:
+    # input = [[1.0, 1.0, 1.0],
+    #          [1.0, 1,0, 1,0]]
+    # with dim = 0, the result is:
+    # result = [[0.5, 0.5, 0.5],
+    #           [0.5, 0.5, 0.5]]
+    # with axis = 0, the result is:
+    # result = [[0.167, 0.167, 0.167],
+    #           [0.167, 0.167, 0.167]]
+    # So only when dim and axis both equal to ndim - 1 (the last dimension),
+    # their semantics are equivalent.
+    if len(input.type().sizes()) != dim + 1:
+        return _unimplemented("dim", "ONNX and PyTorch use different strategies to split the input.")
     return g.op('Softmax', input, axis_i=dim)
 
 
@@ -376,9 +394,6 @@ def log_softmax(g, input, dim=None):
 
 def _convolution(g, input, weight, bias, stride, padding, dilation,
                  transposed, output_padding, groups, benchmark, deterministic, cudnn_enabled):
-    if any(o != 0 for o in output_padding):
-        return _unimplemented("_convolution", "non-zero output_padding")
-
     weight_size = weight.type().sizes()
 
     args = [input, weight]
@@ -393,6 +408,14 @@ def _convolution(g, input, weight, bias, stride, padding, dilation,
               "pads_i": padding + padding,
               "dilations_i": dilation,
               "group_i": groups}
+
+    if any(o != 0 for o in output_padding):
+        # ONNX supports both output_shape and output_padding. they are equivalent expressive.
+        # output_padding is more straightforward, so we use it here.
+        # output_shape = stride * (input_shape - 1) + output_padding + kernel_shape - padding * 2
+        assert transposed
+        assert len(stride) == len(output_padding)
+        kwargs["output_padding_i"] = output_padding
 
     n = g.op("ConvTranspose" if transposed else "Conv", *args, **kwargs)
 

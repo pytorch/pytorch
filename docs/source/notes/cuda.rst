@@ -48,8 +48,12 @@ Memory management
 PyTorch use a caching memory allocator to speed up memory allocations. This
 allows fast memory deallocation without device synchronizations. However, the
 unused memory managed by the allocator will still show as if used in
-`nvidia-smi`. Calling :meth:`~torch.cuda.empty_cache` can release all unused
-cached memory from PyTorch so that those can be used by other GPU applications.
+`nvidia-smi`. You can use :meth:`~torch.cuda.memory_allocated` and
+:meth:`~torch.cuda.max_memory_allocated` to monitor memory occupied by
+tensors, and use :meth:`~torch.cuda.memory_cached` and
+:meth:`~torch.cuda.max_memory_cached` to monitor memory managed by the caching
+allocator. Calling :meth:`~torch.cuda.empty_cache` can release all unused cached
+memory from PyTorch so that those can be used by other GPU applications.
 
 
 Best practices

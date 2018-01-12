@@ -863,17 +863,20 @@ Tensor cudnn_convolution_forward(
   TensorArg output{ output_t, "result", 0 };
   convolution_shape_check(c, input, weight, output, padding, stride, dilation, groups);
 
+  // See #4500
+  Tensor weight_contig = weight->contiguous();
+
 #if CUDNN_VERSION < 7000
   for (int i = 0; i < groups; i++) {
     raw_cudnn_convolution_forward_out(
         narrowGroup(*output, output_channels_dim,        i, groups),
         narrowGroup(*input,  input_channels_dim,         i, groups),
-        narrowGroup(*weight, weight_output_channels_dim, i, groups),
+        narrowGroup(weight_contig, weight_output_channels_dim, i, groups),
         padding, stride, dilation, 1, benchmark, deterministic);
   }
 #else
   raw_cudnn_convolution_forward_out(
-      *output, *input, *weight,
+      *output, *input, weight_contig,
       padding, stride, dilation, groups, benchmark, deterministic);
 #endif
 
@@ -996,17 +999,20 @@ Tensor cudnn_convolution_backward_input(
   TensorArg grad_input{ grad_input_t, "result", 0 };
   convolution_shape_check(c, grad_input, weight, grad_output, padding, stride, dilation, groups);
 
+  // See #4500
+  Tensor weight_contig = weight->contiguous();
+
 #if CUDNN_VERSION < 7000
   for (int i = 0; i < groups; i++) {
     raw_cudnn_convolution_backward_input_out(
         narrowGroup(*grad_input, input_channels_dim, i, groups),
         narrowGroup(*grad_output, output_channels_dim, i, groups),
-        narrowGroup(*weight, weight_output_channels_dim, i, groups),
+        narrowGroup(weight_contig, weight_output_channels_dim, i, groups),
         padding, stride, dilation, 1, benchmark, deterministic);
   }
 #else
   raw_cudnn_convolution_backward_input_out(
-      *grad_input, *grad_output, *weight,
+      *grad_input, *grad_output, weight_contig,
       padding, stride, dilation, groups, benchmark, deterministic);
 #endif
 
