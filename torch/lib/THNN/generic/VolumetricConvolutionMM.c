@@ -43,6 +43,10 @@ static void inline THNN_(VolumetricConvolutionMM_shapeCheck)(
   int64_t inputHeight;
   int64_t inputWidth;
   int64_t nOutputPlane;
+
+  int64_t exactInputDepth;
+  int64_t exactInputHeight;
+  int64_t exactInputWidth;
   int64_t outputDepth;
   int64_t outputHeight;
   int64_t outputWidth;
@@ -52,9 +56,20 @@ static void inline THNN_(VolumetricConvolutionMM_shapeCheck)(
   inputHeight  = input->size[dimh];
   inputWidth   = input->size[dimw];
   nOutputPlane = weight->size[0];
-  outputDepth  = (inputDepth + 2*pT - kT) / dT + 1;
-  outputHeight = (inputHeight + 2*pH - kH) / dH + 1;
-  outputWidth  = (inputWidth + 2*pW - kW) / dW + 1;
+
+  exactInputDepth = inputDepth + 2*pT;
+  exactInputHeight = inputHeight + 2*pH;
+  exactInputWidth = inputWidth + 2*pW;
+
+  if (exactInputDepth < kT || exactInputHeight < kH || exactInputWidth < kW) {
+    THError("Calculated input size: (%d x %d x %d). "
+      "Kernel size: (%d x %d x %d). Kernel size can't greater than actual input size",
+      exactInputDepth,exactInputHeight,exactInputWidth,kT,kH,kW);
+  }
+
+  outputDepth  = (exactInputDepth - kT) / dT + 1;
+  outputHeight = (exactInputHeight - kH) / dH + 1;
+  outputWidth  = (exactInputWidth - kW) / dW + 1;
 
   if (outputWidth < 1 || outputHeight < 1 || outputDepth < 1)
   {
