@@ -2,11 +2,11 @@ import torch
 from torch.autograd import Variable, Function
 
 
-def repackage_inputs(inputs, requires_grad=False):
+def repackage_inputs(inputs):
     if torch.is_tensor(inputs):
-        return Variable(inputs, requires_grad=requires_grad)
+        return Variable(inputs)
     elif isinstance(inputs, tuple):
-        return tuple(repackage_inputs(v, requires_grad=requires_grad) for v in inputs)
+        return tuple(repackage_inputs(v) for v in inputs)
     else:
         raise RuntimeError("Unknown input type")
 
@@ -37,7 +37,7 @@ class CheckpointFunction(Function):
     @staticmethod
     def backward(ctx, *args):
         saved_inputs = ctx.saved_tensors
-        inputs = repackage_inputs(saved_inputs, requires_grad=True)
+        inputs = repackage_inputs(saved_inputs)
         with torch.enable_grad():
             outputs = ctx.run_function(*inputs)
 
@@ -58,8 +58,7 @@ class CheckpointFunction(Function):
 
 
 def checkpoint(run_function, *args):
-    ck = CheckpointFunction()
-    return ck.apply(run_function, *args)
+    return CheckpointFunction.apply(run_function, *args)
 
 
 def checkpoint_sequential(modules, segments, run_function, *inputs):
