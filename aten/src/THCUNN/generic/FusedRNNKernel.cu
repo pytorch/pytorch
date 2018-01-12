@@ -420,17 +420,20 @@ __global__ void
     *gi = gcx;
 #else
     float gcx = THCNumerics<float>::tanh(H2F(cy));
+
     float gog = H2F(go) * gcx;
     gcx = H2F(go) * H2F(og) * ( 1 - gcx*gcx) + H2F(goc);
 
-    float gcg = gcx * H2F(fg);
-    float gfg = gcx * H2F(cg);
-    float gig = gcx * H2F(cx);
+    float gig = gcx * H2F(cg);
+    float gfg = gcx * H2F(cx);
+    float gcg = gcx * H2F(ig);
 
-    gog = gog * ( (1-H2F(og))*H2F(og) );
+    gcx = gcx * H2F(fg);
+
+    gig = gig * (1-H2F(ig)) * H2F(ig);
+    gfg = gfg * (1-H2F(fg)) * H2F(fg);
     gcg = gcg * (1-H2F(cg)*H2F(cg));
-    gfg = gfg * ( (1-H2F(fg))*H2F(fg) );
-    gig = gig * ( (1-H2F(ig))*H2F(ig) );
+    gog = gog * (1-H2F(og)) * H2F(og);
 
     *ih = F2H(gig);
     *fh = F2H(gfg);
@@ -439,6 +442,7 @@ __global__ void
 
     *gi = F2H(gcx);
 #endif
+
   }
 }
 
