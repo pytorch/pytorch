@@ -167,7 +167,7 @@ Example::
     >>> a.all()
     False
 
-.. function:: any(dim, keepdim=False, out=None) -> Tensor
+.. function:: all(dim, keepdim=False, out=None) -> Tensor
 
 Returns True if all elements in each row of the tensor in the given
 dimension :attr:`dim` are non-zero, False otherwise.
@@ -204,7 +204,7 @@ Example::
 
 add_docstr_all('any',
                r"""
-.. function:: x.any() -> bool
+.. function:: any() -> bool
 
 Returns True if any elements in the tensor are non-zero, False otherwise.
 
@@ -219,7 +219,7 @@ Example::
     >>> a.any()
     True
 
-.. function:: x.any(dim, keepdim=False, out=None) -> Tensor
+.. function:: any(dim, keepdim=False, out=None) -> Tensor
 
 Returns True if any elements in each row of the tensor in the given
 dimension :attr:`dim` are non-zero, False otherwise.
