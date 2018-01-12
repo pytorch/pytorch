@@ -8,7 +8,7 @@ namespace at {
 namespace native {
 
 bool allclose(const Tensor& self, const Tensor& other, double rtol, double atol) {
-  if (!self.sub(other).abs().le(other.abs().mul(rtol).add(atol)).all()) {
+  if (!self.sub(other).abs().le(other.abs().mul(rtol).add(atol)).all().toCByte()) {
     return false;
   }
 

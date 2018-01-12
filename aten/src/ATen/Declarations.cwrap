@@ -1117,7 +1117,7 @@
     - CPU
     - CUDA
   cname: logicalall
-  return: bool
+  return: real
   arguments:
     - THTensor* self
 ]]
@@ -1129,7 +1129,7 @@
     - CPU
     - CUDA
   cname: logicalany
-  return: bool
+  return: real
   arguments:
     - THTensor* self
 ]]
