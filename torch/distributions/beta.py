@@ -28,8 +28,12 @@ class Beta(Distribution):
     has_rsample = True
 
     def __init__(self, alpha, beta):
-        self.alpha, self.beta = broadcast_all(alpha, beta)
-        alpha_beta = torch.stack([self.alpha, self.beta], -1)
+        if isinstance(alpha, Number) and isinstance(beta, Number):
+            alpha_beta = torch.Tensor([alpha, beta])
+            self.alpha, self.beta = torch.Tensor([alpha]), torch.Tensor([beta])
+        else:
+            self.alpha, self.beta = broadcast_all(alpha, beta)
+            alpha_beta = torch.stack([self.alpha, self.beta], -1)
         self._dirichlet = Dirichlet(alpha_beta)
         super(Beta, self).__init__(self._dirichlet._batch_shape)
 
