@@ -267,6 +267,8 @@ def _kl_beta_gamma(p, q):
     t4 = q.beta * p.alpha / (p.alpha + p.beta)
     return t1 + t2 - t3 + t4
 
+# TODO: Add Beta-Laplace KL Divergence
+
 
 @register_kl(Beta, Normal)
 def _kl_beta_normal(p, q):
@@ -310,6 +312,8 @@ def _kl_exponential_gumbel(p, q):
     t3 = scale_rate_prod.reciprocal()
     return t1 - loc_scale_ratio + t2 + t3
 
+# TODO: Add Exponential-Laplace KL Divergence
+
 
 @register_kl(Exponential, Normal)
 def _kl_exponential_normal(p, q):
@@ -342,6 +346,8 @@ def _kl_gamma_gumbel(p, q):
     t2 = beta_scale_prod.log() + p.alpha / beta_scale_prod
     t3 = torch.exp(loc_scale_ratio) * (1 + beta_scale_prod.reciprocal()).pow(-p.alpha) - loc_scale_ratio
     return t1 + t2 + t3
+
+# TODO: Add Gamma-Laplace KL Divergence
 
 
 @register_kl(Gamma, Normal)
@@ -414,12 +420,7 @@ def _kl_normal_gumbel(p, q):
     t3 = torch.exp(-mean_scale_ratio + 0.5 * var_scale_sqr_ratio + loc_scale_ratio)
     return -t1 + t2 + t3 - (0.5 * (1 + math.log(2 * math.pi)))
 
-
-@register_kl(Normal, Laplace)
-def _kl_normal_laplace(p, q):  # this fails
-    common_term = (p.std / q.scale)
-    common_const = math.sqrt(2.0 / math.pi)
-    return (math.log(common_const) - 0.5) - torch.log(common_term) + common_term * common_const
+# TODO: Add Normal-Laplace KL Divergence
 
 
 @register_kl(Pareto, Beta)
