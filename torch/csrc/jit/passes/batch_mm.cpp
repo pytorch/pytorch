@@ -17,6 +17,34 @@ namespace torch { namespace jit {
 // Such patterns show up mostly in backward of RNNs, since the derivative of many
 // uses of matrix multiplies with same weights forms exactly such a tree
 // (note that it's usually also highly imbalanced i.e. has O(n) depth).
+//
+// This (or any tree of adds of MMs):
+//
+// +------+ +------+   +------+ +------+   +------+
+// |      | |      |   |      | |      |   |      |
+// |  L1  | |  R1  | + |  L2  | |  R2  | = |  O   |
+// |      | |      |   |      | |      |   |      |
+// +------+ +------+   +------+ +------+   +------+
+//
+// can be basically transformed into a single MM which looks like this
+// (we concat all lhs operands, concat rhs operands, do mm):
+//
+//                 +------+
+//                 |      |
+//                 |  R1  |
+//                 |      |
+//                 +------+
+//                 |      |
+//                 |  R2  |
+//                 |      |
+//                 +------+
+// +------+------+ +------+
+// |      |      | |      |
+// |  L1  |  L2  | |  O   |
+// |      |      | |      |
+// +------+------+ +------+
+
+
 
 // Note [Further optimizations]
 // It would be straightforward to extend the TreeToken class to also detect if all
@@ -54,14 +82,19 @@ static std::array<int64_t, 2> as_array(at::IntList sizes) {
   return arr;
 }
 
+// TreeTokens will be used to label nodes of the graph, if the nodes will fit
+// our mm/add tree pattern. Basically we do dynamic programming on DAGs, where
+// when we reach node N with inputs A and B, then A and B have already been
+// procesed, and we can try to unify their TreeTokens (if they have them)
+// and build a larger tree.
 struct TreeToken {
   uint64_t tree_size = 0; // NOTE: measured in number of leaves i.e. mm ops
   std::array<int64_t, 2> lhs_sizes;
   std::array<int64_t, 2> rhs_sizes;
   Node *node = nullptr;
-  bool valid = false;
+  bool is_root = false;
 
-  static TreeToken from_mm(Node *mm) {
+  static TreeToken fromMM(Node *mm) {
     TreeToken token;
     token.tree_size = 1;
     Value *lhs = mm->inputs()[0];
@@ -69,14 +102,14 @@ struct TreeToken {
     token.lhs_sizes = as_array(lhs->type()->expect<TensorType>()->sizes());
     token.rhs_sizes = as_array(rhs->type()->expect<TensorType>()->sizes());
     token.node = mm;
-    token.valid = true;
+    token.is_root = true;
     return token;
   }
 
   static TreeToken unify(Node *add, TreeToken& l, TreeToken& r) {
     TreeToken token;
     // See Note [Overlapping trees]
-    if (&l == &r || !l.valid || !r.valid)
+    if (&l == &r || !l.is_root || !r.is_root)
       return token;
     // We can batch the tree only if all sizes match, because we need to
     // cat inputs for both operands
@@ -88,13 +121,13 @@ struct TreeToken {
     token.lhs_sizes = l.lhs_sizes;
     token.rhs_sizes = l.rhs_sizes;
     token.node = add;
-    token.valid = true;
-    l.valid = r.valid = false; // Reserve the subtrees, so they can't be used again.
+    token.is_root = true;
+    l.is_root = r.is_root = false; // Reserve the subtrees, so they can't be used again.
     return token;
   }
 
   operator bool() {
-    return valid;
+    return is_root;
   }
 
   std::vector<Node*> gatherMatMuls() {
@@ -120,10 +153,11 @@ void BatchMM(std::shared_ptr<Graph>& graph) {
   static Symbol cat_kind = "cat"_sym;
   static Symbol dim_sym = "dim"_sym;
 
+  // Look for trees in the graph
   std::unordered_map<Node*, TreeToken> tokens;
   for (auto node : graph->nodes()) {
     if (node->kind() == mm_kind) {
-      tokens[node] = TreeToken::from_mm(node);
+      tokens[node] = TreeToken::fromMM(node);
     } else if (node->kind() == add_kind) {
       Node *lhs = node->inputs()[0]->node();
       Node *rhs = node->inputs()[1]->node();
@@ -139,6 +173,7 @@ void BatchMM(std::shared_ptr<Graph>& graph) {
     }
   }
 
+  // Merge trees we've found
   for (auto & item : tokens) {
     auto & root = item.second;
     if (!root || root.tree_size < min_fusion_size)
