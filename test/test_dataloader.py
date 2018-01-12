@@ -582,5 +582,43 @@ class TestDictDataLoader(TestCase):
             self.assertTrue(sample['another_dict']['a_number'].is_pinned())
 
 
+class TestWorkerQueueDataset(Dataset):
+    def __init__(self, data):
+        self.data = data
+        self.worker_id = None
+
+    def worker_init_fn(self, worker_id):
+        self.worker_id = worker_id
+
+    def __getitem__(self, item):
+        return self.worker_id, self.data[item]
+
+    def __len__(self):
+        return len(self.data)
+
+
+class TestIndividualWorkerQueue(TestCase):
+    def setUp(self):
+        self.dataset = TestWorkerQueueDataset([i for i in range(128)])
+
+    def _run_ind_worker_queue_test(self, batch_size, num_workers):
+        loader = DataLoader(
+            self.dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers,
+            worker_init_fn=self.dataset.worker_init_fn, ind_worker_queue=True
+        )
+        current_worker_idx = 0
+        for i, (worker_ids, sample) in enumerate(loader):
+            self.assertEqual(worker_ids.tolist(), [current_worker_idx] * batch_size)
+            self.assertEqual(sample.tolist(), [j for j in range(i*batch_size, (i+1)*batch_size)])
+            current_worker_idx += 1
+            if current_worker_idx == num_workers:
+                current_worker_idx = 0
+
+    def test_ind_worker_queue(self):
+        for batch_size in (8, 16, 32, 64):
+            for num_workers in range(1, 6):
+                self._run_ind_worker_queue_test(batch_size=batch_size, num_workers=num_workers)
+
+
 if __name__ == '__main__':
     run_tests()
