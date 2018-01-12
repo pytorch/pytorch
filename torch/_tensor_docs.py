@@ -152,16 +152,106 @@ In-place version of :meth:`~Tensor.addr`
 
 add_docstr_all('all',
                r"""
-all() -> bool
+.. function:: all() -> bool
 
 Returns True if all elements in the tensor are non-zero, False otherwise.
+
+Example::
+
+    >>> a = torch.randn(1, 3).mul(2).byte()
+    >>> a
+
+     1  1  0
+    [torch.ByteTensor of size 1x3]
+
+    >>> a.all()
+    False
+
+.. function:: any(dim, keepdim=False, out=None) -> Tensor
+
+Returns True if all elements in each row of the tensor in the given
+dimension :attr:`dim` are non-zero, False otherwise.
+
+If :attr:`keepdim` is ``True``, the output tensor is of the same size as
+:attr:`input` except in the dimension :attr:`dim` where it is of size 1.
+Otherwise, :attr:`dim` is squeezed (see :func:`torch.squeeze`), resulting
+in the output tensor having 1 fewer dimension than :attr:`input`.
+
+Args:
+    dim (int): the dimension to reduce
+    keepdim (bool): whether the output tensor has :attr:`dim` retained or not
+    out (Tensor, optional): the output tensor
+
+Example::
+
+    >>> a = torch.randn(4, 2).mul(2).byte()
+    >>> a
+
+     1  1
+     1  0
+     0  0
+     1  0
+    [torch.ByteTensor of size 4x2]
+
+    >>> a.all(dim=1)
+
+     1
+     0
+     0
+     0
+    [torch.ByteTensor of size 4]
 """)
 
 add_docstr_all('any',
                r"""
-any() -> bool
+.. function:: x.any() -> bool
 
 Returns True if any elements in the tensor are non-zero, False otherwise.
+
+Example::
+
+    >>> a = torch.randn(1, 3).mul(2).byte()
+    >>> a
+
+     1  1  0
+    [torch.ByteTensor of size 1x3]
+
+    >>> a.any()
+    True
+
+.. function:: x.any(dim, keepdim=False, out=None) -> Tensor
+
+Returns True if any elements in each row of the tensor in the given
+dimension :attr:`dim` are non-zero, False otherwise.
+
+If :attr:`keepdim` is ``True``, the output tensor is of the same size as
+:attr:`input` except in the dimension :attr:`dim` where it is of size 1.
+Otherwise, :attr:`dim` is squeezed (see :func:`torch.squeeze`), resulting
+in the output tensor having 1 fewer dimension than :attr:`input`.
+
+Args:
+    dim (int): the dimension to reduce
+    keepdim (bool): whether the output tensor has :attr:`dim` retained or not
+    out (Tensor, optional): the output tensor
+
+Example::
+
+    >>> a = torch.randn(4, 2).mul(2).byte()
+    >>> a
+
+     1  1
+     1  0
+     0  0
+     1  0
+    [torch.ByteTensor of size 4x2]
+
+    >>> a.any(dim=1)
+
+     1
+     1
+     0
+     1
+    [torch.ByteTensor of size 4]
 """)
 
 add_docstr_all('apply_',

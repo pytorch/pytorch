@@ -204,8 +204,10 @@ TH_API void THTensor_(dirichlet_grad)(THTensor *self, THTensor *x, THTensor *alp
 
 #if defined(TH_REAL_IS_BYTE)
 
-TH_API int THTensor_(logicalall)(THTensor *self);
-TH_API int THTensor_(logicalany)(THTensor *self);
+TH_API int THTensor_(logicalallall)(THTensor *self);
+TH_API int THTensor_(logicalanyall)(THTensor *self);
+TH_API void THTensor_(logicalall)(THTensor *r_, THTensor *t, int dimension, int keepdim);
+TH_API void THTensor_(logicalany)(THTensor *r_, THTensor *t, int dimension, int keepdim);
 
 #endif /* TH_REAL_IS_BYTE */
 

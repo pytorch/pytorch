@@ -461,6 +461,22 @@ class TestTorch(TestCase):
         self.assertTrue(x.all())
         self.assertFalse(x.any())
 
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    def test_all_any_with_dim(self):
+        def test(x):
+            r1 = np.all(x, axis=1, keepdims=False).astype('uint8')
+            r2 = torch.ByteTensor(x).all(dim=1, keepdim=False).numpy()
+            self.assertEqual(r1.shape, r2.shape)
+            self.assertTrue((r1 == r2).all())
+
+            r3 = np.any(x, axis=2, keepdims=True).astype('uint8')
+            r4 = torch.ByteTensor(x).any(dim=2, keepdim=True).numpy()
+            self.assertEqual(r3.shape, r4.shape)
+            self.assertTrue((r3 == r4).all())
+
+        test(np.random.choice([0, 1], size=(1, 2, 3, 4)))
+        test(np.random.choice([0, 1], size=(4, 3, 2, 4)))
+
     @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
     def test_all_any_empty_cuda(self):
         x = torch.cuda.ByteTensor()

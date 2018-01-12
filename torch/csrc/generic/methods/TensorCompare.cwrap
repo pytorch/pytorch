@@ -737,24 +737,62 @@
   name: all
   types:
     - Byte
-  backends:
-    - CPU
-    - CUDA
-  cname: logicalall
-  return: bool
-  arguments:
-    - THTensor* self
+  variants:
+    - method
+  options:
+    - cname: logicalallall
+      return: bool
+      arguments:
+        - THTensor* self
+    - cname: logicalall
+      return: argument 0
+      arguments:
+        - arg: THTensor* result
+          output: True
+        - THTensor* self
+        - arg: int64_t dim
+          wrap_dim: self
+        - bool keepdim
+    - cname: logicalall
+      return: argument 0
+      before_call: maybeThrowBackCompatKeepdimWarn("all");
+      arguments:
+        - arg: THTensor* result
+          output: True
+        - THTensor* self
+        - arg: int64_t dim
+          wrap_dim: self
+        - CONSTANT false
 ]]
 
 [[
   name: any
   types:
     - Byte
-  backends:
-    - CPU
-    - CUDA
-  cname: logicalany
-  return: bool
-  arguments:
-    - THTensor* self
+  variants:
+    - method
+  options:
+    - cname: logicalanyall
+      return: bool
+      arguments:
+        - THTensor* self
+    - cname: logicalany
+      return: argument 0
+      arguments:
+        - arg: THTensor* result
+          output: True
+        - THTensor* self
+        - arg: int64_t dim
+          wrap_dim: self
+        - bool keepdim
+    - cname: logicalany
+      return: argument 0
+      before_call: maybeThrowBackCompatKeepdimWarn("any");
+      arguments:
+        - arg: THTensor* result
+          output: True
+        - THTensor* self
+        - arg: int64_t dim
+          wrap_dim: self
+        - CONSTANT false
 ]]

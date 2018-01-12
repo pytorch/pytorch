@@ -734,19 +734,16 @@ real THTensor_(medianall)(THTensor *tensor)
   return theMedian;
 }
 
-accreal THTensor_(sumall)(THTensor *tensor)
-{
-  accreal sum = 0;
-  TH_TENSOR_APPLY(real, tensor, sum += *tensor_data;);
-  return sum;
-}
+#define TENSOR_IMPLEMENT_ACCALL(NAME, RETTYPE, ACC_OP, INIT_VALUE)        \
+  RETTYPE THTensor_(NAME)(THTensor *tensor)                               \
+  {                                                                       \
+    accreal result = INIT_VALUE;                                          \
+    TH_TENSOR_APPLY(real, tensor, result = result ACC_OP *tensor_data;);  \
+    return result;                                                        \
+  }
 
-accreal THTensor_(prodall)(THTensor *tensor)
-{
-  accreal prod = 1;
-  TH_TENSOR_APPLY(real, tensor, prod *= *tensor_data;);
-  return prod;
-}
+TENSOR_IMPLEMENT_ACCALL(sumall, accreal, +, 0)
+TENSOR_IMPLEMENT_ACCALL(prodall, accreal, *, 1)
 
 void THTensor_(add)(THTensor *r_, THTensor *t, real value)
 {
@@ -1870,78 +1867,44 @@ void THTensor_(min)(THTensor *values_, THLongTensor *indices_, THTensor *t, int 
   }
 }
 
-
-void THTensor_(sum)(THTensor *r_, THTensor *t, int dimension, int keepdim)
-{
-  THLongStorage *dim;
-
-  THArgCheck(dimension >= 0 && dimension < THTensor_(nDimension)(t), 2, "dimension %d out of range",
-      dimension + TH_INDEX_BASE);
-
-  dim = THTensor_(newSizeOf)(t);
-  THLongStorage_set(dim, dimension, 1);
-  THTensor_(resize)(r_, dim, NULL);
-  THLongStorage_free(dim);
-
-  // two implementations optimized for data locality
-  if (t->stride[dimension] == 1) {
-    TH_TENSOR_DIM_APPLY2(real, t, real, r_, dimension,
-                         accreal sum = 0;
-                         int64_t i;
-                         for(i = 0; i < t_size; i++)
-                           sum += t_data[i*t_stride];
-                         *r__data = (real)sum;);
-  } else {
-    THTensor_(zero)(r_);
-    THTensor *temp_ = THTensor_(newWithTensor)(r_);
-    // r_.expand_as(t)
-    temp_->size[dimension] = t->size[dimension];
-    temp_->stride[dimension] = 0;
-
-    TH_TENSOR_APPLY2(real, temp_, real, t, *temp__data = *temp__data + *t_data;);
-    THTensor_(free)(temp_);
+#define TENSOR_IMPLEMENT_ACC(NAME, ACC_OP, INIT_VALUE)                                   \
+  void THTensor_(NAME)(THTensor *r_, THTensor *t, int dimension, int keepdim)            \
+  {                                                                                      \
+    THLongStorage *dim;                                                                  \
+                                                                                         \
+    THArgCheck(dimension >= 0 && dimension < THTensor_(nDimension)(t), 2, "dimension %d out of range", \
+        dimension + TH_INDEX_BASE);                                                      \
+                                                                                         \
+    dim = THTensor_(newSizeOf)(t);                                                       \
+    THLongStorage_set(dim, dimension, 1);                                                \
+    THTensor_(resize)(r_, dim, NULL);                                                    \
+    THLongStorage_free(dim);                                                             \
+                                                                                         \
+    /* two implementations optimized for data locality */                                \
+    if (t->stride[dimension] == 1) {                                                     \
+      TH_TENSOR_DIM_APPLY2(real, t, real, r_, dimension,                                 \
+                           accreal result = INIT_VALUE;                                  \
+                           int64_t i;                                                    \
+                           for(i = 0; i < t_size; i++)                                   \
+                             result = result ACC_OP t_data[i*t_stride];                  \
+                           *r__data = (real)result;);                                    \
+    } else {                                                                             \
+      THTensor_(fill)(r_, INIT_VALUE);                                                   \
+      THTensor *temp_ = THTensor_(newWithTensor)(r_);                                    \
+      /* r_.expand_as(t) */                                                              \
+      temp_->size[dimension] = t->size[dimension];                                       \
+      temp_->stride[dimension] = 0;                                                      \
+      TH_TENSOR_APPLY2(real, temp_, real, t, *temp__data =  *temp__data ACC_OP *t_data;);\
+      THTensor_(free)(temp_);                                                            \
+    }                                                                                    \
+                                                                                         \
+    if (!keepdim) {                                                                      \
+      THTensor_(squeeze1d)(r_, r_, dimension);                                           \
+    }                                                                                    \
   }
 
-  if (!keepdim) {
-    THTensor_(squeeze1d)(r_, r_, dimension);
-  }
-}
-
-void THTensor_(prod)(THTensor *r_, THTensor *t, int dimension, int keepdim)
-{
-  THLongStorage *dim;
-
-  THArgCheck(dimension >= 0 && dimension < THTensor_(nDimension)(t), 2, "dimension %d out of range",
-      dimension + TH_INDEX_BASE);
-
-  dim = THTensor_(newSizeOf)(t);
-  THLongStorage_set(dim, dimension, 1);
-  THTensor_(resize)(r_, dim, NULL);
-  THLongStorage_free(dim);
-
-  // two implementations optimized for data locality
-  if (t->stride[dimension] == 1) {
-    TH_TENSOR_DIM_APPLY2(real, t, real, r_, dimension,
-                         accreal prod = 1;
-                         int64_t i;
-                         for(i = 0; i < t_size; i++)
-                           prod *= t_data[i*t_stride];
-                         *r__data = (real)prod;);
-  } else {
-    THTensor_(fill)(r_, 1);
-    THTensor *temp_ = THTensor_(newWithTensor)(r_);
-    // r_.expand_as(t)
-    temp_->size[dimension] = t->size[dimension];
-    temp_->stride[dimension] = 0;
-
-    TH_TENSOR_APPLY2(real, temp_, real, t, *temp__data = *temp__data * *t_data;);
-    THTensor_(free)(temp_);
-  }
-
-  if (!keepdim) {
-    THTensor_(squeeze1d)(r_, r_, dimension);
-  }
-}
+TENSOR_IMPLEMENT_ACC(sum, +, 0)
+TENSOR_IMPLEMENT_ACC(prod, *, 1)
 
 void THTensor_(cumsum)(THTensor *r_, THTensor *t, int dimension)
 {
@@ -3040,16 +3003,11 @@ LAB_IMPLEMENT_BASIC_FUNCTION(abs,abs)
 
 #if defined(TH_REAL_IS_BYTE)
 
-#define TENSOR_IMPLEMENT_LOGICAL_SUM(NAME, OP, INIT_VALUE) \
-  int THTensor_(NAME)(THTensor *tensor) \
-  { \
-    int sum = INIT_VALUE;                               \
-    TH_TENSOR_APPLY(real, tensor, sum = sum OP *tensor_data;); \
-    return sum; \
-  }
+TENSOR_IMPLEMENT_ACCALL(logicalallall, int, &&, 1)
+TENSOR_IMPLEMENT_ACCALL(logicalanyall, int, ||, 0)
 
-TENSOR_IMPLEMENT_LOGICAL_SUM(logicalall, &&, 1)
-TENSOR_IMPLEMENT_LOGICAL_SUM(logicalany, ||, 0)
+TENSOR_IMPLEMENT_ACC(logicalall, &&, 1)
+TENSOR_IMPLEMENT_ACC(logicalany, ||, 0)
 
 #endif /* Byte only part */
 
