@@ -23,13 +23,13 @@ class Multinomial(Distribution):
 
     Example::
 
-        >>> m = Multinomial(10, torch.Tensor([ 1, 1, 1, 1]))
-        >>> x= m.sample()  # equal probability of 0, 1, 2, 3
-         1
-         3
-         3
-         3
-        [torch.FloatTensor of size 4]
+        >>> m = Multinomial(100, torch.Tensor([ 1, 1, 1, 1]))
+        >>> x = m.sample()  # equal probability of 0, 1, 2, 3
+         21
+         24
+         30
+         25
+        [torch.FloatTensor of size 4]]
 
         >>> Multinomial(probs=torch.Tensor([1, 1, 1, 1])).log_prob(x)
         -4.1338
@@ -77,7 +77,7 @@ class Multinomial(Distribution):
 
     def log_prob(self, value):
         self._validate_log_prob_arg(value)
-        logits, value = broadcast_all(self.probs.log(), value)
+        logits, value = broadcast_all(self.logits.clone(), value)
         log_factorial_n = torch.lgamma(value.sum(-1) + 1)
         log_factorial_xs = torch.lgamma(value + 1).sum(-1)
         logits[(value == 0) & (logits == -float('inf'))] = 0
