@@ -4,7 +4,7 @@ from torch.autograd import Variable
 from torch.distributions import Categorical
 from numbers import Number
 from torch.distributions import constraints
-from torch.distributions.utils import log_sum_exp, broadcast_all
+from torch.distributions.utils import log_sum_exp, broadcast_all, lazy_property
 
 
 class Multinomial(Distribution):
@@ -47,19 +47,19 @@ class Multinomial(Distribution):
             raise NotImplementedError('inhomogeneous total_count is not supported')
         self.total_count = total_count
         self._categorical = Categorical(probs=probs, logits=logits)
-        batch_shape = probs.size()[:-1] if probs is not None else logits.size()[:-1]
-        event_shape = probs.size()[-1:] if probs is not None else logits.size()[-1:]
+        batch_shape = self._categorical.batch_shape
+        event_shape = self._categorical.probs_or_logits.size()[-1:]
         super(Multinomial, self).__init__(batch_shape, event_shape)
 
     @constraints.dependent_property
     def support(self):
         return constraints.integer_interval(0, self.total_count)
 
-    @property
+    @lazy_property
     def logits(self):
         return self._categorical.logits
 
-    @property
+    @lazy_property
     def probs(self):
         return self._categorical.probs
 
@@ -73,7 +73,7 @@ class Multinomial(Distribution):
         samples = samples.permute(*shifted_idx)
         counts = samples.new(self._extended_shape(sample_shape)).zero_()
         counts.scatter_add_(-1, samples, torch.ones_like(samples))
-        return counts.type_as(self.probs)
+        return counts.type_as(self._categorical.probs_or_logits)
 
     def log_prob(self, value):
         self._validate_log_prob_arg(value)
