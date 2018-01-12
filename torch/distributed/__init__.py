@@ -37,8 +37,16 @@ def destroy_process_group():
     Destroy the initialized distributed package
     """
     global _backend
+    global _initialized
+    torch._C._dist_destroy_process_group()
     _backend = dist_backend.UNDEFINED
-    return torch._C._dist_destroy_process_group()
+    _initialized = 0
+
+
+def is_initialized():
+    """Checking if the process group has been initialized
+    """
+    return _initialized == _INITIALIZED_PG
 
 
 def init_process_group(backend, init_method='env://', **kwargs):
