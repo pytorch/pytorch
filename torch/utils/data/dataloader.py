@@ -205,7 +205,7 @@ class DataLoaderIter(object):
                 self.worker_queue_binding = itertools.cycle(range(self.num_workers))
             else:
                 self.index_queue = [multiprocessing.SimpleQueue()]
-                self.worker_queue_binding = itertools.cycle([0])
+                self.worker_queue_binding = itertools.repeat(0)
             self.worker_result_queue = multiprocessing.SimpleQueue()
             self.batches_outstanding = 0
             self.worker_pids_set = False
