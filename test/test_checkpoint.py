@@ -3,9 +3,10 @@ import torch.nn as nn
 import math, unittest
 from torch.autograd import Variable
 from torch.utils.checkpoint import checkpoint_sequential
+from common import TestCase, run_tests
 
 
-class TestCheckpoint(unittest.TestCase):
+class TestCheckpoint(TestCase):
 
     def custom(self):
         def custom_forward(start, end, modules):
@@ -23,7 +24,7 @@ class TestCheckpoint(unittest.TestCase):
             nn.ReLU(),
             nn.Linear(50, 20),
             nn.ReLU(),
-            nn.Linear(20, 1),
+            nn.Linear(20, 5),
             nn.ReLU()
         )
 
@@ -52,17 +53,10 @@ class TestCheckpoint(unittest.TestCase):
             grad_checkpointed[name] = param.grad.data.clone()
 
         # compare the output and parameters gradients
-        print("==> Output difference: {}".format(
-            (out_checkpointed - out_not_checkpointed).abs().sum()))
-
-        print("==> Checking Params grad difference")
+        self.assertEqual(out_checkpointed, out_not_checkpointed)
         for name in grad_checkpointed:
-            print("Diff for {} is {}".format(
-                name,
-                (grad_checkpointed[name] - grad_not_checkpointed[name]).abs().sum()
-            ))
-
+            self.assertEqual(grad_checkpointed[name], grad_not_checkpointed[name])
 
 
 if __name__ == '__main__':
-    unittest.main()
+    run_tests()
