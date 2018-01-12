@@ -593,7 +593,7 @@ static void tensorLogicalall(rpc::RPCMessage& raw_message) {
   at::Tensor tensor = unpackRetrieveTensor(raw_message);
   finalize(raw_message);
 
-  int64_t response = tensor.all();
+  int64_t response = tensor.all().toCLong();
   sendValueToMaster(response);
 }
 
@@ -601,6 +601,6 @@ static void tensorLogicalany(rpc::RPCMessage& raw_message) {
   at::Tensor tensor = unpackRetrieveTensor(raw_message);
   finalize(raw_message);
 
-  int64_t response = tensor.any();
+  int64_t response = tensor.any().toCLong();
   sendValueToMaster(response);
 }
