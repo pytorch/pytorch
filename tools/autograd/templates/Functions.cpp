@@ -1018,6 +1018,10 @@ std::tuple<Tensor, Tensor, Tensor> batchnorm_double_backward(
 
 }
 
+Tensor _scalar_sum_backward(const Tensor & grad, const Tensor & self) {
+  return grad.expand(self.sizes());
+}
+
 } // anonymous namespace
 
 ${autograd_function_definitions}
