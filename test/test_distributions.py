@@ -1430,7 +1430,10 @@ class TestConstraints(TestCase):
                         # These distributions accept positive probs, but elsewhere we
                         # use a stricter constraint to the simplex.
                         value = value / value.sum(-1, True)
-                    constraint = dist.params[name]
+                    try:
+                        constraint = dist.params[name]
+                    except KeyError:
+                        continue  # ignore optional parameters
                     if is_dependent(constraint):
                         continue
                     message = '{} example {}/{} parameter {} = {}'.format(

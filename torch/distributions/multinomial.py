@@ -36,22 +36,16 @@ class Multinomial(Distribution):
         [torch.FloatTensor of size 1]
 
     Args:
-        total_count (int or Tensor or Variable): number of trials
+        total_count (int): number of trials
         probs (Tensor or Variable): event probabilities
         logits (Tensor or Variable): event log probabilities
     """
-    params = {'total_count': constraints.nonnegative_integer,
-              'probs': constraints.simplex, 'logits': constraints.real}
+    params = {'logits': constraints.real}  # Let logits be the canonical parameterization.
 
     def __init__(self, total_count=1, probs=None, logits=None):
-        if isinstance(total_count, Number):
-            self.total_count = total_count
-        else:
-            if isinstance(total_count, Variable):
-                total_count = total_count.data
-            self.total_count = total_count.view(-1)[0]
-            if (total_count != self.total_count).any():
-                raise NotImplementedError('inhomogeneous total_count is not supported')
+        if not isinstance(total_count, Number):
+            raise NotImplementedError('inhomogeneous total_count is not supported')
+        self.total_count = total_count
         self._categorical = Categorical(probs=probs, logits=logits)
         batch_shape = probs.size()[:-1] if probs is not None else logits.size()[:-1]
         event_shape = probs.size()[-1:] if probs is not None else logits.size()[-1:]
