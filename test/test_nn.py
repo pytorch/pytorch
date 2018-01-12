@@ -2202,6 +2202,32 @@ class TestNN(NNTestCase):
                 input = Variable(torch.Tensor(torch.Size((3, ) * dims)))
                 self.assertRaises(RuntimeError, lambda: module(input))
 
+    def test_conv_shapecheck(self):
+        def test(should_raise, module, input_size):
+            input = Variable(torch.Tensor(3, *input_size))
+            if should_raise:
+                self.assertRaises(RuntimeError, lambda: module(input))
+            else:
+                # just run it to ensure no exception raised.
+                module(input)
+
+        # Conv1d
+        test(True, nn.Conv1d(1, 1, 3), (1, 2))
+        test(True, nn.Conv1d(1, 1, 3, stride=2), (1, 2))
+        test(False, nn.Conv1d(1, 1, 2), (1, 2))
+        test(False, nn.Conv1d(1, 1, 2, stride=2), (1, 2))
+        test(False, nn.Conv1d(1, 1, 3, stride=2, padding=1), (1, 2))
+
+        # Conv2d
+        test(True, nn.Conv2d(1, 1, (3, 3)), (1, 2, 2))
+        test(False, nn.Conv2d(1, 1, (3, 3)), (1, 3, 3))
+        test(False, nn.Conv2d(1, 1, (3, 3), padding=1), (1, 2, 2))
+
+        # Conv3D
+        test(True, nn.Conv3d(1, 1, (3, 3, 3)), (1, 2, 2, 2))
+        test(False, nn.Conv3d(1, 1, (3, 3, 3)), (1, 3, 3, 3))
+        test(False, nn.Conv3d(1, 1, (3, 3, 3), padding=1), (1, 2, 2, 2))
+
     def test_ConvTranspose2d_output_size(self):
         m = nn.ConvTranspose2d(3, 4, 3, 3, 0, 2)
         i = Variable(torch.randn(2, 3, 6, 6))
