@@ -2208,7 +2208,8 @@ class TestNN(NNTestCase):
             if should_raise:
                 self.assertRaises(RuntimeError, lambda: module(input))
             else:
-                module(input) ## just run it to ensure no exception raised.
+                # just run it to ensure no exception raised.
+                module(input)
 
         # Conv1d
         test(True, nn.Conv1d(1, 1, 3), (1, 2))
