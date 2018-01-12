@@ -124,8 +124,8 @@ def kl_divergence(p, q):
         KL(p \| q) = \int p(x) \log\frac {p(x)} {q(x)} \,dx
 
     Args:
-        p (Distrubution): A :class:`~torch.distributions.Distribution` object.
-        q (Distrubution): A :class:`~torch.distributions.Distribution` object.
+        p (Distribution): A :class:`~torch.distributions.Distribution` object.
+        q (Distribution): A :class:`~torch.distributions.Distribution` object.
 
     Returns:
         Variable or Tensor: A batch of KL divergences of shape `batch_shape`.

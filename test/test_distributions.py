@@ -893,6 +893,18 @@ class TestDistributions(TestCase):
              (1, 2)),
             (Gamma(alpha=torch.Tensor([1]), beta=torch.Tensor([[1]])),
              (1, 1)),
+            (Gumbel(loc=torch.Tensor([0, 0]), scale=1),
+             (2,)),
+            (Gumbel(loc=0, scale=torch.Tensor([1, 1])),
+             (2,)),
+            (Gumbel(loc=torch.Tensor([0, 0]), scale=torch.Tensor([1])),
+             (2,)),
+            (Gumbel(loc=torch.Tensor([0, 0]), scale=torch.Tensor([[1], [1]])),
+             (2, 2)),
+            (Gumbel(loc=torch.Tensor([0, 0]), scale=torch.Tensor([[1]])),
+             (1, 2)),
+            (Gumbel(loc=torch.Tensor([0]), scale=torch.Tensor([[1]])),
+             (1, 1)),
             (Laplace(loc=torch.Tensor([0, 0]), scale=1),
              (2,)),
             (Laplace(loc=0, scale=torch.Tensor([1, 1])),
@@ -904,6 +916,18 @@ class TestDistributions(TestCase):
             (Laplace(loc=torch.Tensor([0, 0]), scale=torch.Tensor([[1]])),
              (1, 2)),
             (Laplace(loc=torch.Tensor([0]), scale=torch.Tensor([[1]])),
+             (1, 1)),
+            (Pareto(scale=torch.Tensor([1, 1]), alpha=1),
+             (2,)),
+            (Pareto(scale=1, alpha=torch.Tensor([1, 1])),
+             (2,)),
+            (Pareto(scale=torch.Tensor([1, 1]), alpha=torch.Tensor([1])),
+             (2,)),
+            (Pareto(scale=torch.Tensor([1, 1]), alpha=torch.Tensor([[1], [1]])),
+             (2, 2)),
+            (Pareto(scale=torch.Tensor([1, 1]), alpha=torch.Tensor([[1]])),
+             (1, 2)),
+            (Pareto(scale=torch.Tensor([1]), alpha=torch.Tensor([[1]])),
              (1, 1)),
             (StudentT(df=torch.Tensor([1, 1]), loc=1),
              (2,)),
@@ -936,6 +960,14 @@ class TestDistributions(TestCase):
                 'mean': torch.Tensor([[[0, 0, 0], [0, 0, 0]]]),
                 'std': torch.Tensor([1, 1])
             }),
+            (Gumbel, {
+                'loc': torch.Tensor([[0, 0]]),
+                'scale': torch.Tensor([1, 1, 1, 1])
+            }),
+            (Gumbel, {
+                'loc': torch.Tensor([[[0, 0, 0], [0, 0, 0]]]),
+                'scale': torch.Tensor([1, 1])
+            }),
             (Gamma, {
                 'alpha': torch.Tensor([0, 0]),
                 'beta': torch.Tensor([1, 1, 1])
@@ -943,6 +975,14 @@ class TestDistributions(TestCase):
             (Laplace, {
                 'loc': torch.Tensor([0, 0]),
                 'scale': torch.Tensor([1, 1, 1])
+            }),
+            (Pareto, {
+                'scale': torch.Tensor([1, 1]),
+                'alpha': torch.Tensor([1, 1, 1])
+            }),
+            (Pareto, {
+                'scale': torch.Tensor([1, 1]),
+                'alpha': torch.Tensor([1, 1, 1])
             }),
             (StudentT, {
                 'df': torch.Tensor([1, 1]),
@@ -1220,6 +1260,7 @@ class TestKL(TestCase):
             (Chi2(2), Gamma(3, 4)),
             (Chi2(2), Exponential(3)),
             (Dirichlet(torch.Tensor([1, 2])), Dirichlet(torch.Tensor([3, 4]))),
+            (Exponential(1), Chi2(2)),
             (Exponential(1), Exponential(2)),
             (Exponential(1), Gamma(2, 3)),
             (Exponential(1), Gumbel(-2, 3)),
@@ -1234,10 +1275,12 @@ class TestKL(TestCase):
             (Normal(-1, 2), Gumbel(-3, 4)),
             # (Normal(-1, 2), Laplace(-3, 4)),  This case fails
             (Normal(1, 2), Normal(-3, 4)),
+            (Pareto(1, 2), Chi2(3)),
             (Pareto(1, 2), Exponential(3)),  # This case fails for n = 10000
             (Pareto(1, 2), Gamma(3, 4)),  # This case fails for n = 10000, 21000
             (Pareto(1, 3), Normal(-2, 4)),
             (Uniform(0.25, 0.75), Beta(3, 4)),
+            (Uniform(1, 2), Chi2(3)),
             (Uniform(1, 2), Exponential(3)),
             (Uniform(1, 2), Gamma(3, 4)),
             (Uniform(-1, 2), Gumbel(-3, 4)),
