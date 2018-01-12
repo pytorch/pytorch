@@ -1269,6 +1269,7 @@ class TestKL(TestCase):
             (Gamma(1, 2), Exponential(3)),
             (Gamma(1, 2), Gamma(3, 4)),
             (Gamma(1, 2), Gumbel(-3, 4)),
+            (Gumbel(-1, 2), Gumbel(-3, 4)),
             (Gumbel(-1, 2), Normal(-3, 4)),  # This case fails for n = 22000
             (Laplace(1, 2), Laplace(-3, 4)),
             (Laplace(-1, 2), Normal(-3, 4)),

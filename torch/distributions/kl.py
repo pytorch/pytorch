@@ -197,6 +197,17 @@ def _kl_gamma_gamma(p, q):
     return t1 + t2 + t3 + t4
 
 
+@register_kl(Gumbel, Gumbel)
+def _kl_gumbel_gumbel(p, q):
+    ct1 = p.scale / q.scale
+    ct2 = q.loc / q.scale
+    ct3 = p.loc / q.scale
+    t1 = -ct1.log() - ct2 + ct3
+    t2 = ct1 * _euler_gamma
+    t3 = torch.exp(ct2 + (1 + ct1).lgamma() - ct3)
+    return t1 + t2 + t3 - (1 + _euler_gamma)
+
+
 @register_kl(Laplace, Laplace)
 def _kl_laplace_laplace(p, q):
     #  From http://www.mast.queensu.ca/~communications/Papers/gil-msc11.pdf
