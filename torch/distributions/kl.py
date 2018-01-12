@@ -20,9 +20,6 @@ _KL_REGISTRY = {}  # Source of truth mapping a few general (type, type) pairs to
 _KL_MEMOIZE = {}  # Memoized version mapping many specific (type, type) pairs to functions.
 
 
-_euler_gamma = 0.57721566490153286060
-
-
 def register_kl(type_p, type_q):
     """
     Decorator to register a pairwise function with :meth:`kl_divergence`.
@@ -148,7 +145,10 @@ def kl_divergence(p, q):
 # KL Divergence Implementations
 ################################################################################
 
+_euler_gamma = 0.57721566490153286060
+
 # Same distributions
+
 
 @register_kl(Bernoulli, Bernoulli)
 def _kl_bernoulli_bernoulli(p, q):

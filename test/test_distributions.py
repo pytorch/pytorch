@@ -1339,7 +1339,7 @@ class TestKL(TestCase):
 
     def test_kl_infinite(self):
         for p, q in self.infinite_examples:
-            self.assertTrue((kl_divergence(p, q) == float('inf')), 
+            self.assertTrue((kl_divergence(p, q) == float('inf')).all(),
                             'Incorrect KL({}, {})'.format(type(p).__name__, type(q).__name__))
 
 
