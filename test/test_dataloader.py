@@ -1,17 +1,27 @@
 import math
 import sys
+import errno
 import os
 import ctypes
+import signal
 import torch
 import time
 import traceback
 import unittest
+import socket
 from torch import multiprocessing
 from torch.utils.data import Dataset, TensorDataset, DataLoader, ConcatDataset
 from torch.utils.data.dataset import random_split
-from torch.utils.data.dataloader import default_collate
+from torch.utils.data.dataloader import default_collate, ExceptionWrapper
 from common import TestCase, run_tests, TEST_NUMPY, IS_WINDOWS
 from common_nn import TEST_CUDA
+
+
+if sys.version_info[0] == 2:
+    import Queue as queue
+else:
+    import queue
+
 
 JOIN_TIMEOUT = 14.0 if IS_WINDOWS else 1.5
 
@@ -103,6 +113,46 @@ class TestConcatDataset(TestCase):
         self.assertEqual(0, (d3[0][0] - result[14][0]).abs().sum())
 
 
+# Stores the first encountered exception in .exception.
+# Inspired by https://stackoverflow.com/a/33599967
+class ErrorTrackingProcess(multiprocessing.Process):
+
+    def __init__(self, *args, **kwargs):
+        super(ErrorTrackingProcess, self).__init__(*args, **kwargs)
+        self._pconn, self._cconn = multiprocessing.Pipe()
+        self._exception = None
+
+    def run(self):
+        # Disable stderr printing from os level, and make workers not printing
+        # to stderr.
+        # Can't use sys.stderr.close, otherwise Python `raise` will error with
+        # ValueError: I/O operation on closed file.
+        os.close(sys.stderr.fileno())
+        try:
+            super(ErrorTrackingProcess, self).run()
+            self._cconn.send(None)
+        except Exception as e:
+            self._cconn.send(ExceptionWrapper(sys.exc_info()))
+            raise
+
+    @property
+    def exception(self):
+        if self._pconn.poll():
+            self._exception = self._pconn.recv()
+        if self._exception is None:
+            return None
+        else:
+            return self._exception.exc_type(self._exception.exc_msg)
+
+    # ESRCH means that os.kill can't finds alive proc
+    def send_signal(self, signum, ignore_ESRCH=False):
+        try:
+            os.kill(self.pid, signum)
+        except OSError as e:
+            if not ignore_ESRCH or e.errno != errno.ESRCH:
+                raise
+
+
 class ErrorDataset(Dataset):
 
     def __init__(self, size):
@@ -175,19 +225,63 @@ class SynchronizedSeedDataset(Dataset):
 
 
 def _test_timeout():
-    os.close(sys.stderr.fileno())
-    sys.stderr.close()
     dataset = SleepDataset(10, 10)
     dataloader = DataLoader(dataset, batch_size=2, num_workers=2, timeout=1)
     _ = next(iter(dataloader))
 
 
 def _test_segfault():
-    os.close(sys.stderr.fileno())
-    sys.stderr.close()
     dataset = SegfaultDataset(10)
     dataloader = DataLoader(dataset, batch_size=2, num_workers=2)
     _ = next(iter(dataloader))
+
+
+def _test_interrupt_retry(timeout=0):
+    dataset = TensorDataset(torch.randn(1, 1), torch.randn(1, 1))
+    dataloader = DataLoader(dataset, batch_size=1, num_workers=1, timeout=timeout)
+    dataloaderiter = iter(dataloader)
+
+    # make SIGUSR1 interrupt
+    def handler(signum, frame):
+        pass
+    signal.signal(signal.SIGUSR1, handler)
+
+    # Replace iterator getter with a wrapper that reliably calls an
+    # interruptable blocking recv syscall to simulate interruption during recv
+    # in queue.get.
+    # The used socket.recv call below in the replacing function is quite
+    # dangerous because it blocks everything on Python side, including the
+    # cleaning up in dataloder.__del__ when this process exits. To prevent
+    # orphan worker child, we manually terminate worker process here.
+    # Conveniently, the worker has SIGTERM handler installed so SIGTERM from
+    # loader process won't cause loader error.
+    data = dataloaderiter.data_queue.get()  # ensure that worker handlers are installed
+    for w in dataloaderiter.workers:
+        w.terminate()
+
+    def interruptable_get(*args, **kwargs):
+        if dataloaderiter.shutdown:
+            return data
+        # get and config timeout if the argument is present
+        if timeout >= 0:
+            if 'timeout' in kwargs:
+                timeout_val = kwargs['timeout']
+            elif len(args) > 1:
+                timeout_val = args[1]  # first arg is `block`
+            else:
+                timeout_val = None
+            socket.setdefaulttimeout(timeout_val)
+        s = socket.socket(socket.AF_INET, type=socket.SOCK_DGRAM)
+        s.bind(("127.0.0.1", 0))
+        try:
+            return s.recv(1024)
+        except socket.timeout:
+            raise queue.Empty
+        finally:
+            s.close()
+
+    dataloaderiter.data_queue.get = interruptable_get
+    _ = next(dataloaderiter)
 
 
 # test custom init function
@@ -272,22 +366,30 @@ class TestDataLoader(TestCase):
         next(loader2_it)
 
     def test_segfault(self):
-        p = multiprocessing.Process(target=_test_segfault)
-        p.start()
-        p.join(JOIN_TIMEOUT)
-        try:
-            self.assertFalse(p.is_alive())
-            self.assertNotEqual(p.exitcode, 0)
-        finally:
-            p.terminate()
-
-    def test_timeout(self):
-        p = multiprocessing.Process(target=_test_timeout)
+        p = ErrorTrackingProcess(target=_test_segfault)
         p.start()
         p.join(3.0 + JOIN_TIMEOUT)
         try:
             self.assertFalse(p.is_alive())
             self.assertNotEqual(p.exitcode, 0)
+            if IS_WINDOWS:
+                self.assertIsInstance(p.exception, OSError)
+                self.assertRegex(str(p.exception), r'access violation reading ')
+            else:
+                self.assertIsInstance(p.exception, RuntimeError)
+                self.assertRegex(str(p.exception), r'DataLoader worker \(worker_pid \d+\) is killed by signal: ')
+        finally:
+            p.terminate()
+
+    def test_timeout(self):
+        p = ErrorTrackingProcess(target=_test_timeout)
+        p.start()
+        p.join(3.0 + JOIN_TIMEOUT)
+        try:
+            self.assertFalse(p.is_alive())
+            self.assertNotEqual(p.exitcode, 0)
+            self.assertIsInstance(p.exception, RuntimeError)
+            self.assertRegex(str(p.exception), r'DataLoader timed out after \d+ seconds')
         finally:
             p.terminate()
 
@@ -307,6 +409,52 @@ class TestDataLoader(TestCase):
         for batch in dataloader:
             self.assertEqual(12345, batch[0])
             self.assertEqual(12345, batch[1])
+
+    @unittest.skipIf(IS_WINDOWS, "TODO: need to fix this test case for Windows")
+    def test_interrupt_retry(self):
+        # time.sleep doesn't seem to work on main process when running unittest
+        # for all tests together. Use Process.join as a sleep function.
+        # Case 1: interrupt, check still alove
+        p = ErrorTrackingProcess(target=_test_interrupt_retry)
+        p.start()
+        p.join(JOIN_TIMEOUT)  # give it some time to reach get
+        try:
+            self.assertTrue(p.is_alive())
+            for i in range(3):
+                p.send_signal(signal.SIGUSR1)
+                p.join(0.5)
+                self.assertTrue(p.is_alive())
+            p.join(JOIN_TIMEOUT)
+        except OSError as e:
+            self.fail("DataLoader shouldn't fail due to interrupted syscall")
+        try:
+            self.assertTrue(p.is_alive())
+            self.assertIsNone(p.exception)
+        finally:
+            p.terminate()
+        # Case 2: timeout
+        timeout = 2
+        p = ErrorTrackingProcess(target=lambda: _test_interrupt_retry(timeout))
+        p.start()
+        p.join(JOIN_TIMEOUT)  # give some time to reach get
+        try:
+            self.assertTrue(p.is_alive())
+            for _ in range(5):
+                p.send_signal(signal.SIGUSR1)
+                p.join(0.5)
+            p.join(2.0 + JOIN_TIMEOUT)
+        except OSError as e:
+            if e.errno != errno.ESRCH:
+                # ESRCH means that os.kill finds dead proc, which can happen if
+                # timeout triggers
+                self.fail("DataLoader shouldn't fail due to interrupted syscall")
+        try:
+            self.assertFalse(p.is_alive())
+            self.assertNotEqual(p.exitcode, 0)
+            self.assertIsInstance(p.exception, RuntimeError)
+            self.assertRegex(str(p.exception), r'DataLoader timed out after {} seconds'.format(timeout))
+        finally:
+            p.terminate()
 
     def test_shuffle(self):
         self._test_shuffle(DataLoader(self.dataset, shuffle=True))

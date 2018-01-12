@@ -31,6 +31,52 @@ class ExceptionWrapper(object):
         self.exc_msg = "".join(traceback.format_exception(*exc_info))
 
 
+# Syscalls are automatically retried upon encountering EINTR since Python 3.5
+# https://www.python.org/dev/peps/pep-0475/
+# EINTR is not available on Windows.
+if sys.platform == 'win32' or sys.version_info >= (3, 5):
+    def _get_from_queue(mp_queue, timeout=None):
+        if timeout is None:
+            return mp_queue.get()
+        else:
+            return mp_queue.get(timeout=timeout)
+
+    def _put_into_queue(mp_queue, val):
+        return mp_queue.put(val)
+else:
+    import time
+    import errno
+
+    if sys.version_info >= (3, 3):
+        time_fn = time.perf_counter
+    else:
+        time_fn = time.time
+
+    def _get_from_queue(mp_queue, timeout=None):
+        while True:
+            try:
+                if timeout is None:
+                    return mp_queue.get()
+                else:
+                    t0 = time_fn()
+                    return mp_queue.get(timeout=timeout)
+            except IOError as e:
+                if e.errno != errno.EINTR:
+                    raise
+                if timeout is not None:
+                    timeout -= time_fn() - t0
+                    if timeout <= 0:
+                        raise queue.Empty
+
+    def _put_into_queue(mp_queue, val):
+        while True:
+            try:
+                return mp_queue.put(val)
+            except IOError as e:
+                if e.errno != errno.EINTR:
+                    raise
+
+
 def _worker_loop(dataset, index_queue, data_queue, collate_fn, seed, init_fn, worker_id):
     global _use_shared_memory
     _use_shared_memory = True
@@ -48,16 +94,16 @@ def _worker_loop(dataset, index_queue, data_queue, collate_fn, seed, init_fn, wo
         init_fn(worker_id)
 
     while True:
-        r = index_queue.get()
+        r = _get_from_queue(index_queue)
         if r is None:
             break
         idx, batch_indices = r
         try:
             samples = collate_fn([dataset[i] for i in batch_indices])
         except Exception:
-            data_queue.put((idx, ExceptionWrapper(sys.exc_info())))
+            _put_into_queue(data_queue, (idx, ExceptionWrapper(sys.exc_info())))
         else:
-            data_queue.put((idx, samples))
+            _put_into_queue(data_queue, (idx, samples))
 
 
 def _worker_manager_loop(in_queue, out_queue, done_event, pin_memory, device_id):
@@ -66,7 +112,7 @@ def _worker_manager_loop(in_queue, out_queue, done_event, pin_memory, device_id)
 
     while True:
         try:
-            r = in_queue.get()
+            r = _get_from_queue(in_queue)
         except Exception:
             if done_event.is_set():
                 return
@@ -74,16 +120,16 @@ def _worker_manager_loop(in_queue, out_queue, done_event, pin_memory, device_id)
         if r is None:
             break
         if isinstance(r[1], ExceptionWrapper):
-            out_queue.put(r)
+            _put_into_queue(out_queue, r)
             continue
         idx, batch = r
         try:
             if pin_memory:
                 batch = pin_memory_batch(batch)
         except Exception:
-            out_queue.put((idx, ExceptionWrapper(sys.exc_info())))
+            _put_into_queue(out_queue, (idx, ExceptionWrapper(sys.exc_info())))
         else:
-            out_queue.put((idx, batch))
+            _put_into_queue(out_queue, (idx, batch))
 
 numpy_type_map = {
     'float64': torch.DoubleTensor,
@@ -212,10 +258,15 @@ class DataLoaderIter(object):
 
             if self.pin_memory or self.timeout > 0:
                 self.data_queue = queue.Queue()
+                if self.pin_memory:
+                    maybe_device_id = torch.cuda.current_device()
+                else:
+                    # do not initialize cuda context if not necessary
+                    maybe_device_id = None
                 self.worker_manager_thread = threading.Thread(
                     target=_worker_manager_loop,
                     args=(self.worker_result_queue, self.data_queue, self.done_event, self.pin_memory,
-                          torch.cuda.current_device()))
+                          maybe_device_id))
                 self.worker_manager_thread.daemon = True
                 self.worker_manager_thread.start()
             else:
@@ -239,11 +290,11 @@ class DataLoaderIter(object):
     def _get_batch(self):
         if self.timeout > 0:
             try:
-                return self.data_queue.get(True, self.timeout)
+                return _get_from_queue(self.data_queue, self.timeout)
             except queue.Empty:
                 raise RuntimeError('DataLoader timed out after {} seconds'.format(self.timeout))
         else:
-            return self.data_queue.get()
+            return _get_from_queue(self.data_queue)
 
     def __next__(self):
         if self.num_workers == 0:  # same-process loading
@@ -282,7 +333,7 @@ class DataLoaderIter(object):
         indices = next(self.sample_iter, None)
         if indices is None:
             return
-        self.index_queue.put((self.send_idx, indices))
+        _put_into_queue(self.index_queue, (self.send_idx, indices))
         self.batches_outstanding += 1
         self.send_idx += 1
 
@@ -302,17 +353,20 @@ class DataLoaderIter(object):
         raise NotImplementedError("DataLoaderIterator cannot be pickled")
 
     def _shutdown_workers(self):
-        if not self.shutdown:
-            self.shutdown = True
-            self.done_event.set()
-            # if worker_manager_thread is waiting to put
-            while not self.data_queue.empty():
-                self.data_queue.get()
-            for _ in self.workers:
-                self.index_queue.put(None)
-            # done_event should be sufficient to exit worker_manager_thread, but
-            # be safe here and put another None
-            self.worker_result_queue.put(None)
+        try:
+            if not self.shutdown:
+                self.shutdown = True
+                self.done_event.set()
+                # if worker_manager_thread is waiting to put
+                while not self.data_queue.empty():
+                    _get_from_queue(self.data_queue)
+                for _ in self.workers:
+                    _put_into_queue(self.index_queue, None)
+                # done_event should be sufficient to exit worker_manager_thread,
+                # but be safe here and put another None
+                _put_into_queue(self.worker_result_queue, None)
+        finally:
+            # removes pids no matter what
             if self.worker_pids_set:
                 _remove_worker_pids(id(self))
                 self.worker_pids_set = False
