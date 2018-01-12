@@ -288,9 +288,9 @@ def _vector_str(self):
                 '\n')
 
 
-def _str(self):
+def _str(self, include_footer=True):
     if self.ndimension() == 0:
-        return '[{} with no dimension]\n'.format(torch.typename(self))
+        strt = ''
     elif self.ndimension() == 1:
         strt = _vector_str(self)
     elif self.ndimension() == 2:
@@ -298,9 +298,11 @@ def _str(self):
     else:
         strt = _tensor_str(self)
 
-    size_str = 'x'.join(str(size) for size in self.size())
-    device_str = '' if not self.is_cuda else \
-        ' (GPU {})'.format(self.get_device())
-    strt += '[{} of size {}{}]\n'.format(torch.typename(self),
-                                         size_str, device_str)
+    if include_footer:
+        size_str = 'x'.join(str(size) for size in self.size())
+        size_str_prefix = 'of size ' if self.ndimension() > 0 else 'with no dimension'
+        device_str = '' if not self.is_cuda else \
+            ' (GPU {})'.format(self.get_device())
+        strt += '[{} {}{}{}]\n'.format(torch.typename(self), size_str_prefix,
+                                      size_str, device_str)
     return '\n' + strt
