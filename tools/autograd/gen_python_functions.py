@@ -15,7 +15,7 @@ CodeTemplate = import_module('code_template', 'aten/src/ATen/code_template.py').
 # These functions require manual Python bindings or are not exposed to Python
 SKIP_PYTHON_BINDINGS = [
     'alias', 'contiguous', 'clamp.*', 'is_cuda', 'is_sparse', 'size', 'stride',
-    'slice_dim', '.*_backward'
+    '.*_backward'
 ]
 
 PY_VARIABLE_METHODS_CPP = CodeTemplate.from_file(template_path + '/python_variable_methods.cpp')

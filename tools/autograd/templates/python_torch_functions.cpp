@@ -1,5 +1,10 @@
 // ${generated_comment}
 
+// Python bindings for torch.* functions implemented through ATen.
+//
+// The functions are bound as static methods on a class
+// torch._C._VariableFunctions which is also aliased as Variable._torch.
+
 #include <Python.h>
 
 #include "torch/csrc/Exceptions.h"
@@ -34,6 +39,7 @@ static Tensor dispatch_clamp_max(const Tensor & self, Scalar max) {
   return self.clamp_max(max);
 }
 
+// The Python clamp() syntax has to be mapped to one of three C++ functions
 static PyObject * THPVariable_clamp(PyObject* module, PyObject* args, PyObject* kwargs)
 {
   HANDLE_TH_ERRORS

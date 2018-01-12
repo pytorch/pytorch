@@ -88,8 +88,11 @@ ${return_type} VariableType::${method_prefix_derived}${api_name}(${formals}) con
 UNPACK_TENSOR = CodeTemplate("""\
 auto${ref} ${arg_name}_ = unpack${suffix}(${arg_name}, "${arg_name}", ${arg_pos});""")
 
-SETUP_DERIVATIVE = CodeTemplate("""\
+DECLARE_GRAD_FN = CodeTemplate("""\
 std::shared_ptr<${op}> grad_fn;
+""")
+
+SETUP_DERIVATIVE = CodeTemplate("""\
 if (compute_requires_grad({ ${args_with_derivatives} })) {
   ${setup}
 }
@@ -168,6 +171,7 @@ def emit_body(declaration):
     name = declaration['name']
     inplace = declaration['inplace']
     is_out_fn = name.endswith('_out')
+    modifies_arguments = inplace or is_out_fn
 
     base_name = name[:-1] if inplace else name[:-4] if is_out_fn else name
     is_view = base_name in VIEW_FUNCTIONS
@@ -210,24 +214,28 @@ def emit_body(declaration):
         env['op'] = func['op'] if func is not None else 'Error'
         env['op_ctor'] = '' if func is not None else error_msg()
 
+        if is_out_fn:
+            setup = ['throw_out_requires_grad("{}");'.format(base_name)]
+            body = []
+            body.append(DECLARE_GRAD_FN.substitute(op='Function'))
+            body.append(SETUP_DERIVATIVE.substitute(
+                setup=setup,
+                args_with_derivatives=reference_args(differentiable_inputs)))
+            body.append(SETUP_DERIVATIVE.substitute(
+                setup=setup,
+                args_with_derivatives=reference_args(differentiable_outputs)))
+            return body
+
         setup = []
-        setup.extend(emit_check_output_args())
         setup.extend(ASSIGN_GRAD_FN.substitute(env).split('\n'))
         if func is not None:
             setup.extend(save_variables(func['saved_inputs'], False))
 
         body = []
         body.extend(emit_check_no_requires_grad(differentiable_inputs, args_with_derivatives))
+        body.append(DECLARE_GRAD_FN.substitute(env))
         body.append(SETUP_DERIVATIVE.substitute(env, setup=setup))
         return body
-
-    def emit_check_output_args():
-        if not is_out_fn:
-            return []
-        name = declaration['name']
-        args = [arg['name'] for arg in differentiable_outputs]
-        args = '{ ' + ', '.join(args) + ' }'
-        return ['check_output_args("{}", {});'.format(name, args)]
 
     def find_args_with_derivatives():
         """Find arguments that have derivative definitions"""
@@ -356,7 +364,7 @@ def emit_body(declaration):
         return RECORD_TRACE.substitute(combined)
 
     def declare_returned_variables():
-        if inplace or is_out_fn:
+        if modifies_arguments:
             return ''
         if len(declaration['returns']) == 1:
             return ''
@@ -375,11 +383,11 @@ def emit_body(declaration):
         combined = nested_dict(env, declaration)
         if strategy == 'use_derived':
             call = CALL_VIA_DERIVED.substitute(combined)
-            if not (inplace or is_out_fn):
+            if not modifies_arguments:
                 call = wrap_output(call)
         else:
             call = CALL_VIA_TYPE.substitute(declaration)
-        if not (inplace or is_out_fn):
+        if not modifies_arguments:
             call = '{} = {}'.format(tie_return_values(), call)
         return call + ';'
 
@@ -406,7 +414,7 @@ def emit_body(declaration):
         return 'std::make_tuple({})'.format(', '.join(moved))
 
     def emit_history():
-        fn = 'rebase' if (inplace or is_out_fn) and not is_view else 'set'
+        fn = 'rebase' if modifies_arguments and not is_view else 'set'
         output_names = [r['name'] for r in differentiable_outputs]
         if len(output_names) == 1:
             outs = output_names[0]
@@ -415,6 +423,9 @@ def emit_body(declaration):
         return SET_HISTORY.substitute(fn=fn, differentiable_outputs=outs)
 
     def emit_save_outputs():
+        if is_out_fn:
+            # out functions don't currently support differentiation
+            return ''
         func = declaration['derivative']
         if func is not None:
             stmts = save_variables(func['saved_outputs'], True)
@@ -424,12 +435,12 @@ def emit_body(declaration):
         return ''
 
     def emit_check_inplace():
-        if not inplace and not is_out_fn:
+        if not inplace:
             return []
         return ['check_inplace({});'.format(arg['name']) for arg in differentiable_outputs]
 
     def emit_increment_version():
-        if not inplace and not is_out_fn:
+        if not modifies_arguments:
             return []
         return ['increment_version({});'.format(arg['name']) for arg in differentiable_outputs]
 

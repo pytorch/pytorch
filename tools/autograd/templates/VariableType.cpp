@@ -296,19 +296,10 @@ static void check_inplace(const Tensor& tensor) {
   }
 }
 
-static void check_output_args(const char* name, TensorList tensors) {
-  // Our logic for modifications to views only works for in-place functions,
-  // not out=... functions. Checks that no output arguments are views.
-  for (auto& tensor : tensors) {
-    if (tensor.defined()) {
-      auto& var = static_cast<const Variable&>(tensor);
-      if (var.is_view()) {
-        at::runtime_error(
-          "%s(): output arguments (out=...) must not be views in "
-          "differentiable functions", name);
-      }
-    }
-  }
+static void throw_out_requires_grad(const char* name) {
+  at::runtime_error(
+      "%s(): functions with out=... arguments don't support automatic differentiation, "
+      "but one of the arguments requires grad.", name);
 }
 
 static void rebase_history(Tensor& tensor, std::shared_ptr<Function> grad_fn) {
