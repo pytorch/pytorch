@@ -43,10 +43,9 @@ def destroy_process_group():
     _initialized = 0
 
 
-def is_process_group_initialized():
+def is_initialized():
     """Checking if the process group has been initialized
     """
-    global _initialized
     return _initialized == _INITIALIZED_PG
 
 
