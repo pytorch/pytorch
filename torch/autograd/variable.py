@@ -70,7 +70,25 @@ class Variable(_C._VariableBase):
         self.requires_grad, _, self._backward_hooks = state
 
     def __repr__(self):
-        return 'Variable containing:' + self.data.__repr__()
+        strt = 'Variable containing:' + torch._tensor_str._str(self.data, False)
+        # let's make our own Variable-specific footer
+        size_str = '(' + ','.join(str(size) for size in self.size()) + (',)' if len(self.size()) == 1 else ')')
+        device_str = '' if not self.is_cuda else \
+            ' (GPU {})'.format(self.get_device())
+        strt += '[{} of size {}{}]\n'.format(torch.typename(self.data),
+                                             size_str, device_str)
+
+        # All strings are unicode in Python 3, while we have to encode unicode
+        # strings in Python2. If we can't, let python decide the best
+        # characters to replace unicode characters with.
+        if sys.version_info > (3,):
+            return strt
+        else:
+            if hasattr(sys.stdout, 'encoding'):
+                return strt.encode(
+                    sys.stdout.encoding or 'UTF-8', 'replace')
+            else:
+                return strt.encode('UTF-8', 'replace')
 
     def backward(self, gradient=None, retain_graph=None, create_graph=False):
         """Computes the gradient of current variable w.r.t. graph leaves.
