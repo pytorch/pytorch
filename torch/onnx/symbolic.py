@@ -164,6 +164,10 @@ def neg(g, self):
     return g.op("Neg", self)
 
 
+def sqrt(g, self):
+    return g.op("Sqrt", self)
+
+
 def tanh(g, self):
     return g.op("Tanh", self)
 
@@ -173,11 +177,30 @@ def sigmoid(g, self):
 
 
 def mean(g, self, dim=None, keepdim=None):
-    kwargs = {}
+    if dim is None and keepdim is None:
+        return g.op("Mean", self)
     # NB: ONNX's default is different from PyTorch's
     if keepdim is None:
         keepdim = 0
-    return g.op("ReduceMean", self, axes_i=dim, keepdims_i=keepdim)
+    return g.op("ReduceMean", self, axes_i=[dim], keepdims_i=keepdim)
+
+
+def sum(g, self, dim=None, keepdim=None):
+    if dim is None and keepdim is None:
+        return g.op("Sum", self)
+    if keepdim is None:
+        keepdim = 0
+    return g.op("ReduceSum", self, axes_i=[dim], keepdims_i=keepdim)
+
+
+def prod(g, self, dim=None, keepdim=None):
+    if dim is None:
+        dims = None
+    else:
+        dims = [dim]
+    if keepdim is None:
+        keepdim = 0
+    return g.op("ReduceProd", self, axes_i=dims, keepdims_i=keepdim)
 
 
 def t(g, self):
@@ -324,7 +347,7 @@ def avg_pool3d(g, input, kernel_size, stride, padding, ceil_mode, count_include_
 
 
 def log_softmax(g, input, dim=None):
-    return g.op("Log", g.op('Softmax', input, axis_i=dim).setTypeAs(input))
+    return g.op("LogSoftmax", input, axis_i=dim)
 
 
 def unfold(g, input, dimension, size, step):
