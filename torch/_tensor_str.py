@@ -304,5 +304,5 @@ def _str(self, include_footer=True):
         device_str = '' if not self.is_cuda else \
             ' (GPU {})'.format(self.get_device())
         strt += '[{} {}{}{}]\n'.format(torch.typename(self), size_str_prefix,
-                                      size_str, device_str)
+                                       size_str, device_str)
     return '\n' + strt
