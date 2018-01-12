@@ -7,7 +7,6 @@ from .sampler import SequentialSampler, RandomSampler, BatchSampler
 import signal
 import functools
 import collections
-import itertools
 import re
 import sys
 import threading
@@ -202,10 +201,9 @@ class DataLoaderIter(object):
             self.ind_worker_queue = loader.ind_worker_queue
             if self.ind_worker_queue:
                 self.index_queue = [multiprocessing.SimpleQueue() for _ in range(self.num_workers)]
-                self.worker_queue_binding = itertools.cycle(range(self.num_workers))
             else:
                 self.index_queue = [multiprocessing.SimpleQueue()]
-                self.worker_queue_binding = itertools.repeat(0)
+            self.worker_queue_idx = 0
             self.worker_result_queue = multiprocessing.SimpleQueue()
             self.batches_outstanding = 0
             self.worker_pids_set = False
@@ -218,7 +216,7 @@ class DataLoaderIter(object):
             self.workers = [
                 multiprocessing.Process(
                     target=_worker_loop,
-                    args=(self.dataset, self.index_queue[next(self.worker_queue_binding)],
+                    args=(self.dataset, self.index_queue[i if self.ind_worker_queue else 0],
                           self.worker_result_queue, self.collate_fn, base_seed + i,
                           self.worker_init_fn, i))
                 for i in range(self.num_workers)]
@@ -300,7 +298,11 @@ class DataLoaderIter(object):
         indices = next(self.sample_iter, None)
         if indices is None:
             return
-        self.index_queue[next(self.worker_queue_binding)].put((self.send_idx, indices))
+        self.index_queue[self.worker_queue_idx].put((self.send_idx, indices))
+        if self.ind_worker_queue:
+            self.worker_queue_idx += 1
+            if self.worker_queue_idx == self.num_workers:
+                self.worker_queue_idx = 0
         self.batches_outstanding += 1
         self.send_idx += 1
 
