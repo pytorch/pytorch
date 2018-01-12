@@ -1119,11 +1119,11 @@
     - CPU
     - CUDA
   options:
-    - cname: logicalallall
+    - cname: logicalAndAll
       return: real
       arguments:
         - THTensor* self
-    - cname: logicalall
+    - cname: logicalAnd
       return: argument 0
       scalar_check: self_->isScalar() || (keepdim == false && self_->dim() == 1)
       arguments:
@@ -1145,11 +1145,11 @@
     - CPU
     - CUDA
   options:
-    - cname: logicalanyall
+    - cname: logicalAnyAll
       return: real
       arguments:
         - THTensor* self
-    - cname: logicalany
+    - cname: logicalAny
       return: argument 0
       scalar_check: self_->isScalar() || (keepdim == false && self_->dim() == 1)
       arguments:

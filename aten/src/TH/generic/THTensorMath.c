@@ -734,6 +734,9 @@ real THTensor_(medianall)(THTensor *tensor)
   return theMedian;
 }
 
+// Reduce all elements in the given tensor `t` with given `INIT_VALUE` and return
+// the result of type `RETTYPE`.
+// The accumulate operator `ACC_OP` must be commutative.
 #define TENSOR_IMPLEMENT_ACCALL(NAME, RETTYPE, ACC_OP, INIT_VALUE)        \
   RETTYPE THTensor_(NAME)(THTensor *tensor)                               \
   {                                                                       \
@@ -1867,6 +1870,8 @@ void THTensor_(min)(THTensor *values_, THLongTensor *indices_, THTensor *t, int 
   }
 }
 
+// Reduce elements in the given tensor `t` along the `dimension` axes, and store result in `r_`.
+// The accumulate operator `ACC_OP` must be commutative.
 #define TENSOR_IMPLEMENT_ACC(NAME, ACC_OP, INIT_VALUE)                                   \
   void THTensor_(NAME)(THTensor *r_, THTensor *t, int dimension, int keepdim)            \
   {                                                                                      \
@@ -3003,11 +3008,11 @@ LAB_IMPLEMENT_BASIC_FUNCTION(abs,abs)
 
 #if defined(TH_REAL_IS_BYTE)
 
-TENSOR_IMPLEMENT_ACCALL(logicalallall, int, &&, 1)
-TENSOR_IMPLEMENT_ACCALL(logicalanyall, int, ||, 0)
+TENSOR_IMPLEMENT_ACCALL(logicalAndAll, int, &&, 1)
+TENSOR_IMPLEMENT_ACCALL(logicalAnyAll, int, ||, 0)
 
-TENSOR_IMPLEMENT_ACC(logicalall, &&, 1)
-TENSOR_IMPLEMENT_ACC(logicalany, ||, 0)
+TENSOR_IMPLEMENT_ACC(logicalAnd, &&, 1)
+TENSOR_IMPLEMENT_ACC(logicalAny, ||, 0)
 
 #endif /* Byte only part */
 

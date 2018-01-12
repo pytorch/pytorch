@@ -1,7 +1,7 @@
 #include "THCTensorMathReduce.cuh"
 
 THC_API int
-THCudaByteTensor_logicalallall(THCState *state, THCudaByteTensor *self) {
+THCudaByteTensor_logicalAndAll(THCState *state, THCudaByteTensor *self) {
   THCAssertSameGPU(THCudaByteTensor_checkGPU(state, 1, self));
   unsigned char result;
   if (!THC_reduceAll(state, self,
@@ -16,7 +16,7 @@ THCudaByteTensor_logicalallall(THCState *state, THCudaByteTensor *self) {
 }
 
 THC_API int
-THCudaByteTensor_logicalanyall(THCState *state, THCudaByteTensor *self) {
+THCudaByteTensor_logicalAnyAll(THCState *state, THCudaByteTensor *self) {
   THCAssertSameGPU(THCudaByteTensor_checkGPU(state, 1, self));
   unsigned char result;
   if (!THC_reduceAll(state, self,
@@ -31,7 +31,7 @@ THCudaByteTensor_logicalanyall(THCState *state, THCudaByteTensor *self) {
 }
 
 THC_API void
-THCudaByteTensor_logicalall(THCState* state, THCudaByteTensor *self, THCudaByteTensor *src, int dimension, int keepdim) {
+THCudaByteTensor_logicalAnd(THCState* state, THCudaByteTensor *self, THCudaByteTensor *src, int dimension, int keepdim) {
   THCAssertSameGPU(THCudaByteTensor_checkGPU(state, 2, self, src));
   if (!THC_reduceDim(state, self, src,
                      thrust::identity<unsigned char>(),
@@ -47,7 +47,7 @@ THCudaByteTensor_logicalall(THCState* state, THCudaByteTensor *self, THCudaByteT
 }
 
 THC_API void
-THCudaByteTensor_logicalany(THCState* state, THCudaByteTensor *self, THCudaByteTensor *src, int dimension, int keepdim) {
+THCudaByteTensor_logicalAny(THCState* state, THCudaByteTensor *self, THCudaByteTensor *src, int dimension, int keepdim) {
   THCAssertSameGPU(THCudaByteTensor_checkGPU(state, 2, self, src));
   if (!THC_reduceDim(state, self, src,
                      thrust::identity<unsigned char>(),

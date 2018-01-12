@@ -740,11 +740,11 @@
   variants:
     - method
   options:
-    - cname: logicalallall
+    - cname: logicalAndAll
       return: bool
       arguments:
         - THTensor* self
-    - cname: logicalall
+    - cname: logicalAnd
       return: argument 0
       arguments:
         - arg: THTensor* result
@@ -753,9 +753,8 @@
         - arg: int64_t dim
           wrap_dim: self
         - bool keepdim
-    - cname: logicalall
+    - cname: logicalAnd
       return: argument 0
-      before_call: maybeThrowBackCompatKeepdimWarn("all");
       arguments:
         - arg: THTensor* result
           output: True
@@ -772,11 +771,11 @@
   variants:
     - method
   options:
-    - cname: logicalanyall
+    - cname: logicalAnyAll
       return: bool
       arguments:
         - THTensor* self
-    - cname: logicalany
+    - cname: logicalAny
       return: argument 0
       arguments:
         - arg: THTensor* result
@@ -785,9 +784,8 @@
         - arg: int64_t dim
           wrap_dim: self
         - bool keepdim
-    - cname: logicalany
+    - cname: logicalAny
       return: argument 0
-      before_call: maybeThrowBackCompatKeepdimWarn("any");
       arguments:
         - arg: THTensor* result
           output: True

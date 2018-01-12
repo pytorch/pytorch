@@ -589,7 +589,7 @@ static void tensorHistc(rpc::RPCMessage& raw_message) {
   }
 }
 
-static void tensorLogicalallall(rpc::RPCMessage& raw_message) {
+static void tensorLogicalAndAll(rpc::RPCMessage& raw_message) {
   at::Tensor tensor = unpackRetrieveTensor(raw_message);
   finalize(raw_message);
 
@@ -597,7 +597,7 @@ static void tensorLogicalallall(rpc::RPCMessage& raw_message) {
   sendValueToMaster(response);
 }
 
-static void tensorLogicalanyall(rpc::RPCMessage& raw_message) {
+static void tensorLogicalAnyAll(rpc::RPCMessage& raw_message) {
   at::Tensor tensor = unpackRetrieveTensor(raw_message);
   finalize(raw_message);
 
@@ -605,20 +605,20 @@ static void tensorLogicalanyall(rpc::RPCMessage& raw_message) {
   sendValueToMaster(response);
 }
 
-static void tensorLogicalall(rpc::RPCMessage& raw_message) {
+static void tensorLogicalAnd(rpc::RPCMessage& raw_message) {
   at::Tensor tensor = unpackRetrieveTensor(raw_message);
   at::Tensor src = unpackRetrieveTensor(raw_message);
   int dimension = unpackInteger(raw_message);
   int keepdim = unpackInteger(raw_message);
   finalize(raw_message);
-  at::logicalall_out(tensor, src, dimension, keepdim);
+  at::logicalAnd_out(tensor, src, dimension, keepdim);
 }
 
-static void tensorLogicalany(rpc::RPCMessage& raw_message) {
+static void tensorLogicalAny(rpc::RPCMessage& raw_message) {
   at::Tensor tensor = unpackRetrieveTensor(raw_message);
   at::Tensor src = unpackRetrieveTensor(raw_message);
   int dimension = unpackInteger(raw_message);
   int keepdim = unpackInteger(raw_message);
   finalize(raw_message);
-  at::logicalany_out(tensor, src, dimension, keepdim);
+  at::logicalAny_out(tensor, src, dimension, keepdim);
 }
