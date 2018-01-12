@@ -350,7 +350,7 @@ def _kl_gamma_exponential(p, q):
 @register_kl(Gumbel, Pareto)
 @register_kl(Gumbel, Uniform)
 def _kl_gumbel_infinity(p, q):
-    return _infinite_like(gumbel.loc)
+    return _infinite_like(p.loc)
 
 # TODO: Add Gumbel-Laplace KL Divergence
 
@@ -390,7 +390,7 @@ def _kl_laplace_normal(p, q):
 @register_kl(Normal, Pareto)
 @register_kl(Normal, Uniform)
 def _kl_normal_infinity(p, q):
-    return torch.new(p.mean.size()).fill_(float('inf'))
+    return _infinite_like(p.mean)
 
 
 @register_kl(Normal, Gumbel)
@@ -423,7 +423,7 @@ def _kl_pareto_exponential(p, q):
     t2 = p.alpha.reciprocal()
     t3 = q.rate * p.alpha * p.scale / (p.alpha - 1)
     result = t1 - t2 + t3 - 1
-    result[(p.support.lower_bound < q.support.lower_bound) | (p.alpha <= 1)] = float('inf')
+    result[p.alpha <= 1] = float('inf')
     return result
 
 
@@ -504,3 +504,13 @@ def _kl_uniform_normal(p, q):
     t2 = (common_term).pow(2) / 12
     t3 = ((p.high + p.low - 2 * q.mean) / 2).pow(2)
     return t1 + 0.5 * (t2 + t3) / q.std.pow(2)
+
+
+@register_kl(Uniform, Pareto)
+def _kl_uniform_pareto(p, q):
+    support_uniform = p.high - p.low
+    t1 = (q.alpha * q.scale.pow(q.alpha) * (support_uniform)).log()
+    t2 = (_x_log_x(p.high) - _x_log_x(p.low) - support_uniform) / support_uniform
+    result = t2 * (q.alpha + 1) - t1
+    result[p.low < q.support.lower_bound] = float('inf')
+    return result

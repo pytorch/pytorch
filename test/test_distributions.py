@@ -1249,7 +1249,7 @@ class TestDistributionShapes(TestCase):
 
 class TestKL(TestCase):
     def setUp(self):
-        self.examples = [
+        self.finite_examples = [
             (Bernoulli(0.7), Bernoulli(0.3)),
             (Beta(1, 2), Beta(3, 4)),
             (Beta(1, 2), Chi2(3)),
@@ -1285,17 +1285,61 @@ class TestKL(TestCase):
             (Uniform(1, 2), Gamma(3, 4)),
             (Uniform(-1, 2), Gumbel(-3, 4)),
             (Uniform(-1, 2), Normal(-3, 4)),
+            (Uniform(2, 3), Pareto(1, 4))
+        ]
+
+        self.infinite_examples = [
+            (Beta(1, 2), Uniform(0.25, 1)),
+            (Beta(1, 2), Uniform(0, 0.75)),
+            (Beta(1, 2), Uniform(0.25, 0.75)),
+            (Beta(1, 2), Pareto(1, 2)),
+            (Exponential(1), Beta(2, 3)),
+            (Exponential(1), Pareto(2, 3)),
+            (Exponential(1), Uniform(-2, 3)),
+            (Gamma(1, 2), Beta(3, 4)),
+            (Gamma(1, 2), Pareto(3, 4)),
+            (Gamma(1, 2), Uniform(-3, 4)),
+            (Gumbel(-1, 2), Beta(3, 4)),
+            (Gumbel(-1, 2), Exponential(3)),
+            (Gumbel(-1, 2), Gamma(3, 4)),
+            (Gumbel(-1, 2), Pareto(3, 4)),
+            (Gumbel(-1, 2), Uniform(-3, 4)),
+            (Laplace(-1, 2), Beta(3, 4)),
+            (Laplace(-1, 2), Exponential(3)),
+            (Laplace(-1, 2), Gamma(3, 4)),
+            (Laplace(-1, 2), Pareto(3, 4)),
+            (Laplace(-1, 2), Uniform(-3, 4)),
+            (Normal(-1, 2), Beta(3, 4)),
+            (Normal(-1, 2), Exponential(3)),
+            (Normal(-1, 2), Gamma(3, 4)),
+            (Normal(-1, 2), Pareto(3, 4)),
+            (Normal(-1, 2), Uniform(-3, 4)),
+            (Pareto(2, 1), Exponential(3)),
+            (Pareto(2, 1), Gamma(3, 4)),
+            (Pareto(1, 2), Normal(-3, 4)),
+            (Pareto(1, 2), Pareto(3, 4)),
+            (Uniform(-1, 1), Beta(2, 2)),
+            (Uniform(0, 2), Beta(3, 4)),
+            (Uniform(-1, 2), Beta(3, 4)),
+            (Uniform(-1, 2), Exponential(3)),
+            (Uniform(-1, 2), Gamma(3, 4)),
+            (Uniform(-1, 2), Pareto(3, 4)),
         ]
 
     def test_kl_monte_carlo(self):
         set_rng_seed(0)  # see Note [Randomized statistical tests]
-        for p, q in self.examples:
+        for p, q in self.finite_examples:
             x = p.sample(sample_shape=(23000,))
             expected = (p.log_prob(x) - q.log_prob(x)).mean(0)
             actual = kl_divergence(p, q)
             message = 'Incorrect KL({}, {}). expected {}, actual {}'.format(
                 type(p).__name__, type(q).__name__, expected, actual)
             self.assertEqual(expected, actual, prec=0.1, message=message)
+
+    def test_kl_infinite(self):
+        for p, q in self.infinite_examples:
+            self.assertTrue((kl_divergence(p, q) == float('inf')), 
+                            'Incorrect KL({}, {})'.format(type(p).__name__, type(q).__name__))
 
 
 class TestConstraints(TestCase):
