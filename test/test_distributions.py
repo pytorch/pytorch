@@ -31,8 +31,8 @@ import torch
 from common import TestCase, run_tests, set_rng_seed
 from torch.autograd import Variable, grad, gradcheck
 from torch.distributions import (Bernoulli, Beta, Categorical, Cauchy, Chi2,
-                                 Dirichlet, Exponential, Gamma, Gumbel,
-                                 Laplace, Normal, OneHotCategorical, Pareto,
+                                 Dirichlet, Exponential, Gamma, Gumbel, Laplace,
+                                 Normal, OneHotCategorical, Multinomial, Pareto,
                                  StudentT, Uniform, kl_divergence)
 from torch.distributions.dirichlet import _Dirichlet_backward
 from torch.distributions.constraints import Constraint, is_dependent
@@ -68,6 +68,10 @@ EXAMPLES = [
     Example(Categorical, [
         {'probs': Variable(torch.Tensor([[0.1, 0.2, 0.3], [0.5, 0.3, 0.2]]), requires_grad=True)},
         {'probs': Variable(torch.Tensor([[1.0, 0.0], [0.0, 1.0]]), requires_grad=True)},
+    ]),
+    Example(Multinomial, [
+        {'probs': Variable(torch.Tensor([[0.1, 0.2, 0.3], [0.5, 0.3, 0.2]]), requires_grad=True), 'total_count': 10},
+        {'probs': Variable(torch.Tensor([[1.0, 0.0], [0.0, 1.0]]), requires_grad=True), 'total_count': 10},
     ]),
     Example(Cauchy, [
         {'loc': 0.0, 'scale': 1.0},
@@ -293,6 +297,53 @@ class TestDistributions(TestCase):
         self.assertEqual(Bernoulli(p).sample(sample_shape=(2, 5)).size(),
                          (2, 5, 2, 3, 5))
         self.assertEqual(Bernoulli(p).sample_n(2).size(), (2, 2, 3, 5))
+
+    def test_multinomial_1d(self):
+        total_count = 10
+        p = Variable(torch.Tensor([0.1, 0.2, 0.3]), requires_grad=True)
+        self.assertEqual(Multinomial(total_count, p).sample().size(), (3,))
+        self.assertEqual(Multinomial(total_count, p).sample((2, 2)).size(), (2, 2, 3))
+        self.assertEqual(Multinomial(total_count, p).sample_n(1).size(), (1, 3))
+        self._gradcheck_log_prob(lambda p: Multinomial(total_count, p), [p])
+        self._gradcheck_log_prob(lambda p: Multinomial(total_count, None, p.log()), [p])
+        self.assertRaises(NotImplementedError, Multinomial(10, p).rsample)
+
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    def test_multinomial_1d_log_prob(self):
+        total_count = 10
+        p = Variable(torch.Tensor([0.1, 0.2, 0.3]), requires_grad=True)
+        dist = Multinomial(total_count, probs=p)
+        x = dist.sample()
+        log_prob = dist.log_prob(x)
+        expected = torch.Tensor(scipy.stats.multinomial.logpmf(x.numpy(), n=total_count, p=dist.probs.detach().numpy()))
+        self.assertEqual(log_prob.data, expected)
+
+        dist = Multinomial(total_count, logits=p.log())
+        x = dist.sample()
+        log_prob = dist.log_prob(x)
+        expected = torch.Tensor(scipy.stats.multinomial.logpmf(x.numpy(), n=total_count, p=dist.probs.detach().numpy()))
+        self.assertEqual(log_prob.data, expected)
+
+    def test_multinomial_2d(self):
+        total_count = 10
+        probabilities = [[0.1, 0.2, 0.3], [0.5, 0.3, 0.2]]
+        probabilities_1 = [[1.0, 0.0], [0.0, 1.0]]
+        p = Variable(torch.Tensor(probabilities), requires_grad=True)
+        s = Variable(torch.Tensor(probabilities_1), requires_grad=True)
+        self.assertEqual(Multinomial(total_count, p).sample().size(), (2, 3))
+        self.assertEqual(Multinomial(total_count, p).sample(sample_shape=(3, 4)).size(), (3, 4, 2, 3))
+        self.assertEqual(Multinomial(total_count, p).sample_n(6).size(), (6, 2, 3))
+        set_rng_seed(0)
+        self._gradcheck_log_prob(lambda p: Multinomial(total_count, p), [p])
+        p.grad.zero_()
+        self._gradcheck_log_prob(lambda p: Multinomial(total_count, None, p.log()), [p])
+
+        # sample check for extreme value of probs
+        self.assertEqual(Multinomial(total_count, s).sample().data,
+                         torch.Tensor([[total_count, 0], [0, total_count]]))
+
+        # check entropy computation
+        self.assertRaises(NotImplementedError, Multinomial(10, p).entropy)
 
     def test_categorical_1d(self):
         p = Variable(torch.Tensor([0.1, 0.2, 0.3]), requires_grad=True)
@@ -1096,13 +1147,16 @@ class TestDistributionShapes(TestCase):
         for Dist, params in EXAMPLES:
             for i, param in enumerate(params):
                 dist = Dist(**param)
-                actual_shape = dist.entropy().size()
-                expected_shape = dist._batch_shape
-                if not expected_shape:
-                    expected_shape = torch.Size((1,))  # TODO Remove this once scalars are supported.
-                message = '{} example {}/{}, shape mismatch. expected {}, actual {}'.format(
-                    Dist.__name__, i, len(params), expected_shape, actual_shape)
-                self.assertEqual(actual_shape, expected_shape, message=message)
+                try:
+                    actual_shape = dist.entropy().size()
+                    expected_shape = dist._batch_shape
+                    if not expected_shape:
+                        expected_shape = torch.Size((1,))  # TODO Remove this once scalars are supported.
+                    message = '{} example {}/{}, shape mismatch. expected {}, actual {}'.format(
+                        Dist.__name__, i, len(params), expected_shape, actual_shape)
+                    self.assertEqual(actual_shape, expected_shape, message=message)
+                except NotImplementedError:
+                    continue
 
     def test_bernoulli_shape_scalar_params(self):
         bernoulli = Bernoulli(0.3)
@@ -1144,6 +1198,16 @@ class TestDistributionShapes(TestCase):
         self.assertEqual(dist.log_prob(self.tensor_sample_1).size(), torch.Size((3, 2)))
         self.assertRaises(ValueError, dist.log_prob, self.tensor_sample_2)
         self.assertEqual(dist.log_prob(torch.ones(3, 1, 1)).size(), torch.Size((3, 3, 2)))
+
+    def test_multinomial_shape(self):
+        dist = Multinomial(10, torch.Tensor([[0.6, 0.3], [0.6, 0.3], [0.6, 0.3]]))
+        self.assertEqual(dist._batch_shape, torch.Size((3,)))
+        self.assertEqual(dist._event_shape, torch.Size((2,)))
+        self.assertEqual(dist.sample().size(), torch.Size((3, 2)))
+        self.assertEqual(dist.sample((3, 2)).size(), torch.Size((3, 2, 3, 2)))
+        self.assertEqual(dist.log_prob(self.tensor_sample_1).size(), torch.Size((3,)))
+        self.assertRaises(ValueError, dist.log_prob, self.tensor_sample_2)
+        self.assertEqual(dist.log_prob(torch.ones(3, 1, 2)).size(), torch.Size((3, 3)))
 
     def test_categorical_shape(self):
         dist = Categorical(torch.Tensor([[0.6, 0.3], [0.6, 0.3], [0.6, 0.3]]))
@@ -1375,11 +1439,14 @@ class TestConstraints(TestCase):
                 for name, value in param.items():
                     if not (torch.is_tensor(value) or isinstance(value, Variable)):
                         value = torch.Tensor([value])
-                    if Dist in (Categorical, OneHotCategorical) and name == 'probs':
+                    if Dist in (Categorical, OneHotCategorical, Multinomial) and name == 'probs':
                         # These distributions accept positive probs, but elsewhere we
                         # use a stricter constraint to the simplex.
                         value = value / value.sum(-1, True)
-                    constraint = dist.params[name]
+                    try:
+                        constraint = dist.params[name]
+                    except KeyError:
+                        continue  # ignore optional parameters
                     if is_dependent(constraint):
                         continue
                     message = '{} example {}/{} parameter {} = {}'.format(
@@ -1497,6 +1564,23 @@ class TestNumericalStability(TestCase):
             log_pdf_prob_1 = categorical.log_prob(Variable(tensor_type([0, 1])))
             self.assertEqual(log_pdf_prob_1.data[0], 0)
             log_pdf_prob_0 = categorical.log_prob(Variable(tensor_type([1, 0])))
+            self.assertEqual(log_pdf_prob_0.data[0], -float('inf'), allow_inf=True)
+
+    def test_multinomial_log_prob(self):
+        for tensor_type in [torch.FloatTensor, torch.DoubleTensor]:
+            p = Variable(tensor_type([0, 1]), requires_grad=True)
+            s = Variable(tensor_type([0, 10]))
+            multinomial = Multinomial(10, p)
+            log_pdf = multinomial.log_prob(s)
+            self.assertEqual(log_pdf.data[0], 0)
+
+    def test_multinomial_log_prob_with_logits(self):
+        for tensor_type in [torch.FloatTensor, torch.DoubleTensor]:
+            p = Variable(tensor_type([-float('inf'), 0]), requires_grad=True)
+            multinomial = Multinomial(10, logits=p)
+            log_pdf_prob_1 = multinomial.log_prob(Variable(tensor_type([0, 10])))
+            self.assertEqual(log_pdf_prob_1.data[0], 0)
+            log_pdf_prob_0 = multinomial.log_prob(Variable(tensor_type([10, 0])))
             self.assertEqual(log_pdf_prob_0.data[0], -float('inf'), allow_inf=True)
 
 

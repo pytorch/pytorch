@@ -7,10 +7,12 @@ from torch.distributions.utils import probs_to_logits, logits_to_probs, log_sum_
 
 class Categorical(Distribution):
     r"""
-    Creates a categorical distribution parameterized by `probs`.
+    Creates a categorical distribution parameterized by either `probs` or
+    `logits` (but not both).
 
     .. note::
-        It is equivalent to the distribution that ``multinomial()`` samples from.
+        It is equivalent to the distribution that :func:`torch.multinomial`
+        samples from.
 
     Samples are integers from `0 ... K-1` where `K` is probs.size(-1).
 
@@ -30,6 +32,7 @@ class Categorical(Distribution):
 
     Args:
         probs (Tensor or Variable): event probabilities
+        logits (Tensor or Variable): event log probabilities
     """
     params = {'probs': constraints.simplex}
     has_enumerate_support = True
