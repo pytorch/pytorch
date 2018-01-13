@@ -363,6 +363,7 @@ extern PFN_vkGetPhysicalDeviceExternalImageFormatPropertiesNV vulkanSymbolWrappe
 VkBool32 vulkanSymbolWrapperInitLoader(void);
 void vulkanSymbolWrapperInit(PFN_vkGetInstanceProcAddr getInstanceProcAddr);
 PFN_vkGetInstanceProcAddr vulkanSymbolWrapperInstanceProcAddr(void);
+void vulkanSymbolWrapperReset(void);
 VkBool32 vulkanSymbolWrapperLoadGlobalSymbols(void);
 VkBool32 vulkanSymbolWrapperLoadCoreInstanceSymbols(VkInstance instance);
 VkBool32 vulkanSymbolWrapperLoadCoreSymbols(VkInstance instance);
