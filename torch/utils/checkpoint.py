@@ -84,7 +84,7 @@ def checkpoint(run_function, *args):
     return CheckpointFunction.apply(run_function, *args)
 
 
-def checkpoint_sequential(modules, segments, run_function, *inputs):
+def checkpoint_sequential(modules, segments, *inputs):
     r"""A helper function for checkpointing sequential based models.
 
     For models that are constructed using sequential, they normally are built
@@ -96,18 +96,24 @@ def checkpoint_sequential(modules, segments, run_function, *inputs):
 
     Args:
         modules: The sequence of modules (comprising the model) to run in order.
-                 Usually modules = model._modules.items()
+                 Usually
+                    modules = [module for k, module in self._modules.items()][0]
 
         segments: Number of times chunks to create in the model
-
-        run_function: It takes start, end point of the segment and returns a
-                      function that describes what to run in the checkpoint api
-                      on the given inputs.
 
         inputs: tuple containing the inputs to run_function
 
     Returns:
     """
+
+    def run_function(start, end, modules):
+        def forward(*inputs):
+            input = inputs[0]
+            for j in range(start, end + 1):
+                input = modules[j](input)
+            return input
+        return forward
+
     segment_size = len(modules) // segments
     # the last chunk has to be non-volatile
     for start in range(0, segment_size * (segments - 1), segment_size):

@@ -114,16 +114,6 @@ class DatasetMock(object):
 
 class TestCheckpoint(TestCase):
 
-    def custom(self):
-        def custom_forward(start, end, modules):
-            def forward_extended(*inputs):
-                input = inputs[0]
-                for j in range(start, end + 1):
-                    input = modules[j](input)
-                return input
-            return forward_extended
-        return custom_forward
-
     def test_checkpoint(self):
         model = nn.Sequential(
             nn.Linear(100, 50),
@@ -150,7 +140,7 @@ class TestCheckpoint(TestCase):
         chunks = 2
         modules = [module for k, module in model._modules.items()]
         input_var = Variable(x.data, requires_grad=True)
-        out = checkpoint_sequential(modules, chunks, self.custom(), input_var)
+        out = checkpoint_sequential(modules, chunks, input_var)
         out_checkpointed = out.data.clone()
         model.zero_grad()
         out.sum().backward()
