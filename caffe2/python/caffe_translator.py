@@ -490,8 +490,7 @@ def TranslateDeconv(layer, pretrained_blobs, is_test, **kwargs):
 
 @TranslatorRegistry.Register("Crop")
 def TranslateCrop(layer, pretrained_blobs, is_test, **kwargs):
-    net, net_params, input_dims = kwargs['net'], kwargs['net_params'],
-    kwargs['input_dims']
+    net, net_params, input_dims = kwargs['net'], kwargs['net_params'], kwargs['input_dims']
     n, c, h, w = input_dims
     dummy_input = np.random.randn(n, c, h, w).astype(np.float32)
     dim_map = _GetBlobDimMap(net, net_params, dummy_input)
