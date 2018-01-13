@@ -171,7 +171,7 @@ def _kl_beta_beta(p, q):
 
 @register_kl(Dirichlet, Dirichlet)
 def _kl_dirichlet_dirichlet(p, q):
-    # From http://bariskurt.com/kullback-leibler-divergence-between-two-dirichlet-and-beta-distributions/    
+    # From http://bariskurt.com/kullback-leibler-divergence-between-two-dirichlet-and-beta-distributions/
     sum_p_alpha = p.alpha.sum(0)
     sum_q_alpha = q.alpha.sum(0)
     t1 = torch.lgamma(sum_p_alpha)
