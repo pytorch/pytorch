@@ -259,7 +259,7 @@ def kldivloss_reference(input, target, size_average=True, reduce=True):
 
 def nlllossNd_reference(input, target, weight=None, ignore_index=-100,
                         size_average=True, reduce=True):
-    assert input.dim() >= 4
+    assert input.dim() >= 3
     N = input.size(0)
     C = input.size(1)
     out_size = (N,) + input.size()[2:]
