@@ -37,7 +37,7 @@ VIEW_FUNCTIONS = {
 # These functions require manual Python bindings or are not exposed to Python
 SKIP_PYTHON_BINDINGS = [
     'alias', 'contiguous', 'clamp.*', 'is_cuda', 'is_sparse', 'size', 'stride',
-    '_scalar_sum', # FixMe: remove when scalars are fully supported
+    '_scalar_sum',  # FixMe: remove when scalars are fully supported
     'slice_dim', '.*_backward'
 ]
 

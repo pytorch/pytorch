@@ -2359,7 +2359,7 @@ method_tests = [
 
 
 def make_non_contiguous(tensor):
-    if tensor.numel() <= 1: # can't make non-contiguous
+    if tensor.numel() <= 1:  # can't make non-contiguous
         return tensor.new(tensor.size())
     osize = list(tensor.size())
 
@@ -2431,7 +2431,8 @@ def generate_gradoutput(dummy_out, non_contiguous=False):
         return ret
 
     if isinstance(dummy_out, tuple):
-        grad_y = tuple(maybe_non_contig(x.double().randn_like(), x.requires_grad) for x in dummy_out if isinstance(x, Variable))
+        grad_y = tuple(maybe_non_contig(x.double().randn_like(), x.requires_grad)
+                       for x in dummy_out if isinstance(x, Variable))
     else:
         grad_y = (maybe_non_contig(dummy_out.double().randn_like(), dummy_out.requires_grad),)
 
