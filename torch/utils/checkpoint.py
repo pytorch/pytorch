@@ -36,8 +36,7 @@ class CheckpointFunction(Function):
 
     @staticmethod
     def backward(ctx, *args):
-        saved_inputs = ctx.saved_tensors
-        inputs = repackage_inputs(saved_inputs)
+        inputs = ctx.saved_variables
         with torch.enable_grad():
             outputs = ctx.run_function(*inputs)
 
@@ -45,16 +44,27 @@ class CheckpointFunction(Function):
             output_list = list(outputs)
         elif isinstance(outputs, Variable) or torch.is_tensor(outputs):
             output_list = [outputs]
-        out_grads = [grad for grad in args]
-        torch.autograd.backward(output_list, out_grads)
+        grad_outputs = [grad for grad in args]
 
-        input_grads = None
-        if isinstance(inputs, tuple):
-            input_grads = tuple(inp.grad for inp in inputs)
-            return (None,) + input_grads
-        elif isinstance(inputs, Variable) or torch.is_tensor(inputs):
-            input_grads = inputs.grad
-            return None, input_grads
+        # some inputs might not need gradients so we filter them out
+        # and later return None as grad for those inputs
+        filtered_inputs = []
+        for i in range(len(inputs)):
+            if inputs[i].requires_grad:
+                filtered_inputs.append(inputs[i])
+        assert len(filtered_inputs) > 0, "No input requires gradients"
+
+        torch.autograd.grad(output_list, filtered_inputs, grad_outputs)
+
+        # append None for input grads which don't require grad. The first input
+        # is a run_function whose grad is None
+        input_grads = [None]
+        for i in range(len(inputs)):
+            if inputs[i].requires_grad:
+                input_grads.append(inputs[i].grad)
+            else:
+                input_grads.append(None)
+        return tuple(input_grads)
 
 
 def checkpoint(run_function, *args):
@@ -104,6 +114,12 @@ def checkpoint_sequential(modules, segments, *inputs):
         inputs: tuple containing the inputs to run_function
 
     Returns:
+        Output of running the modules on *inputs
+
+    Example:
+        >>> modules = [module for k, module in self._modules.items()][0]
+        >>> input_var = Variable(x.data, requires_grad=True)
+        >>> input_var = checkpoint_sequential(modules, chunks, input_var)
     """
 
     def run_function(start, end, modules):
