@@ -46,6 +46,16 @@ except ImportError:
     TEST_NUMPY = False
 
 
+def pairwise(Dist, *params):
+    """
+    Creates a pair of distributions `Dist` initialzed to test each element of
+    param with each other.
+    """
+    params1 = [torch.Tensor([p] * len(p)) for p in params]
+    params2 = [p.transpose(0, 1) for p in params1]
+    return Dist(*params1), Dist(*params2)
+
+
 # Register all distributions for generic tests.
 Example = namedtuple('Example', ['Dist', 'params'])
 EXAMPLES = [
@@ -1248,44 +1258,64 @@ class TestDistributionShapes(TestCase):
 
 
 class TestKL(TestCase):
+
     def setUp(self):
+        # These are pairs of distributions with 4 x 4 paramters as specified.
+        # The first of the pair e.g. bernoulli[0] varies column-wise and the second
+        # e.g. bernoulli[1] varies row-wise; that way we test all param pairs.
+        bernoulli = pairwise(Bernoulli, [0.1, 0.2, 0.6, 0.9])
+        beta = pairwise(Beta, [0.5, 2.0, 0.5, 2.0], [0.3, 0.3, 3.0, 3.0])
+        chi2 = pairwise(Chi2, [0.2, 1.0, 2.0, 5.0])
+        exponential = pairwise(Exponential, [0.1, 0.5, 2.0, 10.0])
+        gamma = pairwise(Gamma, [0.5, 2.0, 0.5, 2.0], [0.5, 0.5, 2.0, 2.0])
+        gumbel = pairwise(Gumbel, [-2.0, 2.0, -2.0, 2.0], [0.5, 2.0, 0.5, 2.0])
+        laplace = pairwise(Laplace, [-2.0, 2.0, -2.0, 2.0], [0.5, 2.0, 0.5, 2.0])
+        normal = pairwise(Normal, [-2.0, 2.0, -2.0, 2.0], [0.5, 2.0, 0.5, 2.0])
+        pareto = pairwise(Pareto, [-2.0, 2.0, -2.0, 2.0], [0.5, 2.0, 0.5, 2.0])
+        uniform_interval = pairwise(Uniform, [0, 0, 0.4, 0.8], [1, 0.2, 0.6, 1])
+        uniform_positive = pairwise(Uniform, [1, 1.5, 2, 4], [1.2, 2.0, 3, 7])
+        uniform_real = pairwise(Uniform, [-2, -1, 0, 2], [-1, 1, 1, 4])
+        dirichlet = pairwise(Dirichlet, [[0.1, 0.2, 0.7],
+                                         [0.5, 0.4, 0.1],
+                                         [0.33, 0.33, 0.34],
+                                         [0.2, 0.2, 0.4]])
         self.finite_examples = [
-            (Bernoulli(0.7), Bernoulli(0.3)),
-            (Beta(1, 2), Beta(3, 4)),
-            (Beta(1, 2), Chi2(3)),
-            (Beta(1, 2), Exponential(3)),
-            (Beta(1, 2), Gamma(3, 4)),
-            (Beta(1, 2), Normal(-3, 4)),
-            (Chi2(2), Chi2(3)),
-            (Chi2(2), Gamma(3, 4)),
-            (Chi2(2), Exponential(3)),
-            (Dirichlet(torch.Tensor([1, 2])), Dirichlet(torch.Tensor([3, 4]))),
-            (Exponential(1), Chi2(2)),
-            (Exponential(1), Exponential(2)),
-            (Exponential(1), Gamma(2, 3)),
-            (Exponential(1), Gumbel(-2, 3)),
-            (Exponential(2), Normal(-3, 4)),
-            (Gamma(1, 2), Chi2(3)),
-            (Gamma(1, 2), Exponential(3)),
-            (Gamma(1, 2), Gamma(3, 4)),
-            (Gamma(1, 2), Gumbel(-3, 4)),
-            (Gumbel(-1, 2), Gumbel(-3, 4)),
-            (Gumbel(-1, 2), Normal(-3, 4)),  # This case fails for n <= 22000
-            (Laplace(1, 2), Laplace(-3, 4)),
-            (Laplace(-1, 2), Normal(-3, 4)),
-            (Normal(-1, 2), Gumbel(-3, 4)),
-            (Normal(1, 2), Normal(-3, 4)),
-            (Pareto(1, 2), Chi2(3)),
-            (Pareto(1, 2), Exponential(3)),  # This case fails for n <= 22000
-            (Pareto(1, 2), Gamma(3, 4)),  # This case fails for n <= 22000
-            (Pareto(1, 3), Normal(-2, 4)),
-            (Uniform(0.25, 0.75), Beta(3, 4)),
-            (Uniform(1, 2), Chi2(3)),
-            (Uniform(1, 2), Exponential(3)),
-            (Uniform(1, 2), Gamma(3, 4)),
-            (Uniform(-1, 2), Gumbel(-3, 4)),
-            (Uniform(-1, 2), Normal(-3, 4)),
-            (Uniform(2, 3), Pareto(1, 4))
+            (bernoulli, bernoulli),
+            (beta, beta),
+            (beta, chi2),
+            (beta, exponential),
+            (beta, gamma),
+            (beta, normal),
+            (chi2, chi2),
+            (chi2, exponential),
+            (chi2, gamma),
+            (dirichlet, dirichlet),
+            (exponential, chi2),
+            (exponential, exponential),
+            (exponential, gamma),
+            (exponential, gumbel),
+            (exponential, normal),
+            (gamma, chi2),
+            (gamma, exponential),
+            (gamma, gamma),
+            (gamma, gumbel),
+            (gumbel, gumbel),
+            (gumbel, normal),  # this case fails for n <= 22000
+            (laplace, laplace),
+            (laplace, normal),
+            (normal, gumbel),
+            (normal, normal),
+            (pareto, chi2),
+            (pareto, exponential),  # this case fails for n <= 22000
+            (pareto, gamma),  # this case fails for n <= 22000
+            (pareto, normal),
+            (uniform_interval, beta),
+            (uniform_positive, chi2),
+            (uniform_positive, exponential),
+            (uniform_positive, gamma),
+            (uniform_real, gumbel),
+            (uniform_real, normal),
+            (uniform_positive, pareto),
         ]
 
         self.infinite_examples = [
@@ -1336,11 +1366,11 @@ class TestKL(TestCase):
 
     def test_kl_monte_carlo(self):
         set_rng_seed(0)  # see Note [Randomized statistical tests]
-        for p, q in self.finite_examples:
-            x = p.sample(sample_shape=(23000,))
+        for (p, _), (_, q) in self.finite_examples:
+            x = p.sample(sample_shape=(100000,))
             expected = (p.log_prob(x) - q.log_prob(x)).mean(0)
             actual = kl_divergence(p, q)
-            message = 'Incorrect KL({}, {}). expected {}, actual {}'.format(
+            message = 'Incorrect KL({}, {}).\nExpected (monte carlo): {}\nActual (analytic): {}'.format(
                 type(p).__name__, type(q).__name__, expected, actual)
             self.assertEqual(expected, actual, prec=0.1, message=message)
 
