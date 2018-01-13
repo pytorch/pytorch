@@ -124,7 +124,7 @@ struct TreeToken {
   }
 
   std::vector<Node*> gatherMatMuls() {
-    static Symbol mm_kind = "mm"_sym;
+    static const Symbol mm_kind = "mm"_sym;
     std::vector<Node*> matmuls;
     std::vector<Node*> queue {node};
     while (!queue.empty()) {
@@ -142,10 +142,10 @@ struct TreeToken {
 
 void BatchMM(std::shared_ptr<Graph>& graph) {
   enum class Side { LHS, RHS };
-  static Symbol mm_kind = "mm"_sym;
-  static Symbol add_kind = "add"_sym;
-  static Symbol cat_kind = "cat"_sym;
-  static Symbol dim_sym = "dim"_sym;
+  static const Symbol mm_kind = "mm"_sym;
+  static const Symbol add_kind = "add"_sym;
+  static const Symbol cat_kind = "cat"_sym;
+  static const Symbol dim_sym = "dim"_sym;
 
   // Look for trees in the graph
   std::unordered_map<Node*, TreeToken> tokens;
