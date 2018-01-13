@@ -20,10 +20,10 @@ class Binomial(Distribution):
 
         >>> m = Binomial(100, torch.Tensor([0 , .2, .8, 1]))
         >>> x = m.sample()
-         21
-         24
-         30
-         25
+         0
+         22
+         71
+         100
         [torch.FloatTensor of size 4]]
 
     Args:
@@ -65,8 +65,8 @@ class Binomial(Distribution):
         return self.logits.exp()
 
     def sample(self, sample_shape=torch.Size()):
-        shape = (self.total_count,) + self._extended_shape(sample_shape)
-        return torch.bernoulli(self.probs.expand(shape)).sum(dim=0)
+        shape = self._extended_shape(sample_shape) + (self.total_count,)
+        return torch.bernoulli(self.probs.unsqueeze(-1).expand(shape)).sum(dim=-1)
 
     def log_prob(self, value):
         self._validate_log_prob_arg(value)
@@ -76,12 +76,6 @@ class Binomial(Distribution):
         log_factorial_nmk = torch.lgamma(self.total_count - value + 1)
         return (log_factorial_n - log_factorial_k - log_factorial_nmk +
                 value * self.logits + (self.total_count - value) * torch.log1p(-probs))
-
-    def entropy(self):
-        return 0.5 * (math.log(self.total_count) +
-                      self.logits +
-                      torch.log1p(-self.probs) +
-                      1 + math.log(2 * math.pi))
 
     def enumerate_support(self):
         values = torch.arange(self.total_count)
