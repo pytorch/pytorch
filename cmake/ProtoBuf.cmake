@@ -20,7 +20,7 @@ function(custom_protobuf_find)
   # we need those static libraries to be compiled as PIC.
   set_property(TARGET libprotobuf PROPERTY POSITION_INDEPENDENT_CODE ON)
   set(PROTOBUF_LIBRARIES libprotobuf PARENT_SCOPE)
-  set(PROTOBUF_INCLUDE_DIR ${PROJECT_SOURCE_DIR}/third_party/protobuf/src PARENT_SCOPE)
+  set(PROTOBUF_INCLUDE_DIRS ${PROJECT_SOURCE_DIR}/third_party/protobuf/src PARENT_SCOPE)
   set(Caffe2_DEPENDENCY_LIBS ${Caffe2_DEPENDENCY_LIBS} PARENT_SCOPE)
   # Figure out which protoc to use.
   # If CAFFE2_CUSTOM_PROTOC_EXECUTABLE is set, we assume the user knows
@@ -42,6 +42,15 @@ function(custom_protobuf_find)
   set(Protobuf_FOUND TRUE PARENT_SCOPE)
 endfunction()
 
+# The following cache variables are also available to set or use:
+#
+#   PROTOBUF_LIBRARY - The protobuf library
+#   PROTOBUF_PROTOC_LIBRARY   - The protoc library
+#   PROTOBUF_INCLUDE_DIR - The include directory for protocol buffers
+#   PROTOBUF_PROTOC_EXECUTABLE - The protoc compiler
+#
+# They are available in CMake 2.8.12 and later.
+#
 if (WIN32)
   find_package(Protobuf NO_MODULE)
 elseif (ANDROID OR IOS)
@@ -61,12 +70,53 @@ else()
   if(EXISTS "${CAFFE2_CUSTOM_PROTOC_EXECUTABLE}")
     custom_protobuf_find()
   else()
-    find_package(Protobuf)
-    if(Protobuf_FOUND OR PROTOBUF_FOUND)
-      # Add PROTOBUF_LIBRARY for backwards compatibility.
-      # Newer versions use *PROTOBUF_LIBRARIES*.
-      list(APPEND Caffe2_DEPENDENCY_LIBS ${PROTOBUF_LIBRARY})
+    # protoc is searched for in system PATH (see FindProtobuf.cmake).
+    # Include directories and libraries searched for separately.
+    #
+    # This is problematic in the following example case: if we run in an
+    # Anaconda environment, PATH is set accordingly, and protoc is found
+    # in the Anaconda installation if it is installed there. If
+    # libprotobuf is *also* installed as a system package, then
+    # FindProtobuf.cmake will happily use its include directories and
+    # libraries, as there is nothing guiding CMake to use the ones in
+    # the Anaconda installation. To fix this, we can seed the cache
+    # variables used by FindProtobuf.cmake here.
+    #
+    find_program(PROTOBUF_PROTOC_EXECUTABLE
+      NAMES protoc
+      DOC "The Google Protocol Buffers Compiler")
+
+    # Only if protoc was found, seed the include directories and libraries.
+    # We assume that protoc is installed at PREFIX/bin.
+    # We use get_filename_component to resolve PREFIX.
+    if(PROTOBUF_PROTOC_EXECUTABLE)
+      get_filename_component(
+        _PROTOBUF_INSTALL_PREFIX
+        ${PROTOBUF_PROTOC_EXECUTABLE}
+        DIRECTORY)
+      get_filename_component(
+        _PROTOBUF_INSTALL_PREFIX
+        ${_PROTOBUF_INSTALL_PREFIX}/..
+        REALPATH)
+      find_library(PROTOBUF_LIBRARY
+        NAMES protobuf
+        PATHS ${_PROTOBUF_INSTALL_PREFIX}/lib
+        NO_DEFAULT_PATH)
+      find_library(PROTOBUF_PROTOC_LIBRARY
+        NAMES protoc
+        PATHS ${_PROTOBUF_INSTALL_PREFIX}/lib
+        NO_DEFAULT_PATH)
+      find_library(PROTOBUF_LITE_LIBRARY
+        NAMES protobuf-lite
+        PATHS ${_PROTOBUF_INSTALL_PREFIX}/lib
+        NO_DEFAULT_PATH)
+      find_path(PROTOBUF_INCLUDE_DIR
+        google/protobuf/service.h
+        PATHS ${_PROTOBUF_INSTALL_PREFIX}/include
+        NO_DEFAULT_PATH)
     endif()
+
+    find_package(Protobuf)
   endif()
 endif()
 
@@ -79,8 +129,7 @@ if(NOT(Protobuf_FOUND OR PROTOBUF_FOUND))
   message(FATAL_ERROR "Could not find protobuf or compile local version")
 endif()
 
-message(STATUS "Using protobuf compiler ${PROTOBUF_PROTOC_EXECUTABLE}")
-caffe2_include_directories(${PROTOBUF_INCLUDE_DIR})
+caffe2_include_directories(${PROTOBUF_INCLUDE_DIRS})
 list(APPEND Caffe2_DEPENDENCY_LIBS ${PROTOBUF_LIBRARIES})
 
 ################################################################################################
