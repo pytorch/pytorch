@@ -85,17 +85,17 @@ class TestCase(hu.HypothesisTestCase):
             while proc.is_alive():
                 proc.join(10)
 
-                # Raise exception if we find any. Otherwise each worker
-                # should put a True into the queue
-                # Note that the following is executed ALSO after
-                # the last process was joined, so if ANY exception
-                # was raised, it will be re-raised here.
-                self.assertFalse(queue.empty(), "Job failed without a result")
-                o = queue.get()
-                if isinstance(o, Exception):
-                    raise o
-                else:
-                    self.assertTrue(o)
+            # Raise exception if we find any. Otherwise each worker
+            # should put a True into the queue
+            # Note that the following is executed ALSO after
+            # the last process was joined, so if ANY exception
+            # was raised, it will be re-raised here.
+            self.assertFalse(queue.empty(), "Job failed without a result")
+            o = queue.get()
+            if isinstance(o, Exception):
+                raise o
+            else:
+                self.assertTrue(o)
 
     def run_test_distributed(self, fn, device_option=None, **kwargs):
         comm_rank = os.getenv('COMM_RANK')
