@@ -736,17 +736,17 @@ real THTensor_(medianall)(THTensor *tensor)
 
 // Reduce all elements in the given tensor `t` with given `INIT_VALUE` and return
 // the result of type `RETTYPE`.
-// The accumulate operator `ACC_OP` must be commutative.
-#define TENSOR_IMPLEMENT_ACCALL(NAME, RETTYPE, ACC_OP, INIT_VALUE)        \
-  RETTYPE THTensor_(NAME)(THTensor *tensor)                               \
-  {                                                                       \
-    accreal result = INIT_VALUE;                                          \
-    TH_TENSOR_APPLY(real, tensor, result = result ACC_OP *tensor_data;);  \
-    return result;                                                        \
+// The accumulate operator `REDUCE_OP` must be commutative.
+#define TENSOR_IMPLEMENT_REDUCE_ALL(NAME, RETTYPE, REDUCE_OP, INIT_VALUE)   \
+  RETTYPE THTensor_(NAME)(THTensor *tensor)                                 \
+  {                                                                         \
+    accreal result = INIT_VALUE;                                            \
+    TH_TENSOR_APPLY(real, tensor, result = result REDUCE_OP *tensor_data;); \
+    return result;                                                          \
   }
 
-TENSOR_IMPLEMENT_ACCALL(sumall, accreal, +, 0)
-TENSOR_IMPLEMENT_ACCALL(prodall, accreal, *, 1)
+TENSOR_IMPLEMENT_REDUCE_ALL(sumall, accreal, +, 0)
+TENSOR_IMPLEMENT_REDUCE_ALL(prodall, accreal, *, 1)
 
 void THTensor_(add)(THTensor *r_, THTensor *t, real value)
 {
@@ -1871,8 +1871,8 @@ void THTensor_(min)(THTensor *values_, THLongTensor *indices_, THTensor *t, int 
 }
 
 // Reduce elements in the given tensor `t` along the `dimension` axes, and store result in `r_`.
-// The accumulate operator `ACC_OP` must be commutative.
-#define TENSOR_IMPLEMENT_ACC(NAME, ACC_OP, INIT_VALUE)                                   \
+// The accumulate operator `REDUCE_OP` must be commutative.
+#define TENSOR_IMPLEMENT_REDUCE(NAME, REDUCE_OP, INIT_VALUE)                             \
   void THTensor_(NAME)(THTensor *r_, THTensor *t, int dimension, int keepdim)            \
   {                                                                                      \
     THLongStorage *dim;                                                                  \
@@ -1891,7 +1891,7 @@ void THTensor_(min)(THTensor *values_, THLongTensor *indices_, THTensor *t, int 
                            accreal result = INIT_VALUE;                                  \
                            int64_t i;                                                    \
                            for(i = 0; i < t_size; i++)                                   \
-                             result = result ACC_OP t_data[i*t_stride];                  \
+                             result = result REDUCE_OP t_data[i*t_stride];               \
                            *r__data = (real)result;);                                    \
     } else {                                                                             \
       THTensor_(fill)(r_, INIT_VALUE);                                                   \
@@ -1899,7 +1899,7 @@ void THTensor_(min)(THTensor *values_, THLongTensor *indices_, THTensor *t, int 
       /* r_.expand_as(t) */                                                              \
       temp_->size[dimension] = t->size[dimension];                                       \
       temp_->stride[dimension] = 0;                                                      \
-      TH_TENSOR_APPLY2(real, temp_, real, t, *temp__data =  *temp__data ACC_OP *t_data;);\
+      TH_TENSOR_APPLY2(real, temp_, real, t, *temp__data =  *temp__data REDUCE_OP *t_data;);  \
       THTensor_(free)(temp_);                                                            \
     }                                                                                    \
                                                                                          \
@@ -1908,8 +1908,8 @@ void THTensor_(min)(THTensor *values_, THLongTensor *indices_, THTensor *t, int 
     }                                                                                    \
   }
 
-TENSOR_IMPLEMENT_ACC(sum, +, 0)
-TENSOR_IMPLEMENT_ACC(prod, *, 1)
+TENSOR_IMPLEMENT_REDUCE(sum, +, 0)
+TENSOR_IMPLEMENT_REDUCE(prod, *, 1)
 
 void THTensor_(cumsum)(THTensor *r_, THTensor *t, int dimension)
 {
@@ -3008,11 +3008,11 @@ LAB_IMPLEMENT_BASIC_FUNCTION(abs,abs)
 
 #if defined(TH_REAL_IS_BYTE)
 
-TENSOR_IMPLEMENT_ACCALL(logicalAndAll, int, &&, 1)
-TENSOR_IMPLEMENT_ACCALL(logicalAnyAll, int, ||, 0)
+TENSOR_IMPLEMENT_REDUCE_ALL(logicalAndAll, int, &&, 1)
+TENSOR_IMPLEMENT_REDUCE_ALL(logicalAnyAll, int, ||, 0)
 
-TENSOR_IMPLEMENT_ACC(logicalAnd, &&, 1)
-TENSOR_IMPLEMENT_ACC(logicalAny, ||, 0)
+TENSOR_IMPLEMENT_REDUCE(logicalAnd, &&, 1)
+TENSOR_IMPLEMENT_REDUCE(logicalAny, ||, 0)
 
 #endif /* Byte only part */
 
