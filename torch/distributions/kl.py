@@ -171,6 +171,7 @@ def _kl_beta_beta(p, q):
 
 @register_kl(Dirichlet, Dirichlet)
 def _kl_dirichlet_dirichlet(p, q):
+    # From http://bariskurt.com/kullback-leibler-divergence-between-two-dirichlet-and-beta-distributions/    
     sum_p_alpha = p.alpha.sum(0)
     sum_q_alpha = q.alpha.sum(0)
     t1 = torch.lgamma(sum_p_alpha)
@@ -210,7 +211,7 @@ def _kl_gumbel_gumbel(p, q):
 
 @register_kl(Laplace, Laplace)
 def _kl_laplace_laplace(p, q):
-    #  From http://www.mast.queensu.ca/~communications/Papers/gil-msc11.pdf
+    # From http://www.mast.queensu.ca/~communications/Papers/gil-msc11.pdf
     scale_ratio = p.scale / q.scale
     loc_abs_diff = (p.loc - q.loc).abs()
     t1 = -scale_ratio.log()
@@ -230,7 +231,7 @@ def _kl_normal_normal(p, q):
 
 @register_kl(Pareto, Pareto)
 def _kl_pareto_pareto(p, q):
-    #  From http://www.mast.queensu.ca/~communications/Papers/gil-msc11.pdf
+    # From http://www.mast.queensu.ca/~communications/Papers/gil-msc11.pdf
     scale_ratio = p.scale / q.scale
     alpha_ratio = q.alpha / p.alpha
     t1 = q.alpha * scale_ratio.log()
