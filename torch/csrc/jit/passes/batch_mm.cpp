@@ -44,8 +44,6 @@ namespace torch { namespace jit {
 // |      |      | |      |
 // +------+------+ +------+
 
-
-
 // Note [Further optimizations]
 // It would be straightforward to extend the TreeToken class to also detect if all
 // MMs had the same lhs/rhs. In such case it's more efficient to expand the lhs
@@ -65,11 +63,6 @@ namespace torch { namespace jit {
 // The algorithm we're using is simple. We're iterating through the graph in the
 // topological order and labeling nodes with TreeTokens. Then, we look for roots of
 // the trees we formed and fuse them.
-
-enum class Side {
-  LHS,
-  RHS
-};
 
 // Tunable parameter. Set to something larger if it turns out to be better.
 static constexpr std::size_t min_fusion_size = 2;
@@ -148,6 +141,7 @@ struct TreeToken {
 };
 
 void BatchMM(std::shared_ptr<Graph>& graph) {
+  enum class Side { LHS, RHS };
   static Symbol mm_kind = "mm"_sym;
   static Symbol add_kind = "add"_sym;
   static Symbol cat_kind = "cat"_sym;
@@ -165,6 +159,10 @@ void BatchMM(std::shared_ptr<Graph>& graph) {
       auto rhs_it = tokens.find(rhs);
       // See Note [Overlapping trees] (regarding the uses().size() == 1 check)
       // We could treat a subtree with multiple uses as if it was overlapping.
+      // XXX: uses().size() == 1 is also something that guarantees that this
+      // transform is valid, because we know for sure that the none of these
+      // operands depend on the result of the other. If we were to remove this,
+      // we need to compute a transitive closure and actually check the dependencies.
       if (lhs_it != tokens.end() && rhs_it != tokens.end() &&
           lhs->output()->uses().size() == 1 && rhs->output()->uses().size() == 1) {
         if (auto token = TreeToken::unify(node, lhs_it->second, rhs_it->second))
@@ -183,7 +181,7 @@ void BatchMM(std::shared_ptr<Graph>& graph) {
 
     auto batch_inputs = [&](Side s, std::array<int64_t, 2> cat_sizes) -> Value* {
       int inputs_off = s == Side::LHS ? 0 : 1;
-      int cat_dim = s == Side::LHS ? 1 : 0;
+      int cat_dim    = s == Side::LHS ? 1 : 0;
       cat_sizes[cat_dim] *= matmuls.size(); // make them really cat_sizes
 
       auto inputs = fmap(matmuls, [=](Node *mm) { return mm->inputs()[inputs_off]; });
