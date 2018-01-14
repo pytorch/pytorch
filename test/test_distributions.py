@@ -1278,6 +1278,8 @@ class TestKL(TestCase):
             (Pareto(1, 2), Chi2(3)),
             (Pareto(1, 2), Exponential(3)),  # This case fails for n <= 22000
             (Pareto(1, 2), Gamma(3, 4)),  # This case fails for n <= 22000
+            (Pareto(1, 2), Laplace(-3, 4)),
+            (Pareto(1, 2), Laplace(3, 4)),
             (Pareto(1, 3), Normal(-2, 4)),
             (Uniform(0.25, 0.75), Beta(3, 4)),
             (Uniform(1, 2), Chi2(3)),
