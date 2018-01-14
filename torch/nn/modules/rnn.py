@@ -622,7 +622,7 @@ class LSTMCell(RNNCellBase):
         - **input** (batch, input_size): tensor containing input features
         - **h_0** (batch, hidden_size): tensor containing the initial hidden
           state for each element in the batch.
-        - **c_0** (batch. hidden_size): tensor containing the initial cell state
+        - **c_0** (batch, hidden_size): tensor containing the initial cell state
           for each element in the batch.
 
     Outputs: h_1, c_1
