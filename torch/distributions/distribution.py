@@ -147,3 +147,6 @@ class Distribution(object):
             if i != 1 and j != 1 and i != j:
                 raise ValueError('Value is not broadcastable with batch_shape+event_shape: {} vs {}.'.
                                  format(actual_shape, expected_shape))
+
+    def __repr__(self):
+        return self.__class__.__name__ + '()'
