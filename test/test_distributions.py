@@ -1430,6 +1430,29 @@ class TestKL(TestCase):
                 type(p).__name__, type(q).__name__, expected, actual)
             self.assertEqual(expected, actual, prec=0.1, message=message)
 
+    def test_entropy_monte_carlo(self):
+        set_rng_seed(0)  # see Note [Randomized statistical tests]
+        for Dist, params in EXAMPLES:
+            for i, param in enumerate(params):
+                dist = Dist(**param)
+                try:
+                    actual = dist.entropy()
+                except NotImplementedError:
+                    continue
+                x = dist.sample(sample_shape=(20000,))
+                expected = -dist.log_prob(x).mean(0)
+                if isinstance(actual, Variable):
+                    actual = actual.data
+                    expected = expected.data
+                ignore = (expected == float('inf'))
+                expected[ignore] = actual[ignore]
+                self.assertEqual(actual, expected, prec=0.2, message='\n'.join([
+                    '{} example {}/{}, incorrect .entropy().'.format(Dist.__name__, i, len(params)),
+                    'Expected (monte carlo) {}'.format(expected),
+                    'Actual (analytic) {}'.format(actual),
+                    'max error = {}'.format(torch.abs(actual - expected).max()),
+                ]))
+
 
 class TestConstraints(TestCase):
     def test_params_contains(self):
