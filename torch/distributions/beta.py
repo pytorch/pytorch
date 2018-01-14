@@ -15,12 +15,13 @@ class Beta(Distribution):
     Example::
 
         >>> m = Beta(torch.Tensor([0.5]), torch.Tensor([0.5]))
-        >>> m.sample()  # Beta distributed with concentrarion alpha
+        >>> m.sample()  # Beta distributed with concentration alpha and beta
          0.1046
-        [torch.FloatTensor of size 2]
+        [torch.FloatTensor of size 1]
 
     Args:
-        alpha (Tensor or Variable): concentration parameter of the distribution
+        alpha (float or Tensor or Variable): 1st concentration parameter of the distribution
+        beta (float or Tensor or Variable): 2nd concentration parameter of the distribution
     """
     params = {'alpha': constraints.positive, 'beta': constraints.positive}
     support = constraints.unit_interval
@@ -48,3 +49,19 @@ class Beta(Distribution):
 
     def entropy(self):
         return self._dirichlet.entropy()
+
+    @property
+    def alpha(self):
+        result = self._dirichlet.alpha[..., 0]
+        if isinstance(result, Number):
+            return torch.Tensor([result])
+        else:
+            return result
+
+    @property
+    def beta(self):
+        result = self._dirichlet.alpha[..., 1]
+        if isinstance(result, Number):
+            return torch.Tensor([result])
+        else:
+            return result

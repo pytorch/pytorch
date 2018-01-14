@@ -46,4 +46,4 @@ class Gumbel(Distribution):
         return -(self.scale.log() + z + torch.exp(-z))
 
     def entropy(self):
-        return self.scale.log() + (1.57721566490153286060)  # 1 + Euler Mascheroni Constant
+        return self.scale.log() + 1.57721566490153286060  # 1 + Euler Mascheroni Constant
