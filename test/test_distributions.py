@@ -1448,7 +1448,7 @@ class TestKL(TestCase):
                 expected[ignore] = actual[ignore]
                 self.assertEqual(actual, expected, prec=0.2, message='\n'.join([
                     '{} example {}/{}, incorrect .entropy().'.format(Dist.__name__, i, len(params)),
-                    'Expected (monte carlow) {}'.format(expected),
+                    'Expected (monte carlo) {}'.format(expected),
                     'Actual (analytic) {}'.format(actual),
                     'max error = {}'.format(torch.abs(actual - expected).max()),
                 ]))
