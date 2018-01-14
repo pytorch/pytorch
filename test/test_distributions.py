@@ -303,25 +303,26 @@ class TestDistributions(TestCase):
         self.assertEqual(Bernoulli(p).sample_n(2).size(), (2, 2, 3, 5))
 
     def test_binomial(self):
-        total_count = 10
-        p = Variable(torch.Tensor([0.1, 0.2, 0.3]), requires_grad=True)
-        self._gradcheck_log_prob(lambda p: Multinomial(total_count, p), [p])
-        self._gradcheck_log_prob(lambda p: Multinomial(total_count, None, p.log()), [p])
-        self.assertRaises(NotImplementedError, Multinomial(10, p).rsample)
-        self.assertRaises(NotImplementedError, Multinomial(10, p).entropy)
+        p = Variable(torch.arange(0.05, 1, 0.1), requires_grad=True)
+        for total_count in [1, 2, 10]:
+            self._gradcheck_log_prob(lambda p: Binomial(total_count, p), [p])
+            self._gradcheck_log_prob(lambda p: Binomial(total_count, None, p.log()), [p])
+        self.assertRaises(NotImplementedError, Binomial(10, p).rsample)
+        self.assertRaises(NotImplementedError, Binomial(10, p).entropy)
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_binomial_log_prob(self):
-        total_count = 10
-        probs = Variable(torch.Tensor([0.1, 0.2, 0.3]), requires_grad=True)
+        probs = Variable(torch.arange(0.05, 1, 0.1))
+        for total_count in [1, 2, 10]:
 
-        def ref_log_prob(idx, x, log_prob):
-            p = probs.data.view(-1)[idx]
-            expected = scipy.stats.binom(total_count, p).logpmf(x)
-            self.assertAlmostEqual(log_prob, expected, places=3)
+            def ref_log_prob(idx, x, log_prob):
+                p = probs.data.view(-1)[idx]
+                expected = scipy.stats.binom(total_count, p).logpmf(x)
+                self.assertAlmostEqual(log_prob, expected, places=3)
 
-        self._check_log_prob(Binomial(total_count, probs), ref_log_prob)
-        self._check_log_prob(Binomial(total_count, logits=probs_to_logits(probs, is_binary=True)), ref_log_prob)
+            self._check_log_prob(Binomial(total_count, probs), ref_log_prob)
+            logits = probs_to_logits(probs, is_binary=True)
+            self._check_log_prob(Binomial(total_count, logits=logits), ref_log_prob)
 
     def test_binomial_extreme_vals(self):
         total_count = 100
