@@ -36,7 +36,7 @@ from torch.distributions import (Bernoulli, Beta, Binomial, Categorical, Cauchy,
                                  StudentT, Uniform, kl_divergence)
 from torch.distributions.dirichlet import _Dirichlet_backward
 from torch.distributions.constraints import Constraint, is_dependent
-from torch.distributions.utils import _finfo
+from torch.distributions.utils import _finfo, probs_to_logits, logits_to_probs
 
 TEST_NUMPY = True
 try:
@@ -321,7 +321,7 @@ class TestDistributions(TestCase):
             self.assertAlmostEqual(log_prob, expected, places=3)
 
         self._check_log_prob(Binomial(total_count, probs), ref_log_prob)
-        self._check_log_prob(Binomial(total_count, logits=probs.log()), ref_log_prob)
+        self._check_log_prob(Binomial(total_count, logits=probs_to_logits(probs, is_binary=True)), ref_log_prob)
 
     def test_binomial_extreme_vals(self):
         total_count = 100

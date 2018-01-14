@@ -137,11 +137,6 @@ def clamp_probs(probs):
     return probs.clamp(min=eps, max=1 - eps)
 
 
-def clamp_logits(logits):
-    eps = _finfo(logits).eps
-    return logits.clamp(min=math.log(eps), max=math.log1p(-eps))
-
-
 def probs_to_logits(probs, is_binary=False):
     """
     Converts a tensor of probabilities into logits. For the binary case,

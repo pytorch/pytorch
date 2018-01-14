@@ -3,7 +3,7 @@ import torch
 import math
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
-from torch.distributions.utils import broadcast_all, probs_to_logits, lazy_property
+from torch.distributions.utils import broadcast_all, probs_to_logits, lazy_property, logits_to_probs
 from torch.distributions.utils import clamp_probs
 from torch.autograd import Variable
 
@@ -58,11 +58,11 @@ class Binomial(Distribution):
 
     @lazy_property
     def logits(self):
-        return probs_to_logits(self.probs)
+        return probs_to_logits(self.probs, is_binary=True)
 
     @lazy_property
     def probs(self):
-        return self.logits.exp()
+        return logits_to_probs(self.logits, is_binary=True)
 
     def sample(self, sample_shape=torch.Size()):
         shape = self._extended_shape(sample_shape) + (self.total_count,)
@@ -75,7 +75,7 @@ class Binomial(Distribution):
         log_factorial_k = torch.lgamma(value + 1)
         log_factorial_nmk = torch.lgamma(self.total_count - value + 1)
         return (log_factorial_n - log_factorial_k - log_factorial_nmk +
-                value * self.logits + (self.total_count - value) * torch.log1p(-probs))
+                value * self.logits + self.total_count * torch.log1p(-probs))
 
     def enumerate_support(self):
         values = torch.arange(self.total_count)
