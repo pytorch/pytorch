@@ -1554,7 +1554,7 @@ class TestKL(TestCase):
         for p, q in self.infinite_examples:
             self.assertTrue((kl_divergence(p, q) == float('inf')).all(),
                             'Incorrect KL({}, {})'.format(type(p).__name__, type(q).__name__))
-   
+
     def test_entropy_monte_carlo(self):
         set_rng_seed(0)  # see Note [Randomized statistical tests]
         for Dist, params in EXAMPLES:
