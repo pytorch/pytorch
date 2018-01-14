@@ -5,7 +5,7 @@ from torch.autograd import Function, Variable
 from torch.autograd.function import once_differentiable
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
-from torch.distributions.utils import broadcast_all
+from torch.distributions.utils import _finfo, broadcast_all
 
 
 def _standard_gamma(alpha):
@@ -43,7 +43,10 @@ class Gamma(Distribution):
 
     def rsample(self, sample_shape=torch.Size()):
         shape = self._extended_shape(sample_shape)
-        return _standard_gamma(self.alpha.expand(shape)) / self.beta.expand(shape)
+        value = _standard_gamma(self.alpha.expand(shape)) / self.beta.expand(shape)
+        data = value.data if isinstance(value, Variable) else value
+        data.clamp_(min=_finfo(value).tiny)  # do not record in autograd graph
+        return value
 
     def log_prob(self, value):
         self._validate_log_prob_arg(value)

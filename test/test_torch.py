@@ -205,8 +205,10 @@ class TestTorch(TestCase):
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found")
     def test_polygamma(self):
         from scipy.special import polygamma
+        from torch.autograd import Variable
         for n in [0, 1]:
             self._testMath(lambda x: torch.polygamma(n, x), lambda x: polygamma(n, x)[()])
+            self._testMath(lambda x: torch.polygamma(n, Variable(x)).data, lambda x: polygamma(n, x)[()])
 
     def test_asin(self):
         self._testMath(torch.asin, lambda x: math.asin(x) if abs(x) <= 1 else float('nan'))
@@ -2696,7 +2698,7 @@ class TestTorch(TestCase):
             if expected_error is None:
                 result = x.stft(frame_length, hop, fft_size, return_onesided, window, pad_end)
                 ref_result = naive_stft(x, frame_length, hop, fft_size, return_onesided, window, pad_end)
-                self.assertEqual(result.data, ref_result, 1e-8, 'stft result')
+                self.assertEqual(result.data, ref_result, 5e-6, 'stft result')
             else:
                 self.assertRaises(expected_error,
                                   lambda: x.stft(frame_length, hop, fft_size, return_onesided, window, pad_end))

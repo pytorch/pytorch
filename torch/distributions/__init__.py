@@ -42,6 +42,7 @@ from .gamma import Gamma
 from .gumbel import Gumbel
 from .kl import kl_divergence, register_kl
 from .laplace import Laplace
+from .multinomial import Multinomial
 from .normal import Normal
 from .one_hot_categorical import OneHotCategorical
 from .pareto import Pareto
@@ -60,6 +61,7 @@ __all__ = [
     'Gamma',
     'Gumbel',
     'Laplace',
+    'Multinomial',
     'Normal',
     'OneHotCategorical',
     'Pareto',

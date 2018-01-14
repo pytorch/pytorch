@@ -194,7 +194,7 @@ class CosineAnnealingLR(_LRScheduler):
 
     def get_lr(self):
         return [self.eta_min + (base_lr - self.eta_min) *
-                (1 + math.cos(self.last_epoch / self.T_max * math.pi)) / 2
+                (1 + math.cos(math.pi * self.last_epoch / self.T_max)) / 2
                 for base_lr in self.base_lrs]
 
 
@@ -326,7 +326,7 @@ class ReduceLROnPlateau(object):
         if mode not in {'min', 'max'}:
             raise ValueError('mode ' + mode + ' is unknown!')
         if threshold_mode not in {'rel', 'abs'}:
-            raise ValueError('threshold mode ' + mode + ' is unknown!')
+            raise ValueError('threshold mode ' + threshold_mode + ' is unknown!')
         if mode == 'min' and threshold_mode == 'rel':
             rel_epsilon = 1. - threshold
             self.is_better = lambda a, best: a < best * rel_epsilon

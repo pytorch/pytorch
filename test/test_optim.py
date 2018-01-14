@@ -503,7 +503,7 @@ class TestLRScheduler(TestCase):
         epochs = 10
         eta_min = 1e-10
         single_targets = [eta_min + (0.05 - eta_min) *
-                          (1 + math.cos(x / epochs * math.pi)) / 2
+                          (1 + math.cos(math.pi * x / epochs)) / 2
                           for x in range(epochs)]
         targets = [single_targets, list(map(lambda x: x * epochs, single_targets))]
         scheduler = CosineAnnealingLR(self.opt, T_max=epochs, eta_min=eta_min)

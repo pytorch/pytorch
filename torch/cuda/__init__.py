@@ -340,6 +340,69 @@ def empty_cache():
     return torch._C._cuda_emptyCache()
 
 
+def memory_allocated(device=None):
+    """Returns the current GPU memory usage by tensors in bytes for a given
+    device.
+
+    Arguments:
+        device (int, optional): selected device. Returns statistic for the
+                                current device, given by
+                                :meth:`~torch.cuda.current_device`, if
+                                :attr:`device` is ``None`` (default).
+
+    .. note:: This is likely less than the amount shown in `nvidia-smi` since
+    some unused memory can be held by the caching allocator and some context
+    needs to be created on GPU. """
+    if device is None:
+        device = current_device()
+    return torch._C._cuda_memoryAllocated(device)
+
+
+def max_memory_allocated(device=None):
+    """Returns the maxium GPU memory usage by tensors in bytes for a given
+    device.
+
+    Arguments:
+        device (int, optional): selected device. Returns statistic for the
+                                current device, given by
+                                :meth:`~torch.cuda.current_device`, if
+                                :attr:`device` is ``None`` (default).
+    """
+    if device is None:
+        device = current_device()
+    return torch._C._cuda_maxMemoryAllocated(device)
+
+
+def memory_cached(device=None):
+    """Returns the current GPU memory managed by the caching allocator in bytes
+    for a given device.
+
+    Arguments:
+        device (int, optional): selected device. Returns statistic for the
+                                current device, given by
+                                :meth:`~torch.cuda.current_device`, if
+                                :attr:`device` is ``None`` (default).
+    """
+    if device is None:
+        device = current_device()
+    return torch._C._cuda_memoryCached(device)
+
+
+def max_memory_cached(device=None):
+    """Returns the maximum GPU memory managed by the caching allocator in bytes
+    for a given device.
+
+    Arguments:
+        device (int, optional): selected device. Returns statistic for the
+                                current device, given by
+                                :meth:`~torch.cuda.current_device`, if
+                                :attr:`device` is ``None`` (default).
+    """
+    if device is None:
+        device = current_device()
+    return torch._C._cuda_maxMemoryCached(device)
+
+
 def _host_allocator():
     _lazy_init()
     return torch._C._cuda_cudaHostAllocator()

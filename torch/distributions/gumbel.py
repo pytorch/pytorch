@@ -3,7 +3,7 @@ from numbers import Number
 import torch
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
-from torch.distributions.utils import broadcast_all
+from torch.distributions.utils import _finfo, broadcast_all
 
 
 class Gumbel(Distribution):
@@ -35,7 +35,7 @@ class Gumbel(Distribution):
 
     def rsample(self, sample_shape=torch.Size()):
         shape = self._extended_shape(sample_shape)
-        uni_dist = self.scale.new(shape).uniform_(1e-15, 1)
+        uni_dist = self.scale.new(shape).uniform_(_finfo(self.scale).eps, 1)
         # X ~ Uniform(0, 1)
         # Y = loc - scale * ln (-ln (X)) ~ Gumbel(loc, scale)
         return self.loc - self.scale * torch.log(-uni_dist.log())

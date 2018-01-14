@@ -1,9 +1,36 @@
+from collections import namedtuple
 from functools import update_wrapper
 from numbers import Number
 
 import torch
-from torch.autograd import Variable
 import torch.nn.functional as F
+from torch.autograd import Variable
+
+# This follows semantics of numpy.finfo.
+_Finfo = namedtuple('_Finfo', ['eps', 'tiny'])
+_FINFO = {
+    torch.HalfStorage: _Finfo(eps=0.00097656, tiny=6.1035e-05),
+    torch.FloatStorage: _Finfo(eps=1.19209e-07, tiny=1.17549e-38),
+    torch.DoubleStorage: _Finfo(eps=2.22044604925e-16, tiny=2.22507385851e-308),
+    torch.cuda.HalfStorage: _Finfo(eps=0.00097656, tiny=6.1035e-05),
+    torch.cuda.FloatStorage: _Finfo(eps=1.19209e-07, tiny=1.17549e-38),
+    torch.cuda.DoubleStorage: _Finfo(eps=2.22044604925e-16, tiny=2.22507385851e-308),
+}
+
+
+def _finfo(tensor):
+    """
+    Return floating point info about a `Tensor` or `Variable`:
+    - `.eps` is the smallest number that can be added to 1 without being lost.
+    - `.tiny` is the smallest positive number greater than zero
+      (much smaller than `.eps`).
+
+    Args:
+        tensor (Tensor or Variable): tensor or variable of floating point data.
+    Returns:
+        _Finfo: a `namedtuple` with fields `.eps` and `.tiny`.
+    """
+    return _FINFO[tensor.storage_type()]
 
 
 def expand_n(v, n):
@@ -70,15 +97,6 @@ def broadcast_all(*values):
     return values
 
 
-def _get_clamping_buffer(tensor):
-    clamp_eps = 1e-6
-    if isinstance(tensor, Variable):
-        tensor = tensor.data
-    if isinstance(tensor, (torch.DoubleTensor, torch.cuda.DoubleTensor)):
-        clamp_eps = 1e-15
-    return clamp_eps
-
-
 def softmax(tensor):
     """
     Wrapper around softmax to make it work with both Tensors and Variables.
@@ -121,7 +139,7 @@ def probs_to_logits(probs, is_binary=False):
     For the multi-dimensional case, the values along the last dimension
     denote the probabilities of occurrence of each of the events.
     """
-    eps = _get_clamping_buffer(probs)
+    eps = _finfo(probs).eps
     ps_clamped = probs.clamp(min=eps, max=1 - eps)
     if is_binary:
         return torch.log(ps_clamped) - torch.log1p(-ps_clamped)

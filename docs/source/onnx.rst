@@ -130,9 +130,12 @@ The following operators are supported:
 * mm
 * addmm
 * neg
+* sqrt
 * tanh
 * sigmoid
 * mean
+* sum
+* prod
 * t
 * expand (only when used before a broadcasting ONNX operator; e.g., add)
 * transpose
@@ -189,7 +192,7 @@ for installing PyTorch from source.
 If the wanted operator is standardized in ONNX, it should be easy to add
 support for exporting such operator (adding a symbolic function for the operator).
 To confirm whether the operator is standardized or not, please check the
-`ONNX operator list <http://https://github.com/onnx/onnx/blob/master/docs/Operators.md>`_.
+`ONNX operator list <https://github.com/onnx/onnx/blob/master/docs/Operators.md>`_.
 
 If the operator is an ATen operator, which means you can find the declaration
 of the function in ``torch/csrc/autograd/generated/VariableType.h``

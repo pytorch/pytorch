@@ -1,6 +1,7 @@
 #ifndef THC_TENSORMATH_POINTWISE_CUH
 #define THC_TENSORMATH_POINTWISE_CUH
 
+#include <type_traits>
 #include "THCTensorMath.h"
 #include "THCGeneral.h"
 #include "THCHalf.h"
