@@ -858,6 +858,18 @@ class TestDistributions(TestCase):
              (1, 2)),
             (Gamma(alpha=torch.Tensor([1]), beta=torch.Tensor([[1]])),
              (1, 1)),
+            (Gumbel(loc=torch.Tensor([0, 0]), scale=1),
+             (2,)),
+            (Gumbel(loc=0, scale=torch.Tensor([1, 1])),
+             (2,)),
+            (Gumbel(loc=torch.Tensor([0, 0]), scale=torch.Tensor([1])),
+             (2,)),
+            (Gumbel(loc=torch.Tensor([0, 0]), scale=torch.Tensor([[1], [1]])),
+             (2, 2)),
+            (Gumbel(loc=torch.Tensor([0, 0]), scale=torch.Tensor([[1]])),
+             (1, 2)),
+            (Gumbel(loc=torch.Tensor([0]), scale=torch.Tensor([[1]])),
+             (1, 1)),
             (Laplace(loc=torch.Tensor([0, 0]), scale=1),
              (2,)),
             (Laplace(loc=0, scale=torch.Tensor([1, 1])),
@@ -869,6 +881,18 @@ class TestDistributions(TestCase):
             (Laplace(loc=torch.Tensor([0, 0]), scale=torch.Tensor([[1]])),
              (1, 2)),
             (Laplace(loc=torch.Tensor([0]), scale=torch.Tensor([[1]])),
+             (1, 1)),
+            (Pareto(scale=torch.Tensor([1, 1]), alpha=1),
+             (2,)),
+            (Pareto(scale=1, alpha=torch.Tensor([1, 1])),
+             (2,)),
+            (Pareto(scale=torch.Tensor([1, 1]), alpha=torch.Tensor([1])),
+             (2,)),
+            (Pareto(scale=torch.Tensor([1, 1]), alpha=torch.Tensor([[1], [1]])),
+             (2, 2)),
+            (Pareto(scale=torch.Tensor([1, 1]), alpha=torch.Tensor([[1]])),
+             (1, 2)),
+            (Pareto(scale=torch.Tensor([1]), alpha=torch.Tensor([[1]])),
              (1, 1)),
             (StudentT(df=torch.Tensor([1, 1]), loc=1),
              (2,)),
@@ -901,6 +925,14 @@ class TestDistributions(TestCase):
                 'mean': torch.Tensor([[[0, 0, 0], [0, 0, 0]]]),
                 'std': torch.Tensor([1, 1])
             }),
+            (Gumbel, {
+                'loc': torch.Tensor([[0, 0]]),
+                'scale': torch.Tensor([1, 1, 1, 1])
+            }),
+            (Gumbel, {
+                'loc': torch.Tensor([[[0, 0, 0], [0, 0, 0]]]),
+                'scale': torch.Tensor([1, 1])
+            }),
             (Gamma, {
                 'alpha': torch.Tensor([0, 0]),
                 'beta': torch.Tensor([1, 1, 1])
@@ -908,6 +940,14 @@ class TestDistributions(TestCase):
             (Laplace, {
                 'loc': torch.Tensor([0, 0]),
                 'scale': torch.Tensor([1, 1, 1])
+            }),
+            (Pareto, {
+                'scale': torch.Tensor([1, 1]),
+                'alpha': torch.Tensor([1, 1, 1])
+            }),
+            (Pareto, {
+                'scale': torch.Tensor([1, 1]),
+                'alpha': torch.Tensor([1, 1, 1])
             }),
             (StudentT, {
                 'df': torch.Tensor([1, 1]),
@@ -1413,22 +1453,107 @@ class TestDistributionShapes(TestCase):
 
 class TestKL(TestCase):
     def setUp(self):
-        self.examples = [
-            (Gamma(1, 2), Gamma(3, 4)),
+        self.finite_examples = [
+            (Bernoulli(0.7), Bernoulli(0.3)),
+            (Beta(1, 2), Beta(3, 4)),
+            (Beta(1, 2), Chi2(3)),
+            (Beta(1, 2), Exponential(3)),
+            (Beta(1, 2), Gamma(3, 4)),
+            (Beta(1, 2), Normal(-3, 4)),
             (Chi2(2), Chi2(3)),
-            (Gamma(1, 2), Chi2(3)),
             (Chi2(2), Gamma(3, 4)),
+            (Chi2(2), Exponential(3)),
+            (Dirichlet(torch.Tensor([1, 2])), Dirichlet(torch.Tensor([3, 4]))),
+            (Exponential(1), Chi2(2)),
+            (Exponential(1), Exponential(2)),
+            (Exponential(1), Gamma(2, 3)),
+            (Exponential(1), Gumbel(-2, 3)),
+            (Exponential(2), Normal(-3, 4)),
+            (Gamma(1, 2), Chi2(3)),
+            (Gamma(1, 2), Exponential(3)),
+            (Gamma(1, 2), Gamma(3, 4)),
+            (Gamma(1, 2), Gumbel(-3, 4)),
+            (Gumbel(-1, 2), Gumbel(-3, 4)),
+            (Gumbel(-1, 2), Normal(-3, 4)),  # This case fails for n <= 22000
+            (Laplace(1, 2), Laplace(-3, 4)),
+            (Laplace(-1, 2), Normal(-3, 4)),
+            (Normal(-1, 2), Gumbel(-3, 4)),
+            (Normal(1, 2), Normal(-3, 4)),
+            (Pareto(1, 2), Chi2(3)),
+            (Pareto(1, 2), Exponential(3)),  # This case fails for n <= 22000
+            (Pareto(1, 2), Gamma(3, 4)),  # This case fails for n <= 22000
+            (Pareto(1, 2), Laplace(-3, 4)),
+            (Pareto(1, 2), Laplace(3, 4)),
+            (Pareto(1, 3), Normal(-2, 4)),
+            (Uniform(0.25, 0.75), Beta(3, 4)),
+            (Uniform(1, 2), Chi2(3)),
+            (Uniform(1, 2), Exponential(3)),
+            (Uniform(1, 2), Gamma(3, 4)),
+            (Uniform(-1, 2), Gumbel(-3, 4)),
+            (Uniform(-1, 2), Normal(-3, 4)),
+            (Uniform(2, 3), Pareto(1, 4))
+        ]
+
+        self.infinite_examples = [
+            (Beta(1, 2), Uniform(0.25, 1)),
+            (Beta(1, 2), Uniform(0, 0.75)),
+            (Beta(1, 2), Uniform(0.25, 0.75)),
+            (Beta(1, 2), Pareto(1, 2)),
+            (Chi2(1), Beta(2, 3)),
+            (Chi2(1), Pareto(2, 3)),
+            (Chi2(1), Uniform(-2, 3)),
+            (Exponential(1), Beta(2, 3)),
+            (Exponential(1), Pareto(2, 3)),
+            (Exponential(1), Uniform(-2, 3)),
+            (Gamma(1, 2), Beta(3, 4)),
+            (Gamma(1, 2), Pareto(3, 4)),
+            (Gamma(1, 2), Uniform(-3, 4)),
+            (Gumbel(-1, 2), Beta(3, 4)),
+            (Gumbel(-1, 2), Chi2(3)),
+            (Gumbel(-1, 2), Exponential(3)),
+            (Gumbel(-1, 2), Gamma(3, 4)),
+            (Gumbel(-1, 2), Pareto(3, 4)),
+            (Gumbel(-1, 2), Uniform(-3, 4)),
+            (Laplace(-1, 2), Beta(3, 4)),
+            (Laplace(-1, 2), Chi2(3)),
+            (Laplace(-1, 2), Exponential(3)),
+            (Laplace(-1, 2), Gamma(3, 4)),
+            (Laplace(-1, 2), Pareto(3, 4)),
+            (Laplace(-1, 2), Uniform(-3, 4)),
+            (Normal(-1, 2), Beta(3, 4)),
+            (Normal(-1, 2), Chi2(3)),
+            (Normal(-1, 2), Exponential(3)),
+            (Normal(-1, 2), Gamma(3, 4)),
+            (Normal(-1, 2), Pareto(3, 4)),
+            (Normal(-1, 2), Uniform(-3, 4)),
+            (Pareto(2, 1), Chi2(3)),
+            (Pareto(2, 1), Exponential(3)),
+            (Pareto(2, 1), Gamma(3, 4)),
+            (Pareto(1, 2), Normal(-3, 4)),
+            (Pareto(1, 2), Pareto(3, 4)),
+            (Uniform(-1, 1), Beta(2, 2)),
+            (Uniform(0, 2), Beta(3, 4)),
+            (Uniform(-1, 2), Beta(3, 4)),
+            (Uniform(-1, 2), Chi2(3)),
+            (Uniform(-1, 2), Exponential(3)),
+            (Uniform(-1, 2), Gamma(3, 4)),
+            (Uniform(-1, 2), Pareto(3, 4)),
         ]
 
     def test_kl_monte_carlo(self):
         set_rng_seed(0)  # see Note [Randomized statistical tests]
-        for p, q in self.examples:
-            x = p.sample(sample_shape=(10000,))
+        for p, q in self.finite_examples:
+            x = p.sample(sample_shape=(23000,))
             expected = (p.log_prob(x) - q.log_prob(x)).mean(0)
             actual = kl_divergence(p, q)
             message = 'Incorrect KL({}, {}). expected {}, actual {}'.format(
                 type(p).__name__, type(q).__name__, expected, actual)
             self.assertEqual(expected, actual, prec=0.1, message=message)
+
+    def test_kl_infinite(self):
+        for p, q in self.infinite_examples:
+            self.assertTrue((kl_divergence(p, q) == float('inf')).all(),
+                            'Incorrect KL({}, {})'.format(type(p).__name__, type(q).__name__))
 
     def test_entropy_monte_carlo(self):
         set_rng_seed(0)  # see Note [Randomized statistical tests]
