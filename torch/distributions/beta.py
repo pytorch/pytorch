@@ -52,16 +52,16 @@ class Beta(Distribution):
 
     @property
     def alpha(self):
-        result = self._dirichlet.alpha.index_select(-1, torch.LongTensor([0]))
-        if self._batch_shape == torch.Size([]):
-            return result
+        result = self._dirichlet.alpha[..., 0]
+        if isinstance(result, Number):
+            return torch.Tensor([result])
         else:
-            return result.view(self._batch_shape)
+            return result
 
     @property
     def beta(self):
-        result = self._dirichlet.alpha.index_select(-1, torch.LongTensor([1]))
-        if self._batch_shape == torch.Size([]):
-            return result
+        result = self._dirichlet.alpha[..., 1]
+        if isinstance(result, Number):
+            return torch.Tensor([result])
         else:
-            return result.view(self._batch_shape)
+            return result
