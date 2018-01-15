@@ -13,7 +13,7 @@ class Binomial(Distribution):
     Creates a Binomial distribution parameterized by `total_count` and
     either `probs` or `logits` (but not both).
 
-    -   :meth:`sample` requires a single shared `total_count` for all
+    -   Requires a single shared `total_count` for all
         parameters and samples.
 
     Example::
@@ -27,9 +27,9 @@ class Binomial(Distribution):
         [torch.FloatTensor of size 4]]
 
     Args:
-        total_count (int): number of trials
-        probs (Tensor or Variable): event probabilities
-        logits (Tensor or Variable): event log probabilities
+        total_count (int): number of Bernoulli trials
+        probs (Tensor or Variable): Event probabilities
+        logits (Tensor or Variable): Event log-odds
     """
     params = {'probs': constraints.unit_interval}
     has_enumerate_support = True

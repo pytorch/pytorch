@@ -10,7 +10,7 @@ from torch.nn.functional import binary_cross_entropy_with_logits
 
 class Bernoulli(Distribution):
     r"""
-    Creates a Bernoulli distribution parameterized by `probs`.
+    Creates a Bernoulli distribution parameterized by `probs` or `logits`.
 
     Samples are binary (0 or 1). They take the value `1` with probability `p`
     and `0` with probability `1 - p`.
@@ -24,6 +24,7 @@ class Bernoulli(Distribution):
 
     Args:
         probs (Number, Tensor or Variable): the probabilty of sampling `1`
+        logits (Number, Tensor or Variable): the log-odds of sampling `1`
     """
     params = {'probs': constraints.unit_interval}
     support = constraints.boolean
