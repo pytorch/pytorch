@@ -4893,15 +4893,22 @@ new_module_tests = [
         input_size=(1, 3, 7),
     ),
     dict(
-        module_name='LocalResponseNorm2d',
+        module_name='LocalResponseNorm',
         constructor_args=(3, ),
-        input_size=(1, 5, 7, 7)
+        input_size=(1, 5, 7),
+        desc='1d'
     ),
     dict(
-        module_name='LocalResponseNorm2d',
-        constructor_args=(1, 1, 0.5, 2),
+        module_name='LocalResponseNorm',
+        constructor_args=(2, ),
         input_size=(1, 5, 7, 7),
-        desc='custom_params'
+        desc='2d_uneven_pad'
+    ),
+    dict(
+        module_name='LocalResponseNorm',
+        constructor_args=(1, 1, 0.5, 2),
+        input_size=(1, 5, 7, 7, 7),
+        desc='3d_custom_params'
     ),
     dict(
         module_name='ReflectionPad1d',

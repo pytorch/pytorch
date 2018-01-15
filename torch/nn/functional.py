@@ -1154,9 +1154,29 @@ def batch_norm(input, running_mean, running_var, weight=None, bias=None,
 
 
 def local_response_norm(input, size, alpha=1e-4, beta=0.75, k=1):
-    div = avg_pool3d(input.pow(2).unsqueeze(1), (size, 1, 1),
-                     stride=1, padding=(size // 2, 0, 0)).squeeze(1)
-    div.mul_(alpha).add_(k).pow_(beta)
+    """Applies local response normalization over an input signal composed of
+    several input planes.
+
+    See :class:`~torch.nn.LocalResponseNorm` for details.
+    """
+    dim = input.dim()
+    if dim < 3 or dim > 5:
+        raise ValueError('Expected {3,4,5}D input (got {} dimensions)'
+                         .format(dim))
+    div = input.mul(input).unsqueeze(1)
+    if dim == 3:
+        div = pad(div, (0, 0, size // 2, (size - 1) // 2))
+        div = avg_pool2d(div, (size, 1), stride=1).squeeze(1)
+    elif dim == 4:
+        div = pad(div, (0, 0, 0, 0, size // 2, (size - 1) // 2))
+        div = avg_pool3d(div, (size, 1, 1), stride=1).squeeze(1)
+    elif dim == 5:
+        sizes = input.size()
+        div = div.view(sizes[0], 1, sizes[1], sizes[2], sizes[3] * sizes[4])
+        div = pad(div, (0, 0, 0, 0, size // 2, (size - 1) // 2))
+        div = avg_pool3d(div, (size, 1, 1), stride=1).squeeze(1)
+        div = div.view(sizes[0], sizes[1], sizes[2], sizes[3], sizes[4])
+    div = div.mul(input.size(1)).mul(alpha).add(k).pow(beta)
     return input / div
 
 
