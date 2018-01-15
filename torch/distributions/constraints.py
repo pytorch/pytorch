@@ -14,6 +14,7 @@ __all__ = [
     'lower_triangular',
     'nonnegative_integer',
     'positive',
+    'positive_integer',
     'real',
     'simplex',
     'unit_interval',
@@ -74,14 +75,6 @@ class _Boolean(Constraint):
         return (value == 0) | (value == 1)
 
 
-class _NonnegativeInteger(Constraint):
-    """
-    Constrain to non-negative integers `{0, 1, 2, ...}`.
-    """
-    def check(self, value):
-        return (value % 1 == 0) & (value >= 0)
-
-
 class _IntegerInterval(Constraint):
     """
     Constrain to an integer interval `[lower_bound, upper_bound]`.
@@ -92,6 +85,28 @@ class _IntegerInterval(Constraint):
 
     def check(self, value):
         return (value % 1 == 0) & (self.lower_bound <= value) & (value <= self.upper_bound)
+
+
+class _IntegerLessThan(Constraint):
+    """
+    Constrain to an integer interval `(-inf, upper_bound]`.
+    """
+    def __init__(self, upper_bound):
+        self.upper_bound = upper_bound
+
+    def check(self, value):
+        return (value % 1 == 0) & (value <= self.upper_bound)
+
+
+class _IntegerGreaterThan(Constraint):
+    """
+    Constrain to an integer interval `[lower_bound, inf)`.
+    """
+    def __init__(self, lower_bound):
+        self.lower_bound = lower_bound
+
+    def check(self, value):
+        return (value % 1 == 0) & (value >= self.lower_bound)
 
 
 class _Real(Constraint):
@@ -157,7 +172,8 @@ class _LowerTriangular(Constraint):
 dependent = _Dependent()
 dependent_property = _DependentProperty
 boolean = _Boolean()
-nonnegative_integer = _NonnegativeInteger()
+nonnegative_integer = _IntegerGreaterThan(0)
+positive_integer = _IntegerGreaterThan(1)
 integer_interval = _IntegerInterval
 real = _Real()
 positive = _GreaterThan(0)

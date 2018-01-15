@@ -61,6 +61,12 @@ Probability distributions - torch.distributions
 .. autoclass:: Gamma
     :members:
 
+:hidden:`Geometric`
+~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: Geometric
+    :members:
+
 :hidden:`Gumbel`
 ~~~~~~~~~~~~~~~~
 
