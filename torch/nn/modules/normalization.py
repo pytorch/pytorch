@@ -4,7 +4,8 @@ from .. import functional as F
 
 class LocalResponseNorm(Module):
     def __init__(self, size, alpha=1e-4, beta=0.75, k=1):
-        r"""Applies local response normalization:
+        r"""Applies local response normalization to a 3D or higher dimensional
+        signal, where channels occupy the second dimension:
 
         .. math::
 
@@ -18,14 +19,14 @@ class LocalResponseNorm(Module):
             k: additive factor
 
         Shape:
-            - Input: :math:`(N, C, L)` or :math:`(N, C, H, W)`
-              or :math:`(N, C, D, H, W)`
-            - Output: :math:`(N, C, L)` or :math:`(N, C, H, W)`
-              or :math:`(N, C, D, H, W)` (same shape as input)
+            - Input: :math:`(N, C, ...)`
+            - Output: :math:`(N, C, ...)` (same shape as input)
         Examples::
             >>> lrn = nn.LocalResponseNorm(2)
-            >>> input = autograd.Variable(torch.randn(32, 5, 24, 24))
-            >>> output = lrn(input)
+            >>> 2d_signal = autograd.Variable(torch.randn(32, 5, 24, 24))
+            >>> 4d_signal = autograd.Variable(torch.randn(16, 5, 7, 7, 7, 7))
+            >>> 2d_output = lrn(2d_signal)
+            >>> 4d_output = lrn(4d_signal)
         """
         super(LocalResponseNorm, self).__init__()
         self.size = size

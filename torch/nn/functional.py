@@ -1160,22 +1160,19 @@ def local_response_norm(input, size, alpha=1e-4, beta=0.75, k=1):
     See :class:`~torch.nn.LocalResponseNorm` for details.
     """
     dim = input.dim()
-    if dim < 3 or dim > 5:
-        raise ValueError('Expected {3,4,5}D input (got {} dimensions)'
-                         .format(dim))
+    if dim < 3:
+        raise ValueError('Expected 3D or higher dimensionality \
+                         input (got {} dimensions)'.format(dim))
     div = input.mul(input).unsqueeze(1)
     if dim == 3:
         div = pad(div, (0, 0, size // 2, (size - 1) // 2))
         div = avg_pool2d(div, (size, 1), stride=1).squeeze(1)
-    elif dim == 4:
-        div = pad(div, (0, 0, 0, 0, size // 2, (size - 1) // 2))
-        div = avg_pool3d(div, (size, 1, 1), stride=1).squeeze(1)
-    elif dim == 5:
+    else:
         sizes = input.size()
-        div = div.view(sizes[0], 1, sizes[1], sizes[2], sizes[3] * sizes[4])
+        div = div.view(sizes[0], 1, sizes[1], sizes[2], -1)
         div = pad(div, (0, 0, 0, 0, size // 2, (size - 1) // 2))
         div = avg_pool3d(div, (size, 1, 1), stride=1).squeeze(1)
-        div = div.view(sizes[0], sizes[1], sizes[2], sizes[3], sizes[4])
+        div = div.view(sizes)
     div = div.mul(input.size(1)).mul(alpha).add(k).pow(beta)
     return input / div
 
