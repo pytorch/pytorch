@@ -1153,7 +1153,15 @@ def batch_norm(input, running_mean, running_var, weight=None, bias=None,
     )
 
 
+def local_response_norm(input, size, alpha=1e-4, beta=0.75, k=1):
+    div = avg_pool3d(input.pow(2).unsqueeze(1), (size, 1, 1),
+                     stride=1, padding=(size // 2, 0, 0)).squeeze(1)
+    div.mul_(alpha).add_(k).pow_(beta)
+    return input / div
+
+
 # loss
+
 
 def nll_loss(input, target, weight=None, size_average=True, ignore_index=-100, reduce=True):
     r"""The negative log likelihood loss.
