@@ -1155,7 +1155,8 @@ def batch_norm(input, running_mean, running_var, weight=None, bias=None,
 
 def local_response_norm(input, size, alpha=1e-4, beta=0.75, k=1):
     """Applies local response normalization over an input signal composed of
-    several input planes.
+    several input planes, where channels occupy the second dimension.
+    Applies normalization across channels.
 
     See :class:`~torch.nn.LocalResponseNorm` for details.
     """
@@ -1173,7 +1174,7 @@ def local_response_norm(input, size, alpha=1e-4, beta=0.75, k=1):
         div = pad(div, (0, 0, 0, 0, size // 2, (size - 1) // 2))
         div = avg_pool3d(div, (size, 1, 1), stride=1).squeeze(1)
         div = div.view(sizes)
-    div = div.mul(input.size(1)).mul(alpha).add(k).pow(beta)
+    div = div.mul(alpha).add(k).pow(beta)
     return input / div
 
 

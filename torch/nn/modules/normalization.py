@@ -4,19 +4,20 @@ from .. import functional as F
 
 class LocalResponseNorm(Module):
     def __init__(self, size, alpha=1e-4, beta=0.75, k=1):
-        r"""Applies local response normalization to a 3D or higher dimensional
-        signal, where channels occupy the second dimension:
+        r"""Applies local response normalization over an input signal composed
+        of several input planes, where channels occupy the second dimension.
+        Applies normalization across channels.
 
         .. math::
 
-            `b_{c} = a_{c}\left(k + \alpha\sum_{c'=\max(0, c-n/2)}^{\min(N-1,c+n/2)}
-            a_{c'}^2\right)^{-\beta}`
+            `b_{c} = a_{c}\left(k + \frac{\alpha}{n}
+            \sum_{c'=\max(0, c-n/2)}^{\min(N-1,c+n/2)}a_{c'}^2\right)^{-\beta}`
 
         Args:
             size: amount of neighbouring channels used for normalization
-            alpha: multiplicative factor
-            beta: exponenent
-            k: additive factor
+            alpha: multiplicative factor. Default: 0.0001
+            beta: exponent. Default: 0.75
+            k: additive factor. Default: 1
 
         Shape:
             - Input: :math:`(N, C, ...)`
