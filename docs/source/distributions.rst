@@ -55,6 +55,12 @@ Probability distributions - torch.distributions
 .. autoclass:: Exponential
     :members:
 
+:hidden:`FisherSnedecor`
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: FisherSnedecor
+    :members:
+
 :hidden:`Gamma`
 ~~~~~~~~~~~~~~~~~~~~~~~
 

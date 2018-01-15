@@ -31,9 +31,9 @@ import torch
 from common import TestCase, run_tests, set_rng_seed
 from torch.autograd import Variable, grad, gradcheck
 from torch.distributions import (Bernoulli, Beta, Categorical, Cauchy, Chi2,
-                                 Dirichlet, Exponential, Gamma, Gumbel, Laplace,
-                                 Normal, OneHotCategorical, Multinomial, Pareto,
-                                 StudentT, Uniform, kl_divergence)
+                                 Dirichlet, Exponential, FisherSnedecor, Gamma, Gumbel,
+                                 Gamma, Gumbel, Laplace, Normal, OneHotCategorical,
+                                 Multinomial, Pareto, StudentT, Uniform, kl_divergence)
 from torch.distributions.dirichlet import _Dirichlet_backward
 from torch.distributions.constraints import Constraint, is_dependent
 from torch.distributions.utils import _finfo
@@ -701,6 +701,35 @@ class TestDistributions(TestCase):
             self._check_sampler_sampler(Gumbel(loc, scale),
                                         scipy.stats.gumbel_r(loc=loc, scale=scale),
                                         'Gumbel(loc={}, scale={})'.format(loc, scale))
+
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    def test_fishersnedecor_shape(self):
+        df1 = Variable(torch.randn(2, 3).abs(), requires_grad=True)
+        df2 = Variable(torch.randn(2, 3).abs(), requires_grad=True)
+        df1_1d = torch.randn(1).abs()
+        df2_1d = torch.randn(1).abs()
+        self.assertEqual(FisherSnedecor(df1, df2).sample().size(), (2, 3))
+        self.assertEqual(FisherSnedecor(df1, df2).sample_n(5).size(), (5, 2, 3))
+        self.assertEqual(FisherSnedecor(df1_1d, df2_1d).sample().size(), (1,))
+        self.assertEqual(FisherSnedecor(df1_1d, df2_1d).sample_n(1).size(), (1, 1))
+        self.assertEqual(FisherSnedecor(1.0, 1.0).sample().size(), (1,))
+        self.assertEqual(FisherSnedecor(1.0, 1.0).sample_n(1).size(), (1,))
+
+        def ref_log_prob(idx, x, log_prob):
+            f1 = df1.data.view(-1)[idx]
+            f2 = df2.data.view(-1)[idx]
+            expected = scipy.stats.f.logpdf(x, f1, f2)
+            self.assertAlmostEqual(log_prob, expected, places=3)
+
+        self._check_log_prob(FisherSnedecor(df1, df2), ref_log_prob)
+
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    def test_fishersnedecor_sample(self):
+        set_rng_seed(1)  # see note [Randomized statistical tests]
+        for df1, df2 in product([0.1, 0.5, 1.0, 5.0, 10.0], [0.1, 0.5, 1.0, 5.0, 10.0]):
+            self._check_sampler_sampler(FisherSnedecor(df1, df2),
+                                        scipy.stats.f(df1, df2),
+                                        'FisherSnedecor(loc={}, scale={})'.format(df1, df2))
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_chi2_shape(self):
