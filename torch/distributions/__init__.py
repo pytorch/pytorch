@@ -38,6 +38,7 @@ from .chi2 import Chi2
 from .dirichlet import Dirichlet
 from .distribution import Distribution
 from .exponential import Exponential
+from .f import F
 from .gamma import Gamma
 from .gumbel import Gumbel
 from .kl import kl_divergence, register_kl
@@ -58,6 +59,7 @@ __all__ = [
     'Dirichlet',
     'Distribution',
     'Exponential',
+    'F',
     'Gamma',
     'Gumbel',
     'Laplace',
