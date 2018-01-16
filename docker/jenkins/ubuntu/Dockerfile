@@ -45,6 +45,12 @@ ADD ./install_clang.sh install_clang.sh
 RUN if [ -n "${CLANG_VERSION}" ]; then bash ./install_clang.sh; fi
 RUN rm install_clang.sh
 
+# (optional) Install non-default CMake version
+ARG CMAKE_VERSION
+ADD ./install_cmake.sh install_cmake.sh
+RUN if [ -n "${CMAKE_VERSION}" ]; then bash ./install_cmake.sh; fi
+RUN rm install_cmake.sh
+
 # (optional) Add Jenkins user
 ARG JENKINS
 ARG JENKINS_UID
