@@ -1059,7 +1059,7 @@ def embedding(input, weight, padding_idx=None, max_norm=None, norm_type=2,
     if max_norm is not None:
         with torch.no_grad():
             torch._C._VariableBase.embedding_renorm_(weight, input, max_norm, norm_type)
-    return torch._C._VariableBase.embedding(weight, input, padding_idx, scale_grad_by_freq)
+    return torch._C._VariableBase.embedding(weight, input, padding_idx, scale_grad_by_freq, sparse)
 
 
 def embedding_bag(embedding_matrix, indices, offsets=None,
