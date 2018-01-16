@@ -34,7 +34,7 @@ class Embedding(Module):
     Notes:
         Keep in mind that only a limited number of optimizers support
         sparse gradients: currently it's `optim.SGD` (`cuda` and `cpu`),
-        and `optim.Adagrad` (`cpu`)
+        `optim.SparseAdam` (`cuda` and `cpu`) and `optim.Adagrad` (`cpu`)
 
     Examples::
 
