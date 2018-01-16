@@ -158,15 +158,6 @@ def _kl_bernoulli_bernoulli(p, q):
     return t1 + t2
 
 
-@register_kl(Binomial, Binomial)
-def _kl_binomial_binomial(p, q):
-    # from https://math.stackexchange.com/questions/2214993/
-    # kullback-leibler-divergence-for-binomial-distributions-p-and-q
-    if p.total_count != q.total_count:
-        raise(NotImplementedError, 'KL between Binomials with different total_count is not implemented')
-    return p.total_count * (p.probs * (p.logits - q.logits) + (-p.probs).log1p() - (-q.probs).log1p())
-
-
 @register_kl(Beta, Beta)
 def _kl_beta_beta(p, q):
     sum_params_p = p.alpha + p.beta
@@ -177,6 +168,15 @@ def _kl_beta_beta(p, q):
     t4 = (p.beta - q.beta) * torch.digamma(p.beta)
     t5 = (sum_params_q - sum_params_p) * torch.digamma(sum_params_p)
     return t1 - t2 + t3 + t4 + t5
+
+
+@register_kl(Binomial, Binomial)
+def _kl_binomial_binomial(p, q):
+    # from https://math.stackexchange.com/questions/2214993/
+    # kullback-leibler-divergence-for-binomial-distributions-p-and-q
+    if p.total_count != q.total_count:
+        raise NotImplementedError('KL between Binomials with different total_count is not implemented')
+    return p.total_count * (p.probs * (p.logits - q.logits) + (-p.probs).log1p() - (-q.probs).log1p())
 
 
 @register_kl(Dirichlet, Dirichlet)
