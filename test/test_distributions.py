@@ -30,13 +30,13 @@ from itertools import product
 import torch
 from common import TestCase, run_tests, set_rng_seed
 from torch.autograd import Variable, grad, gradcheck
-from torch.distributions import (Bernoulli, Beta, Categorical, Cauchy, Chi2,
+from torch.distributions import (Bernoulli, Beta, Binomial, Categorical, Cauchy, Chi2,
                                  Dirichlet, Exponential, Gamma, Gumbel, Laplace,
                                  Normal, OneHotCategorical, Multinomial, Pareto,
                                  StudentT, Uniform, kl_divergence)
 from torch.distributions.dirichlet import _Dirichlet_backward
 from torch.distributions.constraints import Constraint, is_dependent
-from torch.distributions.utils import _finfo
+from torch.distributions.utils import _finfo, probs_to_logits, logits_to_probs
 
 TEST_NUMPY = True
 try:
@@ -68,6 +68,10 @@ EXAMPLES = [
     Example(Categorical, [
         {'probs': Variable(torch.Tensor([[0.1, 0.2, 0.3], [0.5, 0.3, 0.2]]), requires_grad=True)},
         {'probs': Variable(torch.Tensor([[1.0, 0.0], [0.0, 1.0]]), requires_grad=True)},
+    ]),
+    Example(Binomial, [
+        {'probs': Variable(torch.Tensor([[0.1, 0.2, 0.3], [0.5, 0.3, 0.2]]), requires_grad=True), 'total_count': 10},
+        {'probs': Variable(torch.Tensor([[1.0, 0.0], [0.0, 1.0]]), requires_grad=True), 'total_count': 10},
     ]),
     Example(Multinomial, [
         {'probs': Variable(torch.Tensor([[0.1, 0.2, 0.3], [0.5, 0.3, 0.2]]), requires_grad=True), 'total_count': 10},
@@ -297,6 +301,39 @@ class TestDistributions(TestCase):
         self.assertEqual(Bernoulli(p).sample(sample_shape=(2, 5)).size(),
                          (2, 5, 2, 3, 5))
         self.assertEqual(Bernoulli(p).sample_n(2).size(), (2, 2, 3, 5))
+
+    def test_binomial(self):
+        p = Variable(torch.arange(0.05, 1, 0.1), requires_grad=True)
+        for total_count in [1, 2, 10]:
+            self._gradcheck_log_prob(lambda p: Binomial(total_count, p), [p])
+            self._gradcheck_log_prob(lambda p: Binomial(total_count, None, p.log()), [p])
+        self.assertRaises(NotImplementedError, Binomial(10, p).rsample)
+        self.assertRaises(NotImplementedError, Binomial(10, p).entropy)
+
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    def test_binomial_log_prob(self):
+        probs = Variable(torch.arange(0.05, 1, 0.1))
+        for total_count in [1, 2, 10]:
+
+            def ref_log_prob(idx, x, log_prob):
+                p = probs.data.view(-1)[idx]
+                expected = scipy.stats.binom(total_count, p).logpmf(x)
+                self.assertAlmostEqual(log_prob, expected, places=3)
+
+            self._check_log_prob(Binomial(total_count, probs), ref_log_prob)
+            logits = probs_to_logits(probs, is_binary=True)
+            self._check_log_prob(Binomial(total_count, logits=logits), ref_log_prob)
+
+    def test_binomial_extreme_vals(self):
+        total_count = 100
+        bin0 = Binomial(total_count, 0)
+        self.assertEqual(bin0.sample(), 0)
+        self.assertAlmostEqual(bin0.log_prob(torch.Tensor([0]))[0], 0, places=3)
+        self.assertEqual(bin0.log_prob(torch.Tensor([1])).exp()[0], 0, allow_inf=True)
+        bin1 = Binomial(total_count, 1)
+        self.assertEqual(bin1.sample(), total_count)
+        self.assertAlmostEqual(bin1.log_prob(torch.Tensor([total_count]))[0], 0, places=3)
+        self.assertEqual(bin1.log_prob(torch.Tensor([total_count - 1])).exp()[0], 0, allow_inf=True)
 
     def test_multinomial_1d(self):
         total_count = 10
@@ -1239,6 +1276,15 @@ class TestDistributionShapes(TestCase):
         self.assertRaises(ValueError, dist.log_prob, self.tensor_sample_2)
         self.assertEqual(dist.log_prob(torch.ones(3, 1, 1)).size(), torch.Size((3, 3, 2)))
 
+    def test_binomial_shape(self):
+        dist = Binomial(10, torch.Tensor([0.6, 0.3]))
+        self.assertEqual(dist._batch_shape, torch.Size((2,)))
+        self.assertEqual(dist._event_shape, torch.Size(()))
+        self.assertEqual(dist.sample().size(), torch.Size((2,)))
+        self.assertEqual(dist.sample((3, 2)).size(), torch.Size((3, 2, 2)))
+        self.assertEqual(dist.log_prob(self.tensor_sample_1).size(), torch.Size((3, 2)))
+        self.assertRaises(ValueError, dist.log_prob, self.tensor_sample_2)
+
     def test_multinomial_shape(self):
         dist = Multinomial(10, torch.Tensor([[0.6, 0.3], [0.6, 0.3], [0.6, 0.3]]))
         self.assertEqual(dist._batch_shape, torch.Size((3,)))
@@ -1455,6 +1501,7 @@ class TestKL(TestCase):
     def setUp(self):
         self.finite_examples = [
             (Bernoulli(0.7), Bernoulli(0.3)),
+            (Binomial(30, 0.7), Binomial(30, 0.3)),
             (Beta(1, 2), Beta(3, 4)),
             (Beta(1, 2), Chi2(3)),
             (Beta(1, 2), Exponential(3)),
@@ -1499,6 +1546,7 @@ class TestKL(TestCase):
             (Beta(1, 2), Uniform(0, 0.75)),
             (Beta(1, 2), Uniform(0.25, 0.75)),
             (Beta(1, 2), Pareto(1, 2)),
+            (Binomial(31, 0.7), Binomial(30, 0.3)),
             (Chi2(1), Beta(2, 3)),
             (Chi2(1), Pareto(2, 3)),
             (Chi2(1), Uniform(-2, 3)),
