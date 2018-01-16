@@ -259,7 +259,7 @@ def kldivloss_reference(input, target, size_average=True, reduce=True):
 
 def nlllossNd_reference(input, target, weight=None, ignore_index=-100,
                         size_average=True, reduce=True):
-    assert input.dim() >= 4
+    assert input.dim() >= 3
     N = input.size(0)
     C = input.size(1)
     out_size = (N,) + input.size()[2:]
@@ -848,6 +848,9 @@ class ModuleTest(TestBase):
                     (gpu_input,) + tuple(gpu_module.parameters()),
                     gpu_gradOutput,
                     create_graph=True)
+
+                for cpu_d_i, gpu_d_i in zip(cpu_gradInputs, gpu_gradInputs):
+                    test_case.assertEqual(cpu_d_i, gpu_d_i, 2e-4)
 
                 # We mix output into the second backwards computation so that
                 # torch.autograd.grad doesn't complain that some inputs

@@ -36,13 +36,24 @@ static inline void THNN_(SpatialConvolutionMM_shapeCheck)(
   int64_t inputHeight  = input->size[dimh];
   int64_t inputWidth   = input->size[dimw];
   int64_t nOutputPlane = weight->size[0];
-  int64_t outputHeight = (inputHeight + 2*padH - kH) / dH + 1;
-  int64_t outputWidth  = (inputWidth + 2*padW - kW) / dW + 1;
 
-  if (outputWidth < 1 || outputHeight < 1)
+  int64_t exactInputHeight = inputHeight + 2 * padH;
+  int64_t exactInputWidth = inputWidth + 2 * padW;
+
+  if (exactInputHeight < kH || exactInputWidth < kW) {
+    THError("Calculated input size: (%d x %d). "
+      "Kernel size: (%d x %d). Kernel size can't greater than actual input size",
+      exactInputHeight,exactInputWidth,kH,kW);
+  }
+
+  int64_t outputHeight = (exactInputHeight - kH) / dH + 1;
+  int64_t outputWidth  = (exactInputWidth - kW) / dW + 1;
+
+  if (outputWidth < 1 || outputHeight < 1) {
     THError("Given input size: (%d x %d x %d). "
 	    "Calculated output size: (%d x %d x %d). Output size is too small",
 	    nInputPlane,inputHeight,inputWidth,nOutputPlane,outputHeight,outputWidth);
+  }
 
   THNN_CHECK_DIM_SIZE(input, ndim, dimf, nInputPlane);
 

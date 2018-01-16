@@ -29,13 +29,14 @@ from itertools import product
 
 import torch
 from common import TestCase, run_tests, set_rng_seed
-from torch.autograd import Variable, gradcheck
+from torch.autograd import Variable, grad, gradcheck
 from torch.distributions import (Bernoulli, Beta, Categorical, Cauchy, Chi2,
-                                 Dirichlet, Exponential, Gamma, Gumbel,
-                                 Laplace, Normal, OneHotCategorical, Pareto,
+                                 Dirichlet, Exponential, Gamma, Gumbel, Laplace,
+                                 Normal, OneHotCategorical, Multinomial, Pareto,
                                  StudentT, Uniform, kl_divergence)
+from torch.distributions.dirichlet import _Dirichlet_backward
 from torch.distributions.constraints import Constraint, is_dependent
-from torch.distributions.utils import _get_clamping_buffer
+from torch.distributions.utils import _finfo
 
 TEST_NUMPY = True
 try:
@@ -77,6 +78,10 @@ EXAMPLES = [
     Example(Categorical, [
         {'probs': Variable(torch.Tensor([[0.1, 0.2, 0.3], [0.5, 0.3, 0.2]]), requires_grad=True)},
         {'probs': Variable(torch.Tensor([[1.0, 0.0], [0.0, 1.0]]), requires_grad=True)},
+    ]),
+    Example(Multinomial, [
+        {'probs': Variable(torch.Tensor([[0.1, 0.2, 0.3], [0.5, 0.3, 0.2]]), requires_grad=True), 'total_count': 10},
+        {'probs': Variable(torch.Tensor([[1.0, 0.0], [0.0, 1.0]]), requires_grad=True), 'total_count': 10},
     ]),
     Example(Cauchy, [
         {'loc': 0.0, 'scale': 1.0},
@@ -302,6 +307,53 @@ class TestDistributions(TestCase):
         self.assertEqual(Bernoulli(p).sample(sample_shape=(2, 5)).size(),
                          (2, 5, 2, 3, 5))
         self.assertEqual(Bernoulli(p).sample_n(2).size(), (2, 2, 3, 5))
+
+    def test_multinomial_1d(self):
+        total_count = 10
+        p = Variable(torch.Tensor([0.1, 0.2, 0.3]), requires_grad=True)
+        self.assertEqual(Multinomial(total_count, p).sample().size(), (3,))
+        self.assertEqual(Multinomial(total_count, p).sample((2, 2)).size(), (2, 2, 3))
+        self.assertEqual(Multinomial(total_count, p).sample_n(1).size(), (1, 3))
+        self._gradcheck_log_prob(lambda p: Multinomial(total_count, p), [p])
+        self._gradcheck_log_prob(lambda p: Multinomial(total_count, None, p.log()), [p])
+        self.assertRaises(NotImplementedError, Multinomial(10, p).rsample)
+
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    def test_multinomial_1d_log_prob(self):
+        total_count = 10
+        p = Variable(torch.Tensor([0.1, 0.2, 0.3]), requires_grad=True)
+        dist = Multinomial(total_count, probs=p)
+        x = dist.sample()
+        log_prob = dist.log_prob(x)
+        expected = torch.Tensor(scipy.stats.multinomial.logpmf(x.numpy(), n=total_count, p=dist.probs.detach().numpy()))
+        self.assertEqual(log_prob.data, expected)
+
+        dist = Multinomial(total_count, logits=p.log())
+        x = dist.sample()
+        log_prob = dist.log_prob(x)
+        expected = torch.Tensor(scipy.stats.multinomial.logpmf(x.numpy(), n=total_count, p=dist.probs.detach().numpy()))
+        self.assertEqual(log_prob.data, expected)
+
+    def test_multinomial_2d(self):
+        total_count = 10
+        probabilities = [[0.1, 0.2, 0.3], [0.5, 0.3, 0.2]]
+        probabilities_1 = [[1.0, 0.0], [0.0, 1.0]]
+        p = Variable(torch.Tensor(probabilities), requires_grad=True)
+        s = Variable(torch.Tensor(probabilities_1), requires_grad=True)
+        self.assertEqual(Multinomial(total_count, p).sample().size(), (2, 3))
+        self.assertEqual(Multinomial(total_count, p).sample(sample_shape=(3, 4)).size(), (3, 4, 2, 3))
+        self.assertEqual(Multinomial(total_count, p).sample_n(6).size(), (6, 2, 3))
+        set_rng_seed(0)
+        self._gradcheck_log_prob(lambda p: Multinomial(total_count, p), [p])
+        p.grad.zero_()
+        self._gradcheck_log_prob(lambda p: Multinomial(total_count, None, p.log()), [p])
+
+        # sample check for extreme value of probs
+        self.assertEqual(Multinomial(total_count, s).sample().data,
+                         torch.Tensor([[total_count, 0], [0, total_count]]))
+
+        # check entropy computation
+        self.assertRaises(NotImplementedError, Multinomial(10, p).entropy)
 
     def test_categorical_1d(self):
         p = Variable(torch.Tensor([0.1, 0.2, 0.3]), requires_grad=True)
@@ -603,35 +655,6 @@ class TestDistributions(TestCase):
                                         'Gamma(alpha={}, beta={})'.format(alpha, beta))
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
-    def test_gamma_sample_grad(self):
-        set_rng_seed(1)  # see Note [Randomized statistical tests]
-        num_samples = 100
-        for alpha in [1e-3, 1e-2, 1e-1, 1e0, 1e1, 1e2, 1e3, 1e4]:
-            alphas = Variable(torch.FloatTensor([alpha] * num_samples), requires_grad=True)
-            betas = Variable(torch.ones(num_samples).type_as(alphas))
-            x = Gamma(alphas, betas).rsample()
-            x.sum().backward()
-            x, ind = x.data.sort()
-            x = x.numpy()
-            actual_grad = alphas.grad.data[ind].numpy()
-            # Compare with expected gradient dx/dalpha along constant cdf(x,alpha).
-            cdf = scipy.stats.gamma.cdf
-            pdf = scipy.stats.gamma.pdf
-            eps = 0.01 * alpha / (1.0 + alpha ** 0.5)
-            cdf_alpha = (cdf(x, alpha + eps) - cdf(x, alpha - eps)) / (2 * eps)
-            cdf_x = pdf(x, alpha)
-            expected_grad = -cdf_alpha / cdf_x
-            rel_error = np.abs(actual_grad - expected_grad) / (expected_grad + 1e-30)
-            self.assertLess(np.max(rel_error), 0.0005,
-                            '\n'.join(['Bad gradients for Gamma({}, 1)'.format(alpha),
-                                       'x {}'.format(x),
-                                       'expected {}'.format(expected_grad),
-                                       'actual {}'.format(actual_grad),
-                                       'rel error {}'.format(rel_error),
-                                       'max error {}'.format(rel_error.max()),
-                                       'at alpha={}, x={}'.format(alpha, x[rel_error.argmax()])]))
-
-    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_pareto_shape(self):
         scale = Variable(torch.randn(2, 3).abs(), requires_grad=True)
         alpha = Variable(torch.randn(2, 3).abs(), requires_grad=True)
@@ -715,33 +738,6 @@ class TestDistributions(TestCase):
                                         scipy.stats.chi2(df),
                                         'Chi2(df={})'.format(df))
 
-    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
-    def test_chi2_sample_grad(self):
-        set_rng_seed(0)  # see Note [Randomized statistical tests]
-        num_samples = 100
-        for df in [1e-3, 1e-2, 1e-1, 1e0, 1e1, 1e2, 1e3, 1e4]:
-            dfs = Variable(torch.Tensor([df] * num_samples), requires_grad=True)
-            x = Chi2(dfs).rsample()
-            x.sum().backward()
-            x, ind = x.data.sort()
-            x = x.numpy()
-            actual_grad = dfs.grad.data[ind].numpy()
-            # Compare with expected gradient dx/ddf along constant cdf(x,df).
-            cdf = scipy.stats.chi2.cdf
-            pdf = scipy.stats.chi2.pdf
-            eps = 0.02 * df if df < 100 else 0.02 * df ** 0.5
-            cdf_df = (cdf(x, df + eps) - cdf(x, df - eps)) / (2 * eps)
-            cdf_x = pdf(x, df)
-            expected_grad = -cdf_df / cdf_x
-            rel_error = np.abs(actual_grad - expected_grad) / (expected_grad + 1e-100)
-            self.assertLess(np.max(rel_error), 0.005,
-                            '\n'.join(['Bad gradients for Chi2({})'.format(df),
-                                       'x {}'.format(x),
-                                       'expected {}'.format(expected_grad),
-                                       'actual {}'.format(actual_grad),
-                                       'rel error {}'.format(rel_error),
-                                       'max error {}'.format(rel_error.max())]))
-
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_studentT_shape(self):
         df = Variable(torch.exp(torch.randn(2, 3)), requires_grad=True)
@@ -779,8 +775,6 @@ class TestDistributions(TestCase):
             for i in range(num_samples):
                 expected_log_prob = scipy.stats.t.logpdf(x[i], df=df, loc=loc, scale=scale)
                 self.assertAlmostEqual(actual_log_prob[i], expected_log_prob, places=3)
-
-    # TODO: add test_studentT_sample_grad once standard_t_grad() is implemented
 
     def test_dirichlet_shape(self):
         alpha = Variable(torch.exp(torch.randn(2, 3)), requires_grad=True)
@@ -844,35 +838,6 @@ class TestDistributions(TestCase):
         for Tensor in [torch.FloatTensor, torch.DoubleTensor]:
             x = Beta(Tensor([1e-6]), Tensor([1e-6])).sample()[0]
             self.assertTrue(np.isfinite(x) and x > 0, 'Invalid Beta.sample(): {}'.format(x))
-
-    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
-    def test_beta_sample_grad(self):
-        set_rng_seed(0)  # see Note [Randomized statistical tests]
-        num_samples = 20
-        grid = [1e-2, 1e-1, 1e0, 1e1, 1e2]
-        for alpha, beta in product(grid, grid):
-            alphas = Variable(torch.FloatTensor([alpha] * num_samples), requires_grad=True)
-            betas = Variable(torch.FloatTensor([beta] * num_samples).type_as(alphas))
-            x = Beta(alphas, betas).rsample()
-            x.sum().backward()
-            x, ind = x.data.sort()
-            x = x.numpy()
-            actual_grad = alphas.grad.data[ind].numpy()
-            # Compare with expected gradient dx/dalpha along constant cdf(x,alpha,beta).
-            cdf = scipy.stats.beta.cdf
-            pdf = scipy.stats.beta.pdf
-            eps = 0.01 * alpha / (1.0 + np.sqrt(alpha))
-            cdf_alpha = (cdf(x, alpha + eps, beta) - cdf(x, alpha - eps, beta)) / (2 * eps)
-            cdf_x = pdf(x, alpha, beta)
-            expected_grad = -cdf_alpha / cdf_x
-            rel_error = np.abs(actual_grad - expected_grad) / (expected_grad + 1e-100)
-            self.assertLess(np.max(rel_error), 0.001,
-                            '\n'.join(['Bad gradients for Beta({}, {})'.format(alpha, beta),
-                                       'x {}'.format(x),
-                                       'expected {}'.format(expected_grad),
-                                       'actual {}'.format(actual_grad),
-                                       'rel error {}'.format(rel_error),
-                                       'max error {}'.format(rel_error.max())]))
 
     def test_valid_parameter_broadcasting(self):
         # Test correct broadcasting of parameter sizes for distributions that have multiple
@@ -1008,6 +973,219 @@ class TestDistributions(TestCase):
             self.assertRaises(RuntimeError, dist, **kwargs)
 
 
+# These tests are only needed for a few distributions that implement custom
+# reparameterized gradients. Most .rsample() implementations simply rely on
+# the reparameterization trick and do not need to be tested for accuracy.
+class TestRsample(TestCase):
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    def test_gamma(self):
+        num_samples = 100
+        for alpha in [1e-2, 1e-1, 1e0, 1e1, 1e2, 1e3, 1e4]:
+            alphas = Variable(torch.FloatTensor([alpha] * num_samples), requires_grad=True)
+            betas = Variable(torch.ones(num_samples).type_as(alphas))
+            x = Gamma(alphas, betas).rsample()
+            x.sum().backward()
+            x, ind = x.data.sort()
+            x = x.numpy()
+            actual_grad = alphas.grad.data[ind].numpy()
+            # Compare with expected gradient dx/dalpha along constant cdf(x,alpha).
+            cdf = scipy.stats.gamma.cdf
+            pdf = scipy.stats.gamma.pdf
+            eps = 0.01 * alpha / (1.0 + alpha ** 0.5)
+            cdf_alpha = (cdf(x, alpha + eps) - cdf(x, alpha - eps)) / (2 * eps)
+            cdf_x = pdf(x, alpha)
+            expected_grad = -cdf_alpha / cdf_x
+            rel_error = np.abs(actual_grad - expected_grad) / (expected_grad + 1e-30)
+            self.assertLess(np.max(rel_error), 0.0005, '\n'.join([
+                'Bad gradient dx/alpha for x ~ Gamma({}, 1)'.format(alpha),
+                'x {}'.format(x),
+                'expected {}'.format(expected_grad),
+                'actual {}'.format(actual_grad),
+                'rel error {}'.format(rel_error),
+                'max error {}'.format(rel_error.max()),
+                'at alpha={}, x={}'.format(alpha, x[rel_error.argmax()]),
+            ]))
+
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    def test_chi2(self):
+        num_samples = 100
+        for df in [1e-2, 1e-1, 1e0, 1e1, 1e2, 1e3, 1e4]:
+            dfs = Variable(torch.FloatTensor([df] * num_samples), requires_grad=True)
+            x = Chi2(dfs).rsample()
+            x.sum().backward()
+            x, ind = x.data.sort()
+            x = x.numpy()
+            actual_grad = dfs.grad.data[ind].numpy()
+            # Compare with expected gradient dx/ddf along constant cdf(x,df).
+            cdf = scipy.stats.chi2.cdf
+            pdf = scipy.stats.chi2.pdf
+            eps = 0.01 * df / (1.0 + df ** 0.5)
+            cdf_df = (cdf(x, df + eps) - cdf(x, df - eps)) / (2 * eps)
+            cdf_x = pdf(x, df)
+            expected_grad = -cdf_df / cdf_x
+            rel_error = np.abs(actual_grad - expected_grad) / (expected_grad + 1e-30)
+            self.assertLess(np.max(rel_error), 0.001, '\n'.join([
+                'Bad gradient dx/ddf for x ~ Chi2({})'.format(df),
+                'x {}'.format(x),
+                'expected {}'.format(expected_grad),
+                'actual {}'.format(actual_grad),
+                'rel error {}'.format(rel_error),
+                'max error {}'.format(rel_error.max()),
+            ]))
+
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    def test_dirichlet_on_diagonal(self):
+        num_samples = 20
+        grid = [1e-1, 1e0, 1e1]
+        for a0, a1, a2 in product(grid, grid, grid):
+            alphas = Variable(torch.FloatTensor([[a0, a1, a2]] * num_samples), requires_grad=True)
+            x = Dirichlet(alphas).rsample()[:, 0]
+            x.sum().backward()
+            x, ind = x.data.sort()
+            x = x.numpy()
+            actual_grad = alphas.grad.data[ind].numpy()[:, 0]
+            # Compare with expected gradient dx/dalpha0 along constant cdf(x,alpha).
+            # This reduces to a distribution Beta(alpha[0], alpha[1] + alpha[2]).
+            cdf = scipy.stats.beta.cdf
+            pdf = scipy.stats.beta.pdf
+            alpha, beta = a0, a1 + a2
+            eps = 0.01 * alpha / (1.0 + np.sqrt(alpha))
+            cdf_alpha = (cdf(x, alpha + eps, beta) - cdf(x, alpha - eps, beta)) / (2 * eps)
+            cdf_x = pdf(x, alpha, beta)
+            expected_grad = -cdf_alpha / cdf_x
+            rel_error = np.abs(actual_grad - expected_grad) / (expected_grad + 1e-30)
+            self.assertLess(np.max(rel_error), 0.001, '\n'.join([
+                'Bad gradient dx[0]/dalpha[0] for Dirichlet([{}, {}, {}])'.format(a0, a1, a2),
+                'x {}'.format(x),
+                'expected {}'.format(expected_grad),
+                'actual {}'.format(actual_grad),
+                'rel error {}'.format(rel_error),
+                'max error {}'.format(rel_error.max()),
+                'at x={}'.format(x[rel_error.argmax()]),
+            ]))
+
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    def test_beta_wrt_alpha(self):
+        num_samples = 20
+        grid = [1e-2, 1e-1, 1e0, 1e1, 1e2]
+        for alpha, beta in product(grid, grid):
+            alphas = Variable(torch.FloatTensor([alpha] * num_samples), requires_grad=True)
+            betas = Variable(torch.FloatTensor([beta] * num_samples).type_as(alphas))
+            x = Beta(alphas, betas).rsample()
+            x.sum().backward()
+            x, ind = x.data.sort()
+            x = x.numpy()
+            actual_grad = alphas.grad.data[ind].numpy()
+            # Compare with expected gradient dx/dalpha along constant cdf(x,alpha,beta).
+            cdf = scipy.stats.beta.cdf
+            pdf = scipy.stats.beta.pdf
+            eps = 0.01 * alpha / (1.0 + np.sqrt(alpha))
+            cdf_alpha = (cdf(x, alpha + eps, beta) - cdf(x, alpha - eps, beta)) / (2 * eps)
+            cdf_x = pdf(x, alpha, beta)
+            expected_grad = -cdf_alpha / cdf_x
+            rel_error = np.abs(actual_grad - expected_grad) / (expected_grad + 1e-30)
+            self.assertLess(np.max(rel_error), 0.005, '\n'.join([
+                'Bad gradient dx/dalpha for x ~ Beta({}, {})'.format(alpha, beta),
+                'x {}'.format(x),
+                'expected {}'.format(expected_grad),
+                'actual {}'.format(actual_grad),
+                'rel error {}'.format(rel_error),
+                'max error {}'.format(rel_error.max()),
+                'at x = {}'.format(x[rel_error.argmax()]),
+            ]))
+
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    def test_beta_wrt_beta(self):
+        num_samples = 20
+        grid = [1e-2, 1e-1, 1e0, 1e1, 1e2]
+        for alpha, beta in product(grid, grid):
+            betas = Variable(torch.FloatTensor([beta] * num_samples), requires_grad=True)
+            alphas = Variable(torch.FloatTensor([alpha] * num_samples).type_as(betas))
+            x = Beta(alphas, betas).rsample()
+            x.sum().backward()
+            x, ind = x.data.sort()
+            x = x.numpy()
+            actual_grad = betas.grad.data[ind].numpy()
+            # Compare with expected gradient dx/dbeta along constant cdf(x,alpha,beta).
+            cdf = scipy.stats.beta.cdf
+            pdf = scipy.stats.beta.pdf
+            eps = 0.01 * beta / (1.0 + np.sqrt(beta))
+            cdf_beta = (cdf(x, alpha, beta + eps) - cdf(x, alpha, beta - eps)) / (2 * eps)
+            cdf_x = pdf(x, alpha, beta)
+            expected_grad = -cdf_beta / cdf_x
+            rel_error = np.abs(actual_grad - expected_grad) / (expected_grad + 1e-30)
+            self.assertLess(np.max(rel_error), 0.005, '\n'.join([
+                'Bad gradient dx/dbeta for x ~ Beta({}, {})'.format(alpha, beta),
+                'x {}'.format(x),
+                'expected {}'.format(expected_grad),
+                'actual {}'.format(actual_grad),
+                'rel error {}'.format(rel_error),
+                'max error {}'.format(rel_error.max()),
+                'at x = {!r}'.format(x[rel_error.argmax()]),
+            ]))
+
+    def test_dirichlet_multivariate(self):
+        alpha_crit = 0.25 * (5.0 ** 0.5 - 1.0)
+        num_samples = 100000
+        for shift in [-0.1, -0.05, -0.01, 0.0, 0.01, 0.05, 0.10]:
+            alpha = alpha_crit + shift
+            alpha = Variable(torch.FloatTensor([alpha]), requires_grad=True)
+            alpha_vec = torch.cat([alpha, alpha, alpha.new([1])])
+            z = Dirichlet(alpha_vec.expand(num_samples, 3)).rsample()
+            mean_z3 = 1.0 / (2.0 * alpha + 1.0)
+            loss = torch.pow(z[:, 2] - mean_z3, 2.0).mean()
+            actual_grad = grad(loss, [alpha])[0].data
+            # Compute expected gradient by hand.
+            num = 1.0 - 2.0 * alpha - 4.0 * alpha**2
+            den = (1.0 + alpha)**2 * (1.0 + 2.0 * alpha)**3
+            expected_grad = (num / den).data
+            self.assertEqual(actual_grad, expected_grad, 0.002, '\n'.join([
+                "alpha = alpha_c + %.2g" % shift,
+                "expected_grad: %.5g" % expected_grad,
+                "actual_grad: %.5g" % actual_grad,
+                "error = %.2g" % torch.abs(expected_grad - actual_grad).max(),
+            ]))
+
+    def test_dirichlet_tangent_field(self):
+        num_samples = 20
+        alpha_grid = [0.5, 1.0, 2.0]
+
+        # v = dx/dalpha[0] is the reparameterized gradient aka tangent field.
+        def compute_v(x, alpha):
+            return torch.stack([
+                _Dirichlet_backward(x, alpha, torch.eye(3, 3)[i].expand_as(x))[:, 0]
+                for i in range(3)
+            ], dim=-1)
+
+        for a1, a2, a3 in product(alpha_grid, alpha_grid, alpha_grid):
+            alpha = Variable(torch.Tensor([a1, a2, a3]).expand(num_samples, 3), requires_grad=True)
+            x = Dirichlet(alpha).rsample()
+            dlogp_da = grad([Dirichlet(alpha).log_prob(x.detach()).sum()],
+                            [alpha], retain_graph=True)[0].data[:, 0]
+            dlogp_dx = grad([Dirichlet(alpha.detach()).log_prob(x).sum()],
+                            [x], retain_graph=True)[0].data
+            v = torch.stack([grad([x[:, i].sum()], [alpha], retain_graph=True)[0].data[:, 0]
+                             for i in range(3)], dim=-1)
+            # Compute ramaining properties by finite difference.
+            x = x.data
+            alpha = alpha.data
+            self.assertEqual(compute_v(x, alpha), v, message='Bug in compute_v() helper')
+            # dx is an arbitrary orthonormal basis tangent to the simplex.
+            dx = torch.Tensor([[2, -1, -1], [0, 1, -1]])
+            dx /= dx.norm(2, -1, True)
+            eps = 1e-2 * x.min(-1, True)[0]  # avoid boundary
+            dv0 = (compute_v(x + eps * dx[0], alpha) - compute_v(x - eps * dx[0], alpha)) / (2 * eps)
+            dv1 = (compute_v(x + eps * dx[1], alpha) - compute_v(x - eps * dx[1], alpha)) / (2 * eps)
+            div_v = (dv0 * dx[0] + dv1 * dx[1]).sum(-1)
+            # This is a modification of the standard continuity equation, using the product rule to allow
+            # expression in terms of log_prob rather than the less numerically stable log_prob.exp().
+            error = dlogp_da + (dlogp_dx * v).sum(-1) + div_v
+            self.assertLess(torch.abs(error).max(), 0.005, '\n'.join([
+                'Dirichlet([{}, {}, {}]) gradient violates continuity equation:'.format(a1, a2, a3),
+                'error = {}'.format(error),
+            ]))
+
+
 class TestDistributionShapes(TestCase):
     def setUp(self):
         super(TestCase, self).setUp()
@@ -1019,13 +1197,16 @@ class TestDistributionShapes(TestCase):
         for Dist, params in EXAMPLES:
             for i, param in enumerate(params):
                 dist = Dist(**param)
-                actual_shape = dist.entropy().size()
-                expected_shape = dist._batch_shape
-                if not expected_shape:
-                    expected_shape = torch.Size((1,))  # TODO Remove this once scalars are supported.
-                message = '{} example {}/{}, shape mismatch. expected {}, actual {}'.format(
-                    Dist.__name__, i, len(params), expected_shape, actual_shape)
-                self.assertEqual(actual_shape, expected_shape, message=message)
+                try:
+                    actual_shape = dist.entropy().size()
+                    expected_shape = dist._batch_shape
+                    if not expected_shape:
+                        expected_shape = torch.Size((1,))  # TODO Remove this once scalars are supported.
+                    message = '{} example {}/{}, shape mismatch. expected {}, actual {}'.format(
+                        Dist.__name__, i, len(params), expected_shape, actual_shape)
+                    self.assertEqual(actual_shape, expected_shape, message=message)
+                except NotImplementedError:
+                    continue
 
     def test_bernoulli_shape_scalar_params(self):
         bernoulli = Bernoulli(0.3)
@@ -1045,6 +1226,7 @@ class TestDistributionShapes(TestCase):
         self.assertEqual(bernoulli.sample((3, 2)).size(), torch.Size((3, 2, 3, 2)))
         self.assertEqual(bernoulli.log_prob(self.tensor_sample_1).size(), torch.Size((3, 2)))
         self.assertRaises(ValueError, bernoulli.log_prob, self.tensor_sample_2)
+        self.assertEqual(bernoulli.log_prob(torch.ones(3, 1, 1)).size(), torch.Size((3, 3, 2)))
 
     def test_beta_shape_scalar_params(self):
         dist = Beta(0.1, 0.1)
@@ -1065,6 +1247,17 @@ class TestDistributionShapes(TestCase):
         self.assertEqual(dist.sample((3, 2)).size(), torch.Size((3, 2, 3, 2)))
         self.assertEqual(dist.log_prob(self.tensor_sample_1).size(), torch.Size((3, 2)))
         self.assertRaises(ValueError, dist.log_prob, self.tensor_sample_2)
+        self.assertEqual(dist.log_prob(torch.ones(3, 1, 1)).size(), torch.Size((3, 3, 2)))
+
+    def test_multinomial_shape(self):
+        dist = Multinomial(10, torch.Tensor([[0.6, 0.3], [0.6, 0.3], [0.6, 0.3]]))
+        self.assertEqual(dist._batch_shape, torch.Size((3,)))
+        self.assertEqual(dist._event_shape, torch.Size((2,)))
+        self.assertEqual(dist.sample().size(), torch.Size((3, 2)))
+        self.assertEqual(dist.sample((3, 2)).size(), torch.Size((3, 2, 3, 2)))
+        self.assertEqual(dist.log_prob(self.tensor_sample_1).size(), torch.Size((3,)))
+        self.assertRaises(ValueError, dist.log_prob, self.tensor_sample_2)
+        self.assertEqual(dist.log_prob(torch.ones(3, 1, 2)).size(), torch.Size((3, 3)))
 
     def test_categorical_shape(self):
         dist = Categorical(torch.Tensor([[0.6, 0.3], [0.6, 0.3], [0.6, 0.3]]))
@@ -1074,6 +1267,7 @@ class TestDistributionShapes(TestCase):
         self.assertEqual(dist.sample((3, 2)).size(), torch.Size((3, 2, 3,)))
         self.assertRaises(ValueError, dist.log_prob, self.tensor_sample_1)
         self.assertEqual(dist.log_prob(self.tensor_sample_2).size(), torch.Size((3, 2, 3)))
+        self.assertEqual(dist.log_prob(torch.ones(3, 1)).size(), torch.Size((3, 3)))
 
     def test_one_hot_categorical_shape(self):
         dist = OneHotCategorical(torch.Tensor([[0.6, 0.3], [0.6, 0.3], [0.6, 0.3]]))
@@ -1084,6 +1278,7 @@ class TestDistributionShapes(TestCase):
         self.assertEqual(dist.log_prob(self.tensor_sample_1).size(), torch.Size((3,)))
         self.assertRaises(ValueError, dist.log_prob, self.tensor_sample_2)
         self.assertEqual(dist.log_prob(dist.enumerate_support()).size(), torch.Size((2, 3)))
+        self.assertEqual(dist.log_prob(torch.ones((3, 1, 2))).size(), torch.Size((3, 3)))
 
     def test_cauchy_shape_scalar_params(self):
         cauchy = Cauchy(0, 1)
@@ -1103,6 +1298,7 @@ class TestDistributionShapes(TestCase):
         self.assertEqual(cauchy.sample(torch.Size((3, 2))).size(), torch.Size((3, 2, 2)))
         self.assertEqual(cauchy.log_prob(self.tensor_sample_1).size(), torch.Size((3, 2)))
         self.assertRaises(ValueError, cauchy.log_prob, self.tensor_sample_2)
+        self.assertEqual(cauchy.log_prob(torch.ones(2, 1)).size(), torch.Size((2, 2)))
 
     def test_dirichlet_shape(self):
         dist = Dirichlet(torch.Tensor([[0.6, 0.3], [1.6, 1.3], [2.6, 2.3]]))
@@ -1112,6 +1308,7 @@ class TestDistributionShapes(TestCase):
         self.assertEqual(dist.sample((5, 4)).size(), torch.Size((5, 4, 3, 2)))
         self.assertEqual(dist.log_prob(self.tensor_sample_1).size(), torch.Size((3,)))
         self.assertRaises(ValueError, dist.log_prob, self.tensor_sample_2)
+        self.assertEqual(dist.log_prob(torch.ones((3, 1, 2))).size(), torch.Size((3, 3)))
 
     def test_gamma_shape_scalar_params(self):
         gamma = Gamma(1, 1)
@@ -1131,6 +1328,7 @@ class TestDistributionShapes(TestCase):
         self.assertEqual(gamma.sample((3, 2)).size(), torch.Size((3, 2, 2)))
         self.assertEqual(gamma.log_prob(self.tensor_sample_1).size(), torch.Size((3, 2)))
         self.assertRaises(ValueError, gamma.log_prob, self.tensor_sample_2)
+        self.assertEqual(gamma.log_prob(torch.ones(2, 1)).size(), torch.Size((2, 2)))
 
     def test_chi2_shape_scalar_params(self):
         chi2 = Chi2(1)
@@ -1150,6 +1348,7 @@ class TestDistributionShapes(TestCase):
         self.assertEqual(chi2.sample((3, 2)).size(), torch.Size((3, 2, 2)))
         self.assertEqual(chi2.log_prob(self.tensor_sample_1).size(), torch.Size((3, 2)))
         self.assertRaises(ValueError, chi2.log_prob, self.tensor_sample_2)
+        self.assertEqual(chi2.log_prob(torch.ones(2, 1)).size(), torch.Size((2, 2)))
 
     def test_studentT_shape_scalar_params(self):
         st = StudentT(1)
@@ -1169,6 +1368,7 @@ class TestDistributionShapes(TestCase):
         self.assertEqual(st.sample((3, 2)).size(), torch.Size((3, 2, 2)))
         self.assertEqual(st.log_prob(self.tensor_sample_1).size(), torch.Size((3, 2)))
         self.assertRaises(ValueError, st.log_prob, self.tensor_sample_2)
+        self.assertEqual(st.log_prob(torch.ones(2, 1)).size(), torch.Size((2, 2)))
 
     def test_pareto_shape_scalar_params(self):
         pareto = Pareto(1, 1)
@@ -1198,6 +1398,7 @@ class TestDistributionShapes(TestCase):
         self.assertEqual(normal.sample((3, 2)).size(), torch.Size((3, 2, 2)))
         self.assertEqual(normal.log_prob(self.tensor_sample_1).size(), torch.Size((3, 2)))
         self.assertRaises(ValueError, normal.log_prob, self.tensor_sample_2)
+        self.assertEqual(normal.log_prob(torch.ones(2, 1)).size(), torch.Size((2, 2)))
 
     def test_uniform_shape_scalar_params(self):
         uniform = Uniform(0, 1)
@@ -1217,6 +1418,7 @@ class TestDistributionShapes(TestCase):
         self.assertEqual(uniform.sample(torch.Size((3, 2))).size(), torch.Size((3, 2, 2)))
         self.assertEqual(uniform.log_prob(self.tensor_sample_1).size(), torch.Size((3, 2)))
         self.assertRaises(ValueError, uniform.log_prob, self.tensor_sample_2)
+        self.assertEqual(uniform.log_prob(torch.ones(2, 1)).size(), torch.Size((2, 2)))
 
     def test_exponential_shape_scalar_param(self):
         expon = Exponential(1.)
@@ -1236,6 +1438,7 @@ class TestDistributionShapes(TestCase):
         self.assertEqual(expon.sample((3, 2)).size(), torch.Size((3, 2, 2)))
         self.assertEqual(expon.log_prob(self.tensor_sample_1).size(), torch.Size((3, 2)))
         self.assertRaises(ValueError, expon.log_prob, self.tensor_sample_2)
+        self.assertEqual(expon.log_prob(torch.ones(2, 2)).size(), torch.Size((2, 2)))
 
     def test_laplace_shape_scalar_params(self):
         laplace = Laplace(0, 1)
@@ -1255,6 +1458,7 @@ class TestDistributionShapes(TestCase):
         self.assertEqual(laplace.sample((3, 2)).size(), torch.Size((3, 2, 2)))
         self.assertEqual(laplace.log_prob(self.tensor_sample_1).size(), torch.Size((3, 2)))
         self.assertRaises(ValueError, laplace.log_prob, self.tensor_sample_2)
+        self.assertEqual(laplace.log_prob(torch.ones(2, 1)).size(), torch.Size((2, 2)))
 
 
 class TestKL(TestCase):
@@ -1392,6 +1596,34 @@ class TestKL(TestCase):
             self.assertTrue((kl_divergence(p, q) == float('inf')).all(),
                             'Incorrect KL({}, {})'.format(type(p).__name__, type(q).__name__))
 
+    def test_kl_infinite(self):
+        for p, q in self.infinite_examples:
+            self.assertTrue((kl_divergence(p, q) == float('inf')).all(),
+                            'Incorrect KL({}, {})'.format(type(p).__name__, type(q).__name__))
+
+    def test_entropy_monte_carlo(self):
+        set_rng_seed(0)  # see Note [Randomized statistical tests]
+        for Dist, params in EXAMPLES:
+            for i, param in enumerate(params):
+                dist = Dist(**param)
+                try:
+                    actual = dist.entropy()
+                except NotImplementedError:
+                    continue
+                x = dist.sample(sample_shape=(20000,))
+                expected = -dist.log_prob(x).mean(0)
+                if isinstance(actual, Variable):
+                    actual = actual.data
+                    expected = expected.data
+                ignore = (expected == float('inf'))
+                expected[ignore] = actual[ignore]
+                self.assertEqual(actual, expected, prec=0.2, message='\n'.join([
+                    '{} example {}/{}, incorrect .entropy().'.format(Dist.__name__, i, len(params)),
+                    'Expected (monte carlo) {}'.format(expected),
+                    'Actual (analytic) {}'.format(actual),
+                    'max error = {}'.format(torch.abs(actual - expected).max()),
+                ]))
+
 
 class TestConstraints(TestCase):
     def test_params_contains(self):
@@ -1401,11 +1633,14 @@ class TestConstraints(TestCase):
                 for name, value in param.items():
                     if not (torch.is_tensor(value) or isinstance(value, Variable)):
                         value = torch.Tensor([value])
-                    if Dist in (Categorical, OneHotCategorical) and name == 'probs':
+                    if Dist in (Categorical, OneHotCategorical, Multinomial) and name == 'probs':
                         # These distributions accept positive probs, but elsewhere we
                         # use a stricter constraint to the simplex.
                         value = value / value.sum(-1, True)
-                    constraint = dist.params[name]
+                    try:
+                        constraint = dist.params[name]
+                    except KeyError:
+                        continue  # ignore optional parameters
                     if is_dependent(constraint):
                         continue
                     message = '{} example {}/{} parameter {} = {}'.format(
@@ -1444,13 +1679,13 @@ class TestNumericalStability(TestCase):
         self.assertEqual(log_pdf.data,
                          expected_value,
                          prec=prec,
-                         message='Failed for tensor type: {}. Expected = {}, Actual = {}'
+                         message='Incorrect value for tensor type: {}. Expected = {}, Actual = {}'
                          .format(type(x), expected_value, log_pdf.data))
         if expected_gradient is not None:
             self.assertEqual(p.grad.data,
                              expected_gradient,
                              prec=prec,
-                             message='Failed for tensor type: {}. Expected = {}, Actual = {}'
+                             message='Incorrect gradient for tensor type: {}. Expected = {}, Actual = {}'
                              .format(type(x), expected_gradient, p.grad.data))
 
     def test_bernoulli_gradient(self):
@@ -1464,7 +1699,7 @@ class TestNumericalStability(TestCase):
             self._test_pdf_score(dist_class=Bernoulli,
                                  probs=tensor_type([0]),
                                  x=tensor_type([1]),
-                                 expected_value=tensor_type([_get_clamping_buffer(tensor_type([]))]).log(),
+                                 expected_value=tensor_type([_finfo(tensor_type([])).eps]).log(),
                                  expected_gradient=tensor_type([0]))
 
             self._test_pdf_score(dist_class=Bernoulli,
@@ -1523,6 +1758,23 @@ class TestNumericalStability(TestCase):
             log_pdf_prob_1 = categorical.log_prob(Variable(tensor_type([0, 1])))
             self.assertEqual(log_pdf_prob_1.data[0], 0)
             log_pdf_prob_0 = categorical.log_prob(Variable(tensor_type([1, 0])))
+            self.assertEqual(log_pdf_prob_0.data[0], -float('inf'), allow_inf=True)
+
+    def test_multinomial_log_prob(self):
+        for tensor_type in [torch.FloatTensor, torch.DoubleTensor]:
+            p = Variable(tensor_type([0, 1]), requires_grad=True)
+            s = Variable(tensor_type([0, 10]))
+            multinomial = Multinomial(10, p)
+            log_pdf = multinomial.log_prob(s)
+            self.assertEqual(log_pdf.data[0], 0)
+
+    def test_multinomial_log_prob_with_logits(self):
+        for tensor_type in [torch.FloatTensor, torch.DoubleTensor]:
+            p = Variable(tensor_type([-float('inf'), 0]), requires_grad=True)
+            multinomial = Multinomial(10, logits=p)
+            log_pdf_prob_1 = multinomial.log_prob(Variable(tensor_type([0, 10])))
+            self.assertEqual(log_pdf_prob_1.data[0], 0)
+            log_pdf_prob_0 = multinomial.log_prob(Variable(tensor_type([10, 0])))
             self.assertEqual(log_pdf_prob_0.data[0], -float('inf'), allow_inf=True)
 
 

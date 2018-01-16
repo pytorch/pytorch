@@ -221,6 +221,10 @@
 - name: fill_(Tensor self, Scalar value)
   self: zeros_like(grad)
 
+- name: fill_(Tensor self, Tensor value)
+  self: zeros_like(grad)
+  value: grad.sum()
+
 - name: floor(Tensor self)
   self: zeros_like(grad)
 
@@ -283,6 +287,10 @@
 - name: index_fill_(Tensor self, int64_t dim, Tensor index, Scalar value)
   self: grad.clone().index_fill_(dim, index, 0)
 
+- name: index_fill_(Tensor self, int64_t dim, Tensor index, Tensor value)
+  self: grad.clone().index_fill_(dim, index, 0)
+  value: grad.index_select(dim, index).sum()
+
 - name: index_select(Tensor self, int64_t dim, Tensor index)
   self: grad.type().zeros(self.sizes()).index_add_(dim, index, grad)
 
@@ -330,6 +338,10 @@
 
 - name: masked_fill_(Tensor self, Tensor mask, Scalar value)
   self: grad.clone().masked_fill_(mask, 0)
+
+- name: masked_fill_(Tensor self, Tensor mask, Tensor value)
+  self: grad.clone().masked_fill_(mask, 0)
+  value: at::where(mask, grad, zeros_like(grad)).sum()
 
 - name: masked_scatter_(Tensor self, Tensor mask, Tensor source)
   self: grad.clone().masked_fill_(mask, 0)
@@ -387,6 +399,9 @@
 - name: mv(Tensor self, Tensor vec)
   self: grad.ger(vec)
   vec: self.t().mv(grad)
+
+- name: ne_(Tensor self, Scalar other)
+  self: zeros_like(self)
 
 - name: ne_(Tensor self, Tensor other)
   self: zeros_like(self)

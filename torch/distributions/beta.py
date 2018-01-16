@@ -50,3 +50,19 @@ class Beta(Distribution):
 
     def entropy(self):
         return self._dirichlet.entropy()
+
+    @property
+    def alpha(self):
+        result = self._dirichlet.alpha[..., 0]
+        if isinstance(result, Number):
+            return torch.Tensor([result])
+        else:
+            return result
+
+    @property
+    def beta(self):
+        result = self._dirichlet.alpha[..., 1]
+        if isinstance(result, Number):
+            return torch.Tensor([result])
+        else:
+            return result

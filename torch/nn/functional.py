@@ -1048,8 +1048,14 @@ def embedding(input, weight, padding_idx=None, max_norm=None, norm_type=2,
 
     """
     input = input.contiguous()
-    if padding_idx is None:
-        padding_idx = -1
+    if padding_idx is not None:
+        if padding_idx > 0:
+            assert padding_idx < weight.size(0), 'Padding_idx must be within num_embeddings'
+        elif padding_idx < 0:
+            assert padding_idx >= -weight.size(0), 'Padding_idx must be within num_embeddings'
+            padding_idx = weight.size(0) + padding_idx
+    elif padding_idx is None:
+            padding_idx = -1
     if max_norm is not None:
         with torch.no_grad():
             torch._C._VariableBase.embedding_renorm_(weight, input, max_norm, norm_type)
@@ -1156,10 +1162,10 @@ def nll_loss(input, target, weight=None, size_average=True, ignore_index=-100, r
 
     Args:
         input: :math:`(N, C)` where `C = number of classes` or :math:`(N, C, H, W)`
-            in case of 2D Loss, or :math:`(N, C, d_1, d_2, ..., d_K)` where :math:`K > 2`
+            in case of 2D Loss, or :math:`(N, C, d_1, d_2, ..., d_K)` where :math:`K > 1`
             in the case of K-dimensional loss.
         target: :math:`(N)` where each value is `0 <= targets[i] <= C-1`,
-            or :math:`(N, C, d_1, d_2, ..., d_K)` where :math:`K >= 2` for
+            or :math:`(N, C, d_1, d_2, ..., d_K)` where :math:`K >= 1` for
             K-dimensional loss.
         weight (Tensor, optional): a manual rescaling weight given to each
             class. If given, has to be a Tensor of size `C`
@@ -1186,7 +1192,7 @@ def nll_loss(input, target, weight=None, size_average=True, ignore_index=-100, r
         return torch._C._nn.nll_loss(input, target, weight, size_average, ignore_index, reduce)
     elif dim == 4:
         return torch._C._nn.nll_loss2d(input, target, weight, size_average, ignore_index, reduce)
-    elif dim > 4:
+    elif dim == 3 or dim > 4:
         n = input.size(0)
         c = input.size(1)
         out_size = (n,) + input.size()[2:]
@@ -1200,7 +1206,7 @@ def nll_loss(input, target, weight=None, size_average=True, ignore_index=-100, r
         out = torch._C._nn.nll_loss2d(input, target, weight, size_average, ignore_index, reduce)
         return out.view(out_size)
     else:
-        raise ValueError('Expected 2, 4, or more than 4 dimensions (got {})'.format(dim))
+        raise ValueError('Expected 2 or more dimensions (got {})'.format(dim))
 
 
 def poisson_nll_loss(input, target, log_input=True, full=False, size_average=True, eps=1e-8, reduce=True):

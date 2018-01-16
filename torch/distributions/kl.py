@@ -172,14 +172,14 @@ def _kl_beta_beta(p, q):
 @register_kl(Dirichlet, Dirichlet)
 def _kl_dirichlet_dirichlet(p, q):
     # From http://bariskurt.com/kullback-leibler-divergence-between-two-dirichlet-and-beta-distributions/
-    sum_p_alpha = p.alpha.sum(0)
-    sum_q_alpha = q.alpha.sum(0)
+    sum_p_alpha = p.alpha.sum(-1)
+    sum_q_alpha = q.alpha.sum(-1)
     t1 = torch.lgamma(sum_p_alpha)
     t2 = torch.lgamma(sum_q_alpha)
-    t3 = p.alpha.lgamma().sum(0)
-    t4 = q.alpha.lgamma().sum(0)
+    t3 = p.alpha.lgamma().sum(-1)
+    t4 = q.alpha.lgamma().sum(-1)
     t5 = (p.alpha - q.alpha) * (p.alpha.digamma() - sum_p_alpha.digamma())
-    return t1 - t3 - t2 + t4 + t5.sum(0)
+    return t1 - t3 - t2 + t4 + t5.sum(-1)
 
 
 @register_kl(Exponential, Exponential)
@@ -432,9 +432,10 @@ def _kl_pareto_infinity(p, q):
 
 @register_kl(Pareto, Exponential)
 def _kl_pareto_exponential(p, q):
-    t1 = (p.alpha / (p.scale * q.rate)).log()
+    scale_rate_prod = p.scale * q.rate
+    t1 = (p.alpha / scale_rate_prod).log()
     t2 = p.alpha.reciprocal()
-    t3 = q.rate * p.alpha * p.scale / (p.alpha - 1)
+    t3 = p.alpha * scale_rate_prod / (p.alpha - 1)
     result = t1 - t2 + t3 - 1
     result[p.alpha <= 1] = float('inf')
     return result
@@ -451,7 +452,18 @@ def _kl_pareto_gamma(p, q):
     result[p.alpha <= 1] = float('inf')
     return result
 
-# TODO: Pareto-Laplace KL Divergence
+
+@register_kl(Pareto, Laplace)
+def _kl_pareto_laplace(p, q):
+    ct1 = p.alpha / (p.alpha - 1)
+    ct2 = q.loc / q.scale
+    ct3 = (p.scale / q.loc).pow(p.alpha)
+    result = ct1 * p.scale / q.scale - ct2
+    if (p.scale < q.loc).any():
+        result[p.scale < q.loc] += 2 * ct3 * ct2 * (1 - ct1)
+        result[p.scale < q.loc] *= -1
+    result += (2 * p.alpha * q.scale / p.scale).log() - 1 - p.alpha.reciprocal()
+    return result
 
 
 @register_kl(Pareto, Normal)

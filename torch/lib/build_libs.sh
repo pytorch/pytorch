@@ -53,7 +53,6 @@ if [[ $WITH_CUDA -eq 1 ]]; then
 fi
 CWRAP_FILES="\
 $BASE_DIR/torch/lib/ATen/Declarations.cwrap;\
-$BASE_DIR/torch/lib/ATen/Local.cwrap;\
 $BASE_DIR/torch/lib/THNN/generic/THNN.h;\
 $BASE_DIR/torch/lib/THCUNN/generic/THCUNN.h;\
 $BASE_DIR/torch/lib/ATen/nn.yaml"
@@ -162,6 +161,7 @@ function build_aten() {
   -DNO_NNPACK=$((1-$WITH_NNPACK)) \
   -DCUDNN_INCLUDE_DIR=$CUDNN_INCLUDE_DIR \
   -DCUDNN_LIB_DIR=$CUDNN_LIB_DIR \
+  -DCUDNN_LIBRARY=$CUDNN_LIBRARY \
   -DATEN_NO_CONTRIB=1 \
   -DCMAKE_INSTALL_PREFIX="$INSTALL_DIR" \
   -DCMAKE_EXPORT_COMPILE_COMMANDS=1

@@ -3502,7 +3502,7 @@ static inline real THTensor_(beta_grad_alpha_small)(real x, real alpha, real bet
     const real denom = alpha + i;
     series += numer / denom * (factor + 1 / denom);
   }
-  const real result = x * TH_MATH_NAME(pow)(1 - x, 1 - beta) * series;
+  const real result = x * TH_MATH_NAME(pow)(1 - x, -beta) * series;
   return isnan(result) ? 0.0 : result;
 }
 
@@ -3520,7 +3520,7 @@ static inline real THTensor_(beta_grad_beta_small)(real x, real alpha, real beta
     betas = betas * (beta - i);
     series += numer / (alpha + i) * (dbetas + factor * betas);
   }
-  const real result = -x * TH_MATH_NAME(pow)(1 - x, 1 - beta) * series;
+  const real result = -TH_MATH_NAME(pow)(1 - x, 1 - beta) * series;
   return isnan(result) ? 0.0 : result;
 }
 
@@ -3540,9 +3540,9 @@ static inline real THTensor_(beta_grad_alpha_mid)(double x, double alpha, double
                       8 * (1 - x) * (135 * beta - 11)))));
     const double prefactor_num = (1 + 12 * alpha) * (1 + 12 * beta) / (total * total);
     const double prefactor_den = 12960 * alpha * alpha * alpha * beta * beta * (1 + 12 * total);
-    return prefactor_num * poly / prefactor_den;
+    return prefactor_num / (1 - x) * poly / prefactor_den;
   }
-  const double prefactor = x * (x-1) / sqrt(2 * alpha * beta / total);
+  const double prefactor = -x / sqrt(2 * alpha * beta / total);
   const double stirling = (1 + 1 / (12 * alpha) + 1 / (288 * alpha*alpha))
                         * (1 + 1 / (12 * beta) + 1 / (288 * beta*beta))
                         / (1 + 1 / (12 * total) + 1 / (288 * total*total));
@@ -3561,9 +3561,11 @@ static inline real THTensor_(beta_grad_alpha_mid)(double x, double alpha, double
   return stirling * prefactor * term1234;
 }
 
-// Computes the reparameterized gradient -(d/dalpha cdf(x;alphas)) / pdf(x;alphas)
-// for random number x drawn from a Dirichlet distribution Dirichlet(alphas).
-// Total is the sum of all alphas.
+// Computes a scaled reparameterized gradient
+//   -(d/dalpha cdf(x;alpha,beta)) / pdf(x;alpha,beta) / (1-x)
+// for random number x drawn from a Beta distribution Beta(alpha,beta).
+// This function inputs total=alpha+beta to make it easy to implement
+// Dirichlet reparameterized gradients in terms of Betas.
 static inline real THTensor_(dirichlet_grad_one)(real x, real alpha, real total) {
   const real beta = total - alpha;
   const real boundary = total * x * (1 - x);
@@ -3618,7 +3620,7 @@ static inline real THTensor_(dirichlet_grad_one)(real x, real alpha, real total)
       q += ua * (c[1][i][j][0] + b * (c[1][i][j][1] + b * (c[1][i][j][2] + b * c[1][i][j][3])));
     }
   }
-  const real approx = x * (1 - x) * (TH_digamma(total) - TH_digamma(alpha)) / beta;
+  const real approx = x * (TH_digamma(total) - TH_digamma(alpha)) / beta;
   return p / q * approx;
 }
 
