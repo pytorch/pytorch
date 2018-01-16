@@ -1,7 +1,6 @@
 from numbers import Number
 
 import torch
-from torch.autograd import Variable
 from torch.distributions import constraints
 from torch.distributions.dirichlet import Dirichlet
 from torch.distributions.distribution import Distribution
@@ -10,7 +9,7 @@ from torch.distributions.utils import broadcast_all
 
 class Beta(Distribution):
     r"""
-    Creates a Beta distribution parameterized by concentration `concentration1` and `concentration0`.
+    Beta distribution parameterized by `concentration1` and `concentration0`.
 
     Example::
 

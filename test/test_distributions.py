@@ -1066,7 +1066,7 @@ class TestRsample(TestCase):
             x, ind = x.data.sort()
             x = x.numpy()
             actual_grad = con1s.grad.data[ind].numpy()
-            # Compare with expected gradient dx/dalpha along constant cdf(x,con1,con0).
+            # Compare with expected gradient dx/dcon1 along constant cdf(x,con1,con0).
             cdf = scipy.stats.beta.cdf
             pdf = scipy.stats.beta.pdf
             eps = 0.01 * con1 / (1.0 + np.sqrt(con1))
@@ -1075,7 +1075,7 @@ class TestRsample(TestCase):
             expected_grad = -cdf_alpha / cdf_x
             rel_error = np.abs(actual_grad - expected_grad) / (expected_grad + 1e-30)
             self.assertLess(np.max(rel_error), 0.005, '\n'.join([
-                'Bad gradient dx/dalpha for x ~ Beta({}, {})'.format(con1, con0),
+                'Bad gradient dx/dcon1 for x ~ Beta({}, {})'.format(con1, con0),
                 'x {}'.format(x),
                 'expected {}'.format(expected_grad),
                 'actual {}'.format(actual_grad),
@@ -1096,7 +1096,7 @@ class TestRsample(TestCase):
             x, ind = x.data.sort()
             x = x.numpy()
             actual_grad = con0s.grad.data[ind].numpy()
-            # Compare with expected gradient dx/dbeta along constant cdf(x,con1,con0).
+            # Compare with expected gradient dx/dcon0 along constant cdf(x,con1,con0).
             cdf = scipy.stats.beta.cdf
             pdf = scipy.stats.beta.pdf
             eps = 0.01 * con0 / (1.0 + np.sqrt(con0))
@@ -1105,7 +1105,7 @@ class TestRsample(TestCase):
             expected_grad = -cdf_beta / cdf_x
             rel_error = np.abs(actual_grad - expected_grad) / (expected_grad + 1e-30)
             self.assertLess(np.max(rel_error), 0.005, '\n'.join([
-                'Bad gradient dx/dbeta for x ~ Beta({}, {})'.format(con1, con0),
+                'Bad gradient dx/dcon0 for x ~ Beta({}, {})'.format(con1, con0),
                 'x {}'.format(x),
                 'expected {}'.format(expected_grad),
                 'actual {}'.format(actual_grad),
