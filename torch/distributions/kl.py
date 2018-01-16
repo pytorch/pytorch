@@ -6,6 +6,7 @@ import math
 
 from .distribution import Distribution
 from .bernoulli import Bernoulli
+from .binomial import Binomial
 from .beta import Beta
 from .dirichlet import Dirichlet
 from .exponential import Exponential
@@ -155,6 +156,15 @@ def _kl_bernoulli_bernoulli(p, q):
     t1 = p.probs * (p.probs / q.probs).log()
     t2 = (1 - p.probs) * ((1 - p.probs) / (1 - q.probs)).log()
     return t1 + t2
+
+
+@register_kl(Binomial, Binomial)
+def _kl_binomial_binomial(p, q):
+    # from https://math.stackexchange.com/questions/2214993/
+    # kullback-leibler-divergence-for-binomial-distributions-p-and-q
+    if p.total_count != q.total_count:
+        raise(NotImplementedError, 'KL between Binomials with different total_count is not implemented')
+    return p.total_count * (p.probs * (p.logits - q.logits) + (-p.probs).log1p() - (-q.probs).log1p())
 
 
 @register_kl(Beta, Beta)

@@ -1501,6 +1501,7 @@ class TestKL(TestCase):
     def setUp(self):
         self.finite_examples = [
             (Bernoulli(0.7), Bernoulli(0.3)),
+            (Binomial(30, 0.7), Binomial(30, 0.3)),
             (Beta(1, 2), Beta(3, 4)),
             (Beta(1, 2), Chi2(3)),
             (Beta(1, 2), Exponential(3)),
