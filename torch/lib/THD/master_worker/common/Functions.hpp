@@ -171,6 +171,7 @@ enum Functions: std::uint16_t {
   tensorLog,
   tensorLog1p,
   tensorExp,
+  tensorExpm1,
   tensorCos,
   tensorAcos,
   tensorCosh,

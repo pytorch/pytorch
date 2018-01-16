@@ -25,3 +25,10 @@ struct AutoNoGIL {
 
   PyThreadState* save;
 };
+
+// Runs the function without the GIL
+template<typename F>
+inline void with_no_gil(F f) {
+  AutoNoGIL no_gil;
+  f();
+}

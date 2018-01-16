@@ -7,7 +7,7 @@ from .. import functional as F
 
 
 class Threshold(Module):
-    """Thresholds each element of the input Tensor
+    r"""Thresholds each element of the input Tensor
 
     Threshold is defined as::
 
@@ -17,7 +17,7 @@ class Threshold(Module):
     Args:
         threshold: The value to threshold at
         value: The value to replace with
-        inplace: can optionally do the operation in-place. Default: False
+        inplace: can optionally do the operation in-place. Default: ``False``
 
     Shape:
         - Input: :math:`(N, *)` where `*` means, any number of additional
@@ -51,11 +51,11 @@ class Threshold(Module):
 
 
 class ReLU(Threshold):
-    """Applies the rectified linear unit function element-wise
+    r"""Applies the rectified linear unit function element-wise
     :math:`{ReLU}(x)= max(0, x)`
 
     Args:
-        inplace: can optionally do the operation in-place. Default: False
+        inplace: can optionally do the operation in-place. Default: ``False``
 
     Shape:
         - Input: :math:`(N, *)` where `*` means, any number of additional
@@ -75,7 +75,7 @@ class ReLU(Threshold):
 
     def __repr__(self):
         inplace_str = 'inplace' if self.inplace else ''
-        return self.__class__.__name__ + ' (' \
+        return self.__class__.__name__ + '(' \
             + inplace_str + ')'
 
 
@@ -92,14 +92,14 @@ class RReLU(Module):
 
     def __repr__(self):
         inplace_str = ', inplace' if self.inplace else ''
-        return self.__class__.__name__ + ' (' \
+        return self.__class__.__name__ + '(' \
             + str(self.lower) \
             + ', ' + str(self.upper) \
             + inplace_str + ')'
 
 
 class Hardtanh(Module):
-    """Applies the HardTanh function element-wise
+    r"""Applies the HardTanh function element-wise
 
     HardTanh is defined as::
 
@@ -112,7 +112,7 @@ class Hardtanh(Module):
     Args:
         min_val: minimum value of the linear region range. Default: -1
         max_val: maximum value of the linear region range. Default: 1
-        inplace: can optionally do the operation in-place. Default: False
+        inplace: can optionally do the operation in-place. Default: ``False``
 
     Keyword arguments :attr:`min_value` and :attr:`max_value`
     have been deprecated in favor of :attr:`min_val` and :attr:`max_val`
@@ -124,7 +124,7 @@ class Hardtanh(Module):
 
     Examples::
 
-        >>> m = nn.HardTanh(-2, 2)
+        >>> m = nn.Hardtanh(-2, 2)
         >>> input = autograd.Variable(torch.randn(2))
         >>> print(input)
         >>> print(m(input))
@@ -149,17 +149,17 @@ class Hardtanh(Module):
 
     def __repr__(self):
         inplace_str = ', inplace' if self.inplace else ''
-        return self.__class__.__name__ + ' (' \
+        return self.__class__.__name__ + '(' \
             + 'min_val=' + str(self.min_val) \
             + ', max_val=' + str(self.max_val) \
             + inplace_str + ')'
 
 
 class ReLU6(Hardtanh):
-    """Applies the element-wise function :math:`{ReLU6}(x) = min(max(0,x), 6)`
+    r"""Applies the element-wise function :math:`{ReLU6}(x) = min(max(0,x), 6)`
 
     Args:
-        inplace: can optionally do the operation in-place. Default: False
+        inplace: can optionally do the operation in-place. Default: ``False``
 
     Shape:
         - Input: :math:`(N, *)` where `*` means, any number of additional
@@ -179,12 +179,12 @@ class ReLU6(Hardtanh):
 
     def __repr__(self):
         inplace_str = 'inplace' if self.inplace else ''
-        return self.__class__.__name__ + ' (' \
+        return self.__class__.__name__ + '(' \
             + inplace_str + ')'
 
 
 class Sigmoid(Module):
-    """Applies the element-wise function :math:`f(x) = 1 / ( 1 + exp(-x))`
+    r"""Applies the element-wise function :math:`f(x) = \frac{1}{1 + \exp(-x)}`
 
     Shape:
         - Input: :math:`(N, *)` where `*` means, any number of additional
@@ -203,12 +203,12 @@ class Sigmoid(Module):
         return torch.sigmoid(input)
 
     def __repr__(self):
-        return self.__class__.__name__ + ' ()'
+        return self.__class__.__name__ + '()'
 
 
 class Tanh(Module):
-    """Applies element-wise,
-    :math:`f(x) = (exp(x) - exp(-x)) / (exp(x) + exp(-x))`
+    r"""Applies element-wise,
+    :math:`f(x) = \frac{\exp(x) - \exp(-x)} {\exp(x) + \exp(-x)}`
 
     Shape:
         - Input: :math:`(N, *)` where `*` means, any number of additional
@@ -227,16 +227,16 @@ class Tanh(Module):
         return torch.tanh(input)
 
     def __repr__(self):
-        return self.__class__.__name__ + ' ()'
+        return self.__class__.__name__ + '()'
 
 
 class ELU(Module):
-    """Applies element-wise,
-    :math:`f(x) = max(0,x) + min(0, alpha * (exp(x) - 1))`
+    r"""Applies element-wise,
+    :math:`f(x) = max(0,x) + min(0, alpha * (\exp(x) - 1))`
 
     Args:
         alpha: the alpha value for the ELU formulation. Default: 1.0
-        inplace: can optionally do the operation in-place. Default: False
+        inplace: can optionally do the operation in-place. Default: ``False``
 
     Shape:
         - Input: :math:`(N, *)` where `*` means, any number of additional
@@ -261,13 +261,13 @@ class ELU(Module):
 
     def __repr__(self):
         inplace_str = ', inplace' if self.inplace else ''
-        return self.__class__.__name__ + ' (' \
+        return self.__class__.__name__ + '(' \
             + 'alpha=' + str(self.alpha) \
             + inplace_str + ')'
 
 
 class SELU(Module):
-    """Applies element-wise,
+    r"""Applies element-wise,
     :math:`f(x) = scale * (\max(0,x) + \min(0, alpha * (\exp(x) - 1)))`,
     with ``alpha=1.6732632423543772848170429916717`` and
     ``scale=1.0507009873554804934193349852946``.
@@ -275,7 +275,7 @@ class SELU(Module):
     More details can be found in the paper `Self-Normalizing Neural Networks`_ .
 
     Args:
-        inplace (bool, optional): can optionally do the operation in-place. Default: False
+        inplace (bool, optional): can optionally do the operation in-place. Default: ``False``
 
     Shape:
         - Input: :math:`(N, *)` where `*` means, any number of additional
@@ -300,12 +300,12 @@ class SELU(Module):
         return F.selu(input, self.inplace)
 
     def __repr__(self):
-        inplace_str = ' (inplace)' if self.inplace else ''
+        inplace_str = '(inplace)' if self.inplace else ''
         return self.__class__.__name__ + inplace_str
 
 
 class GLU(Module):
-    """Applies the gated linear unit function
+    r"""Applies the gated linear unit function
     :math:`{GLU}(a, b)= a \otimes \sigma(b)` where `a` is the first half of
     the input vector and `b` is the second half.
 
@@ -333,11 +333,11 @@ class GLU(Module):
         return F.glu(input, self.dim)
 
     def __repr__(self):
-        return '{} (dim={})'.format(self.__class__.__name__, self.dim)
+        return '{}(dim={})'.format(self.__class__.__name__, self.dim)
 
 
 class Hardshrink(Module):
-    """Applies the hard shrinkage function element-wise
+    r"""Applies the hard shrinkage function element-wise
     Hardshrink is defined as::
         f(x) = x, if x >  lambda
         f(x) = x, if x < -lambda
@@ -367,17 +367,17 @@ class Hardshrink(Module):
         return F.hardshrink(input, self.lambd)
 
     def __repr__(self):
-        return self.__class__.__name__ + ' (' \
+        return self.__class__.__name__ + '(' \
             + str(self.lambd) + ')'
 
 
 class LeakyReLU(Module):
-    """Applies element-wise,
-    :math:`f(x) = max(0, x) + {negative\_slope} * min(0, x)`
+    r"""Applies element-wise,
+    :math:`f(x) = \max(0, x) + \text{negative\_slope} * \min(0, x)`
 
     Args:
         negative_slope: Controls the angle of the negative slope. Default: 1e-2
-        inplace: can optionally do the operation in-place. Default: False
+        inplace: can optionally do the operation in-place. Default: ``False``
 
     Shape:
         - Input: :math:`(N, *)` where `*` means, any number of additional
@@ -402,13 +402,13 @@ class LeakyReLU(Module):
 
     def __repr__(self):
         inplace_str = ', inplace' if self.inplace else ''
-        return self.__class__.__name__ + ' (' \
+        return self.__class__.__name__ + '(' \
             + str(self.negative_slope) \
             + inplace_str + ')'
 
 
 class LogSigmoid(Module):
-    """Applies element-wise :math:`LogSigmoid(x) = log( 1 / (1 + exp(-x_i)))`
+    r"""Applies element-wise :math:`LogSigmoid(x) = \log\left(\frac{ 1 }{ 1 + \exp(-x_i)}\right)`
 
     Shape:
         - Input: :math:`(N, *)` where `*` means, any number of additional
@@ -427,11 +427,11 @@ class LogSigmoid(Module):
         return F.logsigmoid(input)
 
     def __repr__(self):
-        return self.__class__.__name__ + ' ()'
+        return self.__class__.__name__ + '()'
 
 
 class Softplus(Module):
-    """Applies element-wise :math:`f(x) = 1/beta * log(1 + exp(beta * x_i))`
+    r"""Applies element-wise :math:`f(x) = \frac{1}{\text{beta}} * \log(1 + \exp(\text{beta} * x_i))`
 
     SoftPlus is a smooth approximation to the ReLU function and can be used
     to constrain the output of a machine to always be positive.
@@ -465,13 +465,13 @@ class Softplus(Module):
         return F.softplus(input, self.beta, self.threshold)
 
     def __repr__(self):
-        return self.__class__.__name__ + ' (' \
+        return self.__class__.__name__ + '(' \
             + 'beta=' + str(self.beta) \
             + ', threshold=' + str(self.threshold) + ')'
 
 
 class Softshrink(Module):
-    """Applies the soft shrinkage function elementwise
+    r"""Applies the soft shrinkage function elementwise
 
     SoftShrinkage operator is defined as::
 
@@ -502,12 +502,12 @@ class Softshrink(Module):
         return F.softshrink(input, self.lambd)
 
     def __repr__(self):
-        return self.__class__.__name__ + ' (' \
+        return self.__class__.__name__ + '(' \
             + str(self.lambd) + ')'
 
 
 class PReLU(Module):
-    """Applies element-wise the function
+    r"""Applies element-wise the function
     :math:`PReLU(x) = max(0,x) + a * min(0,x)` Here "a" is a learnable
     parameter. When called without arguments, nn.PReLU() uses a single
     parameter "a" across all input channels. If called with nn.PReLU(nChannels),
@@ -543,12 +543,12 @@ class PReLU(Module):
         return F.prelu(input, self.weight)
 
     def __repr__(self):
-        return self.__class__.__name__ + ' (' \
-            + str(self.num_parameters) + ')'
+        return self.__class__.__name__ + '(' \
+            + 'num_parameters=' + str(self.num_parameters) + ')'
 
 
 class Softsign(Module):
-    """Applies element-wise, the function :math:`f(x) = x / (1 + |x|)`
+    r"""Applies element-wise, the function :math:`f(x) = \frac{x}{ 1 + |x|}`
 
     Shape:
         - Input: :math:`(N, *)` where `*` means, any number of additional
@@ -567,11 +567,11 @@ class Softsign(Module):
         return F.softsign(input)
 
     def __repr__(self):
-        return self.__class__.__name__ + ' ()'
+        return self.__class__.__name__ + '()'
 
 
 class Tanhshrink(Module):
-    """Applies element-wise, :math:`Tanhshrink(x) = x - Tanh(x)`
+    r"""Applies element-wise, :math:`Tanhshrink(x) = x - Tanh(x)`
 
     Shape:
         - Input: :math:`(N, *)` where `*` means, any number of additional
@@ -590,15 +590,15 @@ class Tanhshrink(Module):
         return F.tanhshrink(input)
 
     def __repr__(self):
-        return self.__class__.__name__ + ' ()'
+        return self.__class__.__name__ + '()'
 
 
 class Softmin(Module):
-    """Applies the Softmin function to an n-dimensional input Tensor
+    r"""Applies the Softmin function to an n-dimensional input Tensor
     rescaling them so that the elements of the n-dimensional output Tensor
     lie in the range `(0, 1)` and sum to 1
 
-    :math:`f(x) = exp(-x_i) / sum_j exp(-x_j)`
+    :math:`f(x) = \frac{\exp(-x_i)}{\sum_j \exp(-x_j)}`
 
     Shape:
         - Input: any shape
@@ -627,16 +627,16 @@ class Softmin(Module):
         return F.softmin(input, self.dim, _stacklevel=5)
 
     def __repr__(self):
-        return self.__class__.__name__ + ' ()'
+        return self.__class__.__name__ + '()'
 
 
 class Softmax(Module):
-    """Applies the Softmax function to an n-dimensional input Tensor
+    r"""Applies the Softmax function to an n-dimensional input Tensor
     rescaling them so that the elements of the n-dimensional output Tensor
     lie in the range (0,1) and sum to 1
 
     Softmax is defined as
-    :math:`f_i(x) = exp(x_i) / sum_j exp(x_j)`
+    :math:`f_i(x) = \frac{\exp(x_i)}{\sum_j \exp(x_j)}`
 
     Shape:
         - Input: any shape
@@ -676,11 +676,11 @@ class Softmax(Module):
         return F.softmax(input, self.dim, _stacklevel=5)
 
     def __repr__(self):
-        return self.__class__.__name__ + ' ()'
+        return self.__class__.__name__ + '()'
 
 
 class Softmax2d(Module):
-    """Applies SoftMax over features to each spatial location
+    r"""Applies SoftMax over features to each spatial location
 
     When given an image of Channels x Height x Width, it will
 
@@ -708,14 +708,14 @@ class Softmax2d(Module):
         return F.softmax(input, 1, _stacklevel=5)
 
     def __repr__(self):
-        return self.__class__.__name__ + ' ()'
+        return self.__class__.__name__ + '()'
 
 
 class LogSoftmax(Module):
-    """Applies the Log(Softmax(x)) function to an n-dimensional input Tensor.
+    r"""Applies the Log(Softmax(x)) function to an n-dimensional input Tensor.
     The LogSoftmax formulation can be simplified as
 
-    :math:`f_i(x) = log(exp(x_i) / sum_j exp(x_j) )`
+    :math:`f_i(x) = \log\left(\frac{\exp(x_i) }{ \sum_j \exp(x_j)} \right)`
 
     Shape:
         - Input: any shape
@@ -750,4 +750,4 @@ class LogSoftmax(Module):
         return F.log_softmax(input, self.dim, _stacklevel=5)
 
     def __repr__(self):
-        return self.__class__.__name__ + ' ()'
+        return self.__class__.__name__ + '()'

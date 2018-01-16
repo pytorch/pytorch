@@ -1,16 +1,88 @@
 #include <Python.h>
 #include <iostream>
-#ifdef WITH_CUDA
 #include "torch/csrc/jit/fusion_compiler.h"
-#endif
 #include "torch/csrc/jit/code_template.h"
-#include "torch/csrc/jit/assert.h"
+#include "torch/csrc/assertions.h"
 #include "torch/csrc/jit/ir.h"
 #include "torch/csrc/jit/attributes.h"
 #include "torch/csrc/jit/interned_strings.h"
 #include <vector>
+#include "torch/csrc/jit/interpreter.h"
 
 namespace torch { namespace jit {
+
+// help build Graphs for tests
+struct Var {
+  Var() : v(nullptr) {}
+  Var(Value * v) : v(v) {}
+  static Var Input(Graph & g, std::string name = "") {
+    return g.addInput(name);
+  }
+  void addAsOutput() {
+    v->owningGraph()->registerOutput(v);
+  }
+  static Var cat(ArrayRef<Var> inputs, int32_t dim) {
+    Node* n;
+    auto r = create(kcat, inputs, 1, &n)[0];
+    n->i_(kdim, dim);
+    return r;
+  }
+
+  static std::vector<Var> create(Symbol kind, ArrayRef<Var> inputs,
+                                 int num_outputs = 1,
+                                 Node** created_node = nullptr,
+                                 Graph * g = nullptr) {
+      if(g == nullptr) {
+        g = inputs.at(0).value()->owningGraph();
+      }
+      Node * n = g->appendNode(g->create(kind, num_outputs));
+      for(auto i : inputs) {
+        n->addInput(i.value());
+      }
+      if(created_node) {
+        *created_node = n;
+      }
+      std::vector<Var> out;
+      for(auto v : n->outputs()) {
+        out.emplace_back(v);
+      }
+      return out;
+  }
+  Var operator*(Var rhs) {
+    return create(kmul, {*this, rhs})[0];
+  }
+  Var operator+(Var rhs) {
+    Node * n;
+    auto r = create(kadd, {*this, rhs}, 1, &n)[0];
+    n->t_(kalpha, at::Scalar(1).toTensor());
+    return r;
+  }
+
+  Var mm(Var rhs) {
+    return create(s("mm"), {*this, rhs})[0];
+  }
+  Var sigmoid() {
+    return create(ksigmoid, {*this})[0];
+  }
+  Var tanh() {
+    return create(ktanh, {*this})[0];
+  }
+  std::vector<Var> chunk(int32_t chunks, uint32_t dim) {
+    Node * n;
+    auto r = create(s("chunk"), { *this }, chunks, &n);
+    n->i_(s("chunks"), chunks)
+    ->i_(s("dim"), dim);
+    return r;
+  }
+  Value * value() const {
+    return v;
+  }
+private:
+  static Symbol s(const char * s_) {
+    return stringToSymbol(s_);
+  }
+  Value * v;
+};
 
 template<typename T>
 static std::ostream & operator<<(std::ostream & out, const std::vector<T> & list) {
@@ -78,27 +150,26 @@ static void codeTemplateTest() {
   }
 }
 
-#ifdef WITH_CUDA
-Node * appendNewNode(NodeKind kind, Graph& graph, ArrayRef<Node*> inputs) {
-  return graph.appendNode(graph.create(kind,inputs));
+Value * appendNewNode(NodeKind kind, Graph& graph, ArrayRef<Value*> inputs) {
+  return graph.appendNode(graph.create(kind,inputs))->output();
 }
+
 
 static void fusionTests() {
   FusionCompiler comp;
-  cudaFree(0);
 
   auto testSimple = [&] {
     Graph graph;
-    Node * i0 = graph.addInput();
-    Node * i1 = graph.addInput();
-    auto o0 = appendNewNode(kMul,graph,{i0, i1});
-    graph.registerOutput(o0);
+    Var i0 = Var::Input(graph);
+    Var i1 = Var::Input(graph);
+    auto o0 = i0 * i1;
+    o0.addAsOutput();
     auto a = at::CUDA(at::kFloat).rand({3,4});
     auto b = at::CUDA(at::kFloat).rand({4,3}).transpose(0,1);
     auto o = at::CUDA(at::kFloat).zeros({3,4});
-    comp.debugLaunchGraph(graph, {a,b}, {o});
+    comp.debugLaunchGraph(graph, 0, {a,b}, {o});
     auto o2 = a*b;
-    float max_diff = (o2 - o).abs().max().toDouble();
+    float max_diff = (o2 - o).abs().max().toCDouble();
     //std::cout << "max diff: " << max_diff << "\n";
     JIT_ASSERT(max_diff == 0);
   };
@@ -108,24 +179,23 @@ static void fusionTests() {
 
     Graph graph;
 
-    Node * i0 = graph.addInput();
-    Node * i1 = graph.addInput();
-    Node * i2 = graph.addInput();
-    Node * i3 = graph.addInput();
-    Node * i4 = graph.addInput();
+    Var i0 = Var::Input(graph);
+    Var i1 = Var::Input(graph);
+    Var i2 = Var::Input(graph);
+    Var i3 = Var::Input(graph);
+    Var i4 = Var::Input(graph);
 
-    auto p22 = appendNewNode(kSigmoid,graph,{i4});
-    auto p20 = appendNewNode(kSigmoid,graph,{i3});
-    auto p18 = appendNewNode(kTanh,graph,{i2});
-    auto p16 = appendNewNode(kSigmoid,graph,{i1});
-    auto p14 = appendNewNode(kMul,graph,{p20, i0});
-    auto p11 = appendNewNode(kMul,graph,{p22, p18});
-    auto o1 = appendNewNode(kAdd,graph,{p14, p11});
-    auto p5 = appendNewNode(kTanh,graph,{o1});
-    auto o0 = appendNewNode(kMul,graph,{p16, p5});
-
-    graph.registerOutput(o0);
-    graph.registerOutput(o1);
+    auto p22 =  i4.sigmoid();
+    auto p20 = i3.sigmoid();
+    auto p18 = i2.tanh();
+    auto p16 = i1.sigmoid();
+    auto p14 = p20 * i0;
+    auto p11 = p22 * p18;
+    auto o1 = p14 + p11;
+    auto p5 = o1.tanh();
+    auto o0 = p16 * p5;
+    o0.addAsOutput();
+    o1.addAsOutput();
 
     graph.lint();
 
@@ -158,9 +228,9 @@ static void fusionTests() {
 
 
     //auto out0 = inputs[0]*inputs[1];
-    comp.debugLaunchGraph(graph, inputs, outputs);
+    comp.debugLaunchGraph(graph, 0, inputs, outputs);
     JIT_ASSERT(out0.is_same_size(outputs.front()));
-    float max_diff = (outputs.front() - out0).abs().max().toDouble();
+    float max_diff = (outputs.front() - out0).abs().max().toCDouble();
     JIT_ASSERT(max_diff < 1e-6);
 
   };
@@ -177,11 +247,12 @@ static void fusionTests() {
 
   auto testConcat = [&](int dim) {
     Graph graph;
-    Node * i0 = graph.addInput();
-    Node * i1 = graph.addInput();
-    auto o0 = appendNewNode(kMul,graph,{i0, i1});
-    graph.registerOutput(o0);
-    graph.registerOutput(appendNewNode(kConcat, graph, {i0,o0})->i_(kaxis, dim));
+    Var i0 = Var::Input(graph);
+    Var i1 = Var::Input(graph);
+    auto o0 = i0 * i1;
+    o0.addAsOutput();
+    Var::cat({i0, o0}, dim).addAsOutput();
+
     auto a = at::CUDA(at::kFloat).rand({3,4,5});
     auto b = at::CUDA(at::kFloat).rand({4,3,5}).transpose(0,1);
     auto o = at::CUDA(at::kFloat).zeros({3,4,5});
@@ -189,11 +260,11 @@ static void fusionTests() {
     auto o_r = a*b;
     auto o2_r = at::cat({a, o_r}, dim);
     auto o2 = at::CUDA(at::kFloat).zeros(o2_r.sizes());
-    comp.debugLaunchGraph(graph, {a,b}, {o, o2});
+    comp.debugLaunchGraph(graph, 0, {a,b}, {o, o2});
 
-    float max_diff = (o_r - o).abs().max().toDouble();
+    float max_diff = (o_r - o).abs().max().toCDouble();
     JIT_ASSERT(max_diff == 0);
-    float max_diff2 = (o2_r - o2).abs().max().toDouble();
+    float max_diff2 = (o2_r - o2).abs().max().toCDouble();
     JIT_ASSERT(max_diff2 == 0);
   };
   testConcat(0);
@@ -201,9 +272,6 @@ static void fusionTests() {
   testConcat(2);
 }
 
-#else //WITH_CUDA
-void fusionTests() {}
-#endif
 struct Attr : public Attributes<Attr> {
 };
 void attributesTest() {
@@ -213,38 +281,224 @@ void attributesTest() {
   auto four = kSlice;
   Attr attr;
   attr.f_(one,3.4)->i_(two,5)->s_(three,"what");
-  assert(attr.f(one) == 3.4);
-  assert(attr.s(three) == "what");
-  assert(attr.i(two) == 5);
+  JIT_ASSERT(attr.f(one) == 3.4);
+  JIT_ASSERT(attr.s(three) == "what");
+  JIT_ASSERT(attr.i(two) == 5);
   attr.s_(one,"no");
-  assert(attr.s(one) == "no");
-  assert(attr.hasAttribute(three));
-  assert(!attr.hasAttribute(four));
+  JIT_ASSERT(attr.s(one) == "no");
+  JIT_ASSERT(attr.hasAttribute(three));
+  JIT_ASSERT(!attr.hasAttribute(four));
   attr.ss_(two, {"hi", "now"});
-  assert(attr.ss(two).at(1) == "now");
+  JIT_ASSERT(attr.ss(two).at(1) == "now");
 
   Attr attr2;
   attr2.copyAttributes(attr);
-  assert(attr2.s(one) == "no");
+  JIT_ASSERT(attr2.s(one) == "no");
   attr2.f_(one,5);
-  assert(attr.s(one) == "no");
-  assert(attr2.f(one) == 5);
+  JIT_ASSERT(attr.s(one) == "no");
+  JIT_ASSERT(attr2.f(one) == 5);
 }
 
 void internedStringsTests () {
 
-  assert(kParam == stringToSymbol("Param"));
-  assert(kReturn == stringToSymbol("Return"));
-  assert(symbolToString(kReturn) == std::string("Return"));
-  assert(stringToSymbol("What") == kLastSymbol);
-  assert(stringToSymbol("What2") == kLastSymbol+1);
-  assert(stringToSymbol("What") == kLastSymbol);
-  assert(stringToSymbol("What2") == kLastSymbol+1);
-  assert(symbolToString(kLastSymbol+1) == std::string("What2"));
+  JIT_ASSERT(kParam == stringToSymbol("Param"));
+  JIT_ASSERT(kReturn == stringToSymbol("Return"));
+  JIT_ASSERT(symbolToString(kReturn) == std::string("Return"));
+  size_t symstart = stringToSymbol("__NEW_SYMBOL");
+  JIT_ASSERT(stringToSymbol("What") == symstart+1);
+  JIT_ASSERT(stringToSymbol("What2") == symstart+2);
+  JIT_ASSERT(stringToSymbol("What") == symstart+1);
+  JIT_ASSERT(stringToSymbol("What2") == symstart+2);
+  JIT_ASSERT(symbolToString(symstart+2) == std::string("What2"));
 }
 
 
+
+at::Tensor t_use(at::Tensor x) {
+  return x;
+}
+at::Tensor t_def(at::Tensor x) {
+  return x.t();
+}
+
+// given the difference of output vs expected tensor, check whether the
+// difference is within a relative tolerance range. This is a standard way of
+// matching tensor values upto certain precision
+bool checkRtol(const at::Tensor& diff, const std::vector<at::Tensor> inputs) {
+  double maxValue = 0.0;
+  for (auto& tensor : inputs) {
+    maxValue = fmax(tensor.abs().max().toCFloat(), maxValue);
+  }
+  return diff.abs().max().toCFloat() < 2e-6 * maxValue;
+}
+bool almostEqual(const at::Tensor & a, const at::Tensor & b) {
+  return checkRtol(a - b,{a, b});
+}
+
+bool exactlyEqual(const at::Tensor & a, const at::Tensor & b) {
+  return (a - b).abs().max().toCFloat() == 0.f;
+}
+
+std::pair<at::Tensor, at::Tensor>
+lstm(at::Tensor input,
+      at::Tensor hx,
+      at::Tensor cx,
+      at::Tensor w_ih,
+      at::Tensor w_hh) {
+  auto gates = input.mm(t_use(w_ih)) + hx.mm(t_use(w_hh));
+
+  auto chunked_gates = gates.chunk(4, 1);
+  auto ingate     = chunked_gates[0];
+  auto forgetgate = chunked_gates[1];
+  auto cellgate = chunked_gates[2];
+  auto outgate    = chunked_gates[3];
+
+  ingate = ingate.sigmoid();
+  outgate = outgate.sigmoid();
+  cellgate = cellgate.tanh();
+  forgetgate = forgetgate.sigmoid();
+
+  auto cy = (forgetgate * cx) + (ingate * cellgate);
+  auto hy = outgate * cy.tanh();
+
+  return {hy, cy};
+}
+
+std::tuple<Var, Var> build_lstm_body(
+  Graph & g,
+  Var input,
+  Var hx,
+  Var cx,
+  Var w_ih,
+  Var w_hh) {
+    auto gates =  input.mm(w_ih) + hx.mm(w_hh);
+    auto outputs = gates.chunk(4, 1);
+    auto ingate = outputs[0];
+    auto forgetgate = outputs[1];
+    auto cellgate = outputs[2];
+    auto outgate = outputs[3];
+    ingate = ingate.sigmoid();
+    outgate = outgate.sigmoid();
+    cellgate = cellgate.tanh();
+    forgetgate = forgetgate.sigmoid();
+
+    auto cy = forgetgate*cx + ingate*cellgate;
+    auto hy = outgate*cy.tanh();
+
+    return std::make_tuple(hy,cy);
+}
+
+std::shared_ptr<Graph> build_lstm() {
+  auto r = std::make_shared<Graph>();
+  auto & g = *r;
+  Value * input = g.addInput();
+  Value * hx = g.addInput();
+  Value * cx = g.addInput();
+  Value * w_ih = g.addInput();
+  Value * w_hh = g.addInput();
+
+  Var hy;
+  Var cy;
+  std::tie(hy,cy) = build_lstm_body(g, input, hx, cx, w_ih, w_hh);
+
+  hy.addAsOutput();
+  cy.addAsOutput();
+  g.lint();
+
+  return r;
+}
+
+std::shared_ptr<Graph> build_lstm_stages() {
+  auto r = std::make_shared<Graph>();
+  auto & g = *r;
+  Var input = g.addInput();
+  Var hx = g.addInput();
+  Var cx = g.addInput();
+  Var w_ih = g.addInput();
+  Var w_hh = g.addInput();
+
+  Var hy;
+  Var cy;
+  std::tie(hy,cy) = build_lstm_body(g, input, hx, cx, w_ih, w_hh);
+
+  // use some stuff from the previous stage as well
+  // as a new input
+  g.advanceStage();
+  hx = hy;
+  cy.addAsOutput();
+  cx = g.addInput();
+
+  std::tie(hy,cy) = build_lstm_body(g, input, hx, cx, w_ih, w_hh);
+
+  hy.addAsOutput();
+  cy.addAsOutput();
+  g.lint();
+
+  return r;
+}
+
+
+void interpTest() {
+    constexpr int batch_size = 4;
+    constexpr int input_size = 256;
+    constexpr int seq_len = 32;
+
+    int hidden_size = 2*input_size;
+
+    auto input = at::CUDA(at::kFloat).randn({seq_len, batch_size, input_size});
+    auto hx    = at::CUDA(at::kFloat).randn({batch_size, hidden_size});
+    auto cx    = at::CUDA(at::kFloat).randn({batch_size, hidden_size});
+    auto w_ih  = t_def(at::CUDA(at::kFloat).randn({4 * hidden_size, input_size}));
+    auto w_hh  = t_def(at::CUDA(at::kFloat).randn({4 * hidden_size, hidden_size}));
+
+    auto lstm_g = build_lstm();
+    Code  lstm_function(lstm_g);
+    std::vector<at::Tensor> outputs;
+    InterpreterState lstm_interp(lstm_function);
+    lstm_interp.runOneStage({input[0], hx, cx, w_ih, w_hh}, outputs);
+    std::tie(hx, cx) = lstm(input[0], hx, cx, w_ih, w_hh);
+
+    //std::cout << almostEqual(outputs[0],hx) << "\n";
+    JIT_ASSERT(exactlyEqual(outputs[0],hx));
+    JIT_ASSERT(exactlyEqual(outputs[1],cx));
+}
+
+void interpStageTest() {
+    constexpr int batch_size = 4;
+    constexpr int input_size = 256;
+    constexpr int seq_len = 32;
+
+    int hidden_size = 2*input_size;
+    auto input = at::CUDA(at::kFloat).randn({seq_len, batch_size, input_size});
+    auto hx    = at::CUDA(at::kFloat).randn({batch_size, hidden_size});
+    auto cx    = at::CUDA(at::kFloat).randn({batch_size, hidden_size});
+    auto cx1 = at::CUDA(at::kFloat).randn({batch_size, hidden_size});
+    auto w_ih  = t_def(at::CUDA(at::kFloat).randn({4 * hidden_size, input_size}));
+    auto w_hh  = t_def(at::CUDA(at::kFloat).randn({4 * hidden_size, hidden_size}));
+
+
+    auto lstm_g = build_lstm_stages();
+    Code lstm_function(lstm_g);
+    std::vector<at::Tensor> outputs;
+    InterpreterState lstm_interp(lstm_function);
+    lstm_interp.runOneStage({input[0], hx, cx, w_ih, w_hh}, outputs);
+    auto cy0 = outputs[0];
+    lstm_interp.runOneStage({cx1}, outputs);
+    at::Tensor ihx = outputs[0];
+    at::Tensor icx = outputs[1];
+
+
+    std::tie(hx, cx) = lstm(input[0], hx, cx, w_ih, w_hh);
+    std::tie(hx, cx) = lstm(input[0], hx, cx1, w_ih, w_hh);
+
+    //std::cout << almostEqual(outputs[0],hx) << "\n";
+    JIT_ASSERT(exactlyEqual(outputs[0],hx));
+    JIT_ASSERT(exactlyEqual(outputs[1],cx));
+}
+
 void runJITCPPTests() {
+  interpTest();
+  interpStageTest();
   codeTemplateTest();
   fusionTests();
   attributesTest();

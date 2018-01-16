@@ -15,11 +15,6 @@ struct EvalOutput : Function {
   EvalOutput(const edge_type& next_edge)
     : next_edge(next_edge) {
     num_inputs = 1;
-    // It would be nice if we could inherit this from the function of next_edge,
-    // but we want to always run this node to capture the output. This might
-    // confuse some of the functions causing them to do unnecessary work.
-    // TODO: it should be possible to improve this once we get rid of NULL Variables
-    is_executable = true;
   }
 
   virtual variable_list apply(const variable_list& inputs) override {
@@ -86,7 +81,7 @@ struct Eval : Function {
   std::shared_ptr<Function> simple_graph;
 
   placeholder_list placeholders;
-  jit::Node* forward_ctx_select = nullptr;
+  jit::Value* forward_ctx_select = nullptr;
   bool traceable = false;
 
 private:

@@ -18,11 +18,11 @@ you can specify optimizer-specific options such as the learning rate, weight dec
 
 .. note::
 
-    If you need to move a model to GPU via `.cuda()`, please do so before 
+    If you need to move a model to GPU via `.cuda()`, please do so before
     constructing optimizers for it. Parameters of a model after `.cuda()` will
-    be different objects with those before the call. 
+    be different objects with those before the call.
 
-    In general, you should make sure that optimized parameters live in  
+    In general, you should make sure that optimized parameters live in
     consistent locations when optimizers are constructed and used.
 
 Example::
@@ -111,6 +111,8 @@ Algorithms
     :members:
 .. autoclass:: Adam
     :members:
+.. autoclass:: SparseAdam
+    :members:
 .. autoclass:: Adamax
     :members:
 .. autoclass:: ASGD
@@ -128,7 +130,7 @@ How to adjust Learning Rate
 ---------------------------
 
 :mod:`torch.optim.lr_scheduler` provides several methods to adjust the learning
-rate based on the number of epoches. :class:`torch.optim.lr_scheduler.ReduceLROnPlateau`
+rate based on the number of epochs. :class:`torch.optim.lr_scheduler.ReduceLROnPlateau`
 allows dynamic learning rate reducing based on some validation measurements.
 
 .. autoclass:: torch.optim.lr_scheduler.LambdaLR
@@ -138,6 +140,8 @@ allows dynamic learning rate reducing based on some validation measurements.
 .. autoclass:: torch.optim.lr_scheduler.MultiStepLR
     :members:
 .. autoclass:: torch.optim.lr_scheduler.ExponentialLR
+    :members:
+.. autoclass:: torch.optim.lr_scheduler.CosineAnnealingLR
     :members:
 .. autoclass:: torch.optim.lr_scheduler.ReduceLROnPlateau
     :members:

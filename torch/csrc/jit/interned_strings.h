@@ -15,34 +15,42 @@ _(Param) \
 _(Select) \
 _(Return) \
 _(Eval) \
+_(add) \
 _(Add) \
+_(Div) \
 _(Mul) \
 _(Neg) \
+_(Sub) \
+_(Pow) \
 _(Sigmoid) \
 _(Tanh) \
+_(mul) \
+_(neg) \
+_(sigmoid) \
+_(tanh) \
 _(Constant) \
-_(Concat) \
+_(cat) \
 _(Slice) \
 _(Squeeze) \
 _(Undefined) \
 _(FusionGroup) \
-_(Split) \
 _(Gemm) \
-_(AddConstant) \
 _(SubConstant) \
 _(Scale) \
 _(Transpose) \
 _(Reshape) \
 _(split) \
+_(chunk) \
 _(Offset) \
 _(value) \
 _(Subgraph) \
-_(SpatialBN) \
+_(BatchNormalization) \
 _(Conv) \
-_(Caffe2ConvTranspose) \
 _(ConvTranspose) \
 _(is_test) \
 _(epsilon) \
+_(expand) \
+_(Expand) \
 _(order) \
 _(momentum) \
 _(consumed_inputs) \
@@ -60,11 +68,64 @@ _(dilations) \
 _(dilation) \
 _(broadcast) \
 _(axis) \
+_(size) \
+_(dim) \
 _(perm) \
 _(shape) \
 _(axes) \
 _(group) \
-_(__inplace)
+_(inplace) \
+_(transA) \
+_(transB) \
+_(other) \
+_(__and__) \
+_(__lshift__) \
+_(__or__) \
+_(__rshift__) \
+_(__xor__) \
+_(abs) \
+_(acos) \
+_(asin) \
+_(atan) \
+_(atan2) \
+_(ceil) \
+_(clamp) \
+_(cos) \
+_(cosh) \
+_(div) \
+_(eq) \
+_(equal) \
+_(exp) \
+_(expm1) \
+_(floor) \
+_(fmod) \
+_(frac) \
+_(ge) \
+_(gt) \
+_(le) \
+_(lerp) \
+_(lgamma) \
+_(log) \
+_(log1p) \
+_(lt) \
+_(max) \
+_(min) \
+_(ne) \
+_(ones) \
+_(pow) \
+_(reciprocal) \
+_(remainder) \
+_(round) \
+_(rsqrt) \
+_(sin) \
+_(sinh) \
+_(sqrt) \
+_(sub) \
+_(tan) \
+_(trunc) \
+_(zeros) \
+_(exponent) \
+_(device)
 
 enum BuiltinSymbol {
   #define DEFINE_SYMBOL(s) \
@@ -76,5 +137,9 @@ enum BuiltinSymbol {
 
 const char * symbolToString(Symbol s);
 Symbol stringToSymbol(const std::string & s);
+
+inline Symbol operator "" _sym(const char * s, size_t) {
+  return stringToSymbol(s);
+}
 
 }}

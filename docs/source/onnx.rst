@@ -53,34 +53,30 @@ exporter to print out a human-readable representation of the network::
 You can also verify the protobuf using the `onnx <https://github.com/onnx/onnx/>`_ library.
 You can install ``onnx`` with conda::
 
-    conda install -c ezyang onnx
+    conda install -c conda-forge onnx
 
 Then, you can run::
 
     import onnx
 
-    graph = onnx.load("alexnet.proto")
+    # Load the ONNX model
+    model = onnx.load("alexnet.proto")
 
     # Check that the IR is well formed
-    onnx.checker.check_graph(graph)
+    onnx.checker.check_model(model)
 
     # Print a human readable representation of the graph
-    onnx.helper.printable_graph(graph)
+    onnx.helper.printable_graph(model.graph)
 
 To run the exported script with `caffe2 <https://caffe2.ai/>`_, you will need three things:
 
-1. You'll need an install of Caffe2.  If you don't have one already,
-   you should make sure you have a Python 2 interpreter (Caffe2
-   doesn't officially support Python 3) and
-   `follow the install instructions <https://caffe2.ai/docs/getting-started.html>`_
-   (no Conda packaging for Caffe2 is available at the moment).
+1. You'll need an install of Caffe2.  If you don't have one already, Please
+   `follow the install instructions <https://caffe2.ai/docs/getting-started.html>`_.
 
 2. You'll need `onnx-caffe2 <https://github.com/onnx/onnx-caffe2>`_, a
    pure-Python library which provides a Caffe2 backend for ONNX.  You can install ``onnx-caffe2``
-   with conda or pip::
+   with pip::
 
-      conda install -c ezyang onnx-caffe2
-      # OR
       pip install onnx-caffe2
 
 Once these are installed, you can use the backend for Caffe2::
@@ -89,7 +85,7 @@ Once these are installed, you can use the backend for Caffe2::
     import onnx_caffe2.backend as backend
     import numpy as np
 
-    rep = backend.prepare(graph, device="CUDA:0") # or "CPU"
+    rep = backend.prepare(model, device="CUDA:0") # or "CPU"
     # For the Caffe2 backend:
     #     rep.predict_net is the Caffe2 protobuf for the network
     #     rep.workspace is the Caffe2 workspace for the network
@@ -124,34 +120,60 @@ Limitations
 Supported operators
 -------------------
 
-In this tech preview, only the following operators are supported:
+The following operators are supported:
 
-* Add (inplace is discarded)
-* Sub (inplace is discarded)
-* Mul (inplace is discarded)
-* Negate (inplace is discarded)
-* Addmm (inplace is discarded, alpha and beta must be 1)
-* Tanh (inplace is discarded)
-* Sigmoid (inplace is discarded)
-* Transpose
-* View
-* Permute
-* Concat
-* Squeeze (inplace is discarded)
+* add (nonzero alpha not supported)
+* sub (nonzero alpha not supported)
+* mul
+* div
+* cat
+* mm
+* addmm
+* neg
+* sqrt
+* tanh
+* sigmoid
+* mean
+* sum
+* prod
+* t
+* expand (only when used before a broadcasting ONNX operator; e.g., add)
+* transpose
+* view
+* split
+* squeeze
+* prelu (single weight shared among input channels not supported)
+* threshold (non-zero threshold/non-zero value not supported)
+* leaky_relu
+* glu
+* softmax
+* avg_pool2d (ceil_mode not supported)
+* log_softmax
+* unfold (experimental support with ATen-Caffe2 integration)
+* elu
+* concat
+* abs
+* index_select
+* pow
+* clamp
+* max
+* min
+* eq
+* exp
+* permute
+* Conv
 * BatchNorm
-* Convolution
-* Embedding (only optional argument that is supported is ``padding_idx``)
-* Slice (only integer indexing is supported)
-* Dropout (inplace is discarded)
-* Relu (inplace is discarded)
-* PReLU (inplace is discarded, sharing a single weight among all channels is not supported)
-* LeakyRelu (inplace is discarded)
-* MaxPool1d (ceil_mode must be False)
-* MaxPool2d (ceil_mode must be False)
-* AvgPool2d (ceil_mode must be False)
+* MaxPool1d (ceil_mode not supported)
+* MaxPool2d (ceil_mode not supported)
+* MaxPool3d (ceil_mode not supported)
+* Embedding (no optional arguments supported)
+* RNN
+* ConstantPadNd
+* Dropout
+* FeatureDropout (training mode not supported)
+* Index (constant integer and tuple indices supported)
 
-We plan on expanding support to more operators; RNNs are high on our priority
-list.  The operator set above is sufficient to export the following models:
+The operator set above is sufficient to export the following models:
 
 * AlexNet
 * DCGAN
@@ -163,8 +185,132 @@ list.  The operator set above is sufficient to export the following models:
 * VGG
 * `word_language_model <https://github.com/pytorch/examples/tree/master/word_language_model>`_
 
-The interface for specifying operator definitions is highly experimental
-and undocumented; adventurous users should note that the APIs will probably
+Adding export support for operators is an *advance usage*.
+To achieve this, developers need to touch the source code of PyTorch.
+Please follow the `instructions <https://github.com/pytorch/pytorch#from-source>`_
+for installing PyTorch from source.
+If the wanted operator is standardized in ONNX, it should be easy to add
+support for exporting such operator (adding a symbolic function for the operator).
+To confirm whether the operator is standardized or not, please check the
+`ONNX operator list <https://github.com/onnx/onnx/blob/master/docs/Operators.md>`_.
+
+If the operator is an ATen operator, which means you can find the declaration
+of the function in ``torch/csrc/autograd/generated/VariableType.h``
+(available in generated code in PyTorch install dir), you should add the symbolic
+function in ``torch/onnx/symbolic.py`` and follow the instructions listed as below:
+
+* Define the symbolic function in
+  `torch/onnx/symbolic.py <https://github.com/pytorch/pytorch/blob/master/torch/onnx/symbolic.py>`_.
+  Make sure the function has the same name as the ATen operator/function
+  defined in ``VariableType.h``.
+* The first parameter is always the exported ONNX graph.
+  Parameter names must EXACTLY match the names in ``VariableType.h``,
+  because dispatch is done with keyword arguments.
+* Parameter ordering does NOT necessarily match what is in ``VariableType.h``,
+  tensors (inputs) are always first, then non-tensor arguments.
+* In the symbolic function, if the operator is already standardized in ONNX,
+  we only need to create a node to represent the ONNX operator in the graph.
+* If the input argument is a tensor, but ONNX asks for a scalar, we have to
+  explicitly do the conversion. The helper function ``_scalar`` can convert a
+  scalar tensor into a python scalar, and ``_if_scalar_type_as`` can turn a
+  Python scalar into a PyTorch tensor.
+
+If the operator is a non-ATen operator, the symbolic function has to be
+added in the corresponding PyTorch Function class. Please read the following
+instructions:
+
+* Create a symbolic function named ``symbolic`` in the corresponding Function class.
+* The first parameter is always the exported ONNX graph.
+* Parameter names except the first must EXACTLY match the names in ``forward``.
+* The output tuple size must match the outputs of ``forward``.
+* In the symbolic function, if the operator is already standardized in ONNX,
+  we just need to create a node to represent the ONNX operator in the graph.
+
+Symbolic functions should be implemented in Python. All of these functions interact
+with Python methods which are implemented via C++-Python bindings,
+but intuitively the interface they provide looks like this::
+
+
+    def operator/symbolic(g, *inputs):
+      """
+      Modifies Graph (e.g., using "op"), adding the ONNX operations representing
+      this PyTorch function, and returning a Value or tuple of Values specifying the
+      ONNX outputs whose values correspond to the original PyTorch return values
+      of the autograd Function (or None if an output is not supported by ONNX).
+
+      Arguments:
+        g (Graph): graph to write the ONNX representation into
+        inputs (Value...): list of values representing the variables which contain
+            the inputs for this function
+      """
+
+    class Value(object):
+      """Represents an intermediate tensor value computed in ONNX."""
+      def type(self):
+        """Returns the Type of the value."""
+
+    class Type(object):
+      def sizes(self):
+        """Returns a tuple of ints representing the shape of a tensor this describes."""
+
+    class Graph(object):
+      def op(self, opname, *inputs, **attrs):
+        """
+        Create an ONNX operator 'opname', taking 'args' as inputs
+        and attributes 'kwargs' and add it as a node to the current graph,
+        returning the value representing the single output of this
+        operator (see the `outputs` keyword argument for multi-return
+        nodes).
+
+        The set of operators and the inputs/attributes they take
+        is documented at https://github.com/onnx/onnx/blob/master/docs/Operators.md
+
+        Arguments:
+            opname (string): The ONNX operator name, e.g., `Abs` or `Add`.
+            args (Value...): The inputs to the operator; usually provided
+                as arguments to the `symbolic` definition.
+            kwargs: The attributes of the ONNX operator, with keys named
+                according to the following convention: `alpha_f` indicates
+                the `alpha` attribute with type `f`.  The valid type specifiers are
+                `f` (float), `i` (int), `s` (string) or `t` (Tensor).  An attribute
+                specified with type float accepts either a single float, or a
+                list of floats (e.g., you would say `dims_i` for a `dims` attribute
+                that takes a list of integers).
+            outputs (int, optional):  The number of outputs this operator returns;
+                by default an operator is assumed to return a single output.
+                If `outputs` is greater than one, this functions returns a tuple
+                of output `Value`, representing each output of the ONNX operator
+                in positional.
+        """
+
+The ONNX graph C++ definition is in ``torch/csrc/jit/ir.h``.
+
+Here is an example of handling missing symbolic function for ``elu`` operator.
+We try to export the model and see the error message as below::
+
+    UserWarning: ONNX export failed on elu because torch.onnx.symbolic.elu does not exist
+    RuntimeError: ONNX export failed: Couldn't export operator elu
+
+The export fails because PyTorch does not support exporting ``elu`` operator.
+We find ``virtual Tensor elu(const Tensor & input, Scalar alpha, bool inplace) const override;``
+in ``VariableType.h``. This means ``elu`` is an ATen operator.
+We check the `ONNX operator list <http://https://github.com/onnx/onnx/blob/master/docs/Operators.md>`_,
+and confirm that ``Elu`` is standardized in ONNX.
+We add the following lines to ``symbolic.py``::
+
+    def elu(g, input, alpha, inplace=False):
+        return g.op("Elu", input, alpha_f=_scalar(alpha))
+
+Now PyTorch is able to export ``elu`` operator.
+
+There are more examples in
+`symbolic.py <https://github.com/pytorch/pytorch/blob/master/torch/onnx/symbolic.py>`_,
+`tensor.py <https://github.com/pytorch/pytorch/blob/99037d627da68cdf53d3d0315deceddfadf03bba/torch/autograd/_functions/tensor.py#L24>`_,
+`padding.py <https://github.com/pytorch/pytorch/blob/99037d627da68cdf53d3d0315deceddfadf03bba/torch/nn/_functions/padding.py#L8>`_.
+
+
+The interface for specifying operator definitions is experimental;
+adventurous users should note that the APIs will probably
 change in a future interface.
 
 Functions

@@ -2,7 +2,7 @@
 
 #include "torch/csrc/jit/interned_strings.h"
 #include "torch/csrc/jit/generic_if.h"
-#include "torch/csrc/jit/assert.h"
+#include "torch/csrc/assertions.h"
 
 #include <ATen/ATen.h>
 
@@ -12,7 +12,6 @@
 namespace torch { namespace jit {
 
 #define TH_FORALL_TYPES(_) \
-_(MultiType) \
 _(TensorType) \
 _(HandleType)
 
@@ -59,7 +58,7 @@ struct TensorType : public Type {
   TensorType(const at::Tensor& tensor)
     : Type(TypeKind::TensorType)
     , scalar_type_(tensor.type().scalarType())
-    , device_(tensor.type().isCuda() ? tensor.get_device() : -1)
+    , device_(tensor.type().is_cuda() ? tensor.get_device() : -1)
     , sizes_(tensor.sizes())
     , strides_(tensor.strides()) {}
   TensorType(at::ScalarType scalar_type, int device, std::vector<int64_t> sizes, std::vector<int64_t> strides)
@@ -97,18 +96,6 @@ private:
   std::vector<int64_t> strides_;
 };
 
-// Type of multireturn nodes. Note that it doesn't mean that they must always
-// have multiple outputs, but each output will be represented with a select node.
-struct MultiType : public Type {
-  friend struct Type;
-
-  MultiType()
-    : Type(TypeKind::MultiType) {}
-
-public:
-  static const TypeKind Kind = TypeKind::MultiType;
-};
-
 // This value represents an opaque handle to external state.
 // Operators that produce/consume values of this type agree on
 // the format.
@@ -135,11 +122,6 @@ struct HandleType : public Type {
 public:
   static const TypeKind Kind = TypeKind::HandleType;
 };
-
-inline TypePtr multiType() {
-  static TypePtr multiType = std::make_shared<MultiType>();
-  return multiType;
-}
 
 std::ostream& operator<<(std::ostream & out, const Type & t);
 

@@ -209,23 +209,20 @@ def once_differentiable(fn):
         # Unfortunately, this leads to unexpected error messages ("no nodes
         # require computing gradients"), but I don't have a better idea.
         # These functions would raise an error in backward anyway.
-        volatile = any(arg.volatile if isinstance(arg, Variable) else False
-                       for arg in args)
         requires_grad = any(arg.requires_grad if isinstance(arg, Variable) else False
                             for arg in args)
-        if volatile:
+        if not torch.is_grad_enabled():
             def err_fn(*args):
                 return args
-            kwargs = {'volatile': True}
         else:
             err_fn = torch._C._functions.DelayedError(
                 b"trying to differentiate twice a function that was marked"
                 b"with @once_differentiable")
-            kwargs = {'requires_grad': requires_grad}
         if not isinstance(outputs, tuple):
-            var = Variable(outputs, **kwargs) if outputs is not None else None
+            var = (Variable(outputs, requires_grad=requires_grad)
+                   if outputs is not None else None)
             return err_fn(var)
-        return err_fn(*[Variable(o, **kwargs) if o is not None else None
+        return err_fn(*[Variable(o, requires_grad=requires_grad) if o is not None else None
                       for o in outputs])
     return wrapper
 
@@ -236,7 +233,7 @@ def traceable(fn_cls):
     Traceable functions have additional restrictions - they can't pass any
     data-dependent values to backward (e.g. Prod passes the output, which makes
     it non-traceable), and their backward should be implemented entirely in terms
-    of operations on autograd Variables in all cases (even when grads are volatile).
+    of operations on autograd Variables in all cases.
 
     DON'T USE THIS DECORATOR. IT IS FOR INTERNAL USE ONLY AND SHOULD BE HANDLED WITH
     CARE (or can give incorrect results otherwise).
@@ -252,7 +249,7 @@ class InplaceFunction(Function):
         self.inplace = inplace
 
 
-def _nested_map(condition, fn):
+def _nested_map(condition, fn, condition_msg=None):
     def _map(obj):
         if condition(obj):
             return fn(obj)
@@ -261,12 +258,16 @@ def _nested_map(condition, fn):
         elif isinstance(obj, (list, tuple)):
             return type(obj)(_map(x) for x in obj)
         else:
-            raise ValueError("NestedIOFunction doesn't know how to process "
-                             "an input object of type " + torch.typename(obj))
+            raise ValueError("Auto nesting doesn't know how to process "
+                             "an input object of type " + torch.typename(obj) +
+                             (". Accepted types: " + condition_msg +
+                              ", or lists/tuples of them"
+                              if condition_msg else ""))
+
     return _map
 
 
-def _iter_filter(condition):
+def _iter_filter(condition, skip_unknown=False, condition_msg=None):
     def _iter(obj):
         if condition(obj):
             yield obj
@@ -276,9 +277,13 @@ def _iter_filter(condition):
             for o in obj:
                 for var in _iter(o):
                     yield var
-        else:
-            raise ValueError("NestedIOFunction doesn't know how to process "
-                             "an input object of type " + torch.typename(obj))
+        elif not skip_unknown:
+            raise ValueError("Auto nesting doesn't know how to process "
+                             "an input object of type " + torch.typename(obj) +
+                             (". Accepted types: " + condition_msg +
+                              ", or lists/tuples of them"
+                              if condition_msg else ""))
+
     return _iter
 
 
@@ -297,27 +302,14 @@ def _unflatten(input, proto):
     return unflatten_helper(input, proto)[0]
 
 
-# Return suitable 'prototype' that doesn't hold
-# references possibly big options from 'obj'
-def _to_proto(obj):
-    def helper(obj):
-        if isinstance(obj, torch.autograd.Variable):
-            return "HOLE"
-        elif obj is None:
-            return None
-        elif isinstance(obj, (list, tuple)):
-            type_ = type(obj)
-            return type_(helper(o) for o in obj)
-        else:
-            raise ValueError("NestedIOFunction doesn't know how to process "
-                             "an input object of type " + torch.typename(obj))
-    return helper(obj)
-
-
-_iter_variables = _iter_filter(lambda o: isinstance(o, torch.autograd.Variable))
-_iter_tensors = _iter_filter(torch.is_tensor)
-_iter_None_tensors = _iter_filter(lambda o: o is None or torch.is_tensor(o))
-_map_variable_tensor = _nested_map(lambda o: isinstance(o, torch.autograd.Variable), lambda o: o.data)
+_iter_variables = _iter_filter(lambda o: isinstance(o, torch.autograd.Variable), condition_msg="Variables")
+_iter_variables_permissive = _iter_filter(lambda o: isinstance(o, torch.autograd.Variable), skip_unknown=True)
+_iter_jit_values = _iter_filter(lambda o: o is None or isinstance(o, torch._C.Value),
+                                condition_msg="jit's Values or None")
+_iter_tensors = _iter_filter(torch.is_tensor, condition_msg="Tensors")
+_iter_None_tensors = _iter_filter(lambda o: o is None or torch.is_tensor(o), condition_msg="Tensors or None")
+_map_variable_tensor = _nested_map(lambda o: isinstance(o, torch.autograd.Variable),
+                                   lambda o: o.data, condition_msg="Variables")
 
 
 class NestedIOFunction(Function):

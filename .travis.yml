@@ -3,38 +3,6 @@ language: python
 dist: trusty
 git:
   submodules: false
-python:
-    - 2.7.9
-    - 2.7
-    - 3.5
-    - 3.6
-    - nightly
-
-cache:
-    - ccache
-    - directories:
-        - $HOME/.ccache
-
-install:
-    - unset CCACHE_DISABLE
-    - export CCACHE_DIR=$HOME/.ccache
-    - export CC="ccache gcc-5"
-    - export CXX="ccache g++-5"
-    - ccache --show-stats
-    - travis_retry pip install --upgrade pip setuptools wheel
-    - travis_retry pip install -r requirements.txt --only-binary=scipy
-    - git submodule update --init --recursive
-    - MAX_JOBS=8 python setup.py install
-
-addons:
-    apt:
-        sources:
-            - ubuntu-toolchain-r-test
-        packages:
-            - g++-5
-
-script:
-    - OMP_NUM_THREADS=2 ./test/run_test.sh
 
 # This reportedly works around an issue downloading packages from pypi on
 # travis.  Consider removing this after the underlying issue is fixed.
@@ -46,6 +14,5 @@ matrix:
     include:
         env: LINT_CHECK
         python: "2.7"
-        addons: true
         install: pip install flake8
         script: flake8

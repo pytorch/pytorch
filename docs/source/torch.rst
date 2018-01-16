@@ -36,9 +36,11 @@ Indexing, Slicing, Joining, Mutating Ops
 .. autofunction:: squeeze
 .. autofunction:: stack
 .. autofunction:: t
+.. autofunction:: take
 .. autofunction:: transpose
 .. autofunction:: unbind
 .. autofunction:: unsqueeze
+.. autofunction:: where
 
 
 Random sampling
@@ -67,7 +69,7 @@ There are a few more in-place random sampling functions defined on Tensors as we
 - :func:`torch.Tensor.log_normal_` - samples from the log-normal distribution
 - :func:`torch.Tensor.normal_` - in-place version of :func:`torch.normal`
 - :func:`torch.Tensor.random_` - numbers sampled from the discrete uniform distribution
-- :func:`torch.Tensor.uniform_` - numbers sampled from the uniform distribution
+- :func:`torch.Tensor.uniform_` - numbers sampled from the continuous uniform distribution
 
 
 Serialization
@@ -104,6 +106,7 @@ Pointwise Ops
 .. autofunction:: erf
 .. autofunction:: erfinv
 .. autofunction:: exp
+.. autofunction:: expm1
 .. autofunction:: floor
 .. autofunction:: fmod
 .. autofunction:: frac
@@ -158,6 +161,14 @@ Comparison Ops
 .. autofunction:: topk
 
 
+Spectral Ops
+~~~~~~~~~~~~~~~~~~~~~~
+.. autofunction:: stft
+.. autofunction:: hann_window
+.. autofunction:: hamming_window
+.. autofunction:: bartlett_window
+
+
 Other Operations
 ~~~~~~~~~~~~~~~~~~~~~~
 .. autofunction:: cross
@@ -179,7 +190,9 @@ BLAS and LAPACK Operations
 .. autofunction:: baddbmm
 .. autofunction:: bmm
 .. autofunction:: btrifact
+.. autofunction:: btrifact_with_info
 .. autofunction:: btrisolve
+.. autofunction:: btriunpack
 .. autofunction:: dot
 .. autofunction:: eig
 .. autofunction:: gels
@@ -187,6 +200,7 @@ BLAS and LAPACK Operations
 .. autofunction:: ger
 .. autofunction:: gesv
 .. autofunction:: inverse
+.. autofunction:: det
 .. autofunction:: matmul
 .. autofunction:: mm
 .. autofunction:: mv
@@ -200,4 +214,3 @@ BLAS and LAPACK Operations
 .. autofunction:: svd
 .. autofunction:: symeig
 .. autofunction:: trtrs
-

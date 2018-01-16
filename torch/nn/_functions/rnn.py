@@ -1,5 +1,5 @@
 import warnings
-from torch.autograd import Function, NestedIOFunction, Variable
+from torch.autograd import NestedIOFunction
 import torch.backends.cudnn as cudnn
 from .. import functional as F
 from .thnn import rnnFusedPointwise as fusedBackend
@@ -24,7 +24,7 @@ def LSTMCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
     if input.is_cuda:
         igates = F.linear(input, w_ih)
         hgates = F.linear(hidden[0], w_hh)
-        state = fusedBackend.LSTMFused()
+        state = fusedBackend.LSTMFused.apply
         return state(igates, hgates, hidden[1]) if b_ih is None else state(igates, hgates, hidden[1], b_ih, b_hh)
 
     hx, cx = hidden
@@ -48,7 +48,7 @@ def GRUCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
     if input.is_cuda:
         gi = F.linear(input, w_ih)
         gh = F.linear(hidden, w_hh)
-        state = fusedBackend.GRUFused()
+        state = fusedBackend.GRUFused.apply
         return state(gi, gh, hidden) if b_ih is None else state(gi, gh, hidden, b_ih, b_hh)
 
     gi = F.linear(input, w_ih, b_ih)
@@ -276,7 +276,7 @@ class CudnnRNN(NestedIOFunction):
         if flat_weight is None:
             warnings.warn("RNN module weights are not part of single contiguous "
                           "chunk of memory. This means they need to be compacted "
-                          "at every call, possibly greately increasing memory usage. "
+                          "at every call, possibly greatly increasing memory usage. "
                           "To compact weights again call flatten_parameters().", stacklevel=5)
 
     def forward_extended(self, input, weight, hx):
@@ -343,11 +343,23 @@ class CudnnRNN(NestedIOFunction):
 
 
 def RNN(*args, **kwargs):
+
     def forward(input, *fargs, **fkwargs):
         if cudnn.is_acceptable(input.data):
             func = CudnnRNN(*args, **kwargs)
         else:
             func = AutogradRNN(*args, **kwargs)
+
+        # Hack for the tracer that allows us to represent RNNs as single
+        # nodes and export them to ONNX in this form
+        # It can be also used as a decorator at the higher level
+        # Check the first argument explicitly to reduce the overhead of creating
+        # the lambda
+        import torch
+        if torch._C._jit_is_tracing(input):
+            import torch.onnx.symbolic
+            func = torch.onnx.symbolic.RNN_symbolic_builder(*args, **kwargs)(func)
+
         return func(input, *fargs, **fkwargs)
 
     return forward

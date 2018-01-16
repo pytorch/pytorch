@@ -91,41 +91,6 @@ def logsigmoid_double_backwards(ctx, ggI):
     return gI, ggO, None, None, None, None
 
 
-def reflectionpad1d_double_backwards(ctx, ggI):
-    gI = None
-    ggO = torch.nn._functions.thnn.auto.ReflectionPad1d.apply(ggI, *ctx.additional_args)
-
-    return gI, ggO, None, None, None, None
-
-
-def reflectionpad2d_double_backwards(ctx, ggI):
-    gI = None
-    ggO = torch.nn._functions.thnn.auto.ReflectionPad2d.apply(ggI, *ctx.additional_args)
-
-    return gI, ggO, None, None, None, None
-
-
-def replicationpad1d_double_backwards(ctx, ggI):
-    gI = None
-    ggO = torch.nn._functions.thnn.auto.ReplicationPad1d.apply(ggI, *ctx.additional_args)
-
-    return gI, ggO, None, None, None, None
-
-
-def replicationpad2d_double_backwards(ctx, ggI):
-    gI = None
-    ggO = torch.nn._functions.thnn.auto.ReplicationPad2d.apply(ggI, *ctx.additional_args)
-
-    return gI, ggO, None, None, None, None
-
-
-def replicationpad3d_double_backwards(ctx, ggI):
-    gI = None
-    ggO = torch.nn._functions.thnn.auto.ReplicationPad3d.apply(ggI, *ctx.additional_args)
-
-    return gI, ggO, None, None, None, None
-
-
 def softplus_double_backwards(ctx, ggI):
     t = ctx.saved_variables
     input, gO, output = t[0], t[1], t[2]
@@ -205,6 +170,7 @@ def nllloss_double_backwards(ctx, ggI):
     weights = Variable(ctx.additional_args[1])
     size_average = ctx.additional_args[0]
     ignore_index = ctx.additional_args[3]
+    reduce = ctx.additional_args[4]
 
     gI = None
 
@@ -225,12 +191,15 @@ def nllloss_double_backwards(ctx, ggI):
         weights_to_scatter = weights_maybe_resized.gather(0, safe_target)
 
     weights_to_scatter.masked_fill_(target_mask, 0)
-    divisor = weights_to_scatter.sum() if size_average else 1
+    divisor = weights_to_scatter.sum() if size_average and reduce else 1
     weights_to_scatter = -1 * weights_to_scatter / divisor
     zeros = Variable(ggI.data.new(ggI.size()).zero_())
     mask = zeros.scatter_(1, safe_target.unsqueeze(1), weights_to_scatter.unsqueeze(1))
 
-    ggO = (ggI * mask).sum()
+    if reduce:
+        ggO = (ggI * mask).sum()
+    else:
+        ggO = (ggI * mask).sum(dim=1)
 
     return gI, None, ggO, None, None, None
 
@@ -275,11 +244,6 @@ double_backwards_fns = {
     'Hardtanh': hardtanh_double_backwards,
     'LeakyReLU': leakyrelu_double_backwards,
     'LogSigmoid': logsigmoid_double_backwards,
-    'ReflectionPad1d': reflectionpad1d_double_backwards,
-    'ReflectionPad2d': reflectionpad2d_double_backwards,
-    'ReplicationPad1d': replicationpad1d_double_backwards,
-    'ReplicationPad2d': replicationpad2d_double_backwards,
-    'ReplicationPad3d': replicationpad3d_double_backwards,
     'Softplus': softplus_double_backwards,
     'Softshrink': softshrink_double_backwards,
     'Threshold': threshold_double_backwards,

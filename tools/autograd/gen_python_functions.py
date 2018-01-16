@@ -1,7 +1,12 @@
+# Generates Python bindings for ATen functions
+#
+# The bindings are generated as methods on python_variable or functions on the
+# torch._C._nn object.
+
 from .nested_dict import nested_dict
 from tools.shared.module_loader import import_module
 
-CodeTemplate = import_module('code_template', 'torch/lib/ATen/code_template.py').CodeTemplate
+CodeTemplate = import_module('code_template', 'aten/src/ATen/code_template.py').CodeTemplate
 
 
 PY_VARIABLE_METHOD_VARARGS = CodeTemplate("""\
@@ -35,6 +40,12 @@ ${cond} (r.idx == ${i}) {
   return wrap(${dispatch_name}(${actuals}));
 """)
 
+PY_VARIABLE_CASE_WITH_UNPACK = CodeTemplate("""\
+${cond} (r.idx == ${i}) {
+  ${unpack_args}
+  return wrap(${dispatch_name}(${actuals}));
+""")
+
 PY_VARIABLE_DISPATCH = CodeTemplate("""\
 inline ${return_type} ${dispatch_name}(${formal_args}) {
   ${AutoNoGIL}
@@ -46,7 +57,21 @@ inline ${return_type} ${dispatch_name}(${formal_args}) {
 PY_VARIABLE_METHOD_DEF = CodeTemplate("""\
 {"${name}", (PyCFunction)${pycname}, ${flags}, NULL},""")
 
+UNPACK_ARG = CodeTemplate("""\
+${formal_arg} = ${actual};""")
+
 UNPACK_SELF = "auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;"
+
+# XXX: if you got here because of an assertion failure, it doesn't mean
+# it's enough to just extend the list here. Before you do this, make sure
+# to add an appropriate wrap() overload in torch/csrc/autograd/utils/wrap_outputs.h.
+SUPPORTED_RETURN_TYPES = {
+    'Tensor', 'std::tuple<Tensor,Tensor>',
+    'std::tuple<Tensor,Tensor,Tensor>',
+    'std::tuple<Tensor,Tensor,Tensor,Tensor>',
+    'std::vector<Tensor>',
+    'Scalar', 'bool', 'int64_t', 'void*'
+}
 
 
 def create_python_bindings(
@@ -59,12 +84,21 @@ def create_python_bindings(
 
     unpack_methods = {
         'const Tensor &': 'tensor',
+        'SparseTensor': 'tensor',
+        'Tensor &': 'tensor',
         'Generator *': 'generator',
         'Storage &': 'storage',
         'int64_t': 'toInt64',
-        'int': 'toInt64',
         'bool': 'toBool',
         'double': 'toDouble',
+    }
+
+    unpack_with_default_methods = {
+        'IntList': 'setDefaultIntlist',
+        'Scalar': 'scalarWithDefault',
+        'int64_t': 'toInt64WithDefault',
+        'bool': 'setDefaultBool',
+        'double': 'setDefaultDouble',
     }
 
     def first_tensor_arg(arguments):
@@ -81,13 +115,18 @@ def create_python_bindings(
 
     def emit_dispatch(i, function):
         env = {}
+        simple_return_type = function['return_type'].replace(' &', '')
+        assert simple_return_type in SUPPORTED_RETURN_TYPES, \
+            function['name'] + ' returns unsupported type: ' + simple_return_type
 
         actuals = []
+        unpack_args = False
         formal_args = []
         arg_idx = 0
         for arg in function['arguments']:
-            if 'Tensor' in function['method_of'] and arg['name'] == 'self':
-                formal_args.append('Tensor & {}'.format(arg['name']))
+            name = arg['name']
+            if 'Tensor' in function['method_of'] and name == 'self':
+                formal_args.append('Tensor & {}'.format(name))
                 actuals.append('self_')
                 continue
 
@@ -97,16 +136,52 @@ def create_python_bindings(
             if typename.startswith('LongTensor'):
                 typename = 'Tensor'
 
-            unpack = unpack_methods.get(typename, typename.lower())
-            actuals.append('r.{}({})'.format(unpack, arg_idx))
+            if arg.get('python_default_init'):
+                unpack_args = True
+                assert typename in unpack_with_default_methods, \
+                    '`{}` type is not supported in python_default_init'.format(typename)
+                unpack_with_default = unpack_with_default_methods.get(typename)
+                default_expr = arg.get('python_default_init')
+                expr = 'r.{}({}, {})'.format(unpack_with_default, arg_idx, default_expr)
+            else:
+                unpack = unpack_methods.get(typename, typename.lower())
+                expr = 'r.{}({})'.format(unpack, arg_idx)
+
+            if typename == 'Storage &':
+                expr = '*' + expr
+            if typename == 'SparseTensor':
+                expr = 'SparseTensor({})'.format(expr)
+
+            actuals.append(expr)
             dispatch_type = typename
-            dispatch_type = 'const Tensor &' if dispatch_type == 'Tensor' else dispatch_type
-            formal_args.append('{} {}'.format(dispatch_type, arg['name']))
+            if dispatch_type == 'Tensor':
+                dispatch_type = 'const Tensor &'
+            elif dispatch_type == 'Tensor &':
+                dispatch_type = 'Tensor'
+            formal_args.append('{} {}'.format(dispatch_type, name))
             arg_idx += 1
 
         env['i'] = i
-        env['actuals'] = actuals
+        env['unpack_args'] = []
         env['formal_args'] = formal_args
+        if unpack_args:
+            unpack_statements_no_default = []
+            unpack_statements_with_default = []
+            actual_names = []
+            for arg, formal_arg, actual in zip(function['arguments'], formal_args, actuals):
+                name = arg['name']
+                actual_names.append(name)
+                unpack_expr = UNPACK_ARG.substitute(formal_arg=formal_arg, actual=actual)
+                if arg.get('python_default_init'):
+                    unpack_statements_with_default.append(unpack_expr)
+                else:
+                    unpack_statements_no_default.append(unpack_expr)
+            env['unpack_args'] = unpack_statements_no_default + unpack_statements_with_default
+            env['actuals'] = actual_names
+            code_template = PY_VARIABLE_CASE_WITH_UNPACK
+        else:
+            env['actuals'] = actuals
+            code_template = PY_VARIABLE_CASE
         if 'call_args' in function:
             env['dispatch_args'] = function['call_args']
         else:
@@ -121,7 +196,7 @@ def create_python_bindings(
         env['cond'] = 'if' if i == 0 else '} else if'
         env = nested_dict(env, function)
         py_method_dispatch.append(PY_VARIABLE_DISPATCH.substitute(env))
-        return PY_VARIABLE_CASE.substitute(env)
+        return code_template.substitute(env)
 
     def process_function(name, functions):
         env = {
@@ -143,6 +218,10 @@ def create_python_bindings(
             if is_method:
                 prototype = prototype.replace('Tensor self, ', '')
                 prototype = prototype.replace('Tensor self', '')
+            if not is_class:
+                # Use 'input' instead of 'self' for NN functions
+                prototype = prototype.replace('Tensor self', 'Tensor input')
+            prototype = prototype.replace('SparseTensor', 'Tensor')
             if 'deprecated' in o:
                 prototype += '|deprecated'
             env['prototypes'].append('"{}",'.format(prototype))

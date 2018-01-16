@@ -574,6 +574,13 @@ elif BACKEND == 'mpi':
     class TestMPI(TestCase, _DistTestBase):
         pass
 
+elif BACKEND == 'nccl':
+    dist.init_process_group(init_method=INIT_METHOD, backend='nccl')
+    # TODO adding some NCCL backend test later
+
+    class TestNCCL(TestCase, _DistTestBase):
+        pass
+
 
 if __name__ == '__main__':
     unittest.main()

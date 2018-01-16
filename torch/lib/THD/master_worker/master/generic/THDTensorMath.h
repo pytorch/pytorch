@@ -86,6 +86,7 @@ THD_API void THDTensor_(sigmoid)(THDTensor *r_, THDTensor *t);
 THD_API void THDTensor_(log)(THDTensor *r_, THDTensor *t);
 THD_API void THDTensor_(log1p)(THDTensor *r_, THDTensor *t);
 THD_API void THDTensor_(exp)(THDTensor *r_, THDTensor *t);
+THD_API void THDTensor_(expm1)(THDTensor *r_, THDTensor *t);
 THD_API void THDTensor_(cos)(THDTensor *r_, THDTensor *t);
 THD_API void THDTensor_(acos)(THDTensor *r_, THDTensor *t);
 THD_API void THDTensor_(cosh)(THDTensor *r_, THDTensor *t);

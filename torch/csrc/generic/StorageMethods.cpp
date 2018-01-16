@@ -66,7 +66,7 @@ static PyObject * THPStorage_(resize_)(THPStorage *self, PyObject *number_arg)
   HANDLE_TH_ERRORS
   THPUtils_assert(THPUtils_checkLong(number_arg), "resize_ expects an int, "
       "but got %s", THPUtils_typename(number_arg));
-  long newsize = THPUtils_unpackLong(number_arg);
+  int64_t newsize = THPUtils_unpackLong(number_arg);
   THStorage_(resize)(LIBRARY_STATE self->cdata, newsize);
   Py_INCREF(self);
   return (PyObject*)self;
@@ -127,16 +127,16 @@ static PyObject * THPStorage_(fromBuffer)(PyObject *_unused, PyObject *args, PyO
 
   if (offset < 0 || offset > buffer.len) {
     PyErr_Format(PyExc_ValueError,
-      "offset must be non-negative and no greater than buffer length (%ld), "
-      "but got %ld", (long)offset, (long)buffer.len);
+      "offset must be non-negative and no greater than buffer length (%" PRId64 "), "
+      "but got %" PRId64, (int64_t)offset, (int64_t)buffer.len);
     PyBuffer_Release(&buffer);
     return NULL;
   }
 
   if (count < 0) {
     if ((buffer.len - offset) % sizeof(real) != 0) {
-      PyErr_Format(PyExc_ValueError, "buffer size (%ld) must be a multiple "
-          "of element size (%ld)", (long)buffer.len, (long)sizeof(real));
+      PyErr_Format(PyExc_ValueError, "buffer size (%" PRId64 ") must be a multiple "
+          "of element size (%" PRId64 ")", (int64_t)buffer.len, (int64_t)sizeof(real));
       PyBuffer_Release(&buffer);
       return NULL;
     }
@@ -144,9 +144,9 @@ static PyObject * THPStorage_(fromBuffer)(PyObject *_unused, PyObject *args, PyO
   }
 
   if (offset + (count * (Py_ssize_t)sizeof(real)) > buffer.len) {
-    PyErr_Format(PyExc_ValueError, "buffer has only %ld elements after offset "
-        "%ld, but specified a size of %ld", (long)(buffer.len - offset),
-        (long)offset, (long)count);
+    PyErr_Format(PyExc_ValueError, "buffer has only %" PRId64 " elements after offset "
+        "%" PRId64 ", but specified a size of %" PRId64, (int64_t)(buffer.len - offset),
+        (int64_t)offset, (int64_t)count);
     PyBuffer_Release(&buffer);
     return NULL;
   }

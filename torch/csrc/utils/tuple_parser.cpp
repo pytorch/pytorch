@@ -10,7 +10,7 @@
 namespace torch {
 
 TupleParser::TupleParser(PyObject* args, int num_args) : args(args), idx(0) {
-   int size = PyTuple_GET_SIZE(args);
+   int size = (int) PyTuple_GET_SIZE(args);
    if (num_args >= 0 && size != num_args) {
      std::string msg("missing required arguments (expected ");
      msg += std::to_string(num_args) + " got " + std::to_string(size) + ")";

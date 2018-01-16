@@ -5,9 +5,7 @@
 namespace torch { namespace jit {
 
 std::ostream& operator<<(std::ostream & out, const Type & t) {
-  TYPE_IF(&t, MultiType)
-    out << "Multi";
-  TYPE_ELSEIF(HandleType)
+  TYPE_IF(&t, HandleType)
     out << "Handle";
   TYPE_ELSEIF(TensorType)
     out << at::toString(value->scalarType()) << "(";

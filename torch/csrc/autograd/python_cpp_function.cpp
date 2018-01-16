@@ -117,7 +117,7 @@ PyObject* THPCppFunction_next_functions(THPCppFunction* self, PyObject* hook)
 }
 
 PyObject* THPCppFunction_requires_grad(THPCppFunction* self) {
-  return PyBool_FromLong(self->cdata->is_executable);
+  Py_RETURN_TRUE;
 }
 
 PyObject* THPCppFunction_register_hook_dict(PyObject* self, PyObject* _var)

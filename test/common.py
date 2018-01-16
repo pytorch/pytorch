@@ -1,5 +1,6 @@
 import sys
 import os
+import re
 import argparse
 import unittest
 import warnings
@@ -7,6 +8,8 @@ import contextlib
 from functools import wraps
 from itertools import product
 from copy import deepcopy
+from numbers import Number
+
 import __main__
 import errno
 
@@ -14,23 +17,27 @@ import torch
 import torch.cuda
 from torch.autograd import Variable
 from torch._six import string_classes
+import torch.backends.cudnn
 
 
 torch.set_default_tensor_type('torch.DoubleTensor')
+torch.backends.cudnn.disable_global_flags()
 
-# set seed one time
+
 parser = argparse.ArgumentParser(add_help=False)
-parser.add_argument('--seed', type=int, default=123)
+parser.add_argument('--seed', type=int, default=1234)
 parser.add_argument('--accept', action='store_true')
 args, remaining = parser.parse_known_args()
 SEED = args.seed
 ACCEPT = args.accept
 UNITTEST_ARGS = [sys.argv[0]] + remaining
+torch.manual_seed(SEED)
 
 
 def run_tests():
     unittest.main(argv=UNITTEST_ARGS)
 
+IS_WINDOWS = sys.platform == "win32"
 
 TEST_NUMPY = True
 try:
@@ -93,6 +100,12 @@ def to_gpu(obj, type_map={}):
         return deepcopy(obj)
 
 
+def set_rng_seed(seed):
+    torch.manual_seed(seed)
+    if TEST_NUMPY:
+        numpy.random.seed(seed)
+
+
 @contextlib.contextmanager
 def freeze_rng_state():
     rng_state = torch.get_rng_state()
@@ -116,17 +129,16 @@ def is_iterable(obj):
     try:
         iter(obj)
         return True
-    except:
+    except TypeError:
         return False
 
 
 class TestCase(unittest.TestCase):
     precision = 1e-5
+    maxDiff = None
 
     def setUp(self):
-        torch.manual_seed(SEED)
-        if torch.cuda.is_available():
-            torch.cuda.manual_seed_all(SEED)
+        set_rng_seed(SEED)
 
     def assertTensorsSlowEqual(self, x, y, prec=None, message=''):
         max_err = 0
@@ -135,8 +147,21 @@ class TestCase(unittest.TestCase):
             max_err = max(max_err, abs(x[index] - y[index]))
         self.assertLessEqual(max_err, prec, message)
 
+    def safeToDense(self, t):
+        r = self.safeCoalesce(t)
+        return r.to_dense()
+
     def safeCoalesce(self, t):
         tc = t.coalesce()
+        self.assertEqual(tc.to_dense(), t.to_dense())
+        self.assertTrue(tc.is_coalesced())
+
+        # Our code below doesn't work when nnz is 0, because
+        # then it's a 0D tensor, not a 2D tensor.
+        if t._nnz() == 0:
+            self.assertEqual(t._indices(), tc._indices())
+            self.assertEqual(t._values(), tc._values())
+            return tc
 
         value_map = {}
         for idx, val in zip(t._indices().t(), t._values()):
@@ -159,6 +184,10 @@ class TestCase(unittest.TestCase):
         self.assertEqual(tc._indices(), tg._indices())
         self.assertEqual(tc._values(), tg._values())
 
+        if t.is_coalesced():
+            self.assertEqual(tc._indices(), t._indices())
+            self.assertEqual(tc._values(), t._values())
+
         return tg
 
     def unwrapVariables(self, x, y):
@@ -168,7 +197,10 @@ class TestCase(unittest.TestCase):
             raise AssertionError("cannot compare {} and {}".format(type(x), type(y)))
         return x, y
 
-    def assertEqual(self, x, y, prec=None, message=''):
+    def assertEqual(self, x, y, prec=None, message='', allow_inf=False):
+        if isinstance(prec, str) and message == '':
+            message = prec
+            prec = None
         if prec is None:
             prec = self.precision
 
@@ -176,7 +208,7 @@ class TestCase(unittest.TestCase):
 
         if torch.is_tensor(x) and torch.is_tensor(y):
             def assertTensorsEqual(a, b):
-                super(TestCase, self).assertEqual(a.size(), b.size())
+                super(TestCase, self).assertEqual(a.size(), b.size(), message)
                 if a.numel() > 0:
                     b = b.type_as(a)
                     b = b.cuda(device=a.get_device()) if a.is_cuda else b.cpu()
@@ -189,7 +221,7 @@ class TestCase(unittest.TestCase):
                         diff = diff.abs()
                     max_err = diff.max()
                     self.assertLessEqual(max_err, prec, message)
-            self.assertEqual(x.is_sparse, y.is_sparse, message)
+            super(TestCase, self).assertEqual(x.is_sparse, y.is_sparse, message)
             if x.is_sparse:
                 x = self.safeCoalesce(x)
                 y = self.safeCoalesce(y)
@@ -198,20 +230,29 @@ class TestCase(unittest.TestCase):
             else:
                 assertTensorsEqual(x, y)
         elif isinstance(x, string_classes) and isinstance(y, string_classes):
-            super(TestCase, self).assertEqual(x, y)
+            super(TestCase, self).assertEqual(x, y, message)
         elif type(x) == set and type(y) == set:
-            super(TestCase, self).assertEqual(x, y)
+            super(TestCase, self).assertEqual(x, y, message)
         elif is_iterable(x) and is_iterable(y):
-            super(TestCase, self).assertEqual(len(x), len(y))
+            super(TestCase, self).assertEqual(len(x), len(y), message)
             for x_, y_ in zip(x, y):
                 self.assertEqual(x_, y_, prec, message)
-        else:
-            try:
-                self.assertLessEqual(abs(x - y), prec, message)
+        elif isinstance(x, Number) and isinstance(y, Number):
+            if abs(x) == float('inf') or abs(y) == float('inf'):
+                if allow_inf:
+                    super(TestCase, self).assertEqual(x, y, message)
+                else:
+                    self.fail("Expected finite numeric values - x={}, y={}".format(x, y))
                 return
-            except:
-                pass
+            super(TestCase, self).assertLessEqual(abs(x - y), prec, message)
+        else:
             super(TestCase, self).assertEqual(x, y, message)
+
+    def assertAlmostEqual(self, x, y, places=None, msg=None, delta=None, allow_inf=None):
+        prec = delta
+        if places:
+            prec = 10**(-places)
+        self.assertEqual(x, y, prec, msg, allow_inf)
 
     def assertNotEqual(self, x, y, prec=None, message=''):
         if prec is None:
@@ -241,7 +282,7 @@ class TestCase(unittest.TestCase):
             try:
                 self.assertGreaterEqual(abs(x - y), prec, message)
                 return
-            except:
+            except (TypeError, AssertionError):
                 pass
             super(TestCase, self).assertNotEqual(x, y, message)
 
@@ -285,12 +326,15 @@ class TestCase(unittest.TestCase):
             if text.startswith(prefix):
                 return text[len(prefix):]
             return text
-        munged_id = remove_prefix(self.id(), "__main__.")
-        # NB: we take __file__ from __main__, so we place the expect directory
-        # where the test script lives, NOT where test/common.py lives.  This
-        # doesn't matter in PyTorch where all test scripts are in the same
-        # directory as test/common.py, but it matters in onnx-pytorch
-        expected_file = os.path.join(os.path.dirname(os.path.realpath(__main__.__file__)),
+        # NB: we take __file__ from the module that defined the test
+        # class, so we place the expect directory where the test script
+        # lives, NOT where test/common.py lives.  This doesn't matter in
+        # PyTorch where all test scripts are in the same directory as
+        # test/common.py, but it matters in onnx-pytorch
+        module_id = self.__class__.__module__
+        munged_id = remove_prefix(self.id(), module_id + ".")
+        test_file = os.path.realpath(sys.modules[module_id].__file__)
+        expected_file = os.path.join(os.path.dirname(test_file),
                                      "expect",
                                      munged_id)
         if subname:
@@ -316,6 +360,12 @@ class TestCase(unittest.TestCase):
                     ("I got this output for {}:\n\n{}\n\n"
                      "No expect file exists; to accept the current output, run:\n"
                      "python {} {} --accept").format(munged_id, s, __main__.__file__, munged_id))
+
+        # a hack for JIT tests
+        if IS_WINDOWS:
+            expected = re.sub(r'CppOp\[(.+?)\]', 'CppOp[]', expected)
+            s = re.sub(r'CppOp\[(.+?)\]', 'CppOp[]', s)
+
         if ACCEPT:
             if expected != s:
                 return accept_output("updated output")

@@ -9,6 +9,7 @@ on an NVIDIA GPU with compute capability >= 3.0.
 """
 
 import sys
+import platform
 from ._utils import _import_dotted_name
 from .version import __version__
 
@@ -16,6 +17,7 @@ __all__ = [
     'typename', 'is_tensor', 'is_storage', 'set_default_tensor_type',
     'set_rng_state', 'get_rng_state', 'manual_seed', 'initial_seed',
     'save', 'load', 'set_printoptions', 'chunk', 'split', 'stack', 'matmul',
+    'no_grad', 'enable_grad',
     'DoubleStorage', 'FloatStorage', 'LongStorage', 'IntStorage',
     'ShortStorage', 'CharStorage', 'ByteStorage',
     'DoubleTensor', 'FloatTensor', 'LongTensor', 'IntTensor',
@@ -34,21 +36,43 @@ import os as _dl_flags
 # if we have numpy, it *must* be imported before the call to setdlopenflags()
 # or there is risk that later c modules will segfault when importing numpy
 try:
-    import numpy as np
-except:
+    import numpy as _np
+except ImportError:
     pass
 
-# first check if the os package has the required flags
-if not hasattr(_dl_flags, 'RTLD_GLOBAL') or not hasattr(_dl_flags, 'RTLD_NOW'):
-    try:
-        # next try if DLFCN exists
-        import DLFCN as _dl_flags
-    except ImportError:
-        # as a last attempt, use compile-time constants
-        import torch._dl as _dl_flags
+if platform.system() == 'Windows':
+    # first get nvToolsExt PATH
+    def get_nvToolsExt_path():
+        NVTOOLEXT_HOME = _dl_flags.getenv('NVTOOLSEXT_PATH', 'C:\\Program Files\\NVIDIA Corporation\\NvToolsExt')
 
-old_flags = sys.getdlopenflags()
-sys.setdlopenflags(_dl_flags.RTLD_GLOBAL | _dl_flags.RTLD_NOW)
+        if _dl_flags.path.exists(NVTOOLEXT_HOME):
+            return NVTOOLEXT_HOME + '\\bin\\x64\\'
+        else:
+            return ''
+
+    # then add the path to env
+    _dl_flags.environ['PATH'] = _dl_flags.path.dirname(
+        __file__) + '\\lib\\;' + get_nvToolsExt_path() + ';' + _dl_flags.environ['PATH']
+
+else:
+    # first check if the os package has the required flags
+    if not hasattr(_dl_flags, 'RTLD_GLOBAL') or not hasattr(_dl_flags, 'RTLD_LAZY'):
+        try:
+            # next try if DLFCN exists
+            import DLFCN as _dl_flags
+        except ImportError:
+            # as a last attempt, use compile-time constants
+            import torch._dl as _dl_flags
+
+    old_flags = sys.getdlopenflags()
+    sys.setdlopenflags(_dl_flags.RTLD_GLOBAL | _dl_flags.RTLD_LAZY)
+
+del _dl_flags
+
+try:
+    import torch._nvrtc
+except ImportError:
+    pass
 
 from torch._C import *
 
@@ -56,9 +80,9 @@ __all__ += [name for name in dir(_C)
             if name[0] != '_' and
             not name.endswith('Base')]
 
-sys.setdlopenflags(old_flags)
-del _dl_flags
-del old_flags
+if platform.system() != 'Windows':
+    sys.setdlopenflags(old_flags)
+    del old_flags
 
 ################################################################################
 # Define basic utilities
@@ -243,6 +267,9 @@ _tensor_classes = {
     CharTensor, ByteTensor, HalfTensor
 }
 
+_integer_tensor_classes = {
+    LongTensor, IntTensor, ShortTensor, CharTensor, ByteTensor
+}
 
 set_default_tensor_type('torch.FloatTensor')
 
@@ -258,6 +285,8 @@ from .functional import *
 ################################################################################
 
 def manager_path():
+    if platform.system() == 'Windows':
+        return b""
     import os
     path = os.path.join(os.path.abspath(os.path.dirname(__file__)), 'lib', 'torch_shm_manager')
     if not os.path.exists(path):
@@ -310,6 +339,7 @@ import torch.utils.backcompat
 import torch.onnx
 import torch.random
 import torch.distributions
+from torch.autograd import no_grad, enable_grad
 
 _C._init_names(list(torch._tensor_classes) + list(torch._storage_classes))
 

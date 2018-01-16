@@ -18,18 +18,22 @@ class DistKLDivCriterion(Criterion):
             input,
             target,
             self.output_tensor,
-            self.sizeAverage
+            self.sizeAverage,
+            True,  # reduce
         )
         self.output = self.output_tensor[0]
         return self.output
 
     def updateGradInput(self, input, target):
         assert input.is_same_size(target)
+        implicit_gradOutput = torch.ones(1).type_as(input)
         self._backend.DistKLDivCriterion_updateGradInput(
             self._backend.library_state,
             input,
             target,
+            implicit_gradOutput,
             self.gradInput,
-            self.sizeAverage
+            self.sizeAverage,
+            True,  # reduce
         )
         return self.gradInput

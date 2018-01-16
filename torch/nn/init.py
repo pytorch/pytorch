@@ -96,7 +96,7 @@ def constant(tensor, val):
 
     Examples:
         >>> w = torch.Tensor(3, 5)
-        >>> nn.init.constant(w)
+        >>> nn.init.constant(w, 0.3)
     """
     if isinstance(tensor, Variable):
         constant(tensor.data, val)

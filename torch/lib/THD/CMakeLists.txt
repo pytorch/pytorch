@@ -34,27 +34,18 @@ int main() {
 IF(NOT HAS_THREAD_LOCAL)
     MESSAGE(FATAL_ERROR "thread_local not supported. THD requires a compiler"
                         " that supports thread_local. Please upgrade your "
-                        "compiler. If you are on OSX, upgrade to "
+                        "compiler. If you are on macOS, upgrade to "
                         "XCode 8 or newer.")
 ENDIF(NOT HAS_THREAD_LOCAL)
+
+FIND_PACKAGE(NCCL)
 
 FIND_PACKAGE(MPI)
 
 FIND_PACKAGE(Gloo)
 
-IF(NOT Torch_FOUND)
-  FIND_PACKAGE(Torch REQUIRED)
-ENDIF()
-
-IF(NOT TH_LIBRARIES)
-  SET(TH_LIBRARIES "TH")
-ENDIF(NOT TH_LIBRARIES)
-MESSAGE(STATUS "TH_LIBRARIES: ${TH_LIBRARIES}")
-
-IF(NOT THPP_LIBRARIES)
-  SET(THPP_LIBRARIES "THPP")
-ENDIF(NOT THPP_LIBRARIES)
-MESSAGE(STATUS "THPP_LIBRARIES: ${THPP_LIBRARIES}")
+FIND_PACKAGE(ATen REQUIRED)
+INCLUDE_DIRECTORIES(${ATEN_INCLUDE_DIR})
 
 IF(NO_CUDA)
   MESSAGE(STATUS "ignoring CUDA")
@@ -65,10 +56,6 @@ ELSE()
     INCLUDE_DIRECTORIES("${CUDA_SDK_ROOT_DIR}/common/inc")
     LINK_DIRECTORIES("${CUDA_TOOLKIT_ROOT_DIR}/lib" "${CUDA_TOOLKIT_ROOT_DIR}/lib64")
 
-    IF(NOT THC_LIBRARIES)
-      SET(THC_LIBRARIES "THC")
-    ENDIF(NOT THC_LIBRARIES)
-    MESSAGE(STATUS "THC_LIBRARIES: ${THC_LIBRARIES}")
     ADD_DEFINITIONS(-DWITH_CUDA=1)
   ENDIF()
 ENDIF()
@@ -80,6 +67,23 @@ ENDIF()
 
 IF(GLOO_FOUND)
   ADD_DEFINITIONS(-DWITH_GLOO=1)
+ENDIF()
+
+IF(NCCL_FOUND)
+  MESSAGE(STATUS "NCCL_LIBRARIES: ${NCCL_LIBRARIES}")
+  IF(NCCL_MAJOR_VERSION AND NOT (NCCL_MAJOR_VERSION LESS 2))
+    MESSAGE(STATUS "NCCL Version 2 or higher found, will "
+                   "compile with NCCL distributed backend")
+    SET(DISTRIBUTED_NCCL_FOUND TRUE)
+    ADD_DEFINITIONS(-DWITH_DISTRIBUTED_NCCL=1)
+  ELSE()
+    MESSAGE(STATUS "Found NCCL, but the NCCL version is either not 2+ or not "
+                   "determinable, will not compile with NCCL distributed "
+                   "backend")
+  ENDIF()
+ELSE()
+  MESSAGE(STATUS "Not able to find NCCL, will not "
+                 "compile with NCCL distributed backend")
 ENDIF()
 
 ADD_DEFINITIONS(-D_THD_CORE=1)
@@ -111,6 +115,10 @@ IF(NOT GLOO_FOUND)
   LIST(REMOVE_ITEM test_cpp "${CMAKE_CURRENT_SOURCE_DIR}/test/data_channel_gloo_cache.cpp")
 ENDIF()
 
+IF(NOT DISTRIBUTED_NCCL_FOUND)
+  LIST(REMOVE_ITEM base_cpp "${CMAKE_CURRENT_SOURCE_DIR}/base/data_channels/DataChannelNccl.cpp")
+ENDIF()
+
 EXCLUDE_DIR(master_worker_cpp ".*/dispatch/.*\\.cpp$")
 
 SET(all_cpp ${base_cpp} ${process_group_cpp} ${master_worker_cpp})
@@ -118,15 +126,18 @@ SET(all_h THD.h ${base_h} ${process_group_h} ${master_worker_h})
 
 EXCLUDE_DIR(all_cpp ".*/generic/.*\\.cpp$")
 
+# Need to include external NCCL first
+IF(DISTRIBUTED_NCCL_FOUND)
+  INCLUDE_DIRECTORIES(${NCCL_INCLUDE_DIR})
+  FILE(APPEND "${CMAKE_INSTALL_PREFIX}/THD_deps.txt" "${NCCL_LIBRARIES};")
+ENDIF()
+
 INCLUDE_DIRECTORIES(${CMAKE_CURRENT_SOURCE_DIR})
 
 ADD_LIBRARY(THD STATIC ${all_cpp})
 set_property(TARGET THD PROPERTY POSITION_INDEPENDENT_CODE ON)
 
-FILE(WRITE "${CMAKE_INSTALL_PREFIX}/THD_deps.txt" "${TH_LIBRARIES};${THPP_LIBRARIES};")
-IF(CUDA_FOUND)
-  FILE(APPEND "${CMAKE_INSTALL_PREFIX}/THD_deps.txt" "${THC_LIBRARIES};")
-ENDIF()
+FILE(WRITE "${CMAKE_INSTALL_PREFIX}/THD_deps.txt" "${ATEN_LIBRARIES};")
 
 IF(MPI_FOUND)
   INCLUDE_DIRECTORIES(${MPI_INCLUDE_PATH})
@@ -159,7 +170,7 @@ IF(THD_WITH_TESTS)
     SET(test_executable_name "test_${test_name}")
 
     ADD_EXECUTABLE(${test_executable_name} "test/${test_source_file}")
-    TARGET_LINK_LIBRARIES(${test_executable_name} THD ${TH_LIBRARIES} ${THPP_LIBRARIES} ${CMAKE_THREAD_LIBS_INIT})
+    TARGET_LINK_LIBRARIES(${test_executable_name} THD ${ATEN_LIBRARIES} ${CMAKE_THREAD_LIBS_INIT})
     SET_PROPERTY(TARGET ${test_executable_name} PROPERTY CXX_STANDARD 11)
     ADD_TEST(${test_name} ${test_executable_name})
   ENDFOREACH()

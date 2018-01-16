@@ -178,4 +178,10 @@ _sparse_tensor_classes.add(CharTensor)
 _sparse_tensor_classes.add(ByteTensor)
 torch._tensor_classes.update(_sparse_tensor_classes)
 
+torch._integer_tensor_classes.add(LongTensor)
+torch._integer_tensor_classes.add(IntTensor)
+torch._integer_tensor_classes.add(ShortTensor)
+torch._integer_tensor_classes.add(CharTensor)
+torch._integer_tensor_classes.add(ByteTensor)
+
 _C._sparse_init()

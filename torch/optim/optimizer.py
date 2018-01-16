@@ -1,4 +1,4 @@
-from collections import defaultdict
+from collections import defaultdict, Iterable
 
 import torch
 from copy import deepcopy
@@ -46,6 +46,17 @@ class Optimizer(object):
 
     def __setstate__(self, state):
         self.__dict__.update(state)
+
+    def __repr__(self):
+        format_string = self.__class__.__name__ + ' ('
+        for i, group in enumerate(self.param_groups):
+            format_string += '\n'
+            format_string += 'Parameter Group {0}\n'.format(i)
+            for key in sorted(group.keys()):
+                if key != 'params':
+                    format_string += '    {0}: {1}\n'.format(key, group[key])
+        format_string += ')'
+        return format_string
 
     def state_dict(self):
         """Returns the state of the optimizer as a :class:`dict`.
@@ -96,8 +107,33 @@ class Optimizer(object):
         id_map = {old_id: p for old_id, p in
                   zip(chain(*(g['params'] for g in saved_groups)),
                       chain(*(g['params'] for g in groups)))}
-        state = defaultdict(
-            dict, {id_map.get(k, k): v for k, v in state_dict['state'].items()})
+
+        def cast(param, value):
+            """Make a deep copy of value, casting all tensors to device of param."""
+            if torch.is_tensor(value):
+                # Floating-point types are a bit special here. They are the only ones
+                # that are assumed to always match the type of params.
+                if any(tp in type(param.data).__name__ for tp in {'Half', 'Float', 'Double'}):
+                    value = value.type_as(param.data)
+                value = value.cuda(param.get_device()) if param.is_cuda else value.cpu()
+                return value
+            elif isinstance(value, dict):
+                return {k: cast(param, v) for k, v in value.items()}
+            elif isinstance(value, Iterable):
+                return type(value)(cast(param, v) for v in value)
+            else:
+                return value
+
+        # Copy state assigned to params (and cast tensors to appropriate types).
+        # State that is not assigned to params is copied as is (needed for
+        # backward compatibility).
+        state = defaultdict(dict)
+        for k, v in state_dict['state'].items():
+            if k in id_map:
+                param = id_map[k]
+                state[param] = cast(param, v)
+            else:
+                state[k] = v
 
         # Update parameter groups, setting their 'params' value
         def update_group(group, new_group):
@@ -112,11 +148,8 @@ class Optimizer(object):
         for group in self.param_groups:
             for p in group['params']:
                 if p.grad is not None:
-                    if p.grad.volatile:
-                        p.grad.data.zero_()
-                    else:
-                        data = p.grad.data
-                        p.grad = Variable(data.new().resize_as_(data).zero_())
+                    p.grad.detach_()
+                    p.grad.zero_()
 
     def step(self, closure):
         """Performs a single optimization step (parameter update).

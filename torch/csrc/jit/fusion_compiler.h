@@ -2,8 +2,6 @@
 #include <torch/csrc/jit/ir.h>
 #include "torch/csrc/utils/disallow_copy.h"
 #include "ATen/ATen.h"
-#include <cuda.h>
-#include <cuda_runtime.h>
 #include <string>
 #include <algorithm>
 #include <unordered_map>
@@ -48,12 +46,13 @@ private:
   size_t nDim_;
 };
 
-// short-term storage only, so it borrows Graph.
-// this type is probably temporary.
-// it will be replaced when the needed TensorDesc information is encoded
-// directly in the information in the IR (e.g. in the Type object)
+constexpr int kCPUDevice = -1;
 struct AnnotatedGraph {
-  Graph* graph;
+  // short-term storage only, so it borrows Graph.
+  AnnotatedGraph(Graph & graph, int device)
+  : graph(&graph), device(device) {}
+  Graph* graph = nullptr;
+  int device = kCPUDevice;
   std::vector<TensorDesc> input_desc;
   std::vector<TensorDesc> output_desc;
 };
@@ -83,28 +82,32 @@ struct CompiledFusionFunction {
   TH_DISALLOW_COPY_AND_ASSIGN(CompiledFusionFunction);
 
   CompiledFusionFunction(const std::string & name, AnnotatedGraph & agraph);
-  ~CompiledFusionFunction();
+  virtual ~CompiledFusionFunction() {}
 
-  void launch(at::ArrayRef<at::Tensor> inputs, at::ArrayRef<at::Tensor> outputs);
+  // expects outputs to be pre-allocated
+  void launch_with_tensors(at::ArrayRef<at::Tensor> inputs, at::ArrayRef<at::Tensor> outputs);
+
+  // creates new tensors for outputs
+  void launch(at::ArrayRef<at::Tensor> inputs, std::vector<at::Tensor> & outputs);
   const std::vector<TensorDesc> & outputDescriptors() const {
     return output_desc;
   }
-private:
-  void launch(uint32_t numel, void ** arguments);
+protected:
+  virtual at::Backend backend() const = 0;
+
+  // arguments is a list of pointers to the arguments for the compiled CUDA/CPU
+  // code.
+  // The format of arguments is suitable for directly passing to a call to
+  // cuLaunchKernel as the kernel arguments.
+  // Currently the first argument is a pointer to numel (for passing to
+  // CUDA code), and the remainder are pointers to the TensorInfo<T> structs
+  // that compiled code uses to load Tensor data.
+  // launch_with_tensors handles packing at::Tensors into this arguments array.
+  // CPU code uses the same convension so that launch_with_tensors can be shared.
+  virtual void launch_raw(uint32_t numel, void ** arguments) = 0;
   std::string name;
   // We keep these around for debugging
-  std::string compliation_unit;
-  std::vector<char> ptx;
-  CUmodule module;
-  CUfunction function;
-
-  // we record prop/device so if they are availiable for launch heuristics
-  // querying at launch is too slow for device properties.
-  int device;
-  cudaDeviceProp prop;
-  int blockSize = 128;
-  int maxBlocks;
-
+  std::string compilation_unit;
   std::vector<TensorDesc> input_desc;
   std::vector<TensorDesc> output_desc;
 
@@ -114,22 +117,37 @@ private:
   std::vector<ConcatDesc> concat_desc;
 };
 
+struct FusionCompilerConfig {
+  std::string cxx = "g++"; // compiler location
+  bool debug = false; // emit debugging information about fusions
+  bool openmp = true;
+};
+
 // caching compiler
 struct FusionCompiler {
   TH_DISALLOW_COPY_AND_ASSIGN(FusionCompiler);
-  FusionCompiler() {}
+  FusionCompiler();
 
   // ignores types in graph, and uses specific contiguity annotations
   std::shared_ptr<CompiledFusionFunction> getOrCompile(AnnotatedGraph & agraph);
-  // uses type annotations in graph to create Annotated graph
-  std::shared_ptr<CompiledFusionFunction> getOrCompile(Graph & graph);
+  // uses type annotations in fusion_group to create Annotated graph
+  std::shared_ptr<CompiledFusionFunction> getOrCompile(Node * fusion_group);
 
+  // uses inputs/outputs as examples to infer continuity, does not run the graph
+  std::shared_ptr<CompiledFusionFunction> getOrCompile(Graph & graph,
+                                                       int device,
+                                                       at::ArrayRef<at::Tensor> inputs,
+                                                       at::ArrayRef<at::Tensor> outputs);
   // debugging function that lets you do everything from compilation to execution
   // in one step.
   // this should not be used in the hot path of execution because it has to serialize
   // the graph each time
-  void debugLaunchGraph(Graph & graph, at::ArrayRef<at::Tensor> inputs, at::ArrayRef<at::Tensor> outputs);
+  void debugLaunchGraph(Graph & graph, int device, at::ArrayRef<at::Tensor> inputs, at::ArrayRef<at::Tensor> outputs);
+  bool canCompileOnCPU() const {
+    return config_.cxx.size() > 0;
+  }
 private:
+  FusionCompilerConfig config_;
   std::unordered_map<std::string, std::shared_ptr<CompiledFusionFunction>> cache;
 };
 

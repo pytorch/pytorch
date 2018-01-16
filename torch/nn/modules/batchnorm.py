@@ -69,8 +69,8 @@ class BatchNorm1d(_BatchNorm):
             Default: 1e-5
         momentum: the value used for the running_mean and running_var
             computation. Default: 0.1
-        affine: a boolean value that when set to true, gives the layer learnable
-            affine parameters. Default: True
+        affine: a boolean value that when set to ``True``, gives the layer learnable
+            affine parameters. Default: ``True``
 
     Shape:
         - Input: :math:`(N, C)` or :math:`(N, C, L)`
@@ -119,8 +119,8 @@ class BatchNorm2d(_BatchNorm):
             Default: 1e-5
         momentum: the value used for the running_mean and running_var
             computation. Default: 0.1
-        affine: a boolean value that when set to true, gives the layer learnable
-            affine parameters. Default: True
+        affine: a boolean value that when set to ``True``, gives the layer learnable
+            affine parameters. Default: ``True``
 
     Shape:
         - Input: :math:`(N, C, H, W)`
@@ -170,8 +170,8 @@ class BatchNorm3d(_BatchNorm):
             Default: 1e-5
         momentum: the value used for the running_mean and running_var
             computation. Default: 0.1
-        affine: a boolean value that when set to true, gives the layer learnable
-            affine parameters. Default: True
+        affine: a boolean value that when set to ``True``, gives the layer learnable
+            affine parameters. Default: ``True``
 
     Shape:
         - Input: :math:`(N, C, D, H, W)`

@@ -1,6 +1,6 @@
 
 def clip_grad_norm(parameters, max_norm, norm_type=2):
-    """Clips gradient norm of an iterable of parameters.
+    r"""Clips gradient norm of an iterable of parameters.
 
     The norm is computed over all gradients together, as if they were
     concatenated into a single vector. Gradients are modified in-place.

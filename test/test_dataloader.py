@@ -1,11 +1,41 @@
 import math
 import sys
+import os
+import ctypes
 import torch
+import time
 import traceback
 import unittest
+from torch import multiprocessing
 from torch.utils.data import Dataset, TensorDataset, DataLoader, ConcatDataset
-from common import TestCase, run_tests, TEST_NUMPY
+from torch.utils.data.dataset import random_split
+from torch.utils.data.dataloader import default_collate
+from common import TestCase, run_tests, TEST_NUMPY, IS_WINDOWS
 from common_nn import TEST_CUDA
+
+JOIN_TIMEOUT = 14.0 if IS_WINDOWS else 1.5
+
+
+class TestDatasetRandomSplit(TestCase):
+    def test_lengths_must_equal_datset_size(self):
+        with self.assertRaises(ValueError):
+            random_split([1, 2, 3, 4], [1, 2])
+
+    def test_splits_have_correct_size(self):
+        splits = random_split([1, 2, 3, 4, 5, 6], [2, 4])
+        self.assertEqual(len(splits), 2)
+        self.assertEqual(len(splits[0]), 2)
+        self.assertEqual(len(splits[1]), 4)
+
+    def test_splits_are_mutually_exclusive(self):
+        data = [5, 2, 3, 4, 1, 6]
+        splits = random_split(data, [2, 4])
+        all_values = []
+        all_values.extend(list(splits[0]))
+        all_values.extend(list(splits[1]))
+        data.sort()
+        all_values.sort()
+        self.assertListEqual(data, all_values)
 
 
 class TestTensorDataset(TestCase):
@@ -62,6 +92,16 @@ class TestConcatDataset(TestCase):
             # this one goes to 11
             result[11]
 
+    def test_add_dataset(self):
+        d1 = TensorDataset(torch.rand(7, 3, 28, 28), torch.rand(7))
+        d2 = TensorDataset(torch.rand(7, 3, 28, 28), torch.rand(7))
+        d3 = TensorDataset(torch.rand(7, 3, 28, 28), torch.rand(7))
+        result = d1 + d2 + d3
+        self.assertEqual(21, len(result))
+        self.assertEqual(0, (d1[0][0] - result[0][0]).abs().sum())
+        self.assertEqual(0, (d2[0][0] - result[7][0]).abs().sum())
+        self.assertEqual(0, (d3[0][0] - result[14][0]).abs().sum())
+
 
 class ErrorDataset(Dataset):
 
@@ -70,6 +110,89 @@ class ErrorDataset(Dataset):
 
     def __len__(self):
         return self.size
+
+
+class SegfaultDataset(Dataset):
+
+    def __init__(self, size):
+        self.size = size
+
+    def __getitem__(self, idx):
+        return ctypes.string_at(0)
+
+    def __len__(self):
+        return self.size
+
+
+class SleepDataset(Dataset):
+
+    def __init__(self, size, sleep_sec):
+        self.size = size
+        self.sleep_sec = sleep_sec
+
+    def __getitem__(self, idx):
+        time.sleep(self.sleep_sec)
+        return idx
+
+    def __len__(self):
+        return self.size
+
+
+class SeedDataset(Dataset):
+
+    def __init__(self, size):
+        self.size = size
+
+    def __getitem__(self, idx):
+        return torch.initial_seed()
+
+    def __len__(self):
+        return self.size
+
+
+# Inspired by https://stackoverflow.com/a/26703365
+# This will ensure that each worker at least processes one data
+class SynchronizedSeedDataset(Dataset):
+
+    def __init__(self, size, num_workers):
+        assert size >= num_workers
+        self.count = multiprocessing.Value('i', 0, lock=True)
+        self.barrier = multiprocessing.Semaphore(0)
+        self.num_workers = num_workers
+        self.size = size
+
+    def __getitem__(self, idx):
+        with self.count.get_lock():
+            self.count.value += 1
+            if self.count.value == self.num_workers:
+                self.barrier.release()
+        self.barrier.acquire()
+        self.barrier.release()
+        return torch.initial_seed()
+
+    def __len__(self):
+        return self.size
+
+
+def _test_timeout():
+    os.close(sys.stderr.fileno())
+    sys.stderr.close()
+    dataset = SleepDataset(10, 10)
+    dataloader = DataLoader(dataset, batch_size=2, num_workers=2, timeout=1)
+    _ = next(iter(dataloader))
+
+
+def _test_segfault():
+    os.close(sys.stderr.fileno())
+    sys.stderr.close()
+    dataset = SegfaultDataset(10)
+    dataloader = DataLoader(dataset, batch_size=2, num_workers=2)
+    _ = next(iter(dataloader))
+
+
+# test custom init function
+def init_fn(worker_id):
+    torch.manual_seed(12345)
 
 
 class TestDataLoader(TestCase):
@@ -137,6 +260,53 @@ class TestDataLoader(TestCase):
         for input, target in loader:
             self.assertTrue(input.is_pinned())
             self.assertTrue(target.is_pinned())
+
+    def test_multiple_dataloaders(self):
+        loader1_it = iter(DataLoader(self.dataset, num_workers=1))
+        loader2_it = iter(DataLoader(self.dataset, num_workers=2))
+        next(loader1_it)
+        next(loader1_it)
+        next(loader2_it)
+        next(loader2_it)
+        next(loader1_it)
+        next(loader2_it)
+
+    def test_segfault(self):
+        p = multiprocessing.Process(target=_test_segfault)
+        p.start()
+        p.join(JOIN_TIMEOUT)
+        try:
+            self.assertFalse(p.is_alive())
+            self.assertNotEqual(p.exitcode, 0)
+        finally:
+            p.terminate()
+
+    def test_timeout(self):
+        p = multiprocessing.Process(target=_test_timeout)
+        p.start()
+        p.join(3.0 + JOIN_TIMEOUT)
+        try:
+            self.assertFalse(p.is_alive())
+            self.assertNotEqual(p.exitcode, 0)
+        finally:
+            p.terminate()
+
+    def test_worker_seed(self):
+        num_workers = 6
+        dataset = SynchronizedSeedDataset(num_workers, num_workers)
+        dataloader = DataLoader(dataset, batch_size=1, num_workers=num_workers)
+        seeds = set()
+        for batch in dataloader:
+            seeds.add(batch[0])
+        self.assertEqual(len(seeds), num_workers)
+
+    def test_worker_init_fn(self):
+        dataset = SeedDataset(4)
+        dataloader = DataLoader(dataset, batch_size=2, num_workers=2,
+                                worker_init_fn=init_fn)
+        for batch in dataloader:
+            self.assertEqual(12345, batch[0])
+            self.assertEqual(12345, batch[1])
 
     def test_shuffle(self):
         self._test_shuffle(DataLoader(self.dataset, shuffle=True))
@@ -213,17 +383,17 @@ class TestDataLoader(TestCase):
         "check that workers exit even if the iterator is not exhausted"
         loader = iter(DataLoader(self.dataset, batch_size=2, num_workers=4, pin_memory=True))
         workers = loader.workers
-        pin_thread = loader.pin_thread
+        worker_manager_thread = loader.worker_manager_thread
         for i, sample in enumerate(loader):
             if i == 3:
                 break
         del loader
         for w in workers:
-            w.join(1.0)  # timeout of one second
+            w.join(JOIN_TIMEOUT)
             self.assertFalse(w.is_alive(), 'subprocess not terminated')
             self.assertEqual(w.exitcode, 0)
-        pin_thread.join(1.0)
-        self.assertFalse(pin_thread.is_alive())
+        worker_manager_thread.join(JOIN_TIMEOUT)
+        self.assertFalse(worker_manager_thread.is_alive())
 
     def test_len(self):
         def check_len(dl, expected):
@@ -265,6 +435,23 @@ class TestDataLoader(TestCase):
             loader = DataLoader(dset, batch_size=2)
             batch = next(iter(loader))
             self.assertIsInstance(batch, tt)
+
+    @unittest.skipIf(not TEST_NUMPY, "numpy unavailable")
+    def test_default_colate_bad_numpy_types(self):
+        import numpy as np
+
+        # Should be a no-op
+        arr = np.array(['a', 'b', 'c'])
+        default_collate(arr)
+
+        arr = np.array([[['a', 'b', 'c']]])
+        self.assertRaises(TypeError, lambda: default_collate(arr))
+
+        arr = np.array([object(), object(), object()])
+        self.assertRaises(TypeError, lambda: default_collate(arr))
+
+        arr = np.array([[[object(), object(), object()]]])
+        self.assertRaises(TypeError, lambda: default_collate(arr))
 
 
 class StringDataset(Dataset):

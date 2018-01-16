@@ -42,7 +42,7 @@ class StandaloneExtension(CWrapPlugin):
         'long': Template('THPUtils_unpackLong($arg)'),
         'int64_t': Template('THPUtils_unpackLong($arg)'),
         'void*': Template('(void*)THPUtils_unpackLong($arg)'),
-        'THGenerator*': Template('THPGenerator_CData((THPGenerator*)$arg)'),
+        'THGenerator*': Template('THPGenerator_TH_CData((THPGenerator*)$arg)'),
     }
 
     TYPE_CHECK = {

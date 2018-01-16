@@ -169,11 +169,11 @@ static void check_single_result(PyObject* _original, PyObject* _result, PyObject
     throw std::runtime_error(ss.str());
   }
 
-  if (original.type().isCuda() != result.type().isCuda()) {
+  if (original.type().is_cuda() != result.type().is_cuda()) {
     std::stringstream ss;
     auto name = hook_name(hook);
     ss << "hook '" << name << "' has changed the type of value";
-    if (original.type().isCuda()) {
+    if (original.type().is_cuda()) {
       ss << " (was CUDA tensor got CPU tensor)";
     } else {
       ss << " (was CPU tensor got CUDA tensor)";

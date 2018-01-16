@@ -12,14 +12,9 @@ class Dropout(InplaceFunction):
 
     @staticmethod
     def symbolic(g, input, p=0.5, train=False, inplace=False):
-        if inplace:
-            return None
-        n = g.appendNode(g.create("Dropout", [input])
-                          .f_("ratio", p)
-                          .i_("is_test", not train))
-        real = g.appendNode(g.createSelect(n, 0))
-        g.appendNode(g.createSelect(n, 1))
-        return real
+        # See Note [Export inplace]
+        r, _ = g.op("Dropout", input, ratio_f=p, is_test_i=not train, outputs=2)
+        return r
 
     @classmethod
     def forward(cls, ctx, input, p=0.5, train=False, inplace=False):
@@ -30,20 +25,22 @@ class Dropout(InplaceFunction):
         ctx.train = train
         ctx.inplace = inplace
 
+        if ctx.p == 0 or not ctx.train:
+            return input
+
         if ctx.inplace:
             ctx.mark_dirty(input)
             output = input
         else:
             output = input.clone()
 
-        if ctx.p > 0 and ctx.train:
-            ctx.noise = cls._make_noise(input)
-            if ctx.p == 1:
-                ctx.noise.fill_(0)
-            else:
-                ctx.noise.bernoulli_(1 - ctx.p).div_(1 - ctx.p)
-            ctx.noise = ctx.noise.expand_as(input)
-            output.mul_(ctx.noise)
+        ctx.noise = cls._make_noise(input)
+        if ctx.p == 1:
+            ctx.noise.fill_(0)
+        else:
+            ctx.noise.bernoulli_(1 - ctx.p).div_(1 - ctx.p)
+        ctx.noise = ctx.noise.expand_as(input)
+        output.mul_(ctx.noise)
 
         return output
 
@@ -59,11 +56,11 @@ class FeatureDropout(Dropout):
 
     @staticmethod
     def symbolic(g, input, p=0.5, train=False, inplace=False):
+        # See Note [Export inplace]
         # NB: In inference mode, FeatureDropout is exported as an identity op.
+        from torch.onnx.symbolic import _unimplemented
         if train:
-            raise ValueError("Exporting ONNX FeatureDropout in train mode is not supported, "
-                             "and the exported model should not be used for training. "
-                             "The FeatureDropout support in ONNX is still under construction.")
+            return _unimplemented("FeatureDropout", "training mode")
         return input
 
     @staticmethod

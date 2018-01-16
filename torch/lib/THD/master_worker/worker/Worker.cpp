@@ -1,5 +1,4 @@
 #include "../../process_group/General.hpp"
-#include <THPP/THPP.h>
 #include "../common/RPC.hpp"
 #include "Dispatch.hpp"
 #include "Worker.h"
@@ -12,9 +11,9 @@ namespace thd {
 namespace worker {
 
 std::unique_ptr<WorkerCommandChannel> workerCommandChannel;
-std::unordered_map<object_id_type, std::unique_ptr<thpp::Tensor>> workerTensors;
-std::unordered_map<object_id_type, std::unique_ptr<thpp::Storage>> workerStorages;
-std::unordered_map<object_id_type, std::unique_ptr<thpp::Generator>> workerGenerators;
+std::unordered_map<object_id_type, at::Tensor> workerTensors;
+std::unordered_map<object_id_type, std::unique_ptr<at::Storage>> workerStorages;
+std::unordered_map<object_id_type, std::unique_ptr<at::Generator>> workerGenerators;
 
 } // namespace worker
 } // namespace thd

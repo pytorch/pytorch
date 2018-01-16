@@ -3,7 +3,7 @@
   python_name: get_device
   backends:
     - CUDA
-  return: long
+  return: int64_t
   arguments:
     - THTensor* self
 ]]

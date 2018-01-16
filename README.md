@@ -15,6 +15,7 @@ We are in an early-release beta. Expect some adventures and rough edges.
   - [Binaries](#binaries)
   - [From Source](#from-source)
   - [Docker Image](#docker-image)
+  - [Previous Versions](#previous-versions)
 - [Getting Started](#getting-started)
 - [Communication](#communication)
 - [Releases and Contributing](#releases-and-contributing)
@@ -22,9 +23,9 @@ We are in an early-release beta. Expect some adventures and rough edges.
 
 | System | 2.7 | 3.5 |
 | --- | --- | --- |
-| Linux CPU | [![Build Status](https://travis-ci.org/pytorch/pytorch.svg?branch=master)](https://travis-ci.org/pytorch/pytorch) | [![Build Status](https://travis-ci.org/pytorch/pytorch.svg?branch=master)](https://travis-ci.org/pytorch/pytorch) |
-| Linux GPU | [![Build Status](http://build.pytorch.org:8080/buildStatus/icon?job=pytorch-master-py2-linux)](https://build.pytorch.org/job/pytorch-master-py2-linux) | [![Build Status](http://build.pytorch.org:8080/buildStatus/icon?job=pytorch-master-py3-linux)](https://build.pytorch.org/job/pytorch-master-py3-linux) |
-| macOS CPU | [![Build Status](http://build.pytorch.org:8080/buildStatus/icon?job=pytorch-master-py2-osx-cpu)](https://build.pytorch.org/job/pytorch-master-py2-osx-cpu) | [![Build Status](http://build.pytorch.org:8080/buildStatus/icon?job=pytorch-master-py3-osx-cpu)](https://build.pytorch.org/job/pytorch-master-py3-osx-cpu) |
+| Linux CPU | [![Build Status](https://ci.pytorch.org/jenkins/job/pytorch-master/badge/icon)](https://ci.pytorch.org/jenkins/job/pytorch-master/) | [![Build Status](https://ci.pytorch.org/jenkins/job/pytorch-master/badge/icon)](https://ci.pytorch.org/jenkins/job/pytorch-master/) |
+| Linux GPU | [![Build Status](https://ci.pytorch.org/jenkins/job/pytorch-master/badge/icon)](https://ci.pytorch.org/jenkins/job/pytorch-master/) | [![Build Status](https://ci.pytorch.org/jenkins/job/pytorch-master/badge/icon)](https://ci.pytorch.org/jenkins/job/pytorch-master/) |
+| Windows GPU | <center>—</center> | [![Build Status](https://ci.pytorch.org/jenkins/job/pytorch-builds/job/pytorch-win-ws2016-cuda9-cudnn7-py3-trigger/badge/icon)](https://ci.pytorch.org/jenkins/job/pytorch-builds/job/pytorch-win-ws2016-cuda9-cudnn7-py3-trigger/)
 
 
 ## More about PyTorch
@@ -176,7 +177,7 @@ conda install numpy pyyaml mkl setuptools cmake cffi
 conda install -c soumith magma-cuda80 # or magma-cuda75 if CUDA 7.5
 ```
 
-On OSX
+On macOS
 ```bash
 export CMAKE_PREFIX_PATH=[anaconda root directory]
 conda install numpy pyyaml setuptools cmake cffi
@@ -192,7 +193,7 @@ On Linux
 python setup.py install
 ```
 
-On OSX
+On macOS
 ```bash
 MACOSX_DEPLOYMENT_TARGET=10.9 CC=clang CXX=clang++ python setup.py install
 ```
@@ -203,6 +204,12 @@ Dockerfile is supplied to build images with cuda support and cudnn v6. Build as 
 ```
 docker build -t pytorch .
 ```
+
+Dockerfile to build with cuda 9 and cudnn v7 (with Volta support) is in tools/docker, the build command is
+
+```
+docker build -t pytorch_cuda9 -f tools/docker/Dockerfile9 .
+```
 Alternatively, if you want to use a runtime image, you can use the pre-built one from Docker Hub and run with nvidia-docker:
 ```
 nvidia-docker run --rm -ti --ipc=host pytorch/pytorch:latest
@@ -211,13 +218,18 @@ Please note that PyTorch uses shared memory to share data between processes, so 
 for multithreaded data loaders) the default shared memory segment size that container runs with is not enough, and you
 should increase shared memory size either with `--ipc=host` or `--shm-size` command line options to `nvidia-docker run`.
 
+### Previous Versions
+
+Installation instructions and binaries for previous PyTorch versions may be found
+on [our website](http://pytorch.org/previous-versions/).
+
 
 ## Getting Started
 
 Three pointers to get you started:
 - [Tutorials: get you started with understanding and using PyTorch](http://pytorch.org/tutorials/)
 - [Examples: easy to understand pytorch code across all domains](https://github.com/pytorch/examples)
-- The API Reference: [http://pytorch.org/docs/](http://pytorch.org/docs/)
+- [The API Reference](http://pytorch.org/docs/)
 
 ## Communication
 * forums: discuss implementations, research, etc. http://discuss.pytorch.org

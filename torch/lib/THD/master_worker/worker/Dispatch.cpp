@@ -10,9 +10,6 @@
 #include "../common/Functions.hpp"
 #include "../common/RPC.hpp"
 #include "../master/Master.hpp"
-#include "THPP/THPP.h"
-#include "THPP/storages/THStorage.hpp"
-#include "THPP/tensors/THTensor.hpp"
 #include "Worker.hpp"
 
 namespace thd {
@@ -30,15 +27,15 @@ void sendValueToMaster(double value) {
   dataChannel->send(scalar, 0);
 }
 
-thpp::Tensor* unpackRetrieveTensor(rpc::RPCMessage& message) {
-  return workerTensors.at(unpackTensor(message)).get();
+at::Tensor& unpackRetrieveTensor(rpc::RPCMessage& message) {
+  return workerTensors.at(unpackTensor(message));
 }
 
-thpp::Storage* unpackRetrieveStorage(rpc::RPCMessage& message) {
+at::Storage* unpackRetrieveStorage(rpc::RPCMessage& message) {
   return workerStorages.at(unpackStorage(message)).get();
 }
 
-thpp::Generator* unpackRetrieveGenerator(rpc::RPCMessage& message) {
+at::Generator* unpackRetrieveGenerator(rpc::RPCMessage& message) {
   return workerGenerators.at(unpackGenerator(message)).get();
 }
 
@@ -74,7 +71,7 @@ static const std::unordered_map<rpc::function_id_type, dispatch_fn> functions {
 
     {Functions::tensorCopyFromMaster, tensorCopyFromMaster},
     {Functions::tensorCopyFromWorker, tensorCopyFromWorker},
-    
+
     {Functions::tensorNew, tensorNew},
     {Functions::tensorNewWithSize, tensorNewWithSize},
     {Functions::tensorNewWithStorage, tensorNewWithStorage},
@@ -132,7 +129,7 @@ static const std::unordered_map<rpc::function_id_type, dispatch_fn> functions {
     {Functions::tensorAddr, tensorAddr},
     {Functions::tensorAddbmm, tensorAddbmm},
     {Functions::tensorBaddbmm, tensorBaddbmm},
-    {Functions::tensorMatch, tensorMatch},
+    /* {Functions::tensorMatch, tensorMatch}, */
     {Functions::tensorMax, tensorMax},
     {Functions::tensorMin, tensorMin},
     {Functions::tensorKthvalue, tensorKthvalue},
@@ -147,8 +144,8 @@ static const std::unordered_map<rpc::function_id_type, dispatch_fn> functions {
     {Functions::tensorCross, tensorCross},
     {Functions::tensorCmax, tensorCmax},
     {Functions::tensorCmin, tensorCmin},
-    {Functions::tensorCmaxValue, tensorCmaxValue},
-    {Functions::tensorCminValue, tensorCminValue},
+    /* {Functions::tensorCmaxValue, tensorCmaxValue}, */
+    /* {Functions::tensorCminValue, tensorCminValue}, */
 
     {Functions::tensorFill, tensorFill},
     {Functions::tensorMaskedFill, tensorMaskedFill},
@@ -197,6 +194,7 @@ static const std::unordered_map<rpc::function_id_type, dispatch_fn> functions {
     {Functions::tensorLog, tensorLog},
     {Functions::tensorLog1p, tensorLog1p},
     {Functions::tensorExp, tensorExp},
+    {Functions::tensorExpm1, tensorExpm1},
     {Functions::tensorCos, tensorCos},
     {Functions::tensorAcos, tensorAcos},
     {Functions::tensorCosh, tensorCosh},
@@ -224,7 +222,7 @@ static const std::unordered_map<rpc::function_id_type, dispatch_fn> functions {
     {Functions::tensorRenorm, tensorRenorm},
     {Functions::tensorDist, tensorDist},
     {Functions::tensorHistc, tensorHistc},
-    {Functions::tensorBhistc, tensorBhistc},
+    /* {Functions::tensorBhistc, tensorBhistc}, */
     {Functions::tensorMeanall, tensorMeanall},
     {Functions::tensorVarall, tensorVarall},
     {Functions::tensorStdall, tensorStdall},

@@ -11,15 +11,26 @@ import torch.cuda
 import torch.multiprocessing as mp
 from torch.autograd import Variable
 from torch.nn import Parameter
-from common import TestCase, run_tests
+from common import TestCase, run_tests, IS_WINDOWS
 
 
 TEST_REPEATS = 30
 HAS_SHM_FILES = os.path.isdir('/dev/shm')
 TEST_CUDA_IPC = torch.cuda.is_available() and \
     sys.version_info[0] == 3 and \
-    sys.platform != 'darwin'
+    sys.platform != 'darwin' and \
+    sys.platform != 'win32'
 TEST_MULTIGPU = TEST_CUDA_IPC and torch.cuda.device_count() > 1
+
+
+class SubProcess(mp.Process):
+    def __init__(self, tensor):
+        super(SubProcess, self).__init__()
+        self.tensor = tensor
+        self.daemon = True
+
+    def run(self):
+        self.tensor.add_(3)
 
 
 def simple_fill(queue, event):
@@ -38,6 +49,11 @@ def send_tensor(queue, event, tp):
     queue.put(t)
     queue.put(t)
     event.wait()
+
+
+def call_backward():
+    x = torch.autograd.Variable(torch.randn(3, 3), requires_grad=True)
+    x.sum().backward()
 
 
 def sum_tensors(inq, outq):
@@ -229,15 +245,15 @@ class TestMultiprocessing(TestCase):
             for i in range(repeat):
                 do_test()
 
-    @unittest.skipIf(platform == 'darwin', "file descriptor strategy is not supported on OS X")
+    @unittest.skipIf(platform == 'darwin', "file descriptor strategy is not supported on macOS")
     def test_fd_sharing(self):
         self._test_sharing(repeat=TEST_REPEATS)
 
-    @unittest.skipIf(platform == 'darwin', "file descriptor strategy is not supported on OS X")
+    @unittest.skipIf(platform == 'darwin', "file descriptor strategy is not supported on macOS")
     def test_fd_preserve_sharing(self):
         self._test_preserve_sharing(repeat=TEST_REPEATS)
 
-    @unittest.skipIf(platform == 'darwin', "file descriptor strategy is not supported on OS X")
+    @unittest.skipIf(platform == 'darwin', "file descriptor strategy is not supported on macOS")
     def test_fd_pool(self):
         self._test_pool(repeat=TEST_REPEATS)
 
@@ -269,15 +285,6 @@ class TestMultiprocessing(TestCase):
                 queue_put()
 
     def test_inherit_tensor(self):
-        class SubProcess(mp.Process):
-            def __init__(self, tensor):
-                super(SubProcess, self).__init__()
-                self.tensor = tensor
-                self.daemon = True
-
-            def run(self):
-                self.tensor.add_(3)
-
         t = torch.zeros(5, 5)
         p = SubProcess(t.share_memory_())
         p.start()
@@ -318,6 +325,7 @@ class TestMultiprocessing(TestCase):
             self.assertEqual(tensor_size, 5)
             self.assertEqual(storage_size, 5)
 
+    @unittest.skipIf(IS_WINDOWS, 'not applicable to Windows (only fails with fork)')
     @unittest.skipIf(not torch.cuda.is_available(), 'CUDA not available')
     def test_cuda_bad_call(self):
         # Initialize CUDA
@@ -378,15 +386,9 @@ class TestMultiprocessing(TestCase):
         self.assertFalse(p.is_alive())
 
     def test_variable_sharing(self):
-        configs = [
-            (True, False),
-            (False, False),
-            (False, True),
-        ]
-        for requires_grad, volatile in configs:
+        for requires_grad in [True, False]:
             var = Variable(torch.arange(1, 26).view(5, 5),
-                           requires_grad=requires_grad,
-                           volatile=volatile)
+                           requires_grad=requires_grad)
             self._test_autograd_sharing(var)
 
     def test_parameter_sharing(self):
@@ -403,7 +405,7 @@ class TestMultiprocessing(TestCase):
         t.share_memory_()
         self.assertTrue(t.is_shared())
 
-    @unittest.skipIf(platform == 'darwin', "file descriptor strategy is not supported on OS X")
+    @unittest.skipIf(platform == 'darwin', "file descriptor strategy is not supported on macOS")
     def test_is_shared(self):
         self._test_is_shared()
 
@@ -415,6 +417,14 @@ class TestMultiprocessing(TestCase):
     def test_is_shared_cuda(self):
         t = torch.randn(5, 5).cuda()
         self.assertTrue(t.is_shared())
+
+    def test_backwards_fork(self):
+        r"backwards() should succeed when called before and after a fork"
+        call_backward()
+        p = mp.Process(target=call_backward)
+        p.start()
+        p.join(1)
+        self.assertFalse(p.is_alive())
 
 
 if __name__ == '__main__':

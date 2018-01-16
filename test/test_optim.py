@@ -1,3 +1,4 @@
+import math
 import unittest
 import functools
 from copy import deepcopy
@@ -8,7 +9,7 @@ import torch.nn.functional as F
 from torch.optim import SGD
 from torch.autograd import Variable
 from torch import sparse
-from torch.optim.lr_scheduler import LambdaLR, StepLR, MultiStepLR, ExponentialLR, ReduceLROnPlateau
+from torch.optim.lr_scheduler import LambdaLR, StepLR, MultiStepLR, ExponentialLR, CosineAnnealingLR, ReduceLROnPlateau
 from common import TestCase, run_tests
 
 
@@ -61,13 +62,15 @@ class TestOptim(TestCase):
 
         self.assertLessEqual(params.data.dist(solution), initial_dist)
 
-    def _test_rosenbrock_sparse(self, constructor):
+    def _test_rosenbrock_sparse(self, constructor, sparse_only=False):
         params_t = torch.Tensor([1.5, 1.5])
 
-        params = Variable(torch.Tensor([1.5, 1.5]), requires_grad=True)
-        params_c = Variable(torch.Tensor([1.5, 1.5]), requires_grad=True)
+        params = Variable(params_t, requires_grad=True)
         optimizer = constructor([params])
-        optimizer_c = constructor([params_c])
+
+        if not sparse_only:
+            params_c = Variable(params_t.clone(), requires_grad=True)
+            optimizer_c = constructor([params_c])
 
         solution = torch.Tensor([1, 1])
         initial_dist = params.data.dist(solution)
@@ -99,8 +102,9 @@ class TestOptim(TestCase):
             # Do cyclic coordinate descent
             w = i % 2
             optimizer.step(functools.partial(eval, params, True, w))
-            optimizer_c.step(functools.partial(eval, params_c, False, w))
-            self.assertEqual(params.data, params_c.data)
+            if not sparse_only:
+                optimizer_c.step(functools.partial(eval, params_c, False, w))
+                self.assertEqual(params.data, params_c.data)
 
         self.assertLessEqual(params.data.dist(solution), initial_dist)
 
@@ -109,6 +113,9 @@ class TestOptim(TestCase):
         bias = Variable(bias, requires_grad=True)
         input = Variable(input)
         optimizer = constructor(weight, bias)
+
+        # to check if the optimizer can be printed as a string
+        optimizer.__repr__()
 
         def fn():
             optimizer.zero_grad()
@@ -131,7 +138,8 @@ class TestOptim(TestCase):
 
         def fn_base(optimizer, weight, bias):
             optimizer.zero_grad()
-            loss = (weight.mv(input) + bias).pow(2).sum()
+            i = input_cuda if weight.is_cuda else input
+            loss = (weight.mv(i) + bias).pow(2).sum()
             loss.backward()
             return loss
 
@@ -158,6 +166,30 @@ class TestOptim(TestCase):
             self.assertEqual(bias, bias_c)
         # Make sure state dict wasn't modified
         self.assertEqual(state_dict, state_dict_c)
+
+        # Check that state dict can be loaded even when we cast parameters
+        # to a different type and move to a different device.
+        if not torch.cuda.is_available():
+            return
+
+        input_cuda = Variable(input.data.float().cuda())
+        weight_cuda = Variable(weight.data.float().cuda(), requires_grad=True)
+        bias_cuda = Variable(bias.data.float().cuda(), requires_grad=True)
+        optimizer_cuda = constructor(weight_cuda, bias_cuda)
+        fn_cuda = functools.partial(fn_base, optimizer_cuda, weight_cuda, bias_cuda)
+
+        state_dict = deepcopy(optimizer.state_dict())
+        state_dict_c = deepcopy(optimizer.state_dict())
+        optimizer_cuda.load_state_dict(state_dict_c)
+
+        # Make sure state dict wasn't modified
+        self.assertEqual(state_dict, state_dict_c)
+
+        for i in range(20):
+            optimizer.step(fn)
+            optimizer_cuda.step(fn_cuda)
+            self.assertEqual(weight, weight_cuda)
+            self.assertEqual(bias, bias_cuda)
 
     def _test_basic_cases(self, constructor, ignore_multidevice=False):
         self._test_state_dict(
@@ -229,6 +261,11 @@ class TestOptim(TestCase):
                 lr=1e-3)
         )
 
+    def test_sgd_sparse(self):
+        self._test_rosenbrock_sparse(
+            lambda params: optim.SGD(params, lr=5e-3)
+        )
+
     def test_adam(self):
         self._test_rosenbrock(
             lambda params: optim.Adam(params, lr=1e-2),
@@ -245,6 +282,21 @@ class TestOptim(TestCase):
             lambda weight, bias: optim.Adam(
                 self._build_params_dict(weight, bias, lr=1e-2),
                 lr=1e-3)
+        )
+        self._test_basic_cases(
+            lambda weight, bias: optim.Adam([weight, bias], lr=1e-3,
+                                            amsgrad=True)
+        )
+        self._test_basic_cases(
+            lambda weight, bias: optim.Adam(
+                self._build_params_dict(weight, bias, lr=1e-2),
+                lr=1e-3, amsgrad=True)
+        )
+
+    def test_sparse_adam(self):
+        self._test_rosenbrock_sparse(
+            lambda params: optim.SparseAdam(params, lr=4e-2),
+            True
         )
 
     def test_adadelta(self):
@@ -423,10 +475,10 @@ class TestLRScheduler(TestCase):
         # lr = 0.05     if epoch < 3
         # lr = 0.005    if 30 <= epoch < 6
         # lr = 0.0005   if epoch >= 9
-        single_targets = [0.05] * 3 + [0.005] * 3 + [0.0005] * 3 + [0.00005] * 3
-        targets = [single_targets, list(map(lambda x: x * 10, single_targets))]
-        scheduler = StepLR(self.opt, gamma=0.1, step_size=3)
         epochs = 10
+        single_targets = [0.05] * 3 + [0.005] * 3 + [0.0005] * 3 + [0.00005] * 3
+        targets = [single_targets, list(map(lambda x: x * epochs, single_targets))]
+        scheduler = StepLR(self.opt, gamma=0.1, step_size=3)
         self._test(scheduler, targets, epochs)
 
     def test_multi_step_lr(self):
@@ -434,106 +486,116 @@ class TestLRScheduler(TestCase):
         # lr = 0.005    if 2 <= epoch < 5
         # lr = 0.0005   if epoch < 9
         # lr = 0.00005   if epoch >= 9
-        single_targets = [0.05] * 2 + [0.005] * 3 + [0.0005] * 4 + [0.00005] * 3
-        targets = [single_targets, list(map(lambda x: x * 10, single_targets))]
-        scheduler = MultiStepLR(self.opt, gamma=0.1, milestones=[2, 5, 9])
         epochs = 10
+        single_targets = [0.05] * 2 + [0.005] * 3 + [0.0005] * 4 + [0.00005] * 3
+        targets = [single_targets, list(map(lambda x: x * epochs, single_targets))]
+        scheduler = MultiStepLR(self.opt, gamma=0.1, milestones=[2, 5, 9])
         self._test(scheduler, targets, epochs)
 
     def test_exp_lr(self):
-        single_targets = [0.05 * (0.9 ** x) for x in range(10)]
-        targets = [single_targets, list(map(lambda x: x * 10, single_targets))]
-        scheduler = ExponentialLR(self.opt, gamma=0.9)
         epochs = 10
+        single_targets = [0.05 * (0.9 ** x) for x in range(epochs)]
+        targets = [single_targets, list(map(lambda x: x * epochs, single_targets))]
+        scheduler = ExponentialLR(self.opt, gamma=0.9)
+        self._test(scheduler, targets, epochs)
+
+    def test_cos_anneal_lr(self):
+        epochs = 10
+        eta_min = 1e-10
+        single_targets = [eta_min + (0.05 - eta_min) *
+                          (1 + math.cos(math.pi * x / epochs)) / 2
+                          for x in range(epochs)]
+        targets = [single_targets, list(map(lambda x: x * epochs, single_targets))]
+        scheduler = CosineAnnealingLR(self.opt, T_max=epochs, eta_min=eta_min)
         self._test(scheduler, targets, epochs)
 
     def test_reduce_lr_on_plateau1(self):
+        epochs = 10
         for param_group in self.opt.param_groups:
             param_group['lr'] = 0.5
         targets = [[0.5] * 20]
         metrics = [10 - i * 0.0167 for i in range(20)]
         scheduler = ReduceLROnPlateau(self.opt, threshold_mode='abs', mode='min',
                                       threshold=0.01, patience=5, cooldown=5)
-        epochs = 10
         self._test_reduce_lr_on_plateau(scheduler, targets, metrics, epochs)
 
     def test_reduce_lr_on_plateau2(self):
+        epochs = 22
         for param_group in self.opt.param_groups:
             param_group['lr'] = 0.5
         targets = [[0.5] * 6 + [0.05] * 7 + [0.005] * 7 + [0.0005] * 2]
         metrics = [10 - i * 0.0165 for i in range(22)]
         scheduler = ReduceLROnPlateau(self.opt, patience=5, cooldown=0, threshold_mode='abs',
                                       mode='min', threshold=0.1)
-        epochs = 22
         self._test_reduce_lr_on_plateau(scheduler, targets, metrics, epochs)
 
     def test_reduce_lr_on_plateau3(self):
+        epochs = 22
         for param_group in self.opt.param_groups:
             param_group['lr'] = 0.5
         targets = [[0.5] * (2 + 6) + [0.05] * (5 + 6) + [0.005] * 4]
         metrics = [-0.8] * 2 + [-0.234] * 20
         scheduler = ReduceLROnPlateau(self.opt, mode='max', patience=5, cooldown=5,
                                       threshold_mode='abs')
-        epochs = 22
         self._test_reduce_lr_on_plateau(scheduler, targets, metrics, epochs)
 
     def test_reduce_lr_on_plateau4(self):
+        epochs = 20
         for param_group in self.opt.param_groups:
             param_group['lr'] = 0.5
         targets = [[0.5] * 20]
         metrics = [1.5 * (1.025 ** i) for i in range(20)]  # 1.025 > 1.1**0.25
         scheduler = ReduceLROnPlateau(self.opt, mode='max', patience=3,
                                       threshold_mode='rel', threshold=0.1)
-        epochs = 20
         self._test_reduce_lr_on_plateau(scheduler, targets, metrics, epochs)
 
     def test_reduce_lr_on_plateau5(self):
+        epochs = 20
         for param_group in self.opt.param_groups:
             param_group['lr'] = 0.5
         targets = [[0.5] * 6 + [0.05] * (5 + 6) + [0.005] * 4]
         metrics = [1.5 * (1.005 ** i) for i in range(20)]
         scheduler = ReduceLROnPlateau(self.opt, mode='max', threshold_mode='rel',
                                       threshold=0.1, patience=5, cooldown=5)
-        epochs = 20
         self._test_reduce_lr_on_plateau(scheduler, targets, metrics, epochs)
 
     def test_reduce_lr_on_plateau6(self):
+        epochs = 20
         for param_group in self.opt.param_groups:
             param_group['lr'] = 0.5
         targets = [[0.5] * 20]
         metrics = [1.5 * (0.85 ** i) for i in range(20)]
         scheduler = ReduceLROnPlateau(self.opt, mode='min', threshold_mode='rel',
                                       threshold=0.1)
-        epochs = 20
         self._test_reduce_lr_on_plateau(scheduler, targets, metrics, epochs)
 
     def test_reduce_lr_on_plateau7(self):
+        epochs = 20
         for param_group in self.opt.param_groups:
             param_group['lr'] = 0.5
         targets = [[0.5] * 6 + [0.05] * (5 + 6) + [0.005] * 4]
         metrics = [1] * 7 + [0.6] + [0.5] * 12
         scheduler = ReduceLROnPlateau(self.opt, mode='min', threshold_mode='rel',
                                       threshold=0.1, patience=5, cooldown=5)
-        epochs = 20
         self._test_reduce_lr_on_plateau(scheduler, targets, metrics, epochs)
 
     def test_reduce_lr_on_plateau8(self):
+        epochs = 20
         for param_group in self.opt.param_groups:
             param_group['lr'] = 0.5
         targets = [[0.5] * 6 + [0.4] * 14, [0.5] * 6 + [0.3] * 14]
         metrics = [1.5 * (1.005 ** i) for i in range(20)]
         scheduler = ReduceLROnPlateau(self.opt, mode='max', threshold_mode='rel', min_lr=[0.4, 0.3],
                                       threshold=0.1, patience=5, cooldown=5)
-        epochs = 20
         self._test_reduce_lr_on_plateau(scheduler, targets, metrics, epochs)
 
     def test_lambda_lr(self):
+        epochs = 10
         self.opt.param_groups[0]['lr'] = 0.05
         self.opt.param_groups[1]['lr'] = 0.4
-        targets = [[0.05 * (0.9 ** x) for x in range(10)], [0.4 * (0.8 ** x) for x in range(10)]]
+        targets = [[0.05 * (0.9 ** x) for x in range(epochs)], [0.4 * (0.8 ** x) for x in range(epochs)]]
         scheduler = LambdaLR(self.opt,
                              lr_lambda=[lambda x1: 0.9 ** x1, lambda x2: 0.8 ** x2])
-        epochs = 10
         self._test(scheduler, targets, epochs)
 
     def _test(self, scheduler, targets, epochs=10):

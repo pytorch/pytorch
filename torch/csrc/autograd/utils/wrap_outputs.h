@@ -33,6 +33,25 @@ inline PyObject* wrap(std::tuple<at::Tensor, at::Tensor, at::Tensor> tensors) {
   return r.release();
 }
 
+inline PyObject* wrap(std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor> tensors) {
+  auto r = THPObjectPtr{PyTuple_New(4)};
+  if (!r) throw python_error();
+  PyTuple_SET_ITEM(r.get(), 0, wrap(std::move(std::get<0>(tensors))));
+  PyTuple_SET_ITEM(r.get(), 1, wrap(std::move(std::get<1>(tensors))));
+  PyTuple_SET_ITEM(r.get(), 2, wrap(std::move(std::get<2>(tensors))));
+  PyTuple_SET_ITEM(r.get(), 3, wrap(std::move(std::get<3>(tensors))));
+  return r.release();
+}
+
+inline PyObject* wrap(at::TensorList tl) {
+  auto r = THPObjectPtr{PyTuple_New(tl.size())};
+  if (!r) throw python_error();
+  for (size_t i = 0; i < tl.size(); ++i) {
+    PyTuple_SET_ITEM(r.get(), i, wrap(tl[i]));
+  }
+  return r.release();
+}
+
 inline PyObject* wrap(bool value) {
   if (value) {
     Py_RETURN_TRUE;
@@ -43,6 +62,14 @@ inline PyObject* wrap(bool value) {
 
 inline PyObject* wrap(int64_t value) {
   return THPUtils_packInt64(value);
+}
+
+inline PyObject* wrap(double value) {
+  return PyFloat_FromDouble(value);
+}
+
+inline PyObject* wrap(void* value) {
+  return THPUtils_packInt64(reinterpret_cast<intptr_t>(value));
 }
 
 inline PyObject* wrap(at::Scalar scalar) {

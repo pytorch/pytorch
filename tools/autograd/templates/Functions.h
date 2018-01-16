@@ -3,6 +3,7 @@
 // ${generated_comment}
 
 #include <ATen/ATen.h>
+#include <ATen/TensorGeometry.h>
 
 #include "torch/csrc/autograd/function.h"
 #include "torch/csrc/autograd/variable.h"
@@ -14,6 +15,7 @@ using at::Scalar;
 using at::Tensor;
 using at::IntList;
 using at::Type;
+using at::TensorGeometry;
 
 struct TypeAndSize {
   TypeAndSize() : type(nullptr) {}
@@ -28,9 +30,6 @@ private:
   std::vector<int64_t> sizes;
   Type* type;
 };
-
-// avoid mutiply if scalar is 1.
-inline Tensor maybe_multiply(const Tensor & t, const Scalar & s);
 
 ${autograd_function_declarations}
 

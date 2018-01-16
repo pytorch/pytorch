@@ -36,6 +36,7 @@ class TestSparse(TestCase):
         self.IndexTensor = torch.LongTensor
         self.ValueTensor = torch.DoubleTensor
         self.SparseTensor = torch.sparse.DoubleTensor
+        super(TestSparse, self).setUp()
 
     def _gen_sparse(self, d, nnz, with_size):
         # TODO: Consider implementing this in the CUDA case by directly
@@ -110,9 +111,15 @@ class TestSparse(TestCase):
         self.assertEqual(i, x._indices())
         self.assertEqual(v, x._values())
         self.assertEqual(x.ndimension(), 3)
-        self.assertEqual(x.coalesce()._nnz(), 10)
+        self.assertEqual(self.safeCoalesce(x)._nnz(), 10)
         for i in range(3):
             self.assertEqual(x.size(i), 100)
+
+        # Make sure that coalesce handles duplicate indices correctly
+        i = self.IndexTensor([[9, 0, 0, 0, 8, 1, 1, 1, 2, 7, 2, 2, 3, 4, 6, 9]])
+        v = self.ValueTensor([[idx**2, idx] for idx in range(i.size(1))])
+        x = self.SparseTensor(i, v, torch.Size([10, 2]))
+        self.assertEqual(self.safeCoalesce(x)._nnz(), 9)
 
         # Make sure we can access empty indices / values
         x = self.SparseTensor()
@@ -146,15 +153,16 @@ class TestSparse(TestCase):
         x.to_dense()
         x.to_dense()
         self.assertEqual(res, x.to_dense())
+        self.assertEqual(res, self.safeToDense(x))
 
     def test_shared(self):
         i = self.IndexTensor([[2]])
         v = self.ValueTensor([5])
         x = self.SparseTensor(i, v, torch.Size([3]))
         v[0] = 6
-        self.assertEqual(self.ValueTensor([0, 0, 6]), x.to_dense())
+        self.assertEqual(self.ValueTensor([0, 0, 6]), self.safeToDense(x))
         i[0][0] = 0
-        self.assertEqual(self.ValueTensor([6, 0, 0]), x.to_dense())
+        self.assertEqual(self.ValueTensor([6, 0, 0]), self.safeToDense(x))
 
     def test_to_dense_hybrid(self):
         i = self.IndexTensor([
@@ -182,6 +190,7 @@ class TestSparse(TestCase):
         x.to_dense()
         x.to_dense()
         self.assertEqual(res, x.to_dense())
+        self.assertEqual(res, self.safeToDense(x))
 
     def test_contig(self):
         i = self.IndexTensor([
@@ -308,16 +317,16 @@ class TestSparse(TestCase):
 
     def test_transpose(self):
         x = self._gen_sparse(4, 20, 5)[0]
-        y = x.to_dense()
+        y = self.safeToDense(x)
 
         for i, j in itertools.combinations(range(4), 2):
             x = x.transpose_(i, j)
             y = y.transpose(i, j)
-            self.assertEqual(x.to_dense(), y)
+            self.assertEqual(self.safeToDense(x), y)
 
             x = x.transpose(i, j)
             y = y.transpose(i, j)
-            self.assertEqual(x.to_dense(), y)
+            self.assertEqual(self.safeToDense(x), y)
 
     @cpu_only
     def test_mm(self):
@@ -329,15 +338,15 @@ class TestSparse(TestCase):
             beta = random.random()
 
             res = torch.addmm(alpha, t, beta, x, y)
-            expected = torch.addmm(alpha, t, beta, x.to_dense(), y)
+            expected = torch.addmm(alpha, t, beta, self.safeToDense(x), y)
             self.assertEqual(res, expected)
 
             res = torch.addmm(t, x, y)
-            expected = torch.addmm(t, x.to_dense(), y)
+            expected = torch.addmm(t, self.safeToDense(x), y)
             self.assertEqual(res, expected)
 
             res = torch.mm(x, y)
-            expected = torch.mm(x.to_dense(), y)
+            expected = torch.mm(self.safeToDense(x), y)
             self.assertEqual(res, expected)
 
         test_shape(10, 100, 100)
@@ -354,16 +363,16 @@ class TestSparse(TestCase):
             beta = random.random()
 
             res = torch.saddmm(alpha, t, beta, x, y)
-            expected = torch.addmm(alpha, t.to_dense(), beta, x.to_dense(), y)
-            self.assertEqual(res.to_dense(), expected)
+            expected = torch.addmm(alpha, self.safeToDense(t), beta, self.safeToDense(x), y)
+            self.assertEqual(self.safeToDense(res), expected)
 
             res = torch.saddmm(t, x, y)
-            expected = torch.addmm(t.to_dense(), x.to_dense(), y)
-            self.assertEqual(res.to_dense(), expected)
+            expected = torch.addmm(self.safeToDense(t), self.safeToDense(x), y)
+            self.assertEqual(self.safeToDense(res), expected)
 
             res = torch.smm(x, y)
-            expected = torch.mm(x.to_dense(), y)
-            self.assertEqual(res.to_dense(), expected)
+            expected = torch.mm(self.safeToDense(x), y)
+            self.assertEqual(self.safeToDense(res), expected)
 
         test_shape(7, 5, 3)
         test_shape(1000, 100, 100)
@@ -375,7 +384,7 @@ class TestSparse(TestCase):
             y = self.randn(dj, dk)
 
             res = torch.dsmm(x, y)
-            expected = torch.mm(x.to_dense(), y)
+            expected = torch.mm(self.safeToDense(x), y)
             self.assertEqual(res, expected)
 
         test_shape(7, 5, 3)
@@ -388,6 +397,8 @@ class TestSparse(TestCase):
             y = self.randn(dj, dk)
 
             res = torch.hsmm(x, y)
+            # TODO: use self.safeToDense(), but this triggers
+            # https://github.com/pytorch/pytorch/issues/3170
             expected = torch.mm(x.to_dense(), y)
             self.assertEqual(res.to_dense(), expected)
 
@@ -402,7 +413,7 @@ class TestSparse(TestCase):
         r = random.random()
 
         res = torch.add(y, r, x)
-        expected = y + r * x.to_dense()
+        expected = y + r * self.safeToDense(x)
 
         self.assertEqual(res, expected)
 
@@ -415,7 +426,7 @@ class TestSparse(TestCase):
         r = random.random()
 
         res = torch.add(y, r, x)
-        expected = y + r * x.to_dense()
+        expected = y + r * self.safeToDense(x)
 
         self.assertEqual(res, expected)
 
@@ -439,50 +450,50 @@ class TestSparse(TestCase):
         y1 = x1 + x2
         y2 = x1.clone()
         y2.add_(x2)
-        expected = x1.to_dense() + x2.to_dense()
-        self.assertEqual(y1.to_dense(), expected)
-        self.assertEqual(y2.to_dense(), expected)
+        expected = self.safeToDense(x1) + self.safeToDense(x2)
+        self.assertEqual(self.safeToDense(y1), expected)
+        self.assertEqual(self.safeToDense(y2), expected)
 
         y1 = x1 - x2
         y2 = x1.clone()
         y2.sub_(x2)
-        expected = x1.to_dense() - x2.to_dense()
-        self.assertEqual(y1.to_dense(), expected)
-        self.assertEqual(y2.to_dense(), expected)
+        expected = self.safeToDense(x1) - self.safeToDense(x2)
+        self.assertEqual(self.safeToDense(y1), expected)
+        self.assertEqual(self.safeToDense(y2), expected)
 
         y1 = x1 * x2
         y2 = x1.clone()
         y2.mul_(x2)
-        expected = x1.to_dense() * x2.to_dense()
-        self.assertEqual(y1.to_dense(), expected)
-        self.assertEqual(y2.to_dense(), expected)
+        expected = self.safeToDense(x1) * self.safeToDense(x2)
+        self.assertEqual(self.safeToDense(y1), expected)
+        self.assertEqual(self.safeToDense(y2), expected)
 
         y1 = x1 * 37.5
         y2 = x1.clone()
         y2.mul_(37.5)
-        expected = x1.to_dense() * 37.5
-        self.assertEqual(y1.to_dense(), expected)
-        self.assertEqual(y2.to_dense(), expected)
+        expected = self.safeToDense(x1) * 37.5
+        self.assertEqual(self.safeToDense(y1), expected)
+        self.assertEqual(self.safeToDense(y2), expected)
 
         y1 = x1 / 37.5
         y2 = x1.clone()
         y2.div_(37.5)
-        expected = x1.to_dense() / 37.5
-        self.assertEqual(y1.to_dense(), expected)
-        self.assertEqual(y2.to_dense(), expected)
+        expected = self.safeToDense(x1) / 37.5
+        self.assertEqual(self.safeToDense(y1), expected)
+        self.assertEqual(self.safeToDense(y2), expected)
 
         # TODO: add back inplace support
         y1 = x1 ** 2
         y2 = x1.clone()
         y2 = y2.pow(2)
-        expected = x1.to_dense() ** 2
-        self.assertEqual(y1.to_dense(), expected)
-        self.assertEqual(y2.to_dense(), expected)
+        expected = self.safeToDense(x1) ** 2
+        self.assertEqual(self.safeToDense(y1), expected)
+        self.assertEqual(self.safeToDense(y2), expected)
 
         y = x1.clone()
         y.zero_()
         expected = torch.zeros(x1.size())
-        self.assertEqual(y.to_dense(), expected)
+        self.assertEqual(self.safeToDense(y), expected)
 
         self.assertFalse(x1.is_coalesced())
         y = x1.coalesce()
@@ -514,9 +525,9 @@ class TestSparse(TestCase):
         y1 = x1 + x2
         y2 = x1.clone()
         y2.add_(x2)
-        expected = x1.to_dense() + x2.to_dense()
-        self.assertEqual(y1.to_dense(), expected)
-        self.assertEqual(y2.to_dense(), expected)
+        expected = self.safeToDense(x1) + self.safeToDense(x2)
+        self.assertEqual(self.safeToDense(y1), expected)
+        self.assertEqual(self.safeToDense(y2), expected)
 
     def _test_sparse_mask_fixed(self):
         i = self.IndexTensor([
@@ -537,6 +548,26 @@ class TestSparse(TestCase):
         expected = self.SparseTensor(i, exp_v, torch.Size([5, 4]))
         self.assertEqual(res, expected)
 
+    def test_sparse_mask_variable(self):
+        # TODO: remove once variable and tensor are merged
+        i = torch.autograd.Variable(self.IndexTensor([
+            [1, 3, 0, 4],
+            [2, 1, 2, 3],
+        ]))
+        v = torch.autograd.Variable(self.ValueTensor([1, 2, 3, 4]))
+        x = torch.autograd.Variable(self.SparseTensor(i.data, v.data, torch.Size([5, 4])).coalesce())
+        dense = torch.autograd.Variable(self.ValueTensor([
+            [1, 2, 3, 4],
+            [5, 6, 7, 8],
+            [9, 10, 11, 12],
+            [13, 14, 15, 16],
+            [17, 18, 19, 20],
+        ]))
+        exp_v = torch.autograd.Variable(self.ValueTensor([7, 14, 3, 20]))
+        res = dense._sparse_mask(x)
+        expected = torch.autograd.Variable(self.SparseTensor(i.data, exp_v.data, torch.Size([5, 4])))
+        self.assertEqual(res, expected)
+
     def test_sparse_mask(self):
         self._test_sparse_mask_fixed()
 
@@ -544,6 +575,43 @@ class TestSparse(TestCase):
         self._test_sparse_mask_shape([10, 10, 10])
         self._test_sparse_mask_shape([50, 30, 20])
         self._test_sparse_mask_shape([5, 5, 5, 5, 5, 5])
+
+    def _test_zeros(self, shape, out_shape_i, out_shape_v=None):
+        out_shape = out_shape_i + (out_shape_v or [])
+        for nnz in [9, 12]:
+            out, _, _ = self._gen_sparse(len(out_shape_i), nnz, out_shape)
+            torch.zeros(*shape, out=out)
+            self.assertEqual(tuple(out.size()), tuple(shape))
+            self.assertTrue(out._indices().numel() == out._values().numel() == 0)
+            self.assertEqual(out._nnz(), 0)
+            self.assertEqual(out._dimI(), len(shape))
+            self.assertEqual(out._dimV(), 0)
+
+    def test_zeros(self):
+        i_shapes = [2, 3, 4]
+        v_shapes = [3, 4, 5, 6]
+        for i_dim in range(1, len(i_shapes) + 1):
+            for v_dim in range(len(v_shapes) + 1):
+                self._test_zeros([2, 3, 4], i_shapes[:i_dim], v_shapes[:v_dim])
+
+    def _test_zeros_like(self, template_shape_i, template_shape_v=None):
+        template_shape_v = template_shape_v or []
+        template_shape = template_shape_i + template_shape_v
+        for nnz in [9, 12]:
+            t, _, _ = self._gen_sparse(len(template_shape_i), nnz, template_shape)
+            res = torch.zeros_like(t)
+            self.assertEqual(tuple(res.size()), tuple(template_shape))
+            self.assertTrue(res._indices().numel() == res._values().numel() == 0)
+            self.assertEqual(res._nnz(), 0)
+            self.assertEqual(res._dimI(), len(template_shape_i))
+            self.assertEqual(res._dimV(), len(template_shape_v))
+
+    def test_zeros_like(self):
+        i_shapes = [2, 3, 4]
+        v_shapes = [3, 4, 5, 6]
+        for i_dim in range(1, len(i_shapes) + 1):
+            for v_dim in range(len(v_shapes) + 1):
+                self._test_zeros_like(i_shapes[:i_dim], v_shapes[:v_dim])
 
     def _test_sparse_mask_hybrid_fixed(self):
         i = self.IndexTensor([
@@ -606,6 +674,37 @@ class TestSparse(TestCase):
 
         v = self.ValueTensor([5]).cuda(0)
         self.assertRaises(RuntimeError, lambda: self.SparseTensor(i, v, torch.Size([3])))
+
+    def _test_new_device(self, size, device):
+        with torch.cuda.device(device):
+            x = torch.cuda.sparse.DoubleTensor(*size)
+        self.assertEqual(x.get_device(), device)
+        x1 = x.new()
+        x2 = x.new(2, 3)
+        self.assertEqual(x1.get_device(), device)
+        self.assertEqual(x2.get_device(), device)
+
+    @cuda_only
+    def test_new_device_single_gpu(self):
+        self._test_new_device((), 0)
+        self._test_new_device((30, 20), 0)
+        self._test_new_device((30, 20, 10), 0)
+
+    @cuda_only
+    @unittest.skipIf(torch.cuda.device_count() < 2, "only one GPU detected")
+    def test_new_device_multi_gpu(self):
+        self._test_new_device((), 1)
+        self._test_new_device((30, 20), 1)
+        self._test_new_device((30, 20, 10), 1)
+
+    def test_is_sparse(self):
+        x = torch.randn(3, 3)
+        self.assertFalse(x.is_sparse)
+        self.assertFalse(torch.autograd.Variable(x).is_sparse)
+
+        x = self.SparseTensor()
+        self.assertTrue(x.is_sparse)
+        self.assertTrue(torch.autograd.Variable(x).is_sparse)
 
 
 class TestUncoalescedSparse(TestSparse):

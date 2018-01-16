@@ -1,0 +1,5 @@
+graph(%0 : Double(1, 1)
+      %1 : Double(1, 1)) {
+  %2 : Double(1, 1) = matmul(%0, %1)
+  return (%2);
+}

@@ -30,12 +30,13 @@
 #include "torch/csrc/utils/object_ptr.h"
 #include "torch/csrc/autograd/python_variable.h"
 #include "torch/csrc/utils/python_numbers.h"
+#include "torch/csrc/DynamicTypes.h"
 
 namespace torch {
 
 enum class ParameterType {
   TENSOR, SCALAR, INT64, DOUBLE, TENSOR_LIST, INT_LIST, GENERATOR,
-  BOOL, STORAGE
+  BOOL, STORAGE, PYOBJECT
 };
 
 struct FunctionParameter;
@@ -75,13 +76,20 @@ struct PythonArgs {
 
   inline at::Tensor tensor(int i);
   inline at::Scalar scalar(int i);
+  inline at::Scalar scalarWithDefault(int i, at::Scalar default_scalar);
   inline std::vector<at::Tensor> tensorlist(int i);
   inline std::vector<int64_t> intlist(int i);
+  inline std::vector<int64_t> intlistWithDefault(int i, std::vector<int64_t> default_intlist);
   inline at::Generator* generator(int i);
-  inline at::Storage& storage(int i);
+  inline std::unique_ptr<at::Storage> storage(int i);
+  inline PyObject* pyobject(int i);
   inline int64_t toInt64(int i);
+  inline int64_t toInt64WithDefault(int i, int64_t default_int);
   inline double toDouble(int i);
+  inline double toDoubleWithDefault(int i, double default_double);
   inline bool toBool(int i);
+  inline bool toBoolWithDefault(int i, bool default_bool);
+  inline bool isNone(int i);
 };
 
 struct FunctionSignature {
@@ -95,6 +103,7 @@ struct FunctionSignature {
   ssize_t min_args;
   ssize_t max_args;
   ssize_t max_pos_args;
+  bool hidden;
   bool deprecated;
 };
 
@@ -107,6 +116,7 @@ struct FunctionParameter {
 
   ParameterType type_;
   bool optional;
+  bool allow_none;
   bool keyword_only;
   int size;
   std::string name;
@@ -123,15 +133,24 @@ struct FunctionParameter {
 };
 
 inline at::Tensor PythonArgs::tensor(int i) {
-  if (!args[i] || args[i] == Py_None) return at::Tensor();
+  if (!args[i]) return at::Tensor();
   if (!THPVariable_Check(args[i])) {
+    // NB: Are you here because you passed None to a Variable method,
+    // and you expected an undefined tensor to be returned?   Don't add
+    // a test for Py_None here; instead, you need to mark the argument
+    // as *allowing none*; you can do this by writing 'Tensor?' instead
+    // of 'Tensor' in the ATen metadata.
     type_error("expected Variable as argument %d, but got %s", i, THPUtils_typename(args[i]));
   }
   return reinterpret_cast<THPVariable*>(args[i])->cdata;
 }
 
 inline at::Scalar PythonArgs::scalar(int i) {
-  if (!args[i]) return signature.params[i].default_scalar;
+  return scalarWithDefault(i, signature.params[i].default_scalar);
+}
+
+inline at::Scalar PythonArgs::scalarWithDefault(int i, at::Scalar default_scalar) {
+  if (!args[i]) return default_scalar;
   if (PyFloat_Check(args[i])) {
     return at::Scalar(THPUtils_unpackDouble(args[i]));
   }
@@ -156,7 +175,11 @@ inline std::vector<at::Tensor> PythonArgs::tensorlist(int i) {
 }
 
 inline std::vector<int64_t> PythonArgs::intlist(int i) {
-  if (!args[i] || args[i] == Py_None) return signature.params[i].default_intlist;
+  return intlistWithDefault(i, signature.params[i].default_intlist);
+}
+
+inline std::vector<int64_t> PythonArgs::intlistWithDefault(int i, std::vector<int64_t> default_intlist) {
+  if (!args[i]) return default_intlist;
   PyObject* arg = args[i];
   auto size = signature.params[i].size;
   if (size > 0 && THPUtils_checkLong(arg)) {
@@ -179,27 +202,52 @@ inline std::vector<int64_t> PythonArgs::intlist(int i) {
 }
 
 inline int64_t PythonArgs::toInt64(int i) {
-  if (!args[i]) return signature.params[i].default_int;
+  return toInt64WithDefault(i, signature.params[i].default_int);
+}
+
+inline int64_t PythonArgs::toInt64WithDefault(int i, int64_t default_int) {
+  if (!args[i]) return default_int;
   return THPUtils_unpackLong(args[i]);
 }
 
 inline double PythonArgs::toDouble(int i) {
-  if (!args[i]) return signature.params[i].default_double;
+  return toDoubleWithDefault(i, signature.params[i].default_double);
+}
+
+inline double PythonArgs::toDoubleWithDefault(int i, double default_double) {
+  if (!args[i]) return default_double;
   return THPUtils_unpackDouble(args[i]);
 }
 
 inline bool PythonArgs::toBool(int i) {
-  if (!args[i]) return signature.params[i].default_bool;
+  return toBoolWithDefault(i, signature.params[i].default_bool);
+}
+
+inline bool PythonArgs::toBoolWithDefault(int i, bool default_bool) {
+  if (!args[i]) return default_bool;
   return args[i] == Py_True;
+}
+
+inline bool PythonArgs::isNone(int i) {
+  return args[i] == nullptr;
 }
 
 inline at::Generator* PythonArgs::generator(int i) {
   if (!args[i]) return nullptr;
-  throw std::runtime_error("PythonArgs::generator not implemented");
+  if (!THPGenerator_Check(args[i])) {
+    type_error("expected Generator as argument %d, but got %s", i, THPUtils_typename(args[i]));
+  }
+  return reinterpret_cast<THPGenerator*>(args[i])->cdata;
 }
 
-inline at::Storage& PythonArgs::storage(int i) {
-  throw std::runtime_error("PythonArgs::storage not implemented");
+inline std::unique_ptr<at::Storage> PythonArgs::storage(int i) {
+  if (!args[i]) return nullptr;
+  return createStorage(args[i]);
+}
+
+inline PyObject* PythonArgs::pyobject(int i) {
+  if (!args[i]) return Py_None;
+  return args[i];
 }
 
 } // namespace torch

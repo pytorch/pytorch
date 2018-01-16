@@ -1,9 +1,11 @@
+#include "Python.h"
 #include "function.h"
 
 #include <string>
 
 #include "variable.h"
 #include "torch/csrc/jit/ir.h"
+#include "torch/csrc/autograd/grad_mode.h"
 #include "torch/csrc/autograd/functions/special.h"
 
 namespace torch { namespace autograd {
@@ -13,24 +15,23 @@ auto makeFlags(const T &inputs) -> FunctionFlags {
   int num_inputs = inputs.size();
   FunctionFlags f;
   f.is_executable = false;
-  f.is_volatile = false;
   f.next_functions.resize(num_inputs);
-  {
-    int i = 0;
-    for (auto it = inputs.begin(); it != inputs.end(); ++it, ++i) {
-      auto& var = *it;
-      if (var.defined()) {
-        f.is_executable |= var.requires_grad();
-        f.is_volatile |= var.is_volatile();
-        if (var.grad_fn()) {
-          f.next_functions[i] = std::make_pair<>(var.grad_fn(), var.output_nr());
-        } else {
-          f.next_functions[i] = std::make_pair<>(var.grad_accumulator(), 0);
-        }
+  if (!GradMode::is_enabled()) {
+    // TODO: avoid allocating next_functions entirely if grad_mode is disabled
+    return f;
+  }
+  int i = 0;
+  for (auto it = inputs.begin(); it != inputs.end(); ++it, ++i) {
+    auto& var = *it;
+    if (var.defined()) {
+      f.is_executable |= var.requires_grad();
+      if (var.grad_fn()) {
+        f.next_functions[i] = std::make_pair<>(var.grad_fn(), var.output_nr());
+      } else if (var.requires_grad()) {
+        f.next_functions[i] = std::make_pair<>(var.grad_accumulator(), 0);
       }
     }
   }
-  f.is_executable &= !f.is_volatile;
   return f;
 }
 
@@ -65,7 +66,14 @@ variable_list Function::tracedApply(variable_list inputs) {
 
   // Insert a CppOp in the trace.
   auto& graph = state->graph;
-  auto* this_node = graph->createCppOp(getSharedPtr());
+  std::vector<VariableFlags> var_flags;
+  for(auto & input: inputs) {
+    var_flags.push_back(VariableFlags::of(input));
+  }
+  auto* this_node = graph->createCppOp(getSharedPtr(), std::move(var_flags));
+  this_node->setSourceLocation(std::make_shared<SourceLocation>(
+        jit::tracer::getPythonInterpreterStackTrace()
+  ));
   for (auto& input: inputs) {
     this_node->addInput(tracer::getValueTrace(state, input));
   }
@@ -80,7 +88,7 @@ variable_list Function::tracedApply(variable_list inputs) {
   int num_outputs = outputs.size();
   for (int i = 0; i < num_outputs; ++i) {
     auto& output = outputs[i];
-    Node* sel = graph->appendNode(graph->createSelect(this_node, i));
+    auto sel = this_node->addOutput();
     // TODO: At the moment, C++ does not track shared storage.  It
     // should.  Update this when that happens.
     if (output.defined()) {
@@ -110,15 +118,14 @@ variable_list Function::tracedApply(variable_list inputs) {
     }
     bool has_backwards_eval = !should_trace_backward || this_eval;
     if (has_backwards_eval)
-      setUpContextEdge(this_node, num_outputs, inputs, outputs);
+      setUpContextEdge(this_node, inputs, outputs);
   }
   return outputs;
 }
 
-void Function::setUpContextEdge(jit::Node* node, int ctx_output_nr,
+void Function::setUpContextEdge(jit::Node* node,
                                 const variable_list& inputs, const variable_list& outputs) {
-  jit::Graph* graph = node->owningGraph();
-  jit::Node* ctx_select = graph->appendNode(graph->createSelect(node, ctx_output_nr));
+  auto ctx_select = node->addOutput();
   ctx_select->setType(std::make_shared<jit::HandleType>());
   auto backward_eval = Eval::getBackwardEval(inputs, outputs);
   if (backward_eval)

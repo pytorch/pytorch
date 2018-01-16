@@ -10,9 +10,9 @@
     - arg: THTensor* result
       output: True
     - arg: THGenerator* generator
-      default: THPDefaultGenerator->cdata
+      default: THPGenerator_TH_CData(THPDefaultGenerator)
       kwarg_only: True
-    - long n
+    - int64_t n
 ]]
 
 [[
@@ -27,23 +27,23 @@
       arguments:
         - THTensor* self
         - arg: THGenerator* generator
-          default: THPDefaultGenerator->cdata
+          default: THPGenerator_TH_CData(THPDefaultGenerator)
           kwarg_only: True
     - cname: cappedRandom
       arguments:
         - THTensor* self
         - arg: THGenerator* generator
-          default: THPDefaultGenerator->cdata
+          default: THPGenerator_TH_CData(THPDefaultGenerator)
           kwarg_only: True
-        - long to
+        - int64_t to
     - cname: clampedRandom
       arguments:
         - THTensor* self
         - arg: THGenerator* generator
-          default: THPDefaultGenerator->cdata
+          default: THPGenerator_TH_CData(THPDefaultGenerator)
           kwarg_only: True
-        - long from
-        - long to
+        - int64_t from
+        - int64_t to
 ]]
 
 [[
@@ -61,10 +61,10 @@
     - arg: THIndexTensor* result
       output: True
     - arg: THGenerator* generator
-      default: THPDefaultGenerator->cdata
+      default: THPGenerator_TH_CData(THPDefaultGenerator)
       kwarg_only: True
     - THTensor* self
-    - long num_samples
+    - int num_samples
     - arg: bool replacement
       default: "false"
 ]]
@@ -81,7 +81,7 @@
   arguments:
     - THTensor* self
     - arg: THGenerator* generator
-      default: THPDefaultGenerator->cdata
+      default: THPGenerator_TH_CData(THPDefaultGenerator)
       kwarg_only: True
     - arg: double from
       default: 0
@@ -105,7 +105,7 @@
         - arg: THTensor* output
           output: True
         - arg: THGenerator* generator
-          default: THPDefaultGenerator->cdata
+          default: THPGenerator_TH_CData(THPDefaultGenerator)
           kwarg_only: True
         - THTensor* means
         - arg: double std
@@ -115,7 +115,7 @@
         - arg: THTensor* output
           output: True
         - arg: THGenerator* generator
-          default: THPDefaultGenerator->cdata
+          default: THPGenerator_TH_CData(THPDefaultGenerator)
           kwarg_only: True
         - arg: double mean
           default: 0
@@ -125,7 +125,7 @@
         - arg: THTensor* output
           output: True
         - arg: THGenerator* generator
-          default: THPDefaultGenerator->cdata
+          default: THPGenerator_TH_CData(THPDefaultGenerator)
           kwarg_only: True
         - THTensor* means
         - THTensor* std
@@ -143,7 +143,7 @@
   arguments:
     - THTensor* self
     - arg: THGenerator* generator
-      default: THPDefaultGenerator->cdata
+      default: THPGenerator_TH_CData(THPDefaultGenerator)
       kwarg_only: True
     - arg: double mean
       default: 0
@@ -163,7 +163,7 @@
   arguments:
     - THTensor* self
     - arg: THGenerator* generator
-      default: THPDefaultGenerator->cdata
+      default: THPGenerator_TH_CData(THPDefaultGenerator)
       kwarg_only: True
     - arg: double median
       default: 0
@@ -184,7 +184,7 @@
   arguments:
     - THTensor* self
     - arg: THGenerator* generator
-      default: THPDefaultGenerator->cdata
+      default: THPGenerator_TH_CData(THPDefaultGenerator)
       kwarg_only: True
     - arg: double mean
       default: 1
@@ -204,10 +204,49 @@
   arguments:
     - THTensor* self
     - arg: THGenerator* generator
-      default: THPDefaultGenerator->cdata
+      default: THPGenerator_TH_CData(THPDefaultGenerator)
       kwarg_only: True
     - arg: double lambd
       default: 1
+]]
+
+[[
+  name: standard_gamma
+  types:
+    - floating_point
+  backends:
+    - CPU
+  return: argument 0
+  variants:
+    - function
+  options:
+    - cname: standard_gamma
+      arguments:
+        - arg: THTensor* output
+          output: True
+        - arg: THGenerator* generator
+          default: THPGenerator_TH_CData(THPDefaultGenerator)
+          kwarg_only: True
+        - THTensor* alpha
+]]
+
+[[
+  name: dirichlet_grad
+  types:
+    - floating_point
+  backends:
+    - CPU
+  return: argument 0
+  variants:
+    - function
+  options:
+    - cname: dirichlet_grad
+      arguments:
+        - arg: THTensor* output
+          output: True
+        - THTensor* x
+        - THTensor* alpha
+        - THTensor* total
 ]]
 
 [[
@@ -224,7 +263,7 @@
     - arg: THTensor* result
       output: True
     - arg: THGenerator* generator
-      default: THPDefaultGenerator->cdata
+      default: THPGenerator_TH_CData(THPDefaultGenerator)
       kwarg_only: True
     - arg: THSize* size
       long_args: True
@@ -244,7 +283,7 @@
     - arg: THTensor* result
       output: True
     - arg: THGenerator* generator
-      default: THPDefaultGenerator->cdata
+      default: THPGenerator_TH_CData(THPDefaultGenerator)
       kwarg_only: True
     - arg: THSize* size
       long_args: True
@@ -261,7 +300,7 @@
   arguments:
     - THTensor* self
     - arg: THGenerator* generator
-      default: THPDefaultGenerator->cdata
+      default: THPGenerator_TH_CData(THPDefaultGenerator)
       kwarg_only: True
     - double p
 ]]
@@ -292,7 +331,7 @@
       output: True
       resize: self
     - arg: THGenerator* generator
-      default: THPDefaultGenerator->cdata
+      default: THPGenerator_TH_CData(THPDefaultGenerator)
       kwarg_only: True
     - THTensor* self
 ]]
@@ -314,7 +353,7 @@
       arguments:
         - THTensor* self
         - arg: THGenerator* generator
-          default: THPDefaultGenerator->cdata
+          default: THPGenerator_TH_CData(THPDefaultGenerator)
           kwarg_only: True
         - arg: double p
           default: 0.5
@@ -322,14 +361,14 @@
       arguments:
         - THTensor* self
         - arg: THGenerator* generator
-          default: THPDefaultGenerator->cdata
+          default: THPGenerator_TH_CData(THPDefaultGenerator)
           kwarg_only: True
         - BackendFloatTensor* float_p
     - cname: bernoulli_DoubleTensor
       arguments:
         - THTensor* self
         - arg: THGenerator* generator
-          default: THPDefaultGenerator->cdata
+          default: THPGenerator_TH_CData(THPDefaultGenerator)
           kwarg_only: True
         - BackendDoubleTensor* float_p
 ]]

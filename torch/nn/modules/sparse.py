@@ -21,7 +21,7 @@ class Embedding(Module):
         norm_type (float, optional): The p of the p-norm to compute for the max_norm option
         scale_grad_by_freq (boolean, optional): if given, this will scale gradients by the frequency of
                                                 the words in the mini-batch.
-        sparse (boolean, optional): if True, gradient w.r.t. weight matrix will be a sparse tensor. See Notes for
+        sparse (boolean, optional): if ``True``, gradient w.r.t. weight matrix will be a sparse tensor. See Notes for
                                     more details regarding sparse gradients.
 
     Attributes:
@@ -79,6 +79,12 @@ class Embedding(Module):
         super(Embedding, self).__init__()
         self.num_embeddings = num_embeddings
         self.embedding_dim = embedding_dim
+        if padding_idx is not None:
+            if padding_idx > 0:
+                assert padding_idx < self.num_embeddings, 'Padding_idx must be within num_embeddings'
+            elif padding_idx < 0:
+                assert padding_idx >= -self.num_embeddings, 'Padding_idx must be within num_embeddings'
+                padding_idx = self.num_embeddings + padding_idx
         self.padding_idx = padding_idx
         self.max_norm = max_norm
         self.norm_type = norm_type
@@ -94,14 +100,9 @@ class Embedding(Module):
             self.weight.data[self.padding_idx].fill_(0)
 
     def forward(self, input):
-        padding_idx = self.padding_idx
-        if padding_idx is None:
-            padding_idx = -1
-        return self._backend.Embedding.apply(
-            input, self.weight,
-            padding_idx, self.max_norm, self.norm_type,
-            self.scale_grad_by_freq, self.sparse
-        )
+        return F.embedding(
+            input, self.weight, self.padding_idx, self.max_norm,
+            self.norm_type, self.scale_grad_by_freq, self.sparse)
 
     def __repr__(self):
         s = '{name}({num_embeddings}, {embedding_dim}'

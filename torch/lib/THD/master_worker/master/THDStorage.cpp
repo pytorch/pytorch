@@ -6,8 +6,6 @@
 #include "master_worker/master/Master.hpp"
 #include "process_group/General.hpp"
 
-#include <THPP/Traits.hpp>
-
 #include <cstring>
 #include <memory>
 

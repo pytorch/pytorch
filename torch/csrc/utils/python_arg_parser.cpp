@@ -21,11 +21,13 @@ static std::unordered_map<std::string, ParameterType> type_map = {
   {"IntList", ParameterType::INT_LIST},
   {"Generator", ParameterType::GENERATOR},
   {"bool", ParameterType::BOOL},
-  {"Storage", ParameterType::STORAGE}
+  {"Storage", ParameterType::STORAGE},
+  {"PyObject*", ParameterType::PYOBJECT},
 };
 
 FunctionParameter::FunctionParameter(const std::string& fmt, bool keyword_only)
   : optional(false)
+  , allow_none(false)
   , keyword_only(keyword_only)
   , size(0)
   , default_scalar(0)
@@ -36,6 +38,14 @@ FunctionParameter::FunctionParameter(const std::string& fmt, bool keyword_only)
   }
 
   auto type_str = fmt.substr(0, space);
+
+  auto question = type_str.find('?');
+  if (question != std::string::npos) {
+    allow_none = true;
+    type_str = type_str.substr(0, question);
+  }
+
+  // Parse and remove brackets from type_str
   auto bracket = type_str.find('[');
   if (bracket != std::string::npos) {
     auto size_str = type_str.substr(bracket + 1, type_str.length() - bracket - 2);
@@ -68,7 +78,7 @@ FunctionParameter::FunctionParameter(const std::string& fmt, bool keyword_only)
 bool FunctionParameter::check(PyObject* obj) {
   switch (type_) {
     case ParameterType::TENSOR: {
-      return THPVariable_Check(obj) || (optional && obj == Py_None);
+      return THPVariable_Check(obj);
     }
     case ParameterType::SCALAR: return THPUtils_checkDouble(obj);
     case ParameterType::INT64: return THPUtils_checkLong(obj);
@@ -81,9 +91,10 @@ bool FunctionParameter::check(PyObject* obj) {
       // if a size is specified (e.g. IntList[2]) we also allow passing a single int
       return size > 0 && THPUtils_checkLong(obj);
     }
-    case ParameterType::GENERATOR: return false;
+    case ParameterType::GENERATOR: return THPGenerator_Check(obj);
     case ParameterType::BOOL: return PyBool_Check(obj);
-    case ParameterType::STORAGE: return false;
+    case ParameterType::STORAGE: return isStorage(obj);
+    case ParameterType::PYOBJECT: return true;
     default: throw std::runtime_error("unknown parameter type");
   }
 }
@@ -99,16 +110,19 @@ std::string FunctionParameter::type_name() const {
     case ParameterType::GENERATOR: return "torch.Generator";
     case ParameterType::BOOL: return "bool";
     case ParameterType::STORAGE: return "torch.Storage";
+    case ParameterType::PYOBJECT: return "object";
     default: throw std::runtime_error("unknown parameter type");
   }
 }
 
 void FunctionParameter::set_default_str(const std::string& str) {
+  if (str == "None") {
+    allow_none = true;
+  }
   if (type_ == ParameterType::TENSOR) {
     if (str != "None") {
       throw std::runtime_error("default value for Tensor must be none, got: " + str);
     }
-    return;
   } else if (type_ == ParameterType::INT64) {
     default_int = atol(str.c_str());
   } else if (type_ == ParameterType::BOOL) {
@@ -116,7 +130,13 @@ void FunctionParameter::set_default_str(const std::string& str) {
   } else if (type_ == ParameterType::DOUBLE) {
     default_double = atof(str.c_str());
   } else if (type_ == ParameterType::SCALAR) {
-    default_scalar = Scalar(atof(str.c_str()));
+    if (str == "None") {
+      // This is a bit awkward, but convenient for clamp which takes Scalars,
+      // but allows None.
+      default_scalar = Scalar(NAN);
+    } else {
+      default_scalar = Scalar(atof(str.c_str()));
+    }
   } else if (type_ == ParameterType::INT_LIST) {
     if (str != "None") {
       default_intlist.assign(size, std::stoi(str));
@@ -128,6 +148,7 @@ FunctionSignature::FunctionSignature(const std::string& fmt)
   : min_args(0)
   , max_args(0)
   , max_pos_args(0)
+  , hidden(false)
   , deprecated(false)
 {
   auto open_paren = fmt.find('(');
@@ -166,7 +187,11 @@ FunctionSignature::FunctionSignature(const std::string& fmt)
   }
 
   if (fmt.substr(last_offset) == "|deprecated") {
+    hidden = true;
+    // TODO: raise warning when parsing deprecated signatures
     deprecated = true;
+  } else if (fmt.substr(last_offset) == "|hidden") {
+    hidden = true;
   }
 
   max_args = params.size();
@@ -311,49 +336,51 @@ bool FunctionSignature::parse(PyObject* args, PyObject* kwargs, PyObject* dst[],
   int i = 0;
   for (auto& param : params) {
     PyObject* obj = nullptr;
+    bool is_kwd = false;
     if (arg_pos < nargs) {
       obj = PyTuple_GET_ITEM(args, arg_pos);
-      if (param.check(obj)) {
-        dst[i++] = obj;
-        arg_pos++;
-        continue;
-      } else {
-        if (allow_varargs_intlist && arg_pos == 0) {
-          dst[i++] = args;
-          arg_pos += nargs;
-          continue;
-        }
-        if (raise_exception) {
-          // foo(): argument 'other' (position 2) must be str, not int
-          type_error("%s(): argument '%s' (position %d) must be %s, not %s",
-              name.c_str(), param.name.c_str(), arg_pos + 1,
-              param.type_name().c_str(), Py_TYPE(obj)->tp_name);
-        }
-        return false;
-      }
+    } else if (kwargs) {
+      obj = PyDict_GetItem(kwargs, param.python_name);
+      is_kwd = true;
     }
 
-    obj = kwargs ? PyDict_GetItem(kwargs, param.python_name) : nullptr;
-    if (obj) {
-      remaining_kwargs--;
-      if (!param.check(obj)) {
-        if (raise_exception) {
-          // foo(): argument 'other' must be str, not int
-          type_error("%s(): argument '%s' must be %s, not %s",
-              name.c_str(), param.name.c_str(), param.type_name().c_str(),
-              Py_TYPE(obj)->tp_name);
-        }
-        return false;
-      }
-      dst[i++] = obj;
-    } else if (param.optional) {
+    if ((!obj && param.optional) || (obj == Py_None && param.allow_none)) {
       dst[i++] = nullptr;
-    } else {
+    } else if (!obj) {
       if (raise_exception) {
         // foo() missing 1 required positional argument: "b"
         missing_args(*this, i);
       }
       return false;
+    } else if (param.check(obj)) {
+      dst[i++] = obj;
+    } else if (allow_varargs_intlist && arg_pos == 0 && !is_kwd &&
+               THPUtils_checkLong(obj)) {
+      // take all positional arguments as this parameter
+      // e.g. permute(1, 2, 3) -> permute((1, 2, 3))
+      dst[i++] = args;
+      arg_pos = nargs;
+      continue;
+    } else if (raise_exception) {
+      if (is_kwd) {
+        // foo(): argument 'other' must be str, not int
+        type_error("%s(): argument '%s' must be %s, not %s",
+            name.c_str(), param.name.c_str(), param.type_name().c_str(),
+            Py_TYPE(obj)->tp_name);
+      } else {
+        // foo(): argument 'other' (position 2) must be str, not int
+        type_error("%s(): argument '%s' (position %d) must be %s, not %s",
+            name.c_str(), param.name.c_str(), arg_pos + 1,
+            param.type_name().c_str(), Py_TYPE(obj)->tp_name);
+      }
+    } else {
+      return false;
+    }
+
+    if (!is_kwd) {
+      arg_pos++;
+    } else if (obj) {
+      remaining_kwargs--;
     }
   }
 
@@ -407,7 +434,7 @@ void PythonArgParser::print_error(PyObject* args, PyObject* kwargs, PyObject* pa
   std::vector<int> plausible_idxs;
   ssize_t i = 0;
   for (auto& signature : signatures_) {
-    if (num_args >= signature.min_args && num_args <= signature.max_args && !signature.deprecated) {
+    if (num_args >= signature.min_args && num_args <= signature.max_args && !signature.hidden) {
       plausible_idxs.push_back(i);
     }
     i++;
@@ -420,7 +447,7 @@ void PythonArgParser::print_error(PyObject* args, PyObject* kwargs, PyObject* pa
 
   std::vector<std::string> options;
   for (auto& signature : signatures_) {
-    if (!signature.deprecated) {
+    if (!signature.hidden) {
       options.push_back(signature.toString());
     }
   }

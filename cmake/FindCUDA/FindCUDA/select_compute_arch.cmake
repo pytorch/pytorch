@@ -62,8 +62,15 @@ function(CUDA_DETECT_INSTALLED_GPUS OUT_VARIABLE)
       "  return 0;\n"
       "}\n")
 
+    if(MSVC AND NOT "${CMAKE_C_COMPILER}" MATCHES "/cl.exe")
+      find_program(REAL_MSVC_COMPILER cl.exe)
+      set(CCBIN "${REAL_MSVC_COMPILER}")
+    else()
+      set(CCBIN "${CMAKE_C_COMPILER}")
+    endif()
+
     execute_process(COMMAND "${CUDA_NVCC_EXECUTABLE}" "--run" "${cufile}"
-                    "-ccbin" ${CMAKE_CXX_COMPILER}
+                    "-ccbin" ${CCBIN}
                     WORKING_DIRECTORY "${PROJECT_BINARY_DIR}/CMakeFiles/"
                     RESULT_VARIABLE nvcc_res OUTPUT_VARIABLE nvcc_out
                     ERROR_QUIET OUTPUT_STRIP_TRAILING_WHITESPACE)

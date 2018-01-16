@@ -107,10 +107,10 @@ class Event(object):
 
     Arguments:
         enable_timing (bool): indicates if the event should measure time
-            (default: False)
-        blocking (bool): if true, :meth:`wait` will be blocking (default: False)
-        interprocess (bool): if true, the event can be shared between processes
-            (default: False)
+            (default: ``False``)
+        blocking (bool): if ``True``, :meth:`wait` will be blocking (default: ``False``)
+        interprocess (bool): if ``True``, the event can be shared between processes
+            (default: ``False``)
     """
 
     DEFAULT = 0x0

@@ -203,13 +203,6 @@ def forward(fn, input, hx, weight, output, hy):
         if fn.batch_first and not is_input_packed:
             input = input.transpose(0, 1)
 
-        if (not is_input_packed and input.dim() != 3) or (is_input_packed and input.dim() != 2):
-            raise RuntimeError(
-                'input must have 3 dimensions, got {}'.format(input.dim()))
-        if fn.input_size != input.size(-1):
-            raise RuntimeError('input.size(-1) must be equal to input_size. Expected {}, got {}'.format(
-                fn.input_size, input.size(-1)
-            ))
         if fn.dropout != 0 and cudnn.version() < 5103:
             raise RuntimeError('dropout supported only in cudnn v5.1 and above')
 
@@ -261,9 +254,6 @@ def forward(fn, input, hx, weight, output, hy):
             fn.w_desc = init_weight_descriptor(fn, fn.weight_buf)
             w = fn.weight_buf
 
-        if tuple(hx.size()) != hidden_size:
-            raise RuntimeError('Expected hidden size {}, got {}'.format(
-                hidden_size, tuple(hx.size())))
         if cx is not None and tuple(cx.size()) != hidden_size:
             raise RuntimeError('Expected cell size {}, got {}'.format(
                 hidden_size, tuple(cx.size())))

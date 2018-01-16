@@ -1,4 +1,6 @@
 #include "torch/csrc/autograd/engine.h"
+
+#include "torch/csrc/autograd/grad_mode.h"
 #include "torch/csrc/autograd/functions/basic_ops.h"
 #include "torch/csrc/utils/auto_gpu.h"
 
@@ -64,7 +66,7 @@ struct GraphTask {
   std::atomic_bool has_error;
   std::atomic<uint64_t> outstanding_tasks;
   bool keep_graph;
-  bool has_any_work;
+  bool grad_mode;
 
   std::mutex mutex;
   // Notified when a task finishes executing.  Check outstanding_tasks to see
@@ -77,12 +79,12 @@ struct GraphTask {
 
   int owner;
 
-  GraphTask(bool keep_graph, const Engine::pre_callback_map& pre_callbacks, const Engine::post_callback_map& post_callbacks)
+  GraphTask(bool keep_graph, bool grad_mode, const Engine::pre_callback_map& pre_callbacks, const Engine::post_callback_map& post_callbacks)
     : exception()
     , has_error(false)
     , outstanding_tasks(0)
     , keep_graph(keep_graph)
-    , has_any_work(false)
+    , grad_mode(grad_mode)
     , mutex()
     , not_done()
     , pre_callbacks(pre_callbacks)
@@ -140,6 +142,7 @@ auto Engine::thread_main(GraphTask *graph_task) -> void {
   while (!graph_task || graph_task->outstanding_tasks > 0) {
     FunctionTask task = queue->pop_back();
     if (task.fn && !task.base->has_error.load()) {
+      GradMode::set_enabled(task.base->grad_mode);
       try {
         evaluate_function(task);
       } catch (std::exception& e) {
@@ -204,7 +207,9 @@ static variable_list call_function(FunctionTask& task) {
     auto& callback = it_p.first->second;
     if (!callback(&fn, inputs)) return variable_list(fn.next_functions.size());
   }
-
+  if(!task.base->keep_graph) {
+    fn.willReleaseVariables();
+  }
   auto outputs = fn(inputs);
 
   auto& post_callbacks = task.base->post_callbacks;
@@ -232,6 +237,8 @@ auto Engine::evaluate_function(FunctionTask& task) -> void {
   }
 
   int num_outputs = outputs.size();
+  if (num_outputs == 0) return; // Don't even acquire the mutex
+  std::lock_guard<std::mutex> lock(task.base->mutex);
   for (int i = 0; i < num_outputs; ++i) {
     auto& output = outputs[i];
     auto& next_fn = fn.next_functions[i].first;
@@ -241,13 +248,6 @@ auto Engine::evaluate_function(FunctionTask& task) -> void {
       continue;
     }
 
-    // Stochastic functions are placed in the ready queue by
-    // compute_dependencies, so we have to skip them here.
-    if (next_fn->is_stochastic || !next_fn->is_executable) {
-      continue;
-    }
-
-    std::lock_guard<std::mutex> lock(task.base->mutex);
     // Check if the next function is ready to be computed
     bool is_ready = false;
     auto& dependencies = task.base->dependencies;
@@ -285,49 +285,24 @@ auto Engine::evaluate_function(FunctionTask& task) -> void {
   }
 }
 
-/** Finds all stochastic functions and appends them to the queue */
-auto Engine::find_stochastic_functions(function_queue& queue, Function* graph_root, GraphTask& task) -> void {
-  std::unordered_set<Function*> seen {graph_root};
-  function_queue search_queue {graph_root};
-  while (search_queue.size() > 0) {
-    auto fn = search_queue.back(); search_queue.pop_back();
-    for (auto& next_fn_pair : fn->next_functions) {
-      auto& next_fn = next_fn_pair.first;
-      Function* next_ptr = next_fn.get();
-      if (!next_ptr) continue;
-      if (next_ptr->is_stochastic && next_ptr->is_executable && seen.count(next_ptr) == 0) {
-        ready_queue(-1).push_front(FunctionTask(&task, next_fn, InputBuffer(0)));
-        queue.push_back(next_ptr);
-        task.has_any_work = true;
-      }
-      if (seen.count(next_ptr) == 0) {
-        seen.insert(next_ptr);
-        search_queue.push_back(next_ptr);
-      }
-    }
-  }
-}
-
-/** Computes the number of dependencies for each function which requires grad */
-auto Engine::compute_dependencies(function_queue queue, GraphTask& task) -> void {
+/* Computes the number of dependencies for each function which requires grad */
+auto Engine::compute_dependencies(Function* root, GraphTask& task) -> void {
   // Just to make sure that they will never be added to the queue again
-  std::unordered_set<Function*> seen(queue.begin(), queue.end());
+  std::unordered_set<Function*> seen;
+  std::vector<Function*> queue { root };
 
   // Queue contains all nodes that will start propagating gradients.
   // We no longer have to expand functions that don't require grad.
   auto& dependencies = task.dependencies;
   while (queue.size() > 0) {
-    auto fn = std::move(queue.back()); queue.pop_back();
-    for (auto& next_fn_pair : fn->next_functions) {
-      Function* next_ptr = next_fn_pair.first.get();
+    auto fn = queue.back(); queue.pop_back();
+    for (auto& edge : fn->next_functions) {
+      Function* next_ptr = edge.first.get();
       if (!next_ptr) continue;
-      if (!next_ptr->is_executable) continue;
-      if (next_ptr->is_stochastic) continue; // Stochastic nodes were in the queue already
       dependencies[next_ptr] += 1;
-      if (seen.count(next_ptr) == 0) {
-        seen.insert(next_ptr);
-        queue.push_back(next_ptr);
-      }
+      bool inserted;
+      std::tie(std::ignore, inserted) = seen.insert(next_ptr);
+      if (inserted) queue.push_back(next_ptr);
     }
   }
 }
@@ -351,37 +326,20 @@ struct ClearCallbacks {
 auto Engine::execute(const function_list& input_roots,
                      const variable_list& inputs,
                      bool keep_graph,
+                     bool create_graph,
                      const pre_callback_map& pre_callbacks,
                      const post_callback_map& post_callbacks) -> void {
   std::call_once(start_threads_flag, &Engine::start_threads, this);
   // Callbacks are only valid for the duration of this run and should always be cleared
   ClearCallbacks _cb_guard(final_callbacks, post_callbacks_lock);
 
-  GraphTask graph_task(keep_graph, pre_callbacks, post_callbacks);
-
+  GraphTask graph_task(keep_graph, create_graph, pre_callbacks, post_callbacks);
   std::unique_lock<std::mutex> lock(graph_task.mutex);
 
+  // Now compute the dependencies for all executable functions and queue the root
   auto graph_root = std::make_shared<GraphRoot>(input_roots, inputs);
-  function_queue roots;
-  for (auto entry : input_roots) {
-    if (entry.first->is_executable) {
-      graph_task.has_any_work = true;
-      roots.push_back(graph_root.get());
-      ready_queue(-1).push_front(FunctionTask(&graph_task, graph_root, InputBuffer(0)));
-      break;
-    }
-  }
-
-  // Search the graph and find all stochastic functions. Append them to the queue.
-  find_stochastic_functions(roots, graph_root.get(), graph_task);
-
-  if (!graph_task.has_any_work) {
-    throw std::runtime_error(
-      "there are no graph nodes that require computing gradients");
-  }
-
-  // Now compute the dependencies for all executable functions
-  compute_dependencies(std::move(roots), graph_task);
+  compute_dependencies(graph_root.get(), graph_task);
+  ready_queue(-1).push_front(FunctionTask(&graph_task, std::move(graph_root), InputBuffer(0)));
 
   // Not a worker
   if (worker_device == NO_DEVICE) {

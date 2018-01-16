@@ -1,6 +1,6 @@
 #pragma once
 
-#include <THPP/Tensor.hpp>
+#include <ATen/ATen.h>
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <cstdlib>
@@ -54,8 +54,8 @@ enum class DeviceType : std::uint8_t {
   LAST
 };
 
-inline DeviceType getDeviceType(thpp::Tensor& tensor) {
-    return tensor.isCuda() ? DeviceType::CUDA : DeviceType::CPU;
+inline DeviceType getDeviceType(at::Tensor& tensor) {
+    return tensor.type().is_cuda() ? DeviceType::CUDA : DeviceType::CPU;
 }
 
 } // namespace thd
@@ -71,7 +71,7 @@ using port_type = std::uint16_t;
 using size_type = std::uint64_t;
 
 #define SYSCHECK(expr) { \
-  errno = 0; (expr);     \
+  errno = 0; auto ___output = (expr); (void)___output;     \
   if (errno != 0) throw std::system_error(errno, std::system_category()); \
 }
 

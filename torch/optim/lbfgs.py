@@ -93,7 +93,9 @@ class LBFGS(Optimizer):
         line_search_fn = group['line_search_fn']
         history_size = group['history_size']
 
-        state = self.state['global_state']
+        # NOTE: LBFGS has only global state, but we register it as state for
+        # the first param, because this helps with casting in load_state_dict
+        state = self.state[self._params[0]]
         state.setdefault('func_evals', 0)
         state.setdefault('n_iter', 0)
 

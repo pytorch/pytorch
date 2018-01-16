@@ -12,4 +12,9 @@ struct THPVoidTensor {
   char data_type;
 };
 
+struct THPVoidStorage {
+  PyObject_HEAD
+  THVoidStorage *cdata;
+};
+
 } // namespace torch

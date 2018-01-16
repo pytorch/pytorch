@@ -27,7 +27,6 @@ struct Engine {
   virtual ~Engine();
 
   using ready_queue_type = std::deque<std::pair<std::shared_ptr<Function>, InputBuffer>>;
-  using function_queue = std::vector<Function*>;
   using dependencies_type = std::unordered_map<Function*, int>;
 
   using pre_callback_type = std::function<bool (Function*, variable_list&)>;
@@ -41,18 +40,14 @@ struct Engine {
       const function_list& roots,
       const variable_list& inputs,
       bool keep_graph,
+      bool create_graph,
       const pre_callback_map& pre_callbacks = pre_callback_map(),
       const post_callback_map& post_callbacks = post_callback_map());
 
   void queue_callback(std::function<void()> callback);
 
 protected:
-  function_queue find_roots(
-      const function_list& roots,
-      variable_list& inputs,
-      GraphTask& task);
-  void find_stochastic_functions(function_queue& queue, Function* graph_root, GraphTask& task);
-  void compute_dependencies(function_queue queue, GraphTask& task);
+  void compute_dependencies(Function* root, GraphTask& task);
   void evaluate_function(FunctionTask& task);
   ReadyQueue& ready_queue(int device);
   void start_threads();

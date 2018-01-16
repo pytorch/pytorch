@@ -1,0 +1,8 @@
+graph(%0 : Double(4, 4)
+      -------- stage 1 --------
+      %1 : Double(4!)) {
+  %2 : Double(4) = select[dim=0, index=0](%0)
+  ---------------- stage 1 ----------------
+  %3 : Double(4, 4) = CppOp[AsStridedBackward](%1)
+  return (%2, %3);
+}

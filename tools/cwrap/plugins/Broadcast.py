@@ -134,7 +134,7 @@ class Broadcast(CWrapPlugin):
              THError("Argument %s requires at least %d dimensions, but only has %d",
                      "${op_dim}", ${arg_op_dim_value} + 1, THTensor_(nDimension)(LIBRARY_STATE ${arg_op_dim}));
            }
-           long ${arg_op_a}_dim${idx}_size = THTensor_(size)(LIBRARY_STATE ${arg_op_dim}, ${arg_op_dim_value});\n""")
+           int64_t ${arg_op_a}_dim${idx}_size = THTensor_(size)(LIBRARY_STATE ${arg_op_dim}, ${arg_op_dim_value});\n""")
 
     OUT_PLACE_PRE_EXPAND1_DIM_TEMPLATE = Template(
         """THLongStoragePtr ${arg_op_a}_storage(THLongStorage_newWithSize1(${arg_op_a}_dim0_size));\n""")

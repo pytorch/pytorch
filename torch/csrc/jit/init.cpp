@@ -2,11 +2,16 @@
 
 #include "torch/csrc/jit/python_tracer.h"
 #include "torch/csrc/jit/python_ir.h"
+#include "torch/csrc/jit/python_arg_flatten.h"
 #include "torch/csrc/jit/export.h"
+#include "torch/csrc/jit/python_compiled_function.h"
 #include "torch/csrc/jit/passes/graph_fuser.h"
 #include "torch/csrc/jit/passes/onnx.h"
 #include "torch/csrc/jit/passes/dead_code_elimination.h"
 #include "torch/csrc/jit/passes/common_subexpression_elimination.h"
+#include "torch/csrc/jit/passes/peephole.h"
+#include "torch/csrc/jit/passes/canonicalize.h"
+#include "torch/csrc/jit/passes/onnx/peephole.h"
 
 
 
@@ -36,16 +41,29 @@ extern void runJITCPPTests();
 void initJITBindings(PyObject *module) {
   auto m = py::handle(module).cast<py::module>();
 
+  py::class_<python::IODescriptor>(m, "IODescriptor");
+
   m.def("_jit_init", loadPythonClasses)
    .def("_jit_pass_onnx", ToONNX)
+   .def("_jit_pass_onnx_peephole", graph_pass<PeepholeOptimizeONNX>)
    .def("_jit_pass_fuse", graph_pass<FuseGraph>)
    .def("_jit_pass_dce", graph_pass<EliminateDeadCode>)
    .def("_jit_pass_cse", graph_pass<EliminateCommonSubexpression>)
+   .def("_jit_pass_peephole", graph_pass<PeepholeOptimize>)
+   .def("_jit_pass_canonicalize", graph_pass<Canonicalize>)
    .def("_jit_pass_lint", graph_pass<LintGraph>)
-   .def("_jit_run_cpp_tests", runJITCPPTests);
+   .def("_jit_run_cpp_tests", runJITCPPTests)
+   .def("_jit_flatten", [](py::handle& obj) {
+     auto res =  python::flatten(obj);
+     return std::make_pair(res.vars, res.desc);
+   })
+   .def("_jit_unflatten", [](autograd::variable_list vars, python::IODescriptor& desc) {
+     return py::reinterpret_steal<py::object>(python::unflatten(vars, desc));
+   });
 
   initPythonIRBindings(module);
   initPythonTracerBindings(module);
+  python::initCompilerMixin(module);
 }
 
 }}

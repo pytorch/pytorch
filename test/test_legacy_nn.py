@@ -15,6 +15,8 @@ class OldModuleTest(ModuleTest):
     def __init__(self, *args, **kwargs):
         super(OldModuleTest, self).__init__(*args, **kwargs)
         self.check_inplace = kwargs.get('check_inplace', False)
+        # Never check gradgrad for legacy NN
+        self.check_gradgrad = False
 
     def _do_test(self, test_case, module, input):
         # TODO: check update parameters
@@ -486,14 +488,14 @@ tests = [
                   input_size=(1, 2, 4, 4, 4)),
     OldModuleTest(nn.VolumetricMaxPooling,
                   constructor_args=(2, 2, 2),
-                  input=(torch.randn(2, 3, 5, 5, 5) * 1000)),
+                  input_fn=lambda: (torch.randn(2, 3, 5, 5, 5) * 1000)),
     OldModuleTest(nn.VolumetricMaxPooling,
                   constructor_args=(2, 2, 2, 2, 2, 2),
-                  input=(torch.randn(2, 3, 5, 5, 5) * 1000),
+                  input_fn=lambda: (torch.randn(2, 3, 5, 5, 5) * 1000),
                   desc='stride'),
     OldModuleTest(nn.VolumetricMaxPooling,
                   constructor_args=(2, 2, 2, 2, 2, 2, 1, 1, 1),
-                  input=(torch.randn(2, 3, 5, 5, 5) * 1000),
+                  input_fn=lambda: (torch.randn(2, 3, 5, 5, 5) * 1000),
                   desc='stride_padding'),
     OldModuleTest(nn.VolumetricReplicationPadding,
                   constructor_args=(1, 2, 3, 4, 5, 6),
@@ -617,6 +619,11 @@ def prepare_tests():
         test_params = deepcopy(test_params)
         name = test_params.pop('module_name')
         name = name_remap.get(name, name.replace('Loss', 'Criterion'))
+
+        # nn.NLLLoss2d is deprecated, but there is a NLLLoss test for 2d
+        if name == 'ClassNLLCriterion' and 'desc' in test_params.keys() and '2d' in test_params['desc']:
+            name = 'SpatialClassNLLCriterion'
+
         test_params['constructor'] = getattr(nn, name)
         test = CriterionTest(**test_params)
         add_test(test)
@@ -628,7 +635,7 @@ class TestNN(NNTestCase):
         with freeze_rng_state():
             return module.forward(input)
 
-    def _backward(self, module, input, output, grad_output):
+    def _backward(self, module, input, output, grad_output, create_graph=False):
         return module.backward(input, grad_output)
 
     def _forward_criterion(self, criterion, input, target):
