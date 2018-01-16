@@ -71,7 +71,8 @@ DONT_REQUIRE_DERIVATIVE = {
 # concrete type of arguments. Eventually all VariableType functions should only
 # check that arguments are Variables.
 USE_UNPACK_ANY = {
-    'sparse_coo_tensor',
+    'sparse_coo_tensor', 'cudnn_batch_norm', 'cudnn_batch_norm_forward',
+    'cudnn_batch_norm_backward',
 }
 
 METHOD_DECLARATION = CodeTemplate("""\
@@ -442,11 +443,11 @@ def unpack_args(env, declaration):
         return 'Tensor' in arg['dynamic_type']
 
     def get_suffix(dynamic_type, is_nullable):
-        if is_nullable:
+        if use_unpack_any:
+            return '_any' if not is_nullable else '_any_opt'
+        elif is_nullable:
             assert dynamic_type == 'Tensor'
             return '_opt'
-        elif use_unpack_any:
-            return '_any'
         elif dynamic_type == 'IndexTensor':
             return '_long'
         elif dynamic_type == 'BoolTensor':
