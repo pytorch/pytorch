@@ -16,10 +16,30 @@ Get latest source from GitHub.
 
 #### Ubuntu
 
+###### Ubuntu 14.04 LTS
     sudo apt-get install libprotobuf-dev protobuf-compiler libatlas-base-dev libgoogle-glog-dev libgtest-dev liblmdb-dev libleveldb-dev libsnappy-dev python-dev python-pip libiomp-dev libopencv-dev libpthread-stubs0-dev cmake
     sudo pip install numpy
     wget http://developer.download.nvidia.com/compute/cuda/repos/ubuntu1404/x86_64/cuda-repo-ubuntu1404_8.0.44-1_amd64.deb
     sudo dpkg -i cuda-repo-ubuntu1404_8.0.44-1_amd64.deb
+    sudo apt-get update
+    sudo apt-get install cuda
+    sudo apt-get install git
+
+    CUDNN_URL="http://developer.download.nvidia.com/compute/redist/cudnn/v5.1/cudnn-8.0-linux-x64-v5.1.tgz" &&
+    curl -fsSL ${CUDNN_URL} -O &&
+    sudo tar -xzf cudnn-8.0-linux-x64-v5.1.tgz -C /usr/local &&
+    rm cudnn-8.0-linux-x64-v5.1.tgz &&
+    sudo ldconfig
+
+    mkdir build && cd build
+    cmake ..
+    make
+
+###### Ubuntu 16.04 LTS
+    sudo apt-get install libprotobuf-dev protobuf-compiler libatlas-base-dev libgoogle-glog-dev libgtest-dev liblmdb-dev libleveldb-dev libsnappy-dev python-dev python-pip libiomp-dev libopencv-dev libpthread-stubs0-dev cmake
+    sudo pip install numpy
+    wget http://developer.download.nvidia.com/compute/cuda/repos/ubuntu1604/x86_64/cuda-repo-ubuntu1604_8.0.61-1_amd64.deb
+    sudo dpkg -i cuda-repo-ubuntu1604_8.0.61-1_amd64.deb
     sudo apt-get update
     sudo apt-get install cuda
     sudo apt-get install git
