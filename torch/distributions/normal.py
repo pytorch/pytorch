@@ -22,7 +22,7 @@ class Normal(Distribution):
     Args:
         loc (float or Tensor or Variable): mean of the distribution (often referred to as mu)
         scale (float or Tensor or Variable): standard deviation of the distribution
-        (often referred to as sigma)
+            (often referred to as sigma)
     """
     params = {'loc': constraints.real, 'scale': constraints.positive}
     support = constraints.real

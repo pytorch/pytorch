@@ -27,9 +27,9 @@ class Gamma(Distribution):
 
     Args:
         concentration (float or Tensor or Variable): shape parameter of the distribution
-        (often referred to as alpha)
+            (often referred to as alpha)
         rate (float or Tensor or Variable): rate = 1 / scale of the distribution
-        (often referred to as beta)
+            (often referred to as beta)
     """
     params = {'concentration': constraints.positive, 'rate': constraints.positive}
     support = constraints.positive

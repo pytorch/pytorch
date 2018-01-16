@@ -50,7 +50,7 @@ class Dirichlet(Distribution):
 
     Args:
         concentration (Tensor or Variable): concentration parameter of the distribution
-        (often referred to as alpha)
+            (often referred to as alpha)
     """
     params = {'concentration': constraints.positive}
     support = constraints.simplex
