@@ -128,15 +128,6 @@ void THTensor_(exponential)(THTensor *self, THGenerator *_generator, double lamb
   TH_TENSOR_APPLY(real, self, *self_data = (real)THRandom_exponential(_generator, lambda););
 }
 
-void THTensor_(standard_gamma)(THTensor *self, THGenerator *gen, THTensor *alpha)
-{
-  THTensor_(resizeAs)(self, alpha);
-  TH_TENSOR_APPLY2(real, self, real, alpha, {
-    const real sample = THRandom_standard_gamma(gen, *alpha_data);
-    *self_data = sample > 0 ? sample : TH_REAL_MIN;
-  });
-}
-
 #undef TH_REAL_MIN
 
 void THTensor_(cauchy)(THTensor *self, THGenerator *_generator, double median, double sigma)

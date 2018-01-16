@@ -8,6 +8,8 @@
 #include "ATen/CheckGenerator.h"
 #include "ATen/Generator.h"
 
+#include <ATen/native/Distributions.cuh>
+
 #include "TH/THRandom.h"
 
 namespace at {
@@ -156,6 +158,24 @@ namespace dist {
   }
 
   template <typename scalar>
+  struct GammaOp {
+    static void apply(Tensor& ret, const Tensor& alpha, THGenerator *generator) {
+      CPU_tensor_apply2<scalar, double>(ret, alpha,
+        [generator](scalar& ret_val, const double& alpha){
+          dist::baseSampler<float> standard_uniform([generator] () {
+            return THRandom_standard_uniform(generator);
+          });
+          dist::baseSampler<float> standard_normal([generator] () {
+            return THRandom_normal(generator, 0.0, 1.0);
+          });
+          auto sample = dist::sample_gamma<float>(alpha, standard_uniform, standard_normal);
+          ret_val = std::max(std::numeric_limits<scalar>::min(), (scalar) sample);
+        }
+      );
+    }
+  };
+
+  template <typename scalar>
   struct PoissonOp {
     static int64_t sample_poisson(double lambda, THGenerator *generator) {
       if (lambda >= 10) {
@@ -224,6 +244,13 @@ Tensor _s_poisson_cpu(const Tensor& lambda, Generator *gen) {
   Tensor ret = lambda.type().zeros(lambda.sizes());
   auto lambda_ = lambda.toType(ScalarType::Double);
   dispatch_floating_types<void, dist::PoissonOp>(ret.type(), "poisson", ret, lambda_, dist::get_generator(gen));
+  return ret;
+}
+
+Tensor _s_gamma_cpu(const Tensor& alpha, Generator *gen) {
+  Tensor ret = alpha.type().zeros(alpha.sizes());
+  auto alpha_ = alpha.toType(ScalarType::Double);
+  dispatch_floating_types<void, dist::GammaOp>(ret.type(), "gamma", ret, alpha_, dist::get_generator(gen));
   return ret;
 }
 
