@@ -1052,14 +1052,18 @@ def create_derived(backend_type_env, declarations):
             arguments = [option['arguments'][argi]
                          for argi in arguments_indices]
             if scalar_check is not None:
-                if len(arguments) > 1:
-                    body.append("bool maybe_scalar = {};".format(scalar_check))
-                    scalar_check = 'maybe_scalar'
+                if not isinstance(scalar_check, dict):
+                    if len(arguments) > 1:
+                        body.append("bool maybe_scalar = {};".format(scalar_check))
+                        scalar_check = 'maybe_scalar'
                 for arg in arguments:
-                    stmt = "{}_->maybeScalar({});".format(arg['name'], scalar_check)
-                    if nullable_argument(arg):
-                        stmt = "if ({}_) {}".format(arg['name'], stmt)
-                    body.append(stmt)
+                    scalar_check_arg = (scalar_check if not isinstance(scalar_check, dict)
+                                        else scalar_check.get(arg['name']))
+                    if scalar_check_arg is not None:
+                        stmt = "{}_->maybeScalar({});".format(arg['name'], scalar_check_arg)
+                        if nullable_argument(arg):
+                            stmt = "if ({}_) {}".format(arg['name'], stmt)
+                        body.append(stmt)
             if len(arguments_indices) == 1:
                 arg = arguments[0]
                 body.append("return {};".format(arg['name']))
