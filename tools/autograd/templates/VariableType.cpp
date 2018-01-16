@@ -142,10 +142,17 @@ Tensor & VariableType::unpack_any(const Tensor & t, const char * name, int pos) 
 }
 
 Tensor VariableType::unpack_opt(const Tensor & t, const char * name, int pos) const {
-  if(!t.defined()) {
+  if (!t.defined()) {
     return Tensor();
   }
   return unpack(t, name, pos);
+}
+
+Tensor VariableType::unpack_any_opt(const Tensor & t, const char * name, int pos) const {
+  if (!t.defined()) {
+    return Tensor();
+  }
+  return unpack_any(t, name, pos);
 }
 
 std::vector<at::Tensor> VariableType::unpack(at::TensorList tl, const char *name, int pos) const {
