@@ -1495,7 +1495,7 @@ class TestKL(TestCase):
             (chi2, chi2),
             (chi2, exponential),
             (chi2, gamma),
-            #  (dirichlet, dirichlet),  there is a size issue
+            (dirichlet, dirichlet),
             (exponential, chi2),
             (exponential, exponential),
             (exponential, gamma),
@@ -1506,14 +1506,14 @@ class TestKL(TestCase):
             (gamma, gamma),
             (gamma, gumbel),
             (gumbel, gumbel),
-            (gumbel, normal),  # this case fails for n <= 22000
+            (gumbel, normal),
             (laplace, laplace),
             (laplace, normal),
             (normal, gumbel),
             (normal, normal),
             (pareto, chi2),
-            (pareto, exponential),  # this case fails for n <= 22000
-            (pareto, gamma),  # this case fails for n <= 22000
+            (pareto, exponential),
+            (pareto, gamma),
             (pareto, normal),
             (uniform_interval, beta),
             (uniform_positive, chi2),
