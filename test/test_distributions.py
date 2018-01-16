@@ -1279,8 +1279,8 @@ class TestKL(TestCase):
                                          [0.5, 0.4, 0.1],
                                          [0.33, 0.33, 0.34],
                                          [0.2, 0.2, 0.4]])
-        self.sampling_range = [1000, 2000, 2500, 5000, 7500, 8000,
-                                10000, 20000, 25000, 50000, 75000, 80000, 100000]
+        self.sampling_extra = [1000, 500, 1500, 1000, 2500, 500, 2000, 10000, 5000,
+                                15000, 10000, 25000, 5000, 20000]
         self.finite_examples = [
             (bernoulli, bernoulli),
             (beta, beta),
@@ -1369,17 +1369,23 @@ class TestKL(TestCase):
     def test_kl_monte_carlo(self):
         set_rng_seed(0)  # see Note [Randomized statistical tests]
         for (p, _), (_, q) in self.finite_examples:
-            for sample_shape in self.sampling_range:
-                x = p.sample(sample_shape=(sample_shape,))
-                expected = (p.log_prob(x) - q.log_prob(x)).mean(0)
-                actual = kl_divergence(p, q)
-                message = 'Incorrect KL({}, {}).\nExpected (Monte Carlo): {}\nActual (analytic): {}'.format(
+            x = p.sample(sample_shape=(1000,))
+            expected = (p.log_prob(x) - q.log_prob(x)).mean(0)
+            actual = kl_divergence(p, q)
+            message = 'Incorrect KL({}, {}).\nExpected (Monte Carlo): {}\nActual (analytic): {}'.format(
                     type(p).__name__, type(q).__name__, expected, actual)
-                try:
-                    self.assertEqual(expected, actual, prec=0.1, message=message)
-                    break
-                except:
-                    continue
+            try:
+                self.assertEqual(expected, actual, prec=0.05, message=message)
+            except:
+                for sample_extra in self.sampling_extra:
+                    x = torch.cat([x, p.sample(sample_shape=(sample_extra,))], 0)
+                    expected = (p.log_prob(x) - q.log_prob(x)).mean(0)
+                    actual = kl_divergence(p, q)
+                    try:
+                        self.assertEqual(expected, actual, prec=0.05, message=message)
+                        break
+                    except:
+                        continue
 
     def test_kl_infinite(self):
         for p, q in self.infinite_examples:
