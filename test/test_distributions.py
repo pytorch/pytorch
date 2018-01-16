@@ -88,8 +88,8 @@ EXAMPLES = [
         {'df': Variable(torch.exp(torch.randn(1)), requires_grad=True)},
     ]),
     Example(Dirichlet, [
-        {'alpha': Variable(torch.exp(torch.randn(2, 3)), requires_grad=True)},
-        {'alpha': Variable(torch.exp(torch.randn(4)), requires_grad=True)},
+        {'concentration': Variable(torch.exp(torch.randn(2, 3)), requires_grad=True)},
+        {'concentration': Variable(torch.exp(torch.randn(4)), requires_grad=True)},
     ]),
     Example(Exponential, [
         {'rate': Variable(torch.randn(5, 5).abs(), requires_grad=True)},

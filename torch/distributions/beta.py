@@ -39,7 +39,7 @@ class Beta(Distribution):
     def rsample(self, sample_shape=()):
         value = self._dirichlet.rsample(sample_shape).select(-1, 0)
         if isinstance(value, Number):
-            value = self._dirichlet.alpha.new([value])
+            value = self._dirichlet.concentration.new([value])
         return value
 
     def log_prob(self, value):
@@ -52,7 +52,7 @@ class Beta(Distribution):
 
     @property
     def concentration1(self):
-        result = self._dirichlet.alpha[..., 0]
+        result = self._dirichlet.concentration[..., 0]
         if isinstance(result, Number):
             return torch.Tensor([result])
         else:
@@ -60,7 +60,7 @@ class Beta(Distribution):
 
     @property
     def concentration0(self):
-        result = self._dirichlet.alpha[..., 1]
+        result = self._dirichlet.concentration[..., 1]
         if isinstance(result, Number):
             return torch.Tensor([result])
         else:

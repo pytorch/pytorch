@@ -172,13 +172,13 @@ def _kl_beta_beta(p, q):
 @register_kl(Dirichlet, Dirichlet)
 def _kl_dirichlet_dirichlet(p, q):
     # From http://bariskurt.com/kullback-leibler-divergence-between-two-dirichlet-and-beta-distributions/
-    sum_p_alpha = p.alpha.sum(-1)
-    sum_q_alpha = q.alpha.sum(-1)
+    sum_p_alpha = p.concentration.sum(-1)
+    sum_q_alpha = q.concentration.sum(-1)
     t1 = torch.lgamma(sum_p_alpha)
     t2 = torch.lgamma(sum_q_alpha)
-    t3 = p.alpha.lgamma().sum(-1)
-    t4 = q.alpha.lgamma().sum(-1)
-    t5 = (p.alpha - q.alpha) * (p.alpha.digamma() - sum_p_alpha.digamma())
+    t3 = p.concentration.lgamma().sum(-1)
+    t4 = q.concentration.lgamma().sum(-1)
+    t5 = (p.concentration - q.concentration) * (p.concentration.digamma() - sum_p_alpha.digamma())
     return t1 - t3 - t2 + t4 + t5.sum(-1)
 
 
