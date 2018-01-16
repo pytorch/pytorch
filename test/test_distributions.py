@@ -1533,6 +1533,7 @@ class TestKL(TestCase):
             (Gamma(1, 2), Gumbel(-3, 4)),
             (Gumbel(-1, 2), Gumbel(-3, 4)),
             (Gumbel(-1, 2), Normal(-3, 4)),  # This case fails for n <= 22000
+            (Geometric(0.7), Geometric(0.3)),
             (Laplace(1, 2), Laplace(-3, 4)),
             (Laplace(-1, 2), Normal(-3, 4)),
             (Normal(-1, 2), Gumbel(-3, 4)),
