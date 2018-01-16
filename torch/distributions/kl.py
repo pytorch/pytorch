@@ -191,10 +191,10 @@ def _kl_exponential_exponential(p, q):
 
 @register_kl(Gamma, Gamma)
 def _kl_gamma_gamma(p, q):
-    t1 = q.alpha * (p.beta / q.beta).log()
-    t2 = torch.lgamma(q.alpha) - torch.lgamma(p.alpha)
-    t3 = (p.alpha - q.alpha) * torch.digamma(p.alpha)
-    t4 = (q.beta - p.beta) * (p.alpha / p.beta)
+    t1 = q.concentration * (p.rate / q.rate).log()
+    t2 = torch.lgamma(q.concentration) - torch.lgamma(p.concentration)
+    t3 = (p.concentration - q.concentration) * torch.digamma(p.concentration)
+    t4 = (q.rate - p.rate) * (p.concentration / p.rate)
     return t1 + t2 + t3 + t4
 
 
@@ -263,9 +263,9 @@ def _kl_beta_exponential(p, q):
 @register_kl(Beta, Gamma)
 def _kl_beta_gamma(p, q):
     t1 = -p.entropy()
-    t2 = q.alpha.lgamma() - q.alpha * q.beta.log()
-    t3 = (q.alpha - 1) * (p.concentration1.digamma() - (p.concentration1 + p.concentration0).digamma())
-    t4 = q.beta * p.concentration1 / (p.concentration1 + p.concentration0)
+    t2 = q.concentration.lgamma() - q.concentration * q.rate.log()
+    t3 = (q.concentration - 1) * (p.concentration1.digamma() - (p.concentration1 + p.concentration0).digamma())
+    t4 = q.rate * p.concentration1 / (p.concentration1 + p.concentration0)
     return t1 + t2 - t3 + t4
 
 # TODO: Add Beta-Laplace KL Divergence
@@ -299,9 +299,9 @@ def _kl_exponential_infinity(p, q):
 
 @register_kl(Exponential, Gamma)
 def _kl_exponential_gamma(p, q):
-    ratio = q.beta / p.rate
-    t1 = -q.alpha * torch.log(ratio)
-    return t1 + ratio + q.alpha.lgamma() + q.alpha * _euler_gamma - (1 + _euler_gamma)
+    ratio = q.rate / p.rate
+    t1 = -q.concentration * torch.log(ratio)
+    return t1 + ratio + q.concentration.lgamma() + q.concentration * _euler_gamma - (1 + _euler_gamma)
 
 
 @register_kl(Exponential, Gumbel)
@@ -331,21 +331,21 @@ def _kl_exponential_normal(p, q):
 @register_kl(Gamma, Pareto)
 @register_kl(Gamma, Uniform)
 def _kl_gamma_infinity(p, q):
-    return _infinite_like(p.alpha)
+    return _infinite_like(p.concentration)
 
 
 @register_kl(Gamma, Exponential)
 def _kl_gamma_exponential(p, q):
-    return -p.entropy() - q.rate.log() + q.rate * p.alpha / p.beta
+    return -p.entropy() - q.rate.log() + q.rate * p.concentration / p.rate
 
 
 @register_kl(Gamma, Gumbel)
 def _kl_gamma_gumbel(p, q):
-    beta_scale_prod = p.beta * q.scale
+    beta_scale_prod = p.rate * q.scale
     loc_scale_ratio = q.loc / q.scale
-    t1 = (p.alpha - 1) * p.alpha.digamma() - p.alpha.lgamma() - p.alpha
-    t2 = beta_scale_prod.log() + p.alpha / beta_scale_prod
-    t3 = torch.exp(loc_scale_ratio) * (1 + beta_scale_prod.reciprocal()).pow(-p.alpha) - loc_scale_ratio
+    t1 = (p.concentration - 1) * p.concentration.digamma() - p.concentration.lgamma() - p.concentration
+    t2 = beta_scale_prod.log() + p.concentration / beta_scale_prod
+    t3 = torch.exp(loc_scale_ratio) * (1 + beta_scale_prod.reciprocal()).pow(-p.concentration) - loc_scale_ratio
     return t1 + t2 + t3
 
 # TODO: Add Gamma-Laplace KL Divergence
@@ -354,12 +354,12 @@ def _kl_gamma_gumbel(p, q):
 @register_kl(Gamma, Normal)
 def _kl_gamma_normal(p, q):
     var_normal = q.scale.pow(2)
-    beta_sqr = p.beta.pow(2)
-    t1 = 0.5 * torch.log(beta_sqr * var_normal * 2 * math.pi) - p.alpha - p.alpha.lgamma()
-    t2 = 0.5 * (p.alpha.pow(2) + p.alpha) / beta_sqr
-    t3 = q.loc * p.alpha / p.beta
+    beta_sqr = p.rate.pow(2)
+    t1 = 0.5 * torch.log(beta_sqr * var_normal * 2 * math.pi) - p.concentration - p.concentration.lgamma()
+    t2 = 0.5 * (p.concentration.pow(2) + p.concentration) / beta_sqr
+    t3 = q.loc * p.concentration / p.rate
     t4 = 0.5 * q.loc.pow(2)
-    return t1 + (p.alpha - 1) * p.alpha.digamma() + (t2 - t3 + t4) / var_normal
+    return t1 + (p.concentration - 1) * p.concentration.digamma() + (t2 - t3 + t4) / var_normal
 
 
 @register_kl(Gumbel, Beta)
@@ -445,9 +445,9 @@ def _kl_pareto_exponential(p, q):
 def _kl_pareto_gamma(p, q):
     common_term = p.scale.log() + p.alpha.reciprocal()
     t1 = p.alpha.log() - common_term
-    t2 = q.alpha.lgamma() - q.alpha * q.beta.log()
-    t3 = (1 - q.alpha) * common_term
-    t4 = q.beta * p.alpha * p.scale / (p.alpha - 1)
+    t2 = q.concentration.lgamma() - q.concentration * q.rate.log()
+    t3 = (1 - q.concentration) * common_term
+    t4 = q.rate * p.alpha * p.scale / (p.alpha - 1)
     result = t1 + t2 + t3 + t4 - 1
     result[p.alpha <= 1] = float('inf')
     return result
@@ -502,9 +502,9 @@ def _kl_uniform_exponetial(p, q):
 def _kl_uniform_gamma(p, q):
     common_term = p.high - p.low
     t1 = common_term.log()
-    t2 = q.alpha.lgamma() - q.alpha * q.beta.log()
-    t3 = (1 - q.alpha) * (_x_log_x(p.high) - _x_log_x(p.low) - common_term) / common_term
-    t4 = q.beta * (p.high + p.low) / 2
+    t2 = q.concentration.lgamma() - q.concentration * q.rate.log()
+    t3 = (1 - q.concentration) * (_x_log_x(p.high) - _x_log_x(p.low) - common_term) / common_term
+    t4 = q.rate * (p.high + p.low) / 2
     result = -t1 + t2 + t3 + t4
     result[p.low < q.support.lower_bound] = float('inf')
     return result

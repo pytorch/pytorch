@@ -97,12 +97,12 @@ EXAMPLES = [
     ]),
     Example(Gamma, [
         {
-            'alpha': Variable(torch.exp(torch.randn(2, 3)), requires_grad=True),
-            'beta': Variable(torch.exp(torch.randn(2, 3)), requires_grad=True),
+            'concentration': Variable(torch.exp(torch.randn(2, 3)), requires_grad=True),
+            'rate': Variable(torch.exp(torch.randn(2, 3)), requires_grad=True),
         },
         {
-            'alpha': Variable(torch.exp(torch.randn(1)), requires_grad=True),
-            'beta': Variable(torch.exp(torch.randn(1)), requires_grad=True),
+            'concentration': Variable(torch.exp(torch.randn(1)), requires_grad=True),
+            'rate': Variable(torch.exp(torch.randn(1)), requires_grad=True),
         },
     ]),
     Example(Gumbel, [
@@ -642,7 +642,7 @@ class TestDistributions(TestCase):
         for alpha, beta in product([0.1, 1.0, 5.0], [0.1, 1.0, 10.0]):
             self._check_sampler_sampler(Gamma(alpha, beta),
                                         scipy.stats.gamma(alpha, scale=1.0 / beta),
-                                        'Gamma(alpha={}, beta={})'.format(alpha, beta))
+                                        'Gamma(concentration={}, rate={})'.format(alpha, beta))
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_pareto_shape(self):
@@ -846,17 +846,17 @@ class TestDistributions(TestCase):
              (1, 2)),
             (Normal(loc=torch.Tensor([0]), scale=torch.Tensor([[1]])),
              (1, 1)),
-            (Gamma(alpha=torch.Tensor([1, 1]), beta=1),
+            (Gamma(concentration=torch.Tensor([1, 1]), rate=1),
              (2,)),
-            (Gamma(alpha=1, beta=torch.Tensor([1, 1])),
+            (Gamma(concentration=1, rate=torch.Tensor([1, 1])),
              (2,)),
-            (Gamma(alpha=torch.Tensor([1, 1]), beta=torch.Tensor([[1], [1], [1]])),
+            (Gamma(concentration=torch.Tensor([1, 1]), rate=torch.Tensor([[1], [1], [1]])),
              (3, 2)),
-            (Gamma(alpha=torch.Tensor([1, 1]), beta=torch.Tensor([[1], [1]])),
+            (Gamma(concentration=torch.Tensor([1, 1]), rate=torch.Tensor([[1], [1]])),
              (2, 2)),
-            (Gamma(alpha=torch.Tensor([1, 1]), beta=torch.Tensor([[1]])),
+            (Gamma(concentration=torch.Tensor([1, 1]), rate=torch.Tensor([[1]])),
              (1, 2)),
-            (Gamma(alpha=torch.Tensor([1]), beta=torch.Tensor([[1]])),
+            (Gamma(concentration=torch.Tensor([1]), rate=torch.Tensor([[1]])),
              (1, 1)),
             (Gumbel(loc=torch.Tensor([0, 0]), scale=1),
              (2,)),
@@ -934,8 +934,8 @@ class TestDistributions(TestCase):
                 'scale': torch.Tensor([1, 1])
             }),
             (Gamma, {
-                'alpha': torch.Tensor([0, 0]),
-                'beta': torch.Tensor([1, 1, 1])
+                'concentration': torch.Tensor([0, 0]),
+                'rate': torch.Tensor([1, 1, 1])
             }),
             (Laplace, {
                 'loc': torch.Tensor([0, 0]),
