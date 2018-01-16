@@ -51,6 +51,7 @@ private:
   at::Tensor & unpack_byte(const Tensor & t, const char * name, int pos) const;
   at::Tensor & unpack_any(const Tensor & t, const char * name, int pos) const;
   at::Tensor unpack_opt(const Tensor & t, const char * name, int pos) const;
+  at::Tensor unpack_any_opt(const Tensor & t, const char * name, int pos) const;
   std::vector<at::Tensor> unpack(at::TensorList tl, const char *name, int pos) const;
   std::vector<at::Tensor> unpack_idxs(at::TensorList tl, const char *name, int pos) const;
 

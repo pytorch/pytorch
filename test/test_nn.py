@@ -3325,6 +3325,15 @@ class TestNN(NNTestCase):
         gradcheck(func, [v])
         gradgradcheck(func, [v])
 
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    @unittest.skipIf(not TEST_CUDNN, "cuDNN unavailable")
+    def test_batchnorm_cudnn_half(self):
+        input = Variable(torch.rand(2, 3, 2, 2).half().cuda())
+        m = nn.BatchNorm2d(3).float().cuda()
+        output = m(input)
+        output.sum().backward()
+        self.assertEqual(output.type(), input.type())
+
     def test_batchnorm_raises_error_if_running_mean_is_not_same_size_as_input(self):
         input = Variable(torch.rand(2, 10))
         running_var = torch.rand(10)
