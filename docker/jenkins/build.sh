@@ -69,6 +69,10 @@ fi
 
 if [[ "$image" == *-android-* ]]; then
   ANDROID=yes
+
+  # The Android NDK requires CMake 3.6 or higher.
+  # See https://github.com/caffe2/caffe2/pull/1740 for more info.
+  CMAKE_VERSION=3.6.3
 fi
 
 if [[ "$image" == *-gcc* ]]; then
@@ -105,5 +109,6 @@ docker build \
        --build-arg "ANDROID=${ANDROID}" \
        --build-arg "GCC_VERSION=${GCC_VERSION}" \
        --build-arg "CLANG_VERSION=${CLANG_VERSION}" \
+       --build-arg "CMAKE_VERSION=${CMAKE_VERSION:-}" \
        "$@" \
        "$(dirname ${DOCKERFILE})"
