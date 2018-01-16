@@ -2352,8 +2352,6 @@ method_tests = [
     ('__getitem__', torch.randn(S, S, S), (dont_convert([[0, 3], Ellipsis]),), 'adv_index_sub_3'),
     ('__getitem__', torch.randn(S, S, S), (dont_convert([[0, 2, 3], [1, 3, 3],
      Variable(torch.LongTensor([0, 0, 2]), requires_grad=False)]),), 'adv_index_var'),
-    ('_scalar_sum', (), NO_ARGS, 'scalar_arg'),
-    ('_scalar_sum', (S, S, S), NO_ARGS, 'tensor_arg'),
 ]
 # TODO: clamp with min/max
 
