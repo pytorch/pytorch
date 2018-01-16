@@ -5,6 +5,8 @@ import glob
 source_files = set(['.py', '.cpp', '.h'])
 
 
+# TODO: This is a little inaccurate, because it will also pick
+# up setup_helper scripts which don't affect code generation
 def all_generator_source():
     r = []
     for directory, _, filenames in os.walk('tools'):
@@ -45,6 +47,15 @@ def generate_code_ninja(w):
         outputs, 'do_cmd', all_inputs,
         variables={
             'cmd': cmd,
+            # Note [Unchanging results for ninja]
+            # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            # generate_code.py will avoid bumping the timestamp on its
+            # output files if the contents of the generated file did not
+            # change.  To let Ninja take advantage of this, it must stat
+            # the output files after the build.  See
+            # https://groups.google.com/forum/#!topic/ninja-build/rExDmgDL2oc
+            # for a more detailed discussion.
+            'restat': True,
         })
 
 
