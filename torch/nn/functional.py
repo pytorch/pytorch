@@ -608,7 +608,7 @@ def sigmoid(input):
 
 
 def spatial_cross_map_lrn(input, size, alpha, beta, k):
-  return _functions.SpaTialCrossMapLRN.apply(input, size, alpha, beta, k)
+  return _functions.SpatialCrossMapLRN.apply(input, size, alpha, beta, k)
 
 
 # etc.
