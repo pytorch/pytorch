@@ -20,7 +20,9 @@ class Beta(Distribution):
 
     Args:
         concentration1 (float or Tensor or Variable): 1st concentration parameter of the distribution
+        (often referred to as alpha)
         concentration0 (float or Tensor or Variable): 2nd concentration parameter of the distribution
+        (often referred to as beta)
     """
     params = {'concentration1': constraints.positive, 'concentration0': constraints.positive}
     support = constraints.unit_interval

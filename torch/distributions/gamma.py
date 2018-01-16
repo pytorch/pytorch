@@ -16,18 +16,20 @@ def _standard_gamma(concentration):
 
 class Gamma(Distribution):
     r"""
-    Creates a Gamma distribution parameterized by shape `concentration` and rate `rate`.
+    Creates a Gamma distribution parameterized by shape `concentration` and `rate`.
 
     Example::
 
         >>> m = Gamma(torch.Tensor([1.0]), torch.Tensor([1.0]))
-        >>> m.sample()  # Gamma distributed with shape concentration=1 and rate rate=1
+        >>> m.sample()  # Gamma distributed with concentration=1 and rate=1
          0.1046
         [torch.FloatTensor of size 1]
 
     Args:
         concentration (float or Tensor or Variable): shape parameter of the distribution
+        (often referred to as alpha)
         rate (float or Tensor or Variable): rate = 1 / scale of the distribution
+        (often referred to as beta)
     """
     params = {'concentration': constraints.positive, 'rate': constraints.positive}
     support = constraints.positive

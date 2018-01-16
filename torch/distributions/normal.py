@@ -15,13 +15,14 @@ class Normal(Distribution):
     Example::
 
         >>> m = Normal(torch.Tensor([0.0]), torch.Tensor([1.0]))
-        >>> m.sample()  # normally distributed with loc=0 and scaledev=1
+        >>> m.sample()  # normally distributed with loc=0 and scale=1
          0.1046
         [torch.FloatTensor of size 1]
 
     Args:
-        loc (float or Tensor or Variable): mean of the distribution
+        loc (float or Tensor or Variable): mean of the distribution (often referred to as mu)
         scale (float or Tensor or Variable): standard deviation of the distribution
+        (often referred to as sigma)
     """
     params = {'loc': constraints.real, 'scale': constraints.positive}
     support = constraints.real
