@@ -70,7 +70,13 @@ class Variable(_C._VariableBase):
         self.requires_grad, _, self._backward_hooks = state
 
     def __repr__(self):
-        strt = 'Variable containing:' + torch._tensor_str._str(self.data, False)
+        if self.is_sparse:
+            data_str = ' \n{} with indices:\n{}and values:\n{}'.format(
+                torch.typename(self.data), self._indices().data,
+                self._values().data)
+        else:
+            data_str = torch._tensor_str._str(self.data, False)
+        strt = 'Variable containing:' + data_str
         # let's make our own Variable-specific footer
         size_str = '(' + ','.join(str(size) for size in self.size()) + (',)' if len(self.size()) == 1 else ')')
         device_str = '' if not self.is_cuda else \
