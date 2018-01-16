@@ -1375,14 +1375,14 @@ class TestKL(TestCase):
             message = 'Incorrect KL({}, {}).\nExpected (Monte Carlo): {}\nActual (analytic): {}'.format(
                     type(p).__name__, type(q).__name__, expected, actual)
             try:
-                self.assertEqual(expected, actual, prec=0.05, message=message)
+                self.assertEqual(expected, actual, prec=0.1, message=message)
             except:
                 for sample_extra in self.sampling_extra:
                     x = torch.cat([x, p.sample(sample_shape=(sample_extra,))], 0)
                     expected = (p.log_prob(x) - q.log_prob(x)).mean(0)
                     actual = kl_divergence(p, q)
                     try:
-                        self.assertEqual(expected, actual, prec=0.05, message=message)
+                        self.assertEqual(expected, actual, prec=0.1, message=message)
                         break
                     except:
                         continue
