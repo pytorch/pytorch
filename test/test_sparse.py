@@ -649,6 +649,7 @@ class TestSparse(TestCase):
             't': lambda x: x.t(),
             'div': lambda x: x.div(2),
             'div_': lambda x: x.div_(2),
+            'pow': lambda x: x.pow(2),
         }
 
         for test_name, test_fn in to_test_one_arg.items():

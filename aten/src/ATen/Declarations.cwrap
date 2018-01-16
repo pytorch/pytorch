@@ -2228,15 +2228,13 @@
   name: pow
   types:
     - floating_point
-  backends:
-    - CPU
-    - CUDA
   variants:
     - method
     - function
   return: argument 0
   options:
     - cname: pow
+      aten_sparse: True
       arguments:
         - arg: THTensor* result
           output: True
