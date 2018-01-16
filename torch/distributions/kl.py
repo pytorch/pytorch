@@ -222,10 +222,10 @@ def _kl_laplace_laplace(p, q):
 
 @register_kl(Normal, Normal)
 def _kl_normal_normal(p, q):
-    std_dev_ratio = p.std / q.std
+    std_dev_ratio = p.scale / q.scale
     t1 = -std_dev_ratio.log()
     t2 = std_dev_ratio.pow(2)
-    t3 = ((p.mean - q.mean) / q.std).pow(2)
+    t3 = ((p.loc - q.loc) / q.scale).pow(2)
     return t1 + (t2 + t3 - 1) / 2
 
 
@@ -274,12 +274,12 @@ def _kl_beta_gamma(p, q):
 @register_kl(Beta, Normal)
 def _kl_beta_normal(p, q):
     E_beta = p.concentration1 / (p.concentration1 + p.concentration0)
-    var_normal = q.std.pow(2)
+    var_normal = q.scale.pow(2)
     t1 = -p.entropy()
     t2 = 0.5 * (var_normal * 2 * math.pi).log()
     t3 = (E_beta * (1 - E_beta) / (p.concentration1 + p.concentration0 + 1) + E_beta.pow(2)) * 0.5
-    t4 = q.mean * E_beta
-    t5 = q.mean.pow(2) * 0.5
+    t4 = q.loc * E_beta
+    t5 = q.loc.pow(2) * 0.5
     return t1 + t2 + (t3 - t4 + t5) / var_normal
 
 
@@ -318,12 +318,12 @@ def _kl_exponential_gumbel(p, q):
 
 @register_kl(Exponential, Normal)
 def _kl_exponential_normal(p, q):
-    var_normal = q.std.pow(2)
+    var_normal = q.scale.pow(2)
     rate_sqr = p.rate.pow(2)
     t1 = 0.5 * torch.log(rate_sqr * var_normal * 2 * math.pi)
     t2 = rate_sqr.reciprocal()
-    t3 = q.mean / p.rate
-    t4 = q.mean.pow(2) * 0.5
+    t3 = q.loc / p.rate
+    t4 = q.loc.pow(2) * 0.5
     return t1 - 1 + (t2 - t3 + t4) / var_normal
 
 
@@ -353,12 +353,12 @@ def _kl_gamma_gumbel(p, q):
 
 @register_kl(Gamma, Normal)
 def _kl_gamma_normal(p, q):
-    var_normal = q.std.pow(2)
+    var_normal = q.scale.pow(2)
     beta_sqr = p.beta.pow(2)
     t1 = 0.5 * torch.log(beta_sqr * var_normal * 2 * math.pi) - p.alpha - p.alpha.lgamma()
     t2 = 0.5 * (p.alpha.pow(2) + p.alpha) / beta_sqr
-    t3 = q.mean * p.alpha / p.beta
-    t4 = 0.5 * q.mean.pow(2)
+    t3 = q.loc * p.alpha / p.beta
+    t4 = 0.5 * q.loc.pow(2)
     return t1 + (p.alpha - 1) * p.alpha.digamma() + (t2 - t3 + t4) / var_normal
 
 
@@ -375,10 +375,10 @@ def _kl_gumbel_infinity(p, q):
 
 @register_kl(Gumbel, Normal)
 def _kl_gumbel_normal(p, q):
-    param_ratio = p.scale / q.std
+    param_ratio = p.scale / q.scale
     t1 = (param_ratio / math.sqrt(2 * math.pi)).log()
     t2 = (math.pi * param_ratio) / 12
-    t3 = ((p.loc + p.scale * _euler_gamma - q.mean) / q.std).pow(2) * 0.5
+    t3 = ((p.loc + p.scale * _euler_gamma - q.loc) / q.scale).pow(2) * 0.5
     return -t1 + t2 + t3 - (_euler_gamma + 1)
 
 
@@ -393,12 +393,12 @@ def _kl_laplace_infinity(p, q):
 
 @register_kl(Laplace, Normal)
 def _kl_laplace_normal(p, q):
-    var_normal = q.std.pow(2)
+    var_normal = q.scale.pow(2)
     scale_sqr_var_ratio = p.scale.pow(2) / var_normal
     t1 = 0.5 * torch.log(2 * scale_sqr_var_ratio / math.pi)
     t2 = 0.5 * p.loc.pow(2)
-    t3 = p.loc * q.mean
-    t4 = 0.5 * q.mean.pow(2)
+    t3 = p.loc * q.loc
+    t4 = 0.5 * q.loc.pow(2)
     return -t1 + scale_sqr_var_ratio + (t2 - t3 + t4) / var_normal - 1
 
 
@@ -408,13 +408,13 @@ def _kl_laplace_normal(p, q):
 @register_kl(Normal, Pareto)
 @register_kl(Normal, Uniform)
 def _kl_normal_infinity(p, q):
-    return _infinite_like(p.mean)
+    return _infinite_like(p.loc)
 
 
 @register_kl(Normal, Gumbel)
 def _kl_normal_gumbel(p, q):
-    mean_scale_ratio = p.mean / q.scale
-    var_scale_sqr_ratio = (p.std / q.scale).pow(2)
+    mean_scale_ratio = p.loc / q.scale
+    var_scale_sqr_ratio = (p.scale / q.scale).pow(2)
     loc_scale_ratio = q.loc / q.scale
     t1 = var_scale_sqr_ratio.log() * 0.5
     t2 = mean_scale_ratio - loc_scale_ratio
@@ -468,12 +468,12 @@ def _kl_pareto_laplace(p, q):
 
 @register_kl(Pareto, Normal)
 def _kl_pareto_normal(p, q):
-    var_normal = 2 * q.std.pow(2)
+    var_normal = 2 * q.scale.pow(2)
     common_term = p.scale / (p.alpha - 1)
-    t1 = (math.sqrt(2 * math.pi) * q.std * p.alpha / p.scale).log()
+    t1 = (math.sqrt(2 * math.pi) * q.scale * p.alpha / p.scale).log()
     t2 = p.alpha.reciprocal()
     t3 = p.alpha * common_term.pow(2) / (p.alpha - 2)
-    t4 = (p.alpha * common_term - q.mean).pow(2)
+    t4 = (p.alpha * common_term - q.loc).pow(2)
     result = t1 - t2 + (t3 + t4) / var_normal - 1
     result[p.alpha <= 2] = float('inf')
     return result
@@ -525,10 +525,10 @@ def _kl_uniform_gumbel(p, q):
 @register_kl(Uniform, Normal)
 def _kl_uniform_normal(p, q):
     common_term = p.high - p.low
-    t1 = (math.sqrt(math.pi * 2) * q.std / common_term).log()
+    t1 = (math.sqrt(math.pi * 2) * q.scale / common_term).log()
     t2 = (common_term).pow(2) / 12
-    t3 = ((p.high + p.low - 2 * q.mean) / 2).pow(2)
-    return t1 + 0.5 * (t2 + t3) / q.std.pow(2)
+    t3 = ((p.high + p.low - 2 * q.loc) / 2).pow(2)
+    return t1 + 0.5 * (t2 + t3) / q.scale.pow(2)
 
 
 @register_kl(Uniform, Pareto)

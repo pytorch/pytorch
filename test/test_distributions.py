@@ -131,16 +131,16 @@ EXAMPLES = [
     ]),
     Example(Normal, [
         {
-            'mean': Variable(torch.randn(5, 5), requires_grad=True),
-            'std': Variable(torch.randn(5, 5).abs(), requires_grad=True),
+            'loc': Variable(torch.randn(5, 5), requires_grad=True),
+            'scale': Variable(torch.randn(5, 5).abs(), requires_grad=True),
         },
         {
-            'mean': Variable(torch.randn(1), requires_grad=True),
-            'std': Variable(torch.randn(1).abs(), requires_grad=True),
+            'loc': Variable(torch.randn(1), requires_grad=True),
+            'scale': Variable(torch.randn(1).abs(), requires_grad=True),
         },
         {
-            'mean': torch.Tensor([1.0, 0.0]),
-            'std': torch.Tensor([1e-5, 1e-5]),
+            'loc': torch.Tensor([1.0, 0.0]),
+            'scale': torch.Tensor([1e-5, 1e-5]),
         },
     ]),
     Example(OneHotCategorical, [
@@ -478,56 +478,56 @@ class TestDistributions(TestCase):
         scale.grad.zero_()
 
     def test_normal(self):
-        mean = Variable(torch.randn(5, 5), requires_grad=True)
-        std = Variable(torch.randn(5, 5).abs(), requires_grad=True)
-        mean_1d = Variable(torch.randn(1), requires_grad=True)
-        std_1d = Variable(torch.randn(1), requires_grad=True)
-        mean_delta = torch.Tensor([1.0, 0.0])
-        std_delta = torch.Tensor([1e-5, 1e-5])
-        self.assertEqual(Normal(mean, std).sample().size(), (5, 5))
-        self.assertEqual(Normal(mean, std).sample_n(7).size(), (7, 5, 5))
-        self.assertEqual(Normal(mean_1d, std_1d).sample_n(1).size(), (1, 1))
-        self.assertEqual(Normal(mean_1d, std_1d).sample().size(), (1,))
+        loc = Variable(torch.randn(5, 5), requires_grad=True)
+        scale = Variable(torch.randn(5, 5).abs(), requires_grad=True)
+        loc_1d = Variable(torch.randn(1), requires_grad=True)
+        scale_1d = Variable(torch.randn(1), requires_grad=True)
+        loc_delta = torch.Tensor([1.0, 0.0])
+        scale_delta = torch.Tensor([1e-5, 1e-5])
+        self.assertEqual(Normal(loc, scale).sample().size(), (5, 5))
+        self.assertEqual(Normal(loc, scale).sample_n(7).size(), (7, 5, 5))
+        self.assertEqual(Normal(loc_1d, scale_1d).sample_n(1).size(), (1, 1))
+        self.assertEqual(Normal(loc_1d, scale_1d).sample().size(), (1,))
         self.assertEqual(Normal(0.2, .6).sample_n(1).size(), (1,))
         self.assertEqual(Normal(-0.7, 50.0).sample_n(1).size(), (1,))
 
         # sample check for extreme value of mean, std
         set_rng_seed(1)
-        self.assertEqual(Normal(mean_delta, std_delta).sample(sample_shape=(1, 2)),
+        self.assertEqual(Normal(loc_delta, scale_delta).sample(sample_shape=(1, 2)),
                          torch.Tensor([[[1.0, 0.0], [1.0, 0.0]]]),
                          prec=1e-4)
 
-        self._gradcheck_log_prob(Normal, (mean, std))
-        self._gradcheck_log_prob(Normal, (mean, 1.0))
-        self._gradcheck_log_prob(Normal, (0.0, std))
+        self._gradcheck_log_prob(Normal, (loc, scale))
+        self._gradcheck_log_prob(Normal, (loc, 1.0))
+        self._gradcheck_log_prob(Normal, (0.0, scale))
 
         state = torch.get_rng_state()
-        eps = torch.normal(torch.zeros_like(mean), torch.ones_like(std))
+        eps = torch.normal(torch.zeros_like(loc), torch.ones_like(scale))
         torch.set_rng_state(state)
-        z = Normal(mean, std).rsample()
+        z = Normal(loc, scale).rsample()
         z.backward(torch.ones_like(z))
-        self.assertEqual(mean.grad, torch.ones_like(mean))
-        self.assertEqual(std.grad, eps)
-        mean.grad.zero_()
-        std.grad.zero_()
+        self.assertEqual(loc.grad, torch.ones_like(loc))
+        self.assertEqual(scale.grad, eps)
+        loc.grad.zero_()
+        scale.grad.zero_()
         self.assertEqual(z.size(), (5, 5))
 
         def ref_log_prob(idx, x, log_prob):
-            m = mean.data.view(-1)[idx]
-            s = std.data.view(-1)[idx]
+            m = loc.data.view(-1)[idx]
+            s = scale.data.view(-1)[idx]
             expected = (math.exp(-(x - m) ** 2 / (2 * s ** 2)) /
                         math.sqrt(2 * math.pi * s ** 2))
             self.assertAlmostEqual(log_prob, math.log(expected), places=3)
 
-        self._check_log_prob(Normal(mean, std), ref_log_prob)
+        self._check_log_prob(Normal(loc, scale), ref_log_prob)
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_normal_sample(self):
         set_rng_seed(0)  # see Note [Randomized statistical tests]
-        for mean, std in product([-1.0, 0.0, 1.0], [0.1, 1.0, 10.0]):
-            self._check_sampler_sampler(Normal(mean, std),
-                                        scipy.stats.norm(loc=mean, scale=std),
-                                        'Normal(mean={}, std={})'.format(mean, std))
+        for loc, scale in product([-1.0, 0.0, 1.0], [0.1, 1.0, 10.0]):
+            self._check_sampler_sampler(Normal(loc, scale),
+                                        scipy.stats.norm(loc=loc, scale=scale),
+                                        'Normal(mean={}, std={})'.format(loc, scale))
 
     def test_exponential(self):
         rate = Variable(torch.randn(5, 5).abs(), requires_grad=True)
@@ -834,17 +834,17 @@ class TestDistributions(TestCase):
         # parameters.
         # example type (distribution instance, expected sample shape)
         valid_examples = [
-            (Normal(mean=torch.Tensor([0, 0]), std=1),
+            (Normal(loc=torch.Tensor([0, 0]), scale=1),
              (2,)),
-            (Normal(mean=0, std=torch.Tensor([1, 1])),
+            (Normal(loc=0, scale=torch.Tensor([1, 1])),
              (2,)),
-            (Normal(mean=torch.Tensor([0, 0]), std=torch.Tensor([1])),
+            (Normal(loc=torch.Tensor([0, 0]), scale=torch.Tensor([1])),
              (2,)),
-            (Normal(mean=torch.Tensor([0, 0]), std=torch.Tensor([[1], [1]])),
+            (Normal(loc=torch.Tensor([0, 0]), scale=torch.Tensor([[1], [1]])),
              (2, 2)),
-            (Normal(mean=torch.Tensor([0, 0]), std=torch.Tensor([[1]])),
+            (Normal(loc=torch.Tensor([0, 0]), scale=torch.Tensor([[1]])),
              (1, 2)),
-            (Normal(mean=torch.Tensor([0]), std=torch.Tensor([[1]])),
+            (Normal(loc=torch.Tensor([0]), scale=torch.Tensor([[1]])),
              (1, 1)),
             (Gamma(alpha=torch.Tensor([1, 1]), beta=1),
              (2,)),
@@ -918,12 +918,12 @@ class TestDistributions(TestCase):
         # example type (distribution class, distribution params)
         invalid_examples = [
             (Normal, {
-                'mean': torch.Tensor([[0, 0]]),
-                'std': torch.Tensor([1, 1, 1, 1])
+                'loc': torch.Tensor([[0, 0]]),
+                'scale': torch.Tensor([1, 1, 1, 1])
             }),
             (Normal, {
-                'mean': torch.Tensor([[[0, 0, 0], [0, 0, 0]]]),
-                'std': torch.Tensor([1, 1])
+                'loc': torch.Tensor([[[0, 0, 0], [0, 0, 0]]]),
+                'scale': torch.Tensor([1, 1])
             }),
             (Gumbel, {
                 'loc': torch.Tensor([[0, 0]]),
