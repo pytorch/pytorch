@@ -77,7 +77,7 @@ static void THCSTensor_(rawInit)(THCState *state, THCSTensor *self)
   self->refcount = 1;
 }
 
-void THCSTensor_(rawResize)(THCState *state, THCSTensor *self, int nDimI, int nDimV, int64_t *size) {
+THCSTensor* THCSTensor_(rawResize)(THCState *state, THCSTensor *self, int nDimI, int nDimV, int64_t *size) {
   // Only resize valid sizes into tensor.
   self->size = THRealloc(self->size, sizeof(int64_t)*(nDimI + nDimV));
 
@@ -86,7 +86,7 @@ void THCSTensor_(rawResize)(THCState *state, THCSTensor *self, int nDimI, int nD
   }
   self->nDimensionI = nDimI;
   self->nDimensionV = nDimV;
-  self->coalesced = 0;
+  return self;
 }
 
 // directly assign without cloning or retaining (internal method)
