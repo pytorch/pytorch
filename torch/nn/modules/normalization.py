@@ -24,10 +24,10 @@ class LocalResponseNorm(Module):
             - Output: :math:`(N, C, ...)` (same shape as input)
         Examples::
             >>> lrn = nn.LocalResponseNorm(2)
-            >>> 2d_signal = autograd.Variable(torch.randn(32, 5, 24, 24))
-            >>> 4d_signal = autograd.Variable(torch.randn(16, 5, 7, 7, 7, 7))
-            >>> 2d_output = lrn(2d_signal)
-            >>> 4d_output = lrn(4d_signal)
+            >>> signal_2d = autograd.Variable(torch.randn(32, 5, 24, 24))
+            >>> signal_4d = autograd.Variable(torch.randn(16, 5, 7, 7, 7, 7))
+            >>> output_2d = lrn(signal_2d)
+            >>> output_4d = lrn(signal_4d)
         """
         super(LocalResponseNorm, self).__init__()
         self.size = size

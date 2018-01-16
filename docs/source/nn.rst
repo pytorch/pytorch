@@ -384,6 +384,12 @@ Normalization layers
 .. autoclass:: InstanceNorm3d
     :members:
 
+:hidden:`LocalResponseNorm`
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: LocalResponseNorm
+    :members:
+
 Recurrent layers
 ----------------------------------
 
@@ -947,6 +953,11 @@ Normalization functions
 ~~~~~~~~~~~~~~~~~~~~
 
 .. autofunction:: layer_norm
+
+:hidden:`local_response_norm`
+~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: local_response_norm
 
 :hidden:`normalize`
 ~~~~~~~~~~~~~~~~~~~~
