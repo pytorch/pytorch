@@ -67,7 +67,7 @@ Tensor embedding_sparse_backward(
   }
 
   auto index = indices.view({1, -1});
-  auto values = grad.contiguous().view({-1, grad.size(1)});
+  auto values = grad.contiguous().view({-1, grad.size(-1)});
 
   auto& sparse_type = grad.type().toBackend(grad.is_cuda() ? kSparseCUDA : kSparseCPU);
   return sparse_type.sparse_coo_tensor(index, values);
