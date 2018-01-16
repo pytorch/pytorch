@@ -174,9 +174,12 @@ def _kl_beta_beta(p, q):
 def _kl_binomial_binomial(p, q):
     # from https://math.stackexchange.com/questions/2214993/
     # kullback-leibler-divergence-for-binomial-distributions-p-and-q
-    if p.total_count != q.total_count:
-        raise NotImplementedError('KL between Binomials with different total_count is not implemented')
-    return p.total_count * (p.probs * (p.logits - q.logits) + (-p.probs).log1p() - (-q.probs).log1p())
+    if p.total_count > q.total_count:
+        return _infinite_like(p.probs)
+    elif p.total_count == q.total_count:
+        return p.total_count * (p.probs * (p.logits - q.logits) + (-p.probs).log1p() - (-q.probs).log1p())
+    else:
+        raise NotImplementedError('KL between Binomials where q.total_count > p.total_count is not implemented')
 
 
 @register_kl(Dirichlet, Dirichlet)

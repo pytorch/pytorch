@@ -1546,6 +1546,7 @@ class TestKL(TestCase):
             (Beta(1, 2), Uniform(0, 0.75)),
             (Beta(1, 2), Uniform(0.25, 0.75)),
             (Beta(1, 2), Pareto(1, 2)),
+            (Binomial(31, 0.7), Binomial(30, 0.3)),
             (Chi2(1), Beta(2, 3)),
             (Chi2(1), Pareto(2, 3)),
             (Chi2(1), Uniform(-2, 3)),
