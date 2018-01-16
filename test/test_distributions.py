@@ -57,12 +57,12 @@ EXAMPLES = [
     ]),
     Example(Beta, [
         {
-            'alpha': Variable(torch.exp(torch.randn(2, 3)), requires_grad=True),
-            'beta': Variable(torch.exp(torch.randn(2, 3)), requires_grad=True),
+            'concentration1': Variable(torch.exp(torch.randn(2, 3)), requires_grad=True),
+            'concentration0': Variable(torch.exp(torch.randn(2, 3)), requires_grad=True),
         },
         {
-            'alpha': Variable(torch.exp(torch.randn(4)), requires_grad=True),
-            'beta': Variable(torch.exp(torch.randn(4)), requires_grad=True),
+            'concentration1': Variable(torch.exp(torch.randn(4)), requires_grad=True),
+            'concentration0': Variable(torch.exp(torch.randn(4)), requires_grad=True),
         },
     ]),
     Example(Categorical, [
@@ -795,35 +795,35 @@ class TestDistributions(TestCase):
                                     multivariate=True)
 
     def test_beta_shape(self):
-        alpha = Variable(torch.exp(torch.randn(2, 3)), requires_grad=True)
-        beta = Variable(torch.exp(torch.randn(2, 3)), requires_grad=True)
-        alpha_1d = Variable(torch.exp(torch.randn(4)), requires_grad=True)
-        beta_1d = Variable(torch.exp(torch.randn(4)), requires_grad=True)
-        self.assertEqual(Beta(alpha, beta).sample().size(), (2, 3))
-        self.assertEqual(Beta(alpha, beta).sample((5,)).size(), (5, 2, 3))
-        self.assertEqual(Beta(alpha_1d, beta_1d).sample().size(), (4,))
-        self.assertEqual(Beta(alpha_1d, beta_1d).sample((1,)).size(), (1, 4))
+        con1 = Variable(torch.exp(torch.randn(2, 3)), requires_grad=True)
+        con0 = Variable(torch.exp(torch.randn(2, 3)), requires_grad=True)
+        con1_1d = Variable(torch.exp(torch.randn(4)), requires_grad=True)
+        con0_1d = Variable(torch.exp(torch.randn(4)), requires_grad=True)
+        self.assertEqual(Beta(con1, con0).sample().size(), (2, 3))
+        self.assertEqual(Beta(con1, con0).sample((5,)).size(), (5, 2, 3))
+        self.assertEqual(Beta(con1_1d, con0_1d).sample().size(), (4,))
+        self.assertEqual(Beta(con1_1d, con0_1d).sample((1,)).size(), (1, 4))
         self.assertEqual(Beta(0.1, 0.3).sample().size(), (1,))
         self.assertEqual(Beta(0.1, 0.3).sample((5,)).size(), (5,))
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_beta_log_prob(self):
         for _ in range(100):
-            alpha = np.exp(np.random.normal())
-            beta = np.exp(np.random.normal())
-            dist = Beta(alpha, beta)
+            con1 = np.exp(np.random.normal())
+            con0 = np.exp(np.random.normal())
+            dist = Beta(con1, con0)
             x = dist.sample()
             actual_log_prob = dist.log_prob(x).sum()
-            expected_log_prob = scipy.stats.beta.logpdf(x, alpha, beta)[0]
+            expected_log_prob = scipy.stats.beta.logpdf(x, con1, con0)[0]
             self.assertAlmostEqual(actual_log_prob, expected_log_prob, places=3, allow_inf=True)
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_beta_sample(self):
         set_rng_seed(1)  # see Note [Randomized statistical tests]
-        for alpha, beta in product([0.1, 1.0, 10.0], [0.1, 1.0, 10.0]):
-            self._check_sampler_sampler(Beta(alpha, beta),
-                                        scipy.stats.beta(alpha, beta),
-                                        'Beta(alpha={}, beta={})'.format(alpha, beta))
+        for con1, con0 in product([0.1, 1.0, 10.0], [0.1, 1.0, 10.0]):
+            self._check_sampler_sampler(Beta(con1, con0),
+                                        scipy.stats.beta(con1, con0),
+                                        'Beta(alpha={}, beta={})'.format(con1, con0))
         # Check that small alphas do not cause NANs.
         for Tensor in [torch.FloatTensor, torch.DoubleTensor]:
             x = Beta(Tensor([1e-6]), Tensor([1e-6])).sample()[0]
@@ -1058,24 +1058,24 @@ class TestRsample(TestCase):
     def test_beta_wrt_alpha(self):
         num_samples = 20
         grid = [1e-2, 1e-1, 1e0, 1e1, 1e2]
-        for alpha, beta in product(grid, grid):
-            alphas = Variable(torch.FloatTensor([alpha] * num_samples), requires_grad=True)
-            betas = Variable(torch.FloatTensor([beta] * num_samples).type_as(alphas))
-            x = Beta(alphas, betas).rsample()
+        for con1, con0 in product(grid, grid):
+            con1s = Variable(torch.FloatTensor([con1] * num_samples), requires_grad=True)
+            con0s = Variable(torch.FloatTensor([con0] * num_samples).type_as(con1s))
+            x = Beta(con1s, con0s).rsample()
             x.sum().backward()
             x, ind = x.data.sort()
             x = x.numpy()
-            actual_grad = alphas.grad.data[ind].numpy()
-            # Compare with expected gradient dx/dalpha along constant cdf(x,alpha,beta).
+            actual_grad = con1s.grad.data[ind].numpy()
+            # Compare with expected gradient dx/dalpha along constant cdf(x,con1,con0).
             cdf = scipy.stats.beta.cdf
             pdf = scipy.stats.beta.pdf
-            eps = 0.01 * alpha / (1.0 + np.sqrt(alpha))
-            cdf_alpha = (cdf(x, alpha + eps, beta) - cdf(x, alpha - eps, beta)) / (2 * eps)
-            cdf_x = pdf(x, alpha, beta)
+            eps = 0.01 * con1 / (1.0 + np.sqrt(con1))
+            cdf_alpha = (cdf(x, con1 + eps, con0) - cdf(x, con1 - eps, con0)) / (2 * eps)
+            cdf_x = pdf(x, con1, con0)
             expected_grad = -cdf_alpha / cdf_x
             rel_error = np.abs(actual_grad - expected_grad) / (expected_grad + 1e-30)
             self.assertLess(np.max(rel_error), 0.005, '\n'.join([
-                'Bad gradient dx/dalpha for x ~ Beta({}, {})'.format(alpha, beta),
+                'Bad gradient dx/dalpha for x ~ Beta({}, {})'.format(con1, con0),
                 'x {}'.format(x),
                 'expected {}'.format(expected_grad),
                 'actual {}'.format(actual_grad),
@@ -1088,24 +1088,24 @@ class TestRsample(TestCase):
     def test_beta_wrt_beta(self):
         num_samples = 20
         grid = [1e-2, 1e-1, 1e0, 1e1, 1e2]
-        for alpha, beta in product(grid, grid):
-            betas = Variable(torch.FloatTensor([beta] * num_samples), requires_grad=True)
-            alphas = Variable(torch.FloatTensor([alpha] * num_samples).type_as(betas))
-            x = Beta(alphas, betas).rsample()
+        for con1, con0 in product(grid, grid):
+            con0s = Variable(torch.FloatTensor([con0] * num_samples), requires_grad=True)
+            con1s = Variable(torch.FloatTensor([con1] * num_samples).type_as(con0s))
+            x = Beta(con1s, con0s).rsample()
             x.sum().backward()
             x, ind = x.data.sort()
             x = x.numpy()
-            actual_grad = betas.grad.data[ind].numpy()
-            # Compare with expected gradient dx/dbeta along constant cdf(x,alpha,beta).
+            actual_grad = con0s.grad.data[ind].numpy()
+            # Compare with expected gradient dx/dbeta along constant cdf(x,con1,con0).
             cdf = scipy.stats.beta.cdf
             pdf = scipy.stats.beta.pdf
-            eps = 0.01 * beta / (1.0 + np.sqrt(beta))
-            cdf_beta = (cdf(x, alpha, beta + eps) - cdf(x, alpha, beta - eps)) / (2 * eps)
-            cdf_x = pdf(x, alpha, beta)
+            eps = 0.01 * con0 / (1.0 + np.sqrt(con0))
+            cdf_beta = (cdf(x, con1, con0 + eps) - cdf(x, con1, con0 - eps)) / (2 * eps)
+            cdf_x = pdf(x, con1, con0)
             expected_grad = -cdf_beta / cdf_x
             rel_error = np.abs(actual_grad - expected_grad) / (expected_grad + 1e-30)
             self.assertLess(np.max(rel_error), 0.005, '\n'.join([
-                'Bad gradient dx/dbeta for x ~ Beta({}, {})'.format(alpha, beta),
+                'Bad gradient dx/dbeta for x ~ Beta({}, {})'.format(con1, con0),
                 'x {}'.format(x),
                 'expected {}'.format(expected_grad),
                 'actual {}'.format(actual_grad),

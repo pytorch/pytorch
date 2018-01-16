@@ -10,30 +10,30 @@ from torch.distributions.utils import broadcast_all
 
 class Beta(Distribution):
     r"""
-    Creates a Beta distribution parameterized by concentration `alpha` and `beta`.
+    Creates a Beta distribution parameterized by concentration `concentration1` and `concentration0`.
 
     Example::
 
         >>> m = Beta(torch.Tensor([0.5]), torch.Tensor([0.5]))
-        >>> m.sample()  # Beta distributed with concentration alpha and beta
+        >>> m.sample()  # Beta distributed with concentration concentration1 and concentration0
          0.1046
         [torch.FloatTensor of size 1]
 
     Args:
-        alpha (float or Tensor or Variable): 1st concentration parameter of the distribution
-        beta (float or Tensor or Variable): 2nd concentration parameter of the distribution
+        concentration1 (float or Tensor or Variable): 1st concentration parameter of the distribution
+        concentration0 (float or Tensor or Variable): 2nd concentration parameter of the distribution
     """
-    params = {'alpha': constraints.positive, 'beta': constraints.positive}
+    params = {'concentration1': constraints.positive, 'concentration0': constraints.positive}
     support = constraints.unit_interval
     has_rsample = True
 
-    def __init__(self, alpha, beta):
-        if isinstance(alpha, Number) and isinstance(beta, Number):
-            alpha_beta = torch.Tensor([alpha, beta])
+    def __init__(self, concentration1, concentration0):
+        if isinstance(concentration1, Number) and isinstance(concentration0, Number):
+            concentration1_concentration0 = torch.Tensor([concentration1, concentration0])
         else:
-            alpha, beta = broadcast_all(alpha, beta)
-            alpha_beta = torch.stack([alpha, beta], -1)
-        self._dirichlet = Dirichlet(alpha_beta)
+            concentration1, concentration0 = broadcast_all(concentration1, concentration0)
+            concentration1_concentration0 = torch.stack([concentration1, concentration0], -1)
+        self._dirichlet = Dirichlet(concentration1_concentration0)
         super(Beta, self).__init__(self._dirichlet._batch_shape)
 
     def rsample(self, sample_shape=()):
@@ -51,7 +51,7 @@ class Beta(Distribution):
         return self._dirichlet.entropy()
 
     @property
-    def alpha(self):
+    def concentration1(self):
         result = self._dirichlet.alpha[..., 0]
         if isinstance(result, Number):
             return torch.Tensor([result])
@@ -59,7 +59,7 @@ class Beta(Distribution):
             return result
 
     @property
-    def beta(self):
+    def concentration0(self):
         result = self._dirichlet.alpha[..., 1]
         if isinstance(result, Number):
             return torch.Tensor([result])
