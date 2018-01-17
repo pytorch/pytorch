@@ -327,7 +327,7 @@ class Variable(_C._VariableBase):
         raise NotImplementedError("in-place pow not implemented")
 
     def __rpow__(self, other):
-        return PowConstant.apply(other, self)
+        return self.new([other]) ** self
 
     __neg__ = _C._VariableBase.neg
 
