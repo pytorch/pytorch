@@ -1059,7 +1059,7 @@ def embedding(input, weight, padding_idx=None, max_norm=None, norm_type=2,
     if max_norm is not None:
         with torch.no_grad():
             torch._C._VariableBase.embedding_renorm_(weight, input, max_norm, norm_type)
-    return torch._C._VariableBase.embedding(weight, input, padding_idx, scale_grad_by_freq)
+    return torch._C._VariableBase.embedding(weight, input, padding_idx, scale_grad_by_freq, sparse)
 
 
 def embedding_bag(embedding_matrix, indices, offsets=None,
@@ -1153,7 +1153,33 @@ def batch_norm(input, running_mean, running_var, weight=None, bias=None,
     )
 
 
+def local_response_norm(input, size, alpha=1e-4, beta=0.75, k=1):
+    """Applies local response normalization over an input signal composed of
+    several input planes, where channels occupy the second dimension.
+    Applies normalization across channels.
+
+    See :class:`~torch.nn.LocalResponseNorm` for details.
+    """
+    dim = input.dim()
+    if dim < 3:
+        raise ValueError('Expected 3D or higher dimensionality \
+                         input (got {} dimensions)'.format(dim))
+    div = input.mul(input).unsqueeze(1)
+    if dim == 3:
+        div = pad(div, (0, 0, size // 2, (size - 1) // 2))
+        div = avg_pool2d(div, (size, 1), stride=1).squeeze(1)
+    else:
+        sizes = input.size()
+        div = div.view(sizes[0], 1, sizes[1], sizes[2], -1)
+        div = pad(div, (0, 0, 0, 0, size // 2, (size - 1) // 2))
+        div = avg_pool3d(div, (size, 1, 1), stride=1).squeeze(1)
+        div = div.view(sizes)
+    div = div.mul(alpha).add(k).pow(beta)
+    return input / div
+
+
 # loss
+
 
 def nll_loss(input, target, weight=None, size_average=True, ignore_index=-100, reduce=True):
     r"""The negative log likelihood loss.
@@ -1162,10 +1188,10 @@ def nll_loss(input, target, weight=None, size_average=True, ignore_index=-100, r
 
     Args:
         input: :math:`(N, C)` where `C = number of classes` or :math:`(N, C, H, W)`
-            in case of 2D Loss, or :math:`(N, C, d_1, d_2, ..., d_K)` where :math:`K > 2`
+            in case of 2D Loss, or :math:`(N, C, d_1, d_2, ..., d_K)` where :math:`K > 1`
             in the case of K-dimensional loss.
         target: :math:`(N)` where each value is `0 <= targets[i] <= C-1`,
-            or :math:`(N, C, d_1, d_2, ..., d_K)` where :math:`K >= 2` for
+            or :math:`(N, C, d_1, d_2, ..., d_K)` where :math:`K >= 1` for
             K-dimensional loss.
         weight (Tensor, optional): a manual rescaling weight given to each
             class. If given, has to be a Tensor of size `C`
@@ -1192,7 +1218,7 @@ def nll_loss(input, target, weight=None, size_average=True, ignore_index=-100, r
         return torch._C._nn.nll_loss(input, target, weight, size_average, ignore_index, reduce)
     elif dim == 4:
         return torch._C._nn.nll_loss2d(input, target, weight, size_average, ignore_index, reduce)
-    elif dim > 4:
+    elif dim == 3 or dim > 4:
         n = input.size(0)
         c = input.size(1)
         out_size = (n,) + input.size()[2:]
@@ -1206,7 +1232,7 @@ def nll_loss(input, target, weight=None, size_average=True, ignore_index=-100, r
         out = torch._C._nn.nll_loss2d(input, target, weight, size_average, ignore_index, reduce)
         return out.view(out_size)
     else:
-        raise ValueError('Expected 2, 4, or more than 4 dimensions (got {})'.format(dim))
+        raise ValueError('Expected 2 or more dimensions (got {})'.format(dim))
 
 
 def poisson_nll_loss(input, target, log_input=True, full=False, size_average=True, eps=1e-8, reduce=True):

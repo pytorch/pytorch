@@ -6,7 +6,7 @@ namespace at {
 
 void Tensor::print() const {
   if (defined()) {
-    std::cerr << "[" << toString() << " " << sizes() << "]" << std::endl;
+    std::cerr << "[" << type().toString() << " " << sizes() << "]" << std::endl;
   } else {
     std::cerr << "[UndefinedTensor]" << std::endl;
   }

@@ -1056,6 +1056,13 @@ class TestNN(NNTestCase):
         m = pickle.loads(pickle.dumps(m))
         self.assertIsInstance(m, nn.Linear)
 
+    def test_embedding_sparse(self):
+        embedding = nn.Embedding(10, 20, sparse=True)
+        input = Variable(torch.LongTensor([[0, 2, 4, 5], [4, 3, 0, 9]]))
+        embedding(input).sum().backward()
+        self.assertTrue(embedding.weight.grad.is_sparse)
+        self.assertEqual(embedding.weight.grad.shape, embedding.weight.shape)
+
     def test_embedding_padding_idx(self):
         embedding = nn.Embedding(10, 20, padding_idx=0)
         input = Variable(torch.LongTensor([[0, 2, 4, 5], [4, 3, 0, 9]]))
@@ -3318,6 +3325,15 @@ class TestNN(NNTestCase):
         gradcheck(func, [v])
         gradgradcheck(func, [v])
 
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    @unittest.skipIf(not TEST_CUDNN, "cuDNN unavailable")
+    def test_batchnorm_cudnn_half(self):
+        input = Variable(torch.rand(2, 3, 2, 2).half().cuda())
+        m = nn.BatchNorm2d(3).float().cuda()
+        output = m(input)
+        output.sum().backward()
+        self.assertEqual(output.type(), input.type())
+
     def test_batchnorm_raises_error_if_running_mean_is_not_same_size_as_input(self):
         input = Variable(torch.rand(2, 10))
         running_var = torch.rand(10)
@@ -4267,6 +4283,15 @@ new_criterion_tests = [
         desc='higher_dim'
     ),
     dict(
+        module_name='NLLLoss',
+        input_size=(2, 3, 5),
+        target_fn=lambda: torch.rand(2, 5).mul(3).floor().long(),
+        reference_fn=lambda i, t, m:
+            loss_reference_fns['NLLLossNd'](i, t, size_average=get_size_average(m)),
+        check_no_size_average=True,
+        desc='dim_is_3'
+    ),
+    dict(
         module_name='PoissonNLLLoss',
         input_size=(2, 3, 4, 5),
         target_fn=lambda: torch.randn(2, 3, 4, 5).floor_().abs_(),
@@ -4556,7 +4581,6 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='affine',
-        FIXME_no_cuda_gradgrad_comparison=True,  # See #4422
     ),
     dict(
         module_name='BatchNorm1d',
@@ -4565,7 +4589,6 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='3d_input',
-        FIXME_no_cuda_gradgrad_comparison=True,  # See #4422
     ),
     dict(
         module_name='BatchNorm1d',
@@ -4574,7 +4597,6 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='not_affine',
-        FIXME_no_cuda_gradgrad_comparison=True,  # See #4422
     ),
     dict(
         module_name='BatchNorm1d',
@@ -4583,7 +4605,6 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='3d_input_not_affine',
-        FIXME_no_cuda_gradgrad_comparison=True,  # See #4422
     ),
     dict(
         module_name='BatchNorm2d',
@@ -4591,7 +4612,6 @@ new_module_tests = [
         input_size=(2, 3, 6, 6),
         cudnn=True,
         check_eval=True,
-        FIXME_no_cuda_gradgrad_comparison=True,  # See #4422
     ),
     dict(
         module_name='BatchNorm2d',
@@ -4600,7 +4620,6 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='momentum',
-        FIXME_no_cuda_gradgrad_comparison=True,  # See #4422
     ),
     dict(
         module_name='BatchNorm2d',
@@ -4609,7 +4628,6 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='not_affine',
-        FIXME_no_cuda_gradgrad_comparison=True,  # See #4422
     ),
     dict(
         module_name='BatchNorm3d',
@@ -4617,7 +4635,6 @@ new_module_tests = [
         input_size=(2, 3, 4, 4, 4),
         cudnn=True,
         check_eval=True,
-        FIXME_no_cuda_gradgrad_comparison=True,  # See #4422
     ),
     dict(
         module_name='BatchNorm3d',
@@ -4626,7 +4643,6 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='momentum',
-        FIXME_no_cuda_gradgrad_comparison=True,  # See #4422
     ),
     dict(
         module_name='BatchNorm3d',
@@ -4635,7 +4651,6 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='not_affine',
-        FIXME_no_cuda_gradgrad_comparison=True,  # See #4422
     ),
     dict(
         module_name='Conv1d',
@@ -4882,6 +4897,24 @@ new_module_tests = [
         module_name='LPPool1d',
         constructor_args=(2, 2, 3),
         input_size=(1, 3, 7),
+    ),
+    dict(
+        module_name='LocalResponseNorm',
+        constructor_args=(3, ),
+        input_size=(1, 5, 7),
+        desc='1d'
+    ),
+    dict(
+        module_name='LocalResponseNorm',
+        constructor_args=(2, ),
+        input_size=(1, 5, 7, 7),
+        desc='2d_uneven_pad'
+    ),
+    dict(
+        module_name='LocalResponseNorm',
+        constructor_args=(1, 1, 0.5, 2),
+        input_size=(1, 5, 7, 7, 7),
+        desc='3d_custom_params'
     ),
     dict(
         module_name='ReflectionPad1d',

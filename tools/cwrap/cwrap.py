@@ -60,8 +60,19 @@ class cwrap(object):
         for plugin in self.plugins:
             wrapper = plugin.process_full_file(wrapper)
 
-        with open(destination, 'w') as f:
-            f.write(wrapper)
+        # See Note [Unchanging results for ninja]
+        try:
+            with open(destination, 'r') as f:
+                old_wrapper = f.read()
+        except IOError:
+            old_wrapper = None
+
+        if old_wrapper != wrapper:
+            with open(destination, 'w') as f:
+                print("Writing {}".format(destination))
+                f.write(wrapper)
+        else:
+            print("Skipped writing {}".format(destination))
 
     def wrap_declarations(self, declarations):
         lines = declarations.split('\n')

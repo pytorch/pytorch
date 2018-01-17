@@ -939,7 +939,7 @@ std::tuple<Tensor, Tensor, Tensor> batchnorm_double_backward(
   }
   auto mu = unsqueeze_dim1(make_variable(training ? save_mean : running_mean), input);
   auto input_sub_mu = input - mu;
-  auto sigma2_eps_neg_1_2 = unsqueeze_dim1(make_variable(training ? save_std : (running_var + Scalar(eps).toTensor()).pow(-0.5)), input);
+  auto sigma2_eps_neg_1_2 = unsqueeze_dim1(make_variable(training ? save_std : running_var.add(Scalar(eps)).pow(-0.5)), input);
   auto sigma2_eps_neg_1 = sigma2_eps_neg_1_2.pow(2);
   auto sigma2_eps_neg_3_2 = sigma2_eps_neg_1_2.pow(3);
 
