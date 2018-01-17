@@ -172,10 +172,10 @@ def _kl_beta_beta(p, q):
 @register_kl(Dirichlet, Dirichlet)
 def _kl_dirichlet_dirichlet(p, q):
     # From http://bariskurt.com/kullback-leibler-divergence-between-two-dirichlet-and-beta-distributions/
-    sum_p_alpha = p.alpha.sum(-1).expand_as(p.alpha)
-    sum_q_alpha = q.alpha.sum(-1).expand_as(q.alpha)
-    t1 = sum_p_alpha.lgamma() - p.alpha.lgamma().sum(-1)
-    t2 = sum_q_alpha.lgamma() - q.alpha.lgamma().sum(-1)
+    sum_p_alpha = p.alpha.sum(-1)
+    sum_q_alpha = q.alpha.sum(-1)
+    t1 = sum_p_alpha.lgamma() - sum_q_alpha.lgamma()
+    t2 = (p.alpha.lgamma() - q.alpha.lgamma()).sum(-1)
     t3 = (p.alpha - q.alpha) * (p.alpha.digamma() - sum_p_alpha.digamma().unsqueeze(-1))
     return t1 - t2 + t3.sum(-1)
 

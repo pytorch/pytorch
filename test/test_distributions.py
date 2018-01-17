@@ -1602,6 +1602,21 @@ class TestKL(TestCase):
             self.assertTrue((kl_divergence(p, q) == float('inf')).all(),
                             'Incorrect KL({}, {})'.format(type(p).__name__, type(q).__name__))
 
+    def test_kl_shape(self):
+        for Dist, params in EXAMPLES:
+            for i, param in enumerate(params):
+                dist = Dist(**param)
+                try:
+                    kl = kl_divergence(dist, dist)
+                except NotImplementedError:
+                    continue
+                expected_shape = dist.batch_shape if dist.batch_shape else torch.Size([1])
+                self.assertEqual(kl.shape, expected_shape, message='\n'.join([
+                    '{} example {}/{}'.format(Dist.__name__, i, len(params)),
+                    'Expected {}'.format(expected_shape),
+                    'Actual {}'.format(kl.shape),
+                ]))
+
     def test_entropy_monte_carlo(self):
         set_rng_seed(0)  # see Note [Randomized statistical tests]
         for Dist, params in EXAMPLES:
