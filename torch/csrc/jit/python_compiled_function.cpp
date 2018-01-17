@@ -9,6 +9,7 @@
 #include "torch/csrc/jit/passes/peephole.h"
 #include "torch/csrc/jit/passes/graph_fuser.h"
 #include "torch/csrc/jit/passes/inplace_check.h"
+#include "torch/csrc/jit/passes/batch_mm.h"
 #include "torch/csrc/jit/python_arg_flatten.h"
 #include "torch/csrc/jit/interpreter.h"
 #include "torch/csrc/jit/interpreter_autograd_function.h"
@@ -80,6 +81,7 @@ struct CompiledFunction {
       CheckInplace(complete_trace->graph);
       if (fn_.optimize_) {
         PeepholeOptimize(complete_trace->graph);
+        BatchMM(complete_trace->graph);
         FuseGraph(complete_trace->graph);
         EliminateCommonSubexpression(complete_trace->graph);
       }
