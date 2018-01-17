@@ -59,7 +59,7 @@ DONT_PROFILE = {
 # not examine or modify requires_grad or grad_fn.
 DONT_REQUIRE_DERIVATIVE = {
     # These  only depend on the input Tensor's shape and device, not the data
-    'ones_like', 'zeros_like',
+    'ones_like', 'zeros_like', 'randn_like',
     # These are only implemented on integral types
     '__and__', '__iand__', '__ilshift__', '__ior__', '__irshift__', '__ixor__',
     '__lshift__', '__or__', '__rshift__', '__xor__',

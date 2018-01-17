@@ -506,12 +506,6 @@ inline PyObject* _wrap_scalar(at::Tensor tensor) {
   return THPVariable_Wrap(v, true);
 }
 
-inline Tensor dispatch__scalar_sum(Tensor & self) {
-  AutoNoGIL no_gil;
-  AutoGPU auto_gpu(self);
-  return self._scalar_sum();
-}
-
 static PyObject * THPVariable__scalar_sum(PyObject* self, PyObject* args, PyObject* kwargs)
 {
   HANDLE_TH_ERRORS
@@ -522,7 +516,7 @@ static PyObject * THPVariable__scalar_sum(PyObject* self, PyObject* args, PyObje
   PyObject* parsed_args[3];
   auto r = parser.parse(args, kwargs, parsed_args);
   if (r.idx == 0) {
-    return _wrap_scalar(dispatch__scalar_sum(self_));
+    return _wrap_scalar(dispatch_sum(self_));
   }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS

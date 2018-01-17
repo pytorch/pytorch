@@ -299,6 +299,3 @@
   dispatch:
     CPU: _standard_gamma_grad_cpu
     CUDA: _standard_gamma_grad_cuda
-
-# FixMe: remove when we have full scalar support in pytorch.
-- func: _scalar_sum(Tensor self) -> Tensor

@@ -635,9 +635,6 @@
 - name: _standard_gamma_grad(Tensor self, Tensor output)
   self: not_implemented("_standard_gamma_grad")
 
-- name: _scalar_sum(Tensor self)
-  self: _scalar_sum_backward(grad, self)
-
 # NN
 
 - name: binary_cross_entropy_forward(Tensor self, Tensor target, Tensor weight, bool size_average, bool reduce)
