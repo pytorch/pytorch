@@ -164,7 +164,7 @@ DYNAMIC_TYPE = {
     'THIndexTensor*': 'IndexTensor',
     'THIntegerTensor*': 'IntegerTensor',
     'THDenseTensor*': 'Tensor',
-    'THDenseIndexTensor*': 'IntegerTensor',
+    'THDenseIndexTensor*': 'IndexTensor',
     'THStorage*': 'Storage',
     'THGenerator*': 'Generator*',
     'THSize*': 'IntList',

@@ -25,6 +25,12 @@ Probability distributions - torch.distributions
 .. autoclass:: Beta
     :members:
 
+:hidden:`Binomial`
+~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: Binomial
+    :members:
+
 :hidden:`Categorical`
 ~~~~~~~~~~~~~~~~~~~~~~~
 
