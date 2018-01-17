@@ -173,12 +173,7 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
     THPObjectPtr py_outputs {PyTuple_New(num_inputs)};
     if (!py_outputs) return NULL;
     for (int i = 0; i < num_inputs; i++) {
-      if (outputs[i].defined()) {
-        PyTuple_SET_ITEM(py_outputs.get(), i, THPVariable_Wrap(outputs[i]));
-      } else {
-        Py_INCREF(Py_None);
-        PyTuple_SET_ITEM(py_outputs.get(), i, Py_None);
-      }
+      PyTuple_SET_ITEM(py_outputs.get(), i, THPVariable_Wrap(outputs[i]));
     }
     return py_outputs.release();
   } else {

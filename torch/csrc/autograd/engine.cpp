@@ -83,7 +83,11 @@ struct GraphTask {
       int output_idx; // within the output vector of a GraphTask
     };
 
-    bool needed;
+    bool should_execute() const {
+      return needed || captures;
+    }
+
+    bool needed = false;
     std::unique_ptr<std::vector<Capture>> captures;
   };
   // Exec info has a bit complicated semantics. If it's empty, it means the task is
@@ -93,7 +97,7 @@ struct GraphTask {
   std::unordered_map<Function*, ExecInfo> exec_info;
   std::vector<Variable> captured_vars;
 
-  void init_to_execute(const std::shared_ptr<Function>& graph_root, const function_list& captures);
+  void init_to_execute(Function& graph_root, const function_list& captures);
 
   int owner;
 
@@ -284,7 +288,7 @@ auto Engine::evaluate_function(FunctionTask& task) -> void {
       // Skip functions that aren't supposed to be executed
       if (!exec_info.empty()) {
         auto it = exec_info.find(next_fn.get());
-        if (it == exec_info.end() || (!it->second.needed && !it->second.captures)) {
+        if (it == exec_info.end() || !it->second.should_execute()) {
           continue;
         }
       }
@@ -364,7 +368,7 @@ auto Engine::execute(const function_list& input_roots,
   auto graph_root = std::make_shared<GraphRoot>(input_roots, inputs);
   compute_dependencies(graph_root.get(), graph_task);
   if (!outputs.empty()) {
-    graph_task.init_to_execute(graph_root, outputs);
+    graph_task.init_to_execute(*graph_root, outputs);
   }
   ready_queue(-1).push_front(FunctionTask(&graph_task, std::move(graph_root), InputBuffer(0)));
 
@@ -431,8 +435,8 @@ auto Engine::start_threads() -> void {
   }
 }
 
-void GraphTask::init_to_execute(const std::shared_ptr<Function>& graph_root, const function_list& outputs) {
-  exec_info[graph_root.get()].needed = true;
+void GraphTask::init_to_execute(Function& graph_root, const function_list& outputs) {
+  exec_info[&graph_root].needed = true;
 
   int output_idx = 0;
   for (auto & output_edge : outputs) {
@@ -468,7 +472,7 @@ void GraphTask::init_to_execute(const std::shared_ptr<Function>& graph_root, con
   };
   std::vector<Frame> stack;
   std::unordered_set<Function*> seen;
-  for (auto & input : graph_root->next_functions) {
+  for (const auto & input : graph_root.next_functions) {
     if (seen.count(input.first.get()) > 0) continue;
     stack.emplace_back(input.first.get());
     while (!stack.empty()) {
@@ -486,9 +490,7 @@ void GraphTask::init_to_execute(const std::shared_ptr<Function>& graph_root, con
         bool needed = std::any_of(next_fns.begin(), next_fns.end(),
                                   [&](const edge_type& e) -> bool {
                                     auto it = exec_info.find(e.first.get());
-                                    // It has to be either needed or be an output
-                                    return it != exec_info.end() &&
-                                            (it->second.needed || it->second.captures);
+                                    return it != exec_info.end() && it->second.should_execute();
                                   });
         exec_info[frame.fn].needed = needed;
         stack.pop_back();
