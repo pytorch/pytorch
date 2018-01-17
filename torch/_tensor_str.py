@@ -1,7 +1,6 @@
 import math
 import torch
 from functools import reduce
-from ._utils import _range
 from sys import float_info
 
 
@@ -159,7 +158,7 @@ def _tensor_str(self):
     while True:
         nrestarted = [False for i in counter]
         nskipped = [False for i in counter]
-        for i in _range(counter_dim - 1, -1, -1):
+        for i in range(counter_dim - 1, -1, -1):
             counter[i] += 1
             if print_dots and counter[i] == n and self.size(i) > 2 * n:
                 counter[i] = self.size(i) - n
@@ -230,7 +229,7 @@ def _matrix_str(self, indent='', formatter=None, force_truncate=False):
                     firstColumn, lastColumn, indent)
             if scale != 1:
                 strt += SCALE_FORMAT.format(scale)
-            for l in _range(self.size(0)):
+            for l in range(self.size(0)):
                 strt += indent + (' ' if scale != 1 else '')
                 row_slice = self[l, firstColumn:lastColumn + 1]
                 strt += ' '.join(fmt.format(val / scale) for val in row_slice)

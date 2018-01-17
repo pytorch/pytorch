@@ -1,7 +1,7 @@
 import torch
 import warnings
 from . import _tensor_str
-from ._utils import _type, _cuda, _range, _rebuild_tensor
+from . import _utils
 import sys
 
 
@@ -25,6 +25,9 @@ class _TensorBase(object):
                   same device as this tensor.
         """
         return self.__class__(*args, **kwargs)
+
+    type = _utils._type
+    cuda = _utils._cuda
 
     def type_as(self, tensor):
         r"""Returns this :attr:`self` tensor cast to the type of the given
@@ -129,7 +132,7 @@ class _TensorBase(object):
     def __reduce__(self):
         # NOTE: _rebuild_tensor does not call __setstate__
         args = self.__getstate__()
-        return (_rebuild_tensor, args)
+        return (_utils._rebuild_tensor, args)
 
     def __getstate__(self):
         return (self.storage(),
@@ -168,7 +171,7 @@ class _TensorBase(object):
 
     def __iter__(self):
         if self.nelement() > 0:
-            return iter(map(lambda i: self.select(0, i), _range(self.size(0))))
+            return iter(map(lambda i: self.select(0, i), range(self.size(0))))
         else:
             return iter([])
 
@@ -243,55 +246,7 @@ class _TensorBase(object):
         """
         return self.expand(tensor.size())
 
-    def repeat(self, *sizes):
-        r"""Repeats this tensor along the specified dimensions.
-
-        Unlike :meth:`expand`, this function copies the tensor's data.
-
-        Args:
-            *sizes (torch.Size or int...): The number of times to repeat this
-                tensor along each dimension
-
-        Example:
-            >>> x = torch.Tensor([1, 2, 3])
-            >>> x.repeat(4, 2)
-             1  2  3  1  2  3
-             1  2  3  1  2  3
-             1  2  3  1  2  3
-             1  2  3  1  2  3
-            [torch.FloatTensor of size 4x6]
-            >>> x.repeat(4, 2, 1).size()
-            torch.Size([4, 2, 3])
-        """
-        # If args == (torch.Size,), then we need to unpack the tuple
-        if len(sizes) == 1 and isinstance(sizes[0], torch.Size):
-            sizes = sizes[0]
-
-        repeats = list(sizes)
-
-        if len(repeats) < self.dim():
-            raise ValueError('Number of dimensions of repeat dims can not be '
-                             'smaller than number of dimensions of tensor')
-
-        # Add new leading dimensions to the tensor if the
-        # number of target dimensions is larger than the
-        # number of source dimensions.
-        num_new_dimensions = len(repeats) - self.dim()
-        padded_size = [1] * num_new_dimensions + list(self.size())
-        target_size = torch.Size([a * b for a, b in zip(padded_size, repeats)])
-
-        xtensor = self.new().set_(self)
-        xtensor = xtensor.expand(padded_size)
-
-        result = self.new()
-        result.resize_(target_size)
-        urtensor = result.new(result)
-        for i in _range(xtensor.dim()):
-            urtensor = urtensor.unfold(i, xtensor.size(i), xtensor.size(i))
-
-        urtensor.copy_(xtensor.expand_as(urtensor))
-
-        return result
+    repeat = _utils._repeat
 
     def masked_copy_(self, *args, **kwargs):
         warnings.warn("masked_copy_ is deprecated and renamed to masked_scatter_, and will be removed in v0.3")
@@ -434,7 +389,3 @@ class _TensorBase(object):
                 array = array.astype('uint8')
 
             return torch.from_numpy(array)
-
-
-_TensorBase.type = _type
-_TensorBase.cuda = _cuda
