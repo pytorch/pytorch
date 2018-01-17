@@ -4,7 +4,7 @@ from torch.autograd import Variable
 from torch.distributions import Categorical
 from numbers import Number
 from torch.distributions import constraints
-from torch.distributions.utils import log_sum_exp, broadcast_all
+from torch.distributions.utils import broadcast_all
 
 
 class Multinomial(Distribution):
@@ -47,9 +47,12 @@ class Multinomial(Distribution):
             raise NotImplementedError('inhomogeneous total_count is not supported')
         self.total_count = total_count
         self._categorical = Categorical(probs=probs, logits=logits)
-        batch_shape = probs.size()[:-1] if probs is not None else logits.size()[:-1]
-        event_shape = probs.size()[-1:] if probs is not None else logits.size()[-1:]
+        batch_shape = self._categorical.batch_shape
+        event_shape = self._categorical.param_shape[-1:]
         super(Multinomial, self).__init__(batch_shape, event_shape)
+
+    def _new(self, *args, **kwargs):
+        return self._categorical._new(*args, **kwargs)
 
     @constraints.dependent_property
     def support(self):
@@ -62,6 +65,10 @@ class Multinomial(Distribution):
     @property
     def probs(self):
         return self._categorical.probs
+
+    @property
+    def param_shape(self):
+        return self._categorical.param_shape
 
     def sample(self, sample_shape=torch.Size()):
         sample_shape = torch.Size(sample_shape)
