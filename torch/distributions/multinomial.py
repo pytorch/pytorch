@@ -51,8 +51,8 @@ class Multinomial(Distribution):
         event_shape = self._categorical.param_shape[-1:]
         super(Multinomial, self).__init__(batch_shape, event_shape)
 
-    def new(self, *args, **kwargs):
-        return self._categorical.new(*args, **kwargs)
+    def _new(self, *args, **kwargs):
+        return self._categorical._new(*args, **kwargs)
 
     @constraints.dependent_property
     def support(self):

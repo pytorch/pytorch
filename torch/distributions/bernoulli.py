@@ -46,7 +46,7 @@ class Bernoulli(Distribution):
             batch_shape = self._param.size()
         super(Bernoulli, self).__init__(batch_shape)
 
-    def new(self, *args, **kwargs):
+    def _new(self, *args, **kwargs):
         return self._param.new(*args, **kwargs)
 
     @lazy_property
@@ -74,7 +74,7 @@ class Bernoulli(Distribution):
         return binary_cross_entropy_with_logits(self.logits, self.probs, reduce=False)
 
     def enumerate_support(self):
-        values = self.new((2,))
+        values = self._new((2,))
         torch.arange(2, out=values.data if isinstance(values, Variable) else values)
         values = values.view((-1,) + (1,) * len(self._batch_shape))
         values = values.expand((-1,) + self._batch_shape)

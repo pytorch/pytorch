@@ -49,7 +49,7 @@ class Categorical(Distribution):
         batch_shape = self._param.size()[:-1]
         super(Categorical, self).__init__(batch_shape)
 
-    def new(self, *args, **kwargs):
+    def _new(self, *args, **kwargs):
         return self._param.new(*args, **kwargs)
 
     @constraints.dependent_property

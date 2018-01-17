@@ -36,8 +36,8 @@ class OneHotCategorical(Distribution):
         event_shape = self._categorical.param_shape[-1:]
         super(OneHotCategorical, self).__init__(batch_shape, event_shape)
 
-    def new(self, *args, **kwargs):
-        return self._categorical.new(*args, **kwargs)
+    def _new(self, *args, **kwargs):
+        return self._categorical._new(*args, **kwargs)
 
     @property
     def param_shape(self):
@@ -61,7 +61,7 @@ class OneHotCategorical(Distribution):
 
     def enumerate_support(self):
         n = self.event_shape[0]
-        values = self._categorical.new((n, n))
+        values = self._new((n, n))
         torch.eye(n, out=values.data if isinstance(values, Variable) else values)
         values = values.view((n,) + (1,) * len(self.batch_shape) + (n,))
         return values.expand((n,) + self.batch_shape + (n,))

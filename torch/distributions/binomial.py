@@ -54,7 +54,7 @@ class Binomial(Distribution):
             batch_shape = self._param.size()
         super(Binomial, self).__init__(batch_shape)
 
-    def new(self, *args, **kwargs):
+    def _new(self, *args, **kwargs):
         return self._param.new(*args, **kwargs)
 
     @constraints.dependent_property
@@ -89,7 +89,7 @@ class Binomial(Distribution):
                 self.total_count * torch.log1p((self.logits + 2 * max_val).exp()))
 
     def enumerate_support(self):
-        values = self.new((self.total_count,))
+        values = self._new((self.total_count,))
         torch.arange(self.total_count, out=values.data if isinstance(values, Variable) else values)
         values = values.view((-1,) + (1,) * len(self._batch_shape))
         values = values.expand((-1,) + self._batch_shape)
