@@ -3,22 +3,22 @@
 - name: binary_cross_entropy(Tensor self, Tensor target, Tensor weight={}, bool size_average=true, bool reduce=true)
   cname: BCECriterion
   scalar_check:
-    output: 'true'
+    output: reduce || self_->isScalar()
 
 - name: kl_div(Tensor self, Tensor target, bool size_average=true, bool reduce=true)
   cname: DistKLDivCriterion
   scalar_check:
-    output: 'true'
+    output: reduce || self_->isScalar()
 
 - name: l1_loss(Tensor self, Tensor target, bool size_average=true, bool reduce=True)
   cname: AbsCriterion
   scalar_check:
-    output: 'true'
+    output: reduce || self_->isScalar()
 
 - name: mse_loss(Tensor self, Tensor target, bool size_average=true, bool reduce=true)
   cname: MSECriterion
   scalar_check:
-    output: 'true'
+    output: reduce || self_->isScalar()
 
 - name: multi_margin_loss(Tensor self, LongTensor target, Scalar p=1, Scalar margin=1, Tensor weight={}, bool size_average=true)
   cname: MultiMarginCriterion
@@ -36,20 +36,20 @@
   cname: ClassNLLCriterion
   buffers: [total_weight]
   scalar_check:
-    output: 'true'
+    output: reduce || self_->isScalar()
     total_weight: 'true'
 
 - name: nll_loss2d(Tensor self, LongTensor target, Tensor weight={}, bool size_average=true, int64_t ignore_index=-100, bool reduce=True)
   cname: SpatialClassNLLCriterion
   buffers: [total_weight]
   scalar_check:
-    output: 'true'
+    output: reduce || self_->isScalar()
     total_weight: 'true'
 
 - name: smooth_l1_loss(Tensor self, Tensor target, bool size_average=true, bool reduce=true)
   cname: SmoothL1Criterion
   scalar_check:
-    output: 'true'
+    output: reduce || self_->isScalar()
 
 - name: soft_margin_loss(Tensor self, Tensor target, bool size_average=true)
   cname: SoftMarginCriterion
