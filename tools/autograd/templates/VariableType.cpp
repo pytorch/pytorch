@@ -296,7 +296,7 @@ static void check_inplace(const Tensor& tensor) {
   }
 }
 
-static void throw_out_requires_grad(const char* name) {
+static void throw_error_out_requires_grad(const char* name) {
   at::runtime_error(
       "%s(): functions with out=... arguments don't support automatic differentiation, "
       "but one of the arguments requires grad.", name);

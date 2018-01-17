@@ -215,7 +215,7 @@ def emit_body(declaration):
         env['op_ctor'] = '' if func is not None else error_msg()
 
         if is_out_fn:
-            setup = ['throw_out_requires_grad("{}");'.format(base_name)]
+            setup = ['throw_error_out_requires_grad("{}");'.format(base_name)]
             body = []
             body.append(DECLARE_GRAD_FN.substitute(op='Function'))
             body.append(SETUP_DERIVATIVE.substitute(
