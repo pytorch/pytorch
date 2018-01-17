@@ -257,6 +257,7 @@ class Variable(_C._VariableBase):
         return self.view(tensor.size())
 
     def repeat(self, *repeats):
+        from ._functions import Repeat
         if len(repeats) == 1 and isinstance(repeats[0], torch.Size):
             repeats = repeats[0]
         else:
@@ -276,9 +277,11 @@ class Variable(_C._VariableBase):
             return super(Variable, self).btrifact(pivot=pivot)
 
     def resize(self, *sizes):
+        from ._functions import Resize
         return Resize.apply(self, sizes)
 
     def resize_as(self, variable):
+        from ._functions import Resize
         return Resize.apply(self, variable.size())
 
     def index_add(self, dim, index, tensor):
@@ -375,21 +378,8 @@ class Variable(_C._VariableBase):
             array = array.astype('uint8')
         return Variable.from_numpy(array)
 
-    class _torch(object):
-        pass
+    _torch = torch._C._VariableFunctions
 
 
-for method in dir(Variable):
-    # This will also wrap some methods that normally aren't part of the
-    # functional interface, but we don't care, as they won't ever be used
-    if method.startswith('_') or method.endswith('_'):
-        continue
-    if hasattr(Variable._torch, method):
-        continue
-    as_static = staticmethod(getattr(Variable, method))
-    setattr(Variable._torch, method, as_static)
-
-
-from ._functions import *
 from torch._C import _ImperativeEngine as ImperativeEngine
 Variable._execution_engine = ImperativeEngine()

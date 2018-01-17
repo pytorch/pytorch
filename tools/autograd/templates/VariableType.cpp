@@ -296,39 +296,56 @@ static void check_inplace(const Tensor& tensor) {
   }
 }
 
-static void rebase_history(Tensor& tensor, std::shared_ptr<Function> grad_fn, int output_nr=0) {
-  if (!tensor.defined()) {
-    return;
-  }
-  auto& var = static_cast<Variable&>(tensor);
-  if (grad_fn) {
+static void throw_error_out_requires_grad(const char* name) {
+  at::runtime_error(
+      "%s(): functions with out=... arguments don't support automatic differentiation, "
+      "but one of the arguments requires grad.", name);
+}
+
+static void rebase_history(Tensor& tensor, std::shared_ptr<Function> grad_fn) {
+  if (grad_fn && tensor.defined()) {
+    auto& var = static_cast<Variable&>(tensor);
     grad_fn->num_inputs = 1;
-    var.rebase_history(output_nr, std::move(grad_fn));
+    var.rebase_history(0, std::move(grad_fn));
+  }
+}
+
+static void rebase_history(TensorList tensors, std::shared_ptr<Function> grad_fn) {
+  if (grad_fn) {
+    grad_fn->num_inputs = tensors.size();
+    int output_nr = 0;
+    for (auto& tensor : tensors) {
+      if (tensor.defined()) {
+        auto& var = static_cast<Variable&>(const_cast<Tensor&>(tensor));
+        var.rebase_history(output_nr, grad_fn);
+        output_nr++;
+      }
+    }
   }
 }
 
 // var must be the only differentiable output of the function. Use the ArrayRef
 // overload for functions with multiple differentiable outputs.
-static void set_history(Tensor& t, std::shared_ptr<Function> grad_fn, int output_nr=0) {
-  auto& var = static_cast<Variable&>(t);
-  if (grad_fn) {
+static void set_history(Tensor& tensor, std::shared_ptr<Function> grad_fn) {
+  if (grad_fn && tensor.defined()) {
+    auto& var = static_cast<Variable&>(tensor);
     grad_fn->num_inputs = 1;
-    var.get()->output_nr = output_nr;
+    var.get()->output_nr = 0;
     var.get()->_grad_fn = std::move(grad_fn);
   }
 }
 
-static void set_history(at::ArrayRef<Tensor> tl, std::shared_ptr<Function> grad_fn) {
+static void set_history(TensorList tensors, std::shared_ptr<Function> grad_fn) {
   if (grad_fn) {
-    grad_fn->num_inputs = tl.size();
+    grad_fn->num_inputs = tensors.size();
     int64_t output_nr = 0;
-    for (auto& t : tl) {
-      if (!t.defined()) continue;
-      // TODO: combine this with the Variable construction
-      auto& var = static_cast<const Variable&>(t);
-      var.get()->output_nr = output_nr;
-      var.get()->_grad_fn = grad_fn;
-      output_nr++;
+    for (auto& tensor : tensors) {
+      if (tensor.defined()) {
+        auto& var = static_cast<Variable&>(const_cast<Tensor&>(tensor));
+        var.get()->output_nr = output_nr;
+        var.get()->_grad_fn = grad_fn;
+        output_nr++;
+      }
     }
   }
 }
@@ -382,7 +399,7 @@ Tensor & VariableType::s_copy_(Tensor & self, const Tensor & src, bool async) co
   }
   baseType->s_copy_(self_, src_, async);
   increment_version(self);
-  rebase_history(static_cast<Variable&>(self), std::move(grad_fn));
+  rebase_history(self, std::move(grad_fn));
   return self;
 }
 

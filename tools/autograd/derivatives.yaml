@@ -11,7 +11,8 @@
 #
 # If a function has out-of-place and in-place variants, then the derivative
 # definition for the in-place variant is optional. It will default to the
-# definition for the out-of-place variant.
+# definition for the out-of-place variant. Similarly, _out variants will
+# default to the derivative for the non _out variant.
 #
 # Gradient expressions are standard C++ expressions operating on ATen
 # variables.  In a gradient expression, the following variables are in
@@ -630,7 +631,6 @@
   self: grad.contiguous().view(self.sizes())
 
 - name: _s_where(Tensor condition, Tensor self, Tensor other)
-  condition: zeros_like(condition)
   self: where(condition, grad, zeros_like(grad))
   other: where(condition, zeros_like(grad), grad)
 
@@ -639,6 +639,7 @@
 
 - name: _sparse_mask(Tensor self, SparseTensor mask)
   self: not_implemented("_sparse_mask")
+  mask: not_implemented("_sparse_mask")
 
 - name: _standard_gamma(Tensor self, Generator generator)
   self: grad * self._standard_gamma_grad(output)

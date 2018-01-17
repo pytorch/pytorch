@@ -1922,6 +1922,26 @@ class TestAutograd(TestCase):
         test()
         self.assertEqual(dealloc[0], 1)
 
+    def test_mul_out(self):
+        a = Variable(torch.randn(2, 2), requires_grad=True)
+        b = Variable(torch.randn(2, 2), requires_grad=True)
+        x = torch.zeros_like(a)
+
+        # out=... functions don't support automatic differentiation currently
+        self.assertRaisesRegex(RuntimeError, 'out=', lambda: torch.mul(a, b, out=x))
+
+        # the inputs can require grad if we're in no_grad() mode
+        with torch.no_grad():
+            torch.mul(a, b, out=x)
+            self.assertEqual(x, a * b)
+
+    def test_mul_out_result_requires_grad(self):
+        a = Variable(torch.randn(2, 2))
+        b = Variable(torch.randn(2, 2))
+        x = Variable(torch.zeros(2, 2), requires_grad=True)
+        # we should throw an exception if the output requires grad
+        self.assertRaisesRegex(RuntimeError, 'out=', lambda: torch.mul(a, b, out=x))
+
 
 def index_variable(shape, max_indices):
     if not isinstance(shape, tuple):

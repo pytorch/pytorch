@@ -24,8 +24,8 @@
 #
 from __future__ import print_function
 import sys
-from .utils import CodeTemplate, nested_dict
-from .gen_autograd import VIEW_FUNCTIONS, template_path, write
+from .utils import CodeTemplate, nested_dict, write
+from .gen_autograd import VIEW_FUNCTIONS, template_path
 from .gen_autograd_functions import uses_single_grad
 
 VARIABLE_TYPE_H = CodeTemplate.from_file(template_path + '/VariableType.h')
@@ -85,19 +85,22 @@ ${return_type} VariableType::${method_prefix_derived}${api_name}(${formals}) con
 }
 """)
 
-METHOD_DEFINITION_NYI = CodeTemplate("""\
-throw std::runtime_error("VariableType::${api_name} NYI");""")
-
 UNPACK_TENSOR = CodeTemplate("""\
 auto${ref} ${arg_name}_ = unpack${suffix}(${arg_name}, "${arg_name}", ${arg_pos});""")
 
-SETUP_DERIVATIVE = CodeTemplate("""\
+DECLARE_GRAD_FN = CodeTemplate("""\
 std::shared_ptr<${op}> grad_fn;
+""")
+
+SETUP_DERIVATIVE = CodeTemplate("""\
 if (compute_requires_grad({ ${args_with_derivatives} })) {
-  grad_fn = std::make_shared<${op}>(${op_ctor});
-  grad_fn->next_functions = compute_next_functions({ ${args_with_derivatives} });
-  ${save_inputs}
+  ${setup}
 }
+""")
+
+ASSIGN_GRAD_FN = CodeTemplate("""\
+grad_fn = std::make_shared<${op}>(${op_ctor});
+grad_fn->next_functions = compute_next_functions({ ${args_with_derivatives} });
 """)
 
 CALL_VIA_TYPE = CodeTemplate("""\
@@ -142,9 +145,6 @@ def gen_variable_type(out, aten_declarations):
     type_definitions = []
 
     for declaration in aten_declarations:
-        if declaration['name'].endswith('_out'):
-            # TODO: implement _out functions
-            continue
         type_declarations.append(METHOD_DECLARATION.substitute(declaration))
         if declaration['name'] not in MANUAL_IMPLEMENTATIONS:
             type_definitions.append(emit_method_definition(declaration))
@@ -170,8 +170,10 @@ def emit_body(declaration):
     func = declaration['derivative']
     name = declaration['name']
     inplace = declaration['inplace']
+    is_out_fn = name.endswith('_out')
+    modifies_arguments = inplace or is_out_fn
 
-    base_name = name[:-1] if inplace else name
+    base_name = name[:-1] if inplace else name[:-4] if is_out_fn else name
     is_view = base_name in VIEW_FUNCTIONS
 
     # These exclude things like BoolTensor, int64_t, and Scalar
@@ -182,7 +184,8 @@ def emit_body(declaration):
             return False
         return True
 
-    differentiable_inputs = list(filter(is_differentiable, arguments))
+    inputs = [arg for arg in arguments if not arg.get('output', False)]
+    differentiable_inputs = list(filter(is_differentiable, inputs))
     differentiable_outputs = list(filter(is_differentiable, returns))
 
     if uses_single_grad(func):
@@ -192,7 +195,7 @@ def emit_body(declaration):
         differentiable_outputs = differentiable_outputs[:1]
 
     requires_derivative = (
-        name not in DONT_REQUIRE_DERIVATIVE and
+        base_name not in DONT_REQUIRE_DERIVATIVE and
         len(differentiable_inputs) > 0 and len(differentiable_outputs) > 0 and
         strategy == 'use_derived')
 
@@ -200,34 +203,48 @@ def emit_body(declaration):
         print('WARNING: derivative ignored for {}'.format(name), file=sys.stderr)
 
     def setup_derivative():
-        env = {}
-        body = []
+        def error_msg():
+            name = declaration['api_name']
+            return '"the derivative for {} is not implemented"'.format(name)
 
-        tensor_args = [arg for arg in arguments if arg['simple_type'] in {'Tensor', 'TensorList'}]
-        tensor_arg_names = [arg['name'] for arg in tensor_args]
-        args_with_derivatives = (
-            tensor_arg_names if func is None else
-            find_args_with_derivatives(tensor_arg_names))
-        body.extend(emit_check_no_requires_grad(tensor_args, args_with_derivatives))
+        args_with_derivatives = find_args_with_derivatives()
+
+        env = {}
+        env['args_with_derivatives'] = reference_args(args_with_derivatives)
+        env['op'] = func['op'] if func is not None else 'Error'
+        env['op_ctor'] = '' if func is not None else error_msg()
+
+        if is_out_fn:
+            setup = ['throw_error_out_requires_grad("{}");'.format(base_name)]
+            body = []
+            body.append(DECLARE_GRAD_FN.substitute(op='Function'))
+            body.append(SETUP_DERIVATIVE.substitute(
+                setup=setup,
+                args_with_derivatives=reference_args(differentiable_inputs)))
+            body.append(SETUP_DERIVATIVE.substitute(
+                setup=setup,
+                args_with_derivatives=reference_args(differentiable_outputs)))
+            return body
+
+        setup = []
+        setup.extend(ASSIGN_GRAD_FN.substitute(env).split('\n'))
         if func is not None:
-            env['op'] = func['op']
-            env['op_ctor'] = ''
-            env['save_inputs'] = save_variables(func['saved_inputs'], False)
-            env['args_with_derivatives'] = args_with_derivatives
-        else:
-            env['op'] = 'Error'
-            env['op_ctor'] = '"the derivative for {} is not implemented"'.format(declaration['api_name'])
-            env['save_inputs'] = []
-            env['args_with_derivatives'] = tensor_arg_names
-        body.append(SETUP_DERIVATIVE.substitute(env))
+            setup.extend(save_variables(func['saved_inputs'], False))
+
+        body = []
+        body.extend(emit_check_no_requires_grad(differentiable_inputs, args_with_derivatives))
+        body.append(DECLARE_GRAD_FN.substitute(env))
+        body.append(SETUP_DERIVATIVE.substitute(env, setup=setup))
         return body
 
-    def find_args_with_derivatives(tensor_arg_names):
+    def find_args_with_derivatives():
         """Find arguments that have derivative definitions"""
+        if func is None:
+            return differentiable_inputs
         names = set(name for d in func['derivatives'] for name in d['var_names'])
-        differentiable = [arg for arg in tensor_arg_names if arg in names]
+        differentiable = [arg for arg in differentiable_inputs if arg['name'] in names]
         if len(differentiable) != len(names):
-            missing = names - set(differentiable)
+            missing = names - set(arg['name'] for arg in differentiable)
             raise RuntimeError('Missing arguments for derivatives: {} in {}'.format(missing, func['name']))
         return differentiable
 
@@ -235,9 +252,9 @@ def emit_body(declaration):
         """Checks that arguments without derivatives don't require grad"""
         body = []
         for arg in tensor_args:
-            name = arg['name']
-            if name in args_with_derivatives:
+            if arg in args_with_derivatives:
                 continue
+            name = arg['name']
             if name == 'output':
                 # Double-backwards definitions sometimes take in 'input' and
                 # 'output', but only define the derivative for input.
@@ -265,6 +282,15 @@ def emit_body(declaration):
             stmts.append('grad_fn->{} = {};'.format(name, expr))
         return stmts
 
+    def reference_args(args):
+        res = []
+        for arg in args:
+            if arg['type'] == 'SparseTensor':
+                res.append('{}.tref'.format(arg['name']))
+            else:
+                res.append(arg['name'])
+        return res
+
     def get_trace_outputs(declaration):
         if declaration['return_type'] == 'std::vector<Tensor>':
             return 'flatten({})'.format(declaration['returns'][0]['name'])
@@ -286,7 +312,7 @@ def emit_body(declaration):
         tensor_args = [arg for arg in arguments if arg['simple_type'] in {'Tensor', 'TensorList'}]
         if len(tensor_args) == 0:
             return ''
-        if name in DONT_RECORD_TRACE:
+        if base_name in DONT_RECORD_TRACE:
             return ''
 
         # Note [clang-802.0.42 tuple overload bug]
@@ -338,7 +364,7 @@ def emit_body(declaration):
         return RECORD_TRACE.substitute(combined)
 
     def declare_returned_variables():
-        if inplace or name.endswith('_out'):
+        if modifies_arguments:
             return ''
         if len(declaration['returns']) == 1:
             return ''
@@ -357,11 +383,11 @@ def emit_body(declaration):
         combined = nested_dict(env, declaration)
         if strategy == 'use_derived':
             call = CALL_VIA_DERIVED.substitute(combined)
-            if not inplace:
+            if not modifies_arguments:
                 call = wrap_output(call)
         else:
             call = CALL_VIA_TYPE.substitute(declaration)
-        if not inplace:
+        if not modifies_arguments:
             call = '{} = {}'.format(tie_return_values(), call)
         return call + ';'
 
@@ -374,7 +400,7 @@ def emit_body(declaration):
     def get_return_value():
         if inplace:
             return 'self'
-        if name.endswith('_out'):
+        if is_out_fn:
             return_names = [arg['name'] for arg in arguments
                             if arg.get('output', False)]
             if len(return_names) == 1:
@@ -388,7 +414,7 @@ def emit_body(declaration):
         return 'std::make_tuple({})'.format(', '.join(moved))
 
     def emit_history():
-        fn = 'rebase' if inplace and not is_view else 'set'
+        fn = 'rebase' if modifies_arguments and not is_view else 'set'
         output_names = [r['name'] for r in differentiable_outputs]
         if len(output_names) == 1:
             outs = output_names[0]
@@ -397,6 +423,9 @@ def emit_body(declaration):
         return SET_HISTORY.substitute(fn=fn, differentiable_outputs=outs)
 
     def emit_save_outputs():
+        if is_out_fn:
+            # out functions don't currently support differentiation
+            return ''
         func = declaration['derivative']
         if func is not None:
             stmts = save_variables(func['saved_outputs'], True)
@@ -405,17 +434,26 @@ def emit_body(declaration):
             return CONDITIONAL.substitute(cond='grad_fn', statements=stmts)
         return ''
 
+    def emit_check_inplace():
+        if not inplace:
+            return []
+        return ['check_inplace({});'.format(arg['name']) for arg in differentiable_outputs]
+
+    def emit_increment_version():
+        if not modifies_arguments:
+            return []
+        return ['increment_version({});'.format(arg['name']) for arg in differentiable_outputs]
+
     env = {}
     combined = nested_dict(env, declaration)
 
     body = []
-    if name not in DONT_PROFILE:
+    if base_name not in DONT_PROFILE:
         body.append(RECORD_FUNCTION.substitute(combined))
     if strategy != 'use_type':
         body.extend(unpack_args(env, declaration))
     if requires_derivative:
-        if inplace:
-            body.append('check_inplace(self);')
+        body.extend(emit_check_inplace())
         body.extend(setup_derivative())
     body.append(declare_returned_variables())
     body.append(emit_call(env))
@@ -424,8 +462,7 @@ def emit_body(declaration):
             body.append('ensure_no_aten_scalars(self);')
         # set_flags has to appear after version_counter, because rebase_history
         # requires that the counter is incremented before it is called
-        if inplace:
-            body.append('increment_version(self);')
+        body.extend(emit_increment_version())
         body.append(emit_history())
     # record_trace must appear before save_outputs so that saved outputs
     # have their tracing_state saved
