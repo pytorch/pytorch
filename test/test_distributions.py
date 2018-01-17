@@ -321,7 +321,7 @@ class TestDistributions(TestCase):
         self.assertEqual(Geometric(r).sample((3, 2)).size(), (3, 2, 1))
         self.assertEqual(Geometric(s).sample().size(), (1,))
         self._gradcheck_log_prob(Geometric, (p,))
-        self.assertRaises(AssertionError, lambda: Geometric(0))
+        self.assertRaises(ValueError, lambda: Geometric(0))
         self.assertRaises(NotImplementedError, Geometric(r).rsample)
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")

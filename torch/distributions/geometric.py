@@ -34,7 +34,8 @@ class Geometric(Distribution):
             raise ValueError("Either `probs` or `logits` must be specified, but not both.")
         if probs is not None:
             self.probs, = broadcast_all(probs)
-            assert self.probs.gt(0).all(), 'All elements of probs must be greater than 0'
+            if not self.probs.gt(0).all():
+                raise ValueError('All elements of probs must be greater than 0')
         else:
             self.logits, = broadcast_all(logits)
         probs_or_logits = probs if probs is not None else logits
