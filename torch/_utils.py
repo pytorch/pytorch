@@ -76,10 +76,6 @@ def _rebuild_tensor(storage, storage_offset, size, stride):
     return tensor_class().set_(storage, storage_offset, size, stride)
 
 
-def _range(*args, **kwargs):
-    return __builtins__['range'](*args, **kwargs)
-
-
 def _import_dotted_name(name):
     components = name.split('.')
     obj = __import__(components[0])
@@ -238,3 +234,54 @@ def _take_tensors(tensors, size_limit):
     for buf, _ in buf_dict.values():
         if len(buf) > 0:
             yield buf
+
+
+def _repeat(self, *sizes):
+    r"""Repeats this tensor along the specified dimensions.
+
+    Unlike :meth:`expand`, this function copies the tensor's data.
+
+    Args:
+        *sizes (torch.Size or int...): The number of times to repeat this
+            tensor along each dimension
+
+    Example:
+        >>> x = torch.Tensor([1, 2, 3])
+        >>> x.repeat(4, 2)
+         1  2  3  1  2  3
+         1  2  3  1  2  3
+         1  2  3  1  2  3
+         1  2  3  1  2  3
+        [torch.FloatTensor of size 4x6]
+        >>> x.repeat(4, 2, 1).size()
+        torch.Size([4, 2, 3])
+    """
+    # If args == (torch.Size,), then we need to unpack the tuple
+    if len(sizes) == 1 and isinstance(sizes[0], torch.Size):
+        sizes = sizes[0]
+
+    repeats = list(sizes)
+
+    if len(repeats) < self.dim():
+        raise ValueError('Number of dimensions of repeat dims can not be '
+                         'smaller than number of dimensions of tensor')
+
+    # Add new leading dimensions to the tensor if the
+    # number of target dimensions is larger than the
+    # number of source dimensions.
+    num_new_dimensions = len(repeats) - self.dim()
+    padded_size = [1] * num_new_dimensions + list(self.size())
+    target_size = torch.Size([a * b for a, b in zip(padded_size, repeats)])
+
+    xtensor = self.new().set_(self)
+    xtensor = xtensor.expand(padded_size)
+
+    result = self.new()
+    result.resize_(target_size)
+    urtensor = result.new(result)
+    for i in range(xtensor.dim()):
+        urtensor = urtensor.unfold(i, xtensor.size(i), xtensor.size(i))
+
+    urtensor.copy_(xtensor.expand_as(urtensor))
+
+    return result
