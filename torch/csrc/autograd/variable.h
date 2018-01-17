@@ -305,4 +305,16 @@ inline Variable & Variable::operator=(const Tensor & rhs) & {
   return *this;
 }
 
+inline size_t count_variables_single(const Variable& x) { return 1; }
+inline size_t count_variables_single(at::ArrayRef<Variable> xs) { return xs.size(); }
+
+template<typename... Args>
+inline size_t count_variables() {
+  return 0;
+}
+template<typename T, typename... Args>
+inline size_t count_variables(T x, Args... args) {
+  return count_variables_single(x) + count_variables(args...);
+}
+
 }} // namespace torch::autograd

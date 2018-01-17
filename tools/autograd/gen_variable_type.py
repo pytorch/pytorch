@@ -93,9 +93,9 @@ auto${ref} ${arg_name}_ = unpack${suffix}(${arg_name}, "${arg_name}", ${arg_pos}
 
 SETUP_DERIVATIVE = CodeTemplate("""\
 std::shared_ptr<${op}> grad_fn;
-if (compute_requires_grad({ ${args_with_derivatives} })) {
+if (compute_requires_grad(${args_with_derivatives})) {
   grad_fn = std::make_shared<${op}>(${op_ctor});
-  grad_fn->next_functions = compute_next_functions({ ${args_with_derivatives} });
+  grad_fn->next_functions = Function::tensor_flags(${args_with_derivatives}).next_functions;
   ${save_inputs}
 }
 """)
