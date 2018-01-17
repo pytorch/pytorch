@@ -14,8 +14,8 @@ class FisherSnedecor(Distribution):
 
     Example::
 
-        >>> m = StudentT(torch.Tensor([1.0]), torch.Tensor([2.0]))
-        >>> m.sample()  # Student's t-distributed with df1=1 and df2=2
+        >>> m = FisherSnedecor(torch.Tensor([1.0]), torch.Tensor([2.0]))
+        >>> m.sample()  # Fisher-Snedecor-distributed with df1=1 and df2=2
          0.2453
         [torch.FloatTensor of size 1]
 
@@ -27,53 +27,26 @@ class FisherSnedecor(Distribution):
     support = constraints.positive
     has_rsample = True
 
-    def __init__(self, df1, df2, sampler='gamma'):  # sampler is temporary, for debug purposes only
+    def __init__(self, df1, df2):
         self.df1, self.df2 = broadcast_all(df1, df2)
-        self.sampler = sampler
-        if sampler == 'beta':
-            self._beta = Beta(self.df1 * 0.5, self.df2 * 0.5)
-        elif sampler == 'chi2':
-            self._chi2_df1 = Chi2(self.df1)
-            self._chi2_df2 = Chi2(self.df2)
-        elif sampler == 'gamma':
-            self._gamma1 = Gamma(self.df1 * 0.5, self.df1)
-            self._gamma2 = Gamma(self.df2 * 0.5, self.df2)
-            
+        self._gamma1 = Gamma(self.df1 * 0.5, self.df1)
+        self._gamma2 = Gamma(self.df2 * 0.5, self.df2)
+
         if isinstance(df1, Number) and isinstance(df2, Number):
             batch_shape = torch.Size()
         else:
             batch_shape = self.df1.size()
         super(FisherSnedecor, self).__init__(batch_shape)
 
-    def rsample(self, sample_shape=torch.Size()):
+    def rsample(self, sample_shape=torch.Size(())):
         shape = self._extended_shape(sample_shape)
-        if self.sampler == 'beta':
-            #   X ~ Beta(df1/2, df2/2)
-            #   Y = df2 * X / df1 * (1 - X) ~ F(df1, df2)
-            X = self._beta.rsample(sample_shape)
-            Y = X * self.df2 / ((1 - X) * self.df1)
-
-        elif self.sampler == 'chi2':
-            #   X1 ~ Chi2(df1), X2 ~ Chi2(df2)
-            #   Y = X1 * df2 / X2 * df1 ~ F(df1, df2)
-            X1 = self._chi2_df1.rsample(sample_shape)
-            X2 = self._chi2_df2.rsample(sample_shape)
-            Y = X1 * self.df2 / (X2 * self.df1)
-
-        elif self.sampler == 'gamma':
-            #   X1 ~ Gamma(df1 / 2, 1 / df1), X2 ~ Gamma(df2 / 2, 1 / df2)
-            #   Y = df2 * df1 * X1 / (df1 * df2 * X2) = X1 / X2 ~ F(df1, df2)
-            X1 = self._gamma1.rsample(sample_shape)
-            X2 = self._gamma2.rsample(sample_shape)
-            Y = X1 / X2
-
-        elif self.sampler == 'st_gamma':
-            #  Similar, but with improve single-precision
-            numer = _standard_gamma((self.df1 * 0.5).expand(sample_shape)) / self.df1.expand(sample_shape)
-            denom = _standard_gamma((self.df2 * 0.5).expand(sample_shape)) / self.df2.expand(sample_shape)
-            denom.clamp_(min=_finfo(denom).tiny)
-            Y = numer / denom
-            Y.clamp_(min=_finfo(denom).tiny)
+        #   X1 ~ Gamma(df1 / 2, 1 / df1), X2 ~ Gamma(df2 / 2, 1 / df2)
+        #   Y = df2 * df1 * X1 / (df1 * df2 * X2) = X1 / X2 ~ F(df1, df2)
+        X1 = self._gamma1.rsample(sample_shape).view(shape)
+        X2 = self._gamma2.rsample(sample_shape).view(shape)
+        X2.clamp_(min=_finfo(X2).tiny)
+        Y = X1 / X2
+        Y.clamp_(min=_finfo(X2).tiny)
         return Y
 
     def log_prob(self, value):

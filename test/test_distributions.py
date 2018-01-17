@@ -645,7 +645,7 @@ class TestDistributions(TestCase):
                                         'Gamma(alpha={}, beta={})'.format(alpha, beta))
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
-    def test_pareto_shape(self):
+    def test_pareto(self):
         scale = Variable(torch.randn(2, 3).abs(), requires_grad=True)
         alpha = Variable(torch.randn(2, 3).abs(), requires_grad=True)
         scale_1d = torch.randn(1).abs()
@@ -674,7 +674,7 @@ class TestDistributions(TestCase):
                                         'Pareto(scale={}, alpha={})'.format(scale, alpha))
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
-    def test_gumbel_shape(self):
+    def test_gumbel(self):
         loc = Variable(torch.randn(2, 3), requires_grad=True)
         scale = Variable(torch.randn(2, 3).abs(), requires_grad=True)
         loc_1d = torch.randn(1)
@@ -703,7 +703,7 @@ class TestDistributions(TestCase):
                                         'Gumbel(loc={}, scale={})'.format(loc, scale))
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
-    def test_fishersnedecor_shape(self):
+    def test_fishersnedecor(self):
         df1 = Variable(torch.randn(2, 3).abs(), requires_grad=True)
         df2 = Variable(torch.randn(2, 3).abs(), requires_grad=True)
         df1_1d = torch.randn(1).abs()
@@ -722,6 +722,8 @@ class TestDistributions(TestCase):
             self.assertAlmostEqual(log_prob, expected, places=3)
 
         self._check_log_prob(FisherSnedecor(df1, df2), ref_log_prob)
+#        self.assertEqual(FisherSnedecor(df1, df2).entropy().data,
+#                                       scipy.stats.f(df1.data.numpy(), df2.data.numpy()).entropy(), prec=1e-03)
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_fishersnedecor_sample(self):
