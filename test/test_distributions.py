@@ -1230,7 +1230,7 @@ class TestDistributionShapes(TestCase):
                     if not expected_shape:
                         expected_shape = torch.Size((1,))  # TODO Remove this once scalars are supported.
                     message = '{} example {}/{}, shape mismatch. expected {}, actual {}'.format(
-                        Dist.__name__, i, len(params), expected_shape, actual_shape)
+                        Dist.__name__, i + 1, len(params), expected_shape, actual_shape)
                     self.assertEqual(actual_shape, expected_shape, message=message)
                 except NotImplementedError:
                     continue
