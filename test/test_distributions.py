@@ -1483,8 +1483,13 @@ class TestKL(TestCase):
                                          [0.5, 0.4, 0.1],
                                          [0.33, 0.33, 0.34],
                                          [0.2, 0.2, 0.4]])
-        self.sampling_extra = [1000, 500, 1500, 1000, 2500, 500, 2000, 10000, 5000,
-                                15000, 10000, 25000, 5000, 20000]
+
+        # These tests should pass with precision = 0.01, but that makes tests very expensive.
+        # Instead, we test with precision = 0.1 and only test with higher precision locally
+        # when adding a new KL implementation
+        self.precision = 0.1
+        self.sampling_extra = [1000, 2000, 3000, 5000, 10000,
+                                20000, 30000, 50000]
         self.finite_examples = [
             (bernoulli, bernoulli),
             (beta, beta),
@@ -1579,17 +1584,15 @@ class TestKL(TestCase):
             message = 'Incorrect KL({}, {}).\nExpected (Monte Carlo): {}\nActual (analytic): {}'.format(
                     type(p).__name__, type(q).__name__, expected, actual)
             try:
-                self.assertEqual(expected, actual, prec=0.1, message=message)
+                self.assertEqual(expected, actual, prec=self.precision, message=message)
             except:
                 for sample_extra in self.sampling_extra:
                     x = torch.cat([x, p.sample(sample_shape=(sample_extra,))], 0)
                     expected = (p.log_prob(x) - q.log_prob(x)).mean(0)
                     actual = kl_divergence(p, q)
-                    try:
-                        self.assertEqual(expected, actual, prec=0.1, message=message)
+                    if torch.abs(actual - expected).max() < self.precision:
                         break
-                    except:
-                        continue
+                self.assertEqual(expected, actual, prec=self.precision, message=message)
 
     def test_kl_infinite(self):
         for p, q in self.infinite_examples:
