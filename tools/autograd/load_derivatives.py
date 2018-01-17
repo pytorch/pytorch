@@ -245,12 +245,17 @@ def ensure_unique_names(autograd_functions):
                 func['op'] += str(i)
 
 
-def get_signature(declaration, ignore_inplace=False):
+def get_signature(declaration, use_base_variant=False):
     name = declaration['name']
-    if ignore_inplace and declaration['inplace']:
-        assert name.endswith('_')
-        name = name[:-1]
-    simple_types = [arg['simple_type'] for arg in declaration['arguments']]
+    arguments = declaration['arguments']
+    if use_base_variant:
+        if declaration['inplace']:
+            assert name.endswith('_')
+            name = name[:-1]
+        elif name.endswith('_out'):
+            name = name[:-4]
+            arguments = [arg for arg in arguments if not arg.get('output', False)]
+    simple_types = [arg['simple_type'] for arg in arguments]
     return '{}({})'.format(name, ', '.join(simple_types))
 
 
@@ -365,8 +370,9 @@ def match_declarations_with_autograd_functions(declarations, autograd_functions)
         if signature in functions_by_signature:
             return functions_by_signature[signature]
 
-        # if there is no exact match look for the out-of-place signature
-        signature = get_signature(declaration, ignore_inplace=True)
+        # if there is no exact match look for the out-of-place signature.
+        # i.e mul() for mul_() or mul_out()
+        signature = get_signature(declaration, use_base_variant=True)
         return functions_by_signature.get(signature)
 
     for declaration in declarations:
