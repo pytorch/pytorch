@@ -166,7 +166,7 @@ class TestAdam(hu.HypothesisTestCase):
            epsilon=st.floats(min_value=0.01, max_value=0.99,
                              allow_nan=False, allow_infinity=False),
            data_strategy=st.data(),
-               **hu.gcs)
+               **hu.gcs_cpu_only)
     def test_row_wise_sparse_adam(self, inputs, ITER, LR, beta1, beta2, epsilon,
                                   data_strategy, gc, dc):
         param, grad = inputs
