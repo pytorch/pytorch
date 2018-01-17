@@ -92,7 +92,61 @@ def process_definition(defn, declarations_by_signature):
         """Return the index of the first element of xs matching pred."""
         return next((i, x) for i, x in enumerate(xs) if pred(x))
 
-    def set_up_derivatives(defn, declaration):
+    def check_grad_usage(defn_name, declaration, derivatives):
+        """
+        Check for some subtle mistakes one might make when writing gradients.
+        These mistakes will compile, but will be latent until a function is
+        used with double backwards.
+        """
+
+        used_grad = 0
+        used_grads = 0
+        fully_implemented = True
+        used_grads_indices = []
+        for d in derivatives:
+            formula = d['formula']
+            used_grad += len(re.findall(IDENT_REGEX.format('grad'), formula))
+            used_grads += len(re.findall(IDENT_REGEX.format('grads'), formula))
+            fully_implemented = \
+                fully_implemented and \
+                not re.search(IDENT_REGEX.format('not_implemented'), formula)
+            used_grads_indices.extend(used_gradient_indices(formula))
+        assert used_grads >= len(used_grads_indices)
+        only_used_grads_indices = used_grads == len(used_grads_indices)
+
+        if used_grad and used_grads:
+            raise RuntimeError("Derivative definition of {} in derivatives.yaml illegally "
+                               "mixes use of 'grad' and 'grads'. Consider replacing "
+                               "occurrences of 'grad' with 'grads[0]'".format(defn_name))
+
+        if only_used_grads_indices and set(used_grads_indices) == {0}:
+            raise RuntimeError("Derivative definition of {} in derivatives.yaml solely "
+                               "refers to 'grads[0]'.  If the first output is indeed the "
+                               "only differentiable output, replace 'grads[0]' with 'grad'; "
+                               "otherwise, there is a likely error in your derivatives "
+                               "declaration.".format(defn_name))
+
+        # DO NOT comment out this test!  Code generation will probably work with
+        # this test commented out, but if you ever pass a non-differentiable
+        # argument to an autograd function (e.g., a backwards function which
+        # has double backwards implemented, as was the case in #4422) your code
+        # will fail when you ever actually try to differentiate with it.
+        #
+        # NB: I had to make it not complain if both 'grads' and 'grad' are never
+        # used, because we have some silly zeros_like() gradients for inplace
+        # comparison tests.
+        if fully_implemented and not used_grad and used_grads and only_used_grads_indices and \
+           set(used_grads_indices) != set(range(len(declaration['returns']))):
+            raise RuntimeError("Derivative definition of {} in derivatives.yaml does "
+                               "not refer to the gradients of all of its outputs.  Either "
+                               "the derivatives declaration is wrong, OR you have some "
+                               "non-differentiable outputs.  If you have a single "
+                               "differentiable output, make it the first output in ATen "
+                               "and reference its gradient with 'grad'; otherwise, you "
+                               "have hit a case which is unsupported by the codegen, "
+                               "see #4567.".format(defn_name))
+
+    def set_up_derivatives(defn_name, defn, declaration):
         # First, let us determine the set of inputs for which gradients
         # were specified in declarations.  We'll use this in layout
         # computation.
@@ -128,6 +182,9 @@ def process_definition(defn, declarations_by_signature):
                 output_indices.append(arg_name_to_output_index[name])
                 args.append(name)
             derivatives.append(create_derivative(declaration, formula, output_indices, args))
+
+        # Test to see if the use of 'grads' makes sense.
+        check_grad_usage(defn_name, declaration, derivatives)
 
         return derivatives, num_inputs
 
@@ -168,7 +225,7 @@ def process_definition(defn, declarations_by_signature):
                                'Declarations.yaml ({})'
                                .format(i, defn_name, x, y))
 
-    derivatives, num_inputs = set_up_derivatives(defn, canonical)
+    derivatives, num_inputs = set_up_derivatives(defn_name, defn, canonical)
     return create_autograd_function(defn_name, derivatives, num_inputs, signature)
 
 
@@ -203,10 +260,6 @@ GRAD_INDEX_REGEX = r'(?:^|\W)grads\[(\d+)\]'
 def used_gradient_indices(formula):
     """Determine a list of gradient indices (the i in grads[i]) that
     are used by the formula.
-
-    NB: references to 'grad' don't count as a gradient index (technically,
-    we should return 0 in this case, but it doesn't matter this can never
-    be out of bounds
 
     >>> used_gradient_indices("foo(grads[0], grads[1])")
     [0, 1]

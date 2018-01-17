@@ -1,7 +1,7 @@
 from collections import namedtuple
 from functools import update_wrapper
 from numbers import Number
-
+import math
 import torch
 import torch.nn.functional as F
 from torch.autograd import Variable
@@ -132,6 +132,11 @@ def logits_to_probs(logits, is_binary=False):
     return softmax(logits)
 
 
+def clamp_probs(probs):
+    eps = _finfo(probs).eps
+    return probs.clamp(min=eps, max=1 - eps)
+
+
 def probs_to_logits(probs, is_binary=False):
     """
     Converts a tensor of probabilities into logits. For the binary case,
@@ -139,8 +144,7 @@ def probs_to_logits(probs, is_binary=False):
     For the multi-dimensional case, the values along the last dimension
     denote the probabilities of occurrence of each of the events.
     """
-    eps = _finfo(probs).eps
-    ps_clamped = probs.clamp(min=eps, max=1 - eps)
+    ps_clamped = clamp_probs(probs)
     if is_binary:
         return torch.log(ps_clamped) - torch.log1p(-ps_clamped)
     return torch.log(ps_clamped)

@@ -58,11 +58,21 @@ DONT_PROFILE = {
 # tensors that have requires_grad=False. In-place functions listed here will
 # not examine or modify requires_grad or grad_fn.
 DONT_REQUIRE_DERIVATIVE = {
-    # These  only depend on the input Tensor's shape and device, not the data
+    # These only depend on the input Tensor's shape and device, not the data
     'ones_like', 'zeros_like',
+    # Tensor constructors
+    'sparse_coo_tensor',
     # These are only implemented on integral types
     '__and__', '__iand__', '__ilshift__', '__ior__', '__irshift__', '__ixor__',
     '__lshift__', '__or__', '__rshift__', '__xor__',
+}
+
+# These functions use `unpack_any` instead of `unpack`. They don't check the
+# concrete type of arguments. Eventually all VariableType functions should only
+# check that arguments are Variables.
+USE_UNPACK_ANY = {
+    'sparse_coo_tensor', 'cudnn_batch_norm', 'cudnn_batch_norm_forward',
+    'cudnn_batch_norm_backward',
 }
 
 METHOD_DECLARATION = CodeTemplate("""\
@@ -427,11 +437,15 @@ def emit_body(declaration):
 
 
 def unpack_args(env, declaration):
+    use_unpack_any = declaration['name'] in USE_UNPACK_ANY
+
     def requires_unpack(arg):
         return 'Tensor' in arg['dynamic_type']
 
     def get_suffix(dynamic_type, is_nullable):
-        if is_nullable:
+        if use_unpack_any:
+            return '_any' if not is_nullable else '_any_opt'
+        elif is_nullable:
             assert dynamic_type == 'Tensor'
             return '_opt'
         elif dynamic_type == 'IndexTensor':

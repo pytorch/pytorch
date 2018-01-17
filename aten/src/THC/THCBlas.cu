@@ -74,7 +74,7 @@ half THCudaBlas_Hdot(THCState *state, int64_t n, half *x, int64_t incx, half *y,
   return THC_float2half(0);
 #else
   THError("Cublas_Hdot requires CUDA 8.0+");
-  return THC_half2float(0);
+  return THC_float2half(0);
 #endif
 }
 #endif

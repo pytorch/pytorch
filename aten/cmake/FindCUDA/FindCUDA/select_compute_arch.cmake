@@ -62,11 +62,11 @@ function(CUDA_DETECT_INSTALLED_GPUS OUT_VARIABLE)
       "  return 0;\n"
       "}\n")
 
-    if(MSVC AND NOT "${CMAKE_C_COMPILER}" MATCHES "/cl.exe")
+    if(MSVC AND NOT "${CUDA_HOST_COMPILER}" MATCHES "/cl.exe")
       find_program(REAL_MSVC_COMPILER cl.exe)
       set(CCBIN "${REAL_MSVC_COMPILER}")
     else()
-      set(CCBIN "${CMAKE_C_COMPILER}")
+      set(CCBIN "${CUDA_HOST_COMPILER}")
     endif()
 
     execute_process(COMMAND "${CUDA_NVCC_EXECUTABLE}" "--run" "${cufile}"

@@ -66,11 +66,14 @@ Tensor embedding_sparse_backward(
     grad = grad.index(c);
   }
 
+  int64_t num_features = grad.size(-1);
+  auto weight_size = std::array<int64_t, 2>{{ num_weights, num_features }};
+
   auto index = indices.view({1, -1});
-  auto values = grad.contiguous().view({-1, grad.size(1)});
+  auto values = grad.contiguous().view({-1, num_features});
 
   auto& sparse_type = grad.type().toBackend(grad.is_cuda() ? kSparseCUDA : kSparseCPU);
-  return sparse_type.sparse_coo_tensor(index, values);
+  return sparse_type.sparse_coo_tensor(index, values, weight_size);
 }
 
 Tensor embedding_backward_cpu(
