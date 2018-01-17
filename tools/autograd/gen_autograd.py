@@ -80,9 +80,9 @@ def load_deprecated_signatures(aten_decls):
         return '{}({})'.format(name, ', '.join(rearranged_types))
 
     for deprecated in deprecated_defs:
-        prototype = deprecated['name']
+        python_signature = deprecated['name']
         call_args = split_name_params(deprecated['aten'])[1]
-        name, params = split_name_params(prototype)
+        name, params = split_name_params(python_signature)
         signature = get_signature(name, params, call_args)
 
         for declaration in declarations_by_signature[signature]:
@@ -90,9 +90,9 @@ def load_deprecated_signatures(aten_decls):
             declaration['deprecated'] = True
             declaration['call_args'] = call_args
             if declaration['inplace']:
-                declaration['prototype'] = prototype.replace(name, name + '_')
+                declaration['python_signature'] = python_signature.replace(name, name + '_')
             else:
-                declaration['prototype'] = prototype
+                declaration['python_signature'] = python_signature
 
             args_by_name = {arg['name']: arg for arg in declaration['arguments']}
             declaration['arguments'] = []

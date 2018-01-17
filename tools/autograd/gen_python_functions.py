@@ -31,7 +31,7 @@ static PyObject * ${pycname}(PyObject* self, PyObject* args, PyObject* kwargs)
 {
   HANDLE_TH_ERRORS
   static PythonArgParser parser({
-    ${prototypes}
+    ${signatures}
   });
   ${unpack_self}
   PyObject* parsed_args[${max_args}];
@@ -81,7 +81,7 @@ PY_VARIABLE_METHOD_DEF = CodeTemplate("""\
 
 UNPACK_SELF = "auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;"
 
-FUNCTION_PROTOTYPE = CodeTemplate("""\
+PYTHON_FUNCTION_SIGNATURE = CodeTemplate("""\
 ${name}(${typed_args})""")
 
 # XXX: if you got here because of an assertion failure, it doesn't mean
@@ -314,7 +314,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
             'name': name,
             'dispatch_name': 'dispatch_{}'.format(name),
             'pycname': 'THPVariable_{}'.format(name),
-            'prototypes': [],
+            'signatures': [],
             'max_args': max(len(o['arguments']) for o in declarations),
             'unpack_self': [],
             'dispatch': [],
@@ -325,17 +325,17 @@ def create_python_bindings(python_functions, has_self, is_module=False):
 
         grouped = group_declarations(declarations)
         for i, dictionary in enumerate(grouped):
-            prototype = dictionary['prototype']
+            signature = dictionary['signature']
             if has_self:
-                prototype = prototype.replace('Tensor self, ', '')
-                prototype = prototype.replace('Tensor self', '')
+                signature = signature.replace('Tensor self, ', '')
+                signature = signature.replace('Tensor self', '')
             if not has_self:
                 # Use 'input' instead of 'self' for NN functions
-                prototype = prototype.replace('Tensor self', 'Tensor input')
-            prototype = prototype.replace('SparseTensor', 'Tensor')
+                signature = signature.replace('Tensor self', 'Tensor input')
+            signature = signature.replace('SparseTensor', 'Tensor')
             if dictionary['base'].get('deprecated', False):
-                prototype += '|deprecated'
-            env['prototypes'].append('"{}",'.format(prototype))
+                signature += '|deprecated'
+            env['signatures'].append('"{}",'.format(signature))
             env['dispatch'].append(emit_dispatch(i, dictionary, env))
 
         env['dispatch'].append('}')
@@ -369,22 +369,22 @@ def group_declarations(declarations):
 
        "base": the regular ATen declaration (e.g. conv2d)
        "out": the out variant (e.g. conv2d_out)
-       "prototype": the signature/prototype used for Python argument parsing
+       "signature": the signature used for Python argument parsing
     """
     grouped = defaultdict(dict)
 
-    # first group by prototype ignoring out arguments
+    # first group by signature ignoring out arguments
     for declaration in declarations:
-        prototype = get_prototype(declaration, False)
-        v = grouped[prototype]
+        signature = get_python_signature(declaration, False)
+        v = grouped[signature]
         if declaration['name'].endswith('_out'):
             v['out'] = declaration
-            # prefer the prototype with optional out=... arguments
-            v['prototype'] = get_prototype(declaration, True)
+            # prefer the signature with optional out=... arguments
+            v['signature'] = get_python_signature(declaration, True)
         else:
             v['base'] = declaration
-            if 'prototype' not in v:
-                v['prototype'] = prototype
+            if 'signature' not in v:
+                v['signature'] = signature
 
     result = []
     for _, dictionary in sorted(grouped.items()):
@@ -393,12 +393,12 @@ def group_declarations(declarations):
     return result
 
 
-def get_prototype(declaration, include_out):
-    # Use the saved prototype for deprecated pseudo-declarations
-    if 'prototype' in declaration:
-        return declaration['prototype']
+def get_python_signature(declaration, include_out):
+    # Use the saved signature for deprecated pseudo-declarations
+    if 'python_signature' in declaration:
+        return declaration['python_signature']
 
-    # Compute the Python function prototype for argument parsing
+    # Compute the Python function signature for argument parsing
     typed_args = []
     output_args = []
     positional = True
@@ -443,8 +443,8 @@ def get_prototype(declaration, include_out):
             typename = typenames[0]
         typed_args.append(typename + ' out=None')
 
-    # Python function prototype.
+    # Python function signature.
     # This is the string that we give to FunctionParameter, which is
     # then parsed into the actual structure which we do parsing
     # with.
-    return FUNCTION_PROTOTYPE.substitute(name=name, typed_args=typed_args)
+    return PYTHON_FUNCTION_SIGNATURE.substitute(name=name, typed_args=typed_args)
