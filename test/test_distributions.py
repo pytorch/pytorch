@@ -708,9 +708,6 @@ class TestDistributions(TestCase):
         df2 = Variable(torch.randn(2, 3).abs(), requires_grad=True)
         df1_1d = torch.randn(1).abs()
         df2_1d = torch.randn(1).abs()
-        # the below two values are required for entropy calculation convergence in scipy for F-distribution
-        df1_int = (1 + torch.randperm(6)).view(2, 3).type(torch.FloatTensor)
-        df2_int = (12 - torch.randperm(6)).view(2, 3).type(torch.FloatTensor)
         self.assertEqual(FisherSnedecor(df1, df2).sample().size(), (2, 3))
         self.assertEqual(FisherSnedecor(df1, df2).sample_n(5).size(), (5, 2, 3))
         self.assertEqual(FisherSnedecor(df1_1d, df2_1d).sample().size(), (1,))
@@ -725,9 +722,8 @@ class TestDistributions(TestCase):
             self.assertAlmostEqual(log_prob, expected, places=3)
 
         self._check_log_prob(FisherSnedecor(df1, df2), ref_log_prob)
-        # The test fails with scipy's implementation, however the formula is correct
-        # self.assertEqual(FisherSnedecor(df1_int, df2_int).entropy(),
-        #                               scipy.stats.f(df1_int.numpy(), df2_int.numpy()).entropy(), prec=1e-03)
+        # The entropy test fails with scipy's implementation, however the formula is correct and is stable
+        # The implementation can be found in the source code for the Fisher-Snedecor distribution
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_fishersnedecor_sample(self):
