@@ -15,7 +15,7 @@ CodeTemplate = import_module('code_template', 'aten/src/ATen/code_template.py').
 # These functions require manual Python bindings or are not exposed to Python
 SKIP_PYTHON_BINDINGS = [
     'alias', 'contiguous', 'clamp.*', 'is_cuda', 'is_sparse', 'size', 'stride',
-    '.*_backward'
+    '.*_backward', '.*_backward_out', '.*_forward', '.*_forward_out',
 ]
 
 PY_VARIABLE_METHODS_CPP = CodeTemplate.from_file(template_path + '/python_variable_methods.cpp')
@@ -111,12 +111,6 @@ def should_generate_python_binding(declaration):
         if arg['type'] == 'SparseTensor' and declaration['name'] != '_sparse_mask':
             return False
 
-    # we don't currently support functions which are only defined on Type
-    # such as zeros(), randn(), etc.
-    method_of = declaration['method_of']
-    if 'Tensor' not in method_of and 'namespace' not in method_of:
-        return False
-
     return True
 
 
@@ -126,10 +120,7 @@ def gen_py_variable_methods(out, declarations):
                 declaration['mode'] != 'NN' and
                 'Tensor' in declaration['method_of'])
 
-    py_variable_methods = defaultdict(list)
-    for declaration in declarations:
-        if should_bind(declaration):
-            py_variable_methods[declaration['name']].append(declaration)
+    py_variable_methods = group_declarations_by_name(declarations, should_bind)
 
     env = create_python_bindings(py_variable_methods, True)
     write(out, 'python_variable_methods.cpp', PY_VARIABLE_METHODS_CPP, env)
@@ -141,10 +132,7 @@ def gen_py_nn_functions(out, declarations):
         return (should_generate_python_binding(declaration) and
                 declaration['mode'] == 'NN')
 
-    py_nn_functions = defaultdict(list)
-    for declaration in declarations:
-        if should_bind(declaration):
-            py_nn_functions[declaration['name']].append(declaration)
+    py_nn_functions = group_declarations_by_name(declarations, should_bind)
 
     env = create_python_bindings(py_nn_functions, has_self=False, is_module=True)
     write(out, 'python_nn_functions.cpp', PY_NN_FUNCTIONS_CPP, env)
@@ -156,20 +144,27 @@ def gen_py_torch_functions(out, declarations):
     def should_bind(declaration):
         return (should_generate_python_binding(declaration) and
                 declaration['mode'] != 'NN' and
-                'namespace' in declaration['method_of'])
+                ('namespace' in declaration['method_of'] or
+                 'Type' in declaration['method_of']))
 
-    py_torch_functions = defaultdict(list)
-    for declaration in declarations:
-        name = declaration['name']
-        if should_bind(declaration):
-            if name.endswith('_out'):
-                py_torch_functions[name[:-4]].append(declaration)
-            else:
-                py_torch_functions[name].append(declaration)
+    py_torch_functions = group_declarations_by_name(declarations, should_bind)
 
     env = create_python_bindings(py_torch_functions, has_self=False)
     write(out, 'python_torch_functions.cpp', PY_TORCH_FUNCTIONS_CPP, env)
     write(out, 'python_torch_functions_dispatch.h', PY_TORCH_DISPATCH_H, env)
+
+
+def group_declarations_by_name(declarations, should_bind_fn):
+    """Group declarations by name ignoring _out suffix"""
+    groups = defaultdict(list)
+    for declaration in declarations:
+        name = declaration['name']
+        if should_bind_fn(declaration):
+            if name.endswith('_out'):
+                groups[name[:-4]].append(declaration)
+            else:
+                groups[name].append(declaration)
+    return groups
 
 
 def create_python_bindings(python_functions, has_self, is_module=False):
@@ -289,8 +284,10 @@ def create_python_bindings(python_functions, has_self, is_module=False):
         if 'Tensor' in declaration['method_of']:
             env['dispatch_args'] = [arg for arg in env['dispatch_args'] if arg != 'self']
             env['dispatch_call'] = 'self.{}'.format(declaration['name'])
-        else:
+        elif 'namespace' in declaration['method_of']:
             env['dispatch_call'] = 'at::{}'.format(declaration['name'])
+        else:
+            env['dispatch_call'] = 'default_type().{}'.format(declaration['name'])
         env['AutoNoGIL'] = 'AutoNoGIL no_gil;'
         env['AutoGPU'] = auto_gpu(declaration)
         env = nested_dict(env, nested_dict(base_env, declaration))
@@ -298,18 +295,17 @@ def create_python_bindings(python_functions, has_self, is_module=False):
         py_method_dispatch.append(PY_VARIABLE_DISPATCH.substitute(env))
         return body
 
-    def emit_dispatch(i, declarations, base_env):
-        if len(declarations) == 1:
-            body = emit_single_dispatch(declarations[0], base_env)
-        else:
-            assert len(declarations) == 2
-            env = {
-                'call_dispatch_out': emit_single_dispatch(declarations[0], base_env),
-                'call_dispatch': emit_single_dispatch(declarations[1], base_env),
-            }
-            out_idx = len([arg for arg in declarations[0]['arguments']
+    def emit_dispatch(i, dictionary, base_env):
+        if 'out' in dictionary:
+            out_idx = len([arg for arg in dictionary['out']['arguments']
                            if not arg.get('output', False)])
+            env = {}
+            env['call_dispatch_out'] = emit_single_dispatch(dictionary['out'], base_env)
+            env['call_dispatch'] = emit_single_dispatch(dictionary['base'], base_env)
             body = PY_VARIABLE_OUT.substitute(env, out_idx=out_idx).split('\n')
+        else:
+            body = emit_single_dispatch(dictionary['base'], base_env)
+
         cond = 'if' if i == 0 else '} else if'
         return PY_VARIABLE_CASE.substitute(i=i, cond=cond, call_dispatch=body)
 
@@ -328,7 +324,8 @@ def create_python_bindings(python_functions, has_self, is_module=False):
             env['unpack_self'] = [UNPACK_SELF]
 
         grouped = group_declarations(declarations)
-        for prototype, decls in grouped:
+        for i, dictionary in enumerate(grouped):
+            prototype = dictionary['prototype']
             if has_self:
                 prototype = prototype.replace('Tensor self, ', '')
                 prototype = prototype.replace('Tensor self', '')
@@ -336,12 +333,11 @@ def create_python_bindings(python_functions, has_self, is_module=False):
                 # Use 'input' instead of 'self' for NN functions
                 prototype = prototype.replace('Tensor self', 'Tensor input')
             prototype = prototype.replace('SparseTensor', 'Tensor')
-            if all('deprecated' in o for o in decls):
+            if dictionary['base'].get('deprecated', False):
                 prototype += '|deprecated'
             env['prototypes'].append('"{}",'.format(prototype))
+            env['dispatch'].append(emit_dispatch(i, dictionary, env))
 
-        for i, (_, decls) in enumerate(grouped):
-            env['dispatch'].append(emit_dispatch(i, decls, env))
         env['dispatch'].append('}')
 
         if len(declarations) == 1 and len(declarations[0]['args']) == 1 and has_self:
@@ -369,19 +365,31 @@ def create_python_bindings(python_functions, has_self, is_module=False):
 
 
 def group_declarations(declarations):
-    grouped = defaultdict(list)
+    """Returns a list of dictionaries containing the optional keys:
+
+       "base": the regular ATen declaration (e.g. conv2d)
+       "out": the out variant (e.g. conv2d_out)
+       "prototype": the signature/prototype used for Python argument parsing
+    """
+    grouped = defaultdict(dict)
 
     # first group by prototype ignoring out arguments
     for declaration in declarations:
-        grouped[get_prototype(declaration, False)].append(declaration)
+        prototype = get_prototype(declaration, False)
+        v = grouped[prototype]
+        if declaration['name'].endswith('_out'):
+            v['out'] = declaration
+            # prefer the prototype with optional out=... arguments
+            v['prototype'] = get_prototype(declaration, True)
+        else:
+            v['base'] = declaration
+            if 'prototype' not in v:
+                v['prototype'] = prototype
 
     result = []
-    for prototype in sorted(grouped.keys()):
-        group = grouped[prototype]
-        assert len(group) <= 2
-        if len(group) == 2:
-            assert group[0]['name'].endswith('_out')
-        result.append((get_prototype(group[0], True), group))
+    for _, dictionary in sorted(grouped.items()):
+        assert 'base' in dictionary
+        result.append(dictionary)
     return result
 
 

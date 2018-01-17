@@ -39,6 +39,7 @@ PyObject* module;
 PyObject* tensor_classes;
 
 PyObject *THPDefaultTensorClass = NULL;
+at::Type *THPDefaultATenType = nullptr;
 THPGenerator *THPDefaultGenerator   = NULL;
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -165,6 +166,7 @@ bool THPModule_isTensor(PyObject *obj)
 PyObject * THPModule_setDefaultTensorType(PyObject *_unused, PyObject *type)
 {
   THPDefaultTensorClass = type;
+  THPDefaultATenType = &torch::getATenType((PyTypeObject*)type);
   Py_RETURN_NONE;
 }
 
