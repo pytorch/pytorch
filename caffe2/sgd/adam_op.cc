@@ -81,7 +81,40 @@ Adam on (param, moment1[indices], momemnt2[indices], lr, iter) and returns
     .Arg("beta2", "Default 0.999")
     .Arg("epsilon", "Default 1e-5");
 
+REGISTER_CPU_OPERATOR(
+    RowWiseSparseAdam,
+    RowWiseSparseAdamOp<float, CPUContext>);
+OPERATOR_SCHEMA(RowWiseSparseAdam)
+    .NumInputs(7)
+    .NumOutputs(3)
+    .EnforceInplace({{0, 0}, {1, 1}, {2, 2}})
+    .SetDoc(R"DOC(
+
+Computes a modified Adam Update for the sparse case.
+Given inputs (param, moment1, moment2, indices, grad, lr, iter), runs the
+Adam update on (param, moment1[indices], moment2[indices], lr, iter) and returns
+(new_param, new_moment1, new_moment2), where moment1 and moment2 are 1D tensors
+with length equal to the number of rows in param: shape(moment1) ==
+shape(moment2) == shape(param)[0]. Each element of moment1 and moment2 is
+applied to an entire row of param, and the new moment1 and moment2 values are
+calculated by averaging across the row.
+
+)DOC")
+    .Input(0, "param", "Parameters to be updated")
+    .Input(1, "moment_1", "First moment history")
+    .Input(2, "moment_2", "Second moment history")
+    .Input(3, "indices", "Sparse indices")
+    .Input(4, "grad", "Gradient computed")
+    .Input(5, "lr", "learning rate")
+    .Input(6, "iter", "iteration number")
+    .Output(0, "output_param", "Updated parameters")
+    .Output(1, "output_moment_1", "Updated first moment")
+    .Output(2, "output_moment_2", "Updated second moment")
+    .Arg("beta1", "Default 0.9")
+    .Arg("beta2", "Default 0.999")
+    .Arg("epsilon", "Default 1e-5");
+
 SHOULD_NOT_DO_GRADIENT(Adam);
 SHOULD_NOT_DO_GRADIENT(SparseAdam);
-
+SHOULD_NOT_DO_GRADIENT(RowWiseSparseAdam);
 }
