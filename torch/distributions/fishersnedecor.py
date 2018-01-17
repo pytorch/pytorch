@@ -60,10 +60,12 @@ class FisherSnedecor(Distribution):
         return t1 + t2 - t3
 
     def entropy(self):
-        ct1 = (self.df1 + self.df2) / 2
-        ct2 = self.df1 / 2
-        ct3 = self.df2 / 2
-        t1 = (self.df1 / self.df2).log() * torch.exp(ct2.lgamma() + ct3.lgamma() - ct1.lgamma())
-        t2 = (1 - ct2) * ct2.digamma() - (1 + ct3) * ct3.digamma()
-        t3 = ct1 * ct1.digamma()
-        return t1 + t2 + t3
+        #  Refer to: http://ieeexplore.ieee.org/stamp/stamp.jsp?tp=&arnumber=1055832
+        ct1 = (self.df1 + self.df2) * 0.5
+        ct2 = self.df1 * 0.5
+        ct3 = self.df2 * 0.5
+        t1 = torch.log(self.df1 / self.df2) + ct2.lgamma() + ct3.lgamma() - ct1.lgamma()
+        t2 = (1 - ct2) * ct2.digamma()
+        t3 = (1 + ct3) * ct3.digamma()
+        t4 = ct1 * ct1.digamma()
+        return t1 + t2 - t3 + t4
