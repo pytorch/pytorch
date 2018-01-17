@@ -592,7 +592,7 @@ class FtrlOptimizer(Optimizer):
 
 class AdamOptimizer(Optimizer):
     def __init__(self, alpha=0.001, beta1=0.9, beta2=0.999, epsilon=1e-8,
-                 policy='fixed', sparse_dedup_aggregator=None,
+                 policy='fixed', sparse_dedup_aggregator=None, rowWise=False,
                  engine='', **kwargs):
         super(AdamOptimizer, self).__init__()
         self.alpha = alpha
@@ -601,6 +601,7 @@ class AdamOptimizer(Optimizer):
         self.epsilon = epsilon
         self.policy = policy
         self.sparse_dedup_aggregator = sparse_dedup_aggregator
+        self.rowWise = rowWise
         self.engine = engine
         self.init_kwargs = kwargs
 
@@ -618,22 +619,49 @@ class AdamOptimizer(Optimizer):
             **(self.init_kwargs)
         )
 
-        m1 = param_init_net.ConstantFill(
-            [param],
-            param + "_first_moment",
-            value=0.0
-        )
-        m2 = param_init_net.ConstantFill(
-            [param],
-            param + "_second_moment",
-            value=0.0
-        )
+        if self.rowWise:
+            shapes, types = workspace.InferShapesAndTypes([param_init_net])
+            m1 = param_init_net.ConstantFill(
+                [],
+                param + "_avg_first_moment",
+                shape=[shapes[param][0]],
+                value=0.0
+            )
+            m2 = param_init_net.ConstantFill(
+                [],
+                param + "_avg_second_moment",
+                shape=[shapes[param][0]],
+                value=0.0
+            )
+
+        else:
+            m1 = param_init_net.ConstantFill(
+                [param],
+                param + "_first_moment",
+                value=0.0
+            )
+            m2 = param_init_net.ConstantFill(
+                [param],
+                param + "_second_moment",
+                value=0.0
+            )
+
         self._aux_params.shared.append(iteration)
         self._aux_params.local.append(m1)
         self._aux_params.local.append(m2)
+
+        if self.rowWise:
+            assert isinstance(grad, core.GradientSlice),\
+                'If SparseAdam with rowWise=True, gradient must be '\
+                'a gradientslice. PLease ensure that rowWise is not enabled '\
+                'for the dense Adam optimizer, as it is not supported.'
         if isinstance(grad, core.GradientSlice):
             grad = self.dedup(net, self.sparse_dedup_aggregator, grad)
-            net.SparseAdam(
+            if self.rowWise:
+                op = 'RowWiseSparseAdam'
+            else:
+                op = 'SparseAdam'
+            net.__getattr__(op)(
                 [param, m1, m2, grad.indices, grad.values, lr, iteration],
                 [param, m1, m2],
                 beta1=self.beta1,
