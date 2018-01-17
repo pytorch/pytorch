@@ -34,15 +34,20 @@ class Bernoulli(Distribution):
         if (probs is None) == (logits is None):
             raise ValueError("Either `probs` or `logits` must be specified, but not both.")
         if probs is not None:
+            is_scalar = isinstance(probs, Number)
             self.probs, = broadcast_all(probs)
         else:
+            is_scalar = isinstance(logits, Number)
             self.logits, = broadcast_all(logits)
-        probs_or_logits = probs if probs is not None else logits
-        if isinstance(probs_or_logits, Number):
+        self._param = self.probs if probs is not None else self.logits
+        if is_scalar:
             batch_shape = torch.Size()
         else:
-            batch_shape = probs_or_logits.size()
+            batch_shape = self._param.size()
         super(Bernoulli, self).__init__(batch_shape)
+
+    def new(self, *args, **kwargs):
+        return self._param.new(*args, **kwargs)
 
     @lazy_property
     def logits(self):
@@ -51,6 +56,10 @@ class Bernoulli(Distribution):
     @lazy_property
     def probs(self):
         return logits_to_probs(self.logits, is_binary=True)
+
+    @property
+    def param_shape(self):
+        return self._param.size()
 
     def sample(self, sample_shape=torch.Size()):
         shape = self._extended_shape(sample_shape)
@@ -68,8 +77,8 @@ class Bernoulli(Distribution):
         values = torch.arange(2)
         values = values.view((-1,) + (1,) * len(self._batch_shape))
         values = values.expand((-1,) + self._batch_shape)
-        if self.probs.is_cuda:
-            values = values.cuda(self.probs.get_device())
-        if isinstance(self.probs, Variable):
+        if self._param.is_cuda:
+            values = values.cuda(self._param.get_device())
+        if isinstance(self._param, Variable):
             values = Variable(values)
         return values

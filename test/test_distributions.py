@@ -36,7 +36,7 @@ from torch.distributions import (Bernoulli, Beta, Binomial, Categorical, Cauchy,
                                  StudentT, Uniform, kl_divergence)
 from torch.distributions.dirichlet import _Dirichlet_backward
 from torch.distributions.constraints import Constraint, is_dependent
-from torch.distributions.utils import _finfo, probs_to_logits, logits_to_probs
+from torch.distributions.utils import _finfo, probs_to_logits
 
 TEST_NUMPY = True
 try:
@@ -1778,6 +1778,47 @@ class TestNumericalStability(TestCase):
             self.assertEqual(log_pdf_prob_1.data[0], 0)
             log_pdf_prob_0 = multinomial.log_prob(Variable(tensor_type([10, 0])))
             self.assertEqual(log_pdf_prob_0.data[0], -float('inf'), allow_inf=True)
+
+
+class TestLazyLogitsInitialization(TestCase):
+    def setUp(self):
+        self.examples = [e for e in EXAMPLES if e.Dist in
+                         (Categorical, OneHotCategorical, Bernoulli, Binomial, Multinomial)]
+
+    def test_lazy_logits_initialization(self):
+        for Dist, params in self.examples:
+            param = params[0]
+            if 'probs' in param:
+                probs = param.pop('probs')
+                param['logits'] = probs_to_logits(probs)
+                dist = Dist(**param)
+                shape = (1,) if not dist.event_shape else dist.event_shape
+                dist.log_prob(Variable(torch.ones(shape)))
+                message = 'Failed for {} example 0/{}'.format(Dist.__name__, len(params))
+                self.assertFalse('probs' in vars(dist), msg=message)
+                try:
+                    dist.enumerate_support()
+                except NotImplementedError:
+                    pass
+                self.assertFalse('probs' in vars(dist), msg=message)
+                batch_shape, event_shape = dist.batch_shape, dist.event_shape
+                self.assertFalse('probs' in vars(dist), msg=message)
+
+    def test_lazy_probs_initialization(self):
+        for Dist, params in self.examples:
+            param = params[0]
+            if 'probs' in param:
+                dist = Dist(**param)
+                dist.sample()
+                message = 'Failed for {} example 0/{}'.format(Dist.__name__, len(params))
+                self.assertFalse('logits' in vars(dist), msg=message)
+                try:
+                    dist.enumerate_support()
+                except NotImplementedError:
+                    pass
+                self.assertFalse('logits' in vars(dist), msg=message)
+                batch_shape, event_shape = dist.batch_shape, dist.event_shape
+                self.assertFalse('logits' in vars(dist), msg=message)
 
 
 if __name__ == '__main__':
