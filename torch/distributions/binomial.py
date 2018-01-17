@@ -41,16 +41,21 @@ class Binomial(Distribution):
         if (probs is None) == (logits is None):
             raise ValueError("Either `probs` or `logits` must be specified, but not both.")
         if probs is not None:
+            is_scalar = isinstance(probs, Number)
             self.probs, = broadcast_all(probs)
         else:
+            is_scalar = isinstance(logits, Number)
             self.logits, = broadcast_all(logits)
 
-        probs_or_logits = probs if probs is not None else logits
-        if isinstance(probs_or_logits, Number):
+        self._param = self.probs if probs is not None else self.logits
+        if is_scalar:
             batch_shape = torch.Size()
         else:
-            batch_shape = probs_or_logits.size()
+            batch_shape = self._param.size()
         super(Binomial, self).__init__(batch_shape)
+
+    def _new(self, *args, **kwargs):
+        return self._param.new(*args, **kwargs)
 
     @constraints.dependent_property
     def support(self):
@@ -64,25 +69,28 @@ class Binomial(Distribution):
     def probs(self):
         return logits_to_probs(self.logits, is_binary=True)
 
+    @property
+    def param_shape(self):
+        return self._param.size()
+
     def sample(self, sample_shape=torch.Size()):
         shape = self._extended_shape(sample_shape) + (self.total_count,)
         return torch.bernoulli(self.probs.unsqueeze(-1).expand(shape)).sum(dim=-1)
 
     def log_prob(self, value):
         self._validate_log_prob_arg(value)
-        probs = clamp_probs(self.probs)
         log_factorial_n = math.lgamma(self.total_count + 1)
         log_factorial_k = torch.lgamma(value + 1)
         log_factorial_nmk = torch.lgamma(self.total_count - value + 1)
+        max_val = (-self.logits).clamp(min=0.0)
+        # Note that: torch.log1p(-self.probs)) = max_val - torch.log1p((self.logits + 2 * max_val).exp()))
         return (log_factorial_n - log_factorial_k - log_factorial_nmk +
-                value * self.logits + self.total_count * torch.log1p(-probs))
+                value * self.logits + self.total_count * max_val -
+                self.total_count * torch.log1p((self.logits + 2 * max_val).exp()))
 
     def enumerate_support(self):
-        values = torch.arange(self.total_count)
+        values = self._new((self.total_count,))
+        torch.arange(self.total_count, out=values.data if isinstance(values, Variable) else values)
         values = values.view((-1,) + (1,) * len(self._batch_shape))
         values = values.expand((-1,) + self._batch_shape)
-        if self.probs.is_cuda:
-            values = values.cuda(self.probs.get_device())
-        if isinstance(self.probs, Variable):
-            values = Variable(values)
         return values
