@@ -3254,6 +3254,9 @@ class TestNN(NNTestCase):
 
         self.assertEqual(nn.BCEWithLogitsLoss()(output, target), nn.BCELoss()(sigmoid(output), target))
 
+        self.assertEqual(nn.BCEWithLogitsLoss(reduce=False)(output, target),
+                         nn.BCELoss(reduce=False)(sigmoid(output), target))
+
         weight = torch.FloatTensor(1).uniform_()
         self.assertEqual(nn.BCEWithLogitsLoss(weight)(output, target), nn.BCELoss(weight)(sigmoid(output), target))
 
@@ -4341,6 +4344,7 @@ def bceloss_weights_no_reduce_test():
         reference_fn=lambda i, m: -(t * i.log() + (1 - t) * (1 - i).log()) * weights,
         check_gradgrad=False,
         pickle=False)
+
 
 def bce_with_logistic_no_reduce_test():
     t = torch.randn(15, 10).gt(0).double()
