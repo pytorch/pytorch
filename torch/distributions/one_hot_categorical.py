@@ -61,12 +61,7 @@ class OneHotCategorical(Distribution):
 
     def enumerate_support(self):
         n = self.event_shape[0]
-        out = self._categorical.new((n, n))
-        if isinstance(out, Variable):
-            values = Variable(torch.eye(n, out=out.data))
-        else:
-            values = torch.eye(n, out=out)
-        if out.is_cuda:
-            values = values.cuda(out.get_device())
+        values = self._categorical.new((n, n))
+        torch.eye(n, out=values.data if isinstance(values, Variable) else values)
         values = values.view((n,) + (1,) * len(self.batch_shape) + (n,))
         return values.expand((n,) + self.batch_shape + (n,))

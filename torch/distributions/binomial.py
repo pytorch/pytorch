@@ -88,11 +88,8 @@ class Binomial(Distribution):
                 self.total_count * torch.log1p((self.logits + 2 * max_val).exp()))
 
     def enumerate_support(self):
-        values = torch.arange(self.total_count)
+        values = self.new((self.total_count,))
+        torch.arange(self.total_count, out=values.data if isinstance(values, Variable) else values)
         values = values.view((-1,) + (1,) * len(self._batch_shape))
         values = values.expand((-1,) + self._batch_shape)
-        if self._param.is_cuda:
-            values = values.cuda(self._param.get_device())
-        if isinstance(self._param, Variable):
-            values = Variable(values)
         return values

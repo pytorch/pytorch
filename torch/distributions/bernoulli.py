@@ -74,11 +74,8 @@ class Bernoulli(Distribution):
         return binary_cross_entropy_with_logits(self.logits, self.probs, reduce=False)
 
     def enumerate_support(self):
-        values = torch.arange(2)
+        values = self.new((2,))
+        torch.arange(2, out=values.data if isinstance(values, Variable) else values)
         values = values.view((-1,) + (1,) * len(self._batch_shape))
         values = values.expand((-1,) + self._batch_shape)
-        if self._param.is_cuda:
-            values = values.cuda(self._param.get_device())
-        if isinstance(self._param, Variable):
-            values = Variable(values)
         return values
