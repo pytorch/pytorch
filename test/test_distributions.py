@@ -1583,16 +1583,14 @@ class TestKL(TestCase):
             actual = kl_divergence(p, q)
             message = 'Incorrect KL({}, {}).\nExpected (Monte Carlo): {}\nActual (analytic): {}'.format(
                     type(p).__name__, type(q).__name__, expected, actual)
-            try:
-                self.assertEqual(expected, actual, prec=self.precision, message=message)
-            except:
+            if torch.abs(actual - expected).max() > self.precision:
                 for sample_extra in self.sampling_extra:
                     x = torch.cat([x, p.sample(sample_shape=(sample_extra,))], 0)
                     expected = (p.log_prob(x) - q.log_prob(x)).mean(0)
                     actual = kl_divergence(p, q)
                     if torch.abs(actual - expected).max() < self.precision:
                         break
-                self.assertEqual(expected, actual, prec=self.precision, message=message)
+            self.assertEqual(expected, actual, prec=self.precision, message=message)
 
     def test_kl_infinite(self):
         for p, q in self.infinite_examples:

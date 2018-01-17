@@ -176,9 +176,8 @@ def _kl_dirichlet_dirichlet(p, q):
     sum_q_alpha = q.alpha.sum(-1).expand_as(q.alpha)
     t1 = sum_p_alpha.lgamma() - p.alpha.lgamma().sum(-1)
     t2 = sum_q_alpha.lgamma() - q.alpha.lgamma().sum(-1)
-    t3 = ((p.alpha - q.alpha) * p.alpha.digamma()).sum(-1)
-    t4 = sum_p_alpha * (p.alpha - q.alpha).sum(-1)
-    return t1 - t2 + t3 - t4
+    t3 = (p.alpha - q.alpha) * (p.alpha.digamma() - sum_p_alpha.digamma().unsqueeze(-1))
+    return t1 - t2 + t3.sum(-1)
 
 
 @register_kl(Exponential, Exponential)
