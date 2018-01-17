@@ -3,8 +3,7 @@ import torch
 import math
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
-from torch.distributions import Beta, Chi2
-from torch.distributions.gamma import _standard_gamma, Gamma
+from torch.distributions.gamma import Gamma
 from torch.distributions.utils import broadcast_all, _finfo
 
 
@@ -58,14 +57,3 @@ class FisherSnedecor(Distribution):
         t2 = ct1 * ct3.log() + (ct1 - 1) * torch.log(value)
         t3 = (ct1 + ct2) * torch.log1p(ct3 * value)
         return t1 + t2 - t3
-
-    def entropy(self):
-        #  Refer to: http://ieeexplore.ieee.org/stamp/stamp.jsp?tp=&arnumber=1055832
-        ct1 = (self.df1 + self.df2) * 0.5
-        ct2 = self.df1 * 0.5
-        ct3 = self.df2 * 0.5
-        t1 = torch.log(self.df1 / self.df2) + ct2.lgamma() + ct3.lgamma() - ct1.lgamma()
-        t2 = (1 - ct2) * ct2.digamma()
-        t3 = (1 + ct3) * ct3.digamma()
-        t4 = ct1 * ct1.digamma()
-        return t1 + t2 - t3 + t4

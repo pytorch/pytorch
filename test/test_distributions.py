@@ -722,8 +722,6 @@ class TestDistributions(TestCase):
             self.assertAlmostEqual(log_prob, expected, places=3)
 
         self._check_log_prob(FisherSnedecor(df1, df2), ref_log_prob)
-        # The entropy test fails with scipy's implementation, however the formula is correct and is stable
-        # The implementation can be found in the source code for the Fisher-Snedecor distribution
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_fishersnedecor_sample(self):
