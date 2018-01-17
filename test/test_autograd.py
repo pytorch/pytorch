@@ -983,7 +983,8 @@ class TestAutograd(TestCase):
         x = Variable(torch.ones(*size), requires_grad=True)
         y = x + 2
         y_version = y._version
-        value = Variable(torch.Tensor(x[index].size()).fill_(7), requires_grad=True)
+        value = x.new(x[index].size()).fill_(7)
+        value.requires_grad = True
         y[index] = value
         self.assertNotEqual(y._version, y_version)
         y.backward(torch.ones(*size))
@@ -1004,7 +1005,7 @@ class TestAutograd(TestCase):
 
         expected_grad_input[index] = 0
         self.assertEqual(x.grad.data, expected_grad_input)
-        self.assertEqual(value.grad.data, torch.ones(value.size()))
+        self.assertEqual(value.grad.data, torch.ones(value.data.size()))
 
         # case when x broadcasts to as y[1]
         x = Variable(torch.randn(4), requires_grad=True)
@@ -1027,6 +1028,7 @@ class TestAutograd(TestCase):
         self._test_setitem_tensor((5, 5), 3)
         self._test_setitem_tensor((5, 5), [[0, 1], [1, 0]])
         self._test_setitem_tensor((5,), 3)
+        self._test_setitem_tensor((5,), Variable(torch.LongTensor([3]), requires_grad=False).sum())
         self._test_setitem_tensor((5,), [[0, 1, 2, 3]])
         self._test_setitem_tensor((5, 5, 5), [slice(None), slice(None), [1, 3]])
         self._test_setitem_tensor((5, 5, 5), [slice(None), [1, 3], slice(None)])
@@ -2355,6 +2357,8 @@ method_tests = [
 
 
 def make_non_contiguous(tensor):
+    if tensor.numel() <= 1:  # can't make non-contiguous
+        return tensor.new(tensor.size())
     osize = list(tensor.size())
 
     # randomly inflate a few dimensions in osize
@@ -2389,6 +2393,10 @@ def create_input(call_args, requires_grad=True, non_contiguous=False):
 
         if isinstance(arg, torch.Size) or isinstance(arg, dont_convert):
             return arg
+        elif isinstance(arg, tuple) and len(arg) == 0:
+            # FixMe: maybe use 'torch.randn()' or similar when we have scalar factories
+            var = Variable(torch.randn(1).double(), requires_grad=requires_grad)._scalar_sum()
+            return var
         elif isinstance(arg, tuple) and not isinstance(arg[0], Variable):
             return Variable(maybe_non_contig(torch.randn(*arg).double()), requires_grad=requires_grad)
         elif torch.is_tensor(arg):
@@ -2415,14 +2423,16 @@ def unpack_variables(args):
 
 
 def generate_gradoutput(dummy_out, non_contiguous=False):
-    def maybe_non_contig(tensor):
-        return tensor if not non_contiguous else make_non_contiguous(tensor)
+    def maybe_non_contig(tensor, requires_grad):
+        ret = make_non_contiguous(tensor) if non_contiguous else tensor.new(tensor.size())
+        ret.requires_grad = requires_grad
+        return ret
 
     if isinstance(dummy_out, tuple):
-        grad_y = tuple(Variable(maybe_non_contig(torch.randn(x.size())), requires_grad=x.requires_grad)
+        grad_y = tuple(maybe_non_contig(x.double().randn_like(), x.requires_grad)
                        for x in dummy_out if isinstance(x, Variable))
     else:
-        grad_y = (Variable(maybe_non_contig(torch.randn(dummy_out.size())), requires_grad=dummy_out.requires_grad),)
+        grad_y = (maybe_non_contig(dummy_out.double().randn_like(), dummy_out.requires_grad),)
 
     return grad_y
 
@@ -2458,7 +2468,9 @@ def exclude_tensor_method(name, test_name):
         'test_clamp_max',
         'test_slice',
         'test_where',
-        'test_where_broadcast_all'
+        'test_where_broadcast_all',
+        'test__scalar_sum_scalar_arg',
+        'test__scalar_sum_tensor_arg',
     }
     # there are no out-of-place tensor equivalents for these
     exclude_outplace_tensor_method = {
@@ -2533,7 +2545,7 @@ def run_functional_checks(test_case, test_name, name, apply_fn, run_grad_checks,
 
     self_variable = f_args_variable[0]
     if isinstance(output_variable, torch.autograd.Variable) and self_variable is not None:
-        output_variable.backward(torch.randn(*output_variable.size()).type_as(output_variable.data))
+        output_variable.backward(output_variable.randn_like())
         test_case.assertTrue(type(self_variable.data) == type(self_variable.grad.data))
         test_case.assertTrue(self_variable.size() == self_variable.grad.size())
 
@@ -2591,7 +2603,7 @@ for test in method_tests:
                     args_variable = create_input(args, requires_grad=False)
                     output_variable = getattr(self_variable, name)(*args_variable)
                     if isinstance(output_variable, torch.autograd.Variable):
-                        output_variable.backward(torch.randn(*output_variable.size()).type_as(output_variable.data))
+                        output_variable.backward(output_variable.randn_like())
                         self.assertTrue(type(self_variable.data) == type(self_variable.grad.data))
                         self.assertTrue(self_variable.size() == self_variable.grad.size())
 
@@ -2628,7 +2640,7 @@ for test in method_tests:
                             if i.grad is not None:
                                 i.grad.data.zero_()
                         for io, o in zip(inplace_output_variable, output_variable):
-                            grad = torch.randn(*io.size()).double()
+                            grad = io.randn_like().double()
                             io.backward(grad)
                             o.backward(grad)
                         for inp_i, i in zip((inplace_self_variable,) + inplace_args_variable,

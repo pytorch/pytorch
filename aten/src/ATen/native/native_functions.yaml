@@ -227,6 +227,8 @@
 
 - func: pin_memory(Tensor self) -> Tensor
 
+- func: randn_like(Tensor self) -> Tensor
+
 - func: RoiPooling2d_forward(Tensor input, Tensor rois, int64_t pooledHeight, int64_t pooledWidth, double spatialScale) -> (Tensor, Tensor)
   variants: function
   dispatch:
