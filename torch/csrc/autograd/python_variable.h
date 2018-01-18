@@ -7,7 +7,7 @@
 #include "torch/csrc/autograd/variable.h"
 
 // Python object that backs torch.autograd.Variable
-struct THPVariable {
+struct THP_CLASS THPVariable {
     PyObject_HEAD
     // Payload
     torch::autograd::Variable cdata;
