@@ -5,6 +5,7 @@
 #include <ATen/ATen.h>
 
 #include "torch/csrc/autograd/variable.h"
+#include "torch/csrc/THP_export.h"
 
 // Python object that backs torch.autograd.Variable
 struct THP_CLASS THPVariable {
