@@ -30,6 +30,7 @@ from itertools import product
 import torch
 from common import TestCase, run_tests, set_rng_seed
 from torch.autograd import Variable, grad, gradcheck
+from torch.distributions import Distribution
 from torch.distributions import (Bernoulli, Beta, Binomial, Categorical, Cauchy, Chi2,
                                  Dirichlet, Exponential, FisherSnedecor, Gamma, Gumbel,
                                  Laplace, Normal, OneHotCategorical, Multinomial, Pareto,
@@ -108,6 +109,16 @@ EXAMPLES = [
             'concentration': Variable(torch.exp(torch.randn(1)), requires_grad=True),
             'rate': Variable(torch.exp(torch.randn(1)), requires_grad=True),
         },
+    ]),
+    Example(FisherSnedecor, [
+        {
+            'df1': Variable(torch.randn(5, 5).abs(), requires_grad=True),
+            'df2': Variable(torch.randn(5, 5).abs(), requires_grad=True),
+        },
+        {
+            'df1': Variable(torch.randn(1).abs(), requires_grad=True),
+            'df2': Variable(torch.randn(1).abs(), requires_grad=True),
+        }
     ]),
     Example(Gumbel, [
         {
@@ -261,6 +272,13 @@ class TestDistributions(TestCase):
                                          'sample and enumerate_support.').format(Dist.__name__, i, len(params)))
                 except NotImplementedError:
                     pass
+
+    def test_has_examples(self):
+        distributions_with_examples = set(e.Dist for e in EXAMPLES)
+        for Dist in globals().values():
+            if isinstance(Dist, type) and issubclass(Dist, Distribution) and Dist is not Distribution:
+                self.assertIn(Dist, distributions_with_examples,
+                              "Please add {} to the EXAMPLES list in test_distributions.py".format(Dist.__name__))
 
     def test_bernoulli(self):
         p = Variable(torch.Tensor([0.7, 0.2, 0.4]), requires_grad=True)
@@ -912,6 +930,18 @@ class TestDistributions(TestCase):
              (1, 2)),
             (Normal(loc=torch.Tensor([0]), scale=torch.Tensor([[1]])),
              (1, 1)),
+            (FisherSnedecor(df1=torch.Tensor([1, 1]), df2=1),
+             (2,)),
+            (FisherSnedecor(df1=1, df2=torch.Tensor([1, 1])),
+             (2,)),
+            (FisherSnedecor(df1=torch.Tensor([1, 1]), df2=torch.Tensor([1])),
+             (2,)),
+            (FisherSnedecor(df1=torch.Tensor([1, 1]), df2=torch.Tensor([[1], [1]])),
+             (2, 2)),
+            (FisherSnedecor(df1=torch.Tensor([1, 1]), df2=torch.Tensor([[1]])),
+             (1, 2)),
+            (FisherSnedecor(df1=torch.Tensor([1]), df2=torch.Tensor([[1]])),
+             (1, 1)),
             (Gamma(concentration=torch.Tensor([1, 1]), rate=1),
              (2,)),
             (Gamma(concentration=1, rate=torch.Tensor([1, 1])),
@@ -991,6 +1021,10 @@ class TestDistributions(TestCase):
                 'loc': torch.Tensor([[[0, 0, 0], [0, 0, 0]]]),
                 'scale': torch.Tensor([1, 1])
             }),
+            (FisherSnedecor, {
+                'df1': torch.Tensor([1, 1]),
+                'df2': torch.Tensor([1, 1, 1]),
+            })
             (Gumbel, {
                 'loc': torch.Tensor([[0, 0]]),
                 'scale': torch.Tensor([1, 1, 1, 1])
@@ -1006,10 +1040,6 @@ class TestDistributions(TestCase):
             (Laplace, {
                 'loc': torch.Tensor([0, 0]),
                 'scale': torch.Tensor([1, 1, 1])
-            }),
-            (Pareto, {
-                'scale': torch.Tensor([1, 1]),
-                'alpha': torch.Tensor([1, 1, 1])
             }),
             (Pareto, {
                 'scale': torch.Tensor([1, 1]),
