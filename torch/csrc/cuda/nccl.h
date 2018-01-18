@@ -10,6 +10,14 @@ namespace torch { namespace cuda { namespace nccl {
 // Don't use them outside of these files.
 namespace detail {
 
+void throw_nccl_error(ncclResult_t status);
+
+static inline void CHECK(ncclResult_t status) {
+  if (status != ncclSuccess) {
+    throw_nccl_error(status);
+  }
+}
+
 struct AutoNcclGroup {
   AutoNcclGroup() {
 #if defined(NCCL_MAJOR) && (NCCL_MAJOR >= 2)
