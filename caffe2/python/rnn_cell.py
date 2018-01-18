@@ -234,6 +234,79 @@ class LSTMInitializer(object):
         ]
 
 
+# based on http://pytorch.org/docs/master/nn.html#torch.nn.RNNCell
+class BasicRNNCell(RNNCell):
+    def __init__(
+        self,
+        input_size,
+        hidden_size,
+        activation,
+        forget_bias,
+        memory_optimization,
+        drop_states=False,
+        initializer=None,
+        **kwargs
+    ):
+        super(BasicRNNCell, self).__init__(**kwargs)
+        self.input_size = input_size
+        self.hidden_size = hidden_size
+        self.activation = activation
+
+        if self.activation not in ['relu', 'tanh']:
+            raise RuntimeError(
+                'BasicRNNCell with unknown activation function (%s)'
+                % self.activation)
+
+    def _apply(
+        self,
+        model,
+        input_t,
+        seq_lengths,
+        states,
+        timestep,
+        extra_inputs=None,
+    ):
+        hidden_t_prev = states[0]
+
+        gates_t = self.scope('gates_t')
+        hidden_t = self.scope('hidden_t')
+
+        brew.fc(
+            model,
+            hidden_t_prev,
+            gates_t,
+            dim_in=self.hidden_size,
+            dim_out=self.hidden_size,
+            axis=2,
+        )
+        brew.sum(model, [gates_t, input_t], gates_t)
+        if self.activation == 'tanh':
+            model.net.Tanh(gates_t, hidden_t)
+        elif self.activation == 'relu':
+            model.net.Relu(gates_t, hidden_t)
+        else:
+            raise RuntimeError(
+                'BasicRNNCell with unknown activation function (%s)'
+                % self.activation)
+        return (hidden_t,)
+
+    def prepare_input(self, model, input_blob):
+        return brew.fc(
+            model,
+            input_blob,
+            self.scope('i2h'),
+            dim_in=self.input_size,
+            dim_out=self.hidden_size,
+            axis=2,
+        )
+
+    def get_state_names(self):
+        return (self.scope('hidden_t'),)
+
+    def get_output_dim(self):
+        return self.hidden_size
+
+
 class LSTMCell(RNNCell):
 
     def __init__(
@@ -1405,6 +1478,7 @@ def _LSTM(
 
 
 LSTM = functools.partial(_LSTM, LSTMCell)
+BasicRNN = functools.partial(_LSTM, BasicRNNCell)
 MILSTM = functools.partial(_LSTM, MILSTMCell)
 LayerNormLSTM = functools.partial(_LSTM, LayerNormLSTMCell)
 LayerNormMILSTM = functools.partial(_LSTM, LayerNormMILSTMCell)
