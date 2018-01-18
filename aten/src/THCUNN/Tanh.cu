@@ -23,9 +23,9 @@ struct tanh_updateGradInput_functor<half>
     const half out_square = __hmul(*output, *output);
     *gradInput = __hmul(*gradOutput, __hadd(one, __hneg(out_square)));
 #else
-    const float out = __half2float(*output);
-    const float go = __half2float(*gradOutput);
-    *gradInput = __float2half(go * (1.f - out * out));
+    const float out = ScalarConvert<half, float>::to(*output);
+    const float go = ScalarConvert<half, float>::to(*gradOutput);
+    *gradInput = ScalarConvert<float, half>::to(go * (1.f - out * out));
 #endif
   }
 };

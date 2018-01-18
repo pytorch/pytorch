@@ -54,10 +54,10 @@ struct logSigmoid_updateOutput_functor<half> {
     const half z = THCNumerics<half>::exp(__hneg(max)) + THCNumerics<half>::exp(__hneg(*input) - max);
     *output = __hneg(max + THCNumerics<half>::log(z));
 #else
-    float in = __half2float(*input);
+    float in = ScalarConvert<half, float>::to(*input);
     float max = fmaxType(0.f, -in);
     float z = THCNumerics<float>::exp(-max) + THCNumerics<float>::exp(-in - max);
-    *output = __float2half(-(max + THCNumerics<float>::log(z)));
+    *output = ScalarConvert<float, half>::to(-(max + THCNumerics<float>::log(z)));
 #endif
   }
 };
@@ -78,17 +78,17 @@ struct logSigmoid_updateGradInput_functor<half> {
     }
     *gradInput = __hmul(*gradOutput, (__hneg(max_deriv) - __hmul(sign, __hdiv(z - one, z))));
 #else
-    const float in = __half2float(*input);
+    const float in = ScalarConvert<half, float>::to(*input);
     const float max = fmaxType(0.f, -in);
     const float z = THCNumerics<float>::exp(-max) + THCNumerics<float>::exp(-in - max);
-    const float go = __half2float(*gradOutput);
+    const float go = ScalarConvert<half, float>::to(*gradOutput);
     float max_deriv = 0.f;
     float sign = -1.f;
     if(in < 0.f){
         max_deriv = -1.f;
         sign = 1.f;
     }
-    *gradInput = __float2half(go * (-max_deriv - sign*((z - 1.f)/z)));
+    *gradInput = ScalarConvert<float, half>::to(go * (-max_deriv - sign*((z - 1.f)/z)));
 #endif
   }
 };
