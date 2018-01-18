@@ -175,6 +175,29 @@ class TestDistributions(TestCase):
 
         self._check_log_prob(LogNormal(mean, std), ref_log_prob)
 
+    def test_entropy_monte_carlo(self):
+        set_rng_seed(0)  # see Note [Randomized statistical tests]
+        for Dist, params in EXAMPLES:
+            for i, param in enumerate(params):
+                dist = Dist(**param)
+                try:
+                    actual = dist.entropy()
+                except NotImplementedError:
+                    continue
+                x = dist.sample(sample_shape=(20000,))
+                expected = -dist.log_prob(x).mean(0)
+                if isinstance(actual, Variable):
+                    actual = actual.data
+                    expected = expected.data
+                ignore = (expected == float('inf'))
+                expected[ignore] = actual[ignore]
+                self.assertEqual(actual, expected, prec=0.2, message='\n'.join([
+                    '{} example {}/{}, incorrect .entropy().'.format(Dist.__name__, i, len(params)),
+                    'Expected (monte carlo) {}'.format(expected),
+                    'Actual (analytic) {}'.format(actual),
+                    'max error = {}'.format(torch.abs(actual - expected).max()),
+                ]))
+
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_lognormal_sample(self):
         set_rng_seed(0)  # see Note [Randomized statistical tests]
@@ -183,7 +206,7 @@ class TestDistributions(TestCase):
                                         scipy.stats.lognorm(scale=math.exp(mean), s=std),
                                         'LogNormal(loc={}, scale={})'.format(mean, std))
 
-    def test_normal(self):
+    def test_normal_no_bijectors(self):
         mean = Variable(torch.randn(5, 5), requires_grad=True)
         std = Variable(torch.randn(5, 5).abs(), requires_grad=True)
         mean_1d = Variable(torch.randn(1), requires_grad=True)
@@ -201,29 +224,29 @@ class TestDistributions(TestCase):
 
         # sample check for extreme value of mean, std
         set_rng_seed(1)
-        self.assertEqual(LogNormal(mean_delta, std_delta).sample(sample_shape=(1, 2)),
-                         torch.Tensor([[[math.exp(1), 1.0], [math.exp(1), 1.0]]]),
+        self.assertEqual(TransformedDistribution(Normal(mean_delta, std_delta)).sample(sample_shape=(1, 2)),
+                         torch.Tensor([[[1.0, 0.0], [1.0, 0.0]]]),
                          prec=1e-4)
 
-        self._gradcheck_log_prob(LogNormal, (mean, std))
-        self._gradcheck_log_prob(LogNormal, (mean, 1.0))
-        self._gradcheck_log_prob(LogNormal, (0.0, std))
+        self._gradcheck_log_prob(lambda x, y: TransformedDistribution(Normal(x, y)), (mean, std))
+        self._gradcheck_log_prob(lambda x, y: TransformedDistribution(Normal(x, y)), (mean, 1.0))
+        self._gradcheck_log_prob(lambda x, y: TransformedDistribution(Normal(x, y)), (0.0, std))
 
         def ref_log_prob(idx, x, log_prob):
             m = mean.data.view(-1)[idx]
             s = std.data.view(-1)[idx]
-            expected = scipy.stats.lognorm(s=s, scale=math.exp(m)).logpdf(x)
+            expected = scipy.stats.norm(loc=m, scale=s).logpdf(x)
             self.assertAlmostEqual(log_prob, expected, places=3)
 
-        self._check_log_prob(LogNormal(mean, std), ref_log_prob)
+        self._check_log_prob(TransformedDistribution(Normal(mean, std)), ref_log_prob)
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_normal_sample(self):
         set_rng_seed(0)  # see Note [Randomized statistical tests]
         for mean, std in product([-1.0, 0.0, 1.0], [0.1, 1.0, 10.0]):
-            self._check_sampler_sampler(LogNormal(mean, std),
-                                        scipy.stats.lognorm(scale=math.exp(mean), s=std),
-                                        'LogNormal(loc={}, scale={})'.format(mean, std))
+            self._check_sampler_sampler(TransformedDistribution(Normal(mean, std)),
+                                        scipy.stats.norm(loc=mean, scale=std),
+                                        'TransformedDistribution(Normal(loc={}, scale={}))'.format(mean, std))
 
 
 class TestConstraints(TestCase):

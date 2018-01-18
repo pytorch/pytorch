@@ -19,8 +19,8 @@ class LogNormal(TransformedDistribution):
         [torch.FloatTensor of size 1]
 
     Args:
-        mean (float or Tensor or Variable): mean of log of distribution
-        std (float or Tensor or Variable): standard deviation of log ofthe distribution
+        loc (float or Tensor or Variable): mean of log of distribution
+        scale (float or Tensor or Variable): standard deviation of log ofthe distribution
     """
     params = {'loc': constraints.real, 'scale': constraints.positive}
     support = constraints.positive
@@ -28,3 +28,14 @@ class LogNormal(TransformedDistribution):
 
     def __init__(self, loc, scale):
         super(LogNormal, self).__init__(Normal(loc, scale), ExpBijector())
+
+    @property
+    def loc(self):
+        return self.base_dist.loc
+
+    @property
+    def scale(self):
+        return self.base_dist.scale
+
+    def entropy(self):
+        return self.base_dist.entropy() + self.loc
