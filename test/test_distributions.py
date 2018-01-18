@@ -27,8 +27,6 @@ import unittest
 from collections import namedtuple
 from itertools import product
 
-import sys
-del sys.path[sys.path.index('/media/vishwak/Official/Projects/pytorch')]
 import torch
 from common import TestCase, run_tests, set_rng_seed
 from torch.autograd import Variable, grad, gradcheck
@@ -1477,10 +1475,12 @@ class TestKL(TestCase):
         gumbel = pairwise(Gumbel, [-2.0, 4.0, -3.0, 6.0], [1.0, 2.5, 1.0, 2.5])
         laplace = pairwise(Laplace, [-2.0, 4.0, -3.0, 6.0], [1.0, 2.5, 1.0, 2.5])
         normal = pairwise(Normal, [-2.0, 4.0, -3.0, 6.0], [1.0, 2.5, 1.0, 2.5])
-        pareto = pairwise(Pareto, [1.0, 2.5, 1.0, 2.5], [1.5, 1.5, 3.5, 3.5])
+        pareto = pairwise(Pareto, [2.5, 4.0, 2.5, 4.0], [3.0, 7.0, 3.0, 7.0])
         uniform_interval = pairwise(Uniform, [0, 0, 0.4, 0.8], [1, 0.2, 0.6, 1])
+        uniform_within_unit = pairwise(Uniform, [0.15, 0.95, 0.2, 0.8], [0.1, 0.9, 0.25, 0.75])
         uniform_positive = pairwise(Uniform, [1, 1.5, 2, 4], [1.2, 2.0, 3, 7])
         uniform_real = pairwise(Uniform, [-2, -1, 0, 2], [-1, 1, 1, 4])
+        uniform_pareto = pairwise(Uniform, [2.5, 7.5, 2.5, 7.5], [3.0, 6.0, 3.0, 6.0])
         dirichlet = pairwise(Dirichlet, [[0.1, 0.2, 0.7],
                                          [0.5, 0.4, 0.1],
                                          [0.33, 0.33, 0.34],
@@ -1503,7 +1503,7 @@ class TestKL(TestCase):
             (chi2, chi2),
             (chi2, exponential),
             (chi2, gamma),
-#            (dirichlet, dirichlet),  Fails
+            (dirichlet, dirichlet),
             (exponential, chi2),
             (exponential, exponential),
             (exponential, gamma),
@@ -1518,19 +1518,18 @@ class TestKL(TestCase):
             (laplace, laplace),
             (laplace, normal),
             (normal, gumbel),
-#           (normal, normal),  Fails
-#            (pareto, chi2),  Fails
-#            (pareto, exponential),  Fails
-#            (pareto, gamma),  Fails
-            (pareto, laplace),
+            (normal, normal),
+            (pareto, chi2),
+            (pareto, exponential),
+            (pareto, gamma),
             (pareto, normal),
-            (uniform_interval, beta),
+            (uniform_within_unit, beta),
             (uniform_positive, chi2),
             (uniform_positive, exponential),
             (uniform_positive, gamma),
             (uniform_real, gumbel),
             (uniform_real, normal),
-            (uniform_positive, pareto),
+            (uniform_pareto, pareto),
         ]
 
         self.infinite_examples = [

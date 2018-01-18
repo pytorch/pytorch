@@ -224,7 +224,7 @@ def _kl_normal_normal(p, q):
     t1 = -std_dev_ratio.log()
     t2 = std_dev_ratio.pow(2)
     t3 = ((p.mean - q.mean) / q.std).pow(2)
-    return t1 + (t2 + t3 - 1) / 2
+    return (t2 + t3 - 1) / 2 + t1
 
 
 @register_kl(Pareto, Pareto)
@@ -448,19 +448,6 @@ def _kl_pareto_gamma(p, q):
     t4 = q.beta * p.alpha * p.scale / (p.alpha - 1)
     result = t1 + t2 + t3 + t4 - 1
     result[p.alpha <= 1] = float('inf')
-    return result
-
-
-@register_kl(Pareto, Laplace)
-def _kl_pareto_laplace(p, q):
-    ct1 = p.alpha / (p.alpha - 1)
-    ct2 = q.loc / q.scale
-    ct3 = (p.scale / q.loc).pow(p.alpha)
-    result = ct1 * p.scale / q.scale - ct2
-    if (p.scale < q.loc).any():
-        result[p.scale < q.loc] += 2 * ct3 * ct2 * (1 - ct1)
-        result[p.scale < q.loc] *= -1
-    result += (2 * p.alpha * q.scale / p.scale).log() - 1 - p.alpha.reciprocal()
     return result
 
 
