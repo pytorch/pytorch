@@ -23,6 +23,14 @@ VIEW_FUNCTIONS = {
     'squeeze', 't', 'transpose', 'unfold', 'unsqueeze', 'view',
 }
 
+# In principle this should live in derivatives.yaml, but I could not
+# think of a good syntax for it
+HARDCODED_DIFFERENTIABLE_OUTPUTS = {
+    # Suppose that 'foo' is a function for which outputs 0 and 1 are
+    # differentiable, and 2 is not.  Then you would write:
+    # 'foo': (0, 1),
+}
+
 
 def format_return_type(returns):
     if len(returns) == 0:

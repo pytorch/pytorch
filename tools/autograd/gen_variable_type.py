@@ -26,7 +26,8 @@ from __future__ import print_function
 import os
 import sys
 from .utils import CodeTemplate, nested_dict, write
-from .gen_autograd import VIEW_FUNCTIONS, template_path
+from .gen_autograd import VIEW_FUNCTIONS, template_path, \
+    HARDCODED_DIFFERENTIABLE_OUTPUTS
 from .gen_autograd_functions import uses_single_grad
 
 VARIABLE_TYPE_H = CodeTemplate.from_file(template_path + '/VariableType.h')
@@ -186,13 +187,17 @@ def emit_body(declaration):
 
     inputs = [arg for arg in arguments if not arg.get('output', False)]
     differentiable_inputs = list(filter(is_differentiable, inputs))
-    differentiable_outputs = list(filter(is_differentiable, returns))
+    candidate_differentiable_outputs = list(filter(is_differentiable, returns))
 
-    if uses_single_grad(func):
-        # If we only use `grad` and not `grads[i]` in the derivative than
-        # assume that only the first output is differentiable. TODO: remove
-        # this heuristic.
-        differentiable_outputs = differentiable_outputs[:1]
+    hardcoded_diff = HARDCODED_DIFFERENTIABLE_OUTPUTS.get(name)
+    if hardcoded_diff:
+        differentiable_outputs = []
+        for i in hardcoded_diff:
+            differentiable_outputs.append(candidate_differentiable_outputs[i])
+    elif uses_single_grad(func):
+        differentiable_outputs = candidate_differentiable_outputs[:1]
+    else:
+        differentiable_outputs = candidate_differentiable_outputs
 
     requires_derivative = (
         base_name not in DONT_REQUIRE_DERIVATIVE and

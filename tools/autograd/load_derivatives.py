@@ -9,6 +9,7 @@ import re
 import yaml
 from .utils import YamlLoader
 from .utils import IDENT_REGEX, split_name_params
+from .gen_autograd import HARDCODED_DIFFERENTIABLE_OUTPUTS
 
 
 def load_derivatives(path, declarations):
@@ -127,25 +128,35 @@ def process_definition(defn, declarations_by_signature):
                                "otherwise, there is a likely error in your derivatives "
                                "declaration.".format(defn_name))
 
-        # DO NOT comment out this test!  Code generation will probably work with
-        # this test commented out, but if you ever pass a non-differentiable
-        # argument to an autograd function (e.g., a backwards function which
-        # has double backwards implemented, as was the case in #4422) your code
-        # will fail when you ever actually try to differentiate with it.
-        #
-        # NB: I had to make it not complain if both 'grads' and 'grad' are never
-        # used, because we have some silly zeros_like() gradients for inplace
-        # comparison tests.
-        if fully_implemented and not used_grad and used_grads and only_used_grads_indices and \
-           set(used_grads_indices) != set(range(len(declaration['returns']))):
-            raise RuntimeError("Derivative definition of {} in derivatives.yaml does "
-                               "not refer to the gradients of all of its outputs.  Either "
-                               "the derivatives declaration is wrong, OR you have some "
-                               "non-differentiable outputs.  If you have a single "
-                               "differentiable output, make it the first output in ATen "
-                               "and reference its gradient with 'grad'; otherwise, you "
-                               "have hit a case which is unsupported by the codegen, "
-                               "see #4567.".format(defn_name))
+        hardcoded_diff = HARDCODED_DIFFERENTIABLE_OUTPUTS.get(defn_name)
+        if hardcoded_diff:
+            if used_grad:
+                raise RuntimeError("Derivative definition {} has hard-coded differentiable "
+                                   "outputs in gen_autograd.py, but used grad (which implies "
+                                   "only the first output is differentiable) in its "
+                                   "derivative declaration.  You likely meant to write "
+                                   "grads[i] for some i instead.".format(defn_name))
+            if only_used_grads_indices and set(used_grads_indices) != set(hardcoded_diff):
+                raise RuntimeError("Derivative definition {} has hard-coded differentiable "
+                                   "outputs {}, but the used grads in the derivative "
+                                   "definitions are only {}.  Either your derivatives "
+                                   "declaration is wrong, or the value of "
+                                   "HARDCODED_DIFFERENTIABLE_OUTPUTS in gen_autograd.py "
+                                   "is wrong.".format(defn_name, hardcoded_diff,
+                                                      used_grads_indices))
+        else:
+            if fully_implemented and not used_grad and \
+               used_grads and only_used_grads_indices and \
+               set(used_grads_indices) != set(range(len(declaration['returns']))):
+                raise RuntimeError("Derivative definition of {} in derivatives.yaml does "
+                                   "not refer to the gradients of all of its outputs.  Either "
+                                   "the derivatives declaration is wrong, OR you have some "
+                                   "non-differentiable outputs.  If you have a single "
+                                   "differentiable output, make it the first output in ATen "
+                                   "and reference its gradient with 'grad'; otherwise, hard "
+                                   "code the list of differentiable outputs in "
+                                   "HARDCODED_DIFFERENTIABLE_OUTPUTS in gen_autograd.py."
+                                   .format(defn_name))
 
     def set_up_derivatives(defn_name, defn, declaration):
         # Determine the set of inputs which have gradients
