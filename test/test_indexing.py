@@ -127,6 +127,10 @@ class TestIndexing(TestCase):
         self.assertEqual(x[2], value)
         self.assertEqual(x[3].data, torch.arange(12, 16))
 
+    def test_invalid_index(self):
+        x = Variable(torch.arange(0, 16).view(4, 4))
+        self.assertRaisesRegex(TypeError, 'slice indices', lambda: x["0":"1"])
+
 
 def tensor(*args, **kwargs):
     return Variable(torch.Tensor(*args, **kwargs))
