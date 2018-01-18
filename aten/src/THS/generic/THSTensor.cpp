@@ -551,10 +551,12 @@ void THSTensor_(retain)(THSTensor *self)
 }
 
 THLongTensor* THSTensor_(rawIndices)(THSTensor *self) {
+  THLongTensor_retain(self->indices);
   return self->indices;
 }
 
 THTensor* THSTensor_(rawValues)(THSTensor *self) {
+  THTensor_(retain)(self->values);
   return self->values;
 }
 

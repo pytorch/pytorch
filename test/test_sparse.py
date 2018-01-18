@@ -374,6 +374,22 @@ class TestSparse(TestCase):
         self.assertTrue(x_coalesced.is_coalesced())
         self.assertFalse(y_uncoalesced.is_coalesced())
 
+    def test_unsqueeze(self):
+        from torch.autograd import Variable
+        x_sparse, _, _ = self._gen_sparse(3, 10, [3, 3, 3, 3, 3])
+        x_sparse = Variable(x_sparse)
+        x_dense = x_sparse.to_dense()
+        for i in range(x_dense.dim() + 1):
+            self.assertEqual(x_sparse.unsqueeze(i).to_dense(), x_dense.unsqueeze(i),
+                             'Sparse unsqueeze({})'.format(i))
+
+            y_sparse = x_sparse.clone()
+            y_dense = x_dense.clone()
+            y_sparse.unsqueeze_(i)
+            y_dense.unsqueeze_(i)
+            self.assertEqual(y_sparse.to_dense(), y_dense,
+                             'Sparse unsqueeze_({})'.format(i))
+
     @cpu_only
     def test_mm(self):
         def test_shape(di, dj, dk):
