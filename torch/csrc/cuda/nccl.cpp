@@ -15,12 +15,10 @@ using namespace at;
 
 namespace detail {
 
-static inline void CHECK(ncclResult_t status) {
-  if (status != ncclSuccess) {
-    std::stringstream err;
-    err << "NCCL Error " << status << ": " << ncclGetErrorString(status);
-    throw std::runtime_error(err.str());
-  }
+void throw_nccl_error(ncclResult_t status) {
+  std::ostringstream err;
+  err << "NCCL Error " << status << ": " << ncclGetErrorString(status);
+  throw std::runtime_error(err.str());
 }
 
 struct NcclCommList {
