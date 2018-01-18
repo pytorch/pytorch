@@ -78,6 +78,8 @@ struct PythonArgs {
   inline at::Scalar scalar(int i);
   inline at::Scalar scalarWithDefault(int i, at::Scalar default_scalar);
   inline std::vector<at::Tensor> tensorlist(int i);
+  template<int N>
+  inline std::array<at::Tensor, N> tensorlist_n(int i);
   inline std::vector<int64_t> intlist(int i);
   inline std::vector<int64_t> intlistWithDefault(int i, std::vector<int64_t> default_intlist);
   inline at::Generator* generator(int i);
@@ -163,6 +165,27 @@ inline std::vector<at::Tensor> PythonArgs::tensorlist(int i) {
   auto tuple = PyTuple_Check(arg);
   auto size = tuple ? PyTuple_GET_SIZE(arg) : PyList_GET_SIZE(arg);
   std::vector<at::Tensor> res(size);
+  for (int idx = 0; idx < size; idx++) {
+    PyObject* obj = tuple ? PyTuple_GET_ITEM(arg, idx) : PyList_GET_ITEM(arg, idx);
+    if (!THPVariable_Check(obj)) {
+      type_error("expected Variable as element %d in argument %d, but got %s",
+                 idx, i, THPUtils_typename(args[i]));
+    }
+    res[idx] = reinterpret_cast<THPVariable*>(obj)->cdata;
+  }
+  return res;
+}
+
+template<int N>
+inline std::array<at::Tensor, N> PythonArgs::tensorlist_n(int i) {
+  auto res = std::array<at::Tensor, N>();
+  PyObject* arg = args[i];
+  if (!arg) return res;
+  auto tuple = PyTuple_Check(arg);
+  auto size = tuple ? PyTuple_GET_SIZE(arg) : PyList_GET_SIZE(arg);
+  if (size != N) {
+    type_error("expected tuple of %d elements but got %d", N, (int)size);
+  }
   for (int idx = 0; idx < size; idx++) {
     PyObject* obj = tuple ? PyTuple_GET_ITEM(arg, idx) : PyList_GET_ITEM(arg, idx);
     if (!THPVariable_Check(obj)) {

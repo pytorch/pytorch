@@ -75,7 +75,7 @@ void encodeTensor(onnx::TensorProto * p, const at::Tensor & tensor) {
 
 void addAttribute(onnx::NodeProto * n_p, jit::Node * n, jit::Symbol name) {
   auto attr = n_p->add_attribute();
-  attr->set_name(jit::symbolToString(name));
+  attr->set_name(name.toString());
   switch(n->kindOf(name)) {
     case AttributeKind::f:
       attr->set_f(n->f(name));
@@ -205,7 +205,7 @@ void encodeGraph(onnx::GraphProto * p_g, const std::shared_ptr<Graph> & g, const
     for(auto output : node->outputs()) {
       p_n->add_output(value_name(output));
     }
-    p_n->set_op_type(symbolToString(node->kind()));
+    p_n->set_op_type(node->kind().toString());
     for(auto attr_name : node->attributeNames()) {
       addAttribute(p_n, node, attr_name);
     }
@@ -247,7 +247,7 @@ void validateGraph(const std::shared_ptr<Graph>& graph) {
       if (it->kind() == kUndefined) {
         FAIL_EXPORT("Couldn't export undefined constant tensor (please file an issue)")
       }
-      std::string n = symbolToString(it->kind());
+      std::string n = it->kind().toString();
       if (n.size() == 0) {
         FAIL_EXPORT("Operator to export had empty name (please file an issue)")
       }

@@ -70,7 +70,13 @@ class Variable(_C._VariableBase):
         self.requires_grad, _, self._backward_hooks = state
 
     def __repr__(self):
-        strt = 'Variable containing:' + torch._tensor_str._str(self.data, False)
+        if self.is_sparse:
+            data_str = ' \n{} with indices:\n{}and values:\n{}'.format(
+                torch.typename(self.data), self._indices().data,
+                self._values().data)
+        else:
+            data_str = torch._tensor_str._str(self.data, False)
+        strt = 'Variable containing:' + data_str
         # let's make our own Variable-specific footer
         size_str = '(' + ','.join(str(size) for size in self.size()) + (',)' if len(self.size()) == 1 else ')')
         device_str = '' if not self.is_cuda else \
@@ -251,6 +257,7 @@ class Variable(_C._VariableBase):
         return self.view(tensor.size())
 
     def repeat(self, *repeats):
+        from ._functions import Repeat
         if len(repeats) == 1 and isinstance(repeats[0], torch.Size):
             repeats = repeats[0]
         else:
@@ -270,9 +277,11 @@ class Variable(_C._VariableBase):
             return super(Variable, self).btrifact(pivot=pivot)
 
     def resize(self, *sizes):
+        from ._functions import Resize
         return Resize.apply(self, sizes)
 
     def resize_as(self, variable):
+        from ._functions import Resize
         return Resize.apply(self, variable.size())
 
     def index_add(self, dim, index, tensor):
@@ -321,7 +330,7 @@ class Variable(_C._VariableBase):
         raise NotImplementedError("in-place pow not implemented")
 
     def __rpow__(self, other):
-        return PowConstant.apply(other, self)
+        return self.new([other]) ** self
 
     __neg__ = _C._VariableBase.neg
 
@@ -369,21 +378,8 @@ class Variable(_C._VariableBase):
             array = array.astype('uint8')
         return Variable.from_numpy(array)
 
-    class _torch(object):
-        pass
+    _torch = torch._C._VariableFunctions
 
 
-for method in dir(Variable):
-    # This will also wrap some methods that normally aren't part of the
-    # functional interface, but we don't care, as they won't ever be used
-    if method.startswith('_') or method.endswith('_'):
-        continue
-    if hasattr(Variable._torch, method):
-        continue
-    as_static = staticmethod(getattr(Variable, method))
-    setattr(Variable._torch, method, as_static)
-
-
-from ._functions import *
 from torch._C import _ImperativeEngine as ImperativeEngine
 Variable._execution_engine = ImperativeEngine()

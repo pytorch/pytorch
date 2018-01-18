@@ -235,7 +235,7 @@ std::string encodeRHS(Node * n) {
     if(n->kindOf(a) == AttributeKind::t) {
       auto v = n->t(a);
       if(v.dim() == 0) {
-        env.s(symbolToString(a), scalarValue(v));
+        env.s(a.toString(), scalarValue(v));
       }
     }
   }

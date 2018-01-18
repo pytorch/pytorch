@@ -834,17 +834,19 @@ class ModuleTest(TestBase):
 
             # Run double-backwards on CPU and GPU and compare results
             if self.check_gradgrad and not self.FIXME_no_cuda_gradgrad_comparison:
-                cpu_output_t = cpu_output.data if isinstance(cpu_output, Variable) else cpu_output
-                cpu_gradOutput = Variable(cpu_output_t.clone().normal_(), requires_grad=True)
-                gpu_gradOutput = Variable(cpu_gradOutput.type('torch.cuda.FloatTensor').data, requires_grad=True)
+                cpu_output = cpu_module(cpu_input)
+                gpu_output = gpu_module(gpu_input)
+
+                cpu_gradOutput = Variable(cpu_output.data.clone().normal_(), requires_grad=True)
+                gpu_gradOutput = Variable(cpu_gradOutput.data.type_as(gpu_output), requires_grad=True)
 
                 cpu_gradInputs = torch.autograd.grad(
-                    cpu_module(cpu_input),
+                    cpu_output,
                     (cpu_input,) + tuple(cpu_module.parameters()),
                     cpu_gradOutput,
                     create_graph=True)
                 gpu_gradInputs = torch.autograd.grad(
-                    gpu_module(gpu_input),
+                    gpu_output,
                     (gpu_input,) + tuple(gpu_module.parameters()),
                     gpu_gradOutput,
                     create_graph=True)

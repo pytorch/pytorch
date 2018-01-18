@@ -271,7 +271,6 @@ _integer_tensor_classes = {
     LongTensor, IntTensor, ShortTensor, CharTensor, ByteTensor
 }
 
-set_default_tensor_type('torch.FloatTensor')
 
 ################################################################################
 # Import interface functions defined in Python
@@ -297,6 +296,8 @@ def manager_path():
 # Shared memory manager needs to know the exact location of manager executable
 _C._initExtension(manager_path())
 del manager_path
+
+set_default_tensor_type('torch.FloatTensor')
 
 ################################################################################
 # Remove unnecessary members

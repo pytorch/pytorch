@@ -121,12 +121,12 @@ std::unordered_map<std::string, operator_constructor> constructors = {
 
 std::string getDescriptor(jit::Node* n) {
   std::stringstream s;
-  s << symbolToString(n->kind());
+  s << n->kind().toString();
   if (tensor_vararg_fns.count(n->kind()) == 0)
     s << "-" << n->inputs().size();
   else
     s << "-*";
-  std::vector<const char*> attr_names = fmap(n->attributeNames(), &symbolToString);
+  std::vector<const char*> attr_names = fmap(n->attributeNames(), [](Symbol x) { return x.toString(); });
   std::sort(attr_names.begin(), attr_names.end(), [](const char *a, const char *b) {
     return std::strcmp(a, b) < 0;
   });
