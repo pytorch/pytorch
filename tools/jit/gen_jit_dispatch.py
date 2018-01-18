@@ -27,7 +27,7 @@ TYPE_CASTS = {
 }
 
 ATTR_ASSIGNMENT = CodeTemplate("""\
-auto ${name} = ${type_cast}(node->${method}(stringToSymbol("${name}")));\
+auto ${name} = ${type_cast}(node->${method}(Symbol("${name}")));\
 """)
 
 CALL_NAMESPACE = CodeTemplate("at::${name}(${args})")
