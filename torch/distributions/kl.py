@@ -220,11 +220,9 @@ def _kl_laplace_laplace(p, q):
 
 @register_kl(Normal, Normal)
 def _kl_normal_normal(p, q):
-    std_dev_ratio = p.std / q.std
-    t1 = -std_dev_ratio.log()
-    t2 = std_dev_ratio.pow(2)
-    t3 = ((p.mean - q.mean) / q.std).pow(2)
-    return (t2 + t3 - 1) / 2 + t1
+    var_ratio = (p.std / q.std).pow(2)
+    t1 = ((p.mean - q.mean) / q.std).pow(2)
+    return 0.5 * (var_ratio + t1 - 1 - var_ratio.log())
 
 
 @register_kl(Pareto, Pareto)
@@ -449,6 +447,8 @@ def _kl_pareto_gamma(p, q):
     result = t1 + t2 + t3 + t4 - 1
     result[p.alpha <= 1] = float('inf')
     return result
+
+# TODO: Add Pareto-Laplace KL Divergence
 
 
 @register_kl(Pareto, Normal)

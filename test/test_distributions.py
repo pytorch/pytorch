@@ -27,8 +27,6 @@ import unittest
 from collections import namedtuple
 from itertools import product
 
-import sys
-del sys.path[sys.path.index('/media/vishwak/Official/Projects/pytorch')]
 import torch
 from common import TestCase, run_tests, set_rng_seed
 from torch.autograd import Variable, grad, gradcheck
@@ -1476,8 +1474,8 @@ class TestKL(TestCase):
         gamma = pairwise(Gamma, [1.0, 2.5, 1.0, 2.5], [1.5, 1.5, 3.5, 3.5])
         gumbel = pairwise(Gumbel, [-2.0, 4.0, -3.0, 6.0], [1.0, 2.5, 1.0, 2.5])
         laplace = pairwise(Laplace, [-2.0, 4.0, -3.0, 6.0], [1.0, 2.5, 1.0, 2.5])
-        normal = pairwise(Normal, [-2.0, 4.0, -3.0, 6.0], [1.0, 2.5, 1.0, 2.5])
-        pareto = pairwise(Pareto, [2.5, 4.0, 2.5, 4.0], [1.5, 3.5, 1.5, 3.5])
+        normal = pairwise(Normal, [-2.0, 2.0, -3.0, 3.0], [1.0, 2.0, 1.0, 2.0])
+        pareto = pairwise(Pareto, [2.5, 4.0, 2.5, 4.0], [2.25, 3.75, 2.25, 3.75])
         uniform_within_unit = pairwise(Uniform, [0.15, 0.95, 0.2, 0.8], [0.1, 0.9, 0.25, 0.75])
         uniform_positive = pairwise(Uniform, [1, 1.5, 2, 4], [1.2, 2.0, 3, 7])
         uniform_real = pairwise(Uniform, [-2, -1, 0, 2], [-1, 1, 1, 4])
@@ -1504,6 +1502,7 @@ class TestKL(TestCase):
             (chi2, chi2),
             (chi2, exponential),
             (chi2, gamma),
+            (chi2, normal),
             (dirichlet, dirichlet),
             (exponential, chi2),
             (exponential, exponential),
@@ -1514,6 +1513,7 @@ class TestKL(TestCase):
             (gamma, exponential),
             (gamma, gamma),
             (gamma, gumbel),
+            (gamma, normal),
             (gumbel, gumbel),
             (gumbel, normal),
             (laplace, laplace),
