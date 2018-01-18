@@ -1533,10 +1533,13 @@ class TestKL(TestCase):
 
         # These tests should pass with precision = 0.01, but that makes tests very expensive.
         # Instead, we test with precision = 0.2 and only test with higher precision locally
-        # when adding a new KL implementation
-        self.precision = 0.01
-        self.step = int(1e05)
-        self.limit = int(1e08)
+        # when adding a new KL implementation.
+        # The following pairs are not tested due to very high variance of the monte carlo
+        # estimator; their implementations have been reviewed with extra care:
+        # - (pareto, normal)
+        self.precision = 0.2  # Set this to 0.01 when testing a new KL implementation.
+        self.max_samples = int(1e07)  # Increase this when testing at smaller precision.
+        self.samples_per_batch = int(1e05)
         self.finite_examples = [
             (bernoulli, bernoulli),
             (beta, beta),
@@ -1548,7 +1551,7 @@ class TestKL(TestCase):
             (chi2, exponential),
             (chi2, gamma),
             (chi2, normal),
-            # (dirichlet, dirichlet),
+            (dirichlet, dirichlet),
             (exponential, chi2),
             (exponential, exponential),
             (exponential, gamma),
@@ -1568,7 +1571,6 @@ class TestKL(TestCase):
             (pareto, chi2),
             (pareto, exponential),
             (pareto, gamma),
-            # (pareto, normal),
             (uniform_within_unit, beta),
             (uniform_positive, chi2),
             (uniform_positive, exponential),
@@ -1628,21 +1630,23 @@ class TestKL(TestCase):
     def test_kl_monte_carlo(self):
         set_rng_seed(0)  # see Note [Randomized statistical tests]
         for (p, _), (_, q) in self.finite_examples:
-            x = p.sample(sample_shape=(25000,))
+            print('Testing KL({}, {})'.format(type(p).__name__, type(q).__name__))
             actual = kl_divergence(p, q)
-            numerator = (p.log_prob(x) - q.log_prob(x)).sum(0)
-            denominator = x.size(0)
-            if torch.abs((numerator / denominator) - actual).max() > self.precision:
-                while denominator < self.limit:
-                    x = p.sample(sample_shape=(self.step,))
-                    numerator += (p.log_prob(x) - q.log_prob(x)).sum(0)
-                    denominator += x.size(0)
-                    if torch.abs((numerator / denominator) - actual).max() < self.precision:
-                        break
-            expected = numerator / denominator
-            message = 'Incorrect KL({}, {}).\nExpected (Monte Carlo): {}\nActual (analytic): {} at size {}'.format(
-                type(p).__name__, type(q).__name__, expected, actual, denominator)
-            self.assertEqual(expected, actual, prec=self.precision, message=message)
+            numerator = 0
+            denominator = 0
+            while denominator < self.max_samples:
+                x = p.sample(sample_shape=(self.samples_per_batch,))
+                numerator += (p.log_prob(x) - q.log_prob(x)).sum(0)
+                denominator += x.size(0)
+                expected = numerator / denominator
+                error = torch.abs(expected - actual) / (1 + expected)
+                if error.max() < self.precision:
+                    break
+            self.assertLess(error.max(), self.precision, '\n'.join([
+                'Incorrect KL({}, {}).'.format(type(p).__name__, type(q).__name__),
+                'Expected ({} Monte Carlo samples): {}'.format(denominator, expected),
+                'Actual (analytic): {}'.format(actual),
+            ]))
 
     def test_kl_infinite(self):
         for p, q in self.infinite_examples:
