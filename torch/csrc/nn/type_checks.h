@@ -47,22 +47,6 @@ static inline bool THNN_IntTensor_Check(PyObject* obj) {
   return torch::nn::check_type(obj, THPIntTensorClass, at::TypeID::CPUInt);
 }
 
-static inline bool THNN_CudaHalfTensor_Check(PyObject* obj) {
-  return torch::nn::check_type(obj, THCPHalfTensorClass, at::TypeID::CUDAHalf);
-}
-
-static inline bool THNN_CudaFloatTensor_Check(PyObject* obj) {
-  return torch::nn::check_type(obj, THCPFloatTensorClass, at::TypeID::CUDAFloat);
-}
-
-static inline bool THNN_CudaDoubleTensor_Check(PyObject* obj) {
-  return torch::nn::check_type(obj, THCPDoubleTensorClass, at::TypeID::CUDADouble);
-}
-
-static inline bool THNN_CudaLongTensor_Check(PyObject* obj) {
-  return torch::nn::check_type(obj, THCPLongTensorClass, at::TypeID::CUDALong);
-}
-
 static inline THFloatTensor* THNN_FloatTensor_Unpack(PyObject* obj) {
   return torch::nn::unpack<THPFloatTensor, THFloatTensor>(obj, THPFloatTensorClass);
 }
@@ -77,6 +61,24 @@ static inline THLongTensor* THNN_LongTensor_Unpack(PyObject* obj) {
 
 static inline THIntTensor* THNN_IntTensor_Unpack(PyObject* obj) {
   return torch::nn::unpack<THPIntTensor, THIntTensor>(obj, THPIntTensorClass);
+}
+
+#ifdef WITH_CUDA
+
+static inline bool THNN_CudaHalfTensor_Check(PyObject* obj) {
+  return torch::nn::check_type(obj, THCPHalfTensorClass, at::TypeID::CUDAHalf);
+}
+
+static inline bool THNN_CudaFloatTensor_Check(PyObject* obj) {
+  return torch::nn::check_type(obj, THCPFloatTensorClass, at::TypeID::CUDAFloat);
+}
+
+static inline bool THNN_CudaDoubleTensor_Check(PyObject* obj) {
+  return torch::nn::check_type(obj, THCPDoubleTensorClass, at::TypeID::CUDADouble);
+}
+
+static inline bool THNN_CudaLongTensor_Check(PyObject* obj) {
+  return torch::nn::check_type(obj, THCPLongTensorClass, at::TypeID::CUDALong);
 }
 
 static inline THCudaHalfTensor* THNN_CudaHalfTensor_Unpack(PyObject* obj) {
@@ -94,3 +96,5 @@ static inline THCudaDoubleTensor* THNN_CudaDoubleTensor_Unpack(PyObject* obj) {
 static inline THCudaLongTensor* THNN_CudaLongTensor_Unpack(PyObject* obj) {
   return torch::nn::unpack<THCPLongTensor, THCudaLongTensor>(obj, THCPLongTensorClass);
 }
+
+#endif  // WITH_CUDA
