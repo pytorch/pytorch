@@ -7,7 +7,9 @@
 #include "torch/csrc/Size.h"
 #include "torch/csrc/autograd/python_variable.h"
 #include "torch/csrc/autograd/utils/wrap_outputs.h"
+#ifdef WITH_CUDA
 #include "torch/csrc/cuda/Stream.h"
+#endif
 #include "torch/csrc/utils/object_ptr.h"
 #include "torch/csrc/utils/python_arg_parser.h"
 #include "torch/csrc/utils/python_numbers.h"
@@ -396,6 +398,7 @@ static PyObject * THPVariable_numpy(PyObject* self, PyObject* arg)
 static PyObject * THPVariable_record_stream(PyObject* self, PyObject* arg)
 {
   HANDLE_TH_ERRORS
+#ifdef WITH_CUDA
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
   if (!THCPStream_Check(arg)) {
     return PyErr_Format(PyExc_TypeError, "expected Stream object");
@@ -403,6 +406,9 @@ static PyObject * THPVariable_record_stream(PyObject* self, PyObject* arg)
   void* data = self_.data_ptr();
   THCCachingAllocator_recordStream(data, ((THCPStream*)arg)->cdata);
   Py_RETURN_NONE;
+#else
+  throw std::runtime_error("PyTorch compiled without CUDA support");
+#endif
   END_HANDLE_TH_ERRORS
 }
 
