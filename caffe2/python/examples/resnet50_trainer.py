@@ -261,6 +261,11 @@ def Train(args):
     # Round down epoch size to closest multiple of batch size across machines
     global_batch_size = total_batch_size * args.num_shards
     epoch_iters = int(args.epoch_size / global_batch_size)
+
+    assert \
+        epoch_iters > 0, \
+        "Epoch size must be larger than batch size times shard count"
+
     args.epoch_size = epoch_iters * global_batch_size
     log.info("Using epoch size: {}".format(args.epoch_size))
 
@@ -522,6 +527,7 @@ def Train(args):
         args.num_labels,
         args.base_learning_rate,
     )
+
     explog = experiment_util.ModelTrainerLog(expname, args)
 
     # Run the training one epoch a time
