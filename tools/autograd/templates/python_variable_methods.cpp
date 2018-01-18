@@ -7,6 +7,7 @@
 #include "torch/csrc/Size.h"
 #include "torch/csrc/autograd/python_variable.h"
 #include "torch/csrc/autograd/utils/wrap_outputs.h"
+#include "torch/csrc/cuda/Stream.h"
 #include "torch/csrc/utils/object_ptr.h"
 #include "torch/csrc/utils/python_arg_parser.h"
 #include "torch/csrc/utils/python_numbers.h"
@@ -391,6 +392,20 @@ static PyObject * THPVariable_numpy(PyObject* self, PyObject* arg)
   END_HANDLE_TH_ERRORS
 }
 
+// TODO: move this to ATen. We would need to expose Stream objects in ATen.
+static PyObject * THPVariable_record_stream(PyObject* self, PyObject* arg)
+{
+  HANDLE_TH_ERRORS
+  auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
+  if (!THCPStream_Check(arg)) {
+    return PyErr_Format(PyExc_TypeError, "expected Stream object");
+  }
+  void* data = self_.data_ptr();
+  THCCachingAllocator_recordStream(data, ((THCPStream*)arg)->cdata);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject * THPVariable_map_(PyObject* self, PyObject* args, PyObject* kwargs)
 {
   HANDLE_TH_ERRORS
@@ -562,6 +577,7 @@ PyMethodDef variable_methods[] = {
   {"nelement", (PyCFunction)THPVariable_numel, METH_NOARGS, NULL},
   {"new", (PyCFunction)THPVariable_new, METH_VARARGS | METH_KEYWORDS, NULL},
   {"numpy", (PyCFunction)THPVariable_numpy, METH_NOARGS, NULL},
+  {"record_stream", (PyCFunction)THPVariable_record_stream, METH_O, NULL},
   {"short", (PyCFunction)THPVariable_short, METH_NOARGS, NULL},
   {"size", (PyCFunction)THPVariable_size, METH_VARARGS | METH_KEYWORDS, NULL},
   {"storage", (PyCFunction)THPVariable_storage, METH_NOARGS, NULL},
