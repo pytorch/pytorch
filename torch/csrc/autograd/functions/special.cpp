@@ -287,11 +287,13 @@ variable_list Eval::apply(const variable_list& inputs) {
   if (simple_graph) {
     outputs = (*simple_graph)(inputs);
   } else {
-    std::mutex outputs_mutex;
-    outputs.resize(placeholders.size());
     auto& engine = python::PythonEngine::getDefaultEngine();
     auto exec_data = filterRoots(inputs);
-    engine.execute(exec_data.first, exec_data.second, true, true, getCallbacks(outputs, outputs_mutex));
+    function_list output_edges = fmap(placeholders,
+                                      [](const std::shared_ptr<EvalOutput>& o) -> edge_type {
+                                        return std::make_pair(o, 0);
+                                      });
+    outputs = engine.execute(exec_data.first, exec_data.second, true, true, output_edges);
   }
 
   auto bw_eval = newEval();
@@ -337,22 +339,6 @@ std::pair<function_list, variable_list> Eval::filterRoots(const variable_list& i
     filtered_roots.emplace_back(roots[i]);
   }
   return std::make_pair(std::move(filtered_roots), std::move(filtered_inputs));
-}
-
-Engine::pre_callback_map Eval::getCallbacks(variable_list& outputs, std::mutex& outputs_mutex) {
-  Engine::pre_callback_map callbacks;
-  int num_outputs = placeholders.size();
-  for (int i = 0; i < num_outputs; ++i) {
-    auto& output_fn = placeholders[i];
-    callbacks.emplace(output_fn.get(), [&outputs, &outputs_mutex, i](Function* _unused, variable_list& inputs) -> bool {
-      if (inputs.size() != 1)
-        throw std::logic_error("placeholder callback received too many inputs");
-      std::lock_guard<std::mutex> lock(outputs_mutex);
-      outputs[i] = inputs[0];
-      return false; // Stop at output nodes
-    });
-  }
-  return callbacks;
 }
 
 }} // namespace torch::autograd

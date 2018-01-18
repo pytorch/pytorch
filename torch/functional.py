@@ -1,5 +1,4 @@
 import torch
-from ._utils import _range
 from operator import mul
 from functools import reduce
 import math
@@ -38,7 +37,7 @@ def split(tensor, split_size_or_sections, dim=0):
         def get_split_size(i):
             return split_size if i < num_splits - 1 else last_split_size
         return tuple(tensor.narrow(int(dim), int(i * split_size), int(get_split_size(i))) for i
-                     in _range(0, num_splits))
+                     in range(0, num_splits))
 
     else:
         if dim_size != sum(split_size_or_sections):
@@ -95,7 +94,7 @@ def unbind(tensor, dim=0):
         tensor (Tensor): the tensor to unbind
         dim (int): dimension to remove
     """
-    return tuple(tensor.select(dim, i) for i in _range(tensor.size(dim)))
+    return tuple(tensor.select(dim, i) for i in range(tensor.size(dim)))
 
 
 def btriunpack(LU_data, LU_pivots, unpack_data=True, unpack_pivots=True):

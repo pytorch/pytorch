@@ -79,7 +79,7 @@ struct Var {
   }
 private:
   static Symbol s(const char * s_) {
-    return stringToSymbol(s_);
+    return Symbol(s_);
   }
   Value * v;
 };
@@ -301,15 +301,15 @@ void attributesTest() {
 
 void internedStringsTests () {
 
-  JIT_ASSERT(kParam == stringToSymbol("Param"));
-  JIT_ASSERT(kReturn == stringToSymbol("Return"));
-  JIT_ASSERT(symbolToString(kReturn) == std::string("Return"));
-  size_t symstart = stringToSymbol("__NEW_SYMBOL");
-  JIT_ASSERT(stringToSymbol("What") == symstart+1);
-  JIT_ASSERT(stringToSymbol("What2") == symstart+2);
-  JIT_ASSERT(stringToSymbol("What") == symstart+1);
-  JIT_ASSERT(stringToSymbol("What2") == symstart+2);
-  JIT_ASSERT(symbolToString(symstart+2) == std::string("What2"));
+  JIT_ASSERT(kParam == Symbol("Param"));
+  JIT_ASSERT(kReturn == Symbol("Return"));
+  JIT_ASSERT(Symbol(kReturn).toString() == std::string("Return"));
+  size_t symstart = Symbol("__NEW_SYMBOL");
+  JIT_ASSERT(Symbol("What") == symstart+1);
+  JIT_ASSERT(Symbol("What2") == symstart+2);
+  JIT_ASSERT(Symbol("What") == symstart+1);
+  JIT_ASSERT(Symbol("What2") == symstart+2);
+  JIT_ASSERT(Symbol(symstart+2).toString() == std::string("What2"));
 }
 
 

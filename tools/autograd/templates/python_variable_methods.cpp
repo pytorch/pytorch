@@ -57,7 +57,7 @@ static Tensor dispatch_clamp_max(const Tensor & self, Scalar max) {
   return self.clamp_max(max);
 }
 
-PyObject * THPVariable_clamp(PyObject* self, PyObject* args, PyObject* kwargs)
+static PyObject * THPVariable_clamp(PyObject* self, PyObject* args, PyObject* kwargs)
 {
   HANDLE_TH_ERRORS
   static PythonArgParser parser({
@@ -94,7 +94,7 @@ static Tensor & dispatch_clamp_max_(Tensor & self, Scalar max) {
   return self.clamp_max_(max);
 }
 
-PyObject * THPVariable_clamp_(PyObject* self, PyObject* args, PyObject* kwargs)
+static PyObject * THPVariable_clamp_(PyObject* self, PyObject* args, PyObject* kwargs)
 {
   HANDLE_TH_ERRORS
   static PythonArgParser parser({
@@ -204,14 +204,6 @@ static PyObject * THPVariable_copy_(PyObject* self, PyObject* args, PyObject* kw
   PyObject* parsed_args[2];
   auto r = parser.parse(args, kwargs, parsed_args);
   return THPVariable_Wrap(dispatch_copy_(self_, r.tensor(0), r.toBool(1)));
-  END_HANDLE_TH_ERRORS
-}
-
-static PyObject * THPVariable_from_numpy(PyObject* module, PyObject* arg)
-{
-  HANDLE_TH_ERRORS
-  auto data = torch::utils::tensor_from_numpy(arg);
-  return THPVariable_Wrap(make_variable(std::move(data)));
   END_HANDLE_TH_ERRORS
 }
 
@@ -561,7 +553,6 @@ PyMethodDef variable_methods[] = {
   {"double", (PyCFunction)THPVariable_double, METH_NOARGS, NULL},
   {"element_size", (PyCFunction)THPVariable_element_size, METH_NOARGS, NULL},
   {"float", (PyCFunction)THPVariable_float, METH_NOARGS, NULL},
-  {"from_numpy", (PyCFunction)THPVariable_from_numpy, METH_STATIC | METH_O, NULL},
   {"half", (PyCFunction)THPVariable_half, METH_NOARGS, NULL},
   {"int", (PyCFunction)THPVariable_int, METH_NOARGS, NULL},
   {"long", (PyCFunction)THPVariable_long, METH_NOARGS, NULL},

@@ -220,23 +220,13 @@ class TestAutograd(TestCase):
         grad_sum = 2 * x.grad + y.grad
         x_hv = torch.autograd.grad(
             outputs=[grad_sum], grad_outputs=[torch.ones(2, 2)],
-            inputs=[x], create_graph=True, only_inputs=True)
+            inputs=[x], create_graph=True)
         expected_x_hv = torch.ones(2, 2) * 5
         expected_y_hv = torch.ones(2, 2) * 4
 
         self.assertEqual(x_hv[0].data, expected_x_hv)
         self.assertEqual(x.grad.data, x_grad)
         self.assertEqual(y.grad.data, y_grad)
-
-        grad_sum = 2 * x.grad + y.grad
-        x_hv = torch.autograd.grad(
-            outputs=grad_sum, inputs=x,
-            grad_outputs=torch.ones(2, 2),
-            only_inputs=False)
-
-        self.assertEqual(x_hv[0].data, expected_x_hv)
-        self.assertEqual(x.grad.data, x_grad)
-        self.assertEqual(y.grad.data, y_grad + expected_y_hv)
 
     def test_grad_nonleaf(self):
         x_init = Variable(torch.randn(2, 2), requires_grad=True)
@@ -287,6 +277,25 @@ class TestAutograd(TestCase):
         self.assertFalse(hook_called[0])
         self.assertIsNone(x.grad)
 
+    def test_sharded_grad(self):
+        leaves = [Variable(torch.zeros(5, 5), requires_grad=True) for _ in range(10)]
+        intermediates = [l * i + l * l for i, l in enumerate(leaves)]
+        loss = sum(v * i for i, v in enumerate(intermediates)).sum()
+
+        # define a helper for dividing intermediates into groups
+        def group(l, group_size):
+            return (l[i:i + group_size] for i in range(0, len(l), group_size))
+
+        # Compute the d loss / d intermediates in chunks of shard_size
+        shard_size = 2
+        d_intermediates = [d_i for intermediates_batch in group(intermediates, shard_size)
+                           for d_i in torch.autograd.grad(loss, intermediates_batch)]
+        # Compute rest of backward pass
+        torch.autograd.backward(intermediates, d_intermediates)
+
+        for i, l in enumerate(leaves):
+            self.assertEqual(l.grad.data, i * i * (1 + l.data))
+
     def test_backward_badcalls(self):
         x = Variable(torch.ones(1))
         with self.assertRaisesRegex(RuntimeError, 'does not require grad'):
@@ -303,8 +312,6 @@ class TestAutograd(TestCase):
         x = Variable(torch.ones(1), requires_grad=True)
         y = x ** 2
         torch.autograd.grad(y, x)  # this should succeed now
-        with self.assertRaisesRegex(RuntimeError, 'unreachable'):
-            torch.autograd.grad(x, y)
 
     def test_grad_unreachable(self):
         x = Variable(torch.ones(1), requires_grad=True)
@@ -312,17 +319,15 @@ class TestAutograd(TestCase):
         # Make sure x and y have grad accumulators allocated
         z = x * 2
         w = y * 2
-        with self.assertRaisesRegex(RuntimeError, 'unreachable'):
-            torch.autograd.grad(x * 2, [x, y])
 
-        grad_x, grad_y = torch.autograd.grad(x * 2, [x, y], allow_unused=True)
+        grad_x, grad_y = torch.autograd.grad(x * 2, [x, y])
         self.assertEqual(grad_x, x * 2)
         self.assertIsNone(grad_y)
 
         # This is slightly different than the case above, because z doesn't even
         # have a grad accumulator allocated.
         z = Variable(torch.ones(1), requires_grad=True)
-        grad_x, grad_z = torch.autograd.grad(x * 2, [x, z], allow_unused=True)
+        grad_x, grad_z = torch.autograd.grad(x * 2, [x, z])
         self.assertEqual(grad_x, x * 2)
         self.assertIsNone(grad_z)
 
@@ -983,7 +988,8 @@ class TestAutograd(TestCase):
         x = Variable(torch.ones(*size), requires_grad=True)
         y = x + 2
         y_version = y._version
-        value = Variable(torch.Tensor(x[index].size()).fill_(7), requires_grad=True)
+        value = x.new(x[index].size()).fill_(7)
+        value.requires_grad = True
         y[index] = value
         self.assertNotEqual(y._version, y_version)
         y.backward(torch.ones(*size))
@@ -1004,7 +1010,7 @@ class TestAutograd(TestCase):
 
         expected_grad_input[index] = 0
         self.assertEqual(x.grad.data, expected_grad_input)
-        self.assertEqual(value.grad.data, torch.ones(value.size()))
+        self.assertEqual(value.grad.data, torch.ones(value.data.size()))
 
         # case when x broadcasts to as y[1]
         x = Variable(torch.randn(4), requires_grad=True)
@@ -1027,6 +1033,7 @@ class TestAutograd(TestCase):
         self._test_setitem_tensor((5, 5), 3)
         self._test_setitem_tensor((5, 5), [[0, 1], [1, 0]])
         self._test_setitem_tensor((5,), 3)
+        self._test_setitem_tensor((5,), Variable(torch.LongTensor([3]), requires_grad=False).sum())
         self._test_setitem_tensor((5,), [[0, 1, 2, 3]])
         self._test_setitem_tensor((5, 5, 5), [slice(None), slice(None), [1, 3]])
         self._test_setitem_tensor((5, 5, 5), [slice(None), [1, 3], slice(None)])
@@ -1920,6 +1927,26 @@ class TestAutograd(TestCase):
         test()
         self.assertEqual(dealloc[0], 1)
 
+    def test_mul_out(self):
+        a = Variable(torch.randn(2, 2), requires_grad=True)
+        b = Variable(torch.randn(2, 2), requires_grad=True)
+        x = torch.zeros_like(a)
+
+        # out=... functions don't support automatic differentiation currently
+        self.assertRaisesRegex(RuntimeError, 'out=', lambda: torch.mul(a, b, out=x))
+
+        # the inputs can require grad if we're in no_grad() mode
+        with torch.no_grad():
+            torch.mul(a, b, out=x)
+            self.assertEqual(x, a * b)
+
+    def test_mul_out_result_requires_grad(self):
+        a = Variable(torch.randn(2, 2))
+        b = Variable(torch.randn(2, 2))
+        x = Variable(torch.zeros(2, 2), requires_grad=True)
+        # we should throw an exception if the output requires grad
+        self.assertRaisesRegex(RuntimeError, 'out=', lambda: torch.mul(a, b, out=x))
+
 
 def index_variable(shape, max_indices):
     if not isinstance(shape, tuple):
@@ -2355,6 +2382,8 @@ method_tests = [
 
 
 def make_non_contiguous(tensor):
+    if tensor.numel() <= 1:  # can't make non-contiguous
+        return tensor.new(tensor.size())
     osize = list(tensor.size())
 
     # randomly inflate a few dimensions in osize
@@ -2389,6 +2418,10 @@ def create_input(call_args, requires_grad=True, non_contiguous=False):
 
         if isinstance(arg, torch.Size) or isinstance(arg, dont_convert):
             return arg
+        elif isinstance(arg, tuple) and len(arg) == 0:
+            # FixMe: maybe use 'torch.randn()' or similar when we have scalar factories
+            var = Variable(torch.randn(1).double(), requires_grad=requires_grad)._scalar_sum()
+            return var
         elif isinstance(arg, tuple) and not isinstance(arg[0], Variable):
             return Variable(maybe_non_contig(torch.randn(*arg).double()), requires_grad=requires_grad)
         elif torch.is_tensor(arg):
@@ -2415,14 +2448,16 @@ def unpack_variables(args):
 
 
 def generate_gradoutput(dummy_out, non_contiguous=False):
-    def maybe_non_contig(tensor):
-        return tensor if not non_contiguous else make_non_contiguous(tensor)
+    def maybe_non_contig(tensor, requires_grad):
+        ret = make_non_contiguous(tensor) if non_contiguous else tensor.new(tensor.size())
+        ret.requires_grad = requires_grad
+        return ret
 
     if isinstance(dummy_out, tuple):
-        grad_y = tuple(Variable(maybe_non_contig(torch.randn(x.size())), requires_grad=x.requires_grad)
+        grad_y = tuple(maybe_non_contig(x.double().randn_like(), x.requires_grad)
                        for x in dummy_out if isinstance(x, Variable))
     else:
-        grad_y = (Variable(maybe_non_contig(torch.randn(dummy_out.size())), requires_grad=dummy_out.requires_grad),)
+        grad_y = (maybe_non_contig(dummy_out.double().randn_like(), dummy_out.requires_grad),)
 
     return grad_y
 
@@ -2458,7 +2493,9 @@ def exclude_tensor_method(name, test_name):
         'test_clamp_max',
         'test_slice',
         'test_where',
-        'test_where_broadcast_all'
+        'test_where_broadcast_all',
+        'test__scalar_sum_scalar_arg',
+        'test__scalar_sum_tensor_arg',
     }
     # there are no out-of-place tensor equivalents for these
     exclude_outplace_tensor_method = {
@@ -2533,7 +2570,7 @@ def run_functional_checks(test_case, test_name, name, apply_fn, run_grad_checks,
 
     self_variable = f_args_variable[0]
     if isinstance(output_variable, torch.autograd.Variable) and self_variable is not None:
-        output_variable.backward(torch.randn(*output_variable.size()).type_as(output_variable.data))
+        output_variable.backward(output_variable.randn_like())
         test_case.assertTrue(type(self_variable.data) == type(self_variable.grad.data))
         test_case.assertTrue(self_variable.size() == self_variable.grad.size())
 
@@ -2591,7 +2628,7 @@ for test in method_tests:
                     args_variable = create_input(args, requires_grad=False)
                     output_variable = getattr(self_variable, name)(*args_variable)
                     if isinstance(output_variable, torch.autograd.Variable):
-                        output_variable.backward(torch.randn(*output_variable.size()).type_as(output_variable.data))
+                        output_variable.backward(output_variable.randn_like())
                         self.assertTrue(type(self_variable.data) == type(self_variable.grad.data))
                         self.assertTrue(self_variable.size() == self_variable.grad.size())
 
@@ -2628,7 +2665,7 @@ for test in method_tests:
                             if i.grad is not None:
                                 i.grad.data.zero_()
                         for io, o in zip(inplace_output_variable, output_variable):
-                            grad = torch.randn(*io.size()).double()
+                            grad = io.randn_like().double()
                             io.backward(grad)
                             o.backward(grad)
                         for inp_i, i in zip((inplace_self_variable,) + inplace_args_variable,

@@ -35,7 +35,7 @@
 #define COPY_FROM_ARRAY_CUDA(ELTYPE, ARRAY, STORAGE, SIZE, CONVERSION)  \
 { \
   ELTYPE *arrdata = (ELTYPE*)PyArray_DATA(ARRAY);                       \
-  std::unique_ptr<load_real> data_guard(new load_real[SIZE]);           \
+  std::unique_ptr<load_real[]> data_guard(new load_real[SIZE]);         \
   load_real *data = data_guard.get();                                   \
   for (size_t i=0; i<SIZE; i++) {                                       \
     data[i] = arrdata[i];                                               \
@@ -51,7 +51,7 @@
 #define COPY_FROM_ARRAY_CUDA(ELTYPE, ARRAY, STORAGE, SIZE, CONVERSION)  \
 { \
   ELTYPE *arrdata = (ELTYPE*)PyArray_DATA(ARRAY);                       \
-  std::unique_ptr<load_real> data_guard(new load_real[SIZE]);           \
+  std::unique_ptr<load_real[]> data_guard(new load_real[SIZE]);         \
   load_real *data = data_guard.get();                                   \
   for (size_t i=0; i<SIZE; i++) {                                       \
     data[i] = CONVERSION(arrdata[i]);                                   \

@@ -84,7 +84,7 @@ private:
   std::vector<std::unique_ptr<Scope> > children_;
 public:
   Scope() {
-    name_ = stringToSymbol("");
+    name_ = Symbol("");
     parent_ = NULL;
   }
   Scope(Scope* parent, Symbol name) {
@@ -115,13 +115,13 @@ public:
     return name_;
   }
   std::string namesFromRoot(const std::string& separator="/") {
-    std::string out = std::string(symbolToString(this->name_));
+    std::string out = this->name_.toString();
     if (this->isRoot()) {
       return out;
     }
     Scope* parent = this->parent_;
     while (!parent->isRoot()) {
-      out = std::string(symbolToString(parent->name_)) + separator + out;
+      out = std::string(parent->name_.toString()) + separator + out;
       parent = parent->parent_;
     }
     return out;
@@ -545,7 +545,7 @@ public:
   }
   template<typename T>
   T* expect() {
-    JIT_ASSERTM(T::Kind == kind(), "expected a %s but found a %s", symbolToString(T::Kind), symbolToString(kind()));
+    JIT_ASSERTM(T::Kind == kind(), "expected a %s but found a %s", Symbol(T::Kind).toString(), kind().toString());
     return static_cast<T*>(this);
   }
 
@@ -703,7 +703,7 @@ public:
     return output_;
   }
   void push_scope(const std::string& scope_name) {
-    current_scope_ = current_scope_->push(stringToSymbol(scope_name));
+    current_scope_ = current_scope_->push(Symbol(scope_name));
   }
   void pop_scope() {
     current_scope_ = current_scope_->parent();
@@ -969,7 +969,7 @@ std::ostream& operator<<(std::ostream & out, const Node & t);
 
  // execute a Python function, used for Ops we can't optimize but that we want to optimize around
 struct PythonOp : public Node {
-  static const NodeKind Kind = kPythonOp;
+  static const BuiltinSymbol Kind = kPythonOp;
   PythonOp(Graph * graph)
   : Node(graph,kPythonOp) {}
   PythonOp* init(THPObjectPtr&& pyobj, const std::string & cconv, bool is_legacy, std::vector<VariableFlags> && var_flags, pyobj_list&& scalar_args) {
@@ -1010,7 +1010,7 @@ inline Node * Graph::createPythonOp(THPObjectPtr&& pyobj, const std::string & cc
 // A Cpp operator is an operator which dispatches directly to an autograd function.
 // TODO: These are not executable without reentrant engine.
 struct CppOp : public Node {
-  static const NodeKind Kind = kCppOp;
+  static const BuiltinSymbol Kind = kCppOp;
   CppOp(Graph * g)
   : Node(g,kCppOp) {}
   std::shared_ptr<torch::autograd::Function> fn;
