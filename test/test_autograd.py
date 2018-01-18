@@ -2504,9 +2504,9 @@ def run_grad_and_gradgrad_checks(test_case, name, test_name, apply_method, outpu
         atol = gradgradcheck_precision_override['atol']
         rtol = gradgradcheck_precision_override['rtol']
         test_case.assertTrue(gradgradcheck(apply_method, input_variables, None, atol=atol, rtol=rtol,
-                                           gen_grad_outputs_non_contig=True))
+                                           gen_non_contig_grad_outputs=True))
     else:
-        test_case.assertTrue(gradgradcheck(apply_method, input_variables, gen_grad_outputs_non_contig=True))
+        test_case.assertTrue(gradgradcheck(apply_method, input_variables, gen_non_contig_grad_outputs=True))
 
 
 def run_functional_checks(test_case, test_name, name, apply_fn, run_grad_checks,
