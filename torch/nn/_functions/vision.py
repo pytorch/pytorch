@@ -47,7 +47,7 @@ class GridSampler(Function):
                              .format(padding_mode))
 
         grid_sz = grid.size()
-        backend = type2backend[type(input)]
+        backend = type2backend[input.type()]
         output = input.new(grid_sz[0], input.size(1), grid_sz[1], grid_sz[2])
         backend.SpatialGridSamplerBilinear_updateOutput(backend.library_state, input, grid, output, ctx.padding_mode)
         return output
@@ -58,7 +58,7 @@ class GridSampler(Function):
         input, grid = ctx.saved_tensors
         padding_mode = ctx.padding_mode
 
-        backend = type2backend[type(input)]
+        backend = type2backend[input.type()]
         grad_input = input.new(input.size())
         grad_grid = grid.new(grid.size())
         backend.SpatialGridSamplerBilinear_updateGradInput(
