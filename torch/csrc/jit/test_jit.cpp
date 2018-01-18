@@ -1,88 +1,27 @@
 #include <Python.h>
-#include <iostream>
 #include "torch/csrc/jit/fusion_compiler.h"
 #include "torch/csrc/jit/code_template.h"
-#include "torch/csrc/assertions.h"
 #include "torch/csrc/jit/ir.h"
 #include "torch/csrc/jit/attributes.h"
 #include "torch/csrc/jit/interned_strings.h"
-#include <vector>
 #include "torch/csrc/jit/interpreter.h"
+#include "torch/csrc/jit/symbolic_variable.h"
+#include "torch/csrc/jit/autodiff.h"
+
+#include "torch/csrc/assertions.h"
+#include "torch/csrc/utils/auto_gil.h"
+
+#include "torch/csrc/autograd/variable.h"
+#include "torch/csrc/autograd/python_engine.h"
+
+#include <vector>
+#include <iostream>
 
 namespace torch { namespace jit {
 
-// help build Graphs for tests
-struct Var {
-  Var() : v(nullptr) {}
-  Var(Value * v) : v(v) {}
-  static Var Input(Graph & g, std::string name = "") {
-    return g.addInput(name);
-  }
-  void addAsOutput() {
-    v->owningGraph()->registerOutput(v);
-  }
-  static Var cat(ArrayRef<Var> inputs, int32_t dim) {
-    Node* n;
-    auto r = create(kcat, inputs, 1, &n)[0];
-    n->i_(kdim, dim);
-    return r;
-  }
+using Var = SymbolicVariable;
 
-  static std::vector<Var> create(Symbol kind, ArrayRef<Var> inputs,
-                                 int num_outputs = 1,
-                                 Node** created_node = nullptr,
-                                 Graph * g = nullptr) {
-      if(g == nullptr) {
-        g = inputs.at(0).value()->owningGraph();
-      }
-      Node * n = g->appendNode(g->create(kind, num_outputs));
-      for(auto i : inputs) {
-        n->addInput(i.value());
-      }
-      if(created_node) {
-        *created_node = n;
-      }
-      std::vector<Var> out;
-      for(auto v : n->outputs()) {
-        out.emplace_back(v);
-      }
-      return out;
-  }
-  Var operator*(Var rhs) {
-    return create(kmul, {*this, rhs})[0];
-  }
-  Var operator+(Var rhs) {
-    Node * n;
-    auto r = create(kadd, {*this, rhs}, 1, &n)[0];
-    n->t_(kalpha, at::Scalar(1).toTensor());
-    return r;
-  }
-
-  Var mm(Var rhs) {
-    return create(s("mm"), {*this, rhs})[0];
-  }
-  Var sigmoid() {
-    return create(ksigmoid, {*this})[0];
-  }
-  Var tanh() {
-    return create(ktanh, {*this})[0];
-  }
-  std::vector<Var> chunk(int32_t chunks, uint32_t dim) {
-    Node * n;
-    auto r = create(s("chunk"), { *this }, chunks, &n);
-    n->i_(s("chunks"), chunks)
-    ->i_(s("dim"), dim);
-    return r;
-  }
-  Value * value() const {
-    return v;
-  }
-private:
-  static Symbol s(const char * s_) {
-    return Symbol(s_);
-  }
-  Value * v;
-};
+using namespace torch::autograd;
 
 template<typename T>
 static std::ostream & operator<<(std::ostream & out, const std::vector<T> & list) {
@@ -160,8 +99,8 @@ static void fusionTests() {
 
   auto testSimple = [&] {
     Graph graph;
-    Var i0 = Var::Input(graph);
-    Var i1 = Var::Input(graph);
+    Var i0 = Var::asNewInput(graph);
+    Var i1 = Var::asNewInput(graph);
     auto o0 = i0 * i1;
     o0.addAsOutput();
     auto a = at::CUDA(at::kFloat).rand({3,4});
@@ -179,11 +118,11 @@ static void fusionTests() {
 
     Graph graph;
 
-    Var i0 = Var::Input(graph);
-    Var i1 = Var::Input(graph);
-    Var i2 = Var::Input(graph);
-    Var i3 = Var::Input(graph);
-    Var i4 = Var::Input(graph);
+    Var i0 = Var::asNewInput(graph);
+    Var i1 = Var::asNewInput(graph);
+    Var i2 = Var::asNewInput(graph);
+    Var i3 = Var::asNewInput(graph);
+    Var i4 = Var::asNewInput(graph);
 
     auto p22 =  i4.sigmoid();
     auto p20 = i3.sigmoid();
@@ -247,8 +186,8 @@ static void fusionTests() {
 
   auto testConcat = [&](int dim) {
     Graph graph;
-    Var i0 = Var::Input(graph);
-    Var i1 = Var::Input(graph);
+    Var i0 = Var::asNewInput(graph);
+    Var i1 = Var::asNewInput(graph);
     auto o0 = i0 * i1;
     o0.addAsOutput();
     Var::cat({i0, o0}, dim).addAsOutput();
@@ -496,7 +435,109 @@ void interpStageTest() {
     JIT_ASSERT(exactlyEqual(outputs[1],cx));
 }
 
+using var_meta_type = std::vector<int64_t>;
+using var_meta_list = std::vector<var_meta_type>;
+using test_fn_type = std::function<variable_list(const variable_list&)>;
+
+struct ADTestSpec {
+  ADTestSpec(const char *name, var_meta_list input_meta, test_fn_type test_fn)
+    : name(name)
+    , input_meta(input_meta)
+    , test_fn(test_fn) {}
+
+  variable_list operator()(const variable_list& inputs) const {
+    return test_fn(inputs);
+  };
+
+  std::vector<Variable> make_vars() const {
+    std::vector<Variable> out;
+    for (const auto & m : input_meta) {
+      out.emplace_back(make_variable(at::CPU(at::kFloat).tensor(m).normal_(), true));
+    }
+    return out;
+  }
+
+  const char *name;
+  var_meta_list input_meta;
+  test_fn_type test_fn;
+};
+
+variable_list get_grad_outputs(const variable_list& vars) {
+  return fmap(vars, [](const Variable& v) -> Variable {
+                      return v.type().tensor(v.sizes()).normal_();
+                    });
+}
+
+std::shared_ptr<Graph> trace(const ADTestSpec& test, const variable_list& vars_in) {
+  std::shared_ptr<tracer::TracingState> state;
+  variable_list trace_vars_in;
+  std::tie(state, trace_vars_in) = tracer::enter(fmap<tracer::TraceInput>(vars_in), 1);
+  auto trace_vars_out = test(trace_vars_in);
+  tracer::exit(trace_vars_out);
+  return state->graph;
+}
+
+variable_list grad(const variable_list& outputs, const variable_list& inputs, const variable_list& grad_outputs) {
+  static const auto get_edge = [](const Variable& v) -> edge_type {
+    return std::make_pair(v.grad_fn() ? v.grad_fn() : v.grad_accumulator(), v.output_nr());
+  };
+  auto & engine = torch::autograd::python::PythonEngine::getDefaultEngine();
+  return engine.execute(fmap(outputs, get_edge), grad_outputs, true, false, fmap(inputs, get_edge));
+}
+
+void assertAllClose(const tensor_list& a, const tensor_list& b) {
+  JIT_ASSERT(a.size() == b.size());
+  for (std::size_t i = 0; i < a.size(); ++i) {
+    JIT_ASSERT(a[i].is_same_size(b[i]));
+    JIT_ASSERT(a[i].allclose(b[i]));
+  }
+}
+
+void testADFormulas() {
+  static const auto unwrap = [](const Variable& v) { return v.data(); };
+
+  using VL = variable_list;
+  static const var_meta_list binary_pointwise = {{2, 3, 4, 5}, {2, 3, 4, 5}};
+  static const std::vector<ADTestSpec> ad_tests = {
+    {"add", binary_pointwise, [](const VL& v) -> VL { return {v[0] + v[1]}; }},
+    {"sub", binary_pointwise, [](const VL& v) -> VL { return {v[0] - v[1]}; }},
+    {"mul", binary_pointwise, [](const VL& v) -> VL { return {v[0] * v[1]}; }},
+  };
+
+  // We have to release the GIL inside this method, because if we happen to
+  // initialize the autograd engine here, the newly spawned worker threads will
+  // try to initialize their PyThreadState*, and they need the GIL for this.
+  AutoNoGIL _no_gil;
+  for (const auto & test : ad_tests) {
+    // Get reference values form autograd
+    auto vars_in        = test.make_vars();
+    auto vars_out       = test(vars_in);
+    auto var_grads_in   = get_grad_outputs(vars_out);
+    auto var_grads_out  = grad(vars_out, vars_in, var_grads_in);
+
+    // Trace and differentiate the op
+    auto graph = trace(test, vars_in);
+    differentiate(graph);
+    Code bytecode {graph};
+    InterpreterState interpreter {bytecode};
+
+    // Get outputs from the interpreter
+    auto tensors_in                = fmap(vars_in, unwrap);
+    auto tensor_grads_in           = fmap(var_grads_in, unwrap);
+    tensor_list tensors_out, tensor_grads_out;
+    interpreter.runOneStage(tensors_in, tensors_out);
+    interpreter.runOneStage(tensor_grads_in, tensor_grads_out);
+
+    // Compare results
+    auto expected_tensors_out      = fmap(vars_out, unwrap);
+    auto expected_tensor_grads_out = fmap(var_grads_out, unwrap);
+    assertAllClose(tensors_out,      expected_tensors_out);
+    assertAllClose(tensor_grads_out, expected_tensor_grads_out);
+  }
+}
+
 void runJITCPPTests() {
+  testADFormulas();
   interpTest();
   interpStageTest();
   codeTemplateTest();
