@@ -23,6 +23,12 @@ VIEW_FUNCTIONS = {
     'squeeze', 't', 'transpose', 'unfold', 'unsqueeze', 'view',
 }
 
+# In principle this should live in derivatives.yaml, but I could not
+# think of a good syntax for it
+HARDCODED_DIFFERENTIABLE_OUTPUTS = {
+    '_cudnn_rnn': (0, 1, 2),
+}
+
 
 def format_return_type(returns):
     if len(returns) == 0:
