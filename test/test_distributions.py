@@ -1024,7 +1024,7 @@ class TestDistributions(TestCase):
             (FisherSnedecor, {
                 'df1': torch.Tensor([1, 1]),
                 'df2': torch.Tensor([1, 1, 1]),
-            })
+            }),
             (Gumbel, {
                 'loc': torch.Tensor([[0, 0]]),
                 'scale': torch.Tensor([1, 1, 1, 1])
