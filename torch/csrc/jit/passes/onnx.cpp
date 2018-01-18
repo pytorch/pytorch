@@ -154,7 +154,7 @@ void ToONNX(std::shared_ptr<tracer::TracingState>& state, bool aten) {
 
     py::object raw_output = onnx.attr("_run_symbolic_function")(ctx.graph, n, py_inputs, aten);
 
-    processSymbolicOutput(symbolToString(n->kind()), n, raw_output);
+    processSymbolicOutput(n->kind().toString(), n, raw_output);
   };
 
   auto callPySymbolicMethod = [&](PythonOp* op) {

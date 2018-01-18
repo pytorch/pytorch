@@ -37,16 +37,16 @@ void initPythonIRBindings(PyObject * module_) {
     .GS(eraseInput)
     .GS(registerOutput)
     .def("create",[](Graph & g, const char * str) {
-      return g.create(stringToSymbol(str));
+      return g.create(Symbol(str));
     })
     .def("create",[](Graph & g, const char * str, size_t noutputs) {
-      return g.create(stringToSymbol(str), noutputs);
+      return g.create(Symbol(str), noutputs);
     })
     .def("create",[](Graph & g, const char * str, const std::vector<Value*> & inputs) {
-      return g.create(stringToSymbol(str),inputs);
+      return g.create(Symbol(str),inputs);
     })
     .def("create",[](Graph & g, const char * str, const std::vector<Value*> & inputs, size_t noutputs) {
-      return g.create(stringToSymbol(str),inputs, noutputs);
+      return g.create(Symbol(str),inputs, noutputs);
     })
     .GS(createConstant)
     .GS(createFusionGroup)
@@ -146,10 +146,10 @@ void initPythonIRBindings(PyObject * module_) {
 #undef AS
 #define CREATE_ACCESSOR(Kind,method) \
     def(#method "_",[](Node & n, const char * name, Kind##Attr::ValueType v) { \
-      return n . method ## _(stringToSymbol(name), std::move(v)); \
+      return n . method ## _(Symbol(name), std::move(v)); \
     }) \
     .def(#method, [](Node & n, const char * name) { \
-      return n.method(stringToSymbol(name)); \
+      return n.method(Symbol(name)); \
     })
     .CREATE_ACCESSOR(Float,f)
     .CREATE_ACCESSOR(Floats,fs)
@@ -163,19 +163,19 @@ void initPythonIRBindings(PyObject * module_) {
     .CREATE_ACCESSOR(Graphs,gs)
 #undef CREATE_ACCESSOR
     .def("z_",[](Node & n, const char * name, at::Tensor v) {
-        return n.t_(stringToSymbol(name), std::move(v.view({})));
+        return n.t_(Symbol(name), std::move(v.view({})));
     })
     .def("z",[](Node & n, const char * name) {
-        return n.t(stringToSymbol(name));
+        return n.t(Symbol(name));
     })
     .def("zs_",[](Node & n, const char * name, TensorsAttr::ValueType v) {
         for (size_t i = 0; i < v.size(); ++ i) {
             v[i] = v[i].view({});
         }
-        return n.ts_(stringToSymbol(name), std::move(v));
+        return n.ts_(Symbol(name), std::move(v));
     })
     .def("zs",[](Node & n, const char * name) {
-        return n.ts(stringToSymbol(name));
+        return n.ts(Symbol(name));
     })
     .def("pyobj",[](Node & n) {
       return py::handle(n.expect<PythonOp>()->pyobj.get()).cast<py::object>();

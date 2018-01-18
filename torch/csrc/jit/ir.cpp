@@ -150,7 +150,7 @@ void printAttributes(std::ostream & out, const Node * n) {
   for(auto name : names) {
     if(i++ > 0)
       out << ", ";
-    out << symbolToString(name) <<"=";
+    out << name.toString() <<"=";
     switch(n->kindOf(name)) {
       case AttributeKind::f:
         out << n->f(name);
@@ -234,7 +234,7 @@ std::ostream& printNode(std::ostream & out, const Node * n, std::vector<const No
   IR_ELSEIFM_CONST(CppOp)
     out << "CppOp[" << value->name() << "]";
   IR_ELSE()
-    out << symbolToString(n->kind());
+    out << n->kind().toString();
     if(n->hasAttributes()) {
       printAttributes(out,n);
     }
