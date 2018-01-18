@@ -27,6 +27,8 @@ import unittest
 from collections import namedtuple
 from itertools import product
 
+import sys
+del sys.path[sys.path.index('/media/vishwak/Official/Projects/pytorch')]
 import torch
 from common import TestCase, run_tests, set_rng_seed
 from torch.autograd import Variable, grad, gradcheck
@@ -1475,12 +1477,11 @@ class TestKL(TestCase):
         gumbel = pairwise(Gumbel, [-2.0, 4.0, -3.0, 6.0], [1.0, 2.5, 1.0, 2.5])
         laplace = pairwise(Laplace, [-2.0, 4.0, -3.0, 6.0], [1.0, 2.5, 1.0, 2.5])
         normal = pairwise(Normal, [-2.0, 4.0, -3.0, 6.0], [1.0, 2.5, 1.0, 2.5])
-        pareto = pairwise(Pareto, [2.5, 4.0, 2.5, 4.0], [3.0, 7.0, 3.0, 7.0])
-        uniform_interval = pairwise(Uniform, [0, 0, 0.4, 0.8], [1, 0.2, 0.6, 1])
+        pareto = pairwise(Pareto, [2.5, 4.0, 2.5, 4.0], [1.5, 3.5, 1.5, 3.5])
         uniform_within_unit = pairwise(Uniform, [0.15, 0.95, 0.2, 0.8], [0.1, 0.9, 0.25, 0.75])
         uniform_positive = pairwise(Uniform, [1, 1.5, 2, 4], [1.2, 2.0, 3, 7])
         uniform_real = pairwise(Uniform, [-2, -1, 0, 2], [-1, 1, 1, 4])
-        uniform_pareto = pairwise(Uniform, [2.5, 7.5, 2.5, 7.5], [3.0, 6.0, 3.0, 6.0])
+        uniform_pareto = pairwise(Uniform, [6.5, 8.5, 6.5, 8.5], [7.5, 7.5, 9.5, 9.5])
         dirichlet = pairwise(Dirichlet, [[0.1, 0.2, 0.7],
                                          [0.5, 0.4, 0.1],
                                          [0.33, 0.33, 0.34],
@@ -1588,7 +1589,7 @@ class TestKL(TestCase):
                 actual = kl_divergence(p, q)
                 message = 'Incorrect KL({}, {}).\nExpected (Monte Carlo): {}\nActual (analytic): {}'.format(
                         type(p).__name__, type(q).__name__, expected, actual)
-                if torch.abs(actual - expected).max() > self.precision:
+                if torch.abs(actual[actual == actual] - expected[expected == expected]).max() > self.precision:
                     for sample_extra in self.sampling_extra:
                         x = torch.cat([x, p.sample(sample_shape=(sample_extra,))], 0)
                         expected = (p.log_prob(x) - q.log_prob(x)).mean(0)
