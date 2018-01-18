@@ -28,9 +28,9 @@ static inline void THNN_(Col2Im_shapeCheck)(
   long nOutputPlane = nInputPlane / (kW * kH);
 
   if (outputWidth < 1 || outputHeight < 1) {
-    THError("Given input size: (%d x %d). "
-            "Calculated output size: (%d x %d x %d). Output size is too small",
-            nInputPlane, inputLength, nOutputPlane, outputHeight, outputWidth);
+    THError("Given input size: (%lld x %lld). "
+            "Calculated output size: (%lld x %d x %d). Output size is too small",
+            (long long)nInputPlane, (long long)inputLength, (long long)nOutputPlane, outputHeight, outputWidth);
   }
 }
 

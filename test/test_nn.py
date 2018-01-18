@@ -5143,6 +5143,20 @@ new_module_tests = [
         check_gradgrad=False,
         test_cuda=True,
     ),
+    dict(
+        fullname='Unfold_int_input',
+        constructor=lambda: nn.Unfold(2, 1, 0, 1),
+        input_size=(2, 4, 3, 3),
+        check_gradgrad=False,
+        test_cuda=True,
+    ),
+    dict(
+        fullname='Fold_int_input',
+        constructor=lambda: nn.Fold(3, 2, 1, 0, 1),
+        input_size=(2, 16, 4),
+        check_gradgrad=False,
+        test_cuda=True,
+    ),
 ]
 
 

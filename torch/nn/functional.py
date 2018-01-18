@@ -1834,15 +1834,21 @@ def normalize(input, p=2, dim=1, eps=1e-12):
     return input / input.norm(p, dim, True).clamp(min=eps).expand_as(input)
 
 
+def assert_int_or_pair(arg, arg_name, message):
+    assert isinstance(arg, int) or len(arg) == 2, message.format(arg_name)
+
+
 def unfold(input, kernel_size, dilation=1, padding=0, stride=1):
     r"""
     See :class:`torch.nn.Unfold` for details
     """
+
     if input is not None and input.dim() == 4:
-        assert len(kernel_size) == 1 or len(kernel_size) == 2, 'kernel_size must be length 1 or 2 for 4D input'
-        assert len(dilation) == 1 or len(dilation) == 2, 'dilation must be length 1 or 2 for 4D input'
-        assert len(padding) == 1 or len(padding) == 2, 'padding must be length 1 or 2 for 4D input'
-        assert len(stride) == 1 or len(stride) == 2, 'stride must be length 1 or 2 for 4D input'
+        msg = '{} must be int or 2-tuple for 4D input'
+        assert_int_or_pair(kernel_size, 'kernel_size', msg)
+        assert_int_or_pair(dilation, 'dilation', msg)
+        assert_int_or_pair(padding, 'padding', msg)
+        assert_int_or_pair(stride, 'stride', msg)
 
         return Im2Col.apply(input, _pair(kernel_size),
                             _pair(dilation), _pair(padding), _pair(stride))
@@ -1855,11 +1861,12 @@ def fold(input, output_size, kernel_size, dilation=1, padding=0, stride=1):
     See :class:`torch.nn.Fold` for details
     """
     if input is not None and input.dim() == 3:
-        assert len(output_size) == 1 or len(output_size) == 2, 'output_size must be length 1 or 2 for 3D input'
-        assert len(kernel_size) == 1 or len(kernel_size) == 2, 'kernel_size must be length 1 or 2 for 3D input'
-        assert len(dilation) == 1 or len(dilation) == 2, 'dilation must be length 1 or 2 for 3D input'
-        assert len(padding) == 1 or len(padding) == 2, 'padding must be length 1 or 2 for 3D input'
-        assert len(stride) == 1 or len(stride) == 2, 'stride must be length 1 or 2 for 3D input'
+        msg = '{} must be int or 2-tuple for 3D input'
+        assert_int_or_pair(output_size, 'output_size', msg)
+        assert_int_or_pair(kernel_size, 'kernel_size', msg)
+        assert_int_or_pair(dilation, 'dilation', msg)
+        assert_int_or_pair(padding, 'padding', msg)
+        assert_int_or_pair(stride, 'stride', msg)
 
         return Col2Im.apply(input, _pair(output_size), _pair(kernel_size),
                             _pair(dilation), _pair(padding), _pair(stride))
