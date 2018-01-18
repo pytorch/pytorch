@@ -258,7 +258,7 @@ class TestDistributions(TestCase):
                 try:
                     self.assertTrue(type(unwrap(dist.sample())) is type(unwrap(dist.enumerate_support())),
                                     msg=('{} example {}/{}, return type mismatch between ' +
-                                         'sample and enumerate_support.').format(Dist.__name__, i, len(params)))
+                                         'sample and enumerate_support.').format(Dist.__name__, i + 1, len(params)))
                 except NotImplementedError:
                     pass
 
@@ -1230,7 +1230,7 @@ class TestDistributionShapes(TestCase):
                     if not expected_shape:
                         expected_shape = torch.Size((1,))  # TODO Remove this once scalars are supported.
                     message = '{} example {}/{}, shape mismatch. expected {}, actual {}'.format(
-                        Dist.__name__, i, len(params), expected_shape, actual_shape)
+                        Dist.__name__, i + 1, len(params), expected_shape, actual_shape)
                     self.assertEqual(actual_shape, expected_shape, message=message)
                 except NotImplementedError:
                     continue
@@ -1620,7 +1620,7 @@ class TestKL(TestCase):
                 ignore = (expected == float('inf'))
                 expected[ignore] = actual[ignore]
                 self.assertEqual(actual, expected, prec=0.2, message='\n'.join([
-                    '{} example {}/{}, incorrect .entropy().'.format(Dist.__name__, i, len(params)),
+                    '{} example {}/{}, incorrect .entropy().'.format(Dist.__name__, i + 1, len(params)),
                     'Expected (monte carlo) {}'.format(expected),
                     'Actual (analytic) {}'.format(actual),
                     'max error = {}'.format(torch.abs(actual - expected).max()),
@@ -1646,7 +1646,7 @@ class TestConstraints(TestCase):
                     if is_dependent(constraint):
                         continue
                     message = '{} example {}/{} parameter {} = {}'.format(
-                        Dist.__name__, i, len(params), name, value)
+                        Dist.__name__, i + 1, len(params), name, value)
                     self.assertTrue(constraint.check(value).all(), msg=message)
 
     def test_support_contains(self):
@@ -1657,7 +1657,7 @@ class TestConstraints(TestCase):
                 value = dist.sample()
                 constraint = dist.support
                 message = '{} example {}/{} sample = {}'.format(
-                    Dist.__name__, i, len(params), value)
+                    Dist.__name__, i + 1, len(params), value)
                 self.assertTrue(constraint.check(value).all(), msg=message)
 
 
