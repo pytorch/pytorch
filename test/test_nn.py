@@ -3254,6 +3254,9 @@ class TestNN(NNTestCase):
 
         self.assertEqual(nn.BCEWithLogitsLoss()(output, target), nn.BCELoss()(sigmoid(output), target))
 
+        self.assertEqual(nn.BCEWithLogitsLoss(reduce=False)(output, target),
+                         nn.BCELoss(reduce=False)(sigmoid(output), target))
+
         weight = torch.FloatTensor(1).uniform_()
         self.assertEqual(nn.BCEWithLogitsLoss(weight)(output, target), nn.BCELoss(weight)(sigmoid(output), target))
 
@@ -4343,6 +4346,19 @@ def bceloss_weights_no_reduce_test():
         pickle=False)
 
 
+def bce_with_logistic_no_reduce_test():
+    t = torch.randn(15, 10).gt(0).double()
+    sigmoid = nn.Sigmoid()
+    return dict(
+        fullname='BCEWithLogitsLoss_no_reduce',
+        constructor=wrap_functional(
+            lambda i: F.binary_cross_entropy_with_logits(i, Variable(t.type_as(i.data)), reduce=False)),
+        input_fn=lambda: torch.rand(15, 10).clamp_(2.8e-2, 1 - 2.8e-2),
+        reference_fn=lambda i, m: -(t * sigmoid(i).log() + (1 - t) * (1 - sigmoid(i)).log()),
+        check_gradgrad=False,
+        pickle=False)
+
+
 def kldivloss_no_reduce_test():
     t = Variable(torch.randn(10, 10))
     return dict(
@@ -4559,6 +4575,7 @@ new_module_tests = [
     poissonnllloss_no_reduce_test(),
     bceloss_no_reduce_test(),
     bceloss_weights_no_reduce_test(),
+    bce_with_logistic_no_reduce_test(),
     kldivloss_no_reduce_test(),
     l1loss_no_reduce_test(),
     mseloss_no_reduce_test(),
