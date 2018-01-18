@@ -100,6 +100,20 @@ EXAMPLES = [
         {'rate': Variable(torch.randn(5, 5).abs(), requires_grad=True)},
         {'rate': Variable(torch.randn(1).abs(), requires_grad=True)},
     ]),
+    Example(FisherSnedecor, [
+        {
+            'df1': Variable(torch.randn(5, 5).abs(), requires_grad=True),
+            'df2': Variable(torch.randn(5, 5).abs(), requires_grad=True),
+        },
+        {
+            'df1': Variable(torch.randn(1).abs(), requires_grad=True),
+            'df2': Variable(torch.randn(1).abs(), requires_grad=True),
+        },
+        {
+            'df1': Variable(torch.Tensor([1.0])),
+            'df2': 1.0,
+        }
+    ]),
     Example(Gamma, [
         {
             'concentration': Variable(torch.exp(torch.randn(2, 3)), requires_grad=True),
@@ -109,16 +123,6 @@ EXAMPLES = [
             'concentration': Variable(torch.exp(torch.randn(1)), requires_grad=True),
             'rate': Variable(torch.exp(torch.randn(1)), requires_grad=True),
         },
-    ]),
-    Example(FisherSnedecor, [
-        {
-            'df1': Variable(torch.randn(5, 5).abs(), requires_grad=True),
-            'df2': Variable(torch.randn(5, 5).abs(), requires_grad=True),
-        },
-        {
-            'df1': Variable(torch.randn(1).abs(), requires_grad=True),
-            'df2': Variable(torch.randn(1).abs(), requires_grad=True),
-        }
     ]),
     Example(Gumbel, [
         {
@@ -1671,7 +1675,7 @@ class TestKL(TestCase):
                     actual = dist.entropy()
                 except NotImplementedError:
                     continue
-                x = dist.sample(sample_shape=(23000,))
+                x = dist.sample(sample_shape=(30000,))
                 expected = -dist.log_prob(x).mean(0)
                 if isinstance(actual, Variable):
                     actual = actual.data
