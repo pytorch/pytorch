@@ -77,8 +77,8 @@ bool THNN_(canUse32BitIndexMath)(THCState *state, int count, ...)
 #define DEVICE_LINEAR_GET(D_TENSOR, INDEX)                              \
   D_TENSOR.data[IndexToOffset<T, IndexType, Dims>::get(INDEX, D_TENSOR)]
 
-#define H2F(input) __half2float(input)
-#define F2H(input) __float2half(input)
+#define H2F(input) ScalarConvert<half, float>::to(input)
+#define F2H(input) ScalarConvert<float, half>::to(input)
 
 template <typename T, typename IndexType, int Dims>
 #if __CUDA_ARCH__ >= 350
