@@ -1,3 +1,6 @@
+from torch.distributions.transformed_distribution import TransformedDistribution
+
+
 class Bijector:
     """
     Abstract class `Bijector`. `Bijector` are bijective transformations with computable
@@ -8,11 +11,11 @@ class Bijector:
         self.add_inverse_to_cache = False
         self._intermediates_cache = {}
 
-    def __call__(self, value):
+    def __call__(self, base_distribution):
         """
-        Invokes the bijection x=>y
+        Applies the bijector to the input distribution. Returns a TransformedDistribution.
         """
-        return self.forward(value)
+        return TransformedDistribution(base_distribution, self)
 
     def forward(self, value):
         """
