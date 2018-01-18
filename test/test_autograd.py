@@ -220,23 +220,13 @@ class TestAutograd(TestCase):
         grad_sum = 2 * x.grad + y.grad
         x_hv = torch.autograd.grad(
             outputs=[grad_sum], grad_outputs=[torch.ones(2, 2)],
-            inputs=[x], create_graph=True, only_inputs=True)
+            inputs=[x], create_graph=True)
         expected_x_hv = torch.ones(2, 2) * 5
         expected_y_hv = torch.ones(2, 2) * 4
 
         self.assertEqual(x_hv[0].data, expected_x_hv)
         self.assertEqual(x.grad.data, x_grad)
         self.assertEqual(y.grad.data, y_grad)
-
-        grad_sum = 2 * x.grad + y.grad
-        x_hv = torch.autograd.grad(
-            outputs=grad_sum, inputs=x,
-            grad_outputs=torch.ones(2, 2),
-            only_inputs=False)
-
-        self.assertEqual(x_hv[0].data, expected_x_hv)
-        self.assertEqual(x.grad.data, x_grad)
-        self.assertEqual(y.grad.data, y_grad + expected_y_hv)
 
     def test_grad_nonleaf(self):
         x_init = Variable(torch.randn(2, 2), requires_grad=True)
@@ -287,6 +277,25 @@ class TestAutograd(TestCase):
         self.assertFalse(hook_called[0])
         self.assertIsNone(x.grad)
 
+    def test_sharded_grad(self):
+        leaves = [Variable(torch.zeros(5, 5), requires_grad=True) for _ in range(10)]
+        intermediates = [l * i + l * l for i, l in enumerate(leaves)]
+        loss = sum(v * i for i, v in enumerate(intermediates)).sum()
+
+        # define a helper for dividing intermediates into groups
+        def group(l, group_size):
+            return (l[i:i + group_size] for i in range(0, len(l), group_size))
+
+        # Compute the d loss / d intermediates in chunks of shard_size
+        shard_size = 2
+        d_intermediates = [d_i for intermediates_batch in group(intermediates, shard_size)
+                           for d_i in torch.autograd.grad(loss, intermediates_batch)]
+        # Compute rest of backward pass
+        torch.autograd.backward(intermediates, d_intermediates)
+
+        for i, l in enumerate(leaves):
+            self.assertEqual(l.grad.data, i * i * (1 + l.data))
+
     def test_backward_badcalls(self):
         x = Variable(torch.ones(1))
         with self.assertRaisesRegex(RuntimeError, 'does not require grad'):
@@ -303,8 +312,6 @@ class TestAutograd(TestCase):
         x = Variable(torch.ones(1), requires_grad=True)
         y = x ** 2
         torch.autograd.grad(y, x)  # this should succeed now
-        with self.assertRaisesRegex(RuntimeError, 'unreachable'):
-            torch.autograd.grad(x, y)
 
     def test_grad_unreachable(self):
         x = Variable(torch.ones(1), requires_grad=True)
@@ -312,17 +319,15 @@ class TestAutograd(TestCase):
         # Make sure x and y have grad accumulators allocated
         z = x * 2
         w = y * 2
-        with self.assertRaisesRegex(RuntimeError, 'unreachable'):
-            torch.autograd.grad(x * 2, [x, y])
 
-        grad_x, grad_y = torch.autograd.grad(x * 2, [x, y], allow_unused=True)
+        grad_x, grad_y = torch.autograd.grad(x * 2, [x, y])
         self.assertEqual(grad_x, x * 2)
         self.assertIsNone(grad_y)
 
         # This is slightly different than the case above, because z doesn't even
         # have a grad accumulator allocated.
         z = Variable(torch.ones(1), requires_grad=True)
-        grad_x, grad_z = torch.autograd.grad(x * 2, [x, z], allow_unused=True)
+        grad_x, grad_z = torch.autograd.grad(x * 2, [x, z])
         self.assertEqual(grad_x, x * 2)
         self.assertIsNone(grad_z)
 

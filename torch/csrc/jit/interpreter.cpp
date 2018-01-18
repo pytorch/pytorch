@@ -163,13 +163,6 @@ Operation createEvalOperation(CppOp * op) {
     for(size_t i = 0; i < inputs.size() - 1; i++) {
       v_inputs.push_back(builder.addInput(inputs[i], op->var_flags[i]));
     }
-    autograd::Engine::pre_callback_map callbacks;
-    callbacks.emplace(handle_in->forward_inputs.get(), [&](autograd::Function * _unused, autograd::variable_list & values) -> bool {
-      for(auto & v : values) {
-        outputs.push_back(builder.addOutput(v));
-      }
-      return false; // stop output and do not run DummyFunction
-    });
     // TODO: handle create_graph appropriately
     bool create_graph = true;
     // note: node handle_in->use_count() == 1 means that we are guarenteed that we have the only
@@ -177,7 +170,15 @@ Operation createEvalOperation(CppOp * op) {
     // However, it is possible for 'copied_next_fns' to grab functions used by _other_ handles,
     // and these functions will be executed in this run. Since these other handles
     // may still be alive, it is not safe to release the graph
-    engine.execute(handle_in->forward_outputs, v_inputs, true, create_graph, callbacks);
+    // TODO: we could cache this list in AutogradHandle (it's read only)
+    autograd::function_list output_edges;
+    int num_inputs = handle_in->forward_inputs->num_inputs;
+    output_edges.reserve(num_inputs);
+    for (int i = 0; i < num_inputs; ++i)
+      output_edges.emplace_back(handle_in->forward_inputs, i);
+    auto values = engine.execute(handle_in->forward_outputs, v_inputs, true, create_graph, output_edges);
+    for(auto & v : values)
+      outputs.push_back(builder.addOutput(v));
     builder.writeTo(outputs);
   };
 }
