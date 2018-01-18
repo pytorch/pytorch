@@ -17,12 +17,12 @@ struct InternedStrings {
     FORALL_BUILTIN_SYMBOLS(REGISTER_SYMBOL)
     #undef REGISTER_SYMBOL
   }
-  Symbol symbol(const std::string & s) {
+  uint32_t symbol(const std::string & s) {
     std::lock_guard<std::mutex> guard(mutex_);
     auto it = string_to_sym_.find(s);
     if(it != string_to_sym_.end())
       return it->second;
-    Symbol k = next_sym++;
+    uint32_t k = next_sym++;
     string_to_sym_[s] = k;
     sym_to_string_[k] = s;
     return k;
@@ -48,9 +48,9 @@ private:
     JIT_ASSERT(it != sym_to_string_.end());
     return it->second.c_str();
   }
-  std::unordered_map<std::string, Symbol> string_to_sym_;
-  std::unordered_map<Symbol, std::string> sym_to_string_;
-  Symbol next_sym;
+  std::unordered_map<std::string, uint32_t> string_to_sym_;
+  std::unordered_map<uint32_t, std::string> sym_to_string_;
+  uint32_t next_sym;
   std::mutex mutex_;
 };
 
@@ -59,11 +59,12 @@ static InternedStrings & globalStrings() {
   return s;
 }
 
-const char * symbolToString(Symbol s) {
-  return globalStrings().string(s);
+const char * Symbol::toString() const {
+  return globalStrings().string(*this);
 }
-Symbol stringToSymbol(const std::string & s) {
-  return globalStrings().symbol(s);
+
+Symbol::Symbol(const std::string & s)
+: value(globalStrings().symbol(s)) {
 }
 
 }}

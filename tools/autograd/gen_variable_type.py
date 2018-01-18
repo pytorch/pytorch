@@ -130,7 +130,7 @@ if (jit::tracer::isTracing( ${tensor_args} )) {
 """)
 
 RECORD_ATTRIBUTE = CodeTemplate("""\
-setattr(n, jit::stringToSymbol("${name}"), ${name});""")
+setattr(n, jit::Symbol("${name}"), ${name});""")
 
 
 def gen_variable_type(out, aten_declarations):
