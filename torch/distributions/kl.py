@@ -172,10 +172,10 @@ def _kl_beta_beta(p, q):
 @register_kl(Dirichlet, Dirichlet)
 def _kl_dirichlet_dirichlet(p, q):
     # From http://bariskurt.com/kullback-leibler-divergence-between-two-dirichlet-and-beta-distributions/
-    sum_p_alpha = p.alpha.sum(-1).expand_as(p.alpha)
-    sum_q_alpha = q.alpha.sum(-1).expand_as(q.alpha)
-    t1 = sum_p_alpha.lgamma() - p.alpha.lgamma().sum(-1)
-    t2 = sum_q_alpha.lgamma() - q.alpha.lgamma().sum(-1)
+    sum_p_alpha = p.alpha.sum(-1)
+    sum_q_alpha = q.alpha.sum(-1)
+    t1 = sum_p_alpha.lgamma() - sum_q_alpha.lgamma()
+    t2 = (p.alpha.lgamma() - q.alpha.lgamma()).sum(-1)
     t3 = (p.alpha - q.alpha) * (p.alpha.digamma() - sum_p_alpha.digamma().unsqueeze(-1))
     return t1 - t2 + t3.sum(-1)
 
@@ -375,7 +375,7 @@ def _kl_gumbel_infinity(p, q):
 def _kl_gumbel_normal(p, q):
     param_ratio = p.scale / q.std
     t1 = (param_ratio / math.sqrt(2 * math.pi)).log()
-    t2 = (math.pi * param_ratio) / 12
+    t2 = (math.pi * param_ratio * 0.5).pow(2) / 3
     t3 = ((p.loc + p.scale * _euler_gamma - q.mean) / q.std).pow(2) * 0.5
     return -t1 + t2 + t3 - (_euler_gamma + 1)
 
