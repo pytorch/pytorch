@@ -1640,9 +1640,9 @@ class TestKL(TestCase):
                 denominator += x.size(0)
                 expected = numerator / denominator
                 error = torch.abs(expected - actual) / (1 + expected)
-                if error.max() < self.precision:
+                if error[error == error].max() < self.precision:
                     break
-            self.assertLess(error.max(), self.precision, '\n'.join([
+            self.assertLess(error[error == error].max(), self.precision, '\n'.join([
                 'Incorrect KL({}, {}).'.format(type(p).__name__, type(q).__name__),
                 'Expected ({} Monte Carlo samples): {}'.format(denominator, expected),
                 'Actual (analytic): {}'.format(actual),
