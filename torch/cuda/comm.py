@@ -5,35 +5,39 @@ from torch._utils import _accumulate, _take_tensors, _flatten_dense_tensors, \
     _unflatten_sparse_tensors, _reorder_tensors_as
 
 
-def broadcast(*args, **kwargs):
+def broadcast(tensor, devices):
     """Broadcasts a tensor to a number of GPUs.
+
     Arguments:
         tensor (Tensor): tensor to broadcast.
         devices (Iterable): an iterable of devices among which to broadcast.
           Note that it should be like (src, dst1, dst2, ...), the first element
           of which is the source device to broadcast from.
+
     Returns:
         A tuple containing copies of the ``tensor``, placed on devices
         corresponding to indices from ``devices``.
     """
-    return torch._C._broadcast(*args, **kwargs)
+    return torch._C._broadcast(tensor, devices)
 
 
-def broadcast_coalesced(*args, **kwargs):
+def broadcast_coalesced(tensors, devices, buffer_size=10485760):
     """Broadcasts a sequence tensors to the specified GPUs.
     Small tensors are first coalesced into a buffer to reduce the number
     of synchronizations.
+
     Arguments:
         tensors (sequence): tensors to broadcast.
         devices (Iterable): an iterable of devices among which to broadcast.
           Note that it should be like (src, dst1, dst2, ...), the first element
           of which is the source device to broadcast from.
         buffer_size (int): maximum size of the buffer used for coalescing
+
     Returns:
         A tuple containing copies of the ``tensor``, placed on devices
         corresponding to indices from ``devices``.
     """
-    return torch._C._broadcast_coalesced(*args, **kwargs)
+    return torch._C._broadcast_coalesced(tensors, devices, buffer_size)
 
 
 def reduce_add(inputs, destination=None):
