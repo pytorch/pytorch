@@ -27,10 +27,9 @@ class TransformedDistribution(Distribution):
 
     def sample(self, sample_shape=torch.Size()):
         """
-        :returns: a sample y
-        :rtype: torch.autograd.Variable
-
-        Sample from base distribution and pass through bijector(s)
+        Generates a sample_shape shaped sample or sample_shape shaped batch of
+        samples if the distribution parameters are batched. Samples first from base distribution
+        and applies bijector.forward() for every bijector in the list.
         """
         x = self.base_dist.sample(sample_shape)
         next_input = x
@@ -43,10 +42,10 @@ class TransformedDistribution(Distribution):
 
     def rsample(self, sample_shape=torch.Size()):
         """
-        :returns: a sample y
-        :rtype: torch.autograd.Variable
-
-        Sample from base distribution and pass through bijector(s)
+        Generates a sample_shape shaped reparameterized sample or sample_shape
+        shaped batch of reparameterized samples if the distribution parameters
+        are batched. Samples first from base distribution and applies bijector.forward()
+        for every bijector in the list.
         """
         x = self.base_dist.rsample(sample_shape)
         next_input = x
@@ -67,18 +66,12 @@ class TransformedDistribution(Distribution):
 
     def log_prob(self, value):
         """
-        :param y: a value sampled from the transformed distribution
-        :type y: torch.autograd.Variable
-
-        :returns: the score (the log pdf) of y
-        :rtype: torch.autograd.Variable
-
         Scores the sample by inverting the bijector(s) and computing the score using the score
-        of the base distribution and the log det jacobian
+        of the base distribution and the log abs det jacobian
         """
         log_pdf = 0.0
         for bijector in reversed(self.bijectors):
-            log_pdf += bijector.inverse_log_det_jacobian(value)
             value = bijector.inverse(value)
+            log_pdf -= bijector.log_abs_det_jacobian(value)
         log_pdf += self.base_dist.log_prob(value)
         return log_pdf

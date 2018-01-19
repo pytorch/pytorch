@@ -32,6 +32,7 @@ from common import TestCase, run_tests, set_rng_seed
 from torch.autograd import Variable, grad, gradcheck
 from torch.distributions import (LogNormal, Normal, TransformedDistribution,
                                  Categorical, OneHotCategorical, Multinomial)
+from torch.distributions.bijectors import *
 from torch.distributions.constraints import Constraint, is_dependent
 from torch.distributions.utils import _finfo, probs_to_logits, logits_to_probs
 
@@ -241,7 +242,7 @@ class TestDistributions(TestCase):
         self._check_log_prob(TransformedDistribution(Normal(mean, std)), ref_log_prob)
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
-    def test_normal_sample(self):
+    def test_normal_no_bijectors_sample(self):
         set_rng_seed(0)  # see Note [Randomized statistical tests]
         for mean, std in product([-1.0, 0.0, 1.0], [0.1, 1.0, 10.0]):
             self._check_sampler_sampler(TransformedDistribution(Normal(mean, std)),
@@ -281,6 +282,7 @@ class TestConstraints(TestCase):
                 message = '{} example {}/{} sample = {}'.format(
                     Dist.__name__, i, len(params), value)
                 self.assertTrue(constraint.check(value).all(), msg=message)
+
 
 if __name__ == '__main__':
     run_tests()

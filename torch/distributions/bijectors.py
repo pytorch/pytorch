@@ -1,20 +1,22 @@
-from torch.distributions.transformed_distribution import TransformedDistribution
 from torch.distributions.utils import broadcast_all
+
 
 class Bijector:
     """
     Abstract class `Bijector`. `Bijector` are bijective transformations with computable
     inverse log det jacobians. They are meant for use in `TransformedDistribution`.
     """
+    is_injective = True
+    add_inverse_to_cache = False
 
     def __init__(self):
-        self.add_inverse_to_cache = False
         self._intermediates_cache = {}
 
     def __call__(self, base_distribution):
         """
         Applies the bijector to the input distribution. Returns a TransformedDistribution.
         """
+        from torch.distributions.transformed_distribution import TransformedDistribution
         return TransformedDistribution(base_distribution, self)
 
     def forward(self, value):
@@ -32,16 +34,15 @@ class Bijector:
                 x = self._intermediates_cache.pop((value, 'x'))
                 return x
             else:
-                print(self._intermediates_cache)
                 raise KeyError("Key {} in wasn't found in intermediates cache of {}".format(
                     (value, 'x'),
                     self.__class__.__name__))
 
         raise NotImplementedError()
 
-    def inverse_log_det_jacobian(self, value):
+    def log_abs_det_jacobian(self, value):
         """
-        Computes the inverse log det jacobian `log |dx/dy|`
+        Computes the log det jacobian `log |dy/dx|`
         """
         raise NotImplementedError()
 
@@ -68,31 +69,11 @@ class ExpBijector(Bijector):
     def inverse(self, value):
         return value.log()
 
-    def inverse_log_det_jacobian(self, value):
-        return -value.log()
-
-
-class AffineBijector(Bijector):
-    """
-    Bijector for the mapping y = scale * x + shift
-    """
-
-    def __init__(self, shift=0, scale=1):
-        self.shift, self.scale = broadcast_all(shift, scale)
-        super(AffineBijector, self).__init__()
-
-    def forward(self, value):
-        return value * self.scale + self.shift
-
-    def inverse(self, value):
-        return (value - self.shift) / self.scale
-
-    def inverse_log_det_jacobian(self, value):
-        return -self.scale.log()
+    def log_abs_det_jacobian(self, value):
+        return value
 
 
 __all__ = [
     'Bijector',
     'ExpBijector',
-    'AffineBijector',
 ]
