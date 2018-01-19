@@ -1,5 +1,5 @@
 from torch.distributions.transformed_distribution import TransformedDistribution
-
+from torch.distributions.utils import broadcast_all
 
 class Bijector:
     """
@@ -72,7 +72,27 @@ class ExpBijector(Bijector):
         return -value.log()
 
 
+class AffineBijector(Bijector):
+    """
+    Bijector for the mapping y = scale * x + shift
+    """
+
+    def __init__(self, shift=0, scale=1):
+        self.shift, self.scale = broadcast_all(shift, scale)
+        super(AffineBijector, self).__init__()
+
+    def forward(self, value):
+        return value * self.scale + self.shift
+
+    def inverse(self, value):
+        return (value - self.shift) / self.scale
+
+    def inverse_log_det_jacobian(self, value):
+        return -self.scale.log()
+
+
 __all__ = [
     'Bijector',
     'ExpBijector',
+    'AffineBijector',
 ]
