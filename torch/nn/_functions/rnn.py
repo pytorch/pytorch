@@ -182,7 +182,8 @@ def VariableRecurrentReverse(batch_sizes, inner):
             hidden = (hidden,)
             initial_hidden = (initial_hidden,)
         hidden = tuple(h[:batch_sizes[-1]] for h in hidden)
-        for batch_size in reversed(batch_sizes):
+        for i in reversed(range(len(batch_sizes))):
+            batch_size = batch_sizes[i]
             inc = batch_size - last_batch_size
             if inc > 0:
                 hidden = tuple(torch.cat((h, ih[last_batch_size:batch_size]), 0)
