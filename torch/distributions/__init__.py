@@ -41,6 +41,7 @@ from .distribution import Distribution
 from .exponential import Exponential
 from .gamma import Gamma
 from .gumbel import Gumbel
+from .half_cauchy import HalfCauchy
 from .kl import kl_divergence, register_kl
 from .laplace import Laplace
 from .multinomial import Multinomial
@@ -62,6 +63,7 @@ __all__ = [
     'Exponential',
     'Gamma',
     'Gumbel',
+    'HalfCauchy',
     'Laplace',
     'Multinomial',
     'Normal',

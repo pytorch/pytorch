@@ -31,7 +31,7 @@ import torch
 from common import TestCase, run_tests, set_rng_seed
 from torch.autograd import Variable, grad, gradcheck
 from torch.distributions import (Bernoulli, Beta, Binomial, Categorical, Cauchy, Chi2,
-                                 Dirichlet, Exponential, Gamma, Gumbel, Laplace,
+                                 Dirichlet, Exponential, Gamma, Gumbel, HalfCauchy, Laplace,
                                  Normal, OneHotCategorical, Multinomial, Pareto,
                                  StudentT, Uniform, kl_divergence)
 from torch.distributions.dirichlet import _Dirichlet_backward
@@ -118,6 +118,12 @@ EXAMPLES = [
             'loc': Variable(torch.randn(1), requires_grad=True),
             'scale': Variable(torch.randn(1).abs(), requires_grad=True),
         },
+    ]),
+    Example(HalfCauchy, [
+        {'loc': 0.0, 'scale': 1.0},
+        {'loc': Variable(torch.Tensor([0.0])), 'scale': 1.0},
+        {'loc': Variable(torch.Tensor([[0.0], [1.0]])),
+         'scale': Variable(torch.Tensor([[1.0], [2.0]]))}
     ]),
     Example(Laplace, [
         {
@@ -513,6 +519,22 @@ class TestDistributions(TestCase):
         self.assertEqual(scale.grad, eps)
         loc.grad.zero_()
         scale.grad.zero_()
+
+    def test_half_cauchy(self):
+        loc = Variable(torch.zeros(5, 5), requires_grad=True)
+        scale = Variable(torch.ones(5, 5), requires_grad=True)
+        loc_1d = Variable(torch.zeros(1), requires_grad=True)
+        scale_1d = Variable(torch.ones(1), requires_grad=True)
+        self.assertEqual(HalfCauchy(loc, scale).sample().size(), (5, 5))
+        self.assertEqual(HalfCauchy(loc, scale).sample_n(7).size(), (7, 5, 5))
+        self.assertEqual(HalfCauchy(loc_1d, scale_1d).sample().size(), (1,))
+        self.assertEqual(HalfCauchy(loc_1d, scale_1d).sample_n(1).size(), (1, 1))
+        self.assertEqual(HalfCauchy(0.0, 1.0).sample_n(1).size(), (1,))
+
+        set_rng_seed(1)
+        self._gradcheck_log_prob(Uniform, (loc, scale))
+        self._gradcheck_log_prob(Uniform, (loc, 1.0))
+        self._gradcheck_log_prob(Uniform, (0.0, scale))
 
     def test_normal(self):
         loc = Variable(torch.randn(5, 5), requires_grad=True)
@@ -1316,8 +1338,11 @@ class TestDistributionShapes(TestCase):
         self.assertEqual(dist.log_prob(dist.enumerate_support()).size(), torch.Size((2, 3)))
         self.assertEqual(dist.log_prob(torch.ones((3, 1, 2))).size(), torch.Size((3, 3)))
 
-    def test_cauchy_shape_scalar_params(self):
-        cauchy = Cauchy(0, 1)
+    def test_cauchy_shape_scalar_params(self, is_half_cauchy=None):
+        if is_half_cauchy:
+            cauchy = HalfCauchy(0, 1)
+        else:
+            cauchy = Cauchy(0, 1)
         self.assertEqual(cauchy._batch_shape, torch.Size())
         self.assertEqual(cauchy._event_shape, torch.Size())
         self.assertEqual(cauchy.sample().size(), torch.Size((1,)))
@@ -1326,8 +1351,11 @@ class TestDistributionShapes(TestCase):
         self.assertEqual(cauchy.log_prob(self.tensor_sample_1).size(), torch.Size((3, 2)))
         self.assertEqual(cauchy.log_prob(self.tensor_sample_2).size(), torch.Size((3, 2, 3)))
 
-    def test_cauchy_shape_tensor_params(self):
-        cauchy = Cauchy(torch.Tensor([0, 0]), torch.Tensor([1, 1]))
+    def test_cauchy_shape_tensor_params(self, is_half_cauchy=None):
+        if is_half_cauchy:
+            cauchy = HalfCauchy(torch.Tensor([0, 0]), torch.Tensor([1, 1]))
+        else:
+            cauchy = Cauchy(torch.Tensor([0, 0]), torch.Tensor([1, 1]))
         self.assertEqual(cauchy._batch_shape, torch.Size((2,)))
         self.assertEqual(cauchy._event_shape, torch.Size(()))
         self.assertEqual(cauchy.sample().size(), torch.Size((2,)))
@@ -1335,6 +1363,12 @@ class TestDistributionShapes(TestCase):
         self.assertEqual(cauchy.log_prob(self.tensor_sample_1).size(), torch.Size((3, 2)))
         self.assertRaises(ValueError, cauchy.log_prob, self.tensor_sample_2)
         self.assertEqual(cauchy.log_prob(torch.ones(2, 1)).size(), torch.Size((2, 2)))
+
+    def test_half_cauchy_shape_scalar_params(self):
+        self.test_cauchy_shape_scalar_params(is_half_cauchy=1)
+
+    def test_half_cauchy_shape_tensor_params(self):
+        self.test_cauchy_shape_tensor_params(is_half_cauchy=1)
 
     def test_dirichlet_shape(self):
         dist = Dirichlet(torch.Tensor([[0.6, 0.3], [1.6, 1.3], [2.6, 2.3]]))

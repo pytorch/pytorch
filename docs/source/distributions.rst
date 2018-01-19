@@ -73,6 +73,12 @@ Probability distributions - torch.distributions
 .. autoclass:: Gumbel
     :members:
 
+:hidden:`HalfCauchy`
+~~~~~~~~~~~~~~~~
+
+.. autoclass:: HalfCauchy
+    :members:
+
 :hidden:`Laplace`
 ~~~~~~~~~~~~~~~~~~~~~~~
 
