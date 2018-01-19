@@ -20,6 +20,7 @@ struct InputBuffer {
     : buffer(size) {}
   InputBuffer(const InputBuffer& other) = delete;
   InputBuffer(InputBuffer&& other) = default;
+  InputBuffer& operator=(InputBuffer&& other) = default;
 
   // Accumulates the variable at a specified index.
   void add(size_t idx, Variable var);
