@@ -31,7 +31,7 @@ import torch
 from common import TestCase, run_tests, set_rng_seed
 from torch.autograd import Variable, grad, gradcheck
 from torch.distributions import (Bernoulli, Beta, Binomial, Categorical, Cauchy, Chi2,
-                                 Dirichlet, Exponential, Gamma, Gumbel, Laplace,
+                                 Dirichlet, Exponential, Gamma, Geometric, Gumbel, Laplace,
                                  Normal, OneHotCategorical, Multinomial, Pareto,
                                  StudentT, Uniform, kl_divergence)
 from torch.distributions.dirichlet import _Dirichlet_backward
@@ -51,6 +51,11 @@ except ImportError:
 Example = namedtuple('Example', ['Dist', 'params'])
 EXAMPLES = [
     Example(Bernoulli, [
+        {'probs': Variable(torch.Tensor([0.7, 0.2, 0.4]), requires_grad=True)},
+        {'probs': Variable(torch.Tensor([0.3]), requires_grad=True)},
+        {'probs': 0.3},
+    ]),
+    Example(Geometric, [
         {'probs': Variable(torch.Tensor([0.7, 0.2, 0.4]), requires_grad=True)},
         {'probs': Variable(torch.Tensor([0.3]), requires_grad=True)},
         {'probs': 0.3},
@@ -301,6 +306,39 @@ class TestDistributions(TestCase):
         self.assertEqual(Bernoulli(p).sample(sample_shape=(2, 5)).size(),
                          (2, 5, 2, 3, 5))
         self.assertEqual(Bernoulli(p).sample_n(2).size(), (2, 2, 3, 5))
+
+    def test_geometric(self):
+        p = Variable(torch.Tensor([0.7, 0.2, 0.4]), requires_grad=True)
+        r = Variable(torch.Tensor([0.3]), requires_grad=True)
+        s = 0.3
+        self.assertEqual(Geometric(p).sample_n(8).size(), (8, 3))
+        self.assertEqual(Geometric(1).sample(), 0)
+        self.assertEqual(Geometric(1).log_prob(torch.Tensor([1])), -float('inf'), allow_inf=True)
+        self.assertEqual(Geometric(1).log_prob(torch.Tensor([0])), 0)
+        self.assertTrue(isinstance(Geometric(p).sample().data, torch.Tensor))
+        self.assertEqual(Geometric(r).sample_n(8).size(), (8, 1))
+        self.assertEqual(Geometric(r).sample().size(), (1,))
+        self.assertEqual(Geometric(r).sample((3, 2)).size(), (3, 2, 1))
+        self.assertEqual(Geometric(s).sample().size(), (1,))
+        self._gradcheck_log_prob(Geometric, (p,))
+        self.assertRaises(ValueError, lambda: Geometric(0))
+        self.assertRaises(NotImplementedError, Geometric(r).rsample)
+
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    def test_geometric_log_prob_and_entropy(self):
+        p = Variable(torch.Tensor([0.7, 0.2, 0.4]), requires_grad=True)
+        s = 0.3
+
+        def ref_log_prob(idx, val, log_prob):
+            prob = p.data[idx]
+            self.assertEqual(log_prob, scipy.stats.geom(prob, loc=-1).logpmf(val))
+
+        self._check_log_prob(Geometric(p), ref_log_prob)
+        self._check_log_prob(Geometric(logits=p.log() - (-p).log1p()), ref_log_prob)
+
+        # check entropy computation
+        self.assertEqual(Geometric(p).entropy().data, scipy.stats.geom(p.data.numpy(), loc=-1).entropy(), prec=1e-3)
+        self.assertEqual(Geometric(s).entropy()[0], scipy.stats.geom(s, loc=-1).entropy().item(), prec=1e-3)
 
     def test_binomial(self):
         p = Variable(torch.arange(0.05, 1, 0.1), requires_grad=True)
@@ -1255,6 +1293,26 @@ class TestDistributionShapes(TestCase):
         self.assertRaises(ValueError, bernoulli.log_prob, self.tensor_sample_2)
         self.assertEqual(bernoulli.log_prob(torch.ones(3, 1, 1)).size(), torch.Size((3, 3, 2)))
 
+    def test_geometric_shape_scalar_params(self):
+        geometric = Geometric(0.3)
+        self.assertEqual(geometric._batch_shape, torch.Size())
+        self.assertEqual(geometric._event_shape, torch.Size())
+        self.assertEqual(geometric.sample().size(), torch.Size((1,)))
+        self.assertEqual(geometric.sample((3, 2)).size(), torch.Size((3, 2)))
+        self.assertRaises(ValueError, geometric.log_prob, self.scalar_sample)
+        self.assertEqual(geometric.log_prob(self.tensor_sample_1).size(), torch.Size((3, 2)))
+        self.assertEqual(geometric.log_prob(self.tensor_sample_2).size(), torch.Size((3, 2, 3)))
+
+    def test_geometric_shape_tensor_params(self):
+        geometric = Geometric(torch.Tensor([[0.6, 0.3], [0.6, 0.3], [0.6, 0.3]]))
+        self.assertEqual(geometric._batch_shape, torch.Size((3, 2)))
+        self.assertEqual(geometric._event_shape, torch.Size(()))
+        self.assertEqual(geometric.sample().size(), torch.Size((3, 2)))
+        self.assertEqual(geometric.sample((3, 2)).size(), torch.Size((3, 2, 3, 2)))
+        self.assertEqual(geometric.log_prob(self.tensor_sample_1).size(), torch.Size((3, 2)))
+        self.assertRaises(ValueError, geometric.log_prob, self.tensor_sample_2)
+        self.assertEqual(geometric.log_prob(torch.ones(3, 1, 1)).size(), torch.Size((3, 3, 2)))
+
     def test_beta_shape_scalar_params(self):
         dist = Beta(0.1, 0.1)
         self.assertEqual(dist._batch_shape, torch.Size())
@@ -1522,6 +1580,7 @@ class TestKL(TestCase):
             (Gamma(1, 2), Gumbel(-3, 4)),
             (Gumbel(-1, 2), Gumbel(-3, 4)),
             (Gumbel(-1, 2), Normal(-3, 4)),  # This case fails for n <= 22000
+            (Geometric(0.7), Geometric(0.3)),
             (Laplace(1, 2), Laplace(-3, 4)),
             (Laplace(-1, 2), Normal(-3, 4)),
             (Normal(-1, 2), Gumbel(-3, 4)),
