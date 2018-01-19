@@ -1568,11 +1568,16 @@ class TestDistributionShapes(TestCase):
 class TestKL(TestCase):
 
     def setUp(self):
+
+        class Binomial30(Binomial):
+            def __init__(self, probs):
+                super(Binomial30, self).__init__(30, probs)
+
         # These are pairs of distributions with 4 x 4 paramters as specified.
         # The first of the pair e.g. bernoulli[0] varies column-wise and the second
         # e.g. bernoulli[1] varies row-wise; that way we test all param pairs.
         bernoulli = pairwise(Bernoulli, [0.1, 0.2, 0.6, 0.9])
-        bernoulli = pairwise(Bernoulli, [0.1, 0.2, 0.6, 0.9])
+        binomial30 = pairwise(Binomial30, [0.1, 0.2, 0.6, 0.9])
         beta = pairwise(Beta, [1.0, 2.5, 1.0, 2.5], [1.5, 1.5, 3.5, 3.5])
         chi2 = pairwise(Chi2, [1.0, 2.0, 2.5, 5.0])
         exponential = pairwise(Exponential, [1.0, 2.5, 5.0, 10.0])
@@ -1596,9 +1601,9 @@ class TestKL(TestCase):
         # The following pairs are not tested due to very high variance of the monte carlo
         # estimator; their implementations have been reviewed with extra care:
         # - (pareto, normal)
-        self.precision = 0.2  # Set this to 0.01 when testing a new KL implementation.
+        self.precision = 0.1  # Set this to 0.01 when testing a new KL implementation.
         self.max_samples = int(1e07)  # Increase this when testing at smaller precision.
-        self.samples_per_batch = int(1e05)
+        self.samples_per_batch = int(1e04)
         self.finite_examples = [
             (bernoulli, bernoulli),
             (beta, beta),
@@ -1606,6 +1611,7 @@ class TestKL(TestCase):
             (beta, exponential),
             (beta, gamma),
             (beta, normal),
+            (binomial30, binomial30),
             (chi2, chi2),
             (chi2, exponential),
             (chi2, gamma),
