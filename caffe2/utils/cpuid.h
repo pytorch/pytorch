@@ -143,7 +143,7 @@ class CpuId {
 #define E(name, bit) X(name, f7c_, bit)
   E(prefetchwt1, 0)
   E(avx512vbmi, 1)
-#undef C
+#undef E
 
 #undef X
 
