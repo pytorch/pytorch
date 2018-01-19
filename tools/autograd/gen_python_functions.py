@@ -307,15 +307,18 @@ def create_python_bindings(python_functions, has_self, is_module=False):
                 raise RuntimeError("found more than 1 entry in python_binding_arguments")
             for arg in declaration['python_binding_arguments']:
                 if not arg['name'] == 'requires_grad' or not arg['type'] == 'bool':
-                    raise RuntimeError("found {} in python_binding_arugments but only bool requires_grad is supported".format(arg))
-                # we have to use out_idx if there is an out variant because the base variant won't have the full arg_idx count
+                    raise RuntimeError(("found {} in python_binding_arguments but only "
+                                        "bool requires_grad is supported".format(arg)))
+                # we have to use out_idx if there is an out variant because the base variant
+                # won't have the full arg_idx count
                 requires_grad_idx = arg_idx if out_idx is None else out_idx + 1
                 requires_grad = parse_arg(arg, requires_grad_idx)[0]
 
         env = nested_dict(env, nested_dict(base_env, declaration))
         call_dispatch = PY_VARIABLE_CALL_DISPATCH.substitute(env)
         if requires_grad:
-            call_dispatch = PY_VARIABLE_SET_REQUIRES_GRAD.substitute(env, call_dispatch=call_dispatch, requires_grad=requires_grad)
+            call_dispatch = PY_VARIABLE_SET_REQUIRES_GRAD.substitute(env, call_dispatch=call_dispatch,
+                                                                     requires_grad=requires_grad)
         body.append(PY_VARIABLE_WRAP.substitute(env, call_dispatch=call_dispatch))
         py_method_dispatch.append(PY_VARIABLE_DISPATCH.substitute(env))
         return body
@@ -462,6 +465,7 @@ def get_python_signature(declaration, include_out):
     typed_args = []
     output_args = []
     positional = True
+
     def get_typed_arg(arg):
         typename = arg['simple_type']
         if arg.get('is_nullable'):
@@ -489,7 +493,6 @@ def get_python_signature(declaration, include_out):
             positional = False
         param = get_typed_arg(arg)
         typed_args.append(param)
-
 
     # add output arguments
     name = declaration['name']
