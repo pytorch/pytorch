@@ -14,8 +14,8 @@
  * limitations under the License.
  */
 
-#include "caffe2/video/video_decoder.h"
-#include "caffe2/core/logging.h"
+#include <caffe2/video/video_decoder.h>
+#include <caffe2/core/logging.h>
 
 #include <stdio.h>
 #include <mutex>
@@ -43,15 +43,30 @@ VideoDecoder::VideoDecoder() {
   }
 }
 
+void VideoDecoder::ResizeAndKeepAspectRatio(
+    const int origWidth,
+    const int origHeight,
+    const int short_edge,
+    int& outWidth,
+    int& outHeight) {
+  if (origWidth < origHeight) {
+    float ratio = short_edge / float(origWidth);
+    outWidth = short_edge;
+    outHeight = (int)round(ratio * origHeight);
+  } else {
+    float ratio = short_edge / float(origHeight);
+    outHeight = short_edge;
+    outWidth = (int)round(ratio * origWidth);
+  }
+}
+
 void VideoDecoder::decodeLoop(
     const string& videoName,
     VideoIOContext& ioctx,
     const Params& params,
-    std::vector<std::unique_ptr<DecodedFrame>>& sampledFrames,
-    int maxFrames,
-    bool decodeFromStart) {
+    const int start_frm,
+    std::vector<std::unique_ptr<DecodedFrame>>& sampledFrames) {
   AVPixelFormat pixFormat = params.pixelFormat_;
-
   AVFormatContext* inputContext = avformat_alloc_context();
   AVStream* videoStream_ = nullptr;
   AVCodecContext* videoCodecContext_ = nullptr;
@@ -59,9 +74,7 @@ void VideoDecoder::decodeLoop(
   AVPacket packet;
   av_init_packet(&packet); // init packet
   SwsContext* scaleContext_ = nullptr;
-  /* if a valid value is given for maxFrames, then decode only limited frames.
-   * Else decode all the frames */
-  bool mustDecodeAll = (maxFrames <= 0);
+
   try {
     inputContext->pb = ioctx.get_avio();
     inputContext->flags |= AVFMT_FLAG_CUSTOM_IO;
@@ -121,45 +134,49 @@ void VideoDecoder::decodeLoop(
     }
 
     // Initialize codec
+    AVDictionary* opts = nullptr;
     videoCodecContext_ = videoStream_->codec;
+    try {
+      ret = avcodec_open2(
+          videoCodecContext_,
+          avcodec_find_decoder(videoCodecContext_->codec_id),
+          &opts);
+    } catch (const std::exception&) {
+      LOG(ERROR) << "Exception during open video codec";
+      return;
+    }
 
-    ret = avcodec_open2(
-        videoCodecContext_,
-        avcodec_find_decoder(videoCodecContext_->codec_id),
-        nullptr);
     if (ret < 0) {
       LOG(ERROR) << "Cannot open video codec : "
                  << videoCodecContext_->codec->name;
       return;
     }
 
-    // Calcuate if we need to rescale the frames
-    int outWidth = videoCodecContext_->width;
-    int outHeight = videoCodecContext_->height;
+    // Calculate if we need to rescale the frames
+    int origWidth = videoCodecContext_->width;
+    int origHeight = videoCodecContext_->height;
+    int outWidth = origWidth;
+    int outHeight = origHeight;
 
-    if (params.maxOutputDimension_ != -1) {
-      if (videoCodecContext_->width > videoCodecContext_->height) {
-        // dominant width
-        if (params.maxOutputDimension_ < videoCodecContext_->width) {
-          float ratio =
-              (float)params.maxOutputDimension_ / videoCodecContext_->width;
-          outWidth = params.maxOutputDimension_;
-          outHeight = (int)round(videoCodecContext_->height * ratio);
-        }
-      } else {
-        // dominant height
-        if (params.maxOutputDimension_ < videoCodecContext_->height) {
-          float ratio =
-              (float)params.maxOutputDimension_ / videoCodecContext_->height;
-          outWidth = (int)round(videoCodecContext_->width * ratio);
-          outHeight = params.maxOutputDimension_;
-        }
+    if (params.video_res_type_ == VideoResType::ORIGINAL_RES) {
+      // if the original resolution is too low,
+      // make it at least the same size as crop_size_
+      if (params.crop_size_ > origWidth || params.crop_size_ > origHeight) {
+        ResizeAndKeepAspectRatio(
+            origWidth, origHeight, params.crop_size_, outWidth, outHeight);
       }
+    } else if (params.video_res_type_ == VideoResType::USE_SHORT_EDGE) {
+      // resize the image to the predefined
+      // short_edge_ resolution while keep the aspect ratio
+      ResizeAndKeepAspectRatio(
+          origWidth, origHeight, params.short_edge_, outWidth, outHeight);
+    } else if (params.video_res_type_ == VideoResType::USE_WIDTH_HEIGHT) {
+      // resize the image to the predefined
+      // resolution and ignore the aspect ratio
+      outWidth = params.scale_w_;
+      outHeight = params.scale_h_;
     } else {
-      outWidth = params.outputWidth_ == -1 ? videoCodecContext_->width
-                                           : params.outputWidth_;
-      outHeight = params.outputHeight_ == -1 ? videoCodecContext_->height
-                                             : params.outputHeight_;
+      LOG(ERROR) << "Unknown video_res_type: " << params.video_res_type_;
     }
 
     // Make sure that we have a valid format
@@ -217,8 +234,6 @@ void VideoDecoder::decodeLoop(
     }
 
     double lastFrameTimestamp = -1.0;
-    double timestamp = -1.0;
-
     // Initialize frame and packet.
     // These will be reused across calls.
     videoStreamFrame_ = av_frame_alloc();
@@ -230,46 +245,70 @@ void VideoDecoder::decodeLoop(
 
     /* identify the starting point from where we must start decoding */
     std::mt19937 meta_randgen(time(nullptr));
-    int random_ts = -1;
-    if (!decodeFromStart) {
-      if (videoStream_->duration > 0 && videoStream_->nb_frames > 0) {
-        /* we have a valid duration and nb_frames. We can safely
-         * detect an intermediate timestamp to start decoding from. */
+    int start_ts = -1;
+    bool mustDecodeAll = false;
+    if (videoStream_->duration > 0 && videoStream_->nb_frames > 0) {
+      /* we have a valid duration and nb_frames. We can safely
+       * detect an intermediate timestamp to start decoding from. */
 
-        /* estimate the average duration for the maxFrames # of frames */
+      // leave a margin of 10 frames to take in to account the error
+      // from av_seek_frame
+      int margin =
+          int(ceil((10 * videoStream_->duration) / (videoStream_->nb_frames)));
+      // if we need to do temporal jittering
+      if (params.decode_type_ == DecodeType::DO_TMP_JITTER) {
+        /* estimate the average duration for the required # of frames */
         double maxFramesDuration =
-            (videoStream_->duration * maxFrames) / (videoStream_->nb_frames);
-        int start_ts = 0;
-        int end_ts = videoStream_->duration - (int)maxFramesDuration;
-        end_ts = end_ts > 0 ? end_ts : 0;
-        /* pick a random timestamp between start and end timestamps.
-         * End timestamp is selected such that you have sufficient frames
-         * from random timestamp to satisfy the requirement of maxFrames */
-        random_ts =
-            std::uniform_int_distribution<>(start_ts, end_ts)(meta_randgen);
-        /* seek a frame at random_ts */
+            (videoStream_->duration * params.num_of_required_frame_) /
+            (videoStream_->nb_frames);
+        int ts1 = 0;
+        int ts2 = videoStream_->duration - int(ceil(maxFramesDuration));
+        ts2 = ts2 > 0 ? ts2 : 0;
+        // pick a random timestamp between ts1 and ts2. ts2 is selected such
+        // that you have enough frames to satisfy the required # of frames.
+        start_ts = std::uniform_int_distribution<>(ts1, ts2)(meta_randgen);
+        // seek a frame at start_ts
         ret = av_seek_frame(
-            inputContext, videoStreamIndex_, random_ts, AVSEEK_FLAG_BACKWARD);
-        if (ret < 0) {
-          LOG(ERROR) << "Unable to decode from a random start point";
-          /* fall back to default decoding of all frames from start */
-          av_seek_frame(
-              inputContext, videoStreamIndex_, 0, AVSEEK_FLAG_BACKWARD);
-          mustDecodeAll = true;
-        }
+            inputContext,
+            videoStreamIndex_,
+            std::max(0, start_ts - margin),
+            AVSEEK_FLAG_BACKWARD);
+
+        // if we need to decode from the start_frm
+      } else if (params.decode_type_ == DecodeType::USE_START_FRM) {
+        start_ts = int(floor(
+            (videoStream_->duration * start_frm) / (videoStream_->nb_frames)));
+        // seek a frame at start_ts
+        ret = av_seek_frame(
+            inputContext,
+            videoStreamIndex_,
+            std::max(0, start_ts - margin),
+            AVSEEK_FLAG_BACKWARD);
       } else {
-        /* we do not have  the necessary metadata to selectively decode frames.
-         * Decode all frames as we do in the default case */
-        LOG(INFO) << " Decoding all frames as we do not have suffiecient"
-                     " metadata for selective decoding.";
         mustDecodeAll = true;
       }
+
+      if (ret < 0) {
+        LOG(ERROR) << "Unable to decode from a random start point";
+        /* fall back to default decoding of all frames from start */
+        av_seek_frame(inputContext, videoStreamIndex_, 0, AVSEEK_FLAG_BACKWARD);
+        mustDecodeAll = true;
+      }
+    } else {
+      /* we do not have the necessary metadata to selectively decode frames.
+       * Decode all frames as we do in the default case */
+      LOG(INFO) << " Decoding all frames as we do not have suffiecient"
+                   " metadata for selective decoding.";
+      mustDecodeAll = true;
     }
 
     int gotPicture = 0;
     int eof = 0;
     int selectiveDecodedFrames = 0;
 
+    int maxFrames = (params.decode_type_ == DecodeType::DO_UNIFORM_SMP)
+        ? MAX_DECODING_FRAMES
+        : params.num_of_required_frame_;
     // There is a delay between reading packets from the
     // transport and getting decoded frames back.
     // Therefore, after EOF, continue going while
@@ -313,19 +352,18 @@ void VideoDecoder::decodeLoop(
             av_free_packet(&packet);
             continue;
           }
-
           frameIndex++;
 
           double frame_ts =
               av_frame_get_best_effort_timestamp(videoStreamFrame_);
-          timestamp = frame_ts * av_q2d(videoStream_->time_base);
+          double timestamp = frame_ts * av_q2d(videoStream_->time_base);
 
-          if ((frame_ts >= random_ts && !mustDecodeAll) || mustDecodeAll) {
+          if ((frame_ts >= start_ts && !mustDecodeAll) || mustDecodeAll) {
             /* process current frame if:
              * 1) We are not doing selective decoding and mustDecodeAll
              *    OR
              * 2) We are doing selective decoding and current frame
-             *   timestamp is >= random_ts from where we start selective
+             *   timestamp is >= start_ts from where we start selective
              *   decoding*/
             // if reaching the next interval, update the current fps
             // and reset lastFrameTimestamp so the current frame could be
@@ -339,7 +377,7 @@ void VideoDecoder::decodeLoop(
               if (itvlIter != params.intervals_.end() &&
                   prevTimestamp >= itvlIter->timestamp) {
                 LOG(ERROR)
-                    << "Sampling interval timestamp must be strictly ascending";
+                    << "Sampling interval timestamps must be strictly ascending.";
               }
             }
 
@@ -425,6 +463,7 @@ void VideoDecoder::decodeLoop(
               frame->outputFrameIndex_ = outputFrameIndex;
               frame->timestamp_ = timestamp;
               frame->keyFrame_ = videoStreamFrame_->key_frame;
+
               sampledFrames.push_back(move(frame));
               selectiveDecodedFrames++;
               av_frame_free(&rgbFrame);
@@ -466,27 +505,19 @@ void VideoDecoder::decodeMemory(
     const char* buffer,
     const int size,
     const Params& params,
-    std::vector<std::unique_ptr<DecodedFrame>>& sampledFrames,
-    int maxFrames,
-    bool decodeFromStart) {
+    const int start_frm,
+    std::vector<std::unique_ptr<DecodedFrame>>& sampledFrames) {
   VideoIOContext ioctx(buffer, size);
-  decodeLoop(
-      string("Memory Buffer"),
-      ioctx,
-      params,
-      sampledFrames,
-      maxFrames,
-      decodeFromStart);
+  decodeLoop(string("Memory Buffer"), ioctx, params, start_frm, sampledFrames);
 }
 
 void VideoDecoder::decodeFile(
-    const string file,
+    const string& file,
     const Params& params,
-    std::vector<std::unique_ptr<DecodedFrame>>& sampledFrames,
-    int maxFrames,
-    bool decodeFromStart) {
+    const int start_frm,
+    std::vector<std::unique_ptr<DecodedFrame>>& sampledFrames) {
   VideoIOContext ioctx(file);
-  decodeLoop(file, ioctx, params, sampledFrames, maxFrames, decodeFromStart);
+  decodeLoop(file, ioctx, params, start_frm, sampledFrames);
 }
 
 string VideoDecoder::ffmpegErrorStr(int result) {
