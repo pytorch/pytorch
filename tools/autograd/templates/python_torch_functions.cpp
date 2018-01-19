@@ -23,6 +23,11 @@ using namespace torch::autograd::utils;
 
 namespace torch { namespace autograd {
 
+static const Tensor & set_requires_grad(const Tensor &self, bool requires_grad) {
+  Variable(self).get()->_requires_grad = requires_grad;
+  return self;
+}
+
 static Tensor dispatch_clamp(const Tensor & self, Scalar min, Scalar max) {
   AutoNoGIL no_gil;
   AutoGPU auto_gpu(self);
