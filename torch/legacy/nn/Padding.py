@@ -20,13 +20,13 @@ class Padding(Module):
         super(Padding, self).__init__()
 
     def updateOutput(self, input):
-        outputSize = list(input.size())
-        outputSize[self.dim] += abs(self.pad)
-        self.outputSize = torch.Size(outputSize)
         dim = self.dim
-
         if hasattr(self, "nInputDim") and self.nInputDim > 0 and input.dim() != self.nInputDim:
             dim = dim + 1
+
+        outputSize = list(input.size())
+        outputSize[dim] += abs(self.pad)
+        self.outputSize = torch.Size(outputSize)
 
         self.output.resize_(self.outputSize)
         self.output.fill_(self.value)
