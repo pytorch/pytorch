@@ -74,6 +74,9 @@
 #include "generic/ClassNLLCriterion.c"
 #include "THGenerateFloatTypes.h"
 
+#include "generic/Col2Im.c"
+#include "THGenerateFloatTypes.h"
+
 #include "generic/SpatialClassNLLCriterion.c"
 #include "THGenerateFloatTypes.h"
 
@@ -87,6 +90,9 @@
 #include "THGenerateFloatTypes.h"
 
 #include "generic/HardTanh.c"
+#include "THGenerateFloatTypes.h"
+
+#include "generic/Im2Col.c"
 #include "THGenerateFloatTypes.h"
 
 #include "generic/GatedLinearUnit.c"
