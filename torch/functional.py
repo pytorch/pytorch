@@ -4,7 +4,7 @@ from functools import reduce
 import math
 
 __all__ = [
-    'split', 'chunk', 'stack', 'unbind', 'btriunpack', 'matmul', 'det', 'stft',
+    'split', 'chunk', 'empty_like', 'stack', 'unbind', 'btriunpack', 'matmul', 'det', 'stft',
     'hann_window', 'hamming_window', 'bartlett_window', 'where',
 ]
 
@@ -62,6 +62,26 @@ def chunk(tensor, chunks, dim=0):
         dim += tensor.dim()
     split_size = (tensor.size(dim) + chunks - 1) // chunks
     return split(tensor, split_size, dim)
+
+
+def empty_like(input):
+    r"""empty_like(input) -> Tensor
+
+    Returns an uninitialized tensor with the same size as :attr:`input`.
+
+    Args:
+        input (Tensor): the size of :attr:`input` will determine size of the output tensor
+
+    Example::
+
+        >>> input = torch.LongTensor(2,3)
+        >>> input.new(input.size())
+
+        1.3996e+14  1.3996e+14  1.3996e+14
+        4.0000e+00  0.0000e+00  0.0000e+00
+        [torch.LongTensor of size 2x3]
+    """
+    return input.new(input.size())
 
 
 def stack(sequence, dim=0, out=None):
