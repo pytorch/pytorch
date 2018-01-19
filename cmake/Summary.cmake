@@ -19,6 +19,7 @@ function (caffe2_print_configuration_summary)
   message(STATUS "")
 
   message(STATUS "  BUILD_BINARY          : ${BUILD_BINARY}")
+  message(STATUS "  BUILD_DOCS            : ${BUILD_DOCS}")
   message(STATUS "  BUILD_PYTHON          : ${BUILD_PYTHON}")
   if (${BUILD_PYTHON})
     message(STATUS "    Python version      : ${PYTHONLIBS_VERSION_STRING}")

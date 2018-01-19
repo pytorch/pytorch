@@ -15,6 +15,7 @@ set(CAFFE2_VERSION
 # Note to developers: if you add an option below, make sure you also add it to
 # cmake/Summary.cmake so that the summary prints out the option values.
 option(BUILD_BINARY "Build C++ binaries" ON)
+option(BUILD_DOCS "Build documentation" OFF)
 option(BUILD_PYTHON "Build Python binaries" ON)
 option(BUILD_SHARED_LIBS "Build libcaffe2.so" ON)
 option(BUILD_OBSERVERS "Build performance observers/loggers in caffe2/share/observers directory" OFF)
@@ -128,6 +129,43 @@ add_subdirectory(caffe/proto)
 
 # ---[ Main build
 add_subdirectory(caffe2)
+
+# Documentation Option
+if(BUILD_DOCS)
+  # check if Doxygen is installed
+  find_package(Doxygen)
+  if (DOXYGEN_FOUND)
+    message("Generating documentation")
+
+    set(DOXYGEN_C_IN ${CMAKE_CURRENT_SOURCE_DIR}/docs/.Doxyfile-c)
+    set(DOXYGEN_C_OUT ${CMAKE_CURRENT_SOURCE_DIR}/docs/Doxyfile-c)
+    set(DOXYGEN_P_IN ${CMAKE_CURRENT_SOURCE_DIR}/docs/.Doxyfile-python)
+    set(DOXYGEN_P_OUT ${CMAKE_CURRENT_SOURCE_DIR}/docs/Doxyfile-python)
+
+    if(EXISTS ${CMAKE_CURRENT_BINARY_DIR}/docs)
+      file(REMOVE_RECURSE ${CMAKE_CURRENT_BINARY_DIR}/docs)
+    endif (EXISTS ${CMAKE_CURRENT_BINARY_DIR}/docs)
+
+    file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/docs)
+    configure_file(${DOXYGEN_C_IN} ${DOXYGEN_C_OUT} @ONLY)
+    configure_file(${DOXYGEN_P_IN} ${DOXYGEN_P_OUT} @ONLY)
+
+    add_custom_target(doc_doxygen_c ALL
+        COMMAND ${DOXYGEN_EXECUTABLE} ${DOXYGEN_C_OUT}
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+        COMMENT "Generating C++ API documentation with Doxygen"
+        VERBATIM)
+
+    add_custom_target(doc_doxygen_python ALL
+        COMMAND ${DOXYGEN_EXECUTABLE} ${DOXYGEN_P_OUT}
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+        COMMENT "Generating Python API documentation with Doxygen"
+        VERBATIM)
+  else (DOXYGEN_FOUND)
+    message(FATAL_ERROR "Doxygen needs to be installed to generate the documentation")
+  endif (DOXYGEN_FOUND)
+endif (BUILD_DOCS)
+
 
 caffe2_print_configuration_summary()
 
