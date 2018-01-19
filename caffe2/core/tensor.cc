@@ -61,17 +61,6 @@ TensorPrinter::~TensorPrinter() {
   }
 }
 
-std::string TensorPrinter::MetaStr(const Tensor<CPUContext>& tensor) {
-  std::stringstream meta_stream;
-  meta_stream << "Tensor " << tensor_name_ << " of type "
-              << tensor.meta().name() << ". Dims: (";
-  for (const auto dim : tensor.dims()) {
-    meta_stream << dim << ",";
-  }
-  meta_stream << "): ";
-  return meta_stream.str();
-}
-
 static CaffeMap<CaffeTypeId, TypeCall> type_call_registry_ {
   {TypeMeta::Id<Tensor<CPUContext>>(), GetTensorType<CPUContext>}
 };

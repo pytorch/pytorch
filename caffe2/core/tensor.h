@@ -143,9 +143,13 @@ class Tensor {
    * Note that this may have a potential performance hit, since a temporary
    * context object will be created for the memory copy. Prefer explicitly
    * providing a context for copy if you can.
+   *
+   * Since it's a potentially expensive operation - making copy constructor
+   * explicit here. If SrcContext != Context it's actually a typecast
+   * constructor and it should be definitely explicit.
    */
   template <class SrcContext>
-  Tensor(const Tensor<SrcContext>& src) {
+  explicit Tensor(const Tensor<SrcContext>& src) {
     CopyFrom(src);
   }
 
@@ -821,7 +825,8 @@ class TensorPrinter {
   template <class Context>
   void PrintMeta(const Tensor<Context>& tensor);
 
-  string MetaStr(const Tensor<CPUContext>& tensor);
+  template <class Context>
+  string MetaStr(const Tensor<Context>& tensor);
 
  private:
   bool to_file_;
@@ -858,6 +863,18 @@ void TensorPrinter::PrintMeta(const Tensor<Context>& tensor) {
   } else {
     LOG(INFO) << MetaStr(tensor);
   }
+}
+
+template <class Context>
+std::string TensorPrinter::MetaStr(const Tensor<Context>& tensor) {
+  std::stringstream meta_stream;
+  meta_stream << "Tensor " << tensor_name_ << " of type "
+              << tensor.meta().name() << ". Dims: (";
+  for (const auto dim : tensor.dims()) {
+    meta_stream << dim << ",";
+  }
+  meta_stream << "): ";
+  return meta_stream.str();
 }
 
 }  // namespace caffe2
