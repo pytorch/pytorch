@@ -802,7 +802,7 @@ void THTensor_(freeCopyTo)(THTensor *self, THTensor *dst)
 static void THTensor_(rawInit)(THTensor *self)
 {
   self->refcount = 1;
-  self->storage = NULL;
+  self->storage = THStorage_(new)();
   self->storageOffset = 0;
   self->size = NULL;
   self->stride = NULL;

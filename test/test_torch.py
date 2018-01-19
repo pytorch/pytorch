@@ -294,6 +294,8 @@ class TestTorch(TestCase):
         self.assertIsNotNone(torch.Tensor([]).storage())
         self.assertIsNotNone(torch.Tensor().clone().storage())
         self.assertIsNotNone(torch.Tensor([0, 0, 0]).nonzero().storage())
+        from torch.autograd import Variable
+        self.assertIsNotNone(Variable(torch.Tensor()).new().storage())
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_has_storage_numpy(self):
