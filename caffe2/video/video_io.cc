@@ -14,532 +14,284 @@
  * limitations under the License.
  */
 
-#include "caffe2/video/video_io.h"
+#include <caffe2/video/video_io.h>
+#include <caffe2/core/logging.h>
+#include <algorithm>
 #include <random>
 #include <string>
-#include "caffe2/core/logging.h"
-#include "caffe2/video/video_decoder.h"
 
 namespace caffe2 {
 
-void ImageChannelToBuffer(const cv::Mat* img, float* buffer, int c) {
-  int idx = 0;
-  for (int h = 0; h < img->rows; ++h) {
-    for (int w = 0; w < img->cols; ++w) {
-      buffer[idx++] = static_cast<float>(img->at<cv::Vec3b>(h, w)[c]);
-    }
-  }
-}
-
-void ImageDataToBuffer(
-    unsigned char* data_buffer,
-    int height,
-    int width,
-    float* buffer,
-    int c) {
-  int idx = 0;
-  for (int h = 0; h < height; ++h) {
-    for (int w = 0; w < width; ++w) {
-      buffer[idx++] =
-          static_cast<float>(data_buffer[h * width * 3 + w * 3 + c]);
-    }
-  }
-}
-
-void ClipTransform(
-    const float* clip_data,
-    const int channels,
-    const int length,
-    const int height,
-    const int width,
+void ClipTransformRGB(
+    const unsigned char* buffer_rgb,
     const int crop_size,
-    const bool mirror,
-    float mean,
-    float std,
-    float* transformed_clip,
-    std::mt19937* randgen,
-    std::bernoulli_distribution* mirror_this_clip,
-    const bool use_center_crop) {
-  int h_off = 0;
-  int w_off = 0;
+    const int length_rgb,
+    const int channels_rgb,
+    const int sampling_rate_rgb,
+    const int height,
+    const int width,
+    const int h_off,
+    const int w_off,
+    const bool mirror_me,
+    const std::vector<float>& mean_rgb,
+    const std::vector<float>& inv_std_rgb,
+    float* transformed_clip) {
+  // The order of output dimensions is C, L, H, W
+  int orig_index, tran_index;
+  for (int c = 0; c < channels_rgb; ++c) {
+    for (int l = 0; l < length_rgb; ++l) {
+      int orig_index_l = l * sampling_rate_rgb * height * width * channels_rgb;
+      int tran_index_l = (c * length_rgb + l) * crop_size;
 
-  if (use_center_crop) {
-    h_off = (height - crop_size) / 2;
-    w_off = (width - crop_size) / 2;
-  } else {
-    h_off = std::uniform_int_distribution<>(0, height - crop_size)(*randgen);
-    w_off = std::uniform_int_distribution<>(0, width - crop_size)(*randgen);
-  }
-
-  float inv_std = 1.f / std;
-  int top_index, data_index;
-  bool mirror_me = mirror && (*mirror_this_clip)(*randgen);
-
-  for (int c = 0; c < channels; ++c) {
-    for (int l = 0; l < length; ++l) {
       for (int h = 0; h < crop_size; ++h) {
+        int orig_index_h = orig_index_l + (h + h_off) * width * channels_rgb;
+        int tran_index_h = (tran_index_l + h) * crop_size;
+
         for (int w = 0; w < crop_size; ++w) {
-          data_index =
-              ((c * length + l) * height + h_off + h) * width + w_off + w;
+          orig_index = orig_index_h + (w + w_off) * channels_rgb + c;
+
+          // mirror the frame
           if (mirror_me) {
-            top_index = ((c * length + l) * crop_size + h) * crop_size +
-                (crop_size - 1 - w);
+            tran_index = tran_index_h + (crop_size - 1 - w);
           } else {
-            top_index = ((c * length + l) * crop_size + h) * crop_size + w;
+            tran_index = tran_index_h + w;
           }
-          transformed_clip[top_index] =
-              (clip_data[data_index] - mean) * inv_std;
+
+          // normalize and transform the clip
+          transformed_clip[tran_index] =
+              (buffer_rgb[orig_index] - mean_rgb[c]) * inv_std_rgb[c];
         }
       }
     }
   }
 }
 
-bool ReadClipFromFrames(
-    std::string img_dir,
-    const int start_frm,
-    std::string im_extension,
-    const int length,
+void ClipTransformOpticalFlow(
+    const unsigned char* buffer_rgb,
+    const int crop_size,
+    const int length_of,
+    const int channels_of,
+    const int sampling_rate_of,
     const int height,
     const int width,
-    const int sampling_rate,
-    float*& buffer) {
-  char fn_im[512];
-  cv::Mat img, img_origin;
-  buffer = nullptr;
-  int offset = 0;
-  int channel_size = 0;
-  int image_size = 0;
-  int data_size = 0;
+    const cv::Rect& rect,
+    const int channels_rgb,
+    const bool mirror_me,
+    const int flow_alg_type,
+    const int flow_data_type,
+    const int frame_gap_of,
+    const bool do_flow_aggregation,
+    const std::vector<float>& mean_of,
+    const std::vector<float>& inv_std_of,
+    float* transformed_clip) {
+  const int frame_size = crop_size * crop_size;
+  const int channel_size_flow = length_of * frame_size;
 
-  int end_frm = start_frm + length * sampling_rate;
-  for (int i = start_frm; i < end_frm; i += sampling_rate) {
-    snprintf(fn_im, 512, "%s/%06d%s", img_dir.c_str(), i, im_extension.c_str());
-    if (height > 0 && width > 0) {
-      img_origin = cv::imread(fn_im, CV_LOAD_IMAGE_COLOR);
-      if (!img_origin.data) {
-        LOG(ERROR) << "Could not open or find file " << fn_im;
-        if (buffer != nullptr) {
-          delete[] buffer;
+  // for get the mean and std of the input data
+  bool extract_statistics = false;
+  static std::vector<double> mean_static(channels_of, 0.f);
+  static std::vector<double> std_static(channels_of, 0.f);
+  static long long count = 0;
+  cv::Scalar mean_img, std_img;
+
+  for (int l = 0; l < length_of; l++) {
+    // get the grayscale frames
+    std::vector<cv::Mat> grays, rgbs;
+    int step_size = do_flow_aggregation ? 1 : frame_gap_of;
+    for (int j = 0; j <= frame_gap_of; j += step_size) {
+      // get the current frame
+      const unsigned char* curr_frame = buffer_rgb +
+          (l * sampling_rate_of + j) * height * width * channels_rgb;
+      cv::Mat img = cv::Mat::zeros(height, width, CV_8UC3);
+      memcpy(
+          img.data,
+          curr_frame,
+          height * width * channels_rgb * sizeof(unsigned char));
+
+      // crop and mirror the frame
+      cv::Mat img_cropped = img(rect);
+      if (mirror_me) {
+        cv::flip(img_cropped, img_cropped, 1);
+      }
+
+      cv::Mat gray;
+      cv::cvtColor(img_cropped, gray, cv::COLOR_RGB2GRAY);
+      grays.push_back(gray);
+      rgbs.push_back(img_cropped);
+    }
+
+    cv::Mat first_gray, first_rgb;
+    cv::Mat flow = cv::Mat::zeros(crop_size, crop_size, CV_32FC2);
+    MultiFrameOpticalFlowExtractor(grays, flow_alg_type, flow);
+
+    std::vector<cv::Mat> imgs;
+    cv::split(flow, imgs);
+    // save the 2-channel optical flow first
+    int c = 0;
+    for (; c < 2; c++) {
+      if (extract_statistics) {
+        cv::meanStdDev(imgs[c], mean_img, std_img);
+        mean_static[c] += mean_img[0];
+        std_static[c] += std_img[0];
+      }
+
+      imgs[c] -= mean_of[c];
+      imgs[c] *= inv_std_of[c];
+      memcpy(
+          transformed_clip + c * channel_size_flow + l * frame_size,
+          imgs[c].data,
+          frame_size * sizeof(float));
+    }
+
+    cv::Mat mag;
+    std::vector<cv::Mat> chans;
+    // augment the optical flow with more channels
+    switch (flow_data_type) {
+      case FlowDataType::Flow2C:
+        // nothing to do if we only need two channels
+        break;
+
+      case FlowDataType::Flow3C:
+        // use magnitude as the third channel
+        mag = cv::abs(imgs[0]) + cv::abs(imgs[1]);
+        if (extract_statistics) {
+          cv::meanStdDev(mag, mean_img, std_img);
+          mean_static[c] += mean_img[0];
+          std_static[c] += std_img[0];
         }
-        return false;
-      }
-      cv::resize(img_origin, img, cv::Size(width, height));
-      img_origin.release();
-    } else {
-      img = cv::imread(fn_im, CV_LOAD_IMAGE_COLOR);
-      if (!img.data) {
-        LOG(ERROR) << "Could not open or find file " << fn_im;
-        if (buffer != nullptr) {
-          delete[] buffer;
+
+        mag -= mean_of[c];
+        mag *= inv_std_of[c];
+        memcpy(
+            transformed_clip + c * channel_size_flow + l * frame_size,
+            mag.data,
+            frame_size * sizeof(float));
+        break;
+
+      case FlowDataType::FlowWithGray:
+        // add grayscale image as the third channel
+        grays[0].convertTo(first_gray, CV_32FC1);
+        if (extract_statistics) {
+          cv::meanStdDev(first_gray, mean_img, std_img);
+          mean_static[c] += mean_img[0];
+          std_static[c] += std_img[0];
         }
-        return false;
-      }
-    }
 
-    // If this is the first frame, allocate memory for the buffer
-    if (i == start_frm) {
-      image_size = img.rows * img.cols;
-      channel_size = image_size * length;
-      data_size = channel_size * 3;
-      buffer = new float[data_size];
-    }
+        first_gray -= mean_of[c];
+        first_gray *= inv_std_of[c];
+        memcpy(
+            transformed_clip + c * channel_size_flow + l * frame_size,
+            first_gray.data,
+            frame_size * sizeof(float));
+        break;
 
-    for (int c = 0; c < 3; c++) {
-      ImageChannelToBuffer(&img, buffer + c * channel_size + offset, c);
-    }
-    offset += image_size;
-  }
-  CAFFE_ENFORCE(offset == channel_size, "Wrong offset size");
-  return true;
-}
+      case FlowDataType::FlowWithRGB:
+        // add all three rgb channels
+        rgbs[0].convertTo(first_rgb, CV_32FC3);
+        cv::split(first_rgb, chans);
+        for (; c < channels_of; c++) {
+          if (extract_statistics) {
+            cv::meanStdDev(chans[c - 2], mean_img, std_img);
+            mean_static[c] += mean_img[0];
+            std_static[c] += std_img[0];
+          }
 
-int GetNumberOfFrames(std::string filename) {
-  cv::VideoCapture cap;
-  cap.open(filename);
-  if (!cap.isOpened()) {
-    LOG(ERROR) << "Cannot open " << filename;
-    return 0;
-  }
-  int num_of_frames = cap.get(CV_CAP_PROP_FRAME_COUNT);
-  cap.release();
-  return num_of_frames;
-}
-
-double GetVideoFPS(std::string filename) {
-  cv::VideoCapture cap;
-  cap.open(filename);
-  if (!cap.isOpened()) {
-    LOG(ERROR) << "Cannot open " << filename;
-    return 0;
-  }
-  double fps = cap.get(CV_CAP_PROP_FPS);
-  cap.release();
-  return fps;
-}
-
-void GetVideoMeta(std::string filename, int& number_of_frames, double& fps) {
-  cv::VideoCapture cap;
-  cap.open(filename);
-  if (cap.isOpened()) {
-    number_of_frames = cap.get(CV_CAP_PROP_FRAME_COUNT);
-    fps = cap.get(CV_CAP_PROP_FPS);
-    cap.release();
-  } else {
-    LOG(ERROR) << "Cannot open " << filename;
-    number_of_frames = -1;
-    fps = 0;
-  }
-}
-
-bool ReadClipFromVideoLazzy(
-    std::string filename,
-    const int start_frm,
-    const int length,
-    const int height,
-    const int width,
-    const int sampling_rate,
-    float*& buffer) {
-  cv::VideoCapture cap;
-  cv::Mat img, img_origin;
-  buffer = nullptr;
-  int offset = 0;
-  int channel_size = 0;
-  int image_size = 0;
-  int data_size = 0;
-  int end_frm = 0;
-
-  cap.open(filename);
-  if (!cap.isOpened()) {
-    LOG(ERROR) << "Cannot open " << filename;
-    return false;
-  }
-
-  int num_of_frames = cap.get(CV_CAP_PROP_FRAME_COUNT);
-  if (num_of_frames < length * sampling_rate) {
-    LOG(INFO) << filename << " does not have enough frames; having "
-              << num_of_frames;
-    return false;
-  }
-
-  CAFFE_ENFORCE_GE(start_frm, 0, "start frame must be greater or equal to 0");
-
-  if (start_frm) {
-    cap.set(CV_CAP_PROP_POS_FRAMES, start_frm);
-  }
-  end_frm = start_frm + length * sampling_rate;
-  CAFFE_ENFORCE_LE(
-      end_frm,
-      num_of_frames,
-      "end frame must be less or equal to num of frames");
-
-  for (int i = start_frm; i < end_frm; i += sampling_rate) {
-    if (sampling_rate > 1) {
-      cap.set(CV_CAP_PROP_POS_FRAMES, i);
-    }
-    if (height > 0 && width > 0) {
-      cap.read(img_origin);
-      if (!img_origin.data) {
-        LOG(INFO) << filename << " has no data at frame " << i;
-        if (buffer != nullptr) {
-          delete[] buffer;
+          chans[c - 2] -= mean_of[c];
+          chans[c - 2] *= inv_std_of[c];
+          memcpy(
+              transformed_clip + c * channel_size_flow + l * frame_size,
+              chans[c - 2].data,
+              frame_size * sizeof(float));
         }
-        return false;
-      }
-      cv::resize(img_origin, img, cv::Size(width, height));
-    } else {
-      cap.read(img);
-      if (!img.data) {
-        LOG(ERROR) << "Could not open or find file " << filename;
-        if (buffer != nullptr) {
-          delete[] buffer;
+        break;
+
+      default:
+        LOG(ERROR) << "Unsupported optical flow data type " << flow_data_type;
+        break;
+    }
+
+    if (extract_statistics) {
+      count++;
+      if (count % 1000 == 1) {
+        for (int i = 0; i < channels_of; i++) {
+          LOG(INFO) << i
+                    << "-th channel mean: " << mean_static[i] / float(count)
+                    << " std: " << std_static[i] / float(count);
         }
-        return false;
       }
     }
-
-    // If this is the fisrt frame, allocate memory for the buffer
-    if (i == start_frm) {
-      image_size = img.rows * img.cols;
-      channel_size = image_size * length;
-      data_size = channel_size * 3;
-      buffer = new float[data_size];
-    }
-
-    for (int c = 0; c < 3; c++) {
-      ImageChannelToBuffer(&img, buffer + c * channel_size + offset, c);
-    }
-
-    offset += image_size;
   }
-
-  CAFFE_ENFORCE(offset == channel_size, "wrong offset size");
-  cap.release();
-  return true;
 }
 
-bool ReadClipFromVideoSequential(
-    std::string filename,
-    const int start_frm,
-    const int length,
-    const int height,
-    const int width,
-    const int sampling_rate,
-    float*& buffer) {
-  cv::VideoCapture cap;
-  cv::Mat img, img_origin;
-  buffer = nullptr;
-  int offset = 0;
-  int channel_size = 0;
-  int image_size = 0;
-  int data_size = 0;
-
-  cap.open(filename);
-  if (!cap.isOpened()) {
-    LOG(ERROR) << "Cannot open " << filename;
-    return false;
-  }
-
-  int num_of_frames = cap.get(CV_CAP_PROP_FRAME_COUNT);
-  if (num_of_frames < length * sampling_rate) {
-    LOG(INFO) << filename << " does not have enough frames; having "
-              << num_of_frames;
-    return false;
-  }
-
-  CAFFE_ENFORCE_GE(start_frm, 0, "start frame must be greater or equal to 0");
-
-  // Instead of random access, do sequentically access (avoid key-frame issue)
-  // This will keep start_frm frames
-  int sequential_counter = 0;
-  while (sequential_counter < start_frm) {
-    cap.read(img_origin);
-    sequential_counter++;
-  }
-
-  int end_frm = start_frm + length * sampling_rate;
-  CAFFE_ENFORCE_LE(
-      end_frm,
-      num_of_frames,
-      "end frame must be less or equal to num of frames");
-
-  for (int i = start_frm; i < end_frm; i++) {
-    if (sampling_rate > 1) {
-      // If sampling_rate > 1, purposely keep some frames
-      if ((i - start_frm) % sampling_rate != 0) {
-        cap.read(img_origin);
-        continue;
-      }
-    }
-    if (height > 0 && width > 0) {
-      cap.read(img_origin);
-      if (!img_origin.data) {
-        LOG(INFO) << filename << " has no data at frame " << i;
-        if (buffer != nullptr) {
-          delete[] buffer;
-        }
-        return false;
-      }
-      cv::resize(img_origin, img, cv::Size(width, height));
-    } else {
-      cap.read(img);
-      if (!img.data) {
-        LOG(ERROR) << "Could not open or find file " << filename;
-        if (buffer != nullptr) {
-          delete[] buffer;
-        }
-        return false;
-      }
-    }
-
-    // If this is the first frame, then we allocate memory for the buffer
-    if (i == start_frm) {
-      image_size = img.rows * img.cols;
-      channel_size = image_size * length;
-      data_size = channel_size * 3;
-      buffer = new float[data_size];
-    }
-
-    for (int c = 0; c < 3; c++) {
-      ImageChannelToBuffer(&img, buffer + c * channel_size + offset, c);
-    }
-
-    offset += image_size;
-  }
-  CAFFE_ENFORCE(offset == channel_size, "wrong offset size");
-  cap.release();
-
-  return true;
-}
-
-bool ReadClipFromVideo(
-    std::string filename,
-    const int start_frm,
-    const int length,
-    const int height,
-    const int width,
-    const int sampling_rate,
-    float*& buffer) {
-  bool read_status = ReadClipFromVideoLazzy(
-      filename, start_frm, length, height, width, sampling_rate, buffer);
-  if (!read_status) {
-    read_status = ReadClipFromVideoSequential(
-        filename, start_frm, length, height, width, sampling_rate, buffer);
-  }
-  return read_status;
-}
-
-bool DecodeClipFromVideoFile(
-    std::string filename,
-    const int start_frm,
-    const int length,
-    const int height,
-    const int width,
-    const int sampling_rate,
-    float*& buffer) {
-  Params params;
-  std::vector<std::unique_ptr<DecodedFrame>> sampledFrames;
-  VideoDecoder decoder;
-
-  params.outputHeight_ = height ? height : -1;
-  params.outputWidth_ = width ? width : -1;
-  params.maximumOutputFrames_ = MAX_DECODING_FRAMES;
-
-  // decode all frames with defaul sampling rate
-  decoder.decodeFile(filename, params, sampledFrames);
-
-  buffer = nullptr;
-  int offset = 0;
-  int channel_size = 0;
-  int image_size = 0;
-  int data_size = 0;
-
-  int end_frm = start_frm + length * sampling_rate;
-  for (int i = start_frm; i < end_frm; i += sampling_rate) {
-    if (i == start_frm) {
-      image_size = sampledFrames[i]->height_ * sampledFrames[i]->width_;
-      channel_size = image_size * length;
-      data_size = channel_size * 3;
-      buffer = new float[data_size];
-    }
-
-    for (int c = 0; c < 3; c++) {
-      ImageDataToBuffer(
-          (unsigned char*)sampledFrames[i]->data_.get(),
-          sampledFrames[i]->height_,
-          sampledFrames[i]->width_,
-          buffer + c * channel_size + offset,
-          c);
-    }
-    offset += image_size;
-  }
-  CAFFE_ENFORCE(offset == channel_size, "Wrong offset size");
-
+void FreeDecodedData(
+    std::vector<std::unique_ptr<DecodedFrame>>& sampledFrames) {
   // free the sampledFrames
   for (int i = 0; i < sampledFrames.size(); i++) {
     DecodedFrame* p = sampledFrames[i].release();
     delete p;
   }
   sampledFrames.clear();
-
-  return true;
 }
 
-bool DecodeClipFromMemoryBuffer(
+bool DecodeMultipleClipsFromVideo(
     const char* video_buffer,
-    const int size,
+    const std::string& video_filename,
+    const int encoded_size,
+    const Params& params,
     const int start_frm,
-    const int length,
-    const int height,
-    const int width,
-    const int sampling_rate,
-    float*& buffer,
-    std::mt19937* randgen) {
-  Params params;
+    const int clip_per_video,
+    const bool use_local_file,
+    int& height,
+    int& width,
+    std::vector<unsigned char*>& buffer_rgb) {
   std::vector<std::unique_ptr<DecodedFrame>> sampledFrames;
   VideoDecoder decoder;
 
-  params.outputHeight_ = height ? height : -1;
-  params.outputWidth_ = width ? width : -1;
-  params.maximumOutputFrames_ = MAX_DECODING_FRAMES;
-
-  bool isTemporalJitter = (start_frm < 0);
-  decoder.decodeMemory(
-      video_buffer,
-      size,
-      params,
-      sampledFrames,
-      length * sampling_rate,
-      !isTemporalJitter);
-
-  if (sampledFrames.size() < length * sampling_rate) {
-    /* selective decoding failed. Decode all frames. */
-    decoder.decodeMemory(video_buffer, size, params, sampledFrames);
+  // decoding from buffer or file
+  if (!use_local_file) {
+    decoder.decodeMemory(
+        video_buffer, encoded_size, params, start_frm, sampledFrames);
+  } else {
+    decoder.decodeFile(video_filename, params, start_frm, sampledFrames);
   }
 
-  buffer = nullptr;
-  int offset = 0;
-  int channel_size = 0;
-  int image_size = 0;
-  int data_size = 0;
-
-  int use_start_frm = start_frm;
-  if (start_frm < 0) { // perform temporal jittering
-    if ((int)(sampledFrames.size() - length * sampling_rate) > 0) {
-      use_start_frm = std::uniform_int_distribution<>(
-          0, (int)(sampledFrames.size() - length * sampling_rate))(*randgen);
-    } else {
-      use_start_frm = 0;
-    }
+  for (int i = 0; i < buffer_rgb.size(); i++) {
+    unsigned char* buff = buffer_rgb[i];
+    delete[] buff;
   }
+  buffer_rgb.clear();
 
-  if (sampledFrames.size() < length * sampling_rate) {
+  if (sampledFrames.size() < params.num_of_required_frame_) {
     LOG(ERROR)
-        << "The video seems faulty and we could not decode suffient samples";
-    buffer = nullptr;
+        << "The video seems faulty and we could not decode enough frames: "
+        << sampledFrames.size() << " VS " << params.num_of_required_frame_;
+    FreeDecodedData(sampledFrames);
     return true;
   }
 
-  CAFFE_ENFORCE_LT(
-    use_start_frm,
-    sampledFrames.size(),
-    "Starting frame must less than total number of video frames");
+  height = sampledFrames[0]->height_;
+  width = sampledFrames[0]->width_;
+  float sample_stepsz =
+      float(sampledFrames.size() - params.num_of_required_frame_) /
+      clip_per_video;
 
-  int end_frm = use_start_frm + length * sampling_rate;
-
-  CAFFE_ENFORCE_LE(
-      end_frm,
-      sampledFrames.size(),
-      "Ending frame must less than or equal total number of video frames");
-
-  for (int i = use_start_frm; i < end_frm; i += sampling_rate) {
-    if (i == use_start_frm) {
-      image_size = sampledFrames[i]->height_ * sampledFrames[i]->width_;
-      channel_size = image_size * length;
-      data_size = channel_size * 3;
-      buffer = new float[data_size];
+  int image_size = 3 * height * width;
+  int clip_size = params.num_of_required_frame_ * image_size;
+  // get the RGB frames for each clip
+  for (int i = 0; i < clip_per_video; i++) {
+    unsigned char* buffer_rgb_ptr = new unsigned char[clip_size];
+    int clip_start = floor(i * sample_stepsz);
+    for (int j = 0; j < params.num_of_required_frame_; j++) {
+      memcpy(
+          buffer_rgb_ptr + j * image_size,
+          (unsigned char*)sampledFrames[j + clip_start]->data_.get(),
+          image_size * sizeof(unsigned char));
     }
-
-    for (int c = 0; c < 3; c++) {
-      ImageDataToBuffer(
-          (unsigned char*)sampledFrames[i]->data_.get(),
-          sampledFrames[i]->height_,
-          sampledFrames[i]->width_,
-          buffer + c * channel_size + offset,
-          c);
-    }
-    offset += image_size;
+    buffer_rgb.push_back(buffer_rgb_ptr);
   }
-  CAFFE_ENFORCE(offset == channel_size, "Wrong offset size");
-
-  // free the sampledFrames
-  for (int i = 0; i < sampledFrames.size(); i++) {
-    DecodedFrame* p = sampledFrames[i].release();
-    delete p;
-  }
-  sampledFrames.clear();
+  FreeDecodedData(sampledFrames);
 
   return true;
 }
 
-} // caffe2 namespace
+} // namespace caffe2
