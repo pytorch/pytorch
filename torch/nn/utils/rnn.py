@@ -25,8 +25,9 @@ class PackedSequence(PackedSequence_):
 
     Attributes:
         data (Variable): Variable containing packed sequence
-        batch_sizes (list[int]): list of integers holding information about
-            the batch size at each sequence step
+        batch_sizes (Variable): Variable of integers holding
+            information about the batch size at each sequence step
+
     """
     def cuda(self, *args, **kwargs):
         """Returns a GPU copy if `self.data` not already on the GPU"""
@@ -100,7 +101,7 @@ def pack_padded_sequence(input, lengths, batch_first=False):
 
     Arguments:
         input (Variable): padded batch of variable length sequences.
-        lengths (list[int]): list of sequences lengths of each batch element.
+        lengths (Variable): list of sequences lengths of each batch element.
         batch_first (bool, optional): if ``True``, the input is expected in BxTx*
             format.
 
@@ -109,7 +110,7 @@ def pack_padded_sequence(input, lengths, batch_first=False):
     """
     data, batch_sizes = PackPadded.apply(input, lengths, batch_first)
 
-    return PackedSequence(data, list(batch_sizes.data))
+    return PackedSequence(data, batch_sizes)
 
 
 def pad_packed_sequence(sequence, batch_first=False, padding_value=0):
@@ -130,11 +131,12 @@ def pad_packed_sequence(sequence, batch_first=False, padding_value=0):
         padding_value (float, optional): values for padded elements.
 
     Returns:
-        Tuple of Variable containing the padded sequence, and a list of lengths
-        of each sequence in the batch.
+        Tuple of Variable containing the padded sequence, and Variable
+        containing the list of lengths of each sequence in the batch.
+
     """
     var_data, batch_sizes = sequence
-    max_batch_size = batch_sizes[0]
+    max_batch_size = list(batch_sizes.data)[0]
     output = var_data.data.new(len(batch_sizes), max_batch_size, *var_data.size()[1:]).fill_(padding_value)
     output = Variable(output)
 
@@ -142,7 +144,7 @@ def pad_packed_sequence(sequence, batch_first=False, padding_value=0):
     data_offset = 0
     prev_batch_size = batch_sizes[0]
     prev_i = 0
-    for i, batch_size in enumerate(batch_sizes + [0]):
+    for i, batch_size in enumerate(list(batch_sizes.data) + [0]):
         if batch_size != prev_batch_size:
             l = prev_batch_size * (i - prev_i)
             tmp = var_data[data_offset:data_offset + l]
@@ -158,7 +160,7 @@ def pad_packed_sequence(sequence, batch_first=False, padding_value=0):
 
     if batch_first:
         output = output.transpose(0, 1)
-    return output, lengths
+    return output, Variable(torch.LongTensor(lengths))
 
 
 def pad_sequence(sequences, batch_first=False):
