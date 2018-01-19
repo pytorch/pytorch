@@ -256,6 +256,20 @@ static PyObject * THPVariable_integral_scalar(PyObject* self, PyObject* args) {
   END_HANDLE_TH_ERRORS
 }
 
+// This is the __index__ function in Python which is similar to __int__, but
+// called when used as a slice.
+static PyObject * THPVariable_index_scalar(PyObject* self, PyObject* args) {
+  HANDLE_TH_ERRORS
+  auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
+  // TODO: change the condition to `self_.dim() != 0` once we expose scalars
+  // in PyTorch.
+  if (!isIntegralType(self_.type().scalarType()) || self_.numel() != 1) {
+    throw TypeError("only integer tensors of a single element can be converted to an index");
+  }
+  return wrap(dispatch_to_CLong(self_));
+  END_HANDLE_TH_ERRORS
+}
+
 static Tensor dispatch_invert(const Tensor & self) {
   AutoNoGIL no_gil;
   AutoGPU auto_gpu(self);
@@ -535,6 +549,7 @@ PyMethodDef variable_methods[] = {
   {"__float__", (PyCFunction)THPVariable_float_scalar, METH_NOARGS, NULL},
   {"__int__", (PyCFunction)THPVariable_integral_scalar, METH_NOARGS, NULL},
   {"__long__", (PyCFunction)THPVariable_integral_scalar, METH_NOARGS, NULL},
+  {"__index__", (PyCFunction)THPVariable_index_scalar, METH_NOARGS, NULL},
   {"__invert__", (PyCFunction)THPVariable_invert, METH_NOARGS, NULL},
   {"__nonzero__", (PyCFunction)THPVariable_is_nonzero, METH_NOARGS, NULL},
   {"__matmul__", (PyCFunction)THPVariable_matmul, METH_VARARGS | METH_KEYWORDS, NULL},
