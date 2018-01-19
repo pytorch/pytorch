@@ -12,11 +12,12 @@ from .modules import utils
 from ._functions.linear import Bilinear
 from ._functions.padding import ConstantPadNd
 from ._functions import vision
+from ._functions.thnn.fold import Col2Im, Im2Col
 from torch.autograd import Variable
 from .modules.utils import _single, _pair, _triple
 
 
-conv1d = _add_docstr(torch._C._VariableBase.conv1d, r"""
+conv1d = _add_docstr(torch._C._VariableFunctions.conv1d, r"""
 conv1d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1) -> Tensor
 
 Applies a 1D convolution over an input signal composed of several input
@@ -44,7 +45,7 @@ Examples::
     >>> F.conv1d(inputs, filters)
 """)
 
-conv2d = _add_docstr(torch._C._VariableBase.conv2d, r"""
+conv2d = _add_docstr(torch._C._VariableFunctions.conv2d, r"""
 conv2d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1) -> Tensor
 
 Applies a 2D convolution over an input image composed of several input
@@ -73,7 +74,7 @@ Examples::
     >>> F.conv2d(inputs, filters, padding=1)
 """)
 
-conv3d = _add_docstr(torch._C._VariableBase.conv3d, r"""
+conv3d = _add_docstr(torch._C._VariableFunctions.conv3d, r"""
 conv3d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1) -> Tensor
 
 Applies a 3D convolution over an input image composed of several input
@@ -101,7 +102,7 @@ Examples::
     >>> F.conv3d(inputs, filters)
 """)
 
-conv_transpose1d = _add_docstr(torch._C._VariableBase.conv_transpose1d, r"""
+conv_transpose1d = _add_docstr(torch._C._VariableFunctions.conv_transpose1d, r"""
 conv_transpose1d(input, weight, bias=None, stride=1, padding=0, output_padding=0, groups=1, dilation=1) -> Tensor
 
 Applies a 1D transposed convolution operator over an input signal
@@ -126,7 +127,7 @@ Args:
       a tuple (dW,). Default: 1
 """)
 
-conv_transpose2d = _add_docstr(torch._C._VariableBase.conv_transpose2d, r"""
+conv_transpose2d = _add_docstr(torch._C._VariableFunctions.conv_transpose2d, r"""
 conv_transpose2d(input, weight, bias=None, stride=1, padding=0, output_padding=0, groups=1, dilation=1) -> Tensor
 
 Applies a 2D transposed convolution operator over an input image
@@ -151,7 +152,7 @@ Args:
       a tuple (dH, dW). Default: 1
 """)
 
-conv_transpose3d = _add_docstr(torch._C._VariableBase.conv_transpose3d, r"""
+conv_transpose3d = _add_docstr(torch._C._VariableFunctions.conv_transpose3d, r"""
 conv_transpose3d(input, weight, bias=None, stride=1, padding=0, output_padding=0, groups=1, dilation=1) -> Tensor
 
 Applies a 3D transposed convolution operator over an input image
@@ -329,7 +330,7 @@ def max_pool1d(input, kernel_size, stride=None, padding=0, dilation=1,
 
     See :class:`~torch.nn.MaxPool1d` for details.
     """
-    ret = torch._C._VariableBase.max_pool1d(input, kernel_size, stride, padding, dilation, ceil_mode)
+    ret = torch._C._VariableFunctions.max_pool1d(input, kernel_size, stride, padding, dilation, ceil_mode)
     return ret if return_indices else ret[0]
 
 
@@ -456,7 +457,7 @@ def adaptive_max_pool1d(input, output_size, return_indices=False):
         output_size: the target output size (single integer)
         return_indices: whether to return pooling indices. Default: ``False``
     """
-    ret = torch._C._VariableBase.adaptive_max_pool1d(input, output_size)
+    ret = torch._C._VariableFunctions.adaptive_max_pool1d(input, output_size)
     return ret if return_indices else ret[0]
 
 
@@ -490,7 +491,7 @@ def adaptive_max_pool3d(input, output_size, return_indices=False):
     return ret if return_indices else ret[0]
 
 
-adaptive_avg_pool1d = _add_docstr(torch._C._VariableBase.adaptive_avg_pool1d, r"""
+adaptive_avg_pool1d = _add_docstr(torch._C._VariableFunctions.adaptive_avg_pool1d, r"""
 adaptive_avg_pool1d(input, output_size) -> Variable
 
 Applies a 1D adaptive average pooling over an input signal composed of
@@ -682,10 +683,10 @@ def selu(input, inplace=False):
     See :class:`~torch.nn.SELU` for more details.
     """
     if inplace:
-        return torch._C._VariableBase.selu_(input)
-    return torch._C._VariableBase.selu(input)
+        return torch._C._VariableFunctions.selu_(input)
+    return torch._C._VariableFunctions.selu(input)
 
-selu_ = _add_docstr(torch._C._VariableBase.selu_, r"""
+selu_ = _add_docstr(torch._C._VariableFunctions.selu_, r"""
 selu_(input) -> Variable
 
 In-place verison of :func:`~selu`.
@@ -730,11 +731,11 @@ def rrelu(input, lower=1. / 8, upper=1. / 3, training=False, inplace=False):
     Randomized leaky ReLU.
     """
     if inplace:
-        return torch._C._VariableBase.rrelu_(input, lower, upper, training)
-    return torch._C._VariableBase.rrelu(input, lower, upper, training)
+        return torch._C._VariableFunctions.rrelu_(input, lower, upper, training)
+    return torch._C._VariableFunctions.rrelu(input, lower, upper, training)
 
 
-rrelu_ = _add_docstr(torch._C._VariableBase.rrelu_, r"""
+rrelu_ = _add_docstr(torch._C._VariableFunctions.rrelu_, r"""
 rrelu_(input, lower=1./8, upper=1./3, training=False) -> Variable
 
 In-place version of :func:`~rrelu`.
@@ -1058,8 +1059,8 @@ def embedding(input, weight, padding_idx=None, max_norm=None, norm_type=2,
             padding_idx = -1
     if max_norm is not None:
         with torch.no_grad():
-            torch._C._VariableBase.embedding_renorm_(weight, input, max_norm, norm_type)
-    return torch._C._VariableBase.embedding(weight, input, padding_idx, scale_grad_by_freq)
+            torch._C._VariableFunctions.embedding_renorm_(weight, input, max_norm, norm_type)
+    return torch._C._VariableFunctions.embedding(weight, input, padding_idx, scale_grad_by_freq, sparse)
 
 
 def embedding_bag(embedding_matrix, indices, offsets=None,
@@ -1147,13 +1148,39 @@ def batch_norm(input, running_mean, running_var, weight=None, bias=None,
         size = list(input.size())
         if reduce(mul, size[2:], size[0]) == 1:
             raise ValueError('Expected more than 1 value per channel when training, got input size {}'.format(size))
-    return torch._C._VariableBase.batch_norm(
+    return torch._C._VariableFunctions.batch_norm(
         input, weight, bias,
         Variable(running_mean), Variable(running_var), training, momentum, eps, torch.backends.cudnn.enabled
     )
 
 
+def local_response_norm(input, size, alpha=1e-4, beta=0.75, k=1):
+    """Applies local response normalization over an input signal composed of
+    several input planes, where channels occupy the second dimension.
+    Applies normalization across channels.
+
+    See :class:`~torch.nn.LocalResponseNorm` for details.
+    """
+    dim = input.dim()
+    if dim < 3:
+        raise ValueError('Expected 3D or higher dimensionality \
+                         input (got {} dimensions)'.format(dim))
+    div = input.mul(input).unsqueeze(1)
+    if dim == 3:
+        div = pad(div, (0, 0, size // 2, (size - 1) // 2))
+        div = avg_pool2d(div, (size, 1), stride=1).squeeze(1)
+    else:
+        sizes = input.size()
+        div = div.view(sizes[0], 1, sizes[1], sizes[2], -1)
+        div = pad(div, (0, 0, 0, 0, size // 2, (size - 1) // 2))
+        div = avg_pool3d(div, (size, 1, 1), stride=1).squeeze(1)
+        div = div.view(sizes)
+    div = div.mul(alpha).add(k).pow(beta)
+    return input / div
+
+
 # loss
+
 
 def nll_loss(input, target, weight=None, size_average=True, ignore_index=-100, reduce=True):
     r"""The negative log likelihood loss.
@@ -1162,10 +1189,10 @@ def nll_loss(input, target, weight=None, size_average=True, ignore_index=-100, r
 
     Args:
         input: :math:`(N, C)` where `C = number of classes` or :math:`(N, C, H, W)`
-            in case of 2D Loss, or :math:`(N, C, d_1, d_2, ..., d_K)` where :math:`K > 2`
+            in case of 2D Loss, or :math:`(N, C, d_1, d_2, ..., d_K)` where :math:`K > 1`
             in the case of K-dimensional loss.
         target: :math:`(N)` where each value is `0 <= targets[i] <= C-1`,
-            or :math:`(N, C, d_1, d_2, ..., d_K)` where :math:`K >= 2` for
+            or :math:`(N, C, d_1, d_2, ..., d_K)` where :math:`K >= 1` for
             K-dimensional loss.
         weight (Tensor, optional): a manual rescaling weight given to each
             class. If given, has to be a Tensor of size `C`
@@ -1192,7 +1219,7 @@ def nll_loss(input, target, weight=None, size_average=True, ignore_index=-100, r
         return torch._C._nn.nll_loss(input, target, weight, size_average, ignore_index, reduce)
     elif dim == 4:
         return torch._C._nn.nll_loss2d(input, target, weight, size_average, ignore_index, reduce)
-    elif dim > 4:
+    elif dim == 3 or dim > 4:
         n = input.size(0)
         c = input.size(1)
         out_size = (n,) + input.size()[2:]
@@ -1206,7 +1233,7 @@ def nll_loss(input, target, weight=None, size_average=True, ignore_index=-100, r
         out = torch._C._nn.nll_loss2d(input, target, weight, size_average, ignore_index, reduce)
         return out.view(out_size)
     else:
-        raise ValueError('Expected 2, 4, or more than 4 dimensions (got {})'.format(dim))
+        raise ValueError('Expected 2 or more dimensions (got {})'.format(dim))
 
 
 def poisson_nll_loss(input, target, log_input=True, full=False, size_average=True, eps=1e-8, reduce=True):
@@ -1908,3 +1935,43 @@ def normalize(input, p=2, dim=1, eps=1e-12):
         eps (float): small value to avoid division by zero. Default: 1e-12
     """
     return input / input.norm(p, dim, True).clamp(min=eps).expand_as(input)
+
+
+def assert_int_or_pair(arg, arg_name, message):
+    assert isinstance(arg, int) or len(arg) == 2, message.format(arg_name)
+
+
+def unfold(input, kernel_size, dilation=1, padding=0, stride=1):
+    r"""
+    See :class:`torch.nn.Unfold` for details
+    """
+
+    if input is not None and input.dim() == 4:
+        msg = '{} must be int or 2-tuple for 4D input'
+        assert_int_or_pair(kernel_size, 'kernel_size', msg)
+        assert_int_or_pair(dilation, 'dilation', msg)
+        assert_int_or_pair(padding, 'padding', msg)
+        assert_int_or_pair(stride, 'stride', msg)
+
+        return Im2Col.apply(input, _pair(kernel_size),
+                            _pair(dilation), _pair(padding), _pair(stride))
+    else:
+        raise NotImplementedError("Input Error: Only 4D input Tensors supported (got {}D)".format(input.dim()))
+
+
+def fold(input, output_size, kernel_size, dilation=1, padding=0, stride=1):
+    r"""
+    See :class:`torch.nn.Fold` for details
+    """
+    if input is not None and input.dim() == 3:
+        msg = '{} must be int or 2-tuple for 3D input'
+        assert_int_or_pair(output_size, 'output_size', msg)
+        assert_int_or_pair(kernel_size, 'kernel_size', msg)
+        assert_int_or_pair(dilation, 'dilation', msg)
+        assert_int_or_pair(padding, 'padding', msg)
+        assert_int_or_pair(stride, 'stride', msg)
+
+        return Col2Im.apply(input, _pair(output_size), _pair(kernel_size),
+                            _pair(dilation), _pair(padding), _pair(stride))
+    else:
+        raise NotImplementedError("Input Error: Only 3D input Tensors supported (got {}D)".format(input.dim()))

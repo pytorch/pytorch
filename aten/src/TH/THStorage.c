@@ -103,9 +103,9 @@ int THLongStorage_inferSizeN(THLongStorage *output, int n, int64_t **sizes, int6
       if (size == expandedSizes[ i ] || size == 1 || expandedSizes[ i ] == 1) {
         expandedSizes[ i ] =  THMax(expandedSizes[ i ], size);
       } else {
-        THFree(expandedSizes);
         snprintf(error_buffer, buffer_len, "The size of tensor %i (%" PRId64 ") must match the expanded size"
                  "of tensor (%" PRId64 ") at non-singleton dimension %" PRId64 ".", j, size, expandedSizes[ i ], i);
+        THFree(expandedSizes);
         return -1;
       }
     }

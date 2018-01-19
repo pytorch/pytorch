@@ -470,6 +470,10 @@ class BCEWithLogitsLoss(Module):
             over observations for each minibatch. However, if the field
             size_average is set to ``False``, the losses are instead summed for
             each minibatch. Default: ``True``
+        reduce (bool, optional): By default, the losses are averaged or summed over
+            observations for each minibatch depending on size_average. When reduce
+            is False, returns a loss per batch element instead and ignores
+            size_average. Default: True
 
      Shape:
          - Input: :math:`(N, *)` where `*` means, any number of additional
@@ -484,16 +488,22 @@ class BCEWithLogitsLoss(Module):
          >>> output = loss(input, target)
          >>> output.backward()
     """
-    def __init__(self, weight=None, size_average=True):
+    def __init__(self, weight=None, size_average=True, reduce=True):
         super(BCEWithLogitsLoss, self).__init__()
         self.size_average = size_average
+        self.reduce = reduce
         self.register_buffer('weight', weight)
 
     def forward(self, input, target):
         if self.weight is not None:
-            return F.binary_cross_entropy_with_logits(input, target, Variable(self.weight), self.size_average)
+            return F.binary_cross_entropy_with_logits(input, target,
+                                                      Variable(self.weight),
+                                                      self.size_average,
+                                                      reduce=self.reduce)
         else:
-            return F.binary_cross_entropy_with_logits(input, target, size_average=self.size_average)
+            return F.binary_cross_entropy_with_logits(input, target,
+                                                      size_average=self.size_average,
+                                                      reduce=self.reduce)
 
 
 class HingeEmbeddingLoss(_Loss):

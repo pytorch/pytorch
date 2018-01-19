@@ -137,7 +137,7 @@ Node* recordTrace(std::string op, // TODO: make this a Symbol
   // haven't actually specified what the locking contract is, be conservative.
   auto state_lock = state->lock();
 
-  Node *n = graph->create(stringToSymbol(op), 0 /* initial outputs */);
+  Node *n = graph->create(Symbol(op), 0 /* initial outputs */);
   auto sl = std::make_shared<SourceLocation>(getPythonInterpreterStackTrace());
   n->setSourceLocation(sl);
 

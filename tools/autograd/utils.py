@@ -37,5 +37,16 @@ def split_name_params(prototype):
 def write(dirname, name, template, env):
     env['generated_comment'] = GENERATED_COMMENT.substitute(filename=name)
     path = os.path.join(dirname, name)
-    with open(path, 'w') as f:
-        f.write(template.substitute(env))
+    # See Note [Unchanging results for ninja]
+    try:
+        with open(path, 'r') as f:
+            old_val = f.read()
+    except IOError:
+        old_val = None
+    new_val = template.substitute(env)
+    if old_val != new_val:
+        with open(path, 'w') as f:
+            print("Writing {}".format(path))
+            f.write(new_val)
+    else:
+        print("Skipped writing {}".format(path))

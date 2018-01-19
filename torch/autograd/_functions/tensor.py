@@ -1,8 +1,7 @@
 from functools import reduce
 import torch
-
+import torch._utils
 from ..function import Function
-from ..variable import Variable
 
 
 class Type(Function):
@@ -56,7 +55,7 @@ class Repeat(Function):
     def forward(ctx, input, repeats):
         ctx.repeats = repeats
         ctx.input_dims = input.dim()
-        return input.repeat(repeats)
+        return torch._utils._repeat(input, repeats)
 
     @staticmethod
     def backward(ctx, grad_output):

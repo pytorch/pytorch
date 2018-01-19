@@ -42,7 +42,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> _det_with_svd(const Tensor& self) {
       qr_det = -qr_det;
     }
     det = qr_det;  // QR is more stable than svd, so use it anyways
-    if ((qr_det < 0).any() ^ (det < 0).any()) {  // if different sign
+    if ((qr_det < 0).any().toCByte() ^ (det < 0).any().toCByte()) {  // if different sign
       u.narrow(1, 0, 1).mul_(-1);
       sigma.narrow(0, 0, 1).mul_(-1);
     }
