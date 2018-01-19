@@ -309,6 +309,7 @@
   name: resizeAs_
   python_name: resize_as_
   cname: resizeAs
+  aten_sparse: True
   return: self
   scalar_check: the_template_->isScalar()
   arguments:
@@ -4024,8 +4025,10 @@
   variants: [function]
   options:
     - cname: new
+      aten_sparse: True
       arguments: []
     - cname: newWithSize
+      aten_sparse: True
       arguments:
         - THSize* size
         - CONSTANT NULL

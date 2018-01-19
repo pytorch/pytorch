@@ -178,7 +178,7 @@ THCSTensor *THCSTensor_(newWithTensorAndSize)(THCState *state, THCIndexTensor *i
   return self;
 }
 
-THCSTensor *THCSTensor_(newWithSize)(THCState *state, THLongStorage *size)
+THCSTensor *THCSTensor_(newWithSize)(THCState *state, THLongStorage *size, THLongStorage *_ignored)
 {
   THCSTensor *self = THAlloc(sizeof(THCSTensor));
   THCSTensor_(rawInit)(state, self);
