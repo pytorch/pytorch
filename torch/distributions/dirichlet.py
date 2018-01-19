@@ -43,7 +43,7 @@ class Dirichlet(Distribution):
     Example::
 
         >>> m = Dirichlet(torch.Tensor([0.5, 0.5]))
-        >>> m.sample()  # Dirichlet distributed with concentrarion concentration
+        >>> m.sample()  # Dirichlet distributed with concentration concentration
          0.1046
          0.8954
         [torch.FloatTensor of size 2]
