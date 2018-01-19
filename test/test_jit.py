@@ -2,6 +2,7 @@ import torch
 import torch.jit
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.nn.utils import rnn as rnn_utils
 import unittest
 from contextlib import contextmanager
 from itertools import product
@@ -1165,6 +1166,23 @@ class TestJit(TestCase):
         self.assertEqual(len(list(trace.graph().inputs())), 2)
         self.assertExpected(str(trace))
 
+
+    def test_packed_sequence(self):
+        class LstmWithPackedSequence(nn.Module):
+            def __init__(self):
+                super(LstmWithPackedSequence, self).__init__()
+                self.model = nn.LSTM(5, 7, 3)
+            def forward(self, input, args):
+                batch_sizes = [input.size(0)] * input.size(1)
+                input = rnn_utils.pack_padded_sequence(input, batch_sizes)
+                ret, _ = self.model(input, args)
+                ret, _ = rnn_utils.pad_packed_sequence(ret)
+                return ret
+        m = LstmWithPackedSequence()
+        input = Variable(torch.randn(11, 13, 5))
+        h0 = Variable(torch.randn(3, 13, 7))
+        c0 = Variable(torch.randn(3, 13, 7))
+        trace, _ = torch.jit.trace(m, (input, (h0, c0)))
 
 if __name__ == '__main__':
     run_tests()
