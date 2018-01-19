@@ -3,12 +3,12 @@ import torch.multiprocessing as multiprocessing
 from torch._C import _set_worker_signal_handlers, _update_worker_pids, \
     _remove_worker_pids, _error_if_any_worker_fails
 from .sampler import SequentialSampler, RandomSampler, BatchSampler
+from .utils import ExceptionWrapper, QueueWrapper
 import signal
 import functools
 import collections
 import re
 import sys
-import traceback
 import threading
 from torch._six import string_classes, int_classes
 
@@ -21,60 +21,6 @@ else:
 
 _use_shared_memory = False
 """Whether to use shared memory in default_collate"""
-
-
-class ExceptionWrapper(object):
-    "Wraps an exception plus traceback to communicate across threads"
-
-    def __init__(self, exc_info):
-        self.exc_type = exc_info[0]
-        self.exc_msg = "".join(traceback.format_exception(*exc_info))
-
-
-# Syscalls are automatically retried upon encountering EINTR since Python 3.5
-# https://www.python.org/dev/peps/pep-0475/
-# EINTR is not available on Windows.
-if sys.platform == 'win32' or sys.version_info >= (3, 5):
-    def _get_from_queue(mp_queue, timeout=None):
-        if timeout is None:
-            return mp_queue.get()
-        else:
-            return mp_queue.get(timeout=timeout)
-
-    def _put_into_queue(mp_queue, val):
-        return mp_queue.put(val)
-else:
-    import time
-    import errno
-
-    if sys.version_info >= (3, 3):
-        time_fn = time.perf_counter
-    else:
-        time_fn = time.time
-
-    def _get_from_queue(mp_queue, timeout=None):
-        while True:
-            try:
-                if timeout is None:
-                    return mp_queue.get()
-                else:
-                    t0 = time_fn()
-                    return mp_queue.get(timeout=timeout)
-            except IOError as e:
-                if e.errno != errno.EINTR:
-                    raise
-                if timeout is not None:
-                    timeout -= time_fn() - t0
-                    if timeout <= 0:
-                        raise queue.Empty
-
-    def _put_into_queue(mp_queue, val):
-        while True:
-            try:
-                return mp_queue.put(val)
-            except IOError as e:
-                if e.errno != errno.EINTR:
-                    raise
 
 
 def _worker_loop(dataset, index_queue, data_queue, collate_fn, seed, init_fn, worker_id):
@@ -94,16 +40,16 @@ def _worker_loop(dataset, index_queue, data_queue, collate_fn, seed, init_fn, wo
         init_fn(worker_id)
 
     while True:
-        r = _get_from_queue(index_queue)
+        r = index_queue.get()
         if r is None:
             break
         idx, batch_indices = r
         try:
             samples = collate_fn([dataset[i] for i in batch_indices])
         except Exception:
-            _put_into_queue(data_queue, (idx, ExceptionWrapper(sys.exc_info())))
+            data_queue.put((idx, ExceptionWrapper(sys.exc_info())))
         else:
-            _put_into_queue(data_queue, (idx, samples))
+            data_queue.put((idx, samples))
 
 
 def _worker_manager_loop(in_queue, out_queue, done_event, pin_memory, device_id):
@@ -112,7 +58,7 @@ def _worker_manager_loop(in_queue, out_queue, done_event, pin_memory, device_id)
 
     while True:
         try:
-            r = _get_from_queue(in_queue)
+            r = in_queue.get()
         except Exception:
             if done_event.is_set():
                 return
@@ -120,16 +66,16 @@ def _worker_manager_loop(in_queue, out_queue, done_event, pin_memory, device_id)
         if r is None:
             break
         if isinstance(r[1], ExceptionWrapper):
-            _put_into_queue(out_queue, r)
+            out_queue.put(r)
             continue
         idx, batch = r
         try:
             if pin_memory:
                 batch = pin_memory_batch(batch)
         except Exception:
-            _put_into_queue(out_queue, (idx, ExceptionWrapper(sys.exc_info())))
+            out_queue.put((idx, ExceptionWrapper(sys.exc_info())))
         else:
-            _put_into_queue(out_queue, (idx, batch))
+            out_queue.put((idx, batch))
 
 numpy_type_map = {
     'float64': torch.DoubleTensor,
@@ -239,8 +185,8 @@ class DataLoaderIter(object):
 
         if self.num_workers > 0:
             self.worker_init_fn = loader.worker_init_fn
-            self.index_queue = multiprocessing.SimpleQueue()
-            self.worker_result_queue = multiprocessing.SimpleQueue()
+            self.index_queue = QueueWrapper(multiprocessing.SimpleQueue())
+            self.worker_result_queue = QueueWrapper(multiprocessing.SimpleQueue())
             self.batches_outstanding = 0
             self.worker_pids_set = False
             self.shutdown = False
@@ -257,7 +203,7 @@ class DataLoaderIter(object):
                 for i in range(self.num_workers)]
 
             if self.pin_memory or self.timeout > 0:
-                self.data_queue = queue.Queue()
+                self.data_queue = QueueWrapper(queue.Queue())
                 if self.pin_memory:
                     maybe_device_id = torch.cuda.current_device()
                 else:
@@ -290,11 +236,11 @@ class DataLoaderIter(object):
     def _get_batch(self):
         if self.timeout > 0:
             try:
-                return _get_from_queue(self.data_queue, self.timeout)
+                return self.data_queue.get(timeout=self.timeout)
             except queue.Empty:
                 raise RuntimeError('DataLoader timed out after {} seconds'.format(self.timeout))
         else:
-            return _get_from_queue(self.data_queue)
+            return self.data_queue.get()
 
     def __next__(self):
         if self.num_workers == 0:  # same-process loading
@@ -333,7 +279,7 @@ class DataLoaderIter(object):
         indices = next(self.sample_iter, None)
         if indices is None:
             return
-        _put_into_queue(self.index_queue, (self.send_idx, indices))
+        self.index_queue.put((self.send_idx, indices))
         self.batches_outstanding += 1
         self.send_idx += 1
 
@@ -359,12 +305,12 @@ class DataLoaderIter(object):
                 self.done_event.set()
                 # if worker_manager_thread is waiting to put
                 while not self.data_queue.empty():
-                    _get_from_queue(self.data_queue)
+                    self.data_queue.get()
                 for _ in self.workers:
-                    _put_into_queue(self.index_queue, None)
+                    self.index_queue.put(None)
                 # done_event should be sufficient to exit worker_manager_thread,
                 # but be safe here and put another None
-                _put_into_queue(self.worker_result_queue, None)
+                self.worker_result_queue.put(None)
         finally:
             # removes pids no matter what
             if self.worker_pids_set:

@@ -12,7 +12,8 @@ import socket
 from torch import multiprocessing
 from torch.utils.data import Dataset, TensorDataset, DataLoader, ConcatDataset
 from torch.utils.data.dataset import random_split
-from torch.utils.data.dataloader import default_collate, ExceptionWrapper
+from torch.utils.data.dataloader import default_collate
+from torch.utils.data.utils import ExceptionWrapper, QueueWrapper
 from common import TestCase, run_tests, TEST_NUMPY, IS_WINDOWS
 from common_nn import TEST_CUDA
 
@@ -23,7 +24,7 @@ else:
     import queue
 
 
-JOIN_TIMEOUT = 14.0 if IS_WINDOWS else 1.5
+JOIN_TIMEOUT = 17.0 if IS_WINDOWS else 4.5
 
 
 class TestDatasetRandomSplit(TestCase):
@@ -250,12 +251,15 @@ def _test_interrupt_retry(timeout=0):
     # interruptable blocking recv syscall to simulate interruption during recv
     # in queue.get.
     # The used socket.recv call below in the replacing function is quite
-    # dangerous because it blocks everything on Python side, including the
-    # cleaning up in dataloder.__del__ when this process exits. To prevent
-    # orphan worker child, we manually terminate worker process here.
+    # dangerous because it blocks everything on Python side (likely by holding
+    # GIL), including any Python signal handlers and the cleaning up in
+    # dataloder.__del__ when this process exits. To prevent orphan worker child,
+    # we manually terminate worker process here.
     # Conveniently, the worker has SIGTERM handler installed so SIGTERM from
     # loader process won't cause loader error.
-    data = dataloaderiter.data_queue.get()  # ensure that worker handlers are installed
+
+    data_queue = dataloaderiter.data_queue
+    data = data_queue.get()  # ensure that worker handlers are installed
     for w in dataloaderiter.workers:
         w.terminate()
 
@@ -280,7 +284,12 @@ def _test_interrupt_retry(timeout=0):
         finally:
             s.close()
 
-    dataloaderiter.data_queue.get = interruptable_get
+    try:
+        if isinstance(data_queue, QueueWrapper):
+            data_queue.queue.get = interruptable_get
+    except Exception:
+        # in Python >= 3.5 or on Windows QueueWrapper is not a class but a no-op
+        pass
     _ = next(dataloaderiter)
 
 
@@ -368,7 +377,7 @@ class TestDataLoader(TestCase):
     def test_segfault(self):
         p = ErrorTrackingProcess(target=_test_segfault)
         p.start()
-        p.join(3.0 + JOIN_TIMEOUT)
+        p.join(JOIN_TIMEOUT)
         try:
             self.assertFalse(p.is_alive())
             self.assertNotEqual(p.exitcode, 0)
@@ -377,14 +386,14 @@ class TestDataLoader(TestCase):
                 self.assertRegex(str(p.exception), r'access violation reading ')
             else:
                 self.assertIsInstance(p.exception, RuntimeError)
-                self.assertRegex(str(p.exception), r'DataLoader worker \(worker_pid \d+\) is killed by signal: ')
+                self.assertRegex(str(p.exception), r'DataLoader worker \(pid \d+\) is killed by signal: ')
         finally:
             p.terminate()
 
     def test_timeout(self):
         p = ErrorTrackingProcess(target=_test_timeout)
         p.start()
-        p.join(3.0 + JOIN_TIMEOUT)
+        p.join(JOIN_TIMEOUT)
         try:
             self.assertFalse(p.is_alive())
             self.assertNotEqual(p.exitcode, 0)
@@ -414,17 +423,15 @@ class TestDataLoader(TestCase):
     def test_interrupt_retry(self):
         # time.sleep doesn't seem to work on main process when running unittest
         # for all tests together. Use Process.join as a sleep function.
-        # Case 1: interrupt, check still alove
         p = ErrorTrackingProcess(target=_test_interrupt_retry)
         p.start()
-        p.join(JOIN_TIMEOUT)  # give it some time to reach get
+        p.join(1)  # give it some time to start
         try:
             self.assertTrue(p.is_alive())
             for i in range(3):
                 p.send_signal(signal.SIGUSR1)
                 p.join(0.5)
                 self.assertTrue(p.is_alive())
-            p.join(JOIN_TIMEOUT)
         except OSError as e:
             self.fail("DataLoader shouldn't fail due to interrupted syscall")
         try:
@@ -432,22 +439,25 @@ class TestDataLoader(TestCase):
             self.assertIsNone(p.exception)
         finally:
             p.terminate()
-        # Case 2: timeout
+
+    @unittest.skipIf(IS_WINDOWS, "TODO: need to fix this test case for Windows")
+    def test_interrupt_retry_with_timeout(self):
+        # time.sleep doesn't seem to work on main process when running unittest
+        # for all tests together. Use Process.join as a sleep function.
         timeout = 2
         p = ErrorTrackingProcess(target=lambda: _test_interrupt_retry(timeout))
         p.start()
-        p.join(JOIN_TIMEOUT)  # give some time to reach get
+        p.join(1)  # give it some time to start
         try:
-            self.assertTrue(p.is_alive())
             for _ in range(5):
-                p.send_signal(signal.SIGUSR1)
-                p.join(0.5)
-            p.join(2.0 + JOIN_TIMEOUT)
+                if p.is_alive():
+                    p.send_signal(signal.SIGUSR1)
+                    p.join(0.5)
+                else:
+                    break
+            p.join(JOIN_TIMEOUT)
         except OSError as e:
-            if e.errno != errno.ESRCH:
-                # ESRCH means that os.kill finds dead proc, which can happen if
-                # timeout triggers
-                self.fail("DataLoader shouldn't fail due to interrupted syscall")
+            self.fail("DataLoader shouldn't fail due to interrupted syscall")
         try:
             self.assertFalse(p.is_alive())
             self.assertNotEqual(p.exitcode, 0)

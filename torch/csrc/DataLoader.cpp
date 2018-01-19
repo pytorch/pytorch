@@ -59,12 +59,14 @@ SIGNAL_HANDLER(SIGBUS, handler_SIGBUS, "ERROR: Unexpected bus error encountered 
   "This might be caused by insufficient shared memory (shm).\n");
 SIGNAL_HANDLER(SIGSEGV, handler_SIGSEGV, "ERROR: Unexpected segmentation fault encountered in worker.\n");
 
-// When an error happend in DataLoader methods and Python starts to  exit, the
+// When an error happend in DataLoader methods and Python starts to exit, the
 // error trace will keep the loader alive, and Python may kill the children
 // processes first before deleting the loader object. Then the cleaning up
 // methods in DataLoader.__del__ are not yet called, and SIGCHILD will print an
 // error saying a worker is killed by SIGTERM. So we suppress SIGTERM from main
-// loader process here to avoid this.
+// loader process here to avoid this by _exit(EXIT_SUCCESS). Note that if we
+// exit with nonzero code, the loader SIGCHLD handler may report RuntimeError
+// again, and then it defeats the whole purpose.
 static void handler_SIGTERM(int sig, siginfo_t *info, void *ctx)
 {
   if (info->si_pid == getppid()) {
@@ -110,9 +112,9 @@ PyObject *THPModule_errorIfAnyWorkerFails(PyObject *module) {
       // ignore errors and case with no waitable child
       if (error < 0 || infop.si_pid == 0)
         continue;
-      if (infop.si_code == CLD_EXITED && infop.si_status != 0) {  // exit with error
+      if (infop.si_code == CLD_EXITED && infop.si_status != EXIT_SUCCESS) {  // exit with error
         std::ostringstream oss;
-        oss << "DataLoader worker (worker_pid " << worker_pid << ") exited "
+        oss << "DataLoader worker (pid " << worker_pid << ") exited "
             << "unexpectedly with exit code " << infop.si_status << ".";
         // This is necessary. Otherwise, the runtime error will kill the other
         // workers, and trigger this again.
@@ -120,7 +122,7 @@ PyObject *THPModule_errorIfAnyWorkerFails(PyObject *module) {
         throw std::runtime_error(oss.str());
       }  else if (infop.si_code == CLD_KILLED || infop.si_code == CLD_DUMPED) {  // killed by signal
         std::ostringstream oss;
-        oss << "DataLoader worker (worker_pid " << worker_pid << ") is killed "
+        oss << "DataLoader worker (pid " << worker_pid << ") is killed "
             << "by signal: " << strsignal(infop.si_status) << ".";
         // This is necessary. Otherwise, the runtime error will kill the other
         // workers, and trigger this again.
