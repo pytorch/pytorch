@@ -32,7 +32,7 @@ from common import TestCase, run_tests, set_rng_seed
 from torch.autograd import Variable, grad, gradcheck
 from torch.distributions import (Bernoulli, Beta, Binomial, Categorical, Cauchy, Chi2,
                                  Dirichlet, Exponential, Gamma, Geometric, Gumbel, Laplace,
-                                 Normal, OneHotCategorical, Multinomial, Pareto,
+                                 Logistic, Normal, OneHotCategorical, Multinomial, Pareto,
                                  StudentT, Uniform, kl_divergence)
 from torch.distributions.dirichlet import _Dirichlet_backward
 from torch.distributions.constraints import Constraint, is_dependent
@@ -125,6 +125,20 @@ EXAMPLES = [
         },
     ]),
     Example(Laplace, [
+        {
+            'loc': Variable(torch.randn(5, 5), requires_grad=True),
+            'scale': Variable(torch.randn(5, 5).abs(), requires_grad=True),
+        },
+        {
+            'loc': Variable(torch.randn(1), requires_grad=True),
+            'scale': Variable(torch.randn(1).abs(), requires_grad=True),
+        },
+        {
+            'loc': torch.Tensor([1.0, 0.0]),
+            'scale': torch.Tensor([1e-5, 1e-5]),
+        },
+    ]),
+    Example(Logistic, [
         {
             'loc': Variable(torch.randn(5, 5), requires_grad=True),
             'scale': Variable(torch.randn(5, 5).abs(), requires_grad=True),
@@ -603,6 +617,56 @@ class TestDistributions(TestCase):
             self._check_sampler_sampler(Normal(loc, scale),
                                         scipy.stats.norm(loc=loc, scale=scale),
                                         'Normal(mean={}, std={})'.format(loc, scale))
+
+    def test_logistic(self):
+        loc = Variable(torch.randn(5, 5), requires_grad=True)
+        scale = Variable(torch.randn(5, 5).abs(), requires_grad=True)
+        loc_1d = Variable(torch.randn(1), requires_grad=True)
+        scale_1d = Variable(torch.randn(1), requires_grad=True)
+        loc_delta = torch.Tensor([1.0, 0.0])
+        scale_delta = torch.Tensor([1e-5, 1e-5])
+        self.assertEqual(Logistic(loc, scale).sample().size(), (5, 5))
+        self.assertEqual(Logistic(loc, scale).sample_n(7).size(), (7, 5, 5))
+        self.assertEqual(Logistic(loc_1d, scale_1d).sample_n(1).size(), (1, 1))
+        self.assertEqual(Logistic(loc_1d, scale_1d).sample().size(), (1,))
+        self.assertEqual(Logistic(0.2, .6).sample_n(1).size(), (1,))
+        self.assertEqual(Logistic(-0.7, 50.0).sample_n(1).size(), (1,))
+
+        # sample check for extreme value of mean, std
+        set_rng_seed(0)  # see Note [Randomized statistical tests]
+        self.assertEqual(Logistic(loc_delta, scale_delta).sample(sample_shape=(1, 2)),
+                         torch.Tensor([[[1.0, 0.0], [1.0, 0.0]]]),
+                         prec=1e-4)
+
+        self._gradcheck_log_prob(Logistic, (loc, scale))
+        self._gradcheck_log_prob(Logistic, (loc, 1.0))
+        self._gradcheck_log_prob(Logistic, (0.0, scale))
+
+        self.assertEqual(Logistic(loc, scale).rsample().size(), (5, 5))
+
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    def test_logistic_log_prob_and_entropy(self):
+        loc = Variable(torch.randn(5, 5), requires_grad=True)
+        scale = Variable(torch.randn(5, 5).abs(), requires_grad=True)
+
+        def ref_log_prob(idx, x, log_prob):
+            m = loc.data.view(-1)[idx]
+            s = scale.data.view(-1)[idx]
+            expected = scipy.stats.logistic(loc=m, scale=s).logpdf(x)
+            self.assertAlmostEqual(log_prob, expected, places=3)
+
+        self._check_log_prob(Logistic(loc, scale), ref_log_prob)
+        # check entropy computation
+        self.assertEqual(Logistic(loc, scale).entropy().data,
+                         scipy.stats.logistic(loc=loc.data.numpy(), scale=scale.data.numpy()).entropy(), prec=1e-3)
+
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    def test_logistic_sample(self):
+        set_rng_seed(1)  # see Note [Randomized statistical tests]
+        for loc, scale in product([-1.0, 0.0, 1.0], [0.1, 1.0, 10.0]):
+            self._check_sampler_sampler(Logistic(loc, scale),
+                                        scipy.stats.logistic(loc=loc, scale=scale),
+                                        'Logistic(loc={}, scale={})'.format(loc, scale))
 
     def test_exponential(self):
         rate = Variable(torch.randn(5, 5).abs(), requires_grad=True)
