@@ -171,6 +171,46 @@ class TestLayers(LayersTestCase):
         predict_net = self.get_predict_net()
         self.assertNetContainOps(predict_net, [mat_mul_spec])
 
+    def testSparseLookup(self):
+        record = schema.NewRecord(self.model.net, schema.Struct(
+            ('sparse', schema.Struct(
+                ('sparse_feature_0', schema.List(
+                    schema.Scalar(np.int64,
+                                  metadata=schema.Metadata(categorical_limit=1000)))),
+            )),
+        ))
+        embedding_dim = 64
+        embedding_after_pooling = self.model.SparseLookup(
+            record.sparse.sparse_feature_0, [embedding_dim], 'Sum')
+        self.model.output_schema = embedding_after_pooling
+        self.assertEqual(
+            schema.Scalar((np.float32, (embedding_dim, ))),
+            embedding_after_pooling
+        )
+
+        train_init_net, train_net = self.get_training_nets()
+
+        init_ops = self.assertNetContainOps(
+            train_init_net,
+            [
+                OpSpec("UniformFill", None, None),
+                OpSpec("ConstantFill", None, None),
+            ]
+        )
+        sparse_lookup_op_spec = OpSpec(
+            'SparseLengthsSum',
+            [
+                init_ops[0].output[0],
+                record.sparse.sparse_feature_0.items(),
+                record.sparse.sparse_feature_0.lengths(),
+            ],
+            [embedding_after_pooling()]
+        )
+        self.assertNetContainOps(train_net, [sparse_lookup_op_spec])
+
+        predict_net = self.get_predict_net()
+        self.assertNetContainOps(predict_net, [sparse_lookup_op_spec])
+
     def testSamplingTrain(self):
         output_dims = 1000
 
