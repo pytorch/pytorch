@@ -20,47 +20,40 @@ from __future__ import unicode_literals
 import argparse
 import sys
 
+sizeof = {'float': 4, 'float16': 2, 'uint8_t': 1}
 
-def unroll(uf, IndexType, InType, OutType, use_weights, isa):
 
-    def sizeof(InType):
-        size = 0
-        if InType == "float":
-            size = 4
-        elif InType == "float16":
-            size = 2
-        elif InType == "uint8_t":
-            size = 1
-        else:
-            assert False
-
-        return size
-
+def unroll(uf, IndexType, InType, OutType, use_weights, isa, fused):
     def compute(regid, InType, use_weights, isa, prefetch):
         code = []
 
         if InType == "float":
-            code.append("vop%d = _mm256_fmadd_ps(vwgt,  \
-                  _mm256_loadu_ps(ip + (%d)), vop%d);" % (regid, regid, regid))
-
+            code.append(
+                "vop%d = _mm256_fmadd_ps(vwgt,  \
+                  _mm256_loadu_ps(ip + (%d)), vop%d);"
+                                                       % (regid, regid, regid)
+            )
         elif InType == "float16":
-            code.append("vop%d = _mm256_fmadd_ps(vwgt,  \
+            code.append(
+                "vop%d = _mm256_fmadd_ps(vwgt,  \
                    _mm256_cvtph_ps(_mm_loadu_si128(reinterpret_cast<const __m128i*>(ip + (%d)))), \
                    vop%d);"
-                        % (regid, regid, regid))
+                            % (regid, regid, regid)
+            )
         elif InType == "uint8_t":
-            code.append("vop%d = _mm256_fmadd_ps(vwgt,  \
+            code.append(
+                "vop%d = _mm256_fmadd_ps(vwgt,  \
                    _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(_mm_loadl_epi64(reinterpret_cast<const __m128i*>(ip + (%d))))), \
                    _mm256_add_ps(vop%d, vbio));"
-                        % (regid, regid, regid))
+                                                 % (regid, regid, regid)
+            )
         else:
             assert False
 
-
-        if prefetch == True:
+        if prefetch:
             code.append("_mm_prefetch((&ip_next_T0[%d]), _MM_HINT_T0);" % (regid))
         else:
-            code.append("// skip unecassery prefetch of (&ip_next_T0[%d])" % (regid))
+            code.append("// skip unnecessary prefetch of (&ip_next_T0[%d])" % (regid))
 
         return code
 
@@ -87,8 +80,16 @@ def unroll(uf, IndexType, InType, OutType, use_weights, isa):
         code.append("if (weights) {")
         code.append("wgt = weights[dataInd];")
         code.append("}")
-        code.append("bio = wgt * scale_bias[2 * idx + 1];");
-        code.append("wgt = wgt * scale_bias[2 * idx];");
+        if fused:
+            code.append(
+                'const float* scale_bias = reinterpret_cast<'
+                'const float*>(&input[idx * fused_block_size + block_size]);'
+            )
+            code.append("bio = wgt * scale_bias[1];")
+            code.append("wgt = wgt * scale_bias[0];")
+        else:
+            code.append("bio = wgt * scale_bias[2 * idx + 1];")
+            code.append("wgt = wgt * scale_bias[2 * idx];")
         code.append("__m256 vbio = _mm256_set1_ps(bio);")
     else:
         code.append(OutType + " wgt = 1.f;")
@@ -97,20 +98,25 @@ def unroll(uf, IndexType, InType, OutType, use_weights, isa):
         code.append("}")
     code.append("__m256 vwgt = _mm256_set1_ps(wgt);")
 
-    code.append("const  " + InType + " *ip = &input[idx * block_size];")
-    code.append("const  " + IndexType +
-                " next_T0 = (dataInd < index_size - prefdist_T0) ? (dataInd + prefdist_T0) : dataInd;");
+    code.append("const {} *ip = &input[idx * fused_block_size];".format(InType))
+    code.append(
+        'const {} next_T0 = (dataInd < index_size - prefdist_T0)'
+        ' ? (dataInd + prefdist_T0) : dataInd;'.format(IndexType)
+    )
     code.append("const  " + IndexType + " idx_pref_T0 = indices[next_T0];")
     code.append(
         "CAFFE_ENFORCE(idx_pref_T0 >= 0 && idx_pref_T0 < data_size);")
-    code.append("const  " + InType +
-                " *ip_next_T0 = &input[idx_pref_T0 * block_size];")
+
+    code.append(
+        'const {} *ip_next_T0 = &input[idx_pref_T0'
+        ' * fused_block_size];'.format(InType)
+    )
 
     for i in range(0, uf):
         j = 8 * i
         cachelinesize = 64
-        byteoffset = sizeof(InType) * j
-        prefetch = ((byteoffset % cachelinesize) == 0)
+        byteoffset = sizeof[InType] * j
+        prefetch = (byteoffset % cachelinesize) == 0
         code.extend(compute(j, InType, use_weights, isa, prefetch))
     code.append("}")
 
@@ -133,25 +139,31 @@ def unroll(uf, IndexType, InType, OutType, use_weights, isa):
     return code
 
 
-def generic(IndexType, InType, OutType, use_weights, isa):
+def generic(IndexType, InType, OutType, use_weights, isa, fused):
 
     def compute(InType, use_weights, isa):
         code = []
         if InType == "float":
-            code.append("_mm256_storeu_ps(&op[j], \
+            code.append(
+                "_mm256_storeu_ps(&op[j], \
                                  _mm256_fmadd_ps(vwgt,_mm256_loadu_ps(&ip[j]), _mm256_loadu_ps(&op[j])) \
-                                   );")
+                                   );"
+            )
         elif InType == "float16":
-            code.append("_mm256_storeu_ps(&op[j], \
+            code.append(
+                "_mm256_storeu_ps(&op[j], \
                    _mm256_fmadd_ps(vwgt, \
                      _mm256_cvtph_ps(_mm_loadu_si128(reinterpret_cast<const __m128i*>(&ip[j]))), _mm256_loadu_ps(&op[j])) \
-                                   );")
+                                   );"
+            )
         elif InType == "uint8_t":
-            code.append("_mm256_storeu_ps(&op[j], \
+            code.append(
+                "_mm256_storeu_ps(&op[j], \
                    _mm256_fmadd_ps(vwgt, \
                      _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(_mm_loadl_epi64(reinterpret_cast<const __m128i*>(&ip[j])))), \
                      _mm256_add_ps(_mm256_loadu_ps(&op[j]), vbio) ) \
-                                   );")
+                                   );"
+            )
         else:
             assert False
 
@@ -188,9 +200,17 @@ def generic(IndexType, InType, OutType, use_weights, isa):
         code.append("if (weights) {")
         code.append("wgt = weights[dataInd];")
         code.append("}")
-        code.append("assert (scale_bias);")
-        code.append("bio = wgt * scale_bias[2 * idx + 1];");
-        code.append("wgt = wgt * scale_bias[2 * idx];");
+        if fused:
+            code.append(
+                'const float* scale_bias = reinterpret_cast<'
+                'const float*>(&input[idx * fused_block_size + block_size]);'
+            )
+            code.append("bio = wgt * scale_bias[1];")
+            code.append("wgt = wgt * scale_bias[0];")
+        else:
+            code.append("assert (scale_bias);")
+            code.append("bio = wgt * scale_bias[2 * idx + 1];")
+            code.append("wgt = wgt * scale_bias[2 * idx];")
         code.append("__m256 vbio = _mm256_set1_ps(bio);")
     else:
         code.append(OutType + " wgt = 1.f;")
@@ -199,14 +219,18 @@ def generic(IndexType, InType, OutType, use_weights, isa):
         code.append("}")
     code.append("__m256 vwgt = _mm256_set1_ps(wgt);")
 
-    code.append("const  " + InType + " *ip = &input[idx * block_size];")
-    code.append("const  " + IndexType +
-                " next_T0 = (dataInd < index_size - prefdist_T0) ? (dataInd + prefdist_T0) : dataInd;");
+    code.append("const {} *ip = &input[idx * fused_block_size];".format(InType))
+    code.append(
+        'const {} next_T0 = (dataInd < index_size - prefdist_T0)'
+        ' ? (dataInd + prefdist_T0) : dataInd;'.format(IndexType)
+    )
     code.append("const  " + IndexType + " idx_pref_T0 = indices[next_T0];")
     code.append(
         "CAFFE_ENFORCE(idx_pref_T0 >= 0 && idx_pref_T0 < data_size);")
-    code.append("const  " + InType +
-                " *ip_next_T0 = &input[idx_pref_T0 * block_size];")
+    code.append(
+        "const {} *ip_next_T0 = &input[idx_pref_T0 * fused_block_size];".
+        format(InType)
+    )
 
     # compute and store main loop
     code.append("j = 0;")
@@ -215,7 +239,6 @@ def generic(IndexType, InType, OutType, use_weights, isa):
     code.append("}")
     # leftover
     if InType == "float16":
-        #code.append("float16 vtmp1[8] __attribute__((aligned(64)));")
         code.append("float16 vtmp1[8] CAFFE2_ALIGNED(64);")
     code.append("for(; j < block_size; j++) {")
     if InType == "float":
@@ -251,14 +274,17 @@ def generic(IndexType, InType, OutType, use_weights, isa):
     return code
 
 
-
 # start main code
 parser = argparse.ArgumentParser()
-parser.add_argument('-f', nargs=1, help="file name")
+parser.add_argument('-f', '--filename', help="file name")
+parser.add_argument('--fused', action='store_true')
 opts = parser.parse_args()
-filename = "embedding_lookup_avx2.cc"
-if opts.f:
-    filename = (opts.f)[0]
+if opts.filename:
+    filename = opts.filename
+elif opts.fused:
+    filename = "embedding_lookup_fused_8bit_rowwise_avx2.cc"
+else:
+    filename = "embedding_lookup_avx2.cc"
 fout = open(filename, 'w')
 
 options = [["int32_t", "float",   "float"],
@@ -289,14 +315,14 @@ code.append(
  */
 """)
 code.append("//// --------------------------")
-code.append("//// ATTENTION:                ")
+code.append("//// ATTENTION:")
 code.append("//// THIS CODE IS AUTOGENERATED")
-code.append("//// BY %s                     " % (sys.argv[0]))
-code.append("//// DO NOT MODIFY!!!          ")
+code.append("//// BY {}".format(sys.argv[0]))
+code.append("//// DO NOT MODIFY!!!")
 code.append("//// --------------------------\n\n")
 
-code.append("#include \"caffe2/core/types.h\"")
-code.append("#include \"caffe2/core/common.h\"")
+code.append("#include <caffe2/core/types.h>")
+code.append("#include <caffe2/core/common.h>")
 code.append("#include <immintrin.h>")
 code.append("\n")
 
@@ -304,9 +330,11 @@ code.append("namespace caffe2 {\n")
 for o in options:
     [IndexType, InType, OutType] = o
 
-    fn = "void EmbeddingLookup_" + IndexType + \
-        "_" + InType + "_" + OutType + "__avx2_fma"
-    code.append(fn + "(")
+    prefix = 'Fused8BitRowwise' if opts.fused else ''
+    fn = 'void {}EmbeddingLookup_{}_{}_{}__avx2_fma('.format(
+        prefix, IndexType, InType, OutType
+    )
+    code.append(fn)
     code.append("const TIndex block_size,")
     code.append("const TIndex output_size,")
     code.append("const TIndex index_size,")
@@ -315,29 +343,45 @@ for o in options:
     code.append("const " + IndexType + "* indices,")
     code.append("const int* lengths,")
     code.append("const float* weights,")
-    code.append("const float* scale_bias,")
+    if not opts.fused:
+        code.append("const float* scale_bias,")
     code.append("bool normalize_by_lengths,")
     code.append(OutType + "* out)")
 
     code.append("{")
     code.append("const " + IndexType + " prefdist_T0 = 16;")
+    # block_size is the number of elements and fused_block_size is the size of
+    # an entire row, including scale and bias.
+    offset = (8 // sizeof[InType]) if opts.fused else 0
+    code.append(
+        "const {} fused_block_size = block_size + {};".
+        format(IndexType, offset)
+    )
+
     #code.append("printf(\"calling " + fn + "\\n\");");
-    if InType != "uint8_t":
-        code.append("CAFFE_ENFORCE(scale_bias == nullptr, \"scale_bias must be nullptr\");");
-    else:
-        code.append("CAFFE_ENFORCE(scale_bias != nullptr, \"scale_bias must not be nullptr\");");
+    if not opts.fused:
+        if InType != "uint8_t":
+            code.append(
+                'CAFFE_ENFORCE(scale_bias == nullptr,'
+                ' "scale_bias must be nullptr");'
+            )
+        else:
+            code.append(
+                'CAFFE_ENFORCE(scale_bias != nullptr,'
+                ' "scale_bias must not be nullptr");'
+            )
 
     code.append("if (block_size == 128) {")
-    code.extend(unroll(16, IndexType, InType, OutType, True, "AVX2"))
+    code += unroll(16, IndexType, InType, OutType, True, "AVX2", opts.fused)
     code.append("} else if (block_size == 64) {")
-    code.extend(unroll(8, IndexType, InType, OutType, True, "AVX2"))
+    code += unroll(8, IndexType, InType, OutType, True, "AVX2", opts.fused)
     code.append("} else if (block_size == 32) {")
-    code.extend(unroll(4, IndexType, InType, OutType, True, "AVX2"))
+    code += unroll(4, IndexType, InType, OutType, True, "AVX2", opts.fused)
     code.append("} else if (block_size == 16) {")
-    code.extend(unroll(2, IndexType, InType, OutType, True, "AVX2"))
+    code += unroll(2, IndexType, InType, OutType, True, "AVX2", opts.fused)
     code.append("} else {")
     code.append("// generic code")
-    code.extend(generic(IndexType, InType, OutType, True, "AVX2"))
+    code += generic(IndexType, InType, OutType, True, "AVX2", opts.fused)
     code.append("}")
 
 
