@@ -24,6 +24,13 @@ import datetime
 
 from caffe2.python import core, workspace
 
+DTYPES = {
+    'uint8': np.uint8,
+    'uint8_fused': np.uint8,
+    'float': np.float32,
+    'float16': np.float16,
+}
+
 
 def benchmark_sparse_lengths_sum(
         dtype_str,
@@ -33,21 +40,21 @@ def benchmark_sparse_lengths_sum(
         batch_size,
         iterations):
     print('Preparing lookup table. ' + str(datetime.datetime.now()))
+
     # We will use a constant, but non-trivial value so we save initialization
     # time.
-    arr = np.ones([categorical_limit, embedding_size], dtype=np.float32)
-    arr *= 17.01
+    data = np.ones([categorical_limit, embedding_size], dtype=np.float32)
+    data *= 17.01
 
-    dtype_table = {
-        'uint8': np.uint8,
-        'float': np.float32,
-        'float16': np.float16
-    }
-    workspace.FeedBlob("X", arr.astype(dtype_table[dtype_str]))
+    if dtype_str == 'uint8':
+        scale_bias = np.random.rand(categorical_limit, 2).astype(np.float32)
+        workspace.FeedBlob("scale_bias", scale_bias.astype(np.float32))
+    elif dtype_str == 'uint8_fused':
+        scale_bias = np.random.randint(255, size=(categorical_limit, 8))
+        data = np.concatenate([data, scale_bias], axis=1)
 
-    scale_bias = np.random.rand(categorical_limit, 2).astype(np.float32)
-    workspace.FeedBlob("scale_bias", scale_bias.astype(np.float32))
-
+    print('Data has shape {} {}'.format(data.shape, datetime.datetime.now()))
+    workspace.FeedBlob("X", data.astype(DTYPES[dtype_str]))
 
     # In order to produce truly random lengths and indices, we will embed a
     # Python operator in the net to generate them.
@@ -63,10 +70,12 @@ def benchmark_sparse_lengths_sum(
 
     net = core.Net("mynet")
     net.Python(f)([], ["indices", "lengths", ])
-    if dtype_str != "uint8":
-        net.SparseLengthsSum(["X", "indices", "lengths"], "Y")
-    else:
+    if dtype_str == "uint8":
         net.SparseLengthsSum8BitsRowwise(["X", "indices", "lengths", "scale_bias"], "Y")
+    elif dtype_str == "uint8_fused":
+        net.SparseLengthsSumFused8BitRowwise(["X", "indices", "lengths"], "Y")
+    else:
+        net.SparseLengthsSum(["X", "indices", "lengths"], "Y")
     workspace.CreateNet(net)
 
     # Set random seed, so that repeated runs will keep the same sequence of
@@ -82,13 +91,13 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="minimal benchmark for sparse lengths sum.")
     parser.add_argument(
-        "--dtype", type=str, default="float",
+        '-d', "--dtype", choices=list(DTYPES.keys()), default="float",
         help="The data type for the input lookup table.")
     parser.add_argument(
-        "--embedding_size", type=int, default=6000000,
+        '-e', "--embedding-size", type=int, default=6000000,
         help="Lookup table size.")
     parser.add_argument(
-        "--embedding_dim", type=int, default=128,
+        "--embedding-dim", type=int, default=128,
         help="Embedding dimension.")
     parser.add_argument(
         "--average_len", type=int, default=27,
@@ -97,7 +106,7 @@ if __name__ == "__main__":
         "--batch_size", type=int, default=100,
         help="The batch size.")
     parser.add_argument(
-        "--iteration", type=int, default=100000,
+        '-i', "--iteration", type=int, default=100000,
         help="The number of iterations.")
     args, extra_args = parser.parse_known_args()
     core.GlobalInit(['python'] + extra_args)
