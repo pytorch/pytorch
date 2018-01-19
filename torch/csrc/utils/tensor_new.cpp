@@ -11,6 +11,7 @@
 #include "torch/csrc/utils/python_scalars.h"
 #include "torch/csrc/utils/python_strings.h"
 #include "torch/csrc/utils/tensor_numpy.h"
+#include "torch/csrc/autograd/variable.h"
 
 static const int MAX_DIMS = 128;
 
@@ -110,6 +111,18 @@ static Tensor new_from_sequence(const Type & type, int device, PyObject* data) {
   return tensor;
 }
 
+static Tensor new_from_data(const Type & type, int device, PyObject *data) {
+  if (PySequence_Check(data)) {
+    return new_from_sequence(type, device, data);
+  } else {
+    // could use scalarTensor but using store_scalar for consistency with the sequence path;
+    // this has stricter checking (i.e. a floating-point number passed to an integral type will error).
+    auto tensor = type.tensor({});
+    torch::utils::store_scalar((char*)tensor.data_ptr(), type.scalarType(), data);
+    return tensor;
+  }
+}
+
 Tensor tensor_new(const Type& type, PyObject* args, PyObject* kwargs) {
   static PythonArgParser parser({
     "new(*, int64_t device=-1)",
@@ -144,6 +157,27 @@ Tensor tensor_new(const Type& type, PyObject* args, PyObject* kwargs) {
     return new_from_sequence(type, r.toInt64(1), r.pyobject(0));
   }
   throw std::runtime_error("new(): invalid arguments");
+}
+
+static const Tensor & set_requires_grad(const Tensor &self, bool requires_grad) {
+  torch::autograd::Variable(self).get()->_requires_grad = requires_grad;
+  return self;
+}
+
+Tensor variable_data_factory(const Type& type, PyObject* args, PyObject* kwargs) {
+  static PythonArgParser parser({
+    "new(Tensor other, *, bool requires_grad=False)",
+    "new(PyObject* data, *, int64_t device=-1, bool requires_grad=False)",
+  });
+
+  PyObject* parsed_args[3];
+  auto r = parser.parse(args, kwargs, parsed_args);
+  if (r.idx == 0) {
+    return set_requires_grad(new_with_tensor(type, r.tensor(0)), r.toBool(1));
+  } else if (r.idx == 1) {
+    return set_requires_grad(new_from_data(type, r.toInt64(1), r.pyobject(0)), r.toBool(2));
+  }
+  throw std::runtime_error("variable(): invalid arguments");
 }
 
 }} // namespace torch::utils

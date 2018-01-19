@@ -11,6 +11,7 @@
 #include "torch/csrc/autograd/python_variable.h"
 #include "torch/csrc/autograd/utils/wrap_outputs.h"
 #include "torch/csrc/utils/python_arg_parser.h"
+#include "torch/csrc/utils/tensor_new.h"
 #include "torch/csrc/utils/tensor_numpy.h"
 
 #include "python_torch_functions_dispatch.h"
@@ -68,6 +69,13 @@ static PyObject * THPVariable_from_numpy(PyObject* module, PyObject* arg)
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject * THPVariable_variable(PyObject* self, PyObject* args, PyObject* kwargs)
+{
+  HANDLE_TH_ERRORS
+  return THPVariable_Wrap(torch::utils::variable_data_factory(default_type(), args, kwargs));
+  END_HANDLE_TH_ERRORS
+}
+
 // generated methods start here
 
 ${py_methods}
@@ -75,6 +83,7 @@ ${py_methods}
 static PyMethodDef torch_functions[] = {
   {"clamp", (PyCFunction)THPVariable_clamp, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
   {"from_numpy", (PyCFunction)THPVariable_from_numpy, METH_STATIC | METH_O, NULL},
+  {"variable", (PyCFunction)THPVariable_variable, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
   ${py_method_defs}
   {NULL}
 };
