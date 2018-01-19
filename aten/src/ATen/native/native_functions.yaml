@@ -49,6 +49,9 @@
 
 - func: chunk(Tensor self, int64_t chunks, int64_t dim=0) -> TensorList
 
+- func: cudnn_is_acceptable(Tensor self) -> bool
+  variants: function
+
 - func: convolution(Tensor input, Tensor weight, Tensor? bias, IntList stride, IntList padding, IntList dilation, bool transposed, IntList output_padding, int64_t groups) -> Tensor
   variants: function
 
