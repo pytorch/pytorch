@@ -141,7 +141,7 @@ def VariableRecurrent(batch_sizes, inner):
         flat_hidden = not isinstance(hidden, tuple)
         if flat_hidden:
             hidden = (hidden,)
-        for batch_size in batch_sizes:
+        for batch_size in batch_sizes.data:
             step_input = input[input_offset:input_offset + batch_size]
             input_offset += batch_size
 

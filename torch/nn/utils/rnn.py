@@ -109,7 +109,7 @@ def pack_padded_sequence(input, lengths, batch_first=False):
     """
     data, batch_sizes = PackPadded.apply(input, lengths, batch_first)
 
-    return PackedSequence(data, list(batch_sizes.data))
+    return PackedSequence(data, batch_sizes)
 
 
 def pad_packed_sequence(sequence, batch_first=False, padding_value=0):
