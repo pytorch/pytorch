@@ -117,21 +117,7 @@ def _assertGradAndGradgradChecks(test_case, apply_fn, inputs):
     # call assert function rather than returning a bool since it's nicer
     # if we get whether this failed on the gradcheck or the gradgradcheck.
     test_case.assertTrue(gradcheck(apply_fn, inputs))
-    dummy_out = apply_fn(*inputs)
-
-    def randn_match_cpu_gpu(x):
-        a = torch.randn(x.size())
-        if x.is_cuda:
-            a = a.cuda(x.get_device())
-        return a
-
-    if isinstance(dummy_out, tuple):
-        grad_y = tuple(Variable(randn_match_cpu_gpu(x), requires_grad=x.requires_grad)
-                       for x in dummy_out if isinstance(x, Variable))
-    else:
-        grad_y = (Variable(randn_match_cpu_gpu(dummy_out), requires_grad=dummy_out.requires_grad),)
-
-    test_case.assertTrue(gradgradcheck(apply_fn, inputs, grad_y,))
+    test_case.assertTrue(gradgradcheck(apply_fn, inputs))
 
 
 class InputVariableMixin(object):
@@ -5399,6 +5385,34 @@ new_module_tests = [
         input_size=(2, 3, 4, 5),
         fullname='log_softmax_dim3',
         pickle=False,
+    ),
+    dict(
+        fullname='Unfold',
+        constructor=lambda: nn.Unfold((2, 2), (1, 1), (0, 0), (1, 1)),
+        input_size=(2, 4, 3, 3),
+        check_gradgrad=False,
+        test_cuda=True,
+    ),
+    dict(
+        fullname='Fold',
+        constructor=lambda: nn.Fold((3, 3), (2, 2), (1, 1), (0, 0), (1, 1)),
+        input_size=(2, 16, 4),
+        check_gradgrad=False,
+        test_cuda=True,
+    ),
+    dict(
+        fullname='Unfold_int_input',
+        constructor=lambda: nn.Unfold(2, 1, 0, 1),
+        input_size=(2, 4, 3, 3),
+        check_gradgrad=False,
+        test_cuda=True,
+    ),
+    dict(
+        fullname='Fold_int_input',
+        constructor=lambda: nn.Fold(3, 2, 1, 0, 1),
+        input_size=(2, 16, 4),
+        check_gradgrad=False,
+        test_cuda=True,
     ),
 ]
 

@@ -181,6 +181,9 @@
 - func: embedding_sparse_backward(Tensor grad, IndexTensor indices, int64_t num_weights, int64_t padding_idx, bool scale_grad_by_freq) -> Tensor
   variants: function
 
+- func: empty_like(Tensor self) -> Tensor
+  variants: function
+
 - func: expand(Tensor self, IntList size) -> Tensor
 
 - func: expand_as(Tensor self, Tensor other) -> Tensor
@@ -193,6 +196,8 @@
 - func: is_cuda(Tensor self) -> bool
 
 - func: is_distributed(Tensor self) -> bool
+
+- func: is_floating_point(Tensor self) -> bool
 
 - func: is_nonzero(Tensor self) -> bool
 
@@ -228,6 +233,7 @@
 - func: pin_memory(Tensor self) -> Tensor
 
 - func: randn_like(Tensor self) -> Tensor
+  variants: function
 
 - func: RoiPooling2d_forward(Tensor input, Tensor rois, int64_t pooledHeight, int64_t pooledWidth, double spatialScale) -> (Tensor, Tensor)
   variants: function

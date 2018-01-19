@@ -6,19 +6,26 @@
 #include <pybind11/stl.h>
 
 #include "torch/csrc/DynamicTypes.h"
+#include "torch/csrc/autograd/python_variable.h"
 
 namespace py = pybind11;
 
 namespace pybind11 { namespace detail {
 
 // handle Tensor <-> at::Tensor conversions
+// Python Variables are unpacked into Tensors
 template <> struct type_caster<at::Tensor> {
 public:
   PYBIND11_TYPE_CASTER(at::Tensor, _("at::Tensor"));
 
   bool load(handle src, bool) {
+    PyObject* obj = src.ptr();
+    if (THPVariable_Check(obj)) {
+      value = ((THPVariable*)obj)->cdata.data();
+      return true;
+    }
     try {
-      value = torch::createTensor(src.ptr());
+      value = torch::createTensor(obj);
     } catch (std::exception& e) {
       return false;
     }
@@ -30,4 +37,3 @@ public:
 };
 
 }} // namespace pybind11::detail
-
