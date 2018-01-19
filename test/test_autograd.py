@@ -4,7 +4,6 @@ import sys
 import math
 import torch
 import unittest
-import random
 import warnings
 from copy import deepcopy
 from collections import OrderedDict
@@ -18,6 +17,7 @@ from torch.autograd.profiler import profile
 from common import TestCase, run_tests, skipIfNoLapack
 from torch.autograd import Variable, Function
 from torch.autograd.function import InplaceFunction
+from torch.testing import make_non_contiguous, randn_like
 
 if sys.version_info[0] == 2:
     import cPickle as pickle
@@ -2381,33 +2381,6 @@ method_tests = [
 # TODO: clamp with min/max
 
 
-def make_non_contiguous(tensor):
-    if tensor.numel() <= 1:  # can't make non-contiguous
-        return tensor.new(tensor.size())
-    osize = list(tensor.size())
-
-    # randomly inflate a few dimensions in osize
-    for _ in range(2):
-        dim = random.randint(0, len(osize) - 1)
-        add = random.randint(4, 15)
-        osize[dim] = osize[dim] + add
-
-    # narrow doesn't make a non-contiguous tensor if we only narrow the 0-th dimension,
-    # (which will always happen with a 1-dimensional tensor), so let's make a new
-    # right-most dimension and cut it off
-
-    input = tensor.new(torch.Size(osize + [random.randint(2, 3)]))
-    input = input.select(len(input.size()) - 1, random.randint(0, 1))
-    # now extract the input of correct size from 'input'
-    for i in range(len(osize)):
-        if input.size(i) != tensor.size(i):
-            bounds = random.randint(1, input.size(i) - tensor.size(i))
-            input = input.narrow(i, bounds, tensor.size(i))
-
-    input.copy_(tensor)
-    return input
-
-
 def create_input(call_args, requires_grad=True, non_contiguous=False):
     if not isinstance(call_args, tuple):
         call_args = (call_args,)
@@ -2446,20 +2419,6 @@ def unpack_variables(args):
     else:
         return args
 
-
-def generate_gradoutput(dummy_out, non_contiguous=False):
-    def maybe_non_contig(tensor, requires_grad):
-        ret = make_non_contiguous(tensor) if non_contiguous else tensor.new(tensor.size())
-        ret.requires_grad = requires_grad
-        return ret
-
-    if isinstance(dummy_out, tuple):
-        grad_y = tuple(maybe_non_contig(x.double().randn_like(), x.requires_grad)
-                       for x in dummy_out if isinstance(x, Variable))
-    else:
-        grad_y = (maybe_non_contig(dummy_out.double().randn_like(), dummy_out.requires_grad),)
-
-    return grad_y
 
 EXCLUDE_FUNCTIONAL = {
     'addmm',
@@ -2545,14 +2504,14 @@ def run_grad_and_gradgrad_checks(test_case, name, test_name, apply_method, outpu
     test_case.assertTrue(gradcheck(apply_method, input_variables, eps=1e-6, atol=PRECISION))
     if name in EXCLUDE_GRADGRADCHECK or test_name in EXCLUDE_GRADGRADCHECK_BY_TEST_NAME:
         return
-    grad_y = generate_gradoutput(output_variable, non_contiguous=True)
     gradgradcheck_precision_override = gradgradcheck_method_precision_override(test_name)
     if gradgradcheck_precision_override is not None:
         atol = gradgradcheck_precision_override['atol']
         rtol = gradgradcheck_precision_override['rtol']
-        test_case.assertTrue(gradgradcheck(apply_method, input_variables, grad_y, atol=atol, rtol=rtol))
+        test_case.assertTrue(gradgradcheck(apply_method, input_variables, None, atol=atol, rtol=rtol,
+                                           gen_non_contig_grad_outputs=True))
     else:
-        test_case.assertTrue(gradgradcheck(apply_method, input_variables, grad_y))
+        test_case.assertTrue(gradgradcheck(apply_method, input_variables, gen_non_contig_grad_outputs=True))
 
 
 def run_functional_checks(test_case, test_name, name, apply_fn, run_grad_checks,
@@ -2570,7 +2529,7 @@ def run_functional_checks(test_case, test_name, name, apply_fn, run_grad_checks,
 
     self_variable = f_args_variable[0]
     if isinstance(output_variable, torch.autograd.Variable) and self_variable is not None:
-        output_variable.backward(output_variable.randn_like())
+        output_variable.backward(randn_like(output_variable))
         test_case.assertTrue(type(self_variable.data) == type(self_variable.grad.data))
         test_case.assertTrue(self_variable.size() == self_variable.grad.size())
 
@@ -2628,7 +2587,7 @@ for test in method_tests:
                     args_variable = create_input(args, requires_grad=False)
                     output_variable = getattr(self_variable, name)(*args_variable)
                     if isinstance(output_variable, torch.autograd.Variable):
-                        output_variable.backward(output_variable.randn_like())
+                        output_variable.backward(randn_like(output_variable))
                         self.assertTrue(type(self_variable.data) == type(self_variable.grad.data))
                         self.assertTrue(self_variable.size() == self_variable.grad.size())
 
@@ -2665,7 +2624,7 @@ for test in method_tests:
                             if i.grad is not None:
                                 i.grad.data.zero_()
                         for io, o in zip(inplace_output_variable, output_variable):
-                            grad = io.randn_like().double()
+                            grad = randn_like(io).double()
                             io.backward(grad)
                             o.backward(grad)
                         for inp_i, i in zip((inplace_self_variable,) + inplace_args_variable,
