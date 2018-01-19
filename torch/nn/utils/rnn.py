@@ -4,7 +4,7 @@ import torch
 from torch.autograd import Variable
 
 
-from .._functions.packing import PackPadded
+from .._functions.packing import PackPadded, PadPacked
 
 PackedSequence_ = namedtuple('PackedSequence', ['data', 'batch_sizes'])
 
@@ -109,7 +109,7 @@ def pack_padded_sequence(input, lengths, batch_first=False):
     """
     data, batch_sizes = PackPadded.apply(input, lengths, batch_first)
 
-    return PackedSequence(data, list(batch_sizes.data))
+    return PackedSequence(data, batch_sizes)
 
 
 def pad_packed_sequence(sequence, batch_first=False, padding_value=0):
@@ -133,32 +133,7 @@ def pad_packed_sequence(sequence, batch_first=False, padding_value=0):
         Tuple of Variable containing the padded sequence, and a list of lengths
         of each sequence in the batch.
     """
-    var_data, batch_sizes = sequence
-    max_batch_size = batch_sizes[0]
-    output = var_data.data.new(len(batch_sizes), max_batch_size, *var_data.size()[1:]).fill_(padding_value)
-    output = Variable(output)
-
-    lengths = []
-    data_offset = 0
-    prev_batch_size = batch_sizes[0]
-    prev_i = 0
-    for i, batch_size in enumerate(batch_sizes + [0]):
-        if batch_size != prev_batch_size:
-            l = prev_batch_size * (i - prev_i)
-            tmp = var_data[data_offset:data_offset + l]
-            output[prev_i:i, :prev_batch_size] = tmp.view(i - prev_i, prev_batch_size, *tmp.size()[1:])
-            data_offset += l
-            prev_i = i
-        dec = prev_batch_size - batch_size
-        if dec > 0:
-            lengths.extend((i,) * dec)
-        prev_batch_size = batch_size
-
-    lengths.reverse()
-
-    if batch_first:
-        output = output.transpose(0, 1)
-    return output, lengths
+    return PadPacked.apply(sequence.data, sequence.batch_sizes, batch_first, padding_value)
 
 
 def pad_sequence(sequences, batch_first=False):

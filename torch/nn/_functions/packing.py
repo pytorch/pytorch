@@ -51,3 +51,36 @@ class PackPadded(Function):
             grad_input = grad_input.transpose(0, 1)
 
         return grad_input, None, None
+
+class PadPacked(Function):
+    @staticmethod
+    def forward(ctx, var_data, batch_sizes, batch_first, padding_value):
+        max_batch_size = batch_sizes[0]
+        output = var_data.new(len(batch_sizes), max_batch_size, *var_data.size()[1:]).fill_(padding_value)
+
+        lengths = []
+        data_offset = 0
+        prev_batch_size = batch_sizes[0]
+        prev_i = 0
+        for i, batch_size in enumerate(list(batch_sizes) + [0]):
+            if batch_size != prev_batch_size:
+                l = prev_batch_size * (i - prev_i)
+                tmp = var_data[data_offset:data_offset + l]
+                output[prev_i:i, :prev_batch_size] = tmp.view(i - prev_i, prev_batch_size, *tmp.size()[1:])
+                data_offset += l
+                prev_i = i
+            dec = prev_batch_size - batch_size
+            if dec > 0:
+                lengths.extend((i,) * dec)
+            prev_batch_size = batch_size
+
+        lengths.reverse()
+
+        if batch_first:
+            output = output.transpose(0, 1)
+
+        return output, torch.LongTensor(lengths)
+
+    @staticmethod
+    def backward(ctx, *args):
+        assert False, "FOO"
