@@ -36,6 +36,16 @@ template<typename T>
 inline T* Tensor::data() const {
   runtime_error("data() cast to unexpected type.");
 }
+
+#if AT_CUDA_ENABLED()
+ 
+ template<>
+   inline __half* Tensor::data() const {
+   return static_cast<__half*>(this->data_ptr());
+ }
+ 
+#endif
+ 
 #define DEFINE_CAST(T,name,_) \
 template<> \
 inline T* Tensor::data() const { \
