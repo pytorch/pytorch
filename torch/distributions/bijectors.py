@@ -1,4 +1,5 @@
 import torch
+from torch.distributions import constraints
 from torch.distributions.utils import broadcast_all
 
 __all__ = [
@@ -78,6 +79,14 @@ class InverseBijector(Bijector):
     def __init__(self, bijector):
         self.bijector = bijector
 
+    @constraints.dependent_property
+    def domain(self):
+        return self.bijector.codomain
+
+    @constraints.dependent_property
+    def codomain(self):
+        return self.bijector.domain
+
     def forward(self, x):
         return self.bijector.inverse(x)
 
@@ -92,6 +101,9 @@ class ExpBijector(Bijector):
     """
     Bijector for the mapping `y = exp(x)`.
     """
+    domain = constraints.real
+    codomain = constraints.positive
+
     def _forward(self, x):
         return x.exp()
 

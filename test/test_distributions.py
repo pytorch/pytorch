@@ -33,7 +33,8 @@ from torch.autograd import Variable, grad, gradcheck
 from torch.distributions import (Bernoulli, Beta, Binomial, Categorical, Cauchy, Chi2,
                                  Dirichlet, Exponential, Gamma, Gumbel, Laplace,
                                  Normal, OneHotCategorical, Multinomial, Pareto,
-                                 StudentT, Uniform, kl_divergence)
+                                 StudentT, Uniform, constraints, kl_divergence)
+from torch.distributions.bijectors import ExpBijector, InverseBijector
 from torch.distributions.dirichlet import _Dirichlet_backward
 from torch.distributions.constraints import Constraint, is_dependent
 from torch.distributions.utils import _finfo, probs_to_logits
@@ -1819,6 +1820,62 @@ class TestLazyLogitsInitialization(TestCase):
                 self.assertFalse('logits' in vars(dist), msg=message)
                 batch_shape, event_shape = dist.batch_shape, dist.event_shape
                 self.assertFalse('logits' in vars(dist), msg=message)
+
+
+class TestBijectors(TestCase):
+    def setUp(self):
+        self.univariate = [
+            ExpBijector(),
+            InverseBijector(ExpBijector()),
+        ]
+
+    def _generate_data(self, constraint):
+        x = torch.Tensor(4, 5)
+        if constraint is constraints.real:
+            return x.normal_()
+        elif constraint is constraints.positive:
+            return x.normal_().exp()
+        raise ValueError('Unsupported constraint: {}'.format(constraint))
+
+    def test_forward_inverse(self):
+        for bijector in self.univariate:
+            x = Variable(self._generate_data(bijector.domain), requires_grad=True)
+            try:
+                y = bijector.forward(x)
+            except NotImplementedError:
+                continue
+            x2 = bijector.inverse(y)  # should be implmented at least by caching
+            self.assertEqual(x2, x, message='{}.forward().inverse() error'.format(bijector))
+
+    def test_univariate_forward_jacobian(self):
+        for bijector in self.univariate:
+            x = Variable(self._generate_data(bijector.domain), requires_grad=True)
+            try:
+                y = bijector.forward(x)
+            except NotImplementedError:
+                continue
+            expected = torch.abs(grad([y.sum()], [x])[0]).log()
+            actual = bijector.log_abs_det_jacobian(x, y)
+            self.assertEqual(actual, expected, message='\n'.join([
+                'Bad {}.log_abs_det_jacobian() disagrees with .forward()'.format(bijector),
+                'Expected: {}'.format(expected),
+                'Actual: {}'.format(actual),
+            ]))
+
+    def test_univariate_inverse_jacobian(self):
+        for bijector in self.univariate:
+            y = Variable(self._generate_data(bijector.codomain), requires_grad=True)
+            try:
+                x = bijector.inverse(y)
+            except NotImplementedError:
+                continue
+            expected = -torch.abs(grad([x.sum()], [y])[0]).log()
+            actual = bijector.log_abs_det_jacobian(x, y)
+            self.assertEqual(actual, expected, message='\n'.join([
+                '{}.log_abs_det_jacobian() disagrees with .inverse()'.format(bijector),
+                'Expected: {}'.format(expected),
+                'Actual: {}'.format(actual),
+            ]))
 
 
 if __name__ == '__main__':
