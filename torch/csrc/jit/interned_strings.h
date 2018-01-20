@@ -6,7 +6,6 @@
 
 namespace torch { namespace jit {
 
-using Symbol = uint32_t;
 
 #define FORALL_BUILTIN_SYMBOLS(_) \
 _(PythonOp) \
@@ -127,19 +126,54 @@ _(zeros) \
 _(exponent) \
 _(device)
 
-enum BuiltinSymbol {
-  #define DEFINE_SYMBOL(s) \
-    k##s,
-  FORALL_BUILTIN_SYMBOLS(DEFINE_SYMBOL)
-  #undef DEFINE_SYMBOL
-  kLastSymbol, //where we start counting for new symbols
+  enum BuiltinSymbol {
+    #define DEFINE_SYMBOL(s) \
+      k##s,
+    FORALL_BUILTIN_SYMBOLS(DEFINE_SYMBOL)
+    #undef DEFINE_SYMBOL
+    kLastSymbol, //where we start counting for new symbols
+  };
+
+
+struct Symbol {
+  Symbol() {}
+  /*implicit*/ Symbol(BuiltinSymbol value)
+  : value(value) {}
+  explicit Symbol(const std::string & s);
+  explicit Symbol(uint32_t value)
+  : value(value) {}
+
+  operator uint32_t() const {
+    return value;
+  }
+  const char * toString() const;
+private:
+  uint32_t value;
 };
 
-const char * symbolToString(Symbol s);
-Symbol stringToSymbol(const std::string & s);
+static inline bool operator==(Symbol lhs, Symbol rhs) {
+  return static_cast<uint32_t>(lhs) == static_cast<uint32_t>(rhs);
+}
+// necessary to prevent ambiguous overload resolutions
+static inline bool operator==(BuiltinSymbol lhs, Symbol rhs) {
+  return static_cast<uint32_t>(lhs) == static_cast<uint32_t>(rhs);
+}
+static inline bool operator==(Symbol lhs, BuiltinSymbol rhs) {
+  return static_cast<uint32_t>(lhs) == static_cast<uint32_t>(rhs);
+}
 
 inline Symbol operator "" _sym(const char * s, size_t) {
-  return stringToSymbol(s);
+  return Symbol(s);
 }
 
 }}
+
+// make symbol behave like an integer in hash tables
+namespace std {
+  template<>
+  struct hash<torch::jit::Symbol> {
+    std::size_t operator()(torch::jit::Symbol s) const {
+      return std::hash<uint32_t>()(static_cast<uint32_t>(s));
+    }
+  };
+}

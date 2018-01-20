@@ -32,9 +32,16 @@ class OneHotCategorical(Distribution):
 
     def __init__(self, probs=None, logits=None):
         self._categorical = Categorical(probs, logits)
-        batch_shape = self._categorical.probs.size()[:-1]
-        event_shape = self._categorical.probs.size()[-1:]
+        batch_shape = self._categorical.batch_shape
+        event_shape = self._categorical.param_shape[-1:]
         super(OneHotCategorical, self).__init__(batch_shape, event_shape)
+
+    def _new(self, *args, **kwargs):
+        return self._categorical._new(*args, **kwargs)
+
+    @property
+    def param_shape(self):
+        return self._categorical.param_shape
 
     def sample(self, sample_shape=torch.Size()):
         sample_shape = torch.Size(sample_shape)
@@ -53,11 +60,8 @@ class OneHotCategorical(Distribution):
         return self._categorical.entropy()
 
     def enumerate_support(self):
-        probs = self._categorical.probs
         n = self.event_shape[0]
-        if isinstance(probs, Variable):
-            values = Variable(torch.eye(n, out=probs.data.new(n, n)))
-        else:
-            values = torch.eye(n, out=probs.new(n, n))
+        values = self._new((n, n))
+        torch.eye(n, out=values.data if isinstance(values, Variable) else values)
         values = values.view((n,) + (1,) * len(self.batch_shape) + (n,))
         return values.expand((n,) + self.batch_shape + (n,))

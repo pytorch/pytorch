@@ -25,8 +25,8 @@ struct TensorSigmoidOp<half> {
     half one = ScalarConvert<int, half>::to(1);
     *out = hdiv(one, __hadd(one, hexp(__hneg(*in))));
 #else
-    float fin = __half2float(*in);
-    *out = __float2half(1.0f / (1.0f + expf(- fin)));
+    float fin = ScalarConvert<half, float>::to(*in);
+    *out = ScalarConvert<float, half>::to(1.0f / (1.0f + expf(- fin)));
 #endif
   }
 
@@ -35,8 +35,8 @@ struct TensorSigmoidOp<half> {
     half one = ScalarConvert<int, half>::to(1);
     *v = hdiv(one, __hadd(one, hexp(__hneg(*v))));
 #else
-    float fv = __half2float(*v);
-    *v = __float2half(1.0f / (1.0f + expf(- fv)));
+    float fv = ScalarConvert<half, float>::to(*v);
+    *v = ScalarConvert<float, half>::to(1.0f / (1.0f + expf(- fv)));
 #endif
   }
 };

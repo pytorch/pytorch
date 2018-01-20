@@ -294,6 +294,8 @@ class TestTorch(TestCase):
         self.assertIsNotNone(torch.Tensor([]).storage())
         self.assertIsNotNone(torch.Tensor().clone().storage())
         self.assertIsNotNone(torch.Tensor([0, 0, 0]).nonzero().storage())
+        from torch.autograd import Variable
+        self.assertIsNotNone(Variable(torch.Tensor()).new().storage())
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_has_storage_numpy(self):
@@ -4826,6 +4828,14 @@ class TestTorch(TestCase):
         # TypeError would be better
         self.assertRaises(RuntimeError, lambda: x.new(z.storage()))
 
+    def test_empty_like(self):
+        x = torch.autograd.Variable(torch.Tensor())
+        y = torch.autograd.Variable(torch.randn(4, 4))
+        z = torch.autograd.Variable(torch.IntTensor([1, 2, 3]))
+        for a in (x, y, z):
+            self.assertEqual(torch.empty_like(a).shape, a.shape)
+            self.assertEqual(torch.empty_like(a).type(), a.type())
+
     @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
     def test_pin_memory(self):
         x = torch.randn(3, 5)
@@ -4996,7 +5006,7 @@ class TestTorch(TestCase):
         # check zero dimensional
         x = np.zeros((0, 2))
         self.assertEqual(torch.from_numpy(x).shape, tuple())
-        self.assertEqual(torch.autograd.Variable.from_numpy(x).shape, [0])
+        self.assertEqual(torch._C._VariableFunctions.from_numpy(x).shape, [0])
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_ctor_with_numpy_array(self):

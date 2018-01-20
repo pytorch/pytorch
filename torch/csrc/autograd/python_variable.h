@@ -5,6 +5,7 @@
 #include <ATen/ATen.h>
 
 #include "torch/csrc/autograd/variable.h"
+#include "torch/csrc/THP_export.h"
 
 // Python object that backs torch.autograd.Variable
 struct THPVariable {
@@ -21,7 +22,7 @@ struct THPVariable {
     PyObject* backward_hooks;
 };
 
-extern PyObject *THPVariableClass;
+THP_API PyObject *THPVariableClass;
 
 bool THPVariable_initModule(PyObject *module);
 // FixMe: remove allow_scalar when scalars are fully supported.

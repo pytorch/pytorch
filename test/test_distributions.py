@@ -32,12 +32,12 @@ from common import TestCase, run_tests, set_rng_seed
 from torch.autograd import Variable, grad, gradcheck
 from torch.distributions import Distribution
 from torch.distributions import (Bernoulli, Beta, Binomial, Categorical, Cauchy, Chi2,
-                                 Dirichlet, Exponential, FisherSnedecor, Gamma, Gumbel,
-                                 Laplace, Normal, OneHotCategorical, Multinomial, Pareto,
+                                 Dirichlet, Exponential, FisherSnedecor, Gamma, Geometric, 
+                                 Gumbel, Laplace, Normal, OneHotCategorical, Multinomial, Pareto,
                                  StudentT, Uniform, kl_divergence)
 from torch.distributions.dirichlet import _Dirichlet_backward
 from torch.distributions.constraints import Constraint, is_dependent
-from torch.distributions.utils import _finfo, probs_to_logits, logits_to_probs
+from torch.distributions.utils import _finfo, probs_to_logits
 
 TEST_NUMPY = True
 try:
@@ -52,6 +52,11 @@ except ImportError:
 Example = namedtuple('Example', ['Dist', 'params'])
 EXAMPLES = [
     Example(Bernoulli, [
+        {'probs': Variable(torch.Tensor([0.7, 0.2, 0.4]), requires_grad=True)},
+        {'probs': Variable(torch.Tensor([0.3]), requires_grad=True)},
+        {'probs': 0.3},
+    ]),
+    Example(Geometric, [
         {'probs': Variable(torch.Tensor([0.7, 0.2, 0.4]), requires_grad=True)},
         {'probs': Variable(torch.Tensor([0.3]), requires_grad=True)},
         {'probs': 0.3},
@@ -273,7 +278,7 @@ class TestDistributions(TestCase):
                 try:
                     self.assertTrue(type(unwrap(dist.sample())) is type(unwrap(dist.enumerate_support())),
                                     msg=('{} example {}/{}, return type mismatch between ' +
-                                         'sample and enumerate_support.').format(Dist.__name__, i, len(params)))
+                                         'sample and enumerate_support.').format(Dist.__name__, i + 1, len(params)))
                 except NotImplementedError:
                     pass
 
@@ -323,6 +328,39 @@ class TestDistributions(TestCase):
         self.assertEqual(Bernoulli(p).sample(sample_shape=(2, 5)).size(),
                          (2, 5, 2, 3, 5))
         self.assertEqual(Bernoulli(p).sample_n(2).size(), (2, 2, 3, 5))
+
+    def test_geometric(self):
+        p = Variable(torch.Tensor([0.7, 0.2, 0.4]), requires_grad=True)
+        r = Variable(torch.Tensor([0.3]), requires_grad=True)
+        s = 0.3
+        self.assertEqual(Geometric(p).sample_n(8).size(), (8, 3))
+        self.assertEqual(Geometric(1).sample(), 0)
+        self.assertEqual(Geometric(1).log_prob(torch.Tensor([1])), -float('inf'), allow_inf=True)
+        self.assertEqual(Geometric(1).log_prob(torch.Tensor([0])), 0)
+        self.assertTrue(isinstance(Geometric(p).sample().data, torch.Tensor))
+        self.assertEqual(Geometric(r).sample_n(8).size(), (8, 1))
+        self.assertEqual(Geometric(r).sample().size(), (1,))
+        self.assertEqual(Geometric(r).sample((3, 2)).size(), (3, 2, 1))
+        self.assertEqual(Geometric(s).sample().size(), (1,))
+        self._gradcheck_log_prob(Geometric, (p,))
+        self.assertRaises(ValueError, lambda: Geometric(0))
+        self.assertRaises(NotImplementedError, Geometric(r).rsample)
+
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    def test_geometric_log_prob_and_entropy(self):
+        p = Variable(torch.Tensor([0.7, 0.2, 0.4]), requires_grad=True)
+        s = 0.3
+
+        def ref_log_prob(idx, val, log_prob):
+            prob = p.data[idx]
+            self.assertEqual(log_prob, scipy.stats.geom(prob, loc=-1).logpmf(val))
+
+        self._check_log_prob(Geometric(p), ref_log_prob)
+        self._check_log_prob(Geometric(logits=p.log() - (-p).log1p()), ref_log_prob)
+
+        # check entropy computation
+        self.assertEqual(Geometric(p).entropy().data, scipy.stats.geom(p.data.numpy(), loc=-1).entropy(), prec=1e-3)
+        self.assertEqual(Geometric(s).entropy()[0], scipy.stats.geom(s, loc=-1).entropy().item(), prec=1e-3)
 
     def test_binomial(self):
         p = Variable(torch.arange(0.05, 1, 0.1), requires_grad=True)
@@ -1293,7 +1331,7 @@ class TestDistributionShapes(TestCase):
                     if not expected_shape:
                         expected_shape = torch.Size((1,))  # TODO Remove this once scalars are supported.
                     message = '{} example {}/{}, shape mismatch. expected {}, actual {}'.format(
-                        Dist.__name__, i, len(params), expected_shape, actual_shape)
+                        Dist.__name__, i + 1, len(params), expected_shape, actual_shape)
                     self.assertEqual(actual_shape, expected_shape, message=message)
                 except NotImplementedError:
                     continue
@@ -1317,6 +1355,26 @@ class TestDistributionShapes(TestCase):
         self.assertEqual(bernoulli.log_prob(self.tensor_sample_1).size(), torch.Size((3, 2)))
         self.assertRaises(ValueError, bernoulli.log_prob, self.tensor_sample_2)
         self.assertEqual(bernoulli.log_prob(torch.ones(3, 1, 1)).size(), torch.Size((3, 3, 2)))
+
+    def test_geometric_shape_scalar_params(self):
+        geometric = Geometric(0.3)
+        self.assertEqual(geometric._batch_shape, torch.Size())
+        self.assertEqual(geometric._event_shape, torch.Size())
+        self.assertEqual(geometric.sample().size(), torch.Size((1,)))
+        self.assertEqual(geometric.sample((3, 2)).size(), torch.Size((3, 2)))
+        self.assertRaises(ValueError, geometric.log_prob, self.scalar_sample)
+        self.assertEqual(geometric.log_prob(self.tensor_sample_1).size(), torch.Size((3, 2)))
+        self.assertEqual(geometric.log_prob(self.tensor_sample_2).size(), torch.Size((3, 2, 3)))
+
+    def test_geometric_shape_tensor_params(self):
+        geometric = Geometric(torch.Tensor([[0.6, 0.3], [0.6, 0.3], [0.6, 0.3]]))
+        self.assertEqual(geometric._batch_shape, torch.Size((3, 2)))
+        self.assertEqual(geometric._event_shape, torch.Size(()))
+        self.assertEqual(geometric.sample().size(), torch.Size((3, 2)))
+        self.assertEqual(geometric.sample((3, 2)).size(), torch.Size((3, 2, 3, 2)))
+        self.assertEqual(geometric.log_prob(self.tensor_sample_1).size(), torch.Size((3, 2)))
+        self.assertRaises(ValueError, geometric.log_prob, self.tensor_sample_2)
+        self.assertEqual(geometric.log_prob(torch.ones(3, 1, 1)).size(), torch.Size((3, 3, 2)))
 
     def test_beta_shape_scalar_params(self):
         dist = Beta(0.1, 0.1)
@@ -1585,6 +1643,7 @@ class TestKL(TestCase):
             (Gamma(1, 2), Gumbel(-3, 4)),
             (Gumbel(-1, 2), Gumbel(-3, 4)),
             (Gumbel(-1, 2), Normal(-3, 4)),  # This case fails for n <= 22000
+            (Geometric(0.7), Geometric(0.3)),
             (Laplace(1, 2), Laplace(-3, 4)),
             (Laplace(-1, 2), Normal(-3, 4)),
             (Normal(-1, 2), Gumbel(-3, 4)),
@@ -1683,7 +1742,7 @@ class TestKL(TestCase):
                 ignore = (expected == float('inf'))
                 expected[ignore] = actual[ignore]
                 self.assertEqual(actual, expected, prec=0.2, message='\n'.join([
-                    '{} example {}/{}, incorrect .entropy().'.format(Dist.__name__, i, len(params)),
+                    '{} example {}/{}, incorrect .entropy().'.format(Dist.__name__, i + 1, len(params)),
                     'Expected (monte carlo) {}'.format(expected),
                     'Actual (analytic) {}'.format(actual),
                     'max error = {}'.format(torch.abs(actual - expected).max()),
@@ -1709,7 +1768,7 @@ class TestConstraints(TestCase):
                     if is_dependent(constraint):
                         continue
                     message = '{} example {}/{} parameter {} = {}'.format(
-                        Dist.__name__, i, len(params), name, value)
+                        Dist.__name__, i + 1, len(params), name, value)
                     self.assertTrue(constraint.check(value).all(), msg=message)
 
     def test_support_contains(self):
@@ -1720,7 +1779,7 @@ class TestConstraints(TestCase):
                 value = dist.sample()
                 constraint = dist.support
                 message = '{} example {}/{} sample = {}'.format(
-                    Dist.__name__, i, len(params), value)
+                    Dist.__name__, i + 1, len(params), value)
                 self.assertTrue(constraint.check(value).all(), msg=message)
 
 
@@ -1841,6 +1900,47 @@ class TestNumericalStability(TestCase):
             self.assertEqual(log_pdf_prob_1.data[0], 0)
             log_pdf_prob_0 = multinomial.log_prob(Variable(tensor_type([10, 0])))
             self.assertEqual(log_pdf_prob_0.data[0], -float('inf'), allow_inf=True)
+
+
+class TestLazyLogitsInitialization(TestCase):
+    def setUp(self):
+        self.examples = [e for e in EXAMPLES if e.Dist in
+                         (Categorical, OneHotCategorical, Bernoulli, Binomial, Multinomial)]
+
+    def test_lazy_logits_initialization(self):
+        for Dist, params in self.examples:
+            param = params[0]
+            if 'probs' in param:
+                probs = param.pop('probs')
+                param['logits'] = probs_to_logits(probs)
+                dist = Dist(**param)
+                shape = (1,) if not dist.event_shape else dist.event_shape
+                dist.log_prob(Variable(torch.ones(shape)))
+                message = 'Failed for {} example 0/{}'.format(Dist.__name__, len(params))
+                self.assertFalse('probs' in vars(dist), msg=message)
+                try:
+                    dist.enumerate_support()
+                except NotImplementedError:
+                    pass
+                self.assertFalse('probs' in vars(dist), msg=message)
+                batch_shape, event_shape = dist.batch_shape, dist.event_shape
+                self.assertFalse('probs' in vars(dist), msg=message)
+
+    def test_lazy_probs_initialization(self):
+        for Dist, params in self.examples:
+            param = params[0]
+            if 'probs' in param:
+                dist = Dist(**param)
+                dist.sample()
+                message = 'Failed for {} example 0/{}'.format(Dist.__name__, len(params))
+                self.assertFalse('logits' in vars(dist), msg=message)
+                try:
+                    dist.enumerate_support()
+                except NotImplementedError:
+                    pass
+                self.assertFalse('logits' in vars(dist), msg=message)
+                batch_shape, event_shape = dist.batch_shape, dist.event_shape
+                self.assertFalse('logits' in vars(dist), msg=message)
 
 
 if __name__ == '__main__':

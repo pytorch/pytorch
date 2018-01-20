@@ -41,6 +41,7 @@ from .distribution import Distribution
 from .exponential import Exponential
 from .fishersnedecor import FisherSnedecor
 from .gamma import Gamma
+from .geometric import Geometric
 from .gumbel import Gumbel
 from .kl import kl_divergence, register_kl
 from .laplace import Laplace
@@ -63,6 +64,7 @@ __all__ = [
     'Exponential',
     'FisherSnedecor',
     'Gamma',
+    'Geometric',
     'Gumbel',
     'Laplace',
     'Multinomial',

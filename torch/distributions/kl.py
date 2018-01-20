@@ -11,6 +11,7 @@ from .beta import Beta
 from .dirichlet import Dirichlet
 from .exponential import Exponential
 from .gamma import Gamma
+from .geometric import Geometric
 from .gumbel import Gumbel
 from .laplace import Laplace
 from .normal import Normal
@@ -220,6 +221,11 @@ def _kl_gumbel_gumbel(p, q):
     t2 = ct1 * _euler_gamma
     t3 = torch.exp(ct2 + (1 + ct1).lgamma() - ct3)
     return t1 + t2 + t3 - (1 + _euler_gamma)
+
+
+@register_kl(Geometric, Geometric)
+def _kl_geometric_geometric(p, q):
+    return -p.entropy() - torch.log1p(-q.probs) / p.probs - q.logits
 
 
 @register_kl(Laplace, Laplace)

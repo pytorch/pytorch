@@ -186,8 +186,6 @@ void setBackCompatKeepdimWarn(bool warn);
 bool getBackCompatKeepdimWarn();
 bool maybeThrowBackCompatKeepdimWarn(char *func);
 
-std::vector<at::Tensor> THPUtils_PySequence_to_TensorList(PyObject *obj);
-
 #ifdef WITH_CUDA
 std::vector <THCStream*> THPUtils_PySequence_to_THCStreamList(PyObject *obj);
 #endif

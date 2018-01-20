@@ -7,6 +7,9 @@
 #include "torch/csrc/Size.h"
 #include "torch/csrc/autograd/python_variable.h"
 #include "torch/csrc/autograd/utils/wrap_outputs.h"
+#ifdef WITH_CUDA
+#include "torch/csrc/cuda/Stream.h"
+#endif
 #include "torch/csrc/utils/object_ptr.h"
 #include "torch/csrc/utils/python_arg_parser.h"
 #include "torch/csrc/utils/python_numbers.h"
@@ -57,7 +60,7 @@ static Tensor dispatch_clamp_max(const Tensor & self, Scalar max) {
   return self.clamp_max(max);
 }
 
-PyObject * THPVariable_clamp(PyObject* self, PyObject* args, PyObject* kwargs)
+static PyObject * THPVariable_clamp(PyObject* self, PyObject* args, PyObject* kwargs)
 {
   HANDLE_TH_ERRORS
   static PythonArgParser parser({
@@ -94,7 +97,7 @@ static Tensor & dispatch_clamp_max_(Tensor & self, Scalar max) {
   return self.clamp_max_(max);
 }
 
-PyObject * THPVariable_clamp_(PyObject* self, PyObject* args, PyObject* kwargs)
+static PyObject * THPVariable_clamp_(PyObject* self, PyObject* args, PyObject* kwargs)
 {
   HANDLE_TH_ERRORS
   static PythonArgParser parser({
@@ -207,14 +210,6 @@ static PyObject * THPVariable_copy_(PyObject* self, PyObject* args, PyObject* kw
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject * THPVariable_from_numpy(PyObject* module, PyObject* arg)
-{
-  HANDLE_TH_ERRORS
-  auto data = torch::utils::tensor_from_numpy(arg);
-  return THPVariable_Wrap(make_variable(std::move(data)));
-  END_HANDLE_TH_ERRORS
-}
-
 static PyObject * THPVariable_detach(PyObject* self, PyObject* args)
 {
   HANDLE_TH_ERRORS
@@ -261,6 +256,20 @@ static PyObject * THPVariable_integral_scalar(PyObject* self, PyObject* args) {
   } else {
     return wrap(dispatch_to_CLong(self_));
   }
+  END_HANDLE_TH_ERRORS
+}
+
+// This is the __index__ function in Python which is similar to __int__, but
+// called when used as a slice.
+static PyObject * THPVariable_index_scalar(PyObject* self, PyObject* args) {
+  HANDLE_TH_ERRORS
+  auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
+  // TODO: change the condition to `self_.dim() != 0` once we expose scalars
+  // in PyTorch.
+  if (!isIntegralType(self_.type().scalarType()) || self_.numel() != 1) {
+    throw TypeError("only integer tensors of a single element can be converted to an index");
+  }
+  return wrap(dispatch_to_CLong(self_));
   END_HANDLE_TH_ERRORS
 }
 
@@ -396,6 +405,24 @@ static PyObject * THPVariable_numpy(PyObject* self, PyObject* arg)
         "Use var.detach().numpy() instead.");
   }
   return torch::utils::tensor_to_numpy(self_.data());
+  END_HANDLE_TH_ERRORS
+}
+
+// TODO: move this to ATen. We would need to expose Stream objects in ATen.
+static PyObject * THPVariable_record_stream(PyObject* self, PyObject* arg)
+{
+  HANDLE_TH_ERRORS
+#ifdef WITH_CUDA
+  auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
+  if (!THCPStream_Check(arg)) {
+    return PyErr_Format(PyExc_TypeError, "expected Stream object");
+  }
+  void* data = self_.data_ptr();
+  THCCachingAllocator_recordStream(data, ((THCPStream*)arg)->cdata);
+  Py_RETURN_NONE;
+#else
+  throw std::runtime_error("PyTorch compiled without CUDA support");
+#endif
   END_HANDLE_TH_ERRORS
 }
 
@@ -543,6 +570,7 @@ PyMethodDef variable_methods[] = {
   {"__float__", (PyCFunction)THPVariable_float_scalar, METH_NOARGS, NULL},
   {"__int__", (PyCFunction)THPVariable_integral_scalar, METH_NOARGS, NULL},
   {"__long__", (PyCFunction)THPVariable_integral_scalar, METH_NOARGS, NULL},
+  {"__index__", (PyCFunction)THPVariable_index_scalar, METH_NOARGS, NULL},
   {"__invert__", (PyCFunction)THPVariable_invert, METH_NOARGS, NULL},
   {"__nonzero__", (PyCFunction)THPVariable_is_nonzero, METH_NOARGS, NULL},
   {"__matmul__", (PyCFunction)THPVariable_matmul, METH_VARARGS | METH_KEYWORDS, NULL},
@@ -561,7 +589,6 @@ PyMethodDef variable_methods[] = {
   {"double", (PyCFunction)THPVariable_double, METH_NOARGS, NULL},
   {"element_size", (PyCFunction)THPVariable_element_size, METH_NOARGS, NULL},
   {"float", (PyCFunction)THPVariable_float, METH_NOARGS, NULL},
-  {"from_numpy", (PyCFunction)THPVariable_from_numpy, METH_STATIC | METH_O, NULL},
   {"half", (PyCFunction)THPVariable_half, METH_NOARGS, NULL},
   {"int", (PyCFunction)THPVariable_int, METH_NOARGS, NULL},
   {"long", (PyCFunction)THPVariable_long, METH_NOARGS, NULL},
@@ -571,6 +598,7 @@ PyMethodDef variable_methods[] = {
   {"nelement", (PyCFunction)THPVariable_numel, METH_NOARGS, NULL},
   {"new", (PyCFunction)THPVariable_new, METH_VARARGS | METH_KEYWORDS, NULL},
   {"numpy", (PyCFunction)THPVariable_numpy, METH_NOARGS, NULL},
+  {"record_stream", (PyCFunction)THPVariable_record_stream, METH_O, NULL},
   {"short", (PyCFunction)THPVariable_short, METH_NOARGS, NULL},
   {"size", (PyCFunction)THPVariable_size, METH_VARARGS | METH_KEYWORDS, NULL},
   {"storage", (PyCFunction)THPVariable_storage, METH_NOARGS, NULL},

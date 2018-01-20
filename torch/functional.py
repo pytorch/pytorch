@@ -1,11 +1,10 @@
 import torch
-from ._utils import _range
 from operator import mul
 from functools import reduce
 import math
 
 __all__ = [
-    'split', 'chunk', 'stack', 'unbind', 'btriunpack', 'matmul', 'det', 'stft',
+    'split', 'chunk', 'empty_like', 'stack', 'unbind', 'btriunpack', 'matmul', 'det', 'stft',
     'hann_window', 'hamming_window', 'bartlett_window', 'where',
 ]
 
@@ -38,7 +37,7 @@ def split(tensor, split_size_or_sections, dim=0):
         def get_split_size(i):
             return split_size if i < num_splits - 1 else last_split_size
         return tuple(tensor.narrow(int(dim), int(i * split_size), int(get_split_size(i))) for i
-                     in _range(0, num_splits))
+                     in range(0, num_splits))
 
     else:
         if dim_size != sum(split_size_or_sections):
@@ -63,6 +62,26 @@ def chunk(tensor, chunks, dim=0):
         dim += tensor.dim()
     split_size = (tensor.size(dim) + chunks - 1) // chunks
     return split(tensor, split_size, dim)
+
+
+def empty_like(input):
+    r"""empty_like(input) -> Tensor
+
+    Returns an uninitialized tensor with the same size as :attr:`input`.
+
+    Args:
+        input (Tensor): the size of :attr:`input` will determine size of the output tensor
+
+    Example::
+
+        >>> input = torch.LongTensor(2,3)
+        >>> input.new(input.size())
+
+        1.3996e+14  1.3996e+14  1.3996e+14
+        4.0000e+00  0.0000e+00  0.0000e+00
+        [torch.LongTensor of size 2x3]
+    """
+    return input.new(input.size())
 
 
 def stack(sequence, dim=0, out=None):
@@ -95,7 +114,7 @@ def unbind(tensor, dim=0):
         tensor (Tensor): the tensor to unbind
         dim (int): dimension to remove
     """
-    return tuple(tensor.select(dim, i) for i in _range(tensor.size(dim)))
+    return tuple(tensor.select(dim, i) for i in range(tensor.size(dim)))
 
 
 def btriunpack(LU_data, LU_pivots, unpack_data=True, unpack_pivots=True):

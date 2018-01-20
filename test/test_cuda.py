@@ -696,7 +696,7 @@ class TestCuda(TestCase):
         self._test_broadcast(torch.randn(5, 5))
 
     def test_broadcast_gpu(self):
-        self._test_broadcast(torch.randn(5, 5))
+        self._test_broadcast(torch.randn(5, 5).cuda())
 
     @staticmethod
     def _test_broadcast_coalesced(self, tensors, buffer_size):

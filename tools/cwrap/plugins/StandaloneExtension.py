@@ -8,6 +8,7 @@ MODULE_HEAD = """
 #include <exception>
 
 #include "THP_API.h"
+#include "torch/csrc/nn/type_checks.h"
 
 """
 with open(os.path.join(os.path.dirname(__file__), 'templates', 'module_tail.cpp'), 'r') as f:
@@ -26,14 +27,14 @@ $METHODS
 class StandaloneExtension(CWrapPlugin):
 
     TYPE_UNPACK = {
-        'THFloatTensor*': Template('THPFloatTensor_CData((THPFloatTensor*)$arg)'),
-        'THDoubleTensor*': Template('THPDoubleTensor_CData((THPDoubleTensor*)$arg)'),
-        'THLongTensor*': Template('THPLongTensor_CData((THPLongTensor*)$arg)'),
-        'THIntTensor*': Template('THPIntTensor_CData((THPIntTensor*)$arg)'),
-        'THCudaHalfTensor*': Template('THCPHalfTensor_CData((THCPHalfTensor*)$arg)'),
-        'THCudaTensor*': Template('THCPFloatTensor_CData((THCPFloatTensor*)$arg)'),
-        'THCudaDoubleTensor*': Template('THCPDoubleTensor_CData((THCPDoubleTensor*)$arg)'),
-        'THCudaLongTensor*': Template('THCPLongTensor_CData((THCPLongTensor*)$arg)'),
+        'THFloatTensor*': Template('THNN_FloatTensor_Unpack($arg)'),
+        'THDoubleTensor*': Template('THNN_DoubleTensor_Unpack($arg)'),
+        'THLongTensor*': Template('THNN_LongTensor_Unpack($arg)'),
+        'THIntTensor*': Template('THNN_IntTensor_Unpack($arg)'),
+        'THCudaHalfTensor*': Template('THNN_CudaHalfTensor_Unpack($arg)'),
+        'THCudaTensor*': Template('THNN_CudaFloatTensor_Unpack($arg)'),
+        'THCudaDoubleTensor*': Template('THNN_CudaDoubleTensor_Unpack($arg)'),
+        'THCudaLongTensor*': Template('THNN_CudaLongTensor_Unpack($arg)'),
         'half': Template('THPHalfUtils_unpackReal($arg)'),
         'float': Template('THPFloatUtils_unpackReal($arg)'),
         'double': Template('THPDoubleUtils_unpackReal($arg)'),
@@ -46,14 +47,14 @@ class StandaloneExtension(CWrapPlugin):
     }
 
     TYPE_CHECK = {
-        'THDoubleTensor*': Template('(PyObject*)Py_TYPE($arg) == THPDoubleTensorClass'),
-        'THFloatTensor*': Template('(PyObject*)Py_TYPE($arg) == THPFloatTensorClass'),
-        'THLongTensor*': Template('(PyObject*)Py_TYPE($arg) == THPLongTensorClass'),
-        'THIntTensor*': Template('(PyObject*)Py_TYPE($arg) == THPIntTensorClass'),
-        'THCudaHalfTensor*': Template('THCPHalfTensor_Check($arg)'),
-        'THCudaTensor*': Template('(PyObject*)Py_TYPE($arg) == THCPFloatTensorClass'),
-        'THCudaDoubleTensor*': Template('THCPDoubleTensor_Check($arg)'),
-        'THCudaLongTensor*': Template('(PyObject*)Py_TYPE($arg) == THCPLongTensorClass'),
+        'THFloatTensor*': Template('THNN_FloatTensor_Check($arg)'),
+        'THDoubleTensor*': Template('THNN_DoubleTensor_Check($arg)'),
+        'THLongTensor*': Template('THNN_LongTensor_Check($arg)'),
+        'THIntTensor*': Template('THNN_IntTensor_Check($arg)'),
+        'THCudaHalfTensor*': Template('THNN_CudaHalfTensor_Check($arg)'),
+        'THCudaTensor*': Template('THNN_CudaFloatTensor_Check($arg)'),
+        'THCudaDoubleTensor*': Template('THNN_CudaDoubleTensor_Check($arg)'),
+        'THCudaLongTensor*': Template('THNN_CudaLongTensor_Check($arg)'),
         'half': Template('THPHalfUtils_checkReal($arg)'),
         'float': Template('THPFloatUtils_checkReal($arg)'),
         'double': Template('THPDoubleUtils_checkReal($arg)'),

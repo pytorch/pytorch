@@ -86,7 +86,6 @@ struct Eval : Function {
 
 private:
   std::pair<function_list, variable_list> filterRoots(const variable_list& inputs);
-  Engine::pre_callback_map getCallbacks(variable_list& outputs, std::mutex& outputs_mutex);
 
   Subgraph getSubgraph(
       const variable_list& inputs,

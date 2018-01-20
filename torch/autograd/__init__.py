@@ -116,13 +116,11 @@ def grad(outputs, inputs, grad_outputs=None, retain_graph=None, create_graph=Fal
             be constructed, allowing to compute higher order derivative products.
             Defaults to ``False``, unless ``grad_variables`` contains at least one
             non-volatile Variable.
-        only_inputs (bool, optional): If ``True``, gradient w.r.t. leaves that are
-            part of the graph, but don't appear in ``inputs`` won't be computed
-            and accumulated. Defaults to ``True``.
-        allow_unused (bool, optional): If ``False``, specifying inputs that were not
-            used when computing outputs (and therefore their grad is always zero)
-            is an error. Defaults to ``False``.
     """
+    if not only_inputs:
+        warnings.warn("only_inputs argument is deprecated and is ignored now (defaults to True)!")
+    if allow_unused:
+        warnings.warn("allow_unused argument is deprecated and is ignored now (defaults to True)!")
 
     outputs = (outputs,) if isinstance(outputs, Variable) else tuple(outputs)
     inputs = (inputs,) if isinstance(inputs, Variable) else tuple(inputs)
@@ -139,7 +137,7 @@ def grad(outputs, inputs, grad_outputs=None, retain_graph=None, create_graph=Fal
 
     return Variable._execution_engine.run_backward(
         outputs, grad_outputs, retain_graph, create_graph,
-        inputs, only_inputs, allow_unused)
+        inputs)
 
 
 if not torch._C._autograd_init():
