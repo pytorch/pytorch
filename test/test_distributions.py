@@ -32,7 +32,7 @@ from common import TestCase, run_tests, set_rng_seed
 from torch.autograd import Variable, grad, gradcheck
 from torch.distributions import Distribution
 from torch.distributions import (Bernoulli, Beta, Binomial, Categorical, Cauchy, Chi2,
-                                 Dirichlet, Exponential, FisherSnedecor, Gamma, Geometric, 
+                                 Dirichlet, Exponential, FisherSnedecor, Gamma, Geometric,
                                  Gumbel, Laplace, Normal, OneHotCategorical, Multinomial, Pareto,
                                  StudentT, Uniform, kl_divergence)
 from torch.distributions.dirichlet import _Dirichlet_backward
@@ -1734,7 +1734,7 @@ class TestKL(TestCase):
                     actual = dist.entropy()
                 except NotImplementedError:
                     continue
-                x = dist.sample(sample_shape=(30000,))
+                x = dist.sample(sample_shape=(50000,))
                 expected = -dist.log_prob(x).mean(0)
                 if isinstance(actual, Variable):
                     actual = actual.data
