@@ -115,20 +115,6 @@ int NumCudaDevices();
 inline bool HasCudaGPU() { return NumCudaDevices() > 0; }
 
 /**
- * Sets the default GPU id for Caffe2.
- *
- * If an operator is set to run on Cuda GPU but no gpu id is given, we will use
- * the default gpu id to run the operator. Before this function is explicitly
- * called, GPU 0 will be the default GPU id.
- */
-void SetDefaultGPUID(const int deviceid);
-
-/**
- * Gets the default GPU id for Caffe2.
- */
-int GetDefaultGPUID();
-
-/**
  * Gets the current GPU id. This is a simple wrapper around cudaGetDevice().
  */
 int CaffeCudaGetDevice();
