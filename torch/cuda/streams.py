@@ -6,36 +6,14 @@ from . import cudart, check_error, cudaStatus
 class Stream(torch._C._CudaStreamBase):
     """Wrapper around a CUDA stream.
 
-    A `CUDA stream`_ is an independent sequence of execution that belongs to a
-    specific device.  If you do not create a stream explicitly, each device uses
-    its own "default" stream.
-
-    Operations inside each stream is serialized in the order they are created,
-    but operations from different streams can execute concurrently in any
-    relative order, unless explicit synchronization instructions (such as
-    :meth:`~synchronize` or :meth:`~wait_stream`) are used.  For example, the
-    following code is incorrect:
-
-        >>> s = torch.cuda.stream()  # Create a new stream.
-        >>> A = torch.cuda.FloatTensor(100, 100).normal_(0.0, 1.0)
-        >>> with torch.cuda.stream(s):
-        >>>     # sum() may start execution before normal_() finishes!
-        >>>     B = torch.sum(A)
-
-    As convenience, when the "current stream" is the default stream, PyTorch
-    automatically performs necessary synchronization when copying data between
-    CPU and GPU or between two GPUs.  Hence, as long as you do not explicitly
-    create a (non-default) stream (or explicitly request asynchronous operation
-    in, e.g., :meth:`~torch.Tensor.copy_`), your code will run as if every
-    operation was executed synchronously.  However, when using non-default
-    streams, it is the user's responsibility to ensure proper synchronization.
+    A CUDA stream is a linear sequence of execution that belongs to a specific
+    device, independent from other streams.  See :ref:`cuda-semantics` for
+    details.
 
     Arguments:
         device(int, optional): a device on which to allocate the Stream.
         priority(int, optional): priority of the stream. Lower numbers
                                  represent higher priorities.
-
-    .. _CUDA stream: http://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#streams
     """
 
     def __new__(cls, device=-1, priority=0, **kwargs):
