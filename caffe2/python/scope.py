@@ -53,7 +53,7 @@ def NameScope(prefix, reset=False):
     assert isinstance(prefix, basestring), \
         "NameScope takes in a string as its argument."
     old_scope = CurrentNameScope()
-    prefix = prefix + _NAMESCOPE_SEPARATOR if prefix is not '' else ''
+    prefix = prefix + _NAMESCOPE_SEPARATOR if prefix else ''
     if reset:
         _threadlocal_scope.namescope = prefix
     else:
