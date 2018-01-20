@@ -15,8 +15,6 @@ class TransformedDistribution(Distribution):
     Y = f(X) ~ TransformedDistribution(BaseDistribution, f)
     log p(Y) = log p(X) + log det (dX/dY)
     """
-    support = constraints.dependent
-
     def __init__(self, base_distribution, bijectors=[], *args, **kwargs):
         super(TransformedDistribution, self).__init__(*args, **kwargs)
         self.base_dist = base_distribution
@@ -30,7 +28,14 @@ class TransformedDistribution(Distribution):
 
     @constraints.dependent_property
     def params(self):
-        return self.base_dist.params
+        return self.base_dist.params  # TODO add params of bijectors?
+
+    @constraints.dependent_property
+    def support(self):
+        try:
+            return self.bijectors[-1].codomain
+        except IndexError:
+            return self.base_dist.support
 
     @property
     def has_rsample(self):
@@ -62,7 +67,7 @@ class TransformedDistribution(Distribution):
         are batched. Samples first from base distribution and applies bijector.forward()
         for every bijector in the list.
         """
-        x = self.base_dist.sample(sample_shape)
+        x = self.base_dist.rsample(sample_shape)
         for bijector in self.bijectors:
             x = bijector.forward(x)
         return x
