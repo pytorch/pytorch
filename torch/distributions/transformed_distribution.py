@@ -62,14 +62,10 @@ class TransformedDistribution(Distribution):
         are batched. Samples first from base distribution and applies bijector.forward()
         for every bijector in the list.
         """
-        x = self.base_dist.rsample(sample_shape)
-        next_input = x
+        x = self.base_dist.sample(sample_shape)
         for bijector in self.bijectors:
-            y = bijector.forward(next_input)
-            if bijector.add_inverse_to_cache:
-                bijector._add_intermediate_to_cache(next_input, y, 'x')
-            next_input = y
-        return next_input
+            x = bijector.forward(x)
+        return x
 
     def log_prob(self, value):
         """
