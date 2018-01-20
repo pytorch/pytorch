@@ -536,8 +536,79 @@ void testADFormulas() {
   }
 }
 
+std::string toString(std::shared_ptr<Graph>& graph) {
+  std::ostringstream s;
+  s << *graph;
+  return s.str();
+}
+
+void testGraphDiff() {
+  auto graph = std::make_shared<Graph>();
+  at::ScalarType s = at::ScalarType::Float;
+  auto type = std::shared_ptr<TensorType>(new TensorType(s, -1, {2, 3, 4}, {12, 4, 1}));
+
+  // Build up a fake graph
+  auto a = SymbolicVariable::asNewInput(*graph, type);
+  auto b = SymbolicVariable::asNewInput(*graph, type);
+  auto c = a * b * a + b;
+  graph->registerOutput(c.value());
+
+  static const char *expected_diff =
+R"(graph(%0 : Float(2, 3, 4)
+      %1 : Float(2, 3, 4)
+      -------- stage 1 --------
+      %5 : Float(2, 3, 4)) {
+  %2 : Float(2, 3, 4) = mul(%0, %1)
+  %3 : Float(2, 3, 4) = mul(%2, %0)
+  %4 : Float(2, 3, 4) = add[alpha={1}](%3, %1)
+  ---------------- stage 1 ----------------
+  %6 : Float(2, 3, 4) = mul(%5, %0)
+  %7 : Float(2, 3, 4) = mul(%5, %2)
+  %8 : Float(2, 3, 4) = mul(%6, %1)
+  %10 : Float(2, 3, 4) = add[alpha={1}](%7, %8)
+  %9 : Float(2, 3, 4) = mul(%6, %0)
+  %11 : Float(2, 3, 4) = add[alpha={1}](%5, %9)
+  return (%4, %10, %11);
+}
+)";
+  differentiate(graph);
+  JIT_ASSERT(toString(graph) == expected_diff);
+
+  static const char *expected_f =
+R"(graph(%0 : Float(2, 3, 4)
+      %1 : Float(2, 3, 4)) {
+  %2 : Float(2, 3, 4) = mul(%0, %1)
+  %3 : Float(2, 3, 4) = mul(%2, %0)
+  %4 : Float(2, 3, 4) = add[alpha={1}](%3, %1)
+  return (%4, %0, %1, %2);
+}
+)";
+
+  static const char *expected_df =
+R"(graph(%0 : Float(2, 3, 4)
+      %1 : Float(2, 3, 4)
+      %2 : Float(2, 3, 4)
+      %3 : Float(2, 3, 4)) {
+  %4 : Float(2, 3, 4) = mul(%3, %0)
+  %5 : Float(2, 3, 4) = mul(%3, %2)
+  %6 : Float(2, 3, 4) = mul(%4, %1)
+  %7 : Float(2, 3, 4) = add[alpha={1}](%5, %6)
+  %8 : Float(2, 3, 4) = mul(%4, %0)
+  %9 : Float(2, 3, 4) = add[alpha={1}](%3, %8)
+  return (%7, %9);
+}
+)";
+
+  auto lifted = lambdaLiftReverse(graph);
+  JIT_ASSERT(toString(lifted.f) == expected_f);
+  JIT_ASSERT(toString(lifted.df) == expected_df);
+  JIT_ASSERT(lifted.f_output_intermediates == 3);
+  JIT_ASSERT(lifted.df_input_captures == (std::vector<std::size_t>{1, 2, 3}));
+}
+
 void runJITCPPTests() {
   testADFormulas();
+  testGraphDiff();
   interpTest();
   interpStageTest();
   codeTemplateTest();
