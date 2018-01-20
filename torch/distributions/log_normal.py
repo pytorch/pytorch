@@ -1,6 +1,6 @@
-from torch.distributions.normal import Normal
 from torch.distributions import constraints
 from torch.distributions.bijectors import ExpBijector
+from torch.distributions.normal import Normal
 from torch.distributions.transformed_distribution import TransformedDistribution
 
 
