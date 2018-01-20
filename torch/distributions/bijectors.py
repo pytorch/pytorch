@@ -1,6 +1,7 @@
 import torch
 from torch.distributions import constraints
 from torch.distributions.utils import broadcast_all
+from torch.nn.functional import sigmoid
 
 __all__ = [
     'AffineBijector',
@@ -115,6 +116,23 @@ class ExpBijector(Bijector):
         return x
 
 
+class SigmoidBijector(Bijector):
+    """
+    Bijector for the mapping `y = sigmoid(x)` and `x = logit(y)`.
+    """
+    domain = constraints.real
+    codomain = constraints.unit_interval
+
+    def _forward(self, x):
+        return sigmoid(x)
+
+    def _inverse(self, y):
+        return y.log() - (-y).log1p()
+
+    def log_abs_det_jacobian(self, x, y):
+        return -(y.reciprocal() + (1 - y).reciprocal()).log()
+
+
 class AffineBijector(Bijector):
     """
     Bijector for the pointwise affine mapping `y = loc + scale * x`.
@@ -142,5 +160,9 @@ class AffineBijector(Bijector):
         return y / self.scale - self.loc
 
     def log_abs_det_jacobian(self, x, y):
-        shape = x.shape[:x.dim() - self.event_dim]
-        return torch.abs(self.scale).log().expand(shape)
+        result = torch.abs(self.scale).log()
+        shape = x.shape
+        for _ in range(self.event_dim):
+            result = result.sum(-1)
+            shape = shape[:-1]
+        return result.expand(shape)
