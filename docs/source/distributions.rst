@@ -73,6 +73,12 @@ Probability distributions - torch.distributions
 .. autoclass:: Gumbel
     :members:
 
+:hidden:`HalfNormal`
+~~~~~~~~~~~~~~~~
+
+.. autoclass:: HalfNormal
+    :members:
+
 :hidden:`Laplace`
 ~~~~~~~~~~~~~~~~~~~~~~~
 

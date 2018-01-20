@@ -8,19 +8,18 @@ from torch.distributions.transformed_distribution import TransformedDistribution
 class HalfNormal(TransformedDistribution):
     r"""
     Creates a half-normal distribution parameterized by `scale`.
-        X~Normal(loc, scale)
-        Y=exp(X)~LogNormal(loc, scale)
+        X~Normal(0, scale)
+        Y=abs(X)~HalfNormal(scale)
 
     Example::
 
-        >>> m = LogNormal(torch.Tensor([0.0]), torch.Tensor([1.0]))
-        >>> m.sample()  # log-normal distributed with mean=0 and stddev=1
+        >>> m = HalfNormal(torch.Tensor([1.0]))
+        >>> m.sample()  # half-normal distributed with and stddev=sqrt(1-2/pi)*scale
          0.1046
         [torch.FloatTensor of size 1]
 
     Args:
-        loc (float or Tensor or Variable): mean of log of distribution
-        scale (float or Tensor or Variable): standard deviation of log ofthe distribution
+        scale (float or Tensor or Variable): standard deviation/sqrt(1-2/pi) of the distribution
     """
     params = {'scale': constraints.positive}
     support = constraints.positive
