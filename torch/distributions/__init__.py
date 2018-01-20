@@ -32,7 +32,7 @@ policy, the code for implementing REINFORCE would be as follows::
 
 from .bernoulli import Bernoulli
 from .beta import Beta
-from .bijectors import *
+from .transforms import *
 from .binomial import Binomial
 from .categorical import Categorical
 from .cauchy import Cauchy
@@ -42,6 +42,7 @@ from .distribution import Distribution
 from .exponential import Exponential
 from .gamma import Gamma
 from .gumbel import Gumbel
+from .half_normal import HalfNormal
 from .kl import kl_divergence, register_kl
 from .laplace import Laplace
 from .log_normal import LogNormal
@@ -67,6 +68,7 @@ __all__ = [
     'ExpBijector',
     'Gamma',
     'Gumbel',
+    'HalfNormal',
     'Laplace',
     'LogNormal',
     'Multinomial',

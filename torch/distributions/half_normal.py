@@ -1,13 +1,13 @@
+import math
 from torch.distributions import constraints
-from torch.distributions.transforms import ExpTransform
+from torch.distributions.transforms import AbsTransform
 from torch.distributions.normal import Normal
 from torch.distributions.transformed_distribution import TransformedDistribution
 
 
-class LogNormal(TransformedDistribution):
+class HalfNormal(TransformedDistribution):
     r"""
-    Creates a log-normal distribution parameterized by
-    `mean` and `std`.
+    Creates a half-normal distribution parameterized by `scale`.
         X~Normal(loc, scale)
         Y=exp(X)~LogNormal(loc, scale)
 
@@ -22,20 +22,19 @@ class LogNormal(TransformedDistribution):
         loc (float or Tensor or Variable): mean of log of distribution
         scale (float or Tensor or Variable): standard deviation of log ofthe distribution
     """
-    params = {'loc': constraints.real, 'scale': constraints.positive}
+    params = {'scale': constraints.positive}
     support = constraints.positive
     has_rsample = True
 
-    def __init__(self, loc, scale):
-        super(LogNormal, self).__init__(Normal(loc, scale), ExpTransform())
-
-    @property
-    def loc(self):
-        return self.base_dist.loc
+    def __init__(self, scale):
+        super(HalfNormal, self).__init__(Normal(0, scale), AbsTransform())
 
     @property
     def scale(self):
         return self.base_dist.scale
 
+    def log_prob(self, value):
+        return math.log(2) + self.base_dist.log_prob(value)
+
     def entropy(self):
-        return self.base_dist.entropy() + self.loc
+        return self.base_dist.entropy() - math.log(2)

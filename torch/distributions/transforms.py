@@ -4,20 +4,21 @@ from torch.distributions.utils import broadcast_all
 from torch.nn.functional import sigmoid
 
 __all__ = [
-    'AffineBijector',
-    'Bijector',
-    'ExpBijector',
-    'InverseBijector',
+    'AffineTransform',
+    'Transform',
+    'ExpTransform',
+    'InverseTransform',
+    'AbsTransform',
 ]
 
 
-class Bijector(object):
+class Transform(object):
     """
-    Abstract class for bijective transformations with computable inverse log
+    Abstract class for transformations with computable inverse log
     det jacobians. They are primarily used in
     :class:`torch.distributions.TransformedDistribution`.
 
-    Bijectors are intended to be short-lived objects. They memoize the forward
+    Transforms are intended to be short-lived objects. They memoize the forward
     and inverse computations to avoid work; therefore :meth:`inverse` is
     nearly free after calling :meth:`forward`. To clear the memoization cache,
     delete the object and create a new object.
@@ -26,7 +27,6 @@ class Bijector(object):
     :meth:`_inverse` and should implement :meth:`log_abs_det_jacobian`.
     Derived classes may store intermediate results in the `._cache` dict.
     """
-    is_injective = True
 
     def __init__(self):
         self._cache = {}
@@ -74,9 +74,9 @@ class Bijector(object):
         raise NotImplementedError
 
 
-class InverseBijector(Bijector):
+class InverseTransform(Transform):
     """
-    Inverts a single :class:`Bijector`.
+    Inverts a single :class:`Transform`.
     """
     def __init__(self, bijector):
         self.bijector = bijector
@@ -99,9 +99,9 @@ class InverseBijector(Bijector):
         return -self.bijector.log_abs_det_jacobian(y, x)
 
 
-class ExpBijector(Bijector):
+class ExpTransform(Transform):
     """
-    Bijector for the mapping `y = exp(x)`.
+    Transform for the mapping `y = exp(x)`.
     """
     domain = constraints.real
     codomain = constraints.positive
@@ -116,9 +116,9 @@ class ExpBijector(Bijector):
         return x
 
 
-class SigmoidBijector(Bijector):
+class SigmoidTransform(Transform):
     """
-    Bijector for the mapping `y = sigmoid(x)` and `x = logit(y)`.
+    Transform for the mapping `y = sigmoid(x)` and `x = logit(y)`.
     """
     domain = constraints.real
     codomain = constraints.unit_interval
@@ -133,9 +133,23 @@ class SigmoidBijector(Bijector):
         return -(y.reciprocal() + (1 - y).reciprocal()).log()
 
 
-class AffineBijector(Bijector):
+class AbsTransform(Transform):
     """
-    Bijector for the pointwise affine mapping `y = loc + scale * x`.
+    Transform for the mapping `y = abs(x)`
+    """
+    domain = constraints.real
+    codomain = constraints.positive
+
+    def _forward(self, x):
+        return x.abs()
+
+    def log_abs_det_jacobian(self, x, y):
+        return 0
+
+
+class AffineTransform(Transform):
+    """
+    Transform for the pointwise affine mapping `y = loc + scale * x`.
 
     Args:
         loc (Tensor or Variable): Location parameter.
@@ -148,7 +162,7 @@ class AffineBijector(Bijector):
     codomain = constraints.real
 
     def __init__(self, loc, scale, event_dim=0):
-        super(AffineBijector, self).__init__()
+        super(AffineTransform, self).__init__()
         self.loc = loc
         self.scale = scale
         self.event_dim = event_dim

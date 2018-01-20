@@ -1,39 +1,36 @@
-from numbers import Number
-
 import torch
-from torch.autograd import Variable
 from torch.distributions import constraints
-from torch.distributions.bijectors import Bijector
+from torch.distributions.transforms import Transform
 from torch.distributions.distribution import Distribution
 
 
 class TransformedDistribution(Distribution):
     r"""
-    Extension of the Distribution class, which applies a sequence of Bijectors to a base distribution.
-    Let f be the composition of bijectors applied,
+    Extension of the Distribution class, which applies a sequence of Transforms to a base distribution.
+    Let f be the composition of transforms applied,
     X ~ BaseDistribution
     Y = f(X) ~ TransformedDistribution(BaseDistribution, f)
     log p(Y) = log p(X) + log det (dX/dY)
     """
-    def __init__(self, base_distribution, bijectors=[], *args, **kwargs):
+    def __init__(self, base_distribution, transforms=[], *args, **kwargs):
         super(TransformedDistribution, self).__init__(*args, **kwargs)
         self.base_dist = base_distribution
-        if isinstance(bijectors, Bijector):
-            self.bijectors = [bijectors, ]
-        elif isinstance(bijectors, list):
-            for bijector in bijectors:
-                if not isinstance(bijector, Bijector):
-                    raise ValueError("bijectors must be a Bijector or a list of Bijectors")
-            self.bijectors = bijectors
+        if isinstance(transforms, Transform):
+            self.transforms = [transforms, ]
+        elif isinstance(transforms, list):
+            for transform in transforms:
+                if not isinstance(transform, Transform):
+                    raise ValueError("transforms must be a Transform or a list of Transforms")
+            self.transforms = transforms
 
     @constraints.dependent_property
     def params(self):
-        return self.base_dist.params  # TODO add params of bijectors?
+        return self.base_dist.params  # TODO add params of transforms?
 
     @constraints.dependent_property
     def support(self):
         try:
-            return self.bijectors[-1].codomain
+            return self.transforms[-1].codomain
         except IndexError:
             return self.base_dist.support
 
@@ -53,35 +50,35 @@ class TransformedDistribution(Distribution):
         """
         Generates a sample_shape shaped sample or sample_shape shaped batch of
         samples if the distribution parameters are batched. Samples first from base distribution
-        and applies bijector.forward() for every bijector in the list.
+        and applies transform.forward() for every transform in the list.
         """
         x = self.base_dist.sample(sample_shape)
-        for bijector in self.bijectors:
-            x = bijector.forward(x)
+        for transform in self.transforms:
+            x = transform.forward(x)
         return x
 
     def rsample(self, sample_shape=torch.Size()):
         """
         Generates a sample_shape shaped reparameterized sample or sample_shape
         shaped batch of reparameterized samples if the distribution parameters
-        are batched. Samples first from base distribution and applies bijector.forward()
-        for every bijector in the list.
+        are batched. Samples first from base distribution and applies transform.forward()
+        for every transform in the list.
         """
         x = self.base_dist.rsample(sample_shape)
-        for bijector in self.bijectors:
-            x = bijector.forward(x)
+        for transform in self.transforms:
+            x = transform.forward(x)
         return x
 
     def log_prob(self, value):
         """
-        Scores the sample by inverting the bijector(s) and computing the score using the score
+        Scores the sample by inverting the transform(s) and computing the score using the score
         of the base distribution and the log abs det jacobian
         """
         log_prob = 0.0
         y = value
-        for bijector in reversed(self.bijectors):
-            x = bijector.inverse(y)
-            log_prob -= bijector.log_abs_det_jacobian(x, y)
+        for transform in reversed(self.transforms):
+            x = transform.inverse(y)
+            log_prob -= transform.log_abs_det_jacobian(x, y)
             y = x
         log_prob += self.base_dist.log_prob(y)
         return log_prob
