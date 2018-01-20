@@ -57,7 +57,6 @@ from .uniform import Uniform
 __all__ = [
     'Bernoulli',
     'Beta',
-    'Bijector',
     'Binomial',
     'Categorical',
     'Cauchy',
@@ -65,7 +64,6 @@ __all__ = [
     'Dirichlet',
     'Distribution',
     'Exponential',
-    'ExpBijector',
     'Gamma',
     'Gumbel',
     'HalfNormal',
@@ -81,3 +79,4 @@ __all__ = [
     'kl_divergence',
     'register_kl',
 ]
+__all__.extend(transforms.__all__)
