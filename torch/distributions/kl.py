@@ -13,6 +13,7 @@ from .exponential import Exponential
 from .gamma import Gamma
 from .gumbel import Gumbel
 from .laplace import Laplace
+from .log_normal import LogNormal
 from .normal import Normal
 from .pareto import Pareto
 from .uniform import Uniform
@@ -231,6 +232,11 @@ def _kl_laplace_laplace(p, q):
     t2 = loc_abs_diff / q.scale
     t3 = scale_ratio * torch.exp(-loc_abs_diff / p.scale)
     return t1 + t2 + t3 - 1
+
+
+@register_kl(LogNormal, LogNormal)
+def _kl_lognormal_lognormal(p, q):
+    return kl_divergence(p.base_dist, q.base_dist)
 
 
 @register_kl(Normal, Normal)
