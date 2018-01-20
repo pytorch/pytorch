@@ -1,6 +1,7 @@
 #include "torch/csrc/jit/autodiff.h"
 
 #include "torch/csrc/jit/symbolic_variable.h"
+#include "torch/csrc/jit/passes/dead_code_elimination.h"
 #include "torch/csrc/utils/functional.h"
 
 namespace torch { namespace jit {
@@ -23,22 +24,45 @@ static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_val
   return fmap(sym_grads, [](const SymbolicVariable &v) { return v.value(); });
 }
 
-void differentiate(std::shared_ptr<Graph>& graph) {
+void differentiate(std::shared_ptr<Graph>& graph,
+                   ArrayRef<bool> requires_grad_inputs,
+                   ArrayRef<bool> requires_grad_outputs) {
+  JIT_ASSERT(graph->inputs().size() == requires_grad_inputs.size());
+  JIT_ASSERT(graph->outputs().size() == requires_grad_outputs.size());
   JIT_ASSERT(graph->stage() == 0);
   graph->advanceStage();
 
   std::unordered_map<Value*, Value*> grad_map; // x -> dx mapping
-  const auto get_grad = [&](Value* v) { return grad_map[v]; };
-  for (auto output : graph->outputs())
-    grad_map[output] = graph->addInput()->setType(output->typeOption());
+  const auto needs_grad = [&](Value *v) { return grad_map.count(v) > 0; };
+  const auto get_grad   = [&](Value *v) -> Value* {
+    auto grad_it = grad_map.find(v);
+    if (grad_it == grad_map.end()) {
+      if (!v->hasType())
+        throw std::runtime_error("can't create a zero gradient without type information");
+      auto type = v->type()->expect<TensorType>();
+      (void) type;
+      // TODO: implement
+      throw std::runtime_error("creating zero gradients not implemented yet");
+    }
+    return grad_it->second;
+  };
+
+  auto outputs = graph->outputs();
+  for (std::size_t i = 0, num_outputs = outputs.size(); i < num_outputs; ++i) {
+    if (!requires_grad_outputs[i]) continue;
+    grad_map[outputs[i]] = graph->addInput()->setType(outputs[i]->typeOption());
+  }
 
   for (auto it = graph->rbegin(), end = graph->rend(); it != end; ++it) {
     Node *node = *it;
     auto inputs = node->inputs();
+    auto outputs = node->outputs();
+    if (std::none_of(outputs.begin(), outputs.end(), needs_grad)) continue;
     value_list grad_inputs = gradientForNode(node, fmap(node->outputs(), get_grad));
-    JIT_ASSERT(grad_inputs.size() == node->inputs().size());
+    JIT_ASSERT(grad_inputs.size() == inputs.size());
     for (std::size_t i = 0, num_inputs = grad_inputs.size(); i < num_inputs; ++i) {
       if (Value * prev_grad = grad_map[inputs[i]]) {
+        // NOTE: can't use SymbolicVariable, because we don't want to append to the graph
         Node *new_grad_node = graph->create(kadd, {prev_grad, grad_inputs[i]})
                                    ->t_(kalpha, at::Scalar(1).toTensor());
         new_grad_node->insertAfter(grad_inputs[i]->node());
@@ -51,10 +75,16 @@ void differentiate(std::shared_ptr<Graph>& graph) {
     }
   }
 
-  for (auto input : graph->inputs()) {
-    if (input->stage() > 0) break;
-    graph->registerOutput(grad_map.at(input));
+  auto inputs = graph->inputs();
+  for (std::size_t i = 0, num_inputs = inputs.size(); i < num_inputs; ++i) {
+    if (inputs[i]->stage() > 0) break;
+    if (!requires_grad_inputs[i]) continue;
+    graph->registerOutput(get_grad(inputs[i]));
   }
+  // We haven't considered requires_grad flags of inputs up until now, which means that
+  // we could have differentiated unnecessary parts of the graph. Run dead code elimination
+  // to get rid of them.
+  EliminateDeadCode(graph);
 }
 
 static std::shared_ptr<Graph> splitOffStage(

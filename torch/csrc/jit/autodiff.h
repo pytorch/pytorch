@@ -10,7 +10,10 @@ namespace torch { namespace jit {
 // This function mutates the given graph (which should only contain a single stage)
 // by appending nodes of a next stage, which computes the Jacobian-vector product
 // (aka backward) of inputs to the first stage w.r.t. the outputs of the first stage.
-void differentiate(std::shared_ptr<Graph>& graph);
+// TODO: expand the comment
+void differentiate(std::shared_ptr<Graph>& graph,
+                   ArrayRef<bool> requires_grad_inputs,
+                   ArrayRef<bool> requires_grad_outputs);
 
 using value_list = std::vector<Value*>;
 struct LiftedReverse {

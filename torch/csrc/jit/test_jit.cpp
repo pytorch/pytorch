@@ -517,7 +517,7 @@ void testADFormulas() {
 
     // Trace and differentiate the op
     auto graph = trace(test, vars_in);
-    differentiate(graph);
+    differentiate(graph, {true, true}, {true});
     Code bytecode {graph};
     InterpreterState interpreter {bytecode};
 
@@ -571,7 +571,7 @@ R"(graph(%0 : Float(2, 3, 4)
   return (%4, %10, %11);
 }
 )";
-  differentiate(graph);
+  differentiate(graph, {true, true}, {true});
   JIT_ASSERT(toString(graph) == expected_diff);
 
   static const char *expected_f =
@@ -606,9 +606,46 @@ R"(graph(%0 : Float(2, 3, 4)
   JIT_ASSERT(lifted.df_input_captures == (std::vector<std::size_t>{1, 2, 3}));
 }
 
+void testDifferentiateRequiresGrad() {
+  auto graph = std::make_shared<Graph>();
+  at::ScalarType s = at::ScalarType::Float;
+  auto type = std::shared_ptr<TensorType>(new TensorType(s, -1, {2, 3, 4}, {12, 4, 1}));
+
+  // Build up a fake graph
+  auto a = SymbolicVariable::asNewInput(*graph, type);
+  auto b = SymbolicVariable::asNewInput(*graph, type);
+  auto c = a * b * a;
+  auto d = c + a;
+  auto e = c + b;
+  graph->registerOutput(d.value());
+  graph->registerOutput(e.value());
+
+  static const char *expected_df =
+R"(graph(%0 : Float(2, 3, 4)
+      %1 : Float(2, 3, 4)
+      -------- stage 1 --------
+      %6 : Float(2, 3, 4)) {
+  %2 : Float(2, 3, 4) = mul(%0, %1)
+  %3 : Float(2, 3, 4) = mul(%2, %0)
+  %4 : Float(2, 3, 4) = add[alpha={1}](%3, %0)
+  %5 : Float(2, 3, 4) = add[alpha={1}](%3, %1)
+  ---------------- stage 1 ----------------
+  %7 : Float(2, 3, 4) = mul(%6, %0)
+  %8 : Float(2, 3, 4) = mul(%6, %2)
+  %9 : Float(2, 3, 4) = mul(%7, %1)
+  %11 : Float(2, 3, 4) = add[alpha={1}](%8, %9)
+  return (%4, %5, %11);
+}
+)";
+
+  differentiate(graph, {true, false}, {false, true});
+  JIT_ASSERT(toString(graph) == expected_df);
+}
+
 void runJITCPPTests() {
   testADFormulas();
   testGraphDiff();
+  testDifferentiateRequiresGrad();
   interpTest();
   interpStageTest();
   codeTemplateTest();
