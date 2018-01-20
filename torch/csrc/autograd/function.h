@@ -184,6 +184,15 @@ struct Function : std::enable_shared_from_this<Function> {
     });
   }
 
+  inline bool should_compute_output(std::initializer_list<std::pair<size_t, size_t>> idxs) const {
+    return std::any_of(idxs.begin(), idxs.end(), [this](std::pair<size_t, size_t> range) {
+      for (size_t i = range.first; i < range.second; i++) {
+        if (should_compute_output(i)) return true;
+      }
+      return false;
+    });
+  }
+
   inline void set_flags(FunctionFlags&& flags) {
     next_functions = std::move(flags.next_functions);
   }
