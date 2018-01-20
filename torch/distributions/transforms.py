@@ -143,9 +143,6 @@ class AbsTransform(Transform):
     def _forward(self, x):
         return x.abs()
 
-    def log_abs_det_jacobian(self, x, y):
-        return 0
-
 
 class AffineTransform(Transform):
     """
