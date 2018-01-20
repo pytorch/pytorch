@@ -321,10 +321,6 @@ class TestWorkspaceGPU(test_util.TestCase):
         self.assertEqual(fetched_again.shape, (1, 2, 3, 4))
         np.testing.assert_array_equal(fetched_again, 2.0)
 
-    def testDefaultGPUID(self):
-        self.assertEqual(workspace.SetDefaultGPUID(0), None)
-        self.assertEqual(workspace.GetDefaultGPUID(), 0)
-
     def testGetCudaPeerAccessPattern(self):
         pattern = workspace.GetCudaPeerAccessPattern()
         self.assertEqual(type(pattern), np.ndarray)

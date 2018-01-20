@@ -254,15 +254,24 @@ struct Caffe2CudaInitializerHelper {
 };
 }  // namespace
 
+/**
+ * A utility function to rectify the gpu id. If the context specifies the
+ * gpu id to be -1, it means that we will just use the current gpu id when
+ * the function is being called.
+ */
+static inline int RectifyGPUID(const int gpu_id) {
+  return gpu_id == -1 ? CaffeCudaGetDevice() : gpu_id;
+}
+
 CUDAContext::CUDAContext(const int gpu_id)
-    : gpu_id_(gpu_id == -1 ? GetDefaultGPUID() : gpu_id),
-      random_seed_(RandomNumberSeed()) {
+    : gpu_id_(RectifyGPUID(gpu_id)), random_seed_(RandomNumberSeed()) {
   static Caffe2CudaInitializerHelper g_cuda_initializer_;
 }
 
 CUDAContext::CUDAContext(const DeviceOption& option)
     : gpu_id_(
-          option.has_cuda_gpu_id() ? option.cuda_gpu_id() : GetDefaultGPUID()),
+          option.has_cuda_gpu_id() ? RectifyGPUID(option.cuda_gpu_id())
+                                   : CaffeCudaGetDevice()),
       random_seed_(
           option.has_random_seed() ? option.random_seed()
                                    : RandomNumberSeed()) {
