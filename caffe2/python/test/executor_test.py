@@ -18,13 +18,13 @@ import unittest
 
 
 EXECUTORS = ["async_scheduling", "async_polling", "dag", "async_dag"]
-ITERATIONS = 2
+ITERATIONS = 1
 
 
 class ExecutorCPUConvNetTest(ExecutorTestBase):
     @given(executor=st.sampled_from(EXECUTORS),
            model_name=st.sampled_from(executor_test_model_names()),
-           batch_size=st.sampled_from([8]),
+           batch_size=st.sampled_from([1]),
            num_workers=st.sampled_from([8]))
     @executor_test_settings
     def test_executor(self, executor, model_name, batch_size, num_workers):

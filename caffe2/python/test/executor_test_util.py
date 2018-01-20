@@ -62,10 +62,10 @@ def conv_model_generators():
 
 
 def executor_test_model_names():
-    if not hu.is_travis():
-        return conv_model_generators().keys()
-    else:
+    if hu.is_sandcastle() or hu.is_travis():
         return ["MLP"]
+    else:
+        return conv_model_generators().keys()
 
 
 def build_conv_model(model_name, batch_size):
