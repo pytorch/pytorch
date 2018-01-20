@@ -14,6 +14,22 @@ fi
 export PYTHONPATH="${PYTHONPATH}:/usr/local/caffe2"
 export LD_LIBRARY_PATH="${LD_LIBRARY_PATH}:/usr/local/caffe2/lib"
 
+exit_code=0
+
+cd "$ROOT_DIR"/caffe2/python/tutorials
+python tutorials_to_script_converter.py
+git status
+if git diff --quiet HEAD; then
+  echo "Source tree is clean."
+else
+  echo "After running a tutorial -> script sync there are changes. This probably means you edited an ipython notebook without a proper sync to a script. Please see caffe2/python/tutorials/README.md for more information"
+  if [ "$exit_code" -eq 0 ]; then
+    exit_code=1
+  fi
+fi
+
+cd "$ROOT_DIR"
+
 if [ -d ./test ]; then
   echo "Directory ./test already exists; please remove it..."
   exit 1
@@ -22,11 +38,11 @@ fi
 mkdir -p ./test/{cpp,python}
 TEST_DIR="$PWD/test"
 
+
 cd /usr/local/caffe2
 
 # Commands below may exit with non-zero status
 set +e
-exit_code=0
 
 # C++ tests
 echo "Running C++ tests.."
