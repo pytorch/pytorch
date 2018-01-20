@@ -34,8 +34,8 @@ from torch.distributions import (Bernoulli, Beta, Binomial, Categorical, Cauchy,
                                  Dirichlet, Exponential, Gamma, Gumbel, Laplace,
                                  Normal, OneHotCategorical, Multinomial, Pareto,
                                  StudentT, Uniform, constraints, kl_divergence)
-from torch.distributions.bijectors import (AffineBijector, ExpBijector,
-                                           InverseBijector, SigmoidBijector)
+from torch.distributions.transforms import (AffineTransform, ExpTransform,
+                                            InverseTransform, SigmoidTransform)
 from torch.distributions.dirichlet import _Dirichlet_backward
 from torch.distributions.constraints import Constraint, is_dependent
 from torch.distributions.utils import _finfo, probs_to_logits
@@ -1823,17 +1823,17 @@ class TestLazyLogitsInitialization(TestCase):
                 self.assertFalse('logits' in vars(dist), msg=message)
 
 
-class TestBijectors(TestCase):
+class TestTransforms(TestCase):
     def setUp(self):
         self.univariate = [
-            ExpBijector(),
-            InverseBijector(ExpBijector()),
-            SigmoidBijector(),
-            InverseBijector(SigmoidBijector()),
-            AffineBijector(Variable(torch.Tensor(5).normal_()),
-                           Variable(torch.Tensor(5).normal_())),
-            AffineBijector(Variable(torch.Tensor(4, 5).normal_()),
-                           Variable(torch.Tensor(4, 5).normal_())),
+            ExpTransform(),
+            InverseTransform(ExpTransform()),
+            SigmoidTransform(),
+            InverseTransform(SigmoidTransform()),
+            AffineTransform(Variable(torch.Tensor(5).normal_()),
+                            Variable(torch.Tensor(5).normal_())),
+            AffineTransform(Variable(torch.Tensor(4, 5).normal_()),
+                            Variable(torch.Tensor(4, 5).normal_())),
         ]
 
     def _generate_data(self, constraint):
