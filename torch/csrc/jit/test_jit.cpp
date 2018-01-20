@@ -493,6 +493,28 @@ void assertAllClose(const tensor_list& a, const tensor_list& b) {
   }
 }
 
+std::pair<tensor_list, tensor_list> runGradient(Gradient& grad_spec,
+                                                tensor_list& tensors_in,
+                                                tensor_list& tensor_grads_in) {
+  tensor_list tensors_out, tensor_grads_out;
+  Code f_code { grad_spec.f }, df_code { grad_spec.df };
+  InterpreterState f_interpreter { f_code }, df_interpreter { df_code };
+
+  f_interpreter.runOneStage(tensors_in, tensors_out);
+
+  tensor_list df_inputs;
+  for (auto capture : grad_spec.df_input_captures) {
+    bool is_input = capture.kind == Capture::Kind::Input;
+    df_inputs.push_back(is_input ? tensors_in[capture.offset] : tensors_out[capture.offset]);
+  }
+  df_inputs.insert(df_inputs.end(), tensor_grads_in.begin(), tensor_grads_in.end());
+  df_interpreter.runOneStage(df_inputs, tensor_grads_out);
+
+  // Outputs of f needs to be sliced
+  tensors_out.erase(tensors_out.begin() + grad_spec.f_real_outputs, tensors_out.end());
+  return std::make_pair(tensors_out, tensor_grads_out);
+}
+
 void testADFormulas() {
   static const auto unwrap = [](const Variable& v) { return v.data(); };
 
@@ -517,16 +539,13 @@ void testADFormulas() {
 
     // Trace and differentiate the op
     auto graph = trace(test, vars_in);
-    differentiate(graph);
-    Code bytecode {graph};
-    InterpreterState interpreter {bytecode};
+    auto grad_spec = differentiate(graph);
 
     // Get outputs from the interpreter
     auto tensors_in                = fmap(vars_in, unwrap);
     auto tensor_grads_in           = fmap(var_grads_in, unwrap);
     tensor_list tensors_out, tensor_grads_out;
-    interpreter.runOneStage(tensors_in, tensors_out);
-    interpreter.runOneStage(tensor_grads_in, tensor_grads_out);
+    std::tie(tensors_out, tensor_grads_out) = runGradient(grad_spec, tensors_in, tensor_grads_in);
 
     // Compare results
     auto expected_tensors_out      = fmap(vars_out, unwrap);
@@ -534,6 +553,44 @@ void testADFormulas() {
     assertAllClose(tensors_out,      expected_tensors_out);
     assertAllClose(tensor_grads_out, expected_tensor_grads_out);
   }
+}
+
+std::string toString(std::shared_ptr<Graph>& graph) {
+  std::ostringstream s;
+  s << *graph;
+  return s.str();
+}
+
+bool operator==(const Capture& a, const Capture& b) {
+  return a.kind == b.kind && a.offset == b.offset;
+}
+
+void testDifferentiate(std::ostream & out) {
+  auto graph = std::make_shared<Graph>();
+  at::ScalarType s = at::ScalarType::Float;
+  auto type = std::shared_ptr<TensorType>(new TensorType(s, -1, {2, 3, 4}, {12, 4, 1}));
+
+  // Build up a fake graph
+  auto a = SymbolicVariable::asNewInput(*graph, type);
+  auto b = SymbolicVariable::asNewInput(*graph, type);
+  auto c = a * b * a + b;
+  graph->registerOutput(c.value());
+
+  auto grad_spec = differentiate(graph);
+  std::vector<Capture> expected_captures = {
+    {Capture::Kind::Input, 0},
+    {Capture::Kind::Input, 1},
+    {Capture::Kind::Output, 1},
+  };
+  std::vector<std::size_t> expected_input_vjps = {0, 1};
+  std::vector<std::size_t> expected_output_vjps = {0, 1};
+  JIT_ASSERT(grad_spec.f_real_outputs == 1);
+  JIT_ASSERT(grad_spec.df_input_captures == expected_captures);
+  JIT_ASSERT(grad_spec.df_input_vjps == expected_input_vjps);
+  JIT_ASSERT(grad_spec.df_output_vjps == expected_output_vjps);
+  out << "testDifferentiate\n";
+  out << *grad_spec.f;
+  out << *grad_spec.df;
 }
 
 void testCreateAutodiffSubgraphs(std::ostream & out) {
@@ -546,6 +603,7 @@ void testCreateAutodiffSubgraphs(std::ostream & out) {
 std::string runJITCPPTests() {
   std::stringstream out;
   testCreateAutodiffSubgraphs(out);
+  testDifferentiate(out);
   testADFormulas();
   interpTest();
   interpStageTest();
