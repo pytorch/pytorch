@@ -30,9 +30,10 @@ from itertools import product
 import torch
 from common import TestCase, run_tests, set_rng_seed
 from torch.autograd import Variable, grad, gradcheck
+from torch.distributions import Distribution
 from torch.distributions import (Bernoulli, Beta, Binomial, Categorical, Cauchy, Chi2,
-                                 Dirichlet, Exponential, Gamma, Geometric, Gumbel, Laplace,
-                                 Normal, OneHotCategorical, Multinomial, Pareto,
+                                 Dirichlet, Exponential, FisherSnedecor, Gamma, Geometric,
+                                 Gumbel, Laplace, Normal, OneHotCategorical, Multinomial, Pareto,
                                  StudentT, Uniform, kl_divergence)
 from torch.distributions.dirichlet import _Dirichlet_backward
 from torch.distributions.constraints import Constraint, is_dependent
@@ -113,6 +114,20 @@ EXAMPLES = [
     Example(Exponential, [
         {'rate': Variable(torch.randn(5, 5).abs(), requires_grad=True)},
         {'rate': Variable(torch.randn(1).abs(), requires_grad=True)},
+    ]),
+    Example(FisherSnedecor, [
+        {
+            'df1': Variable(torch.randn(5, 5).abs(), requires_grad=True),
+            'df2': Variable(torch.randn(5, 5).abs(), requires_grad=True),
+        },
+        {
+            'df1': Variable(torch.randn(1).abs(), requires_grad=True),
+            'df2': Variable(torch.randn(1).abs(), requires_grad=True),
+        },
+        {
+            'df1': Variable(torch.Tensor([1.0])),
+            'df2': 1.0,
+        }
     ]),
     Example(Gamma, [
         {
@@ -276,6 +291,13 @@ class TestDistributions(TestCase):
                                          'sample and enumerate_support.').format(Dist.__name__, i + 1, len(params)))
                 except NotImplementedError:
                     pass
+
+    def test_has_examples(self):
+        distributions_with_examples = set(e.Dist for e in EXAMPLES)
+        for Dist in globals().values():
+            if isinstance(Dist, type) and issubclass(Dist, Distribution) and Dist is not Distribution:
+                self.assertIn(Dist, distributions_with_examples,
+                              "Please add {} to the EXAMPLES list in test_distributions.py".format(Dist.__name__))
 
     def test_bernoulli(self):
         p = Variable(torch.Tensor([0.7, 0.2, 0.4]), requires_grad=True)
@@ -730,7 +752,7 @@ class TestDistributions(TestCase):
                                         'Gamma(concentration={}, rate={})'.format(alpha, beta))
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
-    def test_pareto_shape(self):
+    def test_pareto(self):
         scale = Variable(torch.randn(2, 3).abs(), requires_grad=True)
         alpha = Variable(torch.randn(2, 3).abs(), requires_grad=True)
         scale_1d = torch.randn(1).abs()
@@ -759,7 +781,7 @@ class TestDistributions(TestCase):
                                         'Pareto(scale={}, alpha={})'.format(scale, alpha))
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
-    def test_gumbel_shape(self):
+    def test_gumbel(self):
         loc = Variable(torch.randn(2, 3), requires_grad=True)
         scale = Variable(torch.randn(2, 3).abs(), requires_grad=True)
         loc_1d = torch.randn(1)
@@ -786,6 +808,35 @@ class TestDistributions(TestCase):
             self._check_sampler_sampler(Gumbel(loc, scale),
                                         scipy.stats.gumbel_r(loc=loc, scale=scale),
                                         'Gumbel(loc={}, scale={})'.format(loc, scale))
+
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    def test_fishersnedecor(self):
+        df1 = Variable(torch.randn(2, 3).abs(), requires_grad=True)
+        df2 = Variable(torch.randn(2, 3).abs(), requires_grad=True)
+        df1_1d = torch.randn(1).abs()
+        df2_1d = torch.randn(1).abs()
+        self.assertEqual(FisherSnedecor(df1, df2).sample().size(), (2, 3))
+        self.assertEqual(FisherSnedecor(df1, df2).sample_n(5).size(), (5, 2, 3))
+        self.assertEqual(FisherSnedecor(df1_1d, df2_1d).sample().size(), (1,))
+        self.assertEqual(FisherSnedecor(df1_1d, df2_1d).sample_n(1).size(), (1, 1))
+        self.assertEqual(FisherSnedecor(1.0, 1.0).sample().size(), (1,))
+        self.assertEqual(FisherSnedecor(1.0, 1.0).sample_n(1).size(), (1,))
+
+        def ref_log_prob(idx, x, log_prob):
+            f1 = df1.data.view(-1)[idx]
+            f2 = df2.data.view(-1)[idx]
+            expected = scipy.stats.f.logpdf(x, f1, f2)
+            self.assertAlmostEqual(log_prob, expected, places=3)
+
+        self._check_log_prob(FisherSnedecor(df1, df2), ref_log_prob)
+
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    def test_fishersnedecor_sample(self):
+        set_rng_seed(1)  # see note [Randomized statistical tests]
+        for df1, df2 in product([0.1, 0.5, 1.0, 5.0, 10.0], [0.1, 0.5, 1.0, 5.0, 10.0]):
+            self._check_sampler_sampler(FisherSnedecor(df1, df2),
+                                        scipy.stats.f(df1, df2),
+                                        'FisherSnedecor(loc={}, scale={})'.format(df1, df2))
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_chi2_shape(self):
@@ -931,6 +982,18 @@ class TestDistributions(TestCase):
              (1, 2)),
             (Normal(loc=torch.Tensor([0]), scale=torch.Tensor([[1]])),
              (1, 1)),
+            (FisherSnedecor(df1=torch.Tensor([1, 1]), df2=1),
+             (2,)),
+            (FisherSnedecor(df1=1, df2=torch.Tensor([1, 1])),
+             (2,)),
+            (FisherSnedecor(df1=torch.Tensor([1, 1]), df2=torch.Tensor([1])),
+             (2,)),
+            (FisherSnedecor(df1=torch.Tensor([1, 1]), df2=torch.Tensor([[1], [1]])),
+             (2, 2)),
+            (FisherSnedecor(df1=torch.Tensor([1, 1]), df2=torch.Tensor([[1]])),
+             (1, 2)),
+            (FisherSnedecor(df1=torch.Tensor([1]), df2=torch.Tensor([[1]])),
+             (1, 1)),
             (Gamma(concentration=torch.Tensor([1, 1]), rate=1),
              (2,)),
             (Gamma(concentration=1, rate=torch.Tensor([1, 1])),
@@ -1010,6 +1073,10 @@ class TestDistributions(TestCase):
                 'loc': torch.Tensor([[[0, 0, 0], [0, 0, 0]]]),
                 'scale': torch.Tensor([1, 1])
             }),
+            (FisherSnedecor, {
+                'df1': torch.Tensor([1, 1]),
+                'df2': torch.Tensor([1, 1, 1]),
+            }),
             (Gumbel, {
                 'loc': torch.Tensor([[0, 0]]),
                 'scale': torch.Tensor([1, 1, 1, 1])
@@ -1025,10 +1092,6 @@ class TestDistributions(TestCase):
             (Laplace, {
                 'loc': torch.Tensor([0, 0]),
                 'scale': torch.Tensor([1, 1, 1])
-            }),
-            (Pareto, {
-                'scale': torch.Tensor([1, 1]),
-                'alpha': torch.Tensor([1, 1, 1])
             }),
             (Pareto, {
                 'scale': torch.Tensor([1, 1]),
@@ -1742,7 +1805,7 @@ class TestKL(TestCase):
                     actual = dist.entropy()
                 except NotImplementedError:
                     continue
-                x = dist.sample(sample_shape=(20000,))
+                x = dist.sample(sample_shape=(50000,))
                 expected = -dist.log_prob(x).mean(0)
                 if isinstance(actual, Variable):
                     actual = actual.data
