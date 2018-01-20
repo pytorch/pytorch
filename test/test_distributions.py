@@ -34,7 +34,7 @@ from torch.distributions import (Bernoulli, Beta, Binomial, Categorical, Cauchy,
                                  Dirichlet, Exponential, Gamma, Gumbel, Laplace,
                                  Normal, OneHotCategorical, Multinomial, Pareto,
                                  StudentT, Uniform, constraints, kl_divergence)
-from torch.distributions.bijectors import ExpBijector, InverseBijector
+from torch.distributions.bijectors import AffineBijector, ExpBijector, InverseBijector
 from torch.distributions.dirichlet import _Dirichlet_backward
 from torch.distributions.constraints import Constraint, is_dependent
 from torch.distributions.utils import _finfo, probs_to_logits
@@ -1827,6 +1827,10 @@ class TestBijectors(TestCase):
         self.univariate = [
             ExpBijector(),
             InverseBijector(ExpBijector()),
+            AffineBijector(Variable(torch.Tensor(5).normal_()),
+                           Variable(torch.Tensor(5).normal_())),
+            AffineBijector(Variable(torch.Tensor(4, 5).normal_()),
+                           Variable(torch.Tensor(4, 5).normal_())),
         ]
 
     def _generate_data(self, constraint):

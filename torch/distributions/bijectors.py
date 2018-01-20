@@ -3,6 +3,7 @@ from torch.distributions import constraints
 from torch.distributions.utils import broadcast_all
 
 __all__ = [
+    'AffineBijector',
     'Bijector',
     'ExpBijector',
     'InverseBijector',
@@ -112,3 +113,34 @@ class ExpBijector(Bijector):
 
     def log_abs_det_jacobian(self, x, y):
         return x
+
+
+class AffineBijector(Bijector):
+    """
+    Bijector for the pointwise affine mapping `y = loc + scale * x`.
+
+    Args:
+        loc (Tensor or Variable): Location parameter.
+        scale (Tensor or Variable): Scale parameter.
+        event_dim (int): Optional size of `event_shape`. This should be zero
+            for univariate random variables, 1 for distributions over vectors,
+            2 for distributions over matrices, etc.
+    """
+    domain = constraints.real
+    codomain = constraints.real
+
+    def __init__(self, loc, scale, event_dim=0):
+        super(AffineBijector, self).__init__()
+        self.loc = loc
+        self.scale = scale
+        self.event_dim = event_dim
+
+    def _forward(self, x):
+        return self.loc + self.scale * x
+
+    def _inverse(self, y):
+        return y / self.scale - self.loc
+
+    def log_abs_det_jacobian(self, x, y):
+        shape = x.shape[:x.dim() - self.event_dim]
+        return torch.abs(self.scale).log().expand(shape)
