@@ -524,10 +524,11 @@ class TestDictDataLoader(TestCase):
         from collections import namedtuple
         from pprint import pprint
         Batch = namedtuple('Batch', ['data', 'labels'])
-        print(self.dataset)
+
         def collate(x):
             data, labels = zip(*[(e['a_tensor'], e['another_dict']) for e in x])
             return Batch(data=torch.cat(data), labels=labels)
+
         loader = DataLoader(self.dataset, batch_size=2, pin_memory=True, collate_fn=collate)
         for batch in loader:
             self.assertTrue(isinstance(batch, Batch))
