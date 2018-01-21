@@ -64,12 +64,11 @@ class DistributedDataParallel(Module):
         parameters).
 
     .. warning::
-        If you are using data loader with more than one subprocess workers
-        and this module with ``nccl`` backend, you should use ``spawn``
-        or ``forkserver`` start method instead of ``fork`` start method.
-        This module with ``nccl`` backend doesn't work well (has known issues)
-        with ``fork`` start method of torch.multiprocessing (which is used by
-        the dataloader to launch multiple subprocess workers).
+        If you plan on using this module with a ``nccl`` backend together with
+        a DataLoader that uses multiple workers, please change the multiprocessing
+        start method to ``forkserver`` (Python 3 only) or ``spawn``. Unfortunately
+        NCCL2 isn't fork safe, and you will likely experience deadlocks if you don't
+        change this setting.
 
     .. note::
         Parameters are never broadcast between processes. The module performs
