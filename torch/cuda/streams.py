@@ -6,6 +6,10 @@ from . import cudart, check_error, cudaStatus
 class Stream(torch._C._CudaStreamBase):
     """Wrapper around a CUDA stream.
 
+    A CUDA stream is a linear sequence of execution that belongs to a specific
+    device, independent from other streams.  See :ref:`cuda-semantics` for
+    details.
+
     Arguments:
         device(int, optional): a device on which to allocate the Stream.
         priority(int, optional): priority of the stream. Lower numbers
@@ -21,6 +25,15 @@ class Stream(torch._C._CudaStreamBase):
 
         Arguments:
             event (Event): an event to wait for.
+
+        .. note:: This is a wrapper around ``cudaStreamWaitEvent()``: see `CUDA
+           documentation`_ for more info.
+
+           This function returns without waiting for :attr:`event`: only future
+           operations are affected.
+
+        .. _CUDA documentation:
+           http://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__STREAM.html
         """
         check_error(cudart().cudaStreamWaitEvent(self, event, ctypes.c_int(0)))
 
@@ -32,6 +45,9 @@ class Stream(torch._C._CudaStreamBase):
 
         Arguments:
             stream (Stream): a stream to synchronize.
+
+        .. note:: This function returns without waiting for currently enqueued
+           kernels in :attr:`stream`: only future operations are affected.
         """
         self.wait_event(stream.record_event())
 
@@ -63,7 +79,14 @@ class Stream(torch._C._CudaStreamBase):
         return True
 
     def synchronize(self):
-        """Wait for all the kernels in this stream to complete."""
+        """Wait for all the kernels in this stream to complete.
+
+        .. note:: This is a wrapper around ``cudaStreamSynchronize()``: see
+           `CUDA documentation`_ for more info.
+
+        .. _CUDA documentation:
+           http://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__STREAM.html
+        """
         check_error(cudart().cudaStreamSynchronize(self))
 
     @staticmethod
