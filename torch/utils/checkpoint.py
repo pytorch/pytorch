@@ -2,69 +2,70 @@ import torch
 from torch.autograd import Variable, Function
 
 
-def repackage_inputs(inputs):
+def wrap_variable(inputs):
     if torch.is_tensor(inputs):
         return Variable(inputs)
     elif isinstance(inputs, tuple):
-        return tuple(repackage_inputs(v) for v in inputs)
+        return tuple(wrap_variable(v) for v in inputs)
     else:
-        raise RuntimeError("Unknown input type")
+        raise RuntimeError("Unsupported input type: ", type(inputs).__name__)
 
 
 def unpack_variables(inputs):
-    if type(inputs) == Variable:
+    if isinstance(inputs, Variable):
         return inputs.data
     elif torch.is_tensor(inputs):
         return inputs
     elif isinstance(inputs, tuple):
         return tuple(unpack_variables(v) for v in inputs)
     else:
-        raise RuntimeError("Unknown input type")
+        raise RuntimeError("Unsupported input type: ", type(inputs).__name__)
 
 
 class CheckpointFunction(Function):
 
-    # NOTE: *args is the flat inputs list, args is the tuple containing inputs
     @staticmethod
     def forward(ctx, run_function, *args):
         ctx.run_function = run_function
         ctx.save_for_backward(*args)
-        inputs = repackage_inputs(args)
+        var_args = wrap_variable(args)
         with torch.no_grad():
-            outputs = run_function(*inputs)     # the *inputs* is always a tuple
+            outputs = run_function(*var_args)
         return unpack_variables(outputs)
 
     @staticmethod
-    def backward(ctx, *args):
-        inputs = ctx.saved_variables
+    def backward(ctx, *grads):
+        real_inputs = ctx.saved_variables
+        # We need to create new Variables to mark this place in the graph.
+        # Reusing real_inputs would be incorrect if a case like this:
+        #
+        # y = checkpoint(lambda x: x + 1, x)
+        # z = checkpoint(lambda x, y: x + y, x, y)
+        #
+        # This would fail, because when grad((x + y), (x, y)) is called in
+        # the second checkpoint, autograd would traverse all paths from (x + y)
+        # to the definition of x, which includes the first checkpoint. To
+        # prevent this situation, we create views of the inputs, which lets us
+        # still get all correctness checks, but uniquely marks the place up to
+        # which we want to differentiate, because all views are independent nodes
+        # (i.e. there is no path from one to another via .grad_fn chain).
+        inputs = [i[:] for i in real_inputs]
+        # inputs = real_inputs
         with torch.enable_grad():
             outputs = ctx.run_function(*inputs)
+        if isinstance(outputs, Variable):
+            outputs = (outputs,)
 
-        if isinstance(outputs, tuple):
-            output_list = list(outputs)
-        elif isinstance(outputs, Variable) or torch.is_tensor(outputs):
-            output_list = [outputs]
-        grad_outputs = [grad for grad in args]
-
-        # some inputs might not need gradients so we filter them out
+        # Some inputs might not need gradients so we filter them out
         # and later return None as grad for those inputs
-        filtered_inputs = []
-        for i in range(len(inputs)):
-            if inputs[i].requires_grad:
-                filtered_inputs.append(inputs[i])
-        assert len(filtered_inputs) > 0, "No input requires gradients"
+        filtered_inputs = [i for i in inputs if i.requires_grad]
+        grads = torch.autograd.grad(outputs, filtered_inputs, grads)
 
-        torch.autograd.grad(output_list, filtered_inputs, grad_outputs)
-
-        # append None for input grads which don't require grad. The first input
+        # Append None for input grads which don't require grad. The first input
         # is a run_function whose grad is None
-        input_grads = [None]
-        for i in range(len(inputs)):
-            if inputs[i].requires_grad:
-                input_grads.append(inputs[i].grad)
-            else:
-                input_grads.append(None)
-        return tuple(input_grads)
+        grads_it = iter(grads)
+        return (None,) + tuple(next(grads_it) if i.requires_grad else None
+                               for i in inputs)
 
 
 def checkpoint(run_function, *args):
