@@ -30,14 +30,17 @@ from itertools import product
 import torch
 from common import TestCase, run_tests, set_rng_seed
 from torch.autograd import Variable, grad, gradcheck
-from torch.distributions import (Bernoulli, Beta, Binomial, Categorical, Cauchy, Chi2,
-                                 Dirichlet, Exponential, Gamma, Gumbel, Laplace,
-                                 Normal, OneHotCategorical, Multinomial, Pareto,
-                                 StudentT, Uniform, constraints, kl_divergence)
-from torch.distributions.transforms import (AffineTransform, ExpTransform,
-                                            InverseTransform, SigmoidTransform)
-from torch.distributions.dirichlet import _Dirichlet_backward
+from torch.distributions import (Bernoulli, Beta, Binomial, Categorical,
+                                 Cauchy, Chi2, Dirichlet, Exponential, Gamma,
+                                 Gumbel, Laplace, Multinomial, Normal,
+                                 OneHotCategorical, Pareto, StudentT, Uniform,
+                                 constraints, kl_divergence)
 from torch.distributions.constraints import Constraint, is_dependent
+from torch.distributions.dirichlet import _Dirichlet_backward
+from torch.distributions.transforms import (AffineTransform, ExpTransform,
+                                            InverseTransform, LogprobTransform,
+                                            SigmoidTransform,
+                                            StickBreakingTransform)
 from torch.distributions.utils import _finfo, probs_to_logits
 
 TEST_NUMPY = True
@@ -1829,11 +1832,14 @@ class TestTransforms(TestCase):
             ExpTransform(),
             InverseTransform(ExpTransform()),
             SigmoidTransform(),
+            LogprobTransform(),
             InverseTransform(SigmoidTransform()),
             AffineTransform(Variable(torch.Tensor(5).normal_()),
                             Variable(torch.Tensor(5).normal_())),
             AffineTransform(Variable(torch.Tensor(4, 5).normal_()),
                             Variable(torch.Tensor(4, 5).normal_())),
+            LogprobTransform(),
+            StickBreakingTransform(),
         ]
 
     def _generate_data(self, constraint):
@@ -1844,44 +1850,63 @@ class TestTransforms(TestCase):
             return x.normal_().exp()
         elif constraint is constraints.unit_interval:
             return x.uniform_()
+        elif constraint is constraints.simplex:
+            x = x.normal_().exp()
+            x /= x.sum(-1, True)
+            return x
         raise ValueError('Unsupported constraint: {}'.format(constraint))
 
-    def test_forward_inverse(self):
-        for bijector in self.univariate:
-            x = Variable(self._generate_data(bijector.domain), requires_grad=True)
+    def test_forward_inverse_cache(self):
+        for transform in self.univariate:
+            x = Variable(self._generate_data(transform.domain), requires_grad=True)
             try:
-                y = bijector.forward(x)
+                y = transform.forward(x)
             except NotImplementedError:
                 continue
-            x2 = bijector.inverse(y)  # should be implmented at least by caching
-            self.assertEqual(x2, x, message='{}.forward().inverse() error'.format(bijector))
+            x2 = transform.inverse(y)  # should be implemented at least by caching
+            self.assertEqual(x2, x, message='{}.forward().inverse() error'.format(transform))
+
+    def test_forward_inverse_no_cache(self):
+        for transform in self.univariate:
+            x = Variable(self._generate_data(transform.domain), requires_grad=True)
+            try:
+                y = transform.forward(x)
+                x2 = transform.inverse(y.clone())  # bypass cache
+            except NotImplementedError:
+                continue
+            self.assertEqual(x2, x, message='\n'.join([
+                '{}.forward().inverse() error'.format(transform),
+                'x = {}'.format(x),
+                'y = .forward(x) = {}'.format(y),
+                'x2 = .inverse(y) = {}'.format(x2),
+            ]))
 
     def test_univariate_forward_jacobian(self):
-        for bijector in self.univariate:
-            x = Variable(self._generate_data(bijector.domain), requires_grad=True)
+        for transform in self.univariate:
+            x = Variable(self._generate_data(transform.domain), requires_grad=True)
             try:
-                y = bijector.forward(x)
+                y = transform.forward(x)
+                actual = transform.log_abs_det_jacobian(x, y)
             except NotImplementedError:
                 continue
             expected = torch.abs(grad([y.sum()], [x])[0]).log()
-            actual = bijector.log_abs_det_jacobian(x, y)
             self.assertEqual(actual, expected, message='\n'.join([
-                'Bad {}.log_abs_det_jacobian() disagrees with .forward()'.format(bijector),
+                'Bad {}.log_abs_det_jacobian() disagrees with .forward()'.format(transform),
                 'Expected: {}'.format(expected),
                 'Actual: {}'.format(actual),
             ]))
 
     def test_univariate_inverse_jacobian(self):
-        for bijector in self.univariate:
-            y = Variable(self._generate_data(bijector.codomain), requires_grad=True)
+        for transform in self.univariate:
+            y = Variable(self._generate_data(transform.codomain), requires_grad=True)
             try:
-                x = bijector.inverse(y)
+                x = transform.inverse(y)
+                actual = transform.log_abs_det_jacobian(x, y)
             except NotImplementedError:
                 continue
             expected = -torch.abs(grad([x.sum()], [y])[0]).log()
-            actual = bijector.log_abs_det_jacobian(x, y)
             self.assertEqual(actual, expected, message='\n'.join([
-                '{}.log_abs_det_jacobian() disagrees with .inverse()'.format(bijector),
+                '{}.log_abs_det_jacobian() disagrees with .inverse()'.format(transform),
                 'Expected: {}'.format(expected),
                 'Actual: {}'.format(actual),
             ]))

@@ -101,7 +101,7 @@ class InverseTransform(Transform):
 
 class ExpTransform(Transform):
     """
-    Transform for the mapping `y = exp(x)`.
+    Transform via the mapping `y = exp(x)`.
     """
     domain = constraints.real
     codomain = constraints.positive
@@ -118,7 +118,7 @@ class ExpTransform(Transform):
 
 class SigmoidTransform(Transform):
     """
-    Transform for the mapping `y = sigmoid(x)` and `x = logit(y)`.
+    Transform via the mapping `y = sigmoid(x)` and `x = logit(y)`.
     """
     domain = constraints.real
     codomain = constraints.unit_interval
@@ -135,7 +135,7 @@ class SigmoidTransform(Transform):
 
 class AbsTransform(Transform):
     """
-    Transform for the mapping `y = abs(x)`
+    Transform via the mapping `y = abs(x)`
     """
     domain = constraints.real
     codomain = constraints.positive
@@ -146,7 +146,7 @@ class AbsTransform(Transform):
 
 class AffineTransform(Transform):
     """
-    Transform for the pointwise affine mapping `y = loc + scale * x`.
+    Transform via the pointwise affine mapping `y = loc + scale * x`.
 
     Args:
         loc (Tensor or Variable): Location parameter.
@@ -168,7 +168,7 @@ class AffineTransform(Transform):
         return self.loc + self.scale * x
 
     def _inverse(self, y):
-        return y / self.scale - self.loc
+        return (y - self.loc) / self.scale
 
     def log_abs_det_jacobian(self, x, y):
         result = torch.abs(self.scale).log()
@@ -177,3 +177,53 @@ class AffineTransform(Transform):
             result = result.sum(-1)
             shape = shape[:-1]
         return result.expand(shape)
+
+
+class LogprobTransform(Transform):
+    """
+    Transform from the simplex to unconstrained space via `y = log(x)`.
+
+    This is not bijective and cannot be used for HMC. However this acts mostly
+    coordinate-wise (except for the final normalization), and this is
+    appropriate for coordinate-wise optimization algorithms.
+    """
+    domain = constraints.simplex
+    codomain = constraints.positive
+
+    def _forward(self, x):
+        probs = x
+        return probs.log()
+
+    def _inverse(self, y):
+        logprobs = y
+        probs = (logprobs - logprobs.max(-1, True)[0]).exp()
+        probs /= probs.sum(-1, True)
+        return probs
+
+
+class StickBreakingTransform(Transform):
+    """
+    Transform from the simplex to unconstrained of one fewer dimension via a
+    stick-breaking process.
+
+    This is bijective and appropriate for use in HMC; however it mixes
+    coordinates together and is less appropriate for optimization.
+    """
+    domain = constraints.simplex
+    codomain = constraints.positive
+
+    def _forward(self, x):
+        pmf = x
+        cmf = pmf.cumsum(-1)
+        sf = 1 - cmf
+        units = x[..., :-1] / sf[..., :-1]
+        return units.log()
+
+    def _inverse(self, y):
+        shape = y.shape[:-1] + (1 + y.shape[-1],)
+        one = y.new([1]).expand(y.shape[:-1] + (1,))
+        numer = sigmoid(y)
+        denom = (1 - numer).cumprod(-1)
+        probs = torch.cat([numer, one], -1) * torch.cat([one, denom], -1)
+        # probs /= probs.sum(-1, True)
+        return probs

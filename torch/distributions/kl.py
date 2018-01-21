@@ -1,14 +1,14 @@
+import math
 import warnings
 from functools import total_ordering
 
 import torch
-import math
 
-from .distribution import Distribution
 from .bernoulli import Bernoulli
-from .binomial import Binomial
 from .beta import Beta
+from .binomial import Binomial
 from .dirichlet import Dirichlet
+from .distribution import Distribution
 from .exponential import Exponential
 from .gamma import Gamma
 from .gumbel import Gumbel
@@ -16,6 +16,7 @@ from .laplace import Laplace
 from .log_normal import LogNormal
 from .normal import Normal
 from .pareto import Pareto
+from .transformed_distribution import TransformedDistribution
 from .uniform import Uniform
 
 _KL_REGISTRY = {}  # Source of truth mapping a few general (type, type) pairs to functions.
@@ -258,6 +259,13 @@ def _kl_pareto_pareto(p, q):
     result = t1 + t2 + alpha_ratio - 1
     result[p.support.lower_bound < q.support.lower_bound] = float('inf')
     return result
+
+
+@register_kl(TransformedDistribution, TransformedDistribution)
+def _kl_transformed_transformed(p, q):
+    if p.transforms != q.transforms:
+        raise NotImplementedError
+    return kl_divergence(p.base_dist, q.base_dist)
 
 
 @register_kl(Uniform, Uniform)
